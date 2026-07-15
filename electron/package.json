@@ -1,0 +1,58 @@
+{
+  "name": "as400-5250-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AS400 5250 MCP/Web エミュレーター Electron デスクトップ版",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.asaomaro.as400-5250",
+    "productName": "AS400 5250 Emulator",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../packages/core/dist",
+        "to": "app/packages/core/dist"
+      },
+      {
+        "from": "../packages/server/dist",
+        "to": "app/packages/server/dist"
+      },
+      {
+        "from": "../packages/web-ui/dist",
+        "to": "app/packages/web-ui/dist"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities"
+    }
+  }
+}

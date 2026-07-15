@@ -1,0 +1,26 @@
+{
+  "name": "@as400web/web-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "5250 Web emulator UI (Vue 3 + Vite)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@as400web/core": "0.1.0",
+    "@as400web/server": "0.1.0",
+    "vue": "^3.5.39"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.61.1",
+    "vite": "^8.1.4",
+    "vue-tsc": "^3.3.7"
+  }
+}

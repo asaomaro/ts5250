@@ -1,0 +1,10 @@
+schema: 3
+slug: 5250-mcp-web-emulator
+current: deliver
+approved: [requirement, research, spec, design, plan, test, review, walkthrough, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+subtasks: [01-core-sbcs, 02-server-mcp, 03-web, 04-dbcs-tls-wide, 05-field-edit-keyboard, 06-gui-controls, 07-screen-links]
+activeSubtask: done

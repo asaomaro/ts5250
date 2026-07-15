@@ -1,0 +1,9 @@
+schema: 3
+slug: gui-controls
+parent: 20260714-5250-mcp-web-emulator
+current: review
+approved: [plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [05-field-edit-keyboard]

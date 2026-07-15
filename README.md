@@ -1,0 +1,213 @@
+# as400-web-emulator
+
+IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェント用）と **Web エミュレーター**（ブラウザ／デスクトップ）の
+2 つのフロントから操作できるツール群です。TN5250 プロトコルを **純 TypeScript** で実装しており、外部の 5250
+ライブラリや IBM ACS の jar には依存しません。両フロントは共通の 5250 コア（`packages/core`）を使うため、
+画面の見え方・振る舞いが定義上一致します。
+
+- **AI から操作**: MCP ツール経由で LLM が 5250 アプリを自動操作（サインオン・画面取得・キー送信・ジョブ情報 …）。
+- **人が操作**: ブラウザ／Electron の忠実な 5250 エミュレーターで、ACS に近い操作感。
+- **検証実績**: [PUB400.com](https://pub400.com)（IBM i 7.5）に対する実機 E2E で動作確認済み。
+
+---
+
+## ✨ 特徴
+
+**プロトコル / 接続**
+- RFC 4777 **NEW-ENVIRON 自動サインオン**（バインド時認証。PUB400 で確認済み）
+- telnet ネゴシエーション（BINARY / EOR / TERMINAL-TYPE / NEW-ENVIRON）、**TLS**（既定ポート 992・証明書検証既定 ON）
+- 24x80 / **27x132 ワイド画面**（CLEAR UNIT ALTERNATE）
+
+**文字・画面**
+- EBCDIC ⇔ Unicode 変換（ICU `.ucm` 由来テーブル生成）。**DBCS（日本語）** は EBCDIC_STATEFUL（SO/SI）で
+  **桁位置を厳密維持**（SO/SI・属性桁を 1 セルとして保持）
+- カラー・下線・リバース等の属性を再現。フィールド属性はフィールド長で境界付け（ACS 準拠）
+- 5250 QUERY 応答、**拡張 5250 GUI**（Create Window / Define Selection Field / Scroll Bar = WDSF 0x15）
+
+**Web エミュレーター（ACS 準拠の操作感）**
+- 忠実なフィールド編集（**5250 上書き既定 / Insert トグル / 5250 流バックスペース**・DBCS バイト長検証・入力中 SO/SI 桁維持）
+- **タブ / 矢印**でのフィールド移動（上下は桁を保ち真下のフィールドへ）、**マウスホイールでページ送り**（PageUp/PageDown）
+- 欄内の任意桁にカーソルを置いて入力、画面遷移後の自動フォーカス
+- 拡張 5250 GUI をラジオ / チェック / プッシュボタン / ウィンドウ枠 / スクロールバーとして描画・操作
+- 画面テキストの **URL / メールをリンク化**、通常 / ダークテーマ、ペイン分割（D&D）、タブ、操作ログ
+- 通信中の**入力プロテクト**＋0.5 秒しきい値の**ローディング表示**
+- 表示トグル: SO/SI を `{ }`、半角カナ / 英小文字、リンク化 ON/OFF、編集可能なキーバインド
+
+**MCP サーバー**
+- stdio ＋ Streamable HTTP、**12 ツール**（サインオン〜画面取得〜キー送信〜ジョブ情報〜GUI 選択）
+- 画面は **テキスト（LLM 可読）＋ structuredContent** で返却（桁維持・GUI 構造体・fields/cursor）
+- 認証情報はツール引数に取らず**プロファイル経由**、監査ログは値を出さない（マスク）
+
+---
+
+## 🏗 構成（npm workspaces モノレポ）
+
+| パッケージ | 役割 |
+|---|---|
+| `packages/core` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・EBCDIC⇔Unicode・trace/replay） |
+| `packages/server` | MCP サーバー（stdio + Streamable HTTP）・WebSocket/REST・web-ui 静的配信 |
+| `packages/web-ui` | ブラウザ 5250 エミュレーター（Vue 3 + Vite） |
+| `tools/gen-tables` | ICU `.ucm` → TS 変換テーブル生成（ビルド時ツール） |
+
+共通コアを server / web-ui が消費する縦貫構成。ESM、Node ≥ 20。
+
+---
+
+## 🚀 クイックスタート
+
+**前提**: Node.js ≥ 20、npm。IBM i 接続先（例: 無料の [PUB400.com](https://pub400.com) アカウント）。
+
+### Web エミュレーター（ブラウザ）
+
+```sh
+./start.sh            # Linux / macOS / WSL（初回は依存インストール＋ビルドを自動実行）
+start.bat             # Windows
+```
+
+起動後、ブラウザで **http://localhost:3400** を開きます。
+
+```sh
+./start.sh --port 8080     # ポート変更
+./start.sh --build         # 強制再ビルド
+./start.sh --profiles path.json
+```
+
+### デスクトップ版（Electron）
+
+```sh
+./electron.sh         # Linux / macOS / WSL
+electron.bat          # Windows
+```
+
+既存の Hono サーバーを内部で起動し、`BrowserWindow` で Web UI を表示します。
+インストーラ生成は `cd electron && npm install && npm run dist`（要 GUI / 対象 OS）。
+
+---
+
+## 🖥 Web エミュレーターの使い方
+
+1. **接続**: 接続画面で「サーバー」プロファイル（`profiles.local.json` 由来）または「ブラウザ」保存接続をクリック。
+   「＋ 新規接続」からホスト直指定で追加でき、**編集 / 削除**、**自動サインオン(RFC 4777) の ON/OFF ＋資格情報**を設定可能。
+2. **操作**:
+   - 入力欄に直接タイプ（5250 上書き既定、Insert で挿入トグル）
+   - **Tab / Shift+Tab** で欄移動、**矢印**でカーソル移動（上下は桁を保って真下へ）
+   - **Enter / F1–F24**（Shift+F… で F13–F24）、**PageUp/Down**（マウスホイールでも）
+   - ローカル編集キー（Field Exit / Erase EOF / Erase Input）、キーバインドは編集可能
+3. **表示**: 通常 / ダーク切替、SO/SI `{ }` 表示、半角カナ表示、リンク化 ON/OFF。ペイン分割・タブで複数セッション。
+
+> ⚠️ 一部ホスト（PUB400 等）は **signon 画面へのフィールド入力を受理しない**ため、手動サインオンではなく
+> **自動サインオン（RFC 4777）** の利用を推奨します。
+
+---
+
+## 🤖 MCP サーバーの使い方
+
+### 起動
+
+```sh
+npm run build
+npm run build -w @as400web/web-ui                # Web UI を配信する場合のみ
+
+# stdio（MCP クライアントから起動される想定）
+node packages/server/dist/main.js --stdio --profiles profiles.local.json
+
+# HTTP（Streamable HTTP + WebSocket + Web UI 配信）
+node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --profiles profiles.local.json
+```
+
+### MCP クライアント設定例（stdio）
+
+```json
+{
+  "mcpServers": {
+    "as400-5250": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/as400-web-emulator/packages/server/dist/main.js",
+        "--stdio",
+        "--profiles",
+        "/absolute/path/to/profiles.local.json"
+      ],
+      "env": { "PUB400_PASSWORD": "your-password" }
+    }
+  }
+}
+```
+
+### ツール一覧（12）
+
+| ツール | 概要 |
+|---|---|
+| `open_session` / `close_session` / `list_sessions` | セッションの開始（プロファイル自動サインオン or host 直指定）／切断／一覧 |
+| `signon` | 画面フィールド方式のサインオン（フォールバック） |
+| `get_screen` | 現在画面（text＋structuredContent、`include` / `rows` で絞り込み） |
+| `wait_screen` | ホスト発の更新待ち（`until` で特定テキスト出現待ち） |
+| `set_fields` | フィールドにローカル入力（ホスト送信なし） |
+| `send_key` | fields 反映＋カーソル設定＋AID 送信 → 更新画面（Enter / F1–F24 / PageUp/Down 等） |
+| `run_steps` | 複数ステップを順次実行（`expect` 不一致で中断） |
+| `get_job_info` | 対話ジョブの識別子（番号 / ユーザー / ジョブ名） |
+| `select_gui_choice` / `submit_gui_selection` | 拡張 5250 GUI 選択フィールドの選択・確定送信 |
+
+- 画面応答は **text**（行番号付きグリッド＋フィールド一覧＋GUI）と **structuredContent**（cursor/fields/gui …）を併記。
+- **認証情報はツール引数に取らない**（プロファイル経由）。監査ログは値を出さない。
+
+---
+
+## ⚙️ 接続プロファイル
+
+`packages/server/profiles.json.example` を `profiles.local.json` としてコピーして編集します
+（`*.local.json` は `.gitignore` 済み。パスワードは環境変数で渡す運用を推奨）。
+
+```json
+{
+  "profiles": [
+    {
+      "name": "pub400",
+      "host": "pub400.com",
+      "port": 23,
+      "ccsid": 37,
+      "deviceName": "WEBEMU01",
+      "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
+    }
+  ]
+}
+```
+
+- `signon` を省略すると自動サインオンせず signon 画面に着地します。
+- `tls: true`（ポート既定 992）、`ccsid`（930/939/1399 等で DBCS）、`enhanced: true`（拡張 5250 GUI 広告）も指定可。
+
+---
+
+## 🧪 開発・テスト
+
+```sh
+npm install
+npm run build        # tsc -b（全パッケージ）
+npm run build -w @as400web/web-ui   # Web UI（vue-tsc + vite）
+npm test             # vitest（全パッケージ）
+npm run lint         # eslint
+npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新時のみ）
+```
+
+- **trace-first**: PUB400 実機トレース（JSONL）を `packages/core/test/fixtures/` に採取し、パーサ・画面モデルは
+  リプレイでオフライン回帰。実機 E2E スクリプトは `scripts/`（要 `.env` の `PUB400_USER` / `PUB400_PASSWORD`）。
+- **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint 禁止、`@as400web/core` の `log`（pino/stderr）を使う。
+- 秘密情報（`.env` / `*.local.json`）はコミットしない（`.gitignore` 済み）。
+
+---
+
+## 📋 既知の制約
+
+- 一部ホスト（PUB400）は signon 画面へのフィールド入力を受理しない（valid ユーザーでも CPF1120）。
+  RFC 4777 自動サインオンが確実な経路（送出バイトは byte-perfect であることを診断スクリプトで確認済み）。
+- Web の複数行フィールド（コマンド行等）は現状 1 行目（可視桁）までの編集。
+- 画面全体の自由カーソル（非入力エリアを含む任意位置へのカーソル配置）は未対応。
+
+---
+
+## 📎 補足
+
+- 設計資料: `.aidev/works/20260714-5250-mcp-web-emulator/`（requirement / research / spec / design / plan /
+  walkthrough / decisions）。
+- 検証環境: [PUB400.com](https://pub400.com)（要アカウント。週次再起動・接続数制限あり）。
+- 参考: RFC 1205 / RFC 4777 / SC30-3533、GNU tn5250（挙動・バイト仕様の参照のみ。GPL コードは非移植）。

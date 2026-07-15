@@ -1,0 +1,9 @@
+schema: 3
+slug: field-edit-keyboard
+parent: 20260714-5250-mcp-web-emulator
+current: review
+approved: [plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [04-dbcs-tls-wide]

@@ -1,0 +1,12 @@
+{
+  "name": "@as400web/gen-tables",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Build-time generator: ICU .ucm mapping files -> pure TS EBCDIC tables for @as400web/core",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "gen": "tsc -b && node dist/main.js",
+    "test": "vitest run --passWithNoTests"
+  }
+}

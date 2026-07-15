@@ -1,0 +1,9 @@
+schema: 3
+slug: web
+parent: 20260714-5250-mcp-web-emulator
+current: review
+approved: [plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [02-server-mcp]

@@ -1,0 +1,12 @@
+{
+  "profiles": [
+    {
+      "name": "pub400",
+      "host": "pub400.com",
+      "port": 23,
+      "ccsid": 37,
+      "deviceName": "WEBEMU01",
+      "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
+    }
+  ]
+}
