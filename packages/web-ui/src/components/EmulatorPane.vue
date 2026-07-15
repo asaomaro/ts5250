@@ -6,6 +6,7 @@ import StatusBar from "./StatusBar.vue";
 import { sessionsStore } from "../stores/sessions.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
+import { moveCursor, fieldAt, caretInField, roundToDbcsLead, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
@@ -28,6 +29,47 @@ function onEdit(fieldIndex: number, value: string): void {
 }
 function onCursor(row: number, col: number): void {
   cursorOverride.value = { row, col };
+  reconcileFocus({ row, col });
+}
+
+/**
+ * 有効カーソル位置に応じて表現モードを調停する（field ⇄ free）。
+ * - 編集可能フィールド上 → 該当 <input> に focus し native キャレットを桁に合わせる（field モード）。
+ * - 非入力/保護セル上 → 入力欄を blur し、キーボード捕捉のためペインへ focus（free モード。オーバーレイ表示）。
+ * クリック（ScreenGrid）と矢印セル移動（onLocal）の両経路がここを通り、単一の調停点にする。
+ */
+function reconcileFocus(pos: { row: number; col: number }): void {
+  const snap = snapshot.value;
+  if (!snap) return;
+  const f = fieldAt(pos.row, pos.col, snap.fields);
+  const active = document.activeElement;
+  if (f && !f.protected) {
+    const el = editableInputs()[editableFields().indexOf(f)];
+    if (el) {
+      const caret = caretInField(f, pos.col);
+      if (active !== el) el.focus();
+      el.setSelectionRange(caret, caret);
+      // el.focus() が onInputFocus を発火し emit("cursor", 欄先頭) で override を巻き戻すため、
+      // 目的桁を再確定する（論理カーソルと native キャレットの不一致を防ぐ。review R1-1）。
+      cursorOverride.value = pos;
+    }
+  } else {
+    if (active instanceof HTMLInputElement && paneEl.value?.contains(active)) active.blur();
+    if (document.activeElement !== paneEl.value) paneEl.value?.focus();
+  }
+}
+
+/** 矢印で有効カーソルを 1 セル移動し、着地セルでモード調停する（onCursor 経由） */
+function moveCell(dir: Dir): void {
+  const snap = snapshot.value;
+  if (!snap) return;
+  let next = moveCursor(cursor.value, dir, snap.rows, snap.cols);
+  // DBCS（全角 2 桁）の桁間には止めない。右移動は tail を飛び越え、左/上/下・位置確定は lead へ丸める
+  // （一律丸めだと lead で右が tail→lead に戻され進めない。review R1-2）。
+  if (snap.cells[next.row - 1]?.[next.col - 1]?.kind === "dbcs-tail") {
+    next = dir === "right" ? moveCursor(next, "right", snap.rows, snap.cols) : roundToDbcsLead(next, snap.cells);
+  }
+  onCursor(next.row, next.col);
 }
 function onGuiSelect(fieldId: number, choiceIndex: number, selected: boolean): void {
   selectGuiChoice(props.sessionId, fieldId, choiceIndex, selected);
@@ -39,11 +81,13 @@ function onGuiSubmit(fieldId: number): void {
 watch(snapshot, () => (cursorOverride.value = undefined));
 
 // 【カーソル／編集モデルの協調（ScreenGrid との役割分担）】
-//   EmulatorPane はフィールド「間」の移動（Tab/矢印/Home/End）だけを担う。対象 <input> を focus() し、
-//   setSelectionRange で桁（native caret）を指定するところまでが責務。文字編集そのもの（上書き/挿入/
-//   バックスペース・欄内桁の追従）は ScreenGrid の edit モデルが担い、ScreenGrid が onInputKeydown で
-//   native caret に追従する。つまり両者を繋ぐ単一の真実は「native input の caret」で、ここでは caret を
-//   動かすだけに徹する（ScreenGrid の内部状態には触れない）。上下移動は桁を保って真下のフィールドへ。
+//   有効カーソル `cursor`（override ?? snapshot.cursor）を論理カーソルの単一の真実とし、AID 送信と
+//   ScreenGrid（オーバーレイ）へ供給する。矢印は画面全体を 1 セルずつ自由移動し（moveCell）、着地セルが
+//   編集可能フィールドなら該当 <input> に focus＋キャレット（field モード）、非入力/保護なら input を blur し
+//   ペインに focus してオーバーレイ表示（free モード）。この調停は reconcileFocus に集約する。
+//   Tab はフィールド「間」ジャンプ（focusByOffset）で従来どおり。文字編集そのもの（上書き/挿入/バックスペース・
+//   欄内桁の追従）は ScreenGrid の edit モデルが担い、欄内で動かせる Left/Right は ScreenGrid が処理して
+//   ここへは伝播しない（端・上下・非入力セルだけがセル移動として届く）。両者を繋ぐのは native input の caret。
 //
 /** ペイン内の編集可能な入力欄（画面順＝DOM 順）。保護フィールドは readonly なので除外 */
 function editableInputs(): HTMLInputElement[] {
@@ -72,74 +116,23 @@ function focusByOffset(delta: number): void {
   focusInput(inputs, (start + delta + inputs.length) % inputs.length);
 }
 
-/**
- * 行方向移動（↑↓）。現在の桁を保ったまま、真下/真上の最も近い行で
- * その桁を含む（無ければ最も近い）フィールドへ移動し、カーソルを同じ桁に置く。
- * これで SEU の EVAL 下→MOVEL のように「次項目の先頭」ではなく真下へ移動する。
- */
-function focusByRow(dir: number): void {
-  const inputs = editableInputs();
-  const fields = editableFields();
-  if (inputs.length === 0) return;
-  const cur = inputs.indexOf(document.activeElement as HTMLInputElement);
-  const curField = cur >= 0 ? fields[cur] : undefined;
-  const caret = cur >= 0 ? (inputs[cur]!.selectionStart ?? 0) : 0;
-  // 現在の画面桁（1 始まり）。フォーカスが無ければホストカーソル桁
-  const curCol = curField ? curField.col + caret : cursor.value.col;
-  const curRow = curField ? curField.row : dir > 0 ? -Infinity : Infinity;
-
-  // dir 方向で最も近い行を決める（無ければ端でラップ）
-  let targetRow: number | undefined;
-  for (const f of fields) {
-    if ((f.row - curRow) * dir > 0) {
-      if (targetRow === undefined || Math.abs(f.row - curRow) < Math.abs(targetRow - curRow)) targetRow = f.row;
-    }
-  }
-  if (targetRow === undefined) {
-    targetRow = fields.reduce(
-      (acc, f) => (dir > 0 ? Math.min(acc, f.row) : Math.max(acc, f.row)),
-      dir > 0 ? Infinity : -Infinity
-    );
-  }
-
-  // targetRow の中で curCol を含む、無ければ最も桁が近いフィールド
-  let best = -1;
-  let bestScore = Infinity;
-  for (let i = 0; i < fields.length; i++) {
-    const f = fields[i]!;
-    if (f.row !== targetRow) continue;
-    const inside = curCol >= f.col && curCol < f.col + f.length;
-    const score = inside ? 0 : Math.min(Math.abs(f.col - curCol), Math.abs(f.col + f.length - 1 - curCol));
-    if (score < bestScore) {
-      bestScore = score;
-      best = i;
-    }
-  }
-  if (best < 0) return;
-
-  const el = inputs[best]!;
-  el.focus();
-  const target = fields[best]!;
-  const newCaret = Math.max(0, Math.min(curCol - target.col, target.length));
-  el.setSelectionRange(newCaret, newCaret); // 桁を保持（onInputKeydown が edit カーソルを追従）
-}
-
 function onLocal(action: LocalAction): void {
   const inputs = editableInputs();
   switch (action) {
+    // Tab はフィールド「間」ジャンプ（従来どおり）。矢印は画面全体を 1 セルずつ自由移動。
     case "tab":
-    case "right":
       focusByOffset(1);
       break;
     case "shift-tab":
-    case "left":
       focusByOffset(-1);
       break;
-    case "down":
-      focusByRow(1);
-      break;
+    case "left":
+    case "right":
     case "up":
-      focusByRow(-1);
+    case "down":
+      // 欄内でキャレットが動かせる Left/Right は ScreenGrid が処理して伝播しない。
+      // ここに来るのは欄の端／非入力セル／上下。いずれも 1 セル移動＋モード調停。
+      moveCell(action);
       break;
     case "home":
       focusInput(inputs, 0);
@@ -195,6 +188,7 @@ function onWheel(ev: WheelEvent): void {
         :edits="state!.edits"
         :focused="focused"
         :busy="busy"
+        :cursor="cursor"
         :show-shift-marks="workspaceStore.showShiftMarks"
         :katakana-view="workspaceStore.katakanaView"
         :linkify="workspaceStore.linkify"

@@ -17,6 +17,7 @@ import {
 import { acceptsChar } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont } from "../composables/fitFont.js";
+import { fieldAt, roundToDbcsLead } from "../composables/useCursor.js";
 // codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
 import { katakanaChar } from "@as400web/core/codec";
 
@@ -34,6 +35,8 @@ const props = withDefaults(
     linkify?: boolean;
     /** 通信中（ホスト応答待ち）。入力欄を編集不可にしてプロテクトする */
     busy?: boolean;
+    /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
+    cursor?: { row: number; col: number };
   }>(),
   { linkify: true }
 );
@@ -45,6 +48,14 @@ const emit = defineEmits<{
 }>();
 
 const gui = computed(() => props.snapshot.gui);
+
+// 有効カーソル（未指定時は snapshot.cursor にフォールバック）
+const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
+// カーソルが編集可能フィールド上か（field モード）。true なら native キャレットが担うのでオーバーレイは隠す
+const cursorOnEditable = computed(() => {
+  const f = fieldAt(effCursor.value.row, effCursor.value.col, props.snapshot.fields);
+  return f !== undefined && !f.protected;
+});
 
 interface GuiChoiceLike {
   index: number;
@@ -239,6 +250,9 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   inputEl.setSelectionRange(c, c);
   insertMode.value = edit.insertMode;
   emit("edit", f.index, trimmed);
+  // 欄内のキャレット移動・入力で論理カーソルも追従させる（AID 送信位置・オーバーレイ整合）。
+  // これで field モード中も有効カーソルが native キャレットの桁を指す。
+  emit("cursor", f.row, f.col + Math.min(edit.cursor, visLen(f)));
 }
 
 /** 画面のホストカーソル位置にある入力欄へフォーカスを当てる（無ければ先頭の入力欄）。
@@ -338,12 +352,26 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     sync(el, f);
     return;
   }
-  if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-    // 欄内カーソル移動を優先し、ペインの左右フィールド移動へは伝播させない
+  if (ev.key === "ArrowLeft") {
     ev.preventDefault();
-    ev.stopPropagation();
-    edit = moveCursor(edit, ev.key === "ArrowLeft" ? -1 : 1);
-    sync(el, f);
+    if (edit.cursor > 0) {
+      // 欄内: キャレットを 1 桁戻す。ペインのセル移動へは伝播させない
+      ev.stopPropagation();
+      edit = moveCursor(edit, -1);
+      sync(el, f);
+    }
+    // 左端（cursor===0）は stopPropagation せず、ペインの自由カーソル（セル移動）へ委譲する
+    return;
+  }
+  if (ev.key === "ArrowRight") {
+    ev.preventDefault();
+    if (edit.cursor < visLen(f)) {
+      // 欄内: キャレットを 1 桁進める。ペインのセル移動へは伝播させない
+      ev.stopPropagation();
+      edit = moveCursor(edit, 1);
+      sync(el, f);
+    }
+    // 右端（cursor===visLen）は委譲。欄の外の非入力セルへ自由に出られる
     return;
   }
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
@@ -365,6 +393,13 @@ function onInputFocus(f: Field, ev: FocusEvent): void {
   el.setSelectionRange(0, 0);
   if (edit) edit.cursor = 0;
   emit("cursor", f.row, f.col);
+}
+
+/** 入力欄クリック: 押下桁（native キャレット）を論理カーソルへ反映（AID 位置の正確化） */
+function onInputClick(f: Field, ev: MouseEvent): void {
+  const el = ev.target as HTMLInputElement;
+  const caret = Math.min(el.selectionStart ?? 0, f.length);
+  emit("cursor", f.row, f.col + caret);
 }
 
 /** paste（複数文字）: 上書き/挿入で順に入力し、型・長さで整形 */
@@ -396,22 +431,36 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   sync(el, f);
 }
 
-// ---- クリックでカーソル位置を算出（出力セルクリック。入力欄は @focus で emit） ----
+// ---- クリックでカーソル位置を算出（非入力セル。入力欄は @focus/@click で扱う） ----
+/** 実測の 1 文字幅（px）。ルーラー要素から測る（fontPx*0.6 近似の桁ズレを解消） */
+function charWidthPx(): number {
+  const r = rulerEl.value;
+  if (r) {
+    const w = r.getBoundingClientRect().width / 10;
+    if (w > 0) return w;
+  }
+  return fontPx.value * 0.6;
+}
+
 function onGridClick(ev: MouseEvent): void {
   const el = gridEl.value;
-  if (!el || (ev.target as HTMLElement).tagName === "INPUT") return;
+  if (!el || (ev.target as HTMLElement).tagName === "INPUT") return; // 入力欄は native focus で扱う
   const rect = el.getBoundingClientRect();
-  const chW = fontPx.value * 0.6;
   const lineH = fontPx.value * 1.25;
-  const col = Math.floor((ev.clientX - rect.left - 10) / chW) + 1;
-  const row = Math.floor((ev.clientY - rect.top - 8) / lineH) + 1;
-  if (row >= 1 && row <= props.snapshot.rows && col >= 1 && col <= props.snapshot.cols) {
-    emit("cursor", row, col);
-  }
+  const col = Math.floor((ev.clientX - rect.left - 10) / charWidthPx()) + 1; // padding 10px
+  const row = Math.floor((ev.clientY - rect.top - 8) / lineH) + 1; // padding 8px
+  if (row < 1 || row > props.snapshot.rows || col < 1 || col > props.snapshot.cols) return;
+  // 非入力セルへのクリック = free モード。フォーカス中の入力欄を外してオーバーレイを出す
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && el.contains(active)) active.blur();
+  // DBCS 後半桁をクリックしたら前半へ丸める（桁間にはカーソルを置けない）
+  const pos = roundToDbcsLead({ row, col }, props.snapshot.cells);
+  emit("cursor", pos.row, pos.col);
 }
 
 // ---- フォント自動フィット（ResizeObserver。paneWidth/cols で ch を算出） ----
 const gridEl = ref<HTMLElement>();
+const rulerEl = ref<HTMLElement>(); // 実測字幅用（10 文字幅を測る）
 const fontPx = ref(14);
 let ro: ResizeObserver | undefined;
 
@@ -441,10 +490,12 @@ onBeforeUnmount(() => ro?.disconnect());
     :data-focused="focused"
     @click="onGridClick"
   >
+    <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <div
+      v-if="!cursorOnEditable"
       class="cursor"
       :class="{ live: focused }"
-      :style="{ left: (snapshot.cursor.col - 1) + 'ch', top: (snapshot.cursor.row - 1) * 1.25 + 'em' }"
+      :style="{ left: (effCursor.col - 1) + 'ch', top: (effCursor.row - 1) * 1.25 + 'em' }"
       aria-hidden="true"
     ></div>
     <!-- 拡張 5250 GUI オーバーレイ（ウィンドウ枠・選択フィールド・スクロールバー） -->
@@ -506,6 +557,7 @@ onBeforeUnmount(() => ro?.disconnect());
           @keydown="onInputKeydown(seg.field!, $event)"
           @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
           @focus="onInputFocus(seg.field!, $event)"
+          @click="onInputClick(seg.field!, $event as MouseEvent)"
           @compositionstart="composing = true"
           @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
         />
@@ -556,6 +608,15 @@ onBeforeUnmount(() => ro?.disconnect());
 }
 @media (prefers-reduced-motion: reduce) {
   .cursor.live { animation: none; }
+}
+/* 実測字幅用のルーラー（不可視・レイアウトに影響しない。font は .grid から継承） */
+.cell-ruler {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+  top: 0;
+  left: 0;
 }
 .grid-row {
   height: 1.25em;
