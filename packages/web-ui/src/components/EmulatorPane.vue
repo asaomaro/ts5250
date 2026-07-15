@@ -38,6 +38,13 @@ function onGuiSubmit(fieldId: number): void {
 // 新しいホスト画面が来たらユーザーのカーソル上書きをリセットする
 watch(snapshot, () => (cursorOverride.value = undefined));
 
+// 【カーソル／編集モデルの協調（ScreenGrid との役割分担）】
+//   EmulatorPane はフィールド「間」の移動（Tab/矢印/Home/End）だけを担う。対象 <input> を focus() し、
+//   setSelectionRange で桁（native caret）を指定するところまでが責務。文字編集そのもの（上書き/挿入/
+//   バックスペース・欄内桁の追従）は ScreenGrid の edit モデルが担い、ScreenGrid が onInputKeydown で
+//   native caret に追従する。つまり両者を繋ぐ単一の真実は「native input の caret」で、ここでは caret を
+//   動かすだけに徹する（ScreenGrid の内部状態には触れない）。上下移動は桁を保って真下のフィールドへ。
+//
 /** ペイン内の編集可能な入力欄（画面順＝DOM 順）。保護フィールドは readonly なので除外 */
 function editableInputs(): HTMLInputElement[] {
   if (!paneEl.value) return [];

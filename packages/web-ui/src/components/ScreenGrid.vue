@@ -206,6 +206,17 @@ function inputValue(f: Field): string {
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----
+//
+// 【カーソル／編集モデルの協調（EmulatorPane との役割分担）】
+//   - ScreenGrid（本ファイル）: フィールド内の「文字編集」の真実を持つ（`edit: EditState`）。
+//     文字入力・上書き/挿入・バックスペース・欄内の桁移動を担う。
+//   - EmulatorPane: フィールド「間」の移動（Tab/矢印/Home/End）を担い、対象 <input> に focus() して
+//     setSelectionRange で桁を指定する（ScreenGrid の edit には直接触れない）。
+//   - 両者を繋ぐ単一の真実は「native input の caret（selectionStart）」。EmulatorPane は caret を動かし、
+//     ScreenGrid は onInputKeydown の冒頭で `edit.cursor` を native caret に追従させる（クリック配置も同様）。
+//     これにより「どこにカーソルを置いても、そこから入力できる」（ACS 準拠）を分割設計のまま実現する。
+//   - フォーカス時は onInputFocus / focusCursorField で caret を先頭へ置く（スペース埋め表示だと
+//     value 再設定で caret が末尾へ飛ぶため、明示的に補正する）。
 const composing = ref(false);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
