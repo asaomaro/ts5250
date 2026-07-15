@@ -1,0 +1,8 @@
+schema: 3
+slug: free-cursor
+current: deliver
+approved: [requirement, spec, design, plan, coding, test, review, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

@@ -247,6 +247,51 @@ describe("ScreenGrid", () => {
     expect(cursor.attributes("style")).toContain("6.25em");
   });
 
+  it("cursor prop（有効カーソル）がオーバーレイ位置を駆動する（snapshot.cursor より優先）", () => {
+    const snap = makeSnap();
+    snap.cursor = { row: 1, col: 1 }; // ホスト位置
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: true, cursor: { row: 6, col: 10 } }
+    });
+    const cursor = w.find(".cursor");
+    expect(cursor.exists()).toBe(true);
+    expect(cursor.attributes("style")).toContain("9ch"); // prop の col=10 → 9ch（snapshot の 1 ではない）
+    expect(cursor.attributes("style")).toContain("6.25em");
+  });
+
+  it("有効カーソルが編集可欄上なら field モードでオーバーレイを隠す", () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, cursor: { row: 6, col: 12 } }
+    });
+    // (6,12) は欄内（col10..17）→ native キャレットが担うのでオーバーレイ非表示
+    expect(w.find(".cursor").exists()).toBe(false);
+  });
+
+  it("保護欄上の有効カーソルは free モードでオーバーレイ表示（field ではない）", () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: true, hidden: false, numeric: false, mdt: false, value: "X" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, cursor: { row: 6, col: 12 } }
+    });
+    expect(w.find(".cursor").exists()).toBe(true); // 保護は編集不可 → オーバーレイ
+  });
+
+  it("欄内で文字入力すると論理カーソルが native キャレット桁へ追従して emit される", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus"); // cursor [6,10]（caret 0）
+    await input.trigger("keydown", { key: "A" }); // caret 1 → cursor [6,11]
+    const cursors = w.emitted("cursor") as [number, number][];
+    expect(cursors.at(-1)).toEqual([6, 11]);
+  });
+
   it("edits マップの値が input に反映される", () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "OLD" }
