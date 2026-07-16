@@ -45,6 +45,9 @@ const emit = defineEmits<{
   (e: "cursor", row: number, col: number): void;
   (e: "gui-select", fieldId: number, choiceIndex: number, selected: boolean): void;
   (e: "gui-submit", fieldId: number): void;
+  /** 欄が最大桁まで埋まった（ACS の自動送り＝次の入力欄へ）。満杯になった欄の index を渡す
+   *  （満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、index で次欄を特定する） */
+  (e: "field-full", fieldIndex: number): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -256,6 +259,12 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   emit("cursor", f.row, f.col + Math.min(edit.cursor, visLen(f)));
 }
 
+/** ACS の自動送り: 欄が最大桁まで埋まったら（cursor が欄長に到達）次の入力欄へ送るよう通知。
+ *  上書き入力で最終桁を打つと cursor===chars.length（満杯）になる（fieldEdit.typeChar）。 */
+function advanceIfFull(f: Field): void {
+  if (edit && edit.cursor >= edit.chars.length) emit("field-full", f.index);
+}
+
 /** 画面のホストカーソル位置にある入力欄へフォーカスを当てる（無ければ先頭の入力欄）。
  *  フォーカスにより onInputFocus が発火し beginEdit＋cursor 通知が行われる。 */
 function focusCursorField(): void {
@@ -381,6 +390,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     if (!acceptsChar(f, ev.key)) return; // 型違反は拒否
     edit = typeChar(edit, ev.key);
     sync(el, f);
+    advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
     return;
   }
   // その他（Enter/F キー/PageUp/Down/Tab）はペインの keymap に委譲（preventDefault しない）
@@ -416,6 +426,7 @@ function onInputBeforeInput(f: Field, ev: InputEvent): void {
     const filtered = [...ev.data].filter((ch) => acceptsChar(f, ch)).join("");
     edit = paste(edit!, filtered);
     sync(el, f);
+    advanceIfFull(f); // ACS: 貼り付けで満杯なら次の入力欄へ
   }
 }
 
@@ -449,6 +460,7 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   }
   editFieldIndex = f.index;
   sync(el, f);
+  advanceIfFull(f); // ACS: IME 確定で満杯なら次の入力欄へ
 }
 
 // ---- クリックでカーソル位置を算出（非入力セル。入力欄は @focus/@click で扱う） ----

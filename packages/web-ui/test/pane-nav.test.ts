@@ -197,6 +197,24 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  it("欄を最大桁まで入力すると次の入力欄へフォーカスが移る（ACS 自動送り）", async () => {
+    const f1: Field = { index: 1, row: 5, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const f2: Field = { index: 2, row: 6, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    seed([f1, f2]);
+    const w = mountPane();
+    await nextTick();
+    const els = inputs(w);
+    els[0]!.focus();
+    els[0]!.setSelectionRange(0, 0);
+    const input = w.find("input.grid-input");
+    await input.trigger("keydown", { key: "A" });
+    await input.trigger("keydown", { key: "B" });
+    expect(document.activeElement).toBe(els[0]); // 3 桁目未入力＝まだ欄内
+    await input.trigger("keydown", { key: "C" }); // 最大桁を入力＝満杯
+    expect(document.activeElement).toBe(els[1]); // 次の入力欄へ自動送り
+    w.unmount();
+  });
+
   it("非入力セルから矢印で編集可欄セルに入ると、その欄へ focus（field モードへ復帰）", async () => {
     seed([field(1, 5)]); // (5,10) len5
     const w = mountPane();
