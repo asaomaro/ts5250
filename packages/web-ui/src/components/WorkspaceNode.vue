@@ -68,7 +68,9 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
     <div class="split-child" :style="{ flexBasis: split.ratio * 100 + '%' }">
       <WorkspaceNode :node="split.a" />
     </div>
-    <div class="divider" :class="split.dir" @pointerdown="onDividerDown">⋮</div>
+    <div class="divider" :class="split.dir" @pointerdown="onDividerDown">
+      <span class="grip"><i></i><i></i><i></i></span>
+    </div>
     <div class="split-child" :style="{ flexBasis: (1 - split.ratio) * 100 + '%' }">
       <WorkspaceNode :node="split.b" />
     </div>
@@ -77,9 +79,9 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
   <div
     v-else
     class="group"
+    :data-group-id="group.id"
     :data-focused="focused"
     @mousedown="workspaceStore.focus(group.id)"
-    :data-group-id="group.id"
     @dragover="onDragOver"
     @dragleave="dropZone = undefined"
     @drop="onDrop"
@@ -119,9 +121,26 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--muted);
   background: var(--crt-bezel);
   user-select: none;
+}
+/* つまみ（3 点）は CSS で描画し向きを確実に制御する（フォントのグリフ依存を避ける）。
+   縦バー（row 分割）は点を縦並び、横バー（col 分割）は点を横並びにする。 */
+.divider .grip {
+  display: flex;
+  gap: 3px;
+}
+.divider.row .grip {
+  flex-direction: column;
+}
+.divider.col .grip {
+  flex-direction: row;
+}
+.divider .grip i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted);
 }
 .divider.row {
   width: 10px;
