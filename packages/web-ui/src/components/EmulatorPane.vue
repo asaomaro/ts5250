@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { AidKey } from "@as400web/core";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
@@ -88,7 +88,15 @@ function onGuiSubmit(fieldId: number): void {
   submitGuiSelection(props.sessionId, fieldId, cursor.value);
 }
 // 新しいホスト画面が来たらユーザーのカーソル上書きをリセットする
-watch(snapshot, () => (cursorOverride.value = undefined));
+watch(snapshot, (snap) => {
+  cursorOverride.value = undefined;
+  // 入力欄が 1 つも無い画面では ScreenGrid の欄フォーカス（focusCursorField）が早期 return し、
+  // どこも focus されずキー操作できない（見た目はカーソルが出る）。ペインを focus して
+  // 自由カーソル・F キーを有効にする（クリックで reconcileFocus がペインを focus するのと同じ状態）。
+  if (props.focused && snap && !snap.keyboardLocked && !snap.fields.some((f) => !f.protected)) {
+    nextTick(() => paneEl.value?.focus());
+  }
+});
 
 // 【カーソル／編集モデルの協調（ScreenGrid との役割分担）】
 //   有効カーソル `cursor`（override ?? snapshot.cursor）を論理カーソルの単一の真実とし、AID 送信と
