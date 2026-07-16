@@ -13,7 +13,7 @@ import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { Emitter } from "../util/emitter.js";
 import { aidCodeOf, aidKeyForCode, type AidKey } from "./aid-keys.js";
-import { terminalTypeFor } from "./terminal-type.js";
+import { terminalTypeFor, isDbcsCcsid } from "./terminal-type.js";
 
 export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "closed";
 
@@ -109,8 +109,10 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.id = opts.id ?? `sess-${++seq}`;
     this.codec = codecForCcsid(opts.ccsid ?? 37);
     this.warn = opts.warn ?? (() => {});
-    // 27x132 端末では代替バッファを許可する
-    this.buf = new ScreenBuffer(opts.screenSize === "27x132" ? { alternate: "27x132" } : {});
+    // 27x132 端末、および DBCS 端末（IBM-5555-C01 は 24x80 primary でも 27x132 alternate を
+    // サポートし、SEU 等が CLEAR UNIT ALTERNATE で切替える）では代替バッファを許可する。
+    const allowAlternate = opts.screenSize === "27x132" || isDbcsCcsid(opts.ccsid ?? 37);
+    this.buf = new ScreenBuffer(allowAlternate ? { alternate: "27x132" } : {});
     this.terminalType = terminalTypeFor(opts.ccsid ?? 37, opts.screenSize ?? "24x80");
     this.enhanced = opts.enhanced ?? false;
   }
