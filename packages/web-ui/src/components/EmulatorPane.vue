@@ -9,6 +9,7 @@ import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.j
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
+import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
@@ -44,17 +45,25 @@ function onCursor(row: number, col: number): void {
 function reconcileFocus(pos: { row: number; col: number }): void {
   const snap = snapshot.value;
   if (!snap) return;
-  let f = fieldAt(pos.row, pos.col, snap.fields);
+  let f = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
   const active = document.activeElement;
   // 末尾キャレット: 欄の右端境界（col === f.col+length＝最終文字の後ろ）は独立したセルを持たないが、
   // その欄の <input> が既にフォーカス中なら「欄の末尾」として欄内に留める（満杯欄でも末尾に止まれ、
   // Backspace で最終文字を消せる）。欄外から境界へ入ってきた場合（input 非フォーカス）は自由セル扱い。
   if (!f && active instanceof HTMLInputElement) {
-    const cand = editableFields().find((fld) => fld.row === pos.row && pos.col === fld.col + fld.length);
-    if (cand && editableInputs()[editableFields().indexOf(cand)] === active) f = cand;
+    const cand = editableFields().find((fld) => {
+      const end = posOfOffset(fld, fieldSpan(fld, snap.cols, snap.rows), snap.cols, snap.rows);
+      return pos.row === end.row && pos.col === end.col;
+    });
+    if (cand && active.dataset["fieldIndex"] === String(cand.index)) f = cand;
   }
   if (f && !f.protected) {
-    const el = editableInputs()[editableFields().indexOf(f)];
+    // 行またぎ欄では、論理オフセットを含むスライスの input へフォーカスする
+    const offset = caretInField(f, pos.row, pos.col, snap.cols, snap.rows);
+    const slices = fieldSlices(f, snap.cols, snap.rows);
+    let si = slices.findIndex((s) => offset < s.offset + s.width);
+    if (si < 0) si = slices.length - 1;
+    const el = inputForSlice(f.index, si) ?? editableInputs()[editableFields().indexOf(f)];
     if (el) {
       const wasFocused = active === el;
       if (!wasFocused) el.focus();
@@ -62,7 +71,7 @@ function reconcileFocus(pos: { row: number; col: number }): void {
       // SBCS 用の caretInField（1桁=1文字）で native caret を上書きしない。既にフォーカス中なら
       // ScreenGrid が置いた caret を尊重し、新規フォーカス時は onInputFocus が先頭へ置く。
       if (!f.dbcsType) {
-        const caret = caretInField(f, pos.col);
+        const caret = offset - slices[si]!.offset;
         el.setSelectionRange(caret, caret);
       }
       // el.focus() が onInputFocus を発火し emit("cursor", 欄先頭) で override を巻き戻すため、
@@ -123,10 +132,23 @@ watch(snapshot, (snap) => {
 //   欄内桁の追従）は ScreenGrid の edit モデルが担い、欄内で動かせる Left/Right は ScreenGrid が処理して
 //   ここへは伝播しない（端・上下・非入力セルだけがセル移動として届く）。両者を繋ぐのは native input の caret。
 //
-/** ペイン内の編集可能な入力欄（画面順＝DOM 順）。保護フィールドは readonly なので除外 */
+/** ペイン内の編集可能な入力欄（画面順＝DOM 順）。保護フィールドは readonly なので除外。
+ *  行またぎ欄は行ごとに input が分かれるため、先頭スライスだけを「欄の代表」として拾い、
+ *  editableFields() と 1:1 の対応を保つ（Tab 等の欄間移動はフィールド単位のため）。 */
 function editableInputs(): HTMLInputElement[] {
   if (!paneEl.value) return [];
-  return Array.from(paneEl.value.querySelectorAll<HTMLInputElement>("input.grid-input:not([readonly])"));
+  return Array.from(
+    paneEl.value.querySelectorAll<HTMLInputElement>('input.grid-input:not([readonly])[data-slice="0"]')
+  );
+}
+
+/** 指定フィールド・スライスの input（行またぎ欄のキャレット配置に使う） */
+function inputForSlice(fieldIndex: number, sliceIdx: number): HTMLInputElement | undefined {
+  return (
+    paneEl.value?.querySelector<HTMLInputElement>(
+      `input.grid-input[data-field-index="${fieldIndex}"][data-slice="${sliceIdx}"]`
+    ) ?? undefined
+  );
 }
 
 /** editableInputs と同順の非保護フィールド（行情報つき。上下移動の行判定に使う） */

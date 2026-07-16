@@ -1,4 +1,5 @@
 import type { Cell, Field } from "@as400web/core";
+import { fieldSpan, offsetOfPos } from "./fieldSlices.js";
 
 /**
  * 画面全体の自由カーソルの移動・判定（DOM 非依存の純関数）。
@@ -106,14 +107,32 @@ export function nextWordStart(cells: readonly Cell[][], pos: Pos, dir: Dir, rows
   return pos; // 端で停止
 }
 
-/** (row,col) を含むフィールドを返す（単一行に収まる範囲で判定。無ければ undefined）。 */
-export function fieldAt(row: number, col: number, fields: readonly Field[]): Field | undefined {
-  return fields.find((f) => f.row === row && col >= f.col && col < f.col + f.length);
+/**
+ * (row,col) を含むフィールドを返す（無ければ undefined）。
+ * 行またぎフィールド（コマンド行等）は折返し先の行も対象になる（fieldSlices と同じ規則）。
+ */
+export function fieldAt(
+  row: number,
+  col: number,
+  fields: readonly Field[],
+  cols: number,
+  rows: number
+): Field | undefined {
+  return fields.find((f) => offsetOfPos(f, row, col, cols, rows) !== undefined);
 }
 
-/** フィールド先頭からの桁オフセット（＝入力欄のキャレット位置）。0〜length にクランプ。 */
-export function caretInField(field: Field, col: number): number {
-  return Math.max(0, Math.min(col - field.col, field.length));
+/**
+ * フィールド先頭からの桁オフセット（＝入力欄のキャレット位置）。
+ * 折返し先の行では前行までの桁数が加算される。フィールド外は 0〜span にクランプ。
+ */
+export function caretInField(field: Field, row: number, col: number, cols: number, rows: number): number {
+  const off = offsetOfPos(field, row, col, cols, rows);
+  if (off !== undefined) return off;
+  // 欄外: 手前なら 0、末尾より後ろなら span（末尾の直後＝右端境界）
+  const span = fieldSpan(field, cols, rows);
+  const addr = (row - 1) * cols + (col - 1);
+  const start = (field.row - 1) * cols + (field.col - 1);
+  return Math.max(0, Math.min(addr - start, span));
 }
 
 /**

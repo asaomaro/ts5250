@@ -50,19 +50,28 @@ describe("useCursor.fieldAt", () => {
   const fields = [field(5, 10, 5), field(5, 20, 3, true), field(6, 10, 5)];
 
   it("フィールド範囲内の (row,col) を返す（先頭〜末尾）", () => {
-    expect(fieldAt(5, 10, fields)).toBe(fields[0]); // 先頭桁
-    expect(fieldAt(5, 14, fields)).toBe(fields[0]); // 末尾桁
-    expect(fieldAt(6, 12, fields)).toBe(fields[2]);
+    expect(fieldAt(5, 10, fields, 80, 24)).toBe(fields[0]); // 先頭桁
+    expect(fieldAt(5, 14, fields, 80, 24)).toBe(fields[0]); // 末尾桁
+    expect(fieldAt(6, 12, fields, 80, 24)).toBe(fields[2]);
   });
 
   it("範囲外（末尾+1・別行・隙間）は undefined", () => {
-    expect(fieldAt(5, 15, fields)).toBeUndefined(); // col+length は範囲外
-    expect(fieldAt(5, 9, fields)).toBeUndefined();
-    expect(fieldAt(7, 10, fields)).toBeUndefined();
+    expect(fieldAt(5, 15, fields, 80, 24)).toBeUndefined(); // col+length は範囲外
+    expect(fieldAt(5, 9, fields, 80, 24)).toBeUndefined();
+    expect(fieldAt(7, 10, fields, 80, 24)).toBeUndefined();
   });
 
   it("保護フィールドも命中する（可否判定は呼び出し側）", () => {
-    expect(fieldAt(5, 21, fields)).toBe(fields[1]);
+    expect(fieldAt(5, 21, fields, 80, 24)).toBe(fields[1]);
+  });
+
+  it("行またぎフィールドは折返し先の行でも命中する（コマンド行 (20,7) len=153）", () => {
+    const cmd = [field(20, 7, 153)];
+    expect(fieldAt(20, 7, cmd, 80, 24)).toBe(cmd[0]); // 先頭
+    expect(fieldAt(20, 80, cmd, 80, 24)).toBe(cmd[0]); // 1 行目末尾
+    expect(fieldAt(21, 1, cmd, 80, 24)).toBe(cmd[0]); // 折返し先の先頭
+    expect(fieldAt(21, 79, cmd, 80, 24)).toBe(cmd[0]); // 折返し先の末尾（74+79=153）
+    expect(fieldAt(21, 80, cmd, 80, 24)).toBeUndefined(); // 範囲外
   });
 });
 
@@ -70,13 +79,21 @@ describe("useCursor.caretInField", () => {
   const f = field(5, 10, 5);
 
   it("先頭からの桁オフセットを返す", () => {
-    expect(caretInField(f, 10)).toBe(0);
-    expect(caretInField(f, 13)).toBe(3);
+    expect(caretInField(f, 5, 10, 80, 24)).toBe(0);
+    expect(caretInField(f, 5, 13, 80, 24)).toBe(3);
   });
 
   it("0〜length にクランプする", () => {
-    expect(caretInField(f, 5)).toBe(0); // 手前
-    expect(caretInField(f, 100)).toBe(5); // 末尾超過は length
+    expect(caretInField(f, 5, 5, 80, 24)).toBe(0); // 手前
+    expect(caretInField(f, 5, 100, 80, 24)).toBe(5); // 末尾超過は length
+  });
+
+  it("行またぎフィールドは前行までの桁数を加算する", () => {
+    const cmd = field(20, 7, 153);
+    expect(caretInField(cmd, 20, 7, 80, 24)).toBe(0);
+    expect(caretInField(cmd, 20, 80, 80, 24)).toBe(73); // 1 行目末尾
+    expect(caretInField(cmd, 21, 1, 80, 24)).toBe(74); // 折返し先の先頭
+    expect(caretInField(cmd, 21, 79, 80, 24)).toBe(152); // 最終桁
   });
 });
 

@@ -83,17 +83,47 @@ describe("ScreenGrid", () => {
     expect(v.length).toBe(10);
   });
 
-  it("複数行フィールド（コマンド行等）は可視行の桁数に収める（次行への回り込み防止）", () => {
-    // (20,7) len=153 は 80 桁画面で row20-21 にまたがる。入力欄は可視行(80-6=74)に収める
+  it("行またぎフィールド（コマンド行）は行ごとのスライスに割って全桁を描画する", () => {
+    // (20,7) len=153 は 80 桁画面で row20(col7〜80=74桁) と row21(col1〜79=79桁) にまたがる
     const fields: Field[] = [
       { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: false } });
-    const inp = w.find("input.grid-input");
+    const inputs = w.findAll("input.grid-input");
+    expect(inputs).toHaveLength(2); // 行ごとに 1 つ
+    expect(inputs[0]!.attributes("data-slice")).toBe("0");
+    expect(inputs[0]!.attributes("maxlength")).toBe("74");
+    expect(inputs[0]!.attributes("style")).toContain("74ch");
+    expect(inputs[1]!.attributes("data-slice")).toBe("1");
+    expect(inputs[1]!.attributes("maxlength")).toBe("79");
+    expect(inputs[1]!.attributes("style")).toContain("79ch");
+    // 同一フィールドの 2 スライス（74+79=153＝全桁が編集対象）
+    expect(inputs[0]!.attributes("data-field-index")).toBe("1");
+    expect(inputs[1]!.attributes("data-field-index")).toBe("1");
+  });
+
+  it("行またぎフィールド: 74 桁を超えて入力でき、送信値は全桁ぶん", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const first = w.findAll("input.grid-input")[0]!;
+    await first.trigger("focus");
+    // 1 行目の可視 74 桁を超える長さを貼り付ける（80 文字）
+    const long = "A".repeat(80);
+    await first.trigger("paste", { clipboardData: { getData: () => long } } as unknown as ClipboardEvent);
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe(long); // 74 で切られない
+    expect(emits.at(-1)![1].length).toBe(80);
+  });
+
+  it("DBCS 欄は当面 1 行目のみ（行またぎ未対応）", () => {
+    const fields: Field[] = [
+      { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: false } });
     expect(w.findAll("input.grid-input")).toHaveLength(1);
-    expect((inp.element as HTMLInputElement).value.length).toBe(74); // 153 ではなく可視 74
-    expect(inp.attributes("maxlength")).toBe("74");
-    expect(inp.attributes("style")).toContain("74ch");
+    expect(w.find("input.grid-input").attributes("maxlength")).toBe("74");
   });
 
   it("入力欄フォーカスで cursor イベントをフィールド位置で emit する", async () => {
