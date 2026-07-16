@@ -164,6 +164,43 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     });
   }
 
+  it("DBCS 欄の矢印カーソルが reconcileFocus に壊されず列ビュー caret を維持する（回帰）", async () => {
+    // "あいう" を持つ DBCS 欄。列ビュー " あいう "。矢印は 1 論理文字ずつ移動し SO/SI をスキップ。
+    // 旧: ScreenGrid の emit("cursor") → reconcileFocus が SBCS 用 caretInField で caret を上書きし、
+    // → が 2 文字進む・← が効かない、という不具合になっていた。
+    const dbcs: Field = {
+      index: 1, row: 5, col: 10, length: 16, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: ""
+    };
+    sessionsStore.byId.clear();
+    sessionsStore.order = [];
+    sessionsStore.add({
+      sessionId: SID,
+      label: "t",
+      snapshot: snap([dbcs]),
+      edits: new Map([[1, "あいう"]]),
+      cursor: { row: 5, col: 10 },
+      connected: true,
+      readOnly: false,
+      client: { send: () => {} } as unknown as WsClient
+    });
+    const w = mountPane();
+    await nextTick();
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe(" あいう "); // 列ビュー（SO/SI がスペース）
+    expect(el.selectionStart).toBe(1); // あ の前（SO=桁0 をスキップ）
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(2); // い の前（1 論理文字・reconcileFocus に壊されない）
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(3); // う の前
+    await input.trigger("keydown", { key: "ArrowLeft" });
+    expect(el.selectionStart).toBe(2); // い の前へ戻る（← が効く）
+    await input.trigger("keydown", { key: "ArrowLeft" });
+    expect(el.selectionStart).toBe(1); // あ の前
+    w.unmount();
+  });
+
   it("入力欄から左へ出るとフィールドが blur され、ペインにフォーカスが移る（free モード）", async () => {
     // col10 len5 の欄。左端(caret0)で ArrowLeft を押すと欄外(col9)へ抜ける
     seed([field(1, 5)]);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acceptsChar, dbcsByteLength, columnView } from "../src/composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout } from "../src/composables/fieldValidate.js";
 import type { Field } from "@as400web/core";
 
 function fld(o: Partial<Field>): Field {
@@ -79,5 +79,35 @@ describe("columnView 表示用の SO/SI スペース挿入", () => {
 
   it("例: データ ABC あDEF → 表示 ABC[SO]あ[SI]DEF（SO/SI が半角スペース）", () => {
     expect(columnView("ABC あDEF")).toBe("ABC  あ DEF"); // 実スペース+SO / SI
+  });
+
+  it("SO/SI マーク指定（showShiftMarks の { }）で SO=左・SI=右に置換", () => {
+    expect(columnView("Aあ", "{", "}")).toBe("A{あ}");
+    expect(columnView("あい", "{", "}")).toBe("{あい}");
+    expect(columnView("ABC", "{", "}")).toBe("ABC"); // DBCS 無しは不変
+  });
+});
+
+describe("dbcsViewLayout 論理⇔列ビューのカーソルマッピング", () => {
+  it("論理カーソルは SO/SI をスキップした列位置に対応する", () => {
+    const { view, caretOf } = dbcsViewLayout("Aあ"); // 列ビュー "A あ "（A, SO, あ, SI）
+    expect(view).toBe("A あ ");
+    expect(caretOf(0)).toBe(0); // A の前
+    expect(caretOf(1)).toBe(2); // あ の前（SO の桁=1 をスキップ）
+    expect(caretOf(2)).toBe(3); // 末尾（あ の直後・末尾 SI の前。SI を飛び越えない）
+  });
+
+  it("列ビューの caret を論理カーソルへスナップ（往復）", () => {
+    const { logicalOf } = dbcsViewLayout("Aあ");
+    expect(logicalOf(0)).toBe(0);
+    expect(logicalOf(2)).toBe(1); // あ 桁 → 論理 1
+    expect(logicalOf(3)).toBe(2); // 末尾（あ の直後）
+  });
+
+  it("columnsBefore は DBCS を 2 桁として数える", () => {
+    const { columnsBefore } = dbcsViewLayout("Aあ"); // view="A あ "（A, SO, あ, SI）
+    expect(columnsBefore(2)).toBe(2); // "A "(SO) までで 1+1=2 桁
+    expect(columnsBefore(3)).toBe(4); // "A あ" までで 1+1+2=4 桁（あ の直後）
+    expect(columnsBefore(4)).toBe(5); // "A あ "（末尾 SI 込み）で 5 桁
   });
 });

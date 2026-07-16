@@ -53,9 +53,15 @@ function reconcileFocus(pos: { row: number; col: number }): void {
   if (f && !f.protected) {
     const el = editableInputs()[editableFields().indexOf(f)];
     if (el) {
-      const caret = caretInField(f, pos.col);
-      if (active !== el) el.focus();
-      el.setSelectionRange(caret, caret);
+      const wasFocused = active === el;
+      if (!wasFocused) el.focus();
+      // DBCS 欄は列ビューの caret を ScreenGrid（論理⇔列マッピング）が管理するため、
+      // SBCS 用の caretInField（1桁=1文字）で native caret を上書きしない。既にフォーカス中なら
+      // ScreenGrid が置いた caret を尊重し、新規フォーカス時は onInputFocus が先頭へ置く。
+      if (!f.dbcsType) {
+        const caret = caretInField(f, pos.col);
+        el.setSelectionRange(caret, caret);
+      }
       // el.focus() が onInputFocus を発火し emit("cursor", 欄先頭) で override を巻き戻すため、
       // 目的桁を再確定する（論理カーソルと native キャレットの不一致を防ぐ。review R1-1）。
       cursorOverride.value = pos;

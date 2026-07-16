@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -221,11 +221,13 @@ describe("ScreenGrid", () => {
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
-    el.setSelectionRange(3, 3); // 既入力「あいう」の直後にカーソル
+    // フォーカス中は列ビュー " あいう "（SO/SI 込み）。末尾（う の直後）へカーソルを置く
+    expect(el.value).toBe(" あいう ");
+    el.setSelectionRange(el.value.length, el.value.length);
     await input.trigger("compositionstart");
-    // 既入力は残る（欄全体を空にしない）→ 候補が先頭でなく入力位置に出る
+    // 合成中は純論理値 prefix「あいう」（SO/SI 無し）＋候補 → 候補が先頭でなく入力位置に出る
     expect(el.value).toBe("あいう");
-    expect(el.selectionStart).toBe(3); // caret は既入力の末尾＝合成開始位置
+    expect(el.selectionStart).toBe(3); // caret は既入力の末尾＝合成開始位置（論理 3）
     el.value = "あいうえお"; // IME が「えお」を既入力の後ろに挿入
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
@@ -266,20 +268,186 @@ describe("ScreenGrid", () => {
     const el = input.element as HTMLInputElement;
     expect(el.value).toBe("A あ "); // columnView("Aあ")
 
-    // フォーカスで編集ビュー（純論理値・SO/SI 無し）へ切替
+    // フォーカス中も列ビュー（SO/SI 込み）で編集する（ライブ表示）
     await input.trigger("focus");
-    expect(el.value.trimEnd()).toBe("Aあ");
+    expect(el.value).toBe("A あ ");
 
-    // 末尾に SBCS 追加 → 送信値も SO/SI を含まない純データ
-    el.setSelectionRange(2, 2);
+    // 末尾へ移動して SBCS 追加 → 送信値（emit）は SO/SI を含まない純データ、表示は列ビュー
+    await input.trigger("keydown", { key: "End" });
     await input.trigger("keydown", { key: "B" });
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("AあB");
+    expect(emits.at(-1)![1]).toBe("AあB"); // 純データ
+    expect(el.value).toBe("A あ B"); // columnView("AあB")：あ の後ろに SI スペース
 
-    // blur で再び列ビュー表示（SO/SI 込み）。standalone mount では edit は props.edits へ
-    // 反映されないため、セル由来の論理値 "Aあ" の列ビューに戻る
+    // blur で休止表示へ。standalone mount では edit は props.edits へ反映されないため
+    // セル由来の論理値 "Aあ" の列ビューに戻る
     await input.trigger("blur");
-    expect(el.value).toBe("A あ "); // columnView("Aあ")
+    expect(el.value).toBe("A あ ");
+    w.unmount();
+  });
+
+  it("DBCS 欄の矢印カーソルは SO/SI スペースをスキップする（ライブ列ビュー）", async () => {
+    // 論理 "AあB" → 列ビュー "A あ B"（index1=SO, index3=SI）。cursor は A/あ/B/末尾のみに止まる
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = cell("A");
+    row[10] = { ...cell(" "), kind: "so" };
+    row[11] = { ...cell("あ"), kind: "dbcs-lead" };
+    row[12] = { ...cell(""), kind: "dbcs-tail" };
+    row[13] = { ...cell(" "), kind: "si" };
+    row[14] = cell("B");
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: false }, attachTo: document.body });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe("A あ B"); // columnView("AあB")
+    expect(el.selectionStart).toBe(0); // A の前
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(2); // SO(桁1) を飛ばして あ へ
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(4); // SI(桁3) を飛ばして B へ
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(5); // 末尾
+    await input.trigger("keydown", { key: "ArrowLeft" });
+    expect(el.selectionStart).toBe(4); // B へ戻る（SI スキップ）
+    w.unmount();
+  });
+
+  it("DBCS 欄のコピー/カットは SO/SI（列ビューの半角スペース）を含まない純論理値", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = cell("A");
+    row[10] = { ...cell(" "), kind: "so" };
+    row[11] = { ...cell("あ"), kind: "dbcs-lead" };
+    row[12] = { ...cell(""), kind: "dbcs-tail" };
+    row[13] = { ...cell(" "), kind: "si" };
+    row[14] = cell("B");
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: false }, attachTo: document.body });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus"); // 列ビュー "A あ B"
+
+    // 全選択コピー → SO/SI を含まない "AあB"
+    el.setSelectionRange(0, el.value.length);
+    const copied = { setData: vi.fn() };
+    await input.trigger("copy", { clipboardData: copied });
+    expect(copied.setData).toHaveBeenCalledWith("text/plain", "AあB");
+
+    // あ だけ選択（列ビュー index 2..3）→ "あ" のみ
+    el.setSelectionRange(2, 3);
+    const one = { setData: vi.fn() };
+    await input.trigger("copy", { clipboardData: one });
+    expect(one.setData).toHaveBeenCalledWith("text/plain", "あ");
+
+    // カット: 全選択 → クリップボードは "AあB"、欄は空・送信値も空
+    el.setSelectionRange(0, el.value.length);
+    const cutCd = { setData: vi.fn() };
+    await input.trigger("cut", { clipboardData: cutCd });
+    expect(cutCd.setData).toHaveBeenCalledWith("text/plain", "AあB");
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe(""); // 選択範囲を論理から削除
+    w.unmount();
+  });
+
+  it("showShiftMarks 有効時、DBCS 欄の SO/SI を { } で表示（コピーは { } を含まない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = cell("A");
+    row[10] = { ...cell(" "), kind: "so" };
+    row[11] = { ...cell("あ"), kind: "dbcs-lead" };
+    row[12] = { ...cell(""), kind: "dbcs-tail" };
+    row[13] = { ...cell(" "), kind: "si" };
+    const w = mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused: false, showShiftMarks: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    expect(el.value).toBe("A{あ}"); // 休止表示: SO={ / SI=}
+    await input.trigger("focus");
+    expect(el.value).toBe("A{あ}"); // 編集中も { }
+
+    // コピーは { }（SO/SI）を含まない純論理値
+    el.setSelectionRange(0, el.value.length);
+    const cd = { setData: vi.fn() };
+    await input.trigger("copy", { clipboardData: cd });
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "Aあ");
+    w.unmount();
+  });
+
+  it("DBCS 欄へ貼り付けできる（末尾でもブロックされない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 16, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus");
+    await input.trigger("beforeinput", { inputType: "insertFromPaste", data: "日本語" });
+    let emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("日本語");
+    // 末尾へ移動してさらに貼り付け（cursor===len で typeChar にブロックされない回帰）
+    await input.trigger("keydown", { key: "End" });
+    await input.trigger("beforeinput", { inputType: "insertFromPaste", data: "あ" });
+    emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("日本語あ");
+  });
+
+  it("選択範囲を Delete/入力で削除・置換できる（SBCS）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "HELLO" }
+    ];
+    // Delete: EL(1..3) を削除 → HLO
+    let w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    let input = w.find("input.grid-input");
+    let el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 3);
+    await input.trigger("keydown", { key: "Delete" });
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("HLO");
+    w.unmount();
+    // 入力で置換: EL(1..3) を選択して X → HXLO
+    w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    input = w.find("input.grid-input");
+    el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 3);
+    await input.trigger("keydown", { key: "X" });
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("HXLO");
+    w.unmount();
+  });
+
+  it("選択範囲を Delete/入力で削除・置換できる（DBCS・SO/SI 単位）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 16, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    // 列ビュー " あいう "。あい（view 1..3）を Delete → う のみ
+    let w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map([[1, "あいう"]]), focused: true } });
+    let input = w.find("input.grid-input");
+    let el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 3);
+    await input.trigger("keydown", { key: "Delete" });
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("う");
+    w.unmount();
+    // あい を選択して え を入力 → えう（選択置換）
+    w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map([[1, "あいう"]]), focused: true } });
+    input = w.find("input.grid-input");
+    el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 3);
+    await input.trigger("compositionstart");
+    el.value = "え";
+    await input.trigger("compositionend");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("えう");
     w.unmount();
   });
 
