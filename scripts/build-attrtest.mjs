@@ -20,9 +20,10 @@ const blank = () => " ".repeat(80);
 const fileKwd = (kw) => put(put(blank(), 6, "A"), 45, kw).replace(/ +$/, "");
 const rec = (n) => put(put(put(blank(), 6, "A"), 17, "R"), 19, n).replace(/ +$/, "");
 const constant = (r, c, t, kw = "") => put(put(put(put(blank(), 6, "A"), 39, String(r).padStart(3)), 42, String(c).padStart(3)), 45, `'${t}'${kw ? " " + kw : ""}`).replace(/ +$/, "");
-function field(name, len, usage, r, c) {
+function field(name, len, usage, r, c, type = "") {
   let l = put(put(blank(), 6, "A"), 19, name);
   l = put(l, 35 - String(len).length, String(len)); // 30-34 に右詰
+  if (type) l = put(l, 35, type);                    // 35=データ型（O=DBCS-open 等）
   l = put(put(put(l, 38, usage), 39, String(r).padStart(3)), 42, String(c).padStart(3));
   return l.replace(/ +$/, "");
 }
@@ -56,6 +57,22 @@ const inline = {
     constant(1, 2, "INLINE ATTR TEST"), field("CLRLINE", 40, "O", 3, 2), constant(5, 2, "F3 END")
   ],
   rpg: ["**free", "dcl-f INLTST workstn;", `CLRLINE = x'${inlineHex}';`, "exfmt FMT01;", "*inlr = *on;", "return;"]
+};
+
+// --- フィクスチャ 3: 入力ラウンドトリップ（SBCS＋DBCS 日本語入力→エコー） ---
+const input = {
+  dsp: "INPTST", pgm: "INPPGM", ddsMbr: "INPTST", rpgMbr: "INPPGM", ddsAlias: "N1", rpgAlias: "N2",
+  dds: [
+    fileKwd("DSPSIZ(24 80 *DS3)"), rec("FMT01"), fileKwd("CA03(03)"),
+    constant(1, 2, "INPUT TEST  F3=EXIT"),
+    constant(3, 2, "A IN :"), field("ANAME", 10, "B", 3, 10),
+    constant(4, 2, "J IN :"), field("JNAME", 12, "B", 4, 10, "O"), // O=DBCS-open 入力欄
+    constant(6, 2, "A ECHO:"), field("AECHO", 10, "O", 6, 10),
+    constant(7, 2, "J ECHO:"), field("JECHO", 12, "O", 7, 10, "O"),
+    constant(9, 2, "F3 END")
+  ],
+  // exfmt→入力読取→エコー欄へ複写→再 exfmt（エコー表示）→F3 終了
+  rpg: ["**free", "dcl-f INPTST workstn;", "exfmt FMT01;", "AECHO = ANAME;", "JECHO = JNAME;", "exfmt FMT01;", "*inlr = *on;", "return;"]
 };
 
 const cmdField = (s) => { const e = s.fields.filter((f) => !f.protected); return e[e.length - 1]; };
@@ -124,10 +141,11 @@ let ok = true;
 try {
   ok = (await buildProgram(session, attr)) && ok;
   ok = (await buildProgram(session, inline)) && ok;
+  ok = (await buildProgram(session, input)) && ok;
 } catch (e) {
   ok = false; log("BUILD ERROR: " + e.message);
 } finally {
   await session.disconnect();
 }
-log(ok ? `OK — ${LIB} に CLRTDSP/CLRTPGM ＋ INLTST/INLPGM をビルドしました（verify-attributes.mjs で検証可）` : "NG — ビルド失敗");
+log(ok ? `OK — ${LIB} に CLRTDSP/CLRTPGM・INLTST/INLPGM・INPTST/INPPGM をビルド（verify-attributes.mjs / verify-input.mjs で検証可）` : "NG — ビルド失敗");
 process.exit(ok ? 0 : 1);
