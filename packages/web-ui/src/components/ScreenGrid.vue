@@ -433,9 +433,11 @@ function onInputBeforeInput(f: Field, ev: InputEvent): void {
   }
 }
 
-/** IME 合成開始: 合成中は欄を空にする。
+/** IME 合成開始: スペース埋めを外し、合成開始桁より前の既入力だけを残す。
  *  非 hidden 欄はスペース埋めで maxlength を満たしており、その状態だと IME が確定文字を挿入できず
- *  空白のまま消える（DBCS 全角が入力できない）。合成中だけ欄を空にして挿入余地を作る。 */
+ *  空白のまま消える（DBCS 全角が入力できない）。かといって欄全体を空にすると、既入力が隠れ変換候補が
+ *  欄先頭に出てしまう。合成開始桁より前の実文字を value に残し caret をその末尾へ置くことで、
+ *  既入力を見せたまま候補を入力位置に出しつつ、以降の挿入余地（maxlength）を確保する。 */
 function onCompositionStart(f: Field, ev: CompositionEvent): void {
   if (f.protected || props.busy) return;
   composing.value = true;
@@ -446,7 +448,9 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   const nativeCaret = el.selectionStart;
   if (nativeCaret !== null) edit = { ...edit, cursor: Math.min(nativeCaret, visLen(f)) };
   composeStart = edit.cursor;
-  el.value = ""; // スペース埋めを外して IME 挿入余地を作る（compositionend で欄値を復元）
+  const prefix = edit.chars.slice(0, composeStart).join(""); // 合成開始桁より前の既入力
+  el.value = prefix; // スペース埋めを外しつつ既入力は残す（compositionend で欄値を整形）
+  el.setSelectionRange(prefix.length, prefix.length); // 候補を入力位置（既入力の直後）に出す
 }
 
 function onCompositionEnd(f: Field, ev: CompositionEvent): void {
@@ -455,10 +459,10 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
-  // 合成確定文字を composeStart から 5250 上書きで流し込む（型フィルタ・欄長クランプ）。
-  // el.value は合成中に空へしたので、ここには確定文字のみが入っている。
+  // el.value = 既入力prefix + 確定文字。prefix（composeStart 桁分）を除いた確定分だけを
+  // composeStart から 5250 上書きで流し込む（型フィルタ・欄長クランプ）。
   edit = { ...edit, cursor: composeStart };
-  for (const ch of [...el.value]) {
+  for (const ch of [...el.value].slice(composeStart)) {
     if (acceptsChar(f, ch)) edit = typeChar(edit, ch);
   }
   editFieldIndex = f.index;

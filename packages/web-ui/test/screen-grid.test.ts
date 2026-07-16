@@ -177,7 +177,7 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1]).toBe("ABC"); // 二重化せず ABC
   });
 
-  it("IME 合成で DBCS 全角を入力できる（compositionstart で欄クリア→compositionend で上書き取込）", async () => {
+  it("IME 合成で DBCS 全角を入力できる（空欄はスペース埋めを外して挿入余地を作る）", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
     ];
@@ -186,12 +186,31 @@ describe("ScreenGrid", () => {
     const el = input.element as HTMLInputElement;
     await input.trigger("focus"); // スペース埋め表示（maxlength ぶん）
     await input.trigger("compositionstart");
-    // 合成中は欄を空にして IME 挿入余地を作る（スペース埋め＋maxlength で挿入がブロックされるのを回避）
+    // 空欄なので prefix="" ＝ スペース埋めが外れて挿入余地ができる
     expect(el.value).toBe("");
     el.value = "日本語"; // IME が確定文字を挿入
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("日本語"); // DBCS 全角が欄先頭から取り込まれる
+    expect(emits.at(-1)![1]).toBe("日本語"); // DBCS 全角が取り込まれる
+  });
+
+  it("既入力の後ろに IME 合成すると、既入力を残し候補が入力位置に出る（先頭に出ない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "あいう" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(3, 3); // 既入力「あいう」の直後にカーソル
+    await input.trigger("compositionstart");
+    // 既入力は残る（欄全体を空にしない）→ 候補が先頭でなく入力位置に出る
+    expect(el.value).toBe("あいう");
+    expect(el.selectionStart).toBe(3); // caret は既入力の末尾＝合成開始位置
+    el.value = "あいうえお"; // IME が「えお」を既入力の後ろに挿入
+    await input.trigger("compositionend");
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("あいうえお"); // 既入力＋確定分が二重化せず結合
   });
 
   it("hidden（パスワード）欄はスペース埋めで全桁●にならず、実入力分のみ・送信値も実入力", async () => {
