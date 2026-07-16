@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acceptsChar } from "../src/composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView } from "../src/composables/fieldValidate.js";
 import type { Field } from "@as400web/core";
 
 function fld(o: Partial<Field>): Field {
@@ -40,5 +40,44 @@ describe("acceptsChar フィールド型ごとの入力ルール", () => {
     const f = fld({ dbcsType: "either" });
     expect(acceptsChar(f, "A")).toBe(true);
     expect(acceptsChar(f, "日")).toBe(true);
+  });
+});
+
+describe("dbcsByteLength 送信バイト長の見積り（SO/SI・DBCS 2 バイト込み）", () => {
+  it("SBCS は 1 文字 1 バイト", () => {
+    expect(dbcsByteLength("")).toBe(0);
+    expect(dbcsByteLength("ABC")).toBe(3);
+  });
+
+  it("DBCS 連続ランは SO+2×N+SI（SO/SI を 1 ペア共有）", () => {
+    expect(dbcsByteLength("あ")).toBe(4); // SO+2+SI
+    expect(dbcsByteLength("あい")).toBe(6); // SO+4+SI（1 ペア共有）
+    expect(dbcsByteLength("あいう")).toBe(8); // SO+6+SI
+  });
+
+  it("SBCS↔DBCS 切替ごとに SO/SI が入る", () => {
+    expect(dbcsByteLength("AあB")).toBe(6); // A + SO+2 + SI+B
+    expect(dbcsByteLength("あAい")).toBe(9); // SO+2+SI + A + SO+2+SI
+  });
+
+  it("例: 表示 ABC[SO]あ[SI]DEF ＝ データ ABC あDEF は 11 バイト", () => {
+    // A B C 空白 =4, あ=SO+2, D で SI, DEF=3 → 4 + 3 + 1 + 3 = 11
+    expect(dbcsByteLength("ABC あDEF")).toBe(11);
+  });
+});
+
+describe("columnView 表示用の SO/SI スペース挿入", () => {
+  it("SBCS のみは変化しない", () => {
+    expect(columnView("ABC")).toBe("ABC");
+    expect(columnView("")).toBe("");
+  });
+
+  it("DBCS ランの前後に SO/SI スペースを挿入（連続は 1 ペア）", () => {
+    expect(columnView("あ")).toBe(" あ "); // SO+あ+SI
+    expect(columnView("あい")).toBe(" あい "); // SO+あい+SI（共有）
+  });
+
+  it("例: データ ABC あDEF → 表示 ABC[SO]あ[SI]DEF（SO/SI が半角スペース）", () => {
+    expect(columnView("ABC あDEF")).toBe("ABC  あ DEF"); // 実スペース+SO / SI
   });
 });

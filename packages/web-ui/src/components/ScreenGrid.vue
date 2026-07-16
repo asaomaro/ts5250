@@ -11,10 +11,9 @@ import {
   home,
   end,
   toggleInsert,
-  paste,
   type EditState
 } from "../composables/fieldEdit.js";
-import { acceptsChar } from "../composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, roundToDbcsLead } from "../composables/useCursor.js";
@@ -210,13 +209,50 @@ function visLen(f: Field): number {
   return Math.min(f.length, props.snapshot.cols - (f.col - 1));
 }
 
+/** 編集後の値が欄のバイト予算（SO/SI・DBCS 2 バイト込み）に収まるか。
+ *  収まらない入力は拒否/切り捨てる（送信時の FIELD_OVERFLOW を入力段で防ぐ）。 */
+function fitsBytes(candidate: EditState, f: Field): boolean {
+  return dbcsByteLength(editValue(candidate).replace(/ +$/, "")) <= visLen(f);
+}
+
+/** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
+ *  編集済みなら edits の値、未編集の DBCS 欄はセル種別から SO/SI・tail を除いて再構成する
+ *  （ホスト値の f.value は SO/SI を空白として含むため、そのまま送ると二重 SO/SI・余分スペースになる）。 */
+function logicalValue(f: Field): string {
+  const edited = props.edits.get(f.index);
+  if (edited !== undefined) return edited;
+  if (f.dbcsType) return logicalFromCells(f);
+  return f.value;
+}
+
+/** 未編集 DBCS 欄のセルから純論理値を復元（sbcs 文字・dbcs-lead 文字を採用、so/si/dbcs-tail は除外）。 */
+function logicalFromCells(f: Field): string {
+  const row = props.snapshot.cells[f.row - 1];
+  if (!row) return f.value;
+  let s = "";
+  const len = visLen(f);
+  for (let i = 0; i < len; i++) {
+    const cell = row[f.col - 1 + i];
+    if (!cell) continue;
+    if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
+    // so / si / dbcs-tail / attr は論理データに含めない
+  }
+  return s.replace(/ +$/, ""); // 末尾パディング空白を除去
+}
+
+/** 編集モデル初期値（純論理値をスペース埋め）。フォーカス中の input はこれを表示する。 */
 function inputValue(f: Field): string {
-  const v = props.edits.get(f.index) ?? f.value;
-  // 非 hidden は欄を可視桁までスペース埋めして表示する（ACS 同様、欄内の任意桁に
-  // カーソルを置いて入力開始できる）。hidden は ● 化を避けるため埋めない。送信値は末尾トリム。
+  const v = logicalValue(f);
   if (f.hidden) return v;
   const vl = visLen(f);
   return v.length >= vl ? v.slice(0, vl) : v.padEnd(vl, " ");
+}
+
+/** input の :value（休止時の表示）。DBCS 欄は列ビュー（SO/SI スペース込み）で表示する。 */
+function displayValue(f: Field): string {
+  if (f.hidden) return logicalValue(f);
+  if (f.dbcsType) return columnView(logicalValue(f));
+  return inputValue(f);
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----
@@ -391,7 +427,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (!acceptsChar(f, ev.key)) return; // 型違反は拒否
-    edit = typeChar(edit, ev.key);
+    const trial = typeChar(edit, ev.key);
+    if (!fitsBytes(trial, f)) return; // バイト予算（SO/SI・DBCS 込み）超過は拒否
+    edit = trial;
     sync(el, f);
     advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
     return;
@@ -402,11 +440,20 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
 function onInputFocus(f: Field, ev: FocusEvent): void {
   const el = ev.target as HTMLInputElement;
   beginEdit(f, el);
+  // DBCS 欄は休止時 :value が列ビュー（SO/SI スペース込み）なので、フォーカスで編集ビュー
+  // （純論理値・SO/SI 無し）へ切替える。SBCS は displayValue と同一なので実質無変化。
+  if (edit) el.value = editValue(edit);
   // スペース埋め表示だと Tab/フォーカスで native カーソルが末尾へ行き入力できなくなるため、
   // フォーカス時はフィールド先頭へ置く（クリックは mouseup で押下桁に上書きされる）。
   el.setSelectionRange(0, 0);
   if (edit) edit.cursor = 0;
   emit("cursor", f.row, f.col);
+}
+
+/** フォーカスアウト: 休止表示（DBCS は SO/SI 込みの列ビュー）へ戻す。 */
+function onInputBlur(f: Field, ev: FocusEvent): void {
+  if (composing.value) return; // IME 変換中の一時 blur は無視
+  (ev.target as HTMLInputElement).value = displayValue(f);
 }
 
 /** 入力欄クリック: 押下桁（native キャレット）を論理カーソルへ反映（AID 位置の正確化） */
@@ -426,8 +473,14 @@ function onInputBeforeInput(f: Field, ev: InputEvent): void {
     ev.preventDefault();
     const el = ev.target as HTMLInputElement;
     if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
-    const filtered = [...ev.data].filter((ch) => acceptsChar(f, ch)).join("");
-    edit = paste(edit!, filtered);
+    edit = edit!;
+    // 型フィルタ後、バイト予算（SO/SI・DBCS 込み）に収まる分だけ順に入力し超過は切り捨てる
+    for (const ch of [...ev.data]) {
+      if (!acceptsChar(f, ch)) continue;
+      const trial = typeChar(edit, ch);
+      if (!fitsBytes(trial, f)) break;
+      edit = trial;
+    }
     sync(el, f);
     advanceIfFull(f); // ACS: 貼り付けで満杯なら次の入力欄へ
   }
@@ -460,10 +513,14 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
   // el.value = 既入力prefix + 確定文字。prefix（composeStart 桁分）を除いた確定分だけを
-  // composeStart から 5250 上書きで流し込む（型フィルタ・欄長クランプ）。
+  // composeStart から 5250 上書きで流し込む（型フィルタ・バイト予算クランプ）。
+  // バイト予算（SO/SI・DBCS 2 バイト込み）を超える確定文字は切り捨てる。
   edit = { ...edit, cursor: composeStart };
   for (const ch of [...el.value].slice(composeStart)) {
-    if (acceptsChar(f, ch)) edit = typeChar(edit, ch);
+    if (!acceptsChar(f, ch)) continue;
+    const trial = typeChar(edit, ch);
+    if (!fitsBytes(trial, f)) break; // 桁超過分は切り捨て
+    edit = trial;
   }
   editFieldIndex = f.index;
   sync(el, f);
@@ -617,13 +674,14 @@ onBeforeUnmount(() => ro?.disconnect());
           class="grid-input"
           :class="seg.cls"
           :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-          :value="inputValue(seg.field!)"
+          :value="displayValue(seg.field!)"
           :readonly="seg.field!.protected"
           :type="seg.field!.hidden ? 'password' : 'text'"
           :maxlength="seg.width ?? seg.field!.length"
           @keydown="onInputKeydown(seg.field!, $event)"
           @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
           @focus="onInputFocus(seg.field!, $event)"
+          @blur="onInputBlur(seg.field!, $event as FocusEvent)"
           @click="onInputClick(seg.field!, $event as MouseEvent)"
           @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
           @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"

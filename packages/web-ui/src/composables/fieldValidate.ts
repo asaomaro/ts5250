@@ -20,6 +20,58 @@ export function acceptsChar(field: Field, ch: string): boolean {
   return true;
 }
 
+/**
+ * 5250 送信時のバイト長を見積もる（core codec.encode と整合）。
+ * SBCS=1 バイト。DBCS 連続ランは SO(0x0E)+2×N+SI(0x0F)＝SO/SI を 1 ペア共有。
+ * フィールド長（`field.length`）は SO/SI・DBCS 2 バイトを含むバイト予算なので、
+ * 桁数上限の判定はこの見積り長で行う（JS 文字数では DBCS を過小評価してしまう）。
+ */
+export function dbcsByteLength(value: string): number {
+  let bytes = 0;
+  let inDbcs = false;
+  for (const ch of value) {
+    if (isFullWidth(ch)) {
+      if (!inDbcs) {
+        bytes += 1; // SO（ラン開始）
+        inDbcs = true;
+      }
+      bytes += 2; // DBCS 1 文字 = 2 バイト
+    } else {
+      if (inDbcs) {
+        bytes += 1; // SI（ラン終了）
+        inDbcs = false;
+      }
+      bytes += 1; // SBCS
+    }
+  }
+  if (inDbcs) bytes += 1; // 末尾 SI
+  return bytes;
+}
+
+/**
+ * 純論理値（SBCS＋DBCS、SO/SI 無し）を「列ビュー」表示文字列へ変換する。
+ * DBCS 連続ランの前に SO、後ろに SI を**半角スペース 1 個**として挿入する（ホスト表示と同じ桁配置）。
+ * 例: "ABC あDEF" → "ABC  あ DEF"（あ の前に SO、後ろに SI のスペース）。
+ * これは表示専用。送信値は純論理値のまま（codec が本物の SO/SI を付与）。
+ */
+export function columnView(logical: string): string {
+  let out = "";
+  let inDbcs = false;
+  for (const ch of logical) {
+    const wide = isFullWidth(ch);
+    if (wide && !inDbcs) {
+      out += " "; // SO（ラン開始）
+      inDbcs = true;
+    } else if (!wide && inDbcs) {
+      out += " "; // SI（ラン終了）
+      inDbcs = false;
+    }
+    out += ch;
+  }
+  if (inDbcs) out += " "; // 末尾 SI
+  return out;
+}
+
 /** 全角判定（East Asian Width の Wide/Fullwidth 近似。DBCS 相当の判別に使う） */
 function isFullWidth(ch: string): boolean {
   const cp = ch.codePointAt(0);

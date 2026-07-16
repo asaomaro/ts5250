@@ -194,11 +194,30 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1]).toBe("日本語"); // DBCS 全角が取り込まれる
   });
 
+  it("IME 確定で欄のバイト予算（SO/SI・DBCS 2 バイト込み）を超える DBCS は切り捨てる", async () => {
+    // length=6（バイト予算 6）。あい=SO+4+SI=6 まで。あいう=8 は超過 → う を切り捨て
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 6, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    await input.trigger("compositionstart");
+    el.value = "あいう"; // IME が 3 文字確定（8 バイト相当）
+    await input.trigger("compositionend");
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("あい"); // 6 バイトに収まる「あい」のみ、「う」は切り捨て
+  });
+
   it("既入力の後ろに IME 合成すると、既入力を残し候補が入力位置に出る（先頭に出ない）", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "あいう" }
     ];
-    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const snapshot = makeSnap(fields);
+    // 未編集 DBCS 欄の論理値はセルから復元されるため、欄セルに既入力を配置（row6=index5, col10=index9）
+    ["あ", "い", "う"].forEach((ch, i) => (snapshot.cells[5]![9 + i] = cell(ch)));
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true } });
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
@@ -227,6 +246,41 @@ describe("ScreenGrid", () => {
     // 送信値（emit）も実入力
     const emits = w.emitted("edit") as [number, string][];
     expect(emits.at(-1)).toEqual([1, "PASS"]);
+  });
+
+  it("DBCS 欄は休止時 SO/SI 込みの列ビューで表示し、編集/送信は SO/SI を除いた純データ", async () => {
+    // ホストが書いた DBCS 欄セル: A(sbcs) SO あ(lead) tail SI …（col10=index9 から）
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = cell("A");
+    row[10] = { ...cell(" "), kind: "so" };
+    row[11] = { ...cell("あ"), kind: "dbcs-lead" };
+    row[12] = { ...cell(""), kind: "dbcs-tail" };
+    row[13] = { ...cell(" "), kind: "si" };
+    // 休止表示（focused: false ＝ 自動フォーカスなし）: 列ビュー "A あ "（SO/SI が半角スペース）
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: false }, attachTo: document.body });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    expect(el.value).toBe("A あ "); // columnView("Aあ")
+
+    // フォーカスで編集ビュー（純論理値・SO/SI 無し）へ切替
+    await input.trigger("focus");
+    expect(el.value.trimEnd()).toBe("Aあ");
+
+    // 末尾に SBCS 追加 → 送信値も SO/SI を含まない純データ
+    el.setSelectionRange(2, 2);
+    await input.trigger("keydown", { key: "B" });
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("AあB");
+
+    // blur で再び列ビュー表示（SO/SI 込み）。standalone mount では edit は props.edits へ
+    // 反映されないため、セル由来の論理値 "Aあ" の列ビューに戻る
+    await input.trigger("blur");
+    expect(el.value).toBe("A あ "); // columnView("Aあ")
+    w.unmount();
   });
 
   it("数値フィールドは非数字キーを拒否する", async () => {
