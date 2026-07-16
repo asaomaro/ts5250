@@ -64,6 +64,19 @@ describe("EmulatorPane 画面遷移後のフォーカス・編集リセット", 
     w.unmount();
   });
 
+  it("入力欄が無い画面へ遷移するとペインへフォーカスする（自由カーソル・F キーが効く）", async () => {
+    const w = mountPane();
+    await nextTick(); // 初期はコマンド欄へフォーカス
+    // 入力欄が 1 つも無い画面へ遷移
+    const noField: ScreenSnapshot = { sessionId: SID, rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false, cells: cells(), fields: [] };
+    sessionsStore.updateScreen(SID, noField);
+    await nextTick();
+    await nextTick();
+    // 見た目だけでなく実際にペインが focus され、キーボード操作できる状態になる
+    expect(document.activeElement).toBe(w.find(".pane").element);
+    w.unmount();
+  });
+
   it("同じ field index の別画面で直前のコマンドが残らない", async () => {
     const w = mountPane();
     await nextTick();
