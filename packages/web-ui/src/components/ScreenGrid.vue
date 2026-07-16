@@ -659,7 +659,10 @@ onBeforeUnmount(() => ro?.disconnect());
   display: inline-block;
   width: 2ch;
   text-align: center;
-  overflow: hidden;
+  /* overflow:hidden は inline-block のベースラインを下端に変え全角が上へずれるため使わない。
+     行(line-height:1.25)に合わせ text ベースラインで揃える。 */
+  line-height: inherit;
+  vertical-align: baseline;
 }
 .grid-input {
   font: inherit;
