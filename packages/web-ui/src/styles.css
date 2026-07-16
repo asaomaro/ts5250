@@ -67,17 +67,20 @@ body {
   font-size: 14px;
 }
 
-/* 5250 属性カラー（セルの class にマップ。ScreenGrid が付与） */
-.c-green { color: var(--t-green); }
-.c-white { color: var(--t-white); }
-.c-red { color: var(--t-red); }
-.c-turquoise { color: var(--t-turquoise); }
-.c-yellow { color: var(--t-yellow); }
-.c-pink { color: var(--t-pink); }
-.c-blue { color: var(--t-blue); }
+/* 5250 属性カラー（セルの class にマップ。ScreenGrid が付与）。
+   --cell は反転(背景色)時の背景に使う（color を crt に上書きしても背景色を保てるように別変数で保持）。 */
+.c-green { color: var(--t-green); --cell: var(--t-green); }
+.c-white { color: var(--t-white); --cell: var(--t-white); }
+.c-red { color: var(--t-red); --cell: var(--t-red); }
+.c-turquoise { color: var(--t-turquoise); --cell: var(--t-turquoise); }
+.c-yellow { color: var(--t-yellow); --cell: var(--t-yellow); }
+.c-pink { color: var(--t-pink); --cell: var(--t-pink); }
+.c-blue { color: var(--t-blue); --cell: var(--t-blue); }
 .a-underline { text-decoration: underline; text-underline-offset: 2px; }
-.a-reverse { background: currentColor; }
-.a-reverse > * { filter: invert(1); }
+/* 反転(背景色): 背景をセル色、文字を CRT 地色にして前景/背景を入れ替える
+   （旧実装は background:currentColor で文字色＝背景色になり文字が見えなかった）。 */
+.a-reverse { background: var(--cell); color: var(--crt); }
+.a-reverse .grid-link { color: var(--crt); }
 .a-blink { animation: blink5250 1.1s steps(1) infinite; }
 @keyframes blink5250 {
   50% { opacity: 0.25; }
