@@ -8,6 +8,7 @@ import { workspaceStore } from "../stores/workspace.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
+import { isKatakanaCcsid } from "../hostCodePages.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
@@ -19,6 +20,8 @@ const snapshot = computed(() => state.value?.snapshot);
 // 通信中（ホスト応答待ち）は入力プロテクト。loading は 0.5 秒超でスピナー表示
 const busy = computed(() => state.value?.busy ?? false);
 const loading = computed(() => state.value?.loading ?? false);
+// カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
+const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
 const insertMode = ref(false);
 // ユーザーがクリック/フォーカスでカーソルを動かしたときの上書き（未操作ならホスト snapshot.cursor を使う）
 const cursorOverride = ref<{ row: number; col: number } | undefined>();
@@ -294,6 +297,7 @@ function onWheel(ev: WheelEvent): void {
         :cursor="cursor"
         :show-shift-marks="workspaceStore.showShiftMarks"
         :katakana-view="workspaceStore.katakanaView"
+        :uppercase-input="uppercaseInput"
         :linkify="workspaceStore.linkify"
         @edit="onEdit"
         @cursor="onCursor"

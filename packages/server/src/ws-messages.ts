@@ -57,6 +57,8 @@ export interface WsOpened {
   type: "opened";
   sessionId: string;
   screen: ScreenSnapshot;
+  /** セッションの実効ホストコードページ（CCSID）。既定 37 */
+  ccsid: number;
 }
 export interface WsScreen {
   type: "screen";

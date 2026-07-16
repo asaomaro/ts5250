@@ -146,6 +146,51 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)).toEqual([1, "ABC"]);
   });
 
+  it("uppercaseInput（930/5026）: 半角英小文字を入力すると大文字化する", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, uppercaseInput: true }
+    });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus");
+    await input.trigger("keydown", { key: "a" });
+    await input.trigger("keydown", { key: "b" });
+    await input.trigger("keydown", { key: "1" }); // 数字はそのまま
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "AB1"]);
+  });
+
+  it("uppercaseInput 無効時（既定）は英小文字がそのまま入る", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus");
+    await input.trigger("keydown", { key: "a" });
+    await input.trigger("keydown", { key: "b" });
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "ab"]);
+  });
+
+  it("uppercaseInput: 貼り付けた英小文字も大文字化する", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, uppercaseInput: true }
+    });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus");
+    await input.trigger("paste", {
+      clipboardData: { getData: () => "abc123" }
+    } as unknown as ClipboardEvent);
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "ABC123"]);
+  });
+
   it("上書きモード: 途中入力しても後続桁がシフトしない", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "ABCDE" }

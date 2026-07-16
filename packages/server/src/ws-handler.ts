@@ -81,7 +81,12 @@ export class WsConnection {
         this.detachScreen?.();
       });
       this.detachScreen = () => entry.session.off("screen", onScreen);
-      this.send({ type: "opened", sessionId: entry.id, screen: entry.session.snapshot() });
+      this.send({
+        type: "opened",
+        sessionId: entry.id,
+        screen: entry.session.snapshot(),
+        ccsid: opts.ccsid ?? 37
+      });
     });
   }
 

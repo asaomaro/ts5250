@@ -57,6 +57,7 @@ export async function openSession(open: WsOpen, label: string): Promise<string> 
                 cursor: msg.screen.cursor,
                 connected: true,
                 readOnly: open.readOnly ?? false,
+                ccsid: msg.ccsid,
                 client
               };
               sessionsStore.add(state);

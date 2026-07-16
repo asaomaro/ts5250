@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import type { PublicProfile } from "@as400web/server";
 import { settingsStore, type SavedConnection } from "../stores/settings.js";
 import { openSession } from "../session-controller.js";
+import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 
 const emit = defineEmits<{ (e: "connected", sessionId: string): void }>();
 
@@ -22,8 +23,11 @@ type ConnForm = {
   user?: string;
   password?: string;
 };
-const emptyForm = (): ConnForm => ({ name: "", host: "" });
+const emptyForm = (): ConnForm => ({ name: "", host: "", ccsid: DEFAULT_CCSID });
 const form = ref<ConnForm>(emptyForm());
+
+// カタカナ系コードページ（930/5026）は英小文字が大文字化される旨を案内する
+const showKatakanaHint = computed(() => isKatakanaCcsid(form.value.ccsid));
 
 onMounted(async () => {
   try {
@@ -55,7 +59,8 @@ async function connectSaved(c: SavedConnection): Promise<void> {
 }
 
 function editConn(c: SavedConnection): void {
-  form.value = { ...c };
+  // 旧データ（ccsid 未設定）は既定コードページを選択済み扱いにする
+  form.value = { ...c, ccsid: c.ccsid ?? DEFAULT_CCSID };
   showForm.value = true;
 }
 
@@ -144,9 +149,20 @@ function cancelForm(): void {
       </div>
       <div class="row">
         <input v-model.number="form.port" type="number" placeholder="ポート (既定 23 / TLS 992)" />
-        <input v-model.number="form.ccsid" type="number" placeholder="CCSID (既定 37)" />
         <input v-model="form.deviceName" placeholder="デバイス名 (任意)" />
       </div>
+      <div class="row">
+        <label class="field">
+          <span class="field-label">ホストコードページ</span>
+          <select v-model.number="form.ccsid">
+            <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="showKatakanaHint" class="note">
+        ※ カタカナ系コードページ（930 / 5026）では、実機（ACS）同様に半角英小文字を入力すると大文字になります。
+        英小文字をそのまま入力するには 939 / 1399 / 5035 を選択してください。
+      </p>
       <label class="check"><input v-model="form.tls" type="checkbox" /> TLS で接続</label>
       <label class="check"><input v-model="form.autoSignon" type="checkbox" /> 自動サインオン（RFC 4777）</label>
       <div v-if="form.autoSignon" class="row">
@@ -227,12 +243,28 @@ small {
   gap: 8px;
   margin-top: 14px;
 }
-.form input {
+.form input,
+.form select {
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--card);
   color: var(--ink);
+}
+.form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 120px;
+}
+.form .field-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.form .field select {
+  width: 100%;
 }
 .form button {
   padding: 6px 14px;

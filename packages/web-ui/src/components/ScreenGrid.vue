@@ -36,6 +36,8 @@ const props = withDefaults(
     busy?: boolean;
     /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
     cursor?: { row: number; col: number };
+    /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
+    uppercaseInput?: boolean;
   }>(),
   { linkify: true }
 );
@@ -52,6 +54,12 @@ const emit = defineEmits<{
 }>();
 
 const gui = computed(() => props.snapshot.gui);
+
+/** カタカナ系ホストコードページ（930/5026）では、実機（ACS）同様に半角英小文字を入力時点で
+ *  大文字化する。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。 */
+function inputChar(ch: string): string {
+  return props.uppercaseInput && ch >= "a" && ch <= "z" ? ch.toUpperCase() : ch;
+}
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
 const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
@@ -528,16 +536,17 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
-    if (!acceptsChar(f, ev.key)) return; // 型違反は拒否
+    const ch = inputChar(ev.key); // 930/5026 は英小文字を大文字化
+    if (!acceptsChar(f, ch)) return; // 型違反は拒否
     let trial: EditState;
     if (deleteSelection(f, el)) {
       // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）
       const chars = [...edit.chars];
-      chars.splice(edit.cursor, 0, ev.key);
+      chars.splice(edit.cursor, 0, ch);
       chars.length = visLen(f);
       trial = { ...edit, cursor: edit.cursor + 1, chars };
     } else {
-      trial = typeChar(edit, ev.key);
+      trial = typeChar(edit, ch);
     }
     if (!fitsBytes(trial, f)) return; // バイト予算（SO/SI・DBCS 込み）超過は拒否
     edit = trial;
@@ -607,9 +616,10 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   // 印字可能な 1 文字（修飾なし）: 型・バイト予算検証してから論理挿入
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
-    if (!acceptsChar(f, k)) return;
+    const ch = inputChar(k); // 930/5026 は半角英小文字を大文字化
+    if (!acceptsChar(f, ch)) return;
     deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
-    const trial = dbcsInsert(edit, k);
+    const trial = dbcsInsert(edit, ch);
     if (!fitsBytes(trial, f)) return; // SO/SI 込みバイト予算超過は拒否
     edit = trial;
     syncDbcs(el, f);
@@ -725,8 +735,9 @@ function overwriteFromOffset(field: Field, offset: number, line: string): string
     if (dbcsByteLength(out + ch) > budget) return out.replace(/\s+$/, "");
     out += ch;
   }
-  for (const ch of line) {
-    if (ch === "\n" || ch === "\r") continue;
+  for (const raw of line) {
+    if (raw === "\n" || raw === "\r") continue;
+    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(field, ch)) continue;
     if (dbcsByteLength(out + ch) > budget) break;
     out += ch;
@@ -791,7 +802,8 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     }
   }
   let e: EditState = edit!;
-  for (const ch of [...text]) {
+  for (const raw of [...text]) {
+    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     const trial = dbcs ? dbcsInsert(e, ch) : typeChar(e, ch);
     if (!fitsBytes(trial, f)) break;
@@ -841,7 +853,8 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
   const dbcs = isDbcsEdit(f);
   let e: EditState = { ...edit, cursor: composeStart };
-  for (const ch of [...el.value].slice(composeStart)) {
+  for (const raw of [...el.value].slice(composeStart)) {
+    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     const trial = dbcs ? dbcsInsert(e, ch) : typeChar(e, ch);
     if (!fitsBytes(trial, f)) break; // 桁超過分は切り捨て

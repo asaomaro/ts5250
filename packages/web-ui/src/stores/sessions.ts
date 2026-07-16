@@ -13,6 +13,8 @@ export interface SessionState {
   readOnly: boolean;
   client: WsClient;
   job?: { number: string; user: string; name: string };
+  /** セッションの実効ホストコードページ（CCSID）。930/5026 は入力時に英小文字を大文字化する */
+  ccsid?: number;
   /** ホスト応答待ち（通信中）。入力をプロテクトする */
   busy?: boolean;
   /** ローディング表示（通信が 0.5 秒以上かかったとき） */
