@@ -71,6 +71,16 @@ function moveCell(dir: Dir): void {
   }
   onCursor(next.row, next.col);
 }
+// ACS の自動送り: 欄が満杯になったら次の入力欄へフォーカスを進める。
+// 満杯時は欄外へ論理カーソルが出て input が blur 済み（activeElement がペイン）なので、
+// focusByOffset ではなく満杯欄の index から次欄を特定する。
+function onFieldFull(fieldIndex: number): void {
+  const flds = editableFields();
+  const els = editableInputs();
+  const cur = flds.findIndex((f) => f.index === fieldIndex);
+  if (cur < 0 || els.length === 0) return;
+  focusInput(els, (cur + 1) % els.length);
+}
 function onGuiSelect(fieldId: number, choiceIndex: number, selected: boolean): void {
   selectGuiChoice(props.sessionId, fieldId, choiceIndex, selected);
 }
@@ -194,6 +204,7 @@ function onWheel(ev: WheelEvent): void {
         :linkify="workspaceStore.linkify"
         @edit="onEdit"
         @cursor="onCursor"
+        @field-full="onFieldFull"
         @gui-select="onGuiSelect"
         @gui-submit="onGuiSubmit"
       />
