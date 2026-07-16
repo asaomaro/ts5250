@@ -30,9 +30,11 @@ function onDividerDown(ev: PointerEvent): void {
   window.addEventListener("pointerup", up);
 }
 
-// ---- タブ D&D のドロップ（5 ゾーン） ----
-const dropZone = ref<DropZone | undefined>();
-function zoneFrom(ev: DragEvent, el: HTMLElement): DropZone {
+// ---- タブ D&D のドロップ（端 4 ゾーン＝分割のみ。中央合流は廃止しタブエリアで受ける） ----
+type SplitZone = Exclude<DropZone, "center">;
+const dropZone = ref<SplitZone | undefined>();
+/** 端 4 ゾーンのみ返す。中央は分割対象外（合流はタブエリア＝PaneTabs が担当）→ undefined */
+function zoneFrom(ev: DragEvent, el: HTMLElement): SplitZone | undefined {
   const r = el.getBoundingClientRect();
   const x = (ev.clientX - r.left) / r.width;
   const y = (ev.clientY - r.top) / r.height;
@@ -40,20 +42,22 @@ function zoneFrom(ev: DragEvent, el: HTMLElement): DropZone {
   if (x > 0.75) return "right";
   if (y < 0.25) return "top";
   if (y > 0.75) return "bottom";
-  return "center";
+  return undefined; // 中央はドロップ不可
 }
 function onDragOver(ev: DragEvent): void {
-  ev.preventDefault();
-  dropZone.value = zoneFrom(ev, ev.currentTarget as HTMLElement);
+  const zone = zoneFrom(ev, ev.currentTarget as HTMLElement);
+  dropZone.value = zone;
+  // 有効な端ゾーンのときだけドロップを許可（中央は no-drop カーソルにする）
+  if (zone) ev.preventDefault();
 }
 function onDrop(ev: DragEvent): void {
-  ev.preventDefault();
-  const sessionId = ev.dataTransfer?.getData("text/session");
   const zone = dropZone.value;
   dropZone.value = undefined;
-  if (!sessionId || !zone) return;
-  if (zone === "center") workspaceStore.moveTab(sessionId, group.value.id);
-  else workspaceStore.split(group.value.id, zone, sessionId);
+  if (!zone) return; // 中央ドロップは無効
+  ev.preventDefault();
+  const sessionId = ev.dataTransfer?.getData("text/session");
+  if (!sessionId) return;
+  workspaceStore.split(group.value.id, zone, sessionId);
 }
 
 const focused = computed(() => workspaceStore.focusedGroupId === group.value.id);
@@ -75,6 +79,7 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
     class="group"
     :data-focused="focused"
     @mousedown="workspaceStore.focus(group.id)"
+    :data-group-id="group.id"
     @dragover="onDragOver"
     @dragleave="dropZone = undefined"
     @drop="onDrop"
@@ -152,7 +157,6 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
   border: 1px solid var(--t-green);
   pointer-events: none;
 }
-.dz[data-zone="center"] { inset: 25%; }
 .dz[data-zone="top"] { top: 0; left: 0; right: 0; height: 40%; }
 .dz[data-zone="bottom"] { bottom: 0; left: 0; right: 0; height: 40%; }
 .dz[data-zone="left"] { left: 0; top: 0; bottom: 0; width: 40%; }

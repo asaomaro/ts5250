@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useTheme } from "./composables/useTheme.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
+import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
 import ConnectView from "./components/ConnectView.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
 import LogPanel from "./components/LogPanel.vue";
@@ -23,11 +24,62 @@ function onConnected(): void {
 function checkNarrow(): void {
   workspaceStore.narrow = window.innerWidth < 720;
 }
+
+// ---- アプリ全体のキーショートカット（タブ・ペイン移動） ----
+const ARROW_DIR: Record<string, PaneDir> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down"
+};
+
+/** 各ペイン（分割グループ）の画面矩形を集める（空間ナビ用） */
+function paneRects() {
+  return Array.from(document.querySelectorAll<HTMLElement>(".group[data-group-id]")).map((el) => {
+    const r = el.getBoundingClientRect();
+    return { id: el.dataset.groupId!, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  });
+}
+
+function onGlobalKey(ev: KeyboardEvent): void {
+  if (!hasSessions.value) return;
+  // Alt 系のアプリショートカット（タブ・ペイン移動）。Ctrl+PageUp/Down はブラウザ既定の
+  // タブ切替と衝突するため使わない。素の PageUp/Down はホストの Roll に割当済み。
+  if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+  // Alt+PageDown/Up = タブ切替（次/前）
+  if (ev.key === "PageDown") {
+    ev.preventDefault();
+    workspaceStore.cycleTab(1);
+    return;
+  }
+  if (ev.key === "PageUp") {
+    ev.preventDefault();
+    workspaceStore.cycleTab(-1);
+    return;
+  }
+  // Alt+矢印 = ペイン間フォーカス移動（方向対応）。単一ペインでも preventDefault して
+  // ブラウザの戻る/進む（Alt+←/→）で誤ってアプリを離脱するのを防ぐ。
+  const dir = ARROW_DIR[ev.key];
+  if (dir) {
+    ev.preventDefault();
+    const id = nextPaneInDirection(paneRects(), workspaceStore.focusedGroupId, dir);
+    if (id) {
+      workspaceStore.focus(id);
+      // 移動先ペインへ実フォーカスを移し、キーボード操作を有効化する
+      nextTick(() => document.querySelector<HTMLElement>(`.group[data-group-id="${id}"] .pane`)?.focus());
+    }
+  }
+}
+
 onMounted(() => {
   checkNarrow();
   window.addEventListener("resize", checkNarrow);
+  window.addEventListener("keydown", onGlobalKey);
 });
-onBeforeUnmount(() => window.removeEventListener("resize", checkNarrow));
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", checkNarrow);
+  window.removeEventListener("keydown", onGlobalKey);
+});
 </script>
 
 <template>

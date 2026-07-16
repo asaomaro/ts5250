@@ -60,6 +60,8 @@ export const workspaceStore = reactive({
   focusedGroupId: "" as string,
   /** 狭幅時は分割を無効化し単一グループにフォールバック（Workspace が set） */
   narrow: false,
+  /** D&D 中のタブ（sessionId）。PaneTabs 間で共有し、自グループ内の並び替えか判定する */
+  draggingSession: undefined as string | undefined,
   /** SO/SI を {}表示するか（ACS の Ctrl+F 相当。全ペイン共通の表示設定） */
   showShiftMarks: false,
   /** 半角カナ表示（英小文字位置をカナ解釈。ACS の表示コード切替） */
@@ -95,6 +97,38 @@ export const workspaceStore = reactive({
   setActiveTab(groupId: string, sessionId: string): void {
     const g = findGroup(this.root, groupId);
     if (g && g.tabs.includes(sessionId)) g.activeTab = sessionId;
+  },
+
+  /**
+   * タブを targetGroup の toIndex 位置へ落とす（グループ内並び替え／別グループからの合流の両対応）。
+   * toIndex は「ドラッグ中タブを除いた targetGroup.tabs 配列」での挿入位置（0〜末尾）。
+   * 別グループからの合流時は元グループから取り除き、空になれば片付ける。
+   */
+  dropTabInto(targetGroupId: string, sessionId: string, toIndex: number): void {
+    const to = findGroup(this.root, targetGroupId);
+    if (!to) return;
+    const from = this.groups().find((g) => g.tabs.includes(sessionId));
+    if (!from) return;
+    // 元グループから取り除く（to===from なら同じ配列を更新）
+    from.tabs = from.tabs.filter((t) => t !== sessionId);
+    if (from.activeTab === sessionId) from.activeTab = from.tabs[0];
+    // 挿入位置へ差し込む
+    const rest = to.tabs.filter((t) => t !== sessionId);
+    const at = Math.max(0, Math.min(toIndex, rest.length));
+    rest.splice(at, 0, sessionId);
+    to.tabs = rest;
+    to.activeTab = sessionId; // 落としたタブをアクティブに
+    this.focusedGroupId = to.id;
+    if (from !== to && from.tabs.length === 0) this.pruneEmpty();
+  },
+
+  /** フォーカス中グループのアクティブタブを次(dir=1)/前(dir=-1)へ循環（タブ<2 なら無操作） */
+  cycleTab(dir: 1 | -1): void {
+    const g = this.focusedGroup();
+    if (g.tabs.length < 2 || !g.activeTab) return;
+    const i = g.tabs.indexOf(g.activeTab);
+    if (i < 0) return;
+    g.activeTab = g.tabs[(i + dir + g.tabs.length) % g.tabs.length];
   },
 
   /** タブを別グループへ移動（中央ドロップ＝合流） */
