@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { terminalTypeFor, isDbcsCcsid } from "../src/session/terminal-type.js";
+import { terminalTypeFor, isDbcsCcsid, deviceEnvFor } from "../src/session/terminal-type.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 
 describe("terminalTypeFor", () => {
@@ -47,5 +47,28 @@ describe("ScreenBuffer 27x132 代替バッファ", () => {
     b.clearUnit();
     expect(b.rows).toBe(24);
     expect(b.cols).toBe(80);
+  });
+});
+
+describe("deviceEnvFor: CCSID → RFC 2877 デバイス属性", () => {
+  it("37 は USB/37/697、273 は AGB/273/697", () => {
+    expect(deviceEnvFor(37)).toEqual({ kbdType: "USB", codePage: 37, charSet: 697 });
+    expect(deviceEnvFor(273)).toEqual({ kbdType: "AGB", codePage: 273, charSet: 697 });
+  });
+
+  it("日本語 DBCS は SBCS 部を申告する（930=カタカナ 290 / 939・1399=英小文字 1027）", () => {
+    expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
+    expect(deviceEnvFor(939)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+  });
+
+  it("エイリアス（5026=930 系・5035/931=939 系）も同じ属性", () => {
+    expect(deviceEnvFor(5026)).toEqual(deviceEnvFor(930));
+    expect(deviceEnvFor(5035)).toEqual(deviceEnvFor(939));
+    expect(deviceEnvFor(931)).toEqual(deviceEnvFor(939));
+  });
+
+  it("未知の CCSID は undefined（申告しない）", () => {
+    expect(deviceEnvFor(99999)).toBeUndefined();
   });
 });

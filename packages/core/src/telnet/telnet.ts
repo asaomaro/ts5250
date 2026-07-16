@@ -26,6 +26,16 @@ export interface TelnetOptions {
    * ゼロシードのためパスワードは平文で送られる（暗号化＝非ゼロシードは将来拡張）。
    */
   password?: string | undefined;
+  /**
+   * RFC 2877 の USERVAR KBDTYPE / CODEPAGE / CHARSET。クライアントの EBCDIC コードページを
+   * ホストに申告する。ホストはこの値で仮想デバイスを作り、ジョブ CCSID との差を変換する。
+   * 申告しないとホストはシステム既定を使うため variant 文字（'@' 等）が食い違う
+   * （PUB400 実機で確認: 無申告だと '@' 入りパスワードが化けて CPF1120）。
+   * KBDTYPE は必須。CODEPAGE/CHARSET だけでは PUB400 は反応しない。
+   */
+  kbdType?: string | undefined;
+  codePage?: number | undefined;
+  charSet?: number | undefined;
 }
 
 /** クライアントとして有効化に同意する telnet オプション */
@@ -188,6 +198,16 @@ export class TelnetLayer {
       const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
       if (this.opts.deviceName !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.opts.deviceName));
+      }
+      // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる
+      if (this.opts.kbdType !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("KBDTYPE"), ENV_VALUE, ...ascii(this.opts.kbdType));
+      }
+      if (this.opts.codePage !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("CODEPAGE"), ENV_VALUE, ...ascii(String(this.opts.codePage)));
+      }
+      if (this.opts.charSet !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("CHARSET"), ENV_VALUE, ...ascii(String(this.opts.charSet)));
       }
       if (this.opts.user !== undefined) {
         // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）

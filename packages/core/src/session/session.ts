@@ -13,7 +13,7 @@ import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { Emitter } from "../util/emitter.js";
 import { aidCodeOf, aidKeyForCode, type AidKey } from "./aid-keys.js";
-import { terminalTypeFor, isDbcsCcsid } from "./terminal-type.js";
+import { terminalTypeFor, isDbcsCcsid, deviceEnvFor } from "./terminal-type.js";
 
 export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "closed";
 
@@ -135,11 +135,16 @@ export class Session5250 extends Emitter<SessionEvents> {
     }
 
     session.state = "negotiating";
+    // RFC 2877 KBDTYPE/CODEPAGE/CHARSET を申告し、ホストにデバイス⇄ジョブ CCSID の変換をさせる
+    const dev = deviceEnvFor(opts.ccsid ?? 37);
     session.telnet = new TelnetLayer(transport, {
       terminalType: session.terminalType,
       deviceName: opts.deviceName,
       user: opts.user,
-      password: opts.password
+      password: opts.password,
+      kbdType: dev?.kbdType,
+      codePage: dev?.codePage,
+      charSet: dev?.charSet
     });
 
     const ready = new Promise<void>((resolve, reject) => {

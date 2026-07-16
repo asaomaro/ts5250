@@ -122,3 +122,38 @@ describe("TelnetLayer レコード枠組み", () => {
     expect(records.map((r) => [...r])).toEqual([[9]]);
   });
 });
+
+describe("RFC 2877 デバイス属性の申告（KBDTYPE/CODEPAGE/CHARSET）", () => {
+  // 申告しないとホストはシステム既定でデバイスを作り、variant 文字（'@' 等）が食い違う。
+  // PUB400（QCCSID=273）実機で、無申告だと '@' 入りパスワードが化けて CPF1120 になり、
+  // KBDTYPE を含む 3 点を申告すると 37/273/930/939/1399 いずれでも通ることを確認済み。
+  // CODEPAGE/CHARSET だけ（KBDTYPE 無し）では PUB400 は反応しない＝KBDTYPE は必須。
+  it("KBDTYPE/CODEPAGE/CHARSET を DEVNAME に続けて USERVAR で送る", () => {
+    const t = new FakeTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3179-2",
+      deviceName: "WEBEMU01",
+      kbdType: "USB",
+      codePage: 37,
+      charSet: 697
+    });
+    void telnet;
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([
+      IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
+      ENV_USERVAR, ...ascii("KBDTYPE"), ENV_VALUE, ...ascii("USB"),
+      ENV_USERVAR, ...ascii("CODEPAGE"), ENV_VALUE, ...ascii("37"),
+      ENV_USERVAR, ...ascii("CHARSET"), ENV_VALUE, ...ascii("697"),
+      IAC, CMD.SE
+    ]);
+  });
+
+  it("未指定なら申告しない（後方互換）", () => {
+    const t = new FakeTransport();
+    const telnet = new TelnetLayer(t, { terminalType: "IBM-3179-2" });
+    void telnet;
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS, IAC, CMD.SE]);
+  });
+});
