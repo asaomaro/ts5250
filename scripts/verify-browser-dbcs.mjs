@@ -1,7 +1,7 @@
-// 実ブラウザでの DBCS 入力ラウンドトリップ E2E。build 済み web-ui を server で配信し、
-// Playwright で DBCS プロファイル（CCSID 1399）へ接続 → INPPGM を CALL →
-// SBCS 欄に "HELLO"、DBCS 欄に "日本語"（IME 合成イベントで入力）→ Enter →
-// ホストのエコー欄に返るかを検証する。
+// 実ブラウザでの入力 E2E: DBCS(日本語)ラウンドトリップ＋フィールド型ルール（NUM/A/O/J）。build 済み web-ui を server で配信し、
+// Playwright で DBCS プロファイル（CCSID 1399）へ接続 → INPPGM(NUM/A/O/J) を CALL →
+// O/J へ日本語（実 IME＝CDP）を入力→Enter→エコー往復、さらにフィールド型ルール
+// （J は SBCS 不可・A は DBCS 不可・NUM は英字不可）をブラウザ実経路で検証する。
 //   ※ DBCS は CCSID 1399 セッションが必須（既定 pub400=CCSID 37 では不可）。
 //   ※ 事前に build-attrtest.mjs で INPTST/INPPGM を作成しておくこと。
 // 前提: npm run build 済み。profiles.local.json に CCSID 1399 のプロファイルがあること。
@@ -47,38 +47,41 @@ try {
   await cmd.click();
   await page.keyboard.type(`CALL ${LIB}/INPPGM`);
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.querySelector(".grid")?.textContent?.includes("INPUT TEST"), { timeout: 20000 });
-  log("INPPGM 表示");
+  await page.waitForFunction(() => document.querySelector(".grid")?.textContent?.includes("FIELD TYPE TEST"), { timeout: 20000 });
+  log("INPPGM（NUM/A/O/J）表示");
 
   const inputs = page.locator("input.grid-input:not([readonly])");
-  ok = (await inputs.count()) === 2 && ok;
-
-  // SBCS 入力
-  await inputs.nth(0).click();
-  await page.keyboard.type("HELLO");
-  // DBCS 入力: Chrome の実 IME（CDP）で合成→確定。スペース埋め＋maxlength による挿入ブロック
-  // （素のイベント発火では見逃す不具合）まで含めて実経路で検証する。
+  ok = (await inputs.count()) === 4 && ok;
+  const num = inputs.nth(0), a = inputs.nth(1), o = inputs.nth(2), j = inputs.nth(3); // 行順=NUM/A/O/J
   const cdp = await page.context().newCDPSession(page);
-  const j = inputs.nth(1);
-  await j.click();
-  await page.keyboard.press("Home"); // 欄先頭から入力（12 バイト欄のオーバーフロー回避）
-  await cdp.send("Input.imeSetComposition", { text: "日本語", selectionStart: 3, selectionEnd: 3 });
-  await cdp.send("Input.insertText", { text: "日本語" }); // 確定
-  await page.waitForTimeout(300);
-  const jval = (await j.inputValue()).replace(/\s+$/, "");
-  log(`DBCS 欄の値（実 IME）: "${jval}"`);
-  ok = jval === "日本語" && ok;
+  const val = async (loc) => (await loc.inputValue()).replace(/\s+/g, "");
+  const rule = (name, cond, d = "") => { log(`${cond ? "PASS" : "FAIL"}  ${name}${d ? "  — " + d : ""}`); ok = ok && cond; };
+  // 実 IME（CDP）で欄先頭から合成→確定
+  const ime = async (loc, text) => {
+    await loc.click(); await page.keyboard.press("Home");
+    await cdp.send("Input.imeSetComposition", { text, selectionStart: text.length, selectionEnd: text.length });
+    await cdp.send("Input.insertText", { text });
+    await page.waitForTimeout(250);
+  };
 
+  // DBCS 往復（新レイアウト: O=行5, J=行6）。NUM=初期値0/A=空のまま Enter して有効に送る
+  await ime(o, "日本");
+  await ime(j, "日本語");
+  rule("J 欄に DBCS(日本語) が入る", (await val(j)) === "日本語", await val(j));
   await page.keyboard.press("Enter");
   await page.waitForTimeout(2500);
   const grid = await page.evaluate(() => document.querySelector(".grid").innerText);
-  const echo = grid.split("\n").slice(5, 7).join(" ");
-  log("エコー行: " + echo.replace(/\s+/g, " ").trim());
-  const sbcsOk = /A ECHO:\s*HELLO/.test(grid);
-  const dbcsOk = /J ECHO:\s*日本語/.test(grid);
-  log(`${sbcsOk ? "PASS" : "FAIL"}  SBCS 入力がエコーされる (HELLO)`);
-  log(`${dbcsOk ? "PASS" : "FAIL"}  DBCS(日本語) 入力がエコーされる`);
-  ok = ok && sbcsOk && dbcsOk;
+  const lines = grid.split("\n");
+  rule("O(open) 入力がエコーされる（日本）", /日本/.test(lines[4] ?? ""));
+  rule("J(pure) 入力がエコーされる（日本語）", /日本語/.test(lines[5] ?? ""));
+
+  // フィールド型の入力ルール（フロント検証・Enter 不要）
+  await j.click(); await page.keyboard.press("End"); await page.keyboard.type("A"); // J に SBCS
+  rule("J は SBCS を拒否（キー入力が入らない）", !/[A-Za-z]/.test(await val(j)), await val(j));
+  await ime(a, "あ"); // A に DBCS(IME)
+  rule("A は DBCS を拒否", (await val(a)) === "", await val(a));
+  await num.click(); await page.keyboard.press("Home"); await page.keyboard.type("1A2"); // NUM に英字
+  rule("NUM は英字を拒否（数字のみ）", !/[A-Za-z]/.test(await val(num)), await val(num));
 
   if (errors.length) { ok = false; log("PAGE ERRORS: " + errors.join(" | ")); }
 } catch (e) {
@@ -87,5 +90,5 @@ try {
   await browser.close();
   server.close?.();
 }
-log(ok ? "\nOK — ブラウザ（IME）での DBCS 入力ラウンドトリップに対応" : "\nNG");
+log(ok ? "\nOK — ブラウザ入力: DBCS 往復＋フィールド型ルール" : "\nNG");
 process.exit(ok ? 0 : 1);

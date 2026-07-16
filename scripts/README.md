@@ -23,14 +23,14 @@ node --env-file=.env scripts/<name>.mjs
 
 - **CLRTDSP/CLRTPGM** — フィールド単位の `COLOR`/`DSPATR` ＋ DBCS(日本語) 出力欄（表示）
 - **INLTST/INLPGM** — インライン色制御（フィールドデータ中に属性バイト 0x20–0x3F を埋め込み、桁ごとに色切替）（表示）
-- **INPTST/INPPGM** — 入力ラウンドトリップ（SBCS 欄＋DBCS 日本語入力欄→ホストが読取りエコー）（入力）
+- **INPTST/INPPGM** — フィールド型別の入力（数値/A(SBCS)/O(open)/J(pure DBCS)）＋DBCS 日本語のエコー往復（入力）
 
 | スクリプト | 内容 |
 |---|---|
 | `build-attrtest.mjs` | `MYLIB` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
 | `verify-attributes.mjs` | 表示検証: `CLRTPGM`（7 色・反転・下線・高輝度・桁区切り・点滅・DBCS）＋ `INLPGM`（埋め込み属性バイトの色切替）。**CCSID 1399**。 |
-| `verify-input.mjs` | 入力検証（core 直叩き）: `INPPGM` へ `HELLO`／`日本語` を入力→Enter→エコー欄に返るか。**CCSID 1399**。 |
-| `verify-browser-dbcs.mjs` | 入力検証（実ブラウザ）: Playwright で DBCS プロファイルへ接続→`INPPGM`→SBCS＋DBCS(IME 合成)入力→エコー確認。 |
+| `verify-input.mjs` | 入力検証（core）: `INPPGM` の 4 欄の型（numeric/SBCS/open/pure）＋ O/J のエコー往復。**CCSID 1399**。 |
+| `verify-browser-dbcs.mjs` | 入力検証（実ブラウザ）: DBCS 往復＋**フィールド型ルール**（J は SBCS 不可・A は DBCS 不可・NUM は英字不可）を実 IME(CDP)で。 |
 
 ```sh
 node --env-file=.env scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）
