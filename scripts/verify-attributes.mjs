@@ -1,8 +1,9 @@
-// 表示属性の実機 E2E 検証。<LIB>/CLRTPGM（scripts/build-attrtest.mjs で作成）を CALL し、
-// 文字色 7 種・反転(背景)・下線・高輝度・桁区切り・点滅・DBCS(日本語) がエミュレーターで
-// 正しくデコード・描画されることを確認する。DBCS を出すためセッションは CCSID 1399。
+// 表示属性の実機 E2E 検証。<LIB> の 2 プログラムを CALL し、エミュレーターの属性デコードを確認する。
+//   - CLRTPGM: 文字色 7 種・反転(背景)・下線・高輝度・桁区切り・点滅・DBCS(日本語)
+//   - INLPGM : インライン色制御（フィールドデータ中に埋め込んだ属性バイトで桁ごとに色切替）
+// DBCS を出すためセッションは CCSID 1399。
 // 実行: node --env-file=.env scripts/verify-attributes.mjs
-//   前提: <LIB>（既定 MYLIB）に CLRTDSP/CLRTPGM が存在すること（無ければ build-attrtest.mjs を先に）。
+//   前提: <LIB>（既定 MYLIB）に CLRTPGM/INLPGM が存在すること（無ければ build-attrtest.mjs を先に）。
 import { Session5250 } from "@as400web/core";
 
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
@@ -36,12 +37,15 @@ async function connectMenu() {
 let session;
 try {
   session = await connectMenu();
-  const s0 = session.snapshot();
-  const cf = cmdField(s0);
-  session.setField({ index: cf.index }, `CALL ${LIB}/CLRTPGM`);
-  const snap = (await session.sendAid("Enter", { cursor: { row: cf.row, col: cf.col }, timeoutMs: 20000 })).screen;
-  const at = (r, c) => snap.cells[r - 1][c - 1];
+  const run = async (cmd) => {
+    const cf = cmdField(session.snapshot());
+    session.setField({ index: cf.index }, cmd);
+    return (await session.sendAid("Enter", { cursor: { row: cf.row, col: cf.col }, timeoutMs: 20000 })).screen;
+  };
 
+  // ===== CLRTPGM: フィールド単位の属性＋DBCS =====
+  let snap = await run(`CALL ${LIB}/CLRTPGM`);
+  let at = (r, c) => snap.cells[r - 1][c - 1];
   const title = snap.cells[0].map((c) => c.char).join("");
   check("CLRTPGM を CALL して属性テスト画面を表示", /ATTR TEST/.test(title), title.trim().slice(0, 30));
 
@@ -63,7 +67,16 @@ try {
   check("DBCS 日 tail(9,10)", row9[9].kind === "dbcs-tail");
   check("DBCS 本(9,11) lead", row9[10].kind === "dbcs-lead" && row9[10].char === "本");
   check("DBCS 語(9,13) lead", row9[12].kind === "dbcs-lead" && row9[12].char === "語");
+  await session.sendAid("F3", { timeoutMs: 8000 }).catch(() => {});
 
+  // ===== INLPGM: インライン色制御（データ中の埋め込み属性バイト） =====
+  snap = await run(`CALL ${LIB}/INLPGM`);
+  at = (r, c) => snap.cells[r - 1][c - 1];
+  check("INLPGM を CALL してインライン色画面を表示", /INLINE ATTR TEST/.test(snap.cells[0].map((c) => c.char).join("")));
+  // (3,2)=埋め込み属性バイト（attr 桁・空白）、以降のセグメントが指定色に切り替わる
+  check("インライン (3,2) 埋め込み属性=attr桁", at(3, 2).kind === "attr");
+  const inl = [[3, "red", "R"], [7, "green", "G"], [11, "white", "W"], [15, "pink", "P"], [19, "blue", "B"]];
+  for (const [c, color, ch] of inl) check(`インライン (3,${c}) = ${color}`, at(3, c).color === color && at(3, c).char === ch, `got ${at(3, c).color}/${at(3, c).char}`);
   await session.sendAid("F3", { timeoutMs: 8000 }).catch(() => {});
 } catch (e) {
   results.push(false); log("E2E ERROR: " + e.message);
