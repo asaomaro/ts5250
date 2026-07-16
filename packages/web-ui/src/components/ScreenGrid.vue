@@ -16,7 +16,7 @@ import {
 } from "../composables/fieldEdit.js";
 import { acceptsChar } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
-import { fitFont } from "../composables/fitFont.js";
+import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, roundToDbcsLead } from "../composables/useCursor.js";
 // codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
 import { katakanaChar } from "@as400web/core/codec";
@@ -497,15 +497,43 @@ const fontPx = ref(14);
 let ro: ResizeObserver | undefined;
 
 function fit(): void {
-  const el = gridEl.value;
-  if (!el) return;
-  fontPx.value = fitFont(el.clientWidth, el.clientHeight, props.snapshot.cols, props.snapshot.rows);
+  // 利用可能領域は「親（.screen-wrap）」で測る。.grid 自身はコンテンツサイズに縮める（中央寄せのため）
+  // ので、grid を測ると縮尺のフィードバックループになる。親は grid 内容に依存せず一定。
+  const host = gridEl.value?.parentElement;
+  const ruler = rulerEl.value;
+  if (!host) return;
+  const cols = props.snapshot.cols;
+  const rows = props.snapshot.rows;
+  const availW = host.clientWidth - 20; // padding 10px * 2
+  const availH = host.clientHeight - 16; // padding 8px * 2
+  // 実測字幅（現フォントでの 1 文字幅）を使う。0.6em 近似だと実フォントとずれ、
+  // まだ横に余白があるのに幅制約が先に効いて早く縮小してしまう（右余白の主因）。
+  const measured = ruler ? ruler.getBoundingClientRect().width / 10 : 0;
+  if (measured > 0 && availW > 0 && availH > 0) {
+    // フォント寸法は font-size に線形なので、現フォントでの実測比から目標フォントを一発算出する。
+    const cur = fontPx.value;
+    const charW = measured; // = cur に対する実測字幅
+    const lineH = cur * 1.25; // .grid line-height:1.25 と一致
+    const ratio = Math.min(availW / (charW * cols), availH / (lineH * rows));
+    fontPx.value = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, cur * ratio));
+    return;
+  }
+  // レイアウト前（jsdom 等、ルーラー未計測）は近似でフォールバック。
+  fontPx.value = fitFont(host.clientWidth, host.clientHeight, cols, rows);
 }
 
+// 画面サイズ切替（24x80⇔27x132）では親のボックスサイズが変わらず ResizeObserver が発火しないため、
+// cols/rows の変化を監視して明示的に再フィットする（レイアウト確定後に測るため nextTick）。
+watch(
+  () => [props.snapshot.cols, props.snapshot.rows],
+  () => nextTick(fit)
+);
+
 onMounted(() => {
-  if (typeof ResizeObserver !== "undefined" && gridEl.value) {
+  const host = gridEl.value?.parentElement;
+  if (typeof ResizeObserver !== "undefined" && host) {
     ro = new ResizeObserver(() => fit());
-    ro.observe(gridEl.value);
+    ro.observe(host);
   }
   fit();
   // 初期表示（接続直後の画面）でもフォーカス中ペインはカーソル欄へ
@@ -620,8 +648,11 @@ onBeforeUnmount(() => ro?.disconnect());
   white-space: pre;
   /* フォントを幅・高さ両方にフィットさせるためスクロールバーは出さない */
   overflow: hidden;
-  min-height: 0;
-  flex: 1;
+  /* コンテンツ（cols×rows）ちょうどのサイズに縮め、.screen-wrap 側で中央寄せする。
+     min(幅,高) フィットで生じる余白が右下に偏らず上下・左右均等になる。 */
+  flex: 0 0 auto;
+  max-width: 100%;
+  max-height: 100%;
 }
 /* ホストのカーソル位置を示すブロックカーソル（padding 分オフセット） */
 .cursor {

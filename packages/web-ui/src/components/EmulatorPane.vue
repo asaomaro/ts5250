@@ -254,6 +254,9 @@ function onWheel(ev: WheelEvent): void {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* グリッドをコンテンツサイズに縮めたうえで中央寄せ（余白を上下・左右均等に） */
+  align-items: center;
+  justify-content: center;
 }
 /* 通信中プロテクト: ポインタ操作をブロック。0.5 秒までは透明、loading で薄く覆う */
 .busy-overlay {

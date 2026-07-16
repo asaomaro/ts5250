@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
 
@@ -496,6 +497,68 @@ describe("ScreenGrid", () => {
       expect(w.find("a.grid-link").exists()).toBe(false); // segs 不変でも再描画される
       await w.setProps({ linkify: true });
       expect(w.find("a.grid-link").exists()).toBe(true);
+    });
+  });
+
+  describe("画面サイズ切替（24x80⇔27x132）でフォントを再フィットする", () => {
+    // 24x80 画面（cells は全て空白でよい）
+    function snap24x80(): ScreenSnapshot {
+      const cells: Cell[][] = [];
+      for (let r = 0; r < 24; r++) cells.push(Array.from({ length: 80 }, () => cell(" ")));
+      return { sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false, cells, fields: [] };
+    }
+    // 27x132 代替画面
+    function snap27x132(): ScreenSnapshot {
+      const cells: Cell[][] = [];
+      for (let r = 0; r < 27; r++) cells.push(Array.from({ length: 132 }, () => cell(" ")));
+      return { sessionId: "s", rows: 27, cols: 132, cursor: { row: 1, col: 1 }, keyboardLocked: false, cells, fields: [] };
+    }
+
+    // jsdom はレイアウトしないため親（.screen-wrap 相当＝マウント先）の寸法を固定でスタブする
+    function withStubbedLayout(width: number, height: number, run: () => Promise<void> | void) {
+      const proto = HTMLElement.prototype;
+      const ow = Object.getOwnPropertyDescriptor(proto, "clientWidth");
+      const oh = Object.getOwnPropertyDescriptor(proto, "clientHeight");
+      Object.defineProperty(proto, "clientWidth", { configurable: true, get: () => width });
+      Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => height });
+      const restore = () => {
+        if (ow) Object.defineProperty(proto, "clientWidth", ow);
+        else delete (proto as unknown as Record<string, unknown>).clientWidth;
+        if (oh) Object.defineProperty(proto, "clientHeight", oh);
+        else delete (proto as unknown as Record<string, unknown>).clientHeight;
+      };
+      return Promise.resolve(run()).finally(restore);
+    }
+
+    function fontPx(w: ReturnType<typeof mount>): number {
+      const style = w.find(".grid").attributes("style") ?? "";
+      return parseFloat(/font-size:\s*([\d.]+)px/.exec(style)?.[1] ?? "0");
+    }
+
+    it("24x80→27x132 でフォントが縮む（見切れ防止）／27x132→24x80 で拡大する（小さいまま防止）", async () => {
+      await withStubbedLayout(1000, 700, async () => {
+        const w = mount(ScreenGrid, {
+          props: { snapshot: snap24x80(), edits: new Map(), focused: false },
+          attachTo: document.body
+        });
+        await nextTick();
+        const wide24 = fontPx(w);
+        expect(wide24).toBeGreaterThan(0);
+
+        // ワイド画面へ遷移 → 132 桁を収めるためフォントは小さくなる
+        await w.setProps({ snapshot: snap27x132() });
+        await nextTick();
+        await nextTick();
+        const wide132 = fontPx(w);
+        expect(wide132).toBeLessThan(wide24);
+
+        // 24x80 へ戻すと再び拡大（小さいままにならない）
+        await w.setProps({ snapshot: snap24x80() });
+        await nextTick();
+        await nextTick();
+        expect(fontPx(w)).toBeCloseTo(wide24, 5);
+        w.unmount();
+      });
     });
   });
 });

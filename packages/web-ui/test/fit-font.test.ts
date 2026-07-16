@@ -22,9 +22,9 @@ describe("fitFont", () => {
     expect(shorter).toBeLessThan(big); // 高さ縮小でフォント縮小
   });
 
-  it("最小 6px・最大 22px にクランプする", () => {
+  it("最小 6px・最大 32px にクランプする", () => {
     expect(fitFont(100, 100, 80, 24)).toBe(6); // 極小
-    expect(fitFont(100000, 100000, 80, 24)).toBe(22); // 極大
+    expect(fitFont(100000, 100000, 80, 24)).toBe(32); // 極大
   });
 
   it("27x132 ワイドでも両制約で最小側に合わせる", () => {
