@@ -1,16 +1,17 @@
 // 表示属性 E2E 用のテスト画面を実機（PUB400 等）に作成・コンパイルする。
-// DDS 表示ファイル CLRTDSP と RPGLE プログラム CLRTPGM を <LIB>（既定 MYLIB）へ作る。
+// <LIB>（既定 MYLIB）に 2 つのフィクスチャを作る:
+//   - CLRTDSP/CLRTPGM: フィールド単位の COLOR/DSPATR＋DBCS（日本語）
+//   - INLTST/INLPGM  : インライン色制御（フィールドデータ中に属性バイト 0x20-0x3F を埋め込み）
 // ソース投入は IFS/FTP 不要で、コマンド行から RUNSQL INSERT（各行を単一 SQL 文字列リテラルで）。
 //   - SQL 連結 || は不可（ホストが変体文字 | を認識せず "Token | was not valid"）→ 1 行=1 リテラル。
 //   - RUNSQL は COMMIT(*NONE) 必須。CL の引用符二重化＋コマンド行 153 桁制限に収める。
 // 冪等（RMVM/ADDPFM/DROP+CREATE ALIAS/DLTF/DLTPGM）。作成後は scripts/verify-attributes.mjs で検証。
 // 実行: node --env-file=.env scripts/build-attrtest.mjs
 import { Session5250 } from "@as400web/core";
+import { codecForCcsid } from "@as400web/core/codec";
 
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
 const DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
-const DSPF = "CLRTDSP", PGM = "CLRTPGM", DDSMBR = "CLRTDSP", RPGMBR = "CLRTPGM";
-const DDSALIAS = "A1", RPGALIAS = "R1";
 const log = (s) => process.stderr.write(s + "\n");
 
 // --- DDS 行を桁位置で組み立てる ---
@@ -20,26 +21,42 @@ const fileKwd = (kw) => put(put(blank(), 6, "A"), 45, kw).replace(/ +$/, "");
 const rec = (n) => put(put(put(blank(), 6, "A"), 17, "R"), 19, n).replace(/ +$/, "");
 const constant = (r, c, t, kw = "") => put(put(put(put(blank(), 6, "A"), 39, String(r).padStart(3)), 42, String(c).padStart(3)), 45, `'${t}'${kw ? " " + kw : ""}`).replace(/ +$/, "");
 function field(name, len, usage, r, c) {
-  let l = put(blank(), 6, "A");
-  l = put(l, 19, name);
+  let l = put(put(blank(), 6, "A"), 19, name);
   l = put(l, 35 - String(len).length, String(len)); // 30-34 に右詰
-  l = put(l, 38, usage);
-  l = put(put(l, 39, String(r).padStart(3)), 42, String(c).padStart(3));
+  l = put(put(put(l, 38, usage), 39, String(r).padStart(3)), 42, String(c).padStart(3));
   return l.replace(/ +$/, "");
 }
 
-const dds = [
-  fileKwd("DSPSIZ(24 80 *DS3)"), rec("FMT01"), fileKwd("CA03(03)"),
-  constant(1, 2, "ATTR TEST"), constant(1, 60, "F3=EXIT"),
-  constant(3, 2, "GRN", "COLOR(GRN)"), constant(3, 20, "WHT", "COLOR(WHT)"), constant(3, 40, "RED", "COLOR(RED)"), constant(3, 60, "TRQ", "COLOR(TRQ)"),
-  constant(4, 2, "YLW", "COLOR(YLW)"), constant(4, 20, "PNK", "COLOR(PNK)"), constant(4, 40, "BLU", "COLOR(BLU)"),
-  constant(6, 2, "RVS", "DSPATR(RI)"), constant(6, 20, "UL", "DSPATR(UL)"), constant(6, 40, "HI", "DSPATR(HI)"),
-  constant(7, 2, "BL", "DSPATR(BL)"), constant(7, 20, "CS", "DSPATR(CS)"),
-  constant(8, 2, "REDBL", "COLOR(RED) DSPATR(BL)"),
-  constant(9, 2, "DBCS:"), field("DBFLD", 12, "O", 9, 8), constant(11, 2, "F3 END")
-];
-// RPG: DBFLD へ SO+日本語+SI(ccsid1399) を出力し FMT01 を EXFMT、F3 で終了
-const rpg = ["**free", "dcl-f " + DSPF + " workstn;", "DBFLD = x'0E4562456648E70F';", "exfmt FMT01;", "*inlr = *on;", "return;"];
+// --- フィクスチャ 1: フィールド単位の属性＋DBCS ---
+const attr = {
+  dsp: "CLRTDSP", pgm: "CLRTPGM", ddsMbr: "CLRTDSP", rpgMbr: "CLRTPGM", ddsAlias: "A1", rpgAlias: "R1",
+  dds: [
+    fileKwd("DSPSIZ(24 80 *DS3)"), rec("FMT01"), fileKwd("CA03(03)"),
+    constant(1, 2, "ATTR TEST"), constant(1, 60, "F3=EXIT"),
+    constant(3, 2, "GRN", "COLOR(GRN)"), constant(3, 20, "WHT", "COLOR(WHT)"), constant(3, 40, "RED", "COLOR(RED)"), constant(3, 60, "TRQ", "COLOR(TRQ)"),
+    constant(4, 2, "YLW", "COLOR(YLW)"), constant(4, 20, "PNK", "COLOR(PNK)"), constant(4, 40, "BLU", "COLOR(BLU)"),
+    constant(6, 2, "RVS", "DSPATR(RI)"), constant(6, 20, "UL", "DSPATR(UL)"), constant(6, 40, "HI", "DSPATR(HI)"),
+    constant(7, 2, "BL", "DSPATR(BL)"), constant(7, 20, "CS", "DSPATR(CS)"),
+    constant(8, 2, "REDBL", "COLOR(RED) DSPATR(BL)"),
+    constant(9, 2, "DBCS:"), field("DBFLD", 12, "O", 9, 8), constant(11, 2, "F3 END")
+  ],
+  // DBFLD へ SO+日本語+SI(ccsid1399) を出力
+  rpg: ["**free", "dcl-f CLRTDSP workstn;", "DBFLD = x'0E4562456648E70F';", "exfmt FMT01;", "*inlr = *on;", "return;"]
+};
+
+// --- フィクスチャ 2: インライン色制御（属性バイトをフィールドデータに埋め込む） ---
+// CLRLINE = [0x28]RED [0x20]GRN [0x22]WHT [0x38]PNK [0x3A]BLU（属性バイト＋EBCDIC テキスト）
+const sbcs = codecForCcsid(37);
+const inlineHex = [[0x28, "RED"], [0x20, "GRN"], [0x22, "WHT"], [0x38, "PNK"], [0x3a, "BLU"]]
+  .map(([a, t]) => [a, ...sbcs.encode(t).bytes].map((b) => b.toString(16).padStart(2, "0")).join("")).join("").toUpperCase();
+const inline = {
+  dsp: "INLTST", pgm: "INLPGM", ddsMbr: "INLTST", rpgMbr: "INLPGM", ddsAlias: "I1", rpgAlias: "I2",
+  dds: [
+    fileKwd("DSPSIZ(24 80 *DS3)"), rec("FMT01"), fileKwd("CA03(03)"),
+    constant(1, 2, "INLINE ATTR TEST"), field("CLRLINE", 40, "O", 3, 2), constant(5, 2, "F3 END")
+  ],
+  rpg: ["**free", "dcl-f INLTST workstn;", `CLRLINE = x'${inlineHex}';`, "exfmt FMT01;", "*inlr = *on;", "return;"]
+};
 
 const cmdField = (s) => { const e = s.fields.filter((f) => !f.protected); return e[e.length - 1]; };
 const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join(""));
@@ -66,6 +83,20 @@ async function injectMember(session, srcf, mbr, alias, lines) {
     await run(session, cmd);
   }
 }
+async function buildProgram(session, fx) {
+  log(`build ${LIB}/${fx.dsp} + ${LIB}/${fx.pgm}…`);
+  await injectMember(session, DDSF, fx.ddsMbr, fx.ddsAlias, fx.dds);
+  await run(session, `DLTF FILE(${LIB}/${fx.dsp})`);
+  let s = await run(session, `CRTDSPF FILE(${LIB}/${fx.dsp}) SRCFILE(${LIB}/${DDSF}) SRCMBR(${fx.ddsMbr})`, 30000);
+  const dspfOk = /created in library/i.test(rows(s).join("\n"));
+  log(`  CRTDSPF ${fx.dsp}: ${dspfOk ? "OK" : "NG — " + msgOf(s)}`);
+  await injectMember(session, RPGF, fx.rpgMbr, fx.rpgAlias, fx.rpg);
+  await run(session, `DLTPGM PGM(${LIB}/${fx.pgm})`);
+  s = await run(session, `CRTBNDRPG PGM(${LIB}/${fx.pgm}) SRCFILE(${LIB}/${RPGF}) SRCMBR(${fx.rpgMbr})`, 40000);
+  const pgmOk = /placed in library/i.test(rows(s).join("\n"));
+  log(`  CRTBNDRPG ${fx.pgm}: ${pgmOk ? "OK" : "NG — " + msgOf(s)}`);
+  return dspfOk && pgmOk;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function connectHost() {
@@ -87,26 +118,16 @@ async function connectHost() {
   }
   throw last ?? new Error("could not reach a command screen");
 }
+
 const session = await connectHost();
 let ok = true;
 try {
-  log(`build attr-test in ${LIB} (CLRTDSP/CLRTPGM)…`);
-  await injectMember(session, DDSF, DDSMBR, DDSALIAS, dds);
-  await run(session, `DLTF FILE(${LIB}/${DSPF})`);
-  let s = await run(session, `CRTDSPF FILE(${LIB}/${DSPF}) SRCFILE(${LIB}/${DDSF}) SRCMBR(${DDSMBR})`, 30000);
-  const dspfOk = /created in library/i.test(rows(s).join("\n"));
-  log(`CRTDSPF: ${dspfOk ? "OK" : "NG — " + msgOf(s)}`);
-
-  await injectMember(session, RPGF, RPGMBR, RPGALIAS, rpg);
-  await run(session, `DLTPGM PGM(${LIB}/${PGM})`);
-  s = await run(session, `CRTBNDRPG PGM(${LIB}/${PGM}) SRCFILE(${LIB}/${RPGF}) SRCMBR(${RPGMBR})`, 40000);
-  const pgmOk = /placed in library/i.test(rows(s).join("\n"));
-  log(`CRTBNDRPG: ${pgmOk ? "OK" : "NG — " + msgOf(s)}`);
-  ok = dspfOk && pgmOk;
+  ok = (await buildProgram(session, attr)) && ok;
+  ok = (await buildProgram(session, inline)) && ok;
 } catch (e) {
   ok = false; log("BUILD ERROR: " + e.message);
 } finally {
   await session.disconnect();
 }
-log(ok ? `OK — ${LIB}/CLRTDSP + ${LIB}/CLRTPGM をビルドしました（verify-attributes.mjs で検証可）` : "NG — ビルド失敗");
+log(ok ? `OK — ${LIB} に CLRTDSP/CLRTPGM ＋ INLTST/INLPGM をビルドしました（verify-attributes.mjs で検証可）` : "NG — ビルド失敗");
 process.exit(ok ? 0 : 1);
