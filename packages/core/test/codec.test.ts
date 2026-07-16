@@ -48,3 +48,35 @@ describe("SbcsCodec (ibm-37)", () => {
     expect(c.decodeByte(0x00)).toBe(0xfffd);
   });
 });
+
+describe("CCSID 273（ドイツ語）: variant 文字の位置が 37 と異なる", () => {
+  // 実機（PUB400・QCCSID=273）で確認: 37 で '@' を送ると 0x7C になり、ホストは 273 として
+  // '§' と解釈する。'@' 入りパスワードが化けて CPF1120 になっていた回帰の固定。
+  it("'@' は 273 では 0xB5、37 では 0x7C にエンコードされる", () => {
+    expect(codecForCcsid(273).encode("@").bytes).toEqual(new Uint8Array([0xb5]));
+    expect(codecForCcsid(37).encode("@").bytes).toEqual(new Uint8Array([0x7c]));
+  });
+
+  it("'§' は 273 では 0x7C（37 の '@' と同じ位置）", () => {
+    expect(codecForCcsid(273).encode("§").bytes).toEqual(new Uint8Array([0x7c]));
+  });
+
+  it("0x7C を 273 は '§'、37 は '@' とデコードする（相互に逆転）", () => {
+    expect(codecForCcsid(273).decodeByte(0x7c)).toBe("§".codePointAt(0));
+    expect(codecForCcsid(37).decodeByte(0x7c)).toBe("@".codePointAt(0));
+    expect(codecForCcsid(273).decodeByte(0xb5)).toBe("@".codePointAt(0));
+  });
+
+  it("invariant 文字（英数字）は 37 と 273 で同じバイトになる", () => {
+    const a = codecForCcsid(37);
+    const b = codecForCcsid(273);
+    for (const ch of "ABCUSER0123456789") {
+      expect(b.encode(ch).bytes, `'${ch}'`).toEqual(a.encode(ch).bytes);
+    }
+  });
+
+  it("273 は SBCS（DBCS ではない）", () => {
+    expect(codecForCcsid(273).isDbcs).toBe(false);
+    expect(codecForCcsid(273).ccsid).toBe(273);
+  });
+});

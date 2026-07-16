@@ -12,7 +12,10 @@ const outDir = join(repoRoot, "packages", "core", "src", "codec", "tables");
 
 /** SBCS 生成対象 */
 const SBCS_TARGETS = [
-  { file: "ibm-37_P100-1999.ucm", ccsid: 37, exportName: "ibm37", out: "ibm37.ts" }
+  { file: "ibm-37_P100-1999.ucm", ccsid: 37, exportName: "ibm37", out: "ibm37.ts" },
+  // 273: ドイツ語/オーストリア。PUB400 の QCCSID がこれ。37 と variant 文字が異なる
+  // （'@'=0xB5・'§'=0x7C。37 は '@'=0x7C）ため、37 で繋ぐと '@' 入りのパスワードが化ける。
+  { file: "ibm-273_P100-1995.ucm", ccsid: 273, exportName: "ibm273", out: "ibm273.ts" }
 ] as const;
 
 /** DBCS（EBCDIC_STATEFUL）生成対象 */

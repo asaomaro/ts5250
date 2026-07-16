@@ -22,6 +22,7 @@ export const DEFAULT_CCSID = 37;
 
 export const HOST_CODE_PAGES: readonly HostCodePage[] = [
   { ccsid: 37, label: "037 — 英語（アメリカ／カナダ）" },
+  { ccsid: 273, label: "273 — ドイツ語／オーストリア" },
   { ccsid: 930, label: "930 — 日本語（カタカナ拡張）", katakana: true },
   { ccsid: 939, label: "939 — 日本語（英小文字拡張）" },
   { ccsid: 1399, label: "1399 — 日本語（拡張漢字・Latin）" },

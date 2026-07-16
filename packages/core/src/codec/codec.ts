@@ -1,5 +1,6 @@
 import type { SbcsTable, StatefulTable } from "./table-types.js";
 import { ibm37 } from "./tables/ibm37.js";
+import { ibm273 } from "./tables/ibm273.js";
 import { ibm930 } from "./tables/ibm930.js";
 import { ibm939 } from "./tables/ibm939.js";
 import { ibm1399 } from "./tables/ibm1399.js";
@@ -157,7 +158,10 @@ export class DbcsCodec implements Codec {
   }
 }
 
-const SBCS_TABLES: ReadonlyMap<number, SbcsTable> = new Map([[37, ibm37]]);
+const SBCS_TABLES: ReadonlyMap<number, SbcsTable> = new Map([
+  [37, ibm37],
+  [273, ibm273]
+]);
 const DBCS_TABLES: ReadonlyMap<number, StatefulTable> = new Map([
   [930, ibm930],
   [939, ibm939],

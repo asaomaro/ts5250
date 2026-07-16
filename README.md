@@ -176,7 +176,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
       "name": "pub400",
       "host": "pub400.com",
       "port": 23,
-      "ccsid": 37,
+      "ccsid": 273,
       "deviceName": "WEBEMU01",
       "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
     }
@@ -186,6 +186,21 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 
 - `signon` を省略すると自動サインオンせず signon 画面に着地します。
 - `tls: true`（ポート既定 992）、`ccsid`（930/939/1399 等で DBCS）、`enhanced: true`（拡張 5250 GUI 広告）も指定可。
+
+### ⚠️ ホストコードページ（`ccsid`）はホストに合わせる
+
+`ccsid` は**ホスト側のコードページと一致させる**必要があります。ずれると EBCDIC の
+**variant 文字**（`@` `$` `#` `[` `]` など、コードページごとに位置が変わる文字）が化けます。
+英数字は invariant なので**症状が出ず**、変な文字を含むパスワードだけが通らない、という形で現れます。
+
+実例: PUB400 は `QCCSID=273`（ドイツ語）。既定の `37`（米国）で繋ぐと `@` は `0x7C` で送られますが、
+273 では `0x7C` は `§` です。そのため `@` 入りパスワードが `§` 入りとして届き、
+signon 画面から **`CPF1120`（ユーザー不存在/パスワード不一致）**で弾かれます
+（ユーザー名は英数字だけなので正しく届き、原因が分かりにくい）。`ccsid: 273` にすれば解決します。
+
+ホストの値は `DSPSYSVAL SYSVAL(QCCSID)` で確認できます。なお **RFC 4777 自動サインオンはこの影響を受けません**
+（パスワードを telnet NEW-ENVIRON で送るため EBCDIC 変換を経ない）。「自動サインオンは通るのに
+画面からは通らない」場合、コードページ不一致をまず疑ってください。
 
 ---
 
