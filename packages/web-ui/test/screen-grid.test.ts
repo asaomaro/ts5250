@@ -48,17 +48,19 @@ describe("ScreenGrid", () => {
     expect(html).toContain("c-green");
   });
 
-  it("入力フィールドを inline input として描画し、hidden は password 型", () => {
+  it("入力フィールドを inline input として描画し、hidden は自前の伏せ字でマスクする", () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "TARO" },
-      { index: 2, row: 7, col: 10, length: 8, protected: false, hidden: true, numeric: false, mdt: false, value: "" }
+      { index: 2, row: 7, col: 10, length: 8, protected: false, hidden: true, numeric: false, mdt: false, value: "PW" }
     ];
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
     const inputs = w.findAll("input.grid-input");
     expect(inputs).toHaveLength(2);
     expect(inputs[0]!.attributes("type")).toBe("text");
-    expect(inputs[1]!.attributes("type")).toBe("password"); // hidden はマスク
+    // hidden も type=text（password だとパディング空白まで伏せ字になり全桁が埋まる）。マスクは値側で行う
+    expect(inputs[1]!.attributes("type")).toBe("text");
     expect((inputs[0]!.element as HTMLInputElement).value.trimEnd()).toBe("TARO");
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe("**" + " ".repeat(6));
   });
 
   it("保護（表示専用）フィールドは readonly 入力として描画される（下線抑止 CSS の対象）", () => {
@@ -191,6 +193,58 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)).toEqual([1, "ABC123"]);
   });
 
+  it("hidden 欄: 伏せ字は実入力分のみ・残りは空白パディング（カーソルは欄内自由に動ける）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: true, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe(" ".repeat(40)); // 空欄＝伏せ字 0 個。欄長ぶんの空白でカーソル移動は確保
+    await input.trigger("keydown", { key: "a" });
+    await input.trigger("keydown", { key: "b" });
+    expect(el.value).toBe("**" + " ".repeat(38)); // 伏せ字は 2 個だけ、長さは欄長のまま
+    expect(el.value.length).toBe(40); // 未入力桁へカーソルを置けること（native caret の上限＝値長）
+    expect(el.value).not.toContain("a"); // 実値は DOM に出ない
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "ab"]); // 送信値は実値
+  });
+
+  it("hidden 欄: ホストが空白パディング済みの値を返しても伏せ字で埋めない", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: true, numeric: false, mdt: false, value: " ".repeat(40) }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    expect(el.value).toBe(" ".repeat(40)); // 休止時: 伏せ字 0 個
+    await input.trigger("focus");
+    expect(el.value).toBe(" ".repeat(40)); // フォーカス時も同じ
+  });
+
+  it("hidden 欄: 伏せ字は ASCII（等幅 1 桁）で全角記号を使わない", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: true, numeric: false, mdt: false, value: "abc" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    // 全角記号（●等）だと CJK フォントに落ちて 2 桁幅になり桁が崩れるため ASCII のみ
+    expect(el.value.slice(0, 3)).toBe("***");
+    for (const ch of el.value) expect(ch.codePointAt(0)!).toBeLessThan(0x80);
+  });
+
+  it("非 hidden 欄はスペース埋めのまま（maxlength を満たし IME 挿入余地を確保）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe(" ".repeat(8)); // hidden と違いスペース埋めは維持する
+  });
+
   it("上書きモード: 途中入力しても後続桁がシフトしない", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "ABCDE" }
@@ -279,20 +333,40 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1]).toBe("あいうえお"); // 既入力＋確定分が二重化せず結合
   });
 
-  it("hidden（パスワード）欄はスペース埋めで全桁●にならず、実入力分のみ・送信値も実入力", async () => {
+  it("hidden（パスワード）欄は伏せ字が実入力分のみ・実値は DOM に出ず・送信値は実入力", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 20, protected: false, hidden: true, numeric: false, mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
     const input = w.find("input.grid-input");
-    expect(input.attributes("type")).toBe("password");
+    // 伏せ字は自前で組み立てるため type=password ではない（password だとパディング空白まで伏せ字になる）
+    expect(input.attributes("type")).toBe("text");
+    expect(input.attributes("autocomplete")).toBe("off");
     await input.trigger("focus");
     for (const ch of ["P", "A", "S", "S"]) await input.trigger("keydown", { key: ch });
-    // 表示値はパディング空白を含まず 4 文字（field 長 20 の全●表示にならない）
-    expect((input.element as HTMLInputElement).value).toBe("PASS");
-    // 送信値（emit）も実入力
+    // 伏せ字は 4 個だけ（field 長 20 の全桁が伏せ字にならない）。残りは空白でカーソル移動を確保
+    expect((input.element as HTMLInputElement).value).toBe("****" + " ".repeat(16));
+    expect((input.element as HTMLInputElement).value).not.toContain("P"); // 実値は DOM に出ない
+    // 送信値（emit）は実入力
     const emits = w.emitted("edit") as [number, string][];
     expect(emits.at(-1)).toEqual([1, "PASS"]);
+  });
+
+  it("hidden 欄は IME 合成を無効化する（伏せ字 value がモデルへ流れ込むのを防ぐ）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 20, protected: false, hidden: true, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    for (const ch of ["A", "B"]) await input.trigger("keydown", { key: ch });
+    await input.trigger("compositionstart");
+    el.value = "**あ"; // IME が伏せ字表示の上に確定文字を置いた状況を模す
+    await input.trigger("compositionend");
+    // 伏せ字（*）も確定文字も取り込まれず、既入力のまま
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "AB"]);
   });
 
   it("DBCS 欄は休止時 SO/SI 込みの列ビューで表示し、編集/送信は SO/SI を除いた純データ", async () => {

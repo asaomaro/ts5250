@@ -55,6 +55,11 @@ const emit = defineEmits<{
 
 const gui = computed(() => props.snapshot.gui);
 
+/** hidden（パスワード）欄の伏せ字。実値は edit モデルが持ち、DOM にはこの文字だけを置く。
+ *  ASCII であることが要件: ● 等の記号は East Asian Width が Ambiguous で、フォントスタックの
+ *  CJK フォント（BIZ UDGothic 等）に落ちて全角幅で描画され桁が崩れる（実測 16px＝2 桁）。 */
+const MASK_CHAR = "*";
+
 /** カタカナ系ホストコードページ（930/5026）では、実機（ACS）同様に半角英小文字を入力時点で
  *  大文字化する。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。 */
 function inputChar(ch: string): string {
@@ -267,9 +272,22 @@ function siMark(): string {
   return props.showShiftMarks ? "}" : " ";
 }
 
+/** hidden 欄の表示値を作る（非 hidden はそのまま）。
+ *
+ *  type=password はパディング空白まで ● にしてしまい、空欄でも欄長ぶんの ● が並ぶ。かといって
+ *  実入力分へ切り詰めると、native caret が値長までしか動けず未入力桁へカーソルを置けなくなる
+ *  （5250 は欄内どこへでもカーソルを置ける）。そこで input は type=text とし、こちらで
+ *  「入力済み桁＝●・未入力桁＝本物の空白」を組み立てて欄長までパディングする。
+ *  これで ● の数は実入力分だけ・カーソルは欄内を自由に移動でき、かつ実値は DOM に出ない。 */
+function maskSafe(f: Field, value: string): string {
+  if (!f.hidden) return value;
+  const typed = value.replace(/ +$/, "").length;
+  return MASK_CHAR.repeat(typed).padEnd(visLen(f), " ");
+}
+
 /** input の :value（休止時の表示）。DBCS 欄は列ビュー（SO/SI 込み）で表示する。 */
 function displayValue(f: Field): string {
-  if (f.hidden) return logicalValue(f);
+  if (f.hidden) return maskSafe(f, logicalValue(f));
   if (f.dbcsType) return columnView(logicalValue(f), soMark(), siMark());
   return inputValue(f);
 }
@@ -339,9 +357,8 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   }
   const full = editValue(edit);
   const trimmed = full.replace(/ +$/, "");
-  // hidden（type=password）は末尾のパディング空白も ● 表示されてしまうため、表示値は実入力分のみにする。
   // 送信値（emit）は常に末尾空白除去。sync が input を直接制御する（v-memo で :value 再描画が来ないため）。
-  inputEl.value = f.hidden ? trimmed : full;
+  inputEl.value = maskSafe(f, full);
   const c = Math.min(edit.cursor, inputEl.value.length);
   inputEl.setSelectionRange(c, c);
   insertMode.value = edit.insertMode;
@@ -642,8 +659,9 @@ function onInputFocus(f: Field, ev: FocusEvent): void {
     emit("cursor", f.row, f.col);
     return;
   }
-  // SBCS: 休止時 :value と編集ビューは同一（純論理値スペース埋め）
-  if (edit) el.value = editValue(edit);
+  // SBCS: 休止時 :value と編集ビューは同一（純論理値スペース埋め）。
+  // ただし hidden はスペース埋めがそのまま ● になるため実入力分のみ表示する。
+  if (edit) el.value = maskSafe(f, editValue(edit));
   // スペース埋め表示だと Tab/フォーカスで native カーソルが末尾へ行き入力できなくなるため、
   // フォーカス時はフィールド先頭へ置く（クリックは mouseup で押下桁に上書きされる）。
   el.setSelectionRange(0, 0);
@@ -821,6 +839,12 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
  *  既入力を見せたまま候補を入力位置に出しつつ、以降の挿入余地（maxlength）を確保する。 */
 function onCompositionStart(f: Field, ev: CompositionEvent): void {
   if (f.protected || props.busy) return;
+  // hidden 欄は value が伏せ字（●）で実値ではないため、el.value を読む IME 経路に乗せてはならない
+  // （乗せると ● 自体がモデルへ流れ込む）。パスワードに IME は不要なので合成を無効化する。
+  if (f.hidden) {
+    ev.preventDefault();
+    return;
+  }
   composing.value = true;
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
@@ -846,6 +870,7 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
 function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   composing.value = false;
   if (f.protected) return;
+  if (f.hidden) return; // 伏せ字 value を読み込まない（onCompositionStart で合成自体を止めている）
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
@@ -1158,7 +1183,8 @@ onBeforeUnmount(() => {
           :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
           :value="displayValue(seg.field!)"
           :readonly="seg.field!.protected"
-          :type="seg.field!.hidden ? 'password' : 'text'"
+          type="text"
+          :autocomplete="seg.field!.hidden ? 'off' : undefined"
           :maxlength="seg.width ?? seg.field!.length"
           @keydown="onInputKeydown(seg.field!, $event)"
           @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
