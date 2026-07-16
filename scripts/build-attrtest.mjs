@@ -20,10 +20,11 @@ const blank = () => " ".repeat(80);
 const fileKwd = (kw) => put(put(blank(), 6, "A"), 45, kw).replace(/ +$/, "");
 const rec = (n) => put(put(put(blank(), 6, "A"), 17, "R"), 19, n).replace(/ +$/, "");
 const constant = (r, c, t, kw = "") => put(put(put(put(blank(), 6, "A"), 39, String(r).padStart(3)), 42, String(c).padStart(3)), 45, `'${t}'${kw ? " " + kw : ""}`).replace(/ +$/, "");
-function field(name, len, usage, r, c, type = "") {
+function field(name, len, usage, r, c, type = "", dec) {
   let l = put(put(blank(), 6, "A"), 19, name);
   l = put(l, 35 - String(len).length, String(len)); // 30-34 に右詰
-  if (type) l = put(l, 35, type);                    // 35=データ型（O=DBCS-open 等）
+  if (type) l = put(l, 35, type);                    // 35=データ型（O=DBCS-open / J=DBCS-only 等）
+  if (dec !== undefined) l = put(l, 38 - String(dec).length, String(dec)); // 36-37 小数位（右詰）＝数値欄
   l = put(put(put(l, 38, usage), 39, String(r).padStart(3)), 42, String(c).padStart(3));
   return l.replace(/ +$/, "");
 }
@@ -60,19 +61,23 @@ const inline = {
 };
 
 // --- フィクスチャ 3: 入力ラウンドトリップ（SBCS＋DBCS 日本語入力→エコー） ---
+// フィールド型ごとの入力ルール検証: 数値(Y)=数字/小数点のみ、A=SBCS のみ(DBCS 不可)、
+// O(open)=SBCS+DBCS 両方、J(pure)=DBCS のみ(SBCS 不可)。O/J は入力→エコーで往復も見る。
 const input = {
   dsp: "INPTST", pgm: "INPPGM", ddsMbr: "INPTST", rpgMbr: "INPPGM", ddsAlias: "N1", rpgAlias: "N2",
   dds: [
     fileKwd("DSPSIZ(24 80 *DS3)"), rec("FMT01"), fileKwd("CA03(03)"),
-    constant(1, 2, "INPUT TEST  F3=EXIT"),
-    constant(3, 2, "A IN :"), field("ANAME", 10, "B", 3, 10),
-    constant(4, 2, "J IN :"), field("JNAME", 12, "B", 4, 10, "O"), // O=DBCS-open 入力欄
-    constant(6, 2, "A ECHO:"), field("AECHO", 10, "O", 6, 10),
-    constant(7, 2, "J ECHO:"), field("JECHO", 12, "O", 7, 10, "O"),
-    constant(9, 2, "F3 END")
+    constant(1, 2, "FIELD TYPE TEST  F3=EXIT"),
+    constant(3, 2, "NUM:"), field("NUMF", 8, "B", 3, 8, "Y", 2), // 数値（Y=numeric only, 小数2桁）
+    constant(4, 2, "A  :"), field("ANAME", 8, "B", 4, 8),        // A（英数字 SBCS）
+    constant(5, 2, "O  :"), field("ONAME", 12, "B", 5, 8, "O"),  // O（DBCS-open）
+    constant(6, 2, "J  :"), field("JNAME", 12, "B", 6, 8, "J"),  // J（DBCS-only/pure）
+    constant(5, 30, "E:"), field("OECHO", 12, "O", 5, 33, "O"),
+    constant(6, 30, "E:"), field("JECHO", 12, "O", 6, 33, "O"),
+    constant(8, 2, "F3 END")
   ],
-  // exfmt→入力読取→エコー欄へ複写→再 exfmt（エコー表示）→F3 終了
-  rpg: ["**free", "dcl-f INPTST workstn;", "exfmt FMT01;", "AECHO = ANAME;", "JECHO = JNAME;", "exfmt FMT01;", "*inlr = *on;", "return;"]
+  // exfmt→O/J をエコー欄へ複写→再 exfmt（エコー表示）→F3 終了
+  rpg: ["**free", "dcl-f INPTST workstn;", "exfmt FMT01;", "OECHO = ONAME;", "JECHO = JNAME;", "exfmt FMT01;", "*inlr = *on;", "return;"]
 };
 
 const cmdField = (s) => { const e = s.fields.filter((f) => !f.protected); return e[e.length - 1]; };
