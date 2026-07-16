@@ -52,13 +52,18 @@ export function applyDataStream(
       case COMMAND.CLEAR_UNIT:
         buf.clearUnit();
         break;
-      case COMMAND.CLEAR_UNIT_ALTERNATE:
-        // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）ではプロトコル違反として警告し通常クリア
+      case COMMAND.CLEAR_UNIT_ALTERNATE: {
+        // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
+        // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
+        // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
+        r.u8();
+        // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）では通常クリアにフォールバック
         if (!buf.clearUnitAlternate()) {
           warn("CLEAR UNIT ALTERNATE on 24x80 terminal — falling back to CLEAR UNIT");
           buf.clearUnit();
         }
         break;
+      }
       case COMMAND.CLEAR_FORMAT_TABLE:
         buf.clearFormatTable();
         break;

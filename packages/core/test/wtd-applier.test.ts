@@ -166,6 +166,19 @@ describe("applyDataStream — 合成データ", () => {
     const { warns } = apply([ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]);
     expect(warns[0]).toContain("ALTERNATE");
   });
+
+  it("CLEAR_UNIT_ALTERNATE のパラメータを消費し後続 WTD を取りこぼさない（回帰・DBCS 端末の SEU）", () => {
+    // ESC 20 00（CLEAR UNIT ALTERNATE + パラメータ）の後に ESC 11（WTD）が続く実機パターン。
+    // 旧実装はパラメータ 0x00 を次コマンドの ESC と誤認し "expected ESC" で残りを破棄していた
+    // ＝画面本体を取りこぼして何も表示されなかった。
+    const { buf, warns } = apply([
+      ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00,
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 1, 1, ...e("HELLO")
+    ]);
+    expect(warns.some((w) => /expected ESC/.test(w))).toBe(false); // フレーム同期がずれない
+    expect(rowText(buf, 1)).toContain("HELLO"); // 後続 WTD が適用される（旧: 空）
+  });
 });
 
 describe("applyDataStream — DBCS（SO/SI）", () => {
