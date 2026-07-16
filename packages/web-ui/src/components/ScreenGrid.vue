@@ -47,6 +47,8 @@ const emit = defineEmits<{
   /** 欄が最大桁まで埋まった（ACS の自動送り＝次の入力欄へ）。満杯になった欄の index を渡す
    *  （満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、index で次欄を特定する） */
   (e: "field-full", fieldIndex: number): void;
+  /** 矩形（ブロック）選択が解除された（親のキーボード選択アンカーもリセットさせる） */
+  (e: "selection-cleared"): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -448,11 +450,11 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
-  // Shift+←/→/Home/End はブラウザ既定の範囲選択に委ねる（通常のテキストエディタ流の選択）。
-  // ペインのセル移動へは伝播させない（preventDefault はしない＝native 選択を活かす）。
-  // 選択後のコピー/カットは onInputCopy/Cut が SO/SI を除いた純論理値で処理する。
+  // Shift+←/→/Home/End は欄内テキスト選択ではなく、画面の矩形（ブロック）選択にする
+  // （マウス・欄外操作と同一の範囲指定）。preventDefault で欄内の native 選択を止め、
+  // stopPropagation せずにペイン（EmulatorPane.onKeydown）へ委譲する。
   if (ev.shiftKey && SELECT_KEYS.has(ev.key)) {
-    ev.stopPropagation();
+    ev.preventDefault();
     return;
   }
   if (isDbcsEdit(f)) {
@@ -711,40 +713,93 @@ function onInputClick(f: Field, ev: MouseEvent): void {
   emit("cursor", f.row, f.col + caret);
 }
 
-/** paste（複数文字）: 上書き/挿入で順に入力し、型・長さで整形 */
+/** 欄の値を、開始桁 offset から line で上書きする（ACS のペースト＝カーソル位置起点）。
+ *  offset より前は既存文字（無ければ空白）を残し、offset から型フィルタ済みの line を書く。
+ *  SO/SI 込みバイト予算で切り詰め、末尾空白は落とす。 */
+function overwriteFromOffset(field: Field, offset: number, line: string): string {
+  const budget = visLen(field);
+  const existing = [...logicalValue(field)];
+  let out = "";
+  for (let i = 0; i < offset; i++) {
+    const ch = existing[i] ?? " ";
+    if (dbcsByteLength(out + ch) > budget) return out.replace(/\s+$/, "");
+    out += ch;
+  }
+  for (const ch of line) {
+    if (ch === "\n" || ch === "\r") continue;
+    if (!acceptsChar(field, ch)) continue;
+    if (dbcsByteLength(out + ch) > budget) break;
+    out += ch;
+  }
+  return out.replace(/\s+$/, "");
+}
+
+/** 複数行テキストを、フォーカス欄から下方向へ「空行なく連続する入力欄」へ 1 行ずつ流し込む（ACS 相当）。
+ *  ペースト開始桁（フォーカス欄の caret オフセット）を起点に、各行を同じオフセットから上書きする。 */
+function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
+  const lines = text.split(/\r?\n/);
+  const offset = el.selectionStart ?? 0; // ペースト開始桁（欄内オフセット）
+  const editable = props.snapshot.fields.filter((fl) => !fl.protected);
+  let cur: Field | undefined = f;
+  let i = 0;
+  while (cur && i < lines.length) {
+    const field: Field = cur;
+    const val = overwriteFromOffset(field, offset, lines[i] ?? "");
+    if (field.index === f.index) {
+      // 先頭行はフォーカス欄へ（edit モデルを置換して sync）
+      edit = isDbcsEdit(f) ? { chars: [...val], cursor: val.length, insertMode: true } : initEdit(val, visLen(f), val.length);
+      editFieldIndex = f.index;
+      sync(el, f);
+    } else {
+      emit("edit", field.index, val);
+      // :value バインドは v-memo でキャッシュされ再評価されないため、input を直接更新する
+      const inp = gridEl.value?.querySelector<HTMLInputElement>(`input.grid-input[data-field-index="${field.index}"]`);
+      if (inp) inp.value = displayValue(field);
+    }
+    cur = editable.find((fl) => fl.row === field.row + 1);
+    i++;
+  }
+}
+
+/** 通信中・保護欄では beforeinput をブロック（貼り付けは @paste で扱う）。 */
 function onInputBeforeInput(f: Field, ev: InputEvent): void {
-  if (f.protected || props.busy) {
-    ev.preventDefault(); // 通信中は入力プロテクト（貼り付け含む）
+  if ((f.protected || props.busy) && ev.inputType === "insertFromPaste") ev.preventDefault();
+}
+
+/** paste（clipboardData から取得。単一行 input は beforeinput の data が改行を落とすため paste で扱う）。
+ *  改行を含めば下方向の連続入力欄へ分配、単一行なら caret へ挿入（型・バイト予算で整形）。 */
+function onInputPaste(f: Field, ev: ClipboardEvent): void {
+  ev.preventDefault();
+  if (f.protected || props.busy) return;
+  const text = ev.clipboardData?.getData("text") ?? "";
+  if (!text) return;
+  const el = ev.target as HTMLInputElement;
+  if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
+  if (text.includes("\n")) {
+    pasteMultiline(f, text, el); // 複数行 → 連続入力欄へ分配
     return;
   }
-  if (ev.inputType === "insertFromPaste" && ev.data) {
-    ev.preventDefault();
-    const el = ev.target as HTMLInputElement;
-    if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
-    // native caret を論理カーソルへ写す（DBCS は列ビュー→論理）
-    const dbcs = isDbcsEdit(f);
-    const vc = el.selectionStart;
-    if (vc !== null) {
-      if (dbcs) {
-        const { logicalOf } = dbcsViewLayout(editValue(edit!).replace(/ +$/, ""));
-        edit = { ...edit!, cursor: logicalOf(vc) };
-      } else {
-        edit = { ...edit!, cursor: Math.min(vc, visLen(f)) };
-      }
+  // 単一行: native caret を論理カーソルへ写してから挿入
+  const dbcs = isDbcsEdit(f);
+  const vc = el.selectionStart;
+  if (vc !== null) {
+    if (dbcs) {
+      const { logicalOf } = dbcsViewLayout(editValue(edit!).replace(/ +$/, ""));
+      edit = { ...edit!, cursor: logicalOf(vc) };
+    } else {
+      edit = { ...edit!, cursor: Math.min(vc, visLen(f)) };
     }
-    let e: EditState = edit!;
-    // 型フィルタ後、バイト予算（SO/SI・DBCS 込み）に収まる分だけ順に入力し超過は切り捨てる。
-    // DBCS 欄は挿入モデル（dbcsInsert）を使う。typeChar は末尾で cursor>=len にブロックされ貼付不可。
-    for (const ch of [...ev.data]) {
-      if (!acceptsChar(f, ch)) continue;
-      const trial = dbcs ? dbcsInsert(e, ch) : typeChar(e, ch);
-      if (!fitsBytes(trial, f)) break;
-      e = trial;
-    }
-    edit = e;
-    sync(el, f);
-    advanceIfFull(f); // ACS: 貼り付けで満杯なら次の入力欄へ
   }
+  let e: EditState = edit!;
+  for (const ch of [...text]) {
+    if (!acceptsChar(f, ch)) continue;
+    const trial = dbcs ? dbcsInsert(e, ch) : typeChar(e, ch);
+    if (!fitsBytes(trial, f)) break;
+    e = trial;
+  }
+  edit = e;
+  sync(el, f);
+  advanceIfFull(f); // ACS: 貼り付けで満杯なら次の入力欄へ
 }
 
 /** IME 合成開始: スペース埋めを外し、合成開始桁より前の既入力だけを残す。
@@ -809,7 +864,125 @@ function charWidthPx(): number {
   return fontPx.value * 0.6;
 }
 
+/** マウス座標 → セル (row,col)（1 始まり・画面内にクランプ）。padding 8px/10px を差し引く。 */
+function cellAt(ev: MouseEvent): { row: number; col: number } | undefined {
+  const el = gridEl.value;
+  if (!el) return undefined;
+  const rect = el.getBoundingClientRect();
+  const lineH = fontPx.value * 1.25;
+  const col = Math.floor((ev.clientX - rect.left - 10) / charWidthPx()) + 1;
+  const row = Math.floor((ev.clientY - rect.top - 8) / lineH) + 1;
+  return {
+    row: Math.max(1, Math.min(row, props.snapshot.rows)),
+    col: Math.max(1, Math.min(col, props.snapshot.cols))
+  };
+}
+
+// ---- 矩形（ブロック）選択（ACS 相当。入力/非入力を問わず画面グリッドをドラッグで矩形選択） ----
+const rectSel = ref<{ r1: number; c1: number; r2: number; c2: number } | undefined>();
+let dragAnchor: { row: number; col: number } | null = null;
+let dragMoved = false;
+let copyBound = false;
+
+function normRect(a: { row: number; col: number }, b: { row: number; col: number }) {
+  return {
+    r1: Math.min(a.row, b.row),
+    r2: Math.max(a.row, b.row),
+    c1: Math.min(a.col, b.col),
+    c2: Math.max(a.col, b.col)
+  };
+}
+
+function onGridMousedown(ev: MouseEvent): void {
+  if (ev.button !== 0) return; // 左ボタンのみ
+  const cell = cellAt(ev);
+  if (!cell) return;
+  clearRectSel(); // 新しいドラッグ開始で前回の選択を消す
+  dragAnchor = cell;
+  dragMoved = false;
+  window.addEventListener("mousemove", onGridDragMove);
+  window.addEventListener("mouseup", onGridDragUp);
+}
+
+function onGridDragMove(ev: MouseEvent): void {
+  if (!dragAnchor) return;
+  const cell = cellAt(ev);
+  if (!cell) return;
+  if (!dragMoved && (cell.row !== dragAnchor.row || cell.col !== dragAnchor.col)) {
+    dragMoved = true;
+    // 矩形選択に切替: 入力欄の native 選択/フォーカスを外す（画面全体を一様に選択するため）
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && gridEl.value?.contains(active)) active.blur();
+  }
+  if (dragMoved) {
+    ev.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    rectSel.value = normRect(dragAnchor, cell);
+  }
+}
+
+function onGridDragUp(): void {
+  window.removeEventListener("mousemove", onGridDragMove);
+  window.removeEventListener("mouseup", onGridDragUp);
+  if (dragMoved && rectSel.value) bindCopy(); // 矩形確定 → Ctrl+C を購読
+  dragAnchor = null;
+}
+
+/** 選択矩形をコピー用テキストへ。各行=矩形の桁範囲、行は改行区切り。全角後半・SO/SI を処理。 */
+function copyCharOf(cell: Cell): string {
+  if (cell.kind === "dbcs-tail") return ""; // 全角は lead で 1 文字（tail は畳む）
+  if (cell.kind === "so" || cell.kind === "si") return " "; // 制御桁は空白として写す
+  if (props.katakanaView && cell.kind === "sbcs" && cell.rawByte !== undefined) return katakanaChar(cell.rawByte);
+  return cell.char === "" ? " " : cell.char;
+}
+function rectText(): string {
+  const s = rectSel.value;
+  if (!s) return "";
+  const lines: string[] = [];
+  for (let r = s.r1; r <= s.r2; r++) {
+    let line = "";
+    for (let c = s.c1; c <= s.c2; c++) {
+      const cell = props.snapshot.cells[r - 1]?.[c - 1];
+      line += cell ? copyCharOf(cell) : " ";
+    }
+    lines.push(line.replace(/\s+$/, "")); // 各行末尾の空白は落とす（矩形右端の余白）
+  }
+  return lines.join("\n");
+}
+function onDocCopy(ev: ClipboardEvent): void {
+  if (!rectSel.value) return;
+  ev.clipboardData?.setData("text/plain", rectText());
+  ev.preventDefault();
+  clearRectSel(); // コピー後は範囲選択を解除する
+}
+function bindCopy(): void {
+  if (copyBound) return;
+  document.addEventListener("copy", onDocCopy);
+  copyBound = true;
+}
+function clearRectSel(): void {
+  const had = !!rectSel.value;
+  rectSel.value = undefined;
+  if (copyBound) {
+    document.removeEventListener("copy", onDocCopy);
+    copyBound = false;
+  }
+  if (had) emit("selection-cleared"); // 親のキーボード選択アンカーもリセットさせる
+}
+
+const rectStyle = computed(() => {
+  const s = rectSel.value;
+  if (!s) return {};
+  return {
+    left: s.c1 - 1 + "ch",
+    top: (s.r1 - 1) * 1.25 + "em",
+    width: s.c2 - s.c1 + 1 + "ch",
+    height: (s.r2 - s.r1 + 1) * 1.25 + "em"
+  };
+});
+
 function onGridClick(ev: MouseEvent): void {
+  if (dragMoved) return; // ドラッグ（矩形選択）だったのでクリック処理はしない
   const el = gridEl.value;
   if (!el || (ev.target as HTMLElement).tagName === "INPUT") return; // 入力欄は native focus で扱う
   const rect = el.getBoundingClientRect();
@@ -874,7 +1047,29 @@ onMounted(() => {
   // 初期表示（接続直後の画面）でもフォーカス中ペインはカーソル欄へ
   if (props.focused && !props.snapshot.keyboardLocked) nextTick(() => focusCursorField());
 });
-onBeforeUnmount(() => ro?.disconnect());
+// キーボード（自由カーソル）からの矩形選択制御を親（EmulatorPane）へ公開する。
+// マウス選択と同じ rectSel を使い、コピー経路（onDocCopy）も共有する。
+function setBlockSelection(rect: { r1: number; c1: number; r2: number; c2: number } | undefined): void {
+  if (!rect) {
+    clearRectSel();
+    return;
+  }
+  rectSel.value = rect;
+  bindCopy();
+}
+defineExpose({ setBlockSelection, clearBlockSelection: clearRectSel });
+
+// 画面が更新されたら矩形選択は破棄する
+watch(
+  () => props.snapshot,
+  () => clearRectSel()
+);
+onBeforeUnmount(() => {
+  ro?.disconnect();
+  clearRectSel();
+  window.removeEventListener("mousemove", onGridDragMove);
+  window.removeEventListener("mouseup", onGridDragUp);
+});
 </script>
 
 <template>
@@ -884,8 +1079,11 @@ onBeforeUnmount(() => ro?.disconnect());
     :style="{ fontSize: fontPx + 'px' }"
     :data-focused="focused"
     @click="onGridClick"
+    @mousedown="onGridMousedown"
   >
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
+    <!-- 矩形（ブロック）選択のハイライト -->
+    <div v-if="rectSel" class="rect-sel" :style="rectStyle" aria-hidden="true"></div>
     <div
       v-if="!cursorOnEditable"
       class="cursor"
@@ -951,6 +1149,8 @@ onBeforeUnmount(() => ro?.disconnect());
           :maxlength="seg.width ?? seg.field!.length"
           @keydown="onInputKeydown(seg.field!, $event)"
           @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
+          @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
+          :data-field-index="seg.field!.index"
           @focus="onInputFocus(seg.field!, $event)"
           @blur="onInputBlur(seg.field!, $event as FocusEvent)"
           @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
@@ -1000,6 +1200,15 @@ onBeforeUnmount(() => ro?.disconnect());
   height: 1.25em;
   background: color-mix(in srgb, var(--t-green) 45%, transparent);
   pointer-events: none;
+}
+/* 矩形（ブロック）選択のハイライト（padding 分オフセット） */
+.rect-sel {
+  position: absolute;
+  margin: 8px 0 0 10px;
+  background: color-mix(in srgb, var(--t-turquoise, var(--t-white)) 35%, transparent);
+  outline: 1px solid var(--t-turquoise, var(--t-white));
+  pointer-events: none;
+  z-index: 3;
 }
 .cursor.live {
   animation: cursorBlink 1.1s steps(1) infinite;

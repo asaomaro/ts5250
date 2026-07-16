@@ -191,11 +191,70 @@ const rawKeydown = makeKeydownHandler({
   local: onLocal,
   isFocused: () => props.focused
 });
+
+// ---- キーボードによる矩形（ブロック）選択（free モードで Shift+矢印） ----
+const gridRef = ref<InstanceType<typeof ScreenGrid> | null>(null);
+let selAnchor: { row: number; col: number } | null = null;
+const ARROW_DIRS: Record<string, Dir> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+
+function clearBlockSel(): void {
+  selAnchor = null;
+  gridRef.value?.clearBlockSelection();
+}
+/** ScreenGrid 側で選択が解除された（コピー後・画面更新等）とき、キーボード選択アンカーもリセット。 */
+function onSelectionCleared(): void {
+  selAnchor = null;
+}
+/** ブロック選択の反対角を pos へ拡張する。入力欄にフォーカスがあれば外して free モードにする
+ *  （マウス・欄外操作と同一の画面矩形選択）。開始点は最初の呼び出し時のカーソル位置に固定。 */
+function blockSelExtendTo(pos: { row: number; col: number }): void {
+  if (!selAnchor) selAnchor = { ...cursor.value };
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && paneEl.value?.contains(active)) active.blur();
+  if (document.activeElement !== paneEl.value) paneEl.value?.focus();
+  cursorOverride.value = pos; // カーソル端を動かす。reconcileFocus は通さない
+  gridRef.value?.setBlockSelection({
+    r1: Math.min(selAnchor.row, pos.row),
+    r2: Math.max(selAnchor.row, pos.row),
+    c1: Math.min(selAnchor.col, pos.col),
+    c2: Math.max(selAnchor.col, pos.col)
+  });
+}
+/** Shift+矢印/Home/End によるブロック選択の拡張先を計算して適用する。 */
+function keyboardBlockSelect(ev: KeyboardEvent): boolean {
+  const snap = snapshot.value;
+  if (!snap) return false;
+  const cur = cursor.value;
+  if (ARROW_DIRS[ev.key]) {
+    blockSelExtendTo(moveCursor(cur, ARROW_DIRS[ev.key]!, snap.rows, snap.cols));
+    return true;
+  }
+  if (ev.key === "Home") {
+    blockSelExtendTo({ row: cur.row, col: 1 });
+    return true;
+  }
+  if (ev.key === "End") {
+    blockSelExtendTo({ row: cur.row, col: snap.cols });
+    return true;
+  }
+  return false;
+}
+
 function onKeydown(ev: KeyboardEvent): void {
   if (busy.value) {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
     return;
   }
+  // Shift+矢印/Home/End は入力欄フォーカスの有無に関わらず画面の矩形（ブロック）選択を拡張する
+  // （マウス・欄外操作と同一）。ScreenGrid は欄内 Shift 移動を preventDefault してここへ委譲する。
+  if (ev.shiftKey && (ARROW_DIRS[ev.key] || ev.key === "Home" || ev.key === "End")) {
+    if (keyboardBlockSelect(ev)) {
+      ev.preventDefault();
+      return;
+    }
+  }
+  // Escape・修飾なしのカーソル移動でブロック選択を解除
+  if (ev.key === "Escape" || (!ev.shiftKey && ARROW_DIRS[ev.key] && selAnchor)) clearBlockSel();
   rawKeydown(ev);
 }
 
@@ -226,6 +285,7 @@ function onWheel(ev: WheelEvent): void {
     <div class="screen-wrap">
       <ScreenGrid
         v-if="snapshot"
+        ref="gridRef"
         v-model:insert-mode="insertMode"
         :snapshot="snapshot"
         :edits="state!.edits"
@@ -240,6 +300,7 @@ function onWheel(ev: WheelEvent): void {
         @field-full="onFieldFull"
         @gui-select="onGuiSelect"
         @gui-submit="onGuiSubmit"
+        @selection-cleared="onSelectionCleared"
       />
       <div v-else class="pane-empty">接続待ち…</div>
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->

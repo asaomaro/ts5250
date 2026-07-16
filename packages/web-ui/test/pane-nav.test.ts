@@ -164,6 +164,35 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     });
   }
 
+  it("free モードで Shift+矢印がブロック選択を作り Escape で解除する（キーボード矩形選択）", async () => {
+    seed([]); // 入力欄なし → free モード（ペインにフォーカス）
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await w.find(".pane").trigger("keydown", { key: "ArrowDown", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true); // 矩形選択のハイライトが出る
+    await w.find(".pane").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false); // Escape で解除
+    w.unmount();
+  });
+
+  it("入力欄フォーカス中でも Shift+矢印はブロック選択になる（欄内テキスト選択ではない）", async () => {
+    seed([field(1, 5)]); // 欄 (5,10) len5
+    const w = mountPane();
+    await nextTick();
+    const input = w.find("input.grid-input");
+    (input.element as HTMLElement).focus();
+    await nextTick();
+    await input.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true); // 画面の矩形選択が出る
+    expect(document.activeElement).not.toBe(input.element); // 入力欄は blur され free モードへ
+    w.unmount();
+  });
+
   it("DBCS 欄の矢印カーソルが reconcileFocus に壊されず列ビュー caret を維持する（回帰）", async () => {
     // "あいう" を持つ DBCS 欄。列ビュー " あいう "。矢印は 1 論理文字ずつ移動し SO/SI をスキップ。
     // 旧: ScreenGrid の emit("cursor") → reconcileFocus が SBCS 用 caretInField で caret を上書きし、

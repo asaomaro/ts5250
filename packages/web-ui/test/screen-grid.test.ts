@@ -391,12 +391,12 @@ describe("ScreenGrid", () => {
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
     const input = w.find("input.grid-input");
     await input.trigger("focus");
-    await input.trigger("beforeinput", { inputType: "insertFromPaste", data: "日本語" });
+    await input.trigger("paste", { clipboardData: { getData: () => "日本語" } });
     let emits = w.emitted("edit") as [number, string][];
     expect(emits.at(-1)![1]).toBe("日本語");
     // 末尾へ移動してさらに貼り付け（cursor===len で typeChar にブロックされない回帰）
     await input.trigger("keydown", { key: "End" });
-    await input.trigger("beforeinput", { inputType: "insertFromPaste", data: "あ" });
+    await input.trigger("paste", { clipboardData: { getData: () => "あ" } });
     emits = w.emitted("edit") as [number, string][];
     expect(emits.at(-1)![1]).toBe("日本語あ");
   });
@@ -448,6 +448,90 @@ describe("ScreenGrid", () => {
     el.value = "え";
     await input.trigger("compositionend");
     expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("えう");
+    w.unmount();
+  });
+
+  it("マウスドラッグで矩形選択し、コピーは矩形の複数行テキスト（入力/非入力を問わず）", async () => {
+    const snapshot = makeSnap([]);
+    ["ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ0123"].forEach((s, ri) => {
+      [...s].forEach((ch, ci) => (snapshot.cells[2 + ri]![4 + ci] = cell(ch)));
+    });
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick(); // fit() のフォント確定を style に反映させる
+    const grid = w.find(".grid");
+    const el = grid.element as HTMLElement;
+    const fontPx = parseFloat(el.style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5; // padding 10px + セル中央
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5; // padding 8px
+    // テキストは col5..14。row3..5 の col7..10（= C..F / M..P / W..Z）を矩形選択
+    await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(5) }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true);
+    const cd = { setData: vi.fn() };
+    const ev = new Event("copy") as Event & { clipboardData: typeof cd };
+    ev.clipboardData = cd;
+    document.dispatchEvent(ev);
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "CDEF\nMNOP\nWXYZ");
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false); // コピー後は選択解除
+    expect(w.emitted("selection-cleared")).toBeTruthy();
+    w.unmount();
+  });
+
+  it("複数行ペーストはペースト開始桁（カーソル位置）を起点に上書きする（ACS 相当）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 5, col: 5, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "" },
+      { index: 2, row: 6, col: 5, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(3, 3); // 4 列目（オフセット 3）から貼り付け開始
+    await input.trigger("paste", { clipboardData: { getData: () => "12345\n67890" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("   12345"); // 3 桁の先頭空白＋12345
+    expect(last(2)).toBe("   67890"); // 次欄も同じ開始桁で
+    w.unmount();
+  });
+
+  it("複数行ペーストで下方向の連続入力欄へ 1 行ずつ分配する", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 5, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" },
+      { index: 2, row: 6, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" },
+      { index: 3, row: 7, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    await input.trigger("paste", { clipboardData: { getData: () => "AAA\nBBB\nCCC" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("AAA");
+    expect(last(2)).toBe("BBB");
+    expect(last(3)).toBe("CCC");
+    w.unmount();
+  });
+
+  it("複数行ペーストは次行に入力欄が無い（空行）ところで止まる", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 5, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" },
+      // row6 は欄なし（空行）→ 2 行目以降は流し込まれない
+      { index: 2, row: 7, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    await input.trigger("paste", { clipboardData: { getData: () => "AAA\nBBB\nCCC" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("AAA");
+    expect(last(2)).toBeUndefined(); // row7 の欄には流れない（row6 が空行のため停止）
     w.unmount();
   });
 
