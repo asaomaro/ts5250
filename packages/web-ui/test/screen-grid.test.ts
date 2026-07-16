@@ -158,6 +158,23 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1]).toBe("ABC"); // 二重化せず ABC
   });
 
+  it("IME 合成で DBCS 全角を入力できる（compositionstart で欄クリア→compositionend で上書き取込）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus"); // スペース埋め表示（maxlength ぶん）
+    await input.trigger("compositionstart");
+    // 合成中は欄を空にして IME 挿入余地を作る（スペース埋め＋maxlength で挿入がブロックされるのを回避）
+    expect(el.value).toBe("");
+    el.value = "日本語"; // IME が確定文字を挿入
+    await input.trigger("compositionend");
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("日本語"); // DBCS 全角が欄先頭から取り込まれる
+  });
+
   it("hidden（パスワード）欄はスペース埋めで全桁●にならず、実入力分のみ・送信値も実入力", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 20, protected: false, hidden: true, numeric: false, mdt: false, value: "" }

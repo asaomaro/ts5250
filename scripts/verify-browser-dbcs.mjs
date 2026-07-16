@@ -56,17 +56,17 @@ try {
   // SBCS 入力
   await inputs.nth(0).click();
   await page.keyboard.type("HELLO");
-  // DBCS 入力（IME 合成イベントを忠実に発火）
+  // DBCS 入力: Chrome の実 IME（CDP）で合成→確定。スペース埋め＋maxlength による挿入ブロック
+  // （素のイベント発火では見逃す不具合）まで含めて実経路で検証する。
+  const cdp = await page.context().newCDPSession(page);
   const j = inputs.nth(1);
   await j.click();
-  await j.evaluate((el, text) => {
-    el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
-    el.value = text;
-    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", data: text }));
-    el.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
-  }, "日本語");
+  await page.keyboard.press("Home"); // 欄先頭から入力（12 バイト欄のオーバーフロー回避）
+  await cdp.send("Input.imeSetComposition", { text: "日本語", selectionStart: 3, selectionEnd: 3 });
+  await cdp.send("Input.insertText", { text: "日本語" }); // 確定
+  await page.waitForTimeout(300);
   const jval = (await j.inputValue()).replace(/\s+$/, "");
-  log(`DBCS 欄の値: "${jval}"`);
+  log(`DBCS 欄の値（実 IME）: "${jval}"`);
   ok = jval === "日本語" && ok;
 
   await page.keyboard.press("Enter");
