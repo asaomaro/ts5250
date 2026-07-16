@@ -34,6 +34,23 @@ node --env-file=.env scripts/verify-attributes.mjs # 検証（CLRTPGM が存在�
 補足: 実機では素の `DSPATR(BL)` はホストが赤・非点滅(0x28)を送るため、点滅は `COLOR(RED) DSPATR(BL)`(0x2A) で検証する。
 CLRTDSP/CLRTPGM は E2E 再利用のため MYLIB に残置している。
 
+## テスト自動化のテンプレート
+
+`example-automation.mjs` は **Session5250 でテスト自動化を書くための雛形**（LLM 非依存・ヘッドレス。
+自動化の三択のうち「決定論的ヘッドレス」＝最軽量。CI/リグレッション向き）。
+
+- 極小ハーネス `test(name, fn)` ＋ `assert()` で pass/fail 集計 → `process.exit`。
+- 薄い `Host` ドライバ: `connect()`（デバイス名を変えてリトライ＋メニュー待ち）/ `run(cmd)`（コマンド行→Enter）/
+  `key(k, cursor)` / `waitText(t)` / `text()` / `at(r,c)`（セル属性でアサート）。
+- 「接続 → 操作 → アサート → `finally` で後始末」を素直に書く。
+
+```sh
+node --env-file=.env scripts/example-automation.mjs
+```
+
+要点: `sendAid` にカーソル桁を載せる／`waitForScreen(until.text)` でホスト応答をサーバ側ブロック待ち（ポーリング不要）／
+`host.at(r,c).color` 等でセル単位に属性検証。新しい実機テストはこれをコピーして書き足すのが早い。
+
 ## その他
 
 `verify-autosignon` / `verify-signon` / `verify-mcp` / `verify-ws` / `verify-browser` / `verify-dbcs-tls` /
