@@ -29,16 +29,22 @@ node --env-file=.env scripts/<name>.mjs
 |---|---|
 | `build-attrtest.mjs` | `MYLIB` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
 | `verify-attributes.mjs` | 表示検証: `CLRTPGM`（7 色・反転・下線・高輝度・桁区切り・点滅・DBCS）＋ `INLPGM`（埋め込み属性バイトの色切替）。**CCSID 1399**。 |
-| `verify-input.mjs` | 入力検証: `INPPGM` へ `HELLO`／`日本語` を入力→Enter→エコー欄に返るか（＝入力→再エンコード→ホスト受信）。**CCSID 1399**。 |
+| `verify-input.mjs` | 入力検証（core 直叩き）: `INPPGM` へ `HELLO`／`日本語` を入力→Enter→エコー欄に返るか。**CCSID 1399**。 |
+| `verify-browser-dbcs.mjs` | 入力検証（実ブラウザ）: Playwright で DBCS プロファイルへ接続→`INPPGM`→SBCS＋DBCS(IME 合成)入力→エコー確認。 |
 
 ```sh
-node --env-file=.env scripts/build-attrtest.mjs     # 初回/再作成（既存なら不要）
-node --env-file=.env scripts/verify-attributes.mjs  # 表示検証
-node --env-file=.env scripts/verify-input.mjs       # 入力検証
+node --env-file=.env scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）
+node --env-file=.env scripts/verify-attributes.mjs   # 表示検証
+node --env-file=.env scripts/verify-input.mjs        # 入力検証（core）
+node --env-file=.env scripts/verify-browser-dbcs.mjs # 入力検証（ブラウザ/IME）
 ```
 
-補足: 実機では素の `DSPATR(BL)` はホストが赤・非点滅(0x28)を送るため、点滅は `COLOR(RED) DSPATR(BL)`(0x2A) で検証する。
-DBCS 入力欄は DDS データ型 `O`（DBCS-open）。フィクスチャは E2E 再利用のため MYLIB に残置している。
+補足:
+- 実機では素の `DSPATR(BL)` はホストが赤・非点滅(0x28)を送るため、点滅は `COLOR(RED) DSPATR(BL)`(0x2A) で検証する。
+- **DBCS（日本語）は CCSID 1399 のセッションが必須**。既定 `pub400`(CCSID 37) では表示も入力もできない。
+  `profiles.json.example` の `pub400jp`(CCSID 1399) のように DBCS プロファイルを用意して接続する
+  （ブラウザ操作でも同様。手動接続フォームなら CCSID に 1399 を指定）。ブラウザでの日本語入力は IME 経由（compositionend で取り込み）。
+- DBCS 入力欄は DDS データ型 `O`（DBCS-open）。フィクスチャは E2E 再利用のため MYLIB に残置している。
 
 ## テスト自動化のテンプレート
 
