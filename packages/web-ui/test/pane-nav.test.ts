@@ -217,7 +217,7 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
-    expect(el.value).toBe(" あいう "); // 列ビュー（SO/SI がスペース）
+    expect(el.value.replace(/ +$/, "")).toBe(" あいう"); // 列ビュー（SO/SI がスペース。末尾は欄長までパディング）
     expect(el.selectionStart).toBe(1); // あ の前（SO=桁0 をスキップ）
     await input.trigger("keydown", { key: "ArrowRight" });
     expect(el.selectionStart).toBe(2); // い の前（1 論理文字・reconcileFocus に壊されない）

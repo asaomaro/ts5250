@@ -351,7 +351,7 @@ describe("ScreenGrid", () => {
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
     // フォーカス中は列ビュー " あいう "（SO/SI 込み）。末尾（う の直後）へカーソルを置く
-    expect(el.value).toBe(" あいう ");
+    expect(el.value.replace(/ +$/, "")).toBe(" あいう"); // 末尾は欄長までパディング
     el.setSelectionRange(el.value.length, el.value.length);
     await input.trigger("compositionstart");
     // 合成中は純論理値 prefix「あいう」（SO/SI 無し）＋候補 → 候補が先頭でなく入力位置に出る
@@ -399,6 +399,45 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)).toEqual([1, "AB"]);
   });
 
+  it("DBCS 欄: 未入力桁までスペース埋めされ、任意桁にカーソルを置ける（SBCS 欄と同じ）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true }, attachTo: document.body });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe(" ".repeat(12)); // 空欄でも欄長ぶん（旧: 空文字でカーソルを動かせなかった）
+    el.setSelectionRange(5, 5);
+    expect(el.selectionStart).toBe(5); // 未入力桁へカーソルを置ける
+    w.unmount();
+  });
+
+  it("DBCS 欄: 上書きが既定・Insert で挿入（SBCS 欄と同じ。旧: 挿入固定）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true }, attachTo: document.body });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    for (const ch of ["A", "B", "C"]) await input.trigger("keydown", { key: ch });
+    let emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("ABC"); // 打った順に入る
+    // 2 桁目へ戻して上書き
+    el.setSelectionRange(1, 1);
+    await input.trigger("keydown", { key: "X" });
+    emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("AXC"); // 上書き（挿入なら AXBC）
+    // Insert トグルで挿入
+    el.setSelectionRange(1, 1);
+    await input.trigger("keydown", { key: "Insert" });
+    await input.trigger("keydown", { key: "Y" });
+    emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("AYXC");
+    w.unmount();
+  });
+
   it("DBCS 欄は休止時 SO/SI 込みの列ビューで表示し、編集/送信は SO/SI を除いた純データ", async () => {
     // ホストが書いた DBCS 欄セル: A(sbcs) SO あ(lead) tail SI …（col10=index9 から）
     const fields: Field[] = [
@@ -417,16 +456,17 @@ describe("ScreenGrid", () => {
     const el = input.element as HTMLInputElement;
     expect(el.value).toBe("A あ "); // columnView("Aあ")
 
-    // フォーカス中も列ビュー（SO/SI 込み）で編集する（ライブ表示）
+    // フォーカス中も列ビュー（SO/SI 込み）で編集する（ライブ表示）。
+    // 未入力桁にもカーソルを置けるよう欄長（8 桁）までスペース埋めする（SBCS 欄と同じ）
     await input.trigger("focus");
-    expect(el.value).toBe("A あ ");
+    expect(el.value).toBe("A あ " + "   ");
 
     // 末尾へ移動して SBCS 追加 → 送信値（emit）は SO/SI を含まない純データ、表示は列ビュー
     await input.trigger("keydown", { key: "End" });
     await input.trigger("keydown", { key: "B" });
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("AあB"); // 純データ
-    expect(el.value).toBe("A あ B"); // columnView("AあB")：あ の後ろに SI スペース
+    expect(emits.at(-1)![1]).toBe("AあB"); // 純データ（末尾パディングは送らない）
+    expect(el.value).toBe("A あ B" + "  "); // columnView("AあB")：あ の後ろに SI スペース＋埋め
 
     // blur で休止表示へ。standalone mount では edit は props.edits へ反映されないため
     // セル由来の論理値 "Aあ" の列ビューに戻る
@@ -452,7 +492,7 @@ describe("ScreenGrid", () => {
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
-    expect(el.value).toBe("A あ B"); // columnView("AあB")
+    expect(el.value).toBe("A あ B" + "  "); // columnView("AあB")＋欄長までの埋め
     expect(el.selectionStart).toBe(0); // A の前
     await input.trigger("keydown", { key: "ArrowRight" });
     expect(el.selectionStart).toBe(2); // SO(桁1) を飛ばして あ へ
@@ -523,7 +563,7 @@ describe("ScreenGrid", () => {
     const el = input.element as HTMLInputElement;
     expect(el.value).toBe("A{あ}"); // 休止表示: SO={ / SI=}
     await input.trigger("focus");
-    expect(el.value).toBe("A{あ}"); // 編集中も { }
+    expect(el.value).toBe("A{あ}" + "   "); // 編集中も { }（＋欄長までの埋め）
 
     // コピーは { }（SO/SI）を含まない純論理値
     el.setSelectionRange(0, el.value.length);

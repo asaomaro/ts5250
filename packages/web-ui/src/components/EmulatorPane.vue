@@ -69,10 +69,13 @@ function reconcileFocus(pos: { row: number; col: number }): void {
       if (!wasFocused) el.focus();
       // DBCS 欄は列ビューの caret を ScreenGrid（論理⇔列マッピング）が管理するため、
       // SBCS 用の caretInField（1桁=1文字）で native caret を上書きしない。既にフォーカス中なら
-      // ScreenGrid が置いた caret を尊重し、新規フォーカス時は onInputFocus が先頭へ置く。
+      // ScreenGrid が置いた caret を尊重する（上書きすると欄内の矢印移動が壊れる）。
+      // 欄外から矢印で入ってきたとき（!wasFocused）だけ、到達桁へ論理カーソルを合わせる。
       if (!f.dbcsType) {
         const caret = offset - slices[si]!.offset;
         el.setSelectionRange(caret, caret);
+      } else if (!wasFocused) {
+        gridRef.value?.setDbcsCaretAtColumn(f.index, pos.col);
       }
       // el.focus() が onInputFocus を発火し emit("cursor", 欄先頭) で override を巻き戻すため、
       // 目的桁を再確定する（論理カーソルと native キャレットの不一致を防ぐ。review R1-1）。

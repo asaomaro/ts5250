@@ -91,6 +91,36 @@ try {
     `value長=${caretMove.valueLen} caret=${caretMove.caret}`
   );
 
+  // ①-2 実クリックしたその桁でカーソルが保持される（先頭へ飛ばない）。SBCS/数値欄と同じ挙動。
+  await page.evaluate(() => document.activeElement.blur());
+  await page.waitForTimeout(100);
+  const box = await cmd.boundingBox();
+  const chW = box.width / 74; // コマンド行 1 行目は 74 桁
+  await page.mouse.click(box.x + chW * 20 + chW / 2, box.y + box.height / 2); // 20 桁目あたり
+  await page.waitForTimeout(200);
+  const clicked = await page.evaluate(() => document.activeElement.selectionStart);
+  rule("①-2 クリックした桁でカーソルが保持される（先頭へ飛ばない）", clicked >= 19 && clicked <= 21, `caret=${clicked}`);
+
+  // ①-3 矢印で欄外から入ってきたとき、到達した桁が保持される（先頭へ飛ばない）
+  //     コマンド行の 1 つ上の行（非入力）から ↓ で欄内へ入る。列位置は保たれる仕様。
+  const box2 = await cmd.boundingBox();
+  const chW2 = box2.width / 74;
+  await page.mouse.click(box2.x + chW2 * 30 + chW2 / 2, box2.y + box2.height / 2); // 30 桁目
+  await page.waitForTimeout(200);
+  await page.keyboard.press("ArrowUp"); // 上の非入力行へ出る（欄外＝free モード）
+  await page.waitForTimeout(200);
+  await page.keyboard.press("ArrowDown"); // 真下＝コマンド行へ戻る（列位置は保たれる仕様）
+  await page.waitForTimeout(250);
+  const arrived = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName,
+    caret: document.activeElement?.selectionStart ?? -1
+  }));
+  rule(
+    "①-3 矢印で入った桁が保持される（先頭へ飛ばない）",
+    arrived.tag === "INPUT" && arrived.caret > 10,
+    `tag=${arrived.tag} caret=${arrived.caret}`
+  );
+
   // ② 入力順（abcdefg と打ったら abcdefg になるか）
   await cmd.click();
   await page.keyboard.press("Home");
@@ -116,6 +146,30 @@ try {
   await page.waitForTimeout(200);
   const pasted = (await val()).replace(/\s+$/, "");
   rule("③ DBCS をコマンド行にペーストできる", /日本語/.test(pasted), `"${pasted}"`);
+
+  // 消してから次へ
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 12; i++) await page.keyboard.press("Delete");
+  await page.waitForTimeout(150);
+
+  // ④ 上書きが既定（5250）。ABCDE の途中 2 桁目に X → AXCDE
+  await cmd.click();
+  await page.keyboard.press("Home");
+  await page.keyboard.type("ABCDE", { delay: 30 });
+  await page.evaluate(() => document.activeElement.setSelectionRange(1, 1));
+  await page.keyboard.type("X", { delay: 30 });
+  await page.waitForTimeout(200);
+  const ow = (await val()).replace(/\s+$/, "");
+  rule("④ 上書きが既定（AXCDE。挿入なら AXBCDE になる）", ow === "AXCDE", `"${ow}"`);
+
+  // ⑤ Insert トグルで挿入になる
+  await page.evaluate(() => document.activeElement.setSelectionRange(1, 1));
+  await page.keyboard.press("Insert");
+  await page.keyboard.type("Y", { delay: 30 });
+  await page.waitForTimeout(200);
+  const ins = (await val()).replace(/\s+$/, "");
+  rule("⑤ Insert トグルで挿入になる（AYXCDE）", ins === "AYXCDE", `"${ins}"`);
+  await page.keyboard.press("Insert"); // 戻す
 
   if (errors.length) {
     ok = false;
