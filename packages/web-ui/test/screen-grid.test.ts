@@ -114,6 +114,24 @@ describe("ScreenGrid", () => {
     expect(style).not.toContain("20ch");
   });
 
+  it("満杯欄で ArrowRight 末尾まで移動→Backspace で最終文字を削除できる", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "ABC" } // フルケタ
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(0, 0);
+    await input.trigger("keydown", { key: "ArrowRight" }); // 0→1
+    await input.trigger("keydown", { key: "ArrowRight" }); // 1→2
+    await input.trigger("keydown", { key: "ArrowRight" }); // 2→3（末尾）
+    expect(el.selectionStart).toBe(3); // 最終文字の後ろに止まれる
+    await input.trigger("keydown", { key: "Backspace" }); // 最終文字 C を削除
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)).toEqual([1, "AB"]);
+  });
+
   it("keydown 制御で文字入力し edit を emit する（上書きモード・v-model 不使用）", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }

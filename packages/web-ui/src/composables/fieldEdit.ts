@@ -15,7 +15,9 @@ export interface EditState {
 
 export function initEdit(value: string, fieldLength: number, cursor = 0): EditState {
   const chars = padTo(value.slice(0, fieldLength), fieldLength);
-  return { chars, cursor: clamp(cursor, 0, fieldLength - 1), insertMode: false };
+  // カーソルは 0..fieldLength（末尾＝最終文字の後ろ）を許可。末尾に置けると満杯欄でも
+  // Backspace で最終文字を消せる（cursor===len で Backspace は index len-1 を削除）。
+  return { chars, cursor: clamp(cursor, 0, fieldLength), insertMode: false };
 }
 
 /** value 文字列（末尾空白を保持したまま）を返す */
@@ -52,6 +54,7 @@ export function backspace(state: EditState): EditState {
 
 /** Delete: カーソル位置を削除し以降を左詰め */
 export function del(state: EditState): EditState {
+  if (state.cursor >= state.chars.length) return state; // 末尾（後ろ）では削除対象が無い
   const chars = [...state.chars];
   chars.splice(state.cursor, 1);
   chars.push(" ");
@@ -59,18 +62,19 @@ export function del(state: EditState): EditState {
 }
 
 export function moveCursor(state: EditState, delta: number): EditState {
-  return { ...state, cursor: clamp(state.cursor + delta, 0, state.chars.length - 1) };
+  // 上限は chars.length（末尾＝最終文字の後ろ）まで許可。右端でも末尾に止まれる。
+  return { ...state, cursor: clamp(state.cursor + delta, 0, state.chars.length) };
 }
 
 export function home(state: EditState): EditState {
   return { ...state, cursor: 0 };
 }
 
-/** End: 末尾の非空白の次（入力継続位置）へ */
+/** End: 末尾の非空白の次（入力継続位置）へ。満杯欄なら末尾（len）に到達する。 */
 export function end(state: EditState): EditState {
   let i = state.chars.length - 1;
   while (i >= 0 && state.chars[i] === " ") i--;
-  return { ...state, cursor: clamp(i + 1, 0, state.chars.length - 1) };
+  return { ...state, cursor: clamp(i + 1, 0, state.chars.length) };
 }
 
 export function toggleInsert(state: EditState): EditState {

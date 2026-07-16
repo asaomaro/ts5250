@@ -255,7 +255,8 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   insertMode.value = edit.insertMode;
   emit("edit", f.index, trimmed);
   // 欄内のキャレット移動・入力で論理カーソルも追従させる（AID 送信位置・オーバーレイ整合）。
-  // これで field モード中も有効カーソルが native キャレットの桁を指す。
+  // これで field モード中も有効カーソルが native キャレットの桁を指す。末尾（cursor===visLen）は
+  // 欄の右端境界（f.col+visLen）を指し、reconcileFocus がその境界を「欄の末尾」として欄内に留める。
   emit("cursor", f.row, f.col + Math.min(edit.cursor, visLen(f)));
 }
 
@@ -377,9 +378,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   if (ev.key === "ArrowRight" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
-    // moveCursor は cursor を chars.length-1（最終桁）でクランプするため、最終桁より手前でのみ欄内移動。
-    // 最終桁（cursor===visLen-1）では委譲し、欄の右隣の非入力セルへ出る（左端の cursor===0 と対称）。
-    if (edit.cursor < visLen(f) - 1) {
+    // 末尾（cursor===visLen＝最終文字の後ろ）まで欄内で移動できる。これで満杯欄でも末尾に止まれ、
+    // Backspace で最終文字を削除できる。末尾に居るときの ArrowRight だけ委譲して欄の右隣セルへ出る。
+    if (edit.cursor < visLen(f)) {
       ev.stopPropagation();
       edit = moveCursor(edit, 1);
       sync(el, f);

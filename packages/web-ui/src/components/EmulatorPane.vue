@@ -41,8 +41,15 @@ function onCursor(row: number, col: number): void {
 function reconcileFocus(pos: { row: number; col: number }): void {
   const snap = snapshot.value;
   if (!snap) return;
-  const f = fieldAt(pos.row, pos.col, snap.fields);
+  let f = fieldAt(pos.row, pos.col, snap.fields);
   const active = document.activeElement;
+  // 末尾キャレット: 欄の右端境界（col === f.col+length＝最終文字の後ろ）は独立したセルを持たないが、
+  // その欄の <input> が既にフォーカス中なら「欄の末尾」として欄内に留める（満杯欄でも末尾に止まれ、
+  // Backspace で最終文字を消せる）。欄外から境界へ入ってきた場合（input 非フォーカス）は自由セル扱い。
+  if (!f && active instanceof HTMLInputElement) {
+    const cand = editableFields().find((fld) => fld.row === pos.row && pos.col === fld.col + fld.length);
+    if (cand && editableInputs()[editableFields().indexOf(cand)] === active) f = cand;
+  }
   if (f && !f.protected) {
     const el = editableInputs()[editableFields().indexOf(f)];
     if (el) {
@@ -152,13 +159,6 @@ function onLocal(action: LocalAction): void {
       // ここに来るのは欄の端／非入力セル／上下。いずれも 1 セル移動＋モード調停。
       moveCell(action);
       break;
-    case "home":
-      focusInput(inputs, 0);
-      break;
-    case "end":
-      focusInput(inputs, inputs.length - 1);
-      break;
-  }
     case "word-left":
     case "word-right":
     case "word-up":
@@ -171,6 +171,13 @@ function onLocal(action: LocalAction): void {
       onCursor(next.row, next.col);
       break;
     }
+    case "home":
+      focusInput(inputs, 0);
+      break;
+    case "end":
+      focusInput(inputs, inputs.length - 1);
+      break;
+  }
 }
 
 const rawKeydown = makeKeydownHandler({

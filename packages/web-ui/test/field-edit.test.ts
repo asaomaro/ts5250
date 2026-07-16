@@ -72,7 +72,31 @@ describe("fieldEdit — カーソル移動", () => {
     s = moveCursor(s, -1);
     expect(s.cursor).toBe(1);
     s = moveCursor(s, 10);
-    expect(s.cursor).toBe(4); // クランプ
+    expect(s.cursor).toBe(5); // 末尾（len）でクランプ
+  });
+
+  it("矢印で末尾（len＝最終文字の後ろ）まで到達できる", () => {
+    let s = initEdit("ABCDE", 5, 4); // 満杯・最終文字上
+    s = moveCursor(s, 1);
+    expect(s.cursor).toBe(5); // 末尾に止まれる（1 桁隣の欄外へ出ない）
+    s = moveCursor(s, 1);
+    expect(s.cursor).toBe(5); // クランプ
+  });
+
+  it("満杯欄でも末尾へ移動して Backspace で最終文字を削除できる", () => {
+    let s = initEdit("ABCDE", 5, 0); // フルケタ
+    s = end(s);
+    expect(s.cursor).toBe(5); // End で末尾へ
+    s = backspace(s);
+    expect(editValue(s)).toBe("ABCD "); // 最終文字 E を削除
+    expect(s.cursor).toBe(4);
+  });
+
+  it("末尾（len）での Delete は無操作（削除対象が無い）", () => {
+    let s = initEdit("ABCDE", 5, 5);
+    s = del(s);
+    expect(editValue(s)).toBe("ABCDE");
+    expect(s.cursor).toBe(5);
   });
 });
 

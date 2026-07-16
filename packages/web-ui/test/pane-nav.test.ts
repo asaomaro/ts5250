@@ -179,8 +179,9 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
-  it("入力欄の最終桁で ArrowRight すると右隣の非入力セルへ出る（左端の対称・回帰）", async () => {
-    // 旧: moveCursor が最終桁でクランプ＋条件 cursor<visLen で最終桁に張り付き、右へ出られなかった
+  it("入力欄は末尾（最終文字の後ろ）に止まれ、さらに ArrowRight で右隣セルへ出る（回帰）", async () => {
+    // length 3 の欄。桁 0,1,2 がセル、3 が末尾（最終文字の後ろ）。末尾に止まれることでフルケタでも
+    // Backspace で最終文字を消せる（旧: 最終桁 2 で即欄外へ出て末尾に止まれなかった）。
     const f: Field = { index: 1, row: 5, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
     seed([f]);
     const w = mountPane();
@@ -191,8 +192,10 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     const input = w.find("input.grid-input");
     await input.trigger("keydown", { key: "ArrowRight" }); // 0→1
     await input.trigger("keydown", { key: "ArrowRight" }); // 1→2（最終桁）
-    expect(document.activeElement).toBe(els[0]); // まだ欄内
-    await input.trigger("keydown", { key: "ArrowRight" }); // 最終桁でさらに右 → 欄外へ委譲
+    await input.trigger("keydown", { key: "ArrowRight" }); // 2→3（末尾）
+    expect(document.activeElement).toBe(els[0]); // 末尾でもまだ欄内
+    expect(els[0]!.selectionStart).toBe(3); // native キャレットも末尾
+    await input.trigger("keydown", { key: "ArrowRight" }); // 末尾でさらに右 → 欄外へ委譲
     expect(document.activeElement).not.toBe(els[0]); // 右隣の非入力セルへ出て blur
     w.unmount();
   });
@@ -289,7 +292,6 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     expect(keyMsg).toMatchObject({ type: "key", key: "F3", cursor: { row: 3, col: 22 } });
     w.unmount();
   });
-});
 
   it("Ctrl+→/← で画面上の次/前の語頭へ自由カーソルが飛ぶ（ACS 頭出し・欄外テキストも対象）", async () => {
     // フィールド無し。row1 = "TEXT1  TEXT2"（桁1-5=TEXT1, 桁8-12=TEXT2）。初期カーソル (1,1)
@@ -325,3 +327,4 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     expect(w.find(".cursor").attributes("style")).toContain("left: 0ch");
     w.unmount();
   });
+});
