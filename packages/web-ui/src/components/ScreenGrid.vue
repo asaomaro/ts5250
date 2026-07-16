@@ -232,6 +232,7 @@ const composing = ref(false);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
+let composeStart = 0; // IME 合成を開始した欄内桁（compositionend で上書き開始位置に使う）
 
 function beginEdit(f: Field, inputEl: HTMLInputElement): void {
   edit = initEdit(inputValue(f), visLen(f), inputEl.selectionStart ?? 0);
@@ -418,15 +419,34 @@ function onInputBeforeInput(f: Field, ev: InputEvent): void {
   }
 }
 
+/** IME 合成開始: 合成中は欄を空にする。
+ *  非 hidden 欄はスペース埋めで maxlength を満たしており、その状態だと IME が確定文字を挿入できず
+ *  空白のまま消える（DBCS 全角が入力できない）。合成中だけ欄を空にして挿入余地を作る。 */
+function onCompositionStart(f: Field, ev: CompositionEvent): void {
+  if (f.protected || props.busy) return;
+  composing.value = true;
+  const el = ev.target as HTMLInputElement;
+  if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
+  edit = edit!;
+  // クリック等で動いた native caret に合わせて合成開始桁を決める
+  const nativeCaret = el.selectionStart;
+  if (nativeCaret !== null) edit = { ...edit, cursor: Math.min(nativeCaret, visLen(f)) };
+  composeStart = edit.cursor;
+  el.value = ""; // スペース埋めを外して IME 挿入余地を作る（compositionend で欄値を復元）
+}
+
 function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   composing.value = false;
+  if (f.protected) return;
   const el = ev.target as HTMLInputElement;
-  // IME 確定後は native input の現在値を field 値の真とみなして取り込む
-  // （長さクランプ・型フィルタ・カーソルは selectionStart。旧値からの再打ち込みはしない）
-  const vl = visLen(f);
-  const filtered = [...el.value.slice(0, vl)].filter((ch) => acceptsChar(f, ch)).join("");
-  const caret = Math.min(el.selectionStart ?? filtered.length, vl);
-  edit = initEdit(filtered, vl, caret);
+  if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
+  edit = edit!;
+  // 合成確定文字を composeStart から 5250 上書きで流し込む（型フィルタ・欄長クランプ）。
+  // el.value は合成中に空へしたので、ここには確定文字のみが入っている。
+  edit = { ...edit, cursor: composeStart };
+  for (const ch of [...el.value]) {
+    if (acceptsChar(f, ch)) edit = typeChar(edit, ch);
+  }
   editFieldIndex = f.index;
   sync(el, f);
 }
@@ -558,7 +578,7 @@ onBeforeUnmount(() => ro?.disconnect());
           @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
           @focus="onInputFocus(seg.field!, $event)"
           @click="onInputClick(seg.field!, $event as MouseEvent)"
-          @compositionstart="composing = true"
+          @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
           @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
         />
         <span v-else-if="seg.kind === 'dbcs'" class="grid-span grid-dbcs" :class="seg.cls">{{ seg.text }}</span>
