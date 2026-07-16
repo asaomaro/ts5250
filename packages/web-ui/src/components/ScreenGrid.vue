@@ -366,13 +366,13 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   if (ev.key === "ArrowRight") {
     ev.preventDefault();
-    if (edit.cursor < visLen(f)) {
-      // 欄内: キャレットを 1 桁進める。ペインのセル移動へは伝播させない
+    // moveCursor は cursor を chars.length-1（最終桁）でクランプするため、最終桁より手前でのみ欄内移動。
+    // 最終桁（cursor===visLen-1）では委譲し、欄の右隣の非入力セルへ出る（左端の cursor===0 と対称）。
+    if (edit.cursor < visLen(f) - 1) {
       ev.stopPropagation();
       edit = moveCursor(edit, 1);
       sync(el, f);
     }
-    // 右端（cursor===visLen）は委譲。欄の外の非入力セルへ自由に出られる
     return;
   }
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入

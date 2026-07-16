@@ -179,6 +179,24 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  it("入力欄の最終桁で ArrowRight すると右隣の非入力セルへ出る（左端の対称・回帰）", async () => {
+    // 旧: moveCursor が最終桁でクランプ＋条件 cursor<visLen で最終桁に張り付き、右へ出られなかった
+    const f: Field = { index: 1, row: 5, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    seed([f]);
+    const w = mountPane();
+    await nextTick();
+    const els = inputs(w);
+    els[0]!.focus();
+    els[0]!.setSelectionRange(0, 0);
+    const input = w.find("input.grid-input");
+    await input.trigger("keydown", { key: "ArrowRight" }); // 0→1
+    await input.trigger("keydown", { key: "ArrowRight" }); // 1→2（最終桁）
+    expect(document.activeElement).toBe(els[0]); // まだ欄内
+    await input.trigger("keydown", { key: "ArrowRight" }); // 最終桁でさらに右 → 欄外へ委譲
+    expect(document.activeElement).not.toBe(els[0]); // 右隣の非入力セルへ出て blur
+    w.unmount();
+  });
+
   it("非入力セルから矢印で編集可欄セルに入ると、その欄へ focus（field モードへ復帰）", async () => {
     seed([field(1, 5)]); // (5,10) len5
     const w = mountPane();
