@@ -290,3 +290,38 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 });
+
+  it("Ctrl+→/← で画面上の次/前の語頭へ自由カーソルが飛ぶ（ACS 頭出し・欄外テキストも対象）", async () => {
+    // フィールド無し。row1 = "TEXT1  TEXT2"（桁1-5=TEXT1, 桁8-12=TEXT2）。初期カーソル (1,1)
+    const s = snap([]);
+    const put = (r: number, c0: number, text: string): void => {
+      [...text].forEach((ch, i) => (s.cells[r]![c0 + i] = { ...s.cells[r]![c0 + i]!, char: ch }));
+    };
+    put(0, 0, "TEXT1");
+    put(0, 7, "TEXT2");
+    sessionsStore.byId.clear();
+    sessionsStore.order = [];
+    sessionsStore.add({
+      sessionId: SID,
+      label: "t",
+      snapshot: s,
+      edits: new Map(),
+      cursor: { row: 1, col: 1 },
+      connected: true,
+      readOnly: false,
+      client: {} as WsClient
+    });
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    // 自由カーソルのオーバーレイ位置で観測（left=(col-1)ch）。欄外なので .cursor が描画される
+    // (1,1)=TEXT1 の T（語頭）から Ctrl+→ → 次の語 TEXT2 の頭（1,8）= left 7ch
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await nextTick();
+    expect(w.find(".cursor").attributes("style")).toContain("left: 7ch");
+    // Ctrl+← で TEXT1 の頭（1,1）= left 0ch へ戻る
+    await w.find(".pane").trigger("keydown", { key: "ArrowLeft", ctrlKey: true });
+    await nextTick();
+    expect(w.find(".cursor").attributes("style")).toContain("left: 0ch");
+    w.unmount();
+  });

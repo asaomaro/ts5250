@@ -51,6 +51,61 @@ export function moveCursor(cur: Pos, dir: Dir, rows: number, cols: number): Pos 
   return { row, col };
 }
 
+/**
+ * pos の方向 dir にある「語頭」セルへ移動する（ACS の Ctrl+矢印 頭出し）。
+ * 語 = 非空白セルの連なり。入力欄・保護テキストを問わず、表示文字だけで判定する
+ * （例: `TEXT1  ␣  TEXT2` の空白にカーソルがあるとき Ctrl+→ で TEXT2 の先頭 T へ）。
+ * 語頭 = 非空白かつ「行頭 or 左隣が空白」のセル（全角後半 dbcs-tail は語頭にしない）。
+ * - left/right: 読み順（行→桁、行をまたぐ）で前後の語頭へ。
+ * - up/down: **同じ列位置のまま**、上/下方向で最も近い非空白セルへ（空白列はスキップ）。
+ *   例: `ABCDEFG`/`HIJ LMN`/`OPQxSTU` の x(3行4列)で Ctrl+↑ → 空白の 2 行 4 列を飛ばし 1 行 4 列 D へ。
+ * 見つからなければ pos を返す（画面端で停止）。cells は [row-1][col-1] の 0 始まりグリッド。
+ */
+export function nextWordStart(cells: readonly Cell[][], pos: Pos, dir: Dir, rows: number, cols: number): Pos {
+  const isBlank = (r: number, c: number): boolean => {
+    const ch = cells[r]?.[c]?.char;
+    return ch === undefined || ch === "" || ch === " ";
+  };
+  const isWordStart = (r: number, c: number): boolean => {
+    if (isBlank(r, c)) return false;
+    if (cells[r]?.[c]?.kind === "dbcs-tail") return false; // 全角後半は語頭にしない
+    return c === 0 || isBlank(r, c - 1);
+  };
+  if (dir === "left" || dir === "right") {
+    const idx = (pos.row - 1) * cols + (pos.col - 1);
+    const max = rows * cols;
+    if (dir === "right") {
+      for (let i = idx + 1; i < max; i++) {
+        if (isWordStart(Math.floor(i / cols), i % cols)) return { row: Math.floor(i / cols) + 1, col: (i % cols) + 1 };
+      }
+    } else {
+      for (let i = idx - 1; i >= 0; i--) {
+        if (isWordStart(Math.floor(i / cols), i % cols)) return { row: Math.floor(i / cols) + 1, col: (i % cols) + 1 };
+      }
+    }
+    return pos;
+  }
+  // up/down: 同一列で、空白をスキップして最も近い非空白セルへ（列位置は保つ）。
+  // 全角セル（lead/tail）は「内容あり」とし、tail に載ったら lead へ丸める。
+  const col0 = pos.col - 1;
+  const hasContent = (r: number): boolean => {
+    const cell = cells[r]?.[col0];
+    if (!cell) return false;
+    if (cell.kind === "dbcs-lead" || cell.kind === "dbcs-tail") return true;
+    return !isBlank(r, col0);
+  };
+  if (dir === "down") {
+    for (let r = pos.row; r < rows; r++) {
+      if (hasContent(r)) return roundToDbcsLead({ row: r + 1, col: pos.col }, cells);
+    }
+  } else {
+    for (let r = pos.row - 2; r >= 0; r--) {
+      if (hasContent(r)) return roundToDbcsLead({ row: r + 1, col: pos.col }, cells);
+    }
+  }
+  return pos; // 端で停止
+}
+
 /** (row,col) を含むフィールドを返す（単一行に収まる範囲で判定。無ければ undefined）。 */
 export function fieldAt(row: number, col: number, fields: readonly Field[]): Field | undefined {
   return fields.find((f) => f.row === row && col >= f.col && col < f.col + f.length);

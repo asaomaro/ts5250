@@ -1,7 +1,19 @@
 import type { AidKey } from "@as400web/core";
 import { keybindingsStore } from "../stores/keybindings.js";
 
-export type LocalAction = "home" | "end" | "tab" | "shift-tab" | "left" | "right" | "up" | "down";
+export type LocalAction =
+  | "home"
+  | "end"
+  | "tab"
+  | "shift-tab"
+  | "left"
+  | "right"
+  | "up"
+  | "down"
+  | "word-left"
+  | "word-right"
+  | "word-up"
+  | "word-down";
 
 /** キーイベントを AID キー・ローカル操作・null（非対象）に分類する（純関数・テスト可能） */
 export function classifyKey(ev: {
@@ -11,6 +23,16 @@ export function classifyKey(ev: {
   altKey: boolean;
   metaKey: boolean;
 }): { aid?: AidKey; local?: LocalAction } {
+  // Ctrl+矢印 = 語頭ジャンプ（ACS のカーソル頭出し。入力欄に限らず画面全体で動く）。
+  // 左右は前後の語頭へ、上下は内容のある近接行の先頭語（行の頭）へ。
+  // 他の修飾つき（Alt+PageUp/Down のタブ切替・Alt+矢印のペイン移動）は App 側の
+  // グローバルハンドラが担うため、ここでは対象外（{} を返して素通しさせる）。
+  if (ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
+    if (ev.key === "ArrowLeft") return { local: "word-left" };
+    if (ev.key === "ArrowRight") return { local: "word-right" };
+    if (ev.key === "ArrowUp") return { local: "word-up" };
+    if (ev.key === "ArrowDown") return { local: "word-down" };
+  }
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return {};
   const k = ev.key;
 

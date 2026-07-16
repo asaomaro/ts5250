@@ -31,6 +31,22 @@ describe("classifyKey", () => {
     expect(classifyKey({ ...base, key: "F5", ctrlKey: true })).toEqual({});
   });
 
+  it("Ctrl+矢印は語頭ジャンプ（上下左右すべてローカル操作）", () => {
+    expect(classifyKey({ ...base, key: "ArrowLeft", ctrlKey: true })).toEqual({ local: "word-left" });
+    expect(classifyKey({ ...base, key: "ArrowRight", ctrlKey: true })).toEqual({ local: "word-right" });
+    expect(classifyKey({ ...base, key: "ArrowUp", ctrlKey: true })).toEqual({ local: "word-up" });
+    expect(classifyKey({ ...base, key: "ArrowDown", ctrlKey: true })).toEqual({ local: "word-down" });
+  });
+
+  it("タブ切替(Alt+PageUp/Down)・ペイン移動(Alt+矢印)は App 側担当のため対象外", () => {
+    expect(classifyKey({ ...base, key: "PageDown", altKey: true })).toEqual({});
+    expect(classifyKey({ ...base, key: "PageUp", altKey: true })).toEqual({});
+    expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true })).toEqual({});
+    expect(classifyKey({ ...base, key: "ArrowDown", altKey: true })).toEqual({});
+    // Ctrl+Shift+← は語頭ジャンプにしない（純粋な Ctrl+矢印のみ）
+    expect(classifyKey({ ...base, key: "ArrowLeft", ctrlKey: true, shiftKey: true })).toEqual({});
+  });
+
   it("通常文字は対象外（input へ通す）", () => {
     expect(classifyKey({ ...base, key: "a" })).toEqual({});
   });

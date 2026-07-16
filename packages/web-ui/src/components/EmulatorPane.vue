@@ -6,7 +6,7 @@ import StatusBar from "./StatusBar.vue";
 import { sessionsStore } from "../stores/sessions.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
-import { moveCursor, fieldAt, caretInField, roundToDbcsLead, type Dir } from "../composables/useCursor.js";
+import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
@@ -159,6 +159,18 @@ function onLocal(action: LocalAction): void {
       focusInput(inputs, inputs.length - 1);
       break;
   }
+    case "word-left":
+    case "word-right":
+    case "word-up":
+    case "word-down": {
+      // ACS の Ctrl+矢印 頭出し: 画面上の語頭へ自由カーソルを飛ばす（欄内外を問わない）。
+      const snap = snapshot.value;
+      if (!snap) break;
+      const dir = action.slice("word-".length) as Dir;
+      const next = nextWordStart(snap.cells, cursor.value, dir, snap.rows, snap.cols);
+      onCursor(next.row, next.col);
+      break;
+    }
 }
 
 const rawKeydown = makeKeydownHandler({

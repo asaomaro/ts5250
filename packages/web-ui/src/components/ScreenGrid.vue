@@ -362,7 +362,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     sync(el, f);
     return;
   }
-  if (ev.key === "ArrowLeft") {
+  // Ctrl+←/→（語頭ジャンプ）・Alt+←/→（ペイン移動）は欄内で消費せず、
+  // ペイン keymap／App グローバルへ委譲する（preventDefault しない）。
+  if (ev.key === "ArrowLeft" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (edit.cursor > 0) {
       // 欄内: キャレットを 1 桁戻す。ペインのセル移動へは伝播させない
@@ -373,7 +375,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     // 左端（cursor===0）は stopPropagation せず、ペインの自由カーソル（セル移動）へ委譲する
     return;
   }
-  if (ev.key === "ArrowRight") {
+  if (ev.key === "ArrowRight" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     // moveCursor は cursor を chars.length-1（最終桁）でクランプするため、最終桁より手前でのみ欄内移動。
     // 最終桁（cursor===visLen-1）では委譲し、欄の右隣の非入力セルへ出る（左端の cursor===0 と対称）。
