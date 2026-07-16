@@ -92,8 +92,13 @@ const guiSchema = z.object({
   )
 });
 
-/** 画面を返すツールの structuredContent スキーマ（grid はテキスト側。ここは fields/cursor/meta） */
+/** 画面を返すツールの structuredContent スキーマ。
+ *  text（固定形式の画面イメージ）は content[].text と同内容を持たせる: outputSchema を持つツールでは
+ *  クライアントが structuredContent のみを採用し content[].text を捨てることがあり、それだと画面が
+ *  LLM に届かないため。 */
 const screenOutShape = {
+  /** 固定形式の画面テキスト（grid＋fields。content[].text と同内容） */
+  text: z.string(),
   sessionId: z.string(),
   rows: z.number(),
   cols: z.number(),
@@ -111,9 +116,11 @@ function fieldTarget(f: FieldInput["field"]): { index: number } | { row: number;
   return typeof f === "number" ? { index: f } : { row: f.row, col: f.col };
 }
 
-/** 画面応答（text=固定形式、structuredContent=fields/cursor/meta）を組み立てる */
+/** 画面応答を組み立てる。画面テキストは content[].text と structuredContent.text の両方に載せる */
 function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boolean) {
+  const text = screenToText(snap, fmt);
   const structured: Record<string, unknown> = {
+    text,
     sessionId: snap.sessionId,
     rows: snap.rows,
     cols: snap.cols,
@@ -125,7 +132,7 @@ function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boole
   if (snap.gui !== undefined) structured["gui"] = snap.gui;
   if (timedOut !== undefined) structured["timedOut"] = timedOut;
   return {
-    content: [{ type: "text" as const, text: screenToText(snap, fmt) }],
+    content: [{ type: "text" as const, text }],
     structuredContent: structured
   };
 }
