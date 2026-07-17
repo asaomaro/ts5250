@@ -69,15 +69,15 @@ export function isDbcsCcsid(ccsid: number): boolean {
 /**
  * プリンターセッションの端末タイプ名。
  *
- * SBCS = IBM-3812-1（tn5250 lp5250d が使う唯一のプリンター型番。PUB400 実機で I902＝
- * 「Session successfully started」を確認済み）。
+ * SBCS/DBCS とも IBM-3812-1（tn5250 lp5250d が使う唯一のプリンター型番）。
+ * DBCS でも別型番（IBM-5553 系）は不要で、Japanese の扱いは NEW-ENVIRON の
+ * KBDTYPE/CODEPAGE/CHARSET（`deviceEnvFor`）でホストに申告する。
  *
- * DBCS プリンターの型番は tn5250 にも RFC 1205 にも定義が無く（DBCS プリンターは未実装）、
- * 表示 DBCS の 5555 系と同じく実機総当たりで決める必要がある。DBCS 対応は後続作業のため、
- * 現状は SBCS 型番を返す（DBCS スプールの実 SCS 採取後に分岐を追加する）。
+ * PUB400 実機で確認済み: SBCS(CCSID 37) / DBCS(CCSID 1399) いずれも IBM-3812-1 で I902＝
+ * 「Session successfully started」で接続でき、DBCS スプールは SCS 中に SO/SI 付きの全角が
+ * 正しく届く（`scripts/verify-printer.mjs` / `verify-printer-dbcs.mjs`）。
  */
 export function printerTerminalTypeFor(ccsid: number): string {
-  // DBCS の型番確定は後続。現状は IBM-3812-1（SBCS）で申告する。
-  void ccsid;
+  void ccsid; // 現状 SBCS/DBCS とも IBM-3812-1（CCSID は deviceEnvFor で申告）
   return "IBM-3812-1";
 }

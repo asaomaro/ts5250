@@ -1,4 +1,4 @@
-import { codecForCcsid } from "../codec/codec.js";
+import { codecForCcsid, SO, SI, type Codec } from "../codec/codec.js";
 
 /**
  * SCS（SNA Character String）デコーダ。プリンターセッションでホストから届く印刷データを
@@ -41,10 +41,12 @@ const MAX_ROW = 32767; // 暴走データでの過大確保を防ぐ安全上限
 const MAX_COL = 32767;
 
 export class ScsDecoder {
-  private readonly decodeByte: (b: number) => number;
+  private readonly codec: Codec;
+  private readonly isDbcs: boolean;
 
   constructor(ccsid: number, private readonly warn?: (msg: string) => void) {
-    this.decodeByte = (b) => codecForCcsid(ccsid).decodeByte(b);
+    this.codec = codecForCcsid(ccsid);
+    this.isDbcs = this.codec.isDbcs;
   }
 
   /**
@@ -59,19 +61,34 @@ export class ScsDecoder {
     let col = 1;
     let maxRow = 0;
     let maxCol = 0;
+    let dbcsMode = false; // SO/SI シフト状態（DBCS コーデックのみ）
 
-    const put = (ch: string): void => {
-      if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
+    const cellAt = (c: number): void => {
+      // grid[row-1] を c 桁まで空白で伸ばす
       let line = grid[row - 1];
       if (!line) {
         line = [];
         grid[row - 1] = line;
       }
-      while (line.length < col) line.push(" ");
-      line[col - 1] = ch;
+      while (line.length < c) line.push(" ");
+    };
+    const put = (ch: string): void => {
+      if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
+      cellAt(col);
+      grid[row - 1]![col - 1] = ch;
       if (row > maxRow) maxRow = row;
       if (col > maxCol) maxCol = col;
       col += 1;
+    };
+    // 全角グリフ（2 桁を占める）。後半桁は継続（空文字列）にして join で桁を保つ
+    const putWide = (ch: string): void => {
+      if (row < 1 || col < 1 || row > MAX_ROW || col + 1 > MAX_COL) return;
+      cellAt(col + 1);
+      grid[row - 1]![col - 1] = ch;
+      grid[row - 1]![col] = ""; // 継続桁
+      if (row > maxRow) maxRow = row;
+      if (col + 1 > maxCol) maxCol = col + 1;
+      col += 2;
     };
     const flushPage = (): void => {
       if (maxRow === 0 && maxCol === 0) return; // 空ページは出さない
@@ -92,6 +109,20 @@ export class ScsDecoder {
 
     while (i < n) {
       const b = scs[i++]!;
+      // DBCS モード中はバイトを 2 個ずつ全角として消費する（制御コード値と衝突しないよう switch より前で処理）。
+      // SI で SBCS へ戻る。SO は冗長として読み飛ばす。
+      if (this.isDbcs && dbcsMode) {
+        if (b === SI) {
+          dbcsMode = false;
+        } else if (b === SO) {
+          /* 冗長 SO */
+        } else {
+          const b2 = next();
+          if (b2 < 0) break;
+          putWide(String.fromCodePoint(this.codec.decodeDbcsPair!(b, b2)));
+        }
+        continue;
+      }
       switch (b) {
         case NOOP:
         case IGNORE_FF:
@@ -118,7 +149,7 @@ export class ScsDecoder {
           for (let k = 0; k < count; k++) {
             const rb = next();
             if (rb < 0) break;
-            put(String.fromCodePoint(this.decodeByte(rb)));
+            put(String.fromCodePoint(this.codec.decodeByte(rb)));
           }
           break;
         }
@@ -140,7 +171,9 @@ export class ScsDecoder {
           break;
         }
         default:
-          put(String.fromCodePoint(this.decodeByte(b)));
+          // SBCS モード: SO で DBCS モードへ、それ以外は SBCS 1 バイト
+          if (this.isDbcs && b === SO) dbcsMode = true;
+          else put(String.fromCodePoint(this.codec.decodeByte(b)));
           break;
       }
     }
