@@ -31,5 +31,5 @@
 ## 統合・文書
 - [x] T14: `scripts/verify-printer.mjs`（実機 SBCS: I902→スプール受信→論理ページ、CPA3394 応答込み）。
       `artifacts/probe-printer-*.mjs` を種に。（依存: T5）
-- [ ] T15: `README.md`/`docs/PROTOCOL.md`/`scripts/README.md` にプリンターセッション節（対応範囲・MCP ツール・
+- [x] T15: `README.md`/`docs/PROTOCOL.md`/`scripts/README.md` にプリンターセッション節（対応範囲・MCP ツール・
       CPA3394 運用・既知の制約: DBCS 未対応/自動PDF未実装）。（依存: T12,T14）
