@@ -1,7 +1,7 @@
 schema: 3
 slug: printer-session
-current: plan
-approved: [requirement, research, spec, design, plan]
+current: coding
+approved: [requirement, research, spec, design, plan, coding]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3

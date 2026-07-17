@@ -16,7 +16,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const assert = (cond, msg) => { if (cond) { pass++; log("  PASS " + msg); } else { fail++; log("  FAIL " + msg); } };
 
-const textOf = (snap) => snap.cells.map((r) => r.map((c) => c.char).join("")).join("\n");
 async function run(s, cmd) {
   const f = s.snapshot().fields.filter((x) => !x.protected).at(-1);
   s.setField({ index: f.index }, cmd);

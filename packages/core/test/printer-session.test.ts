@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PrinterSession, type SpoolReport } from "../src/session/printer-session.js";
 import type { Transport } from "../src/transport/types.js";
-import { Tn5250Error } from "../src/errors.js";
 
 /** IAC EOR 付きで records をまとめて供給できる最小 Transport（telnet 交渉なしで直接レコードを流す） */
 class FakeTransport implements Transport {

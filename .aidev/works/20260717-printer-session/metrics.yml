@@ -10,3 +10,5 @@ events:
   - { ts: 2026-07-17T16:15:22Z, phase: plan, event: start }
   - { ts: 2026-07-17T16:20:39Z, phase: plan, event: approved, metrics: { tasks_planned: 15 } }
   - { ts: 2026-07-17T16:20:56Z, phase: coding, event: start }
+  - { ts: 2026-07-17T16:52:23Z, phase: coding, event: approved, metrics: { tasks_done: 15 } }
+  - { ts: 2026-07-17T16:52:23Z, phase: test, event: start }
