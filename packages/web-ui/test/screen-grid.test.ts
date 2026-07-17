@@ -914,6 +914,57 @@ describe("ScreenGrid", () => {
     });
   });
 
+  it("ペースト後もカーソルは開始桁から動かない（単一行。ACS 相当）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([fld(1, 5, 5, 10)]), edits: new Map(), focused: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(2, 2); // 欄の 3 桁目 ＝ 画面 (5,7)
+    await input.trigger("paste", { clipboardData: { getData: () => "ABC" } });
+    const cur = [...(w.emitted("cursor") as [number, number][])].pop();
+    expect(cur).toEqual([5, 7]); // 旧: 貼り付けた文字の末尾（5,10）へ動いていた
+    w.unmount();
+  });
+
+  it("ペーストで欄が満杯になっても次の欄へ自動送りしない（field-full を出さない）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([fld(1, 5, 5, 5), fld(2, 6, 5, 5)]), edits: new Map(), focused: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "ABCDE" } }); // 5 桁欄が満杯
+    // 旧: advanceIfFull が field-full を出し、親が次の欄へフォーカスを送っていた。
+    // ACS はペーストではカーソルを動かさないので自動送りもしない（打鍵時の自動送りは残す）
+    expect(w.emitted("field-full")).toBeFalsy();
+    w.unmount();
+  });
+
+  it("打鍵で欄が満杯になったときは従来どおり次の欄へ自動送りする（回帰）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([fld(1, 5, 5, 3), fld(2, 6, 5, 3)]), edits: new Map(), focused: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    for (const k of ["A", "B", "C"]) await input.trigger("keydown", { key: k });
+    expect(w.emitted("field-full")).toBeTruthy();
+    w.unmount();
+  });
+
+  it("ペースト後もカーソルは開始桁から動かない（矩形。ACS 相当）", async () => {
+    const fields = [fld(1, 5, 5, 10), fld(2, 6, 5, 10)];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(2, 2);
+    await input.trigger("paste", { clipboardData: { getData: () => "AB\nCD" } });
+    const cur = [...(w.emitted("cursor") as [number, number][])].pop();
+    expect(cur).toEqual([5, 7]); // 旧: 欄の値の末尾へ動いていた
+    w.unmount();
+  });
+
   it("複数行ペーストは書いた範囲だけ上書きし、後ろの既存文字を残す", async () => {
     // "123456" の先頭へ "789" を貼ったら "789456"（旧: 後ろを捨てて "789" になっていた）
     const fields: Field[] = [

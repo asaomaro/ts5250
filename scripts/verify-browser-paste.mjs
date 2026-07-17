@@ -8,6 +8,7 @@
 //   4) 挿入モード: 後続を右へずらす／入り切らなければ "No room to insert data." を出して
 //      **何も書かない**（ACS: 問題ないと確定するまで書き換えない）
 //   5) 帯の折返し: 開始桁〜行末の幅で各行を折り返し、あふれた分は次の帯行の**同じ桁**へ
+//   6) ペースト後もカーソルは開始桁から動かない（ACS）
 //
 // STRSQL では Enter を押さない（＝SQL を実行しない）。F3 で抜けるだけなのでホストは変更しない。
 //
@@ -155,6 +156,16 @@ try {
   const wantBand = ["11", "1", "22", "2"];
   check("⑤ 帯幅 2 で折り返し、あふれは次の帯行の同じ桁へ",
     JSON.stringify(band) === JSON.stringify(wantBand), `${JSON.stringify(band)} 期待 ${JSON.stringify(wantBand)}`);
+
+  // ---- ⑥ ペースト後もカーソルは動かない ----
+  await first.click({ position: { x: 2, y: 5 } });
+  await page.keyboard.press("Home");
+  await page.waitForTimeout(100);
+  const posBefore = await page.evaluate(() => document.querySelector(".oia .pos b")?.textContent?.trim());
+  await paste("ZZZ\nZZZ");
+  await page.waitForTimeout(200);
+  const posAfter = await page.evaluate(() => document.querySelector(".oia .pos b")?.textContent?.trim());
+  check("⑥ ペースト後もカーソルは開始桁のまま", posBefore === posAfter, `${posBefore} → ${posAfter}`);
 
   // SQL は実行しない。セッションはブラウザを閉じれば切れる
 } catch (e) {

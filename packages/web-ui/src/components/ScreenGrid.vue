@@ -1055,7 +1055,8 @@ function bandEndCol(field: Field, row: number, col: number): number | undefined 
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   const lines = text.split(/\r?\n/);
   const { cols, rows } = props.snapshot;
-  const start = posOfOffset(f, sliceOffsetOf(f, el) + (el.selectionStart ?? 0), cols, rows);
+  const startOffset = sliceOffsetOf(f, el) + (el.selectionStart ?? 0);
+  const start = posOfOffset(f, startOffset, cols, rows);
   // 帯行へ割り付ける。同じ欄に複数回書くことがある（行またぎ欄・帯の折返し）ため、欄ごとに
   // まとめてから 1 度だけ書く（1 行ずつ書くと、2 回目が 1 回目より前の値を土台にして消す）。
   const targets = new Map<number, { field: Field; parts: { offset: number; line: string }[] }>();
@@ -1096,12 +1097,12 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   }
   for (const { field, val } of built) {
     if (field.index === f.index) {
-      // フォーカス欄は edit モデルを置換して sync
+      // フォーカス欄は edit モデルを置換して sync。カーソルはペースト開始桁のまま動かさない（ACS）。
       // initEdit は insertMode:false を返す。そのまま使うと直後の sync が
       // insertMode.value を false に戻し、ペーストのたびに挿入モードが解除される
       edit = isDbcsEdit(f)
-        ? { chars: padDbcs(f, [...val]), cursor: [...val].length, insertMode: insertMode.value }
-        : { ...initEdit(val, visLen(f), val.length), insertMode: insertMode.value };
+        ? { chars: padDbcs(f, [...val]), cursor: startOffset, insertMode: insertMode.value }
+        : { ...initEdit(val, visLen(f), startOffset), insertMode: insertMode.value };
       editFieldIndex = f.index;
       sync(el, f);
     } else {
@@ -1146,9 +1147,10 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     }
   }
   let e: EditState = edit!;
+  const at = e.cursor; // ペースト開始桁。ACS はペースト後もカーソルを動かさない
   // 挿入は「全部入る」と確定するまで書き換えない（ACS）。typeChar の挿入は溢れた文字を黙って
   // 落として成功を返すため、ここで先に収まるかを見る（落ちた文字に気づけない）。
-  if (e.insertMode && insertInto(f, editValue(e), e.cursor, text) === undefined) {
+  if (e.insertMode && insertInto(f, editValue(e), at, text) === undefined) {
     emit("notice", NO_ROOM);
     return;
   }
@@ -1160,9 +1162,9 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
     e = trial;
   }
-  edit = e;
+  edit = { ...e, cursor: at }; // 開始桁へ戻す（打鍵と違い、ペーストではカーソルが進まない）
   sync(el, f);
-  advanceIfFull(f); // ACS: 貼り付けで満杯なら次の入力欄へ
+  // advanceIfFull は呼ばない: ACS はペーストで満杯になっても次の欄へ送らない（カーソルは動かない）
 }
 
 /** IME 合成開始: スペース埋めを外し、合成開始桁より前の既入力だけを残す。

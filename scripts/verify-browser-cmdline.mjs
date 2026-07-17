@@ -451,6 +451,9 @@ try {
     straddle[0].endsWith("あ") && straddle[1].startsWith(" ") && !straddle[1].includes("あ"),
     `1行目末尾=${JSON.stringify(straddle[0].slice(-3))} 2行目先頭=${JSON.stringify(straddle[1].slice(0, 3))}`
   );
+  // ペースト後もカーソルは開始桁のまま（ACS 挙動）。このまま打つと Z が あ を上書きするので、
+  // あ の先へ 1 つ進めてから続きを打つ。
+  await page.keyboard.press("ArrowRight");
   // 残りは 153 - (72 + SO+2+SI) = 77 桁。桁揃えする実装だと 1〜3 桁ぶん削られて入り切らない。
   //   ※ ちょうど 77 桁で止める。満杯になると ACS の自動送り（field-full）でフォーカスが欄の先頭へ
   //      回り込み、以降の打鍵が 1 文字目を上書きしてしまうため（容量ではなく自動送りの挙動）。
