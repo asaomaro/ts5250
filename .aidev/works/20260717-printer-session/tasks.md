@@ -13,10 +13,10 @@
 - [x] T5: `core/index.ts` に `PrinterSession`/`ScsDecoder`/型を export。（依存: T4）
 
 ## server + MCP
-- [ ] T6: `session-manager.ts` に `kind:"display"|"printer"`。printer は `PrinterSession` を open/track。（依存: T5）
-- [ ] T7: `ws-messages.ts` に `open.kind` と server→client `report`/`printer-status`。`ws-handler.ts` で
+- [x] T6: `session-manager.ts` に `kind:"display"|"printer"`。printer は `PrinterSession` を open/track。（依存: T5）
+- [x] T7: `ws-messages.ts` に `open.kind` と server→client `report`/`printer-status`。`ws-handler.ts` で
       PrinterSession の `report` を購読し push。（依存: T6）
-- [ ] T8: `mcp-tools.ts` に `open_printer_session`/`wait_spool`/`list_spools`/`get_spool`（close は流用）。
+- [x] T8: `mcp-tools.ts` に `open_printer_session`/`wait_spool`/`list_spools`/`get_spool`（close は流用）。
       戻り値は等幅テキスト。（依存: T6）
 - [ ] T9: `profiles.ts` にセッション種別（任意項目）。（依存: T6）
 
