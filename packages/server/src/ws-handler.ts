@@ -95,13 +95,28 @@ export class WsConnection {
   private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
     await withAudit({ op: "ws_open_printer" }, async () => {
       const opts: Parameters<SessionManager["openPrinter"]>[0] = { origin: msg.profile ?? "direct" };
-      if (msg.host !== undefined) opts.host = msg.host;
-      if (msg.port !== undefined) opts.port = msg.port;
-      if (msg.ccsid !== undefined) opts.ccsid = msg.ccsid;
-      if (msg.deviceName !== undefined) opts.deviceName = msg.deviceName;
-      if (msg.tls === true) opts.tls = true;
-      if (msg.user !== undefined) opts.user = msg.user;
-      if (msg.password !== undefined) opts.password = msg.password;
+      if (msg.profile) {
+        // プロファイル由来: 接続情報＋PDF 自動蓄積/印刷（信頼設定）を解決する
+        const co = this.deps.profiles.resolveConnectOptions(msg.profile);
+        if (co.host !== undefined) opts.host = co.host;
+        if (co.port !== undefined) opts.port = co.port;
+        if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
+        if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
+        if (co.tls !== undefined) opts.tls = co.tls;
+        if (co.user !== undefined) opts.user = co.user;
+        if (co.password !== undefined) opts.password = co.password;
+        const output = this.deps.profiles.resolvePrinterOutput(msg.profile);
+        if (output) opts.output = output; // 自動蓄積/印刷はプロファイルにあるときだけ
+      } else {
+        // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
+        if (msg.host !== undefined) opts.host = msg.host;
+        if (msg.port !== undefined) opts.port = msg.port;
+        if (msg.ccsid !== undefined) opts.ccsid = msg.ccsid;
+        if (msg.deviceName !== undefined) opts.deviceName = msg.deviceName;
+        if (msg.tls === true) opts.tls = true;
+        if (msg.user !== undefined) opts.user = msg.user;
+        if (msg.password !== undefined) opts.password = msg.password;
+      }
       const entry = await this.deps.sessions.openPrinter(opts);
       this.sessionId = entry.id;
       const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>

@@ -1,6 +1,17 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { Tn5250Error, type ConnectOptions } from "@as400web/core";
+import type { PrinterOutputConfig } from "./printer-output.js";
+
+/** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。信頼設定なのでプロファイルにのみ置く */
+const printerSchema = z.object({
+  autoPdfDir: z.string().optional(),
+  autoPrint: z.string().optional(),
+  pdfFontPath: z.string().optional(),
+  pdfFontName: z.string().optional(),
+  pageSize: z.string().optional(),
+  fontSize: z.number().positive().optional()
+});
 
 const signonSchema = z.object({
   user: z.string().min(1),
@@ -19,7 +30,8 @@ const profileSchema = z.object({
   screenSize: z.enum(["24x80", "27x132"]).optional(),
   deviceName: z.string().optional(),
   enhanced: z.boolean().optional(),
-  signon: signonSchema.optional()
+  signon: signonSchema.optional(),
+  printer: printerSchema.optional()
 });
 
 const configSchema = z.object({
@@ -108,5 +120,25 @@ export class ProfileStore {
       opts.password = password;
     }
     return opts;
+  }
+
+  /**
+   * プロファイルのプリンター出力設定を解決する（PDF 自動蓄積・自動印刷）。未設定なら undefined。
+   * **信頼されたサーバー設定のみ**をここから供給し、ブラウザ由来の値は使わない（任意パス書込・任意
+   * コマンド実行の防止）。
+   */
+  resolvePrinterOutput(name: string): PrinterOutputConfig | undefined {
+    const pr = this.get(name).printer;
+    if (!pr || (!pr.autoPdfDir && !pr.autoPrint)) return undefined;
+    const cfg: PrinterOutputConfig = {};
+    if (pr.autoPdfDir !== undefined) cfg.autoPdfDir = pr.autoPdfDir;
+    if (pr.autoPrint !== undefined) cfg.autoPrint = pr.autoPrint;
+    const pdf: NonNullable<PrinterOutputConfig["pdf"]> = {};
+    if (pr.pdfFontPath !== undefined) pdf.fontPath = pr.pdfFontPath;
+    if (pr.pdfFontName !== undefined) pdf.fontName = pr.pdfFontName;
+    if (pr.pageSize !== undefined) pdf.pageSize = pr.pageSize;
+    if (pr.fontSize !== undefined) pdf.fontSize = pr.fontSize;
+    if (Object.keys(pdf).length > 0) cfg.pdf = pdf;
+    return cfg;
   }
 }

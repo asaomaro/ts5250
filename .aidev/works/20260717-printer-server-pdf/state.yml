@@ -1,0 +1,8 @@
+schema: 3
+slug: printer-server-pdf
+current: plan
+approved: [requirement, research, spec, plan]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260717-printer-session-dbcs]

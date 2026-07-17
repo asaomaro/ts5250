@@ -4,6 +4,7 @@ import { upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { buildMcpServer } from "./mcp-server.js";
 import { WsConnection } from "./ws-handler.js";
+import { renderSpoolPdf } from "./pdf.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
 export interface AppDeps extends ToolDeps {
@@ -21,6 +22,25 @@ export function buildApp(deps: AppDeps): Hono {
   app.get("/healthz", (c) => c.json({ status: "ok", sessions: deps.sessions.size }));
   app.get("/api/version", (c) => c.json({ name: "as400-5250", version: deps.version }));
   app.get("/api/profiles", (c) => c.json({ profiles: deps.profiles.listPublic() }));
+
+  // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
+  app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {
+    const { sessionId, spoolId } = c.req.param();
+    try {
+      const entry = deps.sessions.getPrinter(sessionId);
+      const report = entry.reports.find((r) => r.id === spoolId);
+      if (!report) return c.json({ error: "spool not found" }, 404);
+      const pdf = await renderSpoolPdf(report.pages);
+      return new Response(new Uint8Array(pdf), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${spoolId}.pdf"`
+        }
+      });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 404);
+    }
+  });
 
   // MCP over Streamable HTTP（@hono/mcp）。ステートレス（接続はリクエスト毎に管理）
   app.all("/mcp", async (c) => {
