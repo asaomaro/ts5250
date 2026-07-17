@@ -805,6 +805,41 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("複数行ペーストは書いた範囲だけ上書きし、後ろの既存文字を残す", async () => {
+    // "123456" の先頭へ "789" を貼ったら "789456"（旧: 後ろを捨てて "789" になっていた）
+    const fields: Field[] = [
+      { index: 1, row: 5, col: 5, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "123456" },
+      { index: 2, row: 6, col: 5, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "123456" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "789\n789" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("789456");
+    expect(last(2)).toBe("789456");
+    w.unmount();
+  });
+
+  it("行またぎ欄（コマンド行）への複数行ペーストは折返し先の同じ桁へ落ちる", async () => {
+    // コマンド行相当: (20,7) len=100 → slice0=row20 col7 幅74 / slice1=row21 col1 幅26
+    const cmd: Field = { index: 1, row: 20, col: 7, length: 100, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap([cmd]), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!; // slice0
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    // 旧: 折返し先は別欄として引けず 2 行目が捨てられていた
+    await input.trigger("paste", { clipboardData: { getData: () => "AAA\nBBB" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const val = [...emits].reverse().find((e) => e[0] === 1)?.[1];
+    // 1 行目は offset 0、2 行目は row21 col7 ＝ 欄先頭から 74+6=80 桁目
+    expect(val?.slice(0, 3)).toBe("AAA");
+    expect(val?.slice(80, 83)).toBe("BBB");
+    w.unmount();
+  });
+
   it("複数行ペーストは同じ画面桁の欄へ流す（1 行に複数欄ある画面でも矩形の形を保つ）", async () => {
     // SEU 編集画面の実寸（PUB400 実機で採取）: 各行に 行コマンド欄(col1 len7) と
     // ソース欄(col9 len71) が並ぶ。桁ではなく「次行の最初の入力欄」を選ぶと、2 行目が

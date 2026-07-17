@@ -988,48 +988,50 @@ function onInputClick(f: Field, ev: MouseEvent): void {
   emit("cursor", pos.row, pos.col);
 }
 
-/** 欄の値を、開始桁 offset から line で上書きする（ACS のペースト＝カーソル位置起点）。
- *  offset より前は既存文字（無ければ空白）を残し、offset から型フィルタ済みの line を書く。
- *  SO/SI 込みバイト予算で切り詰め、末尾空白は落とす。 */
-function overwriteFromOffset(field: Field, offset: number, line: string): string {
+/** 欄の値 base の offset 桁目から line を上書きする（ACS のペースト＝カーソル位置起点の上書き）。
+ *  5250 の上書き入力と同じく、**書いた範囲だけ**を置き換えて前後の既存文字は残す
+ *  （"123456" の先頭へ "789" を貼れば "789456"）。SO/SI 込みバイト予算で切り詰め、末尾空白は落とす。 */
+function overwriteInto(field: Field, base: string, offset: number, line: string): string {
   const budget = visLen(field);
-  const existing = [...logicalValue(field)];
-  const chars: string[] = [];
-  const fits = (ch: string): boolean => dbcsByteLength(chars.join("") + ch) <= budget;
-  for (let i = 0; i < offset; i++) {
-    const ch = existing[i] ?? " ";
-    if (!fits(ch)) return chars.join("").replace(/\s+$/, "");
-    chars.push(ch);
-  }
+  const out = [...base];
+  while (out.length < offset) out.push(" "); // 欄が offset に届いていなければ空白で埋める
+  let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(field, ch)) continue;
-    if (!fits(ch)) break;
-    chars.push(ch);
+    out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
+    i++;
   }
-  return chars.join("").replace(/\s+$/, "");
+  while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
+  return out.join("").replace(/\s+$/, "");
 }
 
-/** 複数行テキストを、フォーカス欄から下方向へ「空行なく連続する入力欄」へ 1 行ずつ流し込む（ACS 相当）。
- *  ペースト開始桁（フォーカス欄の caret オフセット）を起点に、各行を同じオフセットから上書きする。 */
+/** 複数行テキストを、ペースト開始桁を起点に「同じ画面桁の真下」へ 1 行ずつ流し込む（ACS 相当）。
+ *  コピーした矩形の形をそのまま落とす。行ごとの宛先を桁で引くので、1 行に複数の入力欄が並ぶ画面
+ *  （SEU の行コマンド欄＋ソース欄など）でも桁がずれず、行またぎ欄（コマンド行）では複数行が
+ *  同じ欄の別オフセットへ落ちる。 */
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   const lines = text.split(/\r?\n/);
   const { cols, rows } = props.snapshot;
-  const offset = el.selectionStart ?? 0; // ペースト開始桁（欄内オフセット）
-  // 以降の行は「同じ画面桁の真下」の欄へ流す＝コピーした矩形の形をそのまま落とす。
-  // 「次行の最初の入力欄」で選ぶと、1 行に複数欄ある画面（SEU の行番号欄＋ソース欄など）で
-  // 桁の違う欄に流れ込む。
-  const start = posOfOffset(f, sliceOffsetOf(f, el) + offset, cols, rows);
-  let cur: Field | undefined = f;
-  let curOffset = offset;
-  let row = start.row;
-  let i = 0;
-  while (cur && i < lines.length) {
-    const field: Field = cur;
-    const val = overwriteFromOffset(field, curOffset, lines[i] ?? "");
+  const start = posOfOffset(f, sliceOffsetOf(f, el) + (el.selectionStart ?? 0), cols, rows);
+  // 行 → 宛先の欄を桁で引く。行またぎ欄では複数行が同じ欄に落ちるため、欄ごとにまとめてから
+  // 1 度だけ書く（1 行ずつ書くと、同じ欄の 2 行目が 1 行目より前の値を土台にして上書きで消す）。
+  const targets = new Map<number, { field: Field; parts: { offset: number; line: string }[] }>();
+  for (let i = 0; i < lines.length; i++) {
+    const row = start.row + i;
+    if (row > rows) break;
+    const t = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
+    if (!t || t.protected) break; // 真下が入力欄でなければそこで止める
+    const e = targets.get(t.index) ?? { field: t, parts: [] };
+    e.parts.push({ offset: caretInField(t, row, start.col, cols, rows), line: lines[i] ?? "" });
+    targets.set(t.index, e);
+  }
+  for (const { field, parts } of targets.values()) {
+    let val = logicalValue(field);
+    for (const p of parts) val = overwriteInto(field, val, p.offset, p.line);
     if (field.index === f.index) {
-      // 先頭行はフォーカス欄へ（edit モデルを置換して sync）
+      // フォーカス欄は edit モデルを置換して sync
       edit = isDbcsEdit(f)
         ? { chars: padDbcs(f, [...val]), cursor: [...val].length, insertMode: true }
         : initEdit(val, visLen(f), val.length);
@@ -1043,13 +1045,6 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
         if (inp) inp.value = sliceValue(field, i);
       });
     }
-    row += 1;
-    const next = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
-    // 同じ欄が返るのは行またぎ欄の折返し先（コマンド行など）。続けて書くと 1 行目の値を
-    // 消してしまう（emit した値はまだ props に戻っていない）ため、そこで止める。
-    cur = next && !next.protected && next.index !== field.index ? next : undefined;
-    if (cur) curOffset = caretInField(cur, row, start.col, cols, rows);
-    i++;
   }
 }
 
