@@ -5,9 +5,10 @@
 //   2) マウスドラッグ: 広げてもカーソルは始点から動かない
 //   3) マウス選択も修飾なしカーソル移動で解除される（旧: キーボード選択のアンカー依存で残っていた）
 //   4) ダブルクリック: カーソル下の語を矩形選択（未送信の入力値も含む・入力欄は blur）
-//   5) キーボード Shift+矢印: カーソルは動かない（旧: 選択端へ移動していた）
-//   6) キーボード: 選択端は 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ちになる回帰）
-//   7) 重なり順: カーソルが矩形ハイライトより上に描かれる（始点は必ず矩形の角なので、
+//   5) Tab / Home / End でも解除される（＝欄から選択を始めてもキーが届く）
+//   6) キーボード Shift+矢印: カーソルは動かない（旧: 選択端へ移動していた）
+//   7) キーボード: 選択端は 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ちになる回帰）
+//   8) 重なり順: カーソルが矩形ハイライトより上に描かれる（始点は必ず矩形の角なので、
 //      下に置くとハイライトに沈む）。jsdom は scoped CSS を解決しないためここで担保する。
 //
 // 前提: npm run build 済み（web-ui も）。profiles.local.json にプロファイル。
@@ -136,7 +137,11 @@ try {
     return got;
   });
   check("⑧ コピーは語だけ", copied === "WRKACTJOB", `"${copied}"`);
-  await page.keyboard.press("Escape");
+  // 欄の中から選択を始めると入力欄が blur される。ペインへフォーカスを移していないと
+  // フォーカスが body に落ち、以降のキーがどこにも届かない（Tab どころか Escape も効かない）
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(80);
+  check("⑨ Tab で解除される（＝選択後もキーが届いている）", (await boxes()).rect === null);
   await page.waitForTimeout(60);
 
   // ---- キーボード Shift+矢印 ----
@@ -150,11 +155,11 @@ try {
   await page.keyboard.press("Shift+ArrowDown");
   await page.waitForTimeout(60);
   const after = await boxes();
-  check("⑨ Shift+矢印でカーソルは動かない", before.cursor !== null && after.cursor !== null && after.cursor.x === before.cursor.x && after.cursor.y === before.cursor.y,
+  check("⑩ Shift+矢印でカーソルは動かない", before.cursor !== null && after.cursor !== null && after.cursor.x === before.cursor.x && after.cursor.y === before.cursor.y,
     `${JSON.stringify(before.cursor)} → ${JSON.stringify(after.cursor)}`);
   // 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ち）
   const wantW = Math.round(geo.charW * 3);
-  check("⑩ 選択端は Shift+→ 2 回ぶん伸びる", after.rect !== null && Math.abs(after.rect.w - wantW) <= 3,
+  check("⑪ 選択端は Shift+→ 2 回ぶん伸びる", after.rect !== null && Math.abs(after.rect.w - wantW) <= 3,
     `幅 ${after.rect?.w}px 期待≒${wantW}px（3 桁）`);
 } catch (e) {
   ok = false;

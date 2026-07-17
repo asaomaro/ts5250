@@ -236,6 +236,59 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  it.each(["Tab", "Home", "End"])("%s でもブロック選択が解除される（ACS 相当）", async (key) => {
+    seed([field(1, 5), field(2, 6)]); // Tab/Home/End の移動先になる入力欄を置く
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true);
+    await w.find(".pane").trigger("keydown", { key });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("Shift+Tab（前の欄へ）でも解除される。Shift+Home/End は選択の拡張なので解除しない", async () => {
+    seed([field(1, 5), field(2, 6)]);
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "End", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true); // Shift+End は拡張（解除ではない）
+    await w.find(".pane").trigger("keydown", { key: "Tab", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false); // Shift+Tab は欄移動なので解除
+    w.unmount();
+  });
+
+  it("マウス選択の直後もキーが届く（入力欄を blur したままにするとフォーカスが body へ落ちる）", async () => {
+    seed([field(1, 3)]); // 欄 (3,10) len5 — ここを始点にドラッグする
+    const w = mountPane();
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    await grid.trigger("mousedown", { button: 0, clientX: xOf(11), clientY: yOf(3) }); // 欄の中から開始
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(20), clientY: yOf(5) }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true);
+    // 欄を blur しただけだとフォーカスが body に落ち、以降のキーがどこにも届かない
+    expect(document.activeElement).toBe(w.find(".pane").element);
+    await w.find(".pane").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false);
+    w.unmount();
+  });
+
   it("Shift+矢印で戻すと選択が縮む（アンカーは始点に固定）", async () => {
     seed([]);
     const w = mountPane();

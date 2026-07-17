@@ -242,6 +242,9 @@ function onSelectionCleared(): void {
  *  入力欄は ScreenGrid が blur 済みなので、reconcileFocus は通さない（通すと欄へ再フォーカスして選択が壊れる）。 */
 function onSelectionStart(row: number, col: number): void {
   cursorOverride.value = { row, col };
+  // ScreenGrid は入力欄を blur しただけなので、そのままだとフォーカスが body に落ちてキーが
+  // どこにも届かない（Escape や矢印での解除が効かなくなる）。キーボード選択と同じく free モードへ。
+  if (document.activeElement !== paneEl.value) paneEl.value?.focus();
 }
 /** ブロック選択の反対角を pos へ拡張する。入力欄にフォーカスがあれば外して free モードにする
  *  （マウス・欄外操作と同一の画面矩形選択）。開始点は最初の呼び出し時のカーソル位置に固定。
@@ -294,11 +297,14 @@ function onKeydown(ev: KeyboardEvent): void {
       return;
     }
   }
-  // Escape・修飾なしのカーソル移動でブロック選択を解除。
+  // Escape・カーソル移動でブロック選択を解除（ACS 相当）。
   // selAnchor で条件付けないこと: あれはキーボード選択のアンカーで、マウスで選択した場合は
   // null のまま（矩形の実体は ScreenGrid 側）。見るとマウス選択が解除されずに残る。
   // clearBlockSel は冪等なので、選択が無いときに呼んでも害はない。
-  if (ev.key === "Escape" || (!ev.shiftKey && ARROW_DIRS[ev.key])) clearBlockSel();
+  // Shift+矢印/Home/End は上で選択の拡張として処理済み（ここには来ない）。Shift+Tab は
+  // 前の入力欄への移動なので、Tab は修飾に関わらず解除する。
+  const cursorMove = ARROW_DIRS[ev.key] !== undefined || ev.key === "Home" || ev.key === "End";
+  if (ev.key === "Escape" || ev.key === "Tab" || (!ev.shiftKey && cursorMove)) clearBlockSel();
   rawKeydown(ev);
 }
 
