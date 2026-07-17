@@ -310,6 +310,28 @@ Noto Sans Mono CJK、無ければ Courier に degrade）、次を提供します
 }
 ```
 
+## 🔐 認証・per-user 分離（任意）
+
+既定は**無認証**（ローカル単一運用向け・後方互換）。複数ユーザーで共有するときは `--users <file>` で
+認証を有効化すると、**ログイン（Cookie セッション）／API トークン**と **role（admin/user）** が有効になり、
+各ユーザーは**自分が開いたセッション・帳票のみ**アクセスできる（admin は全アクセス）。プリンターセッション
+ID も推測不能（randomUUID）になる。
+
+```sh
+# パスワードの scrypt ハッシュを作る（users.json 作成の補助）
+node packages/server/dist/main.js --hash-password 'ひみつ'
+# → 出力を users.local.json の passwordHash に貼る（packages/server/users.json.example 参照）
+
+# 認証を有効にして起動
+node packages/server/dist/main.js --http 3400 --users ./users.local.json --web-root <dist>
+```
+
+- **ブラウザ**: 未ログインならログイン画面が出る（`/api/login` → httpOnly Cookie）。
+- **MCP / 自動化**: users の `tokenHashes`（API トークンの sha256）に `Authorization: Bearer <token>` で認証。
+- **セキュリティ**: パスワード/トークンは平文保存しない（scrypt/sha256・timingSafe 比較）。
+  `users*.json` はコミットしない（`.gitignore` 済み）。TLS 配信時は `--cookie-secure` を付ける。
+- **管理者画面**（ユーザー CRUD・全セッション/プリンター管理・ログ取得）は後続対応（PR 2）。
+
 ## 🧪 開発・テスト
 
 ```sh

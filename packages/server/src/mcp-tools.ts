@@ -9,6 +9,7 @@ import {
 } from "@as400web/core";
 import { SessionManager } from "./session-manager.js";
 import { ProfileStore } from "./profiles.js";
+import type { AuthUser } from "./auth.js";
 import { screenToText, type FormatOptions } from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
 import { fieldSignon } from "./signon.js";
@@ -18,6 +19,8 @@ export interface ToolDeps {
   sessions: SessionManager;
   profiles: ProfileStore;
   version: string;
+  /** 認証時の呼び出しユーザー（per-user 分離）。未認証/OFF は undefined */
+  user?: AuthUser;
 }
 
 const AID_KEYS = [
@@ -165,7 +168,7 @@ function errorResult(err: unknown) {
  * 認証情報はツール引数に取らない（D13）。サインオンは profile 経由（自動）か signon ツール（画面フィールド）。
  */
 export function registerTools(server: McpServer, deps: ToolDeps): void {
-  const { sessions, profiles } = deps;
+  const { sessions, profiles, user } = deps;
 
   server.registerTool(
     "open_session",
@@ -211,7 +214,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, profile }) =>
       withAudit({ op: "signon", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId);
+          const entry = sessions.assertWritable(sessionId, user);
           const opts = profiles.resolveConnectOptions(profile);
           if (!opts.user || !opts.password) {
             throw new Tn5250Error("CONNECT_FAILED", `profile ${profile} has no signon credentials`);
@@ -234,7 +237,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId }) =>
       withAudit({ op: "close_session", sessionId }, async () => {
         try {
-          await sessions.close(sessionId);
+          await sessions.close(sessionId, user);
           return { content: [{ type: "text" as const, text: "closed" }], structuredContent: { closed: true } };
         } catch (err) {
           return errorResult(err);
@@ -262,7 +265,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     },
     async () =>
       withAudit({ op: "list_sessions" }, async () => {
-        const list = sessions.list().map((e) => ({
+        const list = sessions.list(user).map((e) => ({
           sessionId: e.id,
           host: e.host,
           origin: e.origin,
@@ -336,8 +339,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, timeoutMs }) =>
       withAudit({ op: "wait_spool", sessionId }, async () => {
         try {
-          sessions.getPrinter(sessionId); // 存在確認（無ければ SESSION_NOT_FOUND）
-          const report = await sessions.waitSpool(sessionId, timeoutMs ?? 30_000);
+          sessions.getPrinter(sessionId, user); // 存在確認（無ければ SESSION_NOT_FOUND）
+          const report = await sessions.waitSpool(sessionId, timeoutMs ?? 30_000, user);
           if (!report) {
             return {
               content: [{ type: "text" as const, text: "no spool received (timeout)" }],
@@ -368,7 +371,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId }) =>
       withAudit({ op: "list_spools", sessionId }, async () => {
         try {
-          const entry = sessions.getPrinter(sessionId);
+          const entry = sessions.getPrinter(sessionId, user);
           const spools = entry.reports.map((r) => ({ spoolId: r.id, pages: r.pages.length }));
           return {
             content: [{ type: "text" as const, text: `${spools.length} spool(s)` }],
@@ -390,7 +393,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, spoolId }) =>
       withAudit({ op: "get_spool", sessionId }, async () => {
         try {
-          const entry = sessions.getPrinter(sessionId);
+          const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
           if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
           const pages = report.pages.map((p) => p.lines.join("\n"));
@@ -412,7 +415,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, spoolId }) =>
       withAudit({ op: "get_spool_pdf", sessionId }, async () => {
         try {
-          const entry = sessions.getPrinter(sessionId);
+          const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
           if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
           const pdf = await renderSpoolPdf(report.pages);
@@ -437,7 +440,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, include, rows }) =>
       withAudit({ op: "get_screen", sessionId }, async () => {
         try {
-          const entry = sessions.get(sessionId);
+          const entry = sessions.get(sessionId, user);
           return screenResult(entry.session.snapshot(), fmtOpts({ include, rows }));
         } catch (err) {
           return errorResult(err);
@@ -462,7 +465,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, timeoutMs, until, include, rows }) =>
       withAudit({ op: "wait_screen", sessionId }, async () => {
         try {
-          const entry = sessions.get(sessionId);
+          const entry = sessions.get(sessionId, user);
           const opts: { timeoutMs?: number; until?: { text: string; row?: number } } = {};
           if (timeoutMs !== undefined) opts.timeoutMs = timeoutMs;
           if (until) {
@@ -488,7 +491,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         { op: "set_fields", sessionId, fields: fieldCoords(fields) },
         async () => {
           try {
-            const entry = sessions.assertWritable(sessionId);
+            const entry = sessions.assertWritable(sessionId, user);
             for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
             return screenResult(entry.session.snapshot(), {});
           } catch (err) {
@@ -516,9 +519,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, key, cursor, fields, include, rows }) =>
       withAudit({ op: "send_key", sessionId, key, ...(fields ? { fields: fieldCoords(fields) } : {}) }, async () => {
         try {
-          const entry = sessions.assertKeyAllowed(sessionId, key);
+          const entry = sessions.assertKeyAllowed(sessionId, key, user);
           if (fields) {
-            sessions.assertWritable(sessionId);
+            sessions.assertWritable(sessionId, user);
             for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
           }
           const r = await entry.session.sendAid(key, cursor ? { cursor } : {});
@@ -546,7 +549,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, fieldId, choiceIndex, selected }) =>
       withAudit({ op: "select_gui_choice", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId);
+          const entry = sessions.assertWritable(sessionId, user);
           const ok = entry.session.selectGuiChoice(fieldId, choiceIndex, selected ?? true);
           if (!ok) {
             throw new Tn5250Error("FIELD_TYPE", `選択できません（fieldId=${fieldId} choice=${choiceIndex}）`);
@@ -577,7 +580,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, fieldId, key, cursor, include, rows }) =>
       withAudit({ op: "submit_gui_selection", sessionId, ...(key ? { key } : {}) }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId);
+          const entry = sessions.assertWritable(sessionId, user);
           const opts: SendAidOptions & { key?: AidKey } = {};
           if (key) opts.key = key;
           if (cursor) opts.cursor = cursor;
@@ -619,13 +622,13 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, steps, include, rows }) =>
       withAudit({ op: "run_steps", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId);
+          const entry = sessions.assertWritable(sessionId, user);
           let executed = 0;
           let stopped = false;
           let reason: string | undefined;
           let last: SendAidResult | undefined;
           for (const step of steps) {
-            sessions.assertKeyAllowed(sessionId, step.key);
+            sessions.assertKeyAllowed(sessionId, step.key, user);
             if (step.fields) for (const f of step.fields) entry.session.setField(fieldTarget(f.field), f.value);
             last = await entry.session.sendAid(step.key, step.cursor ? { cursor: step.cursor } : {});
             executed++;
@@ -658,7 +661,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async ({ sessionId, refresh }) =>
       withAudit({ op: "get_job_info", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId);
+          const entry = sessions.assertWritable(sessionId, user);
           const job = await entry.session.fetchJobInfo(refresh ?? false);
           return {
             content: [{ type: "text" as const, text: `${job.number}/${job.user}/${job.name}` }],

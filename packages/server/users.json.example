@@ -1,0 +1,18 @@
+{
+  "_comment": "認証を有効化するには --users <path> でこのファイルを渡す。パスワードは平文で書かず、",
+  "_comment2": "`node packages/server/dist/main.js --hash-password '<平文>'` で得た scrypt ハッシュを passwordHash に入れる。",
+  "_comment3": "tokenHashes は API トークンの sha256（MCP/自動化用）。実ファイルはコミットしないこと。",
+  "users": [
+    {
+      "username": "admin",
+      "role": "admin",
+      "passwordHash": "REPLACE_WITH_SCRYPT_HASH",
+      "tokenHashes": []
+    },
+    {
+      "username": "alice",
+      "role": "user",
+      "passwordHash": "REPLACE_WITH_SCRYPT_HASH"
+    }
+  ]
+}

@@ -8,6 +8,8 @@ import ConnectView from "./components/ConnectView.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
 import LogPanel from "./components/LogPanel.vue";
 import KeybindingsPanel from "./components/KeybindingsPanel.vue";
+import LoginView from "./components/LoginView.vue";
+import { authStore } from "./stores/auth.js";
 
 const { toggle, effective } = useTheme();
 workspaceStore.init();
@@ -72,6 +74,7 @@ function onGlobalKey(ev: KeyboardEvent): void {
 }
 
 onMounted(() => {
+  void authStore.refresh();
   checkNarrow();
   window.addEventListener("resize", checkNarrow);
   window.addEventListener("keydown", onGlobalKey);
@@ -84,6 +87,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
+    <LoginView v-if="authStore.loaded && authStore.needsLogin" />
+    <template v-else>
     <header class="topbar">
       <span class="brand">5250 Web エミュレーター</span>
       <button v-if="hasSessions" class="link" @click="showConnect = !showConnect">
@@ -117,6 +122,10 @@ onBeforeUnmount(() => {
       </button>
       <button class="theme-btn" @click="showKeys = true">⌨ キー</button>
       <button class="theme-btn" @click="toggle">{{ effective() === "dark" ? "☀ 通常" : "🌙 ダーク" }}</button>
+      <span v-if="authStore.user" class="whoami">
+        {{ authStore.user.username }}<template v-if="authStore.isAdmin"> (admin)</template>
+        <button class="link" @click="authStore.logout()">ログアウト</button>
+      </span>
     </header>
 
     <KeybindingsPanel v-if="showKeys" @close="showKeys = false" />
@@ -129,10 +138,19 @@ onBeforeUnmount(() => {
     </main>
 
     <LogPanel />
+    </template>
   </div>
 </template>
 
 <style scoped>
+.whoami {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .app-shell {
   display: flex;
   flex-direction: column;

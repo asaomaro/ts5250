@@ -1,0 +1,11 @@
+events:
+  - { ts: 2026-07-17T23:08:42Z, phase: requirement, event: start }
+  - { ts: 2026-07-17T23:16:57Z, phase: requirement, event: approved }
+  - { ts: 2026-07-17T23:16:57Z, phase: research, event: start }
+  - { ts: 2026-07-17T23:18:25Z, phase: research, event: approved }
+  - { ts: 2026-07-17T23:18:25Z, phase: design, event: start }
+  - { ts: 2026-07-17T23:19:25Z, phase: design, event: start }
+  - { ts: 2026-07-17T23:19:25Z, phase: design, event: approved }
+  - { ts: 2026-07-17T23:19:25Z, phase: plan, event: start }
+  - { ts: 2026-07-17T23:19:25Z, phase: plan, event: approved }
+  - { ts: 2026-07-17T23:19:25Z, phase: coding, event: start }
