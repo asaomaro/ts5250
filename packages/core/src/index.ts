@@ -31,6 +31,13 @@ export {
   type JobInfo
 } from "./session/session.js";
 export { aidCodeOf, aidKeyForCode, type AidKey } from "./session/aid-keys.js";
+// プリンターセッション（SCS 受信 → 論理ページ）
+export {
+  PrinterSession,
+  type PrinterConnectOptions,
+  type SpoolReport
+} from "./session/printer-session.js";
+export { ScsDecoder, type LogicalPage } from "./protocol/scs.js";
 export {
   parseWdsf,
   WDSF_TYPE,
@@ -44,7 +51,13 @@ export {
 // 文字変換（SBCS / DBCS）
 export { SbcsCodec, DbcsCodec, codecForCcsid, katakanaChar, SO, SI, type Codec } from "./codec/codec.js";
 export type { SbcsTable, StatefulTable } from "./codec/table-types.js";
-export { terminalTypeFor, isDbcsCcsid, deviceEnvFor, type DeviceEnv } from "./session/terminal-type.js";
+export {
+  terminalTypeFor,
+  printerTerminalTypeFor,
+  isDbcsCcsid,
+  deviceEnvFor,
+  type DeviceEnv
+} from "./session/terminal-type.js";
 
 // transport / telnet（capture スクリプト・テスト・上位実装向け）
 export type { Transport } from "./transport/types.js";

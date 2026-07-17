@@ -36,6 +36,15 @@ export interface TelnetOptions {
   kbdType?: string | undefined;
   codePage?: number | undefined;
   charSet?: number | undefined;
+  /**
+   * プリンターセッション用の NEW-ENVIRON USERVAR（RFC 4777 / tn5250 lp5250d 準拠）。
+   * ibmFont はプリンターのフォント（既定 "12"）、ibmTransform は "0"=ホストが SCS を送る／
+   * "1"=Host Print Transform 済みデータを送る。
+   * 実機（PUB400）では IBMFONT/IBMTRANSFORM を送らないと仮想プリンターデバイスの作成が
+   * CPF「Creation of device failed」(応答コード 8925) で失敗する（実機プローブで確認）。
+   */
+  ibmFont?: string | undefined;
+  ibmTransform?: string | undefined;
 }
 
 /** クライアントとして有効化に同意する telnet オプション */
@@ -198,6 +207,13 @@ export class TelnetLayer {
       const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
       if (this.opts.deviceName !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.opts.deviceName));
+      }
+      // プリンターセッション: フォントと変換モードを申告（無いと 8925 でデバイス作成失敗）
+      if (this.opts.ibmFont !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("IBMFONT"), ENV_VALUE, ...ascii(this.opts.ibmFont));
+      }
+      if (this.opts.ibmTransform !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("IBMTRANSFORM"), ENV_VALUE, ...ascii(this.opts.ibmTransform));
       }
       // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる
       if (this.opts.kbdType !== undefined) {

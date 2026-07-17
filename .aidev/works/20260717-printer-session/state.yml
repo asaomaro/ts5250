@@ -1,0 +1,8 @@
+schema: 3
+slug: printer-session
+current: plan
+approved: [requirement, research, spec, design, plan]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

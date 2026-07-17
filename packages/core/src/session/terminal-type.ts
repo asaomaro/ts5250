@@ -65,3 +65,19 @@ export function terminalTypeFor(ccsid: number, screenSize: "24x80" | "27x132"): 
 export function isDbcsCcsid(ccsid: number): boolean {
   return DBCS_CCSIDS.has(ccsid);
 }
+
+/**
+ * プリンターセッションの端末タイプ名。
+ *
+ * SBCS = IBM-3812-1（tn5250 lp5250d が使う唯一のプリンター型番。PUB400 実機で I902＝
+ * 「Session successfully started」を確認済み）。
+ *
+ * DBCS プリンターの型番は tn5250 にも RFC 1205 にも定義が無く（DBCS プリンターは未実装）、
+ * 表示 DBCS の 5555 系と同じく実機総当たりで決める必要がある。DBCS 対応は後続作業のため、
+ * 現状は SBCS 型番を返す（DBCS スプールの実 SCS 採取後に分岐を追加する）。
+ */
+export function printerTerminalTypeFor(ccsid: number): string {
+  // DBCS の型番確定は後続。現状は IBM-3812-1（SBCS）で申告する。
+  void ccsid;
+  return "IBM-3812-1";
+}
