@@ -62,6 +62,9 @@ const emit = defineEmits<{
    *  ACS は始点にカーソルを置くため親がカーソルを合わせる。"cursor" と分けているのは、
    *  こちらは reconcileFocus を通してはいけないから（入力欄へ再フォーカスすると選択が壊れる）。 */
   (e: "selection-start", row: number, col: number): void;
+  /** クライアント側の操作員メッセージ（ACS の OIA 相当。ホストの systemMessage とは別物）。
+   *  例: 挿入ペーストが入り切らないときの "No room to insert data."。次のキー操作で消える。 */
+  (e: "notice", text: string): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -1007,6 +1010,31 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   return out.join("").replace(/\s+$/, "");
 }
 
+/** ACS が挿入ペーストの入り切らないときに出す操作員メッセージ。 */
+const NO_ROOM = "No room to insert data.";
+
+/** 欄の値 base の offset 桁目へ line を挿入する（Insert モードのペースト）。後続は右へずれる。
+ *  欄の予算に収まらなければ undefined を返す（呼び出し側が中断して NO_ROOM を出す）。
+ *
+ *  base の末尾空白は落としてから測る。画面上の欄は末尾まで空白で埋まっているが、その空白は
+ *  挿入で押し出されて消えるだけなので、あふれ判定に数えてはいけない
+ *  （10 桁欄の "123" に "123" を挿せる。"123123123" にもう 3 桁は挿せない＝これがエラー）。 */
+function insertInto(field: Field, base: string, offset: number, line: string): string | undefined {
+  const budget = visLen(field);
+  const out = [...base.replace(/\s+$/, "")];
+  while (out.length < offset) out.push(" ");
+  let i = offset;
+  for (const raw of line) {
+    if (raw === "\n" || raw === "\r") continue;
+    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
+    if (!acceptsChar(field, ch)) continue;
+    out.splice(i, 0, ch); // 挿入（後続は右へ）
+    i++;
+  }
+  if (dbcsByteLength(out.join("")) > budget) return undefined; // 入り切らない
+  return out.join("").replace(/\s+$/, "");
+}
+
 /** 複数行テキストを、ペースト開始桁を起点に「同じ画面桁の真下」へ 1 行ずつ流し込む（ACS 相当）。
  *  コピーした矩形の形をそのまま落とす。行ごとの宛先を桁で引くので、1 行に複数の入力欄が並ぶ画面
  *  （SEU の行コマンド欄＋ソース欄など）でも桁がずれず、行またぎ欄（コマンド行）では複数行が
@@ -1027,14 +1055,31 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
     e.parts.push({ offset: caretInField(t, row, start.col, cols, rows), line: lines[i] ?? "" });
     targets.set(t.index, e);
   }
+  // 値を先に全部組み立てる。1 つでも入り切らなければ**何も書かない**（ACS: 問題ないと確定するまで
+  // 書き換えない。挿入モードのみ。上書きモードは予算で切り詰めるだけでエラーにならない）。
+  const built: { field: Field; val: string }[] = [];
   for (const { field, parts } of targets.values()) {
     let val = logicalValue(field);
-    for (const p of parts) val = overwriteInto(field, val, p.offset, p.line);
+    for (const p of parts) {
+      const next = insertMode.value
+        ? insertInto(field, val, p.offset, p.line)
+        : overwriteInto(field, val, p.offset, p.line);
+      if (next === undefined) {
+        emit("notice", NO_ROOM);
+        return;
+      }
+      val = next;
+    }
+    built.push({ field, val });
+  }
+  for (const { field, val } of built) {
     if (field.index === f.index) {
       // フォーカス欄は edit モデルを置換して sync
+      // initEdit は insertMode:false を返す。そのまま使うと直後の sync が
+      // insertMode.value を false に戻し、ペーストのたびに挿入モードが解除される
       edit = isDbcsEdit(f)
-        ? { chars: padDbcs(f, [...val]), cursor: [...val].length, insertMode: true }
-        : initEdit(val, visLen(f), val.length);
+        ? { chars: padDbcs(f, [...val]), cursor: [...val].length, insertMode: insertMode.value }
+        : { ...initEdit(val, visLen(f), val.length), insertMode: insertMode.value };
       editFieldIndex = f.index;
       sync(el, f);
     } else {
@@ -1079,12 +1124,18 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     }
   }
   let e: EditState = edit!;
+  // 挿入は「全部入る」と確定するまで書き換えない（ACS）。typeChar の挿入は溢れた文字を黙って
+  // 落として成功を返すため、ここで先に収まるかを見る（落ちた文字に気づけない）。
+  if (e.insertMode && insertInto(f, editValue(e), e.cursor, text) === undefined) {
+    emit("notice", NO_ROOM);
+    return;
+  }
   for (const raw of [...text]) {
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）
     const trial = dbcs ? dbcsType(e, ch, f) : typeChar(e, ch);
-    if (!trial || !fitsBytes(trial, f)) break;
+    if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
     e = trial;
   }
   edit = e;

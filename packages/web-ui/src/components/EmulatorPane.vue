@@ -240,6 +240,11 @@ function onSelectionCleared(): void {
 }
 /** マウスドラッグで矩形選択が始まった（ScreenGrid）。ACS 同様、押下したセルにカーソルを置く。
  *  入力欄は ScreenGrid が blur 済みなので、reconcileFocus は通さない（通すと欄へ再フォーカスして選択が壊れる）。 */
+/** クライアント側の操作員メッセージ（ACS の OIA 相当）。次のキー操作・画面更新で消える。 */
+const notice = ref("");
+function onNotice(text: string): void {
+  notice.value = text;
+}
 function onSelectionStart(row: number, col: number): void {
   cursorOverride.value = { row, col };
   // ScreenGrid は入力欄を blur しただけなので、そのままだとフォーカスが body に落ちてキーが
@@ -284,6 +289,12 @@ function keyboardBlockSelect(ev: KeyboardEvent): boolean {
   return false;
 }
 
+/** 次のキー操作でメッセージを消す（ACS 相当。キーボードはロックしない）。
+ *  capture で拾うこと: 入力欄は Home/End/矢印などで stopPropagation するため、bubble の
+ *  onKeydown では欄内のキーを取りこぼす（メッセージが出るのはまさに欄内なので消えなくなる）。 */
+function onKeydownCapture(): void {
+  notice.value = "";
+}
 function onKeydown(ev: KeyboardEvent): void {
   if (busy.value) {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
@@ -328,6 +339,7 @@ function onWheel(ev: WheelEvent): void {
     class="pane"
     :data-focused="focused"
     tabindex="0"
+    @keydown.capture="onKeydownCapture"
     @keydown="onKeydown"
     @mousedown="emit('focus')"
     @wheel="onWheel"
@@ -353,6 +365,7 @@ function onWheel(ev: WheelEvent): void {
         @gui-submit="onGuiSubmit"
         @selection-cleared="onSelectionCleared"
         @selection-start="onSelectionStart"
+        @notice="onNotice"
       />
       <div v-else class="pane-empty">接続待ち…</div>
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->
@@ -360,7 +373,7 @@ function onWheel(ev: WheelEvent): void {
         <div v-if="loading" class="spinner" role="status" aria-label="通信中"></div>
       </div>
     </div>
-    <StatusBar v-if="state" :state="state" :insert-mode="insertMode" :cursor="cursor" />
+    <StatusBar v-if="state" :state="state" :insert-mode="insertMode" :cursor="cursor" :notice="notice" />
   </div>
 </template>
 

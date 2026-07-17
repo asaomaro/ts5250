@@ -5,6 +5,8 @@
 //   2) 書いた範囲だけ上書きし、後ろの既存文字を残す（"123456" へ "789" → "789456"。
 //      旧: 後ろを捨てて "789" になっていた）
 //   3) 行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる（旧: 2 行目が捨てられていた）
+//   4) 挿入モード: 後続を右へずらす／入り切らなければ "No room to insert data." を出して
+//      **何も書かない**（ACS: 問題ないと確定するまで書き換えない）
 //
 // STRSQL では Enter を押さない（＝SQL を実行しない）。F3 で抜けるだけなのでホストは変更しない。
 //
@@ -107,6 +109,37 @@ try {
   await page.waitForTimeout(200);
   v = await values();
   check("② 後ろの既存文字が残る（789456 になる）", v[0] === "789456" && v[1] === "789456", `[0]="${v[0]}" [1]="${v[1]}"`);
+  // ---- ④ 挿入モード（Insert キーで切替） ----
+  await first.click({ position: { x: 2, y: 5 } });
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Insert");
+  await page.waitForTimeout(100);
+  const mode = await page.evaluate(() => document.querySelector(".oia .mode")?.textContent?.trim());
+  check("④ Insert キーで挿入モードになる", mode === "挿入", `"${mode}"`);
+
+  // 現状 [0]="789456" [1]="789456"（10 桁欄）。挿入で 3 桁足すと 9 桁＝入る
+  await paste("ABC\nABC");
+  await page.waitForTimeout(200);
+  v = await values();
+  check("④ 挿入は後続を右へずらす", v[0] === "ABC789456" && v[1] === "ABC789456", `[0]="${v[0]}" [1]="${v[1]}"`);
+
+  // 欄は 68 桁。現在 9 桁なので 60 桁挿すと 69 > 68 → エラー。値は変わらない
+  const long = "X".repeat(60);
+  await first.click({ position: { x: 2, y: 5 } });
+  await page.keyboard.press("Home");
+  await paste(`${long}\n${long}`);
+  await page.waitForTimeout(200);
+  const after = await values();
+  const msg = await page.evaluate(() => document.querySelector(".oia .notice")?.textContent?.trim() ?? "");
+  check("④ 入り切らなければ No room to insert data.", msg === "No room to insert data.", `"${msg}"`);
+  check("④ エラー時は何も書き換えない", after[0] === v[0] && after[1] === v[1], `[0]="${after[0]}" [1]="${after[1]}"`);
+
+  // 次のキー操作でメッセージが消える（キーボードはロックしない）
+  await page.keyboard.press("Home");
+  await page.waitForTimeout(100);
+  const gone = await page.evaluate(() => document.querySelector(".oia .notice") === null);
+  check("④ 次の操作でメッセージが消える", gone);
+
   // SQL は実行しない。セッションはブラウザを閉じれば切れる
 } catch (e) {
   ok = false;

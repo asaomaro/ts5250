@@ -10,6 +10,9 @@ const props = defineProps<{
   /** 有効カーソル（override ?? snapshot.cursor）。ホスト由来の snapshot.cursor と違い
    *  ユーザーのカーソル移動に追従する。ACS 同様「行/列」を出して位置を確認できるようにする。 */
   cursor?: { row: number; col: number };
+  /** クライアント側の操作員メッセージ（挿入ペーストの入り切らない等）。ホスト由来の
+   *  systemMessage とは別物なので、区別できるよう別枠で出す。 */
+  notice?: string;
 }>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
@@ -43,6 +46,7 @@ function press(k: AidKey): void {
     <span v-if="snap">画面 <b>{{ snap.rows }}x{{ snap.cols }}</b></span>
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
     <span class="mode">{{ insertMode ? "挿入" : "上書き" }}</span>
+    <span v-if="notice" class="msg notice" role="status">{{ notice }}</span>
     <span v-if="snap?.systemMessage" class="msg">{{ snap.systemMessage }}</span>
     <span class="fkeys">
       <button v-for="f in fkeys" :key="f.key" class="fk" @click="press(f.key)">{{ f.label }}</button>
@@ -76,6 +80,11 @@ function press(k: AidKey): void {
 }
 .lock {
   color: var(--t-yellow);
+}
+/* クライアント側の操作員メッセージ。ホストのメッセージと取り違えないよう色を変える */
+.notice {
+  color: var(--t-red, #c62828);
+  font-weight: 600;
 }
 .msg {
   color: var(--t-red);

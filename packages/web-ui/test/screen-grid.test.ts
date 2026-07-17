@@ -805,6 +805,90 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  // ACS の挿入ペースト仕様（実機挙動として提示されたもの）:
+  //  - 挿入は後続を右へずらす。あふれ判定は行ではなく「欄全体の予算」に対して行う
+  //  - 入り切らなければ "No room to insert data." を出し、**何も書かない**（確定するまで書き換えない）
+  //  - 矩形は「各行を (開始行+i, 開始桁) へ順に挿入した結果」になる
+  const fld = (index: number, row: number, col: number, length: number, value = ""): Field =>
+    ({ index, row, col, length, protected: false, hidden: false, numeric: false, mdt: false, value });
+
+  it("挿入モードの単一行ペーストは、入り切らなければ何も書かず NO_ROOM を出す", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([fld(1, 5, 5, 10, "123123123")]), edits: new Map(), focused: true, insertMode: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "123" } }); // 9+3=12 > 10
+    expect(w.emitted("notice")).toEqual([["No room to insert data."]]);
+    expect(w.emitted("edit")).toBeFalsy(); // 値は書き換えない
+    w.unmount();
+  });
+
+  it("挿入モードの単一行ペーストは、入るなら後続を右へずらす", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([fld(1, 5, 5, 10, "123")]), edits: new Map(), focused: true, insertMode: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "123" } });
+    const emits = w.emitted("edit") as [number, string][];
+    expect([...emits].reverse().find((e) => e[0] === 1)?.[1]).toBe("123123");
+    expect(w.emitted("notice")).toBeFalsy();
+    w.unmount();
+  });
+
+  it("挿入モードの矩形ペーストは、1 行でも入り切らなければ全部取り消す", async () => {
+    // 1 行目 "123"(→789123 で 6 桁・入る) / 2 行目 "123456"(→789123456 で 9 桁・入る)。
+    // ここへもう一度 789/789 を貼ると 2 行目が 12 桁になり入らない → 1 行目も書かない
+    const fields = [fld(1, 5, 5, 10, "789123"), fld(2, 6, 5, 10, "789123456")];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, insertMode: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "789\n789" } });
+    expect(w.emitted("notice")).toEqual([["No room to insert data."]]);
+    expect(w.emitted("edit")).toBeFalsy(); // 1 行目も書き換えない
+    w.unmount();
+  });
+
+  it("挿入モードの矩形ペーストは、各行を同じ画面桁へ挿入する", async () => {
+    const fields = [fld(1, 5, 5, 10, "123"), fld(2, 6, 5, 10, "123456")];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, insertMode: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "789\n789" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("789123");
+    expect(last(2)).toBe("789123456");
+    w.unmount();
+  });
+
+  it("行またぎ欄への挿入ペーストは、1 行ずつ順に挿すのと同じ結果になる（456 → 456   123）", async () => {
+    // 欄 (20,1) len=160 → slice0=row20 幅80 / slice1=row21 幅80。値は "123" + 空白77 + "123"
+    const cmd = fld(1, 20, 1, 160, "123" + " ".repeat(77) + "123");
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap([cmd]), edits: new Map(), focused: true, insertMode: true }
+    });
+    const input = w.findAll("input.grid-input")[0]!; // slice0
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "456\n456" } });
+    const val = [...(w.emitted("edit") as [number, string][])].reverse().find((e) => e[0] === 1)?.[1] ?? "";
+    // 1 行目: offset0 へ挿入 → "456123"、元の 2 行目 "123" は 80→83 桁へずれる
+    expect(val.slice(0, 6)).toBe("456123");
+    // 2 行目: offset80（row21 col1）へ挿入 → "456" + ずれて空いた 3 桁 + "123"
+    expect(val.slice(80, 89)).toBe("456   123");
+    w.unmount();
+  });
+
   it("複数行ペーストは書いた範囲だけ上書きし、後ろの既存文字を残す", async () => {
     // "123456" の先頭へ "789" を貼ったら "789456"（旧: 後ろを捨てて "789" になっていた）
     const fields: Field[] = [
