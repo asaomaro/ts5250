@@ -22,6 +22,7 @@ export interface WsSender {
 export class WsConnection {
   private sessionId: string | undefined;
   private detachScreen: (() => void) | undefined;
+  private detachReport: (() => void) | undefined;
 
   constructor(
     private readonly deps: WsHandlerDeps,
@@ -66,6 +67,7 @@ export class WsConnection {
 
   private async onOpen(msg: WsClientMessage & { type: "open" }): Promise<void> {
     if (this.sessionId) throw new Tn5250Error("PROTOCOL_ERROR", "session already open on this connection");
+    if (msg.kind === "printer") return this.onOpenPrinter(msg);
     await withAudit({ op: "ws_open" }, async () => {
       const opts: OpenOptions = msg.profile
         ? { ...this.deps.profiles.resolveConnectOptions(msg.profile), origin: msg.profile }
@@ -87,6 +89,30 @@ export class WsConnection {
         screen: entry.session.snapshot(),
         ccsid: opts.ccsid ?? 37
       });
+    });
+  }
+
+  private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
+    await withAudit({ op: "ws_open_printer" }, async () => {
+      const opts: Parameters<SessionManager["openPrinter"]>[0] = { origin: msg.profile ?? "direct" };
+      if (msg.host !== undefined) opts.host = msg.host;
+      if (msg.port !== undefined) opts.port = msg.port;
+      if (msg.ccsid !== undefined) opts.ccsid = msg.ccsid;
+      if (msg.deviceName !== undefined) opts.deviceName = msg.deviceName;
+      if (msg.tls === true) opts.tls = true;
+      if (msg.user !== undefined) opts.user = msg.user;
+      if (msg.password !== undefined) opts.password = msg.password;
+      const entry = await this.deps.sessions.openPrinter(opts);
+      this.sessionId = entry.id;
+      const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>
+        this.send({ type: "report", sessionId: entry.id, report: { id: r.id, pages: r.pages } });
+      entry.session.on("report", onReport);
+      entry.session.on("closed", (reason) => {
+        this.send({ type: "closed", reason });
+        this.detachReport?.();
+      });
+      this.detachReport = () => entry.session.off("report", onReport);
+      this.send({ type: "printer-opened", sessionId: entry.id, startupCode: entry.session.startupCode });
     });
   }
 
@@ -143,6 +169,8 @@ export class WsConnection {
   private dispose(reason: string): void {
     this.detachScreen?.();
     this.detachScreen = undefined;
+    this.detachReport?.();
+    this.detachReport = undefined;
     if (this.sessionId) {
       void this.deps.sessions.close(this.sessionId).catch(() => {});
       this.sessionId = undefined;

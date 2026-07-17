@@ -2,9 +2,17 @@ import { reactive, markRaw } from "vue";
 import type { ScreenSnapshot } from "@as400web/core";
 import type { WsClient } from "../ws-client.js";
 
+/** プリンターセッションが受信した 1 スプール（等幅ページ列） */
+export interface SpoolReportView {
+  id: string;
+  pages: { rows: number; cols: number; lines: string[] }[];
+}
+
 export interface SessionState {
   sessionId: string;
   label: string;
+  /** セッション種別（既定 display）。printer は帳票ビュー（PrinterPane）で表示する */
+  kind?: "display" | "printer";
   snapshot: ScreenSnapshot | undefined;
   /** ローカル編集差分（fieldIndex → value）。AID 送信時に載せる */
   edits: Map<number, string>;
@@ -19,6 +27,13 @@ export interface SessionState {
   busy?: boolean;
   /** ローディング表示（通信が 0.5 秒以上かかったとき） */
   loading?: boolean;
+  // ---- プリンターセッション（kind==="printer"）----
+  /** 受信したスプール（帳票）一覧 */
+  reports?: SpoolReportView[];
+  /** ビューで選択中のスプール */
+  selectedReportId?: string;
+  /** 起動応答コード（I902 等） */
+  startupCode?: string;
 }
 
 export const sessionsStore = reactive({
@@ -49,5 +64,14 @@ export const sessionsStore = reactive({
     s.connected = true;
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
+  },
+
+  /** プリンターセッションに受信スプールを追加する（最初の 1 件は自動選択） */
+  addReport(id: string, report: SpoolReportView): void {
+    const s = this.byId.get(id);
+    if (!s) return;
+    if (!s.reports) s.reports = [];
+    s.reports.push(report);
+    if (!s.selectedReportId) s.selectedReportId = report.id;
   }
 });

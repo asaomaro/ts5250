@@ -100,6 +100,59 @@ export async function openSession(open: WsOpen, label: string): Promise<string> 
   });
 }
 
+/** プリンターセッションを開き、stores 登録＋ワークスペース追加する（帳票を report で受信） */
+export async function openPrinterSession(open: WsOpen, label: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let sessionId = "";
+    const client = new WsClient(
+      WS_URL(),
+      {
+        onServerMessage(msg: WsServerMessage) {
+          switch (msg.type) {
+            case "printer-opened": {
+              sessionId = msg.sessionId;
+              const state: SessionState = {
+                sessionId,
+                label,
+                kind: "printer",
+                snapshot: undefined,
+                edits: new Map(),
+                cursor: { row: 1, col: 1 },
+                connected: true,
+                readOnly: true,
+                client,
+                reports: [],
+                startupCode: msg.startupCode
+              };
+              sessionsStore.add(state);
+              workspaceStore.addSession(sessionId);
+              resolve(sessionId);
+              break;
+            }
+            case "report": {
+              sessionsStore.addReport(sessionId, msg.report);
+              break;
+            }
+            case "closed": {
+              const s = sessionsStore.get(sessionId);
+              if (s) s.connected = false;
+              break;
+            }
+            case "error":
+              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              break;
+          }
+        }
+      },
+      label
+    );
+    client
+      .connect()
+      .then(() => client.send({ ...open, kind: "printer" }))
+      .catch(reject);
+  });
+}
+
 /** AID 送信（ローカル編集差分を fields に載せる） */
 export function sendKey(sessionId: string, key: AidKey, cursor?: { row: number; col: number }): void {
   const s = sessionsStore.get(sessionId);

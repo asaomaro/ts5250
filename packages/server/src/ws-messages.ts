@@ -5,6 +5,8 @@ import type { ScreenSnapshot, JobInfo } from "@as400web/core";
 // ---- client → server ----
 export interface WsOpen {
   type: "open";
+  /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
+  kind?: "display" | "printer";
   profile?: string;
   host?: string;
   port?: number;
@@ -81,4 +83,23 @@ export interface WsClosed {
   type: "closed";
   reason: string;
 }
-export type WsServerMessage = WsOpened | WsScreen | WsJobInfoRes | WsError | WsClosed;
+/** プリンターセッションを開いた（起動応答コード付き） */
+export interface WsPrinterOpened {
+  type: "printer-opened";
+  sessionId: string;
+  startupCode: string;
+}
+/** スプール（帳票）1 件を受信した。pages は等幅グリッド（生 SCS は載せない） */
+export interface WsReport {
+  type: "report";
+  sessionId: string;
+  report: { id: string; pages: { rows: number; cols: number; lines: string[] }[] };
+}
+export type WsServerMessage =
+  | WsOpened
+  | WsScreen
+  | WsJobInfoRes
+  | WsError
+  | WsClosed
+  | WsPrinterOpened
+  | WsReport;

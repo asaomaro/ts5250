@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { Session5250, Tn5250Error, type ConnectOptions, type AidKey } from "@as400web/core";
+import {
+  Session5250,
+  PrinterSession,
+  Tn5250Error,
+  type ConnectOptions,
+  type AidKey,
+  type PrinterConnectOptions,
+  type SpoolReport
+} from "@as400web/core";
 
 export interface OpenOptions extends ConnectOptions {
   /** 閲覧専用セッション（set_fields/signon/run_steps と PageUp/Down 以外の AID を拒否） */
@@ -16,6 +24,26 @@ export interface SessionEntry {
   origin: string;
   connectedAt: string;
   lastActivity: number;
+}
+
+export interface OpenPrinterOptions extends PrinterConnectOptions {
+  origin?: string;
+}
+
+/** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
+export interface PrinterEntry {
+  id: string;
+  session: PrinterSession;
+  host: string;
+  origin: string;
+  connectedAt: string;
+  lastActivity: number;
+  /** 受信済みスプール（順） */
+  reports: SpoolReport[];
+  /** wait_spool が返した件数（次に返す位置） */
+  delivered: number;
+  /** 次のスプールを待つ待機者 */
+  waiters: ((r: SpoolReport | undefined) => void)[];
 }
 
 export interface SessionManagerOptions {
@@ -35,6 +63,7 @@ const READONLY_ALLOWED_KEYS: ReadonlySet<AidKey> = new Set<AidKey>(["PageUp", "P
  */
 export class SessionManager {
   private readonly sessions = new Map<string, SessionEntry>();
+  private readonly printers = new Map<string, PrinterEntry>();
   private readonly maxSessions: number;
   private readonly idleTimeoutMs: number;
   private readonly now: () => number;
@@ -54,11 +83,11 @@ export class SessionManager {
   }
 
   get size(): number {
-    return this.sessions.size;
+    return this.sessions.size + this.printers.size;
   }
 
   async open(opts: OpenOptions): Promise<SessionEntry> {
-    if (this.sessions.size >= this.maxSessions) {
+    if (this.size >= this.maxSessions) {
       throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
     const id = opts.id ?? randomUUID();
@@ -82,6 +111,75 @@ export class SessionManager {
     if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
     entry.lastActivity = this.now();
     return entry;
+  }
+
+  /** プリンターセッションを開く（TN5250E プリンター）。受信スプールをバッファする。 */
+  async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
+    if (this.size >= this.maxSessions) {
+      throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
+    }
+    const session = await PrinterSession.connect(opts);
+    const id = session.id;
+    const entry: PrinterEntry = {
+      id,
+      session,
+      host: opts.host ?? "(injected)",
+      origin: opts.origin ?? "direct",
+      connectedAt: new Date(this.now()).toISOString(),
+      lastActivity: this.now(),
+      reports: [],
+      delivered: 0,
+      waiters: []
+    };
+    this.printers.set(id, entry);
+    session.on("report", (report) => {
+      entry.reports.push(report);
+      entry.lastActivity = this.now();
+      const waiter = entry.waiters.shift();
+      if (waiter) {
+        entry.delivered = entry.reports.length;
+        waiter(report);
+      }
+    });
+    session.on("closed", () => {
+      for (const w of entry.waiters.splice(0)) w(undefined);
+      this.printers.delete(id);
+    });
+    return entry;
+  }
+
+  getPrinter(id: string): PrinterEntry {
+    const entry = this.printers.get(id);
+    if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `printer session ${id} not found`);
+    entry.lastActivity = this.now();
+    return entry;
+  }
+
+  listPrinters(): PrinterEntry[] {
+    return [...this.printers.values()];
+  }
+
+  /**
+   * 次の未受け取りスプールを返す。既に届いていれば即返し、無ければ timeoutMs まで待つ。
+   * タイムアウト・切断時は undefined。
+   */
+  waitSpool(id: string, timeoutMs = 30_000): Promise<SpoolReport | undefined> {
+    const entry = this.getPrinter(id);
+    if (entry.delivered < entry.reports.length) {
+      return Promise.resolve(entry.reports[entry.delivered++]);
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const idx = entry.waiters.indexOf(onReport);
+        if (idx >= 0) entry.waiters.splice(idx, 1);
+        resolve(undefined);
+      }, timeoutMs);
+      const onReport = (r: SpoolReport | undefined): void => {
+        clearTimeout(timer);
+        resolve(r);
+      };
+      entry.waiters.push(onReport);
+    });
   }
 
   list(): SessionEntry[] {
@@ -108,14 +206,25 @@ export class SessionManager {
 
   async close(id: string): Promise<void> {
     const entry = this.sessions.get(id);
-    if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
-    entry.session.disconnect();
-    this.sessions.delete(id);
+    if (entry) {
+      entry.session.disconnect();
+      this.sessions.delete(id);
+      return;
+    }
+    const printer = this.printers.get(id);
+    if (printer) {
+      printer.session.disconnect();
+      this.printers.delete(id);
+      return;
+    }
+    throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
   }
 
   closeAll(): void {
     for (const entry of this.sessions.values()) entry.session.disconnect();
     this.sessions.clear();
+    for (const entry of this.printers.values()) entry.session.disconnect();
+    this.printers.clear();
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = undefined;
@@ -128,6 +237,12 @@ export class SessionManager {
       if (entry.lastActivity < cutoff) {
         entry.session.disconnect();
         this.sessions.delete(id);
+      }
+    }
+    for (const [id, entry] of this.printers) {
+      if (entry.lastActivity < cutoff) {
+        entry.session.disconnect();
+        this.printers.delete(id);
       }
     }
   }

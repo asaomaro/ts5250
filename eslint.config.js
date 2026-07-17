@@ -8,7 +8,9 @@ export default tseslint.config(
       "packages/core/src/codec/tables/**",
       "packages/web-ui/**",
       // Electron ランタイム（CommonJS）は TS eslint 対象外
-      "electron/**"
+      "electron/**",
+      // AI 開発ワークフローの作業状態・研究成果物（プローブ script 等）は lint 対象外
+      ".aidev/**"
     ]
   },
   ...tseslint.configs.recommended,

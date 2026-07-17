@@ -15,6 +15,8 @@ export interface SavedConnection {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   tls?: boolean;
+  /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
+  sessionType?: "display" | "printer";
   /** 自動サインオン（RFC 4777）。有効時は user/password を使う */
   autoSignon?: boolean;
   user?: string;

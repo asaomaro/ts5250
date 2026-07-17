@@ -276,6 +276,131 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       })
   );
 
+  // ---- プリンターセッション（TN5250E: スプールを SCS 受信 → 等幅テキスト） ----
+  server.registerTool(
+    "open_printer_session",
+    {
+      description:
+        "TN5250E プリンターセッションを開いて待ち受ける。ホストのスプール出力（帳票・ジョブログ等）を" +
+        "受信でき、wait_spool で内容を等幅テキストとして取得する。deviceName 省略時はホスト採番。",
+      inputSchema: {
+        host: z.string().optional(),
+        port: z.number().int().optional(),
+        deviceName: z.string().optional(),
+        ccsid: z.number().int().optional(),
+        user: z.string().optional(),
+        password: z.string().optional(),
+        tls: z.boolean().optional()
+      },
+      outputSchema: { sessionId: z.string(), startupCode: z.string() }
+    },
+    async (input) =>
+      withAudit({ op: "open_printer_session" }, async () => {
+        try {
+          const entry = await sessions.openPrinter({
+            ...(input.host !== undefined ? { host: input.host } : {}),
+            ...(input.port !== undefined ? { port: input.port } : {}),
+            deviceName: input.deviceName,
+            ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
+            user: input.user,
+            password: input.password,
+            ...(input.tls !== undefined ? { tls: input.tls } : {}),
+            origin: "direct"
+          });
+          const code = entry.session.startupCode;
+          return {
+            content: [{ type: "text" as const, text: `printer session ${entry.id} (${code})` }],
+            structuredContent: { sessionId: entry.id, startupCode: code }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "wait_spool",
+    {
+      description:
+        "プリンターセッションで次のスプール（ジョブ完了 1 件）を待って取得する。既に届いていれば即返す。" +
+        "timeoutMs 内に来なければ received=false。pages はページごとの等幅テキスト、text は全体。",
+      inputSchema: { sessionId: z.string(), timeoutMs: z.number().int().optional() },
+      outputSchema: {
+        received: z.boolean(),
+        spoolId: z.string().optional(),
+        pages: z.array(z.string()).optional(),
+        text: z.string().optional()
+      }
+    },
+    async ({ sessionId, timeoutMs }) =>
+      withAudit({ op: "wait_spool", sessionId }, async () => {
+        try {
+          sessions.getPrinter(sessionId); // 存在確認（無ければ SESSION_NOT_FOUND）
+          const report = await sessions.waitSpool(sessionId, timeoutMs ?? 30_000);
+          if (!report) {
+            return {
+              content: [{ type: "text" as const, text: "no spool received (timeout)" }],
+              structuredContent: { received: false }
+            };
+          }
+          const pages = report.pages.map((p) => p.lines.join("\n"));
+          const text = pages.join("\n\n");
+          return {
+            content: [{ type: "text" as const, text }],
+            structuredContent: { received: true, spoolId: report.id, pages, text }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "list_spools",
+    {
+      description: "プリンターセッションでこれまでに受信したスプールの一覧（ページ数付き）。",
+      inputSchema: { sessionId: z.string() },
+      outputSchema: {
+        spools: z.array(z.object({ spoolId: z.string(), pages: z.number() }))
+      }
+    },
+    async ({ sessionId }) =>
+      withAudit({ op: "list_spools", sessionId }, async () => {
+        try {
+          const entry = sessions.getPrinter(sessionId);
+          const spools = entry.reports.map((r) => ({ spoolId: r.id, pages: r.pages.length }));
+          return {
+            content: [{ type: "text" as const, text: `${spools.length} spool(s)` }],
+            structuredContent: { spools }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "get_spool",
+    {
+      description: "受信済みスプールを spoolId 指定で再取得する（等幅テキスト）。",
+      inputSchema: { sessionId: z.string(), spoolId: z.string() },
+      outputSchema: { pages: z.array(z.string()), text: z.string() }
+    },
+    async ({ sessionId, spoolId }) =>
+      withAudit({ op: "get_spool", sessionId }, async () => {
+        try {
+          const entry = sessions.getPrinter(sessionId);
+          const report = entry.reports.find((r) => r.id === spoolId);
+          if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          const pages = report.pages.map((p) => p.lines.join("\n"));
+          const text = pages.join("\n\n");
+          return { content: [{ type: "text" as const, text }], structuredContent: { pages, text } };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
   server.registerTool(
     "get_screen",
     {

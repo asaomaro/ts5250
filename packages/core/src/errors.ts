@@ -5,6 +5,7 @@ export type ErrorCode =
   | "TLS_CERT_INVALID"
   | "SESSION_CLOSED"
   | "SESSION_NOT_FOUND"
+  | "SESSION_REJECTED"
   | "FIELD_PROTECTED"
   | "FIELD_OVERFLOW"
   | "FIELD_TYPE"

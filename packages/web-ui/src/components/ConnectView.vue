@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import type { PublicProfile } from "@as400web/server";
 import { settingsStore, type SavedConnection } from "../stores/settings.js";
-import { openSession } from "../session-controller.js";
+import { openSession, openPrinterSession } from "../session-controller.js";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 
@@ -21,11 +21,18 @@ type ConnForm = {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   tls?: boolean;
+  sessionType?: "display" | "printer";
   autoSignon?: boolean;
   user?: string;
   password?: string;
 };
-const emptyForm = (): ConnForm => ({ name: "", host: "", ccsid: DEFAULT_CCSID, screenSize: DEFAULT_SCREEN_SIZE });
+const emptyForm = (): ConnForm => ({
+  name: "",
+  host: "",
+  ccsid: DEFAULT_CCSID,
+  screenSize: DEFAULT_SCREEN_SIZE,
+  sessionType: "display"
+});
 const form = ref<ConnForm>(emptyForm());
 
 // カタカナ系コードページ（930/5026）は英小文字が大文字化される旨を案内する
@@ -58,7 +65,7 @@ async function connectSaved(c: SavedConnection): Promise<void> {
     ...(c.autoSignon && c.user ? { user: c.user, password: c.password ?? "" } : {})
   };
   settingsStore.markConnected(c.id, Date.now());
-  await doConnect(open, c.name);
+  await doConnect(open, c.name, c.sessionType);
 }
 
 function editConn(c: SavedConnection): void {
@@ -77,11 +84,16 @@ function newConn(): void {
   showForm.value = true;
 }
 
-async function doConnect(open: Parameters<typeof openSession>[0], label: string): Promise<void> {
+async function doConnect(
+  open: Parameters<typeof openSession>[0],
+  label: string,
+  sessionType?: "display" | "printer"
+): Promise<void> {
   error.value = "";
   connecting.value = true;
   try {
-    const id = await openSession(open, label);
+    const id =
+      sessionType === "printer" ? await openPrinterSession(open, label) : await openSession(open, label);
     emit("connected", id);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -154,6 +166,20 @@ function cancelForm(): void {
         <input v-model.number="form.port" type="number" placeholder="ポート (既定 23 / TLS 992)" />
         <input v-model="form.deviceName" placeholder="デバイス名 (任意)" />
       </div>
+      <div class="row">
+        <label class="field">
+          <span class="field-label">セッション種別</span>
+          <select v-model="form.sessionType">
+            <option value="display">表示（5250 画面）</option>
+            <option value="printer">プリンター（スプール受信）</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="form.sessionType === 'printer'" class="note">
+        ※ プリンターセッションはホストのスプール出力（帳票・ジョブログ等）を受信して表示します。
+        受信するには、ホスト側でスプールをこのデバイスの出力キューへ回す必要があります
+        （ライターの用紙タイプ問い合わせに応答待ちになる場合があります）。
+      </p>
       <div class="row">
         <label class="field">
           <span class="field-label">ホストコードページ</span>
