@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart } from "../src/composables/useCursor.js";
+import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, wordRangeAt } from "../src/composables/useCursor.js";
 import type { Cell, Field } from "@as400web/core";
 
 function field(row: number, col: number, length: number, protectedField = false): Field {
@@ -184,5 +184,43 @@ describe("useCursor.nextWordStart", () => {
     const cells: Cell[][] = [[{ ...cell("sbcs"), char: " " }, { ...cell("dbcs-lead"), char: "日" }, { ...cell("dbcs-tail"), char: "" }, { ...cell("sbcs"), char: " " }]];
     // 桁1 から右 → lead（桁2）。tail（桁3）は語頭にしない
     expect(nextWordStart(cells, { row: 1, col: 1 }, "right", 1, 4)).toEqual({ row: 1, col: 2 });
+  });
+});
+
+describe("useCursor.wordRangeAt（ダブルクリックの語選択）", () => {
+  // charAt の約束: " "=空白（SO/SI 含む）、""=全角の後半桁（語の続き）、他=文字
+  const of = (s: string) => (c: number) => s[c - 1] ?? " ";
+
+  it("語のどの桁を指しても語全体の範囲を返す（両端含む・1 始まり）", () => {
+    const at = of("  ABCD  EF "); // ABCD = 桁 3..6、EF = 桁 9..10
+    expect(wordRangeAt(at, 11, 3)).toEqual({ c1: 3, c2: 6 }); // 語頭
+    expect(wordRangeAt(at, 11, 5)).toEqual({ c1: 3, c2: 6 }); // 語中
+    expect(wordRangeAt(at, 11, 6)).toEqual({ c1: 3, c2: 6 }); // 語尾
+    expect(wordRangeAt(at, 11, 9)).toEqual({ c1: 9, c2: 10 });
+  });
+
+  it("空白桁は undefined（＝選択しない）", () => {
+    const at = of("  ABCD  EF ");
+    expect(wordRangeAt(at, 11, 1)).toBeUndefined();
+    expect(wordRangeAt(at, 11, 7)).toBeUndefined(); // 語間の空白
+  });
+
+  it("行端で止まる（cols を越えて走らない）", () => {
+    expect(wordRangeAt(of("ABC"), 3, 2)).toEqual({ c1: 1, c2: 3 });
+  });
+
+  it("全角は 2 桁とも語に含む（後半桁は \"\" ＝語の続き）", () => {
+    // 桁: 1=空白 2="日" 3="" 4="本" 5="" 6=空白
+    const at = (c: number) => [" ", "日", "", "本", "", " "][c - 1] ?? " ";
+    expect(wordRangeAt(at, 6, 2)).toEqual({ c1: 2, c2: 5 }); // 前半桁から
+    expect(wordRangeAt(at, 6, 5)).toEqual({ c1: 2, c2: 5 }); // 後半桁から
+  });
+
+  it("SO/SI は語の区切り（コピーと同じく空白として写るため）", () => {
+    // "AB" + SO + "あ"(2桁) + SI
+    const at = (c: number) => ["A", "B", " ", "あ", "", " "][c - 1] ?? " ";
+    expect(wordRangeAt(at, 6, 1)).toEqual({ c1: 1, c2: 2 });
+    expect(wordRangeAt(at, 6, 4)).toEqual({ c1: 4, c2: 5 });
+    expect(wordRangeAt(at, 6, 3)).toBeUndefined(); // SO 上
   });
 });

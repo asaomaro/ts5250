@@ -108,6 +108,29 @@ export function nextWordStart(cells: readonly Cell[][], pos: Pos, dir: Dir, rows
 }
 
 /**
+ * col を含む「語」の桁範囲（1 始まり・両端含む）。空白桁なら undefined（ダブルクリック選択用）。
+ * 語 = 非空白桁の連なり（nextWordStart と同じ定義）。行はまたがない。
+ *
+ * セルではなく桁アクセサを取るのは、入力欄の桁が「未送信の入力値」を持ちうるため
+ * （cells はホストが描いた内容しか持たない）。コピーと同じ文字で語を切るために、
+ * 呼び出し側はコピーと同じアクセサを渡す。
+ * charAt(col) の約束: " " = 空白（SO/SI 含む）、"" = 全角の後半桁（＝語の続き）、他 = 文字。
+ */
+export function wordRangeAt(
+  charAt: (col: number) => string,
+  cols: number,
+  col: number
+): { c1: number; c2: number } | undefined {
+  const isWord = (c: number): boolean => c >= 1 && c <= cols && charAt(c) !== " ";
+  if (!isWord(col)) return undefined;
+  let c1 = col;
+  while (isWord(c1 - 1)) c1--;
+  let c2 = col;
+  while (isWord(c2 + 1)) c2++;
+  return { c1, c2 };
+}
+
+/**
  * (row,col) を含むフィールドを返す（無ければ undefined）。
  * 行またぎフィールド（コマンド行等）は折返し先の行も対象になる（fieldSlices と同じ規則）。
  */

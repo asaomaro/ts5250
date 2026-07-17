@@ -705,6 +705,72 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("ダブルクリックでカーソル下の語を矩形選択する（ACS 相当）", async () => {
+    const snapshot = makeSnap([]);
+    // row3 の col5.. に "AB CDEF" を置く → CDEF は col8..11
+    [..."AB CDEF"].forEach((ch, i) => (snapshot.cells[2]![4 + i] = cell(ch)));
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    await grid.trigger("dblclick", { clientX: xOf(10), clientY: yOf(3) }); // CDEF の途中（E）
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true);
+    // 語頭にカーソル（ドラッグと同じ規則。選択の始点に置く）
+    expect(w.emitted("selection-start")).toEqual([[3, 8]]);
+    // コピーは語だけ（矩形は語頭〜語尾の 1 行）
+    const cd = { setData: vi.fn() };
+    const ev = new Event("copy") as Event & { clipboardData: typeof cd };
+    ev.clipboardData = cd;
+    document.dispatchEvent(ev);
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "CDEF");
+    w.unmount();
+  });
+
+  it("入力欄に打った未送信の語もダブルクリックで選択できる（cells はホストの内容しか持たない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 3, col: 5, length: 12, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    // 未送信の入力値（snapshot.cells は空白のまま）。欄は col5.. なので "WRKACTJOB" は col5..13
+    const w = mount(ScreenGrid, {
+      props: { snapshot, edits: new Map([[1, "WRKACTJOB"]]), focused: true },
+      attachTo: document.body
+    });
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    await grid.trigger("dblclick", { clientX: (8 - 1) * charW + 10 + charW * 0.5, clientY: (3 - 1) * lineH + 8 + lineH * 0.5 });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true);
+    expect(w.emitted("selection-start")).toEqual([[3, 5]]); // 語頭＝欄の先頭桁
+    const cd = { setData: vi.fn() };
+    const ev = new Event("copy") as Event & { clipboardData: typeof cd };
+    ev.clipboardData = cd;
+    document.dispatchEvent(ev);
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "WRKACTJOB");
+    w.unmount();
+  });
+
+  it("空白セルのダブルクリックでは選択しない", async () => {
+    const snapshot = makeSnap([]);
+    [..."AB"].forEach((ch, i) => (snapshot.cells[2]![4 + i] = cell(ch)));
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    await grid.trigger("dblclick", { clientX: (20 - 1) * fontPx * 0.6 + 10, clientY: (3 - 1) * fontPx * 1.25 + 8 });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false);
+    w.unmount();
+  });
+
   it("矩形選択中は欄上でもキャレットをオーバーレイで描く（入力欄は blur 済みで native キャレットが居ない）", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }

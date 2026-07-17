@@ -4,9 +4,10 @@
 //   1) マウスドラッグ: 押下したセルにカーソルが移る（旧: カーソルは動かず放置されていた）
 //   2) マウスドラッグ: 広げてもカーソルは始点から動かない
 //   3) マウス選択も修飾なしカーソル移動で解除される（旧: キーボード選択のアンカー依存で残っていた）
-//   4) キーボード Shift+矢印: カーソルは動かない（旧: 選択端へ移動していた）
-//   5) キーボード: 選択端は 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ちになる回帰）
-//   6) 重なり順: カーソルが矩形ハイライトより上に描かれる（始点は必ず矩形の角なので、
+//   4) ダブルクリック: カーソル下の語を矩形選択（未送信の入力値も含む・入力欄は blur）
+//   5) キーボード Shift+矢印: カーソルは動かない（旧: 選択端へ移動していた）
+//   6) キーボード: 選択端は 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ちになる回帰）
+//   7) 重なり順: カーソルが矩形ハイライトより上に描かれる（始点は必ず矩形の角なので、
 //      下に置くとハイライトに沈む）。jsdom は scoped CSS を解決しないためここで担保する。
 //
 // 前提: npm run build 済み（web-ui も）。profiles.local.json にプロファイル。
@@ -105,6 +106,39 @@ try {
   const afterArrow = await boxes();
   check("⑤ マウス選択も修飾なし矢印で解除される", afterArrow.rect === null, `rect=${JSON.stringify(afterArrow.rect)}`);
 
+  // ---- ダブルクリックで語を矩形選択（入力欄の上。実ブラウザは native の語選択を作るので、
+  //      それを畳んで blur できているかがここでしか見られない） ----
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(60);
+  const cmd = page.locator("input.grid-input").first();
+  // 欄の先頭桁をクリックする（既定の中央クリックだと caret が欄の真ん中に落ち、そこへ打ち込まれる）
+  await cmd.click({ position: { x: 2, y: 5 } });
+  await page.keyboard.type("WRKACTJOB");
+  await page.waitForTimeout(60);
+  const cmdBox = await cmd.boundingBox();
+  // 打った語の途中（4 文字目あたり）をダブルクリック
+  await page.mouse.dblclick(cmdBox.x + geo.charW * 3.5, cmdBox.y + cmdBox.height / 2);
+  await page.waitForTimeout(80);
+  const dbl = await boxes();
+  const want = Math.round(geo.charW * 9); // "WRKACTJOB" = 9 桁
+  check("⑥ ダブルクリックで未送信の語が矩形選択される", dbl.rect !== null && Math.abs(dbl.rect.w - want) <= 3,
+    `幅 ${dbl.rect?.w}px 期待≒${want}px（9 桁）`);
+  check("⑦ ダブルクリックで入力欄が blur される（画面の矩形選択へ切替）",
+    await page.evaluate(() => document.activeElement?.tagName !== "INPUT"));
+  // アプリの copy ハンドラ（document・bubble）が setData した後に読む必要がある。
+  // capture で読むとアプリより先に走って空になる
+  const copied = await page.evaluate(() => {
+    let got = "";
+    const h = (e) => { got = e.clipboardData?.getData("text/plain") ?? ""; };
+    document.addEventListener("copy", h);
+    document.execCommand("copy");
+    document.removeEventListener("copy", h);
+    return got;
+  });
+  check("⑧ コピーは語だけ", copied === "WRKACTJOB", `"${copied}"`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(60);
+
   // ---- キーボード Shift+矢印 ----
   await page.keyboard.press("Escape");
   await page.waitForTimeout(60);
@@ -116,11 +150,11 @@ try {
   await page.keyboard.press("Shift+ArrowDown");
   await page.waitForTimeout(60);
   const after = await boxes();
-  check("⑥ Shift+矢印でカーソルは動かない", before.cursor !== null && after.cursor !== null && after.cursor.x === before.cursor.x && after.cursor.y === before.cursor.y,
+  check("⑨ Shift+矢印でカーソルは動かない", before.cursor !== null && after.cursor !== null && after.cursor.x === before.cursor.x && after.cursor.y === before.cursor.y,
     `${JSON.stringify(before.cursor)} → ${JSON.stringify(after.cursor)}`);
   // 2 回ぶん伸びる（基点にカーソルを使うと 1 桁で頭打ち）
   const wantW = Math.round(geo.charW * 3);
-  check("⑦ 選択端は Shift+→ 2 回ぶん伸びる", after.rect !== null && Math.abs(after.rect.w - wantW) <= 3,
+  check("⑩ 選択端は Shift+→ 2 回ぶん伸びる", after.rect !== null && Math.abs(after.rect.w - wantW) <= 3,
     `幅 ${after.rect?.w}px 期待≒${wantW}px（3 桁）`);
 } catch (e) {
   ok = false;

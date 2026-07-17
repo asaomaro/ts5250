@@ -16,7 +16,7 @@ import {
 import { acceptsChar, dbcsByteLength, dbcsViewLayout, isFullWidth } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
-import { fieldAt, roundToDbcsLead } from "../composables/useCursor.js";
+import { fieldAt, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
   fieldSlices,
   fieldSpan,
@@ -1232,6 +1232,31 @@ function onGridDragMove(ev: MouseEvent): void {
   }
 }
 
+/** ダブルクリックでカーソル下の語を矩形選択する（ACS 相当）。行はまたがない。
+ *  イベント順は mousedown→mouseup→click→…→dblclick なので、直前の onGridMousedown が
+ *  消した矩形をここで置き直す形になる。 */
+function onGridDblclick(ev: MouseEvent): void {
+  const cell = cellAt(ev);
+  if (!cell) return;
+  // 語の切り出しはコピーと同じ文字で行う（charAtForCopy は未送信の入力値を反映する）
+  const range = wordRangeAt((c) => charAtForCopy(cell.row, c), props.snapshot.cols, cell.col);
+  if (!range) return; // 空白・SO/SI 上では何もしない（直前の click がカーソルだけ置く）
+  ev.preventDefault();
+  // ドラッグ選択と同じく画面全体を一様に選択する: 入力欄の native 選択/フォーカスを外す。
+  // dblclick は input 内に native の語選択を作るので、blur 前に畳んでおく
+  // （残すと再フォーカス後の入力が選択範囲を巻き込んで消す）。
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && gridEl.value?.contains(active)) {
+    const at = active.selectionStart ?? 0;
+    active.setSelectionRange(at, at);
+    active.blur();
+  }
+  window.getSelection()?.removeAllRanges();
+  rectSel.value = { r1: cell.row, r2: cell.row, c1: range.c1, c2: range.c2 };
+  bindCopy();
+  emit("selection-start", cell.row, range.c1); // カーソルは選択の始点＝語頭へ（ドラッグと同じ規則）
+}
+
 function onGridDragUp(): void {
   window.removeEventListener("mousemove", onGridDragMove);
   window.removeEventListener("mouseup", onGridDragUp);
@@ -1443,6 +1468,7 @@ onBeforeUnmount(() => {
     :style="{ fontSize: fontPx + 'px' }"
     :data-focused="focused"
     @click="onGridClick"
+    @dblclick="onGridDblclick"
     @mousedown="onGridMousedown"
   >
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
