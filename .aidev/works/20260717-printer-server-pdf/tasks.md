@@ -4,5 +4,5 @@
 - [x] P3: profile schema に printer 設定＋resolvePrinterOutput（server 由来のみ）
 - [x] P4: report 受信時に handleReport 実行（session-manager/ws-handler 連携）
 - [x] P5: MCP get_spool_pdf（base64）＋HTTP GET /api/spool/:sessionId/:spoolId/pdf ＋単体
-- [ ] P6: web-ui PrinterPane に「PDF ダウンロード」ボタン
-- [ ] P7: docs（README/scripts）・既知の制約更新
+- [x] P6: web-ui PrinterPane に「PDF ダウンロード」ボタン
+- [x] P7: docs（README/scripts）・既知の制約更新

@@ -15,6 +15,20 @@
       "ccsid": 1399,
       "deviceName": "WEBEMUJP",
       "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
+    },
+    {
+      "name": "pub400-printer",
+      "host": "pub400.com",
+      "port": 23,
+      "ccsid": 1399,
+      "deviceName": "WEBPRTJP",
+      "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" },
+      "printer": {
+        "autoPdfDir": "/var/spool/as400-pdf",
+        "autoPrint": "OfficePrinter",
+        "pageSize": "LETTER",
+        "fontSize": 8
+      }
     }
   ]
 }
