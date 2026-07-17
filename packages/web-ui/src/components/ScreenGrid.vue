@@ -16,7 +16,7 @@ import {
 import { acceptsChar, dbcsByteLength, dbcsViewLayout, isFullWidth } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
-import { fieldAt, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
+import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
   fieldSlices,
   fieldSpan,
@@ -1015,13 +1015,19 @@ function overwriteFromOffset(field: Field, offset: number, line: string): string
  *  ペースト開始桁（フォーカス欄の caret オフセット）を起点に、各行を同じオフセットから上書きする。 */
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   const lines = text.split(/\r?\n/);
+  const { cols, rows } = props.snapshot;
   const offset = el.selectionStart ?? 0; // ペースト開始桁（欄内オフセット）
-  const editable = props.snapshot.fields.filter((fl) => !fl.protected);
+  // 以降の行は「同じ画面桁の真下」の欄へ流す＝コピーした矩形の形をそのまま落とす。
+  // 「次行の最初の入力欄」で選ぶと、1 行に複数欄ある画面（SEU の行番号欄＋ソース欄など）で
+  // 桁の違う欄に流れ込む。
+  const start = posOfOffset(f, sliceOffsetOf(f, el) + offset, cols, rows);
   let cur: Field | undefined = f;
+  let curOffset = offset;
+  let row = start.row;
   let i = 0;
   while (cur && i < lines.length) {
     const field: Field = cur;
-    const val = overwriteFromOffset(field, offset, lines[i] ?? "");
+    const val = overwriteFromOffset(field, curOffset, lines[i] ?? "");
     if (field.index === f.index) {
       // 先頭行はフォーカス欄へ（edit モデルを置換して sync）
       edit = isDbcsEdit(f)
@@ -1037,7 +1043,12 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
         if (inp) inp.value = sliceValue(field, i);
       });
     }
-    cur = editable.find((fl) => fl.row === field.row + 1);
+    row += 1;
+    const next = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
+    // 同じ欄が返るのは行またぎ欄の折返し先（コマンド行など）。続けて書くと 1 行目の値を
+    // 消してしまう（emit した値はまだ props に戻っていない）ため、そこで止める。
+    cur = next && !next.protected && next.index !== field.index ? next : undefined;
+    if (cur) curOffset = caretInField(cur, row, start.col, cols, rows);
     i++;
   }
 }

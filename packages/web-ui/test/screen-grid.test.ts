@@ -805,6 +805,26 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("複数行ペーストは同じ画面桁の欄へ流す（1 行に複数欄ある画面でも矩形の形を保つ）", async () => {
+    // SEU 編集画面の実寸（PUB400 実機で採取）: 各行に 行コマンド欄(col1 len7) と
+    // ソース欄(col9 len71) が並ぶ。桁ではなく「次行の最初の入力欄」を選ぶと、2 行目が
+    // 7 桁の行コマンド欄へ切り詰められて流れ込み、ソース行が失われる。
+    const src5: Field = { index: 1, row: 5, col: 9, length: 71, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const seq6: Field = { index: 2, row: 6, col: 1, length: 7, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const src6: Field = { index: 3, row: 6, col: 9, length: 71, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap([src5, seq6, src6]), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!; // src5
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "12345\n67890" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(3)).toBe("67890"); // 2 行目は同じ桁(col10)のソース欄へ
+    expect(last(2)).toBeUndefined(); // 行番号欄(col2)は触らない
+    w.unmount();
+  });
+
   it("複数行ペーストで下方向の連続入力欄へ 1 行ずつ分配する", async () => {
     const fields: Field[] = [
       { index: 1, row: 5, col: 10, length: 5, protected: false, hidden: false, numeric: false, mdt: false, value: "" },
