@@ -87,6 +87,9 @@ export class ProfileStore {
     const p = this.get(name);
     const opts: ConnectOptions = { host: p.host };
     if (p.port !== undefined) opts.port = p.port;
+    // 転記漏れがあると平文で繋がってしまう。ポート省略時の既定は tls で 992／平文で 23 のため、
+    // tls:true だけ書いたプロファイルは「23 番へ平文で接続して成功する」＝気づけない形になる。
+    if (p.tls !== undefined) opts.tls = p.tls;
     if (p.ccsid !== undefined) opts.ccsid = p.ccsid;
     if (p.screenSize !== undefined) opts.screenSize = p.screenSize;
     if (p.deviceName !== undefined) opts.deviceName = p.deviceName;
