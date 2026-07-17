@@ -680,6 +680,47 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("ドラッグ開始セルにカーソルを置く（ACS 相当。広げてもカーソルは始点から動かない）", async () => {
+    const snapshot = makeSnap([]);
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+    const grid = w.find(".grid");
+    const el = grid.element as HTMLElement;
+    const fontPx = parseFloat(el.style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(5) }));
+    await nextTick();
+    // 始点 (3,7) を 1 度だけ通知する（"cursor" ではない: reconcileFocus を通すと欄へ再フォーカスして選択が壊れる）
+    expect(w.emitted("selection-start")).toEqual([[3, 7]]);
+    // さらに広げても始点は動かない
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(12), clientY: yOf(6) }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    await nextTick();
+    expect(w.emitted("selection-start")).toEqual([[3, 7]]);
+    expect(w.emitted("cursor")).toBeFalsy(); // ドラッグはクリック扱いしない
+    w.unmount();
+  });
+
+  it("矩形選択中は欄上でもキャレットをオーバーレイで描く（入力欄は blur 済みで native キャレットが居ない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, cursor: { row: 6, col: 12 } }
+    });
+    expect(w.find(".cursor").exists()).toBe(false); // 通常は field モード＝native キャレットが担う
+    w.vm.setBlockSelection({ r1: 6, c1: 12, r2: 8, c2: 20 });
+    await nextTick();
+    // 選択中は blur されるため、隠したままだとカーソルが完全に見えなくなる
+    expect(w.find(".cursor").exists()).toBe(true);
+    expect(w.find(".cursor").attributes("style")).toContain("11ch"); // col=12 → 11ch（始点のまま）
+    w.unmount();
+  });
+
   it("複数行ペーストはペースト開始桁（カーソル位置）を起点に上書きする（ACS 相当）", async () => {
     const fields: Field[] = [
       { index: 1, row: 5, col: 5, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "" },

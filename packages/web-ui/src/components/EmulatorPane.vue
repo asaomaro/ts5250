@@ -223,24 +223,35 @@ const rawKeydown = makeKeydownHandler({
 // ---- キーボードによる矩形（ブロック）選択（free モードで Shift+矢印） ----
 const gridRef = ref<InstanceType<typeof ScreenGrid> | null>(null);
 let selAnchor: { row: number; col: number } | null = null;
+/** 選択の移動端（アンカーの反対角）。ACS はカーソルを始点に置いたまま動かさないため、
+ *  「次にどこから広げるか」をカーソルとは別に持つ必要がある。 */
+let selFocus: { row: number; col: number } | null = null;
 const ARROW_DIRS: Record<string, Dir> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
 
 function clearBlockSel(): void {
   selAnchor = null;
+  selFocus = null;
   gridRef.value?.clearBlockSelection();
 }
 /** ScreenGrid 側で選択が解除された（コピー後・画面更新等）とき、キーボード選択アンカーもリセット。 */
 function onSelectionCleared(): void {
   selAnchor = null;
+  selFocus = null;
+}
+/** マウスドラッグで矩形選択が始まった（ScreenGrid）。ACS 同様、押下したセルにカーソルを置く。
+ *  入力欄は ScreenGrid が blur 済みなので、reconcileFocus は通さない（通すと欄へ再フォーカスして選択が壊れる）。 */
+function onSelectionStart(row: number, col: number): void {
+  cursorOverride.value = { row, col };
 }
 /** ブロック選択の反対角を pos へ拡張する。入力欄にフォーカスがあれば外して free モードにする
- *  （マウス・欄外操作と同一の画面矩形選択）。開始点は最初の呼び出し時のカーソル位置に固定。 */
+ *  （マウス・欄外操作と同一の画面矩形選択）。開始点は最初の呼び出し時のカーソル位置に固定。
+ *  ACS 同様、範囲を広げてもカーソルは始点から動かさない（動く端は selFocus が持つ）。 */
 function blockSelExtendTo(pos: { row: number; col: number }): void {
   if (!selAnchor) selAnchor = { ...cursor.value };
+  selFocus = pos;
   const active = document.activeElement;
   if (active instanceof HTMLInputElement && paneEl.value?.contains(active)) active.blur();
   if (document.activeElement !== paneEl.value) paneEl.value?.focus();
-  cursorOverride.value = pos; // カーソル端を動かす。reconcileFocus は通さない
   gridRef.value?.setBlockSelection({
     r1: Math.min(selAnchor.row, pos.row),
     r2: Math.max(selAnchor.row, pos.row),
@@ -252,7 +263,9 @@ function blockSelExtendTo(pos: { row: number; col: number }): void {
 function keyboardBlockSelect(ev: KeyboardEvent): boolean {
   const snap = snapshot.value;
   if (!snap) return false;
-  const cur = cursor.value;
+  // 広げる基点は「前回の移動端」。カーソルは始点に固定されるので基点には使えない
+  // （使うと Shift+→ を 2 回押しても常に始点の隣までしか伸びない）。
+  const cur = selFocus ?? cursor.value;
   if (ARROW_DIRS[ev.key]) {
     blockSelExtendTo(moveCursor(cur, ARROW_DIRS[ev.key]!, snap.rows, snap.cols));
     return true;
@@ -330,6 +343,7 @@ function onWheel(ev: WheelEvent): void {
         @gui-select="onGuiSelect"
         @gui-submit="onGuiSubmit"
         @selection-cleared="onSelectionCleared"
+        @selection-start="onSelectionStart"
       />
       <div v-else class="pane-empty">接続待ち…</div>
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->

@@ -58,6 +58,10 @@ const emit = defineEmits<{
   (e: "field-full", fieldIndex: number): void;
   /** 矩形（ブロック）選択が解除された（親のキーボード選択アンカーもリセットさせる） */
   (e: "selection-cleared"): void;
+  /** マウスドラッグで矩形（ブロック）選択が始まった。押下したセル＝始点を渡す。
+   *  ACS は始点にカーソルを置くため親がカーソルを合わせる。"cursor" と分けているのは、
+   *  こちらは reconcileFocus を通してはいけないから（入力欄へ再フォーカスすると選択が壊れる）。 */
+  (e: "selection-start", row: number, col: number): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -75,8 +79,11 @@ function inputChar(ch: string): string {
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
 const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
-// カーソルが編集可能フィールド上か（field モード）。true なら native キャレットが担うのでオーバーレイは隠す
+// カーソルが編集可能フィールド上か（field モード）。true なら native キャレットが担うのでオーバーレイは隠す。
+// 矩形選択中は入力欄を blur しているので native キャレットが居らず、位置が欄上でもオーバーレイに担わせる
+// （さもないとカーソルが欄の中にある間キャレットが消える。ACS は始点にカーソルを残す）。
 const cursorOnEditable = computed(() => {
+  if (rectSel.value) return false;
   const f = fieldAt(effCursor.value.row, effCursor.value.col, props.snapshot.fields, props.snapshot.cols, props.snapshot.rows);
   return f !== undefined && !f.protected;
 });
@@ -1213,6 +1220,10 @@ function onGridDragMove(ev: MouseEvent): void {
     // 矩形選択に切替: 入力欄の native 選択/フォーカスを外す（画面全体を一様に選択するため）
     const active = document.activeElement;
     if (active instanceof HTMLInputElement && gridEl.value?.contains(active)) active.blur();
+    // ACS 同様、押下したセルにカーソルを置く（以降ドラッグで広げてもここから動かない）。
+    // 全角の後半桁は前半へ丸める（桁間にはカーソルを置けない）。
+    const at = roundToDbcsLead(dragAnchor, props.snapshot.cells);
+    emit("selection-start", at.row, at.col);
   }
   if (dragMoved) {
     ev.preventDefault();
@@ -1555,6 +1566,9 @@ onBeforeUnmount(() => {
   height: 1.25em;
   background: color-mix(in srgb, var(--t-green) 45%, transparent);
   pointer-events: none;
+  /* 矩形選択（z-index:3）より上。カーソルは選択の始点＝必ず矩形の角に載るため、
+     下に置くとハイライトに沈んで「始点にカーソルが見える」という ACS の挙動が崩れる */
+  z-index: 4;
 }
 /* 矩形（ブロック）選択のハイライト（padding 分オフセット） */
 .rect-sel {

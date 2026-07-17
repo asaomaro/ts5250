@@ -193,6 +193,42 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  it("Shift+矢印で範囲を広げてもカーソルは動かない（ACS 相当。動くのは選択端だけ）", async () => {
+    seed([]); // 入力欄なし → free モード。カーソルは (1,1)
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    const cursorStyle = () => w.find(".cursor").attributes("style");
+    expect(cursorStyle()).toContain("0ch"); // 始点 (1,1) → 0ch
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await w.find(".pane").trigger("keydown", { key: "ArrowDown", shiftKey: true });
+    await nextTick();
+    // 旧: カーソルが選択端へ移動していた（→ AID キーで選択端の座標がホストへ飛ぶ）
+    expect(cursorStyle()).toContain("0ch"); // カーソルは始点のまま
+    // 選択端は 2 回ぶん進んでいる（基点にカーソルを使うと 1 桁で頭打ちになる）
+    const sel = w.find(".rect-sel");
+    expect(sel.exists()).toBe(true);
+    expect(sel.attributes("style")).toContain("3ch"); // (1,1)-(2,3) → 幅 3ch
+    w.unmount();
+  });
+
+  it("Shift+矢印で戻すと選択が縮む（アンカーは始点に固定）", async () => {
+    seed([]);
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    const pane = w.find(".pane");
+    await pane.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await pane.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").attributes("style")).toContain("3ch"); // (1,1)-(1,3)
+    await pane.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+    await nextTick();
+    expect(w.find(".rect-sel").attributes("style")).toContain("2ch"); // (1,1)-(1,2) へ縮む
+    w.unmount();
+  });
+
   it("DBCS 欄の矢印カーソルが reconcileFocus に壊されず列ビュー caret を維持する（回帰）", async () => {
     // "あいう" を持つ DBCS 欄。列ビュー " あいう "。矢印は 1 論理文字ずつ移動し SO/SI をスキップ。
     // 旧: ScreenGrid の emit("cursor") → reconcileFocus が SBCS 用 caretInField で caret を上書きし、
