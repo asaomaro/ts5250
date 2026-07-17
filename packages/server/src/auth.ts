@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { writeFile, rename } from "node:fs/promises";
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
@@ -64,8 +65,16 @@ const userRecordSchema = z.object({
 const usersSchema = z.object({ users: z.array(userRecordSchema) });
 export type UserRecord = z.infer<typeof userRecordSchema>;
 
+/** API 露出用のユーザー（ハッシュを含まない） */
+export interface PublicUser {
+  username: string;
+  role: Role;
+  tokenCount: number;
+}
+
 export class UserStore {
   private readonly byName = new Map<string, UserRecord>();
+  private path: string | undefined;
 
   constructor(users: UserRecord[]) {
     for (const u of users) this.byName.set(u.username, u);
@@ -82,7 +91,58 @@ export class UserStore {
     if (!parsed.success) {
       throw new Tn5250Error("CONNECT_FAILED", `invalid users file: ${parsed.error.message}`);
     }
-    return new UserStore(parsed.data.users);
+    const store = new UserStore(parsed.data.users);
+    store.path = path;
+    return store;
+  }
+
+  /** API 露出用の一覧（ハッシュなし） */
+  listPublic(): PublicUser[] {
+    return [...this.byName.values()].map((u) => ({
+      username: u.username,
+      role: u.role,
+      tokenCount: u.tokenHashes?.length ?? 0
+    }));
+  }
+
+  has(username: string): boolean {
+    return this.byName.has(username);
+  }
+
+  /** ユーザーを追加（存在すれば FORBIDDEN）。password は平文（内部で scrypt ハッシュ） */
+  add(username: string, password: string, role: Role): void {
+    if (this.byName.has(username)) throw new Tn5250Error("FORBIDDEN", `user ${username} already exists`);
+    this.byName.set(username, { username, role, passwordHash: hashPassword(password), tokenHashes: [] });
+  }
+
+  /** role / password を更新 */
+  update(username: string, changes: { role?: Role; password?: string }): void {
+    const u = this.byName.get(username);
+    if (!u) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+    if (changes.role) u.role = changes.role;
+    if (changes.password) u.passwordHash = hashPassword(changes.password);
+  }
+
+  remove(username: string): void {
+    if (!this.byName.delete(username)) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+  }
+
+  /** 新しい API トークンを発行し、ハッシュを保存して**平文を 1 回だけ返す** */
+  issueToken(username: string): string {
+    const u = this.byName.get(username);
+    if (!u) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+    const token = randomBytes(24).toString("hex");
+    (u.tokenHashes ??= []).push(hashToken(token));
+    return token;
+  }
+
+  /** users.json へ原子的に保存（tmp→rename）。fromFile 由来のときのみ */
+  async save(): Promise<void> {
+    if (!this.path) return;
+    const json = JSON.stringify({ users: [...this.byName.values()] }, null, 2);
+    const tmp = `${this.path}.tmp`;
+    await writeFile(tmp, json, "utf8");
+    await rename(tmp, this.path);
   }
 
   /** username/password を検証して AuthUser を返す（失敗は undefined） */
@@ -192,6 +252,15 @@ export function createAuthMiddleware(auth: AuthContext): MiddlewareHandler<{ Var
     const user = resolveUser(c, auth);
     if (!user) return c.json({ error: "unauthenticated" }, 401);
     c.set("user", user);
+    return next();
+  };
+}
+
+/** admin 専用ルート用ミドルウェア（role!=="admin" は 403）。authMiddleware の後に適用する。 */
+export function requireAdmin(): MiddlewareHandler<{ Variables: AuthVars }> {
+  return async (c, next) => {
+    const user = c.get("user");
+    if (!user || user.role !== "admin") return c.json({ error: "forbidden: admin only" }, 403);
     return next();
   };
 }

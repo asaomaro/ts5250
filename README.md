@@ -330,7 +330,11 @@ node packages/server/dist/main.js --http 3400 --users ./users.local.json --web-r
 - **MCP / 自動化**: users の `tokenHashes`（API トークンの sha256）に `Authorization: Bearer <token>` で認証。
 - **セキュリティ**: パスワード/トークンは平文保存しない（scrypt/sha256・timingSafe 比較）。
   `users*.json` はコミットしない（`.gitignore` 済み）。TLS 配信時は `--cookie-secure` を付ける。
-- **管理者画面**（ユーザー CRUD・全セッション/プリンター管理・ログ取得）は後続対応（PR 2）。
+- **管理者画面**（role=admin）: ヘッダの「ユーザー / セッション / ログ」から、既存セッションと同様に**タブで開く**。
+  - ユーザー管理（作成・削除・role/パスワード変更・API トークン発行）。最後の admin は削除/降格不可（ロックアウト防止）。
+  - 全ユーザーのセッション（表示/プリンター）一覧・切断。
+  - 直近の監査ログ取得（in-memory・既定 500 件）。
+  - すべて admin 専用（`/api/admin/*` は role!=admin で 403）。
 
 ## 🧪 開発・テスト
 

@@ -1,0 +1,8 @@
+schema: 3
+slug: admin-ui
+current: plan
+approved: [requirement, spec, plan]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260717-auth-admin]
