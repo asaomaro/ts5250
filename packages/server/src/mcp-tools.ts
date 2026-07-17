@@ -10,6 +10,7 @@ import {
 import { SessionManager } from "./session-manager.js";
 import { ProfileStore } from "./profiles.js";
 import { screenToText, type FormatOptions } from "./format.js";
+import { renderSpoolPdf } from "./pdf.js";
 import { fieldSignon } from "./signon.js";
 import { withAudit } from "./audit.js";
 
@@ -395,6 +396,31 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const pages = report.pages.map((p) => p.lines.join("\n"));
           const text = pages.join("\n\n");
           return { content: [{ type: "text" as const, text }], structuredContent: { pages, text } };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "get_spool_pdf",
+    {
+      description: "受信済みスプールを PDF に変換して取得する（base64）。SBCS/DBCS 対応・等幅・改ページ保持。",
+      inputSchema: { sessionId: z.string(), spoolId: z.string() },
+      outputSchema: { base64: z.string(), bytes: z.number() }
+    },
+    async ({ sessionId, spoolId }) =>
+      withAudit({ op: "get_spool_pdf", sessionId }, async () => {
+        try {
+          const entry = sessions.getPrinter(sessionId);
+          const report = entry.reports.find((r) => r.id === spoolId);
+          if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          const pdf = await renderSpoolPdf(report.pages);
+          const base64 = pdf.toString("base64");
+          return {
+            content: [{ type: "text" as const, text: `PDF ${pdf.length} bytes (base64)` }],
+            structuredContent: { base64, bytes: pdf.length }
+          };
         } catch (err) {
           return errorResult(err);
         }

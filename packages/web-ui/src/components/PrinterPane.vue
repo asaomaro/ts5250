@@ -38,6 +38,21 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** サーバー生成の PDF をダウンロードする（等幅・DBCS 対応・改ページ保持） */
+async function downloadPdf(): Promise<void> {
+  const r = selected.value;
+  if (!r) return;
+  const res = await fetch(`/api/spool/${props.sessionId}/${r.id}/pdf`);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${session.value?.label ?? "spool"}-${r.id}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** ブラウザの印刷（→PDF）用に別ウィンドウで開いて印刷する */
 function printReport(): void {
   if (!selected.value) return;
@@ -60,7 +75,8 @@ function printReport(): void {
       <span class="muted">受信 {{ reports.length }} 件</span>
       <span class="spacer"></span>
       <button :disabled="!selected" @click="saveText">テキスト保存</button>
-      <button :disabled="!selected" @click="printReport">印刷 / PDF</button>
+      <button :disabled="!selected" @click="downloadPdf">PDF ダウンロード</button>
+      <button :disabled="!selected" @click="printReport">印刷</button>
     </div>
     <div class="body">
       <ul class="list">

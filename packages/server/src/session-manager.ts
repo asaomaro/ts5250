@@ -3,11 +3,15 @@ import {
   Session5250,
   PrinterSession,
   Tn5250Error,
+  childLog,
   type ConnectOptions,
   type AidKey,
   type PrinterConnectOptions,
   type SpoolReport
 } from "@as400web/core";
+import { handleReport, type PrinterOutputConfig } from "./printer-output.js";
+
+const printerLog = childLog({ component: "printer-output" });
 
 export interface OpenOptions extends ConnectOptions {
   /** 閲覧専用セッション（set_fields/signon/run_steps と PageUp/Down 以外の AID を拒否） */
@@ -28,6 +32,8 @@ export interface SessionEntry {
 
 export interface OpenPrinterOptions extends PrinterConnectOptions {
   origin?: string;
+  /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
+  output?: PrinterOutputConfig;
 }
 
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
@@ -139,6 +145,12 @@ export class SessionManager {
       if (waiter) {
         entry.delivered = entry.reports.length;
         waiter(report);
+      }
+      // サーバー側出力（PDF 自動蓄積・自動印刷）。設定があるときだけ・失敗しても受信は妨げない
+      if (opts.output) {
+        void handleReport(report, opts.output, (m) => printerLog.warn(m)).catch((e) =>
+          printerLog.warn(`printer output failed: ${e instanceof Error ? e.message : String(e)}`)
+        );
       }
     });
     session.on("closed", () => {
