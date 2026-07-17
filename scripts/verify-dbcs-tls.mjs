@@ -1,5 +1,6 @@
 // T11: DBCS/TLS/27x132 の実機・リプレイ検証。
-// 実機: TLS(992) 接続・DBCS 端末タイプ(IBM-5555-C01)受理・27x132 端末(IBM-3477-FC)受理。
+// 実機: TLS(992) 接続・DBCS 端末タイプ(IBM-5555-G02)受理・27x132 端末(IBM-3477-FC)受理。
+// 画面サイズが実際に効くか（SEU が 132 桁で来るか）は verify-screen-size.mjs が見る。
 // リプレイ: 合成 DBCS fixture で日本語デコード・桁維持。
 // 実行: node --env-file=.env scripts/verify-dbcs-tls.mjs
 import { readFileSync } from "node:fs";
@@ -23,7 +24,7 @@ try {
 try {
   const s = await Session5250.connect({ host: "pub400.com", port: 23, ccsid: 1399, deviceName: "WEBEMUD1", ...creds });
   const m = onMenu(s);
-  log(`DBCS term(IBM-5555-C01): onMenu=${m}`);
+  log(`DBCS term(IBM-5555-G02): onMenu=${m}`);
   ok = ok && m;
   s.disconnect();
 } catch (e) { ok = false; log("DBCS term ERROR: " + e.message); }

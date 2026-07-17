@@ -6,9 +6,20 @@ describe("terminalTypeFor", () => {
   it("SBCS/DBCS × 24x80/27x132 の端末タイプを返す", () => {
     expect(terminalTypeFor(37, "24x80")).toBe("IBM-3179-2");
     expect(terminalTypeFor(37, "27x132")).toBe("IBM-3477-FC");
-    expect(terminalTypeFor(1399, "24x80")).toBe("IBM-5555-C01");
-    expect(terminalTypeFor(1399, "27x132")).toBe("IBM-5555-B01");
-    expect(terminalTypeFor(930, "24x80")).toBe("IBM-5555-C01");
+    // DBCS はカラーの 2 つを使う（PUB400 実機で確認: G02=カラー24x80 / C01=カラー27x132。
+    // B01・G01 はモノクロで色が落ちる）。詳細は terminal-type.ts の解説を参照。
+    expect(terminalTypeFor(1399, "24x80")).toBe("IBM-5555-G02");
+    expect(terminalTypeFor(1399, "27x132")).toBe("IBM-5555-C01");
+    expect(terminalTypeFor(930, "24x80")).toBe("IBM-5555-G02");
+  });
+
+  it("DBCS でもモノクロ端末（B01/G01）は選ばない＝色が落ちない", () => {
+    for (const ccsid of [930, 939, 1399, 5026, 5035]) {
+      for (const size of ["24x80", "27x132"] as const) {
+        expect(terminalTypeFor(ccsid, size)).not.toBe("IBM-5555-B01");
+        expect(terminalTypeFor(ccsid, size)).not.toBe("IBM-5555-G01");
+      }
+    }
   });
   it("DBCS CCSID を判定する", () => {
     expect(isDbcsCcsid(1399)).toBe(true);
