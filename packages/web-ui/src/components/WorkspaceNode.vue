@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import EmulatorPane from "./EmulatorPane.vue";
+import PrinterPane from "./PrinterPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
+import { sessionsStore } from "../stores/sessions.js";
 
 const props = defineProps<{ node: WsNode }>();
 
@@ -61,6 +63,10 @@ function onDrop(ev: DragEvent): void {
 }
 
 const focused = computed(() => workspaceStore.focusedGroupId === group.value.id);
+/** アクティブタブがプリンターセッションかどうか（ペイン内容の出し分け） */
+const activeIsPrinter = computed(
+  () => !!group.value.activeTab && sessionsStore.get(group.value.activeTab)?.kind === "printer"
+);
 </script>
 
 <template>
@@ -88,8 +94,14 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
   >
     <PaneTabs :group="group" />
     <div class="group-body">
+      <PrinterPane
+        v-if="group.activeTab && activeIsPrinter"
+        :session-id="group.activeTab"
+        :focused="focused"
+        @focus="workspaceStore.focus(group.id)"
+      />
       <EmulatorPane
-        v-if="group.activeTab"
+        v-else-if="group.activeTab"
         :session-id="group.activeTab"
         :focused="focused"
         @focus="workspaceStore.focus(group.id)"
