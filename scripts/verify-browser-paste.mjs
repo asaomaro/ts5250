@@ -7,6 +7,7 @@
 //   3) 行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる（旧: 2 行目が捨てられていた）
 //   4) 挿入モード: 後続を右へずらす／入り切らなければ "No room to insert data." を出して
 //      **何も書かない**（ACS: 問題ないと確定するまで書き換えない）
+//   5) 帯の折返し: 開始桁〜行末の幅で各行を折り返し、あふれた分は次の帯行の**同じ桁**へ
 //
 // STRSQL では Enter を押さない（＝SQL を実行しない）。F3 で抜けるだけなのでホストは変更しない。
 //
@@ -139,6 +140,21 @@ try {
   await page.waitForTimeout(100);
   const gone = await page.evaluate(() => document.querySelector(".oia .notice") === null);
   check("④ 次の操作でメッセージが消える", gone);
+
+  // ---- ⑤ 帯の折返し（上書きモードへ戻す）----
+  await first.click({ position: { x: 2, y: 5 } });
+  await page.keyboard.press("Insert"); // 上書きへ
+  await page.waitForTimeout(100);
+  // 欄は 68 桁（col7..74）。67 桁目から貼ると帯幅 2 → "111" は "11" ＋ 次の帯行に "1"
+  const at = 67;
+  await page.evaluate((n) => document.activeElement.setSelectionRange(n - 1, n - 1), at);
+  // 2 行の矩形 = 帯行 4 つ。SQL 入力エリアの行数に依存しない範囲で見る
+  await paste("111\n222");
+  await page.waitForTimeout(250);
+  const band = (await values()).slice(0, 4).map((s) => s.slice(at - 1));
+  const wantBand = ["11", "1", "22", "2"];
+  check("⑤ 帯幅 2 で折り返し、あふれは次の帯行の同じ桁へ",
+    JSON.stringify(band) === JSON.stringify(wantBand), `${JSON.stringify(band)} 期待 ${JSON.stringify(wantBand)}`);
 
   // SQL は実行しない。セッションはブラウザを閉じれば切れる
 } catch (e) {

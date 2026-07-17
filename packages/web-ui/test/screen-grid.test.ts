@@ -889,6 +889,31 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  // ACS 実機挙動: 帯（開始桁〜行末）の幅で各行を折り返し、あふれた分は次の帯行の**同じ桁**へ。
+  // 次の行は前の行が使い終わった次の帯行から。10 桁欄が縦に並ぶ画面へ 111/222/333 を貼った実例。
+  describe.each([
+    { startCol: 9, want: ["11", "1", "22", "2", "33", "3"], why: "帯幅 2" },
+    { startCol: 10, want: ["1", "1", "1", "2", "2", "2"], why: "帯幅 1" },
+    { startCol: 8, want: ["111", "222", "333"], why: "帯幅 3＝ちょうど収まる" }
+  ])("矩形ペーストの帯折返し（開始 $startCol 桁・$why）", ({ startCol, want }) => {
+    it(`111/222/333 → ${JSON.stringify(want)}`, async () => {
+      // 10 桁欄（col1..10）を縦に 9 本
+      const fields: Field[] = Array.from({ length: 9 }, (_, i) => fld(i + 1, 5 + i, 1, 10));
+      const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+      const input = w.findAll("input.grid-input")[0]!;
+      await input.trigger("focus");
+      (input.element as HTMLInputElement).setSelectionRange(startCol - 1, startCol - 1);
+      await input.trigger("paste", { clipboardData: { getData: () => "111\n222\n333" } });
+      const emits = w.emitted("edit") as [number, string][];
+      const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+      want.forEach((expected, i) => {
+        // 各欄は開始桁の手前が空白、そこから帯のぶん
+        expect(last(i + 1)?.slice(startCol - 1)).toBe(expected);
+      });
+      w.unmount();
+    });
+  });
+
   it("複数行ペーストは書いた範囲だけ上書きし、後ろの既存文字を残す", async () => {
     // "123456" の先頭へ "789" を貼ったら "789456"（旧: 後ろを捨てて "789" になっていた）
     const fields: Field[] = [

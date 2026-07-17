@@ -1035,25 +1035,47 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
   return out.join("").replace(/\s+$/, "");
 }
 
-/** 複数行テキストを、ペースト開始桁を起点に「同じ画面桁の真下」へ 1 行ずつ流し込む（ACS 相当）。
- *  コピーした矩形の形をそのまま落とす。行ごとの宛先を桁で引くので、1 行に複数の入力欄が並ぶ画面
- *  （SEU の行コマンド欄＋ソース欄など）でも桁がずれず、行またぎ欄（コマンド行）では複数行が
- *  同じ欄の別オフセットへ落ちる。 */
+/** (row, col) を含む欄の、その行の区間の右端桁（行またぎ欄はその行のスライスの右端）。 */
+function bandEndCol(field: Field, row: number, col: number): number | undefined {
+  const s = slicesOf(field).find((sl) => sl.row === row && col >= sl.col && col < sl.col + sl.width);
+  return s ? s.col + s.width - 1 : undefined;
+}
+
+/** 複数行テキストを「帯」へ流し込む（ACS 実機挙動）。
+ *
+ *  帯 = ペースト開始桁から、その行の欄の右端まで。各行を帯の幅で折り返しながら流し、次の行は
+ *  前の行が使い終わった次の帯行から始める。あふれた分は**次の行の 1 桁目ではなく同じ桁**へ回る
+ *  （連続フィールドでも論理的な線形位置ではなく矩形の桁を優先する。独立欄でも同じ）。
+ *
+ *  例: 10 桁欄・矩形 111/222/333 を 9 桁目（帯幅 2）へ →
+ *      row1 "11" / row2 "1" / row3 "22" / row4 "2" / row5 "33" / row6 "3"
+ *
+ *  行ごとの宛先を桁で引くので、1 行に複数の入力欄が並ぶ画面（SEU の行コマンド欄＋ソース欄）でも
+ *  桁がずれない。行またぎ欄では複数行が同じ欄の別オフセットへ落ちる。 */
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   const lines = text.split(/\r?\n/);
   const { cols, rows } = props.snapshot;
   const start = posOfOffset(f, sliceOffsetOf(f, el) + (el.selectionStart ?? 0), cols, rows);
-  // 行 → 宛先の欄を桁で引く。行またぎ欄では複数行が同じ欄に落ちるため、欄ごとにまとめてから
-  // 1 度だけ書く（1 行ずつ書くと、同じ欄の 2 行目が 1 行目より前の値を土台にして上書きで消す）。
+  // 帯行へ割り付ける。同じ欄に複数回書くことがある（行またぎ欄・帯の折返し）ため、欄ごとに
+  // まとめてから 1 度だけ書く（1 行ずつ書くと、2 回目が 1 回目より前の値を土台にして消す）。
   const targets = new Map<number, { field: Field; parts: { offset: number; line: string }[] }>();
-  for (let i = 0; i < lines.length; i++) {
-    const row = start.row + i;
-    if (row > rows) break;
-    const t = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
-    if (!t || t.protected) break; // 真下が入力欄でなければそこで止める
-    const e = targets.get(t.index) ?? { field: t, parts: [] };
-    e.parts.push({ offset: caretInField(t, row, start.col, cols, rows), line: lines[i] ?? "" });
-    targets.set(t.index, e);
+  let row = start.row;
+  let stop = false;
+  for (const line of lines) {
+    if (stop) break;
+    let rest = line;
+    do {
+      if (row > rows) { stop = true; break; }
+      const t = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
+      const end = t ? bandEndCol(t, row, start.col) : undefined;
+      if (!t || t.protected || end === undefined) { stop = true; break; } // 真下が入力欄でなければ打ち切り
+      const width = end - start.col + 1;
+      const e = targets.get(t.index) ?? { field: t, parts: [] };
+      e.parts.push({ offset: caretInField(t, row, start.col, cols, rows), line: rest.slice(0, width) });
+      targets.set(t.index, e);
+      rest = rest.slice(width); // 帯幅を越えた分は次の帯行へ（同じ桁から）
+      row += 1;
+    } while (rest.length > 0);
   }
   // 値を先に全部組み立てる。1 つでも入り切らなければ**何も書かない**（ACS: 問題ないと確定するまで
   // 書き換えない。挿入モードのみ。上書きモードは予算で切り詰めるだけでエラーにならない）。
