@@ -1,0 +1,8 @@
+schema: 3
+slug: printer-session-dbcs
+current: requirement
+approved: []
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260717-printer-session]
