@@ -213,6 +213,29 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  it("マウスで作った矩形選択も、修飾なしカーソル移動で解除される", async () => {
+    // 旧: 解除条件が selAnchor（キーボード選択のアンカー）に依存しており、マウス選択では
+    // null のままなので矩形が残り、選択範囲だけが画面に居座っていた。
+    seed([]);
+    const w = mountPane();
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    await grid.trigger("mousedown", { button: 0, clientX: xOf(5), clientY: yOf(3) });
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(9), clientY: yOf(5) }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(true); // マウスで矩形選択できている
+    await w.find(".pane").trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    expect(w.find(".rect-sel").exists()).toBe(false); // 修飾なし矢印で解除（キーボード選択と同じ）
+    w.unmount();
+  });
+
   it("Shift+矢印で戻すと選択が縮む（アンカーは始点に固定）", async () => {
     seed([]);
     const w = mountPane();

@@ -294,8 +294,11 @@ function onKeydown(ev: KeyboardEvent): void {
       return;
     }
   }
-  // Escape・修飾なしのカーソル移動でブロック選択を解除
-  if (ev.key === "Escape" || (!ev.shiftKey && ARROW_DIRS[ev.key] && selAnchor)) clearBlockSel();
+  // Escape・修飾なしのカーソル移動でブロック選択を解除。
+  // selAnchor で条件付けないこと: あれはキーボード選択のアンカーで、マウスで選択した場合は
+  // null のまま（矩形の実体は ScreenGrid 側）。見るとマウス選択が解除されずに残る。
+  // clearBlockSel は冪等なので、選択が無いときに呼んでも害はない。
+  if (ev.key === "Escape" || (!ev.shiftKey && ARROW_DIRS[ev.key])) clearBlockSel();
   rawKeydown(ev);
 }
 
