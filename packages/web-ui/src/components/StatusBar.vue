@@ -4,7 +4,16 @@ import type { AidKey } from "@as400web/core";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
 
-const props = defineProps<{ state: SessionState; insertMode?: boolean }>();
+const props = defineProps<{
+  state: SessionState;
+  insertMode?: boolean;
+  /** 有効カーソル（override ?? snapshot.cursor）。ホスト由来の snapshot.cursor と違い
+   *  ユーザーのカーソル移動に追従する。ACS 同様「行/列」を出して位置を確認できるようにする。 */
+  cursor?: { row: number; col: number };
+}>();
+
+/** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
+const cur = computed(() => props.cursor ?? props.state.snapshot?.cursor);
 const shift = computed(() => false);
 
 const snap = computed(() => props.state.snapshot);
@@ -28,7 +37,9 @@ function press(k: AidKey): void {
 <template>
   <div class="oia">
     <span>{{ state.connected ? "⌨ 入力可" : "切断" }}</span>
-    <span v-if="snap">カーソル <b>{{ snap.cursor.row }},{{ snap.cursor.col }}</b></span>
+    <span v-if="cur" class="pos" title="カーソル位置（行/列）">
+      <b>{{ String(cur.row).padStart(2, "0") }}/{{ String(cur.col).padStart(3, "0") }}</b>
+    </span>
     <span v-if="snap">画面 <b>{{ snap.rows }}x{{ snap.cols }}</b></span>
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
     <span class="mode">{{ insertMode ? "挿入" : "上書き" }}</span>
@@ -40,6 +51,14 @@ function press(k: AidKey): void {
 </template>
 
 <style scoped>
+/* カーソル位置（行/列）。桁ズレの確認に使うので等幅・固定幅で読み取りやすくする */
+.pos {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.pos b {
+  letter-spacing: 0.5px;
+}
 .oia {
   display: flex;
   align-items: center;

@@ -337,7 +337,7 @@ function onWheel(ev: WheelEvent): void {
         <div v-if="loading" class="spinner" role="status" aria-label="通信中"></div>
       </div>
     </div>
-    <StatusBar v-if="state" :state="state" :insert-mode="insertMode" />
+    <StatusBar v-if="state" :state="state" :insert-mode="insertMode" :cursor="cursor" />
   </div>
 </template>
 

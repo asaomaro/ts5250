@@ -177,74 +177,10 @@ try {
   rule("⑤ Insert トグルで挿入になる（AYXCDE）", ins === "AYXCDE", `"${ins}"`);
   await page.keyboard.press("Insert"); // 戻す
 
-  // ⑥ 行またぎ: 74 桁を超えて入力でき、2 行目へ流れる。1 行目へ混入しない。
+  // ⑥ 全角も上書きが既定（挿入されない）。ABCDEF の 2 桁目に 日 → 日 は SO+2+SI=4 桁を
+  //    占めるので後続 BCDE(4 桁) を食って列ビュー "A 日 F"。挿入だと "A 日 BCDEF" が残る。
   await page.keyboard.press("Home");
-  for (let i = 0; i < 12; i++) await page.keyboard.press("Delete");
-  await cmd.click();
-  await page.keyboard.press("Home");
-  await page.keyboard.type("Z".repeat(80), { delay: 5 }); // 74 桁を超える
-  await page.waitForTimeout(300);
-  const wrap = await page.evaluate(() => {
-    const s0 = document.querySelector('input[data-field-index="1"][data-slice="0"]');
-    const s1 = document.querySelector('input[data-field-index="1"][data-slice="1"]');
-    return {
-      slices: document.querySelectorAll('input[data-field-index="1"]').length,
-      s0len: s0?.value.length ?? -1,
-      s0z: (s0?.value.match(/Z/g) ?? []).length,
-      s1z: (s1?.value.match(/Z/g) ?? []).length,
-      active: document.activeElement?.dataset?.slice
-    };
-  });
-  rule("⑥ 行またぎ: 80 文字が 74+6 に分かれて 2 行目へ流れる", wrap.s0z === 74 && wrap.s1z === 6, JSON.stringify(wrap));
-
-  // ⑦ アウトフォーカスしても 1 行目に 2 行目の文字が出ない（前回の不具合）
-  await page.evaluate(() => document.activeElement.blur());
-  await page.waitForTimeout(200);
-  const blurred = await page.evaluate(() => {
-    const s0 = document.querySelector('input[data-field-index="1"][data-slice="0"]');
-    const s1 = document.querySelector('input[data-field-index="1"][data-slice="1"]');
-    return { s0z: (s0?.value.match(/Z/g) ?? []).length, s1z: (s1?.value.match(/Z/g) ?? []).length };
-  });
-  rule("⑦ blur 後も 1 行目に 2 行目の文字が出ない", blurred.s0z === 74 && blurred.s1z === 6, JSON.stringify(blurred));
-
-  // ⑧ 2 行目にフォーカスしても文字が消えない（前回の不具合）
-  const s1loc = page.locator('input[data-field-index="1"][data-slice="1"]');
-  await s1loc.click();
-  await page.waitForTimeout(200);
-  const focus2 = await page.evaluate(() => {
-    const s1 = document.querySelector('input[data-field-index="1"][data-slice="1"]');
-    return { s1z: (s1?.value.match(/Z/g) ?? []).length };
-  });
-  rule("⑧ 2 行目にフォーカスしても文字が消えない", focus2.s1z === 6, JSON.stringify(focus2));
-
-  // ⑨ 2 行目（折返し先）も欄長までスペース埋めされ、クリックした桁でカーソルが保持される
-  await page.keyboard.press("Home");
-  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
-  await page.evaluate(() => document.activeElement.blur());
-  await page.waitForTimeout(200);
-  const s1meta = await page.evaluate(() => {
-    const s1 = document.querySelector('input[data-field-index="1"][data-slice="1"]');
-    return { len: s1?.value.length ?? -1 };
-  });
-  rule("⑨ 2 行目も空欄で 79 桁ぶんスペース埋めされる", s1meta.len === 79, `s1 value長=${s1meta.len}`);
-
-  const s1box = await page.locator('input[data-field-index="1"][data-slice="1"]').boundingBox();
-  const s1chW = s1box.width / 79;
-  await page.mouse.click(s1box.x + s1chW * 25 + s1chW / 2, s1box.y + s1box.height / 2); // 2 行目の 25 桁目
-  await page.waitForTimeout(250);
-  const s1click = await page.evaluate(() => ({
-    slice: document.activeElement?.dataset?.slice,
-    caret: document.activeElement?.selectionStart ?? -1
-  }));
-  rule(
-    "⑨-2 2 行目のクリックした桁でカーソルが保持される（先頭へ飛ばない）",
-    s1click.slice === "1" && s1click.caret >= 24 && s1click.caret <= 26,
-    JSON.stringify(s1click)
-  );
-
-  // ⑩ 全角も上書きが既定（挿入されない）。ABCDEF の 2 桁目に 日 → A日DEF（日 が 2 桁＋SO/SI を食う）
-  await page.keyboard.press("Home");
-  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
+  for (let i = 0; i < 20; i++) await page.keyboard.press("Delete");
   await cmd.click();
   await page.keyboard.press("Home");
   await page.keyboard.type("ABCDEF", { delay: 20 });
@@ -257,64 +193,198 @@ try {
   });
   await page.waitForTimeout(250);
   const owDbcs = (await val()).replace(/\s+$/, "");
-  // 日 は SO+2+SI=4 桁を占めるので、上書きなら後続 BCDE(4 桁) を食って "A 日 F"（列ビュー）。
-  // 挿入だと BCDEF が押し出されて残る（"A 日 BCDEF"）。
-  rule("⑩ 全角も上書きが既定（後続 4 桁を食う）", owDbcs === "A 日 F", `"${owDbcs}"`);
+  rule("⑥ 全角も上書きが既定（後続 4 桁を食う）", owDbcs === "A 日 F", `"${owDbcs}"`);
 
-  // ⑪ 全角が入った状態で、未入力列を上下移動しても列がずれない
+  // ⑦ 実 IME で確定した全角も上書きになる（IME 経路も dbcsType を通ること）
   await page.keyboard.press("Home");
-  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
+  for (let i = 0; i < 20; i++) await page.keyboard.press("Delete");
+  await cmd.click();
+  await page.keyboard.press("Home");
+  await page.keyboard.type("ABCDEF", { delay: 20 });
+  await page.evaluate(() => document.activeElement.setSelectionRange(1, 1));
+  const cdpIme = await page.context().newCDPSession(page);
+  await cdpIme.send("Input.imeSetComposition", { text: "日", selectionStart: 1, selectionEnd: 1 });
+  await cdpIme.send("Input.insertText", { text: "日" });
+  await page.waitForTimeout(300);
+  const imeOw = (await val()).replace(/\s+$/, "");
+  rule("⑦ 実 IME 確定の全角も上書きになる", imeOw === "A 日 F", `"${imeOw}"`);
+
+
+  // ⑧ 全角が入った状態で、上の行から矢印で入ってきたときに到達桁が保たれる
+  //    （表示桁を列ビュー index として渡していると、全角のぶんずれて右端へ飛ぶ）
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 20; i++) await page.keyboard.press("Delete");
   await cmd.click();
   await page.keyboard.press("Home");
   await page.evaluate(async () => {
     const el = document.activeElement;
     const dt = new DataTransfer();
-    dt.setData("text", "日本語漢字"); // 全角 5 文字
+    dt.setData("text", "ああああああ"); // 全角 6 文字＝14 桁（SO+12+SI）
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await page.waitForTimeout(250);
-  // 未入力列（40 桁目）へクリック → ↓ で 2 行目 → ↑ で 1 行目へ戻る。列が保たれること
-  const b3 = await cmd.boundingBox();
-  const w3 = b3.width / 74;
-  await page.mouse.click(b3.x + w3 * 40 + w3 / 2, b3.y + b3.height / 2);
+  const b5 = await cmd.boundingBox();
+  const w5 = b5.width / 74;
+  await page.mouse.click(b5.x + w5 * 30 + w5 / 2, b5.y + b5.height / 2); // 30 桁目（全角より右の未入力桁）
   await page.waitForTimeout(200);
-  const c1 = await page.evaluate(() => document.activeElement.selectionStart);
-  await page.keyboard.press("ArrowDown");
+  const before5 = await page.evaluate(() => document.activeElement.selectionStart);
+  await page.keyboard.press("ArrowUp"); // 上の非入力行へ
   await page.waitForTimeout(200);
-  const c2 = await page.evaluate(() => ({ slice: document.activeElement?.dataset?.slice, caret: document.activeElement?.selectionStart }));
-  await page.keyboard.press("ArrowUp");
-  await page.waitForTimeout(200);
-  const c3 = await page.evaluate(() => ({ slice: document.activeElement?.dataset?.slice, caret: document.activeElement?.selectionStart }));
+  await page.keyboard.press("ArrowDown"); // 真下＝コマンド行へ戻る
+  await page.waitForTimeout(250);
+  const after5 = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName,
+    caret: document.activeElement?.selectionStart ?? -1
+  }));
   rule(
-    "⑪ 全角 5 文字がある状態で上下移動しても列がずれない",
-    c2.slice === "1" && c3.slice === "0" && c3.caret === c1,
-    `1行目caret=${c1} → ↓${JSON.stringify(c2)} → ↑${JSON.stringify(c3)}`
+    "⑧ 全角がある欄へ矢印で入っても到達桁が保たれる（右端へ飛ばない）",
+    after5.tag === "INPUT" && after5.caret === before5,
+    `入る前caret=${before5} → ${JSON.stringify(after5)}`
   );
 
-  // ⑫ 未入力状態で 2 行目に DBCS を入力すると、2 行目に入る（1 行目の先頭に入らない）
+  // ⑨ showShiftMarks（SO/SI を { }）有効でも、矢印での到達桁が保たれる
+  await page.getByRole("button", { name: /SO\/SI/ }).click(); // { } 表示へ
+  await page.waitForTimeout(300);
   await cmd.click();
   await page.keyboard.press("Home");
-  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
-  await page.evaluate(() => document.activeElement.blur());
-  await page.waitForTimeout(200);
-  const b4 = await page.locator('input[data-field-index="1"][data-slice="1"]').boundingBox();
-  const w4 = b4.width / 79;
-  await page.mouse.click(b4.x + w4 * 10 + w4 / 2, b4.y + b4.height / 2); // 2 行目の 10 桁目
-  await page.waitForTimeout(200);
-  const cdp2 = await page.context().newCDPSession(page);
-  await cdp2.send("Input.imeSetComposition", { text: "日本", selectionStart: 2, selectionEnd: 2 });
-  await cdp2.send("Input.insertText", { text: "日本" });
-  await page.waitForTimeout(400);
-  const imeRow2 = await page.evaluate(() => {
-    const s0 = document.querySelector('input[data-field-index="1"][data-slice="0"]');
-    const s1 = document.querySelector('input[data-field-index="1"][data-slice="1"]');
-    return { s0: s0?.value ?? "", s1: s1?.value ?? "" };
+  for (let i = 0; i < 20; i++) await page.keyboard.press("Delete");
+  await page.evaluate(async () => {
+    const el = document.activeElement;
+    const dt = new DataTransfer();
+    dt.setData("text", "あいうえお");
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
   });
+  await page.waitForTimeout(250);
+  const marked = await val();
+  const b6 = await cmd.boundingBox();
+  const w6 = b6.width / 74;
+  await page.mouse.click(b6.x + w6 * 22 + w6 / 2, b6.y + b6.height / 2); // 22 桁目（{あいうえお} より右）
+  await page.waitForTimeout(200);
+  const before6 = await page.evaluate(() => document.activeElement.selectionStart);
+  await page.keyboard.press("ArrowUp");
+  await page.waitForTimeout(200);
+  await page.keyboard.press("ArrowDown");
+  await page.waitForTimeout(250);
+  const after6 = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName,
+    caret: document.activeElement?.selectionStart ?? -1,
+    len: document.activeElement?.value?.length ?? -1
+  }));
   rule(
-    "⑫ 未入力状態で 2 行目に DBCS 入力 → 2 行目に入る（1 行目の先頭に入らない）",
-    !/日|本/.test(imeRow2.s0) && /日本/.test(imeRow2.s1),
-    `s0="${imeRow2.s0.trim()}" s1="${imeRow2.s1.replace(/ +$/, "")}"`
+    "⑨ { } 表示でも矢印での到達桁が保たれる（右端へ飛ばない）",
+    after6.tag === "INPUT" && after6.caret === before6,
+    `value="${marked.replace(/ +$/, "")}" 入る前caret=${before6} → ${JSON.stringify(after6)}`
   );
+
+  // ⑩ 非入力行（"Selection or command" の行）をクリックしてフリーカーソルを置き、
+  //    そこから ↓ でコマンド行へ入る。到達桁が保たれること。
+  await page.getByRole("button", { name: /SO\/SI/ }).click(); // { } 表示を戻す
+  await page.waitForTimeout(200);
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 20; i++) await page.keyboard.press("Delete");
+  await page.evaluate(async () => {
+    const el = document.activeElement;
+    const dt = new DataTransfer();
+    dt.setData("text", "あいうえお");
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(250);
+  // コマンド行の 1 行上（非入力）の 22 桁目付近をクリック → フリーカーソル
+  const b7 = await cmd.boundingBox();
+  const w7 = b7.width / 74;
+  await page.mouse.click(b7.x + w7 * 15 + w7 / 2, b7.y - b7.height * 0.9);
+  await page.waitForTimeout(250);
+  const freePos = await page.evaluate(() => document.activeElement?.tagName);
+  await page.keyboard.press("ArrowDown"); // 真下＝コマンド行へ
+  await page.waitForTimeout(300);
+  const landed = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName,
+    caret: document.activeElement?.selectionStart ?? -1,
+    len: document.activeElement?.value?.length ?? -1
+  }));
+  rule(
+    "⑩ 非入力行から ↓ で入っても到達桁が保たれる（右端へ飛ばない）",
+    landed.tag === "INPUT" && landed.caret > 0 && landed.caret < landed.len - 5,
+    `クリック時=${freePos} → ${JSON.stringify(landed)}`
+  );
+
+  // ⑪ SBCS と DBCS で、指定桁への着地が一致すること（全角があっても桁感覚が変わらない）
+  //    全角は 2 桁を占めるため、桁 → キャレットの丸め方を誤ると SBCS より 1 桁ずれる。
+  const caretCol = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      if (el.tagName !== "INPUT") return -1;
+      const cs = getComputedStyle(el);
+      const cv = document.createElement("canvas").getContext("2d");
+      cv.font = `${cs.fontSize} ${cs.fontFamily}`;
+      const unit = cv.measureText("0").width;
+      return Math.round(cv.measureText(el.value.slice(0, el.selectionStart)).width / unit);
+    });
+  const fill = async (text, ime) => {
+    await cmd.click();
+    await page.keyboard.press("Home");
+    for (let i = 0; i < 30; i++) await page.keyboard.press("Delete");
+    if (ime) {
+      const c = await page.context().newCDPSession(page);
+      await c.send("Input.imeSetComposition", { text, selectionStart: text.length, selectionEnd: text.length });
+      await c.send("Input.insertText", { text });
+    } else {
+      await page.keyboard.type(text, { delay: 10 });
+    }
+    await page.waitForTimeout(300);
+  };
+  const landing = async (colOffset) => {
+    const bx = await cmd.boundingBox();
+    const cw = bx.width / 74;
+    await page.mouse.click(bx.x + cw * colOffset + cw / 2, bx.y - bx.height * 0.9); // 上の非入力行
+    await page.waitForTimeout(120);
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(180);
+    return await caretCol();
+  };
+  // ああああああ は桁 1..12 を占める（SO=0 / あ=1-2,3-4,… / SI=13）。全角の後半桁（2,4,6,8,10,12）は
+  // 全角の途中なのでカーソルを置けず前半へ丸まる（5250 準拠）。それ以外は SBCS と一致すべき。
+  const cols = [0, 1, 3, 5, 7, 9, 11, 13, 14, 15, 20];
+  await page.getByRole("button", { name: /SO\/SI/ }).click(); // { } 表示（ユーザー報告時の条件）
+  await page.waitForTimeout(250);
+  await fill("aiueo", false);
+  const sbcsCols = [];
+  for (const c of cols) sbcsCols.push(await landing(c));
+  await fill("ああああああ", true);
+  const dbcsCols = [];
+  for (const c of cols) dbcsCols.push(await landing(c));
+  const mismatch = cols.filter((c, i) => sbcsCols[i] !== dbcsCols[i]);
+  rule(
+    "⑪ 全角の途中でない桁への着地は SBCS と DBCS で一致する",
+    mismatch.length === 0,
+    `桁=${cols.join(",")} / SBCS=${sbcsCols.join(",")} / DBCS=${dbcsCols.join(",")}` +
+      (mismatch.length ? ` / 差=${mismatch.join(",")}` : "")
+  );
+
+  // ⑫ 入力欄に打った値を矩形選択（実マウスドラッグ）→ copy で取得できる
+  //    従来は cells（ホストが描いた内容）だけを見ており、未送信の入力値が取れなかった。
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 30; i++) await page.keyboard.press("Delete");
+  await page.keyboard.type("COPYTEST", { delay: 15 });
+  await page.waitForTimeout(250);
+  const cb = await cmd.boundingBox();
+  const cw = cb.width / 74;
+  // 欄の 0..8 桁目をドラッグして矩形選択
+  await page.mouse.move(cb.x + 1, cb.y + cb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(cb.x + cw * 8, cb.y + cb.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const copied = await page.evaluate(() => {
+    let got = "(copy が発火しない)";
+    const ev = new Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: { setData: (_t, v) => (got = v) } });
+    document.dispatchEvent(ev);
+    return got;
+  });
+  rule("⑫ 入力欄に打った値を矩形選択→copy で取得できる", copied.includes("COPYTEST"), `"${copied}"`);
 
   if (errors.length) {
     ok = false;

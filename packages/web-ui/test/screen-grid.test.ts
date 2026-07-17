@@ -352,11 +352,14 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     // フォーカス中は列ビュー " あいう "（SO/SI 込み）。末尾（う の直後）へカーソルを置く
     expect(el.value.replace(/ +$/, "")).toBe(" あいう"); // 末尾は欄長までパディング
-    el.setSelectionRange(el.value.length, el.value.length);
+    // 列ビュー " あいう     "（SO=0 / あ=1 / い=2 / う=3 / SI=4 / 以降パディング）。
+    // 「う の直後」の論理カーソルは SI の後ろ（view 5）。value 末尾はパディング末尾であって
+    // 既入力の直後ではない（欄長までスペース埋めされているため）。
+    el.setSelectionRange(5, 5);
     await input.trigger("compositionstart");
     // 合成中は純論理値 prefix「あいう」（SO/SI 無し）＋候補 → 候補が先頭でなく入力位置に出る
     expect(el.value).toBe("あいう");
-    expect(el.selectionStart).toBe(3); // caret は既入力の末尾＝合成開始位置（論理 3）
+    expect(el.selectionStart).toBe(3); // caret は prefix の末尾＝合成開始位置（論理 3）
     el.value = "あいうえお"; // IME が「えお」を既入力の後ろに挿入
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
@@ -454,7 +457,7 @@ describe("ScreenGrid", () => {
     const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: false }, attachTo: document.body });
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
-    expect(el.value).toBe("A あ "); // columnView("Aあ")
+    expect(el.value).toBe("A あ " + "   "); // columnView("Aあ")＋欄長(8桁)までのスペース埋め
 
     // フォーカス中も列ビュー（SO/SI 込み）で編集する（ライブ表示）。
     // 未入力桁にもカーソルを置けるよう欄長（8 桁）までスペース埋めする（SBCS 欄と同じ）
@@ -471,7 +474,7 @@ describe("ScreenGrid", () => {
     // blur で休止表示へ。standalone mount では edit は props.edits へ反映されないため
     // セル由来の論理値 "Aあ" の列ビューに戻る
     await input.trigger("blur");
-    expect(el.value).toBe("A あ ");
+    expect(el.value).toBe("A あ " + "   "); // 休止表示もパディング込み
     w.unmount();
   });
 
@@ -561,7 +564,7 @@ describe("ScreenGrid", () => {
     });
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
-    expect(el.value).toBe("A{あ}"); // 休止表示: SO={ / SI=}
+    expect(el.value).toBe("A{あ}" + "   "); // 休止表示: SO={ / SI=}（＋欄長までの埋め）
     await input.trigger("focus");
     expect(el.value).toBe("A{あ}" + "   "); // 編集中も { }（＋欄長までの埋め）
 
@@ -1092,5 +1095,265 @@ describe("ScreenGrid", () => {
         w.unmount();
       });
     });
+  });
+});
+
+describe("DBCS 座標変換の集約（dbcsLayoutOf）", () => {
+  // 各ハンドラが dbcsViewLayout を個別に呼び引数を組み立てていたため、
+  // 「trim 済みを渡す」「SO/SI マークを渡し忘れる」不整合が繰り返し混入した。
+  // 単一入口に集約したことで、下記のような経路差が生じないことを固定する。
+  function dbcsField(): Field[] {
+    return [
+      { index: 1, row: 6, col: 10, length: 12, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+  }
+
+  it("showShiftMarks 有効でもコピーは純論理値（マーク未指定だと caret がずれ範囲が狂う）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(dbcsField()), edits: new Map([[1, "AあB"]]), focused: true, showShiftMarks: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value.startsWith("A{あ}B")).toBe(true); // SO={ / SI=}
+    el.setSelectionRange(0, 5); // A{あ}B 全体
+    const setData = vi.fn();
+    await input.trigger("copy", { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "AあB"); // { } は含まない
+    w.unmount();
+  });
+
+  it("未入力桁で IME 合成しても先頭へ飛ばない（trim 版だと logicalOf が 0 を返す）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(dbcsField()), edits: new Map(), focused: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    expect(el.value).toBe(" ".repeat(12)); // 空欄でも欄長ぶんパディング
+    el.setSelectionRange(5, 5); // 未入力の 5 桁目
+    await input.trigger("compositionstart");
+    expect(el.value).toBe("     "); // 合成開始桁より前＝5 桁ぶんの空白（先頭に飛んでいない）
+    el.value += "日";
+    await input.trigger("compositionend");
+    const emits = w.emitted("edit") as [number, string][];
+    expect(emits.at(-1)![1]).toBe("     日"); // 5 桁目に入る
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄の上書き（全角）", () => {
+  // 全角の入力経路（IME 確定・ペースト）が dbcsInsert（挿入固定）を呼んでおり、上書き既定に
+  // なっていなかった。また上書きが 1 文字置換だと SO/SI で桁が増えて後続が押し出される。
+  function f12(): Field[] {
+    return [
+      { index: 1, row: 6, col: 10, length: 16, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+  }
+
+  it("ペーストした全角は上書きされる（後続を押し出さない）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(f12()), edits: new Map([[1, "ABCDEF"]]), focused: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    (input.element as HTMLInputElement).setSelectionRange(1, 1);
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(1, 1);
+    await input.trigger("paste", { clipboardData: { getData: () => "日" } } as unknown as ClipboardEvent);
+    // 日 は SO+2+SI=4 桁を占めるので後続 BCDE を食う → A日F（挿入なら A日BCDEF）
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日F");
+    w.unmount();
+  });
+
+  it("IME 確定した全角も上書きされる", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(f12()), edits: new Map([[1, "ABCDEF"]]), focused: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 1);
+    await input.trigger("compositionstart");
+    el.value += "日"; // 実 IME は既存 value（prefix）へ追記する
+    await input.trigger("compositionend");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日F");
+    w.unmount();
+  });
+
+  it("Insert モードなら全角は挿入される（後続が残る）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(f12()), edits: new Map([[1, "ABCDEF"]]), focused: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    el.setSelectionRange(1, 1);
+    await input.trigger("keydown", { key: "Insert" }); // 挿入モードへ
+    el.setSelectionRange(1, 1);
+    await input.trigger("paste", { clipboardData: { getData: () => "日" } } as unknown as ClipboardEvent);
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日BCDEF");
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄: 桁 → 論理カーソルの変換", () => {
+  it("全角がある欄に桁指定でカーソルを合わせても右端へ飛ばない", async () => {
+    // ああああああ は 6 文字だが 14 桁（SO+12+SI）。表示桁を列ビューの文字 index として
+    // 渡すとビュー長（8 文字）を超えて末尾へクランプされ、キャレットが右端へ飛んでいた。
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map([[1, "ああああああ"]]), focused: true },
+      attachTo: document.body
+    });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    await w.find("input.grid-input").trigger("focus");
+    // 欄先頭から 20 桁目（全角 6 文字＝14 桁より右の未入力桁）へ合わせる
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 20);
+    await nextTick();
+    // 右端（value 末尾）ではなく、20 桁目相当に置かれる
+    expect(el.selectionStart).toBeLessThan(el.value.length);
+    expect(el.selectionStart).toBeGreaterThan(6); // 全角 6 文字ぶん（ビュー index 7）より右
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄: ホスト由来（セル）の値で桁指定カーソル", () => {
+  it("未編集（セル由来）の欄でも、内容より右の桁を指定したら末尾へスナップしない", async () => {
+    // ホストが書いた " あいうえお " を欄セルに置く（SO/あいうえお/SI）。edits は空＝未編集。
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = { ...cell(" "), kind: "so" };
+    let c = 10;
+    for (const ch of ["あ", "い", "う", "え", "お"]) {
+      row[c] = { ...cell(ch), kind: "dbcs-lead" };
+      row[c + 1] = { ...cell(""), kind: "dbcs-tail" };
+      c += 2;
+    }
+    row[c] = { ...cell(" "), kind: "si" };
+    const w = mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused: true },
+      attachTo: document.body
+    });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    await w.find("input.grid-input").trigger("focus");
+    // " あいうえお " は 12 桁。欄先頭から 20 桁目（内容より右の未入力桁）を指定する
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 20);
+    await nextTick();
+    // 内容末尾（ビュー index 7 付近）へスナップせず、20 桁目相当（＝より右）に置かれる
+    expect(el.selectionStart).toBeGreaterThan(7);
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄: 桁指定カーソルは往復スナップでずれない", () => {
+  it("指定した桁のビュー位置にそのまま置かれる（logicalOf→caretOf の往復でずらさない）", async () => {
+    // 列ビュー " あいうえお " ＋パディング。SO=桁0 / あ=1-2 / い=3-4 / う=5-6 / え=7-8 /
+    // お=9-10 / SI=11 / 以降パディング。logicalOf は「最も近い論理カーソル」へのスナップなので
+    // caretOf(logicalOf(v)) は v に戻らない＝往復すると指定桁からずれる。
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map([[1, "あいうえお"]]), focused: true },
+      attachTo: document.body
+    });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    await w.find("input.grid-input").trigger("focus");
+    const setCaret = (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void })
+      .setDbcsCaretAtColumn;
+
+    // SI の桁（欄先頭から 11 桁目）→ ビュー index 6 にそのまま置く
+    setCaret(1, 10 + 11);
+    await nextTick();
+    expect(el.selectionStart).toBe(6);
+
+    // 内容より右の未入力桁（20 桁目）→ SI(index 6) の後ろのパディング index 7 + (20-12) = 15
+    setCaret(1, 10 + 20);
+    await nextTick();
+    expect(el.selectionStart).toBe(15);
+
+    // 全角の途中桁（あ の 2 桁目＝桁 2）は、その全角の開始 index（1）に載る
+    setCaret(1, 10 + 2);
+    await nextTick();
+    expect(el.selectionStart).toBe(1);
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄: SI 桁を指定してもキャレットが左へ引き戻されない", () => {
+  it("`}`(SI) の桁を指定 → その桁に置かれ、モデルの論理カーソルも一致する", async () => {
+    // 列ビュー "{あいうえお}"（showShiftMarks）: { =桁0 / あ=1-2 / い=3-4 / う=5-6 / え=7-8 /
+    // お=9-10 / } =桁11。SI(view index 6) は「お の手前(5)」と「お の直後(7)」から等距離で、
+    // logicalOf（最も近い）だと左へ寄り、以降の同期でキャレットが 2 桁左へ引き戻されていた。
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 40, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map([[1, "あいうえお"]]), focused: true, showShiftMarks: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+    await input.trigger("focus");
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 11);
+    await nextTick();
+    expect(el.selectionStart).toBe(6); // SI の位置（桁 11）にそのまま置かれる
+    // モデルとキャレットが一致していること＝以降の同期で引き戻されない。
+    // キー入力で syncDbcs が走ってもキャレットが左へ動かないことで確認する。
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBeGreaterThanOrEqual(6);
+    w.unmount();
+  });
+});
+
+describe("矩形コピーは未送信の入力値も拾う", () => {
+  // 従来は cells（ホストが描いた内容）だけを読んでいたため、入力欄に打った値が
+  // Ctrl+C で取れなかった（SBCS/DBCS とも）。
+  it("SBCS 欄に打った値がコピーされる", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map([[1, "ABC"]]), focused: true },
+      attachTo: document.body
+    });
+    // 欄の桁(10..12)を含む矩形を選択してコピー
+    (w.vm as unknown as { setBlockSelection: (r: unknown) => void }).setBlockSelection({ r1: 6, c1: 10, r2: 6, c2: 12 });
+    await nextTick();
+    const setData = vi.fn();
+    document.dispatchEvent(
+      Object.assign(new Event("copy", { bubbles: true, cancelable: true }), { clipboardData: { setData } })
+    );
+    expect(setData).toHaveBeenCalledWith("text/plain", "ABC");
+    w.unmount();
+  });
+
+  it("DBCS 欄に打った全角がコピーされる（SO/SI は含まない）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 16, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(fields), edits: new Map([[1, "あい"]]), focused: true },
+      attachTo: document.body
+    });
+    // 列ビュー " あい " → SO=桁10 / あ=11-12 / い=13-14 / SI=15。全角ぶんを選択
+    (w.vm as unknown as { setBlockSelection: (r: unknown) => void }).setBlockSelection({ r1: 6, c1: 11, r2: 6, c2: 14 });
+    await nextTick();
+    const setData = vi.fn();
+    document.dispatchEvent(
+      Object.assign(new Event("copy", { bubbles: true, cancelable: true }), { clipboardData: { setData } })
+    );
+    expect(setData).toHaveBeenCalledWith("text/plain", "あい");
+    w.unmount();
   });
 });

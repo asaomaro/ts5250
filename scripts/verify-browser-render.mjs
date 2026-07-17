@@ -9,13 +9,19 @@ import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { buildApp, SessionManager, ProfileStore } from "@as400web/server";
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 
 const log = (s) => process.stderr.write(s + "\n");
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
 const PORT = 3468;
 
 const sessions = new SessionManager();
-const profiles = ProfileStore.fromFile("profiles.local.json");
+// デバイス名は実行ごとにユニークにする。PUB400 は同名デバイスの二重接続を拒否するため、
+// 直前の実行のセッションが残っていると次の実行が negotiation で切られる（連続実行で詰まる）。
+const rawCfg = JSON.parse(readFileSync("profiles.local.json", "utf8"));
+const uniqDev = Date.now().toString(36).slice(-4).toUpperCase();
+for (const p of rawCfg.profiles) if (p.deviceName) p.deviceName = `WEBR${uniqDev}`.slice(0, 10);
+const profiles = new ProfileStore(rawCfg.profiles);
 const app = buildApp({ sessions, profiles, version: "test", webRoot: "packages/web-ui/dist" });
 const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
@@ -31,6 +37,16 @@ const check = (name, cond, d = "") => { log(`${cond ? "PASS" : "FAIL"}  ${name}$
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.locator("button.card", { hasText: jp.name }).first().click();
+  await page.waitForFunction(() => (document.querySelector(".grid")?.textContent?.length ?? 0) > 100, { timeout: 20000 });
+  // サインオン後にメニュー以外へ着地することがある（未読メッセージ／他セッションのメッセージ待ち行列）
+  for (let i = 0; i < 6; i++) {
+    const scr = await page.evaluate(() => document.querySelector(".grid")?.textContent ?? "");
+    if (scr.includes("Main Menu")) break;
+    if (!/Display (Program )?Messages/.test(scr)) break;
+    await page.locator(".grid").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press(scr.includes("Display Program Messages") ? "Enter" : "F3");
+    await page.waitForTimeout(2000);
+  }
   await page.waitForFunction(() => document.querySelector(".grid")?.textContent?.includes("Main Menu"), { timeout: 20000 });
   const cmd = page.locator("input.grid-input").first();
   await cmd.click(); await page.keyboard.type(`CALL ${LIB}/CLRTPGM`); await page.keyboard.press("Enter");
