@@ -465,6 +465,27 @@ try {
     `A=${as}（期待 72） あ=${(filled.match(/あ/g) ?? []).length} Z=${zs}（期待 77）`
   );
 
+  // ⑰ 1234567890 の繰り返しで、1 行目と 2 行目の「同じ画面桁」が同じ文字になる（ACS と一致）。
+  //    コマンド行は (20,7) len=153。画面桁 C のオフセットは 1 行目が C-7、2 行目が C+73 で、
+  //    -7 ≡ 73 (mod 10) なので 10 桁周期なら両行の同じ列は一致する。折返し位置が 1 桁でも
+  //    ずれていれば崩れる＝境界（74/79）の厳密な検証になる。
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 160; i++) await page.keyboard.press("Delete");
+  await page.keyboard.type("1234567890".repeat(16).slice(0, 153), { delay: 2 });
+  await page.waitForTimeout(400);
+  const [r1, r2] = await slices.evaluateAll((els) => els.map((e) => e.value));
+  // 1 行目の index i（画面桁 7+i）と 2 行目の index i+6（画面桁 7+i）を突き合わせる
+  const wrapDiff = [];
+  for (let i = 0; i + 6 < r2.length && i < r1.length; i++) {
+    if (r1[i] !== r2[i + 6]) wrapDiff.push(`桁${7 + i}: 1行目=${r1[i]} 2行目=${r2[i + 6]}`);
+  }
+  rule(
+    "⑰ 1234567890 の繰り返しで 1 行目と 2 行目の同じ画面桁が一致する",
+    wrapDiff.length === 0 && r1.startsWith("1234567890"),
+    wrapDiff.length ? `不一致 ${wrapDiff.length} 件: ${wrapDiff.slice(0, 3).join(" / ")}` : `1行目="${r1.slice(0, 12)}…" 2行目="${r2.slice(0, 12)}…"`
+  );
+
   if (errors.length) {
     ok = false;
     log("PAGE ERRORS: " + errors.join(" | "));
