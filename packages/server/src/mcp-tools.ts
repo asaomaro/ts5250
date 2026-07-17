@@ -177,6 +177,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         host: z.string().optional(),
         port: z.number().int().optional(),
         ccsid: z.number().int().optional(),
+        screenSize: z.enum(["24x80", "27x132"]).optional(),
         deviceName: z.string().optional(),
         enhanced: z.boolean().optional(),
         readOnly: z.boolean().optional()
@@ -523,12 +524,14 @@ function buildDirectOpts(input: {
   host?: string | undefined;
   port?: number | undefined;
   ccsid?: number | undefined;
+  screenSize?: "24x80" | "27x132" | undefined;
   deviceName?: string | undefined;
   enhanced?: boolean | undefined;
 }): {
   host: string;
   port?: number;
   ccsid?: number;
+  screenSize?: "24x80" | "27x132";
   deviceName?: string;
   enhanced?: boolean;
   origin: string;
@@ -538,6 +541,7 @@ function buildDirectOpts(input: {
     host: string;
     port?: number;
     ccsid?: number;
+    screenSize?: "24x80" | "27x132";
     deviceName?: string;
     enhanced?: boolean;
     origin: string;
@@ -547,6 +551,7 @@ function buildDirectOpts(input: {
   };
   if (input.port !== undefined) o.port = input.port;
   if (input.ccsid !== undefined) o.ccsid = input.ccsid;
+  if (input.screenSize !== undefined) o.screenSize = input.screenSize;
   if (input.deviceName !== undefined) o.deviceName = input.deviceName;
   if (input.enhanced !== undefined) o.enhanced = input.enhanced;
   return o;

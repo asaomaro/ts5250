@@ -9,6 +9,8 @@ export interface WsOpen {
   host?: string;
   port?: number;
   ccsid?: number;
+  /** 画面サイズ。27x132 は端末タイプで申告し、ホストが対応画面でのみ使う（既定 24x80） */
+  screenSize?: "24x80" | "27x132";
   deviceName?: string;
   enhanced?: boolean;
   tls?: boolean;

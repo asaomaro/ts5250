@@ -163,6 +163,7 @@ function buildDirect(msg: {
   host?: string;
   port?: number;
   ccsid?: number;
+  screenSize?: "24x80" | "27x132";
   deviceName?: string;
   enhanced?: boolean;
   tls?: boolean;
@@ -173,6 +174,7 @@ function buildDirect(msg: {
   const o: OpenOptions = { host: msg.host, origin: "direct" };
   if (msg.port !== undefined) o.port = msg.port;
   if (msg.ccsid !== undefined) o.ccsid = msg.ccsid;
+  if (msg.screenSize !== undefined) o.screenSize = msg.screenSize;
   if (msg.deviceName !== undefined) o.deviceName = msg.deviceName;
   if (msg.enhanced !== undefined) o.enhanced = msg.enhanced;
   if (msg.tls === true) o.tls = true;

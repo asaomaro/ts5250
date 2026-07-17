@@ -4,6 +4,7 @@ import type { PublicProfile } from "@as400web/server";
 import { settingsStore, type SavedConnection } from "../stores/settings.js";
 import { openSession } from "../session-controller.js";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
+import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 
 const emit = defineEmits<{ (e: "connected", sessionId: string): void }>();
 
@@ -17,13 +18,14 @@ type ConnForm = {
   host: string;
   port?: number;
   ccsid?: number;
+  screenSize?: "24x80" | "27x132";
   deviceName?: string;
   tls?: boolean;
   autoSignon?: boolean;
   user?: string;
   password?: string;
 };
-const emptyForm = (): ConnForm => ({ name: "", host: "", ccsid: DEFAULT_CCSID });
+const emptyForm = (): ConnForm => ({ name: "", host: "", ccsid: DEFAULT_CCSID, screenSize: DEFAULT_SCREEN_SIZE });
 const form = ref<ConnForm>(emptyForm());
 
 // カタカナ系コードページ（930/5026）は英小文字が大文字化される旨を案内する
@@ -49,6 +51,7 @@ async function connectSaved(c: SavedConnection): Promise<void> {
     host: c.host,
     ...(c.port !== undefined ? { port: c.port } : {}),
     ...(c.ccsid !== undefined ? { ccsid: c.ccsid } : {}),
+    ...(c.screenSize !== undefined ? { screenSize: c.screenSize } : {}),
     ...(c.deviceName !== undefined ? { deviceName: c.deviceName } : {}),
     ...(c.tls ? { tls: true } : {}),
     // 自動サインオン有効時のみ資格情報を送る（オフなら signon 画面に着地）
@@ -59,8 +62,8 @@ async function connectSaved(c: SavedConnection): Promise<void> {
 }
 
 function editConn(c: SavedConnection): void {
-  // 旧データ（ccsid 未設定）は既定コードページを選択済み扱いにする
-  form.value = { ...c, ccsid: c.ccsid ?? DEFAULT_CCSID };
+  // 旧データ（ccsid / screenSize 未設定）は既定を選択済み扱いにする
+  form.value = { ...c, ccsid: c.ccsid ?? DEFAULT_CCSID, screenSize: c.screenSize ?? DEFAULT_SCREEN_SIZE };
   showForm.value = true;
 }
 
@@ -158,7 +161,17 @@ function cancelForm(): void {
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
         </label>
+        <label class="field">
+          <span class="field-label">画面サイズ</span>
+          <select v-model="form.screenSize">
+            <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+        </label>
       </div>
+      <p v-if="form.screenSize === '27x132'" class="note">
+        ※ 27x132 は端末タイプでホストに申告する設定です。実際にどちらで描くかはホストが画面ごとに決めるため、
+        27x132 版を持たない画面（サインオン・メニュー等）は 24x80 のまま表示されます。
+      </p>
       <p v-if="showKatakanaHint" class="note">
         ※ カタカナ系コードページ（930 / 5026）では、実機（ACS）同様に半角英小文字を入力すると大文字になります。
         英小文字をそのまま入力するには 939 / 1399 / 5035 を選択してください。

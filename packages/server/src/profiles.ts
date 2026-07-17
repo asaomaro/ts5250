@@ -88,6 +88,7 @@ export class ProfileStore {
     const opts: ConnectOptions = { host: p.host };
     if (p.port !== undefined) opts.port = p.port;
     if (p.ccsid !== undefined) opts.ccsid = p.ccsid;
+    if (p.screenSize !== undefined) opts.screenSize = p.screenSize;
     if (p.deviceName !== undefined) opts.deviceName = p.deviceName;
     if (p.enhanced !== undefined) opts.enhanced = p.enhanced;
     if (p.signon) {
