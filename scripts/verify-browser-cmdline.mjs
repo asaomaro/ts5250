@@ -429,6 +429,42 @@ try {
     `打鍵=${longCmd.length}桁 / 欄=${sent.replace(/ +$/, "").length}桁`
   );
 
+  // ⑯ 境界にまたがる全角があっても欄の容量が減らない（ACS と一致）。
+  //    全角のグリフは行末と次行頭に割れる（ACS はグリフを左右に割って描画する）。ここで桁揃えの
+  //    スペースを入れると 1〜3 桁ぶん容量が削られてしまうため、入れないことを実機で押さえる。
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 160; i++) await page.keyboard.press("Delete"); // 欄長 153 桁ぶん確実に消す
+  await page.waitForTimeout(200);
+  await page.keyboard.type("A".repeat(72), { delay: 3 }); // SO=桁72 / 全角=桁73-74 ＝ 境界 74 に割れる
+  // insertText はアプリの入力経路（keydown / paste / IME）に乗らないため paste で入れる
+  await page.evaluate(async () => {
+    const el = document.activeElement;
+    const dt = new DataTransfer();
+    dt.setData("text", "あ");
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(300);
+  const straddle = await slices.evaluateAll((els) => els.map((e) => e.value));
+  rule(
+    "⑯-1 境界にまたがる全角は 1 行目の末尾が持ち、2 行目は空白 1 桁で始まる",
+    straddle[0].endsWith("あ") && straddle[1].startsWith(" ") && !straddle[1].includes("あ"),
+    `1行目末尾=${JSON.stringify(straddle[0].slice(-3))} 2行目先頭=${JSON.stringify(straddle[1].slice(0, 3))}`
+  );
+  // 残りは 153 - (72 + SO+2+SI) = 77 桁。桁揃えする実装だと 1〜3 桁ぶん削られて入り切らない。
+  //   ※ ちょうど 77 桁で止める。満杯になると ACS の自動送り（field-full）でフォーカスが欄の先頭へ
+  //      回り込み、以降の打鍵が 1 文字目を上書きしてしまうため（容量ではなく自動送りの挙動）。
+  for (let i = 0; i < 77; i++) await page.keyboard.press("Z");
+  await page.waitForTimeout(400);
+  const filled = await slices.evaluateAll((els) => els.map((e) => e.value).join(""));
+  const zs = (filled.match(/Z/g) ?? []).length;
+  const as = (filled.match(/A/g) ?? []).length;
+  rule(
+    "⑯-2 境界にまたがる全角があっても残り容量が削られない（77 桁ぶん入る）",
+    zs === 77 && as === 72 && filled.includes("あ"),
+    `A=${as}（期待 72） あ=${(filled.match(/あ/g) ?? []).length} Z=${zs}（期待 77）`
+  );
+
   if (errors.length) {
     ok = false;
     log("PAGE ERRORS: " + errors.join(" | "));

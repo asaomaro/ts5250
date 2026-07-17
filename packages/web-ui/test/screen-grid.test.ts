@@ -1365,6 +1365,14 @@ describe("矩形コピーは未送信の入力値も拾う", () => {
 });
 
 describe("DBCS 欄の行またぎ（折返し）", () => {
+  // キーは必ず「フォーカス中の <input>」に届く（実ブラウザと同じ）。折返し欄では入力の途中で
+  // フォーカスが次スライスへ移るため、掴んだ最初の input に投げ続けるとカーソルが巻き戻る。
+  const typeKey = async (w: ReturnType<typeof mount>, key: string) => {
+    const el = document.activeElement;
+    const target = w.findAll("input.grid-input").find((i) => i.element === el) ?? w.find("input.grid-input");
+    await target.trigger("keydown", { key });
+  };
+
   // 1399 のコマンド行相当: (20,7) len=153 → row20 に 74 桁（境界 74）、row21 に 79 桁。
   const cmdLine = (): Field[] => [
     { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
@@ -1379,7 +1387,7 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     await second.trigger("focus");
     // 折返し先の行頭（21,1）を指す。1 行目の先頭へ飛ばない
     expect((w.emitted("cursor") as [number, number][]).at(-1)).toEqual([21, 1]);
-    await second.trigger("keydown", { key: "X" });
+    await typeKey(w, "X");
     // 2 行目の先頭桁＝論理 74 桁目。1 行目の 74 桁ぶんは空白のまま保たれる
     expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(" ".repeat(74) + "X");
     expect((second.element as HTMLInputElement).value.startsWith("X")).toBe(true);
@@ -1394,9 +1402,9 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     const inputs = w.findAll("input.grid-input");
     const first = inputs[0]!;
     await first.trigger("focus");
-    await first.trigger("keydown", { key: "End" }); // 73 文字目の直後＝1 行目の最終桁
-    await first.trigger("keydown", { key: "B" }); // 74 桁目（1 行目の末尾）
-    await first.trigger("keydown", { key: "C" }); // 75 桁目 → 2 行目へ折返す
+    await typeKey(w, "End"); // 73 文字目の直後＝1 行目の最終桁
+    await typeKey(w, "B"); // 74 桁目（1 行目の末尾）
+    await typeKey(w, "C"); // 75 桁目 → 2 行目へ折返す
     expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(73) + "BC");
     // C は 2 行目のスライスへ入り、フォーカスもそちらへ移る
     expect((inputs[1]!.element as HTMLInputElement).value.startsWith("C")).toBe(true);
@@ -1405,9 +1413,9 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     w.unmount();
   });
 
-  it("全角が折返し境界に割れるときは、手前へ半角スペースを詰めて次行へ送る", async () => {
-    // 半角 72 桁 → SO=桁72, 全角=桁73-74 となり、境界 74 が全角の途中に落ちる。
-    // 桁揃えで 72 桁目へ半角スペースが入り、SO=73 全角=74-75（＝2 行目の先頭）へ送られる。
+  it("全角が折返し境界に割れても桁揃えせず、ACS と同じくまたがせる", async () => {
+    // 半角 72 桁 → SO=桁72, 全角=桁73-74 で境界 74 が全角の途中に落ちる。
+    // ACS はこのグリフを左右に割って描画する＝桁揃えのスペースは入れない（＝容量も減らない）。
     const w = mount(ScreenGrid, {
       props: { snapshot: makeSnap(cmdLine()), edits: new Map([[1, "A".repeat(72)]]), focused: false },
       attachTo: document.body
@@ -1415,15 +1423,33 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     const inputs = w.findAll("input.grid-input");
     const first = inputs[0]!;
     await first.trigger("focus");
-    await first.trigger("keydown", { key: "End" });
-    await first.trigger("keydown", { key: "あ" });
-    // 送信値そのものへ桁揃えのスペースが入る（codec が SO/SI を組み直せるようにするため）
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(72) + " あ");
-    // 1 行目は 74 桁ぴったり・全角は割れずに 2 行目にある
-    const row1 = (inputs[0]!.element as HTMLInputElement).value;
-    expect(row1).toHaveLength(74);
-    expect(row1.includes("あ")).toBe(false);
-    expect((inputs[1]!.element as HTMLInputElement).value.includes("あ")).toBe(true);
+    await typeKey(w, "End");
+    await typeKey(w, "あ");
+    // 送信値へ余計なスペースを入れない（桁揃えする実装では "A"*72 + " あ" になっていた）
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(72) + "あ");
+    // またぐ全角の実体は 1 行目の末尾が持つ（input 幅でクリップされ左半分が行末に出る）
+    expect((inputs[0]!.element as HTMLInputElement).value.endsWith("あ")).toBe(true);
+    // 2 行目は「またいで来た後半桁」ぶんの空白 1 桁で始まり、桁数は 79 のまま
+    const row2 = (inputs[1]!.element as HTMLInputElement).value;
+    expect(row2.startsWith(" ")).toBe(true);
+    expect(row2.includes("あ")).toBe(false);
+    expect(row2).toHaveLength(79);
+    w.unmount();
+  });
+
+  it("またぐ全角があっても欄の容量は素のバイト長のまま（2 行目で入れる文字が減らない）", async () => {
+    // 桁揃えする実装だと、境界に全角が掛かるだけで 1〜3 桁ぶん容量が削られていた。
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(cmdLine()), edits: new Map([[1, "A".repeat(72) + "あ"]]), focused: false },
+      attachTo: document.body
+    });
+    const first = w.findAll("input.grid-input")[0]!;
+    await first.trigger("focus");
+    await typeKey(w, "End");
+    // "A"×72 + あ = 72 + (SO+2+SI) = 76 桁。残り 153-76 = 77 桁ぶん半角が入る
+    for (let i = 0; i < 85; i++) await typeKey(w, "Z");
+    const sent = (w.emitted("edit") as [number, string][]).at(-1)![1];
+    expect((sent.match(/Z/g) ?? []).length).toBe(77);
     w.unmount();
   });
 
@@ -1434,8 +1460,8 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     });
     const second = w.findAll("input.grid-input")[1]!;
     await second.trigger("focus");
-    await second.trigger("keydown", { key: "End" });
-    await second.trigger("keydown", { key: "Backspace" });
+    await typeKey(w, "End");
+    await typeKey(w, "Backspace");
     expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(74) + "あ");
     w.unmount();
   });

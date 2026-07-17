@@ -95,6 +95,8 @@ export function dbcsViewLayout(
   columnsBefore: (viewCaret: number) => number;
   /** 表示桁 → その桁を含む文字の view インデックス（全角の後半桁は前半へ丸める） */
   viewAtColumn: (col: number) => number;
+  /** 桁範囲 [startCol, endCol) を 1 行として描画するときの view 範囲（境界にまたがる全角の扱い込み） */
+  sliceRange: (startCol: number, endCol: number) => DbcsSliceRange;
   /** 列ビュー全体の表示桁数（＝送信バイト長。SO/SI=1・全角=2） */
   columns: number;
 } {
@@ -151,54 +153,49 @@ export function dbcsViewLayout(
     }
     return i;
   };
-  return { view, caretOf, logicalOf, logicalAfter, columnsBefore, viewAtColumn, columns: columnsBefore(view.length) };
+  const sliceRange = (startCol: number, endCol: number): DbcsSliceRange => {
+    let from = viewAtColumn(startCol);
+    // 先頭桁が全角の後半に当たる＝前スライスからまたいで来た。実体は前スライスが描くので、
+    // ここは空白 1 桁で場所だけ確保して次の文字から描く。
+    const leadBlank = columnsBefore(from) < startCol;
+    if (leadBlank) from += 1;
+    let to = viewAtColumn(endCol);
+    // 末尾桁が全角の前半に当たる＝次スライスへまたぐ。実体はこちらが描く（input 幅でクリップ）。
+    if (columnsBefore(to) < endCol) to += 1;
+    return { from, to, leadBlank };
+  };
+  return {
+    view,
+    caretOf,
+    logicalOf,
+    logicalAfter,
+    columnsBefore,
+    viewAtColumn,
+    sliceRange,
+    columns: columnsBefore(view.length)
+  };
 }
 
 /**
- * 全角が「行の折返し境界」をまたがないよう、純論理値へ半角スペースを詰める（5250 の桁揃え）。
+ * 全角が行の折返し境界をまたぐとき、それを「前スライスの末尾」「次スライスの先頭」へどう割るか。
  *
- * 5250 は 1 画面桁 = 1 バイトなので、全角の 2 バイトが行末と次行頭に割れると描画できない。
- * 詰めるスペースは**送信値そのもの**へ入れる（列ビュー限定の飾りにしない）。こうすると codec が
- * SO/SI を組み直すだけで済み、表示・送信・バイト予算が単一の表現から導ける。
+ * 5250 のフィールドは画面バッファ上の連続バイト領域で、1 桁 = 1 バイト。全角の 2 バイトが
+ * 行末と次行頭に落ちることは実際に起こり、ACS はそのグリフを左右に割って描画する
+ * （＝桁揃えのスペースは入れない＝欄の容量は減らない）。ここもその桁割りに合わせる。
  *
- * @param bounds 欄先頭からの表示桁で表した折返し位置（＝次行の 1 桁目に当たる桁）
- * @param cursor 論理カーソル。手前へ詰めたぶんだけずらして返す
+ * <input> ではグリフを半分に割れないため、またぐ文字は前スライスの末尾に置いて input 幅で
+ * クリップし（左半分が行末に見える）、次スライスは 1 桁ぶんの空白で始める。
+ *
+ * @param from   このスライスの先頭桁に対応する view インデックス（viewAtColumn の結果）
+ * @param to     次スライスの先頭桁に対応する view インデックス
  */
-export function alignDbcsWrap(
-  chars: readonly string[],
-  bounds: readonly number[],
-  cursor = 0
-): { chars: string[]; cursor: number } {
-  const out = [...chars];
-  let c = cursor;
-  // 1 回の挿入で最低 1 桁は右へ動くので、桁数ぶん回せば必ず収束する（保険の上限）
-  for (let guard = 0; guard <= out.length + bounds.length + 8; guard++) {
-    const at = firstStraddle(out, bounds);
-    if (at < 0) break;
-    out.splice(at, 0, " ");
-    if (at < c) c++;
-  }
-  return { chars: out, cursor: c };
-}
-
-/** 全角が折返し境界をまたぐ最初の論理インデックス（無ければ -1）。 */
-function firstStraddle(chars: readonly string[], bounds: readonly number[]): number {
-  if (bounds.length === 0) return -1;
-  let col = 0;
-  let inDbcs = false;
-  for (let i = 0; i < chars.length; i++) {
-    const wide = isFullWidth(chars[i]!);
-    if (wide && !inDbcs) {
-      col += 1; // SO
-      inDbcs = true;
-    } else if (!wide && inDbcs) {
-      col += 1; // SI
-      inDbcs = false;
-    }
-    if (wide && bounds.some((b) => col < b && b < col + 2)) return i;
-    col += wide ? 2 : 1;
-  }
-  return -1;
+export interface DbcsSliceRange {
+  /** 実際に描画する view の開始インデックス */
+  from: number;
+  /** 実際に描画する view の終了インデックス（排他） */
+  to: number;
+  /** 先頭に空白 1 桁を置くか（＝前スライスからまたいで来た全角の後半桁） */
+  leadBlank: boolean;
 }
 
 /** 全角判定（East Asian Width の Wide/Fullwidth 近似。DBCS 相当の判別に使う） */

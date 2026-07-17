@@ -1,12 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  acceptsChar,
-  dbcsByteLength,
-  columnView,
-  dbcsViewLayout,
-  alignDbcsWrap,
-  isFullWidth
-} from "../src/composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout } from "../src/composables/fieldValidate.js";
 import type { Field } from "@as400web/core";
 
 function fld(o: Partial<Field>): Field {
@@ -119,57 +112,32 @@ describe("dbcsViewLayout 論理⇔列ビューのカーソルマッピング", (
   });
 });
 
-describe("alignDbcsWrap: 全角が行の折返し境界に割れないよう半角スペースを詰める", () => {
-  // 5250 は 1 画面桁 = 1 バイト。全角の 2 バイトが行末と次行頭に割れると描画できないため、
-  // 手前へ半角スペースを入れて次行へ送る。スペースは送信値そのものへ入れる（codec が SO/SI を組み直す）。
-  const cols = (chars: string[]) => dbcsByteLength(chars.join(""));
+describe("dbcsViewLayout.sliceRange: 折返し境界にまたがる全角の桁割り", () => {
+  // 5250 のフィールドは連続バイト領域で 1 桁 = 1 バイト。全角の 2 バイトが行末と次行頭に
+  // 落ちることは実際に起こり、ACS はグリフを左右に割って描画する（＝桁揃えはせず容量も減らない）。
+  // <input> ではグリフを割れないので、またぐ文字は前スライスの末尾に置き（幅でクリップ）、
+  // 次スライスは空白 1 桁で始める。
 
-  it("境界が無ければ何もしない", () => {
-    expect(alignDbcsWrap([..."Aあい"], []).chars.join("")).toBe("Aあい");
+  it("またがない場合はスライスが view の連続区間になる", () => {
+    // "AAAあ": A=0,1,2 / SO=3 / あ=4-5 / SI=6。境界 4 は あ の先頭に一致＝またがない
+    const lay = dbcsViewLayout("AAAあ");
+    expect(lay.sliceRange(0, 4)).toEqual({ from: 0, to: 4, leadBlank: false }); // A A A SO
+    expect(lay.sliceRange(4, 7)).toEqual({ from: 4, to: 6, leadBlank: false }); // あ SI
   });
 
-  it("ラン開始の全角が境界をまたぐなら、SO の手前へスペースを 1 つ詰める", () => {
-    // 素の "AAあ" は A=0, A=1, SO=2, あ=3-4 → 境界 4 が あ の途中に落ちる
-    const r = alignDbcsWrap([..."AAあ"], [4]);
-    expect(r.chars.join("")).toBe("AA あ"); // ' '=桁2, SO=桁3, あ=桁4-5 ＝ 次行の先頭から
-    expect(cols(r.chars)).toBe(7); // A A ' ' SO あ SI
+  it("またぐ全角は前スライスへ含め、次スライスは空白 1 桁で始まる", () => {
+    // "AAあ": A=0,1 / SO=2 / あ=3-4 / SI=5。境界 4 は あ の途中に落ちる
+    const lay = dbcsViewLayout("AAあ");
+    const first = lay.sliceRange(0, 4);
+    expect(first).toEqual({ from: 0, to: 4, leadBlank: false }); // A A SO あ ＝ 5 桁ぶんを 4 桁へクリップ
+    const second = lay.sliceRange(4, 6);
+    // あ の実体は前スライスが描くので、こちらは空白 1 桁ぶんを空けて SI から
+    expect(second).toEqual({ from: 4, to: 5, leadBlank: true });
   });
 
-  it("ラン継続中に境界をまたぐなら、いったん SI で閉じてから次行で開き直す", () => {
-    // 素の "あい" は SO=0, あ=1-2, い=3-4 → 境界 4 が い の途中に落ちる
-    const r = alignDbcsWrap([..."あい"], [4]);
-    // 論理値へ半角スペースが入る＝codec が SO あ SI ' ' SO い SI と組み直す
-    expect(r.chars.join("")).toBe("あ い");
-    // SO=0 あ=1-2 SI=3 ' '=4 SO=5 い=6-7 SI=8。い は境界 4 より右に収まる
-    expect(cols(r.chars)).toBe(9);
-  });
-
-  it("桁揃えで手前へ入ったスペースのぶん、論理カーソルも右へずらす", () => {
-    // "AAあ" は index 2（＝あ の手前）にスペースが入る。
-    // あ の直後（index 3）に居たカーソルは、あ を追って 4 へ動く
-    expect(alignDbcsWrap([..."AAあ"], [4], 3).cursor).toBe(4);
-    // 挿入位置と同じか手前のカーソルは動かさない（入ったスペースの手前に留まる）
-    expect(alignDbcsWrap([..."AAあ"], [4], 2).cursor).toBe(2);
-    expect(alignDbcsWrap([..."AAあ"], [4], 1).cursor).toBe(1);
-  });
-
-  it("桁揃え済みの値をもう一度掛けても変わらない（冪等）", () => {
-    const once = alignDbcsWrap([..."AAあい"], [4]).chars;
-    expect(alignDbcsWrap(once, [4]).chars).toEqual(once);
-  });
-
-  it("桁揃え後はどの全角も境界をまたがない", () => {
-    for (const src of ["あ", "Aあ", "AAあ", "AAAあ", "あいうえお", "AあAあA", "ABCDEFあいう"]) {
-      const chars = alignDbcsWrap([...src], [4, 9]).chars;
-      let col = 0;
-      let inDbcs = false;
-      for (const ch of chars) {
-        const wide = isFullWidth(ch);
-        if (wide !== inDbcs) col += 1; // SO / SI
-        inDbcs = wide;
-        if (wide) expect([4, 9].some((b) => col < b && b < col + 2)).toBe(false);
-        col += wide ? 2 : 1;
-      }
-    }
+  it("桁揃えのスペースは入れない＝欄の容量は素の値のまま（ACS と一致）", () => {
+    // 桁揃えする実装だと "AAあ" が "AA あ" になり 1 桁ぶん容量が減っていた
+    expect(dbcsViewLayout("AAあ").columns).toBe(dbcsByteLength("AAあ"));
+    expect(dbcsViewLayout("あい").columns).toBe(dbcsByteLength("あい"));
   });
 });
