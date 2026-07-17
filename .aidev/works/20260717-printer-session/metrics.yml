@@ -12,3 +12,7 @@ events:
   - { ts: 2026-07-17T16:20:56Z, phase: coding, event: start }
   - { ts: 2026-07-17T16:52:23Z, phase: coding, event: approved, metrics: { tasks_done: 15 } }
   - { ts: 2026-07-17T16:52:23Z, phase: test, event: start }
+  - { ts: 2026-07-17T16:54:13Z, phase: test, event: approved, metrics: { passed: 459, failed: 0 } }
+  - { ts: 2026-07-17T16:54:33Z, phase: review, event: start }
+  - { ts: 2026-07-17T16:56:34Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0 } }
+  - { ts: 2026-07-17T16:56:34Z, phase: deliver, event: start }
