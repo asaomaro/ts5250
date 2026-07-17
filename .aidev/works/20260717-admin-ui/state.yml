@@ -1,7 +1,7 @@
 schema: 3
 slug: admin-ui
-current: review
-approved: [requirement, spec, plan, coding, test, review]
+current: deliver
+approved: [requirement, spec, plan, coding, test, review, deliver]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3
