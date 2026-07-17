@@ -75,7 +75,7 @@ function reconcileFocus(pos: { row: number; col: number }): void {
         const caret = offset - slices[si]!.offset;
         el.setSelectionRange(caret, caret);
       } else if (!wasFocused) {
-        gridRef.value?.setDbcsCaretAtColumn(f.index, pos.col);
+        gridRef.value?.setDbcsCaretAtColumn(f.index, pos.row, pos.col);
       }
       // el.focus() が onInputFocus を発火し emit("cursor", 欄先頭) で override を巻き戻すため、
       // 目的桁を再確定する（論理カーソルと native キャレットの不一致を防ぐ。review R1-1）。

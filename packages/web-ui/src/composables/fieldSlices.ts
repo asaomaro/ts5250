@@ -17,12 +17,12 @@ export interface FieldSlice {
  * （例: コマンド行 (20,7) len=153 は row20 col7 から 74 桁＋row21 col1 から 79 桁）。
  * 編集モデルはこの全スライスを 1 つの論理フィールドとして扱い、表示だけを行ごとに割る。
  *
- * DBCS 欄は当面 1 行目のみ（SO/SI 列ビューとの合流・行境界を跨ぐ全角の扱いが要るため次段で対応）。
+ * DBCS 欄でも単位は同じ「表示桁」。列ビュー（SO/SI=1 桁・全角=2 桁）の桁数はバイト長と一致する
+ * ため、桁で割ればそのままバイト境界になる。全角が境界に割れないようにするのは alignDbcsWrap の役目。
  */
 export function fieldSlices(f: Field, cols: number, rows: number): FieldSlice[] {
   const first = Math.min(f.length, Math.max(0, cols - (f.col - 1)));
   const out: FieldSlice[] = [{ row: f.row, col: f.col, width: first, offset: 0 }];
-  if (f.dbcsType !== undefined) return out; // DBCS 欄の行またぎは未対応
   let offset = first;
   let r = f.row + 1;
   while (offset < f.length && r <= rows) {
@@ -32,6 +32,13 @@ export function fieldSlices(f: Field, cols: number, rows: number): FieldSlice[] 
     r++;
   }
   return out;
+}
+
+/** 折返し位置（欄先頭からの表示桁）。DBCS の桁揃え（alignDbcsWrap）へ渡す境界。 */
+export function wrapBounds(f: Field, cols: number, rows: number): number[] {
+  return fieldSlices(f, cols, rows)
+    .slice(1)
+    .map((s) => s.offset);
 }
 
 /** 編集モデルが扱う論理桁数（全スライスの合計）。画面に収まらない分は落とす。 */

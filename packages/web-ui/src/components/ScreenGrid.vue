@@ -13,11 +13,18 @@ import {
   toggleInsert,
   type EditState
 } from "../composables/fieldEdit.js";
-import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout, isFullWidth } from "../composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, dbcsViewLayout, alignDbcsWrap, isFullWidth } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, roundToDbcsLead } from "../composables/useCursor.js";
-import { fieldSlices, fieldSpan, posOfOffset, type FieldSlice } from "../composables/fieldSlices.js";
+import {
+  fieldSlices,
+  fieldSpan,
+  posOfOffset,
+  offsetOfPos,
+  wrapBounds,
+  type FieldSlice
+} from "../composables/fieldSlices.js";
 // codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
 import { katakanaChar } from "@as400web/core/codec";
 
@@ -248,10 +255,21 @@ function sliceIndexOf(f: Field, offset: number): number {
   return s.length - 1;
 }
 
+/** 欄の折返し境界（欄先頭からの表示桁）。DBCS の桁揃えに使う。 */
+function boundsOf(f: Field): number[] {
+  return wrapBounds(f, props.snapshot.cols, props.snapshot.rows);
+}
+
+/** 純論理値が実際に占める表示桁数＝送信バイト長（折返しの桁揃えを織り込んだ後の値）。 */
+function dbcsCols(f: Field, chars: readonly string[]): number {
+  return dbcsByteLength(alignDbcsWrap(chars, boundsOf(f)).chars.join(""));
+}
+
 /** 編集後の値が欄のバイト予算（SO/SI・DBCS 2 バイト込み）に収まるか。
  *  収まらない入力は拒否/切り捨てる（送信時の FIELD_OVERFLOW を入力段で防ぐ）。 */
 function fitsBytes(candidate: EditState, f: Field): boolean {
-  return dbcsByteLength(editValue(candidate).replace(/ +$/, "")) <= visLen(f);
+  const trimmed = editValue(candidate).replace(/ +$/, "");
+  return dbcsCols(f, [...trimmed]) <= visLen(f);
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -264,17 +282,19 @@ function logicalValue(f: Field): string {
   return f.value;
 }
 
-/** 未編集 DBCS 欄のセルから純論理値を復元（sbcs 文字・dbcs-lead 文字を採用、so/si/dbcs-tail は除外）。 */
+/** 未編集 DBCS 欄のセルから純論理値を復元（sbcs 文字・dbcs-lead 文字を採用、so/si/dbcs-tail は除外）。
+ *  行またぎ欄は全スライス（折返し先の行）を順に読む。 */
 function logicalFromCells(f: Field): string {
-  const row = props.snapshot.cells[f.row - 1];
-  if (!row) return f.value;
   let s = "";
-  const len = visLen(f);
-  for (let i = 0; i < len; i++) {
-    const cell = row[f.col - 1 + i];
-    if (!cell) continue;
-    if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
-    // so / si / dbcs-tail / attr は論理データに含めない
+  for (const sl of slicesOf(f)) {
+    const row = props.snapshot.cells[sl.row - 1];
+    if (!row) continue;
+    for (let i = 0; i < sl.width; i++) {
+      const cell = row[sl.col - 1 + i];
+      if (!cell) continue;
+      if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
+      // so / si / dbcs-tail / attr は論理データに含めない
+    }
   }
   return s.replace(/ +$/, ""); // 末尾パディング空白を除去
 }
@@ -309,12 +329,25 @@ function maskSafe(f: Field, value: string): string {
   return MASK_CHAR.repeat(typed).padEnd(visLen(f), " ");
 }
 
-/** スライス（行ごとの input）に表示する値。論理値の該当区間を切り出しスライス幅へ揃える。 */
+/** スライス（行ごとの input）に表示する値。論理値の該当区間を切り出しスライス幅へ揃える。
+ *  SBCS は 1 桁=1 文字なので単純な切り出し。DBCS は全角が 2 桁を占めるため「桁」で割る。 */
 function sliceValue(f: Field, sliceIdx: number): string {
   const s = slicesOf(f)[sliceIdx];
   if (!s) return "";
-  if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス（DBCS 列ビュー含む）
+  // 休止表示なので props 由来のレイアウトを使う（編集モデルを見ると blur で値が戻らない）
+  if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f), s);
+  if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス
   return displayValue(f).slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
+}
+
+/** 列ビューをスライスの桁範囲で切り出す。桁揃え済み＝全角は境界に割れないので、
+ *  桁範囲はそのまま view 文字列の連続区間になる。 */
+function dbcsSliceText(lay: ReturnType<typeof dbcsViewLayout>, s: FieldSlice): string {
+  const a = lay.viewAtColumn(s.offset);
+  const b = lay.viewAtColumn(s.offset + s.width);
+  const text = lay.view.slice(a, b);
+  const cols = lay.columnsBefore(b) - lay.columnsBefore(a);
+  return text + " ".repeat(Math.max(0, s.width - cols)); // 予算に満たない末尾を桁まで埋める
 }
 
 /** input の :value（休止時の表示）。DBCS 欄は列ビュー（SO/SI 込み）で表示する。 */
@@ -323,8 +356,14 @@ function displayValue(f: Field): string {
   // DBCS も欄長までスペース埋めした列ビューにする。logicalValue は末尾空白除去済みのため、
   // ここで埋めないと休止表示だけ短くなり、未入力桁にカーソルを置けない・桁がずれる
   // （フォーカス中は beginEdit がパディングするので、休止時と座標系が食い違ってしまう）。
-  if (f.dbcsType) return columnView(padDbcs([...logicalValue(f)], visLen(f)).join(""), soMark(), siMark());
+  if (f.dbcsType) return dbcsRestLayout(f).view;
   return inputValue(f);
+}
+
+/** 休止時（props 由来）の列ビューのレイアウト。編集モデルは見ない。
+ *  :value バインド・blur の復帰・矩形コピーはこちら、編集中の同期は dbcsLayoutOf を使う。 */
+function dbcsRestLayout(f: Field): ReturnType<typeof dbcsViewLayout> {
+  return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----
@@ -344,6 +383,7 @@ const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
 let composeStart = 0; // IME 合成を開始した欄内桁（compositionend で上書き開始位置に使う）
+let composePrefixLen = 0; // 合成中の <input> に残した prefix の文字数（確定分の切り出し起点）
 // 合成開始時に選択を削除したか。削除したなら確定文字は「挿入」で跡を埋める（上書きだと後続まで食う）
 let composeReplacedSelection = false;
 
@@ -357,7 +397,7 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
     // 純論理値（SO/SI 無し）＋末尾空白パディング。列ビューは sync で導出、カーソルは論理インデックス。
     // パディングは SBCS 欄と同じ目的: 未入力桁にもカーソルを置けるようにする（5250 は欄内自由）。
     // 上書きが既定（Insert でトグル）で、これも SBCS 欄と揃える。
-    edit = { chars: padDbcs([...logicalValue(f)], visLen(f)), cursor: 0, insertMode: insertMode.value };
+    edit = { chars: padDbcs(f, [...logicalValue(f)]), cursor: 0, insertMode: insertMode.value };
     editFieldIndex = f.index;
     return;
   }
@@ -368,10 +408,12 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
 
 // ---- DBCS 論理編集オペレーション（chars = 純論理値の配列＋末尾空白パディング） ----
 
-/** バイト予算（SO/SI・全角 2 バイト込み）いっぱいまで末尾を空白で埋める。
+/** 折返し境界で桁揃えしたうえで、バイト予算（SO/SI・全角 2 バイト込み）いっぱいまで末尾を空白で埋める。
  *  未入力桁へカーソルを置けるようにするため（SBCS 欄の inputValue と同じ役割）。 */
-function padDbcs(chars: string[], budget: number): string[] {
-  const out = [...chars];
+function padDbcs(f: Field, chars: readonly string[]): string[] {
+  const budget = visLen(f);
+  const out = alignDbcsWrap(chars, boundsOf(f)).chars;
+  // 末尾の空白は境界をまたぎ得ないので、桁揃えを崩さずに増減できる
   while (dbcsByteLength(out.join("")) < budget) out.push(" ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
   while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
@@ -390,40 +432,41 @@ function absorbDbcs(chars: string[], budget: number, cursor: number): string[] |
 }
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
-function dbcsType(e: EditState, ch: string, budget: number): EditState | undefined {
+function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
+  const budget = visLen(f);
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
   } else {
     // 上書きは「新しい文字が占める桁ぶん後続を食う」。全角は SO/SI 込みで最大 4 桁を占めるため、
     // 1 文字置換するだけだとバイト長が増えて後続が右へずれ、挿入に見えてしまう。
-    const before = dbcsByteLength(chars.join(""));
+    const before = dbcsCols(f, chars);
     chars[e.cursor] = ch;
-    while (dbcsByteLength(chars.join("")) > before && chars.length > e.cursor + 1) {
+    while (dbcsCols(f, chars) > before && chars.length > e.cursor + 1) {
       chars.splice(e.cursor + 1, 1);
     }
   }
-  const fit = absorbDbcs(chars, budget, e.cursor + 1);
+  // 桁揃えは入力のたびに引き直す（打った全角が折返し境界に掛かると手前へスペースが入り、
+  // その分だけ論理カーソルも右へずれる）。
+  const aligned = alignDbcsWrap(chars, boundsOf(f), e.cursor + 1);
+  const fit = absorbDbcs(aligned.chars, budget, aligned.cursor);
   if (!fit) return undefined;
-  return { ...e, chars: padDbcs(fit, budget), cursor: e.cursor + 1 };
+  return { ...e, chars: padDbcs(f, fit), cursor: aligned.cursor };
 }
 
-function dbcsInsert(e: EditState, ch: string): EditState {
-  const chars = [...e.chars];
-  chars.splice(e.cursor, 0, ch);
-  return { ...e, chars, cursor: e.cursor + 1 };
-}
-function dbcsBackspace(e: EditState, budget: number): EditState {
+function dbcsBackspace(e: EditState, f: Field): EditState {
   if (e.cursor <= 0) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor - 1, 1);
-  return { ...e, chars: padDbcs(chars, budget), cursor: e.cursor - 1 };
+  const aligned = alignDbcsWrap(chars, boundsOf(f), e.cursor - 1);
+  return { ...e, chars: padDbcs(f, aligned.chars), cursor: aligned.cursor };
 }
-function dbcsDelete(e: EditState, budget: number): EditState {
+function dbcsDelete(e: EditState, f: Field): EditState {
   if (e.cursor >= e.chars.length) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor, 1);
-  return { ...e, chars: padDbcs(chars, budget) };
+  const aligned = alignDbcsWrap(chars, boundsOf(f), e.cursor);
+  return { ...e, chars: padDbcs(f, aligned.chars), cursor: aligned.cursor };
 }
 function dbcsMove(e: EditState, delta: number): EditState {
   return { ...e, cursor: Math.max(0, Math.min(e.cursor + delta, e.chars.length)) };
@@ -435,10 +478,11 @@ let syncingFocus = false;
 /**
  * DBCS 欄の座標変換の単一の入口。
  *
- * DBCS 欄には座標系が 3 つある:
- *   - 論理   : edit.chars の index（純 Unicode・SO/SI 無し）
+ * DBCS 欄には座標系が 4 つある:
+ *   - 論理   : edit.chars の index（純 Unicode・SO/SI 無し。折返しの桁揃えスペースは含む）
  *   - 列ビュー: columnView 文字列の index（SO/SI が 1 文字・全角も 1 文字）
  *   - 表示桁 : 欄先頭からの桁（全角は 2 桁・SO/SI は 1 桁）
+ *   - スライド内 caret: 行ごとの <input> の selectionStart（＝列ビュー index からスライス先頭を引いた値）
  * これらは全角があると一致しない。各ハンドラが dbcsViewLayout を個別に呼んで引数を組み立てて
  * いたため、「trim 済みを渡す」「SO/SI マークを渡し忘れる」といった食い違いが繰り返し混入した
  * （未入力欄で logicalOf が 0 を返し先頭へ飛ぶ、{ } 表示で caret がずれる 等）。
@@ -446,29 +490,17 @@ let syncingFocus = false;
  * 値は常に「パディング込みの編集値」、マークは常に現在の soMark/siMark を使う。呼び出し側は
  * 引数を組み立てないこと。編集中でない欄では props 由来の論理値をパディングして使う。
  */
-/** 表示桁 → 列ビュー内の caret（文字 index）。全角は 1 文字で 2 桁を占めるため両者は一致しない。
- *  dbcsViewLayout の logicalOf/caretOf は「文字 index」座標なので、桁から引くときは必ずここを通す
- *  （桁をそのまま渡すと、全角のぶん右へずれ、桁数が多いと末尾へクランプされて右端へ飛ぶ）。 */
-function viewCaretOfColumn(view: string, col: number): number {
-  let c = 0;
-  let i = 0;
-  for (const ch of view) {
-    const w = isFullWidth(ch) ? 2 : 1;
-    // その桁を含む文字の開始へ。全角の後半桁を指定した場合は前半（全角の開始）へ丸まる
-    // ＝全角の途中にはカーソルを置けない 5250 の挙動（roundToDbcsLead と同じ理屈）。
-    if (col < c + w) return i;
-    c += w;
-    i++;
-  }
-  return i;
-}
-
 function dbcsLayoutOf(f: Field): ReturnType<typeof dbcsViewLayout> {
   const value =
-    edit && editFieldIndex === f.index
-      ? editValue(edit)
-      : padDbcs([...logicalValue(f)], visLen(f)).join("");
+    edit && editFieldIndex === f.index ? editValue(edit) : padDbcs(f, [...logicalValue(f)]).join("");
   return dbcsViewLayout(value, soMark(), siMark());
+}
+
+/** DBCS 欄で、その <input> が担当するスライスの「列ビュー先頭 index」。
+ *  native caret はスライス内の位置なので、これを足すと欄全体の view 座標になる。 */
+function viewBaseOf(f: Field, el: HTMLInputElement, lay = dbcsLayoutOf(f)): number {
+  const s = slicesOf(f)[Number(el.dataset["slice"] ?? 0)];
+  return s ? lay.viewAtColumn(s.offset) : 0;
 }
 
 /** その <input> が担当するスライスの論理オフセット（data-slice から引く）。 */
@@ -526,21 +558,35 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   emit("cursor", pos.row, pos.col);
 }
 
-/** DBCS 欄の sync: 列ビュー（SO/SI スペース込み）を表示し、caret を論理カーソルの列位置へ。 */
+/** DBCS 欄の sync: 列ビュー（SO/SI スペース込み）を行ごとのスライスへ割り、caret を論理カーソルの桁へ。 */
 function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
   // 表示はパディング込みの列ビュー（未入力桁にもカーソルを置けるようにするため）。
   // 送信値（emit）は末尾パディングを除いた純論理値。
-  const padded = editValue(edit);
-  const logical = padded.replace(/ +$/, "");
-  const { view, caretOf, columnsBefore } = dbcsLayoutOf(f);
-  inputEl.value = view;
-  const caret = caretOf(edit.cursor);
-  inputEl.setSelectionRange(caret, caret);
+  const logical = editValue(edit).replace(/ +$/, "");
+  const lay = dbcsLayoutOf(f);
+  const caret = lay.caretOf(edit.cursor); // 欄全体の列ビュー index
+  const col = Math.min(lay.columnsBefore(caret), visLen(f) - 1); // 欄先頭からの表示桁
+  const si = sliceIndexOf(f, col);
+  const s = slicesOf(f)[si]!;
+  // キャレットのあるスライスへ先にフォーカスを移す（focus/blur ハンドラが古い props から
+  // 書き戻すため、そのあとに全スライスを正しい値で上書きする）。
+  const target = inputForSlice(f, si) ?? inputEl;
+  if (document.activeElement !== target) {
+    syncingFocus = true; // onInputFocus に編集モデルを作り直させない
+    target.focus();
+    syncingFocus = false;
+  }
+  slicesOf(f).forEach((sl, i) => {
+    const el = inputForSlice(f, i);
+    if (el) el.value = dbcsSliceText(lay, sl);
+  });
+  const local = caret - lay.viewAtColumn(s.offset); // スライス内 caret
+  target.setSelectionRange(local, local);
   insertMode.value = edit.insertMode;
   emit("edit", f.index, logical);
-  // 論理カーソルの表示列（DBCS=2 桁）を AID 位置へ反映
-  emit("cursor", f.row, f.col + Math.min(columnsBefore(caret), visLen(f) - 1));
+  // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
+  emit("cursor", s.row, s.col + (col - s.offset));
 }
 
 /** ACS の自動送り: 欄が最大桁まで埋まったら次の入力欄へ送るよう通知。
@@ -548,7 +594,7 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
 function advanceIfFull(f: Field): void {
   if (!edit) return;
   if (isDbcsEdit(f)) {
-    if (dbcsByteLength(editValue(edit).replace(/ +$/, "")) >= visLen(f)) emit("field-full", f.index);
+    if (dbcsCols(f, [...editValue(edit).replace(/ +$/, "")]) >= visLen(f)) emit("field-full", f.index);
     return;
   }
   if (edit.cursor >= edit.chars.length) emit("field-full", f.index);
@@ -603,18 +649,19 @@ const SELECT_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
  *  Backspace/Delete/文字入力で「選択を消す/置換する」通常のテキストエディタ挙動に使う。 */
 function deleteSelection(f: Field, el: HTMLInputElement): boolean {
   if (!edit) return false;
-  const base = sliceOffsetOf(f, el); // 行またぎ欄: この input が担当する論理オフセット
-  const s = base + (el.selectionStart ?? 0);
-  const e = base + (el.selectionEnd ?? 0);
-  if (s === e) return false;
   if (isDbcsEdit(f)) {
     const sel = dbcsSelection(f, el); // 列ビュー選択 → 論理範囲 [ls,le)（SO/SI は含まない）
     if (!sel) return false;
     const chars = [...edit.chars];
     chars.splice(sel.ls, sel.le - sel.ls);
-    edit = { ...edit, chars, cursor: sel.ls };
+    const aligned = alignDbcsWrap(chars, boundsOf(f), sel.ls);
+    edit = { ...edit, chars: aligned.chars, cursor: aligned.cursor };
     return true;
   }
+  const base = sliceOffsetOf(f, el); // 行またぎ欄: この input が担当する論理オフセット
+  const s = base + (el.selectionStart ?? 0);
+  const e = base + (el.selectionEnd ?? 0);
+  if (s === e) return false;
   const chars = [...edit.chars];
   chars.splice(s, e - s);
   while (chars.length < visLen(f)) chars.push(" "); // 欄長（パディング）維持
@@ -744,21 +791,23 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   edit = edit!;
   // 論理カーソルを単一の真実にする。native caret が「前回 sync で置いた位置」と食い違うとき
   // （クリック等での再配置）だけ論理へ写す。毎回 logicalOf で丸めると矢印移動が壊れるため。
+  // 行またぎ欄では native caret はスライス内の位置なので、スライスの列ビュー先頭を足して欄全体へ写す。
   const vc = el.selectionStart;
   if (vc !== null) {
-    const { caretOf, logicalOf } = dbcsLayoutOf(f);
-    if (caretOf(edit.cursor) !== vc) edit = { ...edit, cursor: logicalOf(vc) };
+    const lay = dbcsLayoutOf(f);
+    const g = viewBaseOf(f, el, lay) + vc;
+    if (lay.caretOf(edit.cursor) !== g) edit = { ...edit, cursor: lay.logicalOf(g) };
   }
   const k = ev.key;
   if (k === "Backspace") {
     ev.preventDefault();
-    if (!deleteSelection(f, el)) edit = dbcsBackspace(edit, visLen(f));
+    if (!deleteSelection(f, el)) edit = dbcsBackspace(edit, f);
     syncDbcs(el, f);
     return;
   }
   if (k === "Delete") {
     ev.preventDefault();
-    if (!deleteSelection(f, el)) edit = dbcsDelete(edit, visLen(f));
+    if (!deleteSelection(f, el)) edit = dbcsDelete(edit, f);
     syncDbcs(el, f);
     return;
   }
@@ -808,7 +857,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
     const base = replaced ? { ...edit, insertMode: true } : edit;
-    const trial = dbcsType(base, ch, visLen(f));
+    const trial = dbcsType(base, ch, f);
     if (!trial) return; // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）
     edit = { ...trial, insertMode: edit.insertMode };
     syncDbcs(el, f);
@@ -825,6 +874,19 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   // 値・キャレットの確定は呼び出し元の sync が続けて行う。
   if (syncingFocus) return;
   beginEdit(f, el);
+  if (isDbcsEdit(f)) {
+    // DBCS 欄は編集中も列ビュー（SO/SI 込み）を表示。論理カーソルはこのスライスの先頭桁へ。
+    const lay = dbcsLayoutOf(f);
+    const s = slicesOf(f)[sliceIdx] ?? slicesOf(f)[0]!;
+    el.value = dbcsSliceText(lay, s); // パディング込み＝未入力桁にも caret を置ける
+    const vStart = lay.viewAtColumn(s.offset);
+    const lc = lay.logicalAfter(vStart); // 先頭桁が SO なら、その次の論理境界から
+    if (edit) edit.cursor = lc;
+    const local = Math.max(0, lay.caretOf(lc) - vStart);
+    el.setSelectionRange(local, local);
+    emit("cursor", s.row, s.col + (lay.columnsBefore(lay.caretOf(lc)) - s.offset));
+    return;
+  }
   if (sliceIdx > 0 && edit) {
     // 折返し先のスライスへ直接フォーカスした場合、論理カーソルはそのスライスの先頭桁
     const s = slicesOf(f)[sliceIdx];
@@ -835,16 +897,6 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
       emit("cursor", s.row, s.col);
       return;
     }
-  }
-  if (isDbcsEdit(f)) {
-    // DBCS 欄は編集中も列ビュー（SO/SI 込み）を表示。caret を論理先頭の列位置へ。
-    const { view, caretOf } = dbcsLayoutOf(f);
-    el.value = view; // パディング込み＝未入力桁にも caret を置ける
-    const c = caretOf(0);
-    el.setSelectionRange(c, c);
-    if (edit) edit.cursor = 0;
-    emit("cursor", f.row, f.col);
-    return;
   }
   // SBCS: 休止時 :value と編集ビューは同一（純論理値スペース埋め）。
   // ただし hidden はスペース埋めがそのまま伏せ字になるため実入力分のみ表示する。
@@ -869,11 +921,13 @@ function onInputBlur(f: Field, ev: FocusEvent): void {
  *  戻り値の text=論理文字列、[ls,le)=論理インデックス範囲（cut の削除に使う）。 */
 function dbcsSelection(f: Field, el: HTMLInputElement): { text: string; ls: number; le: number } | undefined {
   if (!isDbcsEdit(f)) return undefined;
-  const start = el.selectionStart ?? 0;
-  const end = el.selectionEnd ?? 0;
+  const lay = dbcsLayoutOf(f);
+  const base = viewBaseOf(f, el, lay); // スライス内 caret → 欄全体の列ビュー座標
+  const start = base + (el.selectionStart ?? 0);
+  const end = base + (el.selectionEnd ?? 0);
   if (start >= end) return undefined;
   const logical = (edit && editFieldIndex === f.index ? editValue(edit) : logicalValue(f)).replace(/ +$/, "");
-  const { caretOf } = dbcsLayoutOf(f);
+  const { caretOf } = lay;
   let text = "";
   let ls = -1;
   let le = 0;
@@ -921,16 +975,20 @@ function onInputClick(f: Field, ev: MouseEvent): void {
     // 列ビューの押下位置を論理カーソルへ写し、SO/SI に載ったら論理境界へスナップ。
     // 表示（syncDbcs）と同じ「パディング込み・同じ SO/SI マーク」でレイアウトすること。
     // trim 版で計算すると、未入力桁を押しても論理カーソル 0 に落ちる（＝先頭へ飛ぶ）。
-    const { logicalOf, caretOf, columnsBefore } = dbcsLayoutOf(f);
-    const lc = logicalOf(el.selectionStart ?? 0);
+    const lay = dbcsLayoutOf(f);
+    const base = viewBaseOf(f, el, lay);
+    const lc = lay.logicalOf(base + (el.selectionStart ?? 0));
     edit = { ...edit, cursor: lc };
-    const c = caretOf(lc);
-    el.setSelectionRange(c, c);
-    emit("cursor", f.row, f.col + Math.min(columnsBefore(c), visLen(f) - 1));
+    const c = lay.caretOf(lc);
+    el.setSelectionRange(c - base, c - base);
+    const col = Math.min(lay.columnsBefore(c), visLen(f) - 1);
+    const s = slicesOf(f)[sliceIndexOf(f, col)]!;
+    emit("cursor", s.row, s.col + (col - s.offset));
     return;
   }
-  const caret = Math.min(el.selectionStart ?? 0, f.length);
-  emit("cursor", f.row, f.col + caret);
+  const caret = Math.min(sliceOffsetOf(f, el) + (el.selectionStart ?? 0), visLen(f));
+  const pos = posOfOffset(f, caret, props.snapshot.cols, props.snapshot.rows);
+  emit("cursor", pos.row, pos.col);
 }
 
 /** 欄の値を、開始桁 offset から line で上書きする（ACS のペースト＝カーソル位置起点）。
@@ -939,20 +997,21 @@ function onInputClick(f: Field, ev: MouseEvent): void {
 function overwriteFromOffset(field: Field, offset: number, line: string): string {
   const budget = visLen(field);
   const existing = [...logicalValue(field)];
-  let out = "";
+  const chars: string[] = [];
+  const fits = (ch: string): boolean => dbcsCols(field, [...chars, ch]) <= budget;
   for (let i = 0; i < offset; i++) {
     const ch = existing[i] ?? " ";
-    if (dbcsByteLength(out + ch) > budget) return out.replace(/\s+$/, "");
-    out += ch;
+    if (!fits(ch)) return chars.join("").replace(/\s+$/, "");
+    chars.push(ch);
   }
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(field, ch)) continue;
-    if (dbcsByteLength(out + ch) > budget) break;
-    out += ch;
+    if (!fits(ch)) break;
+    chars.push(ch);
   }
-  return out.replace(/\s+$/, "");
+  return chars.join("").replace(/\s+$/, "");
 }
 
 /** 複数行テキストを、フォーカス欄から下方向へ「空行なく連続する入力欄」へ 1 行ずつ流し込む（ACS 相当）。
@@ -968,14 +1027,18 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
     const val = overwriteFromOffset(field, offset, lines[i] ?? "");
     if (field.index === f.index) {
       // 先頭行はフォーカス欄へ（edit モデルを置換して sync）
-      edit = isDbcsEdit(f) ? { chars: [...val], cursor: val.length, insertMode: true } : initEdit(val, visLen(f), val.length);
+      edit = isDbcsEdit(f)
+        ? { chars: padDbcs(f, [...val]), cursor: [...val].length, insertMode: true }
+        : initEdit(val, visLen(f), val.length);
       editFieldIndex = f.index;
       sync(el, f);
     } else {
       emit("edit", field.index, val);
-      // :value バインドは v-memo でキャッシュされ再評価されないため、input を直接更新する
-      const inp = gridEl.value?.querySelector<HTMLInputElement>(`input.grid-input[data-field-index="${field.index}"]`);
-      if (inp) inp.value = displayValue(field);
+      // :value バインドは v-memo でキャッシュされ再評価されないため、全スライスの input を直接更新する
+      slicesOf(field).forEach((_s, i) => {
+        const inp = inputForSlice(field, i);
+        if (inp) inp.value = sliceValue(field, i);
+      });
     }
     cur = editable.find((fl) => fl.row === field.row + 1);
     i++;
@@ -1005,8 +1068,8 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
   const vc = el.selectionStart;
   if (vc !== null) {
     if (dbcs) {
-      const { logicalOf } = dbcsLayoutOf(f);
-      edit = { ...edit!, cursor: logicalOf(vc) };
+      const lay = dbcsLayoutOf(f);
+      edit = { ...edit!, cursor: lay.logicalOf(viewBaseOf(f, el, lay) + vc) };
     } else {
       // 行またぎ欄: native caret はスライス内の位置なのでオフセットを足して論理化する
       edit = { ...edit!, cursor: Math.min(sliceOffsetOf(f, el) + vc, visLen(f)) };
@@ -1016,8 +1079,8 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
   for (const raw of [...text]) {
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
-    // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。dbcsInsert は挿入固定なので使わない
-    const trial = dbcs ? dbcsType(e, ch, visLen(f)) : typeChar(e, ch);
+    // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）
+    const trial = dbcs ? dbcsType(e, ch, f) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) break;
     e = trial;
   }
@@ -1049,17 +1112,28 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
     const nativeCaret = el.selectionStart;
     if (nativeCaret !== null) {
       if (isDbcsEdit(f)) {
-        const { logicalOf } = dbcsLayoutOf(f);
-        edit = { ...edit, cursor: logicalOf(nativeCaret) };
+        const lay = dbcsLayoutOf(f);
+        edit = { ...edit, cursor: lay.logicalOf(viewBaseOf(f, el, lay) + nativeCaret) };
       } else {
-        edit = { ...edit, cursor: Math.min(nativeCaret, visLen(f)) };
+        edit = { ...edit, cursor: Math.min(sliceOffsetOf(f, el) + nativeCaret, visLen(f)) };
       }
     }
   }
   composeStart = edit.cursor;
-  const prefix = edit.chars.slice(0, composeStart).join(""); // 合成開始桁より前の既入力（純論理値）
-  el.value = prefix; // 合成中は純論理値の prefix（SO/SI 無し）＋候補。確定後に列ビューへ整形する
+  // 合成中は純論理値の prefix（SO/SI 無し）＋候補。確定後に列ビューへ整形する。
+  // 行またぎ欄では、この <input> が担当するスライスの先頭から先だけを残す（欄全長を入れると桁が溢れる）。
+  const from = composeLogicalStart(f, el);
+  const prefix = edit.chars.slice(from, composeStart).join("");
+  composePrefixLen = prefix.length;
+  el.value = prefix;
   el.setSelectionRange(prefix.length, prefix.length); // 候補を入力位置（既入力の直後）に出す
+}
+
+/** 合成中の <input> に残す prefix の開始論理インデックス（＝その input が担当するスライスの先頭）。 */
+function composeLogicalStart(f: Field, el: HTMLInputElement): number {
+  if (!isDbcsEdit(f)) return sliceOffsetOf(f, el);
+  const lay = dbcsLayoutOf(f);
+  return lay.logicalAfter(viewBaseOf(f, el, lay));
 }
 
 function onCompositionEnd(f: Field, ev: CompositionEvent): void {
@@ -1069,17 +1143,17 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
-  // el.value = 既入力prefix + 確定文字。prefix（composeStart 桁分）を除いた確定分だけを
+  // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを
   // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
   const dbcs = isDbcsEdit(f);
   let e: EditState = { ...edit, cursor: composeStart };
-  for (const raw of [...el.value].slice(composeStart)) {
+  for (const raw of [...el.value].slice(composePrefixLen)) {
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
     const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
-    const trial = dbcs ? dbcsType(base, ch, visLen(f)) : typeChar(e, ch);
+    const trial = dbcs ? dbcsType(base, ch, f) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) break; // 桁超過分は切り捨て
     e = { ...trial, insertMode: e.insertMode };
   }
@@ -1179,7 +1253,8 @@ function charAtForCopy(row: number, col: number): string {
     // 欄の表示（列ビュー/パディング込み）から該当桁を取り出す。DBCS は全角が 2 桁を占めるため
     // 桁で数える。hidden 欄は伏せ字がそのまま出る（実値は漏らさない）。
     const view = displayValue(f);
-    const offset = (col - f.col) + (row - f.row) * props.snapshot.cols; // 行またぎ欄は未対応のため実質同一行
+    const offset = offsetOfPos(f, row, col, props.snapshot.cols, props.snapshot.rows);
+    if (offset === undefined) return " ";
     let c = 0;
     for (const ch of view) {
       const w = isFullWidth(ch) ? 2 : 1;
@@ -1319,29 +1394,30 @@ function setBlockSelection(rect: { r1: number; c1: number; r2: number; c2: numbe
  * ただし矢印で欄外から入ってきたときだけは到達桁に合わせる必要があるので、その口をここに開ける。
  * （既にフォーカス中の欄には呼ばないこと。ScreenGrid が置いた caret を壊すため）
  */
-function setDbcsCaretAtColumn(fieldIndex: number, col: number): void {
+function setDbcsCaretAtColumn(fieldIndex: number, row: number, col: number): void {
   const f = props.snapshot.fields.find((x) => x.index === fieldIndex);
   if (!f || !isDbcsEdit(f)) return;
-  const el = gridEl.value?.querySelector<HTMLInputElement>(`input.grid-input[data-field-index="${fieldIndex}"]`);
+  const offset = offsetOfPos(f, row, col, props.snapshot.cols, props.snapshot.rows);
+  if (offset === undefined) return;
+  const si = sliceIndexOf(f, offset);
+  const el = inputForSlice(f, si);
   if (!el) return;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
-  const { view, caretOf } = dbcsLayoutOf(f);
+  const lay = dbcsLayoutOf(f);
   // 列ビューは SO/SI を桁として含み、パディングで欄長まで埋まっている＝画面の桁割りそのもの。
   // よって「表示桁 → ビュー内 caret」を数えたら、それをそのまま native caret に置けばよい。
   //
   // ここで caretOf(logicalOf(c)) と往復してはいけない。logicalOf は「最も近い論理カーソル」への
   // スナップなので往復で元の位置に戻る保証がなく、SO/SI 境界やパディング境界で桁がずれる
   // （指定した桁と違う位置にキャレットが飛ぶ）。
-  const c = viewCaretOfColumn(view, Math.max(0, col - f.col));
-  // モデルの論理カーソルは「その view 位置以降の最初の論理カーソル」を採る。
+  const c = lay.viewAtColumn(offset);
+  // モデルの論理カーソルは「その view 位置以降の最初の論理カーソル」を採る（logicalAfter）。
   // logicalOf（最も近い論理カーソル）は使えない: SI の桁は「直前の全角の手前」と「その直後」の
   // 両方から等距離で同点になり、先に見つかる左を選ぶ。すると以降の同期でキャレットが
   // 全角の手前まで引き戻され、指定桁より 2 桁左にずれる。
-  let lc = 0;
-  const maxLc = edit!.chars.length;
-  while (lc < maxLc && caretOf(lc) < c) lc++;
-  edit = { ...edit!, cursor: lc };
-  el.setSelectionRange(c, c);
+  edit = { ...edit!, cursor: lay.logicalAfter(c) };
+  const base = lay.viewAtColumn(slicesOf(f)[si]!.offset);
+  el.setSelectionRange(c - base, c - base);
 }
 
 defineExpose({ setBlockSelection, clearBlockSelection: clearRectSel, setDbcsCaretAtColumn });

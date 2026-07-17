@@ -117,13 +117,19 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1].length).toBe(80);
   });
 
-  it("DBCS 欄は当面 1 行目のみ（行またぎ未対応）", () => {
+  it("DBCS 欄も行またぎ（折返し）で全長ぶんのスライスに割る", () => {
+    // 1399 のコマンド行相当: (20,7) len=153 → row20 に 74 桁、row21 に 79 桁
     const fields: Field[] = [
       { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: false } });
-    expect(w.findAll("input.grid-input")).toHaveLength(1);
-    expect(w.find("input.grid-input").attributes("maxlength")).toBe("74");
+    const inputs = w.findAll("input.grid-input");
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]!.attributes("maxlength")).toBe("74");
+    expect(inputs[1]!.attributes("maxlength")).toBe("79");
+    // 各スライスの表示はその行の桁数ぴったり（列ビューでも桁で割る）
+    expect((inputs[0]!.element as HTMLInputElement).value).toHaveLength(74);
+    expect((inputs[1]!.element as HTMLInputElement).value).toHaveLength(79);
   });
 
   it("入力欄フォーカスで cursor イベントをフィールド位置で emit する", async () => {
@@ -1215,7 +1221,7 @@ describe("DBCS 欄: 桁 → 論理カーソルの変換", () => {
     const el = w.find("input.grid-input").element as HTMLInputElement;
     await w.find("input.grid-input").trigger("focus");
     // 欄先頭から 20 桁目（全角 6 文字＝14 桁より右の未入力桁）へ合わせる
-    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 20);
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, r: number, c: number) => void }).setDbcsCaretAtColumn(1, 6, 10 + 20);
     await nextTick();
     // 右端（value 末尾）ではなく、20 桁目相当に置かれる
     expect(el.selectionStart).toBeLessThan(el.value.length);
@@ -1247,7 +1253,7 @@ describe("DBCS 欄: ホスト由来（セル）の値で桁指定カーソル", 
     const el = w.find("input.grid-input").element as HTMLInputElement;
     await w.find("input.grid-input").trigger("focus");
     // " あいうえお " は 12 桁。欄先頭から 20 桁目（内容より右の未入力桁）を指定する
-    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 20);
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, r: number, c: number) => void }).setDbcsCaretAtColumn(1, 6, 10 + 20);
     await nextTick();
     // 内容末尾（ビュー index 7 付近）へスナップせず、20 桁目相当（＝より右）に置かれる
     expect(el.selectionStart).toBeGreaterThan(7);
@@ -1269,21 +1275,21 @@ describe("DBCS 欄: 桁指定カーソルは往復スナップでずれない", 
     });
     const el = w.find("input.grid-input").element as HTMLInputElement;
     await w.find("input.grid-input").trigger("focus");
-    const setCaret = (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void })
+    const setCaret = (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, r: number, c: number) => void })
       .setDbcsCaretAtColumn;
 
     // SI の桁（欄先頭から 11 桁目）→ ビュー index 6 にそのまま置く
-    setCaret(1, 10 + 11);
+    setCaret(1, 6, 10 + 11);
     await nextTick();
     expect(el.selectionStart).toBe(6);
 
     // 内容より右の未入力桁（20 桁目）→ SI(index 6) の後ろのパディング index 7 + (20-12) = 15
-    setCaret(1, 10 + 20);
+    setCaret(1, 6, 10 + 20);
     await nextTick();
     expect(el.selectionStart).toBe(15);
 
     // 全角の途中桁（あ の 2 桁目＝桁 2）は、その全角の開始 index（1）に載る
-    setCaret(1, 10 + 2);
+    setCaret(1, 6, 10 + 2);
     await nextTick();
     expect(el.selectionStart).toBe(1);
     w.unmount();
@@ -1305,7 +1311,7 @@ describe("DBCS 欄: SI 桁を指定してもキャレットが左へ引き戻さ
     const input = w.find("input.grid-input");
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
-    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, c: number) => void }).setDbcsCaretAtColumn(1, 10 + 11);
+    (w.vm as unknown as { setDbcsCaretAtColumn: (i: number, r: number, c: number) => void }).setDbcsCaretAtColumn(1, 6, 10 + 11);
     await nextTick();
     expect(el.selectionStart).toBe(6); // SI の位置（桁 11）にそのまま置かれる
     // モデルとキャレットが一致していること＝以降の同期で引き戻されない。
@@ -1354,6 +1360,83 @@ describe("矩形コピーは未送信の入力値も拾う", () => {
       Object.assign(new Event("copy", { bubbles: true, cancelable: true }), { clipboardData: { setData } })
     );
     expect(setData).toHaveBeenCalledWith("text/plain", "あい");
+    w.unmount();
+  });
+});
+
+describe("DBCS 欄の行またぎ（折返し）", () => {
+  // 1399 のコマンド行相当: (20,7) len=153 → row20 に 74 桁（境界 74）、row21 に 79 桁。
+  const cmdLine = (): Field[] => [
+    { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+  ];
+
+  it("2 行目のスライスに直接フォーカスすると、そのスライスの先頭桁から入力できる", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(cmdLine()), edits: new Map(), focused: false },
+      attachTo: document.body
+    });
+    const second = w.findAll("input.grid-input")[1]!;
+    await second.trigger("focus");
+    // 折返し先の行頭（21,1）を指す。1 行目の先頭へ飛ばない
+    expect((w.emitted("cursor") as [number, number][]).at(-1)).toEqual([21, 1]);
+    await second.trigger("keydown", { key: "X" });
+    // 2 行目の先頭桁＝論理 74 桁目。1 行目の 74 桁ぶんは空白のまま保たれる
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(" ".repeat(74) + "X");
+    expect((second.element as HTMLInputElement).value.startsWith("X")).toBe(true);
+    w.unmount();
+  });
+
+  it("1 行目の末尾を越えて入力すると 2 行目のスライスへ続く", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(cmdLine()), edits: new Map([[1, "A".repeat(73)]]), focused: false },
+      attachTo: document.body
+    });
+    const inputs = w.findAll("input.grid-input");
+    const first = inputs[0]!;
+    await first.trigger("focus");
+    await first.trigger("keydown", { key: "End" }); // 73 文字目の直後＝1 行目の最終桁
+    await first.trigger("keydown", { key: "B" }); // 74 桁目（1 行目の末尾）
+    await first.trigger("keydown", { key: "C" }); // 75 桁目 → 2 行目へ折返す
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(73) + "BC");
+    // C は 2 行目のスライスへ入り、フォーカスもそちらへ移る
+    expect((inputs[1]!.element as HTMLInputElement).value.startsWith("C")).toBe(true);
+    expect(document.activeElement).toBe(inputs[1]!.element);
+    expect((w.emitted("cursor") as [number, number][]).at(-1)).toEqual([21, 2]);
+    w.unmount();
+  });
+
+  it("全角が折返し境界に割れるときは、手前へ半角スペースを詰めて次行へ送る", async () => {
+    // 半角 72 桁 → SO=桁72, 全角=桁73-74 となり、境界 74 が全角の途中に落ちる。
+    // 桁揃えで 72 桁目へ半角スペースが入り、SO=73 全角=74-75（＝2 行目の先頭）へ送られる。
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(cmdLine()), edits: new Map([[1, "A".repeat(72)]]), focused: false },
+      attachTo: document.body
+    });
+    const inputs = w.findAll("input.grid-input");
+    const first = inputs[0]!;
+    await first.trigger("focus");
+    await first.trigger("keydown", { key: "End" });
+    await first.trigger("keydown", { key: "あ" });
+    // 送信値そのものへ桁揃えのスペースが入る（codec が SO/SI を組み直せるようにするため）
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(72) + " あ");
+    // 1 行目は 74 桁ぴったり・全角は割れずに 2 行目にある
+    const row1 = (inputs[0]!.element as HTMLInputElement).value;
+    expect(row1).toHaveLength(74);
+    expect(row1.includes("あ")).toBe(false);
+    expect((inputs[1]!.element as HTMLInputElement).value.includes("あ")).toBe(true);
+    w.unmount();
+  });
+
+  it("2 行目の全角を Backspace すると 2 行目の値だけが縮む（1 行目へ食い込まない）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: makeSnap(cmdLine()), edits: new Map([[1, "A".repeat(74) + "あい"]]), focused: false },
+      attachTo: document.body
+    });
+    const second = w.findAll("input.grid-input")[1]!;
+    await second.trigger("focus");
+    await second.trigger("keydown", { key: "End" });
+    await second.trigger("keydown", { key: "Backspace" });
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(74) + "あ");
     w.unmount();
   });
 });

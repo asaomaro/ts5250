@@ -87,8 +87,16 @@ export function dbcsViewLayout(
   caretOf: (lc: number) => number;
   /** 列ビューの caret 位置 → 最も近い論理カーソル（SO/SI はスキップ） */
   logicalOf: (viewCaret: number) => number;
+  /** 列ビューの caret 位置 → その位置**以降**の最初の論理カーソル（SO/SI はスキップ）。
+   *  logicalOf（最近傍スナップ）は SI 桁で左右が同点になり左へ倒れるため、
+   *  「指定した桁から入力を始めたい」用途ではこちらを使う。 */
+  logicalAfter: (viewCaret: number) => number;
   /** caret 位置より前の表示桁数（DBCS=2 桁） */
   columnsBefore: (viewCaret: number) => number;
+  /** 表示桁 → その桁を含む文字の view インデックス（全角の後半桁は前半へ丸める） */
+  viewAtColumn: (col: number) => number;
+  /** 列ビュー全体の表示桁数（＝送信バイト長。SO/SI=1・全角=2） */
+  columns: number;
 } {
   let view = "";
   let inDbcs = false;
@@ -122,12 +130,75 @@ export function dbcsViewLayout(
     }
     return best;
   };
+  const logicalAfter = (vc: number): number => {
+    let lc = 0;
+    while (lc < len && caretOf(lc) < vc) lc++;
+    return lc;
+  };
   const columnsBefore = (vc: number): number => {
     let cols = 0;
     for (const ch of view.slice(0, vc)) cols += isFullWidth(ch) ? 2 : 1;
     return cols;
   };
-  return { view, caretOf, logicalOf, columnsBefore };
+  const viewAtColumn = (col: number): number => {
+    let c = 0;
+    let i = 0;
+    for (const ch of view) {
+      const w = isFullWidth(ch) ? 2 : 1;
+      if (col < c + w) return i; // 全角の後半桁は前半へ丸まる（全角の途中には止まれない）
+      c += w;
+      i++;
+    }
+    return i;
+  };
+  return { view, caretOf, logicalOf, logicalAfter, columnsBefore, viewAtColumn, columns: columnsBefore(view.length) };
+}
+
+/**
+ * 全角が「行の折返し境界」をまたがないよう、純論理値へ半角スペースを詰める（5250 の桁揃え）。
+ *
+ * 5250 は 1 画面桁 = 1 バイトなので、全角の 2 バイトが行末と次行頭に割れると描画できない。
+ * 詰めるスペースは**送信値そのもの**へ入れる（列ビュー限定の飾りにしない）。こうすると codec が
+ * SO/SI を組み直すだけで済み、表示・送信・バイト予算が単一の表現から導ける。
+ *
+ * @param bounds 欄先頭からの表示桁で表した折返し位置（＝次行の 1 桁目に当たる桁）
+ * @param cursor 論理カーソル。手前へ詰めたぶんだけずらして返す
+ */
+export function alignDbcsWrap(
+  chars: readonly string[],
+  bounds: readonly number[],
+  cursor = 0
+): { chars: string[]; cursor: number } {
+  const out = [...chars];
+  let c = cursor;
+  // 1 回の挿入で最低 1 桁は右へ動くので、桁数ぶん回せば必ず収束する（保険の上限）
+  for (let guard = 0; guard <= out.length + bounds.length + 8; guard++) {
+    const at = firstStraddle(out, bounds);
+    if (at < 0) break;
+    out.splice(at, 0, " ");
+    if (at < c) c++;
+  }
+  return { chars: out, cursor: c };
+}
+
+/** 全角が折返し境界をまたぐ最初の論理インデックス（無ければ -1）。 */
+function firstStraddle(chars: readonly string[], bounds: readonly number[]): number {
+  if (bounds.length === 0) return -1;
+  let col = 0;
+  let inDbcs = false;
+  for (let i = 0; i < chars.length; i++) {
+    const wide = isFullWidth(chars[i]!);
+    if (wide && !inDbcs) {
+      col += 1; // SO
+      inDbcs = true;
+    } else if (!wide && inDbcs) {
+      col += 1; // SI
+      inDbcs = false;
+    }
+    if (wide && bounds.some((b) => col < b && b < col + 2)) return i;
+    col += wide ? 2 : 1;
+  }
+  return -1;
 }
 
 /** 全角判定（East Asian Width の Wide/Fullwidth 近似。DBCS 相当の判別に使う） */

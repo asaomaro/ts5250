@@ -386,6 +386,49 @@ try {
   });
   rule("⑫ 入力欄に打った値を矩形選択→copy で取得できる", copied.includes("COPYTEST"), `"${copied}"`);
 
+  // ⑬ DBCS 欄の行またぎ（折返し）。1399 のコマンド行は (20,7) len=153 ＝ 74 桁＋79 桁の 2 スライス。
+  //    従来は DBCS 欄を 1 行目だけに割っており 74 桁で頭打ちだった。
+  const slices = page.locator('input.grid-input:not([readonly])[data-field-index="1"]');
+  const geo = await slices.evaluateAll((els) =>
+    els.map((e) => ({ slice: e.dataset.slice, len: e.value.length, max: e.maxLength }))
+  );
+  rule(
+    "⑬ コマンド行が 2 スライス（74 桁＋79 桁）に割れる",
+    geo.length === 2 && geo[0].max === 74 && geo[1].max === 79,
+    JSON.stringify(geo)
+  );
+
+  // ⑭ 1 行目を越える長さを打ち込むと 2 行目へ続く（74 桁の頭打ちが解消している）
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
+  const long = "B".repeat(80); // 74 桁を越える＝折返し先まで届く
+  await page.keyboard.type(long, { delay: 5 });
+  await page.waitForTimeout(300);
+  const wrapped = await slices.evaluateAll((els) => els.map((e) => e.value));
+  rule(
+    "⑭ 74 桁を越える入力が 2 行目へ折返す",
+    (wrapped[0].match(/B/g) ?? []).length === 74 && (wrapped[1].match(/B/g) ?? []).length === 6,
+    `1行目=${(wrapped[0].match(/B/g) ?? []).length}桁 2行目=${(wrapped[1].match(/B/g) ?? []).length}桁`
+  );
+
+  // ⑮ 折返した長いコマンドが実機へそのまま届く（＝送信値が 2 行ぶん繋がっている）。
+  //    74 桁を越える位置まで伸ばしたコメント付き SNDMSG を投げ、ホストの応答で確認する。
+  await cmd.click();
+  await page.keyboard.press("Home");
+  for (let i = 0; i < 90; i++) await page.keyboard.press("Delete");
+  const tail = "WRAPOK";
+  // 74 桁目を確実に越える長さにする（TOMSGQ の指定が 2 行目へかかる）
+  const longCmd = `SNDMSG MSG('${"x".repeat(60)}${tail}') TOUSR(${jp.user ?? "USER"})`;
+  await page.keyboard.type(longCmd, { delay: 5 });
+  await page.waitForTimeout(300);
+  const sent = await slices.evaluateAll((els) => els.map((e) => e.value).join(""));
+  rule(
+    "⑮ 折返しを含むコマンド全文が欄に保持される",
+    sent.replace(/ +$/, "").startsWith(longCmd),
+    `打鍵=${longCmd.length}桁 / 欄=${sent.replace(/ +$/, "").length}桁`
+  );
+
   if (errors.length) {
     ok = false;
     log("PAGE ERRORS: " + errors.join(" | "));
