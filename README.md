@@ -432,7 +432,26 @@ node packages/server/dist/main.js --http 3400 --users ./users.local.json --web-r
 ```
 
 - **ブラウザ**: 未ログインならログイン画面が出る（`/api/login` → httpOnly Cookie）。
-- **MCP / 自動化**: users の `tokenHashes`（API トークンの sha256）に `Authorization: Bearer <token>` で認証。
+- **MCP / 自動化**: `Authorization: Bearer <token>` で認証（users の `tokenHashes` に sha256 で保存）。
+  **トークンは 1 ユーザー 1 本**で、再発行すると以前のトークンは失効します。
+  発行はヘッダーのユーザー名 →「アカウント」から**各自で**行えます（admin は管理者画面で他ユーザーの分も発行可）。
+  平文は**発行時に 1 回だけ**表示されるので、その場でコピーして MCP クライアントの設定に貼ってください。
+
+  ```json
+  {
+    "mcpServers": {
+      "as400-5250": {
+        "url": "https://host/mcp",
+        "headers": { "Authorization": "Bearer <token>" }
+      }
+    }
+  }
+  ```
+
+  > 📌 トークンは**トランスポート層（ヘッダ）で渡します**。MCP ツールの引数で資格情報をやり取りする
+  > 設計は採りません（引数は LLM のコンテキストとクライアント履歴に残るため）。
+  > なお **stdio モードには認証がありません**（プロセスを起動できる＝信頼された利用者という前提）。
+  > 権限を効かせたい場合は HTTP トランスポート＋トークンを使ってください。
 - **セキュリティ**: パスワード/トークンは平文保存しない（scrypt/sha256・timingSafe 比較）。
   `users*.json` はコミットしない（`.gitignore` 済み）。TLS 配信時は `--cookie-secure` を付ける。
 - **管理者画面**（role=admin）: ヘッダの「ユーザー / セッション / ログ」から、既存セッションと同様に**タブで開く**。

@@ -127,13 +127,27 @@ export class UserStore {
     if (!this.byName.delete(username)) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
   }
 
-  /** 新しい API トークンを発行し、ハッシュを保存して**平文を 1 回だけ返す** */
+  /**
+   * 新しい API トークンを発行し、ハッシュを保存して**平文を 1 回だけ返す**。
+   *
+   * 追加ではなく**置き換え**る（1 ユーザー 1 トークン）。追加方式だと有効なトークンが増え続け、
+   * 漏洩しても「どれを消すか」を特定できず全消しするしかなくなるため。
+   * 再発行＝以前のトークンは即座に失効する。
+   *
+   * スキーマは配列のまま（既存 users.json に複数入っていても読めるようにする。読み込みは
+   * 複数を受け付け、発行時に 1 本へ収束させる）。
+   */
   issueToken(username: string): string {
     const u = this.byName.get(username);
     if (!u) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
     const token = randomBytes(24).toString("hex");
-    (u.tokenHashes ??= []).push(hashToken(token));
+    u.tokenHashes = [hashToken(token)];
     return token;
+  }
+
+  /** そのユーザーが API トークンを発行済みか（UI の状態表示用。値は返さない） */
+  hasToken(username: string): boolean {
+    return (this.byName.get(username)?.tokenHashes?.length ?? 0) > 0;
   }
 
   /** users.json へ原子的に保存（tmp→rename）。fromFile 由来のときのみ */

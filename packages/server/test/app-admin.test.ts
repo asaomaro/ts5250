@@ -57,7 +57,7 @@ describe("管理者 API", () => {
     expect(token).toMatch(/^[0-9a-f]{48}$/);
     // 発行トークンで /api/me が bob を返す
     const me = await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } });
-    expect(await me.json()).toEqual({ enabled: true, user: { username: "bob", role: "user" } });
+    expect(await me.json()).toEqual({ enabled: true, user: { username: "bob", role: "user" }, hasToken: true });
   });
 
   it("最後の admin は削除・降格できない", async () => {
