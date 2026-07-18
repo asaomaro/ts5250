@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
@@ -7,6 +7,36 @@ const emit = defineEmits<{ (e: "focus"): void }>();
 
 const session = computed(() => sessionsStore.get(props.sessionId));
 const reports = computed(() => session.value?.reports ?? []);
+
+// ---- 未読クリア: このペインが表示されている＝ユーザーが見ている ----
+onMounted(() => sessionsStore.markSpoolRead(props.sessionId));
+watch(
+  () => reports.value.length,
+  () => sessionsStore.markSpoolRead(props.sessionId)
+);
+
+// ---- サイドバー開閉・フィルタ ----
+const sidebarOpen = ref(true);
+const filter = ref("");
+/** スプールがフィルタ語に一致するか（タイトル/本文の大文字小文字無視の部分一致） */
+function matches(r: SpoolReportView, q: string): boolean {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  if (reportTitle(r).toLowerCase().includes(needle)) return true;
+  return r.pages.some((p) => p.lines.some((l) => l.toLowerCase().includes(needle)));
+}
+const filteredReports = computed(() => reports.value.filter((r) => matches(r, filter.value)));
+
+/** CPA3394（用紙タイプ問い合わせ）回避のための writer 起動コマンド。デバイス名が分かれば差し込む */
+const deviceName = computed(() => session.value?.meta?.deviceName ?? "<デバイス名>");
+const formtypeCmd = computed(() => `STRPRTWTR DEV(${deviceName.value}) FORMTYPE(*ALL)`);
+async function copyCmd(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(formtypeCmd.value);
+  } catch {
+    /* クリップボード不可環境では無視 */
+  }
+}
 
 /** 帳票のタイトル＝先頭の非空白行（多くの帳票で見出し）。無ければ空 */
 function reportTitle(r: SpoolReportView): string {
@@ -88,6 +118,9 @@ function printReport(): void {
 <template>
   <div class="printer-pane" tabindex="0" @focus="emit('focus')" @mousedown="emit('focus')">
     <div class="toolbar">
+      <button class="toggle" :title="sidebarOpen ? '一覧を隠す' : '一覧を表示'" @click="sidebarOpen = !sidebarOpen">
+        {{ sidebarOpen ? "◧" : "▤" }}
+      </button>
       <span class="badge">プリンター</span>
       <span class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
       <span class="muted">受信 {{ reports.length }} 件</span>
@@ -97,27 +130,40 @@ function printReport(): void {
       <button :disabled="!selected" @click="printReport">印刷</button>
     </div>
     <div class="body">
-      <ul class="list">
-        <li v-if="reports.length === 0" class="empty">
-          スプール待ち受け中…<br />
-          <small>ホスト側で用紙タイプ問い合わせ等の応答待ちの可能性があります</small>
-        </li>
-        <li
-          v-for="(r, i) in reports"
-          :key="r.id"
-          :class="{ sel: r.id === selectedId }"
-          @click="selectReport(r.id)"
-        >
-          <div class="row1">
-            <span class="idx">#{{ i + 1 }}</span>
-            <span class="title" :title="reportTitle(r)">{{ reportTitle(r) || "（無題）" }}</span>
-          </div>
-          <div class="row2">
-            <span class="time">{{ receivedLabel(r) }}</span>
-            <span class="meta">{{ r.pages.length }}ページ・{{ reportLines(r) }}行</span>
-          </div>
-        </li>
-      </ul>
+      <div v-show="sidebarOpen" class="sidebar">
+        <div class="filter">
+          <input v-model="filter" type="search" placeholder="スプールを絞り込み（名称/本文）" />
+        </div>
+        <ul class="list">
+          <li v-if="reports.length === 0" class="empty">
+            スプール待ち受け中…<br />
+            <small>
+              ホスト側で用紙タイプ問い合わせ（CPA3394）の応答待ちになることがあります。writer を用紙タイプ不問で
+              起動すると毎回の「I」応答が不要になります:
+            </small>
+            <code class="cmd" @click="copyCmd" title="クリックでコピー">{{ formtypeCmd }}</code>
+            <small>（既存 writer は <code>CHGWTR</code> の FORMTYPE(*ALL) でも可）</small>
+          </li>
+          <li v-else-if="filteredReports.length === 0" class="empty">
+            「{{ filter }}」に一致するスプールはありません
+          </li>
+          <li
+            v-for="r in filteredReports"
+            :key="r.id"
+            :class="{ sel: r.id === selectedId }"
+            @click="selectReport(r.id)"
+          >
+            <div class="row1">
+              <span class="idx">#{{ reports.indexOf(r) + 1 }}</span>
+              <span class="title" :title="reportTitle(r)">{{ reportTitle(r) || "（無題）" }}</span>
+            </div>
+            <div class="row2">
+              <span class="time">{{ receivedLabel(r) }}</span>
+              <span class="meta">{{ r.pages.length }}ページ・{{ reportLines(r) }}行</span>
+            </div>
+          </li>
+        </ul>
+      </div>
       <div class="viewer">
         <pre v-if="selected">{{ selectedText }}</pre>
         <div v-else class="viewer-empty">スプールを選択すると帳票を表示します</div>
@@ -163,14 +209,51 @@ function printReport(): void {
   display: flex;
   min-height: 0;
 }
-.list {
+.sidebar {
   flex: none;
-  width: 200px;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--crt-bezel, #333);
+}
+.filter {
+  padding: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--crt-bezel, #333) 60%, transparent);
+}
+.filter input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: var(--crt, #0b0f0b);
+  color: var(--ink, #cfc);
+  border: 1px solid var(--crt-bezel, #333);
+  border-radius: 4px;
+}
+.toggle {
+  font-size: 13px;
+  padding: 2px 6px;
+}
+.list {
+  flex: 1;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow-y: auto;
-  border-right: 1px solid var(--crt-bezel, #333);
+}
+.cmd {
+  display: block;
+  margin: 6px 0;
+  padding: 4px 6px;
+  background: var(--crt, #0b0f0b);
+  border: 1px solid var(--crt-bezel, #333);
+  border-radius: 4px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--t-green, #3f6);
+  cursor: pointer;
+  word-break: break-all;
 }
 .list li {
   display: flex;

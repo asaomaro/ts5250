@@ -1,0 +1,10 @@
+events:
+  - { ts: 2026-07-18T03:25:27Z, phase: requirement, event: start }
+  - { ts: 2026-07-18T03:26:34Z, phase: requirement, event: approved }
+  - { ts: 2026-07-18T03:26:34Z, phase: research, event: start }
+  - { ts: 2026-07-18T03:31:18Z, phase: research, event: approved }
+  - { ts: 2026-07-18T03:31:18Z, phase: spec, event: start }
+  - { ts: 2026-07-18T03:34:15Z, phase: spec, event: approved }
+  - { ts: 2026-07-18T03:34:15Z, phase: plan, event: start }
+  - { ts: 2026-07-18T03:35:58Z, phase: plan, event: approved, metrics: { tasks_planned: 17 } }
+  - { ts: 2026-07-18T03:35:58Z, phase: coding, event: start }

@@ -1,7 +1,7 @@
 import type { WsOpen, WsServerMessage } from "@as400web/server";
 import type { AidKey } from "@as400web/core";
 import { WsClient } from "./ws-client.js";
-import { sessionsStore, type SessionState } from "./stores/sessions.js";
+import { sessionsStore, type SessionState, type SessionMeta } from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
 
 const WS_URL = (): string => {
@@ -39,7 +39,7 @@ function setBusy(sessionId: string, busy: boolean): void {
 }
 
 /** 接続を開き、セッションを stores に登録してワークスペースに追加する */
-export async function openSession(open: WsOpen, label: string): Promise<string> {
+export async function openSession(open: WsOpen, label: string, meta?: SessionMeta): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
     const client = new WsClient(
@@ -58,7 +58,8 @@ export async function openSession(open: WsOpen, label: string): Promise<string> 
                 connected: true,
                 readOnly: open.readOnly ?? false,
                 ccsid: msg.ccsid,
-                client
+                client,
+                ...(meta ? { meta } : {})
               };
               sessionsStore.add(state);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
@@ -101,7 +102,7 @@ export async function openSession(open: WsOpen, label: string): Promise<string> 
 }
 
 /** プリンターセッションを開き、stores 登録＋ワークスペース追加する（帳票を report で受信） */
-export async function openPrinterSession(open: WsOpen, label: string): Promise<string> {
+export async function openPrinterSession(open: WsOpen, label: string, meta?: SessionMeta): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
     const client = new WsClient(
@@ -122,7 +123,8 @@ export async function openPrinterSession(open: WsOpen, label: string): Promise<s
                 readOnly: true,
                 client,
                 reports: [],
-                startupCode: msg.startupCode
+                startupCode: msg.startupCode,
+                ...(meta ? { meta } : {})
               };
               sessionsStore.add(state);
               workspaceStore.addSession(sessionId);
