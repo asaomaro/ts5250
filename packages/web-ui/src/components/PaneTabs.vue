@@ -23,6 +23,10 @@ function connected(sessionId: string): boolean {
   if (sessionId.startsWith("admin:")) return true;
   return sessionsStore.get(sessionId)?.connected ?? false;
 }
+/** プリンターの未読スプール数（非アクティブ時にタブへバッジ表示） */
+function unread(sessionId: string): number {
+  return sessionsStore.get(sessionId)?.unread ?? 0;
+}
 /** タブを閉じる（管理タブは workspace から外すだけ、セッションは切断も行う） */
 function closeTab(id: string): void {
   if (id.startsWith("admin:")) workspaceStore.closeSession(id);
@@ -124,6 +128,7 @@ function onStripLeave(): void {
     >
       <span class="dot" :class="{ live: connected(t) }"></span>
       {{ label(t) }}
+      <span v-if="unread(t) > 0" class="badge" title="新着スプール">{{ unread(t) }}</span>
       <button
         v-if="!t.startsWith('admin:')"
         class="info"
@@ -210,5 +215,17 @@ function onStripLeave(): void {
   cursor: pointer;
   padding: 0 2px;
   font-size: 11px;
+}
+.badge {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  font-family: var(--mono);
 }
 </style>

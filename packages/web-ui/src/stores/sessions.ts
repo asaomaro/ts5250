@@ -10,11 +10,26 @@ export interface SpoolReportView {
   receivedAt?: number;
 }
 
+/** 接続時に判明している接続設定のメタ情報（情報表示用。資格情報の平文は持たない） */
+export interface SessionMeta {
+  host?: string;
+  port?: number;
+  tls?: boolean;
+  ccsid?: number;
+  screenSize?: "24x80" | "27x132";
+  deviceName?: string;
+  sessionType?: "display" | "printer";
+  autoSignon?: boolean;
+  signonUser?: string;
+}
+
 export interface SessionState {
   sessionId: string;
   label: string;
   /** セッション種別（既定 display）。printer は帳票ビュー（PrinterPane）で表示する */
   kind?: "display" | "printer";
+  /** 接続設定のメタ情報（セッション情報パネルで表示） */
+  meta?: SessionMeta;
   snapshot: ScreenSnapshot | undefined;
   /** ローカル編集差分（fieldIndex → value）。AID 送信時に載せる */
   edits: Map<number, string>;
@@ -36,6 +51,8 @@ export interface SessionState {
   selectedReportId?: string;
   /** 起動応答コード（I902 等） */
   startupCode?: string;
+  /** 未読スプール数（プリンター。受信で++、タブ表示でクリア） */
+  unread?: number;
 }
 
 export const sessionsStore = reactive({
@@ -68,7 +85,7 @@ export const sessionsStore = reactive({
     s.edits.clear();
   },
 
-  /** プリンターセッションに受信スプールを追加する（最初の 1 件は自動選択） */
+  /** プリンターセッションに受信スプールを追加する（最初の 1 件は自動選択・未読++） */
   addReport(id: string, report: SpoolReportView): void {
     const s = this.byId.get(id);
     if (!s) return;
@@ -76,5 +93,12 @@ export const sessionsStore = reactive({
     if (report.receivedAt === undefined) report.receivedAt = Date.now();
     s.reports.push(report);
     if (!s.selectedReportId) s.selectedReportId = report.id;
+    s.unread = (s.unread ?? 0) + 1;
+  },
+
+  /** プリンタータブを表示したら未読をクリアする */
+  markSpoolRead(id: string): void {
+    const s = this.byId.get(id);
+    if (s) s.unread = 0;
   }
 });

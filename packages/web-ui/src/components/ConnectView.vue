@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from "vue";
 import type { PublicProfile, PublicConnection } from "@as400web/server";
 import { connectionsStore, type ConnectionForm } from "../stores/connections.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
+import type { SessionMeta } from "../stores/sessions.js";
+import InfoPopover from "./InfoPopover.vue";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 
@@ -61,8 +63,60 @@ onMounted(async () => {
   await connectionsStore.refresh();
 });
 
+/** カード ⓘ で開いている情報ポップオーバーの対象キー（'srv-<name>' / 'conn-<id>'） */
+const infoFor = ref<string | undefined>();
+function toggleInfo(key: string): void {
+  infoFor.value = infoFor.value === key ? undefined : key;
+}
+
+type ConnLike = {
+  host?: string;
+  port?: number;
+  tls?: boolean;
+  ccsid?: number;
+  screenSize?: "24x80" | "27x132";
+  deviceName?: string;
+  sessionType?: "display" | "printer";
+  autoSignon?: boolean;
+  signonUser?: string;
+};
+
+/** PublicConnection/PublicProfile から SessionMeta を作る（undefined は載せない） */
+function toMeta(o: ConnLike): SessionMeta {
+  const m: SessionMeta = {};
+  if (o.host !== undefined) m.host = o.host;
+  if (o.port !== undefined) m.port = o.port;
+  if (o.tls !== undefined) m.tls = o.tls;
+  if (o.ccsid !== undefined) m.ccsid = o.ccsid;
+  if (o.screenSize !== undefined) m.screenSize = o.screenSize;
+  if (o.deviceName !== undefined) m.deviceName = o.deviceName;
+  if (o.sessionType !== undefined) m.sessionType = o.sessionType;
+  if (o.autoSignon !== undefined) m.autoSignon = o.autoSignon;
+  if (o.signonUser !== undefined) m.signonUser = o.signonUser;
+  return m;
+}
+
+/** 情報ポップオーバーの行（設定の全情報） */
+function infoRows(name: string, source: string, o: ConnLike): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [
+    { label: "名称", value: name },
+    { label: "区分", value: source },
+    { label: "ホスト", value: `${o.host ?? "-"}${o.port ? ":" + o.port : ""}` },
+    { label: "種別", value: o.sessionType === "printer" ? "プリンター" : "表示" }
+  ];
+  if (o.tls) rows.push({ label: "TLS", value: "有効" });
+  if (o.ccsid !== undefined) rows.push({ label: "CCSID", value: String(o.ccsid) });
+  if (o.screenSize) rows.push({ label: "画面サイズ", value: o.screenSize });
+  if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
+  rows.push({
+    label: "自動サインオン",
+    value: o.autoSignon ? (o.signonUser ? `有効（${o.signonUser}）` : "有効") : "無効"
+  });
+  return rows;
+}
+
 async function connectProfile(p: PublicProfile): Promise<void> {
-  await doConnect({ type: "open", profile: p.name }, p.name, p.sessionType);
+  await doConnect({ type: "open", profile: p.name }, p.name, p.sessionType, toMeta(p));
 }
 
 function editProfile(p: PublicProfile): void {
@@ -108,7 +162,7 @@ function setViewMode(m: "card" | "list"): void {
 
 async function connectSaved(c: PublicConnection): Promise<void> {
   // 保存済み接続は ID 参照で開く（host/資格情報はサーバーが解決・復号する）
-  await doConnect({ type: "open", connection: c.id }, c.name, c.sessionType);
+  await doConnect({ type: "open", connection: c.id }, c.name, c.sessionType, toMeta(c));
 }
 
 /** 編集で hasSecret のとき、パスワード欄は空＝据え置き（サーバーには値を返せない） */
@@ -152,13 +206,16 @@ function newConn(): void {
 async function doConnect(
   open: Parameters<typeof openSession>[0],
   label: string,
-  sessionType?: "display" | "printer"
+  sessionType?: "display" | "printer",
+  meta?: SessionMeta
 ): Promise<void> {
   error.value = "";
   connecting.value = true;
   try {
     const id =
-      sessionType === "printer" ? await openPrinterSession(open, label) : await openSession(open, label);
+      sessionType === "printer"
+        ? await openPrinterSession(open, label, meta)
+        : await openSession(open, label, meta);
     emit("connected", id);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -276,12 +333,22 @@ function cancelForm(): void {
           </span>
           <b>{{ p.name }}</b>
           <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
-          <small>{{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}</small>
+          <small>
+            {{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}{{ p.deviceName ? " · " + p.deviceName : "" }}
+          </small>
         </button>
-        <div v-if="profilesEditable" class="card-actions">
-          <button class="icon-btn" title="編集" @click.stop="editProfile(p)">✎</button>
-          <button class="icon-btn danger" title="削除" @click.stop="deleteProfile(p)">🗑</button>
+        <div class="card-actions">
+          <button class="icon-btn" title="情報" @click.stop="toggleInfo('srv-' + p.name)">ⓘ</button>
+          <template v-if="profilesEditable">
+            <button class="icon-btn" title="編集" @click.stop="editProfile(p)">✎</button>
+            <button class="icon-btn danger" title="削除" @click.stop="deleteProfile(p)">🗑</button>
+          </template>
         </div>
+        <InfoPopover
+          v-if="infoFor === 'srv-' + p.name"
+          :rows="infoRows(p.name, '共有プロファイル', p)"
+          @close="infoFor = undefined"
+        />
       </div>
 
       <div v-for="c in connectionsStore.connections" :key="'conn-' + c.id" class="card loc-card">
@@ -293,12 +360,20 @@ function cancelForm(): void {
           </span>
           <b>{{ c.name }}</b>
           <span v-if="c.autoSignon" title="自動サインオン">⚡</span>
-          <small>{{ c.host }}{{ c.port ? ":" + c.port : "" }}{{ c.tls ? " TLS" : "" }}</small>
+          <small>
+            {{ c.host }}{{ c.port ? ":" + c.port : "" }}{{ c.tls ? " TLS" : "" }}{{ c.deviceName ? " · " + c.deviceName : "" }}
+          </small>
         </button>
         <div class="card-actions">
+          <button class="icon-btn" title="情報" @click.stop="toggleInfo('conn-' + c.id)">ⓘ</button>
           <button class="icon-btn" title="編集" @click.stop="editConn(c)">✎</button>
           <button class="icon-btn danger" title="削除" @click.stop="deleteConn(c)">🗑</button>
         </div>
+        <InfoPopover
+          v-if="infoFor === 'conn-' + c.id"
+          :rows="infoRows(c.name, '保存済み接続', c)"
+          @close="infoFor = undefined"
+        />
       </div>
 
       <button class="card add" @click="newConn">＋ 新規接続</button>
@@ -399,6 +474,7 @@ h2 {
   gap: 10px;
 }
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
