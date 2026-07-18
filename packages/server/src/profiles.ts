@@ -40,7 +40,7 @@ const profileSchema = z.object({
 });
 
 /** プロファイルの実効種別（明示 sessionType 優先、無ければ printer ブロック有無から導出） */
-function effectiveType(p: {
+export function effectiveType(p: {
   sessionType?: "display" | "printer" | undefined;
   printer?: unknown;
 }): "display" | "printer" {

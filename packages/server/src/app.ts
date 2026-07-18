@@ -15,6 +15,8 @@ import {
   type AuthVars
 } from "./auth.js";
 import { registerAdminRoutes } from "./admin.js";
+import { effectiveType } from "./profiles.js";
+import { checkOutputDir } from "./output-dir.js";
 import { registerConnectionRoutes } from "./connections.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
@@ -72,13 +74,39 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     return c.json({ profiles: deps.profiles.listForUser(c.get("user"), { includeSignon: editable }), editable });
   });
 
+  /**
+   * PDF 出力先を保存**前**に検証する（不正な設定を永続化しない）。
+   * 未指定なら検証しない。ディレクトリは作成せず、無ければエラーにする。
+   *
+   * 実効種別が display の場合は検証しない: printer ブロックはどのみち破棄されるため、
+   * 「保存されない設定」を理由に 400 を返すのは利用者を混乱させる。
+   *
+   * 戻り値: エラー文字列（NG）／解決後の絶対パス（OK・未指定なら undefined）。
+   */
+  const validatePdfDir = async (
+    body: unknown,
+    existing?: { sessionType?: "display" | "printer" | undefined; printer?: unknown }
+  ): Promise<{ error?: string; resolved?: string }> => {
+    const b = body as { printer?: { autoPdfDir?: unknown }; sessionType?: "display" | "printer" } | null;
+    const dir = b?.printer?.autoPdfDir;
+    if (typeof dir !== "string" || dir === "") return {};
+    // 更新時の種別は既存側で固定される（種別は変更できない）。新規は入力から導出する
+    const type = existing ? effectiveType(existing) : effectiveType({ ...(b ?? {}) });
+    if (type !== "printer") return {};
+    const r = await checkOutputDir(dir);
+    return r.ok ? { resolved: r.path } : { error: r.reason };
+  };
+
   // サーバー設定の作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
   app.post("/api/profiles", async (c) => {
     if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
     try {
-      const profile = deps.profiles.add(await c.req.json().catch(() => ({})));
+      const body = await c.req.json().catch(() => ({}));
+      const { error, resolved } = await validatePdfDir(body);
+      if (error) return c.json({ error }, 400);
+      const profile = deps.profiles.add(body);
       await deps.profiles.save();
-      return c.json({ profile }, 201);
+      return c.json({ profile, ...(resolved ? { resolvedPdfDir: resolved } : {}) }, 201);
     } catch (e) {
       return c.json({ error: profileErrMsg(e) }, profileErr(e));
     }
@@ -86,9 +114,13 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   app.put("/api/profiles/:name", async (c) => {
     if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
     try {
-      const profile = deps.profiles.update(c.req.param("name"), await c.req.json().catch(() => ({})));
+      const body = await c.req.json().catch(() => ({}));
+      const name = c.req.param("name");
+      const { error, resolved } = await validatePdfDir(body, deps.profiles.getRaw(name));
+      if (error) return c.json({ error }, 400);
+      const profile = deps.profiles.update(name, body);
       await deps.profiles.save();
-      return c.json({ profile });
+      return c.json({ profile, ...(resolved ? { resolvedPdfDir: resolved } : {}) });
     } catch (e) {
       return c.json({ error: profileErrMsg(e) }, profileErr(e));
     }

@@ -15,6 +15,8 @@ const profiles = ref<PublicProfile[]>([]);
 /** サーバー設定（ファイル由来）を UI から編集できるか（認証オフ または admin かつファイル由来。サーバーが判定） */
 const profilesEditable = ref(false);
 const error = ref("");
+/** 保存成功時の補足（解決後の PDF 出力先など）。相対パス・タイポに気づけるように出す */
+const notice = ref("");
 const connecting = ref(false);
 const showForm = ref(false);
 type ConnForm = {
@@ -318,7 +320,11 @@ async function saveProfileForm(f: ConnForm): Promise<void> {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload)
         });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; resolvedPdfDir?: string };
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    // サーバーが解決した絶対パスを見せる（相対パス指定やタイポに気づけるように）
+    notice.value = body.resolvedPdfDir ? `PDF 出力先: ${body.resolvedPdfDir}` : "";
+    error.value = "";
     await refreshProfiles();
     showForm.value = false;
     form.value = emptyForm();
@@ -362,7 +368,8 @@ function cancelForm(): void {
         </button>
       </div>
     </div>
-    <p v-if="error" class="err" role="alert">{{ error }}</p>
+    <p v-if="error && !showForm" class="err" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
     <div class="list" :class="'view-' + viewMode">
       <div v-for="p in profiles" :key="'srv-' + p.name" class="card loc-card">
@@ -525,6 +532,8 @@ function cancelForm(): void {
           （この設定は認証オフ、または admin のときだけ編集できます）
         </p>
       </template>
+      <!-- 保存失敗はフォーム内に出す（一覧が長いと画面上部の表示に気づけないため） -->
+      <p v-if="error" class="err" role="alert">{{ error }}</p>
       <div class="row">
         <button type="submit">保存</button>
         <button type="button" class="ghost" @click="cancelForm">キャンセル</button>
@@ -541,6 +550,11 @@ function cancelForm(): void {
 }
 h2 {
   font-family: var(--mono);
+}
+.notice {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .err {
   color: #c62828;
