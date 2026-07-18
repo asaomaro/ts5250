@@ -2,10 +2,14 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
 import { ProfileStore } from "../src/profiles.js";
+import { SecretCrypto } from "../src/secret-crypto.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "../src/auth.js";
+
+const crypto = SecretCrypto.fromEnv("K", { K: randomBytes(32).toString("hex") })!;
 
 /** signon + printer（信頼設定）を持つプロファイル 1 件のファイルを作る */
 function profilesFile(): string {
@@ -29,7 +33,12 @@ function profilesFile(): string {
 }
 
 function deps(path: string, auth?: AuthContext) {
-  return { sessions: new SessionManager(), profiles: ProfileStore.fromFile(path), version: "test", ...(auth ? { auth } : {}) };
+  return {
+    sessions: new SessionManager(),
+    profiles: ProfileStore.fromFile(path, crypto),
+    version: "test",
+    ...(auth ? { auth } : {})
+  };
 }
 function authCtx(): AuthContext {
   return {
@@ -98,6 +107,38 @@ describe("/api/profiles 編集（認証オフ）", () => {
     expect(res.status).toBe(200);
     expect(JSON.parse(readFileSync(path, "utf8")).profiles).toHaveLength(0);
   });
+
+  it("UI でパスワードを設定すると passwordEnc（暗号化）で保存され平文は残らない", async () => {
+    const app = buildApp(deps(path));
+    const res = await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "pub400", host: "pub400.com", autoSignon: true, signonUser: "USER", password: "pw@1" })
+    });
+    expect(res.status).toBe(200);
+    const raw = readFileSync(path, "utf8");
+    const saved = JSON.parse(raw).profiles[0];
+    expect(saved.signon.user).toBe("USER");
+    expect(saved.signon.passwordEnc).toMatch(/^v1:/);
+    expect(saved.signon.password).toBeUndefined();
+    // 平文パスワードはファイルにもレスポンスにも現れない
+    expect(raw).not.toContain("pw@1");
+    // GET は signonUser を返すがパスワードは返さない
+    const list = await (await app.request("/api/profiles")).json();
+    expect(list.profiles[0].signonUser).toBe("USER");
+    expect(JSON.stringify(list)).not.toContain("passwordEnc");
+  });
+
+  it("autoSignon をオフにすると signon が解除される", async () => {
+    const app = buildApp(deps(path));
+    await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "pub400", host: "pub400.com", autoSignon: false })
+    });
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles[0];
+    expect(saved.signon).toBeUndefined();
+  });
 });
 
 describe("/api/profiles 編集（認証オン・admin ゲート）", () => {
@@ -133,5 +174,24 @@ describe("/api/profiles 編集（ファイル非由来）", () => {
     const app = buildApp({ sessions: new SessionManager(), profiles: new ProfileStore([]), version: "test" });
     const body = await (await app.request("/api/profiles")).json();
     expect(body.editable).toBe(false);
+  });
+});
+
+describe("ProfileStore: signon 解決", () => {
+  it("add した password は暗号化され resolve で復号される", () => {
+    const store = new ProfileStore([], crypto);
+    store.add({ name: "p", host: "h", autoSignon: true, signonUser: "U", password: "secret" });
+    expect(store.resolveConnectOptions("p")).toMatchObject({ user: "U", password: "secret" });
+  });
+
+  it("鍵未設定では passwordEnc を復号できず auto-signon をスキップ（warn）", () => {
+    const noKey = new ProfileStore(
+      [{ name: "p", host: "h", signon: { user: "U", passwordEnc: crypto.encrypt("secret") } }],
+      undefined
+    );
+    let warned = "";
+    const opts = noKey.resolveConnectOptions("p", (m) => (warned = m));
+    expect(opts.password).toBeUndefined();
+    expect(warned).toMatch(/secret key|decrypt/i);
   });
 });

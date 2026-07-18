@@ -73,11 +73,15 @@ function editProfile(p: PublicProfile): void {
     host: p.host,
     ccsid: p.ccsid ?? DEFAULT_CCSID,
     screenSize: p.screenSize ?? DEFAULT_SCREEN_SIZE,
+    password: "",
     ...(p.port !== undefined ? { port: p.port } : {}),
     ...(p.deviceName !== undefined ? { deviceName: p.deviceName } : {}),
-    ...(p.tls !== undefined ? { tls: p.tls } : {})
+    ...(p.tls !== undefined ? { tls: p.tls } : {}),
+    ...(p.autoSignon ? { autoSignon: true } : {}),
+    ...(p.signonUser !== undefined ? { user: p.signonUser } : {})
   };
-  editingHasSecret.value = false;
+  // 既存の自動サインオン（passwordEnv も含む）があればパスワードは据え置き扱い
+  editingHasSecret.value = p.autoSignon;
   showForm.value = true;
 }
 
@@ -201,7 +205,12 @@ async function saveProfileForm(f: ConnForm): Promise<void> {
     ...(f.ccsid !== undefined ? { ccsid: f.ccsid } : {}),
     ...(f.screenSize !== undefined ? { screenSize: f.screenSize } : {}),
     ...(f.deviceName ? { deviceName: f.deviceName } : {}),
-    ...(f.tls !== undefined ? { tls: f.tls } : {})
+    ...(f.tls !== undefined ? { tls: f.tls } : {}),
+    // 常に明示送信（オフにしたら signon を解除できるようにする）
+    autoSignon: !!f.autoSignon,
+    ...(f.autoSignon && f.user ? { signonUser: f.user } : {}),
+    // パスワード空欄は据え置き（未送信）。サーバーが既存の passwordEnv/passwordEnc を保持
+    ...(f.autoSignon && f.password ? { password: f.password } : {})
   };
   try {
     const res = f.id
@@ -298,8 +307,9 @@ function cancelForm(): void {
     <form v-if="showForm" class="form" @submit.prevent="saveForm">
       <h3>{{ isProfileForm ? "共有プロファイルを編集" : form.id ? "接続を編集" : "新規接続" }}</h3>
       <p v-if="isProfileForm" class="note">
-        ※ 共有プロファイル（全員から見える）を編集します。サインオンや PDF 出力などの信頼設定はサーバーの
-        設定ファイルで管理され、ここでは接続情報のみ編集します（既存の信頼設定は保持されます）。
+        ※ 共有プロファイル（全員から見える）を編集します。接続情報と自動サインオンを編集でき、パスワードは
+        暗号化して保存されます。PDF 出力などの信頼設定と、運用者が env で設定した passwordEnv はサーバー側で
+        保持され、ここでは変更しません。
       </p>
       <div class="row">
         <input v-model="form.name" placeholder="名称" required />
@@ -346,10 +356,10 @@ function cancelForm(): void {
         英小文字をそのまま入力するには 939 / 1399 / 5035 を選択してください。
       </p>
       <label class="check"><input v-model="form.tls" type="checkbox" /> TLS で接続</label>
-      <label v-if="!isProfileForm" class="check">
+      <label class="check">
         <input v-model="form.autoSignon" type="checkbox" /> 自動サインオン（RFC 4777）
       </label>
-      <div v-if="!isProfileForm && form.autoSignon" class="row">
+      <div v-if="form.autoSignon" class="row">
         <input v-model="form.user" placeholder="ユーザー" autocomplete="off" />
         <input
           v-model="form.password"
@@ -358,7 +368,7 @@ function cancelForm(): void {
           autocomplete="off"
         />
       </div>
-      <p v-if="!isProfileForm && form.autoSignon" class="note">
+      <p v-if="form.autoSignon" class="note">
         ※ パスワードはサーバーで暗号化して保存されます（AES-256-GCM）。ブラウザや API には平文を返しません。
         サーバーに暗号鍵（AS400_SECRET_KEY）が未設定の場合、パスワード保存は無効です。
       </p>

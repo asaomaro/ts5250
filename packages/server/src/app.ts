@@ -65,9 +65,11 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   };
   const profileErrMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-  app.get("/api/profiles", (c) =>
-    c.json({ profiles: deps.profiles.listPublic(), editable: canEditProfiles(c) })
-  );
+  app.get("/api/profiles", (c) => {
+    const editable = canEditProfiles(c);
+    // signon user 名は編集者（認証オフ or admin）にだけ返す（プレフィル用）
+    return c.json({ profiles: deps.profiles.listPublic({ includeSignon: editable }), editable });
+  });
 
   // 共有プロファイルの作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
   app.post("/api/profiles", async (c) => {

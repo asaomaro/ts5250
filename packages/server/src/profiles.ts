@@ -3,6 +3,7 @@ import { writeFile, rename } from "node:fs/promises";
 import { z } from "zod";
 import { Tn5250Error, type ConnectOptions } from "@as400web/core";
 import type { PrinterOutputConfig } from "./printer-output.js";
+import type { SecretCrypto } from "./secret-crypto.js";
 
 /** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。信頼設定なのでプロファイルにのみ置く */
 const printerSchema = z.object({
@@ -16,10 +17,12 @@ const printerSchema = z.object({
 
 const signonSchema = z.object({
   user: z.string().min(1),
-  /** パスワードを保持する環境変数名（推奨）。平文 password より優先 */
+  /** パスワードを保持する環境変数名（運用者向け）。 */
   passwordEnv: z.string().min(1).optional(),
-  /** 平文パスワード（非推奨。passwordEnv を使うこと） */
-  password: z.string().optional()
+  /** 平文パスワード（非推奨。passwordEnv か passwordEnc を使うこと） */
+  password: z.string().optional(),
+  /** UI 設定の暗号化パスワード（AES-256-GCM の `v1:iv:tag:ct`）。passwordEnv より優先 */
+  passwordEnc: z.string().optional()
 });
 
 const profileSchema = z.object({
@@ -51,6 +54,8 @@ export interface PublicProfile {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   autoSignon: boolean;
+  /** 自動サインオンのユーザー（プレフィル用。パスワードは露出しない） */
+  signonUser?: string;
   /** セッション種別。printer 設定ブロックを持つプロファイルはプリンターセッション用 */
   sessionType: "display" | "printer";
 }
@@ -68,7 +73,11 @@ const profileInputSchema = z
     tls: z.boolean().optional(),
     ccsid: z.number().int().optional(),
     screenSize: z.enum(["24x80", "27x132"]).optional(),
-    deviceName: z.string().optional()
+    deviceName: z.string().optional(),
+    // 自動サインオン（UI 設定）。password は平文で受け、サーバーが暗号化して passwordEnc に保存する
+    autoSignon: z.boolean().optional(),
+    signonUser: z.string().optional(),
+    password: z.string().optional()
   })
   .strict();
 export type ProfileInput = z.infer<typeof profileInputSchema>;
@@ -77,11 +86,14 @@ export class ProfileStore {
   private readonly byName = new Map<string, Profile>();
   private path: string | undefined;
 
-  constructor(profiles: Profile[]) {
+  constructor(
+    profiles: Profile[],
+    private readonly crypto?: SecretCrypto
+  ) {
     for (const p of profiles) this.byName.set(p.name, p);
   }
 
-  static fromFile(path: string): ProfileStore {
+  static fromFile(path: string, crypto?: SecretCrypto): ProfileStore {
     let raw: unknown;
     try {
       raw = JSON.parse(readFileSync(path, "utf8"));
@@ -92,7 +104,7 @@ export class ProfileStore {
     if (!parsed.success) {
       throw new Tn5250Error("CONNECT_FAILED", `invalid profiles.json: ${parsed.error.message}`);
     }
-    const store = new ProfileStore(parsed.data.profiles);
+    const store = new ProfileStore(parsed.data.profiles, crypto);
     store.path = path;
     return store;
   }
@@ -108,8 +120,12 @@ export class ProfileStore {
     return p;
   }
 
-  /** API 露出用の一覧（認証情報なし） */
-  listPublic(): PublicProfile[] {
+  /**
+   * API 露出用の一覧（パスワードは含まない）。
+   * signon の user 名は既定で伏せる（認証情報として扱う）。編集フォームのプレフィル用に必要なときだけ
+   * `includeSignon` で含める——編集は認証オフ or admin に限られるため、一般公開の一覧には出さない。
+   */
+  listPublic(opts?: { includeSignon?: boolean }): PublicProfile[] {
     return [...this.byName.values()].map((p) => {
       const pub: PublicProfile = {
         name: p.name,
@@ -122,11 +138,17 @@ export class ProfileStore {
       if (p.ccsid !== undefined) pub.ccsid = p.ccsid;
       if (p.screenSize !== undefined) pub.screenSize = p.screenSize;
       if (p.deviceName !== undefined) pub.deviceName = p.deviceName;
+      if (opts?.includeSignon && p.signon?.user !== undefined) pub.signonUser = p.signon.user;
       return pub;
     });
   }
 
-  /** 接続フィールドから Profile 本体を組み立てる（信頼設定はここでは付けない） */
+  /**
+   * 接続フィールドから Profile 本体を組み立てる。信頼設定のうち enhanced/printer は保持。
+   * signon は UI 編集を反映する: autoSignon オフなら除去、オンなら user を反映し、password 指定時は
+   * 暗号化して passwordEnc に保存、未指定時は既存の password 機構（passwordEnv/passwordEnc/password）を保持。
+   * printer 出力設定はここでは触れない（ブラウザ入力から注入させない）。
+   */
   private buildProfile(input: ProfileInput, keep?: Profile): Profile {
     const p: Profile = { name: input.name, host: input.host };
     if (input.port !== undefined) p.port = input.port;
@@ -134,11 +156,30 @@ export class ProfileStore {
     if (input.ccsid !== undefined) p.ccsid = input.ccsid;
     if (input.screenSize !== undefined) p.screenSize = input.screenSize;
     if (input.deviceName !== undefined) p.deviceName = input.deviceName;
-    // 信頼設定は運用者管理。更新時は既存の値を保持し、ブラウザ入力からは触れない
     if (keep?.enhanced !== undefined) p.enhanced = keep.enhanced;
-    if (keep?.signon !== undefined) p.signon = keep.signon;
-    if (keep?.printer !== undefined) p.printer = keep.printer;
+    if (keep?.printer !== undefined) p.printer = keep.printer; // 信頼設定（PDF 出力等）は保持
+    const signon = this.buildSignon(input, keep?.signon);
+    if (signon) p.signon = signon;
     return p;
+  }
+
+  /** signon の再構築（UI の autoSignon/user/password を反映しつつ既存パスワード機構を保持） */
+  private buildSignon(input: ProfileInput, keep?: Profile["signon"]): Profile["signon"] | undefined {
+    if (input.autoSignon === undefined) return keep; // 未指定＝既存を保持（signon に触れない更新）
+    if (!input.autoSignon) return undefined; // 明示オフ＝自動サインオンを解除
+    const user = input.signonUser ?? keep?.user;
+    if (!user) return undefined; // ユーザー未指定なら signon を作らない
+    const signon: NonNullable<Profile["signon"]> = { user };
+    if (input.password !== undefined && input.password !== "") {
+      if (!this.crypto) throw new Tn5250Error("CONFIG_ERROR", "secret key not configured; cannot store password");
+      signon.passwordEnc = this.crypto.encrypt(input.password);
+    } else {
+      // パスワード未指定: 既存の機構を保持（passwordEnc 優先→passwordEnv→password）
+      if (keep?.passwordEnc !== undefined) signon.passwordEnc = keep.passwordEnc;
+      else if (keep?.passwordEnv !== undefined) signon.passwordEnv = keep.passwordEnv;
+      else if (keep?.password !== undefined) signon.password = keep.password;
+    }
+    return signon;
   }
 
   /** 新規プロファイルを追加（接続フィールドのみ。信頼設定は持たない）。同名は FORBIDDEN */
@@ -189,7 +230,7 @@ export class ProfileStore {
    * signon があれば RFC 4777 自動サインオン（user/password）を設定する（D3）。
    * 認証情報はここで解決してサーバー内に留め、外へ返さない（D13）。
    */
-  resolveConnectOptions(name: string): ConnectOptions {
+  resolveConnectOptions(name: string, warn?: (msg: string) => void): ConnectOptions {
     const p = this.get(name);
     const opts: ConnectOptions = { host: p.host };
     if (p.port !== undefined) opts.port = p.port;
@@ -201,17 +242,35 @@ export class ProfileStore {
     if (p.deviceName !== undefined) opts.deviceName = p.deviceName;
     if (p.enhanced !== undefined) opts.enhanced = p.enhanced;
     if (p.signon) {
-      const password = p.signon.passwordEnv
-        ? process.env[p.signon.passwordEnv]
-        : p.signon.password;
-      if (password === undefined || password === "") {
-        throw new Tn5250Error(
-          "CONNECT_FAILED",
-          `profile ${name}: password not available (env ${p.signon.passwordEnv ?? "?"} unset)`
-        );
+      const s = p.signon;
+      let password: string | undefined;
+      if (s.passwordEnc !== undefined) {
+        // UI 設定の暗号化パスワード。復号失敗（鍵未設定/鍵変更）は自動サインオンなしで続行
+        if (this.crypto) {
+          try {
+            password = this.crypto.decrypt(s.passwordEnc);
+          } catch {
+            warn?.(`profile ${name}: failed to decrypt saved password (auto-signon skipped)`);
+          }
+        } else {
+          warn?.(`profile ${name}: secret key not configured (auto-signon skipped)`);
+        }
+      } else if (s.passwordEnv !== undefined) {
+        // 運用者管理の env 参照。設定漏れは明示エラー（気づける形にする）
+        password = process.env[s.passwordEnv];
+        if (password === undefined || password === "") {
+          throw new Tn5250Error(
+            "CONNECT_FAILED",
+            `profile ${name}: password not available (env ${s.passwordEnv} unset)`
+          );
+        }
+      } else {
+        password = s.password;
       }
-      opts.user = p.signon.user;
-      opts.password = password;
+      if (password !== undefined && password !== "") {
+        opts.user = s.user;
+        opts.password = password;
+      }
     }
     return opts;
   }
