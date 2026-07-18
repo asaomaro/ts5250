@@ -119,8 +119,11 @@ electron.bat          # Windows
 ```
 
 既存の Hono サーバーを内部で起動し、`BrowserWindow` で Web UI を表示します。単一利用者アプリなので
-`--auto-secret-key` 付きで起動し、UI からのパスワード保存に使う master key を**自動生成して `.env` に保存**します
+`--auto-secret-key` 付きで起動し、UI からのパスワード保存に使う master key を**自動生成**します
 （手動設定は不要 → [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
+書き込みが必要な状態ファイル（`.env`＝master key・`connections.json`・編集した `profiles.json`）は、
+**開発時は repo ルート、パッケージ配布時（`app.isPackaged`）は `userData`** に保存します（asar は読み取り専用のため）。
+パッケージ時は同梱プロファイルがあれば初回に `userData` へシードして編集可能にします。
 インストーラ生成は `cd electron && npm install && npm run dist`（要 GUI / 対象 OS）。
 
 ---

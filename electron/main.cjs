@@ -15,9 +15,8 @@ const WEB_ROOT = "packages/web-ui/dist"; // cwd(ROOT) 相対
 const SERVER_MAIN = path.join(ROOT, "packages", "server", "dist", "main.js");
 const APP_URL = `http://127.0.0.1:${PORT}/`;
 
-/** .env があれば読み込み process.env に反映（プロファイルの passwordEnv 等） */
-function loadDotEnv() {
-  const envPath = path.join(ROOT, ".env");
+/** 指定した .env を読み込み process.env に反映（プロファイルの passwordEnv・master key 等） */
+function loadDotEnv(envPath) {
   if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
     const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
@@ -28,6 +27,41 @@ function loadDotEnv() {
     }
     if (process.env[m[1]] === undefined) process.env[m[1]] = val;
   }
+}
+
+/**
+ * 書き込みが必要な状態ファイル（.env / connections.json / 編集可能な profiles.json）の置き場所を決める。
+ * パッケージ配布では app ディレクトリ（asar）が読み取り専用なので userData を使う。開発時は repo ルート。
+ */
+function resolveDataDir() {
+  const dir = app.isPackaged ? app.getPath("userData") : ROOT;
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * プロファイルファイルのパスを解決する。
+ * 開発時: repo ルートの profiles.local.json / profiles.json（従来どおり・相対）。
+ * パッケージ時: userData の profiles.json（無ければ同梱の既定をシード）。編集して永続化できる。
+ */
+function resolveProfiles(dataDir) {
+  if (dataDir === ROOT) {
+    for (const f of ["profiles.local.json", "profiles.json"]) {
+      if (fs.existsSync(path.join(ROOT, f))) return f;
+    }
+    return undefined;
+  }
+  const dest = path.join(dataDir, "profiles.json");
+  if (!fs.existsSync(dest)) {
+    for (const f of ["profiles.local.json", "profiles.json"]) {
+      const src = path.join(ROOT, f);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+        break;
+      }
+    }
+  }
+  return fs.existsSync(dest) ? dest : undefined;
 }
 
 /** /healthz が 200 を返すまで待つ */
@@ -56,19 +90,20 @@ async function startServer() {
   if (!fs.existsSync(SERVER_MAIN)) {
     throw new Error(`サーバーが未ビルドです: ${SERVER_MAIN}\n先に 'npm run build' と web-ui の 'vite build' を実行してください。`);
   }
-  process.chdir(ROOT);
-  loadDotEnv();
+  process.chdir(ROOT); // serveStatic（--web-root）は cwd 相対で読み取り専用アセットを解決する
+  const dataDir = resolveDataDir();
+  const envPath = path.join(dataDir, ".env");
+  loadDotEnv(envPath);
+  // パッケージ時は repo ルートの .env も一応読む（開発用 .env が同梱されていれば passwordEnv 等を拾える）
+  if (dataDir !== ROOT) loadDotEnv(path.join(ROOT, ".env"));
+
   const argv = ["--http", String(PORT), "--web-root", WEB_ROOT];
-  for (const f of ["profiles.local.json", "profiles.json"]) {
-    if (fs.existsSync(path.join(ROOT, f))) {
-      argv.push("--profiles", f);
-      break;
-    }
-  }
-  // 単一利用者アプリなので、UI からのパスワード保存に使う master key が無ければ自動生成して保存する
-  // （loadDotEnv が次回起動で拾えるよう既定の .env に保存。パッケージ化して .env が書き込み不可な配布形態では
-  //  --secret-key-file に app.getPath("userData") 配下の書き込み可能パスを渡すこと）。
-  argv.push("--auto-secret-key");
+  const profiles = resolveProfiles(dataDir);
+  if (profiles) argv.push("--profiles", profiles);
+  // 書き込みが要る状態は userData（パッケージ時）へ。ユーザー接続（暗号化パスワード含む）と master key を保存する
+  argv.push("--connections", path.join(dataDir, "connections.json"));
+  // 単一利用者アプリなので master key が無ければ自動生成して .env に保存（次回起動で loadDotEnv が拾う）
+  argv.push("--auto-secret-key", "--secret-key-file", envPath);
   const mod = await import(pathToFileURL(SERVER_MAIN).href);
   await mod.main(argv); // serve() は非ブロッキング。listen 開始後に resolve
   await waitForHealth(PORT);
