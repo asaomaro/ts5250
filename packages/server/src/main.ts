@@ -68,11 +68,13 @@ function parseArgs(argv: string[]): Args {
 }
 
 function buildDeps(args: Args): ToolDeps {
-  const profiles = args.profilesPath ? ProfileStore.fromFile(args.profilesPath) : new ProfileStore([]);
   const sessions = new SessionManager();
   sessions.startIdleSweep();
   // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）
   const crypto = SecretCrypto.fromEnv();
+  const profiles = args.profilesPath
+    ? ProfileStore.fromFile(args.profilesPath, crypto)
+    : new ProfileStore([], crypto);
   const connections = ConnectionStore.fromFile(args.connectionsPath, crypto);
   if (!crypto) log.warn("AS400_SECRET_KEY not set: saved auto-signon passwords are disabled");
   return { sessions, profiles, connections, version: VERSION };

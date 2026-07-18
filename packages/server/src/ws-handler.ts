@@ -79,7 +79,10 @@ export class WsConnection {
       const opts: OpenOptions = msg.connection
         ? { ...this.resolveConnection(msg.connection), origin: msg.connection }
         : msg.profile
-          ? { ...this.deps.profiles.resolveConnectOptions(msg.profile), origin: msg.profile }
+          ? {
+              ...this.deps.profiles.resolveConnectOptions(msg.profile, (m) => wsLog.warn(m)),
+              origin: msg.profile
+            }
           : buildDirect(msg);
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
@@ -119,7 +122,7 @@ export class WsConnection {
         if (co.password !== undefined) opts.password = co.password;
       } else if (msg.profile) {
         // プロファイル由来: 接続情報＋PDF 自動蓄積/印刷（信頼設定）を解決する
-        const co = this.deps.profiles.resolveConnectOptions(msg.profile);
+        const co = this.deps.profiles.resolveConnectOptions(msg.profile, (m) => wsLog.warn(m));
         if (co.host !== undefined) opts.host = co.host;
         if (co.port !== undefined) opts.port = co.port;
         if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
