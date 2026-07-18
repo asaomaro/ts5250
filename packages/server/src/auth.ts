@@ -282,8 +282,14 @@ export function createAuthMiddleware(auth: AuthContext): MiddlewareHandler<{ Var
 }
 
 /** admin 専用ルート用ミドルウェア（role!=="admin" は 403）。authMiddleware の後に適用する。 */
-export function requireAdmin(): MiddlewareHandler<{ Variables: AuthVars }> {
+/**
+ * admin 限定ガード。**認証オフは通す**——個人利用は「単一の信頼ユーザー」＝実質管理者として扱う
+ * （assertOwner / assertProfileAccess と同じ「認証オフ＝全通過」の規則に揃える）。
+ * 認証オフかどうかは AuthContext の有無で判定する（未指定なら常に user が無く区別できないため）。
+ */
+export function requireAdmin(authEnabled = true): MiddlewareHandler<{ Variables: AuthVars }> {
   return async (c, next) => {
+    if (!authEnabled) return next();
     const user = c.get("user");
     if (!user || user.role !== "admin") return c.json({ error: "forbidden: admin only" }, 403);
     return next();

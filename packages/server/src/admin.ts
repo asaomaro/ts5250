@@ -6,11 +6,15 @@ import type { SessionManager } from "./session-manager.js";
 import type { AuditBuffer } from "./audit.js";
 
 /**
- * 管理者（role=admin）向けの API。ユーザー管理・全セッション管理・ログ取得。
- * すべて requireAdmin ガードの下。ユーザー変更は users.json に原子的保存。
+ * 管理者向けの API。ユーザー管理・全セッション管理・ログ取得。すべて requireAdmin ガードの下。
+ *
+ * **ユーザー管理は認証時のみ**登録する（認証オフではユーザーが 1 人も存在せず意味がないため）。
+ * セッション管理とログは個人利用（認証オフ＝実質管理者）でも使えるようにする——掴んだままの
+ * セッションを片付けられないと困るため。
  */
 export interface AdminDeps {
-  auth: AuthContext;
+  /** 認証コンテキスト。未指定＝認証オフ（ユーザー管理は登録しない） */
+  auth?: AuthContext;
   sessions: SessionManager;
   audit: AuditBuffer;
 }
@@ -35,8 +39,16 @@ function errStatus(e: unknown): 400 | 403 | 404 {
 }
 
 export function registerAdminRoutes(app: Hono<{ Variables: AuthVars }>, deps: AdminDeps): void {
-  const users = deps.auth.users;
-  app.use("/api/admin/*", requireAdmin());
+  const users = deps.auth?.users;
+  app.use("/api/admin/*", requireAdmin(!!deps.auth));
+
+  if (users) registerUserRoutes(app, users, deps);
+  registerSessionAndLogRoutes(app, deps);
+}
+
+/** ユーザー管理（認証時のみ）。認証オフでは対象が存在しないため登録しない */
+function registerUserRoutes(app: Hono<{ Variables: AuthVars }>, users: AuthContext["users"], deps: AdminDeps): void {
+  void deps;
 
   const isLastAdmin = (username: string): boolean =>
     users.listPublic().filter((u) => u.role === "admin").length === 1 &&
@@ -100,6 +112,10 @@ export function registerAdminRoutes(app: Hono<{ Variables: AuthVars }>, deps: Ad
     }
   });
 
+}
+
+/** セッション管理とログ。個人利用（認証オフ）でも使える */
+function registerSessionAndLogRoutes(app: Hono<{ Variables: AuthVars }>, deps: AdminDeps): void {
   // ---- セッション管理 ----
   app.get("/api/admin/sessions", (c) => c.json({ sessions: deps.sessions.listAll() }));
 

@@ -1,0 +1,8 @@
+schema: 3
+slug: admin-ui-in-personal-mode
+current: review
+approved: [requirement, spec, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
