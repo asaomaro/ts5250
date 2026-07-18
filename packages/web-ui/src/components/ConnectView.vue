@@ -706,6 +706,14 @@ small {
 .list.view-list .card-main small {
   margin-left: auto;
 }
+/* 一覧モードはアクションアイコンを横並びにして行高を抑える（表示件数を増やす） */
+.list.view-list .card-actions {
+  flex-direction: row;
+  align-items: center;
+}
+.list.view-list .icon-btn {
+  flex: none;
+}
 /* 接続中オーバーレイ（クリック〜セッション確立まで） */
 .connecting {
   position: fixed;
