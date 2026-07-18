@@ -218,6 +218,27 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
   指定してください。自動サインオンのパスワードは RFC 4777 の `IBMSUBSPW`＝**平文**で流れるため、
   `connection` / `profile` 側も TLS を有効にすることを推奨します。
 
+### セッションの開き方（profile / connection / host 直指定）
+
+`open_session` / `open_printer_session` は 3 通りの指定を受けます。**どこから設定を取るか**が違います。
+
+| | `profile` | `connection` | `host` 直指定 |
+|---|---|---|---|
+| 実体 | `profiles.json`（サーバー設定・名前で参照） | `connections.json`（保存済み接続・ID で参照） | 引数のみ |
+| 自動サインオン | ✅ | ✅ | ❌（画面サインオン） |
+| 自動 PDF / 印刷 | ✅ | ❌（スキーマが拒否） | ❌ |
+| `passwordEnv`（CI/CD） | ✅ | ❌ | ❌ |
+| 認可 | 編集は認証オフ or admin | 所有者スコープ | 制限なし |
+| TLS 既定 | 設定に従う | 設定に従う | **平文 23。`tls: true` が必要** |
+
+- **信頼設定（自動 PDF/印刷）を持てるのは `profile` だけ**です。`connection` は
+  `connectionInputSchema` の `.strict()` が `autoPdfDir` 等を拒否します（信頼境界）。
+- 3 つを同時に指定した場合の優先順位は **`connection` → `profile` → `host`** です（WebSocket も同順）。
+- `signon` ツールは `profile` の資格情報を画面入力するフォールバックなので、`host` 直指定と組み合わせて使います。
+
+使い分けの目安: 定常運用は `profile`（自動サインオン＋帳票の自動 PDF まで一式）、
+ユーザーごとの接続は `connection`、調査や使い捨ては `host` 直指定（設定を汚さないが TLS 明示が必要）。
+
 ---
 
 ## ⚙️ 接続プロファイル

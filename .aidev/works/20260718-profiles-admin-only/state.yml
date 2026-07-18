@@ -1,0 +1,8 @@
+schema: 3
+slug: profiles-admin-only
+current: requirement
+approved: []
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
