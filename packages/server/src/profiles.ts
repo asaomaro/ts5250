@@ -3,6 +3,7 @@ import { writeFile, rename } from "node:fs/promises";
 import { z } from "zod";
 import { Tn5250Error, type ConnectOptions } from "@as400web/core";
 import type { PrinterOutputConfig } from "./printer-output.js";
+import { assertProfileAccess, type AuthUser } from "./auth.js";
 import type { SecretCrypto } from "./secret-crypto.js";
 
 /** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。信頼設定なのでプロファイルにのみ置く */
@@ -177,6 +178,20 @@ export class ProfileStore {
    * signon の user 名は既定で伏せる（認証情報として扱う）。編集フォームのプレフィル用に必要なときだけ
    * `includeSignon` で含める——編集は認証オフ or admin に限られるため、一般公開の一覧には出さない。
    */
+  /**
+   * API 応答用の一覧。一般ユーザーには**空配列**を返す（存在しないものとして扱う）。
+   * listPublic は内部の名前解決からも使うため分けている（そちらを絞ると profile 解決が壊れる）。
+   */
+  listForUser(user: AuthUser | undefined, opts?: { includeSignon?: boolean }): PublicProfile[] {
+    // 判定は assertProfileAccess に一本化する（ここで role を見ると認可規則が二重管理になる）
+    try {
+      assertProfileAccess(user);
+    } catch {
+      return [];
+    }
+    return this.listPublic(opts);
+  }
+
   listPublic(opts?: { includeSignon?: boolean }): PublicProfile[] {
     return [...this.byName.values()].map((p) => {
       const pub: PublicProfile = {
@@ -300,7 +315,17 @@ export class ProfileStore {
    * signon があれば RFC 4777 自動サインオン（user/password）を設定する（D3）。
    * 認証情報はここで解決してサーバー内に留め、外へ返さない（D13）。
    */
-  resolveConnectOptions(name: string, warn?: (msg: string) => void): ConnectOptions {
+  /**
+   * profile 名から接続オプションを解決する。認可は assertProfileAccess（呼び出し元に委ねない）。
+   * user は**必須**（省略可能にすると渡し忘れが認証オフ扱いで素通りする＝fail-open のため）。
+   * 認証オフや内部利用では undefined を明示的に渡す。
+   */
+  resolveConnectOptions(
+    name: string,
+    user: AuthUser | undefined,
+    warn?: (msg: string) => void
+  ): ConnectOptions {
+    assertProfileAccess(user);
     const p = this.get(name);
     const opts: ConnectOptions = { host: p.host };
     if (p.port !== undefined) opts.port = p.port;
@@ -349,7 +374,8 @@ export class ProfileStore {
    * **信頼されたサーバー設定のみ**をここから供給し、ブラウザ由来の値は使わない（任意パス書込・任意
    * コマンド実行の防止）。
    */
-  resolvePrinterOutput(name: string): PrinterOutputConfig | undefined {
+  resolvePrinterOutput(name: string, user: AuthUser | undefined): PrinterOutputConfig | undefined {
+    assertProfileAccess(user);
     const pr = this.get(name).printer;
     if (!pr || (!pr.autoPdfDir && !pr.autoPrint)) return undefined;
     const cfg: PrinterOutputConfig = {};

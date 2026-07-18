@@ -246,12 +246,13 @@ describe("/api/profiles 編集（認証オン・admin ゲート）", () => {
     expect(put.status).toBe(200);
   });
 
-  it("一般ユーザーは printer を露出されず、printer 付き書き込みも 403", async () => {
+  it("一般ユーザーには一覧が空で返り、printer 付き書き込みも 403", async () => {
     const app = buildApp(deps(profilesFile(), authCtx()));
     const cookie = await login(app, "alice", "alicepw");
-    // GET: editable=false なので printer は返らない
+    // GET: サーバー設定は admin 専用なので存在ごと見せない（空配列）
     const get = await (await app.request("/api/profiles", { headers: { cookie } })).json();
-    expect(get.profiles[0].printer).toBeUndefined();
+    expect(get.profiles).toEqual([]);
+    expect(get.editable).toBe(false);
     // printer を含む書き込みも 403（ルートゲートで拒否）
     const put = await app.request("/api/profiles/pub400", {
       method: "PUT",
@@ -301,7 +302,7 @@ describe("ProfileStore: signon 解決", () => {
   it("add した password は暗号化され resolve で復号される", () => {
     const store = new ProfileStore([], crypto);
     store.add({ name: "p", host: "h", autoSignon: true, signonUser: "U", password: "secret" });
-    expect(store.resolveConnectOptions("p")).toMatchObject({ user: "U", password: "secret" });
+    expect(store.resolveConnectOptions("p", undefined)).toMatchObject({ user: "U", password: "secret" });
   });
 
   it("鍵未設定では passwordEnc を復号できず auto-signon をスキップ（warn）", () => {
@@ -310,7 +311,7 @@ describe("ProfileStore: signon 解決", () => {
       undefined
     );
     let warned = "";
-    const opts = noKey.resolveConnectOptions("p", (m) => (warned = m));
+    const opts = noKey.resolveConnectOptions("p", undefined, (m) => (warned = m));
     expect(opts.password).toBeUndefined();
     expect(warned).toMatch(/secret key|decrypt/i);
   });

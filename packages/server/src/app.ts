@@ -50,7 +50,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
 
   app.get("/healthz", (c) => c.json({ status: "ok", sessions: deps.sessions.size }));
   app.get("/api/version", (c) => c.json({ name: "as400-5250", version: deps.version }));
-  // 共有プロファイルの編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき
+  // サーバー設定（ファイル由来）の編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき
   const canEditProfiles = (c: { get: (k: "user") => AuthVars["user"] }): boolean => {
     const a = deps.auth;
     const permitted = !a || !a.enabled ? true : c.get("user")?.role === "admin";
@@ -68,10 +68,11 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   app.get("/api/profiles", (c) => {
     const editable = canEditProfiles(c);
     // signon user 名は編集者（認証オフ or admin）にだけ返す（プレフィル用）
-    return c.json({ profiles: deps.profiles.listPublic({ includeSignon: editable }), editable });
+    // 一般ユーザーには空配列（サーバー設定は admin 専用）。名指しの解決はストア側で FORBIDDEN
+    return c.json({ profiles: deps.profiles.listForUser(c.get("user"), { includeSignon: editable }), editable });
   });
 
-  // 共有プロファイルの作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
+  // サーバー設定の作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
   app.post("/api/profiles", async (c) => {
     if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
     try {
