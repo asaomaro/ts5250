@@ -1,0 +1,8 @@
+schema: 3
+slug: hostserver-sql
+current: review
+approved: [requirement, research, spec, design, plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260718-acs-data-transfer]
