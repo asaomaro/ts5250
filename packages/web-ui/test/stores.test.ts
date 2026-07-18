@@ -126,7 +126,7 @@ describe("maskOutgoing", () => {
 });
 
 describe("connectionsStore（サーバー保存・API バックド）", () => {
-  const calls: { url: string; init?: RequestInit }[] = [];
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
   let list: unknown[] = [];
 
   beforeEach(() => {
