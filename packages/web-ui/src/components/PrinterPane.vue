@@ -87,7 +87,7 @@ function clearWarnings(): void {
 
 /** CPA3394（用紙タイプ問い合わせ）回避のための writer 起動コマンド。デバイス名が分かれば差し込む */
 const deviceName = computed(() => session.value?.meta?.deviceName ?? "<デバイス名>");
-const formtypeCmd = computed(() => `STRPRTWTR DEV(${deviceName.value}) FORMTYPE(*ALL)`);
+const formtypeCmd = computed(() => `STRPRTWTR DEV(${deviceName.value}) FORMTYPE(*ALL *NOMSG)`);
 async function copyCmd(): Promise<void> {
   try {
     await navigator.clipboard.writeText(formtypeCmd.value);
@@ -215,11 +215,16 @@ function printReport(): void {
           <li v-if="reports.length === 0" class="empty">
             スプール待ち受け中…<br />
             <small>
-              ホスト側で用紙タイプ問い合わせ（CPA3394）の応答待ちになることがあります。writer を用紙タイプ不問で
-              起動すると毎回の「I」応答が不要になります:
+              ホスト側で用紙タイプ問い合わせ（CPA3394）の応答待ちになることがあります。writer の
+              メッセージ制御を <code>*NOMSG</code> にすると毎回の「I」応答が不要になります:
             </small>
             <code class="cmd" @click="copyCmd" title="クリックでコピー">{{ formtypeCmd }}</code>
-            <small>（既存 writer は <code>CHGWTR</code> の FORMTYPE(*ALL) でも可）</small>
+            <small>
+              抑止するのは第2要素の <code>*NOMSG</code> です（<code>FORMTYPE(*ALL)</code> だけでは既定の
+              <code>*INQMSG</code> のままで応答待ちは止まりません）。既存 writer は
+              <code>CHGWTR WTR(…) FORMTYPE(*ALL *NOMSG)</code>。ただし writer の制御には
+              <code>*JOBCTL</code> 権限が必要で、PUB400 のような共用環境では実行できません。
+            </small>
           </li>
           <li v-else-if="filteredReports.length === 0" class="empty">
             「{{ filter }}」に一致するスプールはありません
