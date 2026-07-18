@@ -412,6 +412,43 @@ node packages/server/dist/main.js --http 3400 --users ./users.local.json --web-r
   - ユーザー管理（作成・削除・role/パスワード変更・API トークン発行）。最後の admin は削除/降格不可（ロックアウト防止）。
   - 全ユーザーのセッション（表示/プリンター）一覧・切断。
   - 直近の監査ログ取得（in-memory・既定 500 件）。
+
+### マルチユーザーモードで動かしてみる（検証手順）
+
+**`start.sh` では切り替えできません**。`--users` を渡さず、代わりに単一利用者向けの `--auto-secret-key` を
+必ず付けるためです。検証時は `node` を直接起動します。
+
+```sh
+# 1. パスワードの scrypt ハッシュを作る（出力して終了するだけのユーティリティ）
+node packages/server/dist/main.js --hash-password 'admin-password'
+node packages/server/dist/main.js --hash-password 'user-password'
+
+# 2. users.local.json を作り、出力を passwordHash に貼る（.gitignore 済み）
+#    { "users": [
+#        { "username": "admin", "role": "admin", "passwordHash": "<1つ目>" },
+#        { "username": "taro",  "role": "user",  "passwordHash": "<2つ目>" } ] }
+
+# 3. 認証ありで起動（--auto-secret-key は付けない）
+node --env-file=.env packages/server/dist/main.js \
+  --http 3400 --web-root packages/web-ui/dist \
+  --profiles profiles.local.json \
+  --users users.local.json
+```
+
+起動ログに `authentication enabled (per-user isolation)` が出れば有効です。`--auto-secret-key` を付けないのは、
+マルチユーザーでは master key（`AS400_SECRET_KEY`）を**明示管理する**前提のため（`.env` にあれば保存済み
+パスワードはそのまま復号できます）。
+
+**元に戻す**: Ctrl+C で止めて `./start.sh` を実行するだけです。`--users` を渡さなければ認証は無効に戻ります
+（`main.ts` の `buildAuth` が `undefined` を返す）。`users.local.json` は残しても消しても構いません。
+
+**戻したときの挙動**（データは失われません）:
+
+- **接続設定**: 認証オンで作った設定には `owner` が付き、一般ユーザーには自分の分しか見えません。
+  認証オフに戻すと `owner` の有無に関わらず**全件見えます**（認証オフ＝全通過）。閉じ込められることはありません。
+- **共有プロファイルの編集**: 認証オフでは誰でも可、認証オンでは **admin のみ**に変わります。
+  一般ユーザーで接続画面を開くと編集ボタンが消えるのが確認ポイントです。
+- **ログインセッション・監査ログ**は in-memory なので、再起動で消えます（仕様）。
   - すべて admin 専用（`/api/admin/*` は role!=admin で 403）。
 
 ## 🔗 接続設定の保存（サーバー一元管理）
