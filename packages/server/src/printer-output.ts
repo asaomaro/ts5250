@@ -19,8 +19,16 @@ export interface PrinterOutputConfig {
 }
 
 export interface HandleReportResult {
+  /** PDF を保存できたときの保存先 */
   pdfPath?: string;
+  /** PDF 保存に失敗した理由（UI へ出す。warn も従来どおり呼ぶ） */
+  pdfError?: string;
+  /** 印刷を投げられたか */
   printed?: boolean;
+  /** 送信先プリンター名（autoPrint 設定時） */
+  printer?: string;
+  /** 印刷に失敗した理由 */
+  printError?: string;
 }
 
 const sanitize = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -43,11 +51,19 @@ export async function handleReport(
 ): Promise<HandleReportResult> {
   if (!cfg.autoPdfDir && !cfg.autoPrint) return {};
   const result: HandleReportResult = {};
+  if (cfg.autoPrint) result.printer = cfg.autoPrint;
   let pdf: Buffer;
   try {
     pdf = await renderSpoolPdf(report.pages, cfg.pdf, warn);
   } catch (e) {
-    warn(`PDF 生成に失敗: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = `PDF 生成に失敗: ${e instanceof Error ? e.message : String(e)}`;
+    warn(msg);
+    // 生成に失敗したので保存も印刷もできない。設定されている側に理由を残す
+    if (cfg.autoPdfDir) result.pdfError = msg;
+    if (cfg.autoPrint) {
+      result.printed = false;
+      result.printError = msg;
+    }
     return result;
   }
 
@@ -57,7 +73,9 @@ export async function handleReport(
       await writeFile(path, pdf);
       result.pdfPath = path;
     } catch (e) {
-      warn(`PDF 保存に失敗（${cfg.autoPdfDir}）: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = `PDF 保存に失敗（${cfg.autoPdfDir}）: ${e instanceof Error ? e.message : String(e)}`;
+      warn(msg);
+      result.pdfError = msg;
     }
   }
 
@@ -65,25 +83,40 @@ export async function handleReport(
     const tmp = join(tmpdir(), `spool-${sanitize(report.id)}-${now()}.pdf`);
     try {
       await writeFile(tmp, pdf);
-      result.printed = await lpPrint(cfg.autoPrint, tmp, warn);
+      const r = await lpPrint(cfg.autoPrint, tmp, warn);
+      result.printed = r.ok;
+      if (!r.ok && r.error !== undefined) result.printError = r.error;
     } catch (e) {
-      warn(`自動印刷の準備に失敗: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = `自動印刷の準備に失敗: ${e instanceof Error ? e.message : String(e)}`;
+      warn(msg);
+      result.printed = false;
+      result.printError = msg;
     }
   }
   return result;
 }
 
-/** `lp -d <printer> <file>` で印刷。lp 不在・失敗は warn して false（degrade）。 */
-function lpPrint(printer: string, file: string, warn: (msg: string) => void): Promise<boolean> {
+/** `lp -d <printer> <file>` で印刷。lp 不在・失敗は warn して失敗理由を返す（degrade）。 */
+function lpPrint(
+  printer: string,
+  file: string,
+  warn: (msg: string) => void
+): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const proc = spawn("lp", ["-d", printer, file], { stdio: "ignore" });
     proc.on("error", (e) => {
-      warn(`自動印刷に失敗（lp が無い可能性）: ${e.message}`);
-      resolve(false);
+      const msg = `自動印刷に失敗（lp が無い可能性）: ${e.message}`;
+      warn(msg);
+      resolve({ ok: false, error: msg });
     });
     proc.on("close", (code) => {
-      if (code !== 0) warn(`lp が異常終了しました（code ${code}）`);
-      resolve(code === 0);
+      if (code !== 0) {
+        const msg = `lp が異常終了しました（code ${code}）`;
+        warn(msg);
+        resolve({ ok: false, error: msg });
+        return;
+      }
+      resolve({ ok: true });
     });
   });
 }

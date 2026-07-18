@@ -157,17 +157,21 @@ export class WsConnection {
       this.detachReport = () => {
         entry.session.off("report", onReport);
         delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
+        delete entry.onOutputStatus;
       };
       // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
       entry.onOutputWarn = (w) =>
         this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message });
+      // 自動出力の結果（成功も含む）を UI へ push
+      entry.onOutputStatus = (s) => this.send({ type: "printer-output-result", sessionId: entry.id, status: s });
       this.send({
         type: "printer-opened",
         sessionId: entry.id,
         startupCode: entry.session.startupCode,
         hasOutput: entry.output !== undefined,
         outputEnabled: entry.outputEnabled,
-        outputWarnings: entry.outputWarnings
+        outputWarnings: entry.outputWarnings,
+        outputStatuses: entry.outputStatuses
       });
     });
   }

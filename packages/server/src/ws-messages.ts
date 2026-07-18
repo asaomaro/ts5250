@@ -102,6 +102,22 @@ export interface WsPrinterOpened {
   outputEnabled: boolean;
   /** 既存の出力警告（後から画面を開いても直近の失敗が分かるように配送） */
   outputWarnings: PrinterOutputWarning[];
+  /** 既受信スプールの自動出力結果（後から画面を開いても成否が分かるように配送） */
+  outputStatuses: SpoolOutputStatusMsg[];
+}
+/** 1 スプールに対する自動出力の結果（成功も含む）。設定が無い側はキーを省略する */
+export interface SpoolOutputStatusMsg {
+  spoolId: string;
+  at: number;
+  skipped?: boolean;
+  pdf?: { ok: boolean; path?: string; error?: string };
+  print?: { ok: boolean; printer?: string; error?: string };
+}
+/** 受信スプールの自動出力結果（PDF 作成・印刷の成否）を通知する */
+export interface WsPrinterOutputResult {
+  type: "printer-output-result";
+  sessionId: string;
+  status: SpoolOutputStatusMsg;
 }
 /** 自動出力が失敗した（PDF 保存 / lp 印刷）。非同期に発生するので push する */
 export interface WsPrinterWarn {
@@ -136,4 +152,5 @@ export type WsServerMessage =
   | WsPrinterOpened
   | WsPrinterWarn
   | WsPrinterOutputState
+  | WsPrinterOutputResult
   | WsReport;

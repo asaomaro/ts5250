@@ -9,7 +9,7 @@ import {
   type PrinterConnectOptions,
   type SpoolReport
 } from "@as400web/core";
-import { handleReport, type PrinterOutputConfig } from "./printer-output.js";
+import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
 const printerLog = childLog({ component: "printer-output" });
@@ -77,10 +77,53 @@ export interface PrinterEntry {
   outputWarnings: { at: number; message: string }[];
   /** 警告の push フック（ws-handler が設定し、切断で解除する） */
   onOutputWarn?: (w: { at: number; message: string }) => void;
+  /** スプールごとの自動出力の結果（受信順・上限あり）。成功も含めて画面に出す */
+  outputStatuses: SpoolOutputStatus[];
+  /** 結果の push フック（ws-handler が設定し、切断で解除する） */
+  onOutputStatus?: (s: SpoolOutputStatus) => void;
+}
+
+/**
+ * 1 スプールに対する自動出力の結果。
+ * 設定が無い側は**キーごと省略**する（＝「設定なし」。`ok:false`＝失敗と区別する）。
+ */
+export interface SpoolOutputStatus {
+  spoolId: string;
+  at: number;
+  /** 自動出力が無効（トグル OFF）でスキップした */
+  skipped?: boolean;
+  pdf?: { ok: boolean; path?: string; error?: string };
+  print?: { ok: boolean; printer?: string; error?: string };
 }
 
 /** 出力警告の保持上限（メモリ肥大の防止） */
 const OUTPUT_WARN_LIMIT = 20;
+/** 出力結果の保持上限 */
+const OUTPUT_STATUS_LIMIT = 100;
+
+/**
+ * handleReport の結果を UI 表示用のステータスに変換する。
+ * **設定がある側だけキーを付ける**（設定なし＝キー省略、失敗＝ok:false）。
+ */
+function buildOutputStatus(
+  spoolId: string,
+  at: number,
+  cfg: PrinterOutputConfig,
+  r: HandleReportResult
+): SpoolOutputStatus {
+  const s: SpoolOutputStatus = { spoolId, at };
+  if (cfg.autoPdfDir) {
+    s.pdf = r.pdfPath
+      ? { ok: true, path: r.pdfPath }
+      : { ok: false, ...(r.pdfError !== undefined ? { error: r.pdfError } : {}) };
+  }
+  if (cfg.autoPrint) {
+    s.print = r.printed
+      ? { ok: true, printer: cfg.autoPrint }
+      : { ok: false, printer: cfg.autoPrint, ...(r.printError !== undefined ? { error: r.printError } : {}) };
+  }
+  return s;
+}
 
 export interface SessionManagerOptions {
   maxSessions?: number;
@@ -171,7 +214,8 @@ export class SessionManager {
       waiters: [],
       ...(opts.output !== undefined ? { output: opts.output } : {}),
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
-      outputWarnings: []
+      outputWarnings: [],
+      outputStatuses: []
     };
     this.printers.set(id, entry);
     session.on("report", (report) => {
@@ -184,10 +228,25 @@ export class SessionManager {
       }
       // サーバー側出力（PDF 自動蓄積・自動印刷）。設定があり実行時に有効なときだけ。
       // 失敗しても受信は妨げず、警告はログ＋履歴＋UI push に流す（entry 参照なのでトグルが即時効く）
-      if (entry.output && entry.outputEnabled) {
-        void handleReport(report, entry.output, (m) => this.noteOutputWarn(entry, m)).catch((e) =>
-          this.noteOutputWarn(entry, `printer output failed: ${e instanceof Error ? e.message : String(e)}`)
-        );
+      if (entry.output) {
+        if (entry.outputEnabled) {
+          const cfg = entry.output;
+          void handleReport(report, cfg, (m) => this.noteOutputWarn(entry, m))
+            .then((r) => this.noteOutputStatus(entry, buildOutputStatus(report.id, this.now(), cfg, r)))
+            .catch((e) => {
+              const msg = `printer output failed: ${e instanceof Error ? e.message : String(e)}`;
+              this.noteOutputWarn(entry, msg);
+              this.noteOutputStatus(entry, {
+                spoolId: report.id,
+                at: this.now(),
+                ...(cfg.autoPdfDir ? { pdf: { ok: false, error: msg } } : {}),
+                ...(cfg.autoPrint ? { print: { ok: false, printer: cfg.autoPrint, error: msg } } : {})
+              });
+            });
+        } else {
+          // 自動出力オフ中の受信は「スキップ」として記録する（何も起きていないことを画面で示す）
+          this.noteOutputStatus(entry, { spoolId: report.id, at: this.now(), skipped: true });
+        }
       }
     });
     session.on("closed", () => {
@@ -215,6 +274,13 @@ export class SessionManager {
     entry.outputWarnings.push(w);
     if (entry.outputWarnings.length > OUTPUT_WARN_LIMIT) entry.outputWarnings.shift();
     entry.onOutputWarn?.(w);
+  }
+
+  /** 自動出力の結果を記録して UI へ push する（成功も含めて画面に出すため） */
+  private noteOutputStatus(entry: PrinterEntry, status: SpoolOutputStatus): void {
+    entry.outputStatuses.push(status);
+    if (entry.outputStatuses.length > OUTPUT_STATUS_LIMIT) entry.outputStatuses.shift();
+    entry.onOutputStatus?.(status);
   }
 
   /** 自動出力（PDF 保存・自動印刷）の実行時 有効/無効を切り替える（所有者/admin のみ） */

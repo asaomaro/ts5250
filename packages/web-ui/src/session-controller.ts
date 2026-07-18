@@ -128,6 +128,7 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
                 outputConfigured: msg.hasOutput,
                 outputEnabled: msg.outputEnabled,
                 printerWarnings: [...msg.outputWarnings],
+                outputStatuses: Object.fromEntries(msg.outputStatuses.map((s) => [s.spoolId, s])),
                 ...(meta ? { meta } : {})
               };
               sessionsStore.add(state);
@@ -146,6 +147,15 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
                 if (!s.printerWarnings) s.printerWarnings = [];
                 s.printerWarnings.push({ at: msg.at, message: msg.message });
                 if (s.printerWarnings.length > 20) s.printerWarnings.shift();
+              }
+              break;
+            }
+            case "printer-output-result": {
+              // 自動出力の結果（成功も含む）。スプールごとに保持して一覧・詳細に出す
+              const s = sessionsStore.get(sessionId);
+              if (s) {
+                if (!s.outputStatuses) s.outputStatuses = {};
+                s.outputStatuses[msg.status.spoolId] = msg.status;
               }
               break;
             }
