@@ -55,6 +55,8 @@ export class WsConnection {
           return await this.onGuiSelect(msg);
         case "gui-submit":
           return await this.onGuiSubmit(msg);
+        case "printer-output":
+          return await this.onPrinterOutput(msg);
         case "close":
           return this.dispose("closed by client");
         default:
@@ -152,8 +154,30 @@ export class WsConnection {
         this.send({ type: "closed", reason });
         this.detachReport?.();
       });
-      this.detachReport = () => entry.session.off("report", onReport);
-      this.send({ type: "printer-opened", sessionId: entry.id, startupCode: entry.session.startupCode });
+      this.detachReport = () => {
+        entry.session.off("report", onReport);
+        delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
+      };
+      // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
+      entry.onOutputWarn = (w) =>
+        this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message });
+      this.send({
+        type: "printer-opened",
+        sessionId: entry.id,
+        startupCode: entry.session.startupCode,
+        hasOutput: entry.output !== undefined,
+        outputEnabled: entry.outputEnabled,
+        outputWarnings: entry.outputWarnings
+      });
+    });
+  }
+
+  /** 自動出力（PDF 保存・自動印刷）の有効/無効を切り替える */
+  private async onPrinterOutput(msg: WsClientMessage & { type: "printer-output" }): Promise<void> {
+    const id = this.requireSession();
+    await withAudit({ op: "ws_printer_output", sessionId: id }, async () => {
+      const entry = this.deps.sessions.setPrinterOutputEnabled(id, msg.enabled, this.user);
+      this.send({ type: "printer-output-state", sessionId: id, enabled: entry.outputEnabled });
     });
   }
 

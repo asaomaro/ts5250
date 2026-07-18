@@ -56,7 +56,8 @@ export type WsClientMessage =
   | WsJobInfoReq
   | WsCloseReq
   | WsGuiSelect
-  | WsGuiSubmit;
+  | WsGuiSubmit
+  | WsPrinterOutput;
 
 // ---- server → client ----
 export interface WsOpened {
@@ -85,17 +86,46 @@ export interface WsClosed {
   type: "closed";
   reason: string;
 }
-/** プリンターセッションを開いた（起動応答コード付き） */
+/** 出力（PDF 保存・自動印刷）の警告 1 件 */
+export interface PrinterOutputWarning {
+  at: number;
+  message: string;
+}
+/** プリンターセッションを開いた（起動応答コード＋自動出力の状態） */
 export interface WsPrinterOpened {
   type: "printer-opened";
   sessionId: string;
   startupCode: string;
+  /** サーバー側の自動出力設定があるか（UI のトグル表示条件） */
+  hasOutput: boolean;
+  /** 自動出力の実行時 有効/無効 */
+  outputEnabled: boolean;
+  /** 既存の出力警告（後から画面を開いても直近の失敗が分かるように配送） */
+  outputWarnings: PrinterOutputWarning[];
+}
+/** 自動出力が失敗した（PDF 保存 / lp 印刷）。非同期に発生するので push する */
+export interface WsPrinterWarn {
+  type: "printer-warn";
+  sessionId: string;
+  at: number;
+  message: string;
+}
+/** 自動出力の有効/無効が変わった（クライアントの切替に対する応答） */
+export interface WsPrinterOutputState {
+  type: "printer-output-state";
+  sessionId: string;
+  enabled: boolean;
 }
 /** スプール（帳票）1 件を受信した。pages は等幅グリッド（生 SCS は載せない） */
 export interface WsReport {
   type: "report";
   sessionId: string;
   report: { id: string; pages: { rows: number; cols: number; lines: string[] }[] };
+}
+/** client → server: 自動出力の有効/無効を切り替える */
+export interface WsPrinterOutput {
+  type: "printer-output";
+  enabled: boolean;
 }
 export type WsServerMessage =
   | WsOpened
@@ -104,4 +134,6 @@ export type WsServerMessage =
   | WsError
   | WsClosed
   | WsPrinterOpened
+  | WsPrinterWarn
+  | WsPrinterOutputState
   | WsReport;

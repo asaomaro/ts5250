@@ -124,6 +124,10 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
                 client,
                 reports: [],
                 startupCode: msg.startupCode,
+                // 自動出力（PDF/印刷）の状態。設定がある場合のみ UI にトグルを出す
+                outputConfigured: msg.hasOutput,
+                outputEnabled: msg.outputEnabled,
+                printerWarnings: [...msg.outputWarnings],
                 ...(meta ? { meta } : {})
               };
               sessionsStore.add(state);
@@ -133,6 +137,21 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
             }
             case "report": {
               sessionsStore.addReport(sessionId, msg.report);
+              break;
+            }
+            case "printer-warn": {
+              // 自動出力の失敗。画面で気づけるよう履歴に積む（上限 20）
+              const s = sessionsStore.get(sessionId);
+              if (s) {
+                if (!s.printerWarnings) s.printerWarnings = [];
+                s.printerWarnings.push({ at: msg.at, message: msg.message });
+                if (s.printerWarnings.length > 20) s.printerWarnings.shift();
+              }
+              break;
+            }
+            case "printer-output-state": {
+              const s = sessionsStore.get(sessionId);
+              if (s) s.outputEnabled = msg.enabled;
               break;
             }
             case "closed": {
@@ -153,6 +172,11 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
       .then(() => client.send({ ...open, kind: "printer" }))
       .catch(reject);
   });
+}
+
+/** 自動出力（PDF 保存・自動印刷）の有効/無効を切り替える（サーバー応答で状態を反映） */
+export function setPrinterOutput(sessionId: string, enabled: boolean): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-output", enabled });
 }
 
 /** AID 送信（ローカル編集差分を fields に載せる） */
