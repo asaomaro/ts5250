@@ -187,14 +187,14 @@ function cancelForm(): void {
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
         </label>
-        <label class="field">
+        <label v-if="form.sessionType !== 'printer'" class="field">
           <span class="field-label">画面サイズ</span>
           <select v-model="form.screenSize">
             <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
         </label>
       </div>
-      <p v-if="form.screenSize === '27x132'" class="note">
+      <p v-if="form.sessionType !== 'printer' && form.screenSize === '27x132'" class="note">
         ※ 27x132 は端末タイプでホストに申告する設定です。実際にどちらで描くかはホストが画面ごとに決めるため、
         27x132 版を持たない画面（サインオン・メニュー等）は 24x80 のまま表示されます。
       </p>
