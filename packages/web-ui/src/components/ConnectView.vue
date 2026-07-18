@@ -320,10 +320,20 @@ async function saveProfileForm(f: ConnForm): Promise<void> {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload)
         });
-    const body = (await res.json().catch(() => ({}))) as { error?: string; resolvedPdfDir?: string };
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      resolvedPdfDir?: string;
+      warnings?: string[];
+    };
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-    // サーバーが解決した絶対パスを見せる（相対パス指定やタイポに気づけるように）
-    notice.value = body.resolvedPdfDir ? `PDF 出力先: ${body.resolvedPdfDir}` : "";
+    // サーバーが解決した絶対パスを見せる（相対パス指定やタイポに気づけるように）。
+    // 宛先プリンターは確実に判定できないため警告として返る（保存は成功している）
+    notice.value = [
+      body.resolvedPdfDir ? `PDF 出力先: ${body.resolvedPdfDir}` : "",
+      ...(body.warnings ?? []).map((w) => `⚠ ${w}`)
+    ]
+      .filter(Boolean)
+      .join(" / ");
     error.value = "";
     await refreshProfiles();
     showForm.value = false;

@@ -17,6 +17,7 @@ import {
 import { registerAdminRoutes } from "./admin.js";
 import { effectiveType } from "./profiles.js";
 import { checkOutputDir } from "./output-dir.js";
+import { checkPrintDest } from "./print-dest.js";
 import { registerConnectionRoutes } from "./connections.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
@@ -111,18 +112,35 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
    *
    * 戻り値: エラー文字列（NG）／解決後の絶対パス（OK・未指定なら undefined）。
    */
-  const validatePdfDir = async (
+  const validatePrinter = async (
     body: unknown,
     existing?: { sessionType?: "display" | "printer" | undefined; printer?: unknown }
-  ): Promise<{ error?: string; resolved?: string }> => {
-    const b = body as { printer?: { autoPdfDir?: unknown }; sessionType?: "display" | "printer" } | null;
-    const dir = b?.printer?.autoPdfDir;
-    if (typeof dir !== "string" || dir === "") return {};
+  ): Promise<{ error?: string; resolved?: string; warnings?: string[] }> => {
+    const b = body as
+      | { printer?: { autoPdfDir?: unknown; autoPrint?: unknown }; sessionType?: "display" | "printer" }
+      | null;
     // 更新時の種別は既存側で固定される（種別は変更できない）。新規は入力から導出する
     const type = existing ? effectiveType(existing) : effectiveType({ ...(b ?? {}) });
     if (type !== "printer") return {};
-    const r = await checkOutputDir(dir);
-    return r.ok ? { resolved: r.path } : { error: r.reason };
+
+    // 出力先は確実に判定できるのでエラー（400）。保存前に弾く
+    const dir = b?.printer?.autoPdfDir;
+    let resolved: string | undefined;
+    if (typeof dir === "string" && dir !== "") {
+      const r = await checkOutputDir(dir);
+      if (!r.ok) return { error: r.reason };
+      resolved = r.path;
+    }
+
+    // 宛先プリンターは確実に判定できない（実際に印刷して確かめられない・確認手段が無い環境もある）
+    // ので警告に留め、保存は通す
+    const warnings: string[] = [];
+    const dest = b?.printer?.autoPrint;
+    if (typeof dest === "string" && dest !== "") {
+      const d = await checkPrintDest(dest);
+      if (d.warn) warnings.push(d.warn);
+    }
+    return { ...(resolved ? { resolved } : {}), ...(warnings.length ? { warnings } : {}) };
   };
 
   // サーバー設定の作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
@@ -130,11 +148,14 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
     try {
       const body = await c.req.json().catch(() => ({}));
-      const { error, resolved } = await validatePdfDir(body);
+      const { error, resolved, warnings } = await validatePrinter(body);
       if (error) return c.json({ error }, 400);
       const profile = deps.profiles.add(body);
       await deps.profiles.save();
-      return c.json({ profile, ...(resolved ? { resolvedPdfDir: resolved } : {}) }, 201);
+      return c.json(
+        { profile, ...(resolved ? { resolvedPdfDir: resolved } : {}), ...(warnings ? { warnings } : {}) },
+        201
+      );
     } catch (e) {
       return c.json({ error: profileErrMsg(e) }, profileErr(e));
     }
@@ -144,11 +165,15 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     try {
       const body = await c.req.json().catch(() => ({}));
       const name = c.req.param("name");
-      const { error, resolved } = await validatePdfDir(body, deps.profiles.getRaw(name));
+      const { error, resolved, warnings } = await validatePrinter(body, deps.profiles.getRaw(name));
       if (error) return c.json({ error }, 400);
       const profile = deps.profiles.update(name, body);
       await deps.profiles.save();
-      return c.json({ profile, ...(resolved ? { resolvedPdfDir: resolved } : {}) });
+      return c.json({
+        profile,
+        ...(resolved ? { resolvedPdfDir: resolved } : {}),
+        ...(warnings ? { warnings } : {})
+      });
     } catch (e) {
       return c.json({ error: profileErrMsg(e) }, profileErr(e));
     }
