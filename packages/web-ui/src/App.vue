@@ -142,8 +142,10 @@ onBeforeUnmount(() => {
       <button v-if="hasWorkspaceContent" class="link" @click="showConnect = !showConnect">
         {{ showConnect ? "ワークスペースへ" : "＋ 接続" }}
       </button>
-      <span v-if="authStore.isAdmin" class="admin-nav">
-        <button class="link" @click="openAdmin('admin:users')">ユーザー</button>
+      <!-- 個人利用（認証オフ）は実質管理者なのでセッション・ログを出す。
+           ユーザー管理はユーザーが存在しないため認証時のみ -->
+      <span v-if="authStore.isAdmin || !authStore.enabled" class="admin-nav">
+        <button v-if="authStore.isAdmin" class="link" @click="openAdmin('admin:users')">ユーザー</button>
         <button class="link" @click="openAdmin('admin:sessions')">セッション</button>
         <button class="link" @click="openAdmin('admin:logs')">ログ</button>
       </span>

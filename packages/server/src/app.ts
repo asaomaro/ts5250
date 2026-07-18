@@ -41,8 +41,15 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   if (deps.auth) {
     app.use("*", createAuthMiddleware(deps.auth));
     registerAuthRoutes(app, deps.auth);
-    // 管理者 API（監査バッファがあればログも）
-    if (deps.audit) registerAdminRoutes(app, { auth: deps.auth, sessions: deps.sessions, audit: deps.audit });
+  }
+  // 管理者 API。認証オフ（＝実質管理者）でもセッション管理とログは使える。
+  // ユーザー管理は auth があるときだけ登録される（admin.ts 側で判定）
+  if (deps.audit) {
+    registerAdminRoutes(app, {
+      ...(deps.auth ? { auth: deps.auth } : {}),
+      sessions: deps.sessions,
+      audit: deps.audit
+    });
   }
   // /api/me は認証 OFF でも常に応答（web-ui がログイン要否を判定するため）
   const auth = deps.auth;

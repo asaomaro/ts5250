@@ -122,11 +122,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   const deps = buildDeps(args);
   const auth = buildAuth(args.usersPath, args.cookieSecure);
   // 管理者画面のログ取得用に監査バッファを有効化（認証時のみ意味を持つ）
+  // 監査ログは認証の有無に関わらず収集する（個人利用でも管理画面のログを見られるように）
   const auditBuffer = new AuditBuffer();
-  if (auth) {
-    installAuditBuffer(auditBuffer);
-    log.info("authentication enabled (per-user isolation)");
-  }
+  installAuditBuffer(auditBuffer);
+  if (auth) log.info("authentication enabled (per-user isolation)");
 
   if (args.mode === "stdio") {
     // stdio モード: stdout は MCP 専用（ログは stderr のみ = core log）
@@ -138,7 +137,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     const app = buildApp({
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
-      ...(auth ? { auth, audit: auditBuffer } : {})
+      audit: auditBuffer,
+      ...(auth ? { auth } : {})
     });
     // ws の WebSocketServer は WebSocketServerLike と互換（noServer:true 指定済み。optional 差のみ）
     const wss = new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike;
