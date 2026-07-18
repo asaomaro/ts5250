@@ -95,8 +95,9 @@ function fetchJob(): void {
   font-size: 11.5px;
 }
 .row > span:first-child {
-  width: 6em;
+  width: 7.5em;
   flex: none;
+  white-space: nowrap;
   color: var(--muted);
 }
 .row b {
