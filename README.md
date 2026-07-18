@@ -383,13 +383,19 @@ node packages/server/dist/main.js --http 3400 --users ./users.local.json --web-r
 サーバーに保存します（平文は保存せず、ブラウザ/API にも平文を返しません）。暗号鍵（master key）は
 環境変数 `AS400_SECRET_KEY` から読み、`.env` に置きます（`start.sh` が `--env-file=.env` で読み込む）。
 
+**単一利用者（ローカル・Electron 等）は鍵設定を省けます**: `./start.sh` は `--auto-secret-key` を付けて起動し、
+`AS400_SECRET_KEY` が無ければ**自動生成して `.env` に保存**します（次回以降はそれを再利用）。手動で鍵を用意する
+必要はありません。マルチユーザー運用では、この自動生成に頼らず `AS400_SECRET_KEY` を明示管理してください
+（`--auto-secret-key` を付けず、環境変数やシークレットマネージャで注入）。
+
 ```sh
-# 32 バイトの master key を生成して .env に追記（hex or base64。コミットしないこと）
+# 手動で用意する場合（マルチユーザー運用など）: 32 バイトの master key を .env に追記（コミットしないこと）
 node -e "console.log('AS400_SECRET_KEY=' + require('crypto').randomBytes(32).toString('hex'))" >> .env
+# 保存先を変える場合: node ... main.js --auto-secret-key --secret-key-file <path>
 ```
 
 - `AS400_SECRET_KEY` **未設定**でも接続は使えますが、自動サインオンのパスワード保存は無効になります
-  （API は 400。サインオンは 5250 画面で手動）。
+  （API は 400。サインオンは 5250 画面で手動）。`--auto-secret-key` を使えば自動生成されます。
 - 鍵を変更すると既存の暗号文は復号できなくなり、その接続は自動サインオンなしで開きます（パスワード再入力）。
 - `connections.json` は秘匿ファイルとしてコミットしません（`.gitignore` 済み）。
 

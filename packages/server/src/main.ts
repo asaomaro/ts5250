@@ -24,6 +24,10 @@ interface Args {
   usersPath: string | undefined;
   hashPassword: string | undefined;
   cookieSecure: boolean;
+  /** 単一利用者向け: master key が無ければ自動生成して保存する */
+  autoSecretKey: boolean;
+  /** 自動生成した master key の保存先（既定 .env） */
+  secretKeyFile: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -35,7 +39,9 @@ function parseArgs(argv: string[]): Args {
     webRoot: undefined,
     usersPath: undefined,
     hashPassword: undefined,
-    cookieSecure: false
+    cookieSecure: false,
+    autoSecretKey: false,
+    secretKeyFile: ".env"
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -59,6 +65,11 @@ function parseArgs(argv: string[]): Args {
       args.usersPath = argv[++i];
     } else if (a === "--cookie-secure") {
       args.cookieSecure = true;
+    } else if (a === "--auto-secret-key") {
+      // 単一利用者向け: master key を自動生成して保存（マルチユーザー運用では非推奨）
+      args.autoSecretKey = true;
+    } else if (a === "--secret-key-file") {
+      args.secretKeyFile = argv[++i]!;
     } else if (a === "--hash-password") {
       // ユーティリティ: users.json 用の scrypt ハッシュを出力して終了
       args.hashPassword = argv[++i];
@@ -70,13 +81,21 @@ function parseArgs(argv: string[]): Args {
 function buildDeps(args: Args): ToolDeps {
   const sessions = new SessionManager();
   sessions.startIdleSweep();
-  // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）
-  const crypto = SecretCrypto.fromEnv();
+  // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）。
+  // --auto-secret-key（単一利用者向け）なら無ければ生成して保存する。
+  let crypto: SecretCrypto | undefined;
+  if (args.autoSecretKey) {
+    const r = SecretCrypto.fromEnvOrCreate("AS400_SECRET_KEY", args.secretKeyFile);
+    crypto = r.crypto;
+    if (r.generated) log.info({ file: args.secretKeyFile }, "generated master key for single-user mode");
+  } else {
+    crypto = SecretCrypto.fromEnv();
+    if (!crypto) log.warn("AS400_SECRET_KEY not set: saved auto-signon passwords are disabled");
+  }
   const profiles = args.profilesPath
     ? ProfileStore.fromFile(args.profilesPath, crypto)
     : new ProfileStore([], crypto);
   const connections = ConnectionStore.fromFile(args.connectionsPath, crypto);
-  if (!crypto) log.warn("AS400_SECRET_KEY not set: saved auto-signon passwords are disabled");
   return { sessions, profiles, connections, version: VERSION };
 }
 

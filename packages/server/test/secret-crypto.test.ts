@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SecretCrypto } from "../src/secret-crypto.js";
 
 const KEY_HEX = randomBytes(32).toString("hex");
@@ -55,5 +58,49 @@ describe("SecretCrypto", () => {
     const sc = SecretCrypto.fromEnv("K", { K: KEY_HEX })!;
     expect(() => sc.decrypt("v2:a:b:c")).toThrow(/format/);
     expect(() => sc.decrypt("garbage")).toThrow();
+  });
+});
+
+describe("SecretCrypto.fromEnvOrCreate（単一利用者向け自動生成）", () => {
+  function tmpEnv(): string {
+    return join(mkdtempSync(join(tmpdir(), "key-")), ".env");
+  }
+
+  it("env に鍵があればそれを使い、生成しない", () => {
+    const r = SecretCrypto.fromEnvOrCreate("K", tmpEnv(), { K: KEY_HEX });
+    expect(r.generated).toBe(false);
+    expect(r.crypto.decrypt(r.crypto.encrypt("x"))).toBe("x");
+  });
+
+  it("env に無ければ生成して keyFile に保存し process.env にも載せる", () => {
+    const path = tmpEnv();
+    const env: NodeJS.ProcessEnv = {};
+    const r = SecretCrypto.fromEnvOrCreate("K", path, env);
+    expect(r.generated).toBe(true);
+    // keyFile に書かれ、env にも載る
+    expect(readFileSync(path, "utf8")).toMatch(/^K=[0-9a-f]{64}$/m);
+    expect(env["K"]).toMatch(/^[0-9a-f]{64}$/);
+    // 生成した鍵で暗復号できる
+    expect(r.crypto.decrypt(r.crypto.encrypt("hi"))).toBe("hi");
+  });
+
+  it("既存 keyFile の鍵を再利用し、重複生成しない", () => {
+    const path = tmpEnv();
+    writeFileSync(path, `FOO=bar\nK=${KEY_HEX}\n`);
+    const env: NodeJS.ProcessEnv = {};
+    const r = SecretCrypto.fromEnvOrCreate("K", path, env);
+    expect(r.generated).toBe(false);
+    expect(env["K"]).toBe(KEY_HEX);
+    // ファイルは追記されていない（K は 1 回だけ）
+    expect((readFileSync(path, "utf8").match(/^K=/gm) ?? []).length).toBe(1);
+  });
+
+  it("既存ファイルへ追記しても他の変数を壊さない", () => {
+    const path = tmpEnv();
+    writeFileSync(path, "PUB400_PASSWORD=secret\n");
+    SecretCrypto.fromEnvOrCreate("K", path, {});
+    const content = readFileSync(path, "utf8");
+    expect(content).toContain("PUB400_PASSWORD=secret");
+    expect(content).toMatch(/^K=[0-9a-f]{64}$/m);
   });
 });
