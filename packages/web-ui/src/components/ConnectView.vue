@@ -184,7 +184,7 @@ function cancelForm(): void {
     </div>
     <p v-if="error" class="err" role="alert">{{ error }}</p>
 
-    <div class="list" :class="viewMode">
+    <div class="list" :class="'view-' + viewMode">
       <button
         v-for="p in profiles"
         :key="'srv-' + p.name"
@@ -193,7 +193,6 @@ function cancelForm(): void {
         @click="connectProfile(p)"
       >
         <span class="chips">
-          <span class="src srv">サーバー</span>
           <span class="kind" :class="p.sessionType">
             {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
           </span>
@@ -206,7 +205,6 @@ function cancelForm(): void {
       <div v-for="c in connectionsStore.connections" :key="'conn-' + c.id" class="card loc-card">
         <button class="card-main" :disabled="connecting" @click="connectSaved(c)">
           <span class="chips">
-            <span class="src loc">保存済み</span>
             <span class="kind" :class="c.sessionType ?? 'display'">
               {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
             </span>
@@ -332,20 +330,6 @@ h2 {
   border-style: dashed;
   align-items: center;
   color: var(--accent);
-}
-.src {
-  font-family: var(--mono);
-  font-size: 10px;
-  padding: 1px 7px;
-  border-radius: 4px;
-}
-.src.srv {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.src.loc {
-  border: 1px dashed var(--line);
-  color: var(--muted);
 }
 small {
   color: var(--muted);
@@ -522,30 +506,30 @@ small {
   background: var(--accent-soft);
 }
 /* 一覧表示: 1 列・各カードを横並びのコンパクト行にする */
-.list.list {
+.list.view-list {
   grid-template-columns: 1fr;
   gap: 4px;
 }
-.list.list .card {
+.list.view-list .card {
   flex-direction: row;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
 }
-.list.list .loc-card {
+.list.view-list .loc-card {
   padding: 0;
 }
-.list.list .card-main {
+.list.view-list .card-main {
   flex-direction: row;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
 }
-.list.list .card.add {
+.list.view-list .card.add {
   justify-content: center;
 }
-.list.list .card small,
-.list.list .card-main small {
+.list.view-list .card small,
+.list.view-list .card-main small {
   margin-left: auto;
 }
 </style>
