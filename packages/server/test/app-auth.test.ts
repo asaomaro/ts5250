@@ -131,6 +131,6 @@ describe("認証・per-user 分離", () => {
     expect(await off.json()).toEqual({ enabled: false });
     const cookie = await login(app, "alice", "alicepw");
     const me = await app.request("/api/me", { headers: { cookie } });
-    expect(await me.json()).toEqual({ enabled: true, user: { username: "alice", role: "user" } });
+    expect(await me.json()).toEqual({ enabled: true, user: { username: "alice", role: "user" }, hasToken: false });
   });
 });

@@ -10,14 +10,17 @@ export const authStore = reactive({
   loaded: false,
   enabled: false,
   user: undefined as AuthUser | undefined,
+  /** API トークンを発行済みか（値は保持しない。UI の状態表示用） */
+  hasToken: false,
 
   /** サーバーに認証要否と現在ユーザーを問い合わせる */
   async refresh(): Promise<void> {
     try {
       const res = await fetch("/api/me");
-      const body = (await res.json()) as { enabled: boolean; user?: AuthUser | null };
+      const body = (await res.json()) as { enabled: boolean; user?: AuthUser | null; hasToken?: boolean };
       this.enabled = body.enabled;
       this.user = body.user ?? undefined;
+      this.hasToken = body.hasToken ?? false;
     } catch {
       this.enabled = false;
       this.user = undefined;

@@ -47,11 +47,32 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // /api/me は認証 OFF でも常に応答（web-ui がログイン要否を判定するため）
   const auth = deps.auth;
   app.get("/api/me", (c) =>
-    auth?.enabled ? c.json({ enabled: true, user: resolveUser(c, auth) ?? null }) : c.json({ enabled: false })
+    auth?.enabled
+      ? (() => {
+          const u = resolveUser(c, auth);
+          // hasToken は UI の「発行済み / 未発行」表示用。トークンの値そのものは返さない
+          return c.json({ enabled: true, user: u ?? null, ...(u ? { hasToken: auth.users.hasToken(u.username) } : {}) });
+        })()
+      : c.json({ enabled: false })
   );
 
   app.get("/healthz", (c) => c.json({ status: "ok", sessions: deps.sessions.size }));
   app.get("/api/version", (c) => c.json({ name: "as400-5250", version: deps.version }));
+
+  /**
+   * 自分の API トークンを発行する（MCP/自動化用）。**自分の分だけ**——ユーザー名は
+   * 認証済みコンテキストから取り、パスパラメータを受けない（他人の分を発行しようがない）。
+   * 再発行すると以前のトークンは失効する。平文はここでの応答限りで、保存はハッシュのみ。
+   */
+  app.post("/api/me/token", async (c) => {
+    const a = deps.auth;
+    if (!a?.enabled) return c.json({ error: "authentication is disabled" }, 400);
+    const user = c.get("user");
+    if (!user) return c.json({ error: "unauthorized" }, 401);
+    const token = a.users.issueToken(user.username);
+    await a.users.save();
+    return c.json({ token }, 201);
+  });
   // サーバー設定（ファイル由来）の編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき
   const canEditProfiles = (c: { get: (k: "user") => AuthVars["user"] }): boolean => {
     const a = deps.auth;

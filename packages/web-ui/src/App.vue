@@ -8,6 +8,7 @@ import ConnectView from "./components/ConnectView.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
 import LogPanel from "./components/LogPanel.vue";
 import KeybindingsPanel from "./components/KeybindingsPanel.vue";
+import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
 
@@ -25,6 +26,8 @@ workspaceStore.init();
 // ワークスペースに何かタブがあるか（セッション＋管理タブ）。表示切替の基準
 const hasWorkspaceContent = computed(() => workspaceStore.groups().some((g) => g.tabs.length > 0));
 const showConnect = ref(true);
+/** アカウント（API トークン発行 / ログアウト）ポップオーバー */
+const showAccount = ref(false);
 /**
  * アクティブ（フォーカス中）ペインのタブが 5250 エミュレーター（表示セッション）か。
  * SO/SI・カナ・リンク・キーの各トグルはエミュレーター専用なので、これが true のときだけ出す。
@@ -177,11 +180,13 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <span v-if="authStore.user" class="whoami">
-        {{ authStore.user.username }}<template v-if="authStore.isAdmin"> (admin)</template>
-        <button class="link" @click="authStore.logout()">ログアウト</button>
+        <button class="link" title="アカウント（API トークン発行 / ログアウト）" @click="showAccount = true">
+          {{ authStore.user.username }}<template v-if="authStore.isAdmin"> (admin)</template>
+        </button>
       </span>
     </header>
 
+    <AccountPopover v-if="showAccount" @close="showAccount = false" />
     <KeybindingsPanel v-if="showKeys" @close="showKeys = false" />
 
     <main v-if="showConnect || !hasWorkspaceContent">
