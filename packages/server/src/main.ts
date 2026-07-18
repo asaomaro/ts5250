@@ -8,6 +8,7 @@ import { ProfileStore } from "./profiles.js";
 import { ConnectionStore } from "./connection-store.js";
 import { SecretCrypto } from "./secret-crypto.js";
 import { buildMcpServer } from "./mcp-server.js";
+import { resolveBindHost } from "./bind-host.js";
 import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
 import { AuditBuffer, installAuditBuffer } from "./audit.js";
@@ -18,6 +19,8 @@ const VERSION = "0.1.0";
 interface Args {
   mode: "stdio" | "http";
   port: number;
+  /** 待ち受けアドレス（未指定なら認証オフ=127.0.0.1 / 認証オン=0.0.0.0） */
+  host: string | undefined;
   profilesPath: string | undefined;
   connectionsPath: string;
   webRoot: string | undefined;
@@ -34,6 +37,7 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     mode: "http",
     port: 3400,
+    host: undefined,
     profilesPath: undefined,
     connectionsPath: "connections.json",
     webRoot: undefined,
@@ -46,6 +50,7 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--stdio") args.mode = "stdio";
+    else if (a === "--host") args.host = argv[++i];
     else if (a === "--http") {
       args.mode = "http";
       const next = argv[i + 1];
@@ -137,8 +142,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     });
     // ws の WebSocketServer は WebSocketServerLike と互換（noServer:true 指定済み。optional 差のみ）
     const wss = new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike;
-    serve({ fetch: app.fetch, port: args.port, websocket: { server: wss } }, (info) => {
-      log.info({ port: info.port }, "5250 MCP/Web server started (Streamable HTTP + WebSocket)");
+    // 認証オフは既定でループバックのみ（信頼境界がネットワーク的に担保されないため）
+    const bind = resolveBindHost(args.host, !!auth);
+    if (bind.warn) log.warn(bind.warn);
+    serve({ fetch: app.fetch, port: args.port, hostname: bind.host, websocket: { server: wss } }, (info) => {
+      log.info(
+        { host: bind.host, port: info.port, auth: !!auth },
+        bind.host === "127.0.0.1"
+          ? "5250 MCP/Web server started (localhost only. 公開するには --users と --host を指定)"
+          : "5250 MCP/Web server started (Streamable HTTP + WebSocket)"
+      );
     });
   }
 }

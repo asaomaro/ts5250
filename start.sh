@@ -65,4 +65,5 @@ NODE_ARGS=()
 if [ -f .env ]; then NODE_ARGS+=(--env-file=.env); fi
 
 echo "==> 起動: http://localhost:$PORT  (停止は Ctrl+C)"
+echo "    ※ 認証オフのため localhost のみ待ち受けます（他端末へ公開するには --users で認証を有効に）"
 exec node "${NODE_ARGS[@]}" packages/server/dist/main.js "${ARGS[@]}"
