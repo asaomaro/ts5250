@@ -26,6 +26,10 @@ pino を持ち込むと価値が半減する。**
       ホストサーバーに無縁のものが混在）
 - [ ] CCSID テーブルの同梱単位を見直す（CCSID 37 の174行のために DBCS 込み18,900行が付いてくる）
 
+> **未適用の注意**: 下記「ロガー注入」「`no-restricted-globals`」は
+> `20260718-acs-data-transfer` と `20260718-hostserver-sql` の retro で**2 回とも提案されたが未適用**。
+> SQL 実装では手作業とレビューで `Buffer` の混入を防げたが、**仕組みでは防げていない**。
+
 ## 切り出し候補（推奨順）
 
 - [ ] **1. EBCDIC コーデック** — 依存ゼロ、今すぐ出せる、独自価値が明確
@@ -34,9 +38,11 @@ pino を持ち込むと価値が半減する。**
 - [ ] **2. SCS デコーダ** — 246行、依存は codec のみ。1 と同じ切り出しで一緒に出せる
   - スプールのバイト列 → 論理ページ。`server/src/pdf.ts` が66行で済んでいるのは分離が効いている証拠
   - IBM i のスプールを扱いたいが TN5250 一式は要らない、という需要に合う
-- [ ] 3. ホストサーバー（`hostserver/` ＋ `transport/host-connection.ts`）
-  - **SQL 実装後に実施**（認証だけでは単体の使い道が乏しく、API が固まる前に公開契約にしたくない）
-  - needs: SQL 実行機能の実装
+- [ ] 3. ホストサーバー（`hostserver/` ＋ `hostserver/db/` ＋ `transport/host-connection.ts`）
+  - **前提を満たした**（2026-07-18 に SQL 実行が完了。`20260718-hostserver-sql`）。
+    「IBM i に SQL を投げる TS ライブラリ」として単体で価値が出る状態になった
+  - 規模: 認証 878 行 ＋ SQL 約 1,200 行。純 DBCS コーデックも併せて要る
+  - ただし**アップロードが載ってから**のほうが切り出しの価値は高い（API が固まる）
 - [ ] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
   - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式
   - 競合あり（例: green-screen-react）。差別化軸は「純 TypeScript・依存なし・トレース再生付き」
