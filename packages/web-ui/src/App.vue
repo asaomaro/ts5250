@@ -113,34 +113,38 @@ onBeforeUnmount(() => {
         <button class="link" @click="openAdmin('admin:sessions')">セッション</button>
         <button class="link" @click="openAdmin('admin:logs')">ログ</button>
       </span>
-      <button
-        v-if="hasSessions"
-        class="theme-btn"
-        :aria-pressed="workspaceStore.showShiftMarks"
-        @click="workspaceStore.showShiftMarks = !workspaceStore.showShiftMarks"
-      >
-        SO/SI {{ workspaceStore.showShiftMarks ? "{ }" : "␣" }}
-      </button>
-      <button
-        v-if="hasSessions"
-        class="theme-btn"
-        :aria-pressed="workspaceStore.katakanaView"
-        title="半角カナ表示切替（英小文字位置をカナ解釈）"
-        @click="workspaceStore.katakanaView = !workspaceStore.katakanaView"
-      >
-        {{ workspaceStore.katakanaView ? "カナ" : "英" }}
-      </button>
-      <button
-        v-if="hasSessions"
-        class="theme-btn"
-        :aria-pressed="workspaceStore.linkify"
-        title="URL/メールのリンク化切替"
-        @click="workspaceStore.linkify = !workspaceStore.linkify"
-      >
-        🔗 {{ workspaceStore.linkify ? "ON" : "OFF" }}
-      </button>
-      <button class="theme-btn" @click="showKeys = true">⌨ キー</button>
-      <button class="theme-btn" @click="toggle">{{ effective() === "dark" ? "☀ 通常" : "🌙 ダーク" }}</button>
+      <div class="toggles">
+        <button
+          v-if="hasSessions"
+          class="theme-btn"
+          :aria-pressed="workspaceStore.showShiftMarks"
+          @click="workspaceStore.showShiftMarks = !workspaceStore.showShiftMarks"
+        >
+          SO/SI <span class="tv sosi">{{ workspaceStore.showShiftMarks ? "{ }" : "␣" }}</span>
+        </button>
+        <button
+          v-if="hasSessions"
+          class="theme-btn"
+          :aria-pressed="workspaceStore.katakanaView"
+          title="半角カナ表示切替（英小文字位置をカナ解釈）"
+          @click="workspaceStore.katakanaView = !workspaceStore.katakanaView"
+        >
+          <span class="tv kana">{{ workspaceStore.katakanaView ? "カナ" : "英" }}</span>
+        </button>
+        <button
+          v-if="hasSessions"
+          class="theme-btn"
+          :aria-pressed="workspaceStore.linkify"
+          title="URL/メールのリンク化切替"
+          @click="workspaceStore.linkify = !workspaceStore.linkify"
+        >
+          🔗 <span class="tv onoff">{{ workspaceStore.linkify ? "ON" : "OFF" }}</span>
+        </button>
+        <button class="theme-btn" @click="showKeys = true">⌨ キー</button>
+        <button class="theme-btn" @click="toggle">
+          <span class="tv theme">{{ effective() === "dark" ? "☀ 通常" : "🌙 ダーク" }}</span>
+        </button>
+      </div>
       <span v-if="authStore.user" class="whoami">
         {{ authStore.user.username }}<template v-if="authStore.isAdmin"> (admin)</template>
         <button class="link" @click="authStore.logout()">ログアウト</button>
@@ -169,7 +173,6 @@ onBeforeUnmount(() => {
   border-left: 1px solid var(--line);
 }
 .whoami {
-  margin-left: auto;
   font-size: 12px;
   color: var(--muted);
   display: inline-flex;
@@ -201,8 +204,14 @@ onBeforeUnmount(() => {
   color: var(--accent);
   cursor: pointer;
 }
-.theme-btn {
+/* トグルボタンは右側に 1 グループとしてまとめる（個別の margin-left:auto をやめてバラけないようにする） */
+.toggles {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.theme-btn {
   font-family: var(--mono);
   font-size: 12px;
   padding: 5px 12px;
@@ -211,6 +220,25 @@ onBeforeUnmount(() => {
   background: var(--card);
   color: var(--ink);
   cursor: pointer;
+  white-space: nowrap;
+}
+/* トグルで変化する部分は固定幅を確保し、切替時にボタン幅が変わらない（＝他ボタンが動かない）ようにする */
+.tv {
+  display: inline-block;
+  text-align: left;
+}
+.tv.sosi {
+  width: 1.8em;
+}
+.tv.kana {
+  width: 2.2em;
+  text-align: center;
+}
+.tv.onoff {
+  width: 2.4em;
+}
+.tv.theme {
+  width: 4.6em;
 }
 main {
   flex: 1;
