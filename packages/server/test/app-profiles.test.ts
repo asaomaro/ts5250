@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
@@ -10,6 +11,9 @@ import { SecretCrypto } from "../src/secret-crypto.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "../src/auth.js";
 
 const crypto = SecretCrypto.fromEnv("K", { K: randomBytes(32).toString("hex") })!;
+
+/** 保存時に autoPdfDir が検証されるため、テストでは実在する書き込み可能なディレクトリを使う */
+const OUT_DIR = mkdtempSync(join(tmpdir(), "prof-out-"));
 
 /** signon + printer（信頼設定）を持つプロファイル 1 件のファイルを作る */
 function profilesFile(): string {
@@ -111,17 +115,17 @@ describe("/api/profiles 編集（認証オフ）", () => {
       body: JSON.stringify({
         name: "pub400",
         host: "pub400.com",
-        printer: { autoPdfDir: "/data/out", autoPrint: "Office", fontSize: 9 }
+        printer: { autoPdfDir: OUT_DIR, autoPrint: "Office", fontSize: 9 }
       })
     });
     expect(res.status).toBe(200);
     const saved = JSON.parse(readFileSync(path, "utf8")).profiles[0];
-    expect(saved.printer.autoPdfDir).toBe("/data/out");
+    expect(saved.printer.autoPdfDir).toBe(OUT_DIR);
     expect(saved.printer.autoPrint).toBe("Office");
     expect(saved.printer.fontSize).toBe(9);
     // GET は editable のとき printer を返す
     const list = await (await app.request("/api/profiles")).json();
-    expect(list.profiles[0].printer.autoPdfDir).toBe("/data/out");
+    expect(list.profiles[0].printer.autoPdfDir).toBe(OUT_DIR);
     expect(list.profiles[0].sessionType).toBe("printer");
   });
 
@@ -160,11 +164,11 @@ describe("/api/profiles 編集（認証オフ）", () => {
     await app.request("/api/profiles", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "prt", host: "h", sessionType: "printer", printer: { autoPdfDir: "/out" } })
+      body: JSON.stringify({ name: "prt", host: "h", sessionType: "printer", printer: { autoPdfDir: OUT_DIR } })
     });
     const saved = JSON.parse(readFileSync(path, "utf8")).profiles.find((p: { name: string }) => p.name === "prt");
     expect(saved.sessionType).toBe("printer");
-    expect(saved.printer.autoPdfDir).toBe("/out");
+    expect(saved.printer.autoPdfDir).toBe(OUT_DIR);
   });
 
   it("printer を空にするとブロックが消える（自動蓄積/印刷を無効化）", async () => {
@@ -314,5 +318,76 @@ describe("ProfileStore: signon 解決", () => {
     const opts = noKey.resolveConnectOptions("p", undefined, (m) => (warned = m));
     expect(opts.password).toBeUndefined();
     expect(warned).toMatch(/secret key|decrypt/i);
+  });
+});
+
+/**
+ * PDF 出力先は保存時に検証する（受信時まで失敗が分からない問題への対処）。
+ * ディレクトリは**作成しない**方針なので、存在しなければエラーにする。
+ */
+describe("/api/profiles: PDF 出力先の保存時検証", () => {
+  const printerBody = (dir: string) =>
+    JSON.stringify({ name: "prt", host: "h", sessionType: "printer", printer: { autoPdfDir: dir } });
+  const post = (app: ReturnType<typeof buildApp>, dir: string) =>
+    app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: printerBody(dir)
+    });
+
+  it("存在しない出力先は 400 で、プロファイルは保存されない・フォルダも作られない", async () => {
+    const path = profilesFile();
+    const missing = join(mkdtempSync(join(tmpdir(), "novalid-")), "no-such-dir");
+    const res = await post(buildApp(deps(path)), missing);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/見つかりません/);
+    // 不正な設定を永続化しない
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles;
+    expect(saved.find((p: { name: string }) => p.name === "prt")).toBeUndefined();
+    // 自動作成しない
+    expect(existsSync(missing)).toBe(false);
+  });
+
+  it("正常な出力先なら保存でき、解決後の絶対パスを返す", async () => {
+    const res = await post(buildApp(deps(profilesFile())), OUT_DIR);
+    expect(res.status).toBe(201);
+    expect((await res.json()).resolvedPdfDir).toBe(resolve(OUT_DIR));
+  });
+
+  it("display 種別なら検証しない（printer ブロックはどのみち破棄されるため）", async () => {
+    const res = await buildApp(deps(profilesFile())).request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "d2",
+        host: "h",
+        sessionType: "display",
+        printer: { autoPdfDir: "/definitely/not/here" }
+      })
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("autoPdfDir 未指定の保存は従来どおり成功する", async () => {
+    const res = await buildApp(deps(profilesFile())).request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "p2", host: "h" })
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).resolvedPdfDir).toBeUndefined();
+  });
+
+  it("PUT でも検証され、既存プロファイルは書き換わらない", async () => {
+    const path = profilesFile();
+    const app = buildApp(deps(path));
+    const missing = join(mkdtempSync(join(tmpdir(), "novalid-")), "nope");
+    const res = await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "pub400", host: "changed", printer: { autoPdfDir: missing } })
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(readFileSync(path, "utf8")).profiles[0].host).toBe("pub400.com");
   });
 });
