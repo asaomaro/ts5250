@@ -228,6 +228,16 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     })
   );
 
+  /**
+   * 未登録の API パスは JSON の 404 で返す。**静的配信のフォールバックより前**に置くこと。
+   *
+   * SPA のために `app.get("*")` で index.html へフォールバックしているが、これは `/api/*` まで拾って
+   * しまい、API クライアントが JSON を期待して HTML を受け取る・タイポが 200 で隠れる・404 による
+   * 機能検出が使えない、という問題が起きていた（--web-root の有無で同じパスの応答が変わっていた）。
+   * webRoot の有無に関わらず適用し、挙動を一致させる。
+   */
+  app.all("/api/*", (c) => c.json({ error: `not found: ${c.req.path}` }, 404));
+
   // web-ui 静的配信。webRoot 指定時はビルド済み dist を配信（SPA: 未マッチは index.html）
   if (deps.webRoot) {
     const root = deps.webRoot;
