@@ -15,6 +15,7 @@ import {
   type AuthVars
 } from "./auth.js";
 import { registerAdminRoutes } from "./admin.js";
+import { registerConnectionRoutes } from "./connections.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
@@ -50,6 +51,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   app.get("/healthz", (c) => c.json({ status: "ok", sessions: deps.sessions.size }));
   app.get("/api/version", (c) => c.json({ name: "as400-5250", version: deps.version }));
   app.get("/api/profiles", (c) => c.json({ profiles: deps.profiles.listPublic() }));
+
+  // ユーザー接続設定 CRUD（サーバー保存・owner スコープ）。ストア配線時のみ
+  if (deps.connections) registerConnectionRoutes(app, { connections: deps.connections });
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {

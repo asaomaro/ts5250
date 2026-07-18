@@ -10,3 +10,7 @@ dist/
 users.local.json
 **/users.local.json
 users.json
+
+# ユーザー接続設定（サーバー保存・秘匿）
+connections.json
+connections.json.tmp

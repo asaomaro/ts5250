@@ -7,6 +7,8 @@ export interface WsOpen {
   type: "open";
   /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
   kind?: "display" | "printer";
+  /** 保存済みユーザー接続の ID 参照（サーバーが host/資格情報を解決）。profile/host より優先 */
+  connection?: string;
   profile?: string;
   host?: string;
   port?: number;

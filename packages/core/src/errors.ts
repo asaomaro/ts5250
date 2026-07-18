@@ -8,6 +8,7 @@ export type ErrorCode =
   | "SESSION_REJECTED"
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
+  | "CONFIG_ERROR"
   | "FIELD_PROTECTED"
   | "FIELD_OVERFLOW"
   | "FIELD_TYPE"

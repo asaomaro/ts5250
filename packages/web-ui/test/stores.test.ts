@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { workspaceStore } from "../src/stores/workspace.js";
 import { logStore, maskOutgoing } from "../src/stores/log.js";
-import { settingsStore } from "../src/stores/settings.js";
+import { connectionsStore } from "../src/stores/connections.js";
 
 describe("workspaceStore 分割ツリー", () => {
   beforeEach(() => workspaceStore.init());
@@ -125,37 +125,58 @@ describe("maskOutgoing", () => {
   });
 });
 
-describe("settingsStore", () => {
+describe("connectionsStore（サーバー保存・API バックド）", () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  let list: unknown[] = [];
+
   beforeEach(() => {
-    settingsStore.connections.splice(0, settingsStore.connections.length);
-    if (typeof localStorage !== "undefined") localStorage.clear();
-  });
-
-  it("接続設定を保存・更新・削除できる（認証情報なし）", () => {
-    const c = settingsStore.save({ name: "dev", host: "192.168.0.5", port: 23 });
-    expect(c.id).toBeTruthy();
-    expect(JSON.stringify(c)).not.toContain("password");
-    settingsStore.save({ id: c.id, name: "dev2", host: "192.168.0.5" });
-    expect(settingsStore.connections[0]!.name).toBe("dev2");
-    settingsStore.remove(c.id);
-    expect(settingsStore.connections).toHaveLength(0);
-  });
-
-  it("自動サインオン有効時は user/password を保持し、更新でも維持される", () => {
-    const c = settingsStore.save({
-      name: "pub", host: "pub400.com", port: 23, tls: false,
-      autoSignon: true, user: "USER", password: "secret"
+    calls.length = 0;
+    list = [];
+    connectionsStore.connections = [];
+    connectionsStore.loaded = false;
+    // fetch をモック（GET=一覧 / POST/PUT/DELETE=OK を返す）
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      const method = init?.method ?? "GET";
+      if (url === "/api/connections" && method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({ connections: list }), { status: 200 }));
+      }
+      if (url === "/api/connections" && method === "POST") {
+        const created = { id: "c-1", ...JSON.parse(String(init?.body)), hasSecret: true };
+        list = [{ id: "c-1", name: created.name, host: created.host, sessionType: "display", hasSecret: true }];
+        return Promise.resolve(new Response(JSON.stringify({ connection: created }), { status: 201 }));
+      }
+      if (method === "DELETE") {
+        list = [];
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: "bad" }), { status: 400 }));
     });
-    expect(c.autoSignon).toBe(true);
-    expect(c.user).toBe("USER");
-    expect(c.password).toBe("secret");
-    // 更新（編集）で他項目を変えても資格情報は維持
-    const u = settingsStore.save({ id: c.id, name: "pub2", host: "pub400.com", autoSignon: true, user: "USER", password: "secret" });
-    expect(u.name).toBe("pub2");
-    expect(u.password).toBe("secret");
-    // localStorage 永続化にも含まれる
-    if (typeof localStorage !== "undefined") {
-      expect(localStorage.getItem("as400.connections")).toContain("USER");
-    }
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refresh でサーバーの一覧を反映する", async () => {
+    list = [{ id: "c-9", name: "srv", host: "h", sessionType: "display", hasSecret: false }];
+    await connectionsStore.refresh();
+    expect(connectionsStore.connections.map((c) => c.name)).toEqual(["srv"]);
+    expect(connectionsStore.loaded).toBe(true);
+  });
+
+  it("create はパスワードをサーバーへ送り、hasSecret を受け取る（クライアントは平文を保持しない）", async () => {
+    const created = await connectionsStore.create({
+      name: "pub", host: "pub400.com", sessionType: "display", autoSignon: true, signonUser: "USER", password: "secret"
+    });
+    expect(created.hasSecret).toBe(true);
+    // クライアント側の一覧には平文もパスワードフィールドも含まれない
+    expect(JSON.stringify(connectionsStore.connections)).not.toContain("secret");
+    // POST 後に一覧を再取得している
+    expect(calls.some((c) => (c.init?.method ?? "GET") === "POST")).toBe(true);
+    expect(calls.filter((c) => (c.init?.method ?? "GET") === "GET").length).toBeGreaterThan(0);
+  });
+
+  it("remove はサーバーに削除要求し一覧を更新する", async () => {
+    await connectionsStore.create({ name: "x", host: "h", sessionType: "display" });
+    await connectionsStore.remove("c-1");
+    expect(connectionsStore.connections).toHaveLength(0);
   });
 });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import type { PublicProfile } from "@as400web/server";
-import { settingsStore, type SavedConnection } from "../stores/settings.js";
+import type { PublicProfile, PublicConnection } from "@as400web/server";
+import { connectionsStore, type ConnectionForm } from "../stores/connections.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
@@ -44,43 +44,65 @@ onMounted(async () => {
     const body = (await res.json()) as { profiles: PublicProfile[] };
     profiles.value = body.profiles;
   } catch {
-    /* サーバー未起動時は空。ブラウザ保存の接続だけ使える */
+    /* サーバー未起動時は空。共有プロファイルだけ使える */
   }
+  // ユーザー接続設定はサーバー保存（認証オフ=全件 / オン=自分のみ）
+  await connectionsStore.refresh();
 });
 
 async function connectProfile(p: PublicProfile): Promise<void> {
-  await doConnect({ type: "open", profile: p.name }, p.name);
+  await doConnect({ type: "open", profile: p.name }, p.name, p.sessionType);
 }
 
-async function connectSaved(c: SavedConnection): Promise<void> {
-  const open = {
-    type: "open" as const,
+/** カード / 一覧の表示切り替え（端末ごとに localStorage で保持） */
+const VIEW_KEY = "as400.connectView";
+const viewMode = ref<"card" | "list">(
+  (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY) === "list") ? "list" : "card"
+);
+function setViewMode(m: "card" | "list"): void {
+  viewMode.value = m;
+  if (typeof localStorage !== "undefined") localStorage.setItem(VIEW_KEY, m);
+}
+
+async function connectSaved(c: PublicConnection): Promise<void> {
+  // 保存済み接続は ID 参照で開く（host/資格情報はサーバーが解決・復号する）
+  await doConnect({ type: "open", connection: c.id }, c.name, c.sessionType);
+}
+
+/** 編集で hasSecret のとき、パスワード欄は空＝据え置き（サーバーには値を返せない） */
+const editingHasSecret = ref(false);
+
+function editConn(c: PublicConnection): void {
+  form.value = {
+    id: c.id,
+    name: c.name,
     host: c.host,
-    ...(c.port !== undefined ? { port: c.port } : {}),
-    ...(c.ccsid !== undefined ? { ccsid: c.ccsid } : {}),
-    ...(c.screenSize !== undefined ? { screenSize: c.screenSize } : {}),
-    ...(c.deviceName !== undefined ? { deviceName: c.deviceName } : {}),
-    ...(c.tls ? { tls: true } : {}),
-    // 自動サインオン有効時のみ資格情報を送る（オフなら signon 画面に着地）
-    ...(c.autoSignon && c.user ? { user: c.user, password: c.password ?? "" } : {})
+    port: c.port,
+    ccsid: c.ccsid ?? DEFAULT_CCSID,
+    screenSize: c.screenSize ?? DEFAULT_SCREEN_SIZE,
+    deviceName: c.deviceName,
+    tls: c.tls,
+    sessionType: c.sessionType,
+    autoSignon: c.autoSignon,
+    user: c.signonUser,
+    password: ""
   };
-  settingsStore.markConnected(c.id, Date.now());
-  await doConnect(open, c.name, c.sessionType);
-}
-
-function editConn(c: SavedConnection): void {
-  // 旧データ（ccsid / screenSize 未設定）は既定を選択済み扱いにする
-  form.value = { ...c, ccsid: c.ccsid ?? DEFAULT_CCSID, screenSize: c.screenSize ?? DEFAULT_SCREEN_SIZE };
+  editingHasSecret.value = c.hasSecret;
   showForm.value = true;
 }
 
-function deleteConn(c: SavedConnection): void {
+async function deleteConn(c: PublicConnection): Promise<void> {
   if (typeof confirm === "function" && !confirm(`接続「${c.name}」を削除しますか？`)) return;
-  settingsStore.remove(c.id);
+  try {
+    await connectionsStore.remove(c.id);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 function newConn(): void {
   form.value = emptyForm();
+  editingHasSecret.value = false;
   showForm.value = true;
 }
 
@@ -102,31 +124,67 @@ async function doConnect(
   }
 }
 
-function saveForm(): void {
+async function saveForm(): Promise<void> {
   if (!form.value.name || !form.value.host) return;
-  // 自動サインオン無効なら資格情報は保存しない
-  const conn = { ...form.value };
-  if (!conn.autoSignon) {
-    delete conn.user;
-    delete conn.password;
+  const f = form.value;
+  const payload: ConnectionForm = {
+    name: f.name,
+    host: f.host,
+    sessionType: f.sessionType ?? "display",
+    ...(f.port !== undefined ? { port: f.port } : {}),
+    ...(f.ccsid !== undefined ? { ccsid: f.ccsid } : {}),
+    ...(f.screenSize !== undefined ? { screenSize: f.screenSize } : {}),
+    ...(f.deviceName ? { deviceName: f.deviceName } : {}),
+    ...(f.tls !== undefined ? { tls: f.tls } : {}),
+    ...(f.autoSignon ? { autoSignon: true } : {}),
+    // 自動サインオン有効時のみ資格情報。パスワード空欄は「据え置き」= 未送信（サーバーが既存を保持）
+    ...(f.autoSignon && f.user ? { signonUser: f.user } : {}),
+    ...(f.autoSignon && f.password ? { password: f.password } : {})
+  };
+  try {
+    if (f.id) await connectionsStore.update(f.id, payload);
+    else await connectionsStore.create(payload);
+    showForm.value = false;
+    form.value = emptyForm();
+    editingHasSecret.value = false;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
   }
-  settingsStore.save(conn);
-  showForm.value = false;
-  form.value = emptyForm();
 }
 
 function cancelForm(): void {
   showForm.value = false;
   form.value = emptyForm();
+  editingHasSecret.value = false;
 }
 </script>
 
 <template>
   <div class="connect">
-    <h2>接続</h2>
+    <div class="head">
+      <h2>接続</h2>
+      <div class="view-toggle" role="group" aria-label="表示切り替え">
+        <button
+          type="button"
+          :class="{ active: viewMode === 'card' }"
+          title="カード表示"
+          @click="setViewMode('card')"
+        >
+          ▦ カード
+        </button>
+        <button
+          type="button"
+          :class="{ active: viewMode === 'list' }"
+          title="一覧表示"
+          @click="setViewMode('list')"
+        >
+          ☰ 一覧
+        </button>
+      </div>
+    </div>
     <p v-if="error" class="err" role="alert">{{ error }}</p>
 
-    <div class="list">
+    <div class="list" :class="viewMode">
       <button
         v-for="p in profiles"
         :key="'srv-' + p.name"
@@ -134,15 +192,25 @@ function cancelForm(): void {
         :disabled="connecting"
         @click="connectProfile(p)"
       >
-        <span class="src srv">サーバー</span>
+        <span class="chips">
+          <span class="src srv">サーバー</span>
+          <span class="kind" :class="p.sessionType">
+            {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+          </span>
+        </span>
         <b>{{ p.name }}</b>
         <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
         <small>{{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}</small>
       </button>
 
-      <div v-for="c in settingsStore.connections" :key="'loc-' + c.id" class="card loc-card">
+      <div v-for="c in connectionsStore.connections" :key="'conn-' + c.id" class="card loc-card">
         <button class="card-main" :disabled="connecting" @click="connectSaved(c)">
-          <span class="src loc">ブラウザ</span>
+          <span class="chips">
+            <span class="src loc">保存済み</span>
+            <span class="kind" :class="c.sessionType ?? 'display'">
+              {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+            </span>
+          </span>
           <b>{{ c.name }}</b>
           <span v-if="c.autoSignon" title="自動サインオン">⚡</span>
           <small>{{ c.host }}{{ c.port ? ":" + c.port : "" }}{{ c.tls ? " TLS" : "" }}</small>
@@ -206,9 +274,17 @@ function cancelForm(): void {
       <label class="check"><input v-model="form.autoSignon" type="checkbox" /> 自動サインオン（RFC 4777）</label>
       <div v-if="form.autoSignon" class="row">
         <input v-model="form.user" placeholder="ユーザー" autocomplete="off" />
-        <input v-model="form.password" type="password" placeholder="パスワード" autocomplete="off" />
+        <input
+          v-model="form.password"
+          type="password"
+          :placeholder="editingHasSecret ? 'パスワード（設定済み・変更時のみ入力）' : 'パスワード'"
+          autocomplete="off"
+        />
       </div>
-      <p v-if="form.autoSignon" class="note">※ 資格情報はこの端末のブラウザ（localStorage）に平文保存されます。</p>
+      <p v-if="form.autoSignon" class="note">
+        ※ パスワードはサーバーで暗号化して保存されます（AES-256-GCM）。ブラウザや API には平文を返しません。
+        サーバーに暗号鍵（AS400_SECRET_KEY）が未設定の場合、パスワード保存は無効です。
+      </p>
       <div class="row">
         <button type="submit">保存</button>
         <button type="button" class="ghost" @click="cancelForm">キャンセル</button>
@@ -394,5 +470,82 @@ small {
 .icon-btn.danger:hover {
   background: color-mix(in srgb, #c62828 18%, transparent);
   color: #c62828;
+}
+/* ヘッダ（タイトル＋表示切り替え） */
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.view-toggle button {
+  padding: 4px 12px;
+  background: var(--card);
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.view-toggle button + button {
+  border-left: 1px solid var(--line);
+}
+.view-toggle button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* 種別チップ（サーバー/ブラウザ ＋ 表示/プリンター） */
+.chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.kind.printer {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* 一覧表示: 1 列・各カードを横並びのコンパクト行にする */
+.list.list {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.list.list .card {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.list.list .loc-card {
+  padding: 0;
+}
+.list.list .card-main {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.list.list .card.add {
+  justify-content: center;
+}
+.list.list .card small,
+.list.list .card-main small {
+  margin-left: auto;
 }
 </style>

@@ -1,13 +1,18 @@
-import { Tn5250Error, type AidKey, type ScreenSnapshot } from "@as400web/core";
+import { Tn5250Error, childLog, type AidKey, type ConnectOptions, type ScreenSnapshot } from "@as400web/core";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { AuthUser } from "./auth.js";
 import { ProfileStore } from "./profiles.js";
+import type { ConnectionStore } from "./connection-store.js";
 import { withAudit } from "./audit.js";
 import type { WsClientMessage, WsServerMessage } from "./ws-messages.js";
+
+const wsLog = childLog({ component: "ws-handler" });
 
 export interface WsHandlerDeps {
   sessions: SessionManager;
   profiles: ProfileStore;
+  /** ユーザー接続設定ストア（保存済み接続の ID 参照解決）。未指定なら connection 参照は不可 */
+  connections?: ConnectionStore;
 }
 
 /** WSContext の最小インターフェース（@hono/node-server の WSContext / テストのモック双方に適合） */
@@ -71,9 +76,11 @@ export class WsConnection {
     if (this.sessionId) throw new Tn5250Error("PROTOCOL_ERROR", "session already open on this connection");
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     await withAudit({ op: "ws_open" }, async () => {
-      const opts: OpenOptions = msg.profile
-        ? { ...this.deps.profiles.resolveConnectOptions(msg.profile), origin: msg.profile }
-        : buildDirect(msg);
+      const opts: OpenOptions = msg.connection
+        ? { ...this.resolveConnection(msg.connection), origin: msg.connection }
+        : msg.profile
+          ? { ...this.deps.profiles.resolveConnectOptions(msg.profile), origin: msg.profile }
+          : buildDirect(msg);
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
@@ -97,8 +104,20 @@ export class WsConnection {
 
   private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
     await withAudit({ op: "ws_open_printer" }, async () => {
-      const opts: Parameters<SessionManager["openPrinter"]>[0] = { origin: msg.profile ?? "direct" };
-      if (msg.profile) {
+      const opts: Parameters<SessionManager["openPrinter"]>[0] = {
+        origin: msg.connection ?? msg.profile ?? "direct"
+      };
+      if (msg.connection) {
+        // 保存済み接続由来: 接続情報＋復号資格情報を解決（printer 出力設定は持たない＝信頼設定は profiles 限定）
+        const co = this.resolveConnection(msg.connection);
+        if (co.host !== undefined) opts.host = co.host;
+        if (co.port !== undefined) opts.port = co.port;
+        if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
+        if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
+        if (co.tls !== undefined) opts.tls = co.tls;
+        if (co.user !== undefined) opts.user = co.user;
+        if (co.password !== undefined) opts.password = co.password;
+      } else if (msg.profile) {
         // プロファイル由来: 接続情報＋PDF 自動蓄積/印刷（信頼設定）を解決する
         const co = this.deps.profiles.resolveConnectOptions(msg.profile);
         if (co.host !== undefined) opts.host = co.host;
@@ -133,6 +152,12 @@ export class WsConnection {
       this.detachReport = () => entry.session.off("report", onReport);
       this.send({ type: "printer-opened", sessionId: entry.id, startupCode: entry.session.startupCode });
     });
+  }
+
+  /** 保存済み接続 ID を ConnectOptions に解決する（assertOwner・復号は store 内）。未配線なら明示エラー */
+  private resolveConnection(id: string): ConnectOptions {
+    if (!this.deps.connections) throw new Tn5250Error("CONFIG_ERROR", "connection store not configured");
+    return this.deps.connections.resolveConnectOptions(id, this.user, (m) => wsLog.warn(m));
   }
 
   private async onKey(msg: WsClientMessage & { type: "key" }): Promise<void> {
