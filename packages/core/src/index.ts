@@ -102,3 +102,17 @@ export {
   type SignonFailure,
   type SignonFailureKind
 } from "./hostserver/return-codes.js";
+
+// ホストサーバー: SQL（database サーバー。SELECT のみ。アップロードは未実装）
+export { DbConnection, type DbConnectOptions } from "./hostserver/db/db-connection.js";
+export { query, stream, SqlError, type Row, type QueryResult } from "./hostserver/db/query.js";
+export type { ColumnMeta, DbValue } from "./hostserver/db/db-decode.js";
+export { DB2, typeName, jsTypeOf, type JsType } from "./hostserver/db/db-types.js";
+// 純 DBCS（GRAPHIC 列用）
+export {
+  PureDbcsCodec,
+  pureDbcsCodecForCcsid,
+  isPureDbcsCcsid,
+  ibm16684,
+  ibm300
+} from "./codec/pure-dbcs.js";
