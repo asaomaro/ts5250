@@ -9,11 +9,15 @@ import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 const emit = defineEmits<{ (e: "connected", sessionId: string): void }>();
 
 const profiles = ref<PublicProfile[]>([]);
+/** 共有プロファイルを UI から編集できるか（認証オフ または admin かつファイル由来。サーバーが判定） */
+const profilesEditable = ref(false);
 const error = ref("");
 const connecting = ref(false);
 const showForm = ref(false);
 type ConnForm = {
   id?: string;
+  /** 編集対象。connection=ユーザー接続 / profile=共有プロファイル */
+  kind: "connection" | "profile";
   name: string;
   host: string;
   port?: number;
@@ -27,6 +31,7 @@ type ConnForm = {
   password?: string;
 };
 const emptyForm = (): ConnForm => ({
+  kind: "connection",
   name: "",
   host: "",
   ccsid: DEFAULT_CCSID,
@@ -34,24 +39,57 @@ const emptyForm = (): ConnForm => ({
   sessionType: "display"
 });
 const form = ref<ConnForm>(emptyForm());
+const isProfileForm = computed(() => form.value.kind === "profile");
 
 // カタカナ系コードページ（930/5026）は英小文字が大文字化される旨を案内する
 const showKatakanaHint = computed(() => isKatakanaCcsid(form.value.ccsid));
 
-onMounted(async () => {
+async function refreshProfiles(): Promise<void> {
   try {
     const res = await fetch("/api/profiles");
-    const body = (await res.json()) as { profiles: PublicProfile[] };
+    const body = (await res.json()) as { profiles: PublicProfile[]; editable?: boolean };
     profiles.value = body.profiles;
+    profilesEditable.value = body.editable ?? false;
   } catch {
     /* サーバー未起動時は空。共有プロファイルだけ使える */
   }
+}
+
+onMounted(async () => {
+  await refreshProfiles();
   // ユーザー接続設定はサーバー保存（認証オフ=全件 / オン=自分のみ）
   await connectionsStore.refresh();
 });
 
 async function connectProfile(p: PublicProfile): Promise<void> {
   await doConnect({ type: "open", profile: p.name }, p.name, p.sessionType);
+}
+
+function editProfile(p: PublicProfile): void {
+  form.value = {
+    kind: "profile",
+    id: p.name, // 改名検知のため元の名前を保持
+    name: p.name,
+    host: p.host,
+    ccsid: p.ccsid ?? DEFAULT_CCSID,
+    screenSize: p.screenSize ?? DEFAULT_SCREEN_SIZE,
+    ...(p.port !== undefined ? { port: p.port } : {}),
+    ...(p.deviceName !== undefined ? { deviceName: p.deviceName } : {}),
+    ...(p.tls !== undefined ? { tls: p.tls } : {})
+  };
+  editingHasSecret.value = false;
+  showForm.value = true;
+}
+
+async function deleteProfile(p: PublicProfile): Promise<void> {
+  if (typeof confirm === "function" && !confirm(`プロファイル「${p.name}」を削除しますか？`)) return;
+  try {
+    const res = await fetch(`/api/profiles/${encodeURIComponent(p.name)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
+    await refreshProfiles();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 /** カード / 一覧の表示切り替え（端末ごとに localStorage で保持） */
@@ -74,6 +112,7 @@ const editingHasSecret = ref(false);
 
 function editConn(c: PublicConnection): void {
   form.value = {
+    kind: "connection",
     id: c.id,
     name: c.name,
     host: c.host,
@@ -127,6 +166,7 @@ async function doConnect(
 async function saveForm(): Promise<void> {
   if (!form.value.name || !form.value.host) return;
   const f = form.value;
+  if (f.kind === "profile") return saveProfileForm(f);
   const payload: ConnectionForm = {
     name: f.name,
     host: f.host,
@@ -147,6 +187,38 @@ async function saveForm(): Promise<void> {
     showForm.value = false;
     form.value = emptyForm();
     editingHasSecret.value = false;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** 共有プロファイルの保存（接続フィールドのみ。signon/PDF 等の信頼設定はサーバーが保持） */
+async function saveProfileForm(f: ConnForm): Promise<void> {
+  const payload = {
+    name: f.name,
+    host: f.host,
+    ...(f.port !== undefined ? { port: f.port } : {}),
+    ...(f.ccsid !== undefined ? { ccsid: f.ccsid } : {}),
+    ...(f.screenSize !== undefined ? { screenSize: f.screenSize } : {}),
+    ...(f.deviceName ? { deviceName: f.deviceName } : {}),
+    ...(f.tls !== undefined ? { tls: f.tls } : {})
+  };
+  try {
+    const res = f.id
+      ? await fetch(`/api/profiles/${encodeURIComponent(f.id)}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      : await fetch("/api/profiles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
+    await refreshProfiles();
+    showForm.value = false;
+    form.value = emptyForm();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -185,22 +257,23 @@ function cancelForm(): void {
     <p v-if="error" class="err" role="alert">{{ error }}</p>
 
     <div class="list" :class="'view-' + viewMode">
-      <button
-        v-for="p in profiles"
-        :key="'srv-' + p.name"
-        class="card"
-        :disabled="connecting"
-        @click="connectProfile(p)"
-      >
-        <span class="chips">
-          <span class="kind" :class="p.sessionType">
-            {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+      <div v-for="p in profiles" :key="'srv-' + p.name" class="card loc-card">
+        <button class="card-main" :disabled="connecting" @click="connectProfile(p)">
+          <span class="chips">
+            <span class="kind" :class="p.sessionType">
+              {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+            </span>
+            <span class="kind shared" title="共有プロファイル（全員から見える）">共有</span>
           </span>
-        </span>
-        <b>{{ p.name }}</b>
-        <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
-        <small>{{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}</small>
-      </button>
+          <b>{{ p.name }}</b>
+          <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
+          <small>{{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}</small>
+        </button>
+        <div v-if="profilesEditable" class="card-actions">
+          <button class="icon-btn" title="編集" @click.stop="editProfile(p)">✎</button>
+          <button class="icon-btn danger" title="削除" @click.stop="deleteProfile(p)">🗑</button>
+        </div>
+      </div>
 
       <div v-for="c in connectionsStore.connections" :key="'conn-' + c.id" class="card loc-card">
         <button class="card-main" :disabled="connecting" @click="connectSaved(c)">
@@ -223,7 +296,11 @@ function cancelForm(): void {
     </div>
 
     <form v-if="showForm" class="form" @submit.prevent="saveForm">
-      <h3>{{ form.id ? "接続を編集" : "新規接続" }}</h3>
+      <h3>{{ isProfileForm ? "共有プロファイルを編集" : form.id ? "接続を編集" : "新規接続" }}</h3>
+      <p v-if="isProfileForm" class="note">
+        ※ 共有プロファイル（全員から見える）を編集します。サインオンや PDF 出力などの信頼設定はサーバーの
+        設定ファイルで管理され、ここでは接続情報のみ編集します（既存の信頼設定は保持されます）。
+      </p>
       <div class="row">
         <input v-model="form.name" placeholder="名称" required />
         <input v-model="form.host" placeholder="ホスト" required />
@@ -232,7 +309,7 @@ function cancelForm(): void {
         <input v-model.number="form.port" type="number" placeholder="ポート (既定 23 / TLS 992)" />
         <input v-model="form.deviceName" placeholder="デバイス名 (任意)" />
       </div>
-      <div class="row">
+      <div v-if="!isProfileForm" class="row">
         <label class="field">
           <span class="field-label">セッション種別</span>
           <select v-model="form.sessionType">
@@ -241,7 +318,7 @@ function cancelForm(): void {
           </select>
         </label>
       </div>
-      <p v-if="form.sessionType === 'printer'" class="note">
+      <p v-if="!isProfileForm && form.sessionType === 'printer'" class="note">
         ※ プリンターセッションはホストのスプール出力（帳票・ジョブログ等）を受信して表示します。
         受信するには、ホスト側でスプールをこのデバイスの出力キューへ回す必要があります
         （ライターの用紙タイプ問い合わせに応答待ちになる場合があります）。
@@ -269,8 +346,10 @@ function cancelForm(): void {
         英小文字をそのまま入力するには 939 / 1399 / 5035 を選択してください。
       </p>
       <label class="check"><input v-model="form.tls" type="checkbox" /> TLS で接続</label>
-      <label class="check"><input v-model="form.autoSignon" type="checkbox" /> 自動サインオン（RFC 4777）</label>
-      <div v-if="form.autoSignon" class="row">
+      <label v-if="!isProfileForm" class="check">
+        <input v-model="form.autoSignon" type="checkbox" /> 自動サインオン（RFC 4777）
+      </label>
+      <div v-if="!isProfileForm && form.autoSignon" class="row">
         <input v-model="form.user" placeholder="ユーザー" autocomplete="off" />
         <input
           v-model="form.password"
@@ -279,7 +358,7 @@ function cancelForm(): void {
           autocomplete="off"
         />
       </div>
-      <p v-if="form.autoSignon" class="note">
+      <p v-if="!isProfileForm && form.autoSignon" class="note">
         ※ パスワードはサーバーで暗号化して保存されます（AES-256-GCM）。ブラウザや API には平文を返しません。
         サーバーに暗号鍵（AS400_SECRET_KEY）が未設定の場合、パスワード保存は無効です。
       </p>
@@ -504,6 +583,10 @@ small {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+.kind.shared {
+  border-style: dashed;
+  opacity: 0.85;
 }
 /* 一覧表示: 1 列・各カードを横並びのコンパクト行にする */
 .list.view-list {

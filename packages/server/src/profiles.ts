@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { writeFile, rename } from "node:fs/promises";
 import { z } from "zod";
 import { Tn5250Error, type ConnectOptions } from "@as400web/core";
 import type { PrinterOutputConfig } from "./printer-output.js";
@@ -48,13 +49,33 @@ export interface PublicProfile {
   tls?: boolean;
   ccsid?: number;
   screenSize?: "24x80" | "27x132";
+  deviceName?: string;
   autoSignon: boolean;
   /** セッション種別。printer 設定ブロックを持つプロファイルはプリンターセッション用 */
   sessionType: "display" | "printer";
 }
 
+/**
+ * UI からの編集で受理する接続フィールド（strict）。**信頼設定（signon / printer 出力系）は含めない**——
+ * ブラウザ入力から passwordEnv・autoPdfDir・autoPrint 等を注入させない（任意パス書込・任意コマンド実行の防止）。
+ * これらは運用者がファイルで管理し、更新時はサーバー側で保持する。
+ */
+const profileInputSchema = z
+  .object({
+    name: z.string().min(1),
+    host: z.string().min(1),
+    port: z.number().int().positive().optional(),
+    tls: z.boolean().optional(),
+    ccsid: z.number().int().optional(),
+    screenSize: z.enum(["24x80", "27x132"]).optional(),
+    deviceName: z.string().optional()
+  })
+  .strict();
+export type ProfileInput = z.infer<typeof profileInputSchema>;
+
 export class ProfileStore {
   private readonly byName = new Map<string, Profile>();
+  private path: string | undefined;
 
   constructor(profiles: Profile[]) {
     for (const p of profiles) this.byName.set(p.name, p);
@@ -71,7 +92,14 @@ export class ProfileStore {
     if (!parsed.success) {
       throw new Tn5250Error("CONNECT_FAILED", `invalid profiles.json: ${parsed.error.message}`);
     }
-    return new ProfileStore(parsed.data.profiles);
+    const store = new ProfileStore(parsed.data.profiles);
+    store.path = path;
+    return store;
+  }
+
+  /** プロファイルを保存できるか（--profiles でファイル由来のときのみ編集を永続化できる） */
+  get persistable(): boolean {
+    return this.path !== undefined;
   }
 
   get(name: string): Profile {
@@ -93,8 +121,67 @@ export class ProfileStore {
       if (p.tls !== undefined) pub.tls = p.tls;
       if (p.ccsid !== undefined) pub.ccsid = p.ccsid;
       if (p.screenSize !== undefined) pub.screenSize = p.screenSize;
+      if (p.deviceName !== undefined) pub.deviceName = p.deviceName;
       return pub;
     });
+  }
+
+  /** 接続フィールドから Profile 本体を組み立てる（信頼設定はここでは付けない） */
+  private buildProfile(input: ProfileInput, keep?: Profile): Profile {
+    const p: Profile = { name: input.name, host: input.host };
+    if (input.port !== undefined) p.port = input.port;
+    if (input.tls !== undefined) p.tls = input.tls;
+    if (input.ccsid !== undefined) p.ccsid = input.ccsid;
+    if (input.screenSize !== undefined) p.screenSize = input.screenSize;
+    if (input.deviceName !== undefined) p.deviceName = input.deviceName;
+    // 信頼設定は運用者管理。更新時は既存の値を保持し、ブラウザ入力からは触れない
+    if (keep?.enhanced !== undefined) p.enhanced = keep.enhanced;
+    if (keep?.signon !== undefined) p.signon = keep.signon;
+    if (keep?.printer !== undefined) p.printer = keep.printer;
+    return p;
+  }
+
+  /** 新規プロファイルを追加（接続フィールドのみ。信頼設定は持たない）。同名は FORBIDDEN */
+  add(inputRaw: unknown): PublicProfile {
+    const input = profileInputSchema.parse(inputRaw);
+    if (this.byName.has(input.name)) {
+      throw new Tn5250Error("FORBIDDEN", `profile ${input.name} already exists`);
+    }
+    this.byName.set(input.name, this.buildProfile(input));
+    return this.publicOf(input.name);
+  }
+
+  /** 既存プロファイルを更新（接続フィールドのみ。signon/printer は保持）。name 変更は改名として扱う */
+  update(name: string, inputRaw: unknown): PublicProfile {
+    const existing = this.get(name);
+    const input = profileInputSchema.parse(inputRaw);
+    if (input.name !== name && this.byName.has(input.name)) {
+      throw new Tn5250Error("FORBIDDEN", `profile ${input.name} already exists`);
+    }
+    const updated = this.buildProfile(input, existing);
+    if (input.name !== name) this.byName.delete(name); // 改名
+    this.byName.set(input.name, updated);
+    return this.publicOf(input.name);
+  }
+
+  remove(name: string): void {
+    if (!this.byName.delete(name)) throw new Tn5250Error("SESSION_NOT_FOUND", `profile ${name} not found`);
+  }
+
+  /** 単一プロファイルの公開表現（listPublic と同じ整形） */
+  private publicOf(name: string): PublicProfile {
+    const found = this.listPublic().find((p) => p.name === name);
+    if (!found) throw new Tn5250Error("SESSION_NOT_FOUND", `profile ${name} not found`);
+    return found;
+  }
+
+  /** profiles.json へ原子的に保存（tmp→rename）。ファイル由来のときのみ */
+  async save(): Promise<void> {
+    if (!this.path) return;
+    const json = JSON.stringify({ profiles: [...this.byName.values()] }, null, 2);
+    const tmp = `${this.path}.tmp`;
+    await writeFile(tmp, json, "utf8");
+    await rename(tmp, this.path);
   }
 
   /**
