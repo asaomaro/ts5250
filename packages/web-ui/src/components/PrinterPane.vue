@@ -119,7 +119,7 @@ function printReport(): void {
   <div class="printer-pane" tabindex="0" @focus="emit('focus')" @mousedown="emit('focus')">
     <div class="toolbar">
       <button class="toggle" :title="sidebarOpen ? '一覧を隠す' : '一覧を表示'" @click="sidebarOpen = !sidebarOpen">
-        {{ sidebarOpen ? "◧" : "▤" }}
+        {{ sidebarOpen ? "«" : "»" }}
       </button>
       <span class="badge">プリンター</span>
       <span class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
@@ -200,9 +200,24 @@ function printReport(): void {
 .spacer {
   flex: 1;
 }
+/* ツールバーのボタンは F キー（.fk）と同じ CRT テイストに揃える */
 .toolbar button {
-  font-size: 12px;
-  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 9px;
+  background: var(--crt);
+  color: var(--muted);
+  border: 1px solid var(--crt-line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.toolbar button:hover:not(:disabled) {
+  color: var(--t-green);
+  border-color: var(--t-green);
+}
+.toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .body {
   flex: 1;
@@ -232,8 +247,11 @@ function printReport(): void {
   border-radius: 4px;
 }
 .toggle {
+  min-width: 28px;
+  text-align: center;
   font-size: 13px;
-  padding: 2px 6px;
+  line-height: 1;
+  padding: 3px 6px;
 }
 .list {
   flex: 1;
