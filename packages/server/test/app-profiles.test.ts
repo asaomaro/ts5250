@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -389,5 +389,74 @@ describe("/api/profiles: PDF 出力先の保存時検証", () => {
     });
     expect(res.status).toBe(400);
     expect(JSON.parse(readFileSync(path, "utf8")).profiles[0].host).toBe("pub400.com");
+  });
+});
+
+/**
+ * 宛先プリンターは確実に判定できない（実際に印刷して確かめられない・確認手段が無い環境もある）ため、
+ * 出力先と違って**警告に留め保存は通す**。この非対称は意図的。
+ */
+describe("/api/profiles: 自動印刷の宛先チェック（警告）", () => {
+  const realPath = process.env["PATH"];
+  afterEach(() => {
+    process.env["PATH"] = realPath;
+  });
+  function fakeBin(cmds: Record<string, string>): void {
+    const dir = mkdtempSync(join(tmpdir(), "bin-"));
+    for (const [name, body] of Object.entries(cmds)) {
+      const p = join(dir, name);
+      writeFileSync(p, `#!/bin/sh\n${body}\n`);
+      chmodSync(p, 0o755);
+    }
+    process.env["PATH"] = dir;
+  }
+  const body = (dest: string) =>
+    JSON.stringify({
+      name: "prt",
+      host: "h",
+      sessionType: "printer",
+      printer: { autoPdfDir: OUT_DIR, autoPrint: dest }
+    });
+
+  it("宛先が見つからなくても保存は成功し、警告を返す", async () => {
+    fakeBin({ lp: "exit 0", lpstat: "exit 1" });
+    const path = profilesFile();
+    const res = await buildApp(deps(path)).request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body("Typo")
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).warnings[0]).toMatch(/「Typo」が見つかりません/);
+    // 保存はされている（エラーではなく警告なので）
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles.find((p: { name: string }) => p.name === "prt");
+    expect(saved.printer.autoPrint).toBe("Typo");
+  });
+
+  it("宛先が引ければ警告を返さない", async () => {
+    fakeBin({ lp: "exit 0", lpstat: "exit 0" });
+    const res = await buildApp(deps(profilesFile())).request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body("Office")
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).warnings).toBeUndefined();
+  });
+
+  it("出力先の不備は従来どおりエラー（警告に格下げしない）", async () => {
+    fakeBin({ lp: "exit 0", lpstat: "exit 0" });
+    const missing = join(mkdtempSync(join(tmpdir(), "np-")), "nope");
+    const res = await buildApp(deps(profilesFile())).request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "prt2",
+        host: "h",
+        sessionType: "printer",
+        printer: { autoPdfDir: missing, autoPrint: "Office" }
+      })
+    });
+    expect(res.status).toBe(400);
   });
 });
