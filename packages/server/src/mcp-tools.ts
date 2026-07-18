@@ -185,7 +185,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       description:
         "5250 セッションを開く。connection 指定で保存済み接続、profile 指定で設定プロファイルから接続" +
-        "（自動サインオンあり）、または host 等を直接指定。readOnly で閲覧専用。認証情報は引数に取らない。",
+        "（自動サインオンあり）、または host 等を直接指定。readOnly で閲覧専用。認証情報は引数に取らない。" +
+        "host 直接指定は既定で平文 telnet(23) になるため、TLS で繋ぐ場合は tls:true（ポート省略時 992）を指定する。",
       inputSchema: {
         connection: z.string().optional(),
         profile: z.string().optional(),
@@ -195,6 +196,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         screenSize: z.enum(["24x80", "27x132"]).optional(),
         deviceName: z.string().optional(),
         enhanced: z.boolean().optional(),
+        tls: z.boolean().optional(),
         readOnly: z.boolean().optional()
       },
       outputSchema: screenOutShape
@@ -706,6 +708,7 @@ function buildDirectOpts(input: {
   screenSize?: "24x80" | "27x132" | undefined;
   deviceName?: string | undefined;
   enhanced?: boolean | undefined;
+  tls?: boolean | undefined;
 }): {
   host: string;
   port?: number;
@@ -713,6 +716,7 @@ function buildDirectOpts(input: {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   enhanced?: boolean;
+  tls?: boolean;
   origin: string;
 } {
   if (!input.host) throw new Tn5250Error("CONNECT_FAILED", "host or profile required");
@@ -723,6 +727,7 @@ function buildDirectOpts(input: {
     screenSize?: "24x80" | "27x132";
     deviceName?: string;
     enhanced?: boolean;
+    tls?: boolean;
     origin: string;
   } = {
     host: input.host,
@@ -733,6 +738,7 @@ function buildDirectOpts(input: {
   if (input.screenSize !== undefined) o.screenSize = input.screenSize;
   if (input.deviceName !== undefined) o.deviceName = input.deviceName;
   if (input.enhanced !== undefined) o.enhanced = input.enhanced;
+  if (input.tls !== undefined) o.tls = input.tls;
   return o;
 }
 
