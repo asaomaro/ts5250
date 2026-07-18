@@ -85,20 +85,56 @@ describe("/api/profiles 編集（認証オフ）", () => {
     expect(saved.printer.autoPdfDir).toBe("/var/spool/out");
   });
 
-  it("信頼フィールド（autoPdfDir/signon）を含む入力は 400 で拒否", async () => {
+  it("signon の生オブジェクトや未知キーは strict で 400 拒否", async () => {
     const app = buildApp(deps(path));
-    const bad1 = await app.request("/api/profiles/pub400", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "pub400", host: "h", printer: { autoPdfDir: "/etc" } })
-    });
-    expect(bad1.status).toBe(400);
-    const bad2 = await app.request("/api/profiles", {
+    // signon の生オブジェクトは受理しない（signonUser/password/autoSignon のみ）
+    const bad1 = await app.request("/api/profiles", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "x", host: "h", signon: { user: "u", passwordEnv: "SECRET" } })
     });
+    expect(bad1.status).toBe(400);
+    // 未知キーも strict で拒否
+    const bad2 = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "y", host: "h", bogus: 1 })
+    });
     expect(bad2.status).toBe(400);
+  });
+
+  it("編集者は UI から printer 出力設定を保存でき、GET で printer が露出する", async () => {
+    const app = buildApp(deps(path));
+    const res = await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "pub400",
+        host: "pub400.com",
+        printer: { autoPdfDir: "/data/out", autoPrint: "Office", fontSize: 9 }
+      })
+    });
+    expect(res.status).toBe(200);
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles[0];
+    expect(saved.printer.autoPdfDir).toBe("/data/out");
+    expect(saved.printer.autoPrint).toBe("Office");
+    expect(saved.printer.fontSize).toBe(9);
+    // GET は editable のとき printer を返す
+    const list = await (await app.request("/api/profiles")).json();
+    expect(list.profiles[0].printer.autoPdfDir).toBe("/data/out");
+    expect(list.profiles[0].sessionType).toBe("printer");
+  });
+
+  it("printer を空にするとブロックが消える（自動蓄積/印刷を無効化）", async () => {
+    const app = buildApp(deps(path));
+    await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "pub400", host: "pub400.com", printer: { autoPdfDir: "", autoPrint: "" } })
+    });
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles[0];
+    expect(saved.printer).toBeUndefined();
+    expect(saved.host).toBe("pub400.com");
   });
 
   it("DELETE でプロファイルを削除できる", async () => {
@@ -166,6 +202,36 @@ describe("/api/profiles 編集（認証オン・admin ゲート）", () => {
       body: JSON.stringify({ name: "pub400", host: "h2" })
     });
     expect(put.status).toBe(200);
+  });
+
+  it("一般ユーザーは printer を露出されず、printer 付き書き込みも 403", async () => {
+    const app = buildApp(deps(profilesFile(), authCtx()));
+    const cookie = await login(app, "alice", "alicepw");
+    // GET: editable=false なので printer は返らない
+    const get = await (await app.request("/api/profiles", { headers: { cookie } })).json();
+    expect(get.profiles[0].printer).toBeUndefined();
+    // printer を含む書き込みも 403（ルートゲートで拒否）
+    const put = await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "pub400", host: "h", printer: { autoPdfDir: "/evil" } })
+    });
+    expect(put.status).toBe(403);
+  });
+
+  it("admin は printer を編集でき、露出される", async () => {
+    const path = profilesFile();
+    const app = buildApp(deps(path, authCtx()));
+    const cookie = await login(app, "admin", "adminpw");
+    const get = await (await app.request("/api/profiles", { headers: { cookie } })).json();
+    expect(get.profiles[0].printer.autoPdfDir).toBe("/var/spool/out");
+    const put = await app.request("/api/profiles/pub400", {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "pub400", host: "h", printer: { autoPrint: "AdminPrinter" } })
+    });
+    expect(put.status).toBe(200);
+    expect(JSON.parse(readFileSync(path, "utf8")).profiles[0].printer.autoPrint).toBe("AdminPrinter");
   });
 });
 

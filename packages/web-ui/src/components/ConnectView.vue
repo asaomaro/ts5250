@@ -31,6 +31,13 @@ type ConnForm = {
   autoSignon?: boolean;
   user?: string;
   password?: string;
+  // プロファイルのみ: PDF 自動蓄積・自動印刷（信頼設定・サーバー保存）
+  autoPdfDir?: string;
+  autoPrint?: string;
+  pdfFontPath?: string;
+  pdfFontName?: string;
+  pageSize?: string;
+  fontSize?: number;
 };
 const emptyForm = (): ConnForm => ({
   kind: "connection",
@@ -102,7 +109,7 @@ function infoRows(name: string, source: string, o: ConnLike): { label: string; v
     { label: "名称", value: name },
     { label: "区分", value: source },
     { label: "ホスト", value: `${o.host ?? "-"}${o.port ? ":" + o.port : ""}` },
-    { label: "種別", value: o.sessionType === "printer" ? "プリンター" : "表示" }
+    { label: "種別", value: o.sessionType === "printer" ? "プリンター" : "5250端末" }
   ];
   if (o.tls) rows.push({ label: "TLS", value: "有効" });
   if (o.ccsid !== undefined) rows.push({ label: "CCSID", value: String(o.ccsid) });
@@ -132,7 +139,14 @@ function editProfile(p: PublicProfile): void {
     ...(p.deviceName !== undefined ? { deviceName: p.deviceName } : {}),
     ...(p.tls !== undefined ? { tls: p.tls } : {}),
     ...(p.autoSignon ? { autoSignon: true } : {}),
-    ...(p.signonUser !== undefined ? { user: p.signonUser } : {})
+    ...(p.signonUser !== undefined ? { user: p.signonUser } : {}),
+    // printer 出力設定（編集者にのみ露出される）
+    ...(p.printer?.autoPdfDir !== undefined ? { autoPdfDir: p.printer.autoPdfDir } : {}),
+    ...(p.printer?.autoPrint !== undefined ? { autoPrint: p.printer.autoPrint } : {}),
+    ...(p.printer?.pdfFontPath !== undefined ? { pdfFontPath: p.printer.pdfFontPath } : {}),
+    ...(p.printer?.pdfFontName !== undefined ? { pdfFontName: p.printer.pdfFontName } : {}),
+    ...(p.printer?.pageSize !== undefined ? { pageSize: p.printer.pageSize } : {}),
+    ...(p.printer?.fontSize !== undefined ? { fontSize: p.printer.fontSize } : {})
   };
   // 既存の自動サインオン（passwordEnv も含む）があればパスワードは据え置き扱い
   editingHasSecret.value = p.autoSignon;
@@ -267,7 +281,16 @@ async function saveProfileForm(f: ConnForm): Promise<void> {
     autoSignon: !!f.autoSignon,
     ...(f.autoSignon && f.user ? { signonUser: f.user } : {}),
     // パスワード空欄は据え置き（未送信）。サーバーが既存の passwordEnv/passwordEnc を保持
-    ...(f.autoSignon && f.password ? { password: f.password } : {})
+    ...(f.autoSignon && f.password ? { password: f.password } : {}),
+    // printer 出力設定は常に送る（全空なら server 側でブロック削除＝クリア）
+    printer: {
+      ...(f.autoPdfDir ? { autoPdfDir: f.autoPdfDir } : {}),
+      ...(f.autoPrint ? { autoPrint: f.autoPrint } : {}),
+      ...(f.pdfFontPath ? { pdfFontPath: f.pdfFontPath } : {}),
+      ...(f.pdfFontName ? { pdfFontName: f.pdfFontName } : {}),
+      ...(f.pageSize ? { pageSize: f.pageSize } : {}),
+      ...(f.fontSize !== undefined ? { fontSize: f.fontSize } : {})
+    }
   };
   try {
     const res = f.id
@@ -332,7 +355,7 @@ function cancelForm(): void {
         <button class="card-main" :disabled="connecting" @click="connectProfile(p)">
           <span class="chips">
             <span class="kind" :class="p.sessionType">
-              {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+              {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 5250端末" }}
             </span>
             <span class="kind shared" title="共有プロファイル（全員から見える）">共有</span>
           </span>
@@ -360,7 +383,7 @@ function cancelForm(): void {
         <button class="card-main" :disabled="connecting" @click="connectSaved(c)">
           <span class="chips">
             <span class="kind" :class="c.sessionType ?? 'display'">
-              {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+              {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 5250端末" }}
             </span>
           </span>
           <b>{{ c.name }}</b>
@@ -403,7 +426,7 @@ function cancelForm(): void {
         <label class="field">
           <span class="field-label">セッション種別</span>
           <select v-model="form.sessionType">
-            <option value="display">表示（5250 画面）</option>
+            <option value="display">5250端末（表示）</option>
             <option value="printer">プリンター（スプール受信）</option>
           </select>
         </label>
@@ -452,6 +475,37 @@ function cancelForm(): void {
         ※ パスワードはサーバーで暗号化して保存されます（AES-256-GCM）。ブラウザや API には平文を返しません。
         サーバーに暗号鍵（AS400_SECRET_KEY）が未設定の場合、パスワード保存は無効です。
       </p>
+      <!-- プロファイルのみ: PDF 自動蓄積 / 物理自動印刷（サーバー側の信頼設定） -->
+      <template v-if="isProfileForm">
+        <h4 class="subhead">PDF 自動蓄積 / 自動印刷（サーバー設定）</h4>
+        <div class="row">
+          <label class="field">
+            <span class="field-label">PDF 自動蓄積フォルダ（autoPdfDir）</span>
+            <input v-model="form.autoPdfDir" placeholder="/var/spool/as400-pdf（サーバー上のパス）" autocomplete="off" />
+          </label>
+        </div>
+        <div class="row">
+          <label class="field">
+            <span class="field-label">自動印刷プリンター名（autoPrint）</span>
+            <input v-model="form.autoPrint" placeholder="OfficePrinter（サーバー上のプリンター名）" autocomplete="off" />
+          </label>
+        </div>
+        <div class="row">
+          <label class="field">
+            <span class="field-label">用紙サイズ（任意）</span>
+            <input v-model="form.pageSize" placeholder="LETTER / A4" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="field-label">フォントサイズ（任意）</span>
+            <input v-model.number="form.fontSize" type="number" placeholder="8" />
+          </label>
+        </div>
+        <p class="note">
+          ※ 受信スプールを**サーバー上**の指定フォルダへ PDF 保存し、指定プリンターへ <code>lp</code> で自動印刷します。
+          パス・プリンター名は**サーバーのローカル**を指します。空にすると自動蓄積/印刷は無効になります。
+          （この設定は認証オフ、または admin のときだけ編集できます）
+        </p>
+      </template>
       <div class="row">
         <button type="submit">保存</button>
         <button type="button" class="ghost" @click="cancelForm">キャンセル</button>
@@ -548,6 +602,21 @@ small {
   margin: 0;
   font-family: var(--mono);
   font-size: 14px;
+}
+.subhead {
+  width: 100%;
+  margin: 6px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.form .note code {
+  font-family: var(--mono);
+  background: var(--accent-soft);
+  padding: 0 4px;
+  border-radius: 3px;
 }
 .form .row {
   display: flex;
@@ -674,6 +743,11 @@ small {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+.kind.display {
+  border-color: var(--t-blue);
+  color: var(--t-blue);
+  background: color-mix(in srgb, var(--t-blue) 14%, transparent);
 }
 .kind.shared {
   border-style: dashed;

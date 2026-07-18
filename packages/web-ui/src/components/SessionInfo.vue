@@ -18,7 +18,7 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
   if (!s) return [];
   const m = s.meta ?? {};
   const rows: { label: string; value: string }[] = [];
-  rows.push({ label: "種別", value: isPrinter.value ? "プリンター" : "表示" });
+  rows.push({ label: "種別", value: isPrinter.value ? "プリンター" : "5250端末" });
   if (m.host) rows.push({ label: "ホスト", value: `${m.host}${m.port ? ":" + m.port : ""}` });
   const ccsid = s.ccsid ?? m.ccsid;
   if (ccsid !== undefined) rows.push({ label: "CCSID", value: String(ccsid) });

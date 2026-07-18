@@ -1,6 +1,12 @@
 // @as400web/server 公開 API
 export { SessionManager, type OpenOptions, type SessionEntry } from "./session-manager.js";
-export { ProfileStore, type Profile, type PublicProfile, type ProfileInput } from "./profiles.js";
+export {
+  ProfileStore,
+  type Profile,
+  type PublicProfile,
+  type ProfileInput,
+  type PrinterConfig
+} from "./profiles.js";
 export { ConnectionStore, type PublicConnection, type ConnectionInput } from "./connection-store.js";
 export { screenToText, type FormatOptions } from "./format.js";
 export { fieldSignon } from "./signon.js";
