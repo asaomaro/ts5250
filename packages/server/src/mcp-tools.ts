@@ -296,6 +296,75 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       })
   );
 
+  server.registerTool(
+    "list_connections",
+    {
+      description:
+        "使える接続設定の一覧。open_session / open_printer_session に渡す参照方法つきで返す" +
+        "（kind=profile なら profile に name を、kind=connection なら connection に id を渡す）。" +
+        "可視範囲は認証状態に従う: 認証オフは全件、admin は全件、一般ユーザーは自分の接続のみ" +
+        "（サーバー設定は admin 専用）。出力設定や資格情報は返さない。",
+      inputSchema: {},
+      outputSchema: {
+        connections: z.array(
+          z.object({
+            /** profile=サーバー設定（name で参照） / connection=保存済み接続（id で参照） */
+            kind: z.enum(["profile", "connection"]),
+            /** open_session に渡す値（kind に応じて profile / connection のどちらかへ） */
+            ref: z.string(),
+            name: z.string(),
+            host: z.string(),
+            port: z.number().optional(),
+            tls: z.boolean().optional(),
+            deviceName: z.string().optional(),
+            sessionType: z.enum(["display", "printer"]),
+            /** 自動サインオンが設定されているか（ユーザー名・パスワードは返さない） */
+            autoSignon: z.boolean()
+          })
+        )
+      }
+    },
+    async () =>
+      withAudit({ op: "list_connections" }, async () => {
+        // 露出は「接続先を選ぶのに必要な最小限」に絞る。signonUser と printer（信頼設定）は返さない
+        // ——LLM のコンテキストに残るため、サーバー内部の値を渡さない
+        const fromProfiles = profiles.listForUser(user).map((p) => ({
+          kind: "profile" as const,
+          ref: p.name,
+          name: p.name,
+          host: p.host,
+          ...(p.port !== undefined ? { port: p.port } : {}),
+          ...(p.tls !== undefined ? { tls: p.tls } : {}),
+          ...(p.deviceName !== undefined ? { deviceName: p.deviceName } : {}),
+          sessionType: p.sessionType,
+          autoSignon: p.autoSignon
+        }));
+        const fromConnections = (connections?.listForUser(user) ?? []).map((c) => ({
+          kind: "connection" as const,
+          ref: c.id,
+          name: c.name,
+          host: c.host,
+          ...(c.port !== undefined ? { port: c.port } : {}),
+          ...(c.tls !== undefined ? { tls: c.tls } : {}),
+          ...(c.deviceName !== undefined ? { deviceName: c.deviceName } : {}),
+          sessionType: c.sessionType,
+          autoSignon: c.autoSignon === true
+        }));
+        const list = [...fromProfiles, ...fromConnections];
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: list.length
+                ? list.map((e) => `${e.kind}:${e.ref} — ${e.name} (${e.host}, ${e.sessionType})`).join("\n")
+                : "利用できる接続設定がありません"
+            }
+          ],
+          structuredContent: { connections: list }
+        };
+      })
+  );
+
   // ---- プリンターセッション（TN5250E: スプールを SCS 受信 → 等幅テキスト） ----
   server.registerTool(
     "open_printer_session",

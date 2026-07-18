@@ -1,5 +1,5 @@
 schema: 3
-slug: bind-localhost-when-open
+slug: mcp-list-connections
 current: deliver
 approved: [requirement, spec, coding, test, review, deliver]
 mode: interactive
