@@ -14,6 +14,7 @@ import type { ConnectionStore } from "./connection-store.js";
 import type { AuthUser } from "./auth.js";
 import { screenToText, type FormatOptions } from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
+import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
 import { withAudit } from "./audit.js";
 
@@ -301,15 +302,16 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       description:
         "TN5250E プリンターセッションを開いて待ち受ける。ホストのスプール出力（帳票・ジョブログ等）を" +
-        "受信でき、wait_spool で内容を等幅テキストとして取得する。deviceName 省略時はホスト採番。",
+        "受信でき、wait_spool で内容を等幅テキストとして取得する。deviceName 省略時はホスト採番。" +
+        "認証情報は引数に取らない（D13）。デバイス作成に認証が要るホストでは connection または profile を指定する。" +
+        "host 直接指定は既定で平文 telnet(23) になるため、TLS で繋ぐ場合は tls:true（ポート省略時 992）を指定する。",
       inputSchema: {
         connection: z.string().optional(),
+        profile: z.string().optional(),
         host: z.string().optional(),
         port: z.number().int().optional(),
         deviceName: z.string().optional(),
         ccsid: z.number().int().optional(),
-        user: z.string().optional(),
-        password: z.string().optional(),
         tls: z.boolean().optional()
       },
       outputSchema: { sessionId: z.string(), startupCode: z.string() }
@@ -317,17 +319,18 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (input) =>
       withAudit({ op: "open_printer_session" }, async () => {
         try {
+          // 資格情報は connection / profile 経由のみ（D13）。host 直接指定では認証情報を持たない
           const src: ConnectOptions & { origin?: string } = input.connection
             ? resolveConnection(input.connection)
-            : {
-                host: input.host ?? "",
-                ...(input.port !== undefined ? { port: input.port } : {}),
-                ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
-                ...(input.user !== undefined ? { user: input.user } : {}),
-                ...(input.password !== undefined ? { password: input.password } : {}),
-                ...(input.tls !== undefined ? { tls: input.tls } : {}),
-                origin: "direct"
-              };
+            : input.profile
+              ? { ...profiles.resolveConnectOptions(input.profile), origin: input.profile }
+              : {
+                  host: input.host ?? "",
+                  ...(input.port !== undefined ? { port: input.port } : {}),
+                  ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
+                  ...(input.tls !== undefined ? { tls: input.tls } : {}),
+                  origin: "direct"
+                };
           const entry = await sessions.openPrinter({
             ...(src.host ? { host: src.host } : {}),
             ...(src.port !== undefined ? { port: src.port } : {}),
@@ -336,6 +339,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             user: src.user,
             password: src.password,
             ...(src.tls !== undefined ? { tls: src.tls } : {}),
+            // 自動蓄積/印刷はプロファイルにあるときだけ（ws-handler と同じ信頼境界）
+            ...(input.profile ? withOutput(profiles.resolvePrinterOutput(input.profile)) : {}),
             origin: src.origin ?? "direct"
           });
           const code = entry.session.startupCode;
@@ -751,4 +756,9 @@ function fieldCoords(fields: FieldInput[]): { row: number; col: number }[] {
 function screenHas(snap: ScreenSnapshot, expect: { text: string; row?: number | undefined }): boolean {
   const rows = expect.row !== undefined ? [snap.cells[expect.row - 1] ?? []] : snap.cells;
   return rows.map((r) => r.map((c) => c.char).join("")).join("\n").includes(expect.text);
+}
+
+/** プリンター出力設定を openPrinter のオプション断片へ（未設定なら空＝自動出力なし） */
+function withOutput(output: PrinterOutputConfig | undefined): { output?: PrinterOutputConfig } {
+  return output ? { output } : {};
 }

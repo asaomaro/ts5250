@@ -206,12 +206,17 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | `run_steps` | 複数ステップを順次実行（`expect` 不一致で中断） |
 | `get_job_info` | 対話ジョブの識別子（番号 / ユーザー / ジョブ名） |
 | `select_gui_choice` / `submit_gui_selection` | 拡張 5250 GUI 選択フィールドの選択・確定送信 |
-| `open_printer_session` | TN5250E プリンターセッションを開いて待ち受ける（起動応答コードを返す） |
+| `open_printer_session` | TN5250E プリンターセッションを開いて待ち受ける（`connection` / `profile` / host 直指定。起動応答コードを返す） |
 | `wait_spool` / `list_spools` / `get_spool` | 受信スプール（帳票・ジョブログ等）を等幅テキストで取得（次の 1 件を待つ／一覧／再取得） |
 | `get_spool_pdf` | 受信スプールを PDF（base64）で取得（等幅・改ページ保持・SBCS/DBCS 対応） |
 
 - 画面応答は **text**（行番号付きグリッド＋フィールド一覧＋GUI）と **structuredContent**（cursor/fields/gui …）を併記。
 - **認証情報はツール引数に取らない**（プロファイル経由）。監査ログは値を出さない。
+  デバイス作成に認証が要るホストでプリンターを開く場合も、`connection` / `profile` を指定します
+  （`user` / `password` は受け付けません）。
+- `host` を直接指定した接続は**既定で平文 telnet(23)** です。TLS で繋ぐには `tls: true`（ポート省略時 992）を
+  指定してください。自動サインオンのパスワードは RFC 4777 の `IBMSUBSPW`＝**平文**で流れるため、
+  `connection` / `profile` 側も TLS を有効にすることを推奨します。
 
 ---
 
