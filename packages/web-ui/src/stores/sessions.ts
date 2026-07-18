@@ -6,6 +6,8 @@ import type { WsClient } from "../ws-client.js";
 export interface SpoolReportView {
   id: string;
   pages: { rows: number; cols: number; lines: string[] }[];
+  /** 受信時刻（クライアントでスタンプ） */
+  receivedAt?: number;
 }
 
 export interface SessionState {
@@ -71,6 +73,7 @@ export const sessionsStore = reactive({
     const s = this.byId.get(id);
     if (!s) return;
     if (!s.reports) s.reports = [];
+    if (report.receivedAt === undefined) report.receivedAt = Date.now();
     s.reports.push(report);
     if (!s.selectedReportId) s.selectedReportId = report.id;
   }
