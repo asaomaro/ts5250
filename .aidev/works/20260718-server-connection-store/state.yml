@@ -1,0 +1,8 @@
+schema: 3
+slug: server-connection-store
+current: plan
+approved: [requirement, research, spec, design, plan]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

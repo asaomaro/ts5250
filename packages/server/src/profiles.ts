@@ -49,6 +49,8 @@ export interface PublicProfile {
   ccsid?: number;
   screenSize?: "24x80" | "27x132";
   autoSignon: boolean;
+  /** セッション種別。printer 設定ブロックを持つプロファイルはプリンターセッション用 */
+  sessionType: "display" | "printer";
 }
 
 export class ProfileStore {
@@ -81,7 +83,12 @@ export class ProfileStore {
   /** API 露出用の一覧（認証情報なし） */
   listPublic(): PublicProfile[] {
     return [...this.byName.values()].map((p) => {
-      const pub: PublicProfile = { name: p.name, host: p.host, autoSignon: p.signon !== undefined };
+      const pub: PublicProfile = {
+        name: p.name,
+        host: p.host,
+        autoSignon: p.signon !== undefined,
+        sessionType: p.printer !== undefined ? "printer" : "display"
+      };
       if (p.port !== undefined) pub.port = p.port;
       if (p.tls !== undefined) pub.tls = p.tls;
       if (p.ccsid !== undefined) pub.ccsid = p.ccsid;

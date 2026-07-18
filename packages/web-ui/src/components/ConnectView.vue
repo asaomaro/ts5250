@@ -49,7 +49,17 @@ onMounted(async () => {
 });
 
 async function connectProfile(p: PublicProfile): Promise<void> {
-  await doConnect({ type: "open", profile: p.name }, p.name);
+  await doConnect({ type: "open", profile: p.name }, p.name, p.sessionType);
+}
+
+/** カード / 一覧の表示切り替え（端末ごとに localStorage で保持） */
+const VIEW_KEY = "as400.connectView";
+const viewMode = ref<"card" | "list">(
+  (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY) === "list") ? "list" : "card"
+);
+function setViewMode(m: "card" | "list"): void {
+  viewMode.value = m;
+  if (typeof localStorage !== "undefined") localStorage.setItem(VIEW_KEY, m);
 }
 
 async function connectSaved(c: SavedConnection): Promise<void> {
@@ -123,10 +133,30 @@ function cancelForm(): void {
 
 <template>
   <div class="connect">
-    <h2>接続</h2>
+    <div class="head">
+      <h2>接続</h2>
+      <div class="view-toggle" role="group" aria-label="表示切り替え">
+        <button
+          type="button"
+          :class="{ active: viewMode === 'card' }"
+          title="カード表示"
+          @click="setViewMode('card')"
+        >
+          ▦ カード
+        </button>
+        <button
+          type="button"
+          :class="{ active: viewMode === 'list' }"
+          title="一覧表示"
+          @click="setViewMode('list')"
+        >
+          ☰ 一覧
+        </button>
+      </div>
+    </div>
     <p v-if="error" class="err" role="alert">{{ error }}</p>
 
-    <div class="list">
+    <div class="list" :class="viewMode">
       <button
         v-for="p in profiles"
         :key="'srv-' + p.name"
@@ -134,7 +164,12 @@ function cancelForm(): void {
         :disabled="connecting"
         @click="connectProfile(p)"
       >
-        <span class="src srv">サーバー</span>
+        <span class="chips">
+          <span class="src srv">サーバー</span>
+          <span class="kind" :class="p.sessionType">
+            {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+          </span>
+        </span>
         <b>{{ p.name }}</b>
         <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
         <small>{{ p.host }}{{ p.port ? ":" + p.port : "" }}{{ p.tls ? " TLS" : "" }}</small>
@@ -142,7 +177,12 @@ function cancelForm(): void {
 
       <div v-for="c in settingsStore.connections" :key="'loc-' + c.id" class="card loc-card">
         <button class="card-main" :disabled="connecting" @click="connectSaved(c)">
-          <span class="src loc">ブラウザ</span>
+          <span class="chips">
+            <span class="src loc">ブラウザ</span>
+            <span class="kind" :class="c.sessionType ?? 'display'">
+              {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 表示" }}
+            </span>
+          </span>
           <b>{{ c.name }}</b>
           <span v-if="c.autoSignon" title="自動サインオン">⚡</span>
           <small>{{ c.host }}{{ c.port ? ":" + c.port : "" }}{{ c.tls ? " TLS" : "" }}</small>
@@ -394,5 +434,82 @@ small {
 .icon-btn.danger:hover {
   background: color-mix(in srgb, #c62828 18%, transparent);
   color: #c62828;
+}
+/* ヘッダ（タイトル＋表示切り替え） */
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.view-toggle button {
+  padding: 4px 12px;
+  background: var(--card);
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.view-toggle button + button {
+  border-left: 1px solid var(--line);
+}
+.view-toggle button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* 種別チップ（サーバー/ブラウザ ＋ 表示/プリンター） */
+.chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.kind.printer {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* 一覧表示: 1 列・各カードを横並びのコンパクト行にする */
+.list.list {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.list.list .card {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.list.list .loc-card {
+  padding: 0;
+}
+.list.list .card-main {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.list.list .card.add {
+  justify-content: center;
+}
+.list.list .card small,
+.list.list .card-main small {
+  margin-left: auto;
 }
 </style>
