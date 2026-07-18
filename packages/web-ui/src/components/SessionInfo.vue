@@ -22,13 +22,15 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
   if (m.host) rows.push({ label: "ホスト", value: `${m.host}${m.port ? ":" + m.port : ""}` });
   const ccsid = s.ccsid ?? m.ccsid;
   if (ccsid !== undefined) rows.push({ label: "CCSID", value: String(ccsid) });
-  // 画面: 実際のサイズ（snapshot）を主に、設定 screenSize が異なる場合のみ併記
-  if (s.snapshot) {
-    const actual = `${s.snapshot.rows}x${s.snapshot.cols}`;
-    const setSize = m.screenSize && m.screenSize !== actual ? `（設定 ${m.screenSize}）` : "";
-    rows.push({ label: "画面", value: `${actual}${setSize}` });
-  } else if (m.screenSize) {
-    rows.push({ label: "画面サイズ", value: m.screenSize });
+  // 画面: 表示セッションのみ（プリンターは画面を持たない）。実サイズ主＋設定差分のみ併記
+  if (!isPrinter.value) {
+    if (s.snapshot) {
+      const actual = `${s.snapshot.rows}x${s.snapshot.cols}`;
+      const setSize = m.screenSize && m.screenSize !== actual ? `（設定 ${m.screenSize}）` : "";
+      rows.push({ label: "画面", value: `${actual}${setSize}` });
+    } else if (m.screenSize) {
+      rows.push({ label: "画面サイズ", value: m.screenSize });
+    }
   }
   if (m.deviceName) rows.push({ label: "デバイス名", value: m.deviceName });
   if (m.tls) rows.push({ label: "TLS", value: "有効" });
@@ -51,8 +53,8 @@ function fetchJob(): void {
       <!-- 表示セッション: ジョブ情報 -->
       <div class="row" v-if="!isPrinter">
         <span>ジョブ</span>
-        <b v-if="job">{{ job.number }}/{{ job.user }}/{{ job.name }}</b>
-        <button v-else class="btn" :disabled="locked" @click="fetchJob">🔄 ジョブ情報を取得</button>
+        <b v-if="job" class="jobval">{{ job.number }}/{{ job.user }}/{{ job.name }}</b>
+        <button v-else class="btn" :disabled="locked" @click="fetchJob">🔄 取得</button>
       </div>
       <!-- プリンター: 起動応答＋受信件数 -->
       <template v-if="isPrinter">
@@ -79,7 +81,9 @@ function fetchJob(): void {
   top: 100%;
   left: 0;
   z-index: 21;
-  min-width: 240px;
+  min-width: 260px;
+  width: max-content;
+  max-width: 360px;
   background: var(--crt-bezel);
   border: 1px solid var(--crt-line);
   border-radius: 8px;
@@ -104,7 +108,13 @@ function fetchJob(): void {
   color: var(--t-green);
   word-break: break-all;
 }
+/* ジョブ情報（番号/ユーザー/名前）は折り返さない */
+.jobval {
+  white-space: nowrap;
+  word-break: normal;
+}
 .btn {
+  white-space: nowrap;
   padding: 4px 10px;
   border: 1px solid var(--accent);
   border-radius: 6px;
