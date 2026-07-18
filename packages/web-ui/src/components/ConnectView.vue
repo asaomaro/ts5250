@@ -4,6 +4,7 @@ import type { PublicProfile, PublicConnection } from "@as400web/server";
 import { connectionsStore, type ConnectionForm } from "../stores/connections.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
 import type { SessionMeta } from "../stores/sessions.js";
+import { authStore } from "../stores/auth.js";
 import InfoPopover from "./InfoPopover.vue";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
@@ -49,6 +50,26 @@ const emptyForm = (): ConnForm => ({
 });
 const form = ref<ConnForm>(emptyForm());
 const isProfileForm = computed(() => form.value.kind === "profile");
+const isNew = computed(() => !form.value.id);
+
+// ---- 環境判定（所有 共有/個人 の出し分け） ----
+/** 認証オフ（マルチユーザーでない）＝所有概念を見せない・全て共有 */
+const authOff = computed(() => !authStore.enabled);
+const isAdmin = computed(() => authStore.isAdmin);
+/** 新規作成で所有（共有/個人）を選べるか＝admin のみ（認証オフ=共有固定 / 一般=個人固定） */
+const canChooseOwnership = computed(() => !authOff.value && isAdmin.value);
+const formTitle = computed(() =>
+  isNew.value
+    ? "新規設定"
+    : authOff.value
+      ? "設定を編集"
+      : isProfileForm.value
+        ? "共有設定を編集"
+        : "個人接続を編集"
+);
+function onOwnershipChange(e: Event): void {
+  setOwnership((e.target as HTMLSelectElement).value as "shared" | "personal");
+}
 
 // カタカナ系コードページ（930/5026）は英小文字が大文字化される旨を案内する
 const showKatakanaHint = computed(() => isKatakanaCcsid(form.value.ccsid));
@@ -132,6 +153,7 @@ function editProfile(p: PublicProfile): void {
     id: p.name, // 改名検知のため元の名前を保持
     name: p.name,
     host: p.host,
+    sessionType: p.sessionType, // 種別は編集で変更しないが、表示・printer 欄の判定に必要
     ccsid: p.ccsid ?? DEFAULT_CCSID,
     screenSize: p.screenSize ?? DEFAULT_SCREEN_SIZE,
     password: "",
@@ -212,9 +234,38 @@ async function deleteConn(c: PublicConnection): Promise<void> {
 }
 
 function newConn(): void {
-  form.value = emptyForm();
+  // 既定の所有: 認証オフ or admin は共有（profile）、一般ユーザーは個人（connection）
+  const shared = authOff.value || isAdmin.value;
+  form.value = { ...emptyForm(), kind: shared ? "profile" : "connection" };
   editingHasSecret.value = false;
   showForm.value = true;
+}
+/** 新規フォームの所有（共有/個人）を admin が切り替える */
+function setOwnership(o: "shared" | "personal"): void {
+  form.value.kind = o === "shared" ? "profile" : "connection";
+}
+
+/** admin が既存設定の所有を移動する（共有⇄個人）。移動後は一覧を再取得 */
+async function moveOwnership(to: "shared" | "personal"): Promise<void> {
+  const f = form.value;
+  if (!f.id) return;
+  const kind = f.kind === "profile" ? "profile" : "connection";
+  try {
+    const res = await fetch("/api/settings/move", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, id: f.id, to })
+    });
+    const body = (await res.json().catch(() => ({}))) as { error?: string; warnings?: string[] };
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    if (body.warnings?.length) error.value = "移動しました（注意: " + body.warnings.join(" / ") + "）";
+    await refreshProfiles();
+    await connectionsStore.refresh();
+    showForm.value = false;
+    form.value = emptyForm();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
 }
 
 async function doConnect(
@@ -272,6 +323,8 @@ async function saveProfileForm(f: ConnForm): Promise<void> {
   const payload = {
     name: f.name,
     host: f.host,
+    // 種別は新規作成時のみ採用される（更新ではサーバーが既存を維持）
+    ...(f.sessionType !== undefined ? { sessionType: f.sessionType } : {}),
     ...(f.port !== undefined ? { port: f.port } : {}),
     ...(f.ccsid !== undefined ? { ccsid: f.ccsid } : {}),
     ...(f.screenSize !== undefined ? { screenSize: f.screenSize } : {}),
@@ -357,7 +410,7 @@ function cancelForm(): void {
             <span class="kind" :class="p.sessionType">
               {{ p.sessionType === "printer" ? "🖨 プリンター" : "🖥 5250端末" }}
             </span>
-            <span class="kind shared" title="共有プロファイル（全員から見える）">共有</span>
+            <span v-if="!authOff" class="kind shared" title="共有（全員から見える）">共有</span>
           </span>
           <b>{{ p.name }}</b>
           <span v-if="p.autoSignon" title="自動サインオン">⚡</span>
@@ -385,6 +438,7 @@ function cancelForm(): void {
             <span class="kind" :class="c.sessionType ?? 'display'">
               {{ c.sessionType === "printer" ? "🖨 プリンター" : "🖥 5250端末" }}
             </span>
+            <span v-if="!authOff" class="kind personal" title="個人（自分だけ）">個人</span>
           </span>
           <b>{{ c.name }}</b>
           <span v-if="c.autoSignon" title="自動サインオン">⚡</span>
@@ -408,11 +462,33 @@ function cancelForm(): void {
     </div>
 
     <form v-if="showForm" class="form" @submit.prevent="saveForm">
-      <h3>{{ isProfileForm ? "共有プロファイルを編集" : form.id ? "接続を編集" : "新規接続" }}</h3>
-      <p v-if="isProfileForm" class="note">
-        ※ 共有プロファイル（全員から見える）を編集します。接続情報と自動サインオンを編集でき、パスワードは
-        暗号化して保存されます。PDF 出力などの信頼設定と、運用者が env で設定した passwordEnv はサーバー側で
-        保持され、ここでは変更しません。
+      <h3>{{ formTitle }}</h3>
+      <!-- 所有（共有/個人）: 新規かつ admin のみ選択。認証オフ=共有固定 / 一般=個人固定なので出さない -->
+      <div v-if="isNew && canChooseOwnership" class="row">
+        <label class="field">
+          <span class="field-label">所有</span>
+          <select :value="isProfileForm ? 'shared' : 'personal'" @change="onOwnershipChange">
+            <option value="shared">共有（全員から見える）</option>
+            <option value="personal">個人（自分だけ）</option>
+          </select>
+        </label>
+      </div>
+      <!-- 種別: 新規は選択、編集は固定（変更不可） -->
+      <div class="row">
+        <label class="field">
+          <span class="field-label">セッション種別</span>
+          <select v-if="isNew" v-model="form.sessionType">
+            <option value="display">5250端末（表示）</option>
+            <option value="printer">プリンター（スプール受信）</option>
+          </select>
+          <span v-else class="fixed-type">
+            {{ form.sessionType === "printer" ? "🖨 プリンター" : "🖥 5250端末" }}（種別は変更できません）
+          </span>
+        </label>
+      </div>
+      <p v-if="isProfileForm && !authOff" class="note">
+        ※ 共有設定は全員から見えます。接続情報・自動サインオン{{ form.sessionType === "printer" ? "・PDF 出力設定" : "" }}を
+        編集できます（パスワードは暗号化保存）。運用者が env で設定した passwordEnv はサーバー側で保持します。
       </p>
       <div class="row">
         <input v-model="form.name" placeholder="名称" required />
@@ -422,16 +498,7 @@ function cancelForm(): void {
         <input v-model.number="form.port" type="number" placeholder="ポート (既定 23 / TLS 992)" />
         <input v-model="form.deviceName" placeholder="デバイス名 (任意)" />
       </div>
-      <div v-if="!isProfileForm" class="row">
-        <label class="field">
-          <span class="field-label">セッション種別</span>
-          <select v-model="form.sessionType">
-            <option value="display">5250端末（表示）</option>
-            <option value="printer">プリンター（スプール受信）</option>
-          </select>
-        </label>
-      </div>
-      <p v-if="!isProfileForm && form.sessionType === 'printer'" class="note">
+      <p v-if="form.sessionType === 'printer'" class="note">
         ※ プリンターセッションはホストのスプール出力（帳票・ジョブログ等）を受信して表示します。
         受信するには、ホスト側でスプールをこのデバイスの出力キューへ回す必要があります
         （ライターの用紙タイプ問い合わせに応答待ちになる場合があります）。
@@ -476,7 +543,7 @@ function cancelForm(): void {
         サーバーに暗号鍵（AS400_SECRET_KEY）が未設定の場合、パスワード保存は無効です。
       </p>
       <!-- プロファイルのみ: PDF 自動蓄積 / 物理自動印刷（サーバー側の信頼設定） -->
-      <template v-if="isProfileForm">
+      <template v-if="isProfileForm && form.sessionType === 'printer'">
         <h4 class="subhead">PDF 自動蓄積 / 自動印刷（サーバー設定）</h4>
         <div class="row">
           <label class="field">
@@ -506,6 +573,12 @@ function cancelForm(): void {
           （この設定は認証オフ、または admin のときだけ編集できます）
         </p>
       </template>
+      <!-- 所有の変更（admin・編集時のみ）: 共有⇄個人へ移動 -->
+      <div v-if="!isNew && canChooseOwnership" class="row move-row">
+        <button v-if="!isProfileForm" type="button" class="ghost" @click="moveOwnership('shared')">共有にする</button>
+        <button v-else type="button" class="ghost" @click="moveOwnership('personal')">個人にする</button>
+        <span class="move-note">所有を切り替えます（保存とは別に即時反映）</span>
+      </div>
       <div class="row">
         <button type="submit">保存</button>
         <button type="button" class="ghost" @click="cancelForm">キャンセル</button>
@@ -752,6 +825,25 @@ small {
 .kind.shared {
   border-style: dashed;
   opacity: 0.85;
+}
+.kind.personal {
+  border-style: dotted;
+  opacity: 0.85;
+}
+/* 編集時の種別（変更不可）表示 */
+.fixed-type {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  padding: 4px 0;
+}
+.move-row {
+  align-items: center;
+  gap: 10px;
+}
+.move-note {
+  font-size: 11px;
+  color: var(--muted);
 }
 /* 一覧表示: 1 列・各カードを横並びのコンパクト行にする */
 .list.view-list {

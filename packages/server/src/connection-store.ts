@@ -177,7 +177,7 @@ export class ConnectionStore {
       ...(existing.owner !== undefined ? { owner: existing.owner } : {}),
       name: input.name,
       host: input.host,
-      sessionType: input.sessionType,
+      sessionType: existing.sessionType, // 種別は不変（作成時に確定）
       ...(input.port !== undefined ? { port: input.port } : {}),
       ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
       ...(input.screenSize !== undefined ? { screenSize: input.screenSize } : {}),
@@ -196,6 +196,24 @@ export class ConnectionStore {
     const existing = this.get(id);
     assertOwner(existing.owner, user);
     this.byId.delete(id);
+  }
+
+  /** 所有移動用: owner チェック付きで生レコード（secretEnc 含む）を取得する */
+  getOwned(id: string, user: AuthUser | undefined): ConnectionRecord {
+    const r = this.get(id);
+    assertOwner(r.owner, user);
+    return r;
+  }
+
+  /** 所有移動用: 完成済みレコードを追加（同名 id は無いので衝突チェック不要。サーバー内専用） */
+  addRecord(record: ConnectionRecord): PublicConnection {
+    this.byId.set(record.id, record);
+    return toPublic(record);
+  }
+
+  /** 新規レコード用の id を採番する（移動時に profile→connection を作る用） */
+  static newId(): string {
+    return `c-${randomUUID()}`;
   }
 
   /**
