@@ -82,7 +82,7 @@ export class WsConnection {
         ? { ...this.resolveConnection(msg.connection), origin: msg.connection }
         : msg.profile
           ? {
-              ...this.deps.profiles.resolveConnectOptions(msg.profile, (m) => wsLog.warn(m)),
+              ...this.deps.profiles.resolveConnectOptions(msg.profile, this.user, (m) => wsLog.warn(m)),
               origin: msg.profile
             }
           : buildDirect(msg);
@@ -124,7 +124,7 @@ export class WsConnection {
         if (co.password !== undefined) opts.password = co.password;
       } else if (msg.profile) {
         // プロファイル由来: 接続情報＋PDF 自動蓄積/印刷（信頼設定）を解決する
-        const co = this.deps.profiles.resolveConnectOptions(msg.profile, (m) => wsLog.warn(m));
+        const co = this.deps.profiles.resolveConnectOptions(msg.profile, this.user, (m) => wsLog.warn(m));
         if (co.host !== undefined) opts.host = co.host;
         if (co.port !== undefined) opts.port = co.port;
         if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
@@ -132,7 +132,7 @@ export class WsConnection {
         if (co.tls !== undefined) opts.tls = co.tls;
         if (co.user !== undefined) opts.user = co.user;
         if (co.password !== undefined) opts.password = co.password;
-        const output = this.deps.profiles.resolvePrinterOutput(msg.profile);
+        const output = this.deps.profiles.resolvePrinterOutput(msg.profile, this.user);
         if (output) opts.output = output; // 自動蓄積/印刷はプロファイルにあるときだけ
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）

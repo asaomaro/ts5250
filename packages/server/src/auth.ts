@@ -223,6 +223,17 @@ export function assertOwner(owner: string | undefined, user: AuthUser | undefine
   throw new Tn5250Error("FORBIDDEN", "forbidden: not the owner of this session");
 }
 
+/**
+ * サーバー設定（profiles）へのアクセス可否。認証オフ=全通過 / admin=許可 / 一般ユーザー=FORBIDDEN。
+ * profiles は信頼設定（サーバーのパス書込・lp 実行・資格情報）の置き場なので、一般ユーザーには
+ * 参照も利用もさせない。一覧から隠すだけ（obscurity）にせず、名指しの解決もここで塞ぐ。
+ */
+export function assertProfileAccess(user: AuthUser | undefined): void {
+  if (!user) return; // 認証 OFF
+  if (user.role === "admin") return;
+  throw new Tn5250Error("FORBIDDEN", "forbidden: server settings are admin only");
+}
+
 /** hono の Variables 型（c.get("user") で認証ユーザーを取れる） */
 export type AuthVars = { user?: AuthUser };
 

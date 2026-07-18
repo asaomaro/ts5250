@@ -208,7 +208,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const opts = input.connection
             ? resolveConnection(input.connection)
             : input.profile
-              ? { ...profiles.resolveConnectOptions(input.profile), origin: input.profile }
+              ? { ...profiles.resolveConnectOptions(input.profile, user), origin: input.profile }
               : buildDirectOpts(input);
           const entry = await sessions.open({ ...opts, readOnly: input.readOnly ?? false });
           return screenResult(entry.session.snapshot(), {});
@@ -231,7 +231,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       withAudit({ op: "signon", sessionId }, async () => {
         try {
           const entry = sessions.assertWritable(sessionId, user);
-          const opts = profiles.resolveConnectOptions(profile);
+          const opts = profiles.resolveConnectOptions(profile, user);
           if (!opts.user || !opts.password) {
             throw new Tn5250Error("CONNECT_FAILED", `profile ${profile} has no signon credentials`);
           }
@@ -323,7 +323,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const src: ConnectOptions & { origin?: string } = input.connection
             ? resolveConnection(input.connection)
             : input.profile
-              ? { ...profiles.resolveConnectOptions(input.profile), origin: input.profile }
+              ? { ...profiles.resolveConnectOptions(input.profile, user), origin: input.profile }
               : {
                   host: input.host ?? "",
                   ...(input.port !== undefined ? { port: input.port } : {}),
@@ -340,7 +340,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             password: src.password,
             ...(src.tls !== undefined ? { tls: src.tls } : {}),
             // 自動蓄積/印刷はプロファイルにあるときだけ（ws-handler と同じ信頼境界）
-            ...(input.profile ? withOutput(profiles.resolvePrinterOutput(input.profile)) : {}),
+            ...(input.profile ? withOutput(profiles.resolvePrinterOutput(input.profile, user)) : {}),
             origin: src.origin ?? "direct"
           });
           const code = entry.session.startupCode;
