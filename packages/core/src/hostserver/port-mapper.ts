@@ -18,7 +18,7 @@ const RESPONSE_OK = 0x2b;
 const RESPONSE_LEN = 5;
 
 /** 問い合わせ可能なホストサーバー */
-export type HostService = "signon" | "database" | "command" | "file" | "ddm";
+export type HostService = "signon" | "database" | "command" | "file" | "ddm" | "print";
 
 /**
  * ポートマッパーに渡すサービス名。
@@ -31,7 +31,8 @@ export const SERVICE_NAME: Record<HostService, string> = {
   database: "as-database",
   command: "as-rmtcmd",
   file: "as-file",
-  ddm: "drda"
+  ddm: "drda",
+  print: "as-netprt"
 };
 
 /** ポートマッパーを使わない場合の既定ポート（平文 / TLS） */
@@ -41,7 +42,8 @@ export const DEFAULT_PORT: Record<HostService, { plain: number; tls: number }> =
   command: { plain: 8475, tls: 9475 },
   file: { plain: 8473, tls: 9473 },
   // DDM/DRDA は他と違い 8471 系ではなく DRDA 標準ポート 446（TLS は 448）
-  ddm: { plain: 446, tls: 448 }
+  ddm: { plain: 446, tls: 448 },
+  print: { plain: 8474, tls: 9474 }
 };
 
 export interface ResolvePortOptions {

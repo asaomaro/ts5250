@@ -131,3 +131,26 @@ export {
   type MessageKind
 } from "./hostserver/command/command-message.js";
 export type { ProgramParameter } from "./hostserver/command/command-datastream.js";
+
+// ホストサーバー: スプール（一覧＝コマンドサーバー / 中身＝ネットワーク印刷サーバー）
+export { listSpooledFiles, parseSpoolRecord, buildFilter } from "./hostserver/spool/spool-list.js";
+export {
+  statusName,
+  cyymmddToIso,
+  hhmmssToReadable,
+  type SpoolId,
+  type SpoolEntry,
+  type SpoolListFilter
+} from "./hostserver/spool/spool-types.js";
+export { NetPrintConnection, type NetPrintConnectOptions } from "./hostserver/spool/netprint-connection.js";
+export {
+  NP_ACTION,
+  NP_CP,
+  NP_ATTR,
+  NP_RC,
+  buildAttributeList,
+  buildNpRequest,
+  parseNpReply,
+  findCodePoint,
+  type NpAttribute
+} from "./hostserver/spool/netprint-datastream.js";
