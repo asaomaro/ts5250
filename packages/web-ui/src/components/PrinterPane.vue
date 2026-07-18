@@ -152,7 +152,7 @@ function printReport(): void {
         :title="outputEnabled ? '自動 PDF/印刷を停止する' : '自動 PDF/印刷を再開する'"
         @click="toggleOutput"
       >
-        自動出力: {{ outputEnabled ? "ON" : "OFF" }}
+        自動出力: <span class="onoff">{{ outputEnabled ? "ON" : "OFF" }}</span>
       </button>
       <button :disabled="!selected" @click="saveText">テキスト保存</button>
       <button :disabled="!selected" @click="downloadPdf">PDF ダウンロード</button>
@@ -295,6 +295,12 @@ function printReport(): void {
 .out-toggle.on {
   color: var(--t-green, #3f6);
   border-color: var(--t-green, #3f6);
+}
+/* ON/OFF で幅が変わらないよう固定幅を確保する（隣のボタンをずらさない） */
+.onoff {
+  display: inline-block;
+  width: 2.2em;
+  text-align: left;
 }
 /* 自動出力の失敗を示す警告バー */
 .warn-bar {
