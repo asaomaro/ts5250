@@ -1,7 +1,7 @@
 schema: 3
 slug: hostserver-sql
-current: deliver
-approved: [requirement, research, spec, design, plan, coding, test, review, deliver]
+current: retro
+approved: [requirement, research, spec, design, plan, coding, test, review, deliver, retro]
 mode: interactive
 humanGates: []
 maxSendBacks: 3
