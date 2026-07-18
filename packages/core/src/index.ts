@@ -116,3 +116,18 @@ export {
   ibm16684,
   ibm300
 } from "./codec/pure-dbcs.js";
+
+// ホストサーバー: コマンド実行（コマンドサーバー。CL 実行とプログラム呼び出し）
+export {
+  CommandConnection,
+  CommandError,
+  type CommandConnectOptions,
+  type CommandResult
+} from "./hostserver/command/command-connection.js";
+export {
+  classifySeverity,
+  describeMessage,
+  type HostMessage,
+  type MessageKind
+} from "./hostserver/command/command-message.js";
+export type { ProgramParameter } from "./hostserver/command/command-datastream.js";

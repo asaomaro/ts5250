@@ -21,7 +21,9 @@ export type ErrorCode =
   /** ホストサーバーが要求する機能が未実装（例: DES ベースのパスワードレベル） */
   | "HOST_SERVER_UNSUPPORTED"
   /** SQL の実行エラー（構文誤り・存在しない表・権限不足など） */
-  | "SQL_ERROR";
+  | "SQL_ERROR"
+  /** CL コマンドの実行失敗（メッセージ付き） */
+  | "COMMAND_FAILED";
 
 export class Tn5250Error extends Error {
   constructor(
