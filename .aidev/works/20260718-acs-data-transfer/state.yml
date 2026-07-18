@@ -1,7 +1,7 @@
 schema: 3
 slug: acs-data-transfer
-current: deliver
-approved: [research, spec, plan, coding, test, review, deliver]
+current: retro
+approved: [research, spec, plan, coding, test, review, deliver, retro]
 mode: interactive
 humanGates: []
 maxSendBacks: 3
