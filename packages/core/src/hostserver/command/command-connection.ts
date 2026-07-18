@@ -148,7 +148,8 @@ export class CommandConnection {
   async run(command: string): Promise<CommandResult> {
     this.assertOpen();
     const reply = await this.conn.request(buildRunCommandRequest(command));
-    return this.toResult(reply, command);
+    // コマンド実行は 0 か 0x0400 しか返さない。他は想定外として例外にする
+    return this.toResult(reply, command, true);
   }
 
   /** 失敗を例外にする版。呼び出し側で分岐したくない場合に使う */
@@ -171,7 +172,9 @@ export class CommandConnection {
   ): Promise<{ result: CommandResult; outputs: (Uint8Array | undefined)[] }> {
     this.assertOpen();
     const reply = await this.conn.request(buildCallProgramRequest(program, library, params));
-    const result = this.toResult(reply, `${library}/${program}`);
+    // プログラム呼び出しは 0 以外に様々な値を返す（実機で 0x0501 を観測）。
+    // コマンド実行と判定規則が違うので、ここでは戻りコードを絞らない
+    const result = this.toResult(reply, `${library}/${program}`, false);
     return { result, outputs: extractOutputs(reply, params) };
   }
 
@@ -191,14 +194,20 @@ export class CommandConnection {
     }
   }
 
-  /** 応答から戻りコードとメッセージを取り出す */
-  private toResult(reply: Uint8Array, what: string): CommandResult {
+  /**
+   * 応答から戻りコードとメッセージを取り出す。
+   *
+   * @param strictReturnCode コマンド実行のように取りうる値が決まっている場合 true。
+   *   プログラム呼び出しは 0 以外に様々な値を返すため false にする
+   *   （実機で `QGYOLSPL` が 0x0501 を返すのを観測した）。
+   */
+  private toResult(reply: Uint8Array, what: string, strictReturnCode: boolean): CommandResult {
     if (reply.length < HEADER_LEN + 2) {
       throw new Tn5250Error("PROTOCOL_ERROR", `command reply too short: ${reply.length} bytes`);
     }
     const v = new DataView(reply.buffer, reply.byteOffset, reply.byteLength);
     const returnCode = v.getUint16(REPLY_RC_OFFSET);
-    if (returnCode !== RC_OK && returnCode !== RC_FAILED_WITH_MESSAGES) {
+    if (strictReturnCode && returnCode !== RC_OK && returnCode !== RC_FAILED_WITH_MESSAGES) {
       throw new Tn5250Error(
         "PROTOCOL_ERROR",
         `unexpected return code 0x${returnCode.toString(16)} from command server (${what})`
