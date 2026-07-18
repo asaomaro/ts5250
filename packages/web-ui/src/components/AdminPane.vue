@@ -98,7 +98,8 @@ onMounted(refresh);
 </script>
 
 <template>
-  <div class="admin">
+  <!-- tabindex: Alt+矢印でのペイン移動時に実フォーカスを受けられるようにする -->
+  <div class="admin" tabindex="0">
     <div class="bar">
       <b>{{ view === "users" ? "ユーザー管理" : view === "sessions" ? "セッション管理" : "ログ" }}</b>
       <button class="ghost" @click="refresh">再読み込み</button>

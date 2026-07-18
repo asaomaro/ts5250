@@ -22,7 +22,6 @@ const themeLabel = computed(() =>
 );
 workspaceStore.init();
 
-const hasSessions = computed(() => sessionsStore.order.length > 0);
 // ワークスペースに何かタブがあるか（セッション＋管理タブ）。表示切替の基準
 const hasWorkspaceContent = computed(() => workspaceStore.groups().some((g) => g.tabs.length > 0));
 const showConnect = ref(true);
@@ -78,7 +77,9 @@ function paneRects() {
 }
 
 function onGlobalKey(ev: KeyboardEvent): void {
-  if (!hasSessions.value) return;
+  // セッションだけでなく管理タブ（admin:*）でも効かせる。セッション有無で判定すると
+  // 管理タブしか開いていないときにショートカットが死ぬ
+  if (!hasWorkspaceContent.value) return;
   // Alt 系のアプリショートカット（タブ・ペイン移動）。Ctrl+PageUp/Down はブラウザ既定の
   // タブ切替と衝突するため使わない。素の PageUp/Down はホストの Roll に割当済み。
   if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
@@ -101,8 +102,18 @@ function onGlobalKey(ev: KeyboardEvent): void {
     const id = nextPaneInDirection(paneRects(), workspaceStore.focusedGroupId, dir);
     if (id) {
       workspaceStore.focus(id);
-      // 移動先ペインへ実フォーカスを移し、キーボード操作を有効化する
-      nextTick(() => document.querySelector<HTMLElement>(`.group[data-group-id="${id}"] .pane`)?.focus());
+      // 移動先ペインへ実フォーカスを移し、キーボード操作を有効化する。
+      // ペインの根要素はエミュレーター/プリンター/管理で class が異なるため全て対象にする
+      // （.pane だけだとプリンター・管理ペインへフォーカスが移らない）
+      nextTick(() =>
+        document
+          .querySelector<HTMLElement>(
+            `.group[data-group-id="${id}"] .pane, ` +
+              `.group[data-group-id="${id}"] .printer-pane, ` +
+              `.group[data-group-id="${id}"] .admin`
+          )
+          ?.focus()
+      );
     }
   }
 }
