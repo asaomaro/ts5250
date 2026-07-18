@@ -177,6 +177,18 @@ describe("/api/profiles 編集（ファイル非由来）", () => {
   });
 });
 
+describe("ProfileStore: 平文 signon.password の廃止", () => {
+  it("平文 password を含むファイルは読み込みで明示エラーになる", () => {
+    const dir = mkdtempSync(join(tmpdir(), "prof-legacy-"));
+    const path = join(dir, "profiles.json");
+    writeFileSync(
+      path,
+      JSON.stringify({ profiles: [{ name: "old", host: "h", signon: { user: "U", password: "plain" } }] })
+    );
+    expect(() => ProfileStore.fromFile(path, crypto)).toThrow(/廃止|password/);
+  });
+});
+
 describe("ProfileStore: signon 解決", () => {
   it("add した password は暗号化され resolve で復号される", () => {
     const store = new ProfileStore([], crypto);

@@ -225,6 +225,9 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 ```
 
 - `signon` を省略すると自動サインオンせず signon 画面に着地します。
+- **パスワードの持ち方は 2 通り**: `passwordEnv`（環境変数名を参照＝運用者向け・env 注入）と `passwordEnc`
+  （UI で設定した AES-256-GCM 暗号文）。解決順は `passwordEnc > passwordEnv`。**平文の `password` は廃止**しました
+  （後方互換のため、`signon.password` を含むファイルは起動時に明示エラーになります。`passwordEnv` へ移行してください）。
 - `tls: true`（ポート既定 992）、`ccsid`（930/939/1399 等で DBCS）、`screenSize`（`"24x80"` / `"27x132"`）、
   `enhanced: true`（拡張 5250 GUI 広告）も指定可。
 - **UI からの編集**: 共有プロファイルは接続画面のカードから編集/削除できます（**認証オフ、または admin ユーザーのとき**

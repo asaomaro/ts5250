@@ -17,10 +17,8 @@ const printerSchema = z.object({
 
 const signonSchema = z.object({
   user: z.string().min(1),
-  /** パスワードを保持する環境変数名（運用者向け）。 */
+  /** パスワードを保持する環境変数名（運用者向け・env 注入） */
   passwordEnv: z.string().min(1).optional(),
-  /** 平文パスワード（非推奨。passwordEnv か passwordEnc を使うこと） */
-  password: z.string().optional(),
   /** UI 設定の暗号化パスワード（AES-256-GCM の `v1:iv:tag:ct`）。passwordEnv より優先 */
   passwordEnc: z.string().optional()
 });
@@ -100,6 +98,19 @@ export class ProfileStore {
     } catch (err) {
       throw new Tn5250Error("CONNECT_FAILED", `failed to read profiles ${path}: ${(err as Error).message}`);
     }
+    // 平文 signon.password は廃止。黙って無視すると自動サインオンが静かに壊れるため、明示エラーで気づける形にする
+    const profs = (raw as { profiles?: unknown })?.profiles;
+    if (Array.isArray(profs)) {
+      for (const p of profs) {
+        if (p && typeof p === "object" && (p as { signon?: { password?: unknown } }).signon?.password !== undefined) {
+          throw new Tn5250Error(
+            "CONNECT_FAILED",
+            `profile ${(p as { name?: string }).name ?? "?"}: signon.password (平文) は廃止されました。` +
+              `passwordEnv（環境変数）を使うか、UI からパスワードを設定してください（passwordEnc）`
+          );
+        }
+      }
+    }
     const parsed = configSchema.safeParse(raw);
     if (!parsed.success) {
       throw new Tn5250Error("CONNECT_FAILED", `invalid profiles.json: ${parsed.error.message}`);
@@ -174,10 +185,9 @@ export class ProfileStore {
       if (!this.crypto) throw new Tn5250Error("CONFIG_ERROR", "secret key not configured; cannot store password");
       signon.passwordEnc = this.crypto.encrypt(input.password);
     } else {
-      // パスワード未指定: 既存の機構を保持（passwordEnc 優先→passwordEnv→password）
+      // パスワード未指定: 既存の機構を保持（passwordEnc 優先→passwordEnv）
       if (keep?.passwordEnc !== undefined) signon.passwordEnc = keep.passwordEnc;
       else if (keep?.passwordEnv !== undefined) signon.passwordEnv = keep.passwordEnv;
-      else if (keep?.password !== undefined) signon.password = keep.password;
     }
     return signon;
   }
@@ -264,9 +274,8 @@ export class ProfileStore {
             `profile ${name}: password not available (env ${s.passwordEnv} unset)`
           );
         }
-      } else {
-        password = s.password;
       }
+      // signon.user のみで password 機構が無い場合は自動サインオンせず signon 画面に着地する
       if (password !== undefined && password !== "") {
         opts.user = s.user;
         opts.password = password;
