@@ -1,12 +1,30 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { sessionsStore } from "../stores/sessions.js";
+import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
 
 const session = computed(() => sessionsStore.get(props.sessionId));
 const reports = computed(() => session.value?.reports ?? []);
+
+/** 帳票のタイトル＝先頭の非空白行（多くの帳票で見出し）。無ければ空 */
+function reportTitle(r: SpoolReportView): string {
+  for (const p of r.pages) {
+    for (const line of p.lines) {
+      const t = line.trim();
+      if (t) return t.length > 46 ? t.slice(0, 46) + "…" : t;
+    }
+  }
+  return "";
+}
+/** 総行数（空行含む） */
+function reportLines(r: SpoolReportView): number {
+  return r.pages.reduce((n, p) => n + p.lines.length, 0);
+}
+function receivedLabel(r: SpoolReportView): string {
+  return r.receivedAt ? new Date(r.receivedAt).toLocaleTimeString() : "";
+}
 const selectedId = computed(() => session.value?.selectedReportId);
 const selected = computed(() => reports.value.find((r) => r.id === selectedId.value));
 
@@ -90,8 +108,14 @@ function printReport(): void {
           :class="{ sel: r.id === selectedId }"
           @click="selectReport(r.id)"
         >
-          <span class="name">スプール {{ i + 1 }}</span>
-          <span class="meta">{{ r.pages.length }}ページ</span>
+          <div class="row1">
+            <span class="idx">#{{ i + 1 }}</span>
+            <span class="title" :title="reportTitle(r)">{{ reportTitle(r) || "（無題）" }}</span>
+          </div>
+          <div class="row2">
+            <span class="time">{{ receivedLabel(r) }}</span>
+            <span class="meta">{{ r.pages.length }}ページ・{{ reportLines(r) }}行</span>
+          </div>
         </li>
       </ul>
       <div class="viewer">
@@ -150,14 +174,36 @@ function printReport(): void {
 }
 .list li {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
   padding: 6px 8px;
   cursor: pointer;
   border-bottom: 1px solid color-mix(in srgb, var(--crt-bezel, #333) 50%, transparent);
 }
 .list li.sel {
   background: color-mix(in srgb, var(--t-green, #3f6) 14%, transparent);
+}
+.list .row1 {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.list .idx {
+  color: var(--muted, #888);
+  font-size: 11px;
+  flex: none;
+}
+.list .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list .row2 {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted, #888);
+  font-size: 11px;
 }
 .list li.empty {
   cursor: default;
