@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
-import { useTheme } from "./composables/useTheme.js";
+import { useTheme, type ThemeMode } from "./composables/useTheme.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
@@ -11,7 +11,15 @@ import KeybindingsPanel from "./components/KeybindingsPanel.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
 
-const { toggle, effective } = useTheme();
+const { mode, setMode } = useTheme();
+/** ライト → ダーク → システム（OS 設定に追従）の 3 循環 */
+const THEME_CYCLE: ThemeMode[] = ["light", "dark", "system"];
+function cycleTheme(): void {
+  setMode(THEME_CYCLE[(THEME_CYCLE.indexOf(mode.value) + 1) % THEME_CYCLE.length]!);
+}
+const themeLabel = computed(() =>
+  mode.value === "light" ? "☀ ライト" : mode.value === "dark" ? "🌙 ダーク" : "🖥 システム"
+);
 workspaceStore.init();
 
 const hasSessions = computed(() => sessionsStore.order.length > 0);
@@ -153,8 +161,8 @@ onBeforeUnmount(() => {
           🔗 <span class="tv onoff">{{ workspaceStore.linkify ? "ON" : "OFF" }}</span>
         </button>
         <button v-if="activeIsEmulator" class="theme-btn" @click="showKeys = true">⌨ キー</button>
-        <button class="theme-btn" @click="toggle">
-          <span class="tv theme">{{ effective() === "dark" ? "☀ 通常" : "🌙 ダーク" }}</span>
+        <button class="theme-btn" title="テーマ切替（ライト / ダーク / システム）" @click="cycleTheme">
+          <span class="tv theme">{{ themeLabel }}</span>
         </button>
       </div>
       <span v-if="authStore.user" class="whoami">
@@ -257,7 +265,7 @@ onBeforeUnmount(() => {
   width: 2.4em;
 }
 .tv.theme {
-  width: 4.6em;
+  width: 5.6em;
 }
 main {
   flex: 1;
