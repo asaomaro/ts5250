@@ -77,15 +77,15 @@ function editConn(c: PublicConnection): void {
     id: c.id,
     name: c.name,
     host: c.host,
-    port: c.port,
     ccsid: c.ccsid ?? DEFAULT_CCSID,
     screenSize: c.screenSize ?? DEFAULT_SCREEN_SIZE,
-    deviceName: c.deviceName,
-    tls: c.tls,
     sessionType: c.sessionType,
-    autoSignon: c.autoSignon,
-    user: c.signonUser,
-    password: ""
+    password: "",
+    ...(c.port !== undefined ? { port: c.port } : {}),
+    ...(c.deviceName !== undefined ? { deviceName: c.deviceName } : {}),
+    ...(c.tls !== undefined ? { tls: c.tls } : {}),
+    ...(c.autoSignon !== undefined ? { autoSignon: c.autoSignon } : {}),
+    ...(c.signonUser !== undefined ? { user: c.signonUser } : {})
   };
   editingHasSecret.value = c.hasSecret;
   showForm.value = true;
