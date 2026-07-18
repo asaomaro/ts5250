@@ -50,7 +50,56 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
 
   app.get("/healthz", (c) => c.json({ status: "ok", sessions: deps.sessions.size }));
   app.get("/api/version", (c) => c.json({ name: "as400-5250", version: deps.version }));
-  app.get("/api/profiles", (c) => c.json({ profiles: deps.profiles.listPublic() }));
+  // 共有プロファイルの編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき
+  const canEditProfiles = (c: { get: (k: "user") => AuthVars["user"] }): boolean => {
+    const a = deps.auth;
+    const permitted = !a || !a.enabled ? true : c.get("user")?.role === "admin";
+    return permitted && deps.profiles.persistable;
+  };
+  const profileErr = (e: unknown): 400 | 403 | 404 => {
+    if (e instanceof Tn5250Error) {
+      if (e.code === "FORBIDDEN") return 403;
+      if (e.code === "SESSION_NOT_FOUND") return 404;
+    }
+    return 400;
+  };
+  const profileErrMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+  app.get("/api/profiles", (c) =>
+    c.json({ profiles: deps.profiles.listPublic(), editable: canEditProfiles(c) })
+  );
+
+  // 共有プロファイルの作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
+  app.post("/api/profiles", async (c) => {
+    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
+    try {
+      const profile = deps.profiles.add(await c.req.json().catch(() => ({})));
+      await deps.profiles.save();
+      return c.json({ profile }, 201);
+    } catch (e) {
+      return c.json({ error: profileErrMsg(e) }, profileErr(e));
+    }
+  });
+  app.put("/api/profiles/:name", async (c) => {
+    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
+    try {
+      const profile = deps.profiles.update(c.req.param("name"), await c.req.json().catch(() => ({})));
+      await deps.profiles.save();
+      return c.json({ profile });
+    } catch (e) {
+      return c.json({ error: profileErrMsg(e) }, profileErr(e));
+    }
+  });
+  app.delete("/api/profiles/:name", async (c) => {
+    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
+    try {
+      deps.profiles.remove(c.req.param("name"));
+      await deps.profiles.save();
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: profileErrMsg(e) }, profileErr(e));
+    }
+  });
 
   // ユーザー接続設定 CRUD（サーバー保存・owner スコープ）。ストア配線時のみ
   if (deps.connections) registerConnectionRoutes(app, { connections: deps.connections });

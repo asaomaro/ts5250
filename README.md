@@ -227,6 +227,9 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 - `signon` を省略すると自動サインオンせず signon 画面に着地します。
 - `tls: true`（ポート既定 992）、`ccsid`（930/939/1399 等で DBCS）、`screenSize`（`"24x80"` / `"27x132"`）、
   `enhanced: true`（拡張 5250 GUI 広告）も指定可。
+- **UI からの編集**: 共有プロファイルは接続画面のカードから編集/削除できます（**認証オフ、または admin ユーザーのとき**
+  のみ。一般ユーザーには読み取り専用）。ただし編集できるのは**接続情報のみ**で、`signon`（passwordEnv）・`printer`
+  出力設定などの**信頼設定はサーバー側で保持**され、ブラウザ入力からは変更・注入できません（安全境界）。
 
 ### 画面サイズ（24x80 / 27x132）
 
