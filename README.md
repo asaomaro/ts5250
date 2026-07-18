@@ -118,7 +118,9 @@ start.bat             # Windows
 electron.bat          # Windows
 ```
 
-既存の Hono サーバーを内部で起動し、`BrowserWindow` で Web UI を表示します。
+既存の Hono サーバーを内部で起動し、`BrowserWindow` で Web UI を表示します。単一利用者アプリなので
+`--auto-secret-key` 付きで起動し、UI からのパスワード保存に使う master key を**自動生成して `.env` に保存**します
+（手動設定は不要 → [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
 インストーラ生成は `cd electron && npm install && npm run dist`（要 GUI / 対象 OS）。
 
 ---
