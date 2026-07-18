@@ -25,13 +25,13 @@
 - [x] T14: 起動挙動テスト（未指定で後方互換、master key 不正で起動 throw、未設定で password 保存 400）（依存: T13）
 
 ## 6. web-ui
-- [ ] T15: `packages/web-ui/src/stores/connections.ts`：fetch ベースの reactive ストア（list/create/update/remove、hasSecret 保持）（依存: T7）
-- [ ] T16: `ConnectView.vue` を API 化（一覧を connections ストアから、開くを `{connection: id}`、パスワードは値送信＋`hasSecret` 表示、種別チップ/トグルは維持）（依存: T15）
-- [ ] T17: `stores/settings.ts` の接続 CRUD 撤去（localStorage 接続読み書きを廃止。ビュー設定 `as400.connectView` は残す）（依存: T16）
-- [ ] T18: web-ui テスト更新（connections ストアの CRUD、ConnectView が localStorage 接続を使わない、既存テスト green 維持）（依存: T16,T17）
+- [x] T15: `packages/web-ui/src/stores/connections.ts`：fetch ベースの reactive ストア（list/create/update/remove、hasSecret 保持）（依存: T7）
+- [x] T16: `ConnectView.vue` を API 化（一覧を connections ストアから、開くを `{connection: id}`、パスワードは値送信＋`hasSecret` 表示、種別チップ/トグルは維持）（依存: T15）
+- [x] T17: `stores/settings.ts` の接続 CRUD 撤去（localStorage 接続読み書きを廃止。ビュー設定 `as400.connectView` は残す）（依存: T16）
+- [x] T18: web-ui テスト更新（connections ストアの CRUD、ConnectView が localStorage 接続を使わない、既存テスト green 維持）（依存: T16,T17）
 
 ## 7. ドキュメント
-- [ ] T19: README／`.env` 記載（`AS400_SECRET_KEY` 生成手順、`--connections`、接続設定のサーバー保存・認証連動の説明）（依存: T13,T17）
+- [x] T19: README／`.env` 記載（`AS400_SECRET_KEY` 生成手順、`--connections`、接続設定のサーバー保存・認証連動の説明）（依存: T13,T17）
 
 ## 完了確認
-- [ ] T20: `npm run build` / `npm test` / `npm run lint` が全て green
+- [x] T20: `npm run build` / `npm test` / `npm run lint` が全て green
