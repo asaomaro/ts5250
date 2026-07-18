@@ -1,0 +1,8 @@
+schema: 3
+slug: printer-output-status
+current: plan
+approved: [requirement, spec, plan]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

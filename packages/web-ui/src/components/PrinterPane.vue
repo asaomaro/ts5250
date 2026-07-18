@@ -35,6 +35,45 @@ const outputEnabled = computed(() => session.value?.outputEnabled !== false);
 function toggleOutput(): void {
   setPrinterOutput(props.sessionId, !outputEnabled.value);
 }
+// ---- 自動出力の結果ステータス（PDF 作成・印刷の成否） ----
+/** スプールの結果（無ければ undefined＝記録なし） */
+function statusOf(spoolId: string) {
+  return session.value?.outputStatuses?.[spoolId];
+}
+/** 一覧行の簡易表示（成功 ✓ / 失敗 ✗ / スキップ ⏸ / 設定なしは項目ごと省略） */
+function statusChips(spoolId: string): { label: string; cls: string }[] {
+  const s = statusOf(spoolId);
+  if (!s) return [];
+  if (s.skipped) return [{ label: "⏸ スキップ", cls: "skip" }];
+  const out: { label: string; cls: string }[] = [];
+  if (s.pdf) out.push({ label: `PDF ${s.pdf.ok ? "✓" : "✗"}`, cls: s.pdf.ok ? "ok" : "ng" });
+  if (s.print) out.push({ label: `印刷 ${s.print.ok ? "✓" : "✗"}`, cls: s.print.ok ? "ok" : "ng" });
+  return out;
+}
+/** 選択スプールの詳細（保存先・プリンター名・失敗理由） */
+const selectedStatusLines = computed<{ text: string; cls: string }[]>(() => {
+  const r = selected.value;
+  const s = r ? statusOf(r.id) : undefined;
+  if (!s) return [];
+  if (s.skipped) return [{ text: "自動出力オフのためスキップしました", cls: "skip" }];
+  const lines: { text: string; cls: string }[] = [];
+  if (s.pdf) {
+    lines.push(
+      s.pdf.ok
+        ? { text: `PDF 保存: ${s.pdf.path ?? "成功"}`, cls: "ok" }
+        : { text: `PDF 保存に失敗: ${s.pdf.error ?? "原因不明"}`, cls: "ng" }
+    );
+  }
+  if (s.print) {
+    lines.push(
+      s.print.ok
+        ? { text: `自動印刷: ${s.print.printer ?? ""} へ送信しました`, cls: "ok" }
+        : { text: `自動印刷に失敗: ${s.print.error ?? "原因不明"}`, cls: "ng" }
+    );
+  }
+  return lines;
+});
+
 /** 自動出力の警告（失敗）。画面上部のバーに出して気づけるようにする */
 const warnings = computed(() => session.value?.printerWarnings ?? []);
 const latestWarning = computed(() => warnings.value[warnings.value.length - 1]);
@@ -199,10 +238,18 @@ function printReport(): void {
               <span class="time">{{ receivedLabel(r) }}</span>
               <span class="meta">{{ r.pages.length }}ページ・{{ reportLines(r) }}行</span>
             </div>
+            <!-- 自動出力の結果（成功も含めて一目で分かるように） -->
+            <div v-if="statusChips(r.id).length" class="row3">
+              <span v-for="(c, i) in statusChips(r.id)" :key="i" class="st" :class="c.cls">{{ c.label }}</span>
+            </div>
           </li>
         </ul>
       </div>
       <div class="viewer">
+        <!-- 選択スプールの自動出力の詳細（保存先・プリンター名・失敗理由） -->
+        <div v-if="selectedStatusLines.length" class="status-detail">
+          <div v-for="(l, i) in selectedStatusLines" :key="i" class="st-line" :class="l.cls">{{ l.text }}</div>
+        </div>
         <pre v-if="selected">{{ selectedText }}</pre>
         <div v-else class="viewer-empty">スプールを選択すると帳票を表示します</div>
       </div>
@@ -301,6 +348,45 @@ function printReport(): void {
   display: inline-block;
   width: 2.2em;
   text-align: left;
+}
+/* 自動出力の結果: 一覧行の簡易チップ */
+.row3 {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.st {
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--crt-line, #333);
+  color: var(--muted, #888);
+}
+.st.ok {
+  color: var(--t-green, #3f6);
+  border-color: var(--t-green, #3f6);
+}
+.st.ng {
+  color: var(--t-red, #c62828);
+  border-color: var(--t-red, #c62828);
+}
+/* 選択スプールの結果詳細（ビューア上部） */
+.status-detail {
+  margin: -8px -8px 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--crt-bezel, #333);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.st-line.ok {
+  color: var(--t-green, #3f6);
+}
+.st-line.ng {
+  color: var(--t-red, #c62828);
+}
+.st-line.skip {
+  color: var(--muted, #888);
 }
 /* 自動出力の失敗を示す警告バー */
 .warn-bar {

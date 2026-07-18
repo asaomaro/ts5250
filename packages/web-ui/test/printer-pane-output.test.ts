@@ -46,6 +46,52 @@ describe("PrinterPane: 自動出力トグルと警告表示", () => {
     w.unmount();
   });
 
+  it("PDF 作成・印刷の成否が一覧に簡易表示され、選択で詳細が出る", async () => {
+    const id = addPrinterSession({
+      outputConfigured: true,
+      outputEnabled: true,
+      reports: [{ id: "r1", pages: [{ rows: 1, cols: 5, lines: ["HELLO"] }], receivedAt: Date.now() }],
+      selectedReportId: "r1",
+      outputStatuses: {
+        r1: {
+          spoolId: "r1",
+          at: Date.now(),
+          pdf: { ok: true, path: "/data/out/20260718-x.pdf" },
+          print: { ok: true, printer: "Office" }
+        }
+      }
+    });
+    const w = mount(PrinterPane, { props: { sessionId: id } });
+    // 一覧の簡易表示
+    expect(w.text()).toContain("PDF ✓");
+    expect(w.text()).toContain("印刷 ✓");
+    // 選択中の詳細（保存先・プリンター名）
+    expect(w.text()).toContain("/data/out/20260718-x.pdf");
+    expect(w.text()).toContain("Office");
+    w.unmount();
+  });
+
+  it("失敗・スキップも区別して表示する", () => {
+    const id = addPrinterSession({
+      outputConfigured: true,
+      reports: [
+        { id: "r1", pages: [{ rows: 1, cols: 1, lines: ["A"] }], receivedAt: Date.now() },
+        { id: "r2", pages: [{ rows: 1, cols: 1, lines: ["B"] }], receivedAt: Date.now() }
+      ],
+      selectedReportId: "r1",
+      outputStatuses: {
+        r1: { spoolId: "r1", at: Date.now(), pdf: { ok: false, error: "ENOENT: no such directory" } },
+        r2: { spoolId: "r2", at: Date.now(), skipped: true }
+      }
+    });
+    const w = mount(PrinterPane, { props: { sessionId: id } });
+    expect(w.text()).toContain("PDF ✗");
+    expect(w.text()).toContain("⏸ スキップ");
+    // 選択中(r1)の詳細に理由が出る
+    expect(w.text()).toContain("ENOENT: no such directory");
+    w.unmount();
+  });
+
   it("出力の失敗が警告バーに出て、✕ で消せる", async () => {
     const id = addPrinterSession({
       outputConfigured: true,

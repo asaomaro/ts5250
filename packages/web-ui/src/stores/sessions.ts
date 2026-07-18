@@ -23,6 +23,15 @@ export interface SessionMeta {
   signonUser?: string;
 }
 
+/** 1 スプールに対する自動出力の結果（設定が無い側はキーごと省略＝「設定なし」） */
+export interface SpoolOutputStatusView {
+  spoolId: string;
+  at: number;
+  skipped?: boolean;
+  pdf?: { ok: boolean; path?: string; error?: string };
+  print?: { ok: boolean; printer?: string; error?: string };
+}
+
 export interface SessionState {
   sessionId: string;
   label: string;
@@ -59,6 +68,8 @@ export interface SessionState {
   outputEnabled?: boolean;
   /** 自動出力の警告（失敗）履歴。画面に表示して気づけるようにする */
   printerWarnings?: { at: number; message: string }[];
+  /** スプールごとの自動出力の結果（PDF 作成・印刷の成否）。spoolId で引く */
+  outputStatuses?: Record<string, SpoolOutputStatusView>;
 }
 
 export const sessionsStore = reactive({

@@ -109,6 +109,56 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     expect(entry.reports.length).toBe(1);
   });
 
+  it("成功すると PDF の保存先が結果ステータスに載る", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pout-"));
+    const { entry, t } = await openPrinter(dir);
+    const pushed: unknown[] = [];
+    entry.onOutputStatus = (s) => pushed.push(s);
+    feedSpool(t);
+    expect(await waitFor(() => entry.outputStatuses.length > 0)).toBe(true);
+    const s = entry.outputStatuses[0]!;
+    expect(s.spoolId).toBeTruthy();
+    expect(s.pdf?.ok).toBe(true);
+    expect(s.pdf?.path).toMatch(/\.pdf$/);
+    expect(s.print).toBeUndefined(); // autoPrint 未設定なのでキーごと省略
+    expect(pushed.length).toBe(1);
+  });
+
+  it("失敗すると結果ステータスに理由が載る", async () => {
+    const missing = join(mkdtempSync(join(tmpdir(), "pout-")), "nope");
+    const { entry, t } = await openPrinter(missing);
+    feedSpool(t);
+    expect(await waitFor(() => entry.outputStatuses.length > 0)).toBe(true);
+    const s = entry.outputStatuses[0]!;
+    expect(s.pdf?.ok).toBe(false);
+    expect(s.pdf?.error).toMatch(/PDF 保存に失敗|ENOENT/);
+  });
+
+  it("自動出力オフ中の受信は skipped として記録される", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pout-"));
+    const { sessions, entry, t } = await openPrinter(dir);
+    sessions.setPrinterOutputEnabled(entry.id, false);
+    feedSpool(t);
+    expect(await waitFor(() => entry.outputStatuses.length > 0)).toBe(true);
+    expect(entry.outputStatuses[0]!.skipped).toBe(true);
+    expect(entry.outputStatuses[0]!.pdf).toBeUndefined();
+  });
+
+  it("出力設定が無ければステータスを作らない", async () => {
+    const sessions = new SessionManager();
+    let t!: FakeTransport;
+    const entry = await sessions.openPrinter({
+      transport: new FakeTransport((tr) => {
+        t = tr;
+        tr.feed(startup());
+      })
+    });
+    feedSpool(t);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(entry.outputStatuses).toHaveLength(0);
+    expect(entry.reports.length).toBe(1);
+  });
+
   it("他ユーザーは切り替えできない（FORBIDDEN）", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pout-"));
     const sessions = new SessionManager();
