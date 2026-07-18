@@ -5,3 +5,8 @@ dist/
 *.log
 .aidev/current
 *.local.json
+
+# 認証ユーザーファイル（秘密。コミットしない）
+users.local.json
+**/users.local.json
+users.json

@@ -10,6 +10,7 @@ import {
   type SpoolReport
 } from "@as400web/core";
 import { handleReport, type PrinterOutputConfig } from "./printer-output.js";
+import { assertOwner, type AuthUser } from "./auth.js";
 
 const printerLog = childLog({ component: "printer-output" });
 
@@ -18,6 +19,8 @@ export interface OpenOptions extends ConnectOptions {
   readOnly?: boolean;
   /** 由来（プロファイル名 or "direct"）。list_sessions 表示用 */
   origin?: string;
+  /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
+  owner?: string;
 }
 
 export interface SessionEntry {
@@ -28,12 +31,16 @@ export interface SessionEntry {
   origin: string;
   connectedAt: string;
   lastActivity: number;
+  /** 所有者（認証ユーザー名）。認証 OFF なら undefined */
+  owner?: string;
 }
 
 export interface OpenPrinterOptions extends PrinterConnectOptions {
   origin?: string;
   /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
   output?: PrinterOutputConfig;
+  /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
+  owner?: string;
 }
 
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
@@ -44,6 +51,8 @@ export interface PrinterEntry {
   origin: string;
   connectedAt: string;
   lastActivity: number;
+  /** 所有者（認証ユーザー名）。認証 OFF なら undefined */
+  owner?: string;
   /** 受信済みスプール（順） */
   reports: SpoolReport[];
   /** wait_spool が返した件数（次に返す位置） */
@@ -105,16 +114,18 @@ export class SessionManager {
       host: opts.host ?? "(injected)",
       origin: opts.origin ?? "direct",
       connectedAt: new Date(this.now()).toISOString(),
-      lastActivity: this.now()
+      lastActivity: this.now(),
+      ...(opts.owner !== undefined ? { owner: opts.owner } : {})
     };
     this.sessions.set(id, entry);
     session.on("closed", () => this.sessions.delete(id));
     return entry;
   }
 
-  get(id: string): SessionEntry {
+  get(id: string, user?: AuthUser): SessionEntry {
     const entry = this.sessions.get(id);
     if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
+    assertOwner(entry.owner, user); // 認証時は所有者/admin のみ（OFF は全通過）
     entry.lastActivity = this.now();
     return entry;
   }
@@ -124,7 +135,7 @@ export class SessionManager {
     if (this.size >= this.maxSessions) {
       throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
-    const session = await PrinterSession.connect(opts);
+    const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
     const id = session.id;
     const entry: PrinterEntry = {
       id,
@@ -133,6 +144,7 @@ export class SessionManager {
       origin: opts.origin ?? "direct",
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
+      ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
       reports: [],
       delivered: 0,
       waiters: []
@@ -160,23 +172,30 @@ export class SessionManager {
     return entry;
   }
 
-  getPrinter(id: string): PrinterEntry {
+  getPrinter(id: string, user?: AuthUser): PrinterEntry {
     const entry = this.printers.get(id);
     if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `printer session ${id} not found`);
+    assertOwner(entry.owner, user); // 認証時は所有者/admin のみ
     entry.lastActivity = this.now();
     return entry;
   }
 
-  listPrinters(): PrinterEntry[] {
-    return [...this.printers.values()];
+  /** 認証時は所有者のセッションのみ（admin は全件）。OFF は全件。 */
+  private ownedOnly<T extends { owner?: string }>(entries: T[], user?: AuthUser): T[] {
+    if (!user || user.role === "admin") return entries;
+    return entries.filter((e) => e.owner === user.username);
+  }
+
+  listPrinters(user?: AuthUser): PrinterEntry[] {
+    return this.ownedOnly([...this.printers.values()], user);
   }
 
   /**
    * 次の未受け取りスプールを返す。既に届いていれば即返し、無ければ timeoutMs まで待つ。
    * タイムアウト・切断時は undefined。
    */
-  waitSpool(id: string, timeoutMs = 30_000): Promise<SpoolReport | undefined> {
-    const entry = this.getPrinter(id);
+  waitSpool(id: string, timeoutMs = 30_000, user?: AuthUser): Promise<SpoolReport | undefined> {
+    const entry = this.getPrinter(id, user);
     if (entry.delivered < entry.reports.length) {
       return Promise.resolve(entry.reports[entry.delivered++]);
     }
@@ -194,13 +213,13 @@ export class SessionManager {
     });
   }
 
-  list(): SessionEntry[] {
-    return [...this.sessions.values()];
+  list(user?: AuthUser): SessionEntry[] {
+    return this.ownedOnly([...this.sessions.values()], user);
   }
 
-  /** 書き込み操作の可否を検査（readOnly なら READ_ONLY_SESSION） */
-  assertWritable(id: string): SessionEntry {
-    const entry = this.get(id);
+  /** 書き込み操作の可否を検査（readOnly なら READ_ONLY_SESSION／所有者でなければ FORBIDDEN） */
+  assertWritable(id: string, user?: AuthUser): SessionEntry {
+    const entry = this.get(id, user);
     if (entry.readOnly) {
       throw new Tn5250Error("READ_ONLY_SESSION", `session ${id} is read-only`);
     }
@@ -208,23 +227,25 @@ export class SessionManager {
   }
 
   /** AID キーの可否を検査（readOnly は PageUp/PageDown のみ許可） */
-  assertKeyAllowed(id: string, key: AidKey): SessionEntry {
-    const entry = this.get(id);
+  assertKeyAllowed(id: string, key: AidKey, user?: AuthUser): SessionEntry {
+    const entry = this.get(id, user);
     if (entry.readOnly && !READONLY_ALLOWED_KEYS.has(key)) {
       throw new Tn5250Error("READ_ONLY_SESSION", `key ${key} not allowed on read-only session`);
     }
     return entry;
   }
 
-  async close(id: string): Promise<void> {
+  async close(id: string, user?: AuthUser): Promise<void> {
     const entry = this.sessions.get(id);
     if (entry) {
+      assertOwner(entry.owner, user);
       entry.session.disconnect();
       this.sessions.delete(id);
       return;
     }
     const printer = this.printers.get(id);
     if (printer) {
+      assertOwner(printer.owner, user);
       printer.session.disconnect();
       this.printers.delete(id);
       return;

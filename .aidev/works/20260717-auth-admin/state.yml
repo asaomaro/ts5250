@@ -1,0 +1,8 @@
+schema: 3
+slug: auth-admin
+current: review
+approved: [requirement, research, design, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

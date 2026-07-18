@@ -1,5 +1,6 @@
 import { Tn5250Error, type AidKey, type ScreenSnapshot } from "@as400web/core";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
+import type { AuthUser } from "./auth.js";
 import { ProfileStore } from "./profiles.js";
 import { withAudit } from "./audit.js";
 import type { WsClientMessage, WsServerMessage } from "./ws-messages.js";
@@ -26,7 +27,8 @@ export class WsConnection {
 
   constructor(
     private readonly deps: WsHandlerDeps,
-    private readonly ws: WsSender
+    private readonly ws: WsSender,
+    private readonly user?: AuthUser
   ) {}
 
   async handle(raw: string): Promise<void> {
@@ -73,6 +75,7 @@ export class WsConnection {
         ? { ...this.deps.profiles.resolveConnectOptions(msg.profile), origin: msg.profile }
         : buildDirect(msg);
       if (msg.readOnly) opts.readOnly = true;
+      if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
       this.sessionId = entry.id;
       // ホスト発の画面更新を push
@@ -117,6 +120,7 @@ export class WsConnection {
         if (msg.user !== undefined) opts.user = msg.user;
         if (msg.password !== undefined) opts.password = msg.password;
       }
+      if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.openPrinter(opts);
       this.sessionId = entry.id;
       const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>
@@ -134,9 +138,9 @@ export class WsConnection {
   private async onKey(msg: WsClientMessage & { type: "key" }): Promise<void> {
     const id = this.requireSession();
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
-      const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey);
+      const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
       if (msg.fields && msg.fields.length > 0) {
-        this.deps.sessions.assertWritable(id);
+        this.deps.sessions.assertWritable(id, this.user);
         for (const f of msg.fields) {
           entry.session.setField(typeof f.field === "number" ? { index: f.field } : f.field, f.value);
         }
@@ -149,7 +153,7 @@ export class WsConnection {
   private async onGuiSelect(msg: WsClientMessage & { type: "gui-select" }): Promise<void> {
     const id = this.requireSession();
     await withAudit({ op: "ws_gui_select", sessionId: id }, async () => {
-      const entry = this.deps.sessions.assertWritable(id);
+      const entry = this.deps.sessions.assertWritable(id, this.user);
       const ok = entry.session.selectGuiChoice(msg.fieldId, msg.choiceIndex, msg.selected ?? true);
       if (!ok) throw new Tn5250Error("FIELD_TYPE", `選択できません（fieldId=${msg.fieldId}）`);
       // 更新画面は session の screen イベントで push される
@@ -159,7 +163,7 @@ export class WsConnection {
   private async onGuiSubmit(msg: WsClientMessage & { type: "gui-submit" }): Promise<void> {
     const id = this.requireSession();
     await withAudit({ op: "ws_gui_submit", sessionId: id }, async () => {
-      const entry = this.deps.sessions.assertWritable(id);
+      const entry = this.deps.sessions.assertWritable(id, this.user);
       const opts: { key?: AidKey; cursor?: { row: number; col: number } } = {};
       if (msg.key) opts.key = msg.key as AidKey;
       if (msg.cursor) opts.cursor = msg.cursor;
@@ -170,7 +174,7 @@ export class WsConnection {
   private async onJobInfo(msg: WsClientMessage & { type: "jobinfo" }): Promise<void> {
     const id = this.requireSession();
     await withAudit({ op: "ws_jobinfo", sessionId: id }, async () => {
-      const entry = this.deps.sessions.assertWritable(id);
+      const entry = this.deps.sessions.assertWritable(id, this.user);
       const job = await entry.session.fetchJobInfo(msg.refresh ?? false);
       this.send({ type: "jobinfo", job, cached: false });
     });

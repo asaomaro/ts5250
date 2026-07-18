@@ -25,6 +25,8 @@ export interface PrinterConnectOptions {
   password?: string | undefined;
   /** SBCS=37/273…。DBCS(1399) は後続対応 */
   ccsid?: number;
+  /** セッション ID（server が randomUUID を渡す。省略時は連番）。推測不能化のため */
+  id?: string;
   connectTimeoutMs?: number;
   negotiationTimeoutMs?: number;
   /** テスト注入（ReplayTransport 等）。指定時は host 不要 */
@@ -85,7 +87,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
 
   private constructor(private readonly opts: PrinterConnectOptions) {
     super();
-    this.id = `prt-${++sessionSeq}`;
+    this.id = opts.id ?? `prt-${++sessionSeq}`;
     const ccsid = opts.ccsid ?? 37;
     this.codec = codecForCcsid(ccsid);
     this.decoder = new ScsDecoder(ccsid, opts.warn);
