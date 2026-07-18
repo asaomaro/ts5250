@@ -5,6 +5,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { log } from "@as400web/core";
 import { SessionManager } from "./session-manager.js";
 import { ProfileStore } from "./profiles.js";
+import { ConnectionStore } from "./connection-store.js";
+import { SecretCrypto } from "./secret-crypto.js";
 import { buildMcpServer } from "./mcp-server.js";
 import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
@@ -17,6 +19,7 @@ interface Args {
   mode: "stdio" | "http";
   port: number;
   profilesPath: string | undefined;
+  connectionsPath: string;
   webRoot: string | undefined;
   usersPath: string | undefined;
   hashPassword: string | undefined;
@@ -28,6 +31,7 @@ function parseArgs(argv: string[]): Args {
     mode: "http",
     port: 3400,
     profilesPath: undefined,
+    connectionsPath: "connections.json",
     webRoot: undefined,
     usersPath: undefined,
     hashPassword: undefined,
@@ -45,6 +49,9 @@ function parseArgs(argv: string[]): Args {
       }
     } else if (a === "--profiles") {
       args.profilesPath = argv[++i];
+    } else if (a === "--connections") {
+      // ユーザー接続設定の保存ファイル（サーバー一元管理）。未指定は connections.json
+      args.connectionsPath = argv[++i]!;
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -60,11 +67,15 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-function buildDeps(profilesPath: string | undefined): ToolDeps {
-  const profiles = profilesPath ? ProfileStore.fromFile(profilesPath) : new ProfileStore([]);
+function buildDeps(args: Args): ToolDeps {
+  const profiles = args.profilesPath ? ProfileStore.fromFile(args.profilesPath) : new ProfileStore([]);
   const sessions = new SessionManager();
   sessions.startIdleSweep();
-  return { sessions, profiles, version: VERSION };
+  // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）
+  const crypto = SecretCrypto.fromEnv();
+  const connections = ConnectionStore.fromFile(args.connectionsPath, crypto);
+  if (!crypto) log.warn("AS400_SECRET_KEY not set: saved auto-signon passwords are disabled");
+  return { sessions, profiles, connections, version: VERSION };
 }
 
 /** 認証コンテキストを構築（--users 指定時のみ enabled）。 */
@@ -82,7 +93,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  const deps = buildDeps(args.profilesPath);
+  const deps = buildDeps(args);
   const auth = buildAuth(args.usersPath, args.cookieSecure);
   // 管理者画面のログ取得用に監査バッファを有効化（認証時のみ意味を持つ）
   const auditBuffer = new AuditBuffer();

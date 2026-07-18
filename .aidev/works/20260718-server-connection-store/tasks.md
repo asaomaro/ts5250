@@ -10,19 +10,19 @@
 - [x] T5: connection-store の単体テスト（認可・owner フィルタ・暗号化・update の password 据え置き/削除/再暗号化・strict 拒否・atomic save）（依存: T4）
 
 ## 3. REST + app 配線
-- [ ] T6: `packages/server/src/connections.ts`：`registerConnectionRoutes`（GET/POST/PUT/DELETE、owner スコープ、エラー写像 403/404/400、password 非露出）（依存: T4）
-- [ ] T7: `app.ts` に配線（`AppDeps`/`ToolDeps` に `connections` 追加、ルート登録）（依存: T6）
-- [ ] T8: REST の統合テスト（201/200/403/404/400、認証オン/オフの一覧差、PublicConnection が secret を返さない）（依存: T7）
+- [x] T6: `packages/server/src/connections.ts`：`registerConnectionRoutes`（GET/POST/PUT/DELETE、owner スコープ、エラー写像 403/404/400、password 非露出）（依存: T4）
+- [x] T7: `app.ts` に配線（`AppDeps`/`ToolDeps` に `connections` 追加、ルート登録）（依存: T6）
+- [x] T8: REST の統合テスト（201/200/403/404/400、認証オン/オフの一覧差、PublicConnection が secret を返さない）（依存: T7）
 
 ## 4. open ID 参照
-- [ ] T9: `WsClientMessage` open に `connection?: string` を追加（型・共有）（依存: T3）
-- [ ] T10: `ws-handler.ts` の `onOpen`/`onOpenPrinter` に connection 解決を追加（優先順位 connection>profile>direct、resolve 内 assertOwner、復号失敗 warn）（依存: T4,T9）
-- [ ] T11: `mcp-tools.ts`/`mcp-server.ts` の open 系に connection 参照を通す（deps.connections）（依存: T4,T9）
-- [ ] T12: open ID 参照のテスト（解決・owner 拒否・優先順位）（依存: T10）
+- [x] T9: `WsClientMessage` open に `connection?: string` を追加（型・共有）（依存: T3）
+- [x] T10: `ws-handler.ts` の `onOpen`/`onOpenPrinter` に connection 解決を追加（優先順位 connection>profile>direct、resolve 内 assertOwner、復号失敗 warn）（依存: T4,T9）
+- [x] T11: `mcp-tools.ts`/`mcp-server.ts` の open 系に connection 参照を通す（deps.connections）（依存: T4,T9）
+- [x] T12: open ID 参照のテスト（解決・owner 拒否・優先順位）（依存: T10）
 
 ## 5. main 配線
-- [ ] T13: `main.ts` に `--connections <file>` と master key ロード（`SecretCrypto.fromEnv`）を配線、deps へ注入。未指定時は空ストアで後方互換（依存: T4,T7,T10）
-- [ ] T14: 起動挙動テスト（未指定で後方互換、master key 不正で起動 throw、未設定で password 保存 400）（依存: T13）
+- [x] T13: `main.ts` に `--connections <file>` と master key ロード（`SecretCrypto.fromEnv`）を配線、deps へ注入。未指定時は空ストアで後方互換（依存: T4,T7,T10）
+- [x] T14: 起動挙動テスト（未指定で後方互換、master key 不正で起動 throw、未設定で password 保存 400）（依存: T13）
 
 ## 6. web-ui
 - [ ] T15: `packages/web-ui/src/stores/connections.ts`：fetch ベースの reactive ストア（list/create/update/remove、hasSecret 保持）（依存: T7）

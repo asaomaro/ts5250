@@ -2,13 +2,15 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   Tn5250Error,
+  type ConnectOptions,
   type ScreenSnapshot,
   type SendAidResult,
   type SendAidOptions,
   type AidKey
 } from "@as400web/core";
-import { SessionManager } from "./session-manager.js";
+import { SessionManager, type OpenOptions } from "./session-manager.js";
 import { ProfileStore } from "./profiles.js";
+import type { ConnectionStore } from "./connection-store.js";
 import type { AuthUser } from "./auth.js";
 import { screenToText, type FormatOptions } from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
@@ -18,6 +20,8 @@ import { withAudit } from "./audit.js";
 export interface ToolDeps {
   sessions: SessionManager;
   profiles: ProfileStore;
+  /** ユーザー接続設定ストア（サーバー保存）。未指定なら接続 ID 参照は使えない */
+  connections?: ConnectionStore;
   version: string;
   /** 認証時の呼び出しユーザー（per-user 分離）。未認証/OFF は undefined */
   user?: AuthUser;
@@ -168,15 +172,22 @@ function errorResult(err: unknown) {
  * 認証情報はツール引数に取らない（D13）。サインオンは profile 経由（自動）か signon ツール（画面フィールド）。
  */
 export function registerTools(server: McpServer, deps: ToolDeps): void {
-  const { sessions, profiles, user } = deps;
+  const { sessions, profiles, connections, user } = deps;
+
+  /** connection ID を OpenOptions に解決する（未配線なら明示エラー） */
+  const resolveConnection = (id: string): OpenOptions => {
+    if (!connections) throw new Tn5250Error("CONFIG_ERROR", "connection store not configured");
+    return { ...connections.resolveConnectOptions(id, user), origin: id };
+  };
 
   server.registerTool(
     "open_session",
     {
       description:
-        "5250 セッションを開く。profile 指定で設定プロファイルから接続（自動サインオンあり）、" +
-        "または host 等を直接指定。readOnly で閲覧専用。認証情報は引数に取らない（profile 経由）。",
+        "5250 セッションを開く。connection 指定で保存済み接続、profile 指定で設定プロファイルから接続" +
+        "（自動サインオンあり）、または host 等を直接指定。readOnly で閲覧専用。認証情報は引数に取らない。",
       inputSchema: {
+        connection: z.string().optional(),
         profile: z.string().optional(),
         host: z.string().optional(),
         port: z.number().int().optional(),
@@ -191,9 +202,11 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (input) =>
       withAudit({ op: "open_session" }, async () => {
         try {
-          const opts = input.profile
-            ? { ...profiles.resolveConnectOptions(input.profile), origin: input.profile }
-            : buildDirectOpts(input);
+          const opts = input.connection
+            ? resolveConnection(input.connection)
+            : input.profile
+              ? { ...profiles.resolveConnectOptions(input.profile), origin: input.profile }
+              : buildDirectOpts(input);
           const entry = await sessions.open({ ...opts, readOnly: input.readOnly ?? false });
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
@@ -288,6 +301,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         "TN5250E プリンターセッションを開いて待ち受ける。ホストのスプール出力（帳票・ジョブログ等）を" +
         "受信でき、wait_spool で内容を等幅テキストとして取得する。deviceName 省略時はホスト採番。",
       inputSchema: {
+        connection: z.string().optional(),
         host: z.string().optional(),
         port: z.number().int().optional(),
         deviceName: z.string().optional(),
@@ -301,15 +315,26 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (input) =>
       withAudit({ op: "open_printer_session" }, async () => {
         try {
+          const src: ConnectOptions & { origin?: string } = input.connection
+            ? resolveConnection(input.connection)
+            : {
+                host: input.host ?? "",
+                ...(input.port !== undefined ? { port: input.port } : {}),
+                ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
+                ...(input.user !== undefined ? { user: input.user } : {}),
+                ...(input.password !== undefined ? { password: input.password } : {}),
+                ...(input.tls !== undefined ? { tls: input.tls } : {}),
+                origin: "direct"
+              };
           const entry = await sessions.openPrinter({
-            ...(input.host !== undefined ? { host: input.host } : {}),
-            ...(input.port !== undefined ? { port: input.port } : {}),
+            ...(src.host ? { host: src.host } : {}),
+            ...(src.port !== undefined ? { port: src.port } : {}),
             deviceName: input.deviceName,
-            ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
-            user: input.user,
-            password: input.password,
-            ...(input.tls !== undefined ? { tls: input.tls } : {}),
-            origin: "direct"
+            ...(src.ccsid !== undefined ? { ccsid: src.ccsid } : {}),
+            user: src.user,
+            password: src.password,
+            ...(src.tls !== undefined ? { tls: src.tls } : {}),
+            origin: src.origin ?? "direct"
           });
           const code = entry.session.startupCode;
           return {

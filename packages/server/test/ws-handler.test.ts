@@ -2,9 +2,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { WsConnection } from "../src/ws-handler.js";
 import { SessionManager } from "../src/session-manager.js";
 import { ProfileStore } from "../src/profiles.js";
+import { ConnectionStore } from "../src/connection-store.js";
+import { SecretCrypto } from "../src/secret-crypto.js";
+import type { AuthUser } from "../src/auth.js";
 import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/core";
 import type { WsServerMessage } from "../src/ws-messages.js";
 
@@ -77,5 +81,47 @@ describe("WsConnection", () => {
     expect(mgr.size).toBe(1);
     conn.onSocketClose();
     expect(mgr.size).toBe(0);
+  });
+});
+
+describe("WsConnection: 保存済み接続の ID 参照 open", () => {
+  const crypto = SecretCrypto.fromEnv("K", { K: randomBytes(32).toString("hex") })!;
+  const alice: AuthUser = { username: "alice", role: "user" };
+  const bob: AuthUser = { username: "bob", role: "user" };
+
+  function setupConn(user: AuthUser) {
+    const sent: WsServerMessage[] = [];
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const store = new ConnectionStore([], crypto);
+    const created = store.add({ name: "pub400", host: "pub400.com", sessionType: "display" }, alice);
+    const conn = new WsConnection(
+      { sessions: mgr, profiles: new ProfileStore([]), connections: store },
+      { send: (d) => sent.push(JSON.parse(d)), close: () => {} },
+      user
+    );
+    return { conn, sent, id: created.id };
+  }
+
+  it("owner 本人は connection 参照で開ける", async () => {
+    const { conn, sent, id } = setupConn(alice);
+    await conn.handle(JSON.stringify({ type: "open", connection: id }));
+    expect(sent[0]?.type).toBe("opened");
+  });
+
+  it("他人の connection 参照は FORBIDDEN", async () => {
+    const { conn, sent, id } = setupConn(bob);
+    await conn.handle(JSON.stringify({ type: "open", connection: id }));
+    expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("connection ストア未配線での参照は CONFIG_ERROR", async () => {
+    const sent: WsServerMessage[] = [];
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const conn = new WsConnection(
+      { sessions: mgr, profiles: new ProfileStore([]) },
+      { send: (d) => sent.push(JSON.parse(d)), close: () => {} }
+    );
+    await conn.handle(JSON.stringify({ type: "open", connection: "c-x" }));
+    expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "CONFIG_ERROR" });
   });
 });
