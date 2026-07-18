@@ -1,0 +1,8 @@
+schema: 3
+slug: connection-visibility-model
+current: review
+approved: [requirement, research, spec, plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

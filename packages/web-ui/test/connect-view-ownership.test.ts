@@ -40,20 +40,40 @@ describe("ConnectView: 所有ラベルの出し分けと種別による printer 
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("認証オフでは所有ラベル（共有/個人）を出さない", async () => {
+  it("認証オフでは設定の区別ラベルを出さない", async () => {
     stubFetch(true);
     const w = await mountView();
-    expect(w.text()).not.toContain("共有");
-    expect(w.text()).not.toContain("個人");
+    expect(w.text()).not.toContain("サーバー設定");
     w.unmount();
   });
 
-  it("認証オン（admin）では共有ラベルを出す", async () => {
+  it("認証オン（admin）ではファイル由来に「サーバー設定」表記を出す", async () => {
     authStore.enabled = true;
     authStore.user = { username: "admin", role: "admin" };
     stubFetch(true);
     const w = await mountView();
-    expect(w.text()).toContain("共有");
+    expect(w.text()).toContain("サーバー設定");
+    w.unmount();
+  });
+
+  // 所有（共有/個人）の概念は UI から廃止した。可視性は保存先から導出され、利用者には見せない
+  it("所有（共有/個人）の語と選択・移動 UI をどこにも出さない（admin でも）", async () => {
+    authStore.enabled = true;
+    authStore.user = { username: "admin", role: "admin" };
+    stubFetch(true);
+    const w = await mountView();
+    expect(w.text()).not.toContain("共有");
+    expect(w.text()).not.toContain("個人");
+
+    // 新規作成フォーム: 保存先を選ばせる UI が無い
+    await w.find("button.add").trigger("click");
+    await flushPromises();
+    expect(w.text()).not.toContain("所有");
+
+    // 編集フォーム: 「共有にする / 個人にする」の移動ボタンが無い
+    await w.findAll('button[title="編集"]')[0]!.trigger("click");
+    await flushPromises();
+    expect(w.text()).not.toContain("にする");
     w.unmount();
   });
 
@@ -77,12 +97,12 @@ describe("ConnectView: 所有ラベルの出し分けと種別による printer 
     w.unmount();
   });
 
-  it("共有が書き込めない構成（editable=false）では編集不可、新規は個人接続へ保存する", async () => {
+  it("サーバー設定が書き込めない構成（editable=false）では編集不可、新規は自分の設定へ保存する", async () => {
     stubFetch(false);
     const w = await mountView();
     // プロファイルは読み取り専用（編集ボタンなし）
     expect(w.findAll('button[title="編集"]').length).toBe(0);
-    // 新規作成 → 個人（/api/connections）へ POST される
+    // 新規作成 → 自分の設定（/api/connections）へ POST される
     await w.find("button.add").trigger("click");
     await flushPromises();
     await w.find('input[placeholder="名称"]').setValue("n1");
