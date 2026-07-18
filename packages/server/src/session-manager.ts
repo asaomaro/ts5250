@@ -69,7 +69,18 @@ export interface PrinterEntry {
   delivered: number;
   /** 次のスプールを待つ待機者 */
   waiters: ((r: SpoolReport | undefined) => void)[];
+  /** サーバー側出力設定（プロファイル由来）。未設定なら自動出力機能なし */
+  output?: PrinterOutputConfig;
+  /** 実行時の自動出力 有効/無効（既定 true）。false の間は PDF 保存・自動印刷をしない */
+  outputEnabled: boolean;
+  /** 直近の出力警告（上限 20 件）。後から画面を開いても直近の失敗が分かるよう保持する */
+  outputWarnings: { at: number; message: string }[];
+  /** 警告の push フック（ws-handler が設定し、切断で解除する） */
+  onOutputWarn?: (w: { at: number; message: string }) => void;
 }
+
+/** 出力警告の保持上限（メモリ肥大の防止） */
+const OUTPUT_WARN_LIMIT = 20;
 
 export interface SessionManagerOptions {
   maxSessions?: number;
@@ -157,7 +168,10 @@ export class SessionManager {
       ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
       reports: [],
       delivered: 0,
-      waiters: []
+      waiters: [],
+      ...(opts.output !== undefined ? { output: opts.output } : {}),
+      outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
+      outputWarnings: []
     };
     this.printers.set(id, entry);
     session.on("report", (report) => {
@@ -168,10 +182,11 @@ export class SessionManager {
         entry.delivered = entry.reports.length;
         waiter(report);
       }
-      // サーバー側出力（PDF 自動蓄積・自動印刷）。設定があるときだけ・失敗しても受信は妨げない
-      if (opts.output) {
-        void handleReport(report, opts.output, (m) => printerLog.warn(m)).catch((e) =>
-          printerLog.warn(`printer output failed: ${e instanceof Error ? e.message : String(e)}`)
+      // サーバー側出力（PDF 自動蓄積・自動印刷）。設定があり実行時に有効なときだけ。
+      // 失敗しても受信は妨げず、警告はログ＋履歴＋UI push に流す（entry 参照なのでトグルが即時効く）
+      if (entry.output && entry.outputEnabled) {
+        void handleReport(report, entry.output, (m) => this.noteOutputWarn(entry, m)).catch((e) =>
+          this.noteOutputWarn(entry, `printer output failed: ${e instanceof Error ? e.message : String(e)}`)
         );
       }
     });
@@ -187,6 +202,25 @@ export class SessionManager {
     if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `printer session ${id} not found`);
     assertOwner(entry.owner, user); // 認証時は所有者/admin のみ
     entry.lastActivity = this.now();
+    return entry;
+  }
+
+  /**
+   * 出力警告を記録する: サーバーログ（従来どおり）＋セッション履歴（上限あり）＋UI への push。
+   * 画面から失敗に気づけるようにするための単一経路。
+   */
+  private noteOutputWarn(entry: PrinterEntry, message: string): void {
+    printerLog.warn(message);
+    const w = { at: this.now(), message };
+    entry.outputWarnings.push(w);
+    if (entry.outputWarnings.length > OUTPUT_WARN_LIMIT) entry.outputWarnings.shift();
+    entry.onOutputWarn?.(w);
+  }
+
+  /** 自動出力（PDF 保存・自動印刷）の実行時 有効/無効を切り替える（所有者/admin のみ） */
+  setPrinterOutputEnabled(id: string, enabled: boolean, user?: AuthUser): PrinterEntry {
+    const entry = this.getPrinter(id, user);
+    entry.outputEnabled = enabled;
     return entry;
   }
 

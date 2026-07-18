@@ -53,6 +53,12 @@ export interface SessionState {
   startupCode?: string;
   /** 未読スプール数（プリンター。受信で++、タブ表示でクリア） */
   unread?: number;
+  /** サーバー側の自動出力（PDF 保存/自動印刷）設定があるか＝トグル表示条件 */
+  outputConfigured?: boolean;
+  /** 自動出力の実行時 有効/無効 */
+  outputEnabled?: boolean;
+  /** 自動出力の警告（失敗）履歴。画面に表示して気づけるようにする */
+  printerWarnings?: { at: number; message: string }[];
 }
 
 export const sessionsStore = reactive({

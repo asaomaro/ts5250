@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from "vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
+import { setPrinterOutput } from "../session-controller.js";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
@@ -26,6 +27,24 @@ function matches(r: SpoolReportView, q: string): boolean {
   return r.pages.some((p) => p.lines.some((l) => l.toLowerCase().includes(needle)));
 }
 const filteredReports = computed(() => reports.value.filter((r) => matches(r, filter.value)));
+
+// ---- 自動出力（PDF 保存・自動印刷）の状態と警告 ----
+/** サーバー側に自動出力設定があるか（トグルの表示条件） */
+const outputConfigured = computed(() => session.value?.outputConfigured === true);
+const outputEnabled = computed(() => session.value?.outputEnabled !== false);
+function toggleOutput(): void {
+  setPrinterOutput(props.sessionId, !outputEnabled.value);
+}
+/** 自動出力の警告（失敗）。画面上部のバーに出して気づけるようにする */
+const warnings = computed(() => session.value?.printerWarnings ?? []);
+const latestWarning = computed(() => warnings.value[warnings.value.length - 1]);
+function warnTime(at: number): string {
+  return new Date(at).toLocaleTimeString();
+}
+function clearWarnings(): void {
+  const s = session.value;
+  if (s) s.printerWarnings = [];
+}
 
 /** CPA3394（用紙タイプ問い合わせ）回避のための writer 起動コマンド。デバイス名が分かれば差し込む */
 const deviceName = computed(() => session.value?.meta?.deviceName ?? "<デバイス名>");
@@ -125,9 +144,28 @@ function printReport(): void {
       <span class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
       <span class="muted">受信 {{ reports.length }} 件</span>
       <span class="spacer"></span>
+      <!-- 自動出力の ON/OFF: サーバー側に出力設定があるときだけ表示 -->
+      <button
+        v-if="outputConfigured"
+        class="out-toggle"
+        :class="{ on: outputEnabled }"
+        :title="outputEnabled ? '自動 PDF/印刷を停止する' : '自動 PDF/印刷を再開する'"
+        @click="toggleOutput"
+      >
+        自動出力: {{ outputEnabled ? "ON" : "OFF" }}
+      </button>
       <button :disabled="!selected" @click="saveText">テキスト保存</button>
       <button :disabled="!selected" @click="downloadPdf">PDF ダウンロード</button>
       <button :disabled="!selected" @click="printReport">印刷</button>
+    </div>
+    <!-- 自動出力の失敗を画面で気づけるようにする（サーバーログだけに埋もれない） -->
+    <div v-if="latestWarning" class="warn-bar" role="alert">
+      <span class="warn-icon">⚠</span>
+      <span class="warn-msg" :title="latestWarning.message">
+        [{{ warnTime(latestWarning.at) }}] {{ latestWarning.message }}
+      </span>
+      <span v-if="warnings.length > 1" class="warn-count">他 {{ warnings.length - 1 }} 件</span>
+      <button class="warn-close" title="消す" @click="clearWarnings">✕</button>
     </div>
     <div class="body">
       <div v-show="sidebarOpen" class="sidebar">
@@ -252,6 +290,46 @@ function printReport(): void {
   font-size: 13px;
   line-height: 1;
   padding: 3px 6px;
+}
+/* 自動出力トグル: ON は緑で目立たせる */
+.out-toggle.on {
+  color: var(--t-green, #3f6);
+  border-color: var(--t-green, #3f6);
+}
+/* 自動出力の失敗を示す警告バー */
+.warn-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--t-red, #c62828) 16%, transparent);
+  border-bottom: 1px solid var(--t-red, #c62828);
+  color: var(--ink, #cfc);
+  font-size: 11.5px;
+}
+.warn-icon {
+  color: var(--t-red, #c62828);
+}
+.warn-msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+}
+.warn-count {
+  flex: none;
+  color: var(--muted, #888);
+}
+.warn-close {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted, #888);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
 }
 .list {
   flex: 1;
