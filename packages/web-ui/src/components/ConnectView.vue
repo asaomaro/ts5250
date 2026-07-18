@@ -298,6 +298,11 @@ function cancelForm(): void {
 </script>
 
 <template>
+  <!-- 接続中（クリック〜セッション確立まで）のローディング表示 -->
+  <div v-if="connecting" class="connecting" role="status" aria-live="polite">
+    <div class="spinner" aria-label="接続中"></div>
+    <span>接続中…</span>
+  </div>
   <div class="connect">
     <div class="head">
       <h2>接続</h2>
@@ -700,5 +705,39 @@ small {
 .list.view-list .card small,
 .list.view-list .card-main small {
   margin-left: auto;
+}
+/* 接続中オーバーレイ（クリック〜セッション確立まで） */
+.connecting {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #e8efe8;
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: progress;
+}
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid color-mix(in srgb, var(--accent, #3ddc84) 30%, transparent);
+  border-top-color: var(--accent, #3ddc84);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
 }
 </style>
