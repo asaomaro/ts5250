@@ -56,8 +56,11 @@ const isNew = computed(() => !form.value.id);
 /** 認証オフ（マルチユーザーでない）＝所有概念を見せない・全て共有 */
 const authOff = computed(() => !authStore.enabled);
 const isAdmin = computed(() => authStore.isAdmin);
-/** 新規作成で所有（共有/個人）を選べるか＝admin のみ（認証オフ=共有固定 / 一般=個人固定） */
-const canChooseOwnership = computed(() => !authOff.value && isAdmin.value);
+/**
+ * 新規作成で所有（共有/個人）を選べるか＝admin のみ（認証オフ=共有固定 / 一般=個人固定）。
+ * 共有（profiles）が書き込めない構成（--profiles 未指定）では選択肢にならないので false。
+ */
+const canChooseOwnership = computed(() => !authOff.value && isAdmin.value && profilesEditable.value);
 const formTitle = computed(() =>
   isNew.value
     ? "新規設定"
@@ -234,8 +237,9 @@ async function deleteConn(c: PublicConnection): Promise<void> {
 }
 
 function newConn(): void {
-  // 既定の所有: 認証オフ or admin は共有（profile）、一般ユーザーは個人（connection）
-  const shared = authOff.value || isAdmin.value;
+  // 既定の所有: 認証オフ or admin は共有（profile）、一般ユーザーは個人（connection）。
+  // ただし共有が書き込めない構成（--profiles 未指定＝editable=false）では個人にフォールバックする。
+  const shared = (authOff.value || isAdmin.value) && profilesEditable.value;
   form.value = { ...emptyForm(), kind: shared ? "profile" : "connection" };
   editingHasSecret.value = false;
   showForm.value = true;

@@ -9,9 +9,13 @@ const PROFILES = [
   { name: "prt", host: "h", autoSignon: false, sessionType: "printer" }
 ];
 
+const calls: { url: string; method: string }[] = [];
+
 function stubFetch(editable: boolean): void {
-  vi.stubGlobal("fetch", (url: string) => {
+  calls.length = 0;
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     const u = String(url);
+    calls.push({ url: u, method: init?.method ?? "GET" });
     if (u.startsWith("/api/profiles")) {
       return Promise.resolve(new Response(JSON.stringify({ profiles: PROFILES, editable }), { status: 200 }));
     }
@@ -70,6 +74,23 @@ describe("ConnectView: 所有ラベルの出し分けと種別による printer 
     await w.findAll('button[title="編集"]')[1]!.trigger("click");
     await flushPromises();
     expect(w.text()).toContain("PDF 自動蓄積");
+    w.unmount();
+  });
+
+  it("共有が書き込めない構成（editable=false）では編集不可、新規は個人接続へ保存する", async () => {
+    stubFetch(false);
+    const w = await mountView();
+    // プロファイルは読み取り専用（編集ボタンなし）
+    expect(w.findAll('button[title="編集"]').length).toBe(0);
+    // 新規作成 → 個人（/api/connections）へ POST される
+    await w.find("button.add").trigger("click");
+    await flushPromises();
+    await w.find('input[placeholder="名称"]').setValue("n1");
+    await w.find('input[placeholder="ホスト"]').setValue("h1");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+    expect(calls.some((c) => c.url.startsWith("/api/connections") && c.method === "POST")).toBe(true);
+    expect(calls.some((c) => c.url.startsWith("/api/profiles") && c.method === "POST")).toBe(false);
     w.unmount();
   });
 });
