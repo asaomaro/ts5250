@@ -1,7 +1,7 @@
 schema: 3
 slug: auth-admin
-current: review
-approved: [requirement, research, design, plan, coding, test, review]
+current: deliver
+approved: [requirement, research, design, plan, coding, test, review, deliver]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3

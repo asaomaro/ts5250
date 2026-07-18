@@ -14,6 +14,8 @@ import {
   type AuthContext,
   type AuthVars
 } from "./auth.js";
+import { registerAdminRoutes } from "./admin.js";
+import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
 export interface AppDeps extends ToolDeps {
@@ -21,6 +23,8 @@ export interface AppDeps extends ToolDeps {
   webRoot?: string;
   /** 認証コンテキスト（未指定 or enabled=false なら無認証＝後方互換） */
   auth?: AuthContext;
+  /** 監査ログバッファ（管理者画面のログ取得用） */
+  audit?: AuditBuffer;
 }
 
 /**
@@ -34,6 +38,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   if (deps.auth) {
     app.use("*", createAuthMiddleware(deps.auth));
     registerAuthRoutes(app, deps.auth);
+    // 管理者 API（監査バッファがあればログも）
+    if (deps.audit) registerAdminRoutes(app, { auth: deps.auth, sessions: deps.sessions, audit: deps.audit });
   }
   // /api/me は認証 OFF でも常に応答（web-ui がログイン要否を判定するため）
   const auth = deps.auth;

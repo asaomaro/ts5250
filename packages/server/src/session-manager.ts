@@ -35,6 +35,16 @@ export interface SessionEntry {
   owner?: string;
 }
 
+/** 管理者画面向けのセッション要約（表示/プリンター統合） */
+export interface SessionSummary {
+  id: string;
+  kind: "display" | "printer";
+  owner?: string;
+  host: string;
+  origin: string;
+  connectedAt: string;
+}
+
 export interface OpenPrinterOptions extends PrinterConnectOptions {
   origin?: string;
   /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
@@ -188,6 +198,27 @@ export class SessionManager {
 
   listPrinters(user?: AuthUser): PrinterEntry[] {
     return this.ownedOnly([...this.printers.values()], user);
+  }
+
+  /** 全セッション（表示＋プリンター）の要約。管理者画面用（所有者含む）。 */
+  listAll(): SessionSummary[] {
+    const disp: SessionSummary[] = [...this.sessions.values()].map((e) => ({
+      id: e.id,
+      kind: "display",
+      host: e.host,
+      origin: e.origin,
+      connectedAt: e.connectedAt,
+      ...(e.owner !== undefined ? { owner: e.owner } : {})
+    }));
+    const prt: SessionSummary[] = [...this.printers.values()].map((e) => ({
+      id: e.id,
+      kind: "printer",
+      host: e.host,
+      origin: e.origin,
+      connectedAt: e.connectedAt,
+      ...(e.owner !== undefined ? { owner: e.owner } : {})
+    }));
+    return [...disp, ...prt];
   }
 
   /**

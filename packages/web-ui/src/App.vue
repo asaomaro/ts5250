@@ -15,10 +15,24 @@ const { toggle, effective } = useTheme();
 workspaceStore.init();
 
 const hasSessions = computed(() => sessionsStore.order.length > 0);
+// ワークスペースに何かタブがあるか（セッション＋管理タブ）。表示切替の基準
+const hasWorkspaceContent = computed(() => workspaceStore.groups().some((g) => g.tabs.length > 0));
 const showConnect = ref(true);
 const showKeys = ref(false);
 
 function onConnected(): void {
+  showConnect.value = false;
+}
+
+/** 管理タブを開く（既にあれば前面に）。管理者のみ */
+function openAdmin(id: string): void {
+  const existing = workspaceStore.groups().find((g) => g.tabs.includes(id));
+  if (existing) {
+    workspaceStore.setActiveTab(existing.id, id);
+    workspaceStore.focus(existing.id);
+  } else {
+    workspaceStore.addSession(id);
+  }
   showConnect.value = false;
 }
 
@@ -91,9 +105,14 @@ onBeforeUnmount(() => {
     <template v-else>
     <header class="topbar">
       <span class="brand">5250 Web エミュレーター</span>
-      <button v-if="hasSessions" class="link" @click="showConnect = !showConnect">
-        {{ showConnect ? "エミュレーターへ" : "＋ 接続" }}
+      <button v-if="hasWorkspaceContent" class="link" @click="showConnect = !showConnect">
+        {{ showConnect ? "ワークスペースへ" : "＋ 接続" }}
       </button>
+      <span v-if="authStore.isAdmin" class="admin-nav">
+        <button class="link" @click="openAdmin('admin:users')">ユーザー</button>
+        <button class="link" @click="openAdmin('admin:sessions')">セッション</button>
+        <button class="link" @click="openAdmin('admin:logs')">ログ</button>
+      </span>
       <button
         v-if="hasSessions"
         class="theme-btn"
@@ -130,7 +149,7 @@ onBeforeUnmount(() => {
 
     <KeybindingsPanel v-if="showKeys" @close="showKeys = false" />
 
-    <main v-if="showConnect || !hasSessions">
+    <main v-if="showConnect || !hasWorkspaceContent">
       <ConnectView @connected="onConnected" />
     </main>
     <main v-else class="workspace">
@@ -143,6 +162,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.admin-nav {
+  display: inline-flex;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
 .whoami {
   margin-left: auto;
   font-size: 12px;

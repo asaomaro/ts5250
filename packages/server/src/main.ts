@@ -8,6 +8,7 @@ import { ProfileStore } from "./profiles.js";
 import { buildMcpServer } from "./mcp-server.js";
 import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
+import { AuditBuffer, installAuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
 const VERSION = "0.1.0";
@@ -83,7 +84,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
   const deps = buildDeps(args.profilesPath);
   const auth = buildAuth(args.usersPath, args.cookieSecure);
-  if (auth) log.info("authentication enabled (per-user isolation)");
+  // 管理者画面のログ取得用に監査バッファを有効化（認証時のみ意味を持つ）
+  const auditBuffer = new AuditBuffer();
+  if (auth) {
+    installAuditBuffer(auditBuffer);
+    log.info("authentication enabled (per-user isolation)");
+  }
 
   if (args.mode === "stdio") {
     // stdio モード: stdout は MCP 専用（ログは stderr のみ = core log）
@@ -95,7 +101,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     const app = buildApp({
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
-      ...(auth ? { auth } : {})
+      ...(auth ? { auth, audit: auditBuffer } : {})
     });
     // ws の WebSocketServer は WebSocketServerLike と互換（noServer:true 指定済み。optional 差のみ）
     const wss = new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike;

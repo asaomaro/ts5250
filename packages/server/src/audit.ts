@@ -29,6 +29,35 @@ export function audit(event: AuditEvent): void {
   sink(event);
 }
 
+/** 直近の監査イベントを保持するリングバッファ（管理者画面のログ取得用） */
+export class AuditBuffer {
+  private readonly events: (AuditEvent & { ts: number })[] = [];
+  constructor(
+    private readonly capacity = 500,
+    private readonly now: () => number = () => Date.now()
+  ) {}
+  push(event: AuditEvent): void {
+    this.events.push({ ...event, ts: this.now() });
+    if (this.events.length > this.capacity) this.events.shift();
+  }
+  /** 新しい順に最大 n 件 */
+  recent(n = 100): (AuditEvent & { ts: number })[] {
+    return this.events.slice(-n).reverse();
+  }
+}
+
+/**
+ * 監査バッファを既存 sink に連結する（stderr ログは継続しつつバッファにも積む）。
+ * 管理者画面のログ取得を有効化する。
+ */
+export function installAuditBuffer(buffer: AuditBuffer): void {
+  const prev = sink;
+  sink = (event) => {
+    prev(event);
+    buffer.push(event);
+  };
+}
+
 /**
  * 操作を計測してラップする（now 注入でテスト可能）。
  * fn が例外を投げた場合に加え、**MCP エラー応答（`isError: true`）を返した場合も result:"error"** を記録する

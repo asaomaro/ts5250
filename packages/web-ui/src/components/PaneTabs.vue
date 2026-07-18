@@ -11,11 +11,22 @@ const infoFor = ref<string | undefined>();
 // 並び替えプレビュー（どのタブの前/後ろに挿入されるか）
 const reorder = ref<{ overId: string; after: boolean } | undefined>();
 
+const ADMIN_LABELS: Record<string, string> = {
+  "admin:users": "ユーザー管理",
+  "admin:sessions": "セッション管理",
+  "admin:logs": "ログ"
+};
 function label(sessionId: string): string {
-  return sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
+  return ADMIN_LABELS[sessionId] ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
 }
 function connected(sessionId: string): boolean {
+  if (sessionId.startsWith("admin:")) return true;
   return sessionsStore.get(sessionId)?.connected ?? false;
+}
+/** タブを閉じる（管理タブは workspace から外すだけ、セッションは切断も行う） */
+function closeTab(id: string): void {
+  if (id.startsWith("admin:")) workspaceStore.closeSession(id);
+  else closeSession(id);
 }
 // タブエリアが現在ドロップ対象か（末尾追加のハイライト用）
 const stripActive = ref(false);
@@ -113,9 +124,16 @@ function onStripLeave(): void {
     >
       <span class="dot" :class="{ live: connected(t) }"></span>
       {{ label(t) }}
-      <button class="info" title="セッション情報" @click.stop="infoFor = infoFor === t ? undefined : t">ⓘ</button>
-      <button class="x" title="閉じる" @click.stop="closeSession(t)">✕</button>
-      <SessionInfo v-if="infoFor === t" :session-id="t" @close="infoFor = undefined" />
+      <button
+        v-if="!t.startsWith('admin:')"
+        class="info"
+        title="セッション情報"
+        @click.stop="infoFor = infoFor === t ? undefined : t"
+      >
+        ⓘ
+      </button>
+      <button class="x" title="閉じる" @click.stop="closeTab(t)">✕</button>
+      <SessionInfo v-if="infoFor === t && !t.startsWith('admin:')" :session-id="t" @close="infoFor = undefined" />
     </div>
   </div>
 </template>
