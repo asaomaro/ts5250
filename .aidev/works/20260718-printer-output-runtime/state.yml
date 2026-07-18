@@ -1,7 +1,7 @@
 schema: 3
 slug: printer-output-runtime
-current: plan
-approved: [requirement, spec, plan]
+current: review
+approved: [requirement, spec, plan, coding, test, review]
 mode: interactive
 humanGates: []
 maxSendBacks: 3
