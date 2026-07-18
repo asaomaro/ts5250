@@ -1,0 +1,8 @@
+schema: 3
+slug: connection-ownership-model
+current: deliver
+approved: [requirement, design, plan, coding, test, review, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

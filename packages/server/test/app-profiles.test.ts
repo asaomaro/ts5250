@@ -125,6 +125,48 @@ describe("/api/profiles 編集（認証オフ）", () => {
     expect(list.profiles[0].sessionType).toBe("printer");
   });
 
+  it("種別は新規で確定し、更新では変更されない（不変）", async () => {
+    const app = buildApp(deps(path));
+    // 新規 display プロファイル
+    await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "disp", host: "h", sessionType: "display" })
+    });
+    // 更新で sessionType=printer を送っても display のまま
+    await app.request("/api/profiles/disp", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "disp", host: "h2", sessionType: "printer" })
+    });
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles.find((p: { name: string }) => p.name === "disp");
+    expect(saved.sessionType).toBe("display");
+  });
+
+  it("display 種別には printer 出力設定を付けられない（落とされる）", async () => {
+    const app = buildApp(deps(path));
+    await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "disp2", host: "h", sessionType: "display", printer: { autoPdfDir: "/x" } })
+    });
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles.find((p: { name: string }) => p.name === "disp2");
+    expect(saved.sessionType).toBe("display");
+    expect(saved.printer).toBeUndefined();
+  });
+
+  it("printer 種別なら printer 出力設定を保持できる", async () => {
+    const app = buildApp(deps(path));
+    await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "prt", host: "h", sessionType: "printer", printer: { autoPdfDir: "/out" } })
+    });
+    const saved = JSON.parse(readFileSync(path, "utf8")).profiles.find((p: { name: string }) => p.name === "prt");
+    expect(saved.sessionType).toBe("printer");
+    expect(saved.printer.autoPdfDir).toBe("/out");
+  });
+
   it("printer を空にするとブロックが消える（自動蓄積/印刷を無効化）", async () => {
     const app = buildApp(deps(path));
     await app.request("/api/profiles/pub400", {

@@ -32,9 +32,19 @@ const profileSchema = z.object({
   screenSize: z.enum(["24x80", "27x132"]).optional(),
   deviceName: z.string().optional(),
   enhanced: z.boolean().optional(),
+  /** 種別（明示）。未設定なら printer ブロックの有無から導出（後方互換） */
+  sessionType: z.enum(["display", "printer"]).optional(),
   signon: signonSchema.optional(),
   printer: printerSchema.optional()
 });
+
+/** プロファイルの実効種別（明示 sessionType 優先、無ければ printer ブロック有無から導出） */
+function effectiveType(p: {
+  sessionType?: "display" | "printer" | undefined;
+  printer?: unknown;
+}): "display" | "printer" {
+  return p.sessionType ?? (p.printer !== undefined ? "printer" : "display");
+}
 
 const configSchema = z.object({
   profiles: z.array(profileSchema)
@@ -76,11 +86,13 @@ const profileInputSchema = z
     ccsid: z.number().int().optional(),
     screenSize: z.enum(["24x80", "27x132"]).optional(),
     deviceName: z.string().optional(),
+    // 種別（新規作成時のみ採用。更新では無視して既存を維持＝種別は不変）
+    sessionType: z.enum(["display", "printer"]).optional(),
     // 自動サインオン（UI 設定）。password は平文で受け、サーバーが暗号化して passwordEnc に保存する
     autoSignon: z.boolean().optional(),
     signonUser: z.string().optional(),
     password: z.string().optional(),
-    // PDF 自動蓄積・自動印刷（信頼設定）。canEditProfiles ルート下でのみ到達する
+    // PDF 自動蓄積・自動印刷（信頼設定・プリンター種別のみ）。canEditProfiles ルート下でのみ到達する
     printer: printerSchema.optional()
   })
   .strict();
@@ -171,7 +183,7 @@ export class ProfileStore {
         name: p.name,
         host: p.host,
         autoSignon: p.signon !== undefined,
-        sessionType: p.printer !== undefined ? "printer" : "display"
+        sessionType: effectiveType(p)
       };
       if (p.port !== undefined) pub.port = p.port;
       if (p.tls !== undefined) pub.tls = p.tls;
@@ -193,14 +205,17 @@ export class ProfileStore {
    * ルート下でのみ到達するため、trusted な編集に限られる。
    */
   private buildProfile(input: ProfileInput, keep?: Profile): Profile {
-    const p: Profile = { name: input.name, host: input.host };
+    // 種別: 新規は入力（既定 display）、更新は既存を維持（不変）
+    const type: "display" | "printer" = keep ? effectiveType(keep) : (input.sessionType ?? "display");
+    const p: Profile = { name: input.name, host: input.host, sessionType: type };
     if (input.port !== undefined) p.port = input.port;
     if (input.tls !== undefined) p.tls = input.tls;
     if (input.ccsid !== undefined) p.ccsid = input.ccsid;
     if (input.screenSize !== undefined) p.screenSize = input.screenSize;
     if (input.deviceName !== undefined) p.deviceName = input.deviceName;
     if (keep?.enhanced !== undefined) p.enhanced = keep.enhanced;
-    const printer = buildPrinter(input.printer, keep?.printer);
+    // printer 出力はプリンター種別のときのみ（display では常に落とす＝信頼設定の混入防止）
+    const printer = type === "printer" ? buildPrinter(input.printer, keep?.printer) : undefined;
     if (printer) p.printer = printer;
     const signon = this.buildSignon(input, keep?.signon);
     if (signon) p.signon = signon;
@@ -250,6 +265,18 @@ export class ProfileStore {
 
   remove(name: string): void {
     if (!this.byName.delete(name)) throw new Tn5250Error("SESSION_NOT_FOUND", `profile ${name} not found`);
+  }
+
+  /** 所有移動用: 生 Profile を取得（存在必須） */
+  getRaw(name: string): Profile {
+    return this.get(name);
+  }
+
+  /** 所有移動用: 完成済み Profile を追加（同名は FORBIDDEN）。サーバー内専用 */
+  addRecord(p: Profile): PublicProfile {
+    if (this.byName.has(p.name)) throw new Tn5250Error("FORBIDDEN", `profile ${p.name} already exists`);
+    this.byName.set(p.name, p);
+    return this.publicOf(p.name);
   }
 
   /** 単一プロファイルの公開表現（listPublic と同じ整形） */

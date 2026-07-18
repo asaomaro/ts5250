@@ -16,6 +16,7 @@ import {
 } from "./auth.js";
 import { registerAdminRoutes } from "./admin.js";
 import { registerConnectionRoutes } from "./connections.js";
+import { registerMoveRoutes } from "./settings-move.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
@@ -104,7 +105,11 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   });
 
   // ユーザー接続設定 CRUD（サーバー保存・owner スコープ）。ストア配線時のみ
-  if (deps.connections) registerConnectionRoutes(app, { connections: deps.connections });
+  if (deps.connections) {
+    registerConnectionRoutes(app, { connections: deps.connections });
+    // 所有（共有⇄個人）の移動（admin 限定）
+    registerMoveRoutes(app, { profiles: deps.profiles, connections: deps.connections });
+  }
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {
