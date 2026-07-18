@@ -41,6 +41,7 @@ const configSchema = z.object({
 });
 
 export type Profile = z.infer<typeof profileSchema>;
+export type PrinterConfig = z.infer<typeof printerSchema>;
 
 /** API 露出用にサニタイズしたプロファイル（認証情報を含まない。spec: 名前とホストのみ相当） */
 export interface PublicProfile {
@@ -54,14 +55,17 @@ export interface PublicProfile {
   autoSignon: boolean;
   /** 自動サインオンのユーザー（プレフィル用。パスワードは露出しない） */
   signonUser?: string;
+  /** PDF 自動蓄積・自動印刷（信頼設定）。編集者（認証オフ or admin）にのみ露出する */
+  printer?: PrinterConfig;
   /** セッション種別。printer 設定ブロックを持つプロファイルはプリンターセッション用 */
   sessionType: "display" | "printer";
 }
 
 /**
- * UI からの編集で受理する接続フィールド（strict）。**信頼設定（signon / printer 出力系）は含めない**——
- * ブラウザ入力から passwordEnv・autoPdfDir・autoPrint 等を注入させない（任意パス書込・任意コマンド実行の防止）。
- * これらは運用者がファイルで管理し、更新時はサーバー側で保持する。
+ * UI からの編集で受理するフィールド（strict）。`signon`（password/passwordEnc）と `printer`（出力系）は
+ * **信頼設定**だが、これらを受理するのは canEditProfiles（認証オフ or admin かつファイル由来）を満たす
+ * `/api/profiles` ルート経由のみ——つまり trusted な書き込みに限られる（ルートゲートが境界）。
+ * 一般ユーザー・未認証からのリクエストはルートで 403 となり、この入力に到達しない。
  */
 const profileInputSchema = z
   .object({
@@ -75,10 +79,35 @@ const profileInputSchema = z
     // 自動サインオン（UI 設定）。password は平文で受け、サーバーが暗号化して passwordEnc に保存する
     autoSignon: z.boolean().optional(),
     signonUser: z.string().optional(),
-    password: z.string().optional()
+    password: z.string().optional(),
+    // PDF 自動蓄積・自動印刷（信頼設定）。canEditProfiles ルート下でのみ到達する
+    printer: printerSchema.optional()
   })
   .strict();
 export type ProfileInput = z.infer<typeof profileInputSchema>;
+
+/**
+ * printer 出力設定の反映規則を正規化する。
+ * - input 未指定 → 既存を保持（printer に触れない更新）
+ * - input あり → 空文字を除去。意味のあるキーが 1 つも無ければ undefined（＝ブロック削除＝自動蓄積/印刷を無効化）
+ */
+function buildPrinter(input: PrinterConfig | undefined, keep: PrinterConfig | undefined): PrinterConfig | undefined {
+  if (input === undefined) return keep;
+  const trimmed = (v?: string): string | undefined => (v !== undefined && v.trim() !== "" ? v.trim() : undefined);
+  const out: PrinterConfig = {};
+  const autoPdfDir = trimmed(input.autoPdfDir);
+  const autoPrint = trimmed(input.autoPrint);
+  const pdfFontPath = trimmed(input.pdfFontPath);
+  const pdfFontName = trimmed(input.pdfFontName);
+  const pageSize = trimmed(input.pageSize);
+  if (autoPdfDir !== undefined) out.autoPdfDir = autoPdfDir;
+  if (autoPrint !== undefined) out.autoPrint = autoPrint;
+  if (pdfFontPath !== undefined) out.pdfFontPath = pdfFontPath;
+  if (pdfFontName !== undefined) out.pdfFontName = pdfFontName;
+  if (pageSize !== undefined) out.pageSize = pageSize;
+  if (input.fontSize !== undefined) out.fontSize = input.fontSize;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 export class ProfileStore {
   private readonly byName = new Map<string, Profile>();
@@ -149,16 +178,19 @@ export class ProfileStore {
       if (p.ccsid !== undefined) pub.ccsid = p.ccsid;
       if (p.screenSize !== undefined) pub.screenSize = p.screenSize;
       if (p.deviceName !== undefined) pub.deviceName = p.deviceName;
-      if (opts?.includeSignon && p.signon?.user !== undefined) pub.signonUser = p.signon.user;
+      // 編集者（認証オフ or admin）にのみ signon user 名・printer 設定を返す（一般公開には出さない）
+      if (opts?.includeSignon) {
+        if (p.signon?.user !== undefined) pub.signonUser = p.signon.user;
+        if (p.printer !== undefined) pub.printer = p.printer;
+      }
       return pub;
     });
   }
 
   /**
-   * 接続フィールドから Profile 本体を組み立てる。信頼設定のうち enhanced/printer は保持。
-   * signon は UI 編集を反映する: autoSignon オフなら除去、オンなら user を反映し、password 指定時は
-   * 暗号化して passwordEnc に保存、未指定時は既存の password 機構（passwordEnv/passwordEnc/password）を保持。
-   * printer 出力設定はここでは触れない（ブラウザ入力から注入させない）。
+   * 接続フィールドから Profile 本体を組み立てる。enhanced は保持。
+   * signon/printer は UI 編集を反映する（未指定=既存保持 / 空=クリア / 値=置換）。この入力は canEditProfiles
+   * ルート下でのみ到達するため、trusted な編集に限られる。
    */
   private buildProfile(input: ProfileInput, keep?: Profile): Profile {
     const p: Profile = { name: input.name, host: input.host };
@@ -168,7 +200,8 @@ export class ProfileStore {
     if (input.screenSize !== undefined) p.screenSize = input.screenSize;
     if (input.deviceName !== undefined) p.deviceName = input.deviceName;
     if (keep?.enhanced !== undefined) p.enhanced = keep.enhanced;
-    if (keep?.printer !== undefined) p.printer = keep.printer; // 信頼設定（PDF 出力等）は保持
+    const printer = buildPrinter(input.printer, keep?.printer);
+    if (printer) p.printer = printer;
     const signon = this.buildSignon(input, keep?.signon);
     if (signon) p.signon = signon;
     return p;
