@@ -1,6 +1,7 @@
 {
   "name": "@as400web/server",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "MCP server (stdio + Streamable HTTP) and Web API (WebSocket/REST) for the 5250 core — implemented in subtask 02",
   "type": "module",
   "exports": {
