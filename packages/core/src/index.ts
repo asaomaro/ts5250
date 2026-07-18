@@ -77,3 +77,28 @@ export {
   type TraceRecorderOptions
 } from "./trace/trace.js";
 export { ReplayTransport } from "./trace/replay.js";
+
+// ホストサーバー（IBM i Host Server。TN5250 とは別プロトコル）
+// 第1段階として signon サーバーの認証のみ。SQL・データ転送は未実装。
+export {
+  signon,
+  SignonError,
+  type SignonOptions,
+  type SignonResult,
+  type HostServerInfo,
+  type HostServerTlsOptions
+} from "./hostserver/signon.js";
+export {
+  resolveServicePort,
+  type HostService,
+  type ResolvePortOptions,
+  SERVICE_NAME,
+  DEFAULT_PORT,
+  PORT_MAPPER_PORT
+} from "./hostserver/port-mapper.js";
+export {
+  classifySignonReturnCode,
+  describeSignonFailure,
+  type SignonFailure,
+  type SignonFailureKind
+} from "./hostserver/return-codes.js";

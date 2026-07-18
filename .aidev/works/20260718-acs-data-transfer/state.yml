@@ -1,0 +1,8 @@
+schema: 3
+slug: acs-data-transfer
+current: deliver
+approved: [research, spec, plan, coding, test, review, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
