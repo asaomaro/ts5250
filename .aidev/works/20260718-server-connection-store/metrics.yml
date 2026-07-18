@@ -16,3 +16,4 @@ events:
   - { ts: 2026-07-18T01:38:08Z, phase: review, event: start }
   - { ts: 2026-07-18T01:39:22Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 2 } }
   - { ts: 2026-07-18T01:39:22Z, phase: deliver, event: start }
+  - { ts: 2026-07-18T01:40:13Z, phase: deliver, event: approved }
