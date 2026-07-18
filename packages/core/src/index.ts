@@ -154,3 +154,6 @@ export {
   findCodePoint,
   type NpAttribute
 } from "./hostserver/spool/netprint-datastream.js";
+
+// ホストサーバー: IFS ファイルの読み書き
+export { IfsConnection, type IfsConnectOptions } from "./hostserver/ifs/ifs-connection.js";
