@@ -65,6 +65,10 @@ async function startServer() {
       break;
     }
   }
+  // 単一利用者アプリなので、UI からのパスワード保存に使う master key が無ければ自動生成して保存する
+  // （loadDotEnv が次回起動で拾えるよう既定の .env に保存。パッケージ化して .env が書き込み不可な配布形態では
+  //  --secret-key-file に app.getPath("userData") 配下の書き込み可能パスを渡すこと）。
+  argv.push("--auto-secret-key");
   const mod = await import(pathToFileURL(SERVER_MAIN).href);
   await mod.main(argv); // serve() は非ブロッキング。listen 開始後に resolve
   await waitForHealth(PORT);
