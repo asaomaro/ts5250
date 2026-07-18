@@ -212,9 +212,16 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .theme-btn {
+  /* 絵文字の有無で高さがブレないよう固定高さ＋中央寄せに揃える（28px） */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  box-sizing: border-box;
   font-family: var(--mono);
   font-size: 12px;
-  padding: 5px 12px;
+  line-height: 1;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--card);
