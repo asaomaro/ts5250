@@ -17,7 +17,9 @@ export type ErrorCode =
   | "READ_ONLY_SESSION"
   | "JOB_INFO_BUSY"
   | "JOB_INFO_UNAVAILABLE"
-  | "PROTOCOL_ERROR";
+  | "PROTOCOL_ERROR"
+  /** ホストサーバーが要求する機能が未実装（例: DES ベースのパスワードレベル） */
+  | "HOST_SERVER_UNSUPPORTED";
 
 export class Tn5250Error extends Error {
   constructor(

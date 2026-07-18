@@ -1,0 +1,16 @@
+{
+  "name": "@as400web/hostserver-check",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Manual check: connect to an IBM i host server and verify signon authentication",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b && node dist/main.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@as400web/core": "*"
+  }
+}
