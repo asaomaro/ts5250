@@ -18,6 +18,18 @@ const hasSessions = computed(() => sessionsStore.order.length > 0);
 // ワークスペースに何かタブがあるか（セッション＋管理タブ）。表示切替の基準
 const hasWorkspaceContent = computed(() => workspaceStore.groups().some((g) => g.tabs.length > 0));
 const showConnect = ref(true);
+/**
+ * アクティブ（フォーカス中）ペインのタブが 5250 エミュレーター（表示セッション）か。
+ * SO/SI・カナ・リンク・キーの各トグルはエミュレーター専用なので、これが true のときだけ出す。
+ * 接続画面表示中・プリンター/管理タブ・空ペインでは false。
+ */
+const activeIsEmulator = computed(() => {
+  if (showConnect.value || !hasWorkspaceContent.value) return false;
+  const tab = workspaceStore.focusedGroup().activeTab;
+  if (!tab || tab.startsWith("admin:")) return false;
+  const s = sessionsStore.get(tab);
+  return !!s && s.kind !== "printer";
+});
 const showKeys = ref(false);
 
 function onConnected(): void {
@@ -115,7 +127,7 @@ onBeforeUnmount(() => {
       </span>
       <div class="toggles">
         <button
-          v-if="hasSessions"
+          v-if="activeIsEmulator"
           class="theme-btn"
           :aria-pressed="workspaceStore.showShiftMarks"
           @click="workspaceStore.showShiftMarks = !workspaceStore.showShiftMarks"
@@ -123,7 +135,7 @@ onBeforeUnmount(() => {
           SO/SI <span class="tv sosi">{{ workspaceStore.showShiftMarks ? "{ }" : "␣" }}</span>
         </button>
         <button
-          v-if="hasSessions"
+          v-if="activeIsEmulator"
           class="theme-btn"
           :aria-pressed="workspaceStore.katakanaView"
           title="半角カナ表示切替（英小文字位置をカナ解釈）"
@@ -132,7 +144,7 @@ onBeforeUnmount(() => {
           <span class="tv kana">{{ workspaceStore.katakanaView ? "カナ" : "英" }}</span>
         </button>
         <button
-          v-if="hasSessions"
+          v-if="activeIsEmulator"
           class="theme-btn"
           :aria-pressed="workspaceStore.linkify"
           title="URL/メールのリンク化切替"
@@ -140,7 +152,7 @@ onBeforeUnmount(() => {
         >
           🔗 <span class="tv onoff">{{ workspaceStore.linkify ? "ON" : "OFF" }}</span>
         </button>
-        <button class="theme-btn" @click="showKeys = true">⌨ キー</button>
+        <button v-if="activeIsEmulator" class="theme-btn" @click="showKeys = true">⌨ キー</button>
         <button class="theme-btn" @click="toggle">
           <span class="tv theme">{{ effective() === "dark" ? "☀ 通常" : "🌙 ダーク" }}</span>
         </button>
