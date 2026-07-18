@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { readFileSync, appendFileSync, writeFileSync, existsSync } from "node:fs";
 import { Tn5250Error } from "@as400web/core";
 
 /**
@@ -46,6 +47,33 @@ export class SecretCrypto {
     return new SecretCrypto(decodeKey(raw));
   }
 
+  /**
+   * 単一利用者（Electron 等・非マルチユーザー）向け: master key が無ければ生成して keyFile（既定 .env）に
+   * 保存し、その場でも使えるよう process.env にも載せる。既に env / keyFile にあればそれを使う。
+   * generated=true のとき新規生成した（呼び出し側でログ・注意喚起に使う）。
+   */
+  static fromEnvOrCreate(
+    envName = "AS400_SECRET_KEY",
+    keyFile = ".env",
+    env: NodeJS.ProcessEnv = process.env
+  ): { crypto: SecretCrypto; generated: boolean } {
+    const existing = env[envName];
+    if (existing !== undefined && existing !== "") {
+      return { crypto: new SecretCrypto(decodeKey(existing)), generated: false };
+    }
+    // env に無くても keyFile に在れば使う（--env-file 未使用で起動した場合など。重複生成を防ぐ）
+    const fromFile = readKeyFromFile(keyFile, envName);
+    if (fromFile) {
+      env[envName] = fromFile;
+      return { crypto: new SecretCrypto(decodeKey(fromFile)), generated: false };
+    }
+    const key = randomBytes(KEY_LEN);
+    const hex = key.toString("hex");
+    persistKey(keyFile, envName, hex);
+    env[envName] = hex; // 今回の起動でも使えるように
+    return { crypto: new SecretCrypto(key), generated: true };
+  }
+
   /** 平文 → `v1:iv:tag:ct`（base64 連結） */
   encrypt(plain: string): string {
     const iv = randomBytes(IV_LEN);
@@ -67,5 +95,31 @@ export class SecretCrypto {
     const decipher = createDecipheriv("aes-256-gcm", this.key, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+  }
+}
+
+/** dotenv 形式のファイルから `NAME=VALUE` を 1 件読む（クォートは剥がす）。無ければ undefined */
+function readKeyFromFile(path: string, name: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+      if (m && m[1] === name) return m[2]!.trim().replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    /* 読めなければ未設定扱い */
+  }
+  return undefined;
+}
+
+/** dotenv 形式のファイルへ `NAME=VALUE` を追記する（新規作成時は 0600）。 */
+function persistKey(path: string, name: string, value: string): void {
+  const line = `${name}=${value}\n`;
+  if (existsSync(path)) {
+    const cur = readFileSync(path, "utf8");
+    const sep = cur.length === 0 || cur.endsWith("\n") ? "" : "\n";
+    appendFileSync(path, sep + line);
+  } else {
+    writeFileSync(path, line, { mode: 0o600 });
   }
 }

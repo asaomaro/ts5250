@@ -56,6 +56,9 @@ if [ -n "$PROFILES" ]; then
   ARGS+=(--profiles "$PROFILES")
   echo "==> profiles: $PROFILES"
 fi
+# 単一利用者向けのローカル起動なので、UI からのパスワード保存用 master key を無ければ自動生成して .env に保存する。
+# マルチユーザー運用では AS400_SECRET_KEY を明示管理し、この起動スクリプトは使わない想定。
+ARGS+=(--auto-secret-key)
 
 # .env があれば読み込む（プロファイルの passwordEnv 等）。Node 20.6+ の --env-file を利用
 NODE_ARGS=()
