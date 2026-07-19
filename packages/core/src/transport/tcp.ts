@@ -37,7 +37,10 @@ export class TcpTransport implements Transport {
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
-          new Tn5250Error("CONNECT_FAILED", `connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`)
+          new Tn5250Error(
+            "CONNECT_FAILED",
+            withSocketHint(`connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`, "ETIMEDOUT")
+          )
         );
       }, timeoutMs);
       socket.once("connect", () => {
@@ -71,7 +74,12 @@ export class TcpTransport implements Transport {
       socket.setNoDelay(true);
       const timer = setTimeout(() => {
         socket.destroy();
-        reject(new Tn5250Error("CONNECT_FAILED", `TLS connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`));
+        reject(
+          new Tn5250Error(
+            "CONNECT_FAILED",
+            withSocketHint(`TLS connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`, "ETIMEDOUT")
+          )
+        );
       }, timeoutMs);
       socket.once("secureConnect", () => {
         clearTimeout(timer);

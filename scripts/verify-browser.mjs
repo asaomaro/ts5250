@@ -32,10 +32,12 @@ const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3466;
 
 const sessions = new SessionManager();
-const resolver = buildResolver(
-  JSON.parse(readFileSync("profiles.local.json", "utf8")).profiles,
-  SecretCrypto.fromEnv()
-);
+// 装置名は実行ごとに変える。前回のセッションが解放されていないと
+// 同じ装置名では接続が拒否される（他の verify-browser 系と同じ扱い）
+const rawCfg = JSON.parse(readFileSync("profiles.local.json", "utf8"));
+const uniqDev = String(Date.now() % 100000).padStart(5, "0");
+for (const p of rawCfg.profiles) if (p.deviceName) p.deviceName = `WEBB${uniqDev}`.slice(0, 10);
+const resolver = buildResolver(rawCfg.profiles, SecretCrypto.fromEnv());
 const app = buildApp({ sessions, resolver, version: "test", webRoot: "packages/web-ui/dist" });
 const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
@@ -49,11 +51,12 @@ let ok = true;
 
 try {
   await page.goto(`http://localhost:${PORT}/`);
-  await page.waitForSelector("text=接続");
+  // ランチャー（メニュー）が出るまで待つ。システムが 1 つなら自動選択される
+  await page.waitForSelector(".launcher", { timeout: 20000 });
   log("app loaded");
 
-  // pub400 サーバープロファイルのカードをクリックして接続
-  await page.click("text=pub400");
+  // セッションカードの「接続」を押す（カード名クリックでは開かない）
+  await page.click(".card:has-text('pub400') >> button:has-text('接続')");
   // グリッドに Main Menu が描画されるまで待つ
   await page.waitForSelector("text=IBM i Main Menu", { timeout: 20000 });
   log("grid rendered: IBM i Main Menu 表示");
@@ -93,15 +96,20 @@ try {
   log("F5 sent (screen refresh)");
 
   // テーマ切替（テーマボタンはテキストで特定。複数の theme-btn があるため）
+  // テーマは ライト / ダーク / システム の 3 循環。文言は変わりうるので title で選ぶ。
+  // system は環境の設定次第で light に解決されるため、**見た目が変わるまで**巡回する
   const before = await page.getAttribute("html", "data-theme");
-  await page.click("button:has-text('通常'), button:has-text('ダーク')");
-  const after = await page.getAttribute("html", "data-theme");
+  let after = before;
+  for (let i = 0; i < 3 && after === before; i++) {
+    await page.click('[title*="テーマ切替"]');
+    after = await page.getAttribute("html", "data-theme");
+  }
   log(`theme toggled: ${before} -> ${after}`);
   ok = ok && before !== after;
 
   // 操作ログパネルを開く
-  await page.click("text=操作ログ");
-  await page.waitForSelector(".logpanel.open", { timeout: 3000 });
+  await page.click(".logbtn");
+  await page.waitForSelector(".logpanel", { timeout: 3000 });
   const logCount = await page.locator(".logpanel .lg").count();
   log(`log panel opened: ${logCount} entries`);
   ok = ok && logCount > 0;

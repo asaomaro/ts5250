@@ -73,7 +73,10 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
       fail(
         new Tn5250Error(
           "CONNECT_FAILED",
-          `host server timed out after ${timeoutMs}ms (${opts.host}:${opts.port})`
+          withSocketHint(
+            `host server timed out after ${timeoutMs}ms (${opts.host}:${opts.port})`,
+            "ETIMEDOUT"
+          )
         )
       )
     );
@@ -177,7 +180,10 @@ export function queryPortMapper(
     });
     socket.on("timeout", () =>
       finish(
-        new Tn5250Error("CONNECT_FAILED", `port mapper timed out after ${timeoutMs}ms (${host}:${port})`)
+        new Tn5250Error(
+          "CONNECT_FAILED",
+          withSocketHint(`port mapper timed out after ${timeoutMs}ms (${host}:${port})`, "ETIMEDOUT")
+        )
       )
     );
     socket.on("error", (err) =>

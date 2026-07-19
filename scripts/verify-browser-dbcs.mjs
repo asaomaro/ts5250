@@ -21,6 +21,22 @@ import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 
 /**
+ * セッション設定を実効 CCSID で選ぶ。
+ * CCSID はセッション側の上書きが優先で、無ければ親システムの既定を使う（解決器と同じ規則）。
+ */
+async function findSession(port, ccsid) {
+  const [sys, ses] = await Promise.all([
+    (await fetch(`http://localhost:${port}/api/systems`)).json(),
+    (await fetch(`http://localhost:${port}/api/sessions-config`)).json()
+  ]);
+  const byRef = new Map(sys.systems.map((s) => [s.ref, s]));
+  const eff = (s) => s.ccsid ?? byRef.get(s.system)?.ccsid;
+  const hit = ccsid === undefined ? ses.sessions[0] : ses.sessions.find((s) => eff(s) === ccsid);
+  return hit ? { ...hit, ccsid: eff(hit), user: byRef.get(hit.system)?.signonUser } : undefined;
+}
+
+
+/**
  * 旧形式（profiles 配列）から解決器を組み立てる。
  * 装置名の重複を避けるため、呼び出し側で書き換えたレコードをそのまま渡せる形にしている。
  */
@@ -49,9 +65,8 @@ const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
 await new Promise((r) => setTimeout(r, 500));
 
-// CCSID 1399 の DBCS プロファイル名を /api/profiles から特定
-const pubList = await (await fetch(`http://localhost:${PORT}/api/profiles`)).json();
-const jp = pubList.profiles.find((p) => p.ccsid === 1399);
+// CCSID 1399 の DBCS セッション設定を特定（実効 CCSID＝セッション上書き ?? システム既定）
+const jp = await findSession(PORT, 1399);
 if (!jp) {
   log("NG — CCSID 1399 のプロファイルが profiles.local.json にありません（DBCS には 1399 が必須）。");
   server.close?.(); process.exit(1);
@@ -65,7 +80,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 let ok = true;
 try {
   await page.goto(`http://localhost:${PORT}/`);
-  await page.locator("button.card", { hasText: jp.name }).first().click();
+  await page.locator(".card", { hasText: jp.name }).first().locator("button", { hasText: "接続" }).click();
   await page.waitForFunction(() => (document.querySelector(".grid")?.textContent?.length ?? 0) > 100, { timeout: 20000 });
   // サインオン後にメニュー以外へ着地することがある（未読メッセージ＝Display Messages、
   // 他セッションがメッセージ待ち行列を持つ＝Display Program Messages）。Enter/F3 で抜けてメニューへ。
