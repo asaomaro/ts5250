@@ -1,9 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { UserStore, SessionStore, hashPassword, hashToken, type AuthContext } from "../src/auth.js";
 import type { Transport } from "@as400web/core";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 class FakeTransport implements Transport {
   private dataFn: ((d: Uint8Array) => void) | undefined;
@@ -77,7 +83,7 @@ async function login(app: ReturnType<typeof buildApp>, username: string, passwor
 describe("認証・per-user 分離", () => {
   it("認証 ON: 未認証で保護ルートは 401、login 後は Cookie で通る", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1", auth: authCtx() });
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1", auth: authCtx() });
     const entry = await openPrinterFor(sessions, "alice");
 
     const noauth = await app.request(`/api/spool/${entry.id}/spool-1/pdf`);
@@ -91,7 +97,7 @@ describe("認証・per-user 分離", () => {
 
   it("他ユーザーのスプールは 403、admin は取得可", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1", auth: authCtx() });
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1", auth: authCtx() });
     const entry = await openPrinterFor(sessions, "alice");
 
     const bob = await login(app, "bob", "bobpw");
@@ -105,7 +111,7 @@ describe("認証・per-user 分離", () => {
 
   it("Bearer トークンでも認証でき、per-user 分離が効く", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1", auth: authCtx() });
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1", auth: authCtx() });
     const entry = await openPrinterFor(sessions, "alice"); // owner=alice
     // admin トークンでは取得可、alice のスプールは admin なので OK
     const res = await app.request(`/api/spool/${entry.id}/spool-1/pdf`, {
@@ -119,15 +125,15 @@ describe("認証・per-user 分離", () => {
 
   it("認証 OFF: 従来どおり無認証で取得できる（後方互換）", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1" }); // auth なし
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1" }); // auth なし
     const entry = await openPrinterFor(sessions, "alice");
     const res = await app.request(`/api/spool/${entry.id}/spool-1/pdf`);
     expect(res.status).toBe(200);
   });
 
   it("/api/me は enabled と user を返す", async () => {
-    const app = buildApp({ sessions: new SessionManager(), profiles: new ProfileStore([]), version: "1", auth: authCtx() });
-    const off = await buildApp({ sessions: new SessionManager(), profiles: new ProfileStore([]), version: "1" }).request("/api/me");
+    const app = buildApp({ sessions: new SessionManager(), resolver: emptyResolver(), version: "1", auth: authCtx() });
+    const off = await buildApp({ sessions: new SessionManager(), resolver: emptyResolver(), version: "1" }).request("/api/me");
     expect(await off.json()).toEqual({ enabled: false });
     const cookie = await login(app, "alice", "alicepw");
     const me = await app.request("/api/me", { headers: { cookie } });

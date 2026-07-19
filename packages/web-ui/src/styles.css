@@ -20,7 +20,8 @@
   --t-yellow: #e8d44d;
   --t-pink: #ff8ad8;
   --t-blue: #6ea8ff;
-  --t-glow: 0 0 3px;
+  /* CRT のにじみ。3px は文字がぼやけて読みにくいので抑えめにする */
+  --t-glow: 0 0 1px;
 
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "BIZ UDGothic", "Noto Sans Mono CJK JP", monospace;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
@@ -87,4 +88,70 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .a-blink { animation: none; }
+}
+
+/* ---- フォーム部品の既定スタイル ----
+   これまで select / input / button に既定を置いていなかったため、ブラウザ既定の
+   白い部品がダークテーマの上に浮いていた。トークンで統一する。 */
+select,
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="search"],
+input:not([type]) {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+select {
+  /* ネイティブの矢印は配色が効かないので自前で描く */
+  appearance: none;
+  padding-right: 24px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% + 1px),
+    calc(100% - 9px) calc(50% + 1px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+select:hover,
+input:hover {
+  border-color: var(--accent);
+}
+
+/* 既定のボタン。用途別のクラス（.btn / .link / .theme-btn 等）は各所で上書きする */
+button {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button:disabled:hover {
+  border-color: var(--line);
+  color: var(--ink);
 }

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { GroupNode } from "../stores/workspace.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { systemsStore } from "../stores/systems.js";
+import { PANE_LABELS } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
 import SessionInfo from "./SessionInfo.vue";
 
@@ -11,25 +13,41 @@ const infoFor = ref<string | undefined>();
 // 並び替えプレビュー（どのタブの前/後ろに挿入されるか）
 const reorder = ref<{ overId: string; after: boolean } | undefined>();
 
-const ADMIN_LABELS: Record<string, string> = {
-  "admin:users": "ユーザー管理",
-  "admin:sessions": "セッション管理",
-  "admin:logs": "ログ"
-};
+
+/** セッションを持たない（＝接続の概念が無い）タブか */
+function isPane(id: string): boolean {
+  return id.startsWith("admin:") || id.startsWith("list:");
+}
 function label(sessionId: string): string {
-  return ADMIN_LABELS[sessionId] ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
+  return PANE_LABELS[sessionId] ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
 }
 function connected(sessionId: string): boolean {
-  if (sessionId.startsWith("admin:")) return true;
+  if (isPane(sessionId)) return true;
   return sessionsStore.get(sessionId)?.connected ?? false;
+}
+
+/**
+ * 選択中システムに属するタブだけを描画する。
+ * **`group.tabs` は変えない**——隠すだけで、切り替えて戻れば元どおり現れる。
+ */
+const shownTabs = computed(() => workspaceStore.visibleTabs(props.group, systemsStore.selected));
+
+
+/** タブを選ぶ。ランチャーが開いたままにならないよう閉じる */
+function selectTab(id: string): void {
+  workspaceStore.setActiveTab(props.group.id, id);
+  workspaceStore.showLauncher = false;
 }
 /** プリンターの未読スプール数（非アクティブ時にタブへバッジ表示） */
 function unread(sessionId: string): number {
   return sessionsStore.get(sessionId)?.unread ?? 0;
 }
-/** タブを閉じる（管理タブは workspace から外すだけ、セッションは切断も行う） */
+/**
+ * タブを閉じる。**セッションを持たないタブ（管理・一覧）は workspace から外すだけ**——
+ * 以前は `list:*` がこの分岐から漏れており、切断処理へ流れていた。
+ */
 function closeTab(id: string): void {
-  if (id.startsWith("admin:")) workspaceStore.closeSession(id);
+  if (isPane(id)) workspaceStore.closeSession(id);
   else closeSession(id);
 }
 // タブエリアが現在ドロップ対象か（末尾追加のハイライト用）
@@ -83,12 +101,23 @@ function onTabDrop(ev: DragEvent, t: string): void {
   const j = rest.indexOf(t);
   dropAt(j < 0 ? rest.length : after ? j + 1 : j);
 }
-// タブの隙間・末尾の空き領域に落としたら末尾へ追加（合流）
+/**
+ * タブの隙間・末尾の空き領域に落としたら末尾へ追加（合流）。
+ *
+ * **ここへ来た時点で「タブ耳の上ではない」ことが確定している**——
+ * タブ耳の dragover は stopPropagation するため、この関数まで届かない。
+ * よって残っている `reorder`（タブ間の挿入位置の目印）は過去のもので、消してよい。
+ *
+ * 以前は `if (!reorder.value)` で抑制していたため、タブ耳を通ってから空き領域へ移ると
+ * 目印が残ったままになり、**帯のドロップ領域が出なくなっていた**。
+ */
 function onStripDragOver(ev: DragEvent): void {
   if (!isTabDrag()) return;
   ev.preventDefault();
   ev.stopPropagation();
-  if (!reorder.value) stripActive.value = true;
+  reorder.value = undefined;
+  // 同じグループ内の並べ替えでは合流の目印を出さない——移動先が変わらないので意味がない
+  stripActive.value = !props.group.tabs.includes(workspaceStore.draggingSession!);
 }
 function onStripDrop(ev: DragEvent): void {
   if (!isTabDrag()) return;
@@ -96,8 +125,19 @@ function onStripDrop(ev: DragEvent): void {
   ev.stopPropagation();
   dropAt(props.group.tabs.filter((x) => x !== workspaceStore.draggingSession).length); // 末尾
 }
-function onStripLeave(): void {
+/**
+ * ドラッグがこの帯から出たら、表示中の目印を消す。
+ *
+ * **`reorder` も消すのが要点**——タブ個別には dragleave が無いため、
+ * ドラッグ元のペインでタブ上を通過すると目印が立ちっぱなしになり、
+ * 移動先のペインが反応していないように見えていた。
+ * 子要素（タブ）へ移っただけの dragleave では消さない（ちらつく）。
+ */
+function onStripLeave(ev: DragEvent): void {
+  const to = ev.relatedTarget as Node | null;
+  if (to && (ev.currentTarget as HTMLElement).contains(to)) return;
   stripActive.value = false;
+  reorder.value = undefined;
 }
 </script>
 
@@ -110,7 +150,7 @@ function onStripLeave(): void {
     @drop="onStripDrop"
   >
     <div
-      v-for="t in group.tabs"
+      v-for="t in shownTabs"
       :key="t"
       class="tab"
       :class="{
@@ -124,13 +164,13 @@ function onStripLeave(): void {
       @dragend="onDragEnd"
       @dragover="onTabDragOver($event, t)"
       @drop="onTabDrop($event, t)"
-      @click="workspaceStore.setActiveTab(group.id, t)"
+      @click="selectTab(t)"
     >
       <span class="dot" :class="{ live: connected(t) }"></span>
       {{ label(t) }}
       <span v-if="unread(t) > 0" class="badge" title="新着スプール">{{ unread(t) }}</span>
       <button
-        v-if="!t.startsWith('admin:')"
+        v-if="!isPane(t)"
         class="info"
         title="セッション情報"
         @click.stop="infoFor = infoFor === t ? undefined : t"
@@ -138,7 +178,7 @@ function onStripLeave(): void {
         ⓘ
       </button>
       <button class="x" title="閉じる" @click.stop="closeTab(t)">✕</button>
-      <SessionInfo v-if="infoFor === t && !t.startsWith('admin:')" :session-id="t" @close="infoFor = undefined" />
+      <SessionInfo v-if="infoFor === t && !isPane(t)" :session-id="t" @close="infoFor = undefined" />
     </div>
   </div>
 </template>

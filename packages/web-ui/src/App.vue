@@ -4,13 +4,13 @@ import { useTheme, type ThemeMode } from "./composables/useTheme.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
-import ConnectView from "./components/ConnectView.vue";
+import LauncherPane from "./components/LauncherPane.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
-import LogPanel from "./components/LogPanel.vue";
 import KeybindingsPanel from "./components/KeybindingsPanel.vue";
 import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
+import { systemsStore } from "./stores/systems.js";
 
 const { mode, setMode } = useTheme();
 /** ライト → ダーク → システム（OS 設定に追従）の 3 循環 */
@@ -23,9 +23,22 @@ const themeLabel = computed(() =>
 );
 workspaceStore.init();
 
-// ワークスペースに何かタブがあるか（セッション＋管理タブ）。表示切替の基準
-const hasWorkspaceContent = computed(() => workspaceStore.groups().some((g) => g.tabs.length > 0));
-const showConnect = ref(true);
+/**
+ * いま選択中システムに属する、見えるタブがあるか。
+ * **フィルタ後で判定する**——別システムのタブが残っていても、いまのシステムに何も無ければ
+ * ランチャーを出すのが正しい。
+ */
+const hasVisibleTabs = computed(() => visibleTabCount.value > 0);
+/** 選択中システムで開いているタブの総数（パンくずのバッジ用） */
+const visibleTabCount = computed(() =>
+  workspaceStore
+    .groups()
+    .reduce((n, g) => n + workspaceStore.visibleTabs(g, systemsStore.selected).length, 0)
+);
+/** システム未選択なら常にシステム選択画面（そこから先が存在しない） */
+const showSystemPicker = computed(() => !systemsStore.selected || workspaceStore.showSystemPicker);
+/** ランチャーを出すか。タブが無いか、パンくずから明示的に呼ばれたとき */
+const showLauncher = computed(() => workspaceStore.showLauncher || !hasVisibleTabs.value);
 /** アカウント（API トークン発行 / ログアウト）ポップオーバー */
 const showAccount = ref(false);
 /**
@@ -34,7 +47,7 @@ const showAccount = ref(false);
  * 接続画面表示中・プリンター/管理タブ・空ペインでは false。
  */
 const activeIsEmulator = computed(() => {
-  if (showConnect.value || !hasWorkspaceContent.value) return false;
+  if (showLauncher.value) return false;
   const tab = workspaceStore.focusedGroup().activeTab;
   if (!tab || tab.startsWith("admin:") || tab.startsWith("list:")) return false;
   const s = sessionsStore.get(tab);
@@ -42,8 +55,53 @@ const activeIsEmulator = computed(() => {
 });
 const showKeys = ref(false);
 
-function onConnected(): void {
-  showConnect.value = false;
+/** そのシステムで現在つながっているセッション数（セレクタの表示用） */
+function liveCount(systemRef: string): number {
+  return Object.entries(workspaceStore.tabSystem).filter(
+    ([tab, ref]) => ref === systemRef && sessionsStore.get(tab)?.connected === true
+  ).length;
+}
+
+/**
+ * システムを切り替える。**タブは閉じない**——他システムのタブは生きたまま隠れ、戻せば現れる。
+ * セレクタは絞り込みであって破棄ではない（移動しただけで 5250 の状態が失われるのは代償が大きすぎる）。
+ */
+function onSelectSystem(ref: string): void {
+  systemsStore.select(ref || undefined);
+  workspaceStore.showLauncher = false;
+  // 切り替え先で見えるタブがあれば、最後に見ていたものへ寄せる
+  for (const g of workspaceStore.groups()) {
+    const next = workspaceStore.activeTabFor(g, systemsStore.selected);
+    if (next !== undefined) g.activeTab = next;
+  }
+}
+
+/**
+ * 現在地。3 つは排他で、パンくストの選択状態と一致する。
+ * **システム選択画面へ移っても選択は外さない**——外すと深い段が消え、
+ * 覗きに来ただけの利用者が戻れなくなる。
+ */
+const atSystems = computed(() => showSystemPicker.value);
+const atLauncher = computed(() => !atSystems.value && showLauncher.value);
+const atWorkspace = computed(() => !atSystems.value && !showLauncher.value);
+
+/** システム選択画面へ。選択は保ったまま、一覧を見せるだけ */
+function gotoSystems(): void {
+  workspaceStore.showSystemPicker = true;
+  workspaceStore.showLauncher = true;
+}
+
+/** メニュー（ランチャー）へ */
+function gotoLauncher(): void {
+  workspaceStore.showSystemPicker = false;
+  workspaceStore.showLauncher = true;
+}
+
+/** ワークスペースへ。開いているタブが無いときは押せない */
+function gotoWorkspace(): void {
+  if (!hasVisibleTabs.value) return;
+  workspaceStore.showSystemPicker = false;
+  workspaceStore.showLauncher = false;
 }
 
 /** 管理タブを開く（既にあれば前面に）。管理者のみ */
@@ -53,9 +111,9 @@ function openAdmin(id: string): void {
     workspaceStore.setActiveTab(existing.id, id);
     workspaceStore.focus(existing.id);
   } else {
-    workspaceStore.addSession(id);
+    workspaceStore.addSession(id, systemsStore.selected);
   }
-  showConnect.value = false;
+  workspaceStore.showLauncher = false;
 }
 
 // 狭幅フォールバック（分割無効化）
@@ -82,7 +140,7 @@ function paneRects() {
 function onGlobalKey(ev: KeyboardEvent): void {
   // セッションだけでなく管理タブ（admin:*）でも効かせる。セッション有無で判定すると
   // 管理タブしか開いていないときにショートカットが死ぬ
-  if (!hasWorkspaceContent.value) return;
+  if (!hasVisibleTabs.value) return;
   // Alt 系のアプリショートカット（タブ・ペイン移動）。Ctrl+PageUp/Down はブラウザ既定の
   // タブ切替と衝突するため使わない。素の PageUp/Down はホストの Roll に割当済み。
   if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
@@ -139,21 +197,41 @@ onBeforeUnmount(() => {
     <template v-else>
     <header class="topbar">
       <span class="brand">5250 Web エミュレーター</span>
-      <button v-if="hasWorkspaceContent" class="link" @click="showConnect = !showConnect">
-        {{ showConnect ? "ワークスペースへ" : "＋ 接続" }}
-      </button>
-      <!-- 個人利用（認証オフ）は実質管理者なのでセッション・ログを出す。
-           ユーザー管理はユーザーが存在しないため認証時のみ -->
-      <span class="admin-nav">
-        <button class="link" @click="openAdmin('list:jobs')">ジョブ</button>
-        <button class="link" @click="openAdmin('list:objects')">オブジェクト</button>
-        <button class="link" @click="openAdmin('list:users')">ユーザー一覧</button>
-      </span>
-      <span v-if="authStore.isAdmin || !authStore.enabled" class="admin-nav">
-        <button v-if="authStore.isAdmin" class="link" @click="openAdmin('admin:users')">ユーザー</button>
-        <button class="link" @click="openAdmin('admin:sessions')">セッション</button>
-        <button class="link" @click="openAdmin('admin:logs')">ログ</button>
-      </span>
+      <!--
+        ヘッダーに置くのは「いまどのシステムに繋いでいるか」と、このアプリ自身の管理だけ。
+        IBM i の機能はランチャー（本体）に並ぶ——セッションを開くのと同じ「タブを開く」操作なので、
+        上下に分けない。
+      -->
+      <!--
+        パンくず: システム: <名前> › メニュー › ワークスペース
+        第 1 段は「階層の名前 + 選んだ値」。前半が不変なので、押しても項目名が
+        変わったように見えない（値だけが — になる）。
+        **選択が残っているかぎり深い段は消さない**——覗きに来ただけなら押して戻れる。
+      -->
+      <nav class="crumbs" aria-label="現在地">
+        <button class="crumb" :class="{ on: atSystems }" :disabled="atSystems" @click="gotoSystems">
+          <span class="lvl">システム:</span> {{ systemsStore.current?.name ?? "—" }}
+        </button>
+        <!-- 未選択のときだけ、その先はまだ存在しないので出さない -->
+        <template v-if="systemsStore.selected">
+          <span class="sep">›</span>
+          <button class="crumb" :class="{ on: atLauncher }" :disabled="atLauncher" @click="gotoLauncher">
+            メニュー
+          </button>
+          <span class="sep">›</span>
+          <!-- タブが 1 つも無ければ行き先が無いので不活性にする -->
+          <button
+            class="crumb"
+            :class="{ on: atWorkspace }"
+            :disabled="atWorkspace || !hasVisibleTabs"
+            :title="hasVisibleTabs ? '' : '開いているタブがありません'"
+            @click="gotoWorkspace"
+          >
+            ワークスペース
+            <span v-if="visibleTabCount > 0" class="tabbadge">{{ visibleTabCount }}</span>
+          </button>
+        </template>
+      </nav>
       <div class="toggles">
         <button
           v-if="activeIsEmulator"
@@ -196,19 +274,87 @@ onBeforeUnmount(() => {
     <AccountPopover v-if="showAccount" @close="showAccount = false" />
     <KeybindingsPanel v-if="showKeys" @close="showKeys = false" />
 
-    <main v-if="showConnect || !hasWorkspaceContent">
-      <ConnectView @connected="onConnected" />
+    <main v-if="showLauncher">
+      <LauncherPane />
     </main>
     <main v-else class="workspace">
       <WorkspaceNode :node="workspaceStore.root" />
     </main>
 
-    <LogPanel />
     </template>
   </div>
 </template>
 
 <style scoped>
+/* パンくず。移動の起点をここに集約したので、ヘッダーで最も目立つ要素にする */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.crumb {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+/* 現在地。押しても動かないので、押せる見た目にしない */
+.crumb.on {
+  color: var(--ink);
+  font-weight: 700;
+  cursor: default;
+}
+.crumb.on:hover {
+  background: none;
+  color: var(--ink);
+}
+/* 階層の名前。値と分けることで、押しても項目名が変わったように見えない */
+.crumb .lvl {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+.crumb.on .lvl {
+  color: var(--muted);
+}
+/* 開いているタブ数。行き先に何があるかを押す前に知らせる */
+.tabbadge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 1.5em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.crumb.on .tabbadge {
+  background: var(--accent);
+  color: var(--paper);
+}
+.crumbs .sep {
+  color: var(--line);
+  font-size: 0.9rem;
+  user-select: none;
+}
+
 .admin-nav {
   display: inline-flex;
   gap: 4px;

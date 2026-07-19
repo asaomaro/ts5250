@@ -1,0 +1,9 @@
+schema: 3
+slug: 10-config-core
+parent: 20260719-connection-model
+current: review
+approved: [plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

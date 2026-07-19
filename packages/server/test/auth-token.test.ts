@@ -4,8 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "../src/auth.js";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 /**
  * API トークンは 1 ユーザー 1 本。再発行すると以前のトークンは失効する
@@ -36,7 +42,7 @@ function ctx(path: string): AuthContext {
 function deps(auth?: AuthContext) {
   return {
     sessions: new SessionManager(),
-    profiles: new ProfileStore([]),
+    resolver: emptyResolver(),
     version: "test",
     ...(auth ? { auth } : {})
   };

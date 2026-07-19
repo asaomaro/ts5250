@@ -15,6 +15,7 @@ vi.mock("../src/ws-client.js", () => ({
     }
     close() {}
     setHiddenIndexes() {}
+    setSessionId() {}
   }
 }));
 

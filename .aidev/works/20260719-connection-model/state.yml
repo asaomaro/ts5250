@@ -1,0 +1,10 @@
+schema: 3
+slug: connection-model
+current: review
+approved: [requirement, research, spec, design, plan, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+subtasks: [10-config-core, 20-server-surfaces, 30-web-ui]
+activeSubtask: done

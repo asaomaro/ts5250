@@ -1,6 +1,6 @@
 import { Socket, connect as netConnect } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
-import { Tn5250Error } from "../errors.js";
+import { Tn5250Error, withSocketHint } from "../errors.js";
 import type { Transport } from "./types.js";
 
 export interface TcpConnectOptions {
@@ -44,10 +44,10 @@ export class TcpTransport implements Transport {
         clearTimeout(timer);
         resolve(new TcpTransport(socket));
       });
-      socket.once("error", (err) => {
+      socket.once("error", (err: NodeJS.ErrnoException) => {
         clearTimeout(timer);
         reject(
-          new Tn5250Error("CONNECT_FAILED", `connect failed (${opts.host}:${opts.port}): ${err.message}`, {
+          new Tn5250Error("CONNECT_FAILED", withSocketHint(`connect failed (${opts.host}:${opts.port}): ${err.message}`, err.code), {
             cause: err
           })
         );

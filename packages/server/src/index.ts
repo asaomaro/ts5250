@@ -1,13 +1,30 @@
 // @as400web/server 公開 API
 export { SessionManager, type OpenOptions, type SessionEntry } from "./session-manager.js";
 export {
-  ProfileStore,
-  type Profile,
-  type PublicProfile,
-  type ProfileInput,
-  type PrinterConfig
-} from "./profiles.js";
-export { ConnectionStore, type PublicConnection, type ConnectionInput } from "./connection-store.js";
+  ConfigStore,
+  ServerConfigStore,
+  PersonalConfigStore,
+  type StoreData
+} from "./config-store.js";
+export { ConfigResolver, type ResolvedTarget, type TargetRef } from "./config-resolver.js";
+export {
+  makeRef,
+  parseRef,
+  type System,
+  type ServerSession,
+  type PersonalSession,
+  type AnySession,
+  type PublicSystem,
+  type PublicSession,
+  type PrinterConfig,
+  type ConfigSource
+} from "./config-types.js";
+export {
+  migrateProfiles,
+  migrateConnections,
+  type LegacyProfile,
+  type LegacyConnection
+} from "./config-migrate.js";
 export { screenToText, type FormatOptions } from "./format.js";
 export { fieldSignon } from "./signon.js";
 export { audit, withAudit, setAuditSink, type AuditEvent } from "./audit.js";
@@ -26,6 +43,7 @@ export type {
   WsScreen,
   WsJobInfoRes,
   WsError,
-  WsClosed
+  WsClosed,
+  WsKeyDone
 } from "./ws-messages.js";
 export { main } from "./main.js";

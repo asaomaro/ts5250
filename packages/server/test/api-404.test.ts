@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 /**
  * SPA のフォールバック（app.get("*") → index.html）が /api/* まで拾っていたため、
@@ -20,7 +26,7 @@ function webRoot(): string {
 function app(root?: string) {
   return buildApp({
     sessions: new SessionManager(),
-    profiles: new ProfileStore([]),
+    resolver: emptyResolver(),
     version: "test",
     ...(root ? { webRoot: root } : {})
   });
@@ -49,15 +55,15 @@ describe("未登録 API パスの 404", () => {
   });
 
   it("タイポしたパスが 200 で隠れない", async () => {
-    // 正しくは /api/profiles
-    const res = await app(webRoot()).request("/api/profile");
+    // 正しくは /api/systems
+    const res = await app(webRoot()).request("/api/system");
     expect(res.status).toBe(404);
   });
 
   it("既存の API は従来どおり応答する（回帰）", async () => {
     const a = app(webRoot());
     expect((await a.request("/api/version")).status).toBe(200);
-    expect((await a.request("/api/profiles")).status).toBe(200);
+    expect((await a.request("/api/systems")).status).toBe(200);
     expect((await a.request("/api/me")).status).toBe(200);
     expect((await a.request("/healthz")).status).toBe(200);
   });

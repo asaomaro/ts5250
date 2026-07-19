@@ -64,10 +64,21 @@ export class WsClient {
     this.handlers.onServerMessage(msg);
   }
 
+  /**
+   * 実セッション ID。open 応答で判明するまでは未定なのでラベルで代用する。
+   * **絞り込みに使うのはこちら**——ラベルは重複しうる（同名の設定を 2 本開ける）。
+   */
+  private realSessionId: string | undefined;
+
+  setSessionId(id: string): void {
+    this.realSessionId = id;
+  }
+
   private log(dir: "tx" | "rx" | "event", kind: string, summary: string, detail?: unknown, rt?: number, err?: boolean): void {
     logStore.add({
       ts: now(),
-      sessionId: this.sessionLabel,
+      sessionId: this.realSessionId ?? this.sessionLabel,
+      label: this.sessionLabel,
       dir,
       kind,
       summary,

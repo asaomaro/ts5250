@@ -175,6 +175,7 @@ const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?
   flex-direction: column;
   height: 100%;
   padding: 4px;
+  position: relative;
 }
 .group[data-focused="true"] {
   background: color-mix(in srgb, var(--t-green) 6%, transparent);

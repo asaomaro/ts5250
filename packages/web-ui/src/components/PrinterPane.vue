@@ -272,20 +272,22 @@ function printReport(): void {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  gap: 10px;
+  /* 上部の余白を他の一覧（ジョブ・オブジェクト等）に合わせる */
+  padding: 9px 10px;
   border-bottom: 1px solid var(--crt-bezel, #333);
+  font-size: 13px;
 }
 .badge {
   background: color-mix(in srgb, var(--t-green, #3f6) 20%, transparent);
   border: 1px solid var(--t-green, #3f6);
   border-radius: 3px;
-  padding: 0 6px;
-  font-size: 12px;
+  padding: 1px 8px;
+  font-size: 13px;
 }
 .muted {
   color: var(--muted, #888);
-  font-size: 12px;
+  font-size: 13px;
 }
 .spacer {
   flex: 1;
@@ -293,8 +295,8 @@ function printReport(): void {
 /* ツールバーのボタンは F キー（.fk）と同じ CRT テイストに揃える */
 .toolbar button {
   font-family: var(--mono);
-  font-size: 11px;
-  padding: 3px 9px;
+  font-size: 12px;
+  padding: 4px 10px;
   background: var(--crt);
   color: var(--muted);
   border: 1px solid var(--crt-line);
@@ -323,14 +325,14 @@ function printReport(): void {
   border-right: 1px solid var(--crt-bezel, #333);
 }
 .filter {
-  padding: 4px;
+  padding: 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--crt-bezel, #333) 60%, transparent);
 }
 .filter input {
   width: 100%;
   box-sizing: border-box;
-  padding: 3px 6px;
-  font-size: 12px;
+  padding: 5px 8px;
+  font-size: 13px;
   background: var(--crt, #0b0f0b);
   color: var(--ink, #cfc);
   border: 1px solid var(--crt-bezel, #333);
@@ -453,6 +455,8 @@ function printReport(): void {
   flex-direction: column;
   gap: 3px;
   padding: 6px 8px;
+  /* 他の一覧（ジョブ・オブジェクト等）と同じ大きさに揃える */
+  font-size: 13px;
   cursor: pointer;
   border-bottom: 1px solid color-mix(in srgb, var(--crt-bezel, #333) 50%, transparent);
 }
@@ -466,7 +470,7 @@ function printReport(): void {
 }
 .list .idx {
   color: var(--muted, #888);
-  font-size: 11px;
+  font-size: 12px;
   flex: none;
 }
 .list .title {
@@ -479,7 +483,7 @@ function printReport(): void {
   justify-content: space-between;
   gap: 6px;
   color: var(--muted, #888);
-  font-size: 11px;
+  font-size: 12px;
 }
 .list li.empty {
   cursor: default;
@@ -489,7 +493,7 @@ function printReport(): void {
 }
 .list .meta {
   color: var(--muted, #888);
-  font-size: 11px;
+  font-size: 12px;
 }
 .viewer {
   flex: 1;

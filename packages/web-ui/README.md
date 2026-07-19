@@ -24,15 +24,21 @@ node packages/server/dist/main.js --http 3400 --profiles profiles.json \
 ## 構成（design の web-ui モジュール表に対応）
 
 - `stores/` — sessions（画面・編集差分・カーソル・WS クライアント）/ workspace（分割ツリー・フォーカス・D&D）/
-  settings（localStorage 接続設定・**認証情報は保持しない**）/ log（リング 500・sessionId タグ・**hidden マスク**・
-  往復時間・JSONL）
+  connections（**接続設定はサーバー保存**。localStorage 保存は廃止＝単一の真実はサーバー。
+  **認証情報はブラウザに保持しない**——パスワードはサーバーで AES-256-GCM 暗号化され、
+  API は平文も暗号文も返さない）/ log（リング 500・sessionId タグ・**hidden マスク**・往復時間・JSONL）
+- 接続設定は**システム**（接続先＋資格情報）と**セッション設定**（装置名・画面サイズ・種別）の
+  2 階層で、参照は `srv:<name>`（サーバー設定）/ `own:<id>`（個人設定）。
+  **PDF 自動蓄積・自動印刷などの信頼設定はサーバー設定のセッションのみ**が持ち、
+  ブラウザ入力からは注入できない（サーバー側で拒否する）。
+  localStorage に残すのはテーマとキーバインドだけ。
 - `ws-client.ts` — 1 セッション = 1 WebSocket。送受信を log にフックし、送信時に hidden フィールド値を伏字化
 - `session-controller.ts` — WS とストアの結線（open/key/jobinfo/close）
 - `components/ScreenGrid.vue` — 固定グリッド描画。属性→CSS class、フィールドは inline `<input>`
   （**v-model 禁止**: `:value`＋beforeinput 検証＋composition ガード）、フォント自動フィット（ResizeObserver）
 - `components/WorkspaceNode.vue` / `PaneTabs.vue` — タブ＋ペイン分割（ディバイダ Pointer リサイズ・タブ D&D の 5 ゾーン）
 - `components/StatusBar.vue` / `SessionInfo.vue` — OIA＋タッチ F キーバー / セッション情報＋ジョブ情報取得
-- `components/ConnectView.vue` — サーバープロファイル＋ブラウザ保存設定の統合一覧
+- `components/ConnectView.vue` — サーバー設定＋自分の設定の統合一覧（どちらもサーバー保存）
 - `components/LogPanel.vue` — 操作ログドロワー（フィルタ・往復時間・JSON 展開・JSONL）
 - `composables/useKeymap.ts` — キー→AID（F1-24・Enter・PageUp/Down）、ローカル操作、preventDefault 捕捉、
   **カスタムキーバインド**（keybindings ストア）を優先

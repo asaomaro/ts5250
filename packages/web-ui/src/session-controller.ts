@@ -39,7 +39,12 @@ function setBusy(sessionId: string, busy: boolean): void {
 }
 
 /** 接続を開き、セッションを stores に登録してワークスペースに追加する */
-export async function openSession(open: WsOpen, label: string, meta?: SessionMeta): Promise<string> {
+export async function openSession(
+  open: WsOpen,
+  label: string,
+  meta?: SessionMeta,
+  systemRef?: string
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
     const client = new WsClient(
@@ -49,6 +54,8 @@ export async function openSession(open: WsOpen, label: string, meta?: SessionMet
           switch (msg.type) {
             case "opened": {
               sessionId = msg.sessionId;
+              // ログの絞り込みに使うため、実 ID が決まった時点で伝える
+              client.setSessionId(sessionId);
               const state: SessionState = {
                 sessionId,
                 label,
@@ -63,13 +70,18 @@ export async function openSession(open: WsOpen, label: string, meta?: SessionMet
               };
               sessionsStore.add(state);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
-              workspaceStore.addSession(sessionId);
+              workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);
               break;
             }
             case "screen": {
               sessionsStore.updateScreen(sessionId, msg.screen);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
+              setBusy(sessionId, false);
+              break;
+            }
+            case "key-done": {
+              // 画面を変えないキー（ヘルプ非対応など）でも待ちを解く
               setBusy(sessionId, false);
               break;
             }
@@ -102,7 +114,12 @@ export async function openSession(open: WsOpen, label: string, meta?: SessionMet
 }
 
 /** プリンターセッションを開き、stores 登録＋ワークスペース追加する（帳票を report で受信） */
-export async function openPrinterSession(open: WsOpen, label: string, meta?: SessionMeta): Promise<string> {
+export async function openPrinterSession(
+  open: WsOpen,
+  label: string,
+  meta?: SessionMeta,
+  systemRef?: string
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
     const client = new WsClient(
@@ -112,6 +129,8 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
           switch (msg.type) {
             case "printer-opened": {
               sessionId = msg.sessionId;
+              // ログの絞り込みに使うため、実 ID が決まった時点で伝える
+              client.setSessionId(sessionId);
               const state: SessionState = {
                 sessionId,
                 label,
@@ -132,7 +151,7 @@ export async function openPrinterSession(open: WsOpen, label: string, meta?: Ses
                 ...(meta ? { meta } : {})
               };
               sessionsStore.add(state);
-              workspaceStore.addSession(sessionId);
+              workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);
               break;
             }

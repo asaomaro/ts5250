@@ -87,9 +87,28 @@ const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
 // （さもないとカーソルが欄の中にある間キャレットが消える。ACS は始点にカーソルを残す）。
 const cursorOnEditable = computed(() => {
   if (rectSel.value) return false;
+  // **実際に入力欄へフォーカスがあるならそちらが担う**。
+  // 画面遷移直後、ホストが報告するカーソルは (1,1) のまま入力欄に初期フォーカスが入ることがあり
+  // （STRPDM など、コマンド入力欄へ飛ぶ画面）、位置だけで判定すると左上にセル選択が残る。
+  if (inputFocused.value) return true;
   const f = fieldAt(effCursor.value.row, effCursor.value.col, props.snapshot.fields, props.snapshot.cols, props.snapshot.rows);
   return f !== undefined && !f.protected;
 });
+
+/**
+ * この画面の入力欄がフォーカスを持っているか。
+ * native キャレットとセル選択の二重表示を防ぐためだけに使う。
+ */
+const inputFocused = ref(false);
+function onGridFocusIn(ev: FocusEvent): void {
+  inputFocused.value = (ev.target as HTMLElement | null)?.classList.contains("grid-input") === true;
+}
+function onGridFocusOut(ev: FocusEvent): void {
+  // 欄から欄へ移るだけなら維持する（間に false を挟むとカーソルが一瞬ちらつく）
+  const to = ev.relatedTarget as HTMLElement | null;
+  if (to?.classList.contains("grid-input")) return;
+  inputFocused.value = false;
+}
 
 interface GuiChoiceLike {
   index: number;
@@ -1459,7 +1478,10 @@ function fit(): void {
     const charW = measured; // = cur に対する実測字幅
     const lineH = cur * 1.25; // .grid line-height:1.25 と一致
     const ratio = Math.min(availW / (charW * cols), availH / (lineH * rows));
-    fontPx.value = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, cur * ratio));
+    // **整数に丸める**。小数フォントだと 1 文字ごとの描画位置がサブピクセルにずれ、
+    // 等幅グリッドでも文字がにじんで見える。1px 分の余白より鮮明さを優先する
+    const next = Math.floor(Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, cur * ratio)));
+    fontPx.value = Math.max(MIN_FONT_PX, next);
     return;
   }
   // レイアウト前（jsdom 等、ルーラー未計測）は近似でフォールバック。
@@ -1551,6 +1573,8 @@ onBeforeUnmount(() => {
     @click="onGridClick"
     @dblclick="onGridDblclick"
     @mousedown="onGridMousedown"
+    @focusin="onGridFocusIn"
+    @focusout="onGridFocusOut"
   >
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <!-- 矩形（ブロック）選択のハイライト -->
@@ -1711,6 +1735,13 @@ onBeforeUnmount(() => {
 .grid-span {
   text-shadow: var(--t-glow) currentColor;
 }
+/* 暗い背景に明るい文字を置くと既定のサブピクセル描画で太く・にじんで見える。
+   グレースケール描画にすると輪郭が締まる */
+.grid {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
 /* 画面テキスト内のリンク（桁幅は変えずインライン。色は turquoise 系＋下線） */
 .grid-link {
   color: var(--t-turquoise, var(--t-white));
@@ -1736,6 +1767,9 @@ onBeforeUnmount(() => {
   padding: 0;
   margin: 0;
   border: none;
+  /* グローバルの input 既定（角丸 6px）を打ち消す。
+     5250 の入力欄は下線 1 本で表すので、角が丸いと下線の端が浮いて見える */
+  border-radius: 0;
   background: transparent;
   color: var(--t-white);
   border-bottom: 1px solid color-mix(in srgb, var(--t-green) 55%, transparent);

@@ -1,17 +1,30 @@
 // T2: WebSocket E2E（実機）— サーバーを起動し、WS クライアントで /ws に接続して
-// open(profile)→opened(メニュー)→key(F1)→screen→jobinfo を実機 PUB400 で検証する。
+// open(session)→opened(メニュー)→key(F1)→screen→jobinfo を実機 PUB400 で検証する。
 // 実行: node --env-file=.env scripts/verify-ws.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { buildApp, SessionManager, ProfileStore } from "@as400web/server";
+import {
+  buildApp,
+  SessionManager,
+  ServerConfigStore,
+  PersonalConfigStore,
+  ConfigResolver
+} from "@as400web/server";
+import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3455;
 
 const sessions = new SessionManager();
-const profiles = ProfileStore.fromFile("profiles.local.json");
-const app = buildApp({ sessions, profiles, version: "test" });
+// 暗号鍵を渡さないと passwordEnc を復号できず、自動サインオンが黙って外れる
+const crypto = SecretCrypto.fromEnv();
+if (!crypto) log("WARN: AS400_SECRET_KEY 未設定のため自動サインオンは行われません");
+const resolver = new ConfigResolver(
+  ServerConfigStore.fromFile("profiles.local.json", crypto),
+  new PersonalConfigStore({ systems: [], sessions: [] }, crypto)
+);
+const app = buildApp({ sessions, resolver, version: "test" });
 const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
 await new Promise((r) => setTimeout(r, 400));
@@ -34,7 +47,7 @@ ws.on("message", (d) => inbox.push(JSON.parse(d.toString())));
 let ok = true;
 try {
   await new Promise((r, j) => { ws.on("open", r); ws.on("error", j); });
-  ws.send(JSON.stringify({ type: "open", profile: "pub400" }));
+  ws.send(JSON.stringify({ type: "open", session: "srv:pub400" }));
   const opened = await waitFor("opened");
   const onMenu = opened.screen.cells[0].map((c) => c.char).join("").includes("Main Menu");
   log(`opened: sessionId=${opened.sessionId.slice(0, 8)}… onMenu=${onMenu} fields=${opened.screen.fields.length}`);

@@ -15,10 +15,7 @@ import {
   type AuthVars
 } from "./auth.js";
 import { registerAdminRoutes } from "./admin.js";
-import { effectiveType } from "./profiles.js";
-import { checkOutputDir } from "./output-dir.js";
-import { checkPrintDest } from "./print-dest.js";
-import { registerConnectionRoutes } from "./connections.js";
+import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
@@ -82,121 +79,22 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     await a.users.save();
     return c.json({ token }, 201);
   });
-  // サーバー設定（ファイル由来）の編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき
-  const canEditProfiles = (c: { get: (k: "user") => AuthVars["user"] }): boolean => {
+  /**
+   * サーバー設定の編集可否: 認証オフ（ローカル）または admin のみ。かつファイル由来（永続化可能）のとき。
+   * **信頼境界の 2 層目**——printer 出力（サーバー上の任意パスへの書き込み）を受け付けてよい経路の判定。
+   */
+  const canEditServer = (c: { get: (k: "user") => AuthVars["user"] }): boolean => {
     const a = deps.auth;
     const permitted = !a || !a.enabled ? true : c.get("user")?.role === "admin";
-    return permitted && deps.profiles.persistable;
-  };
-  const profileErr = (e: unknown): 400 | 403 | 404 => {
-    if (e instanceof Tn5250Error) {
-      if (e.code === "FORBIDDEN") return 403;
-      if (e.code === "SESSION_NOT_FOUND") return 404;
-    }
-    return 400;
-  };
-  const profileErrMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
-  app.get("/api/profiles", (c) => {
-    const editable = canEditProfiles(c);
-    // signon user 名は編集者（認証オフ or admin）にだけ返す（プレフィル用）
-    // 一般ユーザーには空配列（サーバー設定は admin 専用）。名指しの解決はストア側で FORBIDDEN
-    return c.json({ profiles: deps.profiles.listForUser(c.get("user"), { includeSignon: editable }), editable });
-  });
-
-  /**
-   * PDF 出力先を保存**前**に検証する（不正な設定を永続化しない）。
-   * 未指定なら検証しない。ディレクトリは作成せず、無ければエラーにする。
-   *
-   * 実効種別が display の場合は検証しない: printer ブロックはどのみち破棄されるため、
-   * 「保存されない設定」を理由に 400 を返すのは利用者を混乱させる。
-   *
-   * 戻り値: エラー文字列（NG）／解決後の絶対パス（OK・未指定なら undefined）。
-   */
-  const validatePrinter = async (
-    body: unknown,
-    existing?: { sessionType?: "display" | "printer" | undefined; printer?: unknown }
-  ): Promise<{ error?: string; resolved?: string; warnings?: string[] }> => {
-    const b = body as
-      | { printer?: { autoPdfDir?: unknown; autoPrint?: unknown }; sessionType?: "display" | "printer" }
-      | null;
-    // 更新時の種別は既存側で固定される（種別は変更できない）。新規は入力から導出する
-    const type = existing ? effectiveType(existing) : effectiveType({ ...(b ?? {}) });
-    if (type !== "printer") return {};
-
-    // 出力先は確実に判定できるのでエラー（400）。保存前に弾く
-    const dir = b?.printer?.autoPdfDir;
-    let resolved: string | undefined;
-    if (typeof dir === "string" && dir !== "") {
-      const r = await checkOutputDir(dir);
-      if (!r.ok) return { error: r.reason };
-      resolved = r.path;
-    }
-
-    // 宛先プリンターは確実に判定できない（実際に印刷して確かめられない・確認手段が無い環境もある）
-    // ので警告に留め、保存は通す
-    const warnings: string[] = [];
-    const dest = b?.printer?.autoPrint;
-    if (typeof dest === "string" && dest !== "") {
-      const d = await checkPrintDest(dest);
-      if (d.warn) warnings.push(d.warn);
-    }
-    return { ...(resolved ? { resolved } : {}), ...(warnings.length ? { warnings } : {}) };
+    return permitted && deps.resolver.storeOf("server").persistable;
   };
 
-  // サーバー設定の作成・編集・削除（認証オフ または admin のみ）。信頼設定はサーバー側で保持
-  app.post("/api/profiles", async (c) => {
-    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const { error, resolved, warnings } = await validatePrinter(body);
-      if (error) return c.json({ error }, 400);
-      const profile = deps.profiles.add(body);
-      await deps.profiles.save();
-      return c.json(
-        { profile, ...(resolved ? { resolvedPdfDir: resolved } : {}), ...(warnings ? { warnings } : {}) },
-        201
-      );
-    } catch (e) {
-      return c.json({ error: profileErrMsg(e) }, profileErr(e));
-    }
-  });
-  app.put("/api/profiles/:name", async (c) => {
-    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const name = c.req.param("name");
-      const { error, resolved, warnings } = await validatePrinter(body, deps.profiles.getRaw(name));
-      if (error) return c.json({ error }, 400);
-      const profile = deps.profiles.update(name, body);
-      await deps.profiles.save();
-      return c.json({
-        profile,
-        ...(resolved ? { resolvedPdfDir: resolved } : {}),
-        ...(warnings ? { warnings } : {})
-      });
-    } catch (e) {
-      return c.json({ error: profileErrMsg(e) }, profileErr(e));
-    }
-  });
-  app.delete("/api/profiles/:name", async (c) => {
-    if (!canEditProfiles(c)) return c.json({ error: "forbidden: profiles are read-only" }, 403);
-    try {
-      deps.profiles.remove(c.req.param("name"));
-      await deps.profiles.save();
-      return c.json({ ok: true });
-    } catch (e) {
-      return c.json({ error: profileErrMsg(e) }, profileErr(e));
-    }
-  });
+  // システム / セッション設定の CRUD（信頼境界 2〜4 層目は config-routes 側）
+  registerConfigRoutes(app, { resolver: deps.resolver, canEditServer });
 
-  // ユーザー接続設定 CRUD（サーバー保存・owner スコープ）。ストア配線時のみ
-  if (deps.connections) {
-    registerConnectionRoutes(app, { connections: deps.connections });
-    // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
-    // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
-    registerHostListRoutes(app, { profiles: deps.profiles, connections: deps.connections });
-  }
+  // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
+  // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
+  registerHostListRoutes(app, { resolver: deps.resolver });
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {

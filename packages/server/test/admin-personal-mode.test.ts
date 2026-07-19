@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { AuditBuffer } from "../src/audit.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "../src/auth.js";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 /**
  * 個人利用（認証オフ）は「単一の信頼ユーザー」＝実質管理者。掴んだままのセッションを片付けられないと
@@ -30,7 +36,7 @@ function authCtx(): AuthContext {
 function app(auth?: AuthContext) {
   return buildApp({
     sessions: new SessionManager(),
-    profiles: new ProfileStore([]),
+    resolver: emptyResolver(),
     audit: new AuditBuffer(),
     version: "test",
     ...(auth ? { auth } : {})

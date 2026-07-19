@@ -4,7 +4,7 @@
 export { log, childLog } from "./log.js";
 
 // エラー
-export { Tn5250Error, type ErrorCode } from "./errors.js";
+export { Tn5250Error, describeSocketError, withSocketHint, type ErrorCode } from "./errors.js";
 
 // 画面モデル（共有型。server / web-ui が import する）
 export type {

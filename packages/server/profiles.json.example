@@ -1,28 +1,37 @@
 {
-  "profiles": [
+  "systems": [
     {
+      "id": "pub400",
       "name": "pub400",
       "host": "pub400.com",
       "port": 23,
       "ccsid": 37,
-      "deviceName": "WEBEMU01",
       "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
+    }
+  ],
+  "sessions": [
+    {
+      "id": "pub400",
+      "name": "pub400",
+      "system": "pub400",
+      "sessionType": "display",
+      "deviceName": "WEBEMU01"
     },
     {
+      "id": "pub400jp",
       "name": "pub400jp",
-      "host": "pub400.com",
-      "port": 23,
-      "ccsid": 1399,
+      "system": "pub400",
+      "sessionType": "display",
       "deviceName": "WEBEMUJP",
-      "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" }
+      "ccsid": 1399
     },
     {
+      "id": "pub400-printer",
       "name": "pub400-printer",
-      "host": "pub400.com",
-      "port": 23,
-      "ccsid": 1399,
+      "system": "pub400",
+      "sessionType": "printer",
       "deviceName": "WEBPRTJP",
-      "signon": { "user": "YOUR_USER", "passwordEnv": "PUB400_PASSWORD" },
+      "ccsid": 1399,
       "printer": {
         "autoPdfDir": "/var/spool/as400-pdf",
         "autoPrint": "OfficePrinter",

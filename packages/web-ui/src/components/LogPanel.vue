@@ -2,12 +2,24 @@
 import { ref, computed } from "vue";
 import { logStore, type LogEntry } from "../stores/log.js";
 
-const open = ref(false);
+/**
+ * 操作ログ。**エミュレーターの下端に重ねて**スライド表示する。
+ * 領域を押し広げると画面が縮んで 5250 の桁組みが変わるため、覆いかぶせる形にした。
+ */
+const props = defineProps<{
+  /** このセッションのログだけを出す。未指定なら全件（従来の全体表示） */
+  sessionId?: string;
+  /** 開いているか。**トグルはフッター（StatusBar）が持つ**——2 行にしないため */
+  open?: boolean;
+}>();
+const emit = defineEmits<{ (e: "close"): void }>();
+
 const filter = ref<"all" | "tx" | "rx" | "error">("all");
 const expanded = ref<number | undefined>();
 
 const shown = computed<LogEntry[]>(() =>
   logStore.entries.filter((e) => {
+    if (props.sessionId !== undefined && e.sessionId !== props.sessionId) return false;
     if (filter.value === "all") return true;
     if (filter.value === "error") return e.error;
     return e.dir === filter.value;
@@ -27,23 +39,23 @@ const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" 
 </script>
 
 <template>
-  <div class="logpanel" :class="{ open }">
+  <div v-if="open" class="logpanel">
     <div class="head">
-      <button class="title" @click="open = !open">{{ open ? "▾" : "▸" }} 操作ログ ({{ logStore.entries.length }})</button>
-      <span class="tools" v-if="open">
+      <span class="tools">
         <button v-for="f in (['all', 'tx', 'rx', 'error'] as const)" :key="f" class="lbtn" :class="{ on: filter === f }" @click="filter = f">
           {{ f === "all" ? "全て" : f === "tx" ? "送信" : f === "rx" ? "受信" : "エラー" }}
         </button>
         <button class="lbtn" @click="logStore.clear()">クリア</button>
         <button class="lbtn" @click="download">⬇ JSONL</button>
+        <button class="lbtn close" title="閉じる" @click="emit('close')">✕</button>
       </span>
     </div>
-    <div v-if="open" class="body">
+    <div class="body">
       <template v-for="e in shown" :key="e.id">
         <div class="lg" :class="{ err: e.error }" @click="expanded = expanded === e.id ? undefined : e.id">
           <span class="t">{{ Math.round(e.ts) }}</span>
           <span class="d" :data-dir="e.dir">{{ dirMark(e.dir) }}</span>
-          <span class="sid">{{ e.sessionId }}</span>
+          <span v-if="!sessionId" class="sid">{{ e.sessionId }}</span>
           <span class="k">{{ e.kind }}</span>
           <span class="m">{{ e.summary }}<em v-if="e.roundtripMs"> ({{ Math.round(e.roundtripMs) }}ms)</em></span>
         </div>
@@ -55,9 +67,31 @@ const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" 
 
 <style scoped>
 .logpanel {
+  /* 下端に重ねる。押し広げると 5250 の表示領域が縮み、桁組みが変わってしまう */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
   border-top: 1px solid var(--crt-line);
-  background: var(--crt-bezel);
+  background: color-mix(in srgb, var(--crt-bezel) 94%, transparent);
+  backdrop-filter: blur(2px);
   font-family: var(--mono);
+  /* 件数に依らず画面の半分。開くたびに高さが変わると読む位置を見失う */
+  height: 50%;
+  display: flex;
+  flex-direction: column;
+  animation: slide-up 0.18s ease;
+}
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logpanel {
+    animation: none;
+  }
 }
 .head {
   display: flex;
@@ -92,6 +126,8 @@ const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" 
   border-color: var(--t-green);
 }
 .body {
+  flex: 1;
+  min-height: 0;
   max-height: 180px;
   overflow-y: auto;
   background: var(--crt);

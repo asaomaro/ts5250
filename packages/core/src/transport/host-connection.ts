@@ -7,7 +7,7 @@
  */
 import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
-import { Tn5250Error } from "../errors.js";
+import { Tn5250Error, withSocketHint } from "../errors.js";
 
 export interface HostTlsOptions {
   rejectUnauthorized?: boolean;
@@ -81,7 +81,10 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
       fail(
         new Tn5250Error(
           isCertError(err) ? "TLS_CERT_INVALID" : "CONNECT_FAILED",
-          `host server connection failed (${opts.host}:${opts.port}): ${err.message}`,
+          withSocketHint(
+            `host server connection failed (${opts.host}:${opts.port}): ${err.message}`,
+            err.code
+          ),
           { cause: err }
         )
       )

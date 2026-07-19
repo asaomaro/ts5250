@@ -58,6 +58,18 @@ function removeGroup(node: WsNode, targetId: string): WsNode | undefined {
 export const workspaceStore = reactive({
   root: newGroup() as WsNode,
   focusedGroupId: "" as string,
+  /**
+   * タブ ID → 所属システムの参照。**タブの可視判定に使う唯一の情報源**。
+   * `GroupNode.tabs` は文字列 ID しか持たず、`admin:*` / `list:*` はセッションも持たないため、
+   * 対応表を別に持つ以外に辿る手段がない。
+   */
+  tabSystem: {} as Record<string, string>,
+  /** システムごとに最後に見ていたタブ。切り替えて戻ったときの復帰先 */
+  lastActiveBySystem: {} as Record<string, string>,
+  /** ランチャー（メニュー）を前面に出すか */
+  showLauncher: false,
+  /** システム選択画面を出すか。**選択を外さずに一覧を見せる**ための状態 */
+  showSystemPicker: false,
   /** 狭幅時は分割を無効化し単一グループにフォールバック（Workspace が set） */
   narrow: false,
   /** D&D 中のタブ（sessionId）。PaneTabs 間で共有し、自グループ内の並び替えか判定する */
@@ -86,12 +98,61 @@ export const workspaceStore = reactive({
     this.focusedGroupId = groupId;
   },
 
-  /** セッションをフォーカス中グループのタブとして追加（狭幅時も同様） */
-  addSession(sessionId: string): void {
+  /**
+   * セッションをフォーカス中グループのタブとして追加（狭幅時も同様）。
+   *
+   * @param systemRef このタブが属するシステム。**タブ ID は所属を持たない**ので、
+   *   ここで対応表に記録する。`admin:*` / `list:*` はセッションを持たず辿れないため、
+   *   開いた時点の選択中システムを渡す。
+   */
+  addSession(sessionId: string, systemRef?: string): void {
     const g = this.focusedGroup();
     if (!g.tabs.includes(sessionId)) g.tabs.push(sessionId);
     g.activeTab = sessionId;
     this.focusedGroupId = g.id;
+    if (systemRef !== undefined) {
+      this.tabSystem[sessionId] = systemRef;
+      this.lastActiveBySystem[systemRef] = sessionId;
+    }
+  },
+
+  /**
+   * 選択中システムに属するタブだけに絞る。
+   *
+   * **これは描画側の派生であって、`tabs` 配列は書き換えない**（design の判断）。
+   * 配列から外して戻す形にすると、復元漏れが「閉じた」と区別できなくなる。
+   * 実体を触らなければ、そもそも失われようがない。
+   *
+   * どのシステムにも紐づいていないタブ（対応表に無いもの）は常に見せる——
+   * 記録漏れで見えなくなるより、余計に見えるほうが安全。
+   */
+  visibleTabs(g: GroupNode, systemRef: string | undefined): string[] {
+    // 実配列を返さない。呼び出し側が結果を書き換えても group が壊れないようにする
+    // （「隠す」が「閉じる」に化けないための不変条件を、返り値の側でも守る）
+    if (systemRef === undefined) return [...g.tabs];
+    return g.tabs.filter((t) => {
+      const owner = this.tabSystem[t];
+      return owner === undefined || owner === systemRef;
+    });
+  },
+
+  /**
+   * 切り替え後に選ぶべきタブ。**最後に見ていたものへ戻す**（先頭固定より復帰が自然）。
+   * 見えるタブが無ければ undefined（ランチャーが出る）。
+   */
+  activeTabFor(g: GroupNode, systemRef: string | undefined): string | undefined {
+    const visible = this.visibleTabs(g, systemRef);
+    if (visible.length === 0) return undefined;
+    if (g.activeTab !== undefined && visible.includes(g.activeTab)) return g.activeTab;
+    const last = systemRef !== undefined ? this.lastActiveBySystem[systemRef] : undefined;
+    if (last !== undefined && visible.includes(last)) return last;
+    return visible[0];
+  },
+
+  /** タブの所属システムを記録する（セッション確立後など、後から分かる場合） */
+  assignSystem(sessionId: string, systemRef: string): void {
+    this.tabSystem[sessionId] = systemRef;
+    this.lastActiveBySystem[systemRef] = sessionId;
   },
 
   setActiveTab(groupId: string, sessionId: string): void {
@@ -179,6 +240,12 @@ export const workspaceStore = reactive({
         g.tabs = g.tabs.filter((t) => t !== sessionId);
         if (g.activeTab === sessionId) g.activeTab = g.tabs[0];
       }
+    }
+    // 対応表からも外す（閉じたタブの所属を残さない）
+    const owner = this.tabSystem[sessionId];
+    delete this.tabSystem[sessionId];
+    if (owner !== undefined && this.lastActiveBySystem[owner] === sessionId) {
+      delete this.lastActiveBySystem[owner];
     }
     this.pruneEmpty();
   },

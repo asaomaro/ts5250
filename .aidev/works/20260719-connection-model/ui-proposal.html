@@ -1,0 +1,1050 @@
+<title>接続設定の分離 — UI 案</title>
+
+<style>
+  :root {
+    --paper: #f2f5f1;
+    --card: #ffffff;
+    --ink: #1a231d;
+    --muted: #5b6b5e;
+    --line: #d8e0d6;
+    --accent: #178a48;
+    --accent-soft: #e3f0e7;
+    --crt: #050d09;
+    --crt-bezel: #0c1710;
+    --t-green: #3ddc84;
+    --t-white: #e8f0e8;
+    --warn: #a35b00;
+    --warn-soft: #fdf1e0;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "BIZ UDGothic", monospace;
+    --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0e1512; --card: #16201b; --ink: #e4ece5; --muted: #97a89b;
+      --line: #27352c; --accent: #3ddc84; --accent-soft: #16301f;
+      --warn: #e0a355; --warn-soft: #2a2113;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0e1512; --card: #16201b; --ink: #e4ece5; --muted: #97a89b;
+    --line: #27352c; --accent: #3ddc84; --accent-soft: #16301f;
+    --warn: #e0a355; --warn-soft: #2a2113;
+  }
+  :root[data-theme="light"] {
+    --paper: #f2f5f1; --card: #ffffff; --ink: #1a231d; --muted: #5b6b5e;
+    --line: #d8e0d6; --accent: #178a48; --accent-soft: #e3f0e7;
+    --warn: #a35b00; --warn-soft: #fdf1e0;
+  }
+
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.7; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 12px; max-width: 62ch; }
+  .rev {
+    display: inline-block; font-size: .76rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 11px; margin-bottom: 40px;
+  }
+
+  h2 {
+    font-size: 1.05rem; margin: 56px 0 6px; text-wrap: balance;
+    padding-bottom: 6px; border-bottom: 2px solid var(--accent); display: inline-block;
+  }
+  h2 + p { margin-top: 8px; color: var(--muted); font-size: 0.92rem; max-width: 66ch; }
+  h3 { font-size: 0.9rem; margin: 30px 0 6px; color: var(--muted); font-weight: 600; }
+
+  /* ── アプリのモック ── */
+  .app {
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.05); margin-top: 16px;
+  }
+
+  .topbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--card); font-size: 0.82rem;
+  }
+  .brand { font-weight: 700; letter-spacing: -0.01em; }
+
+  .syspick {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 999px; padding: 4px 12px 4px 10px; font-weight: 600; color: var(--accent);
+  }
+  .syspick .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .syspick .caret { opacity: .65; font-size: .75rem; }
+  .syspick.empty { background: transparent; border-style: dashed; border-color: var(--line); color: var(--muted); }
+  .syspick.empty .dot { background: var(--line); }
+
+  .navgroup { display: inline-flex; align-items: center; gap: 3px; }
+  .navgroup .lbl { font-size: .68rem; color: var(--muted); letter-spacing: .04em; margin-right: 5px; white-space: nowrap; }
+  .nav {
+    background: none; border: 1px solid transparent; border-radius: 6px;
+    padding: 3px 9px; font: inherit; font-size: .8rem; color: var(--ink); cursor: default;
+  }
+  .nav.on { background: var(--accent-soft); border-color: var(--line); color: var(--accent); font-weight: 600; }
+  .spacer { flex: 1 1 auto; min-width: 8px; }
+  .who { color: var(--muted); font-size: .78rem; }
+
+  /* タブ帯 */
+  .tabs {
+    display: flex; gap: 2px; padding: 7px 12px 0; border-bottom: 1px solid var(--line);
+    flex-wrap: wrap; align-items: center;
+  }
+  .tab {
+    font-size: .78rem; padding: 5px 12px; border: 1px solid var(--line); border-bottom: none;
+    border-radius: 7px 7px 0 0; background: var(--paper); color: var(--muted); position: relative; top: 1px;
+  }
+  .tab.on { background: var(--card); color: var(--ink); font-weight: 600; }
+  .tab .k { font-family: var(--mono); font-size: .72rem; opacity: .6; }
+  .tabadd {
+    margin-left: 4px; margin-bottom: 5px; border: 1px solid var(--accent); background: transparent;
+    color: var(--accent); border-radius: 6px; width: 26px; height: 24px;
+    font: inherit; font-size: .9rem; font-weight: 700; line-height: 1;
+  }
+  .tabnote { margin-left: auto; margin-bottom: 6px; font-size: .72rem; color: var(--muted); }
+  .empty-tabs {
+    padding: 9px 14px; font-size: .76rem; color: var(--muted);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px;
+  }
+
+  /* 本体 */
+  .body { min-height: 210px; }
+  .crt {
+    background: var(--crt); color: var(--t-green); font-family: var(--mono);
+    font-size: .74rem; line-height: 1.55; padding: 14px 16px; min-height: 210px;
+    border-top: 3px solid var(--crt-bezel);
+  }
+  .crt .hi { color: var(--t-white); }
+
+  .pane { padding: 15px 16px; }
+  .pane-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; font-size: .8rem; }
+  .field {
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: var(--paper);
+  }
+  .field .cap { color: var(--muted); font-size: .72rem; }
+  .btn {
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border-radius: 6px; padding: 4px 12px; font: inherit; font-size: .78rem; font-weight: 600;
+  }
+  .btn.ghost { background: transparent; color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .76rem; font-family: var(--mono); }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: .7rem; letter-spacing: .03em; }
+  .tag {
+    font-family: var(--sans); font-size: .68rem; padding: 1px 6px; border-radius: 4px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
+
+  /* カード並び */
+  .sec-lbl {
+    font-size: .72rem; color: var(--muted); letter-spacing: .04em;
+    margin: 0 0 9px; display: flex; align-items: center; gap: 9px;
+  }
+  .sec-lbl::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .sec-lbl + .cards { margin-bottom: 22px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 11px; }
+  .card { border: 1px solid var(--line); border-radius: 9px; padding: 12px 13px; background: var(--card); }
+  .card .nm { font-weight: 700; font-size: .86rem; margin-bottom: 3px; }
+  .card .meta { font-family: var(--mono); font-size: .72rem; color: var(--muted); line-height: 1.55; }
+  .card .desc { font-size: .74rem; color: var(--muted); line-height: 1.5; }
+  .card .foot { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
+  .card.add {
+    border-style: dashed; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: .82rem; min-height: 86px;
+  }
+  .card.fn { display: flex; flex-direction: column; }
+  .card.fn .foot { margin-top: auto; padding-top: 10px; }
+
+  /* インライン編集 */
+  .card.editing {
+    grid-column: 1 / -1; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset;
+    padding: 15px 17px;
+  }
+  .card.editing .nm { margin-bottom: 11px; }
+  .fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 7px 22px; }
+  .row { display: grid; grid-template-columns: 96px 1fr; gap: 9px; align-items: center; font-size: .8rem; }
+  .row .cap { color: var(--muted); font-size: .76rem; }
+  .inp {
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px;
+    background: var(--paper); font-family: var(--mono); font-size: .76rem;
+  }
+  .inp.wide { width: 100%; box-sizing: border-box; }
+  .editfoot { margin-top: 14px; display: flex; gap: 7px; align-items: center; }
+  .editfoot .rest { margin-left: auto; color: var(--muted); font-size: .74rem; }
+
+  /* ドロップダウン */
+  .dd {
+    width: 258px; border: 1px solid var(--line); border-radius: 9px; background: var(--card);
+    box-shadow: 0 6px 20px rgba(0,0,0,.13); padding: 5px; font-size: .8rem;
+  }
+  .dd .it { padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 8px; }
+  .dd .it.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .dd .it .sub2 { margin-left: auto; font-family: var(--mono); font-size: .7rem; color: var(--muted); }
+  .dd .sep { height: 1px; background: var(--line); margin: 5px 2px; }
+  .dd .it.manage { color: var(--accent); font-weight: 600; }
+  .dd .it .live {
+    margin-left: auto; font-size: .71rem; color: var(--accent); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 注釈 */
+  .note {
+    display: flex; gap: 10px; margin-top: 12px; padding: 11px 13px;
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    border-radius: 0 7px 7px 0; font-size: .84rem;
+  }
+  .note.warn { background: var(--warn-soft); border-left-color: var(--warn); }
+  .note .ico { font-size: .95rem; line-height: 1.5; }
+  .note p { margin: 0; }
+
+  /* 差分の説明 */
+  .delta { display: grid; gap: 10px; margin-top: 16px; }
+  .delta > div {
+    border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px; background: var(--card);
+  }
+  .delta h4 { margin: 0 0 5px; font-size: .87rem; }
+  .delta p { margin: 0; font-size: .84rem; color: var(--muted); }
+  .delta p + p { margin-top: 6px; }
+  .delta b { color: var(--ink); }
+
+  /* before/after */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  .cmp > div { border: 1px solid var(--line); border-radius: 9px; padding: 14px 16px; background: var(--card); }
+  .cmp h4 { margin: 0 0 3px; font-size: .84rem; }
+  .cmp .cap { color: var(--muted); font-size: .74rem; margin: 0 0 10px; }
+  .cmp.now h4 { color: var(--warn); }
+  .cmp.next h4 { color: var(--accent); }
+  pre {
+    margin: 0; font-family: var(--mono); font-size: .73rem; line-height: 1.6;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; color: var(--ink);
+  }
+  .dup { color: var(--warn); font-weight: 700; }
+  .one { color: var(--accent); font-weight: 700; }
+
+  .scroll { overflow-x: auto; }
+
+  /* 重ねて開く管理画面 */
+  .ov-host { position: relative; }
+  .body.tall { min-height: 320px; }
+  .ov-dim { position: absolute; inset: 0; background: rgba(4, 12, 8, .5); }
+  .ov-panel {
+    position: absolute; inset: 16px 26px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.34); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .ov-head {
+    display: flex; align-items: center; gap: 10px; padding: 9px 13px;
+    border-bottom: 1px solid var(--line); font-size: .85rem; font-weight: 700;
+  }
+  .ov-head .scope { font-weight: 400; font-size: .73rem; color: var(--muted); }
+  .ov-close {
+    margin-left: auto; border: 1px solid var(--line); background: transparent; color: var(--muted);
+    border-radius: 6px; width: 25px; height: 23px; font: inherit; font-size: .82rem; line-height: 1;
+  }
+  .ov-body { padding: 11px 13px; overflow: auto; }
+
+  /* 2 区画タブ（代案） */
+  .tabs .zonebar { width: 1px; align-self: stretch; background: var(--line); margin: 0 8px 5px; }
+  .tab.admin { border-style: dashed; }
+
+  @media (max-width: 700px) {
+    .cmp { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <h1>接続設定の分離 — UI 案</h1>
+  <p class="sub">
+    システムを親、セッションを子にする。上段でシステムを選ぶと、そのシステムに属するものだけが並ぶ。
+  </p>
+  <span class="rev">第 3 版 — 管理も選択中システムに絞り、ヘッダーを空にした</span>
+
+  <h2>いま何が問題か</h2>
+  <p>同じ相手・同じ資格情報なのに、設定ごとにパスワードを持っている。</p>
+
+  <div class="cmp">
+    <div class="now">
+      <h4>現在</h4>
+      <p class="cap">1 設定に「どこへ・誰として・どう使うか」が同居</p>
+<pre>pub400
+  host  pub400.com    tls ✓
+  user  USER   <span class="dup">password ●●●●</span>
+  ccsid 939  device WEBEMU01
+
+pub400-27x132
+  host  pub400.com    tls ✓
+  user  USER   <span class="dup">password ●●●●</span>   ← 重複
+  ccsid 1399 device WEBEMUJP
+
+pub400-printer
+  host  pub400.com    tls ✓
+  ccsid 1399 device PRT_TEST</pre>
+    </div>
+    <div class="next">
+      <h4>案</h4>
+      <p class="cap">システム 1 つに集約し、セッションが参照する</p>
+<pre>システム: pub400.com
+  host  pub400.com    tls ✓
+  user  USER   <span class="one">password ●●●●</span>   ← 1 箇所
+  既定 ccsid 939
+
+  ├ セッション pub400
+  │    device WEBEMU01
+  ├ セッション pub400-27x132
+  │    device WEBEMUJP  ccsid 1399
+  └ プリンター pub400-printer
+       device PRT_TEST  ccsid 1399</pre>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      SQL・IFS・一覧・アップロードは<strong>システムだけを選べば使える</strong>。
+      装置名や画面サイズを持つ設定を、それらと無関係なサーバーの認証情報の置き場にしなくて済む。
+    </p>
+  </div>
+
+  <h2>ここまでで変えた 3 点</h2>
+  <p>いずれも「同じものが 2 か所にある」「例外がある」状態を消す変更。</p>
+
+  <div class="delta">
+    <div>
+      <h4>1. 専用の設定画面をやめ、カードをその場で開いて編集する</h4>
+      <p>
+        第 1 版は左に木構造を持つ設定画面を別に用意していた。だが<b>画面 1 がシステム一覧、画面 2 がセッション一覧</b>で、
+        木はその両方を別の見た目でもう一度描いていた。追加ボタンも両方にあった。
+      </p>
+      <p>
+        いまは <b>[編集] を押すとカードがその場でフォームに開く</b>。編集対象は押したカードなので、
+        木から選び直す操作が要らない。一覧がそのまま設定になる。
+      </p>
+    </div>
+    <div>
+      <h4>2. 機能をヘッダーから本体へ移し、タブ帯に <span style="font-family:var(--mono)">＋</span> を置いた</h4>
+      <p>
+        ジョブ一覧もセッションも<b>「このシステムに対してタブを 1 枚開く」同じ操作</b>なのに、
+        ヘッダーに機能だけを出すと上下に分かれてしまう。本体に並べれば揃う。
+      </p>
+      <p>
+        ヘッダーは「どのシステムか」と「アプリ自身」だけになり、狭い画面でも折り返さない。
+        セッションで本体が埋まったあとは、<b>タブ帯の ＋</b> が同じ一覧を出す。
+      </p>
+    </div>
+    <div>
+      <h4>3. 接続一覧とログも選択中システムに絞り、ヘッダーを空にした</h4>
+      <p>
+        複数システムを横断して見たい場面はほとんど無い。絞ってしまえば両者は他の機能と同じ扱いになり、
+        <b>ヘッダーに残るのはシステム選択と利用者名だけ</b>になる。
+      </p>
+      <p>
+        ただし<b>どのシステムにも属さないログ</b>（ログイン・認証失敗・トークン発行）があるので、
+        絞り込みは既定値にとどめ、範囲を広げられるようにする。詳細は下の「管理画面をどこに置くか」。
+      </p>
+    </div>
+  </div>
+
+  <h2>画面 1 — 開いた直後（システム未選択）</h2>
+  <p>接続先が決まるまでは何も実行できない。だから最初の画面は「システムを選ぶ」ことだけを提示する。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick empty"><span class="dot"></span>システムを選択<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="body">
+      <div class="pane">
+        <p class="sec-lbl">システム</p>
+        <div class="cards">
+          <div class="card">
+            <div class="nm">pub400.com</div>
+            <div class="meta">pub400.com&nbsp;&nbsp;TLS<br>USER&nbsp;&nbsp;ccsid 939</div>
+            <div class="foot"><button class="btn">選択</button>
+              <button class="btn ghost">編集</button>
+              <span style="color:var(--muted);font-size:.72rem;margin-left:auto">3</span></div>
+          </div>
+          <div class="card">
+            <div class="nm">社内 i シリーズ</div>
+            <div class="meta">as400.local&nbsp;&nbsp;TLS<br>QSECOFR&nbsp;&nbsp;ccsid 5035</div>
+            <div class="foot"><button class="btn">選択</button>
+              <button class="btn ghost">編集</button>
+              <span style="color:var(--muted);font-size:.72rem;margin-left:auto">1</span></div>
+          </div>
+          <div class="card add">＋ システムを追加</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      ヘッダーに「このシステム」の機能はもう無い。<strong>選ぶまで存在しないものは、表示もしない。</strong>
+      前回のシステムを覚えておき、次回はここを飛ばして画面 2 から始めてよい。
+    </p>
+  </div>
+
+  <h2>画面 2 — システム選択直後（ランチャー）</h2>
+  <p>このシステムに対して開けるものが、セッションと機能の 2 段で並ぶ。どちらも押すとタブが 1 枚増える。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="empty-tabs">開いているセッションはありません</div>
+
+    <div class="body">
+      <div class="pane">
+        <p class="sec-lbl">セッション</p>
+        <div class="cards">
+          <div class="card">
+            <div class="nm">pub400</div>
+            <div class="meta">5250 表示&nbsp;&nbsp;24×80<br>WEBEMU01&nbsp;&nbsp;ccsid 939</div>
+            <div class="foot"><button class="btn">接続</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card">
+            <div class="nm">pub400-27x132</div>
+            <div class="meta">5250 表示&nbsp;&nbsp;27×132<br>WEBEMUJP&nbsp;&nbsp;ccsid 1399</div>
+            <div class="foot"><button class="btn">接続</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card">
+            <div class="nm">pub400-printer</div>
+            <div class="meta">プリンター&nbsp;&nbsp;PRT<br>PRT_TEST&nbsp;&nbsp;ccsid 1399</div>
+            <div class="foot"><button class="btn">接続</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card add">＋ セッションを追加</div>
+        </div>
+
+        <p class="sec-lbl">このシステムの機能</p>
+        <div class="cards">
+          <div class="card fn">
+            <div class="nm">ジョブ</div>
+            <div class="desc">実行中・待機中のジョブを見る。保留・解放・終了もできる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">オブジェクト</div>
+            <div class="desc">ライブラリー内のオブジェクトを一覧する。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">ユーザー</div>
+            <div class="desc">ユーザープロファイルと権限を一覧する。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">スプール</div>
+            <div class="desc">スプールファイルを一覧し、中身を読む。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">データ転送</div>
+            <div class="desc">SQL でテーブルを取り出す。IFS のファイルを読み書きする。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">接続状況</div>
+            <div class="desc">このシステムへ、いま誰が何本つないでいるか。切断もできる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">ログ</div>
+            <div class="desc">このシステムに対する操作の記録。範囲は広げられる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      機能は<strong>セッションを開かなくても使える</strong>。システムを選んだ時点で認証情報が揃っているため、
+      ここから直接「ジョブ」を開いてよい。
+    </p>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      <strong>タブ帯に並ぶのは「開いているもの」で、設定の一覧ではない。</strong>
+      設定はこの画面に並び、開いて初めてタブが生まれる。だから未起動のいまはタブが空になる。
+    </p>
+  </div>
+
+  <h2>画面 3 — セッションを開いた状態</h2>
+  <p>タブが生まれ、本体はセッションが占める。ランチャーへは<strong>タブ帯の ＋</strong> で戻る。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on">pub400 <span class="k">24×80</span></span>
+      <span class="tab">pub400-27x132 <span class="k">27×132</span></span>
+      <button class="tabadd">＋</button>
+      <span class="tabnote">＋ を押すと画面 2 のランチャーが出る</span>
+    </div>
+
+    <div class="body">
+      <div class="crt">
+MAIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="hi">IBM i Main Menu</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;System:&nbsp;&nbsp;&nbsp;PUB400<br><br>
+Select one of the following:<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1. User tasks<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2. Office tasks<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3. General system tasks<br><br>
+Selection or command<br>
+===&gt; <span class="hi">_</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      ＋ はブラウザのタブと同じ位置・同じ意味なので説明が要らない。
+      よく使うものはこのメニューの先頭に並べ替えて、押す回数を抑える。
+    </p>
+  </div>
+
+  <h2>画面 4 — ジョブ一覧のタブ</h2>
+  <p>機能もセッションと同じタブとして並ぶ。実行対象は上段で選択中のシステム。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab">pub400 <span class="k">24×80</span></span>
+      <span class="tab">pub400-27x132 <span class="k">27×132</span></span>
+      <span class="tab on">ジョブ</span>
+      <button class="tabadd">＋</button>
+    </div>
+
+    <div class="body">
+      <div class="pane">
+        <div class="pane-head">
+          <span class="field"><span class="cap">ユーザー</span> <span style="font-family:var(--mono)">USER</span></span>
+          <span class="field"><span class="cap">種別</span> すべて ▾</span>
+          <button class="btn">取得</button>
+          <span style="color:var(--muted); font-size:.76rem">30 件</span>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>番号</th><th>ユーザー</th><th>ジョブ名</th><th>状態</th><th>種別</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>681803</td><td>USER</td><td>QPRTJOB</td><td>*OUTQ</td><td>BU</td>
+                  <td><span class="tag">保留</span> <span class="tag">解放</span> <span class="tag">終了</span></td></tr>
+              <tr><td>689526</td><td>QSYS</td><td>QSYSARB</td><td>*ACTIVE</td><td>S</td>
+                  <td><span class="tag">保留</span> <span class="tag">解放</span> <span class="tag">終了</span></td></tr>
+              <tr><td>000000</td><td>QSYS</td><td>SCPF</td><td>*ACTIVE</td><td>X</td>
+                  <td><span class="tag">保留</span> <span class="tag">解放</span> <span class="tag">終了</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="ico">▲</span>
+    <p>
+      見える範囲は <strong>IBM i の権限が決める</strong>。アプリ側で重ねて制限しない
+      （一般ユーザーは自分のジョブしか返らない）。
+    </p>
+  </div>
+
+  <h2>編集 — カードがその場で開く</h2>
+  <p>専用の設定画面は無い。[編集] を押したカードが列いっぱいに広がり、フォームになる。</p>
+
+  <h3>セッションを編集（画面 2 で pub400 の [編集] を押した）</h3>
+
+  <div class="app">
+    <div class="body">
+      <div class="pane">
+        <p class="sec-lbl">セッション</p>
+        <div class="cards">
+          <div class="card editing">
+            <div class="nm">pub400</div>
+            <div class="fgrid">
+              <div class="row"><span class="cap">名前</span><span class="inp wide">pub400</span></div>
+              <div class="row"><span class="cap">種類</span><span>5250 表示 ▾</span></div>
+              <div class="row"><span class="cap">装置名</span><span class="inp wide">WEBEMU01</span></div>
+              <div class="row"><span class="cap">画面サイズ</span><span>24×80 ▾</span></div>
+              <div class="row"><span class="cap">CCSID</span><span class="inp">939（既定のまま）</span></div>
+            </div>
+            <div class="editfoot">
+              <button class="btn">保存</button>
+              <button class="btn ghost">取消</button>
+              <span class="rest">ホスト・ユーザー・パスワードは pub400.com が持つ</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="nm">pub400-27x132</div>
+            <div class="meta">5250 表示&nbsp;&nbsp;27×132<br>WEBEMUJP&nbsp;&nbsp;ccsid 1399</div>
+            <div class="foot"><button class="btn">接続</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card">
+            <div class="nm">pub400-printer</div>
+            <div class="meta">プリンター&nbsp;&nbsp;PRT<br>PRT_TEST&nbsp;&nbsp;ccsid 1399</div>
+            <div class="foot"><button class="btn">接続</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card add">＋ セッションを追加</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      セッションのフォームに<strong>ホスト・ユーザー・パスワードの欄は無い</strong>。
+      親を見ればよく、変更箇所が 1 つに定まる。
+    </p>
+  </div>
+
+  <h3>システムを編集（画面 1 の [編集]、または上段のメニューから）</h3>
+
+  <div class="app">
+    <div class="body">
+      <div class="pane">
+        <p class="sec-lbl">システム</p>
+        <div class="cards">
+          <div class="card editing">
+            <div class="nm">pub400.com</div>
+            <div class="fgrid">
+              <div class="row"><span class="cap">名前</span><span class="inp wide">pub400.com</span></div>
+              <div class="row"><span class="cap">ホスト</span><span class="inp wide">pub400.com</span></div>
+              <div class="row"><span class="cap">ポート</span><span class="inp">既定</span></div>
+              <div class="row"><span class="cap">TLS</span><span>✓ 使う（証明書を検証）</span></div>
+              <div class="row"><span class="cap">ユーザー</span><span class="inp wide">USER</span></div>
+              <div class="row"><span class="cap">パスワード</span><span class="inp wide">●●●●●●●●</span></div>
+              <div class="row"><span class="cap">既定 CCSID</span><span class="inp">939</span></div>
+            </div>
+            <div class="editfoot">
+              <button class="btn">保存</button>
+              <button class="btn ghost">取消</button>
+              <span class="rest">セッション 3 件と、すべての機能に効く</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="nm">社内 i シリーズ</div>
+            <div class="meta">as400.local&nbsp;&nbsp;TLS<br>QSECOFR&nbsp;&nbsp;ccsid 5035</div>
+            <div class="foot"><button class="btn">選択</button><button class="btn ghost">編集</button></div>
+          </div>
+          <div class="card add">＋ システムを追加</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>上段のシステム選択 — 切り替えても閉じない</h2>
+  <p>切り替えと、選択中システムの編集への入口を兼ねる。接続中の本数も、ここで分かる。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER</span>
+    </div>
+    <div class="body" style="min-height:auto; padding:8px 0 18px 118px">
+      <div class="dd">
+        <div class="it on">pub400.com <span class="live">● 2 接続中</span></div>
+        <div class="it">社内 i シリーズ <span class="live">● 1 接続中</span></div>
+        <div class="it">検証機 <span class="sub2">3 セッション</span></div>
+        <div class="sep"></div>
+        <div class="it manage">システムを編集…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      切り替えても<strong>タブは閉じない</strong>。セレクタは<strong>絞り込みであって破棄ではない</strong>——
+      他システムのタブは生きたまま隠れ、戻せばそこにある。
+      移動しただけで 5250 セッションの状態やサインオンが失われるのは、代償が釣り合わない。
+    </p>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      隠れた接続を忘れないよう、メニューには<strong>接続中の本数</strong>を出す。
+      未接続のシステムは設定数だけを薄く出し、<b>いま何かが動いているシステム</b>と区別する。
+    </p>
+  </div>
+
+  <div class="note warn">
+    <span class="ico">▲</span>
+    <p>
+      接続はホスト側の装置とジョブを占有し続ける（PUB400 には上限がある）。
+      ただしそれは<strong>接続を明示的に閉じる話</strong>であって、
+      別システムを見に行ったことへの罰にする理由にはならない。閉じる操作は接続状況のペインに置く。
+    </p>
+  </div>
+
+  <h2>管理画面をどこに置くか</h2>
+  <p>
+    接続一覧とログを<strong>選択中システムの内容に絞る</strong>。そうすると両者は他の機能と同じ「このシステムの機能」になり、
+    ヘッダーから消えてランチャーに並ぶ。置き場所の問題そのものが無くなる。
+  </p>
+
+  <div class="delta">
+    <div>
+      <h4>これで消えるもの</h4>
+      <p>
+        <b>「タブ＝選択中システムのもの」が例外なしの規則になる。</b>
+        重ねて開く仕組みも、タブ帯の 2 区画も、疑似システムも要らない。
+        切り替えは「そのシステムのタブだけを見せる」で説明が終わる（閉じはしない）。
+      </p>
+      <p>
+        ヘッダーに残るのは<b>システム選択と利用者名だけ</b>。アカウントは利用者名のメニューに入る
+        （ログアウトと同じ場所にあるのが自然）。
+      </p>
+    </div>
+    <div>
+      <h4>ただし 2 点だけ補正が要る</h4>
+      <p>
+        <b>1. どのシステムにも属さないログがある。</b>このアプリへのログイン、認証の失敗、
+        API トークンの発行、アカウントの変更、サーバー起動。絞り込みを既定にすると、
+        <b>この監査上いちばん重要な部分が見えなくなる</b>。
+      </p>
+      <p>
+        <b>2. 対処は絞り込みを「既定」にとどめること。</b>ログのペインに絞り込みを置き、
+        初期値を選択中システムにする。<b>すべてのシステム</b>と<b>アプリ自身</b>も選べる。
+        普段の見え方は提案どおり単純なまま、記録は失われない。
+      </p>
+    </div>
+  </div>
+
+  <h3>ランチャー — 機能が 7 つに増える</h3>
+  <p style="color:var(--muted); font-size:.88rem; margin:0 0 4px">
+    接続状況とログが、ジョブやスプールと同じ列に並ぶ。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="empty-tabs">開いているセッションはありません</div>
+
+    <div class="body">
+      <div class="pane">
+        <p class="sec-lbl">このシステムの機能</p>
+        <div class="cards">
+          <div class="card fn">
+            <div class="nm">ジョブ</div>
+            <div class="desc">実行中・待機中のジョブを見る。保留・解放・終了もできる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">オブジェクト</div>
+            <div class="desc">ライブラリー内のオブジェクトを一覧する。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">ユーザー</div>
+            <div class="desc">ユーザープロファイルと権限を一覧する。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">スプール</div>
+            <div class="desc">スプールファイルを一覧し、中身を読む。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn">
+            <div class="nm">データ転送</div>
+            <div class="desc">SQL でテーブルを取り出す。IFS のファイルを読み書きする。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn" style="border-color:var(--accent)">
+            <div class="nm">接続状況</div>
+            <div class="desc">このシステムへ、いま誰が何本つないでいるか。切断もできる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+          <div class="card fn" style="border-color:var(--accent)">
+            <div class="nm">ログ</div>
+            <div class="desc">このシステムに対する操作の記録。範囲は広げられる。</div>
+            <div class="foot"><button class="btn ghost">開く</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>ログのタブ — 絞り込みを既定にする</h3>
+  <p style="color:var(--muted); font-size:.88rem; margin:0 0 4px">
+    初期値は選択中システム。必要なときだけ範囲を広げる。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab">pub400 <span class="k">24×80</span></span>
+      <span class="tab on">ログ</span>
+      <button class="tabadd">＋</button>
+    </div>
+
+    <div class="body">
+      <div class="pane">
+        <div class="pane-head">
+          <span class="field"><span class="cap">範囲</span> pub400.com ▾</span>
+          <span class="field"><span class="cap">期間</span> 直近 1 時間 ▾</span>
+          <button class="btn">取得</button>
+          <span style="color:var(--muted); font-size:.72rem">
+            範囲は「すべてのシステム」「アプリ自身」も選べる
+          </span>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>時刻</th><th>利用者</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td>14:02:11</td><td>USER</td><td>session open (pub400)</td></tr>
+              <tr><td>13:58:03</td><td>USER</td><td>spool read QPRTJOB</td></tr>
+              <tr><td>13:57:20</td><td>USER</td><td>signon ok</td></tr>
+              <tr><td>13:57:02</td><td>USER</td><td>signon failed (CPF1120)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="ico">▲</span>
+    <p>
+      範囲を<strong>アプリ自身</strong>にすると、ログイン・認証失敗・トークン発行・アカウント変更が出る。
+      どのシステムにも属さない記録で、<strong>監査で最初に見るのはここ</strong>。
+      絞り込みの既定値にするだけで、この列を捨てない。
+    </p>
+  </div>
+
+  <h3>ヘッダーに残るもの</h3>
+  <p style="color:var(--muted); font-size:.88rem; margin:0 0 4px">
+    システム選択と利用者名だけ。アカウントは利用者名のメニューへ。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+    <div class="body" style="min-height:auto; padding:8px 0 18px 0; display:flex; justify-content:flex-end">
+      <div class="dd" style="width:210px; margin-right:14px">
+        <div class="it">アカウント</div>
+        <div class="it">API トークン</div>
+        <div class="sep"></div>
+        <div class="it">ログアウト</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>不採用にした 2 案（記録）</h3>
+  <p style="color:var(--muted); font-size:.88rem; margin:0 0 4px">
+    上の案が成立するので、どちらも要らなくなった。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="navgroup">
+        <span class="lbl">アプリ</span>
+        <button class="nav">接続一覧</button>
+        <button class="nav on">ログ</button>
+        <button class="nav">アカウント</button>
+      </span>
+      <span class="who">USER</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on">pub400 <span class="k">24×80</span></span>
+      <span class="tab">ジョブ</span>
+      <button class="tabadd">＋</button>
+      <span class="tabnote">案 A: 重ねて開く（タブは変化しない）</span>
+    </div>
+  <p style="color:var(--muted); font-size:.88rem; margin:0 0 4px">
+    閉じると元の場所に戻る。タブ帯は増減しない。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="navgroup">
+        <span class="lbl">アプリ</span>
+        <button class="nav">接続一覧</button>
+        <button class="nav on">ログ</button>
+        <button class="nav">アカウント</button>
+      </span>
+      <span class="who">USER</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on">pub400 <span class="k">24×80</span></span>
+      <span class="tab">ジョブ</span>
+      <button class="tabadd">＋</button>
+      <span class="tabnote">タブは変化しない</span>
+    </div>
+
+    <div class="body tall ov-host">
+      <div class="crt" style="min-height:320px">
+MAIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="hi">IBM i Main Menu</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;System:&nbsp;&nbsp;&nbsp;PUB400<br><br>
+Select one of the following:<br><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1. User tasks<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2. Office tasks<br>
+      </div>
+      <div class="ov-dim"></div>
+      <div class="ov-panel">
+        <div class="ov-head">
+          ログ <span class="scope">全システム</span>
+          <button class="ov-close">✕</button>
+        </div>
+        <div class="ov-body scroll">
+          <table>
+            <thead><tr><th>時刻</th><th>システム</th><th>利用者</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td>14:02:11</td><td>pub400.com</td><td>USER</td><td>session open (pub400)</td></tr>
+              <tr><td>14:01:48</td><td>社内 i シリーズ</td><td>USER</td><td>job list (30 rows)</td></tr>
+              <tr><td>13:58:03</td><td>pub400.com</td><td>USER</td><td>spool read QPRTJOB</td></tr>
+              <tr><td>13:57:20</td><td>pub400.com</td><td>USER</td><td>signon ok</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="color:var(--muted); font-size:.85rem; margin:10px 0 0">
+    <b>案 A（重ねて開く）</b>：ログが全システム横断である前提で、どのタブ帯にも属さない場所に置いた。
+    絞り込みが成り立つなら、この仕掛けは不要。
+  </p>
+
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">5250 Web エミュレーター</span>
+      <span class="syspick"><span class="dot"></span>pub400.com<span class="caret">▾</span></span>
+      <span class="spacer"></span>
+      <span class="who">USER ▾</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on">pub400 <span class="k">24×80</span></span>
+      <span class="tab">ジョブ</span>
+      <button class="tabadd">＋</button>
+      <span class="zonebar"></span>
+      <span class="tab admin">ログ</span>
+      <span class="tabnote">案 B: タブ帯を 2 区画に分ける</span>
+    </div>
+
+    <div class="body">
+      <div class="pane">
+        <div class="scroll">
+          <table>
+            <thead><tr><th>時刻</th><th>システム</th><th>利用者</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td>14:02:11</td><td>pub400.com</td><td>USER</td><td>session open (pub400)</td></tr>
+              <tr><td>14:01:48</td><td>社内 i シリーズ</td><td>USER</td><td>job list (30 rows)</td></tr>
+              <tr><td>13:58:03</td><td>pub400.com</td><td>USER</td><td>spool read QPRTJOB</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="color:var(--muted); font-size:.85rem; margin:10px 0 0">
+    <b>案 B（2 区画）</b>：管理を開きっぱなしで使う想定なら必要だった。代償はタブ帯の規則が 1 つ増えること
+    ——「タブ＝選択中システムのもの」が「区切りの左だけ」に弱まる。絞り込み案なら規則は 1 本のまま。
+  </p>
+
+  <h2>置き場所のまとめ</h2>
+  <p>ほぼすべてが選択中システムに属する。属さないのはアプリ自身の記録と、利用者本人の設定だけ。</p>
+
+  <div class="scroll">
+    <table style="font-family:var(--sans); font-size:.82rem">
+      <thead><tr><th>画面</th><th>扱うもの</th><th>置き場所</th></tr></thead>
+      <tbody>
+        <tr><td>ジョブ／オブジェクト／ユーザー／スプール／データ転送</td><td>選択中システムの IBM i データ</td><td><span class="tag">ランチャー → タブ</span></td></tr>
+        <tr><td>接続状況</td><td>このシステムへの接続</td><td><span class="tag">ランチャー → タブ</span></td></tr>
+        <tr><td>ログ</td><td>このシステムに対する操作（既定）</td><td><span class="tag">ランチャー → タブ</span></td></tr>
+        <tr><td>ログ（範囲を広げたとき）</td><td>全システム／アプリ自身の記録</td><td>同じタブ内の絞り込み</td></tr>
+        <tr><td>アカウント・API トークン</td><td>利用者本人の設定</td><td>ヘッダーの利用者名メニュー</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p>
+      「接続一覧」「ログ」には<strong>システム名の列を足す</strong>。
+      横断したまま、どのシステムのものか分かる。
+    </p>
+  </div>
+
+  <h2>移行</h2>
+  <p>既存ファイルは読み込み時に自動で分解する。利用者の手作業はない。</p>
+
+  <div class="scroll">
+<pre>profiles.local.json（現在）        →   システム 1 + セッション 3
+
+pub400          host=pub400.com  user=USER  ─┐
+pub400-27x132   host=pub400.com  user=USER  ─┼→  システム「pub400.com」
+pub400-printer  host=pub400.com             ─┘   （host・tls・user・password が一致）
+
+                                                 ├ pub400          device WEBEMU01
+                                                 ├ pub400-27x132   device WEBEMUJP  ccsid 1399
+                                                 └ pub400-printer  device PRT_TEST  ccsid 1399</pre>
+  </div>
+
+  <div class="note warn">
+    <span class="ico">▲</span>
+    <p>
+      <strong>ファイルは勝手に書き換えない。</strong>読み込み時にメモリ上で分解し、
+      保存操作をしたときに初めて新形式で書き出す。取り消せる状態を保つ。
+    </p>
+  </div>
+
+</div>

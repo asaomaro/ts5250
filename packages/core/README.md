@@ -8,6 +8,12 @@ TN5250 プロトコルの純 TypeScript 実装。telnet ネゴシエーション
 CCSID で DBCS を有効化（`ccsid: 1399` 等）、`screenSize: "27x132"`、`tls: true`（既定ポート 992・証明書検証既定 ON）。
 DBCS は SO/SI をまたぐ EBCDIC_STATEFUL 変換で、SO/SI 桁・DBCS 2 桁を保持し桁位置がズレない。
 
+> `ConnectOptions` は**接続 1 回分のフラットな引数**で、保存形式とは独立している（今回の
+> システム / セッション設定の 2 階層化でも変更していない）。`server` 側は保存済み設定を
+> `ConfigResolver` で解決してからこの形に落とす。`deviceName` / `screenSize` はセッション設定
+> 由来、`host` / `port` / `tls` / `signon` はシステム由来、`ccsid` はセッション設定がシステムの
+> 既定を上書きする。
+
 ## 使い方
 
 ```ts
@@ -15,7 +21,7 @@ import { Session5250 } from "@as400web/core";
 
 const session = await Session5250.connect({
   host: "pub400.com",
-  deviceName: "WEBEMU01" // 任意（ジョブ名になる）
+  deviceName: "WEBEMU01" // 任意（ジョブ名になる）。省略するとホストが採番する
 });
 
 let screen = session.snapshot();          // ScreenSnapshot（cells / fields / cursor）

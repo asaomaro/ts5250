@@ -6,9 +6,30 @@
 // 実行: node --env-file=.env scripts/verify-browser-cmdline.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ProfileStore } from "@as400web/server";
+import {
+  buildApp,
+  SessionManager,
+  ServerConfigStore,
+  PersonalConfigStore,
+  ConfigResolver,
+  migrateProfiles
+} from "@as400web/server";
+import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
+
+/**
+ * 旧形式（profiles 配列）から解決器を組み立てる。
+ * 装置名の重複を避けるため、呼び出し側で書き換えたレコードをそのまま渡せる形にしている。
+ */
+function buildResolver(profiles, crypto) {
+  const { systems, sessions } = migrateProfiles(profiles);
+  return new ConfigResolver(
+    new ServerConfigStore({ systems, sessions }, crypto),
+    new PersonalConfigStore({ systems: [], sessions: [] }, crypto)
+  );
+}
+
 
 const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3468;
@@ -19,8 +40,8 @@ const sessions = new SessionManager();
 const raw = JSON.parse(readFileSync("profiles.local.json", "utf8"));
 const uniq = Date.now().toString(36).slice(-4).toUpperCase();
 for (const p of raw.profiles) if (p.deviceName) p.deviceName = `WEBV${uniq}`.slice(0, 10);
-const profiles = new ProfileStore(raw.profiles);
-const app = buildApp({ sessions, profiles, version: "test", webRoot: "packages/web-ui/dist" });
+const resolver = buildResolver(raw.profiles, SecretCrypto.fromEnv());
+const app = buildApp({ sessions, resolver, version: "test", webRoot: "packages/web-ui/dist" });
 const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
 await new Promise((r) => setTimeout(r, 500));

@@ -7,9 +7,10 @@ export interface WsOpen {
   type: "open";
   /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
   kind?: "display" | "printer";
-  /** 保存済みユーザー接続の ID 参照（サーバーが host/資格情報を解決）。profile/host より優先 */
-  connection?: string;
-  profile?: string;
+  /** システム参照（`srv:<name>` / `own:<id>`）。接続先と資格情報を決める */
+  system?: string;
+  /** セッション設定参照。指定すると親システムまで一意に決まる（基本形） */
+  session?: string;
   host?: string;
   port?: number;
   ccsid?: number;
@@ -18,7 +19,7 @@ export interface WsOpen {
   deviceName?: string;
   enhanced?: boolean;
   tls?: boolean;
-  /** RFC 4777 自動サインオン（host 直指定時。profile 指定時は profile 側の signon を使う） */
+  /** RFC 4777 自動サインオン（host 直指定時。system/session 指定時はシステム側の signon を使う） */
   user?: string;
   password?: string;
   readOnly?: boolean;
@@ -76,6 +77,18 @@ export interface WsJobInfoRes {
   job: JobInfo;
   cached: boolean;
 }
+/**
+ * AID 送信の処理が終わった合図。
+ *
+ * **画面が返らないキーがあるため必要**——応答画面は screen イベントで push されるが、
+ * ホストが表示を変えない場合はイベントが起きず、クライアントの「応答待ち」が永久に残る。
+ * sendAid の完了そのものを伝えることで、画面の有無に依らず待ちを解ける。
+ */
+export interface WsKeyDone {
+  type: "key-done";
+  sessionId: string;
+}
+
 export interface WsError {
   type: "error";
   code: string;
@@ -149,6 +162,7 @@ export type WsServerMessage =
   | WsJobInfoRes
   | WsError
   | WsClosed
+  | WsKeyDone
   | WsPrinterOpened
   | WsPrinterWarn
   | WsPrinterOutputState

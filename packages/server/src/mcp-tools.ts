@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  childLog,
   Tn5250Error,
   type ConnectOptions,
   type ScreenSnapshot,
@@ -9,8 +10,8 @@ import {
   type AidKey
 } from "@as400web/core";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
-import { ProfileStore } from "./profiles.js";
-import type { ConnectionStore } from "./connection-store.js";
+import type { ConfigResolver } from "./config-resolver.js";
+import type { PublicSession, PublicSystem } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
 import { screenToText, type FormatOptions } from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
@@ -18,11 +19,12 @@ import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
 import { withAudit } from "./audit.js";
 
+const mcpLog = childLog({ component: "mcp-tools" });
+
 export interface ToolDeps {
   sessions: SessionManager;
-  profiles: ProfileStore;
-  /** ユーザー接続設定ストア（サーバー保存）。未指定なら接続 ID 参照は使えない */
-  connections?: ConnectionStore;
+  /** 接続設定の唯一の解決点（system / session 参照 → 接続オプション） */
+  resolver: ConfigResolver;
   version: string;
   /** 認証時の呼び出しユーザー（per-user 分離）。未認証/OFF は undefined */
   user?: AuthUser;
@@ -173,24 +175,29 @@ function errorResult(err: unknown) {
  * 認証情報はツール引数に取らない（D13）。サインオンは profile 経由（自動）か signon ツール（画面フィールド）。
  */
 export function registerTools(server: McpServer, deps: ToolDeps): void {
-  const { sessions, profiles, connections, user } = deps;
+  const { sessions, resolver, user } = deps;
+  const warn = (m: string): void => mcpLog.warn(m);
 
-  /** connection ID を OpenOptions に解決する（未配線なら明示エラー） */
-  const resolveConnection = (id: string): OpenOptions => {
-    if (!connections) throw new Tn5250Error("CONFIG_ERROR", "connection store not configured");
-    return { ...connections.resolveConnectOptions(id, user), origin: id };
-  };
+  /** system / session 参照を解決する。認可・復号・printer 出力の判定は ConfigResolver 内 */
+  const resolveTarget = (input: { system?: string | undefined; session?: string | undefined }) =>
+    resolver.resolve({ system: input.system, session: input.session }, user, warn);
+
+  const hasRef = (i: { system?: string | undefined; session?: string | undefined }): boolean =>
+    Boolean(i.system ?? i.session);
+  const originOf = (i: { system?: string | undefined; session?: string | undefined }): string =>
+    i.session ?? i.system ?? "direct";
 
   server.registerTool(
     "open_session",
     {
       description:
-        "5250 セッションを開く。connection 指定で保存済み接続、profile 指定で設定プロファイルから接続" +
-        "（自動サインオンあり）、または host 等を直接指定。readOnly で閲覧専用。認証情報は引数に取らない。" +
+        "5250 セッションを開く。session 指定で保存済みのセッション設定（装置名・画面サイズを含む）、" +
+        "system 指定で接続先だけを選ぶ（装置名はホスト採番）、または host 等を直接指定。" +
+        "readOnly で閲覧専用。認証情報は引数に取らない。" +
         "host 直接指定は既定で平文 telnet(23) になるため、TLS で繋ぐ場合は tls:true（ポート省略時 992）を指定する。",
       inputSchema: {
-        connection: z.string().optional(),
-        profile: z.string().optional(),
+        system: z.string().optional(),
+        session: z.string().optional(),
         host: z.string().optional(),
         port: z.number().int().optional(),
         ccsid: z.number().int().optional(),
@@ -205,11 +212,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (input) =>
       withAudit({ op: "open_session" }, async () => {
         try {
-          const opts = input.connection
-            ? resolveConnection(input.connection)
-            : input.profile
-              ? { ...profiles.resolveConnectOptions(input.profile, user), origin: input.profile }
-              : buildDirectOpts(input);
+          const opts: OpenOptions = hasRef(input)
+            ? { ...resolveTarget(input).connect, origin: originOf(input) }
+            : buildDirectOpts(input);
           const entry = await sessions.open({ ...opts, readOnly: input.readOnly ?? false });
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
@@ -222,18 +227,18 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     "signon",
     {
       description:
-        "接続済みセッションの現在画面に、profile の資格情報を画面フィールド入力してサインオン（フォールバック）。" +
+        "接続済みセッションの現在画面に、システムの資格情報を画面フィールド入力してサインオン（フォールバック）。" +
         "PUB400 等は auto-signon 済みの open_session を推奨。",
-      inputSchema: { sessionId: z.string(), profile: z.string() },
+      inputSchema: { sessionId: z.string(), system: z.string() },
       outputSchema: screenOutShape
     },
-    async ({ sessionId, profile }) =>
+    async ({ sessionId, system }) =>
       withAudit({ op: "signon", sessionId }, async () => {
         try {
           const entry = sessions.assertWritable(sessionId, user);
-          const opts = profiles.resolveConnectOptions(profile, user);
+          const opts = resolver.resolve({ system }, user, warn).connect;
           if (!opts.user || !opts.password) {
-            throw new Tn5250Error("CONNECT_FAILED", `profile ${profile} has no signon credentials`);
+            throw new Tn5250Error("CONNECT_FAILED", `system ${system} has no signon credentials`);
           }
           const r = await fieldSignon(entry.session, opts.user, opts.password);
           return screenResult(r.screen, {}, r.timedOut);
@@ -297,27 +302,23 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   );
 
   server.registerTool(
-    "list_connections",
+    "list_systems",
     {
       description:
-        "使える接続設定の一覧。open_session / open_printer_session に渡す参照方法つきで返す" +
-        "（kind=profile なら profile に name を、kind=connection なら connection に id を渡す）。" +
-        "可視範囲は認証状態に従う: 認証オフは全件、admin は全件、一般ユーザーは自分の接続のみ" +
-        "（サーバー設定は admin 専用）。出力設定や資格情報は返さない。",
+        "接続できるシステムの一覧（接続先と資格情報のまとまり）。ref を open_session の system 引数に渡す。" +
+        "SQL・IFS・一覧など装置名を必要としない操作は、これだけを指定すれば足りる。" +
+        "可視範囲は認証状態に従う: 認証オフは全件、admin は全件、一般ユーザーは自分の設定のみ" +
+        "（サーバー設定は admin 専用）。**資格情報は返さない**（設定の有無だけ）。",
       inputSchema: {},
       outputSchema: {
-        connections: z.array(
+        systems: z.array(
           z.object({
-            /** profile=サーバー設定（name で参照） / connection=保存済み接続（id で参照） */
-            kind: z.enum(["profile", "connection"]),
-            /** open_session に渡す値（kind に応じて profile / connection のどちらかへ） */
+            /** open_session の system に渡す値（`srv:<name>` / `own:<id>`） */
             ref: z.string(),
             name: z.string(),
             host: z.string(),
             port: z.number().optional(),
             tls: z.boolean().optional(),
-            deviceName: z.string().optional(),
-            sessionType: z.enum(["display", "printer"]),
             /** 自動サインオンが設定されているか（ユーザー名・パスワードは返さない） */
             autoSignon: z.boolean()
           })
@@ -325,42 +326,80 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       }
     },
     async () =>
-      withAudit({ op: "list_connections" }, async () => {
-        // 露出は「接続先を選ぶのに必要な最小限」に絞る。signonUser と printer（信頼設定）は返さない
+      withAudit({ op: "list_systems" }, async () => {
+        // 露出は「接続先を選ぶのに必要な最小限」に絞る。signon の user 名は返さない
         // ——LLM のコンテキストに残るため、サーバー内部の値を渡さない
-        const fromProfiles = profiles.listForUser(user).map((p) => ({
-          kind: "profile" as const,
-          ref: p.name,
-          name: p.name,
-          host: p.host,
-          ...(p.port !== undefined ? { port: p.port } : {}),
-          ...(p.tls !== undefined ? { tls: p.tls } : {}),
-          ...(p.deviceName !== undefined ? { deviceName: p.deviceName } : {}),
-          sessionType: p.sessionType,
-          autoSignon: p.autoSignon
+        const systems = resolver.listSystems(user).map((s: PublicSystem) => ({
+          ref: s.ref,
+          name: s.name,
+          host: s.host,
+          ...(s.port !== undefined ? { port: s.port } : {}),
+          ...(s.tls !== undefined ? { tls: s.tls } : {}),
+          autoSignon: s.autoSignon
         }));
-        const fromConnections = (connections?.listForUser(user) ?? []).map((c) => ({
-          kind: "connection" as const,
-          ref: c.id,
-          name: c.name,
-          host: c.host,
-          ...(c.port !== undefined ? { port: c.port } : {}),
-          ...(c.tls !== undefined ? { tls: c.tls } : {}),
-          ...(c.deviceName !== undefined ? { deviceName: c.deviceName } : {}),
-          sessionType: c.sessionType,
-          autoSignon: c.autoSignon === true
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: systems.length
+                ? systems.map((e: { ref: string; name: string; host: string }) => `${e.ref} — ${e.name} (${e.host})`).join("\n")
+                : "利用できるシステムがありません"
+            }
+          ],
+          structuredContent: { systems }
+        };
+      })
+  );
+
+  server.registerTool(
+    "list_session_configs",
+    {
+      description:
+        "保存済みのセッション設定の一覧（装置名・画面サイズを持つ）。ref を open_session の session 引数に渡す。" +
+        "session を指定すると親システムまで一意に決まるので、system の指定は要らない。" +
+        "**信頼設定（PDF 自動蓄積・自動印刷）は返さない**。" +
+        "なお list_sessions は「いま開いているセッション」の一覧で、別物。",
+      inputSchema: {},
+      outputSchema: {
+        sessions: z.array(
+          z.object({
+            /** open_session の session に渡す値 */
+            ref: z.string(),
+            name: z.string(),
+            /** 親システムの ref */
+            system: z.string(),
+            sessionType: z.enum(["display", "printer"]),
+            deviceName: z.string().optional(),
+            screenSize: z.enum(["24x80", "27x132"]).optional()
+          })
+        )
+      }
+    },
+    async () =>
+      withAudit({ op: "list_session_configs" }, async () => {
+        const list = resolver.listSessions(user).map((s: PublicSession) => ({
+          ref: s.ref,
+          name: s.name,
+          system: s.system,
+          sessionType: s.sessionType,
+          ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {}),
+          ...(s.screenSize !== undefined ? { screenSize: s.screenSize } : {})
         }));
-        const list = [...fromProfiles, ...fromConnections];
         return {
           content: [
             {
               type: "text" as const,
               text: list.length
-                ? list.map((e) => `${e.kind}:${e.ref} — ${e.name} (${e.host}, ${e.sessionType})`).join("\n")
-                : "利用できる接続設定がありません"
+                ? list
+                    .map(
+                      (e: { ref: string; name: string; sessionType: string; system: string }) =>
+                        `${e.ref} — ${e.name} (${e.sessionType}, system ${e.system})`
+                    )
+                    .join("\n")
+                : "保存済みのセッション設定がありません"
             }
           ],
-          structuredContent: { connections: list }
+          structuredContent: { sessions: list }
         };
       })
   );
@@ -372,11 +411,11 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       description:
         "TN5250E プリンターセッションを開いて待ち受ける。ホストのスプール出力（帳票・ジョブログ等）を" +
         "受信でき、wait_spool で内容を等幅テキストとして取得する。deviceName 省略時はホスト採番。" +
-        "認証情報は引数に取らない（D13）。デバイス作成に認証が要るホストでは connection または profile を指定する。" +
+        "認証情報は引数に取らない（D13）。デバイス作成に認証が要るホストでは system または session を指定する。" +
         "host 直接指定は既定で平文 telnet(23) になるため、TLS で繋ぐ場合は tls:true（ポート省略時 992）を指定する。",
       inputSchema: {
-        connection: z.string().optional(),
-        profile: z.string().optional(),
+        system: z.string().optional(),
+        session: z.string().optional(),
         host: z.string().optional(),
         port: z.number().int().optional(),
         deviceName: z.string().optional(),
@@ -388,29 +427,29 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (input) =>
       withAudit({ op: "open_printer_session" }, async () => {
         try {
-          // 資格情報は connection / profile 経由のみ（D13）。host 直接指定では認証情報を持たない
-          const src: ConnectOptions & { origin?: string } = input.connection
-            ? resolveConnection(input.connection)
-            : input.profile
-              ? { ...profiles.resolveConnectOptions(input.profile, user), origin: input.profile }
-              : {
-                  host: input.host ?? "",
-                  ...(input.port !== undefined ? { port: input.port } : {}),
-                  ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
-                  ...(input.tls !== undefined ? { tls: input.tls } : {}),
-                  origin: "direct"
-                };
+          // 資格情報は system / session 経由のみ（D13）。host 直接指定では認証情報を持たない
+          const target = hasRef(input) ? resolveTarget(input) : undefined;
+          const src: ConnectOptions = target
+            ? target.connect
+            : {
+                host: input.host ?? "",
+                ...(input.port !== undefined ? { port: input.port } : {}),
+                ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
+                ...(input.tls !== undefined ? { tls: input.tls } : {})
+              };
           const entry = await sessions.openPrinter({
             ...(src.host ? { host: src.host } : {}),
             ...(src.port !== undefined ? { port: src.port } : {}),
-            deviceName: input.deviceName,
+            // 引数指定を優先しつつ、無ければ**セッション設定の装置名を使う**。
+            // 以前は input.deviceName を無条件に渡しており、MCP 経由だけ設定側の装置名が無視されていた
+            deviceName: input.deviceName ?? src.deviceName,
             ...(src.ccsid !== undefined ? { ccsid: src.ccsid } : {}),
             user: src.user,
             password: src.password,
             ...(src.tls !== undefined ? { tls: src.tls } : {}),
-            // 自動蓄積/印刷はプロファイルにあるときだけ（ws-handler と同じ信頼境界）
-            ...(input.profile ? withOutput(profiles.resolvePrinterOutput(input.profile, user)) : {}),
-            origin: src.origin ?? "direct"
+            // 自動蓄積/印刷はサーバー設定のセッション由来のときだけ（判定は ConfigResolver 内）
+            ...withOutput(target?.printerOutput),
+            origin: originOf(input)
           });
           const code = entry.session.startupCode;
           return {

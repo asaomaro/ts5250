@@ -1,17 +1,42 @@
 // T16: Playwright ヘッドレス E2E（実機）— build 済み web-ui を server 静的配信で起動し、
 // 実ブラウザで 接続→グリッド描画→フィールド入力→Enter/F キー遷移→テーマ切替→ログ表示 を検証する。
 // 前提: npm run build（web-ui dist）済み。実行: node --env-file=.env scripts/verify-browser.mjs
+import { readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ProfileStore } from "@as400web/server";
+import {
+  buildApp,
+  SessionManager,
+  ServerConfigStore,
+  PersonalConfigStore,
+  ConfigResolver,
+  migrateProfiles
+} from "@as400web/server";
+import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
+
+/**
+ * 旧形式（profiles 配列）から解決器を組み立てる。
+ * 装置名の重複を避けるため、呼び出し側で書き換えたレコードをそのまま渡せる形にしている。
+ */
+function buildResolver(profiles, crypto) {
+  const { systems, sessions } = migrateProfiles(profiles);
+  return new ConfigResolver(
+    new ServerConfigStore({ systems, sessions }, crypto),
+    new PersonalConfigStore({ systems: [], sessions: [] }, crypto)
+  );
+}
+
 
 const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3466;
 
 const sessions = new SessionManager();
-const profiles = ProfileStore.fromFile("profiles.local.json");
-const app = buildApp({ sessions, profiles, version: "test", webRoot: "packages/web-ui/dist" });
+const resolver = buildResolver(
+  JSON.parse(readFileSync("profiles.local.json", "utf8")).profiles,
+  SecretCrypto.fromEnv()
+);
+const app = buildApp({ sessions, resolver, version: "test", webRoot: "packages/web-ui/dist" });
 const wss = new WebSocketServer({ noServer: true });
 const server = serve({ fetch: app.fetch, port: PORT, websocket: { server: wss } });
 await new Promise((r) => setTimeout(r, 500));

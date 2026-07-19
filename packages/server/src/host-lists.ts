@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  childLog,
   CommandConnection,
   listJobs,
   listObjects,
@@ -19,18 +20,20 @@ import {
   type ConnectOptions
 } from "@as400web/core";
 import type { AuthUser, AuthVars } from "./auth.js";
-import type { ProfileStore } from "./profiles.js";
-import type { ConnectionStore } from "./connection-store.js";
+import type { ConfigResolver } from "./config-resolver.js";
 
-/** 一覧の取得元。既存の接続設定をそのまま使う */
+/**
+ * 一覧の取得元。**システムだけで足りる**——コマンドサーバーは装置名も画面サイズも使わないため。
+ * セッション設定を指定してもよい（親システムに解決される）が、必須ではない。
+ */
 const sourceSchema = z
   .object({
-    connection: z.string().optional(),
-    profile: z.string().optional()
+    system: z.string().optional(),
+    session: z.string().optional()
   })
   .strict()
-  .refine((v) => Boolean(v.connection) !== Boolean(v.profile), {
-    message: "connection または profile のどちらか一方を指定してください"
+  .refine((v) => Boolean(v.system ?? v.session), {
+    message: "system または session を指定してください"
   });
 
 const jobFilterSchema = z
@@ -75,9 +78,34 @@ const actionSchema = z
   .strict();
 
 export interface HostListDeps {
-  profiles: ProfileStore;
-  connections: ConnectionStore;
+  /** 接続設定の唯一の解決点 */
+  resolver: ConfigResolver;
 }
+
+const listLog = childLog({ component: "host-lists" });
+
+/**
+ * エラーを HTTP ステータスへ写す。
+ *
+ * **502 は「上流（IBM i）との通信に失敗した」意味に限る。**
+ * 設定の誤りや認可の失敗まで 502 にすると、呼び出し側が
+ * 「ホストが落ちている」のか「指定が間違っている」のかを区別できない。
+ * 写像は connections 側と揃える（旧実装は一律 502 だった）。
+ */
+function statusOf(e: Tn5250Error): 400 | 403 | 404 | 502 {
+  switch (e.code) {
+    case "FORBIDDEN":
+      return 403;
+    case "SESSION_NOT_FOUND":
+      return 404;
+    case "CONFIG_ERROR":
+    case "CONNECT_FAILED":
+      return 400;
+    default:
+      return 502;
+  }
+}
+
 
 /**
  * 未指定（undefined）の項目を落とす。
@@ -99,8 +127,11 @@ function resolveSource(
   source: z.infer<typeof sourceSchema>,
   user: AuthUser | undefined
 ): ConnectOptions {
-  if (source.connection) return deps.connections.resolveConnectOptions(source.connection, user);
-  return deps.profiles.resolveConnectOptions(source.profile as string, user);
+  return deps.resolver.resolve(
+    { system: source.system, session: source.session },
+    user,
+    (m) => listLog.warn(m)
+  ).connect;
 }
 
 /**
@@ -178,7 +209,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
       return c.json({ items });
     } catch (e) {
       const err = e as Tn5250Error;
-      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, 502);
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
     } finally {
       conn?.close();
     }
@@ -210,7 +241,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
       });
     } catch (e) {
       const err = e as Tn5250Error;
-      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, 502);
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
     } finally {
       conn?.close();
     }

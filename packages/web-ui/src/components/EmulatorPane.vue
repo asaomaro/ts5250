@@ -3,6 +3,8 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { AidKey } from "@as400web/core";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
+import LogPanel from "./LogPanel.vue";
+import { logStore } from "../stores/log.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
@@ -24,6 +26,13 @@ const loading = computed(() => state.value?.loading ?? false);
 // カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
 const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
 const insertMode = ref(false);
+
+/** 操作ログの開閉。**トグルはフッターに置く**ので、状態はここが持つ */
+const logOpen = ref(false);
+/** このセッションの記録件数（フッターの表示用） */
+const logCount = computed(
+  () => logStore.entries.filter((e) => e.sessionId === props.sessionId).length
+);
 // ユーザーがクリック/フォーカスでカーソルを動かしたときの上書き（未操作ならホスト snapshot.cursor を使う）
 const cursorOverride = ref<{ row: number; col: number } | undefined>();
 const cursor = computed(() => cursorOverride.value ?? snapshot.value?.cursor ?? { row: 1, col: 1 });
@@ -344,7 +353,8 @@ function onWheel(ev: WheelEvent): void {
     @mousedown="emit('focus')"
     @wheel="onWheel"
   >
-    <div class="screen-wrap">
+    <!-- ログを開いているときは、画面をクリックすると閉じる -->
+    <div class="screen-wrap" @click="logOpen && (logOpen = false)">
       <ScreenGrid
         v-if="snapshot"
         ref="gridRef"
@@ -372,8 +382,22 @@ function onWheel(ev: WheelEvent): void {
       <div v-if="busy" class="busy-overlay" :class="{ loading }" aria-busy="true">
         <div v-if="loading" class="spinner" role="status" aria-label="通信中"></div>
       </div>
+      <!--
+        このセッションの操作ログ。**画面領域の中**に重ねる。
+        .pane 直下に置くとフッター（StatusBar）を覆ってしまう。
+      -->
+      <LogPanel :session-id="sessionId" :open="logOpen" @close="logOpen = false" @click.stop />
     </div>
-    <StatusBar v-if="state" :state="state" :insert-mode="insertMode" :cursor="cursor" :notice="notice" />
+    <StatusBar
+      v-if="state"
+      :state="state"
+      :insert-mode="insertMode"
+      :cursor="cursor"
+      :notice="notice"
+      :log-count="logCount"
+      :log-open="logOpen"
+      @toggle-log="logOpen = !logOpen"
+    />
   </div>
 </template>
 

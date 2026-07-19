@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { Transport } from "@as400web/core";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 class FakeTransport implements Transport {
   private dataFn: ((d: Uint8Array) => void) | undefined;
@@ -43,7 +49,7 @@ const jobComplete = (): number[] => [0x00, 0x11, 0x12, 0xa0, 0x01, 0x01, 0x04, 0
 describe("GET /api/spool/:sessionId/:spoolId/pdf", () => {
   it("受信済みスプールを PDF で返す", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1.0.0" });
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1.0.0" });
     let transport!: FakeTransport;
     const entry = await sessions.openPrinter({
       transport: new FakeTransport((t) => {
@@ -64,7 +70,7 @@ describe("GET /api/spool/:sessionId/:spoolId/pdf", () => {
 
   it("存在しないスプールは 404", async () => {
     const sessions = new SessionManager();
-    const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1.0.0" });
+    const app = buildApp({ sessions, resolver: emptyResolver(), version: "1.0.0" });
     await sessions.openPrinter({ transport: new FakeTransport((t) => t.feed(startup())) });
     const res = await app.request(`/api/spool/prt-x/nope/pdf`);
     expect(res.status).toBe(404);

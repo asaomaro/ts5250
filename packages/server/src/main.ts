@@ -4,8 +4,8 @@ import { WebSocketServer } from "ws";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { log } from "@as400web/core";
 import { SessionManager } from "./session-manager.js";
-import { ProfileStore } from "./profiles.js";
-import { ConnectionStore } from "./connection-store.js";
+import { PersonalConfigStore, ServerConfigStore } from "./config-store.js";
+import { ConfigResolver } from "./config-resolver.js";
 import { SecretCrypto } from "./secret-crypto.js";
 import { buildMcpServer } from "./mcp-server.js";
 import { resolveBindHost } from "./bind-host.js";
@@ -97,11 +97,14 @@ function buildDeps(args: Args): ToolDeps {
     crypto = SecretCrypto.fromEnv();
     if (!crypto) log.warn("AS400_SECRET_KEY not set: saved auto-signon passwords are disabled");
   }
-  const profiles = args.profilesPath
-    ? ProfileStore.fromFile(args.profilesPath, crypto)
-    : new ProfileStore([], crypto);
-  const connections = ConnectionStore.fromFile(args.connectionsPath, crypto);
-  return { sessions, profiles, connections, version: VERSION };
+  // 旧形式のファイルは読み込み時にメモリ上で分解する。**書き戻しは明示的な保存操作のときだけ**
+  const migrateWarn = (m: string): void => log.warn(m);
+  const server = args.profilesPath
+    ? ServerConfigStore.fromFile(args.profilesPath, crypto, migrateWarn)
+    : new ServerConfigStore({ systems: [], sessions: [] }, crypto);
+  const personal = PersonalConfigStore.fromFile(args.connectionsPath, crypto, migrateWarn);
+  const resolver = new ConfigResolver(server, personal);
+  return { sessions, resolver, version: VERSION };
 }
 
 /** 認証コンテキストを構築（--users 指定時のみ enabled）。 */

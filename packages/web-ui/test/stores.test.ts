@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { workspaceStore } from "../src/stores/workspace.js";
 import { logStore, maskOutgoing } from "../src/stores/log.js";
-import { connectionsStore } from "../src/stores/connections.js";
+import type { PublicSession, PublicSystem } from "@as400web/server";
+import { systemsStore } from "../src/stores/systems.js";
 
 describe("workspaceStore 分割ツリー", () => {
   beforeEach(() => workspaceStore.init());
@@ -125,29 +126,48 @@ describe("maskOutgoing", () => {
   });
 });
 
-describe("connectionsStore（サーバー保存・API バックド）", () => {
+describe("systemsStore（サーバー保存・API バックド）", () => {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
-  let list: unknown[] = [];
+  let systems: PublicSystem[] = [];
+  let sessions: PublicSession[] = [];
+  let editable = false;
 
   beforeEach(() => {
     calls.length = 0;
-    list = [];
-    connectionsStore.connections = [];
-    connectionsStore.loaded = false;
+    systems = [];
+    sessions = [];
+    editable = false;
+    systemsStore.systems = [];
+    systemsStore.sessions = [];
+    systemsStore.selected = undefined;
+    systemsStore.editable = false;
+    systemsStore.loaded = false;
     // fetch をモック（GET=一覧 / POST/PUT/DELETE=OK を返す）
     vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
       calls.push({ url, init });
       const method = init?.method ?? "GET";
-      if (url === "/api/connections" && method === "GET") {
-        return Promise.resolve(new Response(JSON.stringify({ connections: list }), { status: 200 }));
+      if (url === "/api/systems" && method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({ systems, editable }), { status: 200 }));
       }
-      if (url === "/api/connections" && method === "POST") {
-        const created = { id: "c-1", ...JSON.parse(String(init?.body)), hasSecret: true };
-        list = [{ id: "c-1", name: created.name, host: created.host, sessionType: "display", hasSecret: true }];
-        return Promise.resolve(new Response(JSON.stringify({ connection: created }), { status: 201 }));
+      if (url === "/api/sessions-config" && method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({ sessions }), { status: 200 }));
+      }
+      if (url === "/api/systems" && method === "POST") {
+        const form = JSON.parse(String(init?.body)) as { name: string; host: string; signonUser?: string };
+        // サーバーはパスワードを返さない。返るのは autoSignon の有無とユーザー名まで
+        const created: PublicSystem = {
+          ref: "own:s-1",
+          name: form.name,
+          host: form.host,
+          autoSignon: true,
+          ...(form.signonUser !== undefined ? { signonUser: form.signonUser } : {})
+        };
+        systems = [created];
+        return Promise.resolve(new Response(JSON.stringify({ system: created }), { status: 201 }));
       }
       if (method === "DELETE") {
-        list = [];
+        systems = [];
+        sessions = [];
         return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
       }
       return Promise.resolve(new Response(JSON.stringify({ error: "bad" }), { status: 400 }));
@@ -155,28 +175,87 @@ describe("connectionsStore（サーバー保存・API バックド）", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("refresh でサーバーの一覧を反映する", async () => {
-    list = [{ id: "c-9", name: "srv", host: "h", sessionType: "display", hasSecret: false }];
-    await connectionsStore.refresh();
-    expect(connectionsStore.connections.map((c) => c.name)).toEqual(["srv"]);
-    expect(connectionsStore.loaded).toBe(true);
+  it("refresh でシステムとセッション設定の一覧・編集可否を反映する", async () => {
+    systems = [
+      { ref: "srv:s-9", name: "srv", host: "h", autoSignon: false },
+      { ref: "own:s-8", name: "mine", host: "h2", autoSignon: false }
+    ];
+    sessions = [{ ref: "own:c-1", name: "disp", system: "srv:s-9", sessionType: "display" }];
+    editable = true;
+    await systemsStore.refresh();
+    expect(systemsStore.systems.map((s) => s.name)).toEqual(["srv", "mine"]);
+    expect(systemsStore.sessions.map((s) => s.name)).toEqual(["disp"]);
+    expect(systemsStore.editable).toBe(true);
+    expect(systemsStore.loaded).toBe(true);
   });
 
-  it("create はパスワードをサーバーへ送り、hasSecret を受け取る（クライアントは平文を保持しない）", async () => {
-    const created = await connectionsStore.create({
-      name: "pub", host: "pub400.com", sessionType: "display", autoSignon: true, signonUser: "USER", password: "secret"
+  it("システムが 1 つだけなら選ぶ手間を省いて自動選択する", async () => {
+    systems = [{ ref: "own:s-1", name: "only", host: "h", autoSignon: false }];
+    await systemsStore.refresh();
+    expect(systemsStore.selected).toBe("own:s-1");
+    expect(systemsStore.current?.name).toBe("only");
+  });
+
+  it("currentSessions / sessionCount は選択中システムの子だけを数える", async () => {
+    systems = [
+      { ref: "own:a", name: "A", host: "h", autoSignon: false },
+      { ref: "own:b", name: "B", host: "h", autoSignon: false }
+    ];
+    sessions = [
+      { ref: "own:s1", name: "a1", system: "own:a", sessionType: "display" },
+      { ref: "own:s2", name: "a2", system: "own:a", sessionType: "printer" },
+      { ref: "own:s3", name: "b1", system: "own:b", sessionType: "display" }
+    ];
+    await systemsStore.refresh();
+    systemsStore.select("own:a");
+    expect(systemsStore.currentSessions.map((s) => s.name)).toEqual(["a1", "a2"]);
+    expect(systemsStore.sessionCount("own:a")).toBe(2);
+    expect(systemsStore.sessionCount("own:b")).toBe(1);
+  });
+
+  it("createSystem はパスワードをサーバーへ送り、クライアントは平文を保持しない", async () => {
+    const created = await systemsStore.createSystem({
+      name: "pub",
+      host: "pub400.com",
+      autoSignon: true,
+      signonUser: "USER",
+      password: "secret"
     });
-    expect(created.hasSecret).toBe(true);
+    expect(created.autoSignon).toBe(true);
+    expect(created.signonUser).toBe("USER");
     // クライアント側の一覧には平文もパスワードフィールドも含まれない
-    expect(JSON.stringify(connectionsStore.connections)).not.toContain("secret");
+    expect(JSON.stringify(systemsStore.systems)).not.toContain("secret");
+    // 平文は POST の本文にだけ現れる
+    const post = calls.find((c) => (c.init?.method ?? "GET") === "POST");
+    expect(String(post?.init?.body)).toContain("secret");
     // POST 後に一覧を再取得している
-    expect(calls.some((c) => (c.init?.method ?? "GET") === "POST")).toBe(true);
     expect(calls.filter((c) => (c.init?.method ?? "GET") === "GET").length).toBeGreaterThan(0);
   });
 
-  it("remove はサーバーに削除要求し一覧を更新する", async () => {
-    await connectionsStore.create({ name: "x", host: "h", sessionType: "display" });
-    await connectionsStore.remove("c-1");
-    expect(connectionsStore.connections).toHaveLength(0);
+  it("removeSystem はサーバーに削除要求し、選択中なら選択も外す", async () => {
+    await systemsStore.createSystem({ name: "x", host: "h" });
+    systemsStore.select("own:s-1");
+    await systemsStore.removeSystem("own:s-1");
+    expect(systemsStore.systems).toHaveLength(0);
+    expect(systemsStore.selected).toBeUndefined();
+  });
+
+  it("refresh で消えたシステムを選んでいたら選択を外す", async () => {
+    systems = [
+      { ref: "own:a", name: "A", host: "h", autoSignon: false },
+      { ref: "own:b", name: "B", host: "h", autoSignon: false }
+    ];
+    await systemsStore.refresh();
+    systemsStore.select("own:b");
+    systems = [{ ref: "own:a", name: "A", host: "h", autoSignon: false }];
+    await systemsStore.refresh();
+    // 消えた選択は外れる（ただし残り 1 件なので自動選択が働く）
+    expect(systemsStore.selected).toBe("own:a");
+  });
+
+  it("エラー応答は例外にして一覧を書き換えない", async () => {
+    await expect(systemsStore.createSession({ name: "x", system: "own:a", sessionType: "display" })).rejects.toThrow(
+      "bad"
+    );
   });
 });

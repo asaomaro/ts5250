@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch } from "vue";
+import LoadingBar from "./LoadingBar.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 
 const props = defineProps<{ tabId: string }>();
 const view = computed(() => props.tabId.replace(/^admin:/, "")); // users | sessions | logs
@@ -43,8 +45,11 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
+const { visible: loading, busy, run } = useDelayedLoading();
+
 async function refresh(): Promise<void> {
   error.value = "";
+  await run(async () => {
   try {
     if (view.value === "users") users.value = (await (await api("/api/admin/users")).json()).users;
     else if (view.value === "sessions") sessions.value = (await (await api("/api/admin/sessions")).json()).sessions;
@@ -52,6 +57,7 @@ async function refresh(): Promise<void> {
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
+  });
 }
 
 async function createUser(): Promise<void> {
@@ -94,7 +100,12 @@ async function terminate(id: string): Promise<void> {
   }
 }
 
-onMounted(refresh);
+/**
+ * **`onMounted` では足りない**——同じグループ内でタブを切り替えると Vue が
+ * このコンポーネントを再利用するため、mount が起きず取得されないまま空表示になる。
+ * 見ている対象（view）に追従させる。
+ */
+watch(view, refresh, { immediate: true });
 </script>
 
 <template>
@@ -102,9 +113,10 @@ onMounted(refresh);
   <div class="admin" tabindex="0">
     <div class="bar">
       <b>{{ view === "users" ? "ユーザー管理" : view === "sessions" ? "セッション管理" : "ログ" }}</b>
-      <button class="ghost" @click="refresh">再読み込み</button>
+      <button class="ghost" :disabled="busy" @click="refresh">再読み込み</button>
     </div>
     <p v-if="error" class="err" role="alert">{{ error }}</p>
+    <LoadingBar v-if="loading" />
 
     <!-- ユーザー管理 -->
     <div v-if="view === 'users'" class="section">

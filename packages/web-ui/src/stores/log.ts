@@ -6,6 +6,8 @@ export interface LogEntry {
   id: number;
   ts: number;
   sessionId: string;
+  /** 表示用のセッション名（sessionId は絞り込み用の実 ID） */
+  label?: string;
   dir: LogDir;
   kind: string;
   summary: string;

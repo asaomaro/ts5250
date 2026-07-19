@@ -1,12 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
-import { ConnectionStore } from "../src/connection-store.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { AuditBuffer } from "../src/audit.js";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 /**
  * ジョブ・オブジェクト・ユーザー一覧の API。
@@ -15,12 +12,13 @@ import { join } from "node:path";
  * **入力の検証と、接続情報を持たない場合の扱い**を固定する。
  */
 function app() {
-  const path = join(mkdtempSync(join(tmpdir(), "hl-")), "connections.json");
-  writeFileSync(path, JSON.stringify({ connections: [] }));
+  const server = new ServerConfigStore({
+    systems: [{ id: "noauth", name: "noauth", host: "example.invalid" }],
+    sessions: [{ id: "noauth-d", name: "noauth-d", system: "noauth", sessionType: "display" }]
+  });
   return buildApp({
     sessions: new SessionManager(),
-    profiles: new ProfileStore([{ name: "noauth", host: "example.invalid" }]),
-    connections: ConnectionStore.fromFile(path),
+    resolver: new ConfigResolver(server, new PersonalConfigStore()),
     audit: new AuditBuffer(),
     version: "test"
   });
@@ -36,15 +34,16 @@ async function post(a: ReturnType<typeof buildApp>, path: string, body: unknown)
 
 describe("一覧 API の入力検証", () => {
   it("未知の種類は 404", async () => {
-    const res = await post(app(), "/api/host/list/nosuch", { source: { profile: "noauth" } });
+    const res = await post(app(), "/api/host/list/nosuch", { source: { system: "srv:noauth" } });
     expect(res.status).toBe(404);
   });
 
-  it("connection と profile の両方を指定したら 400", async () => {
+  it("system と session が食い違えば拒否する", async () => {
     const res = await post(app(), "/api/host/list/jobs", {
-      source: { connection: "a", profile: "b" }
+      source: { system: "srv:other", session: "srv:noauth-d" }
     });
     expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("CONFIG_ERROR");
   });
 
   it("どちらも指定しなければ 400", async () => {
@@ -53,7 +52,7 @@ describe("一覧 API の入力検証", () => {
 
   it("知らない項目は拒否する（strict）", async () => {
     const res = await post(app(), "/api/host/list/jobs", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       unexpected: 1
     });
     expect(res.status).toBe(400);
@@ -61,7 +60,7 @@ describe("一覧 API の入力検証", () => {
 
   it("上限を超える max は拒否する", async () => {
     const res = await post(app(), "/api/host/list/jobs", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       max: 99999
     });
     expect(res.status).toBe(400);
@@ -70,8 +69,8 @@ describe("一覧 API の入力検証", () => {
 
 describe("資格情報を持たない接続設定", () => {
   it("ユーザーとパスワードが無ければ理由の分かるエラーを返す", async () => {
-    const res = await post(app(), "/api/host/list/jobs", { source: { profile: "noauth" } });
-    expect(res.status).toBe(502);
+    const res = await post(app(), "/api/host/list/jobs", { source: { system: "srv:noauth" } });
+    expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/ユーザーとパスワード/);
     expect(body.code).toBe("CONFIG_ERROR");
@@ -81,7 +80,7 @@ describe("資格情報を持たない接続設定", () => {
 describe("操作 API", () => {
   it("知らない操作は拒否する（任意の CL を実行させない）", async () => {
     const res = await post(app(), "/api/host/action", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       action: "run-any-command",
       target: {}
     });
@@ -90,27 +89,27 @@ describe("操作 API", () => {
 
   it("ジョブの指定が不完全なら理由を返す", async () => {
     const res = await post(app(), "/api/host/action", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       action: "job-end",
       target: { jobName: "X" }
     });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/ジョブの指定が不完全/);
   });
 
   it("オブジェクトの指定が不完全なら理由を返す", async () => {
     const res = await post(app(), "/api/host/action", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       action: "object-delete",
       target: { objectName: "X" }
     });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/オブジェクトの指定が不完全/);
   });
 
   it("target に知らない項目があれば拒否する", async () => {
     const res = await post(app(), "/api/host/action", {
-      source: { profile: "noauth" },
+      source: { system: "srv:noauth" },
       action: "job-hold",
       target: { jobName: "A", jobUser: "B", jobNumber: "1", extra: "x" }
     });

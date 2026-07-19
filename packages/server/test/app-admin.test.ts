@@ -1,9 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
-import { ProfileStore } from "../src/profiles.js";
+import { ConfigResolver } from "../src/config-resolver.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "../src/auth.js";
 import { AuditBuffer } from "../src/audit.js";
+
+/** 空の接続設定（このテストは接続設定を使わない）*/
+function emptyResolver(): ConfigResolver {
+  return new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+}
 
 function ctx() {
   const auth: AuthContext = {
@@ -16,7 +22,7 @@ function ctx() {
   };
   const sessions = new SessionManager();
   const audit = new AuditBuffer();
-  const app = buildApp({ sessions, profiles: new ProfileStore([]), version: "1", auth, audit });
+  const app = buildApp({ sessions, resolver: emptyResolver(), version: "1", auth, audit });
   return { app, sessions, audit, auth };
 }
 async function login(app: ReturnType<typeof buildApp>, u: string, p: string): Promise<string> {

@@ -1,5 +1,5 @@
 // T12: MCP E2E（実機）— stdio MCP サーバーを起動し、MCP クライアントから
-// open_session(profile)→get_screen→send_key→get_job_info→close_session を検証する。
+// open_session(session)→get_screen→send_key→get_job_info→close_session を検証する。
 // 実行: node --env-file=.env scripts/verify-mcp.mjs
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -21,8 +21,8 @@ const call = async (name, args) => {
 
 let ok = true;
 try {
-  // 1. open_session with profile（自動サインオン）
-  const open = await call("open_session", { profile: "pub400" });
+  // 1. open_session with session（親システムの自動サインオン）
+  const open = await call("open_session", { session: "srv:pub400" });
   const sessionId = open.structuredContent.sessionId;
   const onMenu = /Main Menu/i.test(open.content[0].text);
   log(`open_session: sessionId=${sessionId?.slice(0, 8)}… onMenu=${onMenu}`);
