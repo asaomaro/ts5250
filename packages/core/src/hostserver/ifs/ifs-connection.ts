@@ -8,6 +8,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
+import { traced } from "../frame-trace.js";
 import {
   openHostConnection,
   type HostConnection,
@@ -69,12 +70,14 @@ export class IfsConnection {
     });
 
     const port = await decidePort(opts, timeoutMs);
-    const conn = await openHostConnection({
+    const rawConn = await openHostConnection({
       host: opts.host,
       port,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       timeoutMs
     });
+    // **接続を 1 度包む**——request() の呼び出しごとに書くと 1 箇所の書き忘れが穴になる
+    const conn = traced(rawConn, log);
     try {
       await startHostServer(conn, FILE_SERVER_ID, {
         user: opts.user,

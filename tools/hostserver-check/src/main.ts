@@ -10,6 +10,7 @@
  *
  * パスワードは環境変数からのみ受け取る（引数はプロセス一覧に見えるため）。
  */
+import "./log-init.js";
 import { signon, resolveServicePort, Tn5250Error } from "@as400web/core";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";

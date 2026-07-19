@@ -9,6 +9,7 @@
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
  *     npm run ddm -w @as400web/hostserver-check -- --tls [--library MYLIB]
  */
+import "./log-init.js";
 import {
   CommandConnection,
   DbConnection,

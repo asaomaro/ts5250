@@ -5,6 +5,7 @@
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
  *     npm run sql -w @as400web/hostserver-check -- --tls "SELECT * FROM MYLIB.SQLTYPES"
  */
+import "./log-init.js";
 import { DbConnection, query, SqlError, Tn5250Error } from "@as400web/core";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
