@@ -15,15 +15,17 @@ cd "$(dirname "$0")"
 
 PORT="${PORT:-3400}"
 FORCE_BUILD=0
+TRACE_RECORDS=0
 PROFILES=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT="$2"; shift 2 ;;
     --build) FORCE_BUILD=1; shift ;;
+    --trace-records) TRACE_RECORDS=1; shift ;;
     --profiles) PROFILES="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: ./start.sh [--port <n>] [--build] [--profiles <path>]"; exit 0 ;;
+      echo "Usage: ./start.sh [--port <n>] [--build] [--profiles <path>] [--trace-records]"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -59,6 +61,8 @@ fi
 # 単一利用者向けのローカル起動なので、UI からのパスワード保存用 master key を無ければ自動生成して .env に保存する。
 # マルチユーザー運用では AS400_SECRET_KEY を明示管理し、この起動スクリプトは使わない想定。
 ARGS+=(--auto-secret-key)
+# 受信レコードを hex でログへ（障害切り分け専用）
+if [ "$TRACE_RECORDS" = "1" ]; then ARGS+=(--trace-records); fi
 
 # .env があれば読み込む（プロファイルの passwordEnv 等）。Node 20.6+ の --env-file を利用
 NODE_ARGS=()

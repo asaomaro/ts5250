@@ -70,6 +70,9 @@ function parseArgs(argv: string[]): Args {
       args.usersPath = argv[++i];
     } else if (a === "--cookie-secure") {
       args.cookieSecure = true;
+    } else if (a === "--trace-records") {
+      // 受信レコードを hex でログへ。障害切り分け専用（画面の中身が残るので常用しない）
+      process.env.AS400_TRACE_RECORDS = "1";
     } else if (a === "--auto-secret-key") {
       // 単一利用者向け: master key を自動生成して保存（マルチユーザー運用では非推奨）
       args.autoSecretKey = true;
@@ -129,6 +132,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   const auditBuffer = new AuditBuffer();
   installAuditBuffer(auditBuffer);
   if (auth) log.info("authentication enabled (per-user isolation)");
+  // 有効なら必ず知らせる。付けたのに出力が無いのか、届いていないのかを迷わせない
+  if (process.env.AS400_TRACE_RECORDS === "1") {
+    log.warn("受信レコードを hex でログへ出力します（--trace-records・切り分け専用）");
+  }
 
   if (args.mode === "stdio") {
     // stdio モード: stdout は MCP 専用（ログは stderr のみ = core log）

@@ -14,6 +14,8 @@ export interface ApplyResult {
   alarm: boolean;
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
+  /** ホストが SAVE SCREEN を送ってきた（画面を送り返す必要がある） */
+  saveScreenRequested: boolean;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -38,7 +40,8 @@ export function applyDataStream(
     unlockKeyboard: false,
     readRequested: false,
     alarm: false,
-    queryRequested: false
+    queryRequested: false,
+    saveScreenRequested: false
   };
 
   while (r.remaining > 0) {
@@ -68,8 +71,11 @@ export function applyDataStream(
         buf.clearFormatTable();
         break;
       case COMMAND.SAVE_SCREEN:
-        // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く
+        // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く。
+        // **加えてホストへ画面を送り返す必要がある**（呼び出し側が応答レコードを送る）。
+        // 返信しないとホストは待ち続ける——SEU の F1 でヘルプが返らなかった原因。
         buf.saveScreen();
+        result.saveScreenRequested = true;
         break;
       case COMMAND.RESTORE_SCREEN:
         if (!buf.restoreScreen()) warn("RESTORE SCREEN with empty save stack");

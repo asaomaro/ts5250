@@ -81,7 +81,11 @@ export async function openSession(
               break;
             }
             case "key-done": {
-              // 画面を変えないキー（ヘルプ非対応など）でも待ちを解く
+              // 画面を変えないキーでも待ちを解く。加えて**完了時点の画面を必ず反映する**——
+              // タイムアウト復帰ではホストからの screen イベントが起きず、
+              // keyboardLocked: true の画面が残って 🔒 が消えなくなる。
+              sessionsStore.updateScreen(sessionId, msg.screen);
+              client.setHiddenIndexes(hiddenIndexes(msg.screen));
               setBusy(sessionId, false);
               break;
             }

@@ -87,6 +87,14 @@ export interface WsJobInfoRes {
 export interface WsKeyDone {
   type: "key-done";
   sessionId: string;
+  /**
+   * 完了時点の画面。**タイムアウト復帰で必要**——ホストがアンロックを伴う応答を返さないと
+   * screen イベントが出ないまま `keyboardLocked: true` の画面が残り、UI の 🔒 が消えない。
+   * sendAid の戻り値には解除後の画面が入っているので、それを必ず届ける。
+   */
+  screen: ScreenSnapshot;
+  /** ホスト応答を待たずタイムアウトで復帰したか */
+  timedOut: boolean;
 }
 
 export interface WsError {

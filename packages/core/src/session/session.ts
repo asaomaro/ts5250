@@ -4,6 +4,7 @@ import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import { buildReadMdtResponse, buildFlagRecord } from "../protocol/read-response.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
+import { buildSaveScreenResponse } from "../protocol/save-screen.js";
 import { applyDataStream } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
@@ -39,6 +40,12 @@ export interface ConnectOptions {
   transport?: Transport;
   /** 警告ログの受け口（既定: 捨てる。server が pino へ接続する） */
   warn?: (message: string) => void;
+  /**
+   * 受信レコードを hex で warn に流す（既定 off）。**障害切り分け専用**。
+   * 「画面が変わらないのにアンロックもされない」ときに、ホストが何を送ったかを見る唯一の手段。
+   * 画面の中身が warn 経由でログに出るため、常用しないこと。
+   */
+  traceRecords?: boolean;
 }
 
 export interface SendAidOptions {
@@ -96,6 +103,7 @@ export class Session5250 extends Emitter<SessionEvents> {
   private readonly enhanced: boolean;
   private telnet!: TelnetLayer;
   private readonly warn: (message: string) => void;
+  private readonly traceRecords: boolean;
   /** メッセージ待ち表示灯（MESSAGE_LIGHT_ON/OFF）。OIA 表示に使える */
   messageWaiting = false;
   private jobInfoCache: JobInfo | undefined;
@@ -109,6 +117,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.id = opts.id ?? `sess-${++seq}`;
     this.codec = codecForCcsid(opts.ccsid ?? 37);
     this.warn = opts.warn ?? (() => {});
+    this.traceRecords = opts.traceRecords ?? false;
     // 代替バッファの許可は、端末タイプでホストに申告した内容と一致させる（27x132 と申告した
     // ときだけ許可する）。ホストは 27x132 対応端末にだけ CLEAR UNIT ALTERNATE を送ってくる。
     const allowAlternate = opts.screenSize === "27x132";
@@ -378,6 +387,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private handleRecord(record: Uint8Array): void {
+    if (this.traceRecords) {
+      const hex = [...record].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      this.warn(`rx record (${record.length} bytes): ${hex}`);
+    }
     let unlocked = false;
     try {
       const parsed = parseRecord(record);
@@ -386,6 +399,10 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_ON) this.messageWaiting = true;
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_OFF) this.messageWaiting = false;
       const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
+      if (result.saveScreenRequested) {
+        // SAVE SCREEN はホストが応答を待つ要求。返さないとホストは先へ進まない
+        this.telnet.sendRecord(buildSaveScreenResponse(this.buf, this.codec));
+      }
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
         this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced));

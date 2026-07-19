@@ -22,7 +22,7 @@ import type {
  * charKind は so/si/dbcs-lead/dbcs-tail を保持（既定 sbcs。DBCS の桁位置維持に使う）。
  */
 type CharKind = "sbcs" | "so" | "si" | "dbcs-lead" | "dbcs-tail";
-type InternalCell =
+export type InternalCell =
   | { type: "attr"; byte: number }
   | { type: "char"; char: string; charKind: CharKind; rawByte?: number }
   | null;
@@ -188,6 +188,13 @@ export class ScreenBuffer {
   }
 
   private savedStack: {
+    /**
+     * **サイズも退避する。** cells の長さは rows*cols に一致していなければならない。
+     * ヘルプ画面が CLEAR UNIT で 24x80 に落としたあと 27x132 の cells だけ戻すと、
+     * 描画が cols=80 で折り返して 24 行を超えた分が消える（SEU の F1→F12 で実際に崩れた）。
+     */
+    rows: 24 | 27;
+    cols: 80 | 132;
     cells: InternalCell[];
     fields: InternalField[];
     cursorAddr: number;
@@ -210,8 +217,16 @@ export class ScreenBuffer {
   }
 
   /** SAVE SCREEN（ESC 0x02）: 現在のバッファを退避（SysReq のシステム要求行オーバーレイ等で使う） */
+  /** 指定アドレスのセル（未書き込みは null）。SAVE SCREEN 応答の直列化で使う */
+  cellAt(addr: number): InternalCell {
+    this.checkAddr(addr);
+    return this.cells[addr] ?? null;
+  }
+
   saveScreen(): void {
     this.savedStack.push({
+      rows: this.rows,
+      cols: this.cols,
       cells: this.cells.map((c) => (c === null ? null : { ...c })),
       fields: this.fields.map((f) => ({ ...f })),
       cursorAddr: this.cursorAddr,
@@ -225,6 +240,8 @@ export class ScreenBuffer {
   restoreScreen(): boolean {
     const saved = this.savedStack.pop();
     if (!saved) return false;
+    this.rows = saved.rows;
+    this.cols = saved.cols;
     this.cells = saved.cells;
     this.fields = saved.fields;
     this.cursorAddr = saved.cursorAddr;

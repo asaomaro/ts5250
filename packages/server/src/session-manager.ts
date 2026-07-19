@@ -13,6 +13,18 @@ import { handleReport, type PrinterOutputConfig, type HandleReportResult } from 
 import { assertOwner, type AuthUser } from "./auth.js";
 
 const printerLog = childLog({ component: "printer-output" });
+const sessionLog = childLog({ component: "session-5250" });
+
+/**
+ * 受信レコードを hex でログへ流すか（`AS400_TRACE_RECORDS=1` / `--trace-records`）。**障害切り分け専用**。
+ * 画面の中身がログに残るので常用しない。
+ *
+ * **セッションを開くたびに評価する。** モジュール読み込み時に固定すると、
+ * main が引数を解釈して環境変数を立てるより先に評価され、フラグが効かない。
+ */
+function traceRecordsEnabled(): boolean {
+  return process.env.AS400_TRACE_RECORDS === "1";
+}
 
 export interface OpenOptions extends ConnectOptions {
   /** 閲覧専用セッション（set_fields/signon/run_steps と PageUp/Down 以外の AID を拒否） */
@@ -170,7 +182,14 @@ export class SessionManager {
       throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
     const id = opts.id ?? randomUUID();
-    const session = await Session5250.connect({ ...opts, id });
+    // 表示セッションの警告は既定で捨てられる（core の warn 既定が no-op）。
+    // 配線しないと `unknown command 0x..` すら残らず、切り分け不能になる。
+    const session = await Session5250.connect({
+      ...opts,
+      id,
+      warn: (m) => sessionLog.warn({ sessionId: id }, m),
+      traceRecords: traceRecordsEnabled()
+    });
     const entry: SessionEntry = {
       id,
       session,

@@ -198,9 +198,14 @@ export class WsConnection {
         }
       }
       // 応答画面は session の screen イベントで push される。
-      // ただし表示を変えないキーではイベントが起きないので、完了そのものも伝える
-      await entry.session.sendAid(msg.key as AidKey, msg.cursor ? { cursor: msg.cursor } : {});
-      this.send({ type: "key-done", sessionId: id });
+      // ただし表示を変えないキーではイベントが起きず、**タイムアウト復帰でも起きない**。
+      // 後者では keyboardLocked が解除された画面が screen イベントに乗らないため、
+      // sendAid の戻り値（解除後の画面）を key-done に必ず載せる。
+      const res = await entry.session.sendAid(
+        msg.key as AidKey,
+        msg.cursor ? { cursor: msg.cursor } : {}
+      );
+      this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
     });
   }
 
