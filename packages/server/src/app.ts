@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -114,7 +114,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
         }
       });
     } catch (e) {
-      if (e instanceof Tn5250Error && e.code === "FORBIDDEN") return c.json({ error: e.message }, 403);
+      if (e instanceof As400Error && e.code === "FORBIDDEN") return c.json({ error: e.message }, 403);
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 404);
     }
   });

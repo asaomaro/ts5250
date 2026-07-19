@@ -6,7 +6,8 @@
  * ずれると「接続先の指定方法が API ごとに違う」「同じ失敗が別のステータスで返る」ことになる。
  */
 import { z } from "zod";
-import { childLog, Tn5250Error, type ConnectOptions } from "@as400web/core";
+import { As400Error, type ConnectOptions } from "@as400web/core";
+import { childLog } from "./log.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 
@@ -35,7 +36,7 @@ export type SourceInput = z.infer<typeof sourceSchema>;
  * 設定の誤りや認可の失敗まで 502 にすると、呼び出し側が
  * 「ホストが落ちている」のか「指定が間違っている」のかを区別できない。
  */
-export function statusOf(e: Tn5250Error): 400 | 403 | 404 | 502 {
+export function statusOf(e: As400Error): 400 | 403 | 404 | 502 {
   switch (e.code) {
     case "FORBIDDEN":
       return 403;

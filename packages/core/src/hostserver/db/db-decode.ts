@@ -8,7 +8,7 @@
  *       ただし純 DBCS の GRAPHIC は jtopenlite が実装しておらず（UTF-16 以外は例外）、
  *       本実装は JTOpen 本体の ConvTable16684 / ConvTable300 相当の変換を行う。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
 import { pureDbcsCodecForCcsid, isPureDbcsCcsid } from "../../codec/pure-dbcs.js";
 import { DB2, baseType, typeName, jsTypeOf, isSupportedType } from "./db-types.js";
@@ -68,7 +68,7 @@ export function toColumnMeta(raw: {
 export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean): DbValue {
   if (isNull) return null;
   if (!isSupportedType(meta.type)) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "HOST_SERVER_UNSUPPORTED",
       `column "${meta.name}" has unsupported type ${meta.typeName} (${meta.type})`
     );
@@ -121,7 +121,7 @@ export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean):
       return decodeText(row.subarray(at, at + meta.length), meta.ccsid).trimEnd();
 
     default:
-      throw new Tn5250Error(
+      throw new As400Error(
         "HOST_SERVER_UNSUPPORTED",
         `no decoder for type ${meta.typeName} (${meta.type})`
       );
@@ -138,7 +138,7 @@ function decodeText(bytes: Uint8Array, ccsid: number): string {
 function decodeGraphic(bytes: Uint8Array, ccsid: number): string {
   if (UTF16_CCSIDS.has(ccsid)) return decodeUtf16Be(bytes);
   if (isPureDbcsCcsid(ccsid)) return pureDbcsCodecForCcsid(ccsid).decode(bytes);
-  throw new Tn5250Error(
+  throw new As400Error(
     "HOST_SERVER_UNSUPPORTED",
     `GRAPHIC column uses unsupported CCSID ${ccsid}`
   );
@@ -155,7 +155,7 @@ function decodeUtf16Be(bytes: Uint8Array): string {
 
 function assertRange(row: Uint8Array, meta: ColumnMeta): void {
   if (meta.offset < 0 || meta.offset + meta.length > row.length) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `column "${meta.name}" out of range (offset ${meta.offset}, length ${meta.length}, row ${row.length})`
     );
@@ -165,7 +165,7 @@ function assertRange(row: Uint8Array, meta: ColumnMeta): void {
 /** 可変長の宣言長がバッファに収まるか。壊れた長さで隣の列を読まない */
 function assertVarLength(meta: ColumnMeta, actual: number, max: number): void {
   if (actual < 0 || actual > max) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `column "${meta.name}" declares length ${actual} but only ${max} bytes are available`
     );

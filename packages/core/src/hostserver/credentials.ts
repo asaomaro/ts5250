@@ -15,7 +15,7 @@
  * 参照: JTOpen(jtopenlite) の HostServerConnection.getUserBytes / getPasswordBytes に対応する
  *       （コードの移植ではなく、符号化規則に基づく実装）。
  */
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { codecForCcsid } from "../codec/codec.js";
 
 /** ユーザー ID の最大長（IBM i のプロファイル名） */
@@ -33,10 +33,10 @@ const codec37 = codecForCcsid(CREDENTIAL_CCSID);
 export function userIdEbcdic37(user: string): Uint8Array {
   const upper = user.toUpperCase();
   if (upper.length === 0) {
-    throw new Tn5250Error("CONFIG_ERROR", "user id is empty");
+    throw new As400Error("CONFIG_ERROR", "user id is empty");
   }
   if (upper.length > MAX_USER_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `user id too long: ${upper.length} chars (max ${MAX_USER_LEN})`
     );
@@ -44,7 +44,7 @@ export function userIdEbcdic37(user: string): Uint8Array {
   const { bytes, substituted } = codec37.encode(upper);
   if (substituted > 0) {
     // 置換文字(0x3F)を黙って送ると「パスワードが違う」に見える失敗になる
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `user id contains characters not representable in CCSID ${CREDENTIAL_CCSID}: ${upper}`
     );
@@ -61,10 +61,10 @@ export function userIdEbcdic37(user: string): Uint8Array {
 export function userIdUnicode(user: string): Uint8Array {
   const upper = user.toUpperCase();
   if (upper.length === 0) {
-    throw new Tn5250Error("CONFIG_ERROR", "user id is empty");
+    throw new As400Error("CONFIG_ERROR", "user id is empty");
   }
   if (upper.length > MAX_USER_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `user id too long: ${upper.length} chars (max ${MAX_USER_LEN})`
     );
@@ -85,7 +85,7 @@ export function userIdUnicode(user: string): Uint8Array {
  */
 export function passwordUnicode(password: string): Uint8Array {
   if (password.length === 0) {
-    throw new Tn5250Error("CONFIG_ERROR", "password is empty");
+    throw new As400Error("CONFIG_ERROR", "password is empty");
   }
   const out = new Uint8Array(password.length * 2);
   const view = new DataView(out.buffer);

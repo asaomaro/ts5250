@@ -15,16 +15,16 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  childLog,
   listJobs,
   listObjects,
   listUsers,
   listSpooledFiles,
   query,
-  Tn5250Error,
+  As400Error,
   type ConnectOptions,
   type ProgramParameter
 } from "@as400web/core";
+import { childLog } from "./log.js";
 import { withAudit } from "./audit.js";
 import { errorResult, type ToolDeps } from "./mcp-tools.js";
 import { openCommand, openDb, openIfs, openNetPrint } from "./host-connect.js";
@@ -116,7 +116,7 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
   /** 接続先を解決する。**未指定を弾くのはここ 1 箇所**（各ツールに分岐を散らさない） */
   const target = (input: TargetInput): ConnectOptions => {
     if (!input.system && !input.session) {
-      throw new Tn5250Error("CONFIG_ERROR", "system または session を指定してください");
+      throw new As400Error("CONFIG_ERROR", "system または session を指定してください");
     }
     return resolver.resolve({ system: input.system, session: input.session }, user, warn).connect;
   };

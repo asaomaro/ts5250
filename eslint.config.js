@@ -40,6 +40,32 @@ export default tseslint.config(
             }
           ]
         }
+      ],
+      // import だけを塞いでも **グローバル参照という抜け道**が残る。
+      // `Buffer.from()` は import 不要で書けてしまい、no-restricted-imports では検出できない。
+      // この穴は 2 回の retro（acs-data-transfer / hostserver-sql）で指摘されながら
+      // 2 回とも未適用のまま、手作業と review で防いでいた＝仕組みで防げていなかった。
+      "no-restricted-globals": [
+        "error",
+        {
+          name: "Buffer",
+          message:
+            "core のピュアロジック層では Buffer を使わない。Uint8Array を使う（transport/・log.ts のみ許可）"
+        },
+        {
+          name: "process",
+          message: "core のピュアロジック層では process を参照しない（設定は引数で受け取る）"
+        },
+        { name: "__dirname", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
+        { name: "__filename", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
+        { name: "global", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
+        { name: "require", message: "core のピュアロジック層では CommonJS の require を使わない" }
+        // **タイマー（setTimeout 等）は禁止しない。**
+        // 元の retro は「Buffer / process / setTimeout 等の Node グローバル」と書いていたが、
+        // setTimeout / setInterval は **ブラウザにも標準である Web API** で Node 固有ではない。
+        // このルールの目的は「ブラウザで動かない依存を防ぐ」ことなので、
+        // 移植性のあるタイマーを塞ぐのは目的に合わない（実際 session/ の
+        // ネゴシエーションのタイムアウトという正当な用途で 11 箇所使われている）。
       ]
     }
   }

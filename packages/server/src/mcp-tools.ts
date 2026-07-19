@@ -1,16 +1,16 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  childLog,
   CommandError,
   SqlError,
-  Tn5250Error,
+  As400Error,
   type ConnectOptions,
   type ScreenSnapshot,
   type SendAidResult,
   type SendAidOptions,
   type AidKey
 } from "@as400web/core";
+import { childLog } from "./log.js";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
@@ -168,7 +168,7 @@ function fmtOpts(input: {
  * 5250 系ツールの既存の応答形は変えていない（フィールドの追加のみ）。
  */
 export function errorResult(err: unknown) {
-  const code = err instanceof Tn5250Error ? err.code : "INTERNAL_ERROR";
+  const code = err instanceof As400Error ? err.code : "INTERNAL_ERROR";
   const message = err instanceof Error ? err.message : String(err);
   const detail: Record<string, unknown> = {};
   if (err instanceof SqlError) {
@@ -255,7 +255,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const entry = sessions.assertWritable(sessionId, user);
           const opts = resolver.resolve({ system }, user, warn).connect;
           if (!opts.user || !opts.password) {
-            throw new Tn5250Error("CONNECT_FAILED", `system ${system} has no signon credentials`);
+            throw new As400Error("CONNECT_FAILED", `system ${system} has no signon credentials`);
           }
           const r = await fieldSignon(entry.session, opts.user, opts.password);
           return screenResult(r.screen, {}, r.timedOut);
@@ -552,7 +552,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         try {
           const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
-          if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
           const pages = report.pages.map((p) => p.lines.join("\n"));
           const text = pages.join("\n\n");
           return { content: [{ type: "text" as const, text }], structuredContent: { pages, text } };
@@ -574,7 +574,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         try {
           const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
-          if (!report) throw new Tn5250Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
           const pdf = await renderSpoolPdf(report.pages);
           const base64 = pdf.toString("base64");
           return {
@@ -709,7 +709,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const entry = sessions.assertWritable(sessionId, user);
           const ok = entry.session.selectGuiChoice(fieldId, choiceIndex, selected ?? true);
           if (!ok) {
-            throw new Tn5250Error("FIELD_TYPE", `選択できません（fieldId=${fieldId} choice=${choiceIndex}）`);
+            throw new As400Error("FIELD_TYPE", `選択できません（fieldId=${fieldId} choice=${choiceIndex}）`);
           }
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
@@ -849,7 +849,7 @@ function buildDirectOpts(input: {
   tls?: boolean;
   origin: string;
 } {
-  if (!input.host) throw new Tn5250Error("CONNECT_FAILED", "host or profile required");
+  if (!input.host) throw new As400Error("CONNECT_FAILED", "host or profile required");
   const o: {
     host: string;
     port?: number;

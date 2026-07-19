@@ -17,7 +17,7 @@ import {
   type HostConnection,
   type HostTlsOptions
 } from "../transport/host-connection.js";
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { childLog } from "../log.js";
 import {
   buildRequest,
@@ -79,7 +79,7 @@ function toHex(bytes: Uint8Array): string {
  * （解析エラーは parseReply が PROTOCOL_ERROR として報告する責務）。
  */
 function traceFrame(direction: "send" | "recv", frame: Uint8Array): void {
-  if (!log.isLevelEnabled("debug")) return;
+  if (!log.isDebugEnabled()) return;
   if (frame.length < HEADER_LEN) {
     log.debug(`${direction} len=${frame.length} (too short to parse)`);
     return;
@@ -133,7 +133,7 @@ export interface HostServerInfo {
 /**
  * 認証失敗。原因を**型として**公開し、呼び出し側が文言ではなく値で分岐できるようにする。
  */
-export class SignonError extends Tn5250Error {
+export class SignonError extends As400Error {
   constructor(readonly failure: SignonFailure) {
     super("UNAUTHENTICATED", describeSignonFailure(failure));
     this.name = "SignonError";
@@ -190,7 +190,7 @@ export async function signon(opts: SignonOptions): Promise<SignonResult> {
 async function decidePort(opts: SignonOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
-      throw new Tn5250Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
+      throw new As400Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
     }
     return opts.port;
   }
@@ -219,7 +219,7 @@ async function exchangeAttributes(
   );
 
   if (reply.returnCode !== RC_OK) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `signon exchange attributes failed (rc=0x${reply.returnCode.toString(16).padStart(8, "0")})`
     );
@@ -227,14 +227,14 @@ async function exchangeAttributes(
 
   const serverSeed = findParam(reply, CP.seed);
   if (!serverSeed || serverSeed.length !== SEED_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `signon server did not return an ${SEED_LEN}-byte seed (got ${serverSeed?.length ?? 0})`
     );
   }
   const passwordLevel = findUint(reply, CP.passwordLevel);
   if (passwordLevel === undefined) {
-    throw new Tn5250Error("PROTOCOL_ERROR", "signon server did not report a password level");
+    throw new As400Error("PROTOCOL_ERROR", "signon server did not report a password level");
   }
   const rawVersion = findUint(reply, CP.version) ?? 0;
 

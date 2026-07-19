@@ -8,7 +8,7 @@
  * 参照: JTOpen(jtopenlite) の JDBCStatement.executeQuery /
  *       DatabaseConnection.prepareAndDescribe / openAndDescribe / fetch に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { findParam, type Reply } from "../datastream.js";
 import { codecForCcsid } from "../../codec/codec.js";
@@ -39,7 +39,7 @@ export interface QueryResult {
 }
 
 /** SQL の実行エラー。SQLCODE / SQLSTATE を**型として**公開する */
-export class SqlError extends Tn5250Error {
+export class SqlError extends As400Error {
   constructor(
     readonly sqlCode: number,
     readonly sqlState: string,
@@ -176,7 +176,7 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
 
   const rawFormat = findParam(prepared, DB_CP.dataFormat);
   if (!rawFormat) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       "prepare did not return a data format (is the statement a SELECT?)"
     );

@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 import { assertOwner, assertProfileAccess, type AuthUser } from "./auth.js";
 import type { SecretCrypto } from "./secret-crypto.js";
 import {
@@ -76,7 +76,7 @@ export abstract class ConfigStore {
   protected assertIntegrity(): void {
     for (const s of this.sessions.values()) {
       if (!this.systems.has(s.system)) {
-        throw new Tn5250Error(
+        throw new As400Error(
           "CONFIG_ERROR",
           `session ${s.name} references missing system ${s.system}`
         );
@@ -88,13 +88,13 @@ export abstract class ConfigStore {
 
   getSystem(id: string): System {
     const s = this.systems.get(id);
-    if (!s) throw new Tn5250Error("SESSION_NOT_FOUND", `system ${id} not found`);
+    if (!s) throw new As400Error("SESSION_NOT_FOUND", `system ${id} not found`);
     return s;
   }
 
   getSession(id: string): AnySession {
     const s = this.sessions.get(id);
-    if (!s) throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
+    if (!s) throw new As400Error("SESSION_NOT_FOUND", `session ${id} not found`);
     return s;
   }
 
@@ -178,7 +178,7 @@ export abstract class ConfigStore {
     if (this.source === "personal" && user) sys.owner = user.username;
     this.assertAccess(sys.owner, user);
     if (this.systems.has(sys.id)) {
-      throw new Tn5250Error("FORBIDDEN", `system ${sys.id} already exists`);
+      throw new As400Error("FORBIDDEN", `system ${sys.id} already exists`);
     }
     this.systems.set(sys.id, sys);
     return this.publicSystem(sys);
@@ -207,7 +207,7 @@ export abstract class ConfigStore {
     // 子が残っていると参照が壊れる。先に片付けさせる
     const children = [...this.sessions.values()].filter((s) => s.system === id);
     if (children.length > 0) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "FORBIDDEN",
         `system ${id} still has ${children.length} session(s); remove them first`
       );
@@ -223,7 +223,7 @@ export abstract class ConfigStore {
     // 参照先はこのファイル内にしか存在しえない（スコープ規定）
     this.getSystem(s.system);
     if (this.sessions.has(s.id)) {
-      throw new Tn5250Error("FORBIDDEN", `session ${s.id} already exists`);
+      throw new As400Error("FORBIDDEN", `session ${s.id} already exists`);
     }
     this.sessions.set(s.id, s);
     return this.publicSession(s);
@@ -267,7 +267,7 @@ export abstract class ConfigStore {
   /** パスワードを暗号化する（平文は保存しない） */
   encryptPassword(plain: string): string {
     if (!this.crypto) {
-      throw new Tn5250Error("CONFIG_ERROR", "secret key not configured; cannot store password");
+      throw new As400Error("CONFIG_ERROR", "secret key not configured; cannot store password");
     }
     return this.crypto.encrypt(plain);
   }
@@ -339,7 +339,7 @@ export class PersonalConfigStore extends ConfigStore {
         empty.setPath(path);
         return empty;
       }
-      throw new Tn5250Error("CONFIG_ERROR", `failed to read connections ${path}: ${(err as Error).message}`);
+      throw new As400Error("CONFIG_ERROR", `failed to read connections ${path}: ${(err as Error).message}`);
     }
     const data = isLegacyConnections(raw)
       ? migrateConnections(raw.connections, warn)
@@ -373,14 +373,14 @@ function readJson(path: string, what: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new Tn5250Error("CONNECT_FAILED", `failed to read ${what} ${path}: ${(err as Error).message}`);
+    throw new As400Error("CONNECT_FAILED", `failed to read ${what} ${path}: ${(err as Error).message}`);
   }
 }
 
 function parseOrThrow<T>(schema: z.ZodType<T>, raw: unknown, what: string): T {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    throw new Tn5250Error("CONNECT_FAILED", `invalid ${what}: ${parsed.error.message}`);
+    throw new As400Error("CONNECT_FAILED", `invalid ${what}: ${parsed.error.message}`);
   }
   return parsed.data;
 }
@@ -394,7 +394,7 @@ function assertNoPlaintextPassword(raw: unknown): void {
   if (!Array.isArray(profs)) return;
   for (const p of profs) {
     if (p && typeof p === "object" && (p as { signon?: { password?: unknown } }).signon?.password !== undefined) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "CONNECT_FAILED",
         `profile ${(p as { name?: string }).name ?? "?"}: signon.password (平文) は廃止されました。` +
           `passwordEnv（環境変数）を使うか、UI からパスワードを設定してください（passwordEnc）`

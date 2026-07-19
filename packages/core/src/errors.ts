@@ -25,16 +25,30 @@ export type ErrorCode =
   /** CL コマンドの実行失敗（メッセージ付き） */
   | "COMMAND_FAILED";
 
-export class Tn5250Error extends Error {
+/**
+ * このライブラリが投げる共通エラー。
+ *
+ * 名前が `As400Error` なのは、**TN5250 だけを扱う層ではなくなったため**。
+ * ホストサーバー（SQL・コマンド・スプール・IFS）は 5250 の端末プロトコルとは別物で、
+ * それらが `Tn5250Error` を投げるのは名が体を表していなかった。
+ */
+export class As400Error extends Error {
   constructor(
     readonly code: ErrorCode,
     message: string,
     options?: { cause?: unknown }
   ) {
     super(message, options);
-    this.name = "Tn5250Error";
+    this.name = "As400Error";
   }
 }
+
+/**
+ * 旧名の互換シム。**外部利用者のコードを壊さないためだけに残している**——
+ * 同一クラスなので `instanceof` は新旧どちらでも通る。
+ * このリポジトリ内の新しいコードでは `As400Error` を使うこと（新旧の混在を意図していない）。
+ */
+export { As400Error as Tn5250Error };
 
 /**
  * OS のソケットエラーコードを、原因の見当がつく日本語にする。

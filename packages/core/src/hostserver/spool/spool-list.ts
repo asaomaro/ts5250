@@ -9,7 +9,7 @@
  *   - 各配列は**最低 1 件必要**（0 件だと GUI0011 / GUI0012 で弾かれる）
  *   - 修飾ジョブ名は**空白**（`*ALL` は CPF3342 で弾かれる）
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
 import type { CommandConnection } from "../command/command-connection.js";
 import {
@@ -35,7 +35,7 @@ function pad(text: string, length: number): Uint8Array {
   const out = new Uint8Array(length).fill(EBCDIC_SPACE);
   const { bytes, substituted } = codec.encode(text.toUpperCase());
   if (substituted > 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `"${text}" contains characters not representable in CCSID ${EBCDIC_CCSID}`
     );
@@ -117,7 +117,7 @@ const F = {
 /** 1 レコードを解釈する */
 export function parseSpoolRecord(record: Uint8Array): SpoolEntry {
   if (record.length < F.priority + 1) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `spool record too short: ${record.length} bytes (need >= ${F.priority + 1})`
     );
@@ -185,7 +185,7 @@ export async function listSpooledFiles(
 
   if (!result.success) {
     const primary = result.messages.find((m) => m.kind === "error" || m.kind === "severe");
-    throw new Tn5250Error(
+    throw new As400Error(
       "COMMAND_FAILED",
       `failed to list spooled files${primary ? `: ${primary.id} ${primary.text}` : ""}`
     );
@@ -194,7 +194,7 @@ export async function listSpooledFiles(
   const listInfo = outputs[2];
   const records = outputs[0];
   if (!listInfo || !records) {
-    throw new Tn5250Error("PROTOCOL_ERROR", "QGYOLSPL returned no list information");
+    throw new As400Error("PROTOCOL_ERROR", "QGYOLSPL returned no list information");
   }
   const li = new DataView(listInfo.buffer, listInfo.byteOffset, listInfo.byteLength);
   const returned = li.getInt32(LIST_INFO.returned);

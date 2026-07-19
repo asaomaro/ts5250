@@ -1,4 +1,5 @@
-import { Tn5250Error, childLog, type AidKey, type ScreenSnapshot } from "@as400web/core";
+import { As400Error, type AidKey, type ScreenSnapshot } from "@as400web/core";
+import { childLog } from "./log.js";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
@@ -71,7 +72,7 @@ export class WsConnection {
           return this.sendError("PROTOCOL_ERROR", `unknown message type`, false);
       }
     } catch (err) {
-      const code = err instanceof Tn5250Error ? err.code : "INTERNAL_ERROR";
+      const code = err instanceof As400Error ? err.code : "INTERNAL_ERROR";
       const fatal = code === "SESSION_CLOSED" || code === "CONNECT_FAILED";
       this.sendError(code, err instanceof Error ? err.message : String(err), fatal);
     }
@@ -83,7 +84,7 @@ export class WsConnection {
   }
 
   private async onOpen(msg: WsClientMessage & { type: "open" }): Promise<void> {
-    if (this.sessionId) throw new Tn5250Error("PROTOCOL_ERROR", "session already open on this connection");
+    if (this.sessionId) throw new As400Error("PROTOCOL_ERROR", "session already open on this connection");
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     await withAudit({ op: "ws_open" }, async () => {
       // 保存済み設定（system / session）か、ブラウザ直指定か。解決は ConfigResolver に一本化されている
@@ -214,7 +215,7 @@ export class WsConnection {
     await withAudit({ op: "ws_gui_select", sessionId: id }, async () => {
       const entry = this.deps.sessions.assertWritable(id, this.user);
       const ok = entry.session.selectGuiChoice(msg.fieldId, msg.choiceIndex, msg.selected ?? true);
-      if (!ok) throw new Tn5250Error("FIELD_TYPE", `選択できません（fieldId=${msg.fieldId}）`);
+      if (!ok) throw new As400Error("FIELD_TYPE", `選択できません（fieldId=${msg.fieldId}）`);
       // 更新画面は session の screen イベントで push される
     });
   }
@@ -240,7 +241,7 @@ export class WsConnection {
   }
 
   private requireSession(): string {
-    if (!this.sessionId) throw new Tn5250Error("SESSION_NOT_FOUND", "no session opened on this connection");
+    if (!this.sessionId) throw new As400Error("SESSION_NOT_FOUND", "no session opened on this connection");
     return this.sessionId;
   }
 
@@ -276,7 +277,7 @@ function buildDirect(msg: {
   user?: string;
   password?: string;
 }): OpenOptions {
-  if (!msg.host) throw new Tn5250Error("CONNECT_FAILED", "host or profile required");
+  if (!msg.host) throw new As400Error("CONNECT_FAILED", "host or profile required");
   const o: OpenOptions = { host: msg.host, origin: "direct" };
   if (msg.port !== undefined) o.port = msg.port;
   if (msg.ccsid !== undefined) o.ccsid = msg.ccsid;

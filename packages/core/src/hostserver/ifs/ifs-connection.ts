@@ -6,7 +6,7 @@
  *
  * 参照: JTOpen(jtopenlite) の FileConnection / FileHandle に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import {
   openHostConnection,
@@ -84,7 +84,7 @@ export class IfsConnection {
       // 交換属性は接続手順に組み込む（送らないと以降の要求が通らない）
       const rc = replyReturnCode(await conn.request(buildFileExchangeAttributes()));
       if (rc !== 0) {
-        throw new Tn5250Error(
+        throw new As400Error(
           "PROTOCOL_ERROR",
           `file server exchange attributes failed (rc=0x${rc.toString(16)})`
         );
@@ -113,7 +113,7 @@ export class IfsConnection {
         chunks.push(new Uint8Array(data));
         offset += data.length;
         if (offset > MAX_FILE_BYTES) {
-          throw new Tn5250Error(
+          throw new As400Error(
             "PROTOCOL_ERROR",
             `file exceeded ${MAX_FILE_BYTES} bytes without reaching end (${path})`
           );
@@ -136,7 +136,7 @@ export class IfsConnection {
         const slice = data.subarray(offset, offset + DEFAULT_CHUNK);
         const rc = replyReturnCode(await this.conn.request(buildWriteRequest(handle, offset, slice)));
         if (rc !== 0) {
-          throw new Tn5250Error(
+          throw new As400Error(
             "PROTOCOL_ERROR",
             `failed to write ${path} at offset ${offset}: ${fileErrorText(rc)} (rc=${rc})`
           );
@@ -153,7 +153,7 @@ export class IfsConnection {
     this.assertOpen();
     const rc = replyReturnCode(await this.conn.request(buildDeleteRequest(path)));
     if (rc !== 0) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `failed to delete ${path}: ${fileErrorText(rc)} (rc=${rc})`
       );
@@ -174,7 +174,7 @@ export class IfsConnection {
     const reply = await this.conn.request(buildOpenFileRequest({ path, access, create }));
     const rc = replyReturnCode(reply);
     if (rc !== 0) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `failed to open ${path}: ${fileErrorText(rc)} (rc=${rc})`
       );
@@ -193,7 +193,7 @@ export class IfsConnection {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Tn5250Error("SESSION_CLOSED", "IFS connection is closed");
+      throw new As400Error("SESSION_CLOSED", "IFS connection is closed");
     }
   }
 }
@@ -211,7 +211,7 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
 async function decidePort(opts: IfsConnectOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
-      throw new Tn5250Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
+      throw new As400Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
     }
     return opts.port;
   }

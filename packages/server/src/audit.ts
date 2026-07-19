@@ -1,4 +1,4 @@
-import { childLog } from "@as400web/core";
+import { childLog } from "./log.js";
 
 /**
  * 監査ログ（spec D14）。全 MCP/WS 操作を stderr に構造化記録する。

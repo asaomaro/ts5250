@@ -6,7 +6,7 @@
  * 参照: JTOpen(jtopenlite) の SignonConnection / HostServerConnection が送受信する
  *       データストリームの構造に対応する（コードの移植ではなく、構造に基づく実装）。
  */
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 
 /** ヘッダー長。応答の戻りコードはこの直前（オフセット 20）から 4 バイト */
 export const HEADER_LEN = 20;
@@ -106,7 +106,7 @@ export interface Reply {
  */
 export function parseReply(data: Uint8Array): Reply {
   if (data.length < REPLY_PARAM_OFFSET) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `host server reply too short: ${data.length} bytes (need >= ${REPLY_PARAM_OFFSET})`
     );
@@ -114,7 +114,7 @@ export function parseReply(data: Uint8Array): Reply {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const declared = view.getUint32(0);
   if (declared !== data.length) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `host server reply length mismatch: header says ${declared}, got ${data.length}`
     );
@@ -122,7 +122,7 @@ export function parseReply(data: Uint8Array): Reply {
 
   const templateLen = view.getUint16(16);
   if (templateLen < 4) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `host server reply has no return code (template length ${templateLen})`
     );
@@ -130,7 +130,7 @@ export function parseReply(data: Uint8Array): Reply {
   const params: Param[] = [];
   let pos = HEADER_LEN + templateLen;
   if (pos > data.length) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `host server reply template overruns frame (length ${templateLen}, frame ${data.length})`
     );
@@ -139,10 +139,10 @@ export function parseReply(data: Uint8Array): Reply {
     const ll = view.getUint32(pos);
     // LL は自身の 6 バイトを含む。6 未満だと前進できず無限ループになる
     if (ll < PARAM_PREFIX_LEN) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `host server reply has bad LL ${ll} at offset ${pos}`);
+      throw new As400Error("PROTOCOL_ERROR", `host server reply has bad LL ${ll} at offset ${pos}`);
     }
     if (pos + ll > data.length) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `host server reply parameter overruns frame (LL=${ll} at offset ${pos}, frame ${data.length})`
       );
@@ -169,7 +169,7 @@ export function findUint(reply: Reply, cp: number): number | undefined {
   if (v.length === 1) return view.getUint8(0);
   if (v.length === 2) return view.getUint16(0);
   if (v.length === 4) return view.getUint32(0);
-  throw new Tn5250Error("PROTOCOL_ERROR", `unexpected width ${v.length} for CP 0x${cp.toString(16)}`);
+  throw new As400Error("PROTOCOL_ERROR", `unexpected width ${v.length} for CP 0x${cp.toString(16)}`);
 }
 
 /** 数値のパラメータ値を作る */

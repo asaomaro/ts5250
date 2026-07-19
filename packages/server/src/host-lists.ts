@@ -15,7 +15,7 @@ import {
   listJobs,
   listObjects,
   listUsers,
-  Tn5250Error
+  As400Error
 } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
@@ -75,7 +75,7 @@ function buildCommand(
 ): string {
   const job = (): string => {
     if (!target.jobNumber || !target.jobUser || !target.jobName) {
-      throw new Tn5250Error("CONFIG_ERROR", "ジョブの指定が不完全です");
+      throw new As400Error("CONFIG_ERROR", "ジョブの指定が不完全です");
     }
     return `${target.jobNumber}/${target.jobUser}/${target.jobName}`;
   };
@@ -88,7 +88,7 @@ function buildCommand(
       return `ENDJOB JOB(${job()}) OPTION(*CNTRLD) DELAY(30)`;
     case "object-delete": {
       if (!target.objectName || !target.objectLibrary || !target.objectType) {
-        throw new Tn5250Error("CONFIG_ERROR", "オブジェクトの指定が不完全です");
+        throw new As400Error("CONFIG_ERROR", "オブジェクトの指定が不完全です");
       }
       return `DLTOBJ OBJ(${target.objectLibrary}/${target.objectName}) OBJTYPE(${target.objectType})`;
     }
@@ -121,7 +121,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
             : await listUsers(conn, compact(body.users), { max });
       return c.json({ items });
     } catch (e) {
-      const err = e as Tn5250Error;
+      const err = e as As400Error;
       return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
     } finally {
       conn?.close();
@@ -153,7 +153,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
         }))
       });
     } catch (e) {
-      const err = e as Tn5250Error;
+      const err = e as As400Error;
       return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
     } finally {
       conn?.close();

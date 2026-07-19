@@ -1,4 +1,4 @@
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { type Codec, SO, SI } from "../codec/codec.js";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteReader } from "./bytes.js";
@@ -205,7 +205,7 @@ function applyWtd(
         const target = buf.addrOf(r.u8(), r.u8());
         const fill = r.u8();
         if (target < addr) {
-          throw new Tn5250Error("PROTOCOL_ERROR", `RA target ${target} < current ${addr}`);
+          throw new As400Error("PROTOCOL_ERROR", `RA target ${target} < current ${addr}`);
         }
         for (; addr <= target; addr++) {
           if (fill === 0x00) buf.eraseRange(addr, addr);
@@ -225,7 +225,7 @@ function applyWtd(
         }
         r.skip(len - 1); // 属性タイプバイト群（未対応。全消去として扱う）
         if (target < addr) {
-          throw new Tn5250Error("PROTOCOL_ERROR", `EA target ${target} < current ${addr}`);
+          throw new As400Error("PROTOCOL_ERROR", `EA target ${target} < current ${addr}`);
         }
         // 消去は target を含む（tn5250 erase_region と一致）。再開アドレスは tn5250 に合わせ target
         buf.eraseRange(addr, target);
@@ -330,7 +330,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   }
   const ffw = r.u16();
   if ((ffw & 0xc000) !== 0x4000) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `invalid FFW 0x${ffw.toString(16)}`);
+    throw new As400Error("PROTOCOL_ERROR", `invalid FFW 0x${ffw.toString(16)}`);
   }
   // FCW（上位 2 ビットが 10）: DBCS 種別等を解釈（SC30-3533 / tn5250 の ideographic FCW）
   let dbcsType: "pure" | "open" | "either" | undefined;

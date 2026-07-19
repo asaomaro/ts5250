@@ -22,7 +22,7 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import { query, SqlError, Tn5250Error, type DbConnection } from "@as400web/core";
+import { query, SqlError, As400Error, type DbConnection } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb } from "./host-connect.js";
@@ -83,7 +83,7 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
         truncated: result.rows.length > rows.length
       });
     } catch (e) {
-      const err = e as Tn5250Error;
+      const err = e as As400Error;
       // SQLCODE / SQLSTATE を落とさない——これが無いと文法誤りと権限不足を区別できない
       const detail =
         e instanceof SqlError ? { sqlCode: e.sqlCode, sqlState: e.sqlState } : {};

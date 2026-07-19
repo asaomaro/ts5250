@@ -1,5 +1,5 @@
 import { Emitter } from "../util/emitter.js";
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { codecForCcsid } from "../codec/codec.js";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
@@ -101,7 +101,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       transport = opts.transport;
     } else {
       if (opts.host === undefined) {
-        throw new Tn5250Error("CONNECT_FAILED", "host is required (or inject transport)");
+        throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
       }
       transport = await TcpTransport.connect({
         host: opts.host,
@@ -129,7 +129,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
         session.telnet.close();
-        reject(new Tn5250Error("NEGOTIATION_TIMEOUT", `no startup response within ${timeoutMs}ms`));
+        reject(new As400Error("NEGOTIATION_TIMEOUT", `no startup response within ${timeoutMs}ms`));
       }, timeoutMs);
       session.onStartup = (err) => {
         clearTimeout(timer);
@@ -139,7 +139,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       session.telnet.onClose((reason) => {
         clearTimeout(timer);
         session.handleClose(reason);
-        reject(new Tn5250Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
+        reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
       });
       session.telnet.onError((e) => session.warn(`transport error: ${e.message}`));
       session.telnet.onRecord((rec) => session.handleRecord(rec));
@@ -151,7 +151,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     return session;
   }
 
-  private onStartup: ((err?: Tn5250Error) => void) | undefined;
+  private onStartup: ((err?: As400Error) => void) | undefined;
 
   get startupCode(): string {
     return this.startupCodeValue;
@@ -191,7 +191,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       this.onStartup?.();
     } else {
       const meaning = CODE_MEANING[code] ?? "unknown startup response";
-      this.onStartup?.(new Tn5250Error("SESSION_REJECTED", `printer session rejected (${code}: ${meaning})`));
+      this.onStartup?.(new As400Error("SESSION_REJECTED", `printer session rejected (${code}: ${meaning})`));
     }
   }
 

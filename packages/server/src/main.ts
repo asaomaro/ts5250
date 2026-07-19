@@ -2,7 +2,7 @@
 import { serve, type WebSocketServerLike } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { log } from "@as400web/core";
+import { log, childLog } from "./log.js";
 import { SessionManager } from "./session-manager.js";
 import { PersonalConfigStore, ServerConfigStore } from "./config-store.js";
 import { ConfigResolver } from "./config-resolver.js";
@@ -13,6 +13,25 @@ import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
 import { AuditBuffer, installAuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
+import { setLogSink } from "@as400web/core";
+
+/**
+ * core（ライブラリ層）のログをサーバーの pino へ流す。
+ *
+ * core は既定で黙る（利用側にロガーを強制しないため）。**アプリはここで明示的に繋ぐ**。
+ * サーバー自身のログは `./log.js` を直接使っており、この注入に依存しない——
+ * 呼び忘れで監査証跡が静かに消えることが無いようにしてある。
+ */
+setLogSink((bindings) => {
+  const l = childLog(bindings);
+  return {
+    debug: (m) => l.debug(m),
+    info: (m) => l.info(m),
+    warn: (m) => l.warn(m),
+    error: (m) => l.error(m),
+    isDebugEnabled: () => l.isLevelEnabled("debug")
+  };
+});
 
 const VERSION = "0.1.0";
 

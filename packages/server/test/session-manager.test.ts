@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SessionManager } from "../src/session-manager.js";
-import { ReplayTransport, parseTraceJsonl, Tn5250Error } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl, As400Error } from "@as400web/core";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,7 @@ describe("SessionManager", () => {
     const mgr = new SessionManager({ maxSessions: 1 });
     await openReplay(mgr);
     await expect(openReplay(mgr)).rejects.toSatisfy(
-      (e: unknown) => e instanceof Tn5250Error && e.code === "CONNECT_FAILED"
+      (e: unknown) => e instanceof As400Error && e.code === "CONNECT_FAILED"
     );
     mgr.closeAll();
   });

@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import {
   Session5250,
   PrinterSession,
-  Tn5250Error,
-  childLog,
+  As400Error,
   type ConnectOptions,
   type AidKey,
   type PrinterConnectOptions,
   type SpoolReport
 } from "@as400web/core";
+import { childLog } from "./log.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -179,7 +179,7 @@ export class SessionManager {
 
   async open(opts: OpenOptions): Promise<SessionEntry> {
     if (this.size >= this.maxSessions) {
-      throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
+      throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
     const id = opts.id ?? randomUUID();
     // 表示セッションの警告は既定で捨てられる（core の warn 既定が no-op）。
@@ -207,7 +207,7 @@ export class SessionManager {
 
   get(id: string, user?: AuthUser): SessionEntry {
     const entry = this.sessions.get(id);
-    if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
+    if (!entry) throw new As400Error("SESSION_NOT_FOUND", `session ${id} not found`);
     assertOwner(entry.owner, user); // 認証時は所有者/admin のみ（OFF は全通過）
     entry.lastActivity = this.now();
     return entry;
@@ -216,7 +216,7 @@ export class SessionManager {
   /** プリンターセッションを開く（TN5250E プリンター）。受信スプールをバッファする。 */
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
     if (this.size >= this.maxSessions) {
-      throw new Tn5250Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
+      throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
     const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
     const id = session.id;
@@ -277,7 +277,7 @@ export class SessionManager {
 
   getPrinter(id: string, user?: AuthUser): PrinterEntry {
     const entry = this.printers.get(id);
-    if (!entry) throw new Tn5250Error("SESSION_NOT_FOUND", `printer session ${id} not found`);
+    if (!entry) throw new As400Error("SESSION_NOT_FOUND", `printer session ${id} not found`);
     assertOwner(entry.owner, user); // 認証時は所有者/admin のみ
     entry.lastActivity = this.now();
     return entry;
@@ -371,7 +371,7 @@ export class SessionManager {
   assertWritable(id: string, user?: AuthUser): SessionEntry {
     const entry = this.get(id, user);
     if (entry.readOnly) {
-      throw new Tn5250Error("READ_ONLY_SESSION", `session ${id} is read-only`);
+      throw new As400Error("READ_ONLY_SESSION", `session ${id} is read-only`);
     }
     return entry;
   }
@@ -380,7 +380,7 @@ export class SessionManager {
   assertKeyAllowed(id: string, key: AidKey, user?: AuthUser): SessionEntry {
     const entry = this.get(id, user);
     if (entry.readOnly && !READONLY_ALLOWED_KEYS.has(key)) {
-      throw new Tn5250Error("READ_ONLY_SESSION", `key ${key} not allowed on read-only session`);
+      throw new As400Error("READ_ONLY_SESSION", `key ${key} not allowed on read-only session`);
     }
     return entry;
   }
@@ -400,7 +400,7 @@ export class SessionManager {
       this.printers.delete(id);
       return;
     }
-    throw new Tn5250Error("SESSION_NOT_FOUND", `session ${id} not found`);
+    throw new As400Error("SESSION_NOT_FOUND", `session ${id} not found`);
   }
 
   closeAll(): void {

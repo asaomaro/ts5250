@@ -4,7 +4,7 @@ import { scryptSync, randomBytes, timingSafeEqual, createHash } from "node:crypt
 import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 
 /**
  * 認証・per-user 分離（PR 1）。Node 標準 crypto のみで完結（新規依存なし）。
@@ -85,11 +85,11 @@ export class UserStore {
     try {
       raw = JSON.parse(readFileSync(path, "utf8"));
     } catch (err) {
-      throw new Tn5250Error("CONNECT_FAILED", `failed to read users ${path}: ${(err as Error).message}`);
+      throw new As400Error("CONNECT_FAILED", `failed to read users ${path}: ${(err as Error).message}`);
     }
     const parsed = usersSchema.safeParse(raw);
     if (!parsed.success) {
-      throw new Tn5250Error("CONNECT_FAILED", `invalid users file: ${parsed.error.message}`);
+      throw new As400Error("CONNECT_FAILED", `invalid users file: ${parsed.error.message}`);
     }
     const store = new UserStore(parsed.data.users);
     store.path = path;
@@ -111,20 +111,20 @@ export class UserStore {
 
   /** ユーザーを追加（存在すれば FORBIDDEN）。password は平文（内部で scrypt ハッシュ） */
   add(username: string, password: string, role: Role): void {
-    if (this.byName.has(username)) throw new Tn5250Error("FORBIDDEN", `user ${username} already exists`);
+    if (this.byName.has(username)) throw new As400Error("FORBIDDEN", `user ${username} already exists`);
     this.byName.set(username, { username, role, passwordHash: hashPassword(password), tokenHashes: [] });
   }
 
   /** role / password を更新 */
   update(username: string, changes: { role?: Role; password?: string }): void {
     const u = this.byName.get(username);
-    if (!u) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+    if (!u) throw new As400Error("SESSION_NOT_FOUND", `user ${username} not found`);
     if (changes.role) u.role = changes.role;
     if (changes.password) u.passwordHash = hashPassword(changes.password);
   }
 
   remove(username: string): void {
-    if (!this.byName.delete(username)) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+    if (!this.byName.delete(username)) throw new As400Error("SESSION_NOT_FOUND", `user ${username} not found`);
   }
 
   /**
@@ -139,7 +139,7 @@ export class UserStore {
    */
   issueToken(username: string): string {
     const u = this.byName.get(username);
-    if (!u) throw new Tn5250Error("SESSION_NOT_FOUND", `user ${username} not found`);
+    if (!u) throw new As400Error("SESSION_NOT_FOUND", `user ${username} not found`);
     const token = randomBytes(24).toString("hex");
     u.tokenHashes = [hashToken(token)];
     return token;
@@ -234,7 +234,7 @@ export function assertOwner(owner: string | undefined, user: AuthUser | undefine
   if (!user) return; // 認証 OFF
   if (user.role === "admin") return;
   if (owner !== undefined && owner === user.username) return;
-  throw new Tn5250Error("FORBIDDEN", "forbidden: not the owner of this session");
+  throw new As400Error("FORBIDDEN", "forbidden: not the owner of this session");
 }
 
 /**
@@ -245,7 +245,7 @@ export function assertOwner(owner: string | undefined, user: AuthUser | undefine
 export function assertProfileAccess(user: AuthUser | undefined): void {
   if (!user) return; // 認証 OFF
   if (user.role === "admin") return;
-  throw new Tn5250Error("FORBIDDEN", "forbidden: server settings are admin only");
+  throw new As400Error("FORBIDDEN", "forbidden: server settings are admin only");
 }
 
 /** hono の Variables 型（c.get("user") で認証ユーザーを取れる） */

@@ -9,7 +9,7 @@
  * 参照: JTOpen(jtopenlite) の DatabaseConnection.getConnection /
  *       createRequestParameterBlock に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import {
   openHostConnection,
@@ -122,7 +122,7 @@ export class DbConnection {
     allowTemplateError?: boolean;
   }): Promise<Reply> {
     if (this.closed) {
-      throw new Tn5250Error("SESSION_CLOSED", "database connection is closed");
+      throw new As400Error("SESSION_CLOSED", "database connection is closed");
     }
     const template = buildDbTemplate({
       orsBitmap: opts.orsBitmap ?? ORS.sendReplyImmediately,
@@ -139,7 +139,7 @@ export class DbConnection {
 
     const tmpl = parseDbTemplate(response);
     if (isDbTemplateError(tmpl) && !opts.allowTemplateError) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `database request 0x${opts.reqId.toString(16)} failed ` +
           `(rcClass=${tmpl.rcClass}, code=${tmpl.rcClassReturnCode})`
@@ -182,7 +182,7 @@ export class DbConnection {
    */
   acquire(): () => void {
     if (this.busy) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         "another query is in progress on this connection (open a second connection to run queries concurrently)"
       );
@@ -213,7 +213,7 @@ function uint16Param(cp: number, value: number): { cp: number; value: Uint8Array
 async function decidePort(opts: DbConnectOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
-      throw new Tn5250Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
+      throw new As400Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
     }
     return opts.port;
   }

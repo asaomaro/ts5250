@@ -8,7 +8,7 @@
  * `warn` を**必須引数**にしているのは意図的（design の判断）。optional にすると渡し忘れが起き、
  * パスワード復号の失敗が無言で握り潰される（実際に 5 経路中 3 経路で起きていた）。
  */
-import { Tn5250Error, type ConnectOptions } from "@as400web/core";
+import { As400Error, type ConnectOptions } from "@as400web/core";
 import type { AuthUser } from "./auth.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import {
@@ -49,7 +49,7 @@ export class ConfigResolver {
   private storeFor(source: ConfigSource): ConfigStore {
     const store = source === "server" ? this.server : this.personal;
     if (!store) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "CONFIG_ERROR",
         source === "server" ? "server settings not configured" : "connection store not configured"
       );
@@ -66,7 +66,7 @@ export class ConfigResolver {
    */
   resolve(ref: TargetRef, user: AuthUser | undefined, warn: Warn): ResolvedTarget {
     if (!ref.system && !ref.session) {
-      throw new Tn5250Error("CONNECT_FAILED", "system, session, or host required");
+      throw new As400Error("CONNECT_FAILED", "system, session, or host required");
     }
 
     let session: AnySession | undefined;
@@ -85,7 +85,7 @@ export class ConfigResolver {
       if (ref.system) {
         const sysRef = requireRef(ref.system, "system");
         if (sysRef.source !== source || sysRef.id !== systemId) {
-          throw new Tn5250Error(
+          throw new As400Error(
             "CONFIG_ERROR",
             `session ${ref.session} does not belong to system ${ref.system}`
           );
@@ -170,7 +170,7 @@ export class ConfigResolver {
     } else if (s.passwordEnv !== undefined) {
       password = process.env[s.passwordEnv];
       if (password === undefined || password === "") {
-        throw new Tn5250Error(
+        throw new As400Error(
           "CONNECT_FAILED",
           `system ${system.name}: password not available (env ${s.passwordEnv} unset)`
         );
@@ -212,7 +212,7 @@ export class ConfigResolver {
 function requireRef(ref: string, what: string): { source: ConfigSource; id: string } {
   const parsed = parseRef(ref);
   if (!parsed) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `invalid ${what} reference "${ref}" (expected srv:<name> or own:<id>)`
     );

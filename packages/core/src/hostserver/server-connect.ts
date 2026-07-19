@@ -12,7 +12,7 @@
  * 参照: JTOpen(jtopenlite) の HostServerConnection.connect /
  *       sendExchangeRandomSeedsRequest / sendStartServerRequest に対応する。
  */
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { childLog } from "../log.js";
 import type { HostConnection } from "../transport/host-connection.js";
 import { CP, HEADER_LEN } from "./datastream.js";
@@ -88,7 +88,7 @@ function buildStartServerRequest(
 /** 応答の戻りコード（オフセット 20 の 4 バイト）を読む */
 function replyReturnCode(frame: Uint8Array, what: string): number {
   if (frame.length < HEADER_LEN + 4) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `${what} reply too short: ${frame.length} bytes`);
+    throw new As400Error("PROTOCOL_ERROR", `${what} reply too short: ${frame.length} bytes`);
   }
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(HEADER_LEN);
 }
@@ -117,7 +117,7 @@ export async function startHostServer(
   const seedReply = await conn.request(buildExchangeSeedsRequest(serverId, clientSeed));
   const seedRc = replyReturnCode(seedReply, "exchange random seeds");
   if (seedRc !== 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `exchange random seeds failed for server 0x${serverId.toString(16)} ` +
         `(rc=0x${seedRc.toString(16).padStart(8, "0")})`
@@ -126,7 +126,7 @@ export async function startHostServer(
   // サーバー seed は LL/CP ではなく戻りコードの直後に生で 8 バイト置かれる
   const seedAt = HEADER_LEN + 4;
   if (seedReply.length < seedAt + SEED_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `exchange random seeds reply has no ${SEED_LEN}-byte server seed`
     );
@@ -146,7 +146,7 @@ export async function startHostServer(
   );
   const startRc = replyReturnCode(startReply, "start server");
   if (startRc !== 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "UNAUTHENTICATED",
       `failed to start host server 0x${serverId.toString(16)} ` +
         `(rc=0x${startRc.toString(16).padStart(8, "0")})`
