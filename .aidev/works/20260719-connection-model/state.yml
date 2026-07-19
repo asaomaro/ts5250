@@ -1,7 +1,7 @@
 schema: 3
 slug: connection-model
-current: review
-approved: [requirement, research, spec, design, plan, test, review]
+current: retro
+approved: [requirement, research, spec, design, plan, test, review, deliver, retro]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3
