@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
@@ -63,8 +63,27 @@ function seed(fields: Field[], cursor: { row: number; col: number }): void {
   });
 }
 
+/** attachTo: body で開いたペインは、unmount しないと DOM に残ってフォーカスを奪う
+ *  （前のテストの入力欄が activeElement のままになり、後続の前提が崩れる）。
+ *  失敗時も確実に片づけるため afterEach で回収する。 */
+let mounted: ReturnType<typeof mount>[] = [];
+afterEach(() => {
+  for (const w of mounted) w.unmount();
+  mounted = [];
+  document.body.innerHTML = "";
+});
+
 function mountPane() {
-  return mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+  const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+  mounted.push(w);
+  return w;
+}
+
+/** カーソルを欄外（真下の行）へ出す。実機では保護領域に focus が留まらず
+ *  ペインへ移るため、この状態が「保護領域にカーソルがある」に相当する。 */
+async function moveOutOfField(w: ReturnType<typeof mountPane>) {
+  await w.find(".pane").trigger("keydown", { key: "ArrowDown" });
+  expect(document.activeElement, "前提: 入力欄から出ている").toBe(w.find(".pane").element);
 }
 
 function statusText(w: ReturnType<typeof mountPane>): string {
@@ -80,27 +99,37 @@ describe("保護領域での文字入力・削除", () => {
   it("文字キーでメッセージが出る", async () => {
     const w = mountPane();
     await nextTick();
+    await moveOutOfField(w);
     await w.find(".pane").trigger("keydown", { key: "A" });
     expect(statusText(w)).toContain(PROTECTED_MSG);
-    w.unmount();
   });
 
-  it("Backspace・Delete でもメッセージが出る", async () => {
-    for (const key of ["Backspace", "Delete"]) {
-      const w = mountPane();
-      await nextTick();
-      await w.find(".pane").trigger("keydown", { key });
-      expect(statusText(w), `${key} で出ていない`).toContain(PROTECTED_MSG);
-      w.unmount();
-    }
+  it.each(["Backspace", "Delete"])("%s でもメッセージが出る", async (key) => {
+    const w = mountPane();
+    await nextTick();
+    await moveOutOfField(w);
+    await w.find(".pane").trigger("keydown", { key });
+    expect(statusText(w), `${key} で出ていない`).toContain(PROTECTED_MSG);
+  });
+
+  it("入力可能欄への入力ではメッセージを出さない（keydown はペインまでバブルする）", async () => {
+    seed([fld(1, 5, 10, 5)], { row: 5, col: 10 });
+    const w = mountPane();
+    await nextTick();
+    const input = w.find("input.grid-input").element as HTMLInputElement;
+    input.focus();
+    await nextTick();
+    expect(document.activeElement, "前提: 入力欄にフォーカスがある").toBe(input);
+    await w.find(".pane").trigger("keydown", { key: "A" });
+    expect(statusText(w), "入力できているのにメッセージが出ている").not.toContain(PROTECTED_MSG);
   });
 
   it("カーソルキーではメッセージを出さない", async () => {
     const w = mountPane();
     await nextTick();
+    await moveOutOfField(w);
     await w.find(".pane").trigger("keydown", { key: "ArrowRight" });
     expect(statusText(w)).not.toContain(PROTECTED_MSG);
-    w.unmount();
   });
 });
 
@@ -117,7 +146,6 @@ describe("保護領域からのペースト", () => {
     await nextTick();
     expect(sessionsStore.byId.get(SID)!.edits.get(2), "右の入力欄へ入っていない").toBe("ABCD");
     expect(statusText(w), "ペーストでメッセージを出してはいけない").not.toContain(PROTECTED_MSG);
-    w.unmount();
   });
 
   it("その行に入力欄が無ければ何も起きない", async () => {
@@ -134,6 +162,5 @@ describe("保護領域からのペースト", () => {
     } as unknown as ClipboardEvent);
     await nextTick();
     expect(sessionsStore.byId.get(SID)!.edits.size, "下の行へ飛ばしてはいけない").toBe(0);
-    w.unmount();
   });
 });

@@ -289,12 +289,17 @@ function onNotice(text: string): void {
  * **このアプリは保護欄に focus を留めない**（reconcileFocus が blur してペインへ移す）ため、
  * ScreenGrid の @paste は届かない。ペインで拾い、カーソル位置を起点に委譲する。
  */
+/** 編集可能な入力欄にフォーカスがあるか。
+ *  **入力欄の keydown / paste はペインまでバブルする**ため、ペイン側の欄外処理は
+ *  必ずこれで弾く（弾かないと入力できているのにメッセージが出る）。 */
+function editableFocused(): boolean {
+  const active = document.activeElement;
+  return active instanceof HTMLInputElement && !!paneEl.value?.contains(active) && !active.readOnly;
+}
+
 function onPanePaste(ev: ClipboardEvent): void {
   if (busy.value || snapshot.value?.keyboardLocked) return;
-  const active = document.activeElement;
-  if (active instanceof HTMLInputElement && paneEl.value?.contains(active) && !active.readOnly) {
-    return; // 入力欄にフォーカスがある → ScreenGrid 側で処理する
-  }
+  if (editableFocused()) return; // 入力欄にフォーカスがある → ScreenGrid 側で処理する
   const text = ev.clipboardData?.getData("text") ?? "";
   if (!text) return;
   ev.preventDefault();
@@ -379,7 +384,7 @@ function onKeydown(ev: KeyboardEvent): void {
   if (ev.key === "Escape" || ev.key === "Tab" || (!ev.shiftKey && cursorMove)) clearBlockSel();
   // 欄外（保護領域・非入力セル）での文字入力・Backspace・Delete は ACS 同様に
   // 操作員メッセージを出す。入力欄にフォーカスがあるときは ScreenGrid が出す。
-  if (isProtectedEdit(ev)) {
+  if (!editableFocused() && isProtectedEdit(ev)) {
     ev.preventDefault();
     notice.value = MSG_PROTECTED;
     return;
