@@ -154,3 +154,7 @@ export {
   findCodePoint,
   type NpAttribute
 } from "./hostserver/spool/netprint-datastream.js";
+
+// ホストサーバー: 各種一覧（QGY オープンリスト）
+export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";
+export { listUsers, type UserEntry, type UserListFilter } from "./hostserver/list/user-list.js";
