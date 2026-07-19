@@ -4,7 +4,7 @@ import type { GroupNode } from "../stores/workspace.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
-import { PANE_LABELS } from "../paneLabels.js";
+import { PANE_LABELS, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
 import SessionInfo from "./SessionInfo.vue";
 
@@ -14,10 +14,8 @@ const infoFor = ref<string | undefined>();
 const reorder = ref<{ overId: string; after: boolean } | undefined>();
 
 
-/** セッションを持たない（＝接続の概念が無い）タブか */
-function isPane(id: string): boolean {
-  return id.startsWith("admin:") || id.startsWith("list:");
-}
+/** セッションを持たない（＝接続の概念が無い）タブか。判定は paneLabels に集約している */
+const isPane = isPaneTab;
 function label(sessionId: string): string {
   return PANE_LABELS[sessionId] ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
 }

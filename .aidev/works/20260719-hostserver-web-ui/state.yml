@@ -1,7 +1,7 @@
 schema: 3
 slug: hostserver-web-ui
-current: requirement
-approved: []
+current: review
+approved: [requirement, spec, plan, coding, test, review]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3

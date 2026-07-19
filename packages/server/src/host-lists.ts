@@ -11,31 +11,16 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
-  childLog,
   type CommandConnection,
   listJobs,
   listObjects,
   listUsers,
-  Tn5250Error,
-  type ConnectOptions
+  Tn5250Error
 } from "@as400web/core";
-import type { AuthUser, AuthVars } from "./auth.js";
+import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openCommand } from "./host-connect.js";
-
-/**
- * 一覧の取得元。**システムだけで足りる**——コマンドサーバーは装置名も画面サイズも使わないため。
- * セッション設定を指定してもよい（親システムに解決される）が、必須ではない。
- */
-const sourceSchema = z
-  .object({
-    system: z.string().optional(),
-    session: z.string().optional()
-  })
-  .strict()
-  .refine((v) => Boolean(v.system ?? v.session), {
-    message: "system または session を指定してください"
-  });
+import { compact, resolveSource, sourceSchema, statusOf } from "./host-api.js";
 
 const jobFilterSchema = z
   .object({ name: z.string().optional(), user: z.string().optional(), type: z.string().optional() })
@@ -83,58 +68,6 @@ export interface HostListDeps {
   resolver: ConfigResolver;
 }
 
-const listLog = childLog({ component: "host-lists" });
-
-/**
- * エラーを HTTP ステータスへ写す。
- *
- * **502 は「上流（IBM i）との通信に失敗した」意味に限る。**
- * 設定の誤りや認可の失敗まで 502 にすると、呼び出し側が
- * 「ホストが落ちている」のか「指定が間違っている」のかを区別できない。
- * 写像は connections 側と揃える（旧実装は一律 502 だった）。
- */
-function statusOf(e: Tn5250Error): 400 | 403 | 404 | 502 {
-  switch (e.code) {
-    case "FORBIDDEN":
-      return 403;
-    case "SESSION_NOT_FOUND":
-      return 404;
-    case "CONFIG_ERROR":
-    case "CONNECT_FAILED":
-      return 400;
-    default:
-      return 502;
-  }
-}
-
-
-/**
- * 未指定（undefined）の項目を落とす。
- * `exactOptionalPropertyTypes` のため、`{ user: undefined }` は
- * 「指定していない」ではなく「undefined を指定した」になってしまう。
- */
-function compact<T extends object>(value: T | undefined): {
-  [K in keyof T]-?: Exclude<T[K], undefined>;
-} {
-  if (!value) return {} as never;
-  return Object.fromEntries(
-    Object.entries(value).filter(([, v]) => v !== undefined)
-  ) as never;
-}
-
-/** 接続設定から資格情報を解く。ブラウザへは渡さない */
-function resolveSource(
-  deps: HostListDeps,
-  source: z.infer<typeof sourceSchema>,
-  user: AuthUser | undefined
-): ConnectOptions {
-  return deps.resolver.resolve(
-    { system: source.system, session: source.session },
-    user,
-    (m) => listLog.warn(m)
-  ).connect;
-}
-
 /** 操作から CL コマンドを組み立てる。**利用側から任意の CL は受け取らない** */
 function buildCommand(
   action: z.infer<typeof actionSchema>["action"],
@@ -178,7 +111,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
 
     let conn: CommandConnection | undefined;
     try {
-      conn = await openCommand(resolveSource(deps, body.source, user));
+      conn = await openCommand(resolveSource(deps.resolver, body.source, user));
       const max = body.max ?? 200;
       const items =
         kind === "jobs"
@@ -207,7 +140,7 @@ export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps:
     let conn: CommandConnection | undefined;
     try {
       const command = buildCommand(action, target);
-      conn = await openCommand(resolveSource(deps, source, user));
+      conn = await openCommand(resolveSource(deps.resolver, source, user));
       const result = await conn.run(command);
       return c.json({
         success: result.success,
