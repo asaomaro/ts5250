@@ -629,17 +629,47 @@ function focusCursorField(): void {
   const editable = snap.fields.filter((f) => !f.protected);
   if (editable.length === 0) return;
   const cur = snap.cursor;
-  const idx = editable.findIndex(
-    (f) => f.row === cur.row && cur.col >= f.col && cur.col < f.col + f.length
+  /**
+   * **ホストが送ったカーソル位置を桁まで忠実に再現する。**
+   * SEU は確定・F キー・スクロールの後もカーソルを元の桁に置いて返す（入力位置を保つ仕様）。
+   * こちらが欄の先頭や第 1 欄へ寄せると、その意図を毎回潰してしまう。
+   *
+   * 旧実装には 2 つの取りこぼしがあった。
+   *  - フィールド番号（欄単位）で、行またぎで分割された input（スライス単位）の NodeList を
+   *    引いていた。SEU のように欄が折り返す画面では添字がずれ、無関係な欄へ飛ぶ。
+   *  - 桁を捨てて常に先頭（offset 0）へ置いていた。
+   */
+  const f = fieldAt(cur.row, cur.col, snap.fields, snap.cols, snap.rows);
+  if (!f || f.protected) {
+    // ホストがカーソルを入力欄の外に置いた場合は従来どおり先頭欄へ（サインオン等）
+    const first = gridEl.value.querySelector<HTMLInputElement>(
+      'input.grid-input:not([readonly])[data-slice="0"]'
+    );
+    if (!first) return;
+    first.focus();
+    first.setSelectionRange(0, 0);
+    if (edit) edit.cursor = 0;
+    return;
+  }
+  const offset = caretInField(f, cur.row, cur.col, snap.cols, snap.rows);
+  const slices = fieldSlices(f, snap.cols, snap.rows);
+  let si = slices.findIndex((s) => offset < s.offset + s.width);
+  if (si < 0) si = slices.length - 1;
+  const el = gridEl.value.querySelector<HTMLInputElement>(
+    `input.grid-input[data-field-index="${f.index}"][data-slice="${si}"]`
   );
-  const inputs = gridEl.value.querySelectorAll("input.grid-input:not([readonly])");
-  const el = inputs[idx >= 0 ? idx : 0] as HTMLInputElement | undefined;
   if (!el) return;
   el.focus();
-  // スペース埋め表示だと value 再設定でカーソルが末尾へ行くため、明示的に先頭へ置く
+  if (isDbcsEdit(f)) {
+    // DBCS 欄は列ビュー（全角=2 桁・SO/SI 込み）で caret を測るため専用経路へ委ねる
+    setDbcsCaretAtColumn(f.index, cur.row, cur.col);
+    return;
+  }
+  // スペース埋め表示だと value 再設定でカーソルが末尾へ行くため明示的に置く
   // （既にフォーカス済みだと focus() では onInputFocus が発火しないため）
-  el.setSelectionRange(0, 0);
-  if (edit) edit.cursor = 0;
+  const caret = offset - slices[si]!.offset;
+  el.setSelectionRange(caret, caret);
+  if (edit) edit.cursor = offset;
 }
 
 // 画面遷移（新 snapshot）で編集状態をリセットし、キーボード解放時はカーソル欄へ自動フォーカス。
