@@ -3,6 +3,7 @@ import { ref, computed } from "vue";
 import EmulatorPane from "./EmulatorPane.vue";
 import PrinterPane from "./PrinterPane.vue";
 import AdminPane from "./AdminPane.vue";
+import HostListPane from "./HostListPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -70,6 +71,8 @@ const activeIsPrinter = computed(
 );
 /** 管理タブ（admin:users/sessions/logs）か */
 const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:") ?? false);
+/** 一覧タブ（list:jobs/objects/users）か。管理タブと同じ「特殊なタブ ID」方式 */
+const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
 </script>
 
 <template>
@@ -98,6 +101,7 @@ const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:")
     <PaneTabs :group="group" />
     <div class="group-body">
       <AdminPane v-if="group.activeTab && activeIsAdmin" :tab-id="group.activeTab" />
+      <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
       <PrinterPane
         v-else-if="group.activeTab && activeIsPrinter"
         :session-id="group.activeTab"
