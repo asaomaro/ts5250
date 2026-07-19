@@ -1,0 +1,3 @@
+events:
+  - { ts: 2026-07-19T14:06:40Z, phase: retro, event: start }
+  - { ts: 2026-07-19T14:09:34Z, phase: retro, event: approved }

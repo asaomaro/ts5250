@@ -1,0 +1,8 @@
+schema: 3
+slug: seu-display-fixes
+current: retro
+approved: [retro]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
