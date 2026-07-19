@@ -13,7 +13,14 @@ import {
   toggleInsert,
   type EditState
 } from "../composables/fieldEdit.js";
-import { acceptsChar, dbcsByteLength, dbcsViewLayout, isFullWidth } from "../composables/fieldValidate.js";
+import {
+  acceptsChar,
+  rejectReason,
+  dbcsByteLength,
+  dbcsViewLayout,
+  isFullWidth,
+  type RejectReason
+} from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -726,8 +733,12 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     return;
   }
   if (f.protected) {
-    // 非入力キー（F キー等）はペインの keymap に委譲するため preventDefault しない
-    if (ev.key.length === 1) ev.preventDefault();
+    // 非入力キー（F キー等）はペインの keymap に委譲するため preventDefault しない。
+    // 文字入力・Backspace・Delete は ACS 同様に操作員メッセージを出す。
+    if (ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete") {
+      ev.preventDefault();
+      emit("notice", MSG_PROTECTED);
+    }
     return;
   }
   if (composing.value) return; // IME 変換中は自前制御しない
@@ -815,7 +826,11 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     const ch = inputChar(ev.key); // 930/5026 は英小文字を大文字化
-    if (!acceptsChar(f, ch)) return; // 型違反は拒否
+    const why = rejectReason(f, ch);
+    if (why) {
+      emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
+      return;
+    }
     let trial: EditState;
     if (deleteSelection(f, el)) {
       // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）
@@ -903,7 +918,11 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     const ch = inputChar(k); // 930/5026 は半角英小文字を大文字化
-    if (!acceptsChar(f, ch)) return;
+    const why = rejectReason(f, ch);
+    if (why) {
+      emit("notice", MSG_BY_REASON[why]);
+      return;
+    }
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
     const base = replaced ? { ...edit, insertMode: true } : edit;
@@ -1051,7 +1070,16 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
-    if (!acceptsChar(field, ch)) continue;
+    if (!acceptsChar(field, ch)) {
+      // **弾いた文字も桁を消費する（捨てて詰めない）。** ACS は入力不可文字の桁を
+      // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
+      // 数値欄 "123" に "3A5" を貼ると "353"（正: "325"）になる。
+      // out[i] に触れないので、既に入っている DBCS も壊さない（全角 1 文字 = 1 要素）。
+      while (out.length <= i) out.push(" "); // 疎配列の穴は join で消えるため空白で埋める
+      i++;
+      continue;
+    }
+    while (out.length < i) out.push(" ");
     out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
     i++;
   }
@@ -1061,6 +1089,30 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 
 /** ACS が挿入ペーストの入り切らないときに出す操作員メッセージ。 */
 const NO_ROOM = "No room to insert data.";
+
+/** ACS の操作員メッセージ（原文）。クライアント側で出すもので、ホストの systemMessage とは別。
+ *
+ *  **ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を受け付けないが、
+ *  本実装は受け付ける（不便なためユーザー判断）。クリア契機も ACS の
+ *  「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。 */
+const MSG_PROTECTED = "Cursor in protected area of display.";
+const MSG_BY_REASON: Record<RejectReason, string> = {
+  numeric: "Field requires numeric characters.",
+  alphanumeric: "Field data must be alphanumeric.",
+  "dbcs-required": "Double-byte character required as input."
+};
+
+/** 挿入ペーストで最初に見つかる入力不可文字の理由。無ければ undefined。
+ *  **挿入モードは 1 文字でも不可なら一切貼らない**（ACS）。上書きモードは桁を消費するだけで
+ *  エラーにしないため、この判定は挿入経路でのみ使う。 */
+function firstRejection(field: Field, text: string): RejectReason | undefined {
+  for (const raw of text) {
+    if (raw === "\n" || raw === "\r") continue;
+    const why = rejectReason(field, inputChar(raw));
+    if (why) return why;
+  }
+  return undefined;
+}
 
 /** 欄の値 base の offset 桁目へ line を挿入する（Insert モードのペースト）。後続は右へずれる。
  *  欄の予算に収まらなければ undefined を返す（呼び出し側が中断して NO_ROOM を出す）。
@@ -1076,12 +1128,28 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
-    if (!acceptsChar(field, ch)) continue;
+    // 入力不可文字は呼び出し側（firstRejection）が先に弾く。ここへは来ない
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
   if (dbcsByteLength(out.join("")) > budget) return undefined; // 入り切らない
   return out.join("").replace(/\s+$/, "");
+}
+
+/** 行 row の col 桁以降で、最初に書き込める（非保護の）入力欄とその開始桁を返す。
+ *  ACS はペースト開始位置が保護領域でも、**その行の右側に入力欄があればそこから**流し込む。 */
+function nextWritableAt(row: number, col: number): { field: Field; col: number } | undefined {
+  let best: { field: Field; col: number } | undefined;
+  for (const f of props.snapshot.fields) {
+    if (f.protected) continue;
+    for (const sl of slicesOf(f)) {
+      if (sl.row !== row) continue;
+      const startCol = Math.max(col, sl.col);
+      if (startCol > sl.col + sl.width - 1) continue; // この行の区間は col より左で終わっている
+      if (!best || startCol < best.col) best = { field: f, col: startCol };
+    }
+  }
+  return best;
 }
 
 /** (row, col) を含む欄の、その行の区間の右端桁（行またぎ欄はその行のスライスの右端）。 */
@@ -1116,14 +1184,30 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
     let rest = line;
     do {
       if (row > rows) { stop = true; break; }
-      const t = fieldAt(row, start.col, props.snapshot.fields, cols, rows);
-      const end = t ? bandEndCol(t, row, start.col) : undefined;
-      if (!t || t.protected || end === undefined) { stop = true; break; } // 真下が入力欄でなければ打ち切り
-      const width = end - start.col + 1;
-      const e = targets.get(t.index) ?? { field: t, parts: [] };
-      e.parts.push({ offset: caretInField(t, row, start.col, cols, rows), line: rest.slice(0, width) });
-      targets.set(t.index, e);
-      rest = rest.slice(width); // 帯幅を越えた分は次の帯行へ（同じ桁から）
+      // **右が先、尽きたら下**（ACS）。開始桁が入力欄でなければその行を右へ走査し、
+      // 最初の非保護欄から流し込む。1 行を使い切ったら次の行の同じ開始桁へ戻る。
+      let col = start.col;
+      let placedOnRow = false;
+      while (rest.length > 0 && col <= cols) {
+        const t = nextWritableAt(row, col);
+        if (!t) break; // この行にはもう入力欄が無い → 次の行へ
+        const from = Math.max(col, t.col);
+        const end = bandEndCol(t.field, row, from);
+        if (end === undefined) break;
+        const width = end - from + 1;
+        const e = targets.get(t.field.index) ?? { field: t.field, parts: [] };
+        e.parts.push({ offset: caretInField(t.field, row, from, cols, rows), line: rest.slice(0, width) });
+        targets.set(t.field.index, e);
+        rest = rest.slice(width);
+        col = end + 1; // 同じ行の右隣を続けて探す
+        placedOnRow = true;
+      }
+      if (!placedOnRow) {
+        // この行には（右へ走査しても）入力欄が無い。**下へは飛ばさず打ち切る。**
+        // ACS は保護領域の下に入力欄があっても流さず、判定は同一行で閉じる。
+        stop = true;
+        break;
+      }
       row += 1;
     } while (rest.length > 0);
   }
@@ -1133,6 +1217,14 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   for (const { field, parts } of targets.values()) {
     let val = logicalValue(field);
     for (const p of parts) {
+      if (insertMode.value) {
+        // 挿入モードは 1 文字でも不可なら**一切貼らない**（ACS）。上書きは桁を消費するだけ
+        const why = firstRejection(field, p.line);
+        if (why) {
+          emit("notice", MSG_BY_REASON[why]);
+          return;
+        }
+      }
       const next = insertMode.value
         ? insertInto(field, val, p.offset, p.line)
         : overwriteInto(field, val, p.offset, p.line);
@@ -1174,45 +1266,59 @@ function onInputBeforeInput(f: Field, ev: InputEvent): void {
  *  改行を含めば下方向の連続入力欄へ分配、単一行なら caret へ挿入（型・バイト予算で整形）。 */
 function onInputPaste(f: Field, ev: ClipboardEvent): void {
   ev.preventDefault();
-  if (f.protected || props.busy) return;
+  if (props.busy) return;
   const text = ev.clipboardData?.getData("text") ?? "";
   if (!text) return;
   const el = ev.target as HTMLInputElement;
-  if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
-  if (text.includes("\n")) {
-    pasteMultiline(f, text, el); // 複数行 → 連続入力欄へ分配
+  if (f.protected) {
+    // **保護欄で始めてもエラーにしない。** ACS はその行の右側に入力欄があれば
+    // そこから流し込む。走査は pasteMultiline が行う（編集モデルは作らない）。
+    pasteMultiline(f, text, el);
     return;
   }
-  // 単一行: native caret を論理カーソルへ写してから挿入
-  const dbcs = isDbcsEdit(f);
-  const vc = el.selectionStart;
-  if (vc !== null) {
-    if (dbcs) {
+  if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
+  /**
+   * **単一行も複数行と同じ経路に通す。** 旧実装は単一行だけ typeChar ループで処理し、
+   * 欄の右端で打ち切っていた。ACS は右の欄へ流し、右が尽きたら次の行へ回すため、
+   * 規則を 2 か所に持たず pasteMultiline へ集約する。
+   *
+   * **ただし DBCS 欄の単一行だけは従来経路を残す（decisions.md D1）。**
+   * pasteMultiline は桁（列ビュー）で宛先を決め、書き込みは overwriteInto が
+   * 論理文字の配列で行う。全角は SO+2+SI=4 桁を占めるため両者がずれ、
+   * 既存の全角を壊す（"ABCDEF" の 1 桁目へ "日" を貼ると A日F になるべきところ A日CDEF）。
+   */
+  if (isDbcsEdit(f)) {
+    // native caret を論理カーソルへ写してから流し込む（列ビュー ⇄ 論理の変換）
+    const vc = el.selectionStart;
+    if (vc !== null) {
       const lay = dbcsLayoutOf(f);
       edit = { ...edit!, cursor: lay.logicalOf(globalCaret(rangeOfInput(f, el, lay), vc)) };
-    } else {
-      // 行またぎ欄: native caret はスライス内の位置なのでオフセットを足して論理化する
-      edit = { ...edit!, cursor: Math.min(sliceOffsetOf(f, el) + vc, visLen(f)) };
     }
-  }
-  let e: EditState = edit!;
-  const at = e.cursor; // ペースト開始桁。ACS はペースト後もカーソルを動かさない
-  // 挿入は「全部入る」と確定するまで書き換えない（ACS）。typeChar の挿入は溢れた文字を黙って
-  // 落として成功を返すため、ここで先に収まるかを見る（落ちた文字に気づけない）。
-  if (e.insertMode && insertInto(f, editValue(e), at, text) === undefined) {
-    emit("notice", NO_ROOM);
+    let e: EditState = edit!;
+    const at = e.cursor;
+    if (e.insertMode) {
+      const why = firstRejection(f, text);
+      if (why) {
+        emit("notice", MSG_BY_REASON[why]);
+        return;
+      }
+      if (insertInto(f, editValue(e), at, text) === undefined) {
+        emit("notice", NO_ROOM);
+        return;
+      }
+    }
+    for (const raw of [...text]) {
+      const ch = inputChar(raw);
+      if (!acceptsChar(f, ch)) continue;
+      const trial = dbcsType(e, ch, f);
+      if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
+      e = trial;
+    }
+    edit = { ...e, cursor: at }; // ペーストではカーソルを動かさない（ACS）
+    sync(el, f);
     return;
   }
-  for (const raw of [...text]) {
-    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
-    if (!acceptsChar(f, ch)) continue;
-    // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）
-    const trial = dbcs ? dbcsType(e, ch, f) : typeChar(e, ch);
-    if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
-    e = trial;
-  }
-  edit = { ...e, cursor: at }; // 開始桁へ戻す（打鍵と違い、ペーストではカーソルが進まない）
-  sync(el, f);
+  pasteMultiline(f, text, el);
   // advanceIfFull は呼ばない: ACS はペーストで満杯になっても次の欄へ送らない（カーソルは動かない）
 }
 

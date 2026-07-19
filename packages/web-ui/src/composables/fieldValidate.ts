@@ -6,18 +6,32 @@ import type { Field } from "@as400web/core";
  * コードページ許容文字の厳密判定は core（送信時）で行い、ここは型ベースの一次フィルタ。
  */
 export function acceptsChar(field: Field, ch: string): boolean {
-  if (ch.length === 0) return false;
+  return rejectReason(field, ch) === undefined;
+}
+
+/**
+ * 弾く理由。**メッセージを出すには「なぜ弾いたか」が要る**ため、真偽値ではなく理由を返す。
+ * 判定はここ 1 か所に置き、`acceptsChar` はこれに委譲する
+ * （同じ事実の導出元を 2 つ持たない）。
+ */
+export type RejectReason =
+  | "numeric" // 数値項目に許可外文字
+  | "alphanumeric" // 半角(A)項目に全角
+  | "dbcs-required"; // J 型(全角専用)項目に全角以外
+
+export function rejectReason(field: Field, ch: string): RejectReason | undefined {
+  if (ch.length === 0) return "alphanumeric";
   const isWide = isFullWidth(ch);
 
   // DBCS 種別
-  if (field.dbcsType === "pure" && !isWide) return false; // J 型: 全角のみ
-  if (field.dbcsType === undefined && isWide) return false; // SBCS(A/数値)フィールドに全角不可
+  if (field.dbcsType === "pure" && !isWide) return "dbcs-required"; // J 型: 全角のみ
+  if (field.dbcsType === undefined && isWide) return "alphanumeric"; // SBCS(A/数値)に全角不可
   // open/either は SBCS/DBCS 両方許可（追加制限なし）
 
-  // 数値型
-  if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return false;
+  // 数値型（数字・, . - + と空白を許可）
+  if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return "numeric";
 
-  return true;
+  return undefined;
 }
 
 /**

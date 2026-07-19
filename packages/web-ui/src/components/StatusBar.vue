@@ -85,7 +85,10 @@ function press(k: AidKey): void {
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
     <span class="mode">{{ insertMode ? "挿入" : "上書き" }}</span>
     <span v-if="notice" class="msg notice" role="status">{{ notice }}</span>
-    <span v-if="snap?.systemMessage" class="msg">{{ snap.systemMessage }}</span>
+    <!-- クライアント側メッセージはホストのメッセージを**隠す**（ACS 準拠）。
+         systemMessage はスナップショットが保持し続けるため、notice が消えれば自然に戻る。
+         復帰のために状態を持つ必要は無い。 -->
+    <span v-if="!notice && snap?.systemMessage" class="msg">{{ snap.systemMessage }}</span>
     <span class="fkeys">
       <button v-for="f in fkeys" :key="f.key" class="fk" @click="press(f.key)">{{ f.label }}</button>
     </span>

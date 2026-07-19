@@ -103,19 +103,21 @@ describe("ScreenGrid", () => {
     expect(inputs[1]!.attributes("data-field-index")).toBe("1");
   });
 
-  it("行またぎフィールド: 74 桁を超えて入力でき、送信値は全桁ぶん", async () => {
+  it("行またぎ欄への単一行ペーストは矩形で折り返す（開始桁に揃えて次の行へ）", async () => {
     const fields: Field[] = [
       { index: 1, row: 20, col: 7, length: 153, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
     const first = w.findAll("input.grid-input")[0]!;
     await first.trigger("focus");
-    // 1 行目の可視 74 桁を超える長さを貼り付ける（80 文字）
+    // 1 行目の可視 74 桁（col7..80）を超える長さを貼り付ける（80 文字）
     const long = "A".repeat(80);
     await first.trigger("paste", { clipboardData: { getData: () => long } } as unknown as ClipboardEvent);
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe(long); // 74 で切られない
-    expect(emits.at(-1)![1].length).toBe(80);
+    // ACS の矩形規則: あふれた 6 文字は「次の行の**同じ開始桁**（col7）」へ回る。
+    // 行またぎ欄では col7 = 欄の 80 桁目にあたるため、74..79 桁は元のまま（空白）残る。
+    // 旧実装は単一行だけ連続して詰めており（80 桁ぶんが隙間なく並ぶ）、矩形規則と食い違っていた。
+    expect(emits.at(-1)![1]).toBe("A".repeat(74) + " ".repeat(6) + "A".repeat(6));
   });
 
   it("DBCS 欄も行またぎ（折返し）で全長ぶんのスライスに割る", () => {
