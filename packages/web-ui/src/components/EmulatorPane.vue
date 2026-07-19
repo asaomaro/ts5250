@@ -178,10 +178,38 @@ function focusInput(inputs: HTMLInputElement[], i: number): void {
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
 function focusByOffset(delta: number): void {
   const inputs = editableInputs();
-  if (inputs.length === 0) return;
+  if (inputs.length === 0) {
+    // 入力可能な欄が 1 つも無い画面（確認画面・ヘルプ等）。行き先が無いので原点へ置く。
+    onCursor(1, 1);
+    return;
+  }
   const cur = inputs.indexOf(document.activeElement as HTMLInputElement);
-  const start = cur === -1 ? (delta > 0 ? -1 : 0) : cur;
-  focusInput(inputs, (start + delta + inputs.length) % inputs.length);
+  if (cur !== -1) {
+    focusInput(inputs, (cur + delta + inputs.length) % inputs.length);
+    return;
+  }
+
+  /**
+   * 入力欄にフォーカスが無い（保護欄・非入力セルにカーソルがある free モード）。
+   * **入力欄の並びに現在地が無いので、そこから探すと必ず先頭／末尾へ飛ぶ。**
+   * 代わりに画面上のカーソル位置と各欄の位置を比べ、その位置から見て
+   * 次（Tab）／前（Shift+Tab）の欄へ移す。
+   */
+  const fs = editableFields();
+  const at = cursor.value;
+  const isAfter = (f: { row: number; col: number }): boolean =>
+    f.row > at.row || (f.row === at.row && f.col > at.col);
+  if (delta > 0) {
+    const i = fs.findIndex(isAfter);
+    focusInput(inputs, i === -1 ? 0 : i); // 後ろに無ければ先頭へラップ
+    return;
+  }
+  let i = -1;
+  for (let k = 0; k < fs.length; k++) {
+    const f = fs[k]!;
+    if (f.row < at.row || (f.row === at.row && f.col < at.col)) i = k;
+  }
+  focusInput(inputs, i === -1 ? inputs.length - 1 : i); // 前に無ければ末尾へラップ
 }
 
 function onLocal(action: LocalAction): void {
