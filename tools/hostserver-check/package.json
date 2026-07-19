@@ -10,7 +10,8 @@
     "check": "tsc -b && node dist/main.js",
     "test": "vitest run --passWithNoTests",
     "sql": "tsc -b && node dist/sql.js",
-    "cmd": "tsc -b && node dist/cmd.js"
+    "cmd": "tsc -b && node dist/cmd.js",
+    "ddm": "node dist/ddm.js"
   },
   "dependencies": {
     "@as400web/core": "*"
