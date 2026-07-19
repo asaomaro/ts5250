@@ -69,11 +69,6 @@ const emit = defineEmits<{
 
 const gui = computed(() => props.snapshot.gui);
 
-/** hidden（パスワード）欄の伏せ字。実値は edit モデルが持ち、DOM にはこの文字だけを置く。
- *  ASCII であることが要件: ● 等の記号は East Asian Width が Ambiguous で、フォントスタックの
- *  CJK フォント（BIZ UDGothic 等）に落ちて全角幅で描画され桁が崩れる（実測 16px＝2 桁）。 */
-const MASK_CHAR = "*";
-
 /** カタカナ系ホストコードページ（930/5026）では、実機（ACS）同様に半角英小文字を入力時点で
  *  大文字化する。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。 */
 function inputChar(ch: string): string {
@@ -343,8 +338,13 @@ function siMark(): string {
  *  これで ● の数は実入力分だけ・カーソルは欄内を自由に移動でき、かつ実値は DOM に出ない。 */
 function maskSafe(f: Field, value: string): string {
   if (!f.hidden) return value;
-  const typed = value.replace(/ +$/, "").length;
-  return MASK_CHAR.repeat(typed).padEnd(visLen(f), " ");
+  /**
+   * **非表示欄は伏せ字も出さない（ACS 準拠）。** 打鍵の手応えは消えるが、ACS は
+   * 非表示属性の欄に何も描かない。伏せ字を出すと「ACS には無いものが見える」状態になり、
+   * ヘルプ画面の 1 桁欄で実際に食い違いとして現れた。
+   * 桁は保つ必要があるため欄長ぶんの空白で埋める（カーソルは欄内を自由に動ける）。
+   */
+  return "".padEnd(visLen(f), " ");
 }
 
 /** スライス（行ごとの input）に表示する値。論理値の該当区間を切り出しスライス幅へ揃える。
@@ -1777,7 +1777,6 @@ onBeforeUnmount(() => {
    * 背景だけはブラウザ既定を消す必要があるため、**属性が指定した値を優先する変数**で受ける。
    */
   background: var(--cell-bg, transparent);
-  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   vertical-align: baseline;
   caret-color: currentColor;
 }
@@ -1795,9 +1794,14 @@ onBeforeUnmount(() => {
   background: var(--cell-bg, transparent);
 }
 /* 入力欄の下線は border-bottom（全桁）で表す。5250 の下線属性による text-decoration との
-   二重下線（太く見える）を防ぐため、input では text-decoration を無効化する（ACS 準拠の単一下線） */
+   二重下線（太く見える）を防ぐため、input では text-decoration を無効化する（ACS 準拠の単一下線）。
+   **下線を引くのは下線属性が付いた欄だけ。** 5250 で入力欄が下線付きに見えるのは
+   ホストが下線属性を送っているからであって、入力欄だから引かれるわけではない。
+   無条件に引くと、非表示属性の欄（ヘルプ画面など ACS が何も描かない箇所）に
+   1 桁の枠が浮き出る。 */
 .grid-input.a-underline {
   text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
 }
 
 /* ==== 拡張 5250 GUI オーバーレイ ==== */

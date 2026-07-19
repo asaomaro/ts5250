@@ -442,7 +442,13 @@ export class ScreenBuffer {
 
     const fields: Field[] = this.orderedFields().map((f, i) => {
       const { row, col } = this.rowColOf(f.startAddr);
-      const hidden = this.isFieldHidden(f);
+      /**
+       * **表示を決めるのは画面上の実効属性であり、SF 記録時の属性バイトではない。**
+       * 両者は食い違うことがあり（SEU の F1 ヘルプで実際に hidden=false / セルは nonDisplay=true）、
+       * attrByte 側を信じると非表示欄に打った文字がそのまま見えてしまう。
+       * セルは描画が従う唯一の真実なので、そこに合わせて真実を一本化する。
+       */
+      const hidden = cells[row - 1]?.[col - 1]?.nonDisplay ?? this.isFieldHidden(f);
       const shift = f.ffw & FFW.SHIFT_MASK;
       const field: Field = {
         index: i + 1,
