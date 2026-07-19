@@ -142,7 +142,11 @@ export {
   type SpoolEntry,
   type SpoolListFilter
 } from "./hostserver/spool/spool-types.js";
-export { NetPrintConnection, type NetPrintConnectOptions } from "./hostserver/spool/netprint-connection.js";
+export {
+  NetPrintConnection,
+  type NetPrintConnectOptions,
+  type SpoolMessage
+} from "./hostserver/spool/netprint-connection.js";
 export {
   NP_ACTION,
   NP_CP,
@@ -154,6 +158,9 @@ export {
   findCodePoint,
   type NpAttribute
 } from "./hostserver/spool/netprint-datastream.js";
+
+// ホストサーバー: IFS ファイルの読み書き
+export { IfsConnection, type IfsConnectOptions } from "./hostserver/ifs/ifs-connection.js";
 
 // ホストサーバー: 各種一覧（QGY オープンリスト）
 export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";

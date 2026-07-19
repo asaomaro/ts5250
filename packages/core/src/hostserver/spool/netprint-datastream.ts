@@ -77,7 +77,14 @@ export const NP_ATTR = {
   spooledFileName: 0x0068,
   spooledFileNumber: 0x0069,
   /** READ で「何バイト読むか」を指定する */
-  numberOfBytes: 0x007d
+  numberOfBytes: 0x007d,
+  // --- メッセージ関連（MSGW の検出・応答） ---
+  messageText: 0x0080,
+  messageHelp: 0x0081,
+  /** 応答（返答を書き込む／期待される返答の種類） */
+  messageReply: 0x0082,
+  messageType: 0x008e,
+  messageId: 0x0093
 } as const;
 
 /** 属性の型コード */
@@ -248,5 +255,44 @@ export const NP_RC = {
   readIncomplete: 0x0012,
   /** これ以上読むものが無い（エラーではない） */
   readEof: 0x0013,
+  spooledFileNoMessage: 0x000e,
   returnCodePointMissing: 0x0019
 } as const;
+
+/**
+ * 属性 ID リスト（`RETRIEVE_MESSAGE` で「どの属性が欲しいか」を指定する）。
+ *
+ * 配置: 件数(2) ＋ 要素長(2、常に 2) ＋ [属性 ID(2)] × n
+ *
+ * 参照: JTOpen 本体の NPCPAttributeIDList に対応する。
+ */
+export function buildAttributeIdList(ids: readonly number[]): Uint8Array {
+  const out = new Uint8Array(4 + ids.length * 2);
+  const v = new DataView(out.buffer);
+  v.setUint16(0, ids.length);
+  v.setUint16(2, 2);
+  ids.forEach((id, i) => v.setUint16(4 + i * 2, id));
+  return out;
+}
+
+/** 属性リストを解釈して ID → 値の対応にする（`buildAttributeList` の逆） */
+export function parseAttributeList(data: Uint8Array): Map<number, Uint8Array> {
+  const out = new Map<number, Uint8Array>();
+  if (data.length < 4) return out;
+  const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const count = v.getUint16(0);
+  const entryLen = v.getUint16(2);
+  if (entryLen < 12) return out;
+
+  for (let i = 0; i < count; i++) {
+    const at = 4 + i * entryLen;
+    if (at + 12 > data.length) break;
+    const id = v.getUint16(at);
+    const valueLen = v.getUint32(at + 4);
+    // 値オフセットはコードポイントヘッダー 6 バイトを含む位置で書かれている
+    const valueAt = v.getUint32(at + 8) - 6;
+    if (valueAt < 0 || valueAt + valueLen > data.length) continue;
+    out.set(id, data.subarray(valueAt, valueAt + valueLen));
+  }
+  return out;
+}

@@ -13,6 +13,7 @@
 import { Tn5250Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { ScsDecoder, type LogicalPage } from "../../protocol/scs.js";
+import { codecForCcsid } from "../../codec/codec.js";
 import {
   openHostConnection,
   type HostConnection,
@@ -29,6 +30,8 @@ import {
   NP_ATTR,
   NP_ATTR_LEN,
   buildAttributeList,
+  buildAttributeIdList,
+  parseAttributeList,
   buildNpRequest,
   parseNpReply,
   findCodePoint,
@@ -46,6 +49,9 @@ const log = childLog({ component: "hostserver-netprint" });
  */
 const DEFAULT_SCS_CCSID = 273;
 
+/** メッセージ ID・テキストは CCSID 37 の EBCDIC */
+const MESSAGE_CCSID = 37;
+
 /**
  * 1 つのスプールから読み取る上限バイト数。
  *
@@ -53,6 +59,16 @@ const DEFAULT_SCS_CCSID = 273;
  * 一覧側には件数上限があるのに読み取り側に無いのは非対称なので設ける。
  */
 const MAX_SPOOL_BYTES = 64 * 1024 * 1024;
+
+/** スプールに付いたメッセージ（MSGW の中身） */
+export interface SpoolMessage {
+  /** 例 "CPA3394" */
+  id: string;
+  text: string;
+  help: string;
+  /** 応答に使うハンドル。取得できない場合は応答できない */
+  handle?: Uint8Array;
+}
 
 export interface NetPrintConnectOptions {
   host: string;
@@ -236,6 +252,100 @@ export class NetPrintConnection {
   async readSpooledText(id: SpoolId, opts: { ccsid?: number } = {}): Promise<string[]> {
     const pages = await this.readSpooledPages(id, opts);
     return pages.flatMap((p) => p.lines);
+  }
+
+  /**
+   * スプールに付いているメッセージを取得する（MSGW の検出）。
+   *
+   * 状態が `MESSAGE_WAIT` のスプールは、応答待ちのメッセージを持つ。
+   * メッセージが無い場合は undefined を返す（`RET_SPLF_NO_MESSAGE`）。
+   *
+   * ---
+   * **⚠ 実際の MSGW に対しては未検証。**
+   *
+   * 開発環境（PUB400）では writer を常駐させられず、MSGW 状態を作れなかった
+   * （特殊権限が `*NONE`、`STRPRTWTR` が `CPF3464` で弾かれる）。
+   * 「メッセージが無い」経路は実機で確認済みで、要求/応答のバイト構成は妥当だが、
+   * **メッセージが有る場合に期待どおり解析できるかは確かめられていない**。
+   * 権限のある環境で最初に使うときは、結果を検証してから頼ること。
+   */
+  async retrieveMessage(id: SpoolId): Promise<SpoolMessage | undefined> {
+    this.assertOpen();
+    const reply = await this.exchange(
+      buildNpRequest({
+        objectType: NP_OBJECT.spooledFile,
+        action: NP_ACTION.retrieveMessage,
+        codePoints: [
+          { id: NP_CP.spooledFileId, data: this.spoolIdCodePoint(id) },
+          {
+            id: NP_CP.attributeList,
+            data: buildAttributeIdList([
+              NP_ATTR.messageId,
+              NP_ATTR.messageText,
+              NP_ATTR.messageHelp,
+              NP_ATTR.messageType,
+              NP_ATTR.messageReply
+            ])
+          }
+        ]
+      }),
+      `retrieve message for ${id.fileName}#${id.fileNumber}`,
+      [NP_RC.ok, NP_RC.spooledFileNoMessage]
+    );
+    if (reply.returnCode === NP_RC.spooledFileNoMessage) return undefined;
+
+    const attrs = findCodePoint(reply, NP_CP.attributeValue);
+    if (!attrs) return undefined;
+    const values = parseAttributeList(attrs);
+    const text = (attrId: number): string =>
+      values.has(attrId) ? codecForCcsid(MESSAGE_CCSID).decode(values.get(attrId)!).trimEnd() : "";
+
+    const handle = findCodePoint(reply, NP_CP.messageHandle);
+    return {
+      id: text(NP_ATTR.messageId),
+      text: text(NP_ATTR.messageText),
+      help: text(NP_ATTR.messageHelp),
+      /** 応答するときに使う。これが無いと answerMessage できない */
+      ...(handle ? { handle } : {})
+    };
+  }
+
+  /**
+   * メッセージに応答する（MSGW の解除）。
+   *
+   * **`retrieveMessage` が返したハンドルが必要**。権限が足りない場合は失敗する。
+   *
+   * ---
+   * **⚠ 未検証。** MSGW 状態を作れなかったため一度も実行できていない
+   * （`retrieveMessage` の注記を参照）。
+   */
+  async answerMessage(message: SpoolMessage, reply: string): Promise<void> {
+    this.assertOpen();
+    if (!message.handle) {
+      throw new Tn5250Error(
+        "CONFIG_ERROR",
+        "cannot answer a message without a handle (retrieveMessage must return one)"
+      );
+    }
+    await this.exchange(
+      buildNpRequest({
+        objectType: NP_OBJECT.spooledFile,
+        action: NP_ACTION.answerMessage,
+        codePoints: [
+          { id: NP_CP.messageHandle, data: message.handle },
+          {
+            id: NP_CP.attributeValue,
+            data: buildAttributeList([
+              // 他の属性（スプール ID 等）は固定長で空白詰めが必要だったが、
+              // MSGREPLY が固定長を要求するかは**未検証**。可変長のまま送っている。
+              // 応答が効かない場合はここを疑うこと（値が隣を巻き込む症状が出る）
+              { id: NP_ATTR.messageReply, type: "string", value: reply, length: reply.length }
+            ])
+          }
+        ]
+      }),
+      `answer message ${message.id}`
+    );
   }
 
   close(): void {
