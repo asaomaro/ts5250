@@ -32,3 +32,19 @@
   requirement は「保護欄で始めても右の入力欄から流し込む」。
 - 決定: 保護欄では編集モデルを作らず `pasteMultiline` に委ねる。
   走査（`nextWritableAt`）が右方向の宛先を見つける。
+
+## D4: 欄外の入力・ペーストは EmulatorPane で拾う（PR #90 の取りこぼし修正）
+
+- 背景: PR #90 は保護欄の打鍵・ペーストを `ScreenGrid` の `@keydown` / `@paste` で
+  扱う実装にしたが、**実機では発火しない**。このアプリは保護欄に focus を留めず
+  （`reconcileFocus` が blur してペインへ移す）、イベントは input へ届かない。
+  単体テストは readonly の input へ直接イベントを送っていたため通ってしまい、
+  **到達しない経路を検証していた**（PR #87 と同じ誤り）。
+- 決定:
+  - 操作員メッセージの定数を `composables/opMessages.ts` へ切り出し、
+    ScreenGrid と EmulatorPane の双方から使う。
+  - `pasteMultiline` を画面座標起点の `pasteFrom` へ一般化し、`pasteAt(row, col, text)`
+    を expose。ペインの `@paste` から委譲する。
+  - ペインの keydown で、欄外の文字入力・Backspace・Delete にメッセージを出す。
+- 影響: テストは **EmulatorPane 起点**（実機と同じ経路）へ移した。
+  ScreenGrid 単体で readonly input を叩くテストは、実機の経路を表さないため増やさない。

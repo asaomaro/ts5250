@@ -22,6 +22,7 @@ import {
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
+import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
@@ -1090,17 +1091,6 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 /** ACS が挿入ペーストの入り切らないときに出す操作員メッセージ。 */
 const NO_ROOM = "No room to insert data.";
 
-/** ACS の操作員メッセージ（原文）。クライアント側で出すもので、ホストの systemMessage とは別。
- *
- *  **ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を受け付けないが、
- *  本実装は受け付ける（不便なためユーザー判断）。クリア契機も ACS の
- *  「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。 */
-const MSG_PROTECTED = "Cursor in protected area of display.";
-const MSG_BY_REASON: Record<RejectReason, string> = {
-  numeric: "Field requires numeric characters.",
-  alphanumeric: "Field data must be alphanumeric.",
-  "dbcs-required": "Double-byte character required as input."
-};
 
 /** 挿入ペーストで最初に見つかる入力不可文字の理由。無ければ undefined。
  *  **挿入モードは 1 文字でも不可なら一切貼らない**（ACS）。上書きモードは桁を消費するだけで
@@ -1170,10 +1160,22 @@ function bandEndCol(field: Field, row: number, col: number): number | undefined 
  *  行ごとの宛先を桁で引くので、1 行に複数の入力欄が並ぶ画面（SEU の行コマンド欄＋ソース欄）でも
  *  桁がずれない。行またぎ欄では複数行が同じ欄の別オフセットへ落ちる。 */
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
-  const lines = text.split(/\r?\n/);
   const { cols, rows } = props.snapshot;
   const startOffset = sliceOffsetOf(f, el) + (el.selectionStart ?? 0);
-  const start = posOfOffset(f, startOffset, cols, rows);
+  pasteFrom(posOfOffset(f, startOffset, cols, rows), text, { f, el, startOffset });
+}
+
+/**
+ * 画面座標 `start` を起点に流し込む。**欄外（保護領域）からのペーストもここを通る。**
+ * `focus` は入力欄にフォーカスがある場合のみ渡す（編集モデルの更新に使う）。
+ */
+function pasteFrom(
+  start: { row: number; col: number },
+  text: string,
+  focus?: { f: Field; el: HTMLInputElement; startOffset: number }
+): void {
+  const lines = text.split(/\r?\n/);
+  const { cols, rows } = props.snapshot;
   // 帯行へ割り付ける。同じ欄に複数回書くことがある（行またぎ欄・帯の折返し）ため、欄ごとに
   // まとめてから 1 度だけ書く（1 行ずつ書くと、2 回目が 1 回目より前の値を土台にして消す）。
   const targets = new Map<number, { field: Field; parts: { offset: number; line: string }[] }>();
@@ -1237,7 +1239,8 @@ function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
     built.push({ field, val });
   }
   for (const { field, val } of built) {
-    if (field.index === f.index) {
+    if (focus && field.index === focus.f.index) {
+      const { f, el, startOffset } = focus;
       // フォーカス欄は edit モデルを置換して sync。カーソルはペースト開始桁のまま動かさない（ACS）。
       // initEdit は insertMode:false を返す。そのまま使うと直後の sync が
       // insertMode.value を false に戻し、ペーストのたびに挿入モードが解除される
@@ -1272,8 +1275,8 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
   const el = ev.target as HTMLInputElement;
   if (f.protected) {
     // **保護欄で始めてもエラーにしない。** ACS はその行の右側に入力欄があれば
-    // そこから流し込む。走査は pasteMultiline が行う（編集モデルは作らない）。
-    pasteMultiline(f, text, el);
+    // そこから流し込む。編集モデルは作らず、カーソル位置を起点にする。
+    pasteFrom(props.cursor ?? { row: f.row, col: f.col }, text);
     return;
   }
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
@@ -1685,7 +1688,13 @@ function setDbcsCaretAtColumn(fieldIndex: number, row: number, col: number): voi
   el.setSelectionRange(localCaret(r, c), localCaret(r, c));
 }
 
-defineExpose({ setBlockSelection, clearBlockSelection: clearRectSel, setDbcsCaretAtColumn });
+/** 欄外（保護領域・非入力セル）からのペースト。EmulatorPane が呼ぶ。
+ *  入力欄に focus が無い状態では @paste が input へ届かないため、ペイン側で拾って委譲する。 */
+function pasteAt(row: number, col: number, text: string): void {
+  pasteFrom({ row, col }, text);
+}
+
+defineExpose({ setBlockSelection, clearBlockSelection: clearRectSel, setDbcsCaretAtColumn, pasteAt });
 
 // 画面が更新されたら矩形選択は破棄する
 watch(

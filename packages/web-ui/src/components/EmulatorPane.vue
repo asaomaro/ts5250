@@ -11,6 +11,7 @@ import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.j
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
+import { MSG_PROTECTED } from "../composables/opMessages.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
@@ -282,6 +283,29 @@ const notice = ref("");
 function onNotice(text: string): void {
   notice.value = text;
 }
+
+/**
+ * 欄外（保護領域・非入力セル）でのペースト。
+ * **このアプリは保護欄に focus を留めない**（reconcileFocus が blur してペインへ移す）ため、
+ * ScreenGrid の @paste は届かない。ペインで拾い、カーソル位置を起点に委譲する。
+ */
+function onPanePaste(ev: ClipboardEvent): void {
+  if (busy.value || snapshot.value?.keyboardLocked) return;
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && paneEl.value?.contains(active) && !active.readOnly) {
+    return; // 入力欄にフォーカスがある → ScreenGrid 側で処理する
+  }
+  const text = ev.clipboardData?.getData("text") ?? "";
+  if (!text) return;
+  ev.preventDefault();
+  gridRef.value?.pasteAt(cursor.value.row, cursor.value.col, text);
+}
+
+/** 欄外で文字入力・Backspace・Delete が押されたか（ACS のメッセージ対象） */
+function isProtectedEdit(ev: KeyboardEvent): boolean {
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
+  return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
+}
 function onSelectionStart(row: number, col: number): void {
   cursorOverride.value = { row, col };
   // ScreenGrid は入力欄を blur しただけなので、そのままだとフォーカスが body に落ちてキーが
@@ -353,6 +377,13 @@ function onKeydown(ev: KeyboardEvent): void {
   // 前の入力欄への移動なので、Tab は修飾に関わらず解除する。
   const cursorMove = ARROW_DIRS[ev.key] !== undefined || ev.key === "Home" || ev.key === "End";
   if (ev.key === "Escape" || ev.key === "Tab" || (!ev.shiftKey && cursorMove)) clearBlockSel();
+  // 欄外（保護領域・非入力セル）での文字入力・Backspace・Delete は ACS 同様に
+  // 操作員メッセージを出す。入力欄にフォーカスがあるときは ScreenGrid が出す。
+  if (isProtectedEdit(ev)) {
+    ev.preventDefault();
+    notice.value = MSG_PROTECTED;
+    return;
+  }
   rawKeydown(ev);
 }
 
@@ -378,6 +409,7 @@ function onWheel(ev: WheelEvent): void {
     tabindex="0"
     @keydown.capture="onKeydownCapture"
     @keydown="onKeydown"
+    @paste="onPanePaste"
     @mousedown="emit('focus')"
     @wheel="onWheel"
   >
