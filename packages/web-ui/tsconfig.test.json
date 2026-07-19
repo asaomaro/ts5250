@@ -1,0 +1,27 @@
+// テスト専用のプロジェクト。
+//
+// アプリ本体（tsconfig.json）は `types: ["vite/client"]` で **Node の型を入れない**——
+// web-ui はブラウザで動くので、`process.env` などが型として通ってしまうと
+// 実行時に初めて壊れる。eslint は web-ui を対象外にしているため、
+// この型の境界が src を守る唯一の仕組みになっている。
+//
+// 一方でテストの一部は、**ソースの宣言そのものを読んで**検証する
+// （jsdom では算出スタイルが取れないため）。そこだけ node:fs / node:path が要る。
+// そのため tsconfig を分け、**テストにだけ Node の型を許す**。
+//
+// 以前は tsconfig.json の include に test が入っており、`types` に node が無いため
+// 本来ずっと型エラーだった。`vue-tsc -b` の増分ビルドがスキップしていて表面化せず、
+// クリーンビルド（--build / --force）で初めて 7 件のエラーとして出た。
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "types": ["vite/client", "node"],
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo"
+  },
+  "include": ["src", "test"]
+}
