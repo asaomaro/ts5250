@@ -36,7 +36,7 @@ const showAccount = ref(false);
 const activeIsEmulator = computed(() => {
   if (showConnect.value || !hasWorkspaceContent.value) return false;
   const tab = workspaceStore.focusedGroup().activeTab;
-  if (!tab || tab.startsWith("admin:")) return false;
+  if (!tab || tab.startsWith("admin:") || tab.startsWith("list:")) return false;
   const s = sessionsStore.get(tab);
   return !!s && s.kind !== "printer";
 });
@@ -144,6 +144,11 @@ onBeforeUnmount(() => {
       </button>
       <!-- 個人利用（認証オフ）は実質管理者なのでセッション・ログを出す。
            ユーザー管理はユーザーが存在しないため認証時のみ -->
+      <span class="admin-nav">
+        <button class="link" @click="openAdmin('list:jobs')">ジョブ</button>
+        <button class="link" @click="openAdmin('list:objects')">オブジェクト</button>
+        <button class="link" @click="openAdmin('list:users')">ユーザー一覧</button>
+      </span>
       <span v-if="authStore.isAdmin || !authStore.enabled" class="admin-nav">
         <button v-if="authStore.isAdmin" class="link" @click="openAdmin('admin:users')">ユーザー</button>
         <button class="link" @click="openAdmin('admin:sessions')">セッション</button>

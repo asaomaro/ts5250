@@ -19,6 +19,7 @@ import { effectiveType } from "./profiles.js";
 import { checkOutputDir } from "./output-dir.js";
 import { checkPrintDest } from "./print-dest.js";
 import { registerConnectionRoutes } from "./connections.js";
+import { registerHostListRoutes } from "./host-lists.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
@@ -192,6 +193,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // ユーザー接続設定 CRUD（サーバー保存・owner スコープ）。ストア配線時のみ
   if (deps.connections) {
     registerConnectionRoutes(app, { connections: deps.connections });
+    // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
+    // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
+    registerHostListRoutes(app, { profiles: deps.profiles, connections: deps.connections });
   }
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）

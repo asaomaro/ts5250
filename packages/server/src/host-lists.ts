@@ -1,0 +1,218 @@
+/**
+ * ジョブ・オブジェクト・ユーザー一覧の API。
+ *
+ * ホストサーバー（コマンドサーバー）経由で取得する。**接続を持つユーザーなら誰でも使える**——
+ * 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない
+ * （一般ユーザーは自分のジョブとアクセスできるオブジェクトしか見えない）。
+ *
+ * 操作（ジョブの保留・解放・終了、オブジェクト削除）も同じ経路で行う。
+ * 失敗は IBM i のメッセージ ID とともに返す。
+ */
+import { Hono } from "hono";
+import { z } from "zod";
+import {
+  CommandConnection,
+  listJobs,
+  listObjects,
+  listUsers,
+  Tn5250Error,
+  type ConnectOptions
+} from "@as400web/core";
+import type { AuthUser, AuthVars } from "./auth.js";
+import type { ProfileStore } from "./profiles.js";
+import type { ConnectionStore } from "./connection-store.js";
+
+/** 一覧の取得元。既存の接続設定をそのまま使う */
+const sourceSchema = z
+  .object({
+    connection: z.string().optional(),
+    profile: z.string().optional()
+  })
+  .strict()
+  .refine((v) => Boolean(v.connection) !== Boolean(v.profile), {
+    message: "connection または profile のどちらか一方を指定してください"
+  });
+
+const jobFilterSchema = z
+  .object({ name: z.string().optional(), user: z.string().optional(), type: z.string().optional() })
+  .strict();
+
+const objectFilterSchema = z
+  .object({ name: z.string().optional(), library: z.string().optional(), type: z.string().optional() })
+  .strict();
+
+const userFilterSchema = z
+  .object({ selection: z.enum(["*USER", "*GROUP", "*MEMBER"]).optional() })
+  .strict();
+
+const listRequestSchema = z
+  .object({
+    source: sourceSchema,
+    jobs: jobFilterSchema.optional(),
+    objects: objectFilterSchema.optional(),
+    users: userFilterSchema.optional(),
+    max: z.number().int().positive().max(1000).optional()
+  })
+  .strict();
+
+/** 操作。破壊的なものを含むため対象を明示的に列挙する */
+const actionSchema = z
+  .object({
+    source: sourceSchema,
+    /** 実行する CL コマンド。**この API が組み立てる**（利用側から任意の CL は受け取らない） */
+    action: z.enum(["job-hold", "job-release", "job-end", "object-delete"]),
+    target: z
+      .object({
+        jobName: z.string().optional(),
+        jobUser: z.string().optional(),
+        jobNumber: z.string().optional(),
+        objectName: z.string().optional(),
+        objectLibrary: z.string().optional(),
+        objectType: z.string().optional()
+      })
+      .strict()
+  })
+  .strict();
+
+export interface HostListDeps {
+  profiles: ProfileStore;
+  connections: ConnectionStore;
+}
+
+/**
+ * 未指定（undefined）の項目を落とす。
+ * `exactOptionalPropertyTypes` のため、`{ user: undefined }` は
+ * 「指定していない」ではなく「undefined を指定した」になってしまう。
+ */
+function compact<T extends object>(value: T | undefined): {
+  [K in keyof T]-?: Exclude<T[K], undefined>;
+} {
+  if (!value) return {} as never;
+  return Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== undefined)
+  ) as never;
+}
+
+/** 接続設定から資格情報を解く。ブラウザへは渡さない */
+function resolveSource(
+  deps: HostListDeps,
+  source: z.infer<typeof sourceSchema>,
+  user: AuthUser | undefined
+): ConnectOptions {
+  if (source.connection) return deps.connections.resolveConnectOptions(source.connection, user);
+  return deps.profiles.resolveConnectOptions(source.profile as string, user);
+}
+
+/**
+ * 一覧・操作に使うコマンドサーバー接続を開く。
+ *
+ * **5250 の自動サインオン情報を流用する**——同じ相手に同じ資格情報で繋ぐため。
+ * user/password が無い接続設定では一覧を取得できない。
+ */
+async function openCommand(opts: ConnectOptions): Promise<CommandConnection> {
+  if (!opts.host || !opts.user || !opts.password) {
+    throw new Tn5250Error(
+      "CONFIG_ERROR",
+      "この接続設定にはユーザーとパスワードが登録されていないため一覧を取得できません"
+    );
+  }
+  return CommandConnection.connect({
+    host: opts.host,
+    user: opts.user,
+    password: opts.password,
+    ...(opts.tls !== undefined ? { tls: opts.tls as boolean } : {})
+  });
+}
+
+/** 操作から CL コマンドを組み立てる。**利用側から任意の CL は受け取らない** */
+function buildCommand(
+  action: z.infer<typeof actionSchema>["action"],
+  target: z.infer<typeof actionSchema>["target"]
+): string {
+  const job = (): string => {
+    if (!target.jobNumber || !target.jobUser || !target.jobName) {
+      throw new Tn5250Error("CONFIG_ERROR", "ジョブの指定が不完全です");
+    }
+    return `${target.jobNumber}/${target.jobUser}/${target.jobName}`;
+  };
+  switch (action) {
+    case "job-hold":
+      return `HLDJOB JOB(${job()})`;
+    case "job-release":
+      return `RLSJOB JOB(${job()})`;
+    case "job-end":
+      return `ENDJOB JOB(${job()}) OPTION(*CNTRLD) DELAY(30)`;
+    case "object-delete": {
+      if (!target.objectName || !target.objectLibrary || !target.objectType) {
+        throw new Tn5250Error("CONFIG_ERROR", "オブジェクトの指定が不完全です");
+      }
+      return `DLTOBJ OBJ(${target.objectLibrary}/${target.objectName}) OBJTYPE(${target.objectType})`;
+    }
+  }
+}
+
+export function registerHostListRoutes(app: Hono<{ Variables: AuthVars }>, deps: HostListDeps): void {
+  /** 一覧の取得 */
+  app.post("/api/host/list/:kind", async (c) => {
+    const kind = c.req.param("kind");
+    if (kind !== "jobs" && kind !== "objects" && kind !== "users") {
+      return c.json({ error: `unknown list kind: ${kind}` }, 404);
+    }
+    const parsed = listRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const body = parsed.data;
+    const user = c.get("user");
+
+    let conn: CommandConnection | undefined;
+    try {
+      conn = await openCommand(resolveSource(deps, body.source, user));
+      const max = body.max ?? 200;
+      const items =
+        kind === "jobs"
+          ? await listJobs(conn, compact(body.jobs), { max })
+          : kind === "objects"
+            ? await listObjects(conn, compact(body.objects), { max })
+            : await listUsers(conn, compact(body.users), { max });
+      return c.json({ items });
+    } catch (e) {
+      const err = e as Tn5250Error;
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, 502);
+    } finally {
+      conn?.close();
+    }
+  });
+
+  /** 操作の実行 */
+  app.post("/api/host/action", async (c) => {
+    const parsed = actionSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const { source, action, target } = parsed.data;
+    const user = c.get("user");
+
+    let conn: CommandConnection | undefined;
+    try {
+      const command = buildCommand(action, target);
+      conn = await openCommand(resolveSource(deps, source, user));
+      const result = await conn.run(command);
+      return c.json({
+        success: result.success,
+        command,
+        messages: result.messages.map((m) => ({
+          id: m.id,
+          text: m.text,
+          severity: m.severity,
+          kind: m.kind
+        }))
+      });
+    } catch (e) {
+      const err = e as Tn5250Error;
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, 502);
+    } finally {
+      conn?.close();
+    }
+  });
+}

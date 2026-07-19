@@ -1,0 +1,8 @@
+schema: 3
+slug: list-ui
+current: deliver
+approved: [requirement, spec, plan, coding, test, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
