@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { logStore, type LogEntry } from "../stores/log.js";
 
 /**
@@ -36,6 +36,40 @@ function download(): void {
   URL.revokeObjectURL(url);
 }
 const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" : "●");
+
+const bodyEl = ref<HTMLElement>();
+/** 最下部にいるか。数 px の余裕を持たせる（端数で判定が揺れるため） */
+function atBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+}
+function toBottom(): void {
+  const el = bodyEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+/**
+ * 新しい行に追従する。**最下部にいるときだけ**——
+ * 過去を遡って読んでいる最中に飛ばされると、追っていた行を見失う。
+ * flush: "pre" で描画前に位置を測り、描画後に寄せる。
+ */
+watch(
+  () => shown.value.length,
+  (_n, _o) => {
+    const el = bodyEl.value;
+    const follow = !el || atBottom(el);
+    if (!follow) return;
+    void nextTick(toBottom);
+  },
+  { flush: "pre" }
+);
+
+/** 開いたときは最新を見せる（前回の位置を覚えていても、まず見たいのは今の状況） */
+watch(
+  () => props.open,
+  (open) => {
+    if (open) void nextTick(toBottom);
+  }
+);
 </script>
 
 <template>
@@ -50,7 +84,7 @@ const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" 
         <button class="lbtn close" title="閉じる" @click="emit('close')">✕</button>
       </span>
     </div>
-    <div class="body">
+    <div ref="bodyEl" class="body">
       <template v-for="e in shown" :key="e.id">
         <div class="lg" :class="{ err: e.error }" @click="expanded = expanded === e.id ? undefined : e.id">
           <span class="t">{{ Math.round(e.ts) }}</span>
@@ -126,9 +160,10 @@ const dirMark = (d: string): string => (d === "tx" ? "→" : d === "rx" ? "←" 
   border-color: var(--t-green);
 }
 .body {
+  /* 親（.logpanel）が高さを決めるので、ここで上限を持たない。
+     以前の max-height: 180px は、親が内容に合わせて伸びていた頃の名残 */
   flex: 1;
   min-height: 0;
-  max-height: 180px;
   overflow-y: auto;
   background: var(--crt);
   padding: 4px 0;

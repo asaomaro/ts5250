@@ -14,3 +14,6 @@ users.json
 # ユーザー接続設定（サーバー保存・秘匿）
 connections.json
 connections.json.tmp
+
+# 5250 の操作ログ書き出し（調査用。実機の画面内容が入るのでコミットしない）
+*5250-log*.jsonl

@@ -55,3 +55,50 @@ describe("操作ログの絞り込み", () => {
     w.unmount();
   });
 });
+
+describe("新しい行への追従", () => {
+  /**
+   * 最下部にいるときだけ追従する。過去を遡って読んでいる最中に飛ばされると、
+   * 追っていた行を見失う。
+   */
+  function mountOpen() {
+    return mount(LogPanel, { props: { sessionId: "id-1", open: true }, attachTo: document.body });
+  }
+
+  it("最下部にいれば新しい行へ追従する", async () => {
+    const { nextTick } = await import("vue");
+    for (let i = 0; i < 20; i++) entry("id-1", "a", `e${i}`);
+    const w = mountOpen();
+    await nextTick();
+
+    const body = w.find(".body").element as HTMLElement;
+    // jsdom は実寸を持たないので、最下部の状態を作って判定を通す
+    Object.defineProperty(body, "scrollHeight", { value: 500, configurable: true });
+    Object.defineProperty(body, "clientHeight", { value: 500, configurable: true });
+    body.scrollTop = 0;
+
+    entry("id-1", "a", "new");
+    await nextTick();
+    await nextTick();
+    expect(body.scrollTop).toBe(500);
+    w.unmount();
+  });
+
+  it("遡って読んでいるときは追従しない", async () => {
+    const { nextTick } = await import("vue");
+    for (let i = 0; i < 20; i++) entry("id-1", "a", `e${i}`);
+    const w = mountOpen();
+    await nextTick();
+
+    const body = w.find(".body").element as HTMLElement;
+    Object.defineProperty(body, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(body, "clientHeight", { value: 200, configurable: true });
+    body.scrollTop = 100; // 上のほうを読んでいる
+
+    entry("id-1", "a", "new");
+    await nextTick();
+    await nextTick();
+    expect(body.scrollTop).toBe(100);
+    w.unmount();
+  });
+});

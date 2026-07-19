@@ -1770,15 +1770,21 @@ onBeforeUnmount(() => {
   /* グローバルの input 既定（角丸 6px）を打ち消す。
      5250 の入力欄は下線 1 本で表すので、角が丸いと下線の端が浮いて見える */
   border-radius: 0;
-  background: transparent;
-  color: var(--t-white);
-  border-bottom: 1px solid color-mix(in srgb, var(--t-green) 55%, transparent);
+  /*
+   * **見た目は属性クラス（.c-green / .a-reverse）に決めさせる。** scoped の詳細度 (0,2,0) は
+   * グローバルの属性クラス (0,1,0) に勝つので、ここで color / background を直に書くと
+   * ホストが送った色と反転を必ず潰す（実際、色は白のまま・反転は消えていた）。
+   * 背景だけはブラウザ既定を消す必要があるため、**属性が指定した値を優先する変数**で受ける。
+   */
+  background: var(--cell-bg, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
   vertical-align: baseline;
-  caret-color: var(--t-green);
+  caret-color: currentColor;
 }
 .grid-input:focus {
   outline: none;
-  background: color-mix(in srgb, var(--t-green) 12%, transparent);
+  /* 反転中はその背景を保つ。フォーカスの色づけは反転していない欄だけ */
+  background: var(--cell-bg, color-mix(in srgb, var(--t-green) 12%, transparent));
 }
 /* 保護（表示専用）フィールドは編集不可。入力欄の下線・キャレット・フォーカス背景を出さない（ACS 準拠） */
 .grid-input[readonly] {
@@ -1786,7 +1792,7 @@ onBeforeUnmount(() => {
   caret-color: transparent;
 }
 .grid-input[readonly]:focus {
-  background: transparent;
+  background: var(--cell-bg, transparent);
 }
 /* 入力欄の下線は border-bottom（全桁）で表す。5250 の下線属性による text-decoration との
    二重下線（太く見える）を防ぐため、input では text-decoration を無効化する（ACS 準拠の単一下線） */

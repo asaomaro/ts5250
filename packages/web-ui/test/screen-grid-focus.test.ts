@@ -71,3 +71,32 @@ describe("セル選択と入力欄のフォーカスは二重に出さない", (
     w.unmount();
   });
 });
+
+describe("入力欄の色は属性に従う", () => {
+  /**
+   * 以前は .grid-input が color: var(--t-white) を固定しており、
+   * scoped スタイルのぶん詳細度が高いためグローバルの .c-* を常に上書きしていた。
+   * ホストが緑で送った入力欄が白く描かれる（PDM のメンバー一覧など）。
+   */
+  function withField(color: Cell["color"]): ScreenSnapshot {
+    const sn = snap([{ ...FIELDS[0]! }]);
+    // 入力欄がある行（FIELDS[0].row = 20）を丸ごと塗る
+    const ri = FIELDS[0]!.row - 1;
+    sn.cells[ri] = sn.cells[ri]!.map((c) => ({ ...cell(c.char), color }));
+    return sn;
+  }
+
+  it("緑の入力欄には c-green が付く（白で固定しない）", () => {
+    const w = mount(ScreenGrid, { props: { snapshot: withField("green"), edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    expect(input.classes()).toContain("c-green");
+    expect(input.classes()).not.toContain("c-white");
+    w.unmount();
+  });
+
+  it("白の入力欄には c-white が付く", () => {
+    const w = mount(ScreenGrid, { props: { snapshot: withField("white"), edits: new Map(), focused: true } });
+    expect(w.find("input.grid-input").classes()).toContain("c-white");
+    w.unmount();
+  });
+});
