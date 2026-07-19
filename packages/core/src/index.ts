@@ -142,7 +142,11 @@ export {
   type SpoolEntry,
   type SpoolListFilter
 } from "./hostserver/spool/spool-types.js";
-export { NetPrintConnection, type NetPrintConnectOptions } from "./hostserver/spool/netprint-connection.js";
+export {
+  NetPrintConnection,
+  type NetPrintConnectOptions,
+  type SpoolMessage
+} from "./hostserver/spool/netprint-connection.js";
 export {
   NP_ACTION,
   NP_CP,

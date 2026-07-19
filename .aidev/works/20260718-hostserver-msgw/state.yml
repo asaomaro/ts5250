@@ -1,0 +1,8 @@
+schema: 3
+slug: hostserver-msgw
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260718-hostserver-spool]
