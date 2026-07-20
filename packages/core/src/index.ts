@@ -177,7 +177,12 @@ export {
 } from "./hostserver/spool/netprint-datastream.js";
 
 // ホストサーバー: IFS ファイルの読み書き
-export { IfsConnection, type IfsConnectOptions } from "./hostserver/ifs/ifs-connection.js";
+export {
+  IfsConnection,
+  type IfsConnectOptions,
+  type IfsListOptions
+} from "./hostserver/ifs/ifs-connection.js";
+export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
 
 // ホストサーバー: 各種一覧（QGY オープンリスト）
 export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";

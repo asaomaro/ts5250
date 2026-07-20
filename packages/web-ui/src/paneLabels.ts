@@ -8,7 +8,7 @@
  */
 
 /** セッションを持たないタブの ID 接頭辞。**新しい種類を足すときはここに追加する** */
-export const PANE_PREFIXES = ["admin:", "list:", "sql:", "transfer:"] as const;
+export const PANE_PREFIXES = ["admin:", "ifs:", "list:", "sql:", "transfer:"] as const;
 
 /** セッションを持たない（＝接続の概念が無い）タブか */
 export function isPaneTab(id: string | undefined): boolean {
@@ -23,6 +23,7 @@ export const PANE_LABELS: Record<string, string> = {
   "list:jobs": "ジョブ",
   "list:objects": "オブジェクト",
   "list:users": "ユーザー",
+  "ifs:files": "IFS",
   "sql:query": "SQL",
   "transfer:data": "データ転送"
 };

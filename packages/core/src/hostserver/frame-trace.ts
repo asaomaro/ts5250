@@ -101,10 +101,12 @@ export function traceFrame(log: CoreLogger, direction: "send" | "recv", frame: U
  * 12 箇所あり、1 箇所書き忘れると「そこだけ追えない」という気づきにくい穴になる。
  * 接続を作るときに 1 度包めば、以降の全往復が自動で乗る。
  */
-export function traced<T extends { request(frame: Uint8Array): Promise<Uint8Array> }>(
-  conn: T,
-  log: CoreLogger
-): T {
+export function traced<
+  T extends {
+    request(frame: Uint8Array): Promise<Uint8Array>;
+    requestStream(frame: Uint8Array, onFrame: (f: Uint8Array) => boolean): Promise<void>;
+  }
+>(conn: T, log: CoreLogger): T {
   return {
     ...conn,
     async request(frame: Uint8Array): Promise<Uint8Array> {
@@ -112,6 +114,19 @@ export function traced<T extends { request(frame: Uint8Array): Promise<Uint8Arra
       const reply = await conn.request(frame);
       traceFrame(log, "recv", reply);
       return reply;
+    },
+    // **新しいメソッドを足したらここも通すこと**——素通しを忘れると
+    // ラップした接続からだけ消えて、原因の分かりにくい沈黙になる。
+    // 型で必須にしてあるので、足し忘れはコンパイルで気づける
+    async requestStream(
+      frame: Uint8Array,
+      onFrame: (f: Uint8Array) => boolean
+    ): Promise<void> {
+      traceFrame(log, "send", frame);
+      await conn.requestStream(frame, (reply) => {
+        traceFrame(log, "recv", reply);
+        return onFrame(reply);
+      });
     }
   };
 }

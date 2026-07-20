@@ -18,6 +18,7 @@ import { registerAdminRoutes } from "./admin.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
+import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
 import { ResultSetStore } from "./result-set-store.js";
 import { DbPool } from "./db-pool.js";
@@ -35,7 +36,28 @@ export interface AppDeps extends ToolDeps {
   resultSets?: ResultSetStore;
   /** 画面の SQL 用の接続の使い回し。未指定なら内部で作る */
   pool?: DbPool;
+  /** zip 一括ダウンロードの上限。未指定なら既定（20MB / 500 ファイル） */
+  ifsZipMaxBytes?: number;
+  ifsZipMaxFiles?: number;
+  /** IFS の 1 ファイル読み取り上限（未指定なら既定 5MB） */
+  ifsReadMaxBytes?: number;
+  /** zip で辿るディレクトリ数の上限（未指定なら ifs-collect の既定 5,000） */
+  ifsZipMaxDirectories?: number;
 }
+
+/**
+ * zip 一括ダウンロードの既定の上限。
+ *
+ * 実効スループットは約 100KB/s（実測）なので、20MB は最悪で約 3.5 分に相当する。
+ * これ以上を既定にすると、待たされた末に失敗する体験が増える。
+ */
+export const DEFAULT_IFS_ZIP_MAX_BYTES = 20 * 1024 * 1024;
+export const DEFAULT_IFS_ZIP_MAX_FILES = 500;
+/**
+ * 1 ファイルの読み取り上限。
+ * 100KB/s では 5MB でも約 50 秒かかる。これを超えるものは画面に出さずダウンロードへ誘導する。
+ */
+export const DEFAULT_IFS_READ_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * Hono アプリ（REST＋MCP Streamable HTTP＋静的配信）。
@@ -106,6 +128,38 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   const resultSets = deps.resultSets ?? new ResultSetStore();
   const pool = deps.pool ?? new DbPool();
   registerHostSqlRoutes(app, { resolver: deps.resolver, resultSets, pool });
+
+  // IFS のファイルブラウザ（一覧・読み書き・zip 一括取得）
+  // 上限は zip64 非対応という**不変条件**に紐づく。CLI 経路だけで検査すると、
+  // buildApp を直接呼ぶ経路（テスト・組み込み）から壊れた値が入り、
+  // 長時間集めた末に buildZip が RangeError を投げて 502 になる（最悪の組み合わせ）
+  const limit = (name: string, value: number, max: number): number => {
+    if (!Number.isInteger(value) || value < 1 || value > max) {
+      throw new Error(`${name} が範囲外です: ${value}（1〜${max}）`);
+    }
+    return value;
+  };
+  const zipMaxBytes = limit(
+    "ifsZipMaxBytes",
+    deps.ifsZipMaxBytes ?? DEFAULT_IFS_ZIP_MAX_BYTES,
+    0xf000_0000
+  );
+  // ZIP の終端レコードの件数は 16 ビット
+  const zipMaxFiles = limit("ifsZipMaxFiles", deps.ifsZipMaxFiles ?? DEFAULT_IFS_ZIP_MAX_FILES, 0xffff);
+  const readMaxBytes = limit(
+    "ifsReadMaxBytes",
+    deps.ifsReadMaxBytes ?? DEFAULT_IFS_READ_MAX_BYTES,
+    0xf000_0000
+  );
+  registerHostIfsRoutes(app, {
+    resolver: deps.resolver,
+    zipMaxBytes,
+    zipMaxFiles,
+    readMaxBytes,
+    ...(deps.ifsZipMaxDirectories !== undefined
+      ? { zipMaxDirectories: deps.ifsZipMaxDirectories }
+      : {})
+  });
 
   // CSV の取り込み（DDM）。**ここは IBM i に書き込むルート**——
   // 読み取り専用なのは /api/host/sql であって、ホスト API 全体ではない（host-upload.ts の説明）

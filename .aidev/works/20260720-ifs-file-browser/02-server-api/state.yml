@@ -1,0 +1,9 @@
+schema: 3
+slug: 02-server-api
+parent: 20260720-ifs-file-browser
+current: review
+approved: [plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [01-core-listfiles]
