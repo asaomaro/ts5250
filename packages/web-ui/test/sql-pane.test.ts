@@ -204,6 +204,36 @@ describe("ページング", () => {
   });
 });
 
+describe("列幅", () => {
+  /**
+   * 幅そのものは CSS（`width: auto` + `max-width: 40ch`）が決めるので、
+   * ここでは**打ち切られた値を読む手段が残っている**ことだけを固定する。
+   * 見た目は実ブラウザで確認する。
+   */
+  it("セルの全文を title で読める（40 文字で打ち切られるため）", async () => {
+    const long = "X".repeat(300);
+    mockFetch({ ...OK_BODY, rows: [{ ID: 1, NAME: long }] });
+    const w = await run();
+    const cells = w.findAll("tbody td");
+    expect(cells[2]?.attributes("title")).toBe(long);
+    w.unmount();
+  });
+
+  it("NULL と LOB には外側の title を付けない（中の説明が読めなくなるため）", async () => {
+    mockFetch({
+      ...OK_BODY,
+      rows: [{ ID: null, NAME: { kind: "lob", unavailable: "not-requested" } }]
+    });
+    const w = await run();
+    const cells = w.findAll("tbody td");
+    expect(cells[1]?.attributes("title")).toBeUndefined();
+    expect(cells[2]?.attributes("title")).toBeUndefined();
+    // 中の span 側の説明は残っている
+    expect(w.find(".lob").attributes("title")).toContain("取得していません");
+    w.unmount();
+  });
+});
+
 describe("SQL 欄と結果欄の境界", () => {
   /**
    * つまみ（textarea の resize）は「どこを掴めば動くのか分からない」と指摘を受けたので、

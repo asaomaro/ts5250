@@ -234,6 +234,16 @@ function onSplitterKeydown(e: KeyboardEvent): void {
   e.preventDefault();
 }
 
+/**
+ * 打ち切られたセルの全文を title で読めるようにする。
+ * NULL と LOB は中の span が自前の title を持つので、ここでは付けない
+ * （付けると外側が勝って「LOB の中身は取得していません」等が読めなくなる）。
+ */
+function cellTitle(v: unknown): string | undefined {
+  if (v === null || isLob(v)) return undefined;
+  return String(v);
+}
+
 /** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
 function lobText(v: unknown): string {
   const lob = v as { value?: unknown; unavailable?: string };
@@ -331,7 +341,7 @@ function download(): void {
         <tr>
           <!-- レコード番号。**横スクロールしても残す**ので、どの行を見ているか見失わない -->
           <th class="rownum" title="レコード番号（読み足した順の通し番号）">#</th>
-          <th v-for="c in columns" :key="c.name" :title="`${c.typeName}${c.nullable ? '' : ' NOT NULL'}`">
+          <th v-for="c in columns" :key="c.name" :title="`${c.name} — ${c.typeName}${c.nullable ? '' : ' NOT NULL'}`">
             {{ c.name }}
           </th>
         </tr>
@@ -339,7 +349,7 @@ function download(): void {
       <tbody>
         <tr v-for="(r, i) in rows" :key="i">
           <td class="rownum">{{ i + 1 }}</td>
-          <td v-for="c in columns" :key="c.name">
+          <td v-for="c in columns" :key="c.name" :title="cellTitle(r[c.name])">
             <span v-if="r[c.name] === null" class="null">NULL</span>
             <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
             <template v-else>{{ r[c.name] }}</template>
@@ -406,10 +416,16 @@ label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; co
 .splitter:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
 .hint code { font-family: var(--mono); }
-table { border-collapse: collapse; width: 100%; }
+/* **列幅は中身に合わせる**。`width: 100%` だと 4 列の表でも画面いっぱいに
+   引き伸ばされ、5 文字の値の間に空白が空いてしまう（利用者の指摘）。
+   代わりに横幅が足りなければ .rows-scroll が横スクロールする */
+table { border-collapse: collapse; width: auto; table-layout: auto; }
 th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 13px; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; font-family: var(--mono); }
 td { font-family: var(--mono); white-space: pre; }
+/* ただし**際限なく伸ばさない**。長い CLOB や説明文の 1 列で表が使えなくなるため、
+   40 文字ぶんで打ち切って「…」を出す（全文は title で読める） */
+th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .null { color: var(--muted); font-style: italic; }
 .lob { color: var(--muted); font-style: italic; }
 .error { color: #c62828; }
