@@ -36,12 +36,21 @@ export type SourceInput = z.infer<typeof sourceSchema>;
  * 設定の誤りや認可の失敗まで 502 にすると、呼び出し側が
  * 「ホストが落ちている」のか「指定が間違っている」のかを区別できない。
  */
-export function statusOf(e: As400Error): 400 | 403 | 404 | 502 {
+export function statusOf(e: As400Error): 400 | 403 | 404 | 409 | 502 {
   switch (e.code) {
     case "FORBIDDEN":
+    // ホスト側の権限で拒否された（IFS の rc=13 等）。こちらの認可ではないが、
+    // 利用者から見れば「権限が無い」で同じ
+    case "ACCESS_DENIED":
       return 403;
     case "SESSION_NOT_FOUND":
+    case "NOT_FOUND":
       return 404;
+    // 対象の現在の状態と衝突している。**どちらも時間や対象を変えれば通りうる**ので、
+    // 「ホストが落ちている」を意味する 502 に落とさない
+    case "ALREADY_EXISTS":
+    case "RESOURCE_BUSY":
+      return 409;
     case "CONFIG_ERROR":
     case "CONNECT_FAILED":
     case "SQL_ERROR":

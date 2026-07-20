@@ -395,6 +395,12 @@ export function fileFailure(what: string, rc: number, replyId: number): As400Err
     case 5:
     case 13:
       return new As400Error("ACCESS_DENIED", detail);
+    // 使用中 / 共有違反 / ロック違反。権限ではなく**時間**の問題なので、
+    // 「ホストが落ちている」を意味する扱いにしない（待てば通りうる）
+    case 1:
+    case 32:
+    case 33:
+      return new As400Error("RESOURCE_BUSY", detail);
     default:
       return new As400Error("PROTOCOL_ERROR", detail);
   }
