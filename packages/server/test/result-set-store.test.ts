@@ -76,6 +76,9 @@ describe("歯止め", () => {
     now += 2_000;
     store.sweep();
     expect(store.size).toBe(0);
+    // **カーソルが閉じ切ってから**接続を手放すので、後始末は 1 tick 遅れる
+    await Promise.resolve();
+    await Promise.resolve();
     expect(c.closed()).toBe(true); // **接続を掴んだままにしない**
     expect(store.get(set.id, undefined)).toBeUndefined();
   });
@@ -120,6 +123,37 @@ describe("歯止め", () => {
     expect(store.size).toBe(0);
     expect(a.closed()).toBe(true);
     expect(b.closed()).toBe(true);
+  });
+
+  it("**カーソルが閉じ切ってからプールへ返す**（次の借り手が閉じかけを掴まない）", async () => {
+    const store = new ResultSetStore();
+    const c = fakeConn();
+    const order: string[] = [];
+    const rows = rowsOf(100);
+    const realReturn = rows.return.bind(rows);
+    rows.return = async (v?: unknown) => {
+      await Promise.resolve();
+      order.push("カーソルを閉じた");
+      return realReturn(v as never);
+    };
+    const set = store.open({
+      owner: undefined, columns, rows, conn: c.conn,
+      release: () => order.push("プールへ返した")
+    });
+    store.close(set.id);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual(["カーソルを閉じた", "プールへ返した"]);
+    expect(c.closed()).toBe(false); // 閉じずに返している
+  });
+
+  it("**closeAll はプールへ返さずその場で閉じる**（終了時に接続を残さない）", () => {
+    const store = new ResultSetStore();
+    const c = fakeConn();
+    const released = vi.fn();
+    store.open({ owner: undefined, columns, rows: rowsOf(1), conn: c.conn, release: released });
+    store.closeAll();
+    expect(c.closed()).toBe(true);
+    expect(released).not.toHaveBeenCalled();
   });
 
   it("close はジェネレータも閉じる（カーソルを残さない）", () => {

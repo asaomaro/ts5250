@@ -25,9 +25,13 @@ import { z } from "zod";
 import { openQuery, query, SqlError, As400Error, type DbConnection } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
-import { openDb } from "./host-connect.js";
+import { openDb, hostAuthFrom } from "./host-connect.js";
 import { resolveSource, sourceSchema, statusOf } from "./host-api.js";
 import type { ResultSetStore } from "./result-set-store.js";
+import { poolKey, type DbPool } from "./db-pool.js";
+import { childLog } from "@as400web/core";
+
+const log = childLog({ component: "host-sql" });
 
 /** 応答に載せる行数の上限（サーバー側で強制する。UI の出し分けに依存しない） */
 const MAX_ROWS = 1000;
@@ -52,7 +56,11 @@ export interface HostSqlDeps {
   resolver: ConfigResolver;
   /** 画面のページング用。**ここだけが接続を掴み続ける** */
   resultSets: ResultSetStore;
+  /** 画面の SQL 用の接続の使い回し（MCP の単発完結は変えない） */
+  pool: DbPool;
 }
+
+const warmSchema = z.object({ source: sourceSchema }).strict();
 
 const nextSchema = z
   .object({ pageSize: z.number().int().positive().max(MAX_ROWS).optional() })
@@ -89,22 +97,52 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
 
     // --- ページング（pageSize 指定時）。**結果セットを保持**して続きを /next で返す ---
     if (pageSize !== undefined) {
+      const opts = resolveSource(deps.resolver, source, user);
+      const key = poolKey(user?.username, hostAuthFrom(opts));
+      const open = () => openDb(opts);
       let conn: DbConnection | undefined;
       try {
-        conn = await openDb(resolveSource(deps.resolver, source, user));
-        const { columns, rows } = await openQuery(conn, sql);
-        const set = deps.resultSets.open({ owner: user?.username, columns, rows, conn });
+        // 使い回した接続が相手側で切れていることがある。
+        // **SQL の誤りで再試行はしない**（同じ誤りを 2 度投げるだけなので）
+        let acquired = await deps.pool.acquire(key, open);
+        conn = acquired.conn;
+        let opened;
+        try {
+          opened = await openQuery(conn, sql);
+        } catch (e) {
+          if (!acquired.reused || e instanceof SqlError) throw e;
+          log.debug(`pooled connection failed, retrying with a fresh one: ${String(e)}`);
+          deps.pool.discard(conn);
+          acquired = { conn: await open(), reused: false };
+          conn = acquired.conn;
+          opened = await openQuery(conn, sql);
+        }
+        const { columns, rows } = opened;
+        const set = deps.resultSets.open({
+          owner: user?.username,
+          columns,
+          rows,
+          conn,
+          // 読み終わったら閉じずに**プールへ返す**
+          release: (used) => deps.pool.release(key, used)
+        });
         const page = await deps.resultSets.next(set, pageSize);
+        // **1 ページで読み切ったなら、その場で手放して接続をプールへ返す**。
+        // 掴んだままにするとアイドル 60 秒のあいだ次の実行が接続を使い回せず、
+        // 小さな表でも毎回 6 秒かかる（実測で気づいた）。
+        // 応答は待たせない（手放しはカーソルを閉じる 1 往復ぶん遅れて完了する）
+        if (!page.hasMore) void deps.resultSets.close(set.id);
         return c.json({
-          resultSetId: set.id,
+          // 読み切っている場合は id を返さない（続きを取りに行かせない）
+          ...(page.hasMore ? { resultSetId: set.id } : {}),
           columns: toColumns(columns),
           rows: toJsonRows(page.rows),
           rowCount: page.rows.length,
           hasMore: page.hasMore
         });
       } catch (e) {
-        // **開けなかったら接続を残さない**
-        conn?.close();
+        // **開けなかったら接続を残さない**（状態が分からないので使い回さない）
+        if (conn) deps.pool.discard(conn);
         const err = e as As400Error;
         const detail = e instanceof SqlError ? { sqlCode: e.sqlCode, sqlState: e.sqlState } : {};
         return c.json({ error: err.message, code: err.code ?? "UNKNOWN", ...detail }, statusOf(err));
@@ -153,6 +191,31 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     }
   });
 
+  /**
+   * 接続を先に暖めておく（画面が SQL ペインを開いた時点で呼ぶ）。
+   *
+   * 接続の確立に約 4.6 秒かかる（うち 2.1 秒は 9471 の TLS ハンドシェイクで、
+   * こちらでは短くできない）。**利用者が SQL を打っている間に済ませておく**ための入口。
+   *
+   * 失敗しても画面は困らない（実行時に開き直せばよいだけ）ので、
+   * **暖機の失敗は 200 で返す**。ここで赤いエラーを出しても利用者にできることが無い。
+   */
+  app.post("/api/host/sql/warm", async (c) => {
+    const parsed = warmSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const user = c.get("user");
+    try {
+      const opts = resolveSource(deps.resolver, parsed.data.source, user);
+      await deps.pool.warm(poolKey(user?.username, hostAuthFrom(opts)), () => openDb(opts));
+      return c.json({ warmed: true });
+    } catch (e) {
+      log.debug(`warm-up failed (実行時に開き直すので画面には出さない): ${String(e)}`);
+      return c.json({ warmed: false });
+    }
+  });
+
   /** 続きを取る。**期限切れは 404**（画面が「再実行してください」と出せるように） */
   app.post("/api/host/sql/:id/next", async (c) => {
     const parsed = nextSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -166,7 +229,7 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
         return c.json({ error: "この結果セットは期限切れです。もう一度実行してください" }, 404);
       }
       const page = await deps.resultSets.next(set, parsed.data.pageSize ?? DEFAULT_ROWS);
-      if (!page.hasMore) deps.resultSets.close(set.id);
+      if (!page.hasMore) void deps.resultSets.close(set.id);
       return c.json({ rows: toJsonRows(page.rows), rowCount: page.rows.length, hasMore: page.hasMore });
     } catch (e) {
       const err = e as As400Error;
@@ -175,11 +238,13 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
   });
 
   /** 画面を閉じたときの後始末（任意。呼ばれなくてもアイドルで閉じる） */
-  app.delete("/api/host/sql/:id", (c) => {
+  app.delete("/api/host/sql/:id", async (c) => {
     const user = c.get("user");
     try {
       const set = deps.resultSets.get(c.req.param("id"), user);
-      if (set) deps.resultSets.close(set.id);
+      // **手放し終えてから応答する**。画面はこれを待ってから次の SQL を実行するので、
+      // ここで待たないと次の実行がプールの接続を拾えない
+      if (set) await deps.resultSets.close(set.id);
       return c.json({ ok: true });
     } catch (e) {
       const err = e as As400Error;

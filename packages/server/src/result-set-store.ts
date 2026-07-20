@@ -31,6 +31,11 @@ export interface ResultSet {
   /** 次の行を取り出す。カーソルは開いたまま */
   rows: AsyncGenerator<Row, void, undefined>;
   conn: DbConnection;
+  /**
+   * 読み終わった接続の始末。既定は閉じる。
+   * プールを使う経路では**閉じずにプールへ返す**（`db-pool.ts` 参照）。
+   */
+  release: (conn: DbConnection) => void;
   /** 先読みして持ち越した 1 行（「続きがあるか」の判定に使う） */
   pending?: Row | undefined;
   done: boolean;
@@ -66,12 +71,13 @@ export class ResultSetStore {
     columns: ColumnMeta[];
     rows: AsyncGenerator<Row, void, undefined>;
     conn: DbConnection;
+    release?: (conn: DbConnection) => void;
   }): ResultSet {
     this.sweep();
     const mine = [...this.sets.values()].filter((s) => s.owner === opts.owner);
     while (mine.length >= this.maxPerUser) {
       const oldest = mine.reduce((a, b) => (a.lastUsed <= b.lastUsed ? a : b));
-      this.close(oldest.id);
+      void this.close(oldest.id);
       mine.splice(mine.indexOf(oldest), 1);
     }
     const id = `rs-${++this.seq}-${this.now().toString(36)}`;
@@ -81,6 +87,7 @@ export class ResultSetStore {
       columns: opts.columns,
       rows: opts.rows,
       conn: opts.conn,
+      release: opts.release ?? ((c) => c.close()),
       done: false,
       lastUsed: this.now()
     };
@@ -127,31 +134,54 @@ export class ResultSetStore {
     return { rows, hasMore: !set.done || set.pending !== undefined };
   }
 
-  close(id: string): void {
+  /**
+   * 結果セットを手放す。
+   *
+   * **カーソルが閉じ切ってから接続を手放す**——`rows.return()` の中で
+   * closeCursor が走る（query.ts の finally）ので、それを待たずにプールへ返すと
+   * 次の借り手がカーソルの閉じかけた接続を掴む。
+   * 閉じ方が分からない状態（`return()` が失敗）なら**使い回さずに閉じる**。
+   *
+   * `hard` はプロセス終了時用。プールへ返さずその場で閉じる。
+   *
+   * **返る Promise は「接続を手放し終えた」ところまでを表す。**
+   * 画面が再実行の前に手放しを待てるようにするため（待たないと、まだ貸し出し中の
+   * 接続をプールから拾えず、再実行のたびに 4〜6 秒かかる。実測で気づいた）。
+   */
+  close(id: string, opts: { hard?: boolean } = {}): Promise<void> {
     const set = this.sets.get(id);
-    if (!set) return;
+    if (!set) return Promise.resolve();
     this.sets.delete(id);
-    // ジェネレータを閉じるとカーソルも閉じる（query.ts の finally）
-    void set.rows.return(undefined).catch(() => undefined);
-    try {
-      set.conn.close();
-    } catch (e) {
-      log.debug(`closing result set ${id} failed: ${String(e)}`);
+    const hardClose = (): void => {
+      try {
+        set.conn.close();
+      } catch (e) {
+        log.debug(`closing result set ${id} failed: ${String(e)}`);
+      }
+    };
+    log.debug(`closing result set ${id} (${this.sets.size} open)`);
+    if (opts.hard) {
+      void set.rows.return(undefined).catch(() => undefined);
+      hardClose();
+      return Promise.resolve();
     }
-    log.debug(`closed result set ${id} (${this.sets.size} open)`);
+    return set.rows.return(undefined).then(
+      () => set.release(set.conn),
+      () => hardClose()
+    );
   }
 
   /** アイドルのものを閉じる */
   sweep(): void {
     const limit = this.now() - this.idleMs;
     for (const [id, set] of this.sets) {
-      if (set.lastUsed < limit) this.close(id);
+      if (set.lastUsed < limit) void this.close(id);
     }
   }
 
-  /** **プロセス終了時に必ず呼ぶ**。掴んだ接続を残さない */
+  /** **プロセス終了時に必ず呼ぶ**。掴んだ接続を残さない（プールへ返さずその場で閉じる） */
   closeAll(): void {
-    for (const id of [...this.sets.keys()]) this.close(id);
+    for (const id of [...this.sets.keys()]) void this.close(id, { hard: true });
   }
 }
 

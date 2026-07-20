@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
@@ -45,6 +45,44 @@ const canRun = computed(
   () => !loading.value && sql.value.trim().length > 0 && Boolean(systemsStore.selected)
 );
 
+/**
+ * 接続を先に暖めておく。
+ *
+ * ホストへの接続確立に約 4.6 秒かかる（うち 2.1 秒は database ポートの
+ * TLS ハンドシェイクで、こちらでは短くできない）。**利用者が SQL を打っている間**に
+ * 済ませておけば、「実行」を押してからの待ちが SQL 本体ぶんだけになる。
+ *
+ * 失敗しても実行時に開き直せばよいので、**画面には何も出さない**。
+ */
+function warmUp(): void {
+  if (!systemsStore.selected) return;
+  void fetch("/api/host/sql/warm", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: { system: systemsStore.selected } })
+  }).catch(() => undefined);
+}
+
+onMounted(warmUp);
+// システムを選び直したら、そちらを暖める
+watch(() => systemsStore.selected, warmUp);
+
+/**
+ * 保持してもらっている結果セットを手放す。
+ *
+ * 結果セットは**接続を掴んでいる**ので、放置するとアイドル（60 秒）まで
+ * 次の実行がその接続を使い回せない。読み終わり・再実行・画面を閉じるときに返す。
+ */
+async function releaseResultSet(): Promise<void> {
+  const id = resultSetId.value;
+  if (!id) return;
+  resultSetId.value = "";
+  await fetch(`/api/host/sql/${id}`, { method: "DELETE" }).catch(() => undefined);
+}
+
+// タブを閉じたときも返す（閉じ忘れをアイドル任せにしない）
+onUnmounted(() => void releaseResultSet());
+
 async function execute(): Promise<void> {
   if (!systemsStore.selected) {
     error.value = "システムを選んでください";
@@ -53,6 +91,9 @@ async function execute(): Promise<void> {
   if (!sql.value.trim()) return;
   error.value = "";
   sqlDetail.value = "";
+  // **前の結果セットを手放し終えてから実行する**。待たずに投げると、まだ貸し出し中の
+  // 接続をサーバーがプールから拾えず、再実行のたびに 4〜6 秒かかる（実測で気づいた）
+  await releaseResultSet();
   await run(async () => {
     try {
       const res = await fetch("/api/host/sql", {

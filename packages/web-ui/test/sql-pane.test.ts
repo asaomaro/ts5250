@@ -65,14 +65,36 @@ async function run(sql = "SELECT 1 FROM SYSIBM.SYSDUMMY1") {
 describe("実行", () => {
   it("選択中のシステムと SQL と pageSize を送る", async () => {
     const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
-    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(call?.[0])).toBe("/api/host/sql");
+    // ペインを開いた時点で暖機を投げているので、実行の呼び出しを名指しで拾う
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => String(c[0]) === "/api/host/sql"
+    );
+    expect(call).toBeDefined();
     const body = JSON.parse(String((call?.[1] as RequestInit).body));
     expect(body.source).toEqual({ system: "own:s1" });
     expect(body.sql).toBe("SELECT 1 FROM SYSIBM.SYSDUMMY1");
     // **上限ではなく「1 度に取得する件数」**として送る
     expect(body.pageSize).toBe(200);
     expect(body.maxRows).toBeUndefined();
+    w.unmount();
+  });
+
+  it("**ペインを開いた時点で接続を暖める**（実行を押してからの待ちを短くする）", async () => {
+    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    await flushPromises();
+    const warm = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => String(c[0]) === "/api/host/sql/warm"
+    );
+    expect(warm).toBeDefined();
+    expect(JSON.parse(String((warm?.[1] as RequestInit).body))).toEqual({ source: { system: "own:s1" } });
+    w.unmount();
+  });
+
+  it("暖機が失敗しても画面には何も出さない（実行時に開き直せばよい）", async () => {
+    globalThis.fetch = vi.fn(async () => { throw new Error("暖機に失敗"); }) as typeof fetch;
+    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    await flushPromises();
+    expect(w.find(".error").exists()).toBe(false);
     w.unmount();
   });
 

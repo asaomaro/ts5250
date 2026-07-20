@@ -13,6 +13,7 @@ import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
 import { AuditBuffer, installAuditBuffer } from "./audit.js";
 import { ResultSetStore } from "./result-set-store.js";
+import { DbPool } from "./db-pool.js";
 import type { ToolDeps } from "./mcp-tools.js";
 import { setLogSink } from "@as400web/core";
 
@@ -159,6 +160,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
   // 画面のページング用。**このプロセスで唯一「接続を掴み続ける」もの**
   const resultSets = new ResultSetStore();
+  // 画面の SQL 用の接続の使い回し（接続の確立に約 4.6 秒かかるため。db-pool.ts に実測）
+  const pool = new DbPool();
 
   if (args.mode === "stdio") {
     // stdio モード: stdout は MCP 専用（ログは stderr のみ = core log）
@@ -169,6 +172,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   } else {
     const app = buildApp({
       resultSets,
+      pool,
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
       audit: auditBuffer,
@@ -183,6 +187,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     for (const sig of ["SIGINT", "SIGTERM"] as const) {
       process.on(sig, () => {
         resultSets.closeAll();
+        pool.closeAll();
         process.exit(0);
       });
     }
