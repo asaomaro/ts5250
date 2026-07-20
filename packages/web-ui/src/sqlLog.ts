@@ -31,7 +31,7 @@ export interface SqlLogEntry {
   detail?: string;
   /** 接続を処理している IBM i 側のジョブ（`832122/QUSER/QZDASOINIT`） */
   job?: string;
-  /** 接続先（`pub400.com:9471`） */
+  /** 接続先（`<host>:<port>` の形。例 `example.com:9471`） */
   target?: string;
 }
 

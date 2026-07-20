@@ -97,8 +97,13 @@ describe("取り込みの状態遷移", () => {
     mockFetch(
       {
         rejections: [
-          { kind: "value-too-long", row: 3, column: "TEST1", bytes: 8, max: 5 },
-          { kind: "value-unencodable", row: 7, column: "TEST2", chars: ["日"], ccsid: 273 }
+          { kind: "value-invalid", row: 3, column: "TEST1", reason: "5 バイトの列に 8 バイトの値です" },
+          {
+            kind: "value-invalid",
+            row: 7,
+            column: "TEST2",
+            reason: "CCSID 273 では書けない文字が含まれます: 日"
+          }
         ],
         truncated: false
       },
@@ -116,6 +121,7 @@ describe("取り込みの状態遷移", () => {
     expect(box.exists()).toBe(true);
     expect(box.text()).toContain("1 行も書いていません");
     expect(box.text()).toContain("3 行目");
+    expect(box.text()).toContain("TEST1");
     expect(box.text()).toContain("5 バイトの列に 8 バイト");
     expect(box.text()).toContain("7 行目");
     expect(box.text()).toContain("日");

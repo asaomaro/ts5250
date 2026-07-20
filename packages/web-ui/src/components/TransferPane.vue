@@ -5,6 +5,8 @@ import { csvBlob, csvFileName, toCsv } from "../csv.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
+import { useColumnWidths } from "../composables/useColumnWidths.js";
+import type { UploadRejection } from "@as400web/core/browser";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
 import { isValidIdentifier, parseCsv } from "@as400web/core/browser";
@@ -29,9 +31,6 @@ const direction = ref<Direction>("upload");
 
 const library = ref("");
 const file = ref("");
-const member = ref("");
-/** レコード様式名。DDS 由来の物理ファイルはファイル名と一致しないことがある（実機で確認） */
-const recordFormat = ref("");
 const where = ref("");
 const emptyAsNull = ref(false);
 
@@ -47,18 +46,14 @@ const rows = ref<string[][]>([]);
 const parseError = ref("");
 const dragging = ref(false);
 
-interface Rejection {
-  kind: string;
-  columns?: string[];
-  column?: string;
-  dataType?: string;
-  ccsid?: number;
-  row?: number;
-  chars?: string[];
-  bytes?: number;
-  max?: number;
-  value?: string;
-}
+/**
+ * 拒否理由。**core の型をそのまま使う**——手で写すと種類を足したときに
+ * 既定値へ落ちて理由が消える（実ブラウザ確認で実際に踏んだ）。
+ * 型を共有しておけば、core に種類が増えたときここが**コンパイルエラーになる**。
+ *
+ * `other` はサーバーが理由を付けずに失敗した場合（接続不可など）の受け皿。
+ */
+type Rejection = UploadRejection | { kind: "other"; value: string };
 const rejections = ref<Rejection[]>([]);
 const rejectTruncated = ref(false);
 const result = ref<
@@ -74,11 +69,34 @@ const result = ref<
 
 const { visible: slowLoading, busy: loading, run } = useDelayedLoading();
 
-/** 想定往復数。**待ち時間の主因は接続（数秒）**なので、往復数だけを強調しない */
-const estimatedTrips = computed(() => {
-  const batch = result.value?.batchSize ?? 100;
-  return rows.value.length === 0 ? 0 : Math.ceil(rows.value.length / batch);
+/**
+ * 列幅。SQL ペインと**同じ振る舞い**にする（中身に合わせ、上限で打ち切り、ドラッグで変えられる）。
+ * 取り込みのプレビューと取得の結果で別々に持つ——列の並びが別物なので、
+ * 片方の幅がもう片方に効くと対応が狂う。
+ */
+const upCols = useColumnWidths();
+const dlCols = useColumnWidths();
+
+/**
+ * 実際に使った往復数。
+ *
+ * **バッチ容量（`batchSize`）をそのまま出さない**——2 行の取り込みで
+ * 「21844 件/往復」と出ても意味が無く、むしろ何の数字か分からない。
+ * 利用者が知りたいのは「何回やりとりしたか」である。
+ */
+const tripsUsed = computed(() => {
+  const r = result.value;
+  if (!r || r.batchSize <= 0) return 0;
+  return Math.max(1, Math.ceil(r.committedRows / r.batchSize));
 });
+
+/**
+ * 送る前の想定往復数。**待ち時間の主因は接続（数秒）**なので、往復数だけを強調しない。
+ * 実測が出るまでは既定のバッチ容量で見積もる。
+ */
+const estimatedTrips = computed(() =>
+  rows.value.length === 0 ? 0 : Math.ceil(rows.value.length / (result.value?.batchSize ?? 1000))
+);
 
 function reset(): void {
   phase.value = "idle";
@@ -86,6 +104,7 @@ function reset(): void {
   header.value = [];
   rows.value = [];
   parseError.value = "";
+  upCols.clear();
   rejections.value = [];
   rejectTruncated.value = false;
   result.value = undefined;
@@ -93,6 +112,7 @@ function reset(): void {
   downloadRows.value = [];
   downloadColumns.value = [];
   downloadError.value = "";
+  dlCols.clear();
 }
 
 watch(direction, reset);
@@ -150,8 +170,6 @@ async function upload(): Promise<void> {
           source: { system: systemsStore.selected },
           library: library.value.trim().toUpperCase(),
           file: file.value.trim().toUpperCase(),
-          ...(member.value.trim() ? { member: member.value.trim() } : {}),
-          ...(recordFormat.value.trim() ? { recordFormat: recordFormat.value.trim() } : {}),
           columns: header.value,
           rows: rows.value,
           ...(emptyAsNull.value ? { emptyAsNull: true } : {})
@@ -226,27 +244,22 @@ function saveCsv(): void {
 function rejectionText(r: Rejection): string {
   switch (r.kind) {
     case "column-missing":
-      return `表にある列が CSV にありません: ${r.columns?.join(", ")}`;
+      return `表にある列が CSV にありません: ${r.columns.join(", ")}`;
     case "column-unknown":
-      return `表に無い列が CSV にあります: ${r.columns?.join(", ")}`;
-    case "type-unsupported":
-      return `対応していない型です: ${r.column}（${r.dataType}）`;
-    case "ccsid-unsupported":
-      return `対応していない文字コードです: ${r.column}（CCSID ${r.ccsid}）`;
+      return `表に無い列が CSV にあります: ${r.columns.join(", ")}`;
+    case "column-duplicated":
+      return `同じ列が CSV に 2 回以上あります: ${r.columns.join(", ")}`;
     case "value-null":
       return `空にできない列です: ${r.column}`;
-    case "value-too-long":
-      return `${r.max} バイトの列に ${r.bytes} バイトの値です: ${r.column}`;
-    case "value-unencodable":
-      return `CCSID ${r.ccsid} では書けない文字が含まれます: ${r.chars?.join(", ")}`;
-    case "value-not-numeric":
-      return `数値の列に「${r.value}」が入っています: ${r.column}`;
+    case "value-invalid":
+      // **理由をそのまま出す**（型・長さ・文字コードのどれかは core が判断済み）
+      return `${r.column}: ${r.reason}`;
     default:
-      return r.value ?? "取り込めませんでした";
+      return r.value;
   }
 }
 function rejectionWhere(r: Rejection): string {
-  return r.row !== undefined ? `${r.row} 行目` : "列の対応";
+  return "row" in r ? `${r.row} 行目` : "列の対応";
 }
 </script>
 
@@ -266,13 +279,11 @@ function rejectionWhere(r: Rejection): string {
           ↑ 取り込み
         </button>
       </div>
-      <label>ライブラリ <input v-model="library" size="10" placeholder="MYLIB" /></label>
-      <label>ファイル <input v-model="file" size="10" placeholder="TESTPF" /></label>
-      <label v-if="direction === 'upload'">メンバー <input v-model="member" size="8" placeholder="*FIRST" /></label>
-      <label v-if="direction === 'upload'" title="DDS で作った物理ファイルはファイル名と違うことがあります">
-        様式 <input v-model="recordFormat" size="8" :placeholder="file || 'ファイル名'" />
-      </label>
-      <label v-else>絞り込み <input v-model="where" size="18" placeholder="ID < 100" /></label>
+      <!-- placeholder に具体名を置かない。特定環境のライブラリ名・表名を書くと、
+           他の利用者には意味が無く「この名前を入れるもの」と誤解させる -->
+      <label>ライブラリ <input v-model="library" size="10" title="英大文字・数字・_$#@ の 1〜10 文字" /></label>
+      <label>ファイル <input v-model="file" size="10" title="英大文字・数字・_$#@ の 1〜10 文字" /></label>
+      <label v-if="direction === 'download'">絞り込み <input v-model="where" size="18" placeholder="ID < 100" /></label>
       <button
         v-if="direction === 'upload'"
         class="go"
@@ -311,12 +322,28 @@ function rejectionWhere(r: Rejection): string {
         <!-- 列の対応（先頭行のプレビュー） -->
         <table v-if="header.length && phase !== 'parse-failed'">
           <thead>
-            <tr><th class="rownum">#</th><th v-for="h in header" :key="h">{{ h }}</th></tr>
+            <tr>
+              <th class="rownum">#</th>
+              <th v-for="(h, ci) in header" :key="ci" :style="upCols.widthStyle(ci)" :title="h">
+                {{ h }}
+                <!-- 列の右端を掴んで幅を変える。ダブルクリックで既定へ戻す -->
+                <span
+                  class="col-grip"
+                  :class="{ dragging: upCols.resizing.value === ci }"
+                  title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
+                  @pointerdown="upCols.onDown($event, ci)"
+                  @pointermove="upCols.onMove"
+                  @pointerup="upCols.onUp"
+                  @pointercancel="upCols.onUp"
+                  @dblclick="upCols.reset(ci)"
+                ></span>
+              </th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in rows.slice(0, 5)" :key="i">
               <td class="rownum">{{ i + 1 }}</td>
-              <td v-for="(v, j) in r" :key="j">{{ v }}</td>
+              <td v-for="(v, j) in r" :key="j" :style="upCols.widthStyle(j)" :title="v ?? ''">{{ v }}</td>
             </tr>
           </tbody>
         </table>
@@ -341,9 +368,7 @@ function rejectionWhere(r: Rejection): string {
         <!-- 完了 -->
         <div v-if="phase === 'done' && result" class="result ok">
           <h3>{{ result.committedRows }} 行を取り込みました</h3>
-          <p class="muted">
-            {{ result.batchSize }} 件/往復 · {{ result.ms }}ms
-          </p>
+          <p class="muted">{{ tripsUsed }} 往復 · {{ result.ms }}ms</p>
         </div>
 
         <!-- 部分完了。**完了と同じ見せ方にしない**（次に取る行動が違う） -->
@@ -375,12 +400,34 @@ function rejectionWhere(r: Rejection): string {
         <p v-if="downloadError" class="error">{{ downloadError }}</p>
         <table v-if="downloadRows.length">
           <thead>
-            <tr><th class="rownum">#</th><th v-for="c in downloadColumns" :key="c">{{ c }}</th></tr>
+            <tr>
+              <th class="rownum">#</th>
+              <th v-for="(c, ci) in downloadColumns" :key="ci" :style="dlCols.widthStyle(ci)" :title="c">
+                {{ c }}
+                <span
+                  class="col-grip"
+                  :class="{ dragging: dlCols.resizing.value === ci }"
+                  title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
+                  @pointerdown="dlCols.onDown($event, ci)"
+                  @pointermove="dlCols.onMove"
+                  @pointerup="dlCols.onUp"
+                  @pointercancel="dlCols.onUp"
+                  @dblclick="dlCols.reset(ci)"
+                ></span>
+              </th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in downloadRows" :key="i">
               <td class="rownum">{{ i + 1 }}</td>
-              <td v-for="c in downloadColumns" :key="c">{{ r[c] }}</td>
+              <td
+                v-for="(c, ci) in downloadColumns"
+                :key="ci"
+                :style="dlCols.widthStyle(ci)"
+                :title="String(r[c] ?? '')"
+              >
+                {{ r[c] }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -452,14 +499,52 @@ input[type="text"], input:not([type]) {
 .drop.armed .big { color: var(--accent); }
 .drop .sub { font-size: 12px; }
 
-table { border-collapse: collapse; width: 100%; }
-th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 12.5px; white-space: nowrap; }
+/* **中身の幅にする**（`100%` だと列が引き伸ばされ、上限も打ち切りも意味を失う）。
+   SQL ペインと同じ */
+table { border-collapse: collapse; width: auto; table-layout: auto; }
+/* **中身に合わせた幅＋上限で打ち切り**（SQL ペインと同じ）。
+   手でドラッグしたぶんは widthStyle が max-width ごと上書きするので、
+   広げれば隠れていた文字が見える */
+th, td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12.5px;
+  white-space: nowrap;
+  /* **際限なく伸ばさない**。長い値の 1 列で表が使えなくなるため、
+     40 文字ぶんで打ち切って「…」を出す（全文は title で読める） */
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 列見出しは固定する（docs/UI-DESIGN.md）。border-collapse では罫線が流れるので box-shadow */
 th {
   color: var(--muted); font-weight: 600; font-size: 11px; font-family: var(--mono);
   position: sticky; top: 0; z-index: 1; background: var(--card);
   border-bottom: none; box-shadow: inset 0 -1px 0 var(--line);
 }
+/* 列の右端の掴み手。**sticky な th 自体が絶対配置の基準になる**ので追加指定は要らない。
+   見出しは overflow: hidden なので、はみ出させると掴み手が切れる */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.col-grip::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+.col-grip.dragging::after { background: var(--accent); }
 .rownum { color: var(--muted); font-family: var(--mono); text-align: right; }
 
 .opt { margin: 8px 0; }

@@ -8,6 +8,8 @@
  * ここに置いてよいのは **`node:*` にも I/O にも触れないもの**に限る。
  */
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
+/** 取り込みの拒否理由。UI が種類ごとに文言を組み立てるため型を共有する */
+export type { UploadRejection } from "./hostserver/db/upload-prepare.js";
 export {
   assertIdentifier,
   isValidIdentifier,

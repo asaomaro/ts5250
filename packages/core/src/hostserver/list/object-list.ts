@@ -17,7 +17,7 @@ export interface ObjectEntry {
 export interface ObjectListFilter {
   /** 例 "*ALL" または具体名 */
   name?: string;
-  /** 例 "MYLIB" / "*LIBL" / "*ALLUSR" */
+  /** 例 "QGPL" / "*LIBL" / "*ALLUSR" */
   library?: string;
   /** 例 "*ALL" / "*PGM" / "*FILE" */
   type?: string;

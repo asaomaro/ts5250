@@ -1,5 +1,5 @@
 /**
- * CSV 取り込みの API（DDM でレコードを追記する）。
+ * CSV 取り込みの API（database サーバー経由の INSERT）。
  *
  * ⚠ **このルートは IBM i に書き込む。** `host-sql.ts` の冒頭が説明している
  * 「構造的に読み取り専用」という性質は `/api/host/sql` に限った話で、
@@ -9,16 +9,19 @@
  * **書ける範囲は IBM i 側のオブジェクト権限が決める**——アプリ側で追加の制限を掛けると、
  * ホストで許された操作を UI が勝手に禁じることになり、既存の設計思想と食い違う。
  *
- * ⚠ **DDM にはコミットメント制御が無い。** 途中で失敗しても書けた分は残る。
+ * ⚠ **コミットメント制御を使っていない。** 途中のバッチで失敗しても書けた分は残る。
  * よって「何行目まで確定したか」を返すことが仕様上の要求になっている。
+ * （経路は DDM から SQL の INSERT に移した。DDM は本家 ACS が使っておらず、
+ *   DBCS の表を開けない等の制約があった。`20260720-sql-insert-upload` の research 参照）
  */
 import { Hono } from "hono";
 import { z } from "zod";
 import {
   As400Error,
-  DdmConnection,
+  InsertEncodeError,
   assertIdentifier,
   fetchColumnLayout,
+  insertRows,
   parseCsv,
   prepareUpload,
   childLog,
@@ -27,7 +30,7 @@ import {
 } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
-import { openDb, hostAuthFrom } from "./host-connect.js";
+import { openDb } from "./host-connect.js";
 import { resolveSource, sourceSchema, statusOf } from "./host-api.js";
 
 const log = childLog({ component: "host-upload" });
@@ -47,15 +50,10 @@ const uploadRequestSchema = z
     source: sourceSchema,
     library: z.string().min(1),
     file: z.string().min(1),
-    member: z.string().min(1).optional(),
-    /** レコード様式名。DDS 由来の物理ファイルで必要になることがある */
-    recordFormat: z.string().min(1).optional(),
     /** CSV のヘッダー（表の列名と対応づける） */
     columns: z.array(z.string()).min(1),
     /** 値。型変換はサーバーが列型に従って行う */
     rows: z.array(z.array(z.string().nullable())).max(MAX_ROWS),
-    /** 1 バッチの希望件数。実効値は recordIncrement で丸める */
-    blockingFactor: z.number().int().positive().optional(),
     /** 空文字を NULL として扱うか（既定 false） */
     emptyAsNull: z.boolean().optional()
   })
@@ -69,18 +67,8 @@ export interface UploadArgs {
   opts: ConnectOptions;
   library: string;
   file: string;
-  member?: string;
-  /**
-   * レコード様式名。既定はファイル名。
-   *
-   * **DDS で作った物理ファイルは様式名がファイル名と一致しないことがある**
-   * （実機で `MYLIB/TESTPF` が `CPF4135 Record format name ... was not valid.` で開けなかった）。
-   * SQL で作った表は一致するので既定で足りるが、DDS 由来の表には指定が要る。
-   */
-  recordFormat?: string;
   header: readonly string[];
   rows: readonly (readonly (string | null)[])[];
-  blockingFactor?: number;
   emptyAsNull?: boolean;
 }
 
@@ -104,7 +92,7 @@ export type UploadOutcome =
  */
 export async function uploadRows(args: UploadArgs): Promise<UploadOutcome> {
   // **上限はここで強制する**。HTTP の zod にだけ置くと MCP の columns+rows 経路が素通りし、
-  // prepareUpload が全行をメモリ上で符号化するため OOM の入口になる
+  // 全行をメモリ上に持つため OOM の入口になる
   if (args.rows.length > MAX_ROWS) {
     throw new As400Error("CONFIG_ERROR", `行数が多すぎます（上限 ${MAX_ROWS} 行）`);
   }
@@ -112,75 +100,64 @@ export async function uploadRows(args: UploadArgs): Promise<UploadOutcome> {
   const file = assertIdentifier(args.file, "ファイル名");
   const started = Date.now();
 
-  // --- 1. 列メタデータ（型・長さ・位取り・CCSID）---
+  // **1 接続を借りて最後まで使う**。`insertRows` は準備〜実行を 1 操作として行うため、
+  // その間に別の SQL を流すと同じ RPB の文が上書きされて失われる（core の説明を参照）
   const db = await openDb(args.opts);
-  let columns;
   try {
-    columns = await fetchColumnLayout(db, library, file);
+    // --- 1. 列メタデータ（列名と NULL 可否の突き合わせに使う）---
+    const columns = await fetchColumnLayout(db, library, file);
+
+    // --- 2. 事前検査。**通るまで 1 行も書かない** ---
+    const prepared = prepareUpload({
+      columns,
+      header: args.header,
+      rows: args.rows,
+      ...(args.emptyAsNull !== undefined ? { emptyAsNull: args.emptyAsNull } : {})
+    });
+    if (!prepared.ok) {
+      return { ok: false, rejections: prepared.rejections, truncated: prepared.truncated };
+    }
+
+    // --- 3. 書く ---
+    try {
+      const res = await insertRows(db, {
+        library,
+        table: file,
+        columns: prepared.prepared.columns,
+        rows: prepared.prepared.rows
+      });
+      if (res.uncertainRange) {
+        log.warn(
+          `partial upload into ${library}.${file}: committed=${res.committedRows} ` +
+            `uncertain=${res.uncertainRange.from}-${res.uncertainRange.to}: ${res.error ?? "(理由不明)"}`
+        );
+      } else {
+        log.debug(
+          `uploaded ${res.committedRows} rows into ${library}.${file} batch=${res.batchSize}`
+        );
+      }
+      return {
+        ok: true,
+        committedRows: res.committedRows,
+        ...(res.uncertainRange ? { uncertainRange: res.uncertainRange } : {}),
+        ...(res.error !== undefined ? { error: res.error } : {}),
+        batchSize: res.batchSize,
+        ms: Date.now() - started
+      };
+    } catch (e) {
+      // 値を詰められなかった行は**拒否として返す**（1 行も書いていない）
+      if (e instanceof InsertEncodeError) {
+        const column = prepared.prepared.columns[e.columnIndex] ?? `列${e.columnIndex + 1}`;
+        return {
+          ok: false,
+          rejections: [{ kind: "value-invalid", row: e.row, column, reason: e.message }],
+          truncated: false
+        };
+      }
+      throw e;
+    }
   } finally {
     db.close();
-  }
-
-  // --- 2. 事前検査。**ここを通るまで DDM に接続しない** ---
-  // 接続してから拒否すると、無駄に 4〜7 秒待たせたうえで「1 行も書いていない」と返すことになる
-  const prepared = prepareUpload({
-    columns,
-    header: args.header,
-    rows: args.rows,
-    ...(args.emptyAsNull !== undefined ? { emptyAsNull: args.emptyAsNull } : {})
-  });
-  if (!prepared.ok) {
-    return { ok: false, rejections: prepared.rejections, truncated: prepared.truncated };
-  }
-
-  // --- 3. 書く ---
-  const ddm = await DdmConnection.connect(hostAuthFrom(args.opts));
-  try {
-    const opened = await ddm.open(library, file, {
-      ...(args.member !== undefined ? { member: args.member } : {}),
-      ...(args.recordFormat !== undefined ? { recordFormat: args.recordFormat } : {}),
-      ...(args.blockingFactor !== undefined ? { blockingFactor: args.blockingFactor } : {})
-    });
-
-    // **レイアウト計算は仮説に基づく実装**（`record-layout.ts` が自らそう明記している）。
-    // ホスト申告との一致がその唯一の裏付けなので、テストではなく実行時にも確かめる
-    if (opened.recordLength !== prepared.layout.recordLength) {
-      throw new As400Error(
-        "PROTOCOL_ERROR",
-        `レコード長が一致しません（SQL 由来 ${prepared.layout.recordLength} / ` +
-          `ホスト申告 ${opened.recordLength}）。レイアウト計算の前提が崩れています`
-      );
-    }
-
-    const res = await ddm.writeAll(opened, prepared.records);
-    // **結果を確定させてから閉じる**。writeAll は失敗しても値を返すので、
-    // close が壊れた接続で例外を投げると、部分成功の報告ごと失われる（それが最も要る場面）
-    try {
-      await ddm.close(opened);
-    } catch (e) {
-      log.warn(`close after write failed (${library}/${file}): ${String(e)}`);
-    }
-    if (res.uncertainRange) {
-      log.warn(
-        `partial upload into ${library}/${file}: committed=${res.committedRows} ` +
-          `uncertain=${res.uncertainRange.from}-${res.uncertainRange.to}: ${res.error ?? "(理由不明)"}`
-      );
-    } else {
-      log.debug(
-        `uploaded ${res.committedRows}/${prepared.records.length} rows into ${library}/${file} ` +
-          `batch=${opened.effectiveBatchSize}`
-      );
-    }
-    return {
-      ok: true,
-      committedRows: res.committedRows,
-      ...(res.uncertainRange ? { uncertainRange: res.uncertainRange } : {}),
-      ...(res.error !== undefined ? { error: res.error } : {}),
-      batchSize: opened.effectiveBatchSize,
-      ms: Date.now() - started
-    };
-  } finally {
-    ddm.disconnect();
   }
 }
 
@@ -207,8 +184,7 @@ export function registerHostUploadRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
-    const { source, library, file, member, recordFormat, columns, rows, blockingFactor, emptyAsNull } =
-      parsed.data;
+    const { source, library, file, columns, rows, emptyAsNull } = parsed.data;
     const user = c.get("user");
     try {
       const opts = resolveSource(deps.resolver, source, user);
@@ -216,11 +192,8 @@ export function registerHostUploadRoutes(
         opts,
         library,
         file,
-        ...(member !== undefined ? { member } : {}),
-        ...(recordFormat !== undefined ? { recordFormat } : {}),
         header: columns,
         rows,
-        ...(blockingFactor !== undefined ? { blockingFactor } : {}),
         ...(emptyAsNull !== undefined ? { emptyAsNull } : {})
       });
       if (!outcome.ok) {

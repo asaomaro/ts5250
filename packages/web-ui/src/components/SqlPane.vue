@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
+import { useColumnWidths } from "../composables/useColumnWidths.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
 import SqlLogPanel from "./SqlLogPanel.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
@@ -195,7 +196,7 @@ async function execute(): Promise<void> {
       }
       columns.value = data.columns ?? [];
       // 列の並びが変わるので、手で決めた列幅は捨てる（前の列の幅が残ると対応が狂う）
-      colWidths.value = {};
+      cols.clear();
       rows.value = data.rows ?? [];
       hasMore.value = Boolean(data.hasMore);
       resultSetId.value = data.resultSetId ?? "";
@@ -332,61 +333,19 @@ function onSplitterKeydown(e: KeyboardEvent): void {
 }
 
 /**
- * 列幅の手動指定（列の右端をドラッグ）。
+ * 列幅の手動指定（列の右端をドラッグ）。**実装は composable に共通化**してある
+ * （データ転送ペインと同じ振る舞いにするため。片方だけ直す事故を避ける）。
  *
- * 既定は中身に合わせた幅で、長い値は 40 文字ぶんで打ち切る。
- * **広げれば隠れていた文字が見える**ようにするため、手で指定した幅は
- * `max-width` も同じ値で上書きする（打ち切りの基準そのものを動かす）。
- *
- * 列名は重複しうる（結合した SELECT など）ので**位置で持つ**。
- * 実行のたびに捨てる——列の並びが変わったのに前の幅が残ると対応が狂う。
+ * 既定は中身に合わせた幅で、長い値は CSS の `max-width` で打ち切る。
+ * 手で指定した幅は打ち切りの基準そのものを動かすので、**広げれば隠れていた文字が見える**。
  */
-const colWidths = ref<Record<number, number>>({});
-const resizingCol = ref(-1);
-/** これ以上狭めない。掴めなくなるため */
-const MIN_COL = 40;
-let colStartX = 0;
-let colStartW = 0;
-
-function widthStyle(index: number): Record<string, string> | undefined {
-  const w = colWidths.value[index];
-  if (w === undefined) return undefined;
-  // width だけでは table-layout: auto が中身を優先して広げてしまう。
-  // max-width も動かさないと**打ち切りが 40 文字のままで広げても見えない**
-  return { width: `${w}px`, minWidth: `${w}px`, maxWidth: `${w}px` };
-}
-
-function onColDown(e: PointerEvent, index: number): void {
-  const th = (e.currentTarget as HTMLElement).parentElement;
-  if (!th) return;
-  resizingCol.value = index;
-  colStartX = e.clientX;
-  colStartW = th.getBoundingClientRect().width;
-  // jsdom には無いので存在確認する（テストから経路を通せるように）
-  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  e.preventDefault();
-  // 掴んだ列の見出しの title が出っぱなしになるのを防ぐ
-  e.stopPropagation();
-}
-
-function onColMove(e: PointerEvent): void {
-  if (resizingCol.value < 0) return;
-  const w = Math.max(MIN_COL, Math.round(colStartW + (e.clientX - colStartX)));
-  colWidths.value = { ...colWidths.value, [resizingCol.value]: w };
-}
-
-function onColUp(e: PointerEvent): void {
-  if (resizingCol.value < 0) return;
-  resizingCol.value = -1;
-  (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-}
-
-/** 既定（中身に合わせた幅）へ戻す */
-function resetColWidth(index: number): void {
-  const next = { ...colWidths.value };
-  delete next[index];
-  colWidths.value = next;
-}
+const cols = useColumnWidths();
+const resizingCol = cols.resizing;
+const widthStyle = cols.widthStyle;
+const onColDown = cols.onDown;
+const onColMove = cols.onMove;
+const onColUp = cols.onUp;
+const resetColWidth = cols.reset;
 
 /**
  * 打ち切られたセルの全文を title で読めるようにする。
