@@ -57,7 +57,12 @@ export function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
 
 /** リスト情報（80 バイト）の解釈 */
 export interface ListInfo {
-  /** リスト全体の件数 */
+  /**
+   * **構築されたリストの件数**＝`min(要求件数, 実際の一致件数)`。
+   * 「条件に一致した総件数」**ではない**——要求件数がリストの構築量そのものを決めるため、
+   * 要求件数で頭打ちになる（QGYOLSPL に対する実測。`spool/spool-list.ts` の LIST_INFO 参照）。
+   * よって**打ち切り判定に使ってはいけない**（常に `total == returned` になり偽陰性になる）。
+   */
   total: number;
   /** 今回返ってきた件数 */
   returned: number;
