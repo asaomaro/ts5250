@@ -234,6 +234,62 @@ describe("列幅", () => {
   });
 });
 
+describe("列幅のドラッグ", () => {
+  /** jsdom には幅が無いので、**状態の持ち方**だけを固定する（見た目は実ブラウザで確認） */
+  async function drag(w: ReturnType<typeof mount>, index: number, dx: number) {
+    // test-utils の trigger は clientX を後から代入するため jsdom で落ちる。
+    // ポインタ列の位置が要るので、イベントを直接組み立てて投げる
+    const el = w.findAll("thead .col-grip")[index]?.element as HTMLElement;
+    const at = (type: string, x: number) =>
+      el.dispatchEvent(new MouseEvent(type, { clientX: x, bubbles: true, cancelable: true }));
+    at("pointerdown", 100);
+    at("pointermove", 100 + dx);
+    at("pointerup", 100 + dx);
+    await flushPromises();
+  }
+
+  it("広げた幅は max-width も上書きする（**打ち切りの基準ごと動かさないと文字が見えない**）", async () => {
+    const w = await run();
+    await drag(w, 0, 300);
+    const style = w.findAll("thead th")[1]?.attributes("style") ?? "";
+    expect(style).toContain("width: 300px");
+    expect(style).toContain("max-width: 300px");
+    w.unmount();
+  });
+
+  it("下限より狭くならない（掴めなくなるため）", async () => {
+    const w = await run();
+    await drag(w, 0, -1000);
+    expect(w.findAll("thead th")[1]?.attributes("style")).toContain("width: 40px");
+    w.unmount();
+  });
+
+  it("ダブルクリックで既定へ戻す", async () => {
+    const w = await run();
+    await drag(w, 0, 300);
+    await w.findAll("thead .col-grip")[0]?.trigger("dblclick");
+    expect(w.findAll("thead th")[1]?.attributes("style")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("**再実行で捨てる**（列の並びが変わると対応が狂うため）", async () => {
+    const w = await run();
+    await drag(w, 0, 300);
+    expect(w.findAll("thead th")[1]?.attributes("style")).toContain("300px");
+    await w.find("header button").trigger("click");
+    await flushPromises();
+    expect(w.findAll("thead th")[1]?.attributes("style")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("レコード番号の列には掴み手を出さない", async () => {
+    const w = await run();
+    expect(w.findAll("thead .col-grip")).toHaveLength(2); // データ列のぶんだけ
+    expect(w.find("thead th.rownum").find(".col-grip").exists()).toBe(false);
+    w.unmount();
+  });
+});
+
 describe("SQL 欄と結果欄の境界", () => {
   /**
    * つまみ（textarea の resize）は「どこを掴めば動くのか分からない」と指摘を受けたので、

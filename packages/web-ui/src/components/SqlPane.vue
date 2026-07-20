@@ -122,6 +122,8 @@ async function execute(): Promise<void> {
         return;
       }
       columns.value = data.columns ?? [];
+      // 列の並びが変わるので、手で決めた列幅は捨てる（前の列の幅が残ると対応が狂う）
+      colWidths.value = {};
       rows.value = data.rows ?? [];
       hasMore.value = Boolean(data.hasMore);
       resultSetId.value = data.resultSetId ?? "";
@@ -235,6 +237,63 @@ function onSplitterKeydown(e: KeyboardEvent): void {
 }
 
 /**
+ * 列幅の手動指定（列の右端をドラッグ）。
+ *
+ * 既定は中身に合わせた幅で、長い値は 40 文字ぶんで打ち切る。
+ * **広げれば隠れていた文字が見える**ようにするため、手で指定した幅は
+ * `max-width` も同じ値で上書きする（打ち切りの基準そのものを動かす）。
+ *
+ * 列名は重複しうる（結合した SELECT など）ので**位置で持つ**。
+ * 実行のたびに捨てる——列の並びが変わったのに前の幅が残ると対応が狂う。
+ */
+const colWidths = ref<Record<number, number>>({});
+const resizingCol = ref(-1);
+/** これ以上狭めない。掴めなくなるため */
+const MIN_COL = 40;
+let colStartX = 0;
+let colStartW = 0;
+
+function widthStyle(index: number): Record<string, string> | undefined {
+  const w = colWidths.value[index];
+  if (w === undefined) return undefined;
+  // width だけでは table-layout: auto が中身を優先して広げてしまう。
+  // max-width も動かさないと**打ち切りが 40 文字のままで広げても見えない**
+  return { width: `${w}px`, minWidth: `${w}px`, maxWidth: `${w}px` };
+}
+
+function onColDown(e: PointerEvent, index: number): void {
+  const th = (e.currentTarget as HTMLElement).parentElement;
+  if (!th) return;
+  resizingCol.value = index;
+  colStartX = e.clientX;
+  colStartW = th.getBoundingClientRect().width;
+  // jsdom には無いので存在確認する（テストから経路を通せるように）
+  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  e.preventDefault();
+  // 掴んだ列の見出しの title が出っぱなしになるのを防ぐ
+  e.stopPropagation();
+}
+
+function onColMove(e: PointerEvent): void {
+  if (resizingCol.value < 0) return;
+  const w = Math.max(MIN_COL, Math.round(colStartW + (e.clientX - colStartX)));
+  colWidths.value = { ...colWidths.value, [resizingCol.value]: w };
+}
+
+function onColUp(e: PointerEvent): void {
+  if (resizingCol.value < 0) return;
+  resizingCol.value = -1;
+  (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+}
+
+/** 既定（中身に合わせた幅）へ戻す */
+function resetColWidth(index: number): void {
+  const next = { ...colWidths.value };
+  delete next[index];
+  colWidths.value = next;
+}
+
+/**
  * 打ち切られたセルの全文を title で読めるようにする。
  * NULL と LOB は中の span が自前の title を持つので、ここでは付けない
  * （付けると外側が勝って「LOB の中身は取得していません」等が読めなくなる）。
@@ -341,15 +400,31 @@ function download(): void {
         <tr>
           <!-- レコード番号。**横スクロールしても残す**ので、どの行を見ているか見失わない -->
           <th class="rownum" title="レコード番号（読み足した順の通し番号）">#</th>
-          <th v-for="c in columns" :key="c.name" :title="`${c.name} — ${c.typeName}${c.nullable ? '' : ' NOT NULL'}`">
+          <th
+            v-for="(c, ci) in columns"
+            :key="c.name"
+            :style="widthStyle(ci)"
+            :title="`${c.name} — ${c.typeName}${c.nullable ? '' : ' NOT NULL'}`"
+          >
             {{ c.name }}
+            <!-- 列の右端を掴んで幅を変える。ダブルクリックで既定へ戻す -->
+            <span
+              class="col-grip"
+              :class="{ dragging: resizingCol === ci }"
+              title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
+              @pointerdown="onColDown($event, ci)"
+              @pointermove="onColMove"
+              @pointerup="onColUp"
+              @pointercancel="onColUp"
+              @dblclick="resetColWidth(ci)"
+            ></span>
           </th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(r, i) in rows" :key="i">
           <td class="rownum">{{ i + 1 }}</td>
-          <td v-for="c in columns" :key="c.name" :title="cellTitle(r[c.name])">
+          <td v-for="(c, ci) in columns" :key="c.name" :style="widthStyle(ci)" :title="cellTitle(r[c.name])">
             <span v-if="r[c.name] === null" class="null">NULL</span>
             <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
             <template v-else>{{ r[c.name] }}</template>
@@ -438,6 +513,30 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .rows-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); background: var(--paper); }
 /* 列見出しはスクロールしても残す */
 .rows-scroll thead th { position: sticky; top: 0; background: var(--card); z-index: 1; }
+/* 列の右端の掴み手。見出しは sticky＝配置済みなので、これを基準に置ける。
+   掴める幅は 8px 取る（1px の罫線ちょうどでは掴めない） */
+.col-grip {
+  position: absolute;
+  top: 0;
+  /* 見出しは overflow: hidden なので、はみ出させると掴み手が切れる */
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.col-grip::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+thead th:hover .col-grip::after,
+.col-grip.dragging::after { background: var(--accent); }
 /* レコード番号は**横スクロールでも動かさない**。
    背景を敷かないと、下を流れるセルが透けて重なる */
 .rownum {
