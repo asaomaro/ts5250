@@ -25,10 +25,19 @@ const UTF16_CCSIDS: ReadonlySet<number> = new Set([1200, 13488]);
  */
 export interface LobPlaceholder {
   kind: "lob";
-  /** ロケーターのハンドル。将来 retrieveLOBData で本体を取るのに使う */
+  /** ロケーターのハンドル。**接続に紐づく**（別接続では無効） */
   locator: number;
   /** 列定義が申告する最大サイズ */
   maxSize: number;
+  /** 取得できた中身。未取得なら undefined */
+  value?: string | Uint8Array;
+  /** LOB 全体のバイト長（取得できたときのみ分かる） */
+  byteLength?: number;
+  /**
+   * 未取得の理由。取得できたときは undefined。
+   * **空文字で埋めない**——空の LOB と「取っていない」が区別できなくなる
+   */
+  unavailable?: "not-requested" | "too-large";
 }
 
 export type DbValue = string | number | bigint | null | LobPlaceholder;
@@ -96,7 +105,8 @@ export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean):
   if (isLobLocatorType(meta.type)) {
     const view = new DataView(row.buffer, row.byteOffset, row.byteLength);
     const locator = meta.offset + 4 <= row.length ? view.getUint32(meta.offset) : 0;
-    return { kind: "lob", locator, maxSize: meta.lobMaxSize ?? 0 };
+    // 既定では本体を取りに行かない。**そうと分かる状態で返す**
+    return { kind: "lob", locator, maxSize: meta.lobMaxSize ?? 0, unavailable: "not-requested" };
   }
   if (!isSupportedType(meta.type)) {
     throw new As400Error(

@@ -31,12 +31,16 @@ import { resolveSource, sourceSchema, statusOf } from "./host-api.js";
 /** 応答に載せる行数の上限（サーバー側で強制する。UI の出し分けに依存しない） */
 const MAX_ROWS = 1000;
 const DEFAULT_ROWS = 200;
+/** LOB 1 セルあたりの上限。これ以上は受け付けない */
+const MAX_LOB_BYTES = 1024 * 1024;
 
 const sqlRequestSchema = z
   .object({
     source: sourceSchema,
     sql: z.string().min(1),
-    maxRows: z.number().int().positive().max(MAX_ROWS).optional()
+    maxRows: z.number().int().positive().max(MAX_ROWS).optional(),
+    /** LOB の中身も取得する。**既定では取りに行かない**（大きな LOB でメモリを掴むため） */
+    lobMaxBytes: z.number().int().positive().max(MAX_LOB_BYTES).optional()
   })
   .strict();
 
@@ -51,14 +55,14 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
-    const { source, sql, maxRows } = parsed.data;
+    const { source, sql, maxRows, lobMaxBytes } = parsed.data;
     const user = c.get("user");
 
     let conn: DbConnection | undefined;
     try {
       conn = await openDb(resolveSource(deps.resolver, source, user));
       const max = maxRows ?? DEFAULT_ROWS;
-      const result = await query(conn, sql);
+      const result = await query(conn, sql, lobMaxBytes ? { lob: { maxBytes: lobMaxBytes } } : {});
       const rows = result.rows.slice(0, max);
       return c.json({
         columns: result.columns.map((col) => ({

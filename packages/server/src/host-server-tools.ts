@@ -131,11 +131,14 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         "**SELECT 専用**——INSERT/UPDATE/DELETE/DDL は実行できない（更新は host_command で RUNSQL を使う）。" +
         "5250 の画面操作を介さないため、画面レイアウトに影響されない。" +
         "**maxRows は応答に載せる行数の上限であって、ホストから取得する行数の上限ではない**——" +
-        "大きな表では SQL 側に FETCH FIRST n ROWS ONLY を付けること。",
+        "大きな表では SQL 側に FETCH FIRST n ROWS ONLY を付けること。" +
+        "LOB 列は既定でロケーターのみ返す。中身が要るときは lobMaxBytes を指定する。",
       inputSchema: {
         ...targetShape,
         sql: z.string(),
-        maxRows: z.number().int().positive().max(MAX_LIMIT).optional()
+        maxRows: z.number().int().positive().max(MAX_LIMIT).optional(),
+        /** LOB の中身も取る場合の 1 セルあたり上限（バイト）。既定は取りに行かない */
+        lobMaxBytes: z.number().int().positive().max(1024 * 1024).optional()
       },
       outputSchema: {
         columns: z.array(
@@ -164,7 +167,11 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
           // ここでの slice はホストからの取得量を減らさない。取得量を抑えるのは呼び出し側の
           // SQL（FETCH FIRST）の責任——`stream` で早期打ち切りする案は、カーソルを
           // 途中で閉じる経路が未検証（backlog 記載）のため採らない。
-          const result = await query(conn, input.sql);
+          const result = await query(
+            conn,
+            input.sql,
+            input.lobMaxBytes ? { lob: { maxBytes: input.lobMaxBytes } } : {}
+          );
           const rows = result.rows.slice(0, max);
           return jsonResult({
             columns: result.columns.map((c) => ({

@@ -8,7 +8,7 @@
  */
 
 /** LOB のプレースホルダか（値ではなくロケーターしか来ていない列） */
-export function isLob(value: unknown): value is { kind: "lob"; locator: number; maxSize: number } {
+export function isLob(value: unknown): value is { kind: "lob"; locator: number; maxSize: number; value?: string; unavailable?: string } {
   return typeof value === "object" && value !== null && (value as { kind?: string }).kind === "lob";
 }
 
@@ -16,7 +16,11 @@ export function isLob(value: unknown): value is { kind: "lob"; locator: number; 
 function escapeField(value: unknown): string {
   if (value === null || value === undefined) return "";
   // LOB は値そのものを取得していない。**空欄にすると NULL と混ざる**ので明示する
-  if (isLob(value)) return "(LOB)";
+  if (isLob(value)) {
+    // 取得済みなら中身、未取得なら (LOB)。**空欄にすると NULL と混ざる**
+    const v = (value as { value?: unknown }).value;
+    return typeof v === "string" ? escapeField(v) : "(LOB)";
+  }
   const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

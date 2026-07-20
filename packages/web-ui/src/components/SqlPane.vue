@@ -25,6 +25,8 @@ type Row = Record<string, string | number | boolean | null | { kind: "lob" }>;
 
 const sql = ref("");
 const maxRows = ref(200);
+/** LOB の中身も取るか。**既定オフ**——大きな LOB を無自覚に引かないため */
+const fetchLob = ref(false);
 const columns = ref<Column[]>([]);
 const rows = ref<Row[]>([]);
 const truncated = ref(false);
@@ -54,7 +56,8 @@ async function execute(): Promise<void> {
         body: JSON.stringify({
           source: { system: systemsStore.selected },
           sql: sql.value,
-          maxRows: maxRows.value
+          maxRows: maxRows.value,
+          ...(fetchLob.value ? { lobMaxBytes: 65536 } : {})
         })
       });
       const data = await res.json();
@@ -89,6 +92,22 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
+function lobText(v: unknown): string {
+  const lob = v as { value?: unknown; unavailable?: string };
+  if (typeof lob.value === "string") {
+    return lob.unavailable === "too-large" ? `${lob.value}…（以降省略）` : lob.value;
+  }
+  return lob.unavailable === "too-large" ? "(LOB: 大きすぎます)" : "(LOB)";
+}
+
+function lobTitle(v: unknown): string {
+  const lob = v as { byteLength?: number; unavailable?: string };
+  if (lob.unavailable === "not-requested") return "LOB の中身は取得していません（左のチェックで取得）";
+  if (lob.unavailable === "too-large") return `全体 ${lob.byteLength ?? "?"} バイトのうち先頭のみ`;
+  return `LOB（${lob.byteLength ?? "?"} バイト）`;
+}
+
 function download(): void {
   const csv = toCsv(
     columns.value.map((c) => c.name),
@@ -111,6 +130,10 @@ function download(): void {
       <label>
         最大行数
         <input v-model.number="maxRows" type="number" min="1" max="1000" size="5" />
+      </label>
+      <label title="LOB は既定でロケーターのみ取得します。中身が要るときだけ有効にしてください（1 セル 64KB まで）">
+        <input v-model="fetchLob" type="checkbox" />
+        LOB の中身も取得
       </label>
       <button :disabled="!canRun" @click="execute">{{ loading ? "実行中…" : "実行" }}</button>
       <button v-if="rows.length" class="link" @click="download">CSV をダウンロード</button>
@@ -153,7 +176,7 @@ function download(): void {
         <tr v-for="(r, i) in rows" :key="i">
           <td v-for="c in columns" :key="c.name">
             <span v-if="r[c.name] === null" class="null">NULL</span>
-            <span v-else-if="isLob(r[c.name])" class="lob" title="LOB は値を取得していません（ロケーターのみ）">(LOB)</span>
+            <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
             <template v-else>{{ r[c.name] }}</template>
           </td>
         </tr>
