@@ -204,6 +204,63 @@ describe("ページング", () => {
   });
 });
 
+describe("実行ログ", () => {
+  it("フッターから開閉する（5250 セッションと同じ作法）", async () => {
+    const w = await run();
+    expect(w.find(".sqllog").exists()).toBe(false);
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    expect(w.find(".sqllog").exists()).toBe(true);
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    expect(w.find(".sqllog").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("実行した SQL・件数・所要時間を記録する", async () => {
+    const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    const row = w.find(".sqllog .row");
+    expect(row.text()).toContain("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    expect(row.text()).toContain("2 件");
+    expect(row.text()).toMatch(/\d+ms/);
+    w.unmount();
+  });
+
+  it("失敗も残す（SQLCODE つきで）", async () => {
+    mockFetch({ __status: 400, error: "prepare failed", sqlCode: -204, sqlState: "42704" });
+    const w = await run("SELECT * FROM NOSUCH.T");
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    const row = w.find(".sqllog .row");
+    expect(row.classes()).toContain("err");
+    expect(row.text()).toContain("失敗");
+    expect(row.text()).toContain("SQLCODE=-204");
+    w.unmount();
+  });
+
+  it("**サーバーへ送らない**（SQL 文は画面の中だけに留める）", async () => {
+    const w = await run("SELECT SECRET FROM T WHERE PW='p'");
+    const urls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    // ログを送る宛先が増えていないこと。既知の 2 つ以外を呼んでいない
+    expect(urls.every((u) => u === "/api/host/sql" || u === "/api/host/sql/warm")).toBe(true);
+    w.unmount();
+  });
+
+  it("フッターに直近の結果を出す（開かなくても分かるように）", async () => {
+    const w = await run();
+    expect(w.find("footer.statusbar .last").text()).toContain("完了");
+    w.unmount();
+  });
+
+  it("消去できる", async () => {
+    const w = await run();
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    expect(w.findAll(".sqllog .row")).toHaveLength(1);
+    await w.find(".sqllog button.link").trigger("click");
+    expect(w.findAll(".sqllog .row")).toHaveLength(0);
+    expect(w.find("footer.statusbar .cnt").text()).toBe("0");
+    w.unmount();
+  });
+});
+
 describe("列幅", () => {
   /**
    * 幅そのものは CSS（`width: auto` + `max-width: 40ch`）が決めるので、

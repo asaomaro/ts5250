@@ -4,6 +4,8 @@ import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
+import SqlLogPanel from "./SqlLogPanel.vue";
+import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
 
 /**
  * SQL の実行と CSV ダウンロード（ACS のデータ転送に相当する入り口）。
@@ -41,9 +43,25 @@ const error = ref("");
 /** SQLCODE / SQLSTATE。これが無いと文法誤りと権限不足を区別できない */
 const sqlDetail = ref("");
 
+/** フッターに出す直近の 1 件（開かなくても最後の結果が分かるように） */
+const lastLog = computed<SqlLogEntry | undefined>(() => logEntries.value[logEntries.value.length - 1]);
+
 const canRun = computed(
   () => !loading.value && sql.value.trim().length > 0 && Boolean(systemsStore.selected)
 );
+
+/**
+ * 実行ログ。**フッターのボタンで開く**（5250 セッションの操作ログと同じ作法）。
+ * 状態はここが持ち、パネルは結果領域に重ねる。
+ *
+ * ⚠ SQL 文をそのまま持つので、**サーバーへは送らない**（`sqlLog.ts` の理由）。
+ */
+const logEntries = ref<SqlLogEntry[]>([]);
+const logOpen = ref(false);
+
+function record(e: Omit<SqlLogEntry, "id" | "ts">): void {
+  logEntries.value = appendSqlLog(logEntries.value, { ...e, ts: Date.now() });
+}
 
 /**
  * 接続を先に暖めておく。
@@ -94,6 +112,8 @@ async function execute(): Promise<void> {
   // **前の結果セットを手放し終えてから実行する**。待たずに投げると、まだ貸し出し中の
   // 接続をサーバーがプールから拾えず、再実行のたびに 4〜6 秒かかる（実測で気づいた）
   await releaseResultSet();
+  const started = Date.now();
+  const ranSql = sql.value;
   await run(async () => {
     try {
       const res = await fetch("/api/host/sql", {
@@ -119,6 +139,13 @@ async function execute(): Promise<void> {
         hasMore.value = false;
         resultSetId.value = "";
         executed.value = true;
+        record({
+          kind: "run",
+          sql: ranSql,
+          status: "error",
+          ms: Date.now() - started,
+          detail: sqlDetail.value || String(error.value)
+        });
         return;
       }
       columns.value = data.columns ?? [];
@@ -129,8 +156,17 @@ async function execute(): Promise<void> {
       resultSetId.value = data.resultSetId ?? "";
       expired.value = false;
       executed.value = true;
+      record({
+        kind: "run",
+        sql: ranSql,
+        status: "ok",
+        ms: Date.now() - started,
+        rowCount: rows.value.length,
+        hasMore: hasMore.value
+      });
     } catch (e) {
       error.value = `実行に失敗しました: ${String(e)}`;
+      record({ kind: "run", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(e) });
     }
   });
 }
@@ -142,6 +178,8 @@ async function execute(): Promise<void> {
 async function loadMore(): Promise<void> {
   if (!hasMore.value || loadingMore.value || !resultSetId.value) return;
   loadingMore.value = true;
+  const started = Date.now();
+  const ranSql = sql.value;
   try {
     const res = await fetch(`/api/host/sql/${resultSetId.value}/next`, {
       method: "POST",
@@ -153,18 +191,29 @@ async function loadMore(): Promise<void> {
       // **黙って空にしない**——期限切れだと分かるようにする
       expired.value = true;
       hasMore.value = false;
+      record({
+        kind: "more", sql: ranSql, status: "error", ms: Date.now() - started,
+        detail: "結果セットの保持期限が切れました"
+      });
       return;
     }
     if (!res.ok) {
       error.value = data.error ?? "続きの取得に失敗しました";
       hasMore.value = false;
+      record({ kind: "more", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(error.value) });
       return;
     }
+    const added = (data.rows ?? []).length;
     rows.value = [...rows.value, ...(data.rows ?? [])];
     hasMore.value = Boolean(data.hasMore);
+    record({
+      kind: "more", sql: ranSql, status: "ok", ms: Date.now() - started,
+      rowCount: added, hasMore: hasMore.value
+    });
   } catch (e) {
     error.value = `続きの取得に失敗しました: ${String(e)}`;
     hasMore.value = false;
+    record({ kind: "more", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(e) });
   } finally {
     loadingMore.value = false;
   }
@@ -394,6 +443,8 @@ function download(): void {
       結果セットの保持期限が切れました。もう一度「実行」してください。
     </p>
 
+    <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
+    <div class="results" @click="logOpen && (logOpen = false)">
     <div v-if="rows.length" class="rows-scroll" tabindex="0" @scroll="onScroll" @keydown="onPaneKeydown">
     <table>
       <thead>
@@ -443,6 +494,33 @@ function download(): void {
     <p v-else-if="!executed && !error" class="empty">
       接続を選び、SELECT を入力して「実行」を押してください。取得できる範囲は IBM i の権限によります。
     </p>
+
+      <!-- .sql-pane 直下に置くとフッターを覆ってしまうので、結果領域の中に置く -->
+      <SqlLogPanel
+        :entries="logEntries"
+        :open="logOpen"
+        @close="logOpen = false"
+        @clear="logEntries = []"
+        @click.stop
+      />
+    </div>
+
+    <!-- フッター。5250 セッションと同じく、ここからログを開く -->
+    <footer class="statusbar">
+      <span v-if="lastLog" class="last" :class="{ err: lastLog.status === 'error' }">
+        {{ lastLog.status === "error" ? "失敗" : "完了" }}・{{ lastLog.ms }}ms
+      </span>
+      <span v-else class="last muted">未実行</span>
+      <span class="spacer"></span>
+      <button
+        class="logbtn"
+        :class="{ on: logOpen }"
+        title="SQL 実行ログ（この画面の中だけの記録です）"
+        @click="logOpen = !logOpen"
+      >
+        {{ logOpen ? "▾" : "▴" }} 実行ログ <span class="cnt">{{ logEntries.length }}</span>
+      </button>
+    </footer>
   </div>
 </template>
 
@@ -510,6 +588,8 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 /* 地の色を明示する。親（.group）が半透明の緑を重ねているため、
    固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
    表の領域を不透明にして、固定列と本文を同じ地の上に載せる */
+/* 結果領域。ログパネルを重ねる基準（position: relative）になる */
+.results { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .rows-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); background: var(--paper); }
 /* 列見出しはスクロールしても残す */
 .rows-scroll thead th { position: sticky; top: 0; background: var(--card); z-index: 1; }
@@ -556,4 +636,30 @@ thead th:hover .col-grip::after,
 .rows-scroll thead th.rownum { z-index: 2; background: var(--card); }
 .rows-scroll:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 .more { color: var(--muted); font-size: 12px; text-align: center; padding: 6px 0; }
+/* フッター。5250 の OIA と同じ位置づけで、ここからログを開く */
+.statusbar {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.statusbar .spacer { flex: 1; }
+.statusbar .last { color: var(--muted); }
+.statusbar .last.err { color: #c62828; }
+.logbtn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 1px 8px;
+}
+.logbtn.on { border-color: var(--accent); color: var(--accent); }
+/* 件数が伸びても右がずれないように幅を取る */
+.logbtn .cnt { min-width: 4ch; display: inline-block; text-align: right; font-variant-numeric: tabular-nums; }
 </style>
