@@ -31,7 +31,19 @@ export type ErrorCode =
   /** SQL の実行エラー（構文誤り・存在しない表・権限不足など） */
   | "SQL_ERROR"
   /** CL コマンドの実行失敗（メッセージ付き） */
-  | "COMMAND_FAILED";
+  | "COMMAND_FAILED"
+  /**
+   * 指定された対象が存在しない（IFS のパスなど）。
+   *
+   * `SESSION_NOT_FOUND` / `FIELD_NOT_FOUND` と同じく**区別できるコードを持つ**方針。
+   * まとめて `PROTOCOL_ERROR` にすると server 側で 502 に落ち、
+   * 「ホストが落ちている」と「指定が間違っている」を呼び出し側が区別できなくなる。
+   */
+  | "NOT_FOUND"
+  /** 対象への権限が無い（IFS の rc=13 など）。ホスト側の権限であって、こちらの認可ではない */
+  | "ACCESS_DENIED"
+  /** 作ろうとした対象が既にある（IFS の mkdir で rc=4 など） */
+  | "ALREADY_EXISTS";
 
 /**
  * このライブラリが投げる共通エラー。
