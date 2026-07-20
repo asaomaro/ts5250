@@ -153,6 +153,35 @@ export async function query(
   }
 }
 
+/**
+ * カーソルを開いたまま「列定義」と「行のジェネレータ」を返す。
+ *
+ * `stream()` は列定義を返さないため、**画面のページング**のように
+ * 列見出しが要る用途で使えない。`query()` は全件読んでカーソルを閉じてしまう。
+ * その中間として、**呼び出し側がカーソルの寿命を握る**入口を用意する。
+ *
+ * ⚠ **返したジェネレータを最後まで回すか `return()` すること。**
+ * 放置するとカーソルと接続が開いたままになる。
+ */
+export async function openQuery(
+  conn: DbConnection,
+  sql: string,
+  opts: { blockSize?: number } = {}
+): Promise<{ columns: ColumnMeta[]; rows: AsyncGenerator<Row, void, undefined> }> {
+  const release = conn.acquire();
+  const format = await prepareAndOpen(conn, sql);
+  const blockSize = opts.blockSize ?? DEFAULT_BLOCK_SIZE;
+  async function* iterate(): AsyncGenerator<Row, void, undefined> {
+    try {
+      yield* fetchAll(conn, format, blockSize);
+    } finally {
+      await closeCursor(conn);
+      release();
+    }
+  }
+  return { columns: format.columns, rows: iterate() };
+}
+
 /** SELECT を実行して 1 行ずつ返す（大きな結果セット向け） */
 export async function* stream(
   conn: DbConnection,

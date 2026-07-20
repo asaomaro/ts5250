@@ -62,14 +62,16 @@ async function run(sql = "SELECT 1 FROM SYSIBM.SYSDUMMY1") {
 }
 
 describe("実行", () => {
-  it("選択中のシステムと SQL と maxRows を送る", async () => {
+  it("選択中のシステムと SQL と pageSize を送る", async () => {
     const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(String(call?.[0])).toBe("/api/host/sql");
     const body = JSON.parse(String((call?.[1] as RequestInit).body));
     expect(body.source).toEqual({ system: "own:s1" });
     expect(body.sql).toBe("SELECT 1 FROM SYSIBM.SYSDUMMY1");
-    expect(body.maxRows).toBe(200);
+    // **上限ではなく「1 度に取得する件数」**として送る
+    expect(body.pageSize).toBe(200);
+    expect(body.maxRows).toBeUndefined();
     w.unmount();
   });
 
@@ -149,17 +151,23 @@ describe("エラー表示", () => {
   });
 });
 
-describe("打ち切り", () => {
-  it("truncated なら警告を出す", async () => {
-    mockFetch({ ...OK_BODY, truncated: true });
+describe("ページング", () => {
+  it("続きがあるときは読み足しを促す", async () => {
+    mockFetch({ ...OK_BODY, hasMore: true, resultSetId: "rs-1" });
     const w = await run();
-    expect(w.find(".warn").text()).toContain("打ち切りました");
+    expect(w.find(".more").text()).toContain("End / PageDown");
     w.unmount();
   });
 
-  it("truncated でなければ警告を出さない", async () => {
+  it("続きが無ければ「これ以上ありません」と出す", async () => {
     const w = await run();
-    expect(w.find(".warn").exists()).toBe(false);
+    expect(w.find(".more").text()).toContain("これ以上ありません");
+    w.unmount();
+  });
+
+  it("CSV ボタンに表示中の件数を出す（何を落とすのか分かるように）", async () => {
+    const w = await run();
+    expect(w.find("button.link").text()).toContain("2 件");
     w.unmount();
   });
 });

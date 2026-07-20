@@ -1,7 +1,7 @@
 schema: 3
 slug: sql-lob-locator
-current: review
-approved: [requirement, research, spec, plan, coding, test, review]
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, deliver]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3

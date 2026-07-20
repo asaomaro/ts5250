@@ -22,11 +22,12 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import { query, SqlError, As400Error, type DbConnection } from "@as400web/core";
+import { openQuery, query, SqlError, As400Error, type DbConnection } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb } from "./host-connect.js";
 import { resolveSource, sourceSchema, statusOf } from "./host-api.js";
+import type { ResultSetStore } from "./result-set-store.js";
 
 /** 応答に載せる行数の上限（サーバー側で強制する。UI の出し分けに依存しない） */
 const MAX_ROWS = 1000;
@@ -40,13 +41,41 @@ const sqlRequestSchema = z
     sql: z.string().min(1),
     maxRows: z.number().int().positive().max(MAX_ROWS).optional(),
     /** LOB の中身も取得する。**既定では取りに行かない**（大きな LOB でメモリを掴むため） */
-    lobMaxBytes: z.number().int().positive().max(MAX_LOB_BYTES).optional()
+    lobMaxBytes: z.number().int().positive().max(MAX_LOB_BYTES).optional(),
+    /** 1 度に取得する件数。指定すると結果セットを保持し、続きを /next で取れる */
+    pageSize: z.number().int().positive().max(MAX_ROWS).optional()
   })
   .strict();
 
 export interface HostSqlDeps {
   /** 接続設定の唯一の解決点 */
   resolver: ConfigResolver;
+  /** 画面のページング用。**ここだけが接続を掴み続ける** */
+  resultSets: ResultSetStore;
+}
+
+const nextSchema = z
+  .object({ pageSize: z.number().int().positive().max(MAX_ROWS).optional() })
+  .strict();
+
+/** 列メタデータを応答の形に落とす */
+function toColumns(columns: readonly { name: string; typeName: string; length: number; scale: number; precision: number; ccsid: number; nullable: boolean }[]) {
+  return columns.map((col) => ({
+    name: col.name,
+    typeName: col.typeName,
+    length: col.length,
+    scale: col.scale,
+    precision: col.precision,
+    ccsid: col.ccsid,
+    nullable: col.nullable
+  }));
+}
+
+/** bigint は JSON にできないため文字列にする（精度を落とさない） */
+function toJsonRows(rows: readonly Record<string, unknown>[]) {
+  return rows.map((r) =>
+    Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v]))
+  );
 }
 
 export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: HostSqlDeps): void {
@@ -55,8 +84,32 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
-    const { source, sql, maxRows, lobMaxBytes } = parsed.data;
+    const { source, sql, maxRows, lobMaxBytes, pageSize } = parsed.data;
     const user = c.get("user");
+
+    // --- ページング（pageSize 指定時）。**結果セットを保持**して続きを /next で返す ---
+    if (pageSize !== undefined) {
+      let conn: DbConnection | undefined;
+      try {
+        conn = await openDb(resolveSource(deps.resolver, source, user));
+        const { columns, rows } = await openQuery(conn, sql);
+        const set = deps.resultSets.open({ owner: user?.username, columns, rows, conn });
+        const page = await deps.resultSets.next(set, pageSize);
+        return c.json({
+          resultSetId: set.id,
+          columns: toColumns(columns),
+          rows: toJsonRows(page.rows),
+          rowCount: page.rows.length,
+          hasMore: page.hasMore
+        });
+      } catch (e) {
+        // **開けなかったら接続を残さない**
+        conn?.close();
+        const err = e as As400Error;
+        const detail = e instanceof SqlError ? { sqlCode: e.sqlCode, sqlState: e.sqlState } : {};
+        return c.json({ error: err.message, code: err.code ?? "UNKNOWN", ...detail }, statusOf(err));
+      }
+    }
 
     let conn: DbConnection | undefined;
     try {
@@ -97,6 +150,40 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       );
     } finally {
       conn?.close();
+    }
+  });
+
+  /** 続きを取る。**期限切れは 404**（画面が「再実行してください」と出せるように） */
+  app.post("/api/host/sql/:id/next", async (c) => {
+    const parsed = nextSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const user = c.get("user");
+    try {
+      const set = deps.resultSets.get(c.req.param("id"), user);
+      if (!set) {
+        return c.json({ error: "この結果セットは期限切れです。もう一度実行してください" }, 404);
+      }
+      const page = await deps.resultSets.next(set, parsed.data.pageSize ?? DEFAULT_ROWS);
+      if (!page.hasMore) deps.resultSets.close(set.id);
+      return c.json({ rows: toJsonRows(page.rows), rowCount: page.rows.length, hasMore: page.hasMore });
+    } catch (e) {
+      const err = e as As400Error;
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
+    }
+  });
+
+  /** 画面を閉じたときの後始末（任意。呼ばれなくてもアイドルで閉じる） */
+  app.delete("/api/host/sql/:id", (c) => {
+    const user = c.get("user");
+    try {
+      const set = deps.resultSets.get(c.req.param("id"), user);
+      if (set) deps.resultSets.close(set.id);
+      return c.json({ ok: true });
+    } catch (e) {
+      const err = e as As400Error;
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
     }
   });
 }

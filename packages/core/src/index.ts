@@ -119,6 +119,7 @@ export {
 
 // ホストサーバー: SQL（database サーバー。SELECT のみ。アップロードは未実装）
 export { DbConnection, type DbConnectOptions } from "./hostserver/db/db-connection.js";
+export { openQuery } from "./hostserver/db/query.js";
 export { type LobOptions } from "./hostserver/db/query.js";
 export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./hostserver/db/lob.js";
 export { query, stream, SqlError, type Row, type QueryResult } from "./hostserver/db/query.js";
