@@ -16,6 +16,7 @@ import {
   DdmConnection,
   buildDdmRecord,
   buildRecordLayout,
+  fetchColumnLayout,
   query,
   As400Error,
   type ColumnLayoutInput
@@ -59,19 +60,9 @@ async function main(): Promise<void> {
     created = true;
 
     // --- 2. 列レイアウトを SQL から得る（spec D1） ---
-    const meta = await query(
-      db,
-      `SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE ` +
-        `FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA='${library}' AND TABLE_NAME='${table}' ` +
-        `ORDER BY ORDINAL_POSITION`
-    );
-    const columns: ColumnLayoutInput[] = meta.rows.map((r) => ({
-      name: String(r["COLUMN_NAME"]).trim(),
-      dataType: String(r["DATA_TYPE"]).trim(),
-      length: Number(r["LENGTH"]),
-      scale: Number(r["NUMERIC_SCALE"] ?? 0),
-      nullable: String(r["IS_NULLABLE"]).trim() === "Y"
-    }));
+    // 問い合わせは core（`fetchColumnLayout`）に一本化した。
+    // **ここに 2 つ目の SYSCOLUMNS クエリを置かない**——列や順序が食い違う元になる
+    const columns: ColumnLayoutInput[] = await fetchColumnLayout(db, library, table);
     const layout = buildRecordLayout(columns);
     out(
       `2. レイアウト（SQL 由来）: ${layout.fields

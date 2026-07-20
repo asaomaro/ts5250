@@ -58,6 +58,16 @@ export interface RecordLayout {
   recordLength: number;
 }
 
+/**
+ * 対応する型かどうか。**対応集合の定義はここ 1 か所**にする——
+ * 事前検査（`upload-prepare.ts`）が同じ判定を独自に持つと、片方だけ更新されて食い違う。
+ */
+export function isSupportedDataType(dataType: string): boolean {
+  return SUPPORTED_TYPES.has(dataType.trim().toUpperCase());
+}
+
+const SUPPORTED_TYPES = new Set(["CHAR", "DECIMAL", "NUMERIC", "SMALLINT", "INTEGER", "BIGINT"]);
+
 /** 型ごとのバイト数。**ここが配置計算の核心** */
 function sizeOf(input: ColumnLayoutInput): { kind: FieldKind; size: number } {
   const t = input.dataType.trim().toUpperCase();

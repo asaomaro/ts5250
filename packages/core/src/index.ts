@@ -201,3 +201,14 @@ export {
   encodePacked,
   encodeZoned
 } from "./hostserver/ddm/encode.js";
+export { isSupportedDataType, type FieldLayout } from "./hostserver/ddm/record-layout.js";
+export { fetchColumnLayout, assertIdentifier } from "./hostserver/ddm/column-meta.js";
+export {
+  prepareUpload,
+  type PrepareUploadArgs,
+  type PrepareResult,
+  type UploadRejection
+} from "./hostserver/ddm/upload-prepare.js";
+
+// CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う）
+export { parseCsv, type CsvParseResult } from "./csv-parse.js";

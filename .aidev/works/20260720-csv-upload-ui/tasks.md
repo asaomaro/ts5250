@@ -14,14 +14,14 @@
 
 ## core — 事前検査（本作業のロジックの中心）
 
-- [ ] T4: `upload-prepare.ts` を新規作成（依存: T3）。`UploadRejection` 判別可能ユニオンと
+- [x] T4: `upload-prepare.ts` を新規作成（依存: T3）。`UploadRejection` 判別可能ユニオンと
       `prepareUpload()` を実装。**全行を符号化してから返す**（DD2）。
       単体テスト: 列不足/余剰・対応外の型・未対応 CCSID・65535・長さ超過・表現できない文字・
       数値でない値・**複数拒否がまとめて返ること**・`row` が 1 始まりであること・件数上限で打ち切ること
 
 ## core — 列メタデータ
 
-- [ ] T5: `column-meta.ts` を新規作成（依存: T2）。`CCSID` を選択列に加え、
+- [x] T5: `column-meta.ts` を新規作成（依存: T2）。`CCSID` を選択列に加え、
       `ORDER BY ORDINAL_POSITION` を維持し、**ライブラリ名・表名を文字列連結しない**
       （`^[A-Z0-9_$#@]{1,10}$` で検証）。
       `tools/hostserver-check/src/ddm.ts` の重複クエリを**これに置き換える**
@@ -40,7 +40,7 @@
 
 ## core — CSV 解析
 
-- [ ] T9: `csv-parse.ts` を新規作成（依存: なし。T1〜T8 と並行可）。RFC 4180 準拠。
+- [x] T9: `csv-parse.ts` を新規作成（依存: なし。T1〜T8 と並行可）。RFC 4180 準拠。
       単体テスト: 引用符・埋め込み改行・二重引用符・BOM・CRLF/LF・末尾改行・空行・
       ヘッダーのみ・列数不一致
 
