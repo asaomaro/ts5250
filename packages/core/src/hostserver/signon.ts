@@ -19,11 +19,10 @@ import {
 } from "../transport/host-connection.js";
 import { As400Error } from "../errors.js";
 import { childLog } from "../log.js";
+import { traceFrame } from "./frame-trace.js";
 import {
   buildRequest,
   parseReply,
-  HEADER_LEN,
-  PARAM_PREFIX_LEN,
   findParam,
   findUint,
   uintParam,
@@ -63,45 +62,6 @@ const ERROR_MESSAGES_MIN_LEVEL = 5;
 /** 置換値が 8 バイトなら DES、それ以外は SHA を表す */
 const ENCRYPTION_TYPE_DES = 1;
 const ENCRYPTION_TYPE_SHA = 3;
-
-/** バイト列を16進文字列にする（Node の Buffer に依存しない） */
-function toHex(bytes: Uint8Array): string {
-  let out = "";
-  for (const b of bytes) out += b.toString(16).padStart(2, "0");
-  return out;
-}
-
-/**
- * データストリームをトレースする。**CP 0x1105（パスワード置換値）の値は必ず伏せる**。
- * 置換値は seed 込みのハッシュなので平文ではないが、生の資格情報由来の値をログに残さない。
- *
- * トレースは副次機能なので、壊れたフレームでも例外を投げない
- * （解析エラーは parseReply が PROTOCOL_ERROR として報告する責務）。
- */
-function traceFrame(direction: "send" | "recv", frame: Uint8Array): void {
-  if (!log.isDebugEnabled()) return;
-  if (frame.length < HEADER_LEN) {
-    log.debug(`${direction} len=${frame.length} (too short to parse)`);
-    return;
-  }
-  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-  const parts: string[] = [];
-  let pos = HEADER_LEN + view.getUint16(16);
-  while (pos + PARAM_PREFIX_LEN <= frame.length) {
-    const ll = view.getUint32(pos);
-    if (ll < PARAM_PREFIX_LEN || pos + ll > frame.length) break;
-    const cp = view.getUint16(pos + 4);
-    const value = frame.subarray(pos + PARAM_PREFIX_LEN, pos + ll);
-    parts.push(
-      `0x${cp.toString(16).padStart(4, "0")}=` +
-        (cp === CP.password ? `<masked ${value.length} bytes>` : toHex(value))
-    );
-    pos += ll;
-  }
-  log.debug(
-    `${direction} len=${frame.length} reqrep=0x${view.getUint16(18).toString(16)} ${parts.join(" ")}`
-  );
-}
 
 export type HostServerTlsOptions = HostTlsOptions;
 
@@ -295,9 +255,9 @@ async function authenticate(
 
 /** フレームを送り、応答を解析する。トレースはここで掛ける（パスワードはマスク） */
 async function exchange(conn: HostConnection, frame: Uint8Array): Promise<Reply> {
-  traceFrame("send", frame);
+  traceFrame(log, "send", frame);
   const response = await conn.request(frame);
-  traceFrame("recv", response);
+  traceFrame(log, "recv", response);
   return parseReply(response);
 }
 

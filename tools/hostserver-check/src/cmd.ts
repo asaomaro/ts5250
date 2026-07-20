@@ -5,6 +5,7 @@
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
  *     npm run cmd -w @as400web/hostserver-check -- --tls "DSPLIB LIB(QGPL)"
  */
+import "./log-init.js";
 import { CommandConnection, describeMessage, Tn5250Error } from "@as400web/core";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
