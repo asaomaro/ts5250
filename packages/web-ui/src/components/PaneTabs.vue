@@ -7,6 +7,7 @@ import { systemsStore } from "../stores/systems.js";
 import { PANE_LABELS, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
 import SessionInfo from "./SessionInfo.vue";
+import { isFileDrag } from "../dnd.js";
 
 const props = defineProps<{ group: GroupNode }>();
 const infoFor = ref<string | undefined>();
@@ -71,8 +72,12 @@ function onDragEnd(): void {
   reorder.value = undefined;
   stripActive.value = false;
 }
-/** タブの D&D 対象か（自グループ内の並び替え／別グループからの合流。どちらもタブエリアで受ける） */
-function isTabDrag(): boolean {
+/**
+ * タブの D&D 対象か（自グループ内の並び替え／別グループからの合流。どちらもタブエリアで受ける）。
+ * **ファイルのドラッグは対象外**——データ転送ペインが受けるので、ここでは何もしない
+ */
+function isTabDrag(ev?: DragEvent): boolean {
+  if (ev && isFileDrag(ev)) return false;
   return !!workspaceStore.draggingSession;
 }
 /** ドラッグ中タブを除いた配列での挿入位置（0〜末尾）を計算して落とす */
@@ -85,7 +90,7 @@ function dropAt(toIndex: number): void {
   workspaceStore.dropTabInto(props.group.id, dragged, toIndex);
 }
 function onTabDragOver(ev: DragEvent, t: string): void {
-  if (!isTabDrag()) return;
+  if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation(); // グループ全体（分割ゾーン）へは伝播させない
   const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
@@ -93,7 +98,7 @@ function onTabDragOver(ev: DragEvent, t: string): void {
   stripActive.value = false;
 }
 function onTabDrop(ev: DragEvent, t: string): void {
-  if (!isTabDrag()) return;
+  if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   const dragged = workspaceStore.draggingSession!;
@@ -121,7 +126,7 @@ function onTabDrop(ev: DragEvent, t: string): void {
  * 目印が残ったままになり、**帯のドロップ領域が出なくなっていた**。
  */
 function onStripDragOver(ev: DragEvent): void {
-  if (!isTabDrag()) return;
+  if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   reorder.value = undefined;
@@ -129,7 +134,7 @@ function onStripDragOver(ev: DragEvent): void {
   stripActive.value = !props.group.tabs.includes(workspaceStore.draggingSession!);
 }
 function onStripDrop(ev: DragEvent): void {
-  if (!isTabDrag()) return;
+  if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   dropAt(props.group.tabs.filter((x) => x !== workspaceStore.draggingSession).length); // 末尾

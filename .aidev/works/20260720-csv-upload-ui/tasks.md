@@ -65,20 +65,20 @@
 > （`TransferPane.vue` / `transfer:data`）にした。SQL ペインは Run SQL Scripts の位置づけで据え置く。
 > core / server は影響なし（`decisions.md` D1）。
 
-- [ ] T15: `TransferPane.vue` の骨格と**方向切替**（取得 ⇄ 取り込み）を作る（依存: T12）。
+- [x] T15: `TransferPane.vue` の骨格と**方向切替**（取得 ⇄ 取り込み）を作る（依存: T12）。
       `transfer:data` タブ ID で開く。`paneLabels.ts` とペイン振り分け（`WorkspaceNode.vue`）に登録。
       列見出し固定の規約（`docs/UI-DESIGN.md`）に従う
-- [ ] T16: 取り込み側を実装（依存: T15）。design の状態遷移
+- [x] T16: 取り込み側を実装（依存: T15）。design の状態遷移
       （待機 / 解析中 / 解析失敗 / プレビュー / 送信中 / 拒否 / 完了 / **部分完了**）。
       **列の突き合わせ表に CCSID を出す**・**想定往復数をステータスバーに出す**・
       **部分完了は確定範囲と不明範囲を分けて出す**（モックで合意済み）。
       コンポーネントテスト: 状態遷移、拒否理由の表示（行番号・列名が出ること）、
       部分完了が完了と別表示になること
-- [ ] T17: 取得側を実装（依存: T15）。表と絞り込み条件だけを受け、既存 `POST /api/host/sql` に
+- [x] T17: 取得側を実装（依存: T15）。表と絞り込み条件だけを受け、既存 `POST /api/host/sql` に
       `SELECT * FROM <lib>.<file> WHERE …` を組み立てて投げ、既存 `csv.ts` で CSV 保存。
       **SQL エディタは出さない**。**識別子の検証は取り込み側と同じ関数を使う**（規則を二重化しない）。
       コンポーネントテスト: 組み立てた SQL、識別子が不正なときに送信しないこと
-- [ ] T18: ファイル D&D の棲み分け（依存: T16）。`WorkspaceNode.vue` と `PaneTabs.vue` の
+- [x] T18: ファイル D&D の棲み分け（依存: T16）。`WorkspaceNode.vue` と `PaneTabs.vue` の
       各ハンドラ先頭で `dataTransfer.types` に `Files` があれば何もせず戻る（DD5）。
       コンポーネントテスト: `Files` ドラッグで分割・タブ移動が発火しないこと（回帰資産化）
 
