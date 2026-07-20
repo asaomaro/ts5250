@@ -175,10 +175,19 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
   checkSqlca(prepared, "prepare");
 
   const rawFormat = findParam(prepared, DB_CP.dataFormat);
-  if (!rawFormat) {
+  // 空のパラメータ（長さ 0）で返ることがあるので `!rawFormat` だけでは足りない
+  if (!rawFormat || rawFormat.length === 0) {
+    // **握り潰していた戻りコードを診断に出す**。`allowTemplateError: true` で
+    // template のエラーを通しているため、ここまで来ても「列定義が無い」ことしか
+    // 分からず、原因（文の種類・未対応の型・権限）を切り分けられなかった。
+    const t = prepared.dbTemplate;
     throw new Tn5250Error(
-      "PROTOCOL_ERROR",
-      "prepare did not return a data format (is the statement a SELECT?)"
+      "HOST_SERVER_UNSUPPORTED",
+      `この結果セットは取得できません（rcClass=${t.rcClass}, code=${t.rcClassReturnCode}）。` +
+        "**LOB 列（DBCLOB / CLOB / BLOB）を含む結果セットは未対応**です" +
+        "（ロケーター経由の取得を実装していないため）。" +
+        "列を明示して LOB を除くか、CAST(... AS VARCHAR(n)) してください。" +
+        "例: QSYS2.SYSTABLES は MQT_DEFINITION が DBCLOB のため SELECT * が通りません"
     );
   }
   const format = parseDataFormat(rawFormat);
@@ -215,7 +224,12 @@ async function* fetchAll(
     });
 
     const raw = findParam(reply, DB_CP.resultData);
-    if (!raw) {
+    // **空のパラメータが返ることがある**（パラメータ自体は在るが長さ 0）。
+    // 行数がブロッキング係数のちょうど倍数のとき、最後のブロックを取り切ったあとの
+    // fetch が「SQLCODE 100 ＋ 長さ 0 の結果データ」で返る。`!raw` だけを見ていると
+    // これをすり抜けて解析に入り `result data too short: 0 bytes` で落ちる。
+    // 実機で確認: FETCH FIRST 100/200 は失敗、99/101 は成功（ブロック既定 100）。
+    if (!raw || raw.length === 0) {
       // データが無い＝行が尽きた（SQLCODE 100 も同時に返る）
       checkSqlca(reply, "fetch");
       return;
