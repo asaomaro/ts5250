@@ -12,7 +12,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   childLog,
-  CommandConnection,
+  type CommandConnection,
   listJobs,
   listObjects,
   listUsers,
@@ -21,6 +21,7 @@ import {
 } from "@as400web/core";
 import type { AuthUser, AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
+import { openCommand } from "./host-connect.js";
 
 /**
  * 一覧の取得元。**システムだけで足りる**——コマンドサーバーは装置名も画面サイズも使わないため。
@@ -132,27 +133,6 @@ function resolveSource(
     user,
     (m) => listLog.warn(m)
   ).connect;
-}
-
-/**
- * 一覧・操作に使うコマンドサーバー接続を開く。
- *
- * **5250 の自動サインオン情報を流用する**——同じ相手に同じ資格情報で繋ぐため。
- * user/password が無い接続設定では一覧を取得できない。
- */
-async function openCommand(opts: ConnectOptions): Promise<CommandConnection> {
-  if (!opts.host || !opts.user || !opts.password) {
-    throw new Tn5250Error(
-      "CONFIG_ERROR",
-      "この接続設定にはユーザーとパスワードが登録されていないため一覧を取得できません"
-    );
-  }
-  return CommandConnection.connect({
-    host: opts.host,
-    user: opts.user,
-    password: opts.password,
-    ...(opts.tls !== undefined ? { tls: opts.tls as boolean } : {})
-  });
 }
 
 /** 操作から CL コマンドを組み立てる。**利用側から任意の CL は受け取らない** */

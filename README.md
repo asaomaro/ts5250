@@ -281,7 +281,12 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 }
 ```
 
-### ツール一覧（19）
+### ツール一覧（29）
+
+ツールは経路で 2 種類に分かれます。**5250 経由**（下表）は画面を操作してテキストを読み取り、
+**ホストサーバー経由**（`host_` 接頭辞。次節）はホストサーバーの API を叩いて構造化された応答を得ます。
+
+#### 5250 経由（19）
 
 | ツール | 概要 |
 |---|---|
@@ -299,6 +304,28 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | `open_printer_session` | TN5250E プリンターセッションを開いて待ち受ける（`session` / `system` / host 直指定。起動応答コードを返す） |
 | `wait_spool` / `list_spools` / `get_spool` | 受信スプール（帳票・ジョブログ等）を等幅テキストで取得（次の 1 件を待つ／一覧／再取得） |
 | `get_spool_pdf` | 受信スプールを PDF（base64）で取得（等幅・改ページ保持・SBCS/DBCS 対応） |
+
+#### ホストサーバー経由（10）
+
+**装置名（デバイス）もセッションも要らず、単発で叩けます。** 画面レイアウトの変化に壊されないのが利点です。
+接続先は `system` または `session` で指定します（5250 と同じ接続設定・資格情報を流用）。
+
+| ツール | 概要 |
+|---|---|
+| `host_sql` | SELECT を実行し列メタデータ付きで結果を返す。**SELECT 専用**（更新は `host_command` の `RUNSQL`） |
+| `host_command` | CL コマンドを実行し、成否とメッセージ（`CPF…` の ID・重大度）を構造化して返す。**非対話のみ** |
+| `host_call_program` | プログラム / QSYS API を呼ぶ（パラメータは Base64） |
+| `host_list_spools` | **既存の**スプールを任意の OUTQ から検索（pull 型） |
+| `host_get_spool` | スプールの中身を取得（`text` / `pages`。`ccsid` 指定可） |
+| `host_read_file` / `host_write_file` | IFS のファイル読み書き（`utf8` / `base64`） |
+| `host_list_jobs` / `host_list_objects` / `host_list_users` | ジョブ・オブジェクト・ユーザーの一覧 |
+
+> 📌 `list_spools`（5250 経由）と `host_list_spools` は**別物**です。前者はプリンターセッションで
+> 受信済みの帳票（push 型）で、セッションを開いておく必要があり過去のスプールは取れません。
+> 後者は既存スプールを後から検索・取得できます（pull 型）。
+>
+> 見える範囲・実行できる範囲は、接続設定の資格情報が **IBM i 上で持つ権限**が決めます
+> （アプリ側で追加の制限は掛けていません）。
 
 - 画面応答は **text**（行番号付きグリッド＋フィールド一覧＋GUI）と **structuredContent**（cursor/fields/gui …）を併記。
 - **認証情報はツール引数に取らない**（システム経由）。監査ログは値を出さない。

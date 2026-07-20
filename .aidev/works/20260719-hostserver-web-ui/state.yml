@@ -1,0 +1,8 @@
+schema: 3
+slug: hostserver-web-ui
+current: requirement
+approved: []
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260719-hostserver-mcp-tools]

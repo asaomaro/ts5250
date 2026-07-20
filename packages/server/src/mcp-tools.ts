@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   childLog,
+  CommandError,
+  SqlError,
   Tn5250Error,
   type ConnectOptions,
   type ScreenSnapshot,
@@ -158,14 +160,29 @@ function fmtOpts(input: {
   return o;
 }
 
-/** エラーを MCP の isError レスポンスに変換する */
-function errorResult(err: unknown) {
+/**
+ * エラーを MCP の isError レスポンスに変換する。
+ *
+ * `SqlError` / `CommandError` は **診断に効く追加情報を型として持っている**ため、
+ * code/message に潰さず error に載せる（SQLCODE を見ないと文法誤りと権限不足が区別できない）。
+ * 5250 系ツールの既存の応答形は変えていない（フィールドの追加のみ）。
+ */
+export function errorResult(err: unknown) {
   const code = err instanceof Tn5250Error ? err.code : "INTERNAL_ERROR";
   const message = err instanceof Error ? err.message : String(err);
+  const detail: Record<string, unknown> = {};
+  if (err instanceof SqlError) {
+    detail["sqlCode"] = err.sqlCode;
+    detail["sqlState"] = err.sqlState;
+  }
+  if (err instanceof CommandError && err.primary) {
+    detail["messageId"] = err.primary.id;
+    detail["messageText"] = err.primary.text;
+  }
   return {
     isError: true as const,
     content: [{ type: "text" as const, text: `${code}: ${message}` }],
-    structuredContent: { error: { code, message } }
+    structuredContent: { error: { code, message, ...detail } }
   };
 }
 
