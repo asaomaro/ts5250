@@ -5,6 +5,9 @@ import { csvBlob, csvFileName, toCsv } from "../csv.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
+// **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
+// バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
+import { isValidIdentifier, parseCsv } from "@as400web/core/browser";
 
 /**
  * データ転送（表 ⇄ CSV）。ACS の **Data Transfer** に相当する。
@@ -18,9 +21,8 @@ import { isFileDrag } from "../dnd.js";
  */
 defineProps<{ tabId: string }>();
 
-/** IBM i のオブジェクト名。サーバー側と同じ規則（規則を二重に持たない） */
-const IDENTIFIER = /^[A-Z0-9_$#@]{1,10}$/;
-const validName = (v: string): boolean => IDENTIFIER.test(v.trim().toUpperCase());
+/** IBM i のオブジェクト名。**判定の実体は core にあり、サーバーと同じものを使う** */
+const validName = isValidIdentifier;
 
 type Direction = "download" | "upload";
 const direction = ref<Direction>("upload");
@@ -59,7 +61,16 @@ interface Rejection {
 }
 const rejections = ref<Rejection[]>([]);
 const rejectTruncated = ref(false);
-const result = ref<{ committedRows: number; uncertainRange?: { from: number; to: number }; batchSize: number; ms: number } | undefined>();
+const result = ref<
+  | {
+      committedRows: number;
+      uncertainRange?: { from: number; to: number };
+      error?: string;
+      batchSize: number;
+      ms: number;
+    }
+  | undefined
+>();
 
 const { visible: slowLoading, busy: loading, run } = useDelayedLoading();
 
@@ -78,19 +89,24 @@ function reset(): void {
   rejections.value = [];
   rejectTruncated.value = false;
   result.value = undefined;
+  // 取得側も一緒に捨てる。**方向を切り替えたのに前の結果が残っていると取り違える**
+  downloadRows.value = [];
+  downloadColumns.value = [];
+  downloadError.value = "";
 }
 
 watch(direction, reset);
 
 // ---- CSV を受け取る ----
 function onDragOver(ev: DragEvent): void {
-  if (!isFileDrag(ev)) return;
+  // 取得モードでは CSV を受け取らない（落としても見えない状態に取り込まれてしまう）
+  if (direction.value !== "upload" || !isFileDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation(); // ペイン分割のドロップゾーンへ伝えない
   dragging.value = true;
 }
 function onDrop(ev: DragEvent): void {
-  if (!isFileDrag(ev)) return;
+  if (direction.value !== "upload" || !isFileDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   dragging.value = false;
@@ -109,7 +125,6 @@ async function loadFile(f: File): Promise<void> {
   try {
     const text = await f.text();
     // 解析は core の実装を使う（web-ui と MCP で行番号の数え方をずらさない）
-    const { parseCsv } = await import("@as400web/core");
     const parsed = parseCsv(text);
     header.value = parsed.header;
     rows.value = parsed.rows;
@@ -337,7 +352,10 @@ function rejectionWhere(r: Rejection): string {
           <ul>
             <li>
               <span class="where">確定</span>
-              <span>1 〜 {{ result.committedRows }} 行目は書き込まれました</span>
+              <span v-if="result.committedRows > 0">
+                1 〜 {{ result.committedRows }} 行目は書き込まれました
+              </span>
+              <span v-else>確実に書き込まれた行はありません</span>
             </li>
             <li>
               <span class="where">不明</span>
@@ -347,6 +365,7 @@ function rejectionWhere(r: Rejection): string {
               </span>
             </li>
           </ul>
+          <p v-if="result.error" class="muted">理由: {{ result.error }}</p>
           <p class="muted">再実行する前に、対象の表で該当行を確認してください。</p>
         </div>
       </template>

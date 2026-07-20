@@ -89,6 +89,8 @@ export type UploadOutcome =
       ok: true;
       committedRows: number;
       uncertainRange?: { from: number; to: number };
+      /** 途中で失敗した理由。**巻き戻せない書き込みでは最も重要な情報**なので必ず返す */
+      error?: string;
       batchSize: number;
       ms: number;
     }
@@ -101,6 +103,11 @@ export type UploadOutcome =
  * 順番だけを持ち、判断は core の純関数（`prepareUpload`）に委ねる。
  */
 export async function uploadRows(args: UploadArgs): Promise<UploadOutcome> {
+  // **上限はここで強制する**。HTTP の zod にだけ置くと MCP の columns+rows 経路が素通りし、
+  // prepareUpload が全行をメモリ上で符号化するため OOM の入口になる
+  if (args.rows.length > MAX_ROWS) {
+    throw new As400Error("CONFIG_ERROR", `行数が多すぎます（上限 ${MAX_ROWS} 行）`);
+  }
   const library = assertIdentifier(args.library, "ライブラリ名");
   const file = assertIdentifier(args.file, "ファイル名");
   const started = Date.now();
@@ -146,15 +153,29 @@ export async function uploadRows(args: UploadArgs): Promise<UploadOutcome> {
     }
 
     const res = await ddm.writeAll(opened, prepared.records);
-    await ddm.close(opened);
-    log.debug(
-      `uploaded ${res.committedRows}/${prepared.records.length} rows into ${library}/${file} ` +
-        `batch=${opened.effectiveBatchSize}`
-    );
+    // **結果を確定させてから閉じる**。writeAll は失敗しても値を返すので、
+    // close が壊れた接続で例外を投げると、部分成功の報告ごと失われる（それが最も要る場面）
+    try {
+      await ddm.close(opened);
+    } catch (e) {
+      log.warn(`close after write failed (${library}/${file}): ${String(e)}`);
+    }
+    if (res.uncertainRange) {
+      log.warn(
+        `partial upload into ${library}/${file}: committed=${res.committedRows} ` +
+          `uncertain=${res.uncertainRange.from}-${res.uncertainRange.to}: ${res.error ?? "(理由不明)"}`
+      );
+    } else {
+      log.debug(
+        `uploaded ${res.committedRows}/${prepared.records.length} rows into ${library}/${file} ` +
+          `batch=${opened.effectiveBatchSize}`
+      );
+    }
     return {
       ok: true,
       committedRows: res.committedRows,
       ...(res.uncertainRange ? { uncertainRange: res.uncertainRange } : {}),
+      ...(res.error !== undefined ? { error: res.error } : {}),
       batchSize: opened.effectiveBatchSize,
       ms: Date.now() - started
     };

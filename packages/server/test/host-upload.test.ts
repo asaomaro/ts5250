@@ -60,7 +60,9 @@ describe("入力の検証", () => {
 
   it("行の値は文字列か null に限る", async () => {
     expect((await post({ ...BASE, rows: [[123]] })).status).toBe(400);
-    expect((await post({ ...BASE, rows: [[null]] })).status).not.toBe(422);
+    // null は受理される（入力検証を抜けて接続まで進み、資格情報が無くて落ちる）
+    const res = await post({ ...BASE, rows: [[null]] });
+    expect((await res.json()).code).toBe("CONFIG_ERROR");
   });
 });
 
@@ -73,7 +75,16 @@ describe("行数の上限はサーバー側で強制される", () => {
   it("上限ちょうどは入力検証を通る（接続まで進んで別の理由で失敗する）", async () => {
     const rows = Array.from({ length: 10_000 }, () => ["x"]);
     const res = await post({ ...BASE, rows });
-    expect((await res.json()).code).toBe("CONFIG_ERROR"); // 資格情報が無い
+    const body = await res.json();
+    // **上限超過と区別する**——どちらも CONFIG_ERROR なので、メッセージで見分ける
+    expect(body.error).toMatch(/ユーザーとパスワード/);
+    expect(body.error).not.toMatch(/行数/);
+  });
+
+  it("**上限超過は行数の問題として返す**（資格情報の失敗と紛れない）", async () => {
+    const rows = Array.from({ length: 10_001 }, () => ["x"]);
+    const res = await post({ ...BASE, rows });
+    expect(res.status).toBe(400);
   });
 });
 

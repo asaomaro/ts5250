@@ -34,21 +34,26 @@ export function parseCsv(text: string): CsvParseResult {
   let field = "";
   let record: string[] = [];
   let quoted = false;
-  let fieldWasQuoted = false;
+  /** この行に引用符付きのフィールドがあったか。**空行の判定に要る**（`""` は空行ではない） */
+  let rowHadQuote = false;
   let i = 0;
+  /** 物理的な行番号（1 始まり）。エラーの案内に使う。空行の読み飛ばしに影響されない */
+  let physicalLine = 1;
 
   const endField = (): void => {
     record.push(field);
     field = "";
-    fieldWasQuoted = false;
   };
   const endRecord = (): void => {
     endField();
-    // 空行（1 列だけで中身が無い）は捨てる。引用符付きの空文字は**残す**——
-    // `""` と書いた人は「空の値」を意図しているため
-    const empty = record.length === 1 && record[0] === "";
+    // 空行（1 列だけで中身が無い）は捨てる。ただし `""` と書かれた行は**残す**——
+    // 書いた人は「空の値」を意図している。
+    // ⚠ 判定は `endField()` の**後**なので、引用符の有無は行単位で覚えておく必要がある
+    //   （フィールド単位のフラグは endField で消える）
+    const empty = record.length === 1 && record[0] === "" && !rowHadQuote;
     if (!empty) records.push(record);
     record = [];
+    rowHadQuote = false;
   };
 
   while (i < src.length) {
@@ -62,26 +67,35 @@ export function parseCsv(text: string): CsvParseResult {
           continue;
         }
         quoted = false;
+        // 閉じ引用符の直後は区切りか改行しか許さない。`"ab"cd` を黙って `abcd` にしない
+        const next = src[i + 1];
+        if (next !== undefined && next !== "," && next !== "\r" && next !== "\n") {
+          throw new As400Error(
+            "CONFIG_ERROR",
+            `CSV の ${physicalLine} 行目: 閉じ引用符の後に文字が続いています`
+          );
+        }
         i++;
         continue;
       }
+      if (ch === "\n") physicalLine++; // 引用符の中の改行も物理行としては進む
       field += ch;
       i++;
       continue;
     }
 
     if (ch === '"') {
-      if (field !== "") {
-        // `ab"cd` のような形。**黙って解釈を決めない**——どう直すべきか利用者に返す
-        throw new As400Error(
-          "CONFIG_ERROR",
-          `CSV の ${records.length + 1} 行目: 引用符は値の先頭にしか置けません`
-        );
+      if (field === "") {
+        quoted = true;
+        rowHadQuote = true;
+        i++;
+        continue;
       }
-      quoted = true;
-      fieldWasQuoted = true;
-      i++;
-      continue;
+      // `ab"cd` のような形。**黙って解釈を決めない**——どう直すべきか利用者に返す
+      throw new As400Error(
+        "CONFIG_ERROR",
+        `CSV の ${physicalLine} 行目: 引用符は値の先頭にしか置けません`
+      );
     }
     if (ch === ",") {
       endField();
@@ -90,6 +104,7 @@ export function parseCsv(text: string): CsvParseResult {
     }
     if (ch === "\r" || ch === "\n") {
       endRecord();
+      physicalLine++;
       // CRLF は 1 つの改行として扱う
       i += ch === "\r" && src[i + 1] === "\n" ? 2 : 1;
       continue;
@@ -103,7 +118,7 @@ export function parseCsv(text: string): CsvParseResult {
   }
   // 末尾に改行が無ければ最後の行がまだ確定していない。
   // 改行で終わっていれば field も record も空なので、この呼び出しは何も足さない
-  if (field !== "" || fieldWasQuoted || record.length > 0) endRecord();
+  if (field !== "" || rowHadQuote || record.length > 0) endRecord();
 
   if (records.length === 0) {
     throw new As400Error("CONFIG_ERROR", "CSV が空です");

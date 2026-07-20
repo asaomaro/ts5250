@@ -12,30 +12,9 @@ import { As400Error } from "../../errors.js";
 import type { DbConnection } from "../db/db-connection.js";
 import { query } from "../db/query.js";
 import type { ColumnLayoutInput } from "./record-layout.js";
+import { assertIdentifier } from "../../identifier.js";
 
-/**
- * IBM i のオブジェクト名として許す形。
- *
- * **SQL への文字列連結を避けられない箇所で使う**——`QSYS2.SYSCOLUMNS` の絞り込みに
- * パラメータマーカーを使えない実装のため、代わりに受け入れる文字を絞って注入経路を閉じる。
- * 名前は最大 10 文字（システム名）で、英大文字・数字・`_$#@` に限る。
- */
-const IDENTIFIER = /^[A-Z0-9_$#@]{1,10}$/;
-
-/**
- * ライブラリ名・表名として妥当か検査し、正規化（前後空白除去＋大文字化）して返す。
- * **取り込みと取得の両方がこれを使う**（検証規則を二重に持たない。design D1 の帰結）。
- */
-export function assertIdentifier(value: string, what: string): string {
-  const v = value.trim().toUpperCase();
-  if (!IDENTIFIER.test(v)) {
-    throw new As400Error(
-      "CONFIG_ERROR",
-      `${what}として使えません: ${value}（英大文字・数字・_$#@ の 1〜10 文字）`
-    );
-  }
-  return v;
-}
+export { assertIdentifier } from "../../identifier.js";
 
 /**
  * 列の情報を宣言順で返す。

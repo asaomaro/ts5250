@@ -1,7 +1,7 @@
 schema: 3
 slug: csv-upload-ui
-current: plan
-approved: [requirement, research, spec, design, plan]
+current: test
+approved: [requirement, research, spec, design, plan, coding, test]
 mode: interactive
 humanGates: []
 maxSendBacks: 3

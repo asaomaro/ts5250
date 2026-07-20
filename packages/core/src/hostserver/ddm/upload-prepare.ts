@@ -10,7 +10,7 @@
  * 取り込みロジックの大半がここに集まるので、実機なしで単体テストで固められる。
  */
 import { codecForCcsid } from "../../codec/codec.js";
-import { encodeChar, encodeInt, encodePacked, encodeZoned } from "./encode.js";
+import { encodeInt, encodePacked, encodeZoned } from "./encode.js";
 import {
   buildRecordLayout,
   isSupportedDataType,
@@ -106,7 +106,11 @@ export function prepareUpload(args: PrepareUploadArgs): PrepareResult {
 
   // 構造が崩れていたら行は見ない。**列が対応づかない状態で行を検査しても意味のある指摘にならない**
   if (rejections.length > 0) {
-    return { ok: false, rejections: rejections.slice(0, MAX_REJECTIONS), truncated: rejections.length > MAX_REJECTIONS };
+    return {
+      ok: false,
+      rejections: rejections.slice(0, MAX_REJECTIONS),
+      truncated: rejections.length > MAX_REJECTIONS
+    };
   }
 
   // ---- 2. 全行を符号化する ----
@@ -134,7 +138,13 @@ export function prepareUpload(args: PrepareUploadArgs): PrepareResult {
     const encoded = encodeRow(layout, values, rowNo, rejections);
     if (encoded) records.push(encoded);
     if (rejections.length >= MAX_REJECTIONS) {
-      return { ok: false, rejections: rejections.slice(0, MAX_REJECTIONS), truncated: true };
+      // **まだ見ていない行が残っているときだけ truncated**。ちょうど上限で終わった場合、
+      // 切り捨てたものは無いのに「先頭 100 件まで」と案内するのは嘘になる
+      return {
+        ok: false,
+        rejections: rejections.slice(0, MAX_REJECTIONS),
+        truncated: rejections.length > MAX_REJECTIONS || r < rows.length - 1
+      };
     }
   }
 
@@ -174,6 +184,13 @@ function encodeRow(
       const ccsid = f.ccsid ?? 37;
       const codec = codecForCcsid(ccsid);
       const { bytes, substituted } = codec.encode(v);
+      if (substituted === 0 && bytes.length <= f.size) {
+        // 成功経路では符号化を 1 回で済ませる（encodeChar に渡すと同じ変換をもう一度走らせる）
+        const padded = new Uint8Array(f.size).fill(0x40);
+        padded.set(bytes, 0);
+        out.set(padded, f.offset);
+        continue;
+      }
       if (substituted > 0) {
         // どの文字が書けないかを返す。**1 文字ずつ試す**——コーデックは件数しか返さないため。
         // 失敗経路でしか通らないので、この総当たりの費用は問題にならない
@@ -193,7 +210,6 @@ function encodeRow(
         failed = true;
         continue;
       }
-      out.set(encodeChar(v, f.size, (t) => codec.encode(t)), f.offset);
       continue;
     }
 
