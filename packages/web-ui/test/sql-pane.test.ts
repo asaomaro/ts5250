@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import SqlPane from "../src/components/SqlPane.vue";
 import { systemsStore } from "../src/stores/systems.js";
+import { toCsv } from "../src/csv.js";
 
 /**
  * SQL ペイン。実際の実行は実機でしか確かめられないので、
@@ -84,9 +85,18 @@ describe("実行", () => {
 
   it("結果を列名つきの表で出し、NULL を明示する", async () => {
     const w = await run();
-    expect(w.findAll("th").map((t) => t.text())).toEqual(["ID", "NAME"]);
+    // 先頭はレコード番号の固定列
+    expect(w.findAll("th").map((t) => t.text())).toEqual(["#", "ID", "NAME"]);
     expect(w.findAll("tbody tr")).toHaveLength(2);
     expect(w.find(".null").text()).toBe("NULL");
+    w.unmount();
+  });
+
+  it("**レコード番号は 1 からの通し番号**で、CSV には入れない", async () => {
+    const w = await run();
+    expect(w.findAll("tbody .rownum").map((t) => t.text())).toEqual(["1", "2"]);
+    // 番号は画面の都合なので、落とすデータには含めない
+    expect(toCsv(["ID", "NAME"], OK_BODY.rows as never)).not.toContain("#");
     w.unmount();
   });
 
@@ -168,6 +178,34 @@ describe("ページング", () => {
   it("CSV ボタンに表示中の件数を出す（何を落とすのか分かるように）", async () => {
     const w = await run();
     expect(w.find("button.link").text()).toContain("2 件");
+    w.unmount();
+  });
+});
+
+describe("SQL 欄と結果欄の境界", () => {
+  /**
+   * つまみ（textarea の resize）は「どこを掴めば動くのか分からない」と指摘を受けたので、
+   * **境界の罫線そのもの**を掴めるようにした。ここではその導線だけを固定する
+   * （見た目とドラッグの追従は実ブラウザで確かめる）。
+   */
+  it("罫線がキーボードでも動かせる", async () => {
+    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const splitter = w.find(".splitter");
+    expect(splitter.attributes("role")).toBe("separator");
+    const before = Number(/height:\s*(\d+)px/.exec(w.find("textarea").attributes("style") ?? "")?.[1]);
+
+    await splitter.trigger("keydown", { key: "ArrowDown" });
+    const after = Number(/height:\s*(\d+)px/.exec(w.find("textarea").attributes("style") ?? "")?.[1]);
+    expect(after).toBeGreaterThan(before);
+    w.unmount();
+  });
+
+  it("下限より小さくならない（結果欄に押し潰されない）", async () => {
+    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const splitter = w.find(".splitter");
+    for (let i = 0; i < 30; i++) await splitter.trigger("keydown", { key: "ArrowUp", shiftKey: true });
+    const h = Number(/height:\s*(\d+)px/.exec(w.find("textarea").attributes("style") ?? "")?.[1]);
+    expect(h).toBe(60);
     w.unmount();
   });
 });

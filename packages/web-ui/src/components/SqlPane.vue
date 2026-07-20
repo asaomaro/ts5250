@@ -146,6 +146,53 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/**
+ * SQL 欄と結果欄の境界をドラッグして高さを変える。
+ *
+ * 以前は textarea の `resize: vertical`（右下のつまみ）だけだったが、
+ * **どこを掴めば動くのか分からない**という指摘を受けた。
+ * 境界の罫線そのものを掴めるようにして、つまみは消す。
+ */
+const editorHeight = ref(110);
+const dragging = ref(false);
+const MIN_EDITOR = 60;
+const MAX_EDITOR = 600;
+let dragStartY = 0;
+let dragStartHeight = 0;
+
+function clampHeight(h: number): number {
+  return Math.min(MAX_EDITOR, Math.max(MIN_EDITOR, h));
+}
+
+function onSplitterDown(e: PointerEvent): void {
+  dragging.value = true;
+  dragStartY = e.clientY;
+  dragStartHeight = editorHeight.value;
+  // capture しないと、速く動かしたときにポインタが罫線から外れて追従が切れる
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onSplitterMove(e: PointerEvent): void {
+  if (!dragging.value) return;
+  editorHeight.value = clampHeight(dragStartHeight + (e.clientY - dragStartY));
+}
+
+function onSplitterUp(e: PointerEvent): void {
+  if (!dragging.value) return;
+  dragging.value = false;
+  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+}
+
+/** キーボードでも動かせるように（罫線は separator として focus できる） */
+function onSplitterKeydown(e: KeyboardEvent): void {
+  const step = e.shiftKey ? 40 : 10;
+  if (e.key === "ArrowUp") editorHeight.value = clampHeight(editorHeight.value - step);
+  else if (e.key === "ArrowDown") editorHeight.value = clampHeight(editorHeight.value + step);
+  else return;
+  e.preventDefault();
+}
+
 /** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
 function lobText(v: unknown): string {
   const lob = v as { value?: unknown; unavailable?: string };
@@ -200,7 +247,7 @@ function download(): void {
     <textarea
       v-model="sql"
       class="editor"
-      rows="5"
+      :style="{ height: `${editorHeight}px` }"
       spellcheck="false"
       placeholder="SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 100 ROWS ONLY"
       @keydown="onKeydown"
@@ -209,6 +256,22 @@ function download(): void {
       SELECT のみ実行できます（Ctrl+Enter で実行）。<strong>下までスクロールするか
       End / PageDown で続きを読み足します。</strong>「1 度に取得」はその 1 回ぶんの件数です。
     </p>
+
+    <!-- SQL 欄と結果欄の境界。この罫線を掴んで高さを変える -->
+    <div
+      class="splitter"
+      :class="{ dragging }"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="SQL 欄と結果欄の境界（ドラッグまたは上下キーで高さを変えられます）"
+      tabindex="0"
+      title="ドラッグすると SQL 欄の高さを変えられます"
+      @pointerdown="onSplitterDown"
+      @pointermove="onSplitterMove"
+      @pointerup="onSplitterUp"
+      @pointercancel="onSplitterUp"
+      @keydown="onSplitterKeydown"
+    ></div>
 
     <LoadingBar v-if="slowLoading" label="実行しています…" />
 
@@ -225,6 +288,8 @@ function download(): void {
     <table>
       <thead>
         <tr>
+          <!-- レコード番号。**横スクロールしても残す**ので、どの行を見ているか見失わない -->
+          <th class="rownum" title="レコード番号（読み足した順の通し番号）">#</th>
           <th v-for="c in columns" :key="c.name" :title="`${c.typeName}${c.nullable ? '' : ' NOT NULL'}`">
             {{ c.name }}
           </th>
@@ -232,6 +297,7 @@ function download(): void {
       </thead>
       <tbody>
         <tr v-for="(r, i) in rows" :key="i">
+          <td class="rownum">{{ i + 1 }}</td>
           <td v-for="c in columns" :key="c.name">
             <span v-if="r[c.name] === null" class="null">NULL</span>
             <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
@@ -272,8 +338,31 @@ label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; co
   border-radius: 6px;
   background: var(--card);
   color: var(--ink);
-  resize: vertical;
+  /* 高さは下の罫線（.splitter）で変える。右下のつまみは出さない */
+  resize: none;
 }
+/* SQL 欄と結果欄の境界。掴めることが見て分かるように、罫線に握り手を描く */
+.splitter {
+  flex: none;
+  height: 9px;
+  margin: 2px 0 6px;
+  cursor: row-resize;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+.splitter::after {
+  content: "";
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.splitter:hover::after,
+.splitter.dragging::after { background: var(--accent); }
+.splitter:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
 .hint code { font-family: var(--mono); }
 table { border-collapse: collapse; width: 100%; }
@@ -286,9 +375,29 @@ td { font-family: var(--mono); white-space: pre; }
 .detail { font-family: var(--mono); font-size: 12px; }
 .warn { color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; font-size: 12px; }
 .empty { color: var(--muted); text-align: center; }
-.rows-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); }
+/* 地の色を明示する。親（.group）が半透明の緑を重ねているため、
+   固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
+   表の領域を不透明にして、固定列と本文を同じ地の上に載せる */
+.rows-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); background: var(--paper); }
 /* 列見出しはスクロールしても残す */
 .rows-scroll thead th { position: sticky; top: 0; background: var(--card); z-index: 1; }
+/* レコード番号は**横スクロールでも動かさない**。
+   背景を敷かないと、下を流れるセルが透けて重なる */
+.rownum {
+  position: sticky;
+  left: 0;
+  /* 本文の行は背景を敷いていないので、地の色（--paper）を敷く。
+     --card（白）にすると**固定列だけ白い帯**になる（実ブラウザの拡大で判明） */
+  background: var(--paper);
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  /* border-collapse 下の sticky セルは border が付いてこないので影で引く */
+  box-shadow: 1px 0 0 var(--line);
+  user-select: none;
+}
+/* 左上の角は縦・横どちらの sticky にも勝つ必要がある。見出し行は --card */
+.rows-scroll thead th.rownum { z-index: 2; background: var(--card); }
 .rows-scroll:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 .more { color: var(--muted); font-size: 12px; text-align: center; padding: 6px 0; }
 </style>
