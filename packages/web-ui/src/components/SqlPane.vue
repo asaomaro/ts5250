@@ -3,7 +3,7 @@ import { ref, computed } from "vue";
 import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
-import { csvBlob, csvFileName, toCsv } from "../csv.js";
+import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
 
 /**
  * SQL の実行と CSV ダウンロード（ACS のデータ転送に相当する入り口）。
@@ -21,7 +21,7 @@ interface Column {
   typeName: string;
   nullable: boolean;
 }
-type Row = Record<string, string | number | boolean | null>;
+type Row = Record<string, string | number | boolean | null | { kind: "lob" }>;
 
 const sql = ref("");
 const maxRows = ref(200);
@@ -153,6 +153,7 @@ function download(): void {
         <tr v-for="(r, i) in rows" :key="i">
           <td v-for="c in columns" :key="c.name">
             <span v-if="r[c.name] === null" class="null">NULL</span>
+            <span v-else-if="isLob(r[c.name])" class="lob" title="LOB は値を取得していません（ロケーターのみ）">(LOB)</span>
             <template v-else>{{ r[c.name] }}</template>
           </td>
         </tr>
@@ -190,6 +191,7 @@ th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: lef
 th { color: var(--muted); font-weight: 600; font-size: 12px; font-family: var(--mono); }
 td { font-family: var(--mono); white-space: pre; }
 .null { color: var(--muted); font-style: italic; }
+.lob { color: var(--muted); font-style: italic; }
 .error { color: #c62828; }
 .detail { font-family: var(--mono); font-size: 12px; }
 .warn { color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; font-size: 12px; }

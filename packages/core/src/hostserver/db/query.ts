@@ -15,7 +15,13 @@ import { codecForCcsid } from "../../codec/codec.js";
 import { DB_REQ, DB_CP, ORS } from "./db-datastream.js";
 import { DbConnection } from "./db-connection.js";
 import { parseDataFormat, parseResultData, parseSqlca, type ResultFormat } from "./db-reply.js";
+import {
+  parseExtendedResultData,
+  parseSuperExtendedDataFormat,
+  type ExtColumn
+} from "./db-reply-ext.js";
 import { decodeRow, type ColumnMeta, type DbValue } from "./db-decode.js";
+import { typeName, jsTypeOf } from "./db-types.js";
 
 const log = childLog({ component: "hostserver-sql" });
 
@@ -174,6 +180,20 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
   });
   checkSqlca(prepared, "prepare");
 
+  // **超拡張形式を優先**。接続時に 0x3821 を送っているので通常はこちらが返る。
+  // 元形式も見るのは、0xF2 を受け付けないホストが見つかったときに戻せるようにするため
+  const rawExt = findParam(prepared, DB_CP.superExtendedDataFormat);
+  if (rawExt && rawExt.length > 0) {
+    const ext = parseSuperExtendedDataFormat(rawExt);
+    const format: ResultFormat = {
+      columns: ext.columns.map(toColumnMeta),
+      recordSize: ext.recordSize
+    };
+    log.debug(`prepared (super extended): ${format.columns.length} columns, record size ${format.recordSize}`);
+    await openCursor(conn);
+    return format;
+  }
+
   const rawFormat = findParam(prepared, DB_CP.dataFormat);
   // 空のパラメータ（長さ 0）で返ることがあるので `!rawFormat` だけでは足りない
   if (!rawFormat || rawFormat.length === 0) {
@@ -182,17 +202,19 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
     // 分からず、原因（文の種類・未対応の型・権限）を切り分けられなかった。
     const t = prepared.dbTemplate;
     throw new As400Error(
-      "HOST_SERVER_UNSUPPORTED",
+      "PROTOCOL_ERROR",
       `この結果セットは取得できません（rcClass=${t.rcClass}, code=${t.rcClassReturnCode}）。` +
-        "**LOB 列（DBCLOB / CLOB / BLOB）を含む結果セットは未対応**です" +
-        "（ロケーター経由の取得を実装していないため）。" +
-        "列を明示して LOB を除くか、CAST(... AS VARCHAR(n)) してください。" +
-        "例: QSYS2.SYSTABLES は MQT_DEFINITION が DBCLOB のため SELECT * が通りません"
+        "SELECT 以外の文か、このホストが超拡張データ形式を受け付けない可能性があります"
     );
   }
   const format = parseDataFormat(rawFormat);
   log.debug(`prepared: ${format.columns.length} columns, record size ${format.recordSize}`);
 
+  await openCursor(conn);
+  return format;
+}
+
+async function openCursor(conn: DbConnection): Promise<void> {
   const opened = await conn.request({
     reqId: DB_REQ.openAndDescribe,
     orsBitmap: ORS.sendReplyImmediately | ORS.dataFormat | ORS.sqlca,
@@ -203,7 +225,26 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
     allowTemplateError: true
   });
   checkSqlca(opened, "open cursor");
-  return format;
+}
+
+/** 超拡張形式の列を既存の ColumnMeta に写す（下流はこの型だけを見る） */
+function toColumnMeta(c: ExtColumn): ColumnMeta {
+  // 型コードは NULL 可なら +1 されている（元形式と同じ規則）
+  const nullable = c.sqlType % 2 === 1;
+  const type = nullable ? c.sqlType - 1 : c.sqlType;
+  return {
+    name: c.name,
+    type,
+    typeName: typeName(type),
+    offset: c.offset,
+    length: c.length,
+    scale: c.scale,
+    precision: c.precision,
+    ccsid: c.ccsid,
+    nullable,
+    jsType: jsTypeOf(type),
+    ...(c.lobLocator ? { lobLocator: c.lobLocator, lobMaxSize: c.lobMaxSize } : {})
+  };
 }
 
 /** 行が尽きるまで fetch を繰り返す */
@@ -222,6 +263,21 @@ async function* fetchAll(
       ],
       allowTemplateError: true
     });
+
+    const rawExt = findParam(reply, DB_CP.extendedResultData);
+    if (rawExt !== undefined) {
+      if (rawExt.length === 0) {
+        checkSqlca(reply, "fetch");
+        return;
+      }
+      const data = parseExtendedResultData(rawExt);
+      for (let r = 0; r < data.rows.length; r++) {
+        yield decodeRow(data.rows[r]!, format.columns, data.nulls[r] ?? []);
+      }
+      checkSqlca(reply, "fetch");
+      if (data.rows.length < blockSize) return;
+      continue;
+    }
 
     const raw = findParam(reply, DB_CP.resultData);
     // **空のパラメータが返ることがある**（パラメータ自体は在るが長さ 0）。
