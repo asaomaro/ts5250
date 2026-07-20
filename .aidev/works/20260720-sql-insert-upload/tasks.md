@@ -37,22 +37,22 @@
 
 ## server
 
-- [ ] T8: `host-upload.ts` の実行経路を `insertRows` に差し替える（依存: T5, T6, T7）。
+- [x] T8: `host-upload.ts` の実行経路を `insertRows` に差し替える（依存: T5, T6, T7）。
       **API の形（`committedRows` / `uncertainRange` / 拒否理由）は変えない**。
       接続は `DbPool` から借り、**借りている間は他の SQL を流さない**（spec D6）
-- [ ] T9: **`/api/host/sql` が読み取り専用のままであること**をテストで固定（依存: T8）。
+- [x] T9: **`/api/host/sql` が読み取り専用のままであること**をテストで固定（依存: T8）。
       requirement の完了条件。`query` に更新系が通らないことを回帰として残す
-- [ ] T10: MCP ツール `host_upload_table` が新経路で動くことを確認（依存: T8）。
+- [x] T10: MCP ツール `host_upload_table` が新経路で動くことを確認（依存: T8）。
       **入口は変えない**（`uploadRows` の中身が変わるだけ）
 
 ## tools
 
-- [ ] T11: `hostserver-check/src/upload.ts` を新経路向けに更新（依存: T8）。
+- [x] T11: `hostserver-check/src/upload.ts` を新経路向けに更新（依存: T8）。
       DDM 版の検証項目（日本語・型・性能）をそのまま新経路で回せるようにする
 
 ## 仕上げ
 
-- [ ] T12: **実機通し確認**（依存: T11）。
+- [x] T12: **実機通し確認**（依存: T11）。
       (a) CSV から投入 → SQL で読み返して一致
       (b) **日本語**（CCSID 5035）が往復する
       (c) `VARCHAR`（引用符入り）・日付時刻・`GRAPHIC` が入る

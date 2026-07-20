@@ -205,27 +205,23 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
     "host_upload_table",
     {
       description:
-        "CSV を IBM i の物理ファイルへ**追記**する（DDM のレコードレベルアクセス）。" +
-        "**追記のみ**——更新・削除・表の作成はできない。" +
+        "CSV を IBM i の表へ**追加**する（database サーバー経由の INSERT）。" +
+        "**追加のみ**——更新・削除・表の作成はできない。" +
         "csv（文字列）か columns+rows のどちらかで渡す。" +
-        "対応する列型は CHAR / DECIMAL / NUMERIC / SMALLINT / INTEGER / BIGINT のみで、" +
-        "VARCHAR・日付時刻・GRAPHIC を含む表は**1 行も書かずに**拒否される。" +
-        "文字は列ごとの CCSID で符号化し、表せない文字があれば置換せず拒否する。" +
+        "型はホストが解釈するので CHAR / VARCHAR / 数値 / 日付時刻 / GRAPHIC を扱える。" +
+        "値はパラメータとして渡すため、引用符を含む文字列もそのまま入る。" +
+        "表せない文字（列の CCSID で書けない文字）は置換せず拒否する。" +
         "⚠ **コミットメント制御が無いため巻き戻せない**——途中で失敗しても書けた分は残る。" +
         "その場合 committedRows（確定した行数）と uncertainRange（確定不明な行範囲）を返す。",
       inputSchema: {
         ...targetShape,
         library: z.string(),
         file: z.string(),
-        member: z.string().optional(),
-        /** レコード様式名。DDS 由来の物理ファイルで必要になることがある（既定はファイル名） */
-        recordFormat: z.string().optional(),
         /** CSV 文字列（ヘッダー行を含む）。columns+rows と排他 */
         csv: z.string().optional(),
         columns: z.array(z.string()).optional(),
         rows: z.array(z.array(z.string().nullable())).optional(),
-        emptyAsNull: z.boolean().optional(),
-        blockingFactor: z.number().int().positive().optional()
+        emptyAsNull: z.boolean().optional()
       },
       outputSchema: {
         ok: z.boolean(),
@@ -253,10 +249,7 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
           opts: target(input),
           library: input.library,
           file: input.file,
-          ...(input.member !== undefined ? { member: input.member } : {}),
-          ...(input.recordFormat !== undefined ? { recordFormat: input.recordFormat } : {}),
-          ...(input.emptyAsNull !== undefined ? { emptyAsNull: input.emptyAsNull } : {}),
-          ...(input.blockingFactor !== undefined ? { blockingFactor: input.blockingFactor } : {})
+          ...(input.emptyAsNull !== undefined ? { emptyAsNull: input.emptyAsNull } : {})
         };
         // **HTTP と同じ実行経路を通す**（入口が違うだけ。検査を二重に持たない）
         const outcome = input.csv

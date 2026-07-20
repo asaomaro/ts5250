@@ -2,14 +2,18 @@
  * CSV 取り込みの実機チェック（手動）。
  *
  * `ddm.ts` が **DDM 層**（バイト配置・バッチ）を確かめるのに対し、こちらは
- * **取り込みの経路まるごと**（列メタデータ取得 → 事前検査 → バッチ書き込み）を確かめる。
+ * **取り込みの経路まるごと**（列メタデータ取得 → 事前検査 → INSERT）を確かめる。
  * サーバーの `uploadRows` をそのまま呼ぶので、HTTP と MCP が通る道と同一である。
  *
+ * 経路は **database サーバー経由の INSERT**（パラメータマーカー）。
+ * DDM 経路だった頃に対象外だった型（VARCHAR・日付時刻・GRAPHIC）も通る。
+ *
  * 確かめるのは requirement の受け入れ基準:
- *   (a) CSV から投入し、**SQL で読み返して**一致する（書いた経路と確かめる経路を分ける）
+ *   (a) CSV から投入し、**SQL で読み返して**一致する
  *   (b) 日本語が CCSID 5035/930 の列に書け、既知の基準行と一致する
  *   (c) CCSID 273 の列に日本語を入れた CSV は **1 行も書かずに**拒否される
  *   (d) 100 行がバッチでまとまり、往復数が件数に比例しない
+ *   (e) DDM で対象外だった型（VARCHAR・日付時刻・GRAPHIC）が通る
  *
  * 使い方（`.env` に PUB400_USER / PUB400_PASSWORD がある前提）:
  *   node --env-file=../../.env dist/upload.js --tls
@@ -124,6 +128,25 @@ async function main(): Promise<void> {
       out(`   表の行数: ${String(back.rows[0]?.["N"])}（100 であること）`);
       out(`   往復数: ${Math.ceil(100 / (res.ok ? res.batchSize : 1))}（1 件 1 往復なら 100 往復）`);
     });
+    // ---- (e) DDM で対象外だった型 ----
+    out("=== (e) VARCHAR / 日付時刻 / GRAPHIC（DDM では対象外だった型）===");
+    await withTable(
+      cmd,
+      "ZZUP5",
+      "(ID INTEGER NOT NULL, VC VARCHAR(30), D DATE, TS TIMESTAMP, G GRAPHIC(4) CCSID 300)",
+      async () => {
+        const res = await uploadRows({
+          opts,
+          library,
+          file: "ZZUP5",
+          header: ["ID", "VC", "D", "TS", "G"],
+          rows: [["1", "quote'test", "2026-07-20", "2026-07-20-13.45.00.000000", "日本"]]
+        });
+        out(`   ${JSON.stringify(res)}`);
+        const back = await query(db, `SELECT * FROM ${library}.ZZUP5`);
+        for (const r of back.rows) out(`   ${JSON.stringify(r)}`);
+      }
+    );
   } catch (e) {
     if (e instanceof As400Error) out(`エラー [${e.code}] ${e.message}`);
     else out(`エラー ${String(e)}`);

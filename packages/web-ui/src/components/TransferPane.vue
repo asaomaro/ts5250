@@ -29,9 +29,6 @@ const direction = ref<Direction>("upload");
 
 const library = ref("");
 const file = ref("");
-const member = ref("");
-/** レコード様式名。DDS 由来の物理ファイルはファイル名と一致しないことがある（実機で確認） */
-const recordFormat = ref("");
 const where = ref("");
 const emptyAsNull = ref(false);
 
@@ -150,8 +147,6 @@ async function upload(): Promise<void> {
           source: { system: systemsStore.selected },
           library: library.value.trim().toUpperCase(),
           file: file.value.trim().toUpperCase(),
-          ...(member.value.trim() ? { member: member.value.trim() } : {}),
-          ...(recordFormat.value.trim() ? { recordFormat: recordFormat.value.trim() } : {}),
           columns: header.value,
           rows: rows.value,
           ...(emptyAsNull.value ? { emptyAsNull: true } : {})
@@ -268,11 +263,7 @@ function rejectionWhere(r: Rejection): string {
       </div>
       <label>ライブラリ <input v-model="library" size="10" placeholder="MYLIB" /></label>
       <label>ファイル <input v-model="file" size="10" placeholder="TESTPF" /></label>
-      <label v-if="direction === 'upload'">メンバー <input v-model="member" size="8" placeholder="*FIRST" /></label>
-      <label v-if="direction === 'upload'" title="DDS で作った物理ファイルはファイル名と違うことがあります">
-        様式 <input v-model="recordFormat" size="8" :placeholder="file || 'ファイル名'" />
-      </label>
-      <label v-else>絞り込み <input v-model="where" size="18" placeholder="ID < 100" /></label>
+      <label v-if="direction === 'download'">絞り込み <input v-model="where" size="18" placeholder="ID < 100" /></label>
       <button
         v-if="direction === 'upload'"
         class="go"

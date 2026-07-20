@@ -164,3 +164,37 @@ describe("暖機（/warm）", () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * **取り込み経路を足しても `/api/host/sql` は読み取り専用のまま**であること。
+ *
+ * `20260720-sql-insert-upload` で database サーバー経由の INSERT を実装したが、
+ * それは別ルート（`/api/host/upload`）・別の要求コードに閉じてあり、
+ * `query` の性質（結果セットを持たない文を実行できない）は変えていない。
+ * ここが崩れると**ブラウザから任意の更新が通る**ようになるので、回帰として固定する。
+ */
+describe("読み取り専用の不変条件（取り込み経路を足した後も）", () => {
+  it("**更新系の SQL でも実行経路は同じ**（文字列としては素通しし、実行は query が拒む）", async () => {
+    // 入力検証で弾いているわけではないことを明示する——弾いていると誤解すると、
+    // 「検証を緩めれば更新できる」と読めてしまう
+    const res = await post({ source: SRC, sql: "INSERT INTO X.Y VALUES (1)" });
+    // 資格情報が無いので接続段階で落ちる＝入力検証は通っている
+    expect((await res.json()).code).toBe("CONFIG_ERROR");
+  });
+
+  it("SQL ルートは取り込み用のパラメータを受け付けない（別ルートに閉じている）", async () => {
+    const res = await post({ source: SRC, sql: "SELECT 1", columns: ["A"], rows: [["x"]] });
+    expect(res.status).toBe(400); // strict schema が拒否する
+  });
+
+  it("**取り込みは別ルート**であることを固定する", async () => {
+    const upload = await app().request("/api/host/upload", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: SRC, library: "L", file: "F", columns: ["A"], rows: [["x"]] })
+    });
+    // 存在し、SQL ルートとは独立に動く（ここでは資格情報が無くて落ちる）
+    expect(upload.status).toBe(400);
+    expect((await upload.json()).code).toBe("CONFIG_ERROR");
+  });
+});
