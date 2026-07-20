@@ -174,7 +174,27 @@ SQL（既定路線・本命）                       ✅
   - `answerMessage` の応答文字列だけ**可変長で送っている**（他の属性は固定長・空白詰め）。
     MSGREPLY が固定長を要求するなら隣の値を巻き込む恐れがある。
     **未検証なので実装は変えていない**——検証できる環境が要る
-- [ ] IFS のディレクトリ操作と、`DEFAULT_CHUNK` を超える複数ブロック読み書きの検証
+- [x] IFS のディレクトリ操作と、`DEFAULT_CHUNK` を超える複数ブロック読み書きの検証
+    → 20260720-ifs-file-browser で消化。複数ブロックは 4MB まで実機で SHA-256 一致、
+      ディレクトリ操作は listFiles(一覧)/mkdir(作成) を実装・実機検証（rmdir は下記に残す）
+
+## IFS ファイルブラウザからの積み残し（2026-07-21 追記）
+
+20260720-ifs-file-browser で Web UI から IFS を扱えるようにした際、
+spec に含むが今回は実装しなかったもの。各 work の decisions に理由あり。
+
+- [ ] IFS テキストの CCSID 決定表（中身推定 → タグ → 手動切替）と `ccsid`/`detectedBy` 応答
+    → 現状 UTF-8 で読めないテキストは content:null で「文字コード未対応」の案内。
+      **実機の日本語テキスト（EBCDIC）の多くはこの状態**。編集も UTF-8 に限られる。
+      listFiles の応答には内容 CCSID が無い（名前の CCSID のみ）ので、
+      属性取得の別要求か SQL の IFS_OBJECT_STATISTICS から引く必要がある（research F1-5 / 02 D7）
+- [ ] IFS プレビューのサイズ上限（5MB）とヌルバイト判定（03 D11）
+    → server の readMaxBytes が最後の砦。クライアント側で先回りすると体感が良くなる
+- [ ] IFS のディレクトリ削除（rmdir = 0x000E, CP 0x0001）
+    → 一覧・作成は実装済み。要求 ID とレイアウトは research で確定済み（01 の調査）
+- [ ] IFS の zip 上限「値」を UI に表示（現状は超過した実測値のみ）
+- [ ] CLI 引数 `--ifs-zip-max-bytes`/`-files`/`-dirs`/`--ifs-read-max-bytes` を README に追記
+- [ ] IFS プレビューの競合対策（速い応答が勝つ。世代トークンで塞ぐ。03 review S3）
 
 ## MCP 公開からの積み残し（2026-07-19 追記）
 

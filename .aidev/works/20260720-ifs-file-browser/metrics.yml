@@ -9,3 +9,13 @@ events:
   - { ts: 2026-07-20T13:29:55Z, phase: design, event: approved }
   - { ts: 2026-07-20T13:30:32Z, phase: plan, event: start }
   - { ts: 2026-07-20T13:34:20Z, phase: plan, event: approved, metrics: { tasks_planned: 3 } }
+  - { ts: 2026-07-20T22:25:53Z, phase: test, event: sent_back }
+  - { ts: 2026-07-20T22:34:27Z, phase: test, event: approved, metrics: { passed: 1, failed: 0 } }
+  - { ts: 2026-07-20T22:50:18Z, phase: review, event: sent_back }
+  - { ts: 2026-07-20T23:15:20Z, phase: test, event: start }
+  - { ts: 2026-07-20T23:15:20Z, phase: test, event: approved, metrics: { passed: 1, failed: 0 } }
+  - { ts: 2026-07-20T23:15:31Z, phase: review, event: start }
+  - { ts: 2026-07-20T23:15:31Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0 } }
+  - { ts: 2026-07-20T23:16:28Z, phase: walkthrough, event: start }
+  - { ts: 2026-07-20T23:18:06Z, phase: walkthrough, event: approved }
+  - { ts: 2026-07-20T23:19:16Z, phase: deliver, event: approved }
