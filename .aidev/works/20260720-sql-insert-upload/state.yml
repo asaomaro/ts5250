@@ -1,0 +1,8 @@
+schema: 3
+slug: sql-insert-upload
+current: plan
+approved: [requirement, research, spec, plan]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260720-csv-upload-ui]

@@ -142,6 +142,15 @@ export class DbConnection {
     params: { cp: number; value: Uint8Array }[];
     /** template のエラーを呼び出し側で扱う場合に true */
     allowTemplateError?: boolean;
+    /**
+     * パラメータマーカー・ディスクリプタのハンドル（template のオフセット 16）。
+     *
+     * **RPB ハンドル（オフセット 14）とは別の欄**である。原典も
+     * `writeTemplate(parms, orsBitmap, pmHandle, rpbHandle)` と分けて書く。
+     * ここを RPB ハンドルと取り違えると、準備した文を見失って
+     * 「エラーにならないのに何も起きない」状態になる（スパイクで踏んだ）。
+     */
+    parameterMarkerHandle?: number;
   }): Promise<DbReply> {
     if (this.closed) {
       throw new As400Error("SESSION_CLOSED", "database connection is closed");
@@ -149,6 +158,9 @@ export class DbConnection {
     const template = buildDbTemplate({
       orsBitmap: opts.orsBitmap ?? ORS.sendReplyImmediately,
       rpbHandle: RPB_HANDLE,
+      ...(opts.parameterMarkerHandle !== undefined
+        ? { parameterMarkerHandle: opts.parameterMarkerHandle }
+        : {}),
       parameterCount: opts.params.length
     });
     const frame = buildRequest({

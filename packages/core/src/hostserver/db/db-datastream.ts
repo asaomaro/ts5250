@@ -37,6 +37,11 @@ export const DB_REQ = {
   fetch: 0x180b,
   openDescribeFetch: 0x180e,
   setServerAttributes: 0x1f80,
+  /**
+   * パラメータマーカーのディスクリプタを登録する。
+   * ハンドルは template の **parameterMarkerHandle 欄**に載る（RPB ハンドルとは別欄）。
+   */
+  changeDescriptor: 0x1e00,
   /** RPB（要求パラメータブロック）作成。作る RPB のハンドルは template に載せる */
   createRpb: 0x1d00,
   deleteRpb: 0x1d02
@@ -132,7 +137,19 @@ export const DB_CP = {
    */
   resultData: 0x3806,
   /** SQLCA（SQLCODE / SQLSTATE） */
-  sqlca: 0x3807
+  sqlca: 0x3807,
+
+  // --- パラメータマーカー（取り込み用。`db/insert.ts` が使う） ---
+  /** 応答: super extended なマーカー形式。**結果列の形式と同一の並び** */
+  parameterMarkerFormat: 0x3813,
+  /** 要求: マーカー形式の登録（changeDescriptor に載せる） */
+  extendedParameterMarkerFormat: 0x381e,
+  /** 要求: マーカーの値。20 バイトヘッダー ＋ 指標 ＋ 行データ */
+  extendedParameterMarkerData: 0x381f,
+  /** 応答: メッセージ ID（診断ビットを立てたときに返る） */
+  messageId: 0x3801,
+  /** 応答: メッセージ本文（同上） */
+  messageText: 0x3802
 } as const;
 
 /** 応答 template（40 バイトヘッダーの 20〜39） */
