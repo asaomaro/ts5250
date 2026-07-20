@@ -1,6 +1,9 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# flaky テスト追跡の失敗ログ（scripts/flake-hunt.sh）
+.flake-logs/
 .env
 *.log
 .aidev/current
