@@ -182,13 +182,28 @@ watch(view, refresh, { immediate: true });
 </template>
 
 <style scoped>
-.admin { height: 100%; overflow: auto; padding: 10px; font-size: 13px; }
-.bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+/* ペイン自体はスクロールさせない。スクロールは .section の中だけに閉じ込め、
+   見出し（.bar）と列見出し（thead）を常に見えるようにする */
+.admin { height: 100%; overflow: hidden; padding: 10px; font-size: 13px; display: flex; flex-direction: column; min-height: 0; }
+.section { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex: none; }
 .bar b { font-family: var(--mono); }
 .err { color: #c62828; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 600; font-size: 12px; }
+/* 列見出しはスクロールしても残す。border-collapse: collapse では sticky な th の罫線が
+   一緒にスクロールして消えるので、罫線は box-shadow で描く。背景色も必須（行が透ける） */
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  border-bottom: none;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
 .actions { display: flex; gap: 6px; }
 button { font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--card); color: var(--ink); cursor: pointer; }
 button.ghost { color: var(--muted); }

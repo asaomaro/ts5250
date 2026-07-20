@@ -190,6 +190,8 @@ watch(
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="actionResult" :class="actionResult.ok ? 'ok' : 'error'">{{ actionResult.text }}</p>
 
+    <!-- 縦スクロールはこの中だけ。見出し（header）と列見出し（thead）は常に見える -->
+    <div class="scroll">
     <table v-if="kind === 'jobs' && jobRows.length">
       <thead>
         <tr><th>番号</th><th>ユーザー</th><th>ジョブ名</th><th>状態</th><th>種別</th><th>操作</th></tr>
@@ -240,21 +242,39 @@ watch(
     <p v-else-if="!loading && !error" class="empty">
       接続を選んで「取得」を押してください。表示される範囲は IBM i の権限によります。
     </p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 
-.host-list { padding: 12px; overflow: auto; height: 100%; }
+/* ペイン自体はスクロールさせない。スクロールは .scroll の中だけに閉じ込め、
+   その外（見出し・絞り込み）と列見出しを常に見えるようにする */
+.host-list { padding: 12px; height: 100%; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 /* 見出し・罫線は管理画面（AdminPane）に揃える。
    以前は未定義の var(--border, #444) を参照しており、ダークテーマでは
    トークンの外にある濃い線が引かれていた */
-header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; flex: none; }
 h2 { margin: 0; font-size: 13px; font-family: var(--mono); font-weight: 700; }
 label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
 table { border-collapse: collapse; width: 100%; }
 th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 13px; }
-th { color: var(--muted); font-weight: 600; font-size: 12px; }
+/* 列見出しはスクロールしても残す。
+   border-collapse: collapse では sticky にした th の罫線が一緒にスクロールして消えるため、
+   罫線は border ではなく box-shadow で描く（SqlPane と同じ手当て）。
+   背景色も必須——行に背景が無いので、無いと本文が透けて重なる。 */
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  border-bottom: none;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
 .actions { display: flex; gap: 6px; }
 .actions button { font-size: 12px; padding: 2px 8px; }
 .danger { border-color: #c62828; color: #c62828; }

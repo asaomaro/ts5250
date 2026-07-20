@@ -51,6 +51,17 @@ function closeTab(id: string): void {
 // タブエリアが現在ドロップ対象か（末尾追加のハイライト用）
 const stripActive = ref(false);
 
+/** このペインが最大化中か */
+const maximized = computed(() => workspaceStore.maximizedGroupId === props.group.id);
+/**
+ * 最大化ボタンを出すか。**分割しているときだけ**——単一ペインは既に全面なので、
+ * 押しても何も変わらないボタンを置かない。最大化中は「元に戻す」として出し続ける。
+ */
+const showMaximize = computed(() => maximized.value || workspaceStore.isSplit());
+function toggleMaximize(): void {
+  workspaceStore.toggleMaximize(props.group.id);
+}
+
 function onDragStart(ev: DragEvent, sessionId: string): void {
   ev.dataTransfer?.setData("text/session", sessionId);
   workspaceStore.draggingSession = sessionId;
@@ -178,6 +189,15 @@ function onStripLeave(ev: DragEvent): void {
       <button class="x" title="閉じる" @click.stop="closeTab(t)">✕</button>
       <SessionInfo v-if="infoFor === t && !isPane(t)" :session-id="t" @close="infoFor = undefined" />
     </div>
+    <button
+      v-if="showMaximize"
+      class="maximize"
+      :aria-pressed="maximized"
+      :title="maximized ? 'ペインを元に戻す' : 'ペインを最大化'"
+      @click.stop="toggleMaximize"
+    >
+      {{ maximized ? "🗗" : "🗖" }}
+    </button>
   </div>
 </template>
 
@@ -235,6 +255,23 @@ function onStripLeave(ev: DragEvent): void {
 }
 .tab.drop-after::after {
   right: -2px;
+}
+/* 最大化 / 元に戻す。タブの並びとは別物なので右端へ寄せる */
+.maximize {
+  margin-left: auto;
+  align-self: center;
+  border: 1px solid var(--crt-line);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.maximize[aria-pressed="true"] {
+  color: var(--t-green);
+  border-color: var(--t-green);
 }
 .dot {
   width: 7px;

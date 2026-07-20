@@ -72,10 +72,22 @@ interface ConnectionInfo {
 }
 
 /**
+ * いまこのペインの後ろにあるホスト接続。フッターに出す。
+ *
+ * **使い回し（reused）でも更新する**——ログ行と違って「いつ張り直したか」ではなく
+ * 「いまどのジョブに繋がっているか」を示すので、毎回の応答が最新の答えになる。
+ */
+const conn = ref<ConnectionInfo | undefined>();
+/** フッター用の接続先表記（host:port）。ホスト不明なら出さない */
+const connTarget = computed(() => (conn.value?.host ? `${conn.value.host}:${conn.value.port ?? "?"}` : ""));
+
+/**
  * 接続の確立を記録する。**張り直したときだけ**——使い回した場合は接続が
  * 起きていないので出さない（毎回同じ行が並ぶと本当に張り直した回が埋もれる）。
  */
 function recordConnection(info: ConnectionInfo | undefined): void {
+  // ログに出すかとは別に、フッターの表示は常に最新へ更新する
+  if (info) conn.value = info;
   if (!info || info.reused) return;
   record({
     kind: "connect",
@@ -111,8 +123,11 @@ function warmUp(): void {
 }
 
 onMounted(warmUp);
-// システムを選び直したら、そちらを暖める
-watch(() => systemsStore.selected, warmUp);
+// システムを選び直したら、そちらを暖める。前のシステムのジョブを出したままにしない
+watch(() => systemsStore.selected, () => {
+  conn.value = undefined;
+  warmUp();
+});
 
 /**
  * 保持してもらっている結果セットを手放す。
@@ -542,6 +557,16 @@ function download(): void {
         {{ lastLog.status === "error" ? "失敗" : "完了" }}・{{ lastLog.ms }}ms
       </span>
       <span v-else class="last muted">未実行</span>
+      <!--
+        いま繋がっているホスト側のジョブ。5250 の OIA と同じで「どこに繋がっているか」を
+        常に見えるところへ置く（従来はログを開かないと分からなかった）。
+      -->
+      <span v-if="conn" class="conn" :title="`SQL 接続先 ${connTarget}${conn.job ? ` / ジョブ ${conn.job}` : ''}`">
+        <template v-if="conn.job">job={{ conn.job }}</template>
+        <template v-else>job=—</template>
+        <span v-if="connTarget" class="target">{{ connTarget }}</span>
+      </span>
+      <span v-else class="conn muted">未接続</span>
       <span class="spacer"></span>
       <button
         class="logbtn"
@@ -681,6 +706,18 @@ thead th:hover .col-grip::after,
 .statusbar .spacer { flex: 1; }
 .statusbar .last { color: var(--muted); }
 .statusbar .last.err { color: #c62828; }
+/* 接続中のホスト側ジョブ。長いジョブ名でフッターが 2 行にならないよう省略する */
+.statusbar .conn {
+  color: var(--muted);
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.statusbar .conn .target { opacity: 0.75; }
 .logbtn {
   background: none;
   border: 1px solid var(--line);

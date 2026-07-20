@@ -40,6 +40,8 @@ type SplitZone = Exclude<DropZone, "center">;
 const dropZone = ref<SplitZone | undefined>();
 /** 端 4 ゾーンのみ返す。中央は分割対象外（合流はタブエリア＝PaneTabs が担当）→ undefined */
 function zoneFrom(ev: DragEvent, el: HTMLElement): SplitZone | undefined {
+  // 最大化中は分割させない（入れ子を作らない）。タブエリアへの合流だけ受け付ける
+  if (workspaceStore.maximizedGroupId !== undefined) return undefined;
   const r = el.getBoundingClientRect();
   const x = (ev.clientX - r.left) / r.width;
   const y = (ev.clientY - r.top) / r.height;

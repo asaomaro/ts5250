@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
       <LauncherPane />
     </main>
     <main v-else class="workspace">
-      <WorkspaceNode :node="workspaceStore.root" />
+      <WorkspaceNode :node="workspaceStore.displayRoot()" />
     </main>
 
     </template>
