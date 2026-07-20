@@ -100,7 +100,15 @@ export interface DdmFile {
   recordLength: number;
   recordIncrement: number;
   nullFieldByteMapOffset: number;
+  /**
+   * 1 バッチに実際に詰める件数。**open の応答が来てから決まる**——
+   * 要求値・形式上の上限（32767）・`recordIncrement` から決まる上限の最小。
+   */
+  effectiveBatchSize: number;
 }
+
+/** ブロッキング係数の既定。原典 `DDMConnection.open` の preferred batch size に倣う */
+const DEFAULT_BLOCKING_FACTOR = 100;
 
 export class DdmConnection {
   private closed = false;
@@ -230,14 +238,24 @@ export class DdmConnection {
   async open(
     library: string,
     file: string,
-    opts: { member?: string; recordFormat?: string } = {}
+    opts: { member?: string; recordFormat?: string; blockingFactor?: number } = {}
   ): Promise<DdmFile> {
     this.assertOpen();
     const dclNam = this.nextDclNam();
     const member = opts.member ?? "*FIRST";
     const recordFormat = opts.recordFormat ?? file;
+    // 既定 100 は原典の preferred batch size に倣う（`DDMConnection.open` の既定値）
+    const requested = opts.blockingFactor ?? DEFAULT_BLOCKING_FACTOR;
     this.transport.send(
-      buildS38Open(this.nextCorrelation(), dclNam, library, file, member, recordFormat)
+      buildS38Open(
+        this.nextCorrelation(),
+        dclNam,
+        library,
+        file,
+        member,
+        recordFormat,
+        requested
+      )
     );
 
     const r = new DdmReader(await this.transport.receive());
@@ -292,9 +310,14 @@ export class DdmConnection {
     // 残りとチェインされたフレームは読み捨てる
     await this.drain(hdr);
 
+    // **実効値は応答が来てから決まる**。ブロッキング係数は open 要求に載せるのに、
+    // 上限を決める recordIncrement は応答で分かる（順序が逆）。宣言値以下に丸めるのは
+    // 安全側なので、要求は希望値・実際の詰め込みはここで丸めた値、という二段構えにする
+    const effectiveBatchSize = effectiveBatchSizeFor(requested, recordIncrement);
+
     log.debug(
       `opened ${realLibrary}/${realFile}(${realMember}) ` +
-        `recordLength=${recordLength} increment=${recordIncrement}`
+        `recordLength=${recordLength} increment=${recordIncrement} batch=${effectiveBatchSize}`
     );
     return {
       library: realLibrary,
@@ -303,7 +326,8 @@ export class DdmConnection {
       dclNam,
       recordLength,
       recordIncrement,
-      nullFieldByteMapOffset
+      nullFieldByteMapOffset,
+      effectiveBatchSize
     };
   }
 
@@ -314,18 +338,56 @@ export class DdmConnection {
    * それまでに書いたレコードは残る。
    */
   async write(file: DdmFile, record: DdmRecord | Uint8Array): Promise<void> {
+    const rec: DdmRecord =
+      record instanceof Uint8Array ? { data: record, nulls: [] } : record;
+    // 1 件書きは **N=1 のバッチ**。フレームの組み立てを二重に持たない（design DD3）
+    await this.sendBatch(file, [rec]);
+  }
+
+  /**
+   * レコードをまとめて追記する。**1 バッチ = 1 往復**なので、
+   * 往復数は件数ではなくバッチ数になる（実機は 1 往復 4〜7 秒）。
+   *
+   * ⚠ **巻き戻らない**。途中のバッチで失敗したとき、そのバッチの何件目まで
+   * 確定したかは**ホストの応答から特定できない**。よって「n 行目で失敗」とは言わず、
+   * 確定した件数と、確定したか不明な範囲を分けて返す（design DD4）。
+   */
+  async writeAll(file: DdmFile, records: readonly DdmRecord[]): Promise<WriteAllResult> {
     this.assertOpen();
-    const data = record instanceof Uint8Array ? record : record.data;
-    const nulls = record instanceof Uint8Array ? [] : record.nulls;
-    if (data.length !== file.recordLength) {
-      throw new As400Error(
-        "CONFIG_ERROR",
-        `レコード長が一致しません（期待 ${file.recordLength} / 実際 ${data.length}）`
-      );
+    const batch = Math.max(1, file.effectiveBatchSize);
+    let committed = 0;
+    while (committed < records.length) {
+      const slice = records.slice(committed, committed + batch);
+      try {
+        await this.sendBatch(file, slice);
+      } catch (e) {
+        return {
+          committedRows: committed,
+          // 1 始まりの行範囲。**この範囲は書けたか書けなかったか分からない**
+          uncertainRange: { from: committed + 1, to: committed + slice.length },
+          error: e instanceof Error ? e.message : String(e)
+        };
+      }
+      committed += slice.length;
+    }
+    return { committedRows: committed };
+  }
+
+  /** S38PUTM ＋ S38BUF を 1 往復で送る（1 件でも N 件でも同じ経路） */
+  private async sendBatch(file: DdmFile, records: readonly DdmRecord[]): Promise<void> {
+    this.assertOpen();
+    if (records.length === 0) return;
+    for (const rec of records) {
+      if (rec.data.length !== file.recordLength) {
+        throw new As400Error(
+          "CONFIG_ERROR",
+          `レコード長が一致しません（期待 ${file.recordLength} / 実際 ${rec.data.length}）`
+        );
+      }
     }
     const id = this.nextCorrelation();
     this.transport.send(buildS38Putm(id, file.dclNam));
-    this.transport.send(buildS38Buf(id, data, nulls, file.recordIncrement));
+    this.transport.send(buildS38Buf(id, records, file.recordIncrement));
 
     const r = new DdmReader(await this.transport.receive());
     const hdr = readHeader(r, "S38PUTM");
@@ -381,6 +443,18 @@ export class DdmConnection {
  *
  * 値は**列の宣言順**で渡す。数が合わなければ失敗させる（黙って詰めない）。
  */
+export interface WriteAllResult {
+  /** **成功が確定したバッチ**までの累計行数（確実に書けた下限） */
+  committedRows: number;
+  /**
+   * 失敗したバッチの行範囲（1 始まり）。この範囲は**書けたか書けなかったか不明**。
+   * 成功時は付かない。
+   */
+  uncertainRange?: { from: number; to: number };
+  /** 失敗の理由（`uncertainRange` があるときのみ） */
+  error?: string;
+}
+
 export interface DdmRecord {
   /** 固定部のバイト列（recordLength ぶん） */
   data: Uint8Array;
@@ -519,7 +593,8 @@ function buildS38Open(
   library: string,
   file: string,
   member: string,
-  recordFormat: string
+  recordFormat: string,
+  blockingFactor: number
 ): Uint8Array {
   const ufcb = new DdmWriter();
   ufcb.bytes(padName10(file, encode37));
@@ -537,7 +612,9 @@ function buildS38Open(
   ufcb.u32(0).u32(0).u32(0).u32(0);
   ufcb.u16(6).u8(0); // LVLCHK しない
   ufcb.u16(58).u8(0xc0); // SEQONLY = YES（読み書き両方でないため）
-  ufcb.u16(1); // ブロッキング係数
+  // ブロッキング係数。原典も open 要求に載せる（`sendS38OpenRequest` の `writeShort(batchSize)`）。
+  // **形式上の上限は 0x7FFF**（原典が `batchSize & 0x7FFF` で丸める）
+  ufcb.u16(Math.max(1, Math.min(blockingFactor, 0x7fff)));
   ufcb.u16(9).u16(1).u16(1); // レコード形式グループ / 最大 / 現在
   ufcb.bytes(padName10(recordFormat, encode37));
   ufcb.u16(32767); // 可変長 UFCB の終端
@@ -564,18 +641,40 @@ function buildS38Putm(correlationId: number, dclNam: Uint8Array): Uint8Array {
  */
 function buildS38Buf(
   correlationId: number,
-  record: Uint8Array,
-  nulls: readonly boolean[],
+  records: readonly DdmRecord[],
   recordIncrement: number
 ): Uint8Array {
-  const payload = new Uint8Array(recordIncrement).fill(0xf0);
-  payload.set(record, 0);
-  // 固定部の後ろが NULL 指標マップ。列ごとに 0xF1 = NULL / 0xF0 = 非 NULL
-  for (let i = 0; i < nulls.length && record.length + i < recordIncrement; i++) {
-    if (nulls[i]) payload[record.length + i] = 0xf1;
+  // **N 件を recordIncrement 刻みで並べるだけ**。1 件のときと構造は同じで、
+  // 長さが N 倍になる（原典 `sendS38BUFRequest`: `total = batchSize * recordIncrement`）
+  const payload = new Uint8Array(records.length * recordIncrement).fill(0xf0);
+  for (let n = 0; n < records.length; n++) {
+    const { data, nulls } = records[n]!;
+    const base = n * recordIncrement;
+    payload.set(data, base);
+    // 固定部の後ろが NULL 指標マップ。列ごとに 0xF1 = NULL / 0xF0 = 非 NULL
+    for (let i = 0; i < nulls.length && data.length + i < recordIncrement; i++) {
+      if (nulls[i]) payload[base + data.length + i] = 0xf1;
+    }
   }
   const body = new DdmWriter().bytes(param(DDM_CP.S38BUF, payload));
   return frame(FMT_OBJDSS_SAME_CORR, correlationId, body.build());
+}
+
+/**
+ * 1 バッチに詰められる最大件数。
+ *
+ * S38BUF の LL は **2 バイト**で、外側フレームが `total + 10`、内側が `total + 4` を書く
+ * （原典 `sendS38BUFRequest`）。よって `N * recordIncrement + 10 <= 65535`。
+ * 加えて原典が `batchSize & 0x7FFF` で丸めるので 32767 件が形式上の上限。
+ */
+export function maxBatchSize(recordIncrement: number): number {
+  if (recordIncrement <= 0) return 1;
+  return Math.max(1, Math.min(0x7fff, Math.floor((0xffff - 10) / recordIncrement)));
+}
+
+/** 要求値・形式上の上限・レコード長から決まる上限の最小 */
+export function effectiveBatchSizeFor(requested: number, recordIncrement: number): number {
+  return Math.max(1, Math.min(Math.floor(requested), maxBatchSize(recordIncrement)));
 }
 
 function buildS38Close(correlationId: number, dclNam: Uint8Array): Uint8Array {

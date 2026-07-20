@@ -28,10 +28,10 @@
 
 ## core — バッチ書き込み
 
-- [ ] T6: `open()` に `blockingFactor?: number`（既定 100）を追加し UFCB に載せる（依存: T3）。
+- [x] T6: `open()` に `blockingFactor?: number`（既定 100）を追加し UFCB に載せる（依存: T3）。
       S38OPNFB 受領後に `effectiveBatchSize = max(1, min(要求, 32767, floor(65525/recordIncrement)))`
       を計算して `DdmFile` に持たせる。単体テスト: 丸めの境界値
-- [ ] T7: `writeAll()` を新規追加（依存: T6）。`buildS38Buf(records)` を括り出し、
+- [x] T7: `writeAll()` を新規追加（依存: T6）。`buildS38Buf(records)` を括り出し、
       `write()` はそれへの薄い委譲にする（DD3）。`WriteAllResult`（`committedRows` /
       `uncertainRange`）を返す。単体テスト: バッチ分割数・境界・`uncertainRange` の算出
 - [ ] **T8: 実機確認（ゲート）** — `MYLIB.TESTPF` へバッチで複数件書き、SQL で読み返して一致を確認。

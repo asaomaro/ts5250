@@ -276,3 +276,42 @@ describe("buildDdmRecord が列ごとの CCSID を使う", () => {
     expect(() => buildDdmRecord(layout, ["日本語"])).toThrow();
   });
 });
+
+/**
+ * バッチ書き込みの件数計算（research F1/F2）。
+ *
+ * S38BUF の LL は 2 バイトで、外側が `N*recordIncrement + 10` を書くため、
+ * **1 バッチの上限はレコード長で決まる**。実機に出る前に固められる部分。
+ */
+describe("バッチ件数の上限", () => {
+  it("LL(2 バイト)に収まる件数までしか詰めない", async () => {
+    const { maxBatchSize } = await import("../src/hostserver/ddm/ddm-connection.js");
+    // 105 バイト（CHAR(100) 系）なら floor(65525/105) = 623 件
+    expect(maxBatchSize(105)).toBe(Math.floor(65525 / 105));
+    // 20 バイト強の小さな表は形式上の上限 32767 に張り付く
+    expect(maxBatchSize(1)).toBe(0x7fff);
+  });
+
+  it("レコードが極端に長ければ 1 件に落ちる", async () => {
+    const { maxBatchSize } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(maxBatchSize(65525)).toBe(1);
+    expect(maxBatchSize(70000)).toBe(1);
+  });
+
+  it("要求値・形式上限・レコード長上限の最小を採る", async () => {
+    const { effectiveBatchSizeFor } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(effectiveBatchSizeFor(100, 21)).toBe(100); // 要求値が効く
+    expect(effectiveBatchSizeFor(1000, 105)).toBe(624); // レコード長が効く（floor(65525/105)）
+    // **形式上限 32767 が効くのは recordIncrement=1 のときだけ**——
+    // 2 バイトでも floor(65525/2)=32762 で長さ由来の上限が先に来る。
+    // 現実の表では常にレコード長が上限を決める
+    expect(effectiveBatchSizeFor(100000, 1)).toBe(0x7fff);
+    expect(effectiveBatchSizeFor(100000, 21)).toBe(Math.floor(65525 / 21));
+  });
+
+  it("0 や負の要求でも 1 件は送る（無限ループを作らない）", async () => {
+    const { effectiveBatchSizeFor } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(effectiveBatchSizeFor(0, 21)).toBe(1);
+    expect(effectiveBatchSizeFor(-5, 21)).toBe(1);
+  });
+});

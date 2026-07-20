@@ -192,6 +192,9 @@ export {
   buildRecordLayout,
   type DdmConnectOptions,
   type DdmFile,
+  type WriteAllResult,
+  maxBatchSize,
+  effectiveBatchSizeFor,
   type ColumnLayoutInput,
   type RecordLayout
 } from "./hostserver/ddm/ddm-connection.js";

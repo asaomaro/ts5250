@@ -94,10 +94,22 @@ async function main(): Promise<void> {
         ["BETA", -7, "-0.01", 2, null], // NULL 指標マップの検証
         ["", 0, "0", 3, ""]
       ];
-      for (const values of rows) {
-        await ddm.write(file, buildDdmRecord(layout, values));
+      // **バッチ書き込みの実機確認**（research F1/F2）。
+      // 1 件 1 往復だと実機は 4〜7 秒/往復なので、往復数が件数でなくバッチ数に
+      // なっていることを実測で示す
+      out(`4. バッチ: 実効 ${file.effectiveBatchSize} 件/往復（increment=${file.recordIncrement}）`);
+      const started = Date.now();
+      const res = await ddm.writeAll(file, rows.map((values) => buildDdmRecord(layout, values)));
+      const trips = Math.ceil(rows.length / file.effectiveBatchSize);
+      out(
+        `   ${res.committedRows}/${rows.length} 件を ${trips} 往復で書き込み ` +
+          `(${Date.now() - started}ms)`
+      );
+      if (res.uncertainRange) {
+        out(
+          `   ⚠ ${res.uncertainRange.from}〜${res.uncertainRange.to} 行目は確定不明: ${res.error ?? ""}`
+        );
       }
-      out(`4. ${rows.length} 件を書き込み`);
       const messages = await ddm.close(file);
       if (messages.length) {
         out(`   close メッセージ: ${messages.map((m) => `${m.id} ${m.text}`).join(" / ")}`);
