@@ -27,6 +27,7 @@ import {
 import { childLog } from "./log.js";
 import { withAudit } from "./audit.js";
 import { errorResult, type ToolDeps } from "./mcp-tools.js";
+import { uploadCsv, uploadRows } from "./host-upload.js";
 import { openCommand, openDb, openIfs, openNetPrint } from "./host-connect.js";
 
 const hostLog = childLog({ component: "host-server-tools" });
@@ -195,6 +196,73 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         } finally {
           conn.close();
         }
+      }).catch(errorResult)
+  );
+
+  // ---- CSV の取り込み（DDM。**書き込み系**）----
+
+  server.registerTool(
+    "host_upload_table",
+    {
+      description:
+        "CSV を IBM i の物理ファイルへ**追記**する（DDM のレコードレベルアクセス）。" +
+        "**追記のみ**——更新・削除・表の作成はできない。" +
+        "csv（文字列）か columns+rows のどちらかで渡す。" +
+        "対応する列型は CHAR / DECIMAL / NUMERIC / SMALLINT / INTEGER / BIGINT のみで、" +
+        "VARCHAR・日付時刻・GRAPHIC を含む表は**1 行も書かずに**拒否される。" +
+        "文字は列ごとの CCSID で符号化し、表せない文字があれば置換せず拒否する。" +
+        "⚠ **コミットメント制御が無いため巻き戻せない**——途中で失敗しても書けた分は残る。" +
+        "その場合 committedRows（確定した行数）と uncertainRange（確定不明な行範囲）を返す。",
+      inputSchema: {
+        ...targetShape,
+        library: z.string(),
+        file: z.string(),
+        member: z.string().optional(),
+        /** レコード様式名。DDS 由来の物理ファイルで必要になることがある（既定はファイル名） */
+        recordFormat: z.string().optional(),
+        /** CSV 文字列（ヘッダー行を含む）。columns+rows と排他 */
+        csv: z.string().optional(),
+        columns: z.array(z.string()).optional(),
+        rows: z.array(z.array(z.string().nullable())).optional(),
+        emptyAsNull: z.boolean().optional(),
+        blockingFactor: z.number().int().positive().optional()
+      },
+      outputSchema: {
+        ok: z.boolean(),
+        /** 書き込みが確定した行数 */
+        committedRows: z.number().optional(),
+        /** 確定したか**不明**な行範囲（1 始まり）。ここは重複投入の危険がある */
+        uncertainRange: z.object({ from: z.number(), to: z.number() }).optional(),
+        batchSize: z.number().optional(),
+        ms: z.number().optional(),
+        /** 拒否理由（1 行も書いていない） */
+        rejections: z.array(z.record(z.string(), z.unknown())).optional(),
+        truncated: z.boolean().optional()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_upload_table" }, async () => {
+        const hasRows = input.columns !== undefined && input.rows !== undefined;
+        if (!input.csv && !hasRows) {
+          throw new As400Error("CONFIG_ERROR", "csv か columns+rows のどちらかを指定してください");
+        }
+        if (input.csv && hasRows) {
+          throw new As400Error("CONFIG_ERROR", "csv と columns+rows は同時に指定できません");
+        }
+        const common = {
+          opts: target(input),
+          library: input.library,
+          file: input.file,
+          ...(input.member !== undefined ? { member: input.member } : {}),
+          ...(input.recordFormat !== undefined ? { recordFormat: input.recordFormat } : {}),
+          ...(input.emptyAsNull !== undefined ? { emptyAsNull: input.emptyAsNull } : {}),
+          ...(input.blockingFactor !== undefined ? { blockingFactor: input.blockingFactor } : {})
+        };
+        // **HTTP と同じ実行経路を通す**（入口が違うだけ。検査を二重に持たない）
+        const outcome = input.csv
+          ? await uploadCsv({ ...common, csv: input.csv })
+          : await uploadRows({ ...common, header: input.columns!, rows: input.rows! });
+        return jsonResult(outcome);
       }).catch(errorResult)
   );
 

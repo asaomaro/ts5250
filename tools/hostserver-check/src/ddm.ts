@@ -16,6 +16,7 @@ import {
   DdmConnection,
   buildDdmRecord,
   buildRecordLayout,
+  fetchColumnLayout,
   query,
   As400Error,
   type ColumnLayoutInput
@@ -59,19 +60,9 @@ async function main(): Promise<void> {
     created = true;
 
     // --- 2. 列レイアウトを SQL から得る（spec D1） ---
-    const meta = await query(
-      db,
-      `SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE ` +
-        `FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA='${library}' AND TABLE_NAME='${table}' ` +
-        `ORDER BY ORDINAL_POSITION`
-    );
-    const columns: ColumnLayoutInput[] = meta.rows.map((r) => ({
-      name: String(r["COLUMN_NAME"]).trim(),
-      dataType: String(r["DATA_TYPE"]).trim(),
-      length: Number(r["LENGTH"]),
-      scale: Number(r["NUMERIC_SCALE"] ?? 0),
-      nullable: String(r["IS_NULLABLE"]).trim() === "Y"
-    }));
+    // 問い合わせは core（`fetchColumnLayout`）に一本化した。
+    // **ここに 2 つ目の SYSCOLUMNS クエリを置かない**——列や順序が食い違う元になる
+    const columns: ColumnLayoutInput[] = await fetchColumnLayout(db, library, table);
     const layout = buildRecordLayout(columns);
     out(
       `2. レイアウト（SQL 由来）: ${layout.fields
@@ -103,10 +94,22 @@ async function main(): Promise<void> {
         ["BETA", -7, "-0.01", 2, null], // NULL 指標マップの検証
         ["", 0, "0", 3, ""]
       ];
-      for (const values of rows) {
-        await ddm.write(file, buildDdmRecord(layout, values));
+      // **バッチ書き込みの実機確認**（research F1/F2）。
+      // 1 件 1 往復だと実機は 4〜7 秒/往復なので、往復数が件数でなくバッチ数に
+      // なっていることを実測で示す
+      out(`4. バッチ: 実効 ${file.effectiveBatchSize} 件/往復（increment=${file.recordIncrement}）`);
+      const started = Date.now();
+      const res = await ddm.writeAll(file, rows.map((values) => buildDdmRecord(layout, values)));
+      const trips = Math.ceil(rows.length / file.effectiveBatchSize);
+      out(
+        `   ${res.committedRows}/${rows.length} 件を ${trips} 往復で書き込み ` +
+          `(${Date.now() - started}ms)`
+      );
+      if (res.uncertainRange) {
+        out(
+          `   ⚠ ${res.uncertainRange.from}〜${res.uncertainRange.to} 行目は確定不明: ${res.error ?? ""}`
+        );
       }
-      out(`4. ${rows.length} 件を書き込み`);
       const messages = await ddm.close(file);
       if (messages.length) {
         out(`   close メッセージ: ${messages.map((m) => `${m.id} ${m.text}`).join(" / ")}`);

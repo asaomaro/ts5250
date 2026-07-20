@@ -40,6 +40,11 @@ const FEATURES = [
   { id: "list:jobs", name: "ジョブ", desc: "実行中・待機中のジョブを見る。保留・解放・終了もできる。" },
   { id: "list:objects", name: "オブジェクト", desc: "ライブラリー内のオブジェクトを一覧する。" },
   { id: "sql:query", name: "SQL", desc: "SELECT を実行して結果を見る。CSV でダウンロードできる。" },
+  {
+    id: "transfer:data",
+    name: "データ転送",
+    desc: "表を CSV に落とす / CSV を表に取り込む。SQL を書かずに済む。"
+  },
   { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" }
 ] as const;
 

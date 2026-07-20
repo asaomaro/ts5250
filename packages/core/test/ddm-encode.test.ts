@@ -194,3 +194,124 @@ describe("encodeChar: 変換できない文字", () => {
     expect(() => encodeChar("ベータ", 20, enc939)).not.toThrow();
   });
 });
+
+/**
+ * 列ごとの CCSID（design D1）。
+ *
+ * 従来はレコードのデータ部を CCSID 37 で固定していたが、実機の表は 273 が主で
+ * 日本語列は 5035/930 と**同じ表の中で混在する**（research F3/F4）。
+ * ここは実機なしで固められる部分なので、符号化が列ごとに切り替わることを固定する。
+ */
+describe("列ごとの CCSID", () => {
+  const cols = [
+    { name: "C_SBCS", dataType: "CHAR", length: 4, scale: 0, nullable: true, ccsid: 273 },
+    { name: "C_JP", dataType: "CHAR", length: 10, scale: 0, nullable: true, ccsid: 5035 },
+    { name: "N", dataType: "INTEGER", length: 10, scale: 0, nullable: true }
+  ];
+
+  it("文字列列にだけ ccsid を運ぶ（数値列には付けない）", () => {
+    const layout = buildRecordLayout(cols);
+    expect(layout.fields[0]!.ccsid).toBe(273);
+    expect(layout.fields[1]!.ccsid).toBe(5035);
+    expect(layout.fields[2]!.ccsid).toBeUndefined();
+  });
+
+  it("CHAR の size は宣言どおりのバイト数（混在 CCSID でも変わらない）", () => {
+    // research F8: 実機で LENGTH = CHARACTER_OCTET_LENGTH を確認済み
+    const layout = buildRecordLayout(cols);
+    expect(layout.fields[0]!.size).toBe(4);
+    expect(layout.fields[1]!.size).toBe(10);
+    expect(layout.recordLength).toBe(4 + 10 + 4);
+  });
+
+  it("**同じ文字列でも列の CCSID で違うバイトになる**", () => {
+    // '@' は CCSID 37 では 0x7C、273 では 0xB5（variant 文字）
+    const at37 = codecForCcsid(37).encode("@").bytes;
+    const at273 = codecForCcsid(273).encode("@").bytes;
+    expect(hex(at37)).not.toBe(hex(at273));
+  });
+
+  it("混在 CCSID の列は SO/SI 込みでバイト長を数える", () => {
+    // 5035 は SBCS/DBCS 混在。日本語 1 文字 = SO + 2 バイト + SI = 4 バイト
+    const { bytes } = codecForCcsid(5035).encode("日");
+    expect(bytes.length).toBe(4);
+    expect(bytes[0]).toBe(0x0e); // SO
+    expect(bytes[bytes.length - 1]).toBe(0x0f); // SI
+  });
+
+  it("列に収まらなければ切り詰めずに拒否する", () => {
+    // CHAR(4) に 日本語(SO+2+2+2+SI = 8 バイト) は入らない
+    const jp = (t: string) => codecForCcsid(5035).encode(t);
+    expect(() => encodeChar("日本", 4, jp)).toThrow();
+  });
+
+  it("表現できない文字は置換せずに拒否する", () => {
+    // CCSID 273（ドイツ語圏 SBCS）に日本語は無い
+    const de = (t: string) => codecForCcsid(273).encode(t);
+    expect(() => encodeChar("日", 20, de)).toThrow();
+  });
+});
+
+describe("buildDdmRecord が列ごとの CCSID を使う", () => {
+  it("**同じ表の 273 列と 5035 列を別々に符号化する**", async () => {
+    const { buildDdmRecord } = await import("../src/hostserver/ddm/ddm-connection.js");
+    const layout = buildRecordLayout([
+      { name: "A", dataType: "CHAR", length: 2, scale: 0, nullable: false, ccsid: 273 },
+      { name: "B", dataType: "CHAR", length: 8, scale: 0, nullable: false, ccsid: 5035 }
+    ]);
+    const rec = buildDdmRecord(layout, ["@", "日本"]);
+
+    // A: 273 の '@' は 0xB5（37 の 0x7C ではない）＝列の CCSID が効いている証拠
+    expect(rec.data[0]).toBe(0xb5);
+    // B: 5035 の日本語は SO … SI で囲まれる
+    expect(rec.data[2]).toBe(0x0e);
+    expect(rec.data[7]).toBe(0x0f);
+  });
+
+  it("CCSID 273 の列に日本語を入れると拒否する（置換しない）", async () => {
+    const { buildDdmRecord } = await import("../src/hostserver/ddm/ddm-connection.js");
+    const layout = buildRecordLayout([
+      { name: "A", dataType: "CHAR", length: 20, scale: 0, nullable: false, ccsid: 273 }
+    ]);
+    expect(() => buildDdmRecord(layout, ["日本語"])).toThrow();
+  });
+});
+
+/**
+ * バッチ書き込みの件数計算（research F1/F2）。
+ *
+ * S38BUF の LL は 2 バイトで、外側が `N*recordIncrement + 10` を書くため、
+ * **1 バッチの上限はレコード長で決まる**。実機に出る前に固められる部分。
+ */
+describe("バッチ件数の上限", () => {
+  it("LL(2 バイト)に収まる件数までしか詰めない", async () => {
+    const { maxBatchSize } = await import("../src/hostserver/ddm/ddm-connection.js");
+    // 105 バイト（CHAR(100) 系）なら floor(65525/105) = 623 件
+    expect(maxBatchSize(105)).toBe(Math.floor(65525 / 105));
+    // 20 バイト強の小さな表は形式上の上限 32767 に張り付く
+    expect(maxBatchSize(1)).toBe(0x7fff);
+  });
+
+  it("レコードが極端に長ければ 1 件に落ちる", async () => {
+    const { maxBatchSize } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(maxBatchSize(65525)).toBe(1);
+    expect(maxBatchSize(70000)).toBe(1);
+  });
+
+  it("要求値・形式上限・レコード長上限の最小を採る", async () => {
+    const { effectiveBatchSizeFor } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(effectiveBatchSizeFor(100, 21)).toBe(100); // 要求値が効く
+    expect(effectiveBatchSizeFor(1000, 105)).toBe(624); // レコード長が効く（floor(65525/105)）
+    // **形式上限 32767 が効くのは recordIncrement=1 のときだけ**——
+    // 2 バイトでも floor(65525/2)=32762 で長さ由来の上限が先に来る。
+    // 現実の表では常にレコード長が上限を決める
+    expect(effectiveBatchSizeFor(100000, 1)).toBe(0x7fff);
+    expect(effectiveBatchSizeFor(100000, 21)).toBe(Math.floor(65525 / 21));
+  });
+
+  it("0 や負の要求でも 1 件は送る（無限ループを作らない）", async () => {
+    const { effectiveBatchSizeFor } = await import("../src/hostserver/ddm/ddm-connection.js");
+    expect(effectiveBatchSizeFor(0, 21)).toBe(1);
+    expect(effectiveBatchSizeFor(-5, 21)).toBe(1);
+  });
+});

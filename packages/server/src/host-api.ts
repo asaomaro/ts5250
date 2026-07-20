@@ -45,6 +45,9 @@ export function statusOf(e: As400Error): 400 | 403 | 404 | 502 {
     case "CONFIG_ERROR":
     case "CONNECT_FAILED":
     case "SQL_ERROR":
+    // 指定した表の列型・CCSID が対応範囲外。**対象を変えれば直る**ので利用者側の入力の問題。
+    // 実装の未対応（HOST_SERVER_UNSUPPORTED＝利用者には直せない）は 502 のままにする
+    case "UNSUPPORTED_TYPE":
       return 400;
     default:
       return 502;

@@ -5,9 +5,11 @@ import PrinterPane from "./PrinterPane.vue";
 import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
 import SqlPane from "./SqlPane.vue";
+import TransferPane from "./TransferPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { isFileDrag } from "../dnd.js";
 
 const props = defineProps<{ node: WsNode }>();
 
@@ -40,6 +42,9 @@ type SplitZone = Exclude<DropZone, "center">;
 const dropZone = ref<SplitZone | undefined>();
 /** 端 4 ゾーンのみ返す。中央は分割対象外（合流はタブエリア＝PaneTabs が担当）→ undefined */
 function zoneFrom(ev: DragEvent, el: HTMLElement): SplitZone | undefined {
+  // **ファイルのドラッグは分割の対象外**。データ転送ペインが CSV を受けるため、
+  // ここで拾うとファイルを落とすたびにペインが割れる（タブは "text/session" を使う）
+  if (isFileDrag(ev)) return undefined;
   // 最大化中は分割させない（入れ子を作らない）。タブエリアへの合流だけ受け付ける
   if (workspaceStore.maximizedGroupId !== undefined) return undefined;
   const r = el.getBoundingClientRect();
@@ -77,6 +82,7 @@ const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:")
 /** 一覧タブ（list:jobs/objects/users）か。管理タブと同じ「特殊なタブ ID」方式 */
 const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
 const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
+const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
 </script>
 
 <template>
@@ -107,6 +113,7 @@ const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? 
       <AdminPane v-if="group.activeTab && activeIsAdmin" :tab-id="group.activeTab" />
       <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
       <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
+      <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
       <PrinterPane
         v-else-if="group.activeTab && activeIsPrinter"
         :session-id="group.activeTab"

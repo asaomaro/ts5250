@@ -192,6 +192,9 @@ export {
   buildRecordLayout,
   type DdmConnectOptions,
   type DdmFile,
+  type WriteAllResult,
+  maxBatchSize,
+  effectiveBatchSizeFor,
   type ColumnLayoutInput,
   type RecordLayout
 } from "./hostserver/ddm/ddm-connection.js";
@@ -201,3 +204,15 @@ export {
   encodePacked,
   encodeZoned
 } from "./hostserver/ddm/encode.js";
+export { isSupportedDataType, type FieldLayout } from "./hostserver/ddm/record-layout.js";
+export { fetchColumnLayout } from "./hostserver/ddm/column-meta.js";
+export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./identifier.js";
+export {
+  prepareUpload,
+  type PrepareUploadArgs,
+  type PrepareResult,
+  type UploadRejection
+} from "./hostserver/ddm/upload-prepare.js";
+
+// CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う）
+export { parseCsv, type CsvParseResult } from "./csv-parse.js";
