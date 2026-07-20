@@ -1,0 +1,8 @@
+schema: 3
+slug: pane-maximize-sticky-headers
+current: retro
+approved: [retro]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
