@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { readFileSync, appendFileSync, writeFileSync, existsSync } from "node:fs";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 
 /**
  * 接続設定の自動サインオン用パスワードを暗号化するモジュール（Node 標準 crypto のみ）。
@@ -22,11 +22,11 @@ function decodeKey(raw: string): Buffer {
     try {
       key = Buffer.from(raw, "base64");
     } catch {
-      throw new Tn5250Error("CONFIG_ERROR", "AS400_SECRET_KEY must be 32-byte hex or base64");
+      throw new As400Error("CONFIG_ERROR", "AS400_SECRET_KEY must be 32-byte hex or base64");
     }
   }
   if (key.length !== KEY_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `AS400_SECRET_KEY must decode to ${KEY_LEN} bytes (got ${key.length})`
     );
@@ -87,7 +87,7 @@ export class SecretCrypto {
   decrypt(blob: string): string {
     const parts = blob.split(":");
     if (parts.length !== 4 || parts[0] !== VERSION) {
-      throw new Tn5250Error("CONFIG_ERROR", "unsupported secret blob format");
+      throw new As400Error("CONFIG_ERROR", "unsupported secret blob format");
     }
     const iv = Buffer.from(parts[1]!, "base64");
     const tag = Buffer.from(parts[2]!, "base64");

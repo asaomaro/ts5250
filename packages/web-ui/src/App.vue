@@ -11,6 +11,7 @@ import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
 import { systemsStore } from "./stores/systems.js";
+import { isPaneTab } from "./paneLabels.js";
 
 const { mode, setMode } = useTheme();
 /** ライト → ダーク → システム（OS 設定に追従）の 3 循環 */
@@ -49,7 +50,7 @@ const showAccount = ref(false);
 const activeIsEmulator = computed(() => {
   if (showLauncher.value) return false;
   const tab = workspaceStore.focusedGroup().activeTab;
-  if (!tab || tab.startsWith("admin:") || tab.startsWith("list:")) return false;
+  if (!tab || isPaneTab(tab)) return false;
   const s = sessionsStore.get(tab);
   return !!s && s.kind !== "printer";
 });

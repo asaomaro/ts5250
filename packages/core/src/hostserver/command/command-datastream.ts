@@ -7,7 +7,7 @@
  * 参照: JTOpen(jtopenlite) の CommandConnection.sendExchangeAttributesRequest /
  *       sendRunCommandRequest / sendCallProgramRequest に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { HEADER_LEN } from "../datastream.js";
 import { codecForCcsid } from "../../codec/codec.js";
 
@@ -75,11 +75,11 @@ function utf16be(text: string): Uint8Array {
 function ebcdicPad(text: string, length: number, what: string): Uint8Array {
   const upper = text.toUpperCase();
   if (upper.length > length) {
-    throw new Tn5250Error("CONFIG_ERROR", `${what} too long: "${text}" (max ${length})`);
+    throw new As400Error("CONFIG_ERROR", `${what} too long: "${text}" (max ${length})`);
   }
   const { bytes, substituted } = codecForCcsid(EBCDIC_CCSID).encode(upper);
   if (substituted > 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `${what} contains characters not representable in CCSID ${EBCDIC_CCSID}: "${text}"`
     );
@@ -144,7 +144,7 @@ const EXCHANGE_TEMPLATE_LEN = 16;
 export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerInfo {
   const minLen = HEADER_LEN + EXCHANGE_TEMPLATE_LEN;
   if (frame.length < minLen) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `command server exchange attributes reply too short: ${frame.length} bytes`
     );
@@ -152,7 +152,7 @@ export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerIn
   const v = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   const templateLen = v.getUint16(16);
   if (templateLen !== EXCHANGE_TEMPLATE_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `unexpected exchange attributes template length ${templateLen} ` +
         `(expected ${EXCHANGE_TEMPLATE_LEN}); cannot read fields at fixed offsets`
@@ -160,7 +160,7 @@ export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerIn
   }
   const rc = v.getUint16(REPLY_RC_OFFSET);
   if (rc !== RC_OK) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `command server exchange attributes failed (rc=0x${rc.toString(16)})`
     );
@@ -182,7 +182,7 @@ export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerIn
  */
 export function buildRunCommandRequest(command: string): Uint8Array {
   if (command.length === 0) {
-    throw new Tn5250Error("CONFIG_ERROR", "command is empty");
+    throw new As400Error("CONFIG_ERROR", "command is empty");
   }
   const cmd = utf16be(command);
   const total = 31 + cmd.length;

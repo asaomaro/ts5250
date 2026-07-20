@@ -9,7 +9,7 @@
  *
  * 参照: JTOpen(jtopenlite) の CommandConnection に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import {
   openHostConnection,
@@ -61,7 +61,7 @@ export interface CommandResult {
 }
 
 /** コマンド失敗。メッセージを**型として**公開する */
-export class CommandError extends Tn5250Error {
+export class CommandError extends As400Error {
   constructor(
     readonly command: string,
     readonly result: CommandResult
@@ -124,7 +124,7 @@ export class CommandConnection {
         await conn.request(buildExchangeAttributesRequest())
       );
       if (info.datastreamLevel < MIN_DATASTREAM_LEVEL) {
-        throw new Tn5250Error(
+        throw new As400Error(
           "HOST_SERVER_UNSUPPORTED",
           `command server datastream level ${info.datastreamLevel} is not supported ` +
             `(need ${MIN_DATASTREAM_LEVEL} or later; older servers use a different command encoding)`
@@ -190,7 +190,7 @@ export class CommandConnection {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Tn5250Error("SESSION_CLOSED", "command connection is closed");
+      throw new As400Error("SESSION_CLOSED", "command connection is closed");
     }
   }
 
@@ -203,12 +203,12 @@ export class CommandConnection {
    */
   private toResult(reply: Uint8Array, what: string, strictReturnCode: boolean): CommandResult {
     if (reply.length < HEADER_LEN + 2) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `command reply too short: ${reply.length} bytes`);
+      throw new As400Error("PROTOCOL_ERROR", `command reply too short: ${reply.length} bytes`);
     }
     const v = new DataView(reply.buffer, reply.byteOffset, reply.byteLength);
     const returnCode = v.getUint16(REPLY_RC_OFFSET);
     if (strictReturnCode && returnCode !== RC_OK && returnCode !== RC_FAILED_WITH_MESSAGES) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `unexpected return code 0x${returnCode.toString(16)} from command server (${what})`
       );
@@ -262,7 +262,7 @@ function extractOutputs(
 async function decidePort(opts: CommandConnectOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
-      throw new Tn5250Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
+      throw new As400Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
     }
     return opts.port;
   }

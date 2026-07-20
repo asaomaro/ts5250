@@ -7,7 +7,7 @@
  * 参照: JTOpen 本体の NPDataStream / NPCPAttributeValue / NPCPIDSplF に対応する
  *       （jtopenlite はネットワーク印刷サーバーを実装していない）。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { HEADER_LEN } from "../datastream.js";
 import { codecForCcsid } from "../../codec/codec.js";
 
@@ -114,7 +114,7 @@ export const NP_ATTR_LEN = {
 function encodeString(text: string): Uint8Array {
   const { bytes, substituted } = codec.encode(text.toUpperCase());
   if (substituted > 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `"${text}" contains characters not representable in CCSID ${EBCDIC_CCSID}`
     );
@@ -223,7 +223,7 @@ export interface NpReply {
 /** 応答を解釈する */
 export function parseNpReply(frame: Uint8Array): NpReply {
   if (frame.length < NP_CODEPOINT_OFFSET) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `network print reply too short: ${frame.length} bytes (need >= ${NP_CODEPOINT_OFFSET})`
     );

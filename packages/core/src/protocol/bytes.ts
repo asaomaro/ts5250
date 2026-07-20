@@ -1,4 +1,4 @@
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 
 /** レコードの逐次読み取り（design: 手続き型の逐次リーダ） */
 export class ByteReader {
@@ -16,13 +16,13 @@ export class ByteReader {
 
   peek(): number {
     const b = this.data[this.pos];
-    if (b === undefined) throw new Tn5250Error("PROTOCOL_ERROR", "unexpected end of record (peek)");
+    if (b === undefined) throw new As400Error("PROTOCOL_ERROR", "unexpected end of record (peek)");
     return b;
   }
 
   u8(): number {
     const b = this.data[this.pos];
-    if (b === undefined) throw new Tn5250Error("PROTOCOL_ERROR", "unexpected end of record (u8)");
+    if (b === undefined) throw new As400Error("PROTOCOL_ERROR", "unexpected end of record (u8)");
     this.pos++;
     return b;
   }
@@ -33,7 +33,7 @@ export class ByteReader {
 
   bytes(n: number): Uint8Array {
     if (this.remaining < n) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `unexpected end of record (need ${n}, have ${this.remaining})`);
+      throw new As400Error("PROTOCOL_ERROR", `unexpected end of record (need ${n}, have ${this.remaining})`);
     }
     const out = this.data.subarray(this.pos, this.pos + n);
     this.pos += n;

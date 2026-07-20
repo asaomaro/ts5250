@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -17,6 +17,7 @@ import {
 import { registerAdminRoutes } from "./admin.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
+import { registerHostSqlRoutes } from "./host-sql.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
@@ -95,6 +96,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
   // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
   registerHostListRoutes(app, { resolver: deps.resolver });
+  registerHostSqlRoutes(app, { resolver: deps.resolver });
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {
@@ -112,7 +114,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
         }
       });
     } catch (e) {
-      if (e instanceof Tn5250Error && e.code === "FORBIDDEN") return c.json({ error: e.message }, 403);
+      if (e instanceof As400Error && e.code === "FORBIDDEN") return c.json({ error: e.message }, 403);
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 404);
     }
   });

@@ -6,7 +6,7 @@
  *
  * 参照: JTOpen(jtopenlite) の FileConnection に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 
 /** ファイルサーバーのサーバー ID */
 export const FILE_SERVER_ID = 0xe002;
@@ -94,7 +94,7 @@ export interface OpenFileOptions {
 /** ファイルを開く要求（0x0002） */
 export function buildOpenFileRequest(opts: OpenFileOptions): Uint8Array {
   if (opts.path.length === 0) {
-    throw new Tn5250Error("CONFIG_ERROR", "path is empty");
+    throw new As400Error("CONFIG_ERROR", "path is empty");
   }
   const name = utf16be(opts.path);
   // データストリームレベル 16 未満は 36。誤ると全体の配置がずれ、rc=17 等で失敗する
@@ -207,7 +207,7 @@ export const REPLY_ERROR = 0x8001;
 /** 応答の ReqRep ID */
 export function replyId(frame: Uint8Array): number {
   if (frame.length < 20) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `file server reply too short: ${frame.length} bytes`);
+    throw new As400Error("PROTOCOL_ERROR", `file server reply too short: ${frame.length} bytes`);
   }
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint16(18);
 }
@@ -221,7 +221,7 @@ export function replyId(frame: Uint8Array): number {
 export function replyReturnCode(frame: Uint8Array): number {
   if (replyId(frame) !== REPLY_ERROR) return 0;
   if (frame.length < 24) {
-    throw new Tn5250Error("PROTOCOL_ERROR", "file server error reply has no return code");
+    throw new As400Error("PROTOCOL_ERROR", "file server error reply has no return code");
   }
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint16(22);
 }
@@ -250,7 +250,7 @@ export function fileErrorText(rc: number): string {
  */
 export function replyFileHandle(frame: Uint8Array): number {
   if (frame.length < 26) {
-    throw new Tn5250Error("PROTOCOL_ERROR", "file server open reply has no handle");
+    throw new As400Error("PROTOCOL_ERROR", "file server open reply has no handle");
   }
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(22);
 }

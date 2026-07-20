@@ -16,7 +16,7 @@ import {
   DbConnection,
   IfsConnection,
   NetPrintConnection,
-  Tn5250Error,
+  As400Error,
   type ConnectOptions
 } from "@as400web/core";
 
@@ -38,7 +38,7 @@ export interface HostServerAuth {
  */
 export function hostAuthFrom(opts: ConnectOptions): HostServerAuth {
   if (!opts.host || !opts.user || !opts.password) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       "この接続設定にはユーザーとパスワードが登録されていないためホストサーバーに接続できません"
     );

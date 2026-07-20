@@ -8,7 +8,7 @@
  *       （コードの移植ではなく、要求/応答の形式に基づく実装）。
  */
 import { queryPortMapper } from "../transport/host-connection.js";
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 
 /** ポートマッパーの待ち受けポート */
 export const PORT_MAPPER_PORT = 449;
@@ -79,13 +79,13 @@ export async function resolveServicePort(
 /** ポートマッパー応答（先頭 1 バイトの状態 ＋ 4 バイトのポート）を解釈する */
 export function parseMapperResponse(response: Uint8Array, name: string, host: string): number {
   if (response.length < RESPONSE_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `port mapper response too short: ${response.length} bytes (service "${name}")`
     );
   }
   if (response[0] !== RESPONSE_OK) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `port mapper rejected service "${name}" on ${host} (status 0x${response[0]?.toString(16)})`
     );
@@ -93,7 +93,7 @@ export function parseMapperResponse(response: Uint8Array, name: string, host: st
   const view = new DataView(response.buffer, response.byteOffset, response.byteLength);
   const port = view.getUint32(1);
   if (port <= 0 || port > 65535) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `port mapper returned invalid port ${port} for "${name}"`
     );

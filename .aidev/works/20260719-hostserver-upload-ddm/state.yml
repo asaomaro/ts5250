@@ -1,7 +1,7 @@
 schema: 3
 slug: hostserver-upload-ddm
-current: requirement
-approved: []
+current: review
+approved: [requirement, research, spec, plan, coding, test, review]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3

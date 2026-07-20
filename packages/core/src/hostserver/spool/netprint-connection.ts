@@ -10,7 +10,7 @@
  *       本実装はホストサーバー経由で統一する方針のためこちらを採るが、
  *       SQL は**検証時の照合**に使える。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { ScsDecoder, type LogicalPage } from "../../protocol/scs.js";
 import { codecForCcsid } from "../../codec/codec.js";
@@ -152,7 +152,7 @@ export class NetPrintConnection {
   ): Promise<ReturnType<typeof parseNpReply>> {
     const reply = parseNpReply(await this.conn.request(frame));
     if (!allowed.includes(reply.returnCode)) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `network print ${what} failed (rc=0x${reply.returnCode.toString(16).padStart(4, "0")})`
       );
@@ -211,7 +211,7 @@ export class NetPrintConnection {
         buffered.push(data);
         total += data.length;
         if (total > MAX_SPOOL_BYTES) {
-          throw new Tn5250Error(
+          throw new As400Error(
             "PROTOCOL_ERROR",
             `spooled file exceeded ${MAX_SPOOL_BYTES} bytes without reaching end of file`
           );
@@ -322,7 +322,7 @@ export class NetPrintConnection {
   async answerMessage(message: SpoolMessage, reply: string): Promise<void> {
     this.assertOpen();
     if (!message.handle) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "CONFIG_ERROR",
         "cannot answer a message without a handle (retrieveMessage must return one)"
       );
@@ -360,7 +360,7 @@ export class NetPrintConnection {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Tn5250Error("SESSION_CLOSED", "network print connection is closed");
+      throw new As400Error("SESSION_CLOSED", "network print connection is closed");
     }
   }
 }
@@ -378,7 +378,7 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
 async function decidePort(opts: NetPrintConnectOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
-      throw new Tn5250Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
+      throw new As400Error("CONFIG_ERROR", `invalid port: ${opts.port}`);
     }
     return opts.port;
   }

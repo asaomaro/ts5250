@@ -1,4 +1,4 @@
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
 import type {
   ParsedScrollBar,
@@ -178,7 +178,7 @@ export class ScreenBuffer {
 
   addrOf(row1: number, col1: number): number {
     if (row1 < 1 || row1 > this.rows || col1 < 1 || col1 > this.cols) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `address out of range: row=${row1}, col=${col1}`);
+      throw new As400Error("PROTOCOL_ERROR", `address out of range: row=${row1}, col=${col1}`);
     }
     return (row1 - 1) * this.cols + (col1 - 1);
   }
@@ -296,7 +296,7 @@ export class ScreenBuffer {
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `field out of range: start=${startAddr}, len=${length}`);
+      throw new As400Error("PROTOCOL_ERROR", `field out of range: start=${startAddr}, len=${length}`);
     }
     // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）
     this.fields = this.fields.filter((f) => f.startAddr !== startAddr);
@@ -317,14 +317,14 @@ export class ScreenBuffer {
 
   fieldByIndex(index1: number): InternalField {
     const f = this.orderedFields()[index1 - 1];
-    if (!f) throw new Tn5250Error("FIELD_NOT_FOUND", `field #${index1} not found`);
+    if (!f) throw new As400Error("FIELD_NOT_FOUND", `field #${index1} not found`);
     return f;
   }
 
   fieldAt(row1: number, col1: number): InternalField {
     const addr = this.addrOf(row1, col1);
     const f = this.fields.find((x) => x.startAddr === addr);
-    if (!f) throw new Tn5250Error("FIELD_NOT_FOUND", `no field starts at (${row1},${col1})`);
+    if (!f) throw new As400Error("FIELD_NOT_FOUND", `no field starts at (${row1},${col1})`);
     return f;
   }
 
@@ -335,10 +335,10 @@ export class ScreenBuffer {
   setFieldValue(field: InternalField, value: string, skipCharLengthCheck = false): void {
     if ((field.ffw & FFW.BYPASS) !== 0) {
       const { row, col } = this.rowColOf(field.startAddr);
-      throw new Tn5250Error("FIELD_PROTECTED", `field at (${row},${col}) is protected`);
+      throw new As400Error("FIELD_PROTECTED", `field at (${row},${col}) is protected`);
     }
     if (!skipCharLengthCheck && value.length > field.length) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "FIELD_OVERFLOW",
         `value length ${value.length} exceeds field length ${field.length}`
       );
@@ -525,7 +525,7 @@ export class ScreenBuffer {
 
   private checkAddr(addr: number): void {
     if (addr < 0 || addr >= this.size) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `buffer address out of range: ${addr}`);
+      throw new As400Error("PROTOCOL_ERROR", `buffer address out of range: ${addr}`);
     }
   }
 }

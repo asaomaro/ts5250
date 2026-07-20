@@ -10,7 +10,7 @@
  *
  * 参照: JTOpen(jtopenlite) の Conv.packedDecimalToString / zonedDecimalToString に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 
 /** 負を表す符号ニブル。それ以外（0x0C / 0x0F 等）は正 */
 const NEGATIVE_SIGNS: ReadonlySet<number> = new Set([0x0b, 0x0d]);
@@ -103,7 +103,7 @@ function assemble(nibbles: readonly number[], scale: number, negative: boolean):
 
 function assertRange(data: Uint8Array, offset: number, len: number, what: string): void {
   if (offset < 0 || offset + len > data.length) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `${what} out of range (offset ${offset}, need ${len}, have ${data.length})`
     );

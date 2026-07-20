@@ -1,6 +1,6 @@
 import { Socket, connect as netConnect } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
-import { Tn5250Error, withSocketHint } from "../errors.js";
+import { As400Error, withSocketHint } from "../errors.js";
 import type { Transport } from "./types.js";
 
 export interface TcpConnectOptions {
@@ -37,7 +37,7 @@ export class TcpTransport implements Transport {
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
-          new Tn5250Error(
+          new As400Error(
             "CONNECT_FAILED",
             withSocketHint(`connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`, "ETIMEDOUT")
           )
@@ -50,7 +50,7 @@ export class TcpTransport implements Transport {
       socket.once("error", (err: NodeJS.ErrnoException) => {
         clearTimeout(timer);
         reject(
-          new Tn5250Error("CONNECT_FAILED", withSocketHint(`connect failed (${opts.host}:${opts.port}): ${err.message}`, err.code), {
+          new As400Error("CONNECT_FAILED", withSocketHint(`connect failed (${opts.host}:${opts.port}): ${err.message}`, err.code), {
             cause: err
           })
         );
@@ -75,7 +75,7 @@ export class TcpTransport implements Transport {
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
-          new Tn5250Error(
+          new As400Error(
             "CONNECT_FAILED",
             withSocketHint(`TLS connect timeout after ${timeoutMs}ms (${opts.host}:${opts.port})`, "ETIMEDOUT")
           )
@@ -90,7 +90,7 @@ export class TcpTransport implements Transport {
         // 証明書検証失敗を区別する
         const certErr = /certificate|self.signed|unable to verify|CERT_/i.test(err.message);
         reject(
-          new Tn5250Error(
+          new As400Error(
             certErr ? "TLS_CERT_INVALID" : "CONNECT_FAILED",
             `TLS connect failed (${opts.host}:${opts.port}): ${err.message}`,
             { cause: err }
@@ -101,7 +101,7 @@ export class TcpTransport implements Transport {
   }
 
   send(data: Uint8Array): void {
-    if (this.closed) throw new Tn5250Error("SESSION_CLOSED", "transport is closed");
+    if (this.closed) throw new As400Error("SESSION_CLOSED", "transport is closed");
     this.socket.write(data);
   }
 

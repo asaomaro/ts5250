@@ -8,7 +8,7 @@
  *
  * 参照: JTOpen(jtopenlite) の CommandConnection.getMessages に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
 import { MSG_CP, REPLY_MESSAGE_COUNT_OFFSET, REPLY_MESSAGES_OFFSET } from "./command-datastream.js";
 
@@ -104,7 +104,7 @@ class Cursor {
 
   private need(n: number): void {
     if (n < 0 || this.pos + n > this.end) {
-      throw new Tn5250Error(
+      throw new As400Error(
         "PROTOCOL_ERROR",
         `command message truncated (need ${n} bytes at offset ${this.pos}, limit ${this.end})`
       );

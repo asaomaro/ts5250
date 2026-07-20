@@ -1,4 +1,4 @@
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
 import type { Codec } from "../codec/codec.js";
 import type { InternalField } from "./buffer.js";
@@ -18,7 +18,7 @@ export function validateFieldContent(value: string, field: InternalField, codec:
   if (numericOnly) {
     const allowed = shift === FFW.SHIFT_DIGITS_ONLY ? /^[0-9]*$/ : /^[0-9.,+-]*$/;
     if (!allowed.test(value)) {
-      throw new Tn5250Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
+      throw new As400Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
     }
   }
 
@@ -26,7 +26,7 @@ export function validateFieldContent(value: string, field: InternalField, codec:
   if (field.dbcsType === "pure") {
     for (const ch of value) {
       if (!isDbcsChar(ch, codec)) {
-        throw new Tn5250Error("FIELD_TYPE", `DBCS-only (pure) field rejects SBCS char: ${JSON.stringify(ch)}`);
+        throw new As400Error("FIELD_TYPE", `DBCS-only (pure) field rejects SBCS char: ${JSON.stringify(ch)}`);
       }
     }
   }
@@ -35,7 +35,7 @@ export function validateFieldContent(value: string, field: InternalField, codec:
   // （例: CCSID 930 は英小文字が SBCS 表に無く入力不可）
   const { substituted } = codec.encode(value);
   if (substituted > 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "FIELD_TYPE",
       `value contains characters not representable in CCSID ${codec.ccsid}`
     );

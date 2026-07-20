@@ -11,7 +11,7 @@
  *       HostServerConnection.getEncryptedPassword に対応する
  *       （コードの移植ではなく、アルゴリズム手順に基づく実装）。
  */
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 
 /** SHA 経路を使う最小パスワードレベル。これ未満は DES 経路 */
 export const MIN_SHA_PASSWORD_LEVEL = 2;
@@ -77,7 +77,7 @@ export async function passwordSubstituteSha(
  */
 export function assertPasswordLevelSupported(level: number): void {
   if (level < MIN_SHA_PASSWORD_LEVEL) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "HOST_SERVER_UNSUPPORTED",
       `password level ${level} requires DES-based authentication, which is not implemented ` +
         `(only level ${MIN_SHA_PASSWORD_LEVEL} and above are supported)`
@@ -87,7 +87,7 @@ export function assertPasswordLevelSupported(level: number): void {
 
 function assertSeed(seed: Uint8Array, which: string): void {
   if (seed.length !== SEED_LEN) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `${which} seed must be ${SEED_LEN} bytes, got ${seed.length}`
     );

@@ -1,4 +1,4 @@
-import { Session5250, Tn5250Error, type SendAidResult } from "@as400web/core";
+import { Session5250, As400Error, type SendAidResult } from "@as400web/core";
 
 export interface FieldSignonOptions {
   /** ユーザー欄の明示指定（省略時は最初の非 hidden 入力フィールド） */
@@ -27,7 +27,7 @@ export async function fieldSignon(
   const userTarget = opts.userField ?? pick(inputs.find((f) => !f.hidden));
   const passTarget = opts.passField ?? pick(inputs.find((f) => f.hidden));
   if (!userTarget || !passTarget) {
-    throw new Tn5250Error("FIELD_NOT_FOUND", "signon fields (user/password) not detected on current screen");
+    throw new As400Error("FIELD_NOT_FOUND", "signon fields (user/password) not detected on current screen");
   }
 
   session.setField(userTarget, user);

@@ -4,7 +4,7 @@
  * 参照: JTOpen(jtopenlite) の DatabaseConnection.parseReply の
  *       CP 0x3812 / 0x380E / 0x3807 の処理に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
 import { toColumnMeta, type ColumnMeta } from "./db-decode.js";
 
@@ -55,7 +55,7 @@ export interface ResultFormat {
  */
 export function parseDataFormat(value: Uint8Array): ResultFormat {
   if (value.length < FORMAT_HEADER_LEN) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `data format too short: ${value.length} bytes`);
+    throw new As400Error("PROTOCOL_ERROR", `data format too short: ${value.length} bytes`);
   }
   const v = new DataView(value.buffer, value.byteOffset, value.byteLength);
   const numFields = v.getUint16(4);
@@ -63,7 +63,7 @@ export function parseDataFormat(value: Uint8Array): ResultFormat {
 
   const need = FORMAT_HEADER_LEN + FIELD_DESC_LEN * numFields;
   if (value.length < need) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `data format declares ${numFields} fields (needs ${need} bytes) but only ${value.length} available`
     );
@@ -133,7 +133,7 @@ export interface ResultData {
  */
 export function parseResultData(value: Uint8Array): ResultData {
   if (value.length < RESULT_HEADER_LEN) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `result data too short: ${value.length} bytes`);
+    throw new As400Error("PROTOCOL_ERROR", `result data too short: ${value.length} bytes`);
   }
   const v = new DataView(value.buffer, value.byteOffset, value.byteLength);
   const rowCount = v.getInt32(4);
@@ -151,7 +151,7 @@ export function parseResultData(value: Uint8Array): ResultData {
         continue;
       }
       if (pos + indicatorSize > value.length) {
-        throw new Tn5250Error("PROTOCOL_ERROR", "result data truncated while reading indicators");
+        throw new As400Error("PROTOCOL_ERROR", "result data truncated while reading indicators");
       }
       // 指標は符号付き。-1 が NULL
       rowNulls.push(v.getInt16(pos) === -1);

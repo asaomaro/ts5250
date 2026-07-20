@@ -6,7 +6,7 @@
  *
  * 参照: JTOpen(jtopenlite) の command/program/openlist に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
 import type { CommandConnection } from "../command/command-connection.js";
 import type { ProgramParameter } from "../command/command-datastream.js";
@@ -23,7 +23,7 @@ export function padEbcdic(text: string, length: number): Uint8Array {
   const out = new Uint8Array(length).fill(EBCDIC_SPACE);
   const { bytes, substituted } = codec.encode(text.toUpperCase());
   if (substituted > 0) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "CONFIG_ERROR",
       `"${text}" contains characters not representable in CCSID ${EBCDIC_CCSID}`
     );
@@ -67,7 +67,7 @@ export interface ListInfo {
 
 export function parseListInfo(data: Uint8Array): ListInfo {
   if (data.length < 16) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `list information too short: ${data.length} bytes`);
+    throw new As400Error("PROTOCOL_ERROR", `list information too short: ${data.length} bytes`);
   }
   const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return {
@@ -98,7 +98,7 @@ export async function callOpenList<T>(
   const { result, outputs } = await conn.call(program, library, params);
   if (!result.success) {
     const primary = result.messages.find((m) => m.kind === "error" || m.kind === "severe");
-    throw new Tn5250Error(
+    throw new As400Error(
       "COMMAND_FAILED",
       `${program} failed${primary ? `: ${primary.id} ${primary.text}` : ""}`
     );
@@ -107,7 +107,7 @@ export async function callOpenList<T>(
   const listInfo = outputs[opts.listInfoIndex];
   const records = outputs[opts.receiveIndex];
   if (!listInfo || !records) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `${program} returned no list information`);
+    throw new As400Error("PROTOCOL_ERROR", `${program} returned no list information`);
   }
   const info = parseListInfo(listInfo);
   if (info.recordLength <= 0) return [];

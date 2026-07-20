@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { z } from "zod";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 import { requireAdmin, type AuthContext, type AuthVars } from "./auth.js";
 import type { SessionManager } from "./session-manager.js";
 import type { AuditBuffer } from "./audit.js";
@@ -29,9 +29,9 @@ const updateUserSchema = z.object({
   password: z.string().min(1).optional()
 });
 
-/** Tn5250Error を HTTP ステータスへ */
+/** As400Error を HTTP ステータスへ */
 function errStatus(e: unknown): 400 | 403 | 404 {
-  if (e instanceof Tn5250Error) {
+  if (e instanceof As400Error) {
     if (e.code === "FORBIDDEN") return 403;
     if (e.code === "SESSION_NOT_FOUND") return 404;
   }

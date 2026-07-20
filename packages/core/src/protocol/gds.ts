@@ -1,4 +1,4 @@
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { ByteReader, ByteWriter } from "./bytes.js";
 import { GDS_TYPE, HDR_FLAG } from "./constants.js";
 
@@ -25,17 +25,17 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
   const r = new ByteReader(record);
   const ll = r.u16();
   if (ll !== record.length) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `record length mismatch: LL=${ll}, actual=${record.length}`);
+    throw new As400Error("PROTOCOL_ERROR", `record length mismatch: LL=${ll}, actual=${record.length}`);
   }
   const type = r.u16();
   if (type !== GDS_TYPE) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `unexpected GDS type 0x${type.toString(16)}`);
+    throw new As400Error("PROTOCOL_ERROR", `unexpected GDS type 0x${type.toString(16)}`);
   }
   r.skip(2); // reserved
   // Variable Header Length は自身の 1 バイトを含む（=0x04 で flags(2)+opcode(1) が続く）
   const varHdrLen = r.u8();
   if (varHdrLen < 4) {
-    throw new Tn5250Error("PROTOCOL_ERROR", `variable header too short: ${varHdrLen}`);
+    throw new As400Error("PROTOCOL_ERROR", `variable header too short: ${varHdrLen}`);
   }
   const flag1 = r.u8();
   r.u8(); // flags 2 バイト目（未使用）

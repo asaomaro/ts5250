@@ -11,7 +11,7 @@
  *   4 層目: `autoPdfDir` を保存**前**に検証する（不正な設定を永続化しない）
  */
 import type { Hono } from "hono";
-import { Tn5250Error } from "@as400web/core";
+import { As400Error } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import { checkOutputDir } from "./output-dir.js";
 import { checkPrintDest } from "./print-dest.js";
@@ -40,7 +40,7 @@ interface SystemInput {
 }
 
 function errStatus(e: unknown): 400 | 403 | 404 {
-  if (e instanceof Tn5250Error) {
+  if (e instanceof As400Error) {
     if (e.code === "FORBIDDEN") return 403;
     if (e.code === "SESSION_NOT_FOUND") return 404;
   }
@@ -55,7 +55,7 @@ function errMsg(e: unknown): string {
 function refOf(raw: string): { source: ConfigSource; id: string } {
   const parsed = parseRef(raw);
   if (!parsed) {
-    throw new Tn5250Error("CONFIG_ERROR", `invalid reference "${raw}" (expected srv:<name> or own:<id>)`);
+    throw new As400Error("CONFIG_ERROR", `invalid reference "${raw}" (expected srv:<name> or own:<id>)`);
   }
   return parsed;
 }
@@ -143,7 +143,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
   /** 書き込みの認可（2 層目）。サーバー設定は admin のみ */
   const assertWritable = (source: ConfigSource, c: { get: (k: "user") => AuthVars["user"] }): void => {
     if (source === "server" && !canEditServer(c)) {
-      throw new Tn5250Error("FORBIDDEN", "forbidden: server settings are read-only");
+      throw new As400Error("FORBIDDEN", "forbidden: server settings are read-only");
     }
   };
 

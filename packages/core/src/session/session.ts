@@ -1,5 +1,5 @@
 import { codecForCcsid, type Codec } from "../codec/codec.js";
-import { Tn5250Error } from "../errors.js";
+import { As400Error } from "../errors.js";
 import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import { buildReadMdtResponse, buildFlagRecord } from "../protocol/read-response.js";
@@ -133,7 +133,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       transport = opts.transport;
     } else {
       if (opts.host === undefined) {
-        throw new Tn5250Error("CONNECT_FAILED", "host is required (or inject transport)");
+        throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
       }
       transport = await TcpTransport.connect({
         host: opts.host,
@@ -160,7 +160,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
         session.telnet.close();
-        reject(new Tn5250Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`));
+        reject(new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`));
       }, timeoutMs);
       const onFirstReady = () => {
         clearTimeout(timer);
@@ -170,7 +170,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       session.telnet.onClose((reason) => {
         clearTimeout(timer);
         session.handleClose(reason);
-        reject(new Tn5250Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
+        reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
       });
       session.telnet.onError((err) => session.warn(`transport error: ${err.message}`));
       session.telnet.onRecord((rec) => session.handleRecord(rec));
@@ -209,7 +209,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (field.dbcsType !== undefined && this.codec.isDbcs) {
       const bytes = this.codec.encode(value).bytes.length;
       if (bytes > field.length) {
-        throw new Tn5250Error("FIELD_OVERFLOW", `DBCS value ${bytes} bytes exceeds field length ${field.length}`);
+        throw new As400Error("FIELD_OVERFLOW", `DBCS value ${bytes} bytes exceeds field length ${field.length}`);
       }
     }
     this.buf.setFieldValue(field, value, field.dbcsType !== undefined);
@@ -237,7 +237,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.assertNotBusy();
     this.assertReady();
     const field = this.buf.getSelectionField(fieldId);
-    if (!field) throw new Tn5250Error("PROTOCOL_ERROR", `no GUI selection field id=${fieldId}`);
+    if (!field) throw new As400Error("PROTOCOL_ERROR", `no GUI selection field id=${fieldId}`);
     const chosen = field.choices.find((c) => c.selected && c.aid !== undefined);
     let key: AidKey = opts.key ?? "Enter";
     if (chosen?.aid !== undefined) {
@@ -264,7 +264,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (key === "Attn") return buildFlagRecord({ atn: true });
     const aid = aidCodeOf(key);
     if (aid === undefined) {
-      throw new Tn5250Error("PROTOCOL_ERROR", `unsupported AID key: ${key}`);
+      throw new As400Error("PROTOCOL_ERROR", `unsupported AID key: ${key}`);
     }
     const { record, substituted } = buildReadMdtResponse(this.buf, this.codec, aid, cursor);
     if (substituted > 0) this.warn(`${substituted} character(s) substituted on send`);
@@ -291,7 +291,7 @@ export class Session5250 extends Emitter<SessionEvents> {
    * until 指定時は条件成立する画面まで待つ。タイムアウトは timedOut: true で現画面を返す。
    */
   waitForScreen(opts: { timeoutMs?: number; until?: { text: string; row?: number } } = {}): Promise<SendAidResult> {
-    if (this.state === "closed") throw new Tn5250Error("SESSION_CLOSED", "session is closed");
+    if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
     const matches = (snap: ScreenSnapshot): boolean => {
       if (!opts.until) return false; // until 無し = 次の更新を待つ（現在画面では解決しない）
       const rows =
@@ -331,13 +331,13 @@ export class Session5250 extends Emitter<SessionEvents> {
    */
   async fetchJobInfo(refresh = false): Promise<JobInfo> {
     if (this.jobInfoCache && !refresh) return this.jobInfoCache;
-    if (this.fetchingJobInfo) throw new Tn5250Error("JOB_INFO_BUSY", "job info fetch already in progress");
-    if (this.state === "closed") throw new Tn5250Error("SESSION_CLOSED", "session is closed");
-    if (this.state !== "ready") throw new Tn5250Error("JOB_INFO_BUSY", "keyboard is locked");
+    if (this.fetchingJobInfo) throw new As400Error("JOB_INFO_BUSY", "job info fetch already in progress");
+    if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
+    if (this.state !== "ready") throw new As400Error("JOB_INFO_BUSY", "keyboard is locked");
 
     const cmd = this.findCommandField();
     if (!cmd) {
-      throw new Tn5250Error("JOB_INFO_UNAVAILABLE", "no command line on current screen");
+      throw new As400Error("JOB_INFO_UNAVAILABLE", "no command line on current screen");
     }
 
     this.fetchingJobInfo = true;
@@ -350,7 +350,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 成否に関わらず F3 で元画面へ戻す
       await this.sendAndWait(this.buildAidRecord("F3"));
       if (!info) {
-        throw new Tn5250Error("JOB_INFO_UNAVAILABLE", "could not parse job identity from DSPJOB screen");
+        throw new As400Error("JOB_INFO_UNAVAILABLE", "could not parse job identity from DSPJOB screen");
       }
       this.jobInfoCache = info;
       return info;
@@ -370,13 +370,13 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private assertNotBusy(): void {
-    if (this.fetchingJobInfo) throw new Tn5250Error("JOB_INFO_BUSY", "job info fetch in progress");
+    if (this.fetchingJobInfo) throw new As400Error("JOB_INFO_BUSY", "job info fetch in progress");
   }
 
   private assertReady(): void {
-    if (this.state === "closed") throw new Tn5250Error("SESSION_CLOSED", "session is closed");
+    if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
     if (this.state !== "ready") {
-      throw new Tn5250Error("KEYBOARD_LOCKED", `keyboard is locked (state=${this.state})`);
+      throw new As400Error("KEYBOARD_LOCKED", `keyboard is locked (state=${this.state})`);
     }
   }
 

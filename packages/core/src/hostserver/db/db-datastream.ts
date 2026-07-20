@@ -11,7 +11,7 @@
  * 参照: JTOpen(jtopenlite) の DatabaseConnection.writeHeader / writeTemplate /
  *       readReplyHeader に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { HEADER_LEN } from "../datastream.js";
 
 /** database のサーバー ID（signon は 0xE009） */
@@ -137,7 +137,7 @@ export interface DbTemplate {
 export function parseDbTemplate(frame: Uint8Array): DbTemplate {
   const minLen = HEADER_LEN + DB_TEMPLATE_LEN;
   if (frame.length < minLen) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `database reply too short: ${frame.length} bytes (need >= ${minLen})`
     );
@@ -145,7 +145,7 @@ export function parseDbTemplate(frame: Uint8Array): DbTemplate {
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   const reqRep = view.getUint16(18);
   if (reqRep !== DB_REPLY_ID) {
-    throw new Tn5250Error(
+    throw new As400Error(
       "PROTOCOL_ERROR",
       `unexpected database reply id 0x${reqRep.toString(16)} (expected 0x${DB_REPLY_ID.toString(16)})`
     );

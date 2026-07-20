@@ -1,10 +1,24 @@
 // @as400web/core 公開 API
 
 // ロガー（stderr 固定。spec D9）
-export { log, childLog } from "./log.js";
+export {
+  log,
+  childLog,
+  setLogSink,
+  resetLogSink,
+  type CoreLogger,
+  type LogFn
+} from "./log.js";
 
 // エラー
-export { Tn5250Error, describeSocketError, withSocketHint, type ErrorCode } from "./errors.js";
+export {
+  As400Error,
+  /** 旧名の互換シム（同一クラス）。新しいコードでは As400Error を使う */
+  Tn5250Error,
+  describeSocketError,
+  withSocketHint,
+  type ErrorCode
+} from "./errors.js";
 
 // 画面モデル（共有型。server / web-ui が import する）
 export type {
@@ -166,3 +180,21 @@ export { IfsConnection, type IfsConnectOptions } from "./hostserver/ifs/ifs-conn
 export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";
 export { listUsers, type UserEntry, type UserListFilter } from "./hostserver/list/user-list.js";
 export { listJobs, type JobEntry, type JobListFilter } from "./hostserver/list/job-list.js";
+
+// DDM（レコードレベル書き込み）
+export {
+  DdmConnection,
+  buildDdmRecord,
+  type DdmRecord,
+  buildRecordLayout,
+  type DdmConnectOptions,
+  type DdmFile,
+  type ColumnLayoutInput,
+  type RecordLayout
+} from "./hostserver/ddm/ddm-connection.js";
+export {
+  encodeChar,
+  encodeInt,
+  encodePacked,
+  encodeZoned
+} from "./hostserver/ddm/encode.js";

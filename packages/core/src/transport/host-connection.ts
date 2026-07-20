@@ -7,7 +7,7 @@
  */
 import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
-import { Tn5250Error, withSocketHint } from "../errors.js";
+import { As400Error, withSocketHint } from "../errors.js";
 
 export interface HostTlsOptions {
   rejectUnauthorized?: boolean;
@@ -71,7 +71,7 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
     socket.setTimeout(timeoutMs);
     socket.on("timeout", () =>
       fail(
-        new Tn5250Error(
+        new As400Error(
           "CONNECT_FAILED",
           withSocketHint(
             `host server timed out after ${timeoutMs}ms (${opts.host}:${opts.port})`,
@@ -82,7 +82,7 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
     );
     socket.on("error", (err: NodeJS.ErrnoException) =>
       fail(
-        new Tn5250Error(
+        new As400Error(
           isCertError(err) ? "TLS_CERT_INVALID" : "CONNECT_FAILED",
           withSocketHint(
             `host server connection failed (${opts.host}:${opts.port}): ${err.message}`,
@@ -93,7 +93,7 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
       )
     );
     socket.on("close", () =>
-      fail(new Tn5250Error("CONNECT_FAILED", "host server closed the connection"))
+      fail(new As400Error("CONNECT_FAILED", "host server closed the connection"))
     );
 
     socket.on("data", (chunk: Buffer) => {
@@ -101,7 +101,7 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
       while (buffer.length >= 4) {
         const len = buffer.readUInt32BE(0);
         if (len < 4) {
-          fail(new Tn5250Error("PROTOCOL_ERROR", `host server sent a bad frame length ${len}`));
+          fail(new As400Error("PROTOCOL_ERROR", `host server sent a bad frame length ${len}`));
           return;
         }
         if (buffer.length < len) return;
@@ -120,7 +120,7 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
         request(frame) {
           return new Promise<Uint8Array>((res, rej) => {
             if (pending) {
-              rej(new Tn5250Error("PROTOCOL_ERROR", "a host server request is already in flight"));
+              rej(new As400Error("PROTOCOL_ERROR", "a host server request is already in flight"));
               return;
             }
             pending = { resolve: res, reject: rej };
@@ -171,7 +171,7 @@ export function queryPortMapper(
     socket.on("end", () => {
       if (buffer.length < responseLen) {
         finish(
-          new Tn5250Error(
+          new As400Error(
             "PROTOCOL_ERROR",
             `port mapper closed the connection after ${buffer.length} bytes (service "${serviceName}")`
           )
@@ -180,7 +180,7 @@ export function queryPortMapper(
     });
     socket.on("timeout", () =>
       finish(
-        new Tn5250Error(
+        new As400Error(
           "CONNECT_FAILED",
           withSocketHint(`port mapper timed out after ${timeoutMs}ms (${host}:${port})`, "ETIMEDOUT")
         )
@@ -188,7 +188,7 @@ export function queryPortMapper(
     );
     socket.on("error", (err) =>
       finish(
-        new Tn5250Error("CONNECT_FAILED", `cannot reach port mapper at ${host}:${port}: ${err.message}`, {
+        new As400Error("CONNECT_FAILED", `cannot reach port mapper at ${host}:${port}: ${err.message}`, {
           cause: err
         })
       )

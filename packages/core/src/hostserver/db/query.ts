@@ -8,7 +8,7 @@
  * 参照: JTOpen(jtopenlite) の JDBCStatement.executeQuery /
  *       DatabaseConnection.prepareAndDescribe / openAndDescribe / fetch に対応する。
  */
-import { Tn5250Error } from "../../errors.js";
+import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { findParam, type Reply } from "../datastream.js";
 import { codecForCcsid } from "../../codec/codec.js";
@@ -39,7 +39,7 @@ export interface QueryResult {
 }
 
 /** SQL の実行エラー。SQLCODE / SQLSTATE を**型として**公開する */
-export class SqlError extends Tn5250Error {
+export class SqlError extends As400Error {
   constructor(
     readonly sqlCode: number,
     readonly sqlState: string,
@@ -181,7 +181,7 @@ async function prepareAndOpen(conn: DbConnection, sql: string): Promise<ResultFo
     // template のエラーを通しているため、ここまで来ても「列定義が無い」ことしか
     // 分からず、原因（文の種類・未対応の型・権限）を切り分けられなかった。
     const t = prepared.dbTemplate;
-    throw new Tn5250Error(
+    throw new As400Error(
       "HOST_SERVER_UNSUPPORTED",
       `この結果セットは取得できません（rcClass=${t.rcClass}, code=${t.rcClassReturnCode}）。` +
         "**LOB 列（DBCLOB / CLOB / BLOB）を含む結果セットは未対応**です" +
