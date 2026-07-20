@@ -216,3 +216,21 @@ export {
 
 // CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う）
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
+
+// SQL 経由の行追加（パラメータマーカー）
+export {
+  insertRows,
+  batchSizeFor,
+  InsertEncodeError,
+  DEFAULT_MAX_BATCH_BYTES,
+  type InsertResult,
+  type InsertRowsArgs
+} from "./hostserver/db/insert.js";
+export { parseMarkerFormat, type MarkerFormat, type MarkerField } from "./hostserver/db/marker-format.js";
+export {
+  encodeMarkerRow,
+  buildMarkerData,
+  markerDataSize,
+  MarkerEncodeError,
+  type MarkerRow
+} from "./hostserver/db/marker-encode.js";

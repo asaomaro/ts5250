@@ -11,18 +11,18 @@
 - [x] T2: `db/marker-format.ts` を新規作成（依存: T1）。`0x3813` を解析して
       `MarkerFormat`（型・長さ・位取り・CCSID・**オフセットの累積**）を返す。
       単体テスト: **スパイクで実際に受け取った 138 バイトを固定データとして使う**（回帰資産）
-- [ ] T3: `db/marker-encode.ts` を新規作成（依存: T2）。spec D2 の表どおりに値を詰める。
+- [x] T3: `db/marker-encode.ts` を新規作成（依存: T2）。spec D2 の表どおりに値を詰める。
       単体テスト（**ここを厚く**）: 整数の BE・境界値 / `CHAR` の空白詰めと CCSID 別 /
       `VARCHAR` の 2 バイト長 / `DECIMAL`・`NUMERIC`（既存関数の再利用）/
       **未対応型は拒否**（列名・型番号つき）/ NULL 指標 `0xFFFF` / ヘッダー各欄 / 複数行の並び
-- [ ] T4: `db/insert.ts` を新規作成（依存: T3）。`insertRows` が
+- [x] T4: `db/insert.ts` を新規作成（依存: T3）。`insertRows` が
       **prepareAndDescribe → changeDescriptor → execute を 1 関数で完結**させる（spec D1）。
       診断ビット（`messageId | firstLevelText`）を常時立てる（spec D5）。
       単体テスト: バッチ分割の件数計算・境界・`uncertainRange` の算出
 
 ## core — 実機で確かめる
 
-- [ ] **T5: 実機ゲート** — `DATE` / `TIME` / `TIMESTAMP` / `GRAPHIC` を含む表へ 1 行 INSERT し、
+- [x] **T5: 実機ゲート** — `DATE` / `TIME` / `TIMESTAMP` / `GRAPHIC` を含む表へ 1 行 INSERT し、
       SQL で読み返して一致を確認（依存: T4）。**spec の「残る不確実性」の本体**。
       ⚠ **ここを通るまで T8 以降に進まない**。詰め方が違えば spec へ差し戻す
 - [ ] T6: 1 バッチの上限を実測し定数化（依存: T5）。行数を増やして限界を測り、

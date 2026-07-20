@@ -37,6 +37,12 @@ export interface MarkerFormat {
   fields: MarkerField[];
   /** 1 行のバイト数。サーバーの申告値をそのまま使う */
   rowSize: number;
+  /**
+   * 受け取ったままのバイト列。
+   * **`changeDescriptor` でそのまま送り返す**ため保持する
+   * （こちらで組み立て直すと、解釈できていない欄を落としかねない）。
+   */
+  raw: Uint8Array;
 }
 
 /**
@@ -86,5 +92,5 @@ export function parseMarkerFormat(value: Uint8Array): MarkerFormat {
       `parameter marker row size mismatch (fields sum ${offset} / server says ${rowSize})`
     );
   }
-  return { fields, rowSize };
+  return { fields, rowSize, raw: value };
 }
