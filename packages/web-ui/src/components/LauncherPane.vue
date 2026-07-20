@@ -45,7 +45,12 @@ const FEATURES = [
     name: "データ転送",
     desc: "表を CSV に落とす / CSV を表に取り込む。SQL を書かずに済む。"
   },
-  { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" }
+  { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" },
+  {
+    id: "ifs:files",
+    name: "IFS",
+    desc: "IFS のフォルダを辿ってファイルを見る / 取り出す / 置く。"
+  }
 ] as const;
 
 /**
