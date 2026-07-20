@@ -72,6 +72,13 @@ export const workspaceStore = reactive({
   showSystemPicker: false,
   /** 狭幅時は分割を無効化し単一グループにフォールバック（Workspace が set） */
   narrow: false,
+  /**
+   * 最大化中のグループ。設定されている間はそのグループだけを描画する。
+   *
+   * **ツリー（root）は書き換えない**——一時的な見せ方の切り替えなので、元に戻すのは
+   * この ID を消すだけで済む。分割の比率も配置もそのまま残る。
+   */
+  maximizedGroupId: undefined as string | undefined,
   /** D&D 中のタブ（sessionId）。PaneTabs 間で共有し、自グループ内の並び替えか判定する */
   draggingSession: undefined as string | undefined,
   /** SO/SI を {}表示するか（ACS の Ctrl+F 相当。全ペイン共通の表示設定） */
@@ -84,6 +91,41 @@ export const workspaceStore = reactive({
   init(): void {
     this.root = newGroup();
     this.focusedGroupId = (this.root as GroupNode).id;
+    this.maximizedGroupId = undefined;
+  },
+
+  /** ペイン分割されているか（＝最大化ボタンを出す条件） */
+  isSplit(): boolean {
+    return this.root.type === "split";
+  },
+
+  /** 実際に描画するツリー。最大化中はそのグループだけ（分割ツリーは保持したまま） */
+  displayRoot(): WsNode {
+    const id = this.maximizedGroupId;
+    if (id === undefined) return this.root;
+    return findGroup(this.root, id) ?? this.root;
+  },
+
+  /** 指定グループの最大化を切り替える。分割されていないときは何もしない */
+  toggleMaximize(groupId: string): void {
+    if (this.maximizedGroupId === groupId) {
+      this.maximizedGroupId = undefined;
+      return;
+    }
+    if (!this.isSplit()) return;
+    if (!findGroup(this.root, groupId)) return;
+    this.maximizedGroupId = groupId;
+    this.focusedGroupId = groupId;
+  },
+
+  /**
+   * 最大化を維持できない状態なら解除する。
+   * グループが消えた／分割が無くなった（＝最大化する意味が無い）ときに呼ぶ。
+   */
+  syncMaximized(): void {
+    const id = this.maximizedGroupId;
+    if (id === undefined) return;
+    if (!this.isSplit() || !findGroup(this.root, id)) this.maximizedGroupId = undefined;
   },
 
   groups(): GroupNode[] {
@@ -206,6 +248,12 @@ export const workspaceStore = reactive({
 
   /** グループを方向に分割し、sessionId を新グループに置く（端ドロップ＝分割。狭幅時は合流にフォールバック） */
   split(groupId: string, zone: Exclude<DropZone, "center">, sessionId: string): void {
+    // 最大化中は分割しない。分割すると「最大化した 1 枚」の中に入れ子ができ、
+    // 元に戻したときの形が予測できなくなる（タブ移動だけ許す）
+    if (this.maximizedGroupId !== undefined) {
+      this.moveTab(sessionId, groupId);
+      return;
+    }
     if (this.narrow) {
       this.moveTab(sessionId, groupId);
       return;
@@ -274,5 +322,6 @@ export const workspaceStore = reactive({
     }
     this.root = root;
     if (!findGroup(this.root, this.focusedGroupId)) this.focusedGroupId = this.groups()[0]!.id;
+    this.syncMaximized();
   }
 });

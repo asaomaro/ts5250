@@ -168,3 +168,29 @@ describe("破壊的な操作は確認を挟む", () => {
     w.unmount();
   });
 });
+
+describe("列見出しの固定", () => {
+  /**
+   * 見出し（絞り込みの帯）と列見出しはスクロールで流れてはいけない。
+   * **スクロールは `.scroll` の中だけ**に閉じ込める構造を固定する
+   * （表をペイン直下に戻すと、ペイン全体が流れて列見出しが消える）。
+   */
+  it("表はスクロール領域の中、絞り込みの帯は外に置く", async () => {
+    mockFetch({
+      "/api/systems": { systems: [SYSTEM], editable: false },
+      "/api/sessions-config": { sessions: [] },
+      "/api/host/list/jobs": {
+        items: [{ number: "123456", user: "QUSER", name: "QZDASOINIT", status: "ACTIVE", type: "B", subtype: "" }]
+      }
+    });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    await flushPromises();
+    await w.find("header button").trigger("click");
+    await flushPromises();
+    expect(w.find(".scroll table thead th").exists()).toBe(true);
+    // 帯はスクロール領域の外（＝常に見える）
+    expect(w.find(".scroll header").exists()).toBe(false);
+    expect(w.find(".host-list > header").exists()).toBe(true);
+    w.unmount();
+  });
+});
