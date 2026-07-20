@@ -47,3 +47,12 @@ export type {
   WsKeyDone
 } from "./ws-messages.js";
 export { main } from "./main.js";
+
+// CSV 取り込み（DDM）。実機チェックスクリプトが HTTP を介さず同じ経路を叩けるように公開する
+export {
+  uploadRows,
+  uploadCsv,
+  registerHostUploadRoutes,
+  type UploadArgs,
+  type UploadOutcome
+} from "./host-upload.js";

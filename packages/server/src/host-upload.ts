@@ -48,6 +48,8 @@ const uploadRequestSchema = z
     library: z.string().min(1),
     file: z.string().min(1),
     member: z.string().min(1).optional(),
+    /** レコード様式名。DDS 由来の物理ファイルで必要になることがある */
+    recordFormat: z.string().min(1).optional(),
     /** CSV のヘッダー（表の列名と対応づける） */
     columns: z.array(z.string()).min(1),
     /** 値。型変換はサーバーが列型に従って行う */
@@ -68,6 +70,14 @@ export interface UploadArgs {
   library: string;
   file: string;
   member?: string;
+  /**
+   * レコード様式名。既定はファイル名。
+   *
+   * **DDS で作った物理ファイルは様式名がファイル名と一致しないことがある**
+   * （実機で `MYLIB/TESTPF` が `CPF4135 Record format name ... was not valid.` で開けなかった）。
+   * SQL で作った表は一致するので既定で足りるが、DDS 由来の表には指定が要る。
+   */
+  recordFormat?: string;
   header: readonly string[];
   rows: readonly (readonly (string | null)[])[];
   blockingFactor?: number;
@@ -90,7 +100,7 @@ export type UploadOutcome =
  *
  * 順番だけを持ち、判断は core の純関数（`prepareUpload`）に委ねる。
  */
-export async function uploadRows(deps: HostUploadDeps, args: UploadArgs): Promise<UploadOutcome> {
+export async function uploadRows(args: UploadArgs): Promise<UploadOutcome> {
   const library = assertIdentifier(args.library, "ライブラリ名");
   const file = assertIdentifier(args.file, "ファイル名");
   const started = Date.now();
@@ -121,6 +131,7 @@ export async function uploadRows(deps: HostUploadDeps, args: UploadArgs): Promis
   try {
     const opened = await ddm.open(library, file, {
       ...(args.member !== undefined ? { member: args.member } : {}),
+      ...(args.recordFormat !== undefined ? { recordFormat: args.recordFormat } : {}),
       ...(args.blockingFactor !== undefined ? { blockingFactor: args.blockingFactor } : {})
     });
 
@@ -154,7 +165,6 @@ export async function uploadRows(deps: HostUploadDeps, args: UploadArgs): Promis
 
 /** CSV 文字列から取り込む（MCP の受け口。解析は core の同じ実装を使う） */
 export async function uploadCsv(
-  deps: HostUploadDeps,
   args: Omit<UploadArgs, "header" | "rows"> & { csv: string }
 ): Promise<UploadOutcome> {
   if (args.csv.length > MAX_CSV_BYTES) {
@@ -164,7 +174,7 @@ export async function uploadCsv(
   if (rows.length > MAX_ROWS) {
     throw new As400Error("CONFIG_ERROR", `行数が多すぎます（上限 ${MAX_ROWS} 行）`);
   }
-  return uploadRows(deps, { ...args, header, rows });
+  return uploadRows({ ...args, header, rows });
 }
 
 export function registerHostUploadRoutes(
@@ -176,16 +186,17 @@ export function registerHostUploadRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
-    const { source, library, file, member, columns, rows, blockingFactor, emptyAsNull } =
+    const { source, library, file, member, recordFormat, columns, rows, blockingFactor, emptyAsNull } =
       parsed.data;
     const user = c.get("user");
     try {
       const opts = resolveSource(deps.resolver, source, user);
-      const outcome = await uploadRows(deps, {
+      const outcome = await uploadRows({
         opts,
         library,
         file,
         ...(member !== undefined ? { member } : {}),
+        ...(recordFormat !== undefined ? { recordFormat } : {}),
         header: columns,
         rows,
         ...(blockingFactor !== undefined ? { blockingFactor } : {}),

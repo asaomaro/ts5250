@@ -218,6 +218,8 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         library: z.string(),
         file: z.string(),
         member: z.string().optional(),
+        /** レコード様式名。DDS 由来の物理ファイルで必要になることがある（既定はファイル名） */
+        recordFormat: z.string().optional(),
         /** CSV 文字列（ヘッダー行を含む）。columns+rows と排他 */
         csv: z.string().optional(),
         columns: z.array(z.string()).optional(),
@@ -252,13 +254,14 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
           library: input.library,
           file: input.file,
           ...(input.member !== undefined ? { member: input.member } : {}),
+          ...(input.recordFormat !== undefined ? { recordFormat: input.recordFormat } : {}),
           ...(input.emptyAsNull !== undefined ? { emptyAsNull: input.emptyAsNull } : {}),
           ...(input.blockingFactor !== undefined ? { blockingFactor: input.blockingFactor } : {})
         };
         // **HTTP と同じ実行経路を通す**（入口が違うだけ。検査を二重に持たない）
         const outcome = input.csv
-          ? await uploadCsv({ resolver }, { ...common, csv: input.csv })
-          : await uploadRows({ resolver }, { ...common, header: input.columns!, rows: input.rows! });
+          ? await uploadCsv({ ...common, csv: input.csv })
+          : await uploadRows({ ...common, header: input.columns!, rows: input.rows! });
         return jsonResult(outcome);
       }).catch(errorResult)
   );

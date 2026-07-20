@@ -263,16 +263,21 @@ export class DdmConnection {
     let ll = r.u16("S38OPEN LL");
     let cp = r.u16("S38OPEN CP");
     let numRead = 10;
-    // S38OPNFB に当たるまで読み進める。途中の S38MSGRM はエラー
+    /**
+     * 応答に混ざるメッセージ。**これがあっても失敗とは限らない**——
+     * 成否は「S38OPNFB（オープンのフィードバック）が来たか」で判断する。
+     *
+     * 実機で `CPF427D Substitution characters may be used in data conversion.` が
+     * S38OPNFB と**一緒に**返ることを確認した（ジョブ CCSID と表の CCSID が違う場合の通知）。
+     * 最初のメッセージで打ち切ると、開けているのに失敗として扱ってしまう。
+     */
+    const messages: DdmMessage[] = [];
     while (cp !== DDM_CP.S38OPNFB && numRead + 4 <= hdr.length) {
       if (cp === DDM_CP.S38MSGRM) {
-        const msg = readMessage(r, ll);
-        throw new As400Error(
-          "PROTOCOL_ERROR",
-          `ファイルを開けませんでした（${library}/${file}）: ${msg.id} ${msg.text}`.trim()
-        );
+        messages.push(readMessage(r, ll));
+      } else {
+        r.skip(ll - 4, "S38OPEN skip");
       }
-      r.skip(ll - 4, "S38OPEN skip");
       numRead += ll;
       if (numRead + 4 > hdr.length) break;
       ll = r.u16("S38OPEN LL");
@@ -280,9 +285,18 @@ export class DdmConnection {
       numRead += 4;
     }
     if (cp !== DDM_CP.S38OPNFB) {
+      // ここで初めて失敗と判断する。メッセージがあれば理由として添える
+      const why = messages.map((m) => `${m.id} ${m.text}`.trim()).join(" / ");
       throw new As400Error(
         "PROTOCOL_ERROR",
-        `S38OPNFB を期待したが 0x${cp.toString(16)} が返りました`
+        why
+          ? `ファイルを開けませんでした（${library}/${file}）: ${why}`
+          : `S38OPNFB を期待したが 0x${cp.toString(16)} が返りました`
+      );
+    }
+    if (messages.length > 0) {
+      log.debug(
+        `open ${library}/${file} advisory: ${messages.map((m) => m.id).join(" ")}`
       );
     }
 

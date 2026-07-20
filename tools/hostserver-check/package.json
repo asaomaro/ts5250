@@ -14,6 +14,7 @@
     "ddm": "tsc -b && node dist/ddm.js"
   },
   "dependencies": {
-    "@as400web/core": "*"
+    "@as400web/core": "*",
+    "@as400web/server": "*"
   }
 }
