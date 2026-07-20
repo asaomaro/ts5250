@@ -5,6 +5,7 @@ import { csvBlob, csvFileName, toCsv } from "../csv.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
+import { useColumnWidths } from "../composables/useColumnWidths.js";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
 import { isValidIdentifier, parseCsv } from "@as400web/core/browser";
@@ -75,6 +76,14 @@ const result = ref<
 const { visible: slowLoading, busy: loading, run } = useDelayedLoading();
 
 /**
+ * 列幅。SQL ペインと**同じ振る舞い**にする（中身に合わせ、上限で打ち切り、ドラッグで変えられる）。
+ * 取り込みのプレビューと取得の結果で別々に持つ——列の並びが別物なので、
+ * 片方の幅がもう片方に効くと対応が狂う。
+ */
+const upCols = useColumnWidths();
+const dlCols = useColumnWidths();
+
+/**
  * 実際に使った往復数。
  *
  * **バッチ容量（`batchSize`）をそのまま出さない**——2 行の取り込みで
@@ -101,6 +110,7 @@ function reset(): void {
   header.value = [];
   rows.value = [];
   parseError.value = "";
+  upCols.clear();
   rejections.value = [];
   rejectTruncated.value = false;
   result.value = undefined;
@@ -108,6 +118,7 @@ function reset(): void {
   downloadRows.value = [];
   downloadColumns.value = [];
   downloadError.value = "";
+  dlCols.clear();
 }
 
 watch(direction, reset);
@@ -272,8 +283,10 @@ function rejectionWhere(r: Rejection): string {
           ↑ 取り込み
         </button>
       </div>
-      <label>ライブラリ <input v-model="library" size="10" placeholder="MYLIB" /></label>
-      <label>ファイル <input v-model="file" size="10" placeholder="TESTPF" /></label>
+      <!-- placeholder に具体名を置かない。特定環境のライブラリ名・表名を書くと、
+           他の利用者には意味が無く「この名前を入れるもの」と誤解させる -->
+      <label>ライブラリ <input v-model="library" size="10" title="英大文字・数字・_$#@ の 1〜10 文字" /></label>
+      <label>ファイル <input v-model="file" size="10" title="英大文字・数字・_$#@ の 1〜10 文字" /></label>
       <label v-if="direction === 'download'">絞り込み <input v-model="where" size="18" placeholder="ID < 100" /></label>
       <button
         v-if="direction === 'upload'"
@@ -313,12 +326,28 @@ function rejectionWhere(r: Rejection): string {
         <!-- 列の対応（先頭行のプレビュー） -->
         <table v-if="header.length && phase !== 'parse-failed'">
           <thead>
-            <tr><th class="rownum">#</th><th v-for="h in header" :key="h">{{ h }}</th></tr>
+            <tr>
+              <th class="rownum">#</th>
+              <th v-for="(h, ci) in header" :key="ci" :style="upCols.widthStyle(ci)" :title="h">
+                {{ h }}
+                <!-- 列の右端を掴んで幅を変える。ダブルクリックで既定へ戻す -->
+                <span
+                  class="col-grip"
+                  :class="{ dragging: upCols.resizing.value === ci }"
+                  title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
+                  @pointerdown="upCols.onDown($event, ci)"
+                  @pointermove="upCols.onMove"
+                  @pointerup="upCols.onUp"
+                  @pointercancel="upCols.onUp"
+                  @dblclick="upCols.reset(ci)"
+                ></span>
+              </th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in rows.slice(0, 5)" :key="i">
               <td class="rownum">{{ i + 1 }}</td>
-              <td v-for="(v, j) in r" :key="j">{{ v }}</td>
+              <td v-for="(v, j) in r" :key="j" :style="upCols.widthStyle(j)" :title="v ?? ''">{{ v }}</td>
             </tr>
           </tbody>
         </table>
@@ -375,12 +404,34 @@ function rejectionWhere(r: Rejection): string {
         <p v-if="downloadError" class="error">{{ downloadError }}</p>
         <table v-if="downloadRows.length">
           <thead>
-            <tr><th class="rownum">#</th><th v-for="c in downloadColumns" :key="c">{{ c }}</th></tr>
+            <tr>
+              <th class="rownum">#</th>
+              <th v-for="(c, ci) in downloadColumns" :key="ci" :style="dlCols.widthStyle(ci)" :title="c">
+                {{ c }}
+                <span
+                  class="col-grip"
+                  :class="{ dragging: dlCols.resizing.value === ci }"
+                  title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
+                  @pointerdown="dlCols.onDown($event, ci)"
+                  @pointermove="dlCols.onMove"
+                  @pointerup="dlCols.onUp"
+                  @pointercancel="dlCols.onUp"
+                  @dblclick="dlCols.reset(ci)"
+                ></span>
+              </th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in downloadRows" :key="i">
               <td class="rownum">{{ i + 1 }}</td>
-              <td v-for="c in downloadColumns" :key="c">{{ r[c] }}</td>
+              <td
+                v-for="(c, ci) in downloadColumns"
+                :key="ci"
+                :style="dlCols.widthStyle(ci)"
+                :title="String(r[c] ?? '')"
+              >
+                {{ r[c] }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -452,14 +503,52 @@ input[type="text"], input:not([type]) {
 .drop.armed .big { color: var(--accent); }
 .drop .sub { font-size: 12px; }
 
-table { border-collapse: collapse; width: 100%; }
-th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 12.5px; white-space: nowrap; }
+/* **中身の幅にする**（`100%` だと列が引き伸ばされ、上限も打ち切りも意味を失う）。
+   SQL ペインと同じ */
+table { border-collapse: collapse; width: auto; table-layout: auto; }
+/* **中身に合わせた幅＋上限で打ち切り**（SQL ペインと同じ）。
+   手でドラッグしたぶんは widthStyle が max-width ごと上書きするので、
+   広げれば隠れていた文字が見える */
+th, td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12.5px;
+  white-space: nowrap;
+  /* **際限なく伸ばさない**。長い値の 1 列で表が使えなくなるため、
+     40 文字ぶんで打ち切って「…」を出す（全文は title で読める） */
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 列見出しは固定する（docs/UI-DESIGN.md）。border-collapse では罫線が流れるので box-shadow */
 th {
   color: var(--muted); font-weight: 600; font-size: 11px; font-family: var(--mono);
   position: sticky; top: 0; z-index: 1; background: var(--card);
   border-bottom: none; box-shadow: inset 0 -1px 0 var(--line);
 }
+/* 列の右端の掴み手。**sticky な th 自体が絶対配置の基準になる**ので追加指定は要らない。
+   見出しは overflow: hidden なので、はみ出させると掴み手が切れる */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.col-grip::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+}
+.col-grip.dragging::after { background: var(--accent); }
 .rownum { color: var(--muted); font-family: var(--mono); text-align: right; }
 
 .opt { margin: 8px 0; }
