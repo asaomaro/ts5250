@@ -1,7 +1,7 @@
 schema: 3
 slug: sql-insert-upload
-current: coding
-approved: [requirement, research, spec, plan, coding]
+current: test
+approved: [requirement, research, spec, plan, coding, test]
 mode: interactive
 humanGates: []
 maxSendBacks: 3

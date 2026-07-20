@@ -19,9 +19,9 @@
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { codecForCcsid } from "../../codec/codec.js";
-import { findParam, type Reply } from "../datastream.js";
-import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
-import type { DbConnection } from "./db-connection.js";
+import { findParam } from "../datastream.js";
+import { DB_CP, DB_REQ, ORS, isDbTemplateError } from "./db-datastream.js";
+import type { DbConnection, DbReply } from "./db-connection.js";
 import { parseSqlca } from "./db-reply.js";
 import { parseMarkerFormat, type MarkerFormat } from "./marker-format.js";
 import { buildMarkerData, encodeMarkerRow, markerDataSize, MarkerEncodeError } from "./marker-encode.js";
@@ -198,7 +198,9 @@ async function prepareAndDescribe(conn: DbConnection, sql: string): Promise<Mark
 async function changeDescriptor(conn: DbConnection, format: MarkerFormat): Promise<void> {
   const reply = await conn.request({
     reqId: DB_REQ.changeDescriptor,
-    orsBitmap: ORS.sendReplyImmediately | ORS.messageId | ORS.firstLevelText,
+    // **SQLCA も要求する**。立てないと応答に SQLCA が無く、
+    // サーバーが形式を拒んでも「判定材料が無い」状態になる
+    orsBitmap: ORS.sendReplyImmediately | ORS.sqlca | ORS.messageId | ORS.firstLevelText,
     // **RPB ハンドルではなくマーカーのハンドル欄**（template のオフセット 16）
     parameterMarkerHandle: DESCRIPTOR_HANDLE,
     params: [{ cp: DB_CP.extendedParameterMarkerFormat, value: format.raw }],
@@ -224,24 +226,51 @@ async function executeBatch(
     ],
     allowTemplateError: true
   });
-  assertOk(reply, "行を追加できませんでした");
+  // **書き込みは「成功と確認できたときだけ」通す**。SQLCA が読めない応答は
+  // 成否を判定できないので失敗として扱う（巻き戻せない経路なので安全側に倒す）
+  assertOk(reply, "行を追加できませんでした", { requireSqlca: true });
+
+  // 申告された更新件数と送った件数が食い違えば、成功とは言えない
+  const rawCa = findParam(reply, DB_CP.sqlca);
+  const ca = rawCa ? parseSqlca(rawCa) : undefined;
+  if (ca !== undefined && ca.updateCount >= 0 && ca.updateCount !== batch.length) {
+    throw new As400Error(
+      "SQL_ERROR",
+      `追加された行数が一致しません（送信 ${batch.length} / サーバー申告 ${ca.updateCount}）`
+    );
+  }
 }
 
 /**
- * 応答を検査する。
+ * 応答を検査する。**成功と言い切れるときだけ通す**。
  *
- * **成否は SQLCA の SQLCODE で判定する**（負なら失敗）。
+ * 見るのは 2 つ:
+ *
+ * 1. **template の戻りコード**（`rcClass !== 0` が失敗）。
+ * 2. **SQLCA の SQLCODE**（負が失敗）。
+ *
  * メッセージ ID の頭文字では判定できない——成功時にも
  * `L7956 n rows inserted` や `S0002 Function completed successfully.` が返るためで、
  * 実際に `S` を失敗と見なす実装にして誤検知した。
  *
- * メッセージは**理由の説明**として添える（`ORS.messageId | firstLevelText` を
- * 立てているのはこのため。立てないと失敗が空の SQLCA だけになる）。
+ * ⚠ **SQLCA が無い応答を成功扱いにしない**。以前は `undefined` を素通りさせており、
+ * 「template はエラーだが SQLCA が無い」応答が黙って成功として通る穴があった。
+ * この経路は書き込みなので、判定できない応答は失敗として扱う。
+ *
+ * `allowTemplateError: true` で要求を出しているのは、**メッセージ本文（`0x3802`）を
+ * 添えてから投げる**ため。`request()` に投げさせると理由が付かない。
  */
-function assertOk(reply: Reply, what: string): void {
+function assertOk(reply: DbReply, what: string, opts: { requireSqlca?: boolean } = {}): void {
   const rawCa = findParam(reply, DB_CP.sqlca);
   const ca = rawCa ? parseSqlca(rawCa) : undefined;
-  if (ca === undefined || ca.sqlCode >= 0) return;
+  const templateFailed = isDbTemplateError(reply.dbTemplate);
+  const sqlFailed = ca !== undefined && ca.sqlCode < 0;
+  // 書き込みでは**判定できない応答を成功にしない**（`parseSqlca` は短い応答で undefined を返す）
+  const undecidable = opts.requireSqlca === true && ca === undefined;
+  if (!templateFailed && !sqlFailed && !undecidable) return;
+  if (undecidable && !templateFailed) {
+    throw new As400Error("SQL_ERROR", `${what}: 応答に SQLCA が無く成否を判定できません`);
+  }
 
   const id = findParam(reply, DB_CP.messageId);
   const text = findParam(reply, DB_CP.messageText);
@@ -251,10 +280,10 @@ function assertOk(reply: Reply, what: string): void {
   ]
     .filter(Boolean)
     .join(" ");
-  throw new As400Error(
-    "SQL_ERROR",
-    `${what}: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}${detail ? ` ${detail}` : ""}`
-  );
+  const why = sqlFailed
+    ? `SQLCODE=${ca!.sqlCode} SQLSTATE=${ca!.sqlState}`
+    : `rcClass=${reply.dbTemplate.rcClass} rc=${reply.dbTemplate.rcClassReturnCode}`;
+  throw new As400Error("SQL_ERROR", `${what}: ${why}${detail ? ` ${detail}` : ""}`);
 }
 
 /** 文字列パラメータ。CCSID(2) ＋ 長さ(2) ＋ 本体 */

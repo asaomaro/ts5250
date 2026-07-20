@@ -151,3 +151,19 @@ describe("型は見ない（SQL 経路の方針）", () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe("同じ列を 2 回受けない", () => {
+  it("**重複したヘッダーを拒否する**（INSERT (A, A) になるのを防ぐ）", () => {
+    const res = prepareUpload({ columns: T, header: ["ID", "NAME", "ID"], rows: [["1", "a", "2"]] });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.rejections).toContainEqual({ kind: "column-duplicated", columns: ["ID"] });
+  });
+
+  it("大小文字が違っても同じ列とみなす", () => {
+    const res = prepareUpload({ columns: T, header: ["ID", "id"], rows: [["1", "2"]] });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.rejections.some((r) => r.kind === "column-duplicated")).toBe(true);
+  });
+});

@@ -94,12 +94,20 @@ function encodeField(
       return;
 
     case DB2.DECIMAL:
-      // 既存の DDM 用エンコーダを再利用する（パック 10 進の作り方は経路によらず同じ）
-      out.set(wrapNumeric(() => encodePacked(value, field.precision, field.scale), index), field.offset);
+      // 既存の DDM 用エンコーダを再利用する（パック 10 進の作り方は経路によらず同じ）。
+      // ただし**長さはサーバーの申告と突き合わせる**——このモジュールの他の分岐と違い、
+      // encodePacked は precision から幅を導くので、申告とずれると隣の列を踏む
+      out.set(
+        fitExactly(wrapNumeric(() => encodePacked(value, field.precision, field.scale), index), field, index),
+        field.offset
+      );
       return;
 
     case DB2.NUMERIC:
-      out.set(wrapNumeric(() => encodeZoned(value, field.precision, field.scale), index), field.offset);
+      out.set(
+        fitExactly(wrapNumeric(() => encodeZoned(value, field.precision, field.scale), index), field, index),
+        field.offset
+      );
       return;
 
     case DB2.CHAR:
@@ -181,6 +189,24 @@ function wrapNumeric(fn: () => Uint8Array, index: number): Uint8Array {
   } catch (e) {
     throw new MarkerEncodeError(index, e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * 型から導いた幅が、サーバーの申告した枠とぴったり合うことを確かめる。
+ *
+ * 数値の 10 進系だけは既存エンコーダ（`precision` から長さを決める）を再利用しており、
+ * **このモジュールで唯一「枠を自分で導いている」箇所**になる。
+ * ずれたまま書くと隣の列を上書きするので、**合わなければ書かずに拒否する**。
+ */
+function fitExactly(bytes: Uint8Array, field: MarkerField, index: number): Uint8Array {
+  if (bytes.length !== field.length) {
+    throw new MarkerEncodeError(
+      index,
+      `枠のバイト数が合いません（サーバー申告 ${field.length} / 生成 ${bytes.length}）。` +
+        `精度 ${field.precision} 位取り ${field.scale}`
+    );
+  }
+  return bytes;
 }
 
 /** 固定長の文字フィールド。**右を空白で詰める**（超過は拒否） */

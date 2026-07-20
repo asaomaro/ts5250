@@ -6,6 +6,7 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
+import type { UploadRejection } from "@as400web/core/browser";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
 import { isValidIdentifier, parseCsv } from "@as400web/core/browser";
@@ -46,20 +47,13 @@ const parseError = ref("");
 const dragging = ref(false);
 
 /**
- * 拒否理由。**core の `UploadRejection` と対応させる**。
- * 種類を足したらここも足すこと——既定値に落ちると理由が消え、
- * 「取り込めませんでした」としか出なくなる（実ブラウザ確認で踏んだ）。
+ * 拒否理由。**core の型をそのまま使う**——手で写すと種類を足したときに
+ * 既定値へ落ちて理由が消える（実ブラウザ確認で実際に踏んだ）。
+ * 型を共有しておけば、core に種類が増えたときここが**コンパイルエラーになる**。
+ *
+ * `other` はサーバーが理由を付けずに失敗した場合（接続不可など）の受け皿。
  */
-interface Rejection {
-  kind: string;
-  columns?: string[];
-  column?: string;
-  row?: number;
-  /** 値を詰められなかった理由（型・長さ・文字コード） */
-  reason?: string;
-  /** 種類が付かない失敗（接続不可など）のメッセージ */
-  value?: string;
-}
+type Rejection = UploadRejection | { kind: "other"; value: string };
 const rejections = ref<Rejection[]>([]);
 const rejectTruncated = ref(false);
 const result = ref<
@@ -250,20 +244,22 @@ function saveCsv(): void {
 function rejectionText(r: Rejection): string {
   switch (r.kind) {
     case "column-missing":
-      return `表にある列が CSV にありません: ${r.columns?.join(", ")}`;
+      return `表にある列が CSV にありません: ${r.columns.join(", ")}`;
     case "column-unknown":
-      return `表に無い列が CSV にあります: ${r.columns?.join(", ")}`;
+      return `表に無い列が CSV にあります: ${r.columns.join(", ")}`;
+    case "column-duplicated":
+      return `同じ列が CSV に 2 回以上あります: ${r.columns.join(", ")}`;
     case "value-null":
       return `空にできない列です: ${r.column}`;
     case "value-invalid":
       // **理由をそのまま出す**（型・長さ・文字コードのどれかは core が判断済み）
       return `${r.column}: ${r.reason}`;
     default:
-      return r.value ?? "取り込めませんでした";
+      return r.value;
   }
 }
 function rejectionWhere(r: Rejection): string {
-  return r.row !== undefined ? `${r.row} 行目` : "列の対応";
+  return "row" in r ? `${r.row} 行目` : "列の対応";
 }
 </script>
 

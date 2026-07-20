@@ -16,7 +16,15 @@
  *
  * この層は純関数で、接続もソケットも触らない。
  */
-import type { ColumnLayoutInput } from "../ddm/record-layout.js";
+/**
+ * 突き合わせに要るのは**列名と NULL 可否だけ**。
+ * 型・長さ・CCSID はサーバーがマーカー形式で教えるのでここでは見ない
+ * （DDM 経路の `ColumnLayoutInput` に依存し続けると、退役したモジュールと結びついたままになる）。
+ */
+export interface UploadColumn {
+  name: string;
+  nullable: boolean;
+}
 
 /**
  * 拒否理由。**判別可能な型で返す**——文字列メッセージだけにすると、
@@ -25,6 +33,8 @@ import type { ColumnLayoutInput } from "../ddm/record-layout.js";
 export type UploadRejection =
   /** 表にあるが CSV に無い（NULL を受け付けない列だけが問題になる） */
   | { kind: "column-missing"; columns: string[] }
+  /** 同じ列が CSV に 2 回以上ある */
+  | { kind: "column-duplicated"; columns: string[] }
   /** CSV にあるが表に無い */
   | { kind: "column-unknown"; columns: string[] }
   | { kind: "value-null"; row: number; column: string }
@@ -47,7 +57,7 @@ const MAX_REJECTIONS = 100;
 
 export interface PrepareUploadArgs {
   /** 表の列（`QSYS2.SYSCOLUMNS` 由来） */
-  columns: readonly ColumnLayoutInput[];
+  columns: readonly UploadColumn[];
   /** CSV のヘッダー */
   header: readonly string[];
   /** CSV のデータ行 */
@@ -64,20 +74,32 @@ export function prepareUpload(args: PrepareUploadArgs): PrepareResult {
   const rejections: UploadRejection[] = [];
 
   // ---- 1. 列の突き合わせ ----
-  const matched: { csvIndex: number; column: ColumnLayoutInput }[] = [];
+  const matched: { csvIndex: number; column: UploadColumn }[] = [];
   const unknown: string[] = [];
+  const seen = new Set<string>();
+  const duplicated: string[] = [];
   for (let i = 0; i < header.length; i++) {
     const col = columns.find((c) => norm(c.name) === norm(header[i]!));
-    if (col) matched.push({ csvIndex: i, column: col });
-    else unknown.push(header[i]!.trim());
+    if (!col) {
+      unknown.push(header[i]!.trim());
+      continue;
+    }
+    // **同じ列を 2 回受けない**。放置すると `INSERT INTO t (A, A) VALUES (?, ?)` になり、
+    // 事前検査の意味（書く前に止める）が失われてホストまで届く
+    if (seen.has(norm(col.name))) {
+      if (!duplicated.includes(col.name)) duplicated.push(col.name);
+      continue;
+    }
+    seen.add(norm(col.name));
+    matched.push({ csvIndex: i, column: col });
   }
   if (unknown.length > 0) rejections.push({ kind: "column-unknown", columns: unknown });
+  if (duplicated.length > 0) rejections.push({ kind: "column-duplicated", columns: duplicated });
 
   // CSV に無い列は文に含めない＝表の既定値/NULL が入る。
   // **NULL を受け付けない列が CSV に無い**場合だけが問題
-  const matchedNames = new Set(matched.map((m) => norm(m.column.name)));
   const missing = columns
-    .filter((c) => !c.nullable && !matchedNames.has(norm(c.name)))
+    .filter((c) => !c.nullable && !seen.has(norm(c.name)))
     .map((c) => c.name);
   if (missing.length > 0) rejections.push({ kind: "column-missing", columns: missing });
 

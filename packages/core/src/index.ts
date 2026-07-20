@@ -204,7 +204,7 @@ export {
   encodePacked,
   encodeZoned
 } from "./hostserver/ddm/encode.js";
-export { isSupportedDataType, type FieldLayout } from "./hostserver/ddm/record-layout.js";
+export { type FieldLayout } from "./hostserver/ddm/record-layout.js";
 export { fetchColumnLayout } from "./hostserver/ddm/column-meta.js";
 export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./identifier.js";
 export {
@@ -212,6 +212,7 @@ export {
   type PrepareUploadArgs,
   type PrepareResult,
   type PreparedUpload,
+  type UploadColumn,
   type UploadRejection
 } from "./hostserver/db/upload-prepare.js";
 
