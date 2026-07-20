@@ -29,7 +29,8 @@ import {
   ORS,
   buildDbTemplate,
   parseDbTemplate,
-  isDbTemplateError
+  isDbTemplateError,
+  type DbTemplate
 } from "./db-datastream.js";
 
 const log = childLog({ component: "hostserver-db" });
@@ -60,6 +61,11 @@ export interface DbConnectOptions {
 }
 
 /** database サーバーとの接続。要求の往復と RPB を持つ */
+/** database の応答。template（戻りコード）を保持する */
+export interface DbReply extends Reply {
+  dbTemplate: DbTemplate;
+}
+
 export class DbConnection {
   private closed = false;
   private busy = false;
@@ -123,7 +129,7 @@ export class DbConnection {
     params: { cp: number; value: Uint8Array }[];
     /** template のエラーを呼び出し側で扱う場合に true */
     allowTemplateError?: boolean;
-  }): Promise<Reply> {
+  }): Promise<DbReply> {
     if (this.closed) {
       throw new As400Error("SESSION_CLOSED", "database connection is closed");
     }
@@ -148,7 +154,9 @@ export class DbConnection {
           `(rcClass=${tmpl.rcClass}, code=${tmpl.rcClassReturnCode})`
       );
     }
-    return parseReply(response);
+    // **template を捨てない**——allowTemplateError で通したときに、
+    // 呼び出し側が「なぜ空なのか」を診断できるようにする
+    return { ...parseReply(response), dbTemplate: tmpl };
   }
 
 
