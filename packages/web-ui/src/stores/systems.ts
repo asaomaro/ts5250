@@ -22,6 +22,8 @@ export interface SystemForm {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** スプール（SCS）用 CCSID。5250 画面用の ccsid とは別物（spec 方針2） */
+  spoolCcsid?: number;
   autoSignon?: boolean;
   signonUser?: string;
   /**

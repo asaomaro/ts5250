@@ -144,6 +144,7 @@ export abstract class ConfigStore {
     if (s.port !== undefined) pub.port = s.port;
     if (s.tls !== undefined) pub.tls = s.tls;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
+    if (s.spoolCcsid !== undefined) pub.spoolCcsid = s.spoolCcsid;
     if (s.owner !== undefined) pub.owner = s.owner;
     // ユーザー名は編集フォームのプレフィル用にだけ返す。**パスワード機構は決して返さない**
     if (opts?.includeSignon && s.signon?.user !== undefined) pub.signonUser = s.signon.user;

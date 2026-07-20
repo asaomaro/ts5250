@@ -48,6 +48,14 @@ export const systemSchema = z
     tls: z.boolean().optional(),
     /** 既定 CCSID。セッション設定が上書きできる */
     ccsid: z.number().int().optional(),
+    /**
+     * スプール（SCS）のデコードに使う CCSID。既定 273。
+     *
+     * 上の `ccsid` とは**別物**——あちらは 5250 画面の文字変換用で、経路によって扱いが違う
+     * （`host-connect.ts` の openNetPrint / spec 方針2。`20260718-hostserver-spool` の決定）。
+     * セッション階層には置かない: pull 型スプールはセッションに紐づかないため（spec 方針2）。
+     */
+    spoolCcsid: z.number().int().optional(),
     /** 個人設定のみ。サーバー設定は所有者を持たない */
     owner: z.string().optional(),
     signon: signonSchema.optional()
@@ -148,6 +156,8 @@ export interface PublicSystem {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** スプール（SCS）用 CCSID。5250 画面用の `ccsid` とは別（spec 方針2） */
+  spoolCcsid?: number;
   owner?: string;
   /** 資格情報が設定されているか */
   autoSignon: boolean;

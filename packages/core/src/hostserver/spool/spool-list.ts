@@ -26,7 +26,16 @@ const EBCDIC_SPACE = 0x40;
 const ALL = "*ALL";
 /** 既定のユーザー（接続ユーザー） */
 const CURRENT_USER = "*CURRENT";
-/** リスト情報（80 バイト）の項目位置 */
+/**
+ * リスト情報（80 バイト）の項目位置。
+ *
+ * **`total` は「条件に一致した総件数」ではない。** 名前に反して `returned` と同じ値が入る
+ * （実機 PUB400 で確認: スプール 3 件の状態で max=1 なら total も 1、max=2 なら 2）。
+ * オープンリスト API は非同期に構築するため、要求した分しか作られていない時点では
+ * 総数が確定していないと思われる。**打ち切り判定にこの値を使ってはいけない**——
+ * 使うと truncated が常に false になり「全件見た」と誤解させる（偽陰性）。
+ * 打ち切りは呼び出し側で `max + 1` 件要求して判定する（server の `listSpools`）。
+ */
 const LIST_INFO = { total: 0, returned: 4, handle: 8, recordLength: 12 } as const;
 
 const codec = codecForCcsid(EBCDIC_CCSID);

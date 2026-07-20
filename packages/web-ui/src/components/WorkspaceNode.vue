@@ -6,6 +6,7 @@ import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
 import SqlPane from "./SqlPane.vue";
 import TransferPane from "./TransferPane.vue";
+import SpoolPane from "./SpoolPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -83,6 +84,8 @@ const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:")
 const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
 const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
 const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
+/** pull 型スプールタブ（spool:files）か。プリンターセッション（push 型）とは別系統 */
+const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:") ?? false);
 </script>
 
 <template>
@@ -114,6 +117,7 @@ const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("trans
       <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
       <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
       <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
+      <SpoolPane v-else-if="group.activeTab && activeIsSpool" :tab-id="group.activeTab" />
       <PrinterPane
         v-else-if="group.activeTab && activeIsPrinter"
         :session-id="group.activeTab"

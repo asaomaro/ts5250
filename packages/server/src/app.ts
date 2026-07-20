@@ -19,6 +19,7 @@ import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
+import { registerHostSpoolRoutes } from "./host-spools.js";
 import { ResultSetStore } from "./result-set-store.js";
 import { DbPool } from "./db-pool.js";
 import type { AuditBuffer } from "./audit.js";
@@ -110,6 +111,11 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // CSV の取り込み（DDM）。**ここは IBM i に書き込むルート**——
   // 読み取り専用なのは /api/host/sql であって、ホスト API 全体ではない（host-upload.ts の説明）
   registerHostUploadRoutes(app, { resolver: deps.resolver });
+
+  // pull 型スプール（任意の OUTQ から**既存の**スプールを検索・取得）。
+  // 下の /api/spool/:sessionId/... とは別系統——あちらは開いているプリンターセッションが
+  // 受信済みの帳票（push 型）で、過去のスプールは取れない
+  registerHostSpoolRoutes(app, { resolver: deps.resolver });
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {

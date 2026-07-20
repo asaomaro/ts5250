@@ -18,7 +18,6 @@ import {
   listJobs,
   listObjects,
   listUsers,
-  listSpooledFiles,
   query,
   As400Error,
   type ConnectOptions,
@@ -28,7 +27,8 @@ import { childLog } from "./log.js";
 import { withAudit } from "./audit.js";
 import { errorResult, type ToolDeps } from "./mcp-tools.js";
 import { uploadCsv, uploadRows } from "./host-upload.js";
-import { openCommand, openDb, openIfs, openNetPrint } from "./host-connect.js";
+import { listSpools, readSpoolPages, DEFAULT_SPOOLS } from "./host-spools.js";
+import { openCommand, openDb, openIfs } from "./host-connect.js";
 
 const hostLog = childLog({ component: "host-server-tools" });
 
@@ -371,15 +371,14 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
     },
     async (input) =>
       withAudit({ op: "host_list_spools" }, async () => {
-        const conn = await openCommand(target(input));
-        try {
-          const items = await listSpooledFiles(conn, compact(input.filter), {
-            max: input.max ?? 100
-          });
-          return jsonResult({ items, count: items.length });
-        } finally {
-          conn.close();
-        }
+        // HTTP ルートと**同じ共有関数**を通す（spec 方針1）。
+        // 出力は従来どおり { items, count }——total の公開は別課題（外部仕様を変えない）
+        const page = await listSpools(
+          target(input),
+          compact(input.filter),
+          input.max ?? DEFAULT_SPOOLS
+        );
+        return jsonResult({ items: page.items, count: page.items.length });
       }).catch(errorResult)
   );
 
@@ -405,17 +404,11 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
     },
     async (input) =>
       withAudit({ op: "host_get_spool" }, async () => {
-        const conn = await openNetPrint(target(input), input.ccsid);
-        try {
-          if (input.format === "pages") {
-            const pages = await conn.readSpooledPages(input.id);
-            return jsonResult({ pages });
-          }
-          const lines = await conn.readSpooledText(input.id);
-          return jsonResult({ lines });
-        } finally {
-          conn.close();
-        }
+        // HTTP ルートと同じ共有関数を通す（spec 方針1）。
+        // text 形式は論理ページを平坦化するだけ——core の readSpooledText と同じ扱い
+        const pages = await readSpoolPages(target(input), input.id, input.ccsid);
+        if (input.format === "pages") return jsonResult({ pages });
+        return jsonResult({ lines: pages.flatMap((p) => p.lines) });
       }).catch(errorResult)
   );
 

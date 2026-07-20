@@ -22,6 +22,12 @@ export interface ConnectOptions {
   host?: string;
   port?: number;
   ccsid?: number; // 既定 37。930/939/1399（＋エイリアス）で DBCS
+  /**
+   * スプール（SCS）のデコードに使う CCSID。既定 273。上の `ccsid` を流用**しない**——
+   * あちらは 5250 画面の文字変換用で、経路によって扱いが違う（spec 方針2）。
+   * 5250 セッションでは使われず、ホストサーバー経由のスプール取得だけが読む。
+   */
+  spoolCcsid?: number;
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   /** TLS（telnet over SSL。既定ポート 992・証明書検証既定 ON） */

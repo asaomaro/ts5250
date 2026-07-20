@@ -45,6 +45,12 @@ const FEATURES = [
     name: "データ転送",
     desc: "表を CSV に落とす / CSV を表に取り込む。SQL を書かずに済む。"
   },
+  {
+    id: "spool:files",
+    name: "スプール",
+    // desc で push 型と区別する——プリンターセッションのタブと紛らわしいため
+    desc: "出力待ち行列にある既存のスプールを検索して、中身を読む / PDF で保存する。"
+  },
   { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" }
 ] as const;
 
