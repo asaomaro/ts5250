@@ -66,15 +66,21 @@ function oneLine(sql: string): string {
     </div>
     <div ref="bodyEl" class="body">
       <p v-if="!entries.length" class="empty">まだ実行していません。</p>
-      <div v-for="e in entries" :key="e.id" class="row" :class="{ err: e.status === 'error' }">
+      <div v-for="e in entries" :key="e.id" class="row" :class="{ err: e.status === 'error', connect: e.kind === 'connect' }">
         <span class="ts">{{ clockOf(e.ts) }}</span>
         <span class="ms">{{ e.ms }}ms</span>
         <span class="outcome">
           <template v-if="e.status === 'error'">失敗</template>
+          <template v-else-if="e.kind === 'connect'">接続</template>
           <template v-else-if="e.kind === 'more'">+{{ e.rowCount }} 件</template>
           <template v-else>{{ e.rowCount }} 件{{ e.hasMore ? "（続きあり）" : "" }}</template>
         </span>
-        <span class="sql" :title="e.sql">{{ oneLine(e.sql) }}</span>
+        <span v-if="e.kind === 'connect'" class="sql conn">
+          {{ e.target }}
+          <template v-if="e.job"> job={{ e.job }}</template>
+          <template v-else> （ジョブ情報を返さないホストです）</template>
+        </span>
+        <span v-else class="sql" :title="e.sql">{{ oneLine(e.sql) }}</span>
         <span v-if="e.detail" class="detail" :title="e.detail">{{ e.detail }}</span>
       </div>
     </div>
@@ -126,6 +132,9 @@ function oneLine(sql: string): string {
   white-space: nowrap;
 }
 .row:hover { background: var(--accent-soft); }
+/* 接続の行は SQL の行と見分けが付くようにする */
+.row.connect { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.conn { color: var(--muted); }
 .ts { color: var(--muted); }
 /* 数字が伸び縮みしても右がずれないように幅を固定する */
 .ms { color: var(--muted); min-width: 7ch; text-align: right; font-variant-numeric: tabular-nums; }

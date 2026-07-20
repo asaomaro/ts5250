@@ -10,8 +10,12 @@
  * `"tx" | "rx" | "event"` 固定で、SQL の実行（文・件数・所要時間・SQLCODE）に合わない。
  */
 
-/** 実行 = 「実行」ボタン、読み足し = End/PageDown/スクロール */
-export type SqlLogKind = "run" | "more";
+/**
+ * 実行 = 「実行」ボタン、読み足し = End/PageDown/スクロール、
+ * 接続 = ホストへの接続確立（**張り直したときだけ**記録する。
+ * 使い回しは接続が起きていないので出さない）。
+ */
+export type SqlLogKind = "run" | "more" | "connect";
 
 export interface SqlLogEntry {
   id: number;
@@ -25,6 +29,10 @@ export interface SqlLogEntry {
   hasMore?: boolean;
   /** SQLCODE / SQLSTATE やエラー本文 */
   detail?: string;
+  /** 接続を処理している IBM i 側のジョブ（`832122/QUSER/QZDASOINIT`） */
+  job?: string;
+  /** 接続先（`pub400.com:9471`） */
+  target?: string;
 }
 
 /** 溜め込みすぎない。1 タブぶんの履歴として十分な数 */

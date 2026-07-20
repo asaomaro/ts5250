@@ -79,6 +79,25 @@ function toColumns(columns: readonly { name: string; typeName: string; length: n
   }));
 }
 
+/**
+ * 接続の素性を画面へ返す。
+ *
+ * **ジョブ名を出すのは障害切り分けのため**——実機側で WRKACTJOB と突き合わせられる。
+ * `reused` は「使い回した接続か」で、`ms` はその取得にかかった時間
+ * （使い回しならほぼ 0、張り直しなら 4〜6 秒）。
+ *
+ * ジョブ名に秘密は含まれない（`832122/QUSER/QZDASOINIT` の形）。
+ */
+function connectionInfo(conn: DbConnection, reused: boolean, ms: number) {
+  return {
+    ...(conn.jobName !== undefined ? { job: conn.jobName } : {}),
+    host: conn.host,
+    port: conn.port,
+    reused,
+    ms
+  };
+}
+
 /** bigint は JSON にできないため文字列にする（精度を落とさない） */
 function toJsonRows(rows: readonly Record<string, unknown>[]) {
   return rows.map((r) =>
@@ -101,11 +120,16 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       const key = poolKey(user?.username, hostAuthFrom(opts));
       const open = () => openDb(opts);
       let conn: DbConnection | undefined;
+      // **接続の確立にかかった時間とジョブを画面へ返す**。約 4.6 秒かかることがあり、
+      // 「SQL が遅い」のか「接続が遅い」のかを利用者が切り分けられないため
+      const connectStart = Date.now();
+      let connectMs = 0;
       try {
         // 使い回した接続が相手側で切れていることがある。
         // **SQL の誤りで再試行はしない**（同じ誤りを 2 度投げるだけなので）
         let acquired = await deps.pool.acquire(key, open);
         conn = acquired.conn;
+        connectMs = Date.now() - connectStart;
         let opened;
         try {
           opened = await openQuery(conn, sql);
@@ -115,6 +139,7 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
           deps.pool.discard(conn);
           acquired = { conn: await open(), reused: false };
           conn = acquired.conn;
+          connectMs = Date.now() - connectStart;
           opened = await openQuery(conn, sql);
         }
         const { columns, rows } = opened;
@@ -135,6 +160,7 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
         return c.json({
           // 読み切っている場合は id を返さない（続きを取りに行かせない）
           ...(page.hasMore ? { resultSetId: set.id } : {}),
+          connection: connectionInfo(conn, acquired.reused, connectMs),
           columns: toColumns(columns),
           rows: toJsonRows(page.rows),
           rowCount: page.rows.length,
@@ -208,8 +234,15 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     const user = c.get("user");
     try {
       const opts = resolveSource(deps.resolver, parsed.data.source, user);
-      await deps.pool.warm(poolKey(user?.username, hostAuthFrom(opts)), () => openDb(opts));
-      return c.json({ warmed: true });
+      const started = Date.now();
+      let info: ReturnType<typeof connectionInfo> | undefined;
+      await deps.pool.warm(poolKey(user?.username, hostAuthFrom(opts)), async () => {
+        const conn = await openDb(opts);
+        info = connectionInfo(conn, false, Date.now() - started);
+        return conn;
+      });
+      // すでに待機中があれば開いていない（info が無い）。画面はそれで区別できる
+      return c.json({ warmed: true, ...(info ? { connection: info } : {}) });
     } catch (e) {
       log.debug(`warm-up failed (実行時に開き直すので画面には出さない): ${String(e)}`);
       return c.json({ warmed: false });

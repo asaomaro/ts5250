@@ -3,6 +3,7 @@ import {
   userIdEbcdic37,
   userIdUnicode,
   passwordUnicode,
+  decodeJobName,
   MAX_USER_LEN
 } from "../src/hostserver/credentials.js";
 import { Tn5250Error } from "../src/errors.js";
@@ -80,5 +81,33 @@ describe("passwordUnicode（ハッシュ入力用）", () => {
 
   it("空を拒否する", () => {
     expect(() => passwordUnicode("")).toThrow(/empty/);
+  });
+});
+
+/**
+ * ジョブ名（CP 0x111f）。
+ *
+ * **障害切り分けで実機のジョブと突き合わせる**ために画面まで通しているので、
+ * 実機が返した形をバイト列で固定する。
+ */
+describe("decodeJobName", () => {
+  /** 実機（PUB400・database サーバー）が 0xf002 で返した値そのもの */
+  const REAL = "00000000f8f3f6f9f9f561d8e4e2c5d961d8e9c4c1e2e2c9d5c9e3";
+
+  it("実機の応答から `836995/QUSER/QZDASSINIT` を読む", () => {
+    expect(decodeJobName(Buffer.from(REAL, "hex"))).toBe("836995/QUSER/QZDASSINIT");
+  });
+
+  it("末尾の空白を落とす", () => {
+    // 先頭 4 バイトの前置き + "AB" + EBCDIC 空白 2 つ
+    const v = Buffer.from("00000000" + "c1c2" + "4040", "hex");
+    expect(decodeJobName(v)).toBe("AB");
+  });
+
+  it("**無い・短い・空なら undefined**（接続自体は成立しているので落とさない）", () => {
+    expect(decodeJobName(undefined)).toBeUndefined();
+    expect(decodeJobName(Buffer.from("000000", "hex"))).toBeUndefined();
+    expect(decodeJobName(Buffer.from("00000000", "hex"))).toBeUndefined();
+    expect(decodeJobName(Buffer.from("00000000" + "4040", "hex"))).toBeUndefined();
   });
 });

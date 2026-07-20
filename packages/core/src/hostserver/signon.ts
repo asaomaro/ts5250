@@ -35,9 +35,8 @@ import {
   userIdEbcdic37,
   userIdUnicode,
   passwordUnicode,
-  CREDENTIAL_CCSID
+  decodeJobName
 } from "./credentials.js";
-import { codecForCcsid } from "../codec/codec.js";
 import {
   generateClientSeed,
   passwordSubstituteSha,
@@ -273,8 +272,4 @@ function formatVersion(raw: number): string {
 }
 
 /** ジョブ名は先頭 4 バイトが CCSID(常に 0)、以降が EBCDIC（資格情報と同じ CCSID 37） */
-function decodeJobName(value: Uint8Array | undefined): string | undefined {
-  if (!value || value.length <= 4) return undefined;
-  const name = codecForCcsid(CREDENTIAL_CCSID).decode(value.subarray(4)).trimEnd();
-  return name.length > 0 ? name : undefined;
-}
+

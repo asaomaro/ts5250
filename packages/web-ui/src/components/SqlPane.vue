@@ -63,6 +63,30 @@ function record(e: Omit<SqlLogEntry, "id" | "ts">): void {
   logEntries.value = appendSqlLog(logEntries.value, { ...e, ts: Date.now() });
 }
 
+interface ConnectionInfo {
+  job?: string;
+  host?: string;
+  port?: number;
+  reused?: boolean;
+  ms?: number;
+}
+
+/**
+ * 接続の確立を記録する。**張り直したときだけ**——使い回した場合は接続が
+ * 起きていないので出さない（毎回同じ行が並ぶと本当に張り直した回が埋もれる）。
+ */
+function recordConnection(info: ConnectionInfo | undefined): void {
+  if (!info || info.reused) return;
+  record({
+    kind: "connect",
+    sql: "",
+    status: "ok",
+    ms: info.ms ?? 0,
+    ...(info.job ? { job: info.job } : {}),
+    ...(info.host ? { target: `${info.host}:${info.port ?? "?"}` } : {})
+  });
+}
+
 /**
  * 接続を先に暖めておく。
  *
@@ -78,7 +102,12 @@ function warmUp(): void {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ source: { system: systemsStore.selected } })
-  }).catch(() => undefined);
+  })
+    .then(async (res) => {
+      // 暖機で実際に接続したなら、それもログに残す（「いつ繋がったか」が分かる）
+      recordConnection((await res.json().catch(() => ({}))).connection);
+    })
+    .catch(() => undefined);
 }
 
 onMounted(warmUp);
@@ -139,6 +168,7 @@ async function execute(): Promise<void> {
         hasMore.value = false;
         resultSetId.value = "";
         executed.value = true;
+        recordConnection(data.connection);
         record({
           kind: "run",
           sql: ranSql,
@@ -156,6 +186,7 @@ async function execute(): Promise<void> {
       resultSetId.value = data.resultSetId ?? "";
       expired.value = false;
       executed.value = true;
+      recordConnection(data.connection);
       record({
         kind: "run",
         sql: ranSql,

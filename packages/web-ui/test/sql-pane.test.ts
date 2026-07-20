@@ -244,6 +244,39 @@ describe("実行ログ", () => {
     w.unmount();
   });
 
+  it("**接続を張ったときはジョブ情報つきで記録する**（実機のジョブと突き合わせるため）", async () => {
+    mockFetch({
+      ...OK_BODY,
+      connection: { job: "836995/QUSER/QZDASSINIT", host: "pub400.com", port: 9471, reused: false, ms: 4908 }
+    });
+    const w = await run();
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    const conn = w.find(".sqllog .row.connect");
+    expect(conn.exists()).toBe(true);
+    expect(conn.text()).toContain("接続");
+    expect(conn.text()).toContain("836995/QUSER/QZDASSINIT");
+    expect(conn.text()).toContain("pub400.com:9471");
+    expect(conn.text()).toContain("4908ms");
+    w.unmount();
+  });
+
+  it("**使い回したときは接続の行を出さない**（本当に張り直した回が埋もれるため）", async () => {
+    mockFetch({ ...OK_BODY, connection: { job: "836995/QUSER/QZDASSINIT", reused: true, ms: 0 } });
+    const w = await run();
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    expect(w.find(".sqllog .row.connect").exists()).toBe(false);
+    expect(w.findAll(".sqllog .row")).toHaveLength(1); // 実行の 1 件だけ
+    w.unmount();
+  });
+
+  it("ジョブ情報を返さないホストでも接続は記録する", async () => {
+    mockFetch({ ...OK_BODY, connection: { host: "h", port: 9471, reused: false, ms: 100 } });
+    const w = await run();
+    await w.find("footer.statusbar .logbtn").trigger("click");
+    expect(w.find(".sqllog .row.connect").text()).toContain("ジョブ情報を返さない");
+    w.unmount();
+  });
+
   it("フッターに直近の結果を出す（開かなくても分かるように）", async () => {
     const w = await run();
     expect(w.find("footer.statusbar .last").text()).toContain("完了");

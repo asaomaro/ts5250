@@ -15,8 +15,8 @@
 import { As400Error } from "../errors.js";
 import { childLog } from "../log.js";
 import type { HostConnection } from "../transport/host-connection.js";
-import { CP, HEADER_LEN } from "./datastream.js";
-import { userIdEbcdic37, userIdUnicode, passwordUnicode } from "./credentials.js";
+import { CP, HEADER_LEN, findParam, parseReply } from "./datastream.js";
+import { userIdEbcdic37, userIdUnicode, passwordUnicode, decodeJobName } from "./credentials.js";
 import {
   generateClientSeed,
   passwordSubstituteSha,
@@ -100,6 +100,17 @@ export interface StartServerOptions {
   passwordLevel: number;
 }
 
+export interface StartServerResult {
+  /**
+   * このサーバー接続を処理するジョブ（`832122/QUSER/QZDASOINIT` の形）。
+   *
+   * 要求で `CLIENT_ATTR_RETURN_JOB_INFO` を立てているので応答に載っている。
+   * **障害切り分けで実機側のジョブと突き合わせるのに要る**ので捨てない。
+   * 応答に無ければ undefined（相手の版によっては返らないことがある）。
+   */
+  jobName?: string;
+}
+
 /**
  * ホストサーバーを開始する（認証込み）。
  *
@@ -109,7 +120,7 @@ export async function startHostServer(
   conn: HostConnection,
   serverId: number,
   opts: StartServerOptions
-): Promise<void> {
+): Promise<StartServerResult> {
   assertPasswordLevelSupported(opts.passwordLevel);
 
   // --- 0x7001 乱数シード交換 ---
@@ -152,5 +163,14 @@ export async function startHostServer(
         `(rc=0x${startRc.toString(16).padStart(8, "0")})`
     );
   }
-  log.debug(`host server 0x${serverId.toString(16)} started`);
+  // 応答にジョブ情報が載っている（要求で RETURN_JOB_INFO を立てているため）。
+  // 解析に失敗しても接続自体は成立しているので、握って undefined にする
+  let jobName: string | undefined;
+  try {
+    jobName = decodeJobName(findParam(parseReply(startReply), CP.jobName));
+  } catch (e) {
+    log.debug(`could not read job info from start server reply: ${String(e)}`);
+  }
+  log.debug(`host server 0x${serverId.toString(16)} started (job=${jobName ?? "?"})`);
+  return jobName !== undefined ? { jobName } : {};
 }
