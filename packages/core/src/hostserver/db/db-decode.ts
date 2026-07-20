@@ -17,7 +17,21 @@ import { packedDecimalToString, zonedDecimalToString } from "./db-decimal.js";
 /** UTF-16 を表す CCSID。EBCDIC ではないので直接読む */
 const UTF16_CCSIDS: ReadonlySet<number> = new Set([1200, 13488]);
 
-export type DbValue = string | number | bigint | null;
+/**
+ * LOB 列の値。**ロケーター（ハンドル）しか受け取っていない**ことを表す。
+ *
+ * `null` にしない——SQL の NULL と「取得していない」が区別できなくなるため。
+ * 本体を取るにはロケーター経由の別要求が要る（未実装）。
+ */
+export interface LobPlaceholder {
+  kind: "lob";
+  /** ロケーターのハンドル。将来 retrieveLOBData で本体を取るのに使う */
+  locator: number;
+  /** 列定義が申告する最大サイズ */
+  maxSize: number;
+}
+
+export type DbValue = string | number | bigint | null | LobPlaceholder;
 
 /** 列のメタデータ */
 export interface ColumnMeta {
@@ -34,6 +48,9 @@ export interface ColumnMeta {
   ccsid: number;
   nullable: boolean;
   jsType: ReturnType<typeof jsTypeOf>;
+  /** **0 以外なら LOB**（ロケーターしか得ていない）。超拡張形式でのみ設定される */
+  lobLocator?: number;
+  lobMaxSize?: number;
 }
 
 /** 生の列定義から ColumnMeta を組み立てる */
@@ -65,8 +82,22 @@ export function toColumnMeta(raw: {
  *
  * @param isNull NULL 指標（行データとは別に届く。research F8）
  */
+/** ロケーターとして返される LOB の型か（しきい値 0 のとき LOB は必ずこれになる） */
+function isLobLocatorType(type: number): boolean {
+  return type === DB2.BLOB_LOCATOR || type === DB2.CLOB_LOCATOR || type === DB2.DBCLOB_LOCATOR;
+}
+
 export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean): DbValue {
   if (isNull) return null;
+  // **LOB はロケーターしか来ていない**。値として復号せず、そうと分かる形で返す
+  // （`null` にすると SQL の NULL と区別できなくなる）。
+  // 判定は**型コード**で行う——ロケーターのハンドルは列定義ではなく
+  // **行データの中に 4 バイト**で入っており、列定義側の LOB フィールドは 0 のことがある。
+  if (isLobLocatorType(meta.type)) {
+    const view = new DataView(row.buffer, row.byteOffset, row.byteLength);
+    const locator = meta.offset + 4 <= row.length ? view.getUint32(meta.offset) : 0;
+    return { kind: "lob", locator, maxSize: meta.lobMaxSize ?? 0 };
+  }
   if (!isSupportedType(meta.type)) {
     throw new As400Error(
       "HOST_SERVER_UNSUPPORTED",

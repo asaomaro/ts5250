@@ -7,9 +7,16 @@
  * 期待とも一致する。
  */
 
+/** LOB のプレースホルダか（値ではなくロケーターしか来ていない列） */
+export function isLob(value: unknown): value is { kind: "lob"; locator: number; maxSize: number } {
+  return typeof value === "object" && value !== null && (value as { kind?: string }).kind === "lob";
+}
+
 /** RFC 4180: `"` を `""` にし、`,` `"` 改行のいずれかを含むならクォートで囲む */
 function escapeField(value: unknown): string {
   if (value === null || value === undefined) return "";
+  // LOB は値そのものを取得していない。**空欄にすると NULL と混ざる**ので明示する
+  if (isLob(value)) return "(LOB)";
   const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

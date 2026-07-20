@@ -36,7 +36,12 @@ import {
 const log = childLog({ component: "hostserver-db" });
 
 /** 本実装が使う RPB ハンドル。1 接続 1 RPB で足りる */
-export const RPB_HANDLE = 1;
+export /** 超拡張データ形式（V5R4 以降）。原典は V5R4 未満で 0xF1 を送る */
+const USE_SUPER_EXTENDED_FORMATS = 0xf2;
+/** 0 = LOB は常にロケーター。インライン化させない（応答が巨大になるため） */
+const LOB_FIELD_THRESHOLD = 0;
+
+const RPB_HANDLE = 1;
 
 /**
  * 日付書式 ISO（yyyy-mm-dd）。実機で 3=*YMD(26-07-18) / 4=*USA(07/18/2026) /
@@ -171,7 +176,14 @@ export class DbConnection {
       reqId: DB_REQ.setServerAttributes,
       params: [
         uint16Param(DB_CP.serverDateFormat, DATE_FORMAT_ISO),
-        uint16Param(DB_CP.serverTimeFormat, TIME_FORMAT_ISO)
+        uint16Param(DB_CP.serverTimeFormat, TIME_FORMAT_ISO),
+        // **超拡張形式を有効にする**。これが無いと LOB 列を含む結果セットは
+        // prepare の段階でホストに拒否される（rcClass=7, code=-101）
+        { cp: DB_CP.useExtendedFormats, value: Uint8Array.of(USE_SUPER_EXTENDED_FORMATS) },
+        // **しきい値は 0 のまま動かさない**。これ以下の LOB はインラインで丸ごと返り、
+        // 実機で DBCLOB(2M) の表を 2 行取っただけで応答が 8.4MB になった（0 なら 10KB）。
+        // 大きくすると静かにメモリを食い尽くすので、オプションにもしていない
+        uint32Param(DB_CP.lobFieldThreshold, LOB_FIELD_THRESHOLD)
       ]
     });
   }
@@ -213,6 +225,12 @@ export class DbConnection {
   get isClosed(): boolean {
     return this.closed;
   }
+}
+
+function uint32Param(cp: number, value: number): { cp: number; value: Uint8Array } {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, value);
+  return { cp, value: b };
 }
 
 function uint16Param(cp: number, value: number): { cp: number; value: Uint8Array } {

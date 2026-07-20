@@ -98,6 +98,14 @@ export const DB_CP = {
    * 簡易形式(0x3805)になって列の型・CCSID が取れない。**
    */
   extendedColumnDescriptorOption: 0x3829,
+  /** 拡張データ形式の使用（1 バイト）。0xF2 = V5R4 以降の超拡張 */
+  useExtendedFormats: 0x3821,
+  /** LOB フィールドしきい値（4 バイト）。**これ以下はインラインで丸ごと返る** */
+  lobFieldThreshold: 0x3822,
+  /** 超拡張列定義 */
+  superExtendedDataFormat: 0x3812,
+  /** 拡張結果データ */
+  extendedResultData: 0x380e,
 
   // --- 応答側 ---
   /**
