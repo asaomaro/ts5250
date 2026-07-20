@@ -129,3 +129,38 @@ describe("任意の SQL を受け付ける（spec D1）", () => {
     expect((await res.json()).code).toBe("CONFIG_ERROR"); // 文面ではなく資格情報で落ちている
   });
 });
+
+describe("暖機（/warm）", () => {
+  /**
+   * 接続の確立に実測で約 4.6 秒かかるため、画面がペインを開いた時点で先に開かせる。
+   * **失敗しても画面には出さない**（実行時に開き直せばよく、利用者にできることが無い）ので、
+   * ここでは「開けなくても 200 で返す」ことを固定する。
+   */
+  it("接続できなくてもエラーにしない（warmed: false）", async () => {
+    const res = await app().request("/api/host/sql/warm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: SRC })
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ warmed: false });
+  });
+
+  it("知らない項目は拒否する（strict）", async () => {
+    const res = await app().request("/api/host/sql/warm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: SRC, sql: "SELECT 1" })
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("接続先を指定しなければ 400", async () => {
+    const res = await app().request("/api/host/sql/warm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    expect(res.status).toBe(400);
+  });
+});

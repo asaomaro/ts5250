@@ -23,6 +23,8 @@ export const DB_TEMPLATE_LEN = 20;
 
 /** 要求 ID */
 export const DB_REQ = {
+  /** ロケーターから LOB の本体を取る */
+  retrieveLobData: 0x1816,
   prepare: 0x1800,
   describe: 0x1801,
   describeParameterMarker: 0x1802,
@@ -106,6 +108,16 @@ export const DB_CP = {
   superExtendedDataFormat: 0x3812,
   /** 拡張結果データ */
   extendedResultData: 0x380e,
+  /** --- ロケーター経由の LOB 取得（要求 0x1816） --- */
+  lobLocatorHandle: 0x3818,
+  lobRequestedSize: 0x3819,
+  lobStartOffset: 0x381a,
+  lobTranslateIndicator: 0x3805,
+  lobReturnCurrentLength: 0x3821,
+  /** 応答: LOB データ長 */
+  lobDataLength: 0x3810,
+  /** 応答: LOB 本体（CCSID(2) + 長さ(4) + データ） */
+  lobData: 0x380f,
 
   // --- 応答側 ---
   /**

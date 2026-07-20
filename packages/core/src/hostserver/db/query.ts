@@ -20,8 +20,9 @@ import {
   parseSuperExtendedDataFormat,
   type ExtColumn
 } from "./db-reply-ext.js";
-import { decodeRow, type ColumnMeta, type DbValue } from "./db-decode.js";
+import { decodeRow, type ColumnMeta, type DbValue, type LobPlaceholder } from "./db-decode.js";
 import { typeName, jsTypeOf } from "./db-types.js";
+import { retrieveLob, DEFAULT_LOB_MAX_BYTES } from "./lob.js";
 
 const log = childLog({ component: "hostserver-sql" });
 
@@ -121,10 +122,15 @@ function checkSqlca(reply: Reply, what: string): void {
 }
 
 /** SELECT を実行して全行を返す */
+export interface LobOptions {
+  /** 1 セルあたりの取得上限。既定 64KB。**既定では取りに行かない** */
+  maxBytes?: number;
+}
+
 export async function query(
   conn: DbConnection,
   sql: string,
-  opts: { blockSize?: number } = {}
+  opts: { blockSize?: number; lob?: LobOptions } = {}
 ): Promise<QueryResult> {
   const release = conn.acquire();
   try {
@@ -138,10 +144,42 @@ export async function query(
       // 途中でエラーが出てもサーバー側のカーソルを残さない
       await closeCursor(conn);
     }
+    // **LOB は同じ接続の中で取り切る**——ロケーターは接続に紐づくため、
+    // 呼び出し側が後から取ることはできない（lob.ts の説明を参照）
+    if (opts.lob) await fillLobs(conn, rows, opts.lob);
     return { columns: format.columns, rows };
   } finally {
     release();
   }
+}
+
+/**
+ * カーソルを開いたまま「列定義」と「行のジェネレータ」を返す。
+ *
+ * `stream()` は列定義を返さないため、**画面のページング**のように
+ * 列見出しが要る用途で使えない。`query()` は全件読んでカーソルを閉じてしまう。
+ * その中間として、**呼び出し側がカーソルの寿命を握る**入口を用意する。
+ *
+ * ⚠ **返したジェネレータを最後まで回すか `return()` すること。**
+ * 放置するとカーソルと接続が開いたままになる。
+ */
+export async function openQuery(
+  conn: DbConnection,
+  sql: string,
+  opts: { blockSize?: number } = {}
+): Promise<{ columns: ColumnMeta[]; rows: AsyncGenerator<Row, void, undefined> }> {
+  const release = conn.acquire();
+  const format = await prepareAndOpen(conn, sql);
+  const blockSize = opts.blockSize ?? DEFAULT_BLOCK_SIZE;
+  async function* iterate(): AsyncGenerator<Row, void, undefined> {
+    try {
+      yield* fetchAll(conn, format, blockSize);
+    } finally {
+      await closeCursor(conn);
+      release();
+    }
+  }
+  return { columns: format.columns, rows: iterate() };
 }
 
 /** SELECT を実行して 1 行ずつ返す（大きな結果セット向け） */
@@ -296,6 +334,53 @@ async function* fetchAll(
     }
     checkSqlca(reply, "fetch");
     if (data.rows.length < blockSize) return;
+  }
+}
+
+/** 行の中のロケーターを本体で置き換える。既定では呼ばれない */
+async function fillLobs(
+  conn: DbConnection,
+  rows: readonly Record<string, DbValue>[],
+  opts: LobOptions
+): Promise<void> {
+  const maxBytes = opts.maxBytes ?? DEFAULT_LOB_MAX_BYTES;
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (!isLobPlaceholder(value)) continue;
+      try {
+        const got = await retrieveLob(conn, value.locator, { maxBytes });
+        const filled: LobPlaceholder = {
+          kind: "lob",
+          locator: value.locator,
+          maxSize: value.maxSize,
+          byteLength: got.totalLength,
+          value: decodeLob(got.bytes, got.ccsid)
+        };
+        // 打ち切ったときだけ理由を残す（取れたなら unavailable は付けない）
+        if (got.truncated) filled.unavailable = "too-large";
+        row[key] = filled;
+      } catch (e) {
+        log.debug(`LOB ${value.locator} の取得に失敗: ${String(e)}`);
+        row[key] = { ...value, unavailable: "not-requested" };
+      }
+    }
+  }
+}
+
+function isLobPlaceholder(v: DbValue): v is LobPlaceholder {
+  return typeof v === "object" && v !== null && (v as LobPlaceholder).kind === "lob";
+}
+
+/**
+ * LOB のバイト列を、ホストが申告した CCSID で文字列にする。
+ * **未知の CCSID なら Uint8Array のまま返す**（壊れた文字列にしない）。
+ */
+function decodeLob(bytes: Uint8Array, ccsid: number): string | Uint8Array {
+  if (ccsid === 0) return bytes;
+  try {
+    return codecForCcsid(ccsid).decode(bytes);
+  } catch {
+    return bytes;
   }
 }
 

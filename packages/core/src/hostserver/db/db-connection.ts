@@ -78,7 +78,13 @@ export class DbConnection {
   private constructor(
     private readonly conn: HostConnection,
     readonly host: string,
-    readonly port: number
+    readonly port: number,
+    /**
+     * この接続を処理している IBM i 側のジョブ（`832122/QUSER/QZDASOINIT`）。
+     * **障害切り分けで実機のジョブと突き合わせる**のに使う。
+     * 相手が返さなければ undefined。
+     */
+    readonly jobName?: string
   ) {}
 
   static async connect(opts: DbConnectOptions): Promise<DbConnection> {
@@ -106,17 +112,19 @@ export class DbConnection {
     const conn = traced(rawConn, log);
 
     try {
-      await startHostServer(conn, DB_SERVER_ID, {
+      const started = await startHostServer(conn, DB_SERVER_ID, {
         user: opts.user,
         password: opts.password,
         passwordLevel: info.info.passwordLevel
       });
-      const db = new DbConnection(conn, opts.host, port);
+      const db = new DbConnection(conn, opts.host, port, started.jobName);
       // 3) 日付・時刻の書式を固定する（受け取り側で書式を推測しないため）
       await db.setServerAttributes();
       // 4) RPB を作る（以降の要求はこのハンドルを指す）
       await db.createRpb();
-      log.debug(`database server ready at ${opts.host}:${port} (rpb=${RPB_HANDLE})`);
+      log.debug(
+        `database server ready at ${opts.host}:${port} (rpb=${RPB_HANDLE}, job=${started.jobName ?? "?"})`
+      );
       return db;
     } catch (e) {
       conn.close();

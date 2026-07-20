@@ -94,3 +94,15 @@ export function passwordUnicode(password: string): Uint8Array {
   }
   return out;
 }
+
+/**
+ * ジョブ名パラメータ（CP 0x111f）を読む。`832122/QUSER/QZDASOINIT` の形。
+ *
+ * 先頭 4 バイトは長さ等の前置きで、そのあとが CCSID 37 の文字列。
+ * signon サーバーと汎用サーバー（database 等）で**同じ形**なので共有する。
+ */
+export function decodeJobName(value: Uint8Array | undefined): string | undefined {
+  if (!value || value.length <= 4) return undefined;
+  const name = codec37.decode(value.subarray(4)).trimEnd();
+  return name.length > 0 ? name : undefined;
+}

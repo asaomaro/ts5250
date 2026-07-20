@@ -18,6 +18,8 @@ import { registerAdminRoutes } from "./admin.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
+import { ResultSetStore } from "./result-set-store.js";
+import { DbPool } from "./db-pool.js";
 import type { AuditBuffer } from "./audit.js";
 import type { ToolDeps } from "./mcp-tools.js";
 
@@ -28,6 +30,10 @@ export interface AppDeps extends ToolDeps {
   auth?: AuthContext;
   /** 監査ログバッファ（管理者画面のログ取得用） */
   audit?: AuditBuffer;
+  /** SQL 結果セットの保持（画面のページング用）。未指定なら内部で作る */
+  resultSets?: ResultSetStore;
+  /** 画面の SQL 用の接続の使い回し。未指定なら内部で作る */
+  pool?: DbPool;
 }
 
 /**
@@ -96,7 +102,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
   // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
   registerHostListRoutes(app, { resolver: deps.resolver });
-  registerHostSqlRoutes(app, { resolver: deps.resolver });
+  const resultSets = deps.resultSets ?? new ResultSetStore();
+  const pool = deps.pool ?? new DbPool();
+  registerHostSqlRoutes(app, { resolver: deps.resolver, resultSets, pool });
 
   // 受信スプールを PDF でダウンロード（web-ui / 任意クライアント向け・オンデマンド生成）
   app.get("/api/spool/:sessionId/:spoolId/pdf", async (c) => {

@@ -12,6 +12,8 @@ import { resolveBindHost } from "./bind-host.js";
 import { buildApp } from "./app.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
 import { AuditBuffer, installAuditBuffer } from "./audit.js";
+import { ResultSetStore } from "./result-set-store.js";
+import { DbPool } from "./db-pool.js";
 import type { ToolDeps } from "./mcp-tools.js";
 import { setLogSink } from "@as400web/core";
 
@@ -156,6 +158,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     log.warn("受信レコードを hex でログへ出力します（--trace-records・切り分け専用）");
   }
 
+  // 画面のページング用。**このプロセスで唯一「接続を掴み続ける」もの**
+  const resultSets = new ResultSetStore();
+  // 画面の SQL 用の接続の使い回し（接続の確立に約 4.6 秒かかるため。db-pool.ts に実測）
+  const pool = new DbPool();
+
   if (args.mode === "stdio") {
     // stdio モード: stdout は MCP 専用（ログは stderr のみ = core log）
     const server = buildMcpServer(deps);
@@ -164,6 +171,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     log.info("5250 MCP server started on stdio");
   } else {
     const app = buildApp({
+      resultSets,
+      pool,
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
       audit: auditBuffer,
@@ -174,6 +183,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     // 認証オフは既定でループバックのみ（信頼境界がネットワーク的に担保されないため）
     const bind = resolveBindHost(args.host, !!auth);
     if (bind.warn) log.warn(bind.warn);
+    // **掴んだ接続を残さない**——結果セットは唯一の状態なので、終了時に必ず閉じる
+    for (const sig of ["SIGINT", "SIGTERM"] as const) {
+      process.on(sig, () => {
+        resultSets.closeAll();
+        pool.closeAll();
+        process.exit(0);
+      });
+    }
+
     serve({ fetch: app.fetch, port: args.port, hostname: bind.host, websocket: { server: wss } }, (info) => {
       log.info(
         { host: bind.host, port: info.port, auth: !!auth },
