@@ -89,7 +89,8 @@ function sizeOf(input: ColumnLayoutInput): { kind: FieldKind; size: number } {
     default:
       // **黙って壊れた値を書かない**（spec D2）。対応外は型名を添えて拒否する
       throw new As400Error(
-        "HOST_SERVER_UNSUPPORTED",
+        // **利用者が選んだ表の問題**なので、実装の未対応（HOST_SERVER_UNSUPPORTED）とは分ける
+        "UNSUPPORTED_TYPE",
         `DDM 書き込みが対応していない型です: ${input.name} (${t})。` +
           `対応: CHAR / DECIMAL / NUMERIC / SMALLINT / INTEGER / BIGINT`
       );

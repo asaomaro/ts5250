@@ -46,17 +46,17 @@
 
 ## server
 
-- [ ] T10: `host-api.ts` の `statusOf` で `HOST_SERVER_UNSUPPORTED` を **400** に写像（依存: なし）。
+- [x] T10: `host-api.ts` の `statusOf` で `HOST_SERVER_UNSUPPORTED` を **400** に写像（依存: なし）。
       **既存 SQL 経路のテストへの影響を先に確認**してから変更する
-- [ ] T11: `host-upload.ts` に `uploadRows()` を実装（依存: T4, T5, T7, T9）。
+- [x] T11: `host-upload.ts` に `uploadRows()` を実装（依存: T4, T5, T7, T9）。
       メタ取得 → 検査 → 接続 → 送信 → 後始末の順序のみを持つ。
       **`layout.recordLength` と S38OPNFB の照合を実行時ガードとして入れる**
-- [ ] T12: `POST /api/host/upload` を追加し `app.ts` に登録（依存: T11）。
+- [x] T12: `POST /api/host/upload` を追加し `app.ts` に登録（依存: T11）。
       zod は `.strict()`・`sourceSchema` 始まり。**行数上限を受理段階で検査**（DD2）。
       テスト: 認証オフ / admin / 一般ユーザーの 3 パターン、上限超過、拒否時 400
-- [ ] T13: MCP ツール `host_upload_table` を追加（依存: T11）。`csv` が来たら
+- [x] T13: MCP ツール `host_upload_table` を追加（依存: T11）。`csv` が来たら
       **core の `parseCsv` で解析**してから `uploadRows` に渡す（入口を分けても実行経路は 1 つ）
-- [ ] T14: `host-sql.ts` 冒頭の「構造的に読み取り専用」コメントを**範囲を狭めて訂正**する（依存: T12）。
+- [x] T14: `host-sql.ts` 冒頭の「構造的に読み取り専用」コメントを**範囲を狭めて訂正**する（依存: T12）。
       削除せず、`/api/host/upload` が書き込みを行う旨を追記して繋ぐ（DD6）
 
 ## web-ui
