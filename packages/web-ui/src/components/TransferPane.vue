@@ -44,16 +44,19 @@ const rows = ref<string[][]>([]);
 const parseError = ref("");
 const dragging = ref(false);
 
+/**
+ * 拒否理由。**core の `UploadRejection` と対応させる**。
+ * 種類を足したらここも足すこと——既定値に落ちると理由が消え、
+ * 「取り込めませんでした」としか出なくなる（実ブラウザ確認で踏んだ）。
+ */
 interface Rejection {
   kind: string;
   columns?: string[];
   column?: string;
-  dataType?: string;
-  ccsid?: number;
   row?: number;
-  chars?: string[];
-  bytes?: number;
-  max?: number;
+  /** 値を詰められなかった理由（型・長さ・文字コード） */
+  reason?: string;
+  /** 種類が付かない失敗（接続不可など）のメッセージ */
   value?: string;
 }
 const rejections = ref<Rejection[]>([]);
@@ -71,11 +74,26 @@ const result = ref<
 
 const { visible: slowLoading, busy: loading, run } = useDelayedLoading();
 
-/** 想定往復数。**待ち時間の主因は接続（数秒）**なので、往復数だけを強調しない */
-const estimatedTrips = computed(() => {
-  const batch = result.value?.batchSize ?? 100;
-  return rows.value.length === 0 ? 0 : Math.ceil(rows.value.length / batch);
+/**
+ * 実際に使った往復数。
+ *
+ * **バッチ容量（`batchSize`）をそのまま出さない**——2 行の取り込みで
+ * 「21844 件/往復」と出ても意味が無く、むしろ何の数字か分からない。
+ * 利用者が知りたいのは「何回やりとりしたか」である。
+ */
+const tripsUsed = computed(() => {
+  const r = result.value;
+  if (!r || r.batchSize <= 0) return 0;
+  return Math.max(1, Math.ceil(r.committedRows / r.batchSize));
 });
+
+/**
+ * 送る前の想定往復数。**待ち時間の主因は接続（数秒）**なので、往復数だけを強調しない。
+ * 実測が出るまでは既定のバッチ容量で見積もる。
+ */
+const estimatedTrips = computed(() =>
+  rows.value.length === 0 ? 0 : Math.ceil(rows.value.length / (result.value?.batchSize ?? 1000))
+);
 
 function reset(): void {
   phase.value = "idle";
@@ -224,18 +242,11 @@ function rejectionText(r: Rejection): string {
       return `表にある列が CSV にありません: ${r.columns?.join(", ")}`;
     case "column-unknown":
       return `表に無い列が CSV にあります: ${r.columns?.join(", ")}`;
-    case "type-unsupported":
-      return `対応していない型です: ${r.column}（${r.dataType}）`;
-    case "ccsid-unsupported":
-      return `対応していない文字コードです: ${r.column}（CCSID ${r.ccsid}）`;
     case "value-null":
       return `空にできない列です: ${r.column}`;
-    case "value-too-long":
-      return `${r.max} バイトの列に ${r.bytes} バイトの値です: ${r.column}`;
-    case "value-unencodable":
-      return `CCSID ${r.ccsid} では書けない文字が含まれます: ${r.chars?.join(", ")}`;
-    case "value-not-numeric":
-      return `数値の列に「${r.value}」が入っています: ${r.column}`;
+    case "value-invalid":
+      // **理由をそのまま出す**（型・長さ・文字コードのどれかは core が判断済み）
+      return `${r.column}: ${r.reason}`;
     default:
       return r.value ?? "取り込めませんでした";
   }
@@ -332,9 +343,7 @@ function rejectionWhere(r: Rejection): string {
         <!-- 完了 -->
         <div v-if="phase === 'done' && result" class="result ok">
           <h3>{{ result.committedRows }} 行を取り込みました</h3>
-          <p class="muted">
-            {{ result.batchSize }} 件/往復 · {{ result.ms }}ms
-          </p>
+          <p class="muted">{{ tripsUsed }} 往復 · {{ result.ms }}ms</p>
         </div>
 
         <!-- 部分完了。**完了と同じ見せ方にしない**（次に取る行動が違う） -->
