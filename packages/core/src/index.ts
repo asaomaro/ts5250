@@ -211,8 +211,9 @@ export {
   prepareUpload,
   type PrepareUploadArgs,
   type PrepareResult,
+  type PreparedUpload,
   type UploadRejection
-} from "./hostserver/ddm/upload-prepare.js";
+} from "./hostserver/db/upload-prepare.js";
 
 // CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う）
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
