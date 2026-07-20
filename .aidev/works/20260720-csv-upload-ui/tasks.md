@@ -34,7 +34,7 @@
 - [x] T7: `writeAll()` を新規追加（依存: T6）。`buildS38Buf(records)` を括り出し、
       `write()` はそれへの薄い委譲にする（DD3）。`WriteAllResult`（`committedRows` /
       `uncertainRange`）を返す。単体テスト: バッチ分割数・境界・`uncertainRange` の算出
-- [ ] **T8: 実機確認（ゲート）** — `MYLIB.TESTPF` へバッチで複数件書き、SQL で読み返して一致を確認。
+- [x] **T8: 実機確認（ゲート）** — `MYLIB.TESTPF` へバッチで複数件書き、SQL で読み返して一致を確認。
       **往復回数が件数でなくバッチ数になっていること**を計測で示す（依存: T7）。
       ⚠ **ここを通るまで T11 以降に進まない**。崩れたら spec へ差し戻す
 
