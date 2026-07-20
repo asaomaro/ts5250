@@ -16,10 +16,23 @@ export interface ColumnLayoutInput {
   name: string;
   /** `QSYS2.SYSCOLUMNS.DATA_TYPE`（例 "CHAR" / "DECIMAL"） */
   dataType: string;
-  /** 文字なら文字数、数値なら精度 */
+  /**
+   * `CHAR` は**バイト数**、数値は精度（桁数）。
+   *
+   * 混在 CCSID（5035 等）でも `CHAR(n)` の `n` はバイト数である——実機の
+   * `QSYS2.SYSCOLUMNS` で `LENGTH` = `CHARACTER_MAXIMUM_LENGTH` = `CHARACTER_OCTET_LENGTH`
+   * が一致することを確認済み（research F8）。SO/SI もこの n バイトを消費する。
+   */
   length: number;
   scale: number;
   nullable: boolean;
+  /**
+   * 文字列列の CCSID（`QSYS2.SYSCOLUMNS.CCSID`）。数値列では未設定。
+   *
+   * **列ごとに持つ**のが要点（design D1）。原典も `DDMField.getCCSID()`（`WHCCSID`）で
+   * フィールド単位に持っており、同じ表に CCSID 273 の列と 5035 の列が同居しうる。
+   */
+  ccsid?: number;
 }
 
 export type FieldKind = "char" | "packed" | "zoned" | "int";
@@ -35,6 +48,8 @@ export interface FieldLayout {
   precision: number;
   scale: number;
   nullable: boolean;
+  /** `char` のときのみ。符号化に使う CCSID */
+  ccsid?: number;
 }
 
 export interface RecordLayout {
@@ -91,7 +106,10 @@ export function buildRecordLayout(columns: readonly ColumnLayoutInput[]): Record
       size,
       precision: c.length,
       scale: c.scale,
-      nullable: c.nullable
+      nullable: c.nullable,
+      // 文字列列にだけ運ぶ。数値列は CCSID を使わないので、持たせると符号化側で「使わない値」を
+      // 無視する判断が要る。存在しないなら分岐そのものが要らない
+      ...(kind === "char" && c.ccsid !== undefined ? { ccsid: c.ccsid } : {})
     });
     offset += size;
   }

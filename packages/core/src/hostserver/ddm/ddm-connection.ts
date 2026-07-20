@@ -48,9 +48,37 @@ const FMT_RQSDSS = 1;
 /** S38PUTM に続く S38BUF のフォーマット ID（OBJDSS・同一相関） */
 const FMT_OBJDSS_SAME_CORR = 3;
 
+/**
+ * DDM の**制御情報**（ファイル名・ライブラリ名・メンバー名・宣言名）専用のコーデック。
+ *
+ * ここは CCSID 37 で固定してよい——オブジェクト名は英数字と `$#@` に限られ、
+ * どの EBCDIC でも同じ位置にある。**レコードのデータ部には使わない**
+ * （データは列ごとの CCSID で符号化する。design D1）。
+ */
 const ebcdic37 = codecForCcsid(37);
 const encode37 = (t: string): { bytes: Uint8Array; substituted: number } => ebcdic37.encode(t);
 const decode37 = (b: Uint8Array): string => ebcdic37.decode(b);
+
+/**
+ * 列の CCSID → エンコーダ。同じ CCSID を何度も引かないよう覚えておく
+ * （1 レコードにつき列数ぶん引かれ、行数ぶん繰り返されるため）。
+ */
+const encoderCache = new Map<number, (t: string) => { bytes: Uint8Array; substituted: number }>();
+function encoderFor(ccsid: number | undefined): (t: string) => {
+  bytes: Uint8Array;
+  substituted: number;
+} {
+  // CCSID 不明の文字列列は 37 とみなす。**黙って化けるより、既定を明示して例外で気づけるようにする**
+  // （表現できない文字があれば encodeChar が拒否する）
+  const key = ccsid ?? 37;
+  let enc = encoderCache.get(key);
+  if (!enc) {
+    const codec = codecForCcsid(key);
+    enc = (t: string) => codec.encode(t);
+    encoderCache.set(key, enc);
+  }
+  return enc;
+}
 
 export interface DdmConnectOptions {
   host: string;
@@ -387,7 +415,8 @@ export function buildDdmRecord(
     let bytes: Uint8Array;
     switch (f.kind) {
       case "char":
-        bytes = encodeChar(String(v), f.size, encode37);
+        // **列ごとの CCSID で符号化する**（design D1）。同じ表に 273 と 5035 が同居しうる
+        bytes = encodeChar(String(v), f.size, encoderFor(f.ccsid));
         break;
       case "packed":
         bytes = encodePacked(v as string | number | bigint, f.precision, f.scale);
