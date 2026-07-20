@@ -22,3 +22,5 @@ events:
   - { ts: 2026-07-20T12:24:42Z, phase: walkthrough, event: approved }
   - { ts: 2026-07-20T12:25:04Z, phase: deliver, event: start }
   - { ts: 2026-07-20T12:25:32Z, phase: deliver, event: approved }
+  - { ts: 2026-07-20T12:38:45Z, phase: retro, event: start }
+  - { ts: 2026-07-20T12:42:47Z, phase: retro, event: approved }
