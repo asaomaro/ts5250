@@ -6,6 +6,7 @@ import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
 import SqlPane from "./SqlPane.vue";
 import IfsPane from "./IfsPane.vue";
+import DtaqPane from "./DtaqPane.vue";
 import TransferPane from "./TransferPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
@@ -84,6 +85,7 @@ const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:")
 const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
 const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
 const activeIsIfs = computed(() => group.value.activeTab?.startsWith("ifs:") ?? false);
+const activeIsDtaq = computed(() => group.value.activeTab?.startsWith("dtaq:") ?? false);
 const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
 </script>
 
@@ -116,6 +118,7 @@ const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("trans
       <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
       <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
       <IfsPane v-else-if="group.activeTab && activeIsIfs" :tab-id="group.activeTab" />
+      <DtaqPane v-else-if="group.activeTab && activeIsDtaq" :tab-id="group.activeTab" />
       <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
       <PrinterPane
         v-else-if="group.activeTab && activeIsPrinter"
