@@ -164,8 +164,13 @@ function printReport(): void {
   if (!selected.value) return;
   const w = window.open("", "_blank");
   if (!w) return;
+  // 別ウィンドウなので CSS 変数は使えない。--screen-mono と同じ日本語対応等幅（1:2）を直接並べる
+  const screenMono =
+    "'HackGen Console NF','HackGen Console','HackGen','UDEV Gothic'," +
+    "'PlemolJP Console','PlemolJP','Cica','Sarasa Term J','BIZ UDGothic'," +
+    "'Osaka-Mono','Noto Sans Mono CJK JP','MS Gothic','ＭＳ ゴシック',monospace";
   w.document.write(
-    `<pre style="font-family:'DejaVu Sans Mono',monospace;font-size:11px;white-space:pre">${escapeHtml(selectedText.value)}</pre>`
+    `<pre style="font-family:${screenMono};font-size:11px;white-space:pre">${escapeHtml(selectedText.value)}</pre>`
   );
   w.document.close();
   w.focus();
@@ -503,7 +508,9 @@ function printReport(): void {
 }
 .viewer pre {
   margin: 0;
-  font-family: "DejaVu Sans Mono", "Courier New", monospace;
+  /* 以前は DejaVu Sans Mono/Courier New で日本語が等幅にならなかった。
+     日本語対応の等幅（半角:全角=1:2）に揃え、帳票の桁を保つ（--screen-mono） */
+  font-family: var(--screen-mono);
   font-size: 12px;
   line-height: 1.2;
   white-space: pre;

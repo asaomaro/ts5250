@@ -464,7 +464,8 @@ tbody tr.sel { background: var(--accent-soft); }
   min-height: 0;
   overflow: auto;
   margin: 0;
-  font-family: var(--mono);
+  /* 帳票は桁揃えが命。日本語対応の等幅（半角:全角=1:2）で桁を保つ（--screen-mono） */
+  font-family: var(--screen-mono);
   font-size: 12px;
   white-space: pre;
 }
