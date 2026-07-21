@@ -24,7 +24,12 @@ import { codecForCcsid } from "../../codec/codec.js";
 import { openDdmTransport, type DdmTransport } from "../../transport/ddm-transport.js";
 import type { HostTlsOptions } from "../../transport/host-connection.js";
 import { signon } from "../signon.js";
-import { generateClientSeed, passwordSubstituteSha, SEED_LEN } from "../password.js";
+import {
+  generateClientSeed,
+  passwordSubstituteSha,
+  MIN_SHA_PASSWORD_LEVEL,
+  SEED_LEN
+} from "../password.js";
 import { passwordUnicode, userIdEbcdic37, userIdUnicode } from "../credentials.js";
 import { DEFAULT_PORT } from "../port-mapper.js";
 import {
@@ -143,6 +148,16 @@ export class DdmConnection {
       ...(opts.resolvePort !== undefined ? { resolvePort: opts.resolvePort } : {})
     });
     const level = info.info.passwordLevel;
+    // DDM(DRDA) の SECCHK は SHA(SECMEC) 前提で実装している。パスワードレベル 0/1 の DES 経路は
+    // signon/ホストサーバー（command/SQL/IFS 等）では対応済みだが、DDM 独自ハンドシェイクは未対応。
+    // signon が通ったあと SECCHK で分かりにくく失敗するより、ここで明示的に断る。
+    if (level < MIN_SHA_PASSWORD_LEVEL) {
+      throw new As400Error(
+        "HOST_SERVER_UNSUPPORTED",
+        `DDM (データ転送/DRDA) はパスワードレベル ${level}（DES 認証）にまだ対応していません。` +
+          `コマンド/SQL/IFS 等のホストサーバーは対応しています`
+      );
+    }
 
     const port = opts.port ?? (opts.tls ? DEFAULT_PORT.ddm.tls : DEFAULT_PORT.ddm.plain);
     const transport = await openDdmTransport({
