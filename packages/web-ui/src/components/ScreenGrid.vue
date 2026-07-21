@@ -1062,7 +1062,10 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
     const s = slicesOf(f)[sliceIdx];
     if (s) {
       edit.cursor = s.offset;
-      el.value = sliceValue(f, sliceIdx);
+      // 表示はセンチネル→空白。生のセンチネル（U+E020–E03F）を入れると、Nerd Font 等
+      // PUA にアイコンを持つ等幅フォントで可視グリフになり（色制御文字が見える）、
+      // 2 桁幅のグリフだと欄幅を超えて横スクロールし caret が行末へ飛ぶ。
+      el.value = stripAttrSentinels(sliceValue(f, sliceIdx));
       el.setSelectionRange(0, 0);
       emit("cursor", s.row, s.col);
       return;
@@ -1071,7 +1074,9 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   // SBCS: 休止時 :value と編集ビューは同一（純論理値スペース埋め）。
   // ただし hidden はスペース埋めがそのまま伏せ字になるため実入力分のみ表示する。
   // 行またぎ欄では、この input が担当するスライスぶんだけを入れる（全長を入れると桁が溢れる）。
-  if (edit) el.value = sliceValue(f, sliceIdx);
+  // 表示はセンチネル→空白（writeSlices / :value / blur と同じ。生のセンチネルを入れると
+  // Nerd Font で可視化・桁溢れし、色制御文字表示とカーソル行末飛びを起こす）。
+  if (edit) el.value = stripAttrSentinels(sliceValue(f, sliceIdx));
   // スペース埋め表示だと Tab/フォーカスで native カーソルが末尾へ行き入力できなくなるため、
   // フォーカス時はフィールド先頭へ置く（クリックは mouseup で押下桁に上書きされる）。
   el.setSelectionRange(0, 0);
@@ -1358,9 +1363,10 @@ function pasteFrom(
     } else {
       emit("edit", field.index, val);
       // :value バインドは v-memo でキャッシュされ再評価されないため、全スライスの input を直接更新する
+      // （表示はセンチネル→空白。生のセンチネルは Nerd Font で可視化・桁溢れするため）
       slicesOf(field).forEach((_s, i) => {
         const inp = inputForSlice(field, i);
-        if (inp) inp.value = sliceValue(field, i);
+        if (inp) inp.value = stripAttrSentinels(sliceValue(field, i));
       });
     }
   }
@@ -1465,7 +1471,9 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   // 合成中は純論理値の prefix（SO/SI 無し）＋候補。確定後に列ビューへ整形する。
   // 行またぎ欄では、この <input> が担当するスライスの先頭から先だけを残す（欄全長を入れると桁が溢れる）。
   const from = composeLogicalStart(f, el);
-  const prefix = edit.chars.slice(from, composeStart).join("");
+  // 表示はセンチネル→空白（1:1 なので長さは不変＝composePrefixLen も確定分の切り出しも保つ）。
+  // 生のセンチネルを prefix に残すと Nerd Font で色制御文字が見え・桁が溢れる。
+  const prefix = stripAttrSentinels(edit.chars.slice(from, composeStart).join(""));
   composePrefixLen = prefix.length;
   el.value = prefix;
   el.setSelectionRange(prefix.length, prefix.length); // 候補を入力位置（既入力の直後）に出す
