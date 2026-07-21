@@ -115,6 +115,25 @@ async function main() {
         return { ok: reds.length > 0 };
       });
       check("カーソル移動+送信の後も色が残る（変更扱いにしない）", after.ok);
+
+      // フォーカス中はオーバーレイを隠し入力欄の文字を見せる／非フォーカスで色付き復元
+      const focusState = await page.evaluate(() => {
+        const inputs = [...document.querySelectorAll("input.grid-input")];
+        const el = inputs.find((i) => (i.value || "").includes("COMMENT"));
+        if (!el) return { ok: false };
+        el.focus();
+        const wrap = el.closest(".input-cell");
+        const ov = wrap?.querySelector(".input-overlay");
+        const focusedTextVisible = getComputedStyle(el).color !== "rgba(0, 0, 0, 0)" &&
+          getComputedStyle(el).color !== "transparent";
+        const overlayHiddenOnFocus = !ov || getComputedStyle(ov).display === "none";
+        el.blur();
+        const overlayShownOnBlur = ov && getComputedStyle(ov).display !== "none" &&
+          (getComputedStyle(el).color === "rgba(0, 0, 0, 0)" || getComputedStyle(el).color === "transparent");
+        return { ok: focusedTextVisible && overlayHiddenOnFocus && overlayShownOnBlur,
+          focusedTextVisible, overlayHiddenOnFocus, overlayShownOnBlur };
+      });
+      check("フォーカス中は文字が見え・非フォーカスで色復元", focusState.ok, JSON.stringify(focusState));
     }
 
     // 後片付け: SEU を F3 で抜ける（保存しない）

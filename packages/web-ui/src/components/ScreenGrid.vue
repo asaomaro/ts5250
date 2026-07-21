@@ -2019,10 +2019,17 @@ onBeforeUnmount(() => {
   white-space: pre;
   pointer-events: none; /* クリック・キャレットは下の input に通す */
 }
-/* オーバーレイを見せるため input のテキストは透明。キャレットは属性色（--cell）で残す */
-.grid-input.has-overlay {
+/*
+ * **フォーカス中（編集中）はオーバーレイを隠し、入力欄の文字をそのまま見せる**（単色）。
+ * オーバーレイは props 由来なので編集中の打鍵に追従しない。入力欄を透明にしたままだと
+ * 打った文字が見えなくなるため、透明化とオーバーレイ表示は**非フォーカス時だけ**にする。
+ * フォーカスが外れれば色付きオーバーレイに復元される。
+ */
+.input-cell.overlaid:focus-within .input-overlay {
+  display: none;
+}
+.grid-input.has-overlay:not(:focus) {
   color: transparent;
-  caret-color: var(--cell, currentColor);
 }
 
 .grid-input {
