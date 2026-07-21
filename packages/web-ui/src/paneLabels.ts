@@ -8,7 +8,7 @@
  */
 
 /** セッションを持たないタブの ID 接頭辞。**新しい種類を足すときはここに追加する** */
-export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "sql:", "transfer:"] as const;
+export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "sql:", "transfer:", "spool:"] as const;
 
 /** セッションを持たない（＝接続の概念が無い）タブか */
 export function isPaneTab(id: string | undefined): boolean {
@@ -26,5 +26,7 @@ export const PANE_LABELS: Record<string, string> = {
   "ifs:files": "IFS",
   "dtaq:entries": "データ待ち行列",
   "sql:query": "SQL",
-  "transfer:data": "データ転送"
+  "transfer:data": "データ転送",
+  // pull 型（既存スプールの検索・取得）。プリンターセッション（push 型）のタブとは別物
+  "spool:files": "スプール"
 };

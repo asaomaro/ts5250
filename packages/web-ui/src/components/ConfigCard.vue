@@ -9,7 +9,7 @@ import { computed, reactive, ref, watch } from "vue";
 import type { PublicSession, PublicSystem } from "@as400web/server";
 import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores/systems.js";
 import InfoPopover from "./InfoPopover.vue";
-import { HOST_CODE_PAGES, DEFAULT_CCSID } from "../hostCodePages.js";
+import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 
 const props = defineProps<{
@@ -48,7 +48,13 @@ const source = ref<"server" | "personal">("personal");
 type SysFormState = { [K in keyof SystemForm]: SystemForm[K] | undefined };
 type SesFormState = { [K in keyof SessionConfigForm]: SessionConfigForm[K] | undefined };
 
-const sysForm = reactive<SysFormState>({ name: "", host: "", tls: true, ccsid: DEFAULT_CCSID });
+const sysForm = reactive<SysFormState>({
+  name: "",
+  host: "",
+  tls: true,
+  ccsid: DEFAULT_CCSID,
+  spoolCcsid: DEFAULT_SPOOL_CCSID
+});
 const sesForm = reactive<SesFormState>({
   name: "",
   system: "",
@@ -82,6 +88,7 @@ function loadSystem(): void {
   sysForm.port = s.port;
   sysForm.tls = s.tls ?? false;
   sysForm.ccsid = s.ccsid ?? DEFAULT_CCSID;
+  sysForm.spoolCcsid = s.spoolCcsid ?? DEFAULT_SPOOL_CCSID;
   sysForm.autoSignon = s.autoSignon;
   sysForm.signonUser = s.signonUser ?? "";
   // パスワードは返らない。**空のまま送れば既存が保たれる**（サーバー側でそう扱う）
@@ -339,6 +346,13 @@ const infoRows = computed(() => {
           <select v-model.number="sysForm.ccsid">
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
+        </label>
+        <label class="row">
+          <span class="cap">スプール CCSID</span>
+          <select v-model.number="sysForm.spoolCcsid">
+            <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+          </select>
+          <span class="hint">スプールの SCS 用。上の 5250 画面用とは別</span>
         </label>
         <label class="row"
           ><span class="cap">自動サインオン</span><input v-model="sysForm.autoSignon" type="checkbox"

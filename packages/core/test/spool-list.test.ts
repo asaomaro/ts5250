@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildFilter, parseSpoolRecord } from "../src/hostserver/spool/spool-list.js";
+import {
+  buildFilter,
+  parseSpoolRecord,
+  listSpooledFiles
+} from "../src/hostserver/spool/spool-list.js";
+import type { CommandConnection } from "../src/hostserver/command/command-connection.js";
 import { statusName, cyymmddToIso, hhmmssToReadable } from "../src/hostserver/spool/spool-types.js";
 import { Tn5250Error } from "../src/errors.js";
 import { codecForCcsid } from "../src/codec/codec.js";
@@ -102,6 +107,58 @@ describe("parseSpoolRecord", () => {
 
   it("短すぎるレコードを拒否する", () => {
     expect(() => parseSpoolRecord(new Uint8Array(50))).toThrow(Tn5250Error);
+  });
+});
+
+/**
+ * リスト情報（80 バイト）を組み立てる。
+ * 位置は実装の LIST_INFO と対（total:0 / returned:4 / handle:8 / recordLength:12）。
+ */
+function listInfo(total: number, returned: number, recordLength = 136): Uint8Array {
+  const b = new Uint8Array(80);
+  const v = new DataView(b.buffer);
+  v.setInt32(0, total);
+  v.setInt32(4, returned);
+  v.setInt32(12, recordLength);
+  return b;
+}
+
+/** QGYOLSPL の応答だけを差し替えた最小のコマンド接続 */
+function fakeConn(records: Uint8Array, info: Uint8Array): CommandConnection {
+  return {
+    call: async () => ({
+      result: { success: true, messages: [] },
+      // outputs[0]=レコード列 / outputs[2]=リスト情報（実装のパラメータ順と対）
+      outputs: [records, undefined, info]
+    })
+  } as unknown as CommandConnection;
+}
+
+/**
+ * `returned` の件数ぶんだけレコードを解析する、という契約を固める。
+ *
+ * **`total`（offset 0）は読まない。** 名前に反して一致総数ではなく、返した件数と同値だと
+ * 実機で判明しているため（LIST_INFO のコメント参照）。打ち切り判定は呼び出し側が
+ * `max + 1` 件要求して行う。ここで人工的に `total ≠ returned` の応答を作ってしまうと、
+ * **実機では起こらない状態を前提にしたテストが緑になる**——実際それで前提の誤りを見逃した。
+ */
+describe("listSpooledFiles", () => {
+  it("returned の件数ぶんを解析して返す", async () => {
+    const res = await listSpooledFiles(fakeConn(record(), listInfo(1, 1)), {}, { max: 100 });
+
+    expect(res).toHaveLength(1);
+    expect(res[0]?.fileName).toBe("QPRTLIBL");
+  });
+
+  it("レコード長 0 なら空（解析全体を落とさない）", async () => {
+    expect(await listSpooledFiles(fakeConn(new Uint8Array(0), listInfo(0, 0, 0)))).toEqual([]);
+  });
+
+  it("バッファが足りなければ入っている分で打ち切る（例外にしない）", async () => {
+    // returned は 2 と言っているが、レコードは 1 件分しか入っていない
+    const res = await listSpooledFiles(fakeConn(record(), listInfo(2, 2)));
+
+    expect(res).toHaveLength(1);
   });
 });
 

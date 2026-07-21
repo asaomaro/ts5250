@@ -20,6 +20,12 @@ export interface HostCodePage {
 /** 既定のホストコードページ（core の ConnectOptions 既定と揃える）。 */
 export const DEFAULT_CCSID = 37;
 
+/**
+ * スプール（SCS）デコードの既定 CCSID。**5250 画面用の `DEFAULT_CCSID`（37）とは別**——
+ * 経路によって扱いが違うため、既定値も揃えない（サーバー側 openNetPrint の既定と合わせる）。
+ */
+export const DEFAULT_SPOOL_CCSID = 273;
+
 export const HOST_CODE_PAGES: readonly HostCodePage[] = [
   { ccsid: 37, label: "037 — 英語（アメリカ／カナダ）" },
   { ccsid: 273, label: "273 — ドイツ語／オーストリア" },

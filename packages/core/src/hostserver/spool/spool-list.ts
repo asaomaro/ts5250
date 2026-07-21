@@ -26,7 +26,30 @@ const EBCDIC_SPACE = 0x40;
 const ALL = "*ALL";
 /** 既定のユーザー（接続ユーザー） */
 const CURRENT_USER = "*CURRENT";
-/** リスト情報（80 バイト）の項目位置 */
+/**
+ * リスト情報（80 バイト）の項目位置。
+ *
+ * **`total` は「条件に一致した総件数」ではなく「構築されたリストの件数」**＝
+ * `min(max, 実際の一致件数)` である。`max` がリストの構築量そのものを決めるため。
+ *
+ * 実機 PUB400（スプール 3 件）で `max` を振って計測した:
+ *
+ * ```
+ *   max=0   total=0  returned=0  完了指示子=I(incomplete)
+ *   max=1   total=1  returned=1  完了指示子=C(complete)
+ *   max=2   total=2  returned=2  完了指示子=C(complete)
+ *   max=5   total=3  returned=3  完了指示子=C(complete)
+ * ```
+ *
+ * `max=1` でも完了指示子（オフセット 16）は `C` を返す——API は「1 件のリストを作り終えた」
+ * と言っているのであって、総数が未確定なのではない。`max=0` で総数だけ取る idiom も効かない。
+ *
+ * **よって打ち切り判定にこの値は使えない**（`max` で頭打ちになるため常に
+ * `total == returned` になり、truncated が常に false ＝「全件見た」と誤解させる偽陰性）。
+ * 打ち切りは `max + 1` 件要求して判定する——`min(max+1, 実件数) > max ⟺ 実件数 > max` で、
+ * この API で打ち切りを知る唯一の形（server の `listSpools`）。
+ * 真の総数を知るにはリストを全件構築するしかない。
+ */
 const LIST_INFO = { total: 0, returned: 4, handle: 8, recordLength: 12 } as const;
 
 const codec = codecForCcsid(EBCDIC_CCSID);

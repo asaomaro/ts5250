@@ -125,6 +125,9 @@ export class ConfigResolver {
     // CCSID はセッション側の上書きを優先する
     const ccsid = session?.ccsid ?? system.ccsid;
     if (ccsid !== undefined) opts.ccsid = ccsid;
+    // スプール用 CCSID は**システムだけが持つ**（pull 型はセッションに紐づかない。spec 方針2）。
+    // 上の ccsid へフォールバックしない——5250 画面用とは別の設定である
+    if (system.spoolCcsid !== undefined) opts.spoolCcsid = system.spoolCcsid;
 
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
