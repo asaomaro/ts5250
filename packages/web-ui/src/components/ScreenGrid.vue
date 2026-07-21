@@ -34,6 +34,12 @@ import {
 } from "../composables/fieldSlices.js";
 // codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
 import { katakanaChar } from "@as400web/core/codec";
+import {
+  isAttrSentinel,
+  attrSentinelByte,
+  stripAttrSentinels,
+  decodeAttribute
+} from "@as400web/core/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
 const props = withDefaults(
@@ -228,32 +234,42 @@ function inputColorBands(
   return bands;
 }
 
+/** 属性バイト（decodeAttribute の結果）を CSS class 文字列にする（cellClass と同じ体裁） */
+function attrByteClass(byte: number): string {
+  const a = decodeAttribute(byte);
+  const cls = [`c-${a.color}`];
+  if (a.underline) cls.push("a-underline");
+  if (a.reverse) cls.push("a-reverse");
+  if (a.blink) cls.push("a-blink");
+  return cls.join(" ");
+}
+
 /**
- * オーバーレイに出す色付きラン。テキストは入力欄と同じ表示値（＝編集にも追従）、
- * 色はバンド境界（桁）で割る。**全角は 2 桁**を占めるので、桁で正しく切る。
+ * オーバーレイに出す色付きラン。**値の中のセンチネル（＝埋め込み属性）で色を切り替える。**
+ * センチネルは編集で桁と一緒に動くので、色も追従する。センチネル位置は新色の空白 1 桁。
+ * 先頭色は欄の先頭セルの属性（seg.cls）から。
  */
 function overlayRuns(seg: Segment): { text: string; cls: string }[] {
-  const value = sliceValue(seg.field!, seg.slice ?? 0);
-  const bands = seg.colorBands ?? [];
+  const value = sliceValue(seg.field!, seg.slice ?? 0).padEnd(seg.width ?? 0, " ");
   const runs: { text: string; cls: string }[] = [];
-  let ji = 0; // value の JS index
-  let col = 0; // スライス先頭からの桁
-  for (const b of bands) {
-    const target = b.start + b.len;
-    let text = "";
-    while (col < target && ji < value.length) {
-      const ch = value[ji]!;
+  let cls = seg.cls; // 欄先頭の色（seg.cls = 先頭セルの cellClass）
+  let text = "";
+  const push = (): void => {
+    if (text.length > 0) {
+      runs.push({ text, cls });
+      text = "";
+    }
+  };
+  for (const ch of value) {
+    if (isAttrSentinel(ch)) {
+      push();
+      cls = attrByteClass(attrSentinelByte(ch));
+      text += " "; // 属性桁は新色の空白 1 桁
+    } else {
       text += ch;
-      col += isFullWidth(ch) ? 2 : 1;
-      ji++;
     }
-    // 値が尽きた残り桁は空白で埋める（属性桁・末尾パディング）
-    while (col < target) {
-      text += " ";
-      col++;
-    }
-    runs.push({ text, cls: b.cls });
   }
+  push();
   return runs;
 }
 
@@ -622,7 +638,8 @@ function writeSlices(f: Field, full: string): void {
   const masked = maskSafe(f, full);
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
-    if (el) el.value = masked.slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
+    // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
+    if (el) el.value = stripAttrSentinels(masked.slice(s.offset, s.offset + s.width)).padEnd(s.width, " ");
   });
 }
 
@@ -1067,7 +1084,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
-  el.value = sliceValue(f, Number(el.dataset["slice"] ?? 0));
+  el.value = stripAttrSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0)));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
   // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
   // **欄内スライス間の一時 blur（syncingFocus）では ++ しない**——編集中に再描画すると
@@ -1878,7 +1895,7 @@ onBeforeUnmount(() => {
             class="grid-input"
             :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
             :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-            :value="sliceValue(seg.field!, seg.slice ?? 0)"
+            :value="stripAttrSentinels(sliceValue(seg.field!, seg.slice ?? 0))"
             :readonly="seg.field!.protected"
             type="text"
             :autocomplete="seg.field!.hidden ? 'off' : undefined"

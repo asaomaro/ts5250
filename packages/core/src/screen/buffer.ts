@@ -6,6 +6,7 @@ import type {
   ParsedWindow
 } from "../protocol/wdsf-parser.js";
 import { decodeAttribute, DEFAULT_ATTR } from "./attributes.js";
+import { attrSentinel, isAttrSentinel, attrSentinelByte } from "./attr-sentinel.js";
 import type {
   Cell,
   CellKind,
@@ -344,20 +345,28 @@ export class ScreenBuffer {
       );
     }
     for (let i = 0; i < field.length; i++) {
-      // **埋め込み属性セル（欄途中の色属性）は保つ**——編集で消さない（バグ: 行を変更すると色が消える）。
-      // 呼び出し側の value は属性桁を空白で桁揃えしているので、その桁を上書きせず属性を残せば桁も合う。
-      if (this.cells[field.startAddr + i]?.type === "attr") continue;
       const ch = value[i];
-      this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
+      // **センチネル文字は埋め込み属性セルとして書く**——値の中で属性が編集に追従して動いた
+      // 位置に、その属性バイトのセルを置き直す（桁ずれ・色ずれ・送信での破壊を防ぐ）。
+      if (ch !== undefined && isAttrSentinel(ch)) {
+        this.cells[field.startAddr + i] = { type: "attr", byte: attrSentinelByte(ch) };
+      } else {
+        this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
+      }
     }
     field.mdt = true;
   }
 
   fieldValue(field: InternalField): string {
+    // **SBCS 欄の埋め込み属性はセンチネル文字で返す**（値の中で識別・移動できるように）。
+    // DBCS 欄は SO/SI・2 バイトの都合でセンチネルを混ぜると送信エンコードが壊れるため空白のまま。
+    const dbcs = field.dbcsType !== undefined;
     let s = "";
     for (let i = 0; i < field.length; i++) {
       const c = this.cells[field.startAddr + i];
-      s += c?.type === "char" ? c.char : " ";
+      if (c?.type === "char") s += c.char;
+      else if (c?.type === "attr") s += dbcs ? " " : attrSentinel(c.byte);
+      else s += " ";
     }
     return s.replace(/ +$/, "");
   }

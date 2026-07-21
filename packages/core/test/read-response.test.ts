@@ -4,6 +4,7 @@ import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { codecForCcsid } from "../src/codec/codec.js";
 import { AID, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
+import { attrSentinel, isAttrSentinel, attrSentinelByte } from "../src/screen/attr-sentinel.js";
 
 const codec = codecForCcsid(37);
 
@@ -69,29 +70,32 @@ describe("buildReadMdtResponse", () => {
     expect(d[6]).toBe(0x3f); // SUB
   });
 
-  it("欄内の埋め込み属性バイトは編集後も保たれ、送信で再送される（色が消えない）", () => {
+  it("埋め込み属性はセンチネルで返り、編集で動いた桁に書き戻り送信される", () => {
     const b = new ScreenBuffer();
     b.setAttr(b.addrOf(5, 24), 0x24); // 欄を定義する属性（欄の前）
     b.addField(b.addrOf(5, 25), 10, FFW.ID_VALUE, 0x24);
     const fs = b.addrOf(5, 25);
-    b.setAttr(fs + 3, 0x28); // **欄の途中に埋め込み属性（赤 0x28）**
+    b.setAttr(fs + 2, 0x28); // 欄の position 2 に埋め込み属性（赤 0x28）
 
-    // 属性桁を空白で桁揃えした値で編集（web-ui の logicalValue と同じ形）
-    b.setFieldValue(b.fieldByIndex(1), "ABC DEF");
+    // fieldValue はその桁をセンチネルで返す（値の中で識別・移動できる）
+    const value = b.fieldValue(b.fieldByIndex(1));
+    expect(isAttrSentinel(value[2]!)).toBe(true);
+    expect(attrSentinelByte(value[2]!)).toBe(0x28);
 
-    // 編集しても埋め込み属性セルが壊れていない
-    const cell = b.cellAt(fs + 3);
-    expect(cell?.type).toBe("attr");
-    expect(cell?.type === "attr" ? cell.byte : 0).toBe(0x28);
+    // 属性より前を 1 文字削って属性が position 1 へ動いた編集値を書き戻す
+    b.setFieldValue(b.fieldByIndex(1), "A" + attrSentinel(0x28) + "CD");
 
-    // 送信レコードの当該桁に**生の属性バイト 0x28**が乗る（空白 0x40 ではない）
+    // 属性セルは**動いた位置(fs+1)**にある（元の fs+2 ではない）
+    expect(b.cellAt(fs + 1)?.type).toBe("attr");
+    expect(b.cellAt(fs + 2)?.type).toBe("char");
+
+    // 送信レコードでも属性バイトが動いた桁(position 1)に出る
     const { record } = buildReadMdtResponse(b, codec, AID.ENTER, { row: 5, col: 25 });
     const d = [...parseRecord(record).data];
-    // [row,col,aid](3) + [SBA,r,c](3) → 欄データは index6 から。属性は欄内 position 3
     expect(d.slice(3, 6)).toEqual([ORDER.SBA, 5, 25]);
-    expect(d[6 + 0]).toBe(codec.encode("A").bytes[0]); // A（EBCDIC）
-    expect(d[6 + 3]).toBe(0x28); // 埋め込み属性バイトが再送される
-    expect(d[6 + 4]).toBe(codec.encode("D").bytes[0]); // 桁ずれせず D が続く
+    expect(d[6 + 0]).toBe(codec.encode("A").bytes[0]); // A
+    expect(d[6 + 1]).toBe(0x28); // 属性バイトが動いた桁(1)に
+    expect(d[6 + 2]).toBe(codec.encode("C").bytes[0]); // C が続く（桁ずれ・破壊なし）
   });
 });
 
