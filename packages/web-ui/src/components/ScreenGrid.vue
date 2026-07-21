@@ -297,12 +297,8 @@ const rows = computed<Segment[][]>(() => {
           width: start.width,
           slice: start.slice,
           offset: start.offset,
-          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）。
-          // **編集済みの欄はオーバーレイを外す**——オーバーレイはホスト由来の色で、編集中の値には
-          // 追従しない（元の値に戻って見える）。編集済みなら input の文字をそのまま見せ、
-          // 送信→ホスト再表示で色付きに戻す（属性バイトは送信時に保持済み）。
-          // `props.edits.has` を読むのは色替えのある欄だけなので、通常画面の v-memo 性能は不変。
-          ...(bands.length > 1 && !props.edits.has(start.field.index) ? { colorBands: bands } : {})
+          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）
+          ...(bands.length > 1 ? { colorBands: bands } : {})
         });
         c += start.width;
         continue;
@@ -483,6 +479,13 @@ function dbcsRestLayout(f: Field): ReturnType<typeof dbcsViewLayout> {
 //   - フォーカス時は onInputFocus / focusCursorField で caret を先頭へ置く（スペース埋め表示だと
 //     value 再設定で caret が末尾へ飛ぶため、明示的に補正する）。
 const composing = ref(false);
+/**
+ * blur 時に行を 1 度だけ再描画させるためのティック。編集した色付き欄のオーバーレイは
+ * props.edits の値を反映するが、行は v-memo で編集中は再描画されない（入力は writeSlices で直更新）。
+ * フォーカスが外れたら（onInputBlur で ++）オーバーレイを編集値の色付きに描き直す。
+ * **フォーカス中は増やさない**——編集中に再描画するとキャレット/IME が乱れるため。
+ */
+const renderTick = ref(0);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
@@ -1065,6 +1068,11 @@ function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
   el.value = sliceValue(f, Number(el.dataset["slice"] ?? 0));
+  // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
+  // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
+  // **欄内スライス間の一時 blur（syncingFocus）では ++ しない**——編集中に再描画すると
+  // ライブの DBCS 表示（writeSlices）が rest レイアウトで上書きされて崩れるため。
+  if (!syncingFocus) renderTick.value++;
 }
 
 /** DBCS 欄の選択範囲（列ビュー座標）を純論理値へ写す。SO/SI スペースは論理文字でないため含まれない。
@@ -1857,7 +1865,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </template>
-    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled]">
+    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled, renderTick]">
       <template v-for="(seg, i) in segs" :key="i">
         <!-- 入力欄。埋め込み属性で色替えのある欄は色付きオーバーレイを重ねる（overlaid）。
              通常欄は input-cell が display:contents で素通し＝従来と同じレイアウト。 -->

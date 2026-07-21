@@ -151,24 +151,36 @@ describe("入力欄の埋め込み属性（色替え）", () => {
     expect(value).toContain(" B");
   });
 
-  it("編集するとオーバーレイを外し、入力の内容を見せる（元の値に戻らない）", async () => {
+  it("編集して blur すると、編集値を色付きオーバーレイで表示する（元の値に戻らない）", async () => {
     const snap = snapWithEmbeddedAttr();
     snap.fields = [FIELD];
     const edits = reactive(new Map<number, string>());
-    const w = mount(ScreenGrid, { props: { snapshot: snap, edits, focused: false } });
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits, focused: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    await input.trigger("focus");
 
-    // 未編集: 色付きオーバーレイが出ている
+    // 未編集の色付きオーバーレイが出ている
     expect(w.find(".input-overlay").exists()).toBe(true);
-    expect(w.find("input.grid-input").classes()).toContain("has-overlay");
 
-    // 編集を in-place で入れる（実アプリの reactive な edits と同じ）
-    edits.set(1, "ZZZ EDITED");
+    // 編集（C→Z、桁は保つ）を入れて blur → blur で再描画トリガー（renderTick）
+    edits.set(1, "ABZ DEF");
+    await input.trigger("blur");
     await nextTick();
 
-    // オーバーレイが外れ、input は透明化されず、編集値を表示（元の "ABC DEF" に戻らない）
-    expect(w.find(".input-overlay").exists()).toBe(false);
-    expect(w.find("input.grid-input").classes()).not.toContain("has-overlay");
-    expect((w.find("input.grid-input").element as HTMLInputElement).value).toContain("ZZZ EDITED");
+    // **オーバーレイは残り、編集値を反映**（"ABZ" が出て元の "ABC" ではない＝色ごと消えない）
+    const overlay = w.find(".input-overlay");
+    expect(overlay.exists()).toBe(true);
+    const text = overlay.findAll("span").map((s) => s.element.textContent ?? "").join("");
+    expect(text).toContain("ABZ");
+    expect(text).not.toContain("ABC");
+    // 色バンドも維持（緑と赤）
+    const spans = overlay.findAll("span");
+    expect(spans.some((s) => s.classes().includes("c-green"))).toBe(true);
+    expect(spans.some((s) => s.classes().includes("c-red"))).toBe(true);
+    w.unmount();
   });
 
   it("色替えの無い通常欄はオーバーレイを付けない（従来描画）", () => {
