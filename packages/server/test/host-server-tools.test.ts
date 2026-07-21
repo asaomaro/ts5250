@@ -16,7 +16,7 @@ import type { AuthUser } from "../src/auth.js";
  * ツールの登録・引数スキーマ・資格情報の扱い・接続先未指定の扱い、そして既存 5250 ツールの回帰。
  */
 
-/** ホストサーバー経由で公開すると決めた 10 本（spec 5. 受け入れ基準） */
+/** ホストサーバー経由で公開すると決めたツール（spec 5. 受け入れ基準 ＋ データ待ち行列 6 本） */
 const HOST_TOOLS = [
   "host_sql",
   "host_command",
@@ -27,7 +27,13 @@ const HOST_TOOLS = [
   "host_write_file",
   "host_list_jobs",
   "host_list_objects",
-  "host_list_users"
+  "host_list_users",
+  "host_dtaq_send",
+  "host_dtaq_receive",
+  "host_dtaq_create",
+  "host_dtaq_clear",
+  "host_dtaq_delete",
+  "host_dtaq_attributes"
 ];
 
 /** 5250 経由の既存ツール。名前が変わっていないことを確かめる（後方互換） */
@@ -157,7 +163,13 @@ describe("資格情報を持たない接続設定", () => {
     host_write_file: { path: "/tmp/x", content: "hi" },
     host_list_jobs: {},
     host_list_objects: {},
-    host_list_users: {}
+    host_list_users: {},
+    host_dtaq_send: { library: "MYLIB", name: "Q", data: "x" },
+    host_dtaq_receive: { library: "MYLIB", name: "Q" },
+    host_dtaq_create: { library: "MYLIB", name: "Q", maxEntryLength: 100, type: "FIFO" },
+    host_dtaq_clear: { library: "MYLIB", name: "Q" },
+    host_dtaq_delete: { library: "MYLIB", name: "Q" },
+    host_dtaq_attributes: { library: "MYLIB", name: "Q" }
   };
 
   for (const name of HOST_TOOLS) {
@@ -168,6 +180,36 @@ describe("資格情報を持たない接続設定", () => {
       expect(r.structuredContent?.error?.message).toMatch(/ユーザーとパスワード/);
     });
   }
+});
+
+describe("host_dtaq_create の整合チェック（HTTP ルートと同一に弾く）", () => {
+  // 接続前に弾くので、資格情報の無い noauth システムでも CONFIG_ERROR の内容で判別できる
+  it("KEYED で keyLength 無しは keyLength を促す CONFIG_ERROR", async () => {
+    const r = await call("host_dtaq_create", {
+      system: "srv:noauth",
+      library: "MYLIB",
+      name: "Q",
+      maxEntryLength: 100,
+      type: "KEYED"
+    });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
+    expect(r.structuredContent?.error?.message).toMatch(/keyLength/);
+  });
+
+  it("非 KEYED で keyLength ありは CONFIG_ERROR", async () => {
+    const r = await call("host_dtaq_create", {
+      system: "srv:noauth",
+      library: "MYLIB",
+      name: "Q",
+      maxEntryLength: 100,
+      type: "FIFO",
+      keyLength: 4
+    });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
+    expect(r.structuredContent?.error?.message).toMatch(/keyLength/);
+  });
 });
 
 describe("hostAuthFrom", () => {

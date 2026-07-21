@@ -19,6 +19,7 @@
  */
 import { CP, HEADER_LEN, PARAM_PREFIX_LEN } from "./datastream.js";
 import type { CoreLogger } from "../log.js";
+import type { RequestOptions } from "../transport/host-connection.js";
 
 /** 値をこのバイト数で切る。フレームの構造（LL/CP の並び）は保たれるので切り分けには足りる */
 const DEFAULT_MAX_VALUE_BYTES = 64;
@@ -103,15 +104,17 @@ export function traceFrame(log: CoreLogger, direction: "send" | "recv", frame: U
  */
 export function traced<
   T extends {
-    request(frame: Uint8Array): Promise<Uint8Array>;
+    request(frame: Uint8Array, opts?: RequestOptions): Promise<Uint8Array>;
     requestStream(frame: Uint8Array, onFrame: (f: Uint8Array) => boolean): Promise<void>;
   }
 >(conn: T, log: CoreLogger): T {
   return {
     ...conn,
-    async request(frame: Uint8Array): Promise<Uint8Array> {
+    // **`opts`（read タイムアウト上書き）を必ず素通しすること**——落とすと
+    // データ待ち行列の無限待ちがトレース有無で挙動が変わる（沈黙のバグになる）
+    async request(frame: Uint8Array, opts?: RequestOptions): Promise<Uint8Array> {
       traceFrame(log, "send", frame);
-      const reply = await conn.request(frame);
+      const reply = await conn.request(frame, opts);
       traceFrame(log, "recv", reply);
       return reply;
     },

@@ -184,6 +184,18 @@ export {
 } from "./hostserver/ifs/ifs-connection.js";
 export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
 
+// ホストサーバー: データ待ち行列
+export { DtaqConnection, type DtaqConnectOptions } from "./hostserver/dtaq/dtaq-connection.js";
+export { decodeEbcdic as dtaqDecodeEbcdic } from "./hostserver/dtaq/dtaq-datastream.js";
+export type {
+  DtaqEntry,
+  DtaqAttributes,
+  DtaqType,
+  CreateOptions as DtaqCreateOptions,
+  ReadOptions as DtaqReadOptions,
+  SearchOrder as DtaqSearchOrder
+} from "./hostserver/dtaq/dtaq-types.js";
+
 // ホストサーバー: 各種一覧（QGY オープンリスト）
 export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";
 export { listUsers, type UserEntry, type UserListFilter } from "./hostserver/list/user-list.js";

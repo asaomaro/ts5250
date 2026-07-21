@@ -21,10 +21,26 @@ export interface HostConnectionOptions {
   timeoutMs?: number;
 }
 
+/** 1 往復ぶんの読み取りタイムアウトを上書きするオプション */
+export interface RequestOptions {
+  /**
+   * **この 1 往復だけ**の read タイムアウト（ミリ秒）。省略時は接続既定（`timeoutMs`）のまま。
+   * `0` を渡すとタイムアウトを無効化する（データ待ち行列の無限待ち `wait=-1` 用）。
+   * 応答受信・失敗のいずれでも既定値に戻すので、次の要求は従来どおり。
+   */
+  readTimeoutMs?: number;
+}
+
 /** 1 往復ずつフレームをやり取りする接続 */
 export interface HostConnection {
-  /** フレームを送り、対応する応答フレームを返す */
-  request(frame: Uint8Array): Promise<Uint8Array>;
+  /**
+   * フレームを送り、対応する応答フレームを返す。
+   *
+   * `opts.readTimeoutMs` を渡すと**その往復だけ**ソケットの read タイムアウトを変える
+   * （無限待ちや長い待機のため）。**省略時は接続を一切いじらない**ので、
+   * 既存の全呼び出し（signon/SQL/IFS/command）は従来どおり `timeoutMs` で動く。
+   */
+  request(frame: Uint8Array, opts?: RequestOptions): Promise<Uint8Array>;
   /**
    * フレームを送り、**連鎖して返る複数の応答**を順に `onFrame` へ渡す。
    *
@@ -195,10 +211,26 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
         return false;
       };
       resolve({
-        request(frame) {
+        request(frame, opts) {
           return new Promise<Uint8Array>((res, rej) => {
             if (rejectIfUnusable(rej)) return;
-            pending = { resolve: res, reject: rej };
+            // この往復だけ read タイムアウトを変える。応答/失敗のどちらでも既定へ戻す
+            // （`socket.setTimeout(0)` はタイマー無効化＝無限待ち）
+            const override = opts?.readTimeoutMs !== undefined;
+            const restore = (): void => {
+              if (override) socket.setTimeout(timeoutMs);
+            };
+            pending = {
+              resolve: (f) => {
+                restore();
+                res(f);
+              },
+              reject: (e) => {
+                restore();
+                rej(e);
+              }
+            };
+            if (override) socket.setTimeout(opts.readTimeoutMs as number);
             socket.write(Buffer.from(frame));
           });
         },

@@ -50,6 +50,11 @@ const FEATURES = [
     id: "ifs:files",
     name: "IFS",
     desc: "IFS のフォルダを辿ってファイルを見る / 取り出す / 置く。"
+  },
+  {
+    id: "dtaq:entries",
+    name: "データ待ち行列",
+    desc: "データ待ち行列にエントリを送受信・ピークする。作成・クリア・削除・属性も。"
   }
 ] as const;
 
