@@ -619,6 +619,18 @@ function writeSlices(f: Field, full: string): void {
   });
 }
 
+/**
+ * この欄の「最後に確定した値」。編集済みなら edits の値、未編集なら元の論理値。
+ * **カーソル移動だけで編集（MDT）扱いにしない**ための基準——値が変わっていなければ
+ * `emit("edit")` を出さず、edits に載せない（載ると送信され core が MDT を立て、
+ * ホスト側で行が変更扱いになり、埋め込み色属性まで失われる）。
+ */
+function baselineValue(f: Field): string {
+  const edited = props.edits.get(f.index);
+  if (edited !== undefined) return edited;
+  return (f.dbcsType ? logicalFromCells(f) : f.value).replace(/ +$/, "");
+}
+
 function sync(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
   if (isDbcsEdit(f)) {
@@ -643,7 +655,8 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   const c = Math.min(edit.cursor - slice.offset, target.value.length);
   target.setSelectionRange(c, c);
   insertMode.value = edit.insertMode;
-  emit("edit", f.index, trimmed);
+  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
+  if (trimmed !== baselineValue(f)) emit("edit", f.index, trimmed);
   // 欄内のキャレット移動・入力で論理カーソルも追従させる（AID 送信位置・オーバーレイ整合）。
   // 末尾（cursor===visLen）は欄の右端境界を指し、reconcileFocus がそれを「欄の末尾」として欄内に留める。
   const pos = posOfOffset(f, Math.min(edit.cursor, visLen(f)), props.snapshot.cols, props.snapshot.rows);
@@ -676,7 +689,8 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
   insertMode.value = edit.insertMode;
-  emit("edit", f.index, logical);
+  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
+  if (logical !== baselineValue(f)) emit("edit", f.index, logical);
   // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
   emit("cursor", s.row, s.col + (col - s.offset));
 }

@@ -344,6 +344,9 @@ export class ScreenBuffer {
       );
     }
     for (let i = 0; i < field.length; i++) {
+      // **埋め込み属性セル（欄途中の色属性）は保つ**——編集で消さない（バグ: 行を変更すると色が消える）。
+      // 呼び出し側の value は属性桁を空白で桁揃えしているので、その桁を上書きせず属性を残せば桁も合う。
+      if (this.cells[field.startAddr + i]?.type === "attr") continue;
       const ch = value[i];
       this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
     }

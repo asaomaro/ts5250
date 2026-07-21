@@ -93,6 +93,30 @@ async function main() {
       check("RED は c-red / GREEN は c-green", hasRed && hasGreen, `red=${hasRed} green=${hasGreen}`);
     }
 
+    // バグ1 検証: COMMENT 行にカーソルを入れて横移動 → Enter 送信 → 色が消えないこと。
+    // （カーソル移動で変更扱いにしていた頃は、送信で SEU が行を書き戻し属性バイトが空白化＝色が消えた）
+    if (colors.found) {
+      // 値に COMMENT を含む入力欄へフォーカスしてカーソルを置く
+      await page.evaluate(() => {
+        const inputs = [...document.querySelectorAll("input.grid-input")];
+        const el = inputs.find((i) => (i.value || "").includes("COMMENT"));
+        if (el) { el.focus(); el.setSelectionRange(2, 2); }
+      });
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(2000);
+      const after = await page.evaluate(() => {
+        const ov = [...document.querySelectorAll(".input-overlay")].find((o) => {
+          const t = o.textContent ?? ""; return t.includes("COMMENT") && t.includes("RED") && t.includes("GREEN");
+        });
+        if (!ov) return { ok: false };
+        const reds = [...ov.querySelectorAll("span")].filter((s) => getComputedStyle(s).color === "rgb(198, 40, 40)");
+        return { ok: reds.length > 0 };
+      });
+      check("カーソル移動+送信の後も色が残る（変更扱いにしない）", after.ok);
+    }
+
     // 後片付け: SEU を F3 で抜ける（保存しない）
     await page.keyboard.press("F3");
     await page.waitForTimeout(1500);

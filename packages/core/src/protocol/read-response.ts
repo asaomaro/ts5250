@@ -26,6 +26,17 @@ export function buildReadMdtResponse(
     const value = buf.fieldValue(f); // 末尾ブランクは落ちる
     const encoded = codec.encode(value);
     substituted += encoded.substituted;
+    // **埋め込み属性バイトを桁位置に再送する**（送信で色が消えないように）。
+    // fieldValue は属性桁を空白にするので、その桁のバイトを生の属性バイトへ差し替える。
+    // SBCS 欄のみ（1 文字 = 1 バイトで桁とバイトが 1:1）。DBCS 欄は SO/SI・2 バイトで
+    // 桁とバイトの対応が非自明なため対象外（属性付き DBCS ソースは稀）。
+    if (f.dbcsType === undefined) {
+      const bytes = encoded.bytes;
+      for (let i = 0; i < bytes.length && i < f.length; i++) {
+        const cell = buf.cellAt(f.startAddr + i);
+        if (cell?.type === "attr") bytes[i] = cell.byte;
+      }
+    }
     w.bytes(encoded.bytes);
   }
 
