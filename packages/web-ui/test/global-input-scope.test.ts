@@ -66,6 +66,9 @@ function gridInputBlocks(): { selector: string; body: string }[] {
 describe(".grid-input は属性クラスの見た目を奪わない", () => {
   it("color を宣言しない（属性色 .c-* に決めさせる）", () => {
     for (const { selector, body } of gridInputBlocks()) {
+      // **例外: `.grid-input.has-overlay`** は色替えのある欄。色は重ねた color オーバーレイが
+      // 表現し、input のテキストは透明にする（属性色を奪うのではなく委譲する）。ここだけ color を許す。
+      if (selector.includes(".has-overlay")) continue;
       const decls = body.split(";").map((d) => d.trim());
       const color = decls.find((d) => /^color\s*:/.test(d));
       expect(color, `${selector} が color を宣言している`).toBeUndefined();

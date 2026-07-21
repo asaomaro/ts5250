@@ -172,6 +172,13 @@ interface Segment {
   slice?: number;
   /** このスライスがフィールド先頭から何桁目に当たるか */
   offset?: number;
+  /**
+   * input スライス内に**埋め込み属性**（欄途中の色替え）がある場合の色バンド。
+   * `<input>` は 1 要素 1 色しか出せないので、これがある欄は色付き span の
+   * オーバーレイを重ねて桁ごとの色を表現する（SEU の色付きソース等）。
+   * バンドが 1 つ（＝色替え無し）の通常欄では未設定にして、描画を従来のままにする。
+   */
+  colorBands?: { start: number; len: number; cls: string }[];
 }
 
 /** セルの表示文字（SO/SI マーク表示・カタカナ再解釈・dbcs-tail 空白埋め） */
@@ -202,6 +209,54 @@ function cellClass(c: Cell): string {
   return cls.join(" ");
 }
 
+/** input スライスの各桁を色クラスでまとめ、色替えの境界（バンド）を返す。
+ *  埋め込み属性（欄途中の attr セル）があるとバンドが 2 つ以上になる。 */
+function inputColorBands(
+  row: readonly Cell[],
+  cStart: number,
+  width: number
+): { start: number; len: number; cls: string }[] {
+  const bands: { start: number; len: number; cls: string }[] = [];
+  for (let k = 0; k < width; k++) {
+    const cell = row[cStart + k];
+    if (!cell) continue;
+    const cls = cellClass(cell);
+    const last = bands[bands.length - 1];
+    if (last && last.cls === cls) last.len++;
+    else bands.push({ start: k, len: 1, cls });
+  }
+  return bands;
+}
+
+/**
+ * オーバーレイに出す色付きラン。テキストは入力欄と同じ表示値（＝編集にも追従）、
+ * 色はバンド境界（桁）で割る。**全角は 2 桁**を占めるので、桁で正しく切る。
+ */
+function overlayRuns(seg: Segment): { text: string; cls: string }[] {
+  const value = sliceValue(seg.field!, seg.slice ?? 0);
+  const bands = seg.colorBands ?? [];
+  const runs: { text: string; cls: string }[] = [];
+  let ji = 0; // value の JS index
+  let col = 0; // スライス先頭からの桁
+  for (const b of bands) {
+    const target = b.start + b.len;
+    let text = "";
+    while (col < target && ji < value.length) {
+      const ch = value[ji]!;
+      text += ch;
+      col += isFullWidth(ch) ? 2 : 1;
+      ji++;
+    }
+    // 値が尽きた残り桁は空白で埋める（属性桁・末尾パディング）
+    while (col < target) {
+      text += " ";
+      col++;
+    }
+    runs.push({ text, cls: b.cls });
+  }
+  return runs;
+}
+
 /** 各行を text/input セグメントに分解する（v-memo 用に行データの参照同一性を保つのは Vue の再評価に委ねる） */
 const rows = computed<Segment[][]>(() => {
   const snap = props.snapshot;
@@ -230,15 +285,20 @@ const rows = computed<Segment[][]>(() => {
       const addr = r * snap.cols + c;
       const start = sliceStart.get(addr);
       if (start) {
+        // スライス内の色バンド（埋め込み属性で欄途中の色が変わる場合に 2 つ以上になる）
+        const bands = inputColorBands(row, c, start.width);
         // スライス＝この行に出るぶんだけの input（行またぎ欄は行ごとに 1 つずつ）
         segs.push({
           kind: "input",
           text: "",
+          // 先頭色を単色フォールバック（オーバーレイ非対応時・IME 変換中に効く）
           cls: cellClass(row[c]!),
           field: start.field,
           width: start.width,
           slice: start.slice,
-          offset: start.offset
+          offset: start.offset,
+          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）
+          ...(bands.length > 1 ? { colorBands: bands } : {})
         });
         c += start.width;
         continue;
@@ -314,7 +374,10 @@ function logicalFromCells(f: Field): string {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
       if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
-      // so / si / dbcs-tail / attr は論理データに含めない
+      // **埋め込み属性は 1 桁の空白として残す**（桁ずれ防止・core の SBCS fieldValue と同じ扱い）。
+      // 落とすと以降が 1 桁ずつ左へずれる（お書きの「SO/SI と違い無視されてずれる」の原因）。
+      else if (cell.kind === "attr") s += " ";
+      // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
   return s.replace(/ +$/, ""); // 末尾パディング空白を除去
@@ -1778,29 +1841,42 @@ onBeforeUnmount(() => {
     </template>
     <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled]">
       <template v-for="(seg, i) in segs" :key="i">
-        <input
+        <!-- 入力欄。埋め込み属性で色替えのある欄は色付きオーバーレイを重ねる（overlaid）。
+             通常欄は input-cell が display:contents で素通し＝従来と同じレイアウト。 -->
+        <span
           v-if="seg.kind === 'input'"
-          class="grid-input"
-          :class="seg.cls"
-          :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-          :value="sliceValue(seg.field!, seg.slice ?? 0)"
-          :readonly="seg.field!.protected"
-          type="text"
-          :autocomplete="seg.field!.hidden ? 'off' : undefined"
-          :maxlength="seg.width ?? seg.field!.length"
-          @keydown="onInputKeydown(seg.field!, $event)"
-          @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
-          @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
-          :data-field-index="seg.field!.index"
-          :data-slice="seg.slice ?? 0"
-          @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
-          @blur="onInputBlur(seg.field!, $event as FocusEvent)"
-          @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
-          @cut="onInputCut(seg.field!, $event as ClipboardEvent)"
-          @click="onInputClick(seg.field!, $event as MouseEvent)"
-          @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
-          @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
-        />
+          class="input-cell"
+          :class="{ overlaid: !!seg.colorBands }"
+        >
+          <input
+            class="grid-input"
+            :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
+            :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
+            :value="sliceValue(seg.field!, seg.slice ?? 0)"
+            :readonly="seg.field!.protected"
+            type="text"
+            :autocomplete="seg.field!.hidden ? 'off' : undefined"
+            :maxlength="seg.width ?? seg.field!.length"
+            @keydown="onInputKeydown(seg.field!, $event)"
+            @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
+            @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
+            :data-field-index="seg.field!.index"
+            :data-slice="seg.slice ?? 0"
+            @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
+            @blur="onInputBlur(seg.field!, $event as FocusEvent)"
+            @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
+            @cut="onInputCut(seg.field!, $event as ClipboardEvent)"
+            @click="onInputClick(seg.field!, $event as MouseEvent)"
+            @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
+            @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
+          />
+          <span v-if="seg.colorBands" class="input-overlay" aria-hidden="true"><span
+            v-for="(run, ri) in overlayRuns(seg)"
+            :key="ri"
+            class="grid-span"
+            :class="run.cls"
+          >{{ run.text }}</span></span>
+        </span>
         <span v-else-if="seg.kind === 'dbcs'" class="grid-span grid-dbcs" :class="seg.cls">{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
           v-for="(p, j) in linkParts(seg.text)"
@@ -1907,6 +1983,34 @@ onBeforeUnmount(() => {
   line-height: inherit;
   vertical-align: baseline;
 }
+/*
+ * 埋め込み属性（欄途中の色替え）用のオーバーレイ。
+ * 通常欄は display:contents で素通し＝レイアウト影響ゼロ。色替えのある欄だけ
+ * inline-block+relative にして、input の上に色付き span を重ねる。
+ */
+.input-cell {
+  display: contents;
+}
+.input-cell.overlaid {
+  display: inline-block;
+  position: relative;
+  vertical-align: baseline;
+}
+.input-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 1.25em;
+  line-height: 1.25;
+  white-space: pre;
+  pointer-events: none; /* クリック・キャレットは下の input に通す */
+}
+/* オーバーレイを見せるため input のテキストは透明。キャレットは属性色（--cell）で残す */
+.grid-input.has-overlay {
+  color: transparent;
+  caret-color: var(--cell, currentColor);
+}
+
 .grid-input {
   font: inherit;
   height: 1.25em;
