@@ -1821,7 +1821,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .grid {
   position: relative;
-  font-family: var(--mono);
+  /* 桁位置は ch 単位・DBCS=2ch を仮定するので、和欧 1:2 を保つ日本語等幅を使う（--screen-mono） */
+  font-family: var(--screen-mono);
   line-height: 1.25;
   background: var(--crt);
   padding: 8px 10px;

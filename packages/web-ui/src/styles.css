@@ -24,6 +24,28 @@
   --t-glow: 0 0 1px;
 
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "BIZ UDGothic", "Noto Sans Mono CJK JP", monospace;
+  /*
+   * エミュレーター画面・スプール画面用の日本語対応等幅フォント。
+   *
+   * **半角:全角 = 1:2 の等幅**が必須——エミュレーターの桁位置は `ch` 単位で、DBCS を
+   * ちょうど 2ch と仮定して重ねる（ScreenGrid）。この比を崩すと桁がずれる。
+   * そのため「欧文だけの等幅を先頭に置いて日本語をフォールバックさせる」形は使わず、
+   * **和欧ともに 1:2 を保つフォント**を並べる（どれが当たっても比が崩れない）。
+   *
+   * 選定（`おすすめ 日本語 等幅` の調査より・いずれも 1:2 の正統派等幅）:
+   *  HackGen(白源) / UDEV Gothic / PlemolJP / Cica / Sarasa / Firge …導入者の多い現代的コーディングフォント
+   *  BIZ UDGothic(Win10+同梱) / Osaka-Mono(mac) / Noto Sans Mono CJK JP(Linux 等)…OS 同梱・入手容易
+   *  MS Gothic …**最低優先度**（ユーザー指定。Windows に必ずある古株）
+   *  monospace …総称。**必ずいずれかの等幅が適用される**ことの最終保証
+   */
+  --screen-mono:
+    "HackGen Console NF", "HackGen Console", "HackGen",
+    "UDEV Gothic", "PlemolJP Console NF", "PlemolJP Console", "PlemolJP",
+    "Cica", "Firge35", "Firge",
+    "Sarasa Term J", "Sarasa Mono J",
+    "BIZ UDGothic", "Osaka-Mono", "Noto Sans Mono CJK JP", "Migu 1M",
+    "MS Gothic", "ＭＳ ゴシック",
+    monospace;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
 
