@@ -35,12 +35,14 @@ import {
   userIdEbcdic37,
   userIdUnicode,
   passwordUnicode,
+  passwordEbcdic37,
   decodeJobName
 } from "./credentials.js";
 import {
   generateClientSeed,
   passwordSubstituteSha,
-  assertPasswordLevelSupported,
+  passwordSubstituteDes,
+  MIN_SHA_PASSWORD_LEVEL,
   SEED_LEN
 } from "./password.js";
 import {
@@ -139,7 +141,6 @@ export async function signon(opts: SignonOptions): Promise<SignonResult> {
       `signon server ${opts.host}:${port} version=${info.version} dsLevel=${info.datastreamLevel} ` +
         `passwordLevel=${info.passwordLevel} job=${info.jobName ?? "?"}`
     );
-    assertPasswordLevelSupported(info.passwordLevel);
     return await authenticate(conn, opts, info);
   } finally {
     conn.close();
@@ -215,12 +216,22 @@ async function authenticate(
   opts: SignonOptions,
   info: HostServerInfo & { serverSeed: Uint8Array; clientSeed: Uint8Array }
 ): Promise<SignonResult> {
-  const substitute = await passwordSubstituteSha(
-    userIdUnicode(opts.user),
-    passwordUnicode(opts.password),
-    info.clientSeed,
-    info.serverSeed
-  );
+  // レベル 0/1 は DES（8 バイト置換）、レベル >= 2 は SHA（20 バイト置換）。
+  // 要求テンプレートの暗号化種別は substitute の長さで自動的に切り替わる（下）
+  const substitute =
+    info.passwordLevel < MIN_SHA_PASSWORD_LEVEL
+      ? passwordSubstituteDes(
+          userIdEbcdic37(opts.user),
+          passwordEbcdic37(opts.password),
+          info.clientSeed,
+          info.serverSeed
+        )
+      : await passwordSubstituteSha(
+          userIdUnicode(opts.user),
+          passwordUnicode(opts.password),
+          info.clientSeed,
+          info.serverSeed
+        );
 
   const params = [
     uintParam(CP.clientCcsid, CLIENT_CCSID, 4),

@@ -54,6 +54,40 @@ export function userIdEbcdic37(user: string): Uint8Array {
   return out;
 }
 
+/** パスワードの最大長（レベル 0/1 の DES 経路。10 文字上限） */
+export const MAX_DES_PASSWORD_LEN = 10;
+
+/**
+ * パスワードを CCSID 37 の 10 バイトにする（0x40 詰め・**大文字化**）。
+ * パスワードレベル 0/1（DES 経路）のハッシュ入力に使う形式。
+ *
+ * **大文字化する**——レベル 0/1 のパスワードは大小文字を区別しない
+ * （レベル >= 2 の `passwordUnicode` が大文字化しないのと対照的）。
+ */
+export function passwordEbcdic37(password: string): Uint8Array {
+  const upper = password.toUpperCase();
+  if (upper.length === 0) {
+    throw new As400Error("CONFIG_ERROR", "password is empty");
+  }
+  if (upper.length > MAX_DES_PASSWORD_LEN) {
+    // レベル 0/1 は最大 10 文字。長いものは DES 経路では扱えない
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `password too long for password level 0/1: ${upper.length} chars (max ${MAX_DES_PASSWORD_LEN})`
+    );
+  }
+  const { bytes, substituted } = codec37.encode(upper);
+  if (substituted > 0) {
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `password contains characters not representable in CCSID ${CREDENTIAL_CCSID}`
+    );
+  }
+  const out = new Uint8Array(MAX_DES_PASSWORD_LEN).fill(EBCDIC_SPACE);
+  out.set(bytes.subarray(0, MAX_DES_PASSWORD_LEN));
+  return out;
+}
+
 /**
  * ユーザー ID を UTF-16BE 20 バイトにする（空白詰め・大文字化）。
  * パスワードレベル >= 2 のハッシュ入力に使う形式。

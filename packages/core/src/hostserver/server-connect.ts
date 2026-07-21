@@ -16,11 +16,18 @@ import { As400Error } from "../errors.js";
 import { childLog } from "../log.js";
 import type { HostConnection } from "../transport/host-connection.js";
 import { CP, HEADER_LEN, findParam, parseReply } from "./datastream.js";
-import { userIdEbcdic37, userIdUnicode, passwordUnicode, decodeJobName } from "./credentials.js";
+import {
+  userIdEbcdic37,
+  userIdUnicode,
+  passwordUnicode,
+  passwordEbcdic37,
+  decodeJobName
+} from "./credentials.js";
 import {
   generateClientSeed,
   passwordSubstituteSha,
-  assertPasswordLevelSupported,
+  passwordSubstituteDes,
+  MIN_SHA_PASSWORD_LEVEL,
   SEED_LEN
 } from "./password.js";
 
@@ -121,8 +128,6 @@ export async function startHostServer(
   serverId: number,
   opts: StartServerOptions
 ): Promise<StartServerResult> {
-  assertPasswordLevelSupported(opts.passwordLevel);
-
   // --- 0x7001 乱数シード交換 ---
   const clientSeed = generateClientSeed();
   const seedReply = await conn.request(buildExchangeSeedsRequest(serverId, clientSeed));
@@ -145,12 +150,21 @@ export async function startHostServer(
   const serverSeed = seedReply.subarray(seedAt, seedAt + SEED_LEN);
 
   // --- 0x7002 サーバー開始（認証） ---
-  const substitute = await passwordSubstituteSha(
-    userIdUnicode(opts.user),
-    passwordUnicode(opts.password),
-    clientSeed,
-    serverSeed
-  );
+  // レベル 0/1 は DES（8 バイト）、レベル >= 2 は SHA（20 バイト）。要求の暗号化種別は長さで切り替わる
+  const substitute =
+    opts.passwordLevel < MIN_SHA_PASSWORD_LEVEL
+      ? passwordSubstituteDes(
+          userIdEbcdic37(opts.user),
+          passwordEbcdic37(opts.password),
+          clientSeed,
+          serverSeed
+        )
+      : await passwordSubstituteSha(
+          userIdUnicode(opts.user),
+          passwordUnicode(opts.password),
+          clientSeed,
+          serverSeed
+        );
   const startReply = await conn.request(
     // レベル 2 以上でも、要求に載せるユーザー ID は CCSID 37（signon と同じ）
     buildStartServerRequest(serverId, userIdEbcdic37(opts.user), substitute)
