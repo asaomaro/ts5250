@@ -57,6 +57,8 @@ interface Args {
   ifsZipMaxFiles: number | undefined;
   ifsZipMaxDirectories: number | undefined;
   ifsReadMaxBytes: number | undefined;
+  /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
+  dtaqReceiveMaxWaitSec: number | undefined;
 }
 
 /**
@@ -94,7 +96,8 @@ function parseArgs(argv: string[]): Args {
     ifsZipMaxBytes: undefined,
     ifsZipMaxFiles: undefined,
     ifsZipMaxDirectories: undefined,
-    ifsReadMaxBytes: undefined
+    ifsReadMaxBytes: undefined,
+    dtaqReceiveMaxWaitSec: undefined
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -122,6 +125,8 @@ function parseArgs(argv: string[]): Args {
       args.ifsZipMaxDirectories = parseLimit(argv[++i], "--ifs-zip-max-dirs", 1_000_000);
     } else if (a === "--ifs-read-max-bytes") {
       args.ifsReadMaxBytes = parseLimit(argv[++i], "--ifs-read-max-bytes", ZIP_MAX_BYTES_LIMIT);
+    } else if (a === "--dtaq-max-wait") {
+      args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -166,7 +171,16 @@ function buildDeps(args: Args): ToolDeps {
     : new ServerConfigStore({ systems: [], sessions: [] }, crypto);
   const personal = PersonalConfigStore.fromFile(args.connectionsPath, crypto, migrateWarn);
   const resolver = new ConfigResolver(server, personal);
-  return { sessions, resolver, version: VERSION };
+  return {
+    sessions,
+    resolver,
+    version: VERSION,
+    // stdio モードは buildApp を通らないので、ここで MCP ツールへ受信待機上限を渡す
+    // （CLI 値は parseArgs の parseLimit で 1〜3600 に検証済み）
+    ...(args.dtaqReceiveMaxWaitSec !== undefined
+      ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }
+      : {})
+  };
 }
 
 /** 認証コンテキストを構築（--users 指定時のみ enabled）。 */
@@ -220,7 +234,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       ...(args.ifsZipMaxDirectories !== undefined
         ? { ifsZipMaxDirectories: args.ifsZipMaxDirectories }
         : {}),
-      ...(args.ifsReadMaxBytes !== undefined ? { ifsReadMaxBytes: args.ifsReadMaxBytes } : {})
+      ...(args.ifsReadMaxBytes !== undefined ? { ifsReadMaxBytes: args.ifsReadMaxBytes } : {}),
+      ...(args.dtaqReceiveMaxWaitSec !== undefined
+        ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }
+        : {})
     });
     // ws の WebSocketServer は WebSocketServerLike と互換（noServer:true 指定済み。optional 差のみ）
     const wss = new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike;

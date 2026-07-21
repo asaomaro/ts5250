@@ -30,6 +30,12 @@ export interface ToolDeps {
   version: string;
   /** 認証時の呼び出しユーザー（per-user 分離）。未認証/OFF は undefined */
   user?: AuthUser;
+  /**
+   * データ待ち行列の受信待機秒の上限（未指定なら既定 60 秒）。
+   * **HTTP ルートと同じ歯止めを MCP にも効かせるため**——ここが無いと `--dtaq-max-wait` で
+   * 締めた上限が /mcp 経路だけ効かず、MCP から既定 60 秒まで待ててしまう。
+   */
+  dtaqReceiveMaxWaitSec?: number;
 }
 
 const AID_KEYS = [

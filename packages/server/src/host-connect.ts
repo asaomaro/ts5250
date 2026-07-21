@@ -16,6 +16,7 @@ import {
   DbConnection,
   IfsConnection,
   NetPrintConnection,
+  DtaqConnection,
   As400Error,
   type ConnectOptions
 } from "@as400web/core";
@@ -78,4 +79,9 @@ export function openNetPrint(opts: ConnectOptions, ccsid?: number): Promise<NetP
 /** IFS ファイルサーバー接続 */
 export function openIfs(opts: ConnectOptions): Promise<IfsConnection> {
   return IfsConnection.connect(hostAuthFrom(opts));
+}
+
+/** データ待ち行列サーバー接続（送受信・作成・クリア・削除・属性） */
+export function openDtaq(opts: ConnectOptions): Promise<DtaqConnection> {
+  return DtaqConnection.connect(hostAuthFrom(opts));
 }

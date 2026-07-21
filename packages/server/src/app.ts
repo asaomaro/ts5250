@@ -19,6 +19,7 @@ import { registerConfigRoutes } from "./config-routes.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
+import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
 import { ResultSetStore } from "./result-set-store.js";
 import { DbPool } from "./db-pool.js";
@@ -43,6 +44,8 @@ export interface AppDeps extends ToolDeps {
   ifsReadMaxBytes?: number;
   /** zip で辿るディレクトリ数の上限（未指定なら ifs-collect の既定 5,000） */
   ifsZipMaxDirectories?: number;
+  /** データ待ち行列の受信待機秒の上限（未指定なら既定 60 秒）。無限待ちを HTTP から許さない歯止め */
+  dtaqReceiveMaxWaitSec?: number;
 }
 
 /**
@@ -161,6 +164,14 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
       : {})
   });
 
+  // データ待ち行列（送受信・作成・クリア・削除・属性）
+  const dtaqReceiveMaxWaitSec = limit(
+    "dtaqReceiveMaxWaitSec",
+    deps.dtaqReceiveMaxWaitSec ?? DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC,
+    3600
+  );
+  registerHostDtaqRoutes(app, { resolver: deps.resolver, receiveMaxWaitSec: dtaqReceiveMaxWaitSec });
+
   // CSV の取り込み（DDM）。**ここは IBM i に書き込むルート**——
   // 読み取り専用なのは /api/host/sql であって、ホスト API 全体ではない（host-upload.ts の説明）
   registerHostUploadRoutes(app, { resolver: deps.resolver });
@@ -190,7 +201,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // 認証時は per-request の認証ユーザーをツールに渡し、per-user 分離を効かせる
   app.all("/mcp", async (c) => {
     const user = c.get("user");
-    const server = buildMcpServer(user ? { ...deps, user } : deps);
+    // MCP にも HTTP と同じ受信待機上限（クランプ済み）を渡す。渡さないと --dtaq-max-wait が /mcp で効かない
+    const mcpDeps = { ...deps, dtaqReceiveMaxWaitSec, ...(user ? { user } : {}) };
+    const server = buildMcpServer(mcpDeps);
     const transport = new StreamableHTTPTransport();
     await server.connect(transport);
     return transport.handleRequest(c);
