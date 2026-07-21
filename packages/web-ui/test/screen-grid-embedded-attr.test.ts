@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { reactive, nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
@@ -148,6 +149,26 @@ describe("入力欄の埋め込み属性（色替え）", () => {
     expect(joined).toBe(value);
     // 属性桁が落ちていない証拠: B の前に属性ぶんの空白がある（"…B" が直前の全角に密着しない）
     expect(value).toContain(" B");
+  });
+
+  it("編集するとオーバーレイを外し、入力の内容を見せる（元の値に戻らない）", async () => {
+    const snap = snapWithEmbeddedAttr();
+    snap.fields = [FIELD];
+    const edits = reactive(new Map<number, string>());
+    const w = mount(ScreenGrid, { props: { snapshot: snap, edits, focused: false } });
+
+    // 未編集: 色付きオーバーレイが出ている
+    expect(w.find(".input-overlay").exists()).toBe(true);
+    expect(w.find("input.grid-input").classes()).toContain("has-overlay");
+
+    // 編集を in-place で入れる（実アプリの reactive な edits と同じ）
+    edits.set(1, "ZZZ EDITED");
+    await nextTick();
+
+    // オーバーレイが外れ、input は透明化されず、編集値を表示（元の "ABC DEF" に戻らない）
+    expect(w.find(".input-overlay").exists()).toBe(false);
+    expect(w.find("input.grid-input").classes()).not.toContain("has-overlay");
+    expect((w.find("input.grid-input").element as HTMLInputElement).value).toContain("ZZZ EDITED");
   });
 
   it("色替えの無い通常欄はオーバーレイを付けない（従来描画）", () => {

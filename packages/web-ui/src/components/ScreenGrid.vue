@@ -297,8 +297,12 @@ const rows = computed<Segment[][]>(() => {
           width: start.width,
           slice: start.slice,
           offset: start.offset,
-          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）
-          ...(bands.length > 1 ? { colorBands: bands } : {})
+          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）。
+          // **編集済みの欄はオーバーレイを外す**——オーバーレイはホスト由来の色で、編集中の値には
+          // 追従しない（元の値に戻って見える）。編集済みなら input の文字をそのまま見せ、
+          // 送信→ホスト再表示で色付きに戻す（属性バイトは送信時に保持済み）。
+          // `props.edits.has` を読むのは色替えのある欄だけなので、通常画面の v-memo 性能は不変。
+          ...(bands.length > 1 && !props.edits.has(start.field.index) ? { colorBands: bands } : {})
         });
         c += start.width;
         continue;
