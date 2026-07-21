@@ -52,6 +52,32 @@ interface Args {
   autoSecretKey: boolean;
   /** 自動生成した master key の保存先（既定 .env） */
   secretKeyFile: string;
+  /** IFS の zip 一括ダウンロードの上限（未指定なら app.ts の既定） */
+  ifsZipMaxBytes: number | undefined;
+  ifsZipMaxFiles: number | undefined;
+  ifsZipMaxDirectories: number | undefined;
+  ifsReadMaxBytes: number | undefined;
+  /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
+  dtaqReceiveMaxWaitSec: number | undefined;
+}
+
+/**
+ * zip64 を実装していないため、アーカイブ全体が 4GB を超えられない。
+ *
+ * ここで弾くのは**明らかに無理な指定を起動時に知らせる**ため。
+ * ヘッダとセントラルディレクトリの分だけアーカイブはデータより大きくなるので、
+ * 4GB ちょうどを許すと実行時に溢れる。余裕を見て 1 割弱を引いておく。
+ * **最終的な防波堤は `buildZip` 側にある**（そちらが本当の不変条件）。
+ */
+const ZIP_MAX_BYTES_LIMIT = 0xf000_0000;
+
+/** 上限として妥当な整数か検査して返す */
+function parseLimit(raw: string | undefined, name: string, max: number): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > max) {
+    throw new Error(`${name} は 1〜${max} の整数で指定してください（指定値: ${raw}）`);
+  }
+  return value;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -66,7 +92,12 @@ function parseArgs(argv: string[]): Args {
     hashPassword: undefined,
     cookieSecure: false,
     autoSecretKey: false,
-    secretKeyFile: ".env"
+    secretKeyFile: ".env",
+    ifsZipMaxBytes: undefined,
+    ifsZipMaxFiles: undefined,
+    ifsZipMaxDirectories: undefined,
+    ifsReadMaxBytes: undefined,
+    dtaqReceiveMaxWaitSec: undefined
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -84,6 +115,18 @@ function parseArgs(argv: string[]): Args {
     } else if (a === "--connections") {
       // ユーザー接続設定の保存ファイル（サーバー一元管理）。未指定は connections.json
       args.connectionsPath = argv[++i]!;
+    } else if (a === "--ifs-zip-max-bytes") {
+      // zip64 非対応なので 4GB 未満に制限する（起動時に弾く）
+      args.ifsZipMaxBytes = parseLimit(argv[++i], "--ifs-zip-max-bytes", ZIP_MAX_BYTES_LIMIT);
+    } else if (a === "--ifs-zip-max-files") {
+      // ZIP の終端レコードの件数は 16 ビット
+      args.ifsZipMaxFiles = parseLimit(argv[++i], "--ifs-zip-max-files", 0xffff);
+    } else if (a === "--ifs-zip-max-dirs") {
+      args.ifsZipMaxDirectories = parseLimit(argv[++i], "--ifs-zip-max-dirs", 1_000_000);
+    } else if (a === "--ifs-read-max-bytes") {
+      args.ifsReadMaxBytes = parseLimit(argv[++i], "--ifs-read-max-bytes", ZIP_MAX_BYTES_LIMIT);
+    } else if (a === "--dtaq-max-wait") {
+      args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -128,7 +171,16 @@ function buildDeps(args: Args): ToolDeps {
     : new ServerConfigStore({ systems: [], sessions: [] }, crypto);
   const personal = PersonalConfigStore.fromFile(args.connectionsPath, crypto, migrateWarn);
   const resolver = new ConfigResolver(server, personal);
-  return { sessions, resolver, version: VERSION };
+  return {
+    sessions,
+    resolver,
+    version: VERSION,
+    // stdio モードは buildApp を通らないので、ここで MCP ツールへ受信待機上限を渡す
+    // （CLI 値は parseArgs の parseLimit で 1〜3600 に検証済み）
+    ...(args.dtaqReceiveMaxWaitSec !== undefined
+      ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }
+      : {})
+  };
 }
 
 /** 認証コンテキストを構築（--users 指定時のみ enabled）。 */
@@ -176,7 +228,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
       audit: auditBuffer,
-      ...(auth ? { auth } : {})
+      ...(auth ? { auth } : {}),
+      ...(args.ifsZipMaxBytes !== undefined ? { ifsZipMaxBytes: args.ifsZipMaxBytes } : {}),
+      ...(args.ifsZipMaxFiles !== undefined ? { ifsZipMaxFiles: args.ifsZipMaxFiles } : {}),
+      ...(args.ifsZipMaxDirectories !== undefined
+        ? { ifsZipMaxDirectories: args.ifsZipMaxDirectories }
+        : {}),
+      ...(args.ifsReadMaxBytes !== undefined ? { ifsReadMaxBytes: args.ifsReadMaxBytes } : {}),
+      ...(args.dtaqReceiveMaxWaitSec !== undefined
+        ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }
+        : {})
     });
     // ws の WebSocketServer は WebSocketServerLike と互換（noServer:true 指定済み。optional 差のみ）
     const wss = new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike;

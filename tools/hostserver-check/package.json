@@ -11,7 +11,10 @@
     "test": "vitest run --passWithNoTests",
     "sql": "tsc -b && node dist/sql.js",
     "cmd": "tsc -b && node dist/cmd.js",
-    "ddm": "tsc -b && node dist/ddm.js"
+    "ddm": "tsc -b && node dist/ddm.js",
+    "ifs": "tsc -b && node dist/ifs.js",
+    "ifs-list": "tsc -b && node dist/ifs-list.js",
+    "dtaq": "tsc -b && node dist/dtaq.js"
   },
   "dependencies": {
     "@as400web/core": "*",

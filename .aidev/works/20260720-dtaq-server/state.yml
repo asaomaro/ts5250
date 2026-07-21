@@ -1,0 +1,10 @@
+schema: 3
+slug: dtaq-server
+current: deliver
+approved: [requirement, research, spec, design, plan, test, review, walkthrough, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+subtasks: [01-core-dtaq, 02-server-dtaq, 03-web-ui-dtaq]
+activeSubtask: done

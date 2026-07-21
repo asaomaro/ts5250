@@ -20,6 +20,7 @@ import {
   listUsers,
   query,
   As400Error,
+  dtaqDecodeEbcdic,
   type ConnectOptions,
   type ProgramParameter
 } from "@as400web/core";
@@ -28,7 +29,8 @@ import { withAudit } from "./audit.js";
 import { errorResult, type ToolDeps } from "./mcp-tools.js";
 import { uploadCsv, uploadRows } from "./host-upload.js";
 import { listSpools, readSpoolPages, DEFAULT_SPOOLS } from "./host-spools.js";
-import { openCommand, openDb, openIfs } from "./host-connect.js";
+import { openCommand, openDb, openIfs, openDtaq } from "./host-connect.js";
+import { toBytes, fromBytes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 
 const hostLog = childLog({ component: "host-server-tools" });
 
@@ -472,6 +474,214 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
             input.create !== undefined ? { create: input.create } : {}
           );
           return jsonResult({ bytes: data.length });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  // ---- データ待ち行列（DTAQ） ----
+
+  const dtaqEncoding = z.enum(["utf8", "base64", "ebcdic"]);
+  const dtaqName = z.string().min(1).max(10);
+
+  server.registerTool(
+    "host_dtaq_send",
+    {
+      description:
+        "データ待ち行列にエントリを積む。data は encoding で解釈（utf8=テキスト / base64=バイナリ / " +
+        "ebcdic=システムキュー）。キー付きキューには key を付ける。",
+      inputSchema: {
+        ...targetShape,
+        library: dtaqName,
+        name: dtaqName,
+        data: z.string(),
+        encoding: dtaqEncoding.optional(),
+        key: z.string().optional(),
+        keyEncoding: dtaqEncoding.optional()
+      },
+      outputSchema: { ok: z.boolean() }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_send" }, async () => {
+        const conn = await openDtaq(target(input));
+        try {
+          const entry = toBytes(input.data, input.encoding ?? "utf8");
+          const key = input.key !== undefined ? toBytes(input.key, input.keyEncoding ?? "utf8") : undefined;
+          await conn.write(input.name, input.library, entry, key);
+          return jsonResult({ ok: true });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_dtaq_receive",
+    {
+      description:
+        "データ待ち行列からエントリを取り出す／覗く（peek）。空なら entry=null（エラーではない）。" +
+        "wait は待機秒（0=待たない）。**無限待ちは MCP からは不可**（上限でクランプ）。" +
+        "キー付きは key と search（EQ/NE/LT/LE/GT/GE）。entry.data は encoding で返す。",
+      inputSchema: {
+        ...targetShape,
+        library: dtaqName,
+        name: dtaqName,
+        wait: z.number().int().min(0).optional(),
+        peek: z.boolean().optional(),
+        key: z.string().optional(),
+        keyEncoding: dtaqEncoding.optional(),
+        search: z.enum(["EQ", "NE", "LT", "LE", "GT", "GE"]).optional(),
+        encoding: dtaqEncoding.optional()
+      },
+      outputSchema: {
+        entry: z
+          .object({
+            data: z.string(),
+            encoding: z.string(),
+            bytes: z.number(),
+            senderInfo: z.string().optional()
+          })
+          .nullable()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_receive" }, async () => {
+        const conn = await openDtaq(target(input));
+        try {
+          const encoding = input.encoding ?? "utf8";
+          // HTTP ルートと同じ上限を効かせる（`--dtaq-max-wait` で締めた値を MCP でも尊重）
+          const wait = Math.min(input.wait ?? 0, deps.dtaqReceiveMaxWaitSec ?? DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC);
+          const key = input.key !== undefined ? toBytes(input.key, input.keyEncoding ?? "utf8") : undefined;
+          const entry = await conn.read({
+            name: input.name,
+            library: input.library,
+            wait,
+            ...(input.peek !== undefined ? { peek: input.peek } : {}),
+            ...(key !== undefined ? { key } : {}),
+            ...(input.search !== undefined ? { search: input.search } : {})
+          });
+          if (entry === undefined) return jsonResult({ entry: null });
+          return jsonResult({
+            entry: {
+              data: fromBytes(entry.data, encoding),
+              encoding,
+              bytes: entry.data.length,
+              ...(entry.senderInfo !== undefined ? { senderInfo: dtaqDecodeEbcdic(entry.senderInfo) } : {})
+            }
+          });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_dtaq_create",
+    {
+      description:
+        "データ待ち行列を作る。type は FIFO / LIFO / KEYED。KEYED なら keyLength が要る。",
+      inputSchema: {
+        ...targetShape,
+        library: dtaqName,
+        name: dtaqName,
+        maxEntryLength: z.number().int().min(1).max(64512),
+        type: z.enum(["FIFO", "LIFO", "KEYED"]),
+        keyLength: z.number().int().min(1).max(256).optional(),
+        saveSender: z.boolean().optional(),
+        description: z.string().max(50).optional()
+      },
+      outputSchema: { ok: z.boolean() }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_create" }, async () => {
+        // HTTP ルートと同じ整合チェック（両サーフェスで同一に弾く）
+        if (input.type === "KEYED" && input.keyLength === undefined) {
+          throw new As400Error("CONFIG_ERROR", "KEYED のキューには keyLength が必要です");
+        }
+        if (input.type !== "KEYED" && input.keyLength !== undefined) {
+          throw new As400Error("CONFIG_ERROR", "keyLength は KEYED のときだけ指定できます");
+        }
+        const conn = await openDtaq(target(input));
+        try {
+          await conn.create({
+            name: input.name,
+            library: input.library,
+            maxEntryLength: input.maxEntryLength,
+            type: input.type,
+            ...(input.keyLength !== undefined ? { keyLength: input.keyLength } : {}),
+            ...(input.saveSender !== undefined ? { saveSender: input.saveSender } : {}),
+            ...(input.description !== undefined ? { description: input.description } : {})
+          });
+          return jsonResult({ ok: true });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_dtaq_clear",
+    {
+      description: "データ待ち行列のエントリを全消去する（キー付きは key で特定キーだけも可）。",
+      inputSchema: {
+        ...targetShape,
+        library: dtaqName,
+        name: dtaqName,
+        key: z.string().optional(),
+        keyEncoding: dtaqEncoding.optional()
+      },
+      outputSchema: { ok: z.boolean() }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_clear" }, async () => {
+        const conn = await openDtaq(target(input));
+        try {
+          const key = input.key !== undefined ? toBytes(input.key, input.keyEncoding ?? "utf8") : undefined;
+          await conn.clear(input.name, input.library, key);
+          return jsonResult({ ok: true });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_dtaq_delete",
+    {
+      description: "データ待ち行列を削除する（DLTDTAQ 相当）。",
+      inputSchema: { ...targetShape, library: dtaqName, name: dtaqName },
+      outputSchema: { ok: z.boolean() }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_delete" }, async () => {
+        const conn = await openDtaq(target(input));
+        try {
+          await conn.deleteQueue(input.name, input.library);
+          return jsonResult({ ok: true });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_dtaq_attributes",
+    {
+      description: "データ待ち行列の属性を取得する（最大エントリ長・種別・キー長・送信者情報の保存）。",
+      inputSchema: { ...targetShape, library: dtaqName, name: dtaqName },
+      outputSchema: {
+        maxEntryLength: z.number(),
+        type: z.string(),
+        keyLength: z.number(),
+        saveSender: z.boolean()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_dtaq_attributes" }, async () => {
+        const conn = await openDtaq(target(input));
+        try {
+          return jsonResult({ ...(await conn.attributes(input.name, input.library)) });
         } finally {
           conn.close();
         }

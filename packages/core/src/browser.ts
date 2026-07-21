@@ -15,3 +15,12 @@ export {
   isValidIdentifier,
   IDENTIFIER_PATTERN
 } from "./identifier.js";
+/** IFS の一覧。UI がツリーと一覧を組み立てるため型を共有する（型だけ＝実行時依存は増えない） */
+export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
+/** データ待ち行列。UI が属性・送受信フォームを組み立てるため型を共有する */
+export type {
+  DtaqEntry,
+  DtaqAttributes,
+  DtaqType,
+  SearchOrder as DtaqSearchOrder
+} from "./hostserver/dtaq/dtaq-types.js";

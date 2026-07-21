@@ -5,6 +5,8 @@ import PrinterPane from "./PrinterPane.vue";
 import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
 import SqlPane from "./SqlPane.vue";
+import IfsPane from "./IfsPane.vue";
+import DtaqPane from "./DtaqPane.vue";
 import TransferPane from "./TransferPane.vue";
 import SpoolPane from "./SpoolPane.vue";
 import PaneTabs from "./PaneTabs.vue";
@@ -83,6 +85,8 @@ const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:")
 /** 一覧タブ（list:jobs/objects/users）か。管理タブと同じ「特殊なタブ ID」方式 */
 const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
 const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
+const activeIsIfs = computed(() => group.value.activeTab?.startsWith("ifs:") ?? false);
+const activeIsDtaq = computed(() => group.value.activeTab?.startsWith("dtaq:") ?? false);
 const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
 /** pull 型スプールタブ（spool:files）か。プリンターセッション（push 型）とは別系統 */
 const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:") ?? false);
@@ -116,6 +120,8 @@ const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:")
       <AdminPane v-if="group.activeTab && activeIsAdmin" :tab-id="group.activeTab" />
       <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
       <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
+      <IfsPane v-else-if="group.activeTab && activeIsIfs" :tab-id="group.activeTab" />
+      <DtaqPane v-else-if="group.activeTab && activeIsDtaq" :tab-id="group.activeTab" />
       <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
       <SpoolPane v-else-if="group.activeTab && activeIsSpool" :tab-id="group.activeTab" />
       <PrinterPane
