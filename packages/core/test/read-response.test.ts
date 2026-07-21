@@ -4,6 +4,7 @@ import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { codecForCcsid } from "../src/codec/codec.js";
 import { AID, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
+import { attrSentinel, isAttrSentinel, attrSentinelByte } from "../src/screen/attr-sentinel.js";
 
 const codec = codecForCcsid(37);
 
@@ -67,6 +68,34 @@ describe("buildReadMdtResponse", () => {
     expect(substituted).toBe(1);
     const d = [...parseRecord(record).data];
     expect(d[6]).toBe(0x3f); // SUB
+  });
+
+  it("埋め込み属性はセンチネルで返り、編集で動いた桁に書き戻り送信される", () => {
+    const b = new ScreenBuffer();
+    b.setAttr(b.addrOf(5, 24), 0x24); // 欄を定義する属性（欄の前）
+    b.addField(b.addrOf(5, 25), 10, FFW.ID_VALUE, 0x24);
+    const fs = b.addrOf(5, 25);
+    b.setAttr(fs + 2, 0x28); // 欄の position 2 に埋め込み属性（赤 0x28）
+
+    // fieldValue はその桁をセンチネルで返す（値の中で識別・移動できる）
+    const value = b.fieldValue(b.fieldByIndex(1));
+    expect(isAttrSentinel(value[2]!)).toBe(true);
+    expect(attrSentinelByte(value[2]!)).toBe(0x28);
+
+    // 属性より前を 1 文字削って属性が position 1 へ動いた編集値を書き戻す
+    b.setFieldValue(b.fieldByIndex(1), "A" + attrSentinel(0x28) + "CD");
+
+    // 属性セルは**動いた位置(fs+1)**にある（元の fs+2 ではない）
+    expect(b.cellAt(fs + 1)?.type).toBe("attr");
+    expect(b.cellAt(fs + 2)?.type).toBe("char");
+
+    // 送信レコードでも属性バイトが動いた桁(position 1)に出る
+    const { record } = buildReadMdtResponse(b, codec, AID.ENTER, { row: 5, col: 25 });
+    const d = [...parseRecord(record).data];
+    expect(d.slice(3, 6)).toEqual([ORDER.SBA, 5, 25]);
+    expect(d[6 + 0]).toBe(codec.encode("A").bytes[0]); // A
+    expect(d[6 + 1]).toBe(0x28); // 属性バイトが動いた桁(1)に
+    expect(d[6 + 2]).toBe(codec.encode("C").bytes[0]); // C が続く（桁ずれ・破壊なし）
   });
 });
 

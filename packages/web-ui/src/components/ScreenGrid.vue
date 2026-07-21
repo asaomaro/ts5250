@@ -34,6 +34,12 @@ import {
 } from "../composables/fieldSlices.js";
 // codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
 import { katakanaChar } from "@as400web/core/codec";
+import {
+  isAttrSentinel,
+  attrSentinelByte,
+  stripAttrSentinels,
+  decodeAttribute
+} from "@as400web/core/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
 const props = withDefaults(
@@ -172,6 +178,13 @@ interface Segment {
   slice?: number;
   /** このスライスがフィールド先頭から何桁目に当たるか */
   offset?: number;
+  /**
+   * input スライス内に**埋め込み属性**（欄途中の色替え）がある場合の色バンド。
+   * `<input>` は 1 要素 1 色しか出せないので、これがある欄は色付き span の
+   * オーバーレイを重ねて桁ごとの色を表現する（SEU の色付きソース等）。
+   * バンドが 1 つ（＝色替え無し）の通常欄では未設定にして、描画を従来のままにする。
+   */
+  colorBands?: { start: number; len: number; cls: string }[];
 }
 
 /** セルの表示文字（SO/SI マーク表示・カタカナ再解釈・dbcs-tail 空白埋め） */
@@ -202,6 +215,64 @@ function cellClass(c: Cell): string {
   return cls.join(" ");
 }
 
+/** input スライスの各桁を色クラスでまとめ、色替えの境界（バンド）を返す。
+ *  埋め込み属性（欄途中の attr セル）があるとバンドが 2 つ以上になる。 */
+function inputColorBands(
+  row: readonly Cell[],
+  cStart: number,
+  width: number
+): { start: number; len: number; cls: string }[] {
+  const bands: { start: number; len: number; cls: string }[] = [];
+  for (let k = 0; k < width; k++) {
+    const cell = row[cStart + k];
+    if (!cell) continue;
+    const cls = cellClass(cell);
+    const last = bands[bands.length - 1];
+    if (last && last.cls === cls) last.len++;
+    else bands.push({ start: k, len: 1, cls });
+  }
+  return bands;
+}
+
+/** 属性バイト（decodeAttribute の結果）を CSS class 文字列にする（cellClass と同じ体裁） */
+function attrByteClass(byte: number): string {
+  const a = decodeAttribute(byte);
+  const cls = [`c-${a.color}`];
+  if (a.underline) cls.push("a-underline");
+  if (a.reverse) cls.push("a-reverse");
+  if (a.blink) cls.push("a-blink");
+  return cls.join(" ");
+}
+
+/**
+ * オーバーレイに出す色付きラン。**値の中のセンチネル（＝埋め込み属性）で色を切り替える。**
+ * センチネルは編集で桁と一緒に動くので、色も追従する。センチネル位置は新色の空白 1 桁。
+ * 先頭色は欄の先頭セルの属性（seg.cls）から。
+ */
+function overlayRuns(seg: Segment): { text: string; cls: string }[] {
+  const value = sliceValue(seg.field!, seg.slice ?? 0).padEnd(seg.width ?? 0, " ");
+  const runs: { text: string; cls: string }[] = [];
+  let cls = seg.cls; // 欄先頭の色（seg.cls = 先頭セルの cellClass）
+  let text = "";
+  const push = (): void => {
+    if (text.length > 0) {
+      runs.push({ text, cls });
+      text = "";
+    }
+  };
+  for (const ch of value) {
+    if (isAttrSentinel(ch)) {
+      push();
+      cls = attrByteClass(attrSentinelByte(ch));
+      text += " "; // 属性桁は新色の空白 1 桁
+    } else {
+      text += ch;
+    }
+  }
+  push();
+  return runs;
+}
+
 /** 各行を text/input セグメントに分解する（v-memo 用に行データの参照同一性を保つのは Vue の再評価に委ねる） */
 const rows = computed<Segment[][]>(() => {
   const snap = props.snapshot;
@@ -230,15 +301,20 @@ const rows = computed<Segment[][]>(() => {
       const addr = r * snap.cols + c;
       const start = sliceStart.get(addr);
       if (start) {
+        // スライス内の色バンド（埋め込み属性で欄途中の色が変わる場合に 2 つ以上になる）
+        const bands = inputColorBands(row, c, start.width);
         // スライス＝この行に出るぶんだけの input（行またぎ欄は行ごとに 1 つずつ）
         segs.push({
           kind: "input",
           text: "",
+          // 先頭色を単色フォールバック（オーバーレイ非対応時・IME 変換中に効く）
           cls: cellClass(row[c]!),
           field: start.field,
           width: start.width,
           slice: start.slice,
-          offset: start.offset
+          offset: start.offset,
+          // 色替えがある欄だけオーバーレイ用のバンドを持たせる（通常欄は従来描画）
+          ...(bands.length > 1 ? { colorBands: bands } : {})
         });
         c += start.width;
         continue;
@@ -314,7 +390,10 @@ function logicalFromCells(f: Field): string {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
       if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
-      // so / si / dbcs-tail / attr は論理データに含めない
+      // **埋め込み属性は 1 桁の空白として残す**（桁ずれ防止・core の SBCS fieldValue と同じ扱い）。
+      // 落とすと以降が 1 桁ずつ左へずれる（お書きの「SO/SI と違い無視されてずれる」の原因）。
+      else if (cell.kind === "attr") s += " ";
+      // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
   return s.replace(/ +$/, ""); // 末尾パディング空白を除去
@@ -416,6 +495,13 @@ function dbcsRestLayout(f: Field): ReturnType<typeof dbcsViewLayout> {
 //   - フォーカス時は onInputFocus / focusCursorField で caret を先頭へ置く（スペース埋め表示だと
 //     value 再設定で caret が末尾へ飛ぶため、明示的に補正する）。
 const composing = ref(false);
+/**
+ * blur 時に行を 1 度だけ再描画させるためのティック。編集した色付き欄のオーバーレイは
+ * props.edits の値を反映するが、行は v-memo で編集中は再描画されない（入力は writeSlices で直更新）。
+ * フォーカスが外れたら（onInputBlur で ++）オーバーレイを編集値の色付きに描き直す。
+ * **フォーカス中は増やさない**——編集中に再描画するとキャレット/IME が乱れるため。
+ */
+const renderTick = ref(0);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
@@ -552,8 +638,21 @@ function writeSlices(f: Field, full: string): void {
   const masked = maskSafe(f, full);
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
-    if (el) el.value = masked.slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
+    // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
+    if (el) el.value = stripAttrSentinels(masked.slice(s.offset, s.offset + s.width)).padEnd(s.width, " ");
   });
+}
+
+/**
+ * この欄の「最後に確定した値」。編集済みなら edits の値、未編集なら元の論理値。
+ * **カーソル移動だけで編集（MDT）扱いにしない**ための基準——値が変わっていなければ
+ * `emit("edit")` を出さず、edits に載せない（載ると送信され core が MDT を立て、
+ * ホスト側で行が変更扱いになり、埋め込み色属性まで失われる）。
+ */
+function baselineValue(f: Field): string {
+  const edited = props.edits.get(f.index);
+  if (edited !== undefined) return edited;
+  return (f.dbcsType ? logicalFromCells(f) : f.value).replace(/ +$/, "");
 }
 
 function sync(inputEl: HTMLInputElement, f: Field): void {
@@ -580,7 +679,8 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   const c = Math.min(edit.cursor - slice.offset, target.value.length);
   target.setSelectionRange(c, c);
   insertMode.value = edit.insertMode;
-  emit("edit", f.index, trimmed);
+  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
+  if (trimmed !== baselineValue(f)) emit("edit", f.index, trimmed);
   // 欄内のキャレット移動・入力で論理カーソルも追従させる（AID 送信位置・オーバーレイ整合）。
   // 末尾（cursor===visLen）は欄の右端境界を指し、reconcileFocus がそれを「欄の末尾」として欄内に留める。
   const pos = posOfOffset(f, Math.min(edit.cursor, visLen(f)), props.snapshot.cols, props.snapshot.rows);
@@ -613,7 +713,8 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
   insertMode.value = edit.insertMode;
-  emit("edit", f.index, logical);
+  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
+  if (logical !== baselineValue(f)) emit("edit", f.index, logical);
   // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
   emit("cursor", s.row, s.col + (col - s.offset));
 }
@@ -983,7 +1084,12 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
-  el.value = sliceValue(f, Number(el.dataset["slice"] ?? 0));
+  el.value = stripAttrSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0)));
+  // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
+  // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
+  // **欄内スライス間の一時 blur（syncingFocus）では ++ しない**——編集中に再描画すると
+  // ライブの DBCS 表示（writeSlices）が rest レイアウトで上書きされて崩れるため。
+  if (!syncingFocus) renderTick.value++;
 }
 
 /** DBCS 欄の選択範囲（列ビュー座標）を純論理値へ写す。SO/SI スペースは論理文字でないため含まれない。
@@ -1776,31 +1882,44 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </template>
-    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled]">
+    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled, renderTick]">
       <template v-for="(seg, i) in segs" :key="i">
-        <input
+        <!-- 入力欄。埋め込み属性で色替えのある欄は色付きオーバーレイを重ねる（overlaid）。
+             通常欄は input-cell が display:contents で素通し＝従来と同じレイアウト。 -->
+        <span
           v-if="seg.kind === 'input'"
-          class="grid-input"
-          :class="seg.cls"
-          :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-          :value="sliceValue(seg.field!, seg.slice ?? 0)"
-          :readonly="seg.field!.protected"
-          type="text"
-          :autocomplete="seg.field!.hidden ? 'off' : undefined"
-          :maxlength="seg.width ?? seg.field!.length"
-          @keydown="onInputKeydown(seg.field!, $event)"
-          @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
-          @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
-          :data-field-index="seg.field!.index"
-          :data-slice="seg.slice ?? 0"
-          @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
-          @blur="onInputBlur(seg.field!, $event as FocusEvent)"
-          @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
-          @cut="onInputCut(seg.field!, $event as ClipboardEvent)"
-          @click="onInputClick(seg.field!, $event as MouseEvent)"
-          @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
-          @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
-        />
+          class="input-cell"
+          :class="{ overlaid: !!seg.colorBands }"
+        >
+          <input
+            class="grid-input"
+            :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
+            :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
+            :value="stripAttrSentinels(sliceValue(seg.field!, seg.slice ?? 0))"
+            :readonly="seg.field!.protected"
+            type="text"
+            :autocomplete="seg.field!.hidden ? 'off' : undefined"
+            :maxlength="seg.width ?? seg.field!.length"
+            @keydown="onInputKeydown(seg.field!, $event)"
+            @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
+            @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
+            :data-field-index="seg.field!.index"
+            :data-slice="seg.slice ?? 0"
+            @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
+            @blur="onInputBlur(seg.field!, $event as FocusEvent)"
+            @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
+            @cut="onInputCut(seg.field!, $event as ClipboardEvent)"
+            @click="onInputClick(seg.field!, $event as MouseEvent)"
+            @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
+            @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
+          />
+          <span v-if="seg.colorBands" class="input-overlay" aria-hidden="true"><span
+            v-for="(run, ri) in overlayRuns(seg)"
+            :key="ri"
+            class="grid-span"
+            :class="run.cls"
+          >{{ run.text }}</span></span>
+        </span>
         <span v-else-if="seg.kind === 'dbcs'" class="grid-span grid-dbcs" :class="seg.cls">{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
           v-for="(p, j) in linkParts(seg.text)"
@@ -1907,6 +2026,41 @@ onBeforeUnmount(() => {
   line-height: inherit;
   vertical-align: baseline;
 }
+/*
+ * 埋め込み属性（欄途中の色替え）用のオーバーレイ。
+ * 通常欄は display:contents で素通し＝レイアウト影響ゼロ。色替えのある欄だけ
+ * inline-block+relative にして、input の上に色付き span を重ねる。
+ */
+.input-cell {
+  display: contents;
+}
+.input-cell.overlaid {
+  display: inline-block;
+  position: relative;
+  vertical-align: baseline;
+}
+.input-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 1.25em;
+  line-height: 1.25;
+  white-space: pre;
+  pointer-events: none; /* クリック・キャレットは下の input に通す */
+}
+/*
+ * **フォーカス中（編集中）はオーバーレイを隠し、入力欄の文字をそのまま見せる**（単色）。
+ * オーバーレイは props 由来なので編集中の打鍵に追従しない。入力欄を透明にしたままだと
+ * 打った文字が見えなくなるため、透明化とオーバーレイ表示は**非フォーカス時だけ**にする。
+ * フォーカスが外れれば色付きオーバーレイに復元される。
+ */
+.input-cell.overlaid:focus-within .input-overlay {
+  display: none;
+}
+.grid-input.has-overlay:not(:focus) {
+  color: transparent;
+}
+
 .grid-input {
   font: inherit;
   height: 1.25em;

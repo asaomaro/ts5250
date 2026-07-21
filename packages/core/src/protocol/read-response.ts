@@ -3,6 +3,7 @@ import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
 import { ORDER, OPCODE } from "./constants.js";
 import { buildRecord, type RecordHeaderFlags } from "./gds.js";
+import { isAttrSentinel, attrSentinelByte } from "../screen/attr-sentinel.js";
 
 /**
  * Read MDT Fields 応答（クライアント → ホスト）を構築する。
@@ -23,10 +24,27 @@ export function buildReadMdtResponse(
   for (const f of buf.mdtFields()) {
     const { row, col } = buf.rowColOf(f.startAddr);
     w.u8(ORDER.SBA).u8(row).u8(col);
-    const value = buf.fieldValue(f); // 末尾ブランクは落ちる
-    const encoded = codec.encode(value);
-    substituted += encoded.substituted;
-    w.bytes(encoded.bytes);
+    const value = buf.fieldValue(f); // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル
+    // **センチネル位置には生の属性バイトを出す**（編集で動いた桁にそのまま書き戻す＝色/バイトが追従）。
+    // センチネル以外の連続部分だけを codec でエンコードし、センチネルは 1 バイトそのまま挟む。
+    let run = "";
+    const flushRun = (): void => {
+      if (run.length > 0) {
+        const enc = codec.encode(run);
+        substituted += enc.substituted;
+        w.bytes(enc.bytes);
+        run = "";
+      }
+    };
+    for (const ch of value) {
+      if (isAttrSentinel(ch)) {
+        flushRun();
+        w.u8(attrSentinelByte(ch));
+      } else {
+        run += ch;
+      }
+    }
+    flushRun();
   }
 
   return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array()), substituted };
