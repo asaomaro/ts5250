@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildFilter,
   parseSpoolRecord,
+  buildSortInfo,
   listSpooledFiles
 } from "../src/hostserver/spool/spool-list.js";
 import type { CommandConnection } from "../src/hostserver/command/command-connection.js";
@@ -195,5 +196,43 @@ describe("hhmmssToReadable", () => {
   });
   it("形式が違えば空文字", () => {
     expect(hhmmssToReadable("12")).toBe("");
+  });
+});
+
+/**
+ * **一覧は新しい順に並べる。**
+ *
+ * 指定しないとホストは古い順に返す。一覧は件数で打ち切られるので、実際に使う新しい
+ * スプールが窓の外に出て見えない（実機で確認: 先頭が 2021-11-01 で、1000 件目でもまだ
+ * 2021-12-07。当日のスプールは載らず、ユーザーデータを持つものが 1000 件中 2 件しか
+ * 現れなかった）。
+ *
+ * 書式は実機で総当たりして決めた。**1 キー 12 バイト・予約は 0x00**。
+ * 14 バイトだとキーが 1 つのときだけ通り、2 つ目からズレて GUI0119 で落ちる。
+ * 予約をブランク(0x40)で埋めても同じく GUI0119。
+ */
+describe("buildSortInfo", () => {
+  it("キー数のあとに 12 バイトずつ並ぶ", () => {
+    const b = buildSortInfo([{ start: 45, length: 7 }]);
+    expect(b).toHaveLength(4 + 12);
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    expect(v.getInt32(0), "キー数").toBe(1);
+    expect(v.getInt32(4), "開始位置（1 始まり）").toBe(45);
+    expect(v.getInt32(8), "長さ").toBe(7);
+    expect(v.getInt16(12), "型＝文字").toBe(4);
+    expect(b[14], "降順（EBCDIC の 2）").toBe(0xf2);
+    expect(b[15], "予約は 0x00（ブランクだと GUI0119）").toBe(0x00);
+  });
+
+  it("2 キーでも 12 バイト刻みで続く", () => {
+    const b = buildSortInfo([
+      { start: 45, length: 7 },
+      { start: 52, length: 6 }
+    ]);
+    expect(b).toHaveLength(4 + 24);
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    expect(v.getInt32(0)).toBe(2);
+    expect(v.getInt32(16), "2 キー目の開始位置").toBe(52);
+    expect(v.getInt32(20), "2 キー目の長さ").toBe(6);
   });
 });
