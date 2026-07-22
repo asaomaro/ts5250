@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
+import PaneSplitter from "./PaneSplitter.vue";
+import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
 
@@ -259,6 +261,23 @@ async function downloadPdf(): Promise<void> {
   }
 }
 
+/**
+ * 一覧と表示領域の分割。**SQL ペインと同じ操作**にする（境界を掴む・上下キー・最大化）。
+ * 帳票は横にも縦にも長いので、表示だけを広げたい場面が多い。
+ */
+const split = usePaneSplit({ initial: 220, min: 80, max: 700 });
+
+/**
+ * 一覧の高さ。**v-show と :style を同じ要素へ併用しない**——v-show が付けた
+ * `display: none` と :style の再適用がぶつかり、最大化を戻しても消えたままになる。
+ * 表示/非表示も高さもこの 1 つの束で決める。
+ */
+const listStyle = computed(() => {
+  if (!selected.value) return undefined;
+  if (split.maximized.value) return { display: "none" };
+  return { height: `${split.topHeight.value ?? 0}px`, flex: "none" };
+});
+
 onMounted(() => {
   if (systemsStore.systems.length === 0) void systemsStore.refresh();
 });
@@ -330,7 +349,7 @@ watch(
       先頭 {{ rows.length }} 件のみ表示しています（条件を絞り込んでください）
     </p>
 
-    <div class="scroll">
+    <div class="scroll" :style="listStyle">
       <table v-if="rows.length > 0">
         <thead>
           <tr>
@@ -375,6 +394,12 @@ watch(
       </p>
     </div>
 
+    <PaneSplitter
+      v-if="selected && !split.maximized.value"
+      :split="split"
+      label="一覧の高さ"
+    />
+
     <section v-if="selected" class="viewer">
       <div class="viewer-bar">
         <strong>{{ selected.fileName }}</strong>
@@ -382,6 +407,10 @@ watch(
           {{ selected.jobName }}/{{ selected.jobUser }}/{{ selected.jobNumber }} ・
           {{ selected.totalPages }} ページ
         </span>
+        <button class="max" :title="split.maximized.value ? '一覧を出す' : '表示を最大化する'"
+          @click="split.toggleMaximize()">
+          {{ split.maximized.value ? "◱ 元に戻す" : "⛶ 最大化" }}
+        </button>
         <button :disabled="contentLoading || pages.length === 0" @click="downloadPdf">PDF</button>
       </div>
       <p v-if="contentError" class="error">{{ contentError }}</p>
@@ -458,7 +487,8 @@ tbody tr.sel { background: var(--accent-soft); }
 /* 中身の表示。一覧と同じくここだけをスクロールさせる */
 .viewer { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); margin-top: 8px; }
 .viewer-bar { display: flex; gap: 10px; align-items: center; padding: 6px 0; flex: none; }
-.viewer-bar button { margin-left: auto; }
+/* 右寄せは最大化ボタンから。PDF はその隣に並べる */
+.viewer-bar .max { margin-left: auto; }
 .viewer pre {
   flex: 1 1 auto;
   min-height: 0;
