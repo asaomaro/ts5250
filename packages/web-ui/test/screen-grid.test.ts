@@ -1070,7 +1070,7 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)![1]).toBe("5");
   });
 
-  it("DBCS lead セルを 2ch 幅の全角スパンで描画し、桁を保つ", () => {
+  it("全角は同じ属性のランにまとめて描画し、桁を保つ", () => {
     const snap = makeSnap();
     const r0 = snap.cells[0]!;
     r0[0] = cell("A");
@@ -1080,11 +1080,13 @@ describe("ScreenGrid", () => {
     r0[4] = { ...cell(" "), kind: "si" };
     r0[5] = cell("B");
     const w = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: true } });
-    const dbcs = w.find(".grid-dbcs");
-    expect(dbcs.exists()).toBe(true);
-    expect(dbcs.text()).toBe("日");
-    // 行の可視テキストに日本語が含まれ、A と B の間に配置される
-    expect(w.findAll(".grid-row")[0]!.text()).toContain("日");
+    // 全角は専用スパンに切り出さず、同じ属性の前後と 1 つのランになる
+    // （桁は「全角＝半角×2」の等幅前提で合う。入力欄も同じ前提でプレーン文字列を出す）
+    expect(w.find(".grid-dbcs").exists()).toBe(false);
+    const row = w.findAll(".grid-row")[0]!;
+    expect(row.findAll("span.grid-span")).toHaveLength(1);
+    // dbcs-tail は文字を出さない（lead の 1 文字が 2 桁ぶんを占める）ので A 日 B が連続する
+    expect(row.text()).toContain("A 日 B");
   });
 
   it("katakanaView で SBCS の生バイトを半角カナ解釈で表示する", () => {
