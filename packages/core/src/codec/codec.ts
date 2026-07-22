@@ -158,9 +158,21 @@ export class DbcsCodec implements Codec {
   }
 }
 
+/**
+ * 日本語 SBCS。**混在 CCSID の SBCS 部そのもの**なので、表を作り直さず借りる。
+ * 290 = 930 の SBCS 部（カタカナ）、1027 = 939 の SBCS 部（英小文字）。
+ *
+ * DB2 の列は混在 CCSID ではなく SBCS の CCSID を持つことがあり（日本語機の CHAR 列など）、
+ * 未登録だと SQL やデータ取得が `unsupported CCSID 290` で落ちる。
+ */
+const ibm290: SbcsTable = { ...ibm930.sbcs, ccsid: 290, name: "ibm-290 (930 SBCS 部)" };
+const ibm1027: SbcsTable = { ...ibm939.sbcs, ccsid: 1027, name: "ibm-1027 (939 SBCS 部)" };
+
 const SBCS_TABLES: ReadonlyMap<number, SbcsTable> = new Map([
   [37, ibm37],
-  [273, ibm273]
+  [273, ibm273],
+  [290, ibm290],
+  [1027, ibm1027]
 ]);
 const DBCS_TABLES: ReadonlyMap<number, StatefulTable> = new Map([
   [930, ibm930],
