@@ -114,6 +114,39 @@ export function buildFilter(filter: SpoolListFilter = {}): Uint8Array {
   ]);
 }
 
+/**
+ * ソート情報（QGY 共通の書式）。
+ *
+ * **既定で新しい順に並べる。** 指定しないとホストは**古い順**に返し、しかも一覧は件数で
+ * 打ち切られるので、実際に使う新しいスプールが窓の外に出て見えない
+ * （実機で確認: 先頭が 2021-11-01、1000 件目でまだ 2021-12-07。当日のスプールは載らない）。
+ *
+ * 書式は「キー数(4) + [開始位置(4) 長さ(4) 型(2) 昇降(1) 予約(1)]×キー数」＝ **1 キー 12 バイト**。
+ * 開始位置は**レコード内の 1 始まり**。作成日（CYYMMDD）は文字の降順がそのまま新しい順になる。
+ *
+ * 大きさと予約の埋め方は実機で総当たりして決めた。14 バイトだとキーが 1 つのときだけ通り
+ * （余りを読まないため）、2 つ目からズレて GUI0119 で落ちる。予約をブランク(0x40)で
+ * 埋めても同じく GUI0119。**12 バイト・予約は 0x00** が正解。
+ */
+export function buildSortInfo(keys: readonly { start: number; length: number }[]): Uint8Array {
+  const parts: Uint8Array[] = [int32(keys.length)];
+  for (const k of keys) {
+    const b = new Uint8Array(12);
+    const v = new DataView(b.buffer);
+    v.setInt32(0, k.start);
+    v.setInt32(4, k.length);
+    v.setInt16(8, SORT_TYPE_CHAR);
+    b[10] = SORT_DESCENDING;
+    parts.push(b);
+  }
+  return concat(parts);
+}
+
+/** キー種別: 文字データ（NLS 照合はしない）。日付・時刻は CYYMMDD / HHMMSS の文字 */
+const SORT_TYPE_CHAR = 4;
+/** 降順。EBCDIC の '2' */
+const SORT_DESCENDING = 0xf2;
+
 /** レコード（OSPL0300）内の項目位置。原典 OpenListOfSpooledFilesFormatOSPL0300 に対応 */
 const F = {
   jobName: 0,
@@ -203,7 +236,14 @@ export async function listSpooledFiles(
     { type: "in", data: int32(receiveLength) },
     { type: "out", length: 80 },
     { type: "in", data: int32(max) },
-    { type: "in", data: int32(0) }, // ソートなし
+    // 作成日→時刻の降順（新しい順）。既定の「古い順」だと打ち切りで最近のものが見えない
+    {
+      type: "in",
+      data: buildSortInfo([
+        { start: F.dateOpened + 1, length: 7 },
+        { start: F.timeOpened + 1, length: 6 }
+      ])
+    },
     { type: "in", data: buildFilter(filter) },
     // 修飾ジョブ名は空白。*ALL は CPF3342 で弾かれる
     { type: "in", data: pad("", 26) },
