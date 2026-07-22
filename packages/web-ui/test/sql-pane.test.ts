@@ -471,3 +471,88 @@ describe("CSV ダウンロード", () => {
     w.unmount();
   });
 });
+
+/**
+ * **複数のクエリを左の一覧で切り替える。**
+ *
+ * 1 本の SQL を書き換えながら使うと、前の結果を見返したいときに打ち直すしかない。
+ * 切り替えると SQL 文だけでなく**結果も一緒に**戻ることを固定する（結果が消えるなら
+ * 切り替えられる意味が無い）。
+ */
+describe("クエリ一覧", () => {
+  const items = (w: ReturnType<typeof mount>) => w.findAll(".qlist .qitem");
+
+  it("最初は 1 本だけあり、閉じるボタンは出ない", () => {
+    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    expect(items(w)).toHaveLength(1);
+    expect(w.find(".qclose").exists(), "最後の 1 本は閉じられない").toBe(false);
+    w.unmount();
+  });
+
+  it("＋で増え、名前は SQL の 1 行目になる", async () => {
+    const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    await w.find(".qadd").trigger("click");
+    await flushPromises();
+    expect(items(w)).toHaveLength(2);
+    expect(items(w)[0]!.text()).toContain("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    // 追加した側は未入力なので通し番号
+    expect(items(w)[1]!.text()).toContain("クエリ 2");
+    w.unmount();
+  });
+
+  it("切り替えると SQL も結果も戻る", async () => {
+    const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    expect(w.text()).toContain("NAME"); // 1 本目の結果が出ている
+
+    await w.find(".qadd").trigger("click");
+    await flushPromises();
+    expect((w.find("textarea").element as HTMLTextAreaElement).value, "新しい方は空").toBe("");
+    expect(w.text()).not.toContain("NAME");
+
+    await items(w)[0]!.trigger("click");
+    await flushPromises();
+    expect((w.find("textarea").element as HTMLTextAreaElement).value).toBe(
+      "SELECT 1 FROM SYSIBM.SYSDUMMY1"
+    );
+    expect(w.text(), "結果も一緒に戻る").toContain("NAME");
+    w.unmount();
+  });
+
+  it("閉じると隣へ移る（最後の 1 本は残す）", async () => {
+    const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    await w.find(".qadd").trigger("click");
+    await flushPromises();
+    expect(w.findAll(".qclose")).toHaveLength(2);
+
+    await w.findAll(".qclose")[1]!.trigger("click");
+    await flushPromises();
+    expect(items(w)).toHaveLength(1);
+    expect((w.find("textarea").element as HTMLTextAreaElement).value).toBe(
+      "SELECT 1 FROM SYSIBM.SYSDUMMY1"
+    );
+    expect(w.find(".qclose").exists()).toBe(false);
+    w.unmount();
+  });
+});
+
+/** 結果エリアの最大化（スプールペインと同じ操作） */
+describe("結果の最大化", () => {
+  const maxButton = (w: ReturnType<typeof mount>) =>
+    w.findAll("header button").find((b) => b.text().includes("最大化") || b.text().includes("元に戻す"))!;
+
+  it("最大化すると SQL 欄と境界が消え、戻すと出る", async () => {
+    const w = await run();
+    expect(w.find(".splitter").exists()).toBe(true);
+
+    await maxButton(w).trigger("click");
+    await flushPromises();
+    expect(w.find(".splitter").exists(), "境界は隠れる").toBe(false);
+    expect(w.find("textarea").attributes("style"), "SQL 欄は隠れる").toContain("display: none");
+
+    await maxButton(w).trigger("click");
+    await flushPromises();
+    expect(w.find(".splitter").exists()).toBe(true);
+    expect(w.find("textarea").attributes("style")).not.toContain("display: none");
+    w.unmount();
+  });
+});

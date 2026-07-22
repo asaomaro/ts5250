@@ -181,7 +181,9 @@ describe("中身の表示", () => {
    * テストは「何も起きなかった」まま素通りしてしまう（静かな空振り）。
    */
   async function clickPdf(w: Awaited<ReturnType<typeof openRow>>): Promise<void> {
-    const btn = w.find(".viewer-bar button");
+    // 最大化ボタンも同じ帯にあるので、文言で PDF を選ぶ
+    const btn = w.findAll(".viewer-bar button").find((b) => b.text() === "PDF")!;
+    expect(btn, "PDF ボタンがある").toBeTruthy();
     expect(btn.attributes("disabled")).toBeUndefined();
     await btn.trigger("click");
     await flushPromises();
@@ -368,6 +370,72 @@ describe("接続先の切り替え", () => {
     await flushPromises();
 
     expect(w.text()).not.toContain("QPRTLIBL");
+    w.unmount();
+  });
+});
+
+/**
+ * **一覧と表示領域の分割・最大化。**
+ *
+ * SQL ペインと同じ操作にするための機能（境界を掴む・上下キー・最大化）。
+ * 帳票は縦にも横にも長いので、表示だけを広げたい場面が多い。
+ */
+describe("一覧と表示の分割", () => {
+  beforeEach(() => selectSystem());
+
+  async function openRow() {
+    mockFetch({
+      "/api/host/spools": { items: [ROW], count: 1, truncated: false },
+      "/api/host/spool/content": { pages: [{ rows: 1, cols: 10, lines: ["本文"] }] }
+    });
+    const w = await mountPane();
+    await w.find("header button").trigger("click");
+    await flushPromises();
+    await w.find("tbody tr").trigger("click");
+    await flushPromises();
+    return w;
+  }
+
+  const maxButton = (w: Awaited<ReturnType<typeof openRow>>) =>
+    w.findAll(".viewer-bar button").find((b) => b.text().includes("最大化") || b.text().includes("元に戻す"))!;
+
+  it("行を選ぶまでは境界を出さない（一覧だけのときは分ける物が無い）", async () => {
+    mockFetch({ "/api/host/spools": { items: [ROW], count: 1, truncated: false } });
+    const w = await mountPane();
+    await w.find("header button").trigger("click");
+    await flushPromises();
+    expect(w.find(".splitter").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("行を選ぶと境界が出て、一覧の高さが固定される", async () => {
+    const w = await openRow();
+    expect(w.find(".splitter").exists()).toBe(true);
+    expect(w.find(".scroll").attributes("style")).toContain("px");
+    w.unmount();
+  });
+
+  it("上下キーで一覧の高さが変わる", async () => {
+    const w = await openRow();
+    const before = w.find(".scroll").attributes("style");
+    await w.find(".splitter").trigger("keydown", { key: "ArrowUp" });
+    expect(w.find(".scroll").attributes("style")).not.toBe(before);
+    w.unmount();
+  });
+
+  it("最大化すると一覧と境界が消え、戻すと出る", async () => {
+    const w = await openRow();
+    await maxButton(w).trigger("click");
+    await flushPromises();
+    expect(w.find(".splitter").exists(), "境界は隠れる").toBe(false);
+    expect(w.find(".scroll").attributes("style"), "一覧は隠れる").toContain("display: none");
+
+    await maxButton(w).trigger("click");
+    await flushPromises();
+    expect(w.find(".splitter").exists()).toBe(true);
+    const style = w.find(".scroll").attributes("style") ?? "";
+    expect(style, "一覧が戻る").not.toContain("display: none");
+    expect(style, "高さも戻る").toContain("220px");
     w.unmount();
   });
 });

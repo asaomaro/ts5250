@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
+import PaneSplitter from "./PaneSplitter.vue";
+import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
@@ -286,50 +288,113 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 /**
- * SQL 欄と結果欄の境界をドラッグして高さを変える。
- *
- * 以前は textarea の `resize: vertical`（右下のつまみ）だけだったが、
- * **どこを掴めば動くのか分からない**という指摘を受けた。
- * 境界の罫線そのものを掴めるようにして、つまみは消す。
+ * SQL 欄と結果欄の境界。**スプールペインと同じ操作**にするため共通化してある
+ * （境界を掴む・上下キー・結果の最大化）。
  */
-const editorHeight = ref(110);
-const dragging = ref(false);
-const MIN_EDITOR = 60;
-const MAX_EDITOR = 600;
-let dragStartY = 0;
-let dragStartHeight = 0;
+const split = usePaneSplit({ initial: 110, min: 60, max: 600 });
 
-function clampHeight(h: number): number {
-  return Math.min(MAX_EDITOR, Math.max(MIN_EDITOR, h));
+/**
+ * **複数のクエリを持ち、左の一覧で切り替える。**
+ *
+ * 1 本の SQL を書き換えながら使うと、前の結果を見返したいときに打ち直すしかない。
+ * 上の各 ref は「いま見えているクエリ」の状態そのものなので、切り替えのたびに
+ * 現在値を控えて、行き先の控えを流し込む（各所のロジックは触らずに済む）。
+ *
+ * 結果セット（resultSetId）はサーバー側に残るため、切り替えても読み足しは続けられる。
+ */
+interface QuerySnapshot {
+  id: number;
+  sql: string;
+  columns: Column[];
+  rows: Row[];
+  hasMore: boolean;
+  resultSetId: string;
+  expired: boolean;
+  executed: boolean;
+  error: string;
+  sqlDetail: string;
 }
 
-function onSplitterDown(e: PointerEvent): void {
-  dragging.value = true;
-  dragStartY = e.clientY;
-  dragStartHeight = editorHeight.value;
-  // capture しないと、速く動かしたときにポインタが罫線から外れて追従が切れる
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  e.preventDefault();
+let querySeq = 0;
+function blankQuery(): QuerySnapshot {
+  return {
+    id: ++querySeq,
+    sql: "",
+    columns: [],
+    rows: [],
+    hasMore: false,
+    resultSetId: "",
+    expired: false,
+    executed: false,
+    error: "",
+    sqlDetail: ""
+  };
 }
 
-function onSplitterMove(e: PointerEvent): void {
-  if (!dragging.value) return;
-  editorHeight.value = clampHeight(dragStartHeight + (e.clientY - dragStartY));
+const queries = ref<QuerySnapshot[]>([blankQuery()]);
+const activeId = ref(queries.value[0]!.id);
+
+/** 一覧に出す名前。SQL の 1 行目を詰めたもの（未入力なら通し番号） */
+function queryTitle(q: QuerySnapshot, index: number): string {
+  const head = q.sql.trim().split("\n")[0]?.trim() ?? "";
+  return head.length > 0 ? head.slice(0, 40) : `クエリ ${index + 1}`;
 }
 
-function onSplitterUp(e: PointerEvent): void {
-  if (!dragging.value) return;
-  dragging.value = false;
-  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+/** いま見えている状態を控えへ書き戻す */
+function captureActive(): void {
+  const q = queries.value.find((x) => x.id === activeId.value);
+  if (!q) return;
+  q.sql = sql.value;
+  q.columns = columns.value;
+  q.rows = rows.value;
+  q.hasMore = hasMore.value;
+  q.resultSetId = resultSetId.value;
+  q.expired = expired.value;
+  q.executed = executed.value;
+  q.error = error.value;
+  q.sqlDetail = sqlDetail.value;
 }
 
-/** キーボードでも動かせるように（罫線は separator として focus できる） */
-function onSplitterKeydown(e: KeyboardEvent): void {
-  const step = e.shiftKey ? 40 : 10;
-  if (e.key === "ArrowUp") editorHeight.value = clampHeight(editorHeight.value - step);
-  else if (e.key === "ArrowDown") editorHeight.value = clampHeight(editorHeight.value + step);
-  else return;
-  e.preventDefault();
+function restore(q: QuerySnapshot): void {
+  sql.value = q.sql;
+  columns.value = q.columns;
+  rows.value = q.rows;
+  hasMore.value = q.hasMore;
+  resultSetId.value = q.resultSetId;
+  expired.value = q.expired;
+  executed.value = q.executed;
+  error.value = q.error;
+  sqlDetail.value = q.sqlDetail;
+}
+
+function selectQuery(id: number): void {
+  if (id === activeId.value) return;
+  captureActive();
+  const q = queries.value.find((x) => x.id === id);
+  if (!q) return;
+  activeId.value = id;
+  restore(q);
+}
+
+function addQuery(): void {
+  captureActive();
+  const q = blankQuery();
+  queries.value.push(q);
+  activeId.value = q.id;
+  restore(q);
+}
+
+/** 閉じる。**最後の 1 本は閉じない**（空のペインになって行き場が無くなる） */
+function closeQuery(id: number): void {
+  if (queries.value.length <= 1) return;
+  const i = queries.value.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  queries.value.splice(i, 1);
+  if (id === activeId.value) {
+    const next = queries.value[Math.min(i, queries.value.length - 1)]!;
+    activeId.value = next.id;
+    restore(next);
+  }
 }
 
 /**
@@ -389,7 +454,33 @@ function download(): void {
 </script>
 
 <template>
-  <div class="sql-pane admin">
+  <div class="sql-layout admin">
+    <!-- 左の一覧。複数のクエリを持ち、結果ごと切り替える -->
+    <aside class="qlist">
+      <div class="qlist-bar">
+        <span class="qlist-title">クエリ</span>
+        <button class="qadd" title="クエリを追加する" @click="addQuery">＋</button>
+      </div>
+      <ul>
+        <li v-for="(q, i) in queries" :key="q.id" :class="{ sel: q.id === activeId }">
+          <button class="qitem" :title="q.sql || '（未入力）'" @click="selectQuery(q.id)">
+            <span class="qname">{{ queryTitle(q, i) }}</span>
+            <span v-if="q.executed && !q.error" class="qcount">{{ q.rows.length }}</span>
+            <span v-else-if="q.error" class="qerr" title="失敗">!</span>
+          </button>
+          <button
+            v-if="queries.length > 1"
+            class="qclose"
+            title="このクエリを閉じる"
+            @click="closeQuery(q.id)"
+          >
+            ×
+          </button>
+        </li>
+      </ul>
+    </aside>
+
+  <div class="sql-pane">
     <header>
       <h2>SQL</h2>
       <label title="1 回の読み足しで取得する件数です（上限ではありません）">
@@ -406,36 +497,31 @@ function download(): void {
       <button v-if="rows.length" class="link" @click="download">
         CSV をダウンロード（表示中の {{ rows.length }} 件）
       </button>
+      <button
+        class="max"
+        :title="split.maximized.value ? 'SQL 欄を出す' : '結果を最大化する'"
+        @click="split.toggleMaximize()"
+      >
+        {{ split.maximized.value ? "◱ 元に戻す" : "⛶ 最大化" }}
+      </button>
     </header>
 
     <textarea
+      v-show="!split.maximized.value"
       v-model="sql"
       class="editor"
-      :style="{ height: `${editorHeight}px` }"
+      :style="{ height: `${split.topHeight.value}px` }"
       spellcheck="false"
       placeholder="SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 100 ROWS ONLY"
       @keydown="onKeydown"
     ></textarea>
-    <p class="hint">
+    <p v-show="!split.maximized.value" class="hint">
       SELECT のみ実行できます（Ctrl+Enter で実行）。<strong>下までスクロールするか
       End / PageDown で続きを読み足します。</strong>「1 度に取得」はその 1 回ぶんの件数です。
     </p>
 
     <!-- SQL 欄と結果欄の境界。この罫線を掴んで高さを変える -->
-    <div
-      class="splitter"
-      :class="{ dragging }"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="SQL 欄と結果欄の境界（ドラッグまたは上下キーで高さを変えられます）"
-      tabindex="0"
-      title="ドラッグすると SQL 欄の高さを変えられます"
-      @pointerdown="onSplitterDown"
-      @pointermove="onSplitterMove"
-      @pointerup="onSplitterUp"
-      @pointercancel="onSplitterUp"
-      @keydown="onSplitterKeydown"
-    ></div>
+    <PaneSplitter v-if="!split.maximized.value" :split="split" label="SQL 欄の高さ" />
 
     <LoadingBar v-if="slowLoading" label="実行しています…" />
 
@@ -537,13 +623,60 @@ function download(): void {
       </button>
     </footer>
   </div>
+  </div>
 </template>
 
 <style scoped>
+/* 左の一覧＋本体の 2 列。一覧は固定幅、本体が伸びる */
+.sql-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.qlist {
+  flex: none;
+  width: 170px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 0 12px 12px;
+  box-sizing: border-box;
+}
+.qlist-bar { display: flex; align-items: center; gap: 6px; padding-right: 8px; margin-bottom: 6px; }
+.qlist-title { font-size: 12px; color: var(--muted); font-weight: 600; }
+.qadd { margin-left: auto; }
+.qlist ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.qlist li { display: flex; align-items: center; gap: 2px; padding-right: 6px; }
+/* 名前は 1 行に収める。長い SQL でも一覧の幅を押し広げない */
+.qitem {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.qitem:hover { background: var(--accent-soft); }
+.qlist li.sel .qitem { background: var(--accent-soft); border-color: var(--accent); }
+.qname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.qcount { flex: none; font-size: 11px; color: var(--muted); }
+.qerr { flex: none; font-size: 11px; color: #c62828; font-weight: 700; }
+.qclose { flex: none; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0 2px; }
+.qclose:hover { color: #c62828; }
+
 /* ペインは縦に積み、**表領域だけがスクロール**する。
    以前は .sql-pane 自体を overflow:auto にしていたため、表の高さを固定すると
    二重スクロールになり、ヘッダーが画面外へ押し出された */
-.sql-pane { padding: 12px; height: 100%; display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; }
+.sql-pane { flex: 1 1 auto; min-width: 0; padding: 12px; height: 100%; display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; }
 header { flex: none; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 h2 { margin: 0; font-size: 13px; font-family: var(--mono); font-weight: 700; }
 label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
@@ -561,27 +694,8 @@ label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; co
   resize: none;
 }
 /* SQL 欄と結果欄の境界。掴めることが見て分かるように、罫線に握り手を描く */
-.splitter {
-  flex: none;
-  height: 9px;
-  margin: 2px 0 6px;
-  cursor: row-resize;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  touch-action: none;
-}
-.splitter::after {
-  content: "";
-  width: 44px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--line);
-}
-.splitter:hover::after,
-.splitter.dragging::after { background: var(--accent); }
-.splitter:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* ヘッダーの右端に寄せる。結果を広く見たいときのための切替 */
+header .max { margin-left: auto; }
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
 .hint code { font-family: var(--mono); }
 /* **列幅は中身に合わせる**。`width: 100%` だと 4 列の表でも画面いっぱいに
