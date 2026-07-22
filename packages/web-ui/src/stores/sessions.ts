@@ -35,6 +35,12 @@ export interface SpoolOutputStatusView {
 export interface SessionState {
   sessionId: string;
   label: string;
+  /**
+   * 元になった接続設定（セッション設定）の ref。
+   * ランチャーが「この設定は既に開いている」を判定し、新規接続ではなくそのタブへ戻すために持つ。
+   * 直接指定（設定を経ない接続）では undefined。
+   */
+  configRef?: string;
   /** セッション種別（既定 display）。printer は帳票ビュー（PrinterPane）で表示する */
   kind?: "display" | "printer";
   /** 接続設定のメタ情報（セッション情報パネルで表示） */
@@ -85,6 +91,11 @@ export const sessionsStore = reactive({
 
   get(id: string): SessionState | undefined {
     return this.byId.get(id);
+  },
+
+  /** 開いているセッション一覧（登録順） */
+  get all(): SessionState[] {
+    return this.order.map((id) => this.byId.get(id)).filter((s): s is SessionState => s !== undefined);
   },
 
   remove(id: string): void {

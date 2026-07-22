@@ -180,7 +180,14 @@ export class Session5250 extends Emitter<SessionEvents> {
       session.telnet.onClose((reason) => {
         clearTimeout(timer);
         session.handleClose(reason);
-        reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
+        // **装置名を指定していてネゴシエーション中に切られたら、まず装置名の重複を疑う。**
+        // IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる。生の
+        // 「socket closed」だけだと利用者は原因に辿り着けない（同じ設定で 2 本目を開いた等）。
+        const hint =
+          opts.deviceName !== undefined
+            ? `（装置名 ${opts.deviceName} が既に使用中の可能性があります）`
+            : "";
+        reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
       session.telnet.onError((err) => session.warn(`transport error: ${err.message}`));
       session.telnet.onRecord((rec) => session.handleRecord(rec));

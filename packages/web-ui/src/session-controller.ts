@@ -43,7 +43,8 @@ export async function openSession(
   open: WsOpen,
   label: string,
   meta?: SessionMeta,
-  systemRef?: string
+  systemRef?: string,
+  configRef?: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
@@ -66,7 +67,8 @@ export async function openSession(
                 readOnly: open.readOnly ?? false,
                 ccsid: msg.ccsid,
                 client,
-                ...(meta ? { meta } : {})
+                ...(meta ? { meta } : {}),
+                ...(configRef !== undefined ? { configRef } : {})
               };
               sessionsStore.add(state);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
@@ -122,7 +124,8 @@ export async function openPrinterSession(
   open: WsOpen,
   label: string,
   meta?: SessionMeta,
-  systemRef?: string
+  systemRef?: string,
+  configRef?: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let sessionId = "";
@@ -152,7 +155,8 @@ export async function openPrinterSession(
                 outputEnabled: msg.outputEnabled,
                 printerWarnings: [...msg.outputWarnings],
                 outputStatuses: Object.fromEntries(msg.outputStatuses.map((s) => [s.spoolId, s])),
-                ...(meta ? { meta } : {})
+                ...(meta ? { meta } : {}),
+                ...(configRef !== undefined ? { configRef } : {})
               };
               sessionsStore.add(state);
               workspaceStore.addSession(sessionId, systemRef);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SessionManager } from "../src/session-manager.js";
+import { SessionManager, nextDeviceName } from "../src/session-manager.js";
 import { ReplayTransport, parseTraceJsonl, As400Error } from "@as400web/core";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -88,5 +88,30 @@ describe("SessionManager", () => {
     (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
     expect(mgr.size).toBe(0);
     void entry;
+  });
+});
+
+/**
+ * **装置名の自動リトライ（任意設定）。**
+ *
+ * IBM i は要求された装置が使用中だと、理由を返さずソケットを閉じる。名前にこだわらない運用の
+ * ために、末尾の数字を繰り上げて再試行できるようにしてある。既定 off なのは、装置名を固定する
+ * のが「その名前で繋ぎたい」意図だからで、黙って別名にすり替えるのは裏切りになるため。
+ */
+describe("nextDeviceName", () => {
+  it("末尾の数字を桁を保って繰り上げる", () => {
+    expect(nextDeviceName("WEBEMU01")).toBe("WEBEMU02");
+    expect(nextDeviceName("WEBEMU09")).toBe("WEBEMU10");
+    expect(nextDeviceName("DEV1")).toBe("DEV2");
+  });
+
+  it("数字が無ければ 2 を足す（10 文字上限を超えるなら打ち止め）", () => {
+    expect(nextDeviceName("WEBEMU")).toBe("WEBEMU2");
+    expect(nextDeviceName("ABCDEFGHIJ")).toBeUndefined();
+  });
+
+  it("桁が増えるなら打ち止め（装置名は 10 文字まで）", () => {
+    expect(nextDeviceName("WEBEMU99")).toBeUndefined();
+    expect(nextDeviceName("DEV9")).toBeUndefined();
   });
 });

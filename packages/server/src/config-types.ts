@@ -71,6 +71,11 @@ const sessionBase = {
   system: z.string().min(1),
   sessionType: sessionTypeSchema,
   deviceName: z.string().optional(),
+  /**
+   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する（既定 false）。
+   * 装置名を固定するのは「その名前で繋ぎたい」意図なので、既定では別名にすり替えない。
+   */
+  deviceNameRetry: z.boolean().optional(),
   /** display のみ意味を持つ */
   screenSize: screenSizeSchema.optional(),
   /** システムの既定 CCSID を上書きする */
