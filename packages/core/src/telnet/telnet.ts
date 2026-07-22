@@ -225,6 +225,9 @@ export class TelnetLayer {
       if (this.opts.charSet !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("CHARSET"), ENV_VALUE, ...ascii(String(this.opts.charSet)));
       }
+      // IBMSENDCONFREC=YES: ホストが確認レコードを送る作法を申告する（RFC 4777）。
+      // ACS 実機が送っており、当方も合わせる（無いとホストの応答経路が変わる）。
+      payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
       if (this.opts.user !== undefined) {
         // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）
         payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii(this.opts.user));

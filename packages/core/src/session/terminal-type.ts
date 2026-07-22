@@ -45,7 +45,8 @@ const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   // 日本語 DBCS は SBCS 部を申告する（930/5026=カタカナ 290、939/5035/931/1399=英小文字 1027）
   [930, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   [5026, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
-  [939, { kbdType: "JEB", codePage: 1027, charSet: 1172 }],
+  // 939 の KBDTYPE は ACS 実機の申告に合わせて JPB（従来 JEB）
+  [939, { kbdType: "JPB", codePage: 1027, charSet: 1172 }],
   [5035, { kbdType: "JEB", codePage: 1027, charSet: 1172 }],
   [931, { kbdType: "JEB", codePage: 1027, charSet: 1172 }],
   [1399, { kbdType: "JEB", codePage: 1027, charSet: 1172 }]

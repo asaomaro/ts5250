@@ -9,32 +9,42 @@ import { OPCODE, ESC, COMMAND } from "../src/protocol/constants.js";
 const codec = codecForCcsid(37);
 
 describe("buildQueryReply", () => {
-  it("NO_OP レコードに 61 バイトの Query Reply を載せる", () => {
-    const parsed = parseRecord(buildQueryReply());
-    expect(parsed.opcode).toBe(OPCODE.NOOP);
-    const d = parsed.data;
-    expect(d).toHaveLength(61);
+  /**
+   * ACS 実機（IBM i 日本語機・IBM-5555-C01）が返す Query Reply の本体 71 バイト。
+   * 中継プロキシで実測したもので、当方はこれとバイト一致させる。
+   * 申告が違うとホストがヘルプ／ウィンドウの描画経路を変える（PDM の F1 が 27x132 に落ちる）。
+   */
+  const ACS_5555_C01 = [
+    0x00, 0x00, 0x88, 0x00, 0x44, 0xd9, 0x70, 0x80, 0x05, 0x00, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf5, 0xf5,
+    0xf5, 0xf5, 0xc3, 0xf0, 0xf1, 0x01, 0x01, 0x00, 0x00, 0x00, 0x70, 0x12, 0x01, 0xf4, 0x00, 0x00,
+    0x00, 0x7b, 0x31, 0x00, 0x40, 0x0f, 0xc8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+  ];
+
+  it("IBM-5555-C01 で ACS 実機とバイト一致する（opcode PUT_GET・flag2 0x80）", () => {
+    const rec = buildQueryReply("IBM-5555-C01");
+    expect(rec[9]).toBe(OPCODE.PUT_GET);
+    expect(rec[8]).toBe(0x80); // フラグ 2 バイト目
+    expect([...parseRecord(rec).data]).toEqual(ACS_5555_C01);
+  });
+
+  it("device type / model を 4 桁 + **3 桁** で載せる", () => {
+    const d = parseRecord(buildQueryReply()).data;
+    expect(d).toHaveLength(71);
     expect(d[2]).toBe(0x88); // Inbound WSF AID
     expect(d[5]).toBe(0xd9); // command class
     expect(d[6]).toBe(0x70); // Query
-    // device type "3179" model "02" が EBCDIC で入っている
+    // "3179" + "002"（model を 3 桁にしないと "C01" の先頭が落ちる）
     expect([...d.slice(30, 34)]).toEqual([0xf3, 0xf1, 0xf7, 0xf9]);
-    expect([...d.slice(35, 37)]).toEqual([0xf0, 0xf2]);
-    // 非拡張: 長さ 0x3A、capability t[53]/t[54] は 0
-    expect(d[4]).toBe(0x3a);
-    expect(d[53]).toBe(0x00);
-    expect(d[54]).toBe(0x00);
+    expect([...d.slice(34, 37)]).toEqual([0xf0, 0xf0, 0xf2]);
   });
 
-  it("enhanced=true で拡張 5250 を広告する（長さ 67・capability ビット）", () => {
-    const parsed = parseRecord(buildQueryReply("IBM-3179-2", true));
-    const d = parsed.data;
-    expect(d).toHaveLength(67);
-    expect(d[4]).toBe(0x40); // Query Reply 長 = 64
-    expect(d[53]).toBe(0x02); // 拡張 5250 FCW & WDSF
-    expect(d[54]).toBe(0x80); // 拡張 UI レベル 2
-    // 末尾（55..66）はゼロ
-    expect([...d.slice(55, 67)].every((b) => b === 0)).toBe(true);
+  it("拡張 5250 と 24x80/27x132 両対応を常に広告する", () => {
+    const d = parseRecord(buildQueryReply("IBM-3179-2", false)).data;
+    expect(d[50]).toBe(0x31); // bit0-3=0011: 両サイズ対応
+    expect(d[53]).toBe(0x0f); // 拡張 5250（FCW & WDSF 等）
+    expect(d[54]).toBe(0xc8); // 拡張ユーザーインターフェース
   });
 });
 

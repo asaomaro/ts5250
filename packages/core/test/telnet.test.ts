@@ -52,6 +52,7 @@ describe("TelnetLayer ネゴシエーション", () => {
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);
   });
@@ -59,7 +60,11 @@ describe("TelnetLayer ネゴシエーション", () => {
   it("デバイス名未設定なら NEW-ENVIRON は空 IS", () => {
     const { t } = setup();
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
-    expect(t.takeSent()).toEqual([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS, IAC, CMD.SE]);
+    expect(t.takeSent()).toEqual([
+      IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
+      IAC, CMD.SE
+    ]);
   });
 
   it("RFC 4777 自動サインオン: USER + IBMRSEED(ゼロシード) + IBMSUBSPW(平文)", () => {
@@ -69,6 +74,7 @@ describe("TelnetLayer ネゴシエーション", () => {
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
       ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ENV_ESC, 0, 0, 0, 0, 0, 0, 0, 0,
       ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii("SECRET"),
@@ -82,6 +88,7 @@ describe("TelnetLayer ネゴシエーション", () => {
     const ENV_VAR = 0;
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
       IAC, CMD.SE
     ]);
@@ -145,6 +152,7 @@ describe("RFC 2877 デバイス属性の申告（KBDTYPE/CODEPAGE/CHARSET）", (
       ENV_USERVAR, ...ascii("KBDTYPE"), ENV_VALUE, ...ascii("USB"),
       ENV_USERVAR, ...ascii("CODEPAGE"), ENV_VALUE, ...ascii("37"),
       ENV_USERVAR, ...ascii("CHARSET"), ENV_VALUE, ...ascii("697"),
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);
   });
@@ -154,6 +162,10 @@ describe("RFC 2877 デバイス属性の申告（KBDTYPE/CODEPAGE/CHARSET）", (
     const telnet = new TelnetLayer(t, { terminalType: "IBM-3179-2" });
     void telnet;
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
-    expect(t.takeSent()).toEqual([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS, IAC, CMD.SE]);
+    expect(t.takeSent()).toEqual([
+      IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
+      IAC, CMD.SE
+    ]);
   });
 });

@@ -316,6 +316,20 @@ export class ScreenBuffer {
     return [...this.fields].sort((a, b) => a.startAddr - b.startAddr);
   }
 
+  /**
+   * カーソルを最初の入力可能（非 bypass）フィールドの先頭へ置く。
+   *
+   * 5250 では WTD に IC/MC が無い場合、カーソルは最初の入力フィールドに着く。
+   * これを行わないとカーソルが原点（1,1）に残り、**AID レコードで報告する
+   * カーソル位置が実機とずれる**。IBM i のヘルプ（F1）はカーソル位置依存で、
+   * フィールド上でなければ「拡張ヘルプ」経路になり、ホストがウィンドウではなく
+   * 別サイズのヘルプ画面を出そうとする（日本語実機の PDM F1 で確認）。
+   */
+  cursorToFirstInputField(): void {
+    const first = this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0);
+    if (first !== undefined) this.cursorAddr = first.startAddr;
+  }
+
   fieldByIndex(index1: number): InternalField {
     const f = this.orderedFields()[index1 - 1];
     if (!f) throw new As400Error("FIELD_NOT_FOUND", `field #${index1} not found`);

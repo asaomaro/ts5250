@@ -83,6 +83,37 @@ export function buildReadScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
   return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
 }
 
+/** READ SCREEN EXTENDED の行区切り（ACS 実機の応答を実測して判明） */
+const ROW_DELIMITER = 0xff;
+
+/**
+ * READ SCREEN EXTENDED（opcode 0x08 / ESC 0x64）への応答レコードを組み立てる。
+ *
+ * 拡張 5250 を申告した端末には、ホストは READ SCREEN（0x62）ではなくこちらを送ってくる。
+ * **形式は 0x62 とはまったく別物**で、ACS 実機（IBM i 日本語機）の応答を実測して次と判明した:
+ *
+ * - カーソル位置の前置は **無い**（いきなり画面 1 行目 1 桁目から始まる）
+ * - 1 行ぶんのバイト列を並べ、行末に区切りバイト `0xFF` を置く。これを行数ぶん繰り返す
+ * - 行末の **NUL（未書き込み桁）は切り詰める**。行全体が NUL なら長さ 0（区切りだけ）。
+ *   ブランク（0x40）は切り詰めない——実測で末尾 0x40 のまま 80 バイト送っている行がある
+ * - レコードヘッダは opcode READ_SCREEN(0x08)・フラグ 2 バイト目 0x80
+ *
+ * 形式が違うと、ホストは応答の中身を見ずに「適用業務ヘルプ中に機能チェックが起こった」を
+ * 返してヘルプを送ってこない（日本語実機で 9 通りの誤った形式を試して確認）。
+ */
+export function buildReadScreenExtendedResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
+  const w = new ByteWriter();
+  for (let row = 0; row < buf.rows; row++) {
+    const line = new ByteWriter();
+    for (let col = 0; col < buf.cols; col++) writeCell(line, buf, row * buf.cols + col, codec, 0x00);
+    const bytes = line.toUint8Array();
+    let end = bytes.length;
+    while (end > 0 && bytes[end - 1] === 0x00) end--; // 行末の未書き込み桁は送らない
+    w.bytes(bytes.subarray(0, end)).u8(ROW_DELIMITER);
+  }
+  return buildRecord(OPCODE.READ_SCREEN, w.toUint8Array(), {}, 0x80);
+}
+
 function fcwFor(kind: "pure" | "open" | "either"): number {
   if (kind === "pure") return 0x8200;
   if (kind === "either") return 0x8240;
@@ -95,10 +126,17 @@ function writeSba(w: ByteWriter, buf: ScreenBuffer, addr: number): void {
   w.u8(ORDER.SBA).u8(row).u8(col);
 }
 
-function writeCell(w: ByteWriter, buf: ScreenBuffer, addr: number, codec: Codec): void {
+/** 1 桁ぶんを書く。empty は未書き込み桁に出すバイト（既定は空白 0x40） */
+function writeCell(
+  w: ByteWriter,
+  buf: ScreenBuffer,
+  addr: number,
+  codec: Codec,
+  empty = 0x40
+): void {
   const cell = buf.cellAt(addr);
   if (cell === null) {
-    w.u8(0x40); // 空白
+    w.u8(empty);
     return;
   }
   if (cell.type === "attr") {

@@ -28,57 +28,57 @@ function toEbcdic(ch: string): number {
  * このとき Query Reply 長を 0x40（64）に伸ばし、controller/display capability の
  * t[53]=0x02（拡張 5250 FCW & WDSF）・t[54]=0x80（拡張 UI レベル 2）を立てる（tn5250 query_reply と一致）。
  */
+/**
+ * 5250 QUERY（WSF class 0xD9 / type 0x70）への Query Reply を構築する（SC30-3533 表89）。
+ * terminalType で device type/model を広告する（IBM-3179-2 / IBM-3477-FC / IBM-5555-C01 等）。
+ *
+ * **バイト列は ACS 実機（IBM i 日本語機）の Query Reply を実測して一致させてある。**
+ * 能力申告が違うと、ホストはヘルプやウィンドウの描き方を別経路に切り替える。実測では
+ * 当方の旧申告だと PDM の F1 ヘルプが CLEAR UNIT ALTERNATE（27x132）経路に落ち、
+ * 24x80 用に組まれた背景が 132 桁に流し込まれてレイアウトが崩れた。
+ */
 export function buildQueryReply(terminalType = "IBM-3179-2", enhanced = false): Uint8Array {
+  void enhanced; // ACS 実機と同じ申告に統一する（拡張は常に広告する。t[53]/t[54] 参照）
   const { type, model } = typeAndModel(terminalType);
-  const t = new Uint8Array(enhanced ? 67 : 61);
-  t[0] = 0x00; // cursor row
-  t[1] = 0x00; // cursor col
+  const t = new Uint8Array(71);
+  t[0] = 0x00; // カーソル行
+  t[1] = 0x00; // カーソル桁
   t[2] = 0x88; // Inbound Write Structured Field AID
   t[3] = 0x00; // Query Reply 長（上位）
-  t[4] = enhanced ? 0x40 : 0x3a; // Query Reply 長（下位）: 拡張=64 / 非拡張=58
+  t[4] = 0x44; // Query Reply 長（下位）= 68
   t[5] = 0xd9; // command class
   t[6] = 0x70; // command type = Query
   t[7] = 0x80; // flag
-  t[8] = 0x06; // controller hardware class
+  t[8] = 0x05; // controller hardware class
   t[9] = 0x00;
-  t[10] = 0x01; // controller code level
-  t[11] = 0x01;
-  t[12] = 0x00;
-  // t[13..28] = 0（予約）
+  t[10] = 0x03; // controller code level
+  t[11] = 0x02;
+  // t[12..28] = 0（予約）
   t[29] = 0x01; // display emulation
-  // device type（4 桁）＋ model（2-3 桁）を EBCDIC で（terminalType 由来）
+  // device type（4 桁）＋ model（**3 桁**）を EBCDIC で連続配置。
+  // モデルを 2 桁しか送らないと "C01" の先頭 'C' が落ち、ホストに別モデルとして見える。
   const dt = type.padStart(4, "0").slice(0, 4);
   t[30] = toEbcdic(dt[0]!);
   t[31] = toEbcdic(dt[1]!);
   t[32] = toEbcdic(dt[2]!);
   t[33] = toEbcdic(dt[3]!);
-  t[34] = 0x00;
-  const md = model.padStart(2, "0");
-  t[35] = toEbcdic(md[md.length - 2]!);
-  t[36] = toEbcdic(md[md.length - 1]!);
-  t[37] = 0x02; // Keyboard ID = 標準
-  t[38] = 0x00;
-  t[39] = 0x00;
-  t[40] = 0x00; // display serial number
-  t[41] = 0x61;
-  t[42] = 0x50;
-  t[43] = 0x00;
-  t[44] = 0xff; // 最大入力フィールド数
-  t[45] = 0xff;
-  t[46] = 0x00;
-  t[47] = 0x00;
-  t[48] = 0x00;
-  t[49] = 0x23; // controller/display capability
-  t[50] = 0x31;
-  t[51] = 0x00;
-  t[52] = 0x00;
-  if (enhanced) {
-    t[53] = 0x02; // 拡張 5250 FCW & WDSF（GUI 構造体を受け付ける）
-    t[54] = 0x80; // 拡張ユーザーインターフェース サポートレベル 2
-  } else {
-    t[53] = 0x00; // 非拡張（graphics/mouse/enhanced なし）
-    t[54] = 0x00;
-  }
-  // t[55..] = 0（拡張時 t[55..66] も 0）
-  return buildRecord(OPCODE.NOOP, t);
+  const md = model.padStart(3, "0").slice(-3);
+  t[34] = toEbcdic(md[0]!);
+  t[35] = toEbcdic(md[1]!);
+  t[36] = toEbcdic(md[2]!);
+  t[37] = 0x01; // Keyboard ID
+  t[38] = 0x01;
+  t[42] = 0x70; // display serial number
+  t[43] = 0x12;
+  t[44] = 0x01; // 最大入力フィールド数 = 500
+  t[45] = 0xf4;
+  t[49] = 0x7b; // controller/display capability
+  t[50] = 0x31; // bit0-3=0011: 24x80 と 27x132 の両対応
+  t[52] = 0x40;
+  t[53] = 0x0f; // 拡張 5250（FCW & WDSF 等）
+  t[54] = 0xc8; // 拡張ユーザーインターフェース
+  t[61] = 0x01;
+  t[62] = 0x01;
+  // opcode は PUT_GET(0x03)・フラグ 2 バイト目 0x80。ACS 実機はこれで返す。
+  return buildRecord(OPCODE.PUT_GET, t, {}, 0x80);
 }

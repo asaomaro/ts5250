@@ -18,6 +18,10 @@ export interface ApplyResult {
   saveScreenRequested: boolean;
   /** ホストが READ SCREEN を送ってきた（現在の画面イメージを送り返す必要がある） */
   readScreenRequested: boolean;
+  /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
+  readScreenExtendedRequested: boolean;
+  /** このレコード中で IC/MC によりカーソル位置が明示された */
+  cursorSet: boolean;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -44,7 +48,9 @@ export function applyDataStream(
     alarm: false,
     queryRequested: false,
     saveScreenRequested: false,
-    readScreenRequested: false
+    readScreenRequested: false,
+    readScreenExtendedRequested: false,
+    cursorSet: false
   };
 
   while (r.remaining > 0) {
@@ -107,6 +113,11 @@ export function applyDataStream(
         // ホストが「既にあると仮定した画面」を取得するために送ってくる。返信しないと
         // ホストは停止し、後続のウィンドウ描画を送ってこない（キーボードがロックのまま）。
         result.readScreenRequested = true;
+        break;
+      case COMMAND.READ_SCREEN_EXTENDED:
+        // 拡張 5250 を申告した端末にはホストがこちらを送ってくる。応答形式は 0x62 と別
+        // （buildReadScreenExtendedResponse 参照）。
+        result.readScreenExtendedRequested = true;
         break;
       default:
         warn(`unknown command 0x${cmd.toString(16)} — discarding rest of record`);
@@ -210,6 +221,7 @@ function applyWtd(
       case ORDER.MC:
         // 01 では IC/MC とも「カーソル位置の設定」として扱う（IC_ULOCK の厳密な扱いは必要時に拡張）
         buf.cursorAddr = buf.addrOf(r.u8(), r.u8());
+        result.cursorSet = true;
         break;
       case ORDER.RA: {
         const target = buf.addrOf(r.u8(), r.u8());
