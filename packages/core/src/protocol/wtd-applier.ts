@@ -16,6 +16,8 @@ export interface ApplyResult {
   queryRequested: boolean;
   /** ホストが SAVE SCREEN を送ってきた（画面を送り返す必要がある） */
   saveScreenRequested: boolean;
+  /** ホストが READ SCREEN を送ってきた（現在の画面イメージを送り返す必要がある） */
+  readScreenRequested: boolean;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -41,7 +43,8 @@ export function applyDataStream(
     readRequested: false,
     alarm: false,
     queryRequested: false,
-    saveScreenRequested: false
+    saveScreenRequested: false,
+    readScreenRequested: false
   };
 
   while (r.remaining > 0) {
@@ -98,6 +101,13 @@ export function applyDataStream(
         result.unlockKeyboard = true; // Read はキーボードを解放して入力を待つ
         break;
       }
+      case COMMAND.READ_SCREEN:
+        // READ SCREEN（opcode 0x08 / ESC 0x62）: パラメータ無し。現在の画面イメージを
+        // ホストへ送り返す要求。ASSUME 付き WINDOW（別表示ファイルの画面に重ねる）で、
+        // ホストが「既にあると仮定した画面」を取得するために送ってくる。返信しないと
+        // ホストは停止し、後続のウィンドウ描画を送ってこない（キーボードがロックのまま）。
+        result.readScreenRequested = true;
+        break;
       default:
         warn(`unknown command 0x${cmd.toString(16)} — discarding rest of record`);
         return result;

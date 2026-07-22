@@ -4,7 +4,7 @@ import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import { buildReadMdtResponse, buildFlagRecord } from "../protocol/read-response.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
-import { buildSaveScreenResponse } from "../protocol/save-screen.js";
+import { buildSaveScreenResponse, buildReadScreenResponse } from "../protocol/save-screen.js";
 import { applyDataStream } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
@@ -412,6 +412,12 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
         this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced));
+        return;
+      }
+      if (result.readScreenRequested) {
+        // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
+        // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
+        this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec));
         return;
       }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";

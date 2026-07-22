@@ -62,6 +62,27 @@ export function buildSaveScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
   return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array());
 }
 
+/**
+ * READ SCREEN（opcode 0x08 / ESC 0x62）への応答レコードを組み立てる。
+ *
+ * **これはホストが待っている返信である。** READ SCREEN は「今表示している画面の内容を
+ * 送り返せ」という要求で、ASSUME 付き WINDOW（別の表示ファイルが描いた全画面の上に
+ * ウィンドウを重ねる）で、ホストが「既にあると仮定している画面」を取得するために送ってくる。
+ * 返信しないとホストは先へ進まず、後続のウィンドウ描画を送ってこない。
+ *
+ * 形式は他の Read 応答と同じ「カーソル行(1) 桁(1)」に続けて、画面全域を先頭位置から
+ * 末尾位置まで 1 桁 1 バイトで並べたイメージ（属性桁は属性バイト、文字桁は EBCDIC）。
+ * SBA 等のオーダーは付けない（フラットなスキャン）。opcode は PUT_GET（0x03）。
+ */
+export function buildReadScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
+  const w = new ByteWriter();
+  const cur = buf.rowColOf(buf.cursorAddr);
+  w.u8(cur.row).u8(cur.col);
+  // 画面全域をスキャン。DBCS の lead は 2 バイト書き tail は 0 バイト（桁数は保たれる）。
+  for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec);
+  return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
+}
+
 function fcwFor(kind: "pure" | "open" | "either"): number {
   if (kind === "pure") return 0x8200;
   if (kind === "either") return 0x8240;
