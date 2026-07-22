@@ -28,6 +28,12 @@ export type {
  * 埋め込み属性センチネル（SEU の色付き入力欄）。UI がオーバーレイの色分けと、入力欄の
  * 表示（センチネル→空白）に使う。属性バイト→色の解決に decodeAttribute も共有する。
  */
-export { isAttrSentinel, attrSentinelByte, stripAttrSentinels } from "./screen/attr-sentinel.js";
+export {
+  isAttrSentinel,
+  isRawSentinel,
+  attrSentinelByte,
+  sentinelByte,
+  stripSentinels
+} from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
 export type { ScreenColor } from "./screen/types.js";

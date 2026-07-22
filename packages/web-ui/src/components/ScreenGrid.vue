@@ -36,8 +36,9 @@ import {
 import { katakanaChar } from "@as400web/core/codec";
 import {
   isAttrSentinel,
+  isRawSentinel,
   attrSentinelByte,
-  stripAttrSentinels,
+  stripSentinels,
   decodeAttribute
 } from "@as400web/core/browser";
 
@@ -278,7 +279,8 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
       cls = attrByteClass(attrSentinelByte(ch));
       text += " "; // 属性桁は新色の空白 1 桁
     } else {
-      text += ch;
+      // 表示できないバイトのセンチネルは色を変えない。空白 1 桁で桁だけ保つ
+      text += isRawSentinel(ch) ? " " : ch;
     }
   }
   push();
@@ -694,7 +696,7 @@ function writeSlices(f: Field, full: string): void {
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
     // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
-    if (el) el.value = displayText(stripAttrSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
+    if (el) el.value = displayText(stripSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
   });
 }
 
@@ -1120,7 +1122,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
       // 表示はセンチネル→空白。生のセンチネル（U+E020–E03F）を入れると、Nerd Font 等
       // PUA にアイコンを持つ等幅フォントで可視グリフになり（色制御文字が見える）、
       // 2 桁幅のグリフだと欄幅を超えて横スクロールし caret が行末へ飛ぶ。
-      el.value = displayText(stripAttrSentinels(sliceValue(f, sliceIdx)));
+      el.value = displayText(stripSentinels(sliceValue(f, sliceIdx)));
       el.setSelectionRange(0, 0);
       emit("cursor", s.row, s.col);
       return;
@@ -1131,7 +1133,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   // 行またぎ欄では、この input が担当するスライスぶんだけを入れる（全長を入れると桁が溢れる）。
   // 表示はセンチネル→空白（writeSlices / :value / blur と同じ。生のセンチネルを入れると
   // Nerd Font で可視化・桁溢れし、色制御文字表示とカーソル行末飛びを起こす）。
-  if (edit) el.value = displayText(stripAttrSentinels(sliceValue(f, sliceIdx)));
+  if (edit) el.value = displayText(stripSentinels(sliceValue(f, sliceIdx)));
   // スペース埋め表示だと Tab/フォーカスで native カーソルが末尾へ行き入力できなくなるため、
   // フォーカス時はフィールド先頭へ置く（クリックは mouseup で押下桁に上書きされる）。
   el.setSelectionRange(0, 0);
@@ -1144,7 +1146,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
-  el.value = displayText(stripAttrSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
+  el.value = displayText(stripSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
   // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
   // **欄内スライス間の一時 blur（syncingFocus）では ++ しない**——編集中に再描画すると
@@ -1421,7 +1423,7 @@ function pasteFrom(
       // （表示はセンチネル→空白。生のセンチネルは Nerd Font で可視化・桁溢れするため）
       slicesOf(field).forEach((_s, i) => {
         const inp = inputForSlice(field, i);
-        if (inp) inp.value = displayText(stripAttrSentinels(sliceValue(field, i)));
+        if (inp) inp.value = displayText(stripSentinels(sliceValue(field, i)));
       });
     }
   }
@@ -1528,7 +1530,7 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   const from = composeLogicalStart(f, el);
   // 表示はセンチネル→空白（1:1 なので長さは不変＝composePrefixLen も確定分の切り出しも保つ）。
   // 生のセンチネルを prefix に残すと Nerd Font で色制御文字が見え・桁が溢れる。
-  const prefix = displayText(stripAttrSentinels(edit.chars.slice(from, composeStart).join("")));
+  const prefix = displayText(stripSentinels(edit.chars.slice(from, composeStart).join("")));
   composePrefixLen = prefix.length;
   el.value = prefix;
   el.setSelectionRange(prefix.length, prefix.length); // 候補を入力位置（既入力の直後）に出す
@@ -1958,7 +1960,7 @@ onBeforeUnmount(() => {
             class="grid-input"
             :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
             :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-            :value="displayText(stripAttrSentinels(sliceValue(seg.field!, seg.slice ?? 0)))"
+            :value="displayText(stripSentinels(sliceValue(seg.field!, seg.slice ?? 0)))"
             :readonly="seg.field!.protected"
             type="text"
             :autocomplete="seg.field!.hidden ? 'off' : undefined"
