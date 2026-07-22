@@ -305,15 +305,17 @@ const infoRows = computed(() => {
         <span v-if="session?.ccsid"> ccsid {{ session.ccsid }}</span>
       </div>
       <div class="foot">
-        <button v-if="kind === 'system'" class="btn" @click="emit('select', system!.ref)">
-          {{ selected ? "メニューへ" : "選択" }}
-        </button>
-        <button v-else class="btn" :disabled="connecting" @click="emit('open', session!.ref)">
-          <span v-if="connecting" class="dot" aria-hidden="true"></span>{{ connecting ? "接続中…" : "接続" }}
-        </button>
-        <button v-if="canEdit" class="btn ghost" @click="startEdit">編集</button>
-        <button class="info" title="詳細" @click.stop="showInfo = !showInfo">ⓘ</button>
-        <InfoPopover v-if="showInfo" :rows="infoRows" @close="showInfo = false" />
+        <div class="actions">
+          <button v-if="kind === 'system'" class="btn" @click="emit('select', system!.ref)">
+            {{ selected ? "メニューへ" : "選択" }}
+          </button>
+          <button v-else class="btn" :disabled="connecting" @click="emit('open', session!.ref)">
+            <span v-if="connecting" class="dot" aria-hidden="true"></span>{{ connecting ? "接続中…" : "接続" }}
+          </button>
+          <button v-if="canEdit" class="btn ghost" @click="startEdit">編集</button>
+          <button class="info" title="詳細" @click.stop="showInfo = !showInfo">ⓘ</button>
+          <InfoPopover v-if="showInfo" :rows="infoRows" @close="showInfo = false" />
+        </div>
         <span v-if="kind === 'system'" class="count" title="このシステムのセッション設定">
           セッション {{ systemsStore.sessionCount(system!.ref) }}
         </span>
@@ -473,9 +475,12 @@ const infoRows = computed(() => {
   margin-top: 0;
   padding-top: 0;
   flex: 0 0 auto;
+  /* リスト表示は 1 行に戻す（ボタンの右にセッション数） */
+  flex-direction: row;
+  align-items: center;
 }
 .card.dense .count {
-  margin-left: 0;
+  margin-left: 6px;
 }
 
 /* 選択中のシステム。一覧の中で現在地が分かるようにする */
@@ -544,13 +549,20 @@ const infoRows = computed(() => {
   margin-top: auto;
   padding-top: 10px;
   display: flex;
+  /* グリッド表示ではセッション数をボタンの上の行に出す（狭い幅で折り返さないように） */
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+}
+.actions {
+  display: flex;
   gap: 6px;
   align-items: center;
 }
 .count {
-  margin-left: auto;
   font-size: 0.72rem;
   color: var(--muted);
+  white-space: nowrap;
 }
 .btn {
   border: 1px solid var(--accent);
@@ -561,6 +573,7 @@ const infoRows = computed(() => {
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 .btn.ghost {
