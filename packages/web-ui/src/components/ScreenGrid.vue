@@ -168,7 +168,7 @@ const selectionFields = computed<GuiSelectionLike[]>(
 );
 
 interface Segment {
-  kind: "text" | "input" | "dbcs";
+  kind: "text" | "input";
   text: string;
   cls: string;
   field?: Field;
@@ -319,22 +319,21 @@ const rows = computed<Segment[][]>(() => {
         c += start.width;
         continue;
       }
-      // DBCS lead セルは 2ch 幅の専用セグメント（tail は char="" なので実質畳まれる）
-      if (row[c]!.kind === "dbcs-lead") {
-        segs.push({ kind: "dbcs", text: row[c]!.char, cls: cellClass(row[c]!) });
-        c += 2; // lead + tail の 2 桁
-        continue;
-      }
-      // text ラン（同一 class をまとめる）。DBCS/SO/SI 桁はまたがない
+      // text ラン（同一 class をまとめる）。全角も同じランに入れる。
+      //
+      // 桁は「全角＝半角×2」の等幅前提で合う（--screen-mono はこれを満たす日本語等幅を並べ、
+      // 総称 monospace も 1:2）。入力欄も同じ前提でプレーン文字列を出しており、全角だけ
+      // 1 文字ずつ箱に入れても揃う範囲は変わらない。ラン化して DOM を減らす。
       const cls = cellClass(row[c]!);
       let text = "";
-      while (
-        c < snap.cols &&
-        !fieldAt.has(r * snap.cols + c) &&
-        row[c]!.kind !== "dbcs-lead" &&
-        cellClass(row[c]!) === cls
-      ) {
-        text += displayChar(row[c]!);
+      while (c < snap.cols && !fieldAt.has(r * snap.cols + c)) {
+        const cellHere = row[c]!;
+        if (cellHere.kind === "dbcs-tail") {
+          c++; // lead 側で 1 文字書いており、2 桁ぶんはその文字が占める
+          continue;
+        }
+        if (cellClass(cellHere) !== cls) break;
+        text += displayChar(cellHere);
         c++;
       }
       segs.push({ kind: "text", text, cls });
@@ -1972,7 +1971,6 @@ onBeforeUnmount(() => {
             :class="run.cls"
           >{{ run.text }}</span></span>
         </span>
-        <span v-else-if="seg.kind === 'dbcs'" class="grid-span grid-dbcs" :class="seg.cls">{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
           v-for="(p, j) in linkParts(seg.text)"
           :key="j"
@@ -2067,16 +2065,6 @@ onBeforeUnmount(() => {
 }
 .grid-link:hover {
   color: var(--t-white);
-}
-/* DBCS（全角）は 2ch 幅を占有し中央寄せ（全角=半角×2 の桁対応を担保） */
-.grid-dbcs {
-  display: inline-block;
-  width: 2ch;
-  text-align: center;
-  /* overflow:hidden は inline-block のベースラインを下端に変え全角が上へずれるため使わない。
-     行(line-height:1.25)に合わせ text ベースラインで揃える。 */
-  line-height: inherit;
-  vertical-align: baseline;
 }
 /*
  * 埋め込み属性（欄途中の色替え）用のオーバーレイ。
