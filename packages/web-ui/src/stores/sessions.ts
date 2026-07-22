@@ -41,6 +41,8 @@ export interface SessionState {
    * 直接指定（設定を経ない接続）では undefined。
    */
   configRef?: string;
+  /** どのシステムのセッションか（システム一覧に接続数を出すために持つ） */
+  systemRef?: string;
   /** セッション種別（既定 display）。printer は帳票ビュー（PrinterPane）で表示する */
   kind?: "display" | "printer";
   /** 接続設定のメタ情報（セッション情報パネルで表示） */
@@ -91,6 +93,11 @@ export const sessionsStore = reactive({
 
   get(id: string): SessionState | undefined {
     return this.byId.get(id);
+  },
+
+  /** そのシステムで接続中のセッション数（システムカードに出す） */
+  connectedCount(systemRef: string): number {
+    return this.all.filter((s) => s.systemRef === systemRef && s.connected).length;
   },
 
   /** 開いているセッション一覧（登録順） */

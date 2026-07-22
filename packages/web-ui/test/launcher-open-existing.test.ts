@@ -120,3 +120,49 @@ describe("既に開いている設定のカード", () => {
     w.unmount();
   });
 });
+
+/**
+ * **システム一覧に接続中の数を出す。**
+ *
+ * カードの「セッション N」は設定の数なので、それだけでは今つながっているのかが分からない。
+ * 切り替えて戻ったときに一番知りたいのは「このシステムは今つながっているか」なので、
+ * 接続中が 1 本でもあれば数を添える（0 なら出さない＝普段の見た目を変えない）。
+ */
+describe("システムカードの接続数", () => {
+  it("接続が無ければ設定の数だけを出す", () => {
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM } });
+    expect(w.text()).toContain("セッション 1");
+    expect(w.text()).not.toContain("接続 ");
+    w.unmount();
+  });
+
+  it("接続中があれば「接続 N」を添える", () => {
+    sessionsStore.add({ ...liveSession(SESSION.ref, "WEBEMU01"), systemRef: SYSTEM.ref });
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM } });
+    expect(w.text()).toContain("セッション 1");
+    expect(w.text()).toContain("接続 1");
+    w.unmount();
+  });
+
+  it("別システムの接続は数えない", () => {
+    sessionsStore.add({
+      ...liveSession(SESSION.ref, "WEBEMU01"),
+      sessionId: "sess-other",
+      systemRef: "own:s-other"
+    });
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM } });
+    expect(w.text()).not.toContain("接続 ");
+    w.unmount();
+  });
+
+  it("切断済みのセッションは数えない", () => {
+    sessionsStore.add({
+      ...liveSession(SESSION.ref, "WEBEMU01"),
+      systemRef: SYSTEM.ref,
+      connected: false
+    });
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM } });
+    expect(w.text()).not.toContain("接続 ");
+    w.unmount();
+  });
+});

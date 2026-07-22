@@ -68,7 +68,8 @@ export async function openSession(
                 ccsid: msg.ccsid,
                 client,
                 ...(meta ? { meta } : {}),
-                ...(configRef !== undefined ? { configRef } : {})
+                ...(configRef !== undefined ? { configRef } : {}),
+                ...(systemRef !== undefined ? { systemRef } : {})
               };
               sessionsStore.add(state);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
@@ -156,7 +157,8 @@ export async function openPrinterSession(
                 printerWarnings: [...msg.outputWarnings],
                 outputStatuses: Object.fromEntries(msg.outputStatuses.map((s) => [s.spoolId, s])),
                 ...(meta ? { meta } : {}),
-                ...(configRef !== undefined ? { configRef } : {})
+                ...(configRef !== undefined ? { configRef } : {}),
+                ...(systemRef !== undefined ? { systemRef } : {})
               };
               sessionsStore.add(state);
               workspaceStore.addSession(sessionId, systemRef);
