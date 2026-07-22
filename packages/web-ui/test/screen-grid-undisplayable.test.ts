@@ -76,3 +76,49 @@ describe("表示できない SBCS（U+FFFD）", () => {
     expect(v.startsWith("A B")).toBe(true);
   });
 });
+
+/**
+ * **表示の置き換えがモデルへ逆流しないこと。**
+ *
+ * 表示は U+FFFD を空白にするが、ホストへ送る値は元の文字のまま保たれなければならない。
+ * 置き換えが逆流すると、その欄を編集しただけで別の文字（空白）に化けて送信されてしまう。
+ * 置換は 1 文字 1 文字（長さ不変）なので、桁とキャレットの対応も崩れない。
+ */
+describe("表示の置き換えは編集値に影響しない", () => {
+  const editable: Field = {
+    index: 1,
+    row: 1,
+    col: 1,
+    length: 3,
+    protected: false,
+    hidden: false,
+    numeric: false,
+    mdt: false,
+    value: "A�B"
+  };
+
+  it("末尾を打ち替えても U+FFFD は元の桁に残る（空白に化けない）", async () => {
+    const snapshot = snapWith(["A", "�", "B"]);
+    snapshot.fields = [editable];
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true } });
+    const input = w.find("input.grid-input");
+    const el = input.element as HTMLInputElement;
+
+    await input.trigger("focus");
+    el.setSelectionRange(2, 2); // U+FFFD の次（3 桁目）
+    await input.trigger("keydown", { key: "X" });
+
+    const emits = w.emitted("edit") as [number, string][] | undefined;
+    expect(emits, "編集が発火する").toBeTruthy();
+    expect(emits!.at(-1)![1]).toBe("A�X"); // 表示は "A X" でも送る値は元の文字
+  });
+
+  it("表示（DOM の value）は空白で、桁数は変わらない", async () => {
+    const snapshot = snapWith(["A", "�", "B"]);
+    snapshot.fields = [editable];
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true } });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    expect(el.value).toBe("A B");
+    expect(el.value).toHaveLength(editable.value.length); // 1:1 置換なのでキャレット桁が保たれる
+  });
+});
