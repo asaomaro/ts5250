@@ -11,6 +11,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { codecForCcsid } from "../../codec/codec.js";
+import { codecOf } from "../list/openlist.js";
 import type { CommandConnection } from "../command/command-connection.js";
 import {
   statusName,
@@ -137,8 +138,12 @@ const F = {
   priority: 128
 } as const;
 
-/** 1 レコードを解釈する */
-export function parseSpoolRecord(record: Uint8Array): SpoolEntry {
+/**
+ * 1 レコードを解釈する。
+ * `textCodec` はホストサーバージョブの CCSID のコーデック（省略時は CCSID 37）。
+ * 用紙タイプやユーザーデータに日本語が入ることがあり、37 固定だとバイトごとに化ける。
+ */
+export function parseSpoolRecord(record: Uint8Array, textCodec = codec): SpoolEntry {
   if (record.length < F.priority + 1) {
     throw new As400Error(
       "PROTOCOL_ERROR",
@@ -146,7 +151,8 @@ export function parseSpoolRecord(record: Uint8Array): SpoolEntry {
     );
   }
   const v = new DataView(record.buffer, record.byteOffset, record.byteLength);
-  const str = (at: number, len: number): string => codec.decode(record.subarray(at, at + len)).trimEnd();
+  const str = (at: number, len: number): string =>
+    textCodec.decode(record.subarray(at, at + len)).trimEnd();
   const statusCode = v.getInt32(F.statusCode);
 
   return {
@@ -224,11 +230,12 @@ export async function listSpooledFiles(
   const recordLength = li.getInt32(LIST_INFO.recordLength);
   if (recordLength <= 0) return [];
 
+  const textCodec = codecOf(conn);
   const entries: SpoolEntry[] = [];
   for (let i = 0; i < returned; i++) {
     const at = i * recordLength;
     if (at + recordLength > records.length) break;
-    entries.push(parseSpoolRecord(records.subarray(at, at + recordLength)));
+    entries.push(parseSpoolRecord(records.subarray(at, at + recordLength), textCodec));
   }
   return entries;
 }

@@ -7,7 +7,7 @@
  * 参照: JTOpen(jtopenlite) の command/program/openlist に対応する。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid, type Codec } from "../../codec/codec.js";
 import type { CommandConnection } from "../command/command-connection.js";
 import type { ProgramParameter } from "../command/command-datastream.js";
 
@@ -32,9 +32,32 @@ export function padEbcdic(text: string, length: number): Uint8Array {
   return out;
 }
 
-/** EBCDIC の断片を文字列にする（末尾の空白は落とす） */
-export function readEbcdic(data: Uint8Array, at: number, length: number): string {
-  return codec.decode(data.subarray(at, at + length)).trimEnd();
+/** EBCDIC の断片を文字列にする（末尾の空白は落とす）。codec 省略時は CCSID 37 */
+export function readEbcdic(
+  data: Uint8Array,
+  at: number,
+  length: number,
+  with_ = codec
+): string {
+  return with_.decode(data.subarray(at, at + length)).trimEnd();
+}
+
+/**
+ * ホストサーバージョブの CCSID に対応するコーデック。
+ *
+ * **リストが返す文字は CCSID 37 ではなくジョブの CCSID で入っている。** 日本語機では
+ * ユーザーの説明などが DBCS（SO/SI ＋ 2 バイト）で返るので、37 で読むと 1 バイトずつ
+ * ラテン文字に化ける（実機のユーザー一覧で「ä[äbäýäþ」のように出た）。
+ * 未対応の CCSID なら 37 のまま——読めない値で落とすより従来どおり出す方が害が小さい。
+ */
+export function codecOf(conn: CommandConnection): Codec {
+  const ccsid = conn?.info?.ccsid;
+  if (!ccsid || ccsid === EBCDIC_CCSID) return codec;
+  try {
+    return codecForCcsid(ccsid);
+  } catch {
+    return codec;
+  }
 }
 
 /** 4 バイト整数 */
@@ -95,7 +118,7 @@ export async function callOpenList<T>(
   opts: {
     receiveIndex: number;
     listInfoIndex: number;
-    decode: (record: Uint8Array) => T;
+    decode: (record: Uint8Array, textCodec: Codec) => T;
     /** 空レコードで打ち切るか（既定 true）。0 埋めの余白を件数に数えないため */
     stopAtEmpty?: boolean;
   }
@@ -114,6 +137,7 @@ export async function callOpenList<T>(
   if (!listInfo || !records) {
     throw new As400Error("PROTOCOL_ERROR", `${program} returned no list information`);
   }
+  const textCodec = codecOf(conn);
   const info = parseListInfo(listInfo);
   if (info.recordLength <= 0) return [];
 
@@ -135,7 +159,7 @@ export async function callOpenList<T>(
     const record = records.subarray(at, at + info.recordLength);
     // 受信変数の余白は 0 埋め。全 0 のレコードは実データの終端とみなす
     if (stopAtEmpty && record.every((b) => b === 0)) break;
-    out.push(opts.decode(record));
+    out.push(opts.decode(record, textCodec));
   }
   return out;
 }

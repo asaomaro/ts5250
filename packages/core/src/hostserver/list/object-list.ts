@@ -92,10 +92,10 @@ export async function listObjects(
     {
       receiveIndex: 0,
       listInfoIndex: 2,
-      decode: (r) => ({
-        name: readEbcdic(r, F.name, 10),
-        library: readEbcdic(r, F.library, 10),
-        type: readEbcdic(r, F.type, 10)
+      decode: (r, c) => ({
+        name: readEbcdic(r, F.name, 10, c),
+        library: readEbcdic(r, F.library, 10, c),
+        type: readEbcdic(r, F.type, 10, c)
       })
     }
   );
