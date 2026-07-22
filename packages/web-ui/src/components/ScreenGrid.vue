@@ -187,15 +187,27 @@ interface Segment {
   colorBands?: { start: number; len: number; cls: string }[];
 }
 
+/**
+ * **表示できない SBCS は半角スペースにする（ACS と同じ）。**
+ *
+ * EBCDIC の SBCS 表にはマップの無いバイトがあり、コーデックはそこを U+FFFD で返す。
+ * これをそのまま出すと、多くのフォントで **U+FFFD が全角幅**になるため 1 桁のはずが
+ * 2 桁を占め、その行の後続がすべて右へずれる。表示コードページを切り替えると
+ * （930 カナ表と 1027 表で未定義バイトの集合が違うため）実際に現れる。
+ */
+function displayText(s: string): string {
+  return s.includes("\uFFFD") ? s.replaceAll("\uFFFD", " ") : s;
+}
+
 /** セルの表示文字（SO/SI マーク表示・カタカナ再解釈・dbcs-tail 空白埋め） */
 function displayChar(c: Cell): string {
   if (props.showShiftMarks && c.kind === "so") return "{";
   if (props.showShiftMarks && c.kind === "si") return "}";
   // カタカナ表示: SBCS の生バイトを半角カナで再解釈
   if (props.katakanaView && c.kind === "sbcs" && c.rawByte !== undefined) {
-    return katakanaChar(c.rawByte);
+    return displayText(katakanaChar(c.rawByte));
   }
-  return c.char === "" ? " " : c.char;
+  return c.char === "" ? " " : displayText(c.char);
 }
 
 // リンク化: 既定 ON（withDefaults）。カタカナ表示中は文字が別解釈になるため無効化（誤検出・桁崩れ防止）
@@ -483,7 +495,7 @@ function shiftCellsView(s: FieldSlice): string {
     if (cell.kind === "dbcs-tail") continue; // lead 側が 2 桁ぶんを担う
     if (cell.kind === "so") out += soMark();
     else if (cell.kind === "si") out += siMark();
-    else out += cell.char === "" ? " " : cell.char;
+    else out += cell.char === "" ? " " : displayText(cell.char);
   }
   return out;
 }
@@ -682,7 +694,7 @@ function writeSlices(f: Field, full: string): void {
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
     // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
-    if (el) el.value = stripAttrSentinels(masked.slice(s.offset, s.offset + s.width)).padEnd(s.width, " ");
+    if (el) el.value = displayText(stripAttrSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
   });
 }
 
@@ -1108,7 +1120,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
       // 表示はセンチネル→空白。生のセンチネル（U+E020–E03F）を入れると、Nerd Font 等
       // PUA にアイコンを持つ等幅フォントで可視グリフになり（色制御文字が見える）、
       // 2 桁幅のグリフだと欄幅を超えて横スクロールし caret が行末へ飛ぶ。
-      el.value = stripAttrSentinels(sliceValue(f, sliceIdx));
+      el.value = displayText(stripAttrSentinels(sliceValue(f, sliceIdx)));
       el.setSelectionRange(0, 0);
       emit("cursor", s.row, s.col);
       return;
@@ -1119,7 +1131,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   // 行またぎ欄では、この input が担当するスライスぶんだけを入れる（全長を入れると桁が溢れる）。
   // 表示はセンチネル→空白（writeSlices / :value / blur と同じ。生のセンチネルを入れると
   // Nerd Font で可視化・桁溢れし、色制御文字表示とカーソル行末飛びを起こす）。
-  if (edit) el.value = stripAttrSentinels(sliceValue(f, sliceIdx));
+  if (edit) el.value = displayText(stripAttrSentinels(sliceValue(f, sliceIdx)));
   // スペース埋め表示だと Tab/フォーカスで native カーソルが末尾へ行き入力できなくなるため、
   // フォーカス時はフィールド先頭へ置く（クリックは mouseup で押下桁に上書きされる）。
   el.setSelectionRange(0, 0);
@@ -1132,7 +1144,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
-  el.value = stripAttrSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0)));
+  el.value = displayText(stripAttrSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
   // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
   // **欄内スライス間の一時 blur（syncingFocus）では ++ しない**——編集中に再描画すると
@@ -1409,7 +1421,7 @@ function pasteFrom(
       // （表示はセンチネル→空白。生のセンチネルは Nerd Font で可視化・桁溢れするため）
       slicesOf(field).forEach((_s, i) => {
         const inp = inputForSlice(field, i);
-        if (inp) inp.value = stripAttrSentinels(sliceValue(field, i));
+        if (inp) inp.value = displayText(stripAttrSentinels(sliceValue(field, i)));
       });
     }
   }
@@ -1516,7 +1528,7 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   const from = composeLogicalStart(f, el);
   // 表示はセンチネル→空白（1:1 なので長さは不変＝composePrefixLen も確定分の切り出しも保つ）。
   // 生のセンチネルを prefix に残すと Nerd Font で色制御文字が見え・桁が溢れる。
-  const prefix = stripAttrSentinels(edit.chars.slice(from, composeStart).join(""));
+  const prefix = displayText(stripAttrSentinels(edit.chars.slice(from, composeStart).join("")));
   composePrefixLen = prefix.length;
   el.value = prefix;
   el.setSelectionRange(prefix.length, prefix.length); // 候補を入力位置（既入力の直後）に出す
@@ -1946,7 +1958,7 @@ onBeforeUnmount(() => {
             class="grid-input"
             :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
             :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
-            :value="stripAttrSentinels(sliceValue(seg.field!, seg.slice ?? 0))"
+            :value="displayText(stripAttrSentinels(sliceValue(seg.field!, seg.slice ?? 0)))"
             :readonly="seg.field!.protected"
             type="text"
             :autocomplete="seg.field!.hidden ? 'off' : undefined"
