@@ -74,3 +74,21 @@ node --env-file=.env scripts/example-automation.mjs
 `verify-autosignon` / `verify-signon` / `verify-mcp` / `verify-ws` / `verify-browser` / `verify-dbcs-tls` /
 `verify-gui-enhanced`（各機能の実機検証）、`capture-*`（トレース fixture 採取）、`diag-*`（signon/PDM 診断）、
 `dump-screen`（トレースをオフライン再生）も同じ実行規約に従う。
+
+## 他クライアントの実測（tap-proxy）
+
+`tap-proxy.mjs` は **IBM ACS 等の他クライアントと実機のやり取りを実測する中継タップ**。
+仕様書に載っていない応答形式（Query Reply の能力申告・READ SCREEN EXTENDED(0x64) の応答）は
+これで採った。ホストは形式違いを「機能チェック」としか言わないので、推測での総当たりは効かない。
+
+```sh
+TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
+# ACS のセッションを「このホストの IP / ポート 2323」に向けて操作する
+```
+
+5250 telnet だけ hex 記録し、ホストサーバーポート（449 / 8470-8476）は**記録せず中継のみ**
+（資格情報が流れるため）。449 は特権ポートなので Linux では
+`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=440`（作業後は 1024 に戻す）。
+解析時は telnet のエスケープを先に解除すること（`IAC EOR` を落とし `IAC IAC` → `0xFF`）。
+**記録にはサインオンのパスワードが平文で残る。解析が済んだら削除すること。**
+

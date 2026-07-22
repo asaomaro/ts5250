@@ -41,6 +41,12 @@ export const COMMAND = {
   READ_MDT_FIELDS: 0x52,
   READ_MDT_FIELDS_ALT: 0x82,
   READ_SCREEN: 0x62,
+  /**
+   * READ SCREEN EXTENDED。READ SCREEN（0x62）の拡張版で、応答形式は同じ。
+   * 拡張 5250 を Query Reply で申告している端末には、ホストは 0x62 ではなく
+   * こちらを送ってくる（日本語実機の PDM F1 ヘルプで確認）。
+   */
+  READ_SCREEN_EXTENDED: 0x64,
   WRITE_ERROR_CODE: 0x21,
   SAVE_SCREEN: 0x02,
   RESTORE_SCREEN: 0x12,

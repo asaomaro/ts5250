@@ -54,8 +54,16 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
   };
 }
 
-/** クライアント → ホストのレコードを GDS ヘッダ付きで構築する */
-export function buildRecord(opcode: number, data: Uint8Array, flags: Partial<RecordHeaderFlags> = {}): Uint8Array {
+/**
+ * クライアント → ホストのレコードを GDS ヘッダ付きで構築する。
+ * flag2 はフラグ 2 バイト目。ACS 実機はクライアント発のレコードで常に 0x80 を立てている。
+ */
+export function buildRecord(
+  opcode: number,
+  data: Uint8Array,
+  flags: Partial<RecordHeaderFlags> = {},
+  flag2 = 0
+): Uint8Array {
   const w = new ByteWriter();
   const ll = 10 + data.length; // LL(2)+type(2)+reserved(2)+varHdrLen(1)+flags(2)+opcode(1)
   let flag1 = 0;
@@ -64,6 +72,6 @@ export function buildRecord(opcode: number, data: Uint8Array, flags: Partial<Rec
   if (flags.srq === true) flag1 |= HDR_FLAG.SRQ;
   if (flags.trq === true) flag1 |= HDR_FLAG.TRQ;
   if (flags.hlp === true) flag1 |= HDR_FLAG.HLP;
-  w.u16(ll).u16(GDS_TYPE).u16(0).u8(0x04).u8(flag1).u8(0).u8(opcode).bytes(data);
+  w.u16(ll).u16(GDS_TYPE).u16(0).u8(0x04).u8(flag1).u8(flag2).u8(opcode).bytes(data);
   return w.toUint8Array();
 }

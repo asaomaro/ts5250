@@ -4,7 +4,11 @@ import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import { buildReadMdtResponse, buildFlagRecord } from "../protocol/read-response.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
-import { buildSaveScreenResponse, buildReadScreenResponse } from "../protocol/save-screen.js";
+import {
+  buildSaveScreenResponse,
+  buildReadScreenResponse,
+  buildReadScreenExtendedResponse
+} from "../protocol/save-screen.js";
 import { applyDataStream } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
@@ -414,11 +418,21 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced));
         return;
       }
+      if (result.readScreenExtendedRequested) {
+        // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
+        this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec));
+        return;
+      }
       if (result.readScreenRequested) {
         // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
         // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
         this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec));
         return;
+      }
+      if (result.readRequested && !result.cursorSet) {
+        // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
+        // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
+        this.buf.cursorToFirstInputField();
       }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
       if (result.unlockKeyboard) unlocked = true;

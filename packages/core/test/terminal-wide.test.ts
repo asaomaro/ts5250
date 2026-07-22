@@ -69,14 +69,15 @@ describe("deviceEnvFor: CCSID → RFC 2877 デバイス属性", () => {
 
   it("日本語 DBCS は SBCS 部を申告する（930=カタカナ 290 / 939・1399=英小文字 1027）", () => {
     expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
-    expect(deviceEnvFor(939)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+    // 939 は ACS 実機の申告に合わせて JPB
+    expect(deviceEnvFor(939)).toEqual({ kbdType: "JPB", codePage: 1027, charSet: 1172 });
     expect(deviceEnvFor(1399)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
   });
 
   it("エイリアス（5026=930 系・5035/931=939 系）も同じ属性", () => {
     expect(deviceEnvFor(5026)).toEqual(deviceEnvFor(930));
-    expect(deviceEnvFor(5035)).toEqual(deviceEnvFor(939));
-    expect(deviceEnvFor(931)).toEqual(deviceEnvFor(939));
+    expect(deviceEnvFor(5035)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+    expect(deviceEnvFor(931)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
   });
 
   it("未知の CCSID は undefined（申告しない）", () => {
