@@ -33,6 +33,24 @@ export interface OpenOptions extends ConnectOptions {
   origin?: string;
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
+  /**
+   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   *
+   * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
+   * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
+   */
+  deviceNameRetry?: boolean;
+}
+
+/** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
+export function nextDeviceName(name: string): string | undefined {
+  const m = /^(.*?)(\d+)$/.exec(name);
+  if (!m) return name.length < 10 ? `${name}2` : undefined;
+  const width = m[2]!.length;
+  const next = Number(m[2]) + 1;
+  const digits = String(next).padStart(width, "0");
+  if (digits.length > width) return undefined; // 桁が増えるなら打ち止め（装置名は 10 文字まで）
+  return `${m[1]}${digits}`;
 }
 
 export interface SessionEntry {
@@ -63,7 +81,15 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
   output?: PrinterOutputConfig;
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
+  /**
+   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   *
+   * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
+   * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
+   */
+  deviceNameRetry?: boolean;
 }
+
 
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
 export interface PrinterEntry {
@@ -184,12 +210,22 @@ export class SessionManager {
     const id = opts.id ?? randomUUID();
     // 表示セッションの警告は既定で捨てられる（core の warn 既定が no-op）。
     // 配線しないと `unknown command 0x..` すら残らず、切り分け不能になる。
-    const session = await Session5250.connect({
-      ...opts,
-      id,
-      warn: (m) => sessionLog.warn({ sessionId: id }, m),
-      traceRecords: traceRecordsEnabled()
-    });
+    const connect = (deviceName?: string): Promise<Session5250> =>
+      Session5250.connect({
+        ...opts,
+        ...(deviceName !== undefined ? { deviceName } : {}),
+        id,
+        warn: (m) => sessionLog.warn({ sessionId: id }, m),
+        traceRecords: traceRecordsEnabled()
+      });
+    let session: Session5250;
+    try {
+      session = await connect();
+    } catch (err) {
+      // 装置名の重複はホストが理由を返さずソケットを閉じる。設定で許されていれば名前を繰り上げて再試行
+      if (!opts.deviceNameRetry || opts.deviceName === undefined) throw err;
+      session = await this.retryWithNextDeviceName(opts.deviceName, connect, err);
+    }
     const entry: SessionEntry = {
       id,
       session,
@@ -214,6 +250,27 @@ export class SessionManager {
   }
 
   /** プリンターセッションを開く（TN5250E プリンター）。受信スプールをバッファする。 */
+  /** 装置名を繰り上げながら再試行する（既定 5 回まで）。全滅したら最初のエラーを投げ直す */
+  private async retryWithNextDeviceName(
+    first: string,
+    connect: (deviceName: string) => Promise<Session5250>,
+    original: unknown
+  ): Promise<Session5250> {
+    let name: string | undefined = first;
+    for (let i = 0; i < 5; i++) {
+      name = name === undefined ? undefined : nextDeviceName(name);
+      if (name === undefined) break;
+      try {
+        const s = await connect(name);
+        sessionLog.warn({ deviceName: name }, `装置名 ${first} が使用中のため ${name} で接続した`);
+        return s;
+      } catch {
+        // 次の名前へ
+      }
+    }
+    throw original;
+  }
+
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
     if (this.size >= this.maxSessions) {
       throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);

@@ -14,6 +14,7 @@ import { systemsStore } from "../stores/systems.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { authStore } from "../stores/auth.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
+import { sessionsStore } from "../stores/sessions.js";
 import ConfigCard from "./ConfigCard.vue";
 
 /** カード / 一覧の表示切り替え（端末ごとに localStorage で保持。旧 UI から引き継ぐ） */
@@ -110,12 +111,52 @@ function openFeature(id: string, scoped = true): void {
   workspaceStore.showLauncher = false;
 }
 
+/**
+ * その設定で既に開いているセッション（あれば）。
+ * **システムを切り替えて戻ってきたときの誤操作を防ぐのが目的。** 戻るとメニューに出るのは
+ * この設定カードだけで、タブが生きていることが見えない。そこで「接続」を押すと 2 本目が開き、
+ * 装置名を固定していればホストが「使用中」としてネゴシエーション中にソケットを切る
+ * （SESSION_CLOSED: closed during negotiation）。開いているならタブへ戻す。
+ */
+function openedSession(ref: string): string | undefined {
+  return sessionsStore.all.find((x) => x.configRef === ref && x.connected)?.sessionId;
+}
+
+/** 同じ装置名で既に開いているセッション（別設定でも衝突する）。 */
+function deviceNameInUse(deviceName: string | undefined): string | undefined {
+  if (deviceName === undefined) return undefined;
+  return sessionsStore.all.find((x) => x.connected && x.meta?.deviceName === deviceName)?.label;
+}
+
+/** 既存タブを前面に出してワークスペースへ移る */
+function focusSession(sessionId: string): void {
+  const g = workspaceStore.groups().find((x) => x.tabs.includes(sessionId));
+  if (g) {
+    workspaceStore.setActiveTab(g.id, sessionId);
+    workspaceStore.focus(g.id);
+  }
+  workspaceStore.showLauncher = false;
+}
+
 /** セッション設定から接続する。**資格情報は送らない**——サーバーが参照から解決する */
-async function connect(ref: string): Promise<void> {
+async function connect(ref: string, force = false): Promise<void> {
   // 二重クリックで同じ装置名のセッションを 2 本開くと、2 本目がホスト側で弾かれる
   if (connecting.value) return;
   const s = systemsStore.currentSessions.find((x) => x.ref === ref);
   if (!s) return;
+  // 既に開いているならタブへ戻す（明示的に「新しいセッション」を選んだときだけ 2 本目を開く）
+  const opened = openedSession(ref);
+  if (opened !== undefined && !force) {
+    focusSession(opened);
+    return;
+  }
+  const busyLabel = deviceNameInUse(s.deviceName);
+  if (busyLabel !== undefined) {
+    error.value =
+      `装置名 ${s.deviceName} は「${busyLabel}」が使用中です。` +
+      `ホストは 1 つの装置に 1 接続しか許さないため、先に切断してください。`;
+    return;
+  }
   connecting.value = s.ref;
   error.value = "";
   try {
@@ -125,9 +166,9 @@ async function connect(ref: string): Promise<void> {
       ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {})
     };
     if (s.sessionType === "printer") {
-      await openPrinterSession(open, s.name, meta, s.system);
+      await openPrinterSession(open, s.name, meta, s.system, s.ref);
     } else {
-      await openSession(open, s.name, meta, s.system);
+      await openSession(open, s.name, meta, s.system, s.ref);
     }
     workspaceStore.showLauncher = false;
   } catch (e) {
@@ -183,7 +224,9 @@ async function connect(ref: string): Promise<void> {
           :session="s"
           :dense="viewMode === 'list'"
           :connecting="connecting === s.ref"
+          :opened="openedSession(s.ref) !== undefined"
           @open="connect($event)"
+          @open-new="connect($event, true)"
           @done="systemsStore.refresh()"
         />
         <ConfigCard

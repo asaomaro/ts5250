@@ -26,6 +26,13 @@ const props = defineProps<{
   dense?: boolean;
   /** このセッションが接続処理中か（接続待ちの表示に使う） */
   connecting?: boolean;
+  /**
+   * この設定のセッションが既に開いているか。
+   * 開いていれば「接続」ではなく「開く」（既存タブへ戻る）を出す。システムを切り替えて戻ると
+   * メニューにはこのカードしか出ず、タブが生きていることが見えないため、そのまま「接続」を
+   * 押して 2 本目を開いてしまう。装置名を固定しているとホストが弾く。
+   */
+  opened?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +40,8 @@ const emit = defineEmits<{
   (e: "cancel"): void;
   (e: "select", ref: string): void;
   (e: "open", ref: string): void;
+  /** 開いていても**あえて**もう 1 本開く */
+  (e: "openNew", ref: string): void;
 }>();
 
 const editing = ref(props.creating === true);
@@ -310,7 +319,17 @@ const infoRows = computed(() => {
             {{ selected ? "メニューへ" : "選択" }}
           </button>
           <button v-else class="btn" :disabled="connecting" @click="emit('open', session!.ref)">
-            <span v-if="connecting" class="dot" aria-hidden="true"></span>{{ connecting ? "接続中…" : "接続" }}
+            <span v-if="connecting" class="dot" aria-hidden="true"></span>{{
+              connecting ? "接続中…" : opened ? "開く" : "接続"
+            }}
+          </button>
+          <button
+            v-if="kind === 'session' && opened && !connecting"
+            class="btn ghost"
+            title="この設定でもう 1 本セッションを開く"
+            @click="emit('openNew', session!.ref)"
+          >
+            ＋新規
           </button>
           <button v-if="canEdit" class="btn ghost" @click="startEdit">編集</button>
           <button class="info" title="詳細" @click.stop="showInfo = !showInfo">ⓘ</button>
