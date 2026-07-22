@@ -8,6 +8,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import type { PublicSession, PublicSystem } from "@as400web/server";
 import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores/systems.js";
+import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
@@ -43,6 +44,14 @@ const emit = defineEmits<{
   /** 開いていても**あえて**もう 1 本開く */
   (e: "openNew", ref: string): void;
 }>();
+
+/**
+ * このシステムで**接続中**のセッション数。カードの「セッション N」は設定の数なので、
+ * それだけでは今つながっているのかが分からない（切り替えて戻ったときに一番知りたい情報）。
+ */
+const connectedCount = computed(() =>
+  props.kind === "system" && props.system ? sessionsStore.connectedCount(props.system.ref) : 0
+);
 
 const editing = ref(props.creating === true);
 const busy = ref(false);
@@ -335,8 +344,11 @@ const infoRows = computed(() => {
           <button class="info" title="詳細" @click.stop="showInfo = !showInfo">ⓘ</button>
           <InfoPopover v-if="showInfo" :rows="infoRows" @close="showInfo = false" />
         </div>
-        <span v-if="kind === 'system'" class="count" title="このシステムのセッション設定">
+        <span v-if="kind === 'system'" class="count" title="このシステムのセッション設定と接続中の数">
           セッション {{ systemsStore.sessionCount(system!.ref) }}
+          <span v-if="connectedCount > 0" class="live" title="接続中のセッション数"
+            >接続 {{ connectedCount }}</span
+          >
         </span>
       </div>
     </template>
@@ -582,6 +594,12 @@ const infoRows = computed(() => {
   font-size: 0.72rem;
   color: var(--muted);
   white-space: nowrap;
+}
+/* 接続中の数。設定の数と区別できるよう色を変える（0 のときは出さない） */
+.live {
+  margin-left: 6px;
+  color: var(--t-green);
+  font-weight: 600;
 }
 .btn {
   border: 1px solid var(--accent);
