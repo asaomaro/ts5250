@@ -441,8 +441,52 @@ function sliceValue(f: Field, sliceIdx: number): string {
   if (!s) return "";
   // 休止表示なので props 由来のレイアウトを使う（編集モデルを見ると blur で値が戻らない）
   if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f), s);
+  if (usesShiftCells(f)) return shiftCellsView(s);
   if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス
   return displayValue(f).slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
+}
+
+/**
+ * FCW で DBCS 宣言されていないのに SO/SI 混在データが書かれた欄か。
+ *
+ * ホストは**出力専用の欄に FCW を付けないことがある**（PDM のテキスト列など）。この欄は
+ * `f.dbcsType` が undefined なので DBCS 用の描画経路（dbcsRestLayout）に入らず、
+ * core の `fieldValue` が SO/SI を空白に潰した値をそのまま表示していた。結果、
+ * SO/SI マーク表示（ACS の Ctrl+F 相当）が ON でも `{ }` が出ず、空白のままだった。
+ *
+ * 編集中の欄は編集モデルが真実なのでセルを見ない。
+ */
+function usesShiftCells(f: Field): boolean {
+  if (f.dbcsType || f.hidden) return false;
+  if (props.edits.get(f.index) !== undefined) return false;
+  return slicesOf(f).some((s) => {
+    const row = props.snapshot.cells[s.row - 1];
+    if (!row) return false;
+    for (let i = 0; i < s.width; i++) {
+      const kind = row[s.col - 1 + i]?.kind;
+      if (kind === "so" || kind === "si") return true;
+    }
+    return false;
+  });
+}
+
+/** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・全角は 1 文字で 2 桁ぶん）。 */
+function shiftCellsView(s: FieldSlice): string {
+  const row = props.snapshot.cells[s.row - 1];
+  if (!row) return "".padEnd(s.width, " ");
+  let out = "";
+  for (let i = 0; i < s.width; i++) {
+    const cell = row[s.col - 1 + i];
+    if (!cell) {
+      out += " ";
+      continue;
+    }
+    if (cell.kind === "dbcs-tail") continue; // lead 側が 2 桁ぶんを担う
+    if (cell.kind === "so") out += soMark();
+    else if (cell.kind === "si") out += siMark();
+    else out += cell.char === "" ? " " : cell.char;
+  }
+  return out;
 }
 
 /** 列ビューをスライスの桁範囲で切り出す。境界にまたがる全角は前スライスの末尾に置き（input 幅で
