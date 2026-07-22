@@ -70,12 +70,12 @@ export async function listUsers(
     {
       receiveIndex: 0,
       listInfoIndex: 2,
-      decode: (r) => ({
-        name: readEbcdic(r, F.name, 10),
+      decode: (r, c) => ({
+        name: readEbcdic(r, F.name, 10, c),
         // 0xF1 = グループ
         isGroup: r[F.groupIndicator] === 0xf1,
-        text: readEbcdic(r, F.text, 50),
-        groupProfile: readEbcdic(r, F.groupProfile, 10)
+        text: readEbcdic(r, F.text, 50, c),
+        groupProfile: readEbcdic(r, F.groupProfile, 10, c)
       })
     }
   );

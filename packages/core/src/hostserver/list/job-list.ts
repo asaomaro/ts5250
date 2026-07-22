@@ -98,13 +98,13 @@ export async function listJobs(
     {
       receiveIndex: 0,
       listInfoIndex: 5,
-      decode: (r) => ({
-        name: readEbcdic(r, F.name, 10),
-        user: readEbcdic(r, F.user, 10),
-        number: readEbcdic(r, F.number, 6),
-        status: readEbcdic(r, F.status, 10),
-        type: readEbcdic(r, F.type, 1),
-        subtype: readEbcdic(r, F.subtype, 1)
+      decode: (r, c) => ({
+        name: readEbcdic(r, F.name, 10, c),
+        user: readEbcdic(r, F.user, 10, c),
+        number: readEbcdic(r, F.number, 6, c),
+        status: readEbcdic(r, F.status, 10, c),
+        type: readEbcdic(r, F.type, 1, c),
+        subtype: readEbcdic(r, F.subtype, 1, c)
       })
     }
   );

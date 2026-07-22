@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { padEbcdic, readEbcdic, int32, concatBytes, parseListInfo } from "../src/hostserver/list/openlist.js";
+import {
+  padEbcdic,
+  readEbcdic,
+  codecOf,
+  int32,
+  concatBytes,
+  parseListInfo
+} from "../src/hostserver/list/openlist.js";
+import type { CommandConnection } from "../src/hostserver/command/command-connection.js";
 import { Tn5250Error } from "../src/errors.js";
 
 /** QGY のオープンリスト API に共通する部分 */
@@ -58,5 +66,33 @@ describe("parseListInfo", () => {
 
   it("短すぎるデータを拒否する", () => {
     expect(() => parseListInfo(new Uint8Array(8))).toThrow(Tn5250Error);
+  });
+});
+
+/**
+ * **リストが返す文字はジョブの CCSID で入っている。**
+ *
+ * 日本語機ではユーザーの説明などが DBCS（SO/SI ＋ 2 バイト）で返る。CCSID 37 で読むと
+ * 1 バイトずつラテン文字に化けた（実機のユーザー一覧で「ä[äbäýäþ ãýáÄ」のように出た）。
+ */
+describe("codecOf — ジョブ CCSID でテキストを読む", () => {
+  const conn = (ccsid: number) => ({ info: { ccsid } }) as unknown as CommandConnection;
+  /** "日本" を CCSID 939 の DBCS で表したバイト列（SO + 2 バイト×2 + SI） */
+  const NIHON = Uint8Array.from([0x0e, 0x45, 0x62, 0x45, 0x66, 0x0f]);
+
+  it("日本語 CCSID なら DBCS として読める", () => {
+    expect(readEbcdic(NIHON, 0, NIHON.length, codecOf(conn(939)))).toBe("日本");
+  });
+
+  it("CCSID 37 のままだとバイトごとに化ける（従来の挙動）", () => {
+    const broken = readEbcdic(NIHON, 0, NIHON.length);
+    expect(broken).not.toBe("日本");
+    expect(broken.length).toBeGreaterThan(2); // 1 バイト 1 文字に割れる
+  });
+
+  it("未対応の CCSID は 37 にフォールバックする（落とさない）", () => {
+    const b = Uint8Array.from([0xc1, 0xc2]);
+    expect(readEbcdic(b, 0, 2, codecOf(conn(1234567)))).toBe("AB");
+    expect(readEbcdic(b, 0, 2, codecOf(conn(0)))).toBe("AB");
   });
 });
