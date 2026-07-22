@@ -4,7 +4,13 @@ import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { codecForCcsid } from "../src/codec/codec.js";
 import { AID, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
-import { attrSentinel, isAttrSentinel, attrSentinelByte } from "../src/screen/attr-sentinel.js";
+import {
+  attrSentinel,
+  isAttrSentinel,
+  attrSentinelByte,
+  isRawSentinel,
+  sentinelByte
+} from "../src/screen/attr-sentinel.js";
 
 const codec = codecForCcsid(37);
 
@@ -112,5 +118,67 @@ describe("buildFlagRecord", () => {
     const parsed = parseRecord(buildFlagRecord({ atn: true }));
     expect(parsed.flags.atn).toBe(true);
     expect(parsed.flags.srq).toBe(false);
+  });
+});
+
+/**
+ * **表示できない SBCS バイトは、編集して送信しても元のバイトのまま返る。**
+ *
+ * EBCDIC の SBCS 表にはマップの無いバイトがあり、デコードすると U+FFFD になる。値に
+ * U+FFFD をそのまま載せると、その欄を編集して送信した時点でエンコード不能となり
+ * SUB（0x3F）に化けて元のデータを壊す（日本語機の実データで発生）。
+ * 埋め込み属性と同じセンチネル方式で生バイトを運び、送信で書き戻す。
+ */
+describe("表示できない SBCS バイトの保持", () => {
+  const dbcsCodec = codecForCcsid(939);
+  /** 0x41 は CCSID 939 の SBCS 部（1027）に定義が無い */
+  const UNMAPPED = 0x41;
+
+  function bufferWithUnmappedByte(): ScreenBuffer {
+    const b = new ScreenBuffer();
+    b.setAttr(b.addrOf(5, 24), 0x24);
+    b.addField(b.addrOf(5, 25), 4, FFW.ID_VALUE, 0x24);
+    const fs = b.addrOf(5, 25);
+    b.setChar(fs, "A", 0xc1);
+    b.setChar(fs + 1, String.fromCharCode(dbcsCodec.decodeByte(UNMAPPED)), UNMAPPED);
+    b.setChar(fs + 2, "B", 0xc2);
+    return b;
+  }
+
+  it("前提: そのバイトはデコードできず U+FFFD になる", () => {
+    expect(dbcsCodec.decodeByte(UNMAPPED)).toBe(0xfffd);
+  });
+
+  it("fieldValue はセンチネルで返す（U+FFFD をそのまま出さない）", () => {
+    const b = bufferWithUnmappedByte();
+    const value = b.fieldValue(b.fieldByIndex(1));
+    expect(value).not.toContain("�");
+    expect(isRawSentinel(value[1]!)).toBe(true);
+    expect(sentinelByte(value[1]!)).toBe(UNMAPPED);
+  });
+
+  it("編集して送信しても元のバイトで返る（SUB に化けない）", () => {
+    const b = bufferWithUnmappedByte();
+    const value = b.fieldValue(b.fieldByIndex(1));
+    // 末尾を打ち替える（該当バイトの桁は触らない）
+    b.setFieldValue(b.fieldByIndex(1), value.slice(0, 2) + "X");
+
+    const { record, substituted } = buildReadMdtResponse(b, dbcsCodec, AID.ENTER, {
+      row: 5,
+      col: 25
+    });
+    const d = [...parseRecord(record).data];
+    expect(d.slice(3, 6)).toEqual([ORDER.SBA, 5, 25]);
+    expect(d.slice(6, 9)).toEqual([0xc1, UNMAPPED, 0xe7]); // A / 元のバイト / X
+    expect(substituted, "センチネルは SUB に計上されない").toBe(0);
+  });
+
+  it("該当バイトより前を削ると、そのバイトも一緒に左へ動く", () => {
+    const b = bufferWithUnmappedByte();
+    const value = b.fieldValue(b.fieldByIndex(1));
+    b.setFieldValue(b.fieldByIndex(1), value.slice(1)); // 先頭 "A" を削除
+    const { record } = buildReadMdtResponse(b, dbcsCodec, AID.ENTER, { row: 5, col: 25 });
+    const d = [...parseRecord(record).data];
+    expect(d.slice(6, 8)).toEqual([UNMAPPED, 0xc2]);
   });
 });

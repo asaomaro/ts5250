@@ -3,7 +3,7 @@ import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
 import { ORDER, OPCODE } from "./constants.js";
 import { buildRecord, type RecordHeaderFlags } from "./gds.js";
-import { isAttrSentinel, attrSentinelByte } from "../screen/attr-sentinel.js";
+import { isRawSentinel, sentinelByte } from "../screen/attr-sentinel.js";
 
 /**
  * Read MDT Fields 応答（クライアント → ホスト）を構築する。
@@ -37,9 +37,9 @@ export function buildReadMdtResponse(
       }
     };
     for (const ch of value) {
-      if (isAttrSentinel(ch)) {
+      if (isRawSentinel(ch)) {
         flushRun();
-        w.u8(attrSentinelByte(ch));
+        w.u8(sentinelByte(ch));
       } else {
         run += ch;
       }

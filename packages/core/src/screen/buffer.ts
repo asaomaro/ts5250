@@ -6,7 +6,13 @@ import type {
   ParsedWindow
 } from "../protocol/wdsf-parser.js";
 import { decodeAttribute, DEFAULT_ATTR } from "./attributes.js";
-import { attrSentinel, isAttrSentinel, attrSentinelByte } from "./attr-sentinel.js";
+import {
+  attrSentinel,
+  rawSentinel,
+  isAttrSentinel,
+  isRawSentinel,
+  sentinelByte
+} from "./attr-sentinel.js";
 import type {
   Cell,
   CellKind,
@@ -17,6 +23,9 @@ import type {
   GuiWindow,
   ScreenSnapshot
 } from "./types.js";
+
+/** コーデックがマップできなかったバイトのデコード結果（表示は空白・値はセンチネルで運ぶ） */
+const UNDISPLAYABLE = "\uFFFD";
 
 /**
  * 内部セル: 属性バイト or 文字（Unicode）。null = 未設定（既定属性の空白）。
@@ -363,7 +372,15 @@ export class ScreenBuffer {
       // **センチネル文字は埋め込み属性セルとして書く**——値の中で属性が編集に追従して動いた
       // 位置に、その属性バイトのセルを置き直す（桁ずれ・色ずれ・送信での破壊を防ぐ）。
       if (ch !== undefined && isAttrSentinel(ch)) {
-        this.cells[field.startAddr + i] = { type: "attr", byte: attrSentinelByte(ch) };
+        this.cells[field.startAddr + i] = { type: "attr", byte: sentinelByte(ch) };
+      } else if (ch !== undefined && isRawSentinel(ch)) {
+        // 表示できない SBCS バイト。生バイトを保ったまま置き直す（送信で元に戻る）
+        this.cells[field.startAddr + i] = {
+          type: "char",
+          char: UNDISPLAYABLE,
+          charKind: "sbcs",
+          rawByte: sentinelByte(ch)
+        };
       } else {
         this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
       }
@@ -378,8 +395,13 @@ export class ScreenBuffer {
     let s = "";
     for (let i = 0; i < field.length; i++) {
       const c = this.cells[field.startAddr + i];
-      if (c?.type === "char") s += c.char;
-      else if (c?.type === "attr") s += dbcs ? " " : attrSentinel(c.byte);
+      if (c?.type === "char") {
+        // **表示できないバイトもセンチネルで返す**。U+FFFD のまま返すと、その欄を編集して
+        // 送信した時点でエンコード不能となり SUB（0x3F）に化けて元のデータを壊す。
+        s += !dbcs && c.char === UNDISPLAYABLE && c.rawByte !== undefined
+          ? rawSentinel(c.rawByte)
+          : c.char;
+      } else if (c?.type === "attr") s += dbcs ? " " : attrSentinel(c.byte);
       else s += " ";
     }
     return s.replace(/ +$/, "");
