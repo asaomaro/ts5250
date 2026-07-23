@@ -101,6 +101,14 @@ const ATTR_ENTRY_LEN = 12;
  */
 export type NpAttribute =
   | { id: number; type: "string"; value: string; length: number }
+  /**
+   * NUL 終端の EBCDIC 文字列（固定長ではない）。
+   *
+   * メッセージ応答（MSGREPLY）はホストが**末尾 NUL で長さを判断する**。空白詰めの固定長で
+   * 送ると応答が届かない（answerMessage が rc=0x0009 で失敗した）。JTOpen も文字列属性は
+   * `new byte[len+1]` に詰めて末尾を 0 にしている（NPAttrString.buildHostString）。
+   */
+  | { id: number; type: "stringz"; value: string }
   | { id: number; type: "int"; value: number };
 
 /** 属性ごとの固定長 */
@@ -132,9 +140,11 @@ function encodeString(text: string): Uint8Array {
  * データ部の先頭からではない。ここを誤ると CPF3C58「ジョブ名が無効」になる。
  */
 export function buildAttributeList(attributes: readonly NpAttribute[]): Uint8Array {
-  const values = attributes.map((a) =>
-    a.type === "string" ? padEbcdic(a.value, a.length) : intBytes(a.value)
-  );
+  const values = attributes.map((a) => {
+    if (a.type === "string") return padEbcdic(a.value, a.length);
+    if (a.type === "stringz") return ebcdicNulTerminated(a.value);
+    return intBytes(a.value);
+  });
   const headerLen = 4 + ATTR_ENTRY_LEN * attributes.length;
   const total = headerLen + values.reduce((n, v) => n + v.length, 0);
   // 値オフセットはコードポイントヘッダー（LL 4 ＋ CP 2）を含めた位置で書く
@@ -150,7 +160,7 @@ export function buildAttributeList(attributes: readonly NpAttribute[]): Uint8Arr
   attributes.forEach((attr, i) => {
     const value = values[i]!;
     view.setUint16(entryAt, attr.id);
-    view.setUint16(entryAt + 2, attr.type === "string" ? ATTR_TYPE.string : ATTR_TYPE.fourByte);
+    view.setUint16(entryAt + 2, attr.type === "int" ? ATTR_TYPE.fourByte : ATTR_TYPE.string);
     view.setUint32(entryAt + 4, value.length);
     view.setUint32(entryAt + 8, valueAt + CODEPOINT_HEADER);
     out.set(value, valueAt);
@@ -164,6 +174,14 @@ function intBytes(value: number): Uint8Array {
   const b = new Uint8Array(4);
   new DataView(b.buffer).setInt32(0, value);
   return b;
+}
+
+/** NUL 終端の EBCDIC（可変長）。ホストが末尾 NUL で長さを判断する属性用 */
+export function ebcdicNulTerminated(text: string): Uint8Array {
+  const body = encodeString(text);
+  const out = new Uint8Array(body.length + 1);
+  out.set(body);
+  return out; // 末尾 1 バイトは 0（Uint8Array 既定）
 }
 
 /** 空白詰めの EBCDIC */
