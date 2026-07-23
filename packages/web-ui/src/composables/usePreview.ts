@@ -36,16 +36,46 @@ export interface PreviewState {
 }
 
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
+/**
+ * テキストとして開く拡張子。
+ *
+ * **IBM i の資産を厚めに入れている**——IFS に置かれるのは一般的なテキストだけでなく、
+ * ソース（RPG / CL / SQLRPG）や DDS（表示・印刷・物理・論理ファイル）が普通にある。
+ * これらは拡張子だけ見ればテキストなので、バイナリ扱いで「ダウンロードしてください」に
+ * 落とすとソースを画面で確認できない。
+ *
+ * 判定は**拡張子だけ**で、中身は見ていない。文字コードの判定は別（サーバーの決定表）。
+ */
 const TEXT_EXT = new Set([
-  "txt", "log", "md", "json", "xml", "csv", "yml", "yaml", "ini", "conf", "properties",
-  "sh", "js", "ts", "css", "html", "htm", "sql", "rpgle", "clle", "cbl", "c", "h", "java", "py"
+  // 一般的なテキスト・設定・データ
+  "txt", "log", "md", "ini", "conf", "cfg", "properties", "env",
+  "json", "jsonl", "ndjson", "xml", "yml", "yaml", "toml", "csv", "tsv",
+  // IBM i のソース・DDS（拡張子だけ見ればテキスト）
+  "rpg", "rpgle", "sqlrpg", "sqlrpgle", "clp", "clle", "cl", "cmd", "cbl", "cblle", "sqlcbl",
+  "dspf", "prtf", "pf", "lf", "mbr", "dds", "dtaara",
+  // スクリプト・プログラム
+  "sh", "bash", "zsh", "bat", "ps1", "psm1", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx",
+  "java", "c", "h", "cpp", "hpp", "cs", "go", "rb", "php", "pl", "sql",
+  // マークアップ・スタイル
+  "html", "htm", "css", "scss", "svg", "vue", "diff", "patch"
 ]);
 
+/** パスの最後の要素。拡張子の判定は**ファイル名だけ**を見る（`/a.b/noext` に引きずられない） */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
 export function kindOf(path: string): PreviewKind {
-  const at = path.lastIndexOf(".");
+  const name = baseName(path);
+  const at = name.lastIndexOf(".");
+  // `.bashrc` `.gitignore` のような**ドットで始まる拡張子なしのファイル**はテキストとして扱う。
+  // この形は設定ファイルであることがほとんどで、バイナリで置かれることはまず無い
+  if (at === 0) return "text";
   if (at < 0) return "binary";
-  const ext = path.slice(at + 1).toLowerCase();
+  const ext = name.slice(at + 1).toLowerCase();
   if (ext === "pdf") return "pdf";
+  // `.svg` は画像として描ける（テキストでもある）。**画像の判定を先に置く**——
+  // 拡張子の集合が重なる唯一の例なので、順序が意味を持つ
   if (IMAGE_EXT.has(ext)) return "image";
   if (TEXT_EXT.has(ext)) return "text";
   return "binary";

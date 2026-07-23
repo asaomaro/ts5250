@@ -75,6 +75,50 @@ describe("種別の振り分け", () => {
     expect(kindOf("/a/noext")).toBe("binary");
   });
 
+  /**
+   * **IBM i の資産はテキストとして開けること。**
+   * ソースや DDS をバイナリ扱いにすると「ダウンロードしてください」に落ち、画面で確認できない。
+   */
+  it("IBM i のソース・DDS をテキストとして扱う", () => {
+    for (const ext of [
+      "rpg", "rpgle", "sqlrpg", "sqlrpgle", "clp", "clle", "cl", "cmd", "cbl",
+      "dspf", "prtf", "pf", "lf", "mbr", "dds"
+    ]) {
+      expect(kindOf(`/a/SRC.${ext}`)).toBe("text");
+      // 大文字（IBM i のメンバー名は大文字が普通）
+      expect(kindOf(`/a/SRC.${ext.toUpperCase()}`)).toBe("text");
+    }
+  });
+
+  it("一般的なテキスト・設定・スクリプトをテキストとして扱う", () => {
+    for (const ext of [
+      "txt", "log", "ini", "properties", "json", "jsonl", "xml", "yml", "toml",
+      "csv", "tsv", "sql", "html", "js", "ts", "java", "py", "sh", "bat", "ps1"
+    ]) {
+      expect(kindOf(`/a/f.${ext}`)).toBe("text");
+    }
+  });
+
+  /** `.bashrc` `.gitignore` の類。設定ファイルなのでテキストで開く */
+  it("ドットで始まる拡張子なしのファイルはテキスト", () => {
+    expect(kindOf("/home/USER/.bashrc")).toBe("text");
+    expect(kindOf("/home/USER/.gitignore")).toBe("text");
+    expect(kindOf("/.profile")).toBe("text");
+    // ドットで始まっても拡張子があれば、その拡張子で判定する
+    expect(kindOf("/home/USER/.config.json")).toBe("text");
+    expect(kindOf("/home/USER/.cache.bin")).toBe("binary");
+  });
+
+  it("拡張子の判定はファイル名だけを見る（フォルダ名のドットに引きずられない）", () => {
+    expect(kindOf("/a.txt/noext")).toBe("binary");
+    expect(kindOf("/v1.2/readme.md")).toBe("text");
+  });
+
+  /** svg はテキストでもあるが、画像として描ける方を採る */
+  it("svg は画像として扱う", () => {
+    expect(kindOf("/a/logo.svg")).toBe("image");
+  });
+
   /** 表示できない種別は読みに行かない（100KB/s のホストから無駄に転送しない） */
   it("プレビューできない種別では要求を出さない", async () => {
     const spy = vi.fn();
