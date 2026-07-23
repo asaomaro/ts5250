@@ -95,6 +95,25 @@ export function buildFileExchangeAttributes(): Uint8Array {
   return out;
 }
 
+/**
+ * 交換属性応答（0x8009）が報告するデータストリームレベル。
+ *
+ * **要求した値（`buildFileExchangeAttributes` は 8）以下とは限らない**——
+ * PUB400 は 24 を返す（research F3）。OA2 の CCSID をどのオフセットで読むかがこれで決まるので、
+ * 要求値から決め打ちにせず、応答の値を保持して使うこと（`parseContentCcsid`）。
+ *
+ * 参照: JTOpen `IFSExchangeAttrRep.getDataStreamLevel()`（offset 22）。
+ */
+export function replyDatastreamLevel(frame: Uint8Array): number {
+  if (frame.length < 24) {
+    throw new As400Error(
+      "PROTOCOL_ERROR",
+      `file server exchange attributes reply too short: ${frame.length} bytes`
+    );
+  }
+  return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint16(22);
+}
+
 export interface OpenFileOptions {
   path: string;
   /** 読み取りか書き込みか */
@@ -258,6 +277,81 @@ export function buildListFilesRequest(path: string, opts: ListFilesOptions = {})
     v.setUint32(at, opts.restartId);
   }
   return out;
+}
+
+/**
+ * 属性リストレベル: OA2 構造体を返させる ＋ 開いたインスタンス（ファイルハンドル）を使う。
+ * 原典 `IFSListAttrsReq(handle, OA2, …)` の `0x44`。OA1 は 0x42、OA なしは 0x01。
+ */
+const ATTR_LIST_LEVEL_OA2 = 0x44;
+/** OA2 構造体のコードポイント（OA1 は 0x0010）。原典 `IFSListAttrsRep.getObjAttrBytes` */
+const CP_OBJ_ATTRS2 = 0x000f;
+
+/**
+ * ハンドル指定の属性一覧要求（0x000A）。**ファイル内容の CCSID タグを取るための唯一の経路**。
+ *
+ * 原典 `IFSFileDescriptorImplRemote.listObjAttrs()` の設計メモ:
+ * 「OA* 構造体を応答に含めさせるには、名前ではなく**ハンドル**でファイルを指定しなければならない」。
+ * 実際、パターン指定の一覧（`buildListFilesRequest`）では OA2 が返らず、
+ * 応答 offset 73 は名前の CCSID（1200）でしかない（research F1-5）。
+ *
+ * **応答は `request()` で受けること**——`requestStream()` は使わない。
+ * パターン指定の一覧と違い、**終端フレーム（0x8001 rc=18）は来ない**。
+ * 連鎖指示 0 の `0x8005` が 1 フレーム返って終わりで、次を待つと 20 秒固まる（research F2 で実測）。
+ */
+export function buildListAttrsByHandleRequest(handle: number): Uint8Array {
+  if (!isUint(handle, 0xffffffff)) {
+    throw new As400Error("CONFIG_ERROR", `invalid file handle: ${handle}`);
+  }
+  const templateLength = 20;
+  const total = 20 + templateLength; // ハンドル指定＝名前を送らないので可変部は無い
+  const out = new Uint8Array(total);
+  const v = new DataView(out.buffer);
+  writeHeader(v, total, templateLength, FILE_REQ.listFiles);
+  v.setUint16(20, 0); // 連鎖指示
+  v.setUint32(22, handle);
+  v.setUint16(26, 0); // 名前 CCSID: ハンドル指定では使わない（原典も設定しない）
+  v.setUint32(28, 1); // 作業ディレクトリハンドル
+  v.setUint16(32, 0); // 権限チェック不要（既に開けているため）
+  v.setUint16(34, 0xffff); // 最大件数: 無制限
+  v.setUint16(36, ATTR_LIST_LEVEL_OA2);
+  v.setUint16(38, 0); // パターン一致: POSIX
+  return out;
+}
+
+/**
+ * OA2 応答（0x8005）から**ファイル内容の CCSID タグ**を取り出す。取れなければ `undefined`。
+ *
+ * 可変部（`20 + 宣言テンプレート長`。ハンドル指定の応答は 8 で、一覧応答の 93 とは違う）から
+ * LL/CP を辿り、CP が `0x000F` の塊が OA2 本体（LL/CP の 6 バイトを除いた部分）。
+ *
+ * **CCSID の位置はサーバーが報告したデータストリームレベルで変わる**
+ * （原典 `IFSObjAttrs2.determineCCSIDOffset`）。固定値を埋め込まないこと:
+ *
+ * - 0 → OA2: 126（コードページ）
+ * - 0xF4F4 → OA2a: 142（コードページ）
+ * - それ以外 → OA2b / OA2c: 134（CCSID of object）
+ *
+ * タグは**中身を説明しているとは限らない**（我々が書いた UTF-8 のファイルに 850 が付く。research F4）。
+ * 復号の決定表では中身の推定を先に置くこと。
+ */
+export function parseContentCcsid(frame: Uint8Array, datastreamLevel: number): number | undefined {
+  if (replyId(frame) !== REPLY_LIST_ENTRY || frame.length < 20) return undefined;
+  const v = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  const offsetInOa = datastreamLevel === 0 ? 126 : datastreamLevel === 0xf4f4 ? 142 : 134;
+  let at = 20 + v.getUint16(16);
+  while (at + 6 <= frame.length) {
+    const ll = v.getUint32(at);
+    if (ll < 6 || at + ll > frame.length) return undefined; // 壊れた LL で無限ループ・範囲外にしない
+    if (v.getUint16(at + 4) === CP_OBJ_ATTRS2) {
+      const valueAt = at + 6 + offsetInOa;
+      // 構造体が短い（想定より古い OA2 形）なら、無関係なバイトを CCSID として読まない
+      if (valueAt + 2 > at + ll) return undefined;
+      return v.getUint16(valueAt);
+    }
+    at += ll;
+  }
+  return undefined;
 }
 
 /**

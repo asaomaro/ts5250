@@ -12,6 +12,9 @@ import {
   buildWriteRequest,
   buildCloseRequest,
   buildDeleteRequest,
+  buildListAttrsByHandleRequest,
+  parseContentCcsid,
+  replyDatastreamLevel,
   replyId,
   replyReturnCode,
   replyFileHandle,
@@ -135,6 +138,96 @@ describe("応答の解釈（取り違えやすい）", () => {
 
   it("短すぎる応答を拒否する", () => {
     expect(() => replyId(new Uint8Array(10))).toThrow(Tn5250Error);
+  });
+});
+
+/**
+ * ファイル内容の CCSID タグ（OA2）。
+ * ここのバイト列は **PUB400 で実際に捕えたフレーム**（research F2・F3）。
+ * レイアウトを変えるときは、この実物が通ることを必ず確かめること。
+ */
+describe("内容の CCSID タグ（OA2）", () => {
+  /** 実機の交換属性応答（0x8009・38 バイト）。offset 22 が報告レベル = 24 */
+  const EXCHANGE_REPLY = Uint8Array.from([
+    0x00, 0x00, 0x00, 0x26, 0x00, 0x00, 0xe0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x0a, 0x80, 0x09, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x08, 0x00, 0x0a, 0x04, 0xb0
+  ]);
+
+  /**
+   * 実機の OA2 応答（0x8005・194 バイト）。`/home/USER/ifsdemo/hello.txt` のタグは 850。
+   * 宣言テンプレート長は 8（一覧応答の 93 とは別レイアウト）。
+   */
+  function oa2Reply(ccsid = 850): Uint8Array {
+    const out = new Uint8Array(194);
+    const v = new DataView(out.buffer);
+    v.setUint32(0, 194);
+    v.setUint16(6, FILE_SERVER_ID);
+    v.setUint16(16, 8); // 宣言テンプレート長
+    v.setUint16(18, 0x8005);
+    v.setUint16(20, 0); // 連鎖指示 0 = このフレームで終わり
+    v.setUint32(28, 166); // 可変部 LL
+    v.setUint16(32, 0x000f); // CP = OA2
+    v.setUint16(34 + 134, ccsid); // OA2b/OA2c の「CCSID of object」
+    return out;
+  }
+
+  it("交換属性応答から、サーバーが報告したレベルを読む（要求値ではない）", () => {
+    // 我々は 8 を要求しているが、PUB400 は 24 を返す。要求値で決め打ちにしないこと
+    expect(new DataView(buildFileExchangeAttributes().buffer).getUint16(22)).toBe(8);
+    expect(replyDatastreamLevel(EXCHANGE_REPLY)).toBe(24);
+  });
+
+  it("要求は 40 バイト・テンプレート長 20・属性リストレベル 0x44（名前は送らない）", () => {
+    const req = buildListAttrsByHandleRequest(9);
+    const v = new DataView(req.buffer);
+    expect(req.length).toBe(40);
+    expect(v.getUint32(0)).toBe(40);
+    expect(v.getUint16(16)).toBe(20);
+    expect(v.getUint16(18)).toBe(FILE_REQ.listFiles);
+    expect(v.getUint32(22)).toBe(9); // ファイルハンドル
+    expect(v.getUint32(28)).toBe(1); // 作業ディレクトリハンドル
+    expect(v.getUint16(36)).toBe(0x44); // OA2 ＋ 開いたインスタンス
+  });
+
+  it("実機の OA2 応答から 850 が取れる", () => {
+    expect(parseContentCcsid(oa2Reply(), 24)).toBe(850);
+  });
+
+  it("CCSID の位置は報告レベルで変わる（126 / 142 / 134）", () => {
+    const frame = oa2Reply();
+    const v = new DataView(frame.buffer);
+    v.setUint16(34 + 126, 1111); // OA2（レベル 0）のコードページ位置
+    v.setUint16(34 + 142, 2222); // OA2a（0xF4F4）のコードページ位置
+    expect(parseContentCcsid(frame, 0)).toBe(1111);
+    expect(parseContentCcsid(frame, 0xf4f4)).toBe(2222);
+    expect(parseContentCcsid(frame, 24)).toBe(850);
+    expect(parseContentCcsid(frame, 8)).toBe(850);
+  });
+
+  it("OA2 が付かない応答（一覧と同じ形）では undefined", () => {
+    // 属性リストレベル 0x01 の応答。テンプレート長 93 で可変部は名前だけ
+    const frame = new Uint8Array(113);
+    const v = new DataView(frame.buffer);
+    v.setUint32(0, 113);
+    v.setUint16(16, 93);
+    v.setUint16(18, 0x8005);
+    v.setUint32(113 - 24, 24); // 名前の LL
+    v.setUint16(113 - 20, 0x0002); // CP = ファイル名
+    expect(parseContentCcsid(frame, 24)).toBeUndefined();
+  });
+
+  it("エラー応答・壊れた LL では undefined（無限ループしない）", () => {
+    expect(parseContentCcsid(reply(REPLY_ERROR, [0, 0, 0, 6]), 24)).toBeUndefined();
+    const broken = oa2Reply();
+    new DataView(broken.buffer).setUint32(28, 0); // LL = 0
+    expect(parseContentCcsid(broken, 24)).toBeUndefined();
+  });
+
+  it("OA2 が宣言より短ければ、無関係なバイトを CCSID として読まない", () => {
+    const short = oa2Reply();
+    new DataView(short.buffer).setUint32(28, 100); // LL を縮める（CCSID 位置が構造体の外に出る）
+    expect(parseContentCcsid(short, 24)).toBeUndefined();
   });
 });
 

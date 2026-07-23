@@ -7,6 +7,7 @@
  * 解放するのは「次を表示する直前」と「ペインを破棄する時」の 2 箇所だけ。
  */
 import { ref, onBeforeUnmount } from "vue";
+import type { LineEnding } from "@as400web/core/browser";
 import { download, readFile, IfsRequestError, type IfsSource } from "../ifsApi.js";
 
 export type PreviewKind = "text" | "pdf" | "image" | "binary";
@@ -25,6 +26,13 @@ export interface PreviewState {
    * 読み取りは成功していて、表示手段が無いだけ（サーバーは 200 で返す）。
    */
   undecodable: boolean;
+  /** 採用した文字コードと、その根拠。保存時にそのまま書き戻すのにも使う */
+  ccsid?: number;
+  detectedBy?: "content" | "tag" | "manual";
+  newline?: LineEnding;
+  bom?: boolean;
+  /** ファイルに付いていたタグ。採用したものとは限らない（読めなかったときの手掛かり） */
+  tagCcsid?: number;
 }
 
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
@@ -59,7 +67,23 @@ export function usePreview(source: () => IfsSource) {
     error.value = "";
   }
 
-  async function show(path: string, sizeHint?: number): Promise<void> {
+  /**
+   * テキストを指定の文字コードで読み直す。
+   * 自動判定（中身 → タグ）が外れたときに利用者が選ぶ道（サーバーの `detectedBy: "manual"`）。
+   *
+   * **失敗しても直前の表示を消さない。** 選び直しは「当たるまで試す」操作なので、
+   * 1 回外しただけで本文も選択 UI も消えると、次の 1 手が打てなくなる
+   * （IfsPane が「プレビューに失敗しても操作は消さない」としているのと同じ理屈）。
+   */
+  async function reload(ccsid: number): Promise<void> {
+    const current = state.value;
+    if (!current || current.kind !== "text") return;
+    await show(current.path, current.bytes, ccsid);
+    // テキストは blob URL を持たないので、そのまま戻して問題ない
+    if (state.value === undefined) state.value = current;
+  }
+
+  async function show(path: string, sizeHint?: number, ccsid?: number): Promise<void> {
     const kind = kindOf(path);
     // 表示できない種別は読みに行かない（100KB/s のホストから無駄に転送しない）
     if (kind === "binary") {
@@ -73,7 +97,7 @@ export function usePreview(source: () => IfsSource) {
     error.value = "";
     try {
       if (kind === "text") {
-        const result = await readFile(source(), path);
+        const result = await readFile(source(), path, "utf8", ccsid);
         revoke();
         state.value = {
           path,
@@ -82,7 +106,12 @@ export function usePreview(source: () => IfsSource) {
           url: "",
           bytes: result.bytes,
           // サーバーは復号できないとき 200 で content: null を返す。失敗ではない
-          undecodable: result.content === null
+          undecodable: result.content === null,
+          ...(result.ccsid !== undefined ? { ccsid: result.ccsid } : {}),
+          ...(result.detectedBy !== undefined ? { detectedBy: result.detectedBy } : {}),
+          ...(result.newline !== undefined ? { newline: result.newline } : {}),
+          ...(result.bom !== undefined ? { bom: result.bom } : {}),
+          ...(result.tagCcsid !== undefined ? { tagCcsid: result.tagCcsid } : {})
         };
         return;
       }
@@ -110,5 +139,5 @@ export function usePreview(source: () => IfsSource) {
   // ペインを閉じたら解放する（開いたまま残すと、タブを消すたびに漏れる）
   onBeforeUnmount(revoke);
 
-  return { state, loading, error, show, clear };
+  return { state, loading, error, show, reload, clear };
 }

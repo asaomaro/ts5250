@@ -183,11 +183,17 @@ SQL（既定路線・本命）                       ✅
 20260720-ifs-file-browser で Web UI から IFS を扱えるようにした際、
 spec に含むが今回は実装しなかったもの。各 work の decisions に理由あり。
 
-- [ ] IFS テキストの CCSID 決定表（中身推定 → タグ → 手動切替）と `ccsid`/`detectedBy` 応答
-    → 現状 UTF-8 で読めないテキストは content:null で「文字コード未対応」の案内。
-      **実機の日本語テキスト（EBCDIC）の多くはこの状態**。編集も UTF-8 に限られる。
-      listFiles の応答には内容 CCSID が無い（名前の CCSID のみ）ので、
-      属性取得の別要求か SQL の IFS_OBJECT_STATISTICS から引く必要がある（research F1-5 / 02 D7）
+- [x] IFS テキストの CCSID 決定表（中身推定 → タグ → 手動切替）と `ccsid`/`detectedBy` 応答
+    → 20260723-ifs-ccsid-decode で実装。File Server の**ハンドル指定 ListAttrs（OA2）**でタグを取り、
+      決定表（手動 → BOM → UTF-8 → タグ）で復号。保存も読んだ文字コード・行末（0x15）・BOM のまま戻す。
+      実機（PUB400）で EBCDIC 1399 / 273 / 37 の表示・編集・保存の往復を確認済み
+- [ ] IFS の書き込みで `dataCcsid` を明示し、新規作成ファイルのタグを中身と合わせる
+    → 現状は 0（サーバー既定）で開くため、UTF-8 を書いても **850 のタグ**が付く（20260720 research F3）。
+      読む側は決定表①（中身推定）で救えているが、他ツールから見ると嘘のタグのまま。
+      `IfsConnection.writeFile` の `dataCcsid` は既に受け口だけある（20260723 decisions D5）
+- [ ] CCSID 850 / 437 のテキスト表（必要になったら）
+    → Node の TextDecoder に無く、実機の 850 タグは中身が UTF-8/ASCII で決定表①が拾うため今は不要。
+      要るときは `tools/gen-tables` に `ibm-850_P100-1999.ucm` を足す（ICU に存在することは確認済み）
 - [ ] IFS プレビューのサイズ上限（5MB）とヌルバイト判定（03 D11）
     → server の readMaxBytes が最後の砦。クライアント側で先回りすると体感が良くなる
 - [ ] IFS のディレクトリ削除（rmdir = 0x000E, CP 0x0001）

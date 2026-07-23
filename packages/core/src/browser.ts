@@ -17,6 +17,11 @@ export {
 } from "./identifier.js";
 /** IFS の一覧。UI がツリーと一覧を組み立てるため型を共有する（型だけ＝実行時依存は増えない） */
 export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
+/**
+ * 文字コードの選択肢。**`codec.js`（DBCS の巨大な表）を引き込まない一覧だけ**を出す。
+ * 実際の復号・符号化はサーバー側（`ccsid-text.ts`）が行う。
+ */
+export { TEXT_CCSIDS, ccsidLabel, type LineEnding } from "./codec/ccsid-catalog.js";
 /** データ待ち行列。UI が属性・送受信フォームを組み立てるため型を共有する */
 export type {
   DtaqEntry,
