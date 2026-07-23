@@ -127,3 +127,38 @@ describe("rescueStuckSpools", () => {
     expect(closeNp).toHaveBeenCalled();
   });
 });
+
+/**
+ * **救出した帳票が画面へ届くこと。**
+ *
+ * ws-handler は当初 `session.on("report")` だけを見ていた。救出した帳票はホストから届いた
+ * ものではないのでそのイベントに乗らず、サーバー側には溜まるのに画面へ出なかった。
+ * 配る側（`deliverReport`）から必ずフックを叩く形に直した回帰。
+ */
+describe("救出した帳票の配り先", () => {
+  it("push と救出のどちらも同じフックへ流れる", async () => {
+    const { SessionManager } = await import("../src/session-manager.js");
+    const mgr = new SessionManager();
+    const pushed: string[] = [];
+    // deliverReport は private なので、entry を組み立てて型経由で叩く
+    const entry = {
+      id: "p1",
+      reports: [] as unknown[],
+      waiters: [] as unknown[],
+      outputEnabled: true,
+      outputWarnings: [],
+      outputStatuses: [],
+      onReport: (r: { id: string }) => pushed.push(r.id)
+    };
+    const deliver = (mgr as unknown as {
+      deliverReport: (e: unknown, r: unknown) => void;
+    }).deliverReport.bind(mgr);
+
+    deliver(entry, { id: "spool-1", pages: [], raw: new Uint8Array(0) });
+    deliver(entry, { id: "spool-rescued-DSPFMT-1", pages: [], raw: new Uint8Array(0) });
+
+    expect(pushed, "救出分も画面へ push される").toEqual(["spool-1", "spool-rescued-DSPFMT-1"]);
+    expect(entry.reports, "サーバー側にも両方溜まる").toHaveLength(2);
+    mgr.closeAll();
+  });
+});
