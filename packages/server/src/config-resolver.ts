@@ -31,7 +31,7 @@ export interface TargetRef {
 
 export interface ResolvedTarget {
   /** deviceNameRetry はサーバー側（SessionManager）で解釈するので ConnectOptions に足して運ぶ */
-  connect: ConnectOptions & { deviceNameRetry?: boolean };
+  connect: ConnectOptions & { deviceNameRetry?: boolean; rescueAction?: "hold" | "delete" };
   /** **サーバー設定由来のセッションのときのみ**（信頼設定） */
   printerOutput?: PrinterOutputConfig;
   source: ConfigSource;
@@ -117,7 +117,9 @@ export class ConfigResolver {
     store: ConfigStore,
     warn: Warn
   ): ConnectOptions {
-    const opts: ConnectOptions & { deviceNameRetry?: boolean } = { host: system.host };
+    const opts: ConnectOptions & { deviceNameRetry?: boolean; rescueAction?: "hold" | "delete" } = {
+      host: system.host
+    };
     if (system.port !== undefined) opts.port = system.port;
     // 転記漏れがあると平文で繋がる。ポート省略時の既定は tls で 992／平文で 23 のため、
     // tls:true だけ設定したシステムは「23 番へ平文で接続して成功する」＝気づけない形になる
@@ -133,6 +135,9 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
+      if (session.sessionType === "printer" && session.rescueAction !== undefined) {
+        opts.rescueAction = session.rescueAction;
+      }
       // 画面サイズ・拡張は display のみ意味を持つ
       if (session.sessionType === "display") {
         if (session.screenSize !== undefined) opts.screenSize = session.screenSize;

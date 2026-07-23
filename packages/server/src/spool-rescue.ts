@@ -11,8 +11,11 @@
  * `LogicalPage[]` になるので、**pull で読んで push と同じ帳票として配れば利用者から見た体験は変わらない**。
  *
  * 拾ったあとはメッセージに「H」（保留して次へ）を応答する。応答しないと書き出しプログラムは
- * 待ち続け、後続の帳票も止まったままになる。**削除はしない**——中身は届けたが、ホスト側の
- * スプールを消すかは利用者の判断に属する。
+ * 待ち続け、後続の帳票も止まったままになる。
+ *
+ * 保留したスプールはホスト側に残り続けるので、運用によっては溜まる。取得後に削除するかは
+ * `action` で選べるが、**既定は保留**——削除は取り消せないので、利用者が明示的に選んだ
+ * ときだけ行う。
  */
 import type { ConnectOptions, SpoolId, SpoolEntry } from "@as400web/core";
 import { openNetPrint } from "./host-connect.js";
@@ -34,10 +37,17 @@ export interface RescuedSpool {
  *
  * @param outputQueue 監視する出力待ち行列（＝プリンターセッションの装置名）
  */
+/**
+ * 取得後にホスト側のスプールをどうするか。
+ * - `hold`（既定）… 保留にして残す。あとから手で扱える
+ * - `delete` … 削除する。**取り消せない**ので明示的に選んだときだけ
+ */
+export type RescueAction = "hold" | "delete";
+
 export async function rescueStuckSpools(
   opts: ConnectOptions,
   outputQueue: string,
-  o: { max?: number; ccsid?: number } = {}
+  o: { max?: number; ccsid?: number; action?: RescueAction } = {}
 ): Promise<RescuedSpool[]> {
   const page = await listSpools(opts, { outputQueue, user: "*ALL" }, o.max ?? 20);
   const waiting = page.items.filter((s) => s.status === "MESSAGE_WAIT");
@@ -64,13 +74,30 @@ export async function rescueStuckSpools(
       }
       rescued.push({ entry, pages, messageId: message.id });
 
-      // 「H」＝保留して次のファイルを処理する。削除はしない
+      // **まず「H」で応答する。** 応答しないと書き出しプログラムが待ち続け、後続も止まる。
+      // 削除する設定でも先に応答が要る（待ち状態のまま消すと writer が宙に浮く）。
+      let answered = true;
       await np.answerMessage(message, "H").catch((err: unknown) => {
+        answered = false;
         log.warn({ file: entry.fileName, err }, "メッセージに応答できなかった");
       });
+
+      // 削除は**応答できたときだけ**。応答に失敗した状態で消すと、writer が待っている対象を
+      // 取り上げることになる
+      if (o.action === "delete" && answered) {
+        await np.deleteSpooledFile(id).catch((err: unknown) => {
+          log.warn({ file: entry.fileName, err }, "取得後の削除に失敗した（保留のまま残る）");
+        });
+      }
       log.info(
-        { file: entry.fileName, fileNumber: entry.fileNumber, messageId: message.id, pages: pages.length },
-        "書き出しできないスプールを取得して保留にした"
+        {
+          file: entry.fileName,
+          fileNumber: entry.fileNumber,
+          messageId: message.id,
+          pages: pages.length,
+          action: o.action ?? "hold"
+        },
+        "書き出しできないスプールを取得した"
       );
     }
   } finally {

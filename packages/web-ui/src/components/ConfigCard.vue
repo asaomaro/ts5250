@@ -78,7 +78,8 @@ const sesForm = reactive<SesFormState>({
   system: "",
   sessionType: "display",
   screenSize: DEFAULT_SCREEN_SIZE,
-  deviceName: ""
+  deviceName: "",
+  rescueAction: "hold" as "hold" | "delete"
 });
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
 
@@ -123,6 +124,7 @@ function loadSession(): void {
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
   sesForm.deviceName = s.deviceName ?? "";
+  sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
@@ -197,6 +199,8 @@ async function save(): Promise<void> {
     } else {
       const form = { ...sesForm, name: sesForm.name!.trim() } as SessionConfigForm;
       if (form.sessionType === "printer") {
+        // 既定（保留）はわざわざ保存しない——設定ファイルに既定値を書き散らさない
+        if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
         delete form.screenSize;
         delete form.enhanced;
       }
@@ -291,6 +295,9 @@ const infoRows = computed(() => {
     });
   }
   if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
+  if (o.sessionType === "printer") {
+    rows.push({ label: "取得後の扱い", value: o.rescueAction === "delete" ? "削除する" : "保留にして残す" });
+  }
   if (o.screenSize) rows.push({ label: "画面サイズ", value: o.screenSize });
   rows.push({
     label: "CCSID",
@@ -415,6 +422,15 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
+        <label v-if="sesForm.sessionType === 'printer'" class="row">
+          <span class="cap" title="書き出しプログラムが処理できない帳票を取得したあと、ホスト側のスプールをどうするか">
+            取得後の扱い
+          </span>
+          <select v-model="sesForm.rescueAction">
+            <option value="hold">保留にして残す（既定）</option>
+            <option value="delete">削除する</option>
+          </select>
+        </label>
         <label v-if="sesForm.sessionType === 'display'" class="row">
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">
