@@ -4,6 +4,11 @@ import { codecForCcsid } from "../codec/codec.js";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
+import {
+  parseStartupResponse,
+  startupCodeMeaning,
+  STARTUP_SUCCESS_CODES
+} from "../telnet/startup-record.js";
 import { deviceEnvFor, printerTerminalTypeFor } from "./terminal-type.js";
 import { ScsDecoder, type LogicalPage } from "../protocol/scs.js";
 
@@ -50,23 +55,13 @@ interface PrinterSessionEvents extends Record<string, unknown[]> {
   closed: [string];
 }
 
-/** 起動応答コード（tn5250 printsession.c）。成功＝セッション確立、他＝失敗。 */
-const SUCCESS_CODES = new Set(["I901", "I902", "I906"]);
-const CODE_MEANING: Record<string, string> = {
-  I901: "Virtual device has less function than source device.",
-  I902: "Session successfully started.",
-  I906: "Automatic sign-on requested, but not allowed. A sign-on screen will follow.",
-  2702: "Device description not found.",
-  8901: "Device not varied on.",
-  8902: "Device not available.",
-  8903: "Device not valid for session.",
-  8906: "Session initiation failed.",
-  8917: "Not authorized to object.",
-  8922: "Negative response received.",
+/**
+ * プリンター固有の補足。共通の意味は `startupCodeMeaning`（`telnet/startup-record.ts`）にある。
+ * 8925 はプリンターでだけ出やすい（IBMFONT/IBMTRANSFORM の申告漏れ）ので、ここで上書きする。
+ */
+const PRINTER_CODE_MEANING: Record<string, string> = {
   8925: "Creation of device failed (IBMFONT/IBMTRANSFORM 欠落や権限不足の可能性).",
-  8935: "Session rejected.",
-  8936: "Security failure on session attempt.",
-  8940: "Automatic configuration failed or not allowed."
+  8936: "Security failure on session attempt."
 };
 
 /** クライアント→ホストの印刷完了応答（CLIENTO・opcode=PRINT_COMPLETE・空ペイロード） */
@@ -198,22 +193,17 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
 
   private handleStartup(rec: Uint8Array): void {
     this.started = true;
-    const code = this.readResponseCode(rec);
+    // 解析は表示セッションと共有する（読み位置を 2 か所に書くと片方だけずれる）
+    const startup = parseStartupResponse(rec, this.codec);
+    const code = startup?.code ?? "";
     this.startupCodeValue = code;
-    if (SUCCESS_CODES.has(code)) {
+    if (STARTUP_SUCCESS_CODES.has(code)) {
       this.emit("status", { startupCode: code, connected: true });
       this.onStartup?.();
     } else {
-      const meaning = CODE_MEANING[code] ?? "unknown startup response";
+      const meaning = PRINTER_CODE_MEANING[code] ?? startupCodeMeaning(code);
       this.onStartup?.(new As400Error("SESSION_REJECTED", `printer session rejected (${code}: ${meaning})`));
     }
-  }
-
-  /** 起動応答レコードの (6+data[6])+5 の 4 バイト EBCDIC を読む（printsession.c:222-235） */
-  private readResponseCode(rec: Uint8Array): string {
-    const o = 6 + (rec[6] ?? 4);
-    if (o + 9 > rec.length) return "";
-    return this.codec.decode(rec.subarray(o + 5, o + 9));
   }
 
   private finishJob(): void {

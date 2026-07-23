@@ -37,7 +37,6 @@ export type {
   WsServerMessage,
   WsOpen,
   WsKey,
-  WsJobInfoReq,
   WsCloseReq,
   WsOpened,
   WsScreen,

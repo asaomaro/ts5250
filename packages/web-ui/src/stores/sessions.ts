@@ -54,7 +54,11 @@ export interface SessionState {
   connected: boolean;
   readOnly: boolean;
   client: WsClient;
-  job?: { number: string; user: string; name: string };
+  /**
+   * ジョブ識別子。**接続と同時に `name`（＝装置名）だけ入ることがある**——
+   * ユーザーと番号はサーバーが背後で引けたときに遅れて届く（画面には触れない）
+   */
+  job?: { name: string; system?: string; user?: string; number?: string };
   /** セッションの実効ホストコードページ（CCSID）。930/5026 は入力時に英小文字を大文字化する */
   ccsid?: number;
   /** ホスト応答待ち（通信中）。入力をプロテクトする */

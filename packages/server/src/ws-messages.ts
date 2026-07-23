@@ -1,4 +1,5 @@
-import type { ScreenSnapshot, JobInfo } from "@as400web/core";
+import type { ScreenSnapshot } from "@as400web/core";
+import type { SessionJob } from "./session-manager.js";
 
 /** WebSocket メッセージ型（server が定義し web-ui が type-only import で共有。spec「Web 向けプロトコル」） */
 
@@ -30,10 +31,6 @@ export interface WsKey {
   cursor?: { row: number; col: number };
   fields?: { field: number | { row: number; col: number }; value: string }[];
 }
-export interface WsJobInfoReq {
-  type: "jobinfo";
-  refresh?: boolean;
-}
 export interface WsCloseReq {
   type: "close";
 }
@@ -54,7 +51,6 @@ export interface WsGuiSubmit {
 export type WsClientMessage =
   | WsOpen
   | WsKey
-  | WsJobInfoReq
   | WsCloseReq
   | WsGuiSelect
   | WsGuiSubmit
@@ -67,15 +63,23 @@ export interface WsOpened {
   screen: ScreenSnapshot;
   /** セッションの実効ホストコードページ（CCSID）。既定 37 */
   ccsid: number;
+  /** ジョブ識別子。接続直後は装置名（＝ジョブ名）だけのことがある */
+  job?: SessionJob;
 }
 export interface WsScreen {
   type: "screen";
   screen: ScreenSnapshot;
 }
+/**
+ * ジョブ識別子の通知（**サーバー発のみ**）。
+ *
+ * 装置名は接続直後の `opened` に載る。ユーザー・番号はコマンドサーバーで引けたときに
+ * 遅れて届くので、このメッセージで足す。**クライアントから要求する口は無い**——
+ * 取得は画面に触れずに自動で行われる（DSPJOB を打つ旧経路は廃止した）。
+ */
 export interface WsJobInfoRes {
   type: "jobinfo";
-  job: JobInfo;
-  cached: boolean;
+  job: SessionJob;
 }
 /**
  * AID 送信の処理が終わった合図。

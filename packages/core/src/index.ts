@@ -42,7 +42,6 @@ export {
   type SessionState,
   type SendAidOptions,
   type SendAidResult,
-  type JobInfo
 } from "./session/session.js";
 export { aidCodeOf, aidKeyForCode, type AidKey } from "./session/aid-keys.js";
 // プリンターセッション（SCS 受信 → 論理ページ）

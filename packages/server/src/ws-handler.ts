@@ -58,8 +58,6 @@ export class WsConnection {
           return await this.onOpen(msg);
         case "key":
           return await this.onKey(msg);
-        case "jobinfo":
-          return await this.onJobInfo(msg);
         case "gui-select":
           return await this.onGuiSelect(msg);
         case "gui-submit":
@@ -107,7 +105,15 @@ export class WsConnection {
         type: "opened",
         sessionId: entry.id,
         screen: entry.session.snapshot(),
-        ccsid: opts.ccsid ?? 37
+        ccsid: opts.ccsid ?? 37,
+        // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
+        ...(entry.job !== undefined ? { job: entry.job } : {})
+      });
+      // ユーザー・番号は背後で引いている。**待たない**——取れたら足すだけ
+      void entry.jobResolved?.then((job) => {
+        if (job?.user !== undefined && this.sessionId === entry.id) {
+          this.send({ type: "jobinfo", job });
+        }
       });
     });
   }
@@ -232,15 +238,6 @@ export class WsConnection {
       if (msg.key) opts.key = msg.key as AidKey;
       if (msg.cursor) opts.cursor = msg.cursor;
       await entry.session.submitGuiSelection(msg.fieldId, opts);
-    });
-  }
-
-  private async onJobInfo(msg: WsClientMessage & { type: "jobinfo" }): Promise<void> {
-    const id = this.requireSession();
-    await withAudit({ op: "ws_jobinfo", sessionId: id }, async () => {
-      const entry = this.deps.sessions.assertWritable(id, this.user);
-      const job = await entry.session.fetchJobInfo(msg.refresh ?? false);
-      this.send({ type: "jobinfo", job, cached: false });
     });
   }
 

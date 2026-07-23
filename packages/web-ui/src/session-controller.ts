@@ -68,6 +68,8 @@ export async function openSession(
                 ccsid: msg.ccsid,
                 client,
                 ...(meta ? { meta } : {}),
+                // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
+                ...(msg.job !== undefined ? { job: msg.job } : {}),
                 ...(configRef !== undefined ? { configRef } : {}),
                 ...(systemRef !== undefined ? { systemRef } : {})
               };
@@ -92,10 +94,11 @@ export async function openSession(
               setBusy(sessionId, false);
               break;
             }
+            // ジョブ識別子は**サーバー発だけ**（画面に触れずに取れたものが遅れて届く）。
+            // 要求する口は無いので busy も動かさない
             case "jobinfo": {
               const s = sessionsStore.get(sessionId);
               if (s) s.job = msg.job;
-              setBusy(sessionId, false);
               break;
             }
             case "closed": {
@@ -229,13 +232,6 @@ export function sendKey(sessionId: string, key: AidKey, cursor?: { row: number; 
     ...(cursor ? { cursor } : {}),
     ...(fields.length > 0 ? { fields } : {})
   });
-  setBusy(sessionId, true);
-}
-
-export function requestJobInfo(sessionId: string, refresh = false): void {
-  const s = sessionsStore.get(sessionId);
-  if (!s || s.busy) return;
-  s.client.send({ type: "jobinfo", refresh });
   setBusy(sessionId, true);
 }
 

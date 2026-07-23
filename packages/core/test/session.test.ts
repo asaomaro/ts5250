@@ -62,6 +62,62 @@ async function connectReplay(entries: TraceEntry[]) {
   return { transport, session };
 }
 
+/** 実機（PUB400）で捕えた起動応答レコード。I902 / PUB400 / QPADEV001P */
+function startupResponseRecord(): Uint8Array {
+  const out = new Uint8Array(73);
+  out.set(
+    [
+      0x00, 0x49, 0x12, 0xa0, 0x90, 0x00, 0x05, 0x60, 0x06, 0x00, 0x20, 0xc0, 0x00, 0x3d, 0x00,
+      0x00,
+      0xc9, 0xf9, 0xf0, 0xf2, // "I902"
+      0xd7, 0xe4, 0xc2, 0xf4, 0xf0, 0xf0, 0x40, 0x40, // "PUB400  "
+      0xd8, 0xd7, 0xc1, 0xc4, 0xc5, 0xe5, 0xf0, 0xf0, 0xf1, 0xd7 // "QPADEV001P"
+    ],
+    0
+  );
+  return out;
+}
+
+/**
+ * 起動応答レコード（RFC 4777 §10）。**接続時に必ず来る**ので、
+ * ここから実際の装置名（＝対話ジョブのジョブ名）が分かる。画面には流さない。
+ */
+describe("起動応答レコード", () => {
+  it("1 レコード目の起動応答を保持し、画面には流さない", async () => {
+    const { session } = await connectReplay([
+      rxRecord(startupResponseRecord()),
+      ...signonEntries()
+    ]);
+    expect(session.startup).toEqual({
+      code: "I902",
+      system: "PUB400",
+      device: "QPADEV001P"
+    });
+    // 画面はサインオン（起動応答の後ろのレコード）が出ている＝食べ違えていない
+    expect(session.snapshot().cells[0]?.map((c) => c.char).join("")).toContain(
+      "Welcome to PUB400.COM"
+    );
+  });
+
+  it("起動応答が来ない接続では undefined（画面はそのまま出る）", async () => {
+    const { session } = await connectReplay(signonEntries());
+    expect(session.startup).toBeUndefined();
+    expect(session.snapshot().cells[0]?.map((c) => c.char).join("")).toContain(
+      "Welcome to PUB400.COM"
+    );
+  });
+
+  /** 2 レコード目以降は判定しない（画面のデータを食べない） */
+  it("2 レコード目に同じ形が来ても食べない", async () => {
+    const { session } = await connectReplay([
+      ...signonEntries(),
+      { ts: "t", dir: "tx", masked: true, len: 0 },
+      rxRecord(startupResponseRecord())
+    ]);
+    expect(session.startup).toBeUndefined();
+  });
+});
+
 describe("Session5250 リプレイ E2E", () => {
   it("接続でサインオン画面が Ready になる", async () => {
     const { session } = await connectReplay(signonEntries());
@@ -175,20 +231,21 @@ describe("Session5250 リプレイ E2E", () => {
     await new Promise((r) => setTimeout(r, 30)); // タイムアウトを消化
   });
 
-  it("fetchJobInfo が DSPJOB フローでジョブ識別子を取得しキャッシュする", async () => {
+  /**
+   * **起動応答レコードを送ってこないホストでも壊れない。**
+   * この fixture は実機の採取だが、当時は `IBMSENDCONFREC` を申告しておらず起動応答が無い。
+   * 1 レコード目（WTD）を食べずに画面へ流していること＝画面が出ることで確かめる。
+   */
+  it("起動応答が来ない実機キャプチャでも画面が出る（startup は undefined）", async () => {
     const entries = parseTraceJsonl(
       readFileSync(join(here, "fixtures", "pub400-jobinfo.jsonl"), "utf8")
     );
     const transport = new ReplayTransport(entries);
     const session = await Session5250.connect({ transport, id: "job", user: "USER", password: "dummy" });
     expect(session.currentState).toBe("ready");
-    const info = await session.fetchJobInfo();
-    expect(info.name).toBe("WEBEMU01");
-    expect(info.user).toBe("USER");
-    expect(info.number).toMatch(/^\d+$/);
-    // 2 回目はキャッシュ（画面操作なし）
-    const cached = await session.fetchJobInfo();
-    expect(cached).toEqual(info);
+    expect(session.startup).toBeUndefined();
+    // 画面が組み上がっている（1 レコード目を食べていない）
+    expect(session.snapshot().fields.length).toBeGreaterThan(0);
   });
 
   it("自動サインオン fixture のリプレイでメニュー画面に到達する", async () => {

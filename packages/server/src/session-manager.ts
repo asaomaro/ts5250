@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   Session5250,
   PrinterSession,
+  CommandConnection,
+  listJobs,
   As400Error,
   type ConnectOptions,
   type AidKey,
@@ -59,6 +61,20 @@ export function nextDeviceName(name: string): string | undefined {
   return `${m[1]}${digits}`;
 }
 
+/**
+ * セッションのジョブ識別子。
+ *
+ * `name`（＝装置名）は**起動応答レコードから必ず取れる**（資格情報も往復も要らない）。
+ * `user` / `number` はコマンドサーバーで引けたときだけ入る
+ * （20260723-session-job-info-rework の research F1・F2）。
+ */
+export interface SessionJob {
+  name: string;
+  system?: string;
+  user?: string;
+  number?: string;
+}
+
 export interface SessionEntry {
   id: string;
   session: Session5250;
@@ -69,6 +85,14 @@ export interface SessionEntry {
   lastActivity: number;
   /** 所有者（認証ユーザー名）。認証 OFF なら undefined */
   owner?: string;
+  /** ジョブ識別子。接続直後に装置名だけ入り、引けたら user/number が足される */
+  job?: SessionJob;
+  /**
+   * ジョブ識別子の解決（背後で走る）。**接続を待たせないので await しない**。
+   * 呼び出し側が「取れたら表示に足す」ために購読できるよう、Promise だけ持たせる。
+   * 解決できなければ `undefined` で終わる（失敗は握りつぶす）
+   */
+  jobResolved?: Promise<SessionJob | undefined>;
 }
 
 /** 管理者画面向けのセッション要約（表示/プリンター統合） */
@@ -194,7 +218,37 @@ export interface SessionManagerOptions {
   rescueIntervalMs?: number;
   /** 現在時刻（テスト注入用） */
   now?: () => number;
+  /**
+   * ジョブ識別子の照会。**テストで偽の応答を差し込むための口**。
+   *
+   * 既定はコマンドサーバー（`QGYOLJOB`）。これが無いと
+   * 「1 件のときだけ採用」「資格情報が無ければ引かない」といった判断を、
+   * 実機なしでは一切テストできない（host-ifs の `connect` と同じ考え方）。
+   */
+  lookupJobs?: LookupJobs;
 }
+
+/** 装置名とユーザーで対話ジョブを引く。返すのは一致したジョブ（0 件・複数件もありうる） */
+export type LookupJobs = (
+  target: { host: string; user: string; password: string; tls?: ConnectOptions["tls"] },
+  filter: { name: string; user: string }
+) => Promise<{ name: string; user: string; number: string }[]>;
+
+/** 既定の照会: コマンドサーバーに繋いで QGYOLJOB を引き、使い終わったら閉じる */
+const lookupJobsViaCommandServer: LookupJobs = async (target, filter) => {
+  const conn = await CommandConnection.connect({
+    host: target.host,
+    user: target.user,
+    password: target.password,
+    ...(target.tls !== undefined ? { tls: target.tls } : {})
+  });
+  try {
+    // 種別 I（対話）まで絞る。装置名だけでは**他人のジョブを掴む**（research F2）
+    return await listJobs(conn, { ...filter, type: "I" }, { max: 5 });
+  } finally {
+    conn.close();
+  }
+};
 
 /** ページング系 AID（readOnly セッションでも許可する閲覧操作） */
 const READONLY_ALLOWED_KEYS: ReadonlySet<AidKey> = new Set<AidKey>(["PageUp", "PageDown"]);
@@ -211,6 +265,7 @@ export class SessionManager {
   /** 書き出しできないスプールを拾う見張りの間隔（既定 10 秒） */
   private readonly rescueIntervalMs: number;
   private readonly now: () => number;
+  private readonly lookupJobs: LookupJobs;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(opts: SessionManagerOptions = {}) {
@@ -218,6 +273,7 @@ export class SessionManager {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
+    this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
   }
 
   /** アイドルセッションの定期掃除を開始（サーバー起動時に呼ぶ）。テストでは呼ばなくてよい */
@@ -264,9 +320,65 @@ export class SessionManager {
       lastActivity: this.now(),
       ...(opts.owner !== undefined ? { owner: opts.owner } : {})
     };
+    // 起動応答レコードから分かる範囲（装置名＝ジョブ名・システム名）を先に載せる。
+    // **追加の往復はゼロ**で、資格情報が無い環境でもここまでは必ず出せる
+    const startup = session.startup;
+    if (startup?.device) {
+      entry.job = { name: startup.device, ...(startup.system ? { system: startup.system } : {}) };
+    }
     this.sessions.set(id, entry);
     session.on("closed", () => this.sessions.delete(id));
+    // 残り（ユーザー・番号）はコマンドサーバーで引く。**接続を待たせない**
+    entry.jobResolved = this.resolveJob(entry, opts);
     return entry;
+  }
+
+  /**
+   * ジョブ識別子（ユーザー・番号）をコマンドサーバーで引く。
+   *
+   * **資格情報が無ければ何もしない**——画面で手サインオンする使い方では誰のジョブか分からず、
+   * 装置名だけで引くと**他人のジョブを掴む**（実機で同名ジョブが 2 件返った。research F2）。
+   * 失敗は握りつぶす。ジョブ情報はセッションの成立条件ではない。
+   */
+  private async resolveJob(
+    entry: SessionEntry,
+    opts: OpenOptions
+  ): Promise<SessionJob | undefined> {
+    const device = entry.job?.name;
+    if (!device || opts.user === undefined || opts.password === undefined) return undefined;
+    const host = opts.host;
+    if (host === undefined) return undefined;
+    try {
+      const jobs = await this.lookupJobs(
+        {
+          host,
+          user: opts.user,
+          password: opts.password,
+          ...(opts.tls !== undefined ? { tls: opts.tls } : {})
+        },
+        { name: device, user: opts.user }
+      );
+      // **1 件に定まらなければ採用しない**（他人のジョブを出さない。research F2）
+      const only = jobs.length === 1 ? jobs[0] : undefined;
+      if (!only) {
+        sessionLog.debug(
+          { sessionId: entry.id, device, found: jobs.length },
+          "job identity not resolved (not exactly one match)"
+        );
+        return entry.job;
+      }
+      // セッションが既に閉じていれば捨てる
+      if (!this.sessions.has(entry.id)) return undefined;
+      entry.job = { ...entry.job, name: only.name, user: only.user, number: only.number };
+      return entry.job;
+    } catch (err) {
+      // ホストサーバーが使えない・権限が無い等。セッションには影響させない
+      sessionLog.debug(
+        { sessionId: entry.id, device, err: String(err) },
+        "job identity lookup failed"
+      );
+      return entry.job;
+    }
   }
 
   get(id: string, user?: AuthUser): SessionEntry {

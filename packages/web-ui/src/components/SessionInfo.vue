@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { sessionsStore } from "../stores/sessions.js";
-import { requestJobInfo } from "../session-controller.js";
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const state = computed(() => sessionsStore.get(props.sessionId));
 const job = computed(() => state.value?.job);
-const locked = computed(() => state.value?.snapshot?.keyboardLocked ?? false);
+/**
+ * ジョブの表示。番号まで分かれば従来と同じ `番号/ユーザー/名前`、
+ * 装置名しか分からなければ名前だけ（手サインオンでは誰のジョブか特定できない）
+ */
+const jobText = computed(() => {
+  const j = job.value;
+  if (!j) return "";
+  return j.number !== undefined && j.user !== undefined
+    ? `${j.number}/${j.user}/${j.name}`
+    : j.name;
+});
 // プリンターセッションはジョブ情報を持たない（表示セッション専用）
 const isPrinter = computed(() => state.value?.kind === "printer");
 
@@ -32,15 +41,21 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
       rows.push({ label: "画面サイズ", value: m.screenSize });
     }
   }
-  if (m.deviceName) rows.push({ label: "デバイス名", value: m.deviceName });
+  // **実際に割り当てられた装置名**を優先する（ホスト採番なら設定値は空）。
+  // 設定と違う名前になっていたら、そのことが分かるように併記する
+  const actualDevice = s.job?.name;
+  const configured = m.deviceName;
+  if (actualDevice) {
+    const differs = configured && configured !== actualDevice ? `（設定 ${configured}）` : "";
+    rows.push({ label: "デバイス名", value: `${actualDevice}${differs}` });
+  } else if (configured) {
+    rows.push({ label: "デバイス名", value: configured });
+  }
   if (m.tls) rows.push({ label: "TLS", value: "有効" });
   if (m.autoSignon) rows.push({ label: "自動サインオン", value: m.signonUser ? `有効（${m.signonUser}）` : "有効" });
   return rows;
 });
 
-function fetchJob(): void {
-  requestJobInfo(props.sessionId);
-}
 </script>
 
 <template>
@@ -50,11 +65,14 @@ function fetchJob(): void {
     <div class="popover" @mousedown.stop @click.stop>
       <!-- 接続設定の情報（種別・ホスト・CCSID・画面・デバイス名・TLS・サインオン） -->
       <div class="row" v-for="(r, i) in metaRows" :key="'m' + i"><span>{{ r.label }}</span><b>{{ r.value }}</b></div>
-      <!-- 表示セッション: ジョブ情報 -->
-      <div class="row" v-if="!isPrinter">
+      <!--
+        表示セッション: ジョブ情報。**接続時に自動で入る**（画面には触れない）。
+        番号・ユーザーは引けたときだけなので、装置名だけのこともある。
+        何も分からなければ**行ごと出さない**——押しても何も起きないボタンを残さないため
+      -->
+      <div class="row" v-if="!isPrinter && job">
         <span>ジョブ</span>
-        <b v-if="job" class="jobval">{{ job.number }}/{{ job.user }}/{{ job.name }}</b>
-        <button v-else class="btn" :disabled="locked" @click="fetchJob">🔄 取得</button>
+        <b class="jobval">{{ jobText }}</b>
       </div>
       <!-- プリンター: 起動応答＋受信件数 -->
       <template v-if="isPrinter">
