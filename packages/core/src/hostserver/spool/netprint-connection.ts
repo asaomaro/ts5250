@@ -318,9 +318,6 @@ export class NetPrintConnection {
    *
    * **`retrieveMessage` が返したハンドルが必要**。権限が足りない場合は失敗する。
    *
-   * ---
-   * **⚠ 未検証。** MSGW 状態を作れなかったため一度も実行できていない
-   * （`retrieveMessage` の注記を参照）。
    */
   async answerMessage(message: SpoolMessage, reply: string): Promise<void> {
     this.assertOpen();
@@ -338,12 +335,9 @@ export class NetPrintConnection {
           { id: NP_CP.messageHandle, data: message.handle },
           {
             id: NP_CP.attributeValue,
-            data: buildAttributeList([
-              // 他の属性（スプール ID 等）は固定長で空白詰めが必要だったが、
-              // MSGREPLY が固定長を要求するかは**未検証**。可変長のまま送っている。
-              // 応答が効かない場合はここを疑うこと（値が隣を巻き込む症状が出る）
-              { id: NP_ATTR.messageReply, type: "string", value: reply, length: reply.length }
-            ])
+            // MSGREPLY は **NUL 終端**で送る。固定長の空白詰めだと応答が届かず
+            // answerMessage が rc=0x0009 で失敗する（JTOpen も NPAttrString で末尾を 0 にしている）。
+            data: buildAttributeList([{ id: NP_ATTR.messageReply, type: "stringz", value: reply }])
           }
         ]
       }),

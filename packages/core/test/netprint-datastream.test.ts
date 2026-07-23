@@ -57,6 +57,28 @@ describe("buildAttributeList", () => {
     expect(new DataView(data.buffer).getInt32(at)).toBe(5);
   });
 
+  /**
+   * **NUL 終端の文字列（stringz）。** メッセージ応答（MSGREPLY）はホストが末尾 NUL で
+   * 長さを判断する。固定長の空白詰めで送ると応答が届かず、answerMessage が rc=0x0009 で
+   * 失敗した（実機で確認）。JTOpen も文字列属性を new byte[len+1] にして末尾を 0 にしている。
+   */
+  it("stringz は EBCDIC ＋ 末尾 NUL（可変長）", () => {
+    const d = buildAttributeList([{ id: NP_ATTR.messageReply, type: "stringz", value: "I" }]);
+    const v = new DataView(d.buffer);
+    expect(v.getUint16(0)).toBe(1);
+    expect(v.getUint32(8), "長さは 2（'I' 1 + NUL 1）").toBe(2);
+    const at = 4 + 12;
+    expect([...d.subarray(at, at + 2)]).toEqual([0xc9, 0x00]); // EBCDIC 'I' + NUL
+    // 型コードは文字列（int 以外）
+    expect(v.getUint16(6)).toBe(0x0005);
+  });
+
+  it("stringz も大文字化する（固定長文字列と同じ規約）", () => {
+    const d = buildAttributeList([{ id: NP_ATTR.messageReply, type: "stringz", value: "g" }]);
+    const at = 4 + 12;
+    expect([...d.subarray(at, at + 2)]).toEqual([0xc7, 0x00]); // 'G' + NUL
+  });
+
   it("CCSID 37 で表せない値を拒否する", () => {
     expect(() =>
       buildAttributeList([{ id: NP_ATTR.jobName, type: "string", value: "日本語", length: 10 }])
