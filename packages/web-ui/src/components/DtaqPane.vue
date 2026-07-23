@@ -59,6 +59,17 @@ const listed = ref(false);
 const queueReady = computed(
   () => isValidObjectName(library.value) && isValidObjectName(name.value)
 );
+/**
+ * 状態行に出す案内文（エラーより下位）。
+ * **案内と操作結果を 1 つの行に寄せる**——別々の `<p>` を出し入れすると行数が変わり、
+ * 下のフォームや表が上下に飛ぶ
+ */
+const statusNote = computed(() => {
+  if (!systemsStore.selected) return "システムを選んでください。";
+  if (!queueReady.value)
+    return "ライブラリーとキュー名を入力してください（英数字と $ # @ _ . のみ・10 文字まで）。";
+  return message.value;
+});
 const disabled = computed(() => busy.value || !systemsStore.selected || !queueReady.value);
 const keyed = computed(() => createType.value === "KEYED");
 
@@ -88,7 +99,8 @@ async function onSend(): Promise<void> {
 async function onReceive(peek: boolean): Promise<void> {
   actionError.value = "";
   message.value = "";
-  received.value = undefined;
+  // **前回の結果は消さない**——応答が返るまでの間だけ結果欄が畳まれると、
+  // 下のレイアウトが一瞬詰まってから戻り、上下に飛んで見える
   try {
     const res = await run(() =>
       receive(source(), library.value, name.value, {
@@ -101,6 +113,8 @@ async function onReceive(peek: boolean): Promise<void> {
     received.value = res.entry;
     message.value = res.entry === null ? "エントリはありませんでした" : peek ? "先頭を覗きました" : "受信しました";
   } catch (e) {
+    // 失敗したときだけ畳む（古い結果をエラーの下に残すと、どちらが今の状態か分からない）
+    received.value = undefined;
     actionError.value = e instanceof DtaqRequestError ? e.message : String(e);
   }
 }
@@ -180,22 +194,24 @@ defineExpose({ onSend, onReceive, onCreate, onClear, onDelete, onAttributes, onL
     <header class="head">
       <h2>データ待ち行列</h2>
       <label>ライブラリー
-        <input v-model="library" maxlength="10" placeholder="MYLIB" spellcheck="false" />
+        <input v-model="library" maxlength="10" spellcheck="false" />
       </label>
       <label>キュー
-        <input v-model="name" maxlength="10" placeholder="MYDTAQ" spellcheck="false" />
+        <input v-model="name" maxlength="10" spellcheck="false" />
       </label>
       <button :disabled="disabled" @click="onAttributes">属性</button>
       <button :disabled="disabled" @click="onList">一覧</button>
     </header>
 
-    <LoadingBar v-if="slowLoading" label="データ待ち行列と通信しています" />
-    <p v-if="!systemsStore.selected" class="note">システムを選んでください。</p>
-    <p v-else-if="!queueReady" class="note">
-      ライブラリーとキュー名を入力してください（英数字と $ # @ _ . のみ・10 文字まで）。
-    </p>
-    <p v-if="actionError" class="error">{{ actionError }}</p>
-    <p v-if="message" class="note">{{ message }}</p>
+    <!--
+      読み込み中・エラー・案内・操作結果を **1 行の固定枠**にまとめる。
+      それぞれを個別に出し入れすると行数が変わり、押すたびに下の表が上下に飛ぶ
+    -->
+    <div class="status">
+      <LoadingBar v-if="slowLoading" label="データ待ち行列と通信しています" />
+      <p v-else-if="actionError" class="error" role="alert">{{ actionError }}</p>
+      <p v-else-if="statusNote" class="note" role="status">{{ statusNote }}</p>
+    </div>
 
     <div class="cols">
       <!-- 送信 -->
@@ -266,9 +282,10 @@ defineExpose({ onSend, onReceive, onCreate, onClear, onDelete, onAttributes, onL
             <input v-model.number="createKeyLen" type="number" min="1" max="256" />
           </label>
           <label><input v-model="createSaveSender" type="checkbox" /> 送信者情報</label>
-          <button :disabled="disabled" @click="onCreate">作成</button>
         </div>
+        <!-- 上の行は作成のパラメーター、この行は操作。削除は右端に離して誤クリックを避ける -->
         <div class="row">
+          <button :disabled="disabled" @click="onCreate">作成</button>
           <button :disabled="disabled" @click="onClear">クリア</button>
           <button class="danger" :disabled="disabled" @click="onDelete">削除</button>
         </div>
@@ -344,7 +361,8 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.danger { color: #e66; }
+/* 削除だけは行の右端へ離す（作成・クリアの隣で誤って押さないように） */
+button.danger { color: #e66; margin-left: auto; }
 .cols {
   display: flex;
   gap: 12px;
@@ -363,8 +381,17 @@ legend { font-size: 12px; color: var(--accent); padding: 0 4px; }
 .result { margin-top: 8px; font-size: 13px; }
 .result code { color: var(--accent); word-break: break-all; }
 .attrs { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
-.error { color: #e66; padding: 0 12px; font-size: 13px; }
-.note { color: var(--muted); padding: 0 12px; font-size: 12px; }
+/* 状態行は**中身が無くても場所を取る**（高さを固定して、下のレイアウトを動かさない） */
+.status {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 12px;
+}
+/* 枠の高さに収める（LoadingBar 既定の縦 padding だと行が伸びて飛ぶ） */
+.status :deep(.loading) { padding: 0; font-size: 12px; }
+.error { color: #e66; margin: 0; font-size: 12px; }
+.note { color: var(--muted); margin: 0; font-size: 12px; }
 .list { padding: 0 12px 12px; }
 .hint { font-size: 11px; color: var(--muted); }
 table { border-collapse: collapse; width: 100%; }
