@@ -191,7 +191,11 @@ export class ScsDecoder {
     const cls = read();
     if (cls < 0) return true;
     switch (cls) {
-      case 0xd2: {
+      case 0xd2:
+      // **0xFD は DBCS（IGC）制御。** 長さ前置で 0xD2 と同じ構造。
+      // これを知らないと DBCS 帳票の先頭で「未知の 2B オーダー」と判定して打ち切り、
+      // ページが 1 枚も取れなかった（日本語実機のスプールで確認）。
+      case 0xfd: {
         // 長さ前置（len は自身を含む）。残り len-1 バイトを消費。
         const len = read();
         if (len < 0) return true;

@@ -62,3 +62,50 @@ describe("ScsDecoder", () => {
     expect(pages[0]!.lines[1]).toBe("X");
   });
 });
+
+/**
+ * **0x2B 0xFD（IGC/DBCS 制御）を読み飛ばせること。**
+ *
+ * 日本語機の業務帳票（DSPFMT のレコード設計書）が 1 ページも取れなかった原因。
+ * 帳票の先頭付近にこのオーダーが並び、未知として打ち切っていたため decode が空配列を返した。
+ * 構造は 0xD2 と同じ長さ前置（len は自身を含む）。実機で観測した 3 パターンをそのまま使う。
+ *
+ * 業務データはフィクスチャにできないので、観測したオーダーだけを合成して固定する。
+ */
+describe("SCS: IGC 制御オーダー 0x2BFD", () => {
+  /** 実機で観測した 3 つの 2B FD（len 前置） */
+  const IGC_ORDERS = [
+    [0x2b, 0xfd, 0x06, 0x01, 0x00, 0x00, 0x00, 0xc0],
+    [0x2b, 0xfd, 0x04, 0x03, 0x00, 0x01],
+    [0x2b, 0xfd, 0x04, 0x02, 0x10, 0x00]
+  ].flat();
+
+  it("IGC オーダーの後ろの本文を取りこぼさない", () => {
+    const codec = codecForCcsid(939);
+    const body = [...codec.encode("設計書").bytes];
+    const pages = new ScsDecoder(939).decode(Uint8Array.from([...IGC_ORDERS, ...body]));
+    expect(pages.length, "IGC オーダーで打ち切らない").toBe(1);
+    expect(pages[0]!.lines.join("")).toContain("設計書");
+  });
+
+  it("打ち切りの警告を出さない", () => {
+    const warns: string[] = [];
+    const codec = codecForCcsid(939);
+    const body = [...codec.encode("あ").bytes];
+    new ScsDecoder(939, (m) => warns.push(m)).decode(Uint8Array.from([...IGC_ORDERS, ...body]));
+    expect(warns).toEqual([]);
+  });
+
+  it("長さ前置どおりに消費する（続く本文がずれない）", () => {
+    const codec = codecForCcsid(939);
+    // IGC オーダー → "AB" → IGC オーダー → "CD"
+    const bytes = Uint8Array.from([
+      ...IGC_ORDERS.slice(0, 8), // 1 つ目だけ
+      ...codec.encode("AB").bytes,
+      ...IGC_ORDERS.slice(8), // 残り 2 つ
+      ...codec.encode("CD").bytes
+    ]);
+    const pages = new ScsDecoder(939).decode(bytes);
+    expect(pages[0]!.lines.join("")).toBe("ABCD");
+  });
+});
