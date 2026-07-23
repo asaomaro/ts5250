@@ -25,6 +25,16 @@ export interface PrinterConnectOptions {
   password?: string | undefined;
   /** SBCS=37/273…。DBCS(1399) は後続対応 */
   ccsid?: number;
+  /**
+   * ホスト側で印刷データへ変換させる（Host Print Transform）。
+   *
+   * **指定すると届くのは SCS ではなく、その機種の印刷データ（PCL 等）になる。**
+   * 実プリンターへそのまま流せる代わりに、当アプリでは中身を解釈できない
+   * （帳票のページは作られず `raw` だけが載る）。値はプリンター機種（"*HP4" 等）。
+   *
+   * 装置に IGC などの能力が無くて書き出せない帳票も、変換を通せばホストが処理できる。
+   */
+  transformTo?: string;
   /** セッション ID（server が randomUUID を渡す。省略時は連番）。推測不能化のため */
   id?: string;
   connectTimeoutMs?: number;
@@ -78,6 +88,8 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
   private readonly warn: (message: string) => void;
   private readonly codec;
   private readonly decoder: ScsDecoder;
+  /** HPT で受けているか。true なら受信データは SCS ではないので解釈しない */
+  private readonly transformed: boolean;
   private started = false;
   private startupCodeValue = "";
   private jobBytes: number[] = [];
@@ -91,6 +103,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     const ccsid = opts.ccsid ?? 37;
     this.codec = codecForCcsid(ccsid);
     this.decoder = new ScsDecoder(ccsid, opts.warn);
+    this.transformed = opts.transformTo !== undefined;
     this.warn = opts.warn ?? (() => {});
   }
 
@@ -122,7 +135,8 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       codePage: dev?.codePage,
       charSet: dev?.charSet,
       ibmFont: "12",
-      ibmTransform: "0"
+      ibmTransform: opts.transformTo === undefined ? "0" : "1",
+      ...(opts.transformTo !== undefined ? { ibmMfrTypMdl: opts.transformTo } : {})
     });
 
     const ready = new Promise<void>((resolve, reject) => {
@@ -205,7 +219,9 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
   private finishJob(): void {
     const raw = Uint8Array.from(this.jobBytes);
     this.jobBytes = [];
-    const pages = this.decoder.decode(raw);
+    // **HPT では中身を解釈しない。** 届いているのは SCS ではなくプリンターの言語なので、
+    // SCS として読むと意味のないページが並ぶ。印刷にはそのまま流すので raw だけで足りる。
+    const pages = this.transformed ? [] : this.decoder.decode(raw);
     const report: SpoolReport = { id: `spool-${++this.seq}`, pages, raw };
     this.reportList.push(report);
     this.emit("report", report);

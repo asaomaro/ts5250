@@ -128,6 +128,7 @@ export class WsConnection {
         if (co.user !== undefined) opts.user = co.user;
         if (co.password !== undefined) opts.password = co.password;
         if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
+        if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
         if (t.printerOutput) opts.output = t.printerOutput;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）

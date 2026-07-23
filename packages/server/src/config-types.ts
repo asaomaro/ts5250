@@ -81,6 +81,14 @@ const sessionBase = {
    * `hold`（既定）＝保留にして残す / `delete`＝削除する。削除は取り消せない。
    */
   rescueAction: z.enum(["hold", "delete"]).optional(),
+  /**
+   * printer のみ。ホスト側で印刷データへ変換させる機種（"*HP4" 等。HPT）。
+   *
+   * 指定すると**本来の印刷経路**になる——ホストが決めた書式のまま実プリンターへ流せる。
+   * 代わりに届くのが SCS でなくなるので、画面表示と PDF は使えない。
+   * 未指定（既定）は従来どおり SCS を受け取り、表示・PDF ができる。
+   */
+  transformTo: z.string().min(1).optional(),
   /** display のみ意味を持つ */
   screenSize: screenSizeSchema.optional(),
   /** システムの既定 CCSID を上書きする */
@@ -187,6 +195,8 @@ export interface PublicSession {
   deviceName?: string;
   /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
   rescueAction?: "hold" | "delete";
+  /** printer のみ。ホスト変換の機種（HPT）。指定時は表示・PDF が使えない代わりに本来の印刷になる */
+  transformTo?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;

@@ -161,6 +161,7 @@ export abstract class ConfigStore {
     };
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
+    if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
     if (s.enhanced !== undefined) pub.enhanced = s.enhanced;
