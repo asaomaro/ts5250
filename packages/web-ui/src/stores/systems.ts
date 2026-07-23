@@ -43,6 +43,11 @@ export interface SessionConfigForm {
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;
+  /**
+   * printer のみ。書き出しできないスプールを取得したあとの扱い。
+   * `hold`（既定）＝保留にして残す / `delete`＝削除する
+   */
+  rescueAction?: "hold" | "delete";
   /** サーバー設定のプリンターセッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界） */
   printer?: {
     autoPdfDir?: string;

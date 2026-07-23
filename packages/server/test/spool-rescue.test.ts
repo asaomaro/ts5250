@@ -22,10 +22,12 @@ vi.mock("../src/host-spools.js", () => ({
   readSpoolPages: (...a: unknown[]) => readSpoolPages(...a),
   DEFAULT_SPOOL_CCSID: 273
 }));
+const deleteSpooledFile = vi.fn();
 vi.mock("../src/host-connect.js", () => ({
   openNetPrint: async () => ({
     retrieveMessage: (...a: unknown[]) => retrieveMessage(...a),
     answerMessage: (...a: unknown[]) => answerMessage(...a),
+    deleteSpooledFile: (...a: unknown[]) => deleteSpooledFile(...a),
     close: closeNp
   })
 }));
@@ -52,6 +54,8 @@ beforeEach(() => {
   readSpoolPages.mockResolvedValue([{ rows: 1, cols: 10, lines: ["取引先ＣＤ"] }]);
   answerMessage.mockResolvedValue(undefined);
   retrieveMessage.mockResolvedValue(undefined);
+  deleteSpooledFile.mockReset();
+  deleteSpooledFile.mockResolvedValue(undefined);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -160,5 +164,58 @@ describe("救出した帳票の配り先", () => {
     expect(pushed, "救出分も画面へ push される").toEqual(["spool-1", "spool-rescued-DSPFMT-1"]);
     expect(entry.reports, "サーバー側にも両方溜まる").toHaveLength(2);
     mgr.closeAll();
+  });
+});
+
+/**
+ * **取得後の扱い（保留 / 削除）。**
+ *
+ * 保留のままだとホスト側に溜まり続けるので、運用によっては削除したい。ただし削除は
+ * 取り消せないので**既定は保留**——明示的に選んだときだけ消す。
+ */
+describe("取得後の扱い", () => {
+  beforeEach(() => {
+    listSpools.mockResolvedValue({ items: [entry()], truncated: false });
+    retrieveMessage.mockResolvedValue({ id: "CPA3303", text: "x" });
+  });
+
+  it("既定は保留（削除しない）", async () => {
+    await rescueStuckSpools(OPTS, "PRT_TEST");
+    expect(answerMessage).toHaveBeenCalledWith(expect.anything(), "H");
+    expect(deleteSpooledFile).not.toHaveBeenCalled();
+  });
+
+  it("hold を指定しても削除しない", async () => {
+    await rescueStuckSpools(OPTS, "PRT_TEST", { action: "hold" });
+    expect(deleteSpooledFile).not.toHaveBeenCalled();
+  });
+
+  it("delete なら応答してから削除する", async () => {
+    await rescueStuckSpools(OPTS, "PRT_TEST", { action: "delete" });
+    expect(answerMessage, "先に応答する（待ち状態のまま消さない）").toHaveBeenCalledWith(
+      expect.anything(),
+      "H"
+    );
+    expect(deleteSpooledFile).toHaveBeenCalledTimes(1);
+  });
+
+  /** 応答できていない＝writer がまだ待っている。その対象を取り上げない */
+  it("応答に失敗したら削除しない", async () => {
+    answerMessage.mockRejectedValue(new Error("answer failed"));
+    await rescueStuckSpools(OPTS, "PRT_TEST", { action: "delete" });
+    expect(deleteSpooledFile).not.toHaveBeenCalled();
+  });
+
+  it("中身を読めなければ削除しない（届けていないものを消さない）", async () => {
+    readSpoolPages.mockRejectedValue(new Error("read failed"));
+    await rescueStuckSpools(OPTS, "PRT_TEST", { action: "delete" });
+    expect(deleteSpooledFile).not.toHaveBeenCalled();
+    expect(answerMessage).not.toHaveBeenCalled();
+  });
+
+  it("削除に失敗しても帳票は返す（届いたものは捨てない）", async () => {
+    deleteSpooledFile.mockRejectedValue(new Error("delete failed"));
+    const got = await rescueStuckSpools(OPTS, "PRT_TEST", { action: "delete" });
+    expect(got).toHaveLength(1);
   });
 });

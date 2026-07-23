@@ -344,6 +344,24 @@ export class NetPrintConnection {
     );
   }
 
+  /**
+   * スプールを削除する。
+   *
+   * **取り消せない。** 呼ぶのは利用者が明示的に「取得後に削除する」を選んだときだけにする
+   * （既定は保留＝残す）。中身を届ける前に呼んではいけない——読めていないのに消すと帳票が失われる。
+   */
+  async deleteSpooledFile(id: SpoolId): Promise<void> {
+    this.assertOpen();
+    await this.exchange(
+      buildNpRequest({
+        objectType: NP_OBJECT.spooledFile,
+        action: NP_ACTION.delete,
+        codePoints: [{ id: NP_CP.spooledFileId, data: this.spoolIdCodePoint(id) }]
+      }),
+      `delete ${id.fileName}#${id.fileNumber}`
+    );
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

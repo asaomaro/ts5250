@@ -9,7 +9,7 @@ import {
   type SpoolReport
 } from "@as400web/core";
 import { childLog } from "./log.js";
-import { rescueStuckSpools } from "./spool-rescue.js";
+import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -41,6 +41,11 @@ export interface OpenOptions extends ConnectOptions {
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
    */
   deviceNameRetry?: boolean;
+  /**
+   * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
+   * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
+   */
+  rescueAction?: RescueAction;
 }
 
 /** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
@@ -89,6 +94,11 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
    */
   deviceNameRetry?: boolean;
+  /**
+   * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
+   * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
+   */
+  rescueAction?: RescueAction;
 }
 
 
@@ -382,7 +392,7 @@ export class SessionManager {
     const tick = (): void => {
       if (entry.rescueBusy) return; // 前回が終わっていなければ見送る（重複取得を避ける）
       entry.rescueBusy = true;
-      void rescueStuckSpools(connect, outputQueue)
+      void rescueStuckSpools(connect, outputQueue, opts.rescueAction ? { action: opts.rescueAction } : {})
         .then((found) => {
           for (const r of found) {
             // push 型と同じ形の帳票にして同じ道で配る。利用者からは区別が要らない

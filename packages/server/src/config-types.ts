@@ -76,6 +76,11 @@ const sessionBase = {
    * 装置名を固定するのは「その名前で繋ぎたい」意図なので、既定では別名にすり替えない。
    */
   deviceNameRetry: z.boolean().optional(),
+  /**
+   * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか（printer のみ）。
+   * `hold`（既定）＝保留にして残す / `delete`＝削除する。削除は取り消せない。
+   */
+  rescueAction: z.enum(["hold", "delete"]).optional(),
   /** display のみ意味を持つ */
   screenSize: screenSizeSchema.optional(),
   /** システムの既定 CCSID を上書きする */
@@ -180,6 +185,8 @@ export interface PublicSession {
   system: string;
   sessionType: "display" | "printer";
   deviceName?: string;
+  /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
+  rescueAction?: "hold" | "delete";
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;
