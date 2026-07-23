@@ -5,10 +5,10 @@ import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
-import { useColumnWidths } from "../composables/useColumnWidths.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
 import { splitSqlStatements, summarizeSql } from "@as400web/core/browser";
 import SqlLogPanel from "./SqlLogPanel.vue";
+import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
 
 /**
@@ -205,8 +205,6 @@ async function execute(): Promise<void> {
   await releaseResultSets();
   tabs.value = [];
   activeTabId.value = "";
-  // 列の並びが変わるので、手で決めた列幅は捨てる（前の列の幅が残ると対応が狂う）
-  cols.clear();
   executed.value = true;
 
   await run(async () => {
@@ -281,11 +279,12 @@ async function executeOne(one: string, position: number, total: number): Promise
   }
 }
 
-/** タブを選ぶ。列が違うので、手で決めた列幅は持ち越さない */
+/**
+ * タブを選ぶ。**列幅とスクロール位置はタブごとに保たれる**——表のインスタンスを
+ * KeepAlive で持っているため（スクロール位置は表側が自分で覚えている）
+ */
 function selectTab(id: string): void {
-  if (activeTabId.value === id) return;
   activeTabId.value = id;
-  cols.clear();
 }
 
 /**
@@ -338,16 +337,7 @@ async function loadMore(): Promise<void> {
   }
 }
 
-/** 表の下端に近づいたら読み足す */
-function onScroll(e: Event): void {
-  const el = e.target as HTMLElement;
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) void loadMore();
-}
 
-/** End / PageDown でも読み足す（キーボードだけで使えるように） */
-function onPaneKeydown(e: KeyboardEvent): void {
-  if (e.key === "End" || e.key === "PageDown") void loadMore();
-}
 
 /** Ctrl+Enter で実行（textarea 内なので Enter は改行のまま残す） */
 function onKeydown(e: KeyboardEvent): void {
@@ -427,8 +417,6 @@ function restore(q: QuerySnapshot): void {
   tabs.value = q.tabs;
   activeTabId.value = q.activeTabId;
   executed.value = q.executed;
-  // 列の並びが変わるので、手で決めた列幅は捨てる
-  cols.clear();
   error.value = q.error;
   sqlDetail.value = q.sqlDetail;
 }
@@ -470,39 +458,10 @@ function closeQuery(id: number): void {
  * 既定は中身に合わせた幅で、長い値は CSS の `max-width` で打ち切る。
  * 手で指定した幅は打ち切りの基準そのものを動かすので、**広げれば隠れていた文字が見える**。
  */
-const cols = useColumnWidths();
-const resizingCol = cols.resizing;
-const widthStyle = cols.widthStyle;
-const onColDown = cols.onDown;
-const onColMove = cols.onMove;
-const onColUp = cols.onUp;
-const resetColWidth = cols.reset;
 
-/**
- * 打ち切られたセルの全文を title で読めるようにする。
- * NULL と LOB は中の span が自前の title を持つので、ここでは付けない
- * （付けると外側が勝って「LOB の中身は取得していません」等が読めなくなる）。
- */
-function cellTitle(v: unknown): string | undefined {
-  if (v === null || isLob(v)) return undefined;
-  return String(v);
-}
 
-/** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
-function lobText(v: unknown): string {
-  const lob = v as { value?: unknown; unavailable?: string };
-  if (typeof lob.value === "string") {
-    return lob.unavailable === "too-large" ? `${lob.value}…（以降省略）` : lob.value;
-  }
-  return lob.unavailable === "too-large" ? "(LOB: 大きすぎます)" : "(LOB)";
-}
 
-function lobTitle(v: unknown): string {
-  const lob = v as { byteLength?: number; unavailable?: string };
-  if (lob.unavailable === "not-requested") return "LOB の中身は取得していません（左のチェックで取得）";
-  if (lob.unavailable === "too-large") return `全体 ${lob.byteLength ?? "?"} バイトのうち先頭のみ`;
-  return `LOB（${lob.byteLength ?? "?"} バイト）`;
-}
+
 
 function download(): void {
   const csv = toCsv(
@@ -630,53 +589,26 @@ function download(): void {
 
     <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
     <div class="results" @click="logOpen && (logOpen = false)">
-    <div v-if="rows.length" class="rows-scroll" tabindex="0" @scroll="onScroll" @keydown="onPaneKeydown">
-    <table>
-      <thead>
-        <tr>
-          <!-- レコード番号。**横スクロールしても残す**ので、どの行を見ているか見失わない -->
-          <th class="rownum" title="レコード番号（読み足した順の通し番号）">#</th>
-          <th
-            v-for="(c, ci) in columns"
-            :key="c.name"
-            :style="widthStyle(ci)"
-            :title="`${c.name} — ${c.typeName}${c.nullable ? '' : ' NOT NULL'}`"
-          >
-            {{ c.name }}
-            <!-- 列の右端を掴んで幅を変える。ダブルクリックで既定へ戻す -->
-            <span
-              class="col-grip"
-              :class="{ dragging: resizingCol === ci }"
-              title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
-              @pointerdown="onColDown($event, ci)"
-              @pointermove="onColMove"
-              @pointerup="onColUp"
-              @pointercancel="onColUp"
-              @dblclick="resetColWidth(ci)"
-            ></span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(r, i) in rows" :key="i">
-          <td class="rownum">{{ i + 1 }}</td>
-          <td v-for="(c, ci) in columns" :key="c.name" :style="widthStyle(ci)" :title="cellTitle(r[c.name])">
-            <span v-if="r[c.name] === null" class="null">NULL</span>
-            <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
-            <template v-else>{{ r[c.name] }}</template>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-      <p v-if="loadingMore" class="more">読み足しています…</p>
-      <p v-else-if="hasMore" class="more">
-        下までスクロール、または End / PageDown で続きを読み込みます（{{ rows.length }} 件表示中）
-      </p>
-      <p v-else class="more">これ以上ありません（全 {{ rows.length }} 件）</p>
-    </div>
+    <!--
+      **タブごとに表のインスタンスを保つ**（KeepAlive）。切り替えのたびに作り直すと
+      200 行 × 40 列で 220〜280ms のブロッキングが出て、描画後に操作を受け付けない
+      （実測。DOM を挿し直すだけなら 65ms なので、大半は vnode の作り直し）。
+      `:max` は保持するタブ数の上限——多数のタブで DOM を抱え込みすぎないため
+    -->
+    <KeepAlive :max="4">
+      <SqlResultTable
+        v-if="activeTab && activeTab.rows.length"
+        :key="activeTab.id"
+        :columns="activeTab.columns"
+        :rows="activeTab.rows"
+        :has-more="activeTab.hasMore"
+        :loading-more="loadingMore"
+        @load-more="loadMore"
+      />
+    </KeepAlive>
 
-    <p v-else-if="executed && !error && !loading" class="empty">該当する行はありません。</p>
-    <p v-else-if="!executed && !error" class="empty">
+    <p v-if="executed && !error && !loading && !rows.length" class="empty">該当する行はありません。</p>
+    <p v-else-if="!executed && !error && !rows.length" class="empty">
       接続を選び、SELECT を入力して「実行」を押してください。取得できる範囲は IBM i の権限によります。
     </p>
 

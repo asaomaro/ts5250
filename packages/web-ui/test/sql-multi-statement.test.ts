@@ -171,6 +171,38 @@ describe("複数文の実行", () => {
     w.unmount();
   });
 
+  /**
+   * **タブごとに表のインスタンスを保つ**（KeepAlive）ことの確認。
+   * 手で決めた列幅が切り替えて戻っても残る＝作り直していない。
+   * 作り直していると 200 行 × 40 列で 220〜280ms のブロッキングが出る（実測）。
+   */
+  it("タブを切り替えて戻っても、手で決めた列幅が残る", async () => {
+    mockSequence([{ body: result("A", 2) }, { body: result("B", 2) }]);
+    const w = await run("SELECT A FROM T1; SELECT B FROM T2");
+
+    // 1 つ目のタブで列幅を掴んで動かす。
+    // （test-utils の trigger は clientX を後から代入するため jsdom で落ちる。
+    //   sql-pane.test.ts と同じくイベントを直接組み立てる）
+    const el = w.findAll("thead .col-grip")[0]?.element as HTMLElement;
+    const at = (type: string, x: number) =>
+      el.dispatchEvent(new MouseEvent(type, { clientX: x, bubbles: true, cancelable: true }));
+    at("pointerdown", 100);
+    at("pointermove", 400);
+    at("pointerup", 400);
+    await flushPromises();
+    const widened = w.findAll("thead th")[1]?.attributes("style");
+    expect(widened).toContain("width: 300px");
+
+    // 2 つ目へ行って戻る
+    await w.findAll(".rtab")[1]?.trigger("click");
+    await flushPromises();
+    await w.findAll(".rtab")[0]?.trigger("click");
+    await flushPromises();
+
+    expect(w.findAll("thead th")[1]?.attributes("style")).toBe(widened);
+    w.unmount();
+  });
+
   it("再実行のたびに前の結果セットを手放す", async () => {
     mockSequence([
       { body: { ...result("A", 2), resultSetId: "rs-1", hasMore: true } },
