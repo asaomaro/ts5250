@@ -16,6 +16,14 @@ export interface PrinterOutputConfig {
   autoPrint?: string;
   /** PDF 生成オプション（フォント・サイズ等） */
   pdf?: PdfOptions;
+  /**
+   * 受信データがホスト変換済みの印刷データか（HPT）。
+   *
+   * true なら**受信したバイト列をそのままプリンターへ流す**（`lp -o raw`）。
+   * ホストが決めた書式・フォント・改ページのまま印刷される＝本来の印刷経路。
+   * false（既定）は帳票を PDF へ起こして印刷する——当アプリの再現なので体裁は元と異なる。
+   */
+  rawPrint?: boolean;
 }
 
 export interface HandleReportResult {
@@ -52,6 +60,10 @@ export async function handleReport(
   if (!cfg.autoPdfDir && !cfg.autoPrint) return {};
   const result: HandleReportResult = {};
   if (cfg.autoPrint) result.printer = cfg.autoPrint;
+
+  // ホスト変換済みなら PDF に起こさない。受信バイトをそのまま流すのが本来の経路
+  if (cfg.rawPrint) return printRaw(report, cfg, warn, now, result);
+
   let pdf: Buffer;
   try {
     pdf = await renderSpoolPdf(report.pages, cfg.pdf, warn);
@@ -96,14 +108,50 @@ export async function handleReport(
   return result;
 }
 
+/**
+ * ホスト変換済みの印刷データをそのまま流す（本来の印刷経路）。
+ *
+ * PDF には起こさない——中身はプリンターの言語（PCL 等）で、当アプリは解釈しない。
+ * `autoPdfDir` が設定されていても PDF は作れないので、理由を残してスキップする。
+ */
+async function printRaw(
+  report: SpoolReport,
+  cfg: PrinterOutputConfig,
+  warn: (msg: string) => void,
+  now: () => number,
+  result: HandleReportResult
+): Promise<HandleReportResult> {
+  if (cfg.autoPdfDir) {
+    result.pdfError = "ホスト変換済みの印刷データは PDF にできません（印刷はそのまま流します）";
+  }
+  if (!cfg.autoPrint) return result;
+  const tmp = join(tmpdir(), `spool-${sanitize(report.id)}-${now()}.prn`);
+  try {
+    await writeFile(tmp, report.raw);
+    const r = await lpPrint(cfg.autoPrint, tmp, warn, true);
+    result.printed = r.ok;
+    if (!r.ok && r.error !== undefined) result.printError = r.error;
+  } catch (e) {
+    const msg = `自動印刷の準備に失敗: ${e instanceof Error ? e.message : String(e)}`;
+    warn(msg);
+    result.printed = false;
+    result.printError = msg;
+  }
+  return result;
+}
+
 /** `lp -d <printer> <file>` で印刷。lp 不在・失敗は warn して失敗理由を返す（degrade）。 */
 function lpPrint(
   printer: string,
   file: string,
-  warn: (msg: string) => void
+  warn: (msg: string) => void,
+  /** 変換せずそのまま流す（ホスト変換済みの印刷データ用） */
+  raw = false
 ): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const proc = spawn("lp", ["-d", printer, file], { stdio: "ignore" });
+    // -o raw を付けないと CUPS がフィルターを掛けてしまい、ホストが作った書式が壊れる
+    const args = raw ? ["-d", printer, "-o", "raw", file] : ["-d", printer, file];
+    const proc = spawn("lp", args, { stdio: "ignore" });
     proc.on("error", (e) => {
       const msg = `自動印刷に失敗（lp が無い可能性）: ${e.message}`;
       warn(msg);

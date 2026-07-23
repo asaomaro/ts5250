@@ -260,7 +260,17 @@ function printReport(): void {
         <div v-if="selectedStatusLines.length" class="status-detail">
           <div v-for="(l, i) in selectedStatusLines" :key="i" class="st-line" :class="l.cls">{{ l.text }}</div>
         </div>
-        <pre v-if="selected">{{ selectedText }}</pre>
+        <!-- ホスト変換（HPT）で受けている帳票はページを持たない。中身はプリンターの言語なので
+             当アプリでは描けない。何も出ないと壊れて見えるので、理由をはっきり書く -->
+        <div v-if="selected && selected.pages.length === 0" class="viewer-empty raw">
+          <p><strong>ホスト変換済みの印刷データです。</strong></p>
+          <p>
+            このセッションはホストに印刷データへ変換させる設定（印刷の経路＝ホスト変換）のため、
+            画面表示と PDF は使えません。書式はホストが決めたまま、実プリンターへそのまま送られます。
+          </p>
+          <p class="hint">画面で読みたい場合は、セッション設定の「印刷の経路」を「画面で見る」に戻してください。</p>
+        </div>
+        <pre v-else-if="selected">{{ selectedText }}</pre>
         <div v-else class="viewer-empty">スプールを選択すると帳票を表示します</div>
       </div>
     </div>
@@ -268,6 +278,16 @@ function printReport(): void {
 </template>
 
 <style scoped>
+/* ホスト変換で受けたときの説明。空白ではなく理由を出す */
+.viewer-empty.raw {
+  text-align: left;
+  max-width: 46em;
+  margin: 0 auto;
+  padding: 24px 12px;
+  line-height: 1.7;
+}
+.viewer-empty.raw .hint { color: var(--muted); font-size: 12px; }
+
 .printer-pane {
   display: flex;
   flex-direction: column;

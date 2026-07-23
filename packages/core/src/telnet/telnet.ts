@@ -45,6 +45,11 @@ export interface TelnetOptions {
    */
   ibmFont?: string | undefined;
   ibmTransform?: string | undefined;
+  /**
+   * HPT の変換先プリンター機種（RFC 4777 の USERVAR IBMMFRTYPMDL）。
+   * `ibmTransform` を "1" にするときは必須——これが無いとホストは変換先を決められない。
+   */
+  ibmMfrTypMdl?: string | undefined;
 }
 
 /** クライアントとして有効化に同意する telnet オプション */
@@ -214,6 +219,9 @@ export class TelnetLayer {
       }
       if (this.opts.ibmTransform !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("IBMTRANSFORM"), ENV_VALUE, ...ascii(this.opts.ibmTransform));
+      }
+      if (this.opts.ibmMfrTypMdl !== undefined) {
+        payload.push(ENV_USERVAR, ...ascii("IBMMFRTYPMDL"), ENV_VALUE, ...ascii(this.opts.ibmMfrTypMdl));
       }
       // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる
       if (this.opts.kbdType !== undefined) {

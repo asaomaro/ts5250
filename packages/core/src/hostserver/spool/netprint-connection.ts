@@ -155,9 +155,12 @@ export class NetPrintConnection {
   ): Promise<ReturnType<typeof parseNpReply>> {
     const reply = parseNpReply(await this.conn.request(frame));
     if (!allowed.includes(reply.returnCode)) {
+      // **ホストが理由を返しているなら載せる。** rc=0x0009 は「CPF メッセージ付き」で、
+      // 番号だけでは何が悪いのか分からない（機種名が不正なのか、権限なのか等）
+      const detail = cpfDetail(reply);
       throw new As400Error(
         "PROTOCOL_ERROR",
-        `network print ${what} failed (rc=0x${reply.returnCode.toString(16).padStart(4, "0")})`
+        `network print ${what} failed (rc=0x${reply.returnCode.toString(16).padStart(4, "0")})${detail}`
       );
     }
     return reply;
@@ -172,6 +175,10 @@ export class NetPrintConnection {
    * 権限の範囲でしか読めない——他人のスプールは開けない。
    */
   async readSpooledFileRaw(id: SpoolId): Promise<Uint8Array> {
+    return this.readSpooled(id);
+  }
+
+  private async readSpooled(id: SpoolId): Promise<Uint8Array> {
     this.assertOpen();
     const idCp = this.spoolIdCodePoint(id);
 
@@ -396,6 +403,21 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
  * NUL が値の末尾に残る。残ると `message.id === "CPA3394"` のような比較が必ず外れ、
  * メッセージ種別で分岐する呼び出し側（応答が要るかの判定）が動かない（実機で確認）。
  */
+/** 応答に載っている CPF メッセージ（あれば " CPFxxxx text" の形で返す） */
+function cpfDetail(reply: ReturnType<typeof parseNpReply>): string {
+  const attrs = findCodePoint(reply, NP_CP.attributeValue);
+  if (!attrs) return "";
+  try {
+    const values = parseAttributeList(attrs);
+    const id = decodeNpString(values.get(NP_ATTR.messageId));
+    const text = decodeNpString(values.get(NP_ATTR.messageText));
+    if (!id && !text) return "";
+    return `: ${id} ${text}`.trimEnd();
+  } catch {
+    return "";
+  }
+}
+
 export function decodeNpString(raw: Uint8Array | undefined): string {
   if (!raw) return "";
   const end = raw.indexOf(0);

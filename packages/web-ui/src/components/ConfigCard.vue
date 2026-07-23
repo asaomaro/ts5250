@@ -79,7 +79,8 @@ const sesForm = reactive<SesFormState>({
   sessionType: "display",
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
-  rescueAction: "hold" as "hold" | "delete"
+  rescueAction: "hold" as "hold" | "delete",
+  transformTo: ""
 });
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
 
@@ -125,6 +126,7 @@ function loadSession(): void {
   sesForm.sessionType = s.sessionType;
   sesForm.deviceName = s.deviceName ?? "";
   sesForm.rescueAction = s.rescueAction ?? "hold";
+  sesForm.transformTo = s.transformTo ?? "";
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
@@ -201,6 +203,9 @@ async function save(): Promise<void> {
       if (form.sessionType === "printer") {
         // 既定（保留）はわざわざ保存しない——設定ファイルに既定値を書き散らさない
         if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
+        const tt = (sesForm.transformTo ?? "").trim();
+        if (tt) form.transformTo = tt;
+        else delete form.transformTo;
         delete form.screenSize;
         delete form.enhanced;
       }
@@ -297,6 +302,10 @@ const infoRows = computed(() => {
   if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
   if (o.sessionType === "printer") {
     rows.push({ label: "取得後の扱い", value: o.rescueAction === "delete" ? "削除する" : "保留にして残す" });
+    rows.push({
+      label: "印刷の経路",
+      value: o.transformTo ? `ホスト変換 ${o.transformTo}（表示不可）` : "画面で見る（表示・PDF 可）"
+    });
   }
   if (o.screenSize) rows.push({ label: "画面サイズ", value: o.screenSize });
   rows.push({
@@ -422,6 +431,17 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
+        <label v-if="sesForm.sessionType === 'printer'" class="row">
+          <span class="cap" title="ホストに印刷データへ変換させると、書式そのままで実プリンターへ流せます。代わりに画面表示と PDF は使えません">
+            印刷の経路
+          </span>
+          <select v-model="sesForm.transformTo">
+            <option value="">画面で見る（表示・PDF が使える）</option>
+            <option value="*HP4">ホスト変換 *HP4（本来の印刷・表示不可）</option>
+            <option value="*HP5">ホスト変換 *HP5（本来の印刷・表示不可）</option>
+            <option value="*IBM4019">ホスト変換 *IBM4019（本来の印刷・表示不可）</option>
+          </select>
+        </label>
         <label v-if="sesForm.sessionType === 'printer'" class="row">
           <span class="cap" title="書き出しプログラムが処理できない帳票を取得したあと、ホスト側のスプールをどうするか">
             取得後の扱い

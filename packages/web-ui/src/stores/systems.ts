@@ -48,6 +48,11 @@ export interface SessionConfigForm {
    * `hold`（既定）＝保留にして残す / `delete`＝削除する
    */
   rescueAction?: "hold" | "delete";
+  /**
+   * printer のみ。ホスト変換の機種（HPT。"*HP4" 等）。
+   * 指定すると本来の印刷経路になる代わりに、画面表示と PDF が使えない。
+   */
+  transformTo?: string;
   /** サーバー設定のプリンターセッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界） */
   printer?: {
     autoPdfDir?: string;

@@ -304,6 +304,11 @@ export class SessionManager {
       throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
     }
     const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
+    // ホスト変換で受けているなら、自動印刷は PDF に起こさず受信バイトをそのまま流す
+    const output =
+      opts.output && opts.transformTo !== undefined
+        ? { ...opts.output, rawPrint: true }
+        : opts.output;
     const id = session.id;
     const entry: PrinterEntry = {
       id,
@@ -316,7 +321,7 @@ export class SessionManager {
       reports: [],
       delivered: 0,
       waiters: [],
-      ...(opts.output !== undefined ? { output: opts.output } : {}),
+      ...(output !== undefined ? { output } : {}),
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
       outputWarnings: [],
       outputStatuses: []
