@@ -8,6 +8,12 @@
  * ここに置いてよいのは **`node:*` にも I/O にも触れないもの**に限る。
  */
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
+/** SQL の複数文分割。純テキスト処理なので UI から直接使う（表も I/O も引き込まない） */
+export {
+  splitSqlStatements,
+  summarizeSql,
+  type SqlStatement
+} from "./sql/split-statements.js";
 /** 取り込みの拒否理由。UI が種類ごとに文言を組み立てるため型を共有する */
 export type { UploadRejection } from "./hostserver/db/upload-prepare.js";
 export {

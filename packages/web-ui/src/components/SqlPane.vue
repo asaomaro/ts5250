@@ -5,9 +5,10 @@ import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
-import { useColumnWidths } from "../composables/useColumnWidths.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
+import { splitSqlStatements, summarizeSql } from "@as400web/core/browser";
 import SqlLogPanel from "./SqlLogPanel.vue";
+import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
 
 /**
@@ -18,6 +19,10 @@ import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
  *
  * **実行できるのは SELECT だけ**——サーバー側 `/api/host/sql` の実装がそうなっている
  * （結果セットを持たない文は describe の段階で落ちる）。UI でも SELECT 以外を勧めない。
+ *
+ * **`;` で区切れば複数の文を順に実行する**。結果を返した文ごとに結果領域のタブを積み、
+ * 表示中のタブに対して列幅・CSV・読み足しが働く。失敗したらそこで止め、
+ * 何番目の文かを添える（後続は投げない）。
  */
 defineProps<{ tabId: string }>();
 
@@ -34,12 +39,38 @@ const pageSize = ref(200);
 const PAGE_SIZES = [50, 200, 500, 1000] as const;
 /** LOB の中身も取るか。**既定オフ**——大きな LOB を無自覚に引かないため */
 const fetchLob = ref(false);
-const columns = ref<Column[]>([]);
-const rows = ref<Row[]>([]);
-const hasMore = ref(false);
-const resultSetId = ref("");
+/**
+ * 結果タブ。**`;` 区切りの文ごとに 1 つ**積む。
+ *
+ * 表示に関わる状態（列・行・続き・期限切れ）はすべてここに持ち、
+ * 画面は「表示中のタブ」から引く。単一文のときはタブが 1 つになるだけで、
+ * 見え方は今までと変わらない（タブ帯は 2 つ以上のときだけ出す）。
+ */
+interface ResultTab {
+  id: string;
+  /** 何番目の文か（1 起点） */
+  index: number;
+  /** 実行した文。見出しの要約と CSV のファイル名に使う */
+  sql: string;
+  columns: Column[];
+  rows: Row[];
+  hasMore: boolean;
+  resultSetId: string;
+  expired: boolean;
+}
+
+const tabs = ref<ResultTab[]>([]);
+const activeTabId = ref("");
+let tabSeq = 0;
+
+const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value));
+/** 以下は「表示中のタブ」から引く。テンプレートと既存の処理をそのまま使えるようにするため */
+const columns = computed<Column[]>(() => activeTab.value?.columns ?? []);
+const rows = computed<Row[]>(() => activeTab.value?.rows ?? []);
+const hasMore = computed(() => activeTab.value?.hasMore ?? false);
+const resultSetId = computed(() => activeTab.value?.resultSetId ?? "");
+const expired = computed(() => activeTab.value?.expired ?? false);
 const loadingMore = ref(false);
-const expired = ref(false);
 const executed = ref(false);
 const { visible: slowLoading, busy: loading, run } = useDelayedLoading();
 const error = ref("");
@@ -138,86 +169,122 @@ watch(() => systemsStore.selected, () => {
  * 結果セットは**接続を掴んでいる**ので、放置するとアイドル（60 秒）まで
  * 次の実行がその接続を使い回せない。読み終わり・再実行・画面を閉じるときに返す。
  */
-async function releaseResultSet(): Promise<void> {
-  const id = resultSetId.value;
-  if (!id) return;
-  resultSetId.value = "";
-  await fetch(`/api/host/sql/${id}`, { method: "DELETE" }).catch(() => undefined);
+async function releaseResultSets(): Promise<void> {
+  // **開いているタブぶんすべて返す**。1 つでも残すと、その接続はアイドル（60 秒）まで
+  // プールへ戻らず、次の実行が接続確立の 4〜6 秒を払うことになる
+  const ids = tabs.value.map((t) => t.resultSetId).filter(Boolean);
+  for (const t of tabs.value) t.resultSetId = "";
+  await Promise.all(
+    ids.map((id) => fetch(`/api/host/sql/${id}`, { method: "DELETE" }).catch(() => undefined))
+  );
 }
 
 // タブを閉じたときも返す（閉じ忘れをアイドル任せにしない）
-onUnmounted(() => void releaseResultSet());
+onUnmounted(() => void releaseResultSets());
 
+/**
+ * 入力欄の SQL を `;` で分割し、**書いた順に 1 文ずつ実行**する。
+ *
+ * 1 文 = 1 要求（既存の `/api/host/sql`）。まとめて投げる API を作らないのは、
+ * ページング・接続プール・期限切れの規律を**既存のまま**使えるため。
+ *
+ * **失敗したらそこで止める**（後続は実行しない）。それまでのタブは残す——
+ * どこまで通ったかが分かる方が調べやすい。
+ */
 async function execute(): Promise<void> {
   if (!systemsStore.selected) {
     error.value = "システムを選んでください";
     return;
   }
-  if (!sql.value.trim()) return;
+  const statements = splitSqlStatements(sql.value);
+  if (statements.length === 0) return;
   error.value = "";
   sqlDetail.value = "";
   // **前の結果セットを手放し終えてから実行する**。待たずに投げると、まだ貸し出し中の
   // 接続をサーバーがプールから拾えず、再実行のたびに 4〜6 秒かかる（実測で気づいた）
-  await releaseResultSet();
-  const started = Date.now();
-  const ranSql = sql.value;
+  await releaseResultSets();
+  tabs.value = [];
+  activeTabId.value = "";
+  executed.value = true;
+
   await run(async () => {
-    try {
-      const res = await fetch("/api/host/sql", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          source: { system: systemsStore.selected },
-          sql: sql.value,
-          pageSize: pageSize.value,
-          ...(fetchLob.value ? { lobMaxBytes: 65536 } : {})
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        error.value = data.error ?? "実行に失敗しました";
-        // core のメッセージが既に SQLCODE を含むことがある（`prepare failed: SQLCODE=-204 …`）。
-        // その場合に併記すると二重に出る（実ブラウザ確認で判明）
-        if (data.sqlCode !== undefined && !String(error.value).includes("SQLCODE")) {
-          sqlDetail.value = `SQLCODE=${data.sqlCode} SQLSTATE=${data.sqlState}`;
-        }
-        columns.value = [];
-        rows.value = [];
-        hasMore.value = false;
-        resultSetId.value = "";
-        executed.value = true;
-        recordConnection(data.connection);
-        record({
-          kind: "run",
-          sql: ranSql,
-          status: "error",
-          ms: Date.now() - started,
-          detail: sqlDetail.value || String(error.value)
-        });
-        return;
+    for (const [i, statement] of statements.entries()) {
+      const ok = await executeOne(statement.sql, i + 1, statements.length);
+      if (!ok) return; // 失敗した時点で止める（後続は投げない）
+    }
+  });
+}
+
+/** 1 文を実行してタブを足す。続けてよければ true */
+async function executeOne(one: string, position: number, total: number): Promise<boolean> {
+  const started = Date.now();
+  /** 何番目の文かを添える（複数文のときだけ。単一文の文言を変えないため） */
+  const where = total > 1 ? `${position} 番目の文: ` : "";
+  try {
+    const res = await fetch("/api/host/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: { system: systemsStore.selected },
+        sql: one,
+        pageSize: pageSize.value,
+        ...(fetchLob.value ? { lobMaxBytes: 65536 } : {})
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      error.value = `${where}${data.error ?? "実行に失敗しました"}`;
+      // core のメッセージが既に SQLCODE を含むことがある（`prepare failed: SQLCODE=-204 …`）。
+      // その場合に併記すると二重に出る（実ブラウザ確認で判明）
+      if (data.sqlCode !== undefined && !String(error.value).includes("SQLCODE")) {
+        sqlDetail.value = `SQLCODE=${data.sqlCode} SQLSTATE=${data.sqlState}`;
       }
-      columns.value = data.columns ?? [];
-      // 列の並びが変わるので、手で決めた列幅は捨てる（前の列の幅が残ると対応が狂う）
-      cols.clear();
-      rows.value = data.rows ?? [];
-      hasMore.value = Boolean(data.hasMore);
-      resultSetId.value = data.resultSetId ?? "";
-      expired.value = false;
-      executed.value = true;
       recordConnection(data.connection);
       record({
         kind: "run",
-        sql: ranSql,
-        status: "ok",
+        sql: one,
+        status: "error",
         ms: Date.now() - started,
-        rowCount: rows.value.length,
-        hasMore: hasMore.value
+        detail: sqlDetail.value || String(error.value)
       });
-    } catch (e) {
-      error.value = `実行に失敗しました: ${String(e)}`;
-      record({ kind: "run", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(e) });
+      return false;
     }
-  });
+    const tab: ResultTab = {
+      id: `tab-${++tabSeq}`,
+      index: position,
+      sql: one,
+      columns: data.columns ?? [],
+      rows: data.rows ?? [],
+      hasMore: Boolean(data.hasMore),
+      resultSetId: data.resultSetId ?? "",
+      expired: false
+    };
+    tabs.value = [...tabs.value, tab];
+    // **選ぶのは最初のタブ**。書いた順に見るのが自然で、最後の文が確認用のこともある
+    if (!activeTabId.value) activeTabId.value = tab.id;
+    recordConnection(data.connection);
+    record({
+      kind: "run",
+      sql: one,
+      status: "ok",
+      ms: Date.now() - started,
+      rowCount: tab.rows.length,
+      hasMore: tab.hasMore
+    });
+    return true;
+  } catch (e) {
+    error.value = `${where}実行に失敗しました: ${String(e)}`;
+    record({ kind: "run", sql: one, status: "error", ms: Date.now() - started, detail: String(e) });
+    return false;
+  }
+}
+
+/**
+ * タブを選ぶ。**列幅とスクロール位置はタブごとに保たれる**——表のインスタンスを
+ * KeepAlive で持っているため（スクロール位置は表側が自分で覚えている）
+ */
+function selectTab(id: string): void {
+  activeTabId.value = id;
 }
 
 /**
@@ -225,12 +292,14 @@ async function execute(): Promise<void> {
  * 二重に走らせない（`loadingMore`）。
  */
 async function loadMore(): Promise<void> {
-  if (!hasMore.value || loadingMore.value || !resultSetId.value) return;
+  const tab = activeTab.value;
+  if (!tab || !tab.hasMore || loadingMore.value || !tab.resultSetId) return;
   loadingMore.value = true;
   const started = Date.now();
-  const ranSql = sql.value;
+  // **表示中のタブの文**でログを残す（複数文では入力欄と一致しない）
+  const ranSql = tab.sql;
   try {
-    const res = await fetch(`/api/host/sql/${resultSetId.value}/next`, {
+    const res = await fetch(`/api/host/sql/${tab.resultSetId}/next`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pageSize: pageSize.value })
@@ -238,8 +307,8 @@ async function loadMore(): Promise<void> {
     const data = await res.json();
     if (res.status === 404) {
       // **黙って空にしない**——期限切れだと分かるようにする
-      expired.value = true;
-      hasMore.value = false;
+      tab.expired = true;
+      tab.hasMore = false;
       record({
         kind: "more", sql: ranSql, status: "error", ms: Date.now() - started,
         detail: "結果セットの保持期限が切れました"
@@ -248,36 +317,27 @@ async function loadMore(): Promise<void> {
     }
     if (!res.ok) {
       error.value = data.error ?? "続きの取得に失敗しました";
-      hasMore.value = false;
+      tab.hasMore = false;
       record({ kind: "more", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(error.value) });
       return;
     }
     const added = (data.rows ?? []).length;
-    rows.value = [...rows.value, ...(data.rows ?? [])];
-    hasMore.value = Boolean(data.hasMore);
+    tab.rows = [...tab.rows, ...(data.rows ?? [])];
+    tab.hasMore = Boolean(data.hasMore);
     record({
       kind: "more", sql: ranSql, status: "ok", ms: Date.now() - started,
-      rowCount: added, hasMore: hasMore.value
+      rowCount: added, hasMore: tab.hasMore
     });
   } catch (e) {
     error.value = `続きの取得に失敗しました: ${String(e)}`;
-    hasMore.value = false;
+    tab.hasMore = false;
     record({ kind: "more", sql: ranSql, status: "error", ms: Date.now() - started, detail: String(e) });
   } finally {
     loadingMore.value = false;
   }
 }
 
-/** 表の下端に近づいたら読み足す */
-function onScroll(e: Event): void {
-  const el = e.target as HTMLElement;
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) void loadMore();
-}
 
-/** End / PageDown でも読み足す（キーボードだけで使えるように） */
-function onPaneKeydown(e: KeyboardEvent): void {
-  if (e.key === "End" || e.key === "PageDown") void loadMore();
-}
 
 /** Ctrl+Enter で実行（textarea 内なので Enter は改行のまま残す） */
 function onKeydown(e: KeyboardEvent): void {
@@ -305,11 +365,9 @@ const split = usePaneSplit({ initial: 110, min: 60, max: 600 });
 interface QuerySnapshot {
   id: number;
   sql: string;
-  columns: Column[];
-  rows: Row[];
-  hasMore: boolean;
-  resultSetId: string;
-  expired: boolean;
+  /** 結果はタブごと控える（複数文を実行したクエリを行き来しても崩れない） */
+  tabs: ResultTab[];
+  activeTabId: string;
   executed: boolean;
   error: string;
   sqlDetail: string;
@@ -320,11 +378,8 @@ function blankQuery(): QuerySnapshot {
   return {
     id: ++querySeq,
     sql: "",
-    columns: [],
-    rows: [],
-    hasMore: false,
-    resultSetId: "",
-    expired: false,
+    tabs: [],
+    activeTabId: "",
     executed: false,
     error: "",
     sqlDetail: ""
@@ -333,6 +388,11 @@ function blankQuery(): QuerySnapshot {
 
 const queries = ref<QuerySnapshot[]>([blankQuery()]);
 const activeId = ref(queries.value[0]!.id);
+
+/** クエリ一覧に出す行数。複数文なら全タブの合計 */
+function queryRowCount(q: QuerySnapshot): number {
+  return q.tabs.reduce((n, t) => n + t.rows.length, 0);
+}
 
 /** 一覧に出す名前。SQL の 1 行目を詰めたもの（未入力なら通し番号） */
 function queryTitle(q: QuerySnapshot, index: number): string {
@@ -345,11 +405,8 @@ function captureActive(): void {
   const q = queries.value.find((x) => x.id === activeId.value);
   if (!q) return;
   q.sql = sql.value;
-  q.columns = columns.value;
-  q.rows = rows.value;
-  q.hasMore = hasMore.value;
-  q.resultSetId = resultSetId.value;
-  q.expired = expired.value;
+  q.tabs = tabs.value;
+  q.activeTabId = activeTabId.value;
   q.executed = executed.value;
   q.error = error.value;
   q.sqlDetail = sqlDetail.value;
@@ -357,11 +414,8 @@ function captureActive(): void {
 
 function restore(q: QuerySnapshot): void {
   sql.value = q.sql;
-  columns.value = q.columns;
-  rows.value = q.rows;
-  hasMore.value = q.hasMore;
-  resultSetId.value = q.resultSetId;
-  expired.value = q.expired;
+  tabs.value = q.tabs;
+  activeTabId.value = q.activeTabId;
   executed.value = q.executed;
   error.value = q.error;
   sqlDetail.value = q.sqlDetail;
@@ -404,39 +458,10 @@ function closeQuery(id: number): void {
  * 既定は中身に合わせた幅で、長い値は CSS の `max-width` で打ち切る。
  * 手で指定した幅は打ち切りの基準そのものを動かすので、**広げれば隠れていた文字が見える**。
  */
-const cols = useColumnWidths();
-const resizingCol = cols.resizing;
-const widthStyle = cols.widthStyle;
-const onColDown = cols.onDown;
-const onColMove = cols.onMove;
-const onColUp = cols.onUp;
-const resetColWidth = cols.reset;
 
-/**
- * 打ち切られたセルの全文を title で読めるようにする。
- * NULL と LOB は中の span が自前の title を持つので、ここでは付けない
- * （付けると外側が勝って「LOB の中身は取得していません」等が読めなくなる）。
- */
-function cellTitle(v: unknown): string | undefined {
-  if (v === null || isLob(v)) return undefined;
-  return String(v);
-}
 
-/** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
-function lobText(v: unknown): string {
-  const lob = v as { value?: unknown; unavailable?: string };
-  if (typeof lob.value === "string") {
-    return lob.unavailable === "too-large" ? `${lob.value}…（以降省略）` : lob.value;
-  }
-  return lob.unavailable === "too-large" ? "(LOB: 大きすぎます)" : "(LOB)";
-}
 
-function lobTitle(v: unknown): string {
-  const lob = v as { byteLength?: number; unavailable?: string };
-  if (lob.unavailable === "not-requested") return "LOB の中身は取得していません（左のチェックで取得）";
-  if (lob.unavailable === "too-large") return `全体 ${lob.byteLength ?? "?"} バイトのうち先頭のみ`;
-  return `LOB（${lob.byteLength ?? "?"} バイト）`;
-}
+
 
 function download(): void {
   const csv = toCsv(
@@ -446,7 +471,12 @@ function download(): void {
   const url = URL.createObjectURL(csvBlob(csv));
   const a = document.createElement("a");
   a.href = url;
-  a.download = csvFileName();
+  // **複数のタブを続けて落とすときに同じ名前にしない**（何番目の文かを付ける）
+  const name = csvFileName();
+  a.download =
+    tabs.value.length > 1 && activeTab.value
+      ? name.replace(/\.csv$/, `-${activeTab.value.index}.csv`)
+      : name;
   a.click();
   // 解放しないと Blob がタブの寿命だけ残る
   URL.revokeObjectURL(url);
@@ -465,7 +495,8 @@ function download(): void {
         <li v-for="(q, i) in queries" :key="q.id" :class="{ sel: q.id === activeId }">
           <button class="qitem" :title="q.sql || '（未入力）'" @click="selectQuery(q.id)">
             <span class="qname">{{ queryTitle(q, i) }}</span>
-            <span v-if="q.executed && !q.error" class="qcount">{{ q.rows.length }}</span>
+            <!-- 複数文なら合計の行数（タブごとの内訳は結果側のタブで見る） -->
+            <span v-if="q.executed && !q.error" class="qcount">{{ queryRowCount(q) }}</span>
             <span v-else-if="q.error" class="qerr" title="失敗">!</span>
           </button>
           <button
@@ -516,8 +547,9 @@ function download(): void {
       @keydown="onKeydown"
     ></textarea>
     <p v-show="!split.maximized.value" class="hint">
-      SELECT のみ実行できます（Ctrl+Enter で実行）。<strong>下までスクロールするか
-      End / PageDown で続きを読み足します。</strong>「1 度に取得」はその 1 回ぶんの件数です。
+      SELECT のみ実行できます（Ctrl+Enter で実行）。<strong>「;」で区切ると順に実行し、
+      結果ごとにタブが出ます。</strong>下までスクロールするか End / PageDown で続きを読み足します
+      （「1 度に取得」はその 1 回ぶんの件数）。
     </p>
 
     <!-- SQL 欄と結果欄の境界。この罫線を掴んで高さを変える -->
@@ -534,55 +566,49 @@ function download(): void {
       結果セットの保持期限が切れました。もう一度「実行」してください。
     </p>
 
-    <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
-    <div class="results" @click="logOpen && (logOpen = false)">
-    <div v-if="rows.length" class="rows-scroll" tabindex="0" @scroll="onScroll" @keydown="onPaneKeydown">
-    <table>
-      <thead>
-        <tr>
-          <!-- レコード番号。**横スクロールしても残す**ので、どの行を見ているか見失わない -->
-          <th class="rownum" title="レコード番号（読み足した順の通し番号）">#</th>
-          <th
-            v-for="(c, ci) in columns"
-            :key="c.name"
-            :style="widthStyle(ci)"
-            :title="`${c.name} — ${c.typeName}${c.nullable ? '' : ' NOT NULL'}`"
-          >
-            {{ c.name }}
-            <!-- 列の右端を掴んで幅を変える。ダブルクリックで既定へ戻す -->
-            <span
-              class="col-grip"
-              :class="{ dragging: resizingCol === ci }"
-              title="ドラッグで列幅を変えられます（ダブルクリックで戻す）"
-              @pointerdown="onColDown($event, ci)"
-              @pointermove="onColMove"
-              @pointerup="onColUp"
-              @pointercancel="onColUp"
-              @dblclick="resetColWidth(ci)"
-            ></span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(r, i) in rows" :key="i">
-          <td class="rownum">{{ i + 1 }}</td>
-          <td v-for="(c, ci) in columns" :key="c.name" :style="widthStyle(ci)" :title="cellTitle(r[c.name])">
-            <span v-if="r[c.name] === null" class="null">NULL</span>
-            <span v-else-if="isLob(r[c.name])" class="lob" :title="lobTitle(r[c.name])">{{ lobText(r[c.name]) }}</span>
-            <template v-else>{{ r[c.name] }}</template>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-      <p v-if="loadingMore" class="more">読み足しています…</p>
-      <p v-else-if="hasMore" class="more">
-        下までスクロール、または End / PageDown で続きを読み込みます（{{ rows.length }} 件表示中）
-      </p>
-      <p v-else class="more">これ以上ありません（全 {{ rows.length }} 件）</p>
+    <!--
+      結果タブ。**2 つ以上のときだけ出す**——単一文の見え方を変えないため
+      （1 つのときにタブ帯を出すと、今までの画面に無かった段が増える）
+    -->
+    <div v-if="tabs.length > 1" class="rtabs" role="tablist" aria-label="結果">
+      <button
+        v-for="t in tabs"
+        :key="t.id"
+        class="rtab"
+        role="tab"
+        :class="{ sel: t.id === activeTabId }"
+        :aria-selected="t.id === activeTabId"
+        :title="t.sql"
+        @click="selectTab(t.id)"
+      >
+        <span class="rtab-no">{{ t.index }}</span>
+        <span class="rtab-name">{{ summarizeSql(t.sql) }}</span>
+        <span class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
+      </button>
     </div>
 
-    <p v-else-if="executed && !error && !loading" class="empty">該当する行はありません。</p>
-    <p v-else-if="!executed && !error" class="empty">
+    <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
+    <div class="results" @click="logOpen && (logOpen = false)">
+    <!--
+      **タブごとに表のインスタンスを保つ**（KeepAlive）。切り替えのたびに作り直すと
+      200 行 × 40 列で 220〜280ms のブロッキングが出て、描画後に操作を受け付けない
+      （実測。DOM を挿し直すだけなら 65ms なので、大半は vnode の作り直し）。
+      `:max` は保持するタブ数の上限——多数のタブで DOM を抱え込みすぎないため
+    -->
+    <KeepAlive :max="4">
+      <SqlResultTable
+        v-if="activeTab && activeTab.rows.length"
+        :key="activeTab.id"
+        :columns="activeTab.columns"
+        :rows="activeTab.rows"
+        :has-more="activeTab.hasMore"
+        :loading-more="loadingMore"
+        @load-more="loadMore"
+      />
+    </KeepAlive>
+
+    <p v-if="executed && !error && !loading && !rows.length" class="empty">該当する行はありません。</p>
+    <p v-else-if="!executed && !error && !rows.length" class="empty">
       接続を選び、SELECT を入力して「実行」を押してください。取得できる範囲は IBM i の権限によります。
     </p>
 
@@ -718,6 +744,47 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
    固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
    表の領域を不透明にして、固定列と本文を同じ地の上に載せる */
 /* 結果領域。ログパネルを重ねる基準（position: relative）になる */
+/* 結果タブ。2 つ以上のときだけ出る（単一文の見え方を変えない） */
+.rtabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px 0;
+  overflow-x: auto;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.rtab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rtab.sel {
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.rtab-no {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+.rtab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rtab-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
 .results { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .rows-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--line); background: var(--paper); }
 /* 列見出しはスクロールしても残す */
