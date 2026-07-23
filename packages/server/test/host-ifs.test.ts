@@ -115,6 +115,8 @@ describe("エラーコードから HTTP ステータスへの写像", () => {
     ["ACCESS_DENIED", 403],
     ["ALREADY_EXISTS", 409],
     ["RESOURCE_BUSY", 409],
+    // 「中身が残っている」は待っても権限を足しても変わらないが、中を消せば通る
+    ["NOT_EMPTY", 409],
     ["FORBIDDEN", 403],
     ["CONFIG_ERROR", 400],
     // 上流との通信失敗だけが 502

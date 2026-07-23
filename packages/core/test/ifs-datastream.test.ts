@@ -13,13 +13,16 @@ import {
   buildCloseRequest,
   buildDeleteRequest,
   buildListAttrsByHandleRequest,
+  buildRemoveDirRequest,
+  buildRenameRequest,
   parseContentCcsid,
   replyDatastreamLevel,
   replyId,
   replyReturnCode,
   replyFileHandle,
   readReplyData,
-  fileErrorText
+  fileErrorText,
+  fileFailure
 } from "../src/hostserver/ifs/ifs-datastream.js";
 import { Tn5250Error } from "../src/errors.js";
 
@@ -228,6 +231,69 @@ describe("内容の CCSID タグ（OA2）", () => {
     const short = oa2Reply();
     new DataView(short.buffer).setUint32(28, 100); // LL を縮める（CCSID 位置が構造体の外に出る）
     expect(parseContentCcsid(short, 24)).toBeUndefined();
+  });
+});
+
+/**
+ * リネームとディレクトリ削除。**ファイル削除からのコピーで作らない**——
+ * ディレクトリ削除はフラグ 2 バイト分テンプレートが長く（10 と 8）、名前の位置がずれる（research F2）。
+ */
+describe("rename（0x000F）と rmdir（0x000E）", () => {
+  it("rename は元・先の 2 つの名前を CP 0x0003 / 0x0004 で並べる", () => {
+    const req = buildRenameRequest("/a", "/bc");
+    const v = new DataView(req.buffer);
+    expect(v.getUint16(18)).toBe(FILE_REQ.rename);
+    expect(v.getUint16(16)).toBe(16); // テンプレート長
+    expect(req.length).toBe(20 + 16 + 6 + 4 + 6 + 6); // "/a"=4 バイト, "/bc"=6 バイト
+    expect(v.getUint32(0)).toBe(req.length);
+    expect(v.getUint32(26)).toBe(1); // 元の作業ディレクトリハンドル
+    expect(v.getUint32(30)).toBe(1); // 先の作業ディレクトリハンドル
+    expect(v.getUint16(34)).toBe(0); // 置換しない
+    expect(v.getUint32(36)).toBe(4 + 6); // 元の LL
+    expect(v.getUint16(40)).toBe(0x0003); // 元の CP
+    expect(v.getUint16(42)).toBe("/".charCodeAt(0)); // 元の名前（UTF-16BE）
+    expect(v.getUint32(46)).toBe(6 + 6); // 先の LL（42 + 元 4 バイト）
+    expect(v.getUint16(50)).toBe(0x0004); // 先の CP
+    expect(v.getUint16(52)).toBe("/".charCodeAt(0));
+  });
+
+  it("replace を指定したときだけ置換フラグが立つ", () => {
+    expect(new DataView(buildRenameRequest("/a", "/b", { replace: true }).buffer).getUint16(34)).toBe(1);
+    expect(new DataView(buildRenameRequest("/a", "/b", { replace: false }).buffer).getUint16(34)).toBe(0);
+  });
+
+  it("rmdir はテンプレート長 10。フラグの分だけ名前が後ろにずれる", () => {
+    const req = buildRemoveDirRequest("/ab");
+    const v = new DataView(req.buffer);
+    expect(v.getUint16(18)).toBe(FILE_REQ.removeDir);
+    expect(v.getUint16(16)).toBe(10);
+    expect(req.length).toBe(20 + 10 + 6 + 6);
+    expect(v.getUint32(24)).toBe(1); // 作業ディレクトリハンドル
+    expect(v.getUint16(28)).toBe(0); // フラグ（ファイル削除には無い）
+    expect(v.getUint32(30)).toBe(6 + 6); // 名前 LL
+    expect(v.getUint16(34)).toBe(0x0001); // ディレクトリ名の CP（ファイルは 0x0002）
+    expect(v.getUint16(36)).toBe("/".charCodeAt(0)); // 名前は 36 から（ファイル削除は 34）
+  });
+
+  it("ファイル削除とはテンプレート長も名前の位置も違う", () => {
+    const dir = new DataView(buildRemoveDirRequest("/ab").buffer);
+    const file = new DataView(buildDeleteRequest("/ab").buffer);
+    expect([dir.getUint16(16), file.getUint16(16)]).toEqual([10, 8]);
+    expect([dir.getUint16(34), file.getUint16(32)]).toEqual([0x0001, 0x0002]);
+  });
+
+  it("空のパスを拒否する", () => {
+    expect(() => buildRemoveDirRequest("")).toThrow(Tn5250Error);
+    expect(() => buildRenameRequest("", "/b")).toThrow(Tn5250Error);
+    expect(() => buildRenameRequest("/a", "")).toThrow(Tn5250Error);
+  });
+
+  it("「空ではない」(rc=9) は専用のコードにする（502 に落とさない）", () => {
+    expect(fileFailure("x", 9, REPLY_ERROR).code).toBe("NOT_EMPTY");
+    // 既存の写像は変わっていない
+    expect(fileFailure("x", 4, REPLY_ERROR).code).toBe("ALREADY_EXISTS");
+    expect(fileFailure("x", 2, REPLY_ERROR).code).toBe("NOT_FOUND");
+    expect(fileFailure("x", 13, REPLY_ERROR).code).toBe("ACCESS_DENIED");
   });
 });
 

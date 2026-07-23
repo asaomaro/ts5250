@@ -21,6 +21,8 @@ export const FILE_REQ = {
   listFiles: 0x000a,
   delete: 0x000c,
   createDir: 0x000d,
+  removeDir: 0x000e,
+  rename: 0x000f,
   exchangeAttributes: 0x0016
 } as const;
 
@@ -42,6 +44,9 @@ const CP_FILENAME = 0x0002;
  * **ファイル名の 0x0002 とは違う**（原典 `IFSCreateDirReq` / `IFSDeleteDirReq`）。
  */
 const CP_DIRECTORY_NAME = 0x0001;
+/** リネームの元・先の名前のコードポイント（原典 `IFSRenameReq`） */
+const CP_RENAME_SOURCE = 0x0003;
+const CP_RENAME_TARGET = 0x0004;
 /** 一覧の続きを指定する Restart ID のコードポイント */
 const CP_RESTART_ID = 0x000e;
 /** 書き込みデータのコードポイント */
@@ -489,6 +494,10 @@ export function fileFailure(what: string, rc: number, replyId: number): As400Err
     case 5:
     case 13:
       return new As400Error("ACCESS_DENIED", detail);
+    // 中身が残っている（rmdir）。**待っても権限を足しても変わらない**——
+    // 中を先に消すという別の行動が要るので、専用のコードで返す
+    case 9:
+      return new As400Error("NOT_EMPTY", detail);
     // 使用中 / 共有違反 / ロック違反。権限ではなく**時間**の問題なので、
     // 「ホストが落ちている」を意味する扱いにしない（待てば通りうる）
     case 1:
@@ -577,6 +586,75 @@ export function buildDeleteRequest(path: string): Uint8Array {
   v.setUint32(28, name.length + 6);
   v.setUint16(32, CP_FILENAME);
   out.set(name, 34);
+  return out;
+}
+
+/**
+ * リネーム要求（0x000F）。**元も先もフルパスで送る**（同じ要求で別フォルダへ移動もできる）。
+ *
+ * 参照: JTOpen `IFSRenameReq`。テンプレート長 16 で、可変部に
+ * 元の名前（CP `0x0003`）→ 先の名前（CP `0x0004`）の順に 2 つ並べる。
+ *
+ * `replace` は既定 false。**既存の名前を黙って上書きしない**——
+ * 上書きしたい場面が来るまで許さない方が、事故が起きたときに戻せる（rc=4 で失敗する）。
+ */
+export function buildRenameRequest(
+  from: string,
+  to: string,
+  opts: { replace?: boolean } = {}
+): Uint8Array {
+  if (from.length === 0 || to.length === 0) {
+    throw new As400Error("CONFIG_ERROR", "rename needs both source and target paths");
+  }
+  const src = utf16be(from);
+  const dst = utf16be(to);
+  const templateLength = 16;
+  const total = 20 + templateLength + 6 + src.length + 6 + dst.length;
+  const out = new Uint8Array(total);
+  const v = new DataView(out.buffer);
+  writeHeader(v, total, templateLength, FILE_REQ.rename);
+  v.setUint16(20, 0); // 連鎖指示
+  v.setUint16(22, FILENAME_CCSID); // 元の名前の CCSID
+  v.setUint16(24, FILENAME_CCSID); // 先の名前の CCSID
+  v.setUint32(26, 1); // 元の作業ディレクトリハンドル
+  v.setUint32(30, 1); // 先の作業ディレクトリハンドル
+  v.setUint16(34, opts.replace ? 1 : 0); // 置換フラグ
+  v.setUint32(36, src.length + 6);
+  v.setUint16(40, CP_RENAME_SOURCE);
+  out.set(src, 42);
+  const at = 42 + src.length;
+  v.setUint32(at, dst.length + 6);
+  v.setUint16(at + 4, CP_RENAME_TARGET);
+  out.set(dst, at + 6);
+  return out;
+}
+
+/**
+ * ディレクトリ削除要求（0x000E）。
+ *
+ * **ファイル削除（0x000C）と形が違う**（原典 `IFSDeleteDirReq`）——
+ * テンプレート長が 10 で、名前 LL の前に**フラグ 2 バイト**が入る。
+ * `buildDeleteRequest` をコピーしてコードポイントだけ差し替えると、そこで 2 バイトずれる。
+ *
+ * 中身が残っていると rc=9（`NOT_EMPTY`）で失敗する。再帰的に消すのは呼び出し側の責任。
+ */
+export function buildRemoveDirRequest(path: string): Uint8Array {
+  if (path.length === 0) {
+    throw new As400Error("CONFIG_ERROR", "path is empty");
+  }
+  const name = utf16be(path);
+  const templateLength = 10;
+  const total = 20 + templateLength + 6 + name.length;
+  const out = new Uint8Array(total);
+  const v = new DataView(out.buffer);
+  writeHeader(v, total, templateLength, FILE_REQ.removeDir);
+  v.setUint16(20, 0); // 連鎖指示
+  v.setUint16(22, FILENAME_CCSID);
+  v.setUint32(24, 1); // 作業ディレクトリハンドル
+  v.setUint16(28, 0); // フラグ（原典も 0 固定）
+  v.setUint32(30, name.length + 6);
+  v.setUint16(34, CP_DIRECTORY_NAME);
+  out.set(name, 36);
   return out;
 }
 
