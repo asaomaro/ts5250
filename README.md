@@ -308,7 +308,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | `set_fields` | フィールドにローカル入力（ホスト送信なし） |
 | `send_key` | fields 反映＋カーソル設定＋AID 送信 → 更新画面（Enter / F1–F24 / PageUp/Down 等） |
 | `run_steps` | 複数ステップを順次実行（`expect` 不一致で中断） |
-| `get_job_info` | 対話ジョブの識別子（番号 / ユーザー / ジョブ名） |
+| `get_job_info` | セッションのジョブ識別子（ジョブ名＝装置名 / システム名 / 分かればユーザー・番号）。**画面には触れない** |
 | `select_gui_choice` / `submit_gui_selection` | 拡張 5250 GUI 選択フィールドの選択・確定送信 |
 | `list_systems` | **接続できるシステムの一覧**（接続先＋資格情報のまとまり。`ref` を `open_session` の `system` へ。可視範囲は認証状態に従う） |
 | `list_session_configs` | **保存済みセッション設定の一覧**（装置名・画面サイズつき。`ref` を `open_session` の `session` へ）。`list_sessions`（いま開いているセッション）とは別物 |

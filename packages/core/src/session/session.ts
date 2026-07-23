@@ -14,6 +14,7 @@ import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
 import type { ScreenSnapshot } from "../screen/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
+import { parseStartupResponse, type StartupResponse } from "../telnet/startup-record.js";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { Emitter } from "../util/emitter.js";
@@ -70,35 +71,13 @@ export interface SendAidResult {
   timedOut: boolean;
 }
 
-/** 対話ジョブの識別子（fetchJobInfo の戻り値） */
-export interface JobInfo {
-  number: string;
-  user: string;
-  name: string;
-}
-
 interface SessionEvents extends Record<string, unknown[]> {
   screen: [ScreenSnapshot];
   closed: [string];
 }
 
+/** セッション ID の連番（id 未指定時のフォールバック） */
 let seq = 0;
-
-function screenText(snap: ScreenSnapshot): string {
-  return snap.cells.map((r) => r.map((c) => c.char).join("")).join("\n");
-}
-
-/**
- * DSPJOB 画面ヘッダから Job / User / Number を抽出する。
- * 例: "Job:   WEBEMU01       User:   USER           Number:   200737"
- * ラベルは英語 NLV 前提（`. .` ドット装飾・余白を許容）。
- */
-function parseJobInfo(text: string): JobInfo | undefined {
-  const re = /Job\s*[.:]*\s*:?\s*(\S+)\s+User\s*[.:]*\s*:?\s*(\S+)\s+Number\s*[.:]*\s*:?\s*(\S+)/;
-  const m = re.exec(text);
-  if (!m || m[1] === undefined || m[2] === undefined || m[3] === undefined) return undefined;
-  return { name: m[1], user: m[2], number: m[3] };
-}
 
 /**
  * 5250 セッション（design の状態機械: Connecting → Negotiating → Ready ⇄ Locked → Closed）。
@@ -116,8 +95,13 @@ export class Session5250 extends Emitter<SessionEvents> {
   private readonly traceRecords: boolean;
   /** メッセージ待ち表示灯（MESSAGE_LIGHT_ON/OFF）。OIA 表示に使える */
   messageWaiting = false;
-  private jobInfoCache: JobInfo | undefined;
-  private fetchingJobInfo = false;
+  /**
+   * 起動応答レコードで分かったこと（応答コード・システム名・**実際の装置名**）。
+   * 接続直後の 1 レコード目で埋まる。来なければ `undefined`。
+   */
+  private startupInfo: StartupResponse | undefined;
+  /** 1 レコード目かどうか。起動応答の判定はここだけで行う */
+  private firstRecord = true;
   private pendingAid:
     | { resolve: (r: SendAidResult) => void; timer: ReturnType<typeof setTimeout> }
     | undefined;
@@ -217,7 +201,6 @@ export class Session5250 extends Emitter<SessionEvents> {
 
   /** ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可 */
   setField(target: { index: number } | { row: number; col: number }, value: string): void {
-    this.assertNotBusy();
     this.assertReady();
     const field = this.resolveField(target);
     // 内容検証（型・DBCS 種別・コードページ許容文字）。違反は FIELD_TYPE
@@ -238,7 +221,6 @@ export class Session5250 extends Emitter<SessionEvents> {
    * 変更後に画面イベントを発火する。fieldId/choiceIndex は snapshot.gui の値。
    */
   selectGuiChoice(fieldId: number, choiceIndex: number, selected = true): boolean {
-    this.assertNotBusy();
     this.assertReady();
     const ok = this.buf.setSelectionChoice(fieldId, choiceIndex, selected);
     if (ok) this.emit("screen", this.snapshot());
@@ -251,7 +233,6 @@ export class Session5250 extends Emitter<SessionEvents> {
    * メニューバー・プッシュボタンの主経路（AID で動作を識別）に対応する。
    */
   submitGuiSelection(fieldId: number, opts: SendAidOptions & { key?: AidKey } = {}): Promise<SendAidResult> {
-    this.assertNotBusy();
     this.assertReady();
     const field = this.buf.getSelectionField(fieldId);
     if (!field) throw new As400Error("PROTOCOL_ERROR", `no GUI selection field id=${fieldId}`);
@@ -269,7 +250,6 @@ export class Session5250 extends Emitter<SessionEvents> {
    * タイムアウトはエラーにせず timedOut: true で現画面を返す。
    */
   sendAid(key: AidKey, opts: SendAidOptions = {}): Promise<SendAidResult> {
-    this.assertNotBusy();
     this.assertReady();
     const record = this.buildAidRecord(key, opts.cursor);
     return this.sendAndWait(record, opts.timeoutMs);
@@ -336,58 +316,19 @@ export class Session5250 extends Emitter<SessionEvents> {
     });
   }
 
+  /**
+   * 起動応答レコードで分かったこと。接続直後に埋まる（来なければ `undefined`）。
+   *
+   * `device` は**実際に割り当てられた装置名**で、設定で指定していなくても（ホスト採番でも）分かる。
+   * 対話ジョブのジョブ名は装置名と同じなので、ジョブ情報の起点になる。
+   */
+  get startup(): StartupResponse | undefined {
+    return this.startupInfo;
+  }
+
   disconnect(): void {
     if (this.state === "closed") return;
     this.telnet.close();
-  }
-
-  /**
-   * 対話ジョブの識別子を取得する（decisions.md D2: コマンド行に DSPJOB を実行→ヘッダ走査→F3 復帰）。
-   * コマンド行のある画面が前提。取得済みならキャッシュを返す（refresh で再取得）。
-   * 実行中は他操作を JOB_INFO_BUSY で拒否し、完了後に画面を元へ戻す。
-   */
-  async fetchJobInfo(refresh = false): Promise<JobInfo> {
-    if (this.jobInfoCache && !refresh) return this.jobInfoCache;
-    if (this.fetchingJobInfo) throw new As400Error("JOB_INFO_BUSY", "job info fetch already in progress");
-    if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
-    if (this.state !== "ready") throw new As400Error("JOB_INFO_BUSY", "keyboard is locked");
-
-    const cmd = this.findCommandField();
-    if (!cmd) {
-      throw new As400Error("JOB_INFO_UNAVAILABLE", "no command line on current screen");
-    }
-
-    this.fetchingJobInfo = true;
-    try {
-      this.buf.setFieldValue(cmd, "DSPJOB");
-      const entered = await this.sendAndWait(
-        buildReadMdtResponse(this.buf, this.codec, aidCodeOf("Enter")!).record
-      );
-      const info = entered.timedOut ? undefined : parseJobInfo(screenText(entered.screen));
-      // 成否に関わらず F3 で元画面へ戻す
-      await this.sendAndWait(this.buildAidRecord("F3"));
-      if (!info) {
-        throw new As400Error("JOB_INFO_UNAVAILABLE", "could not parse job identity from DSPJOB screen");
-      }
-      this.jobInfoCache = info;
-      return info;
-    } finally {
-      this.fetchingJobInfo = false;
-    }
-  }
-
-  /** コマンド行候補: 画面上の最後の非保護・非 hidden 入力フィールド（メニューの ===> 行等） */
-  private findCommandField(): InternalField | undefined {
-    const inputs = this.buf.orderedFields().filter((f) => !this.buf.isFieldHidden(f));
-    for (let i = inputs.length - 1; i >= 0; i--) {
-      const f = inputs[i];
-      if (f && (f.ffw & 0x2000) === 0) return f; // bypass ビットなし＝入力可
-    }
-    return undefined;
-  }
-
-  private assertNotBusy(): void {
-    if (this.fetchingJobInfo) throw new As400Error("JOB_INFO_BUSY", "job info fetch in progress");
   }
 
   private assertReady(): void {
@@ -407,6 +348,21 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (this.traceRecords) {
       const hex = [...record].map((b) => b.toString(16).padStart(2, "0")).join(" ");
       this.warn(`rx record (${record.length} bytes): ${hex}`);
+    }
+    // **1 レコード目だけ**を起動応答の候補として見る（RFC 4777 §10）。
+    // ここで実際に割り当てられた装置名が分かる＝画面に触れずにジョブ名を知る唯一の経路。
+    // **装置名まで入っているものだけを起動応答として食べる**——通常のデータストリームを
+    // 誤って食べると、そのレコードが画面へ流れず画面が出なくなる
+    if (this.firstRecord) {
+      this.firstRecord = false;
+      const startup = parseStartupResponse(record, this.codec);
+      if (startup && startup.device !== "") {
+        this.startupInfo = startup;
+        this.warn(
+          `startup response ${startup.code} (system=${startup.system} device=${startup.device})`
+        );
+        return;
+      }
     }
     let unlocked = false;
     try {

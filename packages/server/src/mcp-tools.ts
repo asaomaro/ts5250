@@ -815,19 +815,37 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     "get_job_info",
     {
       description:
-        "対話ジョブの識別子（番号/ユーザー/ジョブ名）を取得（コマンド行に DSPJOB を実行→F3 復帰）。取得済みはキャッシュ。",
-      inputSchema: { sessionId: z.string(), refresh: z.boolean().optional() },
+        "セッションのジョブ識別子（ジョブ名＝装置名／システム名／分かればユーザー・番号）を返す。" +
+        "**画面には触れない**——接続時の起動応答とジョブ一覧から既に得ている情報を返すだけ。",
+      inputSchema: { sessionId: z.string() },
       outputSchema: {
-        job: z.object({ number: z.string(), user: z.string(), name: z.string() })
+        job: z.object({
+          name: z.string(),
+          system: z.string().optional(),
+          user: z.string().optional(),
+          number: z.string().optional()
+        })
       }
     },
-    async ({ sessionId, refresh }) =>
+    async ({ sessionId }) =>
       withAudit({ op: "get_job_info", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId, user);
-          const job = await entry.session.fetchJobInfo(refresh ?? false);
+          const entry = sessions.get(sessionId, user);
+          // 背後の解決が終わっていれば待つ（既に終わっていれば即座に返る）
+          const job = (await entry.jobResolved) ?? entry.job;
+          if (!job) {
+            return errorResult(
+              new As400Error(
+                "NOT_FOUND",
+                "このセッションのジョブ識別子は分かりません（起動応答が無いホストの可能性）"
+              )
+            );
+          }
+          const text = job.number
+            ? `${job.number}/${job.user}/${job.name}`
+            : `${job.name}${job.system ? ` (${job.system})` : ""}`;
           return {
-            content: [{ type: "text" as const, text: `${job.number}/${job.user}/${job.name}` }],
+            content: [{ type: "text" as const, text }],
             structuredContent: { job }
           };
         } catch (err) {

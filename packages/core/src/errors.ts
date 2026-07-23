@@ -15,8 +15,6 @@ export type ErrorCode =
   | "FIELD_NOT_FOUND"
   | "KEYBOARD_LOCKED"
   | "READ_ONLY_SESSION"
-  | "JOB_INFO_BUSY"
-  | "JOB_INFO_UNAVAILABLE"
   | "PROTOCOL_ERROR"
   /** ホストサーバーが要求する機能が未実装（例: DES ベースのパスワードレベル） */
   | "HOST_SERVER_UNSUPPORTED"

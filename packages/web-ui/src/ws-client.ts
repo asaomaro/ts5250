@@ -105,8 +105,8 @@ function summarize(msg: unknown): string {
       return s ? `${s.rows}x${s.cols} fields=${s.fields?.length ?? 0}` : "";
     }
     case "jobinfo": {
-      const j = m["job"] as { number?: string } | undefined;
-      return j ? `job ${j.number}` : "jobinfo";
+      const j = m["job"] as { number?: string; name?: string } | undefined;
+      return j ? `job ${j.number ? `${j.number}/${j.name}` : j.name}` : "jobinfo";
     }
     case "error":
       return `${String(m["code"])}: ${String(m["message"])}`;
