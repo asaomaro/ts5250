@@ -15,6 +15,7 @@ import type { ConfigResolver } from "./config-resolver.js";
 import { openIfs } from "./host-connect.js";
 import { sourceSchema, statusOf, resolveSource } from "./host-api.js";
 import { collectFiles, readCollected } from "./ifs-collect.js";
+import { decodeIfsText, encodeIfsText } from "./ifs-text.js";
 import { buildZip } from "./zip-writer.js";
 import { childLog } from "./log.js";
 
@@ -52,8 +53,18 @@ const listSchema = z
   })
   .strict();
 
+/** 文字コードの手動指定。0 と 65535 は「未タグ」「バイナリ」の意味なので受けない */
+const ccsidSchema = z.number().int().min(1).max(0xfffe);
+const newlineSchema = z.enum(["lf", "nel"]);
+
 const readSchema = z
-  .object({ source: sourceSchema, path: pathSchema, encoding: encodingSchema.default("utf8") })
+  .object({
+    source: sourceSchema,
+    path: pathSchema,
+    encoding: encodingSchema.default("utf8"),
+    /** 利用者が選んだ文字コード。自動判定（中身 → タグ）より優先する */
+    ccsid: ccsidSchema.optional()
+  })
   .strict();
 
 const writeSchema = z
@@ -62,6 +73,11 @@ const writeSchema = z
     path: pathSchema,
     content: z.string(),
     encoding: encodingSchema.default("utf8"),
+    /** 読んだときの文字コード。指定が無ければ UTF-8（従来どおり） */
+    ccsid: ccsidSchema.optional(),
+    /** 読んだときの行末と BOM。渡すと元のファイルの流儀のまま書き戻せる */
+    newline: newlineSchema.optional(),
+    bom: z.boolean().optional(),
     create: z.boolean().optional()
   })
   .strict();
@@ -196,7 +212,13 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
           413
         );
       }
-      const data = await conn.readFile(body.path);
+      // **base64（ダウンロード・プレビュー）では CCSID タグを引かない**——復号しないので
+      // 要らないし、1 往復増やす理由が無い
+      const file =
+        body.encoding === "base64"
+          ? { data: await conn.readFile(body.path), ccsid: undefined }
+          : await conn.readTextFile(body.path);
+      const data = file.data;
       // 一覧で分からなかった場合（親を読めない等）の保険。ここは読んだ後になる
       if (data.length > deps.readMaxBytes) {
         return c.json(
@@ -216,26 +238,48 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
           encoding: "base64"
         });
       }
-      // **化けさせずに失敗させる。** IFS のテキストは UTF-8 とは限らず、
-      // EBCDIC（273 等）が普通にある。非 fatal な TextDecoder は U+FFFD の羅列を
-      // 黙って返すので、それを編集して書き戻すと**元ファイルが壊れる**。
-      // spec の決定表の最終行「復号しない。手動選択かダウンロードを促す」に倒す。
-      // 中身の CCSID による復号は core が CCSID タグを出せるようになってから（decisions D7）
-      try {
-        const content = new TextDecoder("utf-8", { fatal: true }).decode(data);
-        return c.json({ content, bytes: data.length, encoding: "utf8" });
-      } catch {
+      // **化けさせずに失敗させる。** IFS のテキストは UTF-8 とは限らず、EBCDIC（273 等）が普通にある。
+      // 決定表（手動 → BOM → UTF-8 → タグ）は `ifs-text.ts` に閉じてある
+      const tag = file.ccsid;
+      const decoded = decodeIfsText(data, tag, body.ccsid);
+      if (!decoded.ok) {
+        if (decoded.failure === "manual-unsupported") {
+          return c.json(
+            { error: `対応していない文字コードです（CCSID ${body.ccsid}）`, code: "UNSUPPORTED_CCSID" },
+            400
+          );
+        }
+        if (decoded.failure === "manual-failed") {
+          return c.json(
+            {
+              error: `CCSID ${body.ccsid} として読めませんでした。別の文字コードを選んでください`,
+              code: "DECODE_FAILED"
+            },
+            400
+          );
+        }
         // **エラーにしない。** 読み取り自体は成功していて、足りないのは表示手段。
         // 4xx にすると UI は「失敗した」画面を出すが、実際に出したいのは
-        // 「文字コードを選ぶ / ダウンロードする」という**続きの操作**
-        // （spec の決定表の最終行）。415 はリクエストの形式に対する応答なので意味も合わない
+        // 「文字コードを選ぶ / ダウンロードする」という**続きの操作**。
+        // タグを添えて返すと、UI が「タグは CCSID 850 です」と手掛かりを出せる
         return c.json({
           content: null,
           bytes: data.length,
           encoding: null,
-          code: "UNSUPPORTED_ENCODING"
+          code: "UNSUPPORTED_ENCODING",
+          ...(tag !== undefined ? { tagCcsid: tag } : {})
         });
       }
+      return c.json({
+        content: decoded.value.content,
+        bytes: data.length,
+        encoding: "utf8",
+        ccsid: decoded.value.ccsid,
+        detectedBy: decoded.value.detectedBy,
+        newline: decoded.value.newline,
+        bom: decoded.value.bom,
+        ...(tag !== undefined ? { tagCcsid: tag } : {})
+      });
     });
   });
 
@@ -246,13 +290,45 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     }
     const body = parsed.data;
     return await withIfs(c, body.source, async (conn) => {
-      const data =
-        body.encoding === "base64"
-          ? new Uint8Array(Buffer.from(body.content, "base64"))
-          : new TextEncoder().encode(body.content);
+      let data: Uint8Array;
+      let substituted = 0;
+      if (body.encoding === "base64") {
+        // base64 は**バイト列をそのまま置く**経路（アップロード・バイナリ）。
+        // 文字コードの変換をしないので ccsid / newline / bom は使わない
+        data = new Uint8Array(Buffer.from(body.content, "base64"));
+      } else {
+        // **読んだときの文字コードで書き戻す**。無指定は従来どおり UTF-8。
+        // 行末（EBCDIC の 0x15）と BOM も、読んだときの流儀に戻す
+        const encoded = encodeIfsText(body.ccsid ?? 1208, body.content, {
+          ...(body.newline !== undefined ? { newline: body.newline } : {}),
+          ...(body.bom !== undefined ? { bom: body.bom } : {})
+        });
+        if (!encoded.ok) {
+          return c.json(
+            {
+              error: `この文字コードでは保存できません（CCSID ${body.ccsid}）`,
+              code: "UNSUPPORTED_CCSID"
+            },
+            400
+          );
+        }
+        data = encoded.bytes;
+        substituted = encoded.substituted;
+      }
       await conn.writeFile(body.path, data, { create: body.create ?? true });
-      log.info({ user: c.get("user")?.username, path: body.path, bytes: data.length }, "ifs write");
-      return c.json({ bytes: data.length });
+      log.info(
+        {
+          user: c.get("user")?.username,
+          path: body.path,
+          bytes: data.length,
+          ...(body.ccsid !== undefined ? { ccsid: body.ccsid } : {}),
+          ...(substituted > 0 ? { substituted } : {})
+        },
+        "ifs write"
+      );
+      // **置換が起きたことは黙って捨てない**——利用者が選んだ文字コードで表せない文字が
+      // SUB に落ちている。書き込み自体は要求どおり行い、件数を返して UI に警告させる
+      return c.json({ bytes: data.length, ...(substituted > 0 ? { substituted } : {}) });
     });
   });
 

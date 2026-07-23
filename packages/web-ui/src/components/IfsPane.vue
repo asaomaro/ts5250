@@ -15,6 +15,7 @@ import {
   type IfsEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
+import { TEXT_CCSIDS, ccsidLabel } from "@as400web/core/browser";
 
 /**
  * IFS のファイルブラウザ。左に階層ツリー、中央に一覧、右にプレビュー。
@@ -180,21 +181,77 @@ async function activate(entry: IfsEntry): Promise<void> {
   await run(async () => {
     await preview.show(joined(entry.name), entry.size);
   });
-  // 表示できたテキストを編集の初期値にする。UTF-8 で読めなかったものは編集させない
+  // 表示できたテキストを編集の初期値にする。復号できなかったものは編集させない
   editText.value = preview.state.value?.kind === "text" ? (preview.state.value.text ?? "") : "";
 }
 
 /**
  * テキストの編集。
  *
- * **UTF-8 として読めたテキストだけ編集・保存できる。** CCSID の決定表が未実装なので、
- * EBCDIC など復号できないファイル（`undecodable`）は編集の土台が無い——
- * 中身を UTF-8 として持てないものを書き戻すと、元ファイルを壊す（02-D7 / 03-D11 の延長）。
+ * **復号できたテキストだけ編集・保存できる。** 復号できないファイル（`undecodable`）は
+ * 編集の土台が無い——中身を文字列として持てないものを書き戻すと元ファイルを壊す。
+ * 復号できても**書き戻せない文字コード**（Shift_JIS 系。core decisions D2）も同じ扱いにする。
+ *
+ * 保存は**読んだときの文字コード・行末・BOM のまま**書き戻す（UTF-8 に化けさせない）。
  */
 const editText = ref("");
+/** 採用中の文字コードが保存に使えるか。候補に無いものはサーバーの判断に委ねる */
+const writable = computed(() => {
+  const ccsid = preview.state.value?.ccsid;
+  if (ccsid === undefined) return true;
+  return TEXT_CCSIDS.find((c) => c.ccsid === ccsid)?.writable ?? true;
+});
 const editable = computed(
-  () => preview.state.value?.kind === "text" && !preview.state.value.undecodable
+  () => preview.state.value?.kind === "text" && !preview.state.value.undecodable && writable.value
 );
+
+/** 採用した文字コードと、その根拠の表示 */
+const encodingNote = computed(() => {
+  const st = preview.state.value;
+  if (!st || st.kind !== "text") return "";
+  if (st.ccsid === undefined) {
+    return st.tagCcsid !== undefined
+      ? `復号できません（タグは ${ccsidLabel(st.tagCcsid)}）`
+      : "復号できません";
+  }
+  const why =
+    st.detectedBy === "manual" ? "手動" : st.detectedBy === "tag" ? "タグ" : "内容から判定";
+  const tag =
+    st.tagCcsid !== undefined && st.tagCcsid !== st.ccsid ? `／タグ ${st.tagCcsid}` : "";
+  return `${ccsidLabel(st.ccsid)}（${why}${tag}）`;
+});
+
+/** 選択中の文字コード。手動で変えると読み直す */
+const chosenCcsid = ref<number | undefined>(undefined);
+watch(
+  () => preview.state.value,
+  (st) => {
+    chosenCcsid.value = st?.ccsid;
+  }
+);
+
+/**
+ * 文字コードを選び直して読み直す。
+ *
+ * 引数に `<select>` 要素そのものを取るのは、**取り消したときに表示を戻す**ため——
+ * `chosenCcsid` が変わらないと再描画が起きず、選択肢の見た目だけが動いたまま残る。
+ */
+async function changeCcsid(el: HTMLSelectElement): Promise<void> {
+  const ccsid = Number(el.value);
+  if (!Number.isFinite(ccsid) || ccsid <= 0) return;
+  // **編集中なら確認する。** 読み直すと本文が入れ替わる＝編集が消える。
+  // 同じペインの削除・上書きアップロードと同じ作法に揃える
+  if (dirty.value && !window.confirm("編集中の内容は破棄されます。文字コードを変更しますか？")) {
+    el.value = String(preview.state.value?.ccsid ?? "");
+    return;
+  }
+  await withAction("読み直し", async () => {
+    await run(async () => {
+      await preview.reload(ccsid);
+      editText.value = preview.state.value?.text ?? "";
+    });
+  });
+}
 /** 編集されていて、保存する意味があるか */
 const dirty = computed(
   () => editable.value && editText.value !== (preview.state.value?.text ?? "")
@@ -207,10 +264,24 @@ async function saveText(): Promise<void> {
   if (!entry || !editable.value || !dirty.value) return;
   await withAction("保存", async () => {
     await run(async () => {
-      await writeFile(source(), joined(entry.name), editText.value, "utf8");
-      message.value = `${entry.name} を保存しました`;
-      // 保存後は「これが現在の中身」にする（再取得せず、書いた内容で更新）
-      await preview.show(joined(entry.name), editText.value.length);
+      const st = preview.state.value;
+      const written = await writeFile(source(), joined(entry.name), editText.value, "utf8", {
+        ...(st?.ccsid !== undefined ? { ccsid: st.ccsid } : {}),
+        ...(st?.newline !== undefined ? { newline: st.newline } : {}),
+        ...(st?.bom !== undefined ? { bom: st.bom } : {})
+      });
+      // **置換が起きたことを黙らせない**——選んだ文字コードで表せない文字が SUB に落ちている
+      message.value =
+        written.substituted !== undefined && written.substituted > 0
+          ? `${entry.name} を保存しました（${written.substituted} 文字はこの文字コードで表せないため置換しました）`
+          : `${entry.name} を保存しました`;
+      // 保存後は「これが現在の中身」にする。**手動で選んだ文字コードは保ったまま**読み直す
+      // （自動判定に戻すと、利用者が直した選択が保存のたびに巻き戻る）
+      if (st?.detectedBy === "manual" && st.ccsid !== undefined) {
+        await preview.reload(st.ccsid);
+      } else {
+        await preview.show(joined(entry.name), editText.value.length);
+      }
       editText.value = preview.state.value?.text ?? editText.value;
       await tree.refresh(currentPath.value);
     });
@@ -520,23 +591,59 @@ void (async () => {
         <template v-if="preview.state.value">
           <p class="path">{{ displayName(preview.state.value.path) }}</p>
 
+          <!--
+            採用した文字コードと根拠を常に見せる。**推定が外れたときに直せることが要**——
+            タグは中身を説明していないことがある（UTF-8 の内容に CCSID 850）ので、
+            復号できたときも・できなかったときも選び直せるようにする
+          -->
+          <p v-if="preview.state.value.kind === 'text'" class="encoding">
+            <span class="tv">{{ encodingNote }}</span>
+            <select
+              :value="chosenCcsid ?? ''"
+              :disabled="disabled"
+              aria-label="文字コード"
+              @change="changeCcsid($event.target as HTMLSelectElement)"
+            >
+              <option value="" disabled>文字コードを選ぶ</option>
+              <option v-for="c in TEXT_CCSIDS" :key="c.ccsid" :value="c.ccsid">
+                {{ c.label }}{{ c.writable ? "" : "（読み取りのみ）" }}
+              </option>
+            </select>
+          </p>
+
+          <!--
+            読み直しの失敗はここに出す。**本文を消さずにエラーだけ足す**——
+            下の `v-else-if` は「表示するものが何も無い」場合の枠なので、
+            選び直しに失敗しただけのときは通らない
+          -->
+          <p v-if="preview.error.value" class="error">{{ preview.error.value }}</p>
+
           <!-- 復号できないのはエラーではない。読み取りは成功していて表示手段が無いだけ -->
           <p v-if="preview.state.value.undecodable" class="note">
-            この文字コードにはまだ対応していません。ダウンロードして開いてください。
+            この文字コードでは読めませんでした。上の一覧から選び直すか、ダウンロードして開いてください。
+          </p>
+          <p v-else-if="!writable" class="note">
+            この文字コードは読み取り専用です（保存はできません）。
           </p>
           <!-- UTF-8 で読めたテキストは編集できる。読めなかったものは上の undecodable 分岐 -->
           <textarea
-            v-else-if="preview.state.value.kind === 'text'"
+            v-if="preview.state.value.kind === 'text' && !preview.state.value.undecodable"
             v-model="editText"
             class="editor"
             spellcheck="false"
+            :readonly="!writable"
             :aria-label="`${selected?.name ?? 'ファイル'} の内容`"
           />
           <p v-if="preview.state.value.kind === 'text' && dirty" class="note">
             編集中（保存すると上書きします）
           </p>
+          <!--
+            **この 3 つは `kind` だけで分岐させる。** 直前の「編集中」の note に
+            v-else で繋ぐと、テキストを編集していないときに最後の v-else が真になり、
+            表示できているテキストの下に「プレビューできません」が出る
+          -->
           <iframe
-            v-else-if="preview.state.value.kind === 'pdf'"
+            v-if="preview.state.value.kind === 'pdf'"
             :src="preview.state.value.url"
             title="PDF プレビュー"
           />
@@ -545,7 +652,9 @@ void (async () => {
             :src="preview.state.value.url"
             alt="画像プレビュー"
           />
-          <p v-else class="note">この形式はプレビューできません。ダウンロードしてください。</p>
+          <p v-else-if="preview.state.value.kind === 'binary'" class="note">
+            この形式はプレビューできません。ダウンロードしてください。
+          </p>
 
         </template>
         <p v-else-if="preview.error.value" class="error">{{ preview.error.value }}</p>

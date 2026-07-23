@@ -180,9 +180,22 @@ export {
 export {
   IfsConnection,
   type IfsConnectOptions,
-  type IfsListOptions
+  type IfsListOptions,
+  type IfsTextFile
 } from "./hostserver/ifs/ifs-connection.js";
 export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
+// CCSID 指定のテキスト復号・符号化（IFS のプレビューと保存が使う）
+export {
+  canDecodeCcsid,
+  canEncodeCcsid,
+  decodeCcsidText,
+  encodeCcsidText,
+  isEbcdicCcsid,
+  TEXT_CCSIDS,
+  ccsidLabel,
+  type CcsidText,
+  type LineEnding
+} from "./codec/ccsid-text.js";
 
 // ホストサーバー: データ待ち行列
 export { DtaqConnection, type DtaqConnectOptions } from "./hostserver/dtaq/dtaq-connection.js";

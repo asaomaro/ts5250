@@ -28,8 +28,11 @@ import {
   buildCloseRequest,
   buildDeleteRequest,
   buildListFilesRequest,
+  buildListAttrsByHandleRequest,
   buildCreateDirRequest,
+  parseContentCcsid,
   parseListEntry,
+  replyDatastreamLevel,
   listReplyKind,
   canRestartFrom,
   fileFailure,
@@ -67,6 +70,18 @@ export interface IfsListOptions {
   onRawFrame?: (frame: Uint8Array) => void;
 }
 
+/** テキスト表示・編集のための読み取り結果。内容とその文字コードのタグ */
+export interface IfsTextFile {
+  data: Uint8Array;
+  /**
+   * ファイル内容の CCSID タグ。取れなければ `undefined`（タグを持たない・OA2 が返らない場合）。
+   *
+   * **タグは中身を説明しているとは限らない**——我々が書いた UTF-8 のファイルに 850 が付く
+   * （research F4）。復号する側は中身の推定を先に置くこと。
+   */
+  ccsid?: number;
+}
+
 export interface IfsConnectOptions {
   host: string;
   user: string;
@@ -83,7 +98,13 @@ export class IfsConnection {
   private constructor(
     private readonly conn: HostConnection,
     readonly host: string,
-    readonly port: number
+    readonly port: number,
+    /**
+     * 交換属性でサーバーが報告したデータストリームレベル。
+     * **OA2 の CCSID をどのオフセットで読むかがこれで決まる**（`parseContentCcsid`）。
+     * 要求値（8）とは違う値が返る（PUB400 は 24）ので、応答の値を持ち回る。
+     */
+    readonly datastreamLevel: number
   ) {}
 
   /**
@@ -98,8 +119,9 @@ export class IfsConnection {
    * 引数の `HostConnection` 型は `index.ts` から出していないので、
    * パッケージの外からはそもそも呼び出しを書けない。
    */
-  static forTesting(conn: HostConnection): IfsConnection {
-    return new IfsConnection(conn, "test", 0);
+  static forTesting(conn: HostConnection, datastreamLevel = 24): IfsConnection {
+    // 既定の 24 は PUB400 が報告する値（research F3）。OA2 のオフセット分岐を実機と揃える
+    return new IfsConnection(conn, "test", 0, datastreamLevel);
   }
 
   static async connect(opts: IfsConnectOptions): Promise<IfsConnection> {
@@ -129,54 +151,71 @@ export class IfsConnection {
         passwordLevel: signonInfo.info.passwordLevel
       });
       // 交換属性は接続手順に組み込む（送らないと以降の要求が通らない）
-      const rc = replyReturnCode(await conn.request(buildFileExchangeAttributes()));
+      const exchange = await conn.request(buildFileExchangeAttributes());
+      const rc = replyReturnCode(exchange);
       if (rc !== 0) {
         throw new As400Error(
           "PROTOCOL_ERROR",
           `file server exchange attributes failed (rc=0x${rc.toString(16)})`
         );
       }
-      log.debug(`file server ready at ${opts.host}:${port}`);
-      return new IfsConnection(conn, opts.host, port);
+      // **応答を捨てない**——報告レベルは OA2 の読み位置を決めるのに要る（`readTextFile`）
+      const datastreamLevel = replyDatastreamLevel(exchange);
+      log.debug(`file server ready at ${opts.host}:${port} (datastream level ${datastreamLevel})`);
+      return new IfsConnection(conn, opts.host, port, datastreamLevel);
     } catch (e) {
       conn.close();
       throw e;
     }
   }
 
-  /** ファイルを読む */
+  /** ファイルを読む（バイト列だけ。ダウンロード・zip はこちら） */
   async readFile(path: string): Promise<Uint8Array> {
     this.assertOpen();
     const handle = await this.open(path, FILE_ACCESS.read, false);
-    const chunks: Uint8Array[] = [];
-    let offset = 0;
     try {
-      for (;;) {
-        const reply = await this.conn.request(buildReadRequest(handle, offset, DEFAULT_CHUNK));
-        // 読み終わりはエラー応答で返る。例外にしない
-        if (replyReturnCode(reply) !== 0) break;
-        const data = readReplyData(reply);
-        if (!data || data.length === 0) break;
-        chunks.push(new Uint8Array(data));
-        offset += data.length;
-        if (offset > MAX_FILE_BYTES) {
-          throw new As400Error(
-            "PROTOCOL_ERROR",
-            `file exceeded ${MAX_FILE_BYTES} bytes without reaching end (${path})`
-          );
-        }
-        if (data.length < DEFAULT_CHUNK) break;
-      }
+      return await this.readAll(handle, path);
     } finally {
       await this.closeQuietly(handle);
     }
-    return concat(chunks);
   }
 
-  /** ファイルを書く（既定で無ければ作る） */
-  async writeFile(path: string, data: Uint8Array, opts: { create?: boolean } = {}): Promise<void> {
+  /**
+   * ファイルを内容の CCSID タグ付きで読む（テキストの表示・編集用）。
+   *
+   * **タグ取得は読み取りと同じハンドルで行う**——OA 構造体はハンドル指定でしか返らないので
+   * （`buildListAttrsByHandleRequest`）、open し直すと往復が倍になる。増えるのは 1 往復だけ。
+   *
+   * タグが取れなくても**読み取りは続ける**。復号できるかは呼び出し側の決定表の問題で、
+   * バイト列自体は返せる（ダウンロードや手動指定の道が残る）。
+   */
+  async readTextFile(path: string): Promise<IfsTextFile> {
     this.assertOpen();
-    const handle = await this.open(path, FILE_ACCESS.write, opts.create ?? true);
+    const handle = await this.open(path, FILE_ACCESS.read, false);
+    try {
+      const ccsid = await this.contentCcsid(handle, path);
+      const data = await this.readAll(handle, path);
+      return ccsid !== undefined ? { data, ccsid } : { data };
+    } finally {
+      await this.closeQuietly(handle);
+    }
+  }
+
+  /**
+   * ファイルを書く（既定で無ければ作る）。
+   *
+   * `dataCcsid` は**新規作成時に付くタグ**を決める（既存ファイルのタグは変わらない）。
+   * 既定の 0 は「サーバー既定」で、実機では中身に関係なく 850 が付く（research F3）。
+   * 通常の保存経路はバイト列をそのまま置く方針なので指定しない——
+   * 指定するのは、タグ付きファイルを作って復号を確かめる検証（`hostserver-check`）だけ。
+   */
+  async writeFile(
+    path: string,
+    data: Uint8Array,
+    opts: { create?: boolean; dataCcsid?: number } = {}
+  ): Promise<void> {
+    this.assertOpen();
+    const handle = await this.open(path, FILE_ACCESS.write, opts.create ?? true, opts.dataCcsid);
     try {
       let offset = 0;
       while (offset < data.length) {
@@ -312,8 +351,58 @@ export class IfsConnection {
     return this.closed;
   }
 
-  private async open(path: string, access: number, create: boolean): Promise<number> {
-    const reply = await this.conn.request(buildOpenFileRequest({ path, access, create }));
+  /** 開いたハンドルから最後まで読む。終端はエラー応答で返るので例外にしない */
+  private async readAll(handle: number, path: string): Promise<Uint8Array> {
+    const chunks: Uint8Array[] = [];
+    let offset = 0;
+    for (;;) {
+      const reply = await this.conn.request(buildReadRequest(handle, offset, DEFAULT_CHUNK));
+      if (replyReturnCode(reply) !== 0) break;
+      const data = readReplyData(reply);
+      if (!data || data.length === 0) break;
+      chunks.push(new Uint8Array(data));
+      offset += data.length;
+      if (offset > MAX_FILE_BYTES) {
+        throw new As400Error(
+          "PROTOCOL_ERROR",
+          `file exceeded ${MAX_FILE_BYTES} bytes without reaching end (${path})`
+        );
+      }
+      if (data.length < DEFAULT_CHUNK) break;
+    }
+    return concat(chunks);
+  }
+
+  /**
+   * 開いているファイルの内容 CCSID タグ。取れなければ `undefined`。
+   *
+   * **`requestStream()` を使わない**——この応答に終端フレームは来ない。連鎖指示 0 の
+   * `0x8005` が 1 フレーム返って終わりで、次を待つとタイムアウトまで固まる（research F2）。
+   */
+  private async contentCcsid(handle: number, path: string): Promise<number | undefined> {
+    const reply = await this.conn.request(buildListAttrsByHandleRequest(handle));
+    const ccsid = parseContentCcsid(reply, this.datastreamLevel);
+    if (ccsid === undefined) {
+      // OA2 が付かない・エラー応答だった。**ここで投げない**（読み取りは続けられる）
+      log.debug(`no content ccsid for ${path} (reply 0x${replyId(reply).toString(16)})`);
+    }
+    return ccsid;
+  }
+
+  private async open(
+    path: string,
+    access: number,
+    create: boolean,
+    dataCcsid?: number
+  ): Promise<number> {
+    const reply = await this.conn.request(
+      buildOpenFileRequest({
+        path,
+        access,
+        create,
+        ...(dataCcsid !== undefined ? { dataCcsid } : {})
+      })
+    );
     // OPEN の成功応答は 0x8002 で、テンプレート先頭がハンドルそのもの。
     // 失敗は 0x8001 で rc が入る。**ID を見ずに rc だけで分岐すると**、
     // 想定外の応答で rc=0（`replyReturnCode` の仕様）になり、

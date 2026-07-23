@@ -17,6 +17,8 @@ import { registerHostIfsRoutes } from "../src/host-ifs.js";
 interface FakeOpts {
   list?: Record<string, IfsListResult>;
   files?: Record<string, Uint8Array>;
+  /** ファイル内容の CCSID タグ（OA2）。`readTextFile` が返す */
+  tags?: Record<string, number>;
   fail?: As400Error;
   /** 呼ばれた操作を記録する */
   calls?: string[];
@@ -33,6 +35,14 @@ function fakeConn(opts: FakeOpts): IfsConnection {
       opts.calls?.push(`read ${path}`);
       if (opts.fail) throw opts.fail;
       return opts.files?.[path] ?? new Uint8Array(0);
+    },
+    // テキスト読み取りは内容 ＋ CCSID タグ。タグが無いファイルは undefined を返す
+    async readTextFile(path: string): Promise<{ data: Uint8Array; ccsid?: number }> {
+      opts.calls?.push(`readText ${path}`);
+      if (opts.fail) throw opts.fail;
+      const data = opts.files?.[path] ?? new Uint8Array(0);
+      const ccsid = opts.tags?.[path];
+      return ccsid !== undefined ? { data, ccsid } : { data };
     },
     async writeFile(path: string, data: Uint8Array): Promise<void> {
       opts.calls?.push(`write ${path} ${data.length}`);
@@ -150,6 +160,72 @@ describe("read", () => {
     });
   });
 
+  it("タグ（CCSID）に従って EBCDIC を復号し、根拠を添えて返す", async () => {
+    // 実機で作った 1399 のファイル（research F5 と同じバイト列）
+    const bytes = new Uint8Array([
+      0x0e, 0x45, 0x62, 0x45, 0x66, 0x48, 0xe7, 0x43, 0x94, 0x43, 0x8e, 0x43, 0x95, 0x0f, 0x7c,
+      0x81, 0x82, 0x83, 0x25
+    ]);
+    const app = appWith({ files: { "/d/f": bytes }, tags: { "/d/f": 1399 } });
+    expect(await (await call(app, "read", { path: "/d/f" })).json()).toMatchObject({
+      content: "日本語テスト@abc\n",
+      ccsid: 1399,
+      detectedBy: "tag",
+      tagCcsid: 1399,
+      newline: "lf"
+    });
+  });
+
+  /** 我々が書いたファイルはタグが中身を説明していない（UTF-8 の内容に 850）。research F4 */
+  it("タグが違っていても、中身が UTF-8 として読めればそちらを採る", async () => {
+    const app = appWith({
+      files: { "/d/f": new TextEncoder().encode("日本語") },
+      tags: { "/d/f": 850 }
+    });
+    expect(await (await call(app, "read", { path: "/d/f" })).json()).toMatchObject({
+      content: "日本語",
+      ccsid: 1208,
+      detectedBy: "content",
+      tagCcsid: 850
+    });
+  });
+
+  it("読めなかったときはタグを添えて返す（UI が手掛かりを出せる）", async () => {
+    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2]) }, tags: { "/d/f": 850 } });
+    expect(await (await call(app, "read", { path: "/d/f" })).json()).toMatchObject({
+      content: null,
+      code: "UNSUPPORTED_ENCODING",
+      tagCcsid: 850
+    });
+  });
+
+  it("手動指定の文字コードで読み直せる", async () => {
+    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2, 0xc3]) } });
+    const res = await call(app, "read", { path: "/d/f", ccsid: 273 });
+    expect(await res.json()).toMatchObject({ content: "ABC", ccsid: 273, detectedBy: "manual" });
+  });
+
+  it("手動指定が未対応・読めないときは 400（利用者の選択の問題なので）", async () => {
+    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1]) } });
+    const unsupported = await call(app, "read", { path: "/d/f", ccsid: 850 });
+    expect(unsupported.status).toBe(400);
+    expect(await unsupported.json()).toMatchObject({ code: "UNSUPPORTED_CCSID" });
+
+    const failed = await call(app, "read", { path: "/d/f", ccsid: 1208 });
+    expect(failed.status).toBe(400);
+    expect(await failed.json()).toMatchObject({ code: "DECODE_FAILED" });
+  });
+
+  it("base64 要求では CCSID タグを引かない（往復を増やさない）", async () => {
+    const calls: string[] = [];
+    await call(appWith({ calls, files: { "/d/f": new Uint8Array([1]) } }), "read", {
+      path: "/d/f",
+      encoding: "base64"
+    });
+    expect(calls).toContain("read /d/f");
+    expect(calls.some((x) => x.startsWith("readText"))).toBe(false);
+  });
+
   it("base64 ならバイナリでも返せる（encoding も揃える）", async () => {
     const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2]) } });
     const res = await call(app, "read", { path: "/d/f", encoding: "base64" });
@@ -171,6 +247,35 @@ describe("write / mkdir / delete", () => {
     const res = await call(appWith({ calls }), "write", { path: "/d/f", content: "abc" });
     expect(await res.json()).toMatchObject({ bytes: 3 });
     expect(calls).toContain("write /d/f 3");
+  });
+
+  it("指定された文字コードで符号化して書く（行末も戻す）", async () => {
+    const calls: string[] = [];
+    await call(appWith({ calls }), "write", {
+      path: "/d/f",
+      content: "a\nb\n",
+      ccsid: 37,
+      newline: "nel"
+    });
+    // "a" 0x15 "b" 0x15 の 4 バイト（UTF-8 なら 4 バイトだが中身が違う）
+    expect(calls).toContain("write /d/f 4");
+  });
+
+  it("マップ不能な文字は SUB に落として件数を返す（保存は止めない）", async () => {
+    const res = await call(appWith({}), "write", { path: "/d/f", content: "A日", ccsid: 819 });
+    expect(await res.json()).toMatchObject({ bytes: 2, substituted: 1 });
+  });
+
+  it("符号化できない文字コードは 400 で断る（化けたまま保存しない）", async () => {
+    const calls: string[] = [];
+    const res = await call(appWith({ calls }), "write", {
+      path: "/d/f",
+      content: "あ",
+      ccsid: 943
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "UNSUPPORTED_CCSID" });
+    expect(calls.some((x) => x.startsWith("write"))).toBe(false);
   });
 
   it("base64 の内容を復号して書く", async () => {

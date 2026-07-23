@@ -6,7 +6,7 @@
  *
  * ここは応答をそのまま返し、解釈はしない（解釈は composable の仕事）。
  */
-import type { IfsEntry, IfsListResult } from "@as400web/core/browser";
+import type { IfsEntry, IfsListResult, LineEnding } from "@as400web/core/browser";
 
 /** サーバーが返すエラー本文 */
 export interface IfsError {
@@ -60,6 +60,10 @@ export function messageFor(b: IfsError): string {
       const count = b.files !== undefined ? `${b.files} ファイル以上 / ` : "";
       return `対象が大きすぎます（${count}${size}）。対象を絞るか、個別に取得してください。`;
     }
+    case "UNSUPPORTED_CCSID":
+      return "この文字コードには対応していません。別の文字コードを選んでください。";
+    case "DECODE_FAILED":
+      return "選んだ文字コードでは読めませんでした。別の文字コードを選んでください。";
     default:
       // 知らない code はサーバーの文言をそのまま（英語のこともある。既知にすべきは上に足す）
       return b.error;
@@ -78,7 +82,9 @@ export const KNOWN_ERROR_CODES = [
   "ALREADY_EXISTS",
   "INCOMPLETE_LISTING",
   "TOO_MANY_DIRECTORIES",
-  "TOO_LARGE"
+  "TOO_LARGE",
+  "UNSUPPORTED_CCSID",
+  "DECODE_FAILED"
 ] as const;
 
 /**
@@ -91,6 +97,19 @@ export interface IfsReadResult {
   content: string | null;
   bytes: number;
   encoding: "utf8" | "base64" | null;
+  /** 採用した文字コード（テキストとして読めたときだけ） */
+  ccsid?: number;
+  /** 何を根拠に選んだか。`content` = 中身から推定、`tag` = ファイルのタグ、`manual` = 利用者の指定 */
+  detectedBy?: "content" | "tag" | "manual";
+  /** 元のファイルの行末。保存時にそのまま返す */
+  newline?: LineEnding;
+  /** BOM が付いていた。保存時にそのまま返す */
+  bom?: boolean;
+  /**
+   * ファイルに付いていた CCSID タグ。**採用した文字コードとは限らない**——
+   * 中身の推定が優先されるため（UTF-8 の内容に 850 のタグが付く）。読めなかったときも返る
+   */
+  tagCcsid?: number;
   code?: string;
 }
 
@@ -130,20 +149,43 @@ export async function listFiles(
 export async function readFile(
   source: IfsSource,
   path: string,
-  encoding: "utf8" | "base64" = "utf8"
+  encoding: "utf8" | "base64" = "utf8",
+  /** 自動判定（中身 → タグ）が外れたときに、利用者が選んだ文字コード */
+  ccsid?: number
 ): Promise<IfsReadResult> {
-  const res = await post("read", { source, path, encoding });
+  const res = await post("read", {
+    source,
+    path,
+    encoding,
+    ...(ccsid !== undefined ? { ccsid } : {})
+  });
   return (await res.json()) as IfsReadResult;
+}
+
+/** 保存の追加指定。**読んだときの値をそのまま返す**と、元のファイルの流儀のまま書き戻せる */
+export interface WriteTextOptions {
+  ccsid?: number;
+  newline?: LineEnding;
+  bom?: boolean;
 }
 
 export async function writeFile(
   source: IfsSource,
   path: string,
   content: string,
-  encoding: "utf8" | "base64" = "utf8"
-): Promise<{ bytes: number }> {
-  const res = await post("write", { source, path, content, encoding });
-  return (await res.json()) as { bytes: number };
+  encoding: "utf8" | "base64" = "utf8",
+  opts: WriteTextOptions = {}
+): Promise<{ bytes: number; substituted?: number }> {
+  const res = await post("write", {
+    source,
+    path,
+    content,
+    encoding,
+    ...(opts.ccsid !== undefined ? { ccsid: opts.ccsid } : {}),
+    ...(opts.newline !== undefined ? { newline: opts.newline } : {}),
+    ...(opts.bom !== undefined ? { bom: opts.bom } : {})
+  });
+  return (await res.json()) as { bytes: number; substituted?: number };
 }
 
 export async function makeDirectory(source: IfsSource, path: string): Promise<void> {

@@ -136,12 +136,163 @@ describe("プレビュー", () => {
   it("復号できないテキストは、失敗ではなく案内として出す", async () => {
     const w = await paneWith({
       list: { entries: [entry("a.txt")], hasMore: false, canContinue: false },
-      read: { content: null, bytes: 3, encoding: null, code: "UNSUPPORTED_ENCODING" }
+      read: {
+        content: null,
+        bytes: 3,
+        encoding: null,
+        code: "UNSUPPORTED_ENCODING",
+        tagCcsid: 850
+      }
     });
     await w.findAll("li")[0]?.trigger("click");
     await flushPromises();
-    expect(w.text()).toContain("この文字コードにはまだ対応していません");
+    expect(w.text()).toContain("選び直すか、ダウンロードして開いてください");
     expect(w.find(".error").exists()).toBe(false);
+    // 読めなくても手掛かり（タグ）と選び直す手段を出す
+    expect(w.text()).toContain("850");
+    expect(w.find(".encoding select").exists()).toBe(true);
+  });
+
+  /**
+   * 表示できているテキストの下に「プレビューできません」を出さない。
+   * v-else の連鎖を「編集中」の note に繋ぐと、未編集のテキストで最後の v-else が真になる
+   * （実機の画面で見つけた。main にもあった不具合）
+   */
+  it("テキストを表示しているときに「プレビューできません」を出さない", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("a.txt")], hasMore: false, canContinue: false },
+      read: { content: "本文", bytes: 6, encoding: "utf8", ccsid: 1208, detectedBy: "content" }
+    });
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    expect(w.find("textarea.editor").exists()).toBe(true);
+    expect(w.text()).not.toContain("この形式はプレビューできません");
+  });
+
+  it("プレビューできない種別ではその案内を出す", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("a.bin")], hasMore: false, canContinue: false }
+    });
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("この形式はプレビューできません");
+  });
+
+  /**
+   * 選び直しは「当たるまで試す」操作。1 回外しただけで本文も選択 UI も消えると次の 1 手が打てない
+   * （review M1）。
+   */
+  it("選んだ文字コードで読めなくても、直前の表示と選択 UI を消さない", async () => {
+    let reads = 0;
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "list") {
+        return new Response(
+          JSON.stringify({ entries: [entry("a.txt")], hasMore: false, canContinue: false }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      reads++;
+      const ok = { content: "本文", bytes: 6, encoding: "utf8", ccsid: 1208, detectedBy: "content" };
+      const ng = { error: "x", code: "DECODE_FAILED" };
+      return new Response(JSON.stringify(reads === 1 ? ok : ng), {
+        status: reads === 1 ? 200 : 400,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+
+    const select = w.find(".encoding select");
+    (select.element as HTMLSelectElement).value = "37";
+    await select.trigger("change");
+    await flushPromises();
+
+    // 失敗の案内は出す。ただし本文も選択 UI も残す
+    expect(w.text()).toContain("別の文字コードを選んでください");
+    expect(w.find("textarea.editor").exists()).toBe(true);
+    expect(w.find(".encoding select").exists()).toBe(true);
+    expect(w.find(".encoding").text()).toContain("1208");
+  });
+
+  /** 削除・上書きと同じく、失われるものがあるなら確認する（review S1） */
+  it("編集中に文字コードを変えるときは確認し、取り消したら読み直さない", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("a.txt")], hasMore: false, canContinue: false },
+      read: { content: "本文", bytes: 6, encoding: "utf8", ccsid: 1208, detectedBy: "content" }
+    });
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    await w.find("textarea.editor").setValue("編集した");
+    await flushPromises();
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const select = w.find(".encoding select");
+    (select.element as HTMLSelectElement).value = "37";
+    await select.trigger("change");
+    await flushPromises();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    // 読み直していない＝編集内容が残っている。選択の見た目も戻す
+    expect((w.find("textarea.editor").element as HTMLTextAreaElement).value).toBe("編集した");
+    expect((select.element as HTMLSelectElement).value).toBe("1208");
+    confirmSpy.mockRestore();
+  });
+
+  it("採用した文字コードと根拠を出す", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("a.txt")], hasMore: false, canContinue: false },
+      read: {
+        content: "日本語",
+        bytes: 9,
+        encoding: "utf8",
+        ccsid: 1208,
+        detectedBy: "content",
+        newline: "lf",
+        bom: false,
+        tagCcsid: 850
+      }
+    });
+    await w.findAll("li")[0]?.trigger("click");
+    await flushPromises();
+    // 「中身から判定した」ことと「タグは別物」が両方見えること（research F4 の状況）
+    expect(w.find(".encoding").text()).toContain("1208");
+    expect(w.find(".encoding").text()).toContain("内容から判定");
+    expect(w.find(".encoding").text()).toContain("850");
+  });
+
+  it("文字コードを選び直すと、その CCSID で読み直す", async () => {
+    const sent: unknown[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "read") sent.push(JSON.parse(String(init?.body)));
+      const body =
+        route === "list"
+          ? { entries: [entry("a.txt")], hasMore: false, canContinue: false }
+          : sent.length > 1
+            ? { content: "ABC", bytes: 3, encoding: "utf8", ccsid: 273, detectedBy: "manual" }
+            : { content: null, bytes: 3, encoding: null, code: "UNSUPPORTED_ENCODING" };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+
+    const select = w.find(".encoding select");
+    (select.element as HTMLSelectElement).value = "273";
+    await select.trigger("change");
+    await flushPromises();
+
+    expect(sent[1]).toMatchObject({ path: "/a.txt", ccsid: 273 });
+    expect(w.find("textarea.editor").exists()).toBe(true);
+    expect(w.find(".encoding").text()).toContain("手動");
   });
 });
 
@@ -783,8 +934,9 @@ describe("上書き確認", () => {
 /**
  * テキストの編集・保存。spec の受け入れ基準の一部（当初 backlog 予定だったが実装した）。
  *
- * **CCSID 未対応なので UTF-8 で読めたテキストに限る。** 復号できないファイルを
- * 編集させると、UTF-8 として持てない中身を書き戻して元ファイルを壊す。
+ * **復号できたテキストに限る。** 復号できないファイルを編集させると、
+ * 文字列として持てない中身を書き戻して元ファイルを壊す。
+ * 保存は**読んだときの文字コード・行末・BOM のまま**返す（UTF-8 に化けさせない）。
  */
 describe("編集・保存", () => {
   /** テキストを開いて編集し、保存が書き込みまで届くことを本文で確かめる */
@@ -828,6 +980,65 @@ describe("編集・保存", () => {
       content: "書き換えた中身",
       encoding: "utf8"
     });
+  });
+
+  /** EBCDIC で読んだファイルは、EBCDIC のまま書き戻す（UTF-8 に化けさせない） */
+  it("読んだときの文字コード・行末・BOM を保存要求に載せる", async () => {
+    const sent: Record<string, unknown>[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "list") {
+        return new Response(
+          JSON.stringify({ entries: [entry("src.rpgle")], hasMore: false, canContinue: false }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (route === "read") {
+        return new Response(
+          JSON.stringify({
+            content: "行1\n行2\n",
+            bytes: 10,
+            encoding: "utf8",
+            ccsid: 1399,
+            detectedBy: "tag",
+            newline: "nel",
+            bom: false,
+            tagCcsid: 1399
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ bytes: 12, substituted: 2 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    await w.find("textarea.editor").setValue("行1\n書き換え\n");
+    await flushPromises();
+    await w.findAll(".actions button").find((b) => b.text() === "保存")?.trigger("click");
+    await flushPromises();
+
+    expect(sent[0]).toMatchObject({ ccsid: 1399, newline: "nel", bom: false });
+    // 置換が起きたことを黙らせない
+    expect(w.text()).toContain("2 文字");
+  });
+
+  /** 読めても書けない文字コード（Shift_JIS 系）は編集させない */
+  it("読み取り専用の文字コードでは編集させない", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("sjis.txt")], hasMore: false, canContinue: false },
+      read: { content: "あいう", bytes: 6, encoding: "utf8", ccsid: 943, detectedBy: "manual" }
+    });
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("読み取り専用");
+    expect(w.find("textarea.editor").attributes("readonly")).toBeDefined();
   });
 
   /** 変更していないなら保存しない（無駄な書き込みをしない） */
