@@ -57,6 +57,9 @@ interface Args {
   ifsZipMaxFiles: number | undefined;
   ifsZipMaxDirectories: number | undefined;
   ifsReadMaxBytes: number | undefined;
+  /** IFS の再帰削除の上限（未指定なら host-ifs の既定） */
+  ifsDeleteMaxEntries: number | undefined;
+  ifsDeleteMaxDirectories: number | undefined;
   /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
   dtaqReceiveMaxWaitSec: number | undefined;
 }
@@ -97,6 +100,8 @@ function parseArgs(argv: string[]): Args {
     ifsZipMaxFiles: undefined,
     ifsZipMaxDirectories: undefined,
     ifsReadMaxBytes: undefined,
+    ifsDeleteMaxEntries: undefined,
+    ifsDeleteMaxDirectories: undefined,
     dtaqReceiveMaxWaitSec: undefined
   };
   for (let i = 0; i < argv.length; i++) {
@@ -125,6 +130,11 @@ function parseArgs(argv: string[]): Args {
       args.ifsZipMaxDirectories = parseLimit(argv[++i], "--ifs-zip-max-dirs", 1_000_000);
     } else if (a === "--ifs-read-max-bytes") {
       args.ifsReadMaxBytes = parseLimit(argv[++i], "--ifs-read-max-bytes", ZIP_MAX_BYTES_LIMIT);
+    } else if (a === "--ifs-delete-max-entries") {
+      // 消せる対象（ファイル＋フォルダ）の総数。事故の規模を抑えるための歯止め
+      args.ifsDeleteMaxEntries = parseLimit(argv[++i], "--ifs-delete-max-entries", 100_000);
+    } else if (a === "--ifs-delete-max-dirs") {
+      args.ifsDeleteMaxDirectories = parseLimit(argv[++i], "--ifs-delete-max-dirs", 100_000);
     } else if (a === "--dtaq-max-wait") {
       args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
     } else if (a === "--web-root") {
@@ -235,6 +245,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         ? { ifsZipMaxDirectories: args.ifsZipMaxDirectories }
         : {}),
       ...(args.ifsReadMaxBytes !== undefined ? { ifsReadMaxBytes: args.ifsReadMaxBytes } : {}),
+      ...(args.ifsDeleteMaxEntries !== undefined
+        ? { ifsDeleteMaxEntries: args.ifsDeleteMaxEntries }
+        : {}),
+      ...(args.ifsDeleteMaxDirectories !== undefined
+        ? { ifsDeleteMaxDirectories: args.ifsDeleteMaxDirectories }
+        : {}),
       ...(args.dtaqReceiveMaxWaitSec !== undefined
         ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }
         : {})

@@ -8,8 +8,10 @@ import { usePreview } from "../composables/usePreview.js";
 import {
   IfsRequestError,
   deleteFile,
+  deletePlan,
   download,
   makeDirectory,
+  renamePath,
   writeFile,
   zipFolder,
   type IfsEntry
@@ -169,6 +171,18 @@ async function openPath(path: string): Promise<void> {
     await revealInTree(path);
   });
 }
+
+/**
+ * 1 つ上のフォルダ。ルートでは `undefined`（＝一覧に「上位へ」を出さない）。
+ *
+ * ホストの一覧に来る `..` は core が落としている（`ifs-connection.ts` の `.`/`..` 除外）ので、
+ * **ここで UI の行として足す**。追加の往復は発生しない。
+ */
+const parentPath = computed(() => {
+  if (currentPath.value === ROOT) return undefined;
+  const at = currentPath.value.lastIndexOf("/");
+  return at <= 0 ? ROOT : currentPath.value.slice(0, at);
+});
 
 async function activate(entry: IfsEntry): Promise<void> {
   if (entry.isDirectory) {
@@ -342,13 +356,101 @@ async function createFolder(): Promise<void> {
   });
 }
 
+/**
+ * フォルダを**開かずに選ぶ**（行の「…」から）。
+ *
+ * クリック＝開く、は日常の移動で使うので変えない。一方でフォルダの削除・改名には
+ * 「選択されたフォルダ」が要る——そこだけを別の入口（行末の小さなボタン）で満たす。
+ */
+function selectEntry(entry: IfsEntry): void {
+  message.value = "";
+  actionError.value = "";
+  selected.value = entry;
+  // フォルダの中身はプレビューの対象ではない。前のファイルの表示を残さない
+  preview.clear();
+}
+
+/**
+ * 削除。**フォルダも消せる**（種別の判定はサーバー側。research F4）。
+ *
+ * フォルダは**消える件数を先に数えてから**確認する——「中身ごと」を押す前に規模が分からないと、
+ * 取り返しのつかない操作を目をつぶって押すことになる。上限超過・辿り切れない場合は
+ * サーバーが 1 件も消さないので、ここでは案内だけ出す。
+ */
 async function removeSelected(): Promise<void> {
   const entry = selected.value;
-  if (!entry || entry.isDirectory) return;
-  if (!window.confirm(`${entry.name} を削除します。よろしいですか？`)) return;
+  if (!entry) return;
+  const path = joined(entry.name);
+
+  if (!entry.isDirectory) {
+    if (!window.confirm(`${entry.name} を削除します。よろしいですか？`)) return;
+    await withAction("削除", async () => {
+      await deleteFile(source(), path);
+      await afterDelete(entry.name);
+    });
+    return;
+  }
+
+  // フォルダ: まず数える（この呼び出しでは何も消えない）
+  let plan;
+  try {
+    plan = await run(async () => await deletePlan(source(), path));
+  } catch (e) {
+    actionError.value = e instanceof IfsRequestError ? e.message : `削除に失敗しました: ${String(e)}`;
+    return;
+  }
+  if (plan.blocked !== undefined) {
+    actionError.value =
+      plan.blocked === "too-many"
+        ? `${entry.name} の中身が多すぎます（${plan.entries ?? "?"} 件以上 / 上限 ${plan.max ?? "?"} 件）。中を分けて削除してください。`
+        : `${entry.name} のフォルダ数が多すぎます（上限 ${plan.max ?? "?"}）。中を分けて削除してください。`;
+    return;
+  }
+  const inside = (plan.files ?? 0) + Math.max((plan.directories ?? 1) - 1, 0);
+  const ask =
+    inside === 0
+      ? `${entry.name}（空のフォルダ）を削除します。よろしいですか？`
+      : `${entry.name} を中身ごと削除します。ファイル ${plan.files ?? 0} 件・フォルダ ${Math.max((plan.directories ?? 1) - 1, 0)} 件が消えます。よろしいですか？`;
+  if (!window.confirm(ask)) return;
   await withAction("削除", async () => {
-    await deleteFile(source(), joined(entry.name));
-    message.value = `${entry.name} を削除しました`;
+    const done = await deleteFile(source(), path, { recursive: inside > 0 });
+    await afterDelete(entry.name, done);
+  });
+}
+
+/** 消した後の後始末。選択・プレビュー・一覧・ツリーが消えたものを指したままにしない */
+async function afterDelete(
+  name: string,
+  done?: { files: number; directories: number }
+): Promise<void> {
+  message.value =
+    done && done.files + done.directories > 1
+      ? `${name} を削除しました（ファイル ${done.files} 件・フォルダ ${done.directories} 件）`
+      : `${name} を削除しました`;
+  selected.value = undefined;
+  preview.clear();
+  await tree.refresh(currentPath.value);
+}
+
+/**
+ * 改名。**同じフォルダ内の名前だけ**を変える（移動は対象外）。
+ * `/` を含む入力はサーバーも 400 で断るが、往復させる前にここで弾く。
+ */
+async function renameSelected(): Promise<void> {
+  const entry = selected.value;
+  if (!entry) return;
+  const input = window.prompt(`${entry.name} の新しい名前`, entry.name);
+  if (input === null) return;
+  const newName = input.trim();
+  if (newName === "" || newName === entry.name) return;
+  if (newName.includes("/")) {
+    actionError.value = "名前にパス区切り（/）は使えません。";
+    return;
+  }
+  await withAction("名前の変更", async () => {
+    await renamePath(source(), joined(entry.name), newName);
+    message.value = `${entry.name} を ${newName} に変更しました`;
+    // 表示中のものが指す先を新しい名前に付け替える（古い名前を選んだままにしない）
     selected.value = undefined;
     preview.clear();
     await tree.refresh(currentPath.value);
@@ -565,13 +667,37 @@ void (async () => {
         </div>
       </nav>
 
-      <ul class="entries" role="listbox">
+      <!--
+        **listbox ではなく list**。行は「開く / プレビューする」というコマンドで、
+        フォルダ行には操作ボタン（…）が入る——ARIA の option は操作可能な子孫を持てないため、
+        option のままだとボタンが支援技術に伝わらない。選択中は `aria-current` で示す
+      -->
+      <ul class="entries" role="list">
+        <!--
+          先頭の「上位フォルダへ」。**ルートでは出さない**（押せない行を残さない）。
+          フォルダ行と同じ操作（クリック / Enter / Space）で動くが、
+          **選択状態にはしない**——プレビューや削除の対象ではないため
+        -->
+        <li
+          v-if="parentPath !== undefined"
+          class="up"
+          role="listitem"
+          tabindex="0"
+          @click="openPath(parentPath)"
+          @keydown.enter.prevent="openPath(parentPath)"
+          @keydown.space.prevent="openPath(parentPath)"
+        >
+          <span class="icon">↩</span>
+          <span class="name">.. 上位フォルダへ</span>
+          <span class="size"></span>
+          <span class="when"></span>
+        </li>
         <li
           v-for="e in entries"
           :key="e.name"
-          role="option"
+          role="listitem"
           tabindex="0"
-          :aria-selected="selected?.name === e.name"
+          :aria-current="selected?.name === e.name ? 'true' : undefined"
           :class="{ dir: e.isDirectory, sel: selected?.name === e.name }"
           @click="activate(e)"
           @keydown.enter.prevent="activate(e)"
@@ -581,6 +707,21 @@ void (async () => {
           <span class="name">{{ displayName(e.name) }}</span>
           <span class="size">{{ sizeText(e) }}</span>
           <span class="when">{{ whenText(e) }}</span>
+          <!--
+            フォルダを**開かずに選ぶ**入口。クリック＝開く（移動）は毎日使う操作なので変えず、
+            削除・改名に要る「選択」だけをここで足す。`@click.stop` が無いと行の移動が同時に走る
+          -->
+          <button
+            v-if="e.isDirectory"
+            class="pick"
+            :aria-label="`${e.name} を選択`"
+            :title="`${e.name} を選択（削除・名前の変更）`"
+            @click.stop="selectEntry(e)"
+            @keydown.enter.stop.prevent="selectEntry(e)"
+            @keydown.space.stop.prevent="selectEntry(e)"
+          >
+            …
+          </button>
         </li>
         <li v-if="entries.length === 0 && currentNode.state === 'loaded'" class="empty">
           （空のフォルダ）
@@ -658,6 +799,10 @@ void (async () => {
 
         </template>
         <p v-else-if="preview.error.value" class="error">{{ preview.error.value }}</p>
+        <template v-else-if="selected?.isDirectory">
+          <p class="path">{{ displayName(selected.name) }}</p>
+          <p class="note">フォルダを選択中です。名前の変更・削除ができます。</p>
+        </template>
         <p v-else class="note">ファイルを選ぶと内容を表示します。</p>
 
         <!--
@@ -667,7 +812,10 @@ void (async () => {
         -->
         <div v-if="selected" class="actions">
           <button v-if="dirty" :disabled="disabled" @click="saveText">保存</button>
-          <button :disabled="disabled" @click="downloadSelected">ダウンロード</button>
+          <button v-if="!selected.isDirectory" :disabled="disabled" @click="downloadSelected">
+            ダウンロード
+          </button>
+          <button :disabled="disabled" @click="renameSelected">名前の変更</button>
           <button class="danger" :disabled="disabled" @click="removeSelected">削除</button>
         </div>
       </section>
@@ -800,6 +948,25 @@ header {
 .entries li.sel {
   background: var(--accent-soft);
   outline: 1px solid var(--accent);
+}
+/* 行末の「選択」ボタン。**行を開く操作の邪魔をしない**よう、幅も色も控えめにする */
+.entries .pick {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.entries li:hover .pick,
+.entries .pick:focus-visible {
+  border-color: var(--border);
+  color: var(--fg);
+}
+/* 上位フォルダへの行。中身の一覧とは種類が違うので控えめにする */
+.entries li.up .name {
+  color: var(--muted);
 }
 .entries .name {
   flex: 1;

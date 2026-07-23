@@ -27,6 +27,8 @@ import {
   buildWriteRequest,
   buildCloseRequest,
   buildDeleteRequest,
+  buildRemoveDirRequest,
+  buildRenameRequest,
   buildListFilesRequest,
   buildListAttrsByHandleRequest,
   buildCreateDirRequest,
@@ -335,10 +337,36 @@ export class IfsConnection {
     assertOk(await this.conn.request(buildCreateDirRequest(path)), `failed to create directory ${path}`);
   }
 
-  /** ファイルを削除する */
+  /** ファイル（シンボリックリンクを含む）を削除する */
   async deleteFile(path: string): Promise<void> {
     this.assertOpen();
     assertOk(await this.conn.request(buildDeleteRequest(path)), `failed to delete ${path}`);
+  }
+
+  /**
+   * **空の**ディレクトリを削除する。
+   *
+   * 中身が残っていれば rc=9 → `NOT_EMPTY` で失敗する（再帰的に消すのは呼び出し側の責任）。
+   * **ファイルにこれを使わないこと**——rc=3 で「見つからない」に化ける。
+   * 逆に**ディレクトリに `deleteFile` を使うと rc=13**（権限がありません）になり、
+   * 原因を説明しないメッセージが出る（research F4）。
+   */
+  async removeDirectory(path: string): Promise<void> {
+    this.assertOpen();
+    assertOk(await this.conn.request(buildRemoveDirRequest(path)), `failed to remove directory ${path}`);
+  }
+
+  /**
+   * 名前を変える。**元も先もフルパス**（プロトコル上は別フォルダへの移動も同じ要求）。
+   *
+   * 既定では**既存の名前を上書きしない**（rc=4 → `ALREADY_EXISTS` で失敗する）。
+   */
+  async rename(from: string, to: string, opts: { replace?: boolean } = {}): Promise<void> {
+    this.assertOpen();
+    assertOk(
+      await this.conn.request(buildRenameRequest(from, to, opts)),
+      `failed to rename ${from} to ${to}`
+    );
   }
 
   close(): void {

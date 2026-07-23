@@ -9,13 +9,15 @@
  */
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import type { As400Error, IfsConnection } from "@as400web/core";
+import { As400Error } from "@as400web/core";
+import type { IfsConnection } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openIfs } from "./host-connect.js";
 import { sourceSchema, statusOf, resolveSource } from "./host-api.js";
 import { collectFiles, readCollected } from "./ifs-collect.js";
 import { decodeIfsText, encodeIfsText } from "./ifs-text.js";
+import { planDelete, type DeleteTarget } from "./ifs-delete.js";
 import { buildZip } from "./zip-writer.js";
 import { childLog } from "./log.js";
 
@@ -27,6 +29,13 @@ export interface HostIfsDeps {
   zipMaxFiles: number;
   /** 1 ファイルの読み取り上限。超えるものはダウンロードに誘導する */
   readMaxBytes: number;
+  /**
+   * 再帰削除で消せる対象の総数の上限。既定 1,000。
+   * zip（ファイル 500）より広いが、**事故の規模を抑える**ための歯止めであることは同じ。
+   */
+  deleteMaxEntries?: number;
+  /** 再帰削除で辿るディレクトリ数の上限。既定 500（zip の 5,000 より絞る） */
+  deleteMaxDirectories?: number;
   /** 辿るディレクトリ数の上限。未指定なら ifs-collect の既定 */
   zipMaxDirectories?: number;
   /**
@@ -83,6 +92,33 @@ const writeSchema = z
   .strict();
 
 const pathOnlySchema = z.object({ source: sourceSchema, path: pathSchema }).strict();
+
+const deleteSchema = z
+  .object({
+    source: sourceSchema,
+    path: pathSchema,
+    /** フォルダの中身ごと消す。**既定は false**（空でなければ NOT_EMPTY で断る） */
+    recursive: z.boolean().optional()
+  })
+  .strict();
+
+/**
+ * 改名。`newName` は**名前だけ**——`/` を含めない。
+ *
+ * プロトコル（0x000F）は元も先もフルパスなので移動もできるが、
+ * **UI の要件は同一フォルダ内の改名まで**。移動を許すかはここで決まる（research F1）。
+ */
+const renameSchema = z
+  .object({
+    source: sourceSchema,
+    path: pathSchema,
+    newName: z.string().min(1).max(255)
+  })
+  .strict();
+
+/** 再帰削除の既定の上限 */
+const DEFAULT_DELETE_MAX_ENTRIES = 1000;
+const DEFAULT_DELETE_MAX_DIRECTORIES = 500;
 
 /** 拡張子から Content-Type を決める。分からなければ汎用のバイナリ */
 function contentTypeOf(path: string): string {
@@ -150,6 +186,83 @@ async function knownSize(conn: IfsConnection, path: string): Promise<number | un
     // 親を一覧できなくても読み取り自体は通ることがある。ここでは諦める
     return undefined;
   }
+}
+
+/**
+ * 対象の種別を親ディレクトリの一覧から引く（`knownSize` と同じ手口）。分からなければ `undefined`。
+ *
+ * **種別を UI に判断させない**——ディレクトリに `deleteFile`（0x000C）を投げると rc=13 になり、
+ * 「権限がありません」という原因を説明しないメッセージが出る（research F4）。
+ */
+async function entryKind(
+  conn: IfsConnection,
+  path: string
+): Promise<"file" | "directory" | undefined> {
+  const at = path.lastIndexOf("/");
+  if (at < 0) return undefined;
+  const parent = at === 0 ? "/" : path.slice(0, at);
+  const name = path.slice(at + 1);
+  try {
+    const listed = await conn.listFiles(parent);
+    const found = listed.entries.find((e) => e.name === name);
+    if (!found) return undefined;
+    // シンボリックリンクは**リンク自体を消す**ので file 扱い（リンク先は消さない）
+    return found.isDirectory && !found.isSymlink ? "directory" : "file";
+  } catch {
+    // 親を一覧できなくても対象の操作自体は通ることがある
+    return undefined;
+  }
+}
+
+/** 削除の上限（未指定なら既定） */
+function deleteLimits(deps: HostIfsDeps): { maxEntries: number; maxDirectories: number } {
+  return {
+    maxEntries: deps.deleteMaxEntries ?? DEFAULT_DELETE_MAX_ENTRIES,
+    maxDirectories: deps.deleteMaxDirectories ?? DEFAULT_DELETE_MAX_DIRECTORIES
+  };
+}
+
+/** 「消せない」を利用者向けの形にする。**理由ごとに次の一手が違う**ので、まとめて 1 文にしない */
+function deleteBlocked(
+  plan: { reason: "too-many"; entries: number } | { reason: "too-many-directories"; directories: number } | { reason: "incomplete"; path: string },
+  limits: { maxEntries: number; maxDirectories: number }
+): Record<string, unknown> {
+  switch (plan.reason) {
+    case "too-many":
+      return { blocked: "too-many", code: "TOO_MANY", entries: plan.entries, max: limits.maxEntries };
+    case "too-many-directories":
+      return {
+        blocked: "too-many-directories",
+        code: "TOO_MANY_DIRECTORIES",
+        directories: plan.directories,
+        max: limits.maxDirectories
+      };
+    default:
+      return {
+        error: `${plan.path} の一覧を最後まで取得できないため、まとめて削除できません`,
+        code: "INCOMPLETE_LISTING",
+        path: plan.path
+      };
+  }
+}
+
+/** 1 件ずつ消す。**深い順に並んだ計画をそのまま実行する**（順序を守らないと rmdir が rc=9 で止まる） */
+async function runDelete(
+  conn: IfsConnection,
+  targets: readonly DeleteTarget[]
+): Promise<{ files: number; directories: number }> {
+  let files = 0;
+  let directories = 0;
+  for (const t of targets) {
+    if (t.kind === "directory") {
+      await conn.removeDirectory(t.path);
+      directories++;
+    } else {
+      await conn.deleteFile(t.path);
+      files++;
+    }
+  }
+  return { files, directories };
 }
 
 export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: HostIfsDeps): void {
@@ -345,16 +458,136 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     });
   });
 
+  /**
+   * 削除。**種別の判定と再帰の要否はここで決める**（UI に持たせない。research F4）。
+   *
+   * 従来の要求形（`{ source, path }`）はそのまま通る——`recursive` を指定しなければ
+   * ファイルは消え、フォルダは空のときだけ消える。
+   */
   app.post("/api/host/ifs/delete", async (c) => {
+    const parsed = deleteSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const body = parsed.data;
+    const limits = deleteLimits(deps);
+    return await withIfs(c, body.source, async (conn) => {
+      const kind = await entryKind(conn, body.path);
+      const user = c.get("user")?.username;
+
+      // ファイル・リンク、または種別が分からないもの。**分からないときはファイルとして試す**
+      /**
+       * ファイルとして消そうとして rc=13 だったときの元エラー。
+       *
+       * 実はディレクトリだと、ファイル削除（0x000C）は rc=13（権限がありません）で返る（research F4）。
+       * 種別を引けなかった場合だけディレクトリとして解釈し直すが、**それも失敗したら元のエラーを返す**——
+       * 本当に権限が無いファイルに対して、rmdir の rc=3 由来の「見つかりません」を返すと余計に分からない
+       */
+      let fileError: As400Error | undefined;
+      if (kind !== "directory") {
+        try {
+          await conn.deleteFile(body.path);
+          log.info({ user, path: body.path, files: 1 }, "ifs delete");
+          return c.json({ files: 1, directories: 0 });
+        } catch (e) {
+          const err = e as As400Error;
+          if (kind !== undefined || err.code !== "ACCESS_DENIED") throw err;
+          fileError = err;
+        }
+      }
+      /** ディレクトリとしての解釈も失敗したら、ファイルとしての元エラーに戻す */
+      const asDirectory = async <T>(run: () => Promise<T>): Promise<T> => {
+        try {
+          return await run();
+        } catch (e) {
+          throw fileError ?? e;
+        }
+      };
+
+      if (!body.recursive) {
+        // 空でなければ rc=9 → NOT_EMPTY（409）。UI が「中身ごと消しますか？」へ誘導する
+        await asDirectory(() => conn.removeDirectory(body.path));
+        log.info({ user, path: body.path, directories: 1 }, "ifs delete");
+        return c.json({ files: 0, directories: 1 });
+      }
+
+      // **数えてから消す。** 上限を超えていれば 1 件も消さない（部分削除を作らない）
+      const plan = await asDirectory(() => planDelete(conn, body.path, limits));
+      if (!plan.ok) return c.json(deleteBlocked(plan, limits), 409);
+      try {
+        const done = await runDelete(conn, plan.targets);
+        log.info({ user, path: body.path, ...done, recursive: true }, "ifs delete");
+        return c.json(done);
+      } catch (e) {
+        // **途中で止まった。** 消せたところまでは実際に消えている。黙って続行も、
+        // 「全部失敗した」ように見せるのも誤り
+        const err = e as As400Error;
+        log.warn({ user, path: body.path, error: err.message }, "ifs delete stopped");
+        return c.json({ error: err.message, code: err.code ?? "UNKNOWN", partial: true }, statusOf(err));
+      }
+    });
+  });
+
+  /** 削除の規模を先に数える（確認ダイアログ用。**ここでは何も消さない**） */
+  app.post("/api/host/ifs/delete-plan", async (c) => {
     const parsed = pathOnlySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
     const body = parsed.data;
+    const limits = deleteLimits(deps);
     return await withIfs(c, body.source, async (conn) => {
-      await conn.deleteFile(body.path);
-      log.info({ user: c.get("user")?.username, path: body.path }, "ifs delete");
-      return c.json({ ok: true });
+      const kind = await entryKind(conn, body.path);
+      if (kind !== "directory") return c.json({ files: 1, directories: 0, entries: 1 });
+      const plan = await planDelete(conn, body.path, limits);
+      if (!plan.ok) {
+        if (plan.reason === "incomplete") {
+          return c.json(deleteBlocked(plan, limits), 409);
+        }
+        // 上限超過は**エラーではなく「消せない」という事実**。確認ダイアログがそのまま案内に使う
+        return c.json(deleteBlocked(plan, limits));
+      }
+      return c.json({
+        files: plan.files,
+        directories: plan.directories,
+        entries: plan.targets.length
+      });
+    });
+  });
+
+  /**
+   * 改名。`newName` は名前だけを受け取り、**親ディレクトリはサーバーが付ける**。
+   * これで「移動」を許さない（プロトコル上は移動もできる。research F1）。
+   */
+  app.post("/api/host/ifs/rename", async (c) => {
+    const parsed = renameSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const body = parsed.data;
+    if (body.newName.includes("/") || body.newName === "." || body.newName === "..") {
+      return c.json({ error: "名前にパス区切りは使えません", code: "INVALID_NAME" }, 400);
+    }
+    const at = body.path.lastIndexOf("/");
+    if (at < 0) return c.json({ error: "パスが不正です", code: "INVALID_NAME" }, 400);
+    const parent = at === 0 ? "" : body.path.slice(0, at);
+    const target = `${parent}/${body.newName}`;
+    return await withIfs(c, body.source, async (conn) => {
+      try {
+        // 置換しない（既存名なら rc=4 → ALREADY_EXISTS）。上書きは要件に無い
+        await conn.rename(body.path, target);
+      } catch (e) {
+        const err = e as As400Error;
+        // **フォルダを「既存のファイル名」へ改名すると rc=3（Path not found）が返る**（実機で確認）。
+        // そのままだと「対象が見つかりません」になるが、実際は**その名前が既に使われている**。
+        // 失敗したときだけ確かめる（成功する経路に往復を足さない）
+        if (err.code === "NOT_FOUND" && (await entryKind(conn, target)) !== undefined) {
+          throw new As400Error("ALREADY_EXISTS", `${body.newName} は既に使われています`);
+        }
+        throw err;
+      }
+      log.info({ user: c.get("user")?.username, path: body.path, to: target }, "ifs rename");
+      return c.json({ path: target });
     });
   });
 

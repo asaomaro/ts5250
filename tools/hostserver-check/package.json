@@ -15,6 +15,7 @@
     "ifs": "tsc -b && node dist/ifs.js",
     "ifs-list": "tsc -b && node dist/ifs-list.js",
     "ifs-ccsid": "tsc -b && node dist/ifs-ccsid.js",
+    "ifs-ops": "tsc -b && node dist/ifs-ops.js",
     "dtaq": "tsc -b && node dist/dtaq.js"
   },
   "dependencies": {

@@ -296,6 +296,74 @@ describe("プレビュー", () => {
   });
 });
 
+describe("上位フォルダへ", () => {
+  it("ルートでは出さない（押せない行を残さない）", async () => {
+    const w = await paneWith({
+      list: { entries: [entry("a.txt")], hasMore: false, canContinue: false }
+    });
+    expect(w.find(".entries li.up").exists()).toBe(false);
+  });
+
+  it("フォルダを開くと先頭に出て、押すと 1 つ上へ戻る", async () => {
+    const asked: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      const body = JSON.parse(String(init?.body)) as { path: string };
+      if (route === "list") asked.push(body.path);
+      return new Response(
+        JSON.stringify({
+          entries: body.path === "/" ? [entry("dir", { isDirectory: true })] : [entry("a.txt")],
+          hasMore: false,
+          canContinue: false
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    // フォルダへ入る
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    const up = w.find(".entries li.up");
+    expect(up.exists()).toBe(true);
+    // 先頭行であること（一覧の中身より前）
+    expect(w.findAll(".entries li")[0]?.classes()).toContain("up");
+
+    expect(asked).toContain("/dir");
+
+    await up.trigger("click");
+    await flushPromises();
+    expect(w.find(".crumbs").text()).toBe("/");
+    expect(w.find(".entries li.up").exists()).toBe(false);
+  });
+
+  it("キーボード（Enter）でも戻れる", async () => {
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      const body = JSON.parse(String(init?.body)) as { path: string };
+      return new Response(
+        JSON.stringify({
+          entries:
+            route === "list" && body.path === "/"
+              ? [entry("dir", { isDirectory: true })]
+              : [entry("a.txt")],
+          hasMore: false,
+          canContinue: false
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    await w.find(".entries li.up").trigger("keydown.enter");
+    await flushPromises();
+    expect(w.find(".crumbs").text()).toBe("/");
+  });
+});
+
 describe("エラーの文言", () => {
   /** 「辿れない」と「大きすぎる」は別の話。利用者がすべきことが違う */
   it("一括ダウンロードで辿れないときは、個別取得を案内する", async () => {
@@ -686,9 +754,10 @@ describe("ツリー", () => {
     treeFetch({ "/": ["home/"], "/home": ["USER/"], "/home/USER": ["x.txt"] });
     const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
     await flushPromises();
-    await w.findAll(".entries li")[0]?.trigger("click"); // home
+    await w.findAll(".entries li").find((li) => li.text().includes("home"))?.trigger("click");
     await flushPromises();
-    await w.findAll(".entries li")[0]?.trigger("click"); // USER
+    // 2 階層目は先頭が「上位フォルダへ」なので、**名前で選ぶ**
+    await w.findAll(".entries li").find((li) => li.text().includes("USER"))?.trigger("click");
     await flushPromises();
     const sel = w.findAll(".tree-row.sel");
     expect(sel.length).toBe(1);
@@ -1120,5 +1189,150 @@ describe("編集・保存", () => {
     await w.find("textarea.editor").setValue("changed");
     await flushPromises();
     expect(w.findAll(".actions button").some((b) => b.text() === "保存")).toBe(true);
+  });
+});
+
+/**
+ * 削除と名前の変更。**フォルダは「…」で開かずに選ぶ**——
+ * クリック＝開く（移動）は毎日使う操作なので変えない。
+ */
+describe("削除・名前の変更", () => {
+  const listWith = (entries: unknown[]) => ({ entries, hasMore: false, canContinue: false });
+
+  it("フォルダ行の「…」で開かずに選べる（移動しない）", async () => {
+    const asked: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      const body = JSON.parse(String(init?.body)) as { path: string };
+      if (route === "list") asked.push(body.path);
+      return new Response(JSON.stringify(listWith([entry("sub", { isDirectory: true })])), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.find(".entries li .pick").trigger("click");
+    await flushPromises();
+
+    expect(asked).toEqual(["/"]); // 移動していない
+    expect(w.find(".crumbs").text()).toBe("/");
+    expect(w.text()).toContain("フォルダを選択中");
+    // フォルダには「ダウンロード」を出さない（一括は上のボタン）
+    const actions = w.findAll(".actions button").map((b) => b.text());
+    expect(actions).toContain("名前の変更");
+    expect(actions).toContain("削除");
+    expect(actions).not.toContain("ダウンロード");
+  });
+
+  it("フォルダの削除は、先に件数を数えてから確認する", async () => {
+    const posted: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      posted.push(route);
+      const body =
+        route === "list"
+          ? listWith([entry("sub", { isDirectory: true })])
+          : route === "delete-plan"
+            ? { files: 3, directories: 2, entries: 5 }
+            : { files: 3, directories: 2 };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.find(".entries li .pick").trigger("click");
+    await flushPromises();
+    await w.findAll(".actions button").find((b) => b.text() === "削除")?.trigger("click");
+    await flushPromises();
+
+    // 数えてから消す
+    expect(posted.filter((r) => r === "delete-plan" || r === "delete")).toEqual([
+      "delete-plan",
+      "delete"
+    ]);
+    // 確認の文言に件数が出る
+    expect(confirmSpy.mock.calls[0]?.[0]).toContain("ファイル 3 件");
+    expect(w.text()).toContain("削除しました");
+    confirmSpy.mockRestore();
+  });
+
+  it("上限を超えるフォルダは数えた時点で断る（削除要求を出さない）", async () => {
+    const posted: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      posted.push(route);
+      const body =
+        route === "list"
+          ? listWith([entry("sub", { isDirectory: true })])
+          : { blocked: "too-many", code: "TOO_MANY", entries: 1001, max: 1000 };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.find(".entries li .pick").trigger("click");
+    await flushPromises();
+    await w.findAll(".actions button").find((b) => b.text() === "削除")?.trigger("click");
+    await flushPromises();
+
+    expect(posted).not.toContain("delete");
+    expect(w.find(".error").text()).toContain("多すぎます");
+  });
+
+  it("名前の変更は新しい名前を送り、一覧を取り直す", async () => {
+    const sent: Record<string, unknown>[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "rename") sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify(route === "list" ? listWith([entry("a.txt")]) : { path: "/b.txt" }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("b.txt");
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    await w.findAll(".actions button").find((b) => b.text() === "名前の変更")?.trigger("click");
+    await flushPromises();
+
+    expect(sent[0]).toMatchObject({ path: "/a.txt", newName: "b.txt" });
+    expect(w.text()).toContain("に変更しました");
+    promptSpy.mockRestore();
+  });
+
+  it("パス区切りを含む名前は往復させずに断る", async () => {
+    const posted: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      posted.push(route);
+      return new Response(JSON.stringify(listWith([entry("a.txt")])), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("../b.txt");
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    await w.findAll(".entries li")[0]?.trigger("click");
+    await flushPromises();
+    await w.findAll(".actions button").find((b) => b.text() === "名前の変更")?.trigger("click");
+    await flushPromises();
+
+    expect(posted).not.toContain("rename");
+    expect(w.find(".error").text()).toContain("パス区切り");
+    promptSpy.mockRestore();
   });
 });

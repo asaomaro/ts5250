@@ -21,6 +21,9 @@ export interface IfsError {
   partial?: boolean;
   /** 一覧を辿り切れなかったディレクトリ */
   path?: string;
+  /** 削除の対象数（上限超過のとき） */
+  entries?: number;
+  max?: number;
 }
 
 export class IfsRequestError extends Error {
@@ -60,6 +63,12 @@ export function messageFor(b: IfsError): string {
       const count = b.files !== undefined ? `${b.files} ファイル以上 / ` : "";
       return `対象が大きすぎます（${count}${size}）。対象を絞るか、個別に取得してください。`;
     }
+    case "NOT_EMPTY":
+      return "フォルダの中身が残っています。中身ごと削除するか、先に中身を消してください。";
+    case "TOO_MANY":
+      return `対象が多すぎます（${b.entries ?? "?"} 件以上 / 上限 ${b.max ?? "?"} 件）。対象を絞ってください。`;
+    case "INVALID_NAME":
+      return "名前にパス区切り（/）は使えません。";
     case "UNSUPPORTED_CCSID":
       return "この文字コードには対応していません。別の文字コードを選んでください。";
     case "DECODE_FAILED":
@@ -84,7 +93,10 @@ export const KNOWN_ERROR_CODES = [
   "TOO_MANY_DIRECTORIES",
   "TOO_LARGE",
   "UNSUPPORTED_CCSID",
-  "DECODE_FAILED"
+  "DECODE_FAILED",
+  "NOT_EMPTY",
+  "TOO_MANY",
+  "INVALID_NAME"
 ] as const;
 
 /**
@@ -192,8 +204,58 @@ export async function makeDirectory(source: IfsSource, path: string): Promise<vo
   await post("mkdir", { source, path });
 }
 
-export async function deleteFile(source: IfsSource, path: string): Promise<void> {
-  await post("delete", { source, path });
+/** 削除の結果。**種別の判断はサーバー側**なので、UI は消えた件数だけを見る */
+export interface IfsDeleteResult {
+  files: number;
+  directories: number;
+}
+
+/**
+ * 削除。フォルダも同じ口で消す（種別はサーバーが判定する）。
+ *
+ * `recursive` を付けないとフォルダは**空のときだけ**消え、中身があれば `NOT_EMPTY` で返る。
+ */
+export async function deleteFile(
+  source: IfsSource,
+  path: string,
+  opts: { recursive?: boolean } = {}
+): Promise<IfsDeleteResult> {
+  const res = await post("delete", {
+    source,
+    path,
+    ...(opts.recursive !== undefined ? { recursive: opts.recursive } : {})
+  });
+  return (await res.json()) as IfsDeleteResult;
+}
+
+/**
+ * 削除の規模を先に数える（**まだ消さない**）。確認ダイアログに件数を出すために使う。
+ *
+ * 上限を超えている場合は**エラーではなく `blocked`** で返る——「消せない」という事実であって、
+ * 通信の失敗ではないため。
+ */
+export interface IfsDeletePlan {
+  files?: number;
+  directories?: number;
+  entries?: number;
+  blocked?: "too-many" | "too-many-directories";
+  max?: number;
+  code?: string;
+}
+
+export async function deletePlan(source: IfsSource, path: string): Promise<IfsDeletePlan> {
+  const res = await post("delete-plan", { source, path });
+  return (await res.json()) as IfsDeletePlan;
+}
+
+/** 名前を変える。`newName` は**名前だけ**（`/` を含めない。移動は出来ない） */
+export async function renamePath(
+  source: IfsSource,
+  path: string,
+  newName: string
+): Promise<{ path: string }> {
+  const res = await post("rename", { source, path, newName });
+  return (await res.json()) as { path: string };
 }
 
 /** 単一ファイルのバイト列。ダウンロードとプレビューの両方に使う */

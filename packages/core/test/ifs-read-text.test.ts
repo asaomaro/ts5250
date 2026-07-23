@@ -132,6 +132,24 @@ describe("readTextFile", () => {
     expect(conn.ids).not.toContain(0x000a);
   });
 
+  it("rename と removeDirectory はそれぞれの要求 ID を使う（種別を取り違えない）", async () => {
+    const sent: number[] = [];
+    const conn = {
+      async request(f: Uint8Array): Promise<Uint8Array> {
+        sent.push(new DataView(f.buffer, f.byteOffset, f.byteLength).getUint16(18));
+        return errorReply(0); // rc=0 = 成功
+      },
+      async requestStream(): Promise<void> {},
+      close(): void {}
+    } as unknown as HostConnection;
+    const ifs = IfsConnection.forTesting(conn);
+    await ifs.rename("/a/x.txt", "/a/y.txt");
+    await ifs.removeDirectory("/a/dir");
+    await ifs.deleteFile("/a/y.txt");
+    // rename=0x000F / rmdir=0x000E / delete=0x000C
+    expect(sent).toEqual([0x000f, 0x000e, 0x000c]);
+  });
+
   it("閉じた接続では呼べない", async () => {
     const ifs = IfsConnection.forTesting(fakeConn({ attrs: oa2Reply(37), data: [] }));
     ifs.close();

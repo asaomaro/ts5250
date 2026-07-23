@@ -1,0 +1,8 @@
+schema: 3
+slug: ifs-pane-nav-file-ops
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

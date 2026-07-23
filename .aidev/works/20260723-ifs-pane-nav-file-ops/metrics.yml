@@ -1,0 +1,23 @@
+events:
+  - { ts: 2026-07-23T06:07:51Z, phase: requirement, event: start }
+  - { ts: 2026-07-23T06:11:22Z, phase: requirement, event: approved }
+  - { ts: 2026-07-23T06:11:22Z, phase: research, event: start }
+  - { ts: 2026-07-23T06:16:24Z, phase: research, event: approved }
+  - { ts: 2026-07-23T06:16:24Z, phase: spec, event: start }
+  - { ts: 2026-07-23T06:18:27Z, phase: spec, event: approved }
+  - { ts: 2026-07-23T06:18:27Z, phase: plan, event: start }
+  - { ts: 2026-07-23T06:21:32Z, phase: plan, event: approved, metrics: { tasks_planned: 15 } }
+  - { ts: 2026-07-23T06:21:32Z, phase: coding, event: start }
+  - { ts: 2026-07-23T06:42:34Z, phase: coding, event: approved, metrics: { tasks_done: 14 } }
+  - { ts: 2026-07-23T06:42:34Z, phase: test, event: start }
+  - { ts: 2026-07-23T06:55:42Z, phase: test, event: sent_back }
+  - { ts: 2026-07-23T06:55:42Z, phase: coding, event: start }
+  - { ts: 2026-07-23T07:00:36Z, phase: test, event: approved, metrics: { passed: 1949, failed: 4 } }
+  - { ts: 2026-07-23T07:00:36Z, phase: review, event: start }
+  - { ts: 2026-07-23T07:02:21Z, phase: review, event: sent_back }
+  - { ts: 2026-07-23T07:02:21Z, phase: coding, event: start }
+  - { ts: 2026-07-23T07:03:51Z, phase: review, event: approved, metrics: { must: 0, should: 1, nit: 2 } }
+  - { ts: 2026-07-23T07:03:51Z, phase: walkthrough, event: start }
+  - { ts: 2026-07-23T07:07:25Z, phase: walkthrough, event: approved }
+  - { ts: 2026-07-23T07:07:25Z, phase: deliver, event: start }
+  - { ts: 2026-07-23T07:07:35Z, phase: deliver, event: approved }

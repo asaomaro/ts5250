@@ -19,6 +19,12 @@ interface FakeOpts {
   files?: Record<string, Uint8Array>;
   /** ファイル内容の CCSID タグ（OA2）。`readTextFile` が返す */
   tags?: Record<string, number>;
+  /** rmdir が NOT_EMPTY を返すパス */
+  notEmpty?: string[];
+  /** rename 先が既にあるパス */
+  exists?: string[];
+  /** rename だけを失敗させる（種別の取り違えの再現に使う） */
+  renameError?: As400Error;
   fail?: As400Error;
   /** 呼ばれた操作を記録する */
   calls?: string[];
@@ -56,6 +62,17 @@ function fakeConn(opts: FakeOpts): IfsConnection {
       opts.calls?.push(`delete ${path}`);
       if (opts.fail) throw opts.fail;
     },
+    async removeDirectory(path: string): Promise<void> {
+      opts.calls?.push(`rmdir ${path}`);
+      if (opts.fail) throw opts.fail;
+      if (opts.notEmpty?.includes(path)) throw new As400Error("NOT_EMPTY", "not empty");
+    },
+    async rename(from: string, to: string): Promise<void> {
+      opts.calls?.push(`rename ${from} -> ${to}`);
+      if (opts.fail) throw opts.fail;
+      if (opts.renameError) throw opts.renameError;
+      if (opts.exists?.includes(to)) throw new As400Error("ALREADY_EXISTS", "exists");
+    },
     close(): void {
       opts.calls?.push("close");
     }
@@ -65,7 +82,14 @@ function fakeConn(opts: FakeOpts): IfsConnection {
 
 function appWith(
   opts: FakeOpts,
-  limits?: Partial<{ zip: number; files: number; read: number; dirs: number }>
+  limits?: Partial<{
+    zip: number;
+    files: number;
+    read: number;
+    dirs: number;
+    deleteEntries: number;
+    deleteDirs: number;
+  }>
 ) {
   const app = new Hono<{ Variables: AuthVars }>();
   const server = new ServerConfigStore({
@@ -78,6 +102,8 @@ function appWith(
     zipMaxFiles: limits?.files ?? 100,
     readMaxBytes: limits?.read ?? 1_000_000,
     ...(limits?.dirs !== undefined ? { zipMaxDirectories: limits.dirs } : {}),
+    ...(limits?.deleteEntries !== undefined ? { deleteMaxEntries: limits.deleteEntries } : {}),
+    ...(limits?.deleteDirs !== undefined ? { deleteMaxDirectories: limits.deleteDirs } : {}),
     connect: async () => fakeConn(opts)
   });
   return app;
@@ -433,5 +459,175 @@ describe("zip", () => {
     );
     await call(app, "zip", { path: "/d" });
     expect(calls.filter((x) => x.startsWith("read"))).toEqual([]);
+  });
+});
+
+/**
+ * 削除の種別分岐と再帰。**種別の判断はサーバーに閉じている**——
+ * UI が間違えてフォルダに 0x000C を投げると rc=13 →「権限がありません」に化けるため（research F4）。
+ */
+describe("delete（種別分岐・再帰）", () => {
+  const dirTree = (over: Record<string, IfsListResult> = {}) => ({
+    // **種別は親の一覧から引く**ので、親も用意する（実機と同じ手順）
+    "/": {
+      entries: [entry("d", { isDirectory: true })],
+      hasMore: false,
+      canContinue: false
+    },
+    "/d": {
+      entries: [entry("f.txt"), entry("sub", { isDirectory: true })],
+      hasMore: false,
+      canContinue: false
+    },
+    "/d/sub": { entries: [entry("inner.txt")], hasMore: false, canContinue: false },
+    ...over
+  });
+
+  it("ファイルはファイル削除（0x000C）で消す", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: dirTree() });
+    const res = await call(app, "delete", { path: "/d/f.txt" });
+    expect(await res.json()).toMatchObject({ files: 1, directories: 0 });
+    expect(calls).toContain("delete /d/f.txt");
+    expect(calls.some((x) => x.startsWith("rmdir"))).toBe(false);
+  });
+
+  it("フォルダはディレクトリ削除（0x000E）で消す", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: { ...dirTree(), "/d/sub": { entries: [], hasMore: false, canContinue: false } } });
+    const res = await call(app, "delete", { path: "/d/sub" });
+    expect(await res.json()).toMatchObject({ files: 0, directories: 1 });
+    expect(calls).toContain("rmdir /d/sub");
+    expect(calls.some((x) => x.startsWith("delete"))).toBe(false);
+  });
+
+  it("recursive 無しで中身があれば 409 NOT_EMPTY（消さない）", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: dirTree(), notEmpty: ["/d/sub"] });
+    const res = await call(app, "delete", { path: "/d/sub" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "NOT_EMPTY" });
+  });
+
+  it("recursive なら深い順に消す（親は最後）", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: dirTree() });
+    const res = await call(app, "delete", { path: "/d", recursive: true });
+    expect(await res.json()).toMatchObject({ files: 2, directories: 2 });
+    expect(calls.filter((x) => x.startsWith("delete") || x.startsWith("rmdir"))).toEqual([
+      "delete /d/f.txt",
+      "delete /d/sub/inner.txt",
+      "rmdir /d/sub",
+      "rmdir /d"
+    ]);
+  });
+
+  /** 部分削除を作らない。**数えた時点で断る** */
+  it("上限を超えたら 1 件も消さない", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: dirTree() }, { deleteEntries: 2 });
+    const res = await call(app, "delete", { path: "/d", recursive: true });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "TOO_MANY", max: 2 });
+    expect(calls.some((x) => x.startsWith("delete") || x.startsWith("rmdir"))).toBe(false);
+  });
+
+  it("辿り切れないフォルダを含むときも 1 件も消さない", async () => {
+    const calls: string[] = [];
+    const app = appWith({
+      calls,
+      list: dirTree({
+        "/d/sub": { entries: [entry("x.txt")], hasMore: true, canContinue: false }
+      })
+    });
+    const res = await call(app, "delete", { path: "/d", recursive: true });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "INCOMPLETE_LISTING", path: "/d/sub" });
+    expect(calls.some((x) => x.startsWith("delete") || x.startsWith("rmdir"))).toBe(false);
+  });
+
+  it("delete-plan は数えるだけで消さない", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls, list: dirTree() });
+    const res = await call(app, "delete-plan", { path: "/d" });
+    expect(await res.json()).toMatchObject({ files: 2, directories: 2, entries: 4 });
+    expect(calls.some((x) => x.startsWith("delete") || x.startsWith("rmdir"))).toBe(false);
+  });
+
+  it("delete-plan は上限超過を「消せない」として返す（エラーにしない）", async () => {
+    const app = appWith({ list: dirTree() }, { deleteEntries: 2 });
+    const res = await call(app, "delete-plan", { path: "/d" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ blocked: "too-many", max: 2 });
+  });
+
+  it("従来の要求形（recursive 無し）がそのまま通る", async () => {
+    const calls: string[] = [];
+    await call(appWith({ calls, list: dirTree() }), "delete", { path: "/d/f.txt" });
+    expect(calls).toContain("delete /d/f.txt");
+  });
+});
+
+describe("rename", () => {
+  it("名前だけを受け取り、親ディレクトリはサーバーが付ける", async () => {
+    const calls: string[] = [];
+    const res = await call(appWith({ calls }), "rename", { path: "/d/old.txt", newName: "new.txt" });
+    expect(await res.json()).toMatchObject({ path: "/d/new.txt" });
+    expect(calls).toContain("rename /d/old.txt -> /d/new.txt");
+  });
+
+  it("ルート直下でもパスが壊れない", async () => {
+    const calls: string[] = [];
+    await call(appWith({ calls }), "rename", { path: "/old", newName: "new" });
+    expect(calls).toContain("rename /old -> /new");
+  });
+
+  /** 移動は対象外。プロトコル上は出来てしまうので、ここで塞ぐ */
+  it("名前にパス区切りが入っていたら 400（移動を許さない）", async () => {
+    const calls: string[] = [];
+    const res = await call(appWith({ calls }), "rename", {
+      path: "/d/a.txt",
+      newName: "../b.txt"
+    });
+    expect(res.status).toBe(400);
+    expect(calls.some((x) => x.startsWith("rename"))).toBe(false);
+  });
+
+  /**
+   * **フォルダ → 既存のファイル名**だけ、ホストは rc=3（Path not found）を返す（実機で確認）。
+   * そのままだと「見つかりません」になるが、実際はその名前が使われている。
+   */
+  it("rc=3 でも、その名前が使われていれば 409 に読み替える", async () => {
+    const app = appWith({
+      // 親の一覧に taken.txt がある＝名前は使われている
+      list: {
+        "/d": {
+          entries: [entry("taken.txt"), entry("dir", { isDirectory: true })],
+          hasMore: false,
+          canContinue: false
+        }
+      },
+      fail: undefined,
+      renameError: new As400Error("NOT_FOUND", "Path not found (rc=3)")
+    });
+    const res = await call(app, "rename", { path: "/d/dir", newName: "taken.txt" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "ALREADY_EXISTS" });
+  });
+
+  it("本当に見つからないときは 404 のまま", async () => {
+    const app = appWith({
+      list: { "/d": { entries: [], hasMore: false, canContinue: false } },
+      renameError: new As400Error("NOT_FOUND", "File not found (rc=2)")
+    });
+    const res = await call(app, "rename", { path: "/d/gone", newName: "new" });
+    expect(res.status).toBe(404);
+  });
+
+  it("既存の名前へは 409（黙って上書きしない）", async () => {
+    const app = appWith({ exists: ["/d/taken.txt"] });
+    const res = await call(app, "rename", { path: "/d/a.txt", newName: "taken.txt" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "ALREADY_EXISTS" });
   });
 });
