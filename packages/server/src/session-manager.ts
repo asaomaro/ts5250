@@ -9,6 +9,7 @@ import {
   type SpoolReport
 } from "@as400web/core";
 import { childLog } from "./log.js";
+import { rescueStuckSpools } from "./spool-rescue.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -115,6 +116,10 @@ export interface PrinterEntry {
   outputWarnings: { at: number; message: string }[];
   /** 警告の push フック（ws-handler が設定し、切断で解除する） */
   onOutputWarn?: (w: { at: number; message: string }) => void;
+  /** 書き出しできないスプールを拾う見張り（`startRescue`）。切断で止める */
+  rescueTimer?: ReturnType<typeof setInterval> | undefined;
+  /** 見張りが実行中か。前回が終わる前に次を走らせて二重取得しないための鍵 */
+  rescueBusy?: boolean;
   /** スプールごとの自動出力の結果（受信順・上限あり）。成功も含めて画面に出す */
   outputStatuses: SpoolOutputStatus[];
   /** 結果の push フック（ws-handler が設定し、切断で解除する） */
@@ -167,6 +172,8 @@ export interface SessionManagerOptions {
   maxSessions?: number;
   /** アイドルタイムアウト（ms）。無操作でこの時間を超えたら切断。既定 30 分 */
   idleTimeoutMs?: number;
+  /** 書き出しできないスプールを拾う見張りの間隔（ミリ秒。既定 10 秒） */
+  rescueIntervalMs?: number;
   /** 現在時刻（テスト注入用） */
   now?: () => number;
 }
@@ -183,12 +190,15 @@ export class SessionManager {
   private readonly printers = new Map<string, PrinterEntry>();
   private readonly maxSessions: number;
   private readonly idleTimeoutMs: number;
+  /** 書き出しできないスプールを拾う見張りの間隔（既定 10 秒） */
+  private readonly rescueIntervalMs: number;
   private readonly now: () => number;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(opts: SessionManagerOptions = {}) {
     this.maxSessions = opts.maxSessions ?? 8;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
+    this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
   }
 
@@ -294,7 +304,23 @@ export class SessionManager {
       outputStatuses: []
     };
     this.printers.set(id, entry);
-    session.on("report", (report) => {
+    session.on("report", (report) => this.deliverReport(entry, report));
+    session.on("closed", () => {
+      for (const w of entry.waiters.splice(0)) w(undefined);
+      this.printers.delete(id);
+      this.stopRescue(entry);
+    });
+    // 書き出しプログラムが処理できないスプールを拾う見張り（装置名＝OUTQ が要る）
+    this.startRescue(entry, opts);
+    return entry;
+  }
+
+  /**
+   * 受信した帳票を配る（push でも救出でも同じ道を通す）。
+   * ここを 1 本にしておかないと、救出した帳票だけ自動出力（PDF/印刷）から漏れる。
+   */
+  private deliverReport(entry: PrinterEntry, report: SpoolReport): void {
+    {
       entry.reports.push(report);
       entry.lastActivity = this.now();
       const waiter = entry.waiters.shift();
@@ -324,12 +350,55 @@ export class SessionManager {
           this.noteOutputStatus(entry, { spoolId: report.id, at: this.now(), skipped: true });
         }
       }
-    });
-    session.on("closed", () => {
-      for (const w of entry.waiters.splice(0)) w(undefined);
-      this.printers.delete(id);
-    });
-    return entry;
+    }
+  }
+
+  /**
+   * 書き出しプログラムが処理できないスプールを拾う見張りを回す。
+   *
+   * **装置名（＝OUTQ）が分からなければ何もしない。** ホスト採番の装置名だと、どの待ち行列を
+   * 見ればよいか決められないため。資格情報が無いときも同じ（pull 経路が開けない）。
+   */
+  private startRescue(entry: PrinterEntry, opts: OpenPrinterOptions): void {
+    const outputQueue = opts.deviceName;
+    if (!outputQueue || opts.host === undefined || opts.user === undefined) return;
+    const connect: ConnectOptions = {
+      host: opts.host,
+      ...(opts.port !== undefined ? { port: opts.port } : {}),
+      ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+      user: opts.user,
+      ...(opts.password !== undefined ? { password: opts.password } : {}),
+      ...(opts.ccsid !== undefined ? { spoolCcsid: opts.ccsid } : {})
+    };
+    const tick = (): void => {
+      if (entry.rescueBusy) return; // 前回が終わっていなければ見送る（重複取得を避ける）
+      entry.rescueBusy = true;
+      void rescueStuckSpools(connect, outputQueue)
+        .then((found) => {
+          for (const r of found) {
+            // push 型と同じ形の帳票にして同じ道で配る。利用者からは区別が要らない
+            this.deliverReport(entry, {
+              id: `spool-rescued-${r.entry.fileName}-${r.entry.fileNumber}`,
+              pages: r.pages,
+              raw: new Uint8Array(0) // pull 経路は SCS 生バイトを持たない
+            });
+          }
+        })
+        .catch((err: unknown) => sessionLog.warn({ sessionId: entry.id, err }, "スプール救出に失敗した"))
+        .finally(() => {
+          entry.rescueBusy = false;
+        });
+    };
+    const timer = setInterval(tick, this.rescueIntervalMs);
+    timer.unref?.();
+    entry.rescueTimer = timer;
+  }
+
+  private stopRescue(entry: PrinterEntry): void {
+    if (entry.rescueTimer) {
+      clearInterval(entry.rescueTimer);
+      entry.rescueTimer = undefined;
+    }
   }
 
   getPrinter(id: string, user?: AuthUser): PrinterEntry {
