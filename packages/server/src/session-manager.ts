@@ -116,6 +116,14 @@ export interface PrinterEntry {
   outputWarnings: { at: number; message: string }[];
   /** 警告の push フック（ws-handler が設定し、切断で解除する） */
   onOutputWarn?: (w: { at: number; message: string }) => void;
+  /**
+   * 帳票の push フック（ws-handler が設定し、切断で解除する）。
+   *
+   * **救出した帳票はセッションのイベントに乗らない**——ホストから届いたものではないため。
+   * ws-handler が `session.on("report")` だけを見ていると救出分が画面に出ないので、
+   * 配る側（`deliverReport`）から必ずこのフックを叩く。
+   */
+  onReport?: (r: SpoolReport) => void;
   /** 書き出しできないスプールを拾う見張り（`startRescue`）。切断で止める */
   rescueTimer?: ReturnType<typeof setInterval> | undefined;
   /** 見張りが実行中か。前回が終わる前に次を走らせて二重取得しないための鍵 */
@@ -323,6 +331,7 @@ export class SessionManager {
     {
       entry.reports.push(report);
       entry.lastActivity = this.now();
+      entry.onReport?.(report);
       const waiter = entry.waiters.shift();
       if (waiter) {
         entry.delivered = entry.reports.length;

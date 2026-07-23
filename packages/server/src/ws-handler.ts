@@ -143,14 +143,16 @@ export class WsConnection {
       this.sessionId = entry.id;
       const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>
         this.send({ type: "report", sessionId: entry.id, report: { id: r.id, pages: r.pages } });
-      entry.session.on("report", onReport);
+      // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
+      // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
+      entry.onReport = onReport;
       entry.session.on("closed", (reason) => {
         this.send({ type: "closed", reason });
         this.detachReport?.();
       });
       this.detachReport = () => {
-        entry.session.off("report", onReport);
         delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
+        delete entry.onReport;
         delete entry.onOutputStatus;
       };
       // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
