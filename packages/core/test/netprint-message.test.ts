@@ -129,3 +129,18 @@ describe("decodeNpString（受信側の NUL 終端）", () => {
     expect(decodeNpString(Uint8Array.from([0x00]))).toBe("");
   });
 });
+
+/**
+ * **エラーにホストの理由を載せる。**
+ *
+ * 返却コード 0x0009 は「CPF メッセージ付き」で、番号だけでは何が悪いのか分からない
+ * （機種名が不正なのか、権限なのか、変換に失敗したのか）。実際 HPT の調査で
+ * `rc=0x0009` としか出ず、応答に載っていた CPF6DFB を読むまで原因に近づけなかった。
+ */
+describe("エラーに CPF メッセージを載せる", () => {
+  it("メッセージ ID と本文を組み立てられる（decodeNpString 経由）", () => {
+    // EBCDIC "CPF6DFB" + NUL（ホストが返す形）
+    const id = Uint8Array.from([0xc3, 0xd7, 0xc6, 0xf6, 0xc4, 0xc6, 0xc2, 0x00]);
+    expect(decodeNpString(id)).toBe("CPF6DFB");
+  });
+});
