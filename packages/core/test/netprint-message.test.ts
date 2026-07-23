@@ -7,13 +7,14 @@ import {
   NP_RC,
   NP_CP
 } from "../src/hostserver/spool/netprint-datastream.js";
+import { decodeNpString } from "../src/hostserver/spool/netprint-connection.js";
 
 /**
  * MSGW（メッセージ待ち）の検出・応答。
  *
- * **実際の MSGW に対しては未検証**——開発環境（PUB400）では writer を常駐させられず、
- * MSGW 状態を作れなかった。ここでは要求の組み立てと応答の解析だけを固定する。
- * 「メッセージが無い」経路は実機で確認済み。
+ * 日本語実機で検証済み——用紙タイプを上書きして CPA3394 を誘発し、`answerMessage("I")` で
+ * 応答して帳票が印刷されるところまで確認した。ここでは要求の組み立て・応答の解析に加え、
+ * そのとき実際に踏んだ 2 つの落とし穴（NUL 終端の送信と受信）を固定する。
  */
 describe("buildAttributeIdList（欲しい属性を指定する）", () => {
   const ids = [NP_ATTR.messageId, NP_ATTR.messageText];
@@ -93,5 +94,38 @@ describe("メッセージ関連の定数", () => {
 
   it("メッセージハンドルのコードポイント", () => {
     expect(NP_CP.messageHandle).toBe(0x000d);
+  });
+});
+
+/**
+ * **NP サーバーの文字列属性は NUL 終端で返る。**
+ *
+ * `trimEnd()` は空白しか落とさないので NUL が残り、`message.id === "CPA3394"` のような
+ * 比較が必ず外れる。実機で `codes=67,80,65,51,51,57,52,0` と末尾 0 を観測した。
+ */
+describe("decodeNpString（受信側の NUL 終端）", () => {
+  /** EBCDIC "CPA3394" + NUL（ホストが実際に返す形） */
+  const CPA3394_Z = Uint8Array.from([0xc3, 0xd7, 0xc1, 0xf3, 0xf3, 0xf9, 0xf4, 0x00]);
+
+  it("NUL 終端を落とす（残ると ID 比較が外れる）", () => {
+    const id = decodeNpString(CPA3394_Z);
+    expect(id).toBe("CPA3394");
+    expect(id === "CPA3394", "厳密比較が通る").toBe(true);
+  });
+
+  it("NUL より後ろは捨てる（詰め物を値に混ぜない）", () => {
+    const withJunk = Uint8Array.from([...CPA3394_Z, 0xe9, 0xe9, 0xe9]);
+    expect(decodeNpString(withJunk)).toBe("CPA3394");
+  });
+
+  it("NUL が無ければ従来どおり末尾の空白だけ落とす", () => {
+    const noNul = Uint8Array.from([0xc1, 0xc2, 0x40, 0x40]);
+    expect(decodeNpString(noNul)).toBe("AB");
+  });
+
+  it("未設定・空でも壊れない", () => {
+    expect(decodeNpString(undefined)).toBe("");
+    expect(decodeNpString(new Uint8Array(0))).toBe("");
+    expect(decodeNpString(Uint8Array.from([0x00]))).toBe("");
   });
 });

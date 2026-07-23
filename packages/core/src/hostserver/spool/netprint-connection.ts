@@ -300,8 +300,7 @@ export class NetPrintConnection {
     const attrs = findCodePoint(reply, NP_CP.attributeValue);
     if (!attrs) return undefined;
     const values = parseAttributeList(attrs);
-    const text = (attrId: number): string =>
-      values.has(attrId) ? codecForCcsid(MESSAGE_CCSID).decode(values.get(attrId)!).trimEnd() : "";
+    const text = (attrId: number): string => decodeNpString(values.get(attrId));
 
     const handle = findCodePoint(reply, NP_CP.messageHandle);
     return {
@@ -370,6 +369,20 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
     pos += p.length;
   }
   return out;
+}
+
+/**
+ * NP サーバーの文字列属性をデコードする。
+ *
+ * **NUL 終端を先に切る。** この属性は C 文字列で返るのに `trimEnd()` は空白しか落とさないため、
+ * NUL が値の末尾に残る。残ると `message.id === "CPA3394"` のような比較が必ず外れ、
+ * メッセージ種別で分岐する呼び出し側（応答が要るかの判定）が動かない（実機で確認）。
+ */
+export function decodeNpString(raw: Uint8Array | undefined): string {
+  if (!raw) return "";
+  const end = raw.indexOf(0);
+  const body = end >= 0 ? raw.subarray(0, end) : raw;
+  return codecForCcsid(MESSAGE_CCSID).decode(body).trimEnd();
 }
 
 async function decidePort(opts: NetPrintConnectOptions, timeoutMs: number): Promise<number> {
