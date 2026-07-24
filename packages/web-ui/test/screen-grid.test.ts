@@ -867,6 +867,25 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("複数行ペーストは DBCS(混在)欄でも各行を下の欄へ分配する（1 行に折り畳まない）", async () => {
+    // STRSQL/SEU のソース欄は混在(DBCS)欄。旧実装は DBCS を単一行経路に通し、改行が捨てられて
+    // 全行が 1 欄へ折り畳まれていた。SBCS 内容なら桁計算は一致する（README の既知の限界の範囲外）。
+    const fields: Field[] = [
+      { index: 1, row: 5, col: 5, length: 10, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" },
+      { index: 2, row: 6, col: 5, length: 10, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true } });
+    const input = w.findAll("input.grid-input")[0]!;
+    await input.trigger("focus");
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("paste", { clipboardData: { getData: () => "ABCDE\nFGHIJ" } });
+    const emits = w.emitted("edit") as [number, string][];
+    const last = (idx: number) => [...emits].reverse().find((e) => e[0] === idx)?.[1];
+    expect(last(1)).toBe("ABCDE"); // 1 行目 → 1 欄目
+    expect(last(2)).toBe("FGHIJ"); // 2 行目 → 下の欄（折り畳まれない）
+    w.unmount();
+  });
+
   // ACS の挿入ペースト仕様（実機挙動として提示されたもの）:
   //  - 挿入は後続を右へずらす。あふれ判定は行ではなく「欄全体の予算」に対して行う
   //  - 入り切らなければ "No room to insert data." を出し、**何も書かない**（確定するまで書き換えない）

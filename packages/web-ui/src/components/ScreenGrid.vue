@@ -1501,12 +1501,16 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
    * 欄の右端で打ち切っていた。ACS は右の欄へ流し、右が尽きたら次の行へ回すため、
    * 規則を 2 か所に持たず pasteMultiline へ集約する。
    *
-   * **ただし DBCS 欄の単一行だけは従来経路を残す（decisions.md D1）。**
+   * **ただし DBCS 欄の“単一行”だけは従来経路を残す（decisions.md D1 / README 既知の限界）。**
    * pasteMultiline は桁（列ビュー）で宛先を決め、書き込みは overwriteInto が
    * 論理文字の配列で行う。全角は SO+2+SI=4 桁を占めるため両者がずれ、
    * 既存の全角を壊す（"ABCDEF" の 1 桁目へ "日" を貼ると A日F になるべきところ A日CDEF）。
+   *
+   * **複数行は DBCS 欄でも pasteMultiline に流す**（各行を下の欄へ分配する）。ここを従来経路に
+   * 通すと改行が acceptsChar で捨てられ、全行が 1 欄へ折り畳まれてしまう（STRSQL/SEU で発生）。
+   * 桁計算は全角を含むと不正確になり得るが（README の既知の限界）、SBCS 内容なら一致する。
    */
-  if (isDbcsEdit(f)) {
+  if (isDbcsEdit(f) && !/[\r\n]/.test(text)) {
     // native caret を論理カーソルへ写してから流し込む（列ビュー ⇄ 論理の変換）
     const vc = el.selectionStart;
     if (vc !== null) {
