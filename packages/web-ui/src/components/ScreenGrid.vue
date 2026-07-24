@@ -18,7 +18,9 @@ import {
   rejectReason,
   dbcsByteLength,
   dbcsViewLayout,
+  columnViewLayout,
   isFullWidth,
+  type DbcsViewLayout,
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
@@ -412,27 +414,31 @@ function logicalFromCells(f: Field): string {
   return s.replace(/ +$/, ""); // 末尾パディング空白を除去
 }
 
-/** 休止表示用の論理値。カナ表示中の未編集 DBCS 欄は、セルの生バイトを displayChar で再解釈する
- *  （SBCS が半角カナへ切り替わる）。span（displayChar）と一致させ、SEU 等の混在ソース欄でも
- *  英カナ切替が input に効くようにするためのもの。
- *  **送信値 logicalValue は汚さない**——編集済み・編集中の欄はそのまま logicalValue を使う。 */
-function displayLogical(f: Field): string {
-  if (!props.katakanaView) return logicalValue(f);
-  if (props.edits.get(f.index) !== undefined || editFieldIndex === f.index) return logicalValue(f);
-  let s = "";
+/** 休止・未編集 DBCS 欄の列ビューを**セルから忠実に**組む（表示専用）。
+ *  SO/SI は実位置のまま（空 {} や不整合 { だけ・} だけ も保持）、SBCS は displayChar で
+ *  カナ再解釈、全角は 1 文字（2 桁）で採用する。span（displayChar）と完全に一致する。
+ *  純論理値からの再構成（dbcsViewLayout）と違い SO/SI を落とさない。 */
+function restViewFromCells(f: Field): string {
+  let v = "";
   for (const sl of slicesOf(f)) {
     const row = props.snapshot.cells[sl.row - 1];
-    if (!row) continue;
+    if (!row) {
+      v += " ".repeat(sl.width);
+      continue;
+    }
     for (let i = 0; i < sl.width; i++) {
       const cell = row[sl.col - 1 + i];
-      if (!cell) continue;
-      if (cell.kind === "sbcs") s += displayChar(cell); // SBCS は生バイトを半角カナへ再解釈
-      else if (cell.kind === "dbcs-lead") s += cell.char;
-      else if (cell.kind === "attr") s += " ";
-      // so / si / dbcs-tail は論理データに含めない（dbcsViewLayout が SO/SI を付け直す）
+      if (!cell) {
+        v += " ";
+        continue;
+      }
+      if (cell.kind === "dbcs-tail") continue; // lead が 2 桁ぶんを担う
+      if (cell.kind === "so") v += soMark();
+      else if (cell.kind === "si") v += siMark();
+      else v += displayChar(cell); // sbcs はカナ再解釈、dbcs-lead は全角、attr は空白
     }
   }
-  return s.replace(/ +$/, "");
+  return v;
 }
 
 /** 編集モデル初期値（純論理値をスペース埋め）。フォーカス中の input はこれを表示する。 */
@@ -540,7 +546,7 @@ function shiftCellsView(s: FieldSlice): string {
 
 /** 列ビューをスライスの桁範囲で切り出す。境界にまたがる全角は前スライスの末尾に置き（input 幅で
  *  クリップされ左半分が行末に出る）、次スライスは空白 1 桁で始める＝ACS の桁割りと一致させる。 */
-function dbcsSliceText(lay: ReturnType<typeof dbcsViewLayout>, s: FieldSlice): string {
+function dbcsSliceText(lay: DbcsViewLayout, s: FieldSlice): string {
   const r = lay.sliceRange(s.offset, s.offset + s.width);
   const text = (r.leadBlank ? " " : "") + lay.view.slice(r.from, r.to);
   const cols = (r.leadBlank ? 1 : 0) + lay.columnsBefore(r.to) - lay.columnsBefore(r.from);
@@ -548,7 +554,7 @@ function dbcsSliceText(lay: ReturnType<typeof dbcsViewLayout>, s: FieldSlice): s
 }
 
 /** スライス内 caret ⇔ 欄全体の列ビュー index。またがる全角のぶん（leadBlank）を吸収する。 */
-function dbcsSliceRangeOf(f: Field, sliceIdx: number, lay: ReturnType<typeof dbcsViewLayout>) {
+function dbcsSliceRangeOf(f: Field, sliceIdx: number, lay: DbcsViewLayout) {
   const s = slicesOf(f)[sliceIdx] ?? slicesOf(f)[0]!;
   return { s, ...lay.sliceRange(s.offset, s.offset + s.width) };
 }
@@ -571,9 +577,13 @@ function displayValue(f: Field): string {
 
 /** 休止時（props 由来）の列ビューのレイアウト。編集モデルは見ない。
  *  :value バインド・blur の復帰・矩形コピーはこちら、編集中の同期は dbcsLayoutOf を使う。 */
-function dbcsRestLayout(f: Field): ReturnType<typeof dbcsViewLayout> {
-  // 休止表示は displayLogical（カナ表示中はセル生バイトを再解釈）。送信値は logicalValue のまま。
-  return dbcsViewLayout(padDbcs(f, [...displayLogical(f)]).join(""), soMark(), siMark());
+function dbcsRestLayout(f: Field): DbcsViewLayout {
+  // 休止・未編集の欄はセルから忠実に列ビューを組む（SO/SI の実位置・空・不整合を保持、SBCS はカナ再解釈）。
+  // 編集済み・編集中の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり）。
+  if (editFieldIndex !== f.index && props.edits.get(f.index) === undefined) {
+    return columnViewLayout(restViewFromCells(f));
+  }
+  return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----

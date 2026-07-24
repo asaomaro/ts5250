@@ -182,3 +182,56 @@ describe("表示できない SBCS バイトの保持", () => {
     expect(d.slice(6, 8)).toEqual([UNMAPPED, 0xc2]);
   });
 });
+
+/**
+ * **未編集の DBCS 欄は、ホストが描いた SO/SI をそのまま送り返す。**
+ *
+ * 全角ランから SO/SI を再構成する方式では、空の SO/SI（{}）や不整合（{ だけ・} だけ）を
+ * 表せず落ちてしまう（SEU のソース等、実データで起こる）。ホスト原本の生バイトをセルに保持し、
+ * 未編集欄はそのバイト列を忠実に送る。
+ */
+describe("DBCS 欄の SO/SI を送信でそのまま保持する", () => {
+  const dbcsCodec = codecForCcsid(939);
+
+  /** MDT を立てた未編集 DBCS（open）欄を作る。セルはテストが直接置く（ホスト描画を模す） */
+  function dbcsFieldBuffer(length: number): { b: ScreenBuffer; fs: number } {
+    const b = new ScreenBuffer();
+    b.setAttr(b.addrOf(5, 24), 0x24);
+    b.addField(b.addrOf(5, 25), length, FFW.ID_VALUE | FFW.MDT, 0x24, "open");
+    return { b, fs: b.addrOf(5, 25) };
+  }
+
+  /** ヘッダ(3)+SBA(3) を除いたフィールドデータのバイト列 */
+  function sentFieldData(b: ScreenBuffer): number[] {
+    const { record } = buildReadMdtResponse(b, dbcsCodec, AID.ENTER, { row: 5, col: 25 });
+    return [...parseRecord(record).data].slice(6);
+  }
+
+  it("空の SO/SI（{}）はそのまま 0x0e 0x0f で送る", () => {
+    const { b, fs } = dbcsFieldBuffer(4);
+    b.setShift(fs, "so");
+    b.setShift(fs + 1, "si");
+    expect(sentFieldData(b)).toEqual([0x0e, 0x0f]);
+  });
+
+  it("SO だけ・SI だけの不整合もそのまま送る", () => {
+    const only1 = dbcsFieldBuffer(2);
+    only1.b.setShift(only1.fs, "so");
+    expect(sentFieldData(only1.b)).toEqual([0x0e]);
+
+    const only2 = dbcsFieldBuffer(2);
+    only2.b.setShift(only2.fs, "si");
+    expect(sentFieldData(only2.b)).toEqual([0x0f]);
+  });
+
+  it("正常な DBCS はホスト原本の 2 バイトをそのまま送る", () => {
+    const { b, fs } = dbcsFieldBuffer(6);
+    b.setChar(fs, "A", 0xc1);
+    b.setShift(fs + 1, "so");
+    b.setDbcs(fs + 2, "日", 0x45, 0x9c); // ホストが送ってきた任意の DBCS 2 バイト
+    b.setShift(fs + 4, "si");
+    const { record, substituted } = buildReadMdtResponse(b, dbcsCodec, AID.ENTER, { row: 5, col: 25 });
+    expect([...parseRecord(record).data].slice(6)).toEqual([0xc1, 0x0e, 0x45, 0x9c, 0x0f]);
+    expect(substituted, "生バイトは SUB に計上されない").toBe(0);
+  });
+});

@@ -276,12 +276,14 @@ export class ScreenBuffer {
     this.cells[addr] = { type: "char", char: " ", charKind: kind };
   }
 
-  /** DBCS 1 文字を lead/tail の 2 桁に配置する */
-  setDbcs(addr: number, char: string): void {
+  /** DBCS 1 文字を lead/tail の 2 桁に配置する。
+   *  lead/tail の生バイトを保持しておくと、未編集欄の送信でホスト原本の 2 バイトをそのまま戻せる
+   *  （SO/SI の空/不整合を含め忠実に送るため。fieldValue の忠実パスが使う）。 */
+  setDbcs(addr: number, char: string, lead?: number, tail?: number): void {
     this.checkAddr(addr);
     this.checkAddr(addr + 1);
-    this.cells[addr] = { type: "char", char, charKind: "dbcs-lead" };
-    this.cells[addr + 1] = { type: "char", char: "", charKind: "dbcs-tail" };
+    this.cells[addr] = { type: "char", char, charKind: "dbcs-lead", ...(lead !== undefined ? { rawByte: lead } : {}) };
+    this.cells[addr + 1] = { type: "char", char: "", charKind: "dbcs-tail", ...(tail !== undefined ? { rawByte: tail } : {}) };
   }
 
   setAttr(addr: number, byte: number): void {
@@ -389,6 +391,13 @@ export class ScreenBuffer {
   }
 
   fieldValue(field: InternalField): string {
+    // **未編集の DBCS 欄はホスト原本のバイト列をセンチネルでそのまま返す**。SO/SI の空（{}）や
+    // 不整合（{ だけ・} だけ）も、全角ランからの再構成では表せず落ちてしまうため、生バイトを
+    // 保持して送信時にそのまま戻す。編集された欄（setFieldValue が SBCS セルに書き換える＝
+    // 構造セルが無い）は従来どおり論理値を返し、codec.encode が SO/SI を付け直す。
+    if (field.dbcsType !== undefined && this.hasDbcsStructure(field)) {
+      return this.dbcsRawFieldValue(field);
+    }
     // **SBCS 欄の埋め込み属性はセンチネル文字で返す**（値の中で識別・移動できるように）。
     // DBCS 欄は SO/SI・2 バイトの都合でセンチネルを混ぜると送信エンコードが壊れるため空白のまま。
     const dbcs = field.dbcsType !== undefined;
@@ -405,6 +414,66 @@ export class ScreenBuffer {
       else s += " ";
     }
     return s.replace(/ +$/, "");
+  }
+
+  /** 欄が SO/SI・DBCS の構造セルを持つ（＝ホストが描いた原本のまま。setFieldValue 後は全 SBCS）。 */
+  private hasDbcsStructure(field: InternalField): boolean {
+    for (let i = 0; i < field.length; i++) {
+      const c = this.cells[field.startAddr + i];
+      if (
+        c?.type === "char" &&
+        (c.charKind === "so" || c.charKind === "si" || c.charKind === "dbcs-lead" || c.charKind === "dbcs-tail")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 未編集 DBCS 欄をセルの生バイトから忠実に復元する（SO/SI の実位置・空・不整合をそのまま保持）。
+   *  戻り値のセンチネルは read-response が生バイトで書き出す。末尾ブランクは現行同様に落とす。 */
+  private dbcsRawFieldValue(field: InternalField): string {
+    const SO_BYTE = 0x0e;
+    const SI_BYTE = 0x0f;
+    // 末尾のブランク桁（空セル・EBCDIC 空白）を落とす。SO/SI・DBCS の構造桁は残す（末尾の { なども保つ）。
+    let end = field.length;
+    while (end > 0 && this.isTrailingBlankCell(this.cells[field.startAddr + end - 1])) end--;
+    let s = "";
+    for (let i = 0; i < end; i++) {
+      const c = this.cells[field.startAddr + i];
+      if (c?.type === "char") {
+        switch (c.charKind) {
+          case "so":
+            s += rawSentinel(SO_BYTE);
+            break;
+          case "si":
+            s += rawSentinel(SI_BYTE);
+            break;
+          case "dbcs-tail":
+            s += c.rawByte !== undefined ? rawSentinel(c.rawByte) : "";
+            break;
+          // dbcs-lead / sbcs: 生バイトがあればそのまま、無ければ文字（フィル空白等）を codec に委ねる
+          default:
+            s += c.rawByte !== undefined ? rawSentinel(c.rawByte) : c.char;
+            break;
+        }
+      } else if (c?.type === "attr") {
+        s += attrSentinel(c.byte);
+      } else {
+        s += " ";
+      }
+    }
+    return s;
+  }
+
+  /** 末尾トリム対象の空白桁か（空セル・生バイト無しの空白・EBCDIC 空白 0x40）。構造桁は対象外。 */
+  private isTrailingBlankCell(c: InternalCell | undefined): boolean {
+    if (c == null) return true;
+    if (c.type !== "char") return false; // 属性桁は残す
+    if (c.charKind === "so" || c.charKind === "si" || c.charKind === "dbcs-lead" || c.charKind === "dbcs-tail") {
+      return false;
+    }
+    return (c.char === " " || c.char === "") && (c.rawByte === undefined || c.rawByte === 0x40);
   }
 
   /** MDT の立ったフィールド（Read MDT Fields 応答用・画面順） */
