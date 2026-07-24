@@ -204,6 +204,9 @@ function displayText(s: string): string {
 
 /** セルの表示文字（SO/SI マーク表示・カタカナ再解釈・dbcs-tail 空白埋め） */
 function displayChar(c: Cell): string {
+  // **非表示（nonDisplay）桁は SO/SI マークも出さない。** ACS は非表示属性の桁に何も描かない
+  // （DBCS ラベルが非表示のとき、UPDDTA 初期表示で SO/SI だけ { } と漏れて見えるのを防ぐ）。
+  if (c.nonDisplay) return " ";
   if (props.showShiftMarks && c.kind === "so") return "{";
   if (props.showShiftMarks && c.kind === "si") return "}";
   // カタカナ表示: SBCS の生バイトを半角カナで再解釈
@@ -433,9 +436,8 @@ function restViewFromCells(f: Field): string {
         continue;
       }
       if (cell.kind === "dbcs-tail") continue; // lead が 2 桁ぶんを担う
-      if (cell.kind === "so") v += soMark();
-      else if (cell.kind === "si") v += siMark();
-      else v += displayChar(cell); // sbcs はカナ再解釈、dbcs-lead は全角、attr は空白
+      // displayChar が SO/SI マーク・カナ再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
+      v += displayChar(cell);
     }
   }
   return v;
@@ -548,9 +550,8 @@ function shiftCellsView(s: FieldSlice): string {
       continue;
     }
     if (cell.kind === "dbcs-tail") continue; // lead 側が 2 桁ぶんを担う
-    if (cell.kind === "so") out += soMark();
-    else if (cell.kind === "si") out += siMark();
-    else out += displayChar(cell); // SBCS は katakanaView 時にカナ再解釈（span と一致）
+    // displayChar が SO/SI マーク・カナ再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
+    out += displayChar(cell);
   }
   return out;
 }

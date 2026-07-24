@@ -1281,6 +1281,22 @@ describe("ScreenGrid", () => {
     expect(line).toContain("}");
   });
 
+  it("非表示(nonDisplay)桁の SO/SI は showShiftMarks でもマークを出さない（ACS 準拠）", () => {
+    // UPDDTA 初期表示: まだ表示しない DBCS ラベルは非表示属性。ACS は何も描かず、SO/SI も出ない。
+    const snap = makeSnap();
+    const r0 = snap.cells[0]!;
+    r0[0] = { ...cell(" "), kind: "so", nonDisplay: true };
+    r0[1] = { ...cell(" "), kind: "dbcs-lead", nonDisplay: true };
+    r0[2] = { ...cell(""), kind: "dbcs-tail", nonDisplay: true };
+    r0[3] = { ...cell(" "), kind: "si", nonDisplay: true };
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: true, showShiftMarks: true }
+    });
+    const line = w.findAll(".grid-row")[0]!.text();
+    expect(line).not.toContain("{");
+    expect(line).not.toContain("}");
+  });
+
   it("カーソル位置にブロックカーソルを描画する", () => {
     const snap = makeSnap();
     snap.cursor = { row: 6, col: 10 };
