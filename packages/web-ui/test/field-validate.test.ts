@@ -86,6 +86,16 @@ describe("columnView 表示用の SO/SI スペース挿入", () => {
     expect(columnView("あい", "{", "}")).toBe("{あい}");
     expect(columnView("ABC", "{", "}")).toBe("ABC"); // DBCS 無しは不変
   });
+
+  it("East Asian Ambiguous（DBCS 由来）も全角として SO/SI・2 桁で扱う", () => {
+    // 0x445A → U+2010 '‐'。表示は DBCS（全角）なのに編集で SBCS 扱いになる食い違いを防ぐ。
+    const hyphen = "‐"; // ‐（DBCS ハイフン。ASCII '-' U+002D とは別）
+    expect(dbcsByteLength(hyphen)).toBe(4); // SO+2+SI（全角 1 文字）
+    expect(columnView(hyphen, "{", "}")).toBe(`{${hyphen}}`); // SO/SI で囲む
+    // ASCII ハイフンは SBCS のまま
+    expect(dbcsByteLength("-")).toBe(1);
+    expect(columnView("-", "{", "}")).toBe("-");
+  });
 });
 
 describe("dbcsViewLayout 論理⇔列ビューのカーソルマッピング", () => {
