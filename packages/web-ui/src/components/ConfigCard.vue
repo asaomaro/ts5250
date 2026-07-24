@@ -200,14 +200,19 @@ async function save(): Promise<void> {
       }
     } else {
       const form = { ...sesForm, name: sesForm.name!.trim() } as SessionConfigForm;
+      // transformTo は printer 専用。空文字だとサーバーの min(1) で 400 になるので、
+      // sessionType によらず「空なら送らない」を常に通す（display の既定 "" 対策）
+      const tt = (sesForm.transformTo ?? "").trim();
+      if (tt) form.transformTo = tt;
+      else delete form.transformTo;
       if (form.sessionType === "printer") {
         // 既定（保留）はわざわざ保存しない——設定ファイルに既定値を書き散らさない
         if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
-        const tt = (sesForm.transformTo ?? "").trim();
-        if (tt) form.transformTo = tt;
-        else delete form.transformTo;
         delete form.screenSize;
         delete form.enhanced;
+      } else {
+        // display は printer 専用項目を送らない
+        delete form.rescueAction;
       }
       if (canEditPrinter.value) {
         const p: NonNullable<SessionConfigForm["printer"]> = {};
