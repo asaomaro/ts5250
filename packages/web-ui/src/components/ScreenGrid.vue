@@ -514,15 +514,26 @@ function usesShiftCells(f: Field): boolean {
   });
 }
 
-/** カタカナ表示中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
- *  input の :value も cell ビューにしないと、span だけカナ・input は英字のままになる。
- *  編集中は編集モデルが真実、確定編集済みはセルが stale なので対象外（logicalValue を使う）。
- *  DBCS/hidden も対象外。 */
-function usesKatakanaCells(f: Field): boolean {
+/** その欄をカナ表示（セルの生バイト再解釈）にするか。
+ *  - カナ表示 OFF・確定編集済み（props.edits にある）は対象外（英字。送信値と食い違わせない）。
+ *  - **フォーカス中でも、まだ打鍵していない（編集モデル＝元セル内容）ならカナ維持**。打鍵して
+ *    編集モデルが元と変わった瞬間から英字（編集値）に戻す。これで「未編集欄はフォーカスしても
+ *    カナのまま、編集し始めたら英字」を satisfy する（送信値は常に元バイト）。 */
+function katakanaViewActive(f: Field): boolean {
   if (!props.katakanaView) return false;
+  if (props.edits.get(f.index) !== undefined) return false;
+  if (editFieldIndex === f.index && edit) {
+    return editValue(edit).replace(/ +$/, "") === baselineValue(f);
+  }
+  return true; // 休止 or 未フォーカスの未編集欄
+}
+
+/** カナ表示中の SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
+ *  input の :value も cell ビューにしないと、span だけカナ・input は英字のままになる。
+ *  DBCS/hidden は対象外（DBCS は dbcsRestLayout、hidden は伏せ字）。 */
+function usesKatakanaCells(f: Field): boolean {
   if (f.dbcsType || f.hidden) return false;
-  if (editFieldIndex === f.index) return false; // 編集中の欄は編集値を優先
-  return props.edits.get(f.index) === undefined; // 確定編集済みはセルと食い違う
+  return katakanaViewActive(f);
 }
 
 /** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・カタカナ再解釈・全角は 1 文字で 2 桁ぶん）。 */
@@ -578,9 +589,12 @@ function displayValue(f: Field): string {
 /** 休止時（props 由来）の列ビューのレイアウト。編集モデルは見ない。
  *  :value バインド・blur の復帰・矩形コピーはこちら、編集中の同期は dbcsLayoutOf を使う。 */
 function dbcsRestLayout(f: Field): DbcsViewLayout {
-  // 休止・未編集の欄はセルから忠実に列ビューを組む（SO/SI の実位置・空・不整合を保持、SBCS はカナ再解釈）。
-  // 編集済み・編集中の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり）。
-  if (editFieldIndex !== f.index && props.edits.get(f.index) === undefined) {
+  // セルから忠実に列ビューを組む条件:
+  //  - 休止・未編集: SO/SI の実位置・空・不整合を保持（#144）。
+  //  - **フォーカス中でも katakanaViewActive（未打鍵のカナ表示欄）**: フォーカスしてもカナを維持する。
+  // 編集済み・打鍵後の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり・英字）。
+  const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
+  if (resting || katakanaViewActive(f)) {
     return columnViewLayout(restViewFromCells(f));
   }
   return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
@@ -739,11 +753,16 @@ function inputForSlice(f: Field, sliceIdx: number): HTMLInputElement | undefined
 
 /** 論理値を全スライスの <input> へ書き戻す（hidden は伏せ字化してから割る）。 */
 function writeSlices(f: Field, full: string): void {
+  // 未打鍵のカナ表示欄はフォーカス中もセル由来のカナ列ビューを保つ（打鍵で editVal!=baseline になれば英字へ）。
+  const kana = katakanaViewActive(f);
   const masked = maskSafe(f, full);
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
+    if (!el) return;
     // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
-    if (el) el.value = displayText(stripSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
+    el.value = kana
+      ? displayText(stripSentinels(sliceValue(f, i)))
+      : displayText(stripSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
   });
 }
 
@@ -810,9 +829,12 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
     target.focus();
     syncingFocus = false;
   }
+  // 未打鍵のカナ表示欄はフォーカス中もセル由来のカナ列ビュー（打鍵で editVal!=baseline になれば英字へ）。
+  // caret は編集モデル（lay）で決めるが、未打鍵欄は列構造が一致するので桁はズレない。
+  const kana = katakanaViewActive(f);
   slicesOf(f).forEach((sl, i) => {
     const el = inputForSlice(f, i);
-    if (el) el.value = dbcsSliceText(lay, sl);
+    if (el) el.value = kana ? displayText(stripSentinels(sliceValue(f, i))) : dbcsSliceText(lay, sl);
   });
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
@@ -1153,7 +1175,10 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
     // DBCS 欄は編集中も列ビュー（SO/SI 込み）を表示。論理カーソルはこのスライスの先頭桁へ。
     const lay = dbcsLayoutOf(f);
     const r = dbcsSliceRangeOf(f, sliceIdx, lay);
-    el.value = dbcsSliceText(lay, r.s); // パディング込み＝未入力桁にも caret を置ける
+    // 未打鍵のカナ表示欄はフォーカスしてもカナ列ビューを保つ（caret は lay 由来。桁構造は一致）。
+    el.value = katakanaViewActive(f)
+      ? displayText(stripSentinels(sliceValue(f, sliceIdx)))
+      : dbcsSliceText(lay, r.s); // パディング込み＝未入力桁にも caret を置ける
     const lc = lay.logicalAfter(r.from); // 先頭桁が SO なら、その次の論理境界から
     if (edit) edit.cursor = lc;
     const local = localCaret(r, lay.caretOf(lc));
