@@ -454,7 +454,9 @@ function sliceValue(f: Field, sliceIdx: number): string {
   if (!s) return "";
   // 休止表示なので props 由来のレイアウトを使う（編集モデルを見ると blur で値が戻らない）
   if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f), s);
-  if (usesShiftCells(f)) return shiftCellsView(s);
+  // カタカナ表示中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
+  // これをしないと span だけカナ・input は英字のまま食い違う（英カナ切替が input に効かない）。
+  if (usesShiftCells(f) || usesKatakanaCells(f)) return shiftCellsView(s);
   if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス
   return displayValue(f).slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
 }
@@ -483,7 +485,18 @@ function usesShiftCells(f: Field): boolean {
   });
 }
 
-/** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・全角は 1 文字で 2 桁ぶん）。 */
+/** カタカナ表示中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
+ *  input の :value も cell ビューにしないと、span だけカナ・input は英字のままになる。
+ *  編集中は編集モデルが真実、確定編集済みはセルが stale なので対象外（logicalValue を使う）。
+ *  DBCS/hidden も対象外。 */
+function usesKatakanaCells(f: Field): boolean {
+  if (!props.katakanaView) return false;
+  if (f.dbcsType || f.hidden) return false;
+  if (editFieldIndex === f.index) return false; // 編集中の欄は編集値を優先
+  return props.edits.get(f.index) === undefined; // 確定編集済みはセルと食い違う
+}
+
+/** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・カタカナ再解釈・全角は 1 文字で 2 桁ぶん）。 */
 function shiftCellsView(s: FieldSlice): string {
   const row = props.snapshot.cells[s.row - 1];
   if (!row) return "".padEnd(s.width, " ");
@@ -497,7 +510,7 @@ function shiftCellsView(s: FieldSlice): string {
     if (cell.kind === "dbcs-tail") continue; // lead 側が 2 桁ぶんを担う
     if (cell.kind === "so") out += soMark();
     else if (cell.kind === "si") out += siMark();
-    else out += cell.char === "" ? " " : displayText(cell.char);
+    else out += displayChar(cell); // SBCS は katakanaView 時にカナ再解釈（span と一致）
   }
   return out;
 }

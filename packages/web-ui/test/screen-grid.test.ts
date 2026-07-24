@@ -1104,6 +1104,25 @@ describe("ScreenGrid", () => {
     expect(kanaText).not.toContain("a");
   });
 
+  it("katakanaView は input 欄の休止表示にも効く（span と一致・英カナ切替）", () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 1, protected: false, hidden: false, numeric: false, mdt: false, value: "a" }
+    ];
+    const snap = makeSnap(fields);
+    // 欄の桁（row6 col10 = 0-index [5][9]）に生バイト 0x81 を持たせる
+    snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
+    // 通常表示: input は論理値のまま 'a'
+    const normal = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: false } });
+    expect((normal.find("input.grid-input").element as HTMLInputElement).value).toBe("a");
+    // カナ表示: input も生バイト再解釈で 'a' 以外（span と食い違わない）
+    const kana = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true }
+    });
+    const v = (kana.find("input.grid-input").element as HTMLInputElement).value;
+    expect(v).not.toBe("a");
+    expect(v.trim()).not.toBe("");
+  });
+
   it("showShiftMarks で SO を { ・SI を } 表示する", () => {
     const snap = makeSnap();
     const r0 = snap.cells[0]!;
