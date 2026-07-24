@@ -1202,6 +1202,26 @@ describe("ScreenGrid", () => {
     expect(v.trim()).not.toBe("");
   });
 
+  it("一度フォーカスした input 欄も、blur 後の英カナ切替で休止カナ表示に切り替わる", async () => {
+    // blur で editFieldIndex を解除しないと「編集中」扱いが残り、カナ再解釈から除外され続ける
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 1, protected: false, hidden: false, numeric: false, mdt: false, value: "a" }
+    ];
+    const snap = makeSnap(fields);
+    snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: false },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const val = () => (input.element as HTMLInputElement).value;
+    await input.trigger("focus");
+    await input.trigger("blur"); // アウトフォーカス（英カナボタンへ移動した状態を模す）
+    await w.setProps({ katakanaView: true }); // 英カナボタンをクリック
+    expect(val()).not.toBe("a"); // 休止カナ表示へ切り替わる
+    w.unmount();
+  });
+
   it("showShiftMarks で SO を { ・SI を } 表示する", () => {
     const snap = makeSnap();
     const r0 = snap.cells[0]!;
