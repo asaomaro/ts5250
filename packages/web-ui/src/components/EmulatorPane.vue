@@ -239,8 +239,25 @@ function onLocal(action: LocalAction): void {
       const snap = snapshot.value;
       if (!snap) break;
       const dir = action.slice("word-".length) as Dir;
-      const next = nextWordStart(snap.cells, cursor.value, dir, snap.rows, snap.cols);
+      const grid = gridRef.value;
+      if (!grid) break;
+      // 語の判定は ScreenGrid の桁アクセサで行う（**未送信の入力値込み**。cells だけ見ると
+      // 欄に打った文字が語として見えず飛び越される）。コピー・ダブルクリック選択と同じ文字。
+      const next = nextWordStart(
+        (r, c) => grid.screenCharAt(r, c),
+        cursor.value,
+        dir,
+        snap.rows,
+        snap.cols
+      );
       onCursor(next.row, next.col);
+      // **DBCS 欄はここで caret を明示的に置く。** reconcileFocus は「既にフォーカス中の DBCS 欄」の
+      // caret を触らない（欄内の矢印移動は ScreenGrid が持つため）。頭出しは ScreenGrid が動かさない
+      // ので、そのままだと同じ欄の中では caret が居残ってしまう。
+      const land = fieldAt(next.row, next.col, snap.fields, snap.cols, snap.rows);
+      if (land && !land.protected && land.dbcsType) {
+        gridRef.value?.setDbcsCaretAtColumn(land.index, next.row, next.col);
+      }
       break;
     }
     case "home":
@@ -264,17 +281,35 @@ let selAnchor: { row: number; col: number } | null = null;
 /** 選択の移動端（アンカーの反対角）。ACS はカーソルを始点に置いたまま動かさないため、
  *  「次にどこから広げるか」をカーソルとは別に持つ必要がある。 */
 let selFocus: { row: number; col: number } | null = null;
+/**
+ * その矩形選択が**入力欄の caret から始まったか**。
+ *
+ * 選択中は free モード（欄を blur してペインへ focus）なので、そのままだと文字入力が
+ * 「保護領域への入力」になり、ペーストもカーソル桁への欄外ペーストになる。caret 発の選択では
+ * 文字入力・ペースト・コピーのあとに選択を解除して caret へ戻し、通常の入力状態に復帰させる。
+ */
+let selFromCaret = false;
 const ARROW_DIRS: Record<string, Dir> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
 
 function clearBlockSel(): void {
   selAnchor = null;
   selFocus = null;
+  selFromCaret = false;
   gridRef.value?.clearBlockSelection();
 }
 /** ScreenGrid 側で選択が解除された（コピー後・画面更新等）とき、キーボード選択アンカーもリセット。 */
 function onSelectionCleared(): void {
   selAnchor = null;
   selFocus = null;
+  selFromCaret = false;
+}
+
+/** 矩形選択を解除し、選択を始めたときの caret（＝カーソル桁の入力欄）へ戻す。
+ *  カーソルは選択中も始点から動かないので、その桁で reconcileFocus すれば元の状態に戻る。 */
+function restoreCaretFromBlockSel(): void {
+  const pos = { ...cursor.value };
+  clearBlockSel();
+  reconcileFocus(pos);
 }
 /** マウスドラッグで矩形選択が始まった（ScreenGrid）。ACS 同様、押下したセルにカーソルを置く。
  *  入力欄は ScreenGrid が blur 済みなので、reconcileFocus は通さない（通すと欄へ再フォーカスして選択が壊れる）。 */
@@ -304,6 +339,21 @@ function onPanePaste(ev: ClipboardEvent): void {
   if (!text) return;
   ev.preventDefault();
   gridRef.value?.pasteAt(cursor.value.row, cursor.value.col, text);
+  // caret 発の矩形選択中なら、貼り付けたあと選択を解除して caret へ戻す（＝通常のペースト後と同じ状態）。
+  // 先に貼ってから戻すこと: 先に focus すると ScreenGrid の編集モデルが貼る前の値のまま残る
+  if (selFromCaret) restoreCaretFromBlockSel();
+}
+
+/**
+ * 矩形選択中の Ctrl+C。コピー自体と選択解除は ScreenGrid（document の copy リスナー）が行うので、
+ * ここではそのあと caret へ戻すだけ。イベントは止めない（順序: ペイン → document）。
+ */
+function onPaneCopy(): void {
+  if (!selFromCaret) return;
+  const pos = { ...cursor.value };
+  selFromCaret = false;
+  // ScreenGrid が矩形をクリップボードへ載せ終えてから戻す（同じイベント配送中に focus を触らない）
+  queueMicrotask(() => reconcileFocus(pos));
 }
 
 /** 欄外で文字入力・Backspace・Delete が押されたか（ACS のメッセージ対象） */
@@ -333,10 +383,43 @@ function blockSelExtendTo(pos: { row: number; col: number }): void {
     c2: Math.max(selAnchor.col, pos.col)
   });
 }
+/** 入力欄に caret があるか（保護欄の readonly input も含む）。
+ *  caret は桁そのものではなく**桁と桁の境界**に立つため、選択の始点計算が欄外と異なる。 */
+function caretFocused(): boolean {
+  const active = document.activeElement;
+  return active instanceof HTMLInputElement && !!paneEl.value?.contains(active);
+}
+
+/**
+ * 入力欄の caret から矩形選択を始めるときの 1 押し目。
+ *
+ * **欄外のブロックカーソルは「桁」を指すが、入力欄の caret は「桁の境界」に立つ。**
+ * 境界のどちら側を選ぶかは矢印の向きで決まる——左なら caret の左隣の桁、右なら右隣の桁
+ * （＝報告しているカーソル桁）。カーソル桁を無条件に始点にすると、"12345" の 4 の右に
+ * caret がある状態の Shift+← で 5 まで選ばれてしまう。
+ *
+ * 1 押し目は端を動かさず、境界に接する 1 桁だけを選ぶ（2 押し目からは通常どおり伸びる）。
+ * 上下は境界と無関係なので従来どおりカーソル桁の列で 1 桁幅のまま行を伸ばす。
+ */
+function blockSelectFromCaret(ev: KeyboardEvent, rows: number, cols: number): boolean {
+  const { row, col } = cursor.value;
+  const leftward = ev.key === "ArrowLeft" || ev.key === "Home";
+  const start = { row, col: leftward ? Math.max(1, col - 1) : col };
+  selAnchor = start;
+  selFromCaret = true;
+  if (ev.key === "Home") blockSelExtendTo({ row, col: 1 });
+  else if (ev.key === "End") blockSelExtendTo({ row, col: cols });
+  else if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+    blockSelExtendTo(moveCursor(start, ARROW_DIRS[ev.key]!, rows, cols));
+  } else blockSelExtendTo(start);
+  return true;
+}
+
 /** Shift+矢印/Home/End によるブロック選択の拡張先を計算して適用する。 */
 function keyboardBlockSelect(ev: KeyboardEvent): boolean {
   const snap = snapshot.value;
   if (!snap) return false;
+  if (selAnchor === null && caretFocused()) return blockSelectFromCaret(ev, snap.rows, snap.cols);
   // 広げる基点は「前回の移動端」。カーソルは始点に固定されるので基点には使えない
   // （使うと Shift+→ を 2 回押しても常に始点の隣までしか伸びない）。
   const cur = selFocus ?? cursor.value;
@@ -382,6 +465,20 @@ function onKeydown(ev: KeyboardEvent): void {
   // 前の入力欄への移動なので、Tab は修飾に関わらず解除する。
   const cursorMove = ARROW_DIRS[ev.key] !== undefined || ev.key === "Home" || ev.key === "End";
   if (ev.key === "Escape" || ev.key === "Tab" || (!ev.shiftKey && cursorMove)) clearBlockSel();
+  // caret 発の矩形選択中の文字入力・Backspace・Delete は「カーソル位置での通常の入力」。
+  // 選択を解除して欄へ戻し、そのキーを欄へ渡す（欄の keydown が型検証・上書き/挿入を行う）。
+  // 合成イベントは bubbles:false——欄の @keydown は直接リスナーなので届き、ペインへは戻らない。
+  if (selFromCaret && isProtectedEdit(ev)) {
+    ev.preventDefault();
+    restoreCaretFromBlockSel();
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement && !el.readOnly) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ev.key, cancelable: true }));
+    } else {
+      notice.value = MSG_PROTECTED; // カーソルが欄上に無いなら従来どおり操作員メッセージ
+    }
+    return;
+  }
   // 欄外（保護領域・非入力セル）での文字入力・Backspace・Delete は ACS 同様に
   // 操作員メッセージを出す。入力欄にフォーカスがあるときは ScreenGrid が出す。
   if (!editableFocused() && isProtectedEdit(ev)) {
@@ -415,6 +512,7 @@ function onWheel(ev: WheelEvent): void {
     @keydown.capture="onKeydownCapture"
     @keydown="onKeydown"
     @paste="onPanePaste"
+    @copy="onPaneCopy"
     @mousedown="emit('focus')"
     @wheel="onWheel"
   >

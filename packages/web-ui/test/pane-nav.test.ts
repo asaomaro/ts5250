@@ -193,6 +193,130 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 
+  /**
+   * **入力欄の caret は「桁」ではなく「桁の境界」に立つ。**
+   * "12345" の 4 と 5 の間に caret があるとき、カーソル桁として報告しているのは 5 の桁。
+   * これを無条件に選択の始点にすると Shift+← で 5 まで選ばれてしまう（4 が右端になるのが正しい）。
+   * 1 押し目は境界に接する 1 桁だけを選ぶ（左＝caret の左隣・右＝右隣）。
+   */
+  describe("入力欄の caret から始める矩形選択（桁の境界）", () => {
+    const FIELD: Field = {
+      index: 1, row: 5, col: 10, length: 5,
+      protected: false, hidden: false, numeric: false, mdt: false, value: "12345"
+    };
+    /** 欄 (5,10) len5 の "12345" で、4 と 5 の間（＝カーソル桁は 5 の col14）に caret を置く */
+    async function paneWithCaretAfter4() {
+      seed([FIELD]);
+      const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+      await nextTick();
+      const input = w.find("input.grid-input");
+      (input.element as HTMLElement).focus();
+      (input.element as HTMLInputElement).setSelectionRange(4, 4);
+      await input.trigger("click");
+      await nextTick();
+      return { w, input };
+    }
+    const rect = (w: ReturnType<typeof mount>) => w.find(".rect-sel").attributes("style");
+
+    it("Shift+← は caret の左隣（4）だけを選ぶ（5 を含めない）", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await nextTick();
+      expect(rect(w)).toContain("left: 12ch"); // col13（'4'）
+      expect(rect(w)).toContain("width: 1ch");
+      w.unmount();
+    });
+
+    it("続けて Shift+← すると 3 まで伸びる（右端は 4 のまま）", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await w.find(".pane").trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await nextTick();
+      expect(rect(w)).toContain("left: 11ch"); // col12（'3'）
+      expect(rect(w)).toContain("width: 2ch"); // '3','4'
+      w.unmount();
+    });
+
+    it("Shift+→ は caret の右隣（5）だけを選ぶ", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+      await nextTick();
+      expect(rect(w)).toContain("left: 13ch"); // col14（'5'）
+      expect(rect(w)).toContain("width: 1ch");
+      w.unmount();
+    });
+
+    it("Shift+Home は caret の左側だけを選ぶ（1 桁目〜4）", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "Home", shiftKey: true });
+      await nextTick();
+      expect(rect(w)).toContain("left: 0ch");
+      expect(rect(w)).toContain("width: 13ch"); // col1..col13
+      w.unmount();
+    });
+
+    /**
+     * caret 発の矩形選択は free モード（欄を blur）で作るが、選択したまま文字入力・ペースト・
+     * コピーをしたら「カーソル位置での通常操作」を行い、選択を解除して caret へ戻す。
+     * 戻さないと、入力が「保護領域への入力」になって操作員メッセージが出ていた。
+     */
+    it("選択中の文字入力はカーソル桁への通常入力になり、選択解除＋caret 復帰する", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await nextTick();
+      expect(w.find(".rect-sel").exists()).toBe(true);
+      await w.find(".pane").trigger("keydown", { key: "X" });
+      await nextTick();
+      // '5' の桁（caret 位置）が X で上書きされる（"1234X"）
+      expect((input.element as HTMLInputElement).value).toBe("1234X");
+      expect(w.find(".rect-sel").exists()).toBe(false); // 選択は解除
+      expect(document.activeElement).toBe(input.element); // caret は欄へ戻る
+      expect(w.find(".notice").exists()).toBe(false); // 保護領域メッセージは出さない
+      w.unmount();
+    });
+
+    it("選択中のペーストはカーソル桁への通常ペーストになり、選択解除＋caret 復帰する", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await nextTick();
+      await w.find(".pane").trigger("paste", { clipboardData: { getData: () => "AB" } });
+      await nextTick();
+      expect((input.element as HTMLInputElement).value).toBe("1234A"); // col14 から上書き（欄は 5 桁）
+      expect(w.find(".rect-sel").exists()).toBe(false);
+      expect(document.activeElement).toBe(input.element);
+      w.unmount();
+    });
+
+    it("選択中のコピーは矩形をコピーし、そのあと caret へ戻る", async () => {
+      const { w, input } = await paneWithCaretAfter4();
+      await input.trigger("keydown", { key: "ArrowLeft", shiftKey: true });
+      await nextTick();
+      const cd = { setData: vi.fn() };
+      const ev = new Event("copy", { bubbles: true }) as Event & { clipboardData: typeof cd };
+      ev.clipboardData = cd;
+      w.find(".pane").element.dispatchEvent(ev);
+      await new Promise((r) => queueMicrotask(() => r(null)));
+      await nextTick();
+      expect(cd.setData).toHaveBeenCalledWith("text/plain", "4"); // 選択していた 1 桁
+      expect(w.find(".rect-sel").exists()).toBe(false);
+      expect(document.activeElement).toBe(input.element);
+      w.unmount();
+    });
+
+    it("欄外（ブロックカーソル）は従来どおり: カーソル桁を含んで左へ伸びる", async () => {
+      seed([]); // 入力欄なし → free モード。カーソルは (1,1)
+      const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+      await nextTick();
+      const pane = w.find(".pane");
+      (pane.element as HTMLElement).focus();
+      await pane.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+      await nextTick();
+      expect(rect(w)).toContain("left: 0ch"); // カーソル桁 col1 を含む
+      expect(rect(w)).toContain("width: 2ch"); // col1..col2
+      w.unmount();
+    });
+  });
+
   it("Shift+矢印で範囲を広げてもカーソルは動かない（ACS 相当。動くのは選択端だけ）", async () => {
     seed([]); // 入力欄なし → free モード。カーソルは (1,1)
     const w = mountPane();

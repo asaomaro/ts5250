@@ -78,13 +78,47 @@ export function buildReadScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
   const w = new ByteWriter();
   const cur = buf.rowColOf(buf.cursorAddr);
   w.u8(cur.row).u8(cur.col);
+  const ends = fieldEndAttrAddrs(buf);
   // 画面全域をスキャン。DBCS の lead は 2 バイト書き tail は 0 バイト（桁数は保たれる）。
-  for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec);
+  for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec, 0x40, ends);
   return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
 }
 
 /** READ SCREEN EXTENDED の行区切り（ACS 実機の応答を実測して判明） */
 const ROW_DELIMITER = 0xff;
+
+/** 通常属性（緑・下線等なし）。フィールド終端の閉じ属性に使う */
+const NORMAL_ATTR = 0x20;
+
+/**
+ * **フィールド終端に置く閉じ属性の位置**（READ SCREEN 系の応答用）。
+ *
+ * 5250 のフィールドは開始属性しか持たず、終端は**フォーマットテーブルの長さ**で決まる。
+ * 画面イメージ（READ SCREEN）にはフォーマットテーブルが乗らないので、そのまま送ると
+ * 「下線がどこで終わるか」がホストに伝わらない。ホストはヘルプウィンドウを出すとき、
+ * この応答をそのまま描き直して背面を再現するため（CLEAR UNIT ＋全画面 WTD）、閉じ属性が
+ * 無いと **背面の下線が入力範囲を越えて伸びる**——ACS は背面がヘルプ前とまったく変わらない
+ * のに対し、こちらだけ罫線が行末まで伸び次行へ回り込んでいた（実機の PDM F1）。
+ *
+ * そこで**空いている終端桁にだけ**通常属性を置いて送る。ホストの描き直しがそれを含むので
+ * 背面が元どおりに再現される。潰すと情報が壊れる桁（ホストが何か書いた桁・別の欄のデータ桁）は
+ * 対象外。画面バッファ自体は変更しない（送るイメージの中だけの補完）。
+ */
+function fieldEndAttrAddrs(buf: ScreenBuffer): ReadonlySet<number> {
+  const fields = buf.orderedFields();
+  const fieldData = new Set<number>();
+  for (const f of fields) {
+    for (let i = 0; i < f.length; i++) fieldData.add(f.startAddr + i);
+  }
+  const ends = new Set<number>();
+  for (const f of fields) {
+    const addr = f.startAddr + f.length;
+    if (addr >= buf.size || fieldData.has(addr)) continue;
+    if (buf.cellAt(addr) !== null) continue; // ホストが書いた桁は上書きしない
+    ends.add(addr);
+  }
+  return ends;
+}
 
 /**
  * READ SCREEN EXTENDED（opcode 0x08 / ESC 0x64）への応答レコードを組み立てる。
@@ -103,9 +137,10 @@ const ROW_DELIMITER = 0xff;
  */
 export function buildReadScreenExtendedResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
   const w = new ByteWriter();
+  const ends = fieldEndAttrAddrs(buf);
   for (let row = 0; row < buf.rows; row++) {
     const line = new ByteWriter();
-    for (let col = 0; col < buf.cols; col++) writeCell(line, buf, row * buf.cols + col, codec, 0x00);
+    for (let col = 0; col < buf.cols; col++) writeCell(line, buf, row * buf.cols + col, codec, 0x00, ends);
     const bytes = line.toUint8Array();
     let end = bytes.length;
     while (end > 0 && bytes[end - 1] === 0x00) end--; // 行末の未書き込み桁は送らない
@@ -126,17 +161,21 @@ function writeSba(w: ByteWriter, buf: ScreenBuffer, addr: number): void {
   w.u8(ORDER.SBA).u8(row).u8(col);
 }
 
-/** 1 桁ぶんを書く。empty は未書き込み桁に出すバイト（既定は空白 0x40） */
+/**
+ * 1 桁ぶんを書く。empty は未書き込み桁に出すバイト（既定は空白 0x40）。
+ * fieldEnds に載る空き桁にはフィールドの閉じ属性を出す（`fieldEndAttrAddrs` 参照）。
+ */
 function writeCell(
   w: ByteWriter,
   buf: ScreenBuffer,
   addr: number,
   codec: Codec,
-  empty = 0x40
+  empty = 0x40,
+  fieldEnds?: ReadonlySet<number>
 ): void {
   const cell = buf.cellAt(addr);
   if (cell === null) {
-    w.u8(empty);
+    w.u8(fieldEnds?.has(addr) === true ? NORMAL_ATTR : empty);
     return;
   }
   if (cell.type === "attr") {

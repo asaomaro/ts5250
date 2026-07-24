@@ -58,3 +58,41 @@ describe("DbcsCodec (ibm-1399)", () => {
     expect(codec.decode(raw)).toBe("A日B");
   });
 });
+
+/**
+ * **930/939 の DBCS 部は CCSID 300**（16684 を使うのは 1399 だけ）。
+ * ICU の ucm は 300 の 5 文字を Unicode 規格寄り（U+2212 等）に割り当てるが、
+ * ACS / jt400（ConvTable300）は全角形（U+FF0D 等）を返す。ACS と同じ結果を正とする。
+ *
+ * 見た目にも効く——全角形は East Asian Width が Fullwidth でどのフォントでも 2 桁だが、
+ * U+2212 等は Ambiguous で欧文等幅フォントが 1 桁に描き、桁がずれる
+ * （実機の PDM F1 ヘルプ「オプション−ヘルプ」で実測）。
+ */
+describe("CCSID 300 の Unicode 割り当て（930/939 の DBCS 部）", () => {
+  const cases: ReadonlyArray<readonly [number, number]> = [
+    [0x4260, 0xff0d], // －
+    [0x426a, 0xffe4], // ￤
+    [0x43a1, 0xff5e], // ～
+    [0x444a, 0x2015], // ―
+    [0x447c, 0x2225] // ‖
+  ];
+
+  for (const ccsid of [930, 939]) {
+    it(`CCSID ${ccsid} は ACS と同じ全角形にデコードする`, () => {
+      const c = codecForCcsid(ccsid);
+      for (const [pair, cp] of cases) {
+        expect(c.decodeDbcsPair!(pair >> 8, pair & 0xff)).toBe(cp);
+        // 逆方向は元から同じバイト対へ寄るので往復する
+        expect(c.encodeDbcsChar!(cp)).toBe(pair);
+      }
+    });
+  }
+
+  it("CCSID 1399（DBCS 部は 16684）は差し替えない", () => {
+    const c = codecForCcsid(1399);
+    expect(c.decodeDbcsPair!(0x42, 0x60)).toBe(0x2212);
+    expect(c.decodeDbcsPair!(0x43, 0xa1)).toBe(0x301c);
+    // 16684 には全角形が別の符号位置で存在する
+    expect(c.decodeDbcsPair!(0xe9, 0xf3)).toBe(0xff0d);
+  });
+});
