@@ -1,13 +1,32 @@
+import { CCSID300_TO_UNICODE } from "./ccsid300.js";
 import type { SbcsTable, StatefulTable } from "./table-types.js";
 import { ibm37 } from "./tables/ibm37.js";
 import { ibm273 } from "./tables/ibm273.js";
-import { ibm930 } from "./tables/ibm930.js";
-import { ibm939 } from "./tables/ibm939.js";
+import { ibm930 as ibm930Ucm } from "./tables/ibm930.js";
+import { ibm939 as ibm939Ucm } from "./tables/ibm939.js";
 import { ibm1399 } from "./tables/ibm1399.js";
 
 /** SO（Shift Out・DBCS モードへ）/ SI（Shift In・SBCS モードへ）制御文字 */
 export const SO = 0x0e;
 export const SI = 0x0f;
+
+/**
+ * **930/939 の DBCS 部は CCSID 300**（16684 を使うのは 1399 だけ）。ICU の ucm は 300 の
+ * 5 文字を Unicode 規格寄り（U+2212 等）に割り当てるが、ACS / jt400 は全角形（U+FF0D 等）を
+ * 返す。ACS と同じ結果を正とするので、デコード側だけ `ccsid300.ts` の割り当てに寄せる。
+ *
+ * 逆方向は ucm の時点でどちらの符号位置からも同じバイト対へ寄っている（往復は変わらない）ため
+ * 差し替えない。表示の実害は PDM の F1 ヘルプ「オプション−ヘルプ」で実測——U+2212 は East Asian
+ * Width が Ambiguous で欧文等幅フォントが 1 桁に描き、以降の桁が左へずれる。
+ */
+function withCcsid300Dbcs(table: StatefulTable): StatefulTable {
+  const ebcdicToUnicode = new Map(table.dbcs.ebcdicToUnicode);
+  for (const [bytes, cp] of CCSID300_TO_UNICODE) ebcdicToUnicode.set(bytes, cp);
+  return { ...table, dbcs: { ...table.dbcs, ebcdicToUnicode } };
+}
+
+const ibm930: StatefulTable = withCcsid300Dbcs(ibm930Ucm);
+const ibm939: StatefulTable = withCcsid300Dbcs(ibm939Ucm);
 
 /** SBCS / DBCS 共通のコーデックインターフェース */
 export interface Codec {

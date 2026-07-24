@@ -7,6 +7,7 @@
  * 参照: JTOpen 本体の ConvTable16684 / ConvTable300 に対応する
  *       （jtopenlite は GRAPHIC を UTF-16 の CCSID でしか扱わず、純 DBCS を実装していない）。
  */
+import { CCSID300_FROM_UNICODE, CCSID300_TO_UNICODE } from "./ccsid300.js";
 import { ibm1399 } from "./tables/ibm1399.js";
 import type { DbcsPart, PureDbcsTable } from "./table-types.js";
 import type { Codec } from "./codec.js";
@@ -27,39 +28,12 @@ export const ibm16684: PureDbcsTable = {
 };
 
 /**
- * CCSID 300 と 16684 の差分。
+ * CCSID 300 と 16684 の差分は `ccsid300.ts`（混在 CCSID 側と共用の単一の出所）。
  *
  * JTOpen 本体は 300 の表を独立生成せず `ConvTable300 extends ConvTable16684` として
  * **差分だけを当てる**。理由も原典のコメントにある——独立生成すると
  * 「マップされなくなるコードポイントが数千個」出て、既存アプリの挙動が変わるため。
- *
- * 差分の中身は日本語エンコーディングで有名な**波ダッシュ・全角チルダ問題**そのもの。
- * 16684 は Unicode 規格寄り、300 は既存クライアント（ACS / jt400）互換の割り当てになる。
- *
- * 本プロジェクトは ACS の代替であり、**ACS と同じ結果を返すことを正とする**ため
- * 規格ではなく原典に合わせる。
  */
-const CCSID300_TO_UNICODE: ReadonlyArray<readonly [number, number]> = [
-  [0x4260, 0xff0d], // 16684: U+2212 MINUS SIGN          → U+FF0D FULLWIDTH HYPHEN-MINUS
-  [0x426a, 0xffe4], // 16684: U+00A6 BROKEN BAR          → U+FFE4 FULLWIDTH BROKEN BAR
-  [0x43a1, 0xff5e], // 16684: U+301C WAVE DASH           → U+FF5E FULLWIDTH TILDE
-  [0x444a, 0x2015], // 16684: U+2014 EM DASH             → U+2015 HORIZONTAL BAR
-  [0x447c, 0x2225] // 16684: U+2016 DOUBLE VERTICAL LINE → U+2225 PARALLEL TO
-];
-
-/** 逆方向（Unicode → バイト）の差分。原典 ConvTable300 の fromUnicodeArray300_ に対応 */
-const CCSID300_FROM_UNICODE: ReadonlyArray<readonly [number, number]> = [
-  [0x2015, 0x444a],
-  [0x2225, 0x447c],
-  [0x525d, 0x5481],
-  [0x5c5b, 0x5443],
-  [0x7c1e, 0x54ca],
-  [0x87ec, 0x53e8],
-  [0x9a52, 0x53da],
-  [0xff0d, 0x4260],
-  [0xff5e, 0x43a1],
-  [0xffe4, 0x426a]
-];
 
 function applyDiff(
   base: DbcsPart,

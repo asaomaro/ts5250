@@ -308,6 +308,40 @@ const FULLWIDTH_RANGES: readonly (readonly [number, number])[] = [
   // 注: U+FFFD は SBCS の表示不能バイト（センチネル）に使うため全角にしない（narrow のまま）。
 ];
 
+/**
+ * **どのフォントでも確実に 2 桁で描かれる**範囲（East Asian Width の Wide/Fullwidth のみ）。
+ * `FULLWIDTH_RANGES` と違い Ambiguous・私用外字は含めない。
+ *
+ * DBCS の桁数（2 桁）は `isFullWidth` が決めるが、**実際に何桁ぶんの幅で描かれるかはフォント次第**。
+ * Ambiguous（U+2212 '−'・U+2010 '‐'・罫線・ギリシャ等）は欧文等幅フォントが 1 桁で描くため、
+ * 素のテキストとして流すと以降の桁が左へずれる。描画側はこの判定で「幅を保証する箱」に入れる。
+ */
+const CERTAIN_WIDE_RANGES: readonly (readonly [number, number])[] = [
+  [0x1100, 0x115f], // ハングル字母
+  [0x2e80, 0x303e], // CJK 部首・記号
+  [0x3041, 0x33ff], // ひらがな・カタカナ・CJK 記号
+  [0x3400, 0x4dbf], // CJK 拡張A
+  [0x4e00, 0x9fff], // CJK 統合漢字
+  [0xa000, 0xa4cf], // イ文字
+  [0xac00, 0xd7a3], // ハングル音節
+  [0xf900, 0xfaff], // CJK 互換漢字
+  [0xfe10, 0xfe19], // 縦書き用約物
+  [0xfe30, 0xfe6f], // CJK 互換形・小字形
+  [0xff00, 0xff60], // 全角英数記号（半角カナ U+FF61–FF9F は含めない）
+  [0xffe0, 0xffe6] // 全角記号（￠￡￢￣￤￥）
+];
+
+/** その 1 文字がフォントに依らず 2 桁幅で描かれるか（描画側の幅保証の要否判定に使う）。 */
+export function isCertainWideGlyph(ch: string): boolean {
+  const cp = ch.codePointAt(0);
+  if (cp === undefined) return false;
+  for (const [lo, hi] of CERTAIN_WIDE_RANGES) {
+    if (cp < lo) break; // 昇順なので以降は該当しない
+    if (cp <= hi) return true;
+  }
+  return false;
+}
+
 /** 全角判定（East Asian Width の Wide/Fullwidth/Ambiguous ＋私用外字。DBCS 相当の判別に使う）。 */
 export function isFullWidth(ch: string): boolean {
   const cp = ch.codePointAt(0);

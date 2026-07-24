@@ -20,6 +20,7 @@ import {
   dbcsViewLayout,
   columnViewLayout,
   isFullWidth,
+  isCertainWideGlyph,
   type DbcsViewLayout,
   type RejectReason
 } from "../composables/fieldValidate.js";
@@ -171,7 +172,8 @@ const selectionFields = computed<GuiSelectionLike[]>(
 );
 
 interface Segment {
-  kind: "text" | "input";
+  /** text=素のラン / input=入力欄 / wide=幅を保証する DBCS 1 文字（下記 wideBox 参照） */
+  kind: "text" | "input" | "wide";
   text: string;
   cls: string;
   field?: Field;
@@ -343,8 +345,17 @@ const rows = computed<Segment[][]>(() => {
       // 桁は「全角＝半角×2」の等幅前提で合う（--screen-mono はこれを満たす日本語等幅を並べ、
       // 総称 monospace も 1:2）。入力欄も同じ前提でプレーン文字列を出しており、全角だけ
       // 1 文字ずつ箱に入れても揃う範囲は変わらない。ラン化して DOM を減らす。
+      //
+      // **ただし East Asian Width が Ambiguous な DBCS 文字（U+2212 '−'・U+2010 '‐'・罫線・
+      // ギリシャ等）は欧文等幅フォントが 1 桁で描く**ため、そのままランに混ぜると以降の桁が
+      // 左へずれる（PDM の F1 ヘルプ「オプション−ヘルプ」で実測）。この種の文字だけ 2ch 幅の
+      // 箱（wide セグメント）に入れて、フォントに依らず 2 桁を占めさせる。
       const cls = cellClass(row[c]!);
       let text = "";
+      const flushText = (): void => {
+        if (text !== "") segs.push({ kind: "text", text, cls });
+        text = "";
+      };
       while (c < snap.cols && !fieldAt.has(r * snap.cols + c)) {
         const cellHere = row[c]!;
         if (cellHere.kind === "dbcs-tail") {
@@ -352,7 +363,14 @@ const rows = computed<Segment[][]>(() => {
           continue;
         }
         if (cellClass(cellHere) !== cls) break;
-        text += displayChar(cellHere);
+        const shown = displayChar(cellHere);
+        if (cellHere.kind === "dbcs-lead" && !isCertainWideGlyph(shown)) {
+          flushText();
+          segs.push({ kind: "wide", text: shown, cls });
+          c++;
+          continue;
+        }
+        text += shown;
         c++;
       }
       segs.push({ kind: "text", text, cls });
@@ -421,7 +439,7 @@ function logicalFromCells(f: Field): string {
  *  SO/SI は実位置のまま（空 {} や不整合 { だけ・} だけ も保持）、SBCS は displayChar で
  *  カナ再解釈、全角は 1 文字（2 桁）で採用する。span（displayChar）と完全に一致する。
  *  純論理値からの再構成（dbcsViewLayout）と違い SO/SI を落とさない。 */
-function restViewFromCells(f: Field): string {
+function restViewFromCells(f: Field, shiftMark?: string): string {
   let v = "";
   for (const sl of slicesOf(f)) {
     const row = props.snapshot.cells[sl.row - 1];
@@ -436,6 +454,11 @@ function restViewFromCells(f: Field): string {
         continue;
       }
       if (cell.kind === "dbcs-tail") continue; // lead が 2 桁ぶんを担う
+      // shiftMark 指定時は SO/SI をその印にする（コピー経路が制御桁を識別するため。SHIFT_MARK 参照）
+      if (shiftMark !== undefined && (cell.kind === "so" || cell.kind === "si")) {
+        v += shiftMark;
+        continue;
+      }
       // displayChar が SO/SI マーク・カナ再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
       v += displayChar(cell);
     }
@@ -672,6 +695,41 @@ function absorbDbcs(chars: string[], budget: number, cursor: number): string[] |
   return out;
 }
 
+/**
+ * **上書きで変わったバイト長（＝桁数）を元へ戻す。後続の桁を動かさないための調整（ACS 相当）。**
+ *
+ * 全角は SO/SI 込みで最大 4 桁を占め、半角で潰せば逆に桁が余る。1 文字を置換して終わりにすると
+ * 欄のバイト長が変わり、離れた桁の文字まで左右へずれる。そこで置換後、**バイト長が元と同じに
+ * 戻るまで**「後続を 1 文字食う」「空白を 1 桁足す」を `at` の直後で繰り返す。
+ * 潰れかけた全角は消え、空いた桁は空白になり、その先の文字は元の桁に残る。
+ *
+ *   " あいう    #" の先頭桁へ全角 `１` → `{１} {う}    #`（`あ` と `い` が潰れ `う` は元の桁）
+ *   "あいうえお    #" を半角空白で潰す → 全角が消えても後ろの `#` は動かない
+ *   `{１}    AAA` の先頭桁へ半角 `AAA` → 全角は消えるが `AAA` は元の桁のまま
+ *
+ * 空白を足すと全角ランが分断されて **行き過ぎる**（SO/SI が 1 組増える）ことがある。
+ * そのときは先に後続を 1 文字食ってから足す（上の `{１} {う}` はこの経路で決まる）。
+ * 打鍵（`dbcsType`）とペースト（`overwriteInto`）で同じ規則を使う。
+ */
+function keepByteLength(chars: string[], at: number, before: number, budget: number): void {
+  const next = at + 1;
+  // 1 回で「食う」か「足す」のどちらかが進むので、最大でも欄の桁数ぶんで収束する
+  for (let guard = chars.length + budget; guard > 0; guard--) {
+    const len = dbcsByteLength(chars.join(""));
+    if (len === before) return;
+    if (len < before) {
+      const trial = [...chars];
+      trial.splice(next, 0, " ");
+      if (dbcsByteLength(trial.join("")) <= before) {
+        chars.splice(next, 0, " ");
+        continue;
+      }
+    }
+    if (chars.length <= next) return; // 後続が無い＝これ以上は調整できない
+    chars.splice(next, 1);
+  }
+}
+
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
 function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
   const budget = visLen(f);
@@ -679,13 +737,9 @@ function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
   } else {
-    // 上書きは「新しい文字が占める桁ぶん後続を食う」。全角は SO/SI 込みで最大 4 桁を占めるため、
-    // 1 文字置換するだけだとバイト長が増えて後続が右へずれ、挿入に見えてしまう。
     const before = dbcsByteLength(chars.join(""));
     chars[e.cursor] = ch;
-    while (dbcsByteLength(chars.join("")) > before && chars.length > e.cursor + 1) {
-      chars.splice(e.cursor + 1, 1);
-    }
+    keepByteLength(chars, e.cursor, before, budget); // 上書きで桁を動かさない
   }
   const fit = absorbDbcs(chars, budget, e.cursor + 1);
   if (!fit) return undefined;
@@ -1027,8 +1081,8 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     sync(el, f);
     return;
   }
-  // Ctrl+←/→（語頭ジャンプ）・Alt+←/→（ペイン移動）は欄内で消費せず、
-  // ペイン keymap／App グローバルへ委譲する（preventDefault しない）。
+  // Ctrl+矢印（語頭ジャンプ）・Alt+←/→（ペイン移動）は欄内で消費せず、ペイン keymap／
+  // App のグローバルへ委譲する（ペイン側が preventDefault してブラウザ既定より優先する）。
   if (ev.key === "ArrowLeft" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (edit.cursor > 0) {
@@ -1331,7 +1385,11 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
       continue;
     }
     while (out.length < i) out.push(" ");
+    // 打鍵と同じ規則で上書きする: 桁数が変わったぶんは直後で調整し、後続の桁を動かさない
+    // （全角の上に半角を貼ると 2 桁が 1 桁になり、その先の文字まで左へ詰まっていた）
+    const before = dbcsByteLength(out.join(""));
     out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
+    if (i < out.length - 1) keepByteLength(out, i, before, budget);
     i++;
   }
   while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
@@ -1411,8 +1469,23 @@ function bandEndCol(field: Field, row: number, col: number): number | undefined 
  *  桁がずれない。行またぎ欄では複数行が同じ欄の別オフセットへ落ちる。 */
 function pasteMultiline(f: Field, text: string, el: HTMLInputElement): void {
   const { cols, rows } = props.snapshot;
-  const startOffset = sliceOffsetOf(f, el) + (el.selectionStart ?? 0);
+  // native caret は DBCS 欄では**列ビュー**の位置。開始桁は桁で引くので、桁オフセットへ直す
+  const caret = sliceOffsetOf(f, el) + (el.selectionStart ?? 0);
+  const startOffset = columnOffsetOfCaret(f, caret);
   pasteFrom(posOfOffset(f, startOffset, cols, rows), text, { f, el, startOffset });
+}
+
+/** DBCS 欄: 欄内の表示桁オフセット → 論理インデックス（全角 2 桁・SO/SI の 1 桁を吸収）。SBCS はそのまま。 */
+function logicalOffsetOfColumn(f: Field, colOffset: number): number {
+  if (!isDbcsEdit(f)) return colOffset;
+  const lay = dbcsLayoutOf(f);
+  return lay.logicalAfter(lay.viewAtColumn(colOffset));
+}
+
+/** DBCS 欄: 欄内の列ビュー caret → 表示桁オフセット。SBCS はそのまま。 */
+function columnOffsetOfCaret(f: Field, viewCaret: number): number {
+  if (!isDbcsEdit(f)) return viewCaret;
+  return dbcsLayoutOf(f).columnsBefore(viewCaret);
 }
 
 /**
@@ -1448,7 +1521,11 @@ function pasteFrom(
         if (end === undefined) break;
         const width = end - from + 1;
         const e = targets.get(t.field.index) ?? { field: t.field, parts: [] };
-        e.parts.push({ offset: caretInField(t.field, row, from, cols, rows), line: rest.slice(0, width) });
+        // 宛先は画面桁で引くが、書き込みは論理文字の配列で行う。DBCS 欄では両者が一致しない
+        // （全角=2 桁・SO/SI=1 桁で論理 0 文字）ので、桁 → 論理インデックスへ変換する。
+        // 変換しないと、欄の先頭にある全角のぶんだけ貼り付け位置が右へずれる。
+        const offset = logicalOffsetOfColumn(t.field, caretInField(t.field, row, from, cols, rows));
+        e.parts.push({ offset, line: rest.slice(0, width) });
         targets.set(t.field.index, e);
         rest = rest.slice(width);
         col = end + 1; // 同じ行の右隣を続けて探す
@@ -1494,9 +1571,20 @@ function pasteFrom(
       // フォーカス欄は edit モデルを置換して sync。カーソルはペースト開始桁のまま動かさない（ACS）。
       // initEdit は insertMode:false を返す。そのまま使うと直後の sync が
       // insertMode.value を false に戻し、ペーストのたびに挿入モードが解除される
-      edit = isDbcsEdit(f)
-        ? { chars: padDbcs(f, [...val]), cursor: startOffset, insertMode: insertMode.value }
-        : { ...initEdit(val, visLen(f), startOffset), insertMode: insertMode.value };
+      if (isDbcsEdit(f)) {
+        // **開始桁は「桁」、edit.cursor は「論理インデックス」。** 貼った後の値で引き直す
+        // （貼り付けで全角の並びが変わり得るため、貼る前のレイアウトでは桁が合わない）。
+        // 変換せずに桁をそのまま入れると、カーソルが貼り付けた文字列の末尾側へ流れる。
+        const chars = padDbcs(f, [...val]);
+        const lay = dbcsViewLayout(chars.join(""), soMark(), siMark());
+        edit = {
+          chars,
+          cursor: lay.logicalAfter(lay.viewAtColumn(startOffset)),
+          insertMode: insertMode.value
+        };
+      } else {
+        edit = { ...initEdit(val, visLen(f), startOffset), insertMode: insertMode.value };
+      }
       editFieldIndex = f.index;
       sync(el, f);
     } else {
@@ -1760,53 +1848,131 @@ function onGridDragUp(): void {
   dragAnchor = null;
 }
 
-/** 選択矩形をコピー用テキストへ。各行=矩形の桁範囲、行は改行区切り。全角後半・SO/SI を処理。 */
-function copyCharOf(cell: Cell): string {
+/**
+ * コピー経路が SO/SI 桁を識別するための内部マーク。表示用の `{ }`／空白と違い、
+ * **用途ごとに何を返すかを呼び出し側が決められる**ようにするための印。クリップボードにも編集値にも出さない。
+ *
+ * 制御文字を使う（私用領域は不可）。列ビューは桁数を `isFullWidth` で数えるが、
+ * **私用領域（外字）は全角扱い**なので、マークが 2 桁に数えられて桁がずれる。
+ */
+const SHIFT_MARK = "\u0001";
+
+/** セル 1 桁の文字。shift = SO/SI 桁に返す文字（語判定は " "＝区切り、クリップボードは ""＝落とす）。 */
+function copyCharOf(cell: Cell, shift: string): string {
   if (cell.kind === "dbcs-tail") return ""; // 全角は lead で 1 文字（tail は畳む）
-  if (cell.kind === "so" || cell.kind === "si") return " "; // 制御桁は空白として写す
-  if (props.katakanaView && cell.kind === "sbcs" && cell.rawByte !== undefined) return katakanaChar(cell.rawByte);
-  return cell.char === "" ? " " : cell.char;
+  if (cell.kind === "so" || cell.kind === "si") return shift;
+  // 属性桁（色制御）・非表示桁は core が char=" " にしている＝空白 1 桁として写る（画面と同じ）
+  if (props.katakanaView && cell.kind === "sbcs" && cell.rawByte !== undefined) {
+    return displayText(katakanaChar(cell.rawByte));
+  }
+  // displayText: 表示できないバイト（U+FFFD）は画面と同じく空白にする（生の U+FFFD を載せない）
+  return cell.char === "" ? " " : displayText(cell.char);
 }
-/** 画面桁 (row,col) の文字。入力欄の桁は「現在の入力値」を優先する。
- *  cells はホストが描いた内容しか持たないため、これを見ないと未送信の入力値がコピーされない。 */
-function charAtForCopy(row: number, col: number): string {
+
+/**
+ * 入力欄の列ビュー（コピー用）。SO/SI 桁は SHIFT_MARK にして識別できるようにする
+ * （`displayValue` をそのまま使うと SO/SI が表示マーク `{ }` や空白になって区別できない）。
+ *
+ * **画面に出ていない文字はクリップボードにも載せない。** 欄の値には埋め込み属性（欄途中の色替え）や
+ * 表示できないバイトが**私用面のセンチネル**として入っており、描画側は `stripSentinels`＋`displayText`
+ * で空白にしている。同じ正規化をしないと、私用面の文字がそのままクリップボードへ乗るうえ、
+ * `isFullWidth` が私用面を全角と見なすため桁の数え方まで狂う（桁がずれて文字が落ちる）。
+ * センチネルを外すのは SBCS 欄だけ——DBCS 欄の値に入る私用面は**外字**（表示される実データ）で、
+ * SBCS 表には私用面へのマッピングが無いため、こちらで取り違える心配は無い。
+ */
+function copyViewOf(f: Field): string {
+  if (f.hidden) return maskSafe(f, logicalValue(f));
+  if (f.dbcsType) {
+    const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
+    const view = resting || katakanaViewActive(f)
+      ? restViewFromCells(f, SHIFT_MARK)
+      : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), SHIFT_MARK, SHIFT_MARK).view;
+    return displayText(view); // 外字は残す（センチネルは DBCS 欄の値には入らない）
+  }
+  return displayText(stripSentinels(inputValue(f)));
+}
+
+/**
+ * 画面桁 (row,col) の文字。入力欄の桁は「現在の入力値」を優先する
+ * （cells はホストが描いた内容しか持たないため、見ないと未送信の入力値が拾えない）。
+ * shift は SO/SI 桁に返す文字（`charAtForCopy` / `charAtForClipboard` 参照）。
+ */
+function columnCharAt(row: number, col: number, shift: string): string {
   const f = fieldAt(row, col, props.snapshot.fields, props.snapshot.cols, props.snapshot.rows);
   if (f && !f.protected) {
     // 欄の表示（列ビュー/パディング込み）から該当桁を取り出す。DBCS は全角が 2 桁を占めるため
     // 桁で数える。hidden 欄は伏せ字がそのまま出る（実値は漏らさない）。
-    const view = displayValue(f);
+    const view = copyViewOf(f);
     const offset = offsetOfPos(f, row, col, props.snapshot.cols, props.snapshot.rows);
     if (offset === undefined) return " ";
     let c = 0;
     for (const ch of view) {
       const w = isFullWidth(ch) ? 2 : 1;
-      if (offset < c + w) return offset === c ? ch : ""; // 全角の後半桁は畳む（lead で 1 文字）
+      // 全角の後半桁は畳む（lead で 1 文字）
+      if (offset < c + w) return offset === c ? (ch === SHIFT_MARK ? shift : ch) : "";
       c += w;
     }
     return " ";
   }
   const cell = props.snapshot.cells[row - 1]?.[col - 1];
-  return cell ? copyCharOf(cell) : " ";
+  return cell ? copyCharOf(cell, shift) : " ";
+}
+
+/** 語の判定用（頭出し・ダブルクリック選択）。**SO/SI は空白＝語の区切り**として扱う。 */
+function charAtForCopy(row: number, col: number): string {
+  return columnCharAt(row, col, " ");
+}
+
+/**
+ * クリップボード用。**SO/SI 桁は落とす**（桁を持たせない）。
+ *
+ * SO/SI は DBCS のデータではなく構造で、貼り付け先の欄が全角ランに合わせて付け直す。
+ * 空白として写すと、貼り付けたときに「元の SO/SI ぶんの空白」＋「付け直された SO/SI」で
+ * 桁が二重になる。`{ }` 表示（showShiftMarks）中は、その表示マークがそのまま文字として
+ * クリップボードへ乗ってしまう問題も同時に消える。
+ */
+function charAtForClipboard(row: number, col: number): string {
+  return columnCharAt(row, col, "");
 }
 
 function rectText(): string {
   const s = rectSel.value;
   if (!s) return "";
-  const raw: string[] = [];
+  const lines: string[] = [];
   for (let r = s.r1; r <= s.r2; r++) {
     let line = "";
-    for (let c = s.c1; c <= s.c2; c++) line += charAtForCopy(r, c);
-    raw.push(line);
+    for (let c = s.c1; c <= s.c2; c++) {
+      const ch = charAtForClipboard(r, c);
+      /**
+       * **全角の片側しか矩形に入っていない桁は、何もコピーしない**（空白も置かない）。
+       * 矩形の端が全角の途中を切る場合で、境目は 2 通りある:
+       *   - 右端が前半桁（lead）… 後半桁が範囲外。そのまま出すと 1 桁の選択に 2 桁ぶんが乗る
+       *   - 左端が後半桁（tail）… 前半桁が範囲外。文字は前半が持つので出す物が無い
+       * 後半桁の判定に語判定用アクセサを使うのは、クリップボード用が SO/SI にも `""` を返すため。
+       */
+      const isDbcsTail = charAtForCopy(r, c) === "";
+      if ((c === s.c2 && isFullWidth(ch)) || (c === s.c1 && isDbcsTail)) continue;
+      line += ch;
+    }
+    lines.push(line);
   }
-  const trimmed = raw.map((line) => line.replace(/\s+$/, "")); // 各行末尾の空白は落とす（矩形右端の余白）
-  // **全て空白でトリム後が空になる選択も、選んだ空白をそのままコピーする。**
-  // 空文字を setData すると空白コピーが不発（クリップボードに載らない）になるため。
-  if (trimmed.every((line) => line === "")) return raw.join("\n");
-  return trimmed.join("\n");
+  /**
+   * **選んだ矩形をそのまま（末尾の空白も落とさずに）コピーする**——ACS と同じ。
+   *
+   * ブロックコピーの空白は「余白」ではなくデータである。貼り付け先では上書きする桁を決めるので、
+   * 落とすとその桁だけ元の文字が残る（"12345" へ 4 桁の "ABC␣" を貼ると "ABC 5" ではなく
+   * "ABC45" になった）。桁を揃えて貼れることがブロック選択の目的なので、幅は選択のまま保つ。
+   *
+   * ただし**全行が空になったら空文字を返す**（全角の半分だけ・SO/SI だけを選んだ場合）。
+   * 呼び出し側はクリップボードに触らない＝**何もコピーしない**。改行だけを載せない。
+   */
+  return lines.every((line) => line === "") ? "" : lines.join("\n");
 }
 function onDocCopy(ev: ClipboardEvent): void {
   if (!rectSel.value) return;
-  ev.clipboardData?.setData("text/plain", rectText());
+  const text = rectText();
+  // 空（写す物が無い選択）ならクリップボードを書き換えない。既定コピーは止める（選択は DOM に無い）
+  if (text !== "") ev.clipboardData?.setData("text/plain", text);
   ev.preventDefault();
   clearRectSel(); // コピー後は範囲選択を解除する
 }
@@ -1955,7 +2121,14 @@ function pasteAt(row: number, col: number, text: string): void {
   pasteFrom({ row, col }, text);
 }
 
-defineExpose({ setBlockSelection, clearBlockSelection: clearRectSel, setDbcsCaretAtColumn, pasteAt });
+defineExpose({
+  setBlockSelection,
+  clearBlockSelection: clearRectSel,
+  setDbcsCaretAtColumn,
+  pasteAt,
+  // 画面桁の表示文字（未送信の入力値込み）。ペインの頭出し（Ctrl+矢印）が語の判定に使う
+  screenCharAt: charAtForCopy
+});
 
 // 画面が更新されたら矩形選択は破棄する
 watch(
@@ -2075,6 +2248,13 @@ onBeforeUnmount(() => {
             :class="run.cls"
           >{{ run.text }}</span></span>
         </span>
+        <!-- 幅が Ambiguous な DBCS 1 文字。2ch の箱に入れてフォントに依らず 2 桁を占めさせる
+             （属性クラスも付けるので、反転の背景も下線も 2 桁ぶん出る） -->
+        <span
+          v-else-if="seg.kind === 'wide'"
+          class="grid-span wide-cell"
+          :class="seg.cls"
+        >{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
           v-for="(p, j) in linkParts(seg.text)"
           :key="j"
@@ -2153,6 +2333,15 @@ onBeforeUnmount(() => {
 }
 .grid-span {
   text-shadow: var(--t-glow) currentColor;
+}
+/* East Asian Width が Ambiguous な DBCS 文字（'−' '‐' 罫線 等）の桁幅を保証する箱。
+   欧文等幅フォントはこれらを 1 桁で描くため、素のテキストのままだと以降の桁が左へずれる。
+   inline-block は text-decoration を親から継がないので、下線等は seg.cls を自分に付けて出す。 */
+.wide-cell {
+  display: inline-block;
+  width: 2ch;
+  text-align: center;
+  vertical-align: baseline;
 }
 /* 暗い背景に明るい文字を置くと既定のサブピクセル描画で太く・にじんで見える。
    グレースケール描画にすると輪郭が締まる */

@@ -742,6 +742,37 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  /**
+   * **矩形の末尾の空白はデータ。落とすと貼り付け先の桁が上書きされない。**
+   * "ABC␣"（4 桁）をコピーして "12345" の先頭へ貼ると ACS は "ABC 5" になる。
+   * 末尾をトリムしていたため "ABC" しかクリップボードに載らず "ABC45" になっていた。
+   */
+  it("矩形の末尾の空白も落とさずコピーし、貼り付け先の桁を上書きできる", async () => {
+    const field: Field = {
+      index: 1, row: 10, col: 5, length: 5,
+      protected: false, hidden: false, numeric: false, mdt: false, value: "12345"
+    };
+    const snapshot = makeSnap([field]);
+    [..."ABC"].forEach((ch, i) => (snapshot.cells[2]![6 + i] = cell(ch))); // row3 col7..9 = ABC（col10 は空白）
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+
+    // row3 の col7..10（4 桁目は空白）を矩形選択してコピー
+    (w.vm as unknown as { setBlockSelection: (r: unknown) => void }).setBlockSelection({ r1: 3, c1: 7, r2: 3, c2: 10 });
+    const cd = { setData: vi.fn() };
+    const ev = new Event("copy") as Event & { clipboardData: typeof cd };
+    ev.clipboardData = cd;
+    document.dispatchEvent(ev);
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "ABC ");
+
+    // そのままフィールド先頭へ貼ると 4 桁目の '4' が空白で上書きされる
+    const copied = cd.setData.mock.calls[0]![1] as string;
+    (w.vm as unknown as { pasteAt: (r: number, c: number, t: string) => void }).pasteAt(10, 5, copied);
+    const edits = (w.emitted("edit") ?? []) as [number, string][];
+    expect(edits[edits.length - 1]).toEqual([1, "ABC 5"]);
+    w.unmount();
+  });
+
   it("空白だけの矩形選択も空白をコピーする（空でコピー不発にしない）", async () => {
     const snapshot = makeSnap([]); // 全セル空白
     const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
