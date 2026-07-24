@@ -1193,6 +1193,15 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
   const el = ev.target as HTMLInputElement;
+  // **スライス間の一時 blur（syncingFocus）以外は編集状態を解除する。**
+  // これをしないと、一度フォーカスした欄が blur 後も editFieldIndex に残って「編集中」扱いのままになり、
+  // 休止表示のカナ再解釈（usesKatakanaCells / dbcsRestLayout）から除外され続ける
+  // （アウトフォーカスで英カナ切替を押しても切り替わらない）。ここで解除すると休止表示（カナ含む）に戻る。
+  // el.value を組む前に解除するので、この blur 直後から休止のカナ表示が反映される。
+  if (!syncingFocus) {
+    edit = undefined;
+    editFieldIndex = -1;
+  }
   el.value = displayText(stripSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
   // 行の v-memo に renderTick を含めてあるので、ここで ++ すると当該行が 1 度再描画される。
