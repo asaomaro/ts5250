@@ -1222,6 +1222,48 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("未編集 SBCS 欄はフォーカスしてもカナ維持、打鍵で英字に戻る", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "ab" }
+    ];
+    const snap = makeSnap(fields);
+    snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
+    snap.cells[5]![10] = { ...cell("b"), rawByte: 0x82 };
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const val = () => (input.element as HTMLInputElement).value;
+    expect(val()).not.toContain("a"); // 休止カナ
+    await input.trigger("focus");
+    expect(val()).not.toContain("a"); // フォーカスしてもカナ維持（aa に戻らない）
+    (input.element as HTMLInputElement).setSelectionRange(0, 0);
+    await input.trigger("keydown", { key: "X" }); // 打鍵 → 編集開始
+    expect(val()).toContain("X"); // 打鍵した欄は編集値（英字）を表示
+    w.unmount();
+  });
+
+  it("未編集 DBCS 欄はフォーカス・カーソル移動でもカナ維持", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 4, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snap = makeSnap(fields);
+    snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
+    snap.cells[5]![10] = { ...cell("b"), rawByte: 0x82 };
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true },
+      attachTo: document.body
+    });
+    const input = w.find("input.grid-input");
+    const val = () => (input.element as HTMLInputElement).value;
+    await input.trigger("focus");
+    expect(val()).not.toContain("a"); // フォーカスしてもカナ維持
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(val()).not.toContain("a"); // カーソル移動でもカナ維持
+    w.unmount();
+  });
+
   it("showShiftMarks で SO を { ・SI を } 表示する", () => {
     const snap = makeSnap();
     const r0 = snap.cells[0]!;
