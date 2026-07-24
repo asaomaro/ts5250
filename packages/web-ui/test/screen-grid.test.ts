@@ -486,6 +486,30 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("katakanaView は DBCS(混在)欄の休止表示にも効く（SEU コード欄・英カナ切替）", () => {
+    // SEU のソース行は混在(DBCS)欄。先頭 SBCS の生バイト 0x81（037='a' / 930 カナ）を持たせる
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = { ...cell("a"), rawByte: 0x81 };
+    row[10] = { ...cell(" "), kind: "so" };
+    row[11] = { ...cell("あ"), kind: "dbcs-lead" };
+    row[12] = { ...cell(""), kind: "dbcs-tail" };
+    row[13] = { ...cell(" "), kind: "si" };
+    // 通常表示: 先頭 SBCS は 'a'
+    const normal = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: false } });
+    expect((normal.find("input.grid-input").element as HTMLInputElement).value).toContain("a");
+    // カナ表示: 先頭 SBCS は半角カナ（'a' でない）、DBCS 'あ' は全角のまま保持
+    const kana = mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused: false, katakanaView: true }
+    });
+    const v = (kana.find("input.grid-input").element as HTMLInputElement).value;
+    expect(v).not.toContain("a");
+    expect(v).toContain("あ");
+  });
+
   it("DBCS 欄の矢印カーソルは SO/SI スペースをスキップする（ライブ列ビュー）", async () => {
     // 論理 "AあB" → 列ビュー "A あ B"（index1=SO, index3=SI）。cursor は A/あ/B/末尾のみに止まる
     const fields: Field[] = [

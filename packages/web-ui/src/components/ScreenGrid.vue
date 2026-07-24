@@ -412,6 +412,29 @@ function logicalFromCells(f: Field): string {
   return s.replace(/ +$/, ""); // 末尾パディング空白を除去
 }
 
+/** 休止表示用の論理値。カナ表示中の未編集 DBCS 欄は、セルの生バイトを displayChar で再解釈する
+ *  （SBCS が半角カナへ切り替わる）。span（displayChar）と一致させ、SEU 等の混在ソース欄でも
+ *  英カナ切替が input に効くようにするためのもの。
+ *  **送信値 logicalValue は汚さない**——編集済み・編集中の欄はそのまま logicalValue を使う。 */
+function displayLogical(f: Field): string {
+  if (!props.katakanaView) return logicalValue(f);
+  if (props.edits.get(f.index) !== undefined || editFieldIndex === f.index) return logicalValue(f);
+  let s = "";
+  for (const sl of slicesOf(f)) {
+    const row = props.snapshot.cells[sl.row - 1];
+    if (!row) continue;
+    for (let i = 0; i < sl.width; i++) {
+      const cell = row[sl.col - 1 + i];
+      if (!cell) continue;
+      if (cell.kind === "sbcs") s += displayChar(cell); // SBCS は生バイトを半角カナへ再解釈
+      else if (cell.kind === "dbcs-lead") s += cell.char;
+      else if (cell.kind === "attr") s += " ";
+      // so / si / dbcs-tail は論理データに含めない（dbcsViewLayout が SO/SI を付け直す）
+    }
+  }
+  return s.replace(/ +$/, "");
+}
+
 /** 編集モデル初期値（純論理値をスペース埋め）。フォーカス中の input はこれを表示する。 */
 function inputValue(f: Field): string {
   const v = logicalValue(f);
@@ -549,7 +572,8 @@ function displayValue(f: Field): string {
 /** 休止時（props 由来）の列ビューのレイアウト。編集モデルは見ない。
  *  :value バインド・blur の復帰・矩形コピーはこちら、編集中の同期は dbcsLayoutOf を使う。 */
 function dbcsRestLayout(f: Field): ReturnType<typeof dbcsViewLayout> {
-  return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
+  // 休止表示は displayLogical（カナ表示中はセル生バイトを再解釈）。送信値は logicalValue のまま。
+  return dbcsViewLayout(padDbcs(f, [...displayLogical(f)]).join(""), soMark(), siMark());
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----
