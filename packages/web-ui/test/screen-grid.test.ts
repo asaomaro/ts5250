@@ -510,6 +510,42 @@ describe("ScreenGrid", () => {
     expect(v).toContain("あ");
   });
 
+  it("空の SO/SI（{}）は詰めずに休止表示する（showShiftMarks）", () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const snapshot = makeSnap(fields);
+    const row = snapshot.cells[5]!;
+    row[9] = cell("A");
+    row[10] = { ...cell(" "), kind: "so" }; // 中身のない SO/SI（全角ラン無し）
+    row[11] = { ...cell(" "), kind: "si" };
+    const w = mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    const v = (w.find("input.grid-input").element as HTMLInputElement).value;
+    // 再構成方式だと全角が無く SO/SI が消えるが、セル由来なら {} がそのまま桁を保って出る
+    expect(v.startsWith("A{}")).toBe(true);
+  });
+
+  it("SO だけ・SI だけの不整合 SO/SI も休止表示する（showShiftMarks）", () => {
+    const soOnly: Field[] = [
+      { index: 1, row: 6, col: 10, length: 4, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
+    ];
+    const s1 = makeSnap(soOnly);
+    s1.cells[5]![9] = { ...cell(" "), kind: "so" };
+    const w1 = mount(ScreenGrid, {
+      props: { snapshot: s1, edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    expect((w1.find("input.grid-input").element as HTMLInputElement).value.startsWith("{")).toBe(true);
+
+    const s2 = makeSnap(soOnly);
+    s2.cells[5]![9] = { ...cell(" "), kind: "si" };
+    const w2 = mount(ScreenGrid, {
+      props: { snapshot: s2, edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    expect((w2.find("input.grid-input").element as HTMLInputElement).value.startsWith("}")).toBe(true);
+  });
+
   it("DBCS 欄の矢印カーソルは SO/SI スペースをスキップする（ライブ列ビュー）", async () => {
     // 論理 "AあB" → 列ビュー "A あ B"（index1=SO, index3=SI）。cursor は A/あ/B/末尾のみに止まる
     const fields: Field[] = [

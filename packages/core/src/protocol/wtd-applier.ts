@@ -198,7 +198,7 @@ function applyWtd(
     if (dbcsMode && codec.decodeDbcsPair && b >= 0x40) {
       // DBCS 2 バイトを lead/tail の 2 桁に配置
       const b2 = r.u8();
-      buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)));
+      buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)), b, b2);
       addr += 2;
       continue;
     }

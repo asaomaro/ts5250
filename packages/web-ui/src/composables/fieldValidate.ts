@@ -86,16 +86,8 @@ export function columnView(logical: string, soMark = " ", siMark = " "): string 
   return out;
 }
 
-/**
- * DBCS 欄の編集用レイアウト。純論理値から列ビュー文字列と、論理カーソル⇔列ビュー caret の
- * 相互マッピングを作る。SO/SI は半角スペースとして列ビューに入るが、caret は論理境界にしか
- * 止まらない（＝カーソル移動時に SO/SI をスキップする）。
- */
-export function dbcsViewLayout(
-  logical: string,
-  soMark = " ",
-  siMark = " "
-): {
+/** DBCS 列ビューのレイアウト（view 文字列と桁⇔view の各種マッピング）。 */
+export interface DbcsViewLayout {
   view: string;
   /** 論理カーソル lc（0..len）→ 列ビュー内の caret 位置 */
   caretOf: (lc: number) => number;
@@ -113,7 +105,14 @@ export function dbcsViewLayout(
   sliceRange: (startCol: number, endCol: number) => DbcsSliceRange;
   /** 列ビュー全体の表示桁数（＝送信バイト長。SO/SI=1・全角=2） */
   columns: number;
-} {
+}
+
+/**
+ * DBCS 欄の編集用レイアウト。純論理値から列ビュー文字列と、論理カーソル⇔列ビュー caret の
+ * 相互マッピングを作る。SO/SI は半角スペースとして列ビューに入るが、caret は論理境界にしか
+ * 止まらない（＝カーソル移動時に SO/SI をスキップする）。
+ */
+export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): DbcsViewLayout {
   let view = "";
   let inDbcs = false;
   const logToView: number[] = []; // logToView[li] = logical[li] の文字が入る view インデックス
@@ -183,6 +182,49 @@ export function dbcsViewLayout(
     caretOf,
     logicalOf,
     logicalAfter,
+    columnsBefore,
+    viewAtColumn,
+    sliceRange,
+    columns: columnsBefore(view.length)
+  };
+}
+
+/**
+ * **すでに組み上がった列ビュー文字列**から桁レイアウトを作る（休止表示専用）。
+ * dbcsViewLayout が純論理値から SO/SI を再構成するのと違い、こちらは view をそのまま使うので、
+ * SO/SI の空（{}）や不整合（{ だけ・} だけ）をセル由来のまま忠実に描ける。
+ * caret 系（logicalOf 等）は休止表示では使わないため identity のスタブ（呼ばれない前提）。
+ */
+export function columnViewLayout(view: string): DbcsViewLayout {
+  const columnsBefore = (vc: number): number => {
+    let cols = 0;
+    for (const ch of view.slice(0, vc)) cols += isFullWidth(ch) ? 2 : 1;
+    return cols;
+  };
+  const viewAtColumn = (col: number): number => {
+    let c = 0;
+    let i = 0;
+    for (const ch of view) {
+      const w = isFullWidth(ch) ? 2 : 1;
+      if (col < c + w) return i;
+      c += w;
+      i++;
+    }
+    return i;
+  };
+  const sliceRange = (startCol: number, endCol: number): DbcsSliceRange => {
+    let from = viewAtColumn(startCol);
+    const leadBlank = columnsBefore(from) < startCol;
+    if (leadBlank) from += 1;
+    let to = viewAtColumn(endCol);
+    if (columnsBefore(to) < endCol) to += 1;
+    return { from, to, leadBlank };
+  };
+  return {
+    view,
+    caretOf: (lc) => Math.min(lc, view.length),
+    logicalOf: (vc) => vc,
+    logicalAfter: (vc) => vc,
     columnsBefore,
     viewAtColumn,
     sliceRange,
