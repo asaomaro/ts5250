@@ -742,6 +742,30 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
+  it("空白だけの矩形選択も空白をコピーする（空でコピー不発にしない）", async () => {
+    const snapshot = makeSnap([]); // 全セル空白
+    const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    // col7..10（4 桁）× row3..4 の空白を矩形選択
+    await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(4) }));
+    window.dispatchEvent(new MouseEvent("mouseup"));
+    await nextTick();
+    const cd = { setData: vi.fn() };
+    const ev = new Event("copy") as Event & { clipboardData: typeof cd };
+    ev.clipboardData = cd;
+    document.dispatchEvent(ev);
+    // 空文字ではなく、選択した空白（4 桁 × 2 行）がそのまま載る
+    expect(cd.setData).toHaveBeenCalledWith("text/plain", "    \n    ");
+    w.unmount();
+  });
+
   it("ドラッグ開始セルにカーソルを置く（ACS 相当。広げてもカーソルは始点から動かない）", async () => {
     const snapshot = makeSnap([]);
     const w = mount(ScreenGrid, { props: { snapshot, edits: new Map(), focused: true }, attachTo: document.body });

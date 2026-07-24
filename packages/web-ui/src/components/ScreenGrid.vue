@@ -1792,13 +1792,17 @@ function charAtForCopy(row: number, col: number): string {
 function rectText(): string {
   const s = rectSel.value;
   if (!s) return "";
-  const lines: string[] = [];
+  const raw: string[] = [];
   for (let r = s.r1; r <= s.r2; r++) {
     let line = "";
     for (let c = s.c1; c <= s.c2; c++) line += charAtForCopy(r, c);
-    lines.push(line.replace(/\s+$/, "")); // 各行末尾の空白は落とす（矩形右端の余白）
+    raw.push(line);
   }
-  return lines.join("\n");
+  const trimmed = raw.map((line) => line.replace(/\s+$/, "")); // 各行末尾の空白は落とす（矩形右端の余白）
+  // **全て空白でトリム後が空になる選択も、選んだ空白をそのままコピーする。**
+  // 空文字を setData すると空白コピーが不発（クリップボードに載らない）になるため。
+  if (trimmed.every((line) => line === "")) return raw.join("\n");
+  return trimmed.join("\n");
 }
 function onDocCopy(ev: ClipboardEvent): void {
   if (!rectSel.value) return;
