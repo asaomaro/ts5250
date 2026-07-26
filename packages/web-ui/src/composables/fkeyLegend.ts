@@ -112,8 +112,10 @@ export function detectWindowRect(snap: ScreenSnapshot, charOf: CharOf = defaultC
   const win = snap.gui?.windows;
   if (win && win.length > 0) {
     const w = win[win.length - 1]!;
-    // 枠線ぶんを除いた内側にする（枠の上に凡例は載らない）
-    return { row1: w.row + 1, row2: w.row + w.height - 2, col1: w.col + 1, col2: w.col + w.width - 2 };
+    // **宣言された矩形がそのまま使用領域**。拡張5250 の窓は枠を*線*として描く（クライアント側で
+    // 描画し、文字セルを消費しない）ので、罫線文字の窓のように上下左右を 1 行ぶん削ってはいけない。
+    // 削ると窓の**先頭行・最終行の凡例が落ちる**（実機 TESTLIB/EXTPGM の WINDOW で確認）。
+    return { row1: w.row, row2: w.row + w.height - 1, col1: w.col, col2: w.col + w.width - 1 };
   }
 
   const rows = snap.cells.map((cells) => rowText(cells, snap.cols, charOf));
