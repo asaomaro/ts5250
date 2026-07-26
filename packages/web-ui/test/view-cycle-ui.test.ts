@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
@@ -103,5 +105,24 @@ describe("キー押下で表示設定が順送りされ、通知が出る", () =
     expect(viewSettings.settings.controls).toBe("underline");
     expect(w.find(".oia .notice").text()).toBe("コントロール表現: 下線");
     w.unmount();
+  });
+});
+
+describe("CRT の滲みは画面の文字すべてに掛かる", () => {
+  // scoped CSS は vitest の DOM に適用されないため、**ビルド後の CSS** を直接検査する。
+  // 「.grid-span にしか掛けず入力欄が滲まない」取りこぼしの再発防止。
+  it("CRT ルールが素のラン・入力欄・GUI 選択肢を対象にしている", () => {
+    // vitest の cwd は packages/web-ui。import.meta.url は file: とは限らないのでパスで解決する。
+    const dir = join(process.cwd(), "dist/assets");
+    if (!existsSync(dir)) return; // 未ビルド時はスキップ
+    const css = readdirSync(dir)
+      .filter((f) => f.endsWith(".css"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .join("\n");
+    if (!css) return;
+    const rule = /\.pane\[data-surface=crt\][^{]*\{[^}]*text-shadow[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(rule).toContain(".grid-span");
+    expect(rule).toContain(".grid-input"); // 入力欄にも掛かること
+    expect(rule).toContain(".gui-choice-text");
   });
 });
