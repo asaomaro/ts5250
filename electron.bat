@@ -1,12 +1,16 @@
 @echo off
-rem AS400 5250 エミュレーター — Electron デスクトップ版 起動（Windows）
-rem   ワークスペース依存 → ビルド（core/server + web-ui）→ Electron 依存 → Electron 起動。
+rem Keep this file ASCII-only: cmd.exe on a cp932 console mis-parses multibyte
+rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
+rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
+chcp 65001 >nul
+rem AS400 5250 emulator - Electron desktop launcher (Windows)
+rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> launch Electron
 rem
-rem 使い方:
-rem   electron.bat            未ビルドなら自動ビルドして起動
-rem   electron.bat --build    強制再ビルド
+rem Usage:
+rem   electron.bat            auto-build if not built, then launch
+rem   electron.bat --build    force rebuild
 rem
-rem パッケージング（インストーラ生成）:
+rem Packaging (build installer):
 rem   npm run build ^&^& npm run build -w @as400web/web-ui
 rem   cd electron ^&^& npm install ^&^& npm run dist
 setlocal
@@ -17,7 +21,7 @@ if /i "%~1"=="--build" set "FORCE_BUILD=1"
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo Node.js ^(^>=20^) が必要です 1>&2
+  echo Node.js ^(^>=20^) is required 1>&2
   exit /b 1
 )
 
@@ -30,20 +34,20 @@ set "NEED_BUILD=%FORCE_BUILD%"
 if not exist packages\server\dist\main.js set "NEED_BUILD=1"
 if not exist packages\web-ui\dist\index.html set "NEED_BUILD=1"
 if "%NEED_BUILD%"=="1" (
-  echo ==^> ビルド（core / server）
+  echo ==^> build ^(core / server^)
   call npm run build
-  echo ==^> ビルド（web-ui / Vite）
+  echo ==^> build ^(web-ui / Vite^)
   call npm run build -w @as400web/web-ui
 )
 
 if not exist electron\node_modules (
-  echo ==^> Electron 依存のインストール（electron/）
+  echo ==^> install Electron deps ^(electron/^)
   pushd electron
   call npm install
   popd
 )
 
-echo ==^> Electron 起動
+echo ==^> launching Electron
 cd electron
 call npm start
 endlocal
