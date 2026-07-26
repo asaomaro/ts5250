@@ -1087,14 +1087,20 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   emit("cursor", s.row, s.col + (col - s.offset));
 }
 
-/** ACS の自動送り: 欄が最大桁まで埋まったら次の入力欄へ送るよう通知。
- *  SBCS は cursor===chars.length（満杯）、DBCS はバイト予算（SO/SI 込み）が満杯のとき。 */
+/**
+ * ACS の自動送り: **カーソルが欄の末尾まで進んだら**次の入力欄へ送るよう通知。
+ *
+ * 条件は SBCS / DBCS 欄で共通にする。以前は DBCS 欄だけ「バイト予算が満杯か」で判定していたが、
+ * **既に埋まっている欄では 1 打鍵目から真**になり、上書きで先頭を打ち替えただけで次の欄へ飛んでいた
+ * （実機の CHGJOB プロンプト。日本語機は入力欄を `dbcsType: "open"` と宣言するので、
+ * 見た目が半角だけの欄でもこの分岐に入る）。空欄を埋めるときは最後の文字で初めて真になるため
+ * 正常に見えていたのがたちが悪い。
+ *
+ * カーソル基準でも DBCS の予算は取りこぼさない——全角入力で予算が尽きると `absorbDbcs` が
+ * 末尾の空白を削って `chars` が短くなるので、カーソルはその分早く末尾に届く。
+ */
 function advanceIfFull(f: Field): void {
   if (!edit) return;
-  if (isDbcsEdit(f)) {
-    if (dbcsByteLength(editValue(edit).replace(/ +$/, "")) >= visLen(f)) emit("field-full", f.index);
-    return;
-  }
   if (edit.cursor >= edit.chars.length) emit("field-full", f.index);
 }
 
