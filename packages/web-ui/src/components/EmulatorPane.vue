@@ -15,6 +15,7 @@ import { resolveWatermark } from "../composables/watermark.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
+import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { MSG_PROTECTED } from "../composables/opMessages.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
@@ -412,10 +413,17 @@ watch(
   }
 );
 
+/** キー設定で割り当てたマクロを再生する（ホストへは送らない。spec D10） */
+function onPlayMacro(macroId: string): void {
+  notice.value = "";
+  play(props.sessionId, macroId);
+}
+
 const rawKeydown = makeKeydownHandler({
   sendAid: onAid,
   local: onLocal,
   viewCycle: onViewCycle,
+  playMacro: onPlayMacro,
   isFocused: () => props.focused
 });
 

@@ -50,7 +50,7 @@ describe("キーバインドからの表示設定切り替え", () => {
     keybindingsStore.set("ctrl+1", "view:surface");
     const sendAid = vi.fn();
     const viewCycle = vi.fn();
-    const handler = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle, isFocused: () => true });
+    const handler = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle, playMacro: vi.fn(), isFocused: () => true });
 
     handler({ ...base, key: "1", ctrlKey: true } as unknown as KeyboardEvent);
 
@@ -62,7 +62,7 @@ describe("キーバインドからの表示設定切り替え", () => {
     keybindingsStore.set("ctrl+2", "F5");
     const sendAid = vi.fn();
     const viewCycle = vi.fn();
-    const handler = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle, isFocused: () => true });
+    const handler = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle, playMacro: vi.fn(), isFocused: () => true });
 
     handler({ ...base, key: "2", ctrlKey: true } as unknown as KeyboardEvent);
 

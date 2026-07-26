@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import type { AidKey } from "@as400web/core";
-import { keybindingsStore, comboOf, isViewBinding, viewKeyOf, type BindingTarget } from "../stores/keybindings.js";
+import {
+  keybindingsStore,
+  comboOf,
+  isViewBinding,
+  viewKeyOf,
+  isMacroBinding,
+  macroIdOf,
+  type BindingTarget
+} from "../stores/keybindings.js";
 import { VIEW_ITEMS, viewItem, viewSettings } from "../stores/viewSettings.js";
+import { macrosStore } from "../stores/macros.js";
 
 defineEmits<{ (e: "close"): void }>();
 
@@ -18,12 +27,22 @@ const newTarget = ref<BindingTarget>("F1");
 
 /** 割当先の表示名。表示設定は「項目名（順送り）＋現在値」で分かるようにする。 */
 function targetLabel(t: string): string {
+  // 消したマクロに紐づいたままのバインドは、id をそのまま出すより「削除済み」と分かる方がよい
+  if (isMacroBinding(t)) {
+    const m = macrosStore.get(macroIdOf(t));
+    return m ? `マクロ: ${m.name}（再生）` : "マクロ: 削除済み";
+  }
   if (!isViewBinding(t)) return t;
   const item = viewItem(viewKeyOf(t));
   if (!item) return t;
   const cur = item.opts.find((o) => o.value === viewSettings.settings[item.key]);
   return `${item.label}（順送り${cur ? `・現在: ${cur.label}` : ""}）`;
 }
+
+// マクロ一覧はサーバー保存なので、パネルを開いたときに取り込む
+onMounted(() => {
+  if (!macrosStore.loaded) void macrosStore.refresh();
+});
 
 function captureKey(ev: KeyboardEvent): void {
   if (!capturing.value) return;
@@ -76,6 +95,13 @@ function add(): void {
           <optgroup label="表示設定（順送り）">
             <option v-for="i in VIEW_ITEMS" :key="i.key" :value="`view:${i.key}`">
               {{ i.label }}（{{ i.opts.map((o) => o.label).join(" → ") }}）
+            </option>
+          </optgroup>
+          <!-- マクロ再生（ACS の「マクロをキーに割り当てる」相当。spec D10）。
+               保存済みが無いときは空の optgroup を出さない -->
+          <optgroup v-if="macrosStore.macros.length > 0" label="マクロ（再生）">
+            <option v-for="m in macrosStore.macros" :key="m.id" :value="`macro:${m.id}`">
+              {{ m.name }}{{ m.hasSecret ? " 🔑" : "" }}
             </option>
           </optgroup>
         </select>

@@ -14,10 +14,13 @@ export function comboOf(ev: { key: string; ctrlKey: boolean; shiftKey: boolean; 
 const KEY = "as400.keybindings";
 
 /**
- * 割当先。AID キー（ホストへ送る）のほか、`view:<項目>` で**表示設定の順送り**も割り当てられる
- * （例 "view:surface"）。旧データは AID 文字列のみなのでそのまま読める。
+ * 割当先。AID キー（ホストへ送る）のほか、`view:<項目>` で**表示設定の順送り**、
+ * `macro:<id>` で**マクロの再生**も割り当てられる（例 "view:surface" / "macro:m-1"）。
+ * 旧データは AID 文字列のみなのでそのまま読める。
+ *
+ * `view:` / `macro:` はいずれも**ホストへ送らない**ローカル処理（`useKeymap.ts` で分岐する）。
  */
-export type BindingTarget = AidKey | `view:${string}`;
+export type BindingTarget = AidKey | `view:${string}` | `macro:${string}`;
 /** 表示設定の順送り割当か。 */
 export function isViewBinding(t: string): t is `view:${string}` {
   return t.startsWith("view:");
@@ -25,6 +28,14 @@ export function isViewBinding(t: string): t is `view:${string}` {
 /** `view:surface` → `surface` */
 export function viewKeyOf(t: string): string {
   return t.slice("view:".length);
+}
+/** マクロ再生の割当か（ACS の「マクロをキーに割り当てる」相当。spec D10）。 */
+export function isMacroBinding(t: string): t is `macro:${string}` {
+  return t.startsWith("macro:");
+}
+/** `macro:m-1` → `m-1` */
+export function macroIdOf(t: string): string {
+  return t.slice("macro:".length);
 }
 
 /**
