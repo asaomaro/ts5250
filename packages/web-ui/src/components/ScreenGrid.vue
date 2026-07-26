@@ -227,9 +227,25 @@ interface LocalSpan {
   col: number;
 }
 
+/**
+ * 全角セルが**対（lead＋tail）を成しているか**。
+ *
+ * ホストは既に全角が書かれている桁へ属性バイトや別データを重ねて書くことがあり、そのとき
+ * 片割れだけが残る（実機: Attn の窓が 23 桁目から重なり、背面の「…コマンド」の
+ * 最後の全角の tail が潰された）。対を失ったセルを 2 桁ぶん描くと隣の桁を侵し、
+ * **以降の見た目が 1 桁ずれる**。ACS は 1 桁に切り詰めて描くので、それに合わせる。
+ */
+function hasTail(row: readonly Cell[], i: number): boolean {
+  return row[i + 1]?.kind === "dbcs-tail";
+}
+function hasLead(row: readonly Cell[], i: number): boolean {
+  return i > 0 && row[i - 1]?.kind === "dbcs-lead";
+}
+
 interface Segment {
-  /** text=素のラン / input=入力欄 / wide=幅を保証する DBCS 1 文字（下記 wideBox 参照） */
-  kind: "text" | "input" | "wide";
+  /** text=素のラン / input=入力欄 / wide=幅を保証する DBCS 1 文字（下記 wideBox 参照）
+   *  / half=対を失った全角セル（1 桁に切り詰め。上記 hasTail/hasLead 参照） */
+  kind: "text" | "input" | "wide" | "half";
   text: string;
   cls: string;
   /** このセグメントが始まる桁（1 始まり）。凡例 span を index へ写すのに使う */
@@ -417,13 +433,17 @@ function localSpans(
   spans: readonly FkeySpan[]
 ): LocalSpan[] {
   const out: LocalSpan[] = [];
+  // その桁が表示文字を 1 つ持つか。DBCS の tail は lead が 2 桁ぶんを担うので数えないが、
+  // **対を失った tail は空白 1 文字として描く**ため 1 つと数える
+  // （描画と数えがずれると凡例リンクの下線位置が桁ずれする）。
+  const counts = (c: number): boolean =>
+    rowCells[c - 1]?.kind !== "dbcs-tail" || !hasLead(rowCells, c - 1);
   for (const s of spans) {
     if (s.col < startCol || s.col + s.width - 1 > endCol) continue;
-    // 表示文字数で数える（DBCS の tail は文字を持たないので飛ばす）
     let from = 0;
-    for (let c = startCol; c < s.col; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") from++;
+    for (let c = startCol; c < s.col; c++) if (counts(c)) from++;
     let len = 0;
-    for (let c = s.col; c <= s.col + s.width - 1; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") len++;
+    for (let c = s.col; c <= s.col + s.width - 1; c++) if (counts(c)) len++;
     if (len > 0) out.push({ from, to: from + len, key: s.key, row: s.row, col: s.col });
   }
   return out.sort((a, b) => a.from - b.from);
@@ -506,12 +526,29 @@ const rows = computed<Segment[][]>(() => {
       };
       while (c < snap.cols && !fieldAt.has(r * snap.cols + c)) {
         const cellHere = row[c]!;
-        if (cellHere.kind === "dbcs-tail") {
+        if (cellHere.kind === "dbcs-tail" && hasLead(row, c)) {
           c++; // lead 側で 1 文字書いており、2 桁ぶんはその文字が占める
           continue;
         }
         if (cellClass(cellHere) !== cls) break;
         const shown = displayChar(cellHere);
+        // 対を失った全角セルは 1 桁に切り詰める。孤児 tail は文字を持たないので空白 1 桁。
+        // **確実に全角のグリフでも必ず箱に入れる**——素のランへ積むとフォントが 2 桁で描き、
+        // それがそのまま桁ずれになる。
+        if (cellHere.kind === "dbcs-tail") {
+          flushText();
+          segs.push({ kind: "half", text: " ", cls, col: c + 1 });
+          c++;
+          textStart = c;
+          continue;
+        }
+        if (cellHere.kind === "dbcs-lead" && !hasTail(row, c)) {
+          flushText();
+          segs.push({ kind: "half", text: shown, cls, col: c + 1 });
+          c++;
+          textStart = c;
+          continue;
+        }
         if (cellHere.kind === "dbcs-lead" && !isCertainWideGlyph(shown)) {
           flushText();
           segs.push({ kind: "wide", text: shown, cls, col: c + 1 });
@@ -2422,6 +2459,12 @@ onBeforeUnmount(() => {
           class="grid-span wide-cell"
           :class="seg.cls"
         >{{ seg.text }}</span>
+        <!-- 対を失った全角セル。1 桁の箱に入れて左半分だけ見せる（ACS と同じ分断された見え方） -->
+        <span
+          v-else-if="seg.kind === 'half'"
+          class="grid-span half-cell"
+          :class="seg.cls"
+        >{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
           v-for="(p, j) in decoParts(seg)"
           :key="j"
@@ -2528,6 +2571,15 @@ onBeforeUnmount(() => {
   display: inline-block;
   width: 2ch;
   text-align: center;
+  vertical-align: baseline;
+}
+/* 対（lead＋tail）を失った全角セル。ホストが片割れの桁へ上書きすると出る。
+   ACS は左半分だけを描いて分断された形にするので、1ch の箱でクリップして同じ見え方にする
+   （空白に置き換えると桁は合うが ACS と別物になる）。 */
+.half-cell {
+  display: inline-block;
+  width: 1ch;
+  overflow: hidden;
   vertical-align: baseline;
 }
 /* 暗い背景に明るい文字を置くと既定のサブピクセル描画で太く・にじんで見える。
