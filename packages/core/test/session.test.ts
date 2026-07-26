@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Session5250 } from "../src/session/session.js";
+import { Session5250, FLAG_KEY_TIMEOUT_MS } from "../src/session/session.js";
 import { ReplayTransport } from "../src/trace/replay.js";
 import { parseTraceJsonl, bytesToHex, type TraceEntry } from "../src/trace/trace.js";
 import { buildRecord, parseRecord } from "../src/protocol/gds.js";
@@ -320,5 +320,34 @@ describe("Session5250 リプレイ E2E", () => {
     expect(() => session.setField({ row: 1, col: 1 }, "X")).toThrow(
       expect.objectContaining({ code: "FIELD_NOT_FOUND" })
     );
+  });
+});
+
+/**
+ * **Attn / SysReq はホストが黙って無視することが正常にあり得る**（ATNPGM が既に前面のとき等。
+ * 実機で 2 回目の Attn に受信ゼロを確認）。画面を返す前提の AID と同じ 30 秒を待つと
+ * その間 UI が入力プロテクトのままになり、固まって見える。
+ */
+describe("フラグレコードの応答待ち", () => {
+  it("Attn は無応答でも 5 秒（FLAG_KEY_TIMEOUT_MS）で戻る", async () => {
+    expect(FLAG_KEY_TIMEOUT_MS).toBe(5_000);
+    const { session } = await connectReplay(signonEntries());
+    // 既定より十分短い値を明示指定して、待ちが opts で上書きできることも同時に確認する
+    const t0 = Date.now();
+    const r = await session.sendAid("Attn", { timeoutMs: 40 });
+    expect(r.timedOut).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    // 時間切れでキーボードは解放される（固まったままにしない）
+    expect(session.keyboardLocked).toBe(false);
+  });
+
+  it("通常の AID の既定待ちは変えていない（30 秒のまま）", async () => {
+    const { session } = await connectReplay(signonEntries());
+    // 既定値そのものは待たずに確認する: 明示指定が無い Enter は 5 秒では戻らない
+    let settled = false;
+    void session.sendAid("Enter").then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(settled).toBe(false);
+    session.disconnect();
   });
 });

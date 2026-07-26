@@ -65,6 +65,11 @@ export interface SessionState {
   busy?: boolean;
   /** ローディング表示（通信が 0.5 秒以上かかったとき） */
   loading?: boolean;
+  /**
+   * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
+   * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
+   */
+  notice?: string;
   // ---- プリンターセッション（kind==="printer"）----
   /** 受信したスプール（帳票）一覧 */
   reports?: SpoolReportView[];
