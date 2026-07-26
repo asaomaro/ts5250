@@ -13,6 +13,14 @@ import type { RejectReason } from "./fieldValidate.js";
  */
 export const MSG_PROTECTED = "Cursor in protected area of display.";
 
+/**
+ * ホストが応答しないまま待ち時間が尽きたときの通知。
+ *
+ * Attn / SysReq は**ホストが黙って無視することが正常にあり得る**（ATNPGM が既に前面のとき等）。
+ * 無言で待ちを解くと「押したのに何も起きない」が不具合と区別できないので、起きたことを明示する。
+ */
+export const MSG_NO_RESPONSE = "ホストから応答がありませんでした";
+
 export const MSG_BY_REASON: Record<RejectReason, string> = {
   numeric: "Field requires numeric characters.",
   alphanumeric: "Field data must be alphanumeric.",

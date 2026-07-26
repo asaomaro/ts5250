@@ -338,6 +338,9 @@ function onViewCycle(key: string): void {
 
 // ---- システム要求行（SysReq） ----
 function onAid(key: AidKey): void {
+  // ボタン経由（マウス）ではペインの keydown を通らずローカル通知が残る。残したままだと
+  // 応答が無かったときのサーバー発の通知（effectiveNotice）を覆い隠すので、ここで消す。
+  notice.value = "";
   if (key === "SysReq") {
     sysReqOpen.value = true;
     return;
@@ -430,6 +433,12 @@ const notice = ref("");
 function onNotice(text: string): void {
   notice.value = text;
 }
+/**
+ * StatusBar へ渡す操作員メッセージ。ローカル発（欄の型違反・保護領域への入力）を優先し、
+ * 無ければサーバー応答由来（ホスト無応答の通知。`SessionState.notice`）を出す。
+ * ローカル発はキー操作で消え、サーバー発は次の送信で消える（session-controller）。
+ */
+const effectiveNotice = computed(() => notice.value || state.value?.notice || "");
 
 /** 機能キー凡例のボタンが押された（ScreenGrid）。キーボードの F キーと同じ扱いで送る。
  *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。 */
@@ -716,7 +725,7 @@ function onWheel(ev: WheelEvent): void {
       :state="state"
       :insert-mode="insertMode"
       :cursor="cursor"
-      :notice="notice"
+      :notice="effectiveNotice"
       :log-count="logCount"
       :log-open="logOpen"
       @toggle-log="logOpen = !logOpen"

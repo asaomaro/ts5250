@@ -1,6 +1,7 @@
 import type { WsOpen, WsServerMessage } from "@as400web/server";
 import type { AidKey } from "@as400web/core";
 import { WsClient } from "./ws-client.js";
+import { MSG_NO_RESPONSE } from "./composables/opMessages.js";
 import { sessionsStore, type SessionState, type SessionMeta } from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
 
@@ -91,6 +92,12 @@ export async function openSession(
               // keyboardLocked: true の画面が残って 🔒 が消えなくなる。
               sessionsStore.updateScreen(sessionId, msg.screen);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
+              // 無応答のまま待ちが尽きたことは**明示する**。無言で戻すと「押したのに何も
+              // 起きない」が不具合と区別できない（Attn は既に窓が出ていると無視される）。
+              if (msg.timedOut === true) {
+                const s = sessionsStore.get(sessionId);
+                if (s) s.notice = MSG_NO_RESPONSE;
+              }
               setBusy(sessionId, false);
               break;
             }
@@ -237,6 +244,7 @@ export function sendKey(
 ): void {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return; // 通信中は多重送信しない（プロテクト）
+  delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   s.client.send({
     type: "key",
