@@ -2334,6 +2334,13 @@ onBeforeUnmount(() => {
 .grid-span {
   text-shadow: var(--t-glow) currentColor;
 }
+/* 画面の質感=CRT: フォスファのにじみを強め、文字が滲む CRT らしい見た目にする。
+   （フラットは --t-glow:0 で滲み無し。CRT はテーマに依らずここで確実に滲ませる） */
+.pane[data-surface="crt"] .grid-span {
+  text-shadow:
+    0 0 1.2px currentColor,
+    0 0 5px color-mix(in srgb, currentColor 45%, transparent);
+}
 /* East Asian Width が Ambiguous な DBCS 文字（'−' '‐' 罫線 等）の桁幅を保証する箱。
    欧文等幅フォントはこれらを 1 桁で描くため、素のテキストのままだと以降の桁が左へずれる。
    inline-block は text-decoration を親から継がないので、下線等は seg.cls を自分に付けて出す。 */
@@ -2435,6 +2442,40 @@ onBeforeUnmount(() => {
 .grid-input.a-underline {
   text-decoration: none;
   border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+}
+
+/* ==== コントロール表現（画面設定・セッションごと）====
+   .pane[data-controls] は祖先(EmulatorPane)に付く。値ごとに**編集可能な**入力欄の見せ方を変える。
+   ここ(ScreenGrid の scope)に置くのは、scoped の詳細度で base の .grid-input:focus に確実に勝たせるため。
+   桁・ホスト色を崩さないよう色替えは box-shadow / 限定的な background のみ。plain は規則なし＝5250 準拠。
+   readonly（保護欄）には一切出さない。 */
+/* 枠: 枠付きボックス＋フォーカスリング */
+.pane[data-controls="rich"] .grid-input:not([readonly]) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-white) 22%, transparent);
+  border-radius: 4px;
+}
+.pane[data-controls="rich"] .grid-input:not([readonly]):focus {
+  box-shadow: inset 0 0 0 1.6px var(--accent), 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+/* 下線: Material 風。休止は淡い下線、フォーカスでアクセントの太線。box-shadow なので桁ズレ無し。 */
+.pane[data-controls="underline"] .grid-input:not([readonly]) {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--t-white) 32%, transparent);
+}
+.pane[data-controls="underline"] .grid-input:not([readonly]):focus {
+  background: var(--cell-bg, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  outline: none;
+}
+/* 塗り: Notion 風のうっすら背景ティント＋角丸。反転欄は cell 背景を優先する。 */
+.pane[data-controls="filled"] .grid-input:not([readonly]) {
+  background: var(--cell-bg, color-mix(in srgb, var(--t-white) 8%, transparent));
+  border-radius: 4px;
+}
+.pane[data-controls="filled"] .grid-input:not([readonly]):focus {
+  background: var(--cell-bg, color-mix(in srgb, var(--accent) 15%, transparent));
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  outline: none;
 }
 
 /* ==== 拡張 5250 GUI オーバーレイ ==== */

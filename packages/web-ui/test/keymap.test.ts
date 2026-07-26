@@ -56,7 +56,7 @@ describe("makeKeydownHandler", () => {
   it("フォーカス時のみ AID を送り preventDefault する", () => {
     const sendAid = vi.fn();
     const prevent = vi.fn();
-    const h = makeKeydownHandler({ sendAid, local: vi.fn(), isFocused: () => true });
+    const h = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle: vi.fn(), isFocused: () => true });
     h({ key: "F3", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, preventDefault: prevent } as unknown as KeyboardEvent);
     expect(sendAid).toHaveBeenCalledWith("F3");
     expect(prevent).toHaveBeenCalled();
@@ -64,7 +64,7 @@ describe("makeKeydownHandler", () => {
 
   it("非フォーカス時は何もしない", () => {
     const sendAid = vi.fn();
-    const h = makeKeydownHandler({ sendAid, local: vi.fn(), isFocused: () => false });
+    const h = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle: vi.fn(), isFocused: () => false });
     h({ key: "Enter", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
     expect(sendAid).not.toHaveBeenCalled();
   });

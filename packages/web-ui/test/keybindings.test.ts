@@ -29,7 +29,7 @@ describe("useKeymap — カスタムバインド優先", () => {
   it("カスタムバインドが既定より優先して AID を送る", () => {
     keybindingsStore.set("ctrl+j", "F4");
     const sendAid = vi.fn();
-    const h = makeKeydownHandler({ sendAid, local: vi.fn(), isFocused: () => true });
+    const h = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle: vi.fn(), isFocused: () => true });
     h({ key: "j", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
     expect(sendAid).toHaveBeenCalledWith("F4");
   });

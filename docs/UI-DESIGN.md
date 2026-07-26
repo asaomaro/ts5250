@@ -114,6 +114,51 @@
   `autoPrint`・パスワード等）は、**認証オフ（ローカル単一利用）または admin のときだけ** UI に露出・編集させる。
   サーバー側でも同じゲート（`canEditProfiles`）で受理し、一般ユーザー・未認証からは受理も露出もしない（信頼境界）。
 
+## デザインスキン（`data-skin`）
+
+- **端末（5250）＋ Web アプリ風スキン**を `documentElement` の `data-skin` で切り替える
+  （`composables/useSkin.ts`・選択 UI は `DesignMenu.vue`）。DOM・グリッド配置は一切変えず、
+  `styles.css` の `:root[data-skin="..."]` が**クロームと端末のトークンを両方**差し替える。
+- スキンを足すときは**クロームと端末の明暗を揃える**こと。OIA / F キーは
+  背景＝端末（`--crt` / `--crt-bezel`）・文字＝クローム（`--muted`）の混在で、揃えないと読めなくなる。
+
+## 画面表示設定（⚙ 画面）とトークン上書き
+
+- 表示設定（SO/SI・半角カナ・リンク化・コントロール表現・配色・画面の質感・フォント）は
+  `stores/viewSettings.ts` の**単一の設定**として保持し、変更は即 localStorage へ保存して全画面に効く。
+  **項目定義（表示順・選択肢）は `VIEW_ITEMS` に集約**し、⚙ 画面メニューとキー設定が同じ定義を参照する。
+- **見た目の切り替えは `.pane` への属性／カスタムプロパティ上書きで行う**（`EmulatorPane.vue`）。
+  カスタムプロパティは scope をまたいで DOM を継承するので、子の `ScreenGrid`（別 scope）の
+  セル色・グロー・反転（`--cell`）まで一括で追従する。ルールを複製しないこと。
+  - 配色 `data-color-mode="semantic"`: 5250 の 7 色を役割ベースへ再マップ（`--t-*` を再定義）。
+    **赤＝エラー・黄＝注意・青＝情報は意味を残して据え置く**。
+  - 質感 `data-surface`: `flat` はグロー無し＋やわらかい影のカード、`crt` は
+    `--t-glow` と `.grid-span` の `text-shadow` でフォスファのにじみを出す。
+  - コントロール表現 `data-controls`: `plain` / `underline` / `filled` / `rich`。
+    **色替えは `box-shadow` と限定的な背景のみ**（桁とホスト色を崩さない）。保護欄には出さない。
+    定義は `.grid-input` と同じ scope（`ScreenGrid.vue`）に置き、base の `:focus` に確実に勝たせる。
+
+## 等幅フォント（`--mono` と `--screen-mono` の使い分け）
+
+- **`--screen-mono`（画面グリッド・帳票）は和欧 1:2 の一体フォントだけ**を並べる。桁位置は `ch` 単位で
+  DBCS を 2ch と仮定するため、**欧文専用フォントを混ぜると比が崩れて桁がずれる**。
+  選択肢と導入判定は `composables/screenFonts.ts`（版名に依存しないよう Local Font Access で列挙し、
+  非対応環境は canvas 実測へフォールバック）。未導入フォントは選ばせない。
+- **`--mono`（クローム: OIA・F キー・タブ・表）は桁揃えの制約が無い**ので、モダンな等幅を先頭に置いてよい
+  （現在は自ホストの IBM Plex Mono。日本語は字ごとに後続の CJK 等幅へフォールバック）。
+
+## ヘッダーのポップオーバー
+
+- ヘッダーのメニューは**同時に 1 つだけ**開く。開いているメニュー id を `composables/headerMenu.ts` で
+  共有し、別を開くと前が閉じる。各ボタンは `@click.stop` するため、**相手の外側クリック検出には頼れない**。
+
+## キー割り当て
+
+- キーバインドは AID キーのほか `view:<項目>` で**表示設定の順送り**を割り当てられる
+  （`stores/keybindings.ts`・`composables/useKeymap.ts`）。`view:*` はホストへ送らずローカル処理のみ。
+- 切り替わったら **OIA の操作員メッセージ**（`notice`）で「項目: 新しい値」を通知する。
+  ホスト由来の `systemMessage` とは別枠で、次のキー操作で消える。
+
 ## アクセシビリティ / 動作
 
 - キーボード focus の可視化、`prefers-reduced-motion` の尊重、`role` / `aria-*`（`role="status"`・

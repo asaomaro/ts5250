@@ -1,5 +1,5 @@
 import type { AidKey } from "@as400web/core";
-import { keybindingsStore } from "../stores/keybindings.js";
+import { keybindingsStore, isViewBinding, viewKeyOf } from "../stores/keybindings.js";
 
 export type LocalAction =
   | "home"
@@ -73,6 +73,8 @@ export interface KeymapHandlers {
   sendAid(key: AidKey): void;
   /** ローカルのカーソル/フィールド操作 */
   local(action: LocalAction): void;
+  /** 表示設定（SO/SI・配色・質感 等）を次の値へ順送りする（キー設定で割り当て可能） */
+  viewCycle(key: string): void;
   /** このペインがフォーカス中か（捕捉はフォーカスペインのみ） */
   isFocused(): boolean;
 }
@@ -84,11 +86,12 @@ export interface KeymapHandlers {
 export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => void {
   return (ev: KeyboardEvent) => {
     if (!h.isFocused()) return;
-    // カスタムキーバインドを既定より優先
+    // カスタムキーバインドを既定より優先。`view:*` は表示設定の順送り（ホストへは送らない）。
     const custom = keybindingsStore.resolve(ev);
     if (custom) {
       ev.preventDefault();
-      h.sendAid(custom);
+      if (isViewBinding(custom)) h.viewCycle(viewKeyOf(custom));
+      else h.sendAid(custom);
       return;
     }
     const { aid, local } = classifyKey(ev);

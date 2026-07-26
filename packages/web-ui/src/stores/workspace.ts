@@ -81,13 +81,6 @@ export const workspaceStore = reactive({
   maximizedGroupId: undefined as string | undefined,
   /** D&D 中のタブ（sessionId）。PaneTabs 間で共有し、自グループ内の並び替えか判定する */
   draggingSession: undefined as string | undefined,
-  /** SO/SI を {}表示するか（ACS の Ctrl+F 相当。全ペイン共通の表示設定） */
-  showShiftMarks: false,
-  /** 半角カナ表示（英小文字位置をカナ解釈。ACS の表示コード切替） */
-  katakanaView: false,
-  /** 画面テキストの URL/メールをリンク化（既定 ON） */
-  linkify: true,
-
   init(): void {
     this.root = newGroup();
     this.focusedGroupId = (this.root as GroupNode).id;
