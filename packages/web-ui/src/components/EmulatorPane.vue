@@ -5,10 +5,13 @@ import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";
 import SysReqLine from "./SysReqLine.vue";
+import WatermarkOverlay from "./WatermarkOverlay.vue";
 import { viewSettings } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { systemsStore } from "../stores/systems.js";
+import { resolveWatermark } from "../composables/watermark.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
@@ -31,6 +34,32 @@ const paneEl = ref<HTMLElement | null>(null);
 
 const state = computed(() => sessionsStore.get(props.sessionId));
 const snapshot = computed(() => state.value?.snapshot);
+
+/**
+ * ウォーターマーク（画面に重ねる透かし）。
+ *
+ * 設定は**セッション設定を直に引く**（接続時にコピーを持ち回らない）。表示だけの設定なので
+ * ホストへ渡す必要がなく、設定を保存した瞬間に開いているセッションへも反映される。
+ * 直接指定で開いたセッション（`configRef` なし）は設定が無い＝透かしも出ない。
+ */
+const watermarkConfig = computed(() => {
+  const cfgRef = state.value?.configRef;
+  return cfgRef ? systemsStore.sessions.find((s) => s.ref === cfgRef)?.watermark : undefined;
+});
+const watermark = computed(() => {
+  const s = state.value;
+  if (!s) return undefined;
+  // 装置名・ユーザーは**実際に割り当てられた値**（ジョブ）を優先する。
+  // ホスト採番や手サインオンでは設定値と食い違い、設定値の方は嘘になる
+  return resolveWatermark(watermarkConfig.value, {
+    host: s.meta?.host,
+    port: s.meta?.port !== undefined ? String(s.meta.port) : undefined,
+    system: systemsStore.systems.find((x) => x.ref === s.systemRef)?.name,
+    session: s.label,
+    device: s.job?.name ?? s.meta?.deviceName,
+    user: s.job?.user ?? s.meta?.signonUser
+  });
+});
 // 通信中（ホスト応答待ち）は入力プロテクト。loading は 0.5 秒超でスピナー表示
 const busy = computed(() => state.value?.busy ?? false);
 const loading = computed(() => state.value?.loading ?? false);
@@ -705,6 +734,11 @@ function onWheel(ev: WheelEvent): void {
         @aid="onFkeyAid"
       />
       <div v-else class="pane-empty">接続待ち…</div>
+      <!--
+        ウォーターマーク（セッション設定）。**重ねるだけ**で文字・桁・ホスト色に触れない。
+        画面領域いっぱいに敷くため .screen-wrap の中に置く（フッターは覆わない）。
+      -->
+      <WatermarkOverlay v-if="watermark" :watermark="watermark" />
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->
       <div v-if="busy" class="busy-overlay" :class="{ loading }" aria-busy="true">
         <div v-if="loading" class="spinner" role="status" aria-label="通信中"></div>

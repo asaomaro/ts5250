@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { PublicSystem, PublicSession } from "@as400web/server";
+import type { PublicSystem, PublicSession, Watermark } from "@as400web/server";
 
 /**
  * システムとセッション設定（サーバー保存・単一の真実）。
@@ -43,6 +43,12 @@ export interface SessionConfigForm {
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;
+  /**
+   * display のみ。画面に重ねる透かし（表示だけの設定。ホストへは送らない）。
+   * **省略して送ると消える**——更新はオブジェクトごと置き換えるため、
+   * フォームは編集しない場合でも読み込んだ値を送り返す。
+   */
+  watermark?: Watermark;
   /**
    * printer のみ。書き出しできないスプールを取得したあとの扱い。
    * `hold`（既定）＝保留にして残す / `delete`＝削除する

@@ -26,6 +26,42 @@ export const printerSchema = z.object({
 });
 export type PrinterConfig = z.infer<typeof printerSchema>;
 
+/**
+ * ウォーターマーク（画面に重ねる透かし）。ACS の透かしと同じ用途——
+ * **本番機と検証機を一目で見分ける**ために、画面全体へ薄く文字を敷く。
+ *
+ * **信頼設定ではない**（サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れず、
+ * 描くのは要求元のブラウザだけ）。したがって個人設定にも持たせる＝`sessionBase` に置く。
+ * ホストへは一切送らない（`ConnectOptions` に写さない）表示だけの設定である。
+ */
+export const watermarkSchema = z
+  .object({
+    /** 透かしの文字。`{host}` 等の差し込み変数を含められる（展開はブラウザ側） */
+    text: z.string().min(1).max(120),
+    /** 表示するか（既定 true）。**文字を消さずに切れる**ようにするための独立したスイッチ */
+    enabled: z.boolean().optional(),
+    /** 濃さ（0.02〜1）。既定はブラウザ側の WATERMARK_DEFAULTS */
+    opacity: z.number().min(0.02).max(1).optional(),
+    /** 文字の大きさ（px） */
+    size: z.number().int().min(8).max(200).optional(),
+    /** 敷き方: `tile`＝画面全体に並べる / `center`＝中央に 1 つ */
+    layout: z.enum(["tile", "center"]).optional(),
+    /** 回転角（度。-90〜90） */
+    angle: z.number().int().min(-90).max(90).optional(),
+    /**
+     * 色（`#rrggbb`）。省略時は端末の前景色（`--t-white`）に追従する。
+     *
+     * **書式を正規表現で縛るのは意図的**——この値はブラウザで CSS の色としてそのまま使われる。
+     * 任意の文字列を通すと `red; background: url(...)` のように別の宣言を混ぜられる。
+     */
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, "color must be #rrggbb")
+      .optional()
+  })
+  .strict();
+export type Watermark = z.infer<typeof watermarkSchema>;
+
 /** 自動サインオンの資格情報。**システムだけが持つ**（セッション設定は持たない） */
 export const signonSchema = z
   .object({
@@ -94,7 +130,9 @@ const sessionBase = {
   /** システムの既定 CCSID を上書きする */
   ccsid: z.number().int().optional(),
   /** display のみ意味を持つ */
-  enhanced: z.boolean().optional()
+  enhanced: z.boolean().optional(),
+  /** display のみ意味を持つ。画面に重ねる透かし（表示だけの設定） */
+  watermark: watermarkSchema.optional()
 };
 
 /**
@@ -200,5 +238,7 @@ export interface PublicSession {
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;
+  /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */
+  watermark?: Watermark;
   owner?: string;
 }
