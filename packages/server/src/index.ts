@@ -17,6 +17,7 @@ export {
   type PublicSystem,
   type PublicSession,
   type PrinterConfig,
+  type Watermark,
   type ConfigSource
 } from "./config-types.js";
 export {

@@ -12,6 +12,7 @@ import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
+import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
 
 const props = defineProps<{
   kind: "system" | "session";
@@ -83,6 +84,25 @@ const sesForm = reactive<SesFormState>({
   transformTo: ""
 });
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
+/**
+ * ウォーターマーク（表示セッションのみ）。
+ *
+ * 保存値は `sesForm` に混ぜず**別の状態に開く**——濃さは保存が 0〜1・入力が % で単位が違い、
+ * 色は「既定に従う」と「指定する」の 2 段階だからである。保存時に 1 つのオブジェクトへ畳む。
+ */
+const wmForm = reactive({
+  enabled: false,
+  text: "",
+  opacityPct: Math.round(WATERMARK_DEFAULTS.opacity * 100),
+  size: WATERMARK_DEFAULTS.size as number,
+  layout: WATERMARK_DEFAULTS.layout as "tile" | "center",
+  angle: WATERMARK_DEFAULTS.angle as number,
+  /** false＝端末の前景色に追従（テーマ・スキンに合う）。true のときだけ color を送る */
+  useColor: false,
+  color: "#808080"
+});
+/** 透かしの文字に使える差し込み変数（`{host}` 等）の説明 */
+const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / ");
 
 /** 編集対象がサーバー設定か（信頼設定の欄を出すかの判定に使う） */
 const isServer = computed(() => {
@@ -121,6 +141,7 @@ function loadSession(): void {
     sesForm.system = props.parentSystem ?? systemsStore.selected ?? "";
     return;
   }
+  loadWatermark(s.watermark);
   sesForm.name = s.name;
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
@@ -130,6 +151,45 @@ function loadSession(): void {
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
+}
+
+/** 保存値をフォームへ開く（未設定なら既定のまま＝文字が空＝透かしなし） */
+function loadWatermark(wm: PublicSession["watermark"]): void {
+  // 設定があれば既定は表示。`enabled: false` は「文字を残したまま切ってある」状態
+  wmForm.enabled = wm !== undefined && wm.enabled !== false;
+  wmForm.text = wm?.text ?? "";
+  wmForm.opacityPct = Math.round((wm?.opacity ?? WATERMARK_DEFAULTS.opacity) * 100);
+  wmForm.size = wm?.size ?? WATERMARK_DEFAULTS.size;
+  wmForm.layout = wm?.layout ?? WATERMARK_DEFAULTS.layout;
+  wmForm.angle = wm?.angle ?? WATERMARK_DEFAULTS.angle;
+  wmForm.useColor = wm?.color !== undefined;
+  wmForm.color = wm?.color ?? "#808080";
+}
+
+/** 数値入力を範囲に収める（空欄にすると NaN が入るので、そのときは既定へ戻す） */
+function clamp(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * フォームを保存値へ畳む。**文字が空なら設定ごと無し**にする——
+ * 文字の無い透かしは描きようがなく、既定値だけの残骸を設定ファイルに残さないため。
+ */
+function buildWatermark(): SessionConfigForm["watermark"] {
+  const text = wmForm.text.trim();
+  if (!text) return undefined;
+  const wm: NonNullable<SessionConfigForm["watermark"]> = {
+    text,
+    opacity: clamp(wmForm.opacityPct, 2, 100, 12) / 100,
+    size: clamp(wmForm.size, 8, 200, WATERMARK_DEFAULTS.size),
+    layout: wmForm.layout,
+    angle: clamp(wmForm.angle, -90, 90, WATERMARK_DEFAULTS.angle)
+  };
+  // 既定（表示する）は書かない。切ってあるときだけ明示する
+  if (!wmForm.enabled) wm.enabled = false;
+  if (wmForm.useColor) wm.color = wmForm.color;
+  return wm;
 }
 
 watch(
@@ -210,9 +270,14 @@ async function save(): Promise<void> {
         if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
         delete form.screenSize;
         delete form.enhanced;
+        delete form.watermark; // 透かしは画面のもの。プリンターには持たせない
       } else {
         // display は printer 専用項目を送らない
         delete form.rescueAction;
+        // 更新はオブジェクトごと置き換えなので、**編集していなくても送り返す**（省略＝削除になる）
+        const wm = buildWatermark();
+        if (wm) form.watermark = wm;
+        else delete form.watermark;
       }
       if (canEditPrinter.value) {
         const p: NonNullable<SessionConfigForm["printer"]> = {};
@@ -313,6 +378,11 @@ const infoRows = computed(() => {
     });
   }
   if (o.screenSize) rows.push({ label: "画面サイズ", value: o.screenSize });
+  if (o.watermark) {
+    const wm = o.watermark;
+    const off = wm.enabled === false ? "（非表示）" : "";
+    rows.push({ label: "ウォーターマーク", value: `${wm.text}${off}` });
+  }
   rows.push({
     label: "CCSID",
     value: o.ccsid !== undefined ? String(o.ccsid) : `システムの既定${parent?.ccsid ? `（${parent.ccsid}）` : ""}`
@@ -469,6 +539,59 @@ const infoRows = computed(() => {
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
         </label>
+      </div>
+
+      <!--
+        ウォーターマーク（表示セッションのみ）。文字を入れて初めて設定になるので、
+        文字を先頭に置き、細かい見え方は文字があるときだけ出す。
+      -->
+      <div v-if="kind === 'session' && sesForm.sessionType === 'display'" class="wmsec">
+        <div class="wmlabel">ウォーターマーク（画面に重ねる透かし）</div>
+        <div class="fgrid">
+          <!-- 文字が設定の本体。長い説明を折り返さずに置くため 1 行を全幅で使う -->
+          <label class="row full">
+            <span class="cap">文字</span>
+            <input v-model="wmForm.text" placeholder="例: 本番 {system}" />
+            <span class="hint">空欄なら透かしを出しません。差し込み変数: {{ WM_VAR_HINT }}</span>
+          </label>
+          <template v-if="wmForm.text.trim()">
+            <label class="row">
+              <span class="cap">表示</span>
+              <input v-model="wmForm.enabled" type="checkbox" />
+              <span class="hint">文字を残したまま切れます</span>
+            </label>
+            <label class="row">
+              <span class="cap">配置</span>
+              <select v-model="wmForm.layout">
+                <option value="tile">並べる（画面全体）</option>
+                <option value="center">中央に 1 つ</option>
+              </select>
+            </label>
+            <!-- 単位はラベルに入れる（説明行を足すと欄ごとに 1 行ずつ縦に伸びるため） -->
+            <label class="row">
+              <span class="cap">濃さ（%）</span>
+              <input v-model.number="wmForm.opacityPct" type="number" min="2" max="100" step="1" />
+            </label>
+            <label class="row">
+              <span class="cap">大きさ（px）</span>
+              <input v-model.number="wmForm.size" type="number" min="8" max="200" step="1" />
+            </label>
+            <label class="row">
+              <span class="cap">角度（度）</span>
+              <input v-model.number="wmForm.angle" type="number" min="-90" max="90" step="5" />
+            </label>
+            <label class="row">
+              <span class="cap">色</span>
+              <span class="colorpick">
+                <select v-model="wmForm.useColor">
+                  <option :value="false">画面の文字色に合わせる</option>
+                  <option :value="true">指定する</option>
+                </select>
+                <input v-if="wmForm.useColor" v-model="wmForm.color" type="color" aria-label="透かしの色" />
+              </span>
+            </label>
+          </template>
+        </div>
       </div>
 
       <!-- 信頼設定。サーバー設定のプリンターセッションで、編集権限があるときだけ -->
@@ -720,6 +843,41 @@ const infoRows = computed(() => {
   font-size: 0.74rem;
   font-weight: 700;
   color: var(--accent);
+}
+/* ウォーターマーク。**信頼設定（.trusted）とは別の意匠**にする——
+   アクセントの縦帯は「サーバー側に効く設定」の合図なので、表示だけの設定には使わない */
+.wmsec {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.wmlabel {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+/* 説明が長い行は全幅で使う（2 列に収めると折り返して行数が増える） */
+.row.full {
+  grid-column: 1 / -1;
+}
+/* 色: セレクトと見本を 1 行に収める（見本だけの行を足すと縦に伸びる） */
+.colorpick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.colorpick select {
+  flex: 1;
+  min-width: 0;
+}
+.row input[type="color"] {
+  width: 40px;
+  height: 24px;
+  flex: none;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
 }
 .editfoot {
   margin-top: 14px;
