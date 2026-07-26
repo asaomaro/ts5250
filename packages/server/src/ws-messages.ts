@@ -1,5 +1,6 @@
 import type { ScreenSnapshot } from "@as400web/core";
 import type { SessionJob } from "./session-manager.js";
+import type { MacroSecretRef } from "./macro-types.js";
 
 /** WebSocket メッセージ型（server が定義し web-ui が type-only import で共有。spec「Web 向けプロトコル」） */
 
@@ -25,15 +26,32 @@ export interface WsOpen {
   password?: string;
   readOnly?: boolean;
 }
+/** フィールドの指し方（index、または画面座標） */
+export type WsFieldRef = number | { row: number; col: number };
+
+/**
+ * 1 フィールドへの書き込み。値そのものか、**マクロの秘密への参照**のいずれか（spec D11）。
+ *
+ * 参照形にしているのは、マクロに保存したパスワードを**ブラウザに一度も渡さない**ため。
+ * クライアントは平文も暗号文も持たず、サーバーが所有者を検証したうえで復号し、
+ * ホストへ書く直前に値へ差し替える（`ws-handler.onKey`）。
+ */
+export type WsKeyField =
+  | { field: WsFieldRef; value: string }
+  | { field: WsFieldRef; secretRef: MacroSecretRef };
+
 export interface WsKey {
   type: "key";
   key: string;
   cursor?: { row: number; col: number };
-  fields?: { field: number | { row: number; col: number }; value: string }[];
+  fields?: WsKeyField[];
   /**
    * **SysReq のときだけ意味を持つ**: システム要求行に打たれた文字列。
    * 別メッセージ型にしないのは、readOnly ゲート・監査・busy 対応付けといった歯止めを
    * key 経路と二重に書かないため（片方への付け忘れを構造的に防ぐ）。
+   *
+   * **マクロの秘密（`fields[].secretRef`）を別経路にしなかったのも同じ理由**——
+   * 秘密こそ readOnly ゲートと監査を確実に通す必要がある（spec D11）。
    */
   sysReqText?: string;
 }

@@ -4,7 +4,9 @@ import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
 import { withAudit } from "./audit.js";
-import type { WsClientMessage, WsServerMessage } from "./ws-messages.js";
+import type { WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
+import type { MacroStore } from "./macro-store.js";
+import { macroSecretRefSchema } from "./macro-types.js";
 
 const wsLog = childLog({ component: "ws-handler" });
 
@@ -12,6 +14,11 @@ export interface WsHandlerDeps {
   sessions: SessionManager;
   /** 接続設定の唯一の解決点（system / session 参照 → 接続オプション） */
   resolver: ConfigResolver;
+  /**
+   * マクロのストア。**再生時の秘密の解決だけ**に使う（spec D11）。
+   * 未指定なら秘密参照を含むキー送信は拒否される（黙って空文字で送らない）。
+   */
+  macros?: MacroStore;
 }
 
 /** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
@@ -204,8 +211,12 @@ export class WsConnection {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
       if (msg.fields && msg.fields.length > 0) {
         this.deps.sessions.assertWritable(id, this.user);
-        for (const f of msg.fields) {
-          entry.session.setField(typeof f.field === "number" ? { index: f.field } : f.field, f.value);
+        // **秘密の解決はフィールドを 1 つでも書く前に済ませる**（spec D11）。
+        // 途中で失敗して throw すると、それまでに書いた欄だけがホストに残り、
+        // 「ユーザー名は入ったがパスワードは空」という中途半端な状態で AID を待つことになる。
+        const values = msg.fields.map((f) => this.resolveField(f));
+        for (const { field, value } of values) {
+          entry.session.setField(typeof field === "number" ? { index: field } : field, value);
         }
       }
       // 応答画面は session の screen イベントで push される。
@@ -219,6 +230,31 @@ export class WsConnection {
       });
       this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
     });
+  }
+
+  /**
+   * 書き込む 1 欄を「値」に確定する。マクロの秘密参照ならここで復号する（spec D11）。
+   *
+   * **平文はこの関数の戻り値としてしか存在しない**——ログにも監査にも残さず、
+   * `setField` へ渡してそのまま捨てる。`ws_key` 監査には既に `key` が載っており、
+   * どのマクロを再生したかは参照（macroId/step/field）だけで追える。
+   *
+   * 解決できないときは throw して**キー送信自体を落とす**。空文字で代替すると、
+   * ホストには「パスワード欄が空」で届き、サインオン失敗の原因が分からなくなる。
+   */
+  private resolveField(f: WsKeyField): { field: WsFieldRef; value: string } {
+    if ("value" in f) return { field: f.field, value: f.value };
+    const store = this.deps.macros;
+    if (!store) {
+      throw new As400Error("CONFIG_ERROR", "macro store is not configured; cannot replay macro secrets");
+    }
+    // ws メッセージは JSON.parse したままの生データ。**秘密を守る経路なので形を検証する**——
+    // 検証せずに渡すと、壊れた参照が素の TypeError になって JS のエラー文がそのまま client へ返る
+    const ref = macroSecretRefSchema.safeParse(f.secretRef);
+    if (!ref.success) {
+      throw new As400Error("PROTOCOL_ERROR", `invalid secretRef: ${ref.error.message}`);
+    }
+    return { field: f.field, value: store.resolveSecret(ref.data, this.user) };
   }
 
   private async onGuiSelect(msg: WsClientMessage & { type: "gui-select" }): Promise<void> {
