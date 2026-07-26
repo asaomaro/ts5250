@@ -38,7 +38,6 @@ export type {
 // セッション（ConnectOptions に RFC 4777 自動サインオンの user/password を含む。decisions.md D3）
 export {
   Session5250,
-  FLAG_KEY_TIMEOUT_MS,
   type ConnectOptions,
   type SessionState,
   type SendAidOptions,

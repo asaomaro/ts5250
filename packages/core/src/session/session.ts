@@ -63,18 +63,9 @@ export interface ConnectOptions {
   traceRecords?: boolean;
 }
 
-/**
- * Attn / SysReq の応答待ち（既定 5 秒）。
- *
- * ホストがこれらを**黙って無視することが正常にあり得る**ため、画面を返す前提の AID（既定 30 秒）
- * とは別の待ち時間にする。実機（LAN）では 1 回目の Attn が送信から 40ms 以内に返るので
- * 5 秒は十分な余裕があり、無視されたときも「固まった」と感じない範囲。
- */
-export const FLAG_KEY_TIMEOUT_MS = 5_000;
-
 export interface SendAidOptions {
   cursor?: { row: number; col: number };
-  /** キーボードアンロック待ちのタイムアウト（既定 30 秒。Attn / SysReq は 5 秒） */
+  /** キーボードアンロック待ちのタイムアウト（既定 30 秒。Attn / SysReq は待たないので無効） */
   timeoutMs?: number;
   /**
    * **SysReq 専用**: システム要求行に打たれた文字列。セッションの CCSID で EBCDIC 化して
@@ -273,13 +264,18 @@ export class Session5250 extends Emitter<SessionEvents> {
   sendAid(key: AidKey, opts: SendAidOptions = {}): Promise<SendAidResult> {
     this.assertReady();
     const record = this.buildAidRecord(key, opts.cursor, opts.sysReqText);
-    // Attn / SysReq は**ホストが黙って無視することが正常にあり得る**（ATNPGM が既に前面のとき等。
-    // 実機で 2 回目の Attn に受信ゼロを確認）。画面を返す前提の AID と同じ 30 秒を待つと、
-    // その間 UI が入力プロテクトのままになり固まって見える。**早く戻しても取りこぼさない**——
-    // ホストが遅れて送ってきた画面は screen イベントで届く。
-    const isFlagKey = key === "Attn" || key === "SysReq";
-    const timeoutMs = opts.timeoutMs ?? (isFlagKey ? FLAG_KEY_TIMEOUT_MS : undefined);
-    return this.sendAndWait(record, timeoutMs);
+    if (key === "Attn" || key === "SysReq") {
+      // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
+      // （ATNPGM が既に前面のとき等。実機で 2 回目の Attn に受信ゼロを確認）。
+      // ACS も 2 回目では何も起きない——待って何か出すのは ACS に無い反応になる。
+      //
+      // **待たなくても取りこぼさない**: 1 回目で窓が出るのはホストが「その後に」画面を送るからで、
+      // それは handleRecord → screen イベントで届く。sendAid の解決は busy（多重送信プロテクト）を
+      // 解く合図にすぎない。`locked` にもしない——応答が来ない 2 回目でロックが残り 🔒 が消えなくなる。
+      this.telnet.sendRecord(record);
+      return Promise.resolve({ screen: this.snapshot(), timedOut: false });
+    }
+    return this.sendAndWait(record, opts.timeoutMs);
   }
 
   /** AID キー名 → 送信レコード。SysReq/Attn はヘッダフラグ、他は Read MDT 応答 */
