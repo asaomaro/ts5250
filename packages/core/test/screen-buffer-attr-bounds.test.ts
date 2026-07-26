@@ -88,3 +88,43 @@ describe("表示属性の打ち切り位置", () => {
     expect(underlinedCols(b)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
   });
 });
+
+/**
+ * **引き継いだ境界は、ホストがその行を書き直したら捨てる。**
+ *
+ * 引き継ぎを無条件に持ち続けると、窓が重なった行で古い境界が生き残り、
+ * **窓のタイトル帯の反転が途中で切れる**（実機の PDM ＋ Attn で 29 桁目で切れた）。
+ * 行を書き直すのは「そこのレイアウトはもう別物」という意味なので、その行の引き継ぎは無効にする。
+ */
+describe("引き継いだ境界の行単位の失効", () => {
+  const REV_WHITE = 0x23; // 白・反転
+
+  it("窓がその行を描き直したら、引き継いだ境界で帯が切れない", () => {
+    const b = new ScreenBuffer();
+    // 背面: 5 行目に欄（→ 終端は 17 桁目）
+    b.setAttr(b.addrOf(ROW, ATTR_COL), UNDERLINE_GREEN);
+    b.addField(b.addrOf(ROW, FIELD_COL), LEN, FFW.ID_VALUE, UNDERLINE_GREEN);
+    b.clearFormatTable(); // 窓の WTD の SOH
+
+    // 窓が同じ行を描き直す: 8 桁目に反転属性 → 9 桁目以降を埋める
+    b.setAttr(b.addrOf(ROW, 8), REV_WHITE);
+    for (let c = 9; c <= 40; c++) b.setChar(b.addrOf(ROW, c), " ");
+
+    const row = b.snapshot("t", false).cells[ROW - 1] ?? [];
+    const reversed = row.map((c, i) => (c.reverse ? i + 1 : 0)).filter(Boolean);
+    // 17 桁目で切れず、埋めた範囲すべてが反転している
+    expect(reversed).toContain(17);
+    expect(reversed).toContain(40);
+  });
+
+  it("書き直していない行の引き継ぎは残る（背面の下線は伸びない）", () => {
+    const b = new ScreenBuffer();
+    b.setAttr(b.addrOf(ROW, ATTR_COL), UNDERLINE_GREEN);
+    b.addField(b.addrOf(ROW, FIELD_COL), LEN, FFW.ID_VALUE, UNDERLINE_GREEN);
+    b.clearFormatTable();
+    // 別の行（窓）だけを描く
+    b.setAttr(b.addrOf(20, 8), REV_WHITE);
+    for (let c = 9; c <= 40; c++) b.setChar(b.addrOf(20, c), " ");
+    expect(underlinedCols(b)).toEqual([11, 12, 13, 14, 15, 16]);
+  });
+});

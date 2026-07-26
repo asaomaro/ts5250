@@ -103,7 +103,7 @@ export class ScreenBuffer {
     this.cols = cols;
     this.cells = new Array<InternalCell>(rows * cols).fill(null);
     this.fields = [];
-    this.attrBounds.clear(); // 画面の中身ごと消えるので表示境界も捨てる
+    this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
     this.clearGui();
@@ -199,15 +199,20 @@ export class ScreenBuffer {
   }
 
   /**
-   * **表示属性の打ち切り位置**（フィールド開始アドレス → 終端アドレス）。
+   * **フォーマットテーブルを消されたときに引き継ぐ、表示属性の打ち切り位置**（終端アドレス）。
    *
    * 下線・色はフィールド長で打ち切る（`docs/PROTOCOL.md` 4.3。閉じ属性を送らないアプリで
-   * 非編集エリアへ漏れるのを防ぐ ACS 準拠の処置）。その境界を **`fields` とは別に持つ**のが要点——
-   * ホストは窓を重ねるとき SOH でフォーマットテーブルを消すことがあり（実機の Attn で
-   * フィールドが 44 → 2 になる）、境界を `fields` から引いていると**画面の中身は変わっていないのに
-   * 背面の下線が伸びる**。入力の受け皿（`fields`）と表示の見え方は別物として扱う。
+   * 非編集エリアへ漏れるのを防ぐ ACS 準拠の処置）。境界の記録は `fields` だけなので、
+   * ホストが窓を重ねるとき SOH でテーブルを消すと（実機の Attn でフィールドが
+   * 44 → 2 になる）**画面の中身は変わっていないのに背面の下線が伸びる**。そこで消される直前の
+   * 終端をここへ引き継ぐ。
+   *
+   * **ホストがその行を書き直したら捨てる。** 引き継いだ境界を無条件に持ち続けると、窓が重なった行で
+   * 古い境界が生き残り、**窓のタイトル帯の反転が途中で切れる**（実機の PDM ＋ Attn で 29 桁目で
+   * 切れていた）。行を書き直すのは「そこのレイアウトはもう別物」という意味なので、その行の
+   * 引き継ぎは無効にする。
    */
-  private attrBounds = new Map<number, number>();
+  private retainedEnds = new Set<number>();
 
   private savedStack: {
     /**
@@ -220,7 +225,7 @@ export class ScreenBuffer {
     cells: InternalCell[];
     fields: InternalField[];
     cursorAddr: number;
-    attrBounds: Map<number, number>;
+    retainedEnds: Set<number>;
     guiSelections: GuiSelectionField[];
     guiWindows: GuiWindow[];
     guiScrollBars: GuiScrollBar[];
@@ -234,7 +239,7 @@ export class ScreenBuffer {
     }
     this.cells.fill(null);
     this.fields = [];
-    this.attrBounds.clear(); // 画面の中身ごと消えるので表示境界も捨てる
+    this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
     this.clearGui();
@@ -254,7 +259,7 @@ export class ScreenBuffer {
       cells: this.cells.map((c) => (c === null ? null : { ...c })),
       fields: this.fields.map((f) => ({ ...f })),
       cursorAddr: this.cursorAddr,
-      attrBounds: new Map(this.attrBounds),
+      retainedEnds: new Set(this.retainedEnds),
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
       guiScrollBars: this.guiScrollBars.map((b) => ({ ...b }))
@@ -270,7 +275,7 @@ export class ScreenBuffer {
     this.cells = saved.cells;
     this.fields = saved.fields;
     this.cursorAddr = saved.cursorAddr;
-    this.attrBounds = saved.attrBounds;
+    this.retainedEnds = saved.retainedEnds;
     this.guiSelections = saved.guiSelections;
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
@@ -278,22 +283,37 @@ export class ScreenBuffer {
   }
 
   /**
-   * CLEAR FORMAT TABLE / SOH: 入力の受け皿だけを消す。
-   * **表示属性の打ち切り位置（`attrBounds`）は消さない**——画面の中身は変わっていないのに
-   * 下線が伸びてしまうため（`attrBounds` のコメント参照）。
+   * CLEAR FORMAT TABLE / SOH: 入力の受け皿を消す。
+   * **表示属性の打ち切り位置は `retainedEnds` へ引き継ぐ**——画面の中身は変わっていないのに
+   * 下線が伸びてしまうため（`retainedEnds` のコメント参照）。
    */
   clearFormatTable(): void {
+    for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
+  }
+
+  /**
+   * その桁を含む行の引き継ぎ境界を捨てる（セル書き込みのたびに呼ぶ）。
+   * ホストがその行を書き直したなら、前の画面の欄の終端はもう当てにならない。
+   */
+  private dropRetainedInRow(addr: number): void {
+    if (this.retainedEnds.size === 0) return; // 通常はここで抜ける（走査しない）
+    const row = Math.floor(addr / this.cols);
+    for (const e of this.retainedEnds) {
+      if (Math.floor(e / this.cols) === row) this.retainedEnds.delete(e);
+    }
   }
 
   setChar(addr: number, char: string, rawByte?: number): void {
     this.checkAddr(addr);
+    this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char, charKind: "sbcs", ...(rawByte !== undefined ? { rawByte } : {}) };
   }
 
   /** SO/SI 制御桁を配置（見た目は空白・1 桁占有。DBCS 桁位置維持の要） */
   setShift(addr: number, kind: "so" | "si"): void {
     this.checkAddr(addr);
+    this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char: " ", charKind: kind };
   }
 
@@ -302,6 +322,7 @@ export class ScreenBuffer {
    *  （SO/SI の空/不整合を含め忠実に送るため。fieldValue の忠実パスが使う）。 */
   setDbcs(addr: number, char: string, lead?: number, tail?: number): void {
     this.checkAddr(addr);
+    this.dropRetainedInRow(addr);
     this.checkAddr(addr + 1);
     this.cells[addr] = { type: "char", char, charKind: "dbcs-lead", ...(lead !== undefined ? { rawByte: lead } : {}) };
     this.cells[addr + 1] = { type: "char", char: "", charKind: "dbcs-tail", ...(tail !== undefined ? { rawByte: tail } : {}) };
@@ -309,6 +330,7 @@ export class ScreenBuffer {
 
   setAttr(addr: number, byte: number): void {
     this.checkAddr(addr);
+    this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "attr", byte };
   }
 
@@ -316,6 +338,8 @@ export class ScreenBuffer {
   eraseRange(from: number, to: number): void {
     this.checkAddr(from);
     this.checkAddr(to);
+    this.dropRetainedInRow(from);
+    this.dropRetainedInRow(to);
     for (let i = from; i <= to; i++) this.cells[i] = null;
   }
 
@@ -333,14 +357,10 @@ export class ScreenBuffer {
     }
     // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）
     this.fields = this.fields.filter((f) => f.startAddr !== startAddr);
-    // 表示境界を記録する。**新しい欄の範囲に掛かる古い境界は捨てる**——同じ場所を別レイアウトで
-    // 描き直したとき、消えたはずの欄の境界が残って下線が早く切れるのを防ぐ。重ならない場所
-    // （窓の背面など）の境界はそのまま残り、ホストが SOH を送っても見え方が変わらない。
-    const end = startAddr + length;
-    for (const [s0, e0] of this.attrBounds) {
-      if (s0 !== startAddr && s0 < end && startAddr < e0) this.attrBounds.delete(s0);
+    // 新しい欄が占める範囲に掛かる引き継ぎ境界は捨てる（その場所はもう別レイアウト）
+    for (const e of this.retainedEnds) {
+      if (e > startAddr && e <= startAddr + length) this.retainedEnds.delete(e);
     }
-    this.attrBounds.set(startAddr, end);
     this.fields.push({
       startAddr,
       length,
@@ -540,8 +560,9 @@ export class ScreenBuffer {
     // フィールド属性はフィールド長で境界付ける（ACS 準拠）。閉じ属性を送らないアプリ（PDM 等）で
     // 下線・カラー等の属性がフィールドを越えて非編集エリアへ漏れるのを防ぐため、フィールド終端
     // （startAddr+length）に明示属性が無ければ既定属性へ戻す。
-    // 打ち切り位置は `attrBounds`（フォーマットテーブルとは独立）から引く
-    const fieldEnds = new Set<number>(this.attrBounds.values());
+    // 打ち切り位置＝現在の欄の終端 ＋ SOH で消される前から引き継いだ終端
+    const fieldEnds = new Set<number>(this.retainedEnds);
+    for (const f of this.fields) fieldEnds.add(f.startAddr + f.length);
     let attr = DEFAULT_ATTR;
     for (let r = 0; r < this.rows; r++) {
       const rowCells: Cell[] = [];
