@@ -3,16 +3,14 @@ rem Keep this file ASCII-only: cmd.exe on a cp932 console mis-parses multibyte
 rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
 rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
 chcp 65001 >nul
-rem AS400 5250 emulator - Electron desktop launcher (Windows)
-rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> launch Electron
+rem AS400 5250 emulator - Electron desktop packager (Windows)
+rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> build exe (installer)
 rem
 rem Usage:
-rem   electron.bat            auto-build if not built, then launch
-rem   electron.bat --build    force rebuild
+rem   electron.bat            auto-build if not built, then build the exe (installer)
+rem   electron.bat --build    force rebuild, then build the exe (installer)
 rem
-rem Packaging (build installer):
-rem   npm run build ^&^& npm run build -w @as400web/web-ui
-rem   cd electron ^&^& npm install ^&^& npm run dist
+rem The generated installer is written to electron\dist\ .
 setlocal
 cd /d "%~dp0"
 
@@ -47,7 +45,8 @@ if not exist electron\node_modules (
   popd
 )
 
-echo ==^> launching Electron
+echo ==^> building exe ^(electron-builder^)
 cd electron
-call npm start
+call npm run dist
+echo ==^> done. installer is in electron\dist\
 endlocal
