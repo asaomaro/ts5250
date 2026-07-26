@@ -2335,8 +2335,12 @@ onBeforeUnmount(() => {
   text-shadow: var(--t-glow) currentColor;
 }
 /* 画面の質感=CRT: フォスファのにじみを強め、文字が滲む CRT らしい見た目にする。
-   （フラットは --t-glow:0 で滲み無し。CRT はテーマに依らずここで確実に滲ませる） */
-.pane[data-surface="crt"] .grid-span {
+   （フラットは --t-glow:0 で滲み無し。CRT はテーマに依らずここで確実に滲ませる）
+   **画面に文字を出す要素すべてに掛ける**——素のラン(.grid-span)だけでなく、入力欄(input)と
+   拡張 GUI の選択肢も対象。要素が違うだけで、利用者にはどれも同じ「画面の文字」に見える。 */
+.pane[data-surface="crt"] .grid-span,
+.pane[data-surface="crt"] .grid-input,
+.pane[data-surface="crt"] .gui-choice-text {
   text-shadow:
     0 0 1.2px currentColor,
     0 0 5px color-mix(in srgb, currentColor 45%, transparent);
