@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import type { AidKey } from "@as400web/core";
-import { keybindingsStore, comboOf } from "../stores/keybindings.js";
+import { keybindingsStore, comboOf, isViewBinding, viewKeyOf, type BindingTarget } from "../stores/keybindings.js";
+import { VIEW_ITEMS, viewItem, viewSettings } from "../stores/viewSettings.js";
 
 defineEmits<{ (e: "close"): void }>();
 
@@ -13,7 +14,16 @@ const AID_KEYS: AidKey[] = [
 
 const capturing = ref(false);
 const newCombo = ref("");
-const newAid = ref<AidKey>("F1");
+const newTarget = ref<BindingTarget>("F1");
+
+/** 割当先の表示名。表示設定は「項目名（順送り）＋現在値」で分かるようにする。 */
+function targetLabel(t: string): string {
+  if (!isViewBinding(t)) return t;
+  const item = viewItem(viewKeyOf(t));
+  if (!item) return t;
+  const cur = item.opts.find((o) => o.value === viewSettings.settings[item.key]);
+  return `${item.label}（順送り${cur ? `・現在: ${cur.label}` : ""}）`;
+}
 
 function captureKey(ev: KeyboardEvent): void {
   if (!capturing.value) return;
@@ -23,7 +33,7 @@ function captureKey(ev: KeyboardEvent): void {
   capturing.value = false;
 }
 function add(): void {
-  if (newCombo.value) keybindingsStore.set(newCombo.value, newAid.value);
+  if (newCombo.value) keybindingsStore.set(newCombo.value, newTarget.value);
   newCombo.value = "";
 }
 </script>
@@ -36,13 +46,16 @@ function add(): void {
         <button class="x" @click="$emit('close')">✕</button>
       </div>
 
-      <p class="hint">既定（F1–F24・Enter・PageUp/Down 等）に加え、任意のキーコンボを AID に割り当てられます。</p>
+      <p class="hint">
+        既定（F1–F24・Enter・PageUp/Down 等）に加え、任意のキーコンボを AID キーや<b>表示設定の切り替え</b>に
+        割り当てられます。表示設定は押すたびに次の値へ順送りし、切り替わると画面下部に通知が出ます。
+      </p>
 
       <table class="kb-table">
         <tbody>
-          <tr v-for="(aid, combo) in keybindingsStore.bindings" :key="combo">
+          <tr v-for="(target, combo) in keybindingsStore.bindings" :key="combo">
             <td><code>{{ combo }}</code></td>
-            <td>→ {{ aid }}</td>
+            <td>→ {{ targetLabel(String(target)) }}</td>
             <td><button class="del" @click="keybindingsStore.remove(String(combo))">削除</button></td>
           </tr>
           <tr v-if="Object.keys(keybindingsStore.bindings).length === 0">
@@ -56,8 +69,15 @@ function add(): void {
           {{ capturing ? "キーを押してください…" : newCombo || "キーを設定" }}
         </button>
         <span>→</span>
-        <select v-model="newAid">
-          <option v-for="k in AID_KEYS" :key="k" :value="k">{{ k }}</option>
+        <select v-model="newTarget">
+          <optgroup label="AID キー（ホストへ送る）">
+            <option v-for="k in AID_KEYS" :key="k" :value="k">{{ k }}</option>
+          </optgroup>
+          <optgroup label="表示設定（順送り）">
+            <option v-for="i in VIEW_ITEMS" :key="i.key" :value="`view:${i.key}`">
+              {{ i.label }}（{{ i.opts.map((o) => o.label).join(" → ") }}）
+            </option>
+          </optgroup>
         </select>
         <button class="add" :disabled="!newCombo" @click="add">追加</button>
       </div>

@@ -1,0 +1,107 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
+import EmulatorPane from "../src/components/EmulatorPane.vue";
+import KeybindingsPanel from "../src/components/KeybindingsPanel.vue";
+import { sessionsStore } from "../src/stores/sessions.js";
+import { keybindingsStore } from "../src/stores/keybindings.js";
+import { viewSettings, initViewSettings, VIEW_ITEMS } from "../src/stores/viewSettings.js";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { WsClient } from "../src/ws-client.js";
+
+const SID = "vc1";
+
+function cells(): Cell[][] {
+  const out: Cell[][] = [];
+  for (let r = 0; r < 24; r++) {
+    const row: Cell[] = [];
+    for (let c = 0; c < 80; c++) {
+      row.push({ char: " ", kind: "sbcs", color: "green", reverse: false, underline: false, blink: false, columnSeparator: false, nonDisplay: false });
+    }
+    out.push(row);
+  }
+  return out;
+}
+function field(): Field {
+  return { index: 1, row: 20, col: 8, length: 60, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+}
+function snap(): ScreenSnapshot {
+  return { sessionId: SID, rows: 24, cols: 80, cursor: { row: 20, col: 8 }, keyboardLocked: false, cells: cells(), fields: [field()] };
+}
+function seed(): void {
+  sessionsStore.byId.clear();
+  sessionsStore.order = [];
+  sessionsStore.add({
+    sessionId: SID, label: "t", snapshot: snap(), edits: new Map(), cursor: { row: 20, col: 8 },
+    connected: true, readOnly: false, client: { send() {} } as unknown as WsClient,
+  });
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  initViewSettings();
+  keybindingsStore.reset();
+  seed();
+});
+
+describe("キー設定パネル（表示設定の割当）", () => {
+  it("割当先に表示設定が並び、font は含まれない", () => {
+    const w = mount(KeybindingsPanel);
+    const opts = w.findAll("optgroup[label*='表示設定'] option");
+    expect(opts).toHaveLength(VIEW_ITEMS.length);
+    const values = opts.map((o) => o.attributes("value"));
+    expect(values).toContain("view:surface");
+    expect(values).toContain("view:sosi");
+    expect(values.some((v) => v === "view:font")).toBe(false);
+    w.unmount();
+  });
+
+  it("割り当て済みの表示設定は項目名と現在値で表示する（生の view:xxx を出さない）", () => {
+    keybindingsStore.set("ctrl+1", "view:surface");
+    const w = mount(KeybindingsPanel);
+    const text = w.text();
+    expect(text).toContain("画面の質感");
+    expect(text).toContain("フラット"); // 現在値
+    expect(text).not.toContain("view:surface");
+    w.unmount();
+  });
+});
+
+describe("キー押下で表示設定が順送りされ、通知が出る", () => {
+  it("割り当てたキーで設定が変わり、OIA に通知が表示される", async () => {
+    keybindingsStore.set("ctrl+1", "view:surface");
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+
+    expect(viewSettings.settings.surface).toBe("flat");
+    expect(w.find(".pane").attributes("data-surface")).toBe("flat");
+
+    await w.find(".pane").trigger("keydown", { key: "1", ctrlKey: true });
+    await nextTick();
+
+    // 設定が順送りされ、画面(ペイン)にも反映される
+    expect(viewSettings.settings.surface).toBe("crt");
+    expect(w.find(".pane").attributes("data-surface")).toBe("crt");
+    // 通知（OIA の操作員メッセージ枠）に「項目: 新しい値」が出る
+    expect(w.find(".oia .notice").text()).toBe("画面の質感: CRT");
+
+    // もう一度押すと次の値（一巡）へ、通知も更新される
+    await w.find(".pane").trigger("keydown", { key: "1", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.surface).toBe("flat");
+    expect(w.find(".oia .notice").text()).toBe("画面の質感: フラット");
+    w.unmount();
+  });
+
+  it("3 値以上（コントロール表現）も順送りできる", async () => {
+    keybindingsStore.set("ctrl+2", "view:controls");
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+
+    await w.find(".pane").trigger("keydown", { key: "2", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.controls).toBe("underline");
+    expect(w.find(".oia .notice").text()).toBe("コントロール表現: 下線");
+    w.unmount();
+  });
+});

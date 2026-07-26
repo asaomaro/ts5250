@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
-import { useTheme, type ThemeMode } from "./composables/useTheme.js";
+import DesignMenu from "./components/DesignMenu.vue";
+import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
@@ -13,15 +14,6 @@ import { authStore } from "./stores/auth.js";
 import { systemsStore } from "./stores/systems.js";
 import { isPaneTab } from "./paneLabels.js";
 
-const { mode, setMode } = useTheme();
-/** ライト → ダーク → システム（OS 設定に追従）の 3 循環 */
-const THEME_CYCLE: ThemeMode[] = ["light", "dark", "system"];
-function cycleTheme(): void {
-  setMode(THEME_CYCLE[(THEME_CYCLE.indexOf(mode.value) + 1) % THEME_CYCLE.length]!);
-}
-const themeLabel = computed(() =>
-  mode.value === "light" ? "☀ ライト" : mode.value === "dark" ? "🌙 ダーク" : "🖥 システム"
-);
 workspaceStore.init();
 
 /**
@@ -53,6 +45,11 @@ const activeIsEmulator = computed(() => {
   if (!tab || isPaneTab(tab)) return false;
   const s = sessionsStore.get(tab);
   return !!s && s.kind !== "printer";
+});
+/** アクティブなエミュレーターセッション id（画面設定メニューの対象。非エミュ時は空） */
+const activeSessionId = computed(() => {
+  const tab = workspaceStore.focusedGroup().activeTab;
+  return tab && !isPaneTab(tab) ? tab : "";
 });
 const showKeys = ref(false);
 
@@ -234,36 +231,11 @@ onBeforeUnmount(() => {
         </template>
       </nav>
       <div class="toggles">
-        <button
-          v-if="activeIsEmulator"
-          class="theme-btn"
-          :aria-pressed="workspaceStore.showShiftMarks"
-          @click="workspaceStore.showShiftMarks = !workspaceStore.showShiftMarks"
-        >
-          SO/SI <span class="tv sosi">{{ workspaceStore.showShiftMarks ? "{ }" : "␣" }}</span>
-        </button>
-        <button
-          v-if="activeIsEmulator"
-          class="theme-btn"
-          :aria-pressed="workspaceStore.katakanaView"
-          title="半角カナ表示切替（英小文字位置をカナ解釈）"
-          @click="workspaceStore.katakanaView = !workspaceStore.katakanaView"
-        >
-          <span class="tv kana">{{ workspaceStore.katakanaView ? "カナ" : "英" }}</span>
-        </button>
-        <button
-          v-if="activeIsEmulator"
-          class="theme-btn"
-          :aria-pressed="workspaceStore.linkify"
-          title="URL/メールのリンク化切替"
-          @click="workspaceStore.linkify = !workspaceStore.linkify"
-        >
-          🔗 <span class="tv onoff">{{ workspaceStore.linkify ? "ON" : "OFF" }}</span>
-        </button>
+        <!-- 表示設定（SO/SI・カナ・リンク・コントロール表現ほか）は ⚙ 画面 に集約。
+             キー設定からも同じ項目を順送りで切り替えられる。 -->
         <button v-if="activeIsEmulator" class="theme-btn" @click="showKeys = true">⌨ キー</button>
-        <button class="theme-btn" title="テーマ切替（ライト / ダーク / システム）" @click="cycleTheme">
-          <span class="tv theme">{{ themeLabel }}</span>
-        </button>
+        <ViewSettingsMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
+        <DesignMenu />
       </div>
       <span v-if="authStore.user" class="whoami">
         <button class="link" title="アカウント（API トークン発行 / ログアウト）" @click="showAccount = true">

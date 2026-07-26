@@ -4,9 +4,10 @@ import type { AidKey } from "@as400web/core";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";
+import { viewSettings } from "../stores/viewSettings.js";
+import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
 import { sessionsStore } from "../stores/sessions.js";
-import { workspaceStore } from "../stores/workspace.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir } from "../composables/useCursor.js";
 import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
@@ -15,6 +16,14 @@ import { MSG_PROTECTED } from "../composables/opMessages.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
+/** この画面（セッション）の実効表示設定＝セッション上書き ?? アプリ既定 */
+const view = computed(() => viewSettings.effective(props.sessionId));
+/** 画面フォント: 選択フォントを --screen-mono へインライン上書き（system は上書き無し＝既定スタック）。
+ *  トークンなので子(ScreenGrid)のグリッド・入力欄まで一括で追従する。 */
+const screenMonoStyle = computed<Record<string, string> | undefined>(() => {
+  const stack = screenFontStack(view.value.font);
+  return stack ? { "--screen-mono": stack } : undefined;
+});
 const emit = defineEmits<{ (e: "focus"): void }>();
 
 const paneEl = ref<HTMLElement | null>(null);
@@ -269,9 +278,16 @@ function onLocal(action: LocalAction): void {
   }
 }
 
+/** キー設定で割り当てた表示設定の順送り。切り替わった内容を OIA に通知する（次のキー操作で消える）。 */
+function onViewCycle(key: string): void {
+  const r = viewSettings.cycle(key);
+  if (r) notice.value = `${r.label}: ${r.valueLabel}`;
+}
+
 const rawKeydown = makeKeydownHandler({
   sendAid: (key: AidKey) => sendKey(props.sessionId, key, cursor.value),
   local: onLocal,
+  viewCycle: onViewCycle,
   isFocused: () => props.focused
 });
 
@@ -508,6 +524,10 @@ function onWheel(ev: WheelEvent): void {
     ref="paneEl"
     class="pane"
     :data-focused="focused"
+    :data-controls="view.controls"
+    :data-color-mode="view.colorMode"
+    :data-surface="view.surface"
+    :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
     @keydown="onKeydown"
@@ -527,10 +547,10 @@ function onWheel(ev: WheelEvent): void {
         :focused="focused"
         :busy="busy"
         :cursor="cursor"
-        :show-shift-marks="workspaceStore.showShiftMarks"
-        :katakana-view="workspaceStore.katakanaView"
+        :show-shift-marks="view.sosi"
+        :katakana-view="view.kana"
         :uppercase-input="uppercaseInput"
-        :linkify="workspaceStore.linkify"
+        :linkify="view.linkify"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
@@ -581,6 +601,50 @@ function onWheel(ev: WheelEvent): void {
 .pane:focus {
   outline: none;
 }
+
+/* ============================================================
+ * 画面設定（セッションごと）: 配色 と 画面の質感
+ *
+ * どちらも .pane にカスタムプロパティを上書きするだけで、子の ScreenGrid（別 scope）の
+ * セル色・グローまで一括で変わる——カスタムプロパティは scope をまたいで DOM を継承するため。
+ * .c-* / .a-reverse(--cell) / .grid-span(text-shadow: --t-glow) はいずれもトークンを参照
+ * しているので、ルール自体を複製せずに追従する。
+ * ============================================================ */
+
+/* --- 配色=意味色: 5250 の 7 色を役割ベースへ再マップ ---
+ *  端末の高コントラスト前景(--t-white)・画面地色(--crt)・アプリのアクセント(--accent) から
+ *  組むため、どのテーマ/スキンでも画面と整合する（明暗が破綻しない）。
+ *   通常(green) → 前景を少し和らげた色  / 値・リンク(turquoise) → アクセント
+ *   装飾(pink)  → アクセント寄り        / 強調(white)・エラー(red)・注意(yellow)・青(blue) は据え置き
+ *   （青は情報色として区別が要る場面が多いので意味色でも残す） */
+.pane[data-color-mode="semantic"] {
+  --t-green: color-mix(in srgb, var(--t-white) 76%, var(--crt));
+  --t-turquoise: var(--accent);
+  --t-pink: color-mix(in srgb, var(--accent) 62%, var(--t-white));
+}
+
+/* --- 画面の質感=フラット: CRT のにじみ(グロー)とベゼル枠を外し、やわらかい影のカードにする ---
+ *  グロー除去は --t-glow を 0 にして .grid-span（子 scope）へ継承させる（light テーマと同じ挙動）。 */
+.pane[data-surface="flat"] {
+  --t-glow: 0 0 0;
+  border-color: var(--line);
+  border-radius: 12px;
+  box-shadow:
+    0 14px 34px -20px rgba(0, 0, 0, 0.55),
+    0 2px 6px -3px rgba(0, 0, 0, 0.2);
+}
+.pane[data-surface="flat"][data-focused="true"] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 14px 34px -20px rgba(0, 0, 0, 0.55);
+}
+/* フッター(OIA)のベゼル感も抑える（枠線をクロームの線色に寄せる） */
+.pane[data-surface="flat"] :deep(.oia) {
+  border-top-color: var(--line);
+}
+/* 画面フォント(--screen-mono)は script 側でインライン上書き（screenFonts.ts の全フォントを動的に扱うため）。 */
+
 .pane-empty {
   color: var(--muted);
   padding: 20px;
