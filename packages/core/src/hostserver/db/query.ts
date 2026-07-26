@@ -11,7 +11,7 @@
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { findParam, type Reply } from "../datastream.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { DB_REQ, DB_CP, ORS } from "./db-datastream.js";
 import { DbConnection } from "./db-connection.js";
 import { parseDataFormat, parseResultData, parseSqlca, type ResultFormat } from "./db-reply.js";

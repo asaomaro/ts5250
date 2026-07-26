@@ -5,7 +5,7 @@ export default tseslint.config(
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
-      "packages/core/src/codec/tables/**",
+      "packages/ebcdic/src/tables/**",
       "packages/web-ui/**",
       // Electron ランタイム（CommonJS）は TS eslint 対象外
       "electron/**",
@@ -25,8 +25,18 @@ export default tseslint.config(
     }
   },
   {
-    // core のピュアロジック層は Node API 非依存（design: I/O は transport/ と log.ts に隔離）
-    files: ["packages/core/src/**"],
+    // core のピュアロジック層は Node API 非依存（design: I/O は transport/ と log.ts に隔離）。
+    //
+    // **ebcdic / scs にも同じガードを掛ける。** codec を core の外へ切り出した時点で
+    // `packages/core/src/**` だけの glob ではガードが静かに外れる——そして
+    // 「依存ゼロ・ブラウザで動く」はこの 2 パッケージの売りそのものなので、
+    // 外れたことに気づけないまま Node 依存が入るのが最悪の結末になる。
+    //
+    // **ebcdic には型の防壁が無い**——`TextDecoder` / `TextEncoder` の型を得るために
+    // `types: ["node"]` が要り、その副作用で Node API も書けてしまう。だから ebcdic に
+    // 限っては禁止をここでしか担保できない（core も transport/ と log.ts のため同様）。
+    // scs は `types: []` なので型検査でも弾かれるが、二重に掛けておく。
+    files: ["packages/core/src/**", "packages/ebcdic/src/**", "packages/scs/src/**"],
     ignores: ["packages/core/src/transport/**", "packages/core/src/log.ts"],
     rules: {
       "no-restricted-imports": [
@@ -36,7 +46,7 @@ export default tseslint.config(
             {
               group: ["node:*"],
               message:
-                "core のピュアロジック層では Node API を import しない（transport/・log.ts のみ許可）"
+                "ピュアロジック層（core/ebcdic/scs）では Node API を import しない（core の transport/・log.ts のみ許可）"
             }
           ]
         }
@@ -50,16 +60,16 @@ export default tseslint.config(
         {
           name: "Buffer",
           message:
-            "core のピュアロジック層では Buffer を使わない。Uint8Array を使う（transport/・log.ts のみ許可）"
+            "ピュアロジック層（core/ebcdic/scs）では Buffer を使わない。Uint8Array を使う（core の transport/・log.ts のみ許可）"
         },
         {
           name: "process",
-          message: "core のピュアロジック層では process を参照しない（設定は引数で受け取る）"
+          message: "ピュアロジック層（core/ebcdic/scs）では process を参照しない（設定は引数で受け取る）"
         },
-        { name: "__dirname", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
-        { name: "__filename", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
-        { name: "global", message: "core のピュアロジック層では Node 固有のグローバルを使わない" },
-        { name: "require", message: "core のピュアロジック層では CommonJS の require を使わない" }
+        { name: "__dirname", message: "ピュアロジック層（core/ebcdic/scs）では Node 固有のグローバルを使わない" },
+        { name: "__filename", message: "ピュアロジック層（core/ebcdic/scs）では Node 固有のグローバルを使わない" },
+        { name: "global", message: "ピュアロジック層（core/ebcdic/scs）では Node 固有のグローバルを使わない" },
+        { name: "require", message: "ピュアロジック層（core/ebcdic/scs）では CommonJS の require を使わない" }
         // **タイマー（setTimeout 等）は禁止しない。**
         // 元の retro は「Buffer / process / setTimeout 等の Node グローバル」と書いていたが、
         // setTimeout / setInterval は **ブラウザにも標準である Web API** で Node 固有ではない。

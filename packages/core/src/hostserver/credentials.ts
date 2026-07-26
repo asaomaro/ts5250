@@ -16,7 +16,7 @@
  *       （コードの移植ではなく、符号化規則に基づく実装）。
  */
 import { As400Error } from "../errors.js";
-import { codecForCcsid } from "../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 
 /** ユーザー ID の最大長（IBM i のプロファイル名） */
 export const MAX_USER_LEN = 10;

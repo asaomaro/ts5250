@@ -18,7 +18,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS, isDbTemplateError } from "./db-datastream.js";
 import type { DbConnection, DbReply } from "./db-connection.js";

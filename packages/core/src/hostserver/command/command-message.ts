@@ -9,7 +9,7 @@
  * 参照: JTOpen(jtopenlite) の CommandConnection.getMessages に対応する。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { MSG_CP, REPLY_MESSAGE_COUNT_OFFSET, REPLY_MESSAGES_OFFSET } from "./command-datastream.js";
 
 /** メッセージ ID・テキストは CCSID 37 の EBCDIC（ジョブの CCSID ではない） */

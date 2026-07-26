@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { codecForCcsid, DbcsCodec, SO, SI } from "../src/codec/codec.js";
+import { codecForCcsid, DbcsCodec, SO, SI } from "../src/codec.js";
 
 const codec = codecForCcsid(1399) as DbcsCodec;
 

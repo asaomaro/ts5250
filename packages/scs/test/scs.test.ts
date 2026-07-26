@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ScsDecoder } from "../src/protocol/scs.js";
-import { codecForCcsid } from "../src/codec/codec.js";
+import { ScsDecoder } from "../src/scs.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): Uint8Array => new Uint8Array(readFileSync(join(here, "fixtures", name)));

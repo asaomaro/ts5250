@@ -9,7 +9,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { HEADER_LEN } from "../datastream.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 
 /** ネットワーク印刷サーバーのサーバー ID */
 export const NP_SERVER_ID = 0xe003;

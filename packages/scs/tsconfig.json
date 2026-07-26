@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // **`types` を空にする。** scs は `Uint8Array` と `String.fromCodePoint` しか使わず、
+    // ebcdic が `types: ["node"]` を要する理由（`TextDecoder` / `TextEncoder` の型）が
+    // ここには無い。Node の型を入れなければ Node API は**そもそも書けない**ので、
+    // eslint のガード（no-restricted-imports / no-restricted-globals）より手前で塞げる。
+    "types": []
+  },
+  "include": ["src"],
+  "references": [{ "path": "../ebcdic" }]
+}

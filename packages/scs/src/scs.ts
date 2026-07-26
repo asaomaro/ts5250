@@ -1,4 +1,4 @@
-import { codecForCcsid, SO, SI, type Codec } from "../codec/codec.js";
+import { codecForCcsid, SO, SI, type Codec } from "@as400web/ebcdic";
 
 /**
  * SCS（SNA Character String）デコーダ。プリンターセッションでホストから届く印刷データを

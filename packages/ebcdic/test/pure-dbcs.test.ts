@@ -5,7 +5,7 @@ import {
   ibm300,
   pureDbcsCodecForCcsid,
   isPureDbcsCcsid
-} from "../src/codec/pure-dbcs.js";
+} from "../src/pure-dbcs.js";
 
 /**
  * 純 DBCS は SQL の GRAPHIC / VARGRAPHIC 列が使う。混在 CCSID と違い SO/SI が無く 2 バイト固定。

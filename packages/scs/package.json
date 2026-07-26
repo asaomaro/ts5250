@@ -1,0 +1,23 @@
+{
+  "name": "@as400web/scs",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "SCS (SNA Character String) decoder for IBM i spooled print data — byte stream to logical pages.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@as400web/ebcdic": "0.1.0"
+  }
+}

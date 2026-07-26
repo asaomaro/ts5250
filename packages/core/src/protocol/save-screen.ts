@@ -1,9 +1,8 @@
 import { ByteWriter } from "./bytes.js";
 import { buildRecord } from "./gds.js";
 import { COMMAND, ESC, OPCODE, ORDER } from "./constants.js";
-import { SO, SI } from "../codec/codec.js";
+import { SO, SI, type Codec } from "@as400web/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
-import type { Codec } from "../codec/codec.js";
 
 /**
  * SAVE SCREEN（opcode 0x04 / ESC 0x02）への応答レコードを組み立てる。

@@ -1,6 +1,6 @@
 import { Emitter } from "../util/emitter.js";
 import { As400Error } from "../errors.js";
-import { codecForCcsid } from "../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
@@ -10,7 +10,7 @@ import {
   STARTUP_SUCCESS_CODES
 } from "../telnet/startup-record.js";
 import { deviceEnvFor, printerTerminalTypeFor } from "./terminal-type.js";
-import { ScsDecoder, type LogicalPage } from "../protocol/scs.js";
+import { ScsDecoder, type LogicalPage } from "@as400web/scs";
 
 /** 受信した 1 スプール（帳票）。ジョブ完了ごとに 1 件。 */
 export interface SpoolReport {

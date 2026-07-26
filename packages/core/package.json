@@ -2,7 +2,7 @@
   "name": "@as400web/core",
   "version": "0.1.0",
   "license": "Apache-2.0",
-  "description": "TN5250 protocol core — telnet negotiation, 5250 datastream parser, screen model, EBCDIC codec, trace/replay",
+  "description": "TN5250 protocol core — telnet negotiation, 5250 datastream parser, screen model, trace/replay",
   "type": "module",
   "exports": {
     ".": {
@@ -24,5 +24,9 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@as400web/ebcdic": "0.1.0",
+    "@as400web/scs": "0.1.0"
   }
 }

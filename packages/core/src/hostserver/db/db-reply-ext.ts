@@ -13,7 +13,7 @@
  * （逐語移植ではなく、バイト配置という事実に基づく書き起こし）。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 
 /** 列定義の固定部の長さ */
 const FIXED_LEN = 16;

@@ -2,6 +2,12 @@
   "files": [],
   "references": [
     {
+      "path": "packages/ebcdic"
+    },
+    {
+      "path": "packages/scs"
+    },
+    {
       "path": "packages/core"
     },
     {

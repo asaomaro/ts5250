@@ -10,7 +10,7 @@
  *   - 修飾ジョブ名は**空白**（`*ALL` は CPF3342 で弾かれる）
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { codecOf } from "../list/openlist.js";
 import type { CommandConnection } from "../command/command-connection.js";
 import {
