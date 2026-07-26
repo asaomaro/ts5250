@@ -126,3 +126,43 @@ describe("CRT の滲みは画面の文字すべてに掛かる", () => {
     expect(rule).toContain(".gui-choice-text");
   });
 });
+
+describe("既定バインドが実際のキー操作で効く", () => {
+  it("Ctrl+F1 でカナ英、Ctrl+F3 で SO/SI が切り替わり通知が出る", async () => {
+    localStorage.clear();
+    keybindingsStore.reload(); // 初回起動相当（既定バインドが入る）
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+
+    expect(viewSettings.settings.kana).toBe(false); // 初期値=英
+    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.kana).toBe(true);
+    expect(w.find(".oia .notice").text()).toBe("半角カナ表示: カナ");
+
+    expect(viewSettings.settings.sosi).toBe(false); // 初期値=非表示
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.sosi).toBe(true);
+    expect(w.find(".oia .notice").text()).toBe("SO/SI 表示: 表示");
+
+    // もう一度押すと戻る（トグルとして使える）
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.sosi).toBe(false);
+    w.unmount();
+  });
+
+  it("Ctrl+F3 はホストへ AID を送らない（F3=終了が誤発火しない）", async () => {
+    localStorage.clear();
+    keybindingsStore.reload();
+    const sent: unknown[] = [];
+    sessionsStore.byId.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await nextTick();
+    expect(sent).toHaveLength(0);
+    w.unmount();
+  });
+});

@@ -81,7 +81,9 @@ function add(): void {
         </select>
         <button class="add" :disabled="!newCombo" @click="add">追加</button>
       </div>
-      <button class="reset" @click="keybindingsStore.reset()">全てリセット</button>
+      <button class="reset" title="カスタム分を捨てて初期設定に戻す" @click="keybindingsStore.reset()">
+        初期設定に戻す
+      </button>
     </div>
   </div>
 </template>
