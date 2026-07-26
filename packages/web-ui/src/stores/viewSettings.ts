@@ -19,9 +19,10 @@ export type Surface = "crt" | "flat";
  * **入力欄の設定（controls）とは別軸**（spec D5）。`none`＝無効で凡例をボタン化しない
  * （拡張5250 の選択肢はホストが宣言した操作部品なので、無効でも現状の意匠で機能を保つ）。
  */
-/** ウィンドウ（ヘルプ窓・アプリの WINDOW DSPF）の見せ方。**重ねて描くだけ**で、
- *  文字・桁・ホスト色には触れない（spec D2）。 */
-export type WindowView = "none" | "shadow" | "smoke" | "smokeShadow" | "raised" | "outline";
+/** ウィンドウ**そのもの**の見せ方（枠・面）。重ねて描くだけで文字・桁・ホスト色には触れない。 */
+export type WindowFrame = "none" | "shadow" | "raised" | "outline";
+/** ウィンドウの**背景**（窓の外側）の見せ方。スモークのほか、すりガラス・ぼやけを選べる。 */
+export type WindowBackdrop = "none" | "smoke" | "frost" | "blur";
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
@@ -33,8 +34,10 @@ export interface ViewSettings {
   surface: Surface;
   /** 機能キー凡例・拡張5250 の選択肢の見せ方 */
   buttons: ButtonStyle;
-  /** ウィンドウの見せ方 */
-  windowView: WindowView;
+  /** ウィンドウそのもの（枠・面）の見せ方 */
+  windowFrame: WindowFrame;
+  /** ウィンドウの背景（窓の外側）の見せ方 */
+  windowBackdrop: WindowBackdrop;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -51,6 +54,12 @@ export interface ViewItemDef {
   /** 選択肢が多い行は、メニューでラベルを上・セグメントを下段全幅にする */
   wide?: boolean;
   opts: { value: ViewSettings[Key]; label: string }[];
+  /** 同じ `group` を持つ項目は**1 つの畳んだ行にまとめて**表示し、開いたときに
+   *  セクションで区切って並べる（例: ウィンドウ設定＝ウィンドウ／背景）。
+   *  設定自体は項目ごとに独立しており、キー設定の順送りも項目ごとに効く。 */
+  group?: string;
+  /** そのグループの見出し（グループ先頭の項目にだけ書く） */
+  groupLabel?: string;
   /** true なら**畳んだ行**にする。ラベルの右に「開く / 閉じる」を置き、開いたときだけ
    *  デザイン候補を並べる（選択肢が多く、常時出すとメニューが縦に伸びるため）。
    *  キー設定の順送りは畳んでいても opts 全体を一巡する。 */
@@ -93,16 +102,28 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     ],
   },
   {
-    key: "windowView",
-    label: "ウィンドウ設定",
+    key: "windowFrame",
+    label: "ウィンドウ",
+    group: "window",
+    groupLabel: "ウィンドウ設定",
     expandable: true,
     opts: [
       { value: "none", label: "無効" },
       { value: "shadow", label: "影" },
-      { value: "smoke", label: "スモーク" },
-      { value: "smokeShadow", label: "影＋スモーク" },
       { value: "raised", label: "浮き出し" },
       { value: "outline", label: "枠強調" },
+    ],
+  },
+  {
+    key: "windowBackdrop",
+    label: "背景",
+    group: "window",
+    expandable: true,
+    opts: [
+      { value: "none", label: "無効" },
+      { value: "smoke", label: "スモーク" },
+      { value: "frost", label: "すりガラス" },
+      { value: "blur", label: "ぼやけ" },
     ],
   },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
@@ -124,7 +145,8 @@ const FALLBACK: ViewSettings = {
   colorMode: "literal", // 端末色
   surface: "flat",
   buttons: "none",
-  windowView: "none",
+  windowFrame: "none",
+  windowBackdrop: "none",
   font: "system",
 };
 
@@ -144,6 +166,23 @@ function migrate(v: ViewSettings): ViewSettings {
   const out = { ...v };
   if ((out.controls as string) === "rich") out.controls = "box";
   if ((out.buttons as string) === "rich") out.buttons = "box";
+  // 旧 `windowView`（ウィンドウと背景が 1 項目だった頃）を 2 項目へ分解する
+  const legacy = (v as unknown as { windowView?: string }).windowView;
+  if (legacy) {
+    const map: Record<string, [WindowFrame, WindowBackdrop]> = {
+      none: ["none", "none"],
+      shadow: ["shadow", "none"],
+      smoke: ["none", "smoke"],
+      smokeShadow: ["shadow", "smoke"],
+      raised: ["raised", "none"],
+      outline: ["outline", "none"],
+    };
+    const m = map[legacy];
+    if (m) {
+      out.windowFrame = m[0];
+      out.windowBackdrop = m[1];
+    }
+  }
   return out;
 }
 

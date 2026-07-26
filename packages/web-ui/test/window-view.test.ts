@@ -60,7 +60,7 @@ describe("既定（無効）では何も重ねない", () => {
 
 describe("両方の種類の窓に効く（FR-4）", () => {
   it("文字で描かれた窓（ヘルプ等）で装飾が出る", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: snapOf(CHAR_WINDOW), edits: new Map(), focused: false, windowView: "smokeShadow" } });
+    const w = mount(ScreenGrid, { props: { snapshot: snapOf(CHAR_WINDOW), edits: new Map(), focused: false, windowFrame: "shadow", windowBackdrop: "smoke" } });
     await nextTick();
     expect(w.findAll(".win-deco")).toHaveLength(1);
     expect(w.findAll(".win-smoke").length).toBeGreaterThan(0);
@@ -68,7 +68,7 @@ describe("両方の種類の窓に効く（FR-4）", () => {
   });
 
   it("拡張5250 の窓（アプリの WINDOW DSPF）で装飾が出て、位置が宣言と一致する", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowView: "shadow" } });
+    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowFrame: "shadow" } });
     await nextTick();
     const deco = w.find(".win-deco");
     expect(deco.exists()).toBe(true);
@@ -82,7 +82,7 @@ describe("両方の種類の窓に効く（FR-4）", () => {
   });
 
   it("窓が無い画面では何も出ない", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: snapOf([" ふつうの画面"]), edits: new Map(), focused: false, windowView: "smokeShadow" } });
+    const w = mount(ScreenGrid, { props: { snapshot: snapOf([" ふつうの画面"]), edits: new Map(), focused: false, windowFrame: "shadow", windowBackdrop: "smoke" } });
     await nextTick();
     expect(w.findAll(".win-deco")).toHaveLength(0);
     expect(w.findAll(".win-smoke")).toHaveLength(0);
@@ -92,7 +92,7 @@ describe("両方の種類の窓に効く（FR-4）", () => {
 
 describe("スモークは窓の外だけを覆う（spec D3）", () => {
   it("窓の中を覆う矩形が無い", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowView: "smoke" } });
+    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowBackdrop: "smoke" } });
     await nextTick();
     // 窓: 行 6〜15 / 桁 17〜62 → 上・下・左・右 の 4 枚
     const rects = w.findAll(".win-smoke").map((d) => d.attributes("style")!);
@@ -108,7 +108,7 @@ describe("桁と操作を壊さない（FR-5/FR-6）", () => {
   it("装飾の ON/OFF で行のテキストが変わらない", async () => {
     const snap = snapOf(CHAR_WINDOW);
     const off = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: false } });
-    const on = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: false, windowView: "raised" } });
+    const on = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: false, windowFrame: "raised" } });
     await nextTick();
     const rows = (w: ReturnType<typeof mount>) => w.findAll(".grid-row").map((r) => r.text()).join("\n");
     expect(rows(on)).toBe(rows(off));
@@ -123,10 +123,10 @@ describe("桁と操作を壊さない（FR-5/FR-6）", () => {
       sessionId: SID, label: "t", snapshot: snapOf(CHAR_WINDOW), edits: new Map(), cursor: { row: 1, col: 1 },
       connected: true, readOnly: false, client: { send() {} } as unknown as WsClient,
     });
-    viewSettings.set("windowView", "outline");
+    viewSettings.set("windowFrame", "outline");
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
-    expect(w.find(".pane").attributes("data-window")).toBe("outline");
+    expect(w.find(".pane").attributes("data-window-frame")).toBe("outline");
     expect(w.findAll(".win-deco")).toHaveLength(1);
     w.unmount();
   });
@@ -144,8 +144,38 @@ describe("CSS 契約（ビルド後）", () => {
     const base = /\.win-smoke\[data-v-[a-z0-9]+\],\.win-deco\[data-v-[a-z0-9]+\]\{([^}]*)\}/.exec(css);
     expect(base, ".win-smoke/.win-deco の基本ルールが見つからない").not.toBeNull();
     expect(base![1]).toContain("pointer-events:none");
-    for (const style of ["shadow", "smoke", "smokeShadow", "raised", "outline"]) {
-      expect(css, `${style} の意匠が無い`).toContain(`[data-window=${style}]`);
+    for (const style of ["shadow", "raised", "outline"]) {
+      expect(css, `ウィンドウ本体 ${style} の意匠が無い`).toContain(`[data-window-frame=${style}]`);
     }
+    for (const style of ["smoke", "frost", "blur"]) {
+      expect(css, `背景 ${style} の意匠が無い`).toContain(`[data-window-backdrop=${style}]`);
+    }
+    // すりガラス・ぼやけは backdrop-filter で下の画面をぼかす
+    expect(css).toMatch(/\[data-window-backdrop=(frost|blur)\][^{]*\{[^}]*backdrop-filter/);
+  });
+});
+
+describe("ウィンドウと背景は独立した設定（ユーザー要求）", () => {
+  it("背景だけ指定すると枠は出ず、背景だけ出る", async () => {
+    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowBackdrop: "frost" } });
+    await nextTick();
+    expect(w.findAll(".win-deco")).toHaveLength(0);
+    expect(w.findAll(".win-smoke")).toHaveLength(4);
+    w.unmount();
+  });
+
+  it("ウィンドウだけ指定すると背景は出ず、枠だけ出る", async () => {
+    const w = mount(ScreenGrid, { props: { snapshot: guiWindowSnap(), edits: new Map(), focused: false, windowFrame: "raised" } });
+    await nextTick();
+    expect(w.findAll(".win-deco")).toHaveLength(1);
+    expect(w.findAll(".win-smoke")).toHaveLength(0);
+    w.unmount();
+  });
+
+  it("旧 windowView の保存値は 2 項目へ読み替えられる", () => {
+    localStorage.setItem("as400.view.settings", JSON.stringify({ windowView: "smokeShadow" }));
+    initViewSettings();
+    expect(viewSettings.settings.windowFrame).toBe("shadow");
+    expect(viewSettings.settings.windowBackdrop).toBe("smoke");
   });
 });

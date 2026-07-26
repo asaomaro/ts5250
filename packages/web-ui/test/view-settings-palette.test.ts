@@ -149,3 +149,42 @@ describe("パレットの後始末（review R2）", () => {
     w.unmount();
   });
 });
+
+describe("ウィンドウ設定はセクションで分かれる（ユーザー要求）", () => {
+  it("1 つの行にまとまり、開くと「ウィンドウ」「背景」に分かれる", async () => {
+    const w = await openMenu();
+    // 行は 1 つ（ウィンドウ設定）
+    const rows = w.findAll(".vsm-row").filter((r) => r.text().includes("ウィンドウ設定"));
+    expect(rows).toHaveLength(1);
+
+    await rows[0]!.find(".vsm-toggle").trigger("click");
+    await nextTick();
+
+    const sections = w.findAll(".vsm-section").map((d) => d.text());
+    expect(sections).toEqual(["ウィンドウ", "背景"]);
+    expect(w.findAll(".vsm-palette")).toHaveLength(2);
+    w.unmount();
+  });
+
+  it("背景にはスモーク・すりガラス・ぼやけがある", async () => {
+    const w = await openMenu();
+    await w.findAll(".vsm-row").find((r) => r.text().includes("ウィンドウ設定"))!.find(".vsm-toggle").trigger("click");
+    await nextTick();
+    const back = w.findAll(".vsm-palette")[1]!.text();
+    for (const name of ["無効", "スモーク", "すりガラス", "ぼやけ"]) expect(back).toContain(name);
+    w.unmount();
+  });
+
+  it("ウィンドウと背景は別々に選べる", async () => {
+    const w = await openMenu();
+    await w.findAll(".vsm-row").find((r) => r.text().includes("ウィンドウ設定"))!.find(".vsm-toggle").trigger("click");
+    await nextTick();
+    const pals = w.findAll(".vsm-palette");
+    await pals[0]!.findAll(".pal-item").find((b) => b.text().includes("浮き出し"))!.trigger("click");
+    await pals[1]!.findAll(".pal-item").find((b) => b.text().includes("ぼやけ"))!.trigger("click");
+    await nextTick();
+    expect(viewSettings.settings.windowFrame).toBe("raised");
+    expect(viewSettings.settings.windowBackdrop).toBe("blur");
+    w.unmount();
+  });
+});

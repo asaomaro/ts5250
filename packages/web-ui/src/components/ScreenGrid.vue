@@ -26,7 +26,7 @@ import {
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
-import type { ButtonStyle, WindowView } from "../stores/viewSettings.js";
+import type { ButtonStyle, WindowFrame, WindowBackdrop } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -67,10 +67,12 @@ const props = withDefaults(
     uppercaseInput?: boolean;
     /** 「押せるもの」の見せ方。none は機能キー凡例をボタン化しない（spec D5） */
     buttons?: ButtonStyle;
-    /** ウィンドウの見せ方。none は何も重ねない */
-    windowView?: WindowView;
+    /** ウィンドウそのもの（枠・面）の見せ方。none は枠を描かない */
+    windowFrame?: WindowFrame;
+    /** ウィンドウの背景（窓の外側）の見せ方。none は背景に何もしない */
+    windowBackdrop?: WindowBackdrop;
   }>(),
-  { linkify: true, buttons: "none", windowView: "none" }
+  { linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none" }
 );
 const emit = defineEmits<{
   (e: "edit", fieldIndex: number, value: string): void;
@@ -176,7 +178,9 @@ function thumbStyle(bar: { horizontal: boolean; total: number; sliderPos: number
  * 設定が none のときは検出も走らせない（無駄な計算をしない）。
  */
 const decoWindow = computed<WindowRect | null>(() =>
-  props.windowView === "none" ? null : detectWindowRect(props.snapshot, displayChar)
+  props.windowFrame === "none" && props.windowBackdrop === "none"
+    ? null
+    : detectWindowRect(props.snapshot, displayChar)
 );
 
 /** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */
@@ -2316,13 +2320,18 @@ onBeforeUnmount(() => {
          pointer-events:none で窓の中の操作（入力・クリック・矩形選択）を透過させる。 -->
     <template v-if="decoWindow">
       <div
-        v-for="(st, i) in smokeRects(decoWindow)"
+        v-for="(st, i) in windowBackdrop === 'none' ? [] : smokeRects(decoWindow)"
         :key="'sm' + i"
         class="win-smoke"
         :style="st"
         aria-hidden="true"
       ></div>
-      <div class="win-deco" :style="winRectStyle(decoWindow)" aria-hidden="true"></div>
+      <div
+        v-if="windowFrame !== 'none'"
+        class="win-deco"
+        :style="winRectStyle(decoWindow)"
+        aria-hidden="true"
+      ></div>
     </template>
     <template v-if="gui">
       <div
@@ -2823,27 +2832,37 @@ onBeforeUnmount(() => {
   z-index: 2;
   box-sizing: border-box;
 }
-/* スモーク: 既定では何もしない。意匠で色を入れる */
+/* --- 背景（窓の外側）--- 既定では何もしない */
 .win-smoke {
   background: none;
 }
-.pane[data-window="smoke"] .win-smoke,
-.pane[data-window="smokeShadow"] .win-smoke {
+/* スモーク: 暗くして下の画面を引っ込める */
+.pane[data-window-backdrop="smoke"] .win-smoke {
   background: color-mix(in srgb, #000 45%, transparent);
 }
+/* すりガラス: ぼかし＋うっすら地色。下に何かあることは分かるが読めない */
+.pane[data-window-backdrop="frost"] .win-smoke {
+  background: color-mix(in srgb, var(--crt) 55%, transparent);
+  backdrop-filter: blur(3px) saturate(0.85);
+}
+/* ぼやけ: 色は足さず、ぼかすだけ */
+.pane[data-window-backdrop="blur"] .win-smoke {
+  backdrop-filter: blur(2.5px);
+}
+
+/* --- ウィンドウ本体 --- */
 /* 影: 窓の外側に落とす */
-.pane[data-window="shadow"] .win-deco,
-.pane[data-window="smokeShadow"] .win-deco {
+.pane[data-window-frame="shadow"] .win-deco {
   box-shadow: 0 6px 24px -6px color-mix(in srgb, #000 75%, transparent);
 }
 /* 浮き出し: 影＋窓の面をわずかに持ち上げる（地色を薄く敷く） */
-.pane[data-window="raised"] .win-deco {
+.pane[data-window-frame="raised"] .win-deco {
   background: color-mix(in srgb, var(--t-white) 7%, transparent);
   box-shadow: 0 8px 28px -8px color-mix(in srgb, #000 80%, transparent);
   border-radius: 3px;
 }
 /* 枠強調: アクセント色の枠線を重ねる */
-.pane[data-window="outline"] .win-deco {
+.pane[data-window-frame="outline"] .win-deco {
   box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-soft);
   border-radius: 3px;
 }

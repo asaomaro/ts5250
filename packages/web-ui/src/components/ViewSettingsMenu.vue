@@ -21,6 +21,36 @@ type Key = keyof ViewSettings;
 // フォントは選択肢が環境依存なのでここには含めず、下のセレクトで別途扱う。
 const ROWS = VIEW_ITEMS;
 
+/**
+ * メニューの表示単位。`group` を持つ項目は**1 行にまとめ**、開いたときに
+ * セクションで区切って並べる（例: ウィンドウ設定＝ウィンドウ／背景）。
+ * 設定自体は項目ごとに独立している（キー設定の順送りも項目ごと）。
+ */
+interface MenuRow {
+  /** 開閉・パレットの識別に使う（グループなら group 名、単独なら項目の key） */
+  id: string;
+  label: string;
+  /** この行に属する設定項目（単独なら 1 つ、グループならその全部） */
+  items: ViewItemDef[];
+  expandable: boolean;
+  wide: boolean;
+}
+const MENU_ROWS = computed<MenuRow[]>(() => {
+  const out: MenuRow[] = [];
+  const seen = new Set<string>();
+  for (const it of ROWS) {
+    if (it.group) {
+      if (seen.has(it.group)) continue;
+      seen.add(it.group);
+      const items = ROWS.filter((x) => x.group === it.group);
+      out.push({ id: it.group, label: it.groupLabel ?? it.label, items, expandable: true, wide: false });
+    } else {
+      out.push({ id: String(it.key), label: it.label, items: [it], expandable: !!it.expandable, wide: !!it.wide });
+    }
+  }
+  return out;
+});
+
 // ---- 画面フォント（セレクト）----
 // styles.css の全フォントを候補にし、**導入済みのものだけ選択可**にする（未導入は disabled）。
 const fontInstalled = ref<Record<string, boolean>>({});
@@ -45,12 +75,12 @@ function onFontChange(e: Event): void {
 // ---- デザイン候補パレット（spec D7/D9）----
 // 選択肢が多い項目（入力項目設定・ボタン設定）は**畳んだ行**にする。既定では候補を出さず、
 // ラベルの右の「開く」で展開する。同時に開くのは 1 行だけ（開いている行の key を持つ）。
-const palette = ref<Key | null>(null);
-function isExpanded(r: ViewItemDef): boolean {
-  return palette.value === r.key;
+const palette = ref<string | null>(null);
+function isExpanded(id: string): boolean {
+  return palette.value === id;
 }
-function togglePalette(key: Key): void {
-  palette.value = palette.value === key ? null : key;
+function togglePalette(id: string): void {
+  palette.value = palette.value === id ? null : id;
 }
 /**
  * 候補から選ぶ。**設定メニューもパレットも開いたままにする**——見比べながら
@@ -98,47 +128,53 @@ onBeforeUnmount(() => {
     </button>
     <div v-if="open" class="vsm-menu" role="menu">
       <div class="vsm-head">画面設定</div>
-      <template v-for="r in ROWS" :key="r.key">
+      <template v-for="r in MENU_ROWS" :key="r.id">
         <!-- 畳んだ行: ラベルの右に「開く / 閉じる」。既定では候補を出さない -->
         <div v-if="r.expandable" class="vsm-row">
           <span class="vsm-label">{{ r.label }}</span>
           <button
             class="vsm-toggle"
-            :class="{ on: isExpanded(r) }"
-            :aria-expanded="isExpanded(r)"
-            @click="togglePalette(r.key)"
+            :class="{ on: isExpanded(r.id) }"
+            :aria-expanded="isExpanded(r.id)"
+            @click="togglePalette(r.id)"
           >
-            {{ isExpanded(r) ? "閉じる" : "開く" }}
+            {{ isExpanded(r.id) ? "閉じる" : "開く" }}
           </button>
         </div>
         <div v-else class="vsm-row" :class="{ wide: r.wide }">
           <span class="vsm-label">{{ r.label }}</span>
           <div class="seg" role="group" :aria-label="r.label">
             <button
-              v-for="o in r.opts"
+              v-for="o in r.items[0]!.opts"
               :key="String(o.value)"
-              :class="{ on: isSel(r.key, o.value) }"
-              @click="setVal(r.key, o.value)"
+              :class="{ on: isSel(r.items[0]!.key, o.value) }"
+              @click="setVal(r.items[0]!.key, o.value)"
             >
               {{ o.label }}
             </button>
           </div>
         </div>
-        <!-- デザイン候補（現在値に印）。選んでも閉じない -->
-        <div v-if="isExpanded(r)" class="vsm-palette" role="listbox" :aria-label="`${r.label}のデザイン`">
-          <button
-            v-for="o in r.opts"
-            :key="String(o.value)"
-            class="pal-item"
-            role="option"
-            :aria-selected="isSel(r.key, o.value)"
-            :class="{ on: isSel(r.key, o.value) }"
-            @click="pickFromPalette(r.key, o.value)"
-          >
-            <span class="pal-prev" :data-kind="r.key" :data-style="String(o.value)">Ab</span>
-            <span class="pal-name">{{ o.label }}</span>
-          </button>
-        </div>
+        <!-- デザイン候補（現在値に印）。選んでも閉じない。
+             複数の設定を持つ行（ウィンドウ設定）はセクションで区切る -->
+        <template v-if="isExpanded(r.id)">
+          <template v-for="it in r.items" :key="String(it.key)">
+            <div v-if="r.items.length > 1" class="vsm-section">{{ it.label }}</div>
+            <div class="vsm-palette" role="listbox" :aria-label="`${it.label}のデザイン`">
+              <button
+                v-for="o in it.opts"
+                :key="String(o.value)"
+                class="pal-item"
+                role="option"
+                :aria-selected="isSel(it.key, o.value)"
+                :class="{ on: isSel(it.key, o.value) }"
+                @click="pickFromPalette(it.key, o.value)"
+              >
+                <span class="pal-prev" :data-kind="it.key" :data-style="String(o.value)">Ab</span>
+                <span class="pal-name">{{ o.label }}</span>
+              </button>
+            </div>
+          </template>
+        </template>
       </template>
 
       <!-- フォント（画面グリッド）: styles.css の全フォントから、導入済みのみ選択可（未導入は無効）。 -->
@@ -285,6 +321,12 @@ onBeforeUnmount(() => {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* 1 行に複数の設定を持つとき（ウィンドウ設定）の区切り見出し */
+.vsm-section {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 4px 6px 0;
+}
 /* デザイン候補パレット（spec D9）。各候補にその意匠を当てた見本を出す。 */
 .vsm-palette {
   display: grid;
@@ -334,6 +376,16 @@ onBeforeUnmount(() => {
 .pal-prev[data-kind="controls"][data-style="inset"] { background: color-mix(in srgb, var(--ink) 7%, transparent); box-shadow: inset 0 2px 3px -1px color-mix(in srgb, #000 35%, transparent); border-radius: 3px; }
 .pal-prev[data-kind="controls"][data-style="dashed"] { outline: 1px dashed var(--muted); outline-offset: -1px; }
 .pal-prev[data-kind="controls"][data-style="glow"] { box-shadow: 0 0 0 2px var(--accent-soft), 0 0 8px -2px var(--accent); border-radius: 3px; }
+/* ウィンドウ本体の見本 */
+.pal-prev[data-kind="windowFrame"][data-style="none"] { color: var(--muted); text-decoration: line-through; }
+.pal-prev[data-kind="windowFrame"][data-style="shadow"] { background: var(--card); box-shadow: 0 3px 8px -2px color-mix(in srgb, #000 55%, transparent); }
+.pal-prev[data-kind="windowFrame"][data-style="raised"] { background: color-mix(in srgb, var(--ink) 8%, transparent); box-shadow: 0 4px 10px -3px color-mix(in srgb, #000 60%, transparent); border-radius: 3px; }
+.pal-prev[data-kind="windowFrame"][data-style="outline"] { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-soft); border-radius: 3px; }
+/* 背景の見本（枠の内側が窓・外側が背景のつもりで描く） */
+.pal-prev[data-kind="windowBackdrop"][data-style="none"] { color: var(--muted); text-decoration: line-through; }
+.pal-prev[data-kind="windowBackdrop"][data-style="smoke"] { background: color-mix(in srgb, #000 45%, transparent); color: #fff; }
+.pal-prev[data-kind="windowBackdrop"][data-style="frost"] { background: color-mix(in srgb, var(--card) 60%, transparent); box-shadow: inset 0 0 0 1px var(--line); filter: blur(0.2px); }
+.pal-prev[data-kind="windowBackdrop"][data-style="blur"] { filter: blur(1.1px); }
 /* ボタンの見本 */
 .pal-prev[data-kind="buttons"][data-style="none"] { color: var(--muted); text-decoration: line-through; }
 .pal-prev[data-kind="buttons"][data-style="underline"] { box-shadow: inset 0 -1.5px 0 var(--accent); }
