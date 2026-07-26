@@ -32,6 +32,51 @@ export interface SpoolOutputStatusView {
   print?: { ok: boolean; printer?: string; error?: string };
 }
 
+/** マクロの実行状態（spec「マクロエンジンの実行時状態」）。記録と再生は排他 */
+export type MacroMode = "idle" | "recording" | "recordPaused" | "playing" | "playPaused";
+
+/** 再生が終わった理由。OIA に出して「なぜ止まったか」を分かるようにする */
+export type MacroStopReason =
+  | "completed"
+  | "user"
+  | "mismatch"
+  | "timeout"
+  | "disconnected"
+  | "readonly"
+  | "secret";
+
+/**
+ * 記録中に積む 1 ステップ。**秘密の平文はここにしか置かない**（spec D5）。
+ *
+ * 保存時にユーザーが欄ごとの扱いを選び、`plainSecrets` としてサーバーへ 1 回だけ送ったら
+ * この draft ごと破棄する。localStorage には**いかなる形でも書かない**。
+ */
+export interface DraftStep {
+  screen: { rows: number; cols: number; targets: { field: number; row: number; col: number; len: number }[] };
+  /** 非表示欄でない通常の入力 */
+  fields: { field: number; value: string }[];
+  /** 非表示（パスワード）欄に打たれた値。保存の可否はユーザーが決める */
+  secrets: { field: number; value: string }[];
+  key: string;
+  sysReqText?: string;
+  cursor: { row: number; col: number };
+}
+
+export interface MacroRuntime {
+  mode: MacroMode;
+  /** 再生中のマクロ id（記録中は undefined） */
+  macroId?: string;
+  /** 記録中に積んだステップ */
+  steps: DraftStep[];
+  /** 再生の進捗（0-based。次に送るステップ） */
+  index: number;
+  /** 記録できない操作（拡張5250 の GUI 選択）に当たったか（spec D8） */
+  incomplete?: boolean;
+  stopReason?: MacroStopReason;
+  /** 停止・警告の付随メッセージ（OIA に出す） */
+  message?: string;
+}
+
 export interface SessionState {
   sessionId: string;
   label: string;
@@ -70,6 +115,12 @@ export interface SessionState {
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
    */
   notice?: string;
+  /**
+   * マクロの実行状態（記録中 / 再生中 / 休止中）。未設定＝ `idle` と同義。
+   * セッションごとに持つのは、ペインを分けて別セッションを触りながら
+   * 片方だけ記録する、という使い方を壊さないため。
+   */
+  macro?: MacroRuntime;
   // ---- プリンターセッション（kind==="printer"）----
   /** 受信したスプール（帳票）一覧 */
   reports?: SpoolReportView[];
