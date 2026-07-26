@@ -103,6 +103,7 @@ export class ScreenBuffer {
     this.cols = cols;
     this.cells = new Array<InternalCell>(rows * cols).fill(null);
     this.fields = [];
+    this.attrBounds.clear(); // 画面の中身ごと消えるので表示境界も捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
     this.clearGui();
@@ -197,6 +198,17 @@ export class ScreenBuffer {
     return { row: Math.floor(addr / this.cols) + 1, col: (addr % this.cols) + 1 };
   }
 
+  /**
+   * **表示属性の打ち切り位置**（フィールド開始アドレス → 終端アドレス）。
+   *
+   * 下線・色はフィールド長で打ち切る（`docs/PROTOCOL.md` 4.3。閉じ属性を送らないアプリで
+   * 非編集エリアへ漏れるのを防ぐ ACS 準拠の処置）。その境界を **`fields` とは別に持つ**のが要点——
+   * ホストは窓を重ねるとき SOH でフォーマットテーブルを消すことがあり（実機の Attn で
+   * フィールドが 44 → 2 になる）、境界を `fields` から引いていると**画面の中身は変わっていないのに
+   * 背面の下線が伸びる**。入力の受け皿（`fields`）と表示の見え方は別物として扱う。
+   */
+  private attrBounds = new Map<number, number>();
+
   private savedStack: {
     /**
      * **サイズも退避する。** cells の長さは rows*cols に一致していなければならない。
@@ -208,6 +220,7 @@ export class ScreenBuffer {
     cells: InternalCell[];
     fields: InternalField[];
     cursorAddr: number;
+    attrBounds: Map<number, number>;
     guiSelections: GuiSelectionField[];
     guiWindows: GuiWindow[];
     guiScrollBars: GuiScrollBar[];
@@ -221,6 +234,7 @@ export class ScreenBuffer {
     }
     this.cells.fill(null);
     this.fields = [];
+    this.attrBounds.clear(); // 画面の中身ごと消えるので表示境界も捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
     this.clearGui();
@@ -240,6 +254,7 @@ export class ScreenBuffer {
       cells: this.cells.map((c) => (c === null ? null : { ...c })),
       fields: this.fields.map((f) => ({ ...f })),
       cursorAddr: this.cursorAddr,
+      attrBounds: new Map(this.attrBounds),
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
       guiScrollBars: this.guiScrollBars.map((b) => ({ ...b }))
@@ -255,12 +270,18 @@ export class ScreenBuffer {
     this.cells = saved.cells;
     this.fields = saved.fields;
     this.cursorAddr = saved.cursorAddr;
+    this.attrBounds = saved.attrBounds;
     this.guiSelections = saved.guiSelections;
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
     return true;
   }
 
+  /**
+   * CLEAR FORMAT TABLE / SOH: 入力の受け皿だけを消す。
+   * **表示属性の打ち切り位置（`attrBounds`）は消さない**——画面の中身は変わっていないのに
+   * 下線が伸びてしまうため（`attrBounds` のコメント参照）。
+   */
   clearFormatTable(): void {
     this.fields = [];
   }
@@ -312,6 +333,14 @@ export class ScreenBuffer {
     }
     // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）
     this.fields = this.fields.filter((f) => f.startAddr !== startAddr);
+    // 表示境界を記録する。**新しい欄の範囲に掛かる古い境界は捨てる**——同じ場所を別レイアウトで
+    // 描き直したとき、消えたはずの欄の境界が残って下線が早く切れるのを防ぐ。重ならない場所
+    // （窓の背面など）の境界はそのまま残り、ホストが SOH を送っても見え方が変わらない。
+    const end = startAddr + length;
+    for (const [s0, e0] of this.attrBounds) {
+      if (s0 !== startAddr && s0 < end && startAddr < e0) this.attrBounds.delete(s0);
+    }
+    this.attrBounds.set(startAddr, end);
     this.fields.push({
       startAddr,
       length,
@@ -511,8 +540,8 @@ export class ScreenBuffer {
     // フィールド属性はフィールド長で境界付ける（ACS 準拠）。閉じ属性を送らないアプリ（PDM 等）で
     // 下線・カラー等の属性がフィールドを越えて非編集エリアへ漏れるのを防ぐため、フィールド終端
     // （startAddr+length）に明示属性が無ければ既定属性へ戻す。
-    const fieldEnds = new Set<number>();
-    for (const f of this.fields) fieldEnds.add(f.startAddr + f.length);
+    // 打ち切り位置は `attrBounds`（フォーマットテーブルとは独立）から引く
+    const fieldEnds = new Set<number>(this.attrBounds.values());
     let attr = DEFAULT_ATTR;
     for (let r = 0; r < this.rows; r++) {
       const rowCells: Cell[] = [];
