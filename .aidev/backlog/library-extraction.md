@@ -51,6 +51,13 @@ pino を持ち込むと価値が半減する。**
     - 生成物は `tools/gen-tables` が **`.ts` として src に直接書き出し**ており、遅延ロードできる形式ではない
   - 直すには (a) 遅延 import 化 / (b) サブパス export の分割 / (c) 生成物の形式変更 のいずれかが要り、
     **ブラウザのバンドル方法に影響する**。バンドルサイズを実測しながら進める独立作業にすること
+  - **2026-07-27 追記**（`20260726-library-extraction-codec`）: 表は `@as400web/ebcdic` へ移り、
+    (b) の足場として **`./codec`（変換のみ）と `./catalog`（表ゼロ）のサブパスが既にある**。
+    実測した現状: web-ui の本番バンドルは **1,407,469 バイト**で、うち ibm-930/939 の表が占める。
+    到達経路は **`ScreenGrid.vue:41` の `katakanaChar` 1 関数だけ**
+    （`@as400web/core/codec` → `@as400web/ebcdic/codec` → 表 5 つ）。
+    つまり「`katakanaChar` を表非依存にする」か「カタカナ SBCS だけの入口を足す」かで大半が落ちる見込み。
+    比較の基準線として、`main` を worktree に取って同一条件でビルドし突き合わせる手順が有効だった
 
 > **未適用だった注意（解消済み）**: 「ロガー注入」「`no-restricted-globals`」は
 > `20260718-acs-data-transfer` と `20260718-hostserver-sql` の retro で**2 回とも提案されたが未適用**だった。
@@ -71,12 +78,23 @@ pino を持ち込むと価値が半減する。**
 
 ## 切り出し候補（推奨順）
 
-- [ ] **1. EBCDIC コーデック** — 依存ゼロ、今すぐ出せる、独自価値が明確
+- [x] **1. EBCDIC コーデック** — 依存ゼロ、今すぐ出せる、独自価値が明確
   - SBCS(37/273) と DBCS(930/939/1399)、SO/SI 制御に対応。npm の EBCDIC 系は SBCS 止まりが多い
   - ICU の .ucm から生成する `tools/gen-tables` も併せて出せば CCSID を増やせる
-- [ ] **2. SCS デコーダ** — 246行、依存は codec のみ。1 と同じ切り出しで一緒に出せる
+  - **2026-07-27 に monorepo 内の分割まで完了**（`20260726-library-extraction-codec` / PR #169）。
+    `@as400web/ebcdic` として独立。`dependencies` は空、入口は `.` / `./codec`（変換のみ）/
+    `./catalog`（表ゼロ・ブラウザ用）の 3 つ。`tools/gen-tables` の出力先も付け替え済み
+  - **publish は未実施**（今回のゴールは「公開の判断を後回しにできる状態にすること」）。
+    公開するなら README とパッケージ名の再検討が要る——`ccsid-text.ts` が非 EBCDIC
+    （UTF-8 / ISO-8859-1 / Shift_JIS）も扱うため `@as400web/ccsid` も候補だった
+- [x] **2. SCS デコーダ** — 246行、依存は codec のみ。1 と同じ切り出しで一緒に出せる
   - スプールのバイト列 → 論理ページ。`server/src/pdf.ts` が66行で済んでいるのは分離が効いている証拠
   - IBM i のスプールを扱いたいが TN5250 一式は要らない、という需要に合う
+  - **2026-07-27 に完了**（同上）。`@as400web/scs` として独立し、依存は `@as400web/ebcdic` のみ。
+    **1 とは別パッケージにした**——「一緒に出せる」は*同時に出す*であって*1 つにまとめる*ではないと解した。
+    サブパスで分けても npm の依存グラフ上は 1 つのままで、EBCDIC だけ欲しい利用者に
+    印刷ストリームのデコーダが付いてくる（`20260726-library-extraction-codec/spec.md` D1）
+  - `tsconfig` の `types` を空にできた（`TextDecoder` を使わないため）＝Node API を型検査で塞げている
 - [ ] 3. ホストサーバー（`hostserver/` ＋ `hostserver/db/` ＋ `transport/host-connection.ts`）
   - **前提を満たした**（2026-07-18 に SQL 実行が完了。`20260718-hostserver-sql`）。
     「IBM i に SQL を投げる TS ライブラリ」として単体で価値が出る状態になった
