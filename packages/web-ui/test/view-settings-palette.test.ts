@@ -33,79 +33,92 @@ describe("設定名は対象を表す（FR-12）", () => {
     expect(text).not.toContain("ボタン意匠");
     w.unmount();
   });
-
-  it("ボタンを使わない値は「無効」と表示される（「なし」ではない）", async () => {
-    const w = await openMenu();
-    const seg = row(w, "ボタン設定").find(".seg");
-    expect(seg.text()).toContain("無効");
-    w.unmount();
-  });
 });
 
-describe("セグメントは「よく使う 3 つ ＋ その他」（FR-14）", () => {
-  it("入力項目・ボタンとも 3 つ＋その他になっている", async () => {
+describe("畳んだ行（開く / 閉じる）", () => {
+  it("初期状態では候補を 1 つも出さない", async () => {
     const w = await openMenu();
+    expect(w.find(".vsm-palette").exists()).toBe(false);
+    // 畳んだ 2 行にはセグメントを置かない
     for (const label of ["入力項目設定", "ボタン設定"]) {
-      const btns = row(w, label).findAll(".seg button");
-      expect(btns, label).toHaveLength(4);
-      expect(btns[3]!.text(), label).toContain("その他");
+      expect(row(w, label).find(".seg").exists(), label).toBe(false);
+      expect(row(w, label).find(".vsm-toggle").text(), label).toBe("開く");
     }
     w.unmount();
   });
 
-  it("「枠」はセグメントに出さず、候補側にある", async () => {
+  it("「開く」で候補が展開し、ラベルが「閉じる」に変わる", async () => {
     const w = await openMenu();
-    expect(row(w, "入力項目設定").find(".seg").text()).not.toContain("枠");
+    const r = row(w, "ボタン設定");
+    await r.find(".vsm-toggle").trigger("click");
+    await nextTick();
+
+    expect(w.find(".vsm-palette").exists()).toBe(true);
+    expect(w.findAll(".pal-item")).toHaveLength(VIEW_ITEMS.find((i) => i.key === "buttons")!.opts.length);
+    expect(row(w, "ボタン設定").find(".vsm-toggle").text()).toBe("閉じる");
+    w.unmount();
+  });
+
+  it("「閉じる」で畳まれる", async () => {
+    const w = await openMenu();
+    await row(w, "入力項目設定").find(".vsm-toggle").trigger("click");
+    await nextTick();
+    await row(w, "入力項目設定").find(".vsm-toggle").trigger("click");
+    await nextTick();
+    expect(w.find(".vsm-palette").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("開けるのは同時に 1 行だけ", async () => {
+    const w = await openMenu();
+    await row(w, "入力項目設定").find(".vsm-toggle").trigger("click");
+    await nextTick();
+    await row(w, "ボタン設定").find(".vsm-toggle").trigger("click");
+    await nextTick();
+    expect(w.findAll(".vsm-palette")).toHaveLength(1);
+    expect(row(w, "入力項目設定").find(".vsm-toggle").text()).toBe("開く");
     w.unmount();
   });
 });
 
-describe("その他からデザインを選ぶ（FR-13/14）", () => {
-  it("その他を押すと候補一覧が開き、選ぶと即反映して閉じる", async () => {
+describe("候補から選ぶ（FR-13/14）", () => {
+  it("選ぶと即反映し、**設定メニューもパレットも閉じない**", async () => {
     const w = await openMenu();
-    expect(w.find(".vsm-palette").exists()).toBe(false);
-
-    await row(w, "入力項目設定").find(".seg button.more").trigger("click");
-    await nextTick();
-    const pal = w.find(".vsm-palette");
-    expect(pal.exists()).toBe(true);
-    // 候補にはよく使う 3 つも含めて全部出す（現在値を確認できるように）
-    expect(pal.findAll(".pal-item")).toHaveLength(VIEW_ITEMS.find((i) => i.key === "controls")!.opts.length);
-
-    const dashed = pal.findAll(".pal-item").find((b) => b.text().includes("破線"))!;
-    await dashed.trigger("click");
+    await row(w, "入力項目設定").find(".vsm-toggle").trigger("click");
     await nextTick();
 
-    expect(viewSettings.settings.controls).toBe("dashed"); // 即反映
-    expect(w.find(".vsm-palette").exists()).toBe(false); // 閉じる
+    const pick = async (name: string) => {
+      await w.findAll(".pal-item").find((b) => b.text().includes(name))!.trigger("click");
+      await nextTick();
+    };
+    await pick("破線");
+    expect(viewSettings.settings.controls).toBe("dashed");
+    // 見比べながら続けて試せるよう、開いたままにする
+    expect(w.find(".vsm-menu").exists()).toBe(true);
+    expect(w.find(".vsm-palette").exists()).toBe(true);
+
+    await pick("発光");
+    expect(viewSettings.settings.controls).toBe("glow");
+    expect(w.find(".vsm-palette").exists()).toBe(true);
     w.unmount();
   });
 
-  it("候補側のデザインを選んでいると「その他」が選択状態になる", async () => {
-    viewSettings.set("controls", "dashed");
+  it("現在の値には印が付く", async () => {
+    viewSettings.set("buttons", "pill");
     const w = await openMenu();
-    const more = row(w, "入力項目設定").find(".seg button.more");
-    expect(more.classes()).toContain("on");
-    // セグメントの通常の 3 つはどれも選択状態でない
-    const quick = row(w, "入力項目設定").findAll(".seg button").slice(0, 3);
-    expect(quick.every((b) => !b.classes().includes("on"))).toBe(true);
+    await row(w, "ボタン設定").find(".vsm-toggle").trigger("click");
+    await nextTick();
+    const on = w.findAll(".pal-item").filter((b) => b.classes().includes("on"));
+    expect(on).toHaveLength(1);
+    expect(on[0]!.text()).toContain("ピル");
     w.unmount();
   });
 
-  it("よく使う値を選んでいるときは「その他」は選択状態にならない", async () => {
-    viewSettings.set("controls", "filled");
+  it("ボタンを使わない値は「無効」と表示される（「なし」ではない）", async () => {
     const w = await openMenu();
-    expect(row(w, "入力項目設定").find(".seg button.more").classes()).not.toContain("on");
-    w.unmount();
-  });
-
-  it("候補一覧は同時に 1 つだけ開く", async () => {
-    const w = await openMenu();
-    await row(w, "入力項目設定").find(".seg button.more").trigger("click");
+    await row(w, "ボタン設定").find(".vsm-toggle").trigger("click");
     await nextTick();
-    await row(w, "ボタン設定").find(".seg button.more").trigger("click");
-    await nextTick();
-    expect(w.findAll(".vsm-palette")).toHaveLength(1);
+    expect(w.find(".vsm-palette").text()).toContain("無効");
     w.unmount();
   });
 });
@@ -122,7 +135,7 @@ describe("旧値の移行（spec D8）", () => {
 describe("パレットの後始末（review R2）", () => {
   it("メニューを閉じるとパレットも畳まれ、開き直しは素の状態から", async () => {
     const w = await openMenu();
-    await row(w, "ボタン設定").find(".seg button.more").trigger("click");
+    await row(w, "ボタン設定").find(".vsm-toggle").trigger("click");
     await nextTick();
     expect(w.find(".vsm-palette").exists()).toBe(true);
 

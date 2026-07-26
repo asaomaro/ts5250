@@ -46,9 +46,10 @@ export interface ViewItemDef {
   /** 選択肢が多い行は、メニューでラベルを上・セグメントを下段全幅にする */
   wide?: boolean;
   opts: { value: ViewSettings[Key]; label: string }[];
-  /** セグメントに出す先頭 N 件。残りは「その他」のパレットから選ぶ（spec D7）。
-   *  未指定なら全部セグメントに出す。キー設定の順送りは常に opts 全体を一巡する。 */
-  quick?: number;
+  /** true なら**畳んだ行**にする。ラベルの右に「開く / 閉じる」を置き、開いたときだけ
+   *  デザイン候補を並べる（選択肢が多く、常時出すとメニューが縦に伸びるため）。
+   *  キー設定の順送りは畳んでいても opts 全体を一巡する。 */
+  expandable?: boolean;
 }
 export const VIEW_ITEMS: ViewItemDef[] = [
   { key: "sosi", label: "SO/SI 表示", opts: [{ value: false, label: "非表示" }, { value: true, label: "表示" }] },
@@ -58,7 +59,7 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     key: "controls",
     label: "入力項目設定",
     wide: true,
-    quick: 3,
+    expandable: true,
     opts: [
       { value: "plain", label: "プレーン" },
       { value: "underline", label: "下線" },
@@ -74,7 +75,7 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     key: "buttons",
     label: "ボタン設定",
     wide: true,
-    quick: 3,
+    expandable: true,
     opts: [
       { value: "none", label: "無効" },
       { value: "underline", label: "下線" },

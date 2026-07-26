@@ -206,6 +206,18 @@ function focusStop(el: HTMLElement | undefined): void {
   if (el instanceof HTMLInputElement) el.setSelectionRange(0, 0);
 }
 
+/** タブ停止点の**画面上の位置**。入力欄はフィールド、ボタンは描画時に付けた data 属性から。 */
+function stopPos(el: HTMLElement): { row: number; col: number } | undefined {
+  if (el instanceof HTMLInputElement) {
+    const idx = Number(el.dataset["fieldIndex"]);
+    const f = snapshot.value?.fields.find((x) => x.index === idx);
+    return f ? { row: f.row, col: f.col } : undefined;
+  }
+  const row = Number(el.dataset["row"]);
+  const col = Number(el.dataset["col"]);
+  return Number.isFinite(row) && Number.isFinite(col) ? { row, col } : undefined;
+}
+
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
 function focusByOffset(delta: number): void {
   const stops = tabStops();
@@ -219,34 +231,32 @@ function focusByOffset(delta: number): void {
     focusStop(stops[(cur + delta + stops.length) % stops.length]);
     return;
   }
-  const inputs = editableInputs();
-  if (inputs.length === 0) {
-    // 入力欄は無いがボタンはある（ヘルプ画面等）。端のボタンへ入る。
+
+  /**
+   * 停止点にフォーカスが無い（保護欄・非入力セルにカーソルがある free モード）。
+   * **並びに現在地が無いので、そこから探すと必ず先頭／末尾へ飛ぶ。**
+   * 代わりに画面上のカーソル位置と各停止点の位置を比べ、その位置から見て
+   * 次（Tab）／前（Shift+Tab）へ移す。**入力欄だけでなく有効化したボタンも移動先にする**
+   * （ボタンなのに Tab で辿り着けないのは不自然なため）。
+   */
+  const at = cursor.value;
+  const positioned = stops
+    .map((el) => ({ el, pos: stopPos(el) }))
+    .filter((x): x is { el: HTMLElement; pos: { row: number; col: number } } => x.pos !== undefined);
+  if (positioned.length === 0) {
     focusStop(delta > 0 ? stops[0] : stops[stops.length - 1]);
     return;
   }
-
-  /**
-   * 入力欄にフォーカスが無い（保護欄・非入力セルにカーソルがある free モード）。
-   * **入力欄の並びに現在地が無いので、そこから探すと必ず先頭／末尾へ飛ぶ。**
-   * 代わりに画面上のカーソル位置と各欄の位置を比べ、その位置から見て
-   * 次（Tab）／前（Shift+Tab）の欄へ移す。
-   */
-  const fs = editableFields();
-  const at = cursor.value;
-  const isAfter = (f: { row: number; col: number }): boolean =>
-    f.row > at.row || (f.row === at.row && f.col > at.col);
+  const isAfter = (p: { row: number; col: number }): boolean =>
+    p.row > at.row || (p.row === at.row && p.col > at.col);
   if (delta > 0) {
-    const i = fs.findIndex(isAfter);
-    focusInput(inputs, i === -1 ? 0 : i); // 後ろに無ければ先頭へラップ
+    const next = positioned.find((x) => isAfter(x.pos));
+    focusStop((next ?? positioned[0]!).el); // 後ろに無ければ先頭へラップ
     return;
   }
-  let i = -1;
-  for (let k = 0; k < fs.length; k++) {
-    const f = fs[k]!;
-    if (f.row < at.row || (f.row === at.row && f.col < at.col)) i = k;
-  }
-  focusInput(inputs, i === -1 ? inputs.length - 1 : i); // 前に無ければ末尾へラップ
+  let prev: HTMLElement | undefined;
+  for (const x of positioned) if (!isAfter(x.pos) && (x.pos.row !== at.row || x.pos.col !== at.col)) prev = x.el;
+  focusStop(prev ?? positioned[positioned.length - 1]!.el); // 前に無ければ末尾へラップ
 }
 
 function onLocal(action: LocalAction): void {

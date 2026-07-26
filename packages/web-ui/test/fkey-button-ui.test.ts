@@ -351,3 +351,38 @@ describe("桁を動かさないための CSS 契約", () => {
     }
   });
 });
+
+describe("Tab の移動先にボタンも入る（ユーザー要求）", () => {
+  // 入力欄の外（保護セル）にカーソルがあるときの Tab は、**カーソル位置から見て次**の
+  // 停止点へ移す。有効化したボタンもその候補に入らないと、画面にあるのに辿り着けない。
+  it("カーソル位置から見て次のボタンへ移動する（入力欄より手前でも）", async () => {
+    // 1 行目に凡例、20 行目に入力欄。カーソルは 1 行目の先頭（凡例より前）。
+    const field: Field = { index: 1, row: 20, col: 2, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "" };
+    const snap = snapOf([LEGEND, ...Array(18).fill(""), "  cmd"], [field]);
+    snap.cursor = { row: 1, col: 1 };
+    seed(snap);
+    viewSettings.set("buttons", "box");
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+
+    // free モードにする（保護セルへカーソルを置く）
+    (w.find(".pane").element as HTMLElement).focus();
+    await w.find(".pane").trigger("keydown", { key: "Tab" });
+    await nextTick();
+
+    const btns = w.findAll("button.fkey-btn");
+    expect(btns.length).toBe(2);
+    // 入力欄(20 行目)ではなく、カーソル(1,1)の次にある 1 行目のボタンへ入る
+    expect(document.activeElement).toBe(btns[0]!.element);
+    w.unmount();
+  });
+
+  it("ボタンには画面位置が付いている（移動先の計算に使う）", async () => {
+    const w = mount(ScreenGrid, { props: { snapshot: snapOf([LEGEND]), edits: new Map(), focused: false, buttons: "box" } });
+    await nextTick();
+    const btn = w.find("button.fkey-btn");
+    expect(btn.attributes("data-row")).toBe("1");
+    expect(Number(btn.attributes("data-col"))).toBeGreaterThan(0);
+    w.unmount();
+  });
+});

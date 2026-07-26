@@ -177,11 +177,14 @@ const selectionFields = computed<GuiSelectionLike[]>(
   () => (gui.value?.selectionFields ?? []) as GuiSelectionLike[]
 );
 
-/** text セグメント内での凡例の位置（文字 index）。桁ではなく index なのは描画で分割に使うため。 */
+/** text セグメント内での凡例の位置（文字 index）。桁ではなく index なのは描画で分割に使うため。
+ *  row/col は**画面上の位置**で、Tab の移動先をカーソル位置から決めるのに使う（EmulatorPane）。 */
 interface LocalSpan {
   from: number;
   to: number;
   key: AidKey;
+  row: number;
+  col: number;
 }
 
 interface Segment {
@@ -246,6 +249,9 @@ function linkParts(text: string): LinkPart[] {
 /** 描画部品。href=リンク / aid=機能キーのボタン / どちらも無ければ素のテキスト */
 interface DecoPart extends LinkPart {
   aid?: AidKey;
+  /** ボタンの画面上の位置（Tab の移動先計算に使う） */
+  row?: number;
+  col?: number;
 }
 
 /**
@@ -261,7 +267,7 @@ function decoParts(seg: Segment): DecoPart[] {
   for (const s of spans) {
     if (s.from < pos) continue; // 念のため（span 同士は重ならない）
     if (s.from > pos) out.push(...linkParts(seg.text.slice(pos, s.from)));
-    out.push({ text: seg.text.slice(s.from, s.to), aid: s.key });
+    out.push({ text: seg.text.slice(s.from, s.to), aid: s.key, row: s.row, col: s.col });
     pos = s.to;
   }
   if (pos < seg.text.length) out.push(...linkParts(seg.text.slice(pos)));
@@ -378,7 +384,7 @@ function localSpans(
     for (let c = startCol; c < s.col; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") from++;
     let len = 0;
     for (let c = s.col; c <= s.col + s.width - 1; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") len++;
-    if (len > 0) out.push({ from, to: from + len, key: s.key });
+    if (len > 0) out.push({ from, to: from + len, key: s.key, row: s.row, col: s.col });
   }
   return out.sort((a, b) => a.from - b.from);
 }
@@ -2373,6 +2379,8 @@ onBeforeUnmount(() => {
             v-else-if="p.aid"
             type="button"
             class="fkey-btn"
+            :data-row="p.row"
+            :data-col="p.col"
             :title="`${p.aid} を送る`"
             @mousedown.prevent
             @click.stop="onFkeyClick(p.aid)"

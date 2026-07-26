@@ -43,28 +43,21 @@ function onFontChange(e: Event): void {
 }
 
 // ---- デザイン候補パレット（spec D7/D9）----
-// 選択肢が多い項目は「よく使う 3 つ＋その他」に畳み、「その他」で全候補を開く。
-// 同時に開くのは 1 行だけ（開いている行の key を持つ）。
+// 選択肢が多い項目（入力項目設定・ボタン設定）は**畳んだ行**にする。既定では候補を出さず、
+// ラベルの右の「開く」で展開する。同時に開くのは 1 行だけ（開いている行の key を持つ）。
 const palette = ref<Key | null>(null);
-/** セグメントに出す選択肢（quick 未指定なら全部） */
-function quickOpts(r: ViewItemDef) {
-  return r.quick === undefined ? r.opts : r.opts.slice(0, r.quick);
-}
-/** その行が「その他」を持つか */
-function hasMore(r: ViewItemDef): boolean {
-  return r.quick !== undefined && r.opts.length > r.quick;
-}
-/** 現在値がセグメントの外＝「その他」が選択状態 */
-function isOther(r: ViewItemDef): boolean {
-  return hasMore(r) && !quickOpts(r).some((o) => o.value === eff.value[r.key]);
+function isExpanded(r: ViewItemDef): boolean {
+  return palette.value === r.key;
 }
 function togglePalette(key: Key): void {
   palette.value = palette.value === key ? null : key;
 }
-/** パレットから選ぶ。即反映して閉じる。 */
+/**
+ * 候補から選ぶ。**設定メニューもパレットも開いたままにする**——見比べながら
+ * 続けて別の候補を試せるようにするため（閉じると毎回開き直しになる）。
+ */
 function pickFromPalette(key: Key, value: ViewSettings[Key]): void {
   viewSettings.set(key, value as never);
-  palette.value = null;
 }
 
 /** その値がいまの設定値か。常にどれか 1 つが選択状態になる。 */
@@ -106,31 +99,33 @@ onBeforeUnmount(() => {
     <div v-if="open" class="vsm-menu" role="menu">
       <div class="vsm-head">画面設定</div>
       <template v-for="r in ROWS" :key="r.key">
-        <div class="vsm-row" :class="{ wide: r.wide }">
+        <!-- 畳んだ行: ラベルの右に「開く / 閉じる」。既定では候補を出さない -->
+        <div v-if="r.expandable" class="vsm-row">
+          <span class="vsm-label">{{ r.label }}</span>
+          <button
+            class="vsm-toggle"
+            :class="{ on: isExpanded(r) }"
+            :aria-expanded="isExpanded(r)"
+            @click="togglePalette(r.key)"
+          >
+            {{ isExpanded(r) ? "閉じる" : "開く" }}
+          </button>
+        </div>
+        <div v-else class="vsm-row" :class="{ wide: r.wide }">
           <span class="vsm-label">{{ r.label }}</span>
           <div class="seg" role="group" :aria-label="r.label">
             <button
-              v-for="o in quickOpts(r)"
+              v-for="o in r.opts"
               :key="String(o.value)"
               :class="{ on: isSel(r.key, o.value) }"
               @click="setVal(r.key, o.value)"
             >
               {{ o.label }}
             </button>
-            <button
-              v-if="hasMore(r)"
-              class="more"
-              :class="{ on: isOther(r) }"
-              :aria-expanded="palette === r.key"
-              title="ほかのデザインから選ぶ"
-              @click="togglePalette(r.key)"
-            >
-              その他{{ palette === r.key ? "▴" : "▾" }}
-            </button>
           </div>
         </div>
-        <!-- デザイン候補。よく使う 3 つも含めて全部出す（現在値に印） -->
-        <div v-if="palette === r.key" class="vsm-palette" role="listbox" :aria-label="`${r.label}のデザイン`">
+        <!-- デザイン候補（現在値に印）。選んでも閉じない -->
+        <div v-if="isExpanded(r)" class="vsm-palette" role="listbox" :aria-label="`${r.label}のデザイン`">
           <button
             v-for="o in r.opts"
             :key="String(o.value)"
@@ -270,8 +265,25 @@ onBeforeUnmount(() => {
   background: var(--accent);
   color: var(--card);
 }
-.seg button.more {
-  font-weight: 600;
+/* 畳んだ行の「開く / 閉じる」。セグメントと高さを揃える */
+.vsm-toggle {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.vsm-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+.vsm-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 /* デザイン候補パレット（spec D9）。各候補にその意匠を当てた見本を出す。 */
 .vsm-palette {
