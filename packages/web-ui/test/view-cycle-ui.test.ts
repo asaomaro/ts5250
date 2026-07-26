@@ -95,7 +95,7 @@ describe("キー押下で表示設定が順送りされ、通知が出る", () =
     w.unmount();
   });
 
-  it("3 値以上（コントロール表現）も順送りできる", async () => {
+  it("3 値以上（入力項目設定）も順送りできる", async () => {
     keybindingsStore.set("ctrl+2", "view:controls");
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
@@ -103,7 +103,7 @@ describe("キー押下で表示設定が順送りされ、通知が出る", () =
     await w.find(".pane").trigger("keydown", { key: "2", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.controls).toBe("underline");
-    expect(w.find(".oia .notice").text()).toBe("コントロール表現: 下線");
+    expect(w.find(".oia .notice").text()).toBe("入力項目設定: 下線");
     w.unmount();
   });
 });

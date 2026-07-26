@@ -185,17 +185,44 @@ function focusInput(inputs: HTMLInputElement[], i: number): void {
   el.setSelectionRange(0, 0);
 }
 
+/**
+ * Tab で止まる要素（入力欄＋機能キーボタン）を DOM 順で返す。
+ * **ボタンもタブ順に含める**——画面上のボタンなら、キーボードだけで到達して押せるべき（decisions D5）。
+ * ボタンは意匠「なし」のときは描画されないので、その場合は従来どおり入力欄だけになる。
+ */
+function tabStops(): HTMLElement[] {
+  if (!paneEl.value) return [];
+  return Array.from(
+    paneEl.value.querySelectorAll<HTMLElement>(
+      'input.grid-input:not([readonly])[data-slice="0"], button.fkey-btn'
+    )
+  );
+}
+
+/** タブ停止点へフォーカスする（入力欄なら先頭桁にキャレットを置く） */
+function focusStop(el: HTMLElement | undefined): void {
+  if (!el) return;
+  el.focus();
+  if (el instanceof HTMLInputElement) el.setSelectionRange(0, 0);
+}
+
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
 function focusByOffset(delta: number): void {
-  const inputs = editableInputs();
-  if (inputs.length === 0) {
-    // 入力可能な欄が 1 つも無い画面（確認画面・ヘルプ等）。行き先が無いので原点へ置く。
+  const stops = tabStops();
+  if (stops.length === 0) {
+    // 行き先が 1 つも無い画面（確認画面等）。原点へ置く。
     onCursor(1, 1);
     return;
   }
-  const cur = inputs.indexOf(document.activeElement as HTMLInputElement);
+  const cur = stops.indexOf(document.activeElement as HTMLElement);
   if (cur !== -1) {
-    focusInput(inputs, (cur + delta + inputs.length) % inputs.length);
+    focusStop(stops[(cur + delta + stops.length) % stops.length]);
+    return;
+  }
+  const inputs = editableInputs();
+  if (inputs.length === 0) {
+    // 入力欄は無いがボタンはある（ヘルプ画面等）。端のボタンへ入る。
+    focusStop(delta > 0 ? stops[0] : stops[stops.length - 1]);
     return;
   }
 
@@ -335,6 +362,14 @@ function onNotice(text: string): void {
   notice.value = text;
 }
 
+/** 機能キー凡例のボタンが押された（ScreenGrid）。キーボードの F キーと同じ扱いで送る。
+ *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。 */
+function onFkeyAid(key: AidKey): void {
+  if (busy.value || snapshot.value?.keyboardLocked) return;
+  emit("focus");
+  sendKey(props.sessionId, key, cursor.value);
+}
+
 /**
  * 欄外（保護領域・非入力セル）でのペースト。
  * **このアプリは保護欄に focus を留めない**（reconcileFocus が blur してペインへ移す）ため、
@@ -465,6 +500,21 @@ function onKeydown(ev: KeyboardEvent): void {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
     return;
   }
+  // 機能キーボタンにフォーカスがあるときの Space は「そのボタンを押す」（普通のボタンと同じ）。
+  // 明示的に処理するのは、下の isProtectedEdit が Space を preventDefault してしまい
+  // native の Space 起動が効かなくなるため。**Enter は 5250 の AID として残す**——端末で最も
+  // 重要なキーを、たまたまボタンにフォーカスがあるという理由で奪わない（decisions D5）。
+  const focusedBtn = document.activeElement;
+  if (
+    ev.key === " " &&
+    focusedBtn instanceof HTMLButtonElement &&
+    focusedBtn.classList.contains("fkey-btn") &&
+    paneEl.value?.contains(focusedBtn)
+  ) {
+    ev.preventDefault();
+    focusedBtn.click();
+    return;
+  }
   // Shift+矢印/Home/End は入力欄フォーカスの有無に関わらず画面の矩形（ブロック）選択を拡張する
   // （マウス・欄外操作と同一）。ScreenGrid は欄内 Shift 移動を preventDefault してここへ委譲する。
   if (ev.shiftKey && (ARROW_DIRS[ev.key] || ev.key === "Home" || ev.key === "End")) {
@@ -527,6 +577,7 @@ function onWheel(ev: WheelEvent): void {
     :data-controls="view.controls"
     :data-color-mode="view.colorMode"
     :data-surface="view.surface"
+    :data-buttons="view.buttons"
     :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
@@ -551,6 +602,7 @@ function onWheel(ev: WheelEvent): void {
         :katakana-view="view.kana"
         :uppercase-input="uppercaseInput"
         :linkify="view.linkify"
+        :buttons="view.buttons"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
@@ -559,6 +611,7 @@ function onWheel(ev: WheelEvent): void {
         @selection-cleared="onSelectionCleared"
         @selection-start="onSelectionStart"
         @notice="onNotice"
+        @aid="onFkeyAid"
       />
       <div v-else class="pane-empty">接続待ち…</div>
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->

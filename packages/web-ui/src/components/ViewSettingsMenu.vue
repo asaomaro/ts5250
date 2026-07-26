@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { viewSettings, VIEW_ITEMS, type ViewSettings } from "../stores/viewSettings.js";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { viewSettings, VIEW_ITEMS, type ViewSettings, type ViewItemDef } from "../stores/viewSettings.js";
 import { SCREEN_FONTS, detectInstalledFontIds } from "../composables/screenFonts.js";
 import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composables/headerMenu.js";
 
@@ -42,6 +42,31 @@ function onFontChange(e: Event): void {
   viewSettings.set("font", (e.target as HTMLSelectElement).value as never);
 }
 
+// ---- デザイン候補パレット（spec D7/D9）----
+// 選択肢が多い項目は「よく使う 3 つ＋その他」に畳み、「その他」で全候補を開く。
+// 同時に開くのは 1 行だけ（開いている行の key を持つ）。
+const palette = ref<Key | null>(null);
+/** セグメントに出す選択肢（quick 未指定なら全部） */
+function quickOpts(r: ViewItemDef) {
+  return r.quick === undefined ? r.opts : r.opts.slice(0, r.quick);
+}
+/** その行が「その他」を持つか */
+function hasMore(r: ViewItemDef): boolean {
+  return r.quick !== undefined && r.opts.length > r.quick;
+}
+/** 現在値がセグメントの外＝「その他」が選択状態 */
+function isOther(r: ViewItemDef): boolean {
+  return hasMore(r) && !quickOpts(r).some((o) => o.value === eff.value[r.key]);
+}
+function togglePalette(key: Key): void {
+  palette.value = palette.value === key ? null : key;
+}
+/** パレットから選ぶ。即反映して閉じる。 */
+function pickFromPalette(key: Key, value: ViewSettings[Key]): void {
+  viewSettings.set(key, value as never);
+  palette.value = null;
+}
+
 /** その値がいまの設定値か。常にどれか 1 つが選択状態になる。 */
 function isSel(key: Key, value: ViewSettings[Key]): boolean {
   return eff.value[key] === value;
@@ -56,6 +81,12 @@ function onDocClick(e: MouseEvent): void {
 function onKey(e: KeyboardEvent): void {
   if (e.key === "Escape") closeHeaderMenu(MENU_ID);
 }
+// メニューを閉じたらパレットも畳む。畳まないと**次に開いたとき勝手に展開された状態**で出る
+// （review R2）。開き直しは「素の状態から」が期待される。
+watch(open, (v) => {
+  if (!v) palette.value = null;
+});
+
 onMounted(() => {
   void refreshFonts(); // 初期表示（ユーザー操作外なので canvas 実測になる）
   document.addEventListener("click", onDocClick);
@@ -74,19 +105,46 @@ onBeforeUnmount(() => {
     </button>
     <div v-if="open" class="vsm-menu" role="menu">
       <div class="vsm-head">画面設定</div>
-      <div v-for="r in ROWS" :key="r.key" class="vsm-row" :class="{ wide: r.wide }">
-        <span class="vsm-label">{{ r.label }}</span>
-        <div class="seg" role="group" :aria-label="r.label">
+      <template v-for="r in ROWS" :key="r.key">
+        <div class="vsm-row" :class="{ wide: r.wide }">
+          <span class="vsm-label">{{ r.label }}</span>
+          <div class="seg" role="group" :aria-label="r.label">
+            <button
+              v-for="o in quickOpts(r)"
+              :key="String(o.value)"
+              :class="{ on: isSel(r.key, o.value) }"
+              @click="setVal(r.key, o.value)"
+            >
+              {{ o.label }}
+            </button>
+            <button
+              v-if="hasMore(r)"
+              class="more"
+              :class="{ on: isOther(r) }"
+              :aria-expanded="palette === r.key"
+              title="ほかのデザインから選ぶ"
+              @click="togglePalette(r.key)"
+            >
+              その他{{ palette === r.key ? "▴" : "▾" }}
+            </button>
+          </div>
+        </div>
+        <!-- デザイン候補。よく使う 3 つも含めて全部出す（現在値に印） -->
+        <div v-if="palette === r.key" class="vsm-palette" role="listbox" :aria-label="`${r.label}のデザイン`">
           <button
             v-for="o in r.opts"
             :key="String(o.value)"
+            class="pal-item"
+            role="option"
+            :aria-selected="isSel(r.key, o.value)"
             :class="{ on: isSel(r.key, o.value) }"
-            @click="setVal(r.key, o.value)"
+            @click="pickFromPalette(r.key, o.value)"
           >
-            {{ o.label }}
+            <span class="pal-prev" :data-kind="r.key" :data-style="String(o.value)">Ab</span>
+            <span class="pal-name">{{ o.label }}</span>
           </button>
         </div>
-      </div>
+      </template>
 
       <!-- フォント（画面グリッド）: styles.css の全フォントから、導入済みのみ選択可（未導入は無効）。 -->
       <div class="vsm-row wide">
@@ -212,6 +270,68 @@ onBeforeUnmount(() => {
   background: var(--accent);
   color: var(--card);
 }
+.seg button.more {
+  font-weight: 600;
+}
+/* デザイン候補パレット（spec D9）。各候補にその意匠を当てた見本を出す。 */
+.vsm-palette {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 2px 4px 6px;
+}
+.pal-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--sans);
+  font-size: 9.5px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px 2px;
+  cursor: pointer;
+}
+.pal-item:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-color: transparent;
+  color: var(--ink);
+}
+.pal-item.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* 見本。実際の画面と同じ「文字は動かさず box-shadow などで見せる」流儀で描く。 */
+.pal-prev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 18px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink);
+}
+/* 入力項目の見本 */
+.pal-prev[data-kind="controls"][data-style="underline"] { box-shadow: inset 0 -1.5px 0 var(--accent); }
+.pal-prev[data-kind="controls"][data-style="filled"] { background: color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 4px; }
+.pal-prev[data-kind="controls"][data-style="box"] { box-shadow: inset 0 0 0 1px var(--line); border-radius: 4px; }
+.pal-prev[data-kind="controls"][data-style="boxRound"] { box-shadow: inset 0 0 0 1px var(--line); border-radius: 999px; }
+.pal-prev[data-kind="controls"][data-style="inset"] { background: color-mix(in srgb, var(--ink) 7%, transparent); box-shadow: inset 0 2px 3px -1px color-mix(in srgb, #000 35%, transparent); border-radius: 3px; }
+.pal-prev[data-kind="controls"][data-style="dashed"] { outline: 1px dashed var(--muted); outline-offset: -1px; }
+.pal-prev[data-kind="controls"][data-style="glow"] { box-shadow: 0 0 0 2px var(--accent-soft), 0 0 8px -2px var(--accent); border-radius: 3px; }
+/* ボタンの見本 */
+.pal-prev[data-kind="buttons"][data-style="none"] { color: var(--muted); text-decoration: line-through; }
+.pal-prev[data-kind="buttons"][data-style="underline"] { box-shadow: inset 0 -1.5px 0 var(--accent); }
+.pal-prev[data-kind="buttons"][data-style="filled"] { background: color-mix(in srgb, var(--ink) 12%, transparent); border-radius: 4px; }
+.pal-prev[data-kind="buttons"][data-style="box"] { box-shadow: inset 0 0 0 1px var(--line); border-radius: 3px; }
+.pal-prev[data-kind="buttons"][data-style="pill"] { background: color-mix(in srgb, var(--ink) 12%, transparent); border-radius: 999px; }
+.pal-prev[data-kind="buttons"][data-style="ghost"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 60%, transparent); border-radius: 3px; }
+.pal-prev[data-kind="buttons"][data-style="raised"] { background: color-mix(in srgb, var(--ink) 10%, transparent); box-shadow: 0 1px 2px color-mix(in srgb, #000 30%, transparent); border-radius: 3px; }
+.pal-prev[data-kind="buttons"][data-style="link"] { color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); }
+
 /* 画面フォントのセレクト */
 .vsm-select {
   width: 100%;

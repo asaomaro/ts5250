@@ -21,7 +21,8 @@ describe("viewSettings.cycle", () => {
   });
 
   it("3 値以上の項目も順送りで一巡する", () => {
-    const order = ["underline", "filled", "rich", "plain"]; // plain から順送り
+    // plain から順送りして一巡する（選択肢はデザイン候補ぶん増えている）
+    const order = ["underline", "filled", "box", "boxRound", "inset", "dashed", "glow", "plain"];
     for (const expected of order) {
       viewSettings.cycle("controls");
       expect(viewSettings.settings.controls).toBe(expected);
