@@ -61,6 +61,44 @@ const fkeys = computed<{ key: AidKey; label: string }[]>(() =>
 function press(k: AidKey): void {
   sendKey(props.state.sessionId, k, props.state.cursor);
 }
+
+/**
+ * マクロの状態表示（spec D10）。ACS が記録中に画面下部へ出すシアンのバーに相当する役目を、
+ * この OIA が担う。**止まった理由も出す**——「押したのに動かない」と
+ * 「画面が一致せず止めた」を利用者が区別できないと、原因を追えない。
+ */
+const macro = computed<{ label: string; cls: string; title: string } | undefined>(() => {
+  const m = props.state.macro;
+  if (!m) return undefined;
+  switch (m.mode) {
+    case "recording":
+      return { label: "⏺ 記録中", cls: "rec", title: "操作を記録しています" };
+    case "recordPaused":
+      return { label: "⏸ 記録休止", cls: "pause", title: "記録を休止しています（送信は記録されません）" };
+    case "playing":
+      return { label: "▶ 再生中", cls: "play", title: "マクロを再生しています" };
+    case "playPaused":
+      return { label: "⏸ 再生休止", cls: "pause", title: m.message ?? "再生を休止しています" };
+    default:
+      return undefined;
+  }
+});
+
+/** 直前の再生が異常終了していたら理由を出す（次の操作・再生で消える） */
+const MACRO_STOP_LABEL: Record<string, string> = {
+  mismatch: "画面が一致しません",
+  timeout: "ホストの応答がありません",
+  disconnected: "切断されました",
+  readonly: "閲覧のみのため再生できません",
+  secret: "保存した秘密を取り出せません"
+};
+const macroStop = computed<string | undefined>(() => {
+  const m = props.state.macro;
+  if (!m || m.mode !== "idle" || !m.stopReason) return undefined;
+  const label = MACRO_STOP_LABEL[m.stopReason];
+  if (!label) return undefined; // completed / user は正常終了なので出さない
+  return m.message ?? label;
+});
 </script>
 
 <template>
@@ -83,6 +121,11 @@ function press(k: AidKey): void {
     </span>
     <span v-if="snap">画面 <b>{{ snap.rows }}x{{ snap.cols }}</b></span>
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
+    <!-- マクロの状態（ACS のシアンバー相当。spec D10）。幅は固定して隣をずらさない -->
+    <span v-if="macro" class="macro" :class="macro.cls" :title="macro.title" role="status">
+      {{ macro.label }}
+    </span>
+    <span v-else-if="macroStop" class="macro stopped" role="status">⏹ マクロ: {{ macroStop }}</span>
     <span class="mode">{{ insertMode ? "挿入" : "上書き" }}</span>
     <span v-if="notice" class="msg notice" role="status">{{ notice }}</span>
     <!-- クライアント側メッセージはホストのメッセージを**隠す**（ACS 準拠）。
@@ -115,6 +158,31 @@ function press(k: AidKey): void {
   min-width: 7em;
 }
 .ime.ng {
+  color: var(--muted);
+}
+/* マクロ状態。記録＝赤・再生＝緑・休止＝黄で ACS のバーと同じ読み取り方にする。
+   幅を固定するのは、記録→休止→再生で表記が変わっても隣の要素を動かさないため
+   （UI-DESIGN「トグルボタンは状態切替で幅も高さも変わらないこと」）。 */
+.macro {
+  display: inline-flex;
+  align-items: center;
+  min-width: 6.5em;
+  line-height: 1;
+  font-weight: 600;
+}
+.macro.rec {
+  color: var(--t-red, #e05252);
+}
+.macro.play {
+  color: var(--t-green);
+}
+.macro.pause {
+  color: var(--t-yellow, #d9a441);
+}
+/* 停止理由は原因の説明なので幅を固定しない（長さがまちまち。右端に流す） */
+.macro.stopped {
+  min-width: 0;
+  font-weight: normal;
   color: var(--muted);
 }
 .logbtn {

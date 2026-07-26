@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import DesignMenu from "./components/DesignMenu.vue";
 import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
+import MacroMenu from "./components/MacroMenu.vue";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
@@ -234,6 +235,8 @@ onBeforeUnmount(() => {
         <!-- 表示設定（SO/SI・カナ・リンク・コントロール表現ほか）は ⚙ 画面 に集約。
              キー設定からも同じ項目を順送りで切り替えられる。 -->
         <button v-if="activeIsEmulator" class="theme-btn" @click="showKeys = true">⌨ キー</button>
+        <!-- マクロは 5250 セッション専用（記録も再生も画面操作なので） -->
+        <MacroMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
         <ViewSettingsMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
         <DesignMenu />
       </div>

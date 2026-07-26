@@ -16,6 +16,8 @@ import {
 } from "./auth.js";
 import { registerAdminRoutes } from "./admin.js";
 import { registerConfigRoutes } from "./config-routes.js";
+import { registerMacroRoutes } from "./macro-routes.js";
+import { MacroStore } from "./macro-store.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
@@ -34,6 +36,12 @@ export interface AppDeps extends ToolDeps {
   auth?: AuthContext;
   /** 監査ログバッファ（管理者画面のログ取得用） */
   audit?: AuditBuffer;
+  /**
+   * マクロ（画面操作の記録・再生）のストア。未指定なら**メモリのみ**で動く
+   * （テスト・組み込み経路。永続化しないだけで機能は同じ）。
+   * 秘密の暗号化に使う master key はストア生成時に渡す（spec D5）。
+   */
+  macros?: MacroStore;
   /** SQL 結果セットの保持（画面のページング用）。未指定なら内部で作る */
   resultSets?: ResultSetStore;
   /** 画面の SQL 用の接続の使い回し。未指定なら内部で作る */
@@ -128,6 +136,10 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
 
   // システム / セッション設定の CRUD（信頼境界 2〜4 層目は config-routes 側）
   registerConfigRoutes(app, { resolver: deps.resolver, canEditServer });
+
+  // マクロの CRUD。認可は MacroStore の assertOwner に集約する（経路ごとに書かない）
+  const macros = deps.macros ?? new MacroStore();
+  registerMacroRoutes(app, { macros });
 
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
   // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
@@ -233,7 +245,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
       return {
         onOpen(_evt, ws) {
           conn = new WsConnection(
-            deps,
+            // マクロの秘密は ws 経路でしか解決しない（spec D11）。同じストアを渡す
+            { ...deps, macros },
             {
               send: (data) => ws.send(data),
               close: () => ws.close()

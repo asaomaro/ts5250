@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { log, childLog } from "./log.js";
 import { SessionManager } from "./session-manager.js";
 import { PersonalConfigStore, ServerConfigStore } from "./config-store.js";
+import { MacroStore } from "./macro-store.js";
 import { ConfigResolver } from "./config-resolver.js";
 import { SecretCrypto } from "./secret-crypto.js";
 import { buildMcpServer } from "./mcp-server.js";
@@ -44,6 +45,8 @@ interface Args {
   host: string | undefined;
   profilesPath: string | undefined;
   connectionsPath: string;
+  /** マクロ（画面操作の記録）の保存ファイル。秘密は master key で暗号化して入る */
+  macrosPath: string;
   webRoot: string | undefined;
   usersPath: string | undefined;
   hashPassword: string | undefined;
@@ -90,6 +93,7 @@ function parseArgs(argv: string[]): Args {
     host: undefined,
     profilesPath: undefined,
     connectionsPath: "connections.json",
+    macrosPath: "macros.json",
     webRoot: undefined,
     usersPath: undefined,
     hashPassword: undefined,
@@ -120,6 +124,9 @@ function parseArgs(argv: string[]): Args {
     } else if (a === "--connections") {
       // ユーザー接続設定の保存ファイル（サーバー一元管理）。未指定は connections.json
       args.connectionsPath = argv[++i]!;
+    } else if (a === "--macros") {
+      // マクロの保存ファイル。未指定は macros.json
+      args.macrosPath = argv[++i]!;
     } else if (a === "--ifs-zip-max-bytes") {
       // zip64 非対応なので 4GB 未満に制限する（起動時に弾く）
       args.ifsZipMaxBytes = parseLimit(argv[++i], "--ifs-zip-max-bytes", ZIP_MAX_BYTES_LIMIT);
@@ -160,7 +167,7 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-function buildDeps(args: Args): ToolDeps {
+function buildDeps(args: Args): ToolDeps & { macros: MacroStore } {
   const sessions = new SessionManager();
   sessions.startIdleSweep();
   // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）。
@@ -181,9 +188,12 @@ function buildDeps(args: Args): ToolDeps {
     : new ServerConfigStore({ systems: [], sessions: [] }, crypto);
   const personal = PersonalConfigStore.fromFile(args.connectionsPath, crypto, migrateWarn);
   const resolver = new ConfigResolver(server, personal);
+  // マクロは接続設定と同じ master key を共有する（秘密の鍵を 2 系統持たない）
+  const macros = MacroStore.fromFile(args.macrosPath, crypto);
   return {
     sessions,
     resolver,
+    macros,
     version: VERSION,
     // stdio モードは buildApp を通らないので、ここで MCP ツールへ受信待機上限を渡す
     // （CLI 値は parseArgs の parseLimit で 1〜3600 に検証済み）

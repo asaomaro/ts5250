@@ -1,9 +1,10 @@
-import type { WsOpen, WsServerMessage } from "@as400web/server";
+import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
 import type { AidKey } from "@as400web/core";
 import { WsClient } from "./ws-client.js";
 import { MSG_NO_RESPONSE } from "./composables/opMessages.js";
 import { sessionsStore, type SessionState, type SessionMeta } from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
+import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
 
 const WS_URL = (): string => {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -235,6 +236,14 @@ export function setPrinterOutput(sessionId: string, enabled: boolean): void {
  * 編集差分を一緒に送るのは SysReq/Attn でも同じ——ホストは Attn の直後に SAVE SCREEN で
  * **こちらの画面イメージ**を引き取って復元に使うため、打ちかけの文字も載せておかないと
  * F3 で戻ったときに消える。
+ *
+ * **マクロの記録フックはここに 1 点だけ置く**（spec D2）。キーボード・機能キー凡例ボタン・
+ * ホイール・OIA ボタンの経路はすべてこの関数を通るため、コンポーネント側は無改造で済む。
+ * 記録していないとき（`idle`）は `recordSend` が即 return するので**挙動は一切変わらない**。
+ *
+ * **再生中の手入力もここで止める**。`busy` プロテクトだけでは足りない——ホストの応答が
+ * 返ってから次のステップを送るまでの**隙間で `busy` が false になる**ため、その瞬間の打鍵が
+ * ホストへ抜けて再生と食い違う。再生は `sendKeyWithFields` を使うので巻き添えにならない。
  */
 export function sendKey(
   sessionId: string,
@@ -244,8 +253,11 @@ export function sendKey(
 ): void {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return; // 通信中は多重送信しない（プロテクト）
+  if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
   delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
+  // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
+  recordSend(sessionId, key, cursor ?? s.cursor, sysReqText);
   s.client.send({
     type: "key",
     key,
@@ -256,17 +268,60 @@ export function sendKey(
   setBusy(sessionId, true);
 }
 
-/** GUI 選択フィールドの選択状態を変更（ローカル・ホスト送信なし） */
+/** 再生時に送る 1 欄。値そのものか、**マクロの秘密への参照**（spec D11） */
+export type OutgoingField = WsKeyField;
+
+/**
+ * マクロ再生用の AID 送信。`sendKey` と違い **`s.edits` を見ず、渡された fields をそのまま送る**。
+ *
+ * 分けているのは秘密のため——秘密は値ではなく `secretRef` で送り、サーバーが所有者を
+ * 確かめて復号し、ホストへ書く直前に差し替える。`s.edits` は `Map<number, string>` なので
+ * 参照を載せられない。**記録フックも呼ばない**（再生を記録し直さない）。
+ */
+export function sendKeyWithFields(
+  sessionId: string,
+  key: string,
+  cursor: { row: number; col: number },
+  fields: OutgoingField[],
+  sysReqText?: string
+): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s || s.busy) return;
+  delete s.notice;
+  s.client.send({
+    type: "key",
+    key,
+    cursor,
+    ...(fields.length > 0 ? { fields } : {}),
+    ...(sysReqText !== undefined ? { sysReqText } : {})
+  });
+  setBusy(sessionId, true);
+}
+
+/**
+ * GUI 選択フィールドの選択状態を変更（ローカル・ホスト送信なし）。
+ *
+ * **この経路もマクロに記録できない**（spec D8）。選択の切り替えはサーバー側セッションの
+ * 状態変更で `s.edits` に現れないため、記録されるのは後続の AID だけになる。
+ * 印を立てておかないと「選択が反映されないまま Enter が飛ぶマクロ」が黙って出来上がる。
+ */
 export function selectGuiChoice(
   sessionId: string,
   fieldId: number,
   choiceIndex: number,
   selected: boolean
 ): void {
+  if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない
+  noteUnrecordable(sessionId);
   sessionsStore.get(sessionId)?.client.send({ type: "gui-select", fieldId, choiceIndex, selected });
 }
 
-/** GUI 選択フィールドを確定送信（AID/Enter を Read 応答として送る） */
+/**
+ * GUI 選択フィールドを確定送信（AID/Enter を Read 応答として送る）。
+ *
+ * **この経路はマクロに記録できない**（拡張5250 のホスト宣言に依存し、`sendKey` を通らない。
+ * spec D8）。記録中なら印を立てて、黙って壊れたマクロが出来上がるのを防ぐ。
+ */
 export function submitGuiSelection(
   sessionId: string,
   fieldId: number,
@@ -274,6 +329,8 @@ export function submitGuiSelection(
 ): void {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return;
+  if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない
+  noteUnrecordable(sessionId);
   s.client.send({ type: "gui-submit", fieldId, ...(cursor ? { cursor } : {}) });
   setBusy(sessionId, true);
 }

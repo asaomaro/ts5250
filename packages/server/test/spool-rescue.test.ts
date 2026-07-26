@@ -33,6 +33,10 @@ vi.mock("../src/host-connect.js", () => ({
 }));
 
 const { rescueStuckSpools } = await import("../src/spool-rescue.js");
+// **テスト本体の中で import しない。** モジュール変換のコストが it() のタイムアウト（5 秒）に
+// 算入されるため、テストファイルが増えてワーカーが混み合うと同期処理だけのテストが落ちる
+// （実測: ダミーのテストファイルを 3 つ足すだけで再現する）。ここで先に解決しておく。
+const { SessionManager } = await import("../src/session-manager.js");
 
 const OPTS = { host: "h", user: "u", password: "p" };
 const entry = (over: Record<string, unknown> = {}) => ({
@@ -140,8 +144,7 @@ describe("rescueStuckSpools", () => {
  * 配る側（`deliverReport`）から必ずフックを叩く形に直した回帰。
  */
 describe("救出した帳票の配り先", () => {
-  it("push と救出のどちらも同じフックへ流れる", async () => {
-    const { SessionManager } = await import("../src/session-manager.js");
+  it("push と救出のどちらも同じフックへ流れる", () => {
     const mgr = new SessionManager();
     const pushed: string[] = [];
     // deliverReport は private なので、entry を組み立てて型経由で叩く
