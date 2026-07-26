@@ -19,6 +19,9 @@ export type Surface = "crt" | "flat";
  * **入力欄の設定（controls）とは別軸**（spec D5）。`none`＝無効で凡例をボタン化しない
  * （拡張5250 の選択肢はホストが宣言した操作部品なので、無効でも現状の意匠で機能を保つ）。
  */
+/** ウィンドウ（ヘルプ窓・アプリの WINDOW DSPF）の見せ方。**重ねて描くだけ**で、
+ *  文字・桁・ホスト色には触れない（spec D2）。 */
+export type WindowView = "none" | "shadow" | "smoke" | "smokeShadow" | "raised" | "outline";
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
@@ -30,6 +33,8 @@ export interface ViewSettings {
   surface: Surface;
   /** 機能キー凡例・拡張5250 の選択肢の見せ方 */
   buttons: ButtonStyle;
+  /** ウィンドウの見せ方 */
+  windowView: WindowView;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -87,6 +92,19 @@ export const VIEW_ITEMS: ViewItemDef[] = [
       { value: "link", label: "リンク風" },
     ],
   },
+  {
+    key: "windowView",
+    label: "ウィンドウ設定",
+    expandable: true,
+    opts: [
+      { value: "none", label: "無効" },
+      { value: "shadow", label: "影" },
+      { value: "smoke", label: "スモーク" },
+      { value: "smokeShadow", label: "影＋スモーク" },
+      { value: "raised", label: "浮き出し" },
+      { value: "outline", label: "枠強調" },
+    ],
+  },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
   { key: "surface", label: "画面の質感", opts: [{ value: "flat", label: "フラット" }, { value: "crt", label: "CRT" }] },
 ];
@@ -106,6 +124,7 @@ const FALLBACK: ViewSettings = {
   colorMode: "literal", // 端末色
   surface: "flat",
   buttons: "none",
+  windowView: "none",
   font: "system",
 };
 

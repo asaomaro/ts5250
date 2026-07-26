@@ -25,8 +25,8 @@ import {
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
-import { detectFkeyLegends, type FkeySpan } from "../composables/fkeyLegend.js";
-import type { ButtonStyle } from "../stores/viewSettings.js";
+import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
+import type { ButtonStyle, WindowView } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -67,8 +67,10 @@ const props = withDefaults(
     uppercaseInput?: boolean;
     /** 「押せるもの」の見せ方。none は機能キー凡例をボタン化しない（spec D5） */
     buttons?: ButtonStyle;
+    /** ウィンドウの見せ方。none は何も重ねない */
+    windowView?: WindowView;
   }>(),
-  { linkify: true, buttons: "none" }
+  { linkify: true, buttons: "none", windowView: "none" }
 );
 const emit = defineEmits<{
   (e: "edit", fieldIndex: number, value: string): void;
@@ -166,6 +168,40 @@ function guiPos(row: number, col: number): Record<string, string> {
 function thumbStyle(bar: { horizontal: boolean; total: number; sliderPos: number }): Record<string, string> {
   const pct = (bar.total ? (bar.sliderPos / bar.total) * 100 : 0) + "%";
   return bar.horizontal ? { left: pct } : { top: pct };
+}
+
+/**
+ * ウィンドウ装飾（画面設定「ウィンドウ設定」）の矩形。
+ * 拡張5250 の窓と文字で描かれた窓の**両方**を同じ関数が返すので、装飾側は種類を意識しない。
+ * 設定が none のときは検出も走らせない（無駄な計算をしない）。
+ */
+const decoWindow = computed<WindowRect | null>(() =>
+  props.windowView === "none" ? null : detectWindowRect(props.snapshot, displayChar)
+);
+
+/** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */
+function winRectStyle(r: { row1: number; row2: number; col1: number; col2: number }): Record<string, string> {
+  return {
+    left: r.col1 - 1 + "ch",
+    top: (r.row1 - 1) * 1.25 + "em",
+    width: r.col2 - r.col1 + 1 + "ch",
+    height: (r.row2 - r.row1 + 1) * 1.25 + "em",
+  };
+}
+
+/**
+ * スモーク（窓の外を暗くする）用の 4 枚。窓の**上・下・左・右**を覆い、窓の中は覆わない
+ * （読みやすさを落とさないため。spec D3）。幅・高さが 0 のものは描かない。
+ */
+function smokeRects(r: WindowRect): Record<string, string>[] {
+  const rows = props.snapshot.rows;
+  const cols = props.snapshot.cols;
+  const out: { row1: number; row2: number; col1: number; col2: number }[] = [];
+  if (r.row1 > 1) out.push({ row1: 1, row2: r.row1 - 1, col1: 1, col2: cols });
+  if (r.row2 < rows) out.push({ row1: r.row2 + 1, row2: rows, col1: 1, col2: cols });
+  if (r.col1 > 1) out.push({ row1: r.row1, row2: r.row2, col1: 1, col2: r.col1 - 1 });
+  if (r.col2 < cols) out.push({ row1: r.row1, row2: r.row2, col1: r.col2 + 1, col2: cols });
+  return out.map(winRectStyle);
 }
 
 /** ウィンドウ枠の位置＋寸法スタイル */
@@ -2276,6 +2312,18 @@ onBeforeUnmount(() => {
       aria-hidden="true"
     ></div>
     <!-- 拡張 5250 GUI オーバーレイ（ウィンドウ枠・選択フィールド・スクロールバー） -->
+    <!-- ウィンドウ装飾（画面設定）。**重ねるだけ**で文字・桁に触れず、
+         pointer-events:none で窓の中の操作（入力・クリック・矩形選択）を透過させる。 -->
+    <template v-if="decoWindow">
+      <div
+        v-for="(st, i) in smokeRects(decoWindow)"
+        :key="'sm' + i"
+        class="win-smoke"
+        :style="st"
+        aria-hidden="true"
+      ></div>
+      <div class="win-deco" :style="winRectStyle(decoWindow)" aria-hidden="true"></div>
+    </template>
     <template v-if="gui">
       <div
         v-for="w in gui.windows"
@@ -2761,6 +2809,43 @@ onBeforeUnmount(() => {
   border-color: transparent;
   box-shadow: inset 0 -1px 0 var(--t-green);
   border-radius: 0;
+}
+
+/* ==== ウィンドウ装飾（画面設定「ウィンドウ設定」）====
+   矩形は fkeyLegend.detectWindowRect（拡張5250 の宣言／罫線検出の両対応）から来る。
+   **重ねるだけ**——文字・桁・ホスト色には触れない。操作は透過させる。
+   重なり順: 文字より上（z:2）、カーソル(z:4)・矩形選択(z:3)より下にして選択を隠さない。 */
+.win-smoke,
+.win-deco {
+  position: absolute;
+  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
+  pointer-events: none;
+  z-index: 2;
+  box-sizing: border-box;
+}
+/* スモーク: 既定では何もしない。意匠で色を入れる */
+.win-smoke {
+  background: none;
+}
+.pane[data-window="smoke"] .win-smoke,
+.pane[data-window="smokeShadow"] .win-smoke {
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+/* 影: 窓の外側に落とす */
+.pane[data-window="shadow"] .win-deco,
+.pane[data-window="smokeShadow"] .win-deco {
+  box-shadow: 0 6px 24px -6px color-mix(in srgb, #000 75%, transparent);
+}
+/* 浮き出し: 影＋窓の面をわずかに持ち上げる（地色を薄く敷く） */
+.pane[data-window="raised"] .win-deco {
+  background: color-mix(in srgb, var(--t-white) 7%, transparent);
+  box-shadow: 0 8px 28px -8px color-mix(in srgb, #000 80%, transparent);
+  border-radius: 3px;
+}
+/* 枠強調: アクセント色の枠線を重ねる */
+.pane[data-window="outline"] .win-deco {
+  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-soft);
+  border-radius: 3px;
 }
 
 /* ==== 拡張 5250 GUI オーバーレイ ==== */
