@@ -1,7 +1,7 @@
 schema: 3
 slug: library-extraction-codec
-current: deliver
-approved: [requirement, spec, plan, coding, test, review, walkthrough, deliver]
+current: retro
+approved: [requirement, spec, plan, coding, test, review, walkthrough, deliver, retro]
 mode: autonomous
 humanGates: [spec]
 maxSendBacks: 3
