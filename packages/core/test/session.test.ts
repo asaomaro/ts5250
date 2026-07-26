@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Session5250, FLAG_KEY_TIMEOUT_MS } from "../src/session/session.js";
+import { Session5250 } from "../src/session/session.js";
 import { ReplayTransport } from "../src/trace/replay.js";
 import { parseTraceJsonl, bytesToHex, type TraceEntry } from "../src/trace/trace.js";
 import { buildRecord, parseRecord } from "../src/protocol/gds.js";
@@ -329,15 +329,20 @@ describe("Session5250 リプレイ E2E", () => {
  * その間 UI が入力プロテクトのままになり、固まって見える。
  */
 describe("フラグレコードの応答待ち", () => {
-  it("Attn は無応答でも 5 秒（FLAG_KEY_TIMEOUT_MS）で戻る", async () => {
-    expect(FLAG_KEY_TIMEOUT_MS).toBe(5_000);
+  it("Attn は応答を待たずに即座に戻る（ACS 準拠。timedOut ではない）", async () => {
     const { session } = await connectReplay(signonEntries());
-    // 既定より十分短い値を明示指定して、待ちが opts で上書きできることも同時に確認する
     const t0 = Date.now();
-    const r = await session.sendAid("Attn", { timeoutMs: 40 });
-    expect(r.timedOut).toBe(true);
-    expect(Date.now() - t0).toBeLessThan(2_000);
-    // 時間切れでキーボードは解放される（固まったままにしない）
+    const r = await session.sendAid("Attn");
+    expect(r.timedOut).toBe(false); // 時間切れではなく「待たない」
+    expect(Date.now() - t0).toBeLessThan(100);
+    // **ロックしない**——応答が来ない 2 回目でロックが残ると 🔒 が消えなくなる
+    expect(session.keyboardLocked).toBe(false);
+  });
+
+  it("SysReq も応答を待たない", async () => {
+    const { session } = await connectReplay(signonEntries());
+    const r = await session.sendAid("SysReq", { sysReqText: "2" });
+    expect(r.timedOut).toBe(false);
     expect(session.keyboardLocked).toBe(false);
   });
 
