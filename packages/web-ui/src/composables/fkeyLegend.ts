@@ -39,6 +39,12 @@ const BORDER_V = new Set([":", "：", "|", "｜", "│", "┃", "║"]);
 const TRAILING_BORDER = /[.:：|｜│┃║─━═┌┐└┘├┤┬┴┼\s]+$/u;
 /** 窓の上下端とみなす横罫の最小長（桁）。見出しの点線 `. . . .` は連続しないので拾わない。 */
 const MIN_BORDER_RUN = 8;
+/**
+ * 反転枠の上下端とみなす反転の最小長（桁）。
+ * `MIN_BORDER_RUN` と同じ値だが**共有しない**——将来どちらかだけ調整したくなったときに、
+ * 片方を触って両方動くのを避ける。
+ */
+const MIN_REVERSE_FRAME = 8;
 
 /** `F<n>=` の開始位置。直前が英数字なら凡例ではない（`REF3=` `XF1=` を弾く）。 */
 const LEGEND_RE = /(?<![A-Za-z0-9])F(\d{1,2})\s*=\s*/g;
@@ -95,6 +101,73 @@ function horizontalRuns(rt: RowText): { from: number; to: number }[] {
   return out;
 }
 
+/** 行から「反転が途切れず続く区間」を拾う（桁は 1 始まりの閉区間）。 */
+function reverseRuns(cells: readonly Cell[]): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  let i = 0;
+  while (i < cells.length) {
+    if (!cells[i]!.reverse) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < cells.length && cells[j]!.reverse) j++;
+    out.push({ from: i + 1, to: j });
+    i = j;
+  }
+  return out;
+}
+
+/**
+ * **反転表示が途切れなく閉じた矩形**を作っていればその外周を返す。
+ *
+ * ホストの ATNPGM の窓（Attn の「コマンド入力」）は枠を反転表示の空白セルで描き、罫線文字を
+ * 1 つも使わないため `horizontalRuns` では拾えない。判定できないと、窓が出ている間も
+ * **背面の F キー凡例がボタンとして残り**、押すと窓側の文脈で解釈されてラベルと食い違う。
+ *
+ * 反転は見出し行・メッセージ行・選択行の強調にも使われるので、**閉じていることを厳しく要求する**:
+ *
+ * 1. 上端: 途切れない反転の連なり（`MIN_REVERSE_FRAME` 桁以上）
+ * 2. 下端: 2 行以上下に、**同じ桁範囲**の途切れない反転の連なり
+ * 3. 側面: その間の**すべての行**で左右端の桁が両方とも反転
+ *
+ * 「上下 2 本の反転バー」だけでは 3 を満たさないので弾ける。上下端を完全一致にしているのは、
+ * 反転枠は属性そのもので描かれるため桁がずれる理由が無いから（実機で確認）。
+ * 罫線経路が重なり率で判定しているのは端の記号（`:`）の有無でずれるからで、事情が違う。
+ *
+ * **矩形は削らずそのまま返す。** 上下端の行は枠ではなく中身（タイトル・F キー凡例が載る）で、
+ * 削ると凡例が落ちる（拡張5250 の窓で削らないのと同じ理由）。
+ */
+function detectReverseFrame(snap: ScreenSnapshot): WindowRect | null {
+  const runs = snap.cells.map((cells) => reverseRuns(cells));
+  if (!runs.some((r) => r.length > 0)) return null; // 反転が無い画面は即やめる
+  const isRev = (r: number, col: number): boolean => snap.cells[r]?.[col - 1]?.reverse === true;
+
+  let best: WindowRect | null = null;
+  let bestArea = 0;
+  for (let top = 0; top < snap.rows; top++) {
+    for (const t of runs[top] ?? []) {
+      if (t.to - t.from + 1 < MIN_REVERSE_FRAME) continue;
+      for (let bottom = top + 2; bottom < snap.rows; bottom++) {
+        // 下端は同じ桁範囲の「途切れない」連なりであること
+        if (!(runs[bottom] ?? []).some((b) => b.from === t.from && b.to === t.to)) continue;
+        // 側面: 間のすべての行で左右端が反転
+        let closed = true;
+        for (let r = top + 1; r < bottom && closed; r++) {
+          closed = isRev(r, t.from) && isRev(r, t.to);
+        }
+        if (!closed) continue;
+        const area = (bottom - top) * (t.to - t.from);
+        if (area > bestArea) {
+          bestArea = area;
+          best = { row1: top + 1, row2: bottom + 1, col1: t.from, col2: t.to };
+        }
+      }
+    }
+  }
+  return best;
+}
+
 /** 指定桁の文字（無ければ空文字）。桁は 1 始まり。 */
 function charAtCol(rt: RowText, col: number): string {
   const i = rt.colOf.indexOf(col);
@@ -147,7 +220,8 @@ export function detectWindowRect(snap: ScreenSnapshot, charOf: CharOf = defaultC
       if (!best || area > best.area) best = { top: t.r, bottom: bo.r, from: t.from, to: t.to, area };
     }
   }
-  if (!best) return null;
+  // 罫線が見つからなければ**反転で閉じた矩形**を試す（ATNPGM の窓は枠を反転で描く）
+  if (!best) return detectReverseFrame(snap);
   // top/bottom は 0 始まりの行 index。内側は枠の 1 つ内なので +2 / そのまま（1 始まり換算）
   return { row1: best.top + 2, row2: best.bottom, col1: best.from + 1, col2: best.to - 1 };
 }
