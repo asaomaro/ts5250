@@ -20,7 +20,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { openDdmTransport, type DdmTransport } from "../../transport/ddm-transport.js";
 import type { HostTlsOptions } from "../../transport/host-connection.js";
 import { signon } from "../signon.js";

@@ -5,7 +5,7 @@
  *       CP 0x3812 / 0x380E / 0x3807 の処理に対応する。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import { toColumnMeta, type ColumnMeta } from "./db-decode.js";
 
 /**

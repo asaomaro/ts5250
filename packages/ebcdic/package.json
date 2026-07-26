@@ -1,0 +1,28 @@
+{
+  "name": "@as400web/ebcdic",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "EBCDIC codec for IBM i — SBCS (37/273/290/1027), stateful DBCS (930/939/1399) with SO/SI, pure DBCS (300/16684), and CCSID text conversion. No runtime dependencies.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./codec": {
+      "types": "./dist/codec.d.ts",
+      "default": "./dist/codec.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog.d.ts",
+      "default": "./dist/catalog.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  }
+}

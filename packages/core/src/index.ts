@@ -50,7 +50,8 @@ export {
   type PrinterConnectOptions,
   type SpoolReport
 } from "./session/printer-session.js";
-export { ScsDecoder, type LogicalPage } from "./protocol/scs.js";
+/** SCS デコーダは `@as400web/scs` に分離済み。既存の利用側のために root から再輸出する */
+export { ScsDecoder, type LogicalPage } from "@as400web/scs";
 export {
   parseWdsf,
   WDSF_TYPE,
@@ -61,9 +62,18 @@ export {
   type ParsedChoice
 } from "./protocol/wdsf-parser.js";
 
-// 文字変換（SBCS / DBCS）
-export { SbcsCodec, DbcsCodec, codecForCcsid, katakanaChar, SO, SI, type Codec } from "./codec/codec.js";
-export type { SbcsTable, StatefulTable } from "./codec/table-types.js";
+// 文字変換（SBCS / DBCS）。実体は `@as400web/ebcdic` に分離済み——既存の利用側のために再輸出する
+export {
+  SbcsCodec,
+  DbcsCodec,
+  codecForCcsid,
+  katakanaChar,
+  SO,
+  SI,
+  type Codec,
+  type SbcsTable,
+  type StatefulTable
+} from "@as400web/ebcdic";
 export {
   terminalTypeFor,
   printerTerminalTypeFor,
@@ -131,7 +141,7 @@ export {
   isPureDbcsCcsid,
   ibm16684,
   ibm300
-} from "./codec/pure-dbcs.js";
+} from "@as400web/ebcdic";
 
 // ホストサーバー: コマンド実行（コマンドサーバー。CL 実行とプログラム呼び出し）
 export {
@@ -194,7 +204,7 @@ export {
   ccsidLabel,
   type CcsidText,
   type LineEnding
-} from "./codec/ccsid-text.js";
+} from "@as400web/ebcdic";
 
 // ホストサーバー: データ待ち行列
 export { DtaqConnection, type DtaqConnectOptions } from "./hostserver/dtaq/dtaq-connection.js";

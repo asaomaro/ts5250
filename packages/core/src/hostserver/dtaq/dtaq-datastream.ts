@@ -11,7 +11,7 @@
  * 求められないため。IFS で踏んだ罠）。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 import type {
   CreateOptions,
   DtaqAttributes,

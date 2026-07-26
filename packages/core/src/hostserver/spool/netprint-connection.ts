@@ -13,8 +13,8 @@
 import { As400Error } from "../../errors.js";
 import { childLog } from "../../log.js";
 import { traced } from "../frame-trace.js";
-import { ScsDecoder, type LogicalPage } from "../../protocol/scs.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { ScsDecoder, type LogicalPage } from "@as400web/scs";
+import { codecForCcsid } from "@as400web/ebcdic";
 import {
   openHostConnection,
   type HostConnection,

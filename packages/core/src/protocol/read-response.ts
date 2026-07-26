@@ -1,4 +1,4 @@
-import type { Codec } from "../codec/codec.js";
+import type { Codec } from "@as400web/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
 import { ORDER, OPCODE } from "./constants.js";

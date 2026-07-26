@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // `types: ["node"]` は **TextDecoder / TextEncoder の型のため**だけに要る（ccsid-text.ts）。
+    // 実行時に Node へ依存するという意味ではない——この 2 つは Web 標準で、ブラウザにもある。
+    // 型が入る以上 Node API を書けてしまうので、実際の禁止は eslint の
+    // no-restricted-imports（node:*）/ no-restricted-globals（Buffer 等）で担保する。
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

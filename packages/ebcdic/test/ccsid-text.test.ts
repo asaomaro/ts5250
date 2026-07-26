@@ -6,7 +6,7 @@ import {
   encodeCcsidText,
   isEbcdicCcsid,
   TEXT_CCSIDS
-} from "../src/codec/ccsid-text.js";
+} from "../src/ccsid-text.js";
 
 /**
  * CCSID 指定の復号・符号化。

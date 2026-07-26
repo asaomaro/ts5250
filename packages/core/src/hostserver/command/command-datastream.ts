@@ -9,7 +9,7 @@
  */
 import { As400Error } from "../../errors.js";
 import { HEADER_LEN } from "../datastream.js";
-import { codecForCcsid } from "../../codec/codec.js";
+import { codecForCcsid } from "@as400web/ebcdic";
 
 /** コマンドサーバーのサーバー ID（signon は 0xE009、database は 0xE004） */
 export const COMMAND_SERVER_ID = 0xe008;

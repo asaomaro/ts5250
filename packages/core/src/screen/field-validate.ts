@@ -1,6 +1,6 @@
 import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
-import type { Codec } from "../codec/codec.js";
+import type { Codec } from "@as400web/ebcdic";
 import type { InternalField } from "./buffer.js";
 
 /**

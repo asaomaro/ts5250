@@ -9,8 +9,7 @@
  *       本実装は JTOpen 本体の ConvTable16684 / ConvTable300 相当の変換を行う。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
-import { pureDbcsCodecForCcsid, isPureDbcsCcsid } from "../../codec/pure-dbcs.js";
+import { codecForCcsid, pureDbcsCodecForCcsid, isPureDbcsCcsid } from "@as400web/ebcdic";
 import { DB2, baseType, typeName, jsTypeOf, isSupportedType } from "./db-types.js";
 import { packedDecimalToString, zonedDecimalToString } from "./db-decimal.js";
 

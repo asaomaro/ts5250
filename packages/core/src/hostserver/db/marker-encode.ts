@@ -11,8 +11,7 @@
  * バイト配置という事実に基づく書き起こし（IPL 1.0。AGENTS.md）。
  */
 import { As400Error } from "../../errors.js";
-import { codecForCcsid } from "../../codec/codec.js";
-import { isPureDbcsCcsid, pureDbcsCodecForCcsid } from "../../codec/pure-dbcs.js";
+import { codecForCcsid, isPureDbcsCcsid, pureDbcsCodecForCcsid } from "@as400web/ebcdic";
 import { encodePacked, encodeZoned } from "../ddm/encode.js";
 import { DB2, baseType, typeName } from "./db-types.js";
 import type { MarkerField, MarkerFormat } from "./marker-format.js";
