@@ -54,12 +54,15 @@ const GRID = CANDIDATES.map((p) => p.replace("styles.css", "components/ScreenGri
   })
   .find((c): c is string => c !== undefined)!;
 
-/** `.grid-input…{ … }` の宣言ブロックを集める */
+/** `.grid-input…{ … }` の宣言ブロックを集める。
+ *  **コメントは先に落とす**——コメント中の `.grid-input` という記述を選択子と誤認すると、
+ *  無関係な次のブロックの中身を検査してしまう（実際に .fkey-btn で誤検知した）。 */
 function gridInputBlocks(): { selector: string; body: string }[] {
+  const css = GRID.replace(/\/\*[\s\S]*?\*\//g, "");
   const out: { selector: string; body: string }[] = [];
   const re = /(\.grid-input[^{}]*)\{([^}]*)\}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(GRID))) out.push({ selector: m[1]!.trim(), body: m[2]! });
+  while ((m = re.exec(css))) out.push({ selector: m[1]!.trim(), body: m[2]! });
   return out;
 }
 

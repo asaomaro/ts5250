@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field, AidKey } from "@as400web/core";
 import {
   initEdit,
   editValue,
@@ -25,6 +25,8 @@ import {
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
+import { detectFkeyLegends, type FkeySpan } from "../composables/fkeyLegend.js";
+import type { ButtonStyle } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -63,8 +65,10 @@ const props = withDefaults(
     cursor?: { row: number; col: number };
     /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
     uppercaseInput?: boolean;
+    /** 「押せるもの」の見せ方。none は機能キー凡例をボタン化しない（spec D5） */
+    buttons?: ButtonStyle;
   }>(),
-  { linkify: true }
+  { linkify: true, buttons: "none" }
 );
 const emit = defineEmits<{
   (e: "edit", fieldIndex: number, value: string): void;
@@ -83,6 +87,8 @@ const emit = defineEmits<{
   /** クライアント側の操作員メッセージ（ACS の OIA 相当。ホストの systemMessage とは別物）。
    *  例: 挿入ペーストが入り切らないときの "No room to insert data."。次のキー操作で消える。 */
   (e: "notice", text: string): void;
+  /** 機能キー凡例のボタンが押された（親が sendKey する。spec B3） */
+  (e: "aid", key: AidKey): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -171,11 +177,25 @@ const selectionFields = computed<GuiSelectionLike[]>(
   () => (gui.value?.selectionFields ?? []) as GuiSelectionLike[]
 );
 
+/** text セグメント内での凡例の位置（文字 index）。桁ではなく index なのは描画で分割に使うため。
+ *  row/col は**画面上の位置**で、Tab の移動先をカーソル位置から決めるのに使う（EmulatorPane）。 */
+interface LocalSpan {
+  from: number;
+  to: number;
+  key: AidKey;
+  row: number;
+  col: number;
+}
+
 interface Segment {
   /** text=素のラン / input=入力欄 / wide=幅を保証する DBCS 1 文字（下記 wideBox 参照） */
   kind: "text" | "input" | "wide";
   text: string;
   cls: string;
+  /** このセグメントが始まる桁（1 始まり）。凡例 span を index へ写すのに使う */
+  col?: number;
+  /** このセグメントに完全に収まる機能キー凡例（spec B1-6） */
+  spans?: LocalSpan[];
   field?: Field;
   /** input の表示桁数（この行に出る桁数） */
   width?: number;
@@ -224,6 +244,40 @@ const linkEnabled = computed(() => props.linkify && !props.katakanaView);
 /** text セグメントをプレーン/リンク部分に分割（リンク無効時は単一のプレーン部分） */
 function linkParts(text: string): LinkPart[] {
   return linkEnabled.value ? splitLinks(text) : [{ text }];
+}
+
+/** 描画部品。href=リンク / aid=機能キーのボタン / どちらも無ければ素のテキスト */
+interface DecoPart extends LinkPart {
+  aid?: AidKey;
+  /** ボタンの画面上の位置（Tab の移動先計算に使う） */
+  row?: number;
+  col?: number;
+}
+
+/**
+ * text セグメントを「リンク・機能キーボタン・素のテキスト」に分割する。
+ * **重なったら凡例を優先**する（凡例の範囲内ではリンク検出をかけない。spec B2）。
+ * 実際には URL と凡例が同じ範囲に出ることはまず無い。
+ */
+function decoParts(seg: Segment): DecoPart[] {
+  const spans = seg.spans;
+  if (!spans || spans.length === 0) return linkParts(seg.text);
+  const out: DecoPart[] = [];
+  let pos = 0;
+  for (const s of spans) {
+    if (s.from < pos) continue; // 念のため（span 同士は重ならない）
+    if (s.from > pos) out.push(...linkParts(seg.text.slice(pos, s.from)));
+    out.push({ text: seg.text.slice(s.from, s.to), aid: s.key, row: s.row, col: s.col });
+    pos = s.to;
+  }
+  if (pos < seg.text.length) out.push(...linkParts(seg.text.slice(pos)));
+  return out;
+}
+
+/** 凡例ボタンの押下。ホストへは親（EmulatorPane）が送る。 */
+function onFkeyClick(key: AidKey): void {
+  if (props.busy || props.snapshot.keyboardLocked) return; // 通信中・ロック中は送らない
+  emit("aid", key);
 }
 
 /** cell の属性を CSS class 文字列にする */
@@ -294,6 +348,47 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
   return runs;
 }
 
+/**
+ * 機能キー凡例（`F3=終了` 等）。行ごとにまとめる。
+ *
+ * `displayChar` を渡すので SO/SI マーク表示・カナ表示の設定が検出にも反映される
+ * （設定と見た目が食い違わないようにするため）。snapshot だけに依存させ、
+ * 入力のたびに再検出しないよう `rows` とは別の computed にしている。
+ */
+const legendsByRow = computed<Map<number, FkeySpan[]>>(() => {
+  const map = new Map<number, FkeySpan[]>();
+  if (props.buttons === "none") return map; // 意匠「なし」＝ボタン化しない（spec B2）
+  for (const s of detectFkeyLegends(props.snapshot, displayChar)) {
+    const list = map.get(s.row);
+    if (list) list.push(s);
+    else map.set(s.row, [s]);
+  }
+  return map;
+});
+
+/**
+ * 凡例（桁）を text セグメント内の文字 index へ写す。
+ * セグメントに**完全に収まる**ものだけを返す（またがるものは捨てる。spec B1-6）。
+ */
+function localSpans(
+  rowCells: readonly Cell[],
+  startCol: number,
+  endCol: number,
+  spans: readonly FkeySpan[]
+): LocalSpan[] {
+  const out: LocalSpan[] = [];
+  for (const s of spans) {
+    if (s.col < startCol || s.col + s.width - 1 > endCol) continue;
+    // 表示文字数で数える（DBCS の tail は文字を持たないので飛ばす）
+    let from = 0;
+    for (let c = startCol; c < s.col; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") from++;
+    let len = 0;
+    for (let c = s.col; c <= s.col + s.width - 1; c++) if (rowCells[c - 1]?.kind !== "dbcs-tail") len++;
+    if (len > 0) out.push({ from, to: from + len, key: s.key, row: s.row, col: s.col });
+  }
+  return out.sort((a, b) => a.from - b.from);
+}
+
 /** 各行を text/input セグメントに分解する（v-memo 用に行データの参照同一性を保つのは Vue の再評価に委ねる） */
 const rows = computed<Segment[][]>(() => {
   const snap = props.snapshot;
@@ -351,9 +446,22 @@ const rows = computed<Segment[][]>(() => {
       // 左へずれる（PDM の F1 ヘルプ「オプション−ヘルプ」で実測）。この種の文字だけ 2ch 幅の
       // 箱（wide セグメント）に入れて、フォントに依らず 2 桁を占めさせる。
       const cls = cellClass(row[c]!);
+      const rowSpans = legendsByRow.value.get(r + 1) ?? [];
       let text = "";
+      // このテキストランが始まる桁（0 始まり）。wide セグメントで割れるたびに更新する
+      let textStart = c;
+      const pushText = (endCol: number): void => {
+        const startCol = textStart + 1;
+        segs.push({
+          kind: "text",
+          text,
+          cls,
+          col: startCol,
+          ...(rowSpans.length > 0 ? { spans: localSpans(row, startCol, endCol, rowSpans) } : {})
+        });
+      };
       const flushText = (): void => {
-        if (text !== "") segs.push({ kind: "text", text, cls });
+        if (text !== "") pushText(c);
         text = "";
       };
       while (c < snap.cols && !fieldAt.has(r * snap.cols + c)) {
@@ -366,14 +474,16 @@ const rows = computed<Segment[][]>(() => {
         const shown = displayChar(cellHere);
         if (cellHere.kind === "dbcs-lead" && !isCertainWideGlyph(shown)) {
           flushText();
-          segs.push({ kind: "wide", text: shown, cls });
+          segs.push({ kind: "wide", text: shown, cls, col: c + 1 });
           c++;
+          textStart = c;
           continue;
         }
+        if (text === "") textStart = c; // flush 直後は、ここが新しいランの先頭
         text += shown;
         c++;
       }
-      segs.push({ kind: "text", text, cls });
+      pushText(c);
     }
     out.push(segs);
   }
@@ -2256,7 +2366,7 @@ onBeforeUnmount(() => {
           :class="seg.cls"
         >{{ seg.text }}</span>
         <span v-else class="grid-span" :class="seg.cls"><template
-          v-for="(p, j) in linkParts(seg.text)"
+          v-for="(p, j) in decoParts(seg)"
           :key="j"
         ><a
             v-if="p.href"
@@ -2265,7 +2375,16 @@ onBeforeUnmount(() => {
             target="_blank"
             rel="noopener noreferrer"
             @click.stop
-          >{{ p.text }}</a><template v-else>{{ p.text }}</template></template></span>
+          >{{ p.text }}</a><button
+            v-else-if="p.aid"
+            type="button"
+            class="fkey-btn"
+            :data-row="p.row"
+            :data-col="p.col"
+            :title="`${p.aid} を送る`"
+            @mousedown.prevent
+            @click.stop="onFkeyClick(p.aid)"
+          >{{ p.text }}</button><template v-else>{{ p.text }}</template></template></span>
       </template>
     </div>
   </div>
@@ -2361,6 +2480,34 @@ onBeforeUnmount(() => {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+/* ==== 機能キー凡例のボタン（spec D4/B2） ====
+   `linkify` と同じく**同一の .grid-span 内にインライン**で置く。padding/margin/border を持たせず
+   font を継ぐことで桁を動かさない（入力欄の描画と同じ考え方）。色も指定せず、
+   ホストが送った色（.c-* / 反転）をそのまま継ぐ。意匠は下の .pane[data-buttons] で足す。
+
+   **ボタンとして普通に扱えること**（decisions D5）: タブ順に入り（tabindex を落とさない）、
+   フォーカス中の Space で押せる。一方 mousedown は preventDefault する——マウス操作では
+   フォーカス（＝5250 のカーソル位置）を奪わず、矩形選択の開始も妨げないため。 */
+.fkey-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  line-height: inherit;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+  cursor: pointer;
+  /* 桁の途中で折り返さない（凡例は 1 行に収まる前提） */
+  white-space: pre;
+}
+.fkey-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 /* 画面テキスト内のリンク（桁幅は変えずインライン。色は turquoise 系＋下線） */
 .grid-link {
   color: var(--t-turquoise, var(--t-white));
@@ -2454,12 +2601,48 @@ onBeforeUnmount(() => {
    桁・ホスト色を崩さないよう色替えは box-shadow / 限定的な background のみ。plain は規則なし＝5250 準拠。
    readonly（保護欄）には一切出さない。 */
 /* 枠: 枠付きボックス＋フォーカスリング */
-.pane[data-controls="rich"] .grid-input:not([readonly]) {
+.pane[data-controls="box"] .grid-input:not([readonly]) {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-white) 22%, transparent);
   border-radius: 4px;
 }
-.pane[data-controls="rich"] .grid-input:not([readonly]):focus {
+.pane[data-controls="box"] .grid-input:not([readonly]):focus {
   box-shadow: inset 0 0 0 1.6px var(--accent), 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+/* 丸枠: 枠と同じだが角丸を大きく取る */
+.pane[data-controls="boxRound"] .grid-input:not([readonly]) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-white) 24%, transparent);
+  border-radius: 999px;
+}
+.pane[data-controls="boxRound"] .grid-input:not([readonly]):focus {
+  box-shadow: inset 0 0 0 1.6px var(--accent), 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+/* くぼみ: 上辺の内側に影を落として「へこんだ入力欄」に見せる */
+.pane[data-controls="inset"] .grid-input:not([readonly]) {
+  background: var(--cell-bg, color-mix(in srgb, var(--t-white) 6%, transparent));
+  box-shadow: inset 0 2px 3px -1px color-mix(in srgb, #000 55%, transparent);
+  border-radius: 3px;
+}
+.pane[data-controls="inset"] .grid-input:not([readonly]):focus {
+  box-shadow: inset 0 2px 3px -1px color-mix(in srgb, #000 55%, transparent), 0 0 0 2px var(--accent-soft);
+  outline: none;
+}
+/* 破線: outline は**レイアウトに影響しない**ので、桁を保ったまま破線が引ける（border は使えない） */
+.pane[data-controls="dashed"] .grid-input:not([readonly]) {
+  outline: 1px dashed color-mix(in srgb, var(--t-white) 35%, transparent);
+  outline-offset: -1px;
+}
+.pane[data-controls="dashed"] .grid-input:not([readonly]):focus {
+  outline: 1px dashed var(--accent);
+}
+/* 発光: 休止は控えめ、フォーカスでアクセントの光。端末の雰囲気に馴染む */
+.pane[data-controls="glow"] .grid-input:not([readonly]) {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, currentColor 30%, transparent);
+}
+.pane[data-controls="glow"] .grid-input:not([readonly]):focus {
+  background: var(--cell-bg, color-mix(in srgb, var(--accent) 10%, transparent));
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 0 10px -2px var(--accent);
   outline: none;
 }
 /* 下線: Material 風。休止は淡い下線、フォーカスでアクセントの太線。box-shadow なので桁ズレ無し。 */
@@ -2480,6 +2663,104 @@ onBeforeUnmount(() => {
   background: var(--cell-bg, color-mix(in srgb, var(--accent) 15%, transparent));
   box-shadow: 0 0 0 2px var(--accent-soft);
   outline: none;
+}
+
+/* ==== ボタン意匠（画面設定・spec D5/B4）====
+   「押せるもの」＝機能キー凡例のボタンと、拡張5250 が宣言した選択肢の**両方**に同じ意匠を効かせる。
+   色替えは box-shadow と限定的な背景のみ（桁とホスト色を崩さない。コントロール表現と同じ方針）。
+   none は凡例をボタン化しない（描画側で分割しない）ため、ここでは .gui-choice を現状のままにする。 */
+.pane[data-buttons="underline"] .fkey-btn {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, currentColor 45%, transparent);
+}
+.pane[data-buttons="underline"] .fkey-btn:hover {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.pane[data-buttons="filled"] .fkey-btn {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 3px;
+}
+.pane[data-buttons="filled"] .fkey-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.pane[data-buttons="box"] .fkey-btn {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 3px;
+}
+.pane[data-buttons="box"] .fkey-btn:hover {
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 2px var(--accent-soft);
+}
+/* ピル: 塗り＋大きい角丸 */
+.pane[data-buttons="pill"] .fkey-btn {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 999px;
+}
+.pane[data-buttons="pill"] .fkey-btn:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+/* ゴースト: 普段は無地。hover で枠が出る（画面を汚さず、押せることは分かる） */
+.pane[data-buttons="ghost"] .fkey-btn:hover {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 3px;
+}
+/* 立体: 影で浮かせる */
+.pane[data-buttons="raised"] .fkey-btn {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 45%, transparent);
+  border-radius: 3px;
+}
+.pane[data-buttons="raised"] .fkey-btn:hover {
+  box-shadow: 0 2px 5px -1px color-mix(in srgb, #000 55%, transparent);
+}
+/* リンク風: アクセント色＋下線。**ここだけ色を変える**（他はホスト色を継ぐ） */
+.pane[data-buttons="link"] .fkey-btn {
+  color: var(--accent);
+  box-shadow: inset 0 -1px 0 currentColor;
+}
+.pane[data-buttons="link"] .fkey-btn:hover {
+  box-shadow: inset 0 -2px 0 currentColor;
+}
+
+/* 拡張5250 の選択肢も同じ意匠に揃える。**selected / unavailable の区別は全意匠で残す**
+   （下の .gui-choice.selected / .unavailable が後から効く）。 */
+.pane[data-buttons="underline"] .gui-choice {
+  background: none;
+  border-color: transparent;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--t-green) 55%, transparent);
+  border-radius: 0;
+}
+.pane[data-buttons="filled"] .gui-choice {
+  background: color-mix(in srgb, var(--t-green) 22%, transparent);
+  border-color: transparent;
+  border-radius: 4px;
+}
+.pane[data-buttons="box"] .gui-choice {
+  background: none;
+  border-color: color-mix(in srgb, var(--t-green) 70%, transparent);
+  border-radius: 4px;
+}
+.pane[data-buttons="pill"] .gui-choice {
+  background: color-mix(in srgb, var(--t-green) 22%, transparent);
+  border-color: transparent;
+  border-radius: 999px;
+}
+.pane[data-buttons="ghost"] .gui-choice {
+  background: none;
+  border-color: transparent;
+}
+.pane[data-buttons="ghost"] .gui-choice:hover {
+  border-color: var(--t-green);
+}
+.pane[data-buttons="raised"] .gui-choice {
+  background: color-mix(in srgb, var(--t-green) 16%, transparent);
+  border-color: transparent;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 45%, transparent);
+  border-radius: 4px;
+}
+.pane[data-buttons="link"] .gui-choice {
+  background: none;
+  border-color: transparent;
+  box-shadow: inset 0 -1px 0 var(--t-green);
+  border-radius: 0;
 }
 
 /* ==== 拡張 5250 GUI オーバーレイ ==== */

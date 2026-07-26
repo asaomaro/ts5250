@@ -7,13 +7,20 @@ import type { ScreenFontId } from "../composables/screenFonts.js";
  * 対象: SO/SI 表示・半角カナ表示・リンク化・コントロール表現（画面内入力欄の見せ方）・
  *       配色（端末色⇄意味色）・画面の質感（CRT⇄フラット）・フォント。
  */
-/** 入力欄(コントロール)の見せ方: plain=5250 準拠（最小）／underline=Material 風下線／
- *  filled=Notion 風の塗り／rich=枠付きボックス＋フォーカスリング */
-export type ControlStyle = "plain" | "underline" | "filled" | "rich";
+/** 入力欄の見せ方（画面設定「入力項目設定」）。すべて桁を動かさない手段だけで作る（spec D8）。 */
+export type ControlStyle =
+  | "plain" | "underline" | "filled" | "box" | "boxRound" | "inset" | "dashed" | "glow";
 /** 配色: literal=5250 の 7 色をそのまま／semantic=役割ベース（通常=前景・値=アクセント・エラー=赤）へ再マップ */
 export type ColorMode = "literal" | "semantic";
 /** 画面の質感: crt=フォスファのにじみ＋ベゼル枠／flat=グロー無し・やわらかい影のカード */
 export type Surface = "crt" | "flat";
+/**
+ * ボタンの設定（画面設定「ボタン設定」）。機能キー凡例のボタンと拡張5250 の選択肢に効く。
+ * **入力欄の設定（controls）とは別軸**（spec D5）。`none`＝無効で凡例をボタン化しない
+ * （拡張5250 の選択肢はホストが宣言した操作部品なので、無効でも現状の意匠で機能を保つ）。
+ */
+export type ButtonStyle =
+  | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
   sosi: boolean;
   kana: boolean;
@@ -21,6 +28,8 @@ export interface ViewSettings {
   controls: ControlStyle;
   colorMode: ColorMode;
   surface: Surface;
+  /** 機能キー凡例・拡張5250 の選択肢の見せ方 */
+  buttons: ButtonStyle;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -37,6 +46,10 @@ export interface ViewItemDef {
   /** 選択肢が多い行は、メニューでラベルを上・セグメントを下段全幅にする */
   wide?: boolean;
   opts: { value: ViewSettings[Key]; label: string }[];
+  /** true なら**畳んだ行**にする。ラベルの右に「開く / 閉じる」を置き、開いたときだけ
+   *  デザイン候補を並べる（選択肢が多く、常時出すとメニューが縦に伸びるため）。
+   *  キー設定の順送りは畳んでいても opts 全体を一巡する。 */
+  expandable?: boolean;
 }
 export const VIEW_ITEMS: ViewItemDef[] = [
   { key: "sosi", label: "SO/SI 表示", opts: [{ value: false, label: "非表示" }, { value: true, label: "表示" }] },
@@ -44,13 +57,34 @@ export const VIEW_ITEMS: ViewItemDef[] = [
   { key: "linkify", label: "リンク化", opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }] },
   {
     key: "controls",
-    label: "コントロール表現",
+    label: "入力項目設定",
     wide: true,
+    expandable: true,
     opts: [
       { value: "plain", label: "プレーン" },
       { value: "underline", label: "下線" },
       { value: "filled", label: "塗り" },
-      { value: "rich", label: "枠" },
+      { value: "box", label: "枠" },
+      { value: "boxRound", label: "丸枠" },
+      { value: "inset", label: "くぼみ" },
+      { value: "dashed", label: "破線" },
+      { value: "glow", label: "発光" },
+    ],
+  },
+  {
+    key: "buttons",
+    label: "ボタン設定",
+    wide: true,
+    expandable: true,
+    opts: [
+      { value: "none", label: "無効" },
+      { value: "underline", label: "下線" },
+      { value: "filled", label: "塗り" },
+      { value: "box", label: "枠" },
+      { value: "pill", label: "ピル" },
+      { value: "ghost", label: "ゴースト" },
+      { value: "raised", label: "立体" },
+      { value: "link", label: "リンク風" },
     ],
   },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
@@ -71,6 +105,7 @@ const FALLBACK: ViewSettings = {
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",
+  buttons: "none",
   font: "system",
 };
 
@@ -82,6 +117,15 @@ function persist(): void {
   } catch {
     /* localStorage 不可でも動作は継続 */
   }
+}
+
+/** 保存済みの旧値を現行の値へ読み替える。`rich` は「枠」の意匠そのままなので `box` に対応する
+ *  （spec D8「旧値の移行」）。利用者から見た変化は無い。 */
+function migrate(v: ViewSettings): ViewSettings {
+  const out = { ...v };
+  if ((out.controls as string) === "rich") out.controls = "box";
+  if ((out.buttons as string) === "rich") out.buttons = "box";
+  return out;
 }
 
 export const viewSettings = {
@@ -117,7 +161,9 @@ export const viewSettings = {
 export function initViewSettings(): void {
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) state.settings = { ...FALLBACK, ...(JSON.parse(raw) as Partial<ViewSettings>) };
+    // 保存値が無ければ**既定へ戻す**（何もしないと前の状態が残る）。起動時は元から既定なので
+    // 実挙動は変わらないが、「読み込み or 既定」を保証しておく方が再初期化に強い。
+    state.settings = raw ? migrate({ ...FALLBACK, ...(JSON.parse(raw) as Partial<ViewSettings>) }) : { ...FALLBACK };
   } catch {
     /* 壊れていれば既定のまま */
   }

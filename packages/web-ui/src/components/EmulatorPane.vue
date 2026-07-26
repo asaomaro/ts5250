@@ -185,41 +185,78 @@ function focusInput(inputs: HTMLInputElement[], i: number): void {
   el.setSelectionRange(0, 0);
 }
 
+/**
+ * Tab で止まる要素（入力欄＋機能キーボタン）を DOM 順で返す。
+ * **ボタンもタブ順に含める**——画面上のボタンなら、キーボードだけで到達して押せるべき（decisions D5）。
+ * ボタンは意匠「なし」のときは描画されないので、その場合は従来どおり入力欄だけになる。
+ */
+function tabStops(): HTMLElement[] {
+  if (!paneEl.value) return [];
+  return Array.from(
+    paneEl.value.querySelectorAll<HTMLElement>(
+      'input.grid-input:not([readonly])[data-slice="0"], button.fkey-btn'
+    )
+  );
+}
+
+/** タブ停止点へフォーカスする（入力欄なら先頭桁にキャレットを置く） */
+function focusStop(el: HTMLElement | undefined): void {
+  if (!el) return;
+  el.focus();
+  if (el instanceof HTMLInputElement) el.setSelectionRange(0, 0);
+}
+
+/** タブ停止点の**画面上の位置**。入力欄はフィールド、ボタンは描画時に付けた data 属性から。 */
+function stopPos(el: HTMLElement): { row: number; col: number } | undefined {
+  if (el instanceof HTMLInputElement) {
+    const idx = Number(el.dataset["fieldIndex"]);
+    const f = snapshot.value?.fields.find((x) => x.index === idx);
+    return f ? { row: f.row, col: f.col } : undefined;
+  }
+  const row = Number(el.dataset["row"]);
+  const col = Number(el.dataset["col"]);
+  return Number.isFinite(row) && Number.isFinite(col) ? { row, col } : undefined;
+}
+
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
 function focusByOffset(delta: number): void {
-  const inputs = editableInputs();
-  if (inputs.length === 0) {
-    // 入力可能な欄が 1 つも無い画面（確認画面・ヘルプ等）。行き先が無いので原点へ置く。
+  const stops = tabStops();
+  if (stops.length === 0) {
+    // 行き先が 1 つも無い画面（確認画面等）。原点へ置く。
     onCursor(1, 1);
     return;
   }
-  const cur = inputs.indexOf(document.activeElement as HTMLInputElement);
+  const cur = stops.indexOf(document.activeElement as HTMLElement);
   if (cur !== -1) {
-    focusInput(inputs, (cur + delta + inputs.length) % inputs.length);
+    focusStop(stops[(cur + delta + stops.length) % stops.length]);
     return;
   }
 
   /**
-   * 入力欄にフォーカスが無い（保護欄・非入力セルにカーソルがある free モード）。
-   * **入力欄の並びに現在地が無いので、そこから探すと必ず先頭／末尾へ飛ぶ。**
-   * 代わりに画面上のカーソル位置と各欄の位置を比べ、その位置から見て
-   * 次（Tab）／前（Shift+Tab）の欄へ移す。
+   * 停止点にフォーカスが無い（保護欄・非入力セルにカーソルがある free モード）。
+   * **並びに現在地が無いので、そこから探すと必ず先頭／末尾へ飛ぶ。**
+   * 代わりに画面上のカーソル位置と各停止点の位置を比べ、その位置から見て
+   * 次（Tab）／前（Shift+Tab）へ移す。**入力欄だけでなく有効化したボタンも移動先にする**
+   * （ボタンなのに Tab で辿り着けないのは不自然なため）。
    */
-  const fs = editableFields();
   const at = cursor.value;
-  const isAfter = (f: { row: number; col: number }): boolean =>
-    f.row > at.row || (f.row === at.row && f.col > at.col);
-  if (delta > 0) {
-    const i = fs.findIndex(isAfter);
-    focusInput(inputs, i === -1 ? 0 : i); // 後ろに無ければ先頭へラップ
+  const positioned = stops
+    .map((el) => ({ el, pos: stopPos(el) }))
+    .filter((x): x is { el: HTMLElement; pos: { row: number; col: number } } => x.pos !== undefined);
+  if (positioned.length === 0) {
+    focusStop(delta > 0 ? stops[0] : stops[stops.length - 1]);
     return;
   }
-  let i = -1;
-  for (let k = 0; k < fs.length; k++) {
-    const f = fs[k]!;
-    if (f.row < at.row || (f.row === at.row && f.col < at.col)) i = k;
+  const isAfter = (p: { row: number; col: number }): boolean =>
+    p.row > at.row || (p.row === at.row && p.col > at.col);
+  if (delta > 0) {
+    const next = positioned.find((x) => isAfter(x.pos));
+    focusStop((next ?? positioned[0]!).el); // 後ろに無ければ先頭へラップ
+    return;
   }
-  focusInput(inputs, i === -1 ? inputs.length - 1 : i); // 前に無ければ末尾へラップ
+  let prev: HTMLElement | undefined;
+  for (const x of positioned) if (!isAfter(x.pos) && (x.pos.row !== at.row || x.pos.col !== at.col)) prev = x.el;
+  focusStop(prev ?? positioned[positioned.length - 1]!.el); // 前に無ければ末尾へラップ
 }
 
 function onLocal(action: LocalAction): void {
@@ -333,6 +370,14 @@ function restoreCaretFromBlockSel(): void {
 const notice = ref("");
 function onNotice(text: string): void {
   notice.value = text;
+}
+
+/** 機能キー凡例のボタンが押された（ScreenGrid）。キーボードの F キーと同じ扱いで送る。
+ *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。 */
+function onFkeyAid(key: AidKey): void {
+  if (busy.value || snapshot.value?.keyboardLocked) return;
+  emit("focus");
+  sendKey(props.sessionId, key, cursor.value);
 }
 
 /**
@@ -465,6 +510,21 @@ function onKeydown(ev: KeyboardEvent): void {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
     return;
   }
+  // 機能キーボタンにフォーカスがあるときの Space は「そのボタンを押す」（普通のボタンと同じ）。
+  // 明示的に処理するのは、下の isProtectedEdit が Space を preventDefault してしまい
+  // native の Space 起動が効かなくなるため。**Enter は 5250 の AID として残す**——端末で最も
+  // 重要なキーを、たまたまボタンにフォーカスがあるという理由で奪わない（decisions D5）。
+  const focusedBtn = document.activeElement;
+  if (
+    ev.key === " " &&
+    focusedBtn instanceof HTMLButtonElement &&
+    focusedBtn.classList.contains("fkey-btn") &&
+    paneEl.value?.contains(focusedBtn)
+  ) {
+    ev.preventDefault();
+    focusedBtn.click();
+    return;
+  }
   // Shift+矢印/Home/End は入力欄フォーカスの有無に関わらず画面の矩形（ブロック）選択を拡張する
   // （マウス・欄外操作と同一）。ScreenGrid は欄内 Shift 移動を preventDefault してここへ委譲する。
   if (ev.shiftKey && (ARROW_DIRS[ev.key] || ev.key === "Home" || ev.key === "End")) {
@@ -527,6 +587,7 @@ function onWheel(ev: WheelEvent): void {
     :data-controls="view.controls"
     :data-color-mode="view.colorMode"
     :data-surface="view.surface"
+    :data-buttons="view.buttons"
     :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
@@ -551,6 +612,7 @@ function onWheel(ev: WheelEvent): void {
         :katakana-view="view.kana"
         :uppercase-input="uppercaseInput"
         :linkify="view.linkify"
+        :buttons="view.buttons"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
@@ -559,6 +621,7 @@ function onWheel(ev: WheelEvent): void {
         @selection-cleared="onSelectionCleared"
         @selection-start="onSelectionStart"
         @notice="onNotice"
+        @aid="onFkeyAid"
       />
       <div v-else class="pane-empty">接続待ち…</div>
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->

@@ -1,0 +1,8 @@
+schema: 3
+slug: fkey-legend-buttons
+current: deliver
+approved: [requirement, research, plan, spec, test, review, deliver, coding]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
