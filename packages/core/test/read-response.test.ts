@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildReadMdtResponse, buildFlagRecord } from "../src/protocol/read-response.js";
+import {
+  buildReadMdtResponse,
+  buildFlagRecord,
+  buildCancelInviteAck
+} from "../src/protocol/read-response.js";
 import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { codecForCcsid } from "../src/codec/codec.js";
@@ -13,6 +17,9 @@ import {
 } from "../src/screen/attr-sentinel.js";
 
 const codec = codecForCcsid(37);
+
+/** 実機採取の hex と突き合わせるための整形（バイト列をそのまま比べる） */
+const hex = (u8: Uint8Array): string => [...u8].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 function makeBuffer(): ScreenBuffer {
   const b = new ScreenBuffer();
@@ -107,6 +114,8 @@ describe("buildReadMdtResponse", () => {
 
 describe("buildFlagRecord", () => {
   it("SysReq(SRQ) は SRQ フラグ・空データの NO_OP レコード", () => {
+    // データ引数を足した後もバイト列は変わらない（既存の呼び出し側との後方互換）
+    expect(hex(buildFlagRecord({ srq: true }))).toBe("000a12a0000004040000");
     const parsed = parseRecord(buildFlagRecord({ srq: true }));
     expect(parsed.opcode).toBe(OPCODE.NOOP);
     expect(parsed.flags.srq).toBe(true);
@@ -118,6 +127,36 @@ describe("buildFlagRecord", () => {
     const parsed = parseRecord(buildFlagRecord({ atn: true }));
     expect(parsed.flags.atn).toBe(true);
     expect(parsed.flags.srq).toBe(false);
+  });
+
+  /**
+   * **実機（CCSID 939）で採取したバイト列と一致させる。**
+   * システム要求行に `DSPJOB` を打って送ったときのレコードそのもの。
+   * ホストはこれを 2 桁のオプションとして解釈し「オプション D は正しくない」を返す
+   * ＝この欄は CL コマンド用ではない、という事実もここに残しておく。
+   */
+  it("SysReq はシステム要求行の文字列を EBCDIC でデータに載せる", () => {
+    const dbcs = codecForCcsid(939);
+    const record = buildFlagRecord({ srq: true }, dbcs.encode("DSPJOB").bytes);
+    expect(hex(record)).toBe("001012a0000004040000c4e2d7d1d6c2");
+    const parsed = parseRecord(record);
+    expect(parsed.opcode).toBe(OPCODE.NOOP);
+    expect(parsed.flags.srq).toBe(true);
+  });
+});
+
+describe("buildCancelInviteAck", () => {
+  /**
+   * ホストの Cancel Invite（opcode 0x0A）に**同じ opcode を**フラグ 0・データ無しで返す。
+   * 返さないとホストは次のデータを送らず、Attn / SysReq がまるごと不発になる。
+   */
+  it("opcode 0x0A・フラグ 0・データ無しを返す", () => {
+    const record = buildCancelInviteAck();
+    expect(hex(record)).toBe("000a12a000000400000a");
+    const parsed = parseRecord(record);
+    expect(parsed.opcode).toBe(OPCODE.CANCEL_INVITE);
+    expect(parsed.data).toHaveLength(0);
+    expect(parsed.flags).toEqual({ err: false, atn: false, srq: false, trq: false, hlp: false });
   });
 });
 

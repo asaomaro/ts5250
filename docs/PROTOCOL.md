@@ -261,9 +261,36 @@ cursorRow(1)  cursorCol(1)  AID(1)  { SBA(11) row(1) col(1)  <field value bytes>
 | Clear | BD | Help | F3 | PageUp(Roll↓) | F4 |
 | PageDown(Roll↑) | F5 | Print | F6 | Record Backspace | F8 |
 
-### 6.2 SysReq / Attn（フラグレコード）
+### 6.2 SysReq / Attn（フラグレコード ＋ Cancel Invite の往復）
 
-データ無しの `buildRecord(NO-OP, [], flags)` を送る。flag1 ビットで表現: **SysReq=SRQ(04)**、**Attn=ATN(40)**。
+`buildRecord(NO-OP, data, flags)` を送る。flag1 ビットで表現: **SysReq=SRQ(04)**、**Attn=ATN(40)**。
+Attn は常にデータ無し。**SysReq はシステム要求行に打たれた文字列を EBCDIC でデータに載せる**
+（打たずに実行＝データ無しならシステム要求メニューが出る）。システム要求行そのものは
+**ホストとの往復を伴わない端末側の機能**で、確定して初めてこのレコードを送る。
+
+| 送るもの | レコード（hex） |
+|---|---|
+| Attn | `000a12a0000004400000` |
+| SysReq（データ無し） | `000a12a0000004040000` |
+| SysReq（`"DSPJOB"` / CCSID 939） | `001012a0000004040000c4e2d7d1d6c2` |
+
+**ホストは Attn / SysReq を受けると Cancel Invite（opcode 0x0A）を返し、端末が同じ opcode を
+フラグ 0・データ無しで返すまで次のデータを送らない**（`000a12a000000400000a`）。この返事を出さないと
+ホストが止まり、画面が変わらずキーボードもロックしたままになる——実機での対照実験では、
+返さない場合に無反応となり、次の AID を送った時点で 1 手遅れて画面が出た。返事を出すと以降は
+
+```
+端末 → NO-OP/ATN            ホスト → Cancel Invite(0x0A)
+端末 → Cancel Invite(0x0A)  ホスト → SAVE SCREEN(0x04) → 画面イメージを返す（6.3）
+                            ホスト → PUT_GET(0x03) ＋ CC2 unlock（ATNPGM の窓）
+```
+
+と流れ、終了時にホストが RESTORE SCREEN(0x05) を送って背面が元に戻る。
+**送ったキーで条件分けせず、opcode を見て無条件に返す**（ホスト都合の invite 取り消しでも同じ返事が要る）。
+
+なお SysReq のデータ欄はホスト側で**オプション（2 / 6 / 90 等）として検証される**。CL コマンドは通らない
+（実機で `DSPJOB` を送ると「オプション D は正しくない」）。画面下部でコマンドを打てるのは Attn 側で、
+あれはホストの ATNPGM が描く画面であって端末の機能ではない。
 
 ### 6.3 画面イメージ応答（SAVE SCREEN / READ SCREEN / READ SCREEN EXTENDED）
 

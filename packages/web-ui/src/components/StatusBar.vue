@@ -19,7 +19,7 @@ const props = defineProps<{
   logOpen?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: "toggle-log"): void }>();
+const emit = defineEmits<{ (e: "toggle-log"): void; (e: "sysreq"): void }>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
 const cur = computed(() => props.cursor ?? props.state.snapshot?.cursor);
@@ -91,6 +91,18 @@ function press(k: AidKey): void {
     <span v-if="!notice && snap?.systemMessage" class="msg">{{ snap.systemMessage }}</span>
     <span class="fkeys">
       <button v-for="f in fkeys" :key="f.key" class="fk" @click="press(f.key)">{{ f.label }}</button>
+      <!--
+        Attn / SysReq はキー設定（⌨ キー）で任意のキーへ割り当てられるが、既定のバインドを持たない。
+        設定を触らない利用者にも押せる導線として、他の AID と同じ .fk 意匠でここに並べる。
+        SysReq だけは**押しても送らない**——画面下部のシステム要求行を開くのが実機・ACS の動きで、
+        送信は行を確定したときなので、親（EmulatorPane）に投げて入口を 1 本にする。
+      -->
+      <button class="fk" title="アテンション（ホストの ATNPGM を呼ぶ）" @click="press('Attn')">
+        Attn 割込
+      </button>
+      <button class="fk" title="システム要求行を開く" @click="emit('sysreq')">
+        SysReq システム要求
+      </button>
     </span>
   </div>
 </template>

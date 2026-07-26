@@ -51,9 +51,25 @@ export function buildReadMdtResponse(
 }
 
 /**
- * ヘッダフラグのみの空レコード（SysReq=SRQ / Attn=ATN）。opcode NO_OP・データ無し
+ * ヘッダフラグのレコード（SysReq=SRQ / Attn=ATN）。opcode NO_OP。
  * （tn5250 handle_aidkey の SysReq/Attn 送信と一致）。
+ *
+ * `data` は **SysReq のシステム要求行に打たれた文字列**（EBCDIC）を載せるためにある。
+ * Attn とデータ無し SysReq は従来どおり空で送る（tn5250j `tnvt#systemRequest(String)` は
+ * `writeGDS(4, 0, ebcdic(str))`＝flag1 に SRQ・opcode NO-OP・データに文字列、という同じ形）。
  */
-export function buildFlagRecord(flags: Partial<RecordHeaderFlags>): Uint8Array {
-  return buildRecord(OPCODE.NOOP, new Uint8Array(0), flags);
+export function buildFlagRecord(flags: Partial<RecordHeaderFlags>, data?: Uint8Array): Uint8Array {
+  return buildRecord(OPCODE.NOOP, data ?? new Uint8Array(0), flags);
+}
+
+/**
+ * Cancel Invite（ホストが送ってくる opcode 0x0A）への返事。**同じ opcode を** フラグ 0・データ無しで返す。
+ *
+ * ホストは Attn / SysReq を受けると invite を取り消し、この返事が来るまで**次のデータを送らない**。
+ * 返さないとホストが止まり、画面が変わらずキーボードもロックしたままになる
+ * （実機で対照実験済み。返さない場合、次の AID を送った時点で 1 手遅れて出てくる）。
+ * tn5250j `tnvt#cancelInvite` の `writeGDS(0, 10, null)` と同じバイト列。
+ */
+export function buildCancelInviteAck(): Uint8Array {
+  return buildRecord(OPCODE.CANCEL_INVITE, new Uint8Array(0));
 }

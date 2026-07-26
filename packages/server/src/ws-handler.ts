@@ -212,10 +212,11 @@ export class WsConnection {
       // ただし表示を変えないキーではイベントが起きず、**タイムアウト復帰でも起きない**。
       // 後者では keyboardLocked が解除された画面が screen イベントに乗らないため、
       // sendAid の戻り値（解除後の画面）を key-done に必ず載せる。
-      const res = await entry.session.sendAid(
-        msg.key as AidKey,
-        msg.cursor ? { cursor: msg.cursor } : {}
-      );
+      const res = await entry.session.sendAid(msg.key as AidKey, {
+        ...(msg.cursor ? { cursor: msg.cursor } : {}),
+        // システム要求行の文字列。SysReq 以外に付いていれば core が PROTOCOL_ERROR で弾く
+        ...(msg.sysReqText !== undefined ? { sysReqText: msg.sysReqText } : {})
+      });
       this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
     });
   }

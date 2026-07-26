@@ -30,6 +30,12 @@ export interface WsKey {
   key: string;
   cursor?: { row: number; col: number };
   fields?: { field: number | { row: number; col: number }; value: string }[];
+  /**
+   * **SysReq のときだけ意味を持つ**: システム要求行に打たれた文字列。
+   * 別メッセージ型にしないのは、readOnly ゲート・監査・busy 対応付けといった歯止めを
+   * key 経路と二重に書かないため（片方への付け忘れを構造的に防ぐ）。
+   */
+  sysReqText?: string;
 }
 export interface WsCloseReq {
   type: "close";

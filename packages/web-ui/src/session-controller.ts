@@ -221,8 +221,20 @@ export function setPrinterOutput(sessionId: string, enabled: boolean): void {
   sessionsStore.get(sessionId)?.client.send({ type: "printer-output", enabled });
 }
 
-/** AID 送信（ローカル編集差分を fields に載せる） */
-export function sendKey(sessionId: string, key: AidKey, cursor?: { row: number; col: number }): void {
+/**
+ * AID 送信（ローカル編集差分を fields に載せる）。
+ *
+ * `sysReqText` は **SysReq 専用**でシステム要求行に打たれた文字列。
+ * 編集差分を一緒に送るのは SysReq/Attn でも同じ——ホストは Attn の直後に SAVE SCREEN で
+ * **こちらの画面イメージ**を引き取って復元に使うため、打ちかけの文字も載せておかないと
+ * F3 で戻ったときに消える。
+ */
+export function sendKey(
+  sessionId: string,
+  key: AidKey,
+  cursor?: { row: number; col: number },
+  sysReqText?: string
+): void {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return; // 通信中は多重送信しない（プロテクト）
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
@@ -230,7 +242,8 @@ export function sendKey(sessionId: string, key: AidKey, cursor?: { row: number; 
     type: "key",
     key,
     ...(cursor ? { cursor } : {}),
-    ...(fields.length > 0 ? { fields } : {})
+    ...(fields.length > 0 ? { fields } : {}),
+    ...(sysReqText !== undefined ? { sysReqText } : {})
   });
   setBusy(sessionId, true);
 }

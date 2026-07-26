@@ -2,7 +2,11 @@ import { codecForCcsid, type Codec } from "../codec/codec.js";
 import { As400Error } from "../errors.js";
 import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
-import { buildReadMdtResponse, buildFlagRecord } from "../protocol/read-response.js";
+import {
+  buildReadMdtResponse,
+  buildFlagRecord,
+  buildCancelInviteAck
+} from "../protocol/read-response.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
 import {
   buildSaveScreenResponse,
@@ -63,6 +67,14 @@ export interface SendAidOptions {
   cursor?: { row: number; col: number };
   /** キーボードアンロック待ちのタイムアウト（既定 30 秒） */
   timeoutMs?: number;
+  /**
+   * **SysReq 専用**: システム要求行に打たれた文字列。セッションの CCSID で EBCDIC 化して
+   * SRQ レコードのデータに載せる（空・未指定ならデータ無し＝システム要求メニューが出る）。
+   * 入力欄そのものは端末側のローカル機能で、ホストとの往復を伴わない。
+   * **SysReq 以外のキーに付けたら PROTOCOL_ERROR**（黙って捨てると、送ったつもりの文字列が
+   * どこにも行かないまま成功したように見える）。
+   */
+  sysReqText?: string;
 }
 
 export interface SendAidResult {
@@ -251,13 +263,29 @@ export class Session5250 extends Emitter<SessionEvents> {
    */
   sendAid(key: AidKey, opts: SendAidOptions = {}): Promise<SendAidResult> {
     this.assertReady();
-    const record = this.buildAidRecord(key, opts.cursor);
+    const record = this.buildAidRecord(key, opts.cursor, opts.sysReqText);
     return this.sendAndWait(record, opts.timeoutMs);
   }
 
   /** AID キー名 → 送信レコード。SysReq/Attn はヘッダフラグ、他は Read MDT 応答 */
-  private buildAidRecord(key: AidKey, cursor?: { row: number; col: number }): Uint8Array {
-    if (key === "SysReq") return buildFlagRecord({ srq: true });
+  private buildAidRecord(
+    key: AidKey,
+    cursor?: { row: number; col: number },
+    sysReqText?: string
+  ): Uint8Array {
+    if (sysReqText !== undefined && key !== "SysReq") {
+      throw new As400Error("PROTOCOL_ERROR", `sysReqText is only valid with SysReq (got ${key})`);
+    }
+    if (key === "SysReq") {
+      // システム要求行の文字列をデータに載せる。空文字は「打たずに実行」＝メニュー要求なので
+      // データ無しと同義に倒す（ホストは 2 桁のオプション欄として解釈する）。
+      if (sysReqText === undefined || sysReqText === "") return buildFlagRecord({ srq: true });
+      const enc = this.codec.encode(sysReqText);
+      if (enc.substituted > 0) {
+        this.warn(`${enc.substituted} character(s) substituted on system request`);
+      }
+      return buildFlagRecord({ srq: true }, enc.bytes);
+    }
     if (key === "Attn") return buildFlagRecord({ atn: true });
     const aid = aidCodeOf(key);
     if (aid === undefined) {
@@ -372,6 +400,20 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_ON) this.messageWaiting = true;
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_OFF) this.messageWaiting = false;
       const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
+      if (parsed.opcode === OPCODE.CANCEL_INVITE) {
+        // **Attn / SysReq を成立させる要**。ホストは Attn/SysReq を受けると invite を取り消し、
+        // この返事が来るまで次のデータを送らない（実機で対照実験済み。返さないと
+        // 無反応のまま止まり、次の AID を送った時点で 1 手遅れて画面が出る）。
+        //
+        // **送ったキーで条件分けしない**——ホスト都合の取り消しでも同じ返事が要る
+        // （tn5250j も opcode ディスパッチで無条件に cancelInvite() を呼ぶ）。
+        // 併せてキーボードをロックする（原典の setInputInhibited 相当）。ホストは ack の直後に
+        // 必ず書き込みを送ってくるので取り残されない。万一来なくても sendAid のタイムアウトが戻す。
+        this.telnet.sendRecord(buildCancelInviteAck());
+        if (this.state === "ready") this.state = "locked";
+        // ここで return しない: データ部は空なので後続処理は無害で、画面イベントの発火判定を
+        // 他の opcode と同じ道に通しておく（Cancel Invite だけ別扱いにする理由が無い）。
+      }
       if (result.saveScreenRequested) {
         // SAVE SCREEN はホストが応答を待つ要求。返さないとホストは先へ進まない
         this.telnet.sendRecord(buildSaveScreenResponse(this.buf, this.codec));
