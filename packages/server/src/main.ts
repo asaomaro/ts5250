@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -291,7 +292,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 }
 
 // このファイルが直接実行されたときのみ起動（テストからの import では起動しない）
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Windows では process.argv[1] がバックスラッシュ区切りのため `file://${argv[1]}` は
+// import.meta.url（file:///C:/...）と一致しない。pathToFileURL で正しく URL 化して比較する。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     log.error({ err }, "server failed to start");
     process.exit(1);
