@@ -4,6 +4,7 @@ import type { AidKey } from "@as400web/core";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";
+import SysReqLine from "./SysReqLine.vue";
 import { viewSettings } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
@@ -36,6 +37,17 @@ const loading = computed(() => state.value?.loading ?? false);
 // カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
 const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
 const insertMode = ref(false);
+
+/**
+ * システム要求行（SysReq）を出しているか。
+ *
+ * SysReq は**押した瞬間には送らない**。実機・ACS と同じく画面下部に入力行を出し、確定して初めて
+ * SRQ レコードを送る（打った文字列がレコードのデータになる）。キー設定からの SysReq も
+ * フッターの SysReq ボタンも、入口は `onAid` に合流させる。
+ * 開いている間は 5250 のキー処理を止め、フォーカスの奪い合いも避ける（下の snapshot watcher）ため、
+ * 参照する側より先にここで宣言しておく。
+ */
+const sysReqOpen = ref(false);
 
 /** 操作ログの開閉。**トグルはフッターに置く**ので、状態はここが持つ */
 const logOpen = ref(false);
@@ -140,6 +152,9 @@ watch(snapshot, (snap) => {
   // 入力欄が 1 つも無い画面では ScreenGrid の欄フォーカス（focusCursorField）が早期 return し、
   // どこも focus されずキー操作できない（見た目はカーソルが出る）。ペインを focus して
   // 自由カーソル・F キーを有効にする（クリックで reconcileFocus がペインを focus するのと同じ状態）。
+  // システム要求行を出している間はフォーカスを奪わない（行が自分で取り戻すので、ここで
+  // ペインへ移すと取り合いになる）。行が開いている間はキー処理も止めている。
+  if (sysReqOpen.value) return;
   if (props.focused && snap && !snap.keyboardLocked && !snap.fields.some((f) => !f.protected)) {
     nextTick(() => paneEl.value?.focus());
   }
@@ -321,8 +336,52 @@ function onViewCycle(key: string): void {
   if (r) notice.value = `${r.label}: ${r.valueLabel}`;
 }
 
+// ---- システム要求行（SysReq） ----
+function onAid(key: AidKey): void {
+  if (key === "SysReq") {
+    sysReqOpen.value = true;
+    return;
+  }
+  sendKey(props.sessionId, key, cursor.value);
+}
+
+function onSysReqSubmit(text: string): void {
+  sysReqOpen.value = false;
+  sendKey(props.sessionId, "SysReq", cursor.value, text);
+  void nextTick(() => paneEl.value?.focus());
+}
+
+function onSysReqCancel(): void {
+  // 取り消しでは**レコードを 1 本も送らない**（ホストは押されたことすら知らない）
+  sysReqOpen.value = false;
+  void nextTick(() => paneEl.value?.focus());
+}
+
+// 切断されたら行を畳む（送り先が無い入力欄を残さない）
+watch(
+  () => state.value?.connected,
+  (connected) => {
+    if (connected === false) sysReqOpen.value = false;
+  }
+);
+
+/**
+ * ペインがフォーカスを失ったら行を畳む＝**取り消し扱い**（まだ何も送っていないので副作用は無い）。
+ *
+ * 畳まないと、行の `@focusout` によるフォーカス保持が**タブ・ペイン切替と喧嘩する**。
+ * Alt+PageUp/Down（タブ切替）と Alt+矢印（ペイン移動）はペインではなく App のグローバルハンドラが
+ * 担うため、行を開いていて `onKeydown` が早期 return していても発火する。そのとき離れたペインの行が
+ * フォーカスを引き戻すと、切替先のペインがキーボードを取れなくなる。
+ */
+watch(
+  () => props.focused,
+  (focused) => {
+    if (!focused) sysReqOpen.value = false;
+  }
+);
+
 const rawKeydown = makeKeydownHandler({
-  sendAid: (key: AidKey) => sendKey(props.sessionId, key, cursor.value),
+  sendAid: onAid,
   local: onLocal,
   viewCycle: onViewCycle,
   isFocused: () => props.focused
@@ -510,6 +569,15 @@ function onKeydown(ev: KeyboardEvent): void {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
     return;
   }
+  // システム要求行が開いている間は 5250 のキー処理を止める。**入力欄は .pane の子なので
+  // keydown がここまでバブルしてくる**——素通しすると実行キーが「行の確定」と「5250 の Enter 送信」の
+  // 両方に解釈され、二重に送ってしまう。
+  //
+  // 行の中で起きたキーは**行が閉じた後でも**触らない（`.sysreq` 由来かで判定する）。
+  // 確定・取り消しのハンドラが先に走って sysReqOpen を false にしてから、同じイベントが
+  // ここへバブルしてくるため。Esc を SysReq に割り当てていると（利用者の想定用途そのもの）、
+  // 取り消しの Esc がそのまま再び行を開いてしまい、二度と閉じられなくなる。
+  if (sysReqOpen.value || (ev.target instanceof HTMLElement && ev.target.closest(".sysreq"))) return;
   // 機能キーボタンにフォーカスがあるときの Space は「そのボタンを押す」（普通のボタンと同じ）。
   // 明示的に処理するのは、下の isProtectedEdit が Space を preventDefault してしまい
   // native の Space 起動が効かなくなるため。**Enter は 5250 の AID として残す**——端末で最も
@@ -637,6 +705,11 @@ function onWheel(ev: WheelEvent): void {
         .pane 直下に置くとフッター（StatusBar）を覆ってしまう。
       -->
       <LogPanel :session-id="sessionId" :open="logOpen" @close="logOpen = false" @click.stop />
+      <!--
+        システム要求行。**画面領域の中**の最下部に重ねる（実機・ACS の見え方に合わせる）。
+        LogPanel と同じく .pane 直下ではなく .screen-wrap の中に置き、フッターを覆わないようにする。
+      -->
+      <SysReqLine :open="sysReqOpen" @submit="onSysReqSubmit" @cancel="onSysReqCancel" />
     </div>
     <StatusBar
       v-if="state"
@@ -647,6 +720,7 @@ function onWheel(ev: WheelEvent): void {
       :log-count="logCount"
       :log-open="logOpen"
       @toggle-log="logOpen = !logOpen"
+      @sysreq="onAid('SysReq')"
     />
   </div>
 </template>

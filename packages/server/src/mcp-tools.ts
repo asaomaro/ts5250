@@ -674,12 +674,16 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         key: z.enum(AID_KEYS),
         cursor: cursorSchema.optional(),
         fields: z.array(fieldInputSchema).optional(),
+        sysReqText: z
+          .string()
+          .optional()
+          .describe("システム要求行の文字列（SysReq 専用。省略でシステム要求メニュー）"),
         include: includeSchema,
         rows: rowsSchema
       },
       outputSchema: screenOutShape
     },
-    async ({ sessionId, key, cursor, fields, include, rows }) =>
+    async ({ sessionId, key, cursor, fields, sysReqText, include, rows }) =>
       withAudit({ op: "send_key", sessionId, key, ...(fields ? { fields: fieldCoords(fields) } : {}) }, async () => {
         try {
           const entry = sessions.assertKeyAllowed(sessionId, key, user);
@@ -687,7 +691,10 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             sessions.assertWritable(sessionId, user);
             for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
           }
-          const r = await entry.session.sendAid(key, cursor ? { cursor } : {});
+          const r = await entry.session.sendAid(key, {
+            ...(cursor ? { cursor } : {}),
+            ...(sysReqText !== undefined ? { sysReqText } : {})
+          });
           return screenResult(r.screen, fmtOpts({ include, rows }), r.timedOut);
         } catch (err) {
           return errorResult(err);

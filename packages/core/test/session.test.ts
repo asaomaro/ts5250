@@ -217,6 +217,52 @@ describe("Session5250 リプレイ E2E", () => {
     expect(r.timedOut).toBe(true);
   });
 
+  /**
+   * **Attn / SysReq が成立する条件**。ホストは Attn/SysReq を受けると Cancel Invite（opcode 0x0A）を
+   * 返し、端末が同じ opcode で返事するまで次のデータを送らない。実機での対照実験では、
+   * 返さないと無反応のまま止まり、次の AID を送った時点で 1 手遅れて画面が出た。
+   * ReplayTransport は send() を受けて次の rx へ進むので、この並びで往復を再現できる。
+   */
+  it("Cancel Invite(0x0A) に同じ opcode で返事し、ホストの次画面まで進む", async () => {
+    const { transport, session } = await connectReplay([
+      ...signonEntries(),
+      { ts: "t", dir: "tx", masked: true, len: 0 }, // Attn の送信で先へ進む
+      rxRecord(buildRecord(OPCODE.CANCEL_INVITE, new Uint8Array(0))),
+      rxRecord(menuRecord()) // ack を返した後にホストが送ってくる画面（unlock 付き）
+    ]);
+    const r = await session.sendAid("Attn", { timeoutMs: 500 });
+    expect(r.timedOut).toBe(false);
+
+    // 送信チャンクには telnet ネゴシエーションも混ざるので、GDS レコードだけを拾う
+    // （IAC EOR を外し、種別 0x12A0 のものだけ）。
+    const ack = transport.sentChunks
+      .map((c) => Uint8Array.from([...c].slice(0, -2))) // IAC EOR を外す
+      .filter((rec) => rec.length >= 10 && rec[2] === 0x12 && rec[3] === 0xa0)
+      .map(parseRecord)
+      .find((p) => p.opcode === OPCODE.CANCEL_INVITE);
+    expect(ack).toBeDefined();
+    expect(ack?.data).toHaveLength(0);
+    expect(ack?.flags.srq).toBe(false);
+    expect(ack?.flags.atn).toBe(false);
+    // 返事のあとホストの画面が反映されている＝止まっていない
+    expect(r.screen.cells[0]?.map((c) => c.char).join("")).toContain("MAIN");
+  });
+
+  it("SysReq はシステム要求行の文字列を EBCDIC でデータに載せる", async () => {
+    const { transport, session } = await connectReplay(signonEntries());
+    void session.sendAid("SysReq", { timeoutMs: 20, sysReqText: "2" });
+    const sent = transport.sentChunks.at(-1) as Uint8Array;
+    const parsed = parseRecord(Uint8Array.from([...sent].slice(0, -2)));
+    expect(parsed.flags.srq).toBe(true);
+    expect([...parsed.data]).toEqual([...codec.encode("2").bytes]);
+    await new Promise((r) => setTimeout(r, 30));
+  });
+
+  it("sysReqText を SysReq 以外に付けたら PROTOCOL_ERROR", async () => {
+    const { session } = await connectReplay(signonEntries());
+    expect(() => session.sendAid("Enter", { sysReqText: "2" })).toThrow(/sysReqText/);
+  });
+
   it("SysReq は SRQ ヘッダフラグの空レコードを送る", async () => {
     const { transport, session } = await connectReplay(signonEntries());
     void session.sendAid("SysReq", { timeoutMs: 20 });
