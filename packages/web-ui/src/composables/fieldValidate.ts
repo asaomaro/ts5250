@@ -1,4 +1,5 @@
 import type { Field } from "@as400web/core";
+import { isRawSentinel } from "@as400web/core/browser";
 
 /**
  * 文字がフィールドの型で受理されるか（web 入力時の拒否。core の validateFieldContent と整合）。
@@ -44,6 +45,18 @@ export function dbcsByteLength(value: string): number {
   let bytes = 0;
   let inDbcs = false;
   for (const ch of value) {
+    // **センチネルは 1 バイトを運ぶ印なので必ず 1 バイト。**
+    // `isFullWidth` は私用領域（U+E000–F8FF）を外字＝全角として含むため、
+    // ここで先に外さないとセンチネルを「SO ＋ 2 バイト ＋ SI」と数えて予算が壊れる。
+    // 送信側（core read-response）もセンチネルは生バイト 1 つとして書き出す。
+    if (isRawSentinel(ch)) {
+      if (inDbcs) {
+        bytes += 1; // SI（ラン終了）
+        inDbcs = false;
+      }
+      bytes += 1;
+      continue;
+    }
     if (isFullWidth(ch)) {
       if (!inDbcs) {
         bytes += 1; // SO（ラン開始）
