@@ -112,12 +112,40 @@ const DDS4 = [
   cons(4, 9, "NO WDWBORDER")
 ];
 
+/**
+ * 画面5（別ファイル GRIDTST5）: **窓を閉じたときにホストが何を送ってくるか**を見る。
+ * 背景 → 枠つきの窓 → OVERLAY の小さな記録、と進める。
+ * OVERLAY を付けるのは、画面全体を書き直させないため——書き直されてしまうと
+ * 「下地を戻すのが誰の仕事か」が分からない。
+ */
+const DDS5 = [
+  kwd("DSPSIZ(24 80 *DS3)"),
+  rec("BACKGND"),
+  ...Array.from({ length: 22 }, (_, i) => i + 1).flatMap((r) => [
+    cons(r, 2, `BG${String(r).padStart(2, "0")}`),
+    cons(r, 20, "BACKGROUND-BACKGROUND-BACKGROUND")
+  ]),
+  rec("WINCLS", "WINDOW(8 25 8 30)"),
+  ...kwds("WDWBORDER((*COLOR GRN) (*CHAR '+-+||+-+'))"),
+  cons(2, 3, "WINDOW CONTENT"),
+  rec("AFTER", "OVERLAY"),
+  cons(23, 2, "WINDOW CLOSED")
+];
+
 const CL3 = [
   "             PGM",
   `             DCLF       FILE(${LIB}/GRIDTST3) RCDFMT(MAIN GRD3 WIN1)`,
   "             SNDF       RCDFMT(MAIN)",
   "             SNDF       RCDFMT(GRD3)",
   "             SNDRCVF    RCDFMT(WIN1)",
+  "             ENDPGM"
+];
+const CL7 = [
+  "             PGM",
+  `             DCLF       FILE(${LIB}/GRIDTST5) RCDFMT(BACKGND WINCLS AFTER)`,
+  "             SNDF       RCDFMT(BACKGND)",
+  "             SNDRCVF    RCDFMT(WINCLS)",
+  "             SNDRCVF    RCDFMT(AFTER)",
   "             ENDPGM"
 ];
 const CL6 = [
@@ -201,12 +229,19 @@ if (process.env.SKIP_GRIDTST3 !== "1") {
     process.exit(1);
   }
 }
-log("== DDS4（枠指定の無い窓）==");
-if (!await putSource("QDDSSRC", "GRIDTST4", DDS4)) process.exit(1);
-await cn.run(`DLTF FILE(${LIB}/GRIDTST4)`);
-if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST4) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST4)`)) process.exit(1);
+log("== DDS5（窓を閉じたときの送信内容）==");
+if (!await putSource("QDDSSRC", "GRIDTST5", DDS5)) process.exit(1);
+await cn.run(`DLTF FILE(${LIB}/GRIDTST5)`);
+if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST5) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST5)`)) process.exit(1);
 
-for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4], ["GRIDCL5", CL5], ["GRIDCL6", CL6]]) {
+log("== DDS4（枠指定の無い窓）==");
+if (process.env.SKIP_GRIDTST4 !== "1") {
+  if (!await putSource("QDDSSRC", "GRIDTST4", DDS4)) process.exit(1);
+  await cn.run(`DLTF FILE(${LIB}/GRIDTST4)`);
+  if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST4) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST4)`)) process.exit(1);
+}
+
+for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4], ["GRIDCL5", CL5], ["GRIDCL6", CL6], ["GRIDCL7", CL7]]) {
   log(`== ${mbr} ==`);
   if (!await putSource("QCLSRC", mbr, src)) process.exit(1);
   await cn.run(`DLTPGM PGM(${LIB}/${mbr})`);

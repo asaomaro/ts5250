@@ -3,15 +3,21 @@ import { ScreenBuffer } from "../src/screen/buffer.js";
 import type { ParsedWindow } from "../src/protocol/wdsf-parser.js";
 
 /**
- * **窓を出したら、その下の画面は消える。**
+ * **窓を出したら、その下の画面は消える。消した下地は取っておかない。**
  *
- * ホストは窓の下地を消す指示を**送ってこない**。実機の `TESTLIB/GRIDCL5`
+ * 消すのが表示装置の仕事であることは実機で確認した。実機の `TESTLIB/GRIDCL5`
  * （背景いっぱいに文字を書いてから窓を出す画面）で受信バイトを見ると、
  * 背景を書いた WTD のあと、窓の WTD は
  * `SBA(8,24)` → CREATE WINDOW → `SBA(10,28)` 窓の中身、しか送ってこない。
- * つまり下地を消すのは表示装置の仕事で、やらないと**窓の中に背景が透ける**
- * （利用者からの報告と同じ症状。修正前の実測では窓の中に
- * `BACKGROUND-BACKGROUND-...` が残っていた）。
+ * やらないと**窓の中に背景が透ける**（利用者からの報告と同じ症状。修正前の実測では
+ * 窓の中に `BACKGROUND-BACKGROUND-...` が残っていた）。
+ *
+ * **戻すのはホストの仕事**。`TESTLIB/GRIDCL7`（背景 → 窓 → 窓を閉じる）で見ると:
+ *   窓を出す前 : `ESC 0x02` SAVE SCREEN
+ *   窓を閉じる時: `ESC 0x12` RESTORE SCREEN ＋ 背景 22 行を丸ごと書き直し（1028 バイト）
+ *                 → WDSF `d9 5f`（全 GUI 構造体の除去）→ 新しい内容
+ * つまりホストが画面を送り直す。こちらで下地を持って戻すと、ホストが書き直した
+ * 内容を古い下地で上書きしかねない。
  */
 describe("窓の下地", () => {
   /** 実機 GRIDCL5 と同じ窓: SBA(8,24)・深さ 8・幅 30 */
@@ -50,53 +56,25 @@ describe("窓の下地", () => {
     expect(charAt(buf, 12, 59)).toBe("X"); // 1 桁右
   });
 
-  it("窓を閉じると下の画面が戻る", () => {
-    const buf = filled();
-    buf.addWindow(parsed, WIN_ROW, WIN_COL);
-    expect(charAt(buf, 12, 40)).toBe(" ");
-    buf.removeWindow(WIN_ROW, WIN_COL);
-    expect(charAt(buf, 12, 40)).toBe("X");
-  });
-
   /**
-   * ホストは同じ窓を出し直すたびに CREATE WINDOW を送ってくる。
-   * 下地を窓 id で持つと、2 回目に「窓の中身」を下地として保存してしまい、
-   * 閉じたときに背景ではなく窓の中身が戻る。位置で持つのはそのため。
+   * **窓を閉じてもこちらでは何も戻さない。**
+   * 戻すのはホスト（RESTORE SCREEN で画面を送り直す）。ここで古い下地を書き戻すと、
+   * ホストが書き直した内容を上書きしてしまう。
    */
-  it("同じ窓を出し直しても下地は最初の画面のまま", () => {
+  it("窓を閉じてもセルには触らない", () => {
     const buf = filled();
     buf.addWindow(parsed, WIN_ROW, WIN_COL);
-    buf.setChar(buf.addrOf(12, 40), "W"); // 窓の中身をホストが書く
-    buf.addWindow(parsed, WIN_ROW, WIN_COL); // 出し直し
+    buf.setChar(buf.addrOf(12, 40), "W"); // ホストが窓の中身を書く
     buf.removeWindow(WIN_ROW, WIN_COL);
-    expect(charAt(buf, 12, 40)).toBe("X"); // 窓の中身 "W" ではなく元の背景
+    expect(charAt(buf, 12, 40)).toBe("W"); // 背景 "X" に戻さない
   });
 
-  it("大きさが変わった窓に出し直しても、前の下地を戻してから消す", () => {
+  it("同じ窓を出し直すと、そのたびに範囲を空白にする", () => {
     const buf = filled();
     buf.addWindow(parsed, WIN_ROW, WIN_COL);
-    buf.addWindow({ ...parsed, width: 10, height: 2 }, WIN_ROW, WIN_COL);
-    // 小さい窓の外に出た桁は背景が戻っている
-    expect(charAt(buf, 12, 40)).toBe("X");
-    expect(charAt(buf, 8, 30)).toBe(" "); // 小さい窓の中は空白
-  });
-
-  it("画面クリアで下地も捨てる（戻す先が無い）", () => {
-    const buf = filled();
-    buf.addWindow(parsed, WIN_ROW, WIN_COL);
-    buf.clearUnit();
-    buf.removeWindow(WIN_ROW, WIN_COL);
-    expect(charAt(buf, 12, 40)).toBe(" "); // クリア後なので空白のまま
-  });
-
-  it("SAVE / RESTORE SCREEN を挟んでも下地は戻る", () => {
-    const buf = filled();
-    buf.addWindow(parsed, WIN_ROW, WIN_COL);
-    buf.saveScreen();
-    buf.clearUnit();
-    expect(buf.restoreScreen()).toBe(true);
-    buf.removeWindow(WIN_ROW, WIN_COL);
-    expect(charAt(buf, 12, 40)).toBe("X");
+    buf.setChar(buf.addrOf(12, 40), "W");
+    buf.addWindow(parsed, WIN_ROW, WIN_COL); // ホストは出し直すたびに送ってくる
+    expect(charAt(buf, 12, 40)).toBe(" ");
   });
 
   it("画面の端をはみ出す窓でも落ちない", () => {
