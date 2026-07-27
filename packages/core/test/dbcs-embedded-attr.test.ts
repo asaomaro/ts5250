@@ -109,3 +109,37 @@ describe("DBCS 欄の埋め込み属性（編集・送信で失わない）", ()
     expect(bytes).toContain(0x0f); // SI
   });
 });
+
+/**
+ * **DBCS 欄を編集しても、SO/SI・全角のバイトが失われないこと。**
+ *
+ * 編集後の DBCS 欄は `setFieldValue` によって全セルが「生バイトを持つ SBCS セル」になり、
+ * `hasDbcsStructure` が偽になるので `fieldValue` の一般経路へ落ちる。
+ * そこで生バイトのセンチネル化を DBCS 欄だけ除外していたため、SO/SI・全角のバイトが
+ * U+FFFD のまま返り、送信時に SUB(0x3F) へ化けて**ソースが壊れていた**。
+ *
+ * 実機（/ TESTLIB/QJPNTEST）で確認した現象:
+ *   編集前 C1 C2 28 0E 45E2 45C9 0F C3 C4   （AB + 属性 + SO 設通 SI + CD）
+ *   編集後 3F E7 28 3F 3F 3F 3F 3F 3F 3F 3F （日本語が全部 SUB に潰れた）
+ */
+describe("DBCS 欄の生バイト（編集しても壊さない）", () => {
+  it("SO/SI・全角を含む欄を 1 文字だけ編集しても、他のバイトがそのまま送られる", () => {
+    // AB + 属性 + SO 設(0x45E2) 通(0x45C9) SI + CD
+    const body = [...e("AB"), ATTR, 0x0e, 0x45, 0xe2, 0x45, 0xc9, 0x0f, ...e("CD")];
+    const buf = dbcsFieldWith(body);
+    const f = buf.fieldByIndex(1);
+
+    // 利用者の操作: 2 文字目だけ B→X（他は触らない）
+    const v = buf.fieldValue(f);
+    const edited = [...v].map((ch, i) => (i === 1 ? "X" : ch)).join("");
+    buf.setFieldValue(f, edited, true);
+
+    const { record } = buildReadMdtResponse(buf, codec, 0x00);
+    const bytes = [...record];
+    // SUB(0x3F) に化けていないこと＝データが壊れていない
+    expect(bytes).not.toContain(0x3f);
+    // 元のバイトがそのまま残っていること
+    for (const b of [ATTR, 0x0e, 0x45, 0xe2, 0x45, 0xc9, 0x0f]) expect(bytes).toContain(b);
+    expect(bytes).toContain(0xe7); // 編集した 'X'
+  });
+});
