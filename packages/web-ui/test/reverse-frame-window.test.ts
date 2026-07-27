@@ -155,4 +155,48 @@ describe("既存経路は変わらない", () => {
     } as unknown as Partial<ScreenSnapshot>);
     expect(detectWindowRect(snap)).toEqual({ row1: 3, row2: 12, col1: 5, col2: 44 });
   });
+
+  /**
+   * **塗り潰しの反転ブロックは窓ではない。**
+   *
+   * 上端・下端・側面の 3 条件は「全部が反転している矩形」でも当然すべて満たしてしまう。
+   * 枠として本質的なのは**中が空いていること**で、その条件が抜けていた（実機で報告あり）。
+   * 見出しの強調・選択行のハイライトが数行続けば起こりうる形。
+   */
+  it("内側まで全部反転した塗り潰しブロックは窓と判定しない", () => {
+    const solid: Record<number, [number, number][]> = {
+      18: [[24, 78]],
+      19: [[24, 78]],
+      20: [[24, 78]],
+      21: [[24, 78]],
+      22: [[24, 78]],
+      23: [[24, 78]]
+    };
+    expect(detectWindowRect(snapOf(solid))).toBeNull();
+  });
+
+  it("最小サイズ（3 行）の塗り潰しブロックも窓と判定しない", () => {
+    const solid: Record<number, [number, number][]> = {
+      10: [[20, 40]],
+      11: [[20, 40]],
+      12: [[20, 40]]
+    };
+    expect(detectWindowRect(snapOf(solid))).toBeNull();
+  });
+
+  /**
+   * **窓の中に全幅の反転行があっても窓と判定する。**
+   * 選択中の行・見出し行が内側いっぱいに反転するのは普通なので、
+   * 「内側の全行に非反転セルを要求する」という厳しい条件は採れない
+   * （本物の窓を弾いてしまう）。
+   */
+  it("内側に全幅の反転強調行があっても、他の行が空いていれば窓と判定する", () => {
+    const withHighlight: Record<number, [number, number][]> = {
+      ...ATTN,
+      20: [[24, 78]] // 内側の 1 行だけ全幅反転（選択行の強調）
+    };
+    expect(detectWindowRect(snapOf(withHighlight))).toEqual({
+      row1: 18, row2: 23, col1: 24, col2: 78
+    });
+  });
 });
