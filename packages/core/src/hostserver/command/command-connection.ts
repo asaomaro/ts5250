@@ -137,6 +137,11 @@ export class CommandConnection {
         `command server ${opts.host}:${port} ${info.version} ccsid=${info.ccsid} ` +
           `nlv=${info.nlv} dsLevel=${info.datastreamLevel}`
       );
+      // 警告（NLV 未インストール等）は接続を止めないが、**握りつぶさない**。
+      // 既定 NLV へのフォールバックは挙動の違いとして後から効きうるので、必ず見えるようにする。
+      if (info.warning !== undefined) {
+        log.warn(`command server exchange attributes warning: ${info.warning}`);
+      }
       return new CommandConnection(conn, info, opts.host, port);
     } catch (e) {
       conn.close();

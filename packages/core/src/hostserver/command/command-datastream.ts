@@ -58,6 +58,29 @@ export const RC_OK = 0;
 /** 戻りコード: 失敗（メッセージあり） */
 export const RC_FAILED_WITH_MESSAGES = 0x0400;
 
+/**
+ * 交換属性応答で「失敗ではなく**警告**」として扱う戻りコード（JTOpen 準拠）。
+ *
+ * JTOpen（jtopenlite）の `CommandConnection.getConnection()` がこの通りに無視している
+ * （`archived/jtopenlite/com/ibm/jtopenlite/command/CommandConnection.java` の
+ * `commandExchangeAttributes` 応答判定。原典を直読して 6 件の一致を確認済み）。
+ *
+ * いずれも接続は継続でき、**サーバーが既定値にフォールバックしたことを示すだけ**。
+ * ここに無い値は本当のプロトコルエラーとして扱う（安全側は変えない）。
+ *
+ * 実害の例: 既定で送る NLV="2924"（英語）が入っていない日本語システムでは 0x0106 が返る。
+ * これを致命扱いすると**コマンドサーバー接続そのものが失敗**し、ジョブ一覧・オブジェクト一覧・
+ * ユーザー一覧・CL 実行・プログラム呼び出しが**まとめて使えなくなる**（実機で発生）。
+ */
+export const EXCHANGE_ATTRIBUTES_WARNING_RC: ReadonlyMap<number, string> = new Map([
+  [0x0100, "制限付きユーザー（LMTCPB(*YES)）"],
+  [0x0104, "無効な CCSID"],
+  [0x0105, "無効な NLV。既定（プライマリ）NLV を使用"],
+  [0x0106, "指定した NLV が未インストール。既定（プライマリ）NLV を使用"],
+  [0x0107, "製品情報の取得に失敗。NLV を検証できない"],
+  [0x0108, "NLV ライブラリをシステムライブラリーリストへ追加できない（CHGSYSLIBL の権限不足の可能性）"]
+]);
+
 /** 応答の戻りコード（2 バイト）とメッセージ件数（2 バイト）の位置 */
 export const REPLY_RC_OFFSET = HEADER_LEN;
 export const REPLY_MESSAGE_COUNT_OFFSET = HEADER_LEN + 2;
@@ -129,6 +152,8 @@ export interface CommandServerInfo {
   version: string;
   /** コマンド書式の分岐に使う */
   datastreamLevel: number;
+  /** 戻りコードが警告扱いだった場合のみ、その内容（成功時は undefined） */
+  warning?: string;
 }
 
 /** 交換属性の応答の template 長。この値を前提に固定オフセットで読む */
@@ -159,7 +184,10 @@ export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerIn
     );
   }
   const rc = v.getUint16(REPLY_RC_OFFSET);
-  if (rc !== RC_OK) {
+  // 警告扱いの戻りコードは接続を続ける（JTOpen 準拠。EXCHANGE_ATTRIBUTES_WARNING_RC 参照）。
+  // 呼び出し側が log.warn に出せるよう、握りつぶさず warning として返す。
+  const warning = rc === RC_OK ? undefined : EXCHANGE_ATTRIBUTES_WARNING_RC.get(rc);
+  if (rc !== RC_OK && warning === undefined) {
     throw new As400Error(
       "PROTOCOL_ERROR",
       `command server exchange attributes failed (rc=0x${rc.toString(16)})`
@@ -171,7 +199,8 @@ export function parseExchangeAttributesReply(frame: Uint8Array): CommandServerIn
     nlv: codecForCcsid(EBCDIC_CCSID).decode(frame.subarray(26, 30)),
     // VRM は上位 16 ビットがバージョン（前段 signon と同じ規則）
     version: `V${(raw >>> 16) & 0xffff}R${(raw >>> 8) & 0xff}M${raw & 0xff}`,
-    datastreamLevel: v.getUint16(34)
+    datastreamLevel: v.getUint16(34),
+    ...(warning !== undefined ? { warning } : {})
   };
 }
 

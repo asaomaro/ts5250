@@ -63,10 +63,37 @@ describe("parseExchangeAttributesReply（実機の応答）", () => {
     expect(() => parseExchangeAttributesReply(new Uint8Array(20))).toThrow(Tn5250Error);
   });
 
-  it("戻りコードが 0 以外なら拒否する", () => {
+  it("戻りコードが未知の値なら拒否する", () => {
     const bad = new Uint8Array(REAL_EXCHANGE);
     new DataView(bad.buffer).setUint16(20, 0x1234);
     expect(() => parseExchangeAttributesReply(bad)).toThrow(/exchange attributes failed/);
+  });
+
+  /**
+   * **警告扱いの戻りコードでは接続を止めない**（JTOpen 準拠）。
+   *
+   * 既定で送る NLV="2924"（英語）が入っていない日本語システムでは 0x0106 が返る。
+   * これを致命扱いすると**コマンドサーバー接続そのものが失敗**し、ジョブ一覧・
+   * オブジェクト一覧・ユーザー一覧・CL 実行・プログラム呼び出しが**まとめて使えなくなる**
+   * （他の実機環境で実際に発生した）。
+   */
+  it("rc=0x0106（NLV 未インストール）は警告として許容し、既定 NLV で処理を続ける", () => {
+    const warn = new Uint8Array(REAL_EXCHANGE);
+    new DataView(warn.buffer).setUint16(20, 0x0106);
+    const parsed = parseExchangeAttributesReply(warn);
+    expect(parsed.warning).toMatch(/NLV/);
+    // 警告でも後続のフィールドは従来どおり読める
+    expect(parsed.ccsid).toBe(273);
+  });
+
+  it("rc=0x0100（制限付きユーザー）も警告として許容する", () => {
+    const warn = new Uint8Array(REAL_EXCHANGE);
+    new DataView(warn.buffer).setUint16(20, 0x0100);
+    expect(parseExchangeAttributesReply(warn).warning).toMatch(/制限付き/);
+  });
+
+  it("戻りコードが 0 なら warning は undefined", () => {
+    expect(parseExchangeAttributesReply(new Uint8Array(REAL_EXCHANGE)).warning).toBeUndefined();
   });
 });
 
