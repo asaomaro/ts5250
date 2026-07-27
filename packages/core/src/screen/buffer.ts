@@ -87,6 +87,13 @@ export class ScreenBuffer {
   /** 拡張 5250 GUI 構造体（WDSF 由来）。id は生成順の連番 */
   private guiSelections: GuiSelectionField[] = [];
   private guiWindows: GuiWindow[] = [];
+  /**
+   * 窓が隠した下地（`"行,桁"` → 退避したセル）。窓を閉じたときに戻す。
+   * **窓 id ではなく位置で持つ**——ホストは同じ窓を出し直すたびに CREATE WINDOW を
+   * 送ってくるので、id で持つと 2 回目に「窓の中身」を下地として保存してしまう。
+   * `blankWindowArea` / `restoreWindowArea` だけが触る。
+   */
+  private windowBackdrops = new Map<string, { addr: number; cell: InternalCell }[]>();
   private guiScrollBars: GuiScrollBar[] = [];
   private guiGridLines: GuiGridLine[] = [];
   private guiIdSeq = 0;
@@ -119,6 +126,8 @@ export class ScreenBuffer {
     this.guiWindows = [];
     this.guiScrollBars = [];
     this.guiGridLines = [];
+    // 画面ごと消える／すべての GUI 構造体を捨てる場面なので、下地も戻さず捨てる
+    this.windowBackdrops.clear();
   }
 
   /** DEFINE SELECTION FIELD を GUI 選択フィールドとして登録（位置は 1 始まり row/col） */
@@ -162,6 +171,46 @@ export class ScreenBuffer {
       win.border = { cba: b.cba, ...(b.chars !== undefined ? { chars: { ...b.chars } } : {}) };
     }
     this.guiWindows.push(win);
+    this.blankWindowArea(win);
+  }
+
+  /**
+   * **窓が占める範囲を退避してから空白にする。**
+   *
+   * ホストは窓の下地を消す指示を**送ってこない**（実機で確認: 背景を書いた後に
+   * CREATE WINDOW と窓の中身だけを送る）。消すのは表示装置の仕事で、これをやらないと
+   * **窓の中に下の画面が透ける**。実際、背景いっぱいに文字を書いた画面に窓を出すと
+   * 窓の中に背景文字が残った（利用者からの報告と同じ症状）。
+   *
+   * 範囲は枠の矩形（行 `row`〜`row+height+1` / 桁 `col+1`〜`col+width+4`）に、
+   * 枠の属性バイトが入る 1 桁（`col`）を足したもの。5250 では属性もセルを 1 つ占めるため、
+   * この桁に下地の文字が残ることはない。
+   *
+   * 退避しておくのは、窓を閉じたときに下の画面へ戻すため（`removeWindow`）。
+   */
+  private blankWindowArea(win: GuiWindow): void {
+    // 同じ場所に前の窓の下地が残っていれば先に戻す（大きさが変わっても筋が通る）
+    this.restoreWindowArea(win.row, win.col);
+    const saved: { addr: number; cell: InternalCell }[] = [];
+    const rowEnd = Math.min(this.rows, win.row + win.height + 1);
+    const colEnd = Math.min(this.cols, win.col + win.width + 4);
+    for (let row = Math.max(1, win.row); row <= rowEnd; row++) {
+      for (let col = Math.max(1, win.col); col <= colEnd; col++) {
+        const addr = (row - 1) * this.cols + (col - 1);
+        saved.push({ addr, cell: this.cells[addr] ?? null });
+        this.cells[addr] = null;
+      }
+    }
+    this.windowBackdrops.set(`${win.row},${win.col}`, saved);
+  }
+
+  /** 窓を閉じたときに下の画面を戻す（下地が無ければ何もしない） */
+  private restoreWindowArea(row: number, col: number): void {
+    const key = `${row},${col}`;
+    const saved = this.windowBackdrops.get(key);
+    if (!saved) return;
+    for (const { addr, cell } of saved) this.cells[addr] = cell;
+    this.windowBackdrops.delete(key);
   }
 
   /**
@@ -223,7 +272,12 @@ export class ScreenBuffer {
   }
 
   removeWindow(row: number, col: number): void {
-    this.guiWindows = removeByPos(this.guiWindows, row, col);
+    const before = this.guiWindows;
+    this.guiWindows = removeByPos(before, row, col);
+    // 消えた窓の下地を戻す。ホストは窓を閉じるとき下地を書き直さないことがある
+    for (const w of before) {
+      if (!this.guiWindows.includes(w)) this.restoreWindowArea(w.row, w.col);
+    }
   }
 
   removeScrollBar(row: number, col: number): void {
@@ -280,6 +334,7 @@ export class ScreenBuffer {
     guiWindows: GuiWindow[];
     guiScrollBars: GuiScrollBar[];
     guiGridLines: GuiGridLine[];
+    windowBackdrops: Map<string, { addr: number; cell: InternalCell }[]>;
   }[] = [];
 
   /** CLEAR UNIT: 既定サイズ（24x80）でクリア */
@@ -314,7 +369,12 @@ export class ScreenBuffer {
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
       guiScrollBars: this.guiScrollBars.map((b) => ({ ...b })),
-      guiGridLines: this.guiGridLines.map((g) => ({ ...g }))
+      guiGridLines: this.guiGridLines.map((g) => ({ ...g })),
+      // 窓の下地も一緒に退避する。これが欠けると SAVE→RESTORE を挟んだ窓を閉じたとき
+      // 下地が戻らず、窓のあった場所が空白のまま残る
+      windowBackdrops: new Map(
+        [...this.windowBackdrops].map(([k, v]) => [k, v.map((e) => ({ ...e }))])
+      )
     });
   }
 
@@ -332,6 +392,7 @@ export class ScreenBuffer {
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
     this.guiGridLines = saved.guiGridLines;
+    this.windowBackdrops = saved.windowBackdrops;
     return true;
   }
 

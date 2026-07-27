@@ -77,7 +77,17 @@ const DDS = [
   rec("WIN2", "WINDOW(16 20 5 40)"),
   ...kwds("WDWBORDER((*COLOR GRN) (*CHAR '+-+||+-+'))"),
   ...kwds("WDWTITLE((*TEXT 'CHAR BORDER') (*COLOR YLW))"),
-  cons(2, 3, "EXPLICIT BORDER CHARS")
+  cons(2, 3, "EXPLICIT BORDER CHARS"),
+
+  // 画面3: 画面いっぱいの背景の上に窓を出す（窓の中に背景が透けないか見る）
+  rec("BACKGND"),
+  ...Array.from({ length: 22 }, (_, i) => i + 1).flatMap((r) => [
+    cons(r, 2, `BG${String(r).padStart(2, "0")}`),
+    cons(r, 20, "BACKGROUND-BACKGROUND-BACKGROUND")
+  ]),
+  rec("WINBG", "WINDOW(8 25 8 30)"),
+  ...kwds("WDWBORDER((*COLOR GRN) (*CHAR '+-+||+-+'))"),
+  cons(2, 3, "WINDOW CONTENT")
 ];
 
 const CL3 = [
@@ -86,6 +96,13 @@ const CL3 = [
   "             SNDF       RCDFMT(MAIN)",
   "             SNDF       RCDFMT(GRD3)",
   "             SNDRCVF    RCDFMT(WIN1)",
+  "             ENDPGM"
+];
+const CL5 = [
+  "             PGM",
+  `             DCLF       FILE(${LIB}/GRIDTST3) RCDFMT(BACKGND WINBG)`,
+  "             SNDF       RCDFMT(BACKGND)",
+  "             SNDRCVF    RCDFMT(WINBG)",
   "             ENDPGM"
 ];
 const CL4 = [
@@ -137,7 +154,7 @@ if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST3) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRI
   log("(コンパイル失敗。上のメッセージを見て DDS を直す)");
   process.exit(1);
 }
-for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4]]) {
+for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4], ["GRIDCL5", CL5]]) {
   log(`== ${mbr} ==`);
   if (!await putSource("QCLSRC", mbr, src)) process.exit(1);
   await cn.run(`DLTPGM PGM(${LIB}/${mbr})`);
