@@ -33,16 +33,73 @@ describe("useCursor.moveCursor", () => {
     expect(moveCursor({ row: 5, col: 1 }, "left", R, C)).toEqual({ row: 4, col: C });
   });
 
-  it("画面右下端の right・左上端の left はクランプ（外へ出ない）", () => {
+  it("既定（wrap 無し）では画面右下端の right・左上端の left はクランプ", () => {
+    // 矩形選択の拡張はこちらを使う。回り込むと選択が画面全体に化ける
     expect(moveCursor({ row: R, col: C }, "right", R, C)).toEqual({ row: R, col: C });
     expect(moveCursor({ row: 1, col: 1 }, "left", R, C)).toEqual({ row: 1, col: 1 });
   });
 
-  it("上下は同じ桁で行移動、画面端はクランプ", () => {
+  it("既定（wrap 無し）では上下も画面端でクランプ", () => {
     expect(moveCursor({ row: 5, col: 10 }, "up", R, C)).toEqual({ row: 4, col: 10 });
     expect(moveCursor({ row: 5, col: 10 }, "down", R, C)).toEqual({ row: 6, col: 10 });
     expect(moveCursor({ row: 1, col: 10 }, "up", R, C)).toEqual({ row: 1, col: 10 });
     expect(moveCursor({ row: R, col: 10 }, "down", R, C)).toEqual({ row: R, col: 10 });
+  });
+
+  /**
+   * **5250 端末の矢印は端で反対側へ回り込む。**
+   * 最下行で ↓ は同じ桁の最上行、最上行で ↑ は最下行、
+   * 右下端で → は左上端、左上端で ← は右下端。
+   */
+  describe("wrap（矢印キーの回り込み）", () => {
+    const w = { wrap: true };
+    it("最下行の down は最上行へ、最上行の up は最下行へ", () => {
+      expect(moveCursor({ row: R, col: 10 }, "down", R, C, w)).toEqual({ row: 1, col: 10 });
+      expect(moveCursor({ row: 1, col: 10 }, "up", R, C, w)).toEqual({ row: R, col: 10 });
+    });
+    it("右下端の right は左上端へ、左上端の left は右下端へ", () => {
+      expect(moveCursor({ row: R, col: C }, "right", R, C, w)).toEqual({ row: 1, col: 1 });
+      expect(moveCursor({ row: 1, col: 1 }, "left", R, C, w)).toEqual({ row: R, col: C });
+    });
+    it("途中の行送りは変わらない", () => {
+      expect(moveCursor({ row: 5, col: C }, "right", R, C, w)).toEqual({ row: 6, col: 1 });
+      expect(moveCursor({ row: 5, col: 1 }, "left", R, C, w)).toEqual({ row: 4, col: C });
+    });
+  });
+
+  /**
+   * **窓の中では窓の範囲だけを動く。**
+   * 実機 GRIDCL5 の窓（ホストは SBA(8,24)・深さ 8・幅 30 を送る）の中身は
+   * 行 9〜16・桁 27〜56。
+   */
+  describe("bounds（窓の中に閉じ込める）", () => {
+    const inner = { row1: 9, row2: 16, col1: 27, col2: 56 };
+    const opts = { bounds: inner, wrap: true };
+    it("右端の right は次の行の頭へ", () => {
+      expect(moveCursor({ row: 12, col: 56 }, "right", 24, 80, opts)).toEqual({ row: 13, col: 27 });
+    });
+    it("最下行の down は同じ桁の最上行へ", () => {
+      expect(moveCursor({ row: 16, col: 40 }, "down", 24, 80, opts)).toEqual({ row: 9, col: 40 });
+    });
+    it("最上行の up は最下行へ、左端の left は前の行の末尾へ", () => {
+      expect(moveCursor({ row: 9, col: 40 }, "up", 24, 80, opts)).toEqual({ row: 16, col: 40 });
+      expect(moveCursor({ row: 12, col: 27 }, "left", 24, 80, opts)).toEqual({ row: 11, col: 56 });
+    });
+    it("右下端の right は左上端へ、左上端の left は右下端へ", () => {
+      expect(moveCursor({ row: 16, col: 56 }, "right", 24, 80, opts)).toEqual({ row: 9, col: 27 });
+      expect(moveCursor({ row: 9, col: 27 }, "left", 24, 80, opts)).toEqual({ row: 16, col: 56 });
+    });
+    it("範囲の外へは出ない", () => {
+      for (const dir of ["up", "down", "left", "right"] as const) {
+        for (const start of [{ row: 9, col: 27 }, { row: 16, col: 56 }, { row: 12, col: 40 }]) {
+          const got = moveCursor(start, dir, 24, 80, opts);
+          expect(got.row).toBeGreaterThanOrEqual(inner.row1);
+          expect(got.row).toBeLessThanOrEqual(inner.row2);
+          expect(got.col).toBeGreaterThanOrEqual(inner.col1);
+          expect(got.col).toBeLessThanOrEqual(inner.col2);
+        }
+      }
+    });
   });
 });
 

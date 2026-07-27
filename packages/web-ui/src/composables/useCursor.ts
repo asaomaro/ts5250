@@ -12,41 +12,58 @@ export interface Pos {
   col: number;
 }
 
+/** カーソルが動ける矩形（1 始まりの閉区間） */
+export interface CursorBounds {
+  row1: number;
+  row2: number;
+  col1: number;
+  col2: number;
+}
+
 /**
  * カーソルを 1 セル移動する。
- * - left/right: 桁送り。行頭で left は前行末尾へ、行末で right は次行先頭へ（画面端はクランプ）。
- * - up/down: 同じ桁で行移動（画面端はクランプ）。
+ *
+ * - left/right: 桁送り。行頭で left は前行末尾へ、行末で right は次行先頭へ。
+ * - up/down: 同じ桁で行移動。
+ * - `bounds`: 動ける矩形。省略すると画面全体。**窓の中ではその窓の範囲**を渡す。
+ * - `wrap`: 端で反対側へ回り込む。5250 端末の矢印はこちら
+ *   （最下行で ↓ は最上行、右下端で → は左上端）。
+ *   **矩形選択の拡張には使わない**——回り込むと選択範囲が画面全体に化ける。
  */
-export function moveCursor(cur: Pos, dir: Dir, rows: number, cols: number): Pos {
+export function moveCursor(
+  cur: Pos,
+  dir: Dir,
+  rows: number,
+  cols: number,
+  opts: { bounds?: CursorBounds; wrap?: boolean } = {}
+): Pos {
+  const b = opts.bounds ?? { row1: 1, row2: rows, col1: 1, col2: cols };
+  const wrap = opts.wrap ?? false;
   let { row, col } = cur;
   switch (dir) {
     case "left":
       col -= 1;
-      if (col < 1) {
-        if (row > 1) {
-          row -= 1;
-          col = cols;
-        } else {
-          col = 1;
-        }
-      }
+      if (col >= b.col1) break;
+      col = b.col2;
+      if (row > b.row1) row -= 1;
+      else if (wrap) row = b.row2;
+      else col = b.col1; // 回り込まないなら左上端に留める
       break;
     case "right":
       col += 1;
-      if (col > cols) {
-        if (row < rows) {
-          row += 1;
-          col = 1;
-        } else {
-          col = cols;
-        }
-      }
+      if (col <= b.col2) break;
+      col = b.col1;
+      if (row < b.row2) row += 1;
+      else if (wrap) row = b.row1;
+      else col = b.col2; // 回り込まないなら右下端に留める
       break;
     case "up":
-      row = Math.max(1, row - 1);
+      if (row > b.row1) row -= 1;
+      else if (wrap) row = b.row2;
       break;
     case "down":
-      row = Math.min(rows, row + 1);
+      if (row < b.row2) row += 1;
+      else if (wrap) row = b.row1;
       break;
   }
   return { row, col };
