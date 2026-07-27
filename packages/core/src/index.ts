@@ -32,6 +32,9 @@ export type {
   GuiSelectionKind,
   GuiChoice,
   GuiWindow,
+  GuiWindowBorder,
+  GuiWindowBorderChars,
+  GuiGridLine,
   GuiScrollBar
 } from "./screen/types.js";
 

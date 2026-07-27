@@ -1436,7 +1436,7 @@ describe("ScreenGrid", () => {
           }
         ],
         windows: [],
-        scrollBars: []
+        scrollBars: [], gridLines: []
       };
       return s;
     }
@@ -1446,7 +1446,7 @@ describe("ScreenGrid", () => {
       s.gui = {
         selectionFields: [],
         windows: [{ id: 9, row: 3, col: 5, width: 20, height: 6, title: "PROMPT", restrictCursor: false, pulldown: false }],
-        scrollBars: []
+        scrollBars: [], gridLines: []
       };
       const w = mount(ScreenGrid, { props: { snapshot: s, edits: new Map(), focused: true } });
       const win = w.find(".gui-window");
@@ -1479,7 +1479,7 @@ describe("ScreenGrid", () => {
           }
         ],
         windows: [],
-        scrollBars: []
+        scrollBars: [], gridLines: []
       };
       const w = mount(ScreenGrid, { props: { snapshot: s, edits: new Map(), focused: true } });
       await w.find(".gui-selection.pushbutton .gui-choice").trigger("click");
@@ -1510,7 +1510,8 @@ describe("ScreenGrid", () => {
       s.gui = {
         selectionFields: [],
         windows: [],
-        scrollBars: [{ id: 5, row: 4, col: 79, horizontal: false, total: 100, sliderPos: 50, size: 5 }]
+        scrollBars: [{ id: 5, row: 4, col: 79, horizontal: false, total: 100, sliderPos: 50, size: 5 }],
+        gridLines: []
       };
       const w = mount(ScreenGrid, { props: { snapshot: s, edits: new Map(), focused: true } });
       const bar = w.find(".gui-scrollbar.vertical");

@@ -20,7 +20,40 @@ export const WDSF_TYPE = {
   REM_GUI_SEL_FIELD: 0x58,
   REM_GUI_WINDOW: 0x59,
   REM_GUI_SCROLL_BAR_FIELD: 0x5b,
-  REM_ALL_GUI_CONSTRUCTS: 0x5f
+  REM_ALL_GUI_CONSTRUCTS: 0x5f,
+  /** DDS の GRDATR/GRDLIN（グリッド罫線）がコンパイルされる先 */
+  DRAW_ERASE_GRID_LINES: 0x60,
+  CLEAR_GRID_LINE_BUFFER: 0x61
+} as const;
+
+/**
+ * グリッド線の線種（Wireshark `packet-tn5250.c` の `vals_tn5250_deg_lines` と同値）。
+ * 0xFF は「端末の既定」＝こちらの既定（実線）に倒す。
+ */
+export const GRID_LINE_STYLE = {
+  SOLID: 0x00,
+  THICK_SOLID: 0x01,
+  DOUBLE: 0x02,
+  DOTTED: 0x03,
+  DASHED: 0x08,
+  THICK_DASHED: 0x09,
+  DOUBLE_DASHED: 0x0a,
+  DISPLAY_DEFAULT: 0xff
+} as const;
+
+/**
+ * グリッド線のマイナー構造の種別（同上 `UPPER_HORIZONTAL_LINE` 〜
+ * `HORIZONTALLY_AND_VERTICALLY_RULED_BOX`）。この 8 種の間だけ構造が続く。
+ */
+export const GRID_MINOR = {
+  UPPER_HORIZONTAL: 0x00,
+  LOWER_HORIZONTAL: 0x01,
+  LEFT_VERTICAL: 0x02,
+  RIGHT_VERTICAL: 0x03,
+  PLAIN_BOX: 0x04,
+  H_RULED_BOX: 0x05,
+  V_RULED_BOX: 0x06,
+  HV_RULED_BOX: 0x07
 } as const;
 
 export interface ParsedChoice {
@@ -38,12 +71,74 @@ export interface ParsedSelectionField {
   choices: ParsedChoice[];
 }
 
+/**
+ * WDWBORDER が指定する窓枠。**罫線文字はホストが EBCDIC 1 バイトで寄越す**
+ * （原典 `dissect_create_window` の `cwbp_fields` が `ENC_EBCDIC` で読んでいる）。
+ * 8 隅・辺の文字と、モノクロ/カラー用の属性バイトを持つ。
+ */
+export interface ParsedWindowBorderChars {
+  /** 左上 / 上辺 / 右上 / 左辺 / 右辺 / 左下 / 下辺 / 右下 */
+  ulbc: string;
+  tbc: string;
+  urbc: string;
+  lbc: string;
+  rbc: string;
+  llbc: string;
+  bbc: string;
+  lrbc: string;
+}
+
+export interface ParsedWindowBorder {
+  /** モノクロ用の属性バイト */
+  mba: number;
+  /** カラー用の属性バイト */
+  cba: number;
+  /**
+   * 罫線文字。**ホストが指定したときだけ入る**——`WDWBORDER((*COLOR PNK))` のように
+   * 色だけを指定すると、ホストは文字を載せない短い構造を送ってくる（実機で確認）。
+   */
+  chars?: ParsedWindowBorderChars;
+}
+
 export interface ParsedWindow {
   width: number;
   height: number;
   title?: string;
   restrictCursor: boolean;
   pulldown: boolean;
+  /** ホストが WDWBORDER で指定した枠（無ければクライアント設定の枠を使う） */
+  border?: ParsedWindowBorder;
+}
+
+/** グリッド線 1 本（または箱）の指定 */
+export interface ParsedGridItem {
+  /** GRID_MINOR のいずれか */
+  minorType: number;
+  /** true = 消去、false = 描画（原典 `ms_flag1` bit0） */
+  erase: boolean;
+  /** 1 始まり */
+  row: number;
+  col: number;
+  /** 桁数（横の広がり） */
+  width: number;
+  /** 行数（縦の広がり） */
+  height: number;
+  /** 属性バイト（0 なら主構造の既定色を使う） */
+  color: number;
+  /** 内部罫線の繰り返し数（0 なら等間隔で引かない） */
+  lineRepeat: number;
+  /** 内部罫線の間隔 */
+  lineInterval: number;
+}
+
+export interface ParsedGridLines {
+  /** 主構造 flag1 bit0: 既存のグリッドバッファを消してから描く */
+  clearBuffer: boolean;
+  /** 主構造の既定色（属性バイト） */
+  defaultColor: number;
+  /** 主構造の既定線種（GRID_LINE_STYLE） */
+  defaultLine: number;
+  items: ParsedGridItem[];
 }
 
 export interface ParsedScrollBar {
@@ -57,6 +152,8 @@ export type WdsfEvent =
   | { kind: "selection"; field: ParsedSelectionField }
   | { kind: "window"; window: ParsedWindow }
   | { kind: "scrollbar"; scrollbar: ParsedScrollBar }
+  | { kind: "grid-lines"; grid: ParsedGridLines }
+  | { kind: "clear-grid-lines" }
   | { kind: "remove-selection" }
   | { kind: "remove-window" }
   | { kind: "remove-scrollbar" }
@@ -108,6 +205,10 @@ export function parseWdsf(sf: Uint8Array, decode: Decode): WdsfEvent {
       return { kind: "remove-scrollbar" };
     case WDSF_TYPE.REM_ALL_GUI_CONSTRUCTS:
       return { kind: "remove-all" };
+    case WDSF_TYPE.DRAW_ERASE_GRID_LINES:
+      return { kind: "grid-lines", grid: parseGridLines(r) };
+    case WDSF_TYPE.CLEAR_GRID_LINE_BUFFER:
+      return { kind: "clear-grid-lines" };
     default:
       return { kind: "unknown", type };
   }
@@ -195,9 +296,82 @@ function parseWindow(r: ByteReader, decode: Decode): ParsedWindow {
       // flags(1) mono(1) color(1) reserved(1) の後がタイトル文字
       const title = decodeText(body.subarray(4), decode);
       if (title !== "") win.title = title;
+    } else if (borderType === CW_BORDER_PRESENTATION && body.length >= 3) {
+      // **WDWBORDER の実体**（原典 `dissect_create_window` の `cwbp_fields`）。
+      // length(1) type(1) を読んだ後の body は
+      //   flag1(1) mba(1) cba(1) ulbc tbc urbc lbc rbc llbc bbc lrbc（各 EBCDIC 1 バイト）
+      // 罫線文字は **1 バイトずつ** decode する。decodeText は末尾の空白を落とすので使えない
+      // ——罫線に空白（＝その辺を描かない）を指定してくるホストがあり、桁がずれる。
+      //
+      // **罫線文字は「あれば」**。実機（）で `WDWBORDER((*COLOR PNK))` を出すと
+      // ホストは `05 01 80 38 38`＝**5 バイトの短い形**で送ってきた（色だけの指定なので
+      // 文字を載せない）。原典のフィールド並びは最長形を示しているだけで**長さは可変**で、
+      // 13 バイト固定と決め打つと色指定だけの窓を丸ごと取りこぼす。
+      const ch = (i: number): string => String.fromCharCode(decode(body[i]!));
+      const border: ParsedWindowBorder = { mba: body[1]!, cba: body[2]! };
+      if (body.length >= 11) {
+        border.chars = {
+          ulbc: ch(3), tbc: ch(4), urbc: ch(5), lbc: ch(6),
+          rbc: ch(7), llbc: ch(8), bbc: ch(9), lrbc: ch(10)
+        };
+      }
+      win.border = border;
     }
   }
   return win;
+}
+
+/** CREATE WINDOW のマイナー構造: Border Presentation（原典 `CW_BORDER_PRESENTATION`） */
+const CW_BORDER_PRESENTATION = 0x01;
+
+/**
+ * DRAW/ERASE GRID LINES（0x60）。DDS の `GRDATR` / `GRDLIN` がここへコンパイルされる。
+ *
+ * 主構造 7 バイト:
+ *   partition(1) / flag1(1) / reserved(1) / flag2(1) / reserved(1) / default_color(1) / default_line(1)
+ * マイナー構造 10 バイト（type が 0x00–0x07 の間だけ続く。原典の while ループと同じ打ち切り条件）:
+ *   length(1) / minor_type(1) / ms_flag1(1) / start_row(1) / start_column(1) /
+ *   horizontal_dimension(1) / vertical_dimension(1) / default_color(1) / line_repeat(1) / line_interval(1)
+ *
+ * 構造は Wireshark の 5250 ディセクタ（`epan/dissectors/packet-tn5250.c` の
+ * `dissect_draw_erase_gridlines`）を直読して確定した。tn5250（C 版）は
+ * "Unhandled WDSF" としてログに出すだけで**実装していない**ため参照元にできない。
+ */
+function parseGridLines(r: ByteReader): ParsedGridLines {
+  // **主構造も可変長**。原典のフィールド並びは最長形（7 バイト）を示しているだけで、
+  // 実機（）は「バッファをクリアせよ」だけのとき `01 80 00 00 00` ＝
+  // **5 バイト**で送ってきた（既定色・既定線種を載せない）。7 バイト固定で読むと
+  // レコードの終端に突き当たり、**構造化フィールドごと「壊れている」と捨ててしまう**。
+  const next = (fallback = 0): number => (r.remaining > 0 ? r.u8() : fallback);
+  next(); // partition（区画。単一区画前提なので使わない）
+  const flag1 = next();
+  next(); // 予約
+  next(); // flag2（原典も bit0 のみ定義。描画に使う情報は無い）
+  next(); // 予約
+  const defaultColor = next(0x20); // 既定は通常の緑
+  const defaultLine = next(GRID_LINE_STYLE.SOLID);
+
+  const items: ParsedGridItem[] = [];
+  // マイナー構造は 10 バイト固定。type が 0x00–0x07 でなくなったら打ち切る（原典と同じ）
+  while (r.remaining >= 10) {
+    const minorType = r.peekAt(1);
+    if (minorType > GRID_MINOR.HV_RULED_BOX) break;
+    r.u8(); // length（10 固定。原典も読み飛ばすだけ）
+    r.u8(); // minor_type（peek 済み）
+    const msFlag1 = r.u8();
+    items.push({
+      minorType,
+      erase: (msFlag1 & 0x80) !== 0, // bit0 = 最上位ビット（5250 のビット番号は MSB 起点）
+      row: r.u8(),
+      col: r.u8(),
+      width: r.u8(),
+      height: r.u8(),
+      color: r.u8(),
+      lineRepeat: r.u8(),
+      lineInterval: r.u8()
+    });
+  }
+  return { clearBuffer: (flag1 & 0x80) !== 0, defaultColor, defaultLine, items };
 }
 
 /** DEFINE SCROLL BAR FIELD（0x53）: 方向・総数・つまみ位置・サイズ（数値は 10 進 4 桁） */

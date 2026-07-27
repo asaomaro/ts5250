@@ -334,6 +334,12 @@ function applyWdsf(
     case "remove-all":
       buf.clearGui();
       break;
+    case "grid-lines":
+      buf.applyGridLines(event.grid);
+      break;
+    case "clear-grid-lines":
+      buf.clearGridLines();
+      break;
     case "unknown":
       warn(`unhandled WDSF type 0x${event.type.toString(16)} — ignored`);
       break;

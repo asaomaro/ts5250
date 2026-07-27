@@ -2,6 +2,7 @@ import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
 import type {
   ParsedScrollBar,
+  ParsedGridLines,
   ParsedSelectionField,
   ParsedWindow
 } from "../protocol/wdsf-parser.js";
@@ -19,6 +20,7 @@ import type {
   Field,
   GuiConstructs,
   GuiScrollBar,
+  GuiGridLine,
   GuiSelectionField,
   GuiWindow,
   ScreenSnapshot
@@ -85,6 +87,7 @@ export class ScreenBuffer {
   private guiSelections: GuiSelectionField[] = [];
   private guiWindows: GuiWindow[] = [];
   private guiScrollBars: GuiScrollBar[] = [];
+  private guiGridLines: GuiGridLine[] = [];
   private guiIdSeq = 0;
   /** 代替（ワイド）画面の許可サイズ。CLEAR UNIT ALTERNATE で切替える（27x132 端末のみ） */
   private readonly alternate: { rows: 27; cols: 132 } | undefined;
@@ -114,6 +117,7 @@ export class ScreenBuffer {
     this.guiSelections = [];
     this.guiWindows = [];
     this.guiScrollBars = [];
+    this.guiGridLines = [];
   }
 
   /** DEFINE SELECTION FIELD を GUI 選択フィールドとして登録（位置は 1 始まり row/col） */
@@ -151,7 +155,50 @@ export class ScreenBuffer {
       pulldown: parsed.pulldown
     };
     if (parsed.title !== undefined) win.title = parsed.title;
+    // ホストが WDWBORDER で枠を指定していれば持ち回す（無ければクライアント設定の枠）
+    if (parsed.border !== undefined) {
+      const b = parsed.border;
+      win.border = { cba: b.cba, ...(b.chars !== undefined ? { chars: { ...b.chars } } : {}) };
+    }
     this.guiWindows.push(win);
+  }
+
+  /**
+   * DRAW/ERASE GRID LINES を適用する。
+   *
+   * `clearBuffer`（主構造 flag1 bit0）と各項目の `erase`（ms_flag1 bit0）で
+   * 描画・消去を切り替える。消去は**同じ位置・同じ種別**の項目を取り除く
+   * （ホストは引いたときと同じ指定で消しに来るため）。
+   */
+  applyGridLines(parsed: ParsedGridLines): void {
+    if (parsed.clearBuffer) this.guiGridLines = [];
+    for (const it of parsed.items) {
+      const samePlace = (g: GuiGridLine): boolean =>
+        g.row === it.row && g.col === it.col && g.minorType === it.minorType;
+      if (it.erase) {
+        this.guiGridLines = this.guiGridLines.filter((g) => !samePlace(g));
+        continue;
+      }
+      // 同じ場所への再描画は置き換える（線種・色の変更を反映するため）
+      this.guiGridLines = this.guiGridLines.filter((g) => !samePlace(g));
+      this.guiGridLines.push({
+        id: ++this.guiIdSeq,
+        minorType: it.minorType,
+        row: it.row,
+        col: it.col,
+        width: it.width,
+        height: it.height,
+        lineStyle: parsed.defaultLine,
+        color: it.color !== 0 ? it.color : parsed.defaultColor,
+        lineRepeat: it.lineRepeat,
+        lineInterval: it.lineInterval
+      });
+    }
+  }
+
+  /** CLEAR GRID LINE BUFFER（0x61） */
+  clearGridLines(): void {
+    this.guiGridLines = [];
   }
 
   /** DEFINE SCROLL BAR FIELD を GUI スクロールバーとして登録 */
@@ -229,6 +276,7 @@ export class ScreenBuffer {
     guiSelections: GuiSelectionField[];
     guiWindows: GuiWindow[];
     guiScrollBars: GuiScrollBar[];
+    guiGridLines: GuiGridLine[];
   }[] = [];
 
   /** CLEAR UNIT: 既定サイズ（24x80）でクリア */
@@ -262,7 +310,8 @@ export class ScreenBuffer {
       retainedEnds: new Set(this.retainedEnds),
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
-      guiScrollBars: this.guiScrollBars.map((b) => ({ ...b }))
+      guiScrollBars: this.guiScrollBars.map((b) => ({ ...b })),
+      guiGridLines: this.guiGridLines.map((g) => ({ ...g }))
     });
   }
 
@@ -279,6 +328,7 @@ export class ScreenBuffer {
     this.guiSelections = saved.guiSelections;
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
+    this.guiGridLines = saved.guiGridLines;
     return true;
   }
 
@@ -670,7 +720,8 @@ export class ScreenBuffer {
     if (
       this.guiSelections.length === 0 &&
       this.guiWindows.length === 0 &&
-      this.guiScrollBars.length === 0
+      this.guiScrollBars.length === 0 &&
+      this.guiGridLines.length === 0
     ) {
       return undefined;
     }
@@ -680,7 +731,8 @@ export class ScreenBuffer {
         choices: s.choices.map((c) => ({ ...c }))
       })),
       windows: this.guiWindows.map((w) => ({ ...w })),
-      scrollBars: this.guiScrollBars.map((b) => ({ ...b }))
+      scrollBars: this.guiScrollBars.map((b) => ({ ...b })),
+      gridLines: this.guiGridLines.map((g) => ({ ...g }))
     };
   }
 
