@@ -144,7 +144,7 @@ describe("拡張5250 の選択肢との共存（spec FR-7/FR-8）", () => {
             { index: 2, text: "NG", selected: false, available: false },
           ],
         }],
-        windows: [], scrollBars: [],
+        windows: [], scrollBars: [], gridLines: [],
       },
     } as Partial<ScreenSnapshot>);
 
@@ -165,7 +165,7 @@ describe("拡張5250 の選択肢との共存（spec FR-7/FR-8）", () => {
     const snap = snapOf([LEGEND], [], {
       gui: {
         selectionFields: [{ id: 1, row: 1, col: 2, kind: "pushbutton", fieldType: 0x11, multiple: false, choices: [] }],
-        windows: [], scrollBars: [],
+        windows: [], scrollBars: [], gridLines: [],
       },
     } as Partial<ScreenSnapshot>);
     const w = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: false, buttons: "box" } });

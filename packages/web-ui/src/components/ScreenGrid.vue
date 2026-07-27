@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { ScreenSnapshot, Cell, Field, AidKey } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@as400web/core";
 import {
   initEdit,
   editValue,
@@ -210,6 +210,118 @@ function smokeRects(r: WindowRect): Record<string, string>[] {
   if (r.col1 > 1) out.push({ row1: r.row1, row2: r.row2, col1: 1, col2: r.col1 - 1 });
   if (r.col2 < cols) out.push({ row1: r.row1, row2: r.row2, col1: r.col2 + 1, col2: cols });
   return out.map(winRectStyle);
+}
+
+/**
+ * **ホストが引いたグリッド罫線（GRDATR/GRDLIN）を 1 本ずつの矩形に展開する。**
+ *
+ * ホストは「箱」や「片側の線」をまとめて指定してくるので、描画しやすいよう
+ * 上辺・下辺・左辺・右辺・内部罫線に分解する。線種は CSS の border-style へ落とす
+ * （太字・二重破線は最も近い見た目に寄せる。原典の線種はこちらの CSS より細かい）。
+ */
+function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: string }[] {
+  const out: { style: Record<string, string>; cls: string }[] = [];
+  const cls = `grid-line c-${decodeAttribute(g.color).color} ${gridLineClass(g.lineStyle)}`;
+  const r1 = g.row;
+  const c1 = g.col;
+  const r2 = g.row + Math.max(0, g.height - 1);
+  const c2 = g.col + Math.max(0, g.width - 1);
+  const hLine = (row: number): Record<string, string> => ({
+    left: c1 - 1 + "ch",
+    top: (row - 1) * 1.25 + "em",
+    width: c2 - c1 + 1 + "ch"
+  });
+  const vLine = (col: number): Record<string, string> => ({
+    left: col - 1 + "ch",
+    top: (r1 - 1) * 1.25 + "em",
+    height: (r2 - r1 + 1) * 1.25 + "em"
+  });
+  const push = (style: Record<string, string>, extra: string): void => {
+    out.push({ style, cls: `${cls} ${extra}` });
+  };
+
+  // 単独の辺（0x00–0x03）
+  if (g.minorType === 0x00) push(hLine(r1), "grid-h");
+  else if (g.minorType === 0x01) push(hLine(r2), "grid-h");
+  else if (g.minorType === 0x02) push(vLine(c1), "grid-v");
+  else if (g.minorType === 0x03) push(vLine(c2), "grid-v");
+  else {
+    // 箱（0x04–0x07）は四辺
+    push(hLine(r1), "grid-h");
+    push(hLine(r2), "grid-h");
+    push(vLine(c1), "grid-v");
+    push(vLine(c2), "grid-v");
+    // 内部罫線。lineInterval 行/桁ごとに lineRepeat 本
+    const rep = g.lineRepeat;
+    const interval = g.lineInterval;
+    if (rep > 0 && interval > 0) {
+      if (g.minorType === 0x05 || g.minorType === 0x07) {
+        for (let i = 1; i <= rep; i++) {
+          const row = r1 + i * interval;
+          if (row < r2) push(hLine(row), "grid-h");
+        }
+      }
+      if (g.minorType === 0x06 || g.minorType === 0x07) {
+        for (let i = 1; i <= rep; i++) {
+          const col = c1 + i * interval;
+          if (col < c2) push(vLine(col), "grid-v");
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** 線種（原典 GRID_LINE_STYLE）→ CSS クラス。太字・二重破線は最も近い見た目へ寄せる */
+function gridLineClass(style: number): string {
+  switch (style) {
+    case 0x01: // 太実線
+      return "gl-thick";
+    case 0x02: // 二重線
+      return "gl-double";
+    case 0x03: // 点線
+      return "gl-dotted";
+    case 0x08: // 破線
+      return "gl-dashed";
+    case 0x09: // 太破線
+      return "gl-dashed gl-thick";
+    case 0x0a: // 二重破線 — CSS に該当が無いので二重線で代替する
+      return "gl-double";
+    default: // 0x00 実線 / 0xFF 端末既定
+      return "";
+  }
+}
+
+/**
+ * **ホストが WDWBORDER で指定した窓枠を文字で描く。**
+ *
+ * ホスト指定がある窓は「実機と同じ見た目」がそこにあるので、
+ * クライアント設定（windowFrame）の枠より**そちらを優先**する。
+ * 指定が無い窓は従来どおりクライアント設定で描く。
+ */
+function hostBorderRows(w: GuiWindow): { text: string; style: Record<string, string> }[] {
+  const b = w.border;
+  if (!b) return [];
+  // **色だけの指定なら既定の罫線文字を使う。** 実機で `WDWBORDER((*COLOR PNK))` を出すと
+  // ホストは色だけを送り文字を載せない。文字が無いから描かない、では
+  // 「ホストが枠を指定したのに枠が出ない」ことになる。ACS の既定と同じ字形で描く。
+  const c = b.chars ?? {
+    ulbc: ".", tbc: ".", urbc: ".", lbc: ":", rbc: ":", llbc: ":", bbc: ".", lrbc: ":"
+  };
+  const inner = Math.max(0, w.width - 2);
+  const rows: { text: string; style: Record<string, string> }[] = [];
+  const at = (row: number, text: string): void => {
+    rows.push({
+      text,
+      style: { left: w.col - 1 + "ch", top: (row - 1) * 1.25 + "em" }
+    });
+  };
+  at(w.row, c.ulbc + c.tbc.repeat(inner) + c.urbc);
+  for (let i = 1; i < w.height - 1; i++) {
+    at(w.row + i, c.lbc + " ".repeat(inner) + c.rbc);
+  }
+  if (w.height > 1) at(w.row + w.height - 1, c.llbc + c.bbc.repeat(inner) + c.lrbc);
+  return rows;
 }
 
 /** ウィンドウ枠の位置＋寸法スタイル */
@@ -2455,6 +2567,16 @@ onBeforeUnmount(() => {
       ></div>
     </template>
     <template v-if="gui">
+      <!-- ホストが引いたグリッド罫線（GRDATR/GRDLIN）。1 本ずつの線に展開して重ねる -->
+      <template v-for="g in gui.gridLines" :key="'g' + g.id">
+        <div
+          v-for="(seg, i) in gridSegments(g)"
+          :key="'g' + g.id + '-' + i"
+          :class="seg.cls"
+          :style="seg.style"
+          aria-hidden="true"
+        ></div>
+      </template>
       <div
         v-for="w in gui.windows"
         :key="'w' + w.id"
@@ -2464,6 +2586,17 @@ onBeforeUnmount(() => {
       >
         <span v-if="w.title" class="gui-window-title">{{ w.title }}</span>
       </div>
+      <!-- WDWBORDER: ホスト指定の罫線文字で枠を描く（指定がある窓だけ） -->
+      <template v-for="w in gui.windows" :key="'wb' + w.id">
+        <div
+          v-for="(ln, i) in hostBorderRows(w)"
+          :key="'wb' + w.id + '-' + i"
+          class="gui-window-border"
+          :class="`c-${decodeAttribute(w.border!.cba).color}`"
+          :style="ln.style"
+          aria-hidden="true"
+        >{{ ln.text }}</div>
+      </template>
       <div
         v-for="b in gui.scrollBars"
         :key="'b' + b.id"
@@ -2651,6 +2784,30 @@ onBeforeUnmount(() => {
 /* East Asian Width が Ambiguous な DBCS 文字（'−' '‐' 罫線 等）の桁幅を保証する箱。
    欧文等幅フォントはこれらを 1 桁で描くため、素のテキストのままだと以降の桁が左へずれる。
    inline-block は text-decoration を親から継がないので、下線等は seg.cls を自分に付けて出す。 */
+/* ホストが引いたグリッド罫線（GRDATR/GRDLIN）。文字セルの上に重ねる 1px の線。
+   色は属性クラス（.c-*）の currentColor に従わせ、線種は border-style で表す。 */
+.grid-line {
+  position: absolute;
+  pointer-events: none;
+}
+.grid-h { border-top: 1px solid currentColor; }
+.grid-v { border-left: 1px solid currentColor; }
+.grid-h.gl-dotted { border-top-style: dotted; }
+.grid-v.gl-dotted { border-left-style: dotted; }
+.grid-h.gl-dashed { border-top-style: dashed; }
+.grid-v.gl-dashed { border-left-style: dashed; }
+.grid-h.gl-double { border-top-style: double; border-top-width: 3px; }
+.grid-v.gl-double { border-left-style: double; border-left-width: 3px; }
+.grid-h.gl-thick { border-top-width: 2px; }
+.grid-v.gl-thick { border-left-width: 2px; }
+/* WDWBORDER: ホスト指定の罫線文字で描く枠。文字なので等幅グリッドにそのまま乗る */
+.gui-window-border {
+  position: absolute;
+  white-space: pre;
+  pointer-events: none;
+  line-height: 1.25;
+}
+
 .wide-cell {
   display: inline-block;
   width: 2ch;

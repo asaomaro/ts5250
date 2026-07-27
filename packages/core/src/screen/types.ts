@@ -78,6 +78,52 @@ export interface GuiWindow {
   restrictCursor: boolean;
   /** プルダウンウィンドウ */
   pulldown: boolean;
+  /**
+   * ホストが WDWBORDER で指定した枠。**無ければクライアント設定の枠を使う**
+   * （ホスト指定があるならそちらが「実機と同じ見た目」なので優先する）。
+   */
+  border?: GuiWindowBorder;
+}
+
+/** WDWBORDER の罫線文字（8 隅・辺）。デコード済みの 1 文字 */
+export interface GuiWindowBorderChars {
+  ulbc: string;
+  tbc: string;
+  urbc: string;
+  lbc: string;
+  rbc: string;
+  llbc: string;
+  bbc: string;
+  lrbc: string;
+}
+
+/** WDWBORDER が指定した枠。**色だけの指定なら `chars` は無い**（実機で確認） */
+export interface GuiWindowBorder {
+  /** カラー用の属性バイト（decodeAttribute で色に落とす） */
+  cba: number;
+  chars?: GuiWindowBorderChars;
+}
+
+/**
+ * グリッド罫線（DDS の GRDATR / GRDLIN）。
+ * ホストは「箱」や「片側の線」を指定し、内部の等間隔罫線も指定できる。
+ */
+export interface GuiGridLine {
+  id: number;
+  /** GRID_MINOR の値（0x00 上辺 … 0x07 縦横罫線付きの箱） */
+  minorType: number;
+  /** 1 始まり */
+  row: number;
+  col: number;
+  width: number;
+  height: number;
+  /** 線種（GRID_LINE_STYLE） */
+  lineStyle: number;
+  /** 色（属性バイト。0 なら既定色） */
+  color: number;
+  /** 内部罫線の繰り返し数・間隔（0 なら内部罫線を引かない） */
+  lineRepeat: number;
+  lineInterval: number;
 }
 
 export interface GuiScrollBar {
@@ -98,6 +144,8 @@ export interface GuiConstructs {
   selectionFields: GuiSelectionField[];
   windows: GuiWindow[];
   scrollBars: GuiScrollBar[];
+  /** グリッド罫線（GRDATR / GRDLIN）。ホストが引いた線をそのまま持つ */
+  gridLines: GuiGridLine[];
 }
 
 export interface ScreenSnapshot {

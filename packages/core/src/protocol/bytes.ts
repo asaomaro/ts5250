@@ -20,6 +20,13 @@ export class ByteReader {
     return b;
   }
 
+  /** 現在位置から `ahead` バイト先を読まずに覗く（可変長の並びで「次の型」を見て打ち切る用途） */
+  peekAt(ahead: number): number {
+    const b = this.data[this.pos + ahead];
+    if (b === undefined) throw new As400Error("PROTOCOL_ERROR", "unexpected end of record (peekAt)");
+    return b;
+  }
+
   u8(): number {
     const b = this.data[this.pos];
     if (b === undefined) throw new As400Error("PROTOCOL_ERROR", "unexpected end of record (u8)");

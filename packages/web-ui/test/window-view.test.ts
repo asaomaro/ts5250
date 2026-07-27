@@ -40,7 +40,7 @@ const CHAR_WINDOW = (() => {
 /** 拡張5250 の窓（アプリの WINDOW DSPF 相当） */
 const guiWindowSnap = () =>
   snapOf([" 下の画面"], {
-    gui: { selectionFields: [], windows: [{ id: 1, row: 6, col: 17, width: 46, height: 10, restrictCursor: false, pulldown: false }], scrollBars: [] },
+    gui: { selectionFields: [], windows: [{ id: 1, row: 6, col: 17, width: 46, height: 10, restrictCursor: false, pulldown: false }], scrollBars: [], gridLines: [] },
   } as Partial<ScreenSnapshot>);
 
 beforeEach(() => {

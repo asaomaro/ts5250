@@ -160,7 +160,7 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
     const withGui = snapOf(lines, {
       gui: {
         selectionFields: [{ id: 1, row: 1, col: 2, kind: "pushbutton", fieldType: 0x11, multiple: false, choices: [] }],
-        windows: [], scrollBars: [],
+        windows: [], scrollBars: [], gridLines: [],
       },
     } as Partial<ScreenSnapshot>);
     expect(detectFkeyLegends(withGui)).toEqual([]);
@@ -180,7 +180,7 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
       gui: {
         selectionFields: [],
         windows: [{ id: 1, row: 6, col: 17, width: 46, height: 10, restrictCursor: false, pulldown: false }],
-        scrollBars: [],
+        scrollBars: [], gridLines: [],
       },
     } as Partial<ScreenSnapshot>);
     const rect = detectWindowRect(snap)!;
@@ -191,7 +191,7 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
 
   it("gui.windows があればそれを窓として使う（罫線検出より優先）", () => {
     const snap = snapOf([" F3= 外側", "", "", "    F12= 内側"], {
-      gui: { selectionFields: [], windows: [{ id: 1, row: 3, col: 3, width: 40, height: 4, restrictCursor: false, pulldown: false }], scrollBars: [] },
+      gui: { selectionFields: [], windows: [{ id: 1, row: 3, col: 3, width: 40, height: 4, restrictCursor: false, pulldown: false }], scrollBars: [], gridLines: [] },
     } as Partial<ScreenSnapshot>);
     const got = detectFkeyLegends(snap);
     expect(got.map((s) => s.key)).toEqual(["F12"]);
