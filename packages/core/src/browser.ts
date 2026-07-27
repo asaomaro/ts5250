@@ -62,4 +62,6 @@ export {
   attrSentinel
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
+/** グリッド線の色コード表（5250 の属性バイトとは別物。DDS リファレンス GRDATR Table 14） */
+export { GRID_COLOR } from "./protocol/wdsf-parser.js";
 export type { ScreenColor } from "./screen/types.js";

@@ -57,6 +57,7 @@ export {
 export { ScsDecoder, type LogicalPage } from "@as400web/scs";
 export {
   parseWdsf,
+  GRID_COLOR,
   WDSF_TYPE,
   type WdsfEvent,
   type ParsedSelectionField,
