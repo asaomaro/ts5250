@@ -153,7 +153,8 @@ describe("既存経路は変わらない", () => {
     const snap = snapOf(ATTN, {
       gui: { windows: [{ row: 3, col: 5, width: 40, height: 10 }] }
     } as unknown as Partial<ScreenSnapshot>);
-    expect(detectWindowRect(snap)).toEqual({ row1: 3, row2: 12, col1: 5, col2: 44 });
+    // ホストが送る位置は枠の左上。中身はその 1 行下・3 桁右から（下の「宣言された窓と枠判定の範囲」参照）
+    expect(detectWindowRect(snap)).toEqual({ row1: 4, row2: 13, col1: 8, col2: 47 });
   });
 
   /**
@@ -198,5 +199,57 @@ describe("既存経路は変わらない", () => {
     expect(detectWindowRect(snapOf(withHighlight))).toEqual({
       row1: 18, row2: 23, col1: 24, col2: 78
     });
+  });
+});
+
+/**
+ * **宣言された窓の「使える範囲」と、表示設定の枠が使う矩形が一致しているか。**
+ *
+ * 枠の装飾・スモーク（窓の外を暗くする）・F キー凡例の絞り込みは、どれも
+ * `detectWindowRect` の矩形を「窓の中身の範囲」として使う。ここが実際の窓と
+ * ずれていると、枠が窓から外れ、窓の最終行の凡例が拾えず、窓の一部が暗くなる。
+ *
+ * 実際の使える範囲は実機（）で確定している。ホストが送るのは
+ * SBA の位置（row, col）と深さ・幅だけで、**中身はその 1 行下・3 桁右から**始まる:
+ *
+ * | 画面 | ホストの窓 | DDS の定数 | ホストが書いた位置 |
+ * |---|---|---|---|
+ * | GRIDCL4 | SBA(16,19) 40x5 | `2 3'EXPLICIT BORDER CHARS'` | 行 18 桁 24 |
+ * | GRIDCL5 | SBA(8,24) 30x8 | `2 3'WINDOW CONTENT'` | 行 10 桁 29 |
+ *
+ * どちらも「窓相対 (2,3) → 絶対 (row+2, col+4)」＝**中身の原点は (row+1, col+3)**。
+ * 枠は中身の上下に 1 行・左右に 2 桁を使う（ACS の画素実測とも一致）。
+ */
+describe("宣言された窓と枠判定の範囲", () => {
+  const declared = (w: { row: number; col: number; width: number; height: number }): ScreenSnapshot =>
+    ({
+      sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false,
+      cells: Array.from({ length: 24 }, () =>
+        Array.from({ length: 80 }, () => ({ char: " ", kind: "sbcs", color: "green" }))
+      ),
+      fields: [],
+      gui: {
+        selectionFields: [],
+        windows: [{ id: 1, ...w, restrictCursor: false, pulldown: false }],
+        scrollBars: [], gridLines: []
+      }
+    }) as unknown as ScreenSnapshot;
+
+  it("実機 GRIDCL5 の窓（SBA(8,24) 30x8）の中身の範囲を返す", () => {
+    // 中身は行 9〜16・桁 27〜56。ホストは "WINDOW CONTENT" を行 10 桁 29 に書いた
+    expect(detectWindowRect(declared({ row: 8, col: 24, width: 30, height: 8 })))
+      .toEqual({ row1: 9, row2: 16, col1: 27, col2: 56 });
+  });
+
+  it("実機 GRIDCL4 の窓（SBA(16,19) 40x5）でも一致する", () => {
+    // 中身は行 17〜21・桁 22〜61。ホストは "EXPLICIT BORDER CHARS" を行 18 桁 24 に書いた
+    expect(detectWindowRect(declared({ row: 16, col: 19, width: 40, height: 5 })))
+      .toEqual({ row1: 17, row2: 21, col1: 22, col2: 61 });
+  });
+
+  it("中身の行数・桁数は宣言どおり", () => {
+    const r = detectWindowRect(declared({ row: 8, col: 24, width: 30, height: 8 }))!;
+    expect(r.row2 - r.row1 + 1).toBe(8);
+    expect(r.col2 - r.col1 + 1).toBe(30);
   });
 });

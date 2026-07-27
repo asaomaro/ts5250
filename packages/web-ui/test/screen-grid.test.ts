@@ -1454,7 +1454,10 @@ describe("ScreenGrid", () => {
       const w = mount(ScreenGrid, { props: { snapshot: s, edits: new Map(), focused: true } });
       const win = w.find(".gui-window");
       expect(win.exists()).toBe(true);
-      expect(win.attributes("style")).toContain("20ch");
+      // **宣言 row=3 col=5 20桁×6行 の「枠の矩形」**は 行 3〜10 / 桁 6〜29。
+      // 宣言の位置は枠の左上で、中身はその 1 行下・3 桁右から始まる
+      expect(win.attributes("style")).toContain("left: 5ch");
+      expect(win.attributes("style")).toContain("width: 24ch");
       // 見出しは窓の中ではなく**枠の辺**に載る（ACS と同じ）
       expect(w.find(".win-title").text()).toBe("PROMPT");
     });

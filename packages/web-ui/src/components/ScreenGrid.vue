@@ -405,9 +405,21 @@ function hostTitle(w: GuiWindow): { text: string; style: Record<string, string>;
   };
 }
 
-/** ウィンドウ枠の位置＋寸法スタイル */
+/**
+ * ウィンドウ枠（`.gui-window`）の位置＋寸法。
+ *
+ * **ホストが送る位置は枠の左上で、中身はその 1 行下・3 桁右から始まる。**
+ * 宣言された位置・大きさをそのまま置くと、実際の窓から**左上へずれた**矩形になる
+ * （表示設定の枠・スモークは中身の範囲を使うので、両者が斜めにずれて見えていた）。
+ * ここは枠そのものなので、ホストが WDWBORDER を出したときと同じ**枠の矩形**
+ * （行 `row`〜`row+height+1` / 桁 `col+1`〜`col+width+4`）に合わせる。
+ */
 function windowStyle(w: { row: number; col: number; width: number; height: number }): Record<string, string> {
-  return { ...guiPos(w.row, w.col), width: w.width + "ch", height: w.height * 1.25 + "em" };
+  return {
+    ...guiPos(w.row, w.col + 1),
+    width: w.width + 4 + "ch",
+    height: (w.height + 2) * 1.25 + "em"
+  };
 }
 
 const selectionFields = computed<GuiSelectionLike[]>(

@@ -72,10 +72,11 @@ describe("両方の種類の窓に効く（FR-4）", () => {
     await nextTick();
     const deco = w.find(".win-deco");
     expect(deco.exists()).toBe(true);
-    // 宣言 row=6 col=17 46桁×10行 → left 16ch / top 6.25em / 46ch × 12.5em
+    // 宣言 row=6 col=17 46桁×10行。**宣言の位置は枠の左上**なので中身は 行 7 桁 20 から
+    // → left 19ch / top 7.5em / 46ch × 12.5em
     const st = deco.attributes("style")!;
-    expect(st).toContain("left: 16ch");
-    expect(st).toContain("top: 6.25em");
+    expect(st).toContain("left: 19ch");
+    expect(st).toContain("top: 7.5em");
     expect(st).toContain("width: 46ch");
     expect(st).toContain("height: 12.5em");
     w.unmount();
@@ -177,5 +178,91 @@ describe("ウィンドウと背景は独立した設定（ユーザー要求）"
     initViewSettings();
     expect(viewSettings.settings.windowFrame).toBe("shadow");
     expect(viewSettings.settings.windowBackdrop).toBe("smoke");
+  });
+});
+
+/**
+ * **窓の表示と、表示設定の枠が同じ場所を指しているか。**
+ *
+ * 窓まわりには位置を決める箇所が 3 つある。
+ *   - `.gui-window`   … 拡張5250 の窓を示す枠（＝ホストの WDWBORDER が出る場所）
+ *   - `.win-deco`     … 表示設定（windowFrame）の装飾枠
+ *   - `.win-smoke`    … 窓の外を暗くする覆い（＝窓の中身の範囲の裏返し）
+ *
+ * ホストが送る位置は**枠の左上**で、中身はその 1 行下・3 桁右から始まる
+ * （実機で確認。DDS の窓内定数が書かれた絶対位置が根拠）。
+ * ここを取り違えると、装飾枠だけが実際の窓から斜めにずれる。
+ * 実機 `TESTLIB/GRIDCL6`（枠指定の無い窓）で実際に起きていた。
+ */
+describe("窓の範囲と表示設定の枠の一致", () => {
+  /** 実機 GRIDCL6 の窓: ホストは SBA(8,24)・深さ 8・幅 30 を送る */
+  const WIN = { id: 1, row: 8, col: 24, width: 30, height: 8, restrictCursor: false, pulldown: false };
+  const snap = (): ScreenSnapshot =>
+    ({
+      sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false,
+      cells: Array.from({ length: 24 }, () =>
+        Array.from({ length: 80 }, () => ({ char: " ", kind: "sbcs", color: "green" }))
+      ),
+      fields: [],
+      gui: { selectionFields: [], windows: [WIN], scrollBars: [], gridLines: [] }
+    }) as unknown as ScreenSnapshot;
+
+  const px = (style: string, key: string): string =>
+    new RegExp(`${key}: ([^;]+);`).exec(style)?.[1] ?? "";
+
+  it("枠の矩形（.gui-window）は行 8〜17・桁 25〜58 に出る", async () => {
+    const w = mount(ScreenGrid, { props: { snapshot: snap(), edits: new Map(), focused: false } });
+    await nextTick();
+    const st = w.find(".gui-window").attributes("style")!;
+    expect(px(st, "left")).toBe("24ch");   // 桁 25 の左端
+    expect(px(st, "top")).toBe("8.75em");  // 行 8 の上端 (8-1)*1.25em
+    expect(px(st, "width")).toBe("34ch");  // 幅 30 ＋ 左右の枠 4
+    expect(px(st, "height")).toBe("12.5em"); // 高さ 8 ＋ 上下の枠 2
+    w.unmount();
+  });
+
+  it("表示設定の枠（.win-deco）は窓の中身（行 9〜16・桁 27〜56）に重なる", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(), edits: new Map(), focused: false, windowFrame: "outline" }
+    });
+    await nextTick();
+    const st = w.find(".win-deco").attributes("style")!;
+    expect(px(st, "left")).toBe("26ch");   // 桁 27 の左端
+    expect(px(st, "top")).toBe("10em");    // 行 9 の上端 (9-1)*1.25em
+    expect(px(st, "width")).toBe("30ch");
+    expect(px(st, "height")).toBe("10em"); // 8 行
+    w.unmount();
+  });
+
+  it("装飾枠は枠の矩形の内側に収まる（斜めにずれない）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(), edits: new Map(), focused: false, windowFrame: "outline" }
+    });
+    await nextTick();
+    const num = (s: string): number => parseFloat(s);
+    const win = w.find(".gui-window").attributes("style")!;
+    const deco = w.find(".win-deco").attributes("style")!;
+    expect(num(px(deco, "left"))).toBeGreaterThanOrEqual(num(px(win, "left")));
+    expect(num(px(deco, "top"))).toBeGreaterThanOrEqual(num(px(win, "top")));
+    expect(num(px(deco, "left")) + num(px(deco, "width")))
+      .toBeLessThanOrEqual(num(px(win, "left")) + num(px(win, "width")));
+    expect(num(px(deco, "top")) + num(px(deco, "height")))
+      .toBeLessThanOrEqual(num(px(win, "top")) + num(px(win, "height")));
+    w.unmount();
+  });
+
+  it("スモークの穴は装飾枠と同じ範囲（窓の中身）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(), edits: new Map(), focused: false, windowFrame: "outline", windowBackdrop: "smoke" }
+    });
+    await nextTick();
+    const smoke = w.findAll(".win-smoke").map((s) => s.attributes("style")!);
+    // 上の覆いの下端＝穴の上端、左の覆いの右端＝穴の左端
+    const top = smoke.find((s) => px(s, "top") === "0em")!;
+    expect(parseFloat(px(top, "height"))).toBe(10); // 行 1〜8 = 8 行
+    // 左の覆いは穴と同じ行範囲（top 10em）に並ぶ。上下の覆いは画面幅いっぱいなので区別する
+    const left = smoke.find((s) => px(s, "left") === "0ch" && px(s, "top") === "10em")!;
+    expect(parseFloat(px(left, "width"))).toBe(26); // 桁 1〜26
+    w.unmount();
   });
 });

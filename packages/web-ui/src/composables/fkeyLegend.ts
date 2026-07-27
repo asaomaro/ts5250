@@ -206,10 +206,23 @@ export function detectWindowRect(snap: ScreenSnapshot, charOf: CharOf = defaultC
   const win = snap.gui?.windows;
   if (win && win.length > 0) {
     const w = win[win.length - 1]!;
-    // **宣言された矩形がそのまま使用領域**。拡張5250 の窓は枠を*線*として描く（クライアント側で
-    // 描画し、文字セルを消費しない）ので、罫線文字の窓のように上下左右を 1 行ぶん削ってはいけない。
-    // 削ると窓の**先頭行・最終行の凡例が落ちる**（実機 TESTLIB/EXTPGM の WINDOW で確認）。
-    return { row1: w.row, row2: w.row + w.height - 1, col1: w.col, col2: w.col + w.width - 1 };
+    // **ホストが送る位置は窓の「中身」ではなく枠の左上。**
+    // 中身はその **1 行下・3 桁右**から始まり、大きさは宣言どおり（深さ × 幅）。
+    // 枠は中身の上下に 1 行・左右に 2 桁を使い、さらにその左に枠の属性バイトが 1 桁入る。
+    //
+    // 実機（）で 2 つの窓から確かめた。ホストが窓の中の定数を書いた位置が根拠:
+    //   GRIDCL4: SBA(16,19) 40x5 に `2 3'EXPLICIT BORDER CHARS'` → 行 18 桁 24
+    //   GRIDCL5: SBA(8,24)  30x8 に `2 3'WINDOW CONTENT'`        → 行 10 桁 29
+    // どちらも窓相対 (2,3) が絶対 (row+2, col+4) ＝ 中身の原点は (row+1, col+3)。
+    //
+    // 宣言された位置をそのまま中身と見なしていたため、枠の装飾・スモーク・凡例の
+    // 絞り込みが**1 行上・3 桁左**にずれ、窓の最終行と右端 4 桁が範囲から外れていた。
+    return {
+      row1: w.row + 1,
+      row2: w.row + w.height,
+      col1: w.col + 3,
+      col2: w.col + w.width + 2
+    };
   }
 
   const rows = snap.cells.map((cells) => rowText(cells, snap.cols, charOf));

@@ -90,12 +90,41 @@ const DDS = [
   cons(2, 3, "WINDOW CONTENT")
 ];
 
+/**
+ * 画面4（別ファイル GRIDTST4）: **枠指定の無い窓**。
+ * WDWBORDER が無いと表示設定（windowFrame）の枠が使われるので、
+ * その枠が実際の窓と重なるかを見るための画面。
+ * 窓の隅に印を置いて、使用領域の四隅がどこかを目で確かめられるようにする。
+ * DDS は宣言した行数の**最終行に定数を置かせない**（CPD7830）ので、下の印は 1 行手前。
+ */
+const DDS4 = [
+  kwd("DSPSIZ(24 80 *DS3)"),
+  rec("BACKGND"),
+  ...Array.from({ length: 22 }, (_, i) => i + 1).flatMap((r) => [
+    cons(r, 2, `BG${String(r).padStart(2, "0")}`),
+    cons(r, 20, "BACKGROUND-BACKGROUND-BACKGROUND")
+  ]),
+  rec("WINNOB", "WINDOW(8 25 8 30)"),
+  cons(1, 1, "TL"),
+  cons(1, 29, "TR"),
+  cons(7, 1, "BL"),
+  cons(7, 29, "BR"),
+  cons(4, 9, "NO WDWBORDER")
+];
+
 const CL3 = [
   "             PGM",
   `             DCLF       FILE(${LIB}/GRIDTST3) RCDFMT(MAIN GRD3 WIN1)`,
   "             SNDF       RCDFMT(MAIN)",
   "             SNDF       RCDFMT(GRD3)",
   "             SNDRCVF    RCDFMT(WIN1)",
+  "             ENDPGM"
+];
+const CL6 = [
+  "             PGM",
+  `             DCLF       FILE(${LIB}/GRIDTST4) RCDFMT(BACKGND WINNOB)`,
+  "             SNDF       RCDFMT(BACKGND)",
+  "             SNDRCVF    RCDFMT(WINNOB)",
   "             ENDPGM"
 ];
 const CL5 = [
@@ -116,7 +145,19 @@ const CL4 = [
 
 const host = process.env.AS400_HOST, user = process.env.AS400_USER, password = process.env.AS400_PASSWORD;
 if (!host || !user || !password) { log("AS400_HOST / AS400_USER / AS400_PASSWORD を環境変数で"); process.exit(1); }
-const cn = await CommandConnection.connect({ host, user, password, resolvePort: true });
+// 実機がたまに応答を返さないので、接続だけは少し粘る
+const connect = async () => {
+  for (let a = 1; ; a++) {
+    try {
+      return await CommandConnection.connect({ host, user, password, resolvePort: true, timeoutMs: 40_000 });
+    } catch (e) {
+      if (a >= 4) throw e;
+      log(`(接続やり直し ${a}: ${e.code})`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+};
+const cn = await connect();
 
 const show = (r, label) => {
   const bad = r.messages.filter((m) => m.kind === "error" || m.kind === "severe");
@@ -130,14 +171,18 @@ const run = async (cmd, label = cmd) => show(await cn.run(cmd), label);
 async function putSource(file, member, lines) {
   await cn.run(`DLTF FILE(${LIB}/QTMPSRC)`);
   if (!await run(`CRTSRCPF FILE(${LIB}/QTMPSRC) RCDLEN(112) MBR(QTMPSRC)`)) return false;
-  let seq = 0;
-  for (const line of lines) {
-    seq += 1;
+  // **1 行ずつ INSERT すると往復が多すぎて途中で落ちる**（DDS が 100 行を超えたところで発生）。
+  // 複数行を 1 つの INSERT にまとめて往復を減らす。
+  const BATCH = 8;
+  for (let i = 0; i < lines.length; i += BATCH) {
+    const chunk = lines.slice(i, i + BATCH);
     // 引用符は 2 段でくくられる（CL の SQL(…) の中に SQL 文字列がある）ので 4 個に増やす
-    const esc = line.replace(/'/g, "''''");
+    const values = chunk
+      .map((line, j) => `(${i + j + 1}.00,0,''${line.replace(/'/g, "''''")}'')`)
+      .join(",");
     const ok = await run(
-      `RUNSQL SQL('INSERT INTO ${LIB}.QTMPSRC (SRCSEQ,SRCDAT,SRCDTA) VALUES (${seq}.00,0,''${esc}'')') COMMIT(*NONE)`,
-      `  行${seq}: ${line.trim().slice(0, 48)}`
+      `RUNSQL SQL('INSERT INTO ${LIB}.QTMPSRC (SRCSEQ,SRCDAT,SRCDTA) VALUES ${values}') COMMIT(*NONE)`,
+      `  行${i + 1}〜${i + chunk.length}`
     );
     if (!ok) return false;
   }
@@ -147,14 +192,21 @@ async function putSource(file, member, lines) {
   return await run(`CPYF FROMFILE(${LIB}/QTMPSRC) TOFILE(${LIB}/${file}) FROMMBR(QTMPSRC) TOMBR(${member}) MBROPT(*REPLACE) FMTOPT(*NOCHK)`, `  ${file}(${member}) へ複写`);
 }
 
-log("== DDS ==");
-if (!await putSource("QDDSSRC", "GRIDTST3", DDS)) process.exit(1);
-await cn.run(`DLTF FILE(${LIB}/GRIDTST3)`);
-if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST3) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST3)`)) {
-  log("(コンパイル失敗。上のメッセージを見て DDS を直す)");
-  process.exit(1);
+if (process.env.SKIP_GRIDTST3 !== "1") {
+  log("== DDS ==");
+  if (!await putSource("QDDSSRC", "GRIDTST3", DDS)) process.exit(1);
+  await cn.run(`DLTF FILE(${LIB}/GRIDTST3)`);
+  if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST3) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST3)`)) {
+    log("(コンパイル失敗。上のメッセージを見て DDS を直す。使用中なら SKIP_GRIDTST3=1 で飛ばせる)");
+    process.exit(1);
+  }
 }
-for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4], ["GRIDCL5", CL5]]) {
+log("== DDS4（枠指定の無い窓）==");
+if (!await putSource("QDDSSRC", "GRIDTST4", DDS4)) process.exit(1);
+await cn.run(`DLTF FILE(${LIB}/GRIDTST4)`);
+if (!await run(`CRTDSPF FILE(${LIB}/GRIDTST4) SRCFILE(${LIB}/QDDSSRC) SRCMBR(GRIDTST4)`)) process.exit(1);
+
+for (const [mbr, src] of [["GRIDCL3", CL3], ["GRIDCL4", CL4], ["GRIDCL5", CL5], ["GRIDCL6", CL6]]) {
   log(`== ${mbr} ==`);
   if (!await putSource("QCLSRC", mbr, src)) process.exit(1);
   await cn.run(`DLTPGM PGM(${LIB}/${mbr})`);

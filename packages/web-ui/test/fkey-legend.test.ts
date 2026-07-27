@@ -168,13 +168,14 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
     expect(detectFkeyLegends(snapOf(lines)).map((s) => s.key)).toEqual(["F3", "F12"]);
   });
 
-  it("拡張5250 の窓は宣言された矩形がそのまま使用領域（先頭行・最終行を落とさない）", () => {
-    // 実機 TESTLIB/EXTPGM の WINDOW の実測値: row=6 col=17 46桁×10行 → 行 6〜15 / 桁 17〜62。
-    // 枠は線として描かれ文字セルを消費しないので、罫線文字の窓のように削ってはいけない。
+  it("拡張5250 の窓は中身の全行を拾う（先頭行・最終行を落とさない）", () => {
+    // 実機 TESTLIB/EXTPGM の WINDOW: row=6 col=17 46桁×10行。
+    // **ホストが送る位置は枠の左上**なので、中身は 1 行下・3 桁右の 行 7〜16 / 桁 20〜65。
+    // 宣言された位置をそのまま中身と見なすと最終行と右端 4 桁が範囲から外れる。
     const lines = Array(24).fill("");
-    lines[5] = " ".repeat(16) + "F2=先頭行";   // 窓の**先頭行**（r6・col 17）
+    lines[6] = " ".repeat(19) + "F2=先頭行";   // 窓の**先頭行**（r7・col 20）
     lines[13] = " ".repeat(31) + "F12=Cancel"; // 窓の中ほど（r14）
-    lines[14] = " ".repeat(16) + "F5=最終行";   // 窓の**最終行**（r15）
+    lines[15] = " ".repeat(19) + "F5=最終行";   // 窓の**最終行**（r16）
     lines[0] = " F3=外側";                      // 窓の外（下の画面）
     const snap = snapOf(lines, {
       gui: {
@@ -184,13 +185,14 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
       },
     } as Partial<ScreenSnapshot>);
     const rect = detectWindowRect(snap)!;
-    expect([rect.row1, rect.row2, rect.col1, rect.col2]).toEqual([6, 15, 17, 62]);
+    expect([rect.row1, rect.row2, rect.col1, rect.col2]).toEqual([7, 16, 20, 65]);
     // 先頭行・最終行の凡例も拾い、窓の外は拾わない
     expect(detectFkeyLegends(snap).map((s) => s.key)).toEqual(["F2", "F12", "F5"]);
   });
 
   it("gui.windows があればそれを窓として使う（罫線検出より優先）", () => {
-    const snap = snapOf([" F3= 外側", "", "", "    F12= 内側"], {
+    // 窓 row=3 col=3 40x4 → 中身は 行 4〜7 / 桁 6〜45
+    const snap = snapOf([" F3= 外側", "", "", "      F12= 内側"], {
       gui: { selectionFields: [], windows: [{ id: 1, row: 3, col: 3, width: 40, height: 4, restrictCursor: false, pulldown: false }], scrollBars: [], gridLines: [] },
     } as Partial<ScreenSnapshot>);
     const got = detectFkeyLegends(snap);
