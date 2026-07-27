@@ -14,7 +14,8 @@
 - **落とし穴・非自明な判断を明文化する**（例）:
   - `// Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する`
   - `// 先に状態を戻す: 応答 send が再入的に次データを流しても誤読しないため`
-  - `// codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）`
+  - `// browser サブパスからブラウザ安全に import（root は node:net/node:tls を巻き込むため不可）`
+  - `// katakanaChar は katakana サブパスから（codec 経由だと DBCS 表が丸ごと付いてくる）`
 - **モジュール／コンポーネント横断の協調は「俯瞰コメント」を冒頭に置く**。個々の関数コメントだけだと
   読み手が全体像を掴めない箇所（例: `ScreenGrid`＝文字編集の真実 ↔ `EmulatorPane`＝フィールド間移動 が
   native caret を単一の真実として協調する、等）はファイル/セクション冒頭に数行の設計メモを残す。

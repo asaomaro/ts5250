@@ -8,7 +8,8 @@
  *       （jtopenlite は GRAPHIC を UTF-16 の CCSID でしか扱わず、純 DBCS を実装していない）。
  */
 import { CCSID300_FROM_UNICODE, CCSID300_TO_UNICODE } from "./ccsid300.js";
-import { ibm1399 } from "./tables/ibm1399.js";
+// **DBCS 部だけを名指しする。** `ibm1399.js`（合成モジュール）を経由すると SBCS 部も付いてくる。
+import { ibm1399Dbcs } from "./tables/ibm1399-dbcs.js";
 import type { DbcsPart, PureDbcsTable } from "./table-types.js";
 import type { Codec } from "./codec.js";
 
@@ -18,13 +19,13 @@ const REPLACEMENT = 0xfffd;
  * CCSID 16684。
  *
  * **新たに表を持たない**——CCSID 1399 は「SBCS 5123 ＋ DBCS 16684」という構成であり、
- * 既存 `ibm1399.ts` の DBCS 部が 16684 そのもの。ICU の ibm-16684_P110-2003.ucm と
+ * 既存 `ibm1399-dbcs.ts` が 16684 そのもの。ICU の ibm-16684_P110-2003.ucm と
  * 突き合わせて一致を確認済み（0x4260→U+2212 / 0x43A1→U+301C / subchar 0xFEFE ほか）。
  */
 export const ibm16684: PureDbcsTable = {
   ccsid: 16684,
   name: "ibm-16684 (from ibm-1399 DBCS part)",
-  part: ibm1399.dbcs
+  part: ibm1399Dbcs
 };
 
 /**

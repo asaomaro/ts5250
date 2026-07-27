@@ -36,9 +36,9 @@ import { TEXT_CCSIDS as catalogCcsids, ccsidLabel as catalogLabel } from "../src
  *
  * 外の利用者は現時点で次の 4 経路:
  *   - `@as400web/core`         … server の `pdf.ts` / `host-spools.ts`（`LogicalPage`）
- *   - `@as400web/core/codec`   … server の `host-dtaq.ts`（`codecForCcsid`）、
- *                                web-ui の `ScreenGrid.vue`（`katakanaChar`）
- *   - `@as400web/core/browser` … web-ui の `IfsPane.vue`（`TEXT_CCSIDS` / `ccsidLabel`）
+ *   - `@as400web/core/codec`   … server の `host-dtaq.ts`（`codecForCcsid`）
+ *   - `@as400web/core/browser` … web-ui の `IfsPane.vue`（`TEXT_CCSIDS` / `ccsidLabel`）、
+ *                                `ScreenGrid.vue`（`katakanaChar`）
  *   - `@as400web/ebcdic` 直接  … 本リポジトリ内の core（切り出し後の正規の経路）
  */
 describe("codec / SCS の再輸出（@as400web/core 経由の後方互換）", () => {
@@ -90,7 +90,9 @@ describe("codec / SCS の再輸出（@as400web/core 経由の後方互換）", (
     expect(codecFromSubpath(37).decode(Uint8Array.of(0xc1, 0xc2))).toBe("AB");
   });
 
-  it("`/codec` サブパスから katakanaChar が取れる（web-ui の ScreenGrid.vue が使う）", () => {
+  it("`/codec` サブパスから katakanaChar が取れる（後方互換。現在の利用側は無い）", () => {
+    // web-ui は `@as400web/core/browser` 経由に移した（表を引き込まないため。
+    // `20260726-ccsid-table-bundling`）。この経路は外部利用者のために残している。
     expect(katakanaFromSubpath).toBe(katakanaChar);
     // 0x81 は 37 では 'a'、930 の SBCS 部（カタカナ）では別字に化ける
     expect(katakanaFromSubpath(0x81)).not.toBe("a");

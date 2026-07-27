@@ -7,8 +7,11 @@
  *
  * ここを消したり `exports` を書き換えたりすると、既存の利用側が黙って壊れる:
  *   - `packages/server/src/host-dtaq.ts` — `codecForCcsid`
- *   - `packages/web-ui/src/components/ScreenGrid.vue` — `katakanaChar`
- *     （web-ui は root の `tsc -b` に含まれないので、全体ビルドでは検出できない）
+ *
+ * **ブラウザからはここを使わない。** この入口は CCSID 930/939/1399 の変換表を
+ * DBCS 部込みで引き込む（実測で web-ui のバンドルが約 1.1 MB 膨らむ）。
+ * 半角カナ表示だけが要る web-ui は `@as400web/core/browser` の `katakanaChar` を使う
+ * （`20260726-ccsid-table-bundling`）。ここの `katakanaChar` は後方互換のために残してある。
  *
  * **`export *` は使わない。** 再輸出を機械的に広げると、何が外に出ているのかが
  * 目視できなくなる——`As400Error` の改名時に re-export の一括置換で旧名が外へ出なく

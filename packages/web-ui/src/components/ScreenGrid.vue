@@ -37,14 +37,17 @@ import {
   offsetOfPos,
   type FieldSlice
 } from "../composables/fieldSlices.js";
-// codec サブパスからブラウザ安全に import（root は pino/node 依存を巻き込むため不可）
-import { katakanaChar } from "@as400web/core/codec";
+// browser サブパスからブラウザ安全に import（root は node 依存を巻き込むため不可）。
+// **katakanaChar もここから取る。** 以前は `@as400web/core/codec` から引いていたが、
+// あの入口は CCSID 930/939 の変換表を DBCS 部込みで持ち込む——実測で本番バンドルが
+// 約 600 KB 膨らんでいた。実際に要るのは 930 の SBCS 部 256 要素だけ。
 import {
   isAttrSentinel,
   isRawSentinel,
   attrSentinelByte,
   stripSentinels,
-  decodeAttribute
+  decodeAttribute,
+  katakanaChar
 } from "@as400web/core/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する

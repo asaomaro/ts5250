@@ -66,12 +66,20 @@ describe("@as400web/ebcdic/catalog は変換表を引き込まない", () => {
   });
 
   it("対照: root（index.ts）からは表に到達する＝検査が実際に効いている", () => {
+    // 混在 CCSID は SBCS 部 / DBCS 部 / 合成の 3 モジュールに割ってある
+    // （`20260726-ccsid-table-bundling`）。バレルからは全部に到達するのが正しい。
     const files = [...reachableFrom("index.ts").keys()].map(rel);
     expect(files.filter((f) => f.startsWith("tables/")).sort()).toEqual([
+      "tables/ibm1399-dbcs.ts",
+      "tables/ibm1399-sbcs.ts",
       "tables/ibm1399.ts",
       "tables/ibm273.ts",
       "tables/ibm37.ts",
+      "tables/ibm930-dbcs.ts",
+      "tables/ibm930-sbcs.ts",
       "tables/ibm930.ts",
+      "tables/ibm939-dbcs.ts",
+      "tables/ibm939-sbcs.ts",
       "tables/ibm939.ts"
     ]);
   });
