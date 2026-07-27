@@ -13,6 +13,10 @@
       "types": "./dist/codec.d.ts",
       "default": "./dist/codec.js"
     },
+    "./katakana": {
+      "types": "./dist/katakana.d.ts",
+      "default": "./dist/katakana.js"
+    },
     "./catalog": {
       "types": "./dist/catalog.d.ts",
       "default": "./dist/catalog.js"

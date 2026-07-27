@@ -10,7 +10,8 @@
  * | 入口 | 中身 | 用途 |
  * |---|---|---|
  * | `@as400web/ebcdic` | 全部 | サーバー側・使う範囲が広いとき |
- * | `@as400web/ebcdic/codec` | SBCS/DBCS の変換だけ（表は入る） | 変換だけが要るとき |
+ * | `@as400web/ebcdic/codec` | SBCS/DBCS の変換だけ（**5 表すべて入る**） | 変換だけが要るとき |
+ * | `@as400web/ebcdic/katakana` | `katakanaChar` だけ（**930 の SBCS 部のみ**） | ブラウザの半角カナ表示 |
  * | `@as400web/ebcdic/catalog` | CCSID の一覧だけ（**表ゼロ**） | ブラウザの選択 UI |
  *
  * バレル経由だと bundler の解析が及ばず、要らない部分まで残ることがある——実測で

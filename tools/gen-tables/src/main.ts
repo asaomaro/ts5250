@@ -34,8 +34,13 @@ for (const t of SBCS_TARGETS) {
   writeFileSync(join(outDir, t.out), emitSbcsTable(ucm, { ccsid: t.ccsid, exportName: t.exportName, sourceFile: t.file }));
   process.stderr.write(`generated ${t.out} (SBCS, ${ucm.entries.length} mappings)\n`);
 }
+// 混在 CCSID は **3 ファイル**に割って書き出す（SBCS 部 / DBCS 部 / 合成）。
+// SBCS 部の 256 要素しか要らない利用者に DBCS 部 98% を運ばせないため（emit-stateful.ts の JSDoc）。
 for (const t of DBCS_TARGETS) {
   const ucm = parseUcm(readFileSync(join(toolRoot, "ucm", t.file), "utf8"));
-  writeFileSync(join(outDir, t.out), emitStatefulTable(ucm, { ccsid: t.ccsid, exportName: t.exportName, sourceFile: t.file }));
-  process.stderr.write(`generated ${t.out} (DBCS, ${ucm.entries.length} mappings)\n`);
+  const mods = emitStatefulTable(ucm, { ccsid: t.ccsid, exportName: t.exportName, sourceFile: t.file });
+  writeFileSync(join(outDir, `${t.exportName}-sbcs.ts`), mods.sbcs);
+  writeFileSync(join(outDir, `${t.exportName}-dbcs.ts`), mods.dbcs);
+  writeFileSync(join(outDir, t.out), mods.index);
+  process.stderr.write(`generated ${t.exportName}-{sbcs,dbcs}.ts + ${t.out} (DBCS, ${ucm.entries.length} mappings)\n`);
 }

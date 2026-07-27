@@ -15,8 +15,10 @@ FORCE_BUILD=0
 
 command -v node >/dev/null 2>&1 || { echo "Node.js (>=20) が必要です" >&2; exit 1; }
 
-# ワークスペース依存
-if [ ! -d node_modules ]; then
+# ワークスペース依存（未取得時 or ロックファイルが node_modules より新しいとき）。
+# 「node_modules があるか」だけでは、ワークスペースが増えた版を pull したときに
+# 新パッケージのリンクが無いまま進んでビルドが落ちる（start.sh と同じ理由。同じ判定にする）。
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   echo "==> npm install"
   npm install
 fi

@@ -204,12 +204,13 @@ const DBCS_TABLES: ReadonlyMap<number, StatefulTable> = new Map([
 ]);
 
 /**
- * 生 EBCDIC バイトをカタカナ SBCS（CCSID 930 の SBCS 部）で再解釈する。
- * ACS の表示コード切替（半角カナ⇔英小文字）用。英小文字位置がカタカナに化ける。
+ * カタカナ SBCS の再解釈は **`katakana.ts` に分離済み**（`@as400web/ebcdic/katakana`）。
+ * ここからの再輸出は、この入口の公開面を変えないためだけに在る。
+ *
+ * **ブラウザから使う側は `@as400web/ebcdic/katakana` を直接指すこと。**
+ * この `codec.js` は 5 表すべてを静的 import するので、経由すると表が丸ごと付いてくる。
  */
-export function katakanaChar(byte: number): string {
-  return String.fromCharCode(ibm930.sbcs.ebcdicToUnicode[byte & 0xff] ?? 0xfffd);
-}
+export { katakanaChar } from "./katakana.js";
 
 /** CCSID → codec。37=SBCS、930/939/1399（＋エイリアス）=DBCS */
 export function codecForCcsid(ccsid: number): Codec {

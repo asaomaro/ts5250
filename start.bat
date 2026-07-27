@@ -42,8 +42,23 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Install dependencies (only when missing)
-if not exist node_modules (
+rem Install dependencies (when missing, or when the lockfile is newer than node_modules).
+rem
+rem Checking only for node_modules is not enough: pulling a revision that adds a workspace
+rem leaves the old node_modules in place without a link for the new package, and the build
+rem then fails with "Cannot find module '@as400web/...'" (this actually happened when
+rem packages/ebcdic and packages/scs were added). npm rewrites node_modules/.package-lock.json
+rem on every install, so a newer package-lock.json means the tree is stale.
+rem PowerShell is used only for the timestamp comparison (present on every supported Windows).
+set "DEPS_STALE="
+if not exist node_modules set "DEPS_STALE=1"
+if not exist node_modules\.package-lock.json set "DEPS_STALE=1"
+rem Kept on one line on purpose: a "^" continuation inside for /f is a common batch pitfall.
+rem The expression uses -gt (not ">") so cmd does not treat it as a redirection.
+if not defined DEPS_STALE (
+  for /f %%s in ('powershell -NoProfile -Command "if ((Get-Item package-lock.json).LastWriteTimeUtc -gt (Get-Item node_modules/.package-lock.json).LastWriteTimeUtc) { 1 } else { 0 }"') do if "%%s"=="1" set "DEPS_STALE=1"
+)
+if defined DEPS_STALE (
   echo ==^> npm install
   call npm install
 )
