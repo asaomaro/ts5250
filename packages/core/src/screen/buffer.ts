@@ -459,7 +459,12 @@ export class ScreenBuffer {
         s += !dbcs && c.char === UNDISPLAYABLE && c.rawByte !== undefined
           ? rawSentinel(c.rawByte)
           : c.char;
-      } else if (c?.type === "attr") s += dbcs ? " " : attrSentinel(c.byte);
+      // **埋め込み属性はセンチネルで返す（DBCS 欄も同じ）。**
+      // 空白で返すと `setFieldValue` の書き戻しでただの文字セルに潰され、
+      // 送信データからも制御コードが落ちる＝**利用者のソースが書き換わる**。
+      // 送信側（read-response）はセンチネルを生バイト 1 つとして書き、前後を別 run で
+      // encode するので、DBCS 欄でも SO/SI の整合は保たれる（属性は SBCS モードの 1 バイト）。
+      } else if (c?.type === "attr") s += attrSentinel(c.byte);
       else s += " ";
     }
     return s.replace(/ +$/, "");
@@ -575,6 +580,9 @@ export class ScreenBuffer {
           rowCells.push({
             char: " ",
             kind: "attr",
+            // **属性バイトを載せる。** これが無いと web-ui が編集の種値を作るときに
+            // 属性をセンチネルへ戻せず、桁を空白で潰してしまう（logicalFromCells）。
+            rawByte: cell.byte,
             color: attr.color,
             reverse: false,
             underline: false,

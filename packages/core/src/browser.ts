@@ -56,7 +56,10 @@ export {
   isRawSentinel,
   attrSentinelByte,
   sentinelByte,
-  stripSentinels
+  stripSentinels,
+  // バイト→センチネル（逆方向）。web-ui が編集の種値を作るときに、セルの属性バイトを
+  // 値の中の 1 文字へ戻すために要る（これが無いと属性が空白に潰れて送信で失われる）
+  attrSentinel
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
 export type { ScreenColor } from "./screen/types.js";

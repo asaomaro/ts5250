@@ -45,6 +45,7 @@ import {
   isAttrSentinel,
   isRawSentinel,
   attrSentinelByte,
+  attrSentinel,
   stripSentinels,
   decodeAttribute,
   katakanaChar
@@ -680,9 +681,13 @@ function logicalFromCells(f: Field): string {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
       if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
-      // **埋め込み属性は 1 桁の空白として残す**（桁ずれ防止・core の SBCS fieldValue と同じ扱い）。
-      // 落とすと以降が 1 桁ずつ左へずれる（お書きの「SO/SI と違い無視されてずれる」の原因）。
-      else if (cell.kind === "attr") s += " ";
+      // **埋め込み属性はセンチネルとして残す**（core の fieldValue と同じ扱い）。
+      // 空白にすると、この値を編集して送り返した時点で core の setFieldValue が
+      // ただの文字セルとして書き戻し、**属性が消えてホストのソースから制御コードが落ちる**。
+      // 落とす（何も足さない）のは論外で、以降が 1 桁ずつ左へずれる。
+      // 既定は 0x20（通常・緑）。**0 にしてはいけない**——属性センチネルの範囲は 0x20–0x3F で、
+      // 0x00 は「生バイトセンチネル」と解釈され、書き戻しで属性セルにならない（静かに劣化する）。
+      else if (cell.kind === "attr") s += attrSentinel(cell.rawByte ?? 0x20);
       // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
