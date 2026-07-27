@@ -57,7 +57,7 @@ export function dbcsByteLength(value: string): number {
       bytes += 1;
       continue;
     }
-    if (isFullWidth(ch)) {
+    if (isWideForDbcs(ch)) {
       if (!inDbcs) {
         bytes += 1; // SO（ラン開始）
         inDbcs = true;
@@ -75,6 +75,27 @@ export function dbcsByteLength(value: string): number {
   return bytes;
 }
 
+
+/**
+ * **DBCS の桁・SO/SI 計算で「全角」とみなすか。**
+ *
+ * `isFullWidth` は私用領域（U+E000–F8FF）を**外字＝全角**として含む。これは本物の外字には
+ * 正しいが、**センチネル（U+E000–E0FF）も私用領域に居る**ため、そのまま渡すと
+ * 1 バイトを運ぶだけの印が全角文字として扱われ、SO/SI で囲まれ桁もずれる。
+ *
+ * センチネルは「1 バイト・1 桁・表示は空白」。列ビュー・送信バイト長・桁送りの
+ * すべてでこの判定を使い、**私用領域の罠を 1 箇所に閉じ込める**
+ * （同じ取り違えを 3 度繰り返したため。displayCols / dbcsByteLength / 列ビュー）。
+ */
+export function isWideForDbcs(ch: string): boolean {
+  return !isRawSentinel(ch) && isFullWidth(ch);
+}
+
+/** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
+export function viewChar(ch: string): string {
+  return isRawSentinel(ch) ? " " : ch;
+}
+
 /**
  * 純論理値（SBCS＋DBCS、SO/SI 無し）を「列ビュー」表示文字列へ変換する。
  * DBCS 連続ランの前に SO、後ろに SI を**半角スペース 1 個**として挿入する（ホスト表示と同じ桁配置）。
@@ -85,7 +106,7 @@ export function columnView(logical: string, soMark = " ", siMark = " "): string 
   let out = "";
   let inDbcs = false;
   for (const ch of logical) {
-    const wide = isFullWidth(ch);
+    const wide = isWideForDbcs(ch);
     if (wide && !inDbcs) {
       out += soMark; // SO（ラン開始）
       inDbcs = true;
@@ -93,7 +114,7 @@ export function columnView(logical: string, soMark = " ", siMark = " "): string 
       out += siMark; // SI（ラン終了）
       inDbcs = false;
     }
-    out += ch;
+    out += viewChar(ch); // センチネルは空白（制御コードを見せない）
   }
   if (inDbcs) out += siMark; // 末尾 SI
   return out;
@@ -130,7 +151,7 @@ export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): Dbc
   let inDbcs = false;
   const logToView: number[] = []; // logToView[li] = logical[li] の文字が入る view インデックス
   for (const ch of logical) {
-    const wide = isFullWidth(ch);
+    const wide = isWideForDbcs(ch);
     if (wide && !inDbcs) {
       view += soMark; // SO
       inDbcs = true;
@@ -139,7 +160,7 @@ export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): Dbc
       inDbcs = false;
     }
     logToView.push(view.length);
-    view += ch;
+    view += viewChar(ch); // センチネルは空白（桁は保つが制御コードは見せない）
   }
   if (inDbcs) view += siMark; // 末尾 SI
   const len = logToView.length;
@@ -165,14 +186,14 @@ export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): Dbc
   };
   const columnsBefore = (vc: number): number => {
     let cols = 0;
-    for (const ch of view.slice(0, vc)) cols += isFullWidth(ch) ? 2 : 1;
+    for (const ch of view.slice(0, vc)) cols += isWideForDbcs(ch) ? 2 : 1;
     return cols;
   };
   const viewAtColumn = (col: number): number => {
     let c = 0;
     let i = 0;
     for (const ch of view) {
-      const w = isFullWidth(ch) ? 2 : 1;
+      const w = isWideForDbcs(ch) ? 2 : 1;
       if (col < c + w) return i; // 全角の後半桁は前半へ丸まる（全角の途中には止まれない）
       c += w;
       i++;
@@ -211,14 +232,14 @@ export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): Dbc
 export function columnViewLayout(view: string): DbcsViewLayout {
   const columnsBefore = (vc: number): number => {
     let cols = 0;
-    for (const ch of view.slice(0, vc)) cols += isFullWidth(ch) ? 2 : 1;
+    for (const ch of view.slice(0, vc)) cols += isWideForDbcs(ch) ? 2 : 1;
     return cols;
   };
   const viewAtColumn = (col: number): number => {
     let c = 0;
     let i = 0;
     for (const ch of view) {
-      const w = isFullWidth(ch) ? 2 : 1;
+      const w = isWideForDbcs(ch) ? 2 : 1;
       if (col < c + w) return i;
       c += w;
       i++;

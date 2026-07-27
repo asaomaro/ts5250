@@ -186,3 +186,41 @@ describe("dbcsByteLength とセンチネル", () => {
     expect(dbcsByteLength("設" + ATTR_SENT + "計")).toBe(9);
   });
 });
+
+/**
+ * **列ビューでセンチネルを全角扱いしない。**
+ *
+ * `isFullWidth` は私用領域（U+E000–F8FF）を外字＝全角として含むが、
+ * センチネルも私用領域に居る。列ビュー構築でこれを全角とみなすと
+ *   - センチネルの前に SO が入り、`{` の桁が本来より前へずれる
+ *   - センチネル自体が描画されて**制御コードが豆腐で見える**
+ * という実機報告どおりの壊れ方をする（PR #173/#174 で DBCS 欄の論理値に
+ * センチネルが載るようになった副作用）。
+ */
+describe("列ビューとセンチネル", () => {
+  const ATTR = String.fromCharCode(0xe028); // 属性 0x28
+
+  it("センチネルの前後に SO/SI を入れない", () => {
+    // A X [属性] 設計 C D → 属性は SBCS なので SO は全角の直前に来る
+    const v = columnView("AX" + ATTR + "設計CD", "{", "}");
+    expect(v).toBe("AX {設計}CD");
+  });
+
+  it("センチネルは空白 1 桁として列ビューに出る（制御コードを見せない）", () => {
+    const v = columnView("AX" + ATTR + "CD", "{", "}");
+    expect(v).toBe("AX CD");
+    expect(v).not.toContain(ATTR);
+  });
+
+  it("dbcsViewLayout でも桁と SO/SI の位置が同じ", () => {
+    const lay = dbcsViewLayout("AX" + ATTR + "設計CD", "{", "}");
+    expect(lay.view).toBe("AX {設計}CD");
+    expect(lay.view).not.toContain(ATTR);
+    // 桁数: A X 属性 { 設 計 } C D = 1+1+1+1+2+2+1+1+1 = 11
+    expect(lay.columns).toBe(11);
+  });
+
+  it("センチネルが無い場合は従来どおり", () => {
+    expect(columnView("AB設計CD", "{", "}")).toBe("AB{設計}CD");
+  });
+});
