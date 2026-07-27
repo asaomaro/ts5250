@@ -449,14 +449,21 @@ export class ScreenBuffer {
     }
     // **SBCS 欄の埋め込み属性はセンチネル文字で返す**（値の中で識別・移動できるように）。
     // DBCS 欄は SO/SI・2 バイトの都合でセンチネルを混ぜると送信エンコードが壊れるため空白のまま。
-    const dbcs = field.dbcsType !== undefined;
+    // **DBCS 欄かどうかでの分岐はもう無い。** 属性も生バイトもセンチネルで返し、
+    // 送信側（read-response）が生バイト 1 つとして書き戻す——これが round-trip の要。
     let s = "";
     for (let i = 0; i < field.length; i++) {
       const c = this.cells[field.startAddr + i];
       if (c?.type === "char") {
-        // **表示できないバイトもセンチネルで返す**。U+FFFD のまま返すと、その欄を編集して
-        // 送信した時点でエンコード不能となり SUB（0x3F）に化けて元のデータを壊す。
-        s += !dbcs && c.char === UNDISPLAYABLE && c.rawByte !== undefined
+        // **表示できないバイトもセンチネルで返す（DBCS 欄も同じ）**。U+FFFD のまま返すと、
+        // その欄を編集して送信した時点でエンコード不能となり SUB（0x3F）に化けて元のデータを壊す。
+        //
+        // **DBCS 欄を除外してはいけない。** 編集後の DBCS 欄は `setFieldValue` によって
+        // 全セルが「生バイトを持つ SBCS セル」になっており（構造セルが無いのでここへ来る）、
+        // 除外すると SO/SI・全角のバイトがそろって U+FFFD → SUB に化ける。
+        // 実機の SEU（TESTLIB/QJPNTEST）で確認: `AB<attr>SO 設通 SI CD` を 1 文字編集して
+        // 保存すると `3F E7 28 3F 3F …` になり、**日本語が全部潰れた**。
+        s += c.char === UNDISPLAYABLE && c.rawByte !== undefined
           ? rawSentinel(c.rawByte)
           : c.char;
       // **埋め込み属性はセンチネルで返す（DBCS 欄も同じ）。**
