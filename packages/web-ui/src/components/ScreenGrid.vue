@@ -229,35 +229,40 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
   // decodeAttribute に渡すと全部緑になる。X'FF'（表示装置の既定）と未知の値は白に倒す。
   const color = GRID_COLOR[g.color] ?? "white";
   const cls = `grid-line c-${color} ${gridLineClass(g.lineStyle)}`;
-  const r1 = g.row;
-  const c1 = g.col;
-  const r2 = g.row + Math.max(0, g.height - 1);
-  const c2 = g.col + Math.max(0, g.width - 1);
-  const hLine = (row: number): Record<string, string> => ({
-    left: c1 - 1 + "ch",
-    top: (row - 1) * 1.25 + "em",
-    width: c2 - c1 + 1 + "ch"
+  // **罫線はセルの中ではなく「セルの境界」に引く。**
+  // 境界は画面原点から数えたセル数で表す（行 r の上端＝r-1、下端＝r）。
+  // 箱の下辺は**最終行の下端**＝ row+height、右辺は**最終桁の右端**＝ col+width。
+  // ここを行番号・桁番号のまま置くと下辺と右辺が 1 つ内側に寄り、
+  // 辺の長さ（width/height）だけが正しいので**箱が閉じない**（ACS との比較で判明）。
+  const top = g.row - 1;
+  const left = g.col - 1;
+  const bottom = top + Math.max(1, g.height);
+  const right = left + Math.max(1, g.width);
+  const hLine = (bound: number): Record<string, string> => ({
+    left: left + "ch",
+    top: bound * 1.25 + "em",
+    width: right - left + "ch"
   });
-  const vLine = (col: number): Record<string, string> => ({
-    left: col - 1 + "ch",
-    top: (r1 - 1) * 1.25 + "em",
-    height: (r2 - r1 + 1) * 1.25 + "em"
+  const vLine = (bound: number): Record<string, string> => ({
+    left: bound + "ch",
+    top: top * 1.25 + "em",
+    height: (bottom - top) * 1.25 + "em"
   });
   const push = (style: Record<string, string>, extra: string): void => {
     out.push({ style, cls: `${cls} ${extra}` });
   };
 
   // 単独の辺（0x00–0x03）
-  if (g.minorType === 0x00) push(hLine(r1), "grid-h");
-  else if (g.minorType === 0x01) push(hLine(r2), "grid-h");
-  else if (g.minorType === 0x02) push(vLine(c1), "grid-v");
-  else if (g.minorType === 0x03) push(vLine(c2), "grid-v");
+  if (g.minorType === 0x00) push(hLine(top), "grid-h");
+  else if (g.minorType === 0x01) push(hLine(bottom), "grid-h");
+  else if (g.minorType === 0x02) push(vLine(left), "grid-v");
+  else if (g.minorType === 0x03) push(vLine(right), "grid-v");
   else {
     // 箱（0x04–0x07）は四辺
-    push(hLine(r1), "grid-h");
-    push(hLine(r2), "grid-h");
-    push(vLine(c1), "grid-v");
-    push(vLine(c2), "grid-v");
+    push(hLine(top), "grid-h");
+    push(hLine(bottom), "grid-h");
+    push(vLine(left), "grid-v");
+    push(vLine(right), "grid-v");
     // **内部罫線は「本数と間隔」ではなく「行の間隔・桁の間隔」**（DDS の *TYPE の 2 引数）。
     // `(*TYPE HRZVRT 2 8)` は「2 行ごとに横罫・8 桁ごとに縦罫」で、
     // 箱が 6 行 × 40 桁なら横 2 本・縦 4 本になる（ACS の表示と一致）。
@@ -265,10 +270,10 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     const hRule = g.hRule;
     const vRule = g.vRule;
     if ((g.minorType === 0x05 || g.minorType === 0x07) && hRule > 0) {
-      for (let row = r1 + hRule; row < r2; row += hRule) push(hLine(row), "grid-h");
+      for (let b = top + hRule; b < bottom; b += hRule) push(hLine(b), "grid-h");
     }
     if ((g.minorType === 0x06 || g.minorType === 0x07) && vRule > 0) {
-      for (let col = c1 + vRule; col < c2; col += vRule) push(vLine(col), "grid-v");
+      for (let b = left + vRule; b < right; b += vRule) push(vLine(b), "grid-v");
     }
   }
   return out;
@@ -300,30 +305,64 @@ function gridLineClass(style: number): string {
  * ホスト指定がある窓は「実機と同じ見た目」がそこにあるので、
  * クライアント設定（windowFrame）の枠より**そちらを優先**する。
  * 指定が無い窓は従来どおりクライアント設定で描く。
+ *
+ * 枠のセル範囲は線で描くとき（`hostBorderSegments`）と同じ——**窓の外側**。
+ * 窓の本体に重ねると窓の中身を塗り潰してしまう。
  */
 function hostBorderRows(w: GuiWindow): { text: string; style: Record<string, string> }[] {
-  const b = w.border;
-  if (!b) return [];
-  // **色だけの指定なら既定の罫線文字を使う。** 実機で `WDWBORDER((*COLOR PNK))` を出すと
-  // ホストは色だけを送り文字を載せない。文字が無いから描かない、では
-  // 「ホストが枠を指定したのに枠が出ない」ことになる。ACS の既定と同じ字形で描く。
-  const c = b.chars ?? {
-    ulbc: ".", tbc: ".", urbc: ".", lbc: ":", rbc: ":", llbc: ":", bbc: ".", lrbc: ":"
-  };
-  const inner = Math.max(0, w.width - 2);
+  const c = w.border?.chars;
+  if (!c) return []; // 文字指定が無ければ線で描く（hostBorderSegments）
+  const height = w.height + 2; // 上下に 1 行ずつ
+  const inner = Math.max(0, w.width + 2); // 左右に 2 桁ずつ（うち左右 1 桁ずつが隅）
   const rows: { text: string; style: Record<string, string> }[] = [];
   const at = (row: number, text: string): void => {
     rows.push({
       text,
-      style: { left: w.col - 1 + "ch", top: (row - 1) * 1.25 + "em" }
+      style: { left: w.col + "ch", top: (row - 1) * 1.25 + "em" }
     });
   };
   at(w.row, c.ulbc + c.tbc.repeat(inner) + c.urbc);
-  for (let i = 1; i < w.height - 1; i++) {
+  for (let i = 1; i < height - 1; i++) {
     at(w.row + i, c.lbc + " ".repeat(inner) + c.rbc);
   }
-  if (w.height > 1) at(w.row + w.height - 1, c.llbc + c.bbc.repeat(inner) + c.lrbc);
+  at(w.row + height - 1, c.llbc + c.bbc.repeat(inner) + c.lrbc);
   return rows;
+}
+
+/**
+ * **文字指定の無い WDWBORDER を線の枠として描く。**
+ *
+ * 実機で `WDWBORDER((*COLOR PNK))` を出すとホストは**色だけ**を送り、罫線文字を載せない。
+ * 字形はこちらで決めるしかないが、ACS は**枠のセルを 1 桁ずつ埋める破線**で描く。
+ * 以前は `.` `:` の記号で描いていて、ACS の枠とはっきり違って見えていた。
+ *
+ * **枠は窓の外側に出る。** 5250 の窓は本体の上下に 1 行、左右に 2 桁を枠に使い、
+ * さらにその左に枠の属性バイトが 1 桁入る。ホストが送るのは属性桁を含む位置（SBA）
+ * なので、枠のセルは行 `row 〜 row+height+1`・桁 `col+1 〜 col+width+4` になる。
+ * 線はそのセルの**中心**を通る（ACS もそう描く）。
+ *
+ * 実機の `WINDOW(10 45 6 30)`（ホストは SBA 行 10 桁 44・30x6 を送る）で ACS を実測:
+ * 枠は行 10〜17・桁 45〜78 に出て、窓内の定数 `2 3'HOST BORDER'` が行 12 桁 49 に載る。
+ * どちらもこの式と一致する。
+ */
+function hostBorderSegments(w: GuiWindow): { style: Record<string, string>; cls: string }[] {
+  const b = w.border;
+  if (!b || b.chars) return []; // 文字指定があるならそちらを尊重する（hostBorderRows）
+  const color = decodeAttribute(b.cba).color;
+  // 枠セルの中心（画面原点から数えたセル数。行 n の中心 = n-0.5）
+  const top = w.row - 0.5;
+  const bottom = w.row + w.height + 0.5;
+  const left = w.col + 0.5;
+  const right = w.col + w.width + 3.5;
+  const cls = `win-frame gui-window-border c-${color}`;
+  const hStyle = { left: left + "ch", width: right - left + "ch" };
+  const vStyle = { top: top * 1.25 + "em", height: (bottom - top) * 1.25 + "em" };
+  return [
+    { cls: `${cls} win-frame-h`, style: { ...hStyle, top: top * 1.25 + "em" } },
+    { cls: `${cls} win-frame-h`, style: { ...hStyle, top: bottom * 1.25 + "em" } },
+    { cls: `${cls} win-frame-v`, style: { ...vStyle, left: left + "ch" } },
+    { cls: `${cls} win-frame-v`, style: { ...vStyle, left: right + "ch" } }
+  ];
 }
 
 /** ウィンドウ枠の位置＋寸法スタイル */
@@ -2583,6 +2622,7 @@ onBeforeUnmount(() => {
         v-for="w in gui.windows"
         :key="'w' + w.id"
         class="gui-window"
+        :class="{ 'no-outline': w.border !== undefined }"
         :style="windowStyle(w)"
         aria-hidden="true"
       >
@@ -2598,6 +2638,13 @@ onBeforeUnmount(() => {
           :style="ln.style"
           aria-hidden="true"
         >{{ ln.text }}</div>
+        <div
+          v-for="(seg, i) in hostBorderSegments(w)"
+          :key="'wl' + w.id + '-' + i"
+          :class="seg.cls"
+          :style="seg.style"
+          aria-hidden="true"
+        ></div>
       </template>
       <div
         v-for="b in gui.scrollBars"
@@ -2802,6 +2849,22 @@ onBeforeUnmount(() => {
 .grid-v.gl-double { border-left-style: double; border-left-width: 3px; }
 .grid-h.gl-thick { border-top-width: 2px; }
 .grid-v.gl-thick { border-left-width: 2px; }
+/* WDWBORDER（色だけの指定）: ACS と同じく「1 セルに 1 本」の破線で枠を描く。
+   線は枠セルの中心を通るので、破線の位相を半セルずらしてセルの頭から引く。 */
+.win-frame {
+  position: absolute;
+  pointer-events: none;
+}
+.win-frame-h {
+  height: 2px;
+  background: repeating-linear-gradient(to right, currentColor 0 0.9ch, transparent 0.9ch 1ch);
+  background-position: 0.5ch 0;
+}
+.win-frame-v {
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, currentColor 0 1.05em, transparent 1.05em 1.25em);
+  background-position: 0 0.625em;
+}
 /* WDWBORDER: ホスト指定の罫線文字で描く枠。文字なので等幅グリッドにそのまま乗る */
 .gui-window-border {
   position: absolute;
@@ -3175,6 +3238,12 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 6px color-mix(in srgb, var(--t-green) 30%, transparent);
   pointer-events: none;
   box-sizing: border-box;
+}
+/* ホストが WDWBORDER で枠を指定した窓は、その枠だけを出す（ACS と同じ）。
+   汎用の窓アウトラインを重ねると枠が二重になる。 */
+.gui-window.no-outline {
+  border-color: transparent;
+  box-shadow: none;
 }
 .gui-window-title {
   position: absolute;

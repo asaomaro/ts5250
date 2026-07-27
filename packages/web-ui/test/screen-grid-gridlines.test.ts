@@ -62,6 +62,33 @@ describe("グリッド罫線の描画", () => {
    * 6 行 × 40 桁の箱に「2 行ごと・8 桁ごと」で、ACS では横 2 本・縦 4 本になる。
    * 本数と読むと横 0 本・縦 2 本になり、ACS の表示と食い違う。
    */
+  /**
+   * **箱は閉じる。** 罫線はセルの中ではなく境界に引くので、
+   * 下辺は「最終行の下端」、右辺は「最終桁の右端」に来る。
+   * 行番号・桁番号のまま置くと下辺と右辺だけ 1 つ内側に寄り、
+   * 辺の長さは正しいのに箱が閉じない（ACS との比較で見つけた不具合）。
+   */
+  it("箱の下辺・右辺は最終行の下端・最終桁の右端に来る", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        // 行 5 桁 5 の 40 桁 × 8 行 → 下辺は行 12 の下端＝12em 相当、右辺は桁 44 の右端＝44ch
+        snapshot: snapWithGui({
+          gridLines: [grid({ minorType: 0x04, row: 5, col: 5, width: 40, height: 8 })]
+        }),
+        edits: new Map(), focused: true
+      }
+    });
+    const h = w.findAll(".grid-line.grid-h").map((l) => l.attributes("style"));
+    const v = w.findAll(".grid-line.grid-v").map((l) => l.attributes("style"));
+    expect(h[0]).toContain("top: 5em;");    // 上辺 = 行 5 の上端 (5-1)*1.25em
+    expect(h[1]).toContain("top: 15em;");   // 下辺 = 行 12 の下端 (5-1+8)*1.25em
+    expect(v[0]).toContain("left: 4ch;");   // 左辺 = 桁 5 の左端
+    expect(v[1]).toContain("left: 44ch;");  // 右辺 = 桁 44 の右端
+    // 辺の長さは上下・左右で閉じた矩形になる
+    expect(h[0]).toContain("width: 40ch;");
+    expect(v[0]).toContain("height: 10em;"); // 8 行 × 1.25em
+  });
+
   it("縦横罫線付きの箱（0x07）は間隔ぶん内部の線を引く", () => {
     const w = mount(ScreenGrid, {
       props: {
@@ -132,10 +159,13 @@ describe("WDWBORDER（ホスト指定の窓枠）", () => {
       props: { snapshot: snapWithGui({ windows: [win(border)] }), edits: new Map(), focused: true }
     });
     const rows = w.findAll(".gui-window-border");
-    expect(rows).toHaveLength(4); // height 4
-    expect(rows[0]!.text()).toBe(".----------.");   // 上辺（幅 12 = 隅 2 ＋ 内側 10）
-    expect(rows[1]!.text()).toBe("|          |");   // 側面
-    expect(rows[3]!.text()).toBe("'----------'");   // 下辺
+    // **枠は窓の外側**。窓 12x4 なら枠は 16 桁 × 6 行（上下に 1 行・左右に 2 桁）。
+    // 窓の本体に重ねると窓の中身を塗り潰してしまう
+    expect(rows).toHaveLength(6);
+    expect(rows[0]!.text()).toBe(".--------------.");   // 上辺（16 桁 = 隅 2 ＋ 内側 14）
+    expect(rows[1]!.text()).toBe("|              |");   // 側面
+    expect(rows[5]!.text()).toBe("'--------------'");   // 下辺
+    expect(rows[0]!.attributes("style")).toContain("left: 10ch;"); // 桁 11 の左端
   });
 
   it("枠の色は cba（カラー用属性バイト）から決まる", () => {
@@ -151,19 +181,29 @@ describe("WDWBORDER（ホスト指定の窓枠）", () => {
   });
 
   /**
-   * **色だけの指定（実機で実際に来る形）でも枠を描く。**
+   * **色だけの指定（実機で実際に来る形）は線の枠として描く。**
    * 実機で `WDWBORDER((*COLOR PNK))` を出すと、ホストは罫線文字を載せず
    * 色だけの 5 バイト構造を送ってくる。文字が無いから描かない、では
    * 「ホストが枠を指定したのに枠が出ない」ことになる。
+   * 字形はこちらで決めるしかないが、**ACS は線で枠を引く**ので線に揃える
+   * （`.` `:` の記号で描いていた頃は ACS の画面と見た目が食い違っていた）。
    */
-  it("色だけの指定なら既定の罫線文字をホストの色で描く", () => {
+  it("色だけの指定ならホストの色の線で枠を描く", () => {
     const w = mount(ScreenGrid, {
       props: { snapshot: snapWithGui({ windows: [win({ cba: 0x28 })] }), edits: new Map(), focused: true }
     });
-    const rows = w.findAll(".gui-window-border");
-    expect(rows).toHaveLength(4);
-    expect(rows[0]!.text()).toBe("............"); // 既定の字形
-    expect(rows[0]!.classes()).toContain("c-red"); // 色はホスト指定
+    const segs = w.findAll(".gui-window-border");
+    expect(segs).toHaveLength(4); // 上下左右
+    expect(segs.every((s) => s.text() === "")).toBe(true); // 文字ではなく線
+    expect(segs[0]!.classes()).toContain("c-red"); // 色はホスト指定
+    // **枠は窓の外側**。窓 row 5 col 10 の 12x4 なら枠セルは行 5〜10・桁 11〜26 で、
+    // 線はそのセルの中心を通る（上辺 4.5・下辺 9.5・左辺 10.5・右辺 25.5）
+    expect(segs[0]!.attributes("style")).toContain("top: 5.625em;");   // 4.5 * 1.25em
+    expect(segs[1]!.attributes("style")).toContain("top: 11.875em;");  // 9.5 * 1.25em
+    expect(segs[2]!.attributes("style")).toContain("left: 10.5ch;");
+    expect(segs[3]!.attributes("style")).toContain("left: 25.5ch;");
+    expect(segs[0]!.attributes("style")).toContain("width: 15ch;");    // 幅 12 ＋ 左右の枠 3
+    expect(segs[2]!.attributes("style")).toContain("height: 6.25em;"); // 高さ 4 ＋ 上下の枠 1
   });
 
   it("ホスト指定が無い窓には描かない（従来どおりクライアント設定の枠）", () => {
