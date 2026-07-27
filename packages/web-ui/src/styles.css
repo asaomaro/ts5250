@@ -127,6 +127,9 @@ body {
    input は既定背景を消す必要があるが、直に transparent と書くとこの反転を潰してしまう。 */
 .a-reverse { --cell-bg: var(--cell); background: var(--cell-bg); color: var(--crt); }
 .a-reverse .grid-link { color: var(--crt); }
+/* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
+   文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */
+.a-colsep { border-left: 1px solid currentColor; }
 .a-blink { animation: blink5250 1.1s steps(1) infinite; }
 @keyframes blink5250 {
   50% { opacity: 0.25; }

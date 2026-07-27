@@ -346,6 +346,9 @@ function cellClass(c: Cell): string {
   if (c.underline) cls.push("a-underline");
   if (c.reverse) cls.push("a-reverse");
   if (c.blink) cls.push("a-blink");
+  // DSPATR(CS)＝桁区切り。core は解析してセルに持っていたが、描画側が**素通ししていた**ため
+  // DSPF の区切り線が画面に一切出ていなかった（dspf-report (1)）。
+  if (c.columnSeparator) cls.push("a-colsep");
   return cls.join(" ");
 }
 
@@ -375,6 +378,7 @@ function attrByteClass(byte: number): string {
   if (a.underline) cls.push("a-underline");
   if (a.reverse) cls.push("a-reverse");
   if (a.blink) cls.push("a-blink");
+  if (a.columnSeparator) cls.push("a-colsep"); // cellClass と同じ体裁（片方だけ落とさない）
   return cls.join(" ");
 }
 
