@@ -254,10 +254,28 @@ export function detectWindowRect(snap: ScreenSnapshot, charOf: CharOf = defaultC
       if (!best || area > best.area) best = { top: t.r, bottom: bo.r, from: t.from, to: t.to, area };
     }
   }
-  // 罫線が見つからなければ**反転で閉じた矩形**を試す（ATNPGM の窓は枠を反転で描く）
-  if (!best) return detectReverseFrame(snap);
   // top/bottom は 0 始まりの行 index。内側は枠の 1 つ内なので +2 / そのまま（1 始まり換算）
-  return { row1: best.top + 2, row2: best.bottom, col1: best.from + 1, col2: best.to - 1 };
+  const border: WindowRect | null = best
+    ? { row1: best.top + 2, row2: best.bottom, col1: best.from + 1, col2: best.to - 1 }
+    : null;
+  // ATNPGM の窓は枠を反転で描く（罫線文字を使わない）。**両方を見て前面を選ぶ**。
+  const reverse = detectReverseFrame(snap);
+  if (border && reverse && containedIn(reverse, border)) return reverse;
+  return border ?? reverse;
+}
+
+/**
+ * `a` が `b` に完全に収まっているか。
+ *
+ * **窓が重なったときの前面判定に使う。** 前面の窓は後ろの窓の枠を上書きするので、枠が壊れた側は
+ * そもそも検出されない——実機で採った 5 パターンのうち**誤るのは「前面が後ろの内側に収まったとき」
+ * だけ**だった（Attn の窓がヘルプ窓の中に出ると、ヘルプの枠が生き残って後ろが選ばれる）。
+ * そのケースに限って内側を前面とみなす。
+ *
+ * 部分的な重なりは扱わない。どちらが前面か判断できないので、従来どおり罫線枠を返して挙動を変えない。
+ */
+function containedIn(a: WindowRect, b: WindowRect): boolean {
+  return a.row1 >= b.row1 && a.row2 <= b.row2 && a.col1 >= b.col1 && a.col2 <= b.col2;
 }
 
 /** 1 行から凡例を拾う（窓・宣言行の絞り込みは呼び出し側）。 */
