@@ -1148,7 +1148,9 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   const kana = katakanaViewActive(f);
   slicesOf(f).forEach((sl, i) => {
     const el = inputForSlice(f, i);
-    if (el) el.value = kana ? displayText(stripSentinels(sliceValue(f, i))) : dbcsSliceText(lay, sl);
+    // **フォーカス中もセンチネルは見せない。** 休止時はテンプレートが stripSentinels を通すが、
+    // ここは同期処理が直接代入するので、同じ処理を通さないと制御コードが豆腐で見える。
+    if (el) el.value = kana ? displayText(stripSentinels(sliceValue(f, i))) : stripSentinels(dbcsSliceText(lay, sl));
   });
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
@@ -1498,7 +1500,7 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
     // 未打鍵のカナ表示欄はフォーカスしてもカナ列ビューを保つ（caret は lay 由来。桁構造は一致）。
     el.value = katakanaViewActive(f)
       ? displayText(stripSentinels(sliceValue(f, sliceIdx)))
-      : dbcsSliceText(lay, r.s); // パディング込み＝未入力桁にも caret を置ける
+      : stripSentinels(dbcsSliceText(lay, r.s)); // パディング込み＝未入力桁にも caret を置ける
     const lc = lay.logicalAfter(r.from); // 先頭桁が SO なら、その次の論理境界から
     if (edit) edit.cursor = lc;
     const local = localCaret(r, lay.caretOf(lc));
