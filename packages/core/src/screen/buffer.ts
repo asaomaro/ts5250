@@ -193,8 +193,8 @@ export class ScreenBuffer {
         // 項目が既定を指していれば主構造の値へ、主構造も既定なら実線・白へ倒す。
         lineStyle: it.lineStyle !== GRID_DEFAULT ? it.lineStyle : parsed.defaultLine,
         color: it.color !== GRID_DEFAULT ? it.color : parsed.defaultColor,
-        lineRepeat: it.lineRepeat,
-        lineInterval: it.lineInterval
+        hRule: it.hRule,
+        vRule: it.vRule
       });
     }
   }

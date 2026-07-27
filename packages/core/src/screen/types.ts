@@ -121,9 +121,9 @@ export interface GuiGridLine {
   lineStyle: number;
   /** 色（属性バイト。0 なら既定色） */
   color: number;
-  /** 内部罫線の繰り返し数・間隔（0 なら内部罫線を引かない） */
-  lineRepeat: number;
-  lineInterval: number;
+  /** 横罫の行間隔・縦罫の桁間隔（0 なら引かない）。DDS `(*TYPE HRZVRT h v)` */
+  hRule: number;
+  vRule: number;
 }
 
 export interface GuiScrollBar {

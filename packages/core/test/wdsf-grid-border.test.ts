@@ -80,7 +80,7 @@ describe("DRAW/ERASE GRID LINES（0x60）", () => {
     expect(ev.grid.items).toHaveLength(1);
     expect(ev.grid.items[0]).toMatchObject({
       minorType: GRID_MINOR.HV_RULED_BOX, erase: false,
-      row: 3, col: 5, width: 40, height: 10, lineRepeat: 4, lineInterval: 2
+      row: 3, col: 5, width: 40, height: 10, hRule: 4, vRule: 2
     });
     expect(ev.grid.defaultLine).toBe(GRID_LINE_STYLE.DOUBLE);
   });
@@ -286,8 +286,8 @@ describe("実機のグリッド線バイト列", () => {
       row: 15, col: 5, width: 40, height: 6,
       color: 0x01,            // BLU
       lineStyle: 0x08,        // DSH
-      lineRepeat: 0x02,       // 横罫の間隔
-      lineInterval: 0x08      // 縦罫の間隔
+      hRule: 0x02,       // 横罫の間隔
+      vRule: 0x08      // 縦罫の間隔
     });
   });
 

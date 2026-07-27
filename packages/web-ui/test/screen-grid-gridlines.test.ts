@@ -33,7 +33,7 @@ function snapWithGui(gui: Partial<ScreenSnapshot["gui"]>): ScreenSnapshot {
 
 const grid = (o: Partial<GuiGridLine> = {}): GuiGridLine => ({
   id: 1, minorType: 0x04, row: 3, col: 5, width: 20, height: 6,
-  lineStyle: 0x00, color: 0x07, lineRepeat: 0, lineInterval: 0, ...o
+  lineStyle: 0x00, color: 0x07, hRule: 0, vRule: 0, ...o
 });
 
 describe("グリッド罫線の描画", () => {
@@ -56,15 +56,27 @@ describe("グリッド罫線の描画", () => {
     expect(lines[0]!.classes()).toContain("grid-h");
   });
 
-  it("縦横罫線付きの箱（0x07）は内部の線も引く", () => {
+  /**
+   * **内部罫線は「本数」ではなく「間隔」**（DDS `(*TYPE HRZVRT h v)` の h/v）。
+   * 実機の DSPF `(*POS (15 5 6 40)) (*TYPE HRZVRT 2 8)` は
+   * 6 行 × 40 桁の箱に「2 行ごと・8 桁ごと」で、ACS では横 2 本・縦 4 本になる。
+   * 本数と読むと横 0 本・縦 2 本になり、ACS の表示と食い違う。
+   */
+  it("縦横罫線付きの箱（0x07）は間隔ぶん内部の線を引く", () => {
     const w = mount(ScreenGrid, {
       props: {
-        snapshot: snapWithGui({ gridLines: [grid({ minorType: 0x07, lineRepeat: 2, lineInterval: 2 })] }),
+        // 実機と同じ: 行 15 桁 5、幅 40 深さ 6、横罫 2 行ごと・縦罫 8 桁ごと
+        snapshot: snapWithGui({
+          gridLines: [grid({ minorType: 0x07, row: 15, col: 5, width: 40, height: 6, hRule: 2, vRule: 8 })]
+        }),
         edits: new Map(), focused: true
       }
     });
-    // 四辺 4 本 ＋ 内部（横 2・縦 2）＝ 8 本
-    expect(w.findAll(".grid-line")).toHaveLength(8);
+    const lines = w.findAll(".grid-line");
+    // 四辺 4 本 ＋ 横罫 2 本（行 17・19）＋ 縦罫 4 本（桁 13・21・29・37）＝ 10 本
+    expect(lines).toHaveLength(10);
+    expect(lines.filter((l) => l.classes().includes("grid-h"))).toHaveLength(4); // 上下 2 ＋ 横罫 2
+    expect(lines.filter((l) => l.classes().includes("grid-v"))).toHaveLength(6); // 左右 2 ＋ 縦罫 4
   });
 
   it("線種が CSS クラスに反映される", () => {
@@ -157,6 +169,44 @@ describe("WDWBORDER（ホスト指定の窓枠）", () => {
   it("ホスト指定が無い窓には描かない（従来どおりクライアント設定の枠）", () => {
     const w = mount(ScreenGrid, {
       props: { snapshot: snapWithGui({ windows: [win()] }), edits: new Map(), focused: true }
+    });
+    expect(w.findAll(".gui-window-border")).toHaveLength(0);
+  });
+});
+
+/**
+ * **ホスト指定の枠がある窓に、クライアント設定の枠を重ねない。**
+ * ACS はホストが `WDWBORDER` で指定した枠だけを出す。上から自前の装飾枠を描くと
+ * 二重になり、実機と食い違う（利用者のスクリーンショット比較で判明）。
+ */
+describe("ホスト枠とクライアント枠の二重描画", () => {
+  const hostBorder = { cba: 0x28 };
+
+  it("ホスト枠のある窓では装飾枠（win-deco）を描かない", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: snapWithGui({ windows: [win(hostBorder)] }),
+        edits: new Map(), focused: true, windowFrame: "outline"
+      }
+    });
+    expect(w.findAll(".gui-window-border").length).toBeGreaterThan(0); // ホスト枠は出る
+    expect(w.find(".win-deco").exists()).toBe(false);                  // 装飾枠は出ない
+  });
+
+  it("ホスト枠が無ければ従来どおり装飾枠を使う", () => {
+    const cells: Cell[][] = [];
+    for (let r = 0; r < 24; r++) {
+      const row: Cell[] = [];
+      for (let c = 0; c < 80; c++) row.push(cell());
+      cells.push(row);
+    }
+    const snap = {
+      sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 },
+      keyboardLocked: false, cells, fields: [],
+      gui: { selectionFields: [], windows: [win()], scrollBars: [], gridLines: [] }
+    } as ScreenSnapshot;
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap, edits: new Map(), focused: true, windowFrame: "outline" }
     });
     expect(w.findAll(".gui-window-border")).toHaveLength(0);
   });

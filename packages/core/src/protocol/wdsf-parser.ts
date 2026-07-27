@@ -158,10 +158,10 @@ export interface ParsedGridItem {
   color: number;
   /** 線種（`GRID_DEFAULT` なら主構造の既定線種を使う） */
   lineStyle: number;
-  /** 内部罫線の繰り返し数（0 なら等間隔で引かない） */
-  lineRepeat: number;
-  /** 内部罫線の間隔 */
-  lineInterval: number;
+  /** 横罫の**行間隔**（0 なら引かない）。DDS `(*TYPE HRZVRT h v)` の h */
+  hRule: number;
+  /** 縦罫の**桁間隔**（0 なら引かない）。DDS の v */
+  vRule: number;
 }
 
 export interface ParsedGridLines {
@@ -411,8 +411,8 @@ function parseGridLines(r: ByteReader): ParsedGridLines {
       height: at(),
       color: at(),
       lineStyle: at(),
-      lineRepeat: at(),
-      lineInterval: at()
+      hRule: at(),
+      vRule: at()
     };
     items.push(item);
     r.skip(Math.max(0, end - r.offset)); // 未知の追加フィールドがあっても長さぶん進む

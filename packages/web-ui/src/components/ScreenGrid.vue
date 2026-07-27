@@ -182,11 +182,14 @@ function thumbStyle(bar: { horizontal: boolean; total: number; sliderPos: number
  * 拡張5250 の窓と文字で描かれた窓の**両方**を同じ関数が返すので、装飾側は種類を意識しない。
  * 設定が none のときは検出も走らせない（無駄な計算をしない）。
  */
-const decoWindow = computed<WindowRect | null>(() =>
-  props.windowFrame === "none" && props.windowBackdrop === "none"
-    ? null
-    : detectWindowRect(props.snapshot, displayChar)
-);
+const decoWindow = computed<WindowRect | null>(() => {
+  if (props.windowFrame === "none" && props.windowBackdrop === "none") return null;
+  // **ホストが WDWBORDER で枠を指定している窓には、クライアント設定の枠を重ねない。**
+  // ホスト指定こそ「実機と同じ見た目」なので、上から自前の枠を描くと二重になる
+  // （ACS はホストの枠だけを出す）。
+  if (props.snapshot.gui?.windows.some((w) => w.border !== undefined)) return null;
+  return detectWindowRect(props.snapshot, displayChar);
+});
 
 /** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */
 function winRectStyle(r: { row1: number; row2: number; col1: number; col2: number }): Record<string, string> {
@@ -255,22 +258,17 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     push(hLine(r2), "grid-h");
     push(vLine(c1), "grid-v");
     push(vLine(c2), "grid-v");
-    // 内部罫線。lineInterval 行/桁ごとに lineRepeat 本
-    const rep = g.lineRepeat;
-    const interval = g.lineInterval;
-    if (rep > 0 && interval > 0) {
-      if (g.minorType === 0x05 || g.minorType === 0x07) {
-        for (let i = 1; i <= rep; i++) {
-          const row = r1 + i * interval;
-          if (row < r2) push(hLine(row), "grid-h");
-        }
-      }
-      if (g.minorType === 0x06 || g.minorType === 0x07) {
-        for (let i = 1; i <= rep; i++) {
-          const col = c1 + i * interval;
-          if (col < c2) push(vLine(col), "grid-v");
-        }
-      }
+    // **内部罫線は「本数と間隔」ではなく「行の間隔・桁の間隔」**（DDS の *TYPE の 2 引数）。
+    // `(*TYPE HRZVRT 2 8)` は「2 行ごとに横罫・8 桁ごとに縦罫」で、
+    // 箱が 6 行 × 40 桁なら横 2 本・縦 4 本になる（ACS の表示と一致）。
+    // 本数と読むと横が 0 本・縦が 2 本になり、実機の見た目と食い違う。
+    const hRule = g.hRule;
+    const vRule = g.vRule;
+    if ((g.minorType === 0x05 || g.minorType === 0x07) && hRule > 0) {
+      for (let row = r1 + hRule; row < r2; row += hRule) push(hLine(row), "grid-h");
+    }
+    if ((g.minorType === 0x06 || g.minorType === 0x07) && vRule > 0) {
+      for (let col = c1 + vRule; col < c2; col += vRule) push(vLine(col), "grid-v");
     }
   }
   return out;
