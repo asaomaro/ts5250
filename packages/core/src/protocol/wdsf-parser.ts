@@ -27,7 +27,9 @@ export const WDSF_TYPE = {
 } as const;
 
 /**
- * グリッド線の線種（Wireshark `packet-tn5250.c` の `vals_tn5250_deg_lines` と同値）。
+ * グリッド線の線種。Wireshark `packet-tn5250.c` の `vals_tn5250_deg_lines` と、
+ * IBM の DDS リファレンス（`GRDATR` の Table 15「Valid line types」）が**完全に一致**する:
+ * SLD=X'00' / THK=X'01' / DBL=X'02' / DOT=X'03' / DSH=X'08' / THKDSH=X'09' / DBLDSH=X'0A' / NONE=X'FF'。
  * 0xFF は「端末の既定」＝こちらの既定（実線）に倒す。
  */
 export const GRID_LINE_STYLE = {
@@ -45,6 +47,35 @@ export const GRID_LINE_STYLE = {
  * グリッド線のマイナー構造の種別（同上 `UPPER_HORIZONTAL_LINE` 〜
  * `HORIZONTALLY_AND_VERTICALLY_RULED_BOX`）。この 8 種の間だけ構造が続く。
  */
+/**
+ * **グリッド線の色は 5250 の属性バイトではない。**
+ *
+ * IBM の DDS リファレンス（`GRDATR` の Table 14「Valid color values」）が定める
+ * 専用のコード。表示属性バイト（0x20–0x3F）とは別物なので、`decodeAttribute` に
+ * 渡してはいけない（渡すと緑一色になる）。X'FF' は「表示装置の既定」。
+ */
+export const GRID_COLOR: Readonly<Record<number, string>> = {
+  0x01: "blue",
+  0x02: "green",
+  0x03: "turquoise",
+  0x04: "red",
+  0x05: "pink",
+  0x06: "yellow",
+  0x07: "white",
+  0x08: "white",
+  0x09: "blue",
+  0x0a: "green",
+  0x0b: "turquoise",
+  0x0c: "red",
+  0x0d: "pink",
+  0x0e: "yellow",
+  0x0f: "white",
+  0x10: "white"
+};
+
+/** 「表示装置の既定を使う」を表す値（DDS リファレンスの NONE = X'FF'） */
+export const GRID_DEFAULT = 0xff;
+
 export const GRID_MINOR = {
   UPPER_HORIZONTAL: 0x00,
   LOWER_HORIZONTAL: 0x01,
@@ -123,8 +154,10 @@ export interface ParsedGridItem {
   width: number;
   /** 行数（縦の広がり） */
   height: number;
-  /** 属性バイト（0 なら主構造の既定色を使う） */
+  /** 色コード（`GRID_DEFAULT` なら主構造の既定色を使う） */
   color: number;
+  /** 線種（`GRID_DEFAULT` なら主構造の既定線種を使う） */
+  lineStyle: number;
   /** 内部罫線の繰り返し数（0 なら等間隔で引かない） */
   lineRepeat: number;
   /** 内部罫線の間隔 */
@@ -352,24 +385,37 @@ function parseGridLines(r: ByteReader): ParsedGridLines {
   const defaultLine = next(GRID_LINE_STYLE.SOLID);
 
   const items: ParsedGridItem[] = [];
-  // マイナー構造は 10 バイト固定。type が 0x00–0x07 でなくなったら打ち切る（原典と同じ）
-  while (r.remaining >= 10) {
+  // マイナー構造は**自分の長さを先頭に持つ**。type が 0x00–0x07 でなくなったら打ち切る（原典と同じ）。
+  //
+  // **長さを決め打たない。** Wireshark のディセクタは 10 フィールドで模しているが、
+  // 実機（）は `length=0x0b`＝**11 バイト**で送ってきた。増えているのは
+  // **項目ごとの線種**で、`(*LINTYP DSH)` を指定した箱の実データが
+  // `… 01 08 02 08`（色=BLU / 線種=DSH / 横罫 2 / 縦罫 8）と並ぶことから確定した。
+  // 長さに従って進めれば、フィールドが増えても位置がずれない。
+  while (r.remaining >= 2) {
+    const len = r.peek();
     const minorType = r.peekAt(1);
     if (minorType > GRID_MINOR.HV_RULED_BOX) break;
-    r.u8(); // length（10 固定。原典も読み飛ばすだけ）
+    if (len < 3 || len > r.remaining) break;
+    const end = r.offset + len;
+    r.u8(); // length
     r.u8(); // minor_type（peek 済み）
     const msFlag1 = r.u8();
-    items.push({
+    const at = (): number => (r.offset < end ? r.u8() : GRID_DEFAULT);
+    const item: ParsedGridItem = {
       minorType,
       erase: (msFlag1 & 0x80) !== 0, // bit0 = 最上位ビット（5250 のビット番号は MSB 起点）
-      row: r.u8(),
-      col: r.u8(),
-      width: r.u8(),
-      height: r.u8(),
-      color: r.u8(),
-      lineRepeat: r.u8(),
-      lineInterval: r.u8()
-    });
+      row: at(),
+      col: at(),
+      width: at(),
+      height: at(),
+      color: at(),
+      lineStyle: at(),
+      lineRepeat: at(),
+      lineInterval: at()
+    };
+    items.push(item);
+    r.skip(Math.max(0, end - r.offset)); // 未知の追加フィールドがあっても長さぶん進む
   }
   return { clearBuffer: (flag1 & 0x80) !== 0, defaultColor, defaultLine, items };
 }

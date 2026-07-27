@@ -33,7 +33,7 @@ function snapWithGui(gui: Partial<ScreenSnapshot["gui"]>): ScreenSnapshot {
 
 const grid = (o: Partial<GuiGridLine> = {}): GuiGridLine => ({
   id: 1, minorType: 0x04, row: 3, col: 5, width: 20, height: 6,
-  lineStyle: 0x00, color: 0x20, lineRepeat: 0, lineInterval: 0, ...o
+  lineStyle: 0x00, color: 0x07, lineRepeat: 0, lineInterval: 0, ...o
 });
 
 describe("グリッド罫線の描画", () => {
@@ -74,11 +74,28 @@ describe("グリッド罫線の描画", () => {
     expect(w.find(".grid-line").classes()).toContain("gl-dashed");
   });
 
-  it("色は属性バイトから決まる", () => {
-    const w = mount(ScreenGrid, {
-      props: { snapshot: snapWithGui({ gridLines: [grid({ minorType: 0x00, color: 0x28 })] }), edits: new Map(), focused: true }
+  /**
+   * **グリッド線の色は 5250 の属性バイトではない。**
+   * DDS リファレンス（GRDATR の Table 14「Valid color values」）が定める専用コードで、
+   * BLU=X'01' GRN=X'02' CYAN=X'03' RED=X'04' … NONE=X'FF'。
+   * 属性バイトとして decodeAttribute に渡すと全部緑になってしまう。
+   */
+  it("色はグリッド専用の色コードから決まる", () => {
+    const red = mount(ScreenGrid, {
+      props: { snapshot: snapWithGui({ gridLines: [grid({ minorType: 0x00, color: 0x04 })] }), edits: new Map(), focused: true }
     });
-    expect(w.find(".grid-line").classes()).toContain("c-red");
+    expect(red.find(".grid-line").classes()).toContain("c-red");
+    const blue = mount(ScreenGrid, {
+      props: { snapshot: snapWithGui({ gridLines: [grid({ minorType: 0x00, color: 0x01 })] }), edits: new Map(), focused: true }
+    });
+    expect(blue.find(".grid-line").classes()).toContain("c-blue");
+  });
+
+  it("X'FF'（表示装置の既定）と未知の値は白に倒す", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapWithGui({ gridLines: [grid({ minorType: 0x00, color: 0xff })] }), edits: new Map(), focused: true }
+    });
+    expect(w.find(".grid-line").classes()).toContain("c-white");
   });
 
   it("グリッド線が無ければ何も描かない", () => {

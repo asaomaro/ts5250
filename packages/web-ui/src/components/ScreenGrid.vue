@@ -26,6 +26,7 @@ import {
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
+import { GRID_COLOR } from "@as400web/core/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
@@ -221,7 +222,10 @@ function smokeRects(r: WindowRect): Record<string, string>[] {
  */
 function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: string }[] {
   const out: { style: Record<string, string>; cls: string }[] = [];
-  const cls = `grid-line c-${decodeAttribute(g.color).color} ${gridLineClass(g.lineStyle)}`;
+  // **グリッド線の色は 5250 の属性バイトではない**（DDS リファレンス GRDATR Table 14 の専用コード）。
+  // decodeAttribute に渡すと全部緑になる。X'FF'（表示装置の既定）と未知の値は白に倒す。
+  const color = GRID_COLOR[g.color] ?? "white";
+  const cls = `grid-line c-${color} ${gridLineClass(g.lineStyle)}`;
   const r1 = g.row;
   const c1 = g.col;
   const r2 = g.row + Math.max(0, g.height - 1);

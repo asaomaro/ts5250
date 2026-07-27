@@ -1,5 +1,6 @@
 import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
+import { GRID_DEFAULT } from "../protocol/wdsf-parser.js";
 import type {
   ParsedScrollBar,
   ParsedGridLines,
@@ -188,8 +189,10 @@ export class ScreenBuffer {
         col: it.col,
         width: it.width,
         height: it.height,
-        lineStyle: parsed.defaultLine,
-        color: it.color !== 0 ? it.color : parsed.defaultColor,
+        // **0xFF は「表示装置の既定」**（DDS リファレンス Table 14/15 の NONE）。
+        // 項目が既定を指していれば主構造の値へ、主構造も既定なら実線・白へ倒す。
+        lineStyle: it.lineStyle !== GRID_DEFAULT ? it.lineStyle : parsed.defaultLine,
+        color: it.color !== GRID_DEFAULT ? it.color : parsed.defaultColor,
         lineRepeat: it.lineRepeat,
         lineInterval: it.lineInterval
       });

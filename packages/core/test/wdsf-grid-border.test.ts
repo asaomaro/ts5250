@@ -41,20 +41,25 @@ function gridBody(
   ];
 }
 
-/** マイナー構造 1 件（10 バイト） */
+/**
+ * マイナー構造 1 件（**11 バイト**）。
+ * 先頭の length に従って進む実装なので、長さもここで正しく載せる。
+ * 項目ごとの線種は Wireshark のディセクタには無く、**実機のバイト列から確定**した。
+ */
 function item(
   minorType: number,
-  o: Partial<{ erase: boolean; row: number; col: number; w: number; h: number; color: number; rep: number; interval: number }> = {}
+  o: Partial<{ erase: boolean; row: number; col: number; w: number; h: number; color: number; line: number; rep: number; interval: number }> = {}
 ): number[] {
   return [
-    10, // length
+    11, // length（自身を含む）
     minorType,
     o.erase === true ? 0x80 : 0x00, // ms_flag1 bit0 = 消去
     o.row ?? 5,
     o.col ?? 10,
     o.w ?? 20,
     o.h ?? 6,
-    o.color ?? 0x00,
+    o.color ?? 0xff,
+    o.line ?? 0xff,
     o.rep ?? 0,
     o.interval ?? 0
   ];
@@ -77,6 +82,7 @@ describe("DRAW/ERASE GRID LINES（0x60）", () => {
       minorType: GRID_MINOR.HV_RULED_BOX, erase: false,
       row: 3, col: 5, width: 40, height: 10, lineRepeat: 4, lineInterval: 2
     });
+    expect(ev.grid.defaultLine).toBe(GRID_LINE_STYLE.DOUBLE);
   });
 
   it("ms_flag1 bit0 で消去を表す", () => {
@@ -140,10 +146,19 @@ describe("ScreenBuffer のグリッド線状態", () => {
     expect(buf.snapshot("t", false).gui).toBeUndefined();
   });
 
-  it("項目の色が 0 なら主構造の既定色を使う", () => {
+  it("項目の色が既定（0xFF）なら主構造の既定色を使う", () => {
     const buf = new ScreenBuffer();
-    apply(buf, gridBody({ defaultColor: 0x22 }, [item(GRID_MINOR.PLAIN_BOX, { color: 0 })]));
-    expect(buf.snapshot("t", false).gui.gridLines[0]!.color).toBe(0x22);
+    apply(buf, gridBody({ defaultColor: 0x04 }, [item(GRID_MINOR.PLAIN_BOX, { color: 0xff })]));
+    expect(buf.snapshot("t", false).gui.gridLines[0]!.color).toBe(0x04);
+  });
+
+  it("項目が色・線種を指定していればそちらを使う", () => {
+    const buf = new ScreenBuffer();
+    apply(buf, gridBody({ defaultColor: 0x04, defaultLine: 0x00 },
+      [item(GRID_MINOR.PLAIN_BOX, { color: 0x01, line: 0x08 })]));
+    const g = buf.snapshot("t", false).gui.gridLines[0]!;
+    expect(g.color).toBe(0x01);
+    expect(g.lineStyle).toBe(0x08);
   });
 });
 
@@ -229,5 +244,60 @@ describe("実機が送る短い主構造", () => {
     if (ev.kind !== "grid-lines") return;
     expect(ev.grid.clearBuffer).toBe(true);
     expect(ev.grid.items).toHaveLength(0);
+  });
+});
+
+/**
+ * **実機（）が送ってきたグリッド線のバイト列そのもの。**
+ *
+ * DDS リファレンス（IBM `rzakcmst.pdf` の GRDBOX / GRDATR）の構文で DSPF をコンパイルし、
+ * 実際に表示させて捕捉した。**マイナー構造は `length=0x0b`＝11 バイト**で、
+ * Wireshark のディセクタが模す 10 フィールドより 1 つ多い——増えているのは
+ * **項目ごとの線種**で、`(*LINTYP DSH)` を指定した箱が `… 01 08 02 08`
+ * （色=BLU / 線種=DSH / 横罫 2 / 縦罫 8）と並ぶことから確定した。
+ * だから長さを決め打たず、**先頭の length に従って進む**。
+ */
+describe("実機のグリッド線バイト列", () => {
+  const parse = (bytes: number[]): ReturnType<typeof parseWdsf> =>
+    parseWdsf(Uint8Array.from(bytes), decode);
+
+  it("GRDBOX((*POS (5 5 8 40)) (*TYPE PLAIN)) — 既定色・既定線種", () => {
+    const ev = parse([0xd9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x04, 0x00,
+                      0x0b, 0x04, 0x00, 0x05, 0x05, 0x28, 0x08, 0xff, 0xff, 0xff, 0xff]);
+    if (ev.kind !== "grid-lines") throw new Error("kind");
+    expect(ev.grid.defaultColor).toBe(0x04); // GRDATR((*COLOR RED))
+    expect(ev.grid.defaultLine).toBe(0x00);  // (*LINTYP SLD)
+    expect(ev.grid.items).toHaveLength(1);
+    expect(ev.grid.items[0]).toMatchObject({
+      minorType: GRID_MINOR.PLAIN_BOX, erase: false,
+      row: 5, col: 5, width: 40, height: 8
+    });
+    // 項目側はすべて「表示装置の既定」
+    expect(ev.grid.items[0]!.color).toBe(0xff);
+    expect(ev.grid.items[0]!.lineStyle).toBe(0xff);
+  });
+
+  it("GRDBOX((*POS (15 5 6 40)) (*TYPE HRZVRT 2 8) (*COLOR BLU) (*LINTYP DSH))", () => {
+    const ev = parse([0xd9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x07, 0x00,
+                      0x0b, 0x07, 0x00, 0x0f, 0x05, 0x28, 0x06, 0x01, 0x08, 0x02, 0x08]);
+    if (ev.kind !== "grid-lines") throw new Error("kind");
+    expect(ev.grid.items[0]).toMatchObject({
+      minorType: GRID_MINOR.HV_RULED_BOX,
+      row: 15, col: 5, width: 40, height: 6,
+      color: 0x01,            // BLU
+      lineStyle: 0x08,        // DSH
+      lineRepeat: 0x02,       // 横罫の間隔
+      lineInterval: 0x08      // 縦罫の間隔
+    });
+  });
+
+  it("項目が既定を指していれば主構造の色・線種へ倒す", () => {
+    const buf = new ScreenBuffer();
+    const ev = parse([0xd9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x04, 0x00,
+                      0x0b, 0x04, 0x00, 0x05, 0x05, 0x28, 0x08, 0xff, 0xff, 0xff, 0xff]);
+    if (ev.kind === "grid-lines") buf.applyGridLines(ev.grid);
+    const g = buf.snapshot("t", false).gui.gridLines[0]!;
+    expect(g.color).toBe(0x04);    // GRDATR の RED
+    expect(g.lineStyle).toBe(0x00); // SLD
   });
 });
