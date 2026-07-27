@@ -23,7 +23,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist node_modules (
+rem Same staleness check as start.bat: node_modules alone does not tell whether a newly
+rem added workspace has been linked (see start.bat for the failure this prevents).
+set "DEPS_STALE="
+if not exist node_modules set "DEPS_STALE=1"
+if not exist node_modules\.package-lock.json set "DEPS_STALE=1"
+if not defined DEPS_STALE (
+  for /f %%s in ('powershell -NoProfile -Command "if ((Get-Item package-lock.json).LastWriteTimeUtc -gt (Get-Item node_modules/.package-lock.json).LastWriteTimeUtc) { 1 } else { 0 }"') do if "%%s"=="1" set "DEPS_STALE=1"
+)
+if defined DEPS_STALE (
   echo ==^> npm install
   call npm install
 )

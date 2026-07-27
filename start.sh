@@ -32,8 +32,16 @@ done
 
 command -v node >/dev/null 2>&1 || { echo "Node.js (>=20) が必要です" >&2; exit 1; }
 
-# 依存インストール（未取得時のみ）
-if [ ! -d node_modules ]; then
+# 依存インストール（未取得時 or ロックファイルが node_modules より新しいとき）。
+#
+# **「node_modules があるか」だけでは足りない。** ワークスペースが増えた版を pull すると、
+# 既存の node_modules は残っているのに新パッケージのシンボリックリンクが無い状態になり、
+# ビルドが `Cannot find module '@as400web/…'` で落ちる（実際に起きた。
+# packages/ebcdic・packages/scs を足したときに `./start.sh --build` が失敗した）。
+# npm は install のたびに node_modules/.package-lock.json を書くので、
+# package-lock.json の方が新しければ依存が古いと判断できる。依存追加全般に効く。
+# 最新状態なら npm install は 1〜2 秒で終わるため、判定が空振りしても実害は無い。
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   echo "==> npm install"
   npm install
 fi
