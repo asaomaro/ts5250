@@ -130,8 +130,18 @@ function reverseRuns(cells: readonly Cell[]): { from: number; to: number }[] {
  * 1. 上端: 途切れない反転の連なり（`MIN_REVERSE_FRAME` 桁以上）
  * 2. 下端: 2 行以上下に、**同じ桁範囲**の途切れない反転の連なり
  * 3. 側面: その間の**すべての行**で左右端の桁が両方とも反転
+ * 4. **内側: 反転でないセルが 1 つ以上ある（＝中が空いている）**
  *
- * 「上下 2 本の反転バー」だけでは 3 を満たさないので弾ける。上下端を完全一致にしているのは、
+ * 「上下 2 本の反転バー」だけでは 3 を満たさないので弾ける。
+ * **4 が要るのは、1〜3 が「全部が反転した塗り潰しブロック」でも成立してしまうから**——
+ * 全面反転なら上端も下端も途切れず、側面の 2 桁も当然反転している。枠として本質的なのは
+ * 中が空いていることで、見出しや選択行の強調が数行続くと実際に誤判定した（実機報告）。
+ *
+ * 4 は「**内側のどこかに** 1 つでも非反転があれば可」という緩い条件にしてある。
+ * 窓の中に**全幅の反転強調行**（選択中の行）が入るのは普通なので、
+ * 「内側の全行に非反転を要求する」と本物の窓を弾いてしまう。
+ *
+ * 上下端を完全一致にしているのは、
  * 反転枠は属性そのもので描かれるため桁がずれる理由が無いから（実機で確認）。
  * 罫線経路が重なり率で判定しているのは端の記号（`:`）の有無でずれるからで、事情が違う。
  *
@@ -157,6 +167,17 @@ function detectReverseFrame(snap: ScreenSnapshot): WindowRect | null {
           closed = isRev(r, t.from) && isRev(r, t.to);
         }
         if (!closed) continue;
+        // 4. 内側が空いていること。**塗り潰しブロックを弾く唯一の条件**なので外さない
+        let hollow = false;
+        for (let r = top + 1; r < bottom && !hollow; r++) {
+          for (let col = t.from + 1; col < t.to; col++) {
+            if (!isRev(r, col)) {
+              hollow = true;
+              break;
+            }
+          }
+        }
+        if (!hollow) continue;
         const area = (bottom - top) * (t.to - t.from);
         if (area > bestArea) {
           bestArea = area;

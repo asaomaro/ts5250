@@ -378,12 +378,59 @@ function attrByteClass(byte: number): string {
 }
 
 /**
- * オーバーレイに出す色付きラン。**値の中のセンチネル（＝埋め込み属性）で色を切り替える。**
- * センチネルは編集で桁と一緒に動くので、色も追従する。センチネル位置は新色の空白 1 桁。
- * 先頭色は欄の先頭セルの属性（seg.cls）から。
+ * その 1 文字が占める桁数。
+ *
+ * **センチネルは必ず 1 桁**（1 バイトを運ぶ印で、表示は空白 1 桁）。
+ * `isFullWidth` は私用領域（U+E000–F8FF）を外字＝全角として扱うので、
+ * センチネルをそのまま渡すと 2 桁と数えて桁がずれる——センチネルも私用領域に居るため。
+ *
+ * **この分岐は現在どの経路からも踏まれない**（定義上の保険）。DBCS 欄の休止表示は
+ * `dbcsSliceText` が列ビューを作る段階でセンチネルを空白へ潰しており、SBCS 欄の
+ * 値は既に欄長まで詰められているので末尾の追加詰めが 0 桁になる。
+ * それでも残すのは、**桁数の定義をここ 1 箇所に閉じ込める**ため——
+ * 上流が「センチネルを残したまま渡す」形に変わっても、桁がずれずに済む。
+ * 落ちるテストを書けないので、テストは置いていない。
+ */
+function displayCols(ch: string): number {
+  if (isRawSentinel(ch)) return 1; // 属性センチネルも含む（isRawSentinel は上位集合）
+  return isFullWidth(ch) ? 2 : 1;
+}
+
+/** 桁オフセットに掛かる色バンドの class（範囲外は undefined） */
+function classAtColumn(
+  bands: { start: number; len: number; cls: string }[],
+  col: number
+): string | undefined {
+  for (const b of bands) if (col >= b.start && col < b.start + b.len) return b.cls;
+  return undefined;
+}
+
+/**
+ * オーバーレイに出す色付きラン。色の出どころは**欄によって 2 通り**ある。
+ *
+ * **(A) 値にセンチネルがある欄（SBCS）**——値の中のセンチネル（＝埋め込み属性）で切り替える。
+ * センチネルは編集で桁と一緒に動くので、**色も編集に追従する**。センチネル位置は新色の空白 1 桁。
+ *
+ * **(B) 値にセンチネルが無い欄（DBCS。SEU のソース欄）**——セル由来の `colorBands` で塗る。
+ * core の `fieldValue` は DBCS 欄にセンチネルを載せない（SO/SI・2 バイトの都合で
+ * 混ぜると**送信エンコードが壊れる**ため）。値だけを見ると色情報がゼロなので、
+ * ここを (A) だけにすると**欄全体が先頭色 1 色になり、SEU の制御コードの色分けが消える**
+ * （実機で報告された不具合。センチネル方式へ移行したときの見落とし）。
+ *
+ * (B) は**ホストが描いた位置**の色なので、編集しても色は動かない。
+ * 「色が編集で少しずれる」より「色が全く出ない」方が悪い、という判断でこちらを採る。
+ * 値に色を載せられるようになれば、条件は自動的に (A) 側へ移る。
+ *
+ * 分岐を `dbcsType` ではなく**センチネルの有無**で書いているのはそのため——
+ * 判定したい事実は「値が色情報を持っているか」そのもの。
  */
 function overlayRuns(seg: Segment): { text: string; cls: string }[] {
-  const value = sliceValue(seg.field!, seg.slice ?? 0).padEnd(seg.width ?? 0, " ");
+  // **末尾の詰めは「文字数」ではなく「桁」で数える。** 全角 1 文字は 2 桁を占めるので、
+  // padEnd(文字数) だと全角のぶんだけ余計に埋まり、入力欄の表示値より長くなる（桁ずれ）。
+  const raw = sliceValue(seg.field!, seg.slice ?? 0);
+  let rawCols = 0;
+  for (const ch of raw) rawCols += displayCols(ch);
+  const value = raw + " ".repeat(Math.max(0, (seg.width ?? 0) - rawCols));
   const runs: { text: string; cls: string }[] = [];
   let cls = seg.cls; // 欄先頭の色（seg.cls = 先頭セルの cellClass）
   let text = "";
@@ -393,6 +440,23 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
       text = "";
     }
   };
+  if (![...value].some((ch) => isAttrSentinel(ch))) {
+    // (B) セル由来。**全角は 2 桁・センチネルは 1 桁**を占めるので、
+    // 文字ごとに桁を進めて色を引く（桁の数え方は displayCols に集約する）。
+    const bands = seg.colorBands ?? [];
+    let col = 0;
+    for (const ch of value) {
+      const at = classAtColumn(bands, col) ?? seg.cls;
+      if (at !== cls) {
+        push();
+        cls = at;
+      }
+      text += isRawSentinel(ch) ? " " : ch;
+      col += displayCols(ch);
+    }
+    push();
+    return runs;
+  }
   for (const ch of value) {
     if (isAttrSentinel(ch)) {
       push();

@@ -171,4 +171,55 @@ describe("入力欄の埋め込み属性（色替え）", () => {
     expect(w.find(".input-overlay").exists()).toBe(false);
     expect(w.find("input.grid-input").classes()).not.toContain("has-overlay");
   });
+
+  /**
+   * **DBCS 欄（SEU のソース欄）は値にセンチネルを持たない。**
+   *
+   * core の `fieldValue` は「SBCS 欄の埋め込み属性をセンチネルで返す。DBCS 欄は
+   * SO/SI・2 バイトの都合で従来どおり空白」という実装で、DBCS 欄には最初から
+   * センチネルが入らない（実測で確認）。
+   *
+   * それでも**セルの色は正しく変わっている**ので、色分けはセル由来のバンドから出す。
+   * これを見落として値由来だけにすると、欄全体が先頭色 1 色で塗られ、
+   * SEU の制御コードによる色分けが**消える**（実機で報告された不具合）。
+   */
+  it("値にセンチネルが無くてもセルの色が変われば色分けを出す（DBCS 欄・SEU ソース）", () => {
+    const snap = snapWithEmbeddedAttr();
+    // 値はセンチネル無し（DBCS 欄の fieldValue と同じ形。属性桁は空白）
+    snap.fields = [{ ...FIELD, dbcsType: "open", value: "ABC DEF" } as Field];
+    const w = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: true } });
+
+    const overlay = w.find(".input-overlay");
+    expect(overlay.exists()).toBe(true);
+    const spans = overlay.findAll("span");
+    // 緑 "ABC" と 赤 " DEF…" に分かれる（セルの色が col 13 から赤に変わるため）
+    expect(spans.some((sp) => sp.classes().includes("c-green"))).toBe(true);
+    expect(spans.some((sp) => sp.classes().includes("c-red"))).toBe(true);
+    const green = spans.find((sp) => sp.classes().includes("c-green"))!;
+    expect(green.element.textContent).toBe("ABC");
+
+    // 桁が保たれている（オーバーレイの連結＝入力欄の表示値）
+    const value = (w.find("input.grid-input").element as HTMLInputElement).value;
+    expect(spans.map((sp) => sp.element.textContent ?? "").join("")).toBe(value);
+  });
+
+  it("全角を含む DBCS 欄でも桁がずれない（全角 1 文字＝2 桁）", () => {
+    const snap = snapWithEmbeddedAttr();
+    const row = snap.cells[5]!;
+    // col 10-11 に全角 1 文字（lead+tail で 2 桁）、col 13 から赤
+    row[9] = cell("設", { color: "green", kind: "dbcs-lead" });
+    row[10] = cell("", { color: "green", kind: "dbcs-tail" });
+    // 値はセル（列ビュー）から作られるので、cells と辻褄の合う形にする
+    snap.fields = [{ ...FIELD, dbcsType: "open", value: "設C DEF" } as Field];
+    const w = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: true } });
+
+    const spans = w.find(".input-overlay").findAll("span");
+    const green = spans.find((sp) => sp.classes().includes("c-green"))!;
+    // 桁: 設=0,1 / C=2 / 属性(赤)=3。全角を 2 桁と数えれば緑は "設C" で切れる。
+    // 1 文字 1 桁と数えると属性桁まで緑に含まれて "設C " になり、赤の開始が 1 桁ずれる。
+    expect(green.element.textContent).toBe("設C");
+    const value = (w.find("input.grid-input").element as HTMLInputElement).value;
+    expect(spans.map((sp) => sp.element.textContent ?? "").join("")).toBe(value);
+  });
+
 });
