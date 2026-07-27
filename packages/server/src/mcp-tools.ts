@@ -15,7 +15,7 @@ import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
-import { screenToText, type FormatOptions } from "./format.js";
+import { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type ScreenSection } from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
@@ -45,12 +45,30 @@ const AID_KEYS = [
 ] as const;
 
 // ---- 共通スキーマ ----
-const includeSchema = z.array(z.enum(["grid", "fields"])).optional();
+const includeSchema = z
+  .array(z.enum(["grid", "fields", "attributes", "ansi"]))
+  .optional()
+  .describe(
+    "含めるもの（既定 grid,fields）。attributes=表示属性の変わり目、" +
+      "ansi=色つき画面（人が端末で見る用。LLM 向けの本文には載せない）"
+  );
 const rowsSchema = z.object({ from: z.number().int(), to: z.number().int() }).optional();
 const cursorSchema = z.object({ row: z.number().int(), col: z.number().int() });
 const fieldInputSchema = z.object({
   field: z.union([z.number().int(), cursorSchema]),
   value: z.string()
+});
+
+const attrRunSchema = z.object({
+  row: z.number(),
+  col: z.number(),
+  len: z.number(),
+  color: z.string(),
+  reverse: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  blink: z.boolean().optional(),
+  columnSeparator: z.boolean().optional(),
+  nonDisplay: z.boolean().optional()
 });
 
 const fieldOutSchema = z.object({
@@ -93,7 +111,15 @@ const guiSchema = z.object({
       col: z.number(),
       width: z.number(),
       height: z.number(),
-      title: z.string().optional(),
+      // WDWTITLE は文字だけでなく寄せ方・脚注か・色を持つ（枠の辺に描くために要る）
+      title: z
+        .object({
+          text: z.string(),
+          align: z.enum(["center", "left", "right"]),
+          footer: z.boolean(),
+          cba: z.number()
+        })
+        .optional(),
       restrictCursor: z.boolean(),
       pulldown: z.boolean()
     })
@@ -126,7 +152,9 @@ const screenOutShape = {
   timedOut: z.boolean().optional(),
   fields: z.array(fieldOutSchema),
   systemMessage: z.string().optional(),
-  gui: guiSchema.optional()
+  gui: guiSchema.optional(),
+  /** 表示属性の変わり目（include に attributes を入れたときだけ） */
+  attributes: z.array(attrRunSchema).optional()
 };
 
 type FieldInput = z.infer<typeof fieldInputSchema>;
@@ -135,9 +163,18 @@ function fieldTarget(f: FieldInput["field"]): { index: number } | { row: number;
   return typeof f === "number" ? { index: f } : { row: f.row, col: f.col };
 }
 
-/** 画面応答を組み立てる。画面テキストは content[].text と structuredContent.text の両方に載せる */
+/**
+ * 画面応答を組み立てる。画面テキストは content[].text と structuredContent.text の両方に載せる。
+ *
+ * **色つき画面（ansi）は人向けの別ブロックにする。** エスケープ列を LLM 向けの本文に混ぜると
+ * 読みにくいうえトークンを食うだけなので、`audience: ["user"]` を付けて分ける
+ * （本文側は `["assistant"]`）。属性を機械可読で欲しい場合は `attributes` を使う。
+ */
 function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boolean) {
-  const text = screenToText(snap, fmt);
+  const want = new Set(fmt.include ?? []);
+  // ansi は表示形式であってセクションではない。テキスト側の include からは外す
+  const textFmt: FormatOptions = { ...fmt, ...(fmt.include ? { include: fmt.include.filter((s) => s !== "ansi") } : {}) };
+  const text = screenToText(snap, textFmt);
   const structured: Record<string, unknown> = {
     text,
     sessionId: snap.sessionId,
@@ -150,14 +187,21 @@ function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boole
   if (snap.systemMessage !== undefined) structured["systemMessage"] = snap.systemMessage;
   if (snap.gui !== undefined) structured["gui"] = snap.gui;
   if (timedOut !== undefined) structured["timedOut"] = timedOut;
-  return {
-    content: [{ type: "text" as const, text }],
-    structuredContent: structured
-  };
+  if (want.has("attributes")) structured["attributes"] = attributeRuns(snap, fmt);
+  type Block = { type: "text"; text: string; annotations: { audience: ("user" | "assistant")[] } };
+  const content: Block[] = [{ type: "text", text, annotations: { audience: ["assistant"] } }];
+  if (want.has("ansi")) {
+    content.unshift({
+      type: "text",
+      text: screenToAnsi(snap, fmt),
+      annotations: { audience: ["user"] }
+    });
+  }
+  return { content, structuredContent: structured };
 }
 
 function fmtOpts(input: {
-  include?: ("grid" | "fields")[] | undefined;
+  include?: ScreenSection[] | undefined;
   rows?: { from: number; to: number } | undefined;
 }): FormatOptions {
   const o: FormatOptions = {};

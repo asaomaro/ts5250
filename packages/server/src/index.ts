@@ -37,7 +37,7 @@ export type {
   MacroSecretRef,
   CreateMacroBody
 } from "./macro-types.js";
-export { screenToText, type FormatOptions } from "./format.js";
+export { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type AttrRun } from "./format.js";
 export { fieldSignon } from "./signon.js";
 export { audit, withAudit, setAuditSink, type AuditEvent } from "./audit.js";
 export { registerTools, type ToolDeps } from "./mcp-tools.js";
