@@ -131,10 +131,21 @@ export interface ParsedWindowBorder {
   chars?: ParsedWindowBorderChars;
 }
 
+/** 窓の見出し／脚注（原典 `CW_TITLE_FOOTER`） */
+export interface ParsedWindowTitle {
+  text: string;
+  /** 枠の辺に沿った寄せ方（既定は中央） */
+  align: "center" | "left" | "right";
+  /** true なら窓の**下辺**に出る脚注 */
+  footer: boolean;
+  /** カラー用の属性バイト。`WDWTITLE((*COLOR YLW))` なら 0x32 */
+  cba: number;
+}
+
 export interface ParsedWindow {
   width: number;
   height: number;
-  title?: string;
+  title?: ParsedWindowTitle;
   restrictCursor: boolean;
   pulldown: boolean;
   /** ホストが WDWBORDER で指定した枠（無ければクライアント設定の枠を使う） */
@@ -335,10 +346,23 @@ function parseWindow(r: ByteReader, decode: Decode): ParsedWindow {
     if (contentLen <= 0 || contentLen > r.remaining) break;
     const borderType = r.u8();
     const body = r.bytes(contentLen - 1);
-    if (borderType === 0x10 && body.length > 4) {
-      // flags(1) mono(1) color(1) reserved(1) の後がタイトル文字
-      const title = decodeText(body.subarray(4), decode);
-      if (title !== "") win.title = title;
+    if (borderType === CW_TITLE_FOOTER && body.length > 4) {
+      // flag1(1) mba(1) cba(1) 予約(1) の後がタイトル文字
+      // （原典 `dissect_create_window` の `cw_tf_fields`）
+      const text = decodeText(body.subarray(4), decode);
+      if (text !== "") {
+        const flag1 = body[0]!;
+        win.title = {
+          text,
+          // flag1 の上位 2 ビットが**寄せ方**（0=中央 / 1=右 / 2=左 / 3=予約＝中央）。
+          // 実機は 0x00 を送ってくる＝中央寄せで、ACS も中央に出す。
+          // ここを見ずに左端へ置くと ACS と食い違う
+          align: TITLE_ALIGN[(flag1 & 0xc0) >> 6] ?? "center",
+          // bit 0x20 が立っていれば**フッタ**（窓の下辺に出る）
+          footer: (flag1 & 0x20) !== 0,
+          cba: body[2]!
+        };
+      }
     } else if (borderType === CW_BORDER_PRESENTATION && body.length >= 3) {
       // **WDWBORDER の実体**（原典 `dissect_create_window` の `cwbp_fields`）。
       // length(1) type(1) を読んだ後の body は
@@ -366,6 +390,10 @@ function parseWindow(r: ByteReader, decode: Decode): ParsedWindow {
 
 /** CREATE WINDOW のマイナー構造: Border Presentation（原典 `CW_BORDER_PRESENTATION`） */
 const CW_BORDER_PRESENTATION = 0x01;
+/** CREATE WINDOW のマイナー構造: 見出し／脚注（原典 `CW_TITLE_FOOTER`） */
+const CW_TITLE_FOOTER = 0x10;
+/** 見出しの寄せ方（原典 `vals_tn5250_wdsf_cw_tf_flag_orientation`。3 は予約で中央扱い） */
+const TITLE_ALIGN = ["center", "right", "left", "center"] as const;
 
 /**
  * DRAW/ERASE GRID LINES（0x60）。DDS の `GRDATR` / `GRDLIN` がここへコンパイルされる。

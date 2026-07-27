@@ -67,13 +67,25 @@ export interface GuiSelectionField {
   choices: GuiChoice[];
 }
 
+/** WDWTITLE の見出し／脚注（枠の辺に載る） */
+export interface GuiWindowTitle {
+  text: string;
+  /** 辺に沿った寄せ方（既定は中央。ACS も中央に出す） */
+  align: "center" | "left" | "right";
+  /** true なら窓の下辺に出る脚注 */
+  footer: boolean;
+  /** カラー用の属性バイト */
+  cba: number;
+}
+
 export interface GuiWindow {
   id: number;
   row: number;
   col: number;
   width: number;
   height: number;
-  title?: string;
+  /** ホストが WDWTITLE で指定した見出し／脚注 */
+  title?: GuiWindowTitle;
   /** カーソルをウィンドウ内に制限 */
   restrictCursor: boolean;
   /** プルダウンウィンドウ */

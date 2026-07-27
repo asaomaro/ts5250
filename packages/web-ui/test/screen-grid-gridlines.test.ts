@@ -344,3 +344,116 @@ describe("反転指定の WDWBORDER", () => {
     expect(rows.filter((r) => (r.element.textContent ?? "").length === 1)).toHaveLength(4 * 2);
   });
 });
+
+/**
+ * **WDWTITLE は枠の辺の上に、既定で中央寄せで出る。**
+ * 実機（TESTLIB/GRIDCL4）の `WINDOW(16 20 5 40)` ＋
+ * `WDWTITLE((*TEXT 'CHAR BORDER') (*COLOR YLW))` を ACS で画素実測すると、
+ * 見出しは**枠の上辺（行 16）の桁 36〜46**に黄色で出る。
+ * 窓の左上に置いていた頃は ACS と食い違っていた。
+ */
+describe("WDWTITLE（窓の見出し）", () => {
+  const withTitle = (title: GuiWindow["title"]): ScreenSnapshot =>
+    snapWithGui({
+      windows: [{
+        id: 1, row: 16, col: 19, width: 40, height: 5,
+        restrictCursor: false, pulldown: false,
+        border: { cba: 0x20, chars: { ulbc: "+", tbc: "-", urbc: "+", lbc: "|", rbc: "|", llbc: "+", bbc: "-", lrbc: "+" } },
+        ...(title ? { title } : {})
+      }]
+    });
+
+  it("既定（中央寄せ）は枠の上辺の中央に置く", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: withTitle({ text: "CHAR BORDER", align: "center", footer: false, cba: 0x32 }),
+        edits: new Map(), focused: true
+      }
+    });
+    const t = w.find(".win-title");
+    expect(t.text()).toBe("CHAR BORDER");
+    // 枠は桁 20〜63 の 44 桁。11 文字を中央に置くと桁 36（境界 35）から
+    expect(t.attributes("style")).toContain("left: 35ch;");
+    expect(t.attributes("style")).toContain("top: 18.75em;"); // 行 16 の上端 (16-1)*1.25em
+    expect(t.classes()).toContain("c-yellow"); // WDWTITLE((*COLOR YLW)) → 0x32
+  });
+
+  it("左寄せ・右寄せを効かせる", () => {
+    const left = mount(ScreenGrid, {
+      props: {
+        snapshot: withTitle({ text: "CHAR BORDER", align: "left", footer: false, cba: 0x32 }),
+        edits: new Map(), focused: true
+      }
+    });
+    expect(left.find(".win-title").attributes("style")).toContain("left: 19ch;");
+    const right = mount(ScreenGrid, {
+      props: {
+        snapshot: withTitle({ text: "CHAR BORDER", align: "right", footer: false, cba: 0x32 }),
+        edits: new Map(), focused: true
+      }
+    });
+    expect(right.find(".win-title").attributes("style")).toContain("left: 52ch;"); // 19 + 44 - 11
+  });
+
+  it("脚注は枠の下辺に置く", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: withTitle({ text: "FOOT", align: "center", footer: true, cba: 0x20 }),
+        edits: new Map(), focused: true
+      }
+    });
+    // 下辺は行 16+5+1 = 22 → 境界 21
+    expect(w.find(".win-title").attributes("style")).toContain("top: 26.25em;");
+  });
+
+  it("見出しが無ければ何も描かない", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: withTitle(undefined), edits: new Map(), focused: true }
+    });
+    expect(w.find(".win-title").exists()).toBe(false);
+  });
+});
+
+/**
+ * **枠と見出しには桁区切り（CS）を持ち込まない。**
+ * 5250 の属性表では黄・青緑に桁区切りビット抜きの割り当てが無いので、
+ * `WDWTITLE((*COLOR YLW))`（→ 0x32）のように色だけ指定した見出しにも
+ * 縦棒が付いてしまう。ACS も枠・見出しに桁区切りは出さない。
+ */
+describe("枠・見出しの属性から桁区切りを落とす", () => {
+  const winAt = (title: GuiWindow["title"], cba: number): ScreenSnapshot =>
+    snapWithGui({
+      windows: [{
+        id: 1, row: 16, col: 19, width: 40, height: 5,
+        restrictCursor: false, pulldown: false,
+        border: { cba, chars: { ulbc: "+", tbc: "-", urbc: "+", lbc: "|", rbc: "|", llbc: "+", bbc: "-", lrbc: "+" } },
+        ...(title ? { title } : {})
+      }]
+    });
+
+  it("黄（0x32）の見出しに縦棒を出さない", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: winAt({ text: "T", align: "center", footer: false, cba: 0x32 }, 0x20),
+        edits: new Map(), focused: true
+      }
+    });
+    const t = w.find(".win-title");
+    expect(t.classes()).toContain("c-yellow");
+    expect(t.classes()).not.toContain("a-colsep");
+  });
+
+  it("黄（0x32）の枠にも縦棒を出さない", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: winAt(undefined, 0x32), edits: new Map(), focused: true }
+    });
+    expect(w.find(".gui-window-border").classes()).not.toContain("a-colsep");
+  });
+
+  it("反転（0x3B）は落とさない — DSPATR(RI) は書き手が頼んだもの", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: winAt(undefined, 0x3b), edits: new Map(), focused: true }
+    });
+    expect(w.find(".gui-window-border").classes()).toContain("a-reverse");
+  });
+});

@@ -42,7 +42,9 @@ describe("WDSF GUI — CREATE WINDOW (0x51)", () => {
     const snap = buf.snapshot("t", false);
     expect(snap.gui?.windows).toHaveLength(1);
     const w = snap.gui!.windows[0]!;
-    expect(w).toMatchObject({ row: 5, col: 10, width: 20, height: 5, title: "HI" });
+    expect(w).toMatchObject({ row: 5, col: 10, width: 20, height: 5 });
+    // 見出しは寄せ方・色つきの構造で載る（枠の辺に描くため位置と色が要る）
+    expect(w.title).toMatchObject({ text: "HI", align: "center", footer: false });
   });
 
   it("境界なしウィンドウも解析できる", () => {

@@ -1445,14 +1445,18 @@ describe("ScreenGrid", () => {
       const s = makeSnap();
       s.gui = {
         selectionFields: [],
-        windows: [{ id: 9, row: 3, col: 5, width: 20, height: 6, title: "PROMPT", restrictCursor: false, pulldown: false }],
+        windows: [{
+          id: 9, row: 3, col: 5, width: 20, height: 6, restrictCursor: false, pulldown: false,
+          title: { text: "PROMPT", align: "center", footer: false, cba: 0x20 }
+        }],
         scrollBars: [], gridLines: []
       };
       const w = mount(ScreenGrid, { props: { snapshot: s, edits: new Map(), focused: true } });
       const win = w.find(".gui-window");
       expect(win.exists()).toBe(true);
       expect(win.attributes("style")).toContain("20ch");
-      expect(w.find(".gui-window-title").text()).toBe("PROMPT");
+      // 見出しは窓の中ではなく**枠の辺**に載る（ACS と同じ）
+      expect(w.find(".win-title").text()).toBe("PROMPT");
     });
 
     it("ラジオ選択肢を描画し、クリックで gui-select を emit する", async () => {

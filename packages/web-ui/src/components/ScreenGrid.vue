@@ -382,6 +382,29 @@ function hostBorderSegments(w: GuiWindow): { style: Record<string, string>; cls:
   ];
 }
 
+/**
+ * **WDWTITLE の見出し／脚注を枠の辺の上に置く。**
+ *
+ * 見出しは窓の中ではなく**枠の行**に載り、既定は**中央寄せ**（原典
+ * `vals_tn5250_wdsf_cw_tf_flag_orientation`: 0=中央 / 1=右 / 2=左）。
+ * 実機（TESTLIB/GRIDCL4）の `WDWTITLE((*TEXT 'CHAR BORDER') (*COLOR YLW))` は
+ * 寄せ方 0・属性 0x32（黄）で来て、ACS は枠の上辺の中央に黄色で出す。
+ * 窓の左上に置くと ACS と食い違う（画素で突き合わせて確認）。
+ */
+function hostTitle(w: GuiWindow): { text: string; style: Record<string, string>; cls: string } | null {
+  const t = w.title;
+  if (!t) return null;
+  const cells = w.width + 4; // 枠の桁数（左右に 2 桁ずつ）
+  const row = t.footer ? w.row + w.height + 1 : w.row;
+  const pad = Math.max(0, cells - t.text.length);
+  const off = t.align === "left" ? 0 : t.align === "right" ? pad : Math.floor(pad / 2);
+  return {
+    text: t.text,
+    style: { left: w.col + off + "ch", top: (row - 1) * 1.25 + "em" },
+    cls: `win-title ${decorAttrClass(t.cba)}`
+  };
+}
+
 /** ウィンドウ枠の位置＋寸法スタイル */
 function windowStyle(w: { row: number; col: number; width: number; height: number }): Record<string, string> {
   return { ...guiPos(w.row, w.col), width: w.width + "ch", height: w.height * 1.25 + "em" };
@@ -549,6 +572,24 @@ function attrByteClass(byte: number): string {
   if (a.reverse) cls.push("a-reverse");
   if (a.blink) cls.push("a-blink");
   if (a.columnSeparator) cls.push("a-colsep"); // cellClass と同じ体裁（片方だけ落とさない）
+  return cls.join(" ");
+}
+
+/**
+ * 窓の枠・見出しに使う属性クラス。**桁区切り（CS）だけは落とす。**
+ *
+ * 5250 の属性表では黄と青緑に桁区切りビット抜きの割り当てが無い（黄 = 0x32 は
+ * 「黄＋桁区切り」）。そのため `WDWTITLE((*COLOR YLW))` のように色だけ指定した
+ * 見出しにも縦棒が付いてしまう——DDS の書き手が頼んでいない印になる。
+ * ACS も枠・見出しに桁区切りは出さない（画素で確認）。
+ * 桁区切りは「欄の桁を仕切る」印なので、飾りの枠には持ち込まない。
+ */
+function decorAttrClass(byte: number): string {
+  const a = decodeAttribute(byte);
+  const cls = [`c-${a.color}`];
+  if (a.underline) cls.push("a-underline");
+  if (a.reverse) cls.push("a-reverse");
+  if (a.blink) cls.push("a-blink");
   return cls.join(" ");
 }
 
@@ -2642,16 +2683,14 @@ onBeforeUnmount(() => {
         :class="{ 'no-outline': w.border !== undefined }"
         :style="windowStyle(w)"
         aria-hidden="true"
-      >
-        <span v-if="w.title" class="gui-window-title">{{ w.title }}</span>
-      </div>
+      ></div>
       <!-- WDWBORDER: ホスト指定の罫線文字で枠を描く（指定がある窓だけ） -->
       <template v-for="w in gui.windows" :key="'wb' + w.id">
         <div
           v-for="(ln, i) in hostBorderRows(w)"
           :key="'wb' + w.id + '-' + i"
           class="gui-window-border"
-          :class="attrByteClass(w.border!.cba)"
+          :class="decorAttrClass(w.border!.cba)"
           :style="ln.style"
           aria-hidden="true"
         >{{ ln.text }}</div>
@@ -2662,6 +2701,13 @@ onBeforeUnmount(() => {
           :style="seg.style"
           aria-hidden="true"
         ></div>
+        <div
+          v-if="hostTitle(w)"
+          :key="'wt' + w.id"
+          :class="hostTitle(w)!.cls"
+          :style="hostTitle(w)!.style"
+          aria-hidden="true"
+        >{{ hostTitle(w)!.text }}</div>
       </template>
       <div
         v-for="b in gui.scrollBars"
@@ -3262,15 +3308,13 @@ onBeforeUnmount(() => {
   border-color: transparent;
   box-shadow: none;
 }
-.gui-window-title {
+/* WDWTITLE: 枠の辺に載る見出し／脚注。枠の罫線を隠すよう地色を敷く */
+.win-title {
   position: absolute;
-  top: -0.7em;
-  left: 0.5ch;
-  padding: 0 0.4ch;
-  font-size: 0.85em;
+  white-space: pre;
+  pointer-events: none;
+  line-height: 1.25;
   background: var(--crt);
-  color: var(--t-turquoise, var(--t-white));
-  white-space: nowrap;
 }
 .gui-selection {
   position: absolute;

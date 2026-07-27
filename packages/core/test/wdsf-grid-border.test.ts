@@ -414,6 +414,7 @@ describe("実機の WDWBORDER（反転の空白／明示の枠文字）", () => 
     expect(ev.window.border?.chars).toEqual({
       ulbc: "+", tbc: "-", urbc: "+", lbc: "|", rbc: "|", llbc: "+", bbc: "-", lrbc: "+"
     });
-    expect(ev.window.title).toBe("CHAR BORDER");
+    // 見出しは寄せ方（0=中央）と色（0x32=黄）ごと持つ。ACS は枠の上辺の中央に黄色で出す
+    expect(ev.window.title).toEqual({ text: "CHAR BORDER", align: "center", footer: false, cba: 0x32 });
   });
 });

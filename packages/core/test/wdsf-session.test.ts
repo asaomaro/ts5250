@@ -83,7 +83,8 @@ describe("Session5250 — 拡張 5250 GUI（合成リプレイ E2E）", () => {
 
     expect(snap.gui).toBeDefined();
     expect(snap.gui!.windows).toHaveLength(1);
-    expect(snap.gui!.windows[0]).toMatchObject({ row: 5, col: 10, width: 30, height: 6, title: "CHOOSE" });
+    expect(snap.gui!.windows[0]).toMatchObject({ row: 5, col: 10, width: 30, height: 6 });
+    expect(snap.gui!.windows[0]!.title).toMatchObject({ text: "CHOOSE" });
 
     expect(snap.gui!.selectionFields).toHaveLength(1);
     const sel = snap.gui!.selectionFields[0]!;
