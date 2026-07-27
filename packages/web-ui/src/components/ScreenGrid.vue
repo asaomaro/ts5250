@@ -252,12 +252,21 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     out.push({ style, cls: `${cls} ${extra}` });
   };
 
-  // 単独の辺（0x00–0x03）
-  if (g.minorType === 0x00) push(hLine(top), "grid-h");
-  else if (g.minorType === 0x01) push(hLine(bottom), "grid-h");
-  else if (g.minorType === 0x02) push(vLine(left), "grid-v");
-  else if (g.minorType === 0x03) push(vLine(right), "grid-v");
-  else {
+  // **単独の罫線（0x00–0x03）では 2 つの数値の意味が箱と違う。**
+  // 箱では「横罫の行間隔・縦罫の桁間隔」だが、GRDLIN では **(繰り返し数, 間隔)**。
+  // 実機で実測: `GRDLIN((*POS (4 3 40)) (*TYPE UPPER 3 2))` → 3 本を 2 行おき、
+  // `GRDLIN((*POS (14 3 8)) (*TYPE LEFT 4 6))` → 4 本を 6 桁おき。
+  // 同じ 2 バイトを型で読み分ける（ここを一律に扱うと単独罫線が 1 本しか出ない）。
+  if (g.minorType <= 0x03) {
+    const repeat = Math.max(1, g.value1);   // 本数
+    const interval = Math.max(1, g.value2); // 本の間隔
+    const horizontal = g.minorType <= 0x01;
+    const base = g.minorType === 0x00 ? top : g.minorType === 0x01 ? bottom : g.minorType === 0x02 ? left : right;
+    for (let i = 0; i < repeat; i++) {
+      const at = base + i * interval;
+      push(horizontal ? hLine(at) : vLine(at), horizontal ? "grid-h" : "grid-v");
+    }
+  } else {
     // 箱（0x04–0x07）は四辺
     push(hLine(top), "grid-h");
     push(hLine(bottom), "grid-h");
@@ -267,13 +276,13 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     // `(*TYPE HRZVRT 2 8)` は「2 行ごとに横罫・8 桁ごとに縦罫」で、
     // 箱が 6 行 × 40 桁なら横 2 本・縦 4 本になる（ACS の表示と一致）。
     // 本数と読むと横が 0 本・縦が 2 本になり、実機の見た目と食い違う。
-    const hRule = g.hRule;
-    const vRule = g.vRule;
-    if ((g.minorType === 0x05 || g.minorType === 0x07) && hRule > 0) {
-      for (let b = top + hRule; b < bottom; b += hRule) push(hLine(b), "grid-h");
+    const value1 = g.value1;
+    const value2 = g.value2;
+    if ((g.minorType === 0x05 || g.minorType === 0x07) && value1 > 0) {
+      for (let b = top + value1; b < bottom; b += value1) push(hLine(b), "grid-h");
     }
-    if ((g.minorType === 0x06 || g.minorType === 0x07) && vRule > 0) {
-      for (let b = left + vRule; b < right; b += vRule) push(vLine(b), "grid-v");
+    if ((g.minorType === 0x06 || g.minorType === 0x07) && value2 > 0) {
+      for (let b = left + value2; b < right; b += value2) push(vLine(b), "grid-v");
     }
   }
   return out;
@@ -308,6 +317,11 @@ function gridLineClass(style: number): string {
  *
  * 枠のセル範囲は線で描くとき（`hostBorderSegments`）と同じ——**窓の外側**。
  * 窓の本体に重ねると窓の中身を塗り潰してしまう。
+ *
+ * **枠文字は属性ごと描く。** `WDWBORDER((*COLOR BLU) (*DSPATR RI) (*CHAR '        '))`
+ * のように「反転表示の空白 8 個」を指定すると、ホストは空白 8 個と属性 0x3B
+ * （青・反転）を送ってくる（実機で実測）。色だけを文字色に使うと
+ * **空白に青い文字色**＝何も見えない。反転を効かせて初めて「背景色のセルで描いた枠」になる。
  */
 function hostBorderRows(w: GuiWindow): { text: string; style: Record<string, string> }[] {
   const c = w.border?.chars;
@@ -315,17 +329,20 @@ function hostBorderRows(w: GuiWindow): { text: string; style: Record<string, str
   const height = w.height + 2; // 上下に 1 行ずつ
   const inner = Math.max(0, w.width + 2); // 左右に 2 桁ずつ（うち左右 1 桁ずつが隅）
   const rows: { text: string; style: Record<string, string> }[] = [];
-  const at = (row: number, text: string): void => {
+  const at = (row: number, col: number, text: string): void => {
     rows.push({
       text,
-      style: { left: w.col + "ch", top: (row - 1) * 1.25 + "em" }
+      style: { left: col + "ch", top: (row - 1) * 1.25 + "em" }
     });
   };
-  at(w.row, c.ulbc + c.tbc.repeat(inner) + c.urbc);
+  at(w.row, w.col, c.ulbc + c.tbc.repeat(inner) + c.urbc);
+  // **側面は左右の枠桁だけを別々に置く。** 間を空白で埋めた 1 本の帯にすると、
+  // 反転指定（DSPATR(RI)）のときに**窓の中身まで塗り潰す**（実機で確認）。
   for (let i = 1; i < height - 1; i++) {
-    at(w.row + i, c.lbc + " ".repeat(inner) + c.rbc);
+    at(w.row + i, w.col, c.lbc);
+    at(w.row + i, w.col + inner + 1, c.rbc);
   }
-  at(w.row + height - 1, c.llbc + c.bbc.repeat(inner) + c.lrbc);
+  at(w.row + height - 1, w.col, c.llbc + c.bbc.repeat(inner) + c.lrbc);
   return rows;
 }
 
@@ -2634,7 +2651,7 @@ onBeforeUnmount(() => {
           v-for="(ln, i) in hostBorderRows(w)"
           :key="'wb' + w.id + '-' + i"
           class="gui-window-border"
-          :class="`c-${decodeAttribute(w.border!.cba).color}`"
+          :class="attrByteClass(w.border!.cba)"
           :style="ln.style"
           aria-hidden="true"
         >{{ ln.text }}</div>

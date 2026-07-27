@@ -41,9 +41,6 @@ const attrMap = (snap) => {
   });
   return out;
 };
-const inputField = (snap, minRow = 1) =>
-  snap.fields.find((f) => !f.protected && f.row >= minRow);
-
 async function enter(ms = 12000) {
   return await session.sendAid("Enter", { timeoutMs: ms });
 }

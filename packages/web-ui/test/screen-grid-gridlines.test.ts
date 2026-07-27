@@ -33,7 +33,7 @@ function snapWithGui(gui: Partial<ScreenSnapshot["gui"]>): ScreenSnapshot {
 
 const grid = (o: Partial<GuiGridLine> = {}): GuiGridLine => ({
   id: 1, minorType: 0x04, row: 3, col: 5, width: 20, height: 6,
-  lineStyle: 0x00, color: 0x07, hRule: 0, vRule: 0, ...o
+  lineStyle: 0x00, color: 0x07, value1: 0, value2: 0, ...o
 });
 
 describe("グリッド罫線の描画", () => {
@@ -94,7 +94,7 @@ describe("グリッド罫線の描画", () => {
       props: {
         // 実機と同じ: 行 15 桁 5、幅 40 深さ 6、横罫 2 行ごと・縦罫 8 桁ごと
         snapshot: snapWithGui({
-          gridLines: [grid({ minorType: 0x07, row: 15, col: 5, width: 40, height: 6, hRule: 2, vRule: 8 })]
+          gridLines: [grid({ minorType: 0x07, row: 15, col: 5, width: 40, height: 6, value1: 2, value2: 8 })]
         }),
         edits: new Map(), focused: true
       }
@@ -161,11 +161,15 @@ describe("WDWBORDER（ホスト指定の窓枠）", () => {
     const rows = w.findAll(".gui-window-border");
     // **枠は窓の外側**。窓 12x4 なら枠は 16 桁 × 6 行（上下に 1 行・左右に 2 桁）。
     // 窓の本体に重ねると窓の中身を塗り潰してしまう
-    expect(rows).toHaveLength(6);
     expect(rows[0]!.text()).toBe(".--------------.");   // 上辺（16 桁 = 隅 2 ＋ 内側 14）
-    expect(rows[1]!.text()).toBe("|              |");   // 側面
-    expect(rows[5]!.text()).toBe("'--------------'");   // 下辺
+    expect(rows[rows.length - 1]!.text()).toBe("'--------------'"); // 下辺
     expect(rows[0]!.attributes("style")).toContain("left: 10ch;"); // 桁 11 の左端
+    // **側面は左右の桁を別々に置く**（間を空白で埋めると反転指定で中身を塗り潰す）
+    const sides = rows.slice(1, -1);
+    expect(sides).toHaveLength(4 * 2); // 高さ 4 行 × 左右
+    expect(sides.every((r) => r.text() === "|")).toBe(true);
+    expect(sides[0]!.attributes("style")).toContain("left: 10ch;");
+    expect(sides[1]!.attributes("style")).toContain("left: 25ch;"); // 10 + 内側 14 + 1
   });
 
   it("枠の色は cba（カラー用属性バイト）から決まる", () => {
@@ -249,5 +253,94 @@ describe("ホスト枠とクライアント枠の二重描画", () => {
       props: { snapshot: snap, edits: new Map(), focused: true, windowFrame: "outline" }
     });
     expect(w.findAll(".gui-window-border")).toHaveLength(0);
+  });
+});
+
+/**
+ * **単独の罫線（GRDLIN）は繰り返して引く。**
+ * `*TYPE` の 2 つの数値は箱では「行間隔・桁間隔」だが、単独罫線では
+ * **(本数, 間隔)**。同じバイト位置なので型で読み分けないと 1 本しか出ない。
+ * 実機（TESTLIB/GRIDCL4）の値をそのまま使う。
+ */
+describe("単独の罫線（GRDLIN）の繰り返し", () => {
+  it("上辺の線は本数ぶん下へ繰り返す", () => {
+    // GRDLIN((*POS (4 3 40)) (*TYPE UPPER 3 2)) → 3 本を 2 行おき
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: snapWithGui({
+          gridLines: [grid({ minorType: 0x00, row: 4, col: 3, width: 40, height: 0, value1: 3, value2: 2 })]
+        }),
+        edits: new Map(), focused: true
+      }
+    });
+    const h = w.findAll(".grid-line.grid-h").map((l) => l.attributes("style"));
+    expect(h).toHaveLength(3);
+    expect(h[0]).toContain("top: 3.75em;"); // 境界 3 = 行 4 の上端
+    expect(h[1]).toContain("top: 6.25em;"); // 境界 5
+    expect(h[2]).toContain("top: 8.75em;"); // 境界 7
+    expect(h[0]).toContain("width: 40ch;"); // 長さは width に入る
+    expect(w.findAll(".grid-line.grid-v")).toHaveLength(0); // 横線だけ
+  });
+
+  it("左辺の線は本数ぶん右へ繰り返す", () => {
+    // GRDLIN((*POS (14 3 8)) (*TYPE LEFT 4 6)) → 4 本を 6 桁おき
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: snapWithGui({
+          gridLines: [grid({ minorType: 0x02, row: 14, col: 3, width: 0, height: 8, value1: 4, value2: 6 })]
+        }),
+        edits: new Map(), focused: true
+      }
+    });
+    const v = w.findAll(".grid-line.grid-v").map((l) => l.attributes("style"));
+    expect(v).toHaveLength(4);
+    expect(v.map((s) => /left: (\d+)ch/.exec(s ?? "")?.[1])).toEqual(["2", "8", "14", "20"]);
+    expect(v[0]).toContain("height: 10em;"); // 長さ 8 行 × 1.25em
+  });
+
+  it("繰り返しが 0 でも 1 本は引く", () => {
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: snapWithGui({
+          gridLines: [grid({ minorType: 0x01, row: 4, col: 3, width: 10, height: 0, value1: 0, value2: 0 })]
+        }),
+        edits: new Map(), focused: true
+      }
+    });
+    expect(w.findAll(".grid-line.grid-h")).toHaveLength(1);
+  });
+});
+
+/**
+ * **背景色のセルで描く窓枠**（`WDWBORDER((*COLOR BLU) (*DSPATR RI) (*CHAR '        '))`）。
+ * ホストは空白 8 個＋属性 0x3B（青・反転）を送ってくる。色を文字色にするだけでは
+ * 「空白に青い文字色」で何も見えない。反転を効かせて初めて枠になる。
+ */
+describe("反転指定の WDWBORDER", () => {
+  const revBorder = {
+    cba: 0x3b,
+    chars: { ulbc: " ", tbc: " ", urbc: " ", lbc: " ", rbc: " ", llbc: " ", bbc: " ", lrbc: " " }
+  };
+
+  it("反転属性を枠の要素に載せる", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapWithGui({ windows: [win(revBorder)] }), edits: new Map(), focused: true }
+    });
+    const rows = w.findAll(".gui-window-border");
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]!.classes()).toContain("a-reverse"); // これが無いと空白のままで見えない
+    expect(rows[0]!.classes()).toContain("c-blue");
+  });
+
+  it("反転でも窓の中身は塗り潰さない（側面は左右の桁だけ）", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapWithGui({ windows: [win(revBorder)] }), edits: new Map(), focused: true }
+    });
+    const rows = w.findAll(".gui-window-border");
+    // 上辺・下辺は幅ぶんの帯、側面は 1 桁ずつ。帯が高さぶん並ぶと窓が真っ青になる
+    // （空白は text() が刈るので textContent で見る）
+    const wide = rows.filter((r) => (r.element.textContent ?? "").length > 1);
+    expect(wide).toHaveLength(2);
+    expect(rows.filter((r) => (r.element.textContent ?? "").length === 1)).toHaveLength(4 * 2);
   });
 });

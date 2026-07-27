@@ -121,9 +121,13 @@ export interface GuiGridLine {
   lineStyle: number;
   /** 色（属性バイト。0 なら既定色） */
   color: number;
-  /** 横罫の行間隔・縦罫の桁間隔（0 なら引かない）。DDS `(*TYPE HRZVRT h v)` */
-  hRule: number;
-  vRule: number;
+  /**
+   * DDS `*TYPE` の後ろの 2 つの数値。**意味は minorType で変わる**
+   * （単独罫線 0x00–0x03 は「繰り返し本数・間隔」、箱 0x04–0x07 は「横罫の行間隔・縦罫の桁間隔」）。
+   * 詳細は `ParsedGridItem` の表を参照。
+   */
+  value1: number;
+  value2: number;
 }
 
 export interface GuiScrollBar {

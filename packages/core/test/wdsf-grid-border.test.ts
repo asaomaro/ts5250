@@ -80,7 +80,7 @@ describe("DRAW/ERASE GRID LINES（0x60）", () => {
     expect(ev.grid.items).toHaveLength(1);
     expect(ev.grid.items[0]).toMatchObject({
       minorType: GRID_MINOR.HV_RULED_BOX, erase: false,
-      row: 3, col: 5, width: 40, height: 10, hRule: 4, vRule: 2
+      row: 3, col: 5, width: 40, height: 10, value1: 4, value2: 2
     });
     expect(ev.grid.defaultLine).toBe(GRID_LINE_STYLE.DOUBLE);
   });
@@ -286,8 +286,8 @@ describe("実機のグリッド線バイト列", () => {
       row: 15, col: 5, width: 40, height: 6,
       color: 0x01,            // BLU
       lineStyle: 0x08,        // DSH
-      hRule: 0x02,       // 横罫の間隔
-      vRule: 0x08      // 縦罫の間隔
+      value1: 0x02,           // 横罫の行間隔
+      value2: 0x08            // 縦罫の桁間隔
     });
   });
 
@@ -299,5 +299,121 @@ describe("実機のグリッド線バイト列", () => {
     const g = buf.snapshot("t", false).gui.gridLines[0]!;
     expect(g.color).toBe(0x04);    // GRDATR の RED
     expect(g.lineStyle).toBe(0x00); // SLD
+  });
+});
+
+/**
+ * **色・線種・種別の対応を実機で 1 つずつ確かめる**（TESTLIB/GRIDTST3・GRIDCL3）。
+ *
+ * 表を推測で作ると 1 か所ずれても気付けないので、DDS に色と線種を書き分けた箱を
+ * 5 つ並べ、返ってきたバイト列をそのまま固定する。
+ * `(*COLOR TRQ)` と `(*COLOR PNK)` は **DDS の時点で拒否される**（CPD7494）ため、
+ * グリッド罫線で使える色は BLU/GRN/RED/WHT/YLW の 5 つ。
+ */
+describe("実機の色・線種・種別（GRIDCL3）", () => {
+  // 主構造 `01 20 00 20 00 07 00`（GRDATR 無し → 既定色 WHT）＋ 11 バイトのマイナー 5 個
+  const BYTES = [
+    0xd9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x07, 0x00,
+    0x0b, 0x04, 0x00, 0x04, 0x03, 0x14, 0x04, 0x04, 0x00, 0x01, 0x01, // RED  SLD
+    0x0b, 0x04, 0x00, 0x04, 0x1a, 0x14, 0x04, 0x06, 0x08, 0x01, 0x01, // YLW  DSH
+    0x0b, 0x04, 0x00, 0x04, 0x31, 0x14, 0x04, 0x07, 0x03, 0x01, 0x01, // WHT  DOT
+    0x0b, 0x05, 0x00, 0x0a, 0x03, 0x1e, 0x06, 0x02, 0xff, 0x02, 0x01, // GRN  横罫のみ
+    0x0b, 0x06, 0x00, 0x0a, 0x28, 0x1e, 0x06, 0x01, 0xff, 0x01, 0x05  // BLU  縦罫のみ
+  ];
+  const ev = parseWdsf(Uint8Array.from(BYTES), decode);
+  if (ev.kind !== "grid-lines") throw new Error("kind");
+  const items = ev.grid.items;
+
+  it("DDS の *COLOR がそのままコードになる", () => {
+    expect(items.map((i) => i.color)).toEqual([0x04, 0x06, 0x07, 0x02, 0x01]);
+    // RED=4 / YLW=6 / WHT=7 / GRN=2 / BLU=1
+  });
+
+  it("DDS の *LINTYP がそのまま線種になる", () => {
+    expect(items[0]!.lineStyle).toBe(GRID_LINE_STYLE.SOLID);  // SLD
+    expect(items[1]!.lineStyle).toBe(GRID_LINE_STYLE.DASHED); // DSH
+    expect(items[2]!.lineStyle).toBe(GRID_LINE_STYLE.DOTTED); // DOT
+  });
+
+  it("GRDATR が無い記録の既定色は WHT", () => {
+    expect(ev.grid.defaultColor).toBe(0x07);
+  });
+
+  it("*TYPE PLAIN / HRZ / VRT が種別になる", () => {
+    expect(items.map((i) => i.minorType)).toEqual([
+      GRID_MINOR.PLAIN_BOX, GRID_MINOR.PLAIN_BOX, GRID_MINOR.PLAIN_BOX,
+      GRID_MINOR.H_RULED_BOX, GRID_MINOR.V_RULED_BOX
+    ]);
+  });
+
+  it("HRZ は value1 に、VRT は value2 に数値が入る", () => {
+    // (*TYPE HRZ 2) → 横罫を 2 行ごと。(*TYPE VRT 5) → 縦罫を 5 桁ごと
+    expect(items[3]).toMatchObject({ value1: 2, value2: 1 });
+    expect(items[4]).toMatchObject({ value1: 1, value2: 5 });
+  });
+});
+
+/**
+ * **単独の罫線（GRDLIN）では 2 つの数値の意味が箱と違う**（GRIDCL4）。
+ *
+ * `(*TYPE UPPER 3 2)` は「3 本を 2 行おき」、`(*TYPE LEFT 4 6)` は「4 本を 6 桁おき」。
+ * 箱の「行間隔・桁間隔」と同じ位置のバイトなので、**型で読み分けないと**
+ * 単独罫線が 1 本しか出ない。
+ */
+describe("実機の単独罫線（GRIDCL4）", () => {
+  const ev = parseWdsf(Uint8Array.from([
+    0xd9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x07, 0x00,
+    0x0b, 0x00, 0x00, 0x04, 0x03, 0x28, 0x00, 0xff, 0xff, 0x03, 0x02, // UPPER 3 2
+    0x0b, 0x02, 0x00, 0x0e, 0x03, 0x00, 0x08, 0xff, 0xff, 0x04, 0x06  // LEFT  4 6
+  ]), decode);
+  if (ev.kind !== "grid-lines") throw new Error("kind");
+
+  it("横の単独罫線は長さが width に入り height は 0", () => {
+    expect(ev.grid.items[0]).toMatchObject({
+      minorType: GRID_MINOR.UPPER_HORIZONTAL, row: 4, col: 3, width: 40, height: 0,
+      value1: 3, value2: 2
+    });
+  });
+
+  it("縦の単独罫線は長さが height に入り width は 0", () => {
+    expect(ev.grid.items[1]).toMatchObject({
+      minorType: GRID_MINOR.LEFT_VERTICAL, row: 14, col: 3, width: 0, height: 8,
+      value1: 4, value2: 6
+    });
+  });
+});
+
+/**
+ * **背景色のセルで枠を描く WDWBORDER**（GRIDCL3 の窓）。
+ *
+ * `WDWBORDER((*COLOR BLU) (*DSPATR RI) (*CHAR '        '))` と書くと、ホストは
+ * **空白 8 個と属性 0x3B（青・反転）**を送ってくる。色を文字色としてだけ使うと
+ * 「空白に青い文字色」＝何も見えない。反転を効かせて初めて枠になる。
+ */
+describe("実機の WDWBORDER（反転の空白／明示の枠文字）", () => {
+  it("反転指定は空白 8 個＋反転属性で来る", () => {
+    const ev = parseWdsf(Uint8Array.from([
+      0xd9, 0x51, 0x80, 0x00, 0x00, 0x04, 0x24,
+      0x0d, 0x01, 0x80, 0x3b, 0x3b, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40
+    ]), decode);
+    if (ev.kind !== "window") throw new Error("kind");
+    expect(ev.window).toMatchObject({ width: 36, height: 4 });
+    expect(ev.window.border?.cba).toBe(0x3b); // 青・反転
+    expect(Object.values(ev.window.border!.chars!)).toEqual(Array(8).fill(" "));
+  });
+
+  it("枠文字の指定は DDS の並び（左上・上・右上・左・右・左下・下・右下）で来る", () => {
+    const ev = parseWdsf(Uint8Array.from([
+      0xd9, 0x51, 0x80, 0x00, 0x00, 0x05, 0x28,
+      0x0d, 0x01, 0x80, 0x20, 0x20, 0x4e, 0x60, 0x4e, 0x4f, 0x4f, 0x4e, 0x60, 0x4e,
+      // 見出し（minor 0x10）: WDWTITLE((*TEXT 'CHAR BORDER') (*COLOR YLW))
+      0x11, 0x10, 0x00, 0x32, 0x32, 0x00,
+      0xc3, 0xc8, 0xc1, 0xd9, 0x40, 0xc2, 0xd6, 0xd9, 0xc4, 0xc5, 0xd9
+    ]), decode);
+    if (ev.kind !== "window") throw new Error("kind");
+    expect(ev.window.border?.chars).toEqual({
+      ulbc: "+", tbc: "-", urbc: "+", lbc: "|", rbc: "|", llbc: "+", bbc: "-", lrbc: "+"
+    });
+    expect(ev.window.title).toBe("CHAR BORDER");
   });
 });

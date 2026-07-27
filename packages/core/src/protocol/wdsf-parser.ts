@@ -158,10 +158,20 @@ export interface ParsedGridItem {
   color: number;
   /** 線種（`GRID_DEFAULT` なら主構造の既定線種を使う） */
   lineStyle: number;
-  /** 横罫の**行間隔**（0 なら引かない）。DDS `(*TYPE HRZVRT h v)` の h */
-  hRule: number;
-  /** 縦罫の**桁間隔**（0 なら引かない）。DDS の v */
-  vRule: number;
+  /**
+   * **意味が minorType で変わる 2 つの数値**（DDS `*TYPE` の後ろの引数）。
+   * 名前を付けずに生のまま持つのは、片方の意味で名付けると他方の読み手を誤らせるため。
+   *
+   * | minorType | value1 | value2 |
+   * |---|---|---|
+   * | 0x00–0x03 単独罫線（GRDLIN） | 繰り返し本数 | 本の間隔 |
+   * | 0x04–0x07 箱（GRDBOX） | 横罫の**行間隔** | 縦罫の**桁間隔** |
+   *
+   * 実機で実測: `GRDLIN((*POS (4 3 40)) (*TYPE UPPER 3 2))` → 3, 2（3 本を 2 行おき）。
+   * `GRDBOX((*POS (15 5 6 40)) (*TYPE HRZVRT 2 8))` → 2, 8（2 行ごと・8 桁ごと）。
+   */
+  value1: number;
+  value2: number;
 }
 
 export interface ParsedGridLines {
@@ -411,8 +421,8 @@ function parseGridLines(r: ByteReader): ParsedGridLines {
       height: at(),
       color: at(),
       lineStyle: at(),
-      hRule: at(),
-      vRule: at()
+      value1: at(),
+      value2: at()
     };
     items.push(item);
     r.skip(Math.max(0, end - r.offset)); // 未知の追加フィールドがあっても長さぶん進む
