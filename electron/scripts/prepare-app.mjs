@@ -20,7 +20,7 @@
 //     package.json                       … 第三者依存の宣言（npm install の入力）
 //     node_modules/                      … 第三者依存 ＋ @as400web/*（実体コピー）
 //     packages/web-ui/dist               … 静的アセット（--web-root が cwd 相対で読む）
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,11 +73,30 @@ writeFileSync(
 );
 
 log(`==> 第三者依存を解決（${Object.keys(thirdParty).sort().join(" ")}）`);
-execFileSync(
-  process.platform === "win32" ? "npm.cmd" : "npm",
-  ["install", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"],
-  { cwd: STAGE, stdio: "inherit" }
-);
+/**
+ * **npm は shell 経由で起動する（`execSync`）。**
+ *
+ * Windows の `npm` の実体は `npm.cmd` というバッチで、Node は CVE-2024-27980 の対策以降
+ * `.cmd` / `.bat` を shell 無しでは起動できない——`execFileSync("npm.cmd", …)` は
+ * `spawnSync npm.cmd EINVAL` で落ちる（Windows の Node 24 で実際に踏んだ）。
+ *
+ * かといって `execFileSync(…, { shell: true })` は引数配列を連結するだけなので Node 24 が
+ * DEP0190 を出す。**コマンド文字列を渡す `execSync` が、この用途に用意された API**。
+ * 渡すのは**この場で書いた定数だけ**（cwd は文字列に混ぜずオプションで渡す）なので、
+ * 外から値が入り込む余地は無い。
+ */
+try {
+  execSync("npm install --omit=dev --no-audit --no-fund --loglevel=error", {
+    cwd: STAGE,
+    stdio: "inherit"
+  });
+} catch (err) {
+  // 生の Node スタックを出さない——ここで落ちる原因はほぼ「npm が無い / ネットワーク」なので、
+  // 読み手に必要なのは何をすればいいかだけ
+  log(`依存の解決に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+  log("npm が使えること・ネットワークに繋がることを確認してからやり直してください。");
+  process.exit(1);
+}
 
 log("==> 自前パッケージを node_modules へ実体コピー");
 for (const name of LIB_PACKAGES) {
