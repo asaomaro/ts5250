@@ -227,6 +227,12 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
   const out: { style: Record<string, string>; cls: string }[] = [];
   // **グリッド線の色は 5250 の属性バイトではない**（DDS リファレンス GRDATR Table 14 の専用コード）。
   // decodeAttribute に渡すと全部緑になる。X'FF'（表示装置の既定）と未知の値は白に倒す。
+  //
+  // **ここは ACS に合わせない**（利用者の判断）。AGENTS.md「2.」は既存クライアントと同じ挙動を
+  // 優先するが、罫線の色と線種はその例外。ACS はホストの指定を無視して**一律に青の実線**で描く
+  // （画素で実測: `GRDATR((*COLOR RED))` の箱も `(*COLOR WHT)` の罫線も同じ青 rgb(120,144,240)、
+  //  `(*LINTYP DSH)` の箱も実線）。合わせると DDS の書き手が指定した色と線種を捨てることになるので、
+  // ホストの指定どおりに描く。**ACS と見比べて「色が違う」と気付いても直さないこと。**
   const color = GRID_COLOR[g.color] ?? "white";
   const cls = `grid-line c-${color} ${gridLineClass(g.lineStyle)}`;
   // **罫線はセルの中ではなく「セルの境界」に引く。**
@@ -288,7 +294,10 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
   return out;
 }
 
-/** 線種（原典 GRID_LINE_STYLE）→ CSS クラス。太字・二重破線は最も近い見た目へ寄せる */
+/**
+ * 線種（原典 GRID_LINE_STYLE）→ CSS クラス。太字・二重破線は最も近い見た目へ寄せる。
+ * ACS は線種を無視して実線で描くが、**こちらは指定どおり描く**（`gridSegments` の色の注記を参照）。
+ */
 function gridLineClass(style: number): string {
   switch (style) {
     case 0x01: // 太実線
