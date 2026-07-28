@@ -1,7 +1,7 @@
 schema: 3
 slug: strpco-strpccmd
-current: walkthrough
-approved: [requirement, research, spec, plan, coding, test, review, walkthrough]
+current: retro
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough, deliver, retro]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3
