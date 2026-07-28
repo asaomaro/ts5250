@@ -2,12 +2,14 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { viewSettings, VIEW_ITEMS, type ViewSettings, type ViewItemDef } from "../stores/viewSettings.js";
 import {
-  SCREEN_FONTS,
-  loadFontChoices,
+  listInstalledFonts,
   measureFontFit,
   fitsGrid,
-  isCuratedId,
+  isLegacyId,
   sanitizeFamily,
+  screenFontLabel,
+  SYSTEM_FONT_ID,
+  SYSTEM_FONT_LABEL,
   type InstalledFont
 } from "../composables/screenFonts.js";
 import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composables/headerMenu.js";
@@ -60,27 +62,18 @@ const MENU_ROWS = computed<MenuRow[]>(() => {
 });
 
 // ---- 画面フォント（セレクト）----
-// 推奨一覧（和欧 1:2 が保証されたもの）に加えて、**インストール済みフォントから選べる**。
-// 一覧を出せないブラウザ（Local Font Access 非対応）のために、名前の直接入力も残す。
-//
-// **導入判定で選択を塞がない。** 判定は canvas 実測や権限に左右され、実際には入っているのに
-// 未検出になることがある（「入れたのに選べない」の原因）。未検出は印を出すだけにして、
-// 当たらなければ CSS が既定スタックへ落ちる形にしてある。
-const fontInstalled = ref<Record<string, boolean>>({});
+// **選択肢はインストール済みフォントそのもの。**「推奨」の固定一覧は廃止した（利用者の判断）。
+// 一覧を出せないブラウザ（Local Font Access 非対応）のために、名前の直接入力を残す。
 /** インストール済みフォント（Local Font Access が使えたときだけ。null＝列挙できない） */
 const installed = ref<InstalledFont[] | null>(null);
 /** 桁が揃うもの／ずれる可能性があるもの。ずれるほうも**選べる**（利用者の判断）。 */
 const installedFit = computed(() => (installed.value ?? []).filter((f) => fitsGrid(f.fit)));
 const installedOther = computed(() => (installed.value ?? []).filter((f) => !fitsGrid(f.fit)));
 
-/** 導入判定と一覧を更新する。可能なら Local Font Access（版名非依存・正確）、無ければ canvas 実測。
- *  **メニューを開いた瞬間（クリック内）に呼ぶ**ことで Local Font Access の許可を得られる。 */
+/** 一覧を取り直す。**メニューを開いた瞬間（クリック内）に呼ぶ**ことで
+ *  Local Font Access の許可を得られる。 */
 async function refreshFonts(): Promise<void> {
-  const choices = await loadFontChoices();
-  const map: Record<string, boolean> = {};
-  for (const f of SCREEN_FONTS) map[f.id] = choices.installedIds.has(f.id);
-  fontInstalled.value = map;
-  installed.value = choices.installed;
+  installed.value = await listInstalledFonts();
 }
 /** ⚙ 画面ボタン。開閉と同時に、開いたときはフォント判定を更新（クリック＝ユーザー操作）。 */
 function onToggle(): void {
@@ -88,25 +81,31 @@ function onToggle(): void {
   if (open.value) void refreshFonts();
 }
 const fontValue = computed(() => eff.value.font);
-/** 一覧のどれでもない値（名前を直接入力した／別環境で選んだ）。選択状態を失わないよう option を足す。 */
+/**
+ * 一覧のどれでもない値（名前を直接入力した／別環境で選んだ／旧「推奨」一覧の保存値）。
+ * option を足さないと**選択状態が消えて「標準」に見えてしまう**ので、「指定中」として出す。
+ */
 const fontIsCustom = computed(
   () =>
-    !isCuratedId(fontValue.value) &&
+    fontValue.value !== SYSTEM_FONT_ID &&
     !(installed.value ?? []).some((f) => f.family === fontValue.value)
 );
+/** 「指定中」の表示名。旧 id はラベル（`hackgen` ではなく「白源 HackGen」）で出す。 */
+const fontCustomLabel = computed(() => screenFontLabel(fontValue.value));
 /** いま選んでいるフォントで桁がずれないか。ずれるなら注意書きを出す（選択は妨げない）。 */
 const fontMisfit = computed(() => {
   const v = fontValue.value;
-  if (isCuratedId(v)) return false; // 推奨一覧は 1:2 が保証されている
+  // 標準（既定スタック）と旧 id（版名を束ねたスタック）は 1:2 のものだけを並べてある
+  if (v === SYSTEM_FONT_ID || isLegacyId(v)) return false;
   return !fitsGrid(measureFontFit(v));
 });
 function setFont(value: string): void {
   viewSettings.set("font", sanitizeFamily(value) as never);
 }
 function onFontChange(e: Event): void {
-  // 推奨一覧の id はそのまま渡す（sanitize は名前指定のためのもので、id には要らない）
   const v = (e.target as HTMLSelectElement).value;
-  if (isCuratedId(v)) viewSettings.set("font", v as never);
+  // 「標準」と旧 id は id として渡す（sanitize は名前指定のためのもの）
+  if (v === SYSTEM_FONT_ID || isLegacyId(v)) viewSettings.set("font", v as never);
   else setFont(v);
 }
 /** 名前を直接入力（一覧に出ないフォント・Local Font Access 非対応ブラウザ向け）。 */
@@ -222,25 +221,21 @@ onBeforeUnmount(() => {
         </template>
       </template>
 
-      <!-- フォント（画面グリッド）: 推奨一覧＋インストール済みフォント。**未検出でも選べる**
-           （判定は助言。当たらなければ CSS が既定スタックへ落ちる） -->
+      <!-- フォント（画面グリッド）: インストール済みフォントから選ぶ（「推奨」の固定一覧は廃止）。
+           桁が揃うものを先に出すが、ずれるものも選べる（注意書きを出すだけ） -->
       <div class="vsm-row wide">
         <span class="vsm-label">フォント（画面）</span>
         <select class="vsm-select" :value="fontValue" aria-label="画面フォント" @change="onFontChange">
-          <optgroup label="推奨（桁が揃う）">
-            <option v-for="f in SCREEN_FONTS" :key="f.id" :value="f.id">
-              {{ f.label }}<template v-if="f.id !== 'system' && !fontInstalled[f.id]">（未検出）</template>
-            </option>
-          </optgroup>
-          <optgroup v-if="installedFit.length" label="インストール済み（桁が揃う）">
+          <option :value="SYSTEM_FONT_ID">{{ SYSTEM_FONT_LABEL }}</option>
+          <optgroup v-if="installedFit.length" label="桁が揃うフォント">
             <option v-for="f in installedFit" :key="'i' + f.family" :value="f.family">{{ f.family }}</option>
           </optgroup>
-          <optgroup v-if="installedOther.length" label="インストール済み（桁がずれます）">
+          <optgroup v-if="installedOther.length" label="桁がずれるフォント">
             <option v-for="f in installedOther" :key="'o' + f.family" :value="f.family">{{ f.family }}</option>
           </optgroup>
-          <!-- 一覧に無い値（名前指定・別環境で選んだ値）。足さないと選択状態が消える -->
+          <!-- 一覧に無い値（名前指定・別環境で選んだ値・旧設定）。足さないと選択状態が消える -->
           <optgroup v-if="fontIsCustom" label="指定中">
-            <option :value="fontValue">{{ fontValue }}</option>
+            <option :value="fontValue">{{ fontCustomLabel }}</option>
           </optgroup>
         </select>
         <!-- 一覧を出せないブラウザ（Local Font Access 非対応）でも名前で指定できるようにする -->
