@@ -68,3 +68,15 @@ export { decodeAttribute } from "./screen/attributes.js";
 /** グリッド線の色コード表（5250 の属性バイトとは別物。DDS リファレンス GRDATR Table 14） */
 export { GRID_COLOR } from "./protocol/wdsf-parser.js";
 export type { ScreenColor } from "./screen/types.js";
+
+/**
+ * **画面を自己完結 HTML に描き出す**（自動操作のエビデンス）。
+ * 純関数で `node:*` に触れないため、ブラウザ入口からも出せる
+ * （web-ui から「この画面を HTML で保存」を作るときに使える）。
+ */
+export {
+  renderScreenHtml,
+  renderScreenHistoryHtml,
+  type ScreenHtmlMeta,
+  type ScreenHistoryEntry
+} from "./html/screen-html.js";

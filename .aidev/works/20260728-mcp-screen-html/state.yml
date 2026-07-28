@@ -1,0 +1,8 @@
+schema: 3
+slug: mcp-screen-html
+current: review
+approved: [requirement, research, spec, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

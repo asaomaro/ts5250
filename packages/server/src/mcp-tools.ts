@@ -19,6 +19,8 @@ import { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type Scr
 import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
+import { renderScreenHtml, renderScreenHistoryHtml } from "@as400web/core";
+import { ScreenRecorder } from "./screen-recorder.js";
 import { withAudit } from "./audit.js";
 
 const mcpLog = childLog({ component: "mcp-tools" });
@@ -655,6 +657,131 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       })
   );
 
+  /**
+   * 画面をそのまま人に見せられる形（HTML）で出す。テキストや属性 run は LLM 向けで、
+   * **人がエビデンスとして読むには足りない**（色も強調も無い／座標の羅列は頭で再構成できない）。
+   */
+  server.registerTool(
+    "get_screen_html",
+    {
+      description:
+        "現在の画面を、5250 エミュレータの見た目を忠実に再現した自己完結 HTML で取得する（自動操作のエビデンス用）。" +
+        "外部 CSS/JS/フォントを参照せず、HTML 単体で開ける。ダーク/ライトを画面上のボタンで切り替えられる。" +
+        "決定的な変換なので、同じ画面からは常に同じ HTML が出る。",
+      inputSchema: { sessionId: z.string(), title: z.string().optional(), note: z.string().optional() },
+      outputSchema: { html: z.string(), bytes: z.number() }
+    },
+    async ({ sessionId, title, note }) =>
+      withAudit({ op: "get_screen_html", sessionId }, async () => {
+        try {
+          const entry = sessions.get(sessionId, user);
+          const html = renderScreenHtml(entry.session.snapshot(), {
+            capturedAt: new Date().toISOString(),
+            sessionId,
+            host: entry.host,
+            ...(entry.job ? { job: jobLabel(entry.job) } : {}),
+            ...(title !== undefined ? { title } : {}),
+            ...(note !== undefined ? { note } : {})
+          });
+          return {
+            content: [{ type: "text" as const, text: `HTML ${html.length} bytes` }],
+            structuredContent: { html, bytes: html.length }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  /**
+   * 記録は**頼まれたときだけ**動かす。全セッションを常時記録すると、使わない画面のために
+   * メモリを食い続けるうえ、画面に写る入力値が黙って溜まる（`screen-recorder.ts`）。
+   */
+  server.registerTool(
+    "start_screen_recording",
+    {
+      description:
+        "このセッションの画面遷移の記録を開始する（get_screen_history_html で HTML にまとめる）。" +
+        "開始時点の画面が 1 コマ目になる。記録するのは画面と送信キーだけで、入力値は残さない。",
+      inputSchema: { sessionId: z.string(), limit: z.number().int().min(1).max(500).optional() },
+      outputSchema: { recording: z.boolean(), frames: z.number() }
+    },
+    async ({ sessionId, limit }) =>
+      withAudit({ op: "start_screen_recording", sessionId }, async () => {
+        try {
+          const entry = sessions.get(sessionId, user);
+          entry.recorder ??= new ScreenRecorder(entry.session, limit ?? 100);
+          entry.recorder.start();
+          return {
+            content: [{ type: "text" as const, text: "recording" }],
+            structuredContent: { recording: true, frames: entry.recorder.count }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "stop_screen_recording",
+    {
+      description: "画面遷移の記録を停止する。記録済みのコマは残るので、停止後に取り出せる。",
+      inputSchema: { sessionId: z.string() },
+      outputSchema: { recording: z.boolean(), frames: z.number() }
+    },
+    async ({ sessionId }) =>
+      withAudit({ op: "stop_screen_recording", sessionId }, async () => {
+        try {
+          const entry = sessions.get(sessionId, user);
+          entry.recorder?.stop();
+          return {
+            content: [{ type: "text" as const, text: "stopped" }],
+            structuredContent: { recording: false, frames: entry.recorder?.count ?? 0 }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  server.registerTool(
+    "get_screen_history_html",
+    {
+      description:
+        "記録した画面遷移を、前後にたどれるナビゲーション付きの自己完結 HTML にまとめて取得する。" +
+        "各コマの描画は get_screen_html と同一（描画経路を二重に持たない）。clear で取り出し後に記録を捨てる。",
+      inputSchema: {
+        sessionId: z.string(),
+        title: z.string().optional(),
+        note: z.string().optional(),
+        clear: z.boolean().optional()
+      },
+      outputSchema: { html: z.string(), bytes: z.number(), frames: z.number() }
+    },
+    async ({ sessionId, title, note, clear }) =>
+      withAudit({ op: "get_screen_history_html", sessionId }, async () => {
+        try {
+          const entry = sessions.get(sessionId, user);
+          const frames = entry.recorder?.snapshotFrames() ?? [];
+          const html = renderScreenHistoryHtml(frames, {
+            capturedAt: new Date().toISOString(),
+            sessionId,
+            host: entry.host,
+            ...(entry.job ? { job: jobLabel(entry.job) } : {}),
+            ...(title !== undefined ? { title } : {}),
+            ...(note !== undefined ? { note } : {})
+          });
+          if (clear) entry.recorder?.clear();
+          return {
+            content: [{ type: "text" as const, text: `HTML ${html.length} bytes (${frames.length} frames)` }],
+            structuredContent: { html, bytes: html.length, frames: frames.length }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
   server.registerTool(
     "wait_screen",
     {
@@ -735,6 +862,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             sessions.assertWritable(sessionId, user);
             for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
           }
+          // 記録中なら、この画面遷移を起こした操作として次のコマに添える
+          entry.recorder?.noteKey(key);
           const r = await entry.session.sendAid(key, {
             ...(cursor ? { cursor } : {}),
             ...(sysReqText !== undefined ? { sysReqText } : {})
@@ -844,6 +973,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           for (const step of steps) {
             sessions.assertKeyAllowed(sessionId, step.key, user);
             if (step.fields) for (const f of step.fields) entry.session.setField(fieldTarget(f.field), f.value);
+            entry.recorder?.noteKey(step.key);
             last = await entry.session.sendAid(step.key, step.cursor ? { cursor: step.cursor } : {});
             executed++;
             if (step.expect && !screenHas(last.screen, step.expect)) {
@@ -961,4 +1091,9 @@ function screenHas(snap: ScreenSnapshot, expect: { text: string; row?: number | 
 /** プリンター出力設定を openPrinter のオプション断片へ（未設定なら空＝自動出力なし） */
 function withOutput(output: PrinterOutputConfig | undefined): { output?: PrinterOutputConfig } {
   return output ? { output } : {};
+}
+
+/** ジョブ識別子の表示形（`番号/ユーザー/ジョブ名`。引けていなければ装置名だけ） */
+function jobLabel(job: { name: string; system?: string; user?: string; number?: string }): string {
+  return job.number ? `${job.number}/${job.user}/${job.name}` : job.name;
 }

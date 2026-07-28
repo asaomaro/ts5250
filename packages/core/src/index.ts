@@ -280,3 +280,11 @@ export {
   MarkerEncodeError,
   type MarkerRow
 } from "./hostserver/db/marker-encode.js";
+
+// 画面 → 自己完結 HTML（エビデンス出力）
+export {
+  renderScreenHtml,
+  renderScreenHistoryHtml,
+  type ScreenHtmlMeta,
+  type ScreenHistoryEntry
+} from "./html/screen-html.js";

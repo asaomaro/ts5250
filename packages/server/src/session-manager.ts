@@ -13,6 +13,7 @@ import {
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
+import { ScreenRecorder } from "./screen-recorder.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
 const printerLog = childLog({ component: "printer-output" });
@@ -87,6 +88,12 @@ export interface SessionEntry {
   owner?: string;
   /** ジョブ識別子。接続直後に装置名だけ入り、引けたら user/number が足される */
   job?: SessionJob;
+  /**
+   * 画面履歴の記録（**頼まれたときだけ**動く）。エビデンス HTML を束ねるために使う。
+   * 常時記録しないのは、使わない画面でメモリを食い続けるうえ、画面に写る入力値が
+   * 黙って溜まるため（`screen-recorder.ts`）。
+   */
+  recorder?: ScreenRecorder;
   /**
    * ジョブ識別子の解決（背後で走る）。**接続を待たせないので await しない**。
    * 呼び出し側が「取れたら表示に足す」ために購読できるよう、Promise だけ持たせる。
@@ -651,6 +658,7 @@ export class SessionManager {
     const entry = this.sessions.get(id);
     if (entry) {
       assertOwner(entry.owner, user);
+      entry.recorder?.stop(); // 購読を残したままセッションを捨てるとリークする
       entry.session.disconnect();
       this.sessions.delete(id);
       return;
