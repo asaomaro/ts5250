@@ -48,6 +48,15 @@ export const COMMAND = {
    */
   READ_SCREEN_EXTENDED: 0x64,
   WRITE_ERROR_CODE: 0x21,
+  /**
+   * WRITE ERROR CODE TO WINDOW。**窓が開いている間のエラーはこちらで来る**（0x21 ではない）。
+   * 形式は 0x21 の前に「メッセージ行の開始桁・終了桁」の 2 バイトが付くだけ。
+   * 実機の DDS 窓（WINDOW(8 25 8 30)）で無効なファンクション・キーを押すと
+   * `04 22 1a 38 22 0e…0f 04 52 00 00` が来た（0x1a=26・0x38=56＝窓内のメッセージ行）。
+   * 未処理だと同一レコード後半の READ MDT FIELDS ごと捨ててしまい、キーボードが
+   * ロックしたまま応答なしになる。
+   */
+  WRITE_ERROR_CODE_WINDOW: 0x22,
   SAVE_SCREEN: 0x02,
   RESTORE_SCREEN: 0x12,
   ROLL: 0x23,

@@ -101,6 +101,13 @@ export function applyDataStream(
       case COMMAND.WRITE_ERROR_CODE:
         applyWriteErrorCode(r, buf, codec);
         break;
+      case COMMAND.WRITE_ERROR_CODE_WINDOW:
+        // 窓が開いている間のエラーはこちら。メッセージ行の開始桁・終了桁（2 バイト）を
+        // 読み捨ててから本文へ——**捨てないと桁が 1 つずれて先頭が化ける**。
+        // 描画は 0x21 と同じ扱い（systemMessage）で、窓の中への描き込みまではしない。
+        r.skip(2);
+        applyWriteErrorCode(r, buf, codec);
+        break;
       case COMMAND.WRITE_STRUCTURED_FIELD:
         if (applyStructuredField(r, warn)) result.queryRequested = true;
         break;
@@ -423,6 +430,7 @@ function applyStructuredField(r: ByteReader, warn: WarnFn): boolean {
 
 /**
  * WRITE ERROR CODE: エラー行のメッセージを systemMessage として保持する（表示行への描画は簡略化）。
+ * WRITE ERROR CODE TO WINDOW（0x22）も、桁指定の 2 バイトを読み飛ばしたうえでここへ来る。
  *
  * **SO/SI で挟まれた DBCS（漢字）は 2 バイト 1 組で読む。** 1 バイトずつ `decodeByte` に
  * 通すと、DBCS のペアがそれぞれ無関係な SBCS 文字に化ける（メッセージが日本語のとき、

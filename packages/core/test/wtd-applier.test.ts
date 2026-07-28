@@ -170,6 +170,35 @@ describe("applyDataStream — 合成データ", () => {
     expect(buf.snapshot("t", false).systemMessage).toBe("機能キーは使用できません。");
   });
 
+  /**
+   * **窓が開いている間のエラーは WRITE ERROR CODE TO WINDOW（0x22）で来る。**
+   *
+   * 実機の DDS 窓（TESTLIB/GRIDTST5・WINDOW(8 25 8 30)）で、CFxx を宣言して
+   * いない記述にファンクション・キーを送ったときのレコードそのもの。未処理だと未知コマンド
+   * として**レコードの残りを丸ごと捨て**、同居している READ MDT FIELDS（`04 52 00 00`）が
+   * 消えてキーボードがロックしたまま＝「F3 を押すと応答なしでタイムアウト」になる。
+   * 0x21 との差は先頭 2 バイト（0x1a=26・0x38=56 ＝窓内メッセージ行の開始桁・終了桁）だけ。
+   */
+  it("WRITE_ERROR_CODE_WINDOW でも読み取り要求が生き残る（実機トレース）", () => {
+    const codec939 = codecForCcsid(939);
+    const record = Uint8Array.from([
+      0x00, 0x31, 0x12, 0xa0, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03,
+      0x04, 0x22, 0x1a, 0x38, 0x22,
+      0x0e, 0x45, 0x79, 0x47, 0x4f, 0x43, 0x87, 0x43, 0x58, 0x44, 0x9d, 0x48, 0xb6,
+      0x45, 0xb6, 0x44, 0xcd, 0x44, 0x87, 0x44, 0xa4, 0x44, 0x8f, 0x44, 0xbd, 0x43,
+      0x41, 0x0f, 0x40, 0x40,
+      0x04, 0x52, 0x00, 0x00
+    ]);
+    const buf = new ScreenBuffer();
+    const warns: string[] = [];
+    const result = applyDataStream(parseRecord(record).data, buf, codec939, (w) => warns.push(w));
+    expect(warns).toEqual([]);
+    expect(buf.snapshot("t", false).systemMessage).toBe("機能キーは使用できません。");
+    // ここが本題: 後半の READ MDT FIELDS まで届いてキーボードが解放される
+    expect(result.readRequested).toBe(true);
+    expect(result.unlockKeyboard).toBe(true);
+  });
+
   it("未知コマンドは警告してレコードの残りを打ち切る（例外にしない）", () => {
     const { warns, buf } = apply([
       ESC, 0x99, 0x01, 0x02,

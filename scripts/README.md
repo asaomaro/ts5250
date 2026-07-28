@@ -72,7 +72,8 @@ node --env-file=.env scripts/example-automation.mjs
 ## その他
 
 `verify-autosignon` / `verify-signon` / `verify-mcp` / `verify-ws` / `verify-browser` / `verify-dbcs-tls` /
-`verify-gui-enhanced`（各機能の実機検証）、`capture-*`（トレース fixture 採取）、`diag-*`（signon/PDM 診断）、
+`verify-gui-enhanced`（各機能の実機検証）、`capture-*`（トレース fixture 採取）、
+`diag-*`（signon/PDM 診断・`diag-window-fkey` は DDS 窓で無効キーを押したときのホスト応答）、
 `dump-screen`（トレースをオフライン再生）も同じ実行規約に従う。
 
 ## 他クライアントの実測（tap-proxy）
