@@ -64,6 +64,59 @@ describe("ScsDecoder", () => {
 });
 
 /**
+ * **ホストが SI でシフトを閉じないまま制御コードを送っても、制御として効くこと。**
+ *
+ * DBCS ラン中は「SO/SI 以外のすべてのバイト」を全角の先行バイトとして消費していたため、
+ * 改行（NL）や改ページ（FF）が 2 バイト文字の一部として食われ、**U+FFFD が並んだうえ
+ * 行・ページが繋がってしまう**不具合があった（利用者報告「一部の DBCS が化ける」）。
+ *
+ * SCS の制御はすべて 0x40 未満、DBCS の先行バイトは 0x40 以上（0x4040 の全角空白を含む）。
+ * `wtd-applier` の `applyWtd` は元からこの境界で分けており、**両経路で同じ判定にする**のが要点。
+ * 制御を処理したあとも `dbcsMode` は落とさない——ホストが SI を送るまでランは続いている。
+ */
+describe("ScsDecoder — SI を閉じないまま制御コードが来る帳票", () => {
+  const SO = 0x0e;
+  const SI = 0x0f;
+  const NL = 0x15;
+  const FF = 0x0c;
+  const KI = [0x45, 0x79]; // 機
+  const NOU = [0x47, 0x4f]; // 能
+  const ZENSP = [0x40, 0x40]; // 全角空白
+  const dec = (bytes: number[]) => new ScsDecoder(939).decode(Uint8Array.from(bytes));
+
+  it("NL が改行として効き、前後の全角が化けない", () => {
+    const pages = dec([SO, ...KI, NL, ...NOU, SI, FF]);
+    expect(pages[0]!.lines).toEqual(["機", "能"]);
+  });
+
+  it("FF が改ページとして効く", () => {
+    const pages = dec([SO, ...KI, FF, ...NOU, SI, FF]);
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.lines[0]).toBe("機");
+    expect(pages[1]!.lines[0]).toBe("能");
+  });
+
+  it("SI を閉じた通常の形は従来どおり（退行防止）", () => {
+    const pages = dec([SO, ...KI, SI, NL, SO, ...NOU, SI, FF]);
+    expect(pages[0]!.lines).toEqual(["機", "能"]);
+  });
+
+  it("奇数バイトの DBCS ランでも U+FFFD が延々と続かない", () => {
+    // ラン内に半角空白 1 個が紛れてペアがずれる形。ずれ自体は避けられないが、
+    // 後続の制御（FF）まで食い潰して同期を失わないことを固定する
+    const pages = dec([SO, ...KI, 0x40, ...NOU, SI, FF]);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.lines[0]!.split("\uFFFD").length - 1).toBeLessThanOrEqual(2);
+  });
+
+  it("全角空白（0x4040）は行中で 2 桁の U+3000 のまま（退行防止）", () => {
+    const pages = dec([SO, ...KI, ...ZENSP, ...NOU, SI, FF]);
+    expect(pages[0]!.lines[0]).toBe("機\u3000能");
+    expect(pages[0]!.cols).toBe(6); // 機(2) + 全角空白(2) + 能(2)
+  });
+});
+
+/**
  * **0x2B 0xFD（IGC/DBCS 制御）を読み飛ばせること。**
  *
  * 日本語機の業務帳票（DSPFMT のレコード設計書）が 1 ページも取れなかった原因。

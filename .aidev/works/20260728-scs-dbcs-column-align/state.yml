@@ -1,0 +1,8 @@
+schema: 3
+slug: scs-dbcs-column-align
+current: review
+approved: [requirement, spec, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

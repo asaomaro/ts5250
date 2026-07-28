@@ -111,17 +111,29 @@ export class ScsDecoder {
       const b = scs[i++]!;
       // DBCS モード中はバイトを 2 個ずつ全角として消費する（制御コード値と衝突しないよう switch より前で処理）。
       // SI で SBCS へ戻る。SO は冗長として読み飛ばす。
+      //
+      // **0x40 未満は全角の先行バイトにしない**（`wtd-applier` の `applyWtd` と同じ判定）。
+      // SCS の制御はすべて 0x40 未満（NOOP 0x00 / TRANSPARENT 0x03 / HT 0x05 / RNL 0x06 /
+      // FF 0x0C / CR 0x0D / NL 0x15 / 0x2B オーダー / PP 0x34 / RFF 0x3A）なので、
+      // ここで除外しないと**ホストが行末で SI を閉じない帳票**で改行・改ページごと食われる
+      // ——制御バイトが先行バイト扱いになって次の 1 バイトまで巻き込み、U+FFFD が並んだうえ
+      // 行が繋がってしまう（利用者報告の「一部の DBCS が化ける」）。除外すれば下の switch が
+      // 制御として処理し、シフトが開いたままでも表示だけが欠けて同期は保たれる。
       if (this.isDbcs && dbcsMode) {
         if (b === SI) {
           dbcsMode = false;
-        } else if (b === SO) {
-          /* 冗長 SO */
-        } else {
+          continue;
+        }
+        if (b === SO) {
+          continue; /* 冗長 SO */
+        }
+        if (b >= 0x40) {
           const b2 = next();
           if (b2 < 0) break;
           putWide(String.fromCodePoint(this.codec.decodeDbcsPair!(b, b2)));
+          continue;
         }
-        continue;
+        // 0x40 未満＝制御。DBCS モードは維持したまま下の switch で処理する
       }
       switch (b) {
         case NOOP:
