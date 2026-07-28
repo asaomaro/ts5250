@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { viewSettings, VIEW_ITEMS, type ViewSettings, type ViewItemDef } from "../stores/viewSettings.js";
-import { SCREEN_FONTS, detectInstalledFontIds } from "../composables/screenFonts.js";
+import {
+  SCREEN_FONTS,
+  loadFontChoices,
+  measureFontFit,
+  fitsGrid,
+  isCuratedId,
+  sanitizeFamily,
+  type InstalledFont
+} from "../composables/screenFonts.js";
 import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composables/headerMenu.js";
 
 /**
@@ -52,15 +60,27 @@ const MENU_ROWS = computed<MenuRow[]>(() => {
 });
 
 // ---- 画面フォント（セレクト）----
-// styles.css の全フォントを候補にし、**導入済みのものだけ選択可**にする（未導入は disabled）。
+// 推奨一覧（和欧 1:2 が保証されたもの）に加えて、**インストール済みフォントから選べる**。
+// 一覧を出せないブラウザ（Local Font Access 非対応）のために、名前の直接入力も残す。
+//
+// **導入判定で選択を塞がない。** 判定は canvas 実測や権限に左右され、実際には入っているのに
+// 未検出になることがある（「入れたのに選べない」の原因）。未検出は印を出すだけにして、
+// 当たらなければ CSS が既定スタックへ落ちる形にしてある。
 const fontInstalled = ref<Record<string, boolean>>({});
-/** 導入判定を更新する。可能なら Local Font Access（版名非依存・正確）、無ければ canvas 実測。
+/** インストール済みフォント（Local Font Access が使えたときだけ。null＝列挙できない） */
+const installed = ref<InstalledFont[] | null>(null);
+/** 桁が揃うもの／ずれる可能性があるもの。ずれるほうも**選べる**（利用者の判断）。 */
+const installedFit = computed(() => (installed.value ?? []).filter((f) => fitsGrid(f.fit)));
+const installedOther = computed(() => (installed.value ?? []).filter((f) => !fitsGrid(f.fit)));
+
+/** 導入判定と一覧を更新する。可能なら Local Font Access（版名非依存・正確）、無ければ canvas 実測。
  *  **メニューを開いた瞬間（クリック内）に呼ぶ**ことで Local Font Access の許可を得られる。 */
 async function refreshFonts(): Promise<void> {
-  const ids = await detectInstalledFontIds();
+  const choices = await loadFontChoices();
   const map: Record<string, boolean> = {};
-  for (const f of SCREEN_FONTS) map[f.id] = ids.has(f.id);
+  for (const f of SCREEN_FONTS) map[f.id] = choices.installedIds.has(f.id);
   fontInstalled.value = map;
+  installed.value = choices.installed;
 }
 /** ⚙ 画面ボタン。開閉と同時に、開いたときはフォント判定を更新（クリック＝ユーザー操作）。 */
 function onToggle(): void {
@@ -68,8 +88,33 @@ function onToggle(): void {
   if (open.value) void refreshFonts();
 }
 const fontValue = computed(() => eff.value.font);
+/** 一覧のどれでもない値（名前を直接入力した／別環境で選んだ）。選択状態を失わないよう option を足す。 */
+const fontIsCustom = computed(
+  () =>
+    !isCuratedId(fontValue.value) &&
+    !(installed.value ?? []).some((f) => f.family === fontValue.value)
+);
+/** いま選んでいるフォントで桁がずれないか。ずれるなら注意書きを出す（選択は妨げない）。 */
+const fontMisfit = computed(() => {
+  const v = fontValue.value;
+  if (isCuratedId(v)) return false; // 推奨一覧は 1:2 が保証されている
+  return !fitsGrid(measureFontFit(v));
+});
+function setFont(value: string): void {
+  viewSettings.set("font", sanitizeFamily(value) as never);
+}
 function onFontChange(e: Event): void {
-  viewSettings.set("font", (e.target as HTMLSelectElement).value as never);
+  // 推奨一覧の id はそのまま渡す（sanitize は名前指定のためのもので、id には要らない）
+  const v = (e.target as HTMLSelectElement).value;
+  if (isCuratedId(v)) viewSettings.set("font", v as never);
+  else setFont(v);
+}
+/** 名前を直接入力（一覧に出ないフォント・Local Font Access 非対応ブラウザ向け）。 */
+const fontName = ref("");
+function onFontNameApply(): void {
+  const v = sanitizeFamily(fontName.value);
+  if (v) setFont(v);
+  fontName.value = "";
 }
 
 // ---- デザイン候補パレット（spec D7/D9）----
@@ -177,19 +222,45 @@ onBeforeUnmount(() => {
         </template>
       </template>
 
-      <!-- フォント（画面グリッド）: styles.css の全フォントから、導入済みのみ選択可（未導入は無効）。 -->
+      <!-- フォント（画面グリッド）: 推奨一覧＋インストール済みフォント。**未検出でも選べる**
+           （判定は助言。当たらなければ CSS が既定スタックへ落ちる） -->
       <div class="vsm-row wide">
         <span class="vsm-label">フォント（画面）</span>
         <select class="vsm-select" :value="fontValue" aria-label="画面フォント" @change="onFontChange">
-          <option
-            v-for="f in SCREEN_FONTS"
-            :key="f.id"
-            :value="f.id"
-            :disabled="!fontInstalled[f.id]"
-          >
-            {{ f.label }}<template v-if="!fontInstalled[f.id]">（未導入）</template>
-          </option>
+          <optgroup label="推奨（桁が揃う）">
+            <option v-for="f in SCREEN_FONTS" :key="f.id" :value="f.id">
+              {{ f.label }}<template v-if="f.id !== 'system' && !fontInstalled[f.id]">（未検出）</template>
+            </option>
+          </optgroup>
+          <optgroup v-if="installedFit.length" label="インストール済み（桁が揃う）">
+            <option v-for="f in installedFit" :key="'i' + f.family" :value="f.family">{{ f.family }}</option>
+          </optgroup>
+          <optgroup v-if="installedOther.length" label="インストール済み（桁がずれます）">
+            <option v-for="f in installedOther" :key="'o' + f.family" :value="f.family">{{ f.family }}</option>
+          </optgroup>
+          <!-- 一覧に無い値（名前指定・別環境で選んだ値）。足さないと選択状態が消える -->
+          <optgroup v-if="fontIsCustom" label="指定中">
+            <option :value="fontValue">{{ fontValue }}</option>
+          </optgroup>
         </select>
+        <!-- 一覧を出せないブラウザ（Local Font Access 非対応）でも名前で指定できるようにする -->
+        <div class="vsm-fontname">
+          <input
+            v-model="fontName"
+            class="vsm-input"
+            type="text"
+            placeholder="フォント名を直接入力"
+            aria-label="フォント名を直接入力"
+            @keydown.enter.prevent="onFontNameApply"
+          />
+          <button class="vsm-toggle" :disabled="!fontName.trim()" @click="onFontNameApply">適用</button>
+        </div>
+        <p v-if="installed === null" class="vsm-note">
+          このブラウザではインストール済みフォントを一覧できません。名前を直接入力してください。
+        </p>
+        <p v-if="fontMisfit" class="vsm-note warn">
+          このフォントは半角:全角が 1:2 でないため、桁がずれて見えることがあります。
+        </p>
       </div>
     </div>
   </div>
@@ -415,5 +486,42 @@ onBeforeUnmount(() => {
 .vsm-select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* 名前の直接入力（一覧を出せないブラウザ・一覧に無いフォント向け） */
+.vsm-fontname {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.vsm-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.vsm-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.vsm-fontname .vsm-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 補足・注意（選択は妨げず、見え方の断りだけ出す） */
+.vsm-note {
+  margin: 4px 0 0;
+  font-family: var(--sans);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.vsm-note.warn {
+  color: var(--t-red);
 }
 </style>
