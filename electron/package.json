@@ -38,19 +38,25 @@
     },
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "signAndEditExecutable": false
-    },
-    "portable": {
-      "artifactName": "AS400-5250-Emulator-${version}-portable.${ext}",
-      "unpackDirName": "as400-5250-emulator"
     },
     "mac": {
       "target": [
         "dmg"
       ],
       "category": "public.app-category.utilities"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "AS400 5250 エミュレーター",
+      "artifactName": "AS400-5250-Emulator-${version}-setup.${ext}"
     }
   }
 }

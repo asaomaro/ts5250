@@ -10,10 +10,15 @@ rem Usage:
 rem   electron.bat            auto-build if not built, then build the exe
 rem   electron.bat --build    force rebuild, then build the exe
 rem
-rem Output: electron\dist\AS400-5250-Emulator-<version>-portable.exe
-rem   A single standalone exe. No installer, no Node.js on the target machine:
-rem   copy it anywhere and run it. Runtime deps are packed inside (see
-rem   electron/scripts/prepare-app.mjs). Settings persist under %APPDATA%.
+rem Output: electron\dist\AS400-5250-Emulator-<version>-setup.exe
+rem   A single exe to hand out. It is a one-click per-user installer:
+rem   installs under %LOCALAPPDATA% (no admin), makes shortcuts, then starts
+rem   instantly every time. No Node.js needed on the target machine - runtime
+rem   deps are packed inside (see electron/scripts/prepare-app.mjs).
+rem   Settings live in %APPDATA% and survive uninstall.
+rem
+rem   Why not a portable exe: the portable stub deletes and re-extracts the whole
+rem   ~300 MB payload on EVERY launch, so startup took minutes and never got faster.
 setlocal
 cd /d "%~dp0"
 
@@ -63,5 +68,5 @@ if errorlevel 1 (
   echo build failed 1>&2
   exit /b 1
 )
-echo ==^> done. standalone exe is in electron\dist\
+echo ==^> done. installer exe is in electron\dist\
 endlocal

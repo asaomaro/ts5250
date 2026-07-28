@@ -7,13 +7,13 @@
 #   ./electron.sh            # 未ビルドなら自動ビルドしてから生成
 #   ./electron.sh --build    # 強制再ビルドしてから生成
 #
-# 生成物は electron/dist/ に出ます。**Windows は単一の portable exe**
-# （インストール不要・実行先に Node.js も不要。設定は %APPDATA% に残る）、
-# Linux は AppImage、macOS は dmg。実行時依存はアプリの中に入ります
-# （electron/scripts/prepare-app.mjs が組み立て）。
+# 生成物は electron/dist/ に出ます。**Windows は単一のインストーラ exe**
+# （ワンクリック・ユーザー単位。%LOCALAPPDATA% に入るので管理者権限は不要。
+# 実行先に Node.js も不要）、Linux は AppImage、macOS は dmg。
+# 実行時依存はアプリの中に入ります（electron/scripts/prepare-app.mjs が組み立て）。
 #
 # **Windows 用 exe は Windows 上で `electron.bat` を実行して作ります**——
-# portable/nsis は NSIS を使うため、Linux から作るには wine が要ります。
+# NSIS を使うため、Linux から作るには wine が要ります。
 set -euo pipefail
 cd "$(dirname "$0")"
 

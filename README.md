@@ -164,10 +164,10 @@ start.bat             # Windows
 > 全インターフェースを待ち受けます）。認証なしのまま公開したい場合は `--host 0.0.0.0` を明示できますが、
 > 起動時に警告が出ます。バインド先は起動ログに出力されます。
 
-### デスクトップ版（Electron）— 単独で配布できる実行ファイルを作る
+### デスクトップ版（Electron）— 配布できる実行ファイルを作る
 
 ```bat
-electron.bat            :: Windows。単一の portable exe を作る
+electron.bat            :: Windows。配布用のインストーラ exe を作る
 electron.bat --build    :: 強制再ビルドしてから作る
 ```
 
@@ -176,22 +176,34 @@ electron.bat --build    :: 強制再ビルドしてから作る
 ```
 
 生成物は `electron/dist/` に出ます。Windows は
-**`AS400-5250-Emulator-<version>-portable.exe`** の 1 ファイルだけで、
-**インストール不要・実行先に Node.js も不要**——コピーして実行すれば動きます。
+**`AS400-5250-Emulator-<version>-setup.exe`** の 1 ファイルで、これを配ればそのまま導入できます
+（**実行先に Node.js は不要**）。ワンクリック・ユーザー単位のインストーラなので
+`%LOCALAPPDATA%` に入り、**管理者権限は要りません**。以後の起動は即座です。
+
+> 📌 **portable（インストール不要の単一 exe）は採っていません。** portable のスタブは
+> 起動のたびに `RMDir /r` で展開先を消し、**約 300MB の中身を毎回展開し直します**。
+> ウイルス対策の走査も毎回かかるため起動に数分かかり、2 回目以降も速くなりません
+> （実測で 2 分超）。インストール痕跡を残したくない用途なら、`electron/package.json` の
+> `win.target` を `"zip"` にすると「1 回展開して以後は即起動」にできます。
 
 - 実行時依存（hono / ws / pino / pdfkit / zod / MCP SDK …）は
   `electron/scripts/prepare-app.mjs` が `electron/app-stage/` に組み立て、**アプリの中に同梱**します。
   ルートの `node_modules` は使いません（electron や playwright まで入っていて配布物が太るため）。
-- **設定は exe の外に残ります**（`%APPDATA%`＝`app.getPath("userData")`）。portable exe は起動のたびに
-  一時フォルダへ展開されますが、`connections.json` と `.env`（master key）は `userData` に置くので
-  次に起動しても引き継がれます。
+  ソースマップと型定義は実行時に読まれないので落とします（13MB ぶん）。
+- **設定はアプリの外に残ります**（`%APPDATA%`＝`app.getPath("userData")`）。`connections.json`・
+  `.env`（master key）・`startup.log` がここに置かれ、アンインストールしても消えません。
 - **サーバー設定（`profiles.json`）は同梱しません。** 同梱するとビルドした人の接続先と資格情報が
   そのまま配られてしまいます。利用者は起動後に接続画面から作ります。
 - 単一利用者アプリなので `--auto-secret-key` 付きで起動し、パスワード保存に使う master key を
   **自動生成**します（手動設定は不要 →
   [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
-- **Windows 用 exe は Windows 上で作ります。** portable は内部で NSIS を使うため、Linux から
-  作るには wine が要ります。`./electron.sh` はその環境の形式（AppImage / dmg）を作ります。
+- **ポートは空いているものを自動で選びます**（3400 から探索）。開発用の `start.bat` を動かしたままでも
+  ぶつかりません。二重起動は防止され、2 つ目は既存のウィンドウを前面に出して終わります。
+- **起動の記録は `%APPDATA%\AS400 5250 Emulator\startup.log`** に残ります。
+  ウィンドウはサーバーより先に開き、失敗したら理由をウィンドウに出します
+  （GUI アプリでは stderr を読む人がいないため）。
+- **Windows 用 exe は Windows 上で作ります。** NSIS を使うため、Linux から作るには wine が要ります。
+  `./electron.sh` はその環境の形式（AppImage / dmg）を作ります。
 - **exe のリソース編集（`signAndEditExecutable`）は切ってあります。** 有効だと electron-builder が
   rcedit のために `winCodeSign` パッケージを取りに行き、その中の **macOS 用シンボリックリンク**を
   展開する段で失敗します（Windows でシンボリックリンクを作るには開発者モードか管理者権限が要る。

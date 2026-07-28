@@ -21,7 +21,16 @@
 //     node_modules/                      … 第三者依存 ＋ @as400web/*（実体コピー）
 //     packages/web-ui/dist               … 静的アセット（--web-root が cwd 相対で読む）
 import { execSync } from "node:child_process";
-import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  existsSync
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,5 +122,33 @@ for (const name of LIB_PACKAGES) {
 cpSync(join(REPO, "packages", "web-ui", "dist"), join(STAGE, "packages", "web-ui", "dist"), {
   recursive: true
 });
+
+/**
+ * 実行に要らないものを落とす。
+ *
+ * **配布物の大きさは起動の速さに直結する**——portable exe は起動のたびに全体を展開し直し、
+ * Windows ではその 1 ファイルずつをウイルス対策が走査する。ソースマップと型定義は
+ * 実行時に一度も読まれないので、入れておく理由が無い。
+ *
+ * **ライセンス表記（LICENSE / NOTICE）と README は残す。** 再配布物なので、
+ * 大きさのために取り除いてよいものではない。
+ */
+function pruneDeadWeight(dir) {
+  let removed = 0;
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(map|d\.ts|d\.cts|d\.mts)$/.test(e.name)) {
+        removed += statSync(p).size;
+        rmSync(p);
+      }
+    }
+  };
+  walk(dir);
+  return removed;
+}
+const freed = pruneDeadWeight(join(STAGE, "node_modules"));
+log(`==> ソースマップ・型定義を除去（${(freed / 1024 / 1024).toFixed(1)} MB）`);
 
 log(`==> 完了: ${STAGE}`);
