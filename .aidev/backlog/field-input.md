@@ -1,8 +1,11 @@
-# フィールド入力仕様（FFW 挙動ビット）
+# フィールド入力仕様（FFW 挙動ビット・ローカル編集キー）
 
 2026-07-28 に「EDTWRD / EDTMSK に対応できているか」を調べた際、**FFW の挙動ビットが
 ほぼ未実装**だと分かった。EDTWRD / EDTMSK 自体は追加実装不要と結論が出ているので、
 その根拠（再調査しないため）と、そこで見つかった残件をここへ積む。
+
+同じ調査の続きで **Field Exit 等のローカル編集キーも未実装**だと分かった。
+こちらは **README が対応済みと書いている**ぶん厄介なので、あわせて積む。
 
 ## 調査済み: EDTWRD / EDTMSK は追加実装が要らない
 
@@ -54,6 +57,40 @@
 - [ ] **SHIFT の未強制分** `ALPHA_ONLY 0x0100` / `KATAKANA 0x0400` / `IO 0x0600`
   - `packages/core/src/screen/field-validate.ts` は数値系（NUMERIC_ONLY / DIGITS_ONLY /
     SIGNED_NUMERIC）と DBCS 種別・コードページしか見ておらず、英字専用等は素通りする
+
+## 未実装: ローカル編集キー（Field Exit / Erase EOF / Erase Input）
+
+**README:335 は「ローカル編集キー（Field Exit / Erase EOF / Erase Input）、キーバインドは
+編集可能」と書いているが、3 つとも実装が無い。** ロードマップではなく
+`## 🖥 Web エミュレーターの使い方` → `2. **操作**` 配下の**機能一覧**に書かれているため、
+実装するか README を直すかのどちらかが要る（2026-07-28 時点で食い違ったまま）。
+
+これらは **AID キーではなくローカル操作**（ホストへ送らず端末が完結させる）なので、
+`AidKey` ではなく `LocalAction` 側に足すもの。現状の欠落は以下。
+
+- 実装は 0 件。`packages/web-ui/src/composables/fieldEdit.ts:41` に
+  「`cursor===len` は満杯で以降の入力はブロックされる（**field-exit 必要**）」という
+  コメントがあり、必要性は認識されているが実行する手段が無い
+- `packages/web-ui/src/composables/useKeymap.ts:4-16` の `LocalAction` は
+  `home` / `end` / `tab` / `shift-tab` / 矢印 / `word-*` のみ
+- `packages/web-ui/src/stores/keybindings.ts:23` の
+  `BindingTarget = AidKey | view:${string} | macro:${string}` に**ローカル編集キーの枠が無い**
+  ＝「キーバインドは編集可能」を満たすには **`BindingTarget` の拡張も要る**
+- 画面下部のキー行（`StatusBar.vue`）は F1–F24 と Attn / SysReq のみ。
+  既定バインドは `ctrl+F1`（カナ）/ `ctrl+F3`（SO/SI）の 2 つだけ
+
+- [ ] **Field Exit**
+  - 実機の仕事は 4 つ: ①カーソル以降を欄末尾まで消去 ②**FFW の ADJUST（右寄せゼロ埋め／
+    空白埋め）を適用** ③次の入力欄へ進める ④MDT を立てる
+  - ②があるので、**上の ADJUST 項目と同時にやるのが素直**（別々にやると二度手間になる）
+  - 現状、部分入力の欄から抜ける手段は Tab だけだが、Tab は①②をやらない
+- [ ] **Field− / Field+**
+  - 数値欄で符号を確定して欄を出る。**実機では負値入力の主経路**がこれ
+  - 現状は `-` を直接打てば `packages/core/src/screen/field-validate.ts:19` の許容集合
+    `/^[0-9.,+-]*$/` を通るので入力自体はできるが、実機の作法とは別物
+  - 下の「符号付き数値の送信表現」と**同じ設計判断**になるので、切り離さずに考えること
+- [ ] **Erase EOF**（カーソルから欄末尾まで消去。欄からは出ない＝Field Exit の①だけ）
+- [ ] **Erase Input**（全入力欄をクリア）
 
 ## 要確認（実機で確かめてから判断する）
 
