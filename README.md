@@ -192,6 +192,14 @@ electron.bat --build    :: 強制再ビルドしてから作る
   [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
 - **Windows 用 exe は Windows 上で作ります。** portable は内部で NSIS を使うため、Linux から
   作るには wine が要ります。`./electron.sh` はその環境の形式（AppImage / dmg）を作ります。
+- **exe のリソース編集（`signAndEditExecutable`）は切ってあります。** 有効だと electron-builder が
+  rcedit のために `winCodeSign` パッケージを取りに行き、その中の **macOS 用シンボリックリンク**を
+  展開する段で失敗します（Windows でシンボリックリンクを作るには開発者モードか管理者権限が要る。
+  `ERROR: Cannot create symbolic link … libcrypto.dylib`）。**署名証明書を使っていない以上、
+  この工程で得るものはファイルプロパティの製品名・バージョンだけ**なので、
+  誰の環境でもビルドが通ることを優先しました。
+  必要なら Windows の開発者モードを有効にしたうえで `electron/package.json` の
+  `win.signAndEditExecutable` を消せば従来どおりになります。
 
 ---
 

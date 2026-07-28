@@ -39,7 +39,8 @@
     "win": {
       "target": [
         "portable"
-      ]
+      ],
+      "signAndEditExecutable": false
     },
     "portable": {
       "artifactName": "AS400-5250-Emulator-${version}-portable.${ext}",
