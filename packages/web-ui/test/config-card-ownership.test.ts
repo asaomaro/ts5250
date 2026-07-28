@@ -191,3 +191,48 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
     w.unmount();
   });
 });
+
+/**
+ * **新規セッションの保存先は「選んだ親システム」から決まる。**
+ *
+ * セッションは参照先システムと同じ保管場所（ファイル）にしか置けない
+ * （サーバー側 `config-store.ts` の `assertIntegrity` / `addSession`）。
+ * 以前は `isServer` が `props.system?.ref ?? props.session?.ref` を見ており、
+ * 新規セッションではどちらも `undefined` に落ちて `source`（システム作成フォームにしか無い
+ * select。既定 "personal"）にフォールバックしていた。その結果、親がサーバー設定のシステムでも
+ * 常に `source: "personal"` で POST され、個人設定ストアに存在しない親を引いて
+ * `system <名前> not found` で保存に失敗していた（利用者報告）。
+ */
+describe("新規セッションの保存先は親システムに従う", () => {
+  async function createSession(parentSystem: string) {
+    stubFetch(true, [SRV_SYSTEM, OWN_SYSTEM]);
+    systemsStore.editable = true;
+    const w = mount(ConfigCard, {
+      props: { kind: "session" as const, creating: true, parentSystem }
+    });
+    await flushPromises();
+    const nameInput = w.findAll(".fgrid input")[0]!;
+    await nameInput.setValue("s1");
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "保存")!
+      .trigger("click");
+    await flushPromises();
+    const post = calls.find((c) => c.url === "/api/sessions-config" && c.method === "POST");
+    expect(post).toBeDefined();
+    w.unmount();
+    return JSON.parse(post!.body) as { source: string; system: string };
+  }
+
+  it("親がサーバー設定（srv:）ならサーバー設定へ保存する", async () => {
+    const body = await createSession(SRV_SYSTEM.ref);
+    expect(body.system).toBe(SRV_SYSTEM.ref);
+    expect(body.source).toBe("server");
+  });
+
+  it("親が自分の設定（own:）なら自分の設定へ保存する", async () => {
+    const body = await createSession(OWN_SYSTEM.ref);
+    expect(body.system).toBe(OWN_SYSTEM.ref);
+    expect(body.source).toBe("personal");
+  });
+});

@@ -143,6 +143,33 @@ describe("applyDataStream — 合成データ", () => {
     expect(buf.snapshot("t", false).systemMessage).toBe("CPF1120 - User not found");
   });
 
+  /**
+   * **WRITE_ERROR_CODE の DBCS（漢字）メッセージが文字化けしない。**
+   *
+   * 実機のトレースで、日本語のエラーメッセージ（"機能キーは使用できません。"）が
+   * SO/SI で挟まれた DBCS として送られてきた。以前の実装は 1 バイトずつ decodeByte に
+   * 通していたため、DBCS のペアがそれぞれ無関係な SBCS 文字に化けていた
+   * （画面下部のエラー行が文字化けする不具合として利用者から報告された）。
+   */
+  it("WRITE_ERROR_CODE の DBCS メッセージが文字化けしない（実機トレース）", () => {
+    const codec930 = codecForCcsid(930);
+    const record = Uint8Array.from([
+      0x00, 0x60, 0x12, 0xa0, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03, 0x04, 0x21, 0x22,
+      0x0e, 0x45, 0x79, 0x47, 0x4f, 0x43, 0x87, 0x43, 0x58, 0x44, 0x9d, 0x48, 0xb6,
+      0x45, 0xb6, 0x44, 0xcd, 0x44, 0x87, 0x44, 0xa4, 0x44, 0x8f, 0x44, 0xbd, 0x43,
+      0x41, 0x0f, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+      0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+      0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+      0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+      0x20, 0x04, 0x52, 0x00, 0x00
+    ]);
+    const buf = new ScreenBuffer();
+    const warns: string[] = [];
+    applyDataStream(parseRecord(record).data, buf, codec930, (w) => warns.push(w));
+    expect(warns).toEqual([]);
+    expect(buf.snapshot("t", false).systemMessage).toBe("機能キーは使用できません。");
+  });
+
   it("未知コマンドは警告してレコードの残りを打ち切る（例外にしない）", () => {
     const { warns, buf } = apply([
       ESC, 0x99, 0x01, 0x02,
@@ -153,13 +180,55 @@ describe("applyDataStream — 合成データ", () => {
     expect(buf.snapshot("t", false)).toBeTruthy();
   });
 
-  it("未知オーダーは警告して残りを打ち切る", () => {
-    const { warns } = apply([
+  /**
+   * **未知オーダーは警告するが、レコード全体は打ち切らない（次の ESC まで読み飛ばす）。**
+   *
+   * 実機で正体不明のオーダー（0x1C 等）に当たった直後の WRITE（キーボード解放）・READ が
+   * 丸ごと失われ、ホストは応答したつもりでもクライアントの鍵盤が開かず
+   * 「応答待ちのまま固まる」不具合として利用者から報告された。ESC(0x04) は表示データにも
+   * 他のオーダーにも現れないので、次の ESC まで読み飛ばして次のコマンドから復帰できる。
+   */
+  it("未知オーダーは警告するが次の ESC から復帰する（レコード全体は打ち切らない）", () => {
+    const { warns, buf, result } = apply([
       ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
-      0x1c, // DUP 等・01 では未対応オーダー
-      ...e("X")
+      0x16, // 0x15(WDSF)〜0x1D(SF) の間の未使用番地。まだ未対応のオーダー
+      ...e("X"), // 読み飛ばされ、画面には出ない
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08, // CC2 unlock
+      ORDER.SBA, 1, 1, ...e("HELLO"),
+      ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00
     ]);
     expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("0x16");
+    expect(rowText(buf, 1)).toContain("HELLO"); // 未知オーダー後続のコマンドも適用される
+    expect(result.unlockKeyboard).toBe(true); // キーボード解放が失われない
+    expect(result.readRequested).toBe(true);
+  });
+
+  /**
+   * **0x1C は "*" 1 文字を表示する（正体未確認・実機表示との突き合わせで確定）。**
+   *
+   * 実機の標準システム画面「スプール・ファイルの表示」（DSPSPLF 系）のトレースで観測。
+   * 桁末尾で打ち切られた DBCS 見出しフィールドの直後・サブファイル明細データの直前に
+   * 一度だけ現れ、以前はここで「未知オーダー」として警告されレコードの残りが失われて
+   * いた（利用者の報告では、見出し以降のデータ行が丸ごと表示されない症状だった）。
+   * 当初は 0 引数の読み飛ばし（no-op）として直したが、ACS の実際の表示（"仕*"）と
+   * 突き合わせたところ "*" が 1 文字欠けていた（利用者のスクリーンショット比較で発覚）。
+   * "*" は 1 桁占有するので、続く表示データは 1 桁分後ろにずれて正しい位置に来る。
+   *
+   * **rawByte は付けない。** 0x1C はオーダー自身の識別バイトであって受信した文字バイトでは
+   * ないので、rawByte として持たせるとカタカナ表示モードが半角カナに再解釈して化ける。
+   */
+  it('0x1C は "*" 1 文字を表示し、後続の表示データを取りこぼさない', () => {
+    const { warns, buf } = apply([
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 1, 1, ...e("A"),
+      ORDER.UNKNOWN_1C,
+      ...e("B")
+    ]);
+    expect(warns).toEqual([]);
+    expect(rowText(buf, 1)).toContain("A*B");
+    const cell = buf.snapshot("t", false).cells[0]?.[1];
+    expect(cell?.rawByte).toBeUndefined(); // カタカナ表示モードで再解釈されない
   });
 
   it("CLEAR_UNIT_ALTERNATE は警告付きでクリアにフォールバックする", () => {

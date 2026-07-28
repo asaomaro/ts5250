@@ -102,6 +102,20 @@ export class ScreenBuffer {
     return this.rows * this.cols;
   }
 
+  /**
+   * **文字セル・サイズだけを変更する共通処理。GUI 構造体には触れない——呼び出し側の責任。**
+   *
+   * `clearUnitAlternate()` から呼ぶときは GUI 構造体（窓・選択フィールド・スクロールバー・
+   * 罫線）を残す。CLEAR UNIT ALTERNATE は SFLCTL の再描画のたびに何度も送られてくる
+   * （実機・YB0270R で確認。KSN20 罫線が「一度描かれた直後に消える」不具合の原因
+   * だった）。罫線は WDSF の専用コマンド（Clear Grid Line Buffer 0x61・GRDATR/GRDLIN
+   * 主構造の flag1 bit0 等）で寿命管理されており、CLEAR UNIT ALTERNATE 側で消す必要はない。
+   *
+   * 一方 `clearUnit()` は自分で `clearGui()` を追加で呼ぶ（実機 PB1000R で、CREATE WINDOW
+   * の窓を閉じるときに素の CLEAR UNIT だけで窓を暗黙に消すことを確認したため）。
+   * つまり GUI 構造体を消すかどうかはコマンドの種類（0x40 と 0x20）で実際に異なる——
+   * ここでは両者に共通する「文字セル・サイズ」の変更だけを行う。
+   */
   private resize(rows: 24 | 27, cols: 80 | 132): void {
     this.rows = rows;
     this.cols = cols;
@@ -110,7 +124,6 @@ export class ScreenBuffer {
     this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
-    this.clearGui();
   }
 
   /** GUI 構造体をすべて除去（画面クリア・REM_ALL_GUI_CONSTRUCTS 時） */
@@ -221,8 +234,13 @@ export class ScreenBuffer {
         // 項目が既定を指していれば主構造の値へ、主構造も既定なら実線・白へ倒す。
         lineStyle: it.lineStyle !== GRID_DEFAULT ? it.lineStyle : parsed.defaultLine,
         color: it.color !== GRID_DEFAULT ? it.color : parsed.defaultColor,
-        value1: it.value1,
-        value2: it.value2
+        // **未指定（ホストがバイトを送ってこない）は 0 に倒す。** 単独罫線（0x00-0x03）は
+        // ScreenGrid.vue が `Math.max(1, value1)` で 1 本に、箱（0x04-0x07）は `value1 > 0` の
+        // 判定で内部罫線なしになる——どちらも「繰り返し・間隔を指定しない」の正しい既定値。
+        // ここを GRID_DEFAULT（0xFF）のまま渡すと単独罫線が「255 本を 255 間隔で」引かれてしまう
+        // （GRDLIN((*TYPE LEFT)) のように繰り返し引数を省略した DSPF で発生。KSN20 で確認）。
+        value1: it.value1 !== GRID_DEFAULT ? it.value1 : 0,
+        value2: it.value2 !== GRID_DEFAULT ? it.value2 : 0
       });
     }
   }
@@ -310,17 +328,18 @@ export class ScreenBuffer {
     guiGridLines: GuiGridLine[];
   }[] = [];
 
-  /** CLEAR UNIT: 既定サイズ（24x80）でクリア */
+  /**
+   * CLEAR UNIT: 既定サイズ（24x80）でクリアし、GUI 構造体も消す。
+   *
+   * **CLEAR UNIT ALTERNATE（`clearUnitAlternate()`）とは違い、こちらは GUI 構造体を消す。**
+   * 実機（、PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
+   * 画面へ戻るとき、REM_GUI_WINDOW 等の専用コマンドを送らず、素の CLEAR UNIT だけで
+   * 窓を暗黙に消していることを確認した（RESTORE SCREEN で戻る実装もあるが、それとは別の経路）。
+   * CLEAR UNIT ALTERNATE 側で GUI を消さないようにしたときと同じ理屈を逆向きに適用している
+   * ——各コマンドが実機で実際にどう使われているかで判断するしかない。
+   */
   clearUnit(): void {
-    if (this.rows !== 24 || this.cols !== 80) {
-      this.resize(24, 80);
-      return;
-    }
-    this.cells.fill(null);
-    this.fields = [];
-    this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
-    this.cursorAddr = 0;
-    this.systemMessage = undefined;
+    this.resize(24, 80);
     this.clearGui();
   }
 

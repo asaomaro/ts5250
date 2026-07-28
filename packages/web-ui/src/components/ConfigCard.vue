@@ -104,10 +104,23 @@ const wmForm = reactive({
 /** 透かしの文字に使える差し込み変数（`{host}` 等）の説明 */
 const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / ");
 
-/** 編集対象がサーバー設定か（信頼設定の欄を出すかの判定に使う） */
+/**
+ * 編集対象がサーバー設定か（信頼設定の欄を出す・保存先を選ぶ判定に使う）。
+ *
+ * セッションは**選んだ親システムと同じ保管場所**にしか置けない（config-store のスコープ規定）。
+ * 新規セッションには `props.session` がまだ無いので、`props.system?.ref ?? props.session?.ref`
+ * では常に未定義に落ちて `source.value`（システム作成用の select。セッションには無い）を見てしまい、
+ * 常に「自分の設定」を選んだのと同じ扱いになっていた——親がサーバー設定のシステムだと、
+ * セッションは個人設定ファイルに追加されて `system ... not found` になる。
+ * 新規作成中は `sesForm.system`（フォームで選んだ親システムの参照）で判定する。
+ */
 const isServer = computed(() => {
-  const r = props.system?.ref ?? props.session?.ref;
-  return r ? r.startsWith("srv:") : source.value === "server";
+  if (props.kind === "system") {
+    const r = props.system?.ref;
+    return r ? r.startsWith("srv:") : source.value === "server";
+  }
+  const r = props.session?.ref ?? sesForm.system;
+  return r?.startsWith("srv:") ?? false;
 });
 /**
  * この設定を編集できるか。**サーバー設定は編集権限があるときだけ**——

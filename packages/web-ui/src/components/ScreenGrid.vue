@@ -554,6 +554,20 @@ function onFkeyClick(key: AidKey): void {
   emit("aid", key);
 }
 
+/**
+ * **桁区切り（CS）ビットは黄・青緑では「書き手の意図」の印にならない。**
+ *
+ * 5250 の属性バイト表（SC30-3533）には黄・青緑を「修飾なし」で表す値が無く、
+ * `COLOR(YLW)` を単体で指定しただけでも桁区切りビット付きの値（0x32 等）に
+ * コンパイルされる（属性バイトだけを見ても DSPATR(CS) を本当に頼んだのか区別できない）。
+ * 窓の見出し・枠（decorAttrClass）は既にこれを踏まえて桁区切りを出さないようにしていたが、
+ * 通常のフィールドには適用しておらず、黄字の欄の頭に意図しない縦棒が出ていた
+ * （利用者からのスクリーンショット報告で判明）。
+ */
+function hasRealColsep(color: string, columnSeparator: boolean): boolean {
+  return columnSeparator && color !== "yellow" && color !== "turquoise";
+}
+
 /** cell の属性を CSS class 文字列にする */
 function cellClass(c: Cell): string {
   const cls = [`c-${c.color}`];
@@ -562,7 +576,7 @@ function cellClass(c: Cell): string {
   if (c.blink) cls.push("a-blink");
   // DSPATR(CS)＝桁区切り。core は解析してセルに持っていたが、描画側が**素通ししていた**ため
   // DSPF の区切り線が画面に一切出ていなかった（dspf-report (1)）。
-  if (c.columnSeparator) cls.push("a-colsep");
+  if (hasRealColsep(c.color, c.columnSeparator)) cls.push("a-colsep");
   return cls.join(" ");
 }
 
@@ -592,7 +606,7 @@ function attrByteClass(byte: number): string {
   if (a.underline) cls.push("a-underline");
   if (a.reverse) cls.push("a-reverse");
   if (a.blink) cls.push("a-blink");
-  if (a.columnSeparator) cls.push("a-colsep"); // cellClass と同じ体裁（片方だけ落とさない）
+  if (hasRealColsep(a.color, a.columnSeparator)) cls.push("a-colsep"); // cellClass と同じ体裁（片方だけ落とさない）
   return cls.join(" ");
 }
 
@@ -2921,6 +2935,7 @@ onBeforeUnmount(() => {
    色は属性クラス（.c-*）の currentColor に従わせ、線種は border-style で表す。 */
 .grid-line {
   position: absolute;
+  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
   pointer-events: none;
 }
 .grid-h { border-top: 1px solid currentColor; }
@@ -2937,6 +2952,7 @@ onBeforeUnmount(() => {
    線は枠セルの中心を通るので、破線の位相を半セルずらしてセルの頭から引く。 */
 .win-frame {
   position: absolute;
+  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
   pointer-events: none;
 }
 .win-frame-h {
@@ -2952,6 +2968,7 @@ onBeforeUnmount(() => {
 /* WDWBORDER: ホスト指定の罫線文字で描く枠。文字なので等幅グリッドにそのまま乗る */
 .gui-window-border {
   position: absolute;
+  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
   white-space: pre;
   pointer-events: none;
   line-height: 1.25;
@@ -3332,6 +3349,11 @@ onBeforeUnmount(() => {
 /* WDWTITLE: 枠の辺に載る見出し／脚注。枠の罫線を隠すよう地色を敷く */
 .win-title {
   position: absolute;
+  /* .gui-window と同じグリッド padding 分の補正。
+     **枠（.gui-window-border）と必ず揃えること**——見出しは枠の辺に載る文字なので、
+     片方だけ補正すると見出しが枠から外れる（原典メモは .win-title を補正済みとしていたが、
+     当リポジトリでは抜けていた。decisions.md D1 参照）。 */
+  margin: 8px 0 0 10px;
   white-space: pre;
   pointer-events: none;
   line-height: 1.25;

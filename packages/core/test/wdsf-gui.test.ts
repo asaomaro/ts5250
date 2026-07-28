@@ -176,6 +176,15 @@ describe("WDSF GUI — 除去コマンド", () => {
     expect(buf.snapshot("t", false).gui).toBeUndefined();
   });
 
+  /**
+   * **CLEAR UNIT は GUI 構造体も消す（CLEAR UNIT ALTERNATE とは違う）。**
+   *
+   * 実機（、PB1000R）のトレースで、CREATE WINDOW の窓を閉じて呼び出し元へ戻るとき、
+   * REM_GUI_WINDOW 等を送らず素の CLEAR UNIT だけで窓を暗黙に消していることを確認した。
+   * 一方 CLEAR UNIT ALTERNATE は SFLCTL の再描画で何度も送られてくるが GUI は消さない
+   * （YB0270R の KSN20 罫線のテスト、wdsf-applier-grid-lines.test.ts 参照）。
+   * 同じ「画面クリア」でもコマンドの種類（0x40 と 0x20）で GUI への影響が違う。
+   */
   it("CLEAR UNIT で GUI がクリアされる", () => {
     const buf = withOne();
     applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT]), buf, codec, () => {});

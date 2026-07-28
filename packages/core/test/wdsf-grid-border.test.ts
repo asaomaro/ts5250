@@ -160,6 +160,26 @@ describe("ScreenBuffer のグリッド線状態", () => {
     expect(g.color).toBe(0x01);
     expect(g.lineStyle).toBe(0x08);
   });
+
+  /**
+   * **value1/value2 が既定（0xFF）の項目は 0 に倒す。**
+   * `color`/`lineStyle` と同じ扱い。ScreenGrid.vue の単独罫線（0x00〜0x03）は
+   * `Math.max(1, value1)` で本数を決めるので、0xFF (=255) を素通しすると
+   * 「255 本を 255 間隔で引け」という意味不明な指定になってしまう。
+   * 実機の YB0270R/KSN20 では単独罫線に繰り返し無し指定時 value1/value2=1 が来ており
+   * この経路には当たらなかったが（実測は wdsf-applier-grid-lines.test.ts 参照）、
+   * `GRDBOX` 側は 0xFF がそのまま来る実測がある（本ファイルの PLAIN_BOX テスト）ため、
+   * 単独罫線でも 0xFF が来た場合に備えて既定値を正しく倒しておく。
+   */
+  it("繰り返し無し（value1/value2 既定 0xFF）は 0 に倒す", () => {
+    const buf = new ScreenBuffer();
+    apply(buf, gridBody({}, [
+      item(GRID_MINOR.LEFT_VERTICAL, { row: 3, col: 23, h: 23, rep: 0xff, interval: 0xff })
+    ]));
+    const g = buf.snapshot("t", false).gui.gridLines[0]!;
+    expect(g.value1).toBe(0);
+    expect(g.value2).toBe(0);
+  });
 });
 
 describe("CREATE WINDOW の Border Presentation（WDWBORDER）", () => {

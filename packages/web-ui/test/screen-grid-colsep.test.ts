@@ -58,4 +58,27 @@ describe("DSPATR(CS) 桁区切りの描画", () => {
     expect(span!.classes()).toContain("a-underline");
     expect(span!.classes()).toContain("c-red");
   });
+
+  /**
+   * **黄・青緑は桁区切りビットを落とす。**
+   *
+   * 5250 の属性バイト表（SC30-3533）には黄・青緑を「修飾なし」で表す値が無く、
+   * `COLOR(YLW)` を単体で指定しただけでも桁区切りビット付きの値にコンパイルされる
+   * （属性バイトだけでは DSPATR(CS) を本当に頼んだのか区別できない）。窓の見出し・枠
+   * では既にこれを踏まえて桁区切りを出さないようにしていたが、通常のフィールドには
+   * 適用しておらず、黄字の欄の頭に意図しない縦棒が出ていた（利用者報告で判明）。
+   */
+  it("黄地のセルには columnSeparator が立っていても a-colsep を出さない", () => {
+    const cells = blank();
+    cells[3]![10] = cell("A", { columnSeparator: true, color: "yellow" });
+    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
+    expect(w.html()).not.toContain("a-colsep");
+  });
+
+  it("青緑地のセルには columnSeparator が立っていても a-colsep を出さない", () => {
+    const cells = blank();
+    cells[3]![10] = cell("A", { columnSeparator: true, color: "turquoise" });
+    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
+    expect(w.html()).not.toContain("a-colsep");
+  });
 });

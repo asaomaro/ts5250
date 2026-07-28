@@ -32,7 +32,13 @@ export type WarnFn = (message: string) => void;
 
 /**
  * 1 レコード分のデータストリーム（ESC+コマンド列）を ScreenBuffer に適用する。
- * 未知のコマンド/オーダーは警告してレコードの残りを打ち切る（レコード境界で再同期。spec「エラー処理」）。
+ *
+ * 未知のコマンド（ESC 直後の 1 バイト）は警告してレコードの残りを打ち切る
+ * （レコード境界で再同期。spec「エラー処理」）。**未知のオーダー（WTD の中の 1 バイト）は
+ * 次の ESC まで読み飛ばして次のコマンドから復帰する**——ここでレコード全部を捨てると、
+ * 未知のオーダーより後ろにある WRITE（キーボード解放）や READ ごと失われ、
+ * ホストは応答したつもりでもクライアントの鍵盤が開かないまま固まる
+ * （実機で正体不明のオーダーに当たったときに観測）。
  */
 export function applyDataStream(
   data: Uint8Array,
@@ -277,10 +283,24 @@ function applyWtd(
         applyWdsf(r, buf, codec, addr, warn);
         break;
       }
+      case ORDER.UNKNOWN_1C:
+        // 表示は "*" 1 文字（桁を 1 つ占有）。詳細は ORDER.UNKNOWN_1C の doc コメント参照。
+        //
+        // **rawByte は渡さない。** 0x1C は実際に受信した EBCDIC 文字バイトではなく
+        // このオーダー自身の識別バイトなので、rawByte として持たせるとカタカナ表示
+        // モード（ScreenGrid.vue の katakanaView）がこれを生バイトとして半角カナに
+        // 再解釈してしまい、"*" のはずが文字化けする（利用者報告で発覚）。
+        buf.setChar(addr++, "*");
+        break;
       default:
-        warn(`unknown order 0x${b.toString(16)} — discarding rest of record`);
-        // オーダー長が不明なため、このレコードの残りは安全に読めない
-        r.skip(r.remaining);
+        warn(`unknown order 0x${b.toString(16)} — skipping to next command`);
+        // **オーダーの長さは分からないが、レコード全体を捨てない。**
+        // ESC(0x04) は表示データ（0x40 以上）にも他のオーダーにも現れないので、
+        // 次の ESC まで読み飛ばして次のコマンドから復帰できる。ここでレコードの
+        // 残り全部を捨てると、後続の WRITE（キーボード解放の CC2 等）や READ が
+        // 丸ごと失われ、ホストは送ったつもりでもクライアントの鍵盤が開かず
+        // 「応答待ちのまま固まる」（実機で正体不明のオーダーに当たったときに観測）。
+        while (r.remaining > 0 && r.peek() !== ESC) r.u8();
         return;
     }
   }
@@ -401,11 +421,31 @@ function applyStructuredField(r: ByteReader, warn: WarnFn): boolean {
   return isQuery;
 }
 
-/** WRITE ERROR CODE: エラー行のメッセージを systemMessage として保持する（表示行への描画は簡略化） */
+/**
+ * WRITE ERROR CODE: エラー行のメッセージを systemMessage として保持する（表示行への描画は簡略化）。
+ *
+ * **SO/SI で挟まれた DBCS（漢字）は 2 バイト 1 組で読む。** 1 バイトずつ `decodeByte` に
+ * 通すと、DBCS のペアがそれぞれ無関係な SBCS 文字に化ける（メッセージが日本語のとき、
+ * 画面下部のエラー行が文字化けする不具合として利用者から報告された）。
+ */
 function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): void {
   let msg = "";
+  let dbcsMode = false;
   while (r.remaining > 0 && r.peek() !== ESC) {
     const b = r.u8();
+    if (b === SO) {
+      dbcsMode = true;
+      continue;
+    }
+    if (b === SI) {
+      dbcsMode = false;
+      continue;
+    }
+    if (dbcsMode && codec.decodeDbcsPair && b >= 0x40) {
+      const b2 = r.u8();
+      msg += String.fromCharCode(codec.decodeDbcsPair(b, b2));
+      continue;
+    }
     if (b >= 0x40) msg += String.fromCharCode(codec.decodeByte(b));
     else if (b === ORDER.IC || b === ORDER.SBA || b === ORDER.MC) r.skip(2);
     // その他の制御は読み飛ばす
