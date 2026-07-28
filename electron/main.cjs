@@ -8,11 +8,23 @@ const fs = require("node:fs");
 const http = require("node:http");
 const { pathToFileURL } = require("node:url");
 
-// リポジトリ（アプリ）ルート。serveStatic は cwd 相対で解決するため cwd を合わせる
-const ROOT = path.resolve(__dirname, "..");
+/**
+ * アプリのルート（＝サーバーを動かす cwd）。serveStatic は cwd 相対で解決するので cwd を合わせる。
+ *
+ * **開発時と配布時でレイアウトが違う。**
+ *  - 開発: repo ルート。サーバーは `packages/server/dist/main.js`、依存は repo の node_modules
+ *  - 配布: `resources/app`（`scripts/prepare-app.mjs` が組んだ一式）。サーバーは
+ *    `node_modules/@as400web/server/dist/main.js`、依存も同じ node_modules に入っている
+ *
+ * 以前は配布時も `resources` を指しており、実際の配置（`resources/app/...`）と 1 階層ずれていた。
+ * さらに実行時依存を同梱していなかったため、**出来上がった exe は起動できなかった**。
+ */
+const ROOT = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const PORT = Number(process.env.PORT || 3400);
 const WEB_ROOT = "packages/web-ui/dist"; // cwd(ROOT) 相対
-const SERVER_MAIN = path.join(ROOT, "packages", "server", "dist", "main.js");
+const SERVER_MAIN = app.isPackaged
+  ? path.join(ROOT, "node_modules", "@as400web", "server", "dist", "main.js")
+  : path.join(ROOT, "packages", "server", "dist", "main.js");
 const APP_URL = `http://127.0.0.1:${PORT}/`;
 
 /** 指定した .env を読み込み process.env に反映（プロファイルの passwordEnv・master key 等） */
@@ -42,7 +54,10 @@ function resolveDataDir() {
 /**
  * プロファイルファイルのパスを解決する。
  * 開発時: repo ルートの profiles.local.json / profiles.json（従来どおり・相対）。
- * パッケージ時: userData の profiles.json（無ければ同梱の既定をシード）。編集して永続化できる。
+ * パッケージ時: userData の profiles.json。編集して永続化できる。
+ *
+ * **配布物にはサーバー設定を同梱しない**（`prepare-app.mjs` が `app-stage` へ入れない）。
+ * ビルドした人の接続先・資格情報がそのまま配られてしまうため。利用者は起動後に自分で作る。
  */
 function resolveProfiles(dataDir) {
   if (dataDir === ROOT) {

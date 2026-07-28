@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# AS400 5250 エミュレーター — Electron デスクトップ版 exe 生成（Linux / macOS / WSL）
-#   ワークスペース依存 → ビルド（core/server + web-ui）→ Electron 依存 → exe（インストーラ）生成。
+# AS400 5250 エミュレーター — Electron デスクトップ版の実行ファイル生成（Linux / macOS / WSL）
+#   ワークスペース依存 → ビルド（core/server + web-ui）→ Electron 依存 → アプリ一式の組み立て
+#   → 実行ファイル生成。
 #
 # 使い方:
-#   ./electron.sh            # 未ビルドなら自動ビルドしてから exe（インストーラ）を生成
-#   ./electron.sh --build    # 強制再ビルドしてから exe（インストーラ）を生成
+#   ./electron.sh            # 未ビルドなら自動ビルドしてから生成
+#   ./electron.sh --build    # 強制再ビルドしてから生成
 #
-# 生成物（インストーラ）は electron/dist/ に出力されます。
+# 生成物は electron/dist/ に出ます。**Windows は単一の portable exe**
+# （インストール不要・実行先に Node.js も不要。設定は %APPDATA% に残る）、
+# Linux は AppImage、macOS は dmg。実行時依存はアプリの中に入ります
+# （electron/scripts/prepare-app.mjs が組み立て）。
+#
+# **Windows 用 exe は Windows 上で `electron.bat` を実行して作ります**——
+# portable/nsis は NSIS を使うため、Linux から作るには wine が要ります。
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -37,7 +44,7 @@ if [ ! -d electron/node_modules ]; then
   ( cd electron && npm install )
 fi
 
-echo "==> exe 生成（electron-builder）"
+echo "==> アプリ一式の組み立て＋実行ファイル生成（electron-builder）"
 cd electron
 npm run dist
-echo "==> 完了。インストーラは electron/dist/ にあります"
+echo "==> 完了。生成物は electron/dist/ にあります"

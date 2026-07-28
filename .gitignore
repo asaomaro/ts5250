@@ -22,5 +22,8 @@ connections.json.tmp
 macros.json
 macros.json.tmp
 
+# Electron 配布物の組み立て置き場（electron/scripts/prepare-app.mjs が毎回作り直す）
+electron/app-stage/
+
 # 5250 の操作ログ書き出し（調査用。実機の画面内容が入るのでコミットしない）
 *5250-log*.jsonl

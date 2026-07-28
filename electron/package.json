@@ -6,7 +6,8 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "prepare-app": "node scripts/prepare-app.mjs",
+    "dist": "npm run prepare-app && electron-builder"
   },
   "devDependencies": {
     "electron": "^32.0.0",
@@ -25,16 +26,8 @@
     ],
     "extraResources": [
       {
-        "from": "../packages/core/dist",
-        "to": "app/packages/core/dist"
-      },
-      {
-        "from": "../packages/server/dist",
-        "to": "app/packages/server/dist"
-      },
-      {
-        "from": "../packages/web-ui/dist",
-        "to": "app/packages/web-ui/dist"
+        "from": "app-stage",
+        "to": "app"
       }
     ],
     "linux": {
@@ -45,8 +38,12 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "portable"
       ]
+    },
+    "portable": {
+      "artifactName": "AS400-5250-Emulator-${version}-portable.${ext}",
+      "unpackDirName": "as400-5250-emulator"
     },
     "mac": {
       "target": [

@@ -164,20 +164,34 @@ start.bat             # Windows
 > 全インターフェースを待ち受けます）。認証なしのまま公開したい場合は `--host 0.0.0.0` を明示できますが、
 > 起動時に警告が出ます。バインド先は起動ログに出力されます。
 
-### デスクトップ版（Electron）
+### デスクトップ版（Electron）— 単独で配布できる実行ファイルを作る
 
-```sh
-./electron.sh         # Linux / macOS / WSL
-electron.bat          # Windows
+```bat
+electron.bat            :: Windows。単一の portable exe を作る
+electron.bat --build    :: 強制再ビルドしてから作る
 ```
 
-既存の Hono サーバーを内部で起動し、`BrowserWindow` で Web UI を表示します。単一利用者アプリなので
-`--auto-secret-key` 付きで起動し、UI からのパスワード保存に使う master key を**自動生成**します
-（手動設定は不要 → [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
-書き込みが必要な状態ファイル（`.env`＝master key・`connections.json`・編集した `profiles.json`）は、
-**開発時は repo ルート、パッケージ配布時（`app.isPackaged`）は `userData`** に保存します（asar は読み取り専用のため）。
-パッケージ時は同梱プロファイルがあれば初回に `userData` へシードして編集可能にします。
-インストーラ生成は `cd electron && npm install && npm run dist`（要 GUI / 対象 OS）。
+```sh
+./electron.sh           # Linux（AppImage）/ macOS（dmg）
+```
+
+生成物は `electron/dist/` に出ます。Windows は
+**`AS400-5250-Emulator-<version>-portable.exe`** の 1 ファイルだけで、
+**インストール不要・実行先に Node.js も不要**——コピーして実行すれば動きます。
+
+- 実行時依存（hono / ws / pino / pdfkit / zod / MCP SDK …）は
+  `electron/scripts/prepare-app.mjs` が `electron/app-stage/` に組み立て、**アプリの中に同梱**します。
+  ルートの `node_modules` は使いません（electron や playwright まで入っていて配布物が太るため）。
+- **設定は exe の外に残ります**（`%APPDATA%`＝`app.getPath("userData")`）。portable exe は起動のたびに
+  一時フォルダへ展開されますが、`connections.json` と `.env`（master key）は `userData` に置くので
+  次に起動しても引き継がれます。
+- **サーバー設定（`profiles.json`）は同梱しません。** 同梱するとビルドした人の接続先と資格情報が
+  そのまま配られてしまいます。利用者は起動後に接続画面から作ります。
+- 単一利用者アプリなので `--auto-secret-key` 付きで起動し、パスワード保存に使う master key を
+  **自動生成**します（手動設定は不要 →
+  [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
+- **Windows 用 exe は Windows 上で作ります。** portable は内部で NSIS を使うため、Linux から
+  作るには wine が要ります。`./electron.sh` はその環境の形式（AppImage / dmg）を作ります。
 
 ---
 

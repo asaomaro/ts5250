@@ -4,13 +4,16 @@ rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
 rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
 chcp 65001 >nul
 rem AS400 5250 emulator - Electron desktop packager (Windows)
-rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> build exe (installer)
+rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> stage app -> build exe
 rem
 rem Usage:
-rem   electron.bat            auto-build if not built, then build the exe (installer)
-rem   electron.bat --build    force rebuild, then build the exe (installer)
+rem   electron.bat            auto-build if not built, then build the exe
+rem   electron.bat --build    force rebuild, then build the exe
 rem
-rem The generated installer is written to electron\dist\ .
+rem Output: electron\dist\AS400-5250-Emulator-<version>-portable.exe
+rem   A single standalone exe. No installer, no Node.js on the target machine:
+rem   copy it anywhere and run it. Runtime deps are packed inside (see
+rem   electron/scripts/prepare-app.mjs). Settings persist under %APPDATA%.
 setlocal
 cd /d "%~dp0"
 
@@ -53,8 +56,12 @@ if not exist electron\node_modules (
   popd
 )
 
-echo ==^> building exe ^(electron-builder^)
+echo ==^> staging app + building exe ^(electron-builder^)
 cd electron
 call npm run dist
-echo ==^> done. installer is in electron\dist\
+if errorlevel 1 (
+  echo build failed 1>&2
+  exit /b 1
+)
+echo ==^> done. standalone exe is in electron\dist\
 endlocal
