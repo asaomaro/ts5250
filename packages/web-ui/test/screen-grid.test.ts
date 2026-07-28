@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import { MSG_NO_ROOM } from "../src/composables/opMessages.js";
 
 function cell(char: string, extra: Partial<Cell> = {}): Cell {
   return {
@@ -943,12 +944,12 @@ describe("ScreenGrid", () => {
 
   // ACS の挿入ペースト仕様（実機挙動として提示されたもの）:
   //  - 挿入は後続を右へずらす。あふれ判定は行ではなく「欄全体の予算」に対して行う
-  //  - 入り切らなければ "No room to insert data." を出し、**何も書かない**（確定するまで書き換えない）
+  //  - 入り切らなければ `MSG_NO_ROOM` を出し、**何も書かない**（確定するまで書き換えない）
   //  - 矩形は「各行を (開始行+i, 開始桁) へ順に挿入した結果」になる
   const fld = (index: number, row: number, col: number, length: number, value = ""): Field =>
     ({ index, row, col, length, protected: false, hidden: false, numeric: false, mdt: false, value });
 
-  it("挿入モードの単一行ペーストは、入り切らなければ何も書かず NO_ROOM を出す", async () => {
+  it("挿入モードの単一行ペーストは、入り切らなければ何も書かず MSG_NO_ROOM を出す", async () => {
     const w = mount(ScreenGrid, {
       props: { snapshot: makeSnap([fld(1, 5, 5, 10, "123123123")]), edits: new Map(), focused: true, insertMode: true }
     });
@@ -956,7 +957,7 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     (input.element as HTMLInputElement).setSelectionRange(0, 0);
     await input.trigger("paste", { clipboardData: { getData: () => "123" } }); // 9+3=12 > 10
-    expect(w.emitted("notice")).toEqual([["No room to insert data."]]);
+    expect(w.emitted("notice")).toEqual([[MSG_NO_ROOM]]);
     expect(w.emitted("edit")).toBeFalsy(); // 値は書き換えない
     w.unmount();
   });
@@ -986,7 +987,7 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     (input.element as HTMLInputElement).setSelectionRange(0, 0);
     await input.trigger("paste", { clipboardData: { getData: () => "789\n789" } });
-    expect(w.emitted("notice")).toEqual([["No room to insert data."]]);
+    expect(w.emitted("notice")).toEqual([[MSG_NO_ROOM]]);
     expect(w.emitted("edit")).toBeFalsy(); // 1 行目も書き換えない
     w.unmount();
   });

@@ -28,7 +28,7 @@ import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView } from "../stores/viewSettings.js";
-import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
@@ -98,7 +98,7 @@ const emit = defineEmits<{
    *  こちらは reconcileFocus を通してはいけないから（入力欄へ再フォーカスすると選択が壊れる）。 */
   (e: "selection-start", row: number, col: number): void;
   /** クライアント側の操作員メッセージ（ACS の OIA 相当。ホストの systemMessage とは別物）。
-   *  例: 挿入ペーストが入り切らないときの "No room to insert data."。次のキー操作で消える。 */
+   *  例: 挿入ペーストが入り切らないときの `MSG_NO_ROOM`。次のキー操作で消える。 */
   (e: "notice", text: string): void;
   /** 機能キー凡例のボタンが押された（親が sendKey する。spec B3） */
   (e: "aid", key: AidKey): void;
@@ -1935,10 +1935,6 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   return out.join("").replace(/\s+$/, "");
 }
 
-/** ACS が挿入ペーストの入り切らないときに出す操作員メッセージ。 */
-const NO_ROOM = "No room to insert data.";
-
-
 /** 挿入ペーストで最初に見つかる入力不可文字の理由。無ければ undefined。
  *  **挿入モードは 1 文字でも不可なら一切貼らない**（ACS）。上書きモードは桁を消費するだけで
  *  エラーにしないため、この判定は挿入経路でのみ使う。 */
@@ -1952,7 +1948,7 @@ function firstRejection(field: Field, text: string): RejectReason | undefined {
 }
 
 /** 欄の値 base の offset 桁目へ line を挿入する（Insert モードのペースト）。後続は右へずれる。
- *  欄の予算に収まらなければ undefined を返す（呼び出し側が中断して NO_ROOM を出す）。
+ *  欄の予算に収まらなければ undefined を返す（呼び出し側が中断して MSG_NO_ROOM を出す）。
  *
  *  base の末尾空白は落としてから測る。画面上の欄は末尾まで空白で埋まっているが、その空白は
  *  挿入で押し出されて消えるだけなので、あふれ判定に数えてはいけない
@@ -2097,7 +2093,7 @@ function pasteFrom(
         ? insertInto(field, val, p.offset, p.line)
         : overwriteInto(field, val, p.offset, p.line);
       if (next === undefined) {
-        emit("notice", NO_ROOM);
+        emit("notice", MSG_NO_ROOM);
         return;
       }
       val = next;
@@ -2188,7 +2184,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
         return;
       }
       if (insertInto(f, editValue(e), at, text) === undefined) {
-        emit("notice", NO_ROOM);
+        emit("notice", MSG_NO_ROOM);
         return;
       }
     }

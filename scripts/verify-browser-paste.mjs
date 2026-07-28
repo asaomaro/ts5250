@@ -5,7 +5,7 @@
 //   2) 書いた範囲だけ上書きし、後ろの既存文字を残す（"123456" へ "789" → "789456"。
 //      旧: 後ろを捨てて "789" になっていた）
 //   3) 行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる（旧: 2 行目が捨てられていた）
-//   4) 挿入モード: 後続を右へずらす／入り切らなければ "No room to insert data." を出して
+//   4) 挿入モード: 後続を右へずらす／入り切らなければ「挿入する余地がありません」を出して
 //      **何も書かない**（ACS: 問題ないと確定するまで書き換えない）
 //   5) 帯の折返し: 開始桁〜行末の幅で各行を折り返し、あふれた分は次の帯行の**同じ桁**へ
 //   6) ペースト後もカーソルは開始桁から動かない（ACS）
@@ -170,7 +170,8 @@ try {
   await page.waitForTimeout(200);
   const after = await values();
   const msg = await page.evaluate(() => document.querySelector(".oia .notice")?.textContent?.trim() ?? "");
-  check("④ 入り切らなければ No room to insert data.", msg === "No room to insert data.", `"${msg}"`);
+  // 文言は packages/web-ui の MSG_NO_ROOM。ブラウザ側スクリプトからは import できないので写す
+  check("④ 入り切らなければ挿入不可メッセージ", msg === "挿入する余地がありません", `"${msg}"`);
   check("④ エラー時は何も書き換えない", after[0] === v[0] && after[1] === v[1], `[0]="${after[0]}" [1]="${after[1]}"`);
 
   // 次のキー操作でメッセージが消える（キーボードはロックしない）

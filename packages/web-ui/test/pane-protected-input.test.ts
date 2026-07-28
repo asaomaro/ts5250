@@ -5,6 +5,7 @@ import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
 import type { WsClient } from "../src/ws-client.js";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 
 /**
  * **欄外（保護領域・非入力セル）での入力とペースト。**
@@ -90,8 +91,6 @@ function statusText(w: ReturnType<typeof mountPane>): string {
   return w.findComponent({ name: "StatusBar" }).text();
 }
 
-const PROTECTED_MSG = "Cursor in protected area of display.";
-
 describe("保護領域での文字入力・削除", () => {
   // 入力欄は行 5。カーソルは行 10（欄外）
   beforeEach(() => seed([fld(1, 5, 10, 5)], { row: 10, col: 20 }));
@@ -101,7 +100,7 @@ describe("保護領域での文字入力・削除", () => {
     await nextTick();
     await moveOutOfField(w);
     await w.find(".pane").trigger("keydown", { key: "A" });
-    expect(statusText(w)).toContain(PROTECTED_MSG);
+    expect(statusText(w)).toContain(MSG_PROTECTED);
   });
 
   it.each(["Backspace", "Delete"])("%s でもメッセージが出る", async (key) => {
@@ -109,7 +108,7 @@ describe("保護領域での文字入力・削除", () => {
     await nextTick();
     await moveOutOfField(w);
     await w.find(".pane").trigger("keydown", { key });
-    expect(statusText(w), `${key} で出ていない`).toContain(PROTECTED_MSG);
+    expect(statusText(w), `${key} で出ていない`).toContain(MSG_PROTECTED);
   });
 
   it("入力可能欄への入力ではメッセージを出さない（keydown はペインまでバブルする）", async () => {
@@ -121,7 +120,7 @@ describe("保護領域での文字入力・削除", () => {
     await nextTick();
     expect(document.activeElement, "前提: 入力欄にフォーカスがある").toBe(input);
     await w.find(".pane").trigger("keydown", { key: "A" });
-    expect(statusText(w), "入力できているのにメッセージが出ている").not.toContain(PROTECTED_MSG);
+    expect(statusText(w), "入力できているのにメッセージが出ている").not.toContain(MSG_PROTECTED);
   });
 
   it("カーソルキーではメッセージを出さない", async () => {
@@ -129,7 +128,7 @@ describe("保護領域での文字入力・削除", () => {
     await nextTick();
     await moveOutOfField(w);
     await w.find(".pane").trigger("keydown", { key: "ArrowRight" });
-    expect(statusText(w)).not.toContain(PROTECTED_MSG);
+    expect(statusText(w)).not.toContain(MSG_PROTECTED);
   });
 });
 
@@ -145,7 +144,7 @@ describe("保護領域からのペースト", () => {
     } as unknown as ClipboardEvent);
     await nextTick();
     expect(sessionsStore.byId.get(SID)!.edits.get(2), "右の入力欄へ入っていない").toBe("ABCD");
-    expect(statusText(w), "ペーストでメッセージを出してはいけない").not.toContain(PROTECTED_MSG);
+    expect(statusText(w), "ペーストでメッセージを出してはいけない").not.toContain(MSG_PROTECTED);
   });
 
   it("その行に入力欄が無ければ何も起きない", async () => {

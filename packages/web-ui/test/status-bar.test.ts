@@ -4,6 +4,7 @@ import StatusBar from "../src/components/StatusBar.vue";
 import type { ScreenSnapshot } from "@as400web/core";
 import type { SessionState } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
+import { MSG_BY_REASON } from "../src/composables/opMessages.js";
 
 function snap(): ScreenSnapshot {
   return {
@@ -60,16 +61,16 @@ describe("StatusBar のカーソル位置表示（ACS 相当）", () => {
 describe("メッセージの優先と復帰", () => {
   it("notice があるときホストの systemMessage を出さない", () => {
     const w = mount(StatusBar, {
-      props: { state: stateWithHostMessage("HOST MSG"), notice: "Field requires numeric characters." }
+      props: { state: stateWithHostMessage("HOST MSG"), notice: MSG_BY_REASON.numeric }
     });
     const texts = w.findAll(".msg").map((e) => e.text());
-    expect(texts).toEqual(["Field requires numeric characters."]);
+    expect(texts).toEqual([MSG_BY_REASON.numeric]);
     expect(w.text(), "ホストのメッセージが同時に見えている").not.toContain("HOST MSG");
   });
 
   it("notice が消えるとホストの systemMessage へ戻る", async () => {
     const w = mount(StatusBar, {
-      props: { state: stateWithHostMessage("HOST MSG"), notice: "Field requires numeric characters." }
+      props: { state: stateWithHostMessage("HOST MSG"), notice: MSG_BY_REASON.numeric }
     });
     await w.setProps({ notice: "" });
     expect(w.findAll(".msg").map((e) => e.text())).toEqual(["HOST MSG"]);

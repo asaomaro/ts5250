@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+// **文言そのものは書かない。** 定数を参照して、日本語化のような文言変更でテストが
+// 落ちないようにする（確かめたいのは「どの理由のメッセージが出たか」）。
+import { MSG_PROTECTED, MSG_BY_REASON } from "../src/composables/opMessages.js";
 
 /**
  * 入力・ペースト時の検証と ACS 準拠メッセージ（requirement / spec 参照）。
@@ -114,11 +117,7 @@ describe("打鍵・削除のメッセージ", () => {
     for (const key of ["A", "Backspace", "Delete"]) {
       await input.trigger("keydown", { key });
     }
-    expect(notices(w)).toEqual([
-      "Cursor in protected area of display.",
-      "Cursor in protected area of display.",
-      "Cursor in protected area of display."
-    ]);
+    expect(notices(w)).toEqual([MSG_PROTECTED, MSG_PROTECTED, MSG_PROTECTED]);
     w.unmount();
   });
 
@@ -127,7 +126,7 @@ describe("打鍵・削除のメッセージ", () => {
     const input = w.find("input.grid-input");
     await input.trigger("focus");
     await input.trigger("keydown", { key: "A" });
-    expect(notices(w)).toContain("Field requires numeric characters.");
+    expect(notices(w)).toContain(MSG_BY_REASON.numeric);
     w.unmount();
   });
 
@@ -136,7 +135,7 @@ describe("打鍵・削除のメッセージ", () => {
     const input = w.find("input.grid-input");
     await input.trigger("focus");
     await input.trigger("keydown", { key: "あ" });
-    expect(notices(w)).toContain("Field data must be alphanumeric.");
+    expect(notices(w)).toContain(MSG_BY_REASON.alphanumeric);
     w.unmount();
   });
 
@@ -145,7 +144,7 @@ describe("打鍵・削除のメッセージ", () => {
     const input = w.find("input.grid-input");
     await input.trigger("focus");
     await input.trigger("keydown", { key: "A" });
-    expect(notices(w)).toContain("Double-byte character required as input.");
+    expect(notices(w)).toContain(MSG_BY_REASON["dbcs-required"]);
     w.unmount();
   });
 });
@@ -161,7 +160,7 @@ describe("挿入モードのペースト: 1 文字でも不可なら何も貼ら
     await input.trigger("focus");
     await toInsertMode(input);
     await paste(input, "1A");
-    expect(notices(w)).toContain("Field requires numeric characters.");
+    expect(notices(w)).toContain(MSG_BY_REASON.numeric);
     expect(lastEdit(w, 1), "一部でも貼られてはいけない").toBe(undefined);
     w.unmount();
   });
