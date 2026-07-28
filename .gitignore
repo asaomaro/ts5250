@@ -18,5 +18,9 @@ users.json
 connections.json
 connections.json.tmp
 
+# 画面マクロ（--macros の保存先）。記録した秘密を secretEnc（AES-256-GCM）で持つので秘匿扱い
+macros.json
+macros.json.tmp
+
 # 5250 の操作ログ書き出し（調査用。実機の画面内容が入るのでコミットしない）
 *5250-log*.jsonl

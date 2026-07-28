@@ -10,7 +10,9 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - **人が操作**: ブラウザ／Electron の忠実な 5250 エミュレーターで、ACS に近い操作感。
 - **帳票も**: TN5250E プリンターセッションでスプール出力を受信し、等幅帳票／PDF として表示・保存・印刷（SBCS＋DBCS）。
 - **共有もできる**: 任意で認証・per-user 分離・管理者画面（既定は無認証のローカル運用）。
-- **検証実績**: [PUB400.com](https://pub400.com)（IBM i 7.5）に対する実機 E2E で動作確認済み。
+- **検証実績**: [PUB400.com](https://pub400.com)（IBM i 7.5・英語）に対する実機 E2E で動作確認済み。
+  日本語（DBCS）まわり——CCSID 930/939、罫線・窓、日本語帳票、SCS の桁揃え——は
+  **日本語ホスト（IBM i 7.3・CCSID 939）でも実機検証**しています。
 
 ---
 
@@ -25,8 +27,11 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 **文字・画面**
 - EBCDIC ⇔ Unicode 変換（ICU `.ucm` 由来テーブル生成）。**DBCS（日本語）** は EBCDIC_STATEFUL（SO/SI）で
   **桁位置を厳密維持**（SO/SI・属性桁を 1 セルとして保持）
-- カラー・下線・リバース等の属性を再現。フィールド属性はフィールド長で境界付け（ACS 準拠）
+- カラー・下線・リバース・桁区切り等の属性を再現。フィールド属性はフィールド長で境界付け（ACS 準拠）
 - 5250 QUERY 応答、**拡張 5250 GUI**（Create Window / Define Selection Field / Scroll Bar = WDSF 0x15）
+- **グリッド罫線**（DDS の `GRDATR` / `GRDLIN` / `GRDBOX`）を線種・色つきで描画
+  （ACS は一律の青実線に落とすが、DDS の書き手の指定を捨てないため**ホストの指定どおり**に描く）
+- **窓の検出**（枠文字・反転枠の両方）と、表示設定による窓枠・背景の装飾
 
 **Web エミュレーター（ACS 準拠の操作感）**
 - 忠実なフィールド編集（**5250 上書き既定 / Insert トグル / 5250 流バックスペース**）、**フィールド型別の入力検証**
@@ -55,13 +60,20 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - 画面テキストの **URL / メールをリンク化**、通常 / ダークテーマ、**ペイン分割（D&D）＋キーボード移動（Alt+矢印）**、
   **タブ（D&D 並び替え / 合流・Alt+PageUp/Down 切替）**、操作ログ
 - 通信中の**入力プロテクト**＋0.5 秒しきい値の**ローディング表示**、画面サイズ切替（24x80⇔27x132）への自動スケール
-- 表示トグル: SO/SI を `{ }`、半角カナ / 英小文字、リンク化 ON/OFF、編集可能なキーバインド
+- **画面設定（⚙ 画面）**: SO/SI を `{ }`、表示コード（自動 / カナ / 英）、リンク化、配色（端末色 / 意味色）、
+  画面の質感（フラット / CRT）、入力項目・ボタンの意匠、窓枠・背景、**画面フォント**
+  （インストール済みフォントから選択。桁が揃うもの＝半角:全角 1:2 を先に出す）。
+  各項目はキーバインドで順送りにもできる
+- **マクロ**（画面操作の記録・再生。秘密は暗号化してサーバー保持）、編集可能なキーバインド
 - **Attn（割込）/ SysReq（システム要求）**: Attn でホストの ATNPGM（多くのシステムでは画面下部のコマンド入力欄）を
   呼び、SysReq は ACS 同様に**画面下部のシステム要求行**でオプションを打てる（Cancel Invite の往復まで実装）
 
 **プリンターセッション / 帳票**
 - **TN5250E プリンターセッション**でホストのスプール出力（帳票・ジョブログ等）を受信し、SCS を等幅帳票に展開
-  （**SBCS ＋ DBCS 日本語**。改ページ保持。PUB400 実機で end-to-end 確認）
+  （改ページ保持。PUB400 実機で end-to-end 確認）
+- **IGC（DBCS）属性の帳票は書き出し経路を通りません**（仮想装置が SBCS の 3812 なので `CPA3303` で
+  待ち行列ごと止まる）。詰まったスプールは**取得経路（pull）で救出**し、日本語も桁揃えのまま読めます
+  （→ [プリンターセッション](#プリンターセッションスプール受信) / [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md)）
 - ブラウザではセッションと同様に**タブ**で表示（スプール一覧＋ビュー）、テキスト保存・印刷
 - **サーバー側 PDF**: 受信スプールを PDF 化（Noto Sans Mono CJK で日本語も等幅）。サーバー設定のセッションに `printer` を書くと
   **指定フォルダへ自動蓄積**・**物理プリンターへ自動印刷**、web-ui/MCP から **PDF ダウンロード**
@@ -77,8 +89,11 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - **管理者画面**（ユーザー管理・全セッション管理・監査ログ）をタブで展開
 
 **MCP サーバー**
-- stdio ＋ Streamable HTTP、**19 ツール**（システム/セッション設定の一覧〜サインオン〜画面取得〜キー送信〜ジョブ情報〜GUI 選択〜プリンター/PDF）
-- 画面は **テキスト（LLM 可読）＋ structuredContent** で返却（桁維持・GUI 構造体・fields/cursor）
+- stdio ＋ Streamable HTTP、**40 ツール**（5250 経由 23 ＋ ホストサーバー経由 17 → [ツール一覧](#ツール一覧40)）
+- 画面は **テキスト（LLM 可読）＋ structuredContent** で返却（桁維持・GUI 構造体・fields/cursor）。
+  **自己完結 HTML** でも取れ（`get_screen_html`）、画面遷移を記録して 1 枚の HTML にまとめられる
+  （自動操作のエビデンス用）
+- ホストサーバー経由なら**装置もセッションも要らず単発**で SQL・CL・IFS・スプール・データ待ち行列を扱える
 - 認証情報はツール引数に取らず**システム設定経由**、監査ログは値を出さない（マスク）
 
 ---
@@ -87,12 +102,17 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 
 | パッケージ | 役割 |
 |---|---|
-| `packages/core` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・EBCDIC⇔Unicode・trace/replay） |
+| `packages/core` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・ホストサーバー・trace/replay） |
+| `packages/ebcdic` | EBCDIC ⇔ Unicode 変換（**外部依存ゼロ**。SBCS / SO-SI 混在 DBCS / 純 DBCS） |
+| `packages/scs` | スプール（SCS）のバイト列 → 論理ページ展開。依存は `ebcdic` のみ |
 | `packages/server` | MCP サーバー（stdio + Streamable HTTP）・WebSocket/REST・web-ui 静的配信 |
 | `packages/web-ui` | ブラウザ 5250 エミュレーター（Vue 3 + Vite） |
 | `tools/gen-tables` | ICU `.ucm` → TS 変換テーブル生成（ビルド時ツール） |
+| `tools/hostserver-check` | ホストサーバー（SQL / CL / DDM / IFS / DTAQ）を実機で叩く手動チェック |
 
-共通コアを server / web-ui が消費する縦貫構成。ESM、Node ≥ 20。
+依存の向きは `ebcdic ← scs ← core ← server / web-ui` の一方向。**`ebcdic` と `scs` は TN5250 一式を
+引き込まずに単体で使えます**（「EBCDIC 変換だけ欲しい」「スプールを読みたいだけ」に応えるため）。
+ESM、Node ≥ 20。
 
 ---
 
@@ -110,10 +130,31 @@ start.bat             # Windows
 起動後、ブラウザで **http://localhost:3400** を開きます。
 
 ```sh
-./start.sh --port 8080     # ポート変更
-./start.sh --build         # 強制再ビルド
-./start.sh --profiles path.json
+./start.sh --port 8080          # ポート変更
+./start.sh --build              # 強制再ビルド
+./start.sh --profiles path.json # 未指定なら profiles.local.json → profiles.json を自動検出
+./start.sh --trace-records      # 受信レコードを hex でログへ（障害切り分け専用）
 ```
+
+`start.sh` が受けるのはこの 4 つだけです（`--auto-secret-key` は常に付きます）。
+認証や上限値を変えるときは `node packages/server/dist/main.js` を直接起動します。
+
+| オプション | 既定 | 用途 |
+|---|---|---|
+| `--http <port>` / `--stdio` | — | トランスポート（HTTP / MCP stdio） |
+| `--web-root <dir>` | — | Web UI の配信元（`packages/web-ui/dist`） |
+| `--host <addr>` | 認証オフ=`127.0.0.1` / オン=全 IF | 待ち受けアドレス（認証なしで公開すると警告） |
+| `--profiles <file>` / `--connections <file>` | — / `connections.json` | サーバー設定 / 自分の設定の保存先 |
+| `--users <file>` | なし（＝無認証） | 認証を有効化（role・per-user 分離） |
+| `--macros <file>` | `macros.json` | 画面マクロの保存先 |
+| `--cookie-secure` | off | TLS 配信時に付ける |
+| `--auto-secret-key` / `--secret-key-file <path>` | off / `.env` | master key の自動生成と保存先 |
+| `--hash-password <pw>` | — | scrypt ハッシュを出力して終了（`users.json` 作成の補助） |
+| `--trace-records` | off | 受信レコードを hex でログへ |
+| `--ifs-read-max-bytes <n>` | 5 MiB | IFS 単一ファイル読み取りの上限 |
+| `--ifs-zip-max-bytes` / `--ifs-zip-max-files` / `--ifs-zip-max-dirs` | 20 MiB / 500 / 5000 | IFS zip 一括取得の上限（zip64 非対応のため 4 GB 未満・件数は 16 ビット） |
+| `--ifs-delete-max-entries` / `--ifs-delete-max-dirs` | 1000 / 500 | IFS 再帰削除の歯止め（事故の規模を抑える） |
+| `--dtaq-max-wait <sec>` | 60 | データ待ち行列の受信待機の上限（無限待ちを作らせない） |
 
 > 🔒 **既定はローカル専用**です。認証オフ（`--users` 未指定）のときは **127.0.0.1 のみ**を待ち受けます。
 > 認証オフは「単一の信頼ユーザー」を前提に、接続設定の編集・PDF 出力先の指定（＝サーバーへの書き込み）・
@@ -250,6 +291,14 @@ electron.bat          # Windows
      「挿入する余地がありません」が出て何も書き換えません（→ [複数行ペースト](#複数行ペーストの規則acs-実機準拠)）
    - **タブ**: Alt+PageUp/Down で切替、D&D で並び替え・別ペインへ合流。**ペイン**: Alt+矢印で移動、端 D&D で分割
    - ローカル編集キー（Field Exit / Erase EOF / Erase Input）、キーバインドは編集可能
+   - **マクロ（画面操作の記録・再生）**: ヘッダーの「マクロ」から ACS と同じ 4 操作（記録 / 再生 /
+     休止 / 停止）。定型のサインオン〜メニュー選択を録って流せます。
+     - 再生は**応答待ちが解けてから次を送り**、**記録時と同じ欄が同じ座標・長さで入力可能に在るか
+       照合してから**打ち込みます（違う画面へ流し込む事故を防ぐため）
+     - 非表示欄（パスワード）に入力があると、保存時に欄ごと「保存する / 毎回入力する / 記録しない」を
+       選べます。**保存を選んでも平文はブラウザに現れません**——値は AES-256-GCM で暗号化して
+       サーバーに置き、再生時は参照だけを送ってサーバーがホストへ書く直前に差し替えます
+     - 保存先は `--macros`（既定 `macros.json`）。**秘密を持つので `.gitignore` 済み**
    - **Attn（割込）/ SysReq（システム要求）**: 画面下部のキー行のボタン、または「⌨ キー」で好きなキーへ
      割り当てて使います（ACS の既定に合わせるなら **Esc → Attn**。既定のバインドは付いていません）
      - **Attn** はホストの ATNPGM を呼びます。多くのシステムでは**画面下部にコマンド入力欄が開き**、
@@ -259,9 +308,16 @@ electron.bat          # Windows
        システム要求メニューが出ます。Esc で取り消せます（**取り消したときはホストへ何も送りません**）。
        この行はオプション専用で、CL コマンドは打てません（コマンドは上記 Attn 側で）
 3. **表示**: 通常 / ダーク切替、SO/SI `{ }` 表示、半角カナ表示、リンク化 ON/OFF。ペイン分割・タブで複数セッション。
-4. **IBM i の機能**（5250 セッションを開かずに使えます。接続画面の「このシステムの機能」から開きます）:
+4. **IBM i の機能**（5250 セッションを開かずに使えます。接続画面の「このシステムの機能」から開きます。
+   システムを選んだ時点で資格情報が揃っているため、装置もセッションも要りません）:
    - **ジョブ / オブジェクト / ユーザー**: 一覧と、ジョブの保留・解放・終了、オブジェクト削除
-   - **SQL**: SELECT を実行して結果を表で見る → **CSV でダウンロード**（ACS の「データ転送」に相当）
+   - **SQL**: SELECT を実行して結果を表で見る → **CSV でダウンロード**
+   - **データ転送**: SQL を書かずに**表 → CSV / CSV → 表**（ACS の「データ転送」に相当。
+     取り込みは **INSERT のみ**で、更新・削除・表の作成はしません）
+   - **IFS**: フォルダを辿ってファイルを見る / 取り出す / 置く（作成・改名・削除・**zip 一括取得**）
+   - **データ待ち行列**: エントリの送受信・ピーク、作成・クリア・削除・属性表示
+   - **スプール**: 出力待ち行列にある**既存**のスプールを検索して中身を読む / PDF 保存
+     （プリンターセッションのタブ＝push 型とは別物。こちらは pull 型で過去の分も取れます）
      - **SELECT のみ**実行できます（更新系は実行されません）
      - 表示行数の上限は既定 200・最大 1000。**これは表示の上限であって、ホストから取り出す行数は
        絞りません**——大きな表では SQL に `FETCH FIRST n ROWS ONLY` を付けてください
@@ -311,18 +367,21 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 }
 ```
 
-### ツール一覧（29）
+### ツール一覧（40）
 
 ツールは経路で 2 種類に分かれます。**5250 経由**（下表）は画面を操作してテキストを読み取り、
 **ホストサーバー経由**（`host_` 接頭辞。次節）はホストサーバーの API を叩いて構造化された応答を得ます。
 
-#### 5250 経由（19）
+#### 5250 経由（23）
 
 | ツール | 概要 |
 |---|---|
 | `open_session` / `close_session` / `list_sessions` | セッションの開始（`session` / `system` から自動サインオン or host 直指定）／切断／一覧 |
 | `signon` | 画面フィールド方式のサインオン（フォールバック） |
 | `get_screen` | 現在画面（text＋structuredContent、`include` / `rows` で絞り込み） |
+| `get_screen_html` | 現在画面を**エミュレーターの見た目のまま自己完結 HTML**で取得（外部 CSS/JS/フォント参照なし・ダーク/ライト切替つき）。自動操作のエビデンス用 |
+| `start_screen_recording` / `stop_screen_recording` | 画面遷移の記録を開始／停止（記録するのは**画面と送信キーだけ**で入力値は残さない） |
+| `get_screen_history_html` | 記録したコマを**前後にたどれる 1 枚の HTML**にまとめて取得（描画は `get_screen_html` と同一経路） |
 | `wait_screen` | ホスト発の更新待ち（`until` で特定テキスト出現待ち） |
 | `set_fields` | フィールドにローカル入力（ホスト送信なし） |
 | `send_key` | fields 反映＋カーソル設定＋AID 送信 → 更新画面（Enter / F1–F24 / PageUp/Down 等） |
@@ -335,7 +394,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | `wait_spool` / `list_spools` / `get_spool` | 受信スプール（帳票・ジョブログ等）を等幅テキストで取得（次の 1 件を待つ／一覧／再取得） |
 | `get_spool_pdf` | 受信スプールを PDF（base64）で取得（等幅・改ページ保持・SBCS/DBCS 対応） |
 
-#### ホストサーバー経由（10）
+#### ホストサーバー経由（17）
 
 **装置名（デバイス）もセッションも要らず、単発で叩けます。** 画面レイアウトの変化に壊されないのが利点です。
 接続先は `system` または `session` で指定します（5250 と同じ接続設定・資格情報を流用）。
@@ -343,12 +402,18 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | ツール | 概要 |
 |---|---|
 | `host_sql` | SELECT を実行し列メタデータ付きで結果を返す。**SELECT 専用**（更新は `host_command` の `RUNSQL`） |
+| `host_upload_table` | CSV を表へ**追加**（INSERT のみ。更新・削除・表作成はしない）。`csv` か `columns`＋`rows` で渡す |
 | `host_command` | CL コマンドを実行し、成否とメッセージ（`CPF…` の ID・重大度）を構造化して返す。**非対話のみ** |
 | `host_call_program` | プログラム / QSYS API を呼ぶ（パラメータは Base64） |
 | `host_list_spools` | **既存の**スプールを任意の OUTQ から検索（pull 型） |
 | `host_get_spool` | スプールの中身を取得（`text` / `pages`。`ccsid` 指定可） |
 | `host_read_file` / `host_write_file` | IFS のファイル読み書き（`utf8` / `base64`） |
 | `host_list_jobs` / `host_list_objects` / `host_list_users` | ジョブ・オブジェクト・ユーザーの一覧 |
+| `host_dtaq_send` / `host_dtaq_receive` | データ待ち行列へ積む／取り出す・覗く（peek）。`encoding` は `utf8` / `base64` / `ebcdic`、キー付きは `key`＋`search` |
+| `host_dtaq_create` / `host_dtaq_clear` / `host_dtaq_delete` / `host_dtaq_attributes` | データ待ち行列の作成・全消去・削除・属性取得 |
+
+> 📌 `host_dtaq_receive` の `wait`（待機秒）に**無限待ちはありません**。サーバー側の上限
+> （既定 60 秒。`--dtaq-max-wait` で変更）でクランプされます。
 
 > 📌 `list_spools`（5250 経由）と `host_list_spools` は**別物**です。前者はプリンターセッションで
 > 受信済みの帳票（push 型）で、セッションを開いておく必要があり過去のスプールは取れません。
@@ -373,7 +438,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | 階層 | 持つもの |
 |---|---|
 | **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報） |
-| **セッション設定** | `system`（親システムの参照）/ `sessionType` / `deviceName` / `screenSize` / `ccsid`（上書き）/ `enhanced` / `watermark` / `printer`（サーバー設定のみ） |
+| **セッション設定** | `system`（親システムの参照）/ `sessionType` / `deviceName` / `deviceNameRetry` / `screenSize` / `ccsid`（上書き）/ `enhanced` / `watermark` / `rescueAction` / `transformTo` / `printer`（サーバー設定のみ） |
 
 参照は**接頭辞つきのトークン**で、保管場所まで含めて一意に決まります。
 
@@ -471,10 +536,14 @@ WebSocket の `open` メッセージも同じ `system` / `session` / `host` を�
   （UI で設定した AES-256-GCM 暗号文）。解決順は `passwordEnc > passwordEnv`。**平文の `password` は廃止**しました
   （後方互換のため、`signon.password` を含むファイルは起動時に明示エラーになります。`passwordEnv` へ移行してください）。
 - **システム側**に指定できるのは `tls: true`（ポート既定 992）と `ccsid`（930/939/1399 等で DBCS。既定値）。
-  **セッション設定側**は `deviceName`、`ccsid`（システムの既定を上書き）、`screenSize`（`"24x80"` /
-  `"27x132"`）、`enhanced: true`（拡張 5250 GUI 広告）、`watermark`（画面の透かし →
-  [ウォーターマーク](#ウォーターマーク画面に重ねる透かし)）、`printer`（プリンター種別のみ）。
-  `screenSize` / `enhanced` / `watermark` は `sessionType: "display"` のときだけ効きます。
+- **セッション設定側**（種別を問わない）: `deviceName`、`deviceNameRetry: true`（装置名が使用中なら
+  末尾の数字を繰り上げて再試行。既定 false ＝「その名前で繋ぎたい」意図をすり替えない）、
+  `ccsid`（システムの既定を上書き）。
+  - **`sessionType: "display"` のときだけ**効くもの: `screenSize`（`"24x80"` / `"27x132"`）、
+    `enhanced: true`（拡張 5250 GUI 広告）、`watermark`（画面の透かし →
+    [ウォーターマーク](#ウォーターマーク画面に重ねる透かし)）。
+  - **`sessionType: "printer"` のときだけ**効くもの: `rescueAction`（`hold` 既定 / `delete`）、
+    `transformTo`（HPT の機種。例 `"*HP4"`）、`printer`（自動 PDF / 印刷。**サーバー設定のみ**）。
 - **UI からの編集**: サーバー設定は接続画面のカードから編集/削除できます（**認証オフ、または admin ユーザーのとき**
   のみ。一般ユーザーには読み取り専用）。接続情報に加え、**自動サインオンのユーザー/パスワードも編集可能**で、
   パスワードは AES-256-GCM で暗号化して `passwordEnc` に保存されます（平文はファイルにもレスポンスにも残さない）。
@@ -579,6 +648,16 @@ DBCS は SCS 中の SO/SI 付き全角を 2 桁のグリフに展開）。ブラ
   起動応答 `I902`（Session successfully started）が返り、ホスト側に仮想プリンターデバイスが作られます。
 - **スプールを受信するには、ホスト側でそのデバイスの出力キューにスプールを回す**必要があります
   （例: `CHGJOB OUTQ(<dev>)` してから印刷、または `CHGSPLFA … OUTQ(<dev>)`）。
+- **IGC（DBCS）属性の帳票は、この書き出し経路を通れません。** 仮想プリンター装置は SBCS の
+  `TYPE(3812) MODEL(1)` として作られるため、ホストが `CPA3303`（… ユニコード/IGC データが装置で
+  サポートされていない）で止まります。**待ち行列の先頭で詰まると後続もすべて止まります**。
+  - 詰まったスプールは**取得経路（pull）で救出**します（書き出しプログラムを通らないので装置の制約を
+    受けません）。日本語も桁揃えのまま読め、救出後のホスト側スプールは `rescueAction` で
+    `hold`（既定・保留にして残す）/ `delete`（削除。取り消せません）を選べます。
+  - どうしても書き出し経路で流したいときは `transformTo`（例 `"*HP4"`。Host Print Transform）を
+    指定すると `CPA3303` は出なくなりますが、**届くのが SCS ではなく PCL になるため画面表示と
+    PDF は使えません**（実プリンターへそのまま流す用途）。
+  - 経緯と実測は [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md) に残しています。
 - **用紙タイプの問い合わせ（MSGW）**: ライターはスプールの用紙タイプに対し `CPA3394`（Load form type '*STD' …）
   というオペレーター応答待ちメッセージを上げ、応答するまで送信を止めます。これは**ライタージョブの外部メッセージ**で
   TN5250E の印刷ストリームには乗らないため、**プリンタークライアント（本アプリ）からは自動応答できません**（通常の
@@ -856,10 +935,18 @@ npm run lint         # eslint
 npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新時のみ）
 ```
 
-- **trace-first**: PUB400 実機トレース（JSONL）を `packages/core/test/fixtures/` に採取し、パーサ・画面モデルは
-  リプレイでオフライン回帰。実機 E2E スクリプトは `scripts/`（要 `.env` の `PUB400_USER` / `PUB400_PASSWORD`）。
-- **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint 禁止、`@as400web/core` の `log`（pino/stderr）を使う。
-- 秘密情報（`.env` / `*.local.json`）はコミットしない（`.gitignore` 済み）。
+- **trace-first**: 実機トレース（JSONL）を `packages/core/test/fixtures/` に採取し、パーサ・画面モデルは
+  リプレイでオフライン回帰。実機 E2E / 診断スクリプトは `scripts/`（実行規約は
+  [`scripts/README.md`](scripts/README.md)。要 `.env` の資格情報）。
+- **web-ui のテストはパッケージ dir から実行する**（`cd packages/web-ui && npx vitest run`）。
+  ルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、実際とは違う失敗が出ます。
+- **ビルドに `vue-tsc` を含める**: `vite build` はテンプレートの型チェックをしないので、
+  `npm run build -w @as400web/web-ui`（`vue-tsc -b && vite build`）を必ず通します。
+- **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint 禁止。
+  アプリ（server）は自前の pino、ライブラリ（core / ebcdic / scs）は既定 no-op の sink
+  （`setLogSink` で注入）を使う——ライブラリ利用者にロガーを強制しないため。
+- 秘密情報はコミットしない（`.gitignore` 済み）。`.env`（master key）・`*.local.json`・
+  `connections.json`・`macros.json`（`secretEnc` を持つ）。
 
 ---
 
@@ -880,6 +967,11 @@ npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新�
   単一行ペーストと打鍵は列ビューで正しく扱う。
 - **挿入モードで 1 行が帯の幅を越えたとき**の ACS 挙動は未確認。現状は欄全体の予算だけを見て、
   収まらなければ「挿入する余地がありません」を出す（帯の折返しは上書きモードで実機確認済み）。
+- **IGC（DBCS）属性の帳票は書き出し経路（プリンターセッション）を通れない**。仮想装置が SBCS の
+  3812 として作られるため `CPA3303` で止まる（ホスト側の制約で、こちらからは変えられない）。
+  取得経路での救出、または `transformTo`（HPT。ただし PCL になり表示・PDF 不可）で回避する
+  （→ [プリンターセッション](#プリンターセッションスプール受信) /
+  [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md)）。
 - **サーバー側の自動 PDF 蓄積・自動印刷はサーバー設定のセッションに `printer` があるときのみ**（→ [プリンターセッション](#プリンターセッションスプール受信)）。
   ブラウザ直接接続では出力先・プリンターを指定できない（任意パス書込・任意コマンド実行を防ぐため）。
   自動印刷はサーバーに `lp`（CUPS 等）がある環境でのみ動作する。

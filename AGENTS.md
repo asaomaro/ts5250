@@ -30,11 +30,26 @@
 
 ## コーディング規約
 
-- **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint で禁止し、
-  `@as400web/core` の `log`（pino/stderr）を使う。
-- **core のピュアロジック層は Node API 非依存**（I/O は `transport/` と `log.ts` に隔離。`node:*` import は
-  この 2 箇所のみ許可）。
+- **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint で禁止。
+  - **アプリ（server）は自前の pino を使う**（`packages/server/src/log.ts`）。監査証跡が
+    「注入し忘れ」で静かに消えないよう、**消えて困る側を注入に依存させない**。
+  - **ライブラリ（core / ebcdic / scs）は `log` の sink 経由**（`packages/core/src/log.ts`）。
+    既定は **no-op** で、要る側が起動時に `setLogSink` を呼ぶ。ライブラリ利用者にロガーを強制しない
+    （以前は core が pino を直接 import しており、コーデックだけ欲しい利用側にも付いてきた）。
+- **core のピュアロジック層は Node API 非依存**（I/O は `transport/` に隔離。`node:*` import は
+  **`transport/` のみ**許可）。
 - ESM / Node ≥ 20。周辺コードのスタイル（逐次 ByteReader・型で分岐を閉じる・オプショナルは存在時のみ付与）に合わせる。
+
+### パッケージ分割と入口（バンドルサイズ）
+
+`@as400web/ebcdic`（EBCDIC 変換）と `@as400web/scs`（スプール展開）は、**TN5250 一式を引き込まずに
+使えるよう core から切り出した**独立パッケージ。依存の向きは `scs → ebcdic`、`core → ebcdic, scs`。
+
+- **ブラウザから触る側は狭い入口を使う**。バレル（`@as400web/ebcdic`）は変換表 18,900 行を全部引き込む。
+  `…/codec`（変換のみ）・`…/katakana`（930/939 の SBCS 部のみ）・`…/catalog`（表ゼロ）を使い分ける。
+  バレル経由だと bundler の解析が及ばず要らない部分が残る（実測差あり。`decisions.md` D2）。
+- 同じ理由で core も `@as400web/core/browser` を持つ。**root は `node:net` / `node:tls` を巻き込む**ので
+  ブラウザから import しない。
 
 ---
 
@@ -50,7 +65,13 @@ web-ui の見た目・振る舞いの規約は **[docs/UI-DESIGN.md](docs/UI-DES
 - 種別表記は「5250端末」「プリンター」（「表示/エミュレーター」は使わない）。チップは青/緑/破線で識別。
 - 表示モードは `view-card`/`view-list` の専用クラスで分岐（`.list.list` の重複クラス指定は使わない）。
 - ヘッダーの機能ボタンはアクティブ（フォーカス中）ペインの内容に連動させる。
+- ヘッダーのポップオーバーは**同時に 1 つだけ**（`composables/headerMenu.ts` の共有状態に参加する）。
 - 信頼設定（PDF 出力先・自動印刷・秘密）の UI は認証オフ or admin のときだけ露出・編集（サーバーも同ゲート）。
+- **環境の検出結果で選択肢を塞がない。** 検出（フォントの導入判定など）は権限・実測に左右されて
+  外れることがあり、塞ぐと「入れたのに選べない」で手が止まる。**印を出すに留め、選ばせて結果で分からせる**
+  （画面フォントの選択がこれで作り直しになった。`docs/UI-DESIGN.md` の等幅フォント節）。
+- **利用者に見えるメッセージは日本語で、文体を揃える**（です・ます調・句点なし）。定数は
+  `composables/opMessages.ts` に 1 か所へ置き、テストは文言リテラルではなく**定数を参照**する。
 
 ---
 
@@ -59,7 +80,11 @@ web-ui の見た目・振る舞いの規約は **[docs/UI-DESIGN.md](docs/UI-DES
 - **ビルドに vue-tsc を含める**: `vite build` はテンプレートの型チェックをしないため、テンプレート型エラーが
   潜伏しうる。`npm run build -w @as400web/web-ui`（`vue-tsc -b && vite build`）で必ず型チェックを通す。
 - **web-ui のテストはパッケージ dir から実行**する（`cd packages/web-ui && npx vitest run`）。
-  リポジトリルートから実行すると Vite の vue plugin が適用されず `.vue` の解析に失敗する。
+  リポジトリルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、
+  **実際とは違う失敗が出る**（`--root packages/web-ui` を付けても足りない。実測で 2 件が偽陽性になった）。
+- **実機診断スクリプトの装置名は使い回す。** 新規の装置名は自動構成が効かず
+  `closed during negotiation` になる環境がある。逆に、途中で殺した接続は装置をしばらく掴んだままなので
+  リトライ待ちを見込む（`scripts/README.md`）。
 - **test 方針に「人が触る操作感」の実機観点を含める**: Tab/矢印/ホイール/複数行フィールド/属性下線/
   パスワード欄など。自動 E2E（Playwright）だけでは拾えない操作系を明示的に確認する。
 - 変更ごとにユニット/コンポーネントテストを追加し回帰資産化する。
@@ -203,8 +228,11 @@ REST は**経路を階層で分け**（`/api/systems` / `/api/sessions-config`�
 
 ## セキュリティ
 
-- **秘密情報（`.env` / `*.local.json`）はコミットしない**（`.gitignore` 済み）。パスワードは環境変数
-  （`passwordEnv`）で渡す。
+- **秘密情報はコミットしない**（`.gitignore` 済み）。パスワードは環境変数（`passwordEnv`）で渡す。
+  対象は `.env`（master key）・`*.local.json`・`connections.json`・**`macros.json`**。
+  **暗号文（`passwordEnc` / `secretEnc`）を持つファイルも同じ扱い**——鍵と同じ場所に置かれた暗号文は
+  秘密と変わらない。**秘密を保存する置き場を新設したら、その場で `.gitignore` に足す**
+  （足し忘れは「動くので気づけない」種類の漏れ）。
 - **`.aidev` 成果物（`decisions.md` 等）にも実資格情報を書かない**。ドメイン説明で例が必要なら伏字（`***`）や
   ダミー値を使う。
 - **deliver / 公開前に secret scan**（パスワード/トークン等の検出）を行う。混入が判明したら履歴からも除去し、
@@ -214,9 +242,17 @@ REST は**経路を階層で分け**（`/api/systems` / `/api/sessions-config`�
 
 ## 残課題（retro → issue 候補）
 
-- 複数行フィールドの行またぎ編集（現状は 1 行目＝可視桁のみ）。
-- 画面全体の自由カーソル（非入力エリアを含む任意位置）＝5250 らしい単一カーソルモデルへの作り替え。
-- カーソル／編集モデルの一元化（`edit` を `ScreenGrid` に集約し、native caret を単一の真実に）。
-- PUB400 手動 field-signon（CPF1120）の未解決調査（ACS の実トラフィックを採取して差分特定）。
+**解決済みの旧項目は落とした**——行またぎ欄の編集（`fieldSlices.ts`）・画面全体の自由カーソル・
+カーソル／編集モデルの一元化（native caret が単一の真実）・PUB400 の手動 field-signon（`CPF1120`。
+RFC 2877 の `KBDTYPE`/`CODEPAGE`/`CHARSET` 申告で解決）はいずれも実装済み。
 
-> 詳細な振り返りは `.aidev/works/20260714-5250-mcp-web-emulator/retro.md`。
+- **複数行ペーストの帯幅を「文字数」で切っている**ため、貼る内容に全角が混ざると桁とずれる
+  （貼り付け**先**の全角は解決済み）。実機検証 `verify-browser-paste.mjs` は SBCS の範囲。
+- **挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認**。現状は欄全体の予算だけを見る。
+- **`ORDER.UNKNOWN_1C`（0x1C）の正体が未確認**。SC30-3533 にも tn5250 にも定義が無く、実機
+  1 回の観測から「1 桁の `*`」として実装している（`constants.ts` に経緯）。
+- **ログインセッション・監査ログが in-memory**。再起動で消える（永続化・外部 IdP は未対応）。
+- DBCS 欄が行末をまたぐとき、全角の右半分が描けない（桁割り・送信データは ACS と一致）。
+
+> 詳細な振り返りは `.aidev/works/*/retro.md`（初回は `20260714-5250-mcp-web-emulator/`）。
+> 横断の傾向は `/aidev-util-insights` で集計できる。
