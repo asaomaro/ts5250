@@ -43,7 +43,7 @@ export function macroIdOf(t: string): string {
  * **消したら消えたまま**（下の load / persist 参照）。「初期設定に戻す」で復元できる。
  */
 export const DEFAULT_BINDINGS: Record<string, BindingTarget> = {
-  "ctrl+F1": "view:kana", // 半角カナ ⇄ 英
+  "ctrl+F1": "view:kana", // 表示コード（自動 → カナ → 英）
   "ctrl+F3": "view:sosi", // SO/SI 表示 ⇄ 非表示
 };
 

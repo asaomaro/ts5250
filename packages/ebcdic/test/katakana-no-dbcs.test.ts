@@ -48,8 +48,19 @@ describe("@as400web/ebcdic/katakana は DBCS 表を引き込まない", () => {
   const rel = (f: string): string => f.slice(srcDir.length + 1);
   const files = [...reached.keys()].map(rel).sort();
 
-  it("到達するのは入口・型・930 の SBCS 部の 3 ファイルだけ", () => {
-    expect(files).toEqual(["katakana.ts", "table-types.ts", "tables/ibm930-sbcs.ts"]);
+  /**
+   * **SBCS 部は 2 つ読む**（930＝CP290 と 939＝CP1027）。表示コード切替は
+   * 「もう一方の表で読み直すこと」なので両方要る——930 の表しか無いと、
+   * ホストが 930 のセッションで切替が無反応になる。
+   * 増えてよいのは SBCS 部だけで、DBCS 部・合成モジュール・`codec.ts` は引き続き禁止。
+   */
+  it("到達するのは入口・型・930/939 の SBCS 部の 4 ファイルだけ", () => {
+    expect(files).toEqual([
+      "katakana.ts",
+      "table-types.ts",
+      "tables/ibm930-sbcs.ts",
+      "tables/ibm939-sbcs.ts"
+    ]);
   });
 
   it("DBCS 部にも合成モジュールにも到達しない", () => {

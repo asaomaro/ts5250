@@ -72,6 +72,7 @@ export {
   DbcsCodec,
   codecForCcsid,
   katakanaChar,
+  latinChar,
   SO,
   SI,
   type Codec,

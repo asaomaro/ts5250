@@ -27,7 +27,7 @@ import {
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
-import type { ButtonStyle, WindowFrame, WindowBackdrop } from "../stores/viewSettings.js";
+import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_BY_REASON } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -49,7 +49,8 @@ import {
   attrSentinel,
   stripSentinels,
   decodeAttribute,
-  katakanaChar
+  katakanaChar,
+  latinChar
 } from "@as400web/core/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
@@ -60,9 +61,12 @@ const props = withDefaults(
     focused: boolean;
     /** SO を { ・SI を } で表示する（ACS の Ctrl+F 相当。既定は空白） */
     showShiftMarks?: boolean;
-    /** SBCS を半角カナ解釈で表示する（ACS の表示コード切替。英小文字位置がカナ化） */
-    katakanaView?: boolean;
-    /** 画面テキストの URL/メールをリンク化する（既定 ON。カタカナ表示中は無効） */
+    /**
+     * SBCS の実効表示コード（ACS の表示コード切替）。`host` はホストの表のまま＝再解釈しない。
+     * `kana`/`latin` は生バイトを対の表で読み直す（親が CCSID と突き合わせて決める）。
+     */
+    sbcsView?: SbcsView;
+    /** 画面テキストの URL/メールをリンク化する（既定 ON。表示コード再解釈中は無効） */
     linkify?: boolean;
     /** 通信中（ホスト応答待ち）。入力欄を編集不可にしてプロテクトする */
     busy?: boolean;
@@ -77,7 +81,7 @@ const props = withDefaults(
     /** ウィンドウの背景（窓の外側）の見せ方。none は背景に何もしない */
     windowBackdrop?: WindowBackdrop;
   }>(),
-  { linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none" }
+  { linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none", sbcsView: "host" }
 );
 const emit = defineEmits<{
   (e: "edit", fieldIndex: number, value: string): void;
@@ -498,22 +502,40 @@ function displayText(s: string): string {
   return s.includes("\uFFFD") ? s.replaceAll("\uFFFD", " ") : s;
 }
 
-/** セルの表示文字（SO/SI マーク表示・カタカナ再解釈・dbcs-tail 空白埋め） */
+/**
+ * 生バイトを実効表示コードで読み直す。**`sbcsView === "host"` のときは呼ばない**
+ * （`recodes()` が先に false を返す）。
+ */
+function recodeChar(rawByte: number): string {
+  return props.sbcsView === "kana" ? katakanaChar(rawByte) : latinChar(rawByte);
+}
+
+/**
+ * このセルを再解釈するか。**再解釈の可否判定はここ 1 か所**——画面（displayChar）・
+ * コピー（copyCharOf）・入力欄（recodeViewActive 経由）が同じ答えを使うことで、
+ * 「画面はカナなのに入力欄は素のまま」のような食い違いを構造的に作らない。
+ *
+ * `rawByte` を持つのは SBCS セルだけ（DBCS・属性桁・オーダーが書いた文字は持たない）。
+ * それらは読み直す元が無いので、ホストの表で解釈済みの `char` をそのまま使う。
+ */
+function recodes(c: Cell): boolean {
+  return props.sbcsView !== "host" && c.kind === "sbcs" && c.rawByte !== undefined;
+}
+
+/** セルの表示文字（SO/SI マーク表示・表示コード再解釈・dbcs-tail 空白埋め） */
 function displayChar(c: Cell): string {
   // **非表示（nonDisplay）桁は SO/SI マークも出さない。** ACS は非表示属性の桁に何も描かない
   // （DBCS ラベルが非表示のとき、UPDDTA 初期表示で SO/SI だけ { } と漏れて見えるのを防ぐ）。
   if (c.nonDisplay) return " ";
   if (props.showShiftMarks && c.kind === "so") return "{";
   if (props.showShiftMarks && c.kind === "si") return "}";
-  // カタカナ表示: SBCS の生バイトを半角カナで再解釈
-  if (props.katakanaView && c.kind === "sbcs" && c.rawByte !== undefined) {
-    return displayText(katakanaChar(c.rawByte));
-  }
+  // 表示コード切替: SBCS の生バイトを対の表で再解釈
+  if (recodes(c)) return displayText(recodeChar(c.rawByte!));
   return c.char === "" ? " " : displayText(c.char);
 }
 
-// リンク化: 既定 ON（withDefaults）。カタカナ表示中は文字が別解釈になるため無効化（誤検出・桁崩れ防止）
-const linkEnabled = computed(() => props.linkify && !props.katakanaView);
+// リンク化: 既定 ON（withDefaults）。再解釈表示中は文字が別解釈になるため無効化（誤検出・桁崩れ防止）
+const linkEnabled = computed(() => props.linkify && props.sbcsView === "host");
 
 /** text セグメントをプレーン/リンク部分に分割（リンク無効時は単一のプレーン部分） */
 function linkParts(text: string): LinkPart[] {
@@ -725,7 +747,7 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
 /**
  * 機能キー凡例（`F3=終了` 等）。行ごとにまとめる。
  *
- * `displayChar` を渡すので SO/SI マーク表示・カナ表示の設定が検出にも反映される
+ * `displayChar` を渡すので SO/SI マーク表示・表示コードの設定が検出にも反映される
  * （設定と見た目が食い違わないようにするため）。snapshot だけに依存させ、
  * 入力のたびに再検出しないよう `rows` とは別の computed にしている。
  */
@@ -946,7 +968,7 @@ function logicalFromCells(f: Field): string {
 
 /** 休止・未編集 DBCS 欄の列ビューを**セルから忠実に**組む（表示専用）。
  *  SO/SI は実位置のまま（空 {} や不整合 { だけ・} だけ も保持）、SBCS は displayChar で
- *  カナ再解釈、全角は 1 文字（2 桁）で採用する。span（displayChar）と完全に一致する。
+ *  表示コード再解釈、全角は 1 文字（2 桁）で採用する。span（displayChar）と完全に一致する。
  *  純論理値からの再構成（dbcsViewLayout）と違い SO/SI を落とさない。 */
 function restViewFromCells(f: Field, shiftMark?: string): string {
   let v = "";
@@ -968,7 +990,7 @@ function restViewFromCells(f: Field, shiftMark?: string): string {
         v += shiftMark;
         continue;
       }
-      // displayChar が SO/SI マーク・カナ再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
+      // displayChar が SO/SI マーク・表示コード再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
       v += displayChar(cell);
     }
   }
@@ -1017,9 +1039,9 @@ function sliceValue(f: Field, sliceIdx: number): string {
   if (!s) return "";
   // 休止表示なので props 由来のレイアウトを使う（編集モデルを見ると blur で値が戻らない）
   if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f), s);
-  // カタカナ表示中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
-  // これをしないと span だけカナ・input は英字のまま食い違う（英カナ切替が input に効かない）。
-  if (usesShiftCells(f) || usesKatakanaCells(f)) return shiftCellsView(s);
+  // 表示コード再解釈中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから読み直す。
+  // これをしないと span だけ再解釈・input は素のままで食い違う（表示コード切替が input に効かない）。
+  if (usesShiftCells(f) || usesRecodedCells(f)) return shiftCellsView(s);
   if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス
   return displayValue(f).slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
 }
@@ -1048,13 +1070,13 @@ function usesShiftCells(f: Field): boolean {
   });
 }
 
-/** その欄をカナ表示（セルの生バイト再解釈）にするか。
- *  - カナ表示 OFF・確定編集済み（props.edits にある）は対象外（英字。送信値と食い違わせない）。
- *  - **フォーカス中でも、まだ打鍵していない（編集モデル＝元セル内容）ならカナ維持**。打鍵して
- *    編集モデルが元と変わった瞬間から英字（編集値）に戻す。これで「未編集欄はフォーカスしても
- *    カナのまま、編集し始めたら英字」を satisfy する（送信値は常に元バイト）。 */
-function katakanaViewActive(f: Field): boolean {
-  if (!props.katakanaView) return false;
+/** その欄を再解釈表示（セルの生バイトを対の表で読み直す）にするか。
+ *  - 再解釈なし（host）・確定編集済み（props.edits にある）は対象外（編集値。送信値と食い違わせない）。
+ *  - **フォーカス中でも、まだ打鍵していない（編集モデル＝元セル内容）なら再解釈を維持**。打鍵して
+ *    編集モデルが元と変わった瞬間から編集値に戻す。これで「未編集欄はフォーカスしても
+ *    再解釈のまま、編集し始めたら素の値」を satisfy する（送信値は常に元バイト）。 */
+function recodeViewActive(f: Field): boolean {
+  if (props.sbcsView === "host") return false;
   if (props.edits.get(f.index) !== undefined) return false;
   if (editFieldIndex === f.index && edit) {
     return editValue(edit).replace(/ +$/, "") === baselineValue(f);
@@ -1062,15 +1084,15 @@ function katakanaViewActive(f: Field): boolean {
   return true; // 休止 or 未フォーカスの未編集欄
 }
 
-/** カナ表示中の SBCS 欄は、span（displayChar）と同じくセルの生バイトから再解釈する。
- *  input の :value も cell ビューにしないと、span だけカナ・input は英字のままになる。
+/** 再解釈表示中の SBCS 欄は、span（displayChar）と同じくセルの生バイトから読み直す。
+ *  input の :value も cell ビューにしないと、span だけ再解釈・input は素のままになる。
  *  DBCS/hidden は対象外（DBCS は dbcsRestLayout、hidden は伏せ字）。 */
-function usesKatakanaCells(f: Field): boolean {
+function usesRecodedCells(f: Field): boolean {
   if (f.dbcsType || f.hidden) return false;
-  return katakanaViewActive(f);
+  return recodeViewActive(f);
 }
 
-/** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・カタカナ再解釈・全角は 1 文字で 2 桁ぶん）。 */
+/** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・表示コード再解釈・全角は 1 文字で 2 桁ぶん）。 */
 function shiftCellsView(s: FieldSlice): string {
   const row = props.snapshot.cells[s.row - 1];
   if (!row) return "".padEnd(s.width, " ");
@@ -1124,10 +1146,10 @@ function displayValue(f: Field): string {
 function dbcsRestLayout(f: Field): DbcsViewLayout {
   // セルから忠実に列ビューを組む条件:
   //  - 休止・未編集: SO/SI の実位置・空・不整合を保持（#144）。
-  //  - **フォーカス中でも katakanaViewActive（未打鍵のカナ表示欄）**: フォーカスしてもカナを維持する。
-  // 編集済み・打鍵後の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり・英字）。
+  //  - **フォーカス中でも recodeViewActive（未打鍵の再解釈表示欄）**: フォーカスしても再解釈を維持する。
+  // 編集済み・打鍵後の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり・素の値）。
   const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
-  if (resting || katakanaViewActive(f)) {
+  if (resting || recodeViewActive(f)) {
     return columnViewLayout(restViewFromCells(f));
   }
   return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
@@ -1317,14 +1339,14 @@ function inputForSlice(f: Field, sliceIdx: number): HTMLInputElement | undefined
 
 /** 論理値を全スライスの <input> へ書き戻す（hidden は伏せ字化してから割る）。 */
 function writeSlices(f: Field, full: string): void {
-  // 未打鍵のカナ表示欄はフォーカス中もセル由来のカナ列ビューを保つ（打鍵で editVal!=baseline になれば英字へ）。
-  const kana = katakanaViewActive(f);
+  // 未打鍵の再解釈表示欄はフォーカス中もセル由来の再解釈列ビューを保つ（打鍵で editVal!=baseline になれば素の値へ）。
+  const recoded = recodeViewActive(f);
   const masked = maskSafe(f, full);
   slicesOf(f).forEach((s, i) => {
     const el = inputForSlice(f, i);
     if (!el) return;
     // 表示はセンチネル→空白（編集モデルはセンチネル込みのまま。見た目は従来どおりの空白）
-    el.value = kana
+    el.value = recoded
       ? displayText(stripSentinels(sliceValue(f, i)))
       : displayText(stripSentinels(masked.slice(s.offset, s.offset + s.width))).padEnd(s.width, " ");
   });
@@ -1393,14 +1415,14 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
     target.focus();
     syncingFocus = false;
   }
-  // 未打鍵のカナ表示欄はフォーカス中もセル由来のカナ列ビュー（打鍵で editVal!=baseline になれば英字へ）。
+  // 未打鍵の再解釈表示欄はフォーカス中もセル由来の再解釈列ビュー（打鍵で editVal!=baseline になれば素の値へ）。
   // caret は編集モデル（lay）で決めるが、未打鍵欄は列構造が一致するので桁はズレない。
-  const kana = katakanaViewActive(f);
+  const recoded = recodeViewActive(f);
   slicesOf(f).forEach((sl, i) => {
     const el = inputForSlice(f, i);
     // **フォーカス中もセンチネルは見せない。** 休止時はテンプレートが stripSentinels を通すが、
     // ここは同期処理が直接代入するので、同じ処理を通さないと制御コードが豆腐で見える。
-    if (el) el.value = kana ? displayText(stripSentinels(sliceValue(f, i))) : stripSentinels(dbcsSliceText(lay, sl));
+    if (el) el.value = recoded ? displayText(stripSentinels(sliceValue(f, i))) : stripSentinels(dbcsSliceText(lay, sl));
   });
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
@@ -1747,8 +1769,8 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
     // DBCS 欄は編集中も列ビュー（SO/SI 込み）を表示。論理カーソルはこのスライスの先頭桁へ。
     const lay = dbcsLayoutOf(f);
     const r = dbcsSliceRangeOf(f, sliceIdx, lay);
-    // 未打鍵のカナ表示欄はフォーカスしてもカナ列ビューを保つ（caret は lay 由来。桁構造は一致）。
-    el.value = katakanaViewActive(f)
+    // 未打鍵の再解釈表示欄はフォーカスしても再解釈列ビューを保つ（caret は lay 由来。桁構造は一致）。
+    el.value = recodeViewActive(f)
       ? displayText(stripSentinels(sliceValue(f, sliceIdx)))
       : stripSentinels(dbcsSliceText(lay, r.s)); // パディング込み＝未入力桁にも caret を置ける
     const lc = lay.logicalAfter(r.from); // 先頭桁が SO なら、その次の論理境界から
@@ -1792,9 +1814,9 @@ function onInputBlur(f: Field, ev: FocusEvent): void {
   const el = ev.target as HTMLInputElement;
   // **スライス間の一時 blur（syncingFocus）以外は編集状態を解除する。**
   // これをしないと、一度フォーカスした欄が blur 後も editFieldIndex に残って「編集中」扱いのままになり、
-  // 休止表示のカナ再解釈（usesKatakanaCells / dbcsRestLayout）から除外され続ける
-  // （アウトフォーカスで英カナ切替を押しても切り替わらない）。ここで解除すると休止表示（カナ含む）に戻る。
-  // el.value を組む前に解除するので、この blur 直後から休止のカナ表示が反映される。
+  // 休止表示の表示コード再解釈（usesRecodedCells / dbcsRestLayout）から除外され続ける
+  // （アウトフォーカスで表示コードを切り替えても変わらない）。ここで解除すると休止表示（再解釈含む）に戻る。
+  // el.value を組む前に解除するので、この blur 直後から休止の再解釈表示が反映される。
   if (!syncingFocus) {
     edit = undefined;
     editFieldIndex = -1;
@@ -2379,9 +2401,7 @@ function copyCharOf(cell: Cell, shift: string): string {
   if (cell.kind === "dbcs-tail") return ""; // 全角は lead で 1 文字（tail は畳む）
   if (cell.kind === "so" || cell.kind === "si") return shift;
   // 属性桁（色制御）・非表示桁は core が char=" " にしている＝空白 1 桁として写る（画面と同じ）
-  if (props.katakanaView && cell.kind === "sbcs" && cell.rawByte !== undefined) {
-    return displayText(katakanaChar(cell.rawByte));
-  }
+  if (recodes(cell)) return displayText(recodeChar(cell.rawByte!));
   // displayText: 表示できないバイト（U+FFFD）は画面と同じく空白にする（生の U+FFFD を載せない）
   return cell.char === "" ? " " : displayText(cell.char);
 }
@@ -2401,7 +2421,7 @@ function copyViewOf(f: Field): string {
   if (f.hidden) return maskSafe(f, logicalValue(f));
   if (f.dbcsType) {
     const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
-    const view = resting || katakanaViewActive(f)
+    const view = resting || recodeViewActive(f)
       ? restViewFromCells(f, SHIFT_MARK)
       : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), SHIFT_MARK, SHIFT_MARK).view;
     return displayText(view); // 外字は残す（センチネルは DBCS 欄の値には入らない）

@@ -34,12 +34,15 @@ export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
  */
 export { TEXT_CCSIDS, ccsidLabel, type LineEnding } from "@as400web/ebcdic/catalog";
 /**
- * 半角カナ表示（ACS の表示コード切替の再現）。**`katakana` サブパスから取る**——
+ * 表示コード切替（ACS の半角カナ ⇔ 英小文字）の再現。**`katakana` サブパスから取る**——
  * ここを `@as400web/ebcdic`（root）や `/codec` に向けると、CCSID 930/939 の変換表が
  * DBCS 部込みで丸ごとバンドルに入る（実測で約 600 KB）。実際に使うのは
- * 930 の SBCS 部 256 要素だけなので、それだけが届く入口を指す。
+ * 930・939 の SBCS 部 256 要素ずつだけなので、それだけが届く入口を指す。
+ *
+ * **2 つで対**。切替とは「もう一方の表で読み直すこと」で、カタカナ系ホスト（930/5026）で
+ * 英字を出すには 939 側の表が要る（`katakanaChar` だけだと 930 セッションで無反応になる）。
  */
-export { katakanaChar } from "@as400web/ebcdic/katakana";
+export { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
 /** データ待ち行列。UI が属性・送受信フォームを組み立てるため型を共有する */
 export type {
   DtaqEntry,

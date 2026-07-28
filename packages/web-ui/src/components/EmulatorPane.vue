@@ -6,7 +6,7 @@ import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";
 import SysReqLine from "./SysReqLine.vue";
 import WatermarkOverlay from "./WatermarkOverlay.vue";
-import { viewSettings } from "../stores/viewSettings.js";
+import { viewSettings, resolveSbcsView } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -66,6 +66,12 @@ const busy = computed(() => state.value?.busy ?? false);
 const loading = computed(() => state.value?.loading ?? false);
 // カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
 const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
+/**
+ * 画面に渡す実効の表示コード。**ホストの SBCS 表を知っているのはここだけ**なので、
+ * 保存値（自動/カナ/英）との突き合わせも親で済ませ、ScreenGrid には結果だけ渡す。
+ * ホストと同じ向きなら `host`＝再解釈しない（今までどおりの見た目）。
+ */
+const sbcsView = computed(() => resolveSbcsView(view.value.kana, isKatakanaCcsid(state.value?.ccsid)));
 const insertMode = ref(false);
 
 /**
@@ -749,7 +755,7 @@ function onWheel(ev: WheelEvent): void {
         :busy="busy"
         :cursor="cursor"
         :show-shift-marks="view.sosi"
-        :katakana-view="view.kana"
+        :sbcs-view="sbcsView"
         :uppercase-input="uppercaseInput"
         :linkify="view.linkify"
         :buttons="view.buttons"

@@ -134,11 +134,16 @@ describe("既定バインドが実際のキー操作で効く", () => {
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
 
-    expect(viewSettings.settings.kana).toBe(false); // 初期値=英
+    // 表示コードは 3 値（自動→カナ→英→自動）。既定はホストの表のまま＝自動
+    expect(viewSettings.settings.kana).toBe("auto");
     await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
-    expect(viewSettings.settings.kana).toBe(true);
-    expect(w.find(".oia .notice").text()).toBe("半角カナ表示: カナ");
+    expect(viewSettings.settings.kana).toBe("kana");
+    expect(w.find(".oia .notice").text()).toBe("表示コード: カナ");
+    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.kana).toBe("latin");
+    expect(w.find(".oia .notice").text()).toBe("表示コード: 英");
 
     expect(viewSettings.settings.sosi).toBe(false); // 初期値=非表示
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });

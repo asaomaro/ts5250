@@ -4,12 +4,36 @@ import type { ScreenFontId } from "../composables/screenFonts.js";
 /**
  * エミュレーター「画面表示」設定。**単一の設定を保存**（localStorage）し、全画面に適用する。
  * メニューで変えた値はそのまま記憶され、新しい画面・再読み込み後も維持される。
- * 対象: SO/SI 表示・半角カナ表示・リンク化・コントロール表現（画面内入力欄の見せ方）・
+ * 対象: SO/SI 表示・表示コード（カナ⇄英）・リンク化・コントロール表現（画面内入力欄の見せ方）・
  *       配色（端末色⇄意味色）・画面の質感（CRT⇄フラット）・フォント。
  */
 /** 入力欄の見せ方（画面設定「入力項目設定」）。すべて桁を動かさない手段だけで作る（spec D8）。 */
 export type ControlStyle =
   | "plain" | "underline" | "filled" | "box" | "boxRound" | "inset" | "dashed" | "glow";
+/**
+ * SBCS の表示コード（ACS の表示コード切替）。
+ *
+ * **切り替えとは「もう一方の表で読み直すこと」**——CCSID 930 の SBCS 部（CP290）と
+ * 939 の SBCS 部（CP1027）はカタカナと英小文字の位置が入れ替わった鏡像である。
+ * だから「カナ / 英」を絶対値で持ち、ホストの表と同じ向きなら再解釈しない、という形にする。
+ * `auto` はホストの表のまま＝**どの CCSID でも今までどおりの見た目**（既定）。
+ */
+export type KanaView = "auto" | "kana" | "latin";
+/** 画面グリッドに渡す実効の表示コード。`host` は再解釈しない（`recodeChar` を通さない） */
+export type SbcsView = "host" | "kana" | "latin";
+
+/**
+ * 保存値（`KanaView`）とホストの SBCS 表から、実効の表示コードを決める。
+ *
+ * **ホストの表と同じ向きを選んだら `host` を返す**のが要点——再解釈を通さないので、
+ * `rawByte` を持たないセル（DBCS・属性桁・オーダーが書いた文字）でも表示が崩れない。
+ */
+export function resolveSbcsView(kana: KanaView, hostIsKatakana: boolean): SbcsView {
+  if (kana === "auto") return "host";
+  if (kana === "kana") return hostIsKatakana ? "host" : "kana";
+  return hostIsKatakana ? "latin" : "host";
+}
+
 /** 配色: literal=5250 の 7 色をそのまま／semantic=役割ベース（通常=前景・値=アクセント・エラー=赤）へ再マップ */
 export type ColorMode = "literal" | "semantic";
 /** 画面の質感: crt=フォスファのにじみ＋ベゼル枠／flat=グロー無し・やわらかい影のカード */
@@ -27,7 +51,8 @@ export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
   sosi: boolean;
-  kana: boolean;
+  /** SBCS の表示コード（ACS の表示コード切替）。既定 auto＝ホストの表のまま */
+  kana: KanaView;
   linkify: boolean;
   controls: ControlStyle;
   colorMode: ColorMode;
@@ -67,7 +92,17 @@ export interface ViewItemDef {
 }
 export const VIEW_ITEMS: ViewItemDef[] = [
   { key: "sosi", label: "SO/SI 表示", opts: [{ value: false, label: "非表示" }, { value: true, label: "表示" }] },
-  { key: "kana", label: "半角カナ表示", opts: [{ value: true, label: "カナ" }, { value: false, label: "英" }] },
+  {
+    key: "kana",
+    label: "表示コード",
+    // 「自動」はホストの表のまま。カナ系ホスト（930/5026）では「カナ」が、
+    // 英小文字系（939/1399/5035）では「英」が自動と同じ結果になる（resolveSbcsView）。
+    opts: [
+      { value: "auto", label: "自動" },
+      { value: "kana", label: "カナ" },
+      { value: "latin", label: "英" },
+    ],
+  },
   { key: "linkify", label: "リンク化", opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }] },
   {
     key: "controls",
@@ -139,7 +174,7 @@ export function viewItem(key: string): ViewItemDef | undefined {
 const STORAGE_KEY = "as400.view.settings";
 const FALLBACK: ViewSettings = {
   sosi: false, // 非表示
-  kana: false, // 英
+  kana: "auto", // ホストの表のまま
   linkify: true,
   controls: "plain",
   colorMode: "literal", // 端末色
@@ -164,6 +199,12 @@ function persist(): void {
  *  （spec D8「旧値の移行」）。利用者から見た変化は無い。 */
 function migrate(v: ViewSettings): ViewSettings {
   const out = { ...v };
+  // 旧 `kana: boolean`（2 値）を 3 値へ。**利用者から見た挙動は変えない**——
+  // 旧 false（英）は再解釈しない挙動だったので `auto`、旧 true（カナ）は `kana` に対応する
+  // （カナ系ホストでは resolveSbcsView が `host` に倒すので、こちらも従来どおり無変化）。
+  if (typeof (out.kana as unknown) === "boolean") {
+    out.kana = (out.kana as unknown as boolean) ? "kana" : "auto";
+  }
   if ((out.controls as string) === "rich") out.controls = "box";
   if ((out.buttons as string) === "rich") out.buttons = "box";
   // 旧 `windowView`（ウィンドウと背景が 1 項目だった頃）を 2 項目へ分解する

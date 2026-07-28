@@ -204,13 +204,13 @@ const DBCS_TABLES: ReadonlyMap<number, StatefulTable> = new Map([
 ]);
 
 /**
- * カタカナ SBCS の再解釈は **`katakana.ts` に分離済み**（`@as400web/ebcdic/katakana`）。
- * ここからの再輸出は、この入口の公開面を変えないためだけに在る。
+ * 表示コード切替（カナ⇔英小文字）の SBCS 再解釈は **`katakana.ts` に分離済み**
+ * （`@as400web/ebcdic/katakana`）。ここからの再輸出は、この入口の公開面を変えないためだけに在る。
  *
  * **ブラウザから使う側は `@as400web/ebcdic/katakana` を直接指すこと。**
  * この `codec.js` は 5 表すべてを静的 import するので、経由すると表が丸ごと付いてくる。
  */
-export { katakanaChar } from "./katakana.js";
+export { katakanaChar, latinChar } from "./katakana.js";
 
 /** CCSID → codec。37=SBCS、930/939/1399（＋エイリアス）=DBCS */
 export function codecForCcsid(ccsid: number): Codec {

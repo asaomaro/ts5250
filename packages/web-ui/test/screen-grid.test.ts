@@ -486,7 +486,7 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
-  it("katakanaView は DBCS(混在)欄の休止表示にも効く（SEU コード欄・英カナ切替）", () => {
+  it("sbcsView=kana は DBCS(混在)欄の休止表示にも効く（SEU コード欄・英カナ切替）", () => {
     // SEU のソース行は混在(DBCS)欄。先頭 SBCS の生バイト 0x81（037='a' / 930 カナ）を持たせる
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
@@ -503,7 +503,7 @@ describe("ScreenGrid", () => {
     expect((normal.find("input.grid-input").element as HTMLInputElement).value).toContain("a");
     // カナ表示: 先頭 SBCS は半角カナ（'a' でない）、DBCS 'あ' は全角のまま保持
     const kana = mount(ScreenGrid, {
-      props: { snapshot, edits: new Map(), focused: false, katakanaView: true }
+      props: { snapshot, edits: new Map(), focused: false, sbcsView: "kana" }
     });
     const v = (kana.find("input.grid-input").element as HTMLInputElement).value;
     expect(v).not.toContain("a");
@@ -1223,7 +1223,7 @@ describe("ScreenGrid", () => {
     expect(row.text()).toContain("A 日 B");
   });
 
-  it("katakanaView で SBCS の生バイトを半角カナ解釈で表示する", () => {
+  it("sbcsView=kana で SBCS の生バイトを半角カナ解釈で表示する", () => {
     const snap = makeSnap();
     // 生バイト 0x81（037 では 'a'、930 カナでは半角カナ）を持つセル
     const r0 = snap.cells[0]!;
@@ -1231,14 +1231,14 @@ describe("ScreenGrid", () => {
     const normal = mount(ScreenGrid, { props: { snapshot: snap, edits: new Map(), focused: true } });
     expect(normal.findAll(".grid-row")[0]!.text()).toContain("a");
     const kana = mount(ScreenGrid, {
-      props: { snapshot: snap, edits: new Map(), focused: true, katakanaView: true }
+      props: { snapshot: snap, edits: new Map(), focused: true, sbcsView: "kana" }
     });
     // カナビューでは 'a' 以外の文字（半角カナ）になる
     const kanaText = kana.findAll(".grid-row")[0]!.text();
     expect(kanaText).not.toContain("a");
   });
 
-  it("katakanaView は input 欄の休止表示にも効く（span と一致・英カナ切替）", () => {
+  it("sbcsView=kana は input 欄の休止表示にも効く（span と一致・英カナ切替）", () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 1, protected: false, hidden: false, numeric: false, mdt: false, value: "a" }
     ];
@@ -1250,7 +1250,7 @@ describe("ScreenGrid", () => {
     expect((normal.find("input.grid-input").element as HTMLInputElement).value).toBe("a");
     // カナ表示: input も生バイト再解釈で 'a' 以外（span と食い違わない）
     const kana = mount(ScreenGrid, {
-      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true }
+      props: { snapshot: snap, edits: new Map(), focused: false, sbcsView: "kana" }
     });
     const v = (kana.find("input.grid-input").element as HTMLInputElement).value;
     expect(v).not.toBe("a");
@@ -1265,14 +1265,14 @@ describe("ScreenGrid", () => {
     const snap = makeSnap(fields);
     snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
     const w = mount(ScreenGrid, {
-      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: false },
+      props: { snapshot: snap, edits: new Map(), focused: false, sbcsView: "host" },
       attachTo: document.body
     });
     const input = w.find("input.grid-input");
     const val = () => (input.element as HTMLInputElement).value;
     await input.trigger("focus");
     await input.trigger("blur"); // アウトフォーカス（英カナボタンへ移動した状態を模す）
-    await w.setProps({ katakanaView: true }); // 英カナボタンをクリック
+    await w.setProps({ sbcsView: "kana" }); // 英カナボタンをクリック
     expect(val()).not.toBe("a"); // 休止カナ表示へ切り替わる
     w.unmount();
   });
@@ -1285,7 +1285,7 @@ describe("ScreenGrid", () => {
     snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
     snap.cells[5]![10] = { ...cell("b"), rawByte: 0x82 };
     const w = mount(ScreenGrid, {
-      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true },
+      props: { snapshot: snap, edits: new Map(), focused: false, sbcsView: "kana" },
       attachTo: document.body
     });
     const input = w.find("input.grid-input");
@@ -1307,7 +1307,7 @@ describe("ScreenGrid", () => {
     snap.cells[5]![9] = { ...cell("a"), rawByte: 0x81 };
     snap.cells[5]![10] = { ...cell("b"), rawByte: 0x82 };
     const w = mount(ScreenGrid, {
-      props: { snapshot: snap, edits: new Map(), focused: false, katakanaView: true },
+      props: { snapshot: snap, edits: new Map(), focused: false, sbcsView: "kana" },
       attachTo: document.body
     });
     const input = w.find("input.grid-input");
@@ -1571,7 +1571,7 @@ describe("ScreenGrid", () => {
 
     it("カタカナ表示中はリンク化を無効化する", () => {
       const w = mount(ScreenGrid, {
-        props: { snapshot: textSnap("http://x.io"), edits: new Map(), focused: true, katakanaView: true }
+        props: { snapshot: textSnap("http://x.io"), edits: new Map(), focused: true, sbcsView: "kana" }
       });
       expect(w.find("a.grid-link").exists()).toBe(false);
     });
