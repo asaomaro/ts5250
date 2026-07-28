@@ -3,6 +3,7 @@ import { type Codec, SO, SI } from "@as400web/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, isAttribute } from "./constants.js";
+import { detectPcoMarker, readPcCommand, type PcCommandRequest } from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
 
 /** データストリーム適用の結果（キーボード状態の遷移は Session が判断する） */
@@ -22,11 +23,23 @@ export interface ApplyResult {
   readScreenExtendedRequested: boolean;
   /** このレコード中で IC/MC によりカーソル位置が明示された */
   cursorSet: boolean;
+  /**
+   * PC Organizer（`STRPCCMD`）のコマンドを受けた。呼び出し側が実行し、実行キーを返す
+   * （`pc-command.ts`。**実行の可否に関わらず実行キーは返す**——返さないとホストが待ち続ける）
+   */
+  pcCommand?: PcCommandRequest;
+  /** PC Organizer 終了の標識を受けた（コマンドは伴わない。実行キーだけ返す） */
+  pcCommandEnd?: boolean;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
 const CC2_UNLOCK = 0x08;
 const CC2_ALARM = 0x04;
+
+/** PC Organizer 標識の先頭バイト（非表示属性）。ここを見てから 11 バイトを照合する */
+const PCO_ATTR = 0x27;
+/** 標識照合＋コマンド本文の読み取りに覗く最大バイト数 */
+const PCO_MARKER_SCAN = 512;
 
 export type WarnFn = (message: string) => void;
 
@@ -190,6 +203,17 @@ function applyWtd(
   while (r.remaining > 0) {
     const b = r.peek();
     if (b === ESC) return; // 次のコマンドへ
+
+    // PC Organizer の標識（非表示属性＋固定 11 バイト）。**消費しない**——
+    // 標識・コマンド本文は今までどおり画面へ書く（非表示なので見えない）。
+    // 検出だけ結果に載せ、実行と応答は Session が行う（`pc-command.ts`）
+    if (b === PCO_ATTR) {
+      // 標識(11) + PAUSE(1) + 本文（実機の上限は 123。余裕を見て 512）
+      const ahead = r.peekUpTo(PCO_MARKER_SCAN);
+      const kind = detectPcoMarker(ahead);
+      if (kind === "start") result.pcCommand = readPcCommand(ahead, (x) => codec.decodeByte(x));
+      else if (kind === "end") result.pcCommandEnd = true;
+    }
 
     r.u8();
     // SO/SI: 空白 1 桁の制御セルを置き、DBCS モードを切り替える（桁位置維持）

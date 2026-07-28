@@ -31,6 +31,20 @@ export const MSG_NO_ROOM = "挿入する余地がありません";
  */
 export const MSG_NO_RESPONSE = "ホストから応答がありませんでした";
 
+/**
+ * PC コマンド（`STRPCCMD`）の実行通知。
+ *
+ * ホストが 5250 の画面に隠して送ってくるので、**何も出さないと「勝手に何かが動いた」
+ * ようにしか見えない**。実行の有無と結果を必ず知らせる。実行先（このPC / サーバー）は
+ * 通知に含めず、詳細はセッション情報の一覧で見せる（通知が長くなりすぎるため）。
+ */
+export const MSG_PC_COMMAND_RUNNING = "PC コマンドを実行しています";
+export const MSG_PC_COMMAND_DONE = "PC コマンドを実行しました";
+export const MSG_PC_COMMAND_FAILED = "PC コマンドの実行に失敗しました";
+/** 既定は無効。**ホストへの応答は返している**ので、画面は進むが実行はされていない */
+export const MSG_PC_COMMAND_DISABLED = "PC コマンドの実行は無効になっています";
+export const MSG_PC_COMMAND_DENIED = "PC コマンドが許可リストに一致しません";
+
 /** 欄の型に合わない文字を弾いたときの理由表示（ACS 原文は各行のコメント）。 */
 export const MSG_BY_REASON: Record<RejectReason, string> = {
   // ACS: "Field requires numeric characters."

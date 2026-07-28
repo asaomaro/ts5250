@@ -23,7 +23,12 @@
       "system": "pub400",
       "sessionType": "display",
       "deviceName": "WEBEMUJP",
-      "ccsid": 1399
+      "ccsid": 1399,
+      "pcCommand": {
+        "enabled": false,
+        "timeoutMs": 60000,
+        "allow": ["start https?://.*"]
+      }
     },
     {
       "id": "pub400-printer",

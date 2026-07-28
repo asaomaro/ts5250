@@ -10,6 +10,7 @@
  */
 import { As400Error, type ConnectOptions } from "@as400web/core";
 import type { AuthUser } from "./auth.js";
+import type { PcCommandConfig } from "./pc-command.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import {
   parseRef,
@@ -38,6 +39,11 @@ export interface ResolvedTarget {
   };
   /** **サーバー設定由来のセッションのときのみ**（信頼設定） */
   printerOutput?: PrinterOutputConfig;
+  /**
+   * PC コマンド（STRPCCMD）の実行設定。**サーバー設定由来のセッションのときのみ**（信頼設定）。
+   * 個人設定はスキーマに持たないので、ここに来ることはそもそも無い（1 層目）
+   */
+  pcCommand?: PcCommandConfig;
   source: ConfigSource;
   system: System;
   session?: AnySession;
@@ -112,6 +118,10 @@ export class ConfigResolver {
     // printer 出力はサーバー設定由来のセッションからのみ供給する（信頼境界の 5 層目）
     const printerOutput = source === "server" && session ? toPrinterOutput(session) : undefined;
     if (printerOutput) out.printerOutput = printerOutput;
+    // PC コマンドも同じ 5 層目。display セッションでしか意味を持たない
+    const pcCommand =
+      source === "server" && session?.sessionType === "display" ? sessionPcCommand(session) : undefined;
+    if (pcCommand) out.pcCommand = pcCommand;
     return out;
   }
 
@@ -214,10 +224,10 @@ export class ConfigResolver {
   }
 
   /** 全保管場所を横断したセッション設定一覧（見える範囲のみ） */
-  listSessions(user: AuthUser | undefined): PublicSession[] {
+  listSessions(user: AuthUser | undefined, opts?: { includeTrusted?: boolean }): PublicSession[] {
     return [
-      ...(this.server?.listSessions(user) ?? []),
-      ...(this.personal?.listSessions(user) ?? [])
+      ...(this.server?.listSessions(user, opts) ?? []),
+      ...(this.personal?.listSessions(user, opts) ?? [])
     ];
   }
 
@@ -235,6 +245,18 @@ function requireRef(ref: string, what: string): { source: ConfigSource; id: stri
     );
   }
   return parsed;
+}
+
+/** セッションの pcCommand 設定を実行時設定へ写す。サーバー設定のセッションだけが持てる */
+function sessionPcCommand(session: AnySession): PcCommandConfig | undefined {
+  const pc = "pcCommand" in session ? session.pcCommand : undefined;
+  if (!pc) return undefined;
+  const cfg: PcCommandConfig = {};
+  if (pc.enabled !== undefined) cfg.enabled = pc.enabled;
+  if (pc.timeoutMs !== undefined) cfg.timeoutMs = pc.timeoutMs;
+  if (pc.cwd !== undefined) cfg.cwd = pc.cwd;
+  if (pc.allow !== undefined) cfg.allow = [...pc.allow];
+  return cfg;
 }
 
 function ownerOf(s: AnySession): string | undefined {

@@ -7,11 +7,18 @@ import {
   As400Error,
   type ConnectOptions,
   type AidKey,
+  type PcCommandRequest,
   type PrinterConnectOptions,
   type SpoolReport
 } from "@as400web/core";
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
+import {
+  runPcCommand,
+  pcCommandHostname,
+  type PcCommandConfig,
+  type PcCommandOutcome
+} from "./pc-command.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { assertOwner, type AuthUser } from "./auth.js";
@@ -29,6 +36,9 @@ const sessionLog = childLog({ component: "session-5250" });
 function traceRecordsEnabled(): boolean {
   return process.env.AS400_TRACE_RECORDS === "1";
 }
+
+/** PC コマンドの履歴保持件数（後から画面を開いても直近の実行が分かるように残す） */
+const PC_COMMAND_HISTORY = 20;
 
 export interface OpenOptions extends ConnectOptions {
   /** 閲覧専用セッション（set_fields/signon/run_steps と PageUp/Down 以外の AID を拒否） */
@@ -49,6 +59,12 @@ export interface OpenOptions extends ConnectOptions {
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
    */
   rescueAction?: RescueAction;
+  /**
+   * PC コマンド（STRPCCMD）の実行設定。**サーバー設定由来のセッションだけが持つ**（信頼設定）。
+   * 未指定なら「実行しない」。検出と実行キーの応答は設定に関わらず行われる
+   * （返さないとホストが待ち続けるため。research D5）
+   */
+  pcCommand?: PcCommandConfig;
 }
 
 /** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
@@ -88,6 +104,12 @@ export interface SessionEntry {
   owner?: string;
   /** ジョブ識別子。接続直後に装置名だけ入り、引けたら user/number が足される */
   job?: SessionJob;
+  /** PC コマンド（STRPCCMD）の実行が有効か。UI の出し分けに使う */
+  pcCommandEnabled: boolean;
+  /** PC コマンドの実行履歴（新しい順ではなく受信順。上限 `PC_COMMAND_HISTORY`） */
+  pcCommands: PcCommandEvent[];
+  /** 実行状況の push フック（ws-handler が設定し、切断で解除する） */
+  onPcCommandEvent?: (e: PcCommandEvent) => void;
   /**
    * 画面履歴の記録（**頼まれたときだけ**動く）。エビデンス HTML を束ねるために使う。
    * 常時記録しないのは、使わない画面でメモリを食い続けるうえ、画面に写る入力値が
@@ -100,6 +122,16 @@ export interface SessionEntry {
    * 解決できなければ `undefined` で終わる（失敗は握りつぶす）
    */
   jobResolved?: Promise<SessionJob | undefined>;
+}
+
+/** PC コマンド 1 件の状況。開始時（`outcome` 無し）と完了時の 2 回積まれる */
+export interface PcCommandEvent {
+  at: number;
+  command: string;
+  wait: boolean;
+  /** 実行先の機械名（サーバープロセスが動いている側） */
+  hostname: string;
+  outcome?: PcCommandOutcome;
 }
 
 /** 管理者画面向けのセッション要約（表示/プリンター統合） */
@@ -301,12 +333,16 @@ export class SessionManager {
     const id = opts.id ?? randomUUID();
     // 表示セッションの警告は既定で捨てられる（core の warn 既定が no-op）。
     // 配線しないと `unknown command 0x..` すら残らず、切り分け不能になる。
+    // PC コマンド（STRPCCMD）。**検出と応答は常に行い、実行だけを設定で絞る**——
+    // 応答を返さないとホストは待ち続ける（research D5）。設定が無ければ disabled として記録する
+    const pcCommand = (cmd: PcCommandRequest): Promise<void> => this.handlePcCommand(id, cmd, opts.pcCommand);
     const connect = (deviceName?: string): Promise<Session5250> =>
       Session5250.connect({
         ...opts,
         ...(deviceName !== undefined ? { deviceName } : {}),
         id,
         warn: (m) => sessionLog.warn({ sessionId: id }, m),
+        onPcCommand: pcCommand,
         traceRecords: traceRecordsEnabled()
       });
     let session: Session5250;
@@ -325,6 +361,8 @@ export class SessionManager {
       origin: opts.origin ?? "direct",
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
+      pcCommandEnabled: opts.pcCommand?.enabled === true,
+      pcCommands: [],
       ...(opts.owner !== undefined ? { owner: opts.owner } : {})
     };
     // 起動応答レコードから分かる範囲（装置名＝ジョブ名・システム名）を先に載せる。
@@ -338,6 +376,46 @@ export class SessionManager {
     // 残り（ユーザー・番号）はコマンドサーバーで引く。**接続を待たせない**
     entry.jobResolved = this.resolveJob(entry, opts);
     return entry;
+  }
+
+  /**
+   * PC コマンド（STRPCCMD）1 件を処理する。**投げない**——例外にすると core 側が
+   * ホストへ実行キーを返す前に抜ける恐れがあり、ホストが待ち続ける（research D5）。
+   *
+   * 開始と完了の 2 回イベントを積む。`PAUSE(*NO)` は「起動した」で完了扱いになる。
+   */
+  private async handlePcCommand(
+    id: string,
+    cmd: PcCommandRequest,
+    cfg: PcCommandConfig | undefined
+  ): Promise<void> {
+    const host = pcCommandHostname();
+    const begin: PcCommandEvent = { at: this.now(), command: cmd.command, wait: cmd.wait, hostname: host };
+    this.pushPcCommandEvent(id, begin);
+    sessionLog.info(
+      { sessionId: id, command: cmd.command, wait: cmd.wait, hostname: host },
+      "PC command received from host"
+    );
+    let outcome: PcCommandOutcome;
+    try {
+      outcome = await runPcCommand(cmd, cfg);
+    } catch (err) {
+      outcome = {
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: this.now() - begin.at
+      };
+    }
+    sessionLog.info({ sessionId: id, command: cmd.command, outcome }, "PC command finished");
+    this.pushPcCommandEvent(id, { ...begin, at: this.now(), outcome });
+  }
+
+  private pushPcCommandEvent(id: string, event: PcCommandEvent): void {
+    const entry = this.sessions.get(id);
+    if (!entry) return;
+    entry.pcCommands.push(event);
+    if (entry.pcCommands.length > PC_COMMAND_HISTORY) entry.pcCommands.shift();
+    entry.onPcCommandEvent?.(event);
   }
 
   /**

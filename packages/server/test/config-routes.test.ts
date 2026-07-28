@@ -300,3 +300,84 @@ describe("回帰: 資格情報を黙って消さない", () => {
     expect(json).not.toContain("passwordEnc");
   });
 });
+
+/**
+ * PC コマンド（STRPCCMD）は**サーバー機での任意コマンド実行**。
+ * printer 出力より強い権限にあたるので、同じ層で守れていることを route 越しに確かめる。
+ */
+describe("信頼境界: PC コマンド（STRPCCMD）", () => {
+  it("一般ユーザーはサーバー設定のセッション（実行の入口）を作れない", async () => {
+    const ctx = buildWithAuth();
+    const res = await post(
+      ctx.app,
+      "/api/sessions-config",
+      {
+        source: "server",
+        name: "d",
+        system: "srv:sys",
+        sessionType: "display",
+        pcCommand: { enabled: true }
+      },
+      ctx.userToken
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("個人設定へ送るとスキーマで弾かれる（1 層目。後段で落とす形にしない）", async () => {
+    const ctx = buildWithAuth();
+    await post(ctx.app, "/api/systems", { name: "mine", host: "h" }, ctx.userToken);
+    const list = (await (
+      await ctx.app.request("/api/systems", { headers: { authorization: `Bearer ${ctx.userToken}` } })
+    ).json()) as { systems: { ref: string }[] };
+    const res = await post(
+      ctx.app,
+      "/api/sessions-config",
+      { name: "d", system: list.systems[0]!.ref, sessionType: "display", pcCommand: { enabled: true } },
+      ctx.userToken
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("3 層目: printer 種別に送っても保存されない（画面の標識でしか届かないため）", async () => {
+    const { app, resolver } = buildOpen();
+    const res = await post(app, "/api/sessions-config", {
+      source: "server",
+      name: "p",
+      system: "srv:sys",
+      sessionType: "printer",
+      pcCommand: { enabled: true }
+    });
+    expect(res.status).toBe(201);
+    const saved = resolver.storeOf("server").getSession("p") as { pcCommand?: unknown };
+    expect(saved.pcCommand).toBeUndefined();
+  });
+
+  it("4 層目: 壊れた許可パターンは保存前に 400 で弾く", async () => {
+    const { app } = buildOpen();
+    const res = await post(app, "/api/sessions-config", {
+      source: "server",
+      name: "d",
+      system: "srv:sys",
+      sessionType: "display",
+      pcCommand: { enabled: true, allow: ["ok.*", "("] }
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/invalid allow pattern/);
+  });
+
+  it("認証オフ（＝単一の信頼ユーザー）なら保存でき、編集用に値が返る", async () => {
+    const { app } = buildOpen();
+    const res = await post(app, "/api/sessions-config", {
+      source: "server",
+      name: "d",
+      system: "srv:sys",
+      sessionType: "display",
+      pcCommand: { enabled: true, allow: ["echo .*"] }
+    });
+    expect(res.status).toBe(201);
+    const list = (await (await app.request("/api/sessions-config")).json()) as {
+      sessions: { ref: string; pcCommand?: { enabled?: boolean; allow?: string[] } }[];
+    };
+    expect(list.sessions[0]?.pcCommand).toEqual({ enabled: true, allow: ["echo .*"] });
+  });
+});

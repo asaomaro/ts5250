@@ -111,10 +111,10 @@ export abstract class ConfigStore {
       .map((s) => this.publicSystem(s, opts));
   }
 
-  listSessions(user: AuthUser | undefined): PublicSession[] {
+  listSessions(user: AuthUser | undefined, opts?: { includeTrusted?: boolean }): PublicSession[] {
     return [...this.sessions.values()]
       .filter((s) => this.canSee(this.ownerOf(s), user))
-      .map((s) => this.publicSession(s));
+      .map((s) => this.publicSession(s, opts));
   }
 
   private canSee(owner: string | undefined, user: AuthUser | undefined): boolean {
@@ -152,7 +152,7 @@ export abstract class ConfigStore {
   }
 
   /** API 露出用のセッション。**printer 出力を返さない**（信頼設定） */
-  protected publicSession(s: AnySession): PublicSession {
+  protected publicSession(s: AnySession, opts?: { includeTrusted?: boolean }): PublicSession {
     const pub: PublicSession = {
       ref: makeRef(this.source, s.id),
       name: s.name,
@@ -168,6 +168,14 @@ export abstract class ConfigStore {
     // 唯一のオブジェクト値。**複製して返す**——参照のまま渡すと、応答を受け取った側の
     // 書き換えがストアの実体に届く（他のフィールドは値型なので起きない）
     if (s.watermark !== undefined) pub.watermark = { ...s.watermark };
+    // 信頼設定は**編集できる相手にだけ**返す（値を返さないと保存のたびに消える）。
+    // 個人設定はスキーマに持たないので、そもそも存在しない
+    if (opts?.includeTrusted && "pcCommand" in s && s.pcCommand) {
+      // **allow は配列なので中身まで複製する**。浅い複製だと応答を書き換えた側が
+      // ストアの許可リストを直接いじれてしまう（watermark と同じ理由）
+      const { allow, ...rest } = s.pcCommand;
+      pub.pcCommand = allow ? { ...rest, allow: [...allow] as [string, ...string[]] } : { ...rest };
+    }
     const owner = this.ownerOf(s);
     if (owner !== undefined) pub.owner = owner;
     return pub;

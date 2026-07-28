@@ -27,6 +27,25 @@ export const printerSchema = z.object({
 export type PrinterConfig = z.infer<typeof printerSchema>;
 
 /**
+ * PC Organizer（`STRPCCMD`）でホストから届いたコマンドの実行設定。**信頼設定**。
+ *
+ * `printer` と同じ理由でサーバー設定のセッションにしか持たせない——
+ * こちらはサーバー機での**任意コマンド実行**そのもので、`autoPdfDir` より強い権限にあたる。
+ * 既定は無効（`enabled` 省略＝false）で、明示的に入れたときだけ動く。
+ */
+export const pcCommandSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    /** PAUSE(*YES) で待つ上限（ミリ秒）。既定 60 秒。1 時間を超える指定は受けない */
+    timeoutMs: z.number().int().positive().max(3_600_000).optional(),
+    cwd: z.string().optional(),
+    /** 許可する正規表現（全体一致）。空配列は「制限なし」と紛らわしいので受けない */
+    allow: z.array(z.string().min(1)).nonempty().optional()
+  })
+  .strict();
+export type PcCommandSettings = z.infer<typeof pcCommandSchema>;
+
+/**
  * ウォーターマーク（画面に重ねる透かし）。ACS の透かしと同じ用途——
  * **本番機と検証機を一目で見分ける**ために、画面全体へ薄く文字を敷く。
  *
@@ -136,17 +155,17 @@ const sessionBase = {
 };
 
 /**
- * サーバー設定のセッション（profiles.json）。printer 出力を持てる。
+ * サーバー設定のセッション（profiles.json）。printer 出力と PC コマンド実行を持てる。
  * 到達経路は `canEditProfiles`（認証オフ or admin かつファイル永続化可）のルートに限られる。
  */
 export const serverSessionSchema = z
-  .object({ ...sessionBase, printer: printerSchema.optional() })
+  .object({ ...sessionBase, printer: printerSchema.optional(), pcCommand: pcCommandSchema.optional() })
   .strict();
 export type ServerSession = z.infer<typeof serverSessionSchema>;
 
 /**
  * 個人設定のセッション（connections.json）。
- * **`printer` を持たない**——ここが信頼境界の 1 層目。`.strict()` により、
+ * **`printer` も `pcCommand` も持たない**——ここが信頼境界の 1 層目。`.strict()` により、
  * 送られてきた時点で parse が失敗する（400）。**optional にして後段で落とす形にしてはならない。**
  */
 export const personalSessionSchema = z
@@ -240,5 +259,13 @@ export interface PublicSession {
   enhanced?: boolean;
   /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */
   watermark?: Watermark;
+  /**
+   * PC コマンド（STRPCCMD）の実行設定。**編集できる相手にだけ返す**（`includeTrusted`）。
+   *
+   * 秘密ではないので値ごと返す。返さないと編集フォームが空から始まり、
+   * 保存のたびに許可パターンが黙って消える——**設定の消失が安全側に倒れない**
+   * （`enabled` だけ残って `allow` が消えると、むしろ緩くなる）。
+   */
+  pcCommand?: PcCommandSettings;
   owner?: string;
 }

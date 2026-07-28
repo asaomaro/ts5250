@@ -59,6 +59,16 @@ export interface SessionConfigForm {
    * 指定すると本来の印刷経路になる代わりに、画面表示と PDF が使えない。
    */
   transformTo?: string;
+  /**
+   * サーバー設定の表示セッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界）。
+   * ホストの `STRPCCMD` が届いたときにサーバー機でコマンドを実行する設定
+   */
+  pcCommand?: {
+    enabled?: boolean;
+    timeoutMs?: number;
+    cwd?: string;
+    allow?: string[];
+  };
   /** サーバー設定のプリンターセッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界） */
   printer?: {
     autoPdfDir?: string;

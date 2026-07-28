@@ -93,9 +93,16 @@ export class WsConnection {
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     await withAudit({ op: "ws_open" }, async () => {
       // 保存済み設定（system / session）か、ブラウザ直指定か。解決は ConfigResolver に一本化されている
-      const opts: OpenOptions = hasRef(msg)
-        ? { ...this.resolveTarget(msg).connect, origin: originOf(msg) }
-        : buildDirect(msg);
+      let opts: OpenOptions;
+      if (hasRef(msg)) {
+        const target = this.resolveTarget(msg);
+        opts = { ...target.connect, origin: originOf(msg) };
+        // PC コマンドの実行設定はサーバー設定由来のときだけ入る（信頼境界の 5 層目）。
+        // **ブラウザ直指定では絶対に付けない**——任意コマンド実行の入口になる
+        if (target.pcCommand) opts.pcCommand = target.pcCommand;
+      } else {
+        opts = buildDirect(msg);
+      }
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
@@ -107,12 +114,18 @@ export class WsConnection {
         this.send({ type: "closed", reason });
         this.detachScreen?.();
       });
-      this.detachScreen = () => entry.session.off("screen", onScreen);
+      // PC コマンド（STRPCCMD）の実行状況を push。切断でフックを外す（リーク防止）
+      entry.onPcCommandEvent = (event) => this.send({ type: "pc-command", sessionId: entry.id, event });
+      this.detachScreen = () => {
+        entry.session.off("screen", onScreen);
+        delete entry.onPcCommandEvent;
+      };
       this.send({
         type: "opened",
         sessionId: entry.id,
         screen: entry.session.snapshot(),
         ccsid: opts.ccsid ?? 37,
+        pcCommand: entry.pcCommandEnabled,
         // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
         ...(entry.job !== undefined ? { job: entry.job } : {})
       });

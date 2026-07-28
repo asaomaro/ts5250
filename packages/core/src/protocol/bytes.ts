@@ -27,6 +27,16 @@ export class ByteReader {
     return b;
   }
 
+  /**
+   * 現在位置から**最大** `n` バイトを読まずに取り出す（残りが少なければ短い配列）。
+   *
+   * `peekAt` と違って**末尾で例外にしない**——「決まったバイト列で始まるか」を試すのに使うため
+   * （PC Organizer の標識照合）。レコード末尾に近いだけで例外になると照合できない。
+   */
+  peekUpTo(n: number): Uint8Array {
+    return this.data.subarray(this.pos, Math.min(this.pos + n, this.data.length));
+  }
+
   u8(): number {
     const b = this.data[this.pos];
     if (b === undefined) throw new As400Error("PROTOCOL_ERROR", "unexpected end of record (u8)");

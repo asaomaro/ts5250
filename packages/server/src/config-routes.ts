@@ -7,13 +7,14 @@
  *
  * 信頼境界（この層が担うのは 2〜4 層目。1・5 層目はスキーマと解決点が担う）:
  *   2 層目: サーバー設定への**書き込みは admin のみ**（`canEditServer`）
- *   3 層目: display 種別では printer 出力を落とす
- *   4 層目: `autoPdfDir` を保存**前**に検証する（不正な設定を永続化しない）
+ *   3 層目: 種別に合わない信頼設定を落とす（display では printer 出力、printer では pcCommand）
+ *   4 層目: `autoPdfDir` と `pcCommand.allow` を保存**前**に検証する（不正な設定を永続化しない）
  */
 import type { Hono } from "hono";
 import { As400Error } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import { checkOutputDir } from "./output-dir.js";
+import { invalidAllowPattern } from "./pc-command.js";
 import { checkPrintDest } from "./print-dest.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { ConfigStore } from "./config-store.js";
@@ -128,15 +129,34 @@ async function validatePrinter(
 }
 
 /**
- * display 種別に付いてきた printer 出力を落とす（信頼境界 3 層目）。
- * 個人設定ではスキーマが弾くが、サーバー設定は printer を持てるため、種別での破棄が要る。
+ * 種別に合わない信頼設定を落とす（信頼境界 3 層目）。
+ * 個人設定ではスキーマが弾くが、サーバー設定は両方を持てるため、種別での破棄が要る。
+ *
+ * - `printer` 出力は display 種別では意味を持たない
+ * - `pcCommand`（PC コマンド実行）は **display 種別でしか起きない**（5250 画面の標識で届くため）
  */
-function dropPrinterForDisplay(body: unknown): unknown {
+function dropByKind(body: unknown): unknown {
   if (!body || typeof body !== "object") return body;
   const b = body as Record<string, unknown>;
-  if (b.sessionType === "printer") return b;
+  if (b.sessionType === "printer") {
+    const { pcCommand: _pc, ...rest } = b;
+    return rest;
+  }
   const { printer: _ignored, ...rest } = b;
   return rest;
+}
+
+/**
+ * `pcCommand.allow` の正規表現を保存**前**に検証する（信頼境界 4 層目）。
+ * 壊れた正規表現は実行時に「一致しない」へ倒れるため、**設定したのに動かない**が
+ * 黙って起きる。保存の時点で気づけるようにする。
+ */
+function validatePcCommand(body: unknown): { error?: string } {
+  const b = body as { pcCommand?: { allow?: unknown } } | null;
+  const allow = b?.pcCommand?.allow;
+  if (!Array.isArray(allow)) return {};
+  const bad = invalidAllowPattern(allow.filter((p): p is string => typeof p === "string"));
+  return bad === undefined ? {} : { error: `invalid allow pattern: ${bad}` };
 }
 
 export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: ConfigRouteDeps): void {
@@ -205,9 +225,12 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
 
   // ---- セッション設定 ----
 
-  app.get("/api/sessions-config", (c) =>
-    c.json({ sessions: resolver.listSessions(c.get("user")), editable: canEditServer(c) })
-  );
+  app.get("/api/sessions-config", (c) => {
+    const editable = canEditServer(c);
+    // 信頼設定（pcCommand）は編集できる相手にだけ返す。フォームが値を持ち帰れないと
+    // 保存のたびに許可パターンが消える（＝黙って緩くなる）
+    return c.json({ sessions: resolver.listSessions(c.get("user"), { includeTrusted: editable }), editable });
+  });
 
   app.post("/api/sessions-config", async (c) => {
     try {
@@ -215,7 +238,9 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const source = sourceOf(raw);
       assertWritable(source, c);
       // 3 層目 → 4 層目の順。落としてから検証しないと、破棄される設定で 400 を返してしまう
-      const body = dropPrinterForDisplay(stripSource(raw));
+      const body = dropByKind(stripSource(raw));
+      const pc = validatePcCommand(body);
+      if (pc.error) return c.json({ error: pc.error }, 400);
       const { error, resolved, warnings } = await validatePrinter(body);
       if (error) return c.json({ error }, 400);
       const store = resolver.storeOf(source);
@@ -235,7 +260,9 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const { source, id } = refOf(c.req.param("ref"));
       assertWritable(source, c);
       const raw = await c.req.json().catch(() => ({}));
-      const body = dropPrinterForDisplay(stripSource(raw));
+      const body = dropByKind(stripSource(raw));
+      const pc = validatePcCommand(body);
+      if (pc.error) return c.json({ error: pc.error }, 400);
       const { error, resolved, warnings } = await validatePrinter(body);
       if (error) return c.json({ error }, 400);
       const store = resolver.storeOf(source);

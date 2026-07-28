@@ -85,6 +85,12 @@ const sesForm = reactive<SesFormState>({
 });
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
 /**
+ * PC コマンド（STRPCCMD）の実行設定。**信頼設定**なのでサーバー設定の表示セッションでのみ編集できる。
+ * printer 出力と同じく**値は API から返らない**（有無だけ）ので、フォームは空から始まる——
+ * 保存すると上書きになるため、現在の状態は「有効 / 無効」の表示で示す。
+ */
+const pcForm = reactive({ enabled: false, timeoutSec: undefined as number | undefined, allow: "" });
+/**
  * ウォーターマーク（表示セッションのみ）。
  *
  * 保存値は `sesForm` に混ぜず**別の状態に開く**——濃さは保存が 0〜1・入力が % で単位が違い、
@@ -132,6 +138,10 @@ const canEdit = computed(() => !isServer.value || systemsStore.editable);
 const canEditPrinter = computed(
   () => isServer.value && systemsStore.editable && sesForm.sessionType === "printer"
 );
+/** PC コマンドは 5250 画面の標識で届くので、**表示セッションだけ**が持つ */
+const canEditPcCommand = computed(
+  () => isServer.value && systemsStore.editable && sesForm.sessionType === "display"
+);
 
 function loadSystem(): void {
   const s = props.system;
@@ -155,6 +165,7 @@ function loadSession(): void {
     return;
   }
   loadWatermark(s.watermark);
+  loadPcCommand(s.pcCommand);
   sesForm.name = s.name;
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
@@ -164,6 +175,17 @@ function loadSession(): void {
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
+}
+
+/**
+ * PC コマンドの保存値をフォームへ開く。**必ず開く**——更新はオブジェクトごと置き換えなので、
+ * 読み込まずに保存すると許可パターンが黙って消える（＝設定が緩くなる）。
+ * 編集できない相手には値が返らない（サーバーが `includeTrusted` で絞る）ので、その場合は空のまま。
+ */
+function loadPcCommand(pc: PublicSession["pcCommand"]): void {
+  pcForm.enabled = pc?.enabled === true;
+  pcForm.timeoutSec = pc?.timeoutMs !== undefined ? Math.round(pc.timeoutMs / 1000) : undefined;
+  pcForm.allow = (pc?.allow ?? []).join("\n");
 }
 
 /** 保存値をフォームへ開く（未設定なら既定のまま＝文字が空＝透かしなし） */
@@ -291,6 +313,19 @@ async function save(): Promise<void> {
         const wm = buildWatermark();
         if (wm) form.watermark = wm;
         else delete form.watermark;
+      }
+      if (canEditPcCommand.value) {
+        const allow = pcForm.allow
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        // 無効かつ既定のままなら書かない（設定ファイルに既定値を書き散らさない）
+        if (pcForm.enabled || allow.length > 0 || pcForm.timeoutSec !== undefined) {
+          const pc: NonNullable<SessionConfigForm["pcCommand"]> = { enabled: pcForm.enabled };
+          if (pcForm.timeoutSec !== undefined) pc.timeoutMs = Math.round(pcForm.timeoutSec * 1000);
+          if (allow.length > 0) pc.allow = allow;
+          form.pcCommand = pc;
+        }
       }
       if (canEditPrinter.value) {
         const p: NonNullable<SessionConfigForm["printer"]> = {};
@@ -605,6 +640,30 @@ const infoRows = computed(() => {
             </label>
           </template>
         </div>
+      </div>
+
+      <!--
+        信頼設定。サーバー設定の表示セッションで、編集権限があるときだけ。
+        **サーバー機での任意コマンド実行**なので、既定は無効で、危険性を画面にも書く
+      -->
+      <div v-if="canEditPcCommand" class="trusted">
+        <div class="tlabel">PC コマンド（STRPCCMD・信頼設定）</div>
+        <label class="row"
+          ><span class="cap">実行を許可</span
+          ><span class="tv"><input v-model="pcForm.enabled" type="checkbox" /> ホストからのコマンドを実行する</span>
+        </label>
+        <label class="row"
+          ><span class="cap">待ち時間上限</span
+          ><input v-model.number="pcForm.timeoutSec" type="number" min="1" placeholder="60（秒）"
+        /></label>
+        <label class="row top"
+          ><span class="cap">許可パターン</span
+          ><textarea v-model="pcForm.allow" rows="3" placeholder="正規表現を 1 行 1 件（全体一致）。空なら制限なし"></textarea>
+        </label>
+        <p class="warn">
+          コマンドはこのサーバーが動いている機械で実行されます（自分の PC で起動していればその PC、
+          サーバー運用ならサーバー機）
+        </p>
       </div>
 
       <!-- 信頼設定。サーバー設定のプリンターセッションで、編集権限があるときだけ -->

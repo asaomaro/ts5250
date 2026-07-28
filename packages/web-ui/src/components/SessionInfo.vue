@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { sessionsStore } from "../stores/sessions.js";
+import { sessionsStore, type PcCommandView } from "../stores/sessions.js";
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -20,6 +20,45 @@ const jobText = computed(() => {
 });
 // プリンターセッションはジョブ情報を持たない（表示セッション専用）
 const isPrinter = computed(() => state.value?.kind === "printer");
+
+/**
+ * PC コマンド（STRPCCMD）の履歴。**新しいものを上**に出す（直近の実行を探しに来るため）。
+ * 履歴が無ければ節ごと出さない（有効・無効の別だけは 1 行で示す）。
+ */
+const pcCommands = computed(() => [...(state.value?.pcCommands ?? [])].reverse());
+
+/**
+ * 実行先の言い換え。**ブラウザが localhost に繋いでいれば、サーバー＝この PC** である
+ * （5250 セッションを持つプロセスの機械で動くため）。そうでなければサーバー機で動いている。
+ * 利用者が「どっちの PC でコマンドが動いたのか」で迷わないようにするための表示。
+ */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+function whereText(hostname: string): string {
+  return LOOPBACK.has(location.hostname) ? `このPC（${hostname}）` : `サーバー（${hostname}）`;
+}
+
+/** 実行結果の 1 行表示。設定で実行しなかった場合も理由を出す（黙って何もしない、を避ける） */
+function outcomeText(e: PcCommandView): string {
+  const o = e.outcome;
+  if (!o) return "実行中";
+  switch (o.status) {
+    case "ran":
+      return o.exitCode === 0 ? "完了" : `終了コード ${o.exitCode ?? "-"}`;
+    case "started":
+      return "起動（完了を待たない）";
+    case "disabled":
+      return "無効（実行しない）";
+    case "denied":
+      return "許可リスト外";
+    case "failed":
+      return `失敗: ${o.error}`;
+    default:
+      return "実行中";
+  }
+}
+
+const timeText = (at: number): string =>
+  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 /** 接続設定の情報行（重複は state 側に統一。資格情報の平文は出さない） */
 const metaRows = computed<{ label: string; value: string }[]>(() => {
@@ -79,6 +118,22 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
         <div class="row"><span>起動</span><b>{{ state.startupCode ?? "-" }}</b></div>
         <div class="row"><span>受信</span><b>{{ state.reports?.length ?? 0 }} 件</b></div>
       </template>
+      <!--
+        PC コマンド（STRPCCMD）。ホストが画面に隠して送ってくるので、
+        何を・どこで実行したかをここで確認できるようにする
+      -->
+      <template v-if="!isPrinter">
+        <div class="row">
+          <span>PC コマンド</span><b>{{ state.pcCommandEnabled ? "有効" : "無効" }}</b>
+        </div>
+        <div v-for="(e, i) in pcCommands" :key="'p' + i" class="row pcrow">
+          <span>{{ timeText(e.at) }}</span>
+          <b>
+            <span class="pccmd">{{ e.command }}</span>
+            <span class="pcmeta">{{ outcomeText(e) }} / {{ whereText(e.hostname) }}</span>
+          </b>
+        </div>
+      </template>
       <div class="row"><span>ラベル</span><b>{{ state.label }}</b></div>
       <div class="row">
         <span>状態</span><b>{{ state.connected ? "接続中" : "切断" }}{{ state.readOnly ? " (閲覧専用)" : "" }}</b>
@@ -125,6 +180,20 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
 .row b {
   color: var(--t-green);
   word-break: break-all;
+}
+/* PC コマンドはコマンド全文を見せたいので折り返す。結果は 1 段下げて小さく */
+.pcrow b {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.pccmd {
+  word-break: break-all;
+}
+.pcmeta {
+  color: var(--muted);
+  font-size: 10.5px;
 }
 /* ジョブ情報（番号/ユーザー/名前）は折り返さない */
 .jobval {

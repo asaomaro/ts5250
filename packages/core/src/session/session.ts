@@ -13,6 +13,7 @@ import {
   buildReadScreenResponse,
   buildReadScreenExtendedResponse
 } from "../protocol/save-screen.js";
+import type { PcCommandRequest } from "../protocol/pc-command.js";
 import { applyDataStream } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
@@ -55,6 +56,14 @@ export interface ConnectOptions {
   transport?: Transport;
   /** 警告ログの受け口（既定: 捨てる。server が pino へ接続する） */
   warn?: (message: string) => void;
+  /**
+   * PC Organizer（`STRPCCMD`）でホストから届いたコマンドの実行係。
+   *
+   * **未指定なら実行しない**（core はコマンドを実行しない。node の API を持ち込まないため）。
+   * 指定しても、実行の可否・許可リスト・タイムアウトは呼び出し側の責任
+   * ——ここでは「`wait` が真なら完了を待ってからホストへ実行キーを返す」だけを保証する。
+   */
+  onPcCommand?: (cmd: PcCommandRequest) => Promise<void> | void;
   /**
    * 受信レコードを hex で warn に流す（既定 off）。**障害切り分け専用**。
    * 「画面が変わらないのにアンロックもされない」ときに、ホストが何を送ったかを見る唯一の手段。
@@ -105,6 +114,7 @@ export class Session5250 extends Emitter<SessionEvents> {
   private telnet!: TelnetLayer;
   private readonly warn: (message: string) => void;
   private readonly traceRecords: boolean;
+  private readonly onPcCommand: ((cmd: PcCommandRequest) => Promise<void> | void) | undefined;
   /** メッセージ待ち表示灯（MESSAGE_LIGHT_ON/OFF）。OIA 表示に使える */
   messageWaiting = false;
   /**
@@ -124,6 +134,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.codec = codecForCcsid(opts.ccsid ?? 37);
     this.warn = opts.warn ?? (() => {});
     this.traceRecords = opts.traceRecords ?? false;
+    this.onPcCommand = opts.onPcCommand;
     // 代替バッファの許可は、端末タイプでホストに申告した内容と一致させる（27x132 と申告した
     // ときだけ許可する）。ホストは 27x132 対応端末にだけ CLEAR UNIT ALTERNATE を送ってくる。
     const allowAlternate = opts.screenSize === "27x132";
@@ -445,6 +456,15 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec));
         return;
       }
+      if (result.pcCommand ?? result.pcCommandEnd) {
+        // PC Organizer（STRPCCMD）の中間画面は**利用者に見せない**——
+        // 画面イベントも pendingAid の解決もせず、ロックのまま実行して実行キーを返す。
+        // ホストはそのあと CLEAR UNIT ＋次画面を送ってくるので、待ちはそこで解ける
+        // （tn5250j も strpccmd 中は updateDirty を飛ばす）。**返さないとホストは待ち続ける**。
+        this.state = "locked";
+        void this.runPcCommand(result.pcCommand);
+        return;
+      }
       if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
         // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
@@ -472,6 +492,31 @@ export class Session5250 extends Emitter<SessionEvents> {
       clearTimeout(p.timer);
       p.resolve({ screen: snap, timedOut: false });
     }
+  }
+
+  /**
+   * PC コマンドを実行係へ渡し、**必ず**ホストへ実行キーを返す。
+   *
+   * `wait`（`PAUSE(*YES)`）のときだけ完了を待つ。実行係が無い・拒否した・失敗した場合でも
+   * 応答は返す——ホストは実行の有無を検証しておらず、返さなければ待ち続けるだけだから
+   * （research D5）。実行係のタイムアウトは呼び出し側（server）が持つ。
+   */
+  private async runPcCommand(cmd: PcCommandRequest | undefined): Promise<void> {
+    try {
+      if (cmd && this.onPcCommand) {
+        const running = Promise.resolve(this.onPcCommand(cmd));
+        if (cmd.wait) await running;
+        // 待たない指定でも例外は拾う（未処理の rejection でプロセスを落とさない）
+        else void running.catch((err: unknown) => this.warn(`PC command failed: ${String(err)}`));
+      }
+    } catch (err) {
+      this.warn(`PC command failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (this.state === "closed") return;
+    const aid = aidCodeOf("Enter");
+    if (aid === undefined) return;
+    const { record } = buildReadMdtResponse(this.buf, this.codec, aid);
+    this.telnet.sendRecord(record);
   }
 
   private handleClose(reason: string): void {

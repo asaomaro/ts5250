@@ -1,4 +1,5 @@
 import type { ScreenSnapshot } from "@as400web/core";
+import type { PcCommandEvent } from "./session-manager.js";
 import type { SessionJob } from "./session-manager.js";
 import type { MacroSecretRef } from "./macro-types.js";
 
@@ -89,6 +90,11 @@ export interface WsOpened {
   ccsid: number;
   /** ジョブ識別子。接続直後は装置名（＝ジョブ名）だけのことがある */
   job?: SessionJob;
+  /**
+   * PC コマンド（STRPCCMD）の実行が有効か。**信頼設定なので値は返さず有無だけ**。
+   * 無効でもホストへの応答は返るので、利用者には「実行しない理由」を示すために使う
+   */
+  pcCommand: boolean;
 }
 export interface WsScreen {
   type: "screen";
@@ -187,6 +193,18 @@ export interface WsReport {
   sessionId: string;
   report: { id: string; pages: { rows: number; cols: number; lines: string[] }[] };
 }
+/**
+ * PC コマンド（STRPCCMD）の実行状況。**サーバー発のみ**（開始時と完了時の 2 回）。
+ *
+ * ホストが 5250 の画面データに隠して送ってきたコマンドを、サーバープロセスが動いている機械で
+ * 実行したことを利用者に見せる。`hostname` は実行先＝ローカル PC かサーバー機かの手がかり。
+ */
+export interface WsPcCommand {
+  type: "pc-command";
+  sessionId: string;
+  event: PcCommandEvent;
+}
+
 /** client → server: 自動出力の有効/無効を切り替える */
 export interface WsPrinterOutput {
   type: "printer-output";
@@ -203,4 +221,5 @@ export type WsServerMessage =
   | WsPrinterWarn
   | WsPrinterOutputState
   | WsPrinterOutputResult
+  | WsPcCommand
   | WsReport;

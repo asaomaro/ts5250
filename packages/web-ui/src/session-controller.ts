@@ -1,8 +1,20 @@
 import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
 import type { AidKey } from "@as400web/core";
 import { WsClient } from "./ws-client.js";
-import { MSG_NO_RESPONSE } from "./composables/opMessages.js";
-import { sessionsStore, type SessionState, type SessionMeta } from "./stores/sessions.js";
+import {
+  MSG_NO_RESPONSE,
+  MSG_PC_COMMAND_DENIED,
+  MSG_PC_COMMAND_DISABLED,
+  MSG_PC_COMMAND_DONE,
+  MSG_PC_COMMAND_FAILED,
+  MSG_PC_COMMAND_RUNNING
+} from "./composables/opMessages.js";
+import {
+  sessionsStore,
+  type PcCommandView,
+  type SessionState,
+  type SessionMeta
+} from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
 
@@ -40,6 +52,24 @@ function setBusy(sessionId: string, busy: boolean): void {
   }
 }
 
+/** 画面に残す PC コマンドの件数（サーバー側の保持と同じ）。古いものから捨てる */
+const PC_COMMAND_VIEW_LIMIT = 20;
+
+/** PC コマンドの状況 → 操作員メッセージ。開始（outcome 無し）と結果で出し分ける */
+function pcCommandNotice(e: PcCommandView): string {
+  if (!e.outcome) return MSG_PC_COMMAND_RUNNING;
+  switch (e.outcome.status) {
+    case "disabled":
+      return MSG_PC_COMMAND_DISABLED;
+    case "denied":
+      return MSG_PC_COMMAND_DENIED;
+    case "failed":
+      return MSG_PC_COMMAND_FAILED;
+    default:
+      return MSG_PC_COMMAND_DONE;
+  }
+}
+
 /** 接続を開き、セッションを stores に登録してワークスペースに追加する */
 export async function openSession(
   open: WsOpen,
@@ -72,6 +102,8 @@ export async function openSession(
                 ...(meta ? { meta } : {}),
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
+                pcCommandEnabled: msg.pcCommand,
+                pcCommands: [],
                 ...(configRef !== undefined ? { configRef } : {}),
                 ...(systemRef !== undefined ? { systemRef } : {})
               };
@@ -107,6 +139,16 @@ export async function openSession(
             case "jobinfo": {
               const s = sessionsStore.get(sessionId);
               if (s) s.job = msg.job;
+              break;
+            }
+            // PC コマンド（STRPCCMD）。ホストが画面に隠して送ってくるので、
+            // 何が・どこで動いたかを必ず知らせる（黙って実行しない）
+            case "pc-command": {
+              const s = sessionsStore.get(sessionId);
+              if (!s) break;
+              (s.pcCommands ??= []).push(msg.event);
+              if (s.pcCommands.length > PC_COMMAND_VIEW_LIMIT) s.pcCommands.shift();
+              s.notice = pcCommandNotice(msg.event);
               break;
             }
             case "closed": {

@@ -32,6 +32,23 @@ export interface SpoolOutputStatusView {
   print?: { ok: boolean; printer?: string; error?: string };
 }
 
+/**
+ * PC コマンド（STRPCCMD）1 件の表示用。開始時は `outcome` が無く、完了時に埋まる。
+ * `hostname` は**実行された機械**（サーバープロセスが動いている側）。
+ */
+export interface PcCommandView {
+  at: number;
+  command: string;
+  wait: boolean;
+  hostname: string;
+  outcome?:
+    | { status: "ran"; exitCode: number | null; durationMs: number }
+    | { status: "started" }
+    | { status: "disabled" }
+    | { status: "denied" }
+    | { status: "failed"; error: string; durationMs: number };
+}
+
 /** マクロの実行状態（spec「マクロエンジンの実行時状態」）。記録と再生は排他 */
 export type MacroMode = "idle" | "recording" | "recordPaused" | "playing" | "playPaused";
 
@@ -121,6 +138,13 @@ export interface SessionState {
    * 片方だけ記録する、という使い方を壊さないため。
    */
   macro?: MacroRuntime;
+  /**
+   * PC コマンド（STRPCCMD）の実行が有効か。**無効でもホストへの応答は返る**ので、
+   * 「実行しない理由」を利用者に示すために持つ（`WsOpened.pcCommand`）。
+   */
+  pcCommandEnabled?: boolean;
+  /** PC コマンドの実行履歴（受信順・上限はサーバー側で 20 件） */
+  pcCommands?: PcCommandView[];
   // ---- プリンターセッション（kind==="printer"）----
   /** 受信したスプール（帳票）一覧 */
   reports?: SpoolReportView[];

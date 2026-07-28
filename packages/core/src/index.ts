@@ -94,6 +94,8 @@ export { TelnetLayer, type TelnetOptions } from "./telnet/telnet.js";
 
 // 低レベルプロトコル（capture/デバッグ・上位実装向け）
 export { parseRecord, buildRecord, type ParsedRecord, type RecordHeaderFlags } from "./protocol/gds.js";
+// PC Organizer（STRPCCMD）: 実行係は server が持つのでリクエスト型を公開する
+export { type PcCommandRequest, PCO_START, PCO_END } from "./protocol/pc-command.js";
 
 // トレース / リプレイ（spec D10）
 export {
