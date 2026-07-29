@@ -1,6 +1,7 @@
 import { As400Error } from "../errors.js";
 import { type Codec, SO, SI } from "@as400web/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
+import type { WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, isAttribute } from "./constants.js";
 import { detectPcoMarker, readPcCommand, type PcCommandRequest } from "./pc-command.js";
@@ -30,6 +31,11 @@ export interface ApplyResult {
   pcCommand?: PcCommandRequest;
   /** PC Organizer 終了の標識を受けた（コマンドは伴わない。実行キーだけ返す） */
   pcCommandEnd?: boolean;
+  /**
+   * このレコードの書き込み範囲（`ScreenSnapshot.lastWrite` と同じ値）。
+   * 窓かどうかの判定材料。詳細は `WriteExtent` を参照。
+   */
+  lastWrite: WriteExtent;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -69,7 +75,17 @@ export function applyDataStream(
     saveScreenRequested: false,
     readScreenRequested: false,
     readScreenExtendedRequested: false,
-    cursorSet: false
+    cursorSet: false,
+    lastWrite: { cleared: false, restored: false, cells: 0 }
+  };
+
+  // **レコード境界はここ**（1 レコード＝1 回の呼び出し）。書き込み範囲の記録をここで開始する。
+  // 何も書かずに終わったレコードでは、buffer 側が前回の確定値を残す（窓を描くレコードと
+  // 入力を待つだけのレコードが分かれて届いても窓が消えないようにするため）。
+  buf.beginRecord();
+  const finish = (): ApplyResult => {
+    result.lastWrite = buf.lastWrite;
+    return result;
   };
 
   while (r.remaining > 0) {
@@ -147,10 +163,10 @@ export function applyDataStream(
         break;
       default:
         warn(`unknown command 0x${cmd.toString(16)} — discarding rest of record`);
-        return result;
+        return finish();
     }
   }
-  return result;
+  return finish();
 }
 
 /** CC1（上位 3 ビット）: ロックと MDT リセット/フィールド null 化（GNU tn5250 の解釈と一致） */

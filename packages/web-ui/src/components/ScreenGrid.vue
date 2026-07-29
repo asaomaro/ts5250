@@ -27,7 +27,7 @@ import {
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
-import { detectFkeyLegends, detectWindowRect, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
+import { detectFkeyLegends, detectWindowRect, sameScreen, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON } from "../composables/opMessages.js";
@@ -184,9 +184,36 @@ function thumbStyle(bar: { horizontal: boolean; total: number; sliderPos: number
 }
 
 /**
+ * 窓の検出結果。**computed ではなく watch で持つ。**
+ *
+ * 判定が**前画面との差分**を見るようになったため（`detectWindowRect` の `prev`）、
+ * 前画面を覚えておく必要がある。これを `decoWindow` の computed の中でやると、
+ * 設定が none の間は早期 return で検出が走らず、**OFF→ON した瞬間に古い画面と比較**して
+ * しまう。判定は設定に依らず毎画面走らせ、装飾側は結果を読むだけにする。
+ *
+ * `watch` のコールバックは第 2 引数で**前の値**を受け取れるので、前画面はここで自然に手に入る。
+ *
+ * **`displayChar` が依存する表示設定（SO/SI マーク・表示コード）は watch しない。**
+ * 窓かどうかは画面の中身で決まるもので、表示設定を切り替えても窓であることは変わらない。
+ * ここで引き直すと**前画面が無い状態で判定し直す**ことになり、`③` の誤検出が復活する
+ * （前画面との差分こそが ③ を弾いている材料なので）。設定変更は次の画面更新から反映される。
+ */
+const detectedWindow = ref<WindowRect | null>(null);
+watch(
+  () => props.snapshot,
+  (snap, prev) => {
+    // **画面が前回とまったく同じなら判定を更新しない。** 情報が増えていないのに結論を変える
+    // 理由が無く、更新すると「同じ帳票が無変化で再描画された」ときに窓へ化ける
+    // （`window-prev-diff.test.ts` の「判定し直すと窓になってしまう」で固定）。
+    if (prev && sameScreen(prev, snap, displayChar)) return;
+    detectedWindow.value = detectWindowRect(snap, displayChar, prev ?? null);
+  },
+  { immediate: true }
+);
+
+/**
  * ウィンドウ装飾（画面設定「ウィンドウ設定」）の矩形。
  * 拡張5250 の窓と文字で描かれた窓の**両方**を同じ関数が返すので、装飾側は種類を意識しない。
- * 設定が none のときは検出も走らせない（無駄な計算をしない）。
  */
 const decoWindow = computed<WindowRect | null>(() => {
   if (props.windowFrame === "none" && props.windowBackdrop === "none") return null;
@@ -194,7 +221,7 @@ const decoWindow = computed<WindowRect | null>(() => {
   // ホスト指定こそ「実機と同じ見た目」なので、上から自前の枠を描くと二重になる
   // （ACS はホストの枠だけを出す）。
   if (props.snapshot.gui?.windows.some((w) => w.border !== undefined)) return null;
-  return detectWindowRect(props.snapshot, displayChar);
+  return detectedWindow.value;
 });
 
 /** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */

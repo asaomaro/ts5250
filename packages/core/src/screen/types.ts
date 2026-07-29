@@ -182,6 +182,39 @@ export interface GuiConstructs {
   gridLines: GuiGridLine[];
 }
 
+/**
+ * 直近に適用したレコードがバッファへ書いた範囲。**「重ね書きか否か」の判定材料**として web-ui へ渡す。
+ *
+ * 罫線・反転からの推測では「左右に `:` が並ぶ帳票」「反転バナー」を窓と誤検出する。判定が見た目しか
+ * 見られないのは材料が渡っていないためで、受信データを渡せば裏が取れる——というのが出発点だった。
+ *
+ * **ただし万能ではない。** 実機（IBM i 7.5）で採った実測:
+ *
+ * | 画面 | 記録 |
+ * |---|---|
+ * | Attn の窓（ATNPGM。反転枠） | `cleared=false` / `rect=r18-24` ＝**重ね書き** |
+ * | **F1 ヘルプ窓**（`.`／`:` の箱） | **`cleared=true` / `rect=r1-24` ＝全画面書き直し** |
+ * | 通常画面（メニュー・PDM・DSPLIBL） | `cleared=true` / `rect=r1-24` |
+ *
+ * ヘルプ窓はホストが画面をクリアしてから背景の見出しごと箱を描き直すので、
+ * **受信データ上は通常画面と区別が付かない**。よってこの記録で言えるのは
+ * 「そのレコードが重ね書きだったか」までで、**窓かどうかを一般に決められはしない**。
+ * 消費側（`web-ui/src/composables/fkeyLegend.ts` の `isOverlayWrite`）はこの限界を前提にしている。
+ *
+ * 通常画面側の裏付けは実機採取レコード（`packages/core/test/fixtures/pub400-*.jsonl`）の再生でも
+ * 取れており、**全画面遷移 6/6 すべてに CLEAR が付いていた**。
+ */
+export interface WriteExtent {
+  /** 書き込みの外接矩形（1 始まり・両端含む）。書き込みが 1 セルも無ければ省略 */
+  rect?: { row1: number; row2: number; col1: number; col2: number };
+  /** CLEAR UNIT / CLEAR UNIT ALTERNATE を通った */
+  cleared: boolean;
+  /** RESTORE SCREEN（ESC 0x12）で画面を丸ごと戻した */
+  restored: boolean;
+  /** 実際に書かれたセル数（矩形の面積とは別。矩形が疎かどうかを見る余地を残す） */
+  cells: number;
+}
+
 export interface ScreenSnapshot {
   sessionId: string;
   rows: 24 | 27;
@@ -193,4 +226,11 @@ export interface ScreenSnapshot {
   systemMessage?: string;
   /** 拡張 5250 GUI コントロール（存在する場合のみ。空なら省略） */
   gui?: GuiConstructs;
+  /**
+   * 直近レコードの書き込み範囲（記録がある場合のみ）。
+   *
+   * **任意にしてあるのは意図的**——既存のテスト資産は手組み snapshot／描画済み fixture で
+   * これを持たない。消費側は**不在を許容し、その場合は従来どおりに振る舞う**こと。
+   */
+  lastWrite?: WriteExtent;
 }

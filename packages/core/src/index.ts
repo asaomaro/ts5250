@@ -23,6 +23,7 @@ export {
 // 画面モデル（共有型。server / web-ui が import する）
 export type {
   ScreenSnapshot,
+  WriteExtent,
   Cell,
   Field,
   FieldAdjust,

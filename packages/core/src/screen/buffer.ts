@@ -25,8 +25,40 @@ import type {
   GuiGridLine,
   GuiSelectionField,
   GuiWindow,
-  ScreenSnapshot
+  ScreenSnapshot,
+  WriteExtent
 } from "./types.js";
+
+/** 書き込み範囲の作業用（レコード適用中に min/max を積む。矩形は確定時に 1 始まりへ直す） */
+interface PendingWrite {
+  r1: number;
+  r2: number;
+  c1: number;
+  c2: number;
+  cells: number;
+  cleared: boolean;
+  restored: boolean;
+}
+
+const newPending = (): PendingWrite => ({
+  r1: Infinity,
+  r2: -1,
+  c1: Infinity,
+  c2: -1,
+  cells: 0,
+  cleared: false,
+  restored: false
+});
+
+/** 作業用に何か記録されたか。無ければ確定値を触らない（＝前回のレコードの値を残す） */
+const pendingHasContent = (p: PendingWrite): boolean => p.cells > 0 || p.cleared || p.restored;
+
+/** 作業用を対外形式へ変換する（矩形は 1 始まり・両端含む） */
+const extentOf = (p: PendingWrite): WriteExtent => {
+  const e: WriteExtent = { cleared: p.cleared, restored: p.restored, cells: p.cells };
+  if (p.cells > 0) e.rect = { row1: p.r1 + 1, row2: p.r2 + 1, col1: p.c1 + 1, col2: p.c2 + 1 };
+  return e;
+};
 
 /** コーデックがマップできなかったバイトのデコード結果（表示は空白・値はセンチネルで運ぶ） */
 const UNDISPLAYABLE = "\uFFFD";
@@ -111,9 +143,84 @@ export class ScreenBuffer {
   /** 代替（ワイド）画面の許可サイズ。CLEAR UNIT ALTERNATE で切替える（27x132 端末のみ） */
   private readonly alternate: { rows: 27; cols: 132 } | undefined;
 
+  // --- 書き込み範囲の記録（窓判定の材料。`WriteExtent` の説明を参照） ---
+  //
+  // **確定値（`committed`）と作業用（`pending`）を分ける。** ホストは「窓を描くレコード」と
+  // 「入力を待つだけのレコード」を別々に送ることがあり、毎レコードで素直に上書きすると
+  // 後続の書き込み無しレコードで窓が消える。そこで **何も起きなかったレコードは確定値を触らない**。
+  private committedWrite: WriteExtent = { cleared: false, restored: false, cells: 0 };
+  private pending = newPending();
+
   constructor(opts: { primary?: "24x80"; alternate?: "27x132" } = {}) {
     this.cells = new Array<InternalCell>(this.rows * this.cols).fill(null);
     if (opts.alternate === "27x132") this.alternate = { rows: 27, cols: 132 };
+  }
+
+  /**
+   * レコード適用の開始を伝える（`applyDataStream` の入口から呼ぶ）。
+   *
+   * 直前のレコードで何か起きていれば、ここで確定させてから作業用を作り直す。
+   * **確定を行うのはこのメソッドだけ**——読み取り側で確定すると、レコードの途中で
+   * 読まれたときに前半の記録が確定へ流れて後半だけが残る（記録が静かに欠ける）。
+   */
+  beginRecord(): void {
+    if (pendingHasContent(this.pending)) this.committedWrite = extentOf(this.pending);
+    this.pending = newPending();
+  }
+
+  /**
+   * 直近レコードの書き込み範囲。
+   *
+   * **純粋な読み取り**（状態を変えない）。レコード適用の途中で読めば、そこまでに記録された分を返す。
+   * まだ何も記録されていなければ前回のレコードの確定値を返す（窓を描くレコードと入力を待つだけの
+   * レコードが分かれて届いても窓が消えないようにするため）。
+   */
+  get lastWrite(): WriteExtent {
+    return pendingHasContent(this.pending) ? extentOf(this.pending) : this.committedWrite;
+  }
+
+  /** 線形アドレス 1 セルを書き込み範囲へ含める */
+  private noteWrite(addr: number): void {
+    const p = this.pending;
+    const r = Math.floor(addr / this.cols);
+    const c = addr % this.cols;
+    p.cells++;
+    if (r < p.r1) p.r1 = r;
+    if (r > p.r2) p.r2 = r;
+    if (c < p.c1) p.c1 = c;
+    if (c > p.c2) p.c2 = c;
+  }
+
+  /**
+   * 画面全体のクリアを記録する。
+   *
+   * **矩形は捨てる**——クリアでセルもサイズも作り直されるため、それ以前の座標は意味を失う
+   * （CLEAR UNIT ALTERNATE では桁数まで変わる）。判定側は `cleared` を先に見るので、
+   * 同一レコード内でクリア後に書かれた分だけが矩形に残ればよい。
+   */
+  private noteClear(): void {
+    const restored = this.pending.restored;
+    this.pending = newPending();
+    this.pending.cleared = true;
+    this.pending.restored = restored;
+  }
+
+  /**
+   * 線形範囲 `from..to`（両端含む）を書き込み範囲へ含める。
+   *
+   * **ループを増やさないため矩形へ畳む。** 行をまたぐ範囲は途中の行を端から端まで通るので
+   * 全幅に触れたものとして扱う（外接矩形なのでこれで過不足ない）。
+   */
+  private noteWriteRange(from: number, to: number): void {
+    const p = this.pending;
+    const r1 = Math.floor(from / this.cols);
+    const r2 = Math.floor(to / this.cols);
+    const [c1, c2] = r1 === r2 ? [from % this.cols, to % this.cols] : [0, this.cols - 1];
+    p.cells += to - from + 1;
+    if (r1 < p.r1) p.r1 = r1;
+    if (r2 > p.r2) p.r2 = r2;
+    if (c1 < p.c1) p.c1 = c1;
+    if (c2 > p.c2) p.c2 = c2;
   }
 
   get size(): number {
@@ -218,6 +325,7 @@ export class ScreenBuffer {
     const colEnd = Math.min(this.cols, win.col + win.width + 4);
     for (let row = Math.max(1, win.row); row <= rowEnd; row++) {
       for (let col = Math.max(1, win.col); col <= colEnd; col++) {
+        this.noteWrite((row - 1) * this.cols + (col - 1));
         this.cells[(row - 1) * this.cols + (col - 1)] = null;
       }
     }
@@ -298,6 +406,7 @@ export class ScreenBuffer {
   clearUnitAlternate(): boolean {
     if (!this.alternate) return false;
     this.resize(this.alternate.rows, this.alternate.cols);
+    this.noteClear();
     return true;
   }
 
@@ -359,6 +468,7 @@ export class ScreenBuffer {
   clearUnit(): void {
     this.resize(24, 80);
     this.clearGui();
+    this.noteClear();
   }
 
   /** SAVE SCREEN（ESC 0x02）: 現在のバッファを退避（SysReq のシステム要求行オーバーレイ等で使う） */
@@ -397,6 +507,11 @@ export class ScreenBuffer {
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
     this.guiGridLines = saved.guiGridLines;
+    // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
+    // これで「窓ではない」と自然に判定される。退避が空（上で false 復帰）なら画面は変わらず、
+    // 記録もしない
+    this.pending.restored = true;
+    this.noteWriteRange(0, this.rows * this.cols - 1);
     return true;
   }
 
@@ -424,6 +539,7 @@ export class ScreenBuffer {
 
   setChar(addr: number, char: string, rawByte?: number): void {
     this.checkAddr(addr);
+    this.noteWrite(addr);
     this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char, charKind: "sbcs", ...(rawByte !== undefined ? { rawByte } : {}) };
   }
@@ -431,6 +547,7 @@ export class ScreenBuffer {
   /** SO/SI 制御桁を配置（見た目は空白・1 桁占有。DBCS 桁位置維持の要） */
   setShift(addr: number, kind: "so" | "si"): void {
     this.checkAddr(addr);
+    this.noteWrite(addr);
     this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char: " ", charKind: kind };
   }
@@ -442,12 +559,16 @@ export class ScreenBuffer {
     this.checkAddr(addr);
     this.dropRetainedInRow(addr);
     this.checkAddr(addr + 1);
+    // 記録は境界チェックの**後**（書けなかったセルを書いたことにしない）
+    this.noteWrite(addr);
+    this.noteWrite(addr + 1);
     this.cells[addr] = { type: "char", char, charKind: "dbcs-lead", ...(lead !== undefined ? { rawByte: lead } : {}) };
     this.cells[addr + 1] = { type: "char", char: "", charKind: "dbcs-tail", ...(tail !== undefined ? { rawByte: tail } : {}) };
   }
 
   setAttr(addr: number, byte: number): void {
     this.checkAddr(addr);
+    this.noteWrite(addr);
     this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "attr", byte };
   }
@@ -456,6 +577,7 @@ export class ScreenBuffer {
   eraseRange(from: number, to: number): void {
     this.checkAddr(from);
     this.checkAddr(to);
+    this.noteWriteRange(from, to);
     this.dropRetainedInRow(from);
     this.dropRetainedInRow(to);
     for (let i = from; i <= to; i++) this.cells[i] = null;
@@ -672,7 +794,14 @@ export class ScreenBuffer {
     }
   }
 
-  /** CC1: 非 bypass フィールドの内容を null 化する（onlyMdt=true なら MDT の立つものだけ） */
+  /**
+   * CC1: 非 bypass フィールドの内容を null 化する（onlyMdt=true なら MDT の立つものだけ）。
+   *
+   * **ここは書き込み範囲（`WriteExtent`）に数えない。** 入力欄は画面中に散っているので、
+   * 数えると矩形が全画面へ膨らみ、窓を描く WTD が CC1 を伴った場合に**本物の窓を弾いてしまう**。
+   * 「数えるべき」と言える実データが無い以上、安全側（数えない）に倒す。
+   * これは欄の状態リセットであって、ホストが「そこへ描いた」わけではない、という整理でもある。
+   */
   nullNonBypass(onlyMdt: boolean): void {
     for (const f of this.fields) {
       if ((f.ffw & FFW.BYPASS) !== 0) continue;
@@ -783,6 +912,8 @@ export class ScreenBuffer {
     if (this.systemMessage !== undefined) snap.systemMessage = this.systemMessage;
     const gui = this.guiSnapshot();
     if (gui) snap.gui = gui;
+    snap.lastWrite = { ...this.lastWrite };
+    if (snap.lastWrite.rect) snap.lastWrite.rect = { ...snap.lastWrite.rect };
     return snap;
   }
 
