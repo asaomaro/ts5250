@@ -896,6 +896,7 @@ export class ScreenBuffer {
       const adjust = adjustOf(f.ffw);
       if (adjust !== undefined) field.adjust = adjust;
       if (shift === FFW.SHIFT_SIGNED_NUMERIC) field.signedNumeric = true;
+      if (shift === FFW.SHIFT_DIGITS_ONLY) field.digitsOnly = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       return field;
     });

@@ -47,6 +47,14 @@ export interface Field {
    * `dbcsType` / `adjust` と同じく**当てはまるときだけ付ける**（false は情報を持たないため）。
    */
   signedNumeric?: boolean;
+  /**
+   * FFW の shift が digits-only（0x0600）のとき **true**。**この欄だけは真に数字しか受け付けない**
+   * （`field-validate.ts` の許容集合が `/^[0-9]*$/`。他の数値欄は `.` `,` `+` `-` も通る）。
+   *
+   * `numeric` は数値 3 種をまとめた既存フラグなので、これだけでは見分けられない。
+   * `signedNumeric` / `dbcsType` と同じく**当てはまるときだけ付ける**。
+   */
+  digitsOnly?: boolean;
   dbcsType?: "pure" | "open" | "either";
   mdt: boolean;
   value: string;

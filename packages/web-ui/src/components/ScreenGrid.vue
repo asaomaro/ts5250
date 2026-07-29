@@ -250,6 +250,22 @@ function optListStyle(p: { row: number; col: number }): Record<string, string> {
   return { left: left + "ch", top: p.row * 1.25 + "em" };
 }
 
+/**
+ * モバイル・タブレットで出すソフトキーボードの種類。
+ *
+ * **ホストが「数字だけ」と申告した欄にだけ数字キーパッドを出す。** `digitsOnly`（FFW の
+ * digits-only）は `field-validate.ts` の許容集合が `/^[0-9]*$/` で、**本当に数字しか通らない**。
+ * ここを絞っても利用者が打てる文字は減らない。
+ *
+ * **`numeric` 全体には付けない。** 数値欄のうち numeric-only / signed-numeric は
+ * `.` `,` `+` `-` を許容しており、`inputmode="numeric"` にするとそれらのキーが消えて
+ * **打てるはずの文字が打てなくなる**（AGENTS.md「環境の検出結果で選択肢を塞がない」）。
+ * 迷ったら既定のフルキーボードに任せる。
+ */
+function inputModeOf(f: Field): "numeric" | undefined {
+  return f.digitsOnly && !f.protected ? "numeric" : undefined;
+}
+
 /** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */
 function winRectStyle(r: { row1: number; row2: number; col1: number; col2: number }): Record<string, string> {
   return {
@@ -3171,6 +3187,7 @@ onBeforeUnmount(() => {
             :readonly="seg.field!.protected"
             type="text"
             :autocomplete="seg.field!.hidden ? 'off' : undefined"
+            :inputmode="inputModeOf(seg.field!)"
             :maxlength="seg.width ?? seg.field!.length"
             @keydown="onInputKeydown(seg.field!, $event)"
             @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
