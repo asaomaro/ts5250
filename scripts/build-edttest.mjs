@@ -26,14 +26,6 @@ const blank = () => " ".repeat(80);
 const kwd = (kw) => put(put(blank(), 6, "A"), 45, kw).replace(/ +$/, "");
 const rec = (n) => put(put(put(blank(), 6, "A"), 17, "R"), 19, n).replace(/ +$/, "");
 const constant = (r, c, t) => put(put(put(put(blank(), 6, "A"), 39, String(r).padStart(3)), 42, String(c).padStart(3)), 45, `'${t}'`).replace(/ +$/, "");
-function field(name, len, shift, usage, r, c, kw = "") {
-  let l = put(put(blank(), 6, "A"), 19, name);
-  l = put(l, 35 - String(len).length, String(len));
-  if (shift) l = put(l, 35, shift);
-  l = put(put(put(l, 38, usage), 39, String(r).padStart(3)), 42, String(c).padStart(3));
-  if (kw) l = put(l, 45, kw);
-  return l.replace(/ +$/, "");
-}
 /** 数値欄（小数位 36-37 桁）。`kw` は 45 桁のキーワード */
 function numf(name, len, dec, usage, r, c, kw = "", type = "") {
   let l = put(put(blank(), 6, "A"), 19, name);

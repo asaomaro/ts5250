@@ -11,7 +11,7 @@ import {
   type AidKey
 } from "@as400web/core";
 import { childLog } from "./log.js";
-import { SessionManager, type OpenOptions } from "./session-manager.js";
+import { orphanSafeIdleTimeoutMs, SessionManager, type OpenOptions } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
@@ -284,7 +284,13 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const opts: OpenOptions = hasRef(input)
             ? { ...resolveTarget(input).connect, origin: originOf(input) }
             : buildDirectOpts(input);
-          const entry = await sessions.open({ ...opts, readOnly: input.readOnly ?? false });
+          const entry = await sessions.open({
+            ...opts,
+            readOnly: input.readOnly ?? false,
+            // **MCP には切断の通知が無い**（ツール呼び出しごとの HTTP）。永続を通すと
+            // 落ちたクライアントのセッションを閉じる者が居なくなるので、有限値に落とす（research F2）
+            idleTimeoutMs: mcpIdleTimeout(opts.idleTimeoutMs)
+          });
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
           return errorResult(err);
@@ -518,6 +524,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             ...(src.tls !== undefined ? { tls: src.tls } : {}),
             // 自動蓄積/印刷はサーバー設定のセッション由来のときだけ（判定は ConfigResolver 内）
             ...withOutput(target?.printerOutput),
+            // 表示セッションと同じ理由で永続を通さない（`mcpIdleTimeout`）
+            idleTimeoutMs: mcpIdleTimeout(target?.connect.idleTimeoutMs),
             origin: originOf(input)
           });
           const code = entry.session.startupCode;
@@ -1086,6 +1094,26 @@ function fieldCoords(fields: FieldInput[]): { row: number; col: number }[] {
 function screenHas(snap: ScreenSnapshot, expect: { text: string; row?: number | undefined }): boolean {
   const rows = expect.row !== undefined ? [snap.cells[expect.row - 1] ?? []] : snap.cells;
   return rows.map((r) => r.map((c) => c.char).join("")).join("\n").includes(expect.text);
+}
+
+/**
+ * MCP 経由セッションのアイドル上限。**設定の「永続」は通さない**（research F2）。
+ *
+ * MCP は `StreamableHTTPTransport` のツール呼び出しごとの HTTP で、クライアントが落ちても
+ * 通知が来ない。ブラウザ経路は WS の切断とハートビートが孤児を回収するが、こちらには
+ * 回収する者が居ない——永続を許すと `maxSessions` を食い潰し、装置記述も掴んだままになる。
+ *
+ * **設定を曲げる唯一の箇所なので黙ってやらない**。warn に出す。
+ */
+function mcpIdleTimeout(v: number | "never" | undefined): number {
+  const ms = orphanSafeIdleTimeoutMs(v);
+  if (v === "never") {
+    mcpLog.warn(
+      { idleTimeoutMs: ms },
+      "MCP セッションには永続を適用しない（切断が通知されないため）。有限値に落とした"
+    );
+  }
+  return ms;
 }
 
 /** プリンター出力設定を openPrinter のオプション断片へ（未設定なら空＝自動出力なし） */

@@ -46,7 +46,7 @@ function seed(fields: Field[]): void {
     cursor: { row: 1, col: 1 },
     connected: true,
     readOnly: false,
-    client: {} as WsClient
+    client: { send: () => {} } as unknown as WsClient
   });
 }
 
@@ -613,7 +613,7 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
       cursor: { row: 1, col: 1 },
       connected: true,
       readOnly: false,
-      client: {} as WsClient
+      client: { send: () => {} } as unknown as WsClient
     });
     const w = mountPane();
     await nextTick();

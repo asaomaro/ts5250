@@ -18,6 +18,7 @@ export {
   type PublicSession,
   type PrinterConfig,
   type Watermark,
+  type IdleTimeout,
   type ConfigSource
 } from "./config-types.js";
 export {

@@ -60,7 +60,7 @@ function seed(fields: Field[], cursor: { row: number; col: number }): void {
     cursor,
     connected: true,
     readOnly: false,
-    client: {} as WsClient
+    client: { send: () => {} } as unknown as WsClient
   });
 }
 

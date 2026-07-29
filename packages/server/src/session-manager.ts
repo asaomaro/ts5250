@@ -65,6 +65,38 @@ export interface OpenOptions extends ConnectOptions {
    * （返さないとホストが待ち続けるため。research D5）
    */
   pcCommand?: PcCommandConfig;
+  /**
+   * このセッションのアイドルタイムアウト（ms、または `"never"`＝切らない）。
+   * 未指定ならマネージャの既定（`SessionManagerOptions.idleTimeoutMs`）に従う。
+   */
+  idleTimeoutMs?: IdleLimit;
+}
+
+/**
+ * アイドルタイムアウトの内部表現。ms、または `"never"`（＝切らない）。
+ *
+ * **`0` / `null` を「切らない」の印にしない**——未設定・転記漏れと見分けが付かなくなる
+ * （spec 方針2）。設定ファイル側は「分」で持ち、`idleTimeoutToMs()` でここへ変換する。
+ */
+export type IdleLimit = number | "never";
+
+/**
+ * 切断を通知しない入口（MCP）に使うアイドル上限（ms）。
+ *
+ * この値は**安全網であって設定ではない**。MCP は `StreamableHTTPTransport` のツール呼び出しごとの
+ * HTTP で、クライアントが落ちても通知が来ない（research F2）。従来の既定と同じ 30 分にしてある。
+ */
+export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * 切断を通知しない入口（MCP）のアイドル上限を決める。**`"never"` は通さない。**
+ *
+ * ブラウザ経路は WS の切断とハートビートが孤児を回収するので永続でも安全だが、
+ * MCP には回収する者が居ない。永続を許すと落ちたクライアントのセッションが残り続け、
+ * `maxSessions` を食い潰して新規接続ができなくなる（装置記述も掴んだまま。research F2）。
+ */
+export function orphanSafeIdleTimeoutMs(v: IdleLimit | undefined): number {
+  return typeof v === "number" ? v : ORPHAN_IDLE_TIMEOUT_MS;
 }
 
 /** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
@@ -122,6 +154,8 @@ export interface SessionEntry {
    * 解決できなければ `undefined` で終わる（失敗は握りつぶす）
    */
   jobResolved?: Promise<SessionJob | undefined>;
+  /** このセッションのアイドルタイムアウト（`OpenOptions` 由来）。無ければマネージャ既定 */
+  idleTimeoutMs?: IdleLimit;
 }
 
 /** PC コマンド 1 件の状況。開始時（`outcome` 無し）と完了時の 2 回積まれる */
@@ -162,6 +196,11 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
    */
   rescueAction?: RescueAction;
+  /**
+   * このプリンターセッションのアイドルタイムアウト（ms、または `"never"`）。
+   * 未指定ならマネージャの既定に従う。
+   */
+  idleTimeoutMs?: IdleLimit;
 }
 
 
@@ -205,6 +244,8 @@ export interface PrinterEntry {
   outputStatuses: SpoolOutputStatus[];
   /** 結果の push フック（ws-handler が設定し、切断で解除する） */
   onOutputStatus?: (s: SpoolOutputStatus) => void;
+  /** このセッションのアイドルタイムアウト（`OpenPrinterOptions` 由来）。無ければマネージャ既定 */
+  idleTimeoutMs?: IdleLimit;
 }
 
 /**
@@ -251,8 +292,19 @@ function buildOutputStatus(
 
 export interface SessionManagerOptions {
   maxSessions?: number;
-  /** アイドルタイムアウト（ms）。無操作でこの時間を超えたら切断。既定 30 分 */
-  idleTimeoutMs?: number;
+  /**
+   * アイドルタイムアウトの既定（ms、または `"never"`＝切らない）。**既定 `"never"`**。
+   * エントリ個別の値（`OpenOptions.idleTimeoutMs`）が無いときに使う。
+   *
+   * **既定が永続なのは意図的。** WS の切断（`ws-handler.onSocketClose`）とハートビートが
+   * 孤児を回収するので、壁時計タイマーは重複した安全網でしかない。一方でこのタイマーは
+   * **WS が繋がったまま＝在席している利用者**を切っていた（research F1）。加えて、アイドル対話
+   * ジョブの扱いは本来ホストの管轄（`QINACTITV`。多くの環境で `*NONE`）であり、こちらが
+   * 30 分で切るのはホストの方針を先取りして上書きする行為だった。ACS も放置で切れない。
+   *
+   * 共有サーバーで有限に戻したい運用のために `--idle-timeout` を用意している。
+   */
+  idleTimeoutMs?: IdleLimit;
   /** 書き出しできないスプールを拾う見張りの間隔（ミリ秒。既定 10 秒） */
   rescueIntervalMs?: number;
   /** 現在時刻（テスト注入用） */
@@ -300,7 +352,7 @@ export class SessionManager {
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly printers = new Map<string, PrinterEntry>();
   private readonly maxSessions: number;
-  private readonly idleTimeoutMs: number;
+  private readonly idleTimeoutMs: IdleLimit;
   /** 書き出しできないスプールを拾う見張りの間隔（既定 10 秒） */
   private readonly rescueIntervalMs: number;
   private readonly now: () => number;
@@ -309,7 +361,7 @@ export class SessionManager {
 
   constructor(opts: SessionManagerOptions = {}) {
     this.maxSessions = opts.maxSessions ?? 8;
-    this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
+    this.idleTimeoutMs = opts.idleTimeoutMs ?? "never";
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
     this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
@@ -363,7 +415,8 @@ export class SessionManager {
       lastActivity: this.now(),
       pcCommandEnabled: opts.pcCommand?.enabled === true,
       pcCommands: [],
-      ...(opts.owner !== undefined ? { owner: opts.owner } : {})
+      ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
+      ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     // 起動応答レコードから分かる範囲（装置名＝ジョブ名・システム名）を先に載せる。
     // **追加の往復はゼロ**で、資格情報が無い環境でもここまでは必ず出せる
@@ -521,7 +574,8 @@ export class SessionManager {
       ...(output !== undefined ? { output } : {}),
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
       outputWarnings: [],
-      outputStatuses: []
+      outputStatuses: [],
+      ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     this.printers.set(id, entry);
     session.on("report", (report) => this.deliverReport(entry, report));
@@ -762,16 +816,42 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 在席の証拠を受けて `lastActivity` を進める（表示・プリンターの両方）。
+   *
+   * 利用者が入力欄に文字を打っても、値はブラウザ内の `edits` に溜まるだけで
+   * **AID キーを押すまで WS に何も流れない**。読んでいる時間・カーソル移動も同じで、
+   * サーバーからは無操作に見える。有限値を設定したときに「設定した時間より早く切れる」のを
+   * 塞ぐための口（spec 方針4。通知そのものは値を運ばない）。
+   *
+   * **所有者検査をしない**のは、id が呼び出し元（WS 接続）自身が開いたものに限られ、
+   * クライアントから来た値ではないため。存在しない id は黙って無視する
+   * （既に閉じたセッションへの遅延メッセージ）。
+   */
+  touch(id: string): void {
+    const entry = this.sessions.get(id) ?? this.printers.get(id);
+    if (entry) entry.lastActivity = this.now();
+  }
+
+  /**
+   * アイドル超過のセッションを切る。**判定はエントリごと**——マネージャ共通の cutoff を
+   * 1 つ作って全部と比べると、セッション設定の値が効かない。
+   * `"never"`（永続）のエントリは対象外。
+   */
   private sweepIdle(): void {
-    const cutoff = this.now() - this.idleTimeoutMs;
+    const now = this.now();
+    const expired = (entry: { lastActivity: number; idleTimeoutMs?: IdleLimit }): boolean => {
+      const limit = entry.idleTimeoutMs ?? this.idleTimeoutMs;
+      return limit !== "never" && entry.lastActivity < now - limit;
+    };
     for (const [id, entry] of this.sessions) {
-      if (entry.lastActivity < cutoff) {
+      if (expired(entry)) {
         entry.session.disconnect();
         this.sessions.delete(id);
       }
     }
     for (const [id, entry] of this.printers) {
-      if (entry.lastActivity < cutoff) {
+      if (expired(entry)) {
         entry.session.disconnect();
         this.printers.delete(id);
       }

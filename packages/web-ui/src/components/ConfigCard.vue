@@ -81,8 +81,12 @@ const sesForm = reactive<SesFormState>({
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
-  transformTo: ""
+  transformTo: "",
+  idleTimeout: undefined
 });
+
+/** 「無操作で切る」の選択肢（分）。任意の数値を打たせるほどの要求ではないので選択式にする */
+const IDLE_MINUTES = [5, 10, 15, 30, 60, 120, 240] as const;
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
 /**
  * PC コマンド（STRPCCMD）の実行設定。**信頼設定**なのでサーバー設定の表示セッションでのみ編集できる。
@@ -175,6 +179,7 @@ function loadSession(): void {
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
+  sesForm.idleTimeout = s.idleTimeout;
 }
 
 /**
@@ -300,6 +305,9 @@ async function save(): Promise<void> {
       const tt = (sesForm.transformTo ?? "").trim();
       if (tt) form.transformTo = tt;
       else delete form.transformTo;
+      // `idleTimeout` は「サーバー既定に従う」＝ undefined。**明示的な delete は要らない**——
+      // `JSON.stringify` が undefined のキーを落とすので、そのままキーごと送られない
+      // （`transformTo`/`screenSize` は空文字や実値を持つため delete が必要。事情が違う）
       if (form.sessionType === "printer") {
         // 既定（保留）はわざわざ保存しない——設定ファイルに既定値を書き散らさない
         if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
@@ -435,6 +443,14 @@ const infoRows = computed(() => {
     label: "CCSID",
     value: o.ccsid !== undefined ? String(o.ccsid) : `システムの既定${parent?.ccsid ? `（${parent.ccsid}）` : ""}`
   });
+  // 未設定のときは行を出さない——サーバー側の既定（`--idle-timeout`）はブラウザから見えないので、
+  // ここで「切らない」と書くと嘘になりうる
+  if (o.idleTimeout !== undefined) {
+    rows.push({
+      label: "無操作で切る",
+      value: o.idleTimeout === "never" ? "切らない" : `${o.idleTimeout} 分`
+    });
+  }
   return rows;
 });
 </script>
@@ -585,6 +601,21 @@ const infoRows = computed(() => {
           <select v-model.number="sesForm.ccsid">
             <option :value="undefined">システムの既定</option>
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+          </select>
+        </label>
+        <!--
+          無操作で切るまでの時間。**「サーバー既定に従う」と「切らない」を別の選択肢にする**——
+          既定は切らないが、運用者が --idle-timeout で有限に変えている場合があり、
+          「既定のまま」と「このセッションは切らない」は違う意思表示になる。
+        -->
+        <label class="row">
+          <span class="cap" title="この時間だけ何も操作しなければセッションを閉じます。入力中・カーソル移動中は操作として数えます">
+            無操作で切る
+          </span>
+          <select v-model="sesForm.idleTimeout">
+            <option :value="undefined">サーバー既定に従う</option>
+            <option value="never">切らない</option>
+            <option v-for="m in IDLE_MINUTES" :key="m" :value="m">{{ m }} 分</option>
           </select>
         </label>
       </div>

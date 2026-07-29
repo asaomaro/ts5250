@@ -59,6 +59,20 @@ export interface WsKey {
 export interface WsCloseReq {
   type: "close";
 }
+/**
+ * 利用者が触った合図（入力・カーソル移動）。アイドル判定の `lastActivity` を進めるためだけに使う。
+ *
+ * **payload を持たない。** 入力値は AID キーを押すまで送らない約束で、`edits` の中身を早く送ると
+ * 秘密（マクロの `secretRef`）の扱いが変わってしまう。**将来ここに値を足してはならない**
+ * ——足した時点で「打鍵のたびに入力値が流れる」設計に変わる（spec 方針4）。
+ */
+export interface WsActivity {
+  type: "activity";
+}
+/** ハートビートの応答（`ping` への返し）。半開きソケットの検出に使う */
+export interface WsPong {
+  type: "pong";
+}
 /** GUI 選択フィールドの選択状態変更（ローカル・ホスト送信なし） */
 export interface WsGuiSelect {
   type: "gui-select";
@@ -79,7 +93,9 @@ export type WsClientMessage =
   | WsCloseReq
   | WsGuiSelect
   | WsGuiSubmit
-  | WsPrinterOutput;
+  | WsPrinterOutput
+  | WsActivity
+  | WsPong;
 
 // ---- server → client ----
 export interface WsOpened {
@@ -210,7 +226,19 @@ export interface WsPrinterOutput {
   type: "printer-output";
   enabled: boolean;
 }
+/**
+ * ハートビート（server → client）。クライアントは `pong` を返す。
+ *
+ * 半開きソケット（TCP が死んでいるのに close イベントが来ない）を検出するために要る。
+ * **既定を永続にした代償**——`onSocketClose` が発火しない事故が起きると、
+ * 壁時計タイマーが無くなった以上セッションが永久に残る。
+ */
+export interface WsPing {
+  type: "ping";
+}
+
 export type WsServerMessage =
+  | WsPing
   | WsOpened
   | WsScreen
   | WsJobInfoRes

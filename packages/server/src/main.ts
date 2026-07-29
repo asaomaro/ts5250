@@ -66,6 +66,11 @@ interface Args {
   ifsDeleteMaxDirectories: number | undefined;
   /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
   dtaqReceiveMaxWaitSec: number | undefined;
+  /**
+   * セッションのアイドルタイムアウトの**サーバー全体の既定**（ms or `"never"`）。
+   * 未指定なら `SessionManager` の既定（＝永続）。共有サーバーで有限に戻すための口。
+   */
+  idleTimeoutMs: number | "never" | undefined;
 }
 
 /**
@@ -85,6 +90,21 @@ function parseLimit(raw: string | undefined, name: string, max: number): number 
     throw new Error(`${name} は 1〜${max} の整数で指定してください（指定値: ${raw}）`);
   }
   return value;
+}
+
+/**
+ * `--idle-timeout` の値を内部表現（ms or `"never"`）へ。
+ *
+ * 単位は**分**。`never` は「切らない」（＝既定と同じだが、明示できるようにしてある）。
+ * `0` を「切らない」に使わないのは、未設定・転記漏れと見分けが付かなくなるため（spec 方針2）。
+ */
+export function parseIdleTimeout(raw: string | undefined): number | "never" {
+  if (raw === "never") return "never";
+  const minutes = Number(raw);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+    throw new Error(`--idle-timeout は 1〜1440 の整数（分）または never で指定してください（指定値: ${raw}）`);
+  }
+  return minutes * 60_000;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -107,7 +127,8 @@ function parseArgs(argv: string[]): Args {
     ifsReadMaxBytes: undefined,
     ifsDeleteMaxEntries: undefined,
     ifsDeleteMaxDirectories: undefined,
-    dtaqReceiveMaxWaitSec: undefined
+    dtaqReceiveMaxWaitSec: undefined,
+    idleTimeoutMs: undefined
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -145,6 +166,10 @@ function parseArgs(argv: string[]): Args {
       args.ifsDeleteMaxDirectories = parseLimit(argv[++i], "--ifs-delete-max-dirs", 100_000);
     } else if (a === "--dtaq-max-wait") {
       args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
+    } else if (a === "--idle-timeout") {
+      // セッション設定を持たない接続にも効く「全体の既定」。既定は永続なので、
+      // 有限に戻したい共有サーバーだけが指定する
+      args.idleTimeoutMs = parseIdleTimeout(argv[++i]);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -169,7 +194,10 @@ function parseArgs(argv: string[]): Args {
 }
 
 function buildDeps(args: Args): ToolDeps & { macros: MacroStore } {
-  const sessions = new SessionManager();
+  const sessions = new SessionManager(
+    args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}
+  );
+  // 既定が永続でも掃除は回す——セッション設定や `--idle-timeout` で有限値が入りうるため
   sessions.startIdleSweep();
   // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）。
   // --auto-secret-key（単一利用者向け）なら無ければ生成して保存する。

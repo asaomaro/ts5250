@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { PublicSystem, PublicSession, Watermark } from "@as400web/server";
+import type { PublicSystem, PublicSession, Watermark, IdleTimeout } from "@as400web/server";
 
 /**
  * システムとセッション設定（サーバー保存・単一の真実）。
@@ -59,6 +59,11 @@ export interface SessionConfigForm {
    * 指定すると本来の印刷経路になる代わりに、画面表示と PDF が使えない。
    */
   transformTo?: string;
+  /**
+   * 無操作で切るまでの時間。`"never"`＝切らない / 数値＝分（1〜1440）。
+   * **省略はサーバー既定に従う**（既定は切らない）。`0` は受け付けない
+   */
+  idleTimeout?: IdleTimeout;
   /**
    * サーバー設定の表示セッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界）。
    * ホストの `STRPCCMD` が届いたときにサーバー機でコマンドを実行する設定

@@ -29,6 +29,33 @@ const WS_URL = (): string => {
 const LOADING_DELAY_MS = 500;
 const loadingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * 在席の合図を送る間隔（ms）。打鍵のたびに送るとただの無駄なので間引く。
+ *
+ * サーバーの掃除は 60 秒間隔で、設定できる最小値は 1 分。15 秒に 1 回なら
+ * `lastActivity` は最大 15 秒古いだけなので、1 分の設定でも操作中に切られない。
+ */
+const ACTIVITY_THROTTLE_MS = 15_000;
+
+/**
+ * 利用者が触ったことをサーバーへ伝える（入力・カーソル移動）。
+ *
+ * 打った文字は AID キーを押すまで送らない約束なので、**サーバーからは打鍵中が無操作に見える**。
+ * アイドルタイムアウトに有限値を設定したとき「設定した時間より早く切られ、打ち込み途中の
+ * 未送信入力が消える」のを防ぐための合図（spec 方針4）。
+ *
+ * **値は載せない。** `edits` の中身を早く送ると秘密（マクロの `secretRef`）の扱いが変わる。
+ * 既定（永続）でも送る——クライアントはサーバー側の既定を知らないため。
+ */
+export function noteActivity(sessionId: string): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  const t = Date.now();
+  if (s.activitySentAt !== undefined && t - s.activitySentAt < ACTIVITY_THROTTLE_MS) return;
+  s.activitySentAt = t;
+  s.client.send({ type: "activity" });
+}
+
 /** 通信中フラグを設定。busy 中は入力プロテクト、0.5 秒超でローディング表示 */
 function setBusy(sessionId: string, busy: boolean): void {
   const s = sessionsStore.get(sessionId);

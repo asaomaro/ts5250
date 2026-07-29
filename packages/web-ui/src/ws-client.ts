@@ -6,6 +6,14 @@ export interface WsClientHandlers {
 }
 
 /**
+ * 操作ログに残さないメッセージ種別。
+ *
+ * 心拍（30 秒）と在席の合図（15 秒）は利用者の操作ではなく、出すと**操作ログが心拍で埋まって
+ * 使えなくなる**。マスク対象も無い（どちらも payload を持たない）。
+ */
+const QUIET_TYPES: ReadonlySet<string> = new Set(["activity", "pong"]);
+
+/**
  * 1 セッション = 1 WebSocket 接続（spec D12: 多重化しない）。
  * 送受信を logStore にフックし、送信時は hidden フィールド値を伏字化してから記録する。
  */
@@ -42,6 +50,10 @@ export class WsClient {
   send(msg: WsClientMessage): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     if (msg.type === "key") this.lastKeyAt = now();
+    if (QUIET_TYPES.has(msg.type)) {
+      this.ws.send(JSON.stringify(msg));
+      return;
+    }
     const masked = maskOutgoing(msg, this.hiddenIndexes);
     this.log("tx", msg.type, summarize(masked), masked);
     this.ws.send(JSON.stringify(msg));
@@ -56,6 +68,12 @@ export class WsClient {
     try {
       msg = JSON.parse(raw) as WsServerMessage;
     } catch {
+      return;
+    }
+    // ハートビートは**この層で完結させる**。上（session-controller / コンポーネント）へ渡すと
+    // 30 秒ごとに無意味な更新が伝わるし、操作ログにも残せない
+    if (msg.type === "ping") {
+      this.send({ type: "pong" });
       return;
     }
     const rt = msg.type === "screen" && this.lastKeyAt !== undefined ? now() - this.lastKeyAt : undefined;

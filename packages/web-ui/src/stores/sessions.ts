@@ -128,6 +128,14 @@ export interface SessionState {
   /** ローディング表示（通信が 0.5 秒以上かかったとき） */
   loading?: boolean;
   /**
+   * 在席の合図（`activity`）を最後に送った時刻。間引きの基準
+   * （`session-controller.ts` の `noteActivity`）。
+   *
+   * **モジュール側の Map ではなくここに持つ**——セッションと一緒に生まれて消えるので、
+   * 閉じた id の記憶が残らない。
+   */
+  activitySentAt?: number;
+  /**
    * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
    */

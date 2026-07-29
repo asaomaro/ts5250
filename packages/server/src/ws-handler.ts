@@ -37,22 +37,57 @@ export interface WsSender {
   close(): void;
 }
 
+/** ハートビート（`ping`）の間隔（ms） */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+/**
+ * 最後にクライアントから何か受け取ってからこの時間を超えたら、半開きと見なして破棄する。
+ * 心拍 3 回ぶんの取りこぼしを許す（回線の一時的な詰まりで切らないため）。
+ */
+export const HEARTBEAT_DEAD_MS = 90_000;
+
+/** ハートビートの調整（テストで間隔と時刻を差し替えるための口） */
+export interface HeartbeatOptions {
+  intervalMs?: number;
+  deadMs?: number;
+  now?: () => number;
+}
+
 /**
  * 1 WebSocket 接続 = 1 セッションの状態機械（spec「Web 向けプロトコル」）。
  * open/key/jobinfo/close を処理し、session の screen イベントを push する。切断でセッションを破棄する。
+ *
+ * **寿命の見張りはここが持つ**（`20260729-session-lifetime-timeout`）。セッションのアイドル
+ * タイムアウトは既定で永続になったため、孤児を回収するのは
+ * ①`onSocketClose`（ブラウザを閉じた）と ②このハートビート（半開きソケット）の 2 つだけ。
+ * どちらも WS 前提なので、**WS を持たない MCP 経路は `orphanSafeIdleTimeoutMs` が受け持つ**。
  */
 export class WsConnection {
   private sessionId: string | undefined;
   private detachScreen: (() => void) | undefined;
   private detachReport: (() => void) | undefined;
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
+  private lastSeen: number;
+  private readonly hbIntervalMs: number;
+  private readonly hbDeadMs: number;
+  private readonly hbNow: () => number;
 
   constructor(
     private readonly deps: WsHandlerDeps,
     private readonly ws: WsSender,
-    private readonly user?: AuthUser
-  ) {}
+    private readonly user?: AuthUser,
+    hb: HeartbeatOptions = {}
+  ) {
+    this.hbIntervalMs = hb.intervalMs ?? HEARTBEAT_INTERVAL_MS;
+    this.hbDeadMs = hb.deadMs ?? HEARTBEAT_DEAD_MS;
+    this.hbNow = hb.now ?? (() => Date.now());
+    this.lastSeen = this.hbNow();
+  }
 
   async handle(raw: string): Promise<void> {
+    // **任意の受信で生存を更新する。** pong だけを見ると、キー送信が流れている最中に
+    // 心拍が 3 回取りこぼされただけで生きている接続を切ってしまう。
+    this.lastSeen = this.hbNow();
     let msg: WsClientMessage;
     try {
       msg = JSON.parse(raw) as WsClientMessage;
@@ -71,6 +106,12 @@ export class WsConnection {
           return await this.onGuiSubmit(msg);
         case "printer-output":
           return await this.onPrinterOutput(msg);
+        case "activity":
+          // 在席の合図。**監査にも操作ログにも残さない**——利用者の意図を含まないうえ、
+          // 15 秒間隔で流れるので本来の記録を量で押し流す
+          return this.onActivity();
+        case "pong":
+          return; // 生存の更新は上で済んでいる
         case "close":
           return this.dispose("closed by client");
         default:
@@ -86,6 +127,43 @@ export class WsConnection {
   /** WebSocket 切断時に呼ぶ（セッションを破棄） */
   onSocketClose(): void {
     this.dispose("websocket closed");
+  }
+
+  /**
+   * 在席の合図を受けて `lastActivity` を進める。**id はこの接続が開いたものだけ**なので
+   * クライアントから受け取らない（所有者検査が要らないのはそのため）。
+   * `open` 前に来たら何もしない（`requireSession` で投げると無害な合図で接続が壊れる）。
+   */
+  private onActivity(): void {
+    if (this.sessionId) this.deps.sessions.touch(this.sessionId);
+  }
+
+  /**
+   * ハートビートを始める（`open` 成功後。display / printer 共通）。
+   *
+   * **死判定を ping の送信より先に行う**——送ってから判定すると 1 周期ぶん遅れる。
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      if (this.hbNow() - this.lastSeen > this.hbDeadMs) {
+        // 半開き（TCP は死んでいるのに close イベントが来ない）。send はローカルで成功するので
+        // 送信の失敗では気づけない。ここで自分から畳む
+        wsLog.warn({ sessionId: this.sessionId }, "no client response; closing half-open websocket");
+        this.dispose("heartbeat timeout");
+        this.ws.close();
+        return;
+      }
+      this.send({ type: "ping" });
+    }, this.hbIntervalMs);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
   }
 
   private async onOpen(msg: WsClientMessage & { type: "open" }): Promise<void> {
@@ -107,6 +185,7 @@ export class WsConnection {
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
       this.sessionId = entry.id;
+      this.startHeartbeat();
       // ホスト発の画面更新を push
       const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
       entry.session.on("screen", onScreen);
@@ -155,6 +234,9 @@ export class WsConnection {
         if (co.password !== undefined) opts.password = co.password;
         if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
         if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
+        // **転記漏れに注意**: ここはキーごとの手写しなので、足し忘れると
+        // 「表示セッションだけ設定が効く」状態になる（display 側は `{...target.connect}`）
+        if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
         if (t.printerOutput) opts.output = t.printerOutput;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
@@ -169,6 +251,7 @@ export class WsConnection {
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.openPrinter(opts);
       this.sessionId = entry.id;
+      this.startHeartbeat();
       const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>
         this.send({ type: "report", sessionId: entry.id, report: { id: r.id, pages: r.pages } });
       // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
@@ -297,6 +380,7 @@ export class WsConnection {
   }
 
   private dispose(reason: string): void {
+    this.stopHeartbeat();
     this.detachScreen?.();
     this.detachScreen = undefined;
     this.detachReport?.();

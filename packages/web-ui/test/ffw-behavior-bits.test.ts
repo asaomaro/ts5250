@@ -276,7 +276,14 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
       cursor: { row: 5, col: 10 },
       connected: true,
       readOnly: false,
-      client: { send: (m: unknown) => sent.push(m) } as unknown as WsClient
+      // **在席の合図（`activity`）は数えない。** 打鍵のたびに WS へ流れるが、これは
+      // サーバーのアイドル判定用でホストへは行かない（`20260729-session-lifetime-timeout`）。
+      // ここで見たいのは「ホストへ送ってしまっていないか」なので、合図は除いて集める
+      client: {
+        send: (m: unknown) => {
+          if ((m as { type?: string }).type !== "activity") sent.push(m);
+        }
+      } as unknown as WsClient
     });
   }
   function mountPane() {

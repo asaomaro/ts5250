@@ -165,6 +165,7 @@ export abstract class ConfigStore {
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
     if (s.enhanced !== undefined) pub.enhanced = s.enhanced;
+    if (s.idleTimeout !== undefined) pub.idleTimeout = s.idleTimeout;
     // 唯一のオブジェクト値。**複製して返す**——参照のまま渡すと、応答を受け取った側の
     // 書き換えがストアの実体に届く（他のフィールドは値型なので起きない）
     if (s.watermark !== undefined) pub.watermark = { ...s.watermark };

@@ -14,7 +14,7 @@ import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
-import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-controller.js";
+import { sendKey, selectGuiChoice, submitGuiSelection, noteActivity } from "../session-controller.js";
 import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { MSG_PROTECTED } from "../composables/opMessages.js";
@@ -698,11 +698,28 @@ function keyboardBlockSelect(ev: KeyboardEvent): boolean {
   return false;
 }
 
+/**
+ * **在席の合図は DOM の生イベント（capture）から出す**（`noteActivity` は 15 秒に間引く）。
+ * 出所は `.pane` の `@keydown.capture` と `@pointerdown.capture` の 2 つ。
+ *
+ * 打った文字は AID キーまで送らないので、これが無いとサーバーからは打鍵中が無操作に見え、
+ * アイドルタイムアウトに有限値を設定したときに打ち込み途中で切られる（spec 方針4）。
+ *
+ * **合成イベント（`cursor` / `edit`）を使ってはならない。** `ScreenGrid.onInputFocus` が
+ * `cursor` を emit するため、**ホスト発の画面更新でも飛ぶ**（新画面 → `reconcileFocus` → focus）。
+ * それを在席と数えると「閉じ忘れたタブが永久に生き残る」＝仕様が禁じている状態になる。
+ * capture にしているのは、子（入力欄・ボタン）が伝播を止めても必ず通るため。
+ */
+function noteUserActivity(): void {
+  noteActivity(props.sessionId);
+}
+
 /** 次のキー操作でメッセージを消す（ACS 相当。キーボードはロックしない）。
  *  capture で拾うこと: 入力欄は Home/End/矢印などで stopPropagation するため、bubble の
  *  onKeydown では欄内のキーを取りこぼす（メッセージが出るのはまさに欄内なので消えなくなる）。 */
 function onKeydownCapture(): void {
   notice.value = "";
+  noteUserActivity();
 }
 function onKeydown(ev: KeyboardEvent): void {
   if (busy.value) {
@@ -827,6 +844,7 @@ function onWheel(ev: WheelEvent): void {
     :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
+    @pointerdown.capture="noteUserActivity"
     @keydown="onKeydown"
     @paste="onPanePaste"
     @copy="onPaneCopy"

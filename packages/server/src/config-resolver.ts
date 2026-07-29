@@ -13,6 +13,7 @@ import type { AuthUser } from "./auth.js";
 import type { PcCommandConfig } from "./pc-command.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import {
+  idleTimeoutToMs,
   parseRef,
   sessionPrinter,
   type AnySession,
@@ -36,6 +37,8 @@ export interface ResolvedTarget {
     deviceNameRetry?: boolean;
     rescueAction?: "hold" | "delete";
     transformTo?: string;
+    /** アイドルタイムアウト（**ms** or `"never"`）。設定の「分」はここで変換済み */
+    idleTimeoutMs?: number | "never";
   };
   /** **サーバー設定由来のセッションのときのみ**（信頼設定） */
   printerOutput?: PrinterOutputConfig;
@@ -135,6 +138,7 @@ export class ConfigResolver {
       deviceNameRetry?: boolean;
       rescueAction?: "hold" | "delete";
       transformTo?: string;
+      idleTimeoutMs?: number | "never";
     } = { host: system.host };
     if (system.port !== undefined) opts.port = system.port;
     // 転記漏れがあると平文で繋がる。ポート省略時の既定は tls で 992／平文で 23 のため、
@@ -151,6 +155,9 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
+      // 分 → ms の変換はここ 1 か所だけで行う（入口ごとに書くと片方が分のまま流れる）
+      const idle = idleTimeoutToMs(session.idleTimeout);
+      if (idle !== undefined) opts.idleTimeoutMs = idle;
       if (session.sessionType === "printer") {
         if (session.rescueAction !== undefined) opts.rescueAction = session.rescueAction;
         if (session.transformTo !== undefined) opts.transformTo = session.transformTo;

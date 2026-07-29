@@ -118,6 +118,25 @@ export const systemSchema = z
   .strict();
 export type System = z.infer<typeof systemSchema>;
 
+/**
+ * 無操作で切るまでの時間。`"never"`＝切らない（永続）/ 数値＝**分**（1〜1440）。
+ * 未設定はサーバー既定（`--idle-timeout`。既定は永続）に従う。
+ *
+ * **`0` も `null` も「切らない」の印にしない。** 未設定・転記漏れと見分けが付かなくなる。
+ * 三者（未設定 / 永続 / 有限）を型で分けておくのが要点（spec 方針2）。
+ */
+export const idleTimeoutSchema = z.union([z.literal("never"), z.number().int().min(1).max(1440)]);
+export type IdleTimeout = z.infer<typeof idleTimeoutSchema>;
+
+/**
+ * 設定値（分 or `"never"`）を `SessionManager` の内部表現（ms or `"never"`）へ変換する。
+ * 未設定は `undefined` のまま返す——**マネージャ既定に従う**という意味を潰さないため。
+ */
+export function idleTimeoutToMs(v: IdleTimeout | undefined): number | "never" | undefined {
+  if (v === undefined) return undefined;
+  return v === "never" ? "never" : v * 60_000;
+}
+
 /** システム / セッションに共通の「どう使うか」 */
 const sessionBase = {
   id: z.string().min(1),
@@ -151,7 +170,14 @@ const sessionBase = {
   /** display のみ意味を持つ */
   enhanced: z.boolean().optional(),
   /** display のみ意味を持つ。画面に重ねる透かし（表示だけの設定） */
-  watermark: watermarkSchema.optional()
+  watermark: watermarkSchema.optional(),
+  /**
+   * 無操作で切るまでの時間（display / printer 双方で意味を持つ）。
+   *
+   * **信頼設定ではない**——サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れないので、
+   * `watermark` と同じ理屈でサーバー設定・個人設定の両方が持てる。
+   */
+  idleTimeout: idleTimeoutSchema.optional()
 };
 
 /**
@@ -259,6 +285,8 @@ export interface PublicSession {
   enhanced?: boolean;
   /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */
   watermark?: Watermark;
+  /** 無操作で切るまでの時間。`"never"`＝切らない / 数値＝分。未設定はサーバー既定に従う */
+  idleTimeout?: IdleTimeout;
   /**
    * PC コマンド（STRPCCMD）の実行設定。**編集できる相手にだけ返す**（`includeTrusted`）。
    *

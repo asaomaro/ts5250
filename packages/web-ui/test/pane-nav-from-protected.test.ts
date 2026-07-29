@@ -57,7 +57,7 @@ function seed(fields: Field[]): void {
     cursor: { row: 1, col: 1 },
     connected: true,
     readOnly: false,
-    client: {} as WsClient
+    client: { send: () => {} } as unknown as WsClient
   });
 }
 
@@ -132,7 +132,7 @@ describe("入力可能な欄が 1 つも無い画面", () => {
       cursor: { row: 8, col: 20 },
       connected: true,
       readOnly: false,
-      client: {} as WsClient
+      client: { send: () => {} } as unknown as WsClient
     });
   });
 

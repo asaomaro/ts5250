@@ -279,3 +279,41 @@ describe("横断一覧", () => {
     expect(systems.map((s) => s.ref)).toEqual(["own:s-1"]);
   });
 });
+
+/**
+ * アイドルタイムアウト。**分 → ms の変換はここ 1 か所だけ**で行う約束なので、
+ * 解決の出口で ms になっていることを直接押さえる（`20260729-session-lifetime-timeout`）。
+ */
+describe("解決: アイドルタイムアウト", () => {
+  const setup = (idleTimeout?: "never" | number) => {
+    const personal = new PersonalConfigStore({
+      systems: [{ id: "s", name: "s", host: "h", owner: "alice" }],
+      sessions: [
+        {
+          id: "d",
+          name: "d",
+          system: "s",
+          sessionType: "display",
+          owner: "alice",
+          ...(idleTimeout !== undefined ? { idleTimeout } : {})
+        }
+      ]
+    });
+    return new ConfigResolver(undefined, personal);
+  };
+
+  it("分を ms にして connect に載せる", () => {
+    const r = setup(30).resolve({ session: "own:d" }, alice, collector().warn);
+    expect(r.connect.idleTimeoutMs).toBe(30 * 60_000);
+  });
+
+  it('"never" はそのまま運ぶ', () => {
+    const r = setup("never").resolve({ session: "own:d" }, alice, collector().warn);
+    expect(r.connect.idleTimeoutMs).toBe("never");
+  });
+
+  it("未設定ならキーごと付かない（サーバー既定に従う）", () => {
+    const r = setup().resolve({ session: "own:d" }, alice, collector().warn);
+    expect("idleTimeoutMs" in r.connect).toBe(false);
+  });
+});

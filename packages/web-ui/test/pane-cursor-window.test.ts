@@ -52,7 +52,7 @@ function seed(windows: GuiWindow[] = []): void {
   sessionsStore.order = [];
   sessionsStore.add({
     sessionId: SID, label: "t", snapshot: snap(windows), edits: new Map(),
-    cursor: { row: 1, col: 1 }, connected: true, readOnly: false, client: {} as WsClient
+    cursor: { row: 1, col: 1 }, connected: true, readOnly: false, client: { send: () => {} } as unknown as WsClient
   });
 }
 

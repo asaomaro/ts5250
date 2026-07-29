@@ -162,7 +162,13 @@ describe("既定バインドが実際のキー操作で効く", () => {
     localStorage.clear();
     keybindingsStore.reload();
     const sent: unknown[] = [];
-    sessionsStore.byId.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    // 在席の合図（`activity`）は打鍵のたびに WS へ流れるが**ホストへは行かない**ので除く
+    // （`20260729-session-lifetime-timeout`）
+    sessionsStore.byId.get(SID)!.client = {
+      send: (m: unknown) => {
+        if ((m as { type?: string }).type !== "activity") sent.push(m);
+      }
+    } as unknown as WsClient;
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
