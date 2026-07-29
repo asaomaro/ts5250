@@ -396,6 +396,16 @@ function onLocal(action: LocalAction): void {
     case "erase-eof":
       gridRef.value?.eraseEof();
       break;
+    // 符号確定と Dup。欄の移動は Field Exit と同じく field-full → onFieldFull が担う
+    case "field-minus":
+      gridRef.value?.fieldMinus();
+      break;
+    case "field-plus":
+      gridRef.value?.fieldPlus();
+      break;
+    case "dup":
+      gridRef.value?.dup();
+      break;
     case "erase-input":
       gridRef.value?.eraseInput();
       // 全欄クリア後は先頭の入力欄へ（実機の Erase Input と同じ着地）

@@ -13,6 +13,9 @@ import {
   toggleInsert,
   eraseToEnd,
   fieldExit,
+  fieldSign,
+  dupFill,
+  DUP_BYTE,
   type EditState
 } from "../composables/fieldEdit.js";
 import {
@@ -38,7 +41,7 @@ import {
 } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
@@ -57,6 +60,7 @@ import {
   isRawSentinel,
   attrSentinelByte,
   attrSentinel,
+  rawSentinel,
   stripSentinels,
   decodeAttribute,
   katakanaChar,
@@ -1752,6 +1756,70 @@ function fieldExitKey(): void {
   emit("field-full", t.f.index); // 次の入力欄へ（自動送りと同じ経路）
 }
 
+/**
+ * Field− / Field+: Field Exit と同じ整形をしてから**符号桁に符号を確定**し、次の欄へ。
+ *
+ * **符号付き数値欄でだけ符号が付く**（それ以外は Field Exit と同じ。`fieldEdit.fieldSign` の
+ * コメント参照）。DBCS 欄は Field Exit と同じく右寄せしない。
+ */
+function fieldSignKey(negative: boolean): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(edit, t.f, negative);
+  sync(t.el, t.f);
+  if (t.f.autoEnter) {
+    emit("aid", "Enter");
+    return;
+  }
+  emit("field-full", t.f.index);
+}
+
+/**
+ * Dup: カーソルから欄末尾までを複写文字（EBCDIC `0x1C`）で埋めて次の欄へ。
+ *
+ * **ホストが `DUP_ENABLE` を立てた欄でだけ効く**（原典 `display.c:1795-1835`）。
+ * 立っていない欄では**値を変えずに**操作員メッセージだけ出す。
+ */
+function dupKey(): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  if (!t.f.dupEnable) {
+    emit("notice", MSG_DUP_DISALLOWED);
+    return;
+  }
+  edit = dupFill(edit, rawSentinel(DUP_BYTE));
+  sync(t.el, t.f);
+  // FER 欄は満杯でも欄に留まるのが実機（原典も Dup の後に FER を見る）
+  if (t.f.fieldExitRequired) return;
+  if (t.f.autoEnter) {
+    emit("aid", "Enter");
+    return;
+  }
+  emit("field-full", t.f.index);
+}
+
+/**
+ * **数値欄で `-` / `+` を打ったら文字として入れず Field− / Field+ を走らせる**（原典の
+ * `sign_key_hack`。GNU tn5250 `display.c:927-940`）。処理したら true。
+ *
+ * これが無いと `-12` と打てて**そのまま送れてしまう**が、ホストは先頭の符号を無視して
+ * `12` を受け取る——**利用者は負値を入れたつもりで正値を送る**（実機で実測）。
+ * 打った通りに送れないなら打たせない、という方に倒す。
+ *
+ * ペースト・マクロ・MCP はこの経路を通らない（打鍵だけの規則）。
+ */
+function signKeyHack(f: Field, key: string): boolean {
+  if (!f.numeric || (key !== "-" && key !== "+")) return false;
+  fieldSignKey(key === "-");
+  return true;
+}
+
 /** Erase EOF: カーソルから欄末尾まで消す。**欄は出ず・カーソルも動かさず・右寄せもしない**。 */
 function eraseEofKey(): void {
   const t = currentEditTarget();
@@ -1988,6 +2056,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
+    if (signKeyHack(f, ev.key)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
     const ch = inputChar(ev.key, f); // MONOCASE 欄／カタカナ系 CCSID は英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {
@@ -2082,6 +2151,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   // 印字可能な 1 文字（修飾なし）: 型・バイト予算検証してから上書き（Insert 時は挿入）
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
+    if (signKeyHack(f, k)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
     const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {
@@ -3010,6 +3080,9 @@ defineExpose({
   fieldExit: fieldExitKey,
   eraseEof: eraseEofKey,
   eraseInput: eraseInputKey,
+  fieldMinus: () => fieldSignKey(true),
+  fieldPlus: () => fieldSignKey(false),
+  dup: dupKey,
   // 画面桁の表示文字（未送信の入力値込み）。ペインの頭出し（Ctrl+矢印）が語の判定に使う
   screenCharAt: charAtForCopy,
   // オプション欄のドロップダウン（ペインの Alt+↓・Esc から呼ぶ）

@@ -65,6 +65,18 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
     "ctrl+Enter": "local:field-exit",
     "ctrl+Delete": "local:erase-eof",
     "ctrl+Backspace": "local:erase-input"
+  },
+  3: {
+    // 符号確定と Dup。実機は数値キーパッドの `-` / `+` / Dup キーだが PC には無いので
+    // 既存のローカル編集キーと同じ ctrl 系で揃える。ブラウザ既定（拡大縮小・ブックマーク）は
+    // 捕捉時に preventDefault で抑える
+    "ctrl+-": "local:field-minus",
+    // **`+` は数値キーパッドなら単独、メイン行なら Shift 併用**でコンボ名が変わる
+    // （`comboOf` は shift も名前に入れる）。実機の Field+ は数値キーパッドの `+` なので
+    // `ctrl++` が本命だが、キーパッドの無い機械でも押せるよう両方を既定にする
+    "ctrl++": "local:field-plus",
+    "ctrl+shift++": "local:field-plus",
+    "ctrl+d": "local:dup"
   }
 };
 
@@ -79,7 +91,10 @@ export const DEFAULT_BINDINGS: Record<string, BindingTarget> = Object.assign(
 
 // 既定バインドの版。保存済みデータへ「増えた分だけ」混ぜるための印。
 const VERSION_KEY = "as400.keybindings.version";
-const VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number));
+/** いまの既定バインドの版。**テストが版番号を直書きしないよう公開する**
+ *  （直書きすると既定を 1 つ足して版を上げるたびに無関係なテストが落ちる）。 */
+export const BINDINGS_VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number));
+const VERSION = BINDINGS_VERSION;
 
 function load(): Record<string, BindingTarget> {
   if (typeof localStorage === "undefined") return { ...DEFAULT_BINDINGS };

@@ -679,7 +679,17 @@ export class ScreenBuffer {
     field.mdt = true;
   }
 
-  fieldValue(field: InternalField): string {
+  /**
+   * 欄の現在値。**末尾の空白は落とす**（5250 の送信仕様）。
+   *
+   * `keepTrailingBlanks` は**符号付き数値欄の符号桁を見るため**にある。符号桁（最終桁）は
+   * 空白か `-` で、落としてしまうと「正なのか、そもそも短いのか」が区別できない。
+   * 送信変換（`read-response.ts`）だけがこれを使う。
+   *
+   * **未編集 DBCS 欄の経路（`dbcsRawFieldValue`）には効かない。** 符号付き数値欄が DBCS に
+   * なることは無いので実害は無いが、他の用途で使うときはここを見ること。
+   */
+  fieldValue(field: InternalField, keepTrailingBlanks = false): string {
     // **未編集の DBCS 欄はホスト原本のバイト列をセンチネルでそのまま返す**。SO/SI の空（{}）や
     // 不整合（{ だけ・} だけ）も、全角ランからの再構成では表せず落ちてしまうため、生バイトを
     // 保持して送信時にそのまま戻す。編集された欄（setFieldValue が SBCS セルに書き換える＝
@@ -714,7 +724,7 @@ export class ScreenBuffer {
       } else if (c?.type === "attr") s += attrSentinel(c.byte);
       else s += " ";
     }
-    return s.replace(/ +$/, "");
+    return keepTrailingBlanks ? s : s.replace(/ +$/, "");
   }
 
   /** 欄が SO/SI・DBCS の構造セルを持つ（＝ホストが描いた原本のまま。setFieldValue 後は全 SBCS）。 */
@@ -906,6 +916,7 @@ export class ScreenBuffer {
       if ((f.ffw & FFW.FIELD_EXIT_REQUIRED) !== 0) field.fieldExitRequired = true;
       if ((f.ffw & FFW.AUTO_ENTER) !== 0) field.autoEnter = true;
       if ((f.ffw & FFW.MANDATORY_ENTER) !== 0) field.mandatoryEnter = true;
+      if ((f.ffw & FFW.DUP_ENABLE) !== 0) field.dupEnable = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       return field;
     });

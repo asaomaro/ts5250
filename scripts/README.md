@@ -108,11 +108,17 @@ FFW の ADJUST 指定に基づく右寄せと、Field Exit / Erase EOF / Erase I
 | `probe-signon-ffw.mjs` | 調査用。**サインオン画面に必須指定が無い**ことの確認（Enter の必須検証がサインオンを塞がない根拠）。 |
 | `verify-browser-ffw.mjs` | 回帰 E2E（実ブラウザ＋実機・18 項目）。MONOCASE / `CHECK(LC)` / 英字専用（`X`）/ キーボード入力不可（`I`）/ AUTO_ENTER（`CHECK(ER)`）/ FER（`CHECK(FE)`）/ 必須検証（`CHECK(ME)`・`CHECK(MF)`）と **F3 は止めない**こと。**要 `TESTLIB/ADJPGM` と `TESTLIB/FFWPGM`**。 |
 
+| `build-sgntest.mjs` | 実機の `TESTLIB` に `SGNDSPF`/`SGNPGM` を作成（冪等）。符号付き数値（`6S 0`）・ゾーン数値（`6 0`）・数値のみ文字（`6M`）・`DUP` キーワード付き欄を並べ、受信値を `[...]` で写す。Dup は `x'1C1C1C1C1C1C'` と突き合わせて `[ALLDUP]` を返す。 |
+| `research-sign.mjs` | 調査用。**欄ごとに 1 つずつ**送って「どの形なら負値として届くか」を切り分ける。混ぜて送ると CPF5257 がどの欄由来か分からない。 |
+| `verify-browser-sign.mjs` | 回帰 E2E（実ブラウザ＋実機・9 項目）。Field−（`[-12]`）／ Field+（`[34]`）／ Dup（`[ALLDUP]`）／ `DUP_ENABLE` でない欄では効かないこと。**要 `TESTLIB/SGNPGM`**。 |
+
 ```sh
 node --env-file=.env scripts/build-adjtest.mjs      # 初回/再作成
 node --env-file=.env scripts/verify-browser-adjust.mjs    # E2E（15 項目）
 node --env-file=.env scripts/build-ffwtest.mjs      # 初回/再作成
 node --env-file=.env scripts/verify-browser-ffw.mjs       # E2E（18 項目）
+node --env-file=.env scripts/build-sgntest.mjs      # 初回/再作成
+node --env-file=.env scripts/verify-browser-sign.mjs      # E2E（9 項目）
 ```
 
 注意:
@@ -122,6 +128,9 @@ node --env-file=.env scripts/verify-browser-ffw.mjs       # E2E（18 項目）
   **`CHECK(ER)` が `AUTO_ENTER`（0x0080）を立てる DDS キーワード**（`Y` は小数位が必須で文字欄にできない）。
 - **ホストは `CHECK(ME)` / `CHECK(MF)` を検証しない**（空・部分入力のまま Enter が素通りする）。
   端末が止めなければ誰も止めない。
+- **符号付き数値欄は「符号桁を送らず、最終桁のゾーンを 0xD にする」**。
+  `-12`（先頭に符号）は**符号が黙って落ちて `12` になり**、7 バイトそのまま送ると CPF5257。
+  DDS の `DUP` キーワードは `DUP_ENABLE`（0x1000）を立て、複写文字は `0x1C`。
 - 装置名を使い回すため、前回のジョブが残っていると**回復画面から始まる**。
   `verify-browser-adjust.mjs` は回復（90）と前回の `ADJPGM` 残留（F3）の両方を捌く。
   `verify-browser-ffw.mjs` は**最後に `SIGNOFF` して装置を解放する**——

@@ -4,8 +4,7 @@ import {
   comboOf,
   DEFAULT_BINDINGS,
   isLocalBinding,
-  localActionOf
-} from "../src/stores/keybindings.js";
+  localActionOf, BINDINGS_VERSION } from "../src/stores/keybindings.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { vi } from "vitest";
 
@@ -128,8 +127,20 @@ describe("既定バインドの版更新", () => {
   it("最新版の保存値には何も足さない", () => {
     localStorage.clear();
     localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+9": "F9" }));
-    localStorage.setItem("as400.keybindings.version", "2");
+    // **版番号を直書きしない。** 既定を 1 つ足して版を上げるたびにこのテストが落ちてしまう
+    localStorage.setItem("as400.keybindings.version", String(BINDINGS_VERSION));
     keybindingsStore.reload();
     expect(keybindingsStore.bindings).toEqual({ "ctrl+9": "F9" });
+  });
+
+  it("版 2 の保存値には版 3 の追加分（符号確定・Dup）だけが入る", () => {
+    localStorage.clear();
+    localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+Enter": "local:field-exit" }));
+    localStorage.setItem("as400.keybindings.version", "2");
+    keybindingsStore.reload();
+    expect(keybindingsStore.bindings["ctrl+-"]).toBe("local:field-minus");
+    expect(keybindingsStore.bindings["ctrl++"]).toBe("local:field-plus");
+    expect(keybindingsStore.bindings["ctrl+d"]).toBe("local:dup");
+    expect(keybindingsStore.bindings["ctrl+F1"], "版 1 の既定は復活しない").toBeUndefined();
   });
 });

@@ -162,6 +162,43 @@ export function fieldExit(state: EditState, field: AdjustSpec): EditState {
   return applyAdjust(eraseToEnd(state), field);
 }
 
+/**
+ * Field− / Field+: Field Exit と同じ整形をしたうえで、**符号桁（最終桁）に符号を確定する**。
+ *
+ * 対象は**符号付き数値欄だけ**。5250 の符号付き数値欄はワイヤ上 `桁数 + 1` バイトで、
+ * 最終桁が符号桁（空白 = 正 / `-` = 負）。送信時に core が符号桁を落として
+ * 最終桁のゾーンを 0xD にする（`read-response.ts`）。
+ *
+ * **符号付き数値でない欄では Field Exit と同じ**にする。原典（GNU tn5250 `display.c`）は
+ * num-only 欄で最終バイトのゾーンを直接 0xD にするが、**実機の数値入力欄はすべて
+ * signed-num** で（実機実測）num-only の符号処理を確かめられない。
+ * 確かめられないものは実装しない側へ倒す（原典にも `field_minus_in_char` という同じ逃げ道がある）。
+ */
+export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean): EditState {
+  const s = fieldExit(state, field);
+  if (!field.signedNumeric) return s;
+  const chars = [...s.chars];
+  if (chars.length === 0) return s;
+  chars[chars.length - 1] = negative ? "-" : " ";
+  return { ...s, chars, cursor: chars.length };
+}
+
+/**
+ * Dup: カーソルから**欄末尾まで**を Dup 文字（EBCDIC `0x1C`）で埋める。
+ *
+ * `0x1C` は表示できる文字ではないので、生バイトを運ぶセンチネルで持つ
+ * （`read-response.ts` がセンチネルを生バイト 1 つとして書き出す）。
+ * 実機で 6 桁ぶん送ってアプリが `x'1C1C1C1C1C1C'` として受け取ることを確認済み。
+ *
+ * 呼び出し側が `DUP_ENABLE` を確かめてから呼ぶ（原典 `display.c:1795-1835`）。
+ */
+export const DUP_BYTE = 0x1c;
+export function dupFill(state: EditState, dupChar: string): EditState {
+  const chars = [...state.chars];
+  for (let i = state.cursor; i < chars.length; i++) chars[i] = dupChar;
+  return { ...state, chars, cursor: chars.length };
+}
+
 /** paste: 複数文字を現在モードで順に入力（超過は切り詰め） */
 export function paste(state: EditState, text: string): EditState {
   let s = state;

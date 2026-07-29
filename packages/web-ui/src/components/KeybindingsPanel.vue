@@ -32,7 +32,10 @@ const newTarget = ref<BindingTarget>("F1");
 const LOCAL_EDIT_LABEL: Record<LocalEditAction, string> = {
   "field-exit": "Field Exit（欄の残りを消して右寄せ・次の欄へ）",
   "erase-eof": "Erase EOF（カーソルから欄末尾まで消去）",
-  "erase-input": "Erase Input（すべての入力欄をクリア）"
+  "erase-input": "Erase Input（すべての入力欄をクリア）",
+  "field-minus": "Field−（数値欄を負の値として確定・次の欄へ）",
+  "field-plus": "Field+（数値欄を正の値として確定・次の欄へ）",
+  "dup": "Dup（カーソルから欄末尾までを複写文字で埋める）"
 };
 
 /** 割当先の表示名。表示設定は「項目名（順送り）＋現在値」で分かるようにする。 */

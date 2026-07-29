@@ -95,6 +95,12 @@ export interface Field {
    * 端末が検証しなければ誰も検証しない。
    */
   mandatoryEnter?: boolean;
+  /**
+   * FFW の DUP_ENABLE（0x1000。DDS の `DUP` キーワード）。**Dup キーが使える欄**。
+   * Dup はカーソルから欄末尾までを `0x1C` で埋める（アプリが「前と同じ」と解釈する印）。
+   * 実機で `DUP` を書いた欄が `0x5020` になることを実測済み。
+   */
+  dupEnable?: boolean;
   dbcsType?: "pure" | "open" | "either";
   mdt: boolean;
   value: string;

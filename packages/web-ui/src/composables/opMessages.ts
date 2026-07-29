@@ -69,6 +69,13 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
  * **ホストはこれを検証しない**（実機で実測。空のまま Enter を送っても素通りした）ので、
  * 端末が止めなければ DDS に `CHECK(ME)` と書いたアプリの意図が丸ごと無視される。
  */
+/**
+ * Dup が許されない欄で Dup を押したときの通知（5250 の操作員エラー 0019 相当）。
+ * ホストが `DUP_ENABLE`（FFW 0x1000）を立てた欄でしか使えない。
+ * ACS: "Dup key not allowed in this field."
+ */
+export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用できません";
+
 /** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
 /** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */

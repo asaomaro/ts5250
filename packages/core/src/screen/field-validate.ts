@@ -1,5 +1,6 @@
 import { As400Error } from "../errors.js";
 import { FFW } from "../protocol/constants.js";
+import { isRawSentinel } from "./attr-sentinel.js";
 import type { Codec } from "@as400web/ebcdic";
 import type { InternalField } from "./buffer.js";
 
@@ -9,6 +10,10 @@ import type { InternalField } from "./buffer.js";
  */
 export function validateFieldContent(value: string, field: InternalField, codec: Codec): void {
   const shift = field.ffw & FFW.SHIFT_MASK;
+  // **センチネル（生バイトを運ぶ印）は利用者が打った文字ではない**ので型検証の対象から外す。
+  // 埋め込み画面属性（SEU の色付きソース）と Dup 文字（0x1C）がこれに当たる。
+  // 外さないと、数値欄で Dup を押した瞬間に「数字しか入らない」で自分の入力を弾いてしまう。
+  const typed = [...value].filter((ch) => !isRawSentinel(ch)).join("");
 
   // 数値専用（数字・符号・小数点のみ）
   const numericOnly =
@@ -21,7 +26,7 @@ export function validateFieldContent(value: string, field: InternalField, codec:
     // signed-num の既定右寄せは端末側で値の左に空白を作るため、ここで弾くと
     // 自分で整形した値を自分で送れなくなる。埋め込みの空白（"1 2"）は trim で消えないので
     // 従来どおり FIELD_TYPE で拒否される。
-    if (!allowed.test(value.trim())) {
+    if (!allowed.test(typed.trim())) {
       throw new As400Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
     }
   }
@@ -32,13 +37,13 @@ export function validateFieldContent(value: string, field: InternalField, codec:
   // **キーボード入力不可（`SHIFT_IO` 0x0600）はここで弾かない。** 「キーボードから入力できない」
   // という制約であって値そのものの制約ではないので、送信時検証（＝ペースト・マクロ・MCP も通る
   // 経路）で弾くと入力手段ごと塞いでしまう。判定は端末側（web-ui の打鍵時）で行う。
-  if (shift === FFW.SHIFT_ALPHA_ONLY && !/^[A-Za-z,.\- ]*$/.test(value)) {
+  if (shift === FFW.SHIFT_ALPHA_ONLY && !/^[A-Za-z,.\- ]*$/.test(typed)) {
     throw new As400Error("FIELD_TYPE", `alphabetic-only field rejects: ${JSON.stringify(value)}`);
   }
 
   // DBCS 種別（pure=DBCS のみ / open=SBCS+DBCS / either=どちらか）
   if (field.dbcsType === "pure") {
-    for (const ch of value) {
+    for (const ch of typed) {
       if (!isDbcsChar(ch, codec)) {
         throw new As400Error("FIELD_TYPE", `DBCS-only (pure) field rejects SBCS char: ${JSON.stringify(ch)}`);
       }
@@ -47,7 +52,9 @@ export function validateFieldContent(value: string, field: InternalField, codec:
 
   // コードページ許容文字: マップ不能文字（encode で SUB 置換されるもの）は拒否
   // （例: CCSID 930 は英小文字が SBCS 表に無く入力不可）
-  const { substituted } = codec.encode(value);
+  // センチネルは codec を通さず生バイトで送るので、ここでも除いた文字列で判定する
+  // （私用面の符号なので、通すと外字として encode されたり SUB に化けたりして誤判定になる）
+  const { substituted } = codec.encode(typed);
   if (substituted > 0) {
     throw new As400Error(
       "FIELD_TYPE",

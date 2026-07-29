@@ -13,7 +13,17 @@ import {
  * キー設定から割り当てられる**ローカル編集キー**（5250 の端末内操作。ホストへは送らない）。
  * ナビゲーション（tab / 矢印 等）は素のキーに固定なので、ここには含めない。
  */
-export const LOCAL_EDIT_ACTIONS = ["field-exit", "erase-eof", "erase-input"] as const;
+export const LOCAL_EDIT_ACTIONS = [
+  "field-exit",
+  "erase-eof",
+  "erase-input",
+  // **符号付き数値欄で負値を入れる主経路**（実機は数値キーパッドの `-` / `+`）。
+  // 打鍵の `-` / `+` も数値欄ではここへ横流しする（ScreenGrid）。
+  "field-minus",
+  "field-plus",
+  // Dup: カーソルから欄末尾までを 0x1C で埋める（FFW の DUP_ENABLE が立つ欄だけ）
+  "dup"
+] as const;
 export type LocalEditAction = (typeof LOCAL_EDIT_ACTIONS)[number];
 
 export type LocalAction =
