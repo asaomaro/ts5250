@@ -55,5 +55,21 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
   // ACS: "Field data must be alphanumeric."
   alphanumeric: "この項目には半角文字しか入力できません",
   // ACS: "Double-byte character required as input."
-  "dbcs-required": "この項目には全角文字しか入力できません"
+  "dbcs-required": "この項目には全角文字しか入力できません",
+  // ACS: "Field requires alphabetic characters."
+  "alpha-only": "この項目には英字しか入力できません",
+  // ACS: "Data not allowed in this field."（DDS 35 桁の `I` = Inhibit keyboard entry）
+  "kbd-inhibited": "この項目はキーボードから入力できません"
 };
+
+/**
+ * ホストが「入力必須」「全桁充填」と指定した欄が満たされていないときの通知（FFW の
+ * `MANDATORY_ENTER` / `MANDATORY_FILL`）。
+ *
+ * **ホストはこれを検証しない**（実機で実測。空のまま Enter を送っても素通りした）ので、
+ * 端末が止めなければ DDS に `CHECK(ME)` と書いたアプリの意図が丸ごと無視される。
+ */
+/** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
+export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
+/** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
+export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";

@@ -17,6 +17,8 @@ import {
 } from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
+import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
+import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL } from "./composables/opMessages.js";
 
 const WS_URL = (): string => {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -286,16 +288,33 @@ export function setPrinterOutput(sessionId: string, enabled: boolean): void {
  * **再生中の手入力もここで止める**。`busy` プロテクトだけでは足りない——ホストの応答が
  * 返ってから次のステップを送るまでの**隙間で `busy` が false になる**ため、その瞬間の打鍵が
  * ホストへ抜けて再生と食い違う。再生は `sendKeyWithFields` を使うので巻き添えにならない。
+ *
+ * **FFW の必須検証（MANDATORY_ENTER / MANDATORY_FILL）もここで行う**。当初は
+ * `EmulatorPane.onAid` に置いたが、**OIA の「⏎ 実行」ボタン（`StatusBar`）はそこを通らず
+ * 直接ここへ来る**ため素通りしていた（実機ブラウザ検証で発覚。単体テストでは見えなかった）。
+ * 上のコメントどおりこの関数が全送信経路の合流点なので、判定もここに 1 つだけ置く。
+ *
+ * @returns 必須検証で止めたときはその違反。送ったときは `undefined`
+ *          （呼び出し側が該当欄へフォーカスを移せるように返す）
  */
 export function sendKey(
   sessionId: string,
   key: AidKey,
   cursor?: { row: number; col: number },
   sysReqText?: string
-): void {
+): MandatoryFinding | undefined {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return; // 通信中は多重送信しない（プロテクト）
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
+  // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
+  // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
+  if (key === "Enter" && s.snapshot) {
+    const hit = findMandatoryViolation(s.snapshot.fields, s.edits);
+    if (hit) {
+      s.notice = hit.reason === "mandatory-enter" ? MSG_MANDATORY_ENTER : MSG_MANDATORY_FILL;
+      return hit;
+    }
+  }
   delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）

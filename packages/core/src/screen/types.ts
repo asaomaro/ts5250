@@ -48,13 +48,53 @@ export interface Field {
    */
   signedNumeric?: boolean;
   /**
-   * FFW の shift が digits-only（0x0600）のとき **true**。**この欄だけは真に数字しか受け付けない**
+   * FFW の shift が digits-only（**0x0500**）のとき **true**。**この欄だけは真に数字しか受け付けない**
    * （`field-validate.ts` の許容集合が `/^[0-9]*$/`。他の数値欄は `.` `,` `+` `-` も通る）。
    *
    * `numeric` は数値 3 種をまとめた既存フラグなので、これだけでは見分けられない。
    * `signedNumeric` / `dbcsType` と同じく**当てはまるときだけ付ける**。
    */
   digitsOnly?: boolean;
+  /**
+   * FFW の shift が alpha-only（0x0100。DDS 35 桁の `X`）のとき true。
+   * **英字・`,`・`.`・`-`・空白しか受け付けない**（数字を弾く）。
+   * GNU tn5250 `field.c:404` と tn5250j `Screen5250.java:1372` が同じ許容集合を持つ。
+   */
+  alphaOnly?: boolean;
+  /**
+   * FFW の shift が io（0x0600。DDS 35 桁の `I` = Inhibit keyboard entry）のとき true。
+   * **キーボードからは入力できない**欄（磁気ストライプ読み取り装置等のための入力欄）。
+   * GNU tn5250 は `DATA_DISALLOWED` で拒否し、tn5250j は case 自体を持たず打鍵を捨てる。
+   *
+   * **「キーボードから」の制約なので送信時検証（`validateFieldContent`）では弾かない**——
+   * ペースト・マクロ・MCP 経由の設定まで塞いでしまうため。判定は端末側で行う。
+   */
+  keyboardInhibited?: boolean;
+  /**
+   * FFW の MONOCASE（0x0020）。この欄に打った **ASCII 英小文字**を大文字にして格納する。
+   * 全角・カナ・記号には触らない（GNU tn5250 `display.c:924` の `isalpha` 相当）。
+   *
+   * **実機では既定で立つ。** DDS の文字欄は `CHECK(LC)` を書かない限りこのビットが載る
+   * （実機で実測。`CHECK(LC)` 付きだけ 0x4020 → 0x4000 になった）。
+   */
+  monocase?: boolean;
+  /**
+   * FFW の FIELD_EXIT_REQUIRED（0x0040。DDS の `CHECK(FE)`）。
+   * **欄が満杯になっても自動で次欄へ送らない**——Field Exit か Tab で明示的に出る。
+   */
+  fieldExitRequired?: boolean;
+  /**
+   * FFW の AUTO_ENTER（0x0080。DDS の `CHECK(ER)`）。
+   * **欄が満杯になった時点・欄を出た時点で Enter を自動送信する**。
+   */
+  autoEnter?: boolean;
+  /**
+   * FFW の MANDATORY_ENTER（0x0008。DDS の `CHECK(ME)`）。空のままでは送信できない。
+   *
+   * **ホストはこれを検証しない**（実機で実測: 空のまま Enter を送っても素通りした）。
+   * 端末が検証しなければ誰も検証しない。
+   */
+  mandatoryEnter?: boolean;
   dbcsType?: "pure" | "open" | "either";
   mdt: boolean;
   value: string;

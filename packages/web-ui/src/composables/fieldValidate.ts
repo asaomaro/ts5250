@@ -18,20 +18,32 @@ export function acceptsChar(field: Field, ch: string): boolean {
 export type RejectReason =
   | "numeric" // 数値項目に許可外文字
   | "alphanumeric" // 半角(A)項目に全角
-  | "dbcs-required"; // J 型(全角専用)項目に全角以外
+  | "dbcs-required" // J 型(全角専用)項目に全角以外
+  | "alpha-only" // 英字専用(X)項目に英字以外
+  | "kbd-inhibited"; // キーボード入力不可(I)項目
 
 export function rejectReason(field: Field, ch: string): RejectReason | undefined {
   if (ch.length === 0) return "alphanumeric";
   const isWide = isFullWidth(ch);
+
+  // **キーボード入力不可（DDS 35 桁の `I`）が最優先。** 文字の種類に関わらず打鍵を受け付けない
+  // （磁気ストライプ読み取り装置等のための欄）。GNU tn5250 は `DATA_DISALLOWED` で拒否し、
+  // tn5250j はこのシフトの case を持たず打鍵を捨てる。**ここは打鍵経路だけの制約**で、
+  // ペースト・マクロ・MCP は core の送信時検証を通る（そちらでは弾かない）。
+  if (field.keyboardInhibited) return "kbd-inhibited";
 
   // DBCS 種別
   if (field.dbcsType === "pure" && !isWide) return "dbcs-required"; // J 型: 全角のみ
   if (field.dbcsType === undefined && isWide) return "alphanumeric"; // SBCS(A/数値)に全角不可
   // open/either は SBCS/DBCS 両方許可（追加制限なし）
 
+  // 英字専用（DDS 35 桁の `X`）。許容集合は core の validateFieldContent と揃える
+  if (field.alphaOnly && !/[A-Za-z,.\- ]/.test(ch)) return "alpha-only";
+
   // 数値型（数字・, . - + と空白を許可）
   if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return "numeric";
 
+  // **カタカナ（0x0400）は入力制限ではない**ので何もしない（参照実装 2 つとも素通し）。
   return undefined;
 }
 

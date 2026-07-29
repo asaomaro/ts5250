@@ -36,17 +36,6 @@ function field(name, len, type, usage, r, c, kw = "") {
   if (kw) l = put(l, 45, kw);
   return l.replace(/ +$/, "");
 }
-/** 数値欄。type を渡すと符号付き（S）等になる。小数位は 36-37 桁 */
-function numf(name, len, dec, usage, r, c, kw = "", type = "") {
-  let l = put(put(blank(), 6, "A"), 19, name);
-  l = put(l, 35 - String(len).length, String(len));
-  if (type) l = put(l, 35, type);
-  l = put(l, 38 - String(dec).length, String(dec));
-  l = put(put(put(l, 38, usage), 39, String(r).padStart(3)), 42, String(c).padStart(3));
-  if (kw) l = put(l, 45, kw);
-  return l.replace(/ +$/, "");
-}
-
 const DDS = [
   put(put(blank(), 6, "A"), 45, "DSPSIZ(24 80)").replace(/ +$/, ""),
   rec("OPTTEST"),

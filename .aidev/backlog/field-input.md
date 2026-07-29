@@ -44,25 +44,24 @@
     「数値欄で送信値も変わる」という当初の見立ては誤りだった
   - `MANDATORY_FILL` は右寄せではなく充填の**検証**指定（参照実装 2 つとも桁を動かさない）。
     検証そのものは未実装＝下の「未実装」に残す
-- [ ] **MANDATORY_FILL の入力検証** `0x0007`
-  - 「全桁を埋めよ」の検証。桁の整形は不要（実装済みの ADJUST 側で no-op にしてある）
-- [ ] **FIELD_EXIT_REQUIRED** `0x0040`
-  - 実機は「欄が埋まっても自動で次へ行かず Field Exit を要求する」。現状 `advanceIfFull`
-    （`packages/web-ui/src/components/ScreenGrid.vue`）は**無条件に**自動送りするため、
-    FER 指定欄で挙動が食い違う
-- [ ] **AUTO_ENTER** `0x0080`
-  - 欄が満杯になった時点で AID（Enter）を自動送信する指定。現在は次欄へ送るだけ
-- [ ] **MONOCASE** `0x0020`
-  - 欄単位の大文字化。現状は **CCSID 930/5026 のときだけ全欄を大文字化**している
-    （`EmulatorPane.vue` の `uppercaseInput`）＝**欄単位の指定を見ていない**。
-    US 系 CCSID の MONOCASE 欄では小文字がそのまま通る
-- [ ] **MANDATORY_ENTER** `0x0008`
-  - 入力必須欄。未入力のまま送信してもこちらでは弾かない
+- [x] ~~**MANDATORY_FILL の入力検証** `0x0007`~~
+- [x] ~~**FIELD_EXIT_REQUIRED** `0x0040`~~
+- [x] ~~**AUTO_ENTER** `0x0080`~~
+- [x] ~~**MONOCASE** `0x0020`~~
+- [x] ~~**MANDATORY_ENTER** `0x0008`~~
+- [x] ~~**SHIFT の未強制分** `ALPHA_ONLY 0x0100` / `KATAKANA 0x0400` / `IO 0x0600`~~
+  - **対応済み**（`.aidev/works/20260729-ffw-behavior-bits`）。実機で FFW の実バイトを
+    採ってから実装した。実測で分かった要点:
+    - **MONOCASE は既定で立つ**。DDS の文字欄は `CHECK(LC)` を書かない限り載る
+      （素の `6A` → `0x4020` / `CHECK(LC)` 付き → `0x4000`）
+    - **`CHECK(ER)` が AUTO_ENTER（0x0080）を立てる DDS キーワード**
+    - **ホストは `CHECK(ME)` / `CHECK(MF)` を検証しない**（空・部分入力のまま Enter が素通りする）
+      ＝端末が止めなければ誰も止めない
+    - **`KATAKANA 0x0400` は入力制限ではない**（キーボードのシフト状態）。参照実装 2 つとも素通し。
+      **制限として実装しないこと**。`IO 0x0600` は逆に「キーボードから入力不可」
+    - 必須検証は **Enter のときだけ**（機能キーで止めると必須欄が空の画面から F3 で抜けられない）
 - [ ] **DUP_ENABLE** `0x1000`
   - Dup キー自体が未実装なので、キーを足すかどうかとセットで判断する
-- [ ] **SHIFT の未強制分** `ALPHA_ONLY 0x0100` / `KATAKANA 0x0400` / `IO 0x0600`
-  - `packages/core/src/screen/field-validate.ts` は数値系（NUMERIC_ONLY / DIGITS_ONLY /
-    SIGNED_NUMERIC）と DBCS 種別・コードページしか見ておらず、英字専用等は素通りする
 
 ## 未実装: ローカル編集キー（Field Exit / Erase EOF / Erase Input）
 

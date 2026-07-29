@@ -118,10 +118,23 @@ const emit = defineEmits<{
 
 const gui = computed(() => props.snapshot.gui);
 
-/** カタカナ系ホストコードページ（930/5026）では、実機（ACS）同様に半角英小文字を入力時点で
- *  大文字化する。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。 */
-function inputChar(ch: string): string {
-  return props.uppercaseInput && ch >= "a" && ch <= "z" ? ch.toUpperCase() : ch;
+/**
+ * 入力 1 文字を格納する形へ直す。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。
+ *
+ * 大文字化する理由は**2 つあり、どちらか一方でも真なら大文字化する**。同じ結果でも根拠が別なので、
+ * 片方を他方の代用にしてはいけない（片方を消すともう片方の画面が壊れる）。
+ *
+ * | 規則 | 理由 | 範囲 |
+ * |---|---|---|
+ * | `field.monocase`（FFW 0x0020） | **ホストがこの欄を大文字化しろと言っている** | その欄だけ |
+ * | `uppercaseInput`（CCSID 930/5026） | **コードページに英小文字が無い**。大文字化しないと core の「マップ不能文字」検証で送信できなくなる | 全欄 |
+ *
+ * MONOCASE は実機では既定で立つ（DDS の文字欄は `CHECK(LC)` を書かない限り載る。実機で実測）。
+ * 逆に `CHECK(LC)` 付きの欄では**小文字がそのまま残る**のが正しい。
+ */
+function inputChar(ch: string, field: Field): string {
+  const upper = props.uppercaseInput || field.monocase === true;
+  return upper && ch >= "a" && ch <= "z" ? ch.toUpperCase() : ch;
 }
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
@@ -1683,7 +1696,18 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
  */
 function advanceIfFull(f: Field): void {
   if (!edit) return;
-  if (edit.cursor >= edit.chars.length) emit("field-full", f.index);
+  if (edit.cursor < edit.chars.length) return;
+  // **FER（FFW 0x0040）は自動送りしない。** ホストが「Field Exit を押して出ろ」と指定した欄。
+  // 原典は FER 標識を立てて他キーまで抑止するが（GNU tn5250 `display.c:1035`）、本実装は
+  // 満杯の欄に以降の打鍵が入らないので、自動送りを止めるだけで実機と同じ操作感になる
+  // （Field Exit か Tab で出る）。FER と AUTO_ENTER が同時なら FER が勝つ——原典も
+  // FER の枝の中では auto-enter を見ない。
+  if (f.fieldExitRequired) return;
+  if (f.autoEnter) {
+    emit("aid", "Enter"); // AUTO_ENTER（FFW 0x0080）: 次欄へ送る代わりに Enter を自動送信
+    return;
+  }
+  emit("field-full", f.index);
 }
 
 // ---------------------------------------------------------------------------
@@ -1718,6 +1742,13 @@ function fieldExitKey(): void {
   }
   edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(edit, t.f);
   sync(t.el, t.f); // 値が変われば emit("edit") が出る＝MDT が立つ
+  // AUTO_ENTER 欄は**次欄へ移らず Enter を送る**（原典は Field Exit / Field± / Dup の
+  // すべてで同じ形。GNU tn5250 `display.c:1637`）。FER 欄でも Field Exit なら出られるので、
+  // ここは advanceIfFull と違って FER を見ない。
+  if (t.f.autoEnter) {
+    emit("aid", "Enter");
+    return;
+  }
   emit("field-full", t.f.index); // 次の入力欄へ（自動送りと同じ経路）
 }
 
@@ -1957,7 +1988,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
-    const ch = inputChar(ev.key); // 930/5026 は英小文字を大文字化
+    const ch = inputChar(ev.key, f); // MONOCASE 欄／カタカナ系 CCSID は英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {
       emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
@@ -2051,7 +2082,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   // 印字可能な 1 文字（修飾なし）: 型・バイト予算検証してから上書き（Insert 時は挿入）
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
-    const ch = inputChar(k); // 930/5026 は半角英小文字を大文字化
+    const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {
       emit("notice", MSG_BY_REASON[why]);
@@ -2229,7 +2260,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
-    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
+    const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     if (!acceptsChar(field, ch)) {
       // **弾いた文字も桁を消費する（捨てて詰めない）。** ACS は入力不可文字の桁を
       // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
@@ -2257,7 +2288,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 function firstRejection(field: Field, text: string): RejectReason | undefined {
   for (const raw of text) {
     if (raw === "\n" || raw === "\r") continue;
-    const why = rejectReason(field, inputChar(raw));
+    const why = rejectReason(field, inputChar(raw, field));
     if (why) return why;
   }
   return undefined;
@@ -2276,7 +2307,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
-    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
+    const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     // 入力不可文字は呼び出し側（firstRejection）が先に弾く。ここへは来ない
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
@@ -2505,7 +2536,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       }
     }
     for (const raw of [...text]) {
-      const ch = inputChar(raw);
+      const ch = inputChar(raw, f);
       if (!acceptsChar(f, ch)) continue;
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
@@ -2580,7 +2611,7 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const dbcs = isDbcsEdit(f);
   let e: EditState = { ...edit, cursor: composeStart };
   for (const raw of [...el.value].slice(composePrefixLen)) {
-    const ch = inputChar(raw); // 930/5026 は半角英小文字を大文字化
+    const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。

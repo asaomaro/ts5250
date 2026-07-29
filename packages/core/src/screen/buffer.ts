@@ -897,6 +897,15 @@ export class ScreenBuffer {
       if (adjust !== undefined) field.adjust = adjust;
       if (shift === FFW.SHIFT_SIGNED_NUMERIC) field.signedNumeric = true;
       if (shift === FFW.SHIFT_DIGITS_ONLY) field.digitsOnly = true;
+      if (shift === FFW.SHIFT_ALPHA_ONLY) field.alphaOnly = true;
+      if (shift === FFW.SHIFT_IO) field.keyboardInhibited = true;
+      // **SHIFT_KATAKANA（0x0400）は入力制限ではない**（キーボードのシフト状態）。
+      // GNU tn5250 は "KATAKANA not implemented" として素通しし、tn5250j も alpha/num-shift と
+      // 同じ枝で無条件に許可する。制限だと誤解して弾かないこと。
+      if ((f.ffw & FFW.MONOCASE) !== 0) field.monocase = true;
+      if ((f.ffw & FFW.FIELD_EXIT_REQUIRED) !== 0) field.fieldExitRequired = true;
+      if ((f.ffw & FFW.AUTO_ENTER) !== 0) field.autoEnter = true;
+      if ((f.ffw & FFW.MANDATORY_ENTER) !== 0) field.mandatoryEnter = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       return field;
     });

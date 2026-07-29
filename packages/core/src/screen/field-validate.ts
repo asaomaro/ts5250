@@ -26,6 +26,16 @@ export function validateFieldContent(value: string, field: InternalField, codec:
     }
   }
 
+  // 英字専用（DDS 35 桁の `X`）。**数字を弾く**。許容集合は参照実装 2 つが一致している
+  // （GNU tn5250 `field.c:404` / tn5250j `Screen5250.java:1372`: 英字・`,`・`.`・`-`・空白）。
+  //
+  // **キーボード入力不可（`SHIFT_IO` 0x0600）はここで弾かない。** 「キーボードから入力できない」
+  // という制約であって値そのものの制約ではないので、送信時検証（＝ペースト・マクロ・MCP も通る
+  // 経路）で弾くと入力手段ごと塞いでしまう。判定は端末側（web-ui の打鍵時）で行う。
+  if (shift === FFW.SHIFT_ALPHA_ONLY && !/^[A-Za-z,.\- ]*$/.test(value)) {
+    throw new As400Error("FIELD_TYPE", `alphabetic-only field rejects: ${JSON.stringify(value)}`);
+  }
+
   // DBCS 種別（pure=DBCS のみ / open=SBCS+DBCS / either=どちらか）
   if (field.dbcsType === "pure") {
     for (const ch of value) {

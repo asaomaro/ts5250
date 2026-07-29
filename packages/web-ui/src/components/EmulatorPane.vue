@@ -18,6 +18,7 @@ import { sendKey, selectGuiChoice, submitGuiSelection } from "../session-control
 import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { MSG_PROTECTED } from "../composables/opMessages.js";
+import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
@@ -418,7 +419,20 @@ function onAid(key: AidKey): void {
     sysReqOpen.value = true;
     return;
   }
-  sendKey(props.sessionId, key, cursor.value);
+  focusMandatoryViolation(sendKey(props.sessionId, key, cursor.value));
+}
+
+/**
+ * 必須検証（FFW の `MANDATORY_ENTER` / `MANDATORY_FILL`）で止められたら、**直せる場所へ連れて行く**。
+ *
+ * 判定と通知そのものは `sendKey` が行う（OIA の「⏎ 実行」ボタンなど、ここを通らない送信経路が
+ * あるため。`session-controller.ts` のコメント参照）。ここはフォーカス移動だけを足す。
+ */
+function focusMandatoryViolation(hit: MandatoryFinding | undefined): void {
+  if (!hit) return;
+  const els = editableInputs();
+  const idx = editableFields().findIndex((f) => f.index === hit.field.index);
+  if (idx >= 0 && els.length > 0) focusInput(els, idx);
 }
 
 function onSysReqSubmit(text: string): void {
@@ -520,12 +534,16 @@ function onNotice(text: string): void {
  */
 const effectiveNotice = computed(() => notice.value || state.value?.notice || "");
 
-/** 機能キー凡例のボタンが押された（ScreenGrid）。キーボードの F キーと同じ扱いで送る。
- *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。 */
+/** ScreenGrid 発の AID。キーボードの F キーと同じ扱いで送る。
+ *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。
+ *
+ *  経路は 2 つある: **機能キー凡例のボタン**（利用者の操作）と、
+ *  **AUTO_ENTER 欄が満杯になったときの自動 Enter**（FFW 0x0080。`advanceIfFull` / `fieldExitKey`）。
+ *  後者も `busy` / `keyboardLocked` のプロテクトに乗せたいので、同じ入口へ合流させている。 */
 function onFkeyAid(key: AidKey): void {
   if (busy.value || snapshot.value?.keyboardLocked) return;
   emit("focus");
-  sendKey(props.sessionId, key, cursor.value);
+  focusMandatoryViolation(sendKey(props.sessionId, key, cursor.value));
 }
 
 /**
