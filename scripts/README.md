@@ -113,6 +113,7 @@ FFW の ADJUST 指定に基づく右寄せと、Field Exit / Erase EOF / Erase I
 | `verify-browser-sign.mjs` | 回帰 E2E（実ブラウザ＋実機・9 項目）。Field−（`[-12]`）／ Field+（`[34]`）／ Dup（`[ALLDUP]`）／ `DUP_ENABLE` でない欄では効かないこと。**要 `TESTLIB/SGNPGM`**。 |
 | `build-edttest.mjs` | 実機の `TESTLIB` に `EDTDSPF`/`EDTPGM` を作成（冪等）。`EDTCDE` / `EDTWRD` を**用途 B（入出力両用）**に書けるかを 1 件ずつ単独コンパイルで確かめる。 |
 | `research-edtcde.mjs` | 調査用。編集コード／編集語つきの入力可能欄が、ワイヤ上**分解されるのか・編集文字を含んだまま 1 欄で来るのか**を実測する。 |
+| `verify-browser-idle.mjs` | 回帰 E2E（実ブラウザ＋実機・11 項目）。**セッションの寿命**: 既定（永続）で 110 秒放置しても切れない（同時に**ハートビートの往復**も検証——pong を返さなければ 90 秒で半開きと判断される）／セッション設定 `idleTimeout: 1` で放置すると **60 秒で切れる**（早くは切らない）／同じ設定でも**打鍵し続ければ切れない**（在席の合図 `activity` が効いている。**AID キーは押さない**）／設定フォームの選択肢。掃除の間隔だけ `startIdleSweep(2000)` に縮める（判定は実装のまま）。**追加のホスト資産は不要**。 |
 
 ```sh
 node --env-file=.env scripts/build-adjtest.mjs      # 初回/再作成
@@ -121,6 +122,7 @@ node --env-file=.env scripts/build-ffwtest.mjs      # 初回/再作成
 node --env-file=.env scripts/verify-browser-ffw.mjs       # E2E（18 項目）
 node --env-file=.env scripts/build-sgntest.mjs      # 初回/再作成
 node --env-file=.env scripts/verify-browser-sign.mjs      # E2E（9 項目）
+node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・約 5 分かかる）
 ```
 
 注意:
@@ -132,6 +134,11 @@ node --env-file=.env scripts/verify-browser-sign.mjs      # E2E（9 項目）
   端末が止めなければ誰も止めない。
 - **`EDTCDE` / `EDTWRD` は用途 B でも書ける**。そのとき編集文字は**入力欄の中に入って**来る
   （`value="     .00"`・shift=num-only）。分解されない。
+- **セッションの寿命は実測で確かめた**（2026-07-29・実機）: 既定（永続）は 110 秒放置でも切れず、
+  `idleTimeout: 1` は **60 秒で切れる**（設定より早くは切らない）。同じ 1 分設定でも **AID キーを押さず打鍵だけ
+  続ければ切れない**——在席の合図が 15 秒間引きでも 1 分のタイムアウトに間に合っている。
+  110 秒放置で生き残ることは**ハートビート（`ping`/`pong`）の往復が成立している証拠**でもある
+  （返さなければサーバーが 90 秒で半開きと判断して畳む）。
 - **符号付き数値欄は「符号桁を送らず、最終桁のゾーンを 0xD にする」**。
   `-12`（先頭に符号）は**符号が黙って落ちて `12` になり**、7 バイトそのまま送ると CPF5257。
   DDS の `DUP` キーワードは `DUP_ENABLE`（0x1000）を立て、複写文字は `0x1C`。

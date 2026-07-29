@@ -86,7 +86,17 @@ const sesForm = reactive<SesFormState>({
 });
 
 /** 「無操作で切る」の選択肢（分）。任意の数値を打たせるほどの要求ではないので選択式にする */
-const IDLE_MINUTES = [5, 10, 15, 30, 60, 120, 240] as const;
+const IDLE_MINUTES = [5, 10, 15, 30, 60, 120, 240];
+/**
+ * 実際の選択肢。**設定ファイルに直接書かれた値（1〜1440 の任意）が一覧に無ければ足す。**
+ * 足さないと select が空欄で描かれ、「設定されていない」ように見えてしまう
+ * （値そのものは保持されるので、黙って消えるより分かりにくい）。
+ */
+const idleMinuteOptions = computed(() => {
+  const v = sesForm.idleTimeout;
+  const list = typeof v === "number" && !IDLE_MINUTES.includes(v) ? [...IDLE_MINUTES, v] : IDLE_MINUTES;
+  return [...list].sort((a, b) => a - b);
+});
 const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
 /**
  * PC コマンド（STRPCCMD）の実行設定。**信頼設定**なのでサーバー設定の表示セッションでのみ編集できる。
@@ -615,7 +625,7 @@ const infoRows = computed(() => {
           <select v-model="sesForm.idleTimeout">
             <option :value="undefined">サーバー既定に従う</option>
             <option value="never">切らない</option>
-            <option v-for="m in IDLE_MINUTES" :key="m" :value="m">{{ m }} 分</option>
+            <option v-for="m in idleMinuteOptions" :key="m" :value="m">{{ m }} 分</option>
           </select>
         </label>
       </div>

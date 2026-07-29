@@ -134,3 +134,35 @@ describe("編集フォームの往復", () => {
     expect("idleTimeout" in body).toBe(false);
   });
 });
+
+/**
+ * 設定ファイルへ直接書かれた値（1〜1440 の任意）が選択肢に無いとき。
+ * **足さないと select が空欄になり「設定されていない」ように見える**——値は保持されるので、
+ * 黙って消えるより分かりにくい。
+ */
+describe("一覧に無い分数", () => {
+  it("現在値を選択肢へ足して選択状態にする", async () => {
+    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session(1) } });
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "編集")!
+      .trigger("click");
+    await flushPromises();
+    const sel = w.findAll("select").find((s) => s.text().includes("サーバー既定に従う"))!;
+    expect(sel.text()).toContain("1 分");
+    expect((sel.element as HTMLSelectElement).value).not.toBe("");
+    w.unmount();
+  });
+
+  it("一覧にある値では選択肢を増やさない", async () => {
+    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session(30) } });
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "編集")!
+      .trigger("click");
+    await flushPromises();
+    const sel = w.findAll("select").find((s) => s.text().includes("サーバー既定に従う"))!;
+    expect(sel.findAll("option")).toHaveLength(2 + 7); // 既定 + 切らない + IDLE_MINUTES
+    w.unmount();
+  });
+});
