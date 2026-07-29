@@ -25,6 +25,7 @@ export type {
   ScreenSnapshot,
   Cell,
   Field,
+  FieldAdjust,
   ScreenColor,
   CellKind,
   GuiConstructs,

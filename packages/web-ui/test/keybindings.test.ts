@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { keybindingsStore, comboOf, DEFAULT_BINDINGS } from "../src/stores/keybindings.js";
+import {
+  keybindingsStore,
+  comboOf,
+  DEFAULT_BINDINGS,
+  isLocalBinding,
+  localActionOf
+} from "../src/stores/keybindings.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { vi } from "vitest";
 
@@ -76,5 +82,54 @@ describe("既定バインド（初期値）", () => {
     expect(keybindingsStore.bindings["ctrl+F1"]).toBe("F5"); // 使用中のキーは保存値が優先
     expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:sosi"); // 空いている方は既定が入る
     expect(keybindingsStore.bindings["ctrl+j"]).toBe("F4");
+  });
+});
+
+describe("ローカル編集キー（local:*）", () => {
+  it("既定で Field Exit / Erase EOF / Erase Input が割り当たる", () => {
+    expect(DEFAULT_BINDINGS["ctrl+Enter"]).toBe("local:field-exit");
+    expect(DEFAULT_BINDINGS["ctrl+Delete"]).toBe("local:erase-eof");
+    expect(DEFAULT_BINDINGS["ctrl+Backspace"]).toBe("local:erase-input");
+  });
+
+  it("local:* は判別でき、操作名を取り出せる", () => {
+    expect(isLocalBinding("local:field-exit")).toBe(true);
+    expect(isLocalBinding("view:kana")).toBe(false);
+    expect(isLocalBinding("F3")).toBe(false);
+    expect(localActionOf("local:erase-eof")).toBe("erase-eof");
+  });
+
+  it("**ホストへ送らず** local ハンドラーを呼ぶ", () => {
+    const sendAid = vi.fn();
+    const local = vi.fn();
+    const prevent = vi.fn();
+    const h = makeKeydownHandler({ sendAid, local, viewCycle: vi.fn(), playMacro: vi.fn(), isFocused: () => true });
+    h({
+      key: "Enter", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: prevent
+    } as unknown as KeyboardEvent);
+    expect(local).toHaveBeenCalledWith("field-exit");
+    expect(sendAid).not.toHaveBeenCalled(); // Ctrl+Enter が素の Enter として飛ばない
+    expect(prevent).toHaveBeenCalled(); // ブラウザ既定より優先
+  });
+});
+
+describe("既定バインドの版更新", () => {
+  // 版を上げたときに**その版で増えた分だけ**を混ぜる。全既定を混ぜ直すと、
+  // 利用者が消した既定まで復活してしまう（「消したら消えたまま」の約束を破る）。
+  it("旧版の保存値には、新版で増えた既定だけを足す（消した旧既定は復活しない）", () => {
+    localStorage.clear();
+    localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+F3": "view:sosi" })); // ctrl+F1 は削除済み
+    localStorage.setItem("as400.keybindings.version", "1");
+    keybindingsStore.reload();
+    expect(keybindingsStore.bindings["ctrl+F1"]).toBeUndefined(); // 版 1 の既定は復活しない
+    expect(keybindingsStore.bindings["ctrl+Enter"]).toBe("local:field-exit"); // 版 2 の追加分は入る
+  });
+
+  it("最新版の保存値には何も足さない", () => {
+    localStorage.clear();
+    localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+9": "F9" }));
+    localStorage.setItem("as400.keybindings.version", "2");
+    keybindingsStore.reload();
+    expect(keybindingsStore.bindings).toEqual({ "ctrl+9": "F9" });
   });
 });

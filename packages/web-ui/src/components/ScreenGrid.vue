@@ -11,6 +11,8 @@ import {
   home,
   end,
   toggleInsert,
+  eraseToEnd,
+  fieldExit,
   type EditState
 } from "../composables/fieldEdit.js";
 import {
@@ -1450,6 +1452,75 @@ function advanceIfFull(f: Field): void {
   if (edit.cursor >= edit.chars.length) emit("field-full", f.index);
 }
 
+// ---------------------------------------------------------------------------
+// ローカル編集キー（Field Exit / Erase EOF / Erase Input）
+//
+// **ホストへは送らない端末内の操作**。編集モデル（edit / editFieldIndex）を持つのはここなので
+// 実行はこの component が担い、**欄から欄への移動は EmulatorPane**（従来の役割分担どおり）。
+// キーの割り当ては `stores/keybindings.ts` の `local:*`。
+// ---------------------------------------------------------------------------
+
+/** 編集中の欄と、caret のあるスライスの <input>。編集中でなければ undefined。 */
+function currentEditTarget(): { f: Field; el: HTMLInputElement } | undefined {
+  if (!edit || editFieldIndex < 0) return undefined;
+  const f = props.snapshot.fields.find((x) => x.index === editFieldIndex);
+  if (!f || f.protected) return undefined;
+  const el = inputForSlice(f, sliceIndexOf(f, edit.cursor));
+  return el ? { f, el } : undefined;
+}
+
+/**
+ * Field Exit: カーソル以降を消し、FFW の ADJUST どおり右寄せして次の入力欄へ。
+ *
+ * **DBCS 欄では右寄せしない**（消去と欄移動だけ）。全角は SO/SI と 2 バイトで桁を占めるため、
+ * 桁単位で寄せると対を壊す。実機に DBCS ＋ ADJUST の構成を確認できていないので、
+ * 分からないものを整形しない側へ倒す。
+ */
+function fieldExitKey(): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(edit, t.f);
+  sync(t.el, t.f); // 値が変われば emit("edit") が出る＝MDT が立つ
+  emit("field-full", t.f.index); // 次の入力欄へ（自動送りと同じ経路）
+}
+
+/** Erase EOF: カーソルから欄末尾まで消す。**欄は出ず・カーソルも動かさず・右寄せもしない**。 */
+function eraseEofKey(): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  edit = eraseToEnd(edit);
+  sync(t.el, t.f);
+}
+
+/**
+ * Erase Input: 画面上のすべての入力欄をクリアする。
+ *
+ * **中身のある欄だけ**を対象にする。もともと空の欄まで編集扱いにすると、触っていない欄に
+ * MDT が立ってホストへ空白が送られる（画面は何も変わっていないのに変更として届く）。
+ */
+function eraseInputKey(): void {
+  const editable = props.snapshot.fields.filter((f) => !f.protected);
+  if (editable.length === 0) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  for (const f of editable) {
+    if (logicalValue(f).replace(/ +$/, "") === "") continue;
+    emit("edit", f.index, "");
+    writeSlices(f, " ".repeat(visLen(f)));
+  }
+  // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
+  // フォーカスの移動は呼び出し側（EmulatorPane）が先頭の入力欄へ行う。
+  edit = undefined;
+  editFieldIndex = -1;
+}
+
 /** 画面のホストカーソル位置にある入力欄へフォーカスを当てる（無ければ先頭の入力欄）。
  *  フォーカスにより onInputFocus が発火し beginEdit＋cursor 通知が行われる。 */
 function focusCursorField(): void {
@@ -1587,25 +1658,30 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     if (logical !== edit.cursor) edit = { ...edit, cursor: logical };
   }
 
-  if (ev.key === "Insert") {
+  // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete / Ctrl+Backspace 等はキー設定で
+  // ローカル編集キー（Erase EOF / Erase Input）に割り当てられており、ここで素の Delete /
+  // Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに全欄が消える）。
+  // 矢印キーが以前から同じ理由で修飾キーを除外しているのと同じ扱いに揃える。
+  const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  if (ev.key === "Insert" && plain) {
     ev.preventDefault();
     edit = toggleInsert(edit);
     insertMode.value = edit.insertMode;
     return;
   }
-  if (ev.key === "Backspace") {
+  if (ev.key === "Backspace" && plain) {
     ev.preventDefault();
     if (!deleteSelection(f, el)) edit = backspace(edit);
     sync(el, f);
     return;
   }
-  if (ev.key === "Delete") {
+  if (ev.key === "Delete" && plain) {
     ev.preventDefault();
     if (!deleteSelection(f, el)) edit = del(edit);
     sync(el, f);
     return;
   }
-  if (ev.key === "Home") {
+  if (ev.key === "Home" && plain) {
     // 欄内はカーソルを先頭へ。ペインのフィールド移動へ伝播させない
     ev.preventDefault();
     ev.stopPropagation();
@@ -1613,7 +1689,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     sync(el, f);
     return;
   }
-  if (ev.key === "End") {
+  if (ev.key === "End" && plain) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = end(edit);
@@ -1686,26 +1762,28 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     if (lay.caretOf(edit.cursor) !== g) edit = { ...edit, cursor: lay.logicalOf(g) };
   }
   const k = ev.key;
-  if (k === "Backspace") {
+  // SBCS 欄と同じ理由で修飾キー付きは欄内編集で消費しない（ローカル編集キーの割り当てと二重に効く）
+  const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  if (k === "Backspace" && plain) {
     ev.preventDefault();
     if (!deleteSelection(f, el)) edit = dbcsBackspace(edit, f);
     syncDbcs(el, f);
     return;
   }
-  if (k === "Delete") {
+  if (k === "Delete" && plain) {
     ev.preventDefault();
     if (!deleteSelection(f, el)) edit = dbcsDelete(edit, f);
     syncDbcs(el, f);
     return;
   }
-  if (k === "Home") {
+  if (k === "Home" && plain) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = { ...edit, cursor: 0 };
     syncDbcs(el, f);
     return;
   }
-  if (k === "End") {
+  if (k === "End" && plain) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = end(edit); // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）
@@ -2659,6 +2737,10 @@ defineExpose({
   clearBlockSelection: clearRectSel,
   setDbcsCaretAtColumn,
   pasteAt,
+  // ローカル編集キー（ホストへ送らない）。ペインの onLocal から呼ぶ
+  fieldExit: fieldExitKey,
+  eraseEof: eraseEofKey,
+  eraseInput: eraseInputKey,
   // 画面桁の表示文字（未送信の入力値込み）。ペインの頭出し（Ctrl+矢印）が語の判定に使う
   screenCharAt: charAtForCopy
 });

@@ -36,10 +36,16 @@
 `SHIFT_SIGNED_NUMERIC` の 6 つだけ**（全ソースの `FFW.*` 参照を数えて確認）。
 以下は**一度も参照されていない**。
 
-- [ ] **ADJUST（右寄せ）** `ADJUST_MASK 0x0007` / `RIGHT_ZERO 0x0005` /
-      `RIGHT_BLANK 0x0006` / `MANDATORY_FILL 0x0007`
-  - 欄を出るときの右寄せ・ゼロ埋め／空白埋めを一切行わない。**数値欄で実機と見た目も
-    送信値も変わる**。EDTMSK 欄は数値欄なので直接効く。**この一覧では実害が最も大きい**
+- [x] ~~**ADJUST（右寄せ）** `ADJUST_MASK 0x0007` / `RIGHT_ZERO 0x0005` /
+      `RIGHT_BLANK 0x0006` / `MANDATORY_FILL 0x0007`~~
+  - **対応済み**（`.aidev/works/20260729-field-adjust-local-edit-keys`）。Field Exit と一体で実装した
+  - 実測で分かった訂正: **送信値が変わるのは英数字欄**（`CHECK(RZ)/(RB)`）で、
+    **数値欄はホスト側が吸収する**（左詰めで送っても正しく解釈される＝見た目だけの違い）。
+    「数値欄で送信値も変わる」という当初の見立ては誤りだった
+  - `MANDATORY_FILL` は右寄せではなく充填の**検証**指定（参照実装 2 つとも桁を動かさない）。
+    検証そのものは未実装＝下の「未実装」に残す
+- [ ] **MANDATORY_FILL の入力検証** `0x0007`
+  - 「全桁を埋めよ」の検証。桁の整形は不要（実装済みの ADJUST 側で no-op にしてある）
 - [ ] **FIELD_EXIT_REQUIRED** `0x0040`
   - 実機は「欄が埋まっても自動で次へ行かず Field Exit を要求する」。現状 `advanceIfFull`
     （`packages/web-ui/src/components/ScreenGrid.vue`）は**無条件に**自動送りするため、

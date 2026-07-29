@@ -1,5 +1,20 @@
 import type { AidKey } from "@as400web/core";
-import { keybindingsStore, isViewBinding, viewKeyOf, isMacroBinding, macroIdOf } from "../stores/keybindings.js";
+import {
+  keybindingsStore,
+  isViewBinding,
+  viewKeyOf,
+  isMacroBinding,
+  macroIdOf,
+  isLocalBinding,
+  localActionOf
+} from "../stores/keybindings.js";
+
+/**
+ * キー設定から割り当てられる**ローカル編集キー**（5250 の端末内操作。ホストへは送らない）。
+ * ナビゲーション（tab / 矢印 等）は素のキーに固定なので、ここには含めない。
+ */
+export const LOCAL_EDIT_ACTIONS = ["field-exit", "erase-eof", "erase-input"] as const;
+export type LocalEditAction = (typeof LOCAL_EDIT_ACTIONS)[number];
 
 export type LocalAction =
   | "home"
@@ -13,7 +28,8 @@ export type LocalAction =
   | "word-left"
   | "word-right"
   | "word-up"
-  | "word-down";
+  | "word-down"
+  | LocalEditAction;
 
 /** キーイベントを AID キー・ローカル操作・null（非対象）に分類する（純関数・テスト可能） */
 export function classifyKey(ev: {
@@ -88,13 +104,14 @@ export interface KeymapHandlers {
 export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => void {
   return (ev: KeyboardEvent) => {
     if (!h.isFocused()) return;
-    // カスタムキーバインドを既定より優先。`view:*`（表示設定の順送り）と
-    // `macro:*`（マクロ再生）は**ホストへ送らない**ローカル処理。
+    // カスタムキーバインドを既定より優先。`view:*`（表示設定の順送り）・`macro:*`（マクロ再生）・
+    // `local:*`（ローカル編集キー）は**ホストへ送らない**ローカル処理。
     const custom = keybindingsStore.resolve(ev);
     if (custom) {
       ev.preventDefault();
       if (isViewBinding(custom)) h.viewCycle(viewKeyOf(custom));
       else if (isMacroBinding(custom)) h.playMacro(macroIdOf(custom));
+      else if (isLocalBinding(custom)) h.local(localActionOf(custom));
       else h.sendAid(custom);
       return;
     }

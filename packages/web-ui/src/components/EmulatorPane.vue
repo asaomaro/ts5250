@@ -387,6 +387,19 @@ function onLocal(action: LocalAction): void {
     case "end":
       focusInput(inputs, inputs.length - 1);
       break;
+    // ローカル編集キー（ホストへ送らない）。値の編集は ScreenGrid、欄の移動はここ、の分担。
+    case "field-exit":
+      // 次の欄への移動は ScreenGrid が出す field-full → onFieldFull が担う
+      gridRef.value?.fieldExit();
+      break;
+    case "erase-eof":
+      gridRef.value?.eraseEof();
+      break;
+    case "erase-input":
+      gridRef.value?.eraseInput();
+      // 全欄クリア後は先頭の入力欄へ（実機の Erase Input と同じ着地）
+      focusInput(inputs, 0);
+      break;
   }
 }
 

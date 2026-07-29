@@ -17,7 +17,11 @@ export function validateFieldContent(value: string, field: InternalField, codec:
     shift === FFW.SHIFT_SIGNED_NUMERIC;
   if (numericOnly) {
     const allowed = shift === FFW.SHIFT_DIGITS_ONLY ? /^[0-9]*$/ : /^[0-9.,+-]*$/;
-    if (!allowed.test(value)) {
+    // **前後の空白は桁合わせの padding として通す。** FFW の ADJUST（右寄せ・空白埋め）と
+    // signed-num の既定右寄せは端末側で値の左に空白を作るため、ここで弾くと
+    // 自分で整形した値を自分で送れなくなる。埋め込みの空白（"1 2"）は trim で消えないので
+    // 従来どおり FIELD_TYPE で拒否される。
+    if (!allowed.test(value.trim())) {
       throw new As400Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
     }
   }

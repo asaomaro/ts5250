@@ -8,8 +8,11 @@ import {
   viewKeyOf,
   isMacroBinding,
   macroIdOf,
+  isLocalBinding,
+  localActionOf,
   type BindingTarget
 } from "../stores/keybindings.js";
+import { LOCAL_EDIT_ACTIONS, type LocalEditAction } from "../composables/useKeymap.js";
 import { VIEW_ITEMS, viewItem, viewSettings } from "../stores/viewSettings.js";
 import { macrosStore } from "../stores/macros.js";
 
@@ -25,6 +28,13 @@ const capturing = ref(false);
 const newCombo = ref("");
 const newTarget = ref<BindingTarget>("F1");
 
+/** ローカル編集キーの表示名（利用者に見える文言はここ 1 か所に置く） */
+const LOCAL_EDIT_LABEL: Record<LocalEditAction, string> = {
+  "field-exit": "Field Exit（欄の残りを消して右寄せ・次の欄へ）",
+  "erase-eof": "Erase EOF（カーソルから欄末尾まで消去）",
+  "erase-input": "Erase Input（すべての入力欄をクリア）"
+};
+
 /** 割当先の表示名。表示設定は「項目名（順送り）＋現在値」で分かるようにする。 */
 function targetLabel(t: string): string {
   // 消したマクロに紐づいたままのバインドは、id をそのまま出すより「削除済み」と分かる方がよい
@@ -32,6 +42,7 @@ function targetLabel(t: string): string {
     const m = macrosStore.get(macroIdOf(t));
     return m ? `マクロ: ${m.name}（再生）` : "マクロ: 削除済み";
   }
+  if (isLocalBinding(t)) return LOCAL_EDIT_LABEL[localActionOf(t)] ?? t;
   if (!isViewBinding(t)) return t;
   const item = viewItem(viewKeyOf(t));
   if (!item) return t;
@@ -66,8 +77,9 @@ function add(): void {
       </div>
 
       <p class="hint">
-        既定（F1–F24・Enter・PageUp/Down 等）に加え、任意のキーコンボを AID キーや<b>表示設定の切り替え</b>に
-        割り当てられます。表示設定は押すたびに次の値へ順送りし、切り替わると画面下部に通知が出ます。
+        既定（F1–F24・Enter・PageUp/Down 等）に加え、任意のキーコンボを AID キーや<b>表示設定の切り替え</b>、
+        <b>ローカル編集キー</b>に割り当てられます。表示設定は押すたびに次の値へ順送りし、切り替わると画面下部に
+        通知が出ます。ローカル編集キーはホストへ送らず端末内で完結します。
       </p>
 
       <table class="kb-table">
@@ -95,6 +107,12 @@ function add(): void {
           <optgroup label="表示設定（順送り）">
             <option v-for="i in VIEW_ITEMS" :key="i.key" :value="`view:${i.key}`">
               {{ i.label }}（{{ i.opts.map((o) => o.label).join(" → ") }}）
+            </option>
+          </optgroup>
+          <!-- ローカル編集キー（5250 の端末内操作。ホストへは送らない） -->
+          <optgroup label="ローカル編集キー（ホストへ送らない）">
+            <option v-for="a in LOCAL_EDIT_ACTIONS" :key="a" :value="`local:${a}`">
+              {{ LOCAL_EDIT_LABEL[a] }}
             </option>
           </optgroup>
           <!-- マクロ再生（ACS の「マクロをキーに割り当てる」相当。spec D10）。

@@ -19,6 +19,7 @@ import type {
   Cell,
   CellKind,
   Field,
+  FieldAdjust,
   GuiConstructs,
   GuiScrollBar,
   GuiGridLine,
@@ -49,6 +50,23 @@ export interface InternalField {
   mdt: boolean;
   /** DBCS フィールド種別（FCW 由来。undefined = SBCS） */
   dbcsType?: "pure" | "open" | "either";
+}
+
+/**
+ * FFW の ADJUST（下位 3 ビット）を snapshot の種別へ。
+ * **0x0001–0x0004 は予約**（tn5250 `field.h` の `MF_RESERVED_1..4`）なので無指定として扱う。
+ */
+function adjustOf(ffw: number): FieldAdjust | undefined {
+  switch (ffw & FFW.ADJUST_MASK) {
+    case FFW.ADJUST_RIGHT_ZERO:
+      return "right-zero";
+    case FFW.ADJUST_RIGHT_BLANK:
+      return "right-blank";
+    case FFW.ADJUST_MANDATORY_FILL:
+      return "mandatory-fill";
+    default:
+      return undefined;
+  }
 }
 
 /** 内部 charKind → snapshot の CellKind */
@@ -746,6 +764,9 @@ export class ScreenBuffer {
         mdt: f.mdt,
         value: hidden ? "" : this.fieldValue(f)
       };
+      const adjust = adjustOf(f.ffw);
+      if (adjust !== undefined) field.adjust = adjust;
+      if (shift === FFW.SHIFT_SIGNED_NUMERIC) field.signedNumeric = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       return field;
     });

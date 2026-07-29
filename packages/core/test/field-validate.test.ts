@@ -28,6 +28,26 @@ describe("validateFieldContent — 数値型", () => {
       expect.objectContaining({ code: "FIELD_TYPE" })
     );
   });
+
+  // 右寄せ（FFW の ADJUST・signed-num の既定）は値の左右に空白を作る。これは桁合わせの
+  // padding であって入力文字ではないので通す。埋め込みの空白は従来どおり弾く。
+  it("前後の空白は padding として許可（右寄せ後の値を自分で送れるように）", () => {
+    expect(() => validateFieldContent("    12", numField, sbcs)).not.toThrow();
+    expect(() => validateFieldContent("12    ", numField, sbcs)).not.toThrow();
+    expect(() => validateFieldContent("    12 ", numField, sbcs)).not.toThrow();
+  });
+  it("埋め込みの空白は従来どおり FIELD_TYPE で拒否", () => {
+    expect(() => validateFieldContent("1 2", numField, sbcs)).toThrow(
+      expect.objectContaining({ code: "FIELD_TYPE" })
+    );
+  });
+  it("digits-only でも前後の空白は許可・埋め込みは拒否", () => {
+    const digits = field(FFW.ID_VALUE | FFW.SHIFT_DIGITS_ONLY);
+    expect(() => validateFieldContent("  123", digits, sbcs)).not.toThrow();
+    expect(() => validateFieldContent("1 3", digits, sbcs)).toThrow(
+      expect.objectContaining({ code: "FIELD_TYPE" })
+    );
+  });
 });
 
 describe("validateFieldContent — コードページ許容文字", () => {

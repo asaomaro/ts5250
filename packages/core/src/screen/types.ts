@@ -18,6 +18,13 @@ export interface Cell {
   rawByte?: number;
 }
 
+/**
+ * FFW の ADJUST（右寄せ）指定。**欄を出るとき（Field Exit）に端末が値を整形するための指定**で、
+ * ホストは整形しない（実機で実測。左詰めで送れば左詰めのまま格納される）。
+ * `mandatory-fill` は右寄せではなく「全桁を埋めよ」の検証指定（GNU tn5250 / tn5250j とも桁を動かさない）。
+ */
+export type FieldAdjust = "right-zero" | "right-blank" | "mandatory-fill";
+
 export interface Field {
   /** snapshot 時点の連番（1 始まり・画面順） */
   index: number;
@@ -29,6 +36,17 @@ export interface Field {
   /** 非表示（パスワード等）。value は常に "" */
   hidden: boolean;
   numeric: boolean;
+  /** FFW の ADJUST 指定（0x0005/0x0006/0x0007）。無指定・予約値では付かない */
+  adjust?: FieldAdjust;
+  /**
+   * FFW の shift が signed-num（0x0700）のとき **true**。**ADJUST 無指定でも空白で右寄せする**
+   * 規則と、**最終桁が符号桁である**ことを表す（GNU tn5250 `display.c` は signed-num の adjust を
+   * 無条件で RIGHT_BLANK へ差し替え、右寄せ時に最終桁を動かさない）。
+   * `numeric` は数値 3 種をまとめた既存フラグなので、これだけでは signed-num を見分けられない。
+   *
+   * `dbcsType` / `adjust` と同じく**当てはまるときだけ付ける**（false は情報を持たないため）。
+   */
+  signedNumeric?: boolean;
   dbcsType?: "pure" | "open" | "either";
   mdt: boolean;
   value: string;

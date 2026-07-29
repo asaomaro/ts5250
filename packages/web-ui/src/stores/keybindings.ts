@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import type { AidKey } from "@as400web/core";
+import type { LocalEditAction } from "../composables/useKeymap.js";
 
 /** キーコンボ文字列（例 "ctrl+3", "shift+F1", "Enter"）を正規化して作る */
 export function comboOf(ev: { key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): string {
@@ -15,12 +16,14 @@ const KEY = "as400.keybindings";
 
 /**
  * 割当先。AID キー（ホストへ送る）のほか、`view:<項目>` で**表示設定の順送り**、
- * `macro:<id>` で**マクロの再生**も割り当てられる（例 "view:surface" / "macro:m-1"）。
+ * `macro:<id>` で**マクロの再生**、`local:<操作>` で**ローカル編集キー**（Field Exit 等）も
+ * 割り当てられる（例 "view:surface" / "macro:m-1" / "local:field-exit"）。
  * 旧データは AID 文字列のみなのでそのまま読める。
  *
- * `view:` / `macro:` はいずれも**ホストへ送らない**ローカル処理（`useKeymap.ts` で分岐する）。
+ * `view:` / `macro:` / `local:` はいずれも**ホストへ送らない**ローカル処理
+ * （`useKeymap.ts` で分岐する）。
  */
-export type BindingTarget = AidKey | `view:${string}` | `macro:${string}`;
+export type BindingTarget = AidKey | `view:${string}` | `macro:${string}` | `local:${LocalEditAction}`;
 /** 表示設定の順送り割当か。 */
 export function isViewBinding(t: string): t is `view:${string}` {
   return t.startsWith("view:");
@@ -37,19 +40,46 @@ export function isMacroBinding(t: string): t is `macro:${string}` {
 export function macroIdOf(t: string): string {
   return t.slice("macro:".length);
 }
+/** ローカル編集キー（Field Exit / Erase EOF / Erase Input）の割当か。ホストへは送らない。 */
+export function isLocalBinding(t: string): t is `local:${LocalEditAction}` {
+  return t.startsWith("local:");
+}
+/** `local:field-exit` → `field-exit` */
+export function localActionOf(t: string): LocalEditAction {
+  return t.slice("local:".length) as LocalEditAction;
+}
 
 /**
- * 出荷時の既定バインド。ACS で使い慣れた表示切り替えを最初から使えるようにする。
- * **消したら消えたまま**（下の load / persist 参照）。「初期設定に戻す」で復元できる。
+ * **版ごとに「その版で追加した既定」だけ**を持つ。保存済みデータへ混ぜるときは差分だけを足す。
+ *
+ * 全既定を毎回混ぜ直すと、**利用者が消した既定まで復活する**（下の「消したら消えたまま」を破る）。
+ * 実際、既定を 1 つ足すために版を上げると既存利用者の削除が巻き戻る作りになっていた。
  */
-export const DEFAULT_BINDINGS: Record<string, BindingTarget> = {
-  "ctrl+F1": "view:kana", // 表示コード（自動 → カナ → 英）
-  "ctrl+F3": "view:sosi", // SO/SI 表示 ⇄ 非表示
+const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
+  1: {
+    "ctrl+F1": "view:kana", // 表示コード（自動 → カナ → 英）
+    "ctrl+F3": "view:sosi" // SO/SI 表示 ⇄ 非表示
+  },
+  2: {
+    // ローカル編集キー。ブラウザ既定（単語削除・履歴戻る）は捕捉時に preventDefault で抑える
+    "ctrl+Enter": "local:field-exit",
+    "ctrl+Delete": "local:erase-eof",
+    "ctrl+Backspace": "local:erase-input"
+  }
 };
 
-// 既定バインドを導入した版。保存済みデータへ一度だけ混ぜるための印。
+/**
+ * 出荷時の既定バインド（全版の合算）。ACS で使い慣れた操作を最初から使えるようにする。
+ * **消したら消えたまま**（下の load / persist 参照）。「初期設定に戻す」で復元できる。
+ */
+export const DEFAULT_BINDINGS: Record<string, BindingTarget> = Object.assign(
+  {},
+  ...Object.values(ADDED_BY_VERSION)
+) as Record<string, BindingTarget>;
+
+// 既定バインドの版。保存済みデータへ「増えた分だけ」混ぜるための印。
 const VERSION_KEY = "as400.keybindings.version";
-const VERSION = 1;
+const VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number));
 
 function load(): Record<string, BindingTarget> {
   if (typeof localStorage === "undefined") return { ...DEFAULT_BINDINGS };
@@ -57,10 +87,14 @@ function load(): Record<string, BindingTarget> {
     const raw = localStorage.getItem(KEY);
     if (raw === null) return { ...DEFAULT_BINDINGS }; // 初回起動
     const saved = JSON.parse(raw) as Record<string, BindingTarget>;
-    // 既定バインド導入前の保存値には一度だけ混ぜる（以後はユーザーの削除を尊重する）。
-    // 保存済みの割り当てが優先＝同じキーを別用途に使っていても奪わない。
-    if (Number(localStorage.getItem(VERSION_KEY) ?? 0) < VERSION) {
-      const merged = { ...DEFAULT_BINDINGS, ...saved };
+    const savedVersion = Number(localStorage.getItem(VERSION_KEY) ?? 0);
+    if (savedVersion < VERSION) {
+      // **保存済み版より後に追加された既定だけ**を足す（以前から在った既定は、
+      // 消されていれば消えたまま）。保存済みの割り当てが優先＝同じキーを別用途に
+      // 使っていても奪わない。
+      const added: Record<string, BindingTarget> = {};
+      for (let v = savedVersion + 1; v <= VERSION; v++) Object.assign(added, ADDED_BY_VERSION[v] ?? {});
+      const merged = { ...added, ...saved };
       localStorage.setItem(KEY, JSON.stringify(merged));
       localStorage.setItem(VERSION_KEY, String(VERSION));
       return merged;

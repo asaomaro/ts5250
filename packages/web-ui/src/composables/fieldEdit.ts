@@ -81,6 +81,87 @@ export function toggleInsert(state: EditState): EditState {
   return { ...state, insertMode: !state.insertMode };
 }
 
+// ---------------------------------------------------------------------------
+// ローカル編集キー（Field Exit / Erase EOF）の純ロジック
+//
+// **右寄せは端末の仕事**で、ホストは整形しない（実機で実測: 左詰めで送れば
+// 左詰めのまま格納される）。適用の契機も Field Exit / Field± / DUP / 打鍵で満杯、に限られ、
+// **Tab や Enter では適用しない**（GNU tn5250 `display.c` の `tn5250_display_field_adjust`
+// 呼び出し元を全数確認）。
+// ---------------------------------------------------------------------------
+
+/** 欄の ADJUST 指定（core の `Field` から必要な分だけ受け取る） */
+export interface AdjustSpec {
+  adjust?: "right-zero" | "right-blank" | "mandatory-fill";
+  signedNumeric?: boolean;
+}
+
+/** Erase EOF: カーソル位置から欄末尾までを空白にする。カーソルは動かさない */
+export function eraseToEnd(state: EditState): EditState {
+  const chars = [...state.chars];
+  for (let i = state.cursor; i < chars.length; i++) chars[i] = " ";
+  return { ...state, chars };
+}
+
+/**
+ * 右寄せ。**GNU tn5250 `tn5250_display_shift_right`（lib5250/display.c）の移植**。
+ *
+ * 手順は原典どおり: ①先頭から続く空白を `fill` で置換 ②末尾が空白の間、1 桁ずつ右へずらして
+ * 先頭に `fill` を置く。これにより
+ *  - 末尾が既に非空白なら**1 桁も動かない**（満杯の欄は無変化）
+ *  - 全桁が空白なら**何もしない**（原典に「そうしないと無限ループ」とある）
+ *  - 語中の空白は保持されたまま一緒に動く（`"1 2  "` → RZ → `"001 2"`）
+ *
+ * `keepLastPosition` は符号付き数値欄用（最終桁＝符号桁を動かさない）。
+ */
+export function rightAdjust(
+  state: EditState,
+  fill: string,
+  opts: { keepLastPosition?: boolean } = {}
+): EditState {
+  const chars = [...state.chars];
+  const end = chars.length - 1 - (opts.keepLastPosition ? 1 : 0);
+  if (end < 0) return state;
+
+  let n = 0;
+  for (; n <= end && chars[n] === " "; n++) chars[n] = fill;
+  if (n > end) return state; // 全桁が空白 = 整形しない（原典の無限ループ回避と同じ判定）
+
+  while (chars[end] === " ") {
+    for (let i = end; i > 0; i--) chars[i] = chars[i - 1]!;
+    chars[0] = fill;
+  }
+  // 右寄せ後は欄末尾（＝これ以上打てない位置）へ。Field Exit は直後に次の欄へ移るが、
+  // 単独で呼んだときにカーソルが語の途中へ取り残されないようにする。
+  return { ...state, chars, cursor: chars.length };
+}
+
+/**
+ * FFW の指定どおりに右寄せする。
+ *
+ * **signed-num を ADJUST 指定より先に見る**のは原典どおり（tn5250 は signed-num の
+ * `mand_fill_type` を無条件で `RIGHT_BLANK` へ差し替える。tn5250j も `adj===0` で同じ）。
+ * 実機の DDS 数値欄は `6 0` も `6S 0` も signed-num で来るため、この規則が無いと
+ * 数値欄で Field Exit が何もしないことになる。
+ *
+ * `mandatory-fill`（0x0007）は**右寄せではない**（「全桁を埋めよ」の検証指定）。両参照実装とも
+ * 桁を動かさないので、ここでも動かさない。
+ */
+export function applyAdjust(state: EditState, field: AdjustSpec): EditState {
+  if (field.signedNumeric) return rightAdjust(state, " ", { keepLastPosition: true });
+  if (field.adjust === "right-zero") return rightAdjust(state, "0");
+  if (field.adjust === "right-blank") return rightAdjust(state, " ");
+  return state; // mandatory-fill / 無指定
+}
+
+/**
+ * Field Exit: ①カーソル以降を欄末尾まで消去 ②ADJUST を適用。
+ * MDT を立てることと次の欄へ移ることは呼び出し側（`ScreenGrid`）の担当。
+ */
+export function fieldExit(state: EditState, field: AdjustSpec): EditState {
+  return applyAdjust(eraseToEnd(state), field);
+}
+
 /** paste: 複数文字を現在モードで順に入力（超過は切り詰め） */
 export function paste(state: EditState, text: string): EditState {
   let s = state;
