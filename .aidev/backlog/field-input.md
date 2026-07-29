@@ -66,8 +66,13 @@
 
 ## 未実装: ローカル編集キー（Field Exit / Erase EOF / Erase Input）
 
-**README:335 は「ローカル編集キー（Field Exit / Erase EOF / Erase Input）、キーバインドは
-編集可能」と書いているが、3 つとも実装が無い。** ロードマップではなく
+**【2026-07-29 追記】この節は 3 つとも実装済み**（`useKeymap.ts` の `LOCAL_EDIT_ACTIONS`、
+`keybindings.ts` の既定バインド `ctrl+Enter` / `ctrl+Delete` / `ctrl+Backspace`）。
+README との食い違いも解消している。**未実装で残るのは Field− / Field+ だけ。**
+以下は起票当時の記述（経緯として残す）。
+
+~~README:335 は「ローカル編集キー（Field Exit / Erase EOF / Erase Input）、キーバインドは
+編集可能」と書いているが、3 つとも実装が無い。~~ ロードマップではなく
 `## 🖥 Web エミュレーターの使い方` → `2. **操作**` 配下の**機能一覧**に書かれているため、
 実装するか README を直すかのどちらかが要る（2026-07-28 時点で食い違ったまま）。
 
@@ -85,18 +90,15 @@
 - 画面下部のキー行（`StatusBar.vue`）は F1–F24 と Attn / SysReq のみ。
   既定バインドは `ctrl+F1`（カナ）/ `ctrl+F3`（SO/SI）の 2 つだけ
 
-- [ ] **Field Exit**
-  - 実機の仕事は 4 つ: ①カーソル以降を欄末尾まで消去 ②**FFW の ADJUST（右寄せゼロ埋め／
-    空白埋め）を適用** ③次の入力欄へ進める ④MDT を立てる
-  - ②があるので、**上の ADJUST 項目と同時にやるのが素直**（別々にやると二度手間になる）
-  - 現状、部分入力の欄から抜ける手段は Tab だけだが、Tab は①②をやらない
+- [x] ~~**Field Exit**~~
+  - **対応済み**（`.aidev/works/20260729-field-adjust-local-edit-keys`）。ADJUST と一体で実装した
 - [ ] **Field− / Field+**
   - 数値欄で符号を確定して欄を出る。**実機では負値入力の主経路**がこれ
   - 現状は `-` を直接打てば `packages/core/src/screen/field-validate.ts:19` の許容集合
     `/^[0-9.,+-]*$/` を通るので入力自体はできるが、実機の作法とは別物
   - 下の「符号付き数値の送信表現」と**同じ設計判断**になるので、切り離さずに考えること
-- [ ] **Erase EOF**（カーソルから欄末尾まで消去。欄からは出ない＝Field Exit の①だけ）
-- [ ] **Erase Input**（全入力欄をクリア）
+- [x] ~~**Erase EOF**（カーソルから欄末尾まで消去。欄からは出ない＝Field Exit の①だけ）~~
+- [x] ~~**Erase Input**（全入力欄をクリア）~~
 
 ## 要確認（実機で確かめてから判断する）
 
