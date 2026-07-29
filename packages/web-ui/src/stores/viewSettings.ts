@@ -47,6 +47,9 @@ export type Surface = "crt" | "flat";
 export type WindowFrame = "none" | "shadow" | "raised" | "outline";
 /** ウィンドウの**背景**（窓の外側）の見せ方。スモークのほか、すりガラス・ぼやけを選べる。 */
 export type WindowBackdrop = "none" | "smoke" | "frost" | "blur";
+/** オプション欄の選択肢の見せ方。none は出さない（既定） */
+export type OptHintStyle = "none" | "panel" | "outline" | "crt";
+
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
@@ -63,6 +66,11 @@ export interface ViewSettings {
   windowFrame: WindowFrame;
   /** ウィンドウの背景（窓の外側）の見せ方 */
   windowBackdrop: WindowBackdrop;
+  /**
+   * オプション欄の選択肢の見せ方（`WRKxxx` / PDM 系の一覧で `2=変更 3=コピー …` の凡例から作る）。
+   * **推測を含む機能なので既定は none**（勝手に有効化しない。`windowFrame` の既定が none なのと同じ扱い）。
+   */
+  optHints: OptHintStyle;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -104,6 +112,19 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     ],
   },
   { key: "linkify", label: "リンク化", opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }] },
+  {
+    key: "optHints",
+    label: "オプション選択肢",
+    wide: true,
+    expandable: true,
+    // 画面に重ねる部品なので、CRT の上での馴染み方を選べるようにする（buttons と同じ考え方）
+    opts: [
+      { value: "none", label: "無効" },
+      { value: "panel", label: "パネル" },
+      { value: "outline", label: "枠" },
+      { value: "crt", label: "端末調" },
+    ],
+  },
   {
     key: "controls",
     label: "入力項目設定",
@@ -176,6 +197,7 @@ const FALLBACK: ViewSettings = {
   sosi: false, // 非表示
   kana: "auto", // ホストの表のまま
   linkify: true,
+  optHints: "none", // 推測を含むので既定は出さない
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",

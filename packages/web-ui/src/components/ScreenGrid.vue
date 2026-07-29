@@ -27,10 +27,18 @@ import {
   type RejectReason
 } from "../composables/fieldValidate.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
-import { detectFkeyLegends, detectWindowRect, sameScreen, type FkeySpan, type WindowRect } from "../composables/fkeyLegend.js";
+import {
+  detectFkeyLegends,
+  detectWindowRect,
+  detectOptionHints,
+  sameScreen,
+  type FkeySpan,
+  type WindowRect,
+  type OptionSpan
+} from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
-import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView } from "../stores/viewSettings.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON } from "../composables/opMessages.js";
+import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
+import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
@@ -82,8 +90,10 @@ const props = withDefaults(
     windowFrame?: WindowFrame;
     /** ウィンドウの背景（窓の外側）の見せ方。none は背景に何もしない */
     windowBackdrop?: WindowBackdrop;
+    /** オプション欄の選択肢の見せ方（既定 none。推測を含む機能は勝手に有効化しない） */
+    optHints?: OptHintStyle;
   }>(),
-  { linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none", sbcsView: "host" }
+  { linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none", optHints: "none", sbcsView: "host" }
 );
 const emit = defineEmits<{
   (e: "edit", fieldIndex: number, value: string): void;
@@ -223,6 +233,22 @@ const decoWindow = computed<WindowRect | null>(() => {
   if (props.snapshot.gui?.windows.some((w) => w.border !== undefined)) return null;
   return detectedWindow.value;
 });
+
+/** 選択肢を欄の直下に置く（.gui-window と同じ ch/em 基準。桁割りには影響しない） */
+function optBtnStyle(p: { row: number; col: number }): Record<string, string> {
+  // **1 行 = 1.25em**（winRectStyle と同じ係数）。1em で置くと行がずれる
+  return { left: p.col - 1 + "ch", top: (p.row - 1) * 1.25 + "em" };
+}
+
+/**
+ * リストの位置。**入力エリアに重ねない**（利用者指示）——Opt 列とボタンの右側から始める。
+ * 縦は開いている行の 1 行下（ボタン自身を隠さない）。
+ */
+function optListStyle(p: { row: number; col: number }): Record<string, string> {
+  const hints = optionHints.value;
+  const left = p.col - 1 + (hints ? hints.column.length + 1 : 2);
+  return { left: left + "ch", top: p.row * 1.25 + "em" };
+}
 
 /** 桁の閉区間 → 重ねる要素の位置・寸法（.gui-window と同じ ch/em 基準） */
 function winRectStyle(r: { row1: number; row2: number; col1: number; col2: number }): Record<string, string> {
@@ -790,6 +816,171 @@ const legendsByRow = computed<Map<number, FkeySpan[]>>(() => {
   }
   return map;
 });
+
+/**
+ * **オプション欄の選択肢**（`2=変更 3=コピー …`）。設定 ON のときだけ検出する。
+ *
+ * 検出は snapshot だけに依存させる（入力のたびに走らせない。`legendsByRow` と同じ理由）。
+ */
+const optionHints = computed(() =>
+  props.optHints === "none" ? null : detectOptionHints(props.snapshot, displayChar)
+);
+
+/** フォーカス中の入力欄。ポップオーバーの開閉はこれに**完全に従属**させる。 */
+const focusedField = ref<Field | null>(null);
+
+/**
+ * **フォーカス中の欄が Opt 列に属するか**（ボタンを出す条件）。
+ *
+ * ここではリストを開かない。**フォーカスしただけでリストが出ると、一覧を移動するたびに
+ * 視界を塞ぐ**（利用者指摘）。出すのは右隣 1 桁のボタンだけで、開くのは明示操作のとき。
+ */
+const optTarget = computed<{ row: number; col: number; options: OptionSpan[] } | null>(() => {
+  const hints = optionHints.value;
+  const f = focusedField.value;
+  if (!hints || !f) return null;
+  if (f.col !== hints.column.col || !hints.column.rows.includes(f.row)) return null;
+  return { row: f.row, col: f.col, options: hints.options };
+});
+
+/**
+ * ボタンを置く桁（欄の右隣 1 桁）。**そこが実際に空いているときだけ**返す。
+ *
+ * 【DSPF で実地検証した根拠 — 実機 2026-07-29 / `scripts/probe-opt-adjacency.mjs`】
+ * 5250 の SF オーダーは属性バイトを**欄の手前**に置くので、欄と欄の間には最低 1 桁の隙間が要る。
+ * 実際に隙間 0 の DSPF を作ると**コンパイルは通るのに実行時に 2 つ目の欄が消えた**。
+ * よって**入力欄が右隣に来ることは無い**。
+ *
+ * ただし**「必ず属性バイト」ではない**。隙間 1 桁のときは `kind=attr` だったが、
+ * 単独の欄や定数を置こうとした欄の右隣は**素の `sbcs` 空白**だった（閉じ属性が送られない）。
+ * なので kind で決め打たず、**表示文字が空白であること**を実行時に見る。
+ */
+const optButtons = computed<{ row: number; col: number }[]>(() => {
+  const hints = optionHints.value;
+  if (!hints) return [];
+  const col = hints.column.col + hints.column.length;
+  if (col > props.snapshot.cols) return [];
+  return hints.column.rows
+    .filter((row) => {
+      const c = props.snapshot.cells[row - 1]?.[col - 1];
+      return c !== undefined && displayChar(c) === " "; // 埋まっていれば出さない
+    })
+    .map((row) => ({ row, col }));
+});
+
+/** リストを開いている Opt 欄の行。**明示操作（ボタン押下 / Alt+↓）でだけ入る** */
+const optOpenRow = ref<number | null>(null);
+watch(optionHints, () => { optOpenRow.value = null; }); // 画面が変わったら閉じる
+
+/** 表示するリスト（開いているときだけ）。位置は開いている行から決める */
+const optPopoverShown = computed<{ row: number; col: number; options: OptionSpan[] } | null>(() => {
+  const hints = optionHints.value;
+  const row = optOpenRow.value;
+  if (!hints || row === null) return null;
+  return { row, col: hints.column.col, options: hints.options };
+});
+
+/** その行の Opt 欄 */
+function optFieldAtRow(row: number): Field | undefined {
+  const col = optionHints.value?.column.col;
+  return props.snapshot.fields.find((f) => f.row === row && f.col === col && !f.protected);
+}
+
+/** 開いた時点で欄に入っている値と一致する選択肢（あれば選択状態にする） */
+const optSelectedValue = computed<string | null>(() => {
+  const row = optOpenRow.value;
+  if (row === null) return null;
+  const f = optFieldAtRow(row);
+  if (!f) return null;
+  const cur = (inputForSlice(f, 0)?.value ?? f.value).trim();
+  return optPopoverShown.value?.options.some((o) => o.value === cur) ? cur : null;
+});
+
+/** リストを開き、選択中（無ければ先頭）の項目へフォーカスを移す */
+async function openOptAt(row: number): Promise<void> {
+  optOpenRow.value = row;
+  await nextTick();
+  const list = gridEl.value?.querySelector<HTMLElement>(".opt-hints");
+  const sel = list?.querySelector<HTMLElement>(".opt-hint[aria-selected='true']");
+  (sel ?? list?.querySelector<HTMLElement>(".opt-hint"))?.focus();
+}
+
+/** Alt+↓ で開く（ペインの onKeydown から呼ぶ）。開ければ true */
+function openOptHints(): boolean {
+  const t = optTarget.value;
+  if (!t) return false;
+  void openOptAt(t.row);
+  return true;
+}
+
+/**
+ * リストを閉じる。既定では元の Opt 欄へフォーカスを戻す。
+ *
+ * `refocus: false` は**外側クリックで閉じるとき**に使う——利用者が別の場所を押したのに
+ * こちらがフォーカスを奪い返すと、クリック先が効かない。
+ */
+function closeOptHints(refocus = true): void {
+  const row = optOpenRow.value;
+  optOpenRow.value = null;
+  if (!refocus || row === null) return;
+  const f = optFieldAtRow(row);
+  if (f) inputForSlice(f, 0)?.focus();
+}
+
+/**
+ * **リストの外側を押したら閉じる。**
+ *
+ * 閉じるだけで `preventDefault` も `stopPropagation` もしない——ここで止めると
+ * 矩形選択のドラッグ開始（`onGridMousedown`）を潰してしまう。ボタン自身の上は除外する
+ * （ボタンの click がトグルを担うので、ここで閉じると開き直しになる）。
+ */
+function onDocMousedownForOpt(ev: MouseEvent): void {
+  const t = ev.target;
+  if (t instanceof HTMLElement && t.closest(".opt-hints, .opt-btn")) return;
+  closeOptHints(false);
+}
+watch(optOpenRow, (row) => {
+  if (row === null) document.removeEventListener("mousedown", onDocMousedownForOpt);
+  else document.addEventListener("mousedown", onDocMousedownForOpt);
+});
+onBeforeUnmount(() => document.removeEventListener("mousedown", onDocMousedownForOpt));
+
+/**
+ * リスト内のキー操作。**Esc はここで握り潰す**——開いている間は他の Esc 割当
+ * （矩形選択の解除等）を発火させない、という利用者指示。
+ * 矢印はリスト内移動、Enter/Space は選択（`.opt-hint` は button なので既定で発火する）。
+ */
+function onOptListKeydown(ev: KeyboardEvent): void {
+  if (ev.key === "Escape") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeOptHints();
+    return;
+  }
+  if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const items = Array.from(gridEl.value?.querySelectorAll<HTMLElement>(".opt-hint") ?? []);
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const next = ev.key === "ArrowDown" ? at + 1 : at - 1;
+  items[(next + items.length) % items.length]?.focus();
+}
+
+/**
+ * 選択肢を選んだ: **既存の貼り付け経路**で欄へ書く（値を直接いじらない）。
+ *
+ * 欄はフォーカス中なので `focus` 文脈を渡し、**打鍵と同じ扱い**（edit モデルの更新・sync）にする。
+ * 渡さないと非フォーカス経路（`emit("edit")`）へ落ち、カーソルと編集状態が食い違う。
+ */
+function chooseOption(o: OptionSpan): void {
+  const row = optOpenRow.value;
+  const f = row === null ? undefined : optFieldAtRow(row);
+  if (!f) return;
+  const el = inputForSlice(f, 0);
+  pasteFrom({ row: f.row, col: f.col }, o.value, el ? { f, el, startOffset: 0 } : undefined);
+  optOpenRow.value = null;
+  el?.focus(); // 選び終わったら欄へ戻す（以降の打鍵は通常どおり）
+}
 
 /**
  * 凡例（桁）を text セグメント内の文字 index へ写す。
@@ -1865,6 +2056,8 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
 
 function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   const el = ev.target as HTMLInputElement;
+  // オプション選択肢の開閉はフォーカスにだけ従属させる（キーは 1 つも購読しない）
+  focusedField.value = f;
   // sync がスライス間で focus を移したときは何もしない。ここで beginEdit すると props
   // （emit 前で古い）から編集モデルを作り直して直前の打鍵が消え、caret も先頭へ戻る。
   // 値・キャレットの確定は呼び出し元の sync が続けて行う。
@@ -1916,6 +2109,8 @@ function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
  *  行またぎ欄では、その input が担当するスライスぶんだけを戻す（全長を戻すと桁が溢れる）。 */
 function onInputBlur(f: Field, ev: FocusEvent): void {
   if (composing.value) return; // IME 変換中の一時 blur は無視
+  // 矩形選択の開始（onGridDragMove の blur）もここを通るので、選択と同時に選択肢が閉じる
+  if (!syncingFocus) focusedField.value = null;
   const el = ev.target as HTMLInputElement;
   // **スライス間の一時 blur（syncingFocus）以外は編集状態を解除する。**
   // これをしないと、一度フォーカスした欄が blur 後も editFieldIndex に残って「編集中」扱いのままになり、
@@ -2769,7 +2964,11 @@ defineExpose({
   eraseEof: eraseEofKey,
   eraseInput: eraseInputKey,
   // 画面桁の表示文字（未送信の入力値込み）。ペインの頭出し（Ctrl+矢印）が語の判定に使う
-  screenCharAt: charAtForCopy
+  screenCharAt: charAtForCopy,
+  // オプション欄のドロップダウン（ペインの Alt+↓・Esc から呼ぶ）
+  openOptHints,
+  optHintsOpen: () => optOpenRow.value !== null,
+  closeOptHints
 });
 
 // 画面が更新されたら矩形選択は破棄する
@@ -2791,6 +2990,7 @@ onBeforeUnmount(() => {
     class="grid"
     :style="{ fontSize: fontPx + 'px' }"
     :data-focused="focused"
+    :data-opt-hints="optHints"
     @click="onGridClick"
     @dblclick="onGridDblclick"
     @mousedown="onGridMousedown"
@@ -2810,6 +3010,57 @@ onBeforeUnmount(() => {
     <!-- 拡張 5250 GUI オーバーレイ（ウィンドウ枠・選択フィールド・スクロールバー） -->
     <!-- ウィンドウ装飾（画面設定）。**重ねるだけ**で文字・桁に触れず、
          pointer-events:none で窓の中の操作（入力・クリック・矩形選択）を透過させる。 -->
+    <!--
+      オプション欄の選択肢。**矩形選択・コピー・貼り付けを妨げないことを最優先**にしている:
+        - mousedown を .stop でグリッドへ伝播させない（伝播すると clearRectSel() が走り選択が消える）
+        - mousedown を .prevent で既定のフォーカス移動ごと止める（入力欄にフォーカスを残す。
+          奪うと貼り付け先が変わる）
+        - キーイベントは 1 つも購読しない（Esc すら捕まえない）
+      絶対配置なので <input> の桁割りには一切触れない。
+    -->
+    <!--
+      右隣 1 桁のボタン。**リストは開かない**——開くのはクリックか Alt+↓ のときだけ。
+      tabindex は開いている間だけ 0 にする: 常にタブ順へ入れると一覧を Tab で降りるときの
+      停止数が倍になり、既存の使い勝手が変わってしまう。
+    -->
+    <button
+      v-for="b in optButtons"
+      :key="'ob' + b.row"
+      type="button"
+      class="opt-btn"
+      :style="optBtnStyle(b)"
+      :tabindex="optOpenRow === b.row ? 0 : -1"
+      :aria-expanded="optOpenRow === b.row"
+      :aria-label="MSG_OPT_HINTS"
+      @mousedown.stop.prevent
+      @click.stop="optOpenRow === b.row ? closeOptHints() : openOptAt(b.row)"
+    >▾</button>
+
+    <div
+      v-if="optPopoverShown"
+      class="opt-hints"
+      :style="optListStyle(optPopoverShown)"
+      role="listbox"
+      :aria-label="MSG_OPT_HINTS"
+      @mousedown.stop.prevent
+      @keydown="onOptListKeydown"
+    >
+      <button
+        v-for="o in optPopoverShown.options"
+        :key="o.value"
+        type="button"
+        class="opt-hint"
+        role="option"
+        :tabindex="0"
+        :aria-selected="o.value === optSelectedValue"
+        @mousedown.stop.prevent
+        @click.stop="chooseOption(o)"
+      >
+        <span class="opt-hint-n">{{ o.value }}</span>
+        <span class="opt-hint-l">{{ o.label }}</span>
+      </button>
+    </div>
+
     <template v-if="decoWindow">
       <div
         v-for="(st, i) in windowBackdrop === 'none' ? [] : smokeRects(decoWindow)"
@@ -3091,6 +3342,112 @@ onBeforeUnmount(() => {
   background-position: 0 0.625em;
 }
 /* WDWBORDER: ホスト指定の罫線文字で描く枠。文字なので等幅グリッドにそのまま乗る */
+/**
+ * オプション欄の選択肢。**テーマ変数（styles.css）に乗せる**——独自の変数名を使うと
+ * フォールバックの黒が常に出て、ライトテーマでも背景が黒くなる（実画面で発生した）。
+ * 意匠は画面設定「オプション選択肢」（`data-opt-hints`）で切り替える。
+ */
+.opt-btn {
+  /* 欄の右隣 1 桁にちょうど収まる。桁割りには影響しない（絶対配置） */
+  position: absolute;
+  margin: 8px 0 0 10px;
+  z-index: 6;
+  width: 1ch;
+  height: 1.25em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.opt-btn:hover,
+.opt-btn:focus-visible {
+  opacity: 1;
+}
+
+.opt-hints {
+  /* .gui-window と同じグリッド padding 分の補正。絶対配置なので桁割りには影響しない */
+  position: absolute;
+  margin: 8px 0 0 10px;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  min-width: 14ch;
+  max-height: 14em;
+  overflow-y: auto;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  font-family: var(--sans);
+  font-size: 0.8em;
+  line-height: 1.5;
+}
+.opt-hint {
+  display: flex;
+  gap: 0.7em;
+  align-items: baseline;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.opt-hint:hover,
+.opt-hint:focus-visible {
+  background: var(--accent-soft);
+}
+.opt-hint[aria-selected="true"] {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.opt-hint-n {
+  min-width: 2ch;
+  color: var(--accent);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.opt-hint-l {
+  color: var(--muted);
+}
+
+/* 枠: 面を持たず輪郭だけ。画面の内容を隠しすぎたくないとき */
+.grid[data-opt-hints="outline"] .opt-hints {
+  background: var(--paper);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+/* 端末調: CRT の緑に寄せる。画面と地続きに見せたいとき */
+.grid[data-opt-hints="crt"] .opt-hints {
+  background: var(--crt-bezel);
+  color: var(--t-green);
+  border-color: var(--crt-line);
+  font-family: var(--screen-mono);
+}
+.grid[data-opt-hints="crt"] .opt-hint-n {
+  color: var(--t-yellow);
+}
+.grid[data-opt-hints="crt"] .opt-hint-l {
+  color: var(--t-green);
+}
+.grid[data-opt-hints="crt"] .opt-hint:hover,
+.grid[data-opt-hints="crt"] .opt-hint:focus-visible {
+  background: var(--crt-line);
+}
+.grid[data-opt-hints="crt"] .opt-btn {
+  color: var(--t-turquoise);
+}
+
 .gui-window-border {
   position: absolute;
   margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */

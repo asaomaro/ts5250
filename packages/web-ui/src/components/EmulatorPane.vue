@@ -667,15 +667,37 @@ function onKeydown(ev: KeyboardEvent): void {
   // ここへバブルしてくるため。Esc を SysReq に割り当てていると（利用者の想定用途そのもの）、
   // 取り消しの Esc がそのまま再び行を開いてしまい、二度と閉じられなくなる。
   if (sysReqOpen.value || (ev.target instanceof HTMLElement && ev.target.closest(".sysreq"))) return;
-  // 機能キーボタンにフォーカスがあるときの Space は「そのボタンを押す」（普通のボタンと同じ）。
+  // 機能キーボタン・オプション選択肢のボタンにフォーカスがあるときの Space は
+  // 「そのボタンを押す」（普通のボタンと同じ）。
   // 明示的に処理するのは、下の isProtectedEdit が Space を preventDefault してしまい
   // native の Space 起動が効かなくなるため。**Enter は 5250 の AID として残す**——端末で最も
   // 重要なキーを、たまたまボタンにフォーカスがあるという理由で奪わない（decisions D5）。
+  // **オプション選択肢のリストが開いている間は、リスト内のキー操作を優先する。**
+  // Esc（矩形選択の解除等）や矢印がリストより先に発火すると、閉じる前に別の動作が起きる
+  // ——「ドロップダウンリストが閉じるまで発火しないように」という利用者指示。
+  if (
+    gridRef.value?.optHintsOpen?.() &&
+    ev.target instanceof HTMLElement &&
+    ev.target.closest(".opt-hints")
+  ) {
+    return;
+  }
+  // **Alt+↓ でオプション欄のドロップダウンを開く**（コンボボックスの慣用キー）。
+  // フォーカスしただけでは開かない——一覧を移動するたびにリストが視界を塞ぐため。
+  // `Alt+矢印` はペイン移動から `Alt+Shift+矢印` へ移してここを空けた（App.vue）。
+  if (ev.altKey && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && ev.key === "ArrowDown") {
+    if (gridRef.value?.openOptHints()) {
+      ev.preventDefault();
+      return;
+    }
+  }
   const focusedBtn = document.activeElement;
   if (
     ev.key === " " &&
     focusedBtn instanceof HTMLButtonElement &&
-    focusedBtn.classList.contains("fkey-btn") &&
+    (focusedBtn.classList.contains("fkey-btn") ||
+      focusedBtn.classList.contains("opt-btn") ||
+      focusedBtn.classList.contains("opt-hint")) &&
     paneEl.value?.contains(focusedBtn)
   ) {
     ev.preventDefault();
@@ -726,6 +748,10 @@ function onKeydown(ev: KeyboardEvent): void {
 let wheelCooldownUntil = 0;
 function onWheel(ev: WheelEvent): void {
   if (Math.abs(ev.deltaY) < 4) return; // 微小ジッタは無視
+  // **オプション選択肢のリスト上ではリスト自身をスクロールさせる。**
+  // ここで preventDefault すると native スクロールが死に、さらにホストへ Roll（PageUp/Down）が
+  // 飛んでしまう——リストを送っただけで画面が送られるのは明らかに誤り。
+  if (ev.target instanceof HTMLElement && ev.target.closest(".opt-hints")) return;
   ev.preventDefault(); // 端末はスクロールせずページ送りに割り当てる（ACS 準拠）
   if (busy.value || snapshot.value?.keyboardLocked) return; // 通信中・ロック中は送らない
   const now = Date.now();
@@ -774,6 +800,7 @@ function onWheel(ev: WheelEvent): void {
         :buttons="view.buttons"
         :window-frame="view.windowFrame"
         :window-backdrop="view.windowBackdrop"
+        :opt-hints="view.optHints"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"

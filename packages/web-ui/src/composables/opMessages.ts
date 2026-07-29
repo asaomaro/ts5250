@@ -20,6 +20,9 @@ import type { RejectReason } from "./fieldValidate.js";
 /** ACS: "Cursor in protected area of display." */
 export const MSG_PROTECTED = "カーソルが保護された区域にあるため入力できません";
 
+/** オプション欄の選択肢（画面の凡例から作る一覧）のラベル */
+export const MSG_OPT_HINTS = "オプションの選択肢";
+
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
 

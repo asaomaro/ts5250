@@ -1,67 +1,75 @@
-[
- {
-  "name": "win-f1",
-  "label": "WINDOW: メニューで F1 ヘルプ",
-  "window": true
- },
- {
-  "name": "win-attn",
-  "label": "WINDOW: Attn の窓",
-  "window": true
- },
- {
-  "name": "nrm-dsplibl",
-  "label": "NORMAL: DSPLIBL",
-  "window": false
- },
- {
-  "name": "win-dsplibl-f1",
-  "label": "WINDOW: DSPLIBL の上で F1",
-  "window": true
- },
- {
-  "name": "win-wrksyssts-f1",
-  "label": "WINDOW: WRKSYSSTS の上で F1",
-  "window": true
- },
- {
-  "name": "win-wrkactjob-f1",
-  "label": "WINDOW: WRKACTJOB の上で F1",
-  "window": true
- },
- {
-  "name": "win-dspsysval-qdatfmt-f1",
-  "label": "WINDOW: DSPSYSVAL QDATFMT の上で F1",
-  "window": true
- },
- {
-  "name": "nrm-wrksplf",
-  "label": "NORMAL: WRKSPLF",
-  "window": false
- },
- {
-  "name": "win-wrksplf-f1",
-  "label": "WINDOW: WRKSPLF の上で F1",
-  "window": true
- },
- {
-  "name": "nrm-wrkobjpdm-testlib",
-  "label": "NORMAL: WRKOBJPDM TESTLIB",
-  "window": false
- },
- {
-  "name": "win-wrkobjpdm-testlib-f1",
-  "label": "WINDOW: WRKOBJPDM TESTLIB の上で F1",
-  "window": true
- },
- {
-  "name": "win-dspmsg-f1",
-  "label": "WINDOW: DSPMSG の上で F1",
-  "window": true
- },
- {
-  "name": "nrm-enter",
-  "label": "NORMAL: メニューで Enter 空打ち",
-  "window": false
- }
-]
+{
+ "note": "実機採取の (前画面, 現画面) 対。kind は sbcs/dbcs-lead/dbcs-tail/so-si のみ区別する——属性桁は表示上は空白なので sbcs として記録している（採取時に区別を残していない）。",
+ "pairs": [
+  {
+   "name": "win-f1",
+   "label": "WINDOW: メニューで F1 ヘルプ",
+   "window": true
+  },
+  {
+   "name": "win-attn",
+   "label": "WINDOW: Attn の窓",
+   "window": true
+  },
+  {
+   "name": "nrm-dsplibl",
+   "label": "NORMAL: DSPLIBL",
+   "window": false
+  },
+  {
+   "name": "win-dsplibl-f1",
+   "label": "WINDOW: DSPLIBL の上で F1",
+   "window": true
+  },
+  {
+   "name": "win-wrksyssts-f1",
+   "label": "WINDOW: WRKSYSSTS の上で F1",
+   "window": true
+  },
+  {
+   "name": "win-wrkactjob-f1",
+   "label": "WINDOW: WRKACTJOB の上で F1",
+   "window": true
+  },
+  {
+   "name": "win-dspsysval-qdatfmt-f1",
+   "label": "WINDOW: DSPSYSVAL QDATFMT の上で F1",
+   "window": true
+  },
+  {
+   "name": "nrm-wrksplf",
+   "label": "NORMAL: WRKSPLF",
+   "window": false
+  },
+  {
+   "name": "win-wrksplf-f1",
+   "label": "WINDOW: WRKSPLF の上で F1",
+   "window": true
+  },
+  {
+   "name": "nrm-wrkobjpdm-testlib",
+   "label": "NORMAL: WRKOBJPDM TESTLIB",
+   "window": false
+  },
+  {
+   "name": "win-wrkobjpdm-testlib-f1",
+   "label": "WINDOW: WRKOBJPDM TESTLIB の上で F1",
+   "window": true
+  },
+  {
+   "name": "win-dspmsg-f1",
+   "label": "WINDOW: DSPMSG の上で F1",
+   "window": true
+  },
+  {
+   "name": "nrm-enter",
+   "label": "NORMAL: メニューで Enter 空打ち",
+   "window": false
+  },
+  {
+   "name": "win-wrkmbrpdm-f1",
+   "label": "WINDOW: WRKMBRPDM の上で F1",
+   "window": true
+  }
+ ]
+}

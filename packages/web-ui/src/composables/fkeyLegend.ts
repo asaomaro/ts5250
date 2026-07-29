@@ -307,7 +307,12 @@ export function detectWindowRect(
   // 前画面が渡されていれば「窓は背景の上に開く」ことで裏を取る（`introducedOutside`）。
   // 渡されなければここで終わり＝**従来と 1 つも結果が変わらない**。
   if (!candidate || !prev) return candidate;
-  return introducedOutside(prev, snap, candidate, charOf) ? null : candidate;
+  // **表示設定ではなく画面モデルで比べる**（`charOf` を渡さない）。
+  // SO/SI マーク表示が ON だと、窓の枠が背景の DBCS を分断して残った SO/SI の片割れが
+  // `{` `}` として見え、「新しい内容が現れた」と数えられて**本物の窓が落ちる**
+  // （実機 fixture win-wrkmbrpdm-f1 / win-wrkobjpdm-testlib-f1 の両方で再現）。
+  // 差分が答えるべきは「ホストがそこへ新しい内容を置いたか」なので、表示の都合を混ぜない。
+  return introducedOutside(prev, snap, candidate) ? null : candidate;
 }
 
 /** 2 つの画面が表示上まったく同じか（表示文字と反転だけを見る） */
@@ -344,14 +349,27 @@ export function sameScreen(a: ScreenSnapshot, b: ScreenSnapshot, charOf: CharOf 
  * 2. **残る差分はすべて `文字→空白` だった**（実測: WRKACTJOB 3・WRKOBJPDM 3・WRKSPLF 14 セル）。
  *    **窓の枠が DBCS 文字の片割れを潰した跡**で、縁の 1〜3 桁に限って出る。
  *    → 「現在が空白かつ非反転」のセルは数えない。これで実測 9/9 が通る
+ * 3. **比較は画面モデルで行う**（既定の `charOf`）。呼び出し側の表示用 `charOf` を使うと、
+ *    SO/SI マーク表示 ON のとき上記の片割れが `{` `}` として見え、2 の除外をすり抜けて
+ *    **本物の窓が落ちる**（実機で再現）。差分が答えるべきは「ホストが新しい内容を置いたか」
  *
  * 画面サイズが変わっているときは比較の意味が無いので**裏取りをしない**（false を返す）。
+ *
+ * 【既知の制限 — 大きい窓から小さい窓へ戻ると判定が外れる】
+ * ヘルプ窓 → F2 拡張ヘルプ（より大きい窓）→ 元のヘルプ窓、と戻ったときに窓と判定されない。
+ * 大きい窓が占めていた領域は、戻るときに背景で描き直される。それが**小さい窓の枠の外**に
+ * 当たるため「新しい内容が現れた」と数えられてしまう。
+ *
+ * **この判定が「窓は背景の上に開く＝枠の外は前のまま」という前提に立っている以上、
+ * 窓が縮む方向の遷移は原理的に区別できない**（枠外が変わるのは通常画面への遷移と同じ形）。
+ * 直すには前画面 1 枚ではなく窓の履歴を持つ必要があり、費用に見合わないと判断した。
+ * **制限事項として受け入れる**（利用者判断 2026-07-29）。
  */
 function introducedOutside(
   prev: ScreenSnapshot,
   cur: ScreenSnapshot,
   rect: WindowRect,
-  charOf: CharOf
+  charOf: CharOf = defaultCharOf
 ): boolean {
   if (prev.rows !== cur.rows || prev.cols !== cur.cols) return false;
   // 枠そのものは内側矩形の外にあるので、外周を含めた矩形で測る
@@ -393,32 +411,59 @@ function containedIn(a: WindowRect, b: WindowRect): boolean {
 }
 
 /** 1 行から凡例を拾う（窓・宣言行の絞り込みは呼び出し側）。 */
-function legendsInRow(rt: RowText, row: number): FkeySpan[] {
-  const out: FkeySpan[] = [];
-  const heads: { key: AidKey; at: number; labelFrom: number }[] = [];
-  LEGEND_RE.lastIndex = 0;
-  for (let m = LEGEND_RE.exec(rt.text); m !== null; m = LEGEND_RE.exec(rt.text)) {
-    const n = Number(m[1]);
-    if (n < 1 || n > 24) continue; // AID に存在しないキーは拾わない
-    heads.push({ key: `F${n}` as AidKey, at: m.index, labelFrom: m.index + m[0].length });
+/** 凡例 1 件の位置とラベル（`F<n>=` とオプション凡例で共有する土台） */
+interface LegendHit {
+  row: number;
+  col: number;
+  width: number;
+  label: string;
+  /** 見出しの捕獲グループ（`F3=` なら `"3"`、`10=` なら `"10"`） */
+  num: string;
+}
+
+/**
+ * 行から `<見出し>=<ラベル>` の並びを拾う。**`F<n>=`（機能キー）とオプション凡例で共有する。**
+ *
+ * 別実装にすると、既存レビューで潰した不具合を踏み直す。ここが持つ処理はどちらにも要る:
+ *
+ * - 桁空間（`RowText`）で走査する＝ DBCS があっても桁がずれない
+ * - **ラベルの終わりは「空白 2 個以上」**。空白 1 個は日本語ラベル内にも出る
+ *   （実測: `F13= この画面の使用法` / `7=名前の変更`）
+ * - 次の凡例の開始位置を hard end にする
+ * - **ラベルと占有幅は同じ切り出しから求める**（review R1）。別々に求めると、末尾の罫線を
+ *   ラベルからは除いたのに幅には残り、描画は幅で切り出すので**ボタンが隣の罫線を飲み込む**
+ *   （実測: `|F3=終了|` で末尾の `|` まで巻き込んでいた）
+ */
+function legendHitsInRow(rt: RowText, row: number, re: RegExp): LegendHit[] {
+  const out: LegendHit[] = [];
+  const heads: { num: string; at: number; labelFrom: number }[] = [];
+  re.lastIndex = 0;
+  for (let m = re.exec(rt.text); m !== null; m = re.exec(rt.text)) {
+    heads.push({ num: m[1]!, at: m.index, labelFrom: m.index + m[0].length });
   }
   for (let i = 0; i < heads.length; i++) {
     const h = heads[i]!;
     const hardEnd = i + 1 < heads.length ? heads[i + 1]!.at : rt.text.length;
     const seg = rt.text.slice(h.labelFrom, hardEnd);
-    // ラベルの終わりは「空白 2 個以上」。1 個の空白は日本語ラベル内にも出る（実測: `F13= この画面の使用法`）。
     const cut = seg.search(/\s{2,}/);
     const raw = cut >= 0 ? seg.slice(0, cut) : seg;
-    // **ラベルと占有幅は同じ切り出しから求める**（review R1）。別々に求めると、末尾の罫線を
-    // ラベルからは除いたのに幅には残り、描画は幅で切り出すので**ボタンが隣の罫線を飲み込む**
-    // （実測: `|F3=終了|` で末尾の `|` まで巻き込んでいた）。
     const kept = raw.replace(TRAILING_BORDER, "");
     const label = kept.trim();
     if (!label) continue; // `F3=` だけで中身が無いものは凡例と見なさない
     const endIdx = h.labelFrom + kept.length - 1;
     const col = rt.colOf[h.at]!;
     const lastCol = (rt.colOf[endIdx] ?? rt.colOf[rt.colOf.length - 1]!) + (rt.widthOf[endIdx] ?? 1) - 1;
-    out.push({ row, col, width: lastCol - col + 1, key: h.key, label });
+    out.push({ row, col, width: lastCol - col + 1, label, num: h.num });
+  }
+  return out;
+}
+
+function legendsInRow(rt: RowText, row: number): FkeySpan[] {
+  const out: FkeySpan[] = [];
+  for (const h of legendHitsInRow(rt, row, LEGEND_RE)) {
+    const n = Number(h.num);
+    if (n < 1 || n > 24) continue; // AID に存在しないキーは拾わない
+    out.push({ row: h.row, col: h.col, width: h.width, key: `F${n}` as AidKey, label: h.label });
   }
   return out;
 }
@@ -446,4 +491,115 @@ export function detectFkeyLegends(snap: ScreenSnapshot, charOf: CharOf = default
     }
   }
   return out;
+}
+
+/**
+ * オプション凡例の見出し（`2=` `10=`）。
+ * **負の後読みが要**——付けないと `F3=` の `3` を拾ってしまう（`F<n>=` 側は機能キーが扱う）。
+ */
+const OPTION_RE = /(?<![A-Za-z0-9])(\d{1,2})\s*=\s*/g;
+
+/** オプション凡例 1 件（`2=変更`）。座標は 1 始まりの桁。 */
+export interface OptionSpan {
+  row: number;
+  col: number;
+  width: number;
+  /** 欄へ入れる番号（`"2"` / `"10"`） */
+  value: string;
+  label: string;
+}
+
+/** Opt 欄の列（同じ桁・同じ長さの非保護欄が縦に並ぶ） */
+export interface OptionColumn {
+  col: number;
+  length: number;
+  /** 並んでいる行（昇順） */
+  rows: number[];
+}
+
+/** Opt 列とみなす最小の行数。一覧は実機 5 画面で 7〜10 行あった */
+const MIN_OPTION_ROWS = 3;
+/** Opt 欄の最大桁数（実機は 1〜2） */
+const MAX_OPTION_LEN = 2;
+
+/**
+ * **Opt 欄の列**を探す。同じ桁・同じ長さ（1〜2）の非保護欄が、連続する行に 3 行以上並ぶもの。
+ *
+ * 【この形にした根拠 — 実機・IBM i 7.5 で 5 画面を実測 2026-07-29】
+ *
+ * | 画面 | Opt 欄 | 並ぶ行 |
+ * |---|---|---|
+ * | `WRKOBJPDM` | c2 / len2 | 11–18 |
+ * | `WRKSPLF`   | c2 / len2 | 12–20 |
+ * | `WRKACTJOB` | c2 / len2 | 10–18 |
+ * | `DSPLIBL`   | c3 / len1 | 9–15 |
+ * | `WRKUSRJOB` | c2 / len2 | 9–18 |
+ *
+ * 5/5 で同じ形をしていた。`WRKMSGQ` にはこの形が無く、正しく何も返さない。
+ *
+ * **これ単独では窓を開けない**——凡例と揃って初めて有効にする（`detectOptionHints`）。
+ * 「短い欄が縦に並ぶ」だけなら数量入力の画面にもあり得るため。
+ */
+export function detectOptionColumn(snap: ScreenSnapshot): OptionColumn | null {
+  const byKey = new Map<string, number[]>();
+  for (const f of snap.fields) {
+    if (f.protected || f.length < 1 || f.length > MAX_OPTION_LEN) continue;
+    const key = `${f.col}/${f.length}`;
+    const list = byKey.get(key);
+    if (list) list.push(f.row);
+    else byKey.set(key, [f.row]);
+  }
+  let best: OptionColumn | null = null;
+  for (const [key, rowsRaw] of byKey) {
+    const rows = [...rowsRaw].sort((a, b) => a - b);
+    // 連続する行の最長の連なりを取る（見出し行を挟んで飛んでいるものは別の塊とみなす）
+    let runFrom = 0;
+    for (let i = 1; i <= rows.length; i++) {
+      if (i < rows.length && rows[i]! === rows[i - 1]! + 1) continue;
+      const run = rows.slice(runFrom, i);
+      if (run.length >= MIN_OPTION_ROWS && (!best || run.length > best.rows.length)) {
+        const [colStr, lenStr] = key.split("/");
+        best = { col: Number(colStr), length: Number(lenStr), rows: run };
+      }
+      runFrom = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * 画面から**オプション凡例と Opt 列**を取り出す。どちらか欠ければ `null`。
+ *
+ * **両方揃ったときだけ返すのが要**。`<数字>=` は `F<n>=` よりはるかに紛れやすく
+ * （金額・式・日付）、凡例だけを根拠にすると誤検出が利用者に見える。
+ * backlog も「Opt 欄の存在・凡例行との位置関係で絞ること」と指示している。
+ *
+ * 凡例は **Opt 列の最小行より上**から拾う。実機の PDM は 2 行にまたがるので 1 行に限定しない。
+ * 窓が開いていれば窓の中だけを見る（`detectFkeyLegends` と同じ考え方）。
+ */
+export function detectOptionHints(
+  snap: ScreenSnapshot,
+  charOf: CharOf = defaultCharOf
+): { column: OptionColumn; options: OptionSpan[] } | null {
+  const column = detectOptionColumn(snap);
+  if (!column) return null;
+
+  const rect = detectWindowRect(snap, charOf);
+  const top = column.rows[0]!;
+  const seen = new Set<string>();
+  const options: OptionSpan[] = [];
+  for (let r = 1; r < top; r++) {
+    if (rect && (r < rect.row1 || r > rect.row2)) continue;
+    const cells = snap.cells[r - 1];
+    if (!cells) continue;
+    for (const h of legendHitsInRow(rowText(cells, snap.cols, charOf), r, OPTION_RE)) {
+      if (rect && (h.col < rect.col1 || h.col + h.width - 1 > rect.col2)) continue;
+      // 欄に収まらない番号は選ばせない（長さ 1 の欄に `10` は入らない）
+      if (h.num.length > column.length) continue;
+      if (seen.has(h.num)) continue; // 同じ番号が 2 回出たら先に出た方を採る
+      seen.add(h.num);
+      options.push({ row: h.row, col: h.col, width: h.width, value: h.num, label: h.label });
+    }
+  }
+  return options.length > 0 ? { column, options } : null;
 }

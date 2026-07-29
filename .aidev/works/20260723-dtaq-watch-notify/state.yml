@@ -1,0 +1,8 @@
+schema: 3
+slug: dtaq-watch-notify
+current: research
+approved: [requirement, research]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

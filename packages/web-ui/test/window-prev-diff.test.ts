@@ -33,6 +33,7 @@ interface Snap {
 }
 interface Pair { label: string; prev: Snap; cur: Snap }
 interface Index { name: string; label: string; window: boolean }
+interface IndexFile { note: string; pairs: Index[] }
 
 const KIND: Record<string, Cell["kind"]> = {
   s: "sbcs", L: "dbcs-lead", T: "dbcs-tail", a: "attr", o: "so", i: "si"
@@ -59,7 +60,7 @@ function toSnap(f: Snap): ScreenSnapshot {
   return s;
 }
 
-const index = JSON.parse(readFileSync(join(DIR, "index.json"), "utf8")) as Index[];
+const index = (JSON.parse(readFileSync(join(DIR, "index.json"), "utf8")) as IndexFile).pairs;
 const load = (name: string): Pair => JSON.parse(readFileSync(join(DIR, `${name}.json`), "utf8")) as Pair;
 
 const windows = index.filter((e) => e.window);
@@ -83,6 +84,20 @@ describe("前画面との差分による窓判定（実機 fixture）", () => {
       const withPrev = detectWindowRect(toSnap(p.cur), undefined, toSnap(p.prev));
       expect(withPrev).toEqual(without);
     }
+  });
+
+  it("**表示設定（SO/SI マーク）を変えても窓を落とさない**", () => {
+    // 差分は画面モデルで比べる。表示用 charOf を使うと、窓の枠が背景の DBCS を分断して
+    // 残った SO/SI の片割れが `{` `}` として「新しい内容」に数えられ、本物の窓が落ちる
+    // （実機 win-wrkmbrpdm-f1 / win-wrkobjpdm-testlib-f1 の両方で再現した）
+    const marks = (c: Cell) =>
+      c.kind === "so" ? "{" : c.kind === "si" ? "}" : c.char === "" ? " " : c.char;
+    const missed: string[] = [];
+    for (const e of windows) {
+      const p = load(e.name);
+      if (!detectWindowRect(toSnap(p.cur), marks, toSnap(p.prev))) missed.push(e.label);
+    }
+    expect(missed).toEqual([]);
   });
 
   it(`通常画面を窓と誤検出しない（${normals.length} 対）`, () => {
@@ -149,6 +164,33 @@ describe("③ 帳票の誤検出", () => {
 
   it("メニューからの遷移なら窓と判定しない（枠の外に新しい内容が出ている）", () => {
     expect(detectWindowRect(synth(TABLE), undefined, synth(MENU))).toBeNull();
+  });
+});
+
+describe("既知の制限: 大きい窓から小さい窓へ戻ると判定が外れる", () => {
+  /**
+   * 実機で採った遷移（実機・IBM i 7.5 / WRKMBRPDM → F1 ヘルプ → F2 拡張ヘルプ → F12 で戻る）。
+   *
+   * この判定は「窓は背景の上に開く＝**枠の外は前の画面のまま**」という前提に立っている。
+   * 窓が縮むと、大きい窓が占めていた領域が背景で描き直され、それが小さい窓の枠外に当たる
+   * ——通常画面への遷移とまったく同じ形なので、前画面 1 枚では原理的に区別できない。
+   *
+   * **RESTORE SCREEN を「1 つ前の窓へ戻った」合図に使う案は実機で否定された。**
+   * 4 段すべて `cleared=true / restored=false / rect=全画面` で、ホストは毎回
+   * クリアしてから全画面を描き直していた（`cells` が 3053 → 1702 → 1921 → 1702）。
+   *
+   * 費用に見合わないため制限事項として受け入れた（利用者判断 2026-07-29）。
+   */
+  it("**実機: 拡張ヘルプから戻ると窓と判定されない**（直っていたら見直すこと）", () => {
+    const p = load("win-help-shrink-back");
+    expect(detectWindowRect(toSnap(p.cur))).not.toBeNull(); // 前画面なしなら窓として拾える
+    expect(detectWindowRect(toSnap(p.cur), undefined, toSnap(p.prev))).toBeNull(); // ← 制限
+  });
+
+  it("実機: RESTORE SCREEN は来ない（合図として使えない）", () => {
+    const p = load("win-help-shrink-back");
+    expect(p.cur.lastWrite?.restored).toBe(false);
+    expect(p.cur.lastWrite?.cleared).toBe(true);
   });
 });
 

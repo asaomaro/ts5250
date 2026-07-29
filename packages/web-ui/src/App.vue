@@ -140,10 +140,16 @@ function onGlobalKey(ev: KeyboardEvent): void {
   // セッションだけでなく管理タブ（admin:*）でも効かせる。セッション有無で判定すると
   // 管理タブしか開いていないときにショートカットが死ぬ
   if (!hasVisibleTabs.value) return;
-  // Alt 系のアプリショートカット（タブ・ペイン移動）。Ctrl+PageUp/Down はブラウザ既定の
-  // タブ切替と衝突するため使わない。素の PageUp/Down はホストの Roll に割当済み。
-  if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
-  // Alt+PageDown/Up = タブ切替（次/前）
+  // **Alt+Shift 系**のアプリショートカット（タブ・ペイン移動）。
+  //
+  // Ctrl+PageUp/Down はブラウザ既定のタブ切替と衝突するため使わない。
+  // 素の PageUp/Down はホストの Roll に割当済み。Shift 単独は矩形選択（Shift+矢印）が使用中。
+  // Meta（⌘/Win）は Windows の Win+矢印が OS のウィンドウスナップに奪われ届かない。
+  //
+  // **Alt 単独から Alt+Shift へ移した**のは、`Alt+↓` をオプション欄のドロップダウンに空けるため
+  // （コンボボックスの慣用キー）。指の形を変えずに済むので移行が小さい。
+  if (!ev.altKey || !ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
+  // Alt+Shift+PageDown/Up = タブ切替（次/前）
   if (ev.key === "PageDown") {
     ev.preventDefault();
     workspaceStore.cycleTab(1);
@@ -154,8 +160,8 @@ function onGlobalKey(ev: KeyboardEvent): void {
     workspaceStore.cycleTab(-1);
     return;
   }
-  // Alt+矢印 = ペイン間フォーカス移動（方向対応）。単一ペインでも preventDefault して
-  // ブラウザの戻る/進む（Alt+←/→）で誤ってアプリを離脱するのを防ぐ。
+  // Alt+Shift+矢印 = ペイン間フォーカス移動（方向対応）。単一ペインでも preventDefault して
+  // ブラウザの戻る/進む（Alt+←/→ 相当）で誤ってアプリを離脱するのを防ぐ。
   const dir = ARROW_DIR[ev.key];
   if (dir) {
     ev.preventDefault();
