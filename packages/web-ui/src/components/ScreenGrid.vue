@@ -118,6 +118,14 @@ const emit = defineEmits<{
   (e: "notice", text: string): void;
   /** 機能キー凡例のボタンが押された（親が sendKey する。spec B3） */
   (e: "aid", key: AidKey): void;
+  /**
+   * 欄の**先頭**で Backspace が押された。`field-full`（次の欄へ）と対になる。
+   *
+   * 実機は欄の先頭で Backspace を押すと**前の入力欄の末尾へカーソルを移す（削除はしない）**
+   * ——GNU tn5250 `display.c` の `kf_backspace`。EDTMSK のように**ホストが 1 つの項目を
+   * 複数の入力欄へ分解して送る**画面では、これが無いと欄をまたいで戻れない。
+   */
+  (e: "field-prev", fieldIndex: number): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -2004,7 +2012,17 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   if (ev.key === "Backspace" && plain) {
     ev.preventDefault();
-    if (!deleteSelection(f, el)) edit = backspace(edit);
+    // 選択があればその削除が優先（先頭にキャレットがあっても選択は消す）
+    if (deleteSelection(f, el)) {
+      sync(el, f);
+      return;
+    }
+    // **欄の先頭では削除せず前の欄の末尾へ移る**（原典どおり。`field-prev` のコメント参照）
+    if (edit.cursor === 0) {
+      emit("field-prev", f.index);
+      return;
+    }
+    edit = backspace(edit);
     sync(el, f);
     return;
   }
@@ -2100,7 +2118,16 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
   if (k === "Backspace" && plain) {
     ev.preventDefault();
-    if (!deleteSelection(f, el)) edit = dbcsBackspace(edit, f);
+    if (deleteSelection(f, el)) {
+      syncDbcs(el, f);
+      return;
+    }
+    // SBCS 欄と同じく、欄の先頭では前の欄の末尾へ移る（削除はしない）
+    if (edit.cursor === 0) {
+      emit("field-prev", f.index);
+      return;
+    }
+    edit = dbcsBackspace(edit, f);
     syncDbcs(el, f);
     return;
   }

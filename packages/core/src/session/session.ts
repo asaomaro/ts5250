@@ -226,8 +226,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   setField(target: { index: number } | { row: number; col: number }, value: string): void {
     this.assertReady();
     const field = this.resolveField(target);
-    // 内容検証（型・DBCS 種別・コードページ許容文字）。違反は FIELD_TYPE
-    validateFieldContent(value, field, this.codec);
+    // 内容検証（型・DBCS 種別・コードページ許容文字）。違反は FIELD_TYPE。
+    // **その欄の現在値を渡す**——ホストが書いた編集文字（EDTCDE / EDTWRD の `$` `*` `/` `CR`）を
+    // 弾くと、ホスト自身が送ってきた値を送り返せず画面ごと送信できなくなる
+    validateFieldContent(value, field, this.codec, this.buf.fieldValue(field));
     // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）
     if (field.dbcsType !== undefined && this.codec.isDbcs) {
       const bytes = this.codec.encode(value).bytes.length;

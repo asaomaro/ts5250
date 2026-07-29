@@ -1,0 +1,10 @@
+events:
+  - { ts: 2026-07-29T15:55:10Z, phase: requirement, event: approved }
+  - { ts: 2026-07-29T16:01:27Z, phase: research, event: approved }
+  - { ts: 2026-07-29T16:01:27Z, phase: spec, event: approved }
+  - { ts: 2026-07-29T16:01:57Z, phase: plan, event: approved, metrics: { tasks_planned: 9 } }
+  - { ts: 2026-07-29T16:11:21Z, phase: coding, event: approved, metrics: { tasks_done: 9 } }
+  - { ts: 2026-07-29T16:12:03Z, phase: test, event: approved, metrics: { passed: 2111, failed: 0 } }
+  - { ts: 2026-07-29T16:13:19Z, phase: review, event: approved, metrics: { must: 0, should: 1, nit: 0 } }
+  - { ts: 2026-07-29T16:13:19Z, phase: walkthrough, event: approved }
+  - { ts: 2026-07-29T16:13:48Z, phase: deliver, event: approved }

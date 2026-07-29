@@ -201,6 +201,29 @@ function onFieldFull(fieldIndex: number): void {
   if (cur < 0 || els.length === 0) return;
   focusInput(els, (cur + 1) % els.length);
 }
+
+/**
+ * 欄の**先頭**で Backspace が押された（ScreenGrid）。**前の入力欄の末尾**へ移る。
+ *
+ * 実機は欄の先頭の Backspace を「前の欄の末尾へカーソルを移す（削除はしない）」として扱う
+ * （GNU tn5250 `display.c` の `kf_backspace`）。EDTMSK のように**ホストが 1 つの項目を
+ * 複数の入力欄へ分解して送る**画面では、これが無いと欄をまたいで戻れず行き止まりになる。
+ * `onFieldFull`（次の欄へ）と対称に、先頭の欄では末尾の欄へ回る。
+ */
+function onFieldPrev(fieldIndex: number): void {
+  const flds = editableFields();
+  const els = editableInputs();
+  const cur = flds.findIndex((f) => f.index === fieldIndex);
+  if (cur < 0 || els.length === 0) return;
+  const prev = (cur - 1 + els.length) % els.length;
+  const el = els[prev];
+  if (!el) return;
+  el.focus();
+  // **末尾へ置く**（`focusInput` は先頭に置くので使えない）。行またぎ欄でも
+  // この input（スライス 0）の末尾で十分——続けて Backspace を押せば欄内の削除になる
+  const end = el.value.length;
+  el.setSelectionRange(end, end);
+}
 function onGuiSelect(fieldId: number, choiceIndex: number, selected: boolean): void {
   selectGuiChoice(props.sessionId, fieldId, choiceIndex, selected);
 }
@@ -832,6 +855,7 @@ function onWheel(ev: WheelEvent): void {
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
+        @field-prev="onFieldPrev"
         @gui-select="onGuiSelect"
         @gui-submit="onGuiSubmit"
         @selection-cleared="onSelectionCleared"
