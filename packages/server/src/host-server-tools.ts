@@ -18,7 +18,7 @@ import {
   listJobs,
   listObjects,
   listUsers,
-  query,
+  queryLimited,
   As400Error,
   dtaqDecodeEbcdic,
   type ConnectOptions,
@@ -133,8 +133,8 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         "ホストサーバー（database）経由で SELECT を実行し、列メタデータ付きで結果を返す。" +
         "**SELECT 専用**——INSERT/UPDATE/DELETE/DDL は実行できない（更新は host_command で RUNSQL を使う）。" +
         "5250 の画面操作を介さないため、画面レイアウトに影響されない。" +
-        "**maxRows は応答に載せる行数の上限であって、ホストから取得する行数の上限ではない**——" +
-        "大きな表では SQL 側に FETCH FIRST n ROWS ONLY を付けること。" +
+        "**maxRows はホストから取得する行数の上限**（既定 200）——上限に達したら結果セットを" +
+        "打ち切るので、大きな表でも全行を読み込まない。続きがある場合は truncated: true を返す。" +
         "LOB 列は既定でロケーターのみ返す。中身が要るときは lobMaxBytes を指定する。",
       inputSchema: {
         ...targetShape,
@@ -157,7 +157,7 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         ),
         rows: z.array(z.record(z.string(), z.unknown())),
         rowCount: z.number(),
-        /** maxRows で切り詰めたか。**切ったことを黙らない** */
+        /** 上限で**取得を打ち切ったか**（続きがある）。切ったことを黙らない */
         truncated: z.boolean()
       }
     },
@@ -166,16 +166,15 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         const conn = await openDb(target(input));
         try {
           const max = input.maxRows ?? 200;
-          // **切り詰めは応答側だけ**。`query` は結果セットを全件取得してから返すため、
-          // ここでの slice はホストからの取得量を減らさない。取得量を抑えるのは呼び出し側の
-          // SQL（FETCH FIRST）の責任——`stream` で早期打ち切りする案は、カーソルを
-          // 途中で閉じる経路が未検証（backlog 記載）のため採らない。
-          const result = await query(
-            conn,
-            input.sql,
-            input.lobMaxBytes ? { lob: { maxBytes: input.lobMaxBytes } } : {}
-          );
-          const rows = result.rows.slice(0, max);
+          // **上限はホストからの取得量の上限**。`queryLimited` が上限＋1 行で結果セットを
+          // 打ち切る（20,000 行の表で 1.2MB / 2.1 秒 → 約 12KB / 45ms。
+          // `20260730-sql-fetch-limit` research F2）。
+          // 以前は `query`（全件取得）＋応答側の slice で、**取得量は減っていなかった**
+          const result = await queryLimited(conn, input.sql, {
+            limit: max,
+            ...(input.lobMaxBytes ? { lob: { maxBytes: input.lobMaxBytes } } : {})
+          });
+          const rows = result.rows;
           return jsonResult({
             columns: result.columns.map((c) => ({
               name: c.name,
@@ -193,7 +192,8 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
               )
             ),
             rowCount: rows.length,
-            truncated: result.rows.length > rows.length
+            // **測った事実**（上限＋1 行目が読めたか）。応答側で切ったかではない
+            truncated: result.truncated
           });
         } finally {
           conn.close();

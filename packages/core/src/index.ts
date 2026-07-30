@@ -141,6 +141,8 @@ export { openQuery } from "./hostserver/db/query.js";
 export { type LobOptions } from "./hostserver/db/query.js";
 export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./hostserver/db/lob.js";
 export { query, stream, SqlError, type Row, type QueryResult } from "./hostserver/db/query.js";
+// 上限つき取得。**ホストから取ってくる量**を抑える（`query` は全件取得）
+export { queryLimited, type LimitedResult } from "./hostserver/db/query.js";
 export type { ColumnMeta, DbValue } from "./hostserver/db/db-decode.js";
 export { DB2, typeName, jsTypeOf, type JsType } from "./hostserver/db/db-types.js";
 // 結果を返さない文（DML / DDL）。判定は純関数で、実行は SQLCODE で成否を見る

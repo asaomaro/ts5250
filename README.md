@@ -457,7 +457,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 
 | ツール | 概要 |
 |---|---|
-| `host_sql` | SELECT を実行し列メタデータ付きで結果を返す。**SELECT 専用**（更新は `host_command` の `RUNSQL`） |
+| `host_sql` | SELECT を実行し列メタデータ付きで結果を返す。**SELECT 専用**（更新は `host_command` の `RUNSQL`）。`maxRows`（既定 200）は**ホストから取得する行数の上限**で、続きがあれば `truncated: true` |
 | `host_upload_table` | CSV を表へ**追加**（INSERT のみ。更新・削除・表作成はしない）。`csv` か `columns`＋`rows` で渡す |
 | `host_command` | CL コマンドを実行し、成否とメッセージ（`CPF…` の ID・重大度）を構造化して返す。**非対話のみ** |
 | `host_call_program` | プログラム / QSYS API を呼ぶ（パラメータは Base64） |

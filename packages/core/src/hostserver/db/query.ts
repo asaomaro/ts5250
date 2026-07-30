@@ -153,6 +153,75 @@ export async function query(
   }
 }
 
+/** 上限つき取得の結果 */
+export interface LimitedResult extends QueryResult {
+  /**
+   * 上限で切ったか。**測った事実**（`limit + 1` 行目が読めたか）であって、
+   * `rows.length === limit` からの推測ではない
+   * ——推測にすると**上限ちょうどの結果セットで嘘になる**。
+   */
+  truncated: boolean;
+}
+
+/**
+ * SELECT を**上限まで**取得する。上限に達したらカーソルを閉じて打ち切る。
+ *
+ * `query()` との違いは「**ホストから取ってくる量**」。`query()` は全件取得してから返すので、
+ * 大きな表では全行がメモリに載る。実機での実測（20,000 行 × `CHAR(50)`）:
+ *
+ * | 取り方 | fetch 往復 | 受信バイト | 所要 |
+ * |---|---|---|---|
+ * | `query`（全件） | 201 | 1,191,336 | 2,072ms |
+ * | `queryLimited`（上限 200） | 3 | 約 12,000 | 約 45ms |
+ *
+ * （3 往復目は「続きがあるか」を見る **1 行だけ**の要求）
+ *
+ * **途中でカーソルを閉じてもホストは健全**（同じ接続で次の SELECT も UPDATE も通る。
+ * 上限 1/50/99/100/101/200/250 と 10 回連続で確認。
+ * `20260730-sql-fetch-limit` research F1）。
+ *
+ * ⚠ `query()` にオプションを足す形にしていないのは、**渡し忘れると全件**になるため。
+ * 入口を分けて「どちらの意味で読むか」を必ず選ばせる。
+ */
+export async function queryLimited(
+  conn: DbConnection,
+  sql: string,
+  opts: { limit: number; lob?: LobOptions }
+): Promise<LimitedResult> {
+  if (!Number.isInteger(opts.limit) || opts.limit <= 0) {
+    // **黙って全件にしない。** 上限のつもりで 0 を渡した呼び出しが全件取得になるのが最悪
+    throw new As400Error("CONFIG_ERROR", `取得上限は 1 以上の整数で指定してください（${opts.limit}）`);
+  }
+  const limit = opts.limit;
+  const release = conn.acquire();
+  try {
+    const format = await prepareAndOpen(conn, sql);
+    const rows: Row[] = [];
+    let truncated = false;
+    try {
+      // **上限＋1 行まで読む**。`limit + 1` 行目が読めたかが「続きがあるか」の答えで、
+      // `rows.length === limit` からの推測にすると**上限ちょうどのときに嘘になる**
+      for await (const row of fetchAll(conn, format, DEFAULT_BLOCK_SIZE, limit + 1)) {
+        if (rows.length >= limit) {
+          // **余りの 1 行は捨てる**（上限を 1 行超えて返さない）。読めた事実だけを使う
+          truncated = true;
+          break;
+        }
+        rows.push(row);
+      }
+    } finally {
+      // 途中で打ち切っても・例外で抜けても**カーソルを残さない**。
+      // 打ち切った後のホストが健全なことは実機で確認済み（research F1）
+      await closeCursor(conn);
+    }
+    // **LOB は同じ接続の中で取り切る**——ロケーターは接続に紐づく（`query` と同じ順序）
+    if (opts.lob) await fillLobs(conn, rows, opts.lob);
+    return { columns: format.columns, rows, truncated };
+  } finally {
+    release();
+  }
+}
+
 /**
  * カーソルを開いたまま「列定義」と「行のジェネレータ」を返す。
  *
@@ -169,7 +238,17 @@ export async function openQuery(
   opts: { blockSize?: number } = {}
 ): Promise<{ columns: ColumnMeta[]; rows: AsyncGenerator<Row, void, undefined> }> {
   const release = conn.acquire();
-  const format = await prepareAndOpen(conn, sql);
+  let format: ResultFormat;
+  try {
+    format = await prepareAndOpen(conn, sql);
+  } catch (e) {
+    // **開けなかったら占有を解く。** ここで解かないと、SQL の誤り 1 回でその接続が
+    // 二度と使えなくなる（以降すべて「another query is in progress」）。
+    // 実機で確認した（`20260730-sql-fetch-limit` decisions D1）——
+    // 単発接続では接続ごと閉じるので隠れていたが、使い回す経路では致命的だった
+    release();
+    throw e;
+  }
   const blockSize = opts.blockSize ?? DEFAULT_BLOCK_SIZE;
   async function* iterate(): AsyncGenerator<Row, void, undefined> {
     try {
@@ -285,19 +364,31 @@ function toColumnMeta(c: ExtColumn): ColumnMeta {
   };
 }
 
-/** 行が尽きるまで fetch を繰り返す */
+/**
+ * 行が尽きるまで fetch を繰り返す。
+ *
+ * `maxRows` を渡すとそこで打ち切り、**1 回ごとのブロッキング係数も残りに合わせる**
+ * ——合わせないと「あと 1 行ほしい」ときにブロック 1 つぶん（既定 100 行）が丸ごと届く。
+ * 実機での実測では 1 行を取るのに 2,956 バイト（ブロック 100）と 184 バイト（ブロック 1）
+ * の差があった（`20260730-sql-fetch-limit` research F3）。
+ */
 async function* fetchAll(
   conn: DbConnection,
   format: ResultFormat,
-  blockSize: number
+  blockSize: number,
+  maxRows?: number
 ): AsyncGenerator<Row, void, undefined> {
+  let sent = 0;
   for (;;) {
+    // **要求するのは「残り」まで**。上限が無ければブロック 1 つぶん
+    const want = maxRows === undefined ? blockSize : Math.min(blockSize, maxRows - sent);
+    if (want <= 0) return;
     const reply = await conn.request({
       reqId: DB_REQ.fetch,
       orsBitmap: ORS.sendReplyImmediately | ORS.resultData | ORS.sqlca,
       params: [
         identifier(DB_CP.cursorName, CURSOR_NAME),
-        num(DB_CP.blockingFactor, blockSize, 4)
+        num(DB_CP.blockingFactor, want, 4)
       ],
       allowTemplateError: true
     });
@@ -312,8 +403,11 @@ async function* fetchAll(
       for (let r = 0; r < data.rows.length; r++) {
         yield decodeRow(data.rows[r]!, format.columns, data.nulls[r] ?? []);
       }
+      sent += data.rows.length;
       checkSqlca(reply, "fetch");
-      if (data.rows.length < blockSize) return;
+      // **要求した数より少なければ尽きている**（`blockSize` ではなく `want` と比べる
+      // ——上限つきの最後の要求はブロックより小さいことがある）
+      if (data.rows.length < want) return;
       continue;
     }
 
@@ -332,8 +426,9 @@ async function* fetchAll(
     for (let r = 0; r < data.rows.length; r++) {
       yield decodeRow(data.rows[r]!, format.columns, data.nulls[r] ?? []);
     }
+    sent += data.rows.length;
     checkSqlca(reply, "fetch");
-    if (data.rows.length < blockSize) return;
+    if (data.rows.length < want) return;
   }
 }
 

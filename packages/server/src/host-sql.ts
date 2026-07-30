@@ -33,7 +33,7 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
   openQuery,
-  query,
+  queryLimited,
   executeStatement,
   isNonQueryStatement,
   SqlError,
@@ -253,9 +253,14 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     let conn: DbConnection | undefined;
     try {
       conn = await openDb(resolveSource(deps.resolver, source, user));
-      const max = maxRows ?? DEFAULT_ROWS;
-      const result = await query(conn, sql, lobMaxBytes ? { lob: { maxBytes: lobMaxBytes } } : {});
-      const rows = result.rows.slice(0, max);
+      // **上限はホストからの取得量の上限**。上限＋1 行で結果セットを打ち切る
+      // （`20260730-sql-fetch-limit`）。以前は全件取得してから応答側で切っていたので、
+      // 大きな表では全行がメモリに載っていた（20,000 行で 1.2MB / 2.1 秒）
+      const result = await queryLimited(conn, sql, {
+        limit: maxRows ?? DEFAULT_ROWS,
+        ...(lobMaxBytes ? { lob: { maxBytes: lobMaxBytes } } : {})
+      });
+      const rows = result.rows;
       return c.json({
         columns: result.columns.map((col) => ({
           name: col.name,
@@ -273,10 +278,8 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
           )
         ),
         rowCount: rows.length,
-        // **切り詰めは応答側だけ**。`query` は結果セットを全件取得してから返すため、
-        // これはホストからの取得量を減らさない。取得量は SQL 側（FETCH FIRST）の責任で、
-        // UI もそう案内している。根本解決は backlog（stream の早期打ち切りが未検証）。
-        truncated: result.rows.length > rows.length
+        // **測った事実**（上限＋1 行目が読めたか）。応答側で切ったかではない
+        truncated: result.truncated
       });
     } catch (e) {
       const err = e as As400Error;
