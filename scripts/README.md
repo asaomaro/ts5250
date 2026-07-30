@@ -114,6 +114,10 @@ FFW の ADJUST 指定に基づく右寄せと、Field Exit / Erase EOF / Erase I
 | `build-edttest.mjs` | 実機の `TESTLIB` に `EDTDSPF`/`EDTPGM` を作成（冪等）。`EDTCDE` / `EDTWRD` を**用途 B（入出力両用）**に書けるかを 1 件ずつ単独コンパイルで確かめる。 |
 | `research-edtcde.mjs` | 調査用。編集コード／編集語つきの入力可能欄が、ワイヤ上**分解されるのか・編集文字を含んだまま 1 欄で来るのか**を実測する。 |
 | `verify-browser-idle.mjs` | 回帰 E2E（実ブラウザ＋実機・11 項目）。**セッションの寿命**: 既定（永続）で 110 秒放置しても切れない（同時に**ハートビートの往復**も検証——pong を返さなければ 90 秒で半開きと判断される）／セッション設定 `idleTimeout: 1` で放置すると **60 秒で切れる**（早くは切らない）／同じ設定でも**打鍵し続ければ切れない**（在席の合図 `activity` が効いている。**AID キーは押さない**）／設定フォームの選択肢。掃除の間隔だけ `startIdleSweep(2000)` に縮める（判定は実装のまま）。**追加のホスト資産は不要**。 |
+| `build-dttest.mjs` | 実機の `TESTLIB` に `DTMDSPF`/`DTMPGM` を作成（冪等）。**`EDTMSK`（編集マスク）つき入力欄**を 8 通り（`&` / 空白 / `&&/&&/&&` のマスク・`EDTCDE(Y)` 単独・`EDTWRD` の時刻・SSN・素の数値）並べる。**マスクの綴りを推測せず 1 件ずつ単独コンパイル**して通る書き方を実機に教えてもらう。DDS の定数は**英数字のみ**（日本語だと `INSERT` が長さ超過する。実測 155 > 153）。`DT_SKIP_PROBE=1` で単独コンパイルを省略できる。 |
+| `research-edtmsk.mjs` | 調査用。`DTMPGM` の受信を **core を通さず独立にパース**して SF オーダーを並べ、**`EDTMSK` が欄を分解するか**を見る。**結論: 分解しない**（下記の注意）。 |
+| `research-sysval.mjs` | 調査用。日付・時刻のシステム値の引き方を確かめる。**`QSYS2.SYSTEM_VALUE_INFO` は実在**し、値は `CURRENT_CHARACTER_VALUE` に入る（`QDATFMT=YMD` / `QDATSEP=/` / `QTIMSEP=:`）。候補を 1 つに絞らず順に試す形にしてある。 |
+| `verify-browser-prompt.mjs` | 回帰 E2E（実ブラウザ＋実機・6 項目）。**`F4` の導線**: 設定 OFF では出ない／ON でフォーカス中の欄の隣に出る／**ラベルはホストの凡例の語**（実機は化けたカタカナで来る）／押すと**ホストが実際にプロンプト画面を返す**（メインメニュー → `MAJOR メジャー・コマンド・グループ`）。画面設定メニューの操作（`.vsm-btn` → `.vsm-row` → `.seg button`）も通る。**追加のホスト資産は不要**。 |
 
 ```sh
 node --env-file=.env scripts/build-adjtest.mjs      # 初回/再作成
@@ -134,6 +138,17 @@ node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・�
   端末が止めなければ誰も止めない。
 - **`EDTCDE` / `EDTWRD` は用途 B でも書ける**。そのとき編集文字は**入力欄の中に入って**来る
   （`value="     .00"`・shift=num-only）。分解されない。
+- **コマンド行の入力欄は実機で長さ 153**（行またぎ）。画面に部品を重ねるとき
+  「欄の右隣」を `col + length` で出すと**画面外に落ちて永久に出ない**。
+  `posOfOffset` で欄の終わりを出し、右に場所が無ければ**欄の直前**（SF の属性バイトの桁＝空白）へ
+  退避する（`verify-browser-prompt.mjs` で実測して直した）。
+- **`EDTMSK` は欄を分解しない**（2026-07-29・実機・8 通りの DDS で実測）。
+  `EDTCDE(Y)` / `EDTWRD` に `EDTMSK` を足しても、**どの綴りでも 1 欄で来て編集文字は欄の中の値に入る**
+  （`value=" 0/00/00"`）。マスクは 3 通りとも `CRTDSPF` が通るので、**「書けるか」では
+  分解の有無を判別できない**。`.aidev/backlog/input-assist.md` の datepicker が
+  これで「作らない」に決着した（判定材料が無い）。**再調査しないこと。**
+- **日付・時刻のシステム値**は `QSYS2.SYSTEM_VALUE_INFO` から引ける
+  （`QDATFMT` / `QDATSEP` / `QTIMSEP`。値は `CURRENT_CHARACTER_VALUE`）。
 - **セッションの寿命は実測で確かめた**（2026-07-29・実機）: 既定（永続）は 110 秒放置でも切れず、
   `idleTimeout: 1` は **60 秒で切れる**（設定より早くは切らない）。同じ 1 分設定でも **AID キーを押さず打鍵だけ
   続ければ切れない**——在席の合図が 15 秒間引きでも 1 分のタイムアウトに間に合っている。

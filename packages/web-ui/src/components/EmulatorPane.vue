@@ -870,6 +870,7 @@ function onWheel(ev: WheelEvent): void {
         :window-frame="view.windowFrame"
         :window-backdrop="view.windowBackdrop"
         :opt-hints="view.optHints"
+        :prompt-hint="view.promptHint"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"

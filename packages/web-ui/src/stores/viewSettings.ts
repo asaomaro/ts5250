@@ -71,6 +71,13 @@ export interface ViewSettings {
    * **推測を含む機能なので既定は none**（勝手に有効化しない。`windowFrame` の既定が none なのと同じ扱い）。
    */
   optHints: OptHintStyle;
+  /**
+   * `F4` の導線（凡例に `F4=…` がある画面で、フォーカス中の欄から F4 を送れるボタン）。
+   *
+   * **検出は推測を含まない**（ホストが凡例に書いた事実だけを見る）が、**画面に部品を重ねる**ので
+   * 既定は OFF——backlog の「勝手に有効化しない」に従う。
+   */
+  promptHint: boolean;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -112,6 +119,8 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     ],
   },
   { key: "linkify", label: "リンク化", opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }] },
+  // 見た目の候補が無いので `linkify` と同じ 2 択（backlog:「全部にデザイン候補を作らない」）
+  { key: "promptHint", label: "F4 の導線", opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }] },
   {
     key: "optHints",
     label: "オプション選択肢",
@@ -198,6 +207,7 @@ const FALLBACK: ViewSettings = {
   kana: "auto", // ホストの表のまま
   linkify: true,
   optHints: "none", // 推測を含むので既定は出さない
+  promptHint: false, // 画面に部品を重ねるので、利用者が選んでから出す
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",

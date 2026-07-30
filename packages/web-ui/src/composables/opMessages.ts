@@ -22,6 +22,11 @@ export const MSG_PROTECTED = "カーソルが保護された区域にあるた�
 
 /** オプション欄の選択肢（画面の凡例から作る一覧）のラベル */
 export const MSG_OPT_HINTS = "オプションの選択肢";
+/**
+ * `F4` の導線の既定ラベル。**凡例のラベルが取れたときはそちらを使う**——
+ * `F4` の意味はホストが決めるので、UI 側で言い換えない（spec 方針2）。
+ */
+export const MSG_PROMPT_HINT = "F4 を送る";
 
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
