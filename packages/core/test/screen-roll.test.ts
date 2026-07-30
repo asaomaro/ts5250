@@ -7,12 +7,15 @@ import { COMMAND, ESC } from "../src/protocol/constants.js";
 /**
  * ROLL（ESC 0x23）＝表示イメージの行送り。
  *
- * ⚠ **実機では未確認**。`COMMAND` 表に値だけあって実装が無く、
- * `default` 節で「レコードの残りごと捨てる」に落ちていた（＝後続の READ を失う）。
- * 形式（`方向＋行数(1) 上端(1) 下端(1)`・上位ビットで方向・下位 5 ビットで行数）は
- * SC30-3533 / tn5250 の定義に従う。**QSH は使っていなかった**（画面を描き直していた。
- * `20260730-qsh-save-partial-screen` research F4）ので、
- * ここで固定できるのは「捨てないこと」と「実装した規則どおりに動くこと」まで。
+ * ⚠ **実機では未確認**（11 画面の国勢調査で 1 件も届かなかった。
+ * `20260730-datastream-command-census`）。根拠は**原典 2 実装の一致**:
+ *
+ * - tn5250 `session.c`: `0x80` が落ちていれば行数を負にし、`dbuffer.c` は負を "Move text up"
+ * - tn5250j `Screen5250.rollScreen`: コメント「0 - up / 1 - down」
+ *
+ * → **`0x80` 落ち＝上へ / 立ち＝下へ**（当方は最初これを逆に実装していた。
+ * `20260730-tn5250-cross-check` research F1）。
+ * 行数は下位 5 ビット（tn5250 と同じ。tn5250j は `& 0x7f` だが 32 以上は画面を超えるので差が出ない）。
  */
 const codec = codecForCcsid(37);
 
@@ -100,21 +103,21 @@ describe("ESC 0x23 の解釈", () => {
     return [ESC, COMMAND.ROLL, dir, top, bottom];
   }
 
-  it("上位ビットが立っていれば上へ送る", () => {
+  it("**上位ビットが落ちていれば上へ**送る（原典 2 実装の一致）", () => {
     const buf = laddered();
-    applyDataStream(Uint8Array.from(rollStream(0x81, 1, 6)), buf, codec, () => {});
+    applyDataStream(Uint8Array.from(rollStream(0x01, 1, 6)), buf, codec, () => {});
     expect(heads(buf)).toBe("BCDEF ");
   });
 
-  it("上位ビットが落ちていれば下へ送る", () => {
+  it("**上位ビットが立っていれば下へ**送る", () => {
     const buf = laddered();
-    applyDataStream(Uint8Array.from(rollStream(0x01, 1, 6)), buf, codec, () => {});
+    applyDataStream(Uint8Array.from(rollStream(0x81, 1, 6)), buf, codec, () => {});
     expect(heads(buf)).toBe(" ABCDE");
   });
 
   it("行数は下位 5 ビット", () => {
     const buf = laddered();
-    applyDataStream(Uint8Array.from(rollStream(0x82, 1, 6)), buf, codec, () => {});
+    applyDataStream(Uint8Array.from(rollStream(0x02, 1, 6)), buf, codec, () => {});
     expect(heads(buf)).toBe("CDEF  ");
   });
 
@@ -122,7 +125,7 @@ describe("ESC 0x23 の解釈", () => {
     const buf = new ScreenBuffer();
     const warns: string[] = [];
     const result = applyDataStream(
-      Uint8Array.from([...rollStream(0x81, 1, 6), ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x08]),
+      Uint8Array.from([...rollStream(0x01, 1, 6), ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x08]),
       buf,
       codec,
       (m) => warns.push(m)

@@ -72,6 +72,18 @@ export const COMMAND = {
   /** RESTORE PARTIAL SCREEN。保管しておいた内容をホストが返してくる側（0x03 の対） */
   RESTORE_PARTIAL_SCREEN: 0x13,
   ROLL: 0x23,
+  /**
+   * 印刷用の画面読み取り（4 種）と即時読み取り（2 種）。**いずれもパラメータを持たない**
+   * ——原典（tn5250 `session.c`）がバイトを読まずに無視していることで確認した
+   * （`20260730-tn5250-cross-check` research F5）。
+   * 当方も応答は実装していないが、**レコードの残りを捨てない**ために受理だけする。
+   */
+  READ_SCREEN_TO_PRINT: 0x66,
+  READ_SCREEN_TO_PRINT_EXTENDED: 0x68,
+  READ_SCREEN_TO_PRINT_GRID: 0x6a,
+  READ_SCREEN_TO_PRINT_EXT_GRID: 0x6c,
+  READ_IMMEDIATE: 0x72,
+  READ_IMMEDIATE_ALT: 0x83,
   WRITE_STRUCTURED_FIELD: 0xf3
 } as const;
 

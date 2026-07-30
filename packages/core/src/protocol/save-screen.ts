@@ -71,20 +71,28 @@ function writeScreenAsWtd(w: ByteWriter, buf: ScreenBuffer, codec: Codec): void 
  * **これはホストが待っている返信である**（opcode は PUT/GET＝「送ったから返せ」）。
  * 返さないとホストは次を送ってこず、**QSH が「待機中・ホストから応答がない」で固まる**。
  *
- * 中身は SAVE SCREEN（0x02）の応答と同じ考え方——ホストにとっては**不透明な保管物**で、
- * あとで RESTORE PARTIAL SCREEN（0x13）としてそのまま返ってくる。
- * 違いは先頭を `ESC RESTORE_PARTIAL_SCREEN` にし、**受け取った 5 バイトのパラメータを
- * そのまま写す**こと（ホストが自分の指定した範囲を識別できるようにするため）。
+ * ## 中身は SAVE SCREEN（0x02）の応答と**同じ**にする
+ *
+ * ホストにとってこの中身は**不透明な保管物**で、復元時に**そのまま返ってくる**
+ * （実機で実験して確かめた——応答から先頭の 7 バイトを外すと、
+ * 返ってくるレコードもちょうど 7 バイト短くなり、`ESC 13` が消えた。
+ * `20260730-tn5250-cross-check` research F4）。
+ *
+ * 以前は先頭に `ESC RESTORE_PARTIAL_SCREEN` ＋受け取った 5 バイトの写しを付けていたが、
+ * **それが返ってきたものを「ホストが送ってきた 0x13」と誤解して 5 バイト読み飛ばす**
+ * という自作自演になっていた。原典（tn5250）は `0x13` を**パラメータ無し**として扱う。
+ *
+ * 先頭の `ESC RESTORE_SCREEN` は**局所の退避を戻す目印**として残す
+ * ——長く実機で動いている形で、`0x02` と同じ役割を果たす。
+ * `params` は受け取るが**送り返さない**（ホストは使っていない。research F2）。
  */
 export function buildSavePartialScreenResponse(
   buf: ScreenBuffer,
   codec: Codec,
   params: Uint8Array
 ): Uint8Array {
-  const w = new ByteWriter();
-  w.u8(ESC).u8(COMMAND.RESTORE_PARTIAL_SCREEN).bytes(params);
-  writeScreenAsWtd(w, buf, codec);
-  return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array());
+  void params; // 記録として受け取るだけ（原典も値を使っていない）
+  return buildSaveScreenResponse(buf, codec);
 }
 
 /**

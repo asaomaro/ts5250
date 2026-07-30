@@ -141,32 +141,58 @@ export function applyDataStream(
         break;
       }
       case COMMAND.RESTORE_PARTIAL_SCREEN:
-        // RESTORE PARTIAL SCREEN（ESC 0x13）: 0x03 で預けた内容をホストが**そのまま返してくる**。
-        // 実機の QSH を F3 で抜けたときの中身（`20260730-datastream-command-census`）:
+        // RESTORE PARTIAL SCREEN（ESC 0x13）: **パラメータは持たない**。
+        // 原典（tn5250 `session.c`）も 1 バイトも読まずに無視し、
+        // 「後続は妥当な WRITE TO DISPLAY のはず」とコメントしている
+        // （`20260730-tn5250-cross-check` research F3）。
         //
-        //   04 13 | 00 00 00 00 00 | 04 11 00 00 | 11 01 01 3a d4 c1 c9 d5 …（"MAIN"）| … 04 52 …
-        //   ESC 13   **パラメータ 5 バイト**   ＝こちらが送った WTD ストリーム       ＝READ
-        //
-        // **5 バイトを読み飛ばさないと、続きを ESC と読み違えてレコードごと捨てる**
-        // （`expected ESC, got 0x0` が出て、後ろの WTD と READ を失う）。
-        // 読み飛ばせば続きは通常のコマンド列として処理され、ホストが返した画像で描き直され、
-        // 末尾の READ でキーボードが開く。
-        r.skip(5);
-        // 画面はこちらの退避からも戻す（`RESTORE SCREEN` と同じ扱い。
-        // 直後にホストの WTD が同じ画像を描くので二重だが、**退避スタックを積んだままにしない**）
+        // ⚠ 以前ここで 5 バイト読み飛ばしていたのは、**こちらの応答が先頭に
+        // `ESC 13 ＋ 写し` を埋め込んでいた**ため——ホストは積荷をそのまま返すので、
+        // 自分が付けたものを「ホストのパラメータ」と誤解していた（自作自演。research F4）。
+        // 応答からその前置きを外したので、ここも原典どおり読まない。
         if (!buf.restoreScreen()) warn("RESTORE PARTIAL SCREEN with empty save stack");
         break;
       case COMMAND.ROLL: {
         // ROLL（ESC 0x23）: `方向＋行数(1) 上端行(1) 下端行(1)`。
-        // 上位ビット（0x80）が立っていれば上へ、落ちていれば下へ。行数は下位 5 ビット。
-        // **行送りの画面（QSH のような出力の流れる画面）で使う**。
+        //
+        // **方向は上位ビット（0x80）が落ちていれば上へ・立っていれば下へ**。
+        // 原典 2 実装が一致している（tn5250 `session.c`: ビットが落ちていれば行数を負にし、
+        // `dbuffer.c` は負を "Move text up" として扱う／tn5250j `Screen5250.rollScreen` の
+        // コメント「0 - up / 1 - down」）。**当方は逆に実装していた**
+        // （`20260730-tn5250-cross-check` research F1）。
+        //
+        // 行数は下位 5 ビット（tn5250 と同じ。tn5250j は `& 0x7f` だが、
+        // 32 以上は 24〜27 行の画面を超えるので**実際には差が出ない**）。
+        //
+        // ⚠ **実機で ROLL を送ってくる画面は見つかっていない**（11 画面の国勢調査で 0 件。
+        // `20260730-datastream-command-census`）。根拠は原典 2 実装の一致だけである。
         const dir = r.u8();
         const top = r.u8();
         const bottom = r.u8();
         const lines = dir & 0x1f;
-        buf.roll(top, bottom, (dir & 0x80) !== 0 ? lines : -lines);
+        buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines);
         break;
       }
+      // **原典がパラメータ無しとして無視しているコマンド**（tn5250 `session.c`。research F5）。
+      // 当方も**捨てずに次のコマンドへ進む**——レコードごと捨てると後続の READ を失い、
+      // キーボードが開かないまま固まる（この不具合をこれまで 3 回踏んでいる）。
+      case COMMAND.READ_SCREEN_TO_PRINT:
+      case COMMAND.READ_SCREEN_TO_PRINT_EXTENDED:
+      case COMMAND.READ_SCREEN_TO_PRINT_GRID:
+      case COMMAND.READ_SCREEN_TO_PRINT_EXT_GRID:
+        warn(`READ SCREEN TO PRINT (0x${cmd.toString(16)}) — 印刷要求には応答しない（後続は処理する）`);
+        break;
+      case COMMAND.READ_IMMEDIATE:
+      case COMMAND.READ_IMMEDIATE_ALT:
+        // ⚠ **本来は応答が要る読み取り要求**（原典 tn5250 は 0x72 を実装しており、
+        // MDT の有無に関わらず全フィールドを即送信する）。**応答は実装していない**
+        // ——実機で届いたことが無く、応答の正しさを確かめられないため。
+        // 届いた事実に気づけるよう警告を残す（backlog に原典の実装方法を控えてある）。
+        warn(
+          `READ IMMEDIATE (0x${cmd.toString(16)}) — **応答していない**（未実装）。` +
+            `ホストが待つ場合は無反応になる`
+        );
+        break;
       case COMMAND.WRITE_TO_DISPLAY:
         applyWtd(r, buf, codec, result, warn);
         break;
