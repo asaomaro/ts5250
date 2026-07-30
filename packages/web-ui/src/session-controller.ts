@@ -1,6 +1,6 @@
 import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
 import type { AidKey } from "@as400web/core";
-import { WsClient } from "./ws-client.js";
+import { WsClient, wsUrl } from "./ws-client.js";
 import {
   MSG_NO_RESPONSE,
   MSG_PC_COMMAND_DENIED,
@@ -20,10 +20,8 @@ import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.
 import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
 import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL } from "./composables/opMessages.js";
 
-const WS_URL = (): string => {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws`;
-};
+/** `/ws` の URL（組み立ては `ws-client.ts` に 1 か所。監視コンソールも同じものを使う） */
+const WS_URL = wsUrl;
 
 /** ローディング表示までの猶予（この時間内に応答が来ればスピナーを出さない） */
 const LOADING_DELAY_MS = 500;

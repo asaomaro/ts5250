@@ -7,6 +7,7 @@ import HostListPane from "./HostListPane.vue";
 import SqlPane from "./SqlPane.vue";
 import IfsPane from "./IfsPane.vue";
 import DtaqPane from "./DtaqPane.vue";
+import WatchPane from "./WatchPane.vue";
 import TransferPane from "./TransferPane.vue";
 import SpoolPane from "./SpoolPane.vue";
 import PaneTabs from "./PaneTabs.vue";
@@ -87,6 +88,8 @@ const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?
 const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
 const activeIsIfs = computed(() => group.value.activeTab?.startsWith("ifs:") ?? false);
 const activeIsDtaq = computed(() => group.value.activeTab?.startsWith("dtaq:") ?? false);
+// 監視コンソール（push 型）。既存の `dtaq:`（pull 型）とは別のアプリ
+const activeIsWatch = computed(() => group.value.activeTab?.startsWith("watch:") ?? false);
 const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
 /** pull 型スプールタブ（spool:files）か。プリンターセッション（push 型）とは別系統 */
 const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:") ?? false);
@@ -122,6 +125,7 @@ const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:")
       <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
       <IfsPane v-else-if="group.activeTab && activeIsIfs" :tab-id="group.activeTab" />
       <DtaqPane v-else-if="group.activeTab && activeIsDtaq" :tab-id="group.activeTab" />
+      <WatchPane v-else-if="group.activeTab && activeIsWatch" :tab-id="group.activeTab" />
       <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
       <SpoolPane v-else-if="group.activeTab && activeIsSpool" :tab-id="group.activeTab" />
       <PrinterPane

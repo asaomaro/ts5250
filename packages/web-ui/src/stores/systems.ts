@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { PublicSystem, PublicSession, Watermark, IdleTimeout } from "@as400web/server";
+import type { PublicSystem, PublicSession, Watermark, IdleTimeout, SessionType, DtaqWatchSpec } from "@as400web/server";
 
 /**
  * システムとセッション設定（サーバー保存・単一の真実）。
@@ -38,7 +38,7 @@ export interface SessionConfigForm {
   source?: "server" | "personal";
   name: string;
   system: string;
-  sessionType: "display" | "printer";
+  sessionType: SessionType;
   deviceName?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
@@ -64,6 +64,11 @@ export interface SessionConfigForm {
    * **省略はサーバー既定に従う**（既定は切らない）。`0` は受け付けない
    */
   idleTimeout?: IdleTimeout;
+  /**
+   * `dtaqwatch` のみ。常駐監視するデータ待ち行列。
+   * **種別との整合はサーバーが parse で強制する**（片方だけ送ると 400）。
+   */
+  dtaqWatch?: DtaqWatchSpec;
   /**
    * サーバー設定の表示セッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界）。
    * ホストの `STRPCCMD` が届いたときにサーバー機でコマンドを実行する設定

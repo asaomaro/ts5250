@@ -1,8 +1,8 @@
 schema: 3
 slug: dtaq-watch-notify
-current: research
-approved: [requirement, research]
-mode: interactive
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough, deliver]
+mode: autonomous
 humanGates: []
 maxSendBacks: 3
 dependsOn: []

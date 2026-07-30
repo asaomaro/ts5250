@@ -10,6 +10,7 @@ import type { PublicSession, PublicSystem } from "@as400web/server";
 import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores/systems.js";
 import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
+import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
 import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
@@ -82,7 +83,32 @@ const sesForm = reactive<SesFormState>({
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
   transformTo: "",
-  idleTimeout: undefined
+  idleTimeout: undefined,
+  dtaqWatch: undefined
+});
+
+/**
+ * 監視するキューの入力。**ネストしたオブジェクトへ直接 v-model しない**——
+ * `sesForm.dtaqWatch` は未設定（undefined）から始まるので、
+ * そのまま束ねるとキー入力の 1 文字目で例外になる。
+ */
+const watchLibrary = computed({
+  get: () => sesForm.dtaqWatch?.library ?? "",
+  set: (v: string) => {
+    sesForm.dtaqWatch = { library: v, name: sesForm.dtaqWatch?.name ?? "", ...(sesForm.dtaqWatch?.encoding ? { encoding: sesForm.dtaqWatch.encoding } : {}) };
+  }
+});
+const watchName = computed({
+  get: () => sesForm.dtaqWatch?.name ?? "",
+  set: (v: string) => {
+    sesForm.dtaqWatch = { library: sesForm.dtaqWatch?.library ?? "", name: v, ...(sesForm.dtaqWatch?.encoding ? { encoding: sesForm.dtaqWatch.encoding } : {}) };
+  }
+});
+const watchEncoding = computed({
+  get: () => sesForm.dtaqWatch?.encoding ?? "utf8",
+  set: (v: "utf8" | "base64" | "ebcdic") => {
+    sesForm.dtaqWatch = { library: sesForm.dtaqWatch?.library ?? "", name: sesForm.dtaqWatch?.name ?? "", encoding: v };
+  }
 });
 
 /** 「無操作で切る」の選択肢（分）。任意の数値を打たせるほどの要求ではないので選択式にする */
@@ -190,6 +216,8 @@ function loadSession(): void {
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
   sesForm.idleTimeout = s.idleTimeout;
+  // 監視の設定はオブジェクトごと置き換わるので、**編集しなくても読み込んで送り返す**
+  sesForm.dtaqWatch = s.dtaqWatch ? { ...s.dtaqWatch } : undefined;
 }
 
 /**
@@ -318,6 +346,23 @@ async function save(): Promise<void> {
       // `idleTimeout` は「サーバー既定に従う」＝ undefined。**明示的な delete は要らない**——
       // `JSON.stringify` が undefined のキーを落とすので、そのままキーごと送られない
       // （`transformTo`/`screenSize` は空文字や実値を持つため delete が必要。事情が違う）
+      // **種別と監視設定の整合を揃える。** サーバーは parse で弾くので、
+      // 揃えないと「保存できません」だけが返って理由が分からない
+      if (form.sessionType === "dtaqwatch") {
+        const w = sesForm.dtaqWatch;
+        form.dtaqWatch = {
+          library: (w?.library ?? "").trim().toUpperCase(),
+          name: (w?.name ?? "").trim().toUpperCase(),
+          ...(w?.encoding ? { encoding: w.encoding } : {})
+        };
+        delete form.screenSize;
+        delete form.enhanced;
+        delete form.watermark;
+        delete form.rescueAction;
+        delete form.transformTo;
+      } else {
+        delete form.dtaqWatch;
+      }
       if (form.sessionType === "printer") {
         // 既定（保留）はわざわざ保存しない——設定ファイルに既定値を書き散らさない
         if (sesForm.rescueAction === "delete") form.rescueAction = "delete";
@@ -389,9 +434,15 @@ async function remove(): Promise<void> {
 }
 
 /** セッション種別のアイコンと表記。旧 UI にあった見分けを引き継ぐ */
-const typeIcon = computed(() => (props.session?.sessionType === "printer" ? "🖨" : "🖥"));
+const typeIcon = computed(() =>
+  props.session?.sessionType === "printer" ? "🖨" : props.session?.sessionType === "dtaqwatch" ? "👁" : "🖥"
+);
 const typeLabel = computed(() =>
-  props.session?.sessionType === "printer" ? "プリンター" : "5250 端末"
+  props.session?.sessionType === "printer"
+    ? "プリンター"
+    : props.session?.sessionType === "dtaqwatch"
+      ? "待ち行列監視"
+      : "5250 端末"
 );
 
 /** 詳細（ⓘ）の開閉。旧 UI にあった接続設定の詳細表示を引き継ぐ */
@@ -424,7 +475,15 @@ const infoRows = computed(() => {
   const parent = systemsStore.systems.find((x) => x.ref === o.system);
   rows.push({ label: "名称", value: o.name });
   rows.push({ label: "区分", value: o.ref.startsWith("srv:") ? "サーバー設定" : "自分の設定" });
-  rows.push({ label: "種別", value: o.sessionType === "printer" ? "プリンター" : "5250 端末" });
+  rows.push({
+    label: "種別",
+    value:
+      o.sessionType === "printer" ? "プリンター" : o.sessionType === "dtaqwatch" ? "待ち行列監視" : "5250 端末"
+  });
+  if (o.dtaqWatch) {
+    rows.push({ label: "監視するキュー", value: `${o.dtaqWatch.library}/${o.dtaqWatch.name}` });
+    rows.push({ label: "符号化", value: o.dtaqWatch.encoding ?? "utf8" });
+  }
   rows.push({ label: "システム", value: parent?.name ?? o.system });
   // 接続先と資格情報はシステム側が持つ。辿った結果をここに出す
   if (parent) {
@@ -577,6 +636,7 @@ const infoRows = computed(() => {
           <select v-model="sesForm.sessionType" :disabled="!creating">
             <option value="display">5250 表示</option>
             <option value="printer">プリンター</option>
+            <option value="dtaqwatch">待ち行列監視</option>
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
@@ -600,6 +660,29 @@ const infoRows = computed(() => {
             <option value="delete">削除する</option>
           </select>
         </label>
+        <!--
+          待ち行列監視。**消費することを設定の場でも言う**——本番キューに掛けると業務が壊れる
+          （requirement の明示要求。監視コンソールでも常時出す）
+        -->
+        <template v-if="sesForm.sessionType === 'dtaqwatch'">
+          <label class="row">
+            <span class="cap">ライブラリー</span>
+            <input v-model="watchLibrary" maxlength="10" placeholder="MYLIB" />
+          </label>
+          <label class="row">
+            <span class="cap">キュー名</span>
+            <input v-model="watchName" maxlength="10" placeholder="ORDERQ" />
+          </label>
+          <label class="row">
+            <span class="cap" title="本文の解釈。ebcdic はシステム CCSID のキュー">符号化</span>
+            <select v-model="watchEncoding">
+              <option value="utf8">utf8（テキスト）</option>
+              <option value="ebcdic">ebcdic（システム CCSID）</option>
+              <option value="base64">base64（バイナリ）</option>
+            </select>
+          </label>
+          <p class="row full watchwarn">⚠ {{ MSG_WATCH_CONSUMES }}</p>
+        </template>
         <label v-if="sesForm.sessionType === 'display'" class="row">
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">

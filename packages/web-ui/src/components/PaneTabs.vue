@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import type { GroupNode } from "../stores/workspace.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { watchesStore } from "../stores/watches.js";
 import { systemsStore } from "../stores/systems.js";
 import { PANE_LABELS, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
@@ -37,9 +38,22 @@ function selectTab(id: string): void {
   workspaceStore.setActiveTab(props.group.id, id);
   workspaceStore.showLauncher = false;
 }
-/** プリンターの未読スプール数（非アクティブ時にタブへバッジ表示） */
-function unread(sessionId: string): number {
-  return sessionsStore.get(sessionId)?.unread ?? 0;
+/**
+ * タブのバッジに出す未読数。
+ *
+ * **セッションタブと pane タブで出どころが違う**——プリンターは
+ * `sessionsStore`（1 タブ = 1 接続）だが、監視コンソールは pane タブで
+ * セッションを持たないので `watchesStore`（サーバーの写し）から引く。
+ * `sessionsStore.get()` は pane タブの id では何も返さないため、
+ * ここで分けなければ監視の未読は永久に出ない（research F6）。
+ */
+function unread(id: string): number {
+  if (id.startsWith("watch:")) return watchesStore.totalUnread;
+  return sessionsStore.get(id)?.unread ?? 0;
+}
+/** バッジの説明。種別ごとに何の未読かを言う */
+function unreadTitle(id: string): string {
+  return id.startsWith("watch:") ? "新着エントリ" : "新着スプール";
 }
 /**
  * タブを閉じる。**セッションを持たないタブ（管理・一覧）は workspace から外すだけ**——
@@ -182,7 +196,7 @@ function onStripLeave(ev: DragEvent): void {
     >
       <span class="dot" :class="{ live: connected(t) }"></span>
       {{ label(t) }}
-      <span v-if="unread(t) > 0" class="badge" title="新着スプール">{{ unread(t) }}</span>
+      <span v-if="unread(t) > 0" class="badge" :title="unreadTitle(t)">{{ unread(t) }}</span>
       <button
         v-if="!isPane(t)"
         class="info"

@@ -13,7 +13,39 @@
 import { z } from "zod";
 
 export const screenSizeSchema = z.enum(["24x80", "27x132"]);
-export const sessionTypeSchema = z.enum(["display", "printer"]);
+/**
+ * セッション種別。
+ *
+ * `dtaqwatch` は**サービス型**——人が画面を触るのではなく、設定が仕事をする
+ * （データ待ち行列を常駐監視する）。装置名も画面サイズも使わない
+ * （`20260723-dtaq-watch-notify` spec 方針1・research F5）。
+ */
+export const sessionTypeSchema = z.enum(["display", "printer", "dtaqwatch"]);
+
+/**
+ * 常駐監視するデータ待ち行列の指定。
+ *
+ * **信頼設定ではない**——サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れないので、
+ * サーバー設定・個人設定の両方が持てる（`watermark` と同じ理屈）。
+ *
+ * **監視はエントリを取り出して消す**（本番のコンシューマの取り分を奪う）。
+ * その注意は UI 側で常時出す（`opMessages.ts` の `MSG_WATCH_CONSUMES`）。
+ */
+export const dtaqWatchSchema = z
+  .object({
+    /** ライブラリー名（EBCDIC 10 バイト固定） */
+    library: z.string().min(1).max(10),
+    /** キュー名（同上） */
+    name: z.string().min(1).max(10),
+    /** 本文の符号化（既定 utf8）。`ebcdic` はシステム CCSID のキュー */
+    encoding: z.enum(["utf8", "base64", "ebcdic"]).optional(),
+    /** キー付きキューのキー。`search` と対で意味を持つ */
+    key: z.string().optional(),
+    search: z.enum(["EQ", "NE", "LT", "LE", "GT", "GE"]).optional()
+  })
+  .strict();
+export type SessionType = z.infer<typeof sessionTypeSchema>;
+export type DtaqWatchSpec = z.infer<typeof dtaqWatchSchema>;
 
 /** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。**信頼設定** */
 export const printerSchema = z.object({
@@ -172,6 +204,11 @@ const sessionBase = {
   /** display のみ意味を持つ。画面に重ねる透かし（表示だけの設定） */
   watermark: watermarkSchema.optional(),
   /**
+   * `dtaqwatch` のみ。常駐監視するデータ待ち行列。
+   * **種別との整合は parse で強制する**（下記 `assertTypeConsistent`）。
+   */
+  dtaqWatch: dtaqWatchSchema.optional(),
+  /**
    * 無操作で切るまでの時間（display / printer 双方で意味を持つ）。
    *
    * **信頼設定ではない**——サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れないので、
@@ -184,9 +221,41 @@ const sessionBase = {
  * サーバー設定のセッション（profiles.json）。printer 出力と PC コマンド実行を持てる。
  * 到達経路は `canEditProfiles`（認証オフ or admin かつファイル永続化可）のルートに限られる。
  */
-export const serverSessionSchema = z
+/**
+ * **種別と設定の整合を parse で強制する。**
+ *
+ * 片方だけ書ける状態にすると「監視のつもりで登録したのに何も起きない」設定が作れてしまう
+ * （`dtaqwatch` なのに対象キューが無い／`display` なのに監視設定がある）。
+ * 後段で落とす形にせず、**受け取った時点で 400 にする**（`printer` を個人設定に
+ * 持たせない判断と同じ考え方）。
+ */
+function assertTypeConsistent(
+  s: { sessionType: SessionType; dtaqWatch?: DtaqWatchSpec | undefined },
+  ctx: z.RefinementCtx
+): void {
+  if (s.sessionType === "dtaqwatch" && s.dtaqWatch === undefined) {
+    ctx.addIssue({ code: "custom", path: ["dtaqWatch"], message: "dtaqwatch セッションには dtaqWatch が必要です" });
+  }
+  if (s.sessionType !== "dtaqwatch" && s.dtaqWatch !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["dtaqWatch"],
+      message: `dtaqWatch は dtaqwatch セッションにしか指定できません（sessionType=${s.sessionType}）`
+    });
+  }
+}
+
+/**
+ * **素のオブジェクト版**（`superRefine` を付ける前）。
+ *
+ * `.superRefine()` を付けると `ZodEffects` になり **`.omit()` が使えなくなる**。
+ * `ConfigStore.parseSessionInput` は `id` を除いて検証するため `.omit()` が必要なので、
+ * 素の版も公開して、整合チェックは呼び出し側で重ねてかける（`sessionInputSchema`）。
+ */
+export const serverSessionObject = z
   .object({ ...sessionBase, printer: printerSchema.optional(), pcCommand: pcCommandSchema.optional() })
   .strict();
+export const serverSessionSchema = serverSessionObject.superRefine(assertTypeConsistent);
 export type ServerSession = z.infer<typeof serverSessionSchema>;
 
 /**
@@ -194,16 +263,44 @@ export type ServerSession = z.infer<typeof serverSessionSchema>;
  * **`printer` も `pcCommand` も持たない**——ここが信頼境界の 1 層目。`.strict()` により、
  * 送られてきた時点で parse が失敗する（400）。**optional にして後段で落とす形にしてはならない。**
  */
-export const personalSessionSchema = z
+/** 素のオブジェクト版（理由は `serverSessionObject` の JSDoc） */
+export const personalSessionObject = z
   .object({ ...sessionBase, owner: z.string().optional() })
   .strict();
+export const personalSessionSchema = personalSessionObject.superRefine(assertTypeConsistent);
 export type PersonalSession = z.infer<typeof personalSessionSchema>;
+
+/**
+ * CRUD の入力用スキーマ（`id` はサーバーが採番するので除く）。
+ * **整合チェックはここでも掛ける**——ファイル読み込みだけで守ると、
+ * API 経由で `dtaqwatch` なのに対象キューが無い設定を作れてしまう。
+ */
+export function sessionInputSchema(
+  source: ConfigSource
+): z.ZodType<Omit<ServerSession, "id"> | Omit<PersonalSession, "id">> {
+  const obj =
+    source === "server"
+      ? serverSessionObject.omit({ id: true })
+      : personalSessionObject.omit({ id: true });
+  return obj.superRefine(assertTypeConsistent) as unknown as z.ZodType<
+    Omit<ServerSession, "id"> | Omit<PersonalSession, "id">
+  >;
+}
 
 /** 保管場所を問わず読める共通部分（解決器が扱う形） */
 export type AnySession = ServerSession | PersonalSession;
 
 export function sessionPrinter(s: AnySession): PrinterConfig | undefined {
   return "printer" in s ? s.printer : undefined;
+}
+
+/**
+ * 監視の設定を取り出す。**種別が `dtaqwatch` のときだけ**返す——
+ * 種別と設定の整合は parse で強制しているが、読み出し側でも種別を見ておく
+ * （古いファイルを直接編集された場合に、意図しない監視を始めないため）。
+ */
+export function sessionDtaqWatch(s: AnySession): DtaqWatchSpec | undefined {
+  return s.sessionType === "dtaqwatch" ? s.dtaqWatch : undefined;
 }
 
 /** ファイル全体 */
@@ -274,7 +371,7 @@ export interface PublicSession {
   ref: string;
   name: string;
   system: string;
-  sessionType: "display" | "printer";
+  sessionType: SessionType;
   deviceName?: string;
   /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
   rescueAction?: "hold" | "delete";
@@ -287,6 +384,8 @@ export interface PublicSession {
   watermark?: Watermark;
   /** 無操作で切るまでの時間。`"never"`＝切らない / 数値＝分。未設定はサーバー既定に従う */
   idleTimeout?: IdleTimeout;
+  /** `dtaqwatch` のみ。常駐監視するデータ待ち行列（信頼設定ではないので値ごと返す） */
+  dtaqWatch?: DtaqWatchSpec;
   /**
    * PC コマンド（STRPCCMD）の実行設定。**編集できる相手にだけ返す**（`includeTrusted`）。
    *

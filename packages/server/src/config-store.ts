@@ -21,6 +21,7 @@ import {
   personalSessionSchema,
   serverConfigSchema,
   serverSessionSchema,
+  sessionInputSchema,
   systemSchema,
   type AnySession,
   type ConfigSource,
@@ -166,6 +167,8 @@ export abstract class ConfigStore {
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
     if (s.enhanced !== undefined) pub.enhanced = s.enhanced;
     if (s.idleTimeout !== undefined) pub.idleTimeout = s.idleTimeout;
+    // 信頼設定ではないので値ごと返す（編集フォームが空から始まると保存で消える）
+    if (s.dtaqWatch !== undefined) pub.dtaqWatch = { ...s.dtaqWatch };
     // 唯一のオブジェクト値。**複製して返す**——参照のまま渡すと、応答を受け取った側の
     // 書き換えがストアの実体に届く（他のフィールドは値型なので起きない）
     if (s.watermark !== undefined) pub.watermark = { ...s.watermark };
@@ -267,8 +270,9 @@ export abstract class ConfigStore {
    * ここで落ちる（`.strict()`）。信頼境界の 1 層目。
    */
   private parseSessionInput(raw: unknown): Omit<AnySession, "id"> {
-    const schema = this.sessionSchema as unknown as z.ZodObject<z.ZodRawShape>;
-    return schema.omit({ id: true }).parse(stripOwner(raw)) as Omit<AnySession, "id">;
+    // **`sessionSchema`（`superRefine` 付き）からは `.omit()` できない**ので、
+    // 入力用のスキーマを `config-types` から作る（種別と設定の整合もそこで掛かる）
+    return sessionInputSchema(this.source).parse(stripOwner(raw)) as Omit<AnySession, "id">;
   }
 
   protected newSystemId(name: string): string {

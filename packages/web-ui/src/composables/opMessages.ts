@@ -28,6 +28,14 @@ export const MSG_OPT_HINTS = "オプションの選択肢";
  */
 export const MSG_PROMPT_HINT = "F4 を送る";
 
+/**
+ * データ待ち行列の常駐監視は**エントリを取り出して消す**（本番のコンシューマの取り分を奪う）。
+ *
+ * requirement の明示要求で、**開始時だけでなく監視中も常に出す**——
+ * 誤って本番キューに掛けたことに後から気づけるようにするため。
+ */
+export const MSG_WATCH_CONSUMES = "監視はエントリを取り出して消します。本番のキューには掛けないでください";
+
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
 

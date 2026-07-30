@@ -15,6 +15,7 @@ import { workspaceStore } from "../stores/workspace.js";
 import { authStore } from "../stores/auth.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { watchesStore } from "../stores/watches.js";
 import ConfigCard from "./ConfigCard.vue";
 
 /** カード / 一覧の表示切り替え（端末ごとに localStorage で保持。旧 UI から引き継ぐ） */
@@ -148,6 +149,26 @@ async function connect(ref: string, force = false): Promise<void> {
   const opened = openedSession(ref);
   if (opened !== undefined && !force) {
     focusSession(opened);
+    return;
+  }
+  // **監視は装置名を持たない。** 重複判定を通すと、装置名 undefined 同士で
+  // 誤って「使用中」に見えるうえ、そもそも 1 装置 1 接続の制約が無い（research F5）。
+  // 監視はサーバーのレジストリが所有するので、セッションとしては開かない
+  if (s.sessionType === "dtaqwatch") {
+    connecting.value = s.ref;
+    error.value = "";
+    try {
+      // **同じ設定の監視を二重に始めない。** 監視は消費するので、2 本掛かると
+      // 1 本ぶんのエントリを取り合って両方が欠ける（セッションで「開いていればタブへ戻す」のと同じ判断）
+      const already = watchesStore.watches.some((x) => x.ref === s.ref);
+      if (!already) await watchesStore.start(s.ref);
+      else await watchesStore.connect();
+      openFeature("watch:queues", false); // 監視コンソールを開く（開いていればそこへ移動）
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      connecting.value = "";
+    }
     return;
   }
   const busyLabel = deviceNameInUse(s.deviceName);

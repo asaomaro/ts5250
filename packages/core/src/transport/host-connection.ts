@@ -117,6 +117,11 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
     };
 
     socket.setTimeout(timeoutMs);
+    // **TCP キープアライブを入れる。** 常駐監視（DTAQ の `wait=-1`）は read タイムアウトを
+    // 無効にして待つので、**相手が黙って消えても永久に待ち続ける**——OS に生存確認を
+    // させておかないと、切れた接続の上で待ち続ける状態を誰も検出できない
+    // （`20260723-dtaq-watch-notify` research R3）。要求ごとの短い接続には実害が無い。
+    socket.setKeepAlive(true, 60_000);
     socket.on("timeout", () =>
       fail(
         new As400Error(

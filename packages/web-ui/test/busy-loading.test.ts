@@ -4,6 +4,8 @@ import type { ScreenSnapshot } from "@as400web/core";
 // WsClient をモック（connect 即時解決・send スパイ・handlers 捕捉）
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };
 vi.mock("../src/ws-client.js", () => ({
+  // `session-controller` が `wsUrl` も import するので、モックにも持たせる
+  wsUrl: () => "ws://test/ws",
   WsClient: class {
     send = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

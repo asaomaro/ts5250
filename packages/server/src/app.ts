@@ -18,6 +18,7 @@ import { registerAdminRoutes } from "./admin.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { registerMacroRoutes } from "./macro-routes.js";
 import { MacroStore } from "./macro-store.js";
+import { WatchRegistry } from "./watch-registry.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
@@ -42,6 +43,14 @@ export interface AppDeps extends ToolDeps {
    * 秘密の暗号化に使う master key はストア生成時に渡す（spec D5）。
    */
   macros?: MacroStore;
+  /**
+   * サービス型の常駐ジョブ（データ待ち行列の監視）のレジストリ。未指定なら内部で作る。
+   * **WS の寿命から独立している**ことが要件なので、`buildApp` の外で作って渡すこともできる
+   * （プロセス全体で 1 つ）。
+   */
+  watches?: WatchRegistry;
+  /** 同時監視数の上限（未指定なら `WatchRegistry` の既定 4） */
+  maxWatches?: number;
   /** SQL 結果セットの保持（画面のページング用）。未指定なら内部で作る */
   resultSets?: ResultSetStore;
   /** 画面の SQL 用の接続の使い回し。未指定なら内部で作る */
@@ -139,6 +148,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
 
   // マクロの CRUD。認可は MacroStore の assertOwner に集約する（経路ごとに書かない）
   const macros = deps.macros ?? new MacroStore();
+  const watches =
+    deps.watches ?? new WatchRegistry(deps.maxWatches !== undefined ? { maxWatches: deps.maxWatches } : {});
   registerMacroRoutes(app, { macros });
 
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
@@ -246,7 +257,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
         onOpen(_evt, ws) {
           conn = new WsConnection(
             // マクロの秘密は ws 経路でしか解決しない（spec D11）。同じストアを渡す
-            { ...deps, macros },
+            { ...deps, macros, watches },
             {
               send: (data) => ws.send(data),
               close: () => ws.close()

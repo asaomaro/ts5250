@@ -66,6 +66,8 @@ interface Args {
   ifsDeleteMaxDirectories: number | undefined;
   /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
   dtaqReceiveMaxWaitSec: number | undefined;
+  /** 同時監視数の上限（データ待ち行列の常駐監視。未指定なら WatchRegistry の既定 4） */
+  maxWatches: number | undefined;
   /**
    * セッションのアイドルタイムアウトの**サーバー全体の既定**（ms or `"never"`）。
    * 未指定なら `SessionManager` の既定（＝永続）。共有サーバーで有限に戻すための口。
@@ -128,7 +130,8 @@ function parseArgs(argv: string[]): Args {
     ifsDeleteMaxEntries: undefined,
     ifsDeleteMaxDirectories: undefined,
     dtaqReceiveMaxWaitSec: undefined,
-    idleTimeoutMs: undefined
+    idleTimeoutMs: undefined,
+    maxWatches: undefined
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -166,6 +169,9 @@ function parseArgs(argv: string[]): Args {
       args.ifsDeleteMaxDirectories = parseLimit(argv[++i], "--ifs-delete-max-dirs", 100_000);
     } else if (a === "--dtaq-max-wait") {
       args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
+    } else if (a === "--max-watches") {
+      // 監視 1 本＝ホストサーバー接続 1 本を占有する（待機中は他の要求を出せない）
+      args.maxWatches = parseLimit(argv[++i], "--max-watches", 64);
     } else if (a === "--idle-timeout") {
       // セッション設定を持たない接続にも効く「全体の既定」。既定は永続なので、
       // 有限に戻したい共有サーバーだけが指定する
@@ -284,6 +290,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         ? { ifsZipMaxDirectories: args.ifsZipMaxDirectories }
         : {}),
       ...(args.ifsReadMaxBytes !== undefined ? { ifsReadMaxBytes: args.ifsReadMaxBytes } : {}),
+      ...(args.maxWatches !== undefined ? { maxWatches: args.maxWatches } : {}),
       ...(args.ifsDeleteMaxEntries !== undefined
         ? { ifsDeleteMaxEntries: args.ifsDeleteMaxEntries }
         : {}),

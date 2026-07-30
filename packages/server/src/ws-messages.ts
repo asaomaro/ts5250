@@ -2,6 +2,7 @@ import type { ScreenSnapshot } from "@as400web/core";
 import type { PcCommandEvent } from "./session-manager.js";
 import type { SessionJob } from "./session-manager.js";
 import type { MacroSecretRef } from "./macro-types.js";
+import type { WatchView, WatchEntryView } from "./watch-registry.js";
 
 /** WebSocket メッセージ型（server が定義し web-ui が type-only import で共有。spec「Web 向けプロトコル」） */
 
@@ -87,6 +88,32 @@ export interface WsGuiSubmit {
   key?: string;
   cursor?: { row: number; col: number };
 }
+/**
+ * **監視（サービス型の常駐ジョブ）のメッセージ。**
+ *
+ * `open`（5250 セッション）を**要さない**——監視コンソールは pane タブで、
+ * セッションを持たないタブだから（`20260723-dtaq-watch-notify` research F6）。
+ * 監視そのものはサーバーのレジストリが所有し、WS は**購読するだけ**。
+ * **WS が切れても監視は止まらない**のがこの設計の核心（research F1）。
+ */
+export interface WsWatchSubscribe {
+  type: "watch-subscribe";
+}
+/** 保存済みセッション設定（`srv:` / `own:`。種別 `dtaqwatch`）から監視を始める */
+export interface WsWatchStart {
+  type: "watch-start";
+  session: string;
+}
+export interface WsWatchStop {
+  type: "watch-stop";
+  watchId: string;
+}
+/** 履歴の取得（タブを開き直したとき・行を選んだとき） */
+export interface WsWatchHistoryReq {
+  type: "watch-history";
+  watchId: string;
+}
+
 export type WsClientMessage =
   | WsOpen
   | WsKey
@@ -95,7 +122,11 @@ export type WsClientMessage =
   | WsGuiSubmit
   | WsPrinterOutput
   | WsActivity
-  | WsPong;
+  | WsPong
+  | WsWatchSubscribe
+  | WsWatchStart
+  | WsWatchStop
+  | WsWatchHistoryReq;
 
 // ---- server → client ----
 export interface WsOpened {
@@ -237,7 +268,37 @@ export interface WsPing {
   type: "ping";
 }
 
+/** 監視の一覧（購読直後・開始・停止のあとに配る） */
+export interface WsWatchList {
+  type: "watch-list";
+  watches: WatchView[];
+}
+/** 到着 1 件の push。**画面に触れなくても気づける**ための唯一の経路 */
+export interface WsWatchEntry {
+  type: "watch-entry";
+  watchId: string;
+  entry: WatchEntryView;
+  /** 累計受信件数（履歴が落ちても増え続ける） */
+  received: number;
+}
+/** 状態の変化（`watching` / `reconnecting` / `error`）。**黙って止まらない**ため */
+export interface WsWatchState {
+  type: "watch-state";
+  watchId: string;
+  state: WatchView["state"];
+  error?: string;
+}
+export interface WsWatchHistoryRes {
+  type: "watch-history";
+  watchId: string;
+  entries: WatchEntryView[];
+}
+
 export type WsServerMessage =
+  | WsWatchList
+  | WsWatchEntry
+  | WsWatchState
+  | WsWatchHistoryRes
   | WsPing
   | WsOpened
   | WsScreen

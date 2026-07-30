@@ -6,6 +6,15 @@ export interface WsClientHandlers {
 }
 
 /**
+ * `/ws` の URL。**接続する側が 2 つある**（セッションと監視コンソール）ので、
+ * 組み立てはここ 1 か所に置く。
+ */
+export const wsUrl = (): string => {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws`;
+};
+
+/**
  * 操作ログに残さないメッセージ種別。
  *
  * 心拍（30 秒）と在席の合図（15 秒）は利用者の操作ではなく、出すと**操作ログが心拍で埋まって

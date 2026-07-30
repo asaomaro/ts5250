@@ -19,6 +19,8 @@ export {
   type PrinterConfig,
   type Watermark,
   type IdleTimeout,
+  type SessionType,
+  type DtaqWatchSpec,
   type ConfigSource
 } from "./config-types.js";
 export {
@@ -45,6 +47,14 @@ export { registerTools, type ToolDeps } from "./mcp-tools.js";
 export { buildMcpServer } from "./mcp-server.js";
 export { buildApp, type AppDeps } from "./app.js";
 export { WsConnection, type WsHandlerDeps, type WsSender } from "./ws-handler.js";
+export {
+  WatchRegistry,
+  type WatchView,
+  type WatchEntryView,
+  type WatchEvent,
+  type WatchState,
+  type WatchRegistryOptions
+} from "./watch-registry.js";
 export type {
   WsClientMessage,
   WsServerMessage,

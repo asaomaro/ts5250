@@ -1,6 +1,8 @@
 import { As400Error, type AidKey, type ScreenSnapshot } from "@as400web/core";
 import { childLog } from "./log.js";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
+import type { WatchRegistry } from "./watch-registry.js";
+import { sessionDtaqWatch } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
 import { withAudit } from "./audit.js";
@@ -12,6 +14,13 @@ const wsLog = childLog({ component: "ws-handler" });
 
 export interface WsHandlerDeps {
   sessions: SessionManager;
+  /**
+   * サービス型の常駐ジョブ（データ待ち行列の監視）。
+   * **WS はここを購読するだけ**で所有しない——`dispose()` はレジストリに触らない
+   * （触ると「ブラウザを閉じたら監視が止まる」になり要件を満たさない。research F1）。
+   * 未指定なら監視のメッセージは `CONFIG_ERROR` で断る。
+   */
+  watches?: WatchRegistry;
   /** 接続設定の唯一の解決点（system / session 参照 → 接続オプション） */
   resolver: ConfigResolver;
   /**
@@ -66,6 +75,8 @@ export class WsConnection {
   private detachScreen: (() => void) | undefined;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
+  private detachWatch: (() => void) | undefined;
   /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
   private lastSeen: number;
   private readonly hbIntervalMs: number;
@@ -106,6 +117,14 @@ export class WsConnection {
           return await this.onGuiSubmit(msg);
         case "printer-output":
           return await this.onPrinterOutput(msg);
+        case "watch-subscribe":
+          return this.onWatchSubscribe();
+        case "watch-start":
+          return await this.onWatchStart(msg);
+        case "watch-stop":
+          return this.onWatchStop(msg);
+        case "watch-history":
+          return this.onWatchHistory(msg);
         case "activity":
           // 在席の合図。**監査にも操作ログにも残さない**——利用者の意図を含まないうえ、
           // 15 秒間隔で流れるので本来の記録を量で押し流す
@@ -142,6 +161,98 @@ export class WsConnection {
    */
   private onActivity(): void {
     if (this.sessionId) this.deps.sessions.touch(this.sessionId);
+  }
+
+  // ---- 監視（サービス型の常駐ジョブ）----
+  //
+  // **`open`（5250 セッション）を要さない。** 監視コンソールは pane タブで、
+  // セッションを持たないタブだから（research F6）。`requireSession()` を通すと
+  // コンソールから一切使えなくなる。
+
+  private requireWatches(): WatchRegistry {
+    const w = this.deps.watches;
+    if (!w) throw new As400Error("CONFIG_ERROR", "watch registry is not configured");
+    return w;
+  }
+
+  /** 一覧を配る（購読直後・開始・停止の後に使う） */
+  private sendWatchList(): void {
+    this.send({ type: "watch-list", watches: this.requireWatches().list(this.user) });
+  }
+
+  /**
+   * 購読する。**再接続のたびに「今ある監視の一覧」を配り直す**——
+   * ブラウザを閉じている間も監視は続いているので、開き直した側は状態を知らない。
+   *
+   * 併せてハートビートを始める。監視だけの WS はセッションを持たないので
+   * `onSocketClose` 以外に死を知る手が無く、半開きのまま push し続けるのを避ける。
+   */
+  private onWatchSubscribe(): void {
+    const reg = this.requireWatches();
+    this.detachWatch?.(); // 二重購読しない
+    // **他人の監視は配らない。** 絞り込みはレジストリに任せる（所有の規則を 2 か所に書かない）
+    this.detachWatch = reg.subscribe((ev) => {
+      if (ev.type === "entry") {
+        this.send({
+          type: "watch-entry",
+          watchId: ev.watch.id,
+          entry: ev.entry,
+          received: ev.watch.received
+        });
+      } else {
+        this.send({
+          type: "watch-state",
+          watchId: ev.watch.id,
+          state: ev.watch.state,
+          ...(ev.watch.error !== undefined ? { error: ev.watch.error } : {})
+        });
+      }
+    }, this.user);
+    this.startHeartbeat();
+    this.sendWatchList();
+  }
+
+  /**
+   * 保存済みセッション設定から監視を始める。
+   *
+   * **常駐の対象は保存済み設定だけ**（research F3）——資格情報をサーバー側だけで
+   * 解決できるので、ブラウザが居なくても張り直せる。
+   */
+  private async onWatchStart(msg: WsClientMessage & { type: "watch-start" }): Promise<void> {
+    const reg = this.requireWatches();
+    await withAudit({ op: "ws_watch_start" }, async () => {
+      const target = this.deps.resolver.resolve({ session: msg.session }, this.user, (m) => wsLog.warn(m));
+      const spec = target.session ? sessionDtaqWatch(target.session) : undefined;
+      if (!spec) {
+        throw new As400Error(
+          "CONFIG_ERROR",
+          `${msg.session} は監視の設定を持っていません（種別 dtaqwatch のセッション設定を指定してください）`
+        );
+      }
+      await reg.start({
+        ref: msg.session,
+        label: `${spec.library}/${spec.name}`,
+        spec,
+        connect: target.connect,
+        ...(this.user ? { owner: this.user.username } : {})
+      });
+      this.sendWatchList();
+    });
+  }
+
+  private onWatchStop(msg: WsClientMessage & { type: "watch-stop" }): void {
+    const reg = this.requireWatches();
+    reg.stop(msg.watchId, this.user);
+    this.sendWatchList();
+  }
+
+  private onWatchHistory(msg: WsClientMessage & { type: "watch-history" }): void {
+    const reg = this.requireWatches();
+    this.send({
+      type: "watch-history",
+      watchId: msg.watchId,
+      entries: reg.history(msg.watchId, this.user)
+    });
   }
 
   /**
@@ -387,6 +498,10 @@ export class WsConnection {
 
   private dispose(reason: string): void {
     this.stopHeartbeat();
+    // **監視は止めない。** 購読を外すだけ——監視はレジストリが所有しており、
+    // ブラウザを閉じても続くことが要件（research F1）
+    this.detachWatch?.();
+    this.detachWatch = undefined;
     this.detachScreen?.();
     this.detachScreen = undefined;
     this.detachReport?.();
