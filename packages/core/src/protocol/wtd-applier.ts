@@ -36,6 +36,12 @@ export interface ApplyResult {
    * 窓かどうかの判定材料。詳細は `WriteExtent` を参照。
    */
   lastWrite: WriteExtent;
+  /**
+   * SAVE PARTIAL SCREEN（ESC 0x03）を受けた。**ホストは応答を待っている**
+   * （opcode は PUT/GET）。付いてきたパラメータ 5 バイトをそのまま渡す
+   * ——応答に写して返すため（`buildSavePartialScreenResponse`）。
+   */
+  savePartialScreen?: Uint8Array;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -124,6 +130,33 @@ export function applyDataStream(
       case COMMAND.RESTORE_SCREEN:
         if (!buf.restoreScreen()) warn("RESTORE SCREEN with empty save stack");
         break;
+      case COMMAND.SAVE_PARTIAL_SCREEN: {
+        // SAVE PARTIAL SCREEN（ESC 0x03）: **パラメータ 5 バイト**（実機の QSH で
+        // `00 00 00 00 00`）。SAVE SCREEN と同じく**ホストは応答を待っている**（opcode PUT/GET）
+        // ——返さないと次を送ってこない（QSH が「待機中」で固まっていた原因）。
+        // パラメータは応答へそのまま写す（意味を解釈しない。ホストにとっては保管物）。
+        const params = r.bytes(5);
+        buf.saveScreen();
+        result.savePartialScreen = params;
+        break;
+      }
+      case COMMAND.RESTORE_PARTIAL_SCREEN:
+        // RESTORE PARTIAL SCREEN（ESC 0x13）: 0x03 で預けた内容をホストが返してくる。
+        // **積荷は読まない**——退避したのはこちらなので、局所の退避スタックから戻す
+        // （`RESTORE SCREEN` と同じ扱い。SAVE SCREEN の docstring も同じ理由を書いている）。
+        if (!buf.restoreScreen()) warn("RESTORE PARTIAL SCREEN with empty save stack");
+        break;
+      case COMMAND.ROLL: {
+        // ROLL（ESC 0x23）: `方向＋行数(1) 上端行(1) 下端行(1)`。
+        // 上位ビット（0x80）が立っていれば上へ、落ちていれば下へ。行数は下位 5 ビット。
+        // **行送りの画面（QSH のような出力の流れる画面）で使う**。
+        const dir = r.u8();
+        const top = r.u8();
+        const bottom = r.u8();
+        const lines = dir & 0x1f;
+        buf.roll(top, bottom, (dir & 0x80) !== 0 ? lines : -lines);
+        break;
+      }
       case COMMAND.WRITE_TO_DISPLAY:
         applyWtd(r, buf, codec, result, warn);
         break;

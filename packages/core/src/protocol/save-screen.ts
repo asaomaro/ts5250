@@ -23,6 +23,12 @@ import type { ScreenBuffer } from "../screen/buffer.js";
 export function buildSaveScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
   const w = new ByteWriter();
   w.u8(ESC).u8(COMMAND.RESTORE_SCREEN);
+  writeScreenAsWtd(w, buf, codec);
+  return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array());
+}
+
+/** 現在の画面を再現する WTD ストリームを書き出す（SAVE SCREEN / SAVE PARTIAL SCREEN 共通） */
+function writeScreenAsWtd(w: ByteWriter, buf: ScreenBuffer, codec: Codec): void {
   w.u8(ESC).u8(COMMAND.WRITE_TO_DISPLAY).u8(0x00).u8(0x00); // CC1/CC2 とも副作用なし
 
   const fieldStarts = new Map<number, ReturnType<ScreenBuffer["orderedFields"]>[number]>();
@@ -57,7 +63,27 @@ export function buildSaveScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
     writeCell(w, buf, addr, codec);
     addr += cell.type === "char" && cell.charKind === "dbcs-lead" ? 2 : 1;
   }
+}
 
+/**
+ * SAVE PARTIAL SCREEN（ESC 0x03）への応答レコードを組み立てる。
+ *
+ * **これはホストが待っている返信である**（opcode は PUT/GET＝「送ったから返せ」）。
+ * 返さないとホストは次を送ってこず、**QSH が「待機中・ホストから応答がない」で固まる**。
+ *
+ * 中身は SAVE SCREEN（0x02）の応答と同じ考え方——ホストにとっては**不透明な保管物**で、
+ * あとで RESTORE PARTIAL SCREEN（0x13）としてそのまま返ってくる。
+ * 違いは先頭を `ESC RESTORE_PARTIAL_SCREEN` にし、**受け取った 5 バイトのパラメータを
+ * そのまま写す**こと（ホストが自分の指定した範囲を識別できるようにするため）。
+ */
+export function buildSavePartialScreenResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  params: Uint8Array
+): Uint8Array {
+  const w = new ByteWriter();
+  w.u8(ESC).u8(COMMAND.RESTORE_PARTIAL_SCREEN).bytes(params);
+  writeScreenAsWtd(w, buf, codec);
   return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array());
 }
 

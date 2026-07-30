@@ -59,6 +59,18 @@ export const COMMAND = {
   WRITE_ERROR_CODE_WINDOW: 0x22,
   SAVE_SCREEN: 0x02,
   RESTORE_SCREEN: 0x12,
+  /**
+   * SAVE PARTIAL SCREEN。**QSH（Qshell）が起動直後に送ってくる**（実機で実測。
+   * `04 03 00 00 00 00 00` ＝ ESC＋コマンド＋**パラメータ 5 バイト**）。
+   *
+   * SAVE SCREEN（0x02）と同じく**端末に画面を送り返させる要求**で、opcode は `PUT/GET(0x03)`
+   * ——返さない限りホストは次を送ってこない。未処理のときは
+   * 「unknown command 0x3 — discarding rest of record」で捨てており、
+   * **QSH が「待機中・ホストから応答がない」で固まる原因**だった。
+   */
+  SAVE_PARTIAL_SCREEN: 0x03,
+  /** RESTORE PARTIAL SCREEN。保管しておいた内容をホストが返してくる側（0x03 の対） */
+  RESTORE_PARTIAL_SCREEN: 0x13,
   ROLL: 0x23,
   WRITE_STRUCTURED_FIELD: 0xf3
 } as const;

@@ -10,6 +10,7 @@ import {
 import { buildQueryReply } from "../protocol/query-reply.js";
 import {
   buildSaveScreenResponse,
+  buildSavePartialScreenResponse,
   buildReadScreenResponse,
   buildReadScreenExtendedResponse
 } from "../protocol/save-screen.js";
@@ -441,6 +442,14 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.saveScreenRequested) {
         // SAVE SCREEN はホストが応答を待つ要求。返さないとホストは先へ進まない
         this.telnet.sendRecord(buildSaveScreenResponse(this.buf, this.codec));
+      }
+      if (result.savePartialScreen !== undefined) {
+        // SAVE PARTIAL SCREEN も同じ（opcode は PUT/GET＝「送ったから返せ」）。
+        // **返さないとホストは次を送ってこない**——QSH が「待機中」で固まっていた原因。
+        // パラメータはそのまま写して返す（ホストが自分の指定を識別できるように）
+        this.telnet.sendRecord(
+          buildSavePartialScreenResponse(this.buf, this.codec, result.savePartialScreen)
+        );
       }
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない

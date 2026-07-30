@@ -110,12 +110,20 @@ LL(2)  type(2)=12A0  reserved(2)=0000  varHdrLen(1)  flag1(1)  flag2(1)  opcode(
 | 50 | CLEAR FORMAT TABLE | | 21 | WRITE ERROR CODE |
 | 42 | READ INPUT FIELDS | | 02 / 12 | SAVE / RESTORE SCREEN |
 | 23 | ROLL | | F3 | WRITE STRUCTURED FIELD (WSF) |
+| 03 / 13 | SAVE / RESTORE PARTIAL SCREEN | | 22 | WRITE ERROR CODE TO WINDOW |
 
 - WTD / WEC の直後に **CC1・CC2**（2 バイトの制御文字）が付く。
   - CC1 上位 3 ビット: キーボードロック・MDT リセット・非 bypass の null 化（`40`=MDT リセット, `60`=全 MDT リセット,
     `80`=非 bypass を null, `A0/C0/E0`=組合せ）。非 `00` はロック。
   - CC2: `08`=キーボードアンロック, `04`=アラーム。
 - Read 系（42/52/82）は入力待ちを示す。応答形式は §6。
+- **SAVE PARTIAL SCREEN（03）は端末に画面を送り返させる要求**で、**パラメータ 5 バイト**が続く
+  （実機の QSH は `04 03 00 00 00 00 00`。opcode は `PUT/GET(03)`）。
+  返さないとホストは次を送ってこない——**QSH が「待機中・ホストから応答がない」で固まる**。
+  応答は `ESC 13` ＋**受け取った 5 バイトの写し**＋画面を再現する WTD（opcode は `RESTORE SCREEN(05)`）。
+  中身はホストにとって不透明な保管物で、あとで `13` としてそのまま返ってくる（§6.3 と同じ考え方）。
+- **ROLL（23）は `方向＋行数(1) 上端(1) 下端(1)`**（上位ビットで方向・下位 5 ビットで行数）。
+  ⚠ **実機では未確認**（QSH は行送りに使わず、画面を描き直していた）。
 
 ### 4.2 WTD オーダー
 
