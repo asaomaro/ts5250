@@ -4,14 +4,38 @@
 （`.aidev/works/20260728-strpco-strpccmd`）。実機で 4 ケース検証済み。
 その後に残った項目をここへ積む。
 
+2026-07-30 に **Windows 実機での実行経路が確認され**、`CALL START` 形式のアプリが
+起動直後に消える不具合が見つかって直った（`20260730-pccmd-call-start-and-winbat`）。
+併せて `start.bat` に `--auto-secret-key` が無く、Windows だけ
+パスワード保存が使えなかった件も直した。
+
 ## 未検証（実装は入っているが確かめられていない）
 
 - [ ] **PCO 終了標識** `27 00 FC D7 C3 D6 40 83 80 82 00` の実物確認
   - 実機に `ENDPCO` コマンドが無く誘発できなかった（research D6）。値は xtn5250 の定数から採った
   - 現状は「一致したら実行せず実行キーだけ返す」保守的な扱い。**誤検出しても害が無い**形にしてある
   - PC Organizer を持つ環境（Windows の PCOMM / ACS）を ACS タップで捕まえれば採れるはず
-- [ ] **Windows での実行経路**（`spawn(..., { shell: true })` → `cmd.exe /c`）
+- [x] **Windows での実行経路**（`spawn(..., { shell: true })` → `cmd.exe /c`）
   - Linux でしか確認していない。Electron 版を Windows で動かして `start` / `notepad` を試す
+  - **2026-07-30 に Windows 実機で確認され、不具合 1 件が見つかって直った**
+    （`20260730-pccmd-call-start-and-winbat`。実測は push できない別環境で行われ、
+    こちらへは記録として持ち込まれた）:
+    - **`CALL START "title" /B "app.exe"` は起動したアプリが直後に消える。**
+      ログには `outcome: {status: "started"}` としか出ず、エラーは見えない
+    - `CALL` を含まない `START …` と実行ファイルの直接指定は問題なく動く。
+      **手でコマンドプロンプトから同じ文字列を実行すると成功する**
+      ——この Node.js プロセスが実行したときだけ再現する
+    - 根本原因は**未特定**（Windows のジョブオブジェクト絡みと見られる）。
+      `START` の直前の `CALL` を落とす回避策を入れた（`stripCallBeforeStart`）。
+      **効かなかった手**（`detached` 単独・`cmd.exe` 直接呼び出し・CCSID・EDR）は
+      `pc-command.ts` の docstring に表で残してある
+- [ ] **`CALL START` が消える根本原因の特定**
+  - 回避策（`CALL` を落とす）で実害は消えているが、**なぜ消えるのかは分かっていない**。
+    Windows 実機でしか追えない（プロセスツリー・ジョブオブジェクトの観察が要る）
+  - 同じ性質の入れ子（`CALL` 以外の経路）で同じことが起きるかも未確認
+- [ ] **Windows 実機での回帰確認の自動化**
+  - `stripCallBeforeStart` は単体テストで固定したが、**「アプリが生き残る」ことは
+    Windows でしか確かめられない**。Electron 版の Windows ビルドで回す道を検討する
 - [ ] **DBCS を含むコマンド**（SO/SI 入り）。標識の読み取りは SBCS 前提で書いている
 - [ ] V7R2 以降の `PCCMD` 1023 文字上限
   - 実機は 200 文字を受け付けず、対話ジョブが応答待ちメッセージで止まった（research D4）

@@ -82,6 +82,50 @@ export function invalidAllowPattern(patterns: readonly string[]): string | undef
 }
 
 /**
+ * `START` の直前の `CALL` を落とす（**Windows 実機の回避策**）。
+ *
+ * ## 実機で分かっていること（2026-07-30・Windows）
+ *
+ * `CMD /C "NET USE \\SERVER & CALL START "title" /B "app.exe" args…"` のように
+ * **`CALL START` を含むコマンドは、起動した `app.exe` が直後に強制終了される**。
+ * サーバーのログには `outcome: {status: "started"}` としか出ず、エラーは一切見えない
+ * （利用者には「何も起きない」ように見える）。一方:
+ *
+ * - `CALL` を含まない `START "title" /B "app.exe"` は**毎回問題なく生き残る**
+ * - 実行ファイルの直接指定も問題なく動く
+ * - **同じ文字列を手でコマンドプロンプトから実行すると成功する**
+ *   ——コマンド内容・環境・権限の問題ではなく、この Node.js プロセスが実行したときだけ再現する
+ *
+ * ## 分かっていないこと
+ *
+ * **根本原因は未特定**（Windows のジョブオブジェクト絡みで、`spawn()` の子プロセスが
+ * `CALL` 経由の入れ子で起動されると巻き添えで終了させられる、と見られる）。
+ * `CALL` は本来バッチファイル・ラベル呼び出し用で、`START` のような内部コマンドに
+ * 付けても意味は変わらないため、**実行前に安全に取り除ける**という回避策を採っている。
+ *
+ * ## 効かなかった手（再調査の手戻り防止）
+ *
+ * | 試したこと | 結果 |
+ * |---|---|
+ * | `spawn()` に `detached: true` を足すだけ | 単体の再現スクリプトでは効くが、**実際のサーバープロセスからの実行では効かない**（原因不明） |
+ * | `shell: true` を使わず `cmd.exe` を直接呼んで入れ子を 1 段減らす | 効果なし。さらに**「実行ファイル単体＋引数」ケースを壊す退行**を起こした（Node の `shell: true` が付ける外側の引用符が exe パス自身の引用符を守るクッションになっており、外すと `cmd.exe` の `/S` が「先頭と最後の引用符を剥がす」処理で exe パスの引用符ごと剥がす） |
+ * | CCSID/EBCDIC のデコード起因の文字化け | 実機の生バイトを直接確認し、正しく変換されていた（**原因ではない**） |
+ * | セキュリティソフト（EDR）によるブロック | `NET USE` の有無・ネットワーク共有の有無を変えても再現パターンが変わらず、**`CALL` の有無だけが唯一の分岐点**と判明したため否定 |
+ *
+ * ## 範囲
+ *
+ * - **全体を置換する**（`g`）——`&` で 2 つ以上並ぶ書き方が実際にあり、
+ *   1 つ目だけ直すと 2 つ目が同じ不具合を起こす
+ * - 大文字小文字を問わない（`i`）。`CALL` と `START` の間の空白は数・種類を問わない
+ * - 語境界を見る（`MYCALL START` や `CALLSTART` は変えない）
+ * - ⚠ **引用符の中の `CALL START` も落とす**（`echo "CALL START"`）。
+ *   見分けるには cmd の構文解析が要り、釣り合わないので取らない
+ */
+export function stripCallBeforeStart(command: string): string {
+  return command.replace(/\bCALL\s+START\b/gi, "START");
+}
+
+/**
  * コマンドを実行する。**例外を投げない**——呼び出し側（core の `runPcCommand`）は
  * 結果に関わらずホストへ実行キーを返す必要があり、ここで投げても得が無い。
  *
@@ -99,16 +143,24 @@ export async function runPcCommand(
   if (!isAllowed(command, cfg.allow)) return { status: "denied" };
 
   const started = Date.now();
+  // **置換は許可判定の後・実行の直前だけ**。順序を逆にすると、利用者が `CALL START …` を
+  // 許可したのに `START …` で照合されることになり、**許可した文面と実際の判定がずれる**。
+  // 記録とログ（`session-manager`）も元の文字列のままで、置換後の文字列は外に出さない
+  const normalized = stripCallBeforeStart(command);
   const opts = {
     shell: true as const,
     windowsHide: true,
     stdio: "ignore" as const,
+    // **効いているのは主に `stripCallBeforeStart` の方**（実機では `detached` 抜きでも
+    // `CALL` を落とせば解消した）。ただし単体の再現では `detached` にも効果が見えており、
+    // 起動したアプリを親から切り離す意図とも合うので**両方残す**（安全側）
+    detached: true,
     ...(cfg.cwd !== undefined ? { cwd: cfg.cwd } : {})
   };
   return new Promise<PcCommandOutcome>((resolve) => {
     let child;
     try {
-      child = spawn(command, opts);
+      child = spawn(normalized, opts);
     } catch (err) {
       return resolve({
         status: "failed",

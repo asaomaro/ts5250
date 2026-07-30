@@ -87,6 +87,11 @@ if not "%PROFILES%"=="" (
   set "ARGS=%ARGS% --profiles %PROFILES%"
   echo ==^> profiles: %PROFILES%
 )
+rem Single-user local launch: auto-generate the UI password-save master key into .env if missing.
+rem For multi-user setups, manage AS400_SECRET_KEY explicitly and do not use this script.
+rem (start.sh has done this from the start; without it Windows fails with
+rem  "secret key not configured; cannot store password" when saving an auto-signon password.)
+set "ARGS=%ARGS% --auto-secret-key"
 
 echo ==^> starting: http://localhost:%PORT%  ^(Ctrl+C to stop^)
 node %ENVFILE% packages\server\dist\main.js %ARGS%
