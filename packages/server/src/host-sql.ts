@@ -1,43 +1,45 @@
 /**
  * SQL 実行の API（ホストサーバーの database サーバー経由）。
  *
- * **ブラウザから任意の SQL 文字列を受け取る。** 一覧 API（`host-lists.ts`）が任意の CL を
- * 拒んでいるのと方針が違うので、根拠を明記する（spec D1）:
+ * **ブラウザから任意の SQL 文字列を受け取り、読み取りも更新も実行する。**
+ * 一覧 API（`host-lists.ts`）が任意の CL を拒んでいるのと方針が違うので、根拠を明記する（spec D1）
+ * ——SQL は**利用者が結果を見るために書く言語**で、権限の範囲を超えられない。
+ * 一方あちらの CL は一覧を組み立てる内部手段で、任意の文を通す動機が無い。
  *
- * この API が安全なのは「実行するのが SELECT だけ」だからではなく、
- * **`query` の実装が結果セットを持たない文を実行できない**ためである。
- * 手順が `prepare + describe` → `open + describe` → `fetch` で、結果セットの無い文は
- * describe の段階で落ちる。実機（PUB400）で次を確認した:
+ * ## この経路は 2026-07-30 に読み取り専用ではなくなった
  *
- *   - `CREATE TABLE` → エラーになり、**表は作られない**（後から DLTOBJ が not found）
- *   - `CALL QSYS2.QCMDEXC('CRTDTAARA …')` → エラーになり、**データ域は作られない**
- *     （別経路のオブジェクト一覧で不在を確認）
- *   - `SELECT …; DROP TABLE …`（複文）→ SQLCODE -104 で拒否
+ * それまでは「`query` の実装が結果セットを持たない文を実行できない」ことが事実上の
+ * 歯止めになっていた（手順が `prepare + describe` → `open + describe` → `fetch` で、
+ * 結果セットの無い文は describe で落ちる。実機 PUB400 で `CREATE TABLE` が作られないこと、
+ * `CALL QSYS2.QCMDEXC('CRTDTAARA …')` が通らないこと、複文が `-104` で拒否されることを確認した）。
  *
- * ⚠ **この API の安全性は `query` の上記の性質に依存している。**
- * 将来 `query` に更新系を通す改造（`executeImmediate` の追加等）を入れると、
- * ブラウザから任意の更新が通るようになる。そのときは必ずこの方針を再検討すること。
+ * `20260730-sql-non-query-statements` で **`executeStatement` を足し、
+ * 非クエリ文（DML / DDL）をこの経路で実行できるようにした**。当時の docstring は
+ * 「更新系を通す改造を入れるときは方針を再検討せよ」と書いていたので、その検討結果を残す:
  *
- * ---
+ *   - **書ける範囲は IBM i 側のオブジェクト権限が決める。** アプリ側で追加の制限を掛けると、
+ *     ホストが許した操作を UI が勝手に禁じることになり、既存の設計思想と食い違う
+ *     （`/api/host/upload` を足したときと同じ結論。`host-upload.ts`）
+ *   - よって認可は他のホスト API と同じ「接続を持つユーザーなら誰でも」を踏襲する
+ *   - **歯止めは「取り消せない操作を静かに成功させない」こと**に置く
+ *     ——SQLCA が読めない応答は失敗として扱い、失敗した書き込みは再試行しない（`runNonQuery`）
  *
- * ⚠ **上の「読み取り専用」はこのルート（`/api/host/sql`）についての話であって、
- * ホスト API 全体の不変条件ではない。**
+ * この経緯を残しているのは、**「なぜ以前は読み取り専用だったか」を消すと
+ * 次の変更で同じ検討をやり直すことになる**ためである。
  *
- * 2026-07-20 に `/api/host/upload`（`host-upload.ts`）を追加し、**DDM で物理ファイルに
- * 追記できるようにした**。上の警告が言う「再検討」をそこで行い、次の結論を採っている:
- *
- *   - 書ける範囲は **IBM i 側のオブジェクト権限が決める**。アプリ側で追加の制限を掛けると、
- *     ホストで許された操作を UI が勝手に禁じることになり、既存の設計思想と食い違う。
- *   - よって認可は他のホスト API と同じ「接続を持つユーザーなら誰でも」を踏襲する。
- *
- * この節を消さずに残しているのは、**「なぜ SQL 経路が読み取り専用だったか」の説明が
- * 依然として有効**だからである（消すと次の変更で同じ検討をやり直すことになる）。
- *
- * なお読み取り範囲は IBM i の権限が決める（`host-lists.ts` と同じ原則。アプリ側で制限しない）。
+ * なお読み取り範囲も IBM i の権限が決める（`host-lists.ts` と同じ原則。アプリ側で制限しない）。
  */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { openQuery, query, SqlError, As400Error, type DbConnection } from "@as400web/core";
+import {
+  openQuery,
+  query,
+  executeStatement,
+  isNonQueryStatement,
+  SqlError,
+  As400Error,
+  type DbConnection
+} from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb, hostAuthFrom } from "./host-connect.js";
@@ -120,6 +122,59 @@ function toJsonRows(rows: readonly Record<string, unknown>[]) {
   );
 }
 
+/**
+ * 結果を返さない文（DML / DDL）を実行して応答を作る。
+ *
+ * **クエリ経路とは応答の形を変える**（`kind: "execute"`）。列の有無で見分けさせると
+ * 「列が 0 の結果セット」と区別できないため、画面が確実に分かる目印を置く。
+ *
+ * ## ⚠ 失敗しても再試行しない
+ *
+ * クエリ経路は「使い回した接続が相手側で切れていた」場合に 1 度だけ張り直す。
+ * **書き込みでは同じことをしてはならない**——`execute` が届いた後に応答だけ失われた場合、
+ * 張り直して投げ直すと同じ INSERT が 2 度走る。取り消せない操作なので、
+ * **失敗はそのまま失敗として返し、やり直すかは利用者に決めさせる**。
+ */
+async function runNonQuery(
+  c: Context<{ Variables: AuthVars }>,
+  deps: HostSqlDeps,
+  args: { source: z.infer<typeof sourceSchema>; sql: string; user: AuthVars["user"] }
+): Promise<Response> {
+  const connectStart = Date.now();
+  let conn: DbConnection | undefined;
+  let key: string | undefined;
+  try {
+    // **解決も try の中で行う。** 資格情報を持たない設定では `hostAuthFrom` が投げるので、
+    // 外に置くと 500 になって「ユーザーとパスワードが未登録」を伝えられない
+    const opts = resolveSource(deps.resolver, args.source, args.user);
+    key = poolKey(args.user?.username, hostAuthFrom(opts));
+    const acquired = await deps.pool.acquire(key, () => openDb(opts));
+    conn = acquired.conn;
+    const connectMs = Date.now() - connectStart;
+    const result = await executeStatement(conn, args.sql);
+    // **素性を採ってから手放す**。返した後は別の要求がその接続を使い始めうる
+    const info = connectionInfo(conn, acquired.reused, connectMs);
+    deps.pool.release(key, conn);
+    return c.json({
+      kind: "execute",
+      updateCount: result.updateCount,
+      hasRowCount: result.hasRowCount,
+      ...(result.warning ? { warning: result.warning } : {}),
+      connection: info
+    });
+  } catch (e) {
+    // **SQL の誤りなら接続は健全**（準備で落ちただけ）。捨てると次の実行が 6 秒待たされる。
+    // それ以外は状態が分からないので捨てる（クエリ経路と同じ判断）
+    if (conn) {
+      if (e instanceof SqlError && key !== undefined) deps.pool.release(key, conn);
+      else deps.pool.discard(conn);
+    }
+    const err = e as As400Error;
+    const detail = e instanceof SqlError ? { sqlCode: e.sqlCode, sqlState: e.sqlState } : {};
+    return c.json({ error: err.message, code: err.code ?? "UNKNOWN", ...detail }, statusOf(err));
+  }
+}
+
 export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: HostSqlDeps): void {
   app.post("/api/host/sql", async (c) => {
     const parsed = sqlRequestSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -128,6 +183,11 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     }
     const { source, sql, maxRows, lobMaxBytes, pageSize } = parsed.data;
     const user = c.get("user");
+
+    // --- 結果を返さない文（DML / DDL）。**クエリ経路では実行できない**ので先に振り分ける ---
+    if (isNonQueryStatement(sql)) {
+      return await runNonQuery(c, deps, { source, sql, user });
+    }
 
     // --- ページング（pageSize 指定時）。**結果セットを保持**して続きを /next で返す ---
     if (pageSize !== undefined) {

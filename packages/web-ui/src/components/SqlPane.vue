@@ -17,8 +17,10 @@ import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
  * 一覧ペインと同じ「特殊なタブ ID」方式で開く（`sql:query`）。
  * 取得できる範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない。
  *
- * **実行できるのは SELECT だけ**——サーバー側 `/api/host/sql` の実装がそうなっている
- * （結果セットを持たない文は describe の段階で落ちる）。UI でも SELECT 以外を勧めない。
+ * **SELECT だけでなく、結果を返さない文（INSERT / UPDATE / DELETE / CREATE …）も実行できる**
+ * （`20260730-sql-non-query-statements`）。振り分けは**サーバーが行う**ので、ここでは
+ * 応答の `kind` を見て「表を出す」か「行数・完了を出す」かを選ぶだけ。
+ * ⚠ **書き込みは取り消せない**（コミットメント制御を使っていない）。
  *
  * **`;` で区切れば複数の文を順に実行する**。結果を返した文ごとに結果領域のタブを積み、
  * 表示中のタブに対して列幅・CSV・読み足しが働く。失敗したらそこで止め、
@@ -57,6 +59,21 @@ interface ResultTab {
   hasMore: boolean;
   resultSetId: string;
   expired: boolean;
+  /**
+   * 結果を返さない文（DML / DDL）の実行結果。**これがあるタブは表の代わりにこれを出す**。
+   * 行が 0 件の SELECT と区別するために、`rows.length` ではなくこの有無で見分ける。
+   */
+  execute?: ExecuteInfo;
+}
+
+/** 非クエリ文の実行結果（サーバーの `kind: "execute"` 応答） */
+interface ExecuteInfo {
+  /** 影響した行数。`hasRowCount` が false のときは意味を持たない */
+  updateCount: number;
+  /** 影響行数に意味があるか（DML なら true。DDL は false） */
+  hasRowCount: boolean;
+  /** 警告つき成功（`7905` など）。**捨てると「作られたのに何も言われない」になる** */
+  warning?: { sqlCode: number; sqlState: string };
 }
 
 const tabs = ref<ResultTab[]>([]);
@@ -68,6 +85,17 @@ const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.val
 const columns = computed<Column[]>(() => activeTab.value?.columns ?? []);
 const rows = computed<Row[]>(() => activeTab.value?.rows ?? []);
 const hasMore = computed(() => activeTab.value?.hasMore ?? false);
+/**
+ * 表示中のタブが「結果を返さない文」なら、その実行結果。
+ * **行が 0 件の SELECT と混ぜない**ためにタブの `execute` の有無で見る。
+ */
+const executeInfo = computed(() => activeTab.value?.execute);
+/** 行数に意味がある文は件数を、意味が無い文（DDL）は完了だけを伝える */
+const executeMessage = computed(() => {
+  const e = executeInfo.value;
+  if (!e) return "";
+  return e.hasRowCount ? `${e.updateCount} 行に影響しました。` : "実行しました。";
+});
 const resultSetId = computed(() => activeTab.value?.resultSetId ?? "");
 const expired = computed(() => activeTab.value?.expired ?? false);
 const loadingMore = ref(false);
@@ -249,6 +277,9 @@ async function executeOne(one: string, position: number, total: number): Promise
       });
       return false;
     }
+    // **結果を返さない文はサーバーが `kind: "execute"` で返す。**
+    // 列の有無で見分けると「列が 0 の結果セット」と区別できない
+    const isExecute = data.kind === "execute";
     const tab: ResultTab = {
       id: `tab-${++tabSeq}`,
       index: position,
@@ -257,7 +288,16 @@ async function executeOne(one: string, position: number, total: number): Promise
       rows: data.rows ?? [],
       hasMore: Boolean(data.hasMore),
       resultSetId: data.resultSetId ?? "",
-      expired: false
+      expired: false,
+      ...(isExecute
+        ? {
+            execute: {
+              updateCount: Number(data.updateCount ?? 0),
+              hasRowCount: Boolean(data.hasRowCount),
+              ...(data.warning ? { warning: data.warning } : {})
+            }
+          }
+        : {})
     };
     tabs.value = [...tabs.value, tab];
     // **選ぶのは最初のタブ**。書いた順に見るのが自然で、最後の文が確認用のこともある
@@ -268,8 +308,16 @@ async function executeOne(one: string, position: number, total: number): Promise
       sql: one,
       status: "ok",
       ms: Date.now() - started,
-      rowCount: tab.rows.length,
-      hasMore: tab.hasMore
+      // 行数の意味が無い文（DDL）では**件数を載せない**——0 と書くと「0 行に影響した」に見える
+      ...(tab.execute
+        ? tab.execute.hasRowCount
+          ? { rowCount: tab.execute.updateCount }
+          : {}
+        : { rowCount: tab.rows.length }),
+      hasMore: tab.hasMore,
+      ...(tab.execute?.warning
+        ? { detail: `SQLCODE=${tab.execute.warning.sqlCode} SQLSTATE=${tab.execute.warning.sqlState}` }
+        : {})
     });
     return true;
   } catch (e) {
@@ -389,9 +437,15 @@ function blankQuery(): QuerySnapshot {
 const queries = ref<QuerySnapshot[]>([blankQuery()]);
 const activeId = ref(queries.value[0]!.id);
 
-/** クエリ一覧に出す行数。複数文なら全タブの合計 */
+/**
+ * クエリ一覧に出す行数。複数文なら全タブの合計。
+ * **非クエリ文は影響行数を足す**（行数に意味が無い DDL は 0 のまま）。
+ */
 function queryRowCount(q: QuerySnapshot): number {
-  return q.tabs.reduce((n, t) => n + t.rows.length, 0);
+  return q.tabs.reduce(
+    (n, t) => n + (t.execute ? (t.execute.hasRowCount ? t.execute.updateCount : 0) : t.rows.length),
+    0
+  );
 }
 
 /** 一覧に出す名前。SQL の 1 行目を詰めたもの（未入力なら通し番号） */
@@ -547,7 +601,8 @@ function download(): void {
       @keydown="onKeydown"
     ></textarea>
     <p v-show="!split.maximized.value" class="hint">
-      SELECT のみ実行できます（Ctrl+Enter で実行）。<strong>「;」で区切ると順に実行し、
+      SELECT も更新（INSERT / UPDATE / DELETE / CREATE …）も実行できます（Ctrl+Enter で実行）。
+      <strong>更新は取り消せません。</strong><strong>「;」で区切ると順に実行し、
       結果ごとにタブが出ます。</strong>下までスクロールするか End / PageDown で続きを読み足します
       （「1 度に取得」はその 1 回ぶんの件数）。
     </p>
@@ -583,7 +638,9 @@ function download(): void {
       >
         <span class="rtab-no">{{ t.index }}</span>
         <span class="rtab-name">{{ summarizeSql(t.sql) }}</span>
-        <span class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
+        <!-- 非クエリ文は行が無い。**行数の意味が無い文は「済」**（0 と出すと 0 行に見える） -->
+        <span v-if="t.execute" class="rtab-count">{{ t.execute.hasRowCount ? t.execute.updateCount : "済" }}</span>
+        <span v-else class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
       </button>
     </div>
 
@@ -607,9 +664,20 @@ function download(): void {
       />
     </KeepAlive>
 
-    <p v-if="executed && !error && !loading && !rows.length" class="empty">該当する行はありません。</p>
+    <!--
+      結果を返さない文（DML / DDL）の結果。**表の代わりにここへ出す**。
+      警告（SQLCODE > 0）も併記する——捨てると「作られたのに何も言われない」になる
+    -->
+    <p v-if="executeInfo" class="done">
+      {{ executeMessage }}
+      <span v-if="executeInfo.warning" class="detail">
+        （警告 SQLCODE={{ executeInfo.warning.sqlCode }} SQLSTATE={{ executeInfo.warning.sqlState }}）
+      </span>
+    </p>
+
+    <p v-else-if="executed && !error && !loading && !rows.length" class="empty">該当する行はありません。</p>
     <p v-else-if="!executed && !error && !rows.length" class="empty">
-      接続を選び、SELECT を入力して「実行」を押してください。取得できる範囲は IBM i の権限によります。
+      接続を選び、SQL を入力して「実行」を押してください。実行できる範囲は IBM i の権限によります。
     </p>
 
       <!-- .sql-pane 直下に置くとフッターを覆ってしまうので、結果領域の中に置く -->
@@ -740,6 +808,8 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .detail { font-family: var(--mono); font-size: 12px; }
 .warn { color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; font-size: 12px; }
 .empty { color: var(--muted); text-align: center; }
+/* 非クエリ文の結果。**エラーと見間違えないよう**赤にはしない（成功の報告） */
+.done { padding: 8px 4px; border-left: 3px solid var(--accent); }
 /* 地の色を明示する。親（.group）が半透明の緑を重ねているため、
    固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
    表の領域を不透明にして、固定列と本文を同じ地の上に載せる */

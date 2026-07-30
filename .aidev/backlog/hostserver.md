@@ -206,12 +206,29 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
 
 ## SQL の複数文実行からの積み残し（2026-07-23 追記）
 
-- [ ] 結果を返さない文（INSERT / UPDATE / DELETE / CREATE 等）を SQL 画面から実行する
-    → `executeImmediate`(0x1806) も `prepare`(0x1800) も実機で `rcClass=2 / -215` に拒否された
-      （20260723-sql-multi-statement の research F2）。動くのは `prepareAndDescribe`(0x1803) だけ。
-      原典 `AS400JDBCStatement` は 文テキスト（V5R4 以降は**拡張形式**）＋文型＋`openAttributes`＋
-      `prepareOption` を送っており、**拡張形式の文テキストか RPB の設定**が鍵の可能性がある。
-      なお原典の文型は SELECT=2 / OTHER=1 で、当方の `query.ts`(0) / `insert.ts`(1) とは一致していない
+- [x] 結果を返さない文（INSERT / UPDATE / DELETE / CREATE 等）を SQL 画面から実行する
+    → 20260730-sql-non-query-statements で実装。**`executeImmediate` は要らなかった**——
+      `prepareAndDescribe`(0x1803) → `execute`(0x1805) を**マーカーデータ無し**で送れば
+      DML も DDL も通る（実機で実測。`scripts/research-sql-exec.mjs` で再現できる）。
+      マーカーが無い文ではマーカー形式が**空（0 バイト）で返る**ので `changeDescriptor` は省ける。
+      上の見立て（拡張形式の文テキストか RPB の設定が鍵）は**別の道を指していた**
+    - 成否は **SQLCODE の符号**で見る。`0` 成功 / **正は警告つき成功**（実ライブラリーへの
+      `CREATE TABLE` は `7905 / 01567`。捨てると「作られたのに何も言われない」）/ 負は失敗
+    - 影響行数は SQLCA の `updateCount`。**DDL も 0 で返る**ので「DDL の完了」と
+      「0 行に影響した DML」は件数から区別できない → 文の先頭語で決める（`isRowCountStatement`）
+    - SELECT を非クエリ経路に流すと `-518 / 07003` で**明確に落ちる**（黙って壊れない）
+- [ ] `executeImmediate`(0x1806) / `prepare`(0x1800) が `-215` で拒まれる理由
+    → **実用上は不要**（上記のとおり既存の 2 要求で足りる）。原典が送っている
+      拡張形式の文テキストや `prepareOption` との差を詰めれば分かるはずだが、
+      **通す動機が無い**ので追っていない。1 往復に縮めたくなったときに再訪する
+- [ ] マーカー（`?`）付きの非クエリ文を実行する
+    → 現状は**実行前に断っている**（`changeDescriptor` を送らない経路なので、
+      通すとマーカーが埋まらないまま実行される）。値を埋めた文を送れば足りるため優先度は低い。
+      必要になったら `insert.ts` のマーカー登録（`marker-encode.ts`）を再利用する
+- [ ] MCP の `host_sql` から非クエリ文を実行させるか決める
+    → 画面（`/api/host/sql`）は 2026-07-30 から実行できるが、**MCP は SELECT 専用のまま**
+      （`host_sql` は `query` を呼ぶ。更新は `host_command` の `RUNSQL` で足りている）。
+      AI から取り消せない書き込みを撃たせるかは**方針の判断**なので、勝手には広げていない
 - [ ] SQL 結果表の行を仮想化する（表示範囲だけ描く）
     → 1 タブぶんの初回描画（200 行 × 40 列 ＝ 8,000 セル）が今も 100ms 前後かかる。
       `pageSize` を 1000 にすると 40,000 セルになる。

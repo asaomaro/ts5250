@@ -205,8 +205,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   );
   registerHostDtaqRoutes(app, { resolver: deps.resolver, receiveMaxWaitSec: dtaqReceiveMaxWaitSec });
 
-  // CSV の取り込み（DDM）。**ここは IBM i に書き込むルート**——
-  // 読み取り専用なのは /api/host/sql であって、ホスト API 全体ではない（host-upload.ts の説明）
+  // CSV の取り込み（DDM）。**ここは IBM i に書き込むルート**（host-upload.ts の説明）。
+  // /api/host/sql も 2026-07-30 から書き込む（非クエリ文の実行。host-sql.ts の冒頭）
   registerHostUploadRoutes(app, { resolver: deps.resolver });
 
   // pull 型スプール（任意の OUTQ から**既存の**スプールを検索・取得）。
