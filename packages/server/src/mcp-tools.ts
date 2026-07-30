@@ -313,7 +313,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           const entry = sessions.assertWritable(sessionId, user);
           const opts = resolver.resolve({ system }, user, warn).connect;
           if (!opts.user || !opts.password) {
-            throw new As400Error("CONNECT_FAILED", `system ${system} has no signon credentials`);
+            throw new As400Error("CONFIG_ERROR", `system ${system} has no signon credentials`);
           }
           const r = await fieldSignon(entry.session, opts.user, opts.password);
           return screenResult(r.screen, {}, r.timedOut);
@@ -1062,7 +1062,7 @@ function buildDirectOpts(input: {
   tls?: boolean;
   origin: string;
 } {
-  if (!input.host) throw new As400Error("CONNECT_FAILED", "host or profile required");
+  if (!input.host) throw new As400Error("CONFIG_ERROR", "host or profile required");
   const o: {
     host: string;
     port?: number;

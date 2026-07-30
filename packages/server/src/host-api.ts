@@ -53,6 +53,10 @@ export function statusOf(e: As400Error): 400 | 403 | 404 | 409 | 502 {
     // 中身が残っていて消せない（IFS の rmdir rc=9）。**中を先に消せば通る**ので、
     // 502（ホストが落ちている）ではなく「今の状態と衝突している」に寄せる
     case "NOT_EMPTY":
+    // セッションの席が埋まっている。**どれか閉じれば通る**ので、要求の誤り（400）でも
+    // ホストの障害（502）でもない。以前は CONNECT_FAILED で 400 に落ちており、
+    // 「ホストへ繋げなかった」と区別できなかった
+    case "SESSION_LIMIT":
       return 409;
     case "CONFIG_ERROR":
     case "CONNECT_FAILED":

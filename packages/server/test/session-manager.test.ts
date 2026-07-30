@@ -26,11 +26,13 @@ describe("SessionManager", () => {
     mgr.closeAll();
   });
 
-  it("上限を超えると CONNECT_FAILED", async () => {
+  // 上限は **SESSION_LIMIT**。CONNECT_FAILED（＝ホストへ繋げなかった）ではない
+  // （`20260729-connect-failed-semantics`。意味ごとの検証は `error-code-semantics.test.ts`）
+  it("上限を超えると SESSION_LIMIT", async () => {
     const mgr = new SessionManager({ maxSessions: 1 });
     await openReplay(mgr);
     await expect(openReplay(mgr)).rejects.toSatisfy(
-      (e: unknown) => e instanceof As400Error && e.code === "CONNECT_FAILED"
+      (e: unknown) => e instanceof As400Error && e.code === "SESSION_LIMIT"
     );
     mgr.closeAll();
   });

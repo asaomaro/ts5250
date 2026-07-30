@@ -119,7 +119,13 @@ export class WsConnection {
       }
     } catch (err) {
       const code = err instanceof As400Error ? err.code : "INTERNAL_ERROR";
-      const fatal = code === "SESSION_CLOSED" || code === "CONNECT_FAILED";
+      // **`fatal` は「この接続にセッションが無い / 失われた」という状態で決める。**
+      // 以前はエラーコードの列挙（`SESSION_CLOSED` / `CONNECT_FAILED`）で決めていたが、
+      // それだと**コード名を変えた瞬間に意味が黙って変わる**——実際 `open` の失敗が
+      // `CONNECT_FAILED` から `CONFIG_ERROR` / `SESSION_LIMIT` へ分かれた時点で、
+      // 列挙のままなら「開けなかった」が致命的でなくなっていた
+      // （`20260729-connect-failed-semantics` spec 方針3）。
+      const fatal = code === "SESSION_CLOSED" || this.sessionId === undefined;
       this.sendError(code, err instanceof Error ? err.message : String(err), fatal);
     }
   }
@@ -412,7 +418,7 @@ function buildDirect(msg: {
   user?: string;
   password?: string;
 }): OpenOptions {
-  if (!msg.host) throw new As400Error("CONNECT_FAILED", "host or profile required");
+  if (!msg.host) throw new As400Error("CONFIG_ERROR", "host or profile required");
   const o: OpenOptions = { host: msg.host, origin: "direct" };
   if (msg.port !== undefined) o.port = msg.port;
   if (msg.ccsid !== undefined) o.ccsid = msg.ccsid;

@@ -105,19 +105,10 @@ async function connect(cardName) {
     { timeout: 25000 }
   );
   await sleep(900);
-  if ((await has("サイン")) && (await has("ユーザー"))) {
-    const u = inputs().nth(0);
-    await u.click();
-    await page.keyboard.press("Home");
-    await page.keyboard.type(user, { delay: 20 });
-    const p = inputs().nth(1);
-    await p.click();
-    await page.keyboard.press("Home");
-    await page.keyboard.type(password, { delay: 20 });
-    await clickEnter();
-  }
+  // **サインオンの入力はループの中で行う。** 1 回だけ先に試すと、前回の実行が装置を掴んでいて
+  // 最初の画面が「対話式ジョブの回復」だった場合に取りこぼし、以後は空のサインオンを
+  // Enter で送り続けて `CPF1296 サインオン情報が必要である` で詰まる（実際に踏んだ）
   for (let i = 0; i < 20; i++) {
-    await sleep(1400);
     if (await has("メインメニュー")) break;
     if (await has("対話式ジョブの回復")) {
       const el = inputs().last();
@@ -125,9 +116,22 @@ async function connect(cardName) {
       await page.keyboard.press("Home");
       await page.keyboard.type("90", { delay: 30 });
       await clickEnter();
+    } else if ((await has("サイン")) && (await has("ユーザー"))) {
+      const u = inputs().nth(0);
+      await u.click();
+      await page.keyboard.press("Home");
+      await page.keyboard.type(user, { delay: 20 });
+      const p = inputs().nth(1);
+      await p.click();
+      await page.keyboard.press("Home");
+      await page.keyboard.type(password, { delay: 20 });
+      await clickEnter();
     } else await clickEnter();
+    await sleep(1400);
   }
-  return await has("メインメニュー");
+  const ok = await has("メインメニュー");
+  if (!ok) log("---- 到達できなかった画面 ----\n" + (await bodyText()).slice(0, 1500));
+  return ok;
 }
 
 /** 「切断」の兆候が出たか（closed 通知 or 接続表示の消失） */

@@ -85,11 +85,11 @@ export class UserStore {
     try {
       raw = JSON.parse(readFileSync(path, "utf8"));
     } catch (err) {
-      throw new As400Error("CONNECT_FAILED", `failed to read users ${path}: ${(err as Error).message}`);
+      throw new As400Error("CONFIG_ERROR", `failed to read users ${path}: ${(err as Error).message}`);
     }
     const parsed = usersSchema.safeParse(raw);
     if (!parsed.success) {
-      throw new As400Error("CONNECT_FAILED", `invalid users file: ${parsed.error.message}`);
+      throw new As400Error("CONFIG_ERROR", `invalid users file: ${parsed.error.message}`);
     }
     const store = new UserStore(parsed.data.users);
     store.path = path;

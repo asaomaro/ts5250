@@ -80,7 +80,7 @@ export class ConfigResolver {
    */
   resolve(ref: TargetRef, user: AuthUser | undefined, warn: Warn): ResolvedTarget {
     if (!ref.system && !ref.session) {
-      throw new As400Error("CONNECT_FAILED", "system, session, or host required");
+      throw new As400Error("CONFIG_ERROR", "system, session, or host required");
     }
 
     let session: AnySession | undefined;
@@ -205,7 +205,7 @@ export class ConfigResolver {
       password = process.env[s.passwordEnv];
       if (password === undefined || password === "") {
         throw new As400Error(
-          "CONNECT_FAILED",
+          "CONFIG_ERROR",
           `system ${system.name}: password not available (env ${s.passwordEnv} unset)`
         );
       }

@@ -380,7 +380,9 @@ export class SessionManager {
 
   async open(opts: OpenOptions): Promise<SessionEntry> {
     if (this.size >= this.maxSessions) {
-      throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
+      // **繋ぎに行く前に自分側で断っている。** CONNECT_FAILED（＝ホストへ繋げなかった）と
+      // 混ぜると「ホストが落ちている」と「席が空いていない」が区別できない
+      throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
     const id = opts.id ?? randomUUID();
     // 表示セッションの警告は既定で捨てられる（core の warn 既定が no-op）。
@@ -551,7 +553,7 @@ export class SessionManager {
 
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
     if (this.size >= this.maxSessions) {
-      throw new As400Error("CONNECT_FAILED", `session limit reached (${this.maxSessions})`);
+      throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
     const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
     // ホスト変換で受けているなら、自動印刷は PDF に起こさず受信バイトをそのまま流す

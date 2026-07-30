@@ -388,14 +388,14 @@ function readJson(path: string, what: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new As400Error("CONNECT_FAILED", `failed to read ${what} ${path}: ${(err as Error).message}`);
+    throw new As400Error("CONFIG_ERROR", `failed to read ${what} ${path}: ${(err as Error).message}`);
   }
 }
 
 function parseOrThrow<T>(schema: z.ZodType<T>, raw: unknown, what: string): T {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    throw new As400Error("CONNECT_FAILED", `invalid ${what}: ${parsed.error.message}`);
+    throw new As400Error("CONFIG_ERROR", `invalid ${what}: ${parsed.error.message}`);
   }
   return parsed.data;
 }
@@ -410,7 +410,7 @@ function assertNoPlaintextPassword(raw: unknown): void {
   for (const p of profs) {
     if (p && typeof p === "object" && (p as { signon?: { password?: unknown } }).signon?.password !== undefined) {
       throw new As400Error(
-        "CONNECT_FAILED",
+        "CONFIG_ERROR",
         `profile ${(p as { name?: string }).name ?? "?"}: signon.password (平文) は廃止されました。` +
           `passwordEnv（環境変数）を使うか、UI からパスワードを設定してください（passwordEnc）`
       );

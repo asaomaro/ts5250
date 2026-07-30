@@ -265,3 +265,35 @@ describe("ハートビート", () => {
     }
   });
 });
+
+/**
+ * `fatal` は「この接続にセッションが無い / 失われた」という**状態**で決める。
+ *
+ * 以前はエラーコードの列挙（`SESSION_CLOSED` / `CONNECT_FAILED`）で決めていたため、
+ * `open` の失敗が `CONFIG_ERROR` / `SESSION_LIMIT` に分かれた時点で
+ * 「開けなかった」が致命的でなくなっていた（`20260729-connect-failed-semantics` spec 方針3）。
+ */
+describe("error の fatal は状態で決まる", () => {
+  const errOf = (sent: WsServerMessage[]) =>
+    sent.filter((m): m is WsServerMessage & { type: "error" } => m.type === "error").at(-1);
+
+  it("open が指定不足で失敗したら fatal（セッションが無い）", async () => {
+    const { conn, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "open" })); // host も参照も無い
+    expect(errOf(sent)).toMatchObject({ code: "CONFIG_ERROR", fatal: true });
+  });
+
+  it("open 前の key も fatal（セッションが無いのは事実）", async () => {
+    const { conn, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "key", key: "Enter" }));
+    expect(errOf(sent)).toMatchObject({ code: "SESSION_NOT_FOUND", fatal: true });
+  });
+
+  it("セッションが生きているうちのエラーは fatal でない", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await conn.handle(JSON.stringify({ type: "gui-select", fieldId: 9999, choiceIndex: 0 }));
+    expect(errOf(sent)).toMatchObject({ fatal: false });
+    mgr.closeAll();
+  });
+});
