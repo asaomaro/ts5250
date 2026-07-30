@@ -204,6 +204,35 @@ export async function makeDirectory(source: IfsSource, path: string): Promise<vo
   await post("mkdir", { source, path });
 }
 
+/**
+ * フォルダごと置くときの 1 項目。`path` は置き先からの**相対パス**
+ * （`webkitRelativePath` の形。先頭が対象フォルダ名になる）。
+ */
+export type IfsUploadEntry =
+  | { kind: "directory"; path: string }
+  | { kind: "file"; path: string; content: string };
+
+/** 一括アップロードの結果。**失敗は件数ではなくパスで返す**（どれが落ちたか要る） */
+export interface IfsUploadResult {
+  directories: number;
+  files: number;
+  bytes: number;
+  failed: { path: string; error: string; code: string }[];
+}
+
+/**
+ * フォルダをまとめて置く。**1 要求で 1 接続**——ファイルごとに `writeFile` を呼ぶと
+ * 実機では接続・認証だけで 1 件 4.5 秒かかり、フォルダの投入が実用にならない。
+ */
+export async function uploadTree(
+  source: IfsSource,
+  base: string,
+  entries: readonly IfsUploadEntry[]
+): Promise<IfsUploadResult> {
+  const res = await post("upload", { source, base, entries });
+  return (await res.json()) as IfsUploadResult;
+}
+
 /** 削除の結果。**種別の判断はサーバー側**なので、UI は消えた件数だけを見る */
 export interface IfsDeleteResult {
   files: number;

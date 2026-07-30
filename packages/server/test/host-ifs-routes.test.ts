@@ -26,6 +26,11 @@ interface FakeOpts {
   /** rename だけを失敗させる（種別の取り違えの再現に使う） */
   renameError?: As400Error;
   fail?: As400Error;
+  /**
+   * パスごとの失敗（`mkdir` / `write`）。**一括アップロードは 1 件の失敗で止めない**ので、
+   * 「どれが落ちたか」を確かめるにはこの粒度が要る
+   */
+  errorsAt?: Record<string, As400Error>;
   /** 呼ばれた操作を記録する */
   calls?: string[];
 }
@@ -53,10 +58,14 @@ function fakeConn(opts: FakeOpts): IfsConnection {
     async writeFile(path: string, data: Uint8Array): Promise<void> {
       opts.calls?.push(`write ${path} ${data.length}`);
       if (opts.fail) throw opts.fail;
+      const at = opts.errorsAt?.[path];
+      if (at) throw at;
     },
     async makeDirectory(path: string): Promise<void> {
       opts.calls?.push(`mkdir ${path}`);
       if (opts.fail) throw opts.fail;
+      const at = opts.errorsAt?.[path];
+      if (at) throw at;
     },
     async deleteFile(path: string): Promise<void> {
       opts.calls?.push(`delete ${path}`);
@@ -89,6 +98,9 @@ function appWith(
     dirs: number;
     deleteEntries: number;
     deleteDirs: number;
+    uploadBytes: number;
+    uploadFiles: number;
+    uploadDirs: number;
   }>
 ) {
   const app = new Hono<{ Variables: AuthVars }>();
@@ -104,6 +116,9 @@ function appWith(
     ...(limits?.dirs !== undefined ? { zipMaxDirectories: limits.dirs } : {}),
     ...(limits?.deleteEntries !== undefined ? { deleteMaxEntries: limits.deleteEntries } : {}),
     ...(limits?.deleteDirs !== undefined ? { deleteMaxDirectories: limits.deleteDirs } : {}),
+    ...(limits?.uploadBytes !== undefined ? { uploadMaxBytes: limits.uploadBytes } : {}),
+    ...(limits?.uploadFiles !== undefined ? { uploadMaxFiles: limits.uploadFiles } : {}),
+    ...(limits?.uploadDirs !== undefined ? { uploadMaxDirectories: limits.uploadDirs } : {}),
     connect: async () => fakeConn(opts)
   });
   return app;
@@ -330,6 +345,132 @@ describe("write / mkdir / delete", () => {
   it("権限が無ければ 403", async () => {
     const app = appWith({ fail: new As400Error("ACCESS_DENIED", "no") });
     expect((await call(app, "delete", { path: "/d/x" })).status).toBe(403);
+  });
+});
+
+/**
+ * フォルダの一括アップロード。
+ *
+ * **1 要求 1 接続**という制約が動機なので、「1 回の要求で全部置く」ことと、
+ * 「途中の失敗で残りを捨てない」こと、そして**置き先の外へ書けない**ことを固定する。
+ */
+describe("upload（フォルダごと）", () => {
+  const file = (path: string, text = "x") => ({
+    kind: "file" as const,
+    path,
+    content: Buffer.from(text).toString("base64")
+  });
+  const dir = (path: string) => ({ kind: "directory" as const, path });
+
+  it("1 接続でフォルダを作ってからファイルを書く", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls });
+    const res = await call(app, "upload", {
+      base: "/home/u",
+      entries: [dir("TOP"), dir("TOP/sub"), file("TOP/a.txt"), file("TOP/sub/b.txt")]
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ directories: 2, files: 2, failed: [] });
+    // 接続は 1 本（close が 1 回）。ファイルごとに開き直していない
+    expect(calls.filter((c) => c === "close")).toHaveLength(1);
+    expect(calls).toEqual([
+      "mkdir /home/u/TOP",
+      "mkdir /home/u/TOP/sub",
+      "write /home/u/TOP/a.txt 1",
+      "write /home/u/TOP/sub/b.txt 1",
+      "close"
+    ]);
+  });
+
+  /** 順序を画面任せにしない。親が後に来ても、浅い順に作るので NOT_FOUND にならない */
+  it("フォルダは浅い順に作る（並びが逆でも）", async () => {
+    const calls: string[] = [];
+    await call(appWith({ calls }), "upload", {
+      base: "/b",
+      entries: [dir("a/b/c"), dir("a"), dir("a/b")]
+    });
+    expect(calls.filter((c) => c.startsWith("mkdir"))).toEqual([
+      "mkdir /b/a",
+      "mkdir /b/a/b",
+      "mkdir /b/a/b/c"
+    ]);
+  });
+
+  /** 同じフォルダへ置き直せることが要件。既存は失敗にしない */
+  it("既にあるフォルダは失敗にしない", async () => {
+    const app = appWith({ errorsAt: { "/b/TOP": new As400Error("ALREADY_EXISTS", "dup") } });
+    const res = await call(app, "upload", {
+      base: "/b",
+      entries: [dir("TOP"), file("TOP/a.txt")]
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ directories: 0, files: 1, failed: [] });
+  });
+
+  /** 1 件の権限エラーで残り全部を捨てない（大きなフォルダほど何度やっても終わらなくなる） */
+  it("途中が失敗しても残りは置き、失敗はパスで返す", async () => {
+    const app = appWith({ errorsAt: { "/b/ng.txt": new As400Error("ACCESS_DENIED", "no") } });
+    const res = await call(app, "upload", {
+      base: "/b",
+      entries: [file("ng.txt"), file("ok.txt")]
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      files: 1,
+      failed: [{ path: "ng.txt", code: "ACCESS_DENIED" }]
+    });
+  });
+
+  /** 上限超過は**先に**返す。途中まで置かれた木は、利用者が中身を確かめられない */
+  it("上限を超えたら 413 で、1 件も置かない", async () => {
+    const calls: string[] = [];
+    const app = appWith({ calls }, { uploadFiles: 1 });
+    const res = await call(app, "upload", {
+      base: "/b",
+      entries: [file("a.txt"), file("b.txt")]
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ code: "TOO_LARGE", files: 2, maxFiles: 1 });
+    expect(calls).toEqual([]); // 接続すら開かない
+  });
+
+  it("合計バイトの上限も効く", async () => {
+    const app = appWith({}, { uploadBytes: 3 });
+    const res = await call(app, "upload", { base: "/b", entries: [file("a.txt", "abcd")] });
+    expect(res.status).toBe(413);
+  });
+
+  it("フォルダ数の上限も効く", async () => {
+    const app = appWith({}, { uploadDirs: 1 });
+    const res = await call(app, "upload", { base: "/b", entries: [dir("a"), dir("b")] });
+    expect(res.status).toBe(413);
+  });
+
+  /**
+   * **置き先の外へ書かせない。** 相対パスを素通しすると、画面が示しているフォルダの外に
+   * 書ける（信頼境界の穴）。`..` も絶対パスも入口で断る
+   */
+  it.each([["../escape.txt"], ["/abs.txt"], ["a/../../b.txt"], ["a//b.txt"], ["a/"]])(
+    "置き先の外を指す相対パスを断る（%s）",
+    async (bad) => {
+      const calls: string[] = [];
+      const res = await call(appWith({ calls }), "upload", { base: "/b", entries: [file(bad)] });
+      expect(res.status).toBe(400);
+      expect(calls).toEqual([]);
+    }
+  );
+
+  /** 実機の /home には端末エスケープ入りの名前が実在した。読むのは仕方ないが、作らせはしない */
+  it("制御文字入りの名前を断る", async () => {
+    const res = await call(appWith({}), "upload", {
+      base: "/b",
+      entries: [file("a\u001b[2Jb.txt")]
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("空の entries を断る", async () => {
+    expect((await call(appWith({}), "upload", { base: "/b", entries: [] })).status).toBe(400);
   });
 });
 

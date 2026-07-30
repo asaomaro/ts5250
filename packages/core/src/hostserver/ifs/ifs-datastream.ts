@@ -30,12 +30,25 @@ export const FILE_REQ = {
 export const FILE_ACCESS = { read: 1, write: 2 } as const;
 
 /**
- * 既存ファイルの扱い（OPEN の duplicate file option）。
+ * 既存ファイルの扱い（OPEN の duplicate file option）。原典 `IFSOpenReq` の
+ * `OPEN_OPTION_*`（値は原典どおり）。
  *
- * 1 = 無ければ作って開く／有れば開く
+ * 1 = 無ければ作る／有れば**開く**（中身はそのまま残る）
+ * 2 = 無ければ作る／有れば**置き換える**（＝開いた時点で 0 バイトになる）
  * 8 = 無ければ失敗／有れば開く
+ * 16 = 無ければ失敗／有れば置き換える
+ *
+ * **「開く」と「置き換える」を取り違えると静かにファイルが壊れる**——
+ * 開くだけだと書き込みは先頭からの上書きになり、元の方が長いと末尾が残る。
+ * 41 バイトのファイルに 19 バイト保存して 41 バイトのまま、
+ * 後半が旧内容という壊れ方を実機で踏んだ（`writeFile` は必ず全文を置く経路）。
  */
-export const FILE_DUPLICATE = { createOrOpen: 1, openExisting: 8 } as const;
+export const FILE_DUPLICATE = {
+  createOrOpen: 1,
+  createOrReplace: 2,
+  openExisting: 8,
+  replaceExisting: 16
+} as const;
 
 /** ファイル名のコードポイント */
 const CP_FILENAME = 0x0002;
@@ -125,6 +138,11 @@ export interface OpenFileOptions {
   access: number;
   /** 無ければ作るか */
   create: boolean;
+  /**
+   * 既存の中身を捨てて開くか（既定 false＝残したまま開く）。
+   * **全文を置き換える書き込みは必ず true にする**（さもないと元の方が長いとき末尾が残る）。
+   */
+  replace?: boolean;
   /** ファイル内容の CCSID。0 でサーバー既定 */
   dataCcsid?: number;
 }
@@ -150,7 +168,17 @@ export function buildOpenFileRequest(opts: OpenFileOptions): Uint8Array {
   v.setUint16(at, opts.access); at += 2;
   v.setUint16(at, 0); at += 2; // 共有: 0 = すべて許可
   v.setUint16(at, 0); at += 2; // データ変換なし
-  v.setUint16(at, opts.create ? FILE_DUPLICATE.createOrOpen : FILE_DUPLICATE.openExisting);
+  // 「作るか」と「既存をどうするか」の 2 軸。原典の定数はこの 4 通りをそのまま持つ
+  v.setUint16(
+    at,
+    opts.create
+      ? opts.replace
+        ? FILE_DUPLICATE.createOrReplace
+        : FILE_DUPLICATE.createOrOpen
+      : opts.replace
+        ? FILE_DUPLICATE.replaceExisting
+        : FILE_DUPLICATE.openExisting
+  );
   at += 2;
   v.setUint32(at, 0); at += 4; // 作成サイズ
   v.setUint32(at, 0); at += 4; // 固定属性

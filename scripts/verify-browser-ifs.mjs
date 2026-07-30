@@ -260,7 +260,8 @@ async function main() {
     // 上書き確認と削除確認をまとめて受け入れる。
     // **1 つのダイアログに 2 つのハンドラを付けない**（Playwright が二重処理で落ちる）
     page.on("dialog", (d) => d.accept());
-    await page.setInputFiles('input[type="file"]', {
+    // **フォルダ用の input と区別する。** `input[type=file]` は 2 つある（strict で落ちる）
+    await page.setInputFiles('input[type="file"]:not([webkitdirectory])', {
       name: "e2e-upload.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("uploaded from e2e\n")

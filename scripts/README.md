@@ -181,6 +181,29 @@ node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・�
   `verify-browser-ffw.mjs` は**最後に `SIGNOFF` して装置を解放する**——
   解放しないと次の実行が回復画面から始まり、**1 回おきに失敗する**（実測）。
 
+## IFS ファイルブラウザ（実機 / /home/USER）
+
+| スクリプト | 内容 |
+|---|---|
+| `verify-browser-ifs.mjs` | IFS ペインの操作 E2E（実ブラウザ・実機・18 項目）。`/home/USER/TEST` を作って、**画面の操作だけ**でフォルダ作成／ファイルのアップロード・プレビュー・編集保存・ダウンロード・改名・削除／**フォルダごとのアップロード**（入れ子・日本語名）／zip 一括ダウンロード／フォルダの改名・中身ごと削除まで通す。**API は検証と後始末にしか使わない**（下回りだけ通っても「画面から行えるか」の答えにならない）。 |
+
+要点:
+
+- **保存は元より短い内容で試す。** 長くする編集だと通ってしまう——OPEN を「開くだけ」で書くと
+  先頭からの上書きになり、41 バイトのファイルに 19 バイト保存して末尾 22 バイトが旧内容のまま残る
+  （実機で踏んだ。`FILE_DUPLICATE.createOrReplace` で修正済み）。ホストの `list` が返すサイズまで見る。
+- **「保存しました」を待ってから測る。** クリック直後は busy が立つ前なので、
+  待たずに一覧を読むと書き込み前のサイズを掴む。
+- **フォルダのアップロードは `input[webkitdirectory]` に*ディレクトリのパス*を渡す**（Playwright ≥1.42）。
+  ファイル用の入力とは別物なので、セレクタは `:not([webkitdirectory])` で書き分ける。
+
+```sh
+node --env-file=.env scripts/verify-browser-ifs.mjs
+```
+
+`verify-browser-ifs.mjs` は同じペインの pub400（`/home/USER/ifsdemo`）版。プレビュー（画像・PDF）と
+`/QSYS.LIB` の「先頭 N 件まで」はこちらが見ている。
+
 ## その他
 
 `verify-autosignon` / `verify-signon` / `verify-mcp` / `verify-ws` / `verify-browser` / `verify-dbcs-tls` /

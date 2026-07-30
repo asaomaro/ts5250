@@ -64,6 +64,10 @@ interface Args {
   /** IFS の再帰削除の上限（未指定なら host-ifs の既定） */
   ifsDeleteMaxEntries: number | undefined;
   ifsDeleteMaxDirectories: number | undefined;
+  /** IFS のフォルダ一括アップロードの上限（未指定なら host-ifs の既定） */
+  ifsUploadMaxBytes: number | undefined;
+  ifsUploadMaxFiles: number | undefined;
+  ifsUploadMaxDirectories: number | undefined;
   /** データ待ち行列の受信待機秒の上限（未指定なら app.ts の既定 60 秒） */
   dtaqReceiveMaxWaitSec: number | undefined;
   /** 同時監視数の上限（データ待ち行列の常駐監視。未指定なら WatchRegistry の既定 4） */
@@ -129,6 +133,9 @@ function parseArgs(argv: string[]): Args {
     ifsReadMaxBytes: undefined,
     ifsDeleteMaxEntries: undefined,
     ifsDeleteMaxDirectories: undefined,
+    ifsUploadMaxBytes: undefined,
+    ifsUploadMaxFiles: undefined,
+    ifsUploadMaxDirectories: undefined,
     dtaqReceiveMaxWaitSec: undefined,
     idleTimeoutMs: undefined,
     maxWatches: undefined
@@ -167,6 +174,13 @@ function parseArgs(argv: string[]): Args {
       args.ifsDeleteMaxEntries = parseLimit(argv[++i], "--ifs-delete-max-entries", 100_000);
     } else if (a === "--ifs-delete-max-dirs") {
       args.ifsDeleteMaxDirectories = parseLimit(argv[++i], "--ifs-delete-max-dirs", 100_000);
+    } else if (a === "--ifs-upload-max-bytes") {
+      // 一度に置ける合計。**本文は JSON でメモリに載る**ので zip 取得と同じ桁に留める
+      args.ifsUploadMaxBytes = parseLimit(argv[++i], "--ifs-upload-max-bytes", ZIP_MAX_BYTES_LIMIT);
+    } else if (a === "--ifs-upload-max-files") {
+      args.ifsUploadMaxFiles = parseLimit(argv[++i], "--ifs-upload-max-files", 100_000);
+    } else if (a === "--ifs-upload-max-dirs") {
+      args.ifsUploadMaxDirectories = parseLimit(argv[++i], "--ifs-upload-max-dirs", 100_000);
     } else if (a === "--dtaq-max-wait") {
       args.dtaqReceiveMaxWaitSec = parseLimit(argv[++i], "--dtaq-max-wait", 3600);
     } else if (a === "--max-watches") {
@@ -296,6 +310,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         : {}),
       ...(args.ifsDeleteMaxDirectories !== undefined
         ? { ifsDeleteMaxDirectories: args.ifsDeleteMaxDirectories }
+        : {}),
+      ...(args.ifsUploadMaxBytes !== undefined ? { ifsUploadMaxBytes: args.ifsUploadMaxBytes } : {}),
+      ...(args.ifsUploadMaxFiles !== undefined ? { ifsUploadMaxFiles: args.ifsUploadMaxFiles } : {}),
+      ...(args.ifsUploadMaxDirectories !== undefined
+        ? { ifsUploadMaxDirectories: args.ifsUploadMaxDirectories }
         : {}),
       ...(args.dtaqReceiveMaxWaitSec !== undefined
         ? { dtaqReceiveMaxWaitSec: args.dtaqReceiveMaxWaitSec }

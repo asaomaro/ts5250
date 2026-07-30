@@ -93,6 +93,27 @@ describe("要求の組み立て", () => {
     expect(v(false)).toBe(FILE_DUPLICATE.openExisting);
   });
 
+  // **replace を落とすと静かにファイルが壊れる**（開くだけだと元の方が長いとき末尾が残る）。
+  // オフセット 36 の値そのものを見るのは、原典 `IFSOpenReq` の定数と対応が取れていることを
+  // ここで固定するため（実機でしか気づけない類の退行を、単体で止める）
+  it("replace で既存の中身を捨てて開く（create との 4 通り）", () => {
+    const v = (create: boolean, replace: boolean): number =>
+      new DataView(buildOpenFileRequest({ path: "/a", access: 1, create, replace }).buffer).getUint16(36);
+    expect(v(true, true)).toBe(FILE_DUPLICATE.createOrReplace);
+    expect(v(true, false)).toBe(FILE_DUPLICATE.createOrOpen);
+    expect(v(false, true)).toBe(FILE_DUPLICATE.replaceExisting);
+    expect(v(false, false)).toBe(FILE_DUPLICATE.openExisting);
+  });
+
+  it("duplicate file option は原典 IFSOpenReq の値", () => {
+    expect(FILE_DUPLICATE).toEqual({
+      createOrOpen: 1,
+      createOrReplace: 2,
+      openExisting: 8,
+      replaceExisting: 16
+    });
+  });
+
   it("空のパスを拒否する", () => {
     expect(() => buildOpenFileRequest({ path: "", access: 1, create: false })).toThrow(/empty/);
   });

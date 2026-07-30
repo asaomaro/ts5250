@@ -39,6 +39,14 @@ export interface HostIfsDeps {
   /** 辿るディレクトリ数の上限。未指定なら ifs-collect の既定 */
   zipMaxDirectories?: number;
   /**
+   * フォルダごとの一括アップロードの上限（合計バイト / ファイル数 / フォルダ数）。
+   * 既定 20 MiB / 500 / 500。zip 取得と対にした値——**同じ回線を同じ向きで使う**ので、
+   * 取れる規模と置ける規模を食い違わせない。
+   */
+  uploadMaxBytes?: number;
+  uploadMaxFiles?: number;
+  uploadMaxDirectories?: number;
+  /**
    * 接続を開く手段。**テストで偽の接続を差し込むための口**。
    *
    * 既定は実接続（`openIfs`）。これが無いと、ハンドラ本体
@@ -92,6 +100,53 @@ const writeSchema = z
   .strict();
 
 const pathOnlySchema = z.object({ source: sourceSchema, path: pathSchema }).strict();
+
+/**
+ * フォルダごとの一括アップロード。
+ *
+ * **1 要求＝1 接続**（このファイル冒頭の規約）なので、ファイルごとに要求を投げると
+ * 実機では 1 件あたり接続・認証で約 4.5 秒かかる。フォルダを置くという操作が
+ * 実用にならないため、**まとめて 1 接続で置く**専用の入口を設ける（zip 取得の裏返し）。
+ *
+ * `entries` の `path` は `base` からの**相対パス**。絶対パスや `..` を受けると、
+ * 画面が示している置き先の外へ書ける（＝信頼境界の穴）ので、ここで弾く。
+ */
+const relPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((p) => !p.startsWith("/") && !p.endsWith("/"), "相対パスで指定してください")
+  .refine(
+    (p) => p.split("/").every((seg) => seg.length > 0 && seg !== "." && seg !== ".."),
+    "パスに空・.・.. は使えません"
+  )
+  // 制御文字は名前に使わせない。**実機の /home には端末エスケープ入りの名前が実在した**
+  // （IfsPane の displayName がその後始末をしている）。読むときは受け入れるしかないが、
+  // 新しく作る側では作らせない
+  .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), "パスに制御文字は使えません");
+
+const uploadSchema = z
+  .object({
+    source: sourceSchema,
+    /** 置き先のフォルダ（絶対パス）。`entries` はここからの相対 */
+    base: pathSchema,
+    entries: z
+      .array(
+        z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("directory"), path: relPathSchema }).strict(),
+          z
+            .object({ kind: z.literal("file"), path: relPathSchema, content: z.string() })
+            .strict()
+        ])
+      )
+      .min(1)
+  })
+  .strict();
+
+/** 一括アップロードの既定の上限（zip 取得と対。app.ts の DEFAULT_IFS_ZIP_* と同じ考え方） */
+const DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const DEFAULT_UPLOAD_MAX_FILES = 500;
+const DEFAULT_UPLOAD_MAX_DIRECTORIES = 500;
 
 const deleteSchema = z
   .object({
@@ -455,6 +510,101 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       await conn.makeDirectory(body.path);
       log.info({ user: c.get("user")?.username, path: body.path }, "ifs mkdir");
       return c.json({ ok: true });
+    });
+  });
+
+  /**
+   * フォルダをまとめて置く（1 接続でフォルダ作成＋ファイル書き込み）。
+   *
+   * **上限は先に数えて、超えていたら 1 件も置かない**（再帰削除と同じ作法）——
+   * 途中まで置かれた木は、利用者が「何が入って何が入っていないか」を確かめる手段が無い。
+   *
+   * 途中の失敗では**止めない**。1 ファイルの権限エラーで残り全部を捨てると、
+   * 大きなフォルダほど何度やっても終わらなくなる。失敗はパスごとに集めて返し、
+   * 画面がまとめて伝える（IfsPane の複数ファイル選択と同じ扱い）。
+   */
+  app.post("/api/host/ifs/upload", async (c) => {
+    const parsed = uploadSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const body = parsed.data;
+    const maxBytes = deps.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES;
+    const maxFiles = deps.uploadMaxFiles ?? DEFAULT_UPLOAD_MAX_FILES;
+    const maxDirs = deps.uploadMaxDirectories ?? DEFAULT_UPLOAD_MAX_DIRECTORIES;
+
+    // **復号は 1 回だけ。** ここで作ったバイト列をそのまま書く（数えるために復号して、
+    // 書くときにもう一度復号すると、大きな本文で 2 倍のメモリを踏む）
+    const dirs: string[] = [];
+    const files: { path: string; data: Uint8Array }[] = [];
+    let bytes = 0;
+    for (const e of body.entries) {
+      if (e.kind === "directory") {
+        dirs.push(e.path);
+        continue;
+      }
+      const data = new Uint8Array(Buffer.from(e.content, "base64"));
+      bytes += data.length;
+      files.push({ path: e.path, data });
+    }
+    if (files.length > maxFiles || dirs.length > maxDirs || bytes > maxBytes) {
+      return c.json(
+        {
+          error: "アップロードする量が上限を超えています",
+          code: "TOO_LARGE",
+          files: files.length,
+          directories: dirs.length,
+          bytes,
+          maxFiles,
+          maxDirectories: maxDirs,
+          maxBytes
+        },
+        413
+      );
+    }
+
+    const base = body.base.replace(/\/$/, "");
+    const at = (rel: string): string => `${base === "" ? "" : base}/${rel}`;
+    return await withIfs(c, body.source, async (conn) => {
+      const failed: { path: string; error: string; code: string }[] = [];
+      let created = 0;
+      let written = 0;
+
+      // **浅い順に作る。** 深さでそろえておけば、親が無いまま子を作ろうとして
+      // NOT_FOUND になることがない（画面が順序を守る保証に頼らない）
+      const ordered = [...dirs].sort((a, b) => a.split("/").length - b.split("/").length);
+      for (const rel of ordered) {
+        try {
+          await conn.makeDirectory(at(rel));
+          created += 1;
+        } catch (e) {
+          const err = e as As400Error;
+          // 既にあるのは失敗ではない。**同じフォルダに置き直せる**ことが要件
+          if (err.code === "ALREADY_EXISTS") continue;
+          failed.push({ path: rel, error: err.message, code: err.code ?? "UNKNOWN" });
+        }
+      }
+      for (const f of files) {
+        try {
+          await conn.writeFile(at(f.path), f.data, { create: true });
+          written += 1;
+        } catch (e) {
+          const err = e as As400Error;
+          failed.push({ path: f.path, error: err.message, code: err.code ?? "UNKNOWN" });
+        }
+      }
+      log.info(
+        {
+          user: c.get("user")?.username,
+          path: base,
+          directories: created,
+          files: written,
+          bytes,
+          ...(failed.length > 0 ? { failed: failed.length } : {})
+        },
+        "ifs upload"
+      );
+      return c.json({ directories: created, files: written, bytes, failed });
     });
   });
 

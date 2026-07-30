@@ -504,9 +504,14 @@ describe("システムの切り替え", () => {
 });
 
 describe("アップロード", () => {
-  /** 1 件の失敗を後続の成功で消さない（利用者が「一部置けていない」に気づけるように） */
+  /**
+   * 1 件の失敗を全体の成功で消さない（利用者が「一部置けていない」に気づけるように）。
+   *
+   * 送信は 1 要求にまとめる（`upload`）ので、**部分的な失敗はサーバーの `failed` で返る**——
+   * HTTP がエラーになるわけではない。ここを「200 なら全部成功」と読むと、
+   * 置けていないファイルを黙って成功と表示してしまう
+   */
   it("一部が失敗したら、成功と失敗の両方を伝える", async () => {
-    let n = 0;
     globalThis.fetch = vi.fn(async (url: unknown) => {
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
@@ -515,17 +520,15 @@ describe("アップロード", () => {
           headers: { "content-type": "application/json" }
         });
       }
-      n++;
-      // 1 件目は失敗、2 件目は成功
-      return n === 1
-        ? new Response(JSON.stringify({ error: "権限がありません", code: "ACCESS_DENIED" }), {
-            status: 403,
-            headers: { "content-type": "application/json" }
-          })
-        : new Response(JSON.stringify({ bytes: 3 }), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          });
+      return new Response(
+        JSON.stringify({
+          directories: 0,
+          files: 1,
+          bytes: 3,
+          failed: [{ path: "ng.txt", error: "権限がありません", code: "ACCESS_DENIED" }]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
     }) as unknown as typeof fetch;
 
     const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
@@ -586,6 +589,197 @@ describe("アップロード", () => {
 });
 
 /**
+ * フォルダのアップロード。
+ *
+ * **階層は相対パスで表す**（`webkitRelativePath` の形）。中間フォルダを作り忘れると
+ * 深いファイルが `NOT_FOUND` で落ちるので、**送る本文の中に directory 項目が
+ * 揃っているか**を見る（画面の文言だけでは、木が半分しか上がらなくても緑になる）。
+ */
+describe("フォルダのアップロード", () => {
+  /** upload の本文を捕まえる偽 fetch */
+  function captureUpload() {
+    const sent: {
+      base: string;
+      dirs: string[];
+      files: string[];
+    }[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "list") {
+        return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as {
+        base: string;
+        entries: { kind: string; path: string }[];
+      };
+      sent.push({
+        base: body.base,
+        dirs: body.entries.filter((e) => e.kind === "directory").map((e) => e.path).sort(),
+        files: body.entries.filter((e) => e.kind === "file").map((e) => e.path)
+      });
+      return new Response(
+        JSON.stringify({ directories: sent[0]?.dirs.length ?? 0, files: 1, bytes: 1, failed: [] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+    return sent;
+  }
+
+  const picked = (path: string) => ({
+    path,
+    file: new File([new Uint8Array([1])], path.split("/").pop() ?? path)
+  });
+  type Pane = {
+    uploadPicked(p: { path: string; file: File }[], dirs: string[]): Promise<void>;
+  };
+
+  it("中間フォルダも作る（深いファイルが親無しで落ちないように）", async () => {
+    const sent = captureUpload();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+
+    await (w.vm as unknown as Pane).uploadPicked(
+      [picked("TOP/a.txt"), picked("TOP/sub/deep/b.txt")],
+      []
+    );
+    await flushPromises();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.dirs).toEqual(["TOP", "TOP/sub", "TOP/sub/deep"]);
+    expect(sent[0]?.files).toEqual(["TOP/a.txt", "TOP/sub/deep/b.txt"]);
+    confirm.mockRestore();
+  });
+
+  /** 木の中の同名を 1 件ずつ聞くと、深いフォルダで確認が終わらない */
+  it("確認は木ごとに 1 回だけ", async () => {
+    captureUpload();
+    const asked: string[] = [];
+    const confirm = vi.spyOn(window, "confirm").mockImplementation((m?: string) => {
+      asked.push(String(m));
+      return true;
+    });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+
+    await (w.vm as unknown as Pane).uploadPicked(
+      [picked("TOP/a.txt"), picked("TOP/b.txt"), picked("TOP/c.txt")],
+      []
+    );
+    await flushPromises();
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("TOP");
+    confirm.mockRestore();
+  });
+
+  it("キャンセルしたら 1 件も送らない", async () => {
+    const sent = captureUpload();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+
+    await (w.vm as unknown as Pane).uploadPicked([picked("TOP/a.txt")], []);
+    await flushPromises();
+
+    expect(sent).toHaveLength(0);
+    confirm.mockRestore();
+  });
+
+  /** 中身が無くてもフォルダは作る（ドロップで辿ったときだけ分かる） */
+  it("空のフォルダも作る", async () => {
+    const sent = captureUpload();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+
+    await (w.vm as unknown as Pane).uploadPicked([picked("TOP/a.txt")], ["TOP", "TOP/empty"]);
+    await flushPromises();
+
+    expect(sent[0]?.dirs).toEqual(["TOP", "TOP/empty"]);
+    confirm.mockRestore();
+  });
+});
+
+/**
+ * ドロップされたフォルダの走査。
+ *
+ * **`readEntries` は一度に最大 100 件しか返さない**（仕様）。空が返るまで繰り返さないと、
+ * 100 件を超えるフォルダが静かに途中までしか上がらない——**画面上は成功に見える**ので、
+ * ここを見ていないと気づけない。
+ */
+describe("フォルダのドロップ", () => {
+  /** `webkitGetAsEntry` が返す木を模す。`readEntries` は 100 件ずつ返す */
+  function dirEntry(name: string, children: FileSystemEntry[]): FileSystemEntry {
+    return {
+      name,
+      isFile: false,
+      isDirectory: true,
+      createReader: () => {
+        let at = 0;
+        return {
+          readEntries: (cb: (e: FileSystemEntry[]) => void) => {
+            const batch = children.slice(at, at + 100);
+            at += batch.length;
+            cb(batch);
+          }
+        };
+      }
+    } as unknown as FileSystemEntry;
+  }
+  function fileEntry(name: string): FileSystemEntry {
+    return {
+      name,
+      isFile: true,
+      isDirectory: false,
+      file: (cb: (f: File) => void) => cb(new File([new Uint8Array([1])], name))
+    } as unknown as FileSystemEntry;
+  }
+
+  it("100 件を超えるフォルダを取りこぼさない", async () => {
+    const sent: { files: string[] } = { files: [] };
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const route = String(url).replace("/api/host/ifs/", "");
+      if (route === "list") {
+        return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as { entries: { kind: string; path: string }[] };
+      sent.files = body.entries.filter((e) => e.kind === "file").map((e) => e.path);
+      return new Response(JSON.stringify({ directories: 1, files: sent.files.length, bytes: 1, failed: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+
+    const children = Array.from({ length: 150 }, (_, i) => fileEntry(`f${i}.txt`));
+    const root = dirEntry("BIG", children);
+    await w.find(".ifs").trigger("drop", {
+      dataTransfer: {
+        types: ["Files"],
+        items: [{ kind: "file", webkitGetAsEntry: () => root }],
+        files: []
+      }
+    });
+    await flushPromises();
+
+    expect(sent.files).toHaveLength(150);
+    expect(sent.files[0]).toBe("BIG/f0.txt");
+    expect(sent.files[149]).toBe("BIG/f149.txt");
+    confirm.mockRestore();
+  });
+});
+
+/**
  * **符号化そのものを検証する。**
  *
  * 画面の文言だけを見るテストでは、base64 をやめても `encoding` を間違えても素通りした
@@ -606,7 +800,7 @@ describe("アップロードの符号化", () => {
         });
       }
       sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return new Response(JSON.stringify({ bytes: bytes.length }), {
+      return new Response(JSON.stringify({ directories: 0, files: 1, bytes: bytes.length, failed: [] }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });
@@ -621,13 +815,21 @@ describe("アップロードの符号化", () => {
     return sent;
   }
 
+  /** 送った本文から、最初のファイル項目を取り出す */
+  const fileEntry = (body: Record<string, unknown> | undefined) =>
+    (body?.["entries"] as { kind: string; path: string; content?: string }[] | undefined)?.find(
+      (e) => e.kind === "file"
+    );
+
   it("バイト列を base64 にして base64 として送る", async () => {
     // 0x00 / 0x7f / 0x80 / 0xff — utf8 として送ると壊れる並び
     const bytes = new Uint8Array([0x00, 0x7f, 0x80, 0xff]);
     const sent = await upload(bytes);
-    expect(sent[0]).toMatchObject({
-      path: "/b.bin",
-      encoding: "base64",
+    // 置き先は base（絶対）＋ 項目の相対パス。**base に置き場が入る**
+    expect(sent[0]).toMatchObject({ base: "/" });
+    expect(fileEntry(sent[0])).toEqual({
+      kind: "file",
+      path: "b.bin",
       content: Buffer.from(bytes).toString("base64")
     });
   });
@@ -636,7 +838,7 @@ describe("アップロードの符号化", () => {
     const bytes = new Uint8Array(256);
     for (let i = 0; i < 256; i++) bytes[i] = i;
     const sent = await upload(bytes);
-    const back = new Uint8Array(Buffer.from(String(sent[0]?.content), "base64"));
+    const back = new Uint8Array(Buffer.from(String(fileEntry(sent[0])?.content), "base64"));
     expect(back).toEqual(bytes);
   });
 });
@@ -787,13 +989,14 @@ describe("ツリー", () => {
  */
 describe("アップロード中のシステム切り替え", () => {
   it("開始時のシステムとパスに固定される", async () => {
-    const sent: { system: unknown; path: unknown }[] = [];
+    const sent: { system: unknown; base: unknown; paths: string[] }[] = [];
     let firstWrite: (() => void) | undefined;
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as {
         source: { system?: string };
-        path: string;
+        base: string;
+        entries: { kind: string; path: string }[];
       };
       if (route === "list") {
         return new Response(
@@ -801,14 +1004,16 @@ describe("アップロード中のシステム切り替え", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
-      sent.push({ system: body.source.system, path: body.path });
-      // 1 件目の応答を保留して、その隙にシステムを切り替える
-      if (sent.length === 1) {
-        await new Promise<void>((r) => {
-          firstWrite = r;
-        });
-      }
-      return new Response(JSON.stringify({ bytes: 1 }), {
+      sent.push({
+        system: body.source.system,
+        base: body.base,
+        paths: body.entries.filter((e) => e.kind === "file").map((e) => e.path)
+      });
+      // 応答を保留して、その隙にシステムを切り替える
+      await new Promise<void>((r) => {
+        firstWrite = r;
+      });
+      return new Response(JSON.stringify({ directories: 0, files: 2, bytes: 2, failed: [] }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });
@@ -827,17 +1032,18 @@ describe("アップロード中のシステム切り替え", () => {
     ]);
     await flushPromises();
 
-    // 1 件目の途中でシステムを切り替える
+    // 送信の途中でシステムを切り替える
     systemsStore.selected = "srv:other";
     await flushPromises();
     firstWrite?.();
     await running;
     await flushPromises();
 
-    // 2 件とも**開始時**のシステムとフォルダに書かれる
-    expect(sent).toHaveLength(2);
-    expect(sent.every((x) => x.system === "srv:s")).toBe(true);
-    expect(sent.map((x) => x.path)).toEqual(["/sub/one.txt", "/sub/two.txt"]);
+    // **開始時**のシステムとフォルダに送られる（切り替えても行き先は変わらない）
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.system).toBe("srv:s");
+    expect(sent[0]?.base).toBe("/sub");
+    expect(sent[0]?.paths).toEqual(["one.txt", "two.txt"]);
   });
 });
 

@@ -65,6 +65,10 @@ export interface AppDeps extends ToolDeps {
   /** IFS の再帰削除の上限（未指定なら host-ifs の既定 1,000 / 500） */
   ifsDeleteMaxEntries?: number;
   ifsDeleteMaxDirectories?: number;
+  /** IFS のフォルダ一括アップロードの上限（未指定なら host-ifs の既定 20MB / 500 / 500） */
+  ifsUploadMaxBytes?: number;
+  ifsUploadMaxFiles?: number;
+  ifsUploadMaxDirectories?: number;
   /** データ待ち行列の受信待機秒の上限（未指定なら既定 60 秒）。無限待ちを HTTP から許さない歯止め */
   dtaqReceiveMaxWaitSec?: number;
 }
@@ -194,6 +198,15 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
       : {}),
     ...(deps.ifsDeleteMaxDirectories !== undefined
       ? { deleteMaxDirectories: limit("ifsDeleteMaxDirectories", deps.ifsDeleteMaxDirectories, 100_000) }
+      : {}),
+    ...(deps.ifsUploadMaxBytes !== undefined
+      ? { uploadMaxBytes: limit("ifsUploadMaxBytes", deps.ifsUploadMaxBytes, 0xf000_0000) }
+      : {}),
+    ...(deps.ifsUploadMaxFiles !== undefined
+      ? { uploadMaxFiles: limit("ifsUploadMaxFiles", deps.ifsUploadMaxFiles, 100_000) }
+      : {}),
+    ...(deps.ifsUploadMaxDirectories !== undefined
+      ? { uploadMaxDirectories: limit("ifsUploadMaxDirectories", deps.ifsUploadMaxDirectories, 100_000) }
       : {})
   });
 

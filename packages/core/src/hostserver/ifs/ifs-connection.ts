@@ -204,9 +204,15 @@ export class IfsConnection {
   }
 
   /**
-   * ファイルを書く（既定で無ければ作る）。
+   * ファイルを書く（既定で無ければ作る）。**全文を置く**——渡した内容がファイルの中身になる。
    *
-   * `dataCcsid` は**新規作成時に付くタグ**を決める（既存ファイルのタグは変わらない）。
+   * そのため OPEN は**既存を置き換える**指定で開く（`replace`）。ここを「開くだけ」にすると
+   * 書き込みが先頭からの上書きになり、**元の方が長いと末尾が残る**。
+   * 41 バイトのファイルに 19 バイト保存しても 41 バイトのまま、後半が旧内容という
+   * 壊れ方を実機で踏んだ（編集の保存・アップロードの上書きの両方）。
+   *
+   * `dataCcsid` は**新規作成時に付くタグ**を決める（既存ファイルのタグは変わらない。
+   * 置き換えでも実機は元のタグを保つ——`verify-browser-ifs.mjs` で確認）。
    * 既定の 0 は「サーバー既定」で、実機では中身に関係なく 850 が付く（research F3）。
    * 通常の保存経路はバイト列をそのまま置く方針なので指定しない——
    * 指定するのは、タグ付きファイルを作って復号を確かめる検証（`hostserver-check`）だけ。
@@ -217,7 +223,10 @@ export class IfsConnection {
     opts: { create?: boolean; dataCcsid?: number } = {}
   ): Promise<void> {
     this.assertOpen();
-    const handle = await this.open(path, FILE_ACCESS.write, opts.create ?? true, opts.dataCcsid);
+    const handle = await this.open(path, FILE_ACCESS.write, opts.create ?? true, {
+      replace: true,
+      ...(opts.dataCcsid !== undefined ? { dataCcsid: opts.dataCcsid } : {})
+    });
     try {
       let offset = 0;
       while (offset < data.length) {
@@ -421,14 +430,15 @@ export class IfsConnection {
     path: string,
     access: number,
     create: boolean,
-    dataCcsid?: number
+    opts: { replace?: boolean; dataCcsid?: number } = {}
   ): Promise<number> {
     const reply = await this.conn.request(
       buildOpenFileRequest({
         path,
         access,
         create,
-        ...(dataCcsid !== undefined ? { dataCcsid } : {})
+        ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
+        ...(opts.dataCcsid !== undefined ? { dataCcsid: opts.dataCcsid } : {})
       })
     );
     // OPEN の成功応答は 0x8002 で、テンプレート先頭がハンドルそのもの。

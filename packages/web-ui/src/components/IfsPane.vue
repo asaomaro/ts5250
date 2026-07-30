@@ -12,9 +12,11 @@ import {
   download,
   makeDirectory,
   renamePath,
+  uploadTree,
   writeFile,
   zipFolder,
-  type IfsEntry
+  type IfsEntry,
+  type IfsUploadEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
 import { TEXT_CCSIDS, ccsidLabel } from "@as400web/core/browser";
@@ -459,6 +461,7 @@ async function renameSelected(): Promise<void> {
 
 const uploading = ref(false);
 const fileInput = ref<HTMLInputElement | undefined>(undefined);
+const folderInput = ref<HTMLInputElement | undefined>(undefined);
 
 /**
  * `<input>` から拾ったら値を戻す。戻さないと同じファイルを続けて選んでも change が来ない。
@@ -470,6 +473,23 @@ function onPick(input: HTMLInputElement): void {
   const files = Array.from(input.files ?? []);
   input.value = "";
   void uploadFiles(files);
+}
+
+/**
+ * フォルダを選んだとき。**ファイル用の `<input>` と共用できない**——
+ * `webkitdirectory` を付けた入力はフォルダしか選べなくなるので、入口を 2 つ持つ。
+ *
+ * ブラウザは選んだフォルダ配下のファイルを平坦に渡し、階層は `webkitRelativePath`
+ * （`TOPDIR/sub/a.txt`）で表す。**空のフォルダは 1 件も来ない**ので、この経路では作られない
+ * （ドラッグ＆ドロップは `webkitGetAsEntry` で辿るため空でも作れる）。
+ */
+function onPickFolder(input: HTMLInputElement): void {
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  void uploadPicked(
+    files.map((file) => ({ path: file.webkitRelativePath || file.name, file })),
+    []
+  );
 }
 
 /**
@@ -499,61 +519,139 @@ function existsHere(name: string): boolean {
   return currentNode.value.entries.some((e) => e.name === name);
 }
 
+/** 置くもの 1 件。`path` は置き先からの相対（フォルダなら `TOP/sub/a.txt`） */
+interface PickedFile {
+  path: string;
+  file: File;
+}
+
+/**
+ * ファイルだけを現在地へ置く（従来の入口）。テストからも直接叩かれる。
+ *
+ * フォルダの階層は付かないので、相対パス＝ファイル名になる。
+ */
 async function uploadFiles(files: readonly File[] | FileList | null): Promise<void> {
-  if (!files || files.length === 0) return;
+  if (!files) return;
+  await uploadPicked(
+    Array.from(files).map((file) => ({ path: file.name, file })),
+    []
+  );
+}
+
+/**
+ * まとめて置く。**ファイルもフォルダもここに集約する。**
+ *
+ * サーバーへは 1 要求で渡す（`uploadTree`）——IFS は要求ごとに接続・認証するので、
+ * ファイルごとに投げると実機で 1 件 4.5 秒かかり、フォルダの投入が終わらない。
+ *
+ * @param picked 置くファイル（相対パス付き）
+ * @param dirs 空でも作りたいフォルダの相対パス（ドロップで辿ったときだけ埋まる）
+ */
+async function uploadPicked(picked: readonly PickedFile[], dirs: readonly string[]): Promise<void> {
+  if (picked.length === 0 && dirs.length === 0) return;
   if (uploading.value) return; // 二重起動を入口で止める（ドロップの連打）
-  // **開始時のコンテキストを固定する。** ループは 1 件ごとに await するので、
-  // 途中でシステムを切り替えられると、残りが**新システムのルート**に書かれる。
-  // watch は「見えているものを捨てる」だけで進行中の操作は止めない
+  // **開始時のコンテキストを固定する。** 送信中にシステムを切り替えられても、
+  // 結果を今の画面へ反映しないため。watch は「見えているものを捨てる」だけで操作は止めない
   const src = source();
   const dir = currentPath.value;
-  const at = (name: string): string => (dir === "/" ? `/${name}` : `${dir}/${name}`);
   uploading.value = true;
   actionError.value = "";
   message.value = "";
-  const done: string[] = [];
-  const failed: string[] = [];
-  const list = Array.from(files);
-  // 一覧が読み切れていないときは、ファイルごとではなく **1 回だけ**まとめて聞く
-  if (!listingComplete.value && list.length > 0) {
-    const ok = window.confirm(
-      `このフォルダは一覧を最後まで読めていません。既存の同名ファイルを上書きする可能性があります。${list.length} 件を置きますか？`
-    );
-    if (!ok) {
-      uploading.value = false;
-      return;
-    }
-  }
   try {
-    for (const file of list) {
-      // フォルダをドロップすると size 0 の File が来る。空ファイルとして書き込まない
-      if (file.size === 0 && file.type === "") {
-        failed.push(`${file.name}（フォルダは置けません）`);
-        continue;
-      }
+    // フォルダを含むか。含むなら**まとめて 1 回だけ確認する**——
+    // 木の中の同名ファイルを 1 つずつ聞くと、深い木で確認が止まらなくなる
+    const tree1 = dirs.length > 0 || picked.some((p) => p.path.includes("/"));
+    let files = [...picked];
+    if (tree1) {
+      const tops = new Set(
+        [...picked.map((p) => p.path), ...dirs].map((p) => p.split("/")[0] ?? p)
+      );
+      const ok = window.confirm(
+        `${[...tops].join("・")} を ${files.length} ファイル置きます。同じ名前のファイルは上書きされます。よろしいですか？`
+      );
+      if (!ok) return;
+    } else if (!listingComplete.value) {
+      // 一覧が読み切れていないときは、ファイルごとではなく **1 回だけ**まとめて聞く
+      const ok = window.confirm(
+        `このフォルダは一覧を最後まで読めていません。既存の同名ファイルを上書きする可能性があります。${files.length} 件を置きますか？`
+      );
+      if (!ok) return;
+    } else {
       // 一覧が読めているときだけ、個別に上書き確認する
-      if (listingComplete.value && existsHere(file.name)) {
-        if (!window.confirm(`${file.name} は既にあります。上書きしますか？`)) continue;
-      }
-      try {
-        const buf = new Uint8Array(await file.arrayBuffer());
-        await writeFile(src, at(file.name), toBase64(buf), "base64");
-        done.push(file.name);
-      } catch (e) {
-        // **1 件の失敗を後続の成功で消さない。** まとめて最後に伝える
-        failed.push(`${file.name}（${e instanceof IfsRequestError ? e.message : String(e)}）`);
-      }
+      files = files.filter(
+        (p) => !existsHere(p.path) || window.confirm(`${p.path} は既にあります。上書きしますか？`)
+      );
+      if (files.length === 0) return;
     }
+
+    // フォルダは**中間も含めて**作る。`a/b/c.txt` は a と a/b が要る
+    const needDirs = new Set<string>(dirs);
+    for (const p of files) {
+      const parts = p.path.split("/");
+      for (let i = 1; i < parts.length; i++) needDirs.add(parts.slice(0, i).join("/"));
+    }
+
+    const entries: IfsUploadEntry[] = [...needDirs].map((path) => ({ kind: "directory", path }));
+    for (const p of files) {
+      const buf = new Uint8Array(await p.file.arrayBuffer());
+      entries.push({ kind: "file", path: p.path, content: toBase64(buf) });
+    }
+
+    const result = await uploadTree(src, dir, entries);
     // 切り替えられていたら、その旨を伝えて今の画面は触らない
     if (source().system !== src.system) {
       actionError.value = "システムを切り替えたため、アップロードの結果は反映していません";
       return;
     }
-    if (done.length > 0) message.value = `${done.length} 件置きました: ${done.join(", ")}`;
-    if (failed.length > 0) actionError.value = `${failed.length} 件失敗: ${failed.join(" / ")}`;
+    if (result.files > 0 || result.directories > 0) {
+      message.value =
+        result.directories > 0
+          ? `${result.files} 件置きました（フォルダ ${result.directories} 件）`
+          : `${result.files} 件置きました: ${files.map((p) => p.path).join(", ")}`;
+    }
+    // **1 件の失敗を全体の成功で消さない。** どれが落ちたかまで伝える
+    if (result.failed.length > 0) {
+      actionError.value = `${result.failed.length} 件失敗: ${result.failed
+        .map((f) => `${f.path}（${f.error}）`)
+        .join(" / ")}`;
+    }
     await tree.refresh(dir);
+  } catch (e) {
+    actionError.value =
+      e instanceof IfsRequestError ? e.message : `アップロードに失敗しました: ${String(e)}`;
   } finally {
     uploading.value = false;
+  }
+}
+
+/**
+ * ドロップされた項目を辿って、ファイルと（空も含む）フォルダを集める。
+ *
+ * **`readEntries` は一度に最大 100 件しか返さない**（仕様）。空が返るまで繰り返さないと、
+ * 100 件を超えるフォルダが静かに途中までしか上がらない。
+ */
+async function walkEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: { files: PickedFile[]; dirs: string[] }
+): Promise<void> {
+  const path = `${prefix}${entry.name}`;
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) => {
+      (entry as FileSystemFileEntry).file(resolve, reject);
+    }).catch(() => undefined);
+    if (file) out.files.push({ path, file });
+    return;
+  }
+  if (!entry.isDirectory) return;
+  out.dirs.push(path);
+  const reader = (entry as FileSystemDirectoryEntry).createReader();
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+      reader.readEntries(resolve, reject);
+    }).catch(() => [] as FileSystemEntry[]);
+    if (batch.length === 0) break;
+    for (const child of batch) await walkEntry(child, `${path}/`, out);
   }
 }
 
@@ -567,8 +665,30 @@ function onDrop(ev: DragEvent): void {
   if (!isFileDrag(ev)) return;
   ev.preventDefault();
   dragging.value = false;
-  if (disabled.value) return; // 通信中は受け付けない（uploadFiles 側でも二重起動は止まる）
-  void uploadFiles(Array.from(ev.dataTransfer?.files ?? []));
+  if (disabled.value) return; // 通信中は受け付けない（uploadPicked 側でも二重起動は止まる）
+  // **`items` は同期で読み切る。** await を挟むと DataTransfer が無効化され、
+  // `webkitGetAsEntry()` が null を返す（フォルダのドロップが静かにファイル 0 件になる）
+  const roots = Array.from(ev.dataTransfer?.items ?? [])
+    .filter((i) => i.kind === "file")
+    .map((i) => i.webkitGetAsEntry())
+    .filter((e): e is FileSystemEntry => e !== null);
+  const plain = Array.from(ev.dataTransfer?.files ?? []);
+  if (roots.length === 0) {
+    // `webkitGetAsEntry` が無い環境。**フォルダかどうか見分けられない**ので、
+    // 従来どおり size 0 / 種別なしを「フォルダ」として断る（空ファイルも巻き込むが、
+    // 中身の無い木を黙って作るよりまし）
+    const files = plain.filter((f) => !(f.size === 0 && f.type === ""));
+    if (files.length < plain.length) {
+      actionError.value = "この環境ではフォルダをドロップできません。「フォルダ」から選んでください";
+    }
+    void uploadFiles(files);
+    return;
+  }
+  void (async () => {
+    const out: { files: PickedFile[]; dirs: string[] } = { files: [], dirs: [] };
+    for (const root of roots) await walkEntry(root, "", out);
+    await uploadPicked(out.files, out.dirs);
+  })();
 }
 
 /**
@@ -597,7 +717,7 @@ watch(
  * `<input>` 経由だと、jsdom が `input.value = ""` で `FileList` が空になる挙動を再現せず、
  * **符号化の検証ができない**（実際、その退行を単体テストで捕まえられなかった）。
  */
-defineExpose({ uploadFiles });
+defineExpose({ uploadFiles, uploadPicked });
 
 void (async () => {
   await openPath(ROOT);
@@ -631,6 +751,20 @@ void (async () => {
         multiple
         class="hidden-input"
         @change="onPick(($event.target as HTMLInputElement))"
+      />
+      <!--
+        フォルダは**別の入力**が要る。`webkitdirectory` を付けた input は
+        フォルダしか選べなくなるので、ファイル用と共用できない
+      -->
+      <button :disabled="disabled" @click="folderInput?.click()">フォルダをアップロード</button>
+      <input
+        ref="folderInput"
+        type="file"
+        webkitdirectory
+        multiple
+        class="hidden-input"
+        aria-label="フォルダを選ぶ"
+        @change="onPickFolder(($event.target as HTMLInputElement))"
       />
     </header>
 
