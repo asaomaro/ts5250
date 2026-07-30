@@ -114,6 +114,39 @@ describe("応答レコードの形（実機が受理した形）", () => {
 });
 
 describe("RESTORE PARTIAL SCREEN（ESC 0x13）", () => {
+  /**
+   * **実機が返してくる形**（`20260730-datastream-command-census` で採取）:
+   *
+   *   04 13 | 00 00 00 00 00 | 04 11 00 00 | 11 01 01 … | … 04 52 00 08
+   *   ESC 13   パラメータ 5 バイト   ＝こちらが送った WTD      ＝READ
+   *
+   * 5 バイトを読み飛ばさないと続きを ESC と読み違え、**WTD も READ も失う**
+   * （`expected ESC, got 0x0 — discarding rest of record`）。
+   */
+  it("**パラメータ 5 バイトの後ろにある WTD と READ を捨てない**（実機の形）", () => {
+    const buf = new ScreenBuffer();
+    const warns: string[] = [];
+    // 先に 0x03 を受けて退避しておく（実機と同じ順序）
+    applyDataStream(Uint8Array.from(SAVE_PARTIAL), buf, codec, (m) => warns.push(m));
+    const result = applyDataStream(
+      Uint8Array.from([
+        ESC, COMMAND.RESTORE_PARTIAL_SCREEN,
+        0x00, 0x00, 0x00, 0x00, 0x00, // パラメータ 5 バイト
+        ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+        0x11, 0x01, 0x01, 0xd4, 0xc1, 0xc9, 0xd5, // SBA(1,1) ＋ "MAIN"
+        ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x08
+      ]),
+      buf,
+      codec,
+      (m) => warns.push(m)
+    );
+    expect(warns.filter((w) => w.includes("expected ESC"))).toEqual([]);
+    expect(buf.snapshot().cells[0]!.slice(0, 4).map((c) => c.char).join("")).toBe("MAIN");
+    // **末尾の READ が生きている**（これを失うとキーボードが開かない）
+    expect(result.readRequested).toBe(true);
+    expect(result.unlockKeyboard).toBe(true);
+  });
+
   it("退避した画面へ戻す", () => {
     const buf = new ScreenBuffer();
     const run = (s: number[]) => applyDataStream(Uint8Array.from(s), buf, codec, () => {});
@@ -122,17 +155,20 @@ describe("RESTORE PARTIAL SCREEN（ESC 0x13）", () => {
     run(SAVE_PARTIAL);
     run([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, 0x11, 0x01, 0x01, 0xc2]);
     expect(buf.snapshot().cells[0]![0]!.char).toBe("B");
-    run([ESC, COMMAND.RESTORE_PARTIAL_SCREEN]);
+    run([ESC, COMMAND.RESTORE_PARTIAL_SCREEN, 0, 0, 0, 0, 0]);
     expect(buf.snapshot().cells[0]![0]!.char).toBe("A");
   });
 
   it("退避が空なら警告するだけ（落とさない）", () => {
-    const { warns } = apply([ESC, COMMAND.RESTORE_PARTIAL_SCREEN]);
+    const { warns } = apply([ESC, COMMAND.RESTORE_PARTIAL_SCREEN, 0, 0, 0, 0, 0]);
     expect(warns.some((w) => w.includes("RESTORE PARTIAL SCREEN"))).toBe(true);
   });
 
   it("後続のコマンドを捨てない", () => {
-    const { result } = apply([ESC, COMMAND.RESTORE_PARTIAL_SCREEN, ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x08]);
+    const { result } = apply([
+      ESC, COMMAND.RESTORE_PARTIAL_SCREEN, 0, 0, 0, 0, 0,
+      ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x08
+    ]);
     expect(result.readRequested).toBe(true);
   });
 });

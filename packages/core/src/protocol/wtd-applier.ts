@@ -141,9 +141,19 @@ export function applyDataStream(
         break;
       }
       case COMMAND.RESTORE_PARTIAL_SCREEN:
-        // RESTORE PARTIAL SCREEN（ESC 0x13）: 0x03 で預けた内容をホストが返してくる。
-        // **積荷は読まない**——退避したのはこちらなので、局所の退避スタックから戻す
-        // （`RESTORE SCREEN` と同じ扱い。SAVE SCREEN の docstring も同じ理由を書いている）。
+        // RESTORE PARTIAL SCREEN（ESC 0x13）: 0x03 で預けた内容をホストが**そのまま返してくる**。
+        // 実機の QSH を F3 で抜けたときの中身（`20260730-datastream-command-census`）:
+        //
+        //   04 13 | 00 00 00 00 00 | 04 11 00 00 | 11 01 01 3a d4 c1 c9 d5 …（"MAIN"）| … 04 52 …
+        //   ESC 13   **パラメータ 5 バイト**   ＝こちらが送った WTD ストリーム       ＝READ
+        //
+        // **5 バイトを読み飛ばさないと、続きを ESC と読み違えてレコードごと捨てる**
+        // （`expected ESC, got 0x0` が出て、後ろの WTD と READ を失う）。
+        // 読み飛ばせば続きは通常のコマンド列として処理され、ホストが返した画像で描き直され、
+        // 末尾の READ でキーボードが開く。
+        r.skip(5);
+        // 画面はこちらの退避からも戻す（`RESTORE SCREEN` と同じ扱い。
+        // 直後にホストの WTD が同じ画像を描くので二重だが、**退避スタックを積んだままにしない**）
         if (!buf.restoreScreen()) warn("RESTORE PARTIAL SCREEN with empty save stack");
         break;
       case COMMAND.ROLL: {

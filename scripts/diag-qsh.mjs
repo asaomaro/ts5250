@@ -220,6 +220,32 @@ try {
     }
   }
 
+  // --- F3 で抜けるときに RESTORE PARTIAL SCREEN（0x13）が来る。その生バイトを見る ---
+  {
+    const mark = records.length;
+    try {
+      await session.sendAid("F3", { timeoutMs: 15000 });
+    } catch (e) {
+      log("F3 の応答が返らない: " + (e instanceof Error ? e.message : String(e)));
+    }
+    await sleep(2000);
+    log(`\n==== F3（QSH 終了）で届いたレコード ${records.length - mark} 本 ====`);
+    for (let i = mark; i < records.length; i++) {
+      const rec = records[i];
+      const cmds = commandsOfRecord(rec);
+      log(`  record（${rec.length} バイト）: ${cmds.map((c) => `0x${c.toString(16)}`).join(" → ")}`);
+      // **0x13 の直後**を見る（パラメータが何バイト続くか）
+      for (let p = 10; p + 1 < rec.length; p++) {
+        if (rec[p] === 0x04 && rec[p + 1] === 0x13) {
+          log(`    ★ ESC 13 の位置 ${p}（ヘッダ後 ${p - 10}）`);
+          log(`    直後 32 バイト: ` + hex(rec.subarray(p + 2, p + 34)));
+        }
+      }
+    }
+    log("\n==== F3 後の画面 ====");
+    log(text(session.snapshot()));
+  }
+
   if (res) {
     log("\n==== 画面 ====");
     log(text(res.screen));
