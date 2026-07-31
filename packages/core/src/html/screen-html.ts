@@ -35,7 +35,10 @@ import type {
   ScreenColor,
   ScreenSnapshot
 } from "../screen/types.js";
-import { GRID_COLOR } from "../protocol/wdsf-parser.js";
+import { GRID_COLOR, GRID_LINE_STYLE } from "../protocol/wdsf-parser.js";
+
+/** コーデックが「この表にマップの無いバイト」を返すときの文字（`buffer.ts` と同じ） */
+const UNDISPLAYABLE = "�";
 
 /** エビデンスの見出しに載せる情報。**日時は呼び出し側が渡す**（この層は時計を持たない） */
 export interface ScreenHtmlMeta {
@@ -105,10 +108,18 @@ function cellClass(c: Cell): string {
   return cls;
 }
 
-/** そのセルに出す 1 文字（非表示は伏せ、制御桁と DBCS tail は空白） */
+/**
+ * そのセルに出す 1 文字（非表示は伏せ、制御桁と DBCS tail は空白）。
+ *
+ * **表示できないバイト（U+FFFD）は空白にする（ACS と同じ）。** EBCDIC の表にはマップの
+ * 無いバイトがあり、コーデックはそこを U+FFFD で返す。そのまま描くと実機に無い「�」が
+ * エビデンスに写り込む。web-ui（`ScreenGrid.vue` の `displayText`）と同じ扱いに揃える
+ * ——同じ画面を 2 つの描画経路で見て絵が違うなら、証拠として使えない。
+ */
 function cellChar(c: Cell): string {
   if (c.nonDisplay) return " ";
-  return c.char === "" ? " " : c.char;
+  if (c.char === "" || c.char === UNDISPLAYABLE) return " ";
+  return c.char;
 }
 
 const isLead = (c: Cell | undefined): boolean => c?.kind === "dbcs-lead";
@@ -191,6 +202,32 @@ function fieldsHtml(snap: ScreenSnapshot): string {
 }
 
 /**
+ * 線種（原典 `GRID_LINE_STYLE`）→ CSS クラス。**web-ui の `gridLineClass` と同じ表**。
+ *
+ * ここを独自に書くと、同じ画面が web-ui と HTML で違う線に見える（実測で
+ * 0x03 点線を破線・0x08 破線を実線として描いていた）。太破線・二重破線は
+ * CSS に該当が無いので web-ui と同じ代替に寄せる。
+ */
+function gridLineClass(style: number): string {
+  switch (style) {
+    case GRID_LINE_STYLE.THICK_SOLID:
+      return "gl-thick";
+    case GRID_LINE_STYLE.DOUBLE:
+      return "gl-double";
+    case GRID_LINE_STYLE.DOTTED:
+      return "gl-dotted";
+    case GRID_LINE_STYLE.DASHED:
+      return "gl-dashed";
+    case GRID_LINE_STYLE.THICK_DASHED:
+      return "gl-dashed gl-thick";
+    case GRID_LINE_STYLE.DOUBLE_DASHED:
+      return "gl-double";
+    default: // 0x00 実線 / 0xFF 端末既定
+      return "";
+  }
+}
+
+/**
  * ホストが引いた罫線（GRDATR / GRDLIN）。
  *
  * **罫線はセルの中ではなく「セルの境界」に引く。** 箱の下辺は最終行の下端＝`row+height`、
@@ -203,8 +240,7 @@ function fieldsHtml(snap: ScreenSnapshot): string {
  */
 function gridLineHtml(g: GuiGridLine): string {
   const color = GRID_COLOR[g.color] ?? "white";
-  const style = g.lineStyle === 0x02 ? "gl-dot" : g.lineStyle === 0x03 ? "gl-dash" : "";
-  const cls = `gl c-${color} ${style}`.trim();
+  const cls = `gl c-${color} ${gridLineClass(g.lineStyle)}`.trim();
   const top = g.row - 1;
   const left = g.col - 1;
   const bottom = top + Math.max(1, g.height);
@@ -239,10 +275,17 @@ function gridLineHtml(g: GuiGridLine): string {
   return out;
 }
 
-/** 拡張 5250 の窓（枠と見出し）。文字で描かれた窓は cells に出るのでここでは扱わない */
+/**
+ * 拡張 5250 の窓（枠と見出し）。文字で描かれた窓は cells に出るのでここでは扱わない。
+ *
+ * **ホストが送る位置は枠の左上で、中身はその 1 行下・3 桁右から始まる。** 宣言された
+ * 位置をそのまま置くと実際の窓から左へ 1 桁ずれた矩形になる（web-ui の `windowStyle`
+ * が既に `w.col + 1` で描いており、そちらが正しい）。枠の矩形は
+ * 行 `row`〜`row+height+1` / 桁 `col+1`〜`col+width+4`。
+ */
 function windowHtml(w: GuiWindow): string {
   const top = w.row - 1;
-  const left = w.col - 1;
+  const left = w.col;
   const frame =
     `<div class="gwin" style="left:${X(left)};top:${Y(top)};` +
     `width:${w.width + 4}ch;height:${(w.height + 2) * 1.25}em"></div>`;
@@ -395,8 +438,12 @@ font-size:15px;line-height:1.25;white-space:pre}
 .fld-p{border-bottom-style:none}
 .gl-h{border-top:1px solid currentColor}
 .gl-v{border-left:1px solid currentColor}
-.gl-dot.gl-h{border-top-style:dotted}.gl-dot.gl-v{border-left-style:dotted}
-.gl-dash.gl-h{border-top-style:dashed}.gl-dash.gl-v{border-left-style:dashed}
+/* 線種は web-ui（ScreenGrid.vue の .grid-line）と同じ見え方に揃える */
+.gl-h.gl-dotted{border-top-style:dotted}.gl-v.gl-dotted{border-left-style:dotted}
+.gl-h.gl-dashed{border-top-style:dashed}.gl-v.gl-dashed{border-left-style:dashed}
+.gl-h.gl-double{border-top-style:double;border-top-width:3px}
+.gl-v.gl-double{border-left-style:double;border-left-width:3px}
+.gl-h.gl-thick{border-top-width:2px}.gl-v.gl-thick{border-left-width:2px}
 .gwin{border:1px solid var(--t-turquoise);border-radius:2px}
 .gwt{color:var(--t-yellow);white-space:pre}
 .gsel{display:flex;gap:4px}

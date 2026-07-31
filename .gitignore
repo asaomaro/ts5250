@@ -27,3 +27,8 @@ electron/app-stage/
 
 # 5250 の操作ログ書き出し（調査用。実機の画面内容が入るのでコミットしない）
 *5250-log*.jsonl
+
+# 画面エビデンスの HTML（get_screen_html / get_screen_history_html の書き出し先）。
+# 操作ログと同じく実機の画面内容が入るのでコミットしない
+testlib-screens/
+*-screens/

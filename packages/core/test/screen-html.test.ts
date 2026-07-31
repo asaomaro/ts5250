@@ -229,6 +229,76 @@ describe("renderScreenHtml — 罫線の幾何", () => {
     expect(renderScreenHtml(withGrid({ color: 0x04 }))).toContain("c-red");
     expect(renderScreenHtml(withGrid({ color: 0x01 }))).toContain("c-blue");
   });
+
+  /**
+   * **線種は原典（`GRID_LINE_STYLE`）どおりに読む。**
+   * 独自の対応表を書くと、同じ画面が web-ui と HTML で違う線に見える。実測で
+   * 0x03（点線）を破線・0x08（破線）を実線として描いていた（実機 GRIDCL2/GRIDCL3）。
+   */
+  it.each([
+    [0x00, ""],
+    [0x01, "gl-thick"],
+    [0x02, "gl-double"],
+    [0x03, "gl-dotted"],
+    [0x08, "gl-dashed"],
+    [0x09, "gl-dashed gl-thick"],
+    [0x0a, "gl-double"],
+    [0xff, ""]
+  ])("線種 0x%s は web-ui と同じクラスになる", (lineStyle, cls) => {
+    const html = renderScreenHtml(withGrid({ lineStyle }));
+    if (cls === "") {
+      // 実線は追加クラスを付けない（gl-h / gl-v の既定が実線）
+      expect(html).not.toMatch(/class="gl [^"]*gl-(thick|double|dotted|dashed)/);
+    } else {
+      // 向き（gl-h / gl-v）は後ろに付く
+      expect(html).toContain(`class="gl c-white ${cls} gl-h"`);
+    }
+  });
+
+  it("線種のクラスに対応する CSS を必ず同梱する（クラスだけ付けて見た目が出ない、を防ぐ）", () => {
+    const html = renderScreenHtml(withGrid());
+    for (const cls of ["gl-dotted", "gl-dashed", "gl-double", "gl-thick"]) {
+      expect(html).toContain(`.gl-h.${cls}`);
+      expect(html).toContain(`.gl-v.${cls}`);
+    }
+  });
+});
+
+describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
+  /**
+   * **表示できないバイト（U+FFFD）は空白にする。** EBCDIC の表にマップの無いバイトを
+   * そのまま描くと、実機に無い「�」がエビデンスに写り込む。web-ui（`displayText`）は
+   * ACS に合わせて空白にしており、そちらに揃える。実機の FEATPGM（DBCS 分断）で発覚。
+   */
+  it("U+FFFD は空白にする（web-ui / ACS と同じ）", () => {
+    const snap = snapWith((c) => putText(c, "AB�C"));
+    const html = renderScreenHtml(snap);
+    expect(html).not.toContain("�");
+    expect(html).toContain("AB C");
+  });
+
+  it("DBCS 対の中身が U+FFFD でも「�」を出さない", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("�", { kind: "dbcs-lead" });
+      c[0]![1] = cell("", { kind: "dbcs-tail" });
+    });
+    expect(renderScreenHtml(snap)).not.toContain("�");
+  });
+
+  /**
+   * **窓の枠はホストが送る位置の 1 桁右**。中身は宣言位置の 1 行下・3 桁右から始まり、
+   * 枠の矩形は 行 row〜row+height+1 / 桁 col+1〜col+width+4。宣言位置のまま置くと
+   * 左へ 1 桁ずれる（web-ui の `windowStyle` は既に +1 で描いている）。
+   */
+  it("窓の枠は col+1 から描く（web-ui の windowStyle と同じ矩形）", () => {
+    const snap = snapWith();
+    snap.gui = {
+      selectionFields: [], scrollBars: [], gridLines: [],
+      windows: [{ id: 1, row: 6, col: 17, width: 30, height: 8 }] as never
+    };
+    const html = renderScreenHtml(snap);
+    expect(html).toContain('class="gwin" style="left:17ch;top:6.25em;width:34ch');
+  });
 });
 
 describe("renderScreenHistoryHtml — 描画経路を二重に持たない", () => {
