@@ -32,3 +32,4 @@ electron/app-stage/
 # 操作ログと同じく実機の画面内容が入るのでコミットしない
 testlib-screens/
 *-screens/
+spool-html/

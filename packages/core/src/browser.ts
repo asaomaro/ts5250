@@ -10,6 +10,8 @@
  * サイズも見ること——`@as400web/ebcdic` の変換表のように、純粋でも重いものはある
  * （だから `katakanaChar` は `katakana` サブパスから取っている。下記）。
  */
+/** 全角判定（East Asian Width）。桁を数える側と描く側で表を分けないため core に置く */
+export { isFullWidth, isCertainWideGlyph } from "./text/east-asian-width.js";
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
 /** SQL の複数文分割。純テキスト処理なので UI から直接使う（表も I/O も引き込まない） */
 export {

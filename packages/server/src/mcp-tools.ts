@@ -19,7 +19,7 @@ import { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type Scr
 import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
-import { renderScreenHtml, renderScreenHistoryHtml } from "@as400web/core";
+import { renderScreenHtml, renderScreenHistoryHtml, renderSpoolHtml } from "@as400web/core";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { withAudit } from "./audit.js";
 
@@ -640,6 +640,49 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           return {
             content: [{ type: "text" as const, text: `PDF ${pdf.length} bytes (base64)` }],
             structuredContent: { base64, bytes: pdf.length }
+          };
+        } catch (err) {
+          return errorResult(err);
+        }
+      })
+  );
+
+  /**
+   * PDF は紙に落とすためのもので、開くのに閲覧環境が要り、差分も取れない。
+   * こちらは `get_screen_html` と同じくブラウザだけで開けて、検索もコピーも差分も効く。
+   */
+  server.registerTool(
+    "get_spool_html",
+    {
+      description:
+        "受信済みスプールを、等幅・改ページを保った自己完結 HTML で取得する（get_spool_pdf の HTML 版）。" +
+        "外部 CSS/JS/フォントを参照せず、HTML 単体で開ける。ページを行き来でき、印刷すれば改ページも保たれる。" +
+        "決定的な変換なので、同じスプールからは常に同じ HTML が出る。",
+      inputSchema: {
+        sessionId: z.string(),
+        spoolId: z.string(),
+        title: z.string().optional(),
+        note: z.string().optional()
+      },
+      outputSchema: { html: z.string(), bytes: z.number(), pages: z.number() }
+    },
+    async ({ sessionId, spoolId, title, note }) =>
+      withAudit({ op: "get_spool_html", sessionId }, async () => {
+        try {
+          const entry = sessions.getPrinter(sessionId, user);
+          const report = entry.reports.find((r) => r.id === spoolId);
+          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          const html = renderSpoolHtml(report.pages, {
+            capturedAt: new Date().toISOString(),
+            sessionId,
+            host: entry.host,
+            spoolId,
+            ...(title !== undefined ? { title } : {}),
+            ...(note !== undefined ? { note } : {})
+          });
+          return {
+            content: [{ type: "text" as const, text: `HTML ${html.length} bytes (${report.pages.length} pages)` }],
+            structuredContent: { html, bytes: html.length, pages: report.pages.length }
           };
         } catch (err) {
           return errorResult(err);

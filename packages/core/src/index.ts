@@ -301,3 +301,9 @@ export {
   type ScreenHtmlMeta,
   type ScreenHistoryEntry
 } from "./html/screen-html.js";
+
+// スプール（帳票）→ 自己完結 HTML。PDF（server 側 `renderSpoolPdf`）の HTML 版
+export { renderSpoolHtml, type SpoolHtmlMeta } from "./html/spool-html.js";
+
+/** 全角判定（East Asian Width）。桁を数える側と描く側で表を分けない */
+export { isFullWidth, isCertainWideGlyph } from "./text/east-asian-width.js";

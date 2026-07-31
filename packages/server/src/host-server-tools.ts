@@ -21,6 +21,7 @@ import {
   queryLimited,
   As400Error,
   dtaqDecodeEbcdic,
+  renderSpoolHtml,
   type ConnectOptions,
   type ProgramParameter
 } from "@as400web/core";
@@ -390,18 +391,24 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
       description:
         "ホストサーバー経由でスプールファイルの中身を取得する（host_list_spools で得た id を渡す）。" +
         "ccsid は SCS のデコードに使う（既定 273。日本語環境では 930 / 939 / 5035）。" +
-        "format=pages で論理ページごとに、text で全行をまとめて返す。",
+        "format=pages で論理ページごとに、text で全行をまとめて、" +
+        "html で等幅・改ページを保った自己完結 HTML（人に見せる/残す用）を返す。",
       inputSchema: {
         ...targetShape,
         id: spoolIdSchema,
-        format: z.enum(["text", "pages"]).optional(),
-        ccsid: z.number().int().optional()
+        format: z.enum(["text", "pages", "html"]).optional(),
+        ccsid: z.number().int().optional(),
+        /** html のときだけ使う見出し・注記 */
+        title: z.string().optional(),
+        note: z.string().optional()
       },
       outputSchema: {
         lines: z.array(z.string()).optional(),
         pages: z
           .array(z.object({ rows: z.number(), cols: z.number(), lines: z.array(z.string()) }))
-          .optional()
+          .optional(),
+        html: z.string().optional(),
+        bytes: z.number().optional()
       }
     },
     async (input) =>
@@ -410,6 +417,16 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         // text 形式は論理ページを平坦化するだけ——core の readSpooledText と同じ扱い
         const pages = await readSpoolPages(target(input), input.id, input.ccsid);
         if (input.format === "pages") return jsonResult({ pages });
+        if (input.format === "html") {
+          // 描画は push 型の get_spool_html と**同じ関数**を通す（帳票の絵を 2 つ持たない）
+          const html = renderSpoolHtml(pages, {
+            capturedAt: new Date().toISOString(),
+            spoolId: `${input.id.fileName}/${input.id.jobName}/${input.id.fileNumber}`,
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.note !== undefined ? { note: input.note } : {})
+          });
+          return jsonResult({ html, bytes: html.length });
+        }
         return jsonResult({ lines: pages.flatMap((p) => p.lines) });
       }).catch(errorResult)
   );
