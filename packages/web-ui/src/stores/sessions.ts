@@ -1,5 +1,6 @@
 import { reactive, markRaw } from "vue";
 import type { ScreenSnapshot } from "@as400web/tn5250";
+import type { ServiceState } from "@as400web/server";
 import type { WsClient } from "../ws-client.js";
 
 /** プリンターセッションが受信した 1 スプール（等幅ページ列） */
@@ -158,8 +159,25 @@ export interface SessionState {
   reports?: SpoolReportView[];
   /** ビューで選択中のスプール */
   selectedReportId?: string;
-  /** 起動応答コード（I902 等） */
+  /** 起動応答コード（I902 等）。**待ち受けていなければ無い**（接続していないため） */
   startupCode?: string;
+  /**
+   * 待ち受けの状態（`20260801-service-lifecycle-model`）。
+   *
+   * **「開く（登録する）」と「待ち受ける」は別**——`自動で待ち受け開始 ☐` の定義は
+   * 開いても `stopped` のまま、利用者の開始操作を待つ。
+   */
+  state?: ServiceState;
+  /** `state === "error"` の理由。`printerWarnings`（自動出力の失敗）とは別物 */
+  serviceError?: string;
+  /**
+   * 状態の**通知が届いた回数**。値ではなく到着を数える。
+   *
+   * `state` を見張るだけでは足りない——`error` のまま開始をやり直して**また同じ理由で失敗**
+   * すると値が変わらず、押した側は「返事が来ていない」と区別できない
+   * （ボタンが押せないまま固まる）。
+   */
+  stateSeq?: number;
   /** 未読スプール数（プリンター。受信で++、タブ表示でクリア） */
   unread?: number;
   /** サーバー側の自動出力（PDF 保存/自動印刷）設定があるか＝トグル表示条件 */

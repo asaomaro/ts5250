@@ -84,7 +84,22 @@ const sesForm = reactive<SesFormState>({
   rescueAction: "hold" as "hold" | "delete",
   transformTo: "",
   idleTimeout: undefined,
+  autoStart: undefined,
   dtaqWatch: undefined
+});
+
+/**
+ * 開いた直後（サービスならサーバー起動直後）に待ち受けを始めるか。
+ *
+ * **未設定＝始める。** 既定を「始めない」にすると、アップグレードで
+ * 「開いても何も起きない」に変わってしまう（`20260801-service-lifecycle-model` design D3）。
+ * ✅ のときは**キーごと書かない**——設定ファイルに既定値を書き散らさない。
+ */
+const autoStartOn = computed({
+  get: () => sesForm.autoStart !== false,
+  set: (v: boolean) => {
+    sesForm.autoStart = v ? undefined : false;
+  }
 });
 
 /**
@@ -123,11 +138,26 @@ const idleMinuteOptions = computed(() => {
   const list = typeof v === "number" && !IDLE_MINUTES.includes(v) ? [...IDLE_MINUTES, v] : IDLE_MINUTES;
   return [...list].sort((a, b) => a - b);
 });
-const printerForm = reactive({ autoPdfDir: "", autoPrint: "", pageSize: "", fontSize: undefined as number | undefined });
+/**
+ * プリンターのサーバー側出力。**信頼設定**なのでサーバー設定のプリンターでのみ編集できる。
+ *
+ * `service` は「サービスとして常駐するか」＝**意図**であって、出力設定の有無から導出しない
+ * （「開いている間だけ PDF に落とす」も「常駐して溜めるだけ」も表現できるように）。
+ *
+ * `rest` は**フォームが編集しない項目**（`pdfFontPath` / `pdfFontName`）。
+ * 更新はオブジェクトごと置き換えなので、**読み込んで送り返さないと消える**。
+ */
+const printerForm = reactive({
+  service: false,
+  autoPdfDir: "",
+  autoPrint: "",
+  pageSize: "",
+  fontSize: undefined as number | undefined,
+  rest: {} as Record<string, unknown>
+});
 /**
  * PC コマンド（STRPCCMD）の実行設定。**信頼設定**なのでサーバー設定の表示セッションでのみ編集できる。
- * printer 出力と同じく**値は API から返らない**（有無だけ）ので、フォームは空から始まる——
- * 保存すると上書きになるため、現在の状態は「有効 / 無効」の表示で示す。
+ * 値は編集できる相手にだけ返る（`includeTrusted`）ので、読み込んで送り返す。
  */
 const pcForm = reactive({ enabled: false, timeoutSec: undefined as number | undefined, allow: "" });
 /**
@@ -206,7 +236,9 @@ function loadSession(): void {
   }
   loadWatermark(s.watermark);
   loadPcCommand(s.pcCommand);
+  loadPrinter(s);
   sesForm.name = s.name;
+  sesForm.autoStart = s.autoStart;
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
   sesForm.deviceName = s.deviceName ?? "";
@@ -229,6 +261,27 @@ function loadPcCommand(pc: PublicSession["pcCommand"]): void {
   pcForm.enabled = pc?.enabled === true;
   pcForm.timeoutSec = pc?.timeoutMs !== undefined ? Math.round(pc.timeoutMs / 1000) : undefined;
   pcForm.allow = (pc?.allow ?? []).join("\n");
+}
+
+/**
+ * プリンターの出力設定をフォームへ開く。**必ず開く**——更新はオブジェクトごと置き換えなので、
+ * 読み込まずに保存すると **PDF 保存先も自動印刷先も黙って消える**（名前を直しただけで消えていた）。
+ *
+ * 値が返るのは編集できる相手だけ（サーバーが `includeTrusted` で絞る）。返らない場合は
+ * `service` / `hasOutput` のフラグしか無いので、そもそも保存フォームを出さない
+ * （`canEditPrinter` が false）。
+ */
+function loadPrinter(s: PublicSession): void {
+  const p = s.printer;
+  // フラグは誰にでも返る。値が返らない相手でも ✅ の現状だけは正しく描ける
+  printerForm.service = (p?.service ?? s.service) === true;
+  printerForm.autoPdfDir = p?.autoPdfDir ?? "";
+  printerForm.autoPrint = p?.autoPrint ?? "";
+  printerForm.pageSize = p?.pageSize ?? "";
+  printerForm.fontSize = p?.fontSize;
+  // 編集欄を持たない項目（フォント指定）。**そのまま送り返す**ために取っておく
+  const { service: _s, autoPdfDir: _d, autoPrint: _p, pageSize: _g, fontSize: _f, ...rest } = p ?? {};
+  printerForm.rest = rest;
 }
 
 /** 保存値をフォームへ開く（未設定なら既定のまま＝文字が空＝透かしなし） */
@@ -372,6 +425,9 @@ async function save(): Promise<void> {
       } else {
         // display は printer 専用項目を送らない
         delete form.rescueAction;
+        // **表示セッションに「自動で待ち受け開始」は無い**（画面なので常に開く）。
+        // 種別を変えたときに古い値が残らないよう、ここで落とす
+        if (form.sessionType === "display") delete form.autoStart;
         // 更新はオブジェクトごと置き換えなので、**編集していなくても送り返す**（省略＝削除になる）
         const wm = buildWatermark();
         if (wm) form.watermark = wm;
@@ -391,7 +447,11 @@ async function save(): Promise<void> {
         }
       }
       if (canEditPrinter.value) {
-        const p: NonNullable<SessionConfigForm["printer"]> = {};
+        // **編集しない項目も送り返す**（フォント指定など）。更新はオブジェクトごと置き換えなので、
+        // 落とすと消える
+        const p = { ...printerForm.rest } as NonNullable<SessionConfigForm["printer"]>;
+        // 既定（サービスでない）はわざわざ書かない——設定ファイルに既定値を書き散らさない
+        if (printerForm.service) p.service = true;
         if (printerForm.autoPdfDir.trim()) p.autoPdfDir = printerForm.autoPdfDir.trim();
         if (printerForm.autoPrint.trim()) p.autoPrint = printerForm.autoPrint.trim();
         if (printerForm.pageSize.trim()) p.pageSize = printerForm.pageSize.trim();
@@ -495,7 +555,19 @@ const infoRows = computed(() => {
     });
   }
   if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
+  // 待ち受けの始め方。**プリンターと待ち行列で同じ**なので同じ行に出す
+  if (o.sessionType !== "display") {
+    rows.push({
+      label: "待ち受けの開始",
+      value: o.autoStart === false ? "手動（開始ボタンで始める）" : "自動（開いたら始める）"
+    });
+  }
   if (o.sessionType === "printer") {
+    rows.push({
+      label: "サービス",
+      // **出力設定の有無からは導出しない**（意図と能力は別の軸）
+      value: o.service ? "サーバーに常駐する" : "常駐しない（開いている間だけ）"
+    });
     rows.push({ label: "取得後の扱い", value: o.rescueAction === "delete" ? "削除する" : "保留にして残す" });
     rows.push({
       label: "印刷の経路",
@@ -683,6 +755,22 @@ const infoRows = computed(() => {
           </label>
           <p class="row full watchwarn">⚠ {{ MSG_WATCH_CONSUMES }}</p>
         </template>
+        <!--
+          待ち受けを自動で始めるか。**プリンターと待ち行列で同じ設定**（利用者の要望どおり）。
+          表示セッションには無い——画面なので開いたら常に繋ぐ。
+        -->
+        <label v-if="sesForm.sessionType !== 'display'" class="row">
+          <span
+            class="cap"
+            title="外すと、開いてもすぐには待ち受けません。開始ボタンを押すまで待ちます（サービスならサーバー起動時も同じ）"
+          >
+            自動で待ち受け開始
+          </span>
+          <span class="tv">
+            <input v-model="autoStartOn" type="checkbox" />
+            開いた直後に待ち受ける
+          </span>
+        </label>
         <label v-if="sesForm.sessionType === 'display'" class="row">
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">
@@ -790,15 +878,32 @@ const infoRows = computed(() => {
         </p>
       </div>
 
-      <!-- 信頼設定。サーバー設定のプリンターセッションで、編集権限があるときだけ -->
+      <!--
+        信頼設定。サーバー設定のプリンターセッションで、編集権限があるときだけ。
+        **サービス ✅ をここに置く理由**: `service` は printer スキーマ＝サーバー設定にしか無く、
+        条件が `canEditPrinter` と完全に一致する。新しい認可条件を作らない（散らすと食い違う）
+      -->
       <div v-if="canEditPrinter" class="trusted">
-        <div class="tlabel">サーバー側の出力（信頼設定）</div>
+        <div class="tlabel">サーバー側のプリンターサービス（信頼設定）</div>
+        <label class="row">
+          <span class="cap" title="ブラウザを閉じてもサーバー側で待ち受け続けます。次に開いたときは同じものへ繋がります">
+            サービスとして使う
+          </span>
+          <span class="tv">
+            <input v-model="printerForm.service" type="checkbox" />
+            サーバーに常駐して受け取り続ける
+          </span>
+        </label>
         <label class="row"
           ><span class="cap">PDF 保存先</span><input v-model="printerForm.autoPdfDir" placeholder="/var/spool/out"
         /></label>
         <label class="row"
           ><span class="cap">自動印刷</span><input v-model="printerForm.autoPrint" placeholder="プリンター名"
         /></label>
+        <p v-if="printerForm.service" class="warn">
+          帳票はブラウザが居なくてもサーバーが受け取ります。出力先を設定していない場合、
+          受け取った帳票はサーバーのメモリにだけ残ります（上限を超えると古いものから落ちます）。
+        </p>
       </div>
 
       <p v-if="error" class="err">{{ error }}</p>

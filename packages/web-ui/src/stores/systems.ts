@@ -79,8 +79,20 @@ export interface SessionConfigForm {
     cwd?: string;
     allow?: string[];
   };
+  /**
+   * 開いた直後／サーバー起動直後に**待ち受けを開始するか**（既定 true）。
+   * `printer` と `dtaqwatch` にだけ意味がある（`display` は画面なので常に開く）。
+   * **信頼設定ではない**ので個人設定にも置ける。
+   */
+  autoStart?: boolean;
   /** サーバー設定のプリンターセッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界） */
   printer?: {
+    /**
+     * **サービスとして常駐するか。** 意図であって能力ではない——
+     * 出力設定の有無から導出しない（「開いている間だけ PDF に落とす」と
+     * 「常駐して溜めるだけ」は別物）。
+     */
+    service?: boolean;
     autoPdfDir?: string;
     autoPrint?: string;
     pdfFontPath?: string;

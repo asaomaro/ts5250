@@ -441,5 +441,17 @@ export interface PublicSession {
   service?: boolean;
   /** `printer` のみ。**自動出力の設定を持つか**（中身は出さない） */
   hasOutput?: boolean;
+  /**
+   * `printer` のみ。出力設定の**中身**。**編集できる相手にだけ返す**（`includeTrusted`）。
+   *
+   * `pcCommand` と同じ理屈——更新はオブジェクトごと置き換えなので、
+   * **返さないと編集フォームが空から始まり、保存のたびに `autoPdfDir` が消える**。
+   * 名前を直して保存しただけで PDF 保存先が失われる、という壊れ方をしていた。
+   *
+   * 受け取れるのは `canEditServer`（認証オフ or admin かつ永続化可）＝
+   * **その値を書ける相手と同じ集合**なので、信頼境界は動かない。
+   * 誰にでも返るのは従来どおり `service` と `hasOutput` のフラグだけ。
+   */
+  printer?: PrinterConfig;
   owner?: string;
 }

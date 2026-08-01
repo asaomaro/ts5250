@@ -165,6 +165,18 @@ export const watchesStore = reactive({
     client?.send({ type: "watch-stop", watchId: id });
   },
 
+  /**
+   * 停止した監視を再開する（`20260801-service-start-stop`）。
+   *
+   * **`start` とは別の口。** あちらは「定義から**作って**始める」ので、
+   * 既にあるものに使うと二重に掛かる——監視は消費するので、2 本掛かると
+   * 1 本ぶんのエントリを取り合って両方が欠ける。
+   */
+  resume(id: string): void {
+    state.error = "";
+    client?.send({ type: "watch-resume", watchId: id });
+  },
+
   /** 行を選ぶ。履歴を持っていなければ取り寄せる */
   select(id: string): void {
     state.selected = id;

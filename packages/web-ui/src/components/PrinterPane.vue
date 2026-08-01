@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from "vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
-import { setPrinterOutput } from "../session-controller.js";
+import { setPrinterOutput, startPrinter, stopPrinter } from "../session-controller.js";
 import { renderSpoolHtml } from "@as400web/scs/spool-html";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
@@ -16,6 +16,45 @@ watch(
   () => reports.value.length,
   () => sessionsStore.markSpoolRead(props.sessionId)
 );
+
+// ---- 待ち受けの開始/停止（`20260801-service-start-stop`）----
+/**
+ * 待ち受けの状態。**未設定は「待ち受け中」扱い**——`printer-opened` より前の一瞬と、
+ * 状態を持たない古い経路がここに落ちる。停止中と誤表示するより、
+ * いままでの見え方に倒すほうが安全。
+ */
+const state = computed(() => session.value?.state ?? "listening");
+/** 接続を持っている状態。**停止中と再接続中を混ぜない**（意図と障害は別物） */
+const listening = computed(() => state.value === "listening" || state.value === "reconnecting");
+const stateLabel = computed(() =>
+  state.value === "listening"
+    ? "待ち受け中"
+    : state.value === "reconnecting"
+      ? "再接続中"
+      : state.value === "stopped"
+        ? "停止中"
+        : "エラー"
+);
+/** `error` の理由（自動出力の失敗とは別物。あちらは警告バー） */
+const stateError = computed(() => session.value?.serviceError);
+/**
+ * 押している間はボタンを止める。**サーバー側は冪等**だが、開始は数秒かかることがあり
+ * （装置使用中の判明まで）、その間の連打で「押せているのか」が分からなくなる。
+ *
+ * **状態の値ではなく通知の到着で戻す**（`stateSeq`）——`error` のまま開始をやり直して
+ * また同じ理由で失敗すると値が変わらず、ボタンが押せないまま固まる。
+ */
+const pending = ref(false);
+watch(
+  () => session.value?.stateSeq,
+  () => (pending.value = false)
+);
+function toggleListening(): void {
+  const id = props.sessionId;
+  pending.value = true;
+  if (listening.value) stopPrinter(id);
+  else startPrinter(id);
+}
 
 // ---- サイドバー開閉・フィルタ ----
 const sidebarOpen = ref(true);
@@ -192,9 +231,26 @@ function printReport(): void {
         {{ sidebarOpen ? "«" : "»" }}
       </button>
       <span class="badge">プリンター</span>
-      <span class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
+      <!-- **黙って止まらない。** 停止も再接続も失敗も、まずここで分かるようにする -->
+      <span class="state" :class="state" :title="stateError ?? ''">
+        {{ stateLabel }}<template v-if="stateError">: {{ stateError }}</template>
+      </span>
+      <span v-if="listening" class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
       <span class="muted">受信 {{ reports.length }} 件</span>
       <span class="spacer"></span>
+      <!--
+        待ち受けの開始/停止。**停止しても受信済みの帳票は消えない**——
+        スプールはホストの OUTQ に残るので、停止は「いま消費しない」であって「取りこぼす」ではない
+      -->
+      <button
+        class="run-toggle"
+        :class="{ on: listening }"
+        :disabled="pending"
+        :title="listening ? 'ホストからの受け取りを止めます（受信済みの帳票は残ります）' : 'ホストからの受け取りを始めます'"
+        @click="toggleListening"
+      >
+        {{ listening ? "停止" : "開始" }}
+      </button>
       <!-- 自動出力の ON/OFF: サーバー側に出力設定があるときだけ表示 -->
       <button
         v-if="outputConfigured"
@@ -224,7 +280,15 @@ function printReport(): void {
           <input v-model="filter" type="search" placeholder="スプールを絞り込み（名称/本文）" />
         </div>
         <ul class="list">
-          <li v-if="reports.length === 0" class="empty">
+          <!-- **停止中に「待ち受け中…」と出さない。** 待っていないのに待っていると書くのは嘘で、
+               帳票が来ないのを装置やホストのせいだと思わせる -->
+          <li v-if="reports.length === 0 && !listening" class="empty">
+            <strong>{{ stateLabel }}</strong
+            ><br />
+            <small v-if="stateError">{{ stateError }}</small>
+            <small v-else>「開始」を押すとホストからの受け取りを始めます。</small>
+          </li>
+          <li v-else-if="reports.length === 0" class="empty">
             スプール待ち受け中…<br />
             <small>
               ホスト側で用紙タイプ問い合わせ（CPA3394）の応答待ちになることがあります。writer の
@@ -376,6 +440,31 @@ function printReport(): void {
   font-size: 13px;
   line-height: 1;
   padding: 3px 6px;
+}
+/* 待ち受けの状態。**監視コンソール（WatchPane）と同じ色分け**にする——
+   プリンターと待ち行列で語が違うだけで、意味は同じ */
+.state {
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+}
+.state.listening {
+  color: var(--t-green, #3f6);
+}
+/* **停止中は「正常だが動いていない」。** 待ち受け中と同じ色にすると、
+   止めたことに気づかないまま帳票を待ってしまう */
+.state.stopped {
+  color: var(--muted, #888);
+}
+.state.reconnecting {
+  color: var(--warn, darkorange);
+}
+.state.error {
+  color: var(--t-red, #c62828);
+}
+/* 開始/停止: 待ち受け中は緑（自動出力トグルと同じ扱い） */
+.run-toggle.on {
+  color: var(--t-green, #3f6);
+  border-color: var(--t-green, #3f6);
 }
 /* 自動出力トグル: ON は緑で目立たせる */
 .out-toggle.on {

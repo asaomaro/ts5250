@@ -21,7 +21,7 @@ import {
   ConfigResolver,
   WatchRegistry
 } from "@as400web/server";
-import { DtaqConnection } from "@as400web/tn5250";
+import { DtaqConnection } from "@as400web/hostserver";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 
@@ -185,14 +185,34 @@ try {
   check("**二重に監視を始めない**（同じ設定の再接続で 1 本のまま）", watches.list().length === 1, `watches=${watches.list().length}`);
   await shot("05-reopened");
 
-  // --- 停止 ---
+  // --- 停止（`20260801-service-start-stop` で意味が変わった）---
+  //
+  // **停止しても一覧から消えない。** 以前は行ごと消えていたが、それだと
+  // 止めたものを二度と再開できない（画面に出ないので開始ボタンが押せない）。
+  // いまは `stopped` として残り、操作列が「開始」に変わる。
   const stop = page.locator(".watch tbody tr button", { hasText: "停止" }).first();
-  if (await stop.count()) {
-    await stop.click();
-    await sleep(1500);
-  }
-  check("停止すると一覧から消える", watches.list().length === 0, `watches=${watches.list().length}`);
+  check("待ち受け中は「停止」ボタンが出る", (await stop.count()) > 0);
+  await stop.click();
+  await sleep(1500);
+  check("**停止しても一覧に残る**（消えると再開できない）", watches.list().length === 1, `watches=${watches.list().length}`);
+  check("行の状態が「停止中」になる", (await bodyText()).includes("停止中"));
+  const resume = page.locator(".watch tbody tr button", { hasText: "開始" }).first();
+  check("**操作列が「開始」に変わる**", (await resume.count()) > 0);
   await shot("06-stopped");
+
+  // --- 停止中に届いたものは失われない → 再開で受け取れる ---
+  //
+  // **これが停止ボタンを置ける根拠。** 監視は「取り出して消す」ので、止めている間に
+  // 送られたものが消えるなら停止は危険な操作になる。実際はキューに残るので、
+  // 再開すればそのまま受け取れる——止めるのは「いま消費しない」であって「取りこぼす」ではない。
+  await sendEntry("ORD-0004");
+  await sleep(1500);
+  check("停止中は履歴に現れない（消費していない）", !(await bodyText()).includes("ORD-0004"));
+  await resume.click();
+  await page.waitForFunction(() => document.body.innerText.includes("ORD-0004"), { timeout: 20000 });
+  check("**再開すると、止めていた間に届いたものを受け取れる**", true);
+  check("再開後は「停止」ボタンに戻る", (await page.locator(".watch tbody tr button", { hasText: "停止" }).count()) > 0);
+  await shot("07-resumed");
 } catch (e) {
   check("例外なく完走", false, e.message);
   log(e.stack ?? "");

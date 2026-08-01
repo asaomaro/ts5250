@@ -181,11 +181,15 @@ export abstract class ConfigStore {
       pub.pcCommand = allow ? { ...rest, allow: [...allow] as [string, ...string[]] } : { ...rest };
     }
     if (s.autoStart !== undefined) pub.autoStart = s.autoStart;
-    // **フラグだけ返す。** パス（`autoPdfDir`）とプリンター名（`autoPrint`）は信頼設定なので出さない
-    // ——「サービスか」「出力を持つか」は定義の一覧に要るが、それ自体は秘密ではない
+    // **誰にでも返すのはフラグだけ。** パス（`autoPdfDir`）とプリンター名（`autoPrint`）は
+    // 信頼設定なので、一般利用者には出さない——「サービスか」「出力を持つか」は
+    // 定義の一覧（`host-printers.ts`）に要るが、それ自体は秘密ではない
     if ("printer" in s && s.printer) {
       if (s.printer.service !== undefined) pub.service = s.printer.service;
       pub.hasOutput = Boolean(s.printer.autoPdfDir || s.printer.autoPrint);
+      // **中身は編集できる相手にだけ**（`pcCommand` と同じ）。返さないと編集フォームが
+      // 空から始まり、更新はオブジェクトごと置き換えなので**保存のたびに出力設定が消える**
+      if (opts?.includeTrusted) pub.printer = { ...s.printer };
     }
     const owner = this.ownerOf(s);
     if (owner !== undefined) pub.owner = owner;

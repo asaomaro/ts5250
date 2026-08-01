@@ -230,7 +230,12 @@ export async function openPrinterSession(
                 readOnly: true,
                 client,
                 reports: [],
-                startupCode: msg.startupCode,
+                // **待ち受けていなければ起動応答コードは無い**（接続していない）。
+                // `exactOptionalPropertyTypes` 下では undefined を入れられないので、キーごと落とす
+                ...(msg.startupCode !== undefined ? { startupCode: msg.startupCode } : {}),
+                // **「開く」と「待ち受ける」は別。** `自動で待ち受け開始 ☐` なら
+                // `stopped` で返り、利用者の開始ボタンを待つ
+                state: msg.state,
                 // 自動出力（PDF/印刷）の状態。設定がある場合のみ UI にトグルを出す
                 outputConfigured: msg.hasOutput,
                 outputEnabled: msg.outputEnabled,
@@ -273,6 +278,23 @@ export async function openPrinterSession(
               if (s) s.outputEnabled = msg.enabled;
               break;
             }
+            case "printer-state": {
+              // **黙って止まらない。** 再接続も、開始の失敗（装置使用中など）も、
+              // ここが唯一の知らせ方——押した側が結果を待っていないので、これが届かないと
+              // 「押したのに何も起きない」になる
+              const s = sessionsStore.get(sessionId);
+              if (s) {
+                // **値ではなく到着を数える**（同じ理由で二度失敗しても押した側に返事が届く）
+                s.stateSeq = (s.stateSeq ?? 0) + 1;
+                s.state = msg.state;
+                if (msg.error !== undefined) s.serviceError = msg.error;
+                else delete s.serviceError;
+                // 起動応答コードは待ち受けを始めたときだけ来る。停止したら消す
+                if (msg.startupCode !== undefined) s.startupCode = msg.startupCode;
+                else if (msg.state === "stopped") delete s.startupCode;
+              }
+              break;
+            }
             case "closed": {
               const s = sessionsStore.get(sessionId);
               if (s) s.connected = false;
@@ -296,6 +318,25 @@ export async function openPrinterSession(
 /** 自動出力（PDF 保存・自動印刷）の有効/無効を切り替える（サーバー応答で状態を反映） */
 export function setPrinterOutput(sessionId: string, enabled: boolean): void {
   sessionsStore.get(sessionId)?.client.send({ type: "printer-output", enabled });
+}
+
+/**
+ * 待ち受けを開始する（`20260801-service-start-stop`）。
+ *
+ * **結果は待たない**——成功すれば `printer-state` の `listening` が、
+ * 失敗すれば `error` と理由が push で届く。ここで待つと、装置使用中のような
+ * 数秒かかる失敗の間だけ画面が固まる。
+ */
+export function startPrinter(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-start", sessionId });
+}
+
+/**
+ * 待ち受けを停止する。**受信済みの帳票は消えない**——
+ * 停止は「いま消費しない」であって「取りこぼす」ではない（スプールはホストの OUTQ に残る）。
+ */
+export function stopPrinter(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-stop", sessionId });
 }
 
 /**

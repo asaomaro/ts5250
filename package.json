@@ -13,7 +13,7 @@
     "tools/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run typecheck -w @as400web/web-ui",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "gen:tables": "npm run gen -w @as400web/gen-tables"

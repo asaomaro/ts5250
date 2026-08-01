@@ -93,7 +93,28 @@ function addWatch(): void {
                 </span>
               </td>
               <td>
-                <button class="btn ghost" @click.stop="watchesStore.stop(w.id)">停止</button>
+                <!--
+                  **停止と開始を出し分ける。** 停止しても行は残る（#254）ので、
+                  ここが「開始」に変わらないと止めたものを二度と再開できない。
+                  `start` ではなく `resume` を送る——`start` は定義から**作る**ので
+                  二重に掛かり、消費するエントリを取り合う
+                -->
+                <button
+                  v-if="w.state === 'stopped' || w.state === 'error'"
+                  class="btn ghost"
+                  title="このキューの待ち受けを再開します"
+                  @click.stop="watchesStore.resume(w.id)"
+                >
+                  開始
+                </button>
+                <button
+                  v-else
+                  class="btn ghost"
+                  title="待ち受けを止めます（キューのエントリはホスト側に残ります）"
+                  @click.stop="watchesStore.stop(w.id)"
+                >
+                  停止
+                </button>
               </td>
             </tr>
           </tbody>

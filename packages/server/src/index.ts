@@ -7,6 +7,8 @@ export {
   type StoreData
 } from "./config-store.js";
 export { ConfigResolver, type ResolvedTarget, type TargetRef } from "./config-resolver.js";
+// 待ち受けの状態はプリンターと監視で共通の語彙。**画面もこれをそのまま描く**
+export { type ServiceState, holdsConnection, autoStartOf } from "./service-state.js";
 export {
   makeRef,
   parseRef,
