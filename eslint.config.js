@@ -25,19 +25,31 @@ export default tseslint.config(
     }
   },
   {
-    // core のピュアロジック層は Node API 非依存（design: I/O は transport/ と log.ts に隔離）。
+    // core のピュアロジック層は Node API 非依存（design: I/O は transport/ に隔離）。
     //
-    // **ebcdic / scs にも同じガードを掛ける。** codec を core の外へ切り出した時点で
-    // `packages/core/src/**` だけの glob ではガードが静かに外れる——そして
-    // 「依存ゼロ・ブラウザで動く」はこの 2 パッケージの売りそのものなので、
+    // **ebcdic / scs / base / hostserver にも同じガードを掛ける。** 何かを core の外へ
+    // 切り出すたび、`packages/core/src/**` だけの glob ではガードが静かに外れる——そして
+    // 「依存ゼロ・ブラウザで動く」はこれらのパッケージの売りそのものなので、
     // 外れたことに気づけないまま Node 依存が入るのが最悪の結末になる。
+    // 実際、hostserver を切り出したとき（`20260801-library-extraction-hostserver`）、
+    // 移設前の `hostserver/**` はこの glob の下で守られていた（`node:*` の import は 0 件）。
+    // ここへ足さなければ、その保護だけが黙って消えていた。
     //
     // **ebcdic には型の防壁が無い**——`TextDecoder` / `TextEncoder` の型を得るために
     // `types: ["node"]` が要り、その副作用で Node API も書けてしまう。だから ebcdic に
-    // 限っては禁止をここでしか担保できない（core も transport/ と log.ts のため同様）。
-    // scs は `types: []` なので型検査でも弾かれるが、二重に掛けておく。
-    files: ["packages/core/src/**", "packages/ebcdic/src/**", "packages/scs/src/**"],
-    ignores: ["packages/core/src/transport/**", "packages/core/src/log.ts"],
+    // 限っては禁止をここでしか担保できない（core・hostserver も transport/ のため同様）。
+    // base と scs は `types: []` なので型検査でも弾かれるが、二重に掛けておく。
+    //
+    // かつて除外していた `packages/core/src/log.ts` は **`@as400web/base` へ移り、除外も要らなくなった**
+    // ——pino を直接 import していた頃の名残で、`setLogSink` の注入式にした今は Node API を使わない。
+    files: [
+      "packages/base/src/**",
+      "packages/core/src/**",
+      "packages/ebcdic/src/**",
+      "packages/hostserver/src/**",
+      "packages/scs/src/**"
+    ],
+    ignores: ["packages/core/src/transport/**", "packages/hostserver/src/transport/**"],
     rules: {
       "no-restricted-imports": [
         "error",

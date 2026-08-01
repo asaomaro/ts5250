@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createServer, type Server, type Socket } from "node:net";
 import { once } from "node:events";
 import { TcpTransport } from "../src/transport/tcp.js";
-import { Tn5250Error } from "../src/errors.js";
+import { Tn5250Error } from "@as400web/base";
 
 async function withEchoServer(fn: (port: number, server: Server) => Promise<void>): Promise<void> {
   const sockets = new Set<Socket>();

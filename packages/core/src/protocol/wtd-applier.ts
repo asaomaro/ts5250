@@ -1,4 +1,4 @@
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { type Codec, SO, SI } from "@as400web/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import type { WriteExtent } from "../screen/types.js";

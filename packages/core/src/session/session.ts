@@ -1,5 +1,5 @@
 import { codecForCcsid, type Codec } from "@as400web/ebcdic";
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import {

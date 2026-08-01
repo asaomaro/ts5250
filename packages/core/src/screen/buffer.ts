@@ -1,4 +1,4 @@
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { FFW } from "../protocol/constants.js";
 import { GRID_DEFAULT } from "../protocol/wdsf-parser.js";
 import type {

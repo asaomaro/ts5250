@@ -132,11 +132,50 @@ pino を持ち込むと価値が半減する。**
     サブパスで分けても npm の依存グラフ上は 1 つのままで、EBCDIC だけ欲しい利用者に
     印刷ストリームのデコーダが付いてくる（`20260726-library-extraction-codec/spec.md` D1）
   - `tsconfig` の `types` を空にできた（`TextDecoder` を使わないため）＝Node API を型検査で塞げている
-- [ ] 3. ホストサーバー（`hostserver/` ＋ `hostserver/db/` ＋ `transport/host-connection.ts`）
+- [x] 3. ホストサーバー（`hostserver/` ＋ `hostserver/db/` ＋ `transport/host-connection.ts`）
   - **前提を満たした**（2026-07-18 に SQL 実行が完了。`20260718-hostserver-sql`）。
     「IBM i に SQL を投げる TS ライブラリ」として単体で価値が出る状態になった
-  - 規模: 認証 878 行 ＋ SQL 約 1,200 行。純 DBCS コーデックも併せて要る
-  - ただし**アップロードが載ってから**のほうが切り出しの価値は高い（API が固まる）
+  - ~~規模: 認証 878 行 ＋ SQL 約 1,200 行。純 DBCS コーデックも併せて要る~~
+    **← 2026-07-18 時点の値。その後 IFS・DDM・DTAQ・スプール・各種一覧が載って大きく増えた**
+  - ~~ただし**アップロードが載ってから**のほうが切り出しの価値は高い（API が固まる）~~
+    **← 満たされた**（`20260719-hostserver-upload-ddm` で DDM 経由のアップロードが着地）
+  - **2026-08-01 完了**（`.aidev/works/20260801-library-extraction-hostserver`）。
+    `@as400web/hostserver` として独立。実測 **48 ファイル / 10,743 行**
+    （`hostserver/` 46 ファイル 10,290 行 ＋ `transport/host-connection.ts` 316 行
+    ＋ `transport/ddm-transport.ts` 137 行）。`dependencies` は base / ebcdic / scs の 3 つだけ
+  - **`transport/ddm-transport.ts` も対象に足した**——この backlog は `host-connection.ts` しか
+    挙げていなかったが、実測すると利用者は hostserver 配下のみで `HostTlsOptions` に依存しており、
+    core に残すと逆流依存になる。`transport/` は既に「hostserver 側」と
+    「TN5250 側（`tcp.ts` / `types.ts`）」に割れていた
+  - **切り出し面は薄かった**。hostserver 46 ファイルが外へ張る相対 import は全件集計で
+    **5 ファイルだけ**（`errors.ts` 28 / `log.ts` 10 / `transport/host-connection.ts` 10 /
+    `transport/ddm-transport.ts` 1 / `identifier.ts` 2）
+  - **本題は共有層で、`@as400web/base`（291 行・依存ゼロ）を新設した**。
+    `errors.ts` / `log.ts` / `identifier.ts` は**複製すると壊れる**——`log.ts` は
+    モジュールスコープの可変状態（`setLogSink` が書き換える）を持ち、実体が 2 つだと
+    注入が片方にしか効かずログが黙って消える。`As400Error` は `instanceof` で判定されるので
+    クラスが 2 つだとパッケージ跨ぎの判定が false になる。**どちらも `tsc -b` は通る**
+    （複製した状態で実際に確認した）ため、実行時テストで固定した
+    （`core/test/log-sink-single-instance.test.ts` / `errors-compat.test.ts`）
+  - **利用側は 1 行も変えていない**——`packages/server` 37 ファイル・`packages/web-ui` 22 ファイル・
+    `tools/hostserver-check` の追跡ファイル差分は 0。後方互換は `@as400web/core` からの
+    列挙 re-export で保ち、到達可能性を `core/test/hostserver-reexport.test.ts` が検査する
+    （**`@as400web/hostserver` 自身の公開面と突き合わせる**ので、行ごと消しても捕まる）
+  - **実測値（次に測る人の基準線）**: web-ui 本番バンドル **359,853 バイト（前後で完全一致）**、
+    テスト **3,248 → 3,263 件**（+15 はすべて新設ガード。1 件も減っていない）。
+    既知の失敗は `zip-writer.test.ts` の 4 件のみで、`unzip` 未インストールによる環境要因（分割前から）
+  - **eslint のピュアロジック層ガードが消えかけた**。移設前 `hostserver/**` は
+    `packages/core/src/**` の glob 下で `node:*` 禁止が効いていた（実測で import 0 件）。
+    `eslint.config.js` の `files` に base / hostserver を足さなければ**保護だけが黙って消えていた**
+  - **publish は未実施**（項目 1・2 と同じく「公開の判断を後回しにできる状態」までがゴール）
+- [ ] 3b. `packages/server` の 37 ファイルを `@as400web/hostserver` 直参照へ移す
+  - 項目 3 の follow-up（`20260801-library-extraction-hostserver` decisions.md D6）。
+    後方互換を `@as400web/core` の re-export で保った結果、**`core → hostserver` の辺が残っている**
+    ——`@as400web/core` を import する側はホストサーバー一式も引き取り続ける
+  - 項目 3 で改善されたのは「ホストサーバーだけ欲しい」側。「TN5250 だけ欲しい」側は
+    **項目 4 と、この 3b の両方**が要る
+  - 移した後も `@as400web/core` の re-export は外部利用者のために残す（`codec` と同じ扱い）。
+    `core/test/hostserver-reexport.test.ts` があるので、消すと落ちる
 - [ ] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
   - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式
   - 競合あり（例: green-screen-react）。差別化軸は「純 TypeScript・依存なし・トレース再生付き」

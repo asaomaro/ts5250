@@ -33,18 +33,40 @@
 - **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint で禁止。
   - **アプリ（server）は自前の pino を使う**（`packages/server/src/log.ts`）。監査証跡が
     「注入し忘れ」で静かに消えないよう、**消えて困る側を注入に依存させない**。
-  - **ライブラリ（core / ebcdic / scs）は `log` の sink 経由**（`packages/core/src/log.ts`）。
-    既定は **no-op** で、要る側が起動時に `setLogSink` を呼ぶ。ライブラリ利用者にロガーを強制しない
-    （以前は core が pino を直接 import しており、コーデックだけ欲しい利用側にも付いてきた）。
-- **core のピュアロジック層は Node API 非依存**（I/O は `transport/` に隔離。`node:*` import は
-  **`transport/` のみ**許可）。
+  - **ライブラリ（base / core / ebcdic / hostserver / scs）は `log` の sink 経由**
+    （`packages/base/src/log.ts`）。既定は **no-op** で、要る側が起動時に `setLogSink` を呼ぶ。
+    ライブラリ利用者にロガーを強制しない（以前は core が pino を直接 import しており、
+    コーデックだけ欲しい利用側にも付いてきた）。
+  - **`log.ts` の実体は 1 つだけ**（`@as400web/base`）。モジュールスコープの可変状態を持つので、
+    複製すると `setLogSink` が片方にしか効かず**もう片方のログが黙って消える**
+    （`packages/core/test/log-sink-single-instance.test.ts` が実行時に固定している）。
+- **ピュアロジック層は Node API 非依存**（I/O は `transport/` に隔離。`node:*` import は
+  **`transport/` のみ**許可）。core と hostserver の両方に同じ規約が掛かる
+  （`eslint.config.js` の `no-restricted-imports` / `no-restricted-globals`）。
 - ESM / Node ≥ 20。周辺コードのスタイル（逐次 ByteReader・型で分岐を閉じる・オプショナルは存在時のみ付与）に合わせる。
 
 ### パッケージ分割と入口（バンドルサイズ）
 
-`@as400web/ebcdic`（EBCDIC 変換）と `@as400web/scs`（スプール展開）は、**TN5250 一式を引き込まずに
-使えるよう core から切り出した**独立パッケージ。依存の向きは `scs → ebcdic`、`core → ebcdic, scs`。
+**TN5250 一式を引き込まずに使えるよう core から切り出した**独立パッケージが 4 つある。
 
+| パッケージ | 中身 | 依存 |
+|---|---|---|
+| `@as400web/base` | 例外の語彙（`As400Error` / `ErrorCode`）・ログの差し込み口・オブジェクト名の検証 | なし |
+| `@as400web/ebcdic` | EBCDIC 変換（SBCS / DBCS / CCSID テキスト） | なし |
+| `@as400web/scs` | スプールのバイト列 → 論理ページ | ebcdic |
+| `@as400web/hostserver` | ホストサーバー群のクライアント（signon / SQL / IFS / DDM / DTAQ / スプール / コマンド） | base, ebcdic, scs |
+| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs, hostserver |
+
+- **`base` に置くのは「複製すると壊れるもの」だけ**で、共通で使うものの物置ではない。
+  `As400Error` は `instanceof` で判定され、`log.ts` は可変状態を持つ——どちらも実体が 2 つに
+  なるとパッケージ跨ぎで静かに壊れる（型検査でもビルドでも気づけない）。
+- **`core → hostserver` の辺は後方互換のためだけに在る。** `@as400web/core` は
+  ホストサーバーの公開面を再輸出しており、`packages/server` はそれ経由で使っている。
+  **逆向き（`hostserver → core`）は禁止**（`packages/hostserver/test/no-core-dependency.test.ts`）。
+  新しいコードは `@as400web/hostserver` を直接使う。
+- **再輸出の列挙を落としても内部は壊れない**——壊れるのは外の利用者だけ、という気づけない回帰に
+  なるので、到達可能性を実行時に検査している（`codec-reexport.test.ts` /
+  `hostserver-reexport.test.ts`）。`export *` は使わず公開面は列挙する。
 - **ブラウザから触る側は狭い入口を使う**。バレル（`@as400web/ebcdic`）は変換表 18,900 行を全部引き込む。
   `…/codec`（変換のみ）・`…/katakana`（930/939 の SBCS 部のみ）・`…/catalog`（表ゼロ）を使い分ける。
   バレル経由だと bundler の解析が及ばず要らない部分が残る（実測差あり。`decisions.md` D2）。

@@ -26,14 +26,14 @@ export {
   type SqlStatement
 } from "./sql/split-statements.js";
 /** 取り込みの拒否理由。UI が種類ごとに文言を組み立てるため型を共有する */
-export type { UploadRejection } from "./hostserver/db/upload-prepare.js";
+export type { UploadRejection } from "@as400web/hostserver";
 export {
   assertIdentifier,
   isValidIdentifier,
   IDENTIFIER_PATTERN
-} from "./identifier.js";
+} from "@as400web/base";
 /** IFS の一覧。UI がツリーと一覧を組み立てるため型を共有する（型だけ＝実行時依存は増えない） */
-export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
+export type { IfsEntry, IfsListResult } from "@as400web/hostserver";
 /**
  * 文字コードの選択肢。**表を引き込まない `catalog` サブパスから取る**——
  * `@as400web/ebcdic`（root）は EBCDIC の変換表を計 18,900 行・約 1.17 MB 同梱するので、
@@ -56,8 +56,8 @@ export type {
   DtaqEntry,
   DtaqAttributes,
   DtaqType,
-  SearchOrder as DtaqSearchOrder
-} from "./hostserver/dtaq/dtaq-types.js";
+  DtaqSearchOrder
+} from "@as400web/hostserver";
 /**
  * 埋め込み属性センチネル（SEU の色付き入力欄）。UI がオーバーレイの色分けと、入力欄の
  * 表示（センチネル→空白）に使う。属性バイト→色の解決に decodeAttribute も共有する。

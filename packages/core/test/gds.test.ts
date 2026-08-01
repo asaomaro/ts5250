@@ -8,7 +8,7 @@ import { OPCODE, ESC, COMMAND } from "../src/protocol/constants.js";
 import { parseTraceJsonl, hexToBytes } from "../src/trace/trace.js";
 import { TelnetLayer } from "../src/telnet/telnet.js";
 import { ReplayTransport } from "../src/trace/replay.js";
-import { Tn5250Error } from "../src/errors.js";
+import { Tn5250Error } from "@as400web/base";
 
 const here = dirname(fileURLToPath(import.meta.url));
 

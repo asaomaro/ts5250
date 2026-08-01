@@ -1,4 +1,4 @@
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 
 /** レコードの逐次読み取り（design: 手続き型の逐次リーダ） */
 export class ByteReader {

@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { TcpTransport } from "../src/transport/tcp.js";
-import { Tn5250Error } from "../src/errors.js";
+import { Tn5250Error } from "@as400web/base";
 
 /** 自己署名証明書を openssl で生成（テスト用） */
 function selfSigned(): { key: string; cert: string } {

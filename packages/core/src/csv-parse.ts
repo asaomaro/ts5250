@@ -7,7 +7,7 @@
  *
  * 純関数。ファイル読み込みは呼び出し側の責務（core は Node API に依存しない）。
  */
-import { As400Error } from "./errors.js";
+import { As400Error } from "@as400web/base";
 
 export interface CsvParseResult {
   /** 先頭行。列名として使う */

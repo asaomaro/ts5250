@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // **`types: ["node"]` が要るのは `src/transport/` だけ**（`node:net` / `node:tls` で
+    // ソケットを張る）。`@as400web/base` や `@as400web/scs` のように `[]` にはできない。
+    //
+    // その副作用で `src/` のどこでも Node API が書けてしまうので、**残りのピュアロジック層は
+    // eslint 側で塞ぐ**（`eslint.config.js` の `no-restricted-imports` / `no-restricted-globals`。
+    // `src/transport/**` だけ除外）。core が同じ形になっているのは同じ理由による。
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "../base" }, { "path": "../ebcdic" }, { "path": "../scs" }]
+}

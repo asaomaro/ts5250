@@ -8,7 +8,7 @@ export {
   resetLogSink,
   type CoreLogger,
   type LogFn
-} from "./log.js";
+} from "@as400web/base";
 
 // エラー
 export {
@@ -18,7 +18,7 @@ export {
   describeSocketError,
   withSocketHint,
   type ErrorCode
-} from "./errors.js";
+} from "@as400web/base";
 
 // 画面モデル（共有型。server / web-ui が import する）
 export type {
@@ -110,8 +110,16 @@ export {
 } from "./trace/trace.js";
 export { ReplayTransport } from "./trace/replay.js";
 
-// ホストサーバー（IBM i Host Server。TN5250 とは別プロトコル）
-// 第1段階として signon サーバーの認証のみ。SQL・データ転送は未実装。
+// ここから下のホストサーバー（IBM i Host Server。TN5250 とは別プロトコル）は、
+// **実体が `@as400web/hostserver` にあり、ここは後方互換のための再輸出**である
+// （`20260801-library-extraction-hostserver`）。`packages/server` の 37 ファイルが
+// この経路で使っているので、**列挙を落とすと外の利用者だけが壊れる**——内部は何も壊れず
+// 型検査もビルドも通る。到達可能性は `test/hostserver-reexport.test.ts` が実行時に検査する。
+//
+// **新しいコードは `@as400web/hostserver` を直接使うこと。**
+//
+// ※ かつてここには「第1段階として signon サーバーの認証のみ。SQL・データ転送は未実装」と
+//   書いてあったが、その後 SQL・IFS・DDM・DTAQ・スプール・各種一覧まで載って実態と乖離していた。
 export {
   signon,
   SignonError,
@@ -119,7 +127,7 @@ export {
   type SignonResult,
   type HostServerInfo,
   type HostServerTlsOptions
-} from "./hostserver/signon.js";
+} from "@as400web/hostserver";
 export {
   resolveServicePort,
   type HostService,
@@ -127,31 +135,31 @@ export {
   SERVICE_NAME,
   DEFAULT_PORT,
   PORT_MAPPER_PORT
-} from "./hostserver/port-mapper.js";
+} from "@as400web/hostserver";
 export {
   classifySignonReturnCode,
   describeSignonFailure,
   type SignonFailure,
   type SignonFailureKind
-} from "./hostserver/return-codes.js";
+} from "@as400web/hostserver";
 
 // ホストサーバー: SQL（database サーバー）
-export { DbConnection, type DbConnectOptions } from "./hostserver/db/db-connection.js";
-export { openQuery } from "./hostserver/db/query.js";
-export { type LobOptions } from "./hostserver/db/query.js";
-export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./hostserver/db/lob.js";
-export { query, stream, SqlError, type Row, type QueryResult } from "./hostserver/db/query.js";
+export { DbConnection, type DbConnectOptions } from "@as400web/hostserver";
+export { openQuery } from "@as400web/hostserver";
+export { type LobOptions } from "@as400web/hostserver";
+export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "@as400web/hostserver";
+export { query, stream, SqlError, type Row, type QueryResult } from "@as400web/hostserver";
 // 上限つき取得。**ホストから取ってくる量**を抑える（`query` は全件取得）
-export { queryLimited, type LimitedResult } from "./hostserver/db/query.js";
-export type { ColumnMeta, DbValue } from "./hostserver/db/db-decode.js";
-export { DB2, typeName, jsTypeOf, type JsType } from "./hostserver/db/db-types.js";
+export { queryLimited, type LimitedResult } from "@as400web/hostserver";
+export type { ColumnMeta, DbValue } from "@as400web/hostserver";
+export { DB2, typeName, jsTypeOf, type JsType } from "@as400web/hostserver";
 // 結果を返さない文（DML / DDL）。判定は純関数で、実行は SQLCODE で成否を見る
-export { executeStatement, type ExecuteResult } from "./hostserver/db/execute.js";
+export { executeStatement, type ExecuteResult } from "@as400web/hostserver";
 export {
   isNonQueryStatement,
   isRowCountStatement,
   hasParameterMarker
-} from "./hostserver/db/statement-kind.js";
+} from "@as400web/hostserver";
 // 純 DBCS（GRAPHIC 列用）
 export {
   PureDbcsCodec,
@@ -167,17 +175,17 @@ export {
   CommandError,
   type CommandConnectOptions,
   type CommandResult
-} from "./hostserver/command/command-connection.js";
+} from "@as400web/hostserver";
 export {
   classifySeverity,
   describeMessage,
   type HostMessage,
   type MessageKind
-} from "./hostserver/command/command-message.js";
-export type { ProgramParameter } from "./hostserver/command/command-datastream.js";
+} from "@as400web/hostserver";
+export type { ProgramParameter } from "@as400web/hostserver";
 
 // ホストサーバー: スプール（一覧＝コマンドサーバー / 中身＝ネットワーク印刷サーバー）
-export { listSpooledFiles, parseSpoolRecord, buildFilter } from "./hostserver/spool/spool-list.js";
+export { listSpooledFiles, parseSpoolRecord, buildFilter } from "@as400web/hostserver";
 export {
   statusName,
   cyymmddToIso,
@@ -185,12 +193,12 @@ export {
   type SpoolId,
   type SpoolEntry,
   type SpoolListFilter
-} from "./hostserver/spool/spool-types.js";
+} from "@as400web/hostserver";
 export {
   NetPrintConnection,
   type NetPrintConnectOptions,
   type SpoolMessage
-} from "./hostserver/spool/netprint-connection.js";
+} from "@as400web/hostserver";
 export {
   NP_ACTION,
   NP_CP,
@@ -201,7 +209,7 @@ export {
   parseNpReply,
   findCodePoint,
   type NpAttribute
-} from "./hostserver/spool/netprint-datastream.js";
+} from "@as400web/hostserver";
 
 // ホストサーバー: IFS ファイルの読み書き
 export {
@@ -209,8 +217,8 @@ export {
   type IfsConnectOptions,
   type IfsListOptions,
   type IfsTextFile
-} from "./hostserver/ifs/ifs-connection.js";
-export type { IfsEntry, IfsListResult } from "./hostserver/ifs/ifs-types.js";
+} from "@as400web/hostserver";
+export type { IfsEntry, IfsListResult } from "@as400web/hostserver";
 // CCSID 指定のテキスト復号・符号化（IFS のプレビューと保存が使う）
 export {
   canDecodeCcsid,
@@ -225,21 +233,24 @@ export {
 } from "@as400web/ebcdic";
 
 // ホストサーバー: データ待ち行列
-export { DtaqConnection, type DtaqConnectOptions } from "./hostserver/dtaq/dtaq-connection.js";
-export { decodeEbcdic as dtaqDecodeEbcdic } from "./hostserver/dtaq/dtaq-datastream.js";
+export { DtaqConnection, type DtaqConnectOptions } from "@as400web/hostserver";
+// 別名は `@as400web/hostserver` 側で付け終わっている（`decodeEbcdic` / `CreateOptions` 等の
+// 汎用すぎる名前を dtaq 接頭辞付きにするのは、分割前は core の役目だった）。
+// **外へ出る名前は分割前と同一**で、ここは受け直しているだけ。
+export { dtaqDecodeEbcdic } from "@as400web/hostserver";
 export type {
   DtaqEntry,
   DtaqAttributes,
   DtaqType,
-  CreateOptions as DtaqCreateOptions,
-  ReadOptions as DtaqReadOptions,
-  SearchOrder as DtaqSearchOrder
-} from "./hostserver/dtaq/dtaq-types.js";
+  DtaqCreateOptions,
+  DtaqReadOptions,
+  DtaqSearchOrder
+} from "@as400web/hostserver";
 
 // ホストサーバー: 各種一覧（QGY オープンリスト）
-export { listObjects, type ObjectEntry, type ObjectListFilter } from "./hostserver/list/object-list.js";
-export { listUsers, type UserEntry, type UserListFilter } from "./hostserver/list/user-list.js";
-export { listJobs, type JobEntry, type JobListFilter } from "./hostserver/list/job-list.js";
+export { listObjects, type ObjectEntry, type ObjectListFilter } from "@as400web/hostserver";
+export { listUsers, type UserEntry, type UserListFilter } from "@as400web/hostserver";
+export { listJobs, type JobEntry, type JobListFilter } from "@as400web/hostserver";
 
 // DDM（レコードレベル書き込み）
 export {
@@ -254,16 +265,16 @@ export {
   effectiveBatchSizeFor,
   type ColumnLayoutInput,
   type RecordLayout
-} from "./hostserver/ddm/ddm-connection.js";
+} from "@as400web/hostserver";
 export {
   encodeChar,
   encodeInt,
   encodePacked,
   encodeZoned
-} from "./hostserver/ddm/encode.js";
-export { type FieldLayout } from "./hostserver/ddm/record-layout.js";
-export { fetchColumnLayout } from "./hostserver/ddm/column-meta.js";
-export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./identifier.js";
+} from "@as400web/hostserver";
+export { type FieldLayout } from "@as400web/hostserver";
+export { fetchColumnLayout } from "@as400web/hostserver";
+export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "@as400web/base";
 export {
   prepareUpload,
   type PrepareUploadArgs,
@@ -271,7 +282,7 @@ export {
   type PreparedUpload,
   type UploadColumn,
   type UploadRejection
-} from "./hostserver/db/upload-prepare.js";
+} from "@as400web/hostserver";
 
 // CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う）
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
@@ -284,15 +295,15 @@ export {
   DEFAULT_MAX_BATCH_BYTES,
   type InsertResult,
   type InsertRowsArgs
-} from "./hostserver/db/insert.js";
-export { parseMarkerFormat, type MarkerFormat, type MarkerField } from "./hostserver/db/marker-format.js";
+} from "@as400web/hostserver";
+export { parseMarkerFormat, type MarkerFormat, type MarkerField } from "@as400web/hostserver";
 export {
   encodeMarkerRow,
   buildMarkerData,
   markerDataSize,
   MarkerEncodeError,
   type MarkerRow
-} from "./hostserver/db/marker-encode.js";
+} from "@as400web/hostserver";
 
 // 画面 → 自己完結 HTML（エビデンス出力）
 export {

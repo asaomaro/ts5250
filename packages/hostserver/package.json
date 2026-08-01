@@ -1,0 +1,25 @@
+{
+  "name": "@as400web/hostserver",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "IBM i host server client — signon authentication, SQL/DB, IFS, DDM, data queues, spooled files, object/user/job lists, and remote command execution. Does not include the TN5250 terminal protocol.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@as400web/base": "0.1.0",
+    "@as400web/ebcdic": "0.1.0",
+    "@as400web/scs": "0.1.0"
+  }
+}

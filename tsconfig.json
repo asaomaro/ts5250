@@ -2,10 +2,16 @@
   "files": [],
   "references": [
     {
+      "path": "packages/base"
+    },
+    {
       "path": "packages/ebcdic"
     },
     {
       "path": "packages/scs"
+    },
+    {
+      "path": "packages/hostserver"
     },
     {
       "path": "packages/core"

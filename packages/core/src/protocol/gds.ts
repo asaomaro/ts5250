@@ -1,4 +1,4 @@
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { ByteReader, ByteWriter } from "./bytes.js";
 import { GDS_TYPE, HDR_FLAG } from "./constants.js";
 

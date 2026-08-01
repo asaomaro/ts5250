@@ -1,5 +1,5 @@
 import { Emitter } from "../util/emitter.js";
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { codecForCcsid } from "@as400web/ebcdic";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";

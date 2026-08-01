@@ -1,4 +1,4 @@
-import { As400Error } from "../errors.js";
+import { As400Error } from "@as400web/base";
 import { FFW } from "../protocol/constants.js";
 import { isRawSentinel } from "./attr-sentinel.js";
 import type { Codec } from "@as400web/ebcdic";
