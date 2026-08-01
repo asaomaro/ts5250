@@ -12,6 +12,8 @@ import { SecretCrypto } from "./secret-crypto.js";
 import { buildMcpServer } from "./mcp-server.js";
 import { resolveBindHost } from "./bind-host.js";
 import { buildApp } from "./app.js";
+import { WatchRegistry } from "./watch-registry.js";
+import { startAutoServices } from "./boot-autostart.js";
 import { UserStore, SessionStore, hashPassword, type AuthContext } from "./auth.js";
 import { AuditBuffer, installAuditBuffer } from "./audit.js";
 import { ResultSetStore } from "./result-set-store.js";
@@ -291,9 +293,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     await server.connect(transport);
     log.info("5250 MCP server started on stdio");
   } else {
+    // **main 側で作って渡す。** 起動時の自動開始（`startAutoServices`）が
+    // 同じレジストリを触る必要があるため——`buildApp` の中で作られると手が届かない
+    const watches = new WatchRegistry(
+      args.maxWatches !== undefined ? { maxWatches: args.maxWatches } : {}
+    );
     const app = buildApp({
       resultSets,
       pool,
+      watches,
       ...deps,
       ...(args.webRoot ? { webRoot: args.webRoot } : {}),
       audit: auditBuffer,
@@ -341,6 +349,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ? "5250 MCP/Web server started (localhost only. 公開するには --users と --host を指定)"
           : "5250 MCP/Web server started (Streamable HTTP + WebSocket)"
       );
+      // **待ち受けを始めてから立ち上げる。** 繋ぎに行くのに時間がかかるので、
+      // HTTP の口を開けるのを待たせない。失敗しても起動は止めない
+      // （`20260801-boot-autostart`）
+      void startAutoServices({ resolver: deps.resolver, sessions: deps.sessions, watches }).catch((e: unknown) => {
+        log.warn(`サービスの自動開始で想定外の失敗: ${e instanceof Error ? e.message : String(e)}`);
+      });
     });
   }
 }
