@@ -135,10 +135,18 @@ async function savePrinter(
     ...(t.printerOutput ? { output: t.printerOutput } : {})
   };
   if (!entry) {
-    // **自動で待ち受け開始 ☐ なら登録だけ。** 開始ボタンを待つ約束は保存でも変わらない
-    await deps.sessions.openPrinter({ ...openOpts, autoStart: t.autoStart });
-    log.info({ ref, autoStart: t.autoStart }, "定義からサービスを立ち上げた");
-    return { started: t.autoStart };
+    // **先に登録して、それから開始する。** `openPrinter` に任せて開始まで行わせると、
+    // 繋がらなかったときに**実体が残らない**——一覧には「未起動」とだけ出て、
+    // 理由（装置が使用中・TLS の設定違い・ホスト不達）がサーバーログにしか無い。
+    // 「設定したのに動かない」が画面から追えないのは、この機能で一番困る壊れ方
+    const created = await deps.sessions.openPrinter({ ...openOpts, autoStart: false });
+    if (!t.autoStart) {
+      log.info({ ref }, "定義からサービスを登録した（自動で待ち受け開始 ☐）");
+      return { started: false };
+    }
+    await deps.sessions.startPrinter(created.id); // 失敗しても `error` 状態が実体に残る
+    log.info({ ref }, "定義からサービスを立ち上げた");
+    return { started: true };
   }
   // **動いているものは落とさない。** 次に開始したとき効くよう材料だけ差し替え、
   // いま繋がっているなら「まだ効いていない」ことを画面に出す

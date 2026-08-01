@@ -38,8 +38,9 @@ function deps(opts: {
     listPrinters: () => opts.printers ?? [],
     openPrinter: async (o: Record<string, unknown>) => {
       calls.push(`openPrinter autoStart=${String(o.autoStart)}`);
-      return {};
+      return { id: "new" };
     },
+    startPrinter: async (id: string) => calls.push(`startPrinter ${id}`),
     stopPrinter: (id: string) => calls.push(`stopPrinter ${id}`),
     close: async (id: string) => calls.push(`close ${id}`),
     updatePrinterOptions: (id: string) => {
@@ -85,12 +86,15 @@ describe("定義が足された", () => {
   it("サービス ✅ ＋ 自動 ✅ なら立ち上げる", async () => {
     const { d, calls } = deps({});
     expect(await reconcileService(d, "srv:p1", "saved")).toMatchObject({ started: true });
-    expect(calls).toEqual(["openPrinter autoStart=true"]);
+    // **登録してから開始する。** `openPrinter` に開始まで任せると、繋がらなかったときに
+    // 実体が残らず、理由が画面から追えない
+    expect(calls).toEqual(["openPrinter autoStart=false", "startPrinter new"]);
   });
 
   it("**自動で待ち受け開始 ☐ なら登録だけ**（開始ボタンを待つ約束は保存でも変わらない）", async () => {
     const { d, calls } = deps({ target: printerTarget({ autoStart: false }) });
     expect(await reconcileService(d, "srv:p1", "saved")).toMatchObject({ started: false });
+    // 登録だけ。**開始は呼ばない**（開始ボタンを待つ）
     expect(calls).toEqual(["openPrinter autoStart=false"]);
   });
 
@@ -191,5 +195,18 @@ describe("失敗しても呼び出し元を巻き添えにしない", () => {
   it("監視レジストリが無ければ飛ばす（落ちない）", async () => {
     const { d } = deps({ target: watchTarget(), noWatches: true });
     expect(await reconcileService(d, "srv:w1", "saved")).toMatchObject({ skipped: "監視レジストリが無い" });
+  });
+});
+
+describe("立ち上げに失敗したとき", () => {
+  it("**実体は残す**（一覧に `error` と理由が出るように）", async () => {
+    const { d, calls } = deps({});
+    (d.sessions as unknown as { startPrinter: () => Promise<never> }).startPrinter = async () => {
+      throw new Error("device in use");
+    };
+    // 反映そのものは投げない（保存を巻き添えにしない）
+    expect(await reconcileService(d, "srv:p1", "saved")).toMatchObject({ skipped: "device in use" });
+    // **登録は済んでいる**——`openPrinter` が先に呼ばれているので、実体が `error` で残る
+    expect(calls).toEqual(["openPrinter autoStart=false"]);
   });
 });
