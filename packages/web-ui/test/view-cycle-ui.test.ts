@@ -8,7 +8,7 @@ import KeybindingsPanel from "../src/components/KeybindingsPanel.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
 import { viewSettings, initViewSettings, VIEW_ITEMS } from "../src/stores/viewSettings.js";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 const SID = "vc1";

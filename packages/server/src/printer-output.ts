@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import type { SpoolReport } from "@as400web/core";
+import type { SpoolReport } from "@as400web/tn5250";
 import { renderSpoolPdf, type PdfOptions } from "./pdf.js";
 
 /**

@@ -21,7 +21,7 @@ import {
   ConfigResolver,
   WatchRegistry
 } from "@as400web/server";
-import { DtaqConnection } from "@as400web/core";
+import { DtaqConnection } from "@as400web/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell } from "@as400web/core";
+import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
 
 /**
  * **表示コード切替（ACS の半角カナ ⇔ 英小文字）が両方向に効くこと。**

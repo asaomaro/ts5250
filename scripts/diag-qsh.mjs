@@ -11,7 +11,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/diag-qsh.mjs
 import { readFileSync } from "node:fs";
-import { Session5250, TcpTransport } from "@as400web/core";
+import { Session5250, TcpTransport } from "@as400web/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));

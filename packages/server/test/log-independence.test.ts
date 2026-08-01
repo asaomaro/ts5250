@@ -42,7 +42,7 @@ describe("server のログは core の注入に依存しない", () => {
    * `src` の各ファイルが実際にどちらを import しているかは検査しておらず、
    * 実際に **3 ファイル（`host-sql` / `result-set-store` / `host-upload`）が
    * ライブラリ側の `childLog` を使っていた**（`20260801-library-extraction-drop-core-reexport`
-   * で発覚。それまでは `@as400web/core` 経由だったので、注入式ロガーだと気づきにくかった）。
+   * で発覚。それまでは `@as400web/tn5250` 経由だったので、注入式ロガーだと気づきにくかった）。
    *
    * `main.ts` が `setLogSink` を呼ぶので通常の起動では出力されるが、
    * **それは「注入に依存している」ということ**で、このモジュール群が避けたかった形そのもの。

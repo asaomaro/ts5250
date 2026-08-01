@@ -11,6 +11,6 @@
     { "path": "../../packages/base" },
     { "path": "../../packages/ebcdic" },
     { "path": "../../packages/hostserver" },
-    { "path": "../../packages/core" }
+    { "path": "../../packages/tn5250" }
   ]
 }

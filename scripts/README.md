@@ -1,6 +1,6 @@
 # 実機 E2E / 診断スクリプト
 
-`packages/core` の `Session5250`（および MCP/WS）を実 IBM i（既定 pub400.com）に対して動かす E2E・診断スクリプト。
+`packages/tn5250` の `Session5250`（および MCP/WS）を実 IBM i（既定 pub400.com）に対して動かす E2E・診断スクリプト。
 
 ## 実行方法
 

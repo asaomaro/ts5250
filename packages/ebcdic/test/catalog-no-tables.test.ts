@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * この性質は「ブラウザのバンドルに 1.17 MB の表を入れない」ためだけに在り、
  * **壊れても型検査もテストもビルドも通ってしまう**——`catalog.ts` に
  * `import { codecForCcsid } from "./codec.js"` を 1 行足すだけで、`catalog` を
- * 使う側（`@as400web/core/browser` 経由の web-ui）のバンドルが一気に膨らむ。
+ * 使う側（`@as400web/tn5250/browser` 経由の web-ui）のバンドルが一気に膨らむ。
  * サイズを見ていなければ誰も気づかない。だから到達可能性そのものを固定する。
  *
  * 検査は **src の import グラフを実際にたどる**（ビルド成果物に依存しないので

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@as400web/tn5250";
 import {
   initEdit,
   editValue,
@@ -39,7 +39,7 @@ import {
   type WindowRect,
   type OptionSpan
 } from "../composables/fkeyLegend.js";
-import { GRID_COLOR } from "@as400web/core/browser";
+import { GRID_COLOR } from "@as400web/tn5250/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
@@ -52,7 +52,7 @@ import {
   type FieldSlice
 } from "../composables/fieldSlices.js";
 // browser サブパスからブラウザ安全に import（root は node 依存を巻き込むため不可）。
-// **katakanaChar もここから取る。** 以前は `@as400web/core/codec` から引いていたが、
+// **katakanaChar もここから取る。** 以前は `@as400web/tn5250/codec` から引いていたが、
 // あの入口は CCSID 930/939 の変換表を DBCS 部込みで持ち込む——実測で本番バンドルが
 // 約 600 KB 膨らんでいた。実際に要るのは 930 の SBCS 部 256 要素だけ。
 import {
@@ -65,7 +65,7 @@ import {
   decodeAttribute,
   katakanaChar,
   latinChar
-} from "@as400web/core/browser";
+} from "@as400web/tn5250/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
 const props = withDefaults(

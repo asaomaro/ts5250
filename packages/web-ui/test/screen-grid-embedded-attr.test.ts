@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reactive, nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 
 /**
  * **入力欄の埋め込み属性（欄途中の色替え）を色付きオーバーレイで表現する。**

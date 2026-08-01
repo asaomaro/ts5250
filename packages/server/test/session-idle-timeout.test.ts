@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
 import {
   ORPHAN_IDLE_TIMEOUT_MS,
   SessionManager,
@@ -23,7 +23,7 @@ import { parseIdleTimeout } from "../src/main.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const signonFixture = () =>
   parseTraceJsonl(
-    readFileSync(join(here, "..", "..", "core", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
+    readFileSync(join(here, "..", "..", "tn5250", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
   );
 
 /** private な sweepIdle を叩く（既存テストと同じ手） */

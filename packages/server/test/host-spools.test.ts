@@ -190,7 +190,7 @@ describe("打ち切り判定（max + 1 方式）", () => {
 
   async function listWith(available: number, max: number) {
     // **モック先は `@as400web/hostserver`**。`host-spools.ts` がそこから import しているので、
-    // `@as400web/core` に spy を張っても被験側は別のモジュールを見ることになり、
+    // `@as400web/tn5250` に spy を張っても被験側は別のモジュールを見ることになり、
     // 「モックしたつもりで実物が動く」になる（core が再輸出をやめたため）。
     const hostserver = await import("@as400web/hostserver");
     const spy = vi.spyOn(hostserver, "listSpooledFiles").mockImplementation(

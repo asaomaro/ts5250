@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SessionManager } from "../src/session-manager.js";
-import type { Transport } from "@as400web/core";
+import type { Transport } from "@as400web/tn5250";
 
 /** startup + 印刷データ + Job Complete を IAC EOR 付きで供給できる最小 Transport */
 class FakeTransport implements Transport {

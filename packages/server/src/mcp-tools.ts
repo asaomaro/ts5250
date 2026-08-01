@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { As400Error } from "@as400web/base";
 import { CommandError, SqlError } from "@as400web/hostserver";
-import { type ConnectOptions, type ScreenSnapshot, type SendAidResult, type SendAidOptions, type AidKey } from "@as400web/core";
+import { type ConnectOptions, type ScreenSnapshot, type SendAidResult, type SendAidOptions, type AidKey } from "@as400web/tn5250";
 import { childLog } from "./log.js";
 import { orphanSafeIdleTimeoutMs, SessionManager, type OpenOptions } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
@@ -12,7 +12,8 @@ import { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type Scr
 import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
-import { renderScreenHtml, renderScreenHistoryHtml, renderSpoolHtml } from "@as400web/core";
+import { renderSpoolHtml } from "@as400web/scs";
+import { renderScreenHtml, renderScreenHistoryHtml } from "@as400web/tn5250";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { withAudit } from "./audit.js";
 

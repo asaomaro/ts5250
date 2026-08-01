@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Field, ScreenSnapshot } from "@as400web/core";
+import type { Field, ScreenSnapshot } from "@as400web/tn5250";
 import type { PublicMacro, PublicMacroStep } from "@as400web/server";
 
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };

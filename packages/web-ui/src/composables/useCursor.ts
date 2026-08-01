@@ -1,4 +1,4 @@
-import type { Cell, Field } from "@as400web/core";
+import type { Cell, Field } from "@as400web/tn5250";
 import { fieldSpan, offsetOfPos } from "./fieldSlices.js";
 
 /**

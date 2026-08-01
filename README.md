@@ -2,7 +2,7 @@
 
 IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェント用）と **Web エミュレーター**（ブラウザ／デスクトップ）の
 2 つのフロントから操作できるツール群です。TN5250 プロトコルを **純 TypeScript** で実装しており、外部の 5250
-ライブラリや IBM ACS の jar には依存しません。両フロントは共通の 5250 コア（`packages/core`）を使うため、
+ライブラリや IBM ACS の jar には依存しません。両フロントは共通の 5250 コア（`packages/tn5250`）を使うため、
 画面の見え方・振る舞いが定義上一致します。
 
 - **AI から操作**: MCP ツール経由で LLM が 5250 アプリを自動操作（サインオン・画面取得・キー送信・ジョブ情報 …）、
@@ -110,7 +110,7 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 
 | パッケージ | 役割 |
 |---|---|
-| `packages/core` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・ホストサーバー・trace/replay） |
+| `packages/tn5250` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・ホストサーバー・trace/replay） |
 | `packages/ebcdic` | EBCDIC ⇔ Unicode 変換（**外部依存ゼロ**。SBCS / SO-SI 混在 DBCS / 純 DBCS） |
 | `packages/scs` | スプール（SCS）のバイト列 → 論理ページ展開。依存は `ebcdic` のみ |
 | `packages/server` | MCP サーバー（stdio + Streamable HTTP）・WebSocket/REST・web-ui 静的配信 |
@@ -1033,7 +1033,7 @@ npm run lint         # eslint
 npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新時のみ）
 ```
 
-- **trace-first**: 実機トレース（JSONL）を `packages/core/test/fixtures/` に採取し、パーサ・画面モデルは
+- **trace-first**: 実機トレース（JSONL）を `packages/tn5250/test/fixtures/` に採取し、パーサ・画面モデルは
   リプレイでオフライン回帰。実機 E2E / 診断スクリプトは `scripts/`（実行規約は
   [`scripts/README.md`](scripts/README.md)。要 `.env` の資格情報）。
 - **web-ui のテストはパッケージ dir から実行する**（`cd packages/web-ui && npx vitest run`）。
@@ -1082,7 +1082,7 @@ npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新�
 
 - **ワイヤ仕様（他言語移植用）**: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — telnet ネゴ／RFC 4777 自動サインオン／
   GDS レコード／WTD オーダー／属性・FFW/FCW／Query Reply／WDSF GUI／Read 応答のバイトレベル仕様。
-  移植版の検証は `packages/core/test/fixtures/*.jsonl`（言語非依存 trace）のリプレイで行える。
+  移植版の検証は `packages/tn5250/test/fixtures/*.jsonl`（言語非依存 trace）のリプレイで行える。
 - **印刷経路の実測記録**: [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md) — 日本語（DBCS）帳票が
   プリンターセッションで書き出せない件の調査記録。効いた対処／効かなかった対処、Host Print Transform の
   出力実測、符号表を探して空振りした経緯まで。**同じ道を再び辿らないための記録**。

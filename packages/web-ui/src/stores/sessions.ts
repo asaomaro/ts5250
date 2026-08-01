@@ -1,5 +1,5 @@
 import { reactive, markRaw } from "vue";
-import type { ScreenSnapshot } from "@as400web/core";
+import type { ScreenSnapshot } from "@as400web/tn5250";
 import type { WsClient } from "../ws-client.js";
 
 /** プリンターセッションが受信した 1 スプール（等幅ページ列） */

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 // **文言そのものは書かない。** 定数を参照して、日本語化のような文言変更でテストが
 // 落ちないようにする（確かめたいのは「どの理由のメッセージが出たか」）。
 import { MSG_PROTECTED, MSG_BY_REASON } from "../src/composables/opMessages.js";

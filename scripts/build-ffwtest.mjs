@@ -17,7 +17,7 @@
 // 実行: node --env-file=.env scripts/build-ffwtest.mjs
 //   （`.env` が無い場合は AS400_PASSWORD=... を環境変数で渡す。**ファイルには書かない**）
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";

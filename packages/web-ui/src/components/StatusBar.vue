@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AidKey } from "@as400web/core";
+import type { AidKey } from "@as400web/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
 import { fieldAt } from "../composables/useCursor.js";

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { detectWindowRect, detectFkeyLegends } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * **窓が重なったときは前面の窓を選ぶ。**

@@ -13,7 +13,7 @@
 // （B01・G01 を掴むと青/桃/黄が落ちて 4 色になる）。
 //
 // 実行: node --env-file=.env scripts/verify-screen-size.mjs
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const creds = { user: process.env.PUB400_USER, password: process.env.PUB400_PASSWORD };

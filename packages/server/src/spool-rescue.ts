@@ -18,7 +18,7 @@
  * ときだけ行う。
  */
 import type { SpoolId, SpoolEntry } from "@as400web/hostserver";
-import type { ConnectOptions } from "@as400web/core";
+import type { ConnectOptions } from "@as400web/tn5250";
 import { openNetPrint } from "./host-connect.js";
 import { listSpools, readSpoolPages, DEFAULT_SPOOL_CCSID } from "./host-spools.js";
 import { childLog } from "./log.js";

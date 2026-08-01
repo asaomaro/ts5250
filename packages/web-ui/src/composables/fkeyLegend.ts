@@ -9,7 +9,7 @@
  * 桁がずれるとボタンの位置・幅が実際の文字とずれるため、`cells`（1 セル = 1 桁、DBCS は
  * lead + tail の 2 セル）を基準に「表示文字列」と「文字列 index → 桁」の対応を同時に作る。
  */
-import type { AidKey, Cell, ScreenSnapshot } from "@as400web/core";
+import type { AidKey, Cell, ScreenSnapshot } from "@as400web/tn5250";
 
 /** 検出した凡例 1 件。座標は 1 始まりの桁。 */
 export interface FkeySpan {

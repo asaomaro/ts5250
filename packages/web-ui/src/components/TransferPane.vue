@@ -11,7 +11,8 @@ import { useColumnWidths } from "../composables/useColumnWidths.js";
 import type { UploadRejection } from "@as400web/hostserver";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
-import { isValidIdentifier, parseCsv } from "@as400web/core/browser";
+import { isValidIdentifier } from "@as400web/tn5250/browser";
+import { parseCsv } from "@as400web/base";
 
 /**
  * データ転送（表 ⇄ CSV）。ACS の **Data Transfer** に相当する。

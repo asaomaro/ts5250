@@ -1,5 +1,5 @@
 import { As400Error } from "@as400web/base";
-import { type AidKey, type ScreenSnapshot } from "@as400web/core";
+import { type AidKey, type ScreenSnapshot } from "@as400web/tn5250";
 import { childLog } from "./log.js";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";

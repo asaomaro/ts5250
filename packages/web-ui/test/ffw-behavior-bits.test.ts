@@ -7,7 +7,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import { rejectReason } from "../src/composables/fieldValidate.js";
 import { findMandatoryViolation } from "../src/composables/mandatoryCheck.js";
 import { MSG_BY_REASON, MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL } from "../src/composables/opMessages.js";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/core";
+import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 /**

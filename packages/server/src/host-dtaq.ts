@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { DtaqConnection, DtaqSearchOrder } from "@as400web/hostserver";
 import { As400Error } from "@as400web/base";
 import { dtaqDecodeEbcdic } from "@as400web/hostserver";
-import { codecForCcsid } from "@as400web/core/codec";
+import { codecForCcsid } from "@as400web/ebcdic/codec";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDtaq } from "./host-connect.js";

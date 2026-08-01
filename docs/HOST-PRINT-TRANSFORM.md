@@ -3,8 +3,8 @@
 日本語（DBCS）帳票をプリンターセッションで扱えなかった件の調査記録。**同じ道を再び辿らないため**に、
 実測で分かったことと、試して駄目だったことを残す。すべて日本語実機（IBM i 7.3・CCSID 939）での実測。
 
-関連実装: `packages/server/src/spool-rescue.ts` / `packages/core/src/session/printer-session.ts` /
-`packages/core/src/protocol/scs.ts`
+関連実装: `packages/server/src/spool-rescue.ts` / `packages/tn5250/src/session/printer-session.ts` /
+`packages/tn5250/src/protocol/scs.ts`
 
 ---
 

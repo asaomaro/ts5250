@@ -3,7 +3,7 @@
 // ライターの用紙タイプ問い合わせ(CPA3394)に応答 → SCS を受信して論理ページに展開できることを確認する。
 // 実行: node --env-file=.env scripts/verify-printer.mjs
 //   env: PUB400_USER / PUB400_PASSWORD（任意 PUB400_HOST）
-import { PrinterSession, Session5250 } from "@as400web/core";
+import { PrinterSession, Session5250 } from "@as400web/tn5250";
 
 const HOST = process.env.PUB400_HOST ?? "pub400.com";
 const USER = process.env.PUB400_USER;

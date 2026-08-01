@@ -1,7 +1,7 @@
 /**
  * `@as400web/base` 公開 API。
  *
- * IBM i を相手にする各パッケージ（`@as400web/core` = TN5250、`@as400web/hostserver` =
+ * IBM i を相手にする各パッケージ（`@as400web/tn5250` = TN5250、`@as400web/hostserver` =
  * ホストサーバー群）が**共有する語彙**だけを置く。ここは「共通で使うものの物置」ではない——
  * **複製すると壊れるもの**の置き場所である。
  *
@@ -11,7 +11,7 @@
  *   パッケージ境界を跨いだ判定が false になる
  *
  * この 2 点が「core に残す」でも「両方に複製する」でもなく独立パッケージにした理由で、
- * `packages/core/test/errors-compat.test.ts` と `log-sink-single-instance.test.ts` が
+ * `packages/tn5250/test/errors-compat.test.ts` と `log-sink-single-instance.test.ts` が
  * 実行時に検査している（`20260801-library-extraction-hostserver` decisions.md D4）。
  *
  * **`export *` は使わない。** 再輸出を機械的に広げると、何が外に出ているのかが目視できなくなる
@@ -40,3 +40,24 @@ export {
 
 // IBM i のオブジェクト名の検証。サーバーとブラウザの両方が使う
 export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./identifier.js";
+
+/*
+ * ここから下は **2 つ目の基準**——「複製すると壊れる」ではなく
+ * **「複数のパッケージが要るが、どれにも属さない」**もの。
+ *
+ * - `east-asian-width` … `@as400web/tn5250` の `screen/`（桁を数える）と
+ *   `@as400web/scs` の `spool-html`（描く）の**両方**が使う。どちらかに置くと他方が依存する
+ * - `csv-parse` / `split-statements` … 取り込みと SQL 入力の下ごしらえ。
+ *   `@as400web/server` と `@as400web/web-ui` が使い、TN5250 でもホストサーバーでもない
+ *
+ * **物置にしないための歯止め**: **片方しか使わないものは、使う側に置く。**
+ * ここへ足す前に「本当に 2 つ以上のパッケージが要るか」を確かめること
+ * （`20260801-library-extraction-tn5250` decisions.md D2）。
+ */
+
+/** 全角判定（East Asian Width）。桁を数える側と描く側で表を分けない */
+export { isFullWidth, isCertainWideGlyph } from "./east-asian-width.js";
+/** CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う） */
+export { parseCsv, type CsvParseResult } from "./csv-parse.js";
+/** SQL の複数文分割。純テキスト処理なので UI から直接使う（表も I/O も引き込まない） */
+export { splitSqlStatements, summarizeSql, type SqlStatement } from "./split-statements.js";

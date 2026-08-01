@@ -1,4 +1,4 @@
-import type { Field, ScreenSnapshot } from "@as400web/core";
+import type { Field, ScreenSnapshot } from "@as400web/tn5250";
 import type { PublicMacroStep } from "@as400web/server";
 import { sessionsStore, type MacroStopReason, type SessionState } from "./stores/sessions.js";
 import { macrosStore } from "./stores/macros.js";

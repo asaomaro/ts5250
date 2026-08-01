@@ -1,4 +1,4 @@
-import type { Field } from "@as400web/core";
+import type { Field } from "@as400web/tn5250";
 import { dbcsByteLength } from "./fieldValidate.js";
 
 /**

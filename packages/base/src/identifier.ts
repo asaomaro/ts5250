@@ -5,7 +5,7 @@
  * （`@as400web/hostserver` の `ddm/column-meta.ts` に置くと `DbConnection` 経由で
  * Node 依存を引き込み、ブラウザから使えない）。規則を 2 か所に書かないための置き場所である。
  *
- * 利用者は hostserver（`column-meta.ts`）と web-ui（`@as400web/core/browser` 経由）で、
+ * 利用者は hostserver（`column-meta.ts`）と web-ui（`@as400web/tn5250/browser` 経由）で、
  * **どちらのパッケージにも属さない**ので `@as400web/base` に置いてある。
  */
 import { As400Error } from "./errors.js";

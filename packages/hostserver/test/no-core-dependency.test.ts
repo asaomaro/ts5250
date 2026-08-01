@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * **`@as400web/hostserver` から `@as400web/core` へ依存しないこと。**
+ * **`@as400web/hostserver` から `@as400web/tn5250` へ依存しないこと。**
  *
  * このパッケージは「IBM i に SQL を投げたい／IFS を読み書きしたいが、5250 の画面
  * エミュレーションは要らない」利用者のために core から切り出したもので、逆向きの辺を
@@ -45,15 +45,15 @@ function moduleSpecifiers(source: string): string[] {
 
 const files = collectSources(srcDir);
 
-describe("@as400web/core への逆依存が無い", () => {
+describe("@as400web/tn5250 への逆依存が無い", () => {
   it("走査対象を実際に拾えている（空振りで緑にならないこと）", () => {
     // ファイルが 0 件でも forEach は通ってしまう。走査そのものを先に固定する
     expect(files.length).toBeGreaterThan(40);
   });
 
-  it("src のどのファイルも @as400web/core を import しない", () => {
+  it("src のどのファイルも @as400web/tn5250 を import しない", () => {
     const offenders = files.filter((f) =>
-      moduleSpecifiers(readFileSync(f, "utf8")).some((s) => s.startsWith("@as400web/core"))
+      moduleSpecifiers(readFileSync(f, "utf8")).some((s) => s.startsWith("@as400web/tn5250"))
     );
     expect(offenders.map((f) => relative(srcDir, f))).toEqual([]);
   });

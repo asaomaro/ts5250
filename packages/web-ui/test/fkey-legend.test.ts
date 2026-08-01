@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/core";
+import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
 import { detectFkeyLegends, detectWindowRect, rowText } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 
 // ---- 合成スナップショットの組み立て（実機で観測した行をそのまま写す） ----
 
@@ -202,7 +202,7 @@ describe("ホスト宣言の優先（spec FR-8）", () => {
 
 describe("実機キャプチャ（PUB400）での検出", () => {
   // vitest の cwd は packages/web-ui（AGENTS.md: web-ui のテストはパッケージ dir から実行する）
-  const fixtures = join(process.cwd(), "../core/test/fixtures");
+  const fixtures = join(process.cwd(), "../tn5250/test/fixtures");
 
   async function snapFromTrace(name: string): Promise<ScreenSnapshot> {
     const entries = parseTraceJsonl(readFileSync(join(fixtures, name), "utf8"));

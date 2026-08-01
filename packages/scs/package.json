@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./spool-html": {
+      "types": "./dist/spool-html.d.ts",
+      "default": "./dist/spool-html.js"
     }
   },
   "files": [
@@ -18,6 +22,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@as400web/base": "0.1.0",
     "@as400web/ebcdic": "0.1.0"
   }
 }

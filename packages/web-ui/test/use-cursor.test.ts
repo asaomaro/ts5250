@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, wordRangeAt } from "../src/composables/useCursor.js";
-import type { Cell, Field } from "@as400web/core";
+import type { Cell, Field } from "@as400web/tn5250";
 
 function field(row: number, col: number, length: number, protectedField = false): Field {
   return { index: 1, row, col, length, protected: protectedField, hidden: false, numeric: false, mdt: false, value: "" };

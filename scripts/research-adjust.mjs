@@ -11,7 +11,7 @@
 //
 // 実行: node --env-file=.env scripts/research-adjust.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = "TESTLIB";
@@ -26,7 +26,7 @@ const O = { SOH: 0x01, RA: 0x02, EA: 0x03, TD: 0x10, SBA: 0x11, WEA: 0x12, IC: 0
 
 /**
  * WRITE TO DISPLAY の中を歩いて SF（0x1D）の FFW を順に返す。
- * オーダーの引数長は SC30-3533 / `packages/core/src/protocol/wtd-applier.ts` と同じ。
+ * オーダーの引数長は SC30-3533 / `packages/tn5250/src/protocol/wtd-applier.ts` と同じ。
  * 未知のバイトは**画面文字**なので 1 バイト読み飛ばす（オーダーではない）。
  */
 function ffwsOf(rec) {

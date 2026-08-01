@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/core";
+import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * **モバイルの数字キーパッド（`inputmode`）。**

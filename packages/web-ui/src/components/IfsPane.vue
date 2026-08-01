@@ -22,7 +22,7 @@ import {
   type IfsUploadEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
-import { TEXT_CCSIDS, ccsidLabel } from "@as400web/core/browser";
+import { TEXT_CCSIDS, ccsidLabel } from "@as400web/tn5250/browser";
 
 /**
  * IFS のファイルブラウザ。左に階層ツリー、中央に一覧、右にプレビュー。

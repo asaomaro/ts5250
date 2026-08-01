@@ -1,4 +1,4 @@
-import type { ScreenSnapshot, Cell, Field, GuiConstructs, ScreenColor } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field, GuiConstructs, ScreenColor } from "@as400web/tn5250";
 
 /**
  * 画面応答に含めるもの。

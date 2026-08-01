@@ -10,7 +10,7 @@ import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { MacroStore } from "../src/macro-store.js";
 import { SecretCrypto } from "../src/secret-crypto.js";
 import type { AuthUser } from "../src/auth.js";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
 import type { WsServerMessage } from "../src/ws-messages.js";
 import type { CreateMacroBody } from "../src/macro-types.js";
 
@@ -23,7 +23,7 @@ import type { CreateMacroBody } from "../src/macro-types.js";
  *      サインオン失敗の原因が分からなくなる
  */
 const here = dirname(fileURLToPath(import.meta.url));
-const fixtureDir = join(here, "..", "..", "core", "test", "fixtures");
+const fixtureDir = join(here, "..", "..", "tn5250", "test", "fixtures");
 const signonTrace = (): ReturnType<typeof parseTraceJsonl> =>
   parseTraceJsonl(readFileSync(join(fixtureDir, "pub400-signon.jsonl"), "utf8"));
 

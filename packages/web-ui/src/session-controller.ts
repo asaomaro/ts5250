@@ -1,5 +1,5 @@
 import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
-import type { AidKey } from "@as400web/core";
+import type { AidKey } from "@as400web/tn5250";
 import { WsClient, wsUrl } from "./ws-client.js";
 import {
   MSG_NO_RESPONSE,

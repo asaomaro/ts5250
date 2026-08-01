@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 
 /**
  * セル選択（オーバーレイ）と native キャレットの二重表示を防ぐ。

@@ -1,7 +1,7 @@
 /**
  * ライブラリのログ出口。**利用側にロガーを強制しない**（既定は何もしない）。
  *
- * 以前は `pino` を直接 import しており、`@as400web/core` を値で触ると
+ * 以前は `pino` を直接 import しており、`@as400web/tn5250` を値で触ると
  * pino がバンドルに入った。ライブラリとして切り出すときに
  * 「EBCDIC コーデックが欲しいだけなのにロガーが付いてくる」のは筋が悪い。
  *
@@ -14,9 +14,9 @@
  * **このモジュールを複製してはならない。** 下の `factory` はモジュールスコープの可変状態で、
  * `setLogSink` はこれを書き換える。実体が 2 つになると注入は片方にしか効かず、
  * もう片方のログが**黙って消える**（型検査でもビルドでも気づけない）。
- * `@as400web/core` と `@as400web/hostserver` の両方から使われるため、
+ * `@as400web/tn5250` と `@as400web/hostserver` の両方から使われるため、
  * どちらにも属さない `@as400web/base` に置いてある。
- * `packages/core/test/log-sink-single-instance.test.ts` が実行時に固定している。
+ * `packages/tn5250/test/log-sink-single-instance.test.ts` が実行時に固定している。
  */
 
 /** ログ 1 メソッドの形。pino の `debug(msg)` 等がそのまま代入できる */

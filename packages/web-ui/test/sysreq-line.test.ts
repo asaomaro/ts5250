@@ -6,7 +6,7 @@ import StatusBar from "../src/components/StatusBar.vue";
 import SysReqLine from "../src/components/SysReqLine.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/core";
+import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 /**

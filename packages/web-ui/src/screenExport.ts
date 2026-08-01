@@ -15,8 +15,8 @@
  * ——`renderScreenHtml` は自前の見た目を持っており、そこまで二重管理にすると
  * 「画面設定を変えたらエビデンスの色も変わる」ことになって証拠として読みにくい。
  */
-import type { Cell, ScreenSnapshot } from "@as400web/core";
-import { renderScreenHtml, katakanaChar, latinChar } from "@as400web/core/browser";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
+import { renderScreenHtml, katakanaChar, latinChar } from "@as400web/tn5250/browser";
 import { sessionsStore } from "./stores/sessions.js";
 import { viewSettings, resolveSbcsView, type SbcsView } from "./stores/viewSettings.js";
 import { isKatakanaCcsid } from "./hostCodePages.js";

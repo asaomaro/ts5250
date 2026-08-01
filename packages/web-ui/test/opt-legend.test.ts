@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectOptionHints, detectOptionColumn } from "../src/composables/fkeyLegend.js";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/core";
+import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * **オプション欄のドロップダウンの検出。**

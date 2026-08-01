@@ -5,7 +5,7 @@ import ScreenGrid from "../src/components/ScreenGrid.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { viewSettings, initViewSettings } from "../src/stores/viewSettings.js";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 const SID = "wv1";

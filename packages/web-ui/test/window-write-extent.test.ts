@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { detectWindowRect } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/core";
+import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/tn5250";
 
 /**
  * **受信データの書き込み範囲で「反転枠が本当に窓か」を裏取りする。**

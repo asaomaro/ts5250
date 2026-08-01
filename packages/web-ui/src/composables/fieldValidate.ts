@@ -1,5 +1,6 @@
-import type { Field } from "@as400web/core";
-import { isRawSentinel, isFullWidth, isCertainWideGlyph } from "@as400web/core/browser";
+import type { Field } from "@as400web/tn5250";
+import { isRawSentinel } from "@as400web/tn5250/browser";
+import { isFullWidth, isCertainWideGlyph } from "@as400web/base";
 
 /**
  * 文字がフィールドの型で受理されるか（web 入力時の拒否。core の validateFieldContent と整合）。
@@ -301,7 +302,7 @@ export interface DbcsSliceRange {
 }
 
 /**
- * 全角判定は **core に一本化**した（`packages/core/src/text/east-asian-width.ts`）。
+ * 全角判定は **core に一本化**した（`packages/tn5250/src/text/east-asian-width.ts`）。
  * 桁を数える側と描く側で表が分かれると必ずどちらかがずれるため、配布 HTML の
  * レンダラー（`spool-html.ts`）と同じ判定を使う。ここは従来どおりの名前で再輸出するだけ。
  */

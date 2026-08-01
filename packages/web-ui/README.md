@@ -47,7 +47,7 @@ node packages/server/dist/main.js --http 3400 --profiles profiles.json \
   Delete・カーソル・paste 整形）。ScreenGrid が native input の keydown を制御して適用
 - `composables/fieldValidate.ts` — 入力時の型（数値/A/O/J）・全角判定による受理チェック
 - `stores/keybindings.ts` — カスタムキーバインド（localStorage・action→key）
-- 表示トグル: SO/SI を `{`/`}` 表示、半角カナ表示（`@as400web/core/codec` の katakanaChar で英小文字位置をカナ再解釈）
+- 表示トグル: SO/SI を `{`/`}` 表示、半角カナ表示（`@as400web/tn5250/codec` の katakanaChar で英小文字位置をカナ再解釈）
 
 ## 検証
 

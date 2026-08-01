@@ -12,7 +12,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/build-dttest.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 
 const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 const log = (s) => process.stdout.write(s + "\n");

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screenToText } from "../src/format.js";
-import type { ScreenSnapshot, Cell } from "@as400web/core";
+import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
 
 function cell(char: string): Cell {
   return {

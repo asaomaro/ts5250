@@ -6,7 +6,7 @@
 //     （test/field-validate.test.ts）と verify-browser-dbcs.mjs（ブラウザ）で担保。
 // DBCS を扱うためセッションは CCSID 1399。
 // 実行: node --env-file=.env scripts/verify-input.mjs
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
 const log = (s) => process.stderr.write(s + "\n");

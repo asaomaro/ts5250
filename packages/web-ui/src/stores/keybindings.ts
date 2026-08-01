@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { AidKey } from "@as400web/core";
+import type { AidKey } from "@as400web/tn5250";
 import type { LocalEditAction } from "../composables/useKeymap.js";
 
 /** キーコンボ文字列（例 "ctrl+3", "shift+F1", "Enter"）を正規化して作る */

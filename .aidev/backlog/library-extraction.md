@@ -236,7 +236,45 @@ pino を持ち込むと価値が半減する。**
     `core/test/errors-compat.test.ts`（**新旧の同一性を検査するのが役目**。消すと検査が成立しない）／
     `core/test/codec-reexport.test.ts`（改名の経緯を述べたコメント）
   - `errors-compat.test.ts` が緑＝**旧名は引き続き `@as400web/base` と `@as400web/core` から取れる**
-- [ ] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
-  - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式
+- [x] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
+  - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式 ← **実測でも確認**（7 と 4 の相互 import）
   - 競合あり（例: green-screen-react）。差別化軸は「純 TypeScript・依存なし・トレース再生付き」
-  - 最も重いので最後でよい
+  - ~~最も重いので最後でよい~~ **← 行数は最大（5,044 行）だが、外へ張る依存は
+    `session → util/emitter.ts` の 1 本だけで、切り出し自体は最も素直だった**
+  - **2026-08-01 完了**（`.aidev/works/20260801-library-extraction-tn5250`）。
+    **前 3 回と違い「core から出す」のではなく「core そのもの」が対象**だったため、
+    ユーザー判断で **`@as400web/core` → `@as400web/tn5250` の改名**という形を採った
+    （6 ディレクトリだけ出すと、残った core が新パッケージに依存し返す＝3b/3c で消した形に逆戻り）
+  - **「core」という名前が問題の一部だった**——何が入っているのか名前が語らないので、
+    実際に TN5250・ホストサーバー・EBCDIC・SCS・CSV 解析・SQL 文分割が同居していた。
+    名が体を表せば、足すときに「これは tn5250 か？」と問える
+  - **中身の整理**: `csv-parse`(128) / `split-statements`(158) / `east-asian-width`(109) →
+    `@as400web/base`、`spool-html`(217) → `@as400web/scs`、
+    `util/emitter` → `session/` 配下、`html/screen-html` → `src/` 直下。
+    **`@as400web/core/codec` ファサード（34 行）は廃止**（利用者 1 箇所を `@as400web/ebcdic/codec` 直参照へ）
+  - **`tn5250 → scs` は正当な辺**——プリンターセッションがホストから SCS を受け取って復号する
+  - **実測値（次に測る人の基準線）**: 追跡ファイルの `@as400web/core` **0 件**、
+    テスト **3,268 → 3,269 件**（失敗 0）、web-ui 本番バンドル **359,853 → 359,857 バイト**
+  - **途中でバンドルが 4 倍（1,458,480 バイト）に膨らんだ**。`spool-html` を scs へ移し、
+    web-ui が **scs のバレル**から取るようにしたところ `ScsDecoder` → `@as400web/ebcdic`（バレル）
+    → 変換表 5 つに到達した。`20260726-ccsid-table-bundling` と同じ失敗様式で、
+    **狭い入口 `@as400web/scs/spool-html` を新設**して解決。
+    受け入れ基準にバンドルサイズを入れていなければ気づかず出荷していた
+  - **依存の向きを 1 か所で宣言する走査ガードを新設**（`tn5250/test/dependency-direction.test.ts`）。
+    従来は辺ごとに個別テストを書いており、5 パッケージ＝15 通りでは書き忘れが素通りする。
+    **このガード自体が 1 回目は効いていなかった**——正規表現 `@as400web/[a-z-]+` が数字を含まず、
+    `tn5250` を `tn` と拾っていた（わざと壊す検証で発覚）
+  - **`@as400web/base` の役割を 2 基準で明文化**（AGENTS.md）。「複製すると壊れるもの」に加えて
+    「複数のパッケージが要るが、どれにも属さないもの」。**物置にしないための歯止め**
+    （片方しか使わないものは使う側に置く）も併記——core が袋になったのと同じことを base で起こさないため
+  - **publish は未実施**（項目 1〜3 と同じく「公開の判断を後回しにできる状態」までがゴール）
+- [ ] 4b. `@as400web/tn5250` の ebcdic 再輸出を撤去する
+  - 項目 4 の follow-up（`20260801-library-extraction-tn5250` decisions.md D8）。
+    `index.ts` が `SbcsCodec` / `codecForCcsid` / `decodeCcsidText` 等を
+    `@as400web/ebcdic` から再輸出しているが、**外部の利用者はほぼ居ない**
+    （server / tools は既に `@as400web/ebcdic` 直参照）
+  - 唯一残るのは web-ui の `IfsPane.vue` が `@as400web/tn5250/browser` 経由で
+    `TEXT_CCSIDS` / `ccsidLabel` を取る経路。ただしこれは**表を引き込まない狭い入口**
+    （`@as400web/ebcdic/catalog`）を維持するための意図的な中継なので、
+    **撤去するなら web-ui を直参照へ移すのとセット**
+  - 優先度は低い（実害は「出どころが見えにくい」だけ）

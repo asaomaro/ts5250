@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell } from "@as400web/core";
+import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
 
 /**
  * **East Asian Width が Ambiguous な DBCS 文字は 2 桁幅の箱で描く。**

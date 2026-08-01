@@ -1,4 +1,4 @@
-import type { Field } from "@as400web/core";
+import type { Field } from "@as400web/tn5250";
 
 /** フィールドの表示スライス（1 行ぶんの矩形）。 */
 export interface FieldSlice {

@@ -7,8 +7,8 @@
 //   - RUNSQL は COMMIT(*NONE) 必須。CL の引用符二重化＋コマンド行 153 桁制限に収める。
 // 冪等（RMVM/ADDPFM/DROP+CREATE ALIAS/DLTF/DLTPGM）。作成後は scripts/verify-attributes.mjs で検証。
 // 実行: node --env-file=.env scripts/build-attrtest.mjs
-import { Session5250 } from "@as400web/core";
-import { codecForCcsid } from "@as400web/core/codec";
+import { Session5250 } from "@as400web/tn5250";
+import { codecForCcsid } from "@as400web/tn5250/codec";
 
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
 const DDSF = "QDDSSRC", RPGF = "QRPGLESRC";

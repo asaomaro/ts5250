@@ -11,5 +11,5 @@
     "types": []
   },
   "include": ["src"],
-  "references": [{ "path": "../ebcdic" }]
+  "references": [{ "path": "../base" }, { "path": "../ebcdic" }]
 }

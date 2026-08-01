@@ -2,7 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 import { setPrinterOutput } from "../session-controller.js";
-import { renderSpoolHtml } from "@as400web/core/browser";
+import { renderSpoolHtml } from "@as400web/scs/spool-html";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();

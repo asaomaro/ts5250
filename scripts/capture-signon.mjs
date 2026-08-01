@@ -3,11 +3,11 @@
 // 注意: サインオンは行わない（資格情報不要・送信データに秘匿情報は含まれない）ため maskTx: false。
 import { writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { TcpTransport, TelnetLayer, TraceRecorder, bytesToHex } from "@as400web/core";
+import { TcpTransport, TelnetLayer, TraceRecorder, bytesToHex } from "@as400web/tn5250";
 
 const host = process.env.PUB400_HOST ?? "pub400.com";
 const port = Number(process.env.PUB400_PORT ?? 23);
-const out = process.argv[2] ?? "packages/core/test/fixtures/pub400-signon.jsonl";
+const out = process.argv[2] ?? "packages/tn5250/test/fixtures/pub400-signon.jsonl";
 const log = (s) => process.stderr.write(s + "\n");
 
 mkdirSync(dirname(out), { recursive: true });

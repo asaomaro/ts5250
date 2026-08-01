@@ -1,8 +1,8 @@
 # PROTOCOL.md — 5250 ワイヤ仕様（他言語移植用）
 
-本書は、この実装（`packages/core`）が扱う **TN5250 / 5250 データストリームのバイトレベル仕様**を集約し、
+本書は、この実装（`packages/tn5250`）が扱う **TN5250 / 5250 データストリームのバイトレベル仕様**を集約し、
 **他言語でのクリーンルーム再実装**を可能にすることを目的とする。上位契約（画面モデル・MCP ツール・WebSocket）
-は `spec.md` を、設計判断の背景は各 `decisions.md` を参照。**バイト一致の検証**は `packages/core/test/fixtures/*.jsonl`
+は `spec.md` を、設計判断の背景は各 `decisions.md` を参照。**バイト一致の検証**は `packages/tn5250/test/fixtures/*.jsonl`
 （言語非依存の trace）をリプレイして行う。
 
 参照: RFC 1205（5250 telnet）/ RFC 1572（NEW-ENVIRON）/ RFC 4777（自動サインオン）/ SC30-3533-04 /
@@ -417,11 +417,11 @@ Attn は常にデータ無し。**SysReq はシステム要求行に打たれた
 
 ## 9. コンフォーマンス（移植版の検証）
 
-- `packages/core/test/fixtures/*.jsonl` は **言語非依存の trace**（`{dir:"rx"|"tx", hex}` の並び。tx は伏字化）。
+- `packages/tn5250/test/fixtures/*.jsonl` は **言語非依存の trace**（`{dir:"rx"|"tx", hex}` の並び。tx は伏字化）。
   移植版で `rx` を順に流し、生成した画面スナップショット／送信バイトが一致することを確認する（本実装の
   リプレイテストと同じ資産）。
 - 実機検証は `scripts/`（`.env` に `PUB400_USER`/`PUB400_PASSWORD`）。診断は `scripts/diag-*.mjs`。
 
-> 本書はコードから抽出した要約であり、曖昧な場合は `packages/core/src/protocol/`（`constants.ts` /
+> 本書はコードから抽出した要約であり、曖昧な場合は `packages/tn5250/src/protocol/`（`constants.ts` /
 > `gds.ts` / `query-reply.ts` / `wdsf-parser.ts` / `read-response.ts` / `wtd-applier.ts`）と
 > `codec/` / `screen/attributes.ts`、および `decisions.md` を一次情報とする。

@@ -7,7 +7,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/verify-sql-limit.mjs
 import { readFileSync } from "node:fs";
-import { DbConnection, executeStatement, query } from "@as400web/core";
+import { DbConnection, executeStatement, query } from "@as400web/tn5250";
 import {
   buildApp,
   SessionManager,

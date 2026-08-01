@@ -3,7 +3,7 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
-import type { ScreenSnapshot, Cell, GuiWindow } from "@as400web/core";
+import type { ScreenSnapshot, Cell, GuiWindow } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 /**

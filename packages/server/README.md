@@ -1,6 +1,6 @@
 # @as400web/server
 
-`@as400web/core` の 5250 セッションを **MCP サーバー**（stdio + Streamable HTTP）と
+`@as400web/tn5250` の 5250 セッションを **MCP サーバー**（stdio + Streamable HTTP）と
 **Web API**（REST。WebSocket は subtask 03）として公開する。
 
 ## 起動

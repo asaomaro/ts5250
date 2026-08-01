@@ -1,15 +1,15 @@
 // trace fixture を WtdApplier に適用して画面をテキストダンプする（開発補助）
 // 使い方: node scripts/dump-screen.mjs [trace.jsonl]
 import { readFileSync } from "node:fs";
-import { parseTraceJsonl } from "../packages/core/dist/trace/trace.js";
-import { ReplayTransport } from "../packages/core/dist/trace/replay.js";
-import { TelnetLayer } from "../packages/core/dist/telnet/telnet.js";
-import { parseRecord } from "../packages/core/dist/protocol/gds.js";
-import { applyDataStream } from "../packages/core/dist/protocol/wtd-applier.js";
-import { ScreenBuffer } from "../packages/core/dist/screen/buffer.js";
-import { codecForCcsid } from "../packages/core/dist/codec/codec.js";
+import { parseTraceJsonl } from "../packages/tn5250/dist/trace/trace.js";
+import { ReplayTransport } from "../packages/tn5250/dist/trace/replay.js";
+import { TelnetLayer } from "../packages/tn5250/dist/telnet/telnet.js";
+import { parseRecord } from "../packages/tn5250/dist/protocol/gds.js";
+import { applyDataStream } from "../packages/tn5250/dist/protocol/wtd-applier.js";
+import { ScreenBuffer } from "../packages/tn5250/dist/screen/buffer.js";
+import { codecForCcsid } from "../packages/tn5250/dist/codec/codec.js";
 
-const path = process.argv[2] ?? "packages/core/test/fixtures/pub400-signon.jsonl";
+const path = process.argv[2] ?? "packages/tn5250/test/fixtures/pub400-signon.jsonl";
 const out = (s) => process.stderr.write(s + "\n");
 
 const entries = parseTraceJsonl(readFileSync(path, "utf8"));

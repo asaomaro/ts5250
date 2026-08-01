@@ -4,7 +4,7 @@ import StatusBar from "../src/components/StatusBar.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { sendKey } from "../src/session-controller.js";
 import { MSG_NO_RESPONSE } from "../src/composables/opMessages.js";
-import type { ScreenSnapshot } from "@as400web/core";
+import type { ScreenSnapshot } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 /**

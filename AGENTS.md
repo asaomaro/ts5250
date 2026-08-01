@@ -33,47 +33,61 @@
 - **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint で禁止。
   - **アプリ（server）は自前の pino を使う**（`packages/server/src/log.ts`）。監査証跡が
     「注入し忘れ」で静かに消えないよう、**消えて困る側を注入に依存させない**。
-  - **ライブラリ（base / core / ebcdic / hostserver / scs）は `log` の sink 経由**
+  - **ライブラリ（base / ebcdic / scs / hostserver / tn5250）は `log` の sink 経由**
     （`packages/base/src/log.ts`）。既定は **no-op** で、要る側が起動時に `setLogSink` を呼ぶ。
-    ライブラリ利用者にロガーを強制しない（以前は core が pino を直接 import しており、
+    ライブラリ利用者にロガーを強制しない（以前は core（現 tn5250）が pino を直接 import しており、
     コーデックだけ欲しい利用側にも付いてきた）。
   - **`log.ts` の実体は 1 つだけ**（`@as400web/base`）。モジュールスコープの可変状態を持つので、
     複製すると `setLogSink` が片方にしか効かず**もう片方のログが黙って消える**
-    （`packages/core/test/log-sink-single-instance.test.ts` が実行時に固定している）。
+    （`packages/tn5250/test/log-sink-single-instance.test.ts` が実行時に固定している）。
 - **ピュアロジック層は Node API 非依存**（I/O は `transport/` に隔離。`node:*` import は
-  **`transport/` のみ**許可）。core と hostserver の両方に同じ規約が掛かる
+  **`transport/` のみ**許可）。tn5250 と hostserver の両方に同じ規約が掛かる
   （`eslint.config.js` の `no-restricted-imports` / `no-restricted-globals`）。
 - ESM / Node ≥ 20。周辺コードのスタイル（逐次 ByteReader・型で分岐を閉じる・オプショナルは存在時のみ付与）に合わせる。
 
 ### パッケージ分割と入口（バンドルサイズ）
 
-**TN5250 一式を引き込まずに使えるよう core から切り出した**独立パッケージが 4 つある。
+IBM i を相手にするパッケージは 5 つ。**TN5250 一式を引き込まずに使えるように**分けてある。
 
 | パッケージ | 中身 | 依存 |
 |---|---|---|
-| `@as400web/base` | 例外の語彙（`As400Error` / `ErrorCode`）・ログの差し込み口・オブジェクト名の検証 | なし |
-| `@as400web/ebcdic` | EBCDIC 変換（SBCS / DBCS / CCSID テキスト） | なし |
-| `@as400web/scs` | スプールのバイト列 → 論理ページ | ebcdic |
+| `@as400web/base` | 例外の語彙（`As400Error` / `ErrorCode`）・ログの差し込み口・オブジェクト名の検証・純粋なテキスト処理（CSV 解析 / SQL 文分割 / 全角判定） | **なし** |
+| `@as400web/ebcdic` | EBCDIC 変換（SBCS / DBCS / CCSID テキスト） | **なし** |
+| `@as400web/scs` | スプールのバイト列 → 論理ページ、論理ページ → HTML | base, ebcdic |
 | `@as400web/hostserver` | ホストサーバー群のクライアント（signon / SQL / IFS / DDM / DTAQ / スプール / コマンド） | base, ebcdic, scs |
-| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs |
+| `@as400web/tn5250` | TN5250（telnet / 5250 データストリーム / 画面モデル / セッション / トレース / 画面→HTML） | base, ebcdic, scs |
 
-- **`base` に置くのは「複製すると壊れるもの」だけ**で、共通で使うものの物置ではない。
-  `As400Error` は `instanceof` で判定され、`log.ts` は可変状態を持つ——どちらも実体が 2 つに
-  なるとパッケージ跨ぎで静かに壊れる（型検査でもビルドでも気づけない）。
-- **使うものは在り処から取る。** `@as400web/core` を「何でも入っている袋」として使わない。
+**`hostserver` と `tn5250` は同位**——互いに依存しない。`tn5250 → scs` はプリンターセッションが
+SCS を復号するため（`session/printer-session.ts`）。
+依存の向きは `packages/tn5250/test/dependency-direction.test.ts` が**層の順序を 1 か所で宣言して
+全パッケージを走査**する（個別に辺を書き足す形だと、書き忘れた組み合わせが素通りする）。
+
+**`@as400web/base` に置く基準は 2 つ**。どちらかに当てはまるものだけを置く:
+1. **複製すると壊れるもの** — `As400Error`（`instanceof` で判定される）・
+   `log.ts`（`setLogSink` が書き換える可変状態を持つ）
+2. **複数のパッケージが要るが、どれにも属さないもの** — `east-asian-width`（tn5250 の `screen/` と
+   scs の `spool-html` の両方が使う）・`csv-parse` / `split-statements`（server と web-ui が使う）
+
+**物置にしないための歯止め: 片方しか使わないものは、使う側に置く。**
+「core」という名前が何でも入る袋を招いた（実際 TN5250・ホストサーバー・EBCDIC・SCS・CSV 解析が
+同居していた）ので、`@as400web/tn5250` へ改名した——**名が体を表せば、足すときに
+「これは tn5250 か？」と問える**（`20260801-library-extraction-tn5250`）。
+
+- **使うものは在り処から取る。** `@as400web/tn5250` を「何でも入っている袋」として使わない。
   `As400Error` / `childLog` は `@as400web/base`、`DbConnection` / `IfsConnection` は
   `@as400web/hostserver`、`LogicalPage` は `@as400web/scs` から**直接** import する。
   `packages/server/test/import-from-owner.test.ts` が走査して塞いでいる
-  （`As400Error` のように core が今も再輸出している名前は、core 経由でも**通ってしまう**——
+  （`As400Error` のように tn5250 が今も再輸出している名前は、tn5250 経由でも**通ってしまう**——
   通るが出どころが見えなくなるので、型検査ではなく走査で止める）。
-- **`core` はホストサーバーに一切依存しない**（実行時も型も）。切り出し直後は後方互換のため
+- **`tn5250` はホストサーバーに一切依存しない**（実行時も型も）。切り出し直後は後方互換のため
   再輸出していたが、利用側を直参照へ移して撤去した。宣言（`package.json` / `tsconfig.json`）も
-  含めて `packages/core/test/hostserver-not-reexported.test.ts` が固定している——
+  含めて `packages/tn5250/test/hostserver-not-reexported.test.ts` が固定している——
   **ソースに参照が無くても宣言が残っていれば元に戻れてしまう**ため。
-  **逆向き（`hostserver → core`）も禁止**（`packages/hostserver/test/no-core-dependency.test.ts`）。
+  **逆向き（`hostserver → tn5250`）も禁止**（`packages/hostserver/test/no-core-dependency.test.ts` と
+  `packages/tn5250/test/dependency-direction.test.ts`）。
 - **web-ui はホストサーバーの型を実体から `import type` する**（`@as400web/hostserver` は
-  web-ui の **`devDependencies`**）。以前は `@as400web/core/browser` が中継していたが、
-  その 1 点のために core が `node:net` を含むパッケージを `dependencies` に持っていた。
+  web-ui の **`devDependencies`**）。以前は `@as400web/tn5250/browser` が中継していたが、
+  その 1 点のために tn5250 が `node:net` を含むパッケージを `dependencies` に持っていた。
   `import type` は実行時コードを出さないので、バンドルにも本番インストールにも入らない
   （バンドルの実測と `node:net` 0 件で裏を取っている）。**`dependencies` に移してはならない。**
 - **再輸出の列挙を落としても内部は壊れない**——壊れるのは外の利用者だけ、という気づけない回帰に
@@ -82,7 +96,7 @@
 - **ブラウザから触る側は狭い入口を使う**。バレル（`@as400web/ebcdic`）は変換表 18,900 行を全部引き込む。
   `…/codec`（変換のみ）・`…/katakana`（930/939 の SBCS 部のみ）・`…/catalog`（表ゼロ）を使い分ける。
   バレル経由だと bundler の解析が及ばず要らない部分が残る（実測差あり。`decisions.md` D2）。
-- 同じ理由で core も `@as400web/core/browser` を持つ。**root は `node:net` / `node:tls` を巻き込む**ので
+- 同じ理由で tn5250 も `@as400web/tn5250/browser` を持つ。**root は `node:net` / `node:tls` を巻き込む**ので
   ブラウザから import しない。
 
 ---
@@ -115,9 +129,9 @@ web-ui の見た目・振る舞いの規約は **[docs/UI-DESIGN.md](docs/UI-DES
   潜伏しうる。`npm run build -w @as400web/web-ui`（`vue-tsc -b && vite build`）で必ず型チェックを通す。
 - **root の `npm run build`（`tsc -b`）は web-ui を検査していない。** web-ui は root の
   project references に入っておらず、`vue-tsc` で別に型検査される。しかも web-ui は
-  `tsconfig.test.json` を持ち **`test/` も型検査の対象**（core / hostserver は `include: ["src"]` で
+  `tsconfig.test.json` を持ち **`test/` も型検査の対象**（tn5250 / hostserver は `include: ["src"]` で
   test を見ないので、取り違えやすい）。**共有型に触る変更では root が緑でも安心しないこと**
-  ——`@as400web/core/browser` の型を 1 つ消したとき、root は緑のまま
+  ——`@as400web/tn5250/browser` の型を 1 つ消したとき、root は緑のまま
   `packages/web-ui/test/` が落ちた（`20260801-library-extraction-cleanup`）。
 - **web-ui のテストはパッケージ dir から実行**する（`cd packages/web-ui && npx vitest run`）。
   リポジトリルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、

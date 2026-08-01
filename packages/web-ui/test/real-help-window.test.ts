@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectWindowRect } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/core";
+import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/tn5250";
 
 /**
  * **実機（/ IBM i 7.5）のメインメニューで F1 を押したヘルプ窓。**

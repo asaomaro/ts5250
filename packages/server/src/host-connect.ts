@@ -13,7 +13,7 @@
  */
 import { As400Error } from "@as400web/base";
 import { CommandConnection, DbConnection, IfsConnection, NetPrintConnection, DtaqConnection } from "@as400web/hostserver";
-import { type ConnectOptions } from "@as400web/core";
+import { type ConnectOptions } from "@as400web/tn5250";
 
 /** ホストサーバー接続に必要な最小の資格情報。core の 4 種すべてがこの形を含む */
 export interface HostServerAuth {

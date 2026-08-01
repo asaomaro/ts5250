@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screenToText, screenToAnsi, attributeRuns } from "../src/format.js";
-import type { ScreenSnapshot, Cell } from "@as400web/core";
+import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
 
 /**
  * **表示属性を端末で再現する**（`screenToAnsi`）と、**機械可読で返す**（`attributeRuns`）。

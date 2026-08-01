@@ -15,7 +15,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
 import { buildMcpServer } from "../src/mcp-server.js";
 import {
   SessionManager,
@@ -29,7 +29,7 @@ import type { IdleTimeout } from "../src/config-types.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const signon = () =>
   parseTraceJsonl(
-    readFileSync(join(here, "..", "..", "core", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
+    readFileSync(join(here, "..", "..", "tn5250", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
   );
 
 /** startup だけ返す最小のプリンター transport */

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
 import type { PublicSession, PublicSystem } from "@as400web/server";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 import ConfigCard from "../src/components/ConfigCard.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import WatermarkOverlay from "../src/components/WatermarkOverlay.vue";

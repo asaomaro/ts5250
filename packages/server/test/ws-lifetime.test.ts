@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
 import { WsConnection } from "../src/ws-handler.js";
 import { SessionManager, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
@@ -17,7 +17,7 @@ import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixtureDir = join(here, "..", "..", "core", "test", "fixtures");
+const fixtureDir = join(here, "..", "..", "tn5250", "test", "fixtures");
 const signon = () => parseTraceJsonl(readFileSync(join(fixtureDir, "pub400-signon.jsonl"), "utf8"));
 
 /** startup だけ返す最小のプリンター transport */

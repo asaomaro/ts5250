@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { downloadScreenHtml } from "../src/screenExport.js";
 import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
 import { viewSettings } from "../src/stores/viewSettings.js";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * エミュレータ画面の「HTML」ボタン。

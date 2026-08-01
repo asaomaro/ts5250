@@ -2,11 +2,11 @@
 // 送信データ（パスワード含む NEW-ENVIRON・Query Reply）は maskTx 既定 ON で伏字化。
 // 実行: node --env-file=.env scripts/capture-autosignon.mjs
 import { writeFileSync, appendFileSync } from "node:fs";
-import { Session5250, TcpTransport, TraceRecorder } from "@as400web/core";
+import { Session5250, TcpTransport, TraceRecorder } from "@as400web/tn5250";
 
 const user = process.env.PUB400_USER, password = process.env.PUB400_PASSWORD;
 if (!user || !password) { process.stderr.write("creds 未設定\n"); process.exit(1); }
-const out = "packages/core/test/fixtures/pub400-autosignon-menu.jsonl";
+const out = "packages/tn5250/test/fixtures/pub400-autosignon-menu.jsonl";
 const log = (s) => process.stderr.write(s + "\n");
 
 writeFileSync(out, "");

@@ -3,7 +3,7 @@ import { buildApp } from "../src/app.js";
 import { SessionManager } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
-import type { Transport } from "@as400web/core";
+import type { Transport } from "@as400web/tn5250";
 
 /** 空の接続設定（このテストは接続設定を使わない）*/
 function emptyResolver(): ConfigResolver {

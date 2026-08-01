@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Field, ScreenSnapshot } from "@as400web/core";
+import type { Field, ScreenSnapshot } from "@as400web/tn5250";
 
 // WsClient をモック（busy-loading.test.ts と同じ体裁）
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { SessionManager, nextDeviceName } from "../src/session-manager.js";
 import { As400Error } from "@as400web/base";
-import { ReplayTransport, parseTraceJsonl } from "@as400web/core";
+import { ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // core の実機 fixture を借用（サインオン画面まで到達すれば十分）
 const signonFixture = () =>
   parseTraceJsonl(
-    readFileSync(join(here, "..", "..", "core", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
+    readFileSync(join(here, "..", "..", "tn5250", "test", "fixtures", "pub400-signon.jsonl"), "utf8")
   );
 
 function openReplay(mgr: SessionManager, readOnly = false) {

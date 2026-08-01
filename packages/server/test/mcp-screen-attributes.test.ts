@@ -5,7 +5,7 @@ import { buildMcpServer } from "../src/mcp-server.js";
 import { SessionManager, type SessionEntry } from "../src/session-manager.js";
 import { ServerConfigStore, PersonalConfigStore } from "../src/config-store.js";
 import { ConfigResolver } from "../src/config-resolver.js";
-import type { ScreenSnapshot, Cell, Session5250 } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Session5250 } from "@as400web/tn5250";
 
 const ESC = "\u001b";
 

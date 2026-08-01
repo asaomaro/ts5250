@@ -12,6 +12,6 @@
     { "path": "../ebcdic" },
     { "path": "../scs" },
     { "path": "../hostserver" },
-    { "path": "../core" }
+    { "path": "../tn5250" }
   ]
 }

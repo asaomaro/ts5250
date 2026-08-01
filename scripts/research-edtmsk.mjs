@@ -11,7 +11,7 @@
 // 前提: `build-dttest.mjs` 済み（TESTLIB/DTMPGM）。
 // 実行: AS400_PASSWORD=... node scripts/research-edtmsk.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/core";
+import { Session5250 } from "@as400web/tn5250";
 
 const LIB = "TESTLIB";
 const log = (s) => process.stdout.write(s + "\n");

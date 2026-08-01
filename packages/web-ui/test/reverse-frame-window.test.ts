@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { detectWindowRect } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot } from "@as400web/core";
+import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * **反転表示が途切れなく閉じた矩形を作っていれば窓と判定する。**

@@ -4,7 +4,7 @@
 // リプレイ: 合成 DBCS fixture で日本語デコード・桁維持。
 // 実行: node --env-file=.env scripts/verify-dbcs-tls.mjs
 import { readFileSync } from "node:fs";
-import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/core";
+import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const creds = { user: process.env.PUB400_USER, password: process.env.PUB400_PASSWORD };
@@ -40,7 +40,7 @@ try {
 
 // 4. 合成 DBCS リプレイ（日本語デコード・桁維持）
 try {
-  const entries = parseTraceJsonl(readFileSync("packages/core/test/fixtures/synthetic-dbcs.jsonl", "utf8"));
+  const entries = parseTraceJsonl(readFileSync("packages/tn5250/test/fixtures/synthetic-dbcs.jsonl", "utf8"));
   const s = await Session5250.connect({ transport: new ReplayTransport(entries), ccsid: 1399 });
   const row1 = s.snapshot().cells[0].map((c) => (c.char === "" ? "" : c.char)).join("");
   const hasJp = row1.includes("日本語");

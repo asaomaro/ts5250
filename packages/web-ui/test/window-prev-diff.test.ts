@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectWindowRect, sameScreen } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/core";
+import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/tn5250";
 
 /**
  * **窓は背景の上に開く——枠の外に新しい内容が出ていなければ窓。**

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/core";
+import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 
 /**
  * **横方向のカーソル移動だけでは欄を「変更（編集）」扱いにしない。**

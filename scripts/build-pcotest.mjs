@@ -12,7 +12,7 @@
 // **ADDPFM の SRCTYPE(CLP) が要る**——省くとコンパイラがソース種別を決められず CPF0820 で落ちる）。
 // 実行: node --env-file=.env scripts/build-pcotest.mjs
 import { readFileSync } from "node:fs";
-import { CommandConnection } from "@as400web/core";
+import { CommandConnection } from "@as400web/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = process.env.AS400_LIB ?? "TESTLIB";

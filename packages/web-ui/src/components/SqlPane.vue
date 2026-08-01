@@ -6,7 +6,7 @@ import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
-import { splitSqlStatements, summarizeSql } from "@as400web/core/browser";
+import { splitSqlStatements, summarizeSql } from "@as400web/base";
 import SqlLogPanel from "./SqlLogPanel.vue";
 import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";

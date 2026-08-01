@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout } from "../src/composables/fieldValidate.js";
-import type { Field } from "@as400web/core";
+import type { Field } from "@as400web/tn5250";
 
 function fld(o: Partial<Field>): Field {
   return { index: 1, row: 1, col: 1, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "", ...o };

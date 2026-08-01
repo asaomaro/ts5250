@@ -4,8 +4,8 @@ import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { fieldSign, dupFill, DUP_BYTE, type EditState } from "../src/composables/fieldEdit.js";
 import { MSG_DUP_DISALLOWED } from "../src/composables/opMessages.js";
-import { rawSentinel } from "@as400web/core/browser";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/core";
+import { rawSentinel } from "@as400web/tn5250/browser";
+import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
 
 /**
  * **負値入力（Field− / Field+）と Dup。**
