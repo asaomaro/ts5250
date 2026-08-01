@@ -227,6 +227,25 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 `diag-*`（signon/PDM 診断・`diag-window-fkey` は DDS 窓で無効キーを押したときのホスト応答）、
 `dump-screen`（トレースをオフライン再生）も同じ実行規約に従う。
 
+### 画面採取・実測の族（実機 / TESTLIB）
+
+窓検出・GUI 拡張・F キー凡例・罫線まわりの調査で使った一群。**1 本ずつ表にすると
+上の重い表が埋もれる**ので族でまとめる。いずれも実行規約は同じで、接続先は
+`AS400_HOST`（既定値なし。未設定なら落ちる）。
+
+| 族 | 本数 | 中身 |
+|---|---|---|
+| `shot-*` | 15 | 画面・UI の採取。ブラウザ経由（`shot-crt` / `shot-buttons` / `shot-font` / `shot-viewsettings` / `shot-keycycle` / `shot-window-fkey` ほか）と MCP の `get_screen_html` 経由（`shot-signon` / `shot-signedon` / `shot-testlib-screens` / `shot-spool-html` ほか） |
+| `build-*` | 3 | `TESTLIB` に DDS/RPGLE のフィクスチャを作る（`empsfl`＝サブファイル / `ext`＝拡張5250 / `feat`＝各種機能） |
+| `probe-*` | 3 | 単発の実測。`probe-ccsid`（SBCS が 939 系か 5026 系か）/ `probe-window-signal`（窓の受信データ上の徴候）/ `probe-testlib-refs`（`DSPPGMREF` で表示装置ファイル参照を洗う） |
+| `check-*` | 3 | 不変条件の確認。`check-html-determinism`（同じ画面から常に同じ HTML か）/ `check-menu-exclusive` / `check-persist` |
+| `diff-*` | 2 | 実機とこちらの出力の突き合わせ。`diff-gridlines`（罫線）/ `diff-webui-vs-host`（web-ui とホスト画面） |
+| 単発 | 3 | `list-testlib`（ライブラリの中身一覧）/ `research-ext-gui`（拡張5250 の GUI 要素調査）/ `verify-spool-html`（スプール HTML の検証） |
+
+> 📌 **接続先をハードコードしない。** 出力に焼く説明文（HTML のメタ・画像の注記）も
+> `AS400_HOST` から組む——固定文字列にすると、別ホストへ繋いだのに説明文だけ元のまま残り、
+> **動作に出ないので気づけない**（`shot-signedon.mjs` / `shot-signon.mjs` に注記）。
+
 ## 他クライアントの実測（tap-proxy）
 
 `tap-proxy.mjs` は **IBM ACS 等の他クライアントと実機のやり取りを実測する中継タップ**。
