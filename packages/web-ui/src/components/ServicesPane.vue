@@ -39,6 +39,10 @@ interface Row {
   hasOutput?: boolean;
   /** 定義が変わったが、いまの接続には効いていない（開始し直しで反映される） */
   stale?: boolean;
+  /** 転送が設定されているか（URL は画面に来ない） */
+  hasWebhook?: boolean;
+  /** **転送を諦めた件数＝失われたデータの数**。0 でなければ目立たせる */
+  undelivered?: number;
 }
 
 const rows = computed<Row[]>(() => [
@@ -71,6 +75,8 @@ const rows = computed<Row[]>(() => [
       autoStart: w.autoStart,
       running: w.id !== undefined,
       ...(w.stale ? { stale: true } : {}),
+      ...(w.hasWebhook ? { hasWebhook: true } : {}),
+      ...(w.undelivered ? { undelivered: w.undelivered } : {}),
       detail: w.received !== undefined ? `エントリ ${w.received} 件${w.label ? ` — ${w.label}` : ""}` : ""
     })
   )
@@ -144,6 +150,7 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
               {{ r.name }}
               <!-- 出力設定の**有無**だけ。パスもプリンター名も画面には来ない -->
               <span v-if="r.hasOutput" class="chip" title="PDF 保存 / 自動印刷の設定があります">出力あり</span>
+              <span v-if="r.hasWebhook" class="chip" title="届いたエントリを転送する設定があります">転送あり</span>
               <span v-if="r.kind === 'printer' && !r.service" class="chip warn" title="サービス ☐ の定義です">
                 対話型
               </span>
@@ -163,7 +170,18 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
               <span v-if="r.error" class="reason" :title="r.error">{{ r.error }}</span>
             </td>
             <td class="k">{{ r.autoStart ? "自動" : "手動" }}</td>
-            <td class="k">{{ r.detail }}</td>
+            <td class="k">
+              {{ r.detail }}
+              <!-- **監視は消費するので、これは失われたデータの数。** 目立たせないと
+                   「黙って消えた」に気づけない -->
+              <span
+                v-if="r.undelivered"
+                class="lost"
+                :title="`転送できずに諦めたエントリです。監視は取り出して消すため、元に戻せません`"
+              >
+                ⚠ 未達 {{ r.undelivered }} 件
+              </span>
+            </td>
             <td>
               <!-- **押しても 403 になるボタンを出さない。** 一覧は見えても操作は admin だけ -->
               <button
@@ -268,6 +286,12 @@ th:nth-child(4) {
 .chip.warn {
   border-color: var(--warn, darkorange);
   color: var(--warn, darkorange);
+}
+/* **失われたデータの数。** 状態の色分けとは別に、行の中で目に入るようにする */
+.lost {
+  display: block;
+  color: var(--danger, crimson);
+  font-weight: 600;
 }
 /* 状態の色分けは監視コンソール・プリンターと揃える（同じ意味に同じ色） */
 .state.listening {

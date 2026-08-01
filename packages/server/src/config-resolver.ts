@@ -14,13 +14,16 @@ import type { AuthUser } from "./auth.js";
 import type { PcCommandConfig } from "./pc-command.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { autoStartOf } from "./service-state.js";
+import { webhookSecret } from "./webhook-sink.js";
 import {
   idleTimeoutToMs,
   parseRef,
   sessionPrinter,
+  sessionWebhook,
   type AnySession,
   type ConfigSource,
   type PublicSession,
+  type WebhookConfig,
   type ServiceDef,
   type PublicSystem,
   type System
@@ -60,6 +63,11 @@ export interface ResolvedTarget {
    * 個人設定はスキーマに持たないので、ここに来ることはそもそも無い（1 層目）
    */
   pcCommand?: PcCommandConfig;
+  /**
+   * 待ち行列サービスの転送先。**サーバー設定由来のときのみ**（同じ 5 層目）。
+   * `secret` は**復号済み**——ここが唯一の解く場所（`resolvePassword` と同じ扱い）
+   */
+  webhook?: { config: WebhookConfig; secret?: string };
   source: ConfigSource;
   system: System;
   session?: AnySession;
@@ -145,6 +153,20 @@ export class ConfigResolver {
     const pcCommand =
       source === "server" && session?.sessionType === "display" ? sessionPcCommand(session) : undefined;
     if (pcCommand) out.pcCommand = pcCommand;
+    // 転送先も同じ 5 層目。**サーバー設定由来のときだけ受理する**
+    const wh = source === "server" && session ? sessionWebhook(session) : undefined;
+    if (wh) {
+      const crypto = store.secretCrypto;
+      const secret = webhookSecret(
+        wh,
+        (enc) => {
+          if (!crypto) throw new Error("secret key not configured");
+          return crypto.decrypt(enc);
+        },
+        warn
+      );
+      out.webhook = { config: wh, ...(secret !== undefined ? { secret } : {}) };
+    }
     return out;
   }
 

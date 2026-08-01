@@ -32,6 +32,7 @@ import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
+import { makeWatchSink } from "./webhook-sink.js";
 import { childLog } from "./log.js";
 
 const log = childLog({ component: "service-reconcile" });
@@ -151,15 +152,21 @@ async function saveWatch(deps: ServiceReconcileDeps, ref: string, t: Resolved): 
   const spec = t.session ? sessionDtaqWatch(t.session) : undefined;
   if (!spec) return { skipped: "監視の設定を持っていない" };
   const label = `${spec.library}/${spec.name}`;
+  const sink = makeWatchSink(ref, t.webhook);
   const view = deps.watches.list().find((w) => w.ref === ref);
   if (!view) {
     // 待ち行列は**種別そのものがサービス型**なので `service` を見ない（#257 と同じ）
     if (!t.autoStart) return { skipped: "自動で待ち受け開始 ☐" };
-    await deps.watches.start({ ref, label, spec, connect: t.connect });
+    await deps.watches.start({ ref, label, spec, connect: t.connect, ...(sink ? { sink } : {}) });
     log.info({ ref, label }, "定義から監視を立ち上げた");
     return { started: true };
   }
-  const running = deps.watches.update(view.id, { label, spec, connect: t.connect });
+  const running = deps.watches.update(view.id, {
+    label,
+    spec,
+    connect: t.connect,
+    ...(sink ? { sink } : {})
+  });
   if (running) log.info({ ref }, "設定を差し替えた（反映には開始し直しが要る）");
   return running ? { stale: true } : {};
 }

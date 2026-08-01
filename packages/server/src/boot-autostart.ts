@@ -26,6 +26,7 @@ import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
+import { makeWatchSink } from "./webhook-sink.js";
 import { childLog } from "./log.js";
 
 const log = childLog({ component: "boot-autostart" });
@@ -118,10 +119,12 @@ async function startWatch(deps: BootAutoStartDeps, ref: string): Promise<void> {
   if (!spec) {
     throw new As400Error("CONFIG_ERROR", `${ref} は監視の設定を持っていません`);
   }
+  const sink = makeWatchSink(ref, t.webhook);
   await deps.watches!.start({
     ref,
     label: `${spec.library}/${spec.name}`,
     spec,
-    connect: t.connect
+    connect: t.connect,
+    ...(sink ? { sink } : {})
   });
 }

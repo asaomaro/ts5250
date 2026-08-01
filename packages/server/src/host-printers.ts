@@ -85,6 +85,13 @@ export interface PrinterRow extends ServiceRow {
 export interface WatchRow extends ServiceRow {
   /** 監視対象（`ライブラリー/キュー`） */
   label?: string;
+  /** 転送が設定されているか（**URL は出さない**） */
+  hasWebhook?: boolean;
+  /**
+   * **転送を諦めた件数**（`20260801-dtaq-webhook`）。
+   * 監視は消費するので、これは**失われたデータの数**——0 でなければ目立たせる
+   */
+  undelivered?: number;
   /** 累計受信件数 */
   received?: number;
   /** いま履歴に残っている件数 */
@@ -155,6 +162,10 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
         if (w.stale) row.stale = true;
         row.label = w.label;
         row.received = w.received;
+        if (w.hasWebhook) row.hasWebhook = true;
+        // **失われた件数は誰にでも出す。** 理由の文面は出さないが、
+        // 「消えたものがある」こと自体は隠す理由が無い
+        if (w.undelivered) row.undelivered = w.undelivered;
         // **本文は載せない**——件数だけ（中身は WS の `watch-history` が返す）。
         // `history` は所有者を検査して投げるので、**見えない相手には数えない**
         // （数えられないだけで、受信の累計 `received` は出る）

@@ -4,6 +4,7 @@ import { childLog } from "./log.js";
 import { SessionManager, type OpenOptions } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
+import { makeWatchSink } from "./webhook-sink.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
 import { withAudit } from "./audit.js";
@@ -306,11 +307,13 @@ export class WsConnection {
           `${msg.session} は監視の設定を持っていません（種別 dtaqwatch のセッション設定を指定してください）`
         );
       }
+      const sink = makeWatchSink(msg.session, target.webhook);
       await reg.start({
         ref: msg.session,
         label: `${spec.library}/${spec.name}`,
         spec,
         connect: target.connect,
+        ...(sink ? { sink } : {}),
         ...(this.user ? { owner: this.user.username } : {})
       });
       this.sendWatchList();

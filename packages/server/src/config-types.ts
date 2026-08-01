@@ -262,7 +262,7 @@ const sessionBase = {
  * 持たせない判断と同じ考え方）。
  */
 function assertTypeConsistent(
-  s: { sessionType: SessionType; dtaqWatch?: DtaqWatchSpec | undefined },
+  s: { sessionType: SessionType; dtaqWatch?: DtaqWatchSpec | undefined; webhook?: unknown },
   ctx: z.RefinementCtx
 ): void {
   if (s.sessionType === "dtaqwatch" && s.dtaqWatch === undefined) {
@@ -275,6 +275,15 @@ function assertTypeConsistent(
       message: `dtaqWatch は dtaqwatch セッションにしか指定できません（sessionType=${s.sessionType}）`
     });
   }
+  // 転送は待ち行列サービスのもの。**種別と設定の食い違いを保存の時点で弾く**
+  // （`printer` / `dtaqWatch` と同じ扱い）
+  if (s.sessionType !== "dtaqwatch" && s.webhook !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["webhook"],
+      message: `webhook は dtaqwatch セッションにしか指定できません（sessionType=${s.sessionType}）`
+    });
+  }
 }
 
 /**
@@ -284,8 +293,49 @@ function assertTypeConsistent(
  * `ConfigStore.parseSessionInput` は `id` を除いて検証するため `.omit()` が必要なので、
  * 素の版も公開して、整合チェックは呼び出し側で重ねてかける（`sessionInputSchema`）。
  */
+
+/**
+ * **待ち行列サービスの転送先**（`20260801-dtaq-webhook`）。**信頼設定**。
+ *
+ * ## なぜサーバー設定にしか置けないか
+ *
+ * これは**サーバーから外へ出ていくデータ経路**である。個人設定に置けると、一般利用者が
+ * 「サーバーが読めるキューの中身を自分の URL へ送る」設定を作れてしまう——
+ * `printer.autoPdfDir`（サーバー上の任意パスへの書き込み）と同格の力を持つ。
+ *
+ * ## 失敗はデータの喪失である
+ *
+ * **監視は消費する**（読んだ時点でホストからエントリが消える）。プリンターの自動出力とは
+ * 性格が違い、失敗しても取り直せない。だから「諦め方」を設定として持つ
+ * （`maxAttempts`）——黙って永久に再試行するのも、1 回で捨てるのも危ない。
+ */
+export const webhookSchema = z
+  .object({
+    /** 送り先。`http:` / `https:` のみ（保存時に検査する） */
+    url: z.string().min(1),
+    /**
+     * 認証ヘッダーの値。**平文では保存しない**——`system.signon` と同じ 2 経路。
+     * `secretEnv` は環境変数名（設定ファイルには名前だけ）
+     */
+    secretEnc: z.string().optional(),
+    secretEnv: z.string().min(1).optional(),
+    /** 秘密を載せるヘッダー名（既定 `Authorization`） */
+    secretHeader: z.string().min(1).optional(),
+    /** 1 回の送信の待ち時間上限（ms・既定 10,000） */
+    timeoutMs: z.number().int().positive().max(120_000).optional(),
+    /** 諦めるまでの試行回数（既定 5）。**諦めた分は「未達」として画面に出る** */
+    maxAttempts: z.number().int().min(1).max(20).optional()
+  })
+  .strict();
+export type WebhookConfig = z.infer<typeof webhookSchema>;
+
 export const serverSessionObject = z
-  .object({ ...sessionBase, printer: printerSchema.optional(), pcCommand: pcCommandSchema.optional() })
+  .object({
+    ...sessionBase,
+    printer: printerSchema.optional(),
+    pcCommand: pcCommandSchema.optional(),
+    webhook: webhookSchema.optional()
+  })
   .strict();
 export const serverSessionSchema = serverSessionObject.superRefine(assertTypeConsistent);
 export type ServerSession = z.infer<typeof serverSessionSchema>;
@@ -333,6 +383,15 @@ export function sessionPrinter(s: AnySession): PrinterConfig | undefined {
  */
 export function sessionDtaqWatch(s: AnySession): DtaqWatchSpec | undefined {
   return s.sessionType === "dtaqwatch" ? s.dtaqWatch : undefined;
+}
+
+/**
+ * 転送設定を取り出す。**種別も見る**（`sessionDtaqWatch` と同じ理由）。
+ * 個人設定はスキーマに持たないので、そもそも `"webhook" in s` が偽になる。
+ */
+export function sessionWebhook(s: AnySession): WebhookConfig | undefined {
+  if (s.sessionType !== "dtaqwatch") return undefined;
+  return "webhook" in s ? s.webhook : undefined;
 }
 
 /** ファイル全体 */
@@ -425,6 +484,17 @@ export interface ServiceDef {
   owner?: string;
 }
 
+/** API 露出用の転送設定。**秘密の値を持たない** */
+export interface PublicWebhook {
+  url: string;
+  secretEnv?: string;
+  secretHeader?: string;
+  timeoutMs?: number;
+  maxAttempts?: number;
+  /** 秘密が設定されているか（値は返さない） */
+  hasSecret: boolean;
+}
+
 export interface PublicSession {
   ref: string;
   name: string;
@@ -479,5 +549,12 @@ export interface PublicSession {
    * 誰にでも返るのは従来どおり `service` と `hasOutput` のフラグだけ。
    */
   printer?: PrinterConfig;
+  /**
+   * `dtaqwatch` のみ。転送設定。**編集できる相手にだけ返す**（`includeTrusted`）。
+   *
+   * **秘密の値は決して返さない**——`hasSecret` で有無だけ示し、
+   * 空で送れば既存を保つ（`system.password` と同じ約束）。
+   */
+  webhook?: PublicWebhook;
   owner?: string;
 }

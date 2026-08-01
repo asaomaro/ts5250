@@ -1,0 +1,8 @@
+schema: 3
+slug: dtaq-webhook
+current: deliver
+approved: [requirement, design, plan, coding, test, review, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

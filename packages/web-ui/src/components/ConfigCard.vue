@@ -161,6 +161,21 @@ const printerForm = reactive({
  */
 const pcForm = reactive({ enabled: false, timeoutSec: undefined as number | undefined, allow: "" });
 /**
+ * 待ち行列サービスの転送先。**信頼設定**（サーバーから外へ出ていくデータ経路）。
+ *
+ * `secret` は**返ってこない**（`hasSecret` だけ）。`system.password` と同じ約束で、
+ * **空で送れば既存を保つ**——そうしないと名前を直して保存しただけで認証が外れる。
+ */
+const hookForm = reactive({
+  url: "",
+  secret: "",
+  hasSecret: false,
+  secretEnv: "",
+  secretHeader: "",
+  timeoutSec: undefined as number | undefined,
+  maxAttempts: undefined as number | undefined
+});
+/**
  * ウォーターマーク（表示セッションのみ）。
  *
  * 保存値は `sesForm` に混ぜず**別の状態に開く**——濃さは保存が 0〜1・入力が % で単位が違い、
@@ -208,6 +223,13 @@ const canEdit = computed(() => !isServer.value || systemsStore.editable);
 const canEditPrinter = computed(
   () => isServer.value && systemsStore.editable && sesForm.sessionType === "printer"
 );
+/**
+ * 転送設定を編集できるか。**サーバー設定の待ち行列監視かつ編集権限があるときだけ**。
+ * `canEditPrinter` と同じ形——**新しい認可条件を作らない**（散らすと食い違う）。
+ */
+const canEditWebhook = computed(
+  () => isServer.value && systemsStore.editable && sesForm.sessionType === "dtaqwatch"
+);
 /** PC コマンドは 5250 画面の標識で届くので、**表示セッションだけ**が持つ */
 const canEditPcCommand = computed(
   () => isServer.value && systemsStore.editable && sesForm.sessionType === "display"
@@ -237,6 +259,7 @@ function loadSession(): void {
   loadWatermark(s.watermark);
   loadPcCommand(s.pcCommand);
   loadPrinter(s);
+  loadWebhook(s);
   sesForm.name = s.name;
   sesForm.autoStart = s.autoStart;
   sesForm.system = s.system;
@@ -271,6 +294,21 @@ function loadPcCommand(pc: PublicSession["pcCommand"]): void {
  * `service` / `hasOutput` のフラグしか無いので、そもそも保存フォームを出さない
  * （`canEditPrinter` が false）。
  */
+/**
+ * 転送設定をフォームへ開く。**秘密は空のまま**（返ってこない）。
+ * 「設定済み」の表示だけ出し、空で保存すれば据え置きになる。
+ */
+function loadWebhook(s: PublicSession): void {
+  const w = s.webhook;
+  hookForm.url = w?.url ?? "";
+  hookForm.secret = "";
+  hookForm.hasSecret = w?.hasSecret === true;
+  hookForm.secretEnv = w?.secretEnv ?? "";
+  hookForm.secretHeader = w?.secretHeader ?? "";
+  hookForm.timeoutSec = w?.timeoutMs !== undefined ? Math.round(w.timeoutMs / 1000) : undefined;
+  hookForm.maxAttempts = w?.maxAttempts;
+}
+
 function loadPrinter(s: PublicSession): void {
   const p = s.printer;
   // フラグは誰にでも返る。値が返らない相手でも ✅ の現状だけは正しく描ける
@@ -445,6 +483,20 @@ async function save(): Promise<void> {
           if (allow.length > 0) pc.allow = allow;
           form.pcCommand = pc;
         }
+      }
+      if (canEditWebhook.value) {
+        const url = hookForm.url.trim();
+        if (url) {
+          const w: NonNullable<SessionConfigForm["webhook"]> = { url };
+          // **平文は「入力したときだけ」送る。** 空なら送らない＝既存を保つ
+          if (hookForm.secret) w.secret = hookForm.secret;
+          if (hookForm.secretEnv.trim()) w.secretEnv = hookForm.secretEnv.trim();
+          if (hookForm.secretHeader.trim()) w.secretHeader = hookForm.secretHeader.trim();
+          if (hookForm.timeoutSec !== undefined) w.timeoutMs = Math.round(hookForm.timeoutSec * 1000);
+          if (hookForm.maxAttempts !== undefined) w.maxAttempts = hookForm.maxAttempts;
+          form.webhook = w;
+        }
+        // URL が空＝転送しない。**キーごと送らない**（更新は置き換えなので消える）
       }
       if (canEditPrinter.value) {
         // **編集しない項目も送り返す**（フォント指定など）。更新はオブジェクトごと置き換えなので、
@@ -876,6 +928,54 @@ const infoRows = computed(() => {
           コマンドはこのサーバーが動いている機械で実行されます（自分の PC で起動していればその PC、
           サーバー運用ならサーバー機）
         </p>
+      </div>
+
+      <!--
+        待ち行列サービスの転送先。**信頼設定**——サーバーから外へ出ていくデータ経路なので、
+        個人設定には置けない（スキーマが弾く）。
+
+        **警告をここに出すのが要点。** 監視は取り出して消すので、転送に失敗したぶんは
+        元に戻せない。設定の場で言わないと、気づくのは事故の後になる。
+      -->
+      <div v-if="canEditWebhook" class="trusted">
+        <div class="tlabel">待ち行列サービス（信頼設定）</div>
+        <label class="row"
+          ><span class="cap" title="届いたエントリをここへ POST します。空にすると転送しません"
+            >転送先 URL</span
+          ><input v-model="hookForm.url" placeholder="https://example.internal/hooks/order"
+        /></label>
+        <template v-if="hookForm.url.trim()">
+          <label class="row"
+            ><span class="cap">認証ヘッダー</span
+            ><input v-model="hookForm.secretHeader" placeholder="Authorization（既定）"
+          /></label>
+          <label class="row"
+            ><span class="cap" title="ここに入力した値は暗号化して保存します。空のままなら現在の設定を保ちます"
+              >秘密</span
+            ><input
+              v-model="hookForm.secret"
+              type="password"
+              :placeholder="hookForm.hasSecret ? '設定済み（変更しない）' : '未設定'"
+          /></label>
+          <label class="row"
+            ><span class="cap" title="秘密を環境変数から取る場合の変数名。設定ファイルには名前だけが残ります"
+              >環境変数名</span
+            ><input v-model="hookForm.secretEnv" placeholder="ORDER_HOOK_TOKEN"
+          /></label>
+          <label class="row"
+            ><span class="cap">待ち時間上限</span
+            ><input v-model.number="hookForm.timeoutSec" type="number" min="1" placeholder="10（秒）"
+          /></label>
+          <label class="row"
+            ><span class="cap" title="この回数まで再試行して、届かなければ諦めます">諦めるまで</span
+            ><input v-model.number="hookForm.maxAttempts" type="number" min="1" max="20" placeholder="5（回）"
+          /></label>
+          <p class="warn">
+            ⚠ 監視はエントリを<strong>取り出して消します</strong>。転送に失敗したぶんは
+            <strong>元に戻せません</strong>（諦めた件数は「サービス」画面に出ます）。
+            サーバーの停止・再起動で未送分は失われます。
+          </p>
+        </template>
       </div>
 
       <!--

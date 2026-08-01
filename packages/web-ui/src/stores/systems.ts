@@ -85,6 +85,19 @@ export interface SessionConfigForm {
    * **信頼設定ではない**ので個人設定にも置ける。
    */
   autoStart?: boolean;
+  /**
+   * サーバー設定の待ち行列監視のみ。**信頼設定**（サーバーから外へ出ていくデータ経路）。
+   * `secret` は**平文で送る**——サーバーが暗号化して保存する。
+   * **空で送れば既存を保つ**（`SystemForm.password` と同じ約束）。
+   */
+  webhook?: {
+    url: string;
+    secret?: string;
+    secretEnv?: string;
+    secretHeader?: string;
+    timeoutMs?: number;
+    maxAttempts?: number;
+  };
   /** サーバー設定のプリンターセッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界） */
   printer?: {
     /**

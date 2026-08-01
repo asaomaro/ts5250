@@ -225,3 +225,163 @@ describe("個人設定のサービス定義は所有者だけ", () => {
     expect(store.listServiceDefs({ username: "bob", role: "user" })).toHaveLength(0);
   });
 });
+
+/**
+ * **転送設定の信頼境界**（`20260801-dtaq-webhook`）。
+ *
+ * Webhook は**サーバーから外へ出ていくデータ経路**なので、個人設定に置けてはならない
+ * ——一般利用者が「サーバーが読めるキューの中身を自分の URL へ送る」設定を作れてしまう。
+ */
+describe("webhook（信頼設定）", () => {
+  const withHook = () =>
+    new ServerConfigStore(
+      {
+        systems: [{ id: "sys", name: "sys", host: "h" }],
+        sessions: [
+          {
+            id: "w",
+            name: "受注",
+            system: "sys",
+            sessionType: "dtaqwatch",
+            dtaqWatch: { library: "L", name: "Q" },
+            webhook: { url: "https://hook.example/x", secretEnc: "v1:a:b:c", maxAttempts: 3 }
+          }
+        ]
+      },
+      crypto
+    );
+
+  it("**個人設定は webhook を持てない**（スキーマが弾く＝信頼境界 1 層目）", () => {
+    const store = new PersonalConfigStore(
+      { systems: [{ id: "s1", name: "s1", host: "h", owner: "alice" }], sessions: [] },
+      crypto
+    );
+    expect(() =>
+      store.addSession(
+        {
+          name: "w",
+          system: "s1",
+          sessionType: "dtaqwatch",
+          dtaqWatch: { library: "L", name: "Q" },
+          webhook: { url: "https://evil.example/x" }
+        },
+        { username: "alice", role: "user" }
+      )
+    ).toThrow();
+  });
+
+  it("**`dtaqwatch` 以外には付けられない**（種別との整合を parse で強制）", () => {
+    const store = new ServerConfigStore(
+      { systems: [{ id: "sys", name: "sys", host: "h" }], sessions: [] },
+      crypto
+    );
+    expect(() =>
+      store.addSession({ name: "p", system: "sys", sessionType: "printer", webhook: { url: "https://x/y" } }, admin)
+    ).toThrow(/webhook/);
+  });
+
+  it("**秘密の値は決して返らない**（有無だけ）", () => {
+    const [pub] = withHook().listSessions(admin, { includeTrusted: true });
+    expect(pub!.webhook).toMatchObject({ url: "https://hook.example/x", hasSecret: true, maxAttempts: 3 });
+    expect(JSON.stringify(pub)).not.toContain("v1:a:b:c");
+  });
+
+  it("編集できない相手には転送設定そのものが返らない（URL も出さない）", () => {
+    const [pub] = withHook().listSessions(admin);
+    expect(pub!.webhook).toBeUndefined();
+    expect(JSON.stringify(pub)).not.toContain("hook.example");
+  });
+
+  it("**サービス定義の名札にも URL は入らない**（一般利用者に見える口）", () => {
+    const json = JSON.stringify(withHook().listServiceDefs({ username: "alice", role: "user" }));
+    expect(json).not.toContain("hook.example");
+    expect(json).not.toContain("v1:a:b:c");
+  });
+});
+
+/**
+ * **秘密が保存で消えない**（`20260801-dtaq-webhook`）。
+ *
+ * 編集フォームには秘密が返らない（`hasSecret` だけ）ので、そのまま送り返すと
+ * **名前を直して保存しただけで認証が外れる**——printer 出力で実際に起きていた壊れ方と同じ形。
+ * `system.password` と同じ約束（空で送れば据え置き）で塞ぐ。
+ */
+describe("webhook の秘密の往復（ルート経由）", () => {
+  const app = () => {
+    const store = new ServerConfigStore(
+      {
+        systems: [{ id: "sys", name: "sys", host: "h" }],
+        sessions: [
+          {
+            id: "w",
+            name: "受注",
+            system: "sys",
+            sessionType: "dtaqwatch",
+            dtaqWatch: { library: "L", name: "Q" },
+            webhook: { url: "https://hook.example/x", secretEnc: crypto.encrypt("s3cret") }
+          }
+        ]
+      },
+      crypto
+    );
+    const resolver = new ConfigResolver(store, undefined);
+    const a = new Hono<{ Variables: AuthVars }>();
+    a.use("*", async (c, next) => {
+      c.set("user", admin);
+      await next();
+    });
+    registerConfigRoutes(a, { resolver, canEditServer: () => true });
+    return { app: a, store };
+  };
+  const put = (a: Hono<{ Variables: AuthVars }>, body: unknown) =>
+    a.request("/api/sessions-config/srv:w", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  const base = {
+    source: "server",
+    name: "受注",
+    system: "srv:sys",
+    sessionType: "dtaqwatch",
+    dtaqWatch: { library: "L", name: "Q" }
+  };
+
+  it("**秘密を空で送れば据え置き**（画面が読めない値を消さない）", async () => {
+    const { app: a, store } = app();
+    const res = await put(a, { ...base, name: "改名", webhook: { url: "https://hook.example/x" } });
+    expect(res.status).toBe(200);
+    const saved = store.getSession("w") as { name: string; webhook?: { secretEnc?: string } };
+    expect(saved.name).toBe("改名");
+    expect(crypto.decrypt(saved.webhook!.secretEnc!)).toBe("s3cret");
+  });
+
+  it("平文を送ると**暗号化して保存**する（平文は残らない）", async () => {
+    const { app: a, store } = app();
+    await put(a, { ...base, webhook: { url: "https://hook.example/x", secret: "new-token" } });
+    const saved = store.getSession("w") as { webhook?: { secretEnc?: string } };
+    expect(saved.webhook!.secretEnc).not.toContain("new-token");
+    expect(crypto.decrypt(saved.webhook!.secretEnc!)).toBe("new-token");
+  });
+
+  it("**入力から暗号文を持ち込ませない**（差し替えは平文経由だけ）", async () => {
+    const { app: a, store } = app();
+    await put(a, { ...base, webhook: { url: "https://hook.example/x", secretEnc: "v1:forged" } });
+    const saved = store.getSession("w") as { webhook?: { secretEnc?: string } };
+    expect(saved.webhook!.secretEnc).not.toBe("v1:forged");
+    expect(crypto.decrypt(saved.webhook!.secretEnc!)).toBe("s3cret"); // 既存が保たれる
+  });
+
+  it("**壊れた URL は 400**（実行時に初めて失敗させない）", async () => {
+    const { app: a } = app();
+    const res = await put(a, { ...base, webhook: { url: "file:///etc/passwd" } });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("webhook url");
+  });
+
+  it("URL を空にすると転送設定ごと消える（＝転送しない）", async () => {
+    const { app: a, store } = app();
+    await put(a, { ...base });
+    expect((store.getSession("w") as { webhook?: unknown }).webhook).toBeUndefined();
+  });
+});

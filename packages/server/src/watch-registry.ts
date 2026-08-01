@@ -70,6 +70,15 @@ export interface WatchView {
    * 開始し直せば消える（材料は差し替え済み）。プリンターと同じ扱い。
    */
   stale?: boolean;
+  /**
+   * **転送を諦めた件数**（`20260801-dtaq-webhook`）。
+   *
+   * **監視は消費する**ので、これは「失われたデータの数」である。0 でないなら
+   * 画面で目立たせる必要がある——黙って消えたと気づかないのが一番悪い。
+   */
+  undelivered?: number;
+  /** 転送が設定されているか（中身＝URL は出さない） */
+  hasWebhook?: boolean;
 }
 
 /** 受信 1 件 */
@@ -85,6 +94,18 @@ export interface WatchEntryView {
 }
 
 /** 購読者へ流すイベント */
+/**
+ * 届いたエントリの転送先（`20260801-dtaq-webhook`）。
+ *
+ * **`deliver` は投げない・待たない。** 呼ぶのはキューの読み取りループなので、
+ * ここで待つと受け手の遅さがホストの読み取りを塞ぎ、キューが溢れる。
+ */
+export interface WatchSink {
+  deliver(entry: WatchEntryView, label: string): void;
+  stop(): void;
+  readonly stats: { failed: number; pending: number };
+}
+
 export type WatchEvent =
   | { type: "entry"; watch: WatchView; entry: WatchEntryView }
   | { type: "state"; watch: WatchView }
@@ -132,6 +153,8 @@ interface Watch {
   view: WatchView;
   spec: DtaqWatchSpec;
   connect: ConnectOptions;
+  /** 転送先（設定があるときだけ）。**HTTP の都合はこちらに閉じ込める** */
+  sink?: WatchSink;
   history: WatchEntryView[];
   /**
    * 明示停止の印。**ループの `catch` がこれを見て「障害ではない」と判断する**——
@@ -179,6 +202,12 @@ export class WatchRegistry {
     spec: DtaqWatchSpec;
     connect: ConnectOptions;
     owner?: string;
+    /**
+     * 届いたエントリの転送先（`20260801-dtaq-webhook`）。
+     * **レジストリは HTTP を知らない**——責務は「ホストの待ち行列を読む」ことだけで、
+     * 送信の再試行が混ざると両方が読みにくくなる
+     */
+    sink?: WatchSink;
   }): Promise<WatchView> {
     // **同じ設定の監視を二重に始めない。** 監視は**消費する**ので、2 本掛かると
     // 1 本ぶんのエントリを取り合って両方が欠ける。
@@ -189,7 +218,7 @@ export class WatchRegistry {
     const existing = [...this.watches.values()].find(
       (w) => w.view.ref === opts.ref && w.view.owner === opts.owner
     );
-    if (existing) return { ...existing.view };
+    if (existing) return this.viewOf(existing);
     // **待ち受け中の数で数える**（停止中は接続を持たないので枠を占めない）
     if (this.listeningCount() >= this.maxWatches) {
       throw new As400Error("SESSION_LIMIT", `watch limit reached (${this.maxWatches})`);
@@ -209,15 +238,17 @@ export class WatchRegistry {
       },
       spec: opts.spec,
       connect: opts.connect,
+      ...(opts.sink ? { sink: opts.sink } : {}),
       history: [],
       stopping: false,
       conn
     };
+    if (opts.sink) watch.view.hasWebhook = true;
     this.watches.set(id, watch);
     log.info({ watchId: id, label: opts.label }, "watch started");
     // ループは待たない（呼び出し側は「始まった」だけ知りたい）
     void this.loop(watch);
-    return { ...watch.view };
+    return this.viewOf(watch);
   }
 
   /** 明示停止。印を立ててから接続を閉じる（印の意味は `Watch.stopping` の JSDoc） */
@@ -237,6 +268,10 @@ export class WatchRegistry {
     w.stopping = true;
     w.conn?.close();
     delete w.conn;
+    // **転送は止めない。** ここで捨てるのは筋が通らない——既に読み取った
+    // エントリはホスト側から消えているので、捨てれば**ただのデータの喪失**になる。
+    // 「待ち受けを止める」は「これ以上読まない」であって、
+    // 「読んだものを配らない」ではない（`stopPrinter` が受信済みの帳票を残すのと同じ）
     this.setState(w, "stopped");
     log.info({ watchId: id }, "watch stopped");
   }
@@ -249,12 +284,24 @@ export class WatchRegistry {
    *
    * @returns いま接続を持っていたか（＝新しい設定はまだ効いていない）
    */
-  update(id: string, opts: { label: string; spec: DtaqWatchSpec; connect: ConnectOptions }): boolean {
+  update(
+    id: string,
+    opts: { label: string; spec: DtaqWatchSpec; connect: ConnectOptions; sink?: WatchSink }
+  ): boolean {
     const w = this.watches.get(id);
     if (!w) throw new As400Error("NOT_FOUND", `watch ${id} not found`);
     w.spec = opts.spec;
     w.connect = opts.connect;
     w.view.label = opts.label;
+    // **古い転送先は止めない。** 差し替えても、既に積んである未送分は配り切らせる
+    // （止めると読み取り済みのデータが消える）。参照を外すだけで、自分で流し終える
+    if (opts.sink) {
+      w.sink = opts.sink;
+      w.view.hasWebhook = true;
+    } else if (w.sink) {
+      delete w.sink;
+      delete w.view.hasWebhook;
+    }
     const running = w.view.state === "listening" || w.view.state === "reconnecting";
     if (running) w.view.stale = true;
     else delete w.view.stale;
@@ -268,6 +315,8 @@ export class WatchRegistry {
    * **先に `stop` を呼ぶこと**（接続を持ったまま消すと掴んだ装置が返らない）。
    */
   remove(id: string): void {
+    // ここでも sink は止めない（読み取り済みのぶんは配り切る）。
+    // **止めるのはプロセスを畳むとき（`closeAll`）だけ**
     this.watches.delete(id);
     this.emit({ type: "list" });
   }
@@ -304,9 +353,25 @@ export class WatchRegistry {
   }
 
   list(user?: AuthUser): WatchView[] {
-    return [...this.watches.values()]
-      .filter((w) => this.canSee(w, user))
-      .map((w) => ({ ...w.view }));
+    return [...this.watches.values()].filter((w) => this.canSee(w, user)).map((w) => this.viewOf(w));
+  }
+
+  /**
+   * 表示用の写し。**転送の実績はここで読む**（`20260801-dtaq-webhook`）。
+   *
+   * 到着時に写しておく形だと、**次のエントリが来るまで数が古いまま**になる——
+   * 受け手が落ちて諦めたのに、キューが静かだと「未達 0 件」に見え続ける。
+   * 失敗は「何も起きない」ときにこそ起きるので、**読むたびに聞く**のが正しい
+   * （実機検証でここを踏んだ）。
+   */
+  private viewOf(w: Watch): WatchView {
+    const view = { ...w.view };
+    if (w.sink) {
+      const failed = w.sink.stats.failed;
+      if (failed > 0) view.undelivered = failed;
+      else delete view.undelivered;
+    }
+    return view;
   }
 
   history(id: string, user?: AuthUser): WatchEntryView[] {
@@ -339,6 +404,9 @@ export class WatchRegistry {
   closeAll(): void {
     for (const w of this.watches.values()) {
       w.stopping = true;
+      // **ここが唯一の捨てどころ。** プロセスが畳まれるので配り切れない
+      // （未送分はここで失われる。設定画面と文書に明記してある。design D1）
+      w.sink?.stop();
       w.conn?.close();
     }
     this.watches.clear();
@@ -422,14 +490,19 @@ export class WatchRegistry {
     };
     w.history.push(view);
     if (w.history.length > this.historyLimit) w.history.splice(0, w.history.length - this.historyLimit);
-    this.emit({ type: "entry", watch: { ...w.view }, entry: view });
+    // **転送は待たない。** 受け手の遅さでホストの読み取りを塞がない
+    // （塞ぐとキューが溢れ、受け手の障害がホスト側の業務の障害になる）
+    // **数は写し取らない**（`viewOf` が読むたびに聞く）——静かなキューで諦めが起きたとき、
+    // 次の到着まで古い数が残ってしまう
+    w.sink?.deliver(view, w.view.label);
+    this.emit({ type: "entry", watch: this.viewOf(w), entry: view });
   }
 
   private setState(w: Watch, state: WatchState, error?: string): void {
     w.view.state = state;
     if (state === "error" && error !== undefined) w.view.error = error;
     else delete w.view.error;
-    this.emit({ type: "state", watch: { ...w.view } });
+    this.emit({ type: "state", watch: this.viewOf(w) });
   }
 
   /**

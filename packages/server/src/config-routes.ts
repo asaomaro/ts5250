@@ -15,9 +15,11 @@ import { As400Error } from "@as400web/base";
 import type { AuthVars } from "./auth.js";
 import { checkOutputDir } from "./output-dir.js";
 import { invalidAllowPattern } from "./pc-command.js";
+import { invalidWebhookUrl } from "./webhook-sink.js";
 import { checkPrintDest } from "./print-dest.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { ConfigStore } from "./config-store.js";
+import type { AnySession } from "./config-types.js";
 import { makeRef, parseRef, type ConfigSource, type Signon } from "./config-types.js";
 
 export interface ConfigRouteDeps {
@@ -159,6 +161,52 @@ function dropByKind(body: unknown): unknown {
  * 壊れた正規表現は実行時に「一致しない」へ倒れるため、**設定したのに動かない**が
  * 黙って起きる。保存の時点で気づけるようにする。
  */
+/**
+ * 転送先 URL を保存**前**に検証する（信頼境界 4 層目）。
+ * 実行時に初めて失敗すると、**設定したのに動かない**ことに気づくのが事故の後になる。
+ *
+ * 掛けるのはここまで——送り先の制限（許可リスト）は持たない。この設定を書けるのは
+ * admin だけで、admin は既にコマンド実行もファイル書き込みもできるので、
+ * **新しい権限を与えるわけではない**（design D2）。
+ */
+/**
+ * 転送設定の秘密を保存形に直す。**平文は保存しない。**
+ *
+ * `system.password` と同じ約束——**空で送れば既存を保つ**。編集フォームには秘密が
+ * 返らない（`PublicWebhook.hasSecret` だけ）ので、そうしないと名前を直して保存した
+ * だけで認証が外れる（printer 出力で実際に起きていた壊れ方と同じ形）。
+ *
+ * 入力の `secret`（平文）は**保存形に残さない**——暗号文 `secretEnc` に置き換える。
+ */
+function toWebhookRecord(body: unknown, store: ConfigStore, existing?: AnySession): unknown {
+  if (!body || typeof body !== "object") return body;
+  const b = body as Record<string, unknown>;
+  const w = b.webhook as Record<string, unknown> | undefined;
+  if (!w) return body;
+  const { secret, ...rest } = w;
+  const out: Record<string, unknown> = { ...rest };
+  delete out.secretEnc; // 入力から暗号文を持ち込ませない（差し替えは平文経由だけ）
+  if (typeof secret === "string" && secret !== "") {
+    out.secretEnc = store.encryptPassword(secret);
+    delete out.secretEnv;
+  } else if (typeof out.secretEnv === "string" && out.secretEnv !== "") {
+    // 環境変数を指したので、前の暗号文は捨てる（二重に持たない）
+  } else {
+    // 触っていない＝**既存を保つ**
+    const prev = existing && "webhook" in existing ? existing.webhook : undefined;
+    if (prev?.secretEnc !== undefined) out.secretEnc = prev.secretEnc;
+    else if (prev?.secretEnv !== undefined) out.secretEnv = prev.secretEnv;
+  }
+  return { ...b, webhook: out };
+}
+
+function validateWebhook(body: unknown): { error?: string } {
+  const url = (body as { webhook?: { url?: unknown } } | null)?.webhook?.url;
+  if (typeof url !== "string") return {};
+  const bad = invalidWebhookUrl(url);
+  return bad === undefined ? {} : { error: `invalid webhook url: ${bad}` };
+}
+
 function validatePcCommand(body: unknown): { error?: string } {
   const b = body as { pcCommand?: { allow?: unknown } } | null;
   const allow = b?.pcCommand?.allow;
@@ -251,10 +299,12 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const body = dropByKind(stripSource(raw));
       const pc = validatePcCommand(body);
       if (pc.error) return c.json({ error: pc.error }, 400);
+      const wh = validateWebhook(body);
+      if (wh.error) return c.json({ error: wh.error }, 400);
       const { error, resolved, warnings } = await validatePrinter(body);
       if (error) return c.json({ error }, 400);
       const store = resolver.storeOf(source);
-      const session = store.addSession(body, c.get("user"));
+      const session = store.addSession(toWebhookRecord(body, store), c.get("user"));
       await store.save();
       changed(session.ref, "saved");
       return c.json(
@@ -274,10 +324,16 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const body = dropByKind(stripSource(raw));
       const pc = validatePcCommand(body);
       if (pc.error) return c.json({ error: pc.error }, 400);
+      const wh = validateWebhook(body);
+      if (wh.error) return c.json({ error: wh.error }, 400);
       const { error, resolved, warnings } = await validatePrinter(body);
       if (error) return c.json({ error }, 400);
       const store = resolver.storeOf(source);
-      const session = store.updateSession(id, body, c.get("user"));
+      const session = store.updateSession(
+        id,
+        toWebhookRecord(body, store, store.getSession(id)),
+        c.get("user")
+      );
       await store.save();
       changed(session.ref, "saved");
       return c.json({

@@ -31,6 +31,8 @@ export {
   type IdleTimeout,
   type SessionType,
   type DtaqWatchSpec,
+  type WebhookConfig,
+  type PublicWebhook,
   type ConfigSource
 } from "./config-types.js";
 export {
@@ -74,9 +76,18 @@ export {
   type WatchEntryView,
   type WatchEvent,
   type WatchState,
+  type WatchSink,
   type WatchRegistryOptions
 } from "./watch-registry.js";
 // 定義の変更を動いているサービスへ反映する
+// 待ち行列サービスの転送（**監視は消費するので、失敗はデータの喪失**）
+export {
+  WebhookSink,
+  makeWatchSink,
+  invalidWebhookUrl,
+  type WebhookStats,
+  type UndeliveredEntry
+} from "./webhook-sink.js";
 export {
   reconcileService,
   type ServiceReconcileDeps,

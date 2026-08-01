@@ -210,6 +210,19 @@ export abstract class ConfigStore {
       pub.pcCommand = allow ? { ...rest, allow: [...allow] as [string, ...string[]] } : { ...rest };
     }
     if (s.autoStart !== undefined) pub.autoStart = s.autoStart;
+    // 転送設定も**編集できる相手にだけ**。ただし**秘密の値は決して返さない**
+    // （`pcCommand` は秘密でないので値ごと返す。ここは `system.password` と同じ扱い）
+    if (opts?.includeTrusted && "webhook" in s && s.webhook) {
+      const w = s.webhook;
+      pub.webhook = {
+        url: w.url,
+        hasSecret: w.secretEnc !== undefined || w.secretEnv !== undefined,
+        ...(w.secretEnv !== undefined ? { secretEnv: w.secretEnv } : {}),
+        ...(w.secretHeader !== undefined ? { secretHeader: w.secretHeader } : {}),
+        ...(w.timeoutMs !== undefined ? { timeoutMs: w.timeoutMs } : {}),
+        ...(w.maxAttempts !== undefined ? { maxAttempts: w.maxAttempts } : {})
+      };
+    }
     // **誰にでも返すのはフラグだけ。** パス（`autoPdfDir`）とプリンター名（`autoPrint`）は
     // 信頼設定なので、一般利用者には出さない——「サービスか」「出力を持つか」は
     // 定義の一覧（`host-printers.ts`）に要るが、それ自体は秘密ではない
