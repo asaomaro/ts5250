@@ -24,7 +24,8 @@ import {
   type LogicalPage,
   type SpoolEntry,
   type SpoolId,
-  type SpoolListFilter
+  type SpoolListFilter,
+  renderSpoolHtml
 } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
@@ -201,6 +202,41 @@ export function registerHostSpoolRoutes(
       const opts = resolveSource(deps.resolver, body.source, c.get("user"));
       const pages = await readSpoolPages(opts, body.id);
       return c.json({ pages });
+    } catch (e) {
+      const err = e as As400Error;
+      return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
+    }
+  });
+
+  /**
+   * HTML。PDF と同じ POST・同じダウンロード方式で返す。
+   *
+   * PDF との使い分けは「紙に落とす・配る」か「画面で読む・探す・差分を取る」か。
+   * サーバーに CJK フォントが要らず、サイズも小さい（実測で PDF の約 4 割）。
+   * 描画は MCP の `get_spool_html` と**同じ `renderSpoolHtml`** を通す。
+   */
+  app.post("/api/host/spool/html", async (c) => {
+    const parsed = contentRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
+    }
+    const body = parsed.data;
+    try {
+      const opts = resolveSource(deps.resolver, body.source, c.get("user"));
+      const pages = await readSpoolPages(opts, body.id);
+      const label = `${body.id.fileName}-${body.id.jobName}-${body.id.fileNumber}`;
+      const html = renderSpoolHtml(pages, {
+        capturedAt: new Date().toISOString(),
+        spoolId: label,
+        title: `スプール ${body.id.fileName}`
+      });
+      const name = safeFileName(label);
+      return new Response(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${name}.html"`
+        }
+      });
     } catch (e) {
       const err = e as As400Error;
       return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));

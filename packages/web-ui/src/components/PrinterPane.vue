@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 import { setPrinterOutput } from "../session-controller.js";
+import { renderSpoolHtml } from "@as400web/core/browser";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
@@ -140,10 +141,6 @@ function saveText(): void {
   URL.revokeObjectURL(url);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 /** サーバー生成の PDF をダウンロードする（等幅・DBCS 対応・改ページ保持） */
 async function downloadPdf(): Promise<void> {
   const r = selected.value;
@@ -159,22 +156,32 @@ async function downloadPdf(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-/** ブラウザの印刷（→PDF）用に別ウィンドウで開いて印刷する */
+/**
+ * ブラウザの印刷（→PDF）用に別ウィンドウで開いて印刷する。
+ *
+ * **中身は core の `renderSpoolHtml` に描かせる。** 以前はここで `<pre>` を組み立てていたが、
+ * それだと (1) `--screen-mono` のフォントスタックをインラインで再掲することになり
+ * （別ウィンドウに CSS 変数は届かない）二重管理になる、(2) 改ページが本物にならず
+ * `selectedText` の「── (改ページ) ──」という区切り文字がそのまま紙に出る、
+ * (3) 全角の桁が開いた先のフォント任せになる——の 3 つを抱えていた。
+ * 同じ帳票の絵を 2 か所で持たない（`spool-html.ts` が唯一の経路）。
+ */
 function printReport(): void {
-  if (!selected.value) return;
+  const r = selected.value;
+  if (!r) return;
   const w = window.open("", "_blank");
   if (!w) return;
-  // 別ウィンドウなので CSS 変数は使えない。--screen-mono と同じ日本語対応等幅（1:2）を直接並べる
-  const screenMono =
-    "'HackGen Console NF','HackGen Console','HackGen','UDEV Gothic'," +
-    "'PlemolJP Console','PlemolJP','Cica','Sarasa Term J','BIZ UDGothic'," +
-    "'Osaka-Mono','Noto Sans Mono CJK JP','MS Gothic','ＭＳ ゴシック',monospace";
   w.document.write(
-    `<pre style="font-family:${screenMono};font-size:11px;white-space:pre">${escapeHtml(selectedText.value)}</pre>`
+    renderSpoolHtml(r.pages, {
+      title: `${session.value?.label ?? "スプール"} — ${r.id}`,
+      ...(r.receivedAt !== undefined ? { capturedAt: new Date(r.receivedAt).toISOString() } : {}),
+      spoolId: r.id
+    })
   );
   w.document.close();
   w.focus();
-  w.print();
+  // 印刷は次のタスクへ回す。document.write 直後だとレイアウト前に印刷が走る環境がある
+  setTimeout(() => w.print(), 0);
 }
 </script>
 

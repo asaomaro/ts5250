@@ -232,12 +232,20 @@ const selectedText = computed(() =>
     .join("\n" + "─".repeat(20) + " (改ページ) " + "─".repeat(20) + "\n")
 );
 
-async function downloadPdf(): Promise<void> {
+/**
+ * スプールをファイルに落とす。**PDF と HTML で経路を分けない**——違うのは
+ * 呼ぶルートと拡張子だけなので、同じ手順を 2 本書くと片方だけ直す事故が起きる。
+ *
+ * 使い分け: PDF は紙に落とす・配る用（ページサイズと字形が確定する）。
+ * HTML は画面で読む・探す・差分を取る用（サーバーに CJK フォントが要らず、実測で PDF の約 4 割）。
+ */
+async function download(kind: "pdf" | "html"): Promise<void> {
   const r = selected.value;
   if (!r) return;
+  const label = kind.toUpperCase();
   contentError.value = "";
   try {
-    const res = await fetch("/api/host/spool/pdf", {
+    const res = await fetch(`/api/host/spool/${kind}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ source: sourceBody(), id: idOf(r) })
@@ -246,18 +254,18 @@ async function downloadPdf(): Promise<void> {
       // **黙って諦めない**——プリンターペインは !res.ok で無言 return しており、
       // 失敗したのかボタンが効いていないのかを利用者が区別できない
       const data = await res.json().catch(() => ({}));
-      contentError.value = data.error ?? "PDF を作成できませんでした";
+      contentError.value = data.error ?? `${label} を作成できませんでした`;
       return;
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${r.fileName}-${r.jobName}-${r.fileNumber}.pdf`;
+    a.download = `${r.fileName}-${r.jobName}-${r.fileNumber}.${kind}`;
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    contentError.value = `PDF を作成できませんでした: ${String(e)}`;
+    contentError.value = `${label} を作成できませんでした: ${String(e)}`;
   }
 }
 
@@ -411,7 +419,20 @@ watch(
           @click="split.toggleMaximize()">
           {{ split.maximized.value ? "◱ 元に戻す" : "⛶ 最大化" }}
         </button>
-        <button :disabled="contentLoading || pages.length === 0" @click="downloadPdf">PDF</button>
+        <button
+          :disabled="contentLoading || pages.length === 0"
+          title="紙に落とす・配る用（ページサイズと字形が確定する）"
+          @click="download('pdf')"
+        >
+          PDF
+        </button>
+        <button
+          :disabled="contentLoading || pages.length === 0"
+          title="画面で読む・探す・差分を取る用（ブラウザで開ける自己完結 HTML）"
+          @click="download('html')"
+        >
+          HTML
+        </button>
       </div>
       <p v-if="contentError" class="error">{{ contentError }}</p>
       <pre v-else-if="contentLoading" class="muted">読み込んでいます…</pre>

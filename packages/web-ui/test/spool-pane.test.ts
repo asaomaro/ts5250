@@ -180,14 +180,18 @@ describe("中身の表示", () => {
    * disabled のボタンに trigger("click") してもハンドラは走らず、
    * テストは「何も起きなかった」まま素通りしてしまう（静かな空振り）。
    */
-  async function clickPdf(w: Awaited<ReturnType<typeof openRow>>): Promise<void> {
-    // 最大化ボタンも同じ帯にあるので、文言で PDF を選ぶ
-    const btn = w.findAll(".viewer-bar button").find((b) => b.text() === "PDF")!;
-    expect(btn, "PDF ボタンがある").toBeTruthy();
+  async function clickFormat(
+    w: Awaited<ReturnType<typeof openRow>>,
+    label: "PDF" | "HTML"
+  ): Promise<void> {
+    // 最大化ボタンも同じ帯にあるので、文言で選ぶ
+    const btn = w.findAll(".viewer-bar button").find((b) => b.text() === label)!;
+    expect(btn, `${label} ボタンがある`).toBeTruthy();
     expect(btn.attributes("disabled")).toBeUndefined();
     await btn.trigger("click");
     await flushPromises();
   }
+  const clickPdf = (w: Awaited<ReturnType<typeof openRow>>) => clickFormat(w, "PDF");
 
   it("複数ページは改ページ区切りで連結する（プリンターペインと同じ見せ方）", async () => {
     const w = await openRow({
@@ -224,6 +228,44 @@ describe("中身の表示", () => {
     await clickPdf(w);
 
     expect(w.text()).toContain("PDF を作れませんでした");
+    w.unmount();
+  });
+
+  /**
+   * HTML は PDF と**同じ経路**（`download(kind)`）を通る。ルートと拡張子だけが違う。
+   * 2 本に分かれていると片方だけ直す事故が起きるので、両方が同じ手順を辿ることを固定する。
+   */
+  it("HTML が成功すれば .html でダウンロードする", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    let downloadName = "";
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement
+    ) {
+      downloadName = this.download;
+    });
+
+    const w = await openRow({
+      "/api/host/spool/content": { pages: [{ rows: 1, cols: 5, lines: ["本文"] }] },
+      "/api/host/spool/html": {}
+    });
+
+    await clickFormat(w, "HTML");
+
+    expect(click).toHaveBeenCalled();
+    expect(downloadName).toBe("QPRTLIBL-QPRTJOB-5.html");
+    w.unmount();
+  });
+
+  it("HTML の失敗も黙らせない（PDF と同じ扱い）", async () => {
+    const w = await openRow({
+      "/api/host/spool/content": { pages: [{ rows: 1, cols: 5, lines: ["本文"] }] },
+      "/api/host/spool/html": { __status: 502, error: "HTML を作れませんでした" }
+    });
+
+    await clickFormat(w, "HTML");
+
+    expect(w.text()).toContain("HTML を作れませんでした");
     w.unmount();
   });
 
