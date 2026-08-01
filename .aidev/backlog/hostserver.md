@@ -35,19 +35,39 @@
   - 積み残し: **バッチ書き込み**（現状 1 件ずつ・ブロッキング係数 1）／
     読み取り・キー付き・更新・削除（SQL があるので動機が弱い）／
     `VARCHAR`・日付時刻・DBCS 列（対応外として明示的に失敗させている）
-- [ ] MCP ツールとして公開
-- [ ] Web UI から操作（テーブル選択 → CSV ダウンロード、CSV をドロップしてアップロード）
+- [x] MCP ツールとして公開
+    → 20260719-hostserver-mcp-tools（PR #93）で公開。`packages/server/src/host-server-tools.ts` に
+      `host_sql` / `host_command` / `host_call_program` / `host_list_spools` / `host_get_spool` /
+      `host_read_file` / `host_write_file`。
+      その後に足したものは出典が別: アップロードの `host_upload_table` は
+      20260720-csv-upload-ui（PR #104）、`host_dtaq_*` は 20260720-dtaq-server（PR #108）
+- [x] Web UI から操作（テーブル選択 → CSV ダウンロード、CSV をドロップしてアップロード）
+    → ダウンロードは 20260719-hostserver-web-ui（PR #94）、アップロードは
+      20260720-csv-upload-ui（PR #104）で完了。入口は
+      `packages/web-ui/src/components/TransferPane.vue`（「データ転送（表 ⇄ CSV）。ACS の Data Transfer に相当」）
   - **ダウンロード側は 2026-07-19 完了**（`20260719-hostserver-web-ui`。SQL ペイン＋CSV）。
-    **アップロード側は未着手**——DDM の土台ができたので着手可能になった
+    ~~**アップロード側は未着手**——DDM の土台ができたので着手可能になった~~（PR #104 で完了）
   - 落とし穴（実機で確認）: **CL 経由の RUNSQL では `DECIMAL(5,0)` が通らず、
     `DECIMAL(5, 0)`（カンマの後に空白）なら通る**。`CHAR(10)` は通るので括弧自体は問題なく、
     括弧内のカンマ直後に数字が続く形が CL の解釈で壊れる
 
 ## 積み残し（signon 段階から）
 
-- [ ] DES 経路（QPWDLVL < 2）の対応
-  - PUB400 はレベル3のため未実装。手書きDES 700行超が必要で、現状は明示的に
-    `HOST_SERVER_UNSUPPORTED` で失敗する。**レベル0/1 の実機に当たってから**でよい
+- [x] DES 経路（QPWDLVL < 2）の対応
+    → 2026-07-21 完了（PR #109 `feature/password-level-0-des-auth`）。
+      `packages/core/src/hostserver/des.ts`（**167 行**。FIPS 46-3 の標準テーブル。Web Crypto に
+      DES が無いため自前実装）＋ `password.ts` の `passwordSubstituteDes`。
+      `signon.ts:222-229` と `server-connect.ts:156` が `passwordLevel < MIN_SHA_PASSWORD_LEVEL` で分岐する。
+      jtopenlite `encryptPasswordDES` との差分テストで **805/805 バイト一致**
+      （FIPS 既知解ベクタは `des.test.ts`、代表ベクタは `hostserver-password.test.ts`）
+  - ~~PUB400 はレベル3のため未実装。手書きDES 700行超が必要で、現状は明示的に
+    `HOST_SERVER_UNSUPPORTED` で失敗する。**レベル0/1 の実機に当たってから**でよい~~
+    **← 3 点とも現状と違う**（実装済み／700 行超ではなく 167 行／`assertPasswordLevelSupported` は撤去済み）
+  - DDM(DRDA) の SECCHK は SHA 前提のままなので、レベル 0/1 では明示的に断る（`ddm-connection.ts`）
+- [ ] パスワードレベル 0/1 の**実機**での認証成功の確認
+  - PR #109 の本文が自ら挙げた穴——「この環境から到達できないため未検証」。
+    参照実装とバイト単位で一致しているので確度は高いが、実機のハンドシェイクは通していない
+  - 検証手順: `AS400_USER=xxx AS400_PASSWORD=yyy npm run cmd -w @as400web/hostserver-check -- --host <実機> [--tls]`
 - [x] 誤パスワード時の戻りコードを実機で確認
   - **2026-07-18 完了**。1 回の失敗では無効化されないとの情報を得て実施。`0x0003000B` を確認した。
     副次的な発見: **存在しないユーザー ID でも `0x0003000B` が返る**（ユーザー列挙対策と思われる）
@@ -169,7 +189,12 @@ SQL（既定路線・本命）                       ✅
   - 併せて**潜在バグを 1 つ潰した**: `openQuery` が prepare で失敗したとき占有を解いておらず、
     SQL の誤り 1 回でその接続が二度と使えなくなっていた（以降すべて
     「another query is in progress」）。単発接続では隠れていた
-- [ ] PUB400 以外の IBM i での検証（単一ホスト・7.5 のみで確認）
+- [x] PUB400 以外の IBM i での検証
+    → 社内機 **実機**（IBM i 7.5）で SQL を実測済み。20260730-sql-non-query-statements（PR #218）と
+      20260730-sql-fetch-limit（PR #219）。後者は 20,000 行 × `CHAR(50)` の全件取得で
+      201 往復 / 1,191,336 バイト / 2,072ms
+- [ ] IBM i 7.5 **以外のバージョン**での検証
+  - PUB400 も実機も 7.5。**バージョン差による違いには当たっていない**
 
 ## コマンドサーバー実装からの積み残し（2026-07-19 追記）
 
@@ -205,8 +230,11 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
     → 20260723-ifs-pane-nav-file-ops で実装。**テンプレート長は 10**（ファイル削除の 8 とは
       フラグ 2 バイト分違う）。中身ごとの再帰削除・リネーム（0x000F）・一覧の「上位フォルダへ」も同時に入れた
 - [ ] IFS の zip 上限「値」を UI に表示（現状は超過した実測値のみ）
-- [ ] CLI 引数 `--ifs-zip-max-bytes`/`-files`/`-dirs`/`--ifs-read-max-bytes`/
+- [x] CLI 引数 `--ifs-zip-max-bytes`/`-files`/`-dirs`/`--ifs-read-max-bytes`/
       `--ifs-delete-max-entries`/`--ifs-delete-max-dirs` を README に追記
+    → PR #199（`docs: README / AGENTS の抜け漏れ・矛盾をコードと突き合わせて直す`）で記載。
+      `README.md:162-164` に既定値つきの表がある（読み取り 5 MiB / zip 20 MiB・500・5000 /
+      再帰削除 1000・500）
 - [ ] IFS プレビューの競合対策（速い応答が勝つ。世代トークンで塞ぐ。03 review S3）
 
 ## SQL の複数文実行からの積み残し（2026-07-23 追記）
@@ -261,11 +289,16 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
     → 今回は**触っていない**（`pageSize` 指定は結果セットを保持して続きを読む別の要求）。
       ただし「1 ページだけ見て閉じる」使い方が多いなら、保持せず打ち切る方が接続を掴まない。
       使われ方を見てから決める
-- [ ] **LAN 内 IBM i での接続所要時間の実測**
+- [x] **LAN 内 IBM i での接続所要時間の実測**
   - PUB400（インターネット越し・TLS）では **4〜7 秒/呼び出し**で、処理量に比例せず
     接続確立が支配的だった。LAN なら大幅に短いと**見込まれる**が未検証
   - 実測して許容できないと分かった場合にのみ、接続プールを検討する（先に複雑さを払わない）
+    → 20260730-sql-fetch-limit（PR #219）で社内機 **実機** を実測。
+      **MCP 経路が接続込み 177ms**（REST 単発は 117ms）。PUB400 の 4〜7 秒に対し 25〜40 倍速い。
+      **接続確立は支配的ではなく、接続プールは要らない**（複雑さを払わずに済んだ）
 - [ ] `host_call_program` を正しいパラメータ列で成功させる検証
+  - 実機確認は `MCH0802`（パラメータ数不一致）までで、**呼び出し経路が通ることしか確かめていない**
+    （`20260719-hostserver-mcp-tools/test-result.md:49`。`QGYOLSPL` にパラメータ 0 個で呼んだ）
 
 ## LOB からの積み残し（2026-07-20 追記）
 
@@ -281,7 +314,8 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
     **嘘に近い**。型を 1 つ足すだけだが server / web-ui / CSV に波及する
 - [ ] BLOB（バイナリ）と中身のある DBCLOB での検証（CLOB でしか試していない）
 - [ ] ロケーターの明示的な解放（接続を閉じれば消えると見込んでいるが未確認）
-  - 実機確認は `MCH0802`（パラメータ数不一致）までで、**呼び出し経路が通ることしか確かめていない**
+  - **原典に該当の要求があるかも未確認**（`20260720-sql-lob-locator/research.md` F5）。
+    同 research では、ロケーターが**接続に紐づく**こと（別接続では `rc=2/-815`）までは実測している
 
 ## サービス型セッションの常駐化（2026-07-24 追記）
 

@@ -58,8 +58,23 @@ pino を持ち込むと価値が半減する。**
       **状態（`this.sessionId === undefined`）で決める**ようにした
     - `packages/server/src` 全体を走査して「**`CONNECT_FAILED` を throw する箇所が 0 件**」を
       不変条件テストにした（列挙にすると新しいファイルが素通りする）
-- [ ] CCSID テーブルの同梱単位を見直す（CCSID 37 の174行のために DBCS 込み18,900行が付いてくる）
-  - **2026-07-19 に原因を実測**（作業自体は未着手）。テーブルは計 **18,900 行 / 1.17 MB**
+- [x] CCSID テーブルの同梱単位を見直す（CCSID 37 の174行のために DBCS 込み18,900行が付いてくる）
+  - **2026-07-27 完了**（`.aidev/works/20260726-ccsid-table-bundling` / PR #171）。
+    web-ui の本番バンドルは **1,407,469 → 358,354 バイト**（2026-08-01 に再測）。
+    残る表の識別子は `ibm-930_P120-1999_SBCS` / `ibm-939_P120-1999_SBCS` の **2 つだけ**で、
+    DBCS 部・`ibm-1399`・`ibm-37`・`ibm-273` は 0 件
+  - 採った手は **(b)＋(c)**——SBCS 部を別モジュールへ切り出し、`@as400web/ebcdic/katakana` の
+    サブパスを新設した。web-ui は `@as400web/core/browser` から
+    **`katakanaChar` / `latinChar` の 2 関数**を取る（`ScreenGrid.vue:66-67`）
+  - **SBCS 部が 2 つ残るのは正しい**。2 関数が 1 対 1 で表に対応している——
+    `katakanaChar`＝930 の SBCS 部（CP290）／`latinChar`＝939 の SBCS 部（CP1027）。
+    2 つは互いの鏡像で、表示コード切替とは「もう一方の表で読み直すこと」だから両方要る。
+    930 の表しか持たないと 930 のセッションで切替が無反応になる（利用者報告で判明。
+    `packages/ebcdic/src/katakana.ts` の JSDoc に経緯）
+  - 再混入は `packages/ebcdic/test/katakana-no-dbcs.test.ts` が塞いでいる——src の import グラフを
+    実際に辿り、到達可能なファイルを 4 つに固定する（対照として `codec.ts` からは DBCS 部に
+    到達することも検査しており、ガードが効いていることを保証している）
+  - **2026-07-19 に原因を実測**~~（作業自体は未着手）~~。テーブルは計 **18,900 行 / 1.17 MB**
     （dist の js で 1,372 KB。ibm1399 が 557 KB、930/939 が各 298 KB）
   - tree-shaking が効かない具体的な原因:
     - `codec.ts:2-6` が 5 テーブルすべてを**静的な値 import**（`import type` ではない）
@@ -73,9 +88,11 @@ pino を持ち込むと価値が半減する。**
     **ブラウザのバンドル方法に影響する**。バンドルサイズを実測しながら進める独立作業にすること
   - **2026-07-27 追記**（`20260726-library-extraction-codec`）: 表は `@as400web/ebcdic` へ移り、
     (b) の足場として **`./codec`（変換のみ）と `./catalog`（表ゼロ）のサブパスが既にある**。
-    実測した現状: web-ui の本番バンドルは **1,407,469 バイト**で、うち ibm-930/939 の表が占める。
+    ~~実測した現状: web-ui の本番バンドルは **1,407,469 バイト**で、うち ibm-930/939 の表が占める。
     到達経路は **`ScreenGrid.vue:41` の `katakanaChar` 1 関数だけ**
-    （`@as400web/core/codec` → `@as400web/ebcdic/codec` → 表 5 つ）。
+    （`@as400web/core/codec` → `@as400web/ebcdic/codec` → 表 5 つ）~~
+    **← 着手前の状態。現在は 358,354 バイトで、`ScreenGrid.vue` は
+    `@as400web/core/browser` から取る（web-ui に `@as400web/core/codec` の import は 0 件）**。
     つまり「`katakanaChar` を表非依存にする」か「カタカナ SBCS だけの入口を足す」かで大半が落ちる見込み。
     比較の基準線として、`main` を worktree に取って同一条件でビルドし突き合わせる手順が有効だった
 
