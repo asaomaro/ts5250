@@ -82,7 +82,13 @@ function addWatch(): void {
               <td>
                 <span class="state" :class="w.state" :title="w.error ?? ''">
                   {{
-                    w.state === "watching" ? "監視中" : w.state === "reconnecting" ? "再接続中" : "エラー"
+                    w.state === "listening"
+                      ? "監視中"
+                      : w.state === "reconnecting"
+                        ? "再接続中"
+                        : w.state === "stopped"
+                          ? "停止中"
+                          : "エラー"
                   }}
                 </span>
               </td>
@@ -200,8 +206,13 @@ tbody tr.sel {
   font-size: 0.8em;
   text-align: center;
 }
-.state.watching {
+.state.listening {
   color: var(--ok, green);
+}
+/* **停止中は「正常だが動いていない」。** 監視中と同じ色にすると、
+   止めたことに気づかないまま帳票やエントリを待ってしまう */
+.state.stopped {
+  color: var(--muted, gray);
 }
 .state.reconnecting {
   color: var(--warn, darkorange);

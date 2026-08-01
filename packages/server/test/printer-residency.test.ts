@@ -53,12 +53,14 @@ const transport = (): Transport => new FakeTransport((tr) => tr.feed(startup()))
 /** サービス ✅ と出力設定を**別々に**指定して開く（軸が分かれていることを試すため） */
 async function open(
   sessions: SessionManager,
-  opts: { service?: boolean; output?: boolean } = {}
+  opts: { service?: boolean; output?: boolean; autoStart?: boolean } = {}
 ) {
   const dir = join(mkdtempSync(join(tmpdir(), "prt-")), "out");
   return sessions.openPrinter({
     ...(opts.service ? { service: true } : {}),
     ...(opts.output ? { output: { autoPdfDir: dir } } : {}),
+    ...(opts.autoStart !== undefined ? { autoStart: opts.autoStart } : {}),
+    // **開き直しでも同じ偽の接続を返す**（開始/停止の往復を試すため）
     transport: transport()
   });
 }
@@ -151,5 +153,75 @@ describe("上限", () => {
 
   it("常駐の上限に既定がある", () => {
     expect(DEFAULT_MAX_RESIDENT_PRINTERS).toBe(4);
+  });
+});
+
+describe("開始と停止", () => {
+  it("既定では開いた直後から待ち受ける（いままでどおり）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    expect(entry.state).toBe("listening");
+    expect(entry.session).toBeDefined();
+  });
+
+  it("**autoStart ☐ なら開いても待ち受けない**（開始操作を待つ）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions, { autoStart: false });
+    expect(entry.state).toBe("stopped");
+    // 接続を持たない——「開く（登録する）」と「待ち受ける」は別
+    expect(entry.session).toBeUndefined();
+  });
+
+  it("停止しても**一覧に残る**（消すと画面から再開できない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    sessions.stopPrinter(entry.id);
+    expect(entry.state).toBe("stopped");
+    expect(sessions.listPrinters().some((e) => e.id === entry.id)).toBe(true);
+  });
+
+  it("停止で接続を手放す（掴んだまま受け取らないと他の人が使えない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    sessions.stopPrinter(entry.id);
+    expect(entry.session).toBeUndefined();
+  });
+
+  it("停止したものを再開できる", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions, { autoStart: false });
+    await sessions.startPrinter(entry.id);
+    expect(entry.state).toBe("listening");
+    expect(entry.session).toBeDefined();
+  });
+
+  it("開始も停止も冪等（画面から二重に押されても壊れない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    await sessions.startPrinter(entry.id); // 既に listening
+    expect(entry.state).toBe("listening");
+    sessions.stopPrinter(entry.id);
+    sessions.stopPrinter(entry.id); // 二度目
+    expect(entry.state).toBe("stopped");
+  });
+
+  it("**停止中は上限を食わない**（登録しただけで自分を締め出さない）", async () => {
+    const sessions = new SessionManager({ maxSessions: 1 });
+    const a = await open(sessions);
+    expect(sessions.size).toBe(1);
+    sessions.stopPrinter(a.id);
+    expect(sessions.size).toBe(0);
+    // 空いたので別のを開ける
+    await open(sessions);
+  });
+
+  it("状態の変化がフックで届く（黙って止まらない）", async () => {
+    const sessions = new SessionManager();
+    const seen: string[] = [];
+    const entry = await open(sessions, { autoStart: false });
+    entry.onState = (s) => void seen.push(s.state);
+    await sessions.startPrinter(entry.id);
+    sessions.stopPrinter(entry.id);
+    expect(seen).toEqual(["listening", "stopped"]);
   });
 });

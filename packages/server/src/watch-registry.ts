@@ -31,6 +31,7 @@ import { As400Error } from "@as400web/base";
 import { type DtaqConnection, dtaqDecodeEbcdic } from "@as400web/hostserver";
 import { type ConnectOptions } from "@as400web/tn5250";
 import { assertOwner, type AuthUser } from "./auth.js";
+import type { ServiceState } from "./service-state.js";
 import type { DtaqWatchSpec } from "./config-types.js";
 import { fromBytes, toBytes, type DtaqEncoding } from "./host-dtaq.js";
 import { openDtaq } from "./host-connect.js";
@@ -38,8 +39,14 @@ import { childLog } from "./log.js";
 
 const log = childLog({ component: "watch-registry" });
 
-/** 監視 1 本の状態。**停止と障害を区別する**（requirement「黙って止まらない」） */
-export type WatchState = "watching" | "reconnecting" | "error";
+/**
+ * 監視 1 本の状態。**停止と障害を区別する**（requirement「黙って止まらない」）。
+ *
+ * **プリンターと共有する語彙**（`service-state.ts`。`20260801-service-start-stop`）——
+ * 別々の文字列を持たせると、同じことを表す語が 2 つになって UI が二重になる。
+ * かつて `watching` と呼んでいたものが `listening`。
+ */
+export type WatchState = ServiceState;
 
 /** API / WS へ出す監視 1 本 */
 export interface WatchView {
@@ -172,7 +179,8 @@ export class WatchRegistry {
       (w) => w.view.ref === opts.ref && w.view.owner === opts.owner
     );
     if (existing) return { ...existing.view };
-    if (this.watches.size >= this.maxWatches) {
+    // **待ち受け中の数で数える**（停止中は接続を持たないので枠を占めない）
+    if (this.listeningCount() >= this.maxWatches) {
       throw new As400Error("SESSION_LIMIT", `watch limit reached (${this.maxWatches})`);
     }
     const conn = await this.openConn(opts.connect);
@@ -183,7 +191,7 @@ export class WatchRegistry {
         kind: "dtaq",
         ref: opts.ref,
         label: opts.label,
-        state: "watching",
+        state: "listening",
         received: 0,
         startedAt: new Date(this.now()).toISOString(),
         ...(opts.owner !== undefined ? { owner: opts.owner } : {})
@@ -202,14 +210,53 @@ export class WatchRegistry {
   }
 
   /** 明示停止。印を立ててから接続を閉じる（印の意味は `Watch.stopping` の JSDoc） */
+  /**
+   * 待ち受けを止める。**レジストリからは消さない**——
+   * 消すと一覧から落ちて、画面から**再開できなくなる**（`20260801-service-start-stop`）。
+   *
+   * 接続は手放す。**仕事は失われない**——待ち行列のエントリは読むまでキューに残るので、
+   * 停止は「いま消費しない」であって「取りこぼす」ではない。
+   * 資源を持たないので、上限の判定からも外れる。
+   */
   stop(id: string, user?: AuthUser): void {
     const w = this.watches.get(id);
     if (!w) throw new As400Error("NOT_FOUND", `watch ${id} not found`);
     assertOwner(w.view.owner, user);
+    if (w.view.state === "stopped") return; // 冪等（二重に押されても壊れない）
     w.stopping = true;
     w.conn?.close();
-    this.watches.delete(id);
+    delete w.conn;
+    this.setState(w, "stopped");
     log.info({ watchId: id }, "watch stopped");
+  }
+
+  /**
+   * 停止した監視を再開する。**保存してある spec と接続先で開き直す**ので、
+   * 画面は id だけ知っていればよい。
+   */
+  async resume(id: string, user?: AuthUser): Promise<void> {
+    const w = this.watches.get(id);
+    if (!w) throw new As400Error("NOT_FOUND", `watch ${id} not found`);
+    assertOwner(w.view.owner, user);
+    if (w.view.state !== "stopped" && w.view.state !== "error") return; // 既に動いている
+    if (this.listeningCount() >= this.maxWatches) {
+      throw new As400Error("SESSION_LIMIT", `watch limit reached (${this.maxWatches})`);
+    }
+    w.stopping = false;
+    w.conn = await this.openConn(w.connect);
+    this.setState(w, "listening");
+    log.info({ watchId: id, label: w.view.label }, "watch resumed");
+    void this.loop(w);
+  }
+
+  /**
+   * **待ち受け中の数**（停止中・障害は数えない）。
+   * 停止中はホストへの接続を持たないので、枠を占める理由が無い。
+   */
+  private listeningCount(): number {
+    let n = 0;
+    for (const w of this.watches.values()) if (w.view.state !== "stopped" && w.view.state !== "error") n++;
+    return n;
   }
 
   list(user?: AuthUser): WatchView[] {
@@ -288,11 +335,11 @@ export class WatchRegistry {
       try {
         if (!w.conn) {
           w.conn = await this.openConn(w.connect);
-          // **繋がった時点で `watching` に戻す。** 受信できたときに戻す形だと、
+          // **繋がった時点で `listening` に戻す。** 受信できたときに戻す形だと、
           // 張り直せたのにエントリが来ないキューが永久に `reconnecting` に見える
           // ——「何も来ないのが正常」な監視では、それは嘘の表示になる
           attempt = 0;
-          if (w.view.state !== "watching") this.setState(w, "watching");
+          if (w.view.state !== "listening") this.setState(w, "listening");
         }
         const entry = await w.conn.read(this.readOptions(w.spec));
         // **空で戻るのは想定外**（wait=-1 は届くまで返らない）。念のため読み直す

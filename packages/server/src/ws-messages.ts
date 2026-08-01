@@ -3,6 +3,7 @@ import type { PcCommandEvent } from "./session-manager.js";
 import type { SessionJob } from "./session-manager.js";
 import type { MacroSecretRef } from "./macro-types.js";
 import type { WatchView, WatchEntryView } from "./watch-registry.js";
+import type { ServiceState } from "./service-state.js";
 
 /** WebSocket メッセージ型（server が定義し web-ui が type-only import で共有。spec「Web 向けプロトコル」） */
 
@@ -114,6 +115,26 @@ export interface WsWatchHistoryReq {
   watchId: string;
 }
 
+/**
+ * 待ち受けの開始／停止。**プリンターと監視で同じ操作**（`20260801-service-start-stop`）。
+ *
+ * 監視は `watch-start` / `watch-stop` を既に持つが、あちらは
+ * 「定義から**作って**始める」意味。こちらは**既にあるものの待ち受けを切り替える**。
+ */
+export interface WsPrinterStart {
+  type: "printer-start";
+  sessionId: string;
+}
+export interface WsPrinterStop {
+  type: "printer-stop";
+  sessionId: string;
+}
+/** 停止した監視の再開（`watch-start` は新規作成なので別に要る） */
+export interface WsWatchResume {
+  type: "watch-resume";
+  watchId: string;
+}
+
 export type WsClientMessage =
   | WsOpen
   | WsKey
@@ -126,7 +147,10 @@ export type WsClientMessage =
   | WsWatchSubscribe
   | WsWatchStart
   | WsWatchStop
-  | WsWatchHistoryReq;
+  | WsWatchHistoryReq
+  | WsWatchResume
+  | WsPrinterStart
+  | WsPrinterStop;
 
 // ---- server → client ----
 export interface WsOpened {
@@ -193,11 +217,21 @@ export interface PrinterOutputWarning {
   at: number;
   message: string;
 }
-/** プリンターセッションを開いた（起動応答コード＋自動出力の状態） */
+/** プリンターセッションを開いた（待ち受けの状態＋自動出力の状態） */
 export interface WsPrinterOpened {
   type: "printer-opened";
   sessionId: string;
-  startupCode: string;
+  /**
+   * 待ち受けの状態。**「開く（登録する）」と「待ち受ける」は別**
+   * （`20260801-service-start-stop`）——`autoStart ☐` の定義は
+   * 開いても `stopped` のままで、利用者の開始操作を待つ
+   */
+  state: ServiceState;
+  /**
+   * 起動応答コード（`I902` 等）。**待ち受けていなければ無い**——
+   * 接続していないので、ホストから応答をもらっていない
+   */
+  startupCode?: string;
   /** サーバー側の自動出力設定があるか（UI のトグル表示条件） */
   hasOutput: boolean;
   /** 自動出力の実行時 有効/無効 */
@@ -281,7 +315,18 @@ export interface WsWatchEntry {
   /** 累計受信件数（履歴が落ちても増え続ける） */
   received: number;
 }
-/** 状態の変化（`watching` / `reconnecting` / `error`）。**黙って止まらない**ため */
+/** プリンターの待ち受け状態が変わった。**黙って止まらない**ため（監視と同じ扱い） */
+export interface WsPrinterState {
+  type: "printer-state";
+  sessionId: string;
+  state: ServiceState;
+  /** `state === "error"` のときの理由 */
+  error?: string;
+  /** 待ち受けを始めたときの起動応答コード */
+  startupCode?: string;
+}
+
+/** 状態の変化（`listening` / `reconnecting` / `error` / `stopped`）。**黙って止まらない**ため */
 export interface WsWatchState {
   type: "watch-state";
   watchId: string;
@@ -298,6 +343,7 @@ export type WsServerMessage =
   | WsWatchList
   | WsWatchEntry
   | WsWatchState
+  | WsPrinterState
   | WsWatchHistoryRes
   | WsPing
   | WsOpened

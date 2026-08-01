@@ -522,7 +522,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             idleTimeoutMs: mcpIdleTimeout(target?.connect.idleTimeoutMs),
             origin: originOf(input)
           });
-          const code = entry.session.startupCode;
+          // 待ち受けていなければ起動応答は無い（`autoStart ☐`。`20260801-service-start-stop`）
+          const code = entry.session?.startupCode ?? entry.state;
           return {
             content: [{ type: "text" as const, text: `printer session ${entry.id} (${code})` }],
             structuredContent: { sessionId: entry.id, startupCode: code }

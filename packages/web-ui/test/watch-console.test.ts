@@ -42,7 +42,8 @@ const W1 = {
   kind: "dtaq" as const,
   ref: "own:c1",
   label: "MYLIB/ORDERQ",
-  state: "watching" as const,
+  // `listening`（旧 `watching`）。プリンターと語彙を共有する（`service-state.ts`）
+  state: "listening" as const,
   received: 0,
   startedAt: "2026-07-30T00:00:00Z"
 };
@@ -99,8 +100,8 @@ describe("watchesStore: サーバーの写し", () => {
     deliver({ type: "watch-list", watches: [W1] });
     deliver({ type: "watch-state", watchId: "w1", state: "error", error: "not authorized" });
     expect(watchesStore.watches[0]).toMatchObject({ state: "error", error: "not authorized" });
-    deliver({ type: "watch-state", watchId: "w1", state: "watching" });
-    expect(watchesStore.watches[0]?.state).toBe("watching");
+    deliver({ type: "watch-state", watchId: "w1", state: "listening" });
+    expect(watchesStore.watches[0]?.state).toBe("listening");
     expect(watchesStore.watches[0]?.error).toBeUndefined();
   });
 

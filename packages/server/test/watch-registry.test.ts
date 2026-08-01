@@ -140,26 +140,64 @@ describe("受信して積んで配る", () => {
     expect(reg.history(w.id).map((e) => e.text)).toEqual(["3", "4"]);
     expect(reg.history(w.id).map((e) => e.seq)).toEqual([3, 4]); // 連番は戻らない
     expect(reg.list()[0]?.received).toBe(4);
-    expect(reg.list()[0]?.state).toBe("watching");
+    expect(reg.list()[0]?.state).toBe("listening");
     reg.closeAll();
   });
 });
 
 describe("停止と障害を区別する", () => {
-  it("停止したら一覧から消え、**error にはならない**", async () => {
+  it("停止しても**一覧に残る**（消すと画面から再開できない）", async () => {
     const { reg, conns, events } = setup();
     const w = await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
     await settle();
     reg.stop(w.id);
     await settle();
-    expect(reg.list()).toEqual([]);
+    // **消さない**——消すと一覧から落ちて、開始ボタンを押せなくなる
+    // （`20260801-service-start-stop`）
+    expect(reg.list()).toHaveLength(1);
+    expect(reg.list()[0]?.state).toBe("stopped");
+    // 接続は手放す。仕事は失われない（エントリは読むまでキューに残る）
     expect(conns[0]!.closed).toBe(true);
     // 停止による read の reject を「障害」として配っていない
-    expect(events.filter((e) => e.type === "state")).toEqual([]);
-    expect(reg.size).toBe(0);
+    expect(events.filter((e) => e.type === "state").map((e) => e.watch.state)).toEqual(["stopped"]);
   });
 
-  it("一時的な失敗は張り直す（reconnecting → watching）", async () => {
+  it("停止した監視を**再開できる**（保存した spec で開き直す）", async () => {
+    const a = new FakeConn();
+    const b = new FakeConn();
+    const { reg, connCount } = setup({ conns: [a, b] });
+    const w = await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
+    await settle();
+    reg.stop(w.id);
+    await settle();
+    await reg.resume(w.id);
+    await settle();
+    expect(connCount()).toBe(2); // 開き直した
+    expect(reg.list()[0]?.state).toBe("listening");
+    b.deliver("after-resume");
+    await settle();
+    expect(reg.history(w.id).map((e) => e.text)).toContain("after-resume");
+    reg.closeAll();
+  });
+
+  it("停止中は上限を食わない（接続を持たないので枠を占めない）", async () => {
+    const { reg } = setup({ conns: [new FakeConn(), new FakeConn(), new FakeConn()], maxWatches: 1 });
+    const w = await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
+    await settle();
+    // 待ち受け中は 1 本で埋まる
+    await expect(
+      reg.start({ ref: "own:c2", label: "l2", spec: SPEC, connect: CONNECT })
+    ).rejects.toMatchObject({ code: "SESSION_LIMIT" });
+    reg.stop(w.id);
+    await settle();
+    // 停止したので空く
+    await reg.start({ ref: "own:c2", label: "l2", spec: SPEC, connect: CONNECT });
+    await settle();
+    expect(reg.list()).toHaveLength(2);
+    reg.closeAll();
+  });
+
+  it("一時的な失敗は張り直す（reconnecting → listening）", async () => {
     const a = new FakeConn();
     const b = new FakeConn();
     const { reg, events, connCount } = setup({ conns: [a, b] });
@@ -170,8 +208,8 @@ describe("停止と障害を区別する", () => {
     expect(connCount()).toBe(2); // 張り直した
     expect(a.closed).toBe(true);
     const states = events.filter((e) => e.type === "state").map((e) => e.watch.state);
-    expect(states).toEqual(["reconnecting", "watching"]);
-    expect(reg.list()[0]?.state).toBe("watching");
+    expect(states).toEqual(["reconnecting", "listening"]);
+    expect(reg.list()[0]?.state).toBe("listening");
     // 張り直した先で受け取れる
     b.deliver("after-reconnect");
     await settle();
@@ -192,7 +230,7 @@ describe("停止と障害を区別する", () => {
     reg.closeAll();
   });
 
-  it("error になった監視も明示停止で消せる", async () => {
+  it("error になった監視も明示停止で `stopped` にできる", async () => {
     const a = new FakeConn();
     const { reg } = setup({ conns: [a] });
     const w = await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
@@ -201,7 +239,23 @@ describe("停止と障害を区別する", () => {
     await settle();
     expect(reg.list()[0]?.state).toBe("error");
     reg.stop(w.id);
-    expect(reg.list()).toEqual([]);
+    // **一覧からは消さない**（原因を直してから再開できる）
+    expect(reg.list()[0]?.state).toBe("stopped");
+  });
+
+  it("error からも再開できる（利用者が原因を直した後）", async () => {
+    const a = new FakeConn();
+    const b = new FakeConn();
+    const { reg } = setup({ conns: [a, b] });
+    const w = await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
+    await settle();
+    a.failWith(new As400Error("NOT_FOUND", "queue not found"));
+    await settle();
+    expect(reg.list()[0]?.state).toBe("error");
+    await reg.resume(w.id);
+    await settle();
+    expect(reg.list()[0]?.state).toBe("listening");
+    reg.closeAll();
   });
 
   it("開始時の接続失敗は start が投げる（監視を作らない）", async () => {

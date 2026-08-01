@@ -124,6 +124,12 @@ export class WsConnection {
           return await this.onWatchStart(msg);
         case "watch-stop":
           return this.onWatchStop(msg);
+        case "watch-resume":
+          return await this.onWatchResume(msg);
+        case "printer-start":
+          return await this.onPrinterStart(msg);
+        case "printer-stop":
+          return this.onPrinterStop(msg);
         case "watch-history":
           return this.onWatchHistory(msg);
         case "activity":
@@ -219,6 +225,29 @@ export class WsConnection {
    * **常駐の対象は保存済み設定だけ**（research F3）——資格情報をサーバー側だけで
    * 解決できるので、ブラウザが居なくても張り直せる。
    */
+  /**
+   * 待ち受けの開始／停止。**プリンターと監視で同じ操作**（`20260801-service-start-stop`）。
+   * どちらも冪等——画面から二重に押されても壊れない。
+   */
+  private async onPrinterStart(msg: WsClientMessage & { type: "printer-start" }): Promise<void> {
+    await withAudit({ op: "ws_printer_start" }, async () => {
+      await this.deps.sessions.startPrinter(msg.sessionId, this.user);
+    });
+  }
+
+  private onPrinterStop(msg: WsClientMessage & { type: "printer-stop" }): void {
+    void withAudit({ op: "ws_printer_stop" }, async () => {
+      this.deps.sessions.stopPrinter(msg.sessionId, this.user);
+    });
+  }
+
+  private async onWatchResume(msg: WsClientMessage & { type: "watch-resume" }): Promise<void> {
+    const reg = this.requireWatches();
+    await withAudit({ op: "ws_watch_resume" }, async () => {
+      await reg.resume(msg.watchId, this.user);
+    });
+  }
+
   private async onWatchStart(msg: WsClientMessage & { type: "watch-start" }): Promise<void> {
     const reg = this.requireWatches();
     await withAudit({ op: "ws_watch_start" }, async () => {
@@ -377,14 +406,20 @@ export class WsConnection {
       // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
       // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
       entry.onReport = onReport;
-      entry.session.on("closed", (reason) => {
-        this.send({ type: "closed", reason });
-        this.detachReport?.();
-      });
+      // **状態の変化を push する**（監視と同じ扱い。「黙って止まらない」ため）
+      entry.onState = (s) =>
+        this.send({
+          type: "printer-state",
+          sessionId: entry.id,
+          state: s.state,
+          ...(s.error !== undefined ? { error: s.error } : {}),
+          ...(s.startupCode !== undefined ? { startupCode: s.startupCode } : {})
+        });
       this.detachReport = () => {
         delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
         delete entry.onReport;
         delete entry.onOutputStatus;
+        delete entry.onState;
       };
       // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
       entry.onOutputWarn = (w) =>
@@ -394,7 +429,10 @@ export class WsConnection {
       this.send({
         type: "printer-opened",
         sessionId: entry.id,
-        startupCode: entry.session.startupCode,
+        // **「開く」と「待ち受ける」は別。** `autoStart ☐` なら `stopped` で返り、
+        // 起動応答コードはまだ無い（`20260801-service-start-stop`）
+        state: entry.state,
+        ...(entry.session ? { startupCode: entry.session.startupCode } : {}),
         hasOutput: entry.output !== undefined,
         outputEnabled: entry.outputEnabled,
         outputWarnings: entry.outputWarnings,

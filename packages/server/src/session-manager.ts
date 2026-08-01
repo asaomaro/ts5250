@@ -11,6 +11,7 @@ import {
   type PcCommandOutcome
 } from "./pc-command.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
+import { holdsConnection, type ServiceState } from "./service-state.js";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -178,6 +179,11 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    * **出力設定の有無から導出しない**（`20260801-service-lifecycle-model` design D3）
    */
   service?: boolean;
+  /**
+   * 開いた直後に待ち受けを開始するか（**未指定は開始する**）。
+   * `false` なら登録だけして `stopped` のまま——利用者の開始操作を待つ
+   */
+  autoStart?: boolean;
   origin?: string;
   /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
   output?: PrinterOutputConfig;
@@ -206,7 +212,22 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
 export interface PrinterEntry {
   id: string;
-  session: PrinterSession;
+  /**
+   * ホストへの接続。**待ち受けていないときは無い**（`state === "stopped"` / `"error"`）。
+   *
+   * 「エントリがある＝接続がある」ではなくなった（`20260801-service-start-stop`）——
+   * 停止しても一覧に残して再開できるようにするため。
+   * 装置を掴んだまま受け取らないのは実害があるので、**停止では必ず手放す**。
+   */
+  session?: PrinterSession;
+  /** 待ち受けの状態。監視と同じ語彙（`service-state.ts`） */
+  state: ServiceState;
+  /** `state === "error"` のときの理由 */
+  error?: string;
+  /** 開き直すときに使う接続条件（保存しておく） */
+  openOpts: OpenPrinterOptions;
+  /** 状態が変わったときに呼ぶ（ws-handler が設定し、切断で解除する） */
+  onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
   host: string;
   origin: string;
   connectedAt: string;
@@ -403,13 +424,21 @@ export class SessionManager {
    * 同じ枠を食うと**帳票を待たせておくと画面が開けない**という説明しにくい失敗になる。
    */
   get size(): number {
-    return this.sessions.size + this.residentCount(false);
+    return this.sessions.size + this.listeningPrinters(false);
   }
 
-  /** 常駐している（`true`）／していない（`false`）プリンターの数 */
-  private residentCount(resident: boolean): number {
+  /**
+   * **待ち受け中のプリンターの数**（常駐 `true` / 非常駐 `false` で分ける）。
+   *
+   * 停止中・障害は数えない——**接続を持たないので枠を占める理由が無い**
+   * （`20260801-service-start-stop`）。登録しただけのエントリが枠を食うと、
+   * 「開いたのに開始できない」という自分で自分を締め出す状態になる。
+   */
+  private listeningPrinters(resident: boolean): number {
     let n = 0;
-    for (const e of this.printers.values()) if (e.resident === resident) n++;
+    for (const e of this.printers.values()) {
+      if (e.resident === resident && holdsConnection(e.state)) n++;
+    }
     return n;
   }
 
@@ -593,7 +622,7 @@ export class SessionManager {
     // **意図（サービス）と能力（出力設定）は別の軸**にする
     const resident = opts.service === true;
     if (resident) {
-      if (this.residentCount(true) >= this.maxResidentPrinters) {
+      if (this.listeningPrinters(true) >= this.maxResidentPrinters) {
         throw new As400Error(
           "SESSION_LIMIT",
           `resident printer limit reached (${this.maxResidentPrinters})`
@@ -602,16 +631,16 @@ export class SessionManager {
     } else if (this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
-    const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
     // ホスト変換で受けているなら、自動印刷は PDF に起こさず受信バイトをそのまま流す
     const output =
       opts.output && opts.transformTo !== undefined
         ? { ...opts.output, rawPrint: true }
         : opts.output;
-    const id = session.id;
+    const id = opts.id ?? randomUUID();
     const entry: PrinterEntry = {
       id,
-      session,
+      state: "stopped",
+      openOpts: { ...opts, id },
       host: opts.host ?? "(injected)",
       origin: opts.origin ?? "direct",
       connectedAt: new Date(this.now()).toISOString(),
@@ -629,15 +658,82 @@ export class SessionManager {
       ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     this.printers.set(id, entry);
+    // **`autoStart ☐` なら待ち受けない。** 「開く（登録する）」と「待ち受ける」は別
+    // （`20260801-service-start-stop`）。既定は true なので、いままでどおり開いたら待ち受ける
+    if (opts.autoStart !== false) await this.startPrinter(id);
+    return entry;
+  }
+
+  /**
+   * 待ち受けを開始する（接続してホストから受け取り始める）。
+   *
+   * `stopped` / `error` からのみ動く。**冪等**——既に待ち受けていれば何もしない
+   * （画面から二重に押されても壊れない）。
+   */
+  async startPrinter(id: string, user?: AuthUser): Promise<PrinterEntry> {
+    const entry = this.getPrinter(id, user);
+    if (entry.state === "listening" || entry.state === "reconnecting") return entry;
+    if (!entry.resident && this.size >= this.maxSessions) {
+      throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
+    }
+    const opts = entry.openOpts;
+    let session: PrinterSession;
+    try {
+      session = await PrinterSession.connect({ ...opts, id });
+    } catch (e) {
+      // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
+      this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+    entry.session = session;
+    entry.lastActivity = this.now();
     session.on("report", (report) => this.deliverReport(entry, report));
     session.on("closed", () => {
       for (const w of entry.waiters.splice(0)) w(undefined);
-      this.printers.delete(id);
       this.stopRescue(entry);
+      // **明示停止なら状態は `stopped`。** `stopPrinter` が先に立てているので上書きしない
+      if (entry.state !== "stopped") this.setPrinterState(entry, "error", "disconnected");
+      delete entry.session;
     });
     // 書き出しプログラムが処理できないスプールを拾う見張り（装置名＝OUTQ が要る）
     this.startRescue(entry, opts);
+    this.setPrinterState(entry, "listening", undefined, session.startupCode);
     return entry;
+  }
+
+  /**
+   * 待ち受けを停止する。**エントリは消さない**——消すと一覧から落ちて再開できない。
+   *
+   * 接続は手放す。**仕事は失われない**——スプールはホストの OUTQ に残るので、
+   * 停止は「いま消費しない」であって「取りこぼす」ではない。
+   * 装置を掴んだまま受け取らないのは実害があるので、必ず手放す。
+   */
+  stopPrinter(id: string, user?: AuthUser): PrinterEntry {
+    const entry = this.getPrinter(id, user);
+    if (entry.state === "stopped") return entry; // 冪等
+    // **先に状態を立てる**——`closed` ハンドラが「障害」と誤って記録しないように
+    this.setPrinterState(entry, "stopped");
+    this.stopRescue(entry);
+    entry.session?.disconnect();
+    delete entry.session;
+    for (const w of entry.waiters.splice(0)) w(undefined);
+    return entry;
+  }
+
+  private setPrinterState(
+    entry: PrinterEntry,
+    state: ServiceState,
+    error?: string,
+    startupCode?: string
+  ): void {
+    entry.state = state;
+    if (state === "error" && error !== undefined) entry.error = error;
+    else delete entry.error;
+    entry.onState?.({
+      state,
+      ...(entry.error !== undefined ? { error: entry.error } : {}),
+      ...(startupCode !== undefined ? { startupCode } : {})
+    });
   }
 
   /**
@@ -859,7 +955,9 @@ export class SessionManager {
     const printer = this.printers.get(id);
     if (printer) {
       assertOwner(printer.owner, user);
-      printer.session.disconnect();
+      // **破棄は停止と別**——停止は残す、破棄は消す（`20260801-service-start-stop`）
+      this.stopRescue(printer);
+      printer.session?.disconnect();
       this.printers.delete(id);
       return;
     }
@@ -869,7 +967,7 @@ export class SessionManager {
   closeAll(): void {
     for (const entry of this.sessions.values()) entry.session.disconnect();
     this.sessions.clear();
-    for (const entry of this.printers.values()) entry.session.disconnect();
+    for (const entry of this.printers.values()) entry.session?.disconnect();
     this.printers.clear();
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
@@ -916,7 +1014,7 @@ export class SessionManager {
       // アイドルを「使われていない」の合図にできない（design D1 / watch-registry と同じ理屈）
       if (entry.resident) continue;
       if (expired(entry)) {
-        entry.session.disconnect();
+        entry.session?.disconnect();
         this.printers.delete(id);
       }
     }

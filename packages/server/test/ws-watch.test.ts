@@ -96,7 +96,7 @@ describe("watch-* は open を要さない", () => {
     await ws.handle(JSON.stringify({ type: "watch-subscribe" }));
     await ws.handle(JSON.stringify({ type: "watch-start", session: "own:w1" }));
     expect(last("watch-list")?.watches).toHaveLength(1);
-    expect(last("watch-list")?.watches[0]).toMatchObject({ label: "MYLIB/ORDERQ", state: "watching" });
+    expect(last("watch-list")?.watches[0]).toMatchObject({ label: "MYLIB/ORDERQ", state: "listening" });
     watches.closeAll();
   });
 
@@ -132,14 +132,16 @@ describe("到着の push と履歴", () => {
     watches.closeAll();
   });
 
-  it("停止すると一覧から消える", async () => {
+  it("停止しても一覧に残り、`stopped` になる（再開できるように）", async () => {
     const { ws, last, watches } = setup();
     await ws.handle(JSON.stringify({ type: "watch-subscribe" }));
     await ws.handle(JSON.stringify({ type: "watch-start", session: "own:w1" }));
     const id = last("watch-list")!.watches[0]!.id;
     await ws.handle(JSON.stringify({ type: "watch-stop", watchId: id }));
-    expect(last("watch-list")?.watches).toEqual([]);
-    expect(watches.size).toBe(0);
+    // **消さない**——消すと画面から開始ボタンを押せなくなる（`20260801-service-start-stop`）
+    expect(last("watch-list")?.watches).toHaveLength(1);
+    expect(last("watch-list")?.watches[0]?.state).toBe("stopped");
+    expect(watches.size).toBe(1);
   });
 });
 
@@ -151,7 +153,7 @@ describe("**WS が切れても監視は止まらない**（要件の核心）", 
     expect(watches.size).toBe(1);
     ws.onSocketClose();
     expect(watches.size).toBe(1); // 止まっていない
-    expect(watches.list()[0]?.state).toBe("watching");
+    expect(watches.list()[0]?.state).toBe("listening");
     watches.closeAll();
   });
 
