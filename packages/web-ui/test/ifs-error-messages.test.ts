@@ -117,6 +117,27 @@ describe("上限値の表示", () => {
    * 上限が載っていない応答（古いサーバー・想定外の形）でも壊れない。
    * **`undefined` を文言に出さない**のが要——出ると利用者は意味を読み取れない。
    */
+  /**
+   * **MB 固定にしない。** 上限は CLI 引数で下げられるので、MB だけで書くと
+   * 「大きすぎます（0.0 MB / 上限 0.0 MB）」という何も伝えない文になる。
+   * 実機の実機検証（`scripts/verify-ifs-limits.mjs`）で実際にそう出た。
+   */
+  it("MB 未満は KB / B で出す（0.0 MB にしない）", () => {
+    const small = messageFor({ error: "x", code: "TOO_LARGE", bytes: 4608, maxBytes: 4096 });
+    expect(small).toContain("4.5 KB");
+    expect(small).toContain("上限 4.0 KB");
+    expect(small).not.toContain("0.0 MB");
+
+    const tiny = messageFor({ error: "x", code: "TOO_LARGE", bytes: 900, maxBytes: 512 });
+    expect(tiny).toContain("900 B");
+    expect(tiny).toContain("上限 512 B");
+
+    // 1 MB 以上は従来どおり MB
+    const big = messageFor({ error: "x", code: "TOO_LARGE", bytes: 6_500_000, maxBytes: 5_242_880 });
+    expect(big).toContain("6.2 MB");
+    expect(big).toContain("上限 5.0 MB");
+  });
+
   it("上限が欠けていても undefined を出さない", () => {
     for (const b of [
       { error: "x", code: "TOO_LARGE", files: 501, bytes: 9_000_000 },

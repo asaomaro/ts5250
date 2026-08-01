@@ -186,8 +186,23 @@ node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・�
 | スクリプト | 内容 |
 |---|---|
 | `verify-browser-ifs.mjs` | IFS ペインの操作 E2E（実ブラウザ・実機・18 項目）。`/home/USER/TEST` を作って、**画面の操作だけ**でフォルダ作成／ファイルのアップロード・プレビュー・編集保存・ダウンロード・改名・削除／**フォルダごとのアップロード**（入れ子・日本語名）／zip 一括ダウンロード／フォルダの改名・中身ごと削除まで通す。**API は検証と後始末にしか使わない**（下回りだけ通っても「画面から行えるか」の答えにならない）。 |
+| `verify-ifs-limits.mjs` | 上限表示・プレビュー競合・先回り判定の実機検証（15 項目。PR #231）。`/home/asao/test` を作り、`GET /limits`／413 に上限が載ること／**上限超過で read を発行しないこと**／ヌルバイト入りの案内／連続選択で最後の 1 つが残ること／zip の上限文言を見る。 |
 
-要点:
+要点（`verify-ifs-limits.mjs`）:
+
+- **上限を CLI 引数で下げて検証する**（`ifsReadMaxBytes: 4096` / `ifsZipMaxBytes: 1024`）。
+  既定 5MiB の超過を作るには 5MB 超を 100KB/s のホストへ置く必要があり、検証のたびには払えない。
+  先回りの分岐は「`sizeHint` > 上限」で決まるので、上限を下げれば**同じ経路**を通る。
+  ついでに CLI 引数が `/limits` に反映されることも確かめられる。
+- **「read を発行しない」は画面を通さないと確かめられない。** `page.on("request")` で
+  `/api/host/ifs/read` を数える。API だけ叩いても答えにならない。
+- **一覧に出る名前は `USER`（大文字）。** IFS は解決時に大小を区別しないので API は
+  `/home/asao` でも通るが、画面の行を掴むには格納されている綴りが要る。
+- **固定待ちにしない。** 実機は 1 往復が数秒（書き込みで 4〜8 秒を実測）で、`sleep(2500)` だと
+  「まだ来ていない」を「壊れている」と読み違える。`.preview .path` が変わるまで待つ。
+- **本文は `textarea` の value。** `innerText` には出ないので `inputValue()` で取る。
+
+要点（`verify-browser-ifs.mjs`）:
 
 - **保存は元より短い内容で試す。** 長くする編集だと通ってしまう——OPEN を「開くだけ」で書くと
   先頭からの上書きになり、41 バイトのファイルに 19 バイト保存して末尾 22 バイトが旧内容のまま残る
@@ -199,6 +214,7 @@ node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・�
 
 ```sh
 node --env-file=.env scripts/verify-browser-ifs.mjs
+node --env-file=.env scripts/verify-ifs-limits.mjs
 ```
 
 `verify-browser-ifs.mjs` は同じペインの pub400（`/home/USER/ifsdemo`）版。プレビュー（画像・PDF）と

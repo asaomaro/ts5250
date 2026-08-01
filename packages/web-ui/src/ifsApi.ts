@@ -42,8 +42,16 @@ export class IfsRequestError extends Error {
   }
 }
 
-/** バイト数を MB 表記に。既存の TOO_LARGE の書き方に揃える */
-function mb(bytes: number): string {
+/**
+ * バイト数を読める単位にする。
+ *
+ * **MB 固定にしない。** 上限は CLI 引数（`--ifs-read-max-bytes` 等）で下げられるので、
+ * MB だけで書くと「大きすぎます（0.0 MB / 上限 0.0 MB）」という**何も伝えない文**になる
+ * （実機の実機検証で実際にそう出た）。一覧の `sizeText` と同じ刻みに揃える。
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -86,12 +94,12 @@ export function messageFor(b: IfsError): string {
       // `files` を持つのは複数系だけ。1 ファイルを開いたときに「対象が大きすぎます」と
       // 言われると、何を絞ればよいのか分からない
       if (b.files === undefined) {
-        const got = b.bytes !== undefined ? mb(b.bytes) : "";
-        return `ファイルが大きすぎます（${got}${limitOf([b.maxBytes !== undefined ? mb(b.maxBytes) : ""])}）。ダウンロードしてください。`;
+        const got = b.bytes !== undefined ? formatBytes(b.bytes) : "";
+        return `ファイルが大きすぎます（${got}${limitOf([b.maxBytes !== undefined ? formatBytes(b.maxBytes) : ""])}）。ダウンロードしてください。`;
       }
-      const size = b.bytes !== undefined ? `${mb(b.bytes)} 以上` : "";
+      const size = b.bytes !== undefined ? `${formatBytes(b.bytes)} 以上` : "";
       const files = `${b.files} ファイル以上 / `;
-      const max = limitOf([count(b.maxFiles, "ファイル"), b.maxBytes !== undefined ? mb(b.maxBytes) : ""]);
+      const max = limitOf([count(b.maxFiles, "ファイル"), b.maxBytes !== undefined ? formatBytes(b.maxBytes) : ""]);
       return `対象が大きすぎます（${files}${size}${max}）。対象を絞るか、個別に取得してください。`;
     }
     case "NOT_EMPTY":

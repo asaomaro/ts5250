@@ -11,6 +11,7 @@ import {
   deletePlan,
   download,
   fetchLimits,
+  formatBytes,
   makeDirectory,
   renamePath,
   uploadTree,
@@ -155,11 +156,7 @@ function displayName(name: string): string {
 }
 
 function sizeText(entry: IfsEntry): string {
-  if (entry.isDirectory) return "";
-  const n = entry.size;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return entry.isDirectory ? "" : formatBytes(entry.size);
 }
 
 function whenText(entry: IfsEntry): string {
@@ -228,11 +225,6 @@ async function activate(entry: IfsEntry): Promise<void> {
  */
 const editText = ref("");
 /** 採用中の文字コードが保存に使えるか。候補に無いものはサーバーの判断に委ねる */
-/** バイト数を MB 表記に。`ifsApi` のエラー文言と同じ書き方に揃える */
-function mbOf(bytes: number): string {
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /**
  * 中身を見せられる状態のプレビューだけを返す。
  *
@@ -909,8 +901,8 @@ void (async () => {
             ダウンロード（右の操作）は使えるので、中身を得る道は残っている
           -->
           <p v-if="preview.state.value.tooLarge" class="note">
-            大きすぎるため表示していません（{{ mbOf(preview.state.value.bytes) }} / 上限
-            {{ mbOf(preview.state.value.maxBytes ?? 0) }}）。ダウンロードして開いてください。
+            大きすぎるため表示していません（{{ formatBytes(preview.state.value.bytes) }} / 上限
+            {{ formatBytes(preview.state.value.maxBytes ?? 0) }}）。ダウンロードして開いてください。
           </p>
 
           <p v-if="body?.kind === 'text'" class="encoding">
