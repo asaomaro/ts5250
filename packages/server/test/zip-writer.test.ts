@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +7,33 @@ import { buildZip, crc32, type ZipEntry } from "../src/zip-writer.js";
 
 /**
  * ZIP は自前で組んでいるので、**自分のパーサで読み返しても正しさの証明にならない**
- * （同じ誤解で書いて同じ誤解で読めば一致する）。外部の `unzip` に通して確かめる。
+ * （同じ誤解で書いて同じ誤解で読めば一致する）。外部の `unzip` と Python の `zipfile` に
+ * 通して確かめる。
+ *
+ * **その外部コマンドが無い環境では飛ばす**（落とさない）。`unzip` も `python3` も
+ * このリポジトリの依存ではなく**素の OS に入っていることを当てにしている**ので、
+ * 無い環境では「ZIP の実装が壊れた」ではなく「検証手段が無い」が正しい。
+ * 実際、`unzip` の無い devcontainer で 4 件が `spawnSync unzip ENOENT` で落ち続け、
+ * **無関係な変更のレビューを毎回汚していた**（`20260801-library-extraction-hostserver`）。
+ *
+ * **飛ばした事実は握り潰さない。** vitest の出力に skip として残るので、
+ * 「緑だから検証された」と読み違えないこと。CI を置くときは `unzip` と `python3` を
+ * 入れて**実際に走らせる**（飛ばしたまま緑にすると、この検証は名前だけ残って消える）。
  */
+
+/**
+ * 外部コマンドが使えるか。**ENOENT だけを「未インストール」と見る**——
+ * 終了コードで判定すると、`-h` の扱いがコマンドごとに違う（0 を返さないものがある）ため
+ * 入っているのに「無い」と誤判定する。`spawnSync` は起動できたら `error` を立てない。
+ */
+function isInstalled(cmd: string): boolean {
+  const err = spawnSync(cmd, ["-h"], { stdio: "ignore" }).error as NodeJS.ErrnoException | undefined;
+  return err?.code !== "ENOENT";
+}
+
+const HAS_UNZIP = isInstalled("unzip");
+const HAS_PYTHON3 = isInstalled("python3");
+
 let dir: string | undefined;
 afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -49,7 +74,7 @@ function readNamesWithPython(zipPath: string): string[] {
 }
 
 describe("外部の unzip が受け付けること", () => {
-  it("整合性検査（unzip -t）を通る", () => {
+  it.skipIf(!HAS_UNZIP)("整合性検査（unzip -t）を通る", () => {
     const zip = writeZip([
       { path: "a.txt", data: bytes("hello") },
       { path: "sub/b.txt", data: bytes("world") }
@@ -58,7 +83,7 @@ describe("外部の unzip が受け付けること", () => {
     expect(out).toContain("No errors detected");
   });
 
-  it("展開した中身がバイト単位で一致する", () => {
+  it.skipIf(!HAS_UNZIP)("展開した中身がバイト単位で一致する", () => {
     const payload = bytes("日本語の中身\nsecond line\n");
     const zip = writeZip([{ path: "nested/dir/file.txt", data: payload }]);
     execFileSync("unzip", ["-q", zip, "-d", dir as string]);
@@ -73,13 +98,13 @@ describe("外部の unzip が受け付けること", () => {
    * 既定で尊重しないため**（`-O UTF-8` を明示すれば正しく展開できることは確認済み）。
    * 化けるのはこちらの ZIP ではなく展開側の既定挙動、という切り分けができている。
    */
-  it("非 ASCII のファイル名が UTF-8 として読める", () => {
+  it.skipIf(!HAS_PYTHON3)("非 ASCII のファイル名が UTF-8 として読める", () => {
     const zip = writeZip([{ path: "日本語ファイル.txt", data: bytes("x") }]);
     const names = readNamesWithPython(zip);
     expect(names).toEqual(["日本語ファイル.txt"]);
   });
 
-  it("空のファイルを含められる", () => {
+  it.skipIf(!HAS_UNZIP)("空のファイルを含められる", () => {
     const zip = writeZip([
       { path: "empty.txt", data: new Uint8Array(0) },
       { path: "notempty.txt", data: bytes("x") }
@@ -90,12 +115,12 @@ describe("外部の unzip が受け付けること", () => {
   });
 
   /** 収集結果が 0 件のときに壊れた ZIP を返さないこと */
-  it("エントリが 1 件も無くても正当な ZIP になる", () => {
+  it.skipIf(!HAS_PYTHON3)("エントリが 1 件も無くても正当な ZIP になる", () => {
     const zip = writeZip([]);
     expect(readNamesWithPython(zip)).toEqual([]);
   });
 
-  it("大きめのデータでも往復する", () => {
+  it.skipIf(!HAS_UNZIP)("大きめのデータでも往復する", () => {
     const big = new Uint8Array(300_000);
     for (let i = 0; i < big.length; i++) big[i] = i & 0xff;
     const zip = writeZip([{ path: "big.bin", data: big }]);
@@ -154,7 +179,7 @@ describe("更新日時（MS-DOS 形式）", () => {
     return JSON.parse(out) as number[];
   }
 
-  it("渡した日時が zip に載る", () => {
+  it.skipIf(!HAS_PYTHON3)("渡した日時が zip に載る", () => {
     // MS-DOS 形式は秒が 2 秒単位なので、22 秒は 22 のまま残る
     const at = new Date(2024, 2, 5, 14, 30, 22);
     const zip = writeZip([{ path: "f.txt", data: bytes("x"), modifiedAt: at }]);
@@ -162,7 +187,7 @@ describe("更新日時（MS-DOS 形式）", () => {
   });
 
   /** 1980 年より前は MS-DOS 形式で表現できないので下限に丸める */
-  it("1980 年より前は下限に丸める", () => {
+  it.skipIf(!HAS_PYTHON3)("1980 年より前は下限に丸める", () => {
     const zip = writeZip([
       { path: "f.txt", data: bytes("x"), modifiedAt: new Date(1970, 0, 1) }
     ]);
@@ -174,7 +199,7 @@ describe("更新日時（MS-DOS 形式）", () => {
    * **範囲チェックでは足りない**——ガードを外すと 2200 年は 2072 年になり、
    * 「1980〜2107 の範囲内」という緩い主張は通ってしまう（review RS4）。下端と同じく厳密に固定する。
    */
-  it("表現できない未来も下限に丸める（巻き戻らない）", () => {
+  it.skipIf(!HAS_PYTHON3)("表現できない未来も下限に丸める（巻き戻らない）", () => {
     const zip = writeZip([
       { path: "f.txt", data: bytes("x"), modifiedAt: new Date(2200, 0, 1) }
     ]);
