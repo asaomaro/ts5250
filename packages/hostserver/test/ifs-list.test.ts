@@ -9,7 +9,7 @@ import {
   listReplyKind,
   canRestartFrom
 } from "../src/ifs/ifs-datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 固定データは**実機（PUB400）から採ったダンプそのもの**（research F1-3）。
@@ -73,7 +73,7 @@ describe("listFiles 要求", () => {
   });
 
   it("空パスは受け付けない", () => {
-    expect(() => buildListFilesRequest("")).toThrow(Tn5250Error);
+    expect(() => buildListFilesRequest("")).toThrow(As400Error);
   });
 
   it("restartId を渡すと名前の後ろに LL/CP/値の 10 バイトが付く", () => {
@@ -131,7 +131,7 @@ describe("ディレクトリ作成要求", () => {
   });
 
   it("空パスは受け付けない", () => {
-    expect(() => buildCreateDirRequest("")).toThrow(Tn5250Error);
+    expect(() => buildCreateDirRequest("")).toThrow(As400Error);
   });
 });
 
@@ -255,7 +255,7 @@ describe("一覧エントリの解析（実機ダンプ）", () => {
   });
 
   it("短すぎるフレームは PROTOCOL_ERROR", () => {
-    expect(() => parseListEntry(HELLO_FRAME.subarray(0, 40))).toThrow(Tn5250Error);
+    expect(() => parseListEntry(HELLO_FRAME.subarray(0, 40))).toThrow(As400Error);
   });
 
   it("REPLY_LIST_ENTRY は 0x8005", () => {

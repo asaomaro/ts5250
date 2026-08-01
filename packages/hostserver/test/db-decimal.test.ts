@@ -4,7 +4,7 @@ import {
   zonedDecimalToString,
   packedByteLength
 } from "../src/db/db-decimal.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 10 進数は number を経由せず文字列にする（2^53 超・金額の精度を落とさないため）。
@@ -64,7 +64,7 @@ describe("packedDecimalToString（パック 10 進数）", () => {
   });
 
   it("範囲外は PROTOCOL_ERROR", () => {
-    expect(() => packedDecimalToString(b(0x12), 0, 11, 2)).toThrow(Tn5250Error);
+    expect(() => packedDecimalToString(b(0x12), 0, 11, 2)).toThrow(As400Error);
     expect(() => packedDecimalToString(b(0x12), 0, 11, 2)).toThrow(/out of range/);
   });
 });

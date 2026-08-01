@@ -6,7 +6,7 @@ import {
   DEFAULT_PORT,
   PORT_MAPPER_PORT
 } from "../src/port-mapper.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /** 実機の 449 に依存しないよう、偽ポートマッパーを立てて mapperPort で差し向ける */
 let server: Server | undefined;
@@ -104,9 +104,9 @@ describe("resolveServicePort（偽ポートマッパー）", () => {
     await expect(resolveOn(port, "signon")).rejects.toMatchObject({ code: "CONNECT_FAILED" });
   });
 
-  it("エラーは Tn5250Error", async () => {
+  it("エラーは As400Error", async () => {
     const port = await fakeMapper(() => Buffer.from([0x00, 0, 0, 0, 0]));
-    await expect(resolveOn(port, "signon")).rejects.toBeInstanceOf(Tn5250Error);
+    await expect(resolveOn(port, "signon")).rejects.toBeInstanceOf(As400Error);
   });
 });
 

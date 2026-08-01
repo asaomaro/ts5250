@@ -6,7 +6,9 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
-import type { UploadRejection } from "@as400web/core/browser";
+// 実体（`@as400web/hostserver`）から取る。`import type` なので実行時にもバンドルにも入らない
+// （`ifsApi.ts` の同じ注記を参照）
+import type { UploadRejection } from "@as400web/hostserver";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
 import { isValidIdentifier, parseCsv } from "@as400web/core/browser";

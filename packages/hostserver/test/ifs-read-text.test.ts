@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { IfsConnection } from "../src/ifs/ifs-connection.js";
 import type { HostConnection } from "../src/transport/host-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * `readTextFile`（内容 ＋ CCSID タグ）を偽の接続で駆動する。
@@ -153,6 +153,6 @@ describe("readTextFile", () => {
   it("閉じた接続では呼べない", async () => {
     const ifs = IfsConnection.forTesting(fakeConn({ attrs: oa2Reply(37), data: [] }));
     ifs.close();
-    await expect(ifs.readTextFile("/home/x.txt")).rejects.toThrow(Tn5250Error);
+    await expect(ifs.readTextFile("/home/x.txt")).rejects.toThrow(As400Error);
   });
 });

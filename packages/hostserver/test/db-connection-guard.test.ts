@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbConnection } from "../src/db/db-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 文名・カーソル名は接続ごとに固定なので、同じ接続で問い合わせを重ねると踏み合う。
@@ -23,7 +23,7 @@ describe("DbConnection.acquire（問い合わせの重複実行を弾く）", ()
   it("実行中に重ねると拒否する", () => {
     const c = fakeConnection();
     c.acquire();
-    expect(() => c.acquire()).toThrow(Tn5250Error);
+    expect(() => c.acquire()).toThrow(As400Error);
     expect(() => c.acquire()).toThrow(/another query is in progress/);
   });
 

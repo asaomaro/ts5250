@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { SignonError } from "../src/signon.js";
 import { classifySignonReturnCode } from "../src/return-codes.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 認証失敗の原因は**型として**公開する。
@@ -10,8 +10,8 @@ import { Tn5250Error } from "@as400web/base";
 describe("SignonError", () => {
   const err = new SignonError(classifySignonReturnCode(0x0003000b)!);
 
-  it("Tn5250Error として捕捉できる", () => {
-    expect(err).toBeInstanceOf(Tn5250Error);
+  it("As400Error として捕捉できる", () => {
+    expect(err).toBeInstanceOf(As400Error);
     expect(err.code).toBe("UNAUTHENTICATED");
   });
 

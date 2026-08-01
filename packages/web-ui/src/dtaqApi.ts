@@ -7,7 +7,9 @@
  * 一覧だけは自前プロトコルに「全部覗く」操作が無いため **SQL サービス
  * `QSYS2.DATA_QUEUE_ENTRIES` を使う**（design 判断 3）。送受信・管理は自前プロトコル。
  */
-import type { DtaqAttributes, DtaqSearchOrder } from "@as400web/core/browser";
+// 実体（`@as400web/hostserver`）から取る。`import type` なので実行時にもバンドルにも入らない
+// （`ifsApi.ts` の同じ注記を参照）
+import type { DtaqAttributes, DtaqSearchOrder } from "@as400web/hostserver";
 
 export type DtaqEncoding = "utf8" | "base64" | "ebcdic";
 

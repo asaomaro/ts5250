@@ -13,7 +13,7 @@
  */
 import "./log-init.js";
 import { createHash } from "node:crypto";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { IfsConnection } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
           (ok ? "" : ` firstDiff=${diff}`);
       } catch (e) {
         failures++;
-        verdict = `ERR size=${size} ${e instanceof Tn5250Error ? `[${e.code}] ${e.message}` : String(e)}`;
+        verdict = `ERR size=${size} ${e instanceof As400Error ? `[${e.code}] ${e.message}` : String(e)}`;
       }
       process.stdout.write(`${verdict}\n`);
       rows.push(verdict);
@@ -123,6 +123,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  if (e instanceof Tn5250Error) fail(`失敗しました [${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`失敗しました [${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}`);
 });

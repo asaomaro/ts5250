@@ -19,7 +19,7 @@ import {
   DTAQ_REPLY,
   DTAQ_RC
 } from "../src/dtaq/dtaq-datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 const view = (b: Uint8Array): DataView => new DataView(b.buffer, b.byteOffset, b.byteLength);
 
@@ -189,7 +189,7 @@ describe("dtaqFailure（rc + CPF → 区別できるエラー）", () => {
     const f = new Uint8Array(22);
     view(f).setUint16(18, DTAQ_REPLY.read);
     const e = dtaqFailure("attributes", f);
-    expect(e).toBeInstanceOf(Tn5250Error);
+    expect(e).toBeInstanceOf(As400Error);
     expect(e.message).toMatch(/unexpected reply 0x8003/);
   });
 
@@ -205,7 +205,7 @@ describe("dtaqFailure（rc + CPF → 区別できるエラー）", () => {
   it("commonReplyRc は 22 バイト未満のフレームで PROTOCOL_ERROR（生の RangeError にしない）", () => {
     const shortFrame = new Uint8Array(21); // replyId は通るが rc(20-21) が読めない
     view(shortFrame).setUint16(18, DTAQ_REPLY.common);
-    expect(() => commonReplyRc(shortFrame)).toThrow(Tn5250Error);
+    expect(() => commonReplyRc(shortFrame)).toThrow(As400Error);
     expect(() => commonReplyRc(shortFrame)).toThrow(/too short/);
   });
 });

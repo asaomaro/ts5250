@@ -20,7 +20,7 @@
  * QSYS2 の SQL サービス（DATA_QUEUE_INFO / DATA_QUEUE_ENTRIES）と突き合わせて確かめること。
  */
 import "./log-init.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { DtaqConnection, dtaqDecodeEbcdic } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
@@ -156,6 +156,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  if (e instanceof Tn5250Error) fail(`失敗しました [${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`失敗しました [${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}`);
 });

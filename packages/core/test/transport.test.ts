@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createServer, type Server, type Socket } from "node:net";
 import { once } from "node:events";
 import { TcpTransport } from "../src/transport/tcp.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 async function withEchoServer(fn: (port: number, server: Server) => Promise<void>): Promise<void> {
   const sockets = new Set<Socket>();
@@ -52,7 +52,7 @@ describe("TcpTransport", () => {
     await once(server, "close");
 
     await expect(TcpTransport.connect({ host: "127.0.0.1", port })).rejects.toSatisfy(
-      (e: unknown) => e instanceof Tn5250Error && e.code === "CONNECT_FAILED"
+      (e: unknown) => e instanceof As400Error && e.code === "CONNECT_FAILED"
     );
   });
 
@@ -79,7 +79,7 @@ describe("TcpTransport", () => {
     await withEchoServer(async (port) => {
       const t = await TcpTransport.connect({ host: "127.0.0.1", port });
       t.close();
-      expect(() => t.send(Uint8Array.from([1]))).toThrow(Tn5250Error);
+      expect(() => t.send(Uint8Array.from([1]))).toThrow(As400Error);
     });
   });
 });

@@ -7,7 +7,7 @@ import {
 } from "../src/spool/spool-list.js";
 import type { CommandConnection } from "../src/command/command-connection.js";
 import { statusName, cyymmddToIso, hhmmssToReadable } from "../src/spool/spool-types.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { codecForCcsid } from "@as400web/ebcdic/codec";
 
 /**
@@ -107,7 +107,7 @@ describe("parseSpoolRecord", () => {
   });
 
   it("短すぎるレコードを拒否する", () => {
-    expect(() => parseSpoolRecord(new Uint8Array(50))).toThrow(Tn5250Error);
+    expect(() => parseSpoolRecord(new Uint8Array(50))).toThrow(As400Error);
   });
 });
 

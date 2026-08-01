@@ -201,21 +201,41 @@ pino を持ち込むと価値が半減する。**
   - 不変条件は `core/test/hostserver-not-reexported.test.ts`（**ビルド成果物を読む**）と
     `server/test/import-from-owner.test.ts`（走査）で固定。**再輸出を 1 行戻したとき
     `tsc -b` は通った**——型検査では捕まらない
-- [ ] 3c. `packages/core` の `dependencies` から `@as400web/hostserver` を完全に外す
+- [x] 3c. `packages/core` の `dependencies` から `@as400web/hostserver` を完全に外す
   - 3b の follow-up（`20260801-library-extraction-drop-core-reexport` decisions.md D5）。
-    実行時の辺は消えたが、**型のみの依存が残っている**——`browser.ts` が
-    `UploadRejection` / `IfsEntry` / `IfsListResult` / dtaq 型群を `export type` している
-  - 外すには **web-ui を触る**必要がある（web-ui が `@as400web/hostserver` を
-    `devDependencies` に持ち `import type` する形）。`devDependencies` なら実行時依存にならず、
-    バンドルにも入らない
-  - 3b では web-ui を対象外にしたので踏み込まなかった。**優先度は低い**——
-    実行時には何も引かないので、実害は「`npm i @as400web/core` で余計に 1 パッケージ入る」だけ
-- [ ] 3d. `tools/hostserver-check` の旧名 `Tn5250Error` を `As400Error` に改める
-  - 7 ファイルが旧名を使っている。`@as400web/base` の JSDoc は
-    「このリポジトリ内の新しいコードでは `As400Error` を使うこと」としている
-  - 3b では import 元の付け替えに徹し**識別子には触れなかった**（差分を
-    「どこから取るかだけが変わった」と読める状態に保つため。decisions.md D4）
-  - 同一クラスの別名なので**振る舞いは変わらない**。`errors-compat.test.ts` が同一性を固定している
+    実行時の辺は消えたが、**型のみの依存が残っていた**——`browser.ts` が
+    `UploadRejection` / `IfsEntry` / `IfsListResult` / dtaq 型群を `export type` していた
+  - **2026-08-01 完了**（`.aidev/works/20260801-library-extraction-cleanup`）。
+    予想どおり web-ui が `@as400web/hostserver` を `devDependencies` に持ち
+    `import type` する形にした。`packages/core` の `dependencies` は
+    **base / ebcdic / scs の 3 つだけ**になり、`tsconfig.json` の `references` からも外れた
+  - **触ったのは web-ui の 4 ファイルだけ**（`ifsApi.ts` / `dtaqApi.ts` /
+    `components/TransferPane.vue` / `test/use-ifs-tree.test.ts`）。
+    `useIfsTree.ts` / `IfsPane.vue` / `DtaqPane.vue` はローカルモジュール経由で型を得ており、
+    `@as400web/core/browser` を直接見ていなかった
+  - **`DtaqEntry` / `DtaqType` は移さず消した**——`browser.ts` が再輸出していたが
+    **web-ui での利用は実測 0 件**だった
+  - **実測値（次に測る人の基準線）**: web-ui 本番バンドル **359,853 バイトで前後一致**、
+    バンドル内の `node:net` / `node:tls` / `hostserver` の文字列とも **0 件**
+    （`import type` が実行時に消えていることの三重の裏取り）
+  - **ガードは宣言まで見る**（`core/test/hostserver-not-reexported.test.ts`）。
+    ソースの参照が 0 でも `package.json` に残っていれば「実行時に引かないだけで依存はしている」
+    状態に戻れるため。`browser.ts` の例外も消して「`src` に 0 件」に強化した
+  - **落とし穴**: root の `npm run build`（`tsc -b`）は **web-ui を検査していない**。
+    web-ui は project references に入っておらず、しかも `tsconfig.test.json` で
+    **test も型検査の対象**。root が緑のまま `web-ui/test/` が落ちた（AGENTS.md に反映済み）
+- [x] 3d. 旧名 `Tn5250Error` を新しいコードから消す
+  - ~~`tools/hostserver-check` の 7 ファイルが旧名を使っている~~
+    **← 起票時の見積もりが狭かった。** 実測すると **32 ファイル / 78 箇所**
+    （`packages/hostserver/test` 20・`tools/hostserver-check/src` 8・`packages/core/test` 4）。
+    tools だけ直しても約 55 箇所が残り、「新旧の混在を意図していない」という目的が達成されない
+  - **2026-08-01 完了**（同上）。使われ方は `import` と
+    `expect(() => …).toThrow(Tn5250Error)` の 2 種類だけで、**同一クラスなので振る舞いは変わらない**
+  - **残した 5 ファイル（意図的）**: `base/src/errors.ts`・`base/src/index.ts`（別名の定義そのもの。
+    外部利用者のための互換シム）／`core/src/index.ts`（公開 API の後方互換）／
+    `core/test/errors-compat.test.ts`（**新旧の同一性を検査するのが役目**。消すと検査が成立しない）／
+    `core/test/codec-reexport.test.ts`（改名の経緯を述べたコメント）
+  - `errors-compat.test.ts` が緑＝**旧名は引き続き `@as400web/base` と `@as400web/core` から取れる**
 - [ ] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
   - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式
   - 競合あり（例: green-screen-react）。差別化軸は「純 TypeScript・依存なし・トレース再生付き」

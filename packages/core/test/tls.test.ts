@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { TcpTransport } from "../src/transport/tcp.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /** 自己署名証明書を openssl で生成（テスト用） */
 function selfSigned(): { key: string; cert: string } {
@@ -36,7 +36,7 @@ describe("TcpTransport TLS", () => {
     await withTlsServer(async (port) => {
       await expect(
         TcpTransport.connect({ host: "127.0.0.1", port, tls: true, connectTimeoutMs: 5000 })
-      ).rejects.toSatisfy((e: unknown) => e instanceof Tn5250Error && e.code === "TLS_CERT_INVALID");
+      ).rejects.toSatisfy((e: unknown) => e instanceof As400Error && e.code === "TLS_CERT_INVALID");
     });
   });
 

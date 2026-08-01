@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:net";
 import { openHostConnection, type HostConnection } from "../src/transport/host-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * `request(frame, { readTimeoutMs })` の 1 往復タイムアウト上書きを、遅延応答する偽サーバーで確かめる。
@@ -51,7 +51,7 @@ describe("request の readTimeoutMs（1 往復のタイムアウト上書き）"
     // 既定 100ms、応答は 300ms 遅れる → 既定が生きていれば時間切れになる
     const port = await slowHost([300]);
     conn = await openHostConnection({ host: "127.0.0.1", port, timeoutMs: 100 });
-    await expect(conn.request(frame(0))).rejects.toThrow(Tn5250Error);
+    await expect(conn.request(frame(0))).rejects.toThrow(As400Error);
   });
 
   it("readTimeoutMs を渡すとその往復だけ延びる", async () => {

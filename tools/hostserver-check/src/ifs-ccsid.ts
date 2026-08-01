@@ -17,7 +17,7 @@
  * research のスパイクを、繰り返し使える形にしたもの（research F2〜F6）。
  */
 import "./log-init.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { canDecodeCcsid, decodeCcsidText, encodeCcsidText } from "@as400web/ebcdic";
 import { IfsConnection } from "@as400web/hostserver";
 
@@ -115,6 +115,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  if (e instanceof Tn5250Error) fail(`失敗しました [${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`失敗しました [${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}`);
 });

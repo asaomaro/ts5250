@@ -14,7 +14,7 @@ import {
   findCodePoint,
   padEbcdic
 } from "../src/spool/netprint-datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 実機で判明した規則を固定する。いずれも推測で組んで失敗した箇所:
@@ -144,7 +144,7 @@ describe("parseNpReply", () => {
   });
 
   it("短すぎる応答を拒否する", () => {
-    expect(() => parseNpReply(new Uint8Array(20))).toThrow(Tn5250Error);
+    expect(() => parseNpReply(new Uint8Array(20))).toThrow(As400Error);
   });
 
   it("LL が 6 未満なら打ち切る（無限ループ防止）", () => {

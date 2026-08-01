@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { FFW } from "../src/protocol/constants.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 const INPUT_FFW = FFW.ID_VALUE; // 入力可・英数
 const BYPASS_FFW = FFW.ID_VALUE | FFW.BYPASS;
@@ -22,9 +22,9 @@ describe("ScreenBuffer アドレス変換", () => {
 
   it("範囲外は PROTOCOL_ERROR", () => {
     const b = new ScreenBuffer();
-    expect(() => b.addrOf(0, 1)).toThrow(Tn5250Error);
-    expect(() => b.addrOf(25, 1)).toThrow(Tn5250Error);
-    expect(() => b.setChar(24 * 80, "x")).toThrow(Tn5250Error);
+    expect(() => b.addrOf(0, 1)).toThrow(As400Error);
+    expect(() => b.addrOf(25, 1)).toThrow(As400Error);
+    expect(() => b.setChar(24 * 80, "x")).toThrow(As400Error);
   });
 });
 

@@ -8,7 +8,7 @@ import { OPCODE, ESC, COMMAND } from "../src/protocol/constants.js";
 import { parseTraceJsonl, hexToBytes } from "../src/trace/trace.js";
 import { TelnetLayer } from "../src/telnet/telnet.js";
 import { ReplayTransport } from "../src/trace/replay.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,7 +39,7 @@ describe("ByteReader / ByteWriter", () => {
   it("レコード末尾越えの読みは PROTOCOL_ERROR", () => {
     const r = new ByteReader(Uint8Array.from([1]));
     r.u8();
-    expect(() => r.u8()).toThrow(Tn5250Error);
+    expect(() => r.u8()).toThrow(As400Error);
   });
 });
 

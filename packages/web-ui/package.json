@@ -18,6 +18,7 @@
     "vue": "^3.5.39"
   },
   "devDependencies": {
+    "@as400web/hostserver": "0.1.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^29.1.1",

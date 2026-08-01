@@ -10,7 +10,7 @@ import {
   SERVER_ID,
   HEADER_LEN
 } from "../src/datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * ホストサーバーのデータストリームは 20 バイトヘッダー＋LL/CP。
@@ -120,7 +120,7 @@ describe("parseReply", () => {
   });
 
   it("短すぎる応答を拒否する", () => {
-    expect(() => parseReply(new Uint8Array(10))).toThrow(Tn5250Error);
+    expect(() => parseReply(new Uint8Array(10))).toThrow(As400Error);
     expect(() => parseReply(new Uint8Array(10))).toThrow(/too short/);
   });
 

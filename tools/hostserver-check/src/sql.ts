@@ -6,7 +6,7 @@
  *     npm run sql -w @as400web/hostserver-check -- --tls "SELECT * FROM MYLIB.SQLTYPES"
  */
 import "./log-init.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { DbConnection, query, SqlError } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
@@ -54,6 +54,6 @@ async function main(): Promise<void> {
 
 main().catch((e: unknown) => {
   if (e instanceof SqlError) fail(`SQL エラー: SQLCODE=${e.sqlCode} SQLSTATE=${e.sqlState}\n${e.message}`);
-  if (e instanceof Tn5250Error) fail(`[${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`[${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}\n${e instanceof Error ? e.stack : ""}`);
 });

@@ -15,7 +15,7 @@
  * - フォルダをファイル削除で消そうとする → `ACCESS_DENIED`（種別を取り違えた症状。research F4）
  */
 import "./log-init.js";
-import { Tn5250Error, As400Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { IfsConnection } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
@@ -114,6 +114,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  if (e instanceof Tn5250Error) fail(`失敗しました [${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`失敗しました [${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}`);
 });

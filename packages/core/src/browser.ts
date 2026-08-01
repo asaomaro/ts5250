@@ -9,6 +9,14 @@
  * ここに置いてよいのは **`node:*` にも I/O にも触れないもの**に限る。
  * サイズも見ること——`@as400web/ebcdic` の変換表のように、純粋でも重いものはある
  * （だから `katakanaChar` は `katakana` サブパスから取っている。下記）。
+ *
+ * **`@as400web/hostserver` の型をここへ戻さないこと。** かつて `IfsEntry` などを
+ * `export type` で中継していたが、その 1 点のために `packages/core` が
+ * `node:net` を含むパッケージを `dependencies` に持つことになっていた。
+ * いまは **web-ui が hostserver を `devDependencies` に持って直接 `import type` する**
+ * （`20260801-library-extraction-cleanup`）。型は実行時に消えるので、
+ * ブラウザ向けパッケージが Node 専用パッケージを参照していても実体は届かない。
+ * `test/hostserver-not-reexported.test.ts` が「`src` に hostserver 参照 0 件」で固定している。
  */
 /** 全角判定（East Asian Width）。桁を数える側と描く側で表を分けないため core に置く */
 export { isFullWidth, isCertainWideGlyph } from "./text/east-asian-width.js";
@@ -25,29 +33,11 @@ export {
   summarizeSql,
   type SqlStatement
 } from "./sql/split-statements.js";
-/**
- * **ここから下の `@as400web/hostserver` 由来は `export type` を外してはならない。**
- *
- * `20260801-library-extraction-drop-core-reexport` で core は hostserver の再輸出をやめ、
- * `index.ts` からは 1 つも出さなくなった（`packages/server` は直参照へ移した）。
- * **残っているのはこの browser 入口の型だけ**で、これは web-ui のためにわざと残している——
- * 直参照にすると**ブラウザ向けパッケージが `node:net` を含むパッケージを依存に持つ**ことになる。
- *
- * 型は実行時に消えるので `dist/browser.js` には何も現れない。値 export に変えた瞬間に
- * バンドラが `node:net` を externalize し、実行時に落ちる。
- * `packages/core/package.json` の `dependencies` に `@as400web/hostserver` が残るのも
- * **この型解決のため**であって、実行時に読み込むためではない。
- * `test/hostserver-not-reexported.test.ts` が `dist` を読んで固定している。
- */
-/** 取り込みの拒否理由。UI が種類ごとに文言を組み立てるため型を共有する */
-export type { UploadRejection } from "@as400web/hostserver";
 export {
   assertIdentifier,
   isValidIdentifier,
   IDENTIFIER_PATTERN
 } from "@as400web/base";
-/** IFS の一覧。UI がツリーと一覧を組み立てるため型を共有する（型だけ＝実行時依存は増えない） */
-export type { IfsEntry, IfsListResult } from "@as400web/hostserver";
 /**
  * 文字コードの選択肢。**表を引き込まない `catalog` サブパスから取る**——
  * `@as400web/ebcdic`（root）は EBCDIC の変換表を計 18,900 行・約 1.17 MB 同梱するので、
@@ -65,13 +55,6 @@ export { TEXT_CCSIDS, ccsidLabel, type LineEnding } from "@as400web/ebcdic/catal
  * 英字を出すには 939 側の表が要る（`katakanaChar` だけだと 930 セッションで無反応になる）。
  */
 export { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
-/** データ待ち行列。UI が属性・送受信フォームを組み立てるため型を共有する */
-export type {
-  DtaqEntry,
-  DtaqAttributes,
-  DtaqType,
-  DtaqSearchOrder
-} from "@as400web/hostserver";
 /**
  * 埋め込み属性センチネル（SEU の色付き入力欄）。UI がオーバーレイの色分けと、入力欄の
  * 表示（センチネル→空白）に使う。属性バイト→色の解決に decodeAttribute も共有する。

@@ -24,7 +24,7 @@ import {
   fileErrorText,
   fileFailure
 } from "../src/ifs/ifs-datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * テンプレート長と項目位置は実機で確かめたもの。
@@ -161,7 +161,7 @@ describe("応答の解釈（取り違えやすい）", () => {
   });
 
   it("短すぎる応答を拒否する", () => {
-    expect(() => replyId(new Uint8Array(10))).toThrow(Tn5250Error);
+    expect(() => replyId(new Uint8Array(10))).toThrow(As400Error);
   });
 });
 
@@ -304,9 +304,9 @@ describe("rename（0x000F）と rmdir（0x000E）", () => {
   });
 
   it("空のパスを拒否する", () => {
-    expect(() => buildRemoveDirRequest("")).toThrow(Tn5250Error);
-    expect(() => buildRenameRequest("", "/b")).toThrow(Tn5250Error);
-    expect(() => buildRenameRequest("/a", "")).toThrow(Tn5250Error);
+    expect(() => buildRemoveDirRequest("")).toThrow(As400Error);
+    expect(() => buildRenameRequest("", "/b")).toThrow(As400Error);
+    expect(() => buildRenameRequest("/a", "")).toThrow(As400Error);
   });
 
   it("「空ではない」(rc=9) は専用のコードにする（502 に落とさない）", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { IfsConnection } from "../src/ifs/ifs-connection.js";
 import type { HostConnection } from "../src/transport/host-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * `listFiles` の連鎖ループそのものを、偽の接続で駆動して確かめる。
@@ -152,7 +152,7 @@ describe("listFiles: 一覧の組み立て", () => {
 
   it("空パスは受け付けない（素通しするとルートを一覧してしまう）", async () => {
     const { ifs } = listOn([endFrame(18)]);
-    await expect(ifs.listFiles("")).rejects.toThrow(Tn5250Error);
+    await expect(ifs.listFiles("")).rejects.toThrow(As400Error);
   });
 });
 
@@ -240,7 +240,7 @@ describe("listFiles: 異常系", () => {
   it("連鎖の途中で解析に失敗したら接続を捨てる", async () => {
     const broken = entryFrame({ name: "a", restartId: 1 }).subarray(0, 40);
     const { conn, ifs } = listOn([broken, endFrame(18)]);
-    await expect(ifs.listFiles("/d")).rejects.toThrow(Tn5250Error);
+    await expect(ifs.listFiles("/d")).rejects.toThrow(As400Error);
     expect(conn.closed).toBe(true);
     expect(ifs.isClosed).toBe(true);
   });

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { useIfsTree } from "../src/composables/useIfsTree.js";
-import type { IfsListResult } from "@as400web/core/browser";
+import type { IfsListResult } from "@as400web/hostserver";
 
 /**
  * ツリーの状態。**サーバーの「素直に読むと間違える」形を吸収できているか**を見る。

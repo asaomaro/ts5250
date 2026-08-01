@@ -6,7 +6,7 @@ import {
   decodeJobName,
   MAX_USER_LEN
 } from "../src/credentials.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
 
@@ -34,7 +34,7 @@ describe("userIdEbcdic37（要求 CP 0x1104 用）", () => {
   });
 
   it("11 文字以上を拒否する", () => {
-    expect(() => userIdEbcdic37("ABCDEFGHIJK")).toThrow(Tn5250Error);
+    expect(() => userIdEbcdic37("ABCDEFGHIJK")).toThrow(As400Error);
     expect(() => userIdEbcdic37("ABCDEFGHIJK")).toThrow(/too long/);
   });
 

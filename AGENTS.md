@@ -55,7 +55,7 @@
 | `@as400web/ebcdic` | EBCDIC 変換（SBCS / DBCS / CCSID テキスト） | なし |
 | `@as400web/scs` | スプールのバイト列 → 論理ページ | ebcdic |
 | `@as400web/hostserver` | ホストサーバー群のクライアント（signon / SQL / IFS / DDM / DTAQ / スプール / コマンド） | base, ebcdic, scs |
-| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs（＋hostserver は**型のみ**） |
+| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs |
 
 - **`base` に置くのは「複製すると壊れるもの」だけ**で、共通で使うものの物置ではない。
   `As400Error` は `instanceof` で判定され、`log.ts` は可変状態を持つ——どちらも実体が 2 つに
@@ -66,12 +66,16 @@
   `packages/server/test/import-from-owner.test.ts` が走査して塞いでいる
   （`As400Error` のように core が今も再輸出している名前は、core 経由でも**通ってしまう**——
   通るが出どころが見えなくなるので、型検査ではなく走査で止める）。
-- **`core` はホストサーバーを実行時に引かない。** 切り出し直後は後方互換のため再輸出していたが、
-  利用側を直参照へ移して撤去した（`packages/core/test/hostserver-not-reexported.test.ts`）。
-  残るのは `@as400web/core/browser` の**型のみ再輸出 3 箇所**だけで、これは web-ui のために
-  意図的に残している（直参照にするとブラウザ向けパッケージが `node:net` を含むパッケージを
-  依存に持つ）。**`export type` を値 export に変えてはならない。**
+- **`core` はホストサーバーに一切依存しない**（実行時も型も）。切り出し直後は後方互換のため
+  再輸出していたが、利用側を直参照へ移して撤去した。宣言（`package.json` / `tsconfig.json`）も
+  含めて `packages/core/test/hostserver-not-reexported.test.ts` が固定している——
+  **ソースに参照が無くても宣言が残っていれば元に戻れてしまう**ため。
   **逆向き（`hostserver → core`）も禁止**（`packages/hostserver/test/no-core-dependency.test.ts`）。
+- **web-ui はホストサーバーの型を実体から `import type` する**（`@as400web/hostserver` は
+  web-ui の **`devDependencies`**）。以前は `@as400web/core/browser` が中継していたが、
+  その 1 点のために core が `node:net` を含むパッケージを `dependencies` に持っていた。
+  `import type` は実行時コードを出さないので、バンドルにも本番インストールにも入らない
+  （バンドルの実測と `node:net` 0 件で裏を取っている）。**`dependencies` に移してはならない。**
 - **再輸出の列挙を落としても内部は壊れない**——壊れるのは外の利用者だけ、という気づけない回帰に
   なるので、到達可能性を実行時に検査している（`codec-reexport.test.ts`）。
   `export *` は使わず公開面は列挙する。
@@ -109,6 +113,12 @@ web-ui の見た目・振る舞いの規約は **[docs/UI-DESIGN.md](docs/UI-DES
 
 - **ビルドに vue-tsc を含める**: `vite build` はテンプレートの型チェックをしないため、テンプレート型エラーが
   潜伏しうる。`npm run build -w @as400web/web-ui`（`vue-tsc -b && vite build`）で必ず型チェックを通す。
+- **root の `npm run build`（`tsc -b`）は web-ui を検査していない。** web-ui は root の
+  project references に入っておらず、`vue-tsc` で別に型検査される。しかも web-ui は
+  `tsconfig.test.json` を持ち **`test/` も型検査の対象**（core / hostserver は `include: ["src"]` で
+  test を見ないので、取り違えやすい）。**共有型に触る変更では root が緑でも安心しないこと**
+  ——`@as400web/core/browser` の型を 1 つ消したとき、root は緑のまま
+  `packages/web-ui/test/` が落ちた（`20260801-library-extraction-cleanup`）。
 - **web-ui のテストはパッケージ dir から実行**する（`cd packages/web-ui && npx vitest run`）。
   リポジトリルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、
   **実際とは違う失敗が出る**（`--root packages/web-ui` を付けても足りない。実測で 2 件が偽陽性になった）。

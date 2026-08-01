@@ -13,7 +13,7 @@
  * 配置を変えるときは必ず実機のバイトを目で見ること。
  */
 import "./log-init.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 import { IfsConnection } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
@@ -157,6 +157,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  if (e instanceof Tn5250Error) fail(`失敗しました [${e.code}] ${e.message}`);
+  if (e instanceof As400Error) fail(`失敗しました [${e.code}] ${e.message}`);
   fail(`予期しないエラー: ${String(e)}`);
 });

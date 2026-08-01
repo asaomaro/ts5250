@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:net";
 import { openHostConnection, type HostConnection } from "../src/transport/host-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 連鎖応答（listFiles のように 1 要求へ複数フレームが返る形）の受け取りを、
@@ -103,7 +103,7 @@ describe("requestStream（連鎖応答）", () => {
     ).rejects.toThrow("途中で失敗");
 
     // 残骸を次の応答として読まず、はっきり失敗する
-    await expect(c.request(frame(0))).rejects.toThrow(Tn5250Error);
+    await expect(c.request(frame(0))).rejects.toThrow(As400Error);
     await expect(c.request(frame(0))).rejects.toThrow(/abandoned mid-chain/);
   });
 
@@ -142,7 +142,7 @@ describe("requestStream（連鎖応答）", () => {
     const c = await openHostConnection({ host: "127.0.0.1", port, timeoutMs: 100 });
     conn = c;
 
-    await expect(c.request(frame(0))).rejects.toThrow(Tn5250Error);
+    await expect(c.request(frame(0))).rejects.toThrow(As400Error);
     await expect(c.request(frame(0))).rejects.toThrow(/abandoned mid-chain/);
   });
 

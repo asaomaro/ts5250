@@ -11,7 +11,7 @@ import {
   buildCallProgramRequest,
   paramMaxLength
 } from "../src/command/command-datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /** 実機（PUB400 / IBM i 7.5）が返した交換属性の応答 */
 const REAL_EXCHANGE = Buffer.from(
@@ -60,7 +60,7 @@ describe("parseExchangeAttributesReply（実機の応答）", () => {
   });
 
   it("短すぎる応答を拒否する", () => {
-    expect(() => parseExchangeAttributesReply(new Uint8Array(20))).toThrow(Tn5250Error);
+    expect(() => parseExchangeAttributesReply(new Uint8Array(20))).toThrow(As400Error);
   });
 
   it("戻りコードが未知の値なら拒否する", () => {

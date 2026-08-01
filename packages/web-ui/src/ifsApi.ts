@@ -6,7 +6,12 @@
  *
  * ここは応答をそのまま返し、解釈はしない（解釈は composable の仕事）。
  */
-import type { IfsEntry, IfsListResult, LineEnding } from "@as400web/core/browser";
+// **IFS の型は実体（`@as400web/hostserver`）から取る。** core を経由すると、その 1 点のために
+// `packages/core` が `node:net` を含むパッケージを `dependencies` に持つことになる
+// （`20260801-library-extraction-cleanup`）。hostserver は web-ui の `devDependencies` で、
+// **`import type` なので実行時にもバンドルにも入らない**。
+import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
+import type { LineEnding } from "@as400web/core/browser";
 
 /** サーバーが返すエラー本文 */
 export interface IfsError {

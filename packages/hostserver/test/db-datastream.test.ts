@@ -10,7 +10,7 @@ import {
   ORS
 } from "../src/db/db-datastream.js";
 import { parseReply, findParam, HEADER_LEN } from "../src/datastream.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * database は signon と同じ 20 バイトヘッダー ＋ 20 バイト template。
@@ -74,7 +74,7 @@ describe("parseDbTemplate", () => {
   });
 
   it("短すぎるフレームを拒否する", () => {
-    expect(() => parseDbTemplate(new Uint8Array(30))).toThrow(Tn5250Error);
+    expect(() => parseDbTemplate(new Uint8Array(30))).toThrow(As400Error);
     expect(() => parseDbTemplate(new Uint8Array(30))).toThrow(/too short/);
   });
 

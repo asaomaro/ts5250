@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { decodeValue, decodeRow, toColumnMeta, type ColumnMeta } from "../src/db/db-decode.js";
 import { DB2 } from "../src/db/db-types.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /**
  * 実機テスト表 MYLIB.SQLTYPES の型を、固定バイト列で再現して検証する。
@@ -173,7 +173,7 @@ describe("日付・時刻（書式化済みの文字列）", () => {
 describe("範囲外・未対応", () => {
   it("列がバッファをはみ出したら PROTOCOL_ERROR", () => {
     const m = meta({ type: DB2.INTEGER, offset: 8, length: 4 });
-    expect(() => decodeValue(new Uint8Array(4), m, false)).toThrow(Tn5250Error);
+    expect(() => decodeValue(new Uint8Array(4), m, false)).toThrow(As400Error);
     expect(() => decodeValue(new Uint8Array(4), m, false)).toThrow(/out of range/);
   });
 
@@ -183,7 +183,7 @@ describe("範囲外・未対応", () => {
       decodeValue(new Uint8Array(4), m, false);
       expect.unreachable();
     } catch (e) {
-      expect((e as Tn5250Error).code).toBe("HOST_SERVER_UNSUPPORTED");
+      expect((e as As400Error).code).toBe("HOST_SERVER_UNSUPPORTED");
     }
   });
 });

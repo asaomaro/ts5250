@@ -18,12 +18,14 @@ import * as hostserver from "@as400web/hostserver";
  * あちらは「再輸出が到達可能なこと」を検査していた。同じ名前のまま中身だけ反転させると、
  * 次に読む人が中身と逆の期待をするので、ファイル名ごと変えてある。
  *
- * **`browser.ts` の型のみ再輸出 3 箇所は例外**（`UploadRejection` / `IfsEntry` /
- * `IfsListResult` / dtaq 型群）。web-ui がこれを使うが、直参照にすると
- * **ブラウザ向けパッケージが `node:net` を含むパッケージを依存に持つ**ことになる。
- * `export type` は実行時に消えるので、`core → hostserver` は**型のみ**の辺として残る
- * （`packages/core/package.json` の `dependencies` に `@as400web/hostserver` が残るのは
- * `dist/browser.d.ts` を型検査する利用者のため。実行時には読み込まれない）。
+ * **例外は無い（`20260801-library-extraction-cleanup` で無くした）。**
+ * 一時は `browser.ts` が hostserver の型を `export type` で中継しており、その 1 点のために
+ * `packages/core` が `node:net` を含むパッケージを `dependencies` に持っていた。
+ * いまは **web-ui が hostserver を `devDependencies` に持って直接 `import type` する**ので、
+ * core は宣言ごと手を切っている。
+ *
+ * **宣言（`package.json` / `tsconfig.json`）も検査する。** ソースに参照が無くても
+ * 宣言が残っていれば「実行時に引かないだけで依存はしている」状態に戻れてしまう。
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +42,14 @@ function collect(dir: string): string[] {
   return out;
 }
 
-/** ビルド成果物を読む。無ければ **落とす**（skip にすると「ビルドしていないから緑」になる） */
+/**
+ * ビルド成果物を**コメントを剥がして**読む。無ければ **落とす**
+ * （skip にすると「ビルドしていないから緑」という無意味な緑になる）。
+ *
+ * **剥がすのは必須**——`tsc` は JSDoc を出力にそのまま残すので、
+ * 「hostserver をここへ戻すな」と書いた注意書き自体が検査に引っかかる（実際に踏んだ）。
+ * 見たいのは**実行時に解決されるモジュール指定子**であってコメントの文字列ではない。
+ */
 function readDist(name: string): string {
   const p = join(distDir, name);
   if (!existsSync(p)) {
@@ -49,7 +58,9 @@ function readDist(name: string): string {
         "（skip にすると「ビルドしていないから緑」という無意味な緑になる）"
     );
   }
-  return readFileSync(p, "utf8");
+  return readFileSync(p, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
 }
 
 describe("core はホストサーバーを再輸出しない", () => {
@@ -65,28 +76,41 @@ describe("core はホストサーバーを再輸出しない", () => {
     expect(hostserver.DbConnection).toBeTypeOf("function");
   });
 
-  it("src が hostserver を参照するのは browser.ts の `export type` だけ", () => {
+  it("src のどこからも hostserver を参照しない（例外なし）", () => {
     const offenders: string[] = [];
     for (const f of collect(srcDir)) {
       const src = readFileSync(f, "utf8");
-      const rel = relative(srcDir, f);
       for (const m of src.matchAll(/^.*@as400web\/hostserver.*$/gm)) {
         const line = m[0];
         if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue; // コメントは対象外
-        // browser.ts の `export type { … } from "@as400web/hostserver"` だけ許す。
-        // **文の頭まで遡ってから判定する**——複数行に折れていると閉じ側の
-        // `} from "@as400web/hostserver";` しか引っかからず、その行だけでは
-        // `export type` か `export` かを見分けられない。
-        // `lastIndexOf(…, m.index)` は m.index 自身も探索対象に含むので、
-        // 1 行に収まっている文ではその行自身の `export` を指す。
-        if (rel === "browser.ts") {
-          const stmtStart = src.lastIndexOf("export ", m.index);
-          if (stmtStart >= 0 && /^export\s+type\s*\{/.test(src.slice(stmtStart))) continue;
-        }
-        offenders.push(`${rel}: ${line.trim()}`);
+        offenders.push(`${relative(srcDir, f)}: ${line.trim()}`);
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("package.json / tsconfig.json のどちらにも hostserver の宣言が無い", () => {
+    // **ソースに参照が無いだけでは足りない。** 宣言が残っていれば
+    // 「実行時に引かないだけで依存はしている」状態に戻れてしまう
+    const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(Object.keys(pkg.dependencies)).not.toContain("@as400web/hostserver");
+    expect(Object.keys(pkg.devDependencies ?? {})).not.toContain("@as400web/hostserver");
+
+    const tsconfig = readFileSync(join(here, "..", "tsconfig.json"), "utf8");
+    expect(tsconfig).not.toContain("hostserver");
+  });
+
+  it("web-ui は hostserver を devDependencies にだけ持つ（型のみ利用）", () => {
+    // 型だけ使うので実行時依存ではない。`dependencies` に入れると本番インストールに
+    // Node 専用パッケージが混じる（`20260801-library-extraction-cleanup` D1）
+    const wu = JSON.parse(
+      readFileSync(join(here, "..", "..", "web-ui", "package.json"), "utf8")
+    ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+    expect(Object.keys(wu.devDependencies)).toContain("@as400web/hostserver");
+    expect(Object.keys(wu.dependencies)).not.toContain("@as400web/hostserver");
   });
 
   it("dist/index.js に hostserver への実行時 import が無い", () => {

@@ -8,7 +8,7 @@ import {
   parseListInfo
 } from "../src/list/openlist.js";
 import type { CommandConnection } from "../src/command/command-connection.js";
-import { Tn5250Error } from "@as400web/base";
+import { As400Error } from "@as400web/base";
 
 /** QGY のオープンリスト API に共通する部分 */
 describe("padEbcdic", () => {
@@ -65,7 +65,7 @@ describe("parseListInfo", () => {
   });
 
   it("短すぎるデータを拒否する", () => {
-    expect(() => parseListInfo(new Uint8Array(8))).toThrow(Tn5250Error);
+    expect(() => parseListInfo(new Uint8Array(8))).toThrow(As400Error);
   });
 });
 
