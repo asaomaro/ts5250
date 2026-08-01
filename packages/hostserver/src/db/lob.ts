@@ -138,6 +138,56 @@ export async function retrieveLob(
  * LOB データ長（CP `0x3810`）を読む。
  * 先頭 2 バイトが長さの幅——0 なら長さなし、4 なら 32 ビット、それ以外は上下 32 ビット。
  */
+/**
+ * 「そのロケーターはもう無い」を表す戻りコード。
+ * `-401` は原典のコメントが挙げる値、`-816` は**実機（7.3）が実際に返した値**。
+ * どちらも二重解放の合図なので騒がない。
+ */
+const ALREADY_FREED: ReadonlySet<number> = new Set([-401, -816]);
+
+/**
+ * ロケーターを解放する（`0x1819`）。
+ *
+ * **後始末なので、失敗しても投げない。** 呼び出し側の目的は既に果たされており、
+ * ここで例外にすると「値は取れたのに落ちる」ことになる。原典も同じ
+ * （`JDLobLocator.free()` は戻りのエラーを読み捨てる。コメントに
+ * `7,-401 signals already free` / `host now has various errors if locator is already freed`）。
+ *
+ * ただし**黙らせない**——`warn` で残す。既定の sink で消える `debug` にすると、
+ * 解放が効いていないことに誰も気づけない（`20260801-sql-lob-failed-state` で踏んだ）。
+ *
+ * @returns 解放要求が戻りコード 0 で返ったら true
+ */
+export async function freeLob(conn: DbConnection, locator: number): Promise<boolean> {
+  try {
+    const reply = await conn.request({
+      reqId: DB_REQ.freeLob,
+      // **結果データを要求しない**（原典も RETURN_DATA のみ）
+      orsBitmap: ORS.sendReplyImmediately,
+      params: [uint32(DB_CP.lobLocatorHandle, locator)],
+      allowTemplateError: true
+    });
+    const t = reply.dbTemplate;
+    if (t.rcClass !== 0) {
+      // **解放済みなら目的は達している**ので騒がない。
+      // 原典のコメントは `7 / -401` を「既に解放済み」の合図として挙げるが、
+      // **実機（IBM i 7.3）は `2 / -816` を返した**——原典自身が
+      // 「host now has various errors if locator is already freed」と書いており、
+      // **ホストや版数で変わる**。どちらも「もう無い」なので同じ扱いにする
+      // （`20260801-lob-locator-free`）
+      const already = ALREADY_FREED.has(t.rcClassReturnCode);
+      const line = `LOB ${locator} の解放が拒まれた（rcClass=${t.rcClass}, code=${t.rcClassReturnCode}）`;
+      if (already) log.debug(`${line}——既に解放済み`);
+      else log.warn(line);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    log.warn(`LOB ${locator} の解放に失敗: ${String(e)}`);
+    return false;
+  }
+}
+
 export function parseLobLength(value: Uint8Array): number {
   const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
   const width = view.getUint16(0);

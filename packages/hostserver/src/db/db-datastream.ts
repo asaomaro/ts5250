@@ -25,6 +25,12 @@ export const DB_TEMPLATE_LEN = 20;
 export const DB_REQ = {
   /** ロケーターから LOB の本体を取る */
   retrieveLobData: 0x1816,
+  /**
+   * ロケーターを解放する。原典 `DBSQLRequestDS.FUNCTIONID_FREE_LOB`。
+   * パラメータは**ロケーターハンドル 1 つだけ**で、ORS は RETURN_DATA のみ
+   * （`20260801-lob-batch-retrieval-research`）
+   */
+  freeLob: 0x1819,
   prepare: 0x1800,
   describe: 0x1801,
   describeParameterMarker: 0x1802,

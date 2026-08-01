@@ -41,7 +41,7 @@ export {
 export { DbConnection, type DbConnectOptions } from "./db/db-connection.js";
 export { openQuery } from "./db/query.js";
 export { type LobOptions } from "./db/query.js";
-export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./db/lob.js";
+export { retrieveLob, freeLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./db/lob.js";
 export { query, stream, SqlError, type Row, type QueryResult } from "./db/query.js";
 // 上限つき取得。**ホストから取ってくる量**を抑える（`query` は全件取得）
 export { queryLimited, type LimitedResult } from "./db/query.js";
