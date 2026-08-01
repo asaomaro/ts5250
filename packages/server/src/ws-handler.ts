@@ -508,7 +508,14 @@ export class WsConnection {
     this.detachReport?.();
     this.detachReport = undefined;
     if (this.sessionId) {
-      void this.deps.sessions.close(this.sessionId).catch(() => {});
+      // **常駐プリンターは切らない。** 監視と同じで、購読を外すだけ——
+      // 「設定が仕事をする」サービス型なので、タブを閉じたら帳票が来なくなるのは
+      // 利用者の期待に反する（design D1）。フック（onReport / onOutputWarn /
+      // onOutputStatus）は上で外しているが、**記録はエントリ側に溜まり続ける**ので、
+      // 開き直したときに閉じている間のぶんを読める
+      if (!this.deps.sessions.isResident(this.sessionId)) {
+        void this.deps.sessions.close(this.sessionId).catch(() => {});
+      }
       this.sessionId = undefined;
     }
     this.send({ type: "closed", reason });

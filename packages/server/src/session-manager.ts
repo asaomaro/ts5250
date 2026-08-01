@@ -79,6 +79,9 @@ export type IdleLimit = number | "never";
  */
 export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
 
+/** 常駐プリンターの既定の上限。表示の上限（8）とは別枠（design D3） */
+export const DEFAULT_MAX_RESIDENT_PRINTERS = 4;
+
 /**
  * 切断を通知しない入口（MCP）のアイドル上限を決める。**`"never"` は通さない。**
  *
@@ -237,6 +240,16 @@ export interface PrinterEntry {
   onOutputStatus?: (s: SpoolOutputStatus) => void;
   /** このセッションのアイドルタイムアウト（`OpenPrinterOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
+  /**
+   * **常駐**（サービス型）。WS が切れても切らず、アイドル掃除でも消さない。
+   *
+   * **呼び出し側が指定するフラグではない**——`output`（自動出力設定）の有無から
+   * `openPrinter` が決める。出力設定はサーバー設定由来のときしか供給されない
+   * （`config-resolver.ts` の信頼境界 5 層目）ので、**常駐の条件は信頼境界とちょうど重なる**。
+   * 別の判定軸を足すと、二つがずれたときに「設定が効かないのに常駐する」等が生える
+   * （design D1）。
+   */
+  resident: boolean;
 }
 
 /**
@@ -296,6 +309,11 @@ export interface SessionManagerOptions {
    * 共有サーバーで有限に戻したい運用のために `--idle-timeout` を用意している。
    */
   idleTimeoutMs?: IdleLimit;
+  /**
+   * **常駐プリンターの上限**（既定 4）。表示セッションの上限とは別枠（design D3）。
+   * 無制限に張らせないための歯止めで、`WatchRegistry` の `maxWatches` と同じ考え方。
+   */
+  maxResidentPrinters?: number;
   /** 書き出しできないスプールを拾う見張りの間隔（ミリ秒。既定 10 秒） */
   rescueIntervalMs?: number;
   /** 現在時刻（テスト注入用） */
@@ -344,6 +362,7 @@ export class SessionManager {
   private readonly printers = new Map<string, PrinterEntry>();
   private readonly maxSessions: number;
   private readonly idleTimeoutMs: IdleLimit;
+  private readonly maxResidentPrinters: number;
   /** 書き出しできないスプールを拾う見張りの間隔（既定 10 秒） */
   private readonly rescueIntervalMs: number;
   private readonly now: () => number;
@@ -353,6 +372,7 @@ export class SessionManager {
   constructor(opts: SessionManagerOptions = {}) {
     this.maxSessions = opts.maxSessions ?? 8;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? "never";
+    this.maxResidentPrinters = opts.maxResidentPrinters ?? DEFAULT_MAX_RESIDENT_PRINTERS;
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
     this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
@@ -365,8 +385,21 @@ export class SessionManager {
     this.sweepTimer.unref?.();
   }
 
+  /**
+   * 上限の判定に使う席数。**常駐プリンターは数えない**（design D3）。
+   *
+   * 上限は「同時に人が使う席」の数として決まっている。常駐は人が座っていないので、
+   * 同じ枠を食うと**帳票を待たせておくと画面が開けない**という説明しにくい失敗になる。
+   */
   get size(): number {
-    return this.sessions.size + this.printers.size;
+    return this.sessions.size + this.residentCount(false);
+  }
+
+  /** 常駐している（`true`）／していない（`false`）プリンターの数 */
+  private residentCount(resident: boolean): number {
+    let n = 0;
+    for (const e of this.printers.values()) if (e.resident === resident) n++;
+    return n;
   }
 
   async open(opts: OpenOptions): Promise<SessionEntry> {
@@ -543,7 +576,16 @@ export class SessionManager {
   }
 
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
-    if (this.size >= this.maxSessions) {
+    // **常駐かどうかは出力設定の有無で決まる**（design D1）。上限もそれで分かれる
+    const resident = opts.output !== undefined;
+    if (resident) {
+      if (this.residentCount(true) >= this.maxResidentPrinters) {
+        throw new As400Error(
+          "SESSION_LIMIT",
+          `resident printer limit reached (${this.maxResidentPrinters})`
+        );
+      }
+    } else if (this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
     const session = await PrinterSession.connect({ ...opts, id: opts.id ?? randomUUID() });
@@ -568,6 +610,7 @@ export class SessionManager {
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
       outputWarnings: [],
       outputStatuses: [],
+      resident,
       ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     this.printers.set(id, entry);
@@ -709,6 +752,16 @@ export class SessionManager {
     return entries.filter((e) => e.owner === user.username);
   }
 
+  /**
+   * その id が**常駐**のプリンターか。WS が切断時に「切ってよいか」を判断するのに使う。
+   *
+   * 表示セッションや存在しない id は `false`——**知らないものを常駐扱いしない**
+   * （切り忘れて溜まる方が、切りすぎるより後から気づきにくい）。
+   */
+  isResident(id: string): boolean {
+    return this.printers.get(id)?.resident === true;
+  }
+
   listPrinters(user?: AuthUser): PrinterEntry[] {
     return this.ownedOnly([...this.printers.values()], user);
   }
@@ -844,6 +897,9 @@ export class SessionManager {
       }
     }
     for (const [id, entry] of this.printers) {
+      // **常駐は掃除しない。** 何も届かない状態が正常なので、
+      // アイドルを「使われていない」の合図にできない（design D1 / watch-registry と同じ理屈）
+      if (entry.resident) continue;
       if (expired(entry)) {
         entry.session.disconnect();
         this.printers.delete(id);
