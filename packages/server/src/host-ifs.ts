@@ -499,6 +499,18 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     return await withIfs(c, body.source, async (conn) => {
       let data: Uint8Array;
       let substituted = 0;
+      /**
+       * **新規作成するファイルに付けるタグ。**
+       *
+       * 指定しないとサーバー既定が付き、**中身と食い違う**——実機で
+       * UTF-8 を書いたファイルに `1041` が付いた（PUB400 では `850`）。
+       * 読む側は決定表①（中身推定）で救えるが、**他ツールから見ると嘘のタグ**になる。
+       *
+       * バイナリ（base64）には文字コードの概念が無いので付けない。
+       * 既存ファイルのタグは `dataCcsid` を渡しても**変わらない**（実機で確認済み）ので、
+       * 他人のファイルのタグを勝手に付け替えることにはならない。
+       */
+      let dataCcsid: number | undefined;
       if (body.encoding === "base64") {
         // base64 は**バイト列をそのまま置く**経路（アップロード・バイナリ）。
         // 文字コードの変換をしないので ccsid / newline / bom は使わない
@@ -506,7 +518,9 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       } else {
         // **読んだときの文字コードで書き戻す**。無指定は従来どおり UTF-8。
         // 行末（EBCDIC の 0x15）と BOM も、読んだときの流儀に戻す
-        const encoded = encodeIfsText(body.ccsid ?? 1208, body.content, {
+        // 符号化に使った文字コードを、そのままタグにする（既定は UTF-8）
+        dataCcsid = body.ccsid ?? 1208;
+        const encoded = encodeIfsText(dataCcsid, body.content, {
           ...(body.newline !== undefined ? { newline: body.newline } : {}),
           ...(body.bom !== undefined ? { bom: body.bom } : {})
         });
@@ -522,7 +536,10 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
         data = encoded.bytes;
         substituted = encoded.substituted;
       }
-      await conn.writeFile(body.path, data, { create: body.create ?? true });
+      await conn.writeFile(body.path, data, {
+        create: body.create ?? true,
+        ...(dataCcsid !== undefined ? { dataCcsid } : {})
+      });
       log.info(
         {
           user: c.get("user")?.username,

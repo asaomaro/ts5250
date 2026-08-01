@@ -319,3 +319,10 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 `sudo sysctl -w net.ipv4.ip_unprivileged_port_start=440`（作業後は 1024 に戻す）。
 解析時は telnet のエスケープを先に解除すること（`IAC EOR` を落とし `IAC IAC` → `0xFF`）。
 **記録にはサインオンのパスワードが平文で残る。解析が済んだら削除すること。**
+
+`research-ifs-dataccsid.mjs` — **IFS の新規ファイルに付く CCSID タグの実測**。
+`dataCcsid` を指定しない／`1208`／`1399`／既存の上書き、の 4 条件を比べる。
+**指定は採用される**が、**既存ファイルのタグは上書きでも変わらない**。
+既定タグは機械ごとに違う（実機は `1041` / PUB400 は `850`）ので、
+**中身が UTF-8 でも嘘のタグが付く**（`20260801-ifs-write-dataccsid`）。
+置いたファイルは `finally` で消す。

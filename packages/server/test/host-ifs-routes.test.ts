@@ -56,8 +56,16 @@ function fakeConn(opts: FakeOpts): IfsConnection {
       const ccsid = opts.tags?.[path];
       return ccsid !== undefined ? { data, ccsid } : { data };
     },
-    async writeFile(path: string, data: Uint8Array): Promise<void> {
-      opts.calls?.push(`write ${path} ${data.length}`);
+    async writeFile(
+      path: string,
+      data: Uint8Array,
+      wopts: { create?: boolean; dataCcsid?: number } = {}
+    ): Promise<void> {
+      // **タグも記録する**——指定を落としても書き込み自体は成功するので、
+      // 長さだけ見ていると「中身と食い違うタグ」に気づけない
+      opts.calls?.push(
+        `write ${path} ${data.length}${wopts.dataCcsid !== undefined ? ` ccsid=${wopts.dataCcsid}` : ""}`
+      );
       if (opts.fail) throw opts.fail;
       const at = opts.errorsAt?.[path];
       if (at) throw at;
@@ -288,7 +296,8 @@ describe("write / mkdir / delete", () => {
     const calls: string[] = [];
     const res = await call(appWith({ calls }), "write", { path: "/d/f", content: "abc" });
     expect(await res.json()).toMatchObject({ bytes: 3 });
-    expect(calls).toContain("write /d/f 3");
+    // **既定は UTF-8 なのでタグも 1208**。渡さないとサーバー既定（実機は 1041 / 850）が付く
+    expect(calls).toContain("write /d/f 3 ccsid=1208");
   });
 
   it("指定された文字コードで符号化して書く（行末も戻す）", async () => {
@@ -299,8 +308,9 @@ describe("write / mkdir / delete", () => {
       ccsid: 37,
       newline: "nel"
     });
-    // "a" 0x15 "b" 0x15 の 4 バイト（UTF-8 なら 4 バイトだが中身が違う）
-    expect(calls).toContain("write /d/f 4");
+    // "a" 0x15 "b" 0x15 の 4 バイト（UTF-8 なら 4 バイトだが中身が違う）。
+    // **符号化に使った文字コードがそのままタグになる**
+    expect(calls).toContain("write /d/f 4 ccsid=37");
   });
 
   it("マップ不能な文字は SUB に落として件数を返す（保存は止めない）", async () => {
@@ -327,6 +337,7 @@ describe("write / mkdir / delete", () => {
       content: "wcI=",
       encoding: "base64"
     });
+    // **バイナリにはタグを付けない**（文字コードの概念が無い）
     expect(calls).toContain("write /d/f 2");
   });
 
