@@ -1,0 +1,13 @@
+events:
+  - { ts: 2026-08-01T09:40:22Z, phase: requirement, event: start }
+  - { ts: 2026-08-01T09:44:50Z, phase: requirement, event: approved }
+  - { ts: 2026-08-01T09:44:50Z, phase: research, event: start }
+  - { ts: 2026-08-01T09:48:02Z, phase: research, event: approved }
+  - { ts: 2026-08-01T09:48:02Z, phase: review, event: start }
+  - { ts: 2026-08-01T09:50:05Z, phase: review, event: sent_back }
+  - { ts: 2026-08-01T09:50:05Z, phase: research, event: start }
+  - { ts: 2026-08-01T09:50:05Z, phase: research, event: approved }
+  - { ts: 2026-08-01T09:50:05Z, phase: review, event: start }
+  - { ts: 2026-08-01T09:50:05Z, phase: review, event: approved, metrics: { must: 1, should: 0, nit: 1 } }
+  - { ts: 2026-08-01T09:50:05Z, phase: deliver, event: start }
+  - { ts: 2026-08-01T09:50:05Z, phase: deliver, event: approved }

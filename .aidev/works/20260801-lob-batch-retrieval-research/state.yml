@@ -1,0 +1,9 @@
+schema: 3
+slug: lob-batch-retrieval-research
+current: deliver
+approved: [requirement, research, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: hostserver.md
