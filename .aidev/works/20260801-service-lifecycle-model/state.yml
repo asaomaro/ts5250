@@ -1,0 +1,8 @@
+schema: 3
+slug: service-lifecycle-model
+current: deliver
+approved: [requirement, design, spec, plan, coding, test, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

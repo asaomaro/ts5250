@@ -13,6 +13,7 @@ import { type ConnectOptions } from "@as400web/tn5250";
 import type { AuthUser } from "./auth.js";
 import type { PcCommandConfig } from "./pc-command.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
+import { autoStartOf } from "./service-state.js";
 import {
   idleTimeoutToMs,
   parseRef,
@@ -43,6 +44,16 @@ export interface ResolvedTarget {
   };
   /** **サーバー設定由来のセッションのときのみ**（信頼設定） */
   printerOutput?: PrinterOutputConfig;
+  /**
+   * **サービスとして常駐する**（WS が切れても待ち受けを止めない）。
+   * 出力設定と同じ 5 層目——サーバー設定由来のときだけ true になりうる
+   */
+  service?: boolean;
+  /**
+   * 開いた直後に待ち受けを開始するか（**未設定は true**）。
+   * 信頼設定ではないので、個人設定でも持てる
+   */
+  autoStart: boolean;
   /**
    * PC コマンド（STRPCCMD）の実行設定。**サーバー設定由来のセッションのときのみ**（信頼設定）。
    * 個人設定はスキーマに持たないので、ここに来ることはそもそも無い（1 層目）
@@ -117,11 +128,18 @@ export class ConfigResolver {
     store.assertAccess(system.owner, user);
 
     const connect = this.buildConnect(system, session, store, warn);
-    const out: ResolvedTarget = { connect, source, system };
+    // 開いた直後に待ち受けを開始するか。**未設定は true**（いまある定義の挙動を変えない）
+    const out: ResolvedTarget = { connect, source, system, autoStart: autoStartOf(session?.autoStart) };
     if (session) out.session = session;
     // printer 出力はサーバー設定由来のセッションからのみ供給する（信頼境界の 5 層目）
     const printerOutput = source === "server" && session ? toPrinterOutput(session) : undefined;
     if (printerOutput) out.printerOutput = printerOutput;
+    // **サービスとして常駐するか。** 出力設定の有無から導出しない——
+    // 導出すると「開いている間だけ PDF に落とす」も「常駐して溜めるだけ」も表現できない
+    // （`20260801-service-lifecycle-model` design D3）。
+    // 出力設定と同じ 5 層目（サーバー設定由来のときだけ受理する）
+    const service = source === "server" && session ? sessionPrinter(session)?.service === true : false;
+    if (service) out.service = true;
     // PC コマンドも同じ 5 層目。display セッションでしか意味を持たない
     const pcCommand =
       source === "server" && session?.sessionType === "display" ? sessionPcCommand(session) : undefined;

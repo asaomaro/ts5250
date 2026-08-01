@@ -356,6 +356,8 @@ export class WsConnection {
         // 「表示セッションだけ設定が効く」状態になる（display 側は `{...target.connect}`）
         if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
         if (t.printerOutput) opts.output = t.printerOutput;
+        // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
+        if (t.service) opts.service = true;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
         if (msg.host !== undefined) opts.host = msg.host;

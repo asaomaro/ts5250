@@ -23,6 +23,21 @@ export const screenSizeSchema = z.enum(["24x80", "27x132"]);
 export const sessionTypeSchema = z.enum(["display", "printer", "dtaqwatch"]);
 
 /**
+ * **開いた直後／サーバー起動直後に待ち受けを開始するか**（既定 true）。
+ *
+ * 「自動起動」ではなく「**自動で待ち受けを開始する**」。セッションの場合、
+ * セッション自体は開かれている（起動している）——自動なのは待ち受けの開始の方。
+ *
+ * 1 つの設定が 2 つの文脈で同じ意味になる:
+ * - サービス: **サーバー起動時**に待ち受けを開始する
+ * - セッション: **開いた直後**に待ち受けを開始する
+ *
+ * **既定を true にするのは、いまある定義の挙動を変えないため**——
+ * false を既定にすると、アップグレードで「開いても何も起きない」に変わる（design D3）。
+ */
+export const autoStartSchema = z.boolean().optional();
+
+/**
  * 常駐監視するデータ待ち行列の指定。
  *
  * **信頼設定ではない**——サーバー上のパス書き込み・コマンド実行・秘密のいずれにも触れないので、
@@ -49,6 +64,18 @@ export type DtaqWatchSpec = z.infer<typeof dtaqWatchSchema>;
 
 /** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。**信頼設定** */
 export const printerSchema = z.object({
+  /**
+   * **サービスとして利用する。** WS が切れても待ち受けを止めない（常駐する）。
+   *
+   * **意図であって能力ではない**——出力設定（`autoPdfDir` / `autoPrint`）の有無から
+   * 導出しない。導出すると「開いている間だけ PDF に落としたい」も
+   * 「常駐して溜めるだけ」も表現できなくなる
+   * （`20260801-printer-session-residency` の作り直し。design D3）。
+   *
+   * この設定を持てるのは printer スキーマ＝**サーバー設定側だけ**なので、
+   * admin 限定という制約は既存の信頼境界にそのまま乗る。
+   */
+  service: z.boolean().optional(),
   autoPdfDir: z.string().optional(),
   autoPrint: z.string().optional(),
   pdfFontPath: z.string().optional(),
@@ -176,6 +203,11 @@ const sessionBase = {
   /** 同一ファイル内のシステム id。ファイル外は参照できない */
   system: z.string().min(1),
   sessionType: sessionTypeSchema,
+  /**
+   * 開いた直後／サーバー起動直後に**待ち受けを開始するか**（既定 true）。
+   * `printer` と `dtaqwatch` にだけ意味がある（`display` は画面なので常に開く）。
+   */
+  autoStart: autoStartSchema,
   deviceName: z.string().optional(),
   /**
    * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する（既定 false）。

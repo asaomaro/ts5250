@@ -173,6 +173,11 @@ export interface SessionSummary {
 }
 
 export interface OpenPrinterOptions extends PrinterConnectOptions {
+  /**
+   * **サービスとして常駐する**（WS が切れても止めない）。定義の「サービスとして利用する ✅」由来。
+   * **出力設定の有無から導出しない**（`20260801-service-lifecycle-model` design D3）
+   */
+  service?: boolean;
   origin?: string;
   /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
   output?: PrinterOutputConfig;
@@ -216,6 +221,12 @@ export interface PrinterEntry {
   waiters: ((r: SpoolReport | undefined) => void)[];
   /** サーバー側出力設定（プロファイル由来）。未設定なら自動出力機能なし */
   output?: PrinterOutputConfig;
+  /**
+   * **サービスとして常駐する**（WS が切れても止めない）。
+   * 定義の「サービスとして利用する ✅」由来で、サーバー設定のときだけ true になりうる。
+   * **出力設定の有無から導出しない**（design D3）
+   */
+  service?: boolean;
   /** 実行時の自動出力 有効/無効（既定 true）。false の間は PDF 保存・自動印刷をしない */
   outputEnabled: boolean;
   /** 直近の出力警告（上限 20 件）。後から画面を開いても直近の失敗が分かるよう保持する */
@@ -576,8 +587,11 @@ export class SessionManager {
   }
 
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
-    // **常駐かどうかは出力設定の有無で決まる**（design D1）。上限もそれで分かれる
-    const resident = opts.output !== undefined;
+    // **常駐かどうかは「サービス ✅」で決まる**（`20260801-service-lifecycle-model` design D3）。
+    // 以前は `output !== undefined` から導出していたが、それだと
+    // 「開いている間だけ PDF に落とす」も「常駐して溜めるだけ」も表現できなかった。
+    // **意図（サービス）と能力（出力設定）は別の軸**にする
+    const resident = opts.service === true;
     if (resident) {
       if (this.residentCount(true) >= this.maxResidentPrinters) {
         throw new As400Error(
@@ -611,6 +625,7 @@ export class SessionManager {
       outputWarnings: [],
       outputStatuses: [],
       resident,
+      ...(opts.service !== undefined ? { service: opts.service } : {}),
       ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     this.printers.set(id, entry);
