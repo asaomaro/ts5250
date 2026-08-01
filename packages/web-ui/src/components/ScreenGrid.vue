@@ -32,7 +32,6 @@ import {
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import {
   detectFkeyLegends,
-  detectPromptKey,
   detectWindowRect,
   detectOptionHints,
   sameScreen,
@@ -42,7 +41,7 @@ import {
 } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@as400web/core/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_PROMPT_HINT, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
@@ -97,12 +96,10 @@ const props = withDefaults(
     windowBackdrop?: WindowBackdrop;
     /** オプション欄の選択肢の見せ方（既定 none。推測を含む機能は勝手に有効化しない） */
     optHints?: OptHintStyle;
-    /** `F4` の導線を出すか（既定 false。画面に部品を重ねるので勝手に有効化しない） */
-    promptHint?: boolean;
   }>(),
   {
     linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none",
-    optHints: "none", promptHint: false, sbcsView: "host"
+    optHints: "none", sbcsView: "host"
   }
 );
 const emit = defineEmits<{
@@ -916,38 +913,6 @@ const optButtons = computed<{ row: number; col: number }[]>(() => {
       return c !== undefined && displayChar(c) === " "; // 埋まっていれば出さない
     })
     .map((row) => ({ row, col }));
-});
-
-/**
- * **`F4` の導線**（凡例に `F4=…` がある画面で、フォーカス中の欄から F4 を送るボタン）。
- *
- * `optHints` と同じ作法にそろえる:
- * - **フォーカスに完全従属**（フォーカスが外れれば消える）
- * - 置き場は**欄の直後 → 空いていなければ欄の直前**（下の `promptTarget` に理由）。
- *   どちらも空白でなければ出さない＝**画面の桁を踏まない**
- * - **ラベルはホストの凡例から取る**。`F4` の意味はホストが決めるので UI 側で言い換えない
- */
-const promptLegend = computed(() => (props.promptHint ? detectPromptKey(props.snapshot, displayChar) : null));
-
-const promptTarget = computed<{ row: number; col: number; label: string } | null>(() => {
-  const legend = promptLegend.value;
-  const f = focusedField.value;
-  if (!legend || !f || f.protected) return null;
-  const { cols, rows: nrows } = props.snapshot;
-  const blankAt = (row: number, col: number): boolean => {
-    if (row < 1 || row > nrows || col < 1 || col > cols) return false;
-    const c = props.snapshot.cells[row - 1]?.[col - 1];
-    return c !== undefined && displayChar(c) === " ";
-  };
-  // **欄の終わりは `posOfOffset` で出す。** `col + span` では行またぎ欄（コマンド行は
-  // 実機で長さ 153）が画面外に落ちてボタンが永久に出ない（実測で踏んだ）
-  const end = posOfOffset(f, fieldSpan(f, cols, nrows), cols, nrows);
-  if (blankAt(end.row, end.col)) return { row: end.row, col: end.col, label: legend.label };
-  // **左隣へ退避。** 欄が行末まで届いていると右に置く場所が無い（コマンド行がまさにそれ）。
-  // 5250 は SF の属性バイトを**欄の手前**に置くので、左隣は空白で空いている
-  // （`scripts/probe-opt-adjacency.mjs` で実測。今回も `左隣=桁6(" ")` を確認）
-  if (blankAt(f.row, f.col - 1)) return { row: f.row, col: f.col - 1, label: legend.label };
-  return null;
 });
 
 /** リストを開いている Opt 欄の行。**明示操作（ボタン押下 / Alt+↓）でだけ入る** */
@@ -3224,24 +3189,6 @@ onBeforeUnmount(() => {
       @click.stop="optOpenRow === b.row ? closeOptHints() : openOptAt(b.row)"
     >▾</button>
 
-    <!--
-      `F4` の導線。**キーイベントを 1 つも購読しない**（矩形選択・コピーを妨げないため。
-      `opt-btn` と同じ理由）。`mousedown.stop.prevent` でフォーカスを移さないので、
-      押しても「その欄にカーソルがある」状態が保たれる＝ホストが正しい欄をプロンプトする。
-      `tabindex="-1"` はタブ順の停止数を変えないため（`opt-btn` と同じ）。
-    -->
-    <button
-      v-if="promptTarget"
-      type="button"
-      class="prompt-btn"
-      :style="optBtnStyle(promptTarget)"
-      tabindex="-1"
-      :title="promptTarget.label || MSG_PROMPT_HINT"
-      :aria-label="promptTarget.label || MSG_PROMPT_HINT"
-      @mousedown.stop.prevent
-      @click.stop="emit('aid', 'F4')"
-    >⌄</button>
-
     <div
       v-if="optPopoverShown"
       class="opt-hints"
@@ -3554,9 +3501,7 @@ onBeforeUnmount(() => {
  * フォールバックの黒が常に出て、ライトテーマでも背景が黒くなる（実画面で発生した）。
  * 意匠は画面設定「オプション選択肢」（`data-opt-hints`）で切り替える。
  */
-/* `.prompt-btn` と共有: 画面に重ねる小さなボタンの見え方を 2 種類作らない */
-.opt-btn,
-.prompt-btn {
+.opt-btn {
   /* 欄の隣 1 桁にちょうど収まる。桁割りには影響しない（絶対配置） */
   position: absolute;
   margin: 8px 0 0 10px;
@@ -3573,9 +3518,7 @@ onBeforeUnmount(() => {
   opacity: 0.7;
 }
 .opt-btn:hover,
-.opt-btn:focus-visible,
-.prompt-btn:hover,
-.prompt-btn:focus-visible {
+.opt-btn:focus-visible {
   opacity: 1;
 }
 

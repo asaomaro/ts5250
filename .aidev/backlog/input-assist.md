@@ -87,15 +87,15 @@
     絞っても打てる文字が 1 つも減らないので「塞がない」ことが保証できる
   - `f.numeric` の欄に `inputmode="numeric"` を付ければ、モバイル・タブレットで
     数字キーパッドが出る。**推測を一切含まず**ホストの申告だけで決まる
-- [x] ~~**F4=Prompt の導線**~~
-  - **対応済み**（`20260730-input-assist-datetime`）。設定 `promptHint`（既定 OFF）。
-  - **語では判定しない。** ラベルは地域語で来る（実機は `F4=ﾌﾟﾛﾝﾌﾟﾄ`）ので
-    `"Prompt"` を探すと言語ごとに壊れる。`detectPromptKey()` は **`key === "F4"`** で判定し、
-    **表示にはホストの凡例のラベルをそのまま使う**（UI 側で言い換えない）
-  - フォーカス中の入力欄の右隣 1 桁にボタンを出し、押すと `F4` を送る。
-    **フォーカスしただけでは何も送らない**
-  - `optHints` と同じ作法（キーイベントを 1 つも購読しない・`mousedown.stop.prevent`・
-    `tabindex="-1"`）で**矩形選択・コピー＆ペースト・タブ順を妨げない**（`prompt-hint.test.ts`）
+- [x] ~~**F4=Prompt の導線**~~ — **廃止した**（2026-08-01。利用者判断で不要）
+  - 一度は実装した（`20260730-input-assist-datetime`。設定 `promptHint`、既定 OFF）が、
+    使われないまま画面に部品を重ねる余地だけが残るため取り下げた。
+  - 削除したもの: `viewSettings` の `promptHint`（保存値も `migrate` で落とす）/
+    `ScreenGrid` の `.prompt-btn` と `promptTarget` / `fkeyLegend.detectPromptKey` /
+    `opMessages.MSG_PROMPT_HINT` / `prompt-hint.test.ts`
+  - **作り直すなら覚えておくこと**: 語では判定しない。ラベルは地域語で来る
+    （実機は `F4=ﾌﾟﾛﾝﾌﾟﾄ`）ので `"Prompt"` を探すと言語ごとに壊れる。
+    `key === "F4"` で判定し、表示にはホストの凡例のラベルをそのまま使う
 
 ### 既にあるので作らないこと
 
@@ -120,7 +120,7 @@
 勝手に有効化しない。
 
 - [x] ~~**`ViewSettings` に項目を足し、`VIEW_ITEMS` に定義を足す**~~
-      **対応済み**（`optHints` / `promptHint` の 2 件で実施済み）
+      **対応済み**（`optHints` で実施済み。`promptHint` も同じ形で足したが後に廃止）
   （`packages/web-ui/src/stores/viewSettings.ts`）
   - `VIEW_ITEMS` は「**画面設定メニューとキー設定で共有する単一の出どころ**」なので、
     ここへ足せば**メニューにもキー設定（順送り `view:*`）にも自動で出る**。
@@ -130,7 +130,7 @@
   - ON/OFF だけで足りる項目（`inputmode` など、見た目の候補が無いもの）は
     `linkify` と同じ 2 択でよい。**全部にデザイン候補を作らない**
 - [x] ~~**既定は無効（`none` / OFF）にする**~~ **対応済み**
-      （`optHints: "none"` / `promptHint: false`。`inputmode` は推測を含まないので既定 ON にした）
+      （`optHints: "none"`。`inputmode` は推測を含まないので既定 ON にした）
   - datepicker / timepicker / オプション欄のドロップダウンは**推測を含む**機能なので、
     既定で出すと誤判定がそのまま利用者に見える。
     `windowFrame` / `windowBackdrop` の既定が `none` なのと同じ扱いにすること

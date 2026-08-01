@@ -603,19 +603,3 @@ export function detectOptionHints(
   }
   return options.length > 0 ? { column, options } : null;
 }
-
-/**
- * **`F4` の凡例**（＝ホストが「この画面では F4 が効く」と書いている）を 1 件返す。無ければ null。
- *
- * `F4` は多くの画面でプロンプト（入力候補の展開）だが、**語では判定しない**——
- * ラベルは地域語で来る（実機は `F4=ﾌﾟﾛﾝﾌﾟﾄ`）。`"Prompt"` を探すと言語ごとに壊れるので
- * **キーで判定し、表示にはホストが書いたラベルをそのまま渡す**
- * （UI 側で言い換えない＝ホストが送る情報を上書きしない。`20260730-input-assist-datetime` spec 方針2）。
- *
- * 窓の内側だけを見る・`gui.selectionFields` の行を避けるといった歯止めは
- * `detectFkeyLegends` が既に持っているので、それを通す。
- */
-export function detectPromptKey(snap: ScreenSnapshot, charOf: CharOf = defaultCharOf): FkeySpan | null {
-  // 複数行に F4 があっても**最初の 1 件**で足りる（どれを押しても同じキーが飛ぶ）
-  return detectFkeyLegends(snap, charOf).find((s) => s.key === "F4") ?? null;
-}
