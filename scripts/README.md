@@ -283,6 +283,17 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 単発接続では明示的な解放は要らない。**二重解放は `2 / -816`** で、
 原典のコメントが挙げる `7 / -401` とは違った（`20260801-lob-locator-free`）。
 
+`research-msgw.mjs` — **MSGW（スプールがライターの問い合わせで止まった状態）の実測**。
+既存の仮想プリンター装置を借り、用紙タイプをずらしたスプールで `CPA3394` を誘発して
+`retrieveMessage` / `answerMessage` を通す。**ライターは必ず止め、スプールは消す。装置は作らない・消さない。**
+装置名は `AS400_PRTDEV`（既定 `PRT_TEST`）。
+
+> ⚠ **実機はプリンターの自動構成を許さない**（`8940`。`QAUTOVRT=200` でも）。
+> `CRTDEVPRT DEVCLS(*VRT)` で自作しても `VRYCFG` が `CPF2640`、セッションは `8903`。
+> **既存装置を借りるしかない**。
+> 上書きは **`OVRPRTF FILE(QPRTLIBL)`**——`DSPLIBL OUTPUT(*PRINT)` が作るスプールの名前。
+> 間違えると用紙タイプが揃ったまま印刷され、MSGW にならない（`20260801-msgw-realhost-verify`）。
+
 > 📌 **接続先をハードコードしない。** 出力に焼く説明文（HTML のメタ・画像の注記）も
 > `AS400_HOST` から組む——固定文字列にすると、別ホストへ繋いだのに説明文だけ元のまま残り、
 > **動作に出ないので気づけない**（`shot-signedon.mjs` / `shot-signon.mjs` に注記）。

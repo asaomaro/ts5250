@@ -221,12 +221,31 @@ SQL（既定路線・本命）                       ✅
 
 ## コマンドサーバー実装からの積み残し（2026-07-19 追記）
 
-- [ ] **MSGW が実在する状態での `retrieveMessage` / `answerMessage` の検証**
+- [x] **MSGW が実在する状態での `retrieveMessage` / `answerMessage` の検証**
   - `20260718-hostserver-msgw` の最大の穴。PUB400 では MSGW を誘発できなかった
-    （自分の OUTQ を作れば `CPF3464` は避けられるが writer が常駐しない）
-  - `answerMessage` の応答文字列だけ**可変長で送っている**（他の属性は固定長・空白詰め）。
-    MSGREPLY が固定長を要求するなら隣の値を巻き込む恐れがある。
-    **未検証なので実装は変えていない**——検証できる環境が要る
+  - ~~`answerMessage` の応答文字列だけ**可変長で送っている**……MSGREPLY が固定長を要求するなら
+    隣の値を巻き込む恐れがある~~
+    → `20260801-msgw-realhost-verify`（PR #247）で実機に MSGW を作って検証。
+      **NUL 終端の応答はそのまま受理された**（`answerMessage(msg, "I")` が成功し、
+      MSGW が解けて印刷まで届いた）。**実装は正しかった**
+    - `retrieveMessage` は `CPA3394` と**24 バイトのハンドル**を返す
+    - 誘発の手順: 既存の仮想プリンター装置を `VRYCFG *ON` →
+      `PrinterSession.connect`（ホストがライターを起動）→ `CHGJOB OUTQ(...)` →
+      **`OVRPRTF FILE(QPRTLIBL) FORMTYPE(...)`**（`DSPLIBL OUTPUT(*PRINT)` が作るのは
+      `QPRTLIBL`。ここを間違えると MSGW にならず素通りする）→ `DSPLIBL OUTPUT(*PRINT)`
+    - **実機はプリンターの自動構成を許さない**（`8940`）。`CRTDEVPRT DEVCLS(*VRT)` で
+      自作しても `VRYCFG` が `CPF2640`、セッションは `8903`。**既存装置を借りるしかない**
+    - 一覧の状態名は **`MESSAGE_WAIT`**（画面表記の `MSGW` ではない）
+    - 再現: `scripts/research-msgw.mjs`
+  - **応答文字列が長い場合は未検証**（試したのは `"I"` の 1 文字）。
+    当初の懸念「固定長を要求するなら隣を巻き込む」は**1 文字では起きない**ことしか示せていない
+- [x] **メッセージ本文が CCSID 37 決め打ちで化けていた**（上の検証で発見・PR #247 で修正）
+  - `decodeNpString` が 37 固定で、サーバー CCSID 5035 の日本語が読めていなかった。
+    サインオンが申告する `serverCcsid` を使うようにした
+  - **ID は英数字なのでどの CCSID でも読める**——だから「メッセージが無い」経路の確認や
+    ID の比較テストでは**一度も表面化しなかった**。本文を実際に読んで初めて分かる
+  - `errorFromReply`（CPF メッセージの組み立て）は**37 のまま**にした。
+    この work で確かめていない経路を巻き込んで変えないため。**要確認**
 - [x] IFS のディレクトリ操作と、`DEFAULT_CHUNK` を超える複数ブロック読み書きの検証
     → 20260720-ifs-file-browser で消化。複数ブロックは 4MB まで実機で SHA-256 一致、
       ディレクトリ操作は listFiles(一覧)/mkdir(作成) を実装・実機検証（rmdir は下記に残す）

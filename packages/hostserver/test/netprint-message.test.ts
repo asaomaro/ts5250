@@ -131,6 +131,39 @@ describe("decodeNpString（受信側の NUL 終端）", () => {
 });
 
 /**
+ * **メッセージ本文はジョブの文字コードで来る。**
+ *
+ * CCSID 37 決め打ちだったため、実機（サーバー CCSID 5035）の `CPA3394` は
+ * 本文が化けていた（`20260801-msgw-realhost-verify` で実測）。
+ * **ID は英数字なのでどの CCSID でも読めてしまい、本文だけが壊れる**ので気づきにくい。
+ */
+describe("decodeNpString の CCSID", () => {
+  /**
+   * CCSID 5035 の「装置」＝ `SO` ＋ DBCS 2 文字 ＋ `SI`（末尾は NP の NUL 終端）。
+   * 値は codec で符号化して確かめたもの（推測で書くと通らない——実際に外した）。
+   */
+  const JP = Uint8Array.from([0x0e, 0x48, 0x98, 0x46, 0x8c, 0x0f, 0x00]);
+
+  it("既定は 37（後方互換。指定しない呼び出しの挙動を変えない）", () => {
+    expect(decodeNpString(Uint8Array.from([0xc1, 0xc2, 0x00]))).toBe("AB");
+  });
+
+  it("CCSID を渡すと日本語が読める", () => {
+    expect(decodeNpString(JP, 5035)).toBe("装置");
+  });
+
+  it("37 のままだと同じバイト列が化ける（本文だけが壊れる形）", () => {
+    expect(decodeNpString(JP, 37)).not.toBe("装置");
+  });
+
+  it("英数字はどちらの CCSID でも同じに読める（だから ID では気づけない）", () => {
+    const id = Uint8Array.from([0xc3, 0xd7, 0xc1, 0xf3, 0xf3, 0xf9, 0xf4, 0x00]);
+    expect(decodeNpString(id, 37)).toBe("CPA3394");
+    expect(decodeNpString(id, 5035)).toBe("CPA3394");
+  });
+});
+
+/**
  * **エラーにホストの理由を載せる。**
  *
  * 返却コード 0x0009 は「CPF メッセージ付き」で、番号だけでは何が悪いのか分からない

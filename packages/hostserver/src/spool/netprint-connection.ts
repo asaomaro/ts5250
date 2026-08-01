@@ -50,7 +50,14 @@ const log = childLog({ component: "hostserver-netprint" });
  */
 const DEFAULT_SCS_CCSID = 273;
 
-/** メッセージ ID・テキストは CCSID 37 の EBCDIC */
+/**
+ * メッセージ文字列の既定 CCSID。
+ *
+ * **サインオンがサーバー CCSID を返せばそちらを使う。** ここは分からないときの保険。
+ * 37 のまま日本語ホストのメッセージを読むと**本文が化ける**——実機
+ * （サーバー CCSID 5035）の `CPA3394` で実際に化けた（`20260801-msgw-realhost-verify`）。
+ * ID（`CPA3394`）は英数字なのでどちらでも読めてしまい、**本文だけが壊れる**ので気づきにくい。
+ */
 const MESSAGE_CCSID = 37;
 
 /**
@@ -91,7 +98,9 @@ export class NetPrintConnection {
     readonly host: string,
     readonly port: number,
     /** SCS の解釈に使う CCSID */
-    readonly ccsid: number
+    readonly ccsid: number,
+    /** メッセージ文字列の CCSID（サインオンが申告したサーバー CCSID） */
+    private readonly messageCcsid: number = MESSAGE_CCSID
   ) {}
 
   static async connect(opts: NetPrintConnectOptions): Promise<NetPrintConnection> {
@@ -121,7 +130,14 @@ export class NetPrintConnection {
         passwordLevel: signonInfo.info.passwordLevel
       });
       log.debug(`network print server ready at ${opts.host}:${port}`);
-      return new NetPrintConnection(conn, opts.host, port, opts.ccsid ?? DEFAULT_SCS_CCSID);
+      return new NetPrintConnection(
+        conn,
+        opts.host,
+        port,
+        opts.ccsid ?? DEFAULT_SCS_CCSID,
+        // **メッセージはジョブの文字コードで来る**。SCS の CCSID とは別物なので混ぜない
+        signonInfo.serverCcsid ?? MESSAGE_CCSID
+      );
     } catch (e) {
       conn.close();
       throw e;
@@ -307,7 +323,7 @@ export class NetPrintConnection {
     const attrs = findCodePoint(reply, NP_CP.attributeValue);
     if (!attrs) return undefined;
     const values = parseAttributeList(attrs);
-    const text = (attrId: number): string => decodeNpString(values.get(attrId));
+    const text = (attrId: number): string => decodeNpString(values.get(attrId), this.messageCcsid);
 
     const handle = findCodePoint(reply, NP_CP.messageHandle);
     return {
@@ -418,11 +434,17 @@ function cpfDetail(reply: ReturnType<typeof parseNpReply>): string {
   }
 }
 
-export function decodeNpString(raw: Uint8Array | undefined): string {
+/**
+ * NUL 終端の EBCDIC 文字列を読む。
+ *
+ * `ccsid` を渡さないと 37 で読む——**日本語ホストでは本文が化ける**ので、
+ * メッセージのようにジョブの文字コードで来るものは接続が申告した CCSID を渡すこと。
+ */
+export function decodeNpString(raw: Uint8Array | undefined, ccsid: number = MESSAGE_CCSID): string {
   if (!raw) return "";
   const end = raw.indexOf(0);
   const body = end >= 0 ? raw.subarray(0, end) : raw;
-  return codecForCcsid(MESSAGE_CCSID).decode(body).trimEnd();
+  return codecForCcsid(ccsid).decode(body).trimEnd();
 }
 
 async function decidePort(opts: NetPrintConnectOptions, timeoutMs: number): Promise<number> {
