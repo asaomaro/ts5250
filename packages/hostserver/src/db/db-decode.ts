@@ -34,9 +34,20 @@ export interface LobPlaceholder {
   byteLength?: number;
   /**
    * 未取得の理由。取得できたときは undefined。
-   * **空文字で埋めない**——空の LOB と「取っていない」が区別できなくなる
+   * **空文字で埋めない**——空の LOB と「取っていない」が区別できなくなる。
+   *
+   * - `not-requested`: 取りに行っていない（既定。`lobMaxBytes` を指定しなかった）
+   * - `too-large`: 取れたが上限で打ち切った（`value` に先頭だけ入る）
+   * - `failed`: **取りに行って失敗した**
+   *
+   * **`failed` を `not-requested` に混ぜない**——読み手は「要求していない」を見て
+   * 「では要求すればよい」と案内するため（`SqlResultTable.vue` の `lobTitle`）。
+   * 既に要求した人に同じ操作を勧めることになる。
+   *
+   * 排他なので**フラグを増やさず 1 つの union で表す**。別フィールドに割ると
+   * 「要求していないのに失敗した」のような表現不能な状態を型が許してしまう（spec D1）。
    */
-  unavailable?: "not-requested" | "too-large";
+  unavailable?: "not-requested" | "too-large" | "failed";
 }
 
 export type DbValue = string | number | bigint | null | LobPlaceholder;

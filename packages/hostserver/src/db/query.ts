@@ -432,8 +432,15 @@ async function* fetchAll(
   }
 }
 
-/** 行の中のロケーターを本体で置き換える。既定では呼ばれない */
-async function fillLobs(
+/**
+ * 行の中のロケーターを本体で置き換える。既定では呼ばれない。
+ *
+ * **export はテストの取っ手**（`index.ts` は公開しない）。`query()` 越しに失敗を踏ませるには
+ * prepare / describe / fetch の応答を丸ごと偽装することになり、テストが失敗の再現ではなく
+ * プロトコルの模写になる。`retrieveLob` が使う接続の口は `conn.request` 1 つだけなので、
+ * ここを直接呼べば「request が reject する偽 conn」で足りる（spec D3）。
+ */
+export async function fillLobs(
   conn: DbConnection,
   rows: readonly Record<string, DbValue>[],
   opts: LobOptions
@@ -455,8 +462,13 @@ async function fillLobs(
         if (got.truncated) filled.unavailable = "too-large";
         row[key] = filled;
       } catch (e) {
-        log.debug(`LOB ${value.locator} の取得に失敗: ${String(e)}`);
-        row[key] = { ...value, unavailable: "not-requested" };
+        // **warn で出す**。要求された取得が落ちたのに debug だと既定の sink で消え、
+        // 失敗の理由がどこにも残らなかった（画面は「ログに理由が出る」と案内する）
+        log.warn(`LOB ${value.locator} の取得に失敗: ${String(e)}`);
+        // **`not-requested` に落とさない**——読み手が「では要求すればよい」と案内してしまう。
+        // 既に要求した人に同じ操作を勧めることになる（spec D1）。
+        // ロケーターと maxSize は spread で残す（取り直す手がかりを消さない）
+        row[key] = { ...value, unavailable: "failed" };
       }
     }
   }

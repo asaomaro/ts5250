@@ -38,6 +38,39 @@ describe("toCsv", () => {
   });
 });
 
+/**
+ * LOB の CSV 表現。**どの状態でも空欄にしない**——空欄は SQL の NULL と混ざる。
+ * 「取りに行っていない」と「取りに行って失敗した」は別物なので書き分ける
+ * （同じ `(LOB)` だと、取得を指定して落とした CSV が指定しなかった CSV と見分けられない）。
+ */
+describe("toCsv の LOB", () => {
+  const lob = (over: Record<string, unknown>) => ({ kind: "lob", locator: 7, maxSize: 1024, ...over });
+
+  it("取得済みなら中身を出す", () => {
+    expect(toCsv(["A"], [{ A: lob({ value: "本文", byteLength: 6 }) }])).toBe("A\r\n本文");
+  });
+
+  it("取得済みの中身もエスケープする（RFC 4180）", () => {
+    expect(toCsv(["A"], [{ A: lob({ value: "x,y" }) }])).toBe('A\r\n"x,y"');
+  });
+
+  it("取りに行っていないなら (LOB)", () => {
+    expect(toCsv(["A"], [{ A: lob({ unavailable: "not-requested" }) }])).toBe("A\r\n(LOB)");
+  });
+
+  it("取りに行って失敗したなら (LOB: 取得失敗)（未要求と区別する）", () => {
+    expect(toCsv(["A"], [{ A: lob({ unavailable: "failed" }) }])).toBe("A\r\n(LOB: 取得失敗)");
+  });
+
+  it("どの状態でも空欄にしない（NULL と混ざるため）", () => {
+    const csv = toCsv(
+      ["N", "A", "B"],
+      [{ N: null, A: lob({ unavailable: "not-requested" }), B: lob({ unavailable: "failed" }) }]
+    );
+    expect(csv).toBe("N,A,B\r\n,(LOB),(LOB: 取得失敗)");
+  });
+});
+
 describe("csvBlob", () => {
   it("UTF-8 BOM を先頭に付ける（Excel が UTF-8 と認識するのに必要）", async () => {
     const blob = csvBlob("A\r\n1");

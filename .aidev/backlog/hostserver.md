@@ -338,9 +338,24 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
     実機は 1 往復 4〜7 秒なので現実的でない
   - 既定では取りに行かないため既定利用では 0 往復だが、
     「無いと決めつけて自前で最適化する」のは避けた。**まず原典を確かめること**
-- [ ] **`unavailable` に `"failed"` を足す**
+- [x] **`unavailable` に `"failed"` を足す**
   - 取りに行って失敗した場合に `"not-requested"`（要求していない）と表示され、
     **嘘に近い**。型を 1 つ足すだけだが server / web-ui / CSV に波及する
+    → `20260801-sql-lob-failed-state`（PR #240）で消化。
+      `packages/hostserver/src/db/db-decode.ts:50` の union に `"failed"` を足し、
+      `query.ts:471` の catch がそれを入れる（`{ ...value }` でロケーターと `maxSize` は残す）。
+      表示は `SqlResultTable.vue:83,95`（`(LOB: 取得失敗)` ＋「ログに理由が出ます」）と
+      `csv.ts:25`（`(LOB: 取得失敗)`。**空欄にしない**——NULL と混ざる）
+    - ~~server / web-ui / CSV に波及する~~ **server（`/api/host/sql`）と MCP（`host_sql`）は
+      無変更で済んだ**。どちらも行を `bigint → string` だけで JSON にしており LOB 固有の整形が無く、
+      MCP の `outputSchema` も `rows: z.array(z.record(z.string(), z.unknown()))`
+      （`packages/server/src/host-server-tools.ts:151`）で値を制約していない
+    - 併せて失敗理由のログを `debug` → `warn` に上げた（`query.ts:467`）。
+      画面が「サーバーのログに理由が出ます」と案内する以上、既定の sink で消えては嘘になる
+    - 回帰テスト 12 件（`packages/hostserver/test/lob-fill-failure.test.ts` 5 件 /
+      `packages/web-ui/test/csv.test.ts` 5 件 / `packages/web-ui/test/sql-pane.test.ts` 2 件）。
+      **変更を外すと 8 件落ちる**ことを実測済み（空振りでない。
+      catch の値・ログレベル・画面・CSV の 4 か所を元に戻して計測: hostserver 4 / web-ui 4）
 - [ ] BLOB（バイナリ）と中身のある DBCLOB での検証（CLOB でしか試していない）
 - [ ] ロケーターの明示的な解放（接続を閉じれば消えると見込んでいるが未確認）
   - **原典に該当の要求があるかも未確認**（`20260720-sql-lob-locator/research.md` F5）。

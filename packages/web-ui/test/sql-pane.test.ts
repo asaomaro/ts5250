@@ -362,6 +362,35 @@ describe("列幅", () => {
   });
 });
 
+/**
+ * 取りに行って失敗した LOB は、**取りに行っていない LOB と区別して**見せる。
+ * 以前はどちらも `not-requested` だったため「左のチェックで取得」と案内しており、
+ * 既に取得を要求した利用者に同じ操作を勧めていた。
+ */
+describe("LOB の取得失敗", () => {
+  it("取得失敗と分かる本文を出す", async () => {
+    mockFetch({
+      ...OK_BODY,
+      rows: [{ ID: 1, NAME: { kind: "lob", locator: 7, maxSize: 1024, unavailable: "failed" } }]
+    });
+    const w = await run();
+    expect(w.find(".lob").text()).toBe("(LOB: 取得失敗)");
+    w.unmount();
+  });
+
+  it("「左のチェックで取得」を案内しない（既に要求している）", async () => {
+    mockFetch({
+      ...OK_BODY,
+      rows: [{ ID: 1, NAME: { kind: "lob", locator: 7, maxSize: 1024, unavailable: "failed" } }]
+    });
+    const w = await run();
+    const title = w.find(".lob").attributes("title") ?? "";
+    expect(title).not.toContain("左のチェックで取得");
+    expect(title).toContain("失敗");
+    w.unmount();
+  });
+});
+
 describe("列幅のドラッグ", () => {
   /** jsdom には幅が無いので、**状態の持ち方**だけを固定する（見た目は実ブラウザで確認） */
   async function drag(w: ReturnType<typeof mount>, index: number, dx: number) {

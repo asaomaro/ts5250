@@ -19,7 +19,10 @@ function escapeField(value: unknown): string {
   if (isLob(value)) {
     // 取得済みなら中身、未取得なら (LOB)。**空欄にすると NULL と混ざる**
     const v = (value as { value?: unknown }).value;
-    return typeof v === "string" ? escapeField(v) : "(LOB)";
+    if (typeof v === "string") return escapeField(v);
+    // **取りに行って失敗した**のは「取りに行っていない」と別物。同じ (LOB) にすると、
+    // 取得を指定して落とした CSV が、指定しなかった CSV と見分けられない
+    return value.unavailable === "failed" ? "(LOB: 取得失敗)" : "(LOB)";
   }
   const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

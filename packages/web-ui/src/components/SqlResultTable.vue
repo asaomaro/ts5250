@@ -73,19 +73,26 @@ function cellTitle(v: unknown): string | undefined {
   return String(v);
 }
 
-/** LOB セルの表示。**取得済み・未取得・大きすぎを区別する** */
+/** LOB セルの表示。**取得済み・未取得・大きすぎ・失敗を区別する** */
 function lobText(v: unknown): string {
   const lob = v as { value?: unknown; unavailable?: string };
+  // **中身があるならまず出す**。理由の判定を先に置くと、部分値を持つ状態で値を捨てる
   if (typeof lob.value === "string") {
     return lob.unavailable === "too-large" ? `${lob.value}…（以降省略）` : lob.value;
   }
-  return lob.unavailable === "too-large" ? "(LOB: 大きすぎます)" : "(LOB)";
+  if (lob.unavailable === "too-large") return "(LOB: 大きすぎます)";
+  if (lob.unavailable === "failed") return "(LOB: 取得失敗)";
+  return "(LOB)";
 }
 
 function lobTitle(v: unknown): string {
   const lob = v as { byteLength?: number; unavailable?: string };
+  // **取得を促すのは本当に要求していないときだけ**。取りに行って失敗した場合にも
+  // これを出していたので、既に取得を要求した利用者へ同じ操作を勧めていた
   if (lob.unavailable === "not-requested") return "LOB の中身は取得していません（左のチェックで取得）";
   if (lob.unavailable === "too-large") return `全体 ${lob.byteLength ?? "?"} バイトのうち先頭のみ`;
+  // 理由は JSON に載せない（ホスト由来のデバッグ文字列のため）。サーバーのログに warn で出る
+  if (lob.unavailable === "failed") return "LOB の取得に失敗しました（サーバーのログに理由が出ます）";
   return `LOB（${lob.byteLength ?? "?"} バイト）`;
 }
 </script>
