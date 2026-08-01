@@ -5,6 +5,7 @@ import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import MacroMenu from "./components/MacroMenu.vue";
 import { workspaceStore } from "./stores/workspace.js";
 import { sessionsStore } from "./stores/sessions.js";
+import { downloadScreenHtml } from "./screenExport.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
 import LauncherPane from "./components/LauncherPane.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
@@ -53,6 +54,14 @@ const activeSessionId = computed(() => {
   return tab && !isPaneTab(tab) ? tab : "";
 });
 const showKeys = ref(false);
+
+/**
+ * 今の画面を HTML で保存する。**表示設定（表示コード・SO/SI）を反映して**書き出すので、
+ * 見えているとおりの絵になる（`screenExport.ts` の注記を参照）。
+ */
+function saveScreenHtml(): void {
+  if (activeSessionId.value) downloadScreenHtml(activeSessionId.value);
+}
 
 /** そのシステムで現在つながっているセッション数（セレクタの表示用） */
 function liveCount(systemRef: string): number {
@@ -241,6 +250,16 @@ onBeforeUnmount(() => {
         <!-- 表示設定（SO/SI・カナ・リンク・コントロール表現ほか）は ⚙ 画面 に集約。
              キー設定からも同じ項目を順送りで切り替えられる。 -->
         <button v-if="activeIsEmulator" class="theme-btn" @click="showKeys = true">⌨ キー</button>
+        <!-- 今の画面を自己完結 HTML で保存。**サーバーへ往復しない**（スナップショットは
+             既にブラウザ側にある）。表示設定を反映するので、見えているとおりの絵が出る -->
+        <button
+          v-if="activeIsEmulator"
+          class="theme-btn"
+          title="今の画面を HTML で保存する（見えているとおり・単体で開ける）"
+          @click="saveScreenHtml"
+        >
+          🖹 HTML
+        </button>
         <!-- マクロは 5250 セッション専用（記録も再生も画面操作なので） -->
         <MacroMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
         <ViewSettingsMenu v-if="activeIsEmulator" :session-id="activeSessionId" />

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import PrinterPane from "../src/components/PrinterPane.vue";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, type SpoolReportView } from "../src/stores/sessions.js";
 
 /**
  * 「印刷」は別ウィンドウへ帳票を書き出してブラウザの印刷に渡す。
@@ -14,7 +14,7 @@ import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
  */
 const SID = "p1";
 
-function addPrinterSession(reports: SessionState["reports"]): string {
+function addPrinterSession(reports: SpoolReportView[]): string {
   sessionsStore.byId.clear();
   sessionsStore.order = [];
   sessionsStore.add({
@@ -48,7 +48,7 @@ function captureOpen(): { written: () => string; printed: () => boolean } {
   return { written: () => buf, printed: () => didPrint };
 }
 
-const TWO_PAGES: SessionState["reports"] = [
+const TWO_PAGES: SpoolReportView[] = [
   {
     id: "r1",
     pages: [
