@@ -7,7 +7,7 @@ import { TelnetLayer } from "../packages/tn5250/dist/telnet/telnet.js";
 import { parseRecord } from "../packages/tn5250/dist/protocol/gds.js";
 import { applyDataStream } from "../packages/tn5250/dist/protocol/wtd-applier.js";
 import { ScreenBuffer } from "../packages/tn5250/dist/screen/buffer.js";
-import { codecForCcsid } from "../packages/tn5250/dist/codec/codec.js";
+import { codecForCcsid } from "../packages/ebcdic/dist/codec.js";
 
 const path = process.argv[2] ?? "packages/tn5250/test/fixtures/pub400-signon.jsonl";
 const out = (s) => process.stderr.write(s + "\n");
