@@ -139,6 +139,82 @@ try {
   const ro = await page.evaluate(async () => (await (await fetch("/api/printers")).json()));
   check(ro.editable === true, "認証オフでは操作できる（`editable: true`）");
   check(ro.printers.every((p) => !JSON.stringify(p).includes("autoPdfDir")), "行にパスが載らない");
+
+  // ---- 5. 定義の変更が動いているサービスに効くか（`20260801-service-reconcile`）----
+  //
+  // **起動時に 1 回読むだけ**では、足しても上がらず・消しても動き続け・直しても
+  // 古い設定のままだった。保存の経路から反映されるかを見る。
+  log("\n### 5. 定義の変更を反映する");
+  const put = (ref, body) =>
+    page.evaluate(
+      async ([r, b]) => {
+        const res = await fetch(`/api/sessions-config/${r}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(b)
+        });
+        return { ok: res.ok, body: await res.json() };
+      },
+      [ref, body]
+    );
+
+  // 5-1. サービス ☐ の定義を ✅ ＋ 自動 ✅ にすると、**再起動せずに上がる**
+  const on = await put("srv:PRTPLAIN", {
+    source: "server",
+    name: "PRTPLAIN",
+    system: "srv:AS400",
+    sessionType: "printer",
+    deviceName: PRTDEV,
+    printer: { service: true }
+  });
+  check(on.ok, `サービス ✅ に変更できる${on.ok ? "" : " — " + JSON.stringify(on.body)}`);
+  check(await rowState("PRTPLAIN", "待ち受け中"), "**サーバーを再起動せずに立ち上がる**");
+
+  // 5-2. 動いているものを直しても**落ちない**。代わりに「要再起動」が出る
+  const edit = await put("srv:PRTPLAIN", {
+    source: "server",
+    name: "PRTPLAIN",
+    system: "srv:AS400",
+    sessionType: "printer",
+    deviceName: PRTDEV,
+    ccsid: 5026,
+    printer: { service: true }
+  });
+  check(edit.ok, "動いているサービスの設定を保存できる");
+  check(await rowState("PRTPLAIN", "要再起動"), "**「要再起動」が出る**（直したのに効いていない、を黙らせない）");
+  check(await rowState("PRTPLAIN", "待ち受け中"), "**保存で待ち受けが切れない**（帳票の受け取りを止めない）");
+
+  // 5-3. 開始し直すと消える（材料は差し替え済み）
+  await rowOf("PRTPLAIN").locator("button", { hasText: "停止" }).click();
+  await rowState("PRTPLAIN", "停止中");
+  await sleep(2500);
+  await rowOf("PRTPLAIN").locator("button", { hasText: "開始" }).click();
+  check(await rowState("PRTPLAIN", "待ち受け中"), "開始し直せる");
+  check(!(await rowOf("PRTPLAIN").innerText()).includes("要再起動"), "**開始し直すと「要再起動」が消える**");
+
+  // 5-4. サービス ☐ に戻すと止まる
+  await put("srv:PRTPLAIN", {
+    source: "server",
+    name: "PRTPLAIN",
+    system: "srv:AS400",
+    sessionType: "printer",
+    deviceName: PRTDEV
+  });
+  check(
+    await until(async () => !sessions.listPrinters().some((e) => e.ref === "srv:PRTPLAIN")),
+    "**サービス ☐ に戻すと止まって実体が消える**"
+  );
+
+  // 5-5. 定義を消すと止まる
+  await page.evaluate(async () => {
+    await fetch("/api/sessions-config/srv:PRTSVC", { method: "DELETE" });
+  });
+  check(
+    await until(async () => !sessions.listPrinters().some((e) => e.ref === "srv:PRTSVC")),
+    "定義を消すと動いていた実体も消える"
+  );
+  await page.locator(".services .head button", { hasText: "更新" }).click();
+  check(await until(async () => !(await text()).includes("PRTSVC")), "一覧からも消える");
 } catch (e) {
   fail++;
   log(`  FAIL 例外: ${e?.message ?? e}`);

@@ -18,12 +18,20 @@ import { invalidAllowPattern } from "./pc-command.js";
 import { checkPrintDest } from "./print-dest.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { ConfigStore } from "./config-store.js";
-import { parseRef, type ConfigSource, type Signon } from "./config-types.js";
+import { makeRef, parseRef, type ConfigSource, type Signon } from "./config-types.js";
 
 export interface ConfigRouteDeps {
   resolver: ConfigResolver;
   /** サーバー設定を編集できるか（認証オフ or admin、かつファイル永続化可） */
   canEditServer: (c: { get: (k: "user") => AuthVars["user"] }) => boolean;
+  /**
+   * セッション設定が変わったときの後始末（`20260801-service-reconcile`）。
+   *
+   * **ここに実体（SessionManager / WatchRegistry）を持ち込まない**——CRUD の役目は
+   * 設定を保存することで、動いているものを触るのは別の関心事。
+   * 呼び先が投げない約束なので、保存の成否には影響しない。
+   */
+  onSessionChanged?: (ref: string, change: "saved" | "removed") => void;
 }
 
 /** 入力（フラット形式）。UI は signon をネストせずに送る */
@@ -161,6 +169,8 @@ function validatePcCommand(body: unknown): { error?: string } {
 
 export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: ConfigRouteDeps): void {
   const { resolver, canEditServer } = deps;
+  /** 保存・削除のあとにサービスを定義へ合わせる。**待たない**（応答を遅らせない） */
+  const changed = (ref: string, change: "saved" | "removed"): void => deps.onSessionChanged?.(ref, change);
 
   /** 書き込みの認可（2 層目）。サーバー設定は admin のみ */
   const assertWritable = (source: ConfigSource, c: { get: (k: "user") => AuthVars["user"] }): void => {
@@ -246,6 +256,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const store = resolver.storeOf(source);
       const session = store.addSession(body, c.get("user"));
       await store.save();
+      changed(session.ref, "saved");
       return c.json(
         { session, ...(resolved ? { resolvedPdfDir: resolved } : {}), ...(warnings ? { warnings } : {}) },
         201
@@ -268,6 +279,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const store = resolver.storeOf(source);
       const session = store.updateSession(id, body, c.get("user"));
       await store.save();
+      changed(session.ref, "saved");
       return c.json({
         session,
         ...(resolved ? { resolvedPdfDir: resolved } : {}),
@@ -285,6 +297,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const store = resolver.storeOf(source);
       store.removeSession(id, c.get("user"));
       await store.save();
+      changed(makeRef(source, id), "removed");
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: errMsg(e) }, errStatus(e));

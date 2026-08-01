@@ -37,6 +37,8 @@ interface Row {
   running: boolean;
   detail: string;
   hasOutput?: boolean;
+  /** 定義が変わったが、いまの接続には効いていない（開始し直しで反映される） */
+  stale?: boolean;
 }
 
 const rows = computed<Row[]>(() => [
@@ -51,6 +53,7 @@ const rows = computed<Row[]>(() => [
       autoStart: p.autoStart,
       running: p.id !== undefined,
       hasOutput: p.hasOutput,
+      ...(p.stale ? { stale: true } : {}),
       detail:
         p.receivedTotal !== undefined
           ? `帳票 ${p.receivedTotal} 件${p.buffered !== undefined && p.buffered < p.receivedTotal ? `（保持 ${p.buffered}）` : ""}`
@@ -67,6 +70,7 @@ const rows = computed<Row[]>(() => [
       service: w.service,
       autoStart: w.autoStart,
       running: w.id !== undefined,
+      ...(w.stale ? { stale: true } : {}),
       detail: w.received !== undefined ? `エントリ ${w.received} 件${w.label ? ` — ${w.label}` : ""}` : ""
     })
   )
@@ -142,6 +146,15 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
               <span v-if="r.hasOutput" class="chip" title="PDF 保存 / 自動印刷の設定があります">出力あり</span>
               <span v-if="r.kind === 'printer' && !r.service" class="chip warn" title="サービス ☐ の定義です">
                 対話型
+              </span>
+              <!-- **「直したのに効いていない」を黙らせない。** 設定を保存しても
+                   動いているサービスは落とさないので、ここで知らせて止めどきを委ねる -->
+              <span
+                v-if="r.stale"
+                class="chip warn"
+                title="設定が変わっています。停止 → 開始で反映されます（いまの接続は変更前の設定で動いています）"
+              >
+                要再起動
               </span>
             </td>
             <td class="k">{{ kindLabel(r) }}</td>

@@ -61,6 +61,11 @@ interface ServiceRow {
   autoStart: boolean;
   /** 動いている実体の id（動いていなければ無い） */
   id?: string;
+  /**
+   * **定義が変わったが、いまの接続には効いていない**（`20260801-service-reconcile`）。
+   * 設定の保存で動いているものを落とさない代わりに、ここで知らせる
+   */
+  stale?: boolean;
   owner?: string;
 }
 
@@ -114,6 +119,7 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
       };
       if (e) {
         row.id = e.id;
+        if (e.stale) row.stale = true;
         row.outputEnabled = e.outputEnabled;
         row.receivedTotal = e.receivedTotal;
         row.buffered = e.reports.length;
@@ -146,6 +152,7 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
       };
       if (w) {
         row.id = w.id;
+        if (w.stale) row.stale = true;
         row.label = w.label;
         row.received = w.received;
         // **本文は載せない**——件数だけ（中身は WS の `watch-history` が返す）。

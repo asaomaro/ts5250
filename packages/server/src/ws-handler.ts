@@ -201,7 +201,10 @@ export class WsConnection {
     this.detachWatch?.(); // 二重購読しない
     // **他人の監視は配らない。** 絞り込みはレジストリに任せる（所有の規則を 2 か所に書かない）
     this.detachWatch = reg.subscribe((ev) => {
-      if (ev.type === "entry") {
+      if (ev.type === "list") {
+        // 行が増減した（定義が足された・消された）。**状態通知では伝わらない**
+        this.sendWatchList();
+      } else if (ev.type === "entry") {
         this.send({
           type: "watch-entry",
           watchId: ev.watch.id,

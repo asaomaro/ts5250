@@ -298,6 +298,14 @@ export interface PrinterEntry {
    * （design D1）。
    */
   resident: boolean;
+  /**
+   * **定義が変わったが、いまの接続には効いていない**（`20260801-service-reconcile`）。
+   *
+   * 設定を保存しても動いているサービスは落とさない——名前の打ち間違いを直しただけで
+   * 帳票の受け取りが切れるのは割に合わない。代わりにここを立てて画面に出し、
+   * **いつ止めてよいかは利用者が決める**。開始し直せば消える（材料は差し替え済み）。
+   */
+  stale?: boolean;
 }
 
 /**
@@ -710,6 +718,30 @@ export class SessionManager {
   }
 
   /**
+   * **開き直しの材料を差し替える**（`20260801-service-reconcile`）。
+   *
+   * 定義が直されたときに呼ぶ。**いまの接続は落とさない**——動いているサービスを
+   * 設定の保存で切ると、その瞬間に流れている帳票の受け取りが切れる。
+   *
+   * @returns いま接続を持っていたか。持っていれば**新しい設定はまだ効いていない**ので、
+   *   `stale` を立てて画面に出す（利用者が止めどきを決める）
+   */
+  updatePrinterOptions(id: string, opts: OpenPrinterOptions): boolean {
+    const entry = this.printers.get(id);
+    if (!entry) throw new As400Error("SESSION_NOT_FOUND", `printer ${id} not found`);
+    entry.openOpts = { ...opts, id };
+    // ホスト変換で受けているなら、自動印刷は PDF に起こさず受信バイトをそのまま流す
+    const output =
+      opts.output && opts.transformTo !== undefined ? { ...opts.output, rawPrint: true } : opts.output;
+    if (output !== undefined) entry.output = output;
+    else delete entry.output;
+    const running = holdsConnection(entry.state);
+    if (running) entry.stale = true;
+    else delete entry.stale;
+    return running;
+  }
+
+  /**
    * 待ち受けを開始する（接続してホストから受け取り始める）。
    *
    * `stopped` / `error` からのみ動く。**冪等**——既に待ち受けていれば何もしない
@@ -718,6 +750,8 @@ export class SessionManager {
   async startPrinter(id: string, user?: AuthUser): Promise<PrinterEntry> {
     const entry = this.getPrinter(id, user);
     if (entry.state === "listening" || entry.state === "reconnecting") return entry;
+    // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
+    delete entry.stale;
     if (!entry.resident && this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }

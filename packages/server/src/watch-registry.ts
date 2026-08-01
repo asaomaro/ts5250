@@ -65,6 +65,11 @@ export interface WatchView {
   startedAt: string;
   /** 所有者（認証時）。他人には見せない */
   owner?: string;
+  /**
+   * **定義が変わったが、いまの接続には効いていない**（`20260801-service-reconcile`）。
+   * 開始し直せば消える（材料は差し替え済み）。プリンターと同じ扱い。
+   */
+  stale?: boolean;
 }
 
 /** 受信 1 件 */
@@ -82,7 +87,13 @@ export interface WatchEntryView {
 /** 購読者へ流すイベント */
 export type WatchEvent =
   | { type: "entry"; watch: WatchView; entry: WatchEntryView }
-  | { type: "state"; watch: WatchView };
+  | { type: "state"; watch: WatchView }
+  /**
+   * 一覧そのものが変わった（定義の追加・削除・差し替え）。
+   * **行が増減する変化は `state` では伝わらない**ので別に要る
+   * （`20260801-service-reconcile`）。
+   */
+  | { type: "list" };
 
 export interface WatchRegistryOptions {
   /**
@@ -231,6 +242,37 @@ export class WatchRegistry {
   }
 
   /**
+   * **開き直しの材料を差し替える**（`20260801-service-reconcile`）。
+   *
+   * 定義が直されたときに呼ぶ。**いまの接続は落とさない**——動いている監視を
+   * 設定の保存で切ると、その瞬間に待っているエントリの受け取りが途切れる。
+   *
+   * @returns いま接続を持っていたか（＝新しい設定はまだ効いていない）
+   */
+  update(id: string, opts: { label: string; spec: DtaqWatchSpec; connect: ConnectOptions }): boolean {
+    const w = this.watches.get(id);
+    if (!w) throw new As400Error("NOT_FOUND", `watch ${id} not found`);
+    w.spec = opts.spec;
+    w.connect = opts.connect;
+    w.view.label = opts.label;
+    const running = w.view.state === "listening" || w.view.state === "reconnecting";
+    if (running) w.view.stale = true;
+    else delete w.view.stale;
+    this.emit({ type: "list" });
+    return running;
+  }
+
+  /**
+   * レジストリから**消す**。定義が消えたときだけ使う——
+   * `stop` が残すのは「再開できるように」であって、定義ごと無くなったものは残す理由が無い。
+   * **先に `stop` を呼ぶこと**（接続を持ったまま消すと掴んだ装置が返らない）。
+   */
+  remove(id: string): void {
+    this.watches.delete(id);
+    this.emit({ type: "list" });
+  }
+
+  /**
    * 停止した監視を再開する。**保存してある spec と接続先で開き直す**ので、
    * 画面は id だけ知っていればよい。
    */
@@ -243,6 +285,8 @@ export class WatchRegistry {
       throw new As400Error("SESSION_LIMIT", `watch limit reached (${this.maxWatches})`);
     }
     w.stopping = false;
+    // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
+    delete w.view.stale;
     w.conn = await this.openConn(w.connect);
     this.setState(w, "listening");
     log.info({ watchId: id, label: w.view.label }, "watch resumed");
@@ -282,7 +326,9 @@ export class WatchRegistry {
    */
   subscribe(fn: (ev: WatchEvent) => void, user?: AuthUser): () => void {
     const sub = (ev: WatchEvent): void => {
-      if (!this.canSeeView(ev.watch, user)) return;
+      // **一覧の変化は誰にでも配る。** 中身は載っていないので絞る対象が無く、
+      // 受け取った側は自分に見える一覧を引き直すだけ（`list(user)` が絞る）
+      if (ev.type !== "list" && !this.canSeeView(ev.watch, user)) return;
       fn(ev);
     };
     this.subscribers.add(sub);

@@ -65,6 +65,13 @@ export {
   type WatchState,
   type WatchRegistryOptions
 } from "./watch-registry.js";
+// 定義の変更を動いているサービスへ反映する
+export {
+  reconcileService,
+  type ServiceReconcileDeps,
+  type SessionChange,
+  type ReconcileResult
+} from "./service-reconcile.js";
 export type {
   WsClientMessage,
   WsServerMessage,

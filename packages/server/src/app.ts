@@ -26,6 +26,7 @@ import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./hos
 import { registerHostUploadRoutes } from "./host-upload.js";
 import { registerHostSpoolRoutes } from "./host-spools.js";
 import { registerHostPrinterRoutes } from "./host-printers.js";
+import { reconcileService } from "./service-reconcile.js";
 import { ResultSetStore } from "./result-set-store.js";
 import { DbPool } from "./db-pool.js";
 import type { AuditBuffer } from "./audit.js";
@@ -148,13 +149,25 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     return permitted && deps.resolver.storeOf("server").persistable;
   };
 
+  // **監視レジストリは設定 CRUD より先に作る。** 設定の変更を動いているサービスへ
+  // 反映する（`20260801-service-reconcile`）ので、CRUD の登録時に既に要る
+  const watches =
+    deps.watches ?? new WatchRegistry(deps.maxWatches !== undefined ? { maxWatches: deps.maxWatches } : {});
+
   // システム / セッション設定の CRUD（信頼境界 2〜4 層目は config-routes 側）
-  registerConfigRoutes(app, { resolver: deps.resolver, canEditServer });
+  registerConfigRoutes(app, {
+    resolver: deps.resolver,
+    canEditServer,
+    // **定義を直したら動いているサービスにも効かせる。** 起動時 1 回だけ読む形では、
+    // 足しても上がらず・消しても動き続け・直しても古い設定のままだった。
+    // **待たない**——設定の保存の応答を、ホストへの接続で遅らせない
+    onSessionChanged: (ref, change) => {
+      void reconcileService({ resolver: deps.resolver, sessions: deps.sessions, watches }, ref, change);
+    }
+  });
 
   // マクロの CRUD。認可は MacroStore の assertOwner に集約する（経路ごとに書かない）
   const macros = deps.macros ?? new MacroStore();
-  const watches =
-    deps.watches ?? new WatchRegistry(deps.maxWatches !== undefined ? { maxWatches: deps.maxWatches } : {});
   registerMacroRoutes(app, { macros });
 
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
