@@ -180,6 +180,13 @@ export abstract class ConfigStore {
       const { allow, ...rest } = s.pcCommand;
       pub.pcCommand = allow ? { ...rest, allow: [...allow] as [string, ...string[]] } : { ...rest };
     }
+    if (s.autoStart !== undefined) pub.autoStart = s.autoStart;
+    // **フラグだけ返す。** パス（`autoPdfDir`）とプリンター名（`autoPrint`）は信頼設定なので出さない
+    // ——「サービスか」「出力を持つか」は定義の一覧に要るが、それ自体は秘密ではない
+    if ("printer" in s && s.printer) {
+      if (s.printer.service !== undefined) pub.service = s.printer.service;
+      pub.hasOutput = Boolean(s.printer.autoPdfDir || s.printer.autoPrint);
+    }
     const owner = this.ownerOf(s);
     if (owner !== undefined) pub.owner = owner;
     return pub;

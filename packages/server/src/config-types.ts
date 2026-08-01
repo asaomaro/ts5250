@@ -426,5 +426,20 @@ export interface PublicSession {
    * （`enabled` だけ残って `allow` が消えると、むしろ緩くなる）。
    */
   pcCommand?: PcCommandSettings;
+  /**
+   * 開いた直後／サーバー起動直後に待ち受けを開始するか（未設定＝する）。
+   * **信頼設定ではない**ので誰にでも返す（`dtaqWatch` と同じ理屈）
+   */
+  autoStart?: boolean;
+  /**
+   * `printer` のみ。**サービスとして常駐するか**。
+   *
+   * **フラグだけを返す**——`autoPdfDir` のパスや `autoPrint` のプリンター名は
+   * 信頼設定なので出さない。「サービスか」は定義の一覧に必ず要る情報で、
+   * それ自体はパスでもコマンドでも秘密でもない
+   */
+  service?: boolean;
+  /** `printer` のみ。**自動出力の設定を持つか**（中身は出さない） */
+  hasOutput?: boolean;
   owner?: string;
 }

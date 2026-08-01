@@ -160,8 +160,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
   // 見える範囲は IBM i の権限が決めるため、アプリ側で追加の制限は掛けない）
   registerHostListRoutes(app, { resolver: deps.resolver });
-  // 常駐プリンターの一覧（ブラウザを開かずに出力の失敗を確かめる口。design D2）
-  registerHostPrinterRoutes(app, { sessions: deps.sessions });
+  // **定義ベースの一覧**（プリンター／待ち行列）。実行中だけ並べると、
+  // 一度も開いていない定義が画面に出ず「開始」を押せない
+  registerHostPrinterRoutes(app, { resolver: deps.resolver, sessions: deps.sessions, watches });
   const resultSets = deps.resultSets ?? new ResultSetStore();
   const pool = deps.pool ?? new DbPool();
   registerHostSqlRoutes(app, { resolver: deps.resolver, resultSets, pool });
