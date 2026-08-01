@@ -8,7 +8,7 @@
  * **`dirty` フラグを持たない**（design の判断）。「移行したから書く」経路を作らないことで、
  * 勝手なファイル書き換えが構造的に起きない。書き出しは CRUD からの明示呼び出しに限る。
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -382,6 +382,27 @@ export class ServerConfigStore extends ConfigStore {
    */
   protected override canSeeService(): boolean {
     return true;
+  }
+
+  /**
+   * **既定パス用。ファイルが無ければ空で始める**（`20260801-server-config-bootstrap`）。
+   *
+   * 個人設定（`PersonalConfigStore.fromFile`）が元からこう振る舞う。サーバー設定だけが
+   * 取り残されていて、**ファイルが無いと `persistable` が false**——その結果
+   * `canEditServer` も false になり、**画面から「サーバー設定」を選べなかった**。
+   * ファイルを作らないと作れず、画面から作らないとファイルができない、という鶏と卵。
+   *
+   * **`--profiles` で明示指定されたときは使わない。** あちらは無ければエラーにする
+   * ——打ち間違えたパスで黙って空の設定が立ち上がると、既存の設定が消えたように見える。
+   */
+  static fromFileOrEmpty(path: string, crypto?: SecretCrypto, warn: Warn = () => {}): ServerConfigStore {
+    if (!existsSync(path)) {
+      const empty = new ServerConfigStore({ systems: [], sessions: [] }, crypto);
+      // **path は持たせる。** これが `persistable`＝「画面から保存できる」の条件
+      empty.setPath(path);
+      return empty;
+    }
+    return ServerConfigStore.fromFile(path, crypto, warn);
   }
 
   static fromFile(path: string, crypto?: SecretCrypto, warn: Warn = () => {}): ServerConfigStore {

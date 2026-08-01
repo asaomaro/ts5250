@@ -115,6 +115,12 @@ export function parseIdleTimeout(raw: string | undefined): number | "never" {
   return minutes * 60_000;
 }
 
+/**
+ * `--profiles` を渡さなかったときのサーバー設定の置き場。
+ * **個人設定（`connections.json`）と同じ形**——既定パスがあり、無ければ空で始まる。
+ */
+const DEFAULT_PROFILES_PATH = "profiles.json";
+
 function parseArgs(argv: string[]): Args {
   const args: Args = {
     mode: "http",
@@ -234,9 +240,11 @@ function buildDeps(args: Args): ToolDeps & { macros: MacroStore } {
   }
   // 旧形式のファイルは読み込み時にメモリ上で分解する。**書き戻しは明示的な保存操作のときだけ**
   const migrateWarn = (m: string): void => log.warn(m);
+  // **既定パスなら無くても保存できる状態で始める**（`20260801-server-config-bootstrap`）。
+  // 明示指定（`--profiles`）は無ければエラー——打ち間違えを黙らせない
   const server = args.profilesPath
     ? ServerConfigStore.fromFile(args.profilesPath, crypto, migrateWarn)
-    : new ServerConfigStore({ systems: [], sessions: [] }, crypto);
+    : ServerConfigStore.fromFileOrEmpty(DEFAULT_PROFILES_PATH, crypto, migrateWarn);
   const personal = PersonalConfigStore.fromFile(args.connectionsPath, crypto, migrateWarn);
   const resolver = new ConfigResolver(server, personal);
   // マクロは接続設定と同じ master key を共有する（秘密の鍵を 2 系統持たない）

@@ -18,6 +18,11 @@ users.json
 connections.json
 connections.json.tmp
 
+# サーバー設定（--profiles の既定の保存先）。接続先・ユーザー名・暗号化パスワードが入る。
+# 雛形は packages/server/profiles.json.example（こちらは追跡する）
+profiles.json
+profiles.json.tmp
+
 # 画面マクロ（--macros の保存先）。記録した秘密を secretEnc（AES-256-GCM）で持つので秘匿扱い
 macros.json
 macros.json.tmp

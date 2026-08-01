@@ -140,7 +140,7 @@ start.bat             # Windows
 ```sh
 ./start.sh --port 8080          # ポート変更
 ./start.sh --build              # 強制再ビルド
-./start.sh --profiles path.json # 未指定なら profiles.local.json → profiles.json を自動検出
+./start.sh --profiles path.json # 未指定なら profiles.local.json → profiles.json を自動検出（無ければ空で作る）
 ./start.sh --trace-records      # 受信レコードを hex でログへ（障害切り分け専用）
 ```
 
@@ -561,9 +561,17 @@ WebSocket の `open` メッセージも同じ `system` / `session` / `host` を�
 
 ## ⚙️ サーバー設定ファイル（profiles.json）
 
-`packages/server/profiles.json.example` を `profiles.local.json` としてコピーして編集します
-（`*.local.json` は `.gitignore` 済み。パスワードは環境変数で渡す運用を推奨）。
+**手で書かなくても構いません。** `./start.sh` は無ければ空の `profiles.local.json` を作り、
+`main.js` を直に起動した場合も `--profiles` 未指定なら `profiles.json` を保存先として使います
+（どちらも `.gitignore` 済み）。**画面の「システムを追加 → 保管場所: サーバー設定」から
+作り始められます**——ファイルが無いと保存先が決まらず選択肢が出ない、という状態は解消済みです。
+
+雛形から書き始めたい場合は `packages/server/profiles.json.example` を `profiles.local.json`
+としてコピーして編集します（パスワードは環境変数で渡す運用を推奨）。
 ファイルは**システム**と**セッション設定**の 2 つの配列を持ちます。
+
+> **`--profiles` を明示指定した場合、そのファイルが無ければ起動しません。**
+> 打ち間違えたパスで空の設定が立ち上がると、既存の設定が消えたように見えるためです。
 
 ```json
 {

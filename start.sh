@@ -54,11 +54,20 @@ if [ "$FORCE_BUILD" = 1 ] || [ ! -f packages/server/dist/main.js ] || [ ! -f pac
   npm run build -w @as400web/web-ui
 fi
 
-# 接続プロファイルの自動検出（未指定時）
+# 接続プロファイルの自動検出（未指定時）。
+# **見つからなければ空で作る。** 保存先が決まっていないと画面に「サーバー設定」の
+# 選択肢が出ず（保存できないボタンを出さない規則）、ファイルを作らないと作れない・
+# 画面から作らないとファイルができない、という鶏と卵になっていた。
+# 単一利用者向けのローカル起動なので、下の master key と同じ扱いで用意する。
 if [ -z "$PROFILES" ]; then
   for f in profiles.local.json profiles.json; do
     if [ -f "$f" ]; then PROFILES="$f"; break; fi
   done
+  if [ -z "$PROFILES" ]; then
+    PROFILES="profiles.local.json"
+    echo '{ "systems": [], "sessions": [] }' > "$PROFILES"
+    echo "==> created empty $PROFILES (サーバー設定の保存先)"
+  fi
 fi
 
 ARGS=(--http "$PORT" --web-root packages/web-ui/dist)
