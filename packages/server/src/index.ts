@@ -9,6 +9,13 @@ export {
 export { ConfigResolver, type ResolvedTarget, type TargetRef } from "./config-resolver.js";
 // 待ち受けの状態はプリンターと監視で共通の語彙。**画面もこれをそのまま描く**
 export { type ServiceState, holdsConnection, autoStartOf } from "./service-state.js";
+// サービス一覧の行（画面が描くので型を共有する。中身は「持っているか」のフラグまで）
+export {
+  registerHostPrinterRoutes,
+  type HostServicesDeps,
+  type PrinterRow,
+  type WatchRow
+} from "./host-printers.js";
 export {
   makeRef,
   parseRef,
@@ -18,6 +25,7 @@ export {
   type AnySession,
   type PublicSystem,
   type PublicSession,
+  type ServiceDef,
   type PrinterConfig,
   type Watermark,
   type IdleTimeout,

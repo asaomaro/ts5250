@@ -126,6 +126,8 @@ export class WsConnection {
           return this.onWatchStop(msg);
         case "watch-resume":
           return await this.onWatchResume(msg);
+        case "printer-service-start":
+          return await this.onPrinterServiceStart(msg);
         case "printer-start":
           return await this.onPrinterStart(msg);
         case "printer-stop":
@@ -232,6 +234,41 @@ export class WsConnection {
   private async onPrinterStart(msg: WsClientMessage & { type: "printer-start" }): Promise<void> {
     await withAudit({ op: "ws_printer_start" }, async () => {
       await this.deps.sessions.startPrinter(msg.sessionId, this.user);
+    });
+  }
+
+  /**
+   * **定義からプリンターサービスを立ち上げる**（`20260801-services-pane`）。
+   *
+   * `openPrinter` は `ref` で既存に繋ぐので、**一度も開いていない定義にも、
+   * 停止中の常駐にも同じ 1 通で効く**（前者は作って開始、後者は既存を返すので開始し直す）。
+   *
+   * **サービス ✅ の定義だけ受ける。** `resolve` が `service` を立てるのは
+   * サーバー設定由来のときだけなので、個人設定のプリンターをここから常駐化できない
+   * （信頼境界 5 層目。`config-resolver.ts`）。
+   */
+  private async onPrinterServiceStart(
+    msg: WsClientMessage & { type: "printer-service-start" }
+  ): Promise<void> {
+    await withAudit({ op: "ws_printer_service_start" }, async () => {
+      const t = this.deps.resolver.resolve({ session: msg.session }, this.user, (m) => wsLog.warn(m));
+      if (!t.service) {
+        throw new As400Error(
+          "CONFIG_ERROR",
+          `${msg.session} は「サービスとして使う」に設定されていません`
+        );
+      }
+      const entry = await this.deps.sessions.openPrinter({
+        ...t.connect,
+        ref: msg.session,
+        origin: "profile",
+        service: true,
+        // **停止中の常駐に当たったときのため。** `openPrinter` は既存を返して終わるので、
+        // ここで開始し直さないと「押しても動かない」になる
+        autoStart: false,
+        ...(t.printerOutput ? { output: t.printerOutput } : {})
+      });
+      await this.deps.sessions.startPrinter(entry.id, this.user);
     });
   }
 

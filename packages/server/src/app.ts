@@ -162,7 +162,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   registerHostListRoutes(app, { resolver: deps.resolver });
   // **定義ベースの一覧**（プリンター／待ち行列）。実行中だけ並べると、
   // 一度も開いていない定義が画面に出ず「開始」を押せない
-  registerHostPrinterRoutes(app, { resolver: deps.resolver, sessions: deps.sessions, watches });
+  registerHostPrinterRoutes(app, { resolver: deps.resolver, sessions: deps.sessions, watches, canEditServer });
   const resultSets = deps.resultSets ?? new ResultSetStore();
   const pool = deps.pool ?? new DbPool();
   registerHostSqlRoutes(app, { resolver: deps.resolver, resultSets, pool });

@@ -21,6 +21,7 @@ import {
   type AnySession,
   type ConfigSource,
   type PublicSession,
+  type ServiceDef,
   type PublicSystem,
   type System
 } from "./config-types.js";
@@ -255,6 +256,17 @@ export class ConfigResolver {
       ...(this.server?.listSessions(user, opts) ?? []),
       ...(this.personal?.listSessions(user, opts) ?? [])
     ];
+  }
+
+  /**
+   * サービス定義の**名札だけ**（`20260801-services-pane`）。
+   *
+   * **サーバー設定のぶんは admin でなくても返る。** `listSessions` の認可規則は
+   * 緩めていない——返す形（`ServiceDef`）にホストもパスも装置名も入っていないため、
+   * 「いま何が動いているか」だけが見える。
+   */
+  listServiceDefs(user: AuthUser | undefined): ServiceDef[] {
+    return [...(this.server?.listServiceDefs(user) ?? []), ...(this.personal?.listServiceDefs(user) ?? [])];
   }
 
   storeOf(source: ConfigSource): ConfigStore {

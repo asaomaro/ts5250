@@ -72,6 +72,12 @@ const FEATURES = [
  */
 const APP_PANES = computed(() => {
   const out = [
+    {
+      id: "svc:services",
+      name: "サービス",
+      // **タブを開かなくても分かる**のがこのペインの値打ちなので、そこを説明に書く
+      desc: "サーバーで動き続けるプリンター・待ち行列の一覧。開始・停止もできる。"
+    },
     { id: "admin:sessions", name: "セッション管理", desc: "このアプリが開いている接続の一覧。切断もできる。" },
     { id: "admin:logs", name: "ログ", desc: "このアプリの操作記録。" }
   ];

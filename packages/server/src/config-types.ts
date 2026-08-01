@@ -399,6 +399,32 @@ export interface PublicSystem {
 }
 
 /** API 露出用のセッション設定（**printer 出力を返さない**） */
+/**
+ * サービス定義の**名札だけ**（`20260801-services-pane`）。
+ *
+ * ## なぜ `PublicSession` と別に要るのか
+ *
+ * サーバー設定は**読むのも admin だけ**（`assertProfileAccess`）。だが
+ * 「いまサーバーで何が動いているか」は一般利用者にも見せたい——帳票が来ない理由が
+ * 「止まっているから」なら、それが分からないと問い合わせるしかない（利用者の判断）。
+ *
+ * そこで `listSessions` の規則は**一切緩めず**、この狭い形だけを別の口で返す。
+ * **ホストもパスも装置名も入っていない**——名前・種別・意図のフラグだけ。
+ */
+export interface ServiceDef {
+  ref: string;
+  name: string;
+  sessionType: SessionType;
+  /** `printer` のみ。サービスとして常駐する意図か */
+  service?: boolean;
+  /** 開いた直後／サーバー起動直後に待ち受けを始めるか（未設定＝始める） */
+  autoStart?: boolean;
+  /** `printer` のみ。自動出力の設定を**持つか**（中身は出さない） */
+  hasOutput?: boolean;
+  /** 個人設定のみ。所有者 */
+  owner?: string;
+}
+
 export interface PublicSession {
   ref: string;
   name: string;

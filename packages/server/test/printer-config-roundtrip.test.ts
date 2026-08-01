@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
-import { ServerConfigStore } from "../src/config-store.js";
+import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { registerConfigRoutes } from "../src/config-routes.js";
 import { SecretCrypto } from "../src/secret-crypto.js";
@@ -152,5 +152,76 @@ describe("autoStart（信頼設定ではない）", () => {
     const list = s.listSessions(admin);
     expect(list.find((x) => x.name === "a")!.autoStart).toBe(false);
     expect(list.find((x) => x.name === "b")!.autoStart).toBeUndefined();
+  });
+});
+
+/**
+ * **サービス定義の名札**（`20260801-services-pane`）。
+ *
+ * サーバー設定は読むのも admin だけ（`assertProfileAccess`）だが、**この狭い口だけは
+ * 一般利用者にも開く**——「いま何が動いているか」が分からないと、帳票が来ない理由を
+ * 問い合わせるしかない（利用者の判断: 見るだけは許す）。
+ *
+ * 開いてよい理由は**返す形が狭いから**。ホストもパスも装置名も入っていない。
+ */
+describe("listServiceDefs（名札だけ）", () => {
+  const s = () =>
+    new ServerConfigStore(
+      {
+        systems: [{ id: "sys", name: "sys", host: "secret-host.example", port: 992 }],
+        sessions: [
+          {
+            id: "p",
+            name: "帳票",
+            system: "sys",
+            sessionType: "printer",
+            deviceName: "PRT_SECRET",
+            printer: { ...PRINTER }
+          },
+          { id: "w", name: "受注", system: "sys", sessionType: "dtaqwatch", dtaqWatch: { library: "L", name: "Q" } },
+          { id: "d", name: "端末", system: "sys", sessionType: "display" }
+        ]
+      },
+      crypto
+    );
+
+  it("**一般ユーザーにも返る**（`listSessions` は 0 件のまま）", () => {
+    const store = s();
+    const plain = { username: "alice", role: "user" } as const;
+    expect(store.listSessions(plain)).toHaveLength(0); // 既存の規則は緩めていない
+    expect(store.listServiceDefs(plain).map((d) => d.name).sort()).toEqual(["受注", "帳票"]);
+  });
+
+  it("**ホスト・パス・装置名は入らない**", () => {
+    const json = JSON.stringify(s().listServiceDefs({ username: "alice", role: "user" }));
+    expect(json).not.toContain("secret-host.example");
+    expect(json).not.toContain("PRT_SECRET");
+    expect(json).not.toContain("/var/spool/out");
+    expect(json).not.toContain("LP1");
+  });
+
+  it("`display` は入らない（サービスではない）", () => {
+    expect(s().listServiceDefs(admin).some((d) => d.sessionType === "display")).toBe(false);
+  });
+
+  it("意図のフラグは入る（一覧の出し分けに要る）", () => {
+    const p = s().listServiceDefs(admin).find((d) => d.name === "帳票");
+    expect(p).toMatchObject({ service: true, hasOutput: true });
+  });
+});
+
+describe("個人設定のサービス定義は所有者だけ", () => {
+  it("**他人のものは名札さえ返さない**（サーバー設定と扱いが違う）", () => {
+    const store = new PersonalConfigStore(
+      {
+        systems: [{ id: "s1", name: "s1", host: "h", owner: "alice" }],
+        sessions: [
+          { id: "w1", name: "alice の監視", system: "s1", sessionType: "dtaqwatch", dtaqWatch: { library: "L", name: "Q" }, owner: "alice" }
+        ]
+      },
+      crypto
+    );
+    expect(store.listServiceDefs({ username: "alice", role: "user" })).toHaveLength(1);
+    expect(store.listServiceDefs({ username: "bob", role: "user" })).toHaveLength(0);
   });
 });

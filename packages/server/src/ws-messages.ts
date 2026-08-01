@@ -134,6 +134,20 @@ export interface WsWatchResume {
   type: "watch-resume";
   watchId: string;
 }
+/**
+ * **定義からプリンターサービスを立ち上げる**（`20260801-services-pane`）。
+ *
+ * `printer-start` は「**登録済みのもの**の待ち受けを始める」意味なので、
+ * **一度も開いていない定義には効かない**——サービス一覧から開始できるようにするには
+ * 「定義から作って始める」口が要る。監視の `watch-start` と同じ役割。
+ *
+ * **タブは開かない**（`open` と違ってセッションを画面に紐づけない）。サービスは
+ * ブラウザが居なくても動くものなので、見に行くのと動かすのを分ける。
+ */
+export interface WsPrinterServiceStart {
+  type: "printer-service-start";
+  session: string;
+}
 
 export type WsClientMessage =
   | WsOpen
@@ -149,6 +163,7 @@ export type WsClientMessage =
   | WsWatchStop
   | WsWatchHistoryReq
   | WsWatchResume
+  | WsPrinterServiceStart
   | WsPrinterStart
   | WsPrinterStop;
 

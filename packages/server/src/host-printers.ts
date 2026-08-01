@@ -36,6 +36,14 @@ export interface HostServicesDeps {
   resolver: ConfigResolver;
   sessions: SessionManager;
   watches?: WatchRegistry;
+  /**
+   * サービスを**操作できる相手か**（＝サーバー設定を編集できるか）。
+   *
+   * 一覧そのものは誰にでも返すが（利用者の判断: 見るだけは許す）、
+   * **理由の文面（`error` / `warnings`）は編集できる相手にだけ**——
+   * 出力の警告文にはサーバー上のパスが載りうる。
+   */
+  canEditServer?: (c: { get: (k: "user") => AuthVars["user"] }) => boolean;
 }
 
 /** 一覧 1 行に共通する部分（プリンターと待ち行列で同じ形にする） */
@@ -79,11 +87,19 @@ export interface WatchRow extends ServiceRow {
 }
 
 export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, deps: HostServicesDeps): void {
+  /** 操作できる相手か。未指定なら操作できる扱い（認証を組み込まない埋め込み用途） */
+  const canOperate = (c: { get: (k: "user") => AuthVars["user"] }): boolean =>
+    deps.canEditServer ? deps.canEditServer(c) : true;
+
   app.get("/api/printers", (c) => {
     const user = c.get("user");
     // **定義が行。** 動いているものは後から突き合わせる
-    const defs = deps.resolver.listSessions(user).filter((s) => s.sessionType === "printer");
-    const running = deps.sessions.listPrinters(user);
+    const defs = deps.resolver.listServiceDefs(user).filter((s) => s.sessionType === "printer");
+    // **所有で絞らずに突き合わせる。** 定義の一覧が既に認可済みで、`ref` は保管場所ごとに
+    // 一意なので、他人の実体に当たることはない。絞ると起動時に上がったサービス
+    // （所有者なし）が一般利用者から見えなくなる——それでは「動いているか」が分からない
+    const running = deps.sessions.listPrinters();
+    const detail = canOperate(c);
     const printers: PrinterRow[] = defs.map((d) => {
       const e = running.find((x) => x.ref === d.ref);
       const row: PrinterRow = {
@@ -98,21 +114,25 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
       };
       if (e) {
         row.id = e.id;
-        if (e.error !== undefined) row.error = e.error;
         row.outputEnabled = e.outputEnabled;
         row.receivedTotal = e.receivedTotal;
         row.buffered = e.reports.length;
-        row.warnings = [...e.outputWarnings].reverse();
+        // **理由の文面はパスを含みうる**ので、操作できる相手にだけ
+        if (detail) {
+          if (e.error !== undefined) row.error = e.error;
+          row.warnings = [...e.outputWarnings].reverse();
+        }
       }
       return row;
     });
-    return c.json({ printers });
+    return c.json({ printers, editable: detail });
   });
 
   app.get("/api/watches", (c) => {
     const user = c.get("user");
-    const defs = deps.resolver.listSessions(user).filter((s) => s.sessionType === "dtaqwatch");
-    const running = deps.watches?.list(user) ?? [];
+    const defs = deps.resolver.listServiceDefs(user).filter((s) => s.sessionType === "dtaqwatch");
+    const running = deps.watches?.list() ?? [];
+    const detail = canOperate(c);
     const watches: WatchRow[] = defs.map((d) => {
       const w = running.find((x) => x.ref === d.ref);
       const row: WatchRow = {
@@ -126,14 +146,18 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
       };
       if (w) {
         row.id = w.id;
-        if (w.error !== undefined) row.error = w.error;
         row.label = w.label;
         row.received = w.received;
-        // **本文は載せない**——件数だけ（中身は WS の `watch-history` が返す）
-        row.buffered = deps.watches?.history(w.id, user).length ?? 0;
+        // **本文は載せない**——件数だけ（中身は WS の `watch-history` が返す）。
+        // `history` は所有者を検査して投げるので、**見えない相手には数えない**
+        // （数えられないだけで、受信の累計 `received` は出る）
+        if (detail) {
+          row.buffered = deps.watches?.history(w.id, user).length ?? 0;
+          if (w.error !== undefined) row.error = w.error;
+        }
       }
       return row;
     });
-    return c.json({ watches });
+    return c.json({ watches, editable: detail });
   });
 }

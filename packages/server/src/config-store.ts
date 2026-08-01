@@ -29,6 +29,7 @@ import {
   type PublicSession,
   type PublicSystem,
   type ServerSession,
+  type ServiceDef,
   type System
 } from "./config-types.js";
 import {
@@ -118,7 +119,35 @@ export abstract class ConfigStore {
       .map((s) => this.publicSession(s, opts));
   }
 
-  private canSee(owner: string | undefined, user: AuthUser | undefined): boolean {
+  /**
+   * **サービス定義の名札だけ**を返す（`20260801-services-pane`）。
+   *
+   * `listSessions` とは**別の口**にしてある——あちらの認可規則は緩めない。
+   * ここが返すのは名前・種別・意図のフラグだけで、ホストもパスも装置名も入らない。
+   */
+  listServiceDefs(user: AuthUser | undefined): ServiceDef[] {
+    return [...this.sessions.values()]
+      .filter((s) => s.sessionType === "printer" || s.sessionType === "dtaqwatch")
+      .filter((s) => this.canSeeService(this.ownerOf(s), user))
+      .map((s) => {
+        const d: ServiceDef = { ref: makeRef(this.source, s.id), name: s.name, sessionType: s.sessionType };
+        if (s.autoStart !== undefined) d.autoStart = s.autoStart;
+        if ("printer" in s && s.printer) {
+          if (s.printer.service !== undefined) d.service = s.printer.service;
+          d.hasOutput = Boolean(s.printer.autoPdfDir || s.printer.autoPrint);
+        }
+        const owner = this.ownerOf(s);
+        if (owner !== undefined) d.owner = owner;
+        return d;
+      });
+  }
+
+  /** サービスの名札を見せてよいか。既定は通常の可視性と同じ（個人設定は所有者だけ） */
+  protected canSeeService(owner: string | undefined, user: AuthUser | undefined): boolean {
+    return this.canSee(owner, user);
+  }
+
+  protected canSee(owner: string | undefined, user: AuthUser | undefined): boolean {
     try {
       this.assertAccess(owner, user);
       return true;
@@ -329,6 +358,17 @@ export class ServerConfigStore extends ConfigStore {
 
   assertAccess(_owner: string | undefined, user: AuthUser | undefined): void {
     assertProfileAccess(user);
+  }
+
+  /**
+   * **サービスの名札は admin でなくても読める**（利用者の判断: 見るだけは許す）。
+   *
+   * 設定そのもの（`assertAccess`）は admin だけのままである——ここで見えるのは
+   * 名前・種別・意図のフラグだけで、ホストもパスも装置名も含まない（`ServiceDef`）。
+   * 動いているかどうかは、帳票が来ない理由を知るのに要る。
+   */
+  protected override canSeeService(): boolean {
+    return true;
   }
 
   static fromFile(path: string, crypto?: SecretCrypto, warn: Warn = () => {}): ServerConfigStore {
