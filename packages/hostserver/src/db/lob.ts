@@ -39,6 +39,7 @@ import { As400Error } from "@as400web/base";
 import { childLog } from "@as400web/base";
 import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
+import { isTwoByteCcsid } from "./db-decode.js";
 import type { DbConnection } from "./db-connection.js";
 
 const log = childLog({ component: "hostserver-lob" });
@@ -74,6 +75,8 @@ export async function retrieveLob(
   const chunks: Uint8Array[] = [];
   let received = 0;
   let ccsid = 0;
+  /** ホストが申告した総長。**単位は CCSID 次第**なので、判明してから換算する */
+  let declaredTotal = 0;
   let totalLength = 0;
 
   for (;;) {
@@ -106,8 +109,8 @@ export async function retrieveLob(
     }
 
     const rawLength = findParam(reply, DB_CP.lobDataLength);
-    if (rawLength && rawLength.length >= 2 && totalLength === 0) {
-      totalLength = parseLobLength(rawLength);
+    if (rawLength && rawLength.length >= 2 && declaredTotal === 0) {
+      declaredTotal = parseLobLength(rawLength);
     }
 
     const rawData = findParam(reply, DB_CP.lobData);
@@ -115,8 +118,14 @@ export async function retrieveLob(
 
     const view = new DataView(rawData.buffer, rawData.byteOffset, rawData.byteLength);
     ccsid = view.getUint16(0);
-    const dataLength = view.getUint32(2);
-    const body = rawData.subarray(6, Math.min(6 + dataLength, rawData.length));
+    // **長さの単位は CCSID で変わる**——UTF-16 / 純 DBCS では【文字数】、
+    // それ以外は【バイト数】。バイト数として読むと `日本語`（3 文字 / 6 バイト）が
+    // 3 バイトに切られる（実機で踏んだ。`20260801-dbclob-locator-decode`）。
+    // **SBCS だけで試すと一致してしまい判別できない**
+    const perChar = isTwoByteCcsid(ccsid) ? 2 : 1;
+    if (totalLength === 0) totalLength = declaredTotal * perChar;
+    const dataBytes = view.getUint32(2) * perChar;
+    const body = rawData.subarray(6, Math.min(6 + dataBytes, rawData.length));
     if (body.length === 0) break;
 
     chunks.push(body);

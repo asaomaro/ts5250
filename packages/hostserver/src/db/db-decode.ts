@@ -229,6 +229,42 @@ function decodeGraphic(bytes: Uint8Array, ccsid: number): string {
   );
 }
 
+/**
+ * この CCSID は **1 文字 2 バイト**か（UTF-16 / 純 DBCS）。
+ *
+ * ホストが申告する長さの**単位がこれで変わる**——2 バイト系では**文字数**、
+ * それ以外は**バイト数**で来る。実機で両方を確かめた
+ * （`DBCLOB CCSID 1200` は文字数 / `CLOB`（混在 5035）は SO・SI 込みのバイト数。
+ * `20260801-dbclob-locator-decode`）。
+ *
+ * **SBCS だけで試すと一致してしまい判別できない。** 必ず全角を含む値で確かめること。
+ */
+export function isTwoByteCcsid(ccsid: number): boolean {
+  return UTF16_CCSIDS.has(ccsid) || isPureDbcsCcsid(ccsid);
+}
+
+/**
+ * ロケーター経由で受け取った LOB のバイト列を文字にする。
+ *
+ * **判定をここに集約する。** 以前は `query.ts` が `codecForCcsid` だけを試しており、
+ * UTF-16（1200 / 13488）で失敗してバイト列のまま返していた——
+ * 同じ CCSID を `decodeText` / `decodeGraphic` は扱えていたのに、
+ * **同じ判定が 2 か所にあって片方だけ正しかった**。
+ *
+ * @param ccsid 0 なら BLOB。バイト列のまま返す
+ */
+export function decodeLobBytes(bytes: Uint8Array, ccsid: number): string | Uint8Array {
+  if (ccsid === 0) return bytes;
+  try {
+    if (UTF16_CCSIDS.has(ccsid)) return decodeUtf16Be(bytes);
+    if (isPureDbcsCcsid(ccsid)) return pureDbcsCodecForCcsid(ccsid).decode(bytes);
+    return codecForCcsid(ccsid).decode(bytes);
+  } catch {
+    // 未知の CCSID は**壊れた文字列にせず**バイト列で返す（既存の方針）
+    return bytes;
+  }
+}
+
 /** UTF-16BE。TextDecoder に頼らず自前で読む（ピュア層を環境非依存に保つ） */
 function decodeUtf16Be(bytes: Uint8Array): string {
   let out = "";

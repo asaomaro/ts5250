@@ -405,13 +405,25 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
   - ライブラリには入ったが、`/api/host/sql` も MCP `host_sql` も**渡す口が無い**。
     使い道（1 ページだけ見る／CSV に落とす等）が固まってから決める
   - **効果が最も大きいのは PUB400（1 往復 4〜7 秒）**だが、そちらでは未実測
-- [ ] **ロケーター経由の DBCLOB が壊れている**（`20260801-lob-threshold-realhost` F5 で発見）
+- [x] **ロケーター経由の DBCLOB が壊れている**（`20260801-lob-threshold-realhost` F5 で発見）
   - 既定経路（しきい値 0）で DBCLOB(CCSID 1200) の中身を取ると、`日本語` が **3 バイト**、
-    `全角混在ab` が **6 バイト**で返る（正しくは 6 / 12）。**バイト数が半分**で、
-    しかも文字列に復号されず `Uint8Array` のまま（`query.ts` の `decodeLob` が
-    `codecForCcsid(1200)` に失敗して落ちる）
-  - インライン経路で踏んだ「**文字数 vs バイト数**」の取り違えが、
-    ロケーター経路（`lob.ts` の受信長）にもあると見られる
+    `全角混在ab` が **6 バイト**で返る（正しくは 6 / 12）
+    → `20260801-dbclob-locator-decode`（PR #248）で修正。**原因は 2 つあった**:
+      1. **申告長の単位**——`lobData`（CP `0x380f`）の長さは
+         **2 バイト/文字の CCSID（UTF-16 / 純 DBCS）でだけ文字数**、混在・SBCS はバイト数。
+         一律バイト数として読んで**半分に切っていた**
+      2. **UTF-16 を復号していなかった**——`query.ts` の `decodeLob` が `codecForCcsid` しか
+         試さず、CCSID 1200 で失敗してバイト列のまま返していた
+    - **根は判定の重複**。`db-decode.ts` は同じ CCSID を扱えていたのに、
+      `query.ts` に別実装があって片方だけ正しかった（PR #242 の `isLob` 型重複と同じ形）。
+      `isTwoByteCcsid` / `decodeLobBytes` を `db-decode.ts` に集約し、`query.ts` の実装は**削除**
+    - **混在 CCSID の CLOB は元から正しい**（申告長＝SO/SI 込みのバイト数）。実機で前後とも確認
+    - 再現: `scripts/research-dbclob-locator.mjs`
+  - ⚠ **SBCS だけで試すと文字数＝バイト数で一致し、取り違えが結果に出ない。**
+    同じ罠をインライン経路（PR #245）でも踏んでいる。**LOB の長さは必ず全角で確かめること**
+- [ ] **純 DBCS の DBCLOB（CCSID 16684 / 300 など）を実機で確かめる**（上の続き）
+  - `isTwoByteCcsid` には含めたが、**その CCSID の DBCLOB 列を作って測ってはいない**
+  - 併せて、64KB を超える DBCLOB の分割受信と、DBCLOB での打ち切り（`too-large`）も未実測
 - [x] **`unavailable` に `"failed"` を足す**
   - 取りに行って失敗した場合に `"not-requested"`（要求していない）と表示され、
     **嘘に近い**。型を 1 つ足すだけだが server / web-ui / CSV に波及する

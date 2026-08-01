@@ -283,6 +283,11 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 単発接続では明示的な解放は要らない。**二重解放は `2 / -816`** で、
 原典のコメントが挙げる `7 / -401` とは違った（`20260801-lob-locator-free`）。
 
+`research-dbclob-locator.mjs` — **ロケーター経由の LOB の長さの単位と復号の実測**。
+`DBCLOB(CCSID 1200)` と混在 `CLOB` を同じ値で作り、`lobData` の申告長と実際の本体を突き合わせる。
+**2 バイト/文字の CCSID でだけ申告長が文字数**（混在・SBCS はバイト数）。
+⚠ **SBCS だけで試すと一致してしまい取り違えに気づけない**（`20260801-dbclob-locator-decode`）。
+
 `research-msgw.mjs` — **MSGW（スプールがライターの問い合わせで止まった状態）の実測**。
 既存の仮想プリンター装置を借り、用紙タイプをずらしたスプールで `CPA3394` を誘発して
 `retrieveMessage` / `answerMessage` を通す。**ライターは必ず止め、スプールは消す。装置は作らない・消さない。**

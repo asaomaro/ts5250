@@ -20,7 +20,7 @@ import {
   parseSuperExtendedDataFormat,
   type ExtColumn
 } from "./db-reply-ext.js";
-import { decodeRow, type ColumnMeta, type DbValue, type LobPlaceholder } from "./db-decode.js";
+import { decodeRow, decodeLobBytes, type ColumnMeta, type DbValue, type LobPlaceholder } from "./db-decode.js";
 import { typeName, jsTypeOf } from "./db-types.js";
 import { retrieveLob, DEFAULT_LOB_MAX_BYTES } from "./lob.js";
 
@@ -456,7 +456,7 @@ export async function fillLobs(
           locator: value.locator,
           maxSize: value.maxSize,
           byteLength: got.totalLength,
-          value: decodeLob(got.bytes, got.ccsid)
+          value: decodeLobBytes(got.bytes, got.ccsid)
         };
         // 打ち切ったときだけ理由を残す（取れたなら unavailable は付けない）
         if (got.truncated) filled.unavailable = "too-large";
@@ -476,19 +476,6 @@ export async function fillLobs(
 
 function isLobPlaceholder(v: DbValue): v is LobPlaceholder {
   return typeof v === "object" && v !== null && (v as LobPlaceholder).kind === "lob";
-}
-
-/**
- * LOB のバイト列を、ホストが申告した CCSID で文字列にする。
- * **未知の CCSID なら Uint8Array のまま返す**（壊れた文字列にしない）。
- */
-function decodeLob(bytes: Uint8Array, ccsid: number): string | Uint8Array {
-  if (ccsid === 0) return bytes;
-  try {
-    return codecForCcsid(ccsid).decode(bytes);
-  } catch {
-    return bytes;
-  }
 }
 
 async function closeCursor(conn: DbConnection): Promise<void> {
