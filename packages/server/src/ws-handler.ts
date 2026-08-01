@@ -387,6 +387,10 @@ export class WsConnection {
         if (t.printerOutput) opts.output = t.printerOutput;
         // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
         if (t.service) opts.service = true;
+        // **開き直したときに既存へ繋ぐ鍵。** 直接接続には無い
+        if (msg.session !== undefined) opts.ref = msg.session;
+        // 開いた直後に待ち受けるか（定義由来。既定は開始する）
+        if (!t.autoStart) opts.autoStart = false;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
         if (msg.host !== undefined) opts.host = msg.host;
@@ -436,6 +440,10 @@ export class WsConnection {
         hasOutput: entry.output !== undefined,
         outputEnabled: entry.outputEnabled,
         outputWarnings: entry.outputWarnings,
+        // **閉じている間に届いたぶんを渡す。** これが無いと
+        // 「繋がったが閉じている間のものは見えない」になる
+        reports: entry.reports.map((r) => ({ id: r.id, pages: r.pages })),
+        receivedTotal: entry.receivedTotal,
         outputStatuses: entry.outputStatuses
       });
     });

@@ -225,3 +225,81 @@ describe("開始と停止", () => {
     expect(seen).toEqual(["listening", "stopped"]);
   });
 });
+
+describe("開き直したら既存へ繋ぐ（attach）", () => {
+  /** `ref` 付きで開く（保存済み設定由来の経路） */
+  const openRef = (sessions: SessionManager, ref: string, owner?: string) =>
+    sessions.openPrinter({
+      ref,
+      ...(owner !== undefined ? { owner } : {}),
+      service: true,
+      transport: transport()
+    });
+
+  it("**同じ ref を二度開いても 1 本**（装置名はホスト上で排他）", async () => {
+    const sessions = new SessionManager();
+    const a = await openRef(sessions, "srv:prt1");
+    const b = await openRef(sessions, "srv:prt1");
+    expect(b.id).toBe(a.id);
+    expect(sessions.listPrinters()).toHaveLength(1);
+  });
+
+  it("**attach では状態を変えない**（止めたものを開き直しただけで再開しない）", async () => {
+    const sessions = new SessionManager();
+    const a = await openRef(sessions, "srv:prt1");
+    sessions.stopPrinter(a.id);
+    const b = await openRef(sessions, "srv:prt1");
+    expect(b.id).toBe(a.id);
+    expect(b.state).toBe("stopped");
+  });
+
+  it("所有が違えば繋がない（他人の常駐に相乗りしない）", async () => {
+    const sessions = new SessionManager();
+    const a = await openRef(sessions, "srv:prt1", "alice");
+    const b = await openRef(sessions, "srv:prt1", "bob");
+    expect(b.id).not.toBe(a.id);
+  });
+
+  it("ref が無ければ従来どおり毎回新規（直接接続）", async () => {
+    const sessions = new SessionManager();
+    const a = await open(sessions);
+    const b = await open(sessions);
+    expect(b.id).not.toBe(a.id);
+  });
+});
+
+describe("帳票バッファの上限", () => {
+  /** `deliverReport` は private。常駐が何日も動く前提の歯止めを直接確かめる */
+  const deliver = (sessions: SessionManager, entry: { id: string }, n: number): void => {
+    const m = sessions as unknown as {
+      deliverReport: (e: unknown, r: unknown) => void;
+    };
+    const e = sessions.listPrinters().find((x) => x.id === entry.id)!;
+    for (let i = 0; i < n; i++) m.deliverReport(e, { id: `s${i}`, pages: [] });
+  };
+
+  it("上限を超えたら古いものから落ちる（常駐は無制限にできない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    deliver(sessions, entry, 60);
+    expect(entry.reports.length).toBe(50);
+    // 落ちたのは古い方——新しいものが残る
+    expect(entry.reports[entry.reports.length - 1]?.id).toBe("s59");
+  });
+
+  it("累計は落ちた分も数える（何件来たかを見失わない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    deliver(sessions, entry, 60);
+    expect(entry.receivedTotal).toBe(60);
+  });
+
+  it("落としたぶん `delivered` もずらす（渡した位置が壊れない）", async () => {
+    const sessions = new SessionManager();
+    const entry = await open(sessions);
+    deliver(sessions, entry, 60);
+    // 位置が配列の外を指していない
+    expect(entry.delivered).toBeGreaterThanOrEqual(0);
+    expect(entry.delivered).toBeLessThanOrEqual(entry.reports.length);
+  });
+});

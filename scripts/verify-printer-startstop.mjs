@@ -47,6 +47,7 @@ try {
   log("### 1. autoStart ☐ で開く");
   entry = await sessions.openPrinter({
     host, user, password, deviceName: PRTDEV,
+    ref: "srv:verify",
     service: true,
     autoStart: false,
     output: { autoPdfDir: outDir }
@@ -88,6 +89,17 @@ try {
   await sessions.startPrinter(entry.id);
   log(`  state=${entry.state} startupCode=${entry.session?.startupCode}`);
   check(entry.state === "listening", "**再開できる（＝停止で本当に装置を手放していた）**");
+
+  // ---- 6. 開き直す（attach）----
+  log("\n### 6. 開き直す（同じ ref）");
+  const again = await sessions.openPrinter({
+    host, user, password, deviceName: PRTDEV,
+    ref: "srv:verify", service: true, output: { autoPdfDir: outDir }
+  });
+  log(`  1 回目 id=${entry.id} / 2 回目 id=${again.id}`);
+  check(again.id === entry.id, "**同じエントリが返る（二重接続しない）**");
+  check(sessions.listPrinters().length === 1, "一覧も 1 本のまま");
+  check(again.reports.length >= 1, "閉じている間に届いた帳票が読める");
 
   log(`\n  PDF: ${readdirSync(outDir).join(", ") || "(なし)"}`);
 } catch (e) {

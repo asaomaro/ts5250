@@ -240,6 +240,17 @@ export interface WsPrinterOpened {
   outputWarnings: PrinterOutputWarning[];
   /** 既受信スプールの自動出力結果（後から画面を開いても成否が分かるように配送） */
   outputStatuses: SpoolOutputStatusMsg[];
+  /**
+   * **バッファ済みの帳票**（`20260801-printer-attach-by-ref`）。
+   *
+   * 常駐中に届いたぶんを、開き直したブラウザへ渡す——これが無いと
+   * 「繋がったが閉じている間のものは見えない」になる。
+   * 上限（サーバー側 `REPORT_LIMIT`）を超えた古いものは落ちているので、
+   * **総数は `receivedTotal` を見る**
+   */
+  reports: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }[];
+  /** 累計受信数（**落ちた分も含む**）。`reports.length` との差が「落ちた数」 */
+  receivedTotal: number;
 }
 /** 1 スプールに対する自動出力の結果（成功も含む）。設定が無い側はキーを省略する */
 export interface SpoolOutputStatusMsg {

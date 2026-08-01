@@ -184,6 +184,11 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    * `false` なら登録だけして `stopped` のまま——利用者の開始操作を待つ
    */
   autoStart?: boolean;
+  /**
+   * 由来のセッション設定参照（`srv:` / `own:`）。**同じものを二度開いたときに繋ぎ直す鍵**。
+   * 直接接続（ブラウザ指定）には無いので、その場合は毎回新規になる
+   */
+  ref?: string;
   origin?: string;
   /** サーバー側出力設定（PDF 自動蓄積・自動印刷）。プロファイル由来のみ渡す（信頼設定） */
   output?: PrinterOutputConfig;
@@ -234,8 +239,19 @@ export interface PrinterEntry {
   lastActivity: number;
   /** 所有者（認証ユーザー名）。認証 OFF なら undefined */
   owner?: string;
-  /** 受信済みスプール（順） */
+  /**
+   * 受信済みスプール（順）。**上限あり**（`REPORT_LIMIT`）——常駐は何日も動くので、
+   * 超えたら古いものから落とす。落ちた分も含めた総数は `receivedTotal`
+   */
   reports: SpoolReport[];
+  /** 累計受信数（**落ちた分も含む**）。「何件来たか」を見失わないため */
+  receivedTotal: number;
+  /**
+   * 由来のセッション設定参照（`srv:` / `own:`）。
+   * **同じ定義を二度開いたときに繋ぎ直す鍵**（`20260801-printer-attach-by-ref`）。
+   * 直接接続には無い
+   */
+  ref?: string;
   /** wait_spool が返した件数（次に返す位置） */
   delivered: number;
   /** 次のスプールを待つ待機者 */
@@ -299,6 +315,19 @@ export interface SpoolOutputStatus {
 
 /** 出力警告の保持上限（メモリ肥大の防止） */
 const OUTPUT_WARN_LIMIT = 20;
+
+/**
+ * 保持する帳票の上限（プリンターあたり）。
+ *
+ * **常駐化が持ち込んだ歯止め**（`20260801-printer-attach-by-ref`）——
+ * WS 切断でセッションごと消えていた頃は自然に頭打ちになっていたが、
+ * サービスとして何日も動くようになった以上、**無制限だと伸び続ける**。
+ *
+ * 警告（20）より多いのは、帳票が**成果物そのもの**だから。ただし 1 件が数十 KB に
+ * なりうるので、無闇には増やさない。`autoPdfDir` があれば PDF がディスクに残るので、
+ * ここから落ちても**最後の砦はファイルの方**。
+ */
+const REPORT_LIMIT = 50;
 /** 出力結果の保持上限 */
 const OUTPUT_STATUS_LIMIT = 100;
 
@@ -616,6 +645,20 @@ export class SessionManager {
   }
 
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
+    // **同じ定義を二度開いたら、繋ぎ直すのではなく既にあるものへ繋ぐ。**
+    //
+    // 装置名は**ホスト上で排他**なので、二本目は断られる（実機で 8903／装置使用中）。
+    // 監視にも同じ規則があり（`watch-registry.ts`）、そのコメントが
+    // **判定をサーバーに置く理由**を書いている——画面側だけで見ると、
+    // リロード直後はまだ一覧が届いておらずすり抜ける。
+    //
+    // **状態は変えない。** 利用者が止めたものを、開き直しただけで勝手に再開しない
+    if (opts.ref !== undefined) {
+      const existing = [...this.printers.values()].find(
+        (e) => e.ref === opts.ref && e.owner === opts.owner
+      );
+      if (existing) return existing;
+    }
     // **常駐かどうかは「サービス ✅」で決まる**（`20260801-service-lifecycle-model` design D3）。
     // 以前は `output !== undefined` から導出していたが、それだと
     // 「開いている間だけ PDF に落とす」も「常駐して溜めるだけ」も表現できなかった。
@@ -647,6 +690,7 @@ export class SessionManager {
       lastActivity: this.now(),
       ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
       reports: [],
+      receivedTotal: 0,
       delivered: 0,
       waiters: [],
       ...(output !== undefined ? { output } : {}),
@@ -655,6 +699,7 @@ export class SessionManager {
       outputStatuses: [],
       resident,
       ...(opts.service !== undefined ? { service: opts.service } : {}),
+      ...(opts.ref !== undefined ? { ref: opts.ref } : {}),
       ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {})
     };
     this.printers.set(id, entry);
@@ -743,6 +788,15 @@ export class SessionManager {
   private deliverReport(entry: PrinterEntry, report: SpoolReport): void {
     {
       entry.reports.push(report);
+      entry.receivedTotal++;
+      // **上限を超えたら古いものから落とす。** 常駐は何日も動くので無制限にできない。
+      // `delivered`（`waitSpool` の位置）も一緒にずらさないと、
+      // 落とした分を「まだ渡していない」と数え続けて位置が壊れる
+      if (entry.reports.length > REPORT_LIMIT) {
+        const dropped = entry.reports.length - REPORT_LIMIT;
+        entry.reports.splice(0, dropped);
+        entry.delivered = Math.max(0, entry.delivered - dropped);
+      }
       entry.lastActivity = this.now();
       entry.onReport?.(report);
       const waiter = entry.waiters.shift();
