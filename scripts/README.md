@@ -334,3 +334,11 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 文字列は **EBCDIC・右空白詰めの固定長**、長さは 4 バイト、
 **エラーコード構造の先頭 4 バイトは 0**（非 0 にするとメッセージが出なくなる）。
 副作用なし（`20260801-call-program-realhost`）。
+
+`research-pure-dbcs-lob.mjs` — **純 DBCS の DBCLOB（CCSID 300）の実測**。
+ロケーター経由とインラインの両方で、中身・`byteLength`・申告長（**文字数**）を確かめる。
+
+> ⚠ **純 DBCS の列はジョブの CCSID から直接作れない**（`-332/57017`＝変換が無い）。
+> **1200 を経由する二段キャスト**なら通る:
+> `CAST(CAST('日本語' AS DBCLOB(1K) CCSID 1200) AS DBCLOB(1K) CCSID 300)`。
+> `16684` はこの実機では 1200 経由でも通らなかった（`20260801-pure-dbcs-dbclob`）。

@@ -446,9 +446,19 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
     - 再現: `scripts/research-dbclob-locator.mjs`
   - ⚠ **SBCS だけで試すと文字数＝バイト数で一致し、取り違えが結果に出ない。**
     同じ罠をインライン経路（PR #245）でも踏んでいる。**LOB の長さは必ず全角で確かめること**
-- [ ] **純 DBCS の DBCLOB（CCSID 16684 / 300 など）を実機で確かめる**（上の続き）
+- [x] **純 DBCS の DBCLOB（CCSID 16684 / 300 など）を実機で確かめる**（上の続き）
   - `isTwoByteCcsid` には含めたが、**その CCSID の DBCLOB 列を作って測ってはいない**
-  - 併せて、64KB を超える DBCLOB の分割受信と、DBCLOB での打ち切り（`too-large`）も未実測
+    → `20260801-pure-dbcs-dbclob`（PR #251）で **CCSID 300** を実測。
+      **ロケーター経由・インラインの両方で正しい**（`日本語` → byteLength=6 /
+      `全角混在` → 8）。申告長が**文字数**であることも生バイトで確認（3 → 6 バイト）。
+      **PR #248 の実装は純 DBCS でも正しく、コード変更は不要**だった
+    - ⚠ **16684 は確かめられなかった**——この実機に変換表が無い（1200 経由でも `-332`）
+    - **純 DBCS の列を作るときは 1200 を経由する**。ジョブの CCSID からの直接変換は
+      `-332/57017` で通らない: `CAST(CAST('…' AS DBCLOB(1K) CCSID 1200) AS DBCLOB(1K) CCSID 300)`
+    - 再現: `scripts/research-pure-dbcs-lob.mjs`
+- [ ] **64KB を超える LOB の分割受信と、LOB の打ち切り（`too-large`）を実機で確かめる**
+  - PR #248 / #251 で長さの単位を直したが、**1 応答に収まる値でしか測っていない**。
+    分割受信が跨ぐ場合と、`too-large` が正しく立つかは未実測（UTF-16・純 DBCS の両方）
 - [x] **`unavailable` に `"failed"` を足す**
   - 取りに行って失敗した場合に `"not-requested"`（要求していない）と表示され、
     **嘘に近い**。型を 1 つ足すだけだが server / web-ui / CSV に波及する
