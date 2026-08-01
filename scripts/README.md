@@ -14,6 +14,34 @@ node --env-file=.env scripts/<name>.mjs
 必要な環境変数: `PUB400_USER` / `PUB400_PASSWORD`（自動サインオン）。任意: `PUB400_HOST`（既定 pub400.com）、
 `PUB400_DEVNAME`、`PUB400_LIB`（既定 MYLIB）。各スクリプトは成功で終了コード 0、失敗で 1。
 
+## 検証に使う実機
+
+| 機械 | 版数 | パスワードレベル | 備考 |
+|---|---|---|---|
+| **実機**（社内・LAN） | **IBM i 7.3**（`V7R3M0`） | **0**（DES 経路） | CCSID 5035 / SBCS は 5026 系。ライブラリ `TESTLIB` |
+| **PUB400**（インターネット・TLS） | IBM i 7.5（`V7R5M0`） | 3（SHA 経路） | ライブラリ `MYLIB`。1 往復 4〜7 秒 |
+
+> ⚠ **2026-08-01 より前の記録は実機を「IBM i 7.5」と書いているが誤り。**
+> `.aidev/works/*` の research / walkthrough 等 15 件超が該当する（過去の記録なので
+> 書き換えていない）。**7.3 で測った結果**として読むこと
+> （経緯は `.aidev/works/20260801-realhost-version-and-pwdlevel/`）。
+
+版数は**表示 1 つを信じず 2 経路で**確かめる。「実機も 7.5」は、おそらく誰も測らずに
+書かれて広まった:
+
+```sh
+# 1. サインオンサーバーの VRM
+node --env-file=.env tools/hostserver-check/dist/main.js --host "$AS400_HOST"
+#    → "server version : V7R3M0" / "password level : 0"
+
+# 2. 累積 PTF パッケージ（ID は Cyyddd<rrr> で末尾 3 桁が版数）
+node --env-file=.env tools/hostserver-check/dist/sql.js \
+  "SELECT PTF_GROUP_NAME, PTF_GROUP_DESCRIPTION FROM QSYS2.GROUP_PTF_INFO"
+#    → SF99730 / "CUMULATIVE PTF PACKAGE C9116730" ＝ 7.3.0
+```
+
+`QSYS2.ENV_SYS_INFO` は実機に**無い**（`SQLCODE=-204`）ので、版数の確認には使えない。
+
 > PUB400 は切断後もデバイスをしばらく保持するため、同名デバイスへの即再接続は
 > `closed during negotiation` になりやすい。E2E 系はリトライごとにデバイス名を変える。
 

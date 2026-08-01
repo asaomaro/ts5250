@@ -27,7 +27,7 @@
 
 - [x] ~~**署名から「日付らしい欄 / 時刻らしい欄」を導く**~~
       **← 前提が実機で崩れた。作らない**（`20260730-input-assist-datetime`）
-  - **`EDTMSK` は欄を分解しない。** 実機（IBM i 7.5）に 8 通りの DDS を作って実測した
+  - **`EDTMSK` は欄を分解しない。** 実機（~~IBM i 7.5~~ **7.3**）に 8 通りの DDS を作って実測した
     （`scripts/build-dttest.mjs` / `scripts/research-edtmsk.mjs`）:
 
     | DDS | 画面 | 実際に届いた形 |

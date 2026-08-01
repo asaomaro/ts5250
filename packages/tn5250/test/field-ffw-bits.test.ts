@@ -11,7 +11,7 @@ const codec = codecForCcsid(37);
 /**
  * **FFW の挙動ビットが `Field` の任意フラグへ正しく写るか。**
  *
- * 期待値は**実機の実測値をそのまま置いている**（実機 / IBM i 7.5・2026-07-29。
+ * 期待値は**実機の実測値をそのまま置いている**（実機 / IBM i 7.3・2026-07-29。
  * `scripts/build-ffwtest.mjs` で DDS を作り `scripts/research-ffw.mjs` が
  * 生データストリームから採取。詳細は `.aidev/works/20260729-ffw-behavior-bits/research.md` 2.2）。
  *

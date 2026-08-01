@@ -17,7 +17,7 @@ const codec = codecForCcsid(37);
  * 送信時は **符号桁を送らず、負なら最終桁のゾーンを 0xD にする**
  * （GNU tn5250 `session.c:551-566`）。
  *
- * 【実機で裏づけ】実機 / IBM i 7.5・2026-07-30（`scripts/research-sign.mjs`）
+ * 【実機で裏づけ】実機 / IBM i 7.3・2026-07-30（`scripts/research-sign.mjs`）
  *
  * | 送った形 | ホストが受け取った値 |
  * |---|---|

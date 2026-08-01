@@ -17,7 +17,7 @@ import type { WsClient } from "../src/ws-client.js";
  * 残っていた。実装の根拠は 2 本立て:
  *
  * - **原典**: GNU tn5250 `display.c` / `field.c` と tn5250j `Screen5250.java`
- * - **実測**: 実機 / IBM i 7.5（2026-07-29）。`scripts/research-ffw.mjs`
+ * - **実測**: 実機 / IBM i 7.3（2026-07-29）。`scripts/research-ffw.mjs`
  *
  * とくに次の 2 つは実測でしか出てこなかった:
  *

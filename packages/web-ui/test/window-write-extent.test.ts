@@ -14,7 +14,7 @@ import type { Cell, ScreenSnapshot, WriteExtent } from "@as400web/tn5250";
  * | ③ 表（左右に `:` が並ぶ帳票） | **誤検出** | 罫線 |
  * | ④ 反転バナー（見出し行＋末尾行が反転） | **誤検出** | 反転 |
  *
- * 2026-07-29 に実機（IBM i 7.5）で `lastWrite` を採ったところ、
+ * 2026-07-29 に実機（IBM i 7.3）で `lastWrite` を採ったところ、
  * **当初の前提は半分しか成り立たなかった**:
  *
  * - Attn の窓（反転枠）… `cleared=false` / `rect=r18-24` ＝ **重ね書き**
