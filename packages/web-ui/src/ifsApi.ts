@@ -18,6 +18,7 @@ export interface IfsError {
   directories?: number;
   maxFiles?: number;
   maxBytes?: number;
+  maxDirectories?: number;
   partial?: boolean;
   /** 一覧を辿り切れなかったディレクトリ */
   path?: string;
@@ -41,6 +42,28 @@ export class IfsRequestError extends Error {
   }
 }
 
+/** バイト数を MB 表記に。既存の TOO_LARGE の書き方に揃える */
+function mb(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 件数（`undefined` なら空文字。**上限が欠けた応答で `undefined` を出さない**ため） */
+function count(n: number | undefined, unit: string): string {
+  return n === undefined ? "" : `${n} ${unit}`;
+}
+
+/**
+ * 「/ 上限 …」の断片を作る。
+ *
+ * **超過値だけでは「どこまでなら通るか」が分からない**——対象を絞る当てが付かない。
+ * 削除の `TOO_MANY` が既に上限を出しているので、他のコードもそれに揃える。
+ * 上限が 1 つも取れない応答（古いサーバー等）では**丸ごと省く**。
+ */
+function limitOf(parts: string[]): string {
+  const shown = parts.filter((p) => p !== "");
+  return shown.length === 0 ? "" : ` / 上限 ${shown.join("・")}`;
+}
+
 /** `code` から利用者向けの文言を作る。knownCodes と対で保つ */
 export function messageFor(b: IfsError): string {
   switch (b.code) {
@@ -57,11 +80,19 @@ export function messageFor(b: IfsError): string {
     case "INCOMPLETE_LISTING":
       return `${b.path ?? "このフォルダ"} の一覧を最後まで取得できないため、まとめてダウンロードできません。個別に取得してください。`;
     case "TOO_MANY_DIRECTORIES":
-      return `フォルダの数が多すぎます（${b.directories} 個以上）。対象を絞ってください。`;
+      return `フォルダの数が多すぎます（${b.directories} 個以上${limitOf([count(b.maxDirectories, "個")])}）。対象を絞ってください。`;
     case "TOO_LARGE": {
-      const size = b.bytes !== undefined ? `${(b.bytes / 1024 / 1024).toFixed(1)} MB 以上` : "";
-      const count = b.files !== undefined ? `${b.files} ファイル以上 / ` : "";
-      return `対象が大きすぎます（${count}${size}）。対象を絞るか、個別に取得してください。`;
+      // **複数系（zip / 一括アップロード）と単数系（1 ファイルの読み取り）で文面を分ける。**
+      // `files` を持つのは複数系だけ。1 ファイルを開いたときに「対象が大きすぎます」と
+      // 言われると、何を絞ればよいのか分からない
+      if (b.files === undefined) {
+        const got = b.bytes !== undefined ? mb(b.bytes) : "";
+        return `ファイルが大きすぎます（${got}${limitOf([b.maxBytes !== undefined ? mb(b.maxBytes) : ""])}）。ダウンロードしてください。`;
+      }
+      const size = b.bytes !== undefined ? `${mb(b.bytes)} 以上` : "";
+      const files = `${b.files} ファイル以上 / `;
+      const max = limitOf([count(b.maxFiles, "ファイル"), b.maxBytes !== undefined ? mb(b.maxBytes) : ""]);
+      return `対象が大きすぎます（${files}${size}${max}）。対象を絞るか、個別に取得してください。`;
     }
     case "NOT_EMPTY":
       return "フォルダの中身が残っています。中身ごと削除するか、先に中身を消してください。";
@@ -142,6 +173,31 @@ export interface IfsSource {
   /** `systemsStore.selected` をそのまま渡せるよう undefined を許す（未選択のまま呼ばれうる） */
   system?: string | undefined;
   session?: string | undefined;
+}
+
+/** サーバーの実効上限。すべて解決済みの値（`GET /api/host/ifs/limits`） */
+export interface IfsLimits {
+  readMaxBytes: number;
+  zipMaxBytes: number;
+  zipMaxFiles: number;
+  zipMaxDirectories: number;
+  deleteMaxEntries: number;
+  deleteMaxDirectories: number;
+}
+
+/**
+ * 上限を引く。**接続を要しない**（サーバー設定を返すだけ）ので、ホスト未選択でも呼べる。
+ *
+ * これを先に知らないと「読みに行く前に大きすぎると断る」ができない——
+ * 413 の応答にも上限は載るが、それは**一度失敗した後**なので体感は改善しない。
+ */
+export async function fetchLimits(): Promise<IfsLimits> {
+  const res = await fetch("/api/host/ifs/limits");
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => ({ error: res.statusText }))) as IfsError;
+    throw new IfsRequestError(res.status, parsed);
+  }
+  return (await res.json()) as IfsLimits;
 }
 
 export interface ListOptions {

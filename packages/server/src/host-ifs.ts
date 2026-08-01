@@ -15,7 +15,7 @@ import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openIfs } from "./host-connect.js";
 import { sourceSchema, statusOf, resolveSource } from "./host-api.js";
-import { collectFiles, readCollected } from "./ifs-collect.js";
+import { collectFiles, readCollected, DEFAULT_MAX_DIRECTORIES } from "./ifs-collect.js";
 import { decodeIfsText, encodeIfsText } from "./ifs-text.js";
 import { planDelete, type DeleteTarget } from "./ifs-delete.js";
 import { buildZip } from "./zip-writer.js";
@@ -277,6 +277,35 @@ function deleteLimits(deps: HostIfsDeps): { maxEntries: number; maxDirectories: 
   };
 }
 
+/** 画面に見せる上限の一式。**すべて解決済みの実効値**（`?? 既定` を呼び出し側に残さない） */
+export interface IfsLimits {
+  readMaxBytes: number;
+  zipMaxBytes: number;
+  zipMaxFiles: number;
+  zipMaxDirectories: number;
+  deleteMaxEntries: number;
+  deleteMaxDirectories: number;
+}
+
+/**
+ * `deps` から実効の上限を解決する。
+ *
+ * **既定値をここで書き直さない**——`?? 5000` のような式を足すと既定が 2 箇所になり、
+ * 片方だけ変えたときに「UI が言う上限」と「実際に弾かれる上限」がずれる。
+ * 削除系は `deleteLimits`、zip のディレクトリ数は `ifs-collect` の定数へ委譲する。
+ */
+export function resolveIfsLimits(deps: HostIfsDeps): IfsLimits {
+  const del = deleteLimits(deps);
+  return {
+    readMaxBytes: deps.readMaxBytes,
+    zipMaxBytes: deps.zipMaxBytes,
+    zipMaxFiles: deps.zipMaxFiles,
+    zipMaxDirectories: deps.zipMaxDirectories ?? DEFAULT_MAX_DIRECTORIES,
+    deleteMaxEntries: del.maxEntries,
+    deleteMaxDirectories: del.maxDirectories
+  };
+}
+
 /** 「消せない」を利用者向けの形にする。**理由ごとに次の一手が違う**ので、まとめて 1 文にしない */
 function deleteBlocked(
   plan: { reason: "too-many"; entries: number } | { reason: "too-many-directories"; directories: number } | { reason: "incomplete"; path: string },
@@ -339,6 +368,16 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       conn?.close();
     }
   };
+
+  /**
+   * 実効の上限を返す。**ホストに繋がない**——返すのはサーバー設定であってホストの状態ではないので、
+   * `withIfs` を通す理由が無い。接続前・接続失敗中でも画面が上限を知れる。
+   *
+   * これが無いと、クライアントは**超過して 413 を受け取るまで上限を知れない**。
+   * 「読みに行く前に大きすぎると断る」（体感の改善）が初回から効かなくなる。
+   * 認証は `app.use("*", createAuthMiddleware(...))` が全体に掛かるのでここでは扱わない。
+   */
+  app.get("/api/host/ifs/limits", (c) => c.json(resolveIfsLimits(deps)));
 
   app.post("/api/host/ifs/list", async (c) => {
     const parsed = listSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -797,7 +836,12 @@ export function registerHostIfsRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
             error: `フォルダの数が多すぎます（${collected.directories} 個以上）`,
             code: "TOO_MANY_DIRECTORIES",
             directories: collected.directories,
-            partial: true
+            partial: true,
+            // 上限も返す。**超過値だけでは「どこまでなら通るか」が分からず**、
+            // 対象を絞る当てが付かない（zip の TOO_LARGE・削除の TOO_MANY と揃える）。
+            // **既定の解決は `resolveIfsLimits` に一本化する**——ここで `?? 既定` を書くと、
+            // 「`/limits` が言う上限」と「弾いたときに返す上限」が別々に育ってずれる
+            maxDirectories: resolveIfsLimits(deps).zipMaxDirectories
           },
           413
         );

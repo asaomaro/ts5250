@@ -224,18 +224,47 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
 - [ ] CCSID 850 / 437 のテキスト表（必要になったら）
     → Node の TextDecoder に無く、実機の 850 タグは中身が UTF-8/ASCII で決定表①が拾うため今は不要。
       要るときは `tools/gen-tables` に `ibm-850_P100-1999.ucm` を足す（ICU に存在することは確認済み）
-- [ ] IFS プレビューのサイズ上限（5MB）とヌルバイト判定（03 D11）
+- [x] IFS プレビューのサイズ上限（5MB）とヌルバイト判定（03 D11）
     → server の readMaxBytes が最後の砦。クライアント側で先回りすると体感が良くなる
+    → 20260801-ifs-limits-and-race で実装。**先回りには上限を先に知る必要がある**ため
+      `GET /api/host/ifs/limits`（接続不要）を新設し、`usePreview` が
+      `sizeHint > readMaxBytes` のとき**読みに行かずに断る**ようにした
+      （`usePreview.ts` の `tooLarge`）。断るのは「サイズが分かっていて、上限も分かっていて、
+      超えている」ときだけ——どちらかが不明なまま断ると読めるファイルを見せられなくなる。
+      境界（同値）はサーバーと同じ `>` で揃えた
+    - **ヌルバイトは復号後の文字列で見る**（追加往復なし）。`content` に `U+0000` があれば
+      `binaryContent` を立て、`undecodable`（文字コード未対応）とは別の案内にする——
+      取り違えると利用者が当たらない文字コードを選び直し続ける
 - [x] IFS のディレクトリ削除（rmdir = 0x000E, CP 0x0001）
     → 20260723-ifs-pane-nav-file-ops で実装。**テンプレート長は 10**（ファイル削除の 8 とは
       フラグ 2 バイト分違う）。中身ごとの再帰削除・リネーム（0x000F）・一覧の「上位フォルダへ」も同時に入れた
-- [ ] IFS の zip 上限「値」を UI に表示（現状は超過した実測値のみ）
+- [x] IFS の zip 上限「値」を UI に表示（現状は超過した実測値のみ）
+    → 20260801-ifs-limits-and-race で実装。**サーバーは既に `maxFiles`/`maxBytes` を
+      送っていた**（`host-ifs.ts` の zip・read の 413）ので、使っていなかった `messageFor` を直した。
+      上限を送っていなかった `TOO_MANY_DIRECTORIES` にだけサーバー側を追加。
+      削除の `TOO_MANY` が既に `上限 N 件` を出しており、同じ関数の中で扱いが不揃いだった
+    - `TOO_LARGE` は**複数系（zip）と単数系（1 ファイルの読み取り）で文面を分けた**——
+      1 本のファイルに「対象を絞るか、個別に取得してください」は当たらない
+    - 上限が載っていない応答では**上限の断片ごと省く**（`undefined` を出さない）
 - [x] CLI 引数 `--ifs-zip-max-bytes`/`-files`/`-dirs`/`--ifs-read-max-bytes`/
       `--ifs-delete-max-entries`/`--ifs-delete-max-dirs` を README に追記
     → PR #199（`docs: README / AGENTS の抜け漏れ・矛盾をコードと突き合わせて直す`）で記載。
       `README.md:162-164` に既定値つきの表がある（読み取り 5 MiB / zip 20 MiB・500・5000 /
       再帰削除 1000・500）
-- [ ] IFS プレビューの競合対策（速い応答が勝つ。世代トークンで塞ぐ。03 review S3）
+- [x] IFS プレビューの競合対策（速い応答が勝つ。世代トークンで塞ぐ。03 review S3）
+    → 20260801-ifs-limits-and-race で実装。`usePreview` に単調増加のトークンを持たせ、
+      `await` 明けに `isStale()` で門番する
+    - **守るべき代入は 4 か所**（テキストの state / blob の state / `catch` の error /
+      `finally` の loading）。1 つでも漏れると症状が残るので、テストも 4 本に分けた
+    - **blob は URL を作る前に捨てる**——`revoke()` は `state.value?.url` しか見ないので、
+      作ってから捨てると解放する当てが無くなる（作らなければ漏れようがない）
+    - `reload` の巻き戻し（失敗時に直前の表示へ戻す）も同じトークンで守る
+    - **`AbortController` は採らなかった**: `ifsApi.post()` に `signal` を通す配管が全 API に要り、
+      かつ**サーバーは既にホストから読み切っている**ので節約できるのはブラウザ側の受信だけ。
+      中断は `AbortError` を投げるので門番が 2 種類になる。「応答は待つが、使わない」に徹した
+    - 落とし穴（この作業で踏んだ）: **早期 return する分岐（`binary`/`tooLarge`）でも
+      `loading` を落とさないと `true` に張り付く**。先行する遅い要求の `finally` が
+      門番で握られ、誰も落とさなくなる（review ラウンド 1 の must）
 
 ## SQL の複数文実行からの積み残し（2026-07-23 追記）
 

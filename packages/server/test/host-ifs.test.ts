@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { As400Error } from "@as400web/core";
-import { buildApp, DEFAULT_IFS_ZIP_MAX_BYTES, DEFAULT_IFS_ZIP_MAX_FILES } from "../src/app.js";
+import {
+  buildApp,
+  DEFAULT_IFS_READ_MAX_BYTES,
+  DEFAULT_IFS_ZIP_MAX_BYTES,
+  DEFAULT_IFS_ZIP_MAX_FILES
+} from "../src/app.js";
+import { DEFAULT_MAX_DIRECTORIES } from "../src/ifs-collect.js";
 import { SessionManager } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
@@ -146,5 +152,73 @@ describe("zip の既定の上限", () => {
   /** zip64 非対応なので、上限そのものが 4GB を超えてはいけない */
   it("既定は zip64 の境界より十分小さい", () => {
     expect(DEFAULT_IFS_ZIP_MAX_BYTES).toBeLessThan(0xffffffff);
+  });
+});
+
+/**
+ * 上限を返す口（`GET /api/host/ifs/limits`）。
+ *
+ * これが無いと、クライアントは**超過して 413 を受け取るまで上限を知れない**。
+ * 「読みに行く前に大きすぎると断る」（体感の改善）が初回から効かなくなる。
+ * backlog hostserver.md:202 / :207 の前提。
+ */
+describe("GET /api/host/ifs/limits", () => {
+  it("実効の上限を 6 つ返す", async () => {
+    const res = await app().request("/api/host/ifs/limits");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, number>;
+    expect(body).toEqual({
+      readMaxBytes: DEFAULT_IFS_READ_MAX_BYTES,
+      zipMaxBytes: DEFAULT_IFS_ZIP_MAX_BYTES,
+      zipMaxFiles: DEFAULT_IFS_ZIP_MAX_FILES,
+      zipMaxDirectories: DEFAULT_MAX_DIRECTORIES,
+      deleteMaxEntries: 1000,
+      deleteMaxDirectories: 500
+    });
+  });
+
+  /**
+   * **ホストに繋がない。** 返すのはサーバー設定であってホストの状態ではないので、
+   * 接続前・接続失敗中でも画面が上限を知れる必要がある
+   * （このアプリの `example.invalid` は当然繋がらない）。
+   */
+  it("接続できない設定でも 200 で答える", async () => {
+    const res = await app().request("/api/host/ifs/limits");
+    expect(res.status).toBe(200);
+  });
+
+  /** CLI 引数で上げ下げした値が、そのまま画面に届くこと */
+  it("CLI 引数の上書きが反映される", async () => {
+    const server = new ServerConfigStore({
+      systems: [{ id: "noauth", name: "noauth", host: "example.invalid" }],
+      sessions: []
+    });
+    const custom = buildApp({
+      sessions: new SessionManager(),
+      resolver: new ConfigResolver(server, new PersonalConfigStore()),
+      audit: new AuditBuffer(),
+      version: "test",
+      ifsReadMaxBytes: 1234,
+      ifsZipMaxFiles: 7,
+      ifsZipMaxDirectories: 9,
+      ifsDeleteMaxEntries: 11
+    });
+    const body = (await (await custom.request("/api/host/ifs/limits")).json()) as Record<string, number>;
+    expect(body.readMaxBytes).toBe(1234);
+    expect(body.zipMaxFiles).toBe(7);
+    expect(body.zipMaxDirectories).toBe(9);
+    expect(body.deleteMaxEntries).toBe(11);
+    // 指定しなかったものは既定のまま
+    expect(body.zipMaxBytes).toBe(DEFAULT_IFS_ZIP_MAX_BYTES);
+    expect(body.deleteMaxDirectories).toBe(500);
+  });
+
+  /**
+   * **既定値を 2 箇所に持たない。** `resolveIfsLimits` が自前で `?? 5000` と書くと、
+   * `ifs-collect` 側だけ変えたときに「UI が言う上限」と「実際に弾かれる上限」がずれる。
+   */
+  it("zip のディレクトリ上限の既定は ifs-collect の定数と同じ", async () => {
+    const body = (await (await app().request("/api/host/ifs/limits")).json()) as Record<string, number>;
+    expect(body.zipMaxDirectories).toBe(DEFAULT_MAX_DIRECTORIES);
   });
 });

@@ -20,6 +20,31 @@ afterEach(() => {
   systemsStore.selected = realSelected;
 });
 
+/**
+ * `IfsPane` はマウント時に必ず `GET /api/host/ifs/limits` を引く
+ * （読みに行く前にサイズで断るための上限）。
+ *
+ * **各テストの経路判定に混ぜない。** このファイルのモックは「`list` 以外は書き込み」と
+ * 決め打ちしているものが多く、素通しすると書き込み回数の検査が狂う。
+ * 各モックの先頭でこれを返して打ち切る。
+ */
+const LIMITS = {
+  readMaxBytes: 5 * 1024 * 1024,
+  zipMaxBytes: 20 * 1024 * 1024,
+  zipMaxFiles: 500,
+  zipMaxDirectories: 5000,
+  deleteMaxEntries: 1000,
+  deleteMaxDirectories: 500
+};
+function limitsResponse(url: unknown): Response | undefined {
+  return String(url).endsWith("/api/host/ifs/limits")
+    ? new Response(JSON.stringify(LIMITS), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    : undefined;
+}
+
 const entry = (name: string, over: Record<string, unknown> = {}) => ({
   name,
   isDirectory: false,
@@ -33,6 +58,8 @@ const entry = (name: string, over: Record<string, unknown> = {}) => ({
 /** URL ごとに応答を返す偽 fetch */
 function mockFetch(routes: Record<string, unknown>, status: Record<string, number> = {}) {
   globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
     const key = String(url).replace("/api/host/ifs/", "");
     const body = routes[key] ?? { entries: [], hasMore: false, canContinue: false };
     return new Response(JSON.stringify(body), {
@@ -185,6 +212,8 @@ describe("プレビュー", () => {
   it("選んだ文字コードで読めなくても、直前の表示と選択 UI を消さない", async () => {
     let reads = 0;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -267,6 +296,8 @@ describe("プレビュー", () => {
   it("文字コードを選び直すと、その CCSID で読み直す", async () => {
     const sent: unknown[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "read") sent.push(JSON.parse(String(init?.body)));
       const body =
@@ -307,6 +338,8 @@ describe("上位フォルダへ", () => {
   it("フォルダを開くと先頭に出て、押すと 1 つ上へ戻る", async () => {
     const asked: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { path: string };
       if (route === "list") asked.push(body.path);
@@ -340,6 +373,8 @@ describe("上位フォルダへ", () => {
 
   it("キーボード（Enter）でも戻れる", async () => {
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { path: string };
       return new Response(
@@ -417,6 +452,8 @@ describe("操作系", () => {
   it("フォルダをクリックすると開く（プレビューしない）", async () => {
     const calls: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       calls.push(`${route} ${JSON.parse(String(init?.body)).path}`);
       return new Response(
@@ -437,6 +474,8 @@ describe("操作系", () => {
   it("ダウンロードは選択中のファイルを対象にする", async () => {
     const asked: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { path: string };
       if (route === "list") {
@@ -513,6 +552,8 @@ describe("アップロード", () => {
    */
   it("一部が失敗したら、成功と失敗の両方を伝える", async () => {
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
@@ -554,6 +595,8 @@ describe("アップロード", () => {
   it("一覧が不完全なら、上書きの可能性を伝えて確認する", async () => {
     const asked: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -604,6 +647,8 @@ describe("フォルダのアップロード", () => {
       files: string[];
     }[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
@@ -742,6 +787,8 @@ describe("フォルダのドロップ", () => {
   it("100 件を超えるフォルダを取りこぼさない", async () => {
     const sent: { files: string[] } = { files: [] };
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
@@ -792,6 +839,8 @@ describe("アップロードの符号化", () => {
     const part = new Blob([new Uint8Array(bytes)]);
     const sent: Record<string, unknown>[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
@@ -851,6 +900,8 @@ describe("ツリー", () => {
   function treeFetch(tree: Record<string, string[]>) {
     const asked: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { path: string };
       if (route !== "list") {
@@ -992,6 +1043,8 @@ describe("アップロード中のシステム切り替え", () => {
     const sent: { system: unknown; base: unknown; paths: string[] }[] = [];
     let firstWrite: (() => void) | undefined;
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as {
         source: { system?: string };
@@ -1057,6 +1110,8 @@ describe("操作中の禁止", () => {
   function pendingList() {
     let release: (() => void) | undefined;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         await new Promise<void>((r) => {
@@ -1096,6 +1151,8 @@ describe("アップロードの後始末（別システムへ飛ばさない）"
     const listed: string[] = [];
     let firstWrite: (() => void) | undefined;
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { source: { system?: string }; path: string };
       if (route === "list") {
@@ -1143,6 +1200,8 @@ describe("上書き確認", () => {
   it("読み込み済みで同名があれば上書きを確認する", async () => {
     let wrote = false;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -1174,6 +1233,8 @@ describe("上書き確認", () => {
     let release: (() => void) | undefined;
     let writes = 0;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(JSON.stringify({ entries: [], hasMore: false, canContinue: false }), {
@@ -1218,6 +1279,8 @@ describe("編集・保存", () => {
   it("編集した内容が UTF-8 で書き戻される", async () => {
     const sent: { path: string; content: string; encoding: string }[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as Record<string, string>;
       if (route === "list") {
@@ -1261,6 +1324,8 @@ describe("編集・保存", () => {
   it("読んだときの文字コード・行末・BOM を保存要求に載せる", async () => {
     const sent: Record<string, unknown>[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -1320,6 +1385,8 @@ describe("編集・保存", () => {
   it("編集していなければ書き込まない", async () => {
     let wrote = false;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -1354,6 +1421,8 @@ describe("編集・保存", () => {
   it("復号できないファイルは編集させない", async () => {
     let wrote = false;
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "list") {
         return new Response(
@@ -1408,6 +1477,8 @@ describe("削除・名前の変更", () => {
   it("フォルダ行の「…」で開かずに選べる（移動しない）", async () => {
     const asked: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       const body = JSON.parse(String(init?.body)) as { path: string };
       if (route === "list") asked.push(body.path);
@@ -1435,6 +1506,8 @@ describe("削除・名前の変更", () => {
   it("フォルダの削除は、先に件数を数えてから確認する", async () => {
     const posted: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       posted.push(route);
       const body =
@@ -1471,6 +1544,8 @@ describe("削除・名前の変更", () => {
   it("上限を超えるフォルダは数えた時点で断る（削除要求を出さない）", async () => {
     const posted: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       posted.push(route);
       const body =
@@ -1497,6 +1572,8 @@ describe("削除・名前の変更", () => {
   it("名前の変更は新しい名前を送り、一覧を取り直す", async () => {
     const sent: Record<string, unknown>[] = [];
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       if (route === "rename") sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(
@@ -1521,6 +1598,8 @@ describe("削除・名前の変更", () => {
   it("パス区切りを含む名前は往復させずに断る", async () => {
     const posted: string[] = [];
     globalThis.fetch = vi.fn(async (url: unknown) => {
+    const limits = limitsResponse(url);
+    if (limits) return limits;
       const route = String(url).replace("/api/host/ifs/", "");
       posted.push(route);
       return new Response(JSON.stringify(listWith([entry("a.txt")])), {

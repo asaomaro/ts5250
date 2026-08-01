@@ -10,12 +10,14 @@ import {
   deleteFile,
   deletePlan,
   download,
+  fetchLimits,
   makeDirectory,
   renamePath,
   uploadTree,
   writeFile,
   zipFolder,
   type IfsEntry,
+  type IfsLimits,
   type IfsUploadEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
@@ -36,7 +38,21 @@ defineProps<{ tabId: string }>();
 const ROOT = "/";
 const source = () => ({ system: systemsStore.selected });
 const tree = useIfsTree(source);
-const preview = usePreview(source);
+/**
+ * サーバーの実効上限。**取れなくても機能は落とさない**——
+ * 先回り判定（読む前に大きすぎると断る）が効かなくなるだけで、
+ * サーバーの 413 が最後の砦として残る。付随機能の失敗で主機能を止めない。
+ */
+const limits = ref<IfsLimits | undefined>(undefined);
+void fetchLimits().then(
+  (l) => {
+    limits.value = l;
+  },
+  () => {
+    // 握る。エラー表示もしない（利用者に打つ手が無く、実害も無い）
+  }
+);
+const preview = usePreview(source, () => limits.value);
 const { visible: slowLoading, busy, run } = useDelayedLoading();
 /** 通信中は操作を止める。zip は実機で分単位かかるので、連打・並行実行を許さない */
 const disabled = computed(() => busy.value || uploading.value);
@@ -212,6 +228,22 @@ async function activate(entry: IfsEntry): Promise<void> {
  */
 const editText = ref("");
 /** 採用中の文字コードが保存に使えるか。候補に無いものはサーバーの判断に委ねる */
+/** バイト数を MB 表記に。`ifsApi` のエラー文言と同じ書き方に揃える */
+function mbOf(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * 中身を見せられる状態のプレビューだけを返す。
+ *
+ * **上限超過で読みに行かなかったとき（`tooLarge`）は本文の枠を出さない**——
+ * `kind` は保ってあるので、素直に描くと空の編集欄や `src=""` の iframe が出る。
+ * 「大きすぎて読んでいない」と「読んだが空だった」を見た目で区別できなくなる。
+ */
+const body = computed(() =>
+  preview.state.value && !preview.state.value.tooLarge ? preview.state.value : undefined
+);
+
 const writable = computed(() => {
   const ccsid = preview.state.value?.ccsid;
   if (ccsid === undefined) return true;
@@ -871,7 +903,17 @@ void (async () => {
             タグは中身を説明していないことがある（UTF-8 の内容に CCSID 850）ので、
             復号できたときも・できなかったときも選び直せるようにする
           -->
-          <p v-if="preview.state.value.kind === 'text'" class="encoding">
+          <!--
+            読みに行かずに断ったとき。**上限も一緒に出す**——超過値だけでは
+            「どこまでなら通るか」が分からず、対象を分ける当てが付かない。
+            ダウンロード（右の操作）は使えるので、中身を得る道は残っている
+          -->
+          <p v-if="preview.state.value.tooLarge" class="note">
+            大きすぎるため表示していません（{{ mbOf(preview.state.value.bytes) }} / 上限
+            {{ mbOf(preview.state.value.maxBytes ?? 0) }}）。ダウンロードして開いてください。
+          </p>
+
+          <p v-if="body?.kind === 'text'" class="encoding">
             <span class="tv">{{ encodingNote }}</span>
             <select
               :value="chosenCcsid ?? ''"
@@ -894,22 +936,30 @@ void (async () => {
           <p v-if="preview.error.value" class="error">{{ preview.error.value }}</p>
 
           <!-- 復号できないのはエラーではない。読み取りは成功していて表示手段が無いだけ -->
-          <p v-if="preview.state.value.undecodable" class="note">
+          <p v-if="body?.undecodable" class="note">
             この文字コードでは読めませんでした。上の一覧から選び直すか、ダウンロードして開いてください。
           </p>
-          <p v-else-if="!writable" class="note">
+          <p v-else-if="body && !writable" class="note">
             この文字コードは読み取り専用です（保存はできません）。
+          </p>
+          <!--
+            **文字コードの問題と混同させない。** 拡張子はテキストでも中身にヌルバイトがあれば
+            そもそもテキストではない。`undecodable` の案内を出すと、利用者は当たらない
+            文字コードを選び直し続けることになる
+          -->
+          <p v-if="body?.binaryContent" class="note">
+            テキストとして開きましたが、中身にバイナリが含まれています。ダウンロードして開いてください。
           </p>
           <!-- UTF-8 で読めたテキストは編集できる。読めなかったものは上の undecodable 分岐 -->
           <textarea
-            v-if="preview.state.value.kind === 'text' && !preview.state.value.undecodable"
+            v-if="body?.kind === 'text' && !body.undecodable"
             v-model="editText"
             class="editor"
             spellcheck="false"
             :readonly="!writable"
             :aria-label="`${selected?.name ?? 'ファイル'} の内容`"
           />
-          <p v-if="preview.state.value.kind === 'text' && dirty" class="note">
+          <p v-if="body?.kind === 'text' && dirty" class="note">
             編集中（保存すると上書きします）
           </p>
           <!--
@@ -917,17 +967,9 @@ void (async () => {
             v-else で繋ぐと、テキストを編集していないときに最後の v-else が真になり、
             表示できているテキストの下に「プレビューできません」が出る
           -->
-          <iframe
-            v-if="preview.state.value.kind === 'pdf'"
-            :src="preview.state.value.url"
-            title="PDF プレビュー"
-          />
-          <img
-            v-else-if="preview.state.value.kind === 'image'"
-            :src="preview.state.value.url"
-            alt="画像プレビュー"
-          />
-          <p v-else-if="preview.state.value.kind === 'binary'" class="note">
+          <iframe v-if="body?.kind === 'pdf'" :src="body.url" title="PDF プレビュー" />
+          <img v-else-if="body?.kind === 'image'" :src="body.url" alt="画像プレビュー" />
+          <p v-else-if="body?.kind === 'binary'" class="note">
             この形式はプレビューできません。ダウンロードしてください。
           </p>
 

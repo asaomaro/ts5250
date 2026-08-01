@@ -64,3 +64,70 @@ describe("エラーコードの網羅", () => {
     expect(msg).toContain("MB 以上");
   });
 });
+
+/**
+ * 上限「値」の表示（backlog hostserver.md:207）。
+ *
+ * **超過値だけでは「どこまでなら通るか」が分からない**——対象を絞る当てが付かない。
+ * サーバーは既に `maxFiles` / `maxBytes` を送っており、使っていなかったのは UI 側だった。
+ * 削除の `TOO_MANY` だけが上限を出していて、同じ関数の中で扱いが不揃いだった。
+ */
+describe("上限値の表示", () => {
+  it("zip の TOO_LARGE に上限が出る", () => {
+    const msg = messageFor({
+      error: "x",
+      code: "TOO_LARGE",
+      files: 501,
+      bytes: 21_000_000,
+      maxFiles: 500,
+      maxBytes: 20_971_520
+    });
+    expect(msg).toContain("501 ファイル以上");
+    expect(msg).toContain("上限 500 ファイル");
+    expect(msg).toContain("20.0 MB");
+  });
+
+  /**
+   * **1 ファイルの読み取りは文面を分ける。** `files` を持たないのが単数系の目印。
+   * 「対象が大きすぎます。対象を絞るか、個別に取得してください」では、
+   * 1 本のファイルを開いたときに何を絞ればよいのか分からない。
+   */
+  it("read の TOO_LARGE は単数形で上限を出す", () => {
+    const msg = messageFor({ error: "x", code: "TOO_LARGE", bytes: 6_500_000, maxBytes: 5_242_880 });
+    expect(msg).toContain("ファイルが大きすぎます");
+    expect(msg).toContain("6.2 MB");
+    expect(msg).toContain("上限 5.0 MB");
+    expect(msg).toContain("ダウンロード");
+    // 複数系の案内が混ざらないこと
+    expect(msg).not.toContain("対象を絞る");
+  });
+
+  it("TOO_MANY_DIRECTORIES に上限が出る", () => {
+    const msg = messageFor({
+      error: "x",
+      code: "TOO_MANY_DIRECTORIES",
+      directories: 6000,
+      maxDirectories: 5000
+    });
+    expect(msg).toContain("6000 個以上");
+    expect(msg).toContain("上限 5000 個");
+  });
+
+  /**
+   * 上限が載っていない応答（古いサーバー・想定外の形）でも壊れない。
+   * **`undefined` を文言に出さない**のが要——出ると利用者は意味を読み取れない。
+   */
+  it("上限が欠けていても undefined を出さない", () => {
+    for (const b of [
+      { error: "x", code: "TOO_LARGE", files: 501, bytes: 9_000_000 },
+      { error: "x", code: "TOO_LARGE", bytes: 9_000_000 },
+      { error: "x", code: "TOO_MANY_DIRECTORIES", directories: 6000 }
+    ]) {
+      const msg = messageFor(b);
+      expect(msg).not.toContain("undefined");
+      expect(msg).not.toContain("NaN");
+      // 上限が取れないなら「上限」の断片ごと出さない（中途半端な文にしない）
+      expect(msg).not.toContain("上限");
+    }
+  });
+});

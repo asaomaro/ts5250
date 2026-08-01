@@ -566,7 +566,9 @@ describe("zip", () => {
     );
     const res = await call(app, "zip", { path: "/d" });
     expect(res.status).toBe(413);
-    expect(await res.json()).toMatchObject({ code: "TOO_MANY_DIRECTORIES" });
+    // **上限も返す。** 超過値（「N 個以上」）だけでは「どこまでなら通るか」が分からず、
+    // 対象を分ける当てが付かない（TOO_LARGE・削除の TOO_MANY と揃える）
+    expect(await res.json()).toMatchObject({ code: "TOO_MANY_DIRECTORIES", maxDirectories: 1 });
   });
 
   /**
