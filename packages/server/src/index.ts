@@ -53,6 +53,17 @@ export type {
 export { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type AttrRun } from "./format.js";
 export { fieldSignon } from "./signon.js";
 export { audit, withAudit, setAuditSink, type AuditEvent } from "./audit.js";
+// 認証の実体。**組み込み用途と検証スクリプトが認証ありのサーバーを組める**ように公開する
+// （認可が効いているかは、認証を有効にしないと一度も測れない）
+export {
+  UserStore,
+  SessionStore,
+  type AuthContext,
+  type AuthUser,
+  type AuthVars,
+  type Role,
+  type PublicUser
+} from "./auth.js";
 export { registerTools, type ToolDeps } from "./mcp-tools.js";
 export { buildMcpServer } from "./mcp-server.js";
 export { buildApp, type AppDeps } from "./app.js";

@@ -131,7 +131,7 @@ export class WsConnection {
         case "printer-start":
           return await this.onPrinterStart(msg);
         case "printer-stop":
-          return this.onPrinterStop(msg);
+          return await this.onPrinterStop(msg);
         case "watch-history":
           return this.onWatchHistory(msg);
         case "activity":
@@ -275,8 +275,15 @@ export class WsConnection {
     });
   }
 
-  private onPrinterStop(msg: WsClientMessage & { type: "printer-stop" }): void {
-    void withAudit({ op: "ws_printer_stop" }, async () => {
+  /**
+   * **`void` で捨てない。** 捨てると 2 つ壊れる（認証ありの実機 E2E で踏んだ）:
+   *
+   * - 拒否（他人のサービスを止めようとした）が**利用者に返らない**——
+   *   `handle()` の catch が `error` を送る経路を、`void` が迂回してしまう
+   * - 未処理の rejection として**プロセスごと落ちる**
+   */
+  private async onPrinterStop(msg: WsClientMessage & { type: "printer-stop" }): Promise<void> {
+    await withAudit({ op: "ws_printer_stop" }, async () => {
       this.deps.sessions.stopPrinter(msg.sessionId, this.user);
     });
   }

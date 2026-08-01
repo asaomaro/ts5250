@@ -280,19 +280,28 @@ async function connect(ref: string, force = false): Promise<void> {
       <p class="note">
         機能はセッションを開かなくても使えます。システムを選んだ時点で認証情報が揃っているためです。
       </p>
+    </template>
 
-      <p class="sec">アプリ</p>
-      <div class="cards">
-        <div v-for="a in APP_PANES" :key="a.id" class="fn app">
-          <div class="nm">{{ a.name }}</div>
-          <div class="desc">{{ a.desc }}</div>
-          <div class="foot">
-            <button class="btn ghost" @click="openFeature(a.id, false)">{{ isOpen(a.id) ? "表示" : "開く" }}</button>
-          </div>
+    <!--
+      アプリ自身の画面。**システムの選択に依存しない**——扱うのは IBM i のデータではなく
+      このアプリだからである。
+
+      以前は「選択後」の段の中にあったが、それだと**サーバー設定のシステムしか無い環境で、
+      一般ユーザーがどの画面にも辿り着けない**（サーバー設定は admin にしか見えないので
+      選べるシステムが 0 件になる）。サービス一覧を「見るだけは許す」と決めた以上、
+      入口が閉じていては意味が無い。
+    -->
+    <p class="sec">アプリ</p>
+    <div class="cards">
+      <div v-for="a in APP_PANES" :key="a.id" class="fn app">
+        <div class="nm">{{ a.name }}</div>
+        <div class="desc">{{ a.desc }}</div>
+        <div class="foot">
+          <button class="btn ghost" @click="openFeature(a.id, false)">{{ isOpen(a.id) ? "表示" : "開く" }}</button>
         </div>
       </div>
-      <p class="note">これらは IBM i ではなく、このアプリ自身を扱います。</p>
-    </template>
+    </div>
+    <p class="note">これらは IBM i ではなく、このアプリ自身を扱います。</p>
   </div>
 </template>
 
