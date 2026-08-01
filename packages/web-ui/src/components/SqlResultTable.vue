@@ -2,6 +2,8 @@
 import { ref, nextTick, onActivated } from "vue";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
 import { isLob } from "../csv.js";
+// 型は在り処（`@as400web/hostserver`）から。`import type` なのでバンドルに入らない
+import type { LobPlaceholder } from "@as400web/hostserver";
 
 /**
  * SQL の結果 1 つぶんの表。
@@ -24,7 +26,9 @@ interface Column {
   typeName: string;
   nullable: boolean;
 }
-type Cell = string | number | boolean | null | { kind: "lob" };
+// LOB は**実体の型**を使う。`{ kind: "lob" }` とだけ書いていたため、
+// `value` / `unavailable` / `byteLength` を読む関数がすべて `as` で読み直していた
+type Cell = string | number | boolean | null | LobPlaceholder;
 type Row = Record<string, Cell>;
 
 defineProps<{
@@ -73,20 +77,26 @@ function cellTitle(v: unknown): string | undefined {
   return String(v);
 }
 
-/** LOB セルの表示。**取得済み・未取得・大きすぎ・失敗を区別する** */
-function lobText(v: unknown): string {
-  const lob = v as { value?: unknown; unavailable?: string };
+/**
+ * LOB セルの表示。**取得済み・未取得・大きすぎ・失敗を区別する**。
+ *
+ * テンプレートは `v-else-if="isLob(…)"` の中でしか呼ばないので、冒頭の絞り込みは
+ * 形式上のもの（`as` で読み直さないために置く）。
+ */
+function lobText(v: Cell | undefined): string {
+  if (!isLob(v)) return String(v ?? "");
   // **中身があるならまず出す**。理由の判定を先に置くと、部分値を持つ状態で値を捨てる
-  if (typeof lob.value === "string") {
-    return lob.unavailable === "too-large" ? `${lob.value}…（以降省略）` : lob.value;
+  if (typeof v.value === "string") {
+    return v.unavailable === "too-large" ? `${v.value}…（以降省略）` : v.value;
   }
-  if (lob.unavailable === "too-large") return "(LOB: 大きすぎます)";
-  if (lob.unavailable === "failed") return "(LOB: 取得失敗)";
+  if (v.unavailable === "too-large") return "(LOB: 大きすぎます)";
+  if (v.unavailable === "failed") return "(LOB: 取得失敗)";
   return "(LOB)";
 }
 
-function lobTitle(v: unknown): string {
-  const lob = v as { byteLength?: number; unavailable?: string };
+function lobTitle(v: Cell | undefined): string {
+  if (!isLob(v)) return String(v ?? "");
+  const lob = v;
   // **取得を促すのは本当に要求していないときだけ**。取りに行って失敗した場合にも
   // これを出していたので、既に取得を要求した利用者へ同じ操作を勧めていた
   if (lob.unavailable === "not-requested") return "LOB の中身は取得していません（左のチェックで取得）";

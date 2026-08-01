@@ -5,7 +5,9 @@ import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
-import { csvBlob, csvFileName, isLob, toCsv } from "../csv.js";
+import { csvBlob, csvFileName, toCsv } from "../csv.js";
+// 型は在り処（`@as400web/hostserver`）から。`import type` なのでバンドルに入らない
+import type { LobPlaceholder } from "@as400web/hostserver";
 import { splitSqlStatements, summarizeSql } from "@as400web/base";
 import SqlLogPanel from "./SqlLogPanel.vue";
 import SqlResultTable from "./SqlResultTable.vue";
@@ -33,7 +35,9 @@ interface Column {
   typeName: string;
   nullable: boolean;
 }
-type Row = Record<string, string | number | boolean | null | { kind: "lob" }>;
+// LOB は**実体の型**を使う。`{ kind: "lob" }` とだけ書くと `SqlResultTable` の
+// `Row` と構造が食い違い、prop として渡せない（vue-tsc TS2719）
+type Row = Record<string, string | number | boolean | null | LobPlaceholder>;
 
 const sql = ref("");
 /** 1 度に取得する件数。**上限ではなく 1 回の読み足し量** */

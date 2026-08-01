@@ -54,6 +54,19 @@ describe("toCsv の LOB", () => {
     expect(toCsv(["A"], [{ A: lob({ value: "x,y" }) }])).toBe('A\r\n"x,y"');
   });
 
+  it("上限で打ち切ったなら画面と同じ印を付ける（無印だと完全な値に見える）", () => {
+    expect(toCsv(["A"], [{ A: lob({ value: "先頭だけ", unavailable: "too-large" }) }])).toBe(
+      "A\r\n先頭だけ…（以降省略）"
+    );
+  });
+
+  it("打ち切りの印を付けても本文は捨てない・囲みは印まで含める", () => {
+    // 本文に `,` があるので RFC 4180 のクォートが要る。**印まで 1 つのフィールドに収める**
+    expect(toCsv(["A"], [{ A: lob({ value: "x,y", unavailable: "too-large" }) }])).toBe(
+      'A\r\n"x,y…（以降省略）"'
+    );
+  });
+
   it("取りに行っていないなら (LOB)", () => {
     expect(toCsv(["A"], [{ A: lob({ unavailable: "not-requested" }) }])).toBe("A\r\n(LOB)");
   });

@@ -45,7 +45,9 @@ export { retrieveLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./db/lob.
 export { query, stream, SqlError, type Row, type QueryResult } from "./db/query.js";
 // 上限つき取得。**ホストから取ってくる量**を抑える（`query` は全件取得）
 export { queryLimited, type LimitedResult } from "./db/query.js";
-export type { ColumnMeta, DbValue } from "./db/db-decode.js";
+// LobPlaceholder も出す。`DbValue` の一員なので、**これが無いと DbValue を
+// 意味のある形に絞れない**（利用側が同じ構造型を書き直すことになり、実態と食い違う）
+export type { ColumnMeta, DbValue, LobPlaceholder } from "./db/db-decode.js";
 export { DB2, typeName, jsTypeOf, type JsType } from "./db/db-types.js";
 // 結果を返さない文（DML / DDL）。判定は純関数で、実行は SQLCODE で成否を見る
 export { executeStatement, type ExecuteResult } from "./db/execute.js";
