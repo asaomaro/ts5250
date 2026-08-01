@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 import {
   buildApp,
   DEFAULT_IFS_READ_MAX_BYTES,

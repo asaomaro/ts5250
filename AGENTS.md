@@ -55,18 +55,26 @@
 | `@as400web/ebcdic` | EBCDIC 変換（SBCS / DBCS / CCSID テキスト） | なし |
 | `@as400web/scs` | スプールのバイト列 → 論理ページ | ebcdic |
 | `@as400web/hostserver` | ホストサーバー群のクライアント（signon / SQL / IFS / DDM / DTAQ / スプール / コマンド） | base, ebcdic, scs |
-| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs, hostserver |
+| `@as400web/core` | TN5250（telnet / 5250 データストリーム / 画面モデル / トレース） | base, ebcdic, scs（＋hostserver は**型のみ**） |
 
 - **`base` に置くのは「複製すると壊れるもの」だけ**で、共通で使うものの物置ではない。
   `As400Error` は `instanceof` で判定され、`log.ts` は可変状態を持つ——どちらも実体が 2 つに
   なるとパッケージ跨ぎで静かに壊れる（型検査でもビルドでも気づけない）。
-- **`core → hostserver` の辺は後方互換のためだけに在る。** `@as400web/core` は
-  ホストサーバーの公開面を再輸出しており、`packages/server` はそれ経由で使っている。
-  **逆向き（`hostserver → core`）は禁止**（`packages/hostserver/test/no-core-dependency.test.ts`）。
-  新しいコードは `@as400web/hostserver` を直接使う。
+- **使うものは在り処から取る。** `@as400web/core` を「何でも入っている袋」として使わない。
+  `As400Error` / `childLog` は `@as400web/base`、`DbConnection` / `IfsConnection` は
+  `@as400web/hostserver`、`LogicalPage` は `@as400web/scs` から**直接** import する。
+  `packages/server/test/import-from-owner.test.ts` が走査して塞いでいる
+  （`As400Error` のように core が今も再輸出している名前は、core 経由でも**通ってしまう**——
+  通るが出どころが見えなくなるので、型検査ではなく走査で止める）。
+- **`core` はホストサーバーを実行時に引かない。** 切り出し直後は後方互換のため再輸出していたが、
+  利用側を直参照へ移して撤去した（`packages/core/test/hostserver-not-reexported.test.ts`）。
+  残るのは `@as400web/core/browser` の**型のみ再輸出 3 箇所**だけで、これは web-ui のために
+  意図的に残している（直参照にするとブラウザ向けパッケージが `node:net` を含むパッケージを
+  依存に持つ）。**`export type` を値 export に変えてはならない。**
+  **逆向き（`hostserver → core`）も禁止**（`packages/hostserver/test/no-core-dependency.test.ts`）。
 - **再輸出の列挙を落としても内部は壊れない**——壊れるのは外の利用者だけ、という気づけない回帰に
-  なるので、到達可能性を実行時に検査している（`codec-reexport.test.ts` /
-  `hostserver-reexport.test.ts`）。`export *` は使わず公開面は列挙する。
+  なるので、到達可能性を実行時に検査している（`codec-reexport.test.ts`）。
+  `export *` は使わず公開面は列挙する。
 - **ブラウザから触る側は狭い入口を使う**。バレル（`@as400web/ebcdic`）は変換表 18,900 行を全部引き込む。
   `…/codec`（変換のみ）・`…/katakana`（930/939 の SBCS 部のみ）・`…/catalog`（表ゼロ）を使い分ける。
   バレル経由だと bundler の解析が及ばず要らない部分が残る（実測差あり。`decisions.md` D2）。

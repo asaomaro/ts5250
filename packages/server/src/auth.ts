@@ -4,7 +4,7 @@ import { scryptSync, randomBytes, timingSafeEqual, createHash } from "node:crypt
 import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 
 /**
  * 認証・per-user 分離（PR 1）。Node 標準 crypto のみで完結（新規依存なし）。

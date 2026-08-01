@@ -11,7 +11,7 @@
  *   4 層目: `autoPdfDir` と `pcCommand.allow` を保存**前**に検証する（不正な設定を永続化しない）
  */
 import type { Hono } from "hono";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 import type { AuthVars } from "./auth.js";
 import { checkOutputDir } from "./output-dir.js";
 import { invalidAllowPattern } from "./pc-command.js";

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ResultSetStore } from "../src/result-set-store.js";
-import type { ColumnMeta, DbConnection, Row } from "@as400web/core";
+import type { ColumnMeta, DbConnection, Row } from "@as400web/hostserver";
 
 /**
  * 結果セットの保持。

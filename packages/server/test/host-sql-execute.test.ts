@@ -5,7 +5,7 @@ import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { AuditBuffer } from "../src/audit.js";
 import { DbPool, poolKey } from "../src/db-pool.js";
-import { SqlError, type DbConnection } from "@as400web/core";
+import { SqlError, type DbConnection } from "@as400web/hostserver";
 import { codecForCcsid } from "@as400web/ebcdic";
 
 /**

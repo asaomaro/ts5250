@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import type { DbConnection } from "@as400web/core";
+import type { DbConnection } from "@as400web/hostserver";
 
 /**
  * **単発経路は毎回 `openDb` で接続を開く**ので、偽の接続はここで差し込む

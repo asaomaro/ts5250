@@ -12,7 +12,7 @@
  * 「秘密だけ差し替える」経路ができ、上の不変条件が崩れるため。差し替えは記録し直す。
  */
 import type { Hono } from "hono";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 import type { AuthVars } from "./auth.js";
 import type { MacroStore } from "./macro-store.js";
 

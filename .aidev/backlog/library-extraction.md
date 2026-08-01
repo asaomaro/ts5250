@@ -159,8 +159,10 @@ pino を持ち込むと価値が半減する。**
     （`core/test/log-sink-single-instance.test.ts` / `errors-compat.test.ts`）
   - **利用側は 1 行も変えていない**——`packages/server` 37 ファイル・`packages/web-ui` 22 ファイル・
     `tools/hostserver-check` の追跡ファイル差分は 0。後方互換は `@as400web/core` からの
-    列挙 re-export で保ち、到達可能性を `core/test/hostserver-reexport.test.ts` が検査する
-    （**`@as400web/hostserver` 自身の公開面と突き合わせる**ので、行ごと消しても捕まる）
+    列挙 re-export で保ち、到達可能性をテストが検査する
+    （**`@as400web/hostserver` 自身の公開面と突き合わせる**ので、行ごと消しても捕まる）。
+    ~~`core/test/hostserver-reexport.test.ts`~~ **← 3b で再輸出ごと撤去したため
+    `core/test/hostserver-not-reexported.test.ts`（逆向きの検査）に作り直した**
   - **実測値（次に測る人の基準線）**: web-ui 本番バンドル **359,853 バイト（前後で完全一致）**、
     テスト **3,248 → 3,263 件**（+15 はすべて新設ガード。1 件も減っていない）。
     既知の失敗は `zip-writer.test.ts` の 4 件のみで、`unzip` 未インストールによる環境要因（分割前から）
@@ -168,14 +170,52 @@ pino を持ち込むと価値が半減する。**
     `packages/core/src/**` の glob 下で `node:*` 禁止が効いていた（実測で import 0 件）。
     `eslint.config.js` の `files` に base / hostserver を足さなければ**保護だけが黙って消えていた**
   - **publish は未実施**（項目 1・2 と同じく「公開の判断を後回しにできる状態」までがゴール）
-- [ ] 3b. `packages/server` の 37 ファイルを `@as400web/hostserver` 直参照へ移す
+- [x] 3b. 利用側を直参照へ移し、`@as400web/core` の hostserver 再輸出を撤去する
   - 項目 3 の follow-up（`20260801-library-extraction-hostserver` decisions.md D6）。
     後方互換を `@as400web/core` の re-export で保った結果、**`core → hostserver` の辺が残っている**
     ——`@as400web/core` を import する側はホストサーバー一式も引き取り続ける
-  - 項目 3 で改善されたのは「ホストサーバーだけ欲しい」側。「TN5250 だけ欲しい」側は
-    **項目 4 と、この 3b の両方**が要る
-  - 移した後も `@as400web/core` の re-export は外部利用者のために残す（`codec` と同じ扱い）。
-    `core/test/hostserver-reexport.test.ts` があるので、消すと落ちる
+  - ~~項目 3 で改善されたのは「ホストサーバーだけ欲しい」側。「TN5250 だけ欲しい」側は
+    **項目 4 と、この 3b の両方**が要る~~
+    **← 起票時の記述が不正確だった。** 「`packages/server` の import を移す」だけでは
+    **辺は消えない**——再輸出しているのは core の `index.ts` なので、利用側を書き換えても
+    core は 1 行も変わらない。**再輸出の撤去まで含めて初めて**目的が達成される
+  - ~~移した後も `@as400web/core` の re-export は外部利用者のために残す（`codec` と同じ扱い）。
+    `core/test/hostserver-reexport.test.ts` があるので、消すと落ちる~~
+    **← 撤去した。** publish していない以上「外部利用者」は仮想で、実在の利用者
+    （server / tools / web-ui）は全部 monorepo 内。残す理由が無い
+  - **2026-08-01 完了**（`.aidev/works/20260801-library-extraction-drop-core-reexport`）。
+    ユーザー判断で範囲を「利用側の移設 ＋ 再輸出の撤去」に拡張した——前者だけでは価値が出ず、
+    後者だけでは利用側が壊れるので、割ると中途半端な状態が残る
+  - **実測値（次に測る人の基準線）**: `packages/core/dist/index.js` の
+    `@as400web/hostserver` が **33 → 0 箇所**（＝実行時の辺が消えた）。
+    web-ui 本番バンドルは **359,853 バイトで前後一致**、テストは **3,263 → 3,266 件**（失敗 0）
+  - 移設は **58 ファイル / 61 import 文**（`packages/server/src` 31・`packages/server/test` 16・
+    `tools/hostserver-check/src` 11）。宛先は base 46 / hostserver 37 / core 15 / scs 3 / ebcdic 3 文
+  - **`browser.ts` の型のみ再輸出 3 箇所は意図的に残した**。`@as400web/hostserver` は
+    `node:net` を含む Node 専用パッケージで、ブラウザ向けパッケージの依存に載せるものではない。
+    型は実行時に消えるので `dist/browser.js` には現れない（0 件を検査している）
+  - **既存バグを 1 件見つけて直した**——`db-pool.ts` / `host-sql.ts` / `result-set-store.ts` /
+    `host-upload.ts` の 4 ファイルが、サーバー自前の pino ではなく**ライブラリ側の注入式
+    `childLog`** を使っていた。分割前は `@as400web/core` 経由だったので気づきにくかった。
+    `log-independence.test.ts` に走査を足して塞いだ（足した直後に 4 件目を検出した）
+  - 不変条件は `core/test/hostserver-not-reexported.test.ts`（**ビルド成果物を読む**）と
+    `server/test/import-from-owner.test.ts`（走査）で固定。**再輸出を 1 行戻したとき
+    `tsc -b` は通った**——型検査では捕まらない
+- [ ] 3c. `packages/core` の `dependencies` から `@as400web/hostserver` を完全に外す
+  - 3b の follow-up（`20260801-library-extraction-drop-core-reexport` decisions.md D5）。
+    実行時の辺は消えたが、**型のみの依存が残っている**——`browser.ts` が
+    `UploadRejection` / `IfsEntry` / `IfsListResult` / dtaq 型群を `export type` している
+  - 外すには **web-ui を触る**必要がある（web-ui が `@as400web/hostserver` を
+    `devDependencies` に持ち `import type` する形）。`devDependencies` なら実行時依存にならず、
+    バンドルにも入らない
+  - 3b では web-ui を対象外にしたので踏み込まなかった。**優先度は低い**——
+    実行時には何も引かないので、実害は「`npm i @as400web/core` で余計に 1 パッケージ入る」だけ
+- [ ] 3d. `tools/hostserver-check` の旧名 `Tn5250Error` を `As400Error` に改める
+  - 7 ファイルが旧名を使っている。`@as400web/base` の JSDoc は
+    「このリポジトリ内の新しいコードでは `As400Error` を使うこと」としている
+  - 3b では import 元の付け替えに徹し**識別子には触れなかった**（差分を
+    「どこから取るかだけが変わった」と読める状態に保つため。decisions.md D4）
+  - 同一クラスの別名なので**振る舞いは変わらない**。`errors-compat.test.ts` が同一性を固定している
 - [ ] 4. TN5250 クライアント一式（`protocol`/`screen`/`session`/`telnet`/`transport`/`trace`）
   - `protocol ⇄ screen` が相互依存のため分割不可。出すなら一式
   - 競合あり（例: green-screen-react）。差別化軸は「純 TypeScript・依存なし・トレース再生付き」

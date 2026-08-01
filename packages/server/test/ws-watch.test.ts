@@ -9,7 +9,8 @@
  * 3. 他人の監視は見えない・配られない
  */
 import { describe, it, expect } from "vitest";
-import { As400Error, type DtaqConnection } from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { type DtaqConnection } from "@as400web/hostserver";
 import { WsConnection } from "../src/ws-handler.js";
 import { SessionManager } from "../src/session-manager.js";
 import { WatchRegistry } from "../src/watch-registry.js";

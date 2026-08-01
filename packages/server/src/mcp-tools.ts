@@ -1,15 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  CommandError,
-  SqlError,
-  As400Error,
-  type ConnectOptions,
-  type ScreenSnapshot,
-  type SendAidResult,
-  type SendAidOptions,
-  type AidKey
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { CommandError, SqlError } from "@as400web/hostserver";
+import { type ConnectOptions, type ScreenSnapshot, type SendAidResult, type SendAidOptions, type AidKey } from "@as400web/core";
 import { childLog } from "./log.js";
 import { orphanSafeIdleTimeoutMs, SessionManager, type OpenOptions } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";

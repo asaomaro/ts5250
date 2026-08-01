@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { SessionManager, nextDeviceName } from "../src/session-manager.js";
-import { ReplayTransport, parseTraceJsonl, As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { ReplayTransport, parseTraceJsonl } from "@as400web/core";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

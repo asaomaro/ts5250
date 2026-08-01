@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { IfsEntry, IfsListResult } from "@as400web/core";
+import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
 import { collectFiles, readCollected, type IfsReader } from "../src/ifs-collect.js";
 
 /**

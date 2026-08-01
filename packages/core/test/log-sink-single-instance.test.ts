@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { setLogSink, resetLogSink, insertRows, type CoreLogger, type DbConnection } from "../src/index.js";
+// **`setLogSink` は core のバレル経由で取る**——このテストが確かめたいのは
+// 「core から差し込んだ sink が hostserver 側へ届くこと」なので、
+// `@as400web/base` から直接取ると経路が 1 つ短くなり、検査の意味が薄れる。
+import { setLogSink, resetLogSink, type CoreLogger } from "../src/index.js";
+// ログを出させる側は hostserver から直接取る（core は再輸出しなくなった）
+import { insertRows, type DbConnection } from "@as400web/hostserver";
 
 /**
  * **ログの差し込み口がパッケージ境界を越えて効くこと。**

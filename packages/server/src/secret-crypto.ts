@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { readFileSync, appendFileSync, writeFileSync, existsSync } from "node:fs";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 
 /**
  * 接続設定の自動サインオン用パスワードを暗号化するモジュール（Node 標準 crypto のみ）。

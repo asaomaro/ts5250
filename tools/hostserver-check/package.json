@@ -19,7 +19,10 @@
     "dtaq": "tsc -b && node dist/dtaq.js"
   },
   "dependencies": {
+    "@as400web/base": "0.1.0",
     "@as400web/core": "*",
+    "@as400web/ebcdic": "0.1.0",
+    "@as400web/hostserver": "0.1.0",
     "@as400web/server": "*"
   }
 }

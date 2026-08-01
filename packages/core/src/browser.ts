@@ -25,6 +25,20 @@ export {
   summarizeSql,
   type SqlStatement
 } from "./sql/split-statements.js";
+/**
+ * **ここから下の `@as400web/hostserver` 由来は `export type` を外してはならない。**
+ *
+ * `20260801-library-extraction-drop-core-reexport` で core は hostserver の再輸出をやめ、
+ * `index.ts` からは 1 つも出さなくなった（`packages/server` は直参照へ移した）。
+ * **残っているのはこの browser 入口の型だけ**で、これは web-ui のためにわざと残している——
+ * 直参照にすると**ブラウザ向けパッケージが `node:net` を含むパッケージを依存に持つ**ことになる。
+ *
+ * 型は実行時に消えるので `dist/browser.js` には何も現れない。値 export に変えた瞬間に
+ * バンドラが `node:net` を externalize し、実行時に落ちる。
+ * `packages/core/package.json` の `dependencies` に `@as400web/hostserver` が残るのも
+ * **この型解決のため**であって、実行時に読み込むためではない。
+ * `test/hostserver-not-reexported.test.ts` が `dist` を読んで固定している。
+ */
 /** 取り込みの拒否理由。UI が種類ごとに文言を組み立てるため型を共有する */
 export type { UploadRejection } from "@as400web/hostserver";
 export {

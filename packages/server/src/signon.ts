@@ -1,4 +1,5 @@
-import { Session5250, As400Error, type SendAidResult } from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { Session5250, type SendAidResult } from "@as400web/core";
 
 export interface FieldSignonOptions {
   /** ユーザー欄の明示指定（省略時は最初の非 hidden 入力フィールド） */

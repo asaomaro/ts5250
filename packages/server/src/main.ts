@@ -17,7 +17,7 @@ import { AuditBuffer, installAuditBuffer } from "./audit.js";
 import { ResultSetStore } from "./result-set-store.js";
 import { DbPool } from "./db-pool.js";
 import type { ToolDeps } from "./mcp-tools.js";
-import { setLogSink } from "@as400web/core";
+import { setLogSink } from "@as400web/base";
 
 /**
  * core（ライブラリ層）のログをサーバーの pino へ流す。

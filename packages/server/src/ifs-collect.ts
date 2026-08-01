@@ -5,7 +5,7 @@
  * 500MB を読み切ってから「大きすぎます」と言うのは、利用者を 80 分待たせてから断ることになる。
  * 一覧が返すサイズを積算し、超えると分かった時点で 1 バイトも読まずに拒否する。
  */
-import type { IfsEntry, IfsListResult } from "@as400web/core";
+import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
 
 /**
  * 収集に必要な操作だけを表す口。

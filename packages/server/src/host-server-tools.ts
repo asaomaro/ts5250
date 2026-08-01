@@ -14,17 +14,9 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  listJobs,
-  listObjects,
-  listUsers,
-  queryLimited,
-  As400Error,
-  dtaqDecodeEbcdic,
-  renderSpoolHtml,
-  type ConnectOptions,
-  type ProgramParameter
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { listJobs, listObjects, listUsers, queryLimited, dtaqDecodeEbcdic, type ProgramParameter } from "@as400web/hostserver";
+import { renderSpoolHtml, type ConnectOptions } from "@as400web/core";
 import { childLog } from "./log.js";
 import { withAudit } from "./audit.js";
 import { errorResult, type ToolDeps } from "./mcp-tools.js";

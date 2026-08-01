@@ -8,13 +8,7 @@
  * タグが中身を説明していない（UTF-8 の内容に CCSID 850 のタグが付く。research F4）。
  * タグを先に信じると、自分で書いたファイルを自分で化けさせる。
  */
-import {
-  canDecodeCcsid,
-  canEncodeCcsid,
-  decodeCcsidText,
-  encodeCcsidText,
-  type LineEnding
-} from "@as400web/core";
+import { canDecodeCcsid, canEncodeCcsid, decodeCcsidText, encodeCcsidText, type LineEnding } from "@as400web/ebcdic";
 
 /** 何を根拠にその文字コードを選んだか */
 export type DetectedBy = "content" | "tag" | "manual";

@@ -13,7 +13,8 @@
  */
 import "./log-init.js";
 import { createHash } from "node:crypto";
-import { IfsConnection, Tn5250Error } from "@as400web/core";
+import { Tn5250Error } from "@as400web/base";
+import { IfsConnection } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

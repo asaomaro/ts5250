@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { resetLogSink, setLogSink, childLog as coreChildLog } from "@as400web/core";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resetLogSink, setLogSink, childLog as coreChildLog } from "@as400web/base";
 import { childLog as serverChildLog } from "../src/log.js";
 
 /**
@@ -32,6 +35,35 @@ describe("server のログは core の注入に依存しない", () => {
     // core 側は薄いラッパで、pino の API（level 等）を持たない
     expect("level" in s).toBe(true);
     expect("level" in c).toBe(false);
+  });
+
+  /**
+   * **上の 2 件は「server の log.ts が正しい」ことしか見ていない。**
+   * `src` の各ファイルが実際にどちらを import しているかは検査しておらず、
+   * 実際に **3 ファイル（`host-sql` / `result-set-store` / `host-upload`）が
+   * ライブラリ側の `childLog` を使っていた**（`20260801-library-extraction-drop-core-reexport`
+   * で発覚。それまでは `@as400web/core` 経由だったので、注入式ロガーだと気づきにくかった）。
+   *
+   * `main.ts` が `setLogSink` を呼ぶので通常の起動では出力されるが、
+   * **それは「注入に依存している」ということ**で、このモジュール群が避けたかった形そのもの。
+   * 呼ばない入口（テスト・ツール・組み込み利用）では静かに消える。
+   */
+  it("src のどのファイルも childLog をライブラリ側から取っていない", () => {
+    const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const f = join(dir, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (e.name.endsWith(".ts")) {
+          const src = readFileSync(f, "utf8");
+          for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+["'](@as400web\/[a-z-]+)["']/g))
+            if (/\bchildLog\b/.test(m[1]!)) offenders.push(`${relative(srcDir, f)} ← ${m[2]!}`);
+        }
+      }
+    };
+    walk(srcDir);
+    expect(offenders).toEqual([]);
   });
 });
 

@@ -31,22 +31,15 @@
  */
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import {
-  openQuery,
-  queryLimited,
-  executeStatement,
-  isNonQueryStatement,
-  SqlError,
-  As400Error,
-  type DbConnection
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { openQuery, queryLimited, executeStatement, isNonQueryStatement, SqlError, type DbConnection } from "@as400web/hostserver";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb, hostAuthFrom } from "./host-connect.js";
 import { resolveSource, sourceSchema, statusOf } from "./host-api.js";
 import type { ResultSetStore } from "./result-set-store.js";
 import { poolKey, type DbPool } from "./db-pool.js";
-import { childLog } from "@as400web/core";
+import { childLog } from "./log.js";
 
 const log = childLog({ component: "host-sql" });
 

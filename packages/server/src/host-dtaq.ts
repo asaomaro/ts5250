@@ -11,8 +11,9 @@
  */
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import type { DtaqConnection, DtaqSearchOrder } from "@as400web/core";
-import { As400Error, dtaqDecodeEbcdic } from "@as400web/core";
+import type { DtaqConnection, DtaqSearchOrder } from "@as400web/hostserver";
+import { As400Error } from "@as400web/base";
+import { dtaqDecodeEbcdic } from "@as400web/hostserver";
 import { codecForCcsid } from "@as400web/core/codec";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";

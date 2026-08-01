@@ -17,16 +17,10 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import {
-  As400Error,
-  listSpooledFiles,
-  type ConnectOptions,
-  type LogicalPage,
-  type SpoolEntry,
-  type SpoolId,
-  type SpoolListFilter,
-  renderSpoolHtml
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { type LogicalPage } from "@as400web/scs";
+import { listSpooledFiles, type SpoolEntry, type SpoolId, type SpoolListFilter } from "@as400web/hostserver";
+import { type ConnectOptions, renderSpoolHtml } from "@as400web/core";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openCommand, openNetPrint } from "./host-connect.js";

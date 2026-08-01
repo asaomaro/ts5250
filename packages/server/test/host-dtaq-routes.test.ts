@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
-import { As400Error, type DtaqConnection, type DtaqEntry, type DtaqAttributes } from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { type DtaqConnection, type DtaqEntry, type DtaqAttributes } from "@as400web/hostserver";
 import type { AuthVars } from "../src/auth.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";

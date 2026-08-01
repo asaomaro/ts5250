@@ -17,7 +17,8 @@
  * `action` で選べるが、**既定は保留**——削除は取り消せないので、利用者が明示的に選んだ
  * ときだけ行う。
  */
-import type { ConnectOptions, SpoolId, SpoolEntry } from "@as400web/core";
+import type { SpoolId, SpoolEntry } from "@as400web/hostserver";
+import type { ConnectOptions } from "@as400web/core";
 import { openNetPrint } from "./host-connect.js";
 import { listSpools, readSpoolPages, DEFAULT_SPOOL_CCSID } from "./host-spools.js";
 import { childLog } from "./log.js";

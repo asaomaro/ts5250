@@ -1,16 +1,7 @@
 import { randomUUID } from "node:crypto";
-import {
-  Session5250,
-  PrinterSession,
-  CommandConnection,
-  listJobs,
-  As400Error,
-  type ConnectOptions,
-  type AidKey,
-  type PcCommandRequest,
-  type PrinterConnectOptions,
-  type SpoolReport
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { CommandConnection, listJobs } from "@as400web/hostserver";
+import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@as400web/core";
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
 import {

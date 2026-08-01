@@ -16,7 +16,7 @@
 import { readFileSync } from "node:fs";
 import { writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { As400Error } from "@as400web/core";
+import { As400Error } from "@as400web/base";
 import { assertOwner, type AuthUser } from "./auth.js";
 import type { SecretCrypto } from "./secret-crypto.js";
 import {

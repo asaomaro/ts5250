@@ -10,13 +10,8 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import {
-  type CommandConnection,
-  listJobs,
-  listObjects,
-  listUsers,
-  As400Error
-} from "@as400web/core";
+import { As400Error } from "@as400web/base";
+import { type CommandConnection, listJobs, listObjects, listUsers } from "@as400web/hostserver";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openCommand } from "./host-connect.js";

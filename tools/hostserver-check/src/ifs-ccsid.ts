@@ -17,13 +17,9 @@
  * research のスパイクを、繰り返し使える形にしたもの（research F2〜F6）。
  */
 import "./log-init.js";
-import {
-  IfsConnection,
-  Tn5250Error,
-  canDecodeCcsid,
-  decodeCcsidText,
-  encodeCcsidText
-} from "@as400web/core";
+import { Tn5250Error } from "@as400web/base";
+import { canDecodeCcsid, decodeCcsidText, encodeCcsidText } from "@as400web/ebcdic";
+import { IfsConnection } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

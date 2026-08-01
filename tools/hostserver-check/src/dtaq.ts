@@ -20,7 +20,8 @@
  * QSYS2 の SQL サービス（DATA_QUEUE_INFO / DATA_QUEUE_ENTRIES）と突き合わせて確かめること。
  */
 import "./log-init.js";
-import { DtaqConnection, dtaqDecodeEbcdic, Tn5250Error } from "@as400web/core";
+import { Tn5250Error } from "@as400web/base";
+import { DtaqConnection, dtaqDecodeEbcdic } from "@as400web/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];
