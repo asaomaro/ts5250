@@ -326,3 +326,11 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 既定タグは機械ごとに違う（実機は `1041` / PUB400 は `850`）ので、
 **中身が UTF-8 でも嘘のタグが付く**（`20260801-ifs-write-dataccsid`）。
 置いたファイルは `finally` で消す。
+
+`research-call-program.mjs` — **プログラム呼び出し（`host_call_program`）の正常系**。
+`QUSROBJD`（`OBJD0100`）と `QSYRUSRI`（`USRI0100`）を正しいパラメータ列で呼び、
+**返った中身を外部の事実と突き合わせる**（「エラーが出ない」だけでは間違った位置を
+読んでいても気づけない）。出力が**要求順**に返り、入力の位置が `null` になることも見る。
+文字列は **EBCDIC・右空白詰めの固定長**、長さは 4 バイト、
+**エラーコード構造の先頭 4 バイトは 0**（非 0 にするとメッセージが出なくなる）。
+副作用なし（`20260801-call-program-realhost`）。

@@ -1,0 +1,9 @@
+schema: 3
+slug: call-program-realhost
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: hostserver.md
