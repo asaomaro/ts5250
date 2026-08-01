@@ -40,6 +40,13 @@ export /** 超拡張データ形式（V5R4 以降）。原典は V5R4 未満で 
 const USE_SUPER_EXTENDED_FORMATS = 0xf2;
 /** 0 = LOB は常にロケーター。インライン化させない（応答が巨大になるため） */
 const LOB_FIELD_THRESHOLD = 0;
+/**
+ * しきい値の上限。**原典が公表する 16,777,216 は通らない**——
+ * JTOpen `AS400JDBCConnectionImpl` が「the system can only handle 15728640.
+ * We do it this way to match ODBC.」として自分で切り下げている
+ * （`20260801-lob-batch-retrieval-research`）。
+ */
+const MAX_LOB_FIELD_THRESHOLD = 15_728_640;
 
 const RPB_HANDLE = 1;
 
@@ -63,6 +70,15 @@ export interface DbConnectOptions {
   /** true でポートマッパー(449)に問い合わせる。既定 false */
   resolvePort?: boolean;
   timeoutMs?: number;
+  /**
+   * LOB フィールドしきい値（バイト）。**これ以下の LOB は行データに載って返る**
+   * （＝ロケーター経由の追加往復が 0 になる）。超えたものはロケーター。
+   *
+   * **既定は 0＝常にロケーター**。上げると静かにメモリを食う（`LOB_FIELD_THRESHOLD` の注記）。
+   * 原典（JTOpen）の既定は 32,768 だが、こちらは**明示的に指定したときだけ**上げる。
+   * 原典に合わせて **15,728,640 で頭打ち**にする（公表の 16,777,216 は通らない）。
+   */
+  lobFieldThreshold?: number;
 }
 
 /** database サーバーとの接続。要求の往復と RPB を持つ */
@@ -119,7 +135,7 @@ export class DbConnection {
       });
       const db = new DbConnection(conn, opts.host, port, started.jobName);
       // 3) 日付・時刻の書式を固定する（受け取り側で書式を推測しないため）
-      await db.setServerAttributes();
+      await db.setServerAttributes(opts.lobFieldThreshold);
       // 4) RPB を作る（以降の要求はこのハンドルを指す）
       await db.createRpb();
       log.debug(
@@ -191,7 +207,7 @@ export class DbConnection {
    * 値は書式化済みの文字列として行バッファに入るため、**書式が分からないと解釈できない**。
    * ジョブの既定に任せると年が 2 桁になり世紀が失われるので、接続時に明示する。
    */
-  private async setServerAttributes(): Promise<void> {
+  private async setServerAttributes(lobFieldThreshold?: number): Promise<void> {
     await this.request({
       reqId: DB_REQ.setServerAttributes,
       params: [
@@ -200,10 +216,10 @@ export class DbConnection {
         // **超拡張形式を有効にする**。これが無いと LOB 列を含む結果セットは
         // prepare の段階でホストに拒否される（rcClass=7, code=-101）
         { cp: DB_CP.useExtendedFormats, value: Uint8Array.of(USE_SUPER_EXTENDED_FORMATS) },
-        // **しきい値は 0 のまま動かさない**。これ以下の LOB はインラインで丸ごと返り、
+        // **既定は 0 のまま動かさない**。これ以下の LOB はインラインで丸ごと返り、
         // 実機で DBCLOB(2M) の表を 2 行取っただけで応答が 8.4MB になった（0 なら 10KB）。
-        // 大きくすると静かにメモリを食い尽くすので、オプションにもしていない
-        uint32Param(DB_CP.lobFieldThreshold, LOB_FIELD_THRESHOLD)
+        // 大きくすると静かにメモリを食い尽くすので、**明示指定のときだけ**上げる
+        uint32Param(DB_CP.lobFieldThreshold, clampLobThreshold(lobFieldThreshold))
       ]
     });
   }
@@ -245,6 +261,21 @@ export class DbConnection {
   get isClosed(): boolean {
     return this.closed;
   }
+}
+
+/**
+ * LOB フィールドしきい値を送れる範囲に丸める。
+ *
+ * **未指定・0 以下・非有限は 0**（＝常にロケーター）。上げるのは明示指定のときだけ
+ * ——既定で上げると、大きな LOB を持つ表を引いた瞬間に静かにメモリを食う。
+ * 上限は原典と同じ 15,728,640（`MAX_LOB_FIELD_THRESHOLD` の注記）。
+ *
+ * **export はテストの取っ手**（`index.ts` には出さない）。境界の丸めは
+ * 接続を張らずに固めたい——実機に当てないと確かめられない部分と分けておく。
+ */
+export function clampLobThreshold(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return LOB_FIELD_THRESHOLD;
+  return Math.min(Math.floor(value), MAX_LOB_FIELD_THRESHOLD);
 }
 
 function uint32Param(cp: number, value: number): { cp: number; value: Uint8Array } {

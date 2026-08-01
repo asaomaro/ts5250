@@ -87,9 +87,19 @@ describe("isSupportedType（この作業の対象範囲）", () => {
     }
   });
 
-  it("LOB・XML・ロケータは対象外", () => {
-    for (const t of [DB2.BLOB, DB2.CLOB, DB2.DBCLOB, DB2.XML, DB2.BLOB_LOCATOR, DB2.DECFLOAT]) {
+  it("XML・ロケータ・DECFLOAT は対象外", () => {
+    // **ロケータは `decodeValue` が型で先に拾う**ので、ここを通らない（対象外のまま）
+    for (const t of [DB2.XML, DB2.BLOB_LOCATOR, DB2.CLOB_LOCATOR, DB2.DBCLOB_LOCATOR, DB2.DECFLOAT]) {
       expect(isSupportedType(t)).toBe(false);
+    }
+  });
+
+  it("ロケータでない LOB は対象（しきい値以下で行に載って届く）", () => {
+    // 接続時の LOB フィールドしきい値（既定 0）を上げると、以下の LOB は
+    // ロケーターではなく本体が行データに載って来る（実機で確認。
+    // `20260801-lob-threshold-realhost`）
+    for (const t of [DB2.BLOB, DB2.CLOB, DB2.DBCLOB]) {
+      expect(isSupportedType(t)).toBe(true);
     }
   });
 });

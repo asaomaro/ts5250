@@ -178,7 +178,10 @@ describe("範囲外・未対応", () => {
   });
 
   it("対象外の型は HOST_SERVER_UNSUPPORTED", () => {
-    const m = meta({ type: DB2.BLOB, offset: 0, length: 4 });
+    // **BLOB ではなく XML で試す**。ロケータでない LOB は
+    // しきい値以下で行に載って届くので、いまは対象内
+    // （`db-decode-inline-lob.test.ts` / `20260801-lob-threshold-realhost`）
+    const m = meta({ type: DB2.XML, offset: 0, length: 4 });
     try {
       decodeValue(new Uint8Array(4), m, false);
       expect.unreachable();

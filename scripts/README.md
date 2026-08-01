@@ -270,6 +270,13 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 | `diff-*` | 2 | 実機とこちらの出力の突き合わせ。`diff-gridlines`（罫線）/ `diff-webui-vs-host`（web-ui とホスト画面） |
 | 単発 | 3 | `list-testlib`（ライブラリの中身一覧）/ `research-ext-gui`（拡張5250 の GUI 要素調査）/ `verify-spool-html`（スプール HTML の検証） |
 
+`research-lob-threshold.mjs` — **LOB フィールドしきい値（CP `0x3822`）の実測**。
+`TESTLIB.LOBTHR`（CLOB / 大きい CLOB / BLOB / DBCLOB）を作り直し、しきい値 0 と 64KB で
+列の型コード・行の並び・往復数・受信バイト数を比べる。しきい値以下の LOB は
+ロケーターではなく**行データに載って**届き、型コードが `964 CLOB_LOCATOR` → `408 CLOB` に変わる。
+**DBCLOB の長さ接頭辞は文字数**（CLOB/BLOB はバイト数）なので、
+**全角を含む値でしか取り違えを検出できない**（`20260801-lob-threshold-realhost`）。
+
 > 📌 **接続先をハードコードしない。** 出力に焼く説明文（HTML のメタ・画像の注記）も
 > `AS400_HOST` から組む——固定文字列にすると、別ホストへ繋いだのに説明文だけ元のまま残り、
 > **動作に出ないので気づけない**（`shot-signedon.mjs` / `shot-signon.mjs` に注記）。

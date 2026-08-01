@@ -80,7 +80,13 @@ const SUPPORTED: ReadonlySet<number> = new Set([
   DB2.NUMERIC,
   DB2.BIGINT,
   DB2.INTEGER,
-  DB2.SMALLINT
+  DB2.SMALLINT,
+  // **ロケーターではない LOB**。接続時の LOB フィールドしきい値
+  // （`DbConnectOptions.lobFieldThreshold`）以下の LOB は、ロケーターではなく
+  // **行データに載って**この型で届く（実機で確認）。既定のしきい値 0 では現れない
+  DB2.CLOB,
+  DB2.DBCLOB,
+  DB2.BLOB
 ]);
 
 /** 値として返す JavaScript の型。利用側が事前に判断できるよう列メタデータに載せる */

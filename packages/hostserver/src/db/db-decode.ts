@@ -164,6 +164,29 @@ export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean):
       return decodeGraphic(row.subarray(at + 2, at + 2 + chars * 2), meta.ccsid);
     }
 
+    // **ロケーターではない LOB**（しきい値以下で行データに載ってきたもの）。
+    // 長さの接頭辞は **4 バイト**——VARCHAR の 2 バイトとは違う
+    // （実機で `00 00 00 64` ＋ 100 バイトの本体を確認）。
+    // 追加の往復が要らない代わりに、行の応答がその分ふくらむ。
+    //
+    // **`LobPlaceholder` の形で返す**。値の届き方（ロケーター経由 / インライン）で
+    // 利用側の分岐を増やさないため——同じ列は設定次第でどちらでも来る。
+    // `locator` は 0（＝インラインなのでロケーターは無い。取り直す先も無い）。
+    case DB2.CLOB:
+    case DB2.BLOB: {
+      const len = view.getUint32(at);
+      assertVarLength(meta, len, meta.length - 4);
+      const body = row.subarray(at + 4, at + 4 + len);
+      return inlineLob(meta, len, meta.type === DB2.BLOB ? new Uint8Array(body) : decodeText(body, meta.ccsid));
+    }
+    case DB2.DBCLOB: {
+      // **接頭辞は【文字数】**（CLOB / BLOB のバイト数とは違う）。VARGRAPHIC と同じ。
+      // バイト数として読むと `日本語`（3 文字）が `日` になる——実機で踏んだ
+      const chars = view.getUint32(at);
+      assertVarLength(meta, chars * 2, meta.length - 4);
+      return inlineLob(meta, chars * 2, decodeGraphic(row.subarray(at + 4, at + 4 + chars * 2), meta.ccsid));
+    }
+
     case DB2.DATE:
     case DB2.TIME:
     case DB2.TIMESTAMP:
@@ -177,6 +200,17 @@ export function decodeValue(row: Uint8Array, meta: ColumnMeta, isNull: boolean):
         `no decoder for type ${meta.typeName} (${meta.type})`
       );
   }
+}
+
+/**
+ * 行データに載って届いた LOB を `LobPlaceholder` に包む。
+ *
+ * **ロケーター経由と同じ形で返す**——値の届き方（ロケーター / インライン）は
+ * 接続時のしきい値で決まるので、利用側に分岐を持たせない。
+ * `locator: 0` は「インラインなのでロケーターは無い（取り直す先も無い）」の意。
+ */
+function inlineLob(meta: ColumnMeta, byteLength: number, value: string | Uint8Array): LobPlaceholder {
+  return { kind: "lob", locator: 0, maxSize: meta.lobMaxSize ?? 0, byteLength, value };
 }
 
 /** SBCS / 混在 CCSID のテキスト。UTF-16 の CCSID は直接読む */
