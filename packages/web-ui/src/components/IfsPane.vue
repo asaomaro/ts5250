@@ -22,7 +22,9 @@ import {
   type IfsUploadEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
-import { TEXT_CCSIDS, ccsidLabel } from "@as400web/tn5250/browser";
+// **`catalog` サブパス（表ゼロ）から直接取る。** バレル（`@as400web/ebcdic`）に向けると
+// 変換表 18,900 行が丸ごとバンドルに入る（`20260801-library-extraction-tn5250` で実測: 約 4 倍）。
+import { TEXT_CCSIDS, ccsidLabel } from "@as400web/ebcdic/catalog";
 
 /**
  * IFS のファイルブラウザ。左に階層ツリー、中央に一覧、右にプレビュー。

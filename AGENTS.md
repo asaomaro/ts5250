@@ -90,12 +90,18 @@ SCS を復号するため（`session/printer-session.ts`）。
   その 1 点のために tn5250 が `node:net` を含むパッケージを `dependencies` に持っていた。
   `import type` は実行時コードを出さないので、バンドルにも本番インストールにも入らない
   （バンドルの実測と `node:net` 0 件で裏を取っている）。**`dependencies` に移してはならない。**
-- **再輸出の列挙を落としても内部は壊れない**——壊れるのは外の利用者だけ、という気づけない回帰に
-  なるので、到達可能性を実行時に検査している（`codec-reexport.test.ts`）。
-  `export *` は使わず公開面は列挙する。
+- **再輸出そのものを置かない。** 「利用側を壊さないため」に置いた再輸出は、
+  **`@as400web/tn5250` を何でも入っている袋に戻す入口**として働く。実際 EBCDIC の再輸出は
+  24 個あって**使われていたのは 6 個だけ**だった（`20260801-library-extraction-drop-ebcdic-reexport`）。
+  切り出したら利用側を直参照へ移し、再輸出は撤去する。撤去したことは
+  `ebcdic-not-reexported.test.ts` / `hostserver-not-reexported.test.ts` が固定している。
+  やむを得ず残す場合は `export *` を使わず公開面を列挙する。
 - **ブラウザから触る側は狭い入口を使う**。バレル（`@as400web/ebcdic`）は変換表 18,900 行を全部引き込む。
   `…/codec`（変換のみ）・`…/katakana`（930/939 の SBCS 部のみ）・`…/catalog`（表ゼロ）を使い分ける。
-  バレル経由だと bundler の解析が及ばず要らない部分が残る（実測差あり。`decisions.md` D2）。
+  バレル経由だと bundler の解析が及ばず要らない部分が残る。
+  **これは繰り返し踏んでいる**——`@as400web/scs` のバレルに向けて 359,853 → 1,458,480 バイト
+  （約 4 倍）にした実例がある。バンドルの実測は人が回すときにしか効かないので、
+  **入口の指定そのもの**を `ebcdic-not-reexported.test.ts` が走査して固定している。
 - 同じ理由で tn5250 も `@as400web/tn5250/browser` を持つ。**root は `node:net` / `node:tls` を巻き込む**ので
   ブラウザから import しない。
 

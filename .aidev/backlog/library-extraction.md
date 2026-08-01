@@ -268,7 +268,7 @@ pino を持ち込むと価値が半減する。**
     「複数のパッケージが要るが、どれにも属さないもの」。**物置にしないための歯止め**
     （片方しか使わないものは使う側に置く）も併記——core が袋になったのと同じことを base で起こさないため
   - **publish は未実施**（項目 1〜3 と同じく「公開の判断を後回しにできる状態」までがゴール）
-- [ ] 4b. `@as400web/tn5250` の ebcdic 再輸出を撤去する
+- [x] 4b. `@as400web/tn5250` の ebcdic 再輸出を撤去する
   - 項目 4 の follow-up（`20260801-library-extraction-tn5250` decisions.md D8）。
     `index.ts` が `SbcsCodec` / `codecForCcsid` / `decodeCcsidText` 等を
     `@as400web/ebcdic` から再輸出しているが、**外部の利用者はほぼ居ない**
@@ -277,4 +277,20 @@ pino を持ち込むと価値が半減する。**
     `TEXT_CCSIDS` / `ccsidLabel` を取る経路。ただしこれは**表を引き込まない狭い入口**
     （`@as400web/ebcdic/catalog`）を維持するための意図的な中継なので、
     **撤去するなら web-ui を直参照へ移すのとセット**
-  - 優先度は低い（実害は「出どころが見えにくい」だけ）
+  - ~~優先度は低い（実害は「出どころが見えにくい」だけ）~~
+    **← 実害はもう 1 つあった。再輸出は「`@as400web/tn5250` を何でも入っている袋に戻す入口」**
+  - **2026-08-01 完了**（`.aidev/works/20260801-library-extraction-drop-ebcdic-reexport`）。
+    実測すると再輸出は **24 名前あって、使われていたのは 6 個だけ**だった（残り 18 個は死んだ再輸出）
+  - 利用者はすべて web-ui。**狭い入口へ付け替えた**——`TEXT_CCSIDS` / `ccsidLabel` / `LineEnding`
+    → `@as400web/ebcdic/catalog`（表ゼロ）、`katakanaChar` / `latinChar`
+    → `@as400web/ebcdic/katakana`（SBCS 部のみ）、`codecForCcsid` → `@as400web/ebcdic/codec`
+  - **`import` は消していない**——`screen/` `protocol/` `session/` が内部で EBCDIC を使うのは正当。
+    禁じるのは `export … from "@as400web/ebcdic"` の形だけ
+  - **実測値（次に測る人の基準線）**: web-ui 本番バンドル **359,857 バイトで前後一致**、
+    DBCS 表（`ibm-1399` / `ibm-37` / `ibm-273`）は 0 件、テスト **3,269 → 3,271 件**（失敗 0）
+  - **入口の指定そのものを走査で固定した**（`tn5250/test/ebcdic-not-reexported.test.ts`）。
+    バンドルサイズの実測は人が回すときにしか効かない——直前の項目 4 で
+    `@as400web/scs` のバレルに向けて **4 倍（1,458,480 バイト）**にした実例があるので、
+    「web-ui は `/catalog` `/katakana` `/codec` 以外を import しない」を恒久的な検査にした
+  - **AGENTS.md の主旨を変えた**——従来「再輸出するなら列挙する」だったが、
+    4 回の切り出しを経た結論は**「再輸出そのものを置かない」**

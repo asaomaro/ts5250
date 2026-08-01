@@ -24,23 +24,6 @@ export {
   IDENTIFIER_PATTERN
 } from "@as400web/base";
 /**
- * 文字コードの選択肢。**表を引き込まない `catalog` サブパスから取る**——
- * `@as400web/ebcdic`（root）は EBCDIC の変換表を計 18,900 行・約 1.17 MB 同梱するので、
- * ここを root に向けるとブラウザのバンドルへ丸ごと入る。**しかもビルドもテストも通る**。
- * 実際の復号・符号化はサーバー側（`@as400web/ebcdic` の `ccsid-text`）が行う。
- */
-export { TEXT_CCSIDS, ccsidLabel, type LineEnding } from "@as400web/ebcdic/catalog";
-/**
- * 表示コード切替（ACS の半角カナ ⇔ 英小文字）の再現。**`katakana` サブパスから取る**——
- * ここを `@as400web/ebcdic`（root）や `/codec` に向けると、CCSID 930/939 の変換表が
- * DBCS 部込みで丸ごとバンドルに入る（実測で約 600 KB）。実際に使うのは
- * 930・939 の SBCS 部 256 要素ずつだけなので、それだけが届く入口を指す。
- *
- * **2 つで対**。切替とは「もう一方の表で読み直すこと」で、カタカナ系ホスト（930/5026）で
- * 英字を出すには 939 側の表が要る（`katakanaChar` だけだと 930 セッションで無反応になる）。
- */
-export { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
-/**
  * 埋め込み属性センチネル（SEU の色付き入力欄）。UI がオーバーレイの色分けと、入力欄の
  * 表示（センチネル→空白）に使う。属性バイト→色の解決に decodeAttribute も共有する。
  */

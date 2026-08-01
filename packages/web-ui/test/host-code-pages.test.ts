@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { codecForCcsid } from "@as400web/tn5250";
+import { codecForCcsid } from "@as400web/ebcdic/codec";
 import {
   HOST_CODE_PAGES,
   DEFAULT_CCSID,

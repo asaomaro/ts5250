@@ -51,10 +51,12 @@ import {
   offsetOfPos,
   type FieldSlice
 } from "../composables/fieldSlices.js";
-// browser サブパスからブラウザ安全に import（root は node 依存を巻き込むため不可）。
-// **katakanaChar もここから取る。** 以前は `@as400web/tn5250/codec` から引いていたが、
-// あの入口は CCSID 930/939 の変換表を DBCS 部込みで持ち込む——実測で本番バンドルが
-// 約 600 KB 膨らんでいた。実際に要るのは 930 の SBCS 部 256 要素だけ。
+// **表示コード切替は `@as400web/ebcdic/katakana` から直接取る**（930/939 の SBCS 部のみ）。
+// バレルや `…/codec` に向けると DBCS 部込みの変換表が持ち込まれる——実測で本番バンドルが
+// 約 600 KB 膨らんでいた。実際に要るのは SBCS 部 256 要素ずつだけ。
+// **2 つで対**: 切替とは「もう一方の表で読み直すこと」なので、両方要る。
+import { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
+// browser サブパスからブラウザ安全に import（root は node 依存を巻き込むため不可）
 import {
   isAttrSentinel,
   isRawSentinel,
@@ -62,9 +64,7 @@ import {
   attrSentinel,
   rawSentinel,
   stripSentinels,
-  decodeAttribute,
-  katakanaChar,
-  latinChar
+  decodeAttribute
 } from "@as400web/tn5250/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する

@@ -11,7 +11,7 @@
 // （`20260801-library-extraction-cleanup`）。hostserver は web-ui の `devDependencies` で、
 // **`import type` なので実行時にもバンドルにも入らない**。
 import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
-import type { LineEnding } from "@as400web/tn5250/browser";
+import type { LineEnding } from "@as400web/ebcdic/catalog";
 
 /** サーバーが返すエラー本文 */
 export interface IfsError {

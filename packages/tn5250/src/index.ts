@@ -66,19 +66,6 @@ export {
   type ParsedChoice
 } from "./protocol/wdsf-parser.js";
 
-// 文字変換（SBCS / DBCS）。実体は `@as400web/ebcdic` に分離済み——既存の利用側のために再輸出する
-export {
-  SbcsCodec,
-  DbcsCodec,
-  codecForCcsid,
-  katakanaChar,
-  latinChar,
-  SO,
-  SI,
-  type Codec,
-  type SbcsTable,
-  type StatefulTable
-} from "@as400web/ebcdic";
 export {
   terminalTypeFor,
   printerTerminalTypeFor,
@@ -107,28 +94,6 @@ export {
   type TraceRecorderOptions
 } from "./trace/trace.js";
 export { ReplayTransport } from "./trace/replay.js";
-
-// 純 DBCS（GRAPHIC 列用）
-export {
-  PureDbcsCodec,
-  pureDbcsCodecForCcsid,
-  isPureDbcsCcsid,
-  ibm16684,
-  ibm300
-} from "@as400web/ebcdic";
-
-// CCSID 指定のテキスト復号・符号化（IFS のプレビューと保存が使う）
-export {
-  canDecodeCcsid,
-  canEncodeCcsid,
-  decodeCcsidText,
-  encodeCcsidText,
-  isEbcdicCcsid,
-  TEXT_CCSIDS,
-  ccsidLabel,
-  type CcsidText,
-  type LineEnding
-} from "@as400web/ebcdic";
 
 export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "@as400web/base";
 
