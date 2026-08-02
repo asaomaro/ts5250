@@ -779,6 +779,40 @@ function displayCols(ch: string): number {
   return isFullWidth(ch) ? 2 : 1;
 }
 
+/**
+ * 操作員メッセージを**ホストの行と同じ形**に整える（`20260802-message-line-parity`）。
+ *
+ * ACS はクライアント側のメッセージも**画面のテキストとして**置くので、全角の前後に
+ * SO/SI が入り、`{ }` 表示（`showShiftMarks`）でも**ホストのメッセージと同じ見え方**になる。
+ * こちらは自前の文字列をそのまま出していたため、**印が付かず開始桁も 1 桁ずれていた**
+ * （利用者の指摘）。
+ *
+ * **SO/SI は印を出さないときも 1 桁を占める**（実機がそうだから）。だから
+ * `showShiftMarks` が OFF でも空白 1 桁を入れる——ここを省くと、ホストの行だけ
+ * 1 桁右にずれる。
+ */
+function withShiftCodes(text: string): string {
+  const so = props.showShiftMarks ? "{" : " ";
+  const si = props.showShiftMarks ? "}" : " ";
+  let out = "";
+  let inDbcs = false;
+  for (const ch of text) {
+    const wide = isFullWidth(ch);
+    if (wide && !inDbcs) {
+      out += so;
+      inDbcs = true;
+    } else if (!wide && inDbcs) {
+      out += si;
+      inDbcs = false;
+    }
+    out += ch;
+  }
+  if (inDbcs) out += si;
+  return out;
+}
+
+const shiftedMessage = computed(() => (props.message ? withShiftCodes(props.message) : ""));
+
 /** 桁オフセットに掛かる色バンドの class（範囲外は undefined） */
 function classAtColumn(
   bands: { start: number; len: number; cls: string }[],
@@ -3162,7 +3196,7 @@ onBeforeUnmount(() => {
       操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。
       `pointer-events: none` で背面のセルの操作を邪魔しない。
     -->
-    <div v-if="message" class="opmsg" role="status">{{ message }}</div>
+    <div v-if="message" class="opmsg" role="status">{{ shiftedMessage }}</div>
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <!-- 矩形（ブロック）選択のハイライト -->
     <div v-if="rectSel" class="rect-sel" :style="rectStyle" aria-hidden="true"></div>

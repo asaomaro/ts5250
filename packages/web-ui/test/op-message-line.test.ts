@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
@@ -6,6 +6,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { MSG_PROTECTED } from "../src/composables/opMessages.js";
+import { viewSettings } from "../src/stores/viewSettings.js";
 
 /**
  * **操作員メッセージの行**（`20260802-message-line`）。
@@ -143,5 +144,55 @@ describe("ホスト側とクライアント側の同居", () => {
     const w = mountPane();
     await nextTick();
     expect(w.find(".opmsg").exists()).toBe(false);
+  });
+});
+
+/**
+ * **ホスト側の行と同じ形にする**（`20260802-message-line-parity`）。
+ *
+ * ACS はクライアント側のメッセージも**画面のテキストとして**置くので、全角の前後に SO/SI が
+ * 入る。こちらは自前の文字列をそのまま出していたため、`{ }` 表示のときに
+ * **印が付かず、開始桁も 1 桁ずれていた**（利用者の指摘）。
+ *
+ * **SO/SI は印を出さないときも 1 桁を占める**——ここを省くと、ホストの行だけ 1 桁右にずれる。
+ */
+describe("ホストの行と同じ形にする（SO/SI）", () => {
+  /**
+   * **`textContent` で読む。** `wrapper.text()` は前後の空白を落とすので、
+   * 「SO/SI が 1 桁を占める」という肝心のところが見えない（実際に踏んだ）。
+   */
+  const raw = (w: ReturnType<typeof mountPane>): string =>
+    w.find(".opmsg").element.textContent ?? "";
+
+  afterEach(() => viewSettings.set("sosi", false));
+
+  it("**`{ }` 表示のとき、全角の前後に印が付く**（ホストの行と同じ見え方）", async () => {
+    viewSettings.set("sosi", true);
+    seed(snap({ systemMessage: "あA" }));
+    const w = mountPane();
+    await nextTick();
+    expect(raw(w)).toBe("{あ}A");
+  });
+
+  it("**印を出さないときも SO/SI の 1 桁は残る**（ホストの行と桁が揃う）", async () => {
+    seed(snap({ systemMessage: "あA" }));
+    const w = mountPane();
+    await nextTick();
+    expect(raw(w)).toBe(" あ A");
+  });
+
+  it("半角だけのメッセージには SO/SI を入れない", async () => {
+    seed(snap({ systemMessage: "ABC" }));
+    const w = mountPane();
+    await nextTick();
+    expect(raw(w)).toBe("ABC");
+  });
+
+  it("全角で終わるメッセージは末尾にも SI が入る", async () => {
+    viewSettings.set("sosi", true);
+    seed(snap({ systemMessage: "Aあ" }));
+    const w = mountPane();
+    await nextTick();
+    expect(raw(w)).toBe("A{あ}");
   });
 });
