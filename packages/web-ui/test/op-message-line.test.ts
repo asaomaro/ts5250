@@ -164,6 +164,12 @@ describe("ホストの行と同じ形にする（SO/SI）", () => {
   const raw = (w: ReturnType<typeof mountPane>): string =>
     w.find(".opmsg").element.textContent ?? "";
 
+  /**
+   * 先頭の 1 桁は**属性バイトのぶん**（ホストの行は桁 2 から本文が始まる）。
+   * SO/SI の検査とは別の話なので、ここで落として本文だけを見る。
+   */
+  const body = (w: ReturnType<typeof mountPane>): string => raw(w).replace(/^ /, "");
+
   afterEach(() => viewSettings.set("sosi", false));
 
   it("**`{ }` 表示のとき、全角の前後に印が付く**（ホストの行と同じ見え方）", async () => {
@@ -171,21 +177,21 @@ describe("ホストの行と同じ形にする（SO/SI）", () => {
     seed(snap({ systemMessage: "あA" }));
     const w = mountPane();
     await nextTick();
-    expect(raw(w)).toBe("{あ}A");
+    expect(body(w)).toBe("{あ}A");
   });
 
   it("**印を出さないときも SO/SI の 1 桁は残る**（ホストの行と桁が揃う）", async () => {
     seed(snap({ systemMessage: "あA" }));
     const w = mountPane();
     await nextTick();
-    expect(raw(w)).toBe(" あ A");
+    expect(body(w)).toBe(" あ A");
   });
 
   it("半角だけのメッセージには SO/SI を入れない", async () => {
     seed(snap({ systemMessage: "ABC" }));
     const w = mountPane();
     await nextTick();
-    expect(raw(w)).toBe("ABC");
+    expect(body(w)).toBe("ABC");
   });
 
   it("全角で終わるメッセージは末尾にも SI が入る", async () => {
@@ -193,6 +199,21 @@ describe("ホストの行と同じ形にする（SO/SI）", () => {
     seed(snap({ systemMessage: "Aあ" }));
     const w = mountPane();
     await nextTick();
-    expect(raw(w)).toBe("A{あ}");
+    expect(body(w)).toBe("A{あ}");
+  });
+});
+
+/**
+ * **桁 1 は属性バイトぶん空ける**（`20260802-message-line-indent`）。
+ *
+ * ホストの操作員メッセージ行は桁 1 が属性で、本文は桁 2 から始まる。桁 1 から描くと
+ * **ホストの行より 1 桁左にずれる**（利用者の指摘）。ACS も桁 2 から始まる。
+ */
+describe("行の左端", () => {
+  it("**本文は桁 2 から始まる**（桁 1 は属性バイトぶん）", async () => {
+    seed(snap({ systemMessage: "ABC" }));
+    const w = mountPane();
+    await nextTick();
+    expect(w.find(".opmsg").element.textContent).toBe(" ABC");
   });
 });

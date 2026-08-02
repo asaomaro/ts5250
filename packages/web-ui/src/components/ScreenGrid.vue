@@ -811,7 +811,16 @@ function withShiftCodes(text: string): string {
   return out;
 }
 
-const shiftedMessage = computed(() => (props.message ? withShiftCodes(props.message) : ""));
+/**
+ * 表示用のメッセージ。**桁 1 を空けて桁 2 から始める**（`20260802-message-line-indent`）。
+ *
+ * ホストの操作員メッセージ行は**桁 1 が属性バイト**で、本文は桁 2 から始まる。
+ * 桁 1 から描くと**ホストの行より 1 桁左にずれる**（利用者の指摘）。ACS も桁 2 から始まる。
+ *
+ * SO/SI の差し込み（`withShiftCodes`）とは別の話なので、ここで分けて足す
+ * ——あちらは「全角の前後に符号が要る」、こちらは「行の左端に属性の 1 桁がある」。
+ */
+const shiftedMessage = computed(() => (props.message ? " " + withShiftCodes(props.message) : ""));
 
 /** 桁オフセットに掛かる色バンドの class（範囲外は undefined） */
 function classAtColumn(
