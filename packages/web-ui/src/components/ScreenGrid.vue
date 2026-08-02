@@ -3483,10 +3483,26 @@ onBeforeUnmount(() => {
   max-width: 100%;
   max-height: 100%;
 }
-/* ホストのカーソル位置を示すブロックカーソル（padding 分オフセット） */
+/**
+ * **重ねるものの余白補正——`margin: var(--grid-pad-y) 0 0 var(--grid-pad-x)` はこの節すべての約束事。**
+ *
+ * 絶対配置の基準は祖先の **padding box** なので、`left: 0` は余白の外側の縁になる。
+ * 桁 1・行 1 に載せるには、`.grid` の padding と同じ量だけ内側へ寄せる必要がある。
+ *
+ * **数字を書いてはいけない。** ここは以前 `margin: 8px 0 0 10px` と直書きしていて、
+ * 余白を ACS 相当へ詰めた (#274) ときに **12 か所が取り残された**——カーソルも罫線も窓枠も
+ * 右へ 8px・下へ 7px ずれ、「カーソルと文字が合わない」と報告を受けた。
+ * 余白の唯一の定義は `composables/fitFont.ts` の `GRID_PAD_X` / `GRID_PAD_Y` で、
+ * `.grid` がインラインで `--grid-pad-x/y` に流し込んでいる（カスタムプロパティは継承する）。
+ *
+ * **フォールバック値（`var(--grid-pad-x, 2px)`）も書かない。** 数字を書いた時点で
+ * 「唯一の定義」が崩れ、同じ食い違いの種になる。代わりにオーバーレイが `.grid` の
+ * 子であることを `grid-overlay-offset.test.ts` が固定する。
+ */
+/* ホストのカーソル位置を示すブロックカーソル */
 .cursor {
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   width: 1ch;
   height: 1.25em;
   background: color-mix(in srgb, var(--t-green) 45%, transparent);
@@ -3495,10 +3511,10 @@ onBeforeUnmount(() => {
      下に置くとハイライトに沈んで「始点にカーソルが見える」という ACS の挙動が崩れる */
   z-index: 4;
 }
-/* 矩形（ブロック）選択のハイライト（padding 分オフセット） */
+/* 矩形（ブロック）選択のハイライト */
 .rect-sel {
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   background: color-mix(in srgb, var(--t-turquoise, var(--t-white)) 35%, transparent);
   outline: 1px solid var(--t-turquoise, var(--t-white));
   pointer-events: none;
@@ -3547,7 +3563,7 @@ onBeforeUnmount(() => {
    色は属性クラス（.c-*）の currentColor に従わせ、線種は border-style で表す。 */
 .grid-line {
   position: absolute;
-  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   pointer-events: none;
 }
 .grid-h { border-top: 1px solid currentColor; }
@@ -3564,7 +3580,7 @@ onBeforeUnmount(() => {
    線は枠セルの中心を通るので、破線の位相を半セルずらしてセルの頭から引く。 */
 .win-frame {
   position: absolute;
-  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   pointer-events: none;
 }
 .win-frame-h {
@@ -3586,7 +3602,7 @@ onBeforeUnmount(() => {
 .opt-btn {
   /* 欄の隣 1 桁にちょうど収まる。桁割りには影響しない（絶対配置） */
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   z-index: 6;
   width: 1ch;
   height: 1.25em;
@@ -3605,9 +3621,8 @@ onBeforeUnmount(() => {
 }
 
 .opt-hints {
-  /* .gui-window と同じグリッド padding 分の補正。絶対配置なので桁割りには影響しない */
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   z-index: 7;
   display: flex;
   flex-direction: column;
@@ -3686,7 +3701,7 @@ onBeforeUnmount(() => {
 
 .gui-window-border {
   position: absolute;
-  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   white-space: pre;
   pointer-events: none;
   line-height: 1.25;
@@ -4009,7 +4024,7 @@ onBeforeUnmount(() => {
 .win-smoke,
 .win-deco {
   position: absolute;
-  margin: 8px 0 0 10px; /* .gui-window と同じグリッド padding 分の補正 */
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   pointer-events: none;
   z-index: 2;
   box-sizing: border-box;
@@ -4052,7 +4067,7 @@ onBeforeUnmount(() => {
 /* ==== 拡張 5250 GUI オーバーレイ ==== */
 .gui-window {
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   border: 1px solid color-mix(in srgb, var(--t-turquoise, var(--t-green)) 70%, transparent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--t-green) 30%, transparent);
   pointer-events: none;
@@ -4067,11 +4082,10 @@ onBeforeUnmount(() => {
 /* WDWTITLE: 枠の辺に載る見出し／脚注。枠の罫線を隠すよう地色を敷く */
 .win-title {
   position: absolute;
-  /* .gui-window と同じグリッド padding 分の補正。
-     **枠（.gui-window-border）と必ず揃えること**——見出しは枠の辺に載る文字なので、
+  /* **枠（.gui-window-border）と必ず揃えること**——見出しは枠の辺に載る文字なので、
      片方だけ補正すると見出しが枠から外れる（原典メモは .win-title を補正済みとしていたが、
      当リポジトリでは抜けていた。decisions.md D1 参照）。 */
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   white-space: pre;
   pointer-events: none;
   line-height: 1.25;
@@ -4079,7 +4093,7 @@ onBeforeUnmount(() => {
 }
 .gui-selection {
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   display: flex;
   gap: 2px;
   z-index: 2;
@@ -4127,7 +4141,7 @@ onBeforeUnmount(() => {
 }
 .gui-scrollbar {
   position: absolute;
-  margin: 8px 0 0 10px;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   background: color-mix(in srgb, var(--t-green) 12%, transparent);
   pointer-events: none;
 }

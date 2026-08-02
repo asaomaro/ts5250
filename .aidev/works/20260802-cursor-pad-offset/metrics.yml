@@ -1,0 +1,8 @@
+events:
+  - { ts: 2026-08-02T04:43:52Z, phase: requirement, event: approved }
+  - { ts: 2026-08-02T04:44:21Z, phase: spec, event: approved }
+  - { ts: 2026-08-02T04:44:43Z, phase: plan, event: approved, metrics: { tasks_planned: 5 } }
+  - { ts: 2026-08-02T04:52:06Z, phase: coding, event: approved, metrics: { tasks_done: 5 } }
+  - { ts: 2026-08-02T04:52:35Z, phase: test, event: approved, metrics: { passed: 1277, failed: 0 } }
+  - { ts: 2026-08-02T04:53:25Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 2 } }
+  - { ts: 2026-08-02T04:53:25Z, phase: deliver, event: approved }
