@@ -224,7 +224,10 @@ function onStripLeave(ev: DragEvent): void {
 .tabs {
   display: flex;
   gap: 2px;
-  /* 上の余白を削って画面に回す（ACS 相当の余白に） */
+  /* 上の余白を削って画面に回す（ACS 相当の余白に）。
+     高さはヘッダーと同じ変数を見る（`--chrome-row-h`）——揃えるため */
+  min-height: var(--chrome-row-h);
+  box-sizing: border-box;
   padding: 1px 2px 0;
   flex-wrap: wrap;
   /* タブが少なくても末尾の空き領域へドロップ（合流）できるよう最低幅・高さを確保 */

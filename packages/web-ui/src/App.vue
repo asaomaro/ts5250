@@ -383,7 +383,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
+  /* **タブ帯と同じ高さに揃える**（`--chrome-row-h`）。縦の余白は持たせず、
+     中身を中央に置く——画面に回せる高さを増やすため */
+  height: var(--chrome-row-h);
+  box-sizing: border-box;
+  padding: 0 14px;
   border-bottom: 1px solid var(--line);
   flex: none;
 }
@@ -403,11 +407,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .theme-btn {
-  /* 絵文字の有無で高さがブレないよう固定高さ＋中央寄せに揃える（28px） */
+  /* 絵文字の有無で高さがブレないよう固定高さ＋中央寄せに揃える。
+     ヘッダーの行高（`--chrome-row-h`）に収まる大きさにする */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 28px;
+  height: 22px;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: 12px;
