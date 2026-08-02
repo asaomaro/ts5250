@@ -17,20 +17,32 @@ import { watchesStore } from "../stores/watches.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
 
-defineProps<{ tabId: string }>();
+/**
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すようになったので、「マウント中＝見えている」ではない。
+ */
+const props = defineProps<{ tabId: string; active?: boolean }>();
 
 onMounted(() => {
   void watchesStore.connect();
-  // **タブを開いたら未読は解消**（プリンターと同じ挙動。requirement）
-  watchesStore.markRead();
 });
 
-// 開いている間に届いた分も既読にする（見えているのにバッジが増え続けるのを避ける）
+/**
+ * **見えている間だけ既読にする。**
+ *
+ * 以前は「マウント中ずっと」だった——タブを切り替えてもアンマウントされていたので、
+ * それで「開いている間」と同義だった。隠れたまま生き続ける今それを続けると、
+ * **裏で全部既読にしてしまい未読バッジが二度と出ない**（バッジは
+ * `PaneTabs` が `watchesStore.totalUnread` から出している）。
+ *
+ * 見えた瞬間にも既読にしたいので `immediate: true`。
+ */
 watch(
-  () => watchesStore.totalUnread,
-  (n) => {
-    if (n > 0) watchesStore.markRead();
-  }
+  () => [props.active, watchesStore.totalUnread] as const,
+  ([on, n]) => {
+    if (on && n > 0) watchesStore.markRead();
+  },
+  { immediate: true }
 );
 
 const at = (ms: number): string => new Date(ms).toLocaleTimeString("ja-JP", { hour12: false });

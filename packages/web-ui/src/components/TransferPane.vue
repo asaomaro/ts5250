@@ -24,7 +24,13 @@ import { parseCsv } from "@as400web/base";
  * ⚠ **取り込みは巻き戻せない**（DDM にコミットメント制御が無い）。
  * よって「完了」と「部分完了」を別の状態として見せる——利用者が次に取る行動が違うため。
  */
-defineProps<{ tabId: string }>();
+/**
+ * `tabId`: このペインのタブ ID。
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
+ * 裏で働き続けてよいかの判断はこれで行う。
+ */
+defineProps<{ tabId: string; active?: boolean }>();
 
 /** IBM i のオブジェクト名。**判定の実体は core にあり、サーバーと同じものを使う** */
 const validName = isValidIdentifier;

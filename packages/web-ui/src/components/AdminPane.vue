@@ -3,7 +3,13 @@ import { ref, computed, watch } from "vue";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 
-const props = defineProps<{ tabId: string }>();
+/**
+ * `tabId`: このペインのタブ ID。
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
+ * 裏で働き続けてよいかの判断はこれで行う。
+ */
+const props = defineProps<{ tabId: string; active?: boolean }>();
 const view = computed(() => props.tabId.replace(/^admin:/, "")); // users | sessions | logs
 
 interface PublicUser {

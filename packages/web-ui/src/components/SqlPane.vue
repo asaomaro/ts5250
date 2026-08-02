@@ -28,7 +28,13 @@ import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
  * 表示中のタブに対して列幅・CSV・読み足しが働く。失敗したらそこで止め、
  * 何番目の文かを添える（後続は投げない）。
  */
-defineProps<{ tabId: string }>();
+/**
+ * `tabId`: このペインのタブ ID。
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
+ * 裏で働き続けてよいかの判断はこれで行う。
+ */
+defineProps<{ tabId: string; active?: boolean }>();
 
 interface Column {
   name: string;

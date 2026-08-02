@@ -36,7 +36,13 @@ import { TEXT_CCSIDS, ccsidLabel } from "@as400web/ebcdic/catalog";
  * 辿れない場所がある）と、復号できないテキスト（エラーではない）は
  * composable が吸収済み。ここでは吸収後の状態だけを見る。
  */
-defineProps<{ tabId: string }>();
+/**
+ * `tabId`: このペインのタブ ID。
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
+ * 裏で働き続けてよいかの判断はこれで行う。
+ */
+defineProps<{ tabId: string; active?: boolean }>();
 
 const ROOT = "/";
 const source = () => ({ system: systemsStore.selected });
@@ -187,6 +193,19 @@ async function openPath(path: string): Promise<void> {
     await tree.load(path);
     await revealInTree(path);
   });
+}
+
+/**
+ * **いまのフォルダを取り直す**（利用者の指示）。
+ *
+ * `openPath` と違い**居場所も選択も変えない**——見ているものを更新するだけ。
+ * ツリーは `refresh`（読み込み済みを捨てて取り直す）を使う。`load` は
+ * 読み込み済みなら何もしないので、これでは「取り直す」にならない。
+ */
+async function reload(): Promise<void> {
+  message.value = "";
+  actionError.value = "";
+  await run(() => tree.refresh(currentPath.value));
 }
 
 /**
@@ -767,6 +786,12 @@ void (async () => {
           {{ c.label }}
         </button>
       </nav>
+      <!--
+        **再読み込み**（利用者の指示）。タブは切り替えても状態を保つようになったので
+        （`20260802-keep-pane-state`）、戻ってきたときに勝手に取り直さない。
+        ホスト側で増えた・消えたものを見るには、明示的な入口が要る。
+      -->
+      <button :disabled="disabled" title="いまのフォルダを取り直す" @click="reload">再読み込み</button>
       <button :disabled="disabled" @click="createFolder">新規フォルダ</button>
       <button :disabled="disabled" @click="downloadFolder">まとめてダウンロード</button>
       <!-- label ではなく button から input を叩く。hidden な input はキーボードで到達できない -->

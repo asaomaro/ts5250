@@ -18,7 +18,13 @@ import { useColumnWidths } from "../composables/useColumnWidths.js";
  * 構成は「一覧 → 選択 → 中身」の 2 段。一覧はコマンドサーバー、中身はネットワーク印刷
  * サーバー経由だが、その非対称はサーバー側（host-spools.ts）が吸収するのでここでは見えない。
  */
-defineProps<{ tabId: string }>();
+/**
+ * `tabId`: このペインのタブ ID。
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
+ * 裏で働き続けてよいかの判断はこれで行う。
+ */
+defineProps<{ tabId: string; active?: boolean }>();
 
 /** 一覧の 1 行（サーバーの SpoolEntry と対） */
 interface SpoolRow {

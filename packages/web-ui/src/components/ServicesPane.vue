@@ -15,13 +15,32 @@
  * 一覧は誰にでも出す（帳票が来ない理由が「止まっているから」なら、それが分からないと
  * 問い合わせるしかない）。**操作は admin だけ**なので、押せない相手にはボタンを出さない。
  */
-import { onMounted, onUnmounted, computed } from "vue";
+import { onUnmounted, computed, watch } from "vue";
 import { servicesStore } from "../stores/services.js";
 import type { PrinterRow, WatchRow } from "@as400web/server";
 
-defineProps<{ tabId: string }>();
+/**
+ * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すようになったので、「マウント中＝見えている」ではない。
+ */
+const props = defineProps<{ tabId: string; active?: boolean }>();
 
-onMounted(() => void servicesStore.open());
+/**
+ * **見えている間だけ定期取得する。**
+ *
+ * `servicesStore.open()` は `setInterval` で一覧を取り直し続ける。以前は
+ * 「マウント中ずっと」で、それがタブを見ている間と同義だった。隠れたまま生き続ける今
+ * そのままにすると、**見ていないのに問い合わせを投げ続ける**。
+ */
+watch(
+  () => props.active,
+  (on) => {
+    if (on) void servicesStore.open();
+    else servicesStore.close();
+  },
+  { immediate: true }
+);
+// タブを閉じたときも確実に止める（`active` の変化を伴わずに消えることがある）
 onUnmounted(() => servicesStore.close());
 
 /** プリンターと待ち行列を 1 つの表に畳む（利用者から見れば同じ「サービス」） */

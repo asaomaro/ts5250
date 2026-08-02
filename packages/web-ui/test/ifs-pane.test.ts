@@ -1621,3 +1621,39 @@ describe("削除・名前の変更", () => {
     promptSpy.mockRestore();
   });
 });
+
+/**
+ * **再読み込み**（利用者の指示）。タブは切り替えても状態を保つようになったので
+ * （`20260802-keep-pane-state`）、戻ってきても勝手に取り直さない。
+ * ホスト側で増えた・消えたものを見るには、明示的な入口が要る。
+ */
+describe("再読み込み", () => {
+  const reloadBtn = (w: Awaited<ReturnType<typeof paneWith>>) =>
+    w.findAll("header button").find((b) => b.text() === "再読み込み");
+
+  it("**押すと同じフォルダを取り直す**（居場所は変えない）", async () => {
+    let call = 0;
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      const limits = limitsResponse(url);
+      if (limits) return limits;
+      call++;
+      // 2 回目に 1 件増える＝ホスト側で作られたものが見える
+      const entries = call === 1 ? [entry("a.txt")] : [entry("a.txt"), entry("b.txt")];
+      return new Response(JSON.stringify({ entries, hasMore: false, canContinue: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    await flushPromises();
+    expect(w.text()).not.toContain("b.txt");
+
+    await reloadBtn(w)!.trigger("click");
+    await flushPromises();
+    expect(w.text(), "取り直していない（読み込み済みで打ち切っている）").toContain("b.txt");
+    // ルートに居るまま（パンくずが増えていない）
+    expect(w.findAll(".crumbs .crumb")).toHaveLength(1);
+    w.unmount();
+  });
+});

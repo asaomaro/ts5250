@@ -145,6 +145,28 @@ function paneRects() {
   });
 }
 
+/**
+ * グループの中の「フォーカスを受ける根要素」へ実フォーカスを移す。
+ *
+ * **隠れている要素は飛ばす**（`20260802-keep-pane-state`）。開いたタブは切り替えても
+ * アンマウントせず `v-show` で隠すようになったので、同じグループに `.admin` を名乗る
+ * 要素（`AdminPane` と `SqlPane` の両方が持つ）が**複数居うる**。先頭を無条件に取ると
+ * 隠れている方を掴み、`focus()` が黙って何も起きない。
+ *
+ * 判定は包み紙の `data-hidden` で行う。**算出スタイルは使えない**——`display: none` は
+ * 包み紙側に付くので、中の要素の computed display は "none" にならない。
+ */
+function focusPane(id: string): void {
+  const sel = [".pane", ".printer-pane", ".admin"]
+    .map((c) => `.group[data-group-id="${id}"] ${c}`)
+    .join(", ");
+  for (const el of document.querySelectorAll<HTMLElement>(sel)) {
+    if (el.closest("[data-hidden]")) continue;
+    el.focus();
+    return;
+  }
+}
+
 function onGlobalKey(ev: KeyboardEvent): void {
   // セッションだけでなく管理タブ（admin:*）でも効かせる。セッション有無で判定すると
   // 管理タブしか開いていないときにショートカットが死ぬ
@@ -180,15 +202,7 @@ function onGlobalKey(ev: KeyboardEvent): void {
       // 移動先ペインへ実フォーカスを移し、キーボード操作を有効化する。
       // ペインの根要素はエミュレーター/プリンター/管理で class が異なるため全て対象にする
       // （.pane だけだとプリンター・管理ペインへフォーカスが移らない）
-      nextTick(() =>
-        document
-          .querySelector<HTMLElement>(
-            `.group[data-group-id="${id}"] .pane, ` +
-              `.group[data-group-id="${id}"] .printer-pane, ` +
-              `.group[data-group-id="${id}"] .admin`
-          )
-          ?.focus()
-      );
+      nextTick(() => focusPane(id));
     }
   }
 }
@@ -282,11 +296,21 @@ onBeforeUnmount(() => {
     <AccountPopover v-if="showAccount" @close="showAccount = false" />
     <KeybindingsPanel v-if="showKeys" @close="showKeys = false" />
 
-    <main v-if="showLauncher">
-      <LauncherPane />
-    </main>
-    <main v-else class="workspace">
-      <WorkspaceNode :node="workspaceStore.displayRoot()" />
+    <!--
+      **ワークスペースは外さない**（`20260802-keep-pane-state`・利用者の指示）。
+      `v-if` でメニューと入れ替えていた頃は、メニューへ寄っただけ／別のシステムを
+      選んだだけでタブのペインが丸ごとアンマウントされ、書きかけの SQL も
+      IFS の居場所も消えていた。**隠すだけ**にして、開いているタブは閉じるまで生かす。
+
+      `<main>` は 1 つのまま両方を内包する——`display: none` で隠しても
+      「文書に main は 1 つ」を崩さないため。見た目の違い（メニューは縦スクロール、
+      ワークスペースは固定）はクラスの付け外しで従来どおり切り替える。
+    -->
+    <main :class="{ workspace: !showLauncher }">
+      <LauncherPane v-show="showLauncher" />
+      <div v-show="!showLauncher" class="ws-root">
+        <WorkspaceNode :node="workspaceStore.displayRoot()" />
+      </div>
     </main>
 
     </template>
@@ -452,5 +476,9 @@ main {
 }
 main.workspace {
   overflow: hidden;
+}
+/* ワークスペースの入れ物。`main` の高さをそのまま分割ツリーへ渡す */
+.ws-root {
+  height: 100%;
 }
 </style>

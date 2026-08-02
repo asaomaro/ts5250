@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, reactive, watch, type Component } from "vue";
 import EmulatorPane from "./EmulatorPane.vue";
 import PrinterPane from "./PrinterPane.vue";
 import AdminPane from "./AdminPane.vue";
@@ -14,6 +14,7 @@ import SpoolPane from "./SpoolPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
+import { PANE_PREFIXES } from "../paneLabels.js";
 import { isFileDrag } from "../dnd.js";
 
 const props = defineProps<{ node: WsNode }>();
@@ -82,19 +83,64 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
 const activeIsPrinter = computed(
   () => !!group.value.activeTab && sessionsStore.get(group.value.activeTab)?.kind === "printer"
 );
-/** 管理タブ（admin:users/sessions/logs）か */
-const activeIsAdmin = computed(() => group.value.activeTab?.startsWith("admin:") ?? false);
-/** 一覧タブ（list:jobs/objects/users）か。管理タブと同じ「特殊なタブ ID」方式 */
-const activeIsList = computed(() => group.value.activeTab?.startsWith("list:") ?? false);
-const activeIsSql = computed(() => group.value.activeTab?.startsWith("sql:") ?? false);
-const activeIsIfs = computed(() => group.value.activeTab?.startsWith("ifs:") ?? false);
-const activeIsDtaq = computed(() => group.value.activeTab?.startsWith("dtaq:") ?? false);
-// 監視コンソール（push 型）。既存の `dtaq:`（pull 型）とは別のアプリ
-const activeIsWatch = computed(() => group.value.activeTab?.startsWith("watch:") ?? false);
-const activeIsServices = computed(() => group.value.activeTab?.startsWith("svc:") ?? false);
-const activeIsTransfer = computed(() => group.value.activeTab?.startsWith("transfer:") ?? false);
-/** pull 型スプールタブ（spool:files）か。プリンターセッション（push 型）とは別系統 */
-const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:") ?? false);
+
+/**
+ * **タブ ID の接頭辞 → ペイン。**
+ *
+ * `Record<(typeof PANE_PREFIXES)[number], …>` にしているので、`paneLabels.ts` へ
+ * 種類を足してここを忘れると**型エラーになる**（以前 `list:` の追加漏れで
+ * タブを閉じる処理が壊れた前例がある。`paneLabels.ts` の注記）。
+ *
+ * 監視コンソール（`watch:`・push 型）と データ待ち行列（`dtaq:`・pull 型）は別のアプリ。
+ * スプール（`spool:`・pull 型）とプリンターセッション（push 型）も別系統。
+ */
+const APP_PANES: Record<(typeof PANE_PREFIXES)[number], Component> = {
+  "admin:": AdminPane,
+  "dtaq:": DtaqPane,
+  "ifs:": IfsPane,
+  "list:": HostListPane,
+  "sql:": SqlPane,
+  "transfer:": TransferPane,
+  "spool:": SpoolPane,
+  "svc:": ServicesPane,
+  "watch:": WatchPane
+};
+/** そのタブのアプリ系ペイン（セッション系タブなら undefined） */
+function appPaneOf(tab: string | undefined): Component | undefined {
+  if (!tab) return undefined;
+  const hit = PANE_PREFIXES.find((p) => tab.startsWith(p));
+  return hit ? APP_PANES[hit] : undefined;
+}
+
+/**
+ * **開いたタブは閉じるまで生かす**（`20260802-keep-pane-state`）。
+ *
+ * 以前はアクティブなタブのペインだけを描いていたので、切り替えるたびに
+ * アンマウントされ、**コンポーネントのローカル状態が丸ごと消えていた**
+ * （SQL の入力・IFS の居場所・一覧の絞り込み……。利用者の指摘）。
+ * 5250 だけ無事に見えたのは、状態が `sessionsStore` にあったから。
+ *
+ * ここは「一度でもアクティブになったアプリ系タブ」を覚え、以後は**マウントしたまま
+ * `v-show` で出し入れ**する。
+ *
+ * - **遅延マウント**: 一度も開いていないタブは作らない（起動時に全タブぶんの
+ *   問い合わせが飛ぶのを避ける）。
+ * - **後片付けはタブの開閉と一致**: 閉じれば `group.tabs` から消えてアンマウントされ、
+ *   `onUnmounted`（SQL の結果セット解放など）が走る。**`<KeepAlive>` では
+ *   閉じたタブのインスタンスがキャッシュに残り、ここが守れない。**
+ */
+const opened = reactive(new Set<string>());
+watch(
+  () => group.value.activeTab,
+  (tab) => {
+    if (tab && appPaneOf(tab)) opened.add(tab);
+  },
+  { immediate: true }
+);
+/** いまマウントしておくアプリ系タブ。閉じた／移した分は `group.tabs` から消えて自然に落ちる */
+const liveTabs = computed(() => group.value.tabs.filter((t) => opened.has(t) && appPaneOf(t)));
+/** アクティブタブがアプリ系か（5250／プリンターの分岐に使う） */
+const activeIsApp = computed(() => appPaneOf(group.value.activeTab) !== undefined);
 </script>
 
 <template>
@@ -122,28 +168,39 @@ const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:")
   >
     <PaneTabs :group="group" />
     <div class="group-body">
-      <AdminPane v-if="group.activeTab && activeIsAdmin" :tab-id="group.activeTab" />
-      <HostListPane v-else-if="group.activeTab && activeIsList" :tab-id="group.activeTab" />
-      <SqlPane v-else-if="group.activeTab && activeIsSql" :tab-id="group.activeTab" />
-      <IfsPane v-else-if="group.activeTab && activeIsIfs" :tab-id="group.activeTab" />
-      <DtaqPane v-else-if="group.activeTab && activeIsDtaq" :tab-id="group.activeTab" />
-      <WatchPane v-else-if="group.activeTab && activeIsWatch" :tab-id="group.activeTab" />
-      <ServicesPane v-else-if="group.activeTab && activeIsServices" :tab-id="group.activeTab" />
-      <TransferPane v-else-if="group.activeTab && activeIsTransfer" :tab-id="group.activeTab" />
-      <SpoolPane v-else-if="group.activeTab && activeIsSpool" :tab-id="group.activeTab" />
+      <!--
+        アプリ系ペインは**開いたぶんを全部マウントしたまま**、見せる 1 枚だけ表示する。
+        包み紙（`.pane-slot`）を挟むのは、`v-show` がコンポーネントのルート要素に効くため
+        ——ルートが複数あるペインでも確実に隠れるようにする。
+      -->
+      <div
+        v-for="t in liveTabs"
+        v-show="t === group.activeTab"
+        :key="t"
+        class="pane-slot"
+        :data-tab="t"
+        :data-hidden="t === group.activeTab ? undefined : 'true'"
+      >
+        <component :is="appPaneOf(t)" :tab-id="t" :active="t === group.activeTab" />
+      </div>
+      <!--
+        5250 とプリンターは**従来どおりアクティブな 1 つだけ**を描く。状態は
+        `sessionsStore` にあるので再マウントで復元でき、`ScreenGrid` は 1 画面の DOM が
+        大きい——見えていない画面まで snapshot 更新のたびに描き直す意味がない。
+      -->
       <PrinterPane
-        v-else-if="group.activeTab && activeIsPrinter"
+        v-if="group.activeTab && !activeIsApp && activeIsPrinter"
         :session-id="group.activeTab"
         :focused="focused"
         @focus="workspaceStore.focus(group.id)"
       />
       <EmulatorPane
-        v-else-if="group.activeTab"
+        v-else-if="group.activeTab && !activeIsApp"
         :session-id="group.activeTab"
         :focused="focused"
         @focus="workspaceStore.focus(group.id)"
       />
-      <div v-else class="group-empty">セッションなし</div>
+      <div v-if="!group.activeTab" class="group-empty">セッションなし</div>
       <div v-if="dropZone" class="dz" :data-zone="dropZone"></div>
     </div>
   </div>
@@ -214,6 +271,11 @@ const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:")
 .group-body {
   position: relative;
   flex: 1;
+  min-height: 0;
+}
+/* 隠れているタブの包み紙。高さの連鎖（.group → .group-body → ペイン）を切らない */
+.pane-slot {
+  height: 100%;
   min-height: 0;
 }
 .group-empty {

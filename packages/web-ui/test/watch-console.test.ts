@@ -224,9 +224,29 @@ describe("WatchPane", () => {
     deliver({ type: "watch-list", watches: [W1] });
     deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
     expect(watchesStore.totalUnread).toBe(1);
-    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    const w = mount(WatchPane, { props: { tabId: "watch:queues", active: true } });
     await nextTick();
     expect(watchesStore.totalUnread).toBe(0);
+    w.unmount();
+  });
+
+  /**
+   * **隠れている間は既読にしない**（`20260802-keep-pane-state`）。
+   *
+   * 開いたタブは切り替えてもアンマウントせず `v-show` で隠すようになった。
+   * 「マウント中ずっと既読」のままだと、**裏で全部既読にして未読バッジが二度と出ない**。
+   */
+  it("**隠れている間の到着は未読のまま**（タブに戻ると消える）", async () => {
+    deliver({ type: "watch-list", watches: [W1] });
+    const w = mount(WatchPane, { props: { tabId: "watch:queues", active: false } });
+    await nextTick();
+    deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
+    await nextTick();
+    expect(watchesStore.totalUnread, "隠れているのに既読にしている").toBe(1);
+
+    await w.setProps({ active: true });
+    await nextTick();
+    expect(watchesStore.totalUnread, "見えたのに未読が残っている").toBe(0);
     w.unmount();
   });
 });
