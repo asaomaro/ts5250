@@ -1,9 +1,11 @@
 /**
  * 「無操作で切る」設定の UI 往復。
  *
- * **「サーバー既定に従う」と「切らない」は別の選択肢**にしてある。既定は切らないが、
- * 運用者が `--idle-timeout` で有限に変えている場合があり、ブラウザからは見えない。
- * したがって未設定のときは概要行を出さない（「切らない」と書くと嘘になりうる）。
+ * **「サーバー既定に従う」は選択肢から外した**（`20260802-config-form-polish`・利用者の判断:
+ * サーバー単位で設定できる必要が無い）。画面から保存した定義は**必ず自分の値を持つ**。
+ *
+ * 起動オプション `--idle-timeout` は残っており、**手書きで未指定のままの定義**にだけ効く。
+ * 概要（ⓘ）は未設定なら行を出さない——そこは変えていない（ブラウザから既定が見えないため）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
@@ -83,7 +85,7 @@ describe("概要表示（ⓘ の詳細）", () => {
 describe("編集フォームの往復", () => {
   /** 「無操作で切る」の select を掴む（選択肢の文言で特定する） */
   function idleSelect(w: ReturnType<typeof mount>) {
-    return w.findAll("select").find((s) => s.text().includes("サーバー既定に従う"))!;
+    return w.findAll("select").find((s) => s.text().includes("切らない"))!;
   }
 
   async function saveWith(
@@ -127,11 +129,11 @@ describe("編集フォームの往復", () => {
     expect(body.idleTimeout).toBe(60);
   });
 
-  it("「サーバー既定に従う」はキーごと送らない（既定値を設定ファイルに書き散らさない）", async () => {
-    const body = await saveWith(session(30), async (w) => {
-      await idleSelect(w).setValue(undefined);
-    });
-    expect("idleTimeout" in body).toBe(false);
+  it("**未設定の定義は「切らない」として開き、保存で明示値になる**", async () => {
+    // 「サーバー既定に従う」を選べなくしたので、未設定のまま保存しても値が付く。
+    // 出荷時のサーバー既定が「切らない」なので、**開いた時点の意味は変わらない**
+    const body = await saveWith(session(), async () => {});
+    expect(body.idleTimeout).toBe("never");
   });
 });
 
@@ -148,7 +150,7 @@ describe("一覧に無い分数", () => {
       .find((b) => b.text() === "編集")!
       .trigger("click");
     await flushPromises();
-    const sel = w.findAll("select").find((s) => s.text().includes("サーバー既定に従う"))!;
+    const sel = w.findAll("select").find((s) => s.text().includes("切らない"))!;
     expect(sel.text()).toContain("1 分");
     expect((sel.element as HTMLSelectElement).value).not.toBe("");
     w.unmount();
@@ -161,8 +163,9 @@ describe("一覧に無い分数", () => {
       .find((b) => b.text() === "編集")!
       .trigger("click");
     await flushPromises();
-    const sel = w.findAll("select").find((s) => s.text().includes("サーバー既定に従う"))!;
-    expect(sel.findAll("option")).toHaveLength(2 + 7); // 既定 + 切らない + IDLE_MINUTES
+    const sel = w.findAll("select").find((s) => s.text().includes("切らない"))!;
+    // **「サーバー既定に従う」を外したので 1 つ減った**（切らない + IDLE_MINUTES）
+    expect(sel.findAll("option")).toHaveLength(1 + 7);
     w.unmount();
   });
 });

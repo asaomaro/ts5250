@@ -172,6 +172,59 @@ select:not(.grid-input) {
   background-repeat: no-repeat;
   cursor: pointer;
 }
+/**
+ * チェックボックスをトグルスイッチに描き直す。
+ *
+ * ネイティブのままだと**配色が OS 任せ**で、自前で描いている select・入力欄と並んだときに
+ * 明らかに浮く（利用者の指摘）。select の矢印を自前で描いているのと同じ理由で、ここも描く。
+ *
+ * 入り/切りが**形でも分かる**ようにしてある（色だけに頼らない）——つまみが左右に動くので、
+ * 色の区別が付きにくい環境でも状態が読める。
+ */
+input[type="checkbox"]:not(.grid-input) {
+  appearance: none;
+  flex: none;
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  cursor: pointer;
+  position: relative;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+/* つまみ */
+input[type="checkbox"]:not(.grid-input)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transform: translateY(-50%);
+  transition:
+    left 0.12s ease,
+    background-color 0.12s ease;
+}
+input[type="checkbox"]:not(.grid-input):checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:not(.grid-input):checked::after {
+  left: 18px;
+  background: var(--card);
+}
+input[type="checkbox"]:not(.grid-input):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 select:not(.grid-input):focus-visible,
 input:not(.grid-input):focus-visible,
 button:focus-visible {

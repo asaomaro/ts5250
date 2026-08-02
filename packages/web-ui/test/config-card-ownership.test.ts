@@ -158,10 +158,18 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
     return w;
   }
 
+  /**
+   * 欄は**見出しで指す**（位置ではなく）。位置指定にすると、欄が 1 つ増えただけで
+   * 別の欄へ書き込み、「保存が効かない」という無関係な失敗になる
+   * （`20260802-config-form-polish` で保管場所がチェックになったとき実際に踏んだ）。
+   */
+  function field(w: Awaited<ReturnType<typeof createSystem>>, cap: string) {
+    return w.findAll(".fgrid .row").find((r) => r.find(".cap").text() === cap)!;
+  }
+
   async function fillAndSave(w: Awaited<ReturnType<typeof createSystem>>): Promise<void> {
-    const inputs = w.findAll(".fgrid input");
-    await inputs[0]!.setValue("n1"); // 名前
-    await inputs[1]!.setValue("h1"); // ホスト
+    await field(w, "名前").find("input").setValue("n1");
+    await field(w, "ホスト").find("input").setValue("h1");
     await w
       .findAll("button")
       .find((b) => b.text() === "保存")!
@@ -183,7 +191,9 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
   it("editable=true では保管場所をサーバー設定にできる", async () => {
     const w = await createSystem(true);
     expect(w.text()).toContain("保管場所");
-    await w.findAll("select")[0]!.setValue("server");
+    // **2 択の select ではなくチェック 1 つ**（`20260802-config-form-polish`）——
+    // 既定は「自分の設定」で、サーバー設定にしたいときだけ入れる
+    await field(w, "保管場所").find('input[type="checkbox"]').setValue(true);
     await fillAndSave(w);
 
     const post = calls.find((c) => c.url === "/api/systems" && c.method === "POST");

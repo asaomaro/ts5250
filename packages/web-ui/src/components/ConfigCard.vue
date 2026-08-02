@@ -62,6 +62,13 @@ const notice = ref("");
 
 /** 保管場所。サーバー設定は編集可能なときだけ選べる */
 const source = ref<"server" | "personal">("personal");
+/** チェック 1 つで表す（既定は自分の設定）。保存経路は従来どおり `source` を見る */
+const isServerSource = computed({
+  get: () => source.value === "server",
+  set: (v: boolean) => {
+    source.value = v ? "server" : "personal";
+  }
+});
 
 // exactOptionalPropertyTypes 下では省略可能プロパティに undefined を代入できないため、
 // フォームの型は「undefined を取りうる」ものとして別に定義する
@@ -83,7 +90,8 @@ const sesForm = reactive<SesFormState>({
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
   transformTo: "",
-  idleTimeout: undefined,
+  // 既定は「切らない」（`20260802-config-form-polish` で「サーバー既定に従う」を廃止）
+  idleTimeout: "never",
   autoStart: undefined,
   dtaqWatch: undefined
 });
@@ -221,18 +229,25 @@ const canEdit = computed(() => !isServer.value || systemsStore.editable);
 
 /** printer 出力（信頼設定）を編集できるか。**サーバー設定のプリンターセッションかつ編集権限があるときだけ** */
 const canEditPrinter = computed(
-  () => isServer.value && systemsStore.editable && sesForm.sessionType === "printer"
+  () => props.kind === "session" && isServer.value && systemsStore.editable && sesForm.sessionType === "printer"
 );
 /**
  * 転送設定を編集できるか。**サーバー設定の待ち行列監視かつ編集権限があるときだけ**。
  * `canEditPrinter` と同じ形——**新しい認可条件を作らない**（散らすと食い違う）。
  */
 const canEditWebhook = computed(
-  () => isServer.value && systemsStore.editable && sesForm.sessionType === "dtaqwatch"
+  () => props.kind === "session" && isServer.value && systemsStore.editable && sesForm.sessionType === "dtaqwatch"
 );
 /** PC コマンドは 5250 画面の標識で届くので、**表示セッションだけ**が持つ */
 const canEditPcCommand = computed(
-  () => isServer.value && systemsStore.editable && sesForm.sessionType === "display"
+  () =>
+    // **セッションカードだけ。** `sesForm.sessionType` は初期値が `display` なので、
+    // システムカードでも真になり **PC コマンド欄がシステムに出ていた**（利用者の報告）。
+    // PC コマンドは 5250 画面の標識で届くもので、システム（接続先）の設定ではない
+    props.kind === "session" &&
+    isServer.value &&
+    systemsStore.editable &&
+    sesForm.sessionType === "display"
 );
 
 function loadSystem(): void {
@@ -270,7 +285,10 @@ function loadSession(): void {
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
   sesForm.enhanced = s.enhanced;
-  sesForm.idleTimeout = s.idleTimeout;
+  // **「サーバー既定に従う」は選べなくした**（`20260802-config-form-polish`）。
+  // 未設定の定義（手書きの profiles.json など）は「切らない」として開く
+  // ——出荷時のサーバー既定が「切らない」なので、開いた時点の意味は変わらない
+  sesForm.idleTimeout = s.idleTimeout ?? "never";
   // 監視の設定はオブジェクトごと置き換わるので、**編集しなくても読み込んで送り返す**
   sesForm.dtaqWatch = s.dtaqWatch ? { ...s.dtaqWatch } : undefined;
 }
@@ -434,9 +452,9 @@ async function save(): Promise<void> {
       const tt = (sesForm.transformTo ?? "").trim();
       if (tt) form.transformTo = tt;
       else delete form.transformTo;
-      // `idleTimeout` は「サーバー既定に従う」＝ undefined。**明示的な delete は要らない**——
-      // `JSON.stringify` が undefined のキーを落とすので、そのままキーごと送られない
-      // （`transformTo`/`screenSize` は空文字や実値を持つため delete が必要。事情が違う）
+      // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
+      // 外した**ので、画面から保存した定義は必ず自分の値を持つ
+      // （`--idle-timeout` は、手書きで未指定のままの定義にだけ効く）
       // **種別と監視設定の整合を揃える。** サーバーは parse で弾くので、
       // 揃えないと「保存できません」だけが返って理由が分からない
       if (form.sessionType === "dtaqwatch") {
@@ -706,12 +724,24 @@ const infoRows = computed(() => {
       <div class="nm">{{ kind === "system" ? "システム" : "セッション" }}{{ creating ? "を追加" : "を編集" }}</div>
 
       <div v-if="kind === 'system'" class="fgrid">
-        <label v-if="creating && systemsStore.editable" class="row">
+        <!--
+          保管場所。**チェック 1 つで表す**——「自分の設定」が既定で、
+          サーバー設定にしたいときだけ入れる（2 択の select より意思が読みやすい）。
+
+          **「全員が使える」ではない。** サーバー設定は `assertProfileAccess` により
+          **読むのも管理者だけ**。一般利用者に見えるのは「サービスが動いているか」だけ
+          （`ServiceDef`。`20260801-services-pane`）。
+        -->
+        <label v-if="creating && systemsStore.editable" class="row full">
           <span class="cap">保管場所</span>
-          <select v-model="source">
-            <option value="personal">自分の設定</option>
-            <option value="server">サーバー設定（全員が使える）</option>
-          </select>
+          <span class="tv">
+            <input v-model="isServerSource" type="checkbox" />
+            サーバー設定にする
+          </span>
+          <span class="hint">
+            管理者だけが参照・編集できる共有の設定です。<strong>サービス（常駐）にできるのはこちらだけ</strong>
+            ——プリンターの自動出力・待ち行列の転送も、サーバー設定のセッションにしか置けません。
+          </span>
         </label>
         <label class="row"><span class="cap">名前</span><input v-model="sysForm.name" /></label>
         <label class="row"><span class="cap">ホスト</span><input v-model="sysForm.host" /></label>
@@ -816,11 +846,11 @@ const infoRows = computed(() => {
             class="cap"
             title="外すと、開いてもすぐには待ち受けません。開始ボタンを押すまで待ちます（サービスならサーバー起動時も同じ）"
           >
-            自動で待ち受け開始
+            自動起動
           </span>
           <span class="tv">
             <input v-model="autoStartOn" type="checkbox" />
-            開いた直後に待ち受ける
+            開いたら開始
           </span>
         </label>
         <label v-if="sesForm.sessionType === 'display'" class="row">
@@ -846,7 +876,6 @@ const infoRows = computed(() => {
             無操作で切る
           </span>
           <select v-model="sesForm.idleTimeout">
-            <option :value="undefined">サーバー既定に従う</option>
             <option value="never">切らない</option>
             <option v-for="m in idleMinuteOptions" :key="m" :value="m">{{ m }} 分</option>
           </select>
@@ -1225,6 +1254,14 @@ const infoRows = computed(() => {
 }
 .row input[type="checkbox"] {
   justify-self: start;
+}
+/* チェックとその説明を 1 行に収める（トグルは高さがあるので縦位置を揃える） */
+.tv {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--ink);
 }
 .hint {
   grid-column: 2;
