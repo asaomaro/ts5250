@@ -1229,7 +1229,17 @@ const infoRows = computed(() => {
   display: grid;
   grid-template-columns: 104px 1fr;
   gap: 8px;
+  /* 見出しと入力欄は**互いに**中央で揃える（1 行目の中で） */
   align-items: center;
+  /**
+   * **中身は上に詰める。**
+   *
+   * `.fgrid` の各行は「その行で一番高い欄」に合わせて伸びる。説明（`.hint`）を持つ欄は
+   * 2 行ぶんの高さになるので、説明の無い隣の欄が**縦中央に浮いて見出しの位置がずれる**
+   * （利用者の指摘）。`align-content` で上詰めにすると、説明の有無にかかわらず
+   * **1 行目の高さが揃う**。
+   */
+  align-content: start;
   font-size: 0.8rem;
 }
 .cap {
