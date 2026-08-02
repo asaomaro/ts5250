@@ -64,7 +64,11 @@ const inputState = computed<{ label: string; ok: boolean }>(() => {
  * **説明を消すのではなく移す**——`title` に残せば、初めて触る人も辿れる。
  */
 const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
-  shift.value
+  // **「その他」を開いている間は確定キーだけ残す**（`20260802-key-palette-layout`）。
+  // 一覧に F1〜F24 が全部出ているので、常時行にも並べると同じキーが 2 か所に出る
+  padOpen.value
+    ? [{ key: "Enter" as AidKey, label: "⏎", hint: "実行" }]
+    : shift.value
     ? [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].map((n) => ({ key: `F${n}` as AidKey, label: `F${n}` }))
     : [
         { key: "F1", label: "F1", hint: "ヘルプ" },
@@ -195,7 +199,49 @@ const macroStop = computed<string | undefined>(() => {
       <!--
         **その他のキー**（`20260802-key-palette`）。常時出すのはよく押すものだけにして、
         残りはここへ畳む。Attn / SysReq もこちらへ移した。
+
+        開いている間は**この行に並べる**（`20260802-key-palette-layout`・利用者の指示）
+        ——別の行を足すと 3 行になり、そのぶん画面が狭くなる。
       -->
+      <template v-if="padOpen">
+        <!-- **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため） -->
+        <button class="fk" :disabled="!!mod" title="割込（アテンション）" @click="padAid('Attn')">Attn</button>
+        <button class="fk" :disabled="!!mod" title="システム要求（行を開く）" @click="padAid('SysReq')">
+          SysReq
+        </button>
+        <button class="fk" :disabled="!!mod" title="前ページ" @click="padAid('PageUp')">PageUp</button>
+        <button class="fk" :disabled="!!mod" title="次ページ" @click="padAid('PageDown')">PageDown</button>
+        <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
+        <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
+        <button
+          class="fk"
+          :disabled="!!mod"
+          title="Esc（割り当てがあれば実行）"
+          @click="emit('combo', { key: 'Escape' })"
+        >
+          Esc
+        </button>
+        <!--
+          **単独では送らない。** 押した状態を保ち、次のファンクションキーと組み合わせる
+          （`Ctrl+F1` 等はキー設定で意味が決まる）。
+        -->
+        <button
+          class="fk mod"
+          :class="{ on: mod === 'ctrl' }"
+          title="Ctrl（ファンクションキーと組み合わせて使う）"
+          @click="mod = mod === 'ctrl' ? '' : 'ctrl'"
+        >
+          Ctrl
+        </button>
+        <button
+          class="fk mod"
+          :class="{ on: mod === 'alt' }"
+          title="Alt（ファンクションキーと組み合わせて使う）"
+          @click="mod = mod === 'alt' ? '' : 'alt'"
+        >
+          Alt
+        </button>
+      </template>
       <button
         class="fk more"
         :class="{ on: padOpen }"
@@ -207,69 +253,26 @@ const macroStop = computed<string | undefined>(() => {
     </span>
   </div>
   <!--
-    キーの一覧。**ペインの keydown 処理へ流す**ので、キー設定（`ctrl+F1` 等）が
-    ボタンからも同じように効く。
+    ファンクションキーの一覧。**右寄せ**にして、上の行の「その他」ボタンの側へ揃える
+    （利用者の指示）。押されたキーはペインの keydown 処理へ流すので、
+    キー設定（`ctrl+F1` 等）がボタンからも同じように効く。
   -->
   <div v-if="padOpen" class="keypad">
-    <span class="row">
-      <button v-for="k in fnKeys" :key="k" class="fk" :disabled="false" @click="padFn(k)">{{ k }}</button>
-    </span>
-    <span class="row">
-      <!-- **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため） -->
-      <button class="fk" :disabled="!!mod" title="割込（アテンション）" @click="padAid('Attn')">Attn</button>
-      <button class="fk" :disabled="!!mod" title="システム要求（行を開く）" @click="padAid('SysReq')">
-        SysReq
-      </button>
-      <button class="fk" :disabled="!!mod" title="前ページ" @click="padAid('PageUp')">PageUp</button>
-      <button class="fk" :disabled="!!mod" title="次ページ" @click="padAid('PageDown')">PageDown</button>
-      <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
-      <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
-      <button class="fk" :disabled="!!mod" title="Esc（割り当てがあれば実行）" @click="emit('combo', { key: 'Escape' })">
-        Esc
-      </button>
-      <span class="sep"></span>
-      <!--
-        **単独では送らない。** 押した状態を保ち、次のファンクションキーと組み合わせる
-        （`Ctrl+F1` 等はキー設定で意味が決まる）。
-      -->
-      <button
-        class="fk mod"
-        :class="{ on: mod === 'ctrl' }"
-        title="Ctrl（ファンクションキーと組み合わせて使う）"
-        @click="mod = mod === 'ctrl' ? '' : 'ctrl'"
-      >
-        Ctrl
-      </button>
-      <button
-        class="fk mod"
-        :class="{ on: mod === 'alt' }"
-        title="Alt（ファンクションキーと組み合わせて使う）"
-        @click="mod = mod === 'alt' ? '' : 'alt'"
-      >
-        Alt
-      </button>
-      <span v-if="mod" class="modhint">{{ mod === "ctrl" ? "Ctrl" : "Alt" }} ＋ ファンクションキー</span>
-    </span>
+    <span v-if="mod" class="modhint">{{ mod === "ctrl" ? "Ctrl" : "Alt" }} ＋ ファンクションキー</span>
+    <button v-for="k in fnKeys" :key="k" class="fk" @click="padFn(k)">{{ k }}</button>
   </div>
 </template>
 
 <style scoped>
-/* キーの一覧（その他のキー）。1 行に収まらないので折り返す */
+/* ファンクションキーの一覧。**右寄せ**（利用者の指示）。狭い幅では折り返す */
 .keypad {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: 3px;
   padding: 3px 8px 4px;
   border-top: 1px solid var(--crt-line);
-}
-.keypad .row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  align-items: center;
-}
-.keypad .sep {
-  width: 10px;
 }
 /* 修飾トグル。**押されていることが形で分かる**ようにする（色だけに頼らない） */
 .fk.mod.on {
