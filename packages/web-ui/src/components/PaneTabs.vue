@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import type { GroupNode } from "../stores/workspace.js";
 import { systemColorVar } from "../composables/systemColor.js";
+import { appearance } from "../stores/appearance.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { watchesStore } from "../stores/watches.js";
@@ -62,7 +63,10 @@ const manySystems = computed(() => {
   }
   return refs.size >= 2;
 });
-const showSystemName = (t: string): boolean => manySystems.value && systemOf(t) !== undefined;
+const showSystemName = (t: string): boolean =>
+  // **`外観` の切り替えに従う**（`20260802-appearance-and-view-cascade`）。
+  // OFF でも**色帯は残す**——見分けの最後の手段まで消さない
+  appearance.value.showTabSystemName && manySystems.value && systemOf(t) !== undefined;
 
 
 /** タブを選ぶ。ランチャーが開いたままにならないよう閉じる */

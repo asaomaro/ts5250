@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { appTheme } from "../composables/useTheme.js";
 import type { ScreenFontId } from "../composables/screenFonts.js";
 
 /**
@@ -71,6 +72,14 @@ export interface ViewSettings {
    * **推測を含む機能なので既定は none**（勝手に有効化しない。`windowFrame` の既定が none なのと同じ扱い）。
    */
   optHints: OptHintStyle;
+  /**
+   * **そのペインの表示モード**（`20260802-appearance-and-view-cascade`）。
+   *
+   * 既定は「外観に従う」——`initViewSettings` がアプリ全体の実効値を入れ、
+   * `外観` で変えれば追従する。セッション個別に指定すると**そのペインの中だけ**が変わる。
+   * `system`（OS 追従）はアプリ側で解決済みの概念なのでここには持ち込まない。
+   */
+  theme: "light" | "dark";
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -183,6 +192,7 @@ export const VIEW_ITEMS: ViewItemDef[] = [
       { value: "blur", label: "ぼやけ" },
     ],
   },
+  { key: "theme", label: "テーマ", opts: [{ value: "light", label: "通常" }, { value: "dark", label: "ダーク" }] },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
   { key: "surface", label: "画面の質感", opts: [{ value: "flat", label: "フラット" }, { value: "crt", label: "CRT" }] },
 ];
@@ -202,13 +212,29 @@ const FALLBACK: ViewSettings = {
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",
+  theme: "dark", // initViewSettings が外観の実効値で上書きする
   buttons: "none",
   windowFrame: "none",
   windowBackdrop: "none",
   font: "system",
 };
 
-const state = reactive({ settings: { ...FALLBACK } as ViewSettings });
+/**
+ * **2 段のカスケード**（`20260802-appearance-and-view-cascade`）。
+ *
+ * `defaults` が全体の既定（従来の単一設定そのもの。`localStorage` に保存）。
+ * `overrides` はセッションごとの上書きで、**置いた項目だけ**が既定より優先される。
+ *
+ * **上書きは保存しない。** セッション ID は接続のたびに変わるので、保存しても
+ * 次の起動では結び付かない（利用者も「リロードは維持されなくて構いません」）。
+ *
+ * 既存の保存値は `defaults` として読むだけで移行が済む——**上書きは空で始まる**ので、
+ * これまでの利用者の見え方は変わらない。
+ */
+const state = reactive({
+  settings: { ...FALLBACK } as ViewSettings,
+  overrides: {} as Record<string, Partial<ViewSettings>>
+});
 
 function persist(): void {
   try {
@@ -254,18 +280,55 @@ function migrate(v: ViewSettings): ViewSettings {
 }
 
 export const viewSettings = {
-  /** 現在の設定（保存済み・全画面共通） */
+  /** 全体の既定（保存済み）。上書きしていないセッションはこれで描かれる */
   get settings(): ViewSettings {
     return state.settings;
   },
-  /** 各画面（ペイン）に渡す実効設定。いまは全画面共通なので保存済み設定をそのまま返す。 */
-  effective(_sessionId?: string): ViewSettings {
-    return state.settings;
+  /**
+   * そのセッションの**実効設定**。既定にセッションの上書きを重ねる。
+   *
+   * この口は前からあったが、引数を使っておらず**全画面共通の値を返していた**
+   * （`⚙ 画面` のボタンには「このセッション」と書いてあったのに）。ここで名実を合わせる。
+   */
+  effective(sessionId?: string): ViewSettings {
+    const over = sessionId ? state.overrides[sessionId] : undefined;
+    return over ? { ...state.settings, ...over } : state.settings;
   },
-  /** 1 項目を変更して即保存（全画面に反映・再読み込み後も維持）。 */
+  /**
+   * **全体の既定**を 1 項目変更して保存する。上書きしていないセッションすべてに効く。
+   *
+   * キー設定からの順送り（`cycle`）もここを通る——あれはアプリ全体の操作なので、
+   * セッション上書き側へ流すとキー 1 つで挙動が分岐して分かりにくくなる。
+   */
   set<K extends Key>(key: K, value: ViewSettings[K]): void {
     state.settings = { ...state.settings, [key]: value };
     persist();
+  },
+
+  /** そのセッションだけを変える（既定には触らない） */
+  setOverride<K extends Key>(sessionId: string, key: K, value: ViewSettings[K]): void {
+    state.overrides[sessionId] = { ...state.overrides[sessionId], [key]: value };
+  },
+  /** その項目を「既定に従う」へ戻す（以後は既定の変更に追従する） */
+  clearOverride(sessionId: string, key: Key): void {
+    const over = state.overrides[sessionId];
+    if (!over) return;
+    const next = { ...over };
+    delete next[key];
+    if (Object.keys(next).length === 0) delete state.overrides[sessionId];
+    else state.overrides[sessionId] = next;
+  },
+  /** そのセッションの上書きを全部捨てる（「すべて既定に戻す」／タブを閉じたとき） */
+  clearAll(sessionId: string): void {
+    delete state.overrides[sessionId];
+  },
+  /** その項目を個別指定しているか（印を出すのに使う） */
+  isOverridden(sessionId: string | undefined, key: Key): boolean {
+    return sessionId !== undefined && state.overrides[sessionId]?.[key] !== undefined;
+  },
+  /** そのセッションが 1 項目でも個別指定しているか */
+  hasOverrides(sessionId: string | undefined): boolean {
+    return sessionId !== undefined && state.overrides[sessionId] !== undefined;
   },
   /**
    * 項目を次の選択肢へ**順送り**（末尾なら先頭へ戻る）。キー設定からの切替に使う。
@@ -292,4 +355,16 @@ export function initViewSettings(): void {
   } catch {
     /* 壊れていれば既定のまま */
   }
+  // **テーマの既定は `外観` に従う。** 保存値があってもここで上書きする——
+  // 「外観に従う」が既定である以上、記憶しているのは `外観` 側であって、こちらではない
+  state.settings = { ...state.settings, theme: appTheme() };
+  state.overrides = {};
+}
+
+/**
+ * `外観` の表示モードが変わったら、**上書きしていないペイン**へ流す。
+ * 個別指定したペインは追従しない（それが「個別指定」の意味）。
+ */
+export function syncThemeFromAppearance(): void {
+  state.settings = { ...state.settings, theme: appTheme() };
 }

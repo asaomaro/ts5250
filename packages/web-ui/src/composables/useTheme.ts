@@ -14,9 +14,24 @@ function effective(m: ThemeMode): "light" | "dark" {
   return m;
 }
 
+/**
+ * **アプリ全体で効いている表示モード**（`20260802-appearance-and-view-cascade`）。
+ *
+ * `mode` は `system` を取りうるので、そのままでは「いま何色か」が分からない。
+ * セッションごとの設定が「既定に従う（ダーク）」と**実値を併記**するのにこれを使う
+ * ——併記が無いと、確かめるのに `外観` を開き直すことになる。
+ */
+const resolved = ref<"light" | "dark">("light");
+
 function apply(m: ThemeMode): void {
+  resolved.value = effective(m);
   if (typeof document === "undefined") return;
-  document.documentElement.setAttribute("data-theme", effective(m));
+  document.documentElement.setAttribute("data-theme", resolved.value);
+}
+
+/** アプリ全体の実効表示モード（`system` を解決済み） */
+export function appTheme(): "light" | "dark" {
+  return resolved.value;
 }
 
 /** 起動時に呼ぶ: localStorage の選択を読み、data-theme を適用し、system 変更に追従する */

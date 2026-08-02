@@ -18,13 +18,46 @@ import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composable
  * 表示設定ポップオーバー。各項目はセグメント（またはセレクト）で、選んだ値は**保存され**
  * （localStorage）、全画面に適用・再読み込み後も維持される。
  */
-defineProps<{ sessionId: string }>();
+const props = defineProps<{ sessionId: string }>();
+
+/**
+ * **編集する層**（`20260802-appearance-and-view-cascade`）。
+ *
+ * `default`＝全体の既定（保存され、上書きしていないペインすべてに効く）／
+ * `session`＝このセッションだけ。**既定の編集も同じメニューでできる**ようにするのが要点
+ * ——別の場所を探させない。
+ *
+ * **初期は `全体の既定`。** これまで（全画面共通）と同じ使い勝手を保つため——
+ * 開いて何か変えたら全画面に効く、が従来の挙動で、そこを黙って変えない。
+ * 1 画面だけ変えたい人が `このセッション` へ切り替える、という opt-in にする。
+ */
+const layer = ref<"default" | "session">("default");
 
 // ヘッダーのポップオーバーは同時に 1 つだけ（共有状態）。デザイン設定と排他になる。
 const MENU_ID = "view";
 const open = computed(() => openHeaderMenu.value === MENU_ID);
-/** 現在の設定値（保存済み）。 */
-const eff = computed(() => viewSettings.settings);
+/** いま編集している層の値。`session` 層でも、上書きが無い項目は既定の値が見える */
+const eff = computed(() =>
+  layer.value === "default" ? viewSettings.settings : viewSettings.effective(props.sessionId)
+);
+/** 継承元（既定）の値。「既定に従う（CRT）」の併記に使う */
+const defaults = computed(() => viewSettings.settings);
+/** その項目をこのセッションで個別指定しているか（`default` 層では常に false） */
+function overridden(key: Key): boolean {
+  return layer.value === "session" && viewSettings.isOverridden(props.sessionId, key);
+}
+/** 継承中（＝この層で値を決めていない）か */
+function inherited(key: Key): boolean {
+  return layer.value === "session" && !overridden(key);
+}
+/** 継承中に併記する実値のラベル */
+function inheritedLabel(key: Key): string {
+  const item = VIEW_ITEMS.find((i) => i.key === key);
+  const v = defaults.value[key];
+  return item?.opts.find((o) => o.value === v)?.label ?? String(v);
+}
+/** このセッションに 1 つでも個別指定があるか（「すべて既定に戻す」を出す条件） */
+const hasOverrides = computed(() => viewSettings.hasOverrides(props.sessionId));
 
 type Key = keyof ViewSettings;
 // 項目定義（表示順・選択肢）は store の VIEW_ITEMS に集約（キー設定の順送りと共有）。
@@ -100,12 +133,12 @@ const fontMisfit = computed(() => {
   return !fitsGrid(measureFontFit(v));
 });
 function setFont(value: string): void {
-  viewSettings.set("font", sanitizeFamily(value) as never);
+  setVal("font", sanitizeFamily(value) as never);
 }
 function onFontChange(e: Event): void {
   const v = (e.target as HTMLSelectElement).value;
   // 「標準」と旧 id は id として渡す（sanitize は名前指定のためのもの）
-  if (v === SYSTEM_FONT_ID || isLegacyId(v)) viewSettings.set("font", v as never);
+  if (v === SYSTEM_FONT_ID || isLegacyId(v)) setVal("font", v as never);
   else setFont(v);
 }
 /** 名前を直接入力（一覧に出ないフォント・Local Font Access 非対応ブラウザ向け）。 */
@@ -131,15 +164,26 @@ function togglePalette(id: string): void {
  * 続けて別の候補を試せるようにするため（閉じると毎回開き直しになる）。
  */
 function pickFromPalette(key: Key, value: ViewSettings[Key]): void {
-  viewSettings.set(key, value as never);
+  setVal(key, value);
 }
 
 /** その値がいまの設定値か。常にどれか 1 つが選択状態になる。 */
 function isSel(key: Key, value: ViewSettings[Key]): boolean {
-  return eff.value[key] === value;
+  // 継承中は「既定に従う」が選択状態。値そのものは併記で見せる
+  return !inherited(key) && eff.value[key] === value;
 }
+/** いま編集している層へ書く */
 function setVal(key: Key, value: ViewSettings[Key]): void {
-  viewSettings.set(key, value as never);
+  if (layer.value === "default") viewSettings.set(key, value as never);
+  else viewSettings.setOverride(props.sessionId, key, value as never);
+}
+/** その項目を「既定に従う」へ戻す */
+function follow(key: Key): void {
+  viewSettings.clearOverride(props.sessionId, key);
+}
+/** このセッションの上書きを全部捨てる */
+function resetAll(): void {
+  viewSettings.clearAll(props.sessionId);
 }
 
 function onDocClick(e: MouseEvent): void {
@@ -167,15 +211,34 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="vsm">
-    <button class="vsm-btn" :class="{ on: open }" title="画面設定（このセッション）" :aria-expanded="open" @click.stop="onToggle">
-      ⚙ 画面
+    <!--
+      **名前は「表示」**（`20260802-appearance-and-view-cascade`・利用者の判断）。
+      対象の広さを名前で示す——`外観`＝アプリ全体、`表示`＝そのペイン。
+      後のスプールでも同じ名前のボタンを出す予定。
+    -->
+    <button class="vsm-btn" :class="{ on: open }" title="表示（このペインの見え方）" :aria-expanded="open" @click.stop="onToggle">
+      ⚙ 表示
     </button>
     <div v-if="open" class="vsm-menu" role="menu">
-      <div class="vsm-head">画面設定</div>
+      <div class="vsm-head">表示</div>
+      <!--
+        **編集する層。** 既定の編集も同じメニューでできるようにして、別の場所を探させない。
+        `このセッション` 側は各項目の初期値が「既定に従う」。
+      -->
+      <div class="vsm-row">
+        <span class="vsm-label">設定の対象</span>
+        <div class="seg" role="group" aria-label="設定の対象">
+          <button :class="{ on: layer === 'default' }" @click="layer = 'default'">全体の既定</button>
+          <button :class="{ on: layer === 'session' }" @click="layer = 'session'">このセッション</button>
+        </div>
+      </div>
       <template v-for="r in MENU_ROWS" :key="r.id">
         <!-- 畳んだ行: ラベルの右に「開く / 閉じる」。既定では候補を出さない -->
         <div v-if="r.expandable" class="vsm-row">
-          <span class="vsm-label">{{ r.label }}</span>
+          <span class="vsm-label">
+            {{ r.label }}
+            <span v-if="r.items.some((it) => overridden(it.key))" class="vsm-mark" title="このセッションで個別指定">●</span>
+          </span>
           <button
             class="vsm-toggle"
             :class="{ on: isExpanded(r.id) }"
@@ -186,8 +249,23 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div v-else class="vsm-row" :class="{ wide: r.wide }">
-          <span class="vsm-label">{{ r.label }}</span>
+          <span class="vsm-label">
+            {{ r.label }}
+            <!-- 個別指定の印。どれを自分で変えたかが一目で分かる -->
+            <span v-if="overridden(r.items[0]!.key)" class="vsm-mark" title="このセッションで個別指定">●</span>
+          </span>
           <div class="seg" role="group" :aria-label="r.label">
+            <!--
+              **継承中は実値を併記する。** 「既定に従う」だけだと、何色なのかを
+              確かめるのに `外観` や既定側を開き直すことになる。
+            -->
+            <button
+              v-if="layer === 'session'"
+              :class="{ on: inherited(r.items[0]!.key) }"
+              @click="follow(r.items[0]!.key)"
+            >
+              既定に従う<template v-if="inherited(r.items[0]!.key)">（{{ inheritedLabel(r.items[0]!.key) }}）</template>
+            </button>
             <button
               v-for="o in r.items[0]!.opts"
               :key="String(o.value)"
@@ -204,6 +282,16 @@ onBeforeUnmount(() => {
           <template v-for="it in r.items" :key="String(it.key)">
             <div v-if="r.items.length > 1" class="vsm-section">{{ it.label }}</div>
             <div class="vsm-palette" role="listbox" :aria-label="`${it.label}のデザイン`">
+              <button
+                v-if="layer === 'session'"
+                class="pal-item pal-follow"
+                role="option"
+                :aria-selected="inherited(it.key)"
+                :class="{ on: inherited(it.key) }"
+                @click="follow(it.key)"
+              >
+                <span class="pal-name">既定に従う（{{ inheritedLabel(it.key) }}）</span>
+              </button>
               <button
                 v-for="o in it.opts"
                 :key="String(o.value)"
@@ -256,6 +344,10 @@ onBeforeUnmount(() => {
         <p v-if="fontMisfit" class="vsm-note warn">
           このフォントは半角:全角が 1:2 でないため、桁がずれて見えることがあります。
         </p>
+      </div>
+      <!-- 個別指定をまとめて解く口。1 つずつ「既定に従う」を押して回らせない -->
+      <div v-if="layer === 'session' && hasOverrides" class="vsm-row">
+        <button class="vsm-toggle" @click="resetAll">この画面の設定をすべて既定に戻す</button>
       </div>
     </div>
   </div>
@@ -518,5 +610,17 @@ onBeforeUnmount(() => {
 }
 .vsm-note.warn {
   color: var(--t-red);
+}
+
+/* 個別指定の印。項目名の右に小さく置く */
+.vsm-mark {
+  margin-left: 4px;
+  font-size: 9px;
+  color: var(--accent);
+  vertical-align: middle;
+}
+/* パレットの「既定に従う」。見本を持たないので名前だけを widely 置く */
+.pal-item.pal-follow {
+  justify-content: center;
 }
 </style>

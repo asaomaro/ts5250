@@ -1,4 +1,5 @@
 import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
+import { viewSettings } from "./stores/viewSettings.js";
 import type { AidKey } from "@as400web/tn5250";
 import { WsClient, wsUrl } from "./ws-client.js";
 import {
@@ -474,6 +475,9 @@ export function closeSession(sessionId: string): void {
   s.client.close();
   sessionsStore.remove(sessionId);
   workspaceStore.closeSession(sessionId);
+  // このセッションだけの表示設定も捨てる（`20260802-appearance-and-view-cascade`）。
+  // 保存していないので放置しても害は無いが、開閉のたびに増え続けるのは避ける
+  viewSettings.clearAll(sessionId);
 }
 
 function hiddenIndexes(screen: { fields: { index: number; hidden: boolean }[] }): number[] {

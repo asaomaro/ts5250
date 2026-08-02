@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount } from "vue";
 import { useSkin, SKIN_META, type Skin } from "../composables/useSkin.js";
 import { useTheme, type ThemeMode } from "../composables/useTheme.js";
 import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composables/headerMenu.js";
+import { appearance } from "../stores/appearance.js";
 
 /**
  * デザイン切替メニュー。5250 端末 と Web アプリ風スキンを選び、
@@ -45,12 +46,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="designer">
-    <button class="dz-btn" :aria-expanded="open" aria-haspopup="menu" title="デザイン" @click.stop="toggleHeaderMenu(MENU_ID)">
+    <button class="dz-btn" :aria-expanded="open" aria-haspopup="menu" title="外観（アプリ全体の見た目）" @click.stop="toggleHeaderMenu(MENU_ID)">
       <span class="swatch" :style="{ background: current.swatch }"></span>
-      <!-- **三角は出さない**（利用者の指示）。ヘッダーの他のメニュー（⚙ 画面・マクロ）も
+      <!-- **三角は出さない**（利用者の指示）。ヘッダーの他のメニュー（⚙ 表示・マクロ）も
            持っていないし、押せば開くことは見れば分かる。開くボタンであることは
            `aria-haspopup` / `aria-expanded` が支援技術へ伝える。 -->
-      <span class="dz-name">{{ current.name }}</span>
+      <!--
+        **名前は「外観」**（`20260802-appearance-and-view-cascade`・利用者の判断）。
+        対象の広さを名前で示す——`外観`＝アプリ全体、`表示`＝そのペイン。
+        現在のスキン名を出していたのをやめたので**ボタンは短くなる**（ヘッダーの折り返しにも効く）。
+        現在値はメニューの中に ✓ で出ている。
+      -->
+      <span class="dz-name">外観</span>
     </button>
     <div v-if="open" class="dz-menu" role="menu">
       <div class="dz-sec">端末</div>
@@ -88,6 +95,21 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
+      <div class="dz-div"></div>
+      <!--
+        **タブにシステム名を出すか**（`20260802-appearance-and-view-cascade`）。
+        タブ帯はクロームなので `外観` の領分——ペインの中の見え方（`表示`）とは別。
+        ON でも**2 システム以上開いているときだけ**出る（1 システムの人の見た目は変えない）。
+        OFF にしても**色帯は残す**（見分けの最後の手段まで消さない）。
+      -->
+      <label class="dz-sub dz-toggle">
+        <span class="dz-sublabel">タブにシステム名</span>
+        <input
+          type="checkbox"
+          :checked="appearance.value.showTabSystemName"
+          @change="appearance.set('showTabSystemName', ($event.target as HTMLInputElement).checked)"
+        />
+      </label>
     </div>
   </div>
 </template>
@@ -219,5 +241,14 @@ onBeforeUnmount(() => {
 .seg button.on {
   background: var(--accent);
   color: var(--card);
+}
+
+/* トグル行。左に名前・右にスイッチ（`styles.css` の checkbox 意匠に乗る） */
+.dz-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
 }
 </style>

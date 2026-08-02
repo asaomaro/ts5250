@@ -101,7 +101,12 @@
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
 
-:root[data-theme="dark"] {
+/**
+ * **選択子から `:root` を外してある。** 特定度は `:root` と同じ (0,1,0) で、
+ * 記述順が後なのでルートでの優先関係は変わらない。外す目的は、
+ * **同じブロックをペイン（`.pane[data-theme]`）にも当てられるようにする**こと。
+ */
+[data-theme="dark"] {
   --paper: #0e1310;
   --card: #141b16;
   --ink: #d9e3da;
@@ -119,10 +124,51 @@
   --sys-6: #e0a049;
   --sys-7: #cb8a67;
   --sys-8: #9aabbf;
+
+  /**
+   * **端末パレットもここに書く**（`20260802-appearance-and-view-cascade`）。
+   *
+   * 以前は `:root` の値（CRT の暗い配色）をそのまま使い、このブロックはクロームだけを
+   * 上書きしていた。**差分を当てる形だとブロック単体では完結せず**、`.pane` に
+   * `data-theme` を付けても端末パレットが親（root）の値を継承したままになる
+   * ——暗いクロームに明るい画面、という壊れた組み合わせになる。
+   * セッションごとにテーマを変えられるようにするため、**全トークンを書く**。
+   */
+  --crt: #050d09;
+  --crt-bezel: #0c1710;
+  --crt-line: #16281d;
+  --t-green: #3ddc84;
+  --t-white: #e8f0e8;
+  --t-red: #ff6161;
+  --t-turquoise: #4dd8d8;
+  --t-yellow: #e8d44d;
+  --t-pink: #ff8ad8;
+  --t-blue: #6ea8ff;
+  --t-glow: 0 0 1px;
 }
 
 /* 端末の通常モード（ペーパー調・暗色 7 色・グローなし） */
-:root[data-theme="light"] {
+[data-theme="light"] {
+  /**
+   * **クロームのトークンもここに書く**（自己完結。上の dark ブロックと同じ理由）。
+   * 値は `:root`（属性が無いときの既定）と同じ。
+   */
+  --paper: #f2f5f1;
+  --card: #ffffff;
+  --ink: #1a231d;
+  --muted: #5b6b5e;
+  --line: #d8e0d6;
+  --accent: #178a48;
+  --accent-soft: #e3f0e7;
+  --sys-1: #2f80ed;
+  --sys-2: #1c9c92;
+  --sys-3: #2e9e4f;
+  --sys-4: #8b5cf6;
+  --sys-5: #d4568a;
+  --sys-6: #c2761c;
+  --sys-7: #a3603f;
+  --sys-8: #6b7a8f;
+
   --crt: #f7f8f4;
   --crt-bezel: #eceee8;
   --crt-line: #d3d9cf;
