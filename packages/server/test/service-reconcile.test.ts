@@ -51,6 +51,11 @@ function deps(opts: {
   const watches = {
     list: () => opts.watches ?? [],
     start: async () => calls.push("watch.start"),
+    register: (o: Record<string, unknown>) => {
+      calls.push(`watch.register ${String(o.ref)}`);
+      return { id: "w-new" };
+    },
+    resume: async (id: string) => calls.push(`watch.resume ${id}`),
     stop: (id: string) => calls.push(`watch.stop ${id}`),
     remove: (id: string) => calls.push(`watch.remove ${id}`),
     update: (id: string) => {
@@ -107,7 +112,9 @@ describe("定義が足された", () => {
   it("`dtaqwatch` は `service` を見ない（種別そのものがサービス型）", async () => {
     const { d, calls } = deps({ target: watchTarget() });
     expect(await reconcileService(d, "srv:w1", "saved")).toMatchObject({ started: true });
-    expect(calls).toEqual(["watch.start"]);
+    // **プリンターと同じ「登録してから開始」**——繋がらなかったときに実体が残らないと、
+    // 一覧に理由が出ない（`20260801-watch-register-symmetry`）
+    expect(calls).toEqual(["watch.register srv:w1", "watch.resume w-new"]);
   });
 
   it("**個人設定は扱わない**（本人が居ないところでその人として繋がない）", async () => {
@@ -208,5 +215,23 @@ describe("立ち上げに失敗したとき", () => {
     expect(await reconcileService(d, "srv:p1", "saved")).toMatchObject({ skipped: "device in use" });
     // **登録は済んでいる**——`openPrinter` が先に呼ばれているので、実体が `error` で残る
     expect(calls).toEqual(["openPrinter autoStart=false"]);
+  });
+});
+
+describe("監視の立ち上げに失敗したとき", () => {
+  it("**実体は残す**（プリンターと同じ。一覧に `error` と理由が出るように）", async () => {
+    const { d, calls } = deps({ target: watchTarget() });
+    (d.watches as unknown as { resume: () => Promise<never> }).resume = async () => {
+      throw new Error("not authorized");
+    };
+    expect(await reconcileService(d, "srv:w1", "saved")).toMatchObject({ skipped: "not authorized" });
+    // 登録は済んでいる——実体が `error` で残る
+    expect(calls).toEqual(["watch.register srv:w1"]);
+  });
+
+  it("自動で待ち受け開始 ☐ なら登録だけ（開始は呼ばない）", async () => {
+    const { d, calls } = deps({ target: watchTarget({ autoStart: false }) });
+    expect(await reconcileService(d, "srv:w1", "saved")).toMatchObject({ started: false });
+    expect(calls).toEqual(["watch.register srv:w1"]);
   });
 });

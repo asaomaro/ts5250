@@ -163,9 +163,15 @@ async function saveWatch(deps: ServiceReconcileDeps, ref: string, t: Resolved): 
   const sink = makeWatchSink(ref, t.webhook);
   const view = deps.watches.list().find((w) => w.ref === ref);
   if (!view) {
-    // 待ち行列は**種別そのものがサービス型**なので `service` を見ない（#257 と同じ）
-    if (!t.autoStart) return { skipped: "自動で待ち受け開始 ☐" };
-    await deps.watches.start({ ref, label, spec, connect: t.connect, ...(sink ? { sink } : {}) });
+    // 待ち行列は**種別そのものがサービス型**なので `service` を見ない（#257 と同じ）。
+    // **プリンターと同じ「登録してから開始」**（`20260801-watch-register-symmetry`）——
+    // 繋がらなかったときに実体が残らないと、一覧に理由が出ない
+    const created = deps.watches.register({ ref, label, spec, connect: t.connect, ...(sink ? { sink } : {}) });
+    if (!t.autoStart) {
+      log.info({ ref, label }, "定義から監視を登録した（自動で待ち受け開始 ☐）");
+      return { started: false };
+    }
+    await deps.watches.resume(created.id); // 失敗しても `error` 状態が実体に残る
     log.info({ ref, label }, "定義から監視を立ち上げた");
     return { started: true };
   }

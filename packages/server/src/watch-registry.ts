@@ -219,11 +219,32 @@ export class WatchRegistry {
       (w) => w.view.ref === opts.ref && w.view.owner === opts.owner
     );
     if (existing) return this.viewOf(existing);
-    // **待ち受け中の数で数える**（停止中は接続を持たないので枠を占めない）
-    if (this.listeningCount() >= this.maxWatches) {
-      throw new As400Error("SESSION_LIMIT", `watch limit reached (${this.maxWatches})`);
-    }
-    const conn = await this.openConn(opts.connect);
+    const view = this.register(opts);
+    // **最初の接続だけは待つ**——権限が無い・キューが無いといった「始められない理由」は
+    // 呼び出し側（＝利用者の操作）に返したい。2 回目以降の張り直しは背後で行う。
+    //
+    // **失敗しても実体は残る**（`20260801-watch-register-symmetry`）。以前は接続してから
+    // 登録していたので、繋がらないと**一覧に何も出ず、理由がログにしか無かった**——
+    // プリンターは登録してから開始する形（`openPrinter` ＋ `startPrinter`）なので、揃えた。
+    await this.resume(view.id);
+    return this.viewOf(this.watches.get(view.id)!);
+  }
+
+  /**
+   * **登録だけする**（接続しない）。プリンターの `openPrinter({ autoStart: false })` に当たる。
+   *
+   * `stopped` で置くので、**枠を占めない**（`listeningCount` は数えない）。
+   * 立ち上げるかどうかは呼び出し側が `resume` で決める——「登録する」と「待ち受ける」を
+   * 分けておくと、`自動で待ち受け開始 ☐` も、失敗しても一覧に残すことも、同じ形で書ける。
+   */
+  register(opts: {
+    ref: string;
+    label: string;
+    spec: DtaqWatchSpec;
+    connect: ConnectOptions;
+    owner?: string;
+    sink?: WatchSink;
+  }): WatchView {
     const id = randomUUID();
     const watch: Watch = {
       view: {
@@ -231,7 +252,7 @@ export class WatchRegistry {
         kind: "dtaq",
         ref: opts.ref,
         label: opts.label,
-        state: "listening",
+        state: "stopped",
         received: 0,
         startedAt: new Date(this.now()).toISOString(),
         ...(opts.owner !== undefined ? { owner: opts.owner } : {})
@@ -240,14 +261,13 @@ export class WatchRegistry {
       connect: opts.connect,
       ...(opts.sink ? { sink: opts.sink } : {}),
       history: [],
-      stopping: false,
-      conn
+      stopping: false
     };
     if (opts.sink) watch.view.hasWebhook = true;
     this.watches.set(id, watch);
-    log.info({ watchId: id, label: opts.label }, "watch started");
-    // ループは待たない（呼び出し側は「始まった」だけ知りたい）
-    void this.loop(watch);
+    // **ここでは配らない。** 登録は組み立ての途中で、外から見て意味を持つのは
+    // このあとの状態変化（`stopped` → `listening` / `error`）のほう。
+    // 一覧を配り直すのは行が増減したとき（`remove` / `update`）に任せる
     return this.viewOf(watch);
   }
 
@@ -336,7 +356,14 @@ export class WatchRegistry {
     w.stopping = false;
     // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
     delete w.view.stale;
-    w.conn = await this.openConn(w.connect);
+    try {
+      w.conn = await this.openConn(w.connect);
+    } catch (e) {
+      // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
+      // （`SessionManager.startPrinter` と同じ扱い）
+      this.setState(w, "error", e instanceof Error ? e.message : String(e));
+      throw e;
+    }
     this.setState(w, "listening");
     log.info({ watchId: id, label: w.view.label }, "watch resumed");
     void this.loop(w);

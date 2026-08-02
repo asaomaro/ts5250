@@ -159,7 +159,12 @@ describe("停止と障害を区別する", () => {
     // 接続は手放す。仕事は失われない（エントリは読むまでキューに残る）
     expect(conns[0]!.closed).toBe(true);
     // 停止による read の reject を「障害」として配っていない
-    expect(events.filter((e) => e.type === "state").map((e) => e.watch.state)).toEqual(["stopped"]);
+    // 先頭の `listening` は**開始そのもの**（登録 → 開始の 2 段になったため。
+    // `20260801-watch-register-symmetry`）。そのあとが停止
+    expect(events.filter((e) => e.type === "state").map((e) => e.watch.state)).toEqual([
+      "listening",
+      "stopped"
+    ]);
   });
 
   it("停止した監視を**再開できる**（保存した spec で開き直す）", async () => {
@@ -208,7 +213,7 @@ describe("停止と障害を区別する", () => {
     expect(connCount()).toBe(2); // 張り直した
     expect(a.closed).toBe(true);
     const states = events.filter((e) => e.type === "state").map((e) => e.watch.state);
-    expect(states).toEqual(["reconnecting", "listening"]);
+    expect(states).toEqual(["listening", "reconnecting", "listening"]);
     expect(reg.list()[0]?.state).toBe("listening");
     // 張り直した先で受け取れる
     b.deliver("after-reconnect");
@@ -226,7 +231,10 @@ describe("停止と障害を区別する", () => {
     await settle();
     expect(connCount()).toBe(1); // 張り直していない
     expect(reg.list()[0]).toMatchObject({ state: "error", error: expect.stringContaining("not authorized") });
-    expect(events.filter((e) => e.type === "state").map((e) => e.watch.state)).toEqual(["error"]);
+    expect(events.filter((e) => e.type === "state").map((e) => e.watch.state)).toEqual([
+      "listening",
+      "error"
+    ]);
     reg.closeAll();
   });
 
@@ -258,7 +266,14 @@ describe("停止と障害を区別する", () => {
     reg.closeAll();
   });
 
-  it("開始時の接続失敗は start が投げる（監視を作らない）", async () => {
+  /**
+   * **開始に失敗しても実体は残す**（`20260801-watch-register-symmetry`）。
+   *
+   * 以前は接続してから登録していたので、繋がらないと**一覧に何も出ず、理由が
+   * サーバーログにしか無かった**——「設定したのに動かない」が画面から追えない。
+   * プリンター（`openPrinter` ＋ `startPrinter`）と同じ「登録してから開始」に揃えた。
+   */
+  it("開始時の接続失敗は start が投げる。**ただし実体と理由は残る**", async () => {
     const reg = new WatchRegistry({
       connect: () => Promise.reject(new As400Error("ACCESS_DENIED", "no auth")),
       delay: async () => undefined
@@ -266,7 +281,25 @@ describe("停止と障害を区別する", () => {
     await expect(
       reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT })
     ).rejects.toMatchObject({ code: "ACCESS_DENIED" });
-    expect(reg.list()).toEqual([]);
+    // **一覧に残り、理由が読める**（画面から開始し直せる）
+    expect(reg.list()).toHaveLength(1);
+    expect(reg.list()[0]).toMatchObject({ state: "error", error: expect.stringContaining("no auth") });
+  });
+
+  it("**失敗しても枠を食わない**（`error` は接続を持たないので数えない）", async () => {
+    const reg = new WatchRegistry({
+      maxWatches: 1,
+      connect: () => Promise.reject(new As400Error("ACCESS_DENIED", "no auth")),
+      delay: async () => undefined
+    });
+    await expect(
+      reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT })
+    ).rejects.toMatchObject({ code: "ACCESS_DENIED" });
+    // 上限 1 でも、失敗した 1 本目が枠を占めていないので 2 本目を試せる
+    await expect(
+      reg.start({ ref: "own:c2", label: "l2", spec: SPEC, connect: CONNECT })
+    ).rejects.toMatchObject({ code: "ACCESS_DENIED" });
+    expect(reg.list()).toHaveLength(2);
   });
 });
 
