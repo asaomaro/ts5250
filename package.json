@@ -16,7 +16,8 @@
     "build": "tsc -b && npm run typecheck -w @ts5250/web-ui",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
-    "gen:tables": "npm run gen -w @ts5250/gen-tables"
+    "gen:tables": "npm run gen -w @ts5250/gen-tables",
+    "gen:icons": "npm run gen:icons -w @ts5250/web-ui"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

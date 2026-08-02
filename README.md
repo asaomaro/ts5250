@@ -193,7 +193,7 @@ electron.bat --build    :: 強制再ビルドしてから作る
 ```
 
 生成物は `electron/dist/` に出ます。Windows は
-**`AS400-5250-Emulator-<version>-setup.exe`** の 1 ファイルで、これを配ればそのまま導入できます
+**`ts5250-<version>-setup.exe`** の 1 ファイルで、これを配ればそのまま導入できます
 （**実行先に Node.js は不要**）。ワンクリック・ユーザー単位のインストーラなので
 `%LOCALAPPDATA%` に入り、**管理者権限は要りません**。以後の起動は即座です。
 

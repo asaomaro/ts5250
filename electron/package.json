@@ -2,7 +2,7 @@
   "name": "ts5250-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "AS400 5250 MCP/Web エミュレーター Electron デスクトップ版",
+  "description": "ts5250 — IBM i (AS/400) 5250 エミュレーター Electron デスクトップ版",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -55,8 +55,8 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "AS400 5250 エミュレーター",
-      "artifactName": "AS400-5250-Emulator-${version}-setup.${ext}"
+      "shortcutName": "ts5250",
+      "artifactName": "ts5250-${version}-setup.${ext}"
     }
   }
 }

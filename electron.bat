@@ -3,14 +3,14 @@ rem Keep this file ASCII-only: cmd.exe on a cp932 console mis-parses multibyte
 rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
 rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
 chcp 65001 >nul
-rem AS400 5250 emulator - Electron desktop packager (Windows)
+rem ts5250 - Electron desktop packager (Windows)
 rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> stage app -> build exe
 rem
 rem Usage:
 rem   electron.bat            auto-build if not built, then build the exe
 rem   electron.bat --build    force rebuild, then build the exe
 rem
-rem Output: electron\dist\AS400-5250-Emulator-<version>-setup.exe
+rem Output: electron\dist\ts5250-<version>-setup.exe
 rem   A single exe to hand out. It is a one-click per-user installer:
 rem   installs under %LOCALAPPDATA% (no admin), makes shortcuts, then starts
 rem   instantly every time. No Node.js needed on the target machine - runtime

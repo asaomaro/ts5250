@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AS400 5250 エミュレーター — Electron デスクトップ版の実行ファイル生成（Linux / macOS / WSL）
+# ts5250 — Electron デスクトップ版の実行ファイル生成（Linux / macOS / WSL）
 #   ワークスペース依存 → ビルド（core/server + web-ui）→ Electron 依存 → アプリ一式の組み立て
 #   → 実行ファイル生成。
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AS400 5250 Web エミュレーター起動スクリプト（Linux / macOS / WSL）
+# ts5250 — Web エミュレーター起動スクリプト（Linux / macOS / WSL）
 #   HTTP サーバーを起動し、ビルド済み Web UI を配信する。ブラウザで http://localhost:<port> を開く。
 #
 # 使い方:

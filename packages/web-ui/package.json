@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "license": "Apache-2.0",
-  "description": "5250 Web emulator UI (Vue 3 + Vite)",
+  "description": "ts5250 Web emulator UI (Vue 3 + Vite)",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "typecheck": "vue-tsc -b tsconfig.json tsconfig.test.json",
     "preview": "vite preview",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "test": "vitest run",
     "test:flake-hunt": "bash scripts/flake-hunt.sh"
   },

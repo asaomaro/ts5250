@@ -3,7 +3,7 @@ rem Keep this file ASCII-only: cmd.exe on a cp932 console mis-parses multibyte
 rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
 rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
 chcp 65001 >nul
-rem AS400 5250 Web emulator launcher (Windows)
+rem ts5250 - Web emulator launcher (Windows)
 rem   Starts the HTTP server and serves the pre-built Web UI.
 rem   Open http://localhost:<port> in a browser.
 rem

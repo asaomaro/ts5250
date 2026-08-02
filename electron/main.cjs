@@ -1,4 +1,4 @@
-// AS400 5250 エミュレーター — Electron メインプロセス
+// ts5250 — Electron メインプロセス
 //   既存の Hono サーバー（packages/server）を Electron 内で起動し（TN5250 接続は Node が担う）、
 //   ビルド済み Web UI を BrowserWindow で開く。単一プロセス構成。
 "use strict";
@@ -190,6 +190,15 @@ function statusPage(title, body) {
 let mainWindow = null;
 
 /**
+ * ウィンドウアイコン。**配布時は付かない**（存在しないので下の分岐で落ちる）。
+ *
+ * 実体は electron-builder の buildResources（`electron/build/icon.png`）で、asar には
+ * 入らない——配布物では exe / dmg / AppImage 側に焼き込まれたアイコンが使われるので、
+ * ここで指すべきものが無い。開発起動（`npm start`）のときだけタスクバーに出す。
+ */
+const DEV_ICON = path.join(__dirname, "build", "icon.png");
+
+/**
  * ウィンドウは**サーバーより先に開く**。
  *
  * 以前は起動が終わってから開いていたので、途中で失敗すると**画面に何も出ないまま**だった
@@ -200,7 +209,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
     height: 760,
-    title: "AS400 5250 エミュレーター",
+    title: "ts5250",
+    ...(fs.existsSync(DEV_ICON) ? { icon: DEV_ICON } : {}),
     backgroundColor: "#0b0f0b",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

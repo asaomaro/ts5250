@@ -320,6 +320,15 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   if (deps.webRoot) {
     const root = deps.webRoot;
     app.use("/assets/*", serveStatic({ root }));
+    /**
+     * dist 直下に置かれるファイル（Vite の `public/`）は**個別に配信する**。
+     * ハッシュ付きの `/assets/*` と違って名前が固定なので、ここに書き漏らすと
+     * SPA フォールバックに吸われて **HTML が image/svg+xml として返る**——
+     * ブラウザ側はアイコンが壊れているとしか分からない。
+     */
+    app.use("/favicon.ico", serveStatic({ root }));
+    app.use("/favicon.svg", serveStatic({ root }));
+    app.use("/apple-touch-icon.png", serveStatic({ root }));
     app.get("*", serveStatic({ path: "index.html", root }));
   } else {
     app.get("/", (c) =>
