@@ -11,9 +11,9 @@
  * core の 4 種の接続オプションは `{ host, user, password, port?, tls?, resolvePort?, timeoutMs? }` で
  * 共通形なので、資格情報の検証をここ 1 箇所に集約できる。
  */
-import { As400Error } from "@as400web/base";
-import { CommandConnection, DbConnection, IfsConnection, NetPrintConnection, DtaqConnection } from "@as400web/hostserver";
-import { type ConnectOptions } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { CommandConnection, DbConnection, IfsConnection, NetPrintConnection, DtaqConnection } from "@ts5250/hostserver";
+import { type ConnectOptions } from "@ts5250/tn5250";
 
 /** ホストサーバー接続に必要な最小の資格情報。core の 4 種すべてがこの形を含む */
 export interface HostServerAuth {

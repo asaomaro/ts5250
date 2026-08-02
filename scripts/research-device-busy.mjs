@@ -11,10 +11,10 @@
 //
 // 副作用: **自分の設定にある装置名**（既定 DEV1）で 2 本開くだけ。装置は作らない・消さない。
 // 掴んだ接続は finally で必ず閉じる。
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 // `startup-record` は公開 API に出していないので dist から直接読む（調査用）
 import { parseStartupResponse, startupCodeMeaning } from "../packages/tn5250/dist/telnet/startup-record.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

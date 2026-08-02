@@ -4,7 +4,7 @@
 // 実行: node scripts/verify-spool-html.mjs <html> <pages.json>
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
-import { isFullWidth } from "@as400web/base";
+import { isFullWidth } from "@ts5250/base";
 
 const HTML = process.argv[2];
 const PAGES = process.argv[3];

@@ -3,7 +3,7 @@ import { buildQueryReply } from "../src/protocol/query-reply.js";
 import { parseRecord } from "../src/protocol/gds.js";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { OPCODE, ESC, COMMAND } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(37);

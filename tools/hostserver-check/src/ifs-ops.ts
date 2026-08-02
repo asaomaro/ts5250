@@ -5,7 +5,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ifs-ops -w @as400web/hostserver-check -- --dir /home/USER/ifsdemo
+ *     npm run ifs-ops -w @ts5250/hostserver-check -- --dir /home/USER/ifsdemo
  *
  * 作業用のフォルダ（既定 `<dir>/opscheck`）を作って一通り試し、**最後に必ず消す**。
  * 確かめるのは「成功する」ことだけでなく、**失敗の戻りコードが意図どおり**であること:
@@ -15,8 +15,8 @@
  * - フォルダをファイル削除で消そうとする → `ACCESS_DENIED`（種別を取り違えた症状。research F4）
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { IfsConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { IfsConnection } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

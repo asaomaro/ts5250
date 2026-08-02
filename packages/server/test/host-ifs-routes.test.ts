@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
-import { As400Error } from "@as400web/base";
-import { type IfsConnection, type IfsListResult } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { type IfsConnection, type IfsListResult } from "@ts5250/hostserver";
 import type { AuthVars } from "../src/auth.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";

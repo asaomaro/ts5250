@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";

@@ -11,7 +11,7 @@
 //   4. 一度も開いていないタブは**マウントされていない**
 //
 // 実行: node --env-file=.env scripts/verify-pane-state.mjs
-//   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
+//   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 実機へ表示セッションを 1 本張って画面を読むだけ。装置名は指定せずホストに採らせる。
 // 2 つ目のシステム（切替の相手）は**接続しない**ので、同じホストを指しても増える接続は無い。
@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@as400web/server";
+import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

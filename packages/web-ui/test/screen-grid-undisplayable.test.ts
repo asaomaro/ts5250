@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
  * **表示できない SBCS は半角スペースで出す（ACS と同じ）。**

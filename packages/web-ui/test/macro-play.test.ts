@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Field, ScreenSnapshot } from "@as400web/tn5250";
-import type { PublicMacro, PublicMacroStep } from "@as400web/server";
+import type { Field, ScreenSnapshot } from "@ts5250/tn5250";
+import type { PublicMacro, PublicMacroStep } from "@ts5250/server";
 
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };
 vi.mock("../src/ws-client.js", () => ({

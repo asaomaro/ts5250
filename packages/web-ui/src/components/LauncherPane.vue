@@ -9,7 +9,7 @@
  * 上下に分けず同じ場所に並べる。
  */
 import { computed, onMounted, ref } from "vue";
-import type { PublicSession } from "@as400web/server";
+import type { PublicSession } from "@ts5250/server";
 import { systemsStore } from "../stores/systems.js";
 import { workspaceStore } from "../stores/workspace.js";
 import SystemDot from "./SystemDot.vue";

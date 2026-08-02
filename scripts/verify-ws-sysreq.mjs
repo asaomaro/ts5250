@@ -16,13 +16,13 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3466;
 const DEV = process.env.SRQ_DEV ?? "QPADEV0002";
-const CONF = join(tmpdir(), "as400web-conn-srq.json");
+const CONF = join(tmpdir(), "ts5250-conn-srq.json");
 
 // 装置名だけ差し替えた設定を作る（利用者が使っている DEV1 を奪わない）
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));

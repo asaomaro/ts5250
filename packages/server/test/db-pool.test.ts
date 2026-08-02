@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { DbPool, poolKey } from "../src/db-pool.js";
-import type { DbConnection } from "@as400web/hostserver";
+import type { DbConnection } from "@ts5250/hostserver";
 
 /**
  * 接続の使い回し。

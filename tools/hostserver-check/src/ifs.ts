@@ -6,15 +6,15 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ifs -w @as400web/hostserver-check -- --tls --dir /home/USER
+ *     npm run ifs -w @ts5250/hostserver-check -- --tls --dir /home/USER
  *
  * 検証内容: 決定的な擬似乱数バイト列を書き、読み戻して長さと SHA-256 を比較する。
  * 境界（32767 / 32768 / 32769）を含めるのは、チャンク境界での取りこぼしを見つけるため。
  */
 import "./log-init.js";
 import { createHash } from "node:crypto";
-import { As400Error } from "@as400web/base";
-import { IfsConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { IfsConnection } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

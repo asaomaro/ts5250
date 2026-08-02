@@ -5,13 +5,13 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
 import { isFileDrag } from "../dnd.js";
 import { useColumnWidths } from "../composables/useColumnWidths.js";
-// 実体（`@as400web/hostserver`）から取る。`import type` なので実行時にもバンドルにも入らない
+// 実体（`@ts5250/hostserver`）から取る。`import type` なので実行時にもバンドルにも入らない
 // （`ifsApi.ts` の同じ注記を参照）
-import type { UploadRejection } from "@as400web/hostserver";
+import type { UploadRejection } from "@ts5250/hostserver";
 // **root ではなく browser サブパスから取る**——root は pino と node:net/node:tls を巻き込み、
 // バンドラが node 組み込みを externalize して実行時に落ちる（AGENTS.md）
-import { isValidIdentifier } from "@as400web/tn5250/browser";
-import { parseCsv } from "@as400web/base";
+import { isValidIdentifier } from "@ts5250/tn5250/browser";
+import { parseCsv } from "@ts5250/base";
 
 /**
  * データ転送（表 ⇄ CSV）。ACS の **Data Transfer** に相当する。

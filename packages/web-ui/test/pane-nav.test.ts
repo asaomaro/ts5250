@@ -4,7 +4,7 @@ import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 function cell(char = " "): Cell {

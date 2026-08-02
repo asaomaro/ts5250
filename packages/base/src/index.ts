@@ -1,7 +1,7 @@
 /**
- * `@as400web/base` 公開 API。
+ * `@ts5250/base` 公開 API。
  *
- * IBM i を相手にする各パッケージ（`@as400web/tn5250` = TN5250、`@as400web/hostserver` =
+ * IBM i を相手にする各パッケージ（`@ts5250/tn5250` = TN5250、`@ts5250/hostserver` =
  * ホストサーバー群）が**共有する語彙**だけを置く。ここは「共通で使うものの物置」ではない——
  * **複製すると壊れるもの**の置き場所である。
  *
@@ -45,10 +45,10 @@ export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./ident
  * ここから下は **2 つ目の基準**——「複製すると壊れる」ではなく
  * **「複数のパッケージが要るが、どれにも属さない」**もの。
  *
- * - `east-asian-width` … `@as400web/tn5250` の `screen/`（桁を数える）と
- *   `@as400web/scs` の `spool-html`（描く）の**両方**が使う。どちらかに置くと他方が依存する
+ * - `east-asian-width` … `@ts5250/tn5250` の `screen/`（桁を数える）と
+ *   `@ts5250/scs` の `spool-html`（描く）の**両方**が使う。どちらかに置くと他方が依存する
  * - `csv-parse` / `split-statements` … 取り込みと SQL 入力の下ごしらえ。
- *   `@as400web/server` と `@as400web/web-ui` が使い、TN5250 でもホストサーバーでもない
+ *   `@ts5250/server` と `@ts5250/web-ui` が使い、TN5250 でもホストサーバーでもない
  *
  * **物置にしないための歯止め**: **片方しか使わないものは、使う側に置く。**
  * ここへ足す前に「本当に 2 つ以上のパッケージが要るか」を確かめること

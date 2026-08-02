@@ -2,7 +2,7 @@
 // 実行: node --env-file=.env scripts/verify-signon.mjs
 // trace は maskTx 既定 ON（パスワードを含む送信データは伏字化して保存）。
 import { writeFileSync, appendFileSync } from "node:fs";
-import { Session5250, TcpTransport, TraceRecorder } from "@as400web/tn5250";
+import { Session5250, TcpTransport, TraceRecorder } from "@ts5250/tn5250";
 
 const user = process.env.PUB400_USER;
 const password = process.env.PUB400_PASSWORD;

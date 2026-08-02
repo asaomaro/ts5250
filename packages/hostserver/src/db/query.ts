@@ -8,10 +8,10 @@
  * 参照: JTOpen(jtopenlite) の JDBCStatement.executeQuery /
  *       DatabaseConnection.prepareAndDescribe / openAndDescribe / fetch に対応する。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
 import { findParam, type Reply } from "../datastream.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { DB_REQ, DB_CP, ORS } from "./db-datastream.js";
 import { DbConnection } from "./db-connection.js";
 import { parseDataFormat, parseResultData, parseSqlca, type ResultFormat } from "./db-reply.js";

@@ -8,7 +8,7 @@ import {
   parseListInfo
 } from "../src/list/openlist.js";
 import type { CommandConnection } from "../src/command/command-connection.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** QGY のオープンリスト API に共通する部分 */
 describe("padEbcdic", () => {

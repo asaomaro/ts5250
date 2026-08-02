@@ -10,11 +10,11 @@
  *       本実装はホストサーバー経由で統一する方針のためこちらを採るが、
  *       SQL は**検証時の照合**に使える。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
 import { traced } from "../frame-trace.js";
-import { ScsDecoder, type LogicalPage } from "@as400web/scs";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { ScsDecoder, type LogicalPage } from "@ts5250/scs";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import {
   openHostConnection,
   type HostConnection,

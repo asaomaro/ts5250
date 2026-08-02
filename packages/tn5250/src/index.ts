@@ -1,4 +1,4 @@
-// @as400web/tn5250 公開 API
+// @ts5250/tn5250 公開 API
 
 // ロガー（stderr 固定。spec D9）
 export {
@@ -8,7 +8,7 @@ export {
   resetLogSink,
   type CoreLogger,
   type LogFn
-} from "@as400web/base";
+} from "@ts5250/base";
 
 // エラー
 export {
@@ -18,7 +18,7 @@ export {
   describeSocketError,
   withSocketHint,
   type ErrorCode
-} from "@as400web/base";
+} from "@ts5250/base";
 
 // 画面モデル（共有型。server / web-ui が import する）
 export type {
@@ -95,7 +95,7 @@ export {
 } from "./trace/trace.js";
 export { ReplayTransport } from "./trace/replay.js";
 
-export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "@as400web/base";
+export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "@ts5250/base";
 
 // 画面 → 自己完結 HTML（エビデンス出力）
 export {

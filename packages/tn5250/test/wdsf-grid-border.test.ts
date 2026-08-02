@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseWdsf, WDSF_TYPE, GRID_MINOR, GRID_LINE_STYLE } from "../src/protocol/wdsf-parser.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 const codec = codecForCcsid(37);
 /** wdsf-parser の Decode は「バイト 1 個 → コードポイント」 */

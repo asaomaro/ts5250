@@ -10,7 +10,7 @@ import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { MacroStore } from "../src/macro-store.js";
 import { SecretCrypto } from "../src/secret-crypto.js";
 import type { AuthUser } from "../src/auth.js";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import type { WsServerMessage } from "../src/ws-messages.js";
 import type { CreateMacroBody } from "../src/macro-types.js";
 

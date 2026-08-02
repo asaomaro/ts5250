@@ -1,6 +1,6 @@
 import { sessionsStore, type DraftStep, type MacroRuntime, type SessionState } from "./stores/sessions.js";
 import { macrosStore, type CreateMacroStep, type SecretChoice } from "./stores/macros.js";
-import type { PublicMacro } from "@as400web/server";
+import type { PublicMacro } from "@ts5250/server";
 
 /**
  * マクロの**記録側**と、記録・再生に共通の状態ヘルパ。

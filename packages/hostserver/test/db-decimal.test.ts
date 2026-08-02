@@ -4,7 +4,7 @@ import {
   zonedDecimalToString,
   packedByteLength
 } from "../src/db/db-decimal.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 10 進数は number を経由せず文字列にする（2^53 超・金額の精度を落とさないため）。

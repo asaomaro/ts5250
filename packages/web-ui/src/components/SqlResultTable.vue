@@ -11,8 +11,8 @@ import {
   INITIAL_ROWS
 } from "../composables/tableVirtual.js";
 import { isLob } from "../csv.js";
-// 型は在り処（`@as400web/hostserver`）から。`import type` なのでバンドルに入らない
-import type { LobPlaceholder } from "@as400web/hostserver";
+// 型は在り処（`@ts5250/hostserver`）から。`import type` なのでバンドルに入らない
+import type { LobPlaceholder } from "@ts5250/hostserver";
 
 /**
  * SQL の結果 1 つぶんの表。

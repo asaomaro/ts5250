@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import type { LogicalPage } from "@as400web/scs";
+import type { LogicalPage } from "@ts5250/scs";
 
 /**
  * 論理ページ（等幅グリッド）→ PDF。等幅フォントで各行を描画し、ページ＝改ページ。

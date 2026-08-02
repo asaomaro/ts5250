@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { parseRecord } from "../src/protocol/gds.js";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { detectPcoMarker, PCO_START, PCO_END } from "../src/protocol/pc-command.js";

@@ -51,7 +51,7 @@ if "%NEED_BUILD%"=="1" (
   echo ==^> build ^(core / server^)
   call npm run build
   echo ==^> build ^(web-ui / Vite^)
-  call npm run build -w @as400web/web-ui
+  call npm run build -w @ts5250/web-ui
 )
 
 if not exist electron\node_modules (

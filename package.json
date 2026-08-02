@@ -1,5 +1,5 @@
 {
-  "name": "as400-web-emulator",
+  "name": "ts5250",
   "private": true,
   "version": "0.1.0",
   "license": "Apache-2.0",
@@ -13,10 +13,10 @@
     "tools/*"
   ],
   "scripts": {
-    "build": "tsc -b && npm run typecheck -w @as400web/web-ui",
+    "build": "tsc -b && npm run typecheck -w @ts5250/web-ui",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
-    "gen:tables": "npm run gen -w @as400web/gen-tables"
+    "gen:tables": "npm run gen -w @ts5250/gen-tables"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

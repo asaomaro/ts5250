@@ -9,7 +9,7 @@ import {
   listReplyKind,
   canRestartFrom
 } from "../src/ifs/ifs-datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 固定データは**実機（PUB400）から採ったダンプそのもの**（research F1-3）。

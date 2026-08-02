@@ -1,5 +1,5 @@
-import type { ScreenSnapshot, Session5250 } from "@as400web/tn5250";
-import type { ScreenHistoryEntry } from "@as400web/tn5250";
+import type { ScreenSnapshot, Session5250 } from "@ts5250/tn5250";
+import type { ScreenHistoryEntry } from "@ts5250/tn5250";
 
 /**
  * **画面履歴のリングバッファ**（自動操作のエビデンスを HTML に束ねるための記録）。

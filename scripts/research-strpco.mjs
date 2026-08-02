@@ -4,7 +4,7 @@
 // 推測で実装しないための工程（AGENTS.md「既存プロトコル実装の移植」）。
 // 実行: node --env-file=.env scripts/research-strpco.mjs [出力先]
 import { readFileSync, writeFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const OUT = process.argv[2] ?? "/tmp/strpco-capture.txt";

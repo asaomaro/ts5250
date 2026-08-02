@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { buildReadMdtResponse } from "../src/protocol/read-response.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(930);

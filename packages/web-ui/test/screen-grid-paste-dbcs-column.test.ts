@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { columnView, isFullWidth } from "../src/composables/fieldValidate.js";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
  * **複数行ペーストの宛先は画面桁。DBCS 欄でも桁がずれない。**

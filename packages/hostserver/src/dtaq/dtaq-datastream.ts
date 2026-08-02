@@ -10,8 +10,8 @@
  * 配置は research 工程で実機採取して確定させる（宣言テンプレート長からは応答のデータ開始位置を
  * 求められないため。IFS で踏んだ罠）。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import type {
   CreateOptions,
   DtaqAttributes,

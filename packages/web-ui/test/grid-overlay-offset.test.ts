@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
-import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell } from "@ts5250/tn5250";
 
 /**
  * **重ねる要素の余白補正**（`20260802-cursor-pad-offset`）。

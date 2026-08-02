@@ -339,7 +339,7 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 レイアウトが確定するまで**を測る。表は作らない（`QSYS2.SYSCOLUMNS` から行を取る）。
 
 > ⚠ **`npm run build` では web-ui の `dist` は作られない**（root の `build` は
-> `tsc -b` ＋ 型検査だけ）。**`npm run build -w @as400web/web-ui` が要る**。
+> `tsc -b` ＋ 型検査だけ）。**`npm run build -w @ts5250/web-ui` が要る**。
 > 忘れると古いバンドルを測ることになり、**変更が効いていないのに数字だけ出る**
 > （実際にこれで 1 度、計測をまるごと無駄にした）。
 >

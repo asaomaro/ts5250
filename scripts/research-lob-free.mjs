@@ -9,8 +9,8 @@
 //         scripts/research-lob-free.mjs
 //
 // 表は `research-lob-threshold.mjs` が作る TESTLIB.LOBTHR を使う（無ければ作る）。
-import { DbConnection, executeStatement, openQuery, retrieveLob, freeLob } from "@as400web/hostserver";
-import { setLogSink } from "@as400web/base";
+import { DbConnection, executeStatement, openQuery, retrieveLob, freeLob } from "@ts5250/hostserver";
+import { setLogSink } from "@ts5250/base";
 
 // **解放の戻りコードはログにしか出ない**（`freeLob` は投げない）。ここでは見たいので拾う
 setLogSink(() => ({

@@ -5,8 +5,8 @@
 // ソース投入は IFS/FTP 不要。コマンド行から RUNSQL INSERT（1 行=1 リテラル、COMMIT(*NONE)）。
 // 実行: node --env-file=.env scripts/build-empsfl.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
-import { codecForCcsid } from "@as400web/tn5250/codec";
+import { Session5250 } from "@ts5250/tn5250";
+import { codecForCcsid } from "@ts5250/tn5250/codec";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";

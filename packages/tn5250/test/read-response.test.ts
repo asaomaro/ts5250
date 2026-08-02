@@ -6,7 +6,7 @@ import {
 } from "../src/protocol/read-response.js";
 import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { AID, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
 import {
   attrSentinel,

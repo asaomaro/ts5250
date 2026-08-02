@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
 import DesignMenu from "../src/components/DesignMenu.vue";
-import type { ScreenSnapshot } from "@as400web/tn5250";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
 import type { SessionState } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
 

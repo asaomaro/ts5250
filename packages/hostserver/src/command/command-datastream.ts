@@ -7,9 +7,9 @@
  * 参照: JTOpen(jtopenlite) の CommandConnection.sendExchangeAttributesRequest /
  *       sendRunCommandRequest / sendCallProgramRequest に対応する。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { HEADER_LEN } from "../datastream.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 /** コマンドサーバーのサーバー ID（signon は 0xE009、database は 0xE004） */
 export const COMMAND_SERVER_ID = 0xe008;

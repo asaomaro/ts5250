@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { executeStatement } from "../src/db/execute.js";
 import { SqlError } from "../src/db/query.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import type { DbConnection } from "../src/db/db-connection.js";
 
 /**

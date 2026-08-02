@@ -12,7 +12,7 @@
 // （L2 の「発行しない」は画面を通さないと意味が無い）。
 // 画面操作の作法は `verify-browser-ifs.mjs` に合わせる（.card / .fn / .entries li / nav.crumbs）。
 //
-// 前提: npm run build && npm run build -w @as400web/web-ui。`connections.json` に実機。
+// 前提: npm run build && npm run build -w @ts5250/web-ui。`connections.json` に実機。
 // 実行: node --env-file=.env scripts/verify-ifs-limits.mjs
 import { readFileSync, mkdirSync, rmSync } from "node:fs";
 import { serve } from "@hono/node-server";
@@ -23,7 +23,7 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

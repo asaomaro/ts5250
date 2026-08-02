@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { setLogSink, resetLogSink } from "@as400web/base";
+import { setLogSink, resetLogSink } from "@ts5250/base";
 import { freeLob } from "../src/db/lob.js";
 import type { DbConnection } from "../src/db/db-connection.js";
 import { DB_REQ, DB_CP, ORS } from "../src/db/db-datastream.js";

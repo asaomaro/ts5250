@@ -7,7 +7,7 @@ import {
 } from "../src/db/marker-encode.js";
 import type { MarkerFormat } from "../src/db/marker-format.js";
 import { DB2 } from "../src/db/db-types.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 /**
  * マーカー値の符号化。**本作業のロジックの中心**なので厚く書く。

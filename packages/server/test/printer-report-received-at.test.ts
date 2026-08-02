@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { SessionManager } from "../src/session-manager.js";
 import type { StoredReport } from "../src/session-manager.js";
-import type { Transport } from "@as400web/tn5250";
+import type { Transport } from "@ts5250/tn5250";
 
 /**
  * **帳票の受信時刻はサーバーが刻む**（`20260802-printer-report-history`）。
  *
  * これが無いと、常駐中に溜まった帳票を後から開いたときに受信時刻を**クライアントが
  * 現在時刻で押す**ことになり、夜中に出た帳票が全部「いま届いた」になる。
- * `SpoolReport`（`@as400web/tn5250`）はプロトコル層の型で時計を持たないので、
+ * `SpoolReport`（`@ts5250/tn5250`）はプロトコル層の型で時計を持たないので、
  * サーバー側の派生型 `StoredReport` に足してある。
  *
  * 刻む場所は `deliverReport` 1 か所——push でも救出でも同じ道を通る funnel。

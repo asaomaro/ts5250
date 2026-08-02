@@ -15,8 +15,8 @@
  * 参照: JTOpen(jtopenlite) の HostServerConnection.getUserBytes / getPasswordBytes に対応する
  *       （コードの移植ではなく、符号化規則に基づく実装）。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 /** ユーザー ID の最大長（IBM i のプロファイル名） */
 export const MAX_USER_LEN = 10;

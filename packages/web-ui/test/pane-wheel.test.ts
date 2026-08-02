@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
-import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 function cells(): Cell[][] {

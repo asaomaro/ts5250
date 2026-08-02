@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { FFW } from "../src/protocol/constants.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 const INPUT_FFW = FFW.ID_VALUE; // 入力可・英数
 const BYPASS_FFW = FFW.ID_VALUE | FFW.BYPASS;

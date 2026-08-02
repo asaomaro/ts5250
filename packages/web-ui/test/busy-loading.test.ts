@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ScreenSnapshot } from "@as400web/tn5250";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
 
 // WsClient をモック（connect 即時解決・send スパイ・handlers 捕捉）
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };

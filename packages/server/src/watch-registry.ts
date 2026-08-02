@@ -27,9 +27,9 @@
  * （`transport/host-connection.ts`）。切れたらここが指数バックオフで張り直す。
  */
 import { randomUUID } from "node:crypto";
-import { As400Error } from "@as400web/base";
-import { type DtaqConnection, dtaqDecodeEbcdic } from "@as400web/hostserver";
-import { type ConnectOptions } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { type DtaqConnection, dtaqDecodeEbcdic } from "@ts5250/hostserver";
+import { type ConnectOptions } from "@ts5250/tn5250";
 import { assertOwner, type AuthUser } from "./auth.js";
 import type { ServiceState } from "./service-state.js";
 import type { DtaqWatchSpec } from "./config-types.js";

@@ -3,11 +3,11 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run cmd -w @as400web/hostserver-check -- --tls "DSPLIB LIB(QGPL)"
+ *     npm run cmd -w @ts5250/hostserver-check -- --tls "DSPLIB LIB(QGPL)"
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { CommandConnection, describeMessage } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { CommandConnection, describeMessage } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

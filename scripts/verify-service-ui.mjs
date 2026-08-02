@@ -6,7 +6,7 @@
 //   3. 開始ボタンで**本当にホストへ繋がる**か（装置を掴めるか）
 //
 // 実行: node --env-file=.env scripts/verify-service-ui.mjs
-//   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
+//   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、スプールを 1 件も流さない。
 // **装置は作らない・消さない。** 設定は一時ファイルに書き、実機の profiles.json には触らない。
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@as400web/server";
+import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

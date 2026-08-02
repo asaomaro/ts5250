@@ -7,11 +7,11 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ddm -w @as400web/hostserver-check -- --tls [--library MYLIB]
+ *     npm run ddm -w @ts5250/hostserver-check -- --tls [--library MYLIB]
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { CommandConnection, DbConnection, DdmConnection, buildDdmRecord, buildRecordLayout, fetchColumnLayout, query, type ColumnLayoutInput } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { CommandConnection, DbConnection, DdmConnection, buildDdmRecord, buildRecordLayout, fetchColumnLayout, query, type ColumnLayoutInput } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

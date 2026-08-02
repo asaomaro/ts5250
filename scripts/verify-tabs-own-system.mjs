@@ -9,7 +9,7 @@
 //   5. **ヘッダーが常に見ているタブのシステムを映す**（タブを選び替えただけで変わる）
 //
 // 実行: node --env-file=.env scripts/verify-tabs-own-system.mjs
-//   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
+//   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: **SQL を 2 回投げるだけ**（`SYSIBM.SYSDUMMY1` の SELECT）。
 // 2 つのシステム設定は同じホストを指す——増える接続はプールが面倒を見る範囲で、
@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@as400web/server";
+import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

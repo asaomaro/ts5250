@@ -14,7 +14,7 @@
 //   SRQ_DEV=…      … 装置名。実機は事前定義された名前しか受け付けず QPADEV000x のみ自動作成が通る。
 //                    切断されたジョブが残るので、同じ名前を続けて使うと「対話式ジョブの回復」画面が出る
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 import { parseRecord } from "../packages/tn5250/dist/protocol/gds.js";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 

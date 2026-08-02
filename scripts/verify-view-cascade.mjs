@@ -14,7 +14,7 @@
 // 巻き戻したので、**地色が元のままか**を 1 で見ている。
 //
 // 実行: node --env-file=.env scripts/verify-view-cascade.mjs
-//   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
+//   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 実機へ表示セッションを 1 本張って画面を読むだけ。装置名は指定せずホストに採らせる。
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@as400web/server";
+import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { buildSaveScreenResponse } from "../src/protocol/save-screen.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { OPCODE, COMMAND, ESC } from "../src/protocol/constants.js";
 
 /**

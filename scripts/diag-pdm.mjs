@@ -1,6 +1,6 @@
 // PDM「Work with Members Using PDM」画面のフィールド／属性を採取し、下線が長く出る原因を調べる。
 // 実行: node --env-file=.env scripts/diag-pdm.mjs
-import { Session5250, TcpTransport } from "@as400web/tn5250";
+import { Session5250, TcpTransport } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const user = process.env.PUB400_USER;

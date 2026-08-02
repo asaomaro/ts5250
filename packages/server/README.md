@@ -1,6 +1,6 @@
-# @as400web/server
+# @ts5250/server
 
-`@as400web/tn5250` の 5250 セッションを **MCP サーバー**（stdio + Streamable HTTP）と
+`@ts5250/tn5250` の 5250 セッションを **MCP サーバー**（stdio + Streamable HTTP）と
 **Web API**（REST。WebSocket は subtask 03）として公開する。
 
 ## 起動
@@ -84,5 +84,5 @@ CCSID 上書き・プリンター出力）の 2 配列を持つ。`session.syste
 
 ## 検証
 
-- ユニット: `npm test -w @as400web/server`
+- ユニット: `npm test -w @ts5250/server`
 - 実機 E2E（MCP クライアント → PUB400）: `node --env-file=.env scripts/verify-mcp.mjs`

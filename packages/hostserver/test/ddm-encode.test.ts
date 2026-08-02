@@ -7,7 +7,7 @@ import {
   toDigits
 } from "../src/ddm/encode.js";
 import { buildRecordLayout } from "../src/ddm/record-layout.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 const enc = (t: string) => codecForCcsid(37).encode(t);
 const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join(" ");

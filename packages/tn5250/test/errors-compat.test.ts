@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { As400Error, Tn5250Error } from "../src/index.js";
-import { As400Error as BaseAs400Error } from "@as400web/base";
-import { SqlError } from "@as400web/hostserver";
+import { As400Error as BaseAs400Error } from "@ts5250/base";
+import { SqlError } from "@ts5250/hostserver";
 
 /**
  * 例外の改名（`Tn5250Error` → `As400Error`）の後方互換。
@@ -13,8 +13,8 @@ import { SqlError } from "@as400web/hostserver";
  * **旧名が外に出なくなって server 全体が型エラーになった**。人手の注意ではなく型で守る。
  *
  * **パッケージ分割後は、もう 1 つの役目を兼ねる**（`20260801-library-extraction-hostserver`）。
- * `As400Error` の定義は `@as400web/base` に 1 つだけ在り、`@as400web/tn5250` はそれを再輸出し、
- * `@as400web/hostserver` の `SqlError` はそれを継承している——という**3 パッケージに跨る同一性**を
+ * `As400Error` の定義は `@ts5250/base` に 1 つだけ在り、`@ts5250/tn5250` はそれを再輸出し、
+ * `@ts5250/hostserver` の `SqlError` はそれを継承している——という**3 パッケージに跨る同一性**を
  * ここで検査する。クラスが複製されると `instanceof` は静かに false になり、
  * `catch (e) { if (e instanceof As400Error) … }` と書いた利用側が黙って壊れる。
  * 型検査では捕まらない（構造的に同じ形なので）ので、実行時に固定するしかない。
@@ -54,12 +54,12 @@ describe("As400Error / Tn5250Error", () => {
     expect(e.code).toBe("SQL_ERROR");
   });
 
-  it("`@as400web/tn5250` が出す As400Error は `@as400web/base` の実体そのもの", () => {
+  it("`@ts5250/tn5250` が出す As400Error は `@ts5250/base` の実体そのもの", () => {
     // core が再輸出ではなく自前の複製を持ってしまうと、ここが別クラスになる
     expect(As400Error).toBe(BaseAs400Error);
   });
 
-  it("`@as400web/hostserver` の例外が `@as400web/base` の instanceof を通る", () => {
+  it("`@ts5250/hostserver` の例外が `@ts5250/base` の instanceof を通る", () => {
     // パッケージ境界を跨いだ instanceof。クラスが複製されると静かに false になる箇所
     const e = new SqlError(-204, "42704", "no table");
     expect(e).toBeInstanceOf(BaseAs400Error);

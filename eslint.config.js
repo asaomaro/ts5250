@@ -40,7 +40,7 @@ export default tseslint.config(
     // 限っては禁止をここでしか担保できない（core・hostserver も transport/ のため同様）。
     // base と scs は `types: []` なので型検査でも弾かれるが、二重に掛けておく。
     //
-    // かつて除外していた `packages/core/src/log.ts` は **`@as400web/base` へ移り、除外も要らなくなった**
+    // かつて除外していた `packages/core/src/log.ts` は **`@ts5250/base` へ移り、除外も要らなくなった**
     // ——pino を直接 import していた頃の名残で、`setLogSink` の注入式にした今は Node API を使わない。
     files: [
       "packages/base/src/**",

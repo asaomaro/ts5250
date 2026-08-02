@@ -3,7 +3,7 @@ import { mount } from "@vue/test-utils";
 import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import { MSG_NO_ROOM } from "../src/composables/opMessages.js";
 
 function cell(char: string, extra: Partial<Cell> = {}): Cell {

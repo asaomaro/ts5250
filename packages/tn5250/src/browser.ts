@@ -1,16 +1,16 @@
 /**
  * ブラウザから安全に import できる純粋な部品だけを集めた入口。
  *
- * **root（`@as400web/tn5250`）は使えない**——`transport/`（`node:net` / `node:tls`）を巻き込むため、
+ * **root（`@ts5250/tn5250`）は使えない**——`transport/`（`node:net` / `node:tls`）を巻き込むため、
  * バンドラが node 組み込みを externalize し、実行時に落ちる（AGENTS.md「コメントの残し方」の例）。
  * ※ かつては `log.js` の pino も理由の 1 つだったが、pino は `20260719-core-debt-payoff` で
  *   server 側へ移した（core は `setLogSink` で注入・既定 no-op）。
  *
  * ここに置いてよいのは **`node:*` にも I/O にも触れないもの**に限る。
- * サイズも見ること——`@as400web/ebcdic` の変換表のように、純粋でも重いものはある
+ * サイズも見ること——`@ts5250/ebcdic` の変換表のように、純粋でも重いものはある
  * （だから `katakanaChar` は `katakana` サブパスから取っている。下記）。
  *
- * **`@as400web/hostserver` の型をここへ戻さないこと。** かつて `IfsEntry` などを
+ * **`@ts5250/hostserver` の型をここへ戻さないこと。** かつて `IfsEntry` などを
  * `export type` で中継していたが、その 1 点のために `packages/tn5250` が
  * `node:net` を含むパッケージを `dependencies` に持つことになっていた。
  * いまは **web-ui が hostserver を `devDependencies` に持って直接 `import type` する**
@@ -22,7 +22,7 @@ export {
   assertIdentifier,
   isValidIdentifier,
   IDENTIFIER_PATTERN
-} from "@as400web/base";
+} from "@ts5250/base";
 /**
  * 埋め込み属性センチネル（SEU の色付き入力欄）。UI がオーバーレイの色分けと、入力欄の
  * 表示（センチネル→空白）に使う。属性バイト→色の解決に decodeAttribute も共有する。

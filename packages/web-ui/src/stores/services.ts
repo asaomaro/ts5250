@@ -15,7 +15,7 @@
  * 「見に行くために繋ぐ」ことをしない、というのがこのペインの要点。
  */
 import { reactive } from "vue";
-import type { PrinterRow, WatchRow, WsServerMessage } from "@as400web/server";
+import type { PrinterRow, WatchRow, WsServerMessage } from "@ts5250/server";
 import { WsClient, wsUrl } from "../ws-client.js";
 
 const state = reactive({

@@ -6,7 +6,7 @@ import {
   DEFAULT_PORT,
   PORT_MAPPER_PORT
 } from "../src/port-mapper.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** 実機の 449 に依存しないよう、偽ポートマッパーを立てて mapperPort で差し向ける */
 let server: Server | undefined;

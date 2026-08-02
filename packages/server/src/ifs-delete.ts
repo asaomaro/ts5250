@@ -11,7 +11,7 @@
  * 共有しているのは「ページングの罠」の扱いだけ——`entries` が空でも続きがあることがあり、
  * `canContinue` を見ずに続けると `/QSYS.LIB` で無限ループする（core の decisions D1・D6）。
  */
-import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
+import type { IfsEntry, IfsListResult } from "@ts5250/hostserver";
 
 /** 列挙に必要な操作だけを表す口（偽のリーダーでテストするため） */
 export interface IfsDeleteReader {

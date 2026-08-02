@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { formatFrame, traceFrame } from "../src/frame-trace.js";
 import { buildRequest, CP, HEADER_LEN } from "../src/datastream.js";
-import type { CoreLogger } from "@as400web/base";
+import type { CoreLogger } from "@ts5250/base";
 
 /**
  * フレームトレース。

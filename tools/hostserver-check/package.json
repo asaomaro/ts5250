@@ -1,5 +1,5 @@
 {
-  "name": "@as400web/hostserver-check",
+  "name": "@ts5250/hostserver-check",
   "private": true,
   "version": "0.1.0",
   "license": "Apache-2.0",
@@ -19,10 +19,10 @@
     "dtaq": "tsc -b && node dist/dtaq.js"
   },
   "dependencies": {
-    "@as400web/base": "0.1.0",
-    "@as400web/tn5250": "*",
-    "@as400web/ebcdic": "0.1.0",
-    "@as400web/hostserver": "0.1.0",
-    "@as400web/server": "*"
+    "@ts5250/base": "0.1.0",
+    "@ts5250/tn5250": "*",
+    "@ts5250/ebcdic": "0.1.0",
+    "@ts5250/hostserver": "0.1.0",
+    "@ts5250/server": "*"
   }
 }

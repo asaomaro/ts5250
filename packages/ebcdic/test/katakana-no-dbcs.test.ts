@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * `@as400web/ebcdic/katakana` から **DBCS 変換表へ到達しない**ことの検査。
+ * `@ts5250/ebcdic/katakana` から **DBCS 変換表へ到達しない**ことの検査。
  *
  * `katakanaChar` は CCSID 930 の SBCS 部 256 要素しか読まないが、
  * 元は `codec.ts` に同居しており、そのせいで web-ui の本番バンドルに
@@ -43,7 +43,7 @@ function reachableFrom(entry: string): Map<string, number> {
   return seen;
 }
 
-describe("@as400web/ebcdic/katakana は DBCS 表を引き込まない", () => {
+describe("@ts5250/ebcdic/katakana は DBCS 表を引き込まない", () => {
   const reached = reachableFrom("katakana.ts");
   const rel = (f: string): string => f.slice(srcDir.length + 1);
   const files = [...reached.keys()].map(rel).sort();

@@ -5,7 +5,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ifs-ccsid -w @as400web/hostserver-check -- --dir /home/USER
+ *     npm run ifs-ccsid -w @ts5250/hostserver-check -- --dir /home/USER
  *   （`--roundtrip` を付けると EBCDIC ファイルを作って復号・往復まで確かめ、最後に消す）
  *
  * 見るところ:
@@ -17,9 +17,9 @@
  * research のスパイクを、繰り返し使える形にしたもの（research F2〜F6）。
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { canDecodeCcsid, decodeCcsidText, encodeCcsidText } from "@as400web/ebcdic";
-import { IfsConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { canDecodeCcsid, decodeCcsidText, encodeCcsidText } from "@ts5250/ebcdic";
+import { IfsConnection } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

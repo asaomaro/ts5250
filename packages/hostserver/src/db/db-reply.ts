@@ -4,8 +4,8 @@
  * 参照: JTOpen(jtopenlite) の DatabaseConnection.parseReply の
  *       CP 0x3812 / 0x380E / 0x3807 の処理に対応する。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { toColumnMeta, isBinaryCcsid, type ColumnMeta } from "./db-decode.js";
 
 /**

@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager, type PrinterEntry } from "../src/session-manager.js";
-import type { Transport } from "@as400web/tn5250";
+import type { Transport } from "@ts5250/tn5250";
 
 class FakeTransport implements Transport {
   private dataFn: ((d: Uint8Array) => void) | undefined;

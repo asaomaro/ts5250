@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
+import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
  * **自動送りは「カーソルが欄の末尾まで進んだとき」だけ。**

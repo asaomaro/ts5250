@@ -3,7 +3,7 @@
 // 注意: サインオンは行わない（資格情報不要・送信データに秘匿情報は含まれない）ため maskTx: false。
 import { writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { TcpTransport, TelnetLayer, TraceRecorder, bytesToHex } from "@as400web/tn5250";
+import { TcpTransport, TelnetLayer, TraceRecorder, bytesToHex } from "@ts5250/tn5250";
 
 const host = process.env.PUB400_HOST ?? "pub400.com";
 const port = Number(process.env.PUB400_PORT ?? 23);

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { decodeValue, decodeRow, toColumnMeta, type ColumnMeta } from "../src/db/db-decode.js";
 import { DB2 } from "../src/db/db-types.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 実機テスト表 MYLIB.SQLTYPES の型を、固定バイト列で再現して検証する。

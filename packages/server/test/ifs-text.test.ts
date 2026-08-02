@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { decodeIfsText, encodeIfsText } from "../src/ifs-text.js";
-import { encodeCcsidText } from "@as400web/ebcdic";
+import { encodeCcsidText } from "@ts5250/ebcdic";
 
 /**
  * 決定表（①手動 → ②BOM → ③UTF-8 → ④タグ）。

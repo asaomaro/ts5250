@@ -6,12 +6,12 @@
  *
  * ここは応答をそのまま返し、解釈はしない（解釈は composable の仕事）。
  */
-// **IFS の型は実体（`@as400web/hostserver`）から取る。** core を経由すると、その 1 点のために
+// **IFS の型は実体（`@ts5250/hostserver`）から取る。** core を経由すると、その 1 点のために
 // `packages/tn5250` が `node:net` を含むパッケージを `dependencies` に持つことになる
 // （`20260801-library-extraction-cleanup`）。hostserver は web-ui の `devDependencies` で、
 // **`import type` なので実行時にもバンドルにも入らない**。
-import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
-import type { LineEnding } from "@as400web/ebcdic/catalog";
+import type { IfsEntry, IfsListResult } from "@ts5250/hostserver";
+import type { LineEnding } from "@ts5250/ebcdic/catalog";
 
 /** サーバーが返すエラー本文 */
 export interface IfsError {

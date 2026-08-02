@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { workspaceStore } from "../src/stores/workspace.js";
 import { logStore, maskOutgoing } from "../src/stores/log.js";
-import type { PublicSession, PublicSystem } from "@as400web/server";
+import type { PublicSession, PublicSystem } from "@ts5250/server";
 import { systemsStore } from "../src/stores/systems.js";
 
 describe("workspaceStore 分割ツリー", () => {

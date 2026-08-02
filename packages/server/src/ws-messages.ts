@@ -1,4 +1,4 @@
-import type { ScreenSnapshot } from "@as400web/tn5250";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
 import type { PcCommandEvent } from "./session-manager.js";
 import type { SessionJob } from "./session-manager.js";
 import type { MacroSecretRef } from "./macro-types.js";

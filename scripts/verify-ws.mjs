@@ -10,7 +10,7 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const log = (s) => process.stderr.write(s + "\n");

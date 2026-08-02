@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { PublicMacro } from "@as400web/server";
+import type { PublicMacro } from "@ts5250/server";
 import { macrosStore } from "../src/stores/macros.js";
 
 /**

@@ -14,7 +14,7 @@ import {
   findCodePoint,
   padEbcdic
 } from "../src/spool/netprint-datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 実機で判明した規則を固定する。いずれも推測で組んで失敗した箇所:

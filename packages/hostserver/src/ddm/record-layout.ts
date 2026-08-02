@@ -9,7 +9,7 @@
  * 前提にしている。実機で書いて **SQL で読み返して**検証すること（別経路の確認）。
  * 前提が崩れる型（可変長・日付時刻・DBCS）は**受け付けずに失敗させる**。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** SQL から得られる 1 列の情報（必要な分だけ） */
 export interface ColumnLayoutInput {

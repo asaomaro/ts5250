@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
-import type { PublicMacro } from "@as400web/server";
+import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
+import type { PublicMacro } from "@ts5250/server";
 import type { WsClient } from "../src/ws-client.js";
 import StatusBar from "../src/components/StatusBar.vue";
 import MacroMenu from "../src/components/MacroMenu.vue";

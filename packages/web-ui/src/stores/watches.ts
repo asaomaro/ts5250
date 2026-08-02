@@ -16,7 +16,7 @@
  * セッション用の WS には乗れない。`watch-*` は `open` を要さないので 1 本だけ張る。
  */
 import { reactive } from "vue";
-import type { WatchView, WatchEntryView, WsServerMessage } from "@as400web/server";
+import type { WatchView, WatchEntryView, WsServerMessage } from "@ts5250/server";
 import { WsClient, wsUrl } from "../ws-client.js";
 
 /** 履歴の保持件数（画面側）。サーバー側の上限（200）と同じにして食い違いを作らない */

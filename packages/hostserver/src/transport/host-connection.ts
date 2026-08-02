@@ -7,7 +7,7 @@
  */
 import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
-import { As400Error, withSocketHint } from "@as400web/base";
+import { As400Error, withSocketHint } from "@ts5250/base";
 
 export interface HostTlsOptions {
   rejectUnauthorized?: boolean;

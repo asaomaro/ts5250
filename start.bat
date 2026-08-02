@@ -46,7 +46,7 @@ rem Install dependencies (when missing, or when the lockfile is newer than node_
 rem
 rem Checking only for node_modules is not enough: pulling a revision that adds a workspace
 rem leaves the old node_modules in place without a link for the new package, and the build
-rem then fails with "Cannot find module '@as400web/...'" (this actually happened when
+rem then fails with "Cannot find module '@ts5250/...'" (this actually happened when
 rem packages/ebcdic and packages/scs were added). npm rewrites node_modules/.package-lock.json
 rem on every install, so a newer package-lock.json means the tree is stale.
 rem PowerShell is used only for the timestamp comparison (present on every supported Windows).
@@ -71,7 +71,7 @@ if "%NEED_BUILD%"=="1" (
   echo ==^> build ^(core / server^)
   call npm run build
   echo ==^> build ^(web-ui / Vite^)
-  call npm run build -w @as400web/web-ui
+  call npm run build -w @ts5250/web-ui
 )
 
 rem Auto-detect connection profiles (when not specified)

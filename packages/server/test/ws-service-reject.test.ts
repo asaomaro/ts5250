@@ -4,7 +4,7 @@ import type { SessionManager, PrinterEntry } from "../src/session-manager.js";
 import type { ConfigResolver } from "../src/config-resolver.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
 import type { AuthUser } from "../src/auth.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * **拒否は利用者に返す**（`20260801-service-auth-e2e`）。

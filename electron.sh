@@ -35,7 +35,7 @@ if [ "$FORCE_BUILD" = 1 ] || [ ! -f packages/server/dist/main.js ] || [ ! -f pac
   echo "==> ビルド（core / server）"
   npm run build
   echo "==> ビルド（web-ui / Vite）"
-  npm run build -w @as400web/web-ui
+  npm run build -w @ts5250/web-ui
 fi
 
 # Electron 依存（electron/ 配下に個別インストール）

@@ -7,9 +7,9 @@
  * 参照: JTOpen 本体の NPDataStream / NPCPAttributeValue / NPCPIDSplF に対応する
  *       （jtopenlite はネットワーク印刷サーバーを実装していない）。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { HEADER_LEN } from "../datastream.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 /** ネットワーク印刷サーバーのサーバー ID */
 export const NP_SERVER_ID = 0xe003;

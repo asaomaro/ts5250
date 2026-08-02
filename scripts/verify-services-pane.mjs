@@ -7,7 +7,7 @@
 //   4. **一般ユーザーには見えるがボタンが出ない**（認証を有効にして確かめる）
 //
 // 実行: node --env-file=.env scripts/verify-services-pane.mjs
-//   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
+//   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 既存の仮想プリンター装置を借りる（既定 PRT_TEST）。スプールは流さない。
 // **装置は作らない・消さない。** 設定は一時ファイルで、実機の profiles.json に触らない。
@@ -22,7 +22,7 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

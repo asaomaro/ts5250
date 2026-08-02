@@ -22,8 +22,8 @@ import {
   ConfigResolver,
   WatchRegistry,
   makeWatchSink
-} from "@as400web/server";
-import { DtaqConnection } from "@as400web/hostserver";
+} from "@ts5250/server";
+import { DtaqConnection } from "@ts5250/hostserver";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const host = process.env.AS400_HOST;

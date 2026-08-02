@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import type { PublicSession, PublicSystem } from "@as400web/server";
+import type { PublicSession, PublicSystem } from "@ts5250/server";
 
 /**
  * **サービス一覧から帳票を読みに行けること**（`20260802-printer-report-history`）。

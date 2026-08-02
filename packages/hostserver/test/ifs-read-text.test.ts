@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { IfsConnection } from "../src/ifs/ifs-connection.js";
 import type { HostConnection } from "../src/transport/host-connection.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * `readTextFile`（内容 ＋ CCSID タグ）を偽の接続で駆動する。

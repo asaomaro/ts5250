@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { z } from "zod";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { requireAdmin, type AuthContext, type AuthVars } from "./auth.js";
 import type { SessionManager } from "./session-manager.js";
 import type { AuditBuffer } from "./audit.js";

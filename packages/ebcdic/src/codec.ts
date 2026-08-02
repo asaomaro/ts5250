@@ -205,9 +205,9 @@ const DBCS_TABLES: ReadonlyMap<number, StatefulTable> = new Map([
 
 /**
  * 表示コード切替（カナ⇔英小文字）の SBCS 再解釈は **`katakana.ts` に分離済み**
- * （`@as400web/ebcdic/katakana`）。ここからの再輸出は、この入口の公開面を変えないためだけに在る。
+ * （`@ts5250/ebcdic/katakana`）。ここからの再輸出は、この入口の公開面を変えないためだけに在る。
  *
- * **ブラウザから使う側は `@as400web/ebcdic/katakana` を直接指すこと。**
+ * **ブラウザから使う側は `@ts5250/ebcdic/katakana` を直接指すこと。**
  * この `codec.js` は 5 表すべてを静的 import するので、経由すると表が丸ごと付いてくる。
  */
 export { katakanaChar, latinChar } from "./katakana.js";

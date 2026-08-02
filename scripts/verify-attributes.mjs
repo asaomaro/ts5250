@@ -4,7 +4,7 @@
 // DBCS を出すためセッションは CCSID 1399。
 // 実行: node --env-file=.env scripts/verify-attributes.mjs
 //   前提: <LIB>（既定 MYLIB）に CLRTPGM/INLPGM が存在すること（無ければ build-attrtest.mjs を先に）。
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const LIB = process.env.PUB400_LIB ?? "MYLIB";
 const log = (s) => process.stderr.write(s + "\n");

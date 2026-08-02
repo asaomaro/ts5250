@@ -14,9 +14,9 @@
  *   - 1 利用者あたり 4 つまで（超えたら**最も古いものを閉じる**）
  *   - プロセス終了時に全部閉じる
  */
-import { type As400Error } from "@as400web/base";
+import { type As400Error } from "@ts5250/base";
 import { childLog } from "./log.js";
-import { type ColumnMeta, type DbConnection, type Row } from "@as400web/hostserver";
+import { type ColumnMeta, type DbConnection, type Row } from "@ts5250/hostserver";
 import { assertOwner, type AuthUser } from "./auth.js";
 
 const log = childLog({ component: "result-set" });

@@ -1,5 +1,5 @@
 {
-  "name": "@as400web/base",
+  "name": "@ts5250/base",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "description": "Shared foundation for the IBM i packages — error vocabulary (As400Error / ErrorCode), injectable log sink, and object-name validation. No runtime dependencies.",

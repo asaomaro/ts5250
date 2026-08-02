@@ -1,4 +1,4 @@
-# as400-web-emulator
+# ts5250
 
 IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェント用）と **Web エミュレーター**（ブラウザ／デスクトップ）の
 2 つのフロントから操作できるツール群です。TN5250 プロトコルを **純 TypeScript** で実装しており、外部の 5250
@@ -216,7 +216,7 @@ electron.bat --build    :: 強制再ビルドしてから作る
   [自動サインオンのパスワード](#自動サインオンのパスワード暗号化保存)）。
 - **ポートは空いているものを自動で選びます**（3400 から探索）。開発用の `start.bat` を動かしたままでも
   ぶつかりません。二重起動は防止され、2 つ目は既存のウィンドウを前面に出して終わります。
-- **起動の記録は `%APPDATA%\AS400 5250 Emulator\startup.log`** に残ります。
+- **起動の記録は `%APPDATA%\ts5250\startup.log`** に残ります。
   ウィンドウはサーバーより先に開き、失敗したら理由をウィンドウに出します
   （GUI アプリでは stderr を読む人がいないため）。
 - **Windows 用 exe は Windows 上で作ります。** NSIS を使うため、Linux から作るには wine が要ります。
@@ -402,7 +402,7 @@ electron.bat --build    :: 強制再ビルドしてから作る
 
 ```sh
 npm run build
-npm run build -w @as400web/web-ui                # Web UI を配信する場合のみ
+npm run build -w @ts5250/web-ui                # Web UI を配信する場合のみ
 
 # stdio（MCP クライアントから起動される想定）
 node packages/server/dist/main.js --stdio --profiles profiles.local.json
@@ -419,7 +419,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
     "as400-5250": {
       "command": "node",
       "args": [
-        "/absolute/path/to/as400-web-emulator/packages/server/dist/main.js",
+        "/absolute/path/to/ts5250/packages/server/dist/main.js",
         "--stdio",
         "--profiles",
         "/absolute/path/to/profiles.local.json"
@@ -1040,7 +1040,7 @@ LOG_LEVEL=debug ./start.sh
 ```sh
 npm install
 npm run build        # tsc -b（全パッケージ）
-npm run build -w @as400web/web-ui   # Web UI（vue-tsc + vite）
+npm run build -w @ts5250/web-ui   # Web UI（vue-tsc + vite）
 npm test             # vitest（全パッケージ）
 npm run lint         # eslint
 npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新時のみ）
@@ -1052,7 +1052,7 @@ npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新�
 - **web-ui のテストはパッケージ dir から実行する**（`cd packages/web-ui && npx vitest run`）。
   ルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、実際とは違う失敗が出ます。
 - **ビルドに `vue-tsc` を含める**: `vite build` はテンプレートの型チェックをしないので、
-  `npm run build -w @as400web/web-ui`（`vue-tsc -b && vite build`）を必ず通します。
+  `npm run build -w @ts5250/web-ui`（`vue-tsc -b && vite build`）を必ず通します。
 - **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint 禁止。
   アプリ（server）は自前の pino、ライブラリ（core / ebcdic / scs）は既定 no-op の sink
   （`setLogSink` で注入）を使う——ライブラリ利用者にロガーを強制しないため。

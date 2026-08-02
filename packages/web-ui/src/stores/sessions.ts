@@ -1,6 +1,6 @@
 import { reactive, markRaw } from "vue";
-import type { ScreenSnapshot } from "@as400web/tn5250";
-import type { ServiceState } from "@as400web/server";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
+import type { ServiceState } from "@ts5250/server";
 import type { WsClient } from "../ws-client.js";
 
 /** プリンターセッションが受信した 1 スプール（等幅ページ列） */

@@ -10,7 +10,7 @@ import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { parseRef } from "../src/config-types.js";
 import { SecretCrypto } from "../src/secret-crypto.js";
 import type { AuthUser } from "../src/auth.js";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import type { WsServerMessage } from "../src/ws-messages.js";
 
 const here = dirname(fileURLToPath(import.meta.url));

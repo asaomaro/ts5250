@@ -35,8 +35,8 @@
  * 参照: jtopenlite の `DatabaseConnection.retrieveLOBData` /
  * `sendRetrieveLOBDataRequest` に対応する（事実に基づく書き起こし）。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
 import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
 import { isTwoByteCcsid } from "./db-decode.js";

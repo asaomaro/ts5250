@@ -16,11 +16,11 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import { As400Error, assertIdentifier } from "@as400web/base";
+import { As400Error, assertIdentifier } from "@ts5250/base";
 import { childLog } from "./log.js";
-import { InsertEncodeError, fetchColumnLayout, insertRows, prepareUpload, type UploadRejection } from "@as400web/hostserver";
-import { type ConnectOptions } from "@as400web/tn5250";
-import { parseCsv } from "@as400web/base";
+import { InsertEncodeError, fetchColumnLayout, insertRows, prepareUpload, type UploadRejection } from "@ts5250/hostserver";
+import { type ConnectOptions } from "@ts5250/tn5250";
+import { parseCsv } from "@ts5250/base";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb } from "./host-connect.js";

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { As400Error, setLogSink, resetLogSink } from "@as400web/base";
+import { As400Error, setLogSink, resetLogSink } from "@ts5250/base";
 import { fillLobs } from "../src/db/query.js";
 import type { DbConnection } from "../src/db/db-connection.js";
 import type { DbValue, LobPlaceholder } from "../src/db/db-decode.js";

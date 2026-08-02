@@ -1,11 +1,11 @@
 // 実ブラウザで SEU の埋め込み色属性を検証する E2E。
 // build 済み web-ui を server で配信し、実 5250 セッションで MYLIB/QTESTSRC を SEU 編集し、
 // 入力欄の色付きオーバーレイ（赤/緑）が実際に描画されることを getComputedStyle で確かめる。
-// 前提: npm run build -w @as400web/web-ui 済み。MYLIB/QTESTSRC(COLORTEST) に埋め込み属性行あり。
+// 前提: npm run build -w @ts5250/web-ui 済み。MYLIB/QTESTSRC(COLORTEST) に埋め込み属性行あり。
 // 実行: node --env-file=.env scripts/verify-browser-seu-color.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
-import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@as400web/server";
+import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";

@@ -24,7 +24,7 @@ import {
   fileErrorText,
   fileFailure
 } from "../src/ifs/ifs-datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * テンプレート長と項目位置は実機で確かめたもの。

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SpoolReport } from "@as400web/tn5250";
+import type { SpoolReport } from "@ts5250/tn5250";
 import { handleReport } from "../src/printer-output.js";
 
 const report: SpoolReport = {

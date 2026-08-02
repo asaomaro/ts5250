@@ -10,7 +10,7 @@ import {
   SERVER_ID,
   HEADER_LEN
 } from "../src/datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * ホストサーバーのデータストリームは 20 バイトヘッダー＋LL/CP。

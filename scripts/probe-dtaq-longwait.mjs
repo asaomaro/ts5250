@@ -13,7 +13,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/probe-dtaq-longwait.mjs [--minutes 45] [--keepalive]
 import { readFileSync } from "node:fs";
-import { DtaqConnection } from "@as400web/tn5250";
+import { DtaqConnection } from "@ts5250/tn5250";
 
 const out = (s) => process.stdout.write(s + "\n");
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));

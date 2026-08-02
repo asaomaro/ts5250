@@ -1,7 +1,7 @@
 /**
  * サーバーのロガー（spec D9: ログは stderr のみ。stdout は stdio MCP 専用）。
  *
- * **core ではなくここで pino を持つ。** 以前は `@as400web/tn5250` の `childLog` に
+ * **core ではなくここで pino を持つ。** 以前は `@ts5250/tn5250` の `childLog` に
  * 相乗りしていたが、core をライブラリとして切り出すにあたり core からロガー実装を外した。
  *
  * サーバー側が core の注入に依存し続けると、`setLogSink` の呼び忘れで

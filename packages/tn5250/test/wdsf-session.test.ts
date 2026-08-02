@@ -9,7 +9,7 @@ import { buildRecord } from "../src/protocol/gds.js";
 import { ByteWriter } from "../src/protocol/bytes.js";
 import { ESC, COMMAND, ORDER, OPCODE } from "../src/protocol/constants.js";
 import { WDSF_TYPE } from "../src/protocol/wdsf-parser.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { IAC, CMD } from "../src/telnet/constants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));

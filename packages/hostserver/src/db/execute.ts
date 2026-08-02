@@ -21,9 +21,9 @@
  * コミットメント制御は使っていない。**成功と確認できたときだけ成功として扱う**
  * ——SQLCA が読めない応答は失敗とする（`insert.ts` と同じ安全側の判断）。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
 import type { DbConnection, DbReply } from "./db-connection.js";

@@ -7,8 +7,8 @@ import {
 } from "../src/spool/spool-list.js";
 import type { CommandConnection } from "../src/command/command-connection.js";
 import { statusName, cyymmddToIso, hhmmssToReadable } from "../src/spool/spool-types.js";
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 /**
  * フィルタの配置は実機で確かめたもの。**オフセット表ではなく、件数と配列が交互**。

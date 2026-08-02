@@ -6,7 +6,7 @@
 //
 // 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node scripts/verify-seu-attr.mjs
 // パスワードは環境変数からのみ受け取る（引数はプロセス一覧に見えるため）。
-import { Session5250, TcpTransport } from "@as400web/tn5250";
+import { Session5250, TcpTransport } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const host = process.env.AS400_HOST;

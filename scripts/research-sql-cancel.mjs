@@ -17,7 +17,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/research-sql-cancel.mjs
 import { readFileSync } from "node:fs";
-import { DbConnection, openQuery, query, executeStatement } from "@as400web/tn5250";
+import { DbConnection, openQuery, query, executeStatement } from "@ts5250/tn5250";
 
 const out = (s) => process.stdout.write(s + "\n");
 // **QTEMP を使う**（必ず存在し、接続ごとに消えるので後片付けが要らない）

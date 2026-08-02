@@ -1,6 +1,6 @@
-import type { SpoolReportMsg, WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
+import type { SpoolReportMsg, WsKeyField, WsOpen, WsServerMessage } from "@ts5250/server";
 import { viewSettings } from "./stores/viewSettings.js";
-import type { AidKey } from "@as400web/tn5250";
+import type { AidKey } from "@ts5250/tn5250";
 import { WsClient, wsUrl } from "./ws-client.js";
 import {
   MSG_NO_RESPONSE,

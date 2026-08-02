@@ -11,7 +11,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/research-sysval.mjs
 import { readFileSync } from "node:fs";
-import { DbConnection, query } from "@as400web/tn5250";
+import { DbConnection, query } from "@ts5250/tn5250";
 
 const log = (s) => process.stdout.write(s + "\n");
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));

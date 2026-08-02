@@ -5,7 +5,7 @@
 // ソース投入は IFS/FTP 不要。RUNSQL で QTMPSRC に 1 行ずつ入れて CPYF で移す。
 // 資格情報は環境変数からのみ受け取る（引数はプロセス一覧に見える）。
 //   AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node scripts/build-gridtest3.mjs
-import { CommandConnection } from "@as400web/tn5250";
+import { CommandConnection } from "@ts5250/tn5250";
 
 const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const log = (s) => process.stdout.write(s + "\n");

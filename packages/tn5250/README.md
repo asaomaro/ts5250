@@ -1,4 +1,4 @@
-# @as400web/tn5250
+# @ts5250/tn5250
 
 TN5250 プロトコルの純 TypeScript 実装。telnet ネゴシエーション（RFC 1205 / RFC 4777）、
 5250 データストリーム解釈（SC30-3533-04）、画面モデル、EBCDIC⇔Unicode 変換、
@@ -17,7 +17,7 @@ DBCS は SO/SI をまたぐ EBCDIC_STATEFUL 変換で、SO/SI 桁・DBCS 2 桁�
 ## 使い方
 
 ```ts
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const session = await Session5250.connect({
   host: "pub400.com",

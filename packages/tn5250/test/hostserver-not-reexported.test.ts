@@ -3,13 +3,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as core from "../src/index.js";
-import * as hostserver from "@as400web/hostserver";
+import * as hostserver from "@ts5250/hostserver";
 
 /**
- * **`@as400web/tn5250` はホストサーバーを実行時に引かない。**
+ * **`@ts5250/tn5250` はホストサーバーを実行時に引かない。**
  *
  * 経緯: `20260801-library-extraction-hostserver`（PR #233）でホストサーバー層を
- * `@as400web/hostserver` へ切り出したとき、利用側を壊さないために core の `index.ts` に
+ * `@ts5250/hostserver` へ切り出したとき、利用側を壊さないために core の `index.ts` に
  * 再輸出を残した。その結果 **`core → hostserver` の実行時依存が残り**、
  * 「TN5250 だけ欲しい」利用者はホストサーバー一式を引き取り続けていた。
  * `20260801-library-extraction-drop-core-reexport` で利用側を直参照へ移し、再輸出を撤去した。
@@ -80,7 +80,7 @@ describe("core はホストサーバーを再輸出しない", () => {
     const offenders: string[] = [];
     for (const f of collect(srcDir)) {
       const src = readFileSync(f, "utf8");
-      for (const m of src.matchAll(/^.*@as400web\/hostserver.*$/gm)) {
+      for (const m of src.matchAll(/^.*@ts5250\/hostserver.*$/gm)) {
         const line = m[0];
         if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue; // コメントは対象外
         offenders.push(`${relative(srcDir, f)}: ${line.trim()}`);
@@ -96,8 +96,8 @@ describe("core はホストサーバーを再輸出しない", () => {
       dependencies: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
-    expect(Object.keys(pkg.dependencies)).not.toContain("@as400web/hostserver");
-    expect(Object.keys(pkg.devDependencies ?? {})).not.toContain("@as400web/hostserver");
+    expect(Object.keys(pkg.dependencies)).not.toContain("@ts5250/hostserver");
+    expect(Object.keys(pkg.devDependencies ?? {})).not.toContain("@ts5250/hostserver");
 
     const tsconfig = readFileSync(join(here, "..", "tsconfig.json"), "utf8");
     expect(tsconfig).not.toContain("hostserver");
@@ -109,18 +109,18 @@ describe("core はホストサーバーを再輸出しない", () => {
     const wu = JSON.parse(
       readFileSync(join(here, "..", "..", "web-ui", "package.json"), "utf8")
     ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
-    expect(Object.keys(wu.devDependencies)).toContain("@as400web/hostserver");
-    expect(Object.keys(wu.dependencies)).not.toContain("@as400web/hostserver");
+    expect(Object.keys(wu.devDependencies)).toContain("@ts5250/hostserver");
+    expect(Object.keys(wu.dependencies)).not.toContain("@ts5250/hostserver");
   });
 
   it("dist/index.js に hostserver への実行時 import が無い", () => {
     // **ソースの `export type` は目視で値と区別しにくい。** 実行時に何が残るかは
     // 成果物を見るのが唯一確実（撤去前は 33 箇所あった）
-    expect(readDist("index.js")).not.toContain("@as400web/hostserver");
+    expect(readDist("index.js")).not.toContain("@ts5250/hostserver");
   });
 
   it("dist/browser.js にも hostserver への実行時 import が無い", () => {
     // `export type` が値に化けるとここに現れる（web-ui のバンドルに node:net が入る）
-    expect(readDist("browser.js")).not.toContain("@as400web/hostserver");
+    expect(readDist("browser.js")).not.toContain("@ts5250/hostserver");
   });
 });

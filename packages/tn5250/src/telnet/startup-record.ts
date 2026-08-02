@@ -18,7 +18,7 @@
  * d8 d7 c1 c4 c5 e5 f0 f0 f1 d7                    ← "QPADEV001P"
  * ```
  */
-import type { Codec } from "@as400web/ebcdic";
+import type { Codec } from "@ts5250/ebcdic";
 
 export interface StartupResponse {
   /** 例 "I902"（成功）/ "8902"（装置が使用中）。意味は `startupCodeMeaning` */

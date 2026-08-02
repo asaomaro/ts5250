@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import {
   ORPHAN_IDLE_TIMEOUT_MS,
   SessionManager,

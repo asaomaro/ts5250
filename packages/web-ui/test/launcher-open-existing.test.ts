@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import type { PublicSession, PublicSystem } from "@as400web/server";
+import type { PublicSession, PublicSystem } from "@ts5250/server";
 import LauncherPane from "../src/components/LauncherPane.vue";
 import ConfigCard from "../src/components/ConfigCard.vue";
 import { systemsStore } from "../src/stores/systems.js";

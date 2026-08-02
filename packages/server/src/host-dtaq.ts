@@ -11,10 +11,10 @@
  */
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import type { DtaqConnection, DtaqSearchOrder } from "@as400web/hostserver";
-import { As400Error } from "@as400web/base";
-import { dtaqDecodeEbcdic } from "@as400web/hostserver";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import type { DtaqConnection, DtaqSearchOrder } from "@ts5250/hostserver";
+import { As400Error } from "@ts5250/base";
+import { dtaqDecodeEbcdic } from "@ts5250/hostserver";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDtaq } from "./host-connect.js";

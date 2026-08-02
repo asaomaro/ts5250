@@ -5,7 +5,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ifs-list -w @as400web/hostserver-check -- --tls --path /home/USER/ifsdemo
+ *     npm run ifs-list -w @ts5250/hostserver-check -- --tls --path /home/USER/ifsdemo
  *
  * `--raw` を付けると受信フレームの hex ダンプも出す。
  * **応答レイアウトを実機で確かめ直すときはこれを使う**——過去に READ 応答で
@@ -13,8 +13,8 @@
  * 配置を変えるときは必ず実機のバイトを目で見ること。
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { IfsConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { IfsConnection } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

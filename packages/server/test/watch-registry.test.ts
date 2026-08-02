@@ -11,8 +11,8 @@
  * 5. 所有者以外には見せない・止めさせない
  */
 import { describe, it, expect, vi } from "vitest";
-import { As400Error } from "@as400web/base";
-import { type DtaqConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { type DtaqConnection } from "@ts5250/hostserver";
 import { WatchRegistry, type WatchEvent } from "../src/watch-registry.js";
 import type { AuthUser } from "../src/auth.js";
 import type { DtaqWatchSpec } from "../src/config-types.js";

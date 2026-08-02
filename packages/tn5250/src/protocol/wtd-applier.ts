@@ -1,5 +1,5 @@
-import { As400Error } from "@as400web/base";
-import { type Codec, SO, SI } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import type { WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";

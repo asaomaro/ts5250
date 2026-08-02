@@ -23,7 +23,7 @@ import {
   PersonalConfigStore,
   ConfigResolver,
   migrateProfiles
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { queryLimited, query, openQuery } from "../src/db/query.js";
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import type { DbConnection } from "../src/db/db-connection.js";
 
 /**

@@ -4,15 +4,15 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * **使うものは在り処から取る。** `@as400web/tn5250` を「何でも入っている袋」として使わない。
+ * **使うものは在り処から取る。** `@ts5250/tn5250` を「何でも入っている袋」として使わない。
  *
- * 経緯: ホストサーバー層を `@as400web/hostserver` へ切り出したあと（PR #233）も、
- * server は後方互換の再輸出を通じて `@as400web/tn5250` から `DbConnection` や `As400Error` を
+ * 経緯: ホストサーバー層を `@ts5250/hostserver` へ切り出したあと（PR #233）も、
+ * server は後方互換の再輸出を通じて `@ts5250/tn5250` から `DbConnection` や `As400Error` を
  * 取り続けていた。`20260801-library-extraction-drop-core-reexport` で 58 ファイル・61 文を
  * 直参照へ移し、core 側の再輸出を撤去した。
  *
  * **このテストが要る理由**: 撤去した今なら間違えれば型エラーになるが、`As400Error` のように
- * **core が今も再輸出している名前**（`@as400web/base` 由来）は `@as400web/tn5250` から
+ * **core が今も再輸出している名前**（`@ts5250/base` 由来）は `@ts5250/tn5250` から
  * 取っても通ってしまう。通るが、出どころが見えなくなる。人の注意ではなく機械で塞ぐ。
  *
  * **列挙ではなく走査**にしてある——ファイル名を並べると、後から足されたファイルが素通りする。
@@ -48,20 +48,20 @@ function collect(dir: string): string[] {
   return out;
 }
 
-/** `@as400web/tn5250` から取っている名前を、実体のあるパッケージ名つきで返す */
+/** `@ts5250/tn5250` から取っている名前を、実体のあるパッケージ名つきで返す */
 function misplacedImports(dirs: readonly string[]): string[] {
   // **表を手で持たない。** 各パッケージのバレルから読む——手で書き写すと、
   // 出どころが移ったときに検査だけが古いままになる
   const owners: [string, Set<string>][] = [
-    ["@as400web/base", exportedNames("base")],
-    ["@as400web/hostserver", exportedNames("hostserver")]
+    ["@ts5250/base", exportedNames("base")],
+    ["@ts5250/hostserver", exportedNames("hostserver")]
   ];
   const bad: string[] = [];
   for (const dir of dirs) {
     for (const f of collect(join(ROOT, dir))) {
       const src = readFileSync(f, "utf8");
       for (const m of src.matchAll(
-        /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s+["']@as400web\/core["']/g
+        /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s+["']@ts5250\/core["']/g
       )) {
         for (const raw of m[1]!.split(",")) {
           const item = strip(raw).trim();
@@ -87,7 +87,7 @@ describe("import は実体のあるパッケージから取る", () => {
     expect(exportedNames("hostserver").size).toBeGreaterThan(30);
   });
 
-  it("base / hostserver のものを @as400web/tn5250 から取っている箇所が無い", () => {
+  it("base / hostserver のものを @ts5250/tn5250 から取っている箇所が無い", () => {
     expect(misplacedImports(DIRS)).toEqual([]);
   });
 
@@ -107,7 +107,7 @@ describe("import は実体のあるパッケージから取る", () => {
       const used = new Set<string>();
       for (const d of dirs)
         for (const f of collect(join(ROOT, d)))
-          for (const m of readFileSync(f, "utf8").matchAll(/from\s+["'](@as400web\/[a-z-]+)["']/g))
+          for (const m of readFileSync(f, "utf8").matchAll(/from\s+["'](@ts5250\/[a-z-]+)["']/g))
             used.add(m[1]!);
       expect([...used].filter((u) => !deps.includes(u)), `${pkgPath} の未宣言依存`).toEqual([]);
     }

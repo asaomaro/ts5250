@@ -8,7 +8,7 @@ import { parseTraceJsonl, bytesToHex, type TraceEntry } from "../src/trace/trace
 import { buildRecord, parseRecord } from "../src/protocol/gds.js";
 import { ByteWriter } from "../src/protocol/bytes.js";
 import { ESC, COMMAND, ORDER, OPCODE, AID, FFW } from "../src/protocol/constants.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { IAC, CMD } from "../src/telnet/constants.js";
 
 const here = dirname(fileURLToPath(import.meta.url));

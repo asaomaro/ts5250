@@ -21,7 +21,7 @@
  * 一覧（`GET /api/printers` / `/api/watches`）に出て画面から気づける。
  * **例外で起動を巻き添えにしない**のが要点——1 台の設定ミスで全部が止まるのは割に合わない。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";

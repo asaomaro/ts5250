@@ -12,7 +12,7 @@
  */
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
-import type { PcCommandRequest } from "@as400web/tn5250";
+import type { PcCommandRequest } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 
 const log = childLog({ component: "pc-command" });

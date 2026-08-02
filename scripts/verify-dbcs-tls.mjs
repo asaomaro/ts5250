@@ -4,7 +4,7 @@
 // リプレイ: 合成 DBCS fixture で日本語デコード・桁維持。
 // 実行: node --env-file=.env scripts/verify-dbcs-tls.mjs
 import { readFileSync } from "node:fs";
-import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
+import { Session5250, ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const creds = { user: process.env.PUB400_USER, password: process.env.PUB400_PASSWORD };

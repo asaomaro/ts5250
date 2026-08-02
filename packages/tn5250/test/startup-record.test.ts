@@ -4,7 +4,7 @@ import {
   startupCodeMeaning,
   STARTUP_SUCCESS_CODES
 } from "../src/telnet/startup-record.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 /**
  * 起動応答レコード（RFC 4777 §10）。

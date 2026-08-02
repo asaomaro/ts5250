@@ -189,10 +189,10 @@ describe("打ち切り判定（max + 1 方式）", () => {
   const entry = (n: number) => ({ fileName: `F${n}`, fileNumber: n }) as never;
 
   async function listWith(available: number, max: number) {
-    // **モック先は `@as400web/hostserver`**。`host-spools.ts` がそこから import しているので、
-    // `@as400web/tn5250` に spy を張っても被験側は別のモジュールを見ることになり、
+    // **モック先は `@ts5250/hostserver`**。`host-spools.ts` がそこから import しているので、
+    // `@ts5250/tn5250` に spy を張っても被験側は別のモジュールを見ることになり、
     // 「モックしたつもりで実物が動く」になる（core が再輸出をやめたため）。
-    const hostserver = await import("@as400web/hostserver");
+    const hostserver = await import("@ts5250/hostserver");
     const spy = vi.spyOn(hostserver, "listSpooledFiles").mockImplementation(
       // 要求された max（＝呼び出し側の max+1）までしか返さないホストを模す
       async (_c, _f, opts) =>

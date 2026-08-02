@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * **`@as400web/hostserver` から `@as400web/tn5250` へ依存しないこと。**
+ * **`@ts5250/hostserver` から `@ts5250/tn5250` へ依存しないこと。**
  *
  * このパッケージは「IBM i に SQL を投げたい／IFS を読み書きしたいが、5250 の画面
  * エミュレーションは要らない」利用者のために core から切り出したもので、逆向きの辺を
@@ -45,15 +45,15 @@ function moduleSpecifiers(source: string): string[] {
 
 const files = collectSources(srcDir);
 
-describe("@as400web/tn5250 への逆依存が無い", () => {
+describe("@ts5250/tn5250 への逆依存が無い", () => {
   it("走査対象を実際に拾えている（空振りで緑にならないこと）", () => {
     // ファイルが 0 件でも forEach は通ってしまう。走査そのものを先に固定する
     expect(files.length).toBeGreaterThan(40);
   });
 
-  it("src のどのファイルも @as400web/tn5250 を import しない", () => {
+  it("src のどのファイルも @ts5250/tn5250 を import しない", () => {
     const offenders = files.filter((f) =>
-      moduleSpecifiers(readFileSync(f, "utf8")).some((s) => s.startsWith("@as400web/tn5250"))
+      moduleSpecifiers(readFileSync(f, "utf8")).some((s) => s.startsWith("@ts5250/tn5250"))
     );
     expect(offenders.map((f) => relative(srcDir, f))).toEqual([]);
   });
@@ -75,13 +75,13 @@ describe("@as400web/tn5250 への逆依存が無い", () => {
       dependencies: Record<string, string>;
     };
     expect(Object.keys(pkg.dependencies).sort()).toEqual([
-      "@as400web/base",
-      "@as400web/ebcdic",
-      "@as400web/scs"
+      "@ts5250/base",
+      "@ts5250/ebcdic",
+      "@ts5250/scs"
     ]);
   });
 
-  it("ログは @as400web/base から取る（自前の log モジュールを持たない）", () => {
+  it("ログは @ts5250/base から取る（自前の log モジュールを持たない）", () => {
     // 複製すると `setLogSink` が効かなくなる（`core/test/log-sink-single-instance.test.ts`）。
     // 「hostserver 内に log の実体を作らない」を構造として固定しておく
     const localLogModules = files.filter((f) => /(^|\/)log(-[a-z]+)?\.ts$/.test(relative(srcDir, f)));
@@ -90,7 +90,7 @@ describe("@as400web/tn5250 への逆依存が無い", () => {
       const src = readFileSync(f, "utf8");
       if (!src.includes("childLog")) continue;
       expect(moduleSpecifiers(src), `${relative(srcDir, f)} の childLog の取得元`).toContain(
-        "@as400web/base"
+        "@ts5250/base"
       );
     }
   });

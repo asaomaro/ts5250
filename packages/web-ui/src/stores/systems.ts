@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 import { systemColorIndex } from "../composables/systemColor.js";
-import type { PublicSystem, PublicSession, Watermark, IdleTimeout, SessionType, DtaqWatchSpec } from "@as400web/server";
+import type { PublicSystem, PublicSession, Watermark, IdleTimeout, SessionType, DtaqWatchSpec } from "@ts5250/server";
 
 /**
  * システムとセッション設定（サーバー保存・単一の真実）。

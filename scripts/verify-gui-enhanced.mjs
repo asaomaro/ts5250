@@ -2,7 +2,7 @@
 //  1) enhanced=true でも既存の自動サインオン→メニュー到達が壊れないこと（非 GUI 回帰）
 //  2) メニューやサブ画面で GUI 構造体（snapshot.gui）が来るか探索（あれば疎通確認）
 // 実行: node --env-file=.env scripts/verify-gui-enhanced.mjs
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const user = process.env.PUB400_USER;
 const password = process.env.PUB400_PASSWORD;

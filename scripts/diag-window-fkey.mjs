@@ -7,7 +7,7 @@
 // CFxx を一切宣言していないので、どのファンクション・キーもホストがエラーで弾く。
 //
 //   AS400_HOST=... AS400_USER=... AS400_PASSWORD=... AS400_DEVNAME=DEV1 node scripts/diag-window-fkey.mjs
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const host = process.env.AS400_HOST;

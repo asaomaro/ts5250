@@ -7,7 +7,7 @@
  * 解放するのは「次を表示する直前」と「ペインを破棄する時」の 2 箇所だけ。
  */
 import { ref, onBeforeUnmount } from "vue";
-import type { LineEnding } from "@as400web/ebcdic/catalog";
+import type { LineEnding } from "@ts5250/ebcdic/catalog";
 import { download, readFile, IfsRequestError, type IfsSource } from "../ifsApi.js";
 
 export type PreviewKind = "text" | "pdf" | "image" | "binary";

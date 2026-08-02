@@ -1,5 +1,5 @@
 {
-  "name": "as400-5250-desktop",
+  "name": "ts5250-desktop",
   "version": "0.1.0",
   "private": true,
   "description": "AS400 5250 MCP/Web エミュレーター Electron デスクトップ版",
@@ -14,8 +14,8 @@
     "electron-builder": "^25.0.0"
   },
   "build": {
-    "appId": "com.asaomaro.as400-5250",
-    "productName": "AS400 5250 Emulator",
+    "appId": "com.asaomaro.ts5250",
+    "productName": "ts5250",
     "directories": {
       "output": "dist",
       "buildResources": "build"

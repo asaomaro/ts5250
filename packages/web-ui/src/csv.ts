@@ -7,11 +7,11 @@
  * 期待とも一致する。
  */
 
-// 型は**実体（`@as400web/hostserver`）から取る**。以前はここに同じ構造型を書き写しており、
+// 型は**実体（`@ts5250/hostserver`）から取る**。以前はここに同じ構造型を書き写しており、
 // `value?: string`（実際は `string | Uint8Array`）・`unavailable?: string`（実際は 3 値の union）と
 // **実態から食い違っていた**。食い違うと型ガードが信用できず、呼び出し側が `as` で読み直す。
-// `import type` なので実行時にもバンドルにも入らない（`@as400web/hostserver` は devDependencies）
-import type { LobPlaceholder } from "@as400web/hostserver";
+// `import type` なので実行時にもバンドルにも入らない（`@ts5250/hostserver` は devDependencies）
+import type { LobPlaceholder } from "@ts5250/hostserver";
 
 /** LOB のプレースホルダか（値ではなくロケーターしか来ていない列） */
 export function isLob(value: unknown): value is LobPlaceholder {

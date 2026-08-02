@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { As400Error } from "@as400web/base";
-import { CommandConnection, listJobs } from "@as400web/hostserver";
-import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { CommandConnection, listJobs } from "@ts5250/hostserver";
+import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
 import {
@@ -217,7 +217,7 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
 /**
  * **サーバーが受け取った帳票**（`20260802-printer-report-history`）。
  *
- * `SpoolReport`（`@as400web/tn5250`）はプロトコル層の「届いた 1 スプール」で、
+ * `SpoolReport`（`@ts5250/tn5250`）はプロトコル層の「届いた 1 スプール」で、
  * **時計を持たない**。いつ受け取ったかはサーバーの関心事なので、ここで足す。
  *
  * これが無いと、常駐中に溜まった帳票を後から開いたときに受信時刻を

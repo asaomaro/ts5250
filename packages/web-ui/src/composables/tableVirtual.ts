@@ -1,4 +1,4 @@
-import { isFullWidth } from "@as400web/base";
+import { isFullWidth } from "@ts5250/base";
 
 /**
  * **結果表を仮想化するための計算**（`20260802-sql-table-virtualize`）。

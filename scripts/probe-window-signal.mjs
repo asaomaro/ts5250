@@ -2,7 +2,7 @@
 // F1 ヘルプ前後のデータストリームを実機から採り、CLEAR の有無と書き込み範囲（SBA）を見る。
 // 実行: node --env-file=.env scripts/probe-window-signal.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -19,7 +19,7 @@ import {
   DTAQ_REPLY,
   DTAQ_RC
 } from "../src/dtaq/dtaq-datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 const view = (b: Uint8Array): DataView => new DataView(b.buffer, b.byteOffset, b.byteLength);
 

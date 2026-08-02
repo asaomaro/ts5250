@@ -18,7 +18,7 @@
  *   - **本番で `LOG_LEVEL=debug` にするときは、ログの取り扱いに注意すること**
  */
 import { CP, HEADER_LEN, PARAM_PREFIX_LEN } from "./datastream.js";
-import type { CoreLogger } from "@as400web/base";
+import type { CoreLogger } from "@ts5250/base";
 import type { RequestOptions } from "./transport/host-connection.js";
 
 /** 値をこのバイト数で切る。フレームの構造（LL/CP の並び）は保たれるので切り分けには足りる */

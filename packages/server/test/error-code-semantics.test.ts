@@ -12,14 +12,14 @@ import { readFileSync, readdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { As400Error } from "@as400web/base";
-import { ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 import { statusOf } from "../src/host-api.js";
 import { SessionManager } from "../src/session-manager.js";
 import { ServerConfigStore, PersonalConfigStore } from "../src/config-store.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { UserStore } from "../src/auth.js";
-import type { Transport } from "@as400web/tn5250";
+import type { Transport } from "@ts5250/tn5250";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const signon = () =>

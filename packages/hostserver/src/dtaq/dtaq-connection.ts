@@ -6,8 +6,8 @@
  *
  * 参照: JTOpen の `BaseDataQueueImplRemote`。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
 import { traced } from "../frame-trace.js";
 import {
   openHostConnection,

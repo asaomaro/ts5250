@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
  * **FCW で DBCS 宣言されていない欄でも SO/SI マークを出す。**

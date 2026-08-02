@@ -10,7 +10,7 @@
  * pino は使わない（この CLI に依存を増やさない）。stderr に素で出す
  * ——stdout は結果の出力に使うため汚さない。
  */
-import { setLogSink } from "@as400web/base";
+import { setLogSink } from "@ts5250/base";
 
 const enabled = (process.env["LOG_LEVEL"] ?? "info").toLowerCase() === "debug";
 

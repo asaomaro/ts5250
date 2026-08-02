@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { ScreenSnapshot, Session5250 } from "@as400web/tn5250";
+import type { ScreenSnapshot, Session5250 } from "@ts5250/tn5250";
 import { ScreenRecorder } from "../src/screen-recorder.js";
 
 /**

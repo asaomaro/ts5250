@@ -1,25 +1,25 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 // **`setLogSink` は core のバレル経由で取る**——このテストが確かめたいのは
 // 「core から差し込んだ sink が hostserver 側へ届くこと」なので、
-// `@as400web/base` から直接取ると経路が 1 つ短くなり、検査の意味が薄れる。
+// `@ts5250/base` から直接取ると経路が 1 つ短くなり、検査の意味が薄れる。
 import { setLogSink, resetLogSink, type CoreLogger } from "../src/index.js";
 // ログを出させる側は hostserver から直接取る（core は再輸出しなくなった）
-import { insertRows, type DbConnection } from "@as400web/hostserver";
+import { insertRows, type DbConnection } from "@ts5250/hostserver";
 
 /**
  * **ログの差し込み口がパッケージ境界を越えて効くこと。**
  *
  * `log.ts` はモジュールスコープに可変の `factory` を持ち、`setLogSink` がそれを書き換える。
- * だから**複製したら壊れる**——`@as400web/tn5250` と `@as400web/hostserver` がそれぞれ自分の
+ * だから**複製したら壊れる**——`@ts5250/tn5250` と `@ts5250/hostserver` がそれぞれ自分の
  * `log.ts` を持つと、アプリが起動時に 1 度呼ぶ `setLogSink` は片方にしか効かず、
  * もう片方のログが**黙って消える**。型検査でもビルドでも気づけない。
- * この性質が `errors.ts` とともに `@as400web/base` を独立させた理由そのものである
+ * この性質が `errors.ts` とともに `@ts5250/base` を独立させた理由そのものである
  * （`20260801-library-extraction-hostserver` decisions.md D4）。
  *
  * 実際に届くことを確かめるため、**ホストサーバー側で `log.warn` を通る経路**を叩く——
  * `insertRows` の部分失敗（`insert.ts` の「partial insert」）。応答を差し替えれば
  * 接続なしで再現できる。ここを別の経路に差し替えるときは、
- * **`@as400web/hostserver` 側のモジュールが自前の `childLog` で出していること**を保つこと
+ * **`@ts5250/hostserver` 側のモジュールが自前の `childLog` で出していること**を保つこと
  * （引数でロガーを渡す関数を選ぶと、差し込み口の検査にならない）。
  */
 

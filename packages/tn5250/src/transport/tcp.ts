@@ -1,6 +1,6 @@
 import { Socket, connect as netConnect } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
-import { As400Error, withSocketHint } from "@as400web/base";
+import { As400Error, withSocketHint } from "@ts5250/base";
 import type { Transport } from "./types.js";
 
 export interface TcpConnectOptions {

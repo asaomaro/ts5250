@@ -11,7 +11,7 @@
  *       （コードの移植ではなく、アルゴリズム手順に基づく実装）。DES 経路は参照実装との
  *       差分テストでバイト単位に一致させて固定した（`hostserver-password.test.ts`）。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { desEncryptBlock } from "./des.js";
 
 /** SHA 経路を使う最小パスワードレベル。これ未満は DES 経路 */

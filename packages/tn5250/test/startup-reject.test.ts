@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Session5250 } from "../src/session/session.js";
 import { isKnownStartupCode } from "../src/telnet/startup-record.js";
 import type { Transport } from "../src/transport/types.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 const codec = codecForCcsid(37);
 

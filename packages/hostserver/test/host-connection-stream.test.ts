@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:net";
 import { openHostConnection, type HostConnection } from "../src/transport/host-connection.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 連鎖応答（listFiles のように 1 要求へ複数フレームが返る形）の受け取りを、

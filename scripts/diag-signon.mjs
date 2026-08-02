@@ -2,7 +2,7 @@
 //   自動サインオンなしで PUB400 に接続 → signon 画面のフィールド構造を出力 →
 //   user/password をセットして Enter 時に送出する Read 応答レコードを採取・16 進ダンプする。
 // 実行: node --env-file=.env scripts/diag-signon.mjs
-import { Session5250, TcpTransport } from "@as400web/tn5250";
+import { Session5250, TcpTransport } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const user = process.env.PUB400_USER ?? "USER";

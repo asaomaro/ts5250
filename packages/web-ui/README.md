@@ -1,7 +1,7 @@
-# @as400web/web-ui
+# @ts5250/web-ui
 
 ブラウザで 5250 画面を表示・操作する Web エミュレーター（Vue 3 + Vite）。
-`@as400web/server` の WebSocket（1 接続 = 1 セッション）に接続する。
+`@ts5250/server` の WebSocket（1 接続 = 1 セッション）に接続する。
 
 ## 開発
 
@@ -10,13 +10,13 @@
 node packages/server/dist/main.js --http 3400 --profiles profiles.json
 
 # web-ui 開発サーバー（/api・/ws は 3400 にプロキシ）
-npm run dev -w @as400web/web-ui
+npm run dev -w @ts5250/web-ui
 ```
 
 ## ビルド＋本番配信
 
 ```sh
-npm run build -w @as400web/web-ui      # → packages/web-ui/dist
+npm run build -w @ts5250/web-ui      # → packages/web-ui/dist
 node packages/server/dist/main.js --http 3400 --profiles profiles.json \
   --web-root packages/web-ui/dist       # server が dist を静的配信
 ```
@@ -47,11 +47,11 @@ node packages/server/dist/main.js --http 3400 --profiles profiles.json \
   Delete・カーソル・paste 整形）。ScreenGrid が native input の keydown を制御して適用
 - `composables/fieldValidate.ts` — 入力時の型（数値/A/O/J）・全角判定による受理チェック
 - `stores/keybindings.ts` — カスタムキーバインド（localStorage・action→key）
-- 表示トグル: SO/SI を `{`/`}` 表示、半角カナ表示（`@as400web/tn5250/codec` の katakanaChar で英小文字位置をカナ再解釈）
+- 表示トグル: SO/SI を `{`/`}` 表示、半角カナ表示（`@ts5250/tn5250/codec` の katakanaChar で英小文字位置をカナ再解釈）
 
 ## 検証
 
-- コンポーネント/ユニット: `npm test -w @as400web/web-ui`
+- コンポーネント/ユニット: `npm test -w @ts5250/web-ui`
 - ブラウザ E2E（Playwright・実機 PUB400）: `node --env-file=.env scripts/verify-browser.mjs`
 
 ## 対応範囲

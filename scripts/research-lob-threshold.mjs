@@ -9,7 +9,7 @@
 //         scripts/research-lob-threshold.mjs
 //
 // 表は TESTLIB/LOBTHR を作り直す（冪等）。読み取りだけでは測れないので作る。
-import { DbConnection, query, executeStatement } from "@as400web/hostserver";
+import { DbConnection, query, executeStatement } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

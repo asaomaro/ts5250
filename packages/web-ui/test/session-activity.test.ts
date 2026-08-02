@@ -6,7 +6,7 @@
  * （`20260729-session-lifetime-timeout` spec 方針4）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ScreenSnapshot } from "@as400web/tn5250";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
 
 let captured: { handlers: { onServerMessage: (m: unknown) => void }; send: ReturnType<typeof vi.fn> };
 vi.mock("../src/ws-client.js", () => ({

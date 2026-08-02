@@ -8,8 +8,8 @@
  * `warn` を**必須引数**にしているのは意図的（design の判断）。optional にすると渡し忘れが起き、
  * パスワード復号の失敗が無言で握り潰される（実際に 5 経路中 3 経路で起きていた）。
  */
-import { As400Error } from "@as400web/base";
-import { type ConnectOptions } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { type ConnectOptions } from "@ts5250/tn5250";
 import type { AuthUser } from "./auth.js";
 import type { PcCommandConfig } from "./pc-command.js";
 import type { PrinterOutputConfig } from "./printer-output.js";

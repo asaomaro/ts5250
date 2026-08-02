@@ -12,8 +12,8 @@
  * 参照: JTOpen(jtopenlite) の HostServerConnection.connect /
  *       sendExchangeRandomSeedsRequest / sendStartServerRequest に対応する。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
 import type { HostConnection } from "./transport/host-connection.js";
 import { CP, HEADER_LEN, findParam, parseReply } from "./datastream.js";
 import {

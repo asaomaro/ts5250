@@ -15,10 +15,10 @@
  * ——`renderScreenHtml` は自前の見た目を持っており、そこまで二重管理にすると
  * 「画面設定を変えたらエビデンスの色も変わる」ことになって証拠として読みにくい。
  */
-import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
-import { renderScreenHtml } from "@as400web/tn5250/browser";
+import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
+import { renderScreenHtml } from "@ts5250/tn5250/browser";
 // 表示コード切替は狭い入口から（`ScreenGrid.vue` の同じ注記を参照）
-import { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
+import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
 import { sessionsStore } from "./stores/sessions.js";
 import { viewSettings, resolveSbcsView, type SbcsView } from "./stores/viewSettings.js";
 import { isKatakanaCcsid } from "./hostCodePages.js";

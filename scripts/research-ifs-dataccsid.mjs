@@ -10,7 +10,7 @@
 //         scripts/research-ifs-dataccsid.mjs
 //
 // 副作用: /home/USER 配下にファイルを数個作り、**最後に消す**。
-import { IfsConnection } from "@as400web/hostserver";
+import { IfsConnection } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

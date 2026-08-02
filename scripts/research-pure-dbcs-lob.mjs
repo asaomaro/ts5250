@@ -8,7 +8,7 @@
 //
 // 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
 //         scripts/research-pure-dbcs-lob.mjs
-import { DbConnection, executeStatement, query } from "@as400web/hostserver";
+import { DbConnection, executeStatement, query } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

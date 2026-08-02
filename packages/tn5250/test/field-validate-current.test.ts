@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateFieldContent } from "../src/screen/field-validate.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { ESC, COMMAND, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
 import { Session5250 } from "../src/session/session.js";
 import { ReplayTransport } from "../src/trace/replay.js";

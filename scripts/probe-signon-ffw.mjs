@@ -10,7 +10,7 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/probe-signon-ffw.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

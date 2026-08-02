@@ -9,8 +9,8 @@
  */
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import { As400Error } from "@as400web/base";
-import type { IfsConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import type { IfsConnection } from "@ts5250/hostserver";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openIfs } from "./host-connect.js";

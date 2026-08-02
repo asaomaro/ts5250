@@ -7,14 +7,14 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/verify-sql-limit.mjs
 import { readFileSync } from "node:fs";
-import { DbConnection, executeStatement, query } from "@as400web/tn5250";
+import { DbConnection, executeStatement, query } from "@ts5250/tn5250";
 import {
   buildApp,
   SessionManager,
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 // **MCP のツール登録は公開 API に無い**ので dist から直接読む（登録コードそのものを通したい）
 import { registerHostServerTools } from "../packages/server/dist/host-server-tools.js";
 

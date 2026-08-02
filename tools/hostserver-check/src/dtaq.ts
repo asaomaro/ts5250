@@ -5,7 +5,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run dtaq -w @as400web/hostserver-check -- --tls --library MYLIB
+ *     npm run dtaq -w @ts5250/hostserver-check -- --tls --library MYLIB
  *   さらに無限待ちも見るなら: -- --tls --wait-test
  *
  * 検証内容:
@@ -20,8 +20,8 @@
  * QSYS2 の SQL サービス（DATA_QUEUE_INFO / DATA_QUEUE_ENTRIES）と突き合わせて確かめること。
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { DtaqConnection, dtaqDecodeEbcdic } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { DtaqConnection, dtaqDecodeEbcdic } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

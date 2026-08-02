@@ -2,11 +2,11 @@
  * IBM i のオブジェクト名（ライブラリ・ファイル・メンバー）の検証。
  *
  * **サーバーとブラウザの両方が使う**ため、`node:*` に触れない独立モジュールにしてある
- * （`@as400web/hostserver` の `ddm/column-meta.ts` に置くと `DbConnection` 経由で
+ * （`@ts5250/hostserver` の `ddm/column-meta.ts` に置くと `DbConnection` 経由で
  * Node 依存を引き込み、ブラウザから使えない）。規則を 2 か所に書かないための置き場所である。
  *
- * 利用者は hostserver（`column-meta.ts`）と web-ui（`@as400web/tn5250/browser` 経由）で、
- * **どちらのパッケージにも属さない**ので `@as400web/base` に置いてある。
+ * 利用者は hostserver（`column-meta.ts`）と web-ui（`@ts5250/tn5250/browser` 経由）で、
+ * **どちらのパッケージにも属さない**ので `@ts5250/base` に置いてある。
  */
 import { As400Error } from "./errors.js";
 

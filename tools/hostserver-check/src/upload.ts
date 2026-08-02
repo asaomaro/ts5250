@@ -19,10 +19,10 @@
  *   node --env-file=../../.env dist/upload.js --tls
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { CommandConnection, DbConnection, query } from "@as400web/hostserver";
-import { type ConnectOptions } from "@as400web/tn5250";
-import { uploadCsv, uploadRows } from "@as400web/server";
+import { As400Error } from "@ts5250/base";
+import { CommandConnection, DbConnection, query } from "@ts5250/hostserver";
+import { type ConnectOptions } from "@ts5250/tn5250";
+import { uploadCsv, uploadRows } from "@ts5250/server";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

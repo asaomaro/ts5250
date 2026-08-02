@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:net";
 import { openHostConnection, type HostConnection } from "../src/transport/host-connection.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * `request(frame, { readTimeoutMs })` の 1 往復タイムアウト上書きを、遅延応答する偽サーバーで確かめる。

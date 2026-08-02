@@ -11,7 +11,7 @@ import {
   buildCallProgramRequest,
   paramMaxLength
 } from "../src/command/command-datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** 実機（PUB400 / IBM i 7.5）が返した交換属性の応答 */
 const REAL_EXCHANGE = Buffer.from(

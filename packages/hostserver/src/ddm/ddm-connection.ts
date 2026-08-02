@@ -18,9 +18,9 @@
  * （getConnection / open / write / close）に対応する。逐語移植ではなく、
  * バイト配置・定数・手順という事実に基づく書き起こし。
  */
-import { As400Error } from "@as400web/base";
-import { childLog } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { childLog } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 import { openDdmTransport, type DdmTransport } from "../transport/ddm-transport.js";
 import type { HostTlsOptions } from "../transport/host-connection.js";
 import { signon } from "../signon.js";

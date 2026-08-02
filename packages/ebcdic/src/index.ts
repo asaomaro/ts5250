@@ -1,5 +1,5 @@
 /**
- * `@as400web/ebcdic` の入口。IBM i の EBCDIC ⇔ Unicode 変換を、**外部依存ゼロ**で提供する。
+ * `@ts5250/ebcdic` の入口。IBM i の EBCDIC ⇔ Unicode 変換を、**外部依存ゼロ**で提供する。
  *
  * SBCS（37 / 273 / 290 / 1027）・SO/SI 付きの混在 DBCS（930 / 939 / 1399 とエイリアス）・
  * 純 DBCS（300 / 16684）に対応し、CCSID を指定したテキスト復号/符号化の入口も持つ。
@@ -9,13 +9,13 @@
  *
  * | 入口 | 中身 | 用途 |
  * |---|---|---|
- * | `@as400web/ebcdic` | 全部 | サーバー側・使う範囲が広いとき |
- * | `@as400web/ebcdic/codec` | SBCS/DBCS の変換だけ（**5 表すべて入る**） | 変換だけが要るとき |
- * | `@as400web/ebcdic/katakana` | `katakanaChar` / `latinChar` だけ（**930・939 の SBCS 部のみ**） | ブラウザの表示コード切替 |
- * | `@as400web/ebcdic/catalog` | CCSID の一覧だけ（**表ゼロ**） | ブラウザの選択 UI |
+ * | `@ts5250/ebcdic` | 全部 | サーバー側・使う範囲が広いとき |
+ * | `@ts5250/ebcdic/codec` | SBCS/DBCS の変換だけ（**5 表すべて入る**） | 変換だけが要るとき |
+ * | `@ts5250/ebcdic/katakana` | `katakanaChar` / `latinChar` だけ（**930・939 の SBCS 部のみ**） | ブラウザの表示コード切替 |
+ * | `@ts5250/ebcdic/catalog` | CCSID の一覧だけ（**表ゼロ**） | ブラウザの選択 UI |
  *
  * バレル経由だと bundler の解析が及ばず、要らない部分まで残ることがある——実測で
- * `@as400web/tn5250/codec` をこのバレルに向けた版は、狭い入口に向けた版より
+ * `@ts5250/tn5250/codec` をこのバレルに向けた版は、狭い入口に向けた版より
  * web-ui のバンドルが 628 バイト大きかった（`decisions.md` D2）。
  */
 

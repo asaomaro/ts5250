@@ -49,11 +49,11 @@ function collect(dir: string): string[] {
   return out;
 }
 
-/** `from "…"` と `import("…")` の**両方**から `@as400web/*` の指定子を拾う */
+/** `from "…"` と `import("…")` の**両方**から `@ts5250/*` の指定子を拾う */
 function workspaceImports(source: string): string[] {
   const out: string[] = [];
-  for (const m of source.matchAll(/from\s+["'](@as400web\/[a-z0-9-]+)[^"']*["']/g)) out.push(m[1]!);
-  for (const m of source.matchAll(/\bimport\s*\(\s*["'](@as400web\/[a-z0-9-]+)[^"']*["']\s*\)/g))
+  for (const m of source.matchAll(/from\s+["'](@ts5250\/[a-z0-9-]+)[^"']*["']/g)) out.push(m[1]!);
+  for (const m of source.matchAll(/\bimport\s*\(\s*["'](@ts5250\/[a-z0-9-]+)[^"']*["']\s*\)/g))
     out.push(m[1]!);
   return out;
 }
@@ -64,7 +64,7 @@ function importedBy(pkg: string): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const f of collect(srcDir)) {
     for (const spec of workspaceImports(readFileSync(f, "utf8"))) {
-      const short = spec.slice("@as400web/".length);
+      const short = spec.slice("@ts5250/".length);
       const list = found.get(short) ?? found.set(short, []).get(short)!;
       const rel = relative(srcDir, f);
       if (!list.includes(rel)) list.push(rel);
@@ -120,8 +120,8 @@ describe("パッケージ間の依存は一方通行", () => {
         dependencies?: Record<string, string>;
       };
       const declared = Object.keys(pkg.dependencies ?? {})
-        .filter((d) => d.startsWith("@as400web/"))
-        .map((d) => d.slice("@as400web/".length))
+        .filter((d) => d.startsWith("@ts5250/"))
+        .map((d) => d.slice("@ts5250/".length))
         .sort();
       const used = [...importedBy(p).keys()].sort();
       // **両方向で一致を要求する**——「宣言だけ残る」（依存を消したのに package.json は

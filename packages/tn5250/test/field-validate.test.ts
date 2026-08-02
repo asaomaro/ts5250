@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateFieldContent } from "../src/screen/field-validate.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { FFW } from "../src/protocol/constants.js";
 import type { InternalField } from "../src/screen/buffer.js";
 

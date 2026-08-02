@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { LogicalPage } from "@as400web/scs";
+import type { LogicalPage } from "@ts5250/scs";
 import { renderSpoolPdf } from "../src/pdf.js";
 
 const page = (lines: string[]): LogicalPage => ({ rows: lines.length, cols: Math.max(...lines.map((l) => l.length), 0), lines });

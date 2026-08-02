@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbConnection } from "../src/db/db-connection.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 文名・カーソル名は接続ごとに固定なので、同じ接続で問い合わせを重ねると踏み合う。

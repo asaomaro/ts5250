@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseDataFormat, parseResultData, parseSqlca } from "../src/db/db-reply.js";
 import { DB2 } from "../src/db/db-types.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 実機（IBM i 7.5 / PUB400）が実際に返したバイト列を写して固定する。

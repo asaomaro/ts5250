@@ -6,9 +6,9 @@ import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { csvBlob, csvFileName, toCsv } from "../csv.js";
-// 型は在り処（`@as400web/hostserver`）から。`import type` なのでバンドルに入らない
-import type { LobPlaceholder } from "@as400web/hostserver";
-import { splitSqlStatements, summarizeSql } from "@as400web/base";
+// 型は在り処（`@ts5250/hostserver`）から。`import type` なのでバンドルに入らない
+import type { LobPlaceholder } from "@ts5250/hostserver";
+import { splitSqlStatements, summarizeSql } from "@ts5250/base";
 import SqlLogPanel from "./SqlLogPanel.vue";
 import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";

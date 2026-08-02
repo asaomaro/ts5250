@@ -8,7 +8,7 @@
 // 「画面から一通り行えるか」が問いなので、下回りだけ通っても答えにならない。
 // 検証は画面の一覧だけに頼らず、**ホストの実体**（IFS API の list / read）でも突き合わせる。
 //
-// 前提: npm run build && npm run build -w @as400web/web-ui。`connections.json` に実機。
+// 前提: npm run build && npm run build -w @ts5250/web-ui。`connections.json` に実機。
 // 実行: node --env-file=.env scripts/verify-browser-ifs.mjs
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -20,7 +20,7 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 

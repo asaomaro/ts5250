@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, GuiGridLine, GuiWindow } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, GuiGridLine, GuiWindow } from "@ts5250/tn5250";
 
 /**
  * **ホストが引いたグリッド罫線（GRDATR/GRDLIN）と、WDWBORDER のホスト指定枠を描く。**

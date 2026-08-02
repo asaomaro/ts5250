@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reactive, nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
  * **フォーカス中の入力欄の value に、埋め込み属性のセンチネル（U+E020–E03F）を絶対に入れない。**

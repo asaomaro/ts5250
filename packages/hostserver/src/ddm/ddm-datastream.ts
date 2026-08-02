@@ -12,7 +12,7 @@
  * 参照: jtopenlite の `com.ibm.jtopenlite.ddm.DDMConnection` の send*Request /
  * および HostInputStream の読み取り手順に対応する（事実に基づく書き起こし）。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 export const DDM_GDS_ID = 0xd0;
 

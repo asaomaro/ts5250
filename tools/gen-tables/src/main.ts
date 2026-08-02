@@ -8,7 +8,7 @@ import { emitStatefulTable } from "./emit-stateful.js";
 const here = dirname(fileURLToPath(import.meta.url)); // tools/gen-tables/dist
 const toolRoot = join(here, "..");
 const repoRoot = join(toolRoot, "..", "..");
-// 生成先は `@as400web/ebcdic`。**`src/table-types.ts` の兄弟に `src/tables/` を置く**構成を
+// 生成先は `@ts5250/ebcdic`。**`src/table-types.ts` の兄弟に `src/tables/` を置く**構成を
 // 崩さないこと——生成物の先頭は `import type { SbcsTable } from "../table-types.js";` で、
 // この相対パスが成り立つ配置が前提になっている（emit-sbcs.ts / emit-stateful.ts が埋め込む）。
 const outDir = join(repoRoot, "packages", "ebcdic", "src", "tables");

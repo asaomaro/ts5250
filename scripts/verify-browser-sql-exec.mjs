@@ -17,7 +17,7 @@ import {
   ServerConfigStore,
   PersonalConfigStore,
   ConfigResolver
-} from "@as400web/server";
+} from "@ts5250/server";
 import { chromium } from "playwright";
 
 const log = (s) => process.stderr.write(s + "\n");

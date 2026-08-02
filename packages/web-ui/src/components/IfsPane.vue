@@ -22,9 +22,9 @@ import {
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
 import { systemsStore } from "../stores/systems.js";
-// **`catalog` サブパス（表ゼロ）から直接取る。** バレル（`@as400web/ebcdic`）に向けると
+// **`catalog` サブパス（表ゼロ）から直接取る。** バレル（`@ts5250/ebcdic`）に向けると
 // 変換表 18,900 行が丸ごとバンドルに入る（`20260801-library-extraction-tn5250` で実測: 約 4 倍）。
-import { TEXT_CCSIDS, ccsidLabel } from "@as400web/ebcdic/catalog";
+import { TEXT_CCSIDS, ccsidLabel } from "@ts5250/ebcdic/catalog";
 
 /**
  * IFS のファイルブラウザ。左に階層ツリー、中央に一覧、右にプレビュー。

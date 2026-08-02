@@ -6,7 +6,7 @@
  *
  * 参照: JTOpen(jtopenlite) の FileConnection に対応する。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import type { IfsEntry } from "./ifs-types.js";
 
 /** ファイルサーバーのサーバー ID */

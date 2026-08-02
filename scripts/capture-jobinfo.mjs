@@ -1,6 +1,6 @@
 // 自動サインオン→メニュー→DSPJOB→F3 復帰 の trace を採取（回帰資産・tx 伏字化）。
 import { writeFileSync, appendFileSync } from "node:fs";
-import { Session5250, TcpTransport, TraceRecorder } from "@as400web/tn5250";
+import { Session5250, TcpTransport, TraceRecorder } from "@ts5250/tn5250";
 const user=process.env.PUB400_USER, password=process.env.PUB400_PASSWORD;
 const out="packages/tn5250/test/fixtures/pub400-jobinfo.jsonl";
 const log=(s)=>process.stderr.write(s+"\n");

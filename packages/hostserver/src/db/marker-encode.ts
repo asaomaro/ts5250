@@ -10,8 +10,8 @@
  * `Column.convertToBytes` に対応する。逐語移植ではなく、
  * バイト配置という事実に基づく書き起こし（IPL 1.0。AGENTS.md）。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid, isPureDbcsCcsid, pureDbcsCodecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid, isPureDbcsCcsid, pureDbcsCodecForCcsid } from "@ts5250/ebcdic";
 import { encodePacked, encodeZoned } from "../ddm/encode.js";
 import { DB2, baseType, typeName } from "./db-types.js";
 import { isBinaryCcsid } from "./db-decode.js";

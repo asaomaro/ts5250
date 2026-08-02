@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell } from "@ts5250/tn5250";
 
 /**
  * **DSPATR(CS)（桁区切り）を画面に出す。**

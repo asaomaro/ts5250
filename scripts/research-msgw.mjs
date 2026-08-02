@@ -11,8 +11,8 @@
 //
 // 副作用: 仮想プリンター装置（毎回別名）と自分のジョブのスプールを 1 件作る。
 // 最後にスプールを消す。**他人の OUTQ には触らない。**
-import { PrinterSession } from "@as400web/tn5250";
-import { CommandConnection, NetPrintConnection, listSpooledFiles } from "@as400web/hostserver";
+import { PrinterSession } from "@ts5250/tn5250";
+import { CommandConnection, NetPrintConnection, listSpooledFiles } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

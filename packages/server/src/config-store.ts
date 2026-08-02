@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { assertOwner, assertProfileAccess, type AuthUser } from "./auth.js";
 import type { SecretCrypto } from "./secret-crypto.js";
 import {

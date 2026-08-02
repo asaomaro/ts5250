@@ -11,7 +11,7 @@
  * 参照: JTOpen(jtopenlite) の DatabaseConnection.writeHeader / writeTemplate /
  *       readReplyHeader に対応する。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { HEADER_LEN } from "../datastream.js";
 
 /** database のサーバー ID（signon は 0xE009） */

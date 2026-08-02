@@ -15,7 +15,7 @@ const { pathToFileURL } = require("node:url");
  * **開発時と配布時でレイアウトが違う。**
  *  - 開発: repo ルート。サーバーは `packages/server/dist/main.js`、依存は repo の node_modules
  *  - 配布: `resources/app`（`scripts/prepare-app.mjs` が組んだ一式）。サーバーは
- *    `node_modules/@as400web/server/dist/main.js`、依存も同じ node_modules に入っている
+ *    `node_modules/@ts5250/server/dist/main.js`、依存も同じ node_modules に入っている
  *
  * 以前は配布時も `resources` を指しており、実際の配置（`resources/app/...`）と 1 階層ずれていた。
  * さらに実行時依存を同梱していなかったため、**出来上がった exe は起動できなかった**。
@@ -23,7 +23,7 @@ const { pathToFileURL } = require("node:url");
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const WEB_ROOT = "packages/web-ui/dist"; // cwd(ROOT) 相対
 const SERVER_MAIN = app.isPackaged
-  ? path.join(ROOT, "node_modules", "@as400web", "server", "dist", "main.js")
+  ? path.join(ROOT, "node_modules", "@ts5250", "server", "dist", "main.js")
   : path.join(ROOT, "packages", "server", "dist", "main.js");
 
 /**

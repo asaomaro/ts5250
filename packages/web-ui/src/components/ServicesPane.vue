@@ -19,7 +19,7 @@ import { onUnmounted, computed, watch } from "vue";
 import { servicesStore } from "../stores/services.js";
 import { systemsStore } from "../stores/systems.js";
 import { useOpenConfigured } from "../composables/openConfigured.js";
-import type { PrinterRow, WatchRow } from "@as400web/server";
+import type { PrinterRow, WatchRow } from "@ts5250/server";
 
 /**
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても

@@ -31,8 +31,8 @@
  */
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { As400Error } from "@as400web/base";
-import { openQuery, queryLimited, executeStatement, isNonQueryStatement, SqlError, type DbConnection } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { openQuery, queryLimited, executeStatement, isNonQueryStatement, SqlError, type DbConnection } from "@ts5250/hostserver";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import { openDb, hostAuthFrom } from "./host-connect.js";

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { buildReadMdtResponse } from "../src/protocol/read-response.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { validateFieldContent } from "../src/screen/field-validate.js";
 import { rawSentinel } from "../src/screen/attr-sentinel.js";
 import { ESC, COMMAND, ORDER, FFW } from "../src/protocol/constants.js";

@@ -1,4 +1,4 @@
-import type { WsClientMessage, WsServerMessage } from "@as400web/server";
+import type { WsClientMessage, WsServerMessage } from "@ts5250/server";
 import { logStore, maskOutgoing } from "./stores/log.js";
 
 export interface WsClientHandlers {

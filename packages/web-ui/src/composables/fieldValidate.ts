@@ -1,6 +1,6 @@
-import type { Field } from "@as400web/tn5250";
-import { isRawSentinel } from "@as400web/tn5250/browser";
-import { isFullWidth, isCertainWideGlyph } from "@as400web/base";
+import type { Field } from "@ts5250/tn5250";
+import { isRawSentinel } from "@ts5250/tn5250/browser";
+import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
 
 /**
  * 文字がフィールドの型で受理されるか（web 入力時の拒否。core の validateFieldContent と整合）。

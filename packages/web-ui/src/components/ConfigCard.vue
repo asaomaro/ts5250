@@ -6,7 +6,7 @@
  * 開いた時点で対象が確定するため——別画面へ移ると「どれを直すんだったか」を選び直すことになる。
  */
 import { computed, reactive, ref, watch } from "vue";
-import type { PublicSession, PublicSystem } from "@as400web/server";
+import type { PublicSession, PublicSystem } from "@ts5250/server";
 import { SYSTEM_COLOR_COUNT, systemColorVar } from "../composables/systemColor.js";
 import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores/systems.js";
 import { sessionsStore } from "../stores/sessions.js";

@@ -23,7 +23,7 @@
  */
 
 import type { LogicalPage } from "./scs.js";
-import { isFullWidth } from "@as400web/base";
+import { isFullWidth } from "@ts5250/base";
 
 /** エビデンスの見出しに載せる情報。**日時は呼び出し側が渡す**（この層は時計を持たない） */
 export interface SpoolHtmlMeta {

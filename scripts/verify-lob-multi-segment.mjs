@@ -11,7 +11,7 @@
 //         scripts/verify-lob-multi-segment.mjs
 //
 // 副作用: 自分のライブラリーに表を 1 つ作り、**finally で必ず消す**。
-import { DbConnection, executeStatement, query } from "@as400web/hostserver";
+import { DbConnection, executeStatement, query } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

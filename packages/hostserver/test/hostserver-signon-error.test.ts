@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { SignonError } from "../src/signon.js";
 import { classifySignonReturnCode } from "../src/return-codes.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * 認証失敗の原因は**型として**公開する。

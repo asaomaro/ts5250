@@ -6,7 +6,7 @@
  * 参照: JTOpen(jtopenlite) の SignonConnection / HostServerConnection が送受信する
  *       データストリームの構造に対応する（コードの移植ではなく、構造に基づく実装）。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** ヘッダー長。応答の戻りコードはこの直前（オフセット 20）から 4 バイト */
 export const HEADER_LEN = 20;

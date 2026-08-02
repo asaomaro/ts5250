@@ -1,4 +1,4 @@
-// @as400web/server 公開 API
+// @ts5250/server 公開 API
 export { SessionManager, type OpenOptions, type SessionEntry } from "./session-manager.js";
 export {
   ConfigStore,

@@ -13,8 +13,8 @@
 //         scripts/research-call-program.mjs
 //
 // 副作用なし（読み取りのみ）。
-import { CommandConnection } from "@as400web/hostserver";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { CommandConnection } from "@ts5250/hostserver";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

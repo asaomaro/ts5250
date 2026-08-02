@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReplayTransport, parseTraceJsonl, type Transport } from "@as400web/tn5250";
+import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import { WsConnection } from "../src/ws-handler.js";
 import { SessionManager, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";

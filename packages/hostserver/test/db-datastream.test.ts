@@ -10,7 +10,7 @@ import {
   ORS
 } from "../src/db/db-datastream.js";
 import { parseReply, findParam, HEADER_LEN } from "../src/datastream.js";
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /**
  * database は signon と同じ 20 バイトヘッダー ＋ 20 バイト template。

@@ -4,7 +4,7 @@ import { SessionManager, type OpenPrinterOptions } from "../src/session-manager.
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
-import type { Transport } from "@as400web/tn5250";
+import type { Transport } from "@ts5250/tn5250";
 
 /**
  * **閉じている間に届いた帳票を配り直す**（`20260802-printer-report-history`）。

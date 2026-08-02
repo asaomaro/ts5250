@@ -2,7 +2,7 @@
 // CCSID 1399 プロファイルへ接続 → メインメニューのコマンド行（dbcsType:"open" の行またぎ欄）で
 // カーソル移動・入力順・ペーストを検証する。実アプリ構成（EmulatorPane 込み）を通すのが要点。
 //   ※ ScreenGrid 単体のハーネスでは EmulatorPane のフォーカス調停を通らず不具合を見逃す。
-// 前提: npm run build && npm run build -w @as400web/web-ui 済み。profiles.local.json に CCSID 1399 のプロファイル。
+// 前提: npm run build && npm run build -w @ts5250/web-ui 済み。profiles.local.json に CCSID 1399 のプロファイル。
 // 実行: node --env-file=.env scripts/verify-browser-cmdline.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
@@ -13,7 +13,7 @@ import {
   PersonalConfigStore,
   ConfigResolver,
   migrateProfiles
-} from "@as400web/server";
+} from "@ts5250/server";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";

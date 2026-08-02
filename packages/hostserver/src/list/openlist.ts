@@ -6,8 +6,8 @@
  *
  * 参照: JTOpen(jtopenlite) の command/program/openlist に対応する。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid, type Codec } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import type { CommandConnection } from "../command/command-connection.js";
 import type { ProgramParameter } from "../command/command-datastream.js";
 

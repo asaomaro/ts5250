@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { PublicMacro } from "@as400web/server";
+import type { PublicMacro } from "@ts5250/server";
 
 /**
  * マクロ（画面操作の記録・再生）のストア。**サーバー保存・単一の真実**（spec D7）。

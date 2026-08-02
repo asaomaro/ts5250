@@ -11,8 +11,8 @@
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager } from "@as400web/server";
-import { CommandConnection } from "@as400web/hostserver";
+import { SessionManager } from "@ts5250/server";
+import { CommandConnection } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

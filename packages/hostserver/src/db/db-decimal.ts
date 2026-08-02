@@ -10,7 +10,7 @@
  *
  * 参照: JTOpen(jtopenlite) の Conv.packedDecimalToString / zonedDecimalToString に対応する。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** 負を表す符号ニブル。それ以外（0x0C / 0x0F 等）は正 */
 const NEGATIVE_SIGNS: ReadonlySet<number> = new Set([0x0b, 0x0d]);

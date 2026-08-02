@@ -3,7 +3,7 @@
 //   (2) エミュレーターが実行キーを返したあと CL が STRPCCMD の**先へ進む**か（データ域 PCOMARK）
 // を実測する。実行: node --env-file=.env scripts/research-strpco3.mjs [出力先]
 import { readFileSync, writeFileSync } from "node:fs";
-import { Session5250, CommandConnection } from "@as400web/tn5250";
+import { Session5250, CommandConnection } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = "TESTLIB";

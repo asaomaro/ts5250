@@ -6,9 +6,9 @@
  *
  * 参照: JTOpen(jtopenlite) の FileConnection / FileHandle に対応する。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import type { IfsEntry, IfsListResult } from "./ifs-types.js";
-import { childLog } from "@as400web/base";
+import { childLog } from "@ts5250/base";
 import { traced } from "../frame-trace.js";
 import {
   openHostConnection,

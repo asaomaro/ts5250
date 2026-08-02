@@ -8,7 +8,7 @@
 //
 // 実行: node --env-file=.env scripts/verify-pcocmd.mjs
 import { readFileSync, existsSync, rmSync } from "node:fs";
-import { Session5250, CommandConnection } from "@as400web/tn5250";
+import { Session5250, CommandConnection } from "@ts5250/tn5250";
 import { runPcCommand } from "../packages/server/dist/pc-command.js";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 

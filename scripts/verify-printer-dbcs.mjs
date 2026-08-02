@@ -3,7 +3,7 @@
 // SCS 中の SO/SI 付き全角を受信し、帳票に日本語が桁揃えで載ることを確認する。
 // 実行: node --env-file=.env scripts/verify-printer-dbcs.mjs
 //   env: PUB400_USER / PUB400_PASSWORD（任意 PUB400_HOST）。要 MYLIB（自分のライブラリ）。
-import { PrinterSession, Session5250 } from "@as400web/tn5250";
+import { PrinterSession, Session5250 } from "@ts5250/tn5250";
 
 const HOST = process.env.PUB400_HOST ?? "pub400.com";
 const USER = process.env.PUB400_USER, PW = process.env.PUB400_PASSWORD;

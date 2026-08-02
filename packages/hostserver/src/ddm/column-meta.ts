@@ -8,13 +8,13 @@
  * 以前は検証スクリプト（`tools/hostserver-check`）の中にだけ同じ問い合わせがあった。
  * **2 つの SYSCOLUMNS クエリが並立しないよう**、製品コードはここ 1 か所にする。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import type { DbConnection } from "../db/db-connection.js";
 import { query } from "../db/query.js";
 import type { ColumnLayoutInput } from "./record-layout.js";
-import { assertIdentifier } from "@as400web/base";
+import { assertIdentifier } from "@ts5250/base";
 
-export { assertIdentifier } from "@as400web/base";
+export { assertIdentifier } from "@ts5250/base";
 
 /**
  * 列の情報を宣言順で返す。

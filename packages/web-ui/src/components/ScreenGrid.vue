@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@as400web/tn5250";
+import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@ts5250/tn5250";
 import {
   initEdit,
   editValue,
@@ -39,7 +39,7 @@ import {
   type WindowRect,
   type OptionSpan
 } from "../composables/fkeyLegend.js";
-import { GRID_COLOR } from "@as400web/tn5250/browser";
+import { GRID_COLOR } from "@ts5250/tn5250/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
@@ -51,11 +51,11 @@ import {
   offsetOfPos,
   type FieldSlice
 } from "../composables/fieldSlices.js";
-// **表示コード切替は `@as400web/ebcdic/katakana` から直接取る**（930/939 の SBCS 部のみ）。
+// **表示コード切替は `@ts5250/ebcdic/katakana` から直接取る**（930/939 の SBCS 部のみ）。
 // バレルや `…/codec` に向けると DBCS 部込みの変換表が持ち込まれる——実測で本番バンドルが
 // 約 600 KB 膨らんでいた。実際に要るのは SBCS 部 256 要素ずつだけ。
 // **2 つで対**: 切替とは「もう一方の表で読み直すこと」なので、両方要る。
-import { katakanaChar, latinChar } from "@as400web/ebcdic/katakana";
+import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
 // browser サブパスからブラウザ安全に import（root は node 依存を巻き込むため不可）
 import {
   isAttrSentinel,
@@ -65,7 +65,7 @@ import {
   rawSentinel,
   stripSentinels,
   decodeAttribute
-} from "@as400web/tn5250/browser";
+} from "@ts5250/tn5250/browser";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
 const props = withDefaults(

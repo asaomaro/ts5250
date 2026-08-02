@@ -6,8 +6,8 @@
  * ずれると「接続先の指定方法が API ごとに違う」「同じ失敗が別のステータスで返る」ことになる。
  */
 import { z } from "zod";
-import { As400Error } from "@as400web/base";
-import { type ConnectOptions } from "@as400web/tn5250";
+import { As400Error } from "@ts5250/base";
+import { type ConnectOptions } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";

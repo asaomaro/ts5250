@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { AidKey, ScreenSnapshot } from "@as400web/tn5250";
+import type { AidKey, ScreenSnapshot } from "@ts5250/tn5250";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";

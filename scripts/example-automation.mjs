@@ -2,7 +2,7 @@
 // 極小テストハーネス＋薄い Host ドライバで「接続→操作→アサート→後始末」を書く例。
 // 実行: node --env-file=.env scripts/example-automation.mjs
 //   必要 env: PUB400_USER / PUB400_PASSWORD（任意: PUB400_HOST, PUB400_DEVNAME, PUB400_LIB）
-import { Session5250 } from "@as400web/tn5250";
+import { Session5250 } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

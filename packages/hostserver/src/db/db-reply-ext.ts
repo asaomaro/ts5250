@@ -12,8 +12,8 @@
  * 参照: JTOpen 本体の `DBSuperExtendedDataFormat` / `DBExtendedData`
  * （逐語移植ではなく、バイト配置という事実に基づく書き起こし）。
  */
-import { As400Error } from "@as400web/base";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { As400Error } from "@ts5250/base";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 /** 列定義の固定部の長さ */
 const FIXED_LEN = 16;

@@ -4,12 +4,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * `@as400web/ebcdic/catalog` から**変換表へ到達しない**ことの検査。
+ * `@ts5250/ebcdic/catalog` から**変換表へ到達しない**ことの検査。
  *
  * この性質は「ブラウザのバンドルに 1.17 MB の表を入れない」ためだけに在り、
  * **壊れても型検査もテストもビルドも通ってしまう**——`catalog.ts` に
  * `import { codecForCcsid } from "./codec.js"` を 1 行足すだけで、`catalog` を
- * 使う側（`@as400web/tn5250/browser` 経由の web-ui）のバンドルが一気に膨らむ。
+ * 使う側（`@ts5250/tn5250/browser` 経由の web-ui）のバンドルが一気に膨らむ。
  * サイズを見ていなければ誰も気づかない。だから到達可能性そのものを固定する。
  *
  * 検査は **src の import グラフを実際にたどる**（ビルド成果物に依存しないので
@@ -49,7 +49,7 @@ function reachableFrom(entry: string): Map<string, number> {
   return seen;
 }
 
-describe("@as400web/ebcdic/catalog は変換表を引き込まない", () => {
+describe("@ts5250/ebcdic/catalog は変換表を引き込まない", () => {
   const fromCatalog = reachableFrom("catalog.ts");
   const rel = (f: string): string => f.slice(srcDir.length + 1);
 

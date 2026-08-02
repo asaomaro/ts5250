@@ -3,8 +3,8 @@
 //   DSPATR 各種 / CNTFLD(継続入力欄の行あふれ) / DBCS 分断 を 3 画面で網羅。
 // 実行: node --env-file=.env scripts/build-feat.mjs
 import { readFileSync } from "node:fs";
-import { Session5250 } from "@as400web/tn5250";
-import { codecForCcsid } from "@as400web/tn5250/codec";
+import { Session5250 } from "@ts5250/tn5250";
+import { codecForCcsid } from "@ts5250/tn5250/codec";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
 const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";

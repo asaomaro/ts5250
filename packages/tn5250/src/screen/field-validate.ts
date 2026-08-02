@@ -1,7 +1,7 @@
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 import { FFW } from "../protocol/constants.js";
 import { isRawSentinel } from "./attr-sentinel.js";
-import type { Codec } from "@as400web/ebcdic";
+import type { Codec } from "@ts5250/ebcdic";
 import type { InternalField } from "./buffer.js";
 
 /**

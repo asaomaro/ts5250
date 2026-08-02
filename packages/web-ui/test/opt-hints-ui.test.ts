@@ -3,7 +3,7 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { MSG_OPT_HINTS } from "../src/composables/opMessages.js";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
+import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
  * **オプション欄の選択肢（UI）。**

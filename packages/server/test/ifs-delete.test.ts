@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { planDelete, type IfsDeleteReader } from "../src/ifs-delete.js";
-import type { IfsEntry, IfsListResult } from "@as400web/hostserver";
+import type { IfsEntry, IfsListResult } from "@ts5250/hostserver";
 
 /**
  * 削除対象の列挙。**順序が仕様**（深い順・親は最後）——逆に並べると、

@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager, DEFAULT_MAX_RESIDENT_PRINTERS } from "../src/session-manager.js";
-import type { Transport } from "@as400web/tn5250";
+import type { Transport } from "@ts5250/tn5250";
 
 /**
  * **プリンターの常駐**（`20260801-printer-session-residency` →

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resetLogSink, setLogSink, childLog as coreChildLog } from "@as400web/base";
+import { resetLogSink, setLogSink, childLog as coreChildLog } from "@ts5250/base";
 import { childLog as serverChildLog } from "../src/log.js";
 
 /**
@@ -42,7 +42,7 @@ describe("server のログは core の注入に依存しない", () => {
    * `src` の各ファイルが実際にどちらを import しているかは検査しておらず、
    * 実際に **3 ファイル（`host-sql` / `result-set-store` / `host-upload`）が
    * ライブラリ側の `childLog` を使っていた**（`20260801-library-extraction-drop-core-reexport`
-   * で発覚。それまでは `@as400web/tn5250` 経由だったので、注入式ロガーだと気づきにくかった）。
+   * で発覚。それまでは `@ts5250/tn5250` 経由だったので、注入式ロガーだと気づきにくかった）。
    *
    * `main.ts` が `setLogSink` を呼ぶので通常の起動では出力されるが、
    * **それは「注入に依存している」ということ**で、このモジュール群が避けたかった形そのもの。
@@ -57,7 +57,7 @@ describe("server のログは core の注入に依存しない", () => {
         if (e.isDirectory()) walk(f);
         else if (e.name.endsWith(".ts")) {
           const src = readFileSync(f, "utf8");
-          for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+["'](@as400web\/[a-z-]+)["']/g))
+          for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s+["'](@ts5250\/[a-z-]+)["']/g))
             if (/\bchildLog\b/.test(m[1]!)) offenders.push(`${relative(srcDir, f)} ← ${m[2]!}`);
         }
       }

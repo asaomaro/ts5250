@@ -1,7 +1,7 @@
 import { ByteWriter } from "./bytes.js";
 import { buildRecord } from "./gds.js";
 import { COMMAND, ESC, OPCODE, ORDER } from "./constants.js";
-import { SO, SI, type Codec } from "@as400web/ebcdic";
+import { SO, SI, type Codec } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 
 /**

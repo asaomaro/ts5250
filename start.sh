@@ -36,7 +36,7 @@ command -v node >/dev/null 2>&1 || { echo "Node.js (>=20) が必要です" >&2; 
 #
 # **「node_modules があるか」だけでは足りない。** ワークスペースが増えた版を pull すると、
 # 既存の node_modules は残っているのに新パッケージのシンボリックリンクが無い状態になり、
-# ビルドが `Cannot find module '@as400web/…'` で落ちる（実際に起きた。
+# ビルドが `Cannot find module '@ts5250/…'` で落ちる（実際に起きた。
 # packages/ebcdic・packages/scs を足したときに `./start.sh --build` が失敗した）。
 # npm は install のたびに node_modules/.package-lock.json を書くので、
 # package-lock.json の方が新しければ依存が古いと判断できる。依存追加全般に効く。
@@ -51,7 +51,7 @@ if [ "$FORCE_BUILD" = 1 ] || [ ! -f packages/server/dist/main.js ] || [ ! -f pac
   echo "==> ビルド（core / server）"
   npm run build
   echo "==> ビルド（web-ui / Vite）"
-  npm run build -w @as400web/web-ui
+  npm run build -w @ts5250/web-ui
 fi
 
 # 接続プロファイルの自動検出（未指定時）。

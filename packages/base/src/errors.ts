@@ -14,7 +14,7 @@ export type ErrorCode =
   /**
    * **IBM i へ繋げなかった**（ソケットが張れない・ポートマッパーが引けない・
    * ネゴシエーション中に閉じられた）。投げるのは各パッケージの `transport/` だけ
-   * （`@as400web/tn5250` の `tcp.ts`＝TN5250 側と、`@as400web/hostserver` の
+   * （`@ts5250/tn5250` の `tcp.ts`＝TN5250 側と、`@ts5250/hostserver` の
    * `host-connection.ts` / `ddm-transport.ts`＝ホストサーバー側。分割前は core の
    * `transport/` に同居していた）。`packages/server` からは 0 件——これは
    * `20260729-connect-failed-semantics` が走査で不変条件にしている。

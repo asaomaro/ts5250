@@ -1,5 +1,5 @@
-import type { Field, ScreenSnapshot } from "@as400web/tn5250";
-import type { PublicMacroStep } from "@as400web/server";
+import type { Field, ScreenSnapshot } from "@ts5250/tn5250";
+import type { PublicMacroStep } from "@ts5250/server";
 import { sessionsStore, type MacroStopReason, type SessionState } from "./stores/sessions.js";
 import { macrosStore } from "./stores/macros.js";
 import { sendKeyWithFields, type OutgoingField } from "./session-controller.js";

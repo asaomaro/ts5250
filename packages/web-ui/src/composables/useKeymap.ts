@@ -1,4 +1,4 @@
-import type { AidKey } from "@as400web/tn5250";
+import type { AidKey } from "@ts5250/tn5250";
 import {
   keybindingsStore,
   isViewBinding,

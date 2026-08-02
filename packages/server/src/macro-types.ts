@@ -15,10 +15,10 @@
  * 「パスワードは形式を問わず決して返さない」（`config-types.ts` の `PublicSystem`）が破れる。
  */
 import { z } from "zod";
-import type { AidKey } from "@as400web/tn5250";
+import type { AidKey } from "@ts5250/tn5250";
 
 /**
- * AID キー名。`@as400web/tn5250` の `AidKey` と一致させる（値の検証はここで行う）。
+ * AID キー名。`@ts5250/tn5250` の `AidKey` と一致させる（値の検証はここで行う）。
  * 一致は下の `_assertAidKeyParity` がコンパイル時に突き合わせる——zod の enum は
  * 値の羅列なので、core 側にキーが増えても**書き足さない限り黙って通ってしまう**。
  */

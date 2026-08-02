@@ -12,7 +12,7 @@
  * 参照: jtopenlite `DatabaseConnection`（`cp == 0x3813` の分岐）と
  * `JDBCParameterMetaData.parameterMarkerFieldDescription`。逐語移植ではない。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** 固定ヘッダー長。一貫性トークン(4) ＋ 列数(4) ＋ 予約(4) ＋ 行サイズ(4) */
 const HEADER_LEN = 16;

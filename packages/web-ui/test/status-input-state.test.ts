@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
-import type { Cell, Field, ScreenSnapshot } from "@as400web/tn5250";
+import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { SessionState } from "../src/stores/sessions.js";
 
 /**

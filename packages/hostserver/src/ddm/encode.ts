@@ -10,7 +10,7 @@
  * 参照: jtopenlite の `com.ibm.jtopenlite.ddm.DDMField` および `com.ibm.jtopenlite.Conv`
  * に対応する（逐語移植ではなく、バイト配置という事実に基づく書き起こし）。
  */
-import { As400Error } from "@as400web/base";
+import { As400Error } from "@ts5250/base";
 
 /** EBCDIC の数字 0-9（0xF0-0xF9）。ゾーン/パック 10 進の構成要素 */
 const EBCDIC_ZERO = 0xf0;

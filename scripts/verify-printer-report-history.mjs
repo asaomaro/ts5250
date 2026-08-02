@@ -13,8 +13,8 @@
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、自分のジョブのスプールを 1 件流す。
 // ライターは必ず止め、スプールは消す。**装置は作らない・消さない。**
-import { SessionManager, WsConnection, ConfigResolver, ServerConfigStore, PersonalConfigStore } from "@as400web/server";
-import { CommandConnection } from "@as400web/hostserver";
+import { SessionManager, WsConnection, ConfigResolver, ServerConfigStore, PersonalConfigStore } from "@ts5250/server";
+import { CommandConnection } from "@ts5250/hostserver";
 
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;

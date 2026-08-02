@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Session5250, ReplayTransport, parseTraceJsonl } from "@as400web/tn5250";
+import { Session5250, ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 import { detectFkeyLegends, detectWindowRect, rowText } from "../src/composables/fkeyLegend.js";
-import type { Cell, ScreenSnapshot } from "@as400web/tn5250";
+import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
 
 // ---- 合成スナップショットの組み立て（実機で観測した行をそのまま写す） ----
 

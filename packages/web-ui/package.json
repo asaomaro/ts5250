@@ -1,5 +1,5 @@
 {
-  "name": "@as400web/web-ui",
+  "name": "@ts5250/web-ui",
   "private": true,
   "version": "0.1.0",
   "license": "Apache-2.0",
@@ -14,13 +14,13 @@
     "test:flake-hunt": "bash scripts/flake-hunt.sh"
   },
   "dependencies": {
-    "@as400web/ebcdic": "0.1.0",
-    "@as400web/server": "0.1.0",
-    "@as400web/tn5250": "0.1.0",
+    "@ts5250/ebcdic": "0.1.0",
+    "@ts5250/server": "0.1.0",
+    "@ts5250/tn5250": "0.1.0",
     "vue": "^3.5.39"
   },
   "devDependencies": {
-    "@as400web/hostserver": "0.1.0",
+    "@ts5250/hostserver": "0.1.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^29.1.1",

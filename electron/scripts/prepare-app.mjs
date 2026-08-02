@@ -10,7 +10,7 @@
 // playwright・vitest まで入っており、配布物が桁違いに太る。ここでは実行時依存だけを
 // npm に解決させる（`--omit=dev`）。
 //
-// **ワークスペース参照（@as400web/*）は実体コピーにする。** npm の workspaces に任せると
+// **ワークスペース参照（@ts5250/*）は実体コピーにする。** npm の workspaces に任せると
 // node_modules 側がシンボリックリンクになり、electron-builder の複写や Windows での展開で
 // 壊れうる（`--install-links` を付けても workspace はリンクのまま作られる。実測）。
 // そこで npm には**第三者依存だけ**を解決させ、自前パッケージは後から実体で置く。
@@ -18,7 +18,7 @@
 // 出来上がり（= 配布物の resources/app/）:
 //   app-stage/
 //     package.json                       … 第三者依存の宣言（npm install の入力）
-//     node_modules/                      … 第三者依存 ＋ @as400web/*（実体コピー）
+//     node_modules/                      … 第三者依存 ＋ @ts5250/*（実体コピー）
 //     packages/web-ui/dist               … 静的アセット（--web-root が cwd 相対で読む）
 import { execSync } from "node:child_process";
 import {
@@ -56,7 +56,7 @@ function requireBuilt(p, hint) {
 for (const name of LIB_PACKAGES) {
   requireBuilt(join(REPO, "packages", name, "dist"), "npm run build");
 }
-requireBuilt(join(REPO, "packages", "web-ui", "dist", "index.html"), "npm run build -w @as400web/web-ui");
+requireBuilt(join(REPO, "packages", "web-ui", "dist", "index.html"), "npm run build -w @ts5250/web-ui");
 
 // 第三者依存は**各 package.json から集める**（ここに書き写すと、依存を足したときに
 // 配布物だけ古いという最悪の壊れ方をする）
@@ -64,7 +64,7 @@ const thirdParty = {};
 for (const name of LIB_PACKAGES) {
   const deps = readJson(join(REPO, "packages", name, "package.json")).dependencies ?? {};
   for (const [dep, range] of Object.entries(deps)) {
-    if (!dep.startsWith("@as400web/")) thirdParty[dep] = range;
+    if (!dep.startsWith("@ts5250/")) thirdParty[dep] = range;
   }
 }
 
@@ -110,7 +110,7 @@ try {
 log("==> 自前パッケージを node_modules へ実体コピー");
 for (const name of LIB_PACKAGES) {
   const from = join(REPO, "packages", name);
-  const to = join(STAGE, "node_modules", "@as400web", name);
+  const to = join(STAGE, "node_modules", "@ts5250", name);
   rmSync(to, { recursive: true, force: true }); // npm がリンクを張っていても消してから置く
   mkdirSync(to, { recursive: true });
   // package.json は exports / type を運ぶので必須。dist だけでは import が解決できない

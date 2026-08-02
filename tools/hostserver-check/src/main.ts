@@ -6,13 +6,13 @@
  *
  * 使い方:
  *   AS400_HOST=pub400.com AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run check -w @as400web/hostserver-check -- --tls
+ *     npm run check -w @ts5250/hostserver-check -- --tls
  *
  * パスワードは環境変数からのみ受け取る（引数はプロセス一覧に見えるため）。
  */
 import "./log-init.js";
-import { As400Error } from "@as400web/base";
-import { signon, resolveServicePort } from "@as400web/hostserver";
+import { As400Error } from "@ts5250/base";
+import { signon, resolveServicePort } from "@ts5250/hostserver";
 
 const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.com";
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];

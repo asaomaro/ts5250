@@ -1,4 +1,4 @@
-import type { Watermark } from "@as400web/server";
+import type { Watermark } from "@ts5250/server";
 
 /**
  * ウォーターマーク（画面に重ねる透かし）の実効値を組み立てる。

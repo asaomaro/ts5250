@@ -18,11 +18,11 @@
 //
 // 実行: AS400_PASSWORD=... node scripts/research-sql-exec.mjs
 import { readFileSync } from "node:fs";
-import { DbConnection, query } from "@as400web/tn5250";
+import { DbConnection, query } from "@ts5250/tn5250";
 import { DB_CP, DB_REQ, ORS } from "../packages/tn5250/dist/hostserver/db/db-datastream.js";
 import { parseSqlca } from "../packages/tn5250/dist/hostserver/db/db-reply.js";
 import { findParam } from "../packages/tn5250/dist/hostserver/datastream.js";
-import { codecForCcsid } from "@as400web/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 const out = (s) => process.stdout.write(s + "\n");
 // **QTEMP を使う**（必ず存在し、接続ごとに消えるので後片付けが要らない）

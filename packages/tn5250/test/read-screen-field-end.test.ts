@@ -5,7 +5,7 @@ import {
   buildReadScreenResponse,
   buildReadScreenExtendedResponse
 } from "../src/protocol/save-screen.js";
-import { codecForCcsid } from "@as400web/ebcdic/codec";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(37);
