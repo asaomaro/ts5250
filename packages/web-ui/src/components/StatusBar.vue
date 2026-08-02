@@ -258,7 +258,8 @@ const macroStop = computed<string | undefined>(() => {
 .fk {
   font-family: var(--mono);
   font-size: 10.5px;
-  padding: 3px 8px;
+  /* 縦を詰めて画面に回す。横は押しやすさのため残す */
+  padding: 2px 8px;
   background: var(--crt);
   color: var(--muted);
   border: 1px solid var(--crt-line);

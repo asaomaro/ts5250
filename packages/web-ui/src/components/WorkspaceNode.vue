@@ -203,7 +203,9 @@ const activeIsSpool = computed(() => group.value.activeTab?.startsWith("spool:")
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 4px;
+  /* **画面を大きく取る**（利用者の指摘: ACS 相当の余白に）。
+     ペインの枠線が仕切りになるので、外側の余白は要らない */
+  padding: 0;
   position: relative;
 }
 .group[data-focused="true"] {

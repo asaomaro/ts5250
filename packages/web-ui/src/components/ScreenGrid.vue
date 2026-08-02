@@ -42,7 +42,7 @@ import {
 import { GRID_COLOR } from "@as400web/tn5250/browser";
 import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
-import { fitFont, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
+import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import {
   fieldSlices,
@@ -2791,14 +2791,14 @@ function charWidthPx(): number {
   return fontPx.value * 0.6;
 }
 
-/** マウス座標 → セル (row,col)（1 始まり・画面内にクランプ）。padding 8px/10px を差し引く。 */
+/** マウス座標 → セル (row,col)（1 始まり・画面内にクランプ）。グリッドの内側余白を差し引く。 */
 function cellAt(ev: MouseEvent): { row: number; col: number } | undefined {
   const el = gridEl.value;
   if (!el) return undefined;
   const rect = el.getBoundingClientRect();
   const lineH = fontPx.value * 1.25;
-  const col = Math.floor((ev.clientX - rect.left - 10) / charWidthPx()) + 1;
-  const row = Math.floor((ev.clientY - rect.top - 8) / lineH) + 1;
+  const col = Math.floor((ev.clientX - rect.left - GRID_PAD_X) / charWidthPx()) + 1;
+  const row = Math.floor((ev.clientY - rect.top - GRID_PAD_Y) / lineH) + 1;
   return {
     row: Math.max(1, Math.min(row, props.snapshot.rows)),
     col: Math.max(1, Math.min(col, props.snapshot.cols))
@@ -3042,8 +3042,8 @@ function onGridClick(ev: MouseEvent): void {
   if (!el || (ev.target as HTMLElement).tagName === "INPUT") return; // 入力欄は native focus で扱う
   const rect = el.getBoundingClientRect();
   const lineH = fontPx.value * 1.25;
-  const col = Math.floor((ev.clientX - rect.left - 10) / charWidthPx()) + 1; // padding 10px
-  const row = Math.floor((ev.clientY - rect.top - 8) / lineH) + 1; // padding 8px
+  const col = Math.floor((ev.clientX - rect.left - GRID_PAD_X) / charWidthPx()) + 1;
+  const row = Math.floor((ev.clientY - rect.top - GRID_PAD_Y) / lineH) + 1;
   if (row < 1 || row > props.snapshot.rows || col < 1 || col > props.snapshot.cols) return;
   // 非入力セルへのクリック = free モード。フォーカス中の入力欄を外してオーバーレイを出す
   const active = document.activeElement;
@@ -3067,8 +3067,8 @@ function fit(): void {
   if (!host) return;
   const cols = props.snapshot.cols;
   const rows = props.snapshot.rows;
-  const availW = host.clientWidth - 20; // padding 10px * 2
-  const availH = host.clientHeight - 16; // padding 8px * 2
+  const availW = host.clientWidth - GRID_PAD_X * 2;
+  const availH = host.clientHeight - GRID_PAD_Y * 2;
   // 実測字幅（現フォントでの 1 文字幅）を使う。0.6em 近似だと実フォントとずれ、
   // まだ横に余白があるのに幅制約が先に効いて早く縮小してしまう（右余白の主因）。
   const measured = ruler ? ruler.getBoundingClientRect().width / 10 : 0;
@@ -3192,7 +3192,11 @@ onBeforeUnmount(() => {
   <div
     ref="gridEl"
     class="grid"
-    :style="{ fontSize: fontPx + 'px' }"
+    :style="{
+      fontSize: fontPx + 'px',
+      '--grid-pad-x': GRID_PAD_X + 'px',
+      '--grid-pad-y': GRID_PAD_Y + 'px'
+    }"
     :data-focused="focused"
     :data-opt-hints="optHints"
     @click="onGridClick"
@@ -3450,9 +3454,11 @@ onBeforeUnmount(() => {
  */
 .opmsg {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 8px;
+  /* **桁 1 の位置に合わせる。** `.grid` の内側余白と同じ値を使う
+     （別々に書くと、片方を直したときに 1 桁ずれる） */
+  left: var(--grid-pad-x);
+  right: var(--grid-pad-x);
+  bottom: var(--grid-pad-y);
   line-height: 1.25;
   background: var(--crt);
   color: var(--t-white, var(--ink));
@@ -3462,11 +3468,12 @@ onBeforeUnmount(() => {
 }
 .grid {
   position: relative;
-  /* 桁位置は ch 単位・DBCS=2ch を仮定するので、和欧 1:2 を保つ日本語等幅を使う（--screen-mono） */
+  /* 内側余白は `fitFont.ts` の `GRID_PAD_*` から流し込む（CSS に数字を置かない）。
+     フィット計算・クリックの桁逆算・`.opmsg` の桁 1 が同じ値を見る */
   font-family: var(--screen-mono);
   line-height: 1.25;
   background: var(--crt);
-  padding: 8px 10px;
+  padding: var(--grid-pad-y) var(--grid-pad-x);
   white-space: pre;
   /* フォントを幅・高さ両方にフィットさせるためスクロールバーは出さない */
   overflow: hidden;

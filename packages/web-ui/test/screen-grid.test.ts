@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@as400web/tn5250";
@@ -724,8 +725,10 @@ describe("ScreenGrid", () => {
     const fontPx = parseFloat(el.style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5; // padding 10px + セル中央
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5; // padding 8px
+    // **余白は定数から引く**（`GRID_PAD_*`）。数字を書くと、余白を詰めたときに
+    // ここだけ取り残されて「クリック位置がずれた」ように見える（実際に踏んだ）
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5; // セル中央
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     // テキストは col5..14。row3..5 の col7..10（= C..F / M..P / W..Z）を矩形選択
     await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(5) }));
@@ -782,8 +785,8 @@ describe("ScreenGrid", () => {
     const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     // col7..10（4 桁）× row3..4 の空白を矩形選択
     await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(4) }));
@@ -807,8 +810,8 @@ describe("ScreenGrid", () => {
     const fontPx = parseFloat(el.style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     await grid.trigger("mousedown", { button: 0, clientX: xOf(7), clientY: yOf(3) });
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(10), clientY: yOf(5) }));
     await nextTick();
@@ -833,8 +836,8 @@ describe("ScreenGrid", () => {
     const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     await grid.trigger("dblclick", { clientX: xOf(10), clientY: yOf(3) }); // CDEF の途中（E）
     await nextTick();
     expect(w.find(".rect-sel").exists()).toBe(true);
@@ -864,7 +867,10 @@ describe("ScreenGrid", () => {
     const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    await grid.trigger("dblclick", { clientX: (8 - 1) * charW + 10 + charW * 0.5, clientY: (3 - 1) * lineH + 8 + lineH * 0.5 });
+    await grid.trigger("dblclick", {
+      clientX: (8 - 1) * charW + GRID_PAD_X + charW * 0.5,
+      clientY: (3 - 1) * lineH + GRID_PAD_Y + lineH * 0.5
+    });
     await nextTick();
     expect(w.find(".rect-sel").exists()).toBe(true);
     expect(w.emitted("selection-start")).toEqual([[3, 5]]); // 語頭＝欄の先頭桁

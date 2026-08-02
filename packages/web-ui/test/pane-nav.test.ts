@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
@@ -347,8 +348,9 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    // 余白は定数から引く（数字を書くと余白変更で取り残される）
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     await grid.trigger("mousedown", { button: 0, clientX: xOf(5), clientY: yOf(3) });
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(9), clientY: yOf(5) }));
     window.dispatchEvent(new MouseEvent("mouseup"));
@@ -398,8 +400,9 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
     const charW = fontPx * 0.6;
     const lineH = fontPx * 1.25;
-    const xOf = (c: number) => (c - 1) * charW + 10 + charW * 0.5;
-    const yOf = (r: number) => (r - 1) * lineH + 8 + lineH * 0.5;
+    // 余白は定数から引く（数字を書くと余白変更で取り残される）
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
     await grid.trigger("mousedown", { button: 0, clientX: xOf(11), clientY: yOf(3) }); // 欄の中から開始
     window.dispatchEvent(new MouseEvent("mousemove", { clientX: xOf(20), clientY: yOf(5) }));
     window.dispatchEvent(new MouseEvent("mouseup"));
