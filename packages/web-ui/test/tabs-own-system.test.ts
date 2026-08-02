@@ -272,3 +272,22 @@ describe("システムが設定から消えたタブ", () => {
     w.unmount();
   });
 });
+
+/**
+ * **パンくず第 1 段の見た目**（`20260802-crumb-system-spacing`・利用者の指摘）。
+ *
+ * 色の点が挟まったので、区切りの `:` は要らなくなった。段の高さ揃えと余白は CSS の話で
+ * jsdom では測れないため（`verify-view-cascade.mjs` の隣で実測している）、
+ * ここでは**文字として `:` が戻ってこないこと**だけを固定する。
+ */
+describe("パンくずの「システム」段", () => {
+  it("**区切りの `:` を出さない**（色の点がその役目を果たしている）", async () => {
+    const w = mount(App, { attachTo: document.body });
+    systemsStore.select(A.ref);
+    await nextTick();
+    const crumb = w.find(".crumbs .crumb");
+    expect(crumb.text()).toContain("システム");
+    expect(crumb.text(), "区切りの `:` が戻っている").not.toContain("システム:");
+    w.unmount();
+  });
+});

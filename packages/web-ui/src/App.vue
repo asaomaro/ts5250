@@ -261,7 +261,8 @@ onBeforeUnmount(() => {
         <button class="crumb" :class="{ on: atSystems }" :disabled="atSystems" @click="gotoSystems">
           <!-- **色は点で出す**（`20260802-tabs-own-system`）。文字は着色しない
                ——テーマをまたいだ文字色のコントラストを保証できないため -->
-          <span class="lvl">システム:</span>
+          <!-- **`:` は置かない**（利用者の指摘）。色の点が区切りの役目を果たしている -->
+          <span class="lvl">システム</span>
           <SystemDot v-if="systemsStore.menuSystem" :system-ref="systemsStore.menuSystem" />
           <template v-else>—</template>
         </button>
@@ -355,12 +356,25 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .crumb {
+  /**
+   * **inline-flex で並べる**（利用者の指摘: システム名の高さが他の段より小さく見える）。
+   *
+   * 素のインライン並びだと、中に入る `SystemDot`（inline-flex）のベースラインが
+   * **最初の子＝色の点**から決まる。点には文字が無いので、名前の行box が他の段と
+   * 揃わず、1 段だけ低く小さく見えていた。flex にすれば中身が中央で揃う。
+   *
+   * `gap` は**ラベルと色の点の間**の余白でもある（利用者の指摘: 近すぎる）。
+   */
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   background: none;
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 2px 9px;
   font: inherit;
   font-size: 0.86rem;
+  line-height: 1.5;
   color: var(--muted);
   cursor: pointer;
   max-width: 22ch;
@@ -394,8 +408,8 @@ onBeforeUnmount(() => {
 }
 /* 開いているタブ数。行き先に何があるかを押す前に知らせる */
 .tabbadge {
+  /* 余白は `.crumb` の `gap` が持つ（margin と二重に効かせない） */
   display: inline-block;
-  margin-left: 6px;
   min-width: 1.5em;
   padding: 0 5px;
   border-radius: 999px;
