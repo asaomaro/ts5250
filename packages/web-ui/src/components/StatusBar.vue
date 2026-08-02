@@ -46,16 +46,24 @@ const inputState = computed<{ label: string; ok: boolean }>(() => {
   if (f.protected) return { label: "保護", ok: false };
   return { label: "入力可", ok: true };
 });
-const fkeys = computed<{ key: AidKey; label: string }[]>(() =>
+/**
+ * 下段の AID ボタン。**表示はキー名だけ**にして、意味は `title`（ホバー）へ回す。
+ *
+ * 説明を並べると横幅を食い、**キーの並びが読み取りにくくなる**（利用者の指摘）。
+ * F13〜F24（Shift 側）は元から名前だけで、そちらのほうが一覧として見やすい。
+ *
+ * **説明を消すのではなく移す**——`title` に残せば、初めて触る人も辿れる。
+ */
+const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
   shift.value
     ? [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].map((n) => ({ key: `F${n}` as AidKey, label: `F${n}` }))
     : [
-        { key: "F1", label: "F1 ヘルプ" },
-        { key: "F3", label: "F3 終了" },
-        { key: "F4", label: "F4 プロンプト" },
-        { key: "F5", label: "F5 更新" },
-        { key: "F12", label: "F12 取消" },
-        { key: "Enter", label: "⏎ 実行" }
+        { key: "F1", label: "F1", hint: "ヘルプ" },
+        { key: "F3", label: "F3", hint: "終了" },
+        { key: "F4", label: "F4", hint: "プロンプト" },
+        { key: "F5", label: "F5", hint: "更新" },
+        { key: "F12", label: "F12", hint: "取消" },
+        { key: "Enter", label: "⏎", hint: "実行" }
       ]
 );
 function press(k: AidKey): void {
@@ -133,19 +141,19 @@ const macroStop = computed<string | undefined>(() => {
       `.msgline` へ移した。同じ性質のものを 2 か所に散らさない。
     -->
     <span class="fkeys">
-      <button v-for="f in fkeys" :key="f.key" class="fk" @click="press(f.key)">{{ f.label }}</button>
+      <button v-for="f in fkeys" :key="f.key" class="fk" :title="f.hint" @click="press(f.key)">
+        {{ f.label }}
+      </button>
       <!--
         Attn / SysReq はキー設定（⌨ キー）で任意のキーへ割り当てられるが、既定のバインドを持たない。
         設定を触らない利用者にも押せる導線として、他の AID と同じ .fk 意匠でここに並べる。
         SysReq だけは**押しても送らない**——画面下部のシステム要求行を開くのが実機・ACS の動きで、
         送信は行を確定したときなので、親（EmulatorPane）に投げて入口を 1 本にする。
       -->
-      <button class="fk" title="アテンション（ホストの ATNPGM を呼ぶ）" @click="press('Attn')">
-        Attn 割込
+      <button class="fk" title="割込（アテンション。ホストの ATNPGM を呼ぶ）" @click="press('Attn')">
+        Attn
       </button>
-      <button class="fk" title="システム要求行を開く" @click="emit('sysreq')">
-        SysReq システム要求
-      </button>
+      <button class="fk" title="システム要求（行を開く）" @click="emit('sysreq')">SysReq</button>
     </span>
   </div>
 </template>
