@@ -18,7 +18,17 @@ import { openHeaderMenu, toggleHeaderMenu, closeHeaderMenu } from "../composable
  * 表示設定ポップオーバー。各項目はセグメント（またはセレクト）で、選んだ値は**保存され**
  * （localStorage）、全画面に適用・再読み込み後も維持される。
  */
-const props = defineProps<{ sessionId: string }>();
+type Key = keyof ViewSettings;
+
+const props = defineProps<{
+  sessionId: string;
+  /**
+   * 出す項目を絞る（省略時は全部）。**ペインの種類ごとに中身が違う**ため
+   * （`20260802-view-menu-refine`）——帳票を読む画面（プリンター・スプール）で
+   * 5250 画面専用の項目を並べても効かない。並びは `VIEW_ITEMS` の順のまま。
+   */
+  keys?: readonly Key[] | undefined;
+}>();
 
 /**
  * **編集する層**（`20260802-appearance-and-view-cascade`）。
@@ -46,23 +56,23 @@ const defaults = computed(() => viewSettings.settings);
 function overridden(key: Key): boolean {
   return layer.value === "session" && viewSettings.isOverridden(props.sessionId, key);
 }
-/** 継承中（＝この層で値を決めていない）か */
-function inherited(key: Key): boolean {
-  return layer.value === "session" && !overridden(key);
-}
-/** 継承中に併記する実値のラベル */
-function inheritedLabel(key: Key): string {
-  const item = VIEW_ITEMS.find((i) => i.key === key);
-  const v = defaults.value[key];
-  return item?.opts.find((o) => o.value === v)?.label ?? String(v);
+/**
+ * その選択肢が**全体の既定**か（`このセッション` 層でだけ印を付ける）。
+ *
+ * 「既定に従う」という選択肢は**置かない**（利用者の指摘）。値の一覧に印を添えるだけにして、
+ * 選択肢が 1 つ増えることによる横幅と読み取りの負担を無くす。
+ */
+function isDefault(key: Key, value: ViewSettings[Key]): boolean {
+  return layer.value === "session" && defaults.value[key] === value;
 }
 /** このセッションに 1 つでも個別指定があるか（「すべて既定に戻す」を出す条件） */
 const hasOverrides = computed(() => viewSettings.hasOverrides(props.sessionId));
 
-type Key = keyof ViewSettings;
 // 項目定義（表示順・選択肢）は store の VIEW_ITEMS に集約（キー設定の順送りと共有）。
 // フォントは選択肢が環境依存なのでここには含めず、下のセレクトで別途扱う。
-const ROWS = VIEW_ITEMS;
+const ROWS = computed(() => (props.keys ? VIEW_ITEMS.filter((i) => props.keys!.includes(i.key)) : VIEW_ITEMS));
+/** フォントの欄を出すか（`keys` で絞られていれば含まれているときだけ） */
+const showFont = computed(() => !props.keys || props.keys.includes("font"));
 
 /**
  * メニューの表示単位。`group` を持つ項目は**1 行にまとめ**、開いたときに
@@ -81,11 +91,11 @@ interface MenuRow {
 const MENU_ROWS = computed<MenuRow[]>(() => {
   const out: MenuRow[] = [];
   const seen = new Set<string>();
-  for (const it of ROWS) {
+  for (const it of ROWS.value) {
     if (it.group) {
       if (seen.has(it.group)) continue;
       seen.add(it.group);
-      const items = ROWS.filter((x) => x.group === it.group);
+      const items = ROWS.value.filter((x) => x.group === it.group);
       out.push({ id: it.group, label: it.groupLabel ?? it.label, items, expandable: true, wide: false });
     } else {
       out.push({ id: String(it.key), label: it.label, items: [it], expandable: !!it.expandable, wide: !!it.wide });
@@ -168,18 +178,24 @@ function pickFromPalette(key: Key, value: ViewSettings[Key]): void {
 }
 
 /** その値がいまの設定値か。常にどれか 1 つが選択状態になる。 */
+/** 選択状態は**実効値**（継承中なら既定の値が選ばれて見える） */
 function isSel(key: Key, value: ViewSettings[Key]): boolean {
-  // 継承中は「既定に従う」が選択状態。値そのものは併記で見せる
-  return !inherited(key) && eff.value[key] === value;
+  return eff.value[key] === value;
 }
-/** いま編集している層へ書く */
+/**
+ * いま編集している層へ書く。
+ *
+ * **`このセッション` 層で既定と同じ値を選んだら、上書きを消して「追従」に戻す。**
+ * これが無いと、一度個別指定したら二度と既定の変更に追従できなくなる
+ * （`すべて既定に戻す` しか手が無くなる）。印はそのことの目印でもある。
+ */
 function setVal(key: Key, value: ViewSettings[Key]): void {
-  if (layer.value === "default") viewSettings.set(key, value as never);
+  if (layer.value === "default") {
+    viewSettings.set(key, value as never);
+    return;
+  }
+  if (defaults.value[key] === value) viewSettings.clearOverride(props.sessionId, key);
   else viewSettings.setOverride(props.sessionId, key, value as never);
-}
-/** その項目を「既定に従う」へ戻す */
-function follow(key: Key): void {
-  viewSettings.clearOverride(props.sessionId, key);
 }
 /** このセッションの上書きを全部捨てる */
 function resetAll(): void {
@@ -256,23 +272,17 @@ onBeforeUnmount(() => {
           </span>
           <div class="seg" role="group" :aria-label="r.label">
             <!--
-              **継承中は実値を併記する。** 「既定に従う」だけだと、何色なのかを
-              確かめるのに `外観` や既定側を開き直すことになる。
+              **選択肢は値だけ**（利用者の指摘）。どれが全体の既定かは小さな印で示し、
+              その値を選べば追従に戻る（`setVal` の注記を参照）。
             -->
-            <button
-              v-if="layer === 'session'"
-              :class="{ on: inherited(r.items[0]!.key) }"
-              @click="follow(r.items[0]!.key)"
-            >
-              既定に従う<template v-if="inherited(r.items[0]!.key)">（{{ inheritedLabel(r.items[0]!.key) }}）</template>
-            </button>
             <button
               v-for="o in r.items[0]!.opts"
               :key="String(o.value)"
               :class="{ on: isSel(r.items[0]!.key, o.value) }"
+              :title="isDefault(r.items[0]!.key, o.value) ? '全体の既定（選ぶと既定に追従します）' : undefined"
               @click="setVal(r.items[0]!.key, o.value)"
             >
-              {{ o.label }}
+              {{ o.label }}<span v-if="isDefault(r.items[0]!.key, o.value)" class="vsm-def">·</span>
             </button>
           </div>
         </div>
@@ -283,26 +293,17 @@ onBeforeUnmount(() => {
             <div v-if="r.items.length > 1" class="vsm-section">{{ it.label }}</div>
             <div class="vsm-palette" role="listbox" :aria-label="`${it.label}のデザイン`">
               <button
-                v-if="layer === 'session'"
-                class="pal-item pal-follow"
-                role="option"
-                :aria-selected="inherited(it.key)"
-                :class="{ on: inherited(it.key) }"
-                @click="follow(it.key)"
-              >
-                <span class="pal-name">既定に従う（{{ inheritedLabel(it.key) }}）</span>
-              </button>
-              <button
                 v-for="o in it.opts"
                 :key="String(o.value)"
                 class="pal-item"
                 role="option"
                 :aria-selected="isSel(it.key, o.value)"
                 :class="{ on: isSel(it.key, o.value) }"
+                :title="isDefault(it.key, o.value) ? '全体の既定（選ぶと既定に追従します）' : undefined"
                 @click="pickFromPalette(it.key, o.value)"
               >
                 <span class="pal-prev" :data-kind="it.key" :data-style="String(o.value)">Ab</span>
-                <span class="pal-name">{{ o.label }}</span>
+                <span class="pal-name">{{ o.label }}<span v-if="isDefault(it.key, o.value)" class="vsm-def">·</span></span>
               </button>
             </div>
           </template>
@@ -311,7 +312,7 @@ onBeforeUnmount(() => {
 
       <!-- フォント（画面グリッド）: インストール済みフォントから選ぶ（「推奨」の固定一覧は廃止）。
            桁が揃うものを先に出すが、ずれるものも選べる（注意書きを出すだけ） -->
-      <div class="vsm-row wide">
+      <div v-if="showFont" class="vsm-row wide">
         <span class="vsm-label">フォント（画面）</span>
         <select class="vsm-select" :value="fontValue" aria-label="画面フォント" @change="onFontChange">
           <option :value="SYSTEM_FONT_ID">{{ SYSTEM_FONT_LABEL }}</option>
@@ -361,7 +362,8 @@ onBeforeUnmount(() => {
 .vsm-btn {
   display: inline-flex;
   align-items: center;
-  height: 28px;
+  /* キー・HTML（`.theme-btn`）と同じ高さ（利用者の指摘: 高い） */
+  height: 22px;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: 12px;
@@ -619,8 +621,10 @@ onBeforeUnmount(() => {
   color: var(--accent);
   vertical-align: middle;
 }
-/* パレットの「既定に従う」。見本を持たないので名前だけを widely 置く */
-.pal-item.pal-follow {
-  justify-content: center;
+/* 全体の既定を示す小さな印。値の右にそっと置く（選択肢を 1 つ増やさないための表現） */
+.vsm-def {
+  margin-left: 3px;
+  color: var(--accent);
+  font-weight: 700;
 }
 </style>

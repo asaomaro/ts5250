@@ -16,6 +16,7 @@ import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
 import { systemsStore } from "./stores/systems.js";
+import type { ViewSettings } from "./stores/viewSettings.js";
 import { isPaneTab } from "./paneLabels.js";
 
 workspaceStore.init();
@@ -54,6 +55,31 @@ const activeIsEmulator = computed(() => {
 const activeSessionId = computed(() => {
   const tab = workspaceStore.focusedGroup().activeTab;
   return tab && !isPaneTab(tab) ? tab : "";
+});
+
+/**
+ * **`⚙ 表示` を出す対象**（`20260802-view-menu-refine`）。
+ *
+ * エミュレータに加え、**帳票を読む画面**（プリンターセッション・スプール）でも出す。
+ * ただし項目は同じではない——5250 画面専用の設定を並べても効かないので、
+ * **そのペインで実際に効くものだけ**を渡す。
+ *
+ * 帳票の本文は SCS の復号を通った Unicode 文字列として届き、SO/SI は復号時に
+ * 消費され、生バイトは端末に来ない。したがって SO/SI 表示・表示コードは
+ * **この経路では実装できない**ので出さない（spec の注記を参照）。
+ */
+const REPORT_VIEW_KEYS: readonly (keyof ViewSettings)[] = ["linkify", "font"];
+const viewMenuTarget = computed<
+  { sessionId: string; keys?: readonly (keyof ViewSettings)[] } | undefined
+>(() => {
+  if (showLauncher.value) return undefined;
+  const tab = workspaceStore.focusedGroup().activeTab;
+  if (!tab) return undefined;
+  if (activeIsEmulator.value) return { sessionId: activeSessionId.value };
+  // スプールはタブ ID、プリンターはセッション ID を鍵にする（どちらも文字列で衝突しない）
+  if (tab.startsWith("spool:")) return { sessionId: tab, keys: REPORT_VIEW_KEYS };
+  if (sessionsStore.get(tab)?.kind === "printer") return { sessionId: tab, keys: REPORT_VIEW_KEYS };
+  return undefined;
 });
 const showKeys = ref(false);
 
@@ -304,7 +330,12 @@ onBeforeUnmount(() => {
         </button>
         <!-- マクロは 5250 セッション専用（記録も再生も画面操作なので） -->
         <MacroMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
-        <ViewSettingsMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
+        <ViewSettingsMenu
+          v-if="viewMenuTarget"
+          :key="viewMenuTarget.sessionId"
+          :session-id="viewMenuTarget.sessionId"
+          :keys="viewMenuTarget.keys"
+        />
         <DesignMenu />
       </div>
       <span v-if="authStore.user" class="whoami">

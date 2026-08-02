@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from "vue";
+import ReportText from "./ReportText.vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 import { setPrinterOutput, startPrinter, stopPrinter } from "../session-controller.js";
 import { renderSpoolHtml } from "@as400web/scs/spool-html";
@@ -341,7 +342,8 @@ function printReport(): void {
           </p>
           <p class="hint">画面で読みたい場合は、セッション設定の「印刷の経路」を「画面で見る」に戻してください。</p>
         </div>
-        <pre v-else-if="selected">{{ selectedText }}</pre>
+        <!-- 本文は共用の `ReportText` へ（`⚙ 表示` のリンク化・フォントが効く） -->
+        <ReportText v-else-if="selected" :session-id="sessionId" :text="selectedText" />
         <div v-else class="viewer-empty">スプールを選択すると帳票を表示します</div>
       </div>
     </div>

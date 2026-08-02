@@ -1,5 +1,4 @@
 import { reactive } from "vue";
-import { appTheme } from "../composables/useTheme.js";
 import type { ScreenFontId } from "../composables/screenFonts.js";
 
 /**
@@ -72,14 +71,6 @@ export interface ViewSettings {
    * **推測を含む機能なので既定は none**（勝手に有効化しない。`windowFrame` の既定が none なのと同じ扱い）。
    */
   optHints: OptHintStyle;
-  /**
-   * **そのペインの表示モード**（`20260802-appearance-and-view-cascade`）。
-   *
-   * 既定は「外観に従う」——`initViewSettings` がアプリ全体の実効値を入れ、
-   * `外観` で変えれば追従する。セッション個別に指定すると**そのペインの中だけ**が変わる。
-   * `system`（OS 追従）はアプリ側で解決済みの概念なのでここには持ち込まない。
-   */
-  theme: "light" | "dark";
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -192,7 +183,6 @@ export const VIEW_ITEMS: ViewItemDef[] = [
       { value: "blur", label: "ぼやけ" },
     ],
   },
-  { key: "theme", label: "テーマ", opts: [{ value: "light", label: "通常" }, { value: "dark", label: "ダーク" }] },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
   { key: "surface", label: "画面の質感", opts: [{ value: "flat", label: "フラット" }, { value: "crt", label: "CRT" }] },
 ];
@@ -212,7 +202,6 @@ const FALLBACK: ViewSettings = {
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",
-  theme: "dark", // initViewSettings が外観の実効値で上書きする
   buttons: "none",
   windowFrame: "none",
   windowBackdrop: "none",
@@ -355,16 +344,5 @@ export function initViewSettings(): void {
   } catch {
     /* 壊れていれば既定のまま */
   }
-  // **テーマの既定は `外観` に従う。** 保存値があってもここで上書きする——
-  // 「外観に従う」が既定である以上、記憶しているのは `外観` 側であって、こちらではない
-  state.settings = { ...state.settings, theme: appTheme() };
   state.overrides = {};
-}
-
-/**
- * `外観` の表示モードが変わったら、**上書きしていないペイン**へ流す。
- * 個別指定したペインは追従しない（それが「個別指定」の意味）。
- */
-export function syncThemeFromAppearance(): void {
-  state.settings = { ...state.settings, theme: appTheme() };
 }

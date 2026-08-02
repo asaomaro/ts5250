@@ -250,7 +250,8 @@ onBeforeUnmount(() => {
 .mcm-btn {
   display: inline-flex;
   align-items: center;
-  height: 28px;
+  /* キー・HTML（`.theme-btn`）と同じ高さ（利用者の指摘: 高い） */
+  height: 22px;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: 12px;

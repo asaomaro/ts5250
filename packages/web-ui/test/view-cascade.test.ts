@@ -4,6 +4,7 @@ import { nextTick } from "vue";
 import ViewSettingsMenu from "../src/components/ViewSettingsMenu.vue";
 import DesignMenu from "../src/components/DesignMenu.vue";
 import PaneTabs from "../src/components/PaneTabs.vue";
+import ReportText from "../src/components/ReportText.vue";
 import { viewSettings, initViewSettings } from "../src/stores/viewSettings.js";
 import { appearance, initAppearance } from "../src/stores/appearance.js";
 import { workspaceStore } from "../src/stores/workspace.js";
@@ -142,14 +143,53 @@ describe("表示メニュー", () => {
     w.unmount();
   });
 
-  it("**継承中は実値を併記する**（確かめるのに別のメニューを開かせない）", async () => {
+  /**
+   * **「既定に従う」の選択肢は置かない**（`20260802-view-menu-refine`・利用者の指摘）。
+   * 値の一覧に小さな印を添えるだけにして、選択肢が 1 つ増えるのを避ける。
+   */
+  it("**選択肢は値だけ／既定に印が付く**", async () => {
     viewSettings.set("surface", "crt");
     const w = await openMenu(mountMenu());
     await row(w, "設定の対象").findAll(".seg button").find((b) => b.text() === "このセッション")!.trigger("click");
-    const follow = row(w, "画面の質感").findAll(".seg button").find((b) => b.text().startsWith("既定に従う"))!;
-    expect(follow.text()).toContain("CRT");
-    expect(follow.classes(), "継承中なのに選択状態でない").toContain("on");
+    const btns = row(w, "画面の質感").findAll(".seg button");
+    expect(btns.some((b) => b.text().includes("既定に従う")), "「既定に従う」が残っている").toBe(false);
+    const crt = btns.find((b) => b.text().startsWith("CRT"))!;
+    expect(crt.find(".vsm-def").exists(), "既定の印が付いていない").toBe(true);
+    expect(crt.classes(), "継承中は既定の値が選択状態に見えるはず").toContain("on");
     w.unmount();
+  });
+
+  /**
+   * **既定と同じ値を選んだら追従に戻す。** これが無いと、一度個別指定したら
+   * 二度と既定の変更に追従できなくなる（`すべて既定に戻す` しか手が無くなる）。
+   */
+  it("**既定と同じ値を選ぶと上書きが消える**（追従に戻る）", async () => {
+    const w = await openMenu(mountMenu());
+    await row(w, "設定の対象").findAll(".seg button").find((b) => b.text() === "このセッション")!.trigger("click");
+    await row(w, "画面の質感").findAll(".seg button").find((b) => b.text().startsWith("CRT"))!.trigger("click");
+    expect(viewSettings.isOverridden(S1, "surface")).toBe(true);
+
+    // 既定（フラット）を押す＝追従へ戻る
+    await row(w, "画面の質感").findAll(".seg button").find((b) => b.text().startsWith("フラット"))!.trigger("click");
+    expect(viewSettings.isOverridden(S1, "surface"), "上書きが残っている").toBe(false);
+    w.unmount();
+  });
+
+  it("**`keys` で項目を絞れる**（帳票の画面では効くものだけ出す）", async () => {
+    const w = mount(ViewSettingsMenu, {
+      props: { sessionId: S1, keys: ["linkify", "font"] },
+      attachTo: document.body
+    });
+    await openMenu(w);
+    const labels = w.findAll(".vsm-label").map((l) => l.text());
+    expect(labels).toContain("リンク化");
+    expect(labels).toContain("フォント（画面）");
+    expect(labels, "5250 画面専用の項目まで出ている").not.toContain("SO/SI 表示");
+    w.unmount();
+  });
+
+  it("表示設定に `theme` はもう無い（外観の一本立てに戻した）", () => {
+    expect(Object.keys(viewSettings.settings)).not.toContain("theme");
   });
 
   it("個別指定した項目に印が出て、すべて既定に戻すで消える", async () => {
@@ -214,6 +254,42 @@ describe("タブのシステム名トグル", () => {
     const w = mount(PaneTabs, { props: { group: g } });
     expect(w.findAll(".sysname").length).toBe(0);
     expect(w.find(".tab").attributes("style") ?? "", "色帯まで消している").toContain("--tab-sys");
+    w.unmount();
+  });
+});
+
+/**
+ * **帳票の画面の「表示」**（`20260802-view-menu-refine`・利用者の指示）。
+ *
+ * プリンターセッションとスプールでも `⚙ 表示` を出す。ただし項目は
+ * **その経路で実際に効くもの**だけ——帳票の本文は SCS の復号を通った Unicode 文字列で
+ * 届き、SO/SI は復号時に消費されるので、SO/SI 表示と表示コードは実装できない。
+ */
+describe("帳票の画面の表示設定", () => {
+  it("**リンク化が効く**（URL が `<a>` になる）", () => {
+    const w = mount(ReportText, {
+      props: { sessionId: "p1", text: "詳細は https://example.com/x を参照\n次の行" }
+    });
+    const a = w.find("a");
+    expect(a.exists()).toBe(true);
+    expect(a.text()).toContain("example.com");
+    expect(w.text(), "本文が失われている").toContain("次の行");
+    w.unmount();
+  });
+
+  it("リンク化を切ると素のまま出る", () => {
+    viewSettings.setOverride("p1", "linkify", false);
+    const w = mount(ReportText, { props: { sessionId: "p1", text: "https://example.com/x" } });
+    expect(w.find("a").exists()).toBe(false);
+    expect(w.text()).toContain("https://example.com/x");
+    w.unmount();
+    viewSettings.clearAll("p1");
+  });
+
+  it("**改行をまたいでリンクにしない**（行ごとに探す）", () => {
+    const w = mount(ReportText, { props: { sessionId: "p1", text: "https://example.com\n/x" } });
+    expect(w.findAll("a")).toHaveLength(1);
+    expect(w.find("a").text()).toBe("https://example.com");
     w.unmount();
   });
 });

@@ -122,7 +122,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 28px;
+  /* キー・HTML（`.theme-btn`）と同じ高さ（利用者の指摘: 高い） */
+  height: 22px;
   padding: 0 12px;
   font-family: var(--mono);
   font-size: 12px;

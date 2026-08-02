@@ -1,13 +1,17 @@
 // **「外観」と「表示」／表示設定の 2 段カスケード**の実機検証
-// （`20260802-appearance-and-view-cascade`）。
+// （`20260802-appearance-and-view-cascade` ＋ `20260802-view-menu-refine`）。
 //
 // jsdom は CSS を計算しないので、ここでしか見られないものが 2 つある:
 //
 //   1. **移行で見え方が変わらない**——テーマのブロックを「差分を当てる」形から
 //      「自己完結」へ書き換え、選択子から `:root` を外した。特定度が (0,2,0) → (0,1,0) へ
 //      下がるので、**ルートでの優先関係が本当に保たれているか**は実画素で見るしかない。
-//   2. **セッション個別のテーマがペインの中だけに効く**——`.pane` に `data-theme` を付ける。
-//      タブ帯・ヘッダーまで変わっていないことを、実際の背景色で確かめる。
+//   2. **ヘッダーのボタンの高さが揃っている**（キー・HTML・マクロ・表示・外観）。
+//   3. **「既定に従う」の選択肢が無く、既定の値にだけ印が付く**。
+//
+// テーマのセッション個別指定は `20260802-view-menu-refine` で**廃止**した（利用者の判断）。
+// エミュレータ画面は外観（スキン・表示モード）に従う——そのために入れた CSS の作り替えも
+// 巻き戻したので、**地色が元のままか**を 1 で見ている。
 //
 // 実行: node --env-file=.env scripts/verify-view-cascade.mjs
 //   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
@@ -109,63 +113,76 @@ try {
   check((await page.locator(".dz-btn").innerText()).trim() === "外観", "ヘッダーのボタンが `外観`");
   check((await page.locator(".vsm-btn").innerText()).trim() === "⚙ 表示", "エミュレータのボタンが `⚙ 表示`");
 
-  // ---- 3. セッション個別のテーマはペインの中だけ ----
-  log("\n### セッション個別のテーマ");
-  /**
-   * `表示` メニューの行のボタンを押す。**ページの中で探して押す**——
-   * Playwright の `hasText` は空白の扱いが素直でなく、テンプレート由来の改行が入る
-   * ボタン（`既定に従う（…）`）で当たらないことがある。ここは検証の本題ではないので、
-   * 曖昧さの無い方法で押す。
-   */
-  const clickRowButton = (label, startsWith) =>
-    page.evaluate(
-      ({ label, startsWith }) => {
-        const rows = Array.from(document.querySelectorAll(".vsm-row"));
-        const row = rows.find((r) => r.querySelector(".vsm-label")?.textContent?.includes(label));
-        if (!row) throw new Error(`行が無い: ${label}`);
-        const btn = Array.from(row.querySelectorAll(".seg button")).find((b) =>
-          (b.textContent ?? "").trim().startsWith(startsWith)
-        );
-        if (!btn) throw new Error(`ボタンが無い: ${label} / ${startsWith}`);
-        btn.click();
-      },
-      { label, startsWith }
-    );
+  // ---- 3. ヘッダーのボタンの高さが揃っている ----
+  log("\n### ヘッダーのボタンの高さ");
+  const heights = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".toggles button, .toggles .designer > button")).map((b) => ({
+      text: (b.textContent ?? "").trim().replace(/\s+/g, " "),
+      h: Math.round(b.getBoundingClientRect().height)
+    }))
+  );
+  const uniq = [...new Set(heights.map((x) => x.h))];
+  check(
+    uniq.length === 1,
+    `**5 つとも同じ高さ**（${heights.map((x) => `${x.text}:${x.h}`).join(" / ")}）`
+  );
+
+  // ---- 4. 「既定に従う」が無く、既定に印が付く ----
+  log("\n### 既定の示し方");
   /**
    * `⚙ 表示` を開き、`このセッション` 層にする。
-   * **開くまで押す**——開閉はトグルなので、既に開いていると 1 回目のクリックが「閉じる」になる。
+   * **開くまで押す**——開閉はトグルなので、既に開いていると 1 回目が「閉じる」になる。
+   * ボタンは**ページの中で探して押す**（Playwright の `hasText` はテンプレート由来の
+   * 改行が入るボタンで当たらないことがある）。
    */
-  async function openViewMenu() {
-    for (let i = 0; i < 2 && (await page.locator(".vsm-menu").count()) === 0; i++) {
-      await page.locator(".vsm-btn").click();
-      await sleep(400);
-    }
-    await page.waitForSelector(".vsm-menu", { timeout: 5000 });
-    await clickRowButton("設定の対象", "このセッション");
-    await sleep(300);
+  for (let i = 0; i < 2 && (await page.locator(".vsm-menu").count()) === 0; i++) {
+    await page.locator(".vsm-btn").click();
+    await sleep(400);
   }
-  await openViewMenu();
-  // **アプリの実効テーマと逆を選ぶ。** 同じ側を選んでも色が動かず、検査にならない
-  // （headless Chromium は `prefers-color-scheme: light` を返すので既定は通常）。
-  const opposite = await page.evaluate(() =>
-    document.documentElement.getAttribute("data-theme") === "dark" ? "通常" : "ダーク"
+  await page.waitForSelector(".vsm-menu", { timeout: 5000 });
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(".vsm-row"));
+    const row = rows.find((r) => r.querySelector(".vsm-label")?.textContent?.includes("設定の対象"));
+    const btn = Array.from(row?.querySelectorAll(".seg button") ?? []).find((b) =>
+      (b.textContent ?? "").trim().startsWith("このセッション")
+    );
+    btn?.click();
+  });
+  await sleep(300);
+  const opts = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(".vsm-row"));
+    const row = rows.find((r) => r.querySelector(".vsm-label")?.textContent?.includes("画面の質感"));
+    return Array.from(row?.querySelectorAll(".seg button") ?? []).map((b) => ({
+      text: (b.textContent ?? "").trim(),
+      def: !!b.querySelector(".vsm-def"),
+      on: b.classList.contains("on")
+    }));
+  });
+  check(!opts.some((o) => o.text.includes("既定に従う")), "**「既定に従う」の選択肢が無い**");
+  check(opts.filter((o) => o.def).length === 1, `**既定の値にだけ印が付く**（${opts.map((o) => o.text + (o.def ? "·" : "")).join(" / ")}）`);
+  check(opts.some((o) => o.def && o.on), "継承中は既定の値が選択状態に見える");
+
+  // ---- 5. 帳票の画面（スプール）にも「表示」が出る ----
+  log("\n### 帳票の画面の表示設定");
+  await page.locator(".crumbs .crumb", { hasText: "メニュー" }).click();
+  await page.waitForSelector(".launcher", { timeout: 10_000 });
+  await page.locator(".fn", { hasText: "スプール" }).first().locator("button").first().click();
+  await sleep(900);
+  check((await page.locator(".vsm-btn").count()) === 1, "**スプールでも `⚙ 表示` が出る**");
+  for (let i = 0; i < 2 && (await page.locator(".vsm-menu").count()) === 0; i++) {
+    await page.locator(".vsm-btn").click();
+    await sleep(400);
+  }
+  const spoolLabels = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".vsm-menu .vsm-label")).map((l) => (l.textContent ?? "").trim())
   );
-  await clickRowButton("テーマ", opposite);
-  await sleep(600);
+  check(spoolLabels.includes("リンク化"), `リンク化が出る（${spoolLabels.join(" / ")}）`);
+  check(spoolLabels.some((l) => l.startsWith("フォント")), "フォントが出る");
+  check(
+    !spoolLabels.some((l) => l.startsWith("SO/SI") || l.startsWith("表示コード")),
+    "**効かない項目（SO/SI・表示コード）は出さない**"
+  );
 
-  const after = await colors();
-  check(after.grid !== base.grid, `**画面の地色が変わる**（${base.grid} → ${after.grid}）`);
-  check(after.tabs === base.tabs, `**タブ帯は変わらない**（${base.tabs} → ${after.tabs}）`);
-  check(after.header === base.header, `**ヘッダーも変わらない**（${base.header} → ${after.header}）`);
-
-  // ---- 4. 既定に戻す ----
-  log("\n### 既定に戻す");
-  await openViewMenu();
-  await clickRowButton("テーマ", "既定に従う");
-  await sleep(600);
-  const back = await colors();
-  check(back.grid === base.grid, `**戻すと元の地色に戻る**（${back.grid}）`);
-  check(back.gridInk === base.gridInk, `文字色も戻る（${back.gridInk}）`);
 } catch (e) {
   fail++;
   log(`  FAIL 例外: ${e?.message ?? e}`);

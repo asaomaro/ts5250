@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
+import ReportText from "./ReportText.vue";
 import { systemsStore } from "../stores/systems.js";
 import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import LoadingBar from "./LoadingBar.vue";
@@ -436,7 +437,9 @@ onMounted(() => {
       </div>
       <p v-if="contentError" class="error">{{ contentError }}</p>
       <pre v-else-if="contentLoading" class="muted">読み込んでいます…</pre>
-      <pre v-else>{{ selectedText }}</pre>
+      <!-- 本文は共用の `ReportText` へ（`⚙ 表示` のリンク化・フォントが効く）。
+           カスケードの鍵はタブ ID——スプールはセッションを持たないため -->
+      <ReportText v-else :session-id="tabId" :text="selectedText" />
     </section>
   </div>
 </template>

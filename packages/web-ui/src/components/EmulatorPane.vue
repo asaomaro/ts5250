@@ -865,7 +865,6 @@ function onWheel(ev: WheelEvent): void {
     :data-controls="view.controls"
     :data-color-mode="view.colorMode"
     :data-surface="view.surface"
-    :data-theme="view.theme"
     :data-buttons="view.buttons"
     :data-window-frame="view.windowFrame"
     :data-window-backdrop="view.windowBackdrop"
@@ -979,14 +978,6 @@ function onWheel(ev: WheelEvent): void {
  *   通常(green) → 前景を少し和らげた色  / 値・リンク(turquoise) → アクセント
  *   装飾(pink)  → アクセント寄り        / 強調(white)・エラー(red)・注意(yellow)・青(blue) は据え置き
  *   （青は情報色として区別が要る場面が多いので意味色でも残す） */
-/**
- * **表示モードはペインの中だけに効く**（`20260802-appearance-and-view-cascade`・利用者の判断）。
- *
- * `data-theme` を根に付けると、`styles.css` の `[data-theme="…"]` ブロックが
- * ここから下だけに当たる（あちらは**要素を選ばない形**にしてあり、ブロックは自己完結）。
- * タブ帯は `.group` の直下で `.pane` の外なので影響しない——あれはクロームであり、
- * `外観` の領分だから。
- */
 .pane[data-color-mode="semantic"] {
   --t-green: color-mix(in srgb, var(--t-white) 76%, var(--crt));
   --t-turquoise: var(--accent);
