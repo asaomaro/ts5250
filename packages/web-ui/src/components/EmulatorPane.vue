@@ -503,6 +503,26 @@ watch(
   }
 );
 
+/**
+ * キーの一覧（`その他のキー`）から押されたキー（`20260802-key-palette`）。
+ *
+ * **キーボードで押したのと同じ道を通す。** ボタン専用の対応表を別に持つと、
+ * キー設定（`ctrl+F1` 等）を変えたときに片方だけ古くなる——
+ * `rawKeydown` に流せば、割り当ての解決も既定の分類も 1 か所で済む。
+ *
+ * `preventDefault` は形を合わせるためのダミー（本物のイベントではないので抑えるものが無い）。
+ */
+function onPaletteKey(k: { key: string; ctrlKey?: boolean; altKey?: boolean }): void {
+  rawKeydown({
+    key: k.key,
+    ctrlKey: k.ctrlKey === true,
+    altKey: k.altKey === true,
+    shiftKey: false,
+    metaKey: false,
+    preventDefault: () => {}
+  } as KeyboardEvent);
+}
+
 /** キー設定で割り当てたマクロを再生する（ホストへは送らない。spec D10） */
 function onPlayMacro(macroId: string): void {
   notice.value = "";
@@ -920,6 +940,7 @@ function onWheel(ev: WheelEvent): void {
       :log-open="logOpen"
       @toggle-log="logOpen = !logOpen"
       @sysreq="onAid('SysReq')"
+      @combo="onPaletteKey"
     />
   </div>
 </template>

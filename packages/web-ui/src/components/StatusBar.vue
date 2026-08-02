@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { AidKey } from "@as400web/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
@@ -19,7 +19,16 @@ const props = defineProps<{
   logOpen?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: "toggle-log"): void; (e: "sysreq"): void }>();
+const emit = defineEmits<{
+  (e: "toggle-log"): void;
+  (e: "sysreq"): void;
+  /**
+   * **キーボードで押したのと同じ扱いにする**（`20260802-key-palette`）。
+   * ペイン側の keydown 処理へ流すので、キー設定（`ctrl+F1` 等）がボタンからも効く
+   * ——ボタン専用の対応表を別に持つと、設定を変えたときに片方だけ古くなる。
+   */
+  (e: "combo", ev: { key: string; ctrlKey?: boolean; altKey?: boolean }): void;
+}>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
 const cur = computed(() => props.cursor ?? props.state.snapshot?.cursor);
@@ -68,6 +77,39 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
 );
 function press(k: AidKey): void {
   sendKey(props.state.sessionId, k, props.state.cursor);
+}
+
+/**
+ * **その他のキー**の一覧（`20260802-key-palette`）。
+ *
+ * 常時出すのは「よく押すもの」だけにして、残りはここへ畳む——常時 8 個並べても
+ * 押す頻度は大きく違い、幅だけ食う。Attn / SysReq もここへ移した（利用者の指示）。
+ */
+const padOpen = ref(false);
+
+/**
+ * 修飾キーのトグル。**単独では送らない**——`Ctrl` / `Alt` は組み合わせて使うものなので、
+ * 押した状態を保持し、次にファンクションキーを押したときに合わせて送る。
+ *
+ * トグル中は**ファンクションキー以外を無効にする**（利用者の指示）。
+ * `Ctrl+PageUp` のような組み合わせは 5250 に無く、押せてしまうと何が起きるか読めない。
+ */
+const mod = ref<"" | "ctrl" | "alt">("");
+const fnKeys = Array.from({ length: 24 }, (_, i) => `F${i + 1}` as AidKey);
+
+/** ファンクションキー。修飾トグル中は組み合わせて「キーボードで押した」扱いにする */
+function padFn(k: AidKey): void {
+  if (mod.value) {
+    emit("combo", { key: k, ctrlKey: mod.value === "ctrl", altKey: mod.value === "alt" });
+    return;
+  }
+  press(k);
+}
+
+/** AID キー（修飾なしで送るもの）。SysReq だけは送らずに行を開く（実機・ACS の動き） */
+function padAid(k: AidKey): void {
+  if (k === "SysReq") emit("sysreq");
+  else press(k);
 }
 
 /**
@@ -150,15 +192,104 @@ const macroStop = computed<string | undefined>(() => {
         SysReq だけは**押しても送らない**——画面下部のシステム要求行を開くのが実機・ACS の動きで、
         送信は行を確定したときなので、親（EmulatorPane）に投げて入口を 1 本にする。
       -->
-      <button class="fk" title="割込（アテンション。ホストの ATNPGM を呼ぶ）" @click="press('Attn')">
-        Attn
+      <!--
+        **その他のキー**（`20260802-key-palette`）。常時出すのはよく押すものだけにして、
+        残りはここへ畳む。Attn / SysReq もこちらへ移した。
+      -->
+      <button
+        class="fk more"
+        :class="{ on: padOpen }"
+        :title="padOpen ? 'その他のキーを閉じる' : 'その他のキーを表示する'"
+        @click="padOpen = !padOpen"
+      >
+        {{ padOpen ? "▼" : "▲" }} その他
       </button>
-      <button class="fk" title="システム要求（行を開く）" @click="emit('sysreq')">SysReq</button>
+    </span>
+  </div>
+  <!--
+    キーの一覧。**ペインの keydown 処理へ流す**ので、キー設定（`ctrl+F1` 等）が
+    ボタンからも同じように効く。
+  -->
+  <div v-if="padOpen" class="keypad">
+    <span class="row">
+      <button v-for="k in fnKeys" :key="k" class="fk" :disabled="false" @click="padFn(k)">{{ k }}</button>
+    </span>
+    <span class="row">
+      <!-- **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため） -->
+      <button class="fk" :disabled="!!mod" title="割込（アテンション）" @click="padAid('Attn')">Attn</button>
+      <button class="fk" :disabled="!!mod" title="システム要求（行を開く）" @click="padAid('SysReq')">
+        SysReq
+      </button>
+      <button class="fk" :disabled="!!mod" title="前ページ" @click="padAid('PageUp')">PageUp</button>
+      <button class="fk" :disabled="!!mod" title="次ページ" @click="padAid('PageDown')">PageDown</button>
+      <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
+      <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
+      <button class="fk" :disabled="!!mod" title="Esc（割り当てがあれば実行）" @click="emit('combo', { key: 'Escape' })">
+        Esc
+      </button>
+      <span class="sep"></span>
+      <!--
+        **単独では送らない。** 押した状態を保ち、次のファンクションキーと組み合わせる
+        （`Ctrl+F1` 等はキー設定で意味が決まる）。
+      -->
+      <button
+        class="fk mod"
+        :class="{ on: mod === 'ctrl' }"
+        title="Ctrl（ファンクションキーと組み合わせて使う）"
+        @click="mod = mod === 'ctrl' ? '' : 'ctrl'"
+      >
+        Ctrl
+      </button>
+      <button
+        class="fk mod"
+        :class="{ on: mod === 'alt' }"
+        title="Alt（ファンクションキーと組み合わせて使う）"
+        @click="mod = mod === 'alt' ? '' : 'alt'"
+      >
+        Alt
+      </button>
+      <span v-if="mod" class="modhint">{{ mod === "ctrl" ? "Ctrl" : "Alt" }} ＋ ファンクションキー</span>
     </span>
   </div>
 </template>
 
 <style scoped>
+/* キーの一覧（その他のキー）。1 行に収まらないので折り返す */
+.keypad {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 8px 4px;
+  border-top: 1px solid var(--crt-line);
+}
+.keypad .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.keypad .sep {
+  width: 10px;
+}
+/* 修飾トグル。**押されていることが形で分かる**ようにする（色だけに頼らない） */
+.fk.mod.on {
+  color: var(--crt);
+  background: var(--t-green);
+  border-color: var(--t-green);
+}
+.fk.more.on {
+  color: var(--t-green);
+  border-color: var(--t-green);
+}
+.fk:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.modhint {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t-green);
+}
 /* 入力できない状態は色で分かるようにする（OIA と同じ役目） */
 .ime {
   /* 幅を固定する。表記が変わるたびに右側の要素が動くと読みにくい */

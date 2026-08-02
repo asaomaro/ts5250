@@ -115,6 +115,16 @@ describe("SysReqLine 単体", () => {
   });
 });
 
+/**
+ * SysReq ボタンを取る。**「その他のキー」の中にある**（`20260802-key-palette`）ので、
+ * 先に開いてから探す。常時出ているボタンから外したのは利用者の指示。
+ */
+async function sysReqButton(w: ReturnType<typeof mount>) {
+  await w.findAll("button.fk").find((b) => b.text().includes("その他"))!.trigger("click");
+  await nextTick();
+  return w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+}
+
 describe("EmulatorPane のシステム要求行", () => {
   it("SysReq のキーバインドは行を開くだけで、ホストへは何も送らない", async () => {
     const send = vi.fn();
@@ -175,7 +185,7 @@ describe("EmulatorPane のシステム要求行", () => {
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
     // フッターの SysReq ボタンから開く（キー設定を触らない導線）
-    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    const btn = await sysReqButton(w);
     expect(btn).toBeDefined();
     await btn!.trigger("click");
     await nextTick();
@@ -198,7 +208,7 @@ describe("EmulatorPane のシステム要求行", () => {
     seed(send);
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
-    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    const btn = await sysReqButton(w);
     await btn!.trigger("click");
     await nextTick();
     const inp = w.find(".sysreq input").element as HTMLInputElement;
@@ -225,7 +235,7 @@ describe("EmulatorPane のシステム要求行", () => {
     seed(send);
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
-    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    const btn = await sysReqButton(w);
     await btn!.trigger("click");
     await nextTick();
     expect(w.find(".sysreq").exists()).toBe(true);
@@ -242,7 +252,7 @@ describe("EmulatorPane のシステム要求行", () => {
     seed(send);
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
     await nextTick();
-    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    const btn = await sysReqButton(w);
     await btn!.trigger("click");
     await nextTick();
     expect(w.find(".sysreq").exists()).toBe(true);
@@ -254,15 +264,25 @@ describe("EmulatorPane のシステム要求行", () => {
   });
 });
 
+/**
+ * Attn / SysReq は**「その他のキー」の中**へ移した（`20260802-key-palette`・利用者の指示）。
+ * 常時出すのはよく押すものだけにして、残りは畳む。
+ */
 describe("StatusBar の Attn / SysReq ボタン", () => {
   function stateOf(send: (m: unknown) => void) {
     seed(send);
     return sessionsStore.get(SID)!;
   }
 
+  /** 「その他」を開いてキーの一覧を出す */
+  async function openPad(w: ReturnType<typeof mount>) {
+    await w.findAll("button.fk").find((b) => b.text().includes("その他"))!.trigger("click");
+  }
+
   it("Attn は即座にホストへ送る", async () => {
     const send = vi.fn();
     const w = mount(StatusBar, { props: { state: stateOf(send) } });
+    await openPad(w);
     const btn = w.findAll("button.fk").find((b) => b.text().includes("Attn"));
     expect(btn).toBeDefined();
     await btn!.trigger("click");
@@ -272,7 +292,7 @@ describe("StatusBar の Attn / SysReq ボタン", () => {
   it("SysReq は送らずに sysreq を emit する（行を開くのは親の仕事）", async () => {
     const send = vi.fn();
     const w = mount(StatusBar, { props: { state: stateOf(send) } });
-    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    const btn = await sysReqButton(w);
     expect(btn).toBeDefined();
     await btn!.trigger("click");
     expect(w.emitted("sysreq")).toHaveLength(1);
