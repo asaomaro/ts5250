@@ -93,8 +93,14 @@ export class TelnetLayer {
     this.recordFn = fn;
   }
 
+  /** 通信路が閉じたか。**交渉の返事を閉じた先へ送らない**ための門番 */
+  private closed = false;
+
   onClose(fn: (reason: string) => void): void {
-    this.transport.onClose(fn);
+    this.transport.onClose((reason) => {
+      this.closed = true;
+      fn(reason);
+    });
   }
 
   onError(fn: (err: Error) => void): void {
@@ -102,6 +108,7 @@ export class TelnetLayer {
   }
 
   close(): void {
+    this.closed = true;
     this.transport.close();
   }
 
@@ -251,8 +258,30 @@ export class TelnetLayer {
     // その他のサブネゴシエーションは無視
   }
 
+  /**
+   * **交渉の返事を送る。閉じた後は黙って捨てる**（`20260802-device-busy-record`）。
+   *
+   * ここは**受信データの処理中に呼ばれる**——ホストが交渉の途中でソケットを閉じると、
+   * 既に届いていたバイトの処理が続き、閉じた通信路へ送りに行く。
+   * `TcpTransport.send` は閉じていると投げるので、その例外は
+   * **ソケットのコールバックから飛び出して捕まえる相手がいない**（プロセスが落ちる）。
+   *
+   * 実機で、**装置名が使用中で断られたとき**に踏んだ
+   * （`transport is closed` が `handleSubnegotiation` から飛んだ）。
+   * 交渉の返事は相手が居てこそ意味があるので、閉じた後は送らないのが正しい。
+   */
+  private sendDuringNegotiation(bytes: Uint8Array): void {
+    if (this.closed) return;
+    try {
+      this.transport.send(bytes);
+    } catch {
+      // 送る先が無くなっただけ。**接続の失敗は `onClose` が伝える**ので、ここでは黙る
+      this.closed = true;
+    }
+  }
+
   private sendCmd(cmd: number, opt: number): void {
-    this.transport.send(Uint8Array.from([IAC, cmd, opt]));
+    this.sendDuringNegotiation(Uint8Array.from([IAC, cmd, opt]));
   }
 
   private sendSb(payload: number[]): void {
@@ -262,7 +291,7 @@ export class TelnetLayer {
       escaped.push(b);
       if (b === IAC) escaped.push(IAC);
     }
-    this.transport.send(Uint8Array.from([IAC, CMD.SB, ...escaped, IAC, CMD.SE]));
+    this.sendDuringNegotiation(Uint8Array.from([IAC, CMD.SB, ...escaped, IAC, CMD.SE]));
   }
 }
 

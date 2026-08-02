@@ -20,7 +20,13 @@ import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
 import type { ScreenSnapshot } from "../screen/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
-import { parseStartupResponse, type StartupResponse } from "../telnet/startup-record.js";
+import {
+  parseStartupResponse,
+  startupCodeMeaning,
+  isKnownStartupCode,
+  STARTUP_SUCCESS_CODES,
+  type StartupResponse
+} from "../telnet/startup-record.js";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { Emitter } from "./emitter.js";
@@ -185,6 +191,16 @@ export class Session5250 extends Emitter<SessionEvents> {
         resolve();
       };
       session.onceReady = onFirstReady;
+      session.requestedDevice = opts.deviceName;
+      // **ホストが理由を返してきたら、それを接続の失敗にする**（`onClose` より先に届く）
+      session.onNegotiationError = (e) => {
+        clearTimeout(timer);
+        // **先に reject する。** `close()` は `onClose` を同期で呼び、そこが
+        // `SESSION_CLOSED closed during negotiation` で先に settle してしまう
+        // ——せっかく分かった理由（`8902` 等）が一般的な文言に負ける（実機で踏んだ）
+        reject(e);
+        session.telnet.close();
+      };
       session.telnet.onClose((reason) => {
         clearTimeout(timer);
         session.handleClose(reason);
@@ -210,6 +226,14 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private onceReady: (() => void) | undefined;
+  /**
+   * 交渉中の失敗を接続待ちへ返す口（`20260802-device-busy-record`）。
+   * ホストが**失敗の起動応答**を返してきたときに使う——`onClose` では
+   * 「切れた」としか言えず、理由（`8902` 等）が落ちる。
+   */
+  private onNegotiationError: ((e: As400Error) => void) | undefined;
+  /** 要求した装置名。失敗の起動応答には装置名が入らないので、文言に添えるために持つ */
+  private requestedDevice: string | undefined;
 
   get currentState(): SessionState {
     return this.state;
@@ -409,8 +433,27 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (this.firstRecord) {
       this.firstRecord = false;
       const startup = parseStartupResponse(record, this.codec);
-      if (startup && startup.device !== "") {
+      // **見分けはコードの既知性で行う**（`20260802-device-busy-record`）。
+      // 以前は「装置名が入っているか」だけで見ていたが、**失敗の応答には装置名が入らない**
+      // ——割り当てられていないのだから当然。取りこぼすとデータストリームとして解析され、
+      // `expected ESC, got 0x…` だけが残って本当の理由（`8902` 等）が消えていた。
+      // プリンター（`PrinterSession.handleStartup`）は元からコードで見ており、**そちらへ揃える**。
+      //
+      // `device !== ""` の枝は**残す**——未知コードでも装置名まで入っていれば従来どおり食べる。
+      // 今まで通っていたものを落とさないため。
+      if (startup && (isKnownStartupCode(startup.code) || startup.device !== "")) {
         this.startupInfo = startup;
+        if (isKnownStartupCode(startup.code) && !STARTUP_SUCCESS_CODES.has(startup.code)) {
+          const meaning = startupCodeMeaning(startup.code);
+          // 失敗応答に装置名は入らないので、**要求した名前**を添える（利用者が直せる情報にする）
+          const dev = startup.device || this.requestedDevice || "";
+          const where = dev ? `（装置 ${dev}）` : "";
+          this.warn(`session rejected ${startup.code}: ${meaning}`);
+          this.onNegotiationError?.(
+            new As400Error("SESSION_REJECTED", `session rejected (${startup.code}: ${meaning})${where}`)
+          );
+          return;
+        }
         this.warn(
           `startup response ${startup.code} (system=${startup.system} device=${startup.device})`
         );
