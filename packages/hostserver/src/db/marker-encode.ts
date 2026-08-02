@@ -14,6 +14,7 @@ import { As400Error } from "@as400web/base";
 import { codecForCcsid, isPureDbcsCcsid, pureDbcsCodecForCcsid } from "@as400web/ebcdic";
 import { encodePacked, encodeZoned } from "../ddm/encode.js";
 import { DB2, baseType, typeName } from "./db-types.js";
+import { isBinaryCcsid } from "./db-decode.js";
 import type { MarkerField, MarkerFormat } from "./marker-format.js";
 
 /** EBCDIC の空白。固定長文字フィールドの詰め物 */
@@ -230,7 +231,7 @@ function fixedText(value: string, field: MarkerField, index: number): Uint8Array
  */
 function encodeText(value: string, field: MarkerField, index: number): Uint8Array {
   const ccsid = field.ccsid;
-  if (ccsid === 0 || ccsid === 65535) {
+  if (isBinaryCcsid(ccsid)) {
     throw new MarkerEncodeError(index, `文字コードが不明な列です（CCSID ${ccsid}）`);
   }
   try {

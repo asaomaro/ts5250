@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isTwoByteCcsid, decodeLobBytes } from "../src/db/db-decode.js";
+import { isTwoByteCcsid, isBinaryCcsid, decodeLobBytes } from "../src/db/db-decode.js";
 
 /**
  * **ホストが申告する LOB の長さは、単位が CCSID で変わる。**
@@ -38,6 +38,36 @@ describe("isTwoByteCcsid", () => {
   it("0（BLOB）は 1 バイト扱い", () => {
     expect(isTwoByteCcsid(0)).toBe(false);
   });
+
+  it("**65535（実機の BLOB）も 1 バイト扱い**", () => {
+    // 実機の BLOB は 0 ではなく 65535 で来る（`20260802-lob-big-dbcs-blob` F3）
+    expect(isTwoByteCcsid(65535)).toBe(false);
+  });
+});
+
+/**
+ * **バイナリ（文字コードを持たない）CCSID。**
+ *
+ * `0` は「未設定」、`65535`（0xFFFF）は IBM の「変換しない」。
+ * **実機の BLOB は `65535` で来る**——`0` ではない
+ * （`scripts/research-lob-big-dbcs-blob.mjs` F3 で実測）。
+ *
+ * この判定は `db-reply.ts` / `marker-encode.ts` / `decodeLobBytes` の 3 か所にあり、
+ * **`decodeLobBytes` だけ `0` しか見ていなかった**。BLOB がバイト列で返っていたのは
+ * `catch` に落ちていたからで、**65535 に codec を足した瞬間に文字列へ化ける**形だった。
+ */
+describe("isBinaryCcsid", () => {
+  it("0 と 65535 がバイナリ", () => {
+    expect(isBinaryCcsid(0)).toBe(true);
+    expect(isBinaryCcsid(65535)).toBe(true);
+  });
+
+  it("文字コードを持つものは違う", () => {
+    expect(isBinaryCcsid(37)).toBe(false);
+    expect(isBinaryCcsid(1200)).toBe(false);
+    expect(isBinaryCcsid(5035)).toBe(false);
+    expect(isBinaryCcsid(300)).toBe(false);
+  });
 });
 
 describe("decodeLobBytes", () => {
@@ -56,6 +86,12 @@ describe("decodeLobBytes", () => {
   it("CCSID 0（BLOB）はバイト列のまま", () => {
     const bytes = Uint8Array.from([0x01, 0x02, 0xff]);
     expect(decodeLobBytes(bytes, 0)).toBe(bytes);
+  });
+
+  it("**CCSID 65535（実機の BLOB）もバイト列のまま**", () => {
+    // 以前は `catch` に落ちて偶然バイト列を返していた。**明示的に返す**
+    const bytes = Uint8Array.from([0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
+    expect(decodeLobBytes(bytes, 65535)).toBe(bytes);
   });
 
   it("未知の CCSID は壊れた文字列にせずバイト列で返す", () => {

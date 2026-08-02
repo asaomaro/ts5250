@@ -244,6 +244,23 @@ export function isTwoByteCcsid(ccsid: number): boolean {
 }
 
 /**
+ * この CCSID は **バイナリ（文字コードを持たない）** か。
+ *
+ * `0` は「未設定」、**`65535`（0xFFFF）は IBM の「変換しない」** を表す。
+ * **実機の BLOB は `65535` で来る**——`0` ではない
+ * （実機で実測。`20260802-lob-big-dbcs-blob` の research F3）。
+ *
+ * 判定を関数にしてあるのは、**同じ概念が 3 か所に散っていて片方だけ欠けていた**から。
+ * `db-reply.ts` と `marker-encode.ts` は `0 || 65535` を見ていたのに、
+ * `decodeLobBytes` は `0` しか見ておらず、**`catch` に落ちて偶然バイト列を返していた**。
+ * 誰かが 65535 に codec を足した瞬間、BLOB が黙って文字列に化ける形だった
+ * （`20260801-dbclob-locator-decode` で踏んだ「判定の重複」と同じ形）。
+ */
+export function isBinaryCcsid(ccsid: number): boolean {
+  return ccsid === 0 || ccsid === 65535;
+}
+
+/**
  * ロケーター経由で受け取った LOB のバイト列を文字にする。
  *
  * **判定をここに集約する。** 以前は `query.ts` が `codecForCcsid` だけを試しており、
@@ -251,10 +268,11 @@ export function isTwoByteCcsid(ccsid: number): boolean {
  * 同じ CCSID を `decodeText` / `decodeGraphic` は扱えていたのに、
  * **同じ判定が 2 か所にあって片方だけ正しかった**。
  *
- * @param ccsid 0 なら BLOB。バイト列のまま返す
+ * @param ccsid バイナリ（`0` / **`65535`**）ならバイト列のまま返す。
+ *              **実機の BLOB は 65535 で来る**（`isBinaryCcsid`）
  */
 export function decodeLobBytes(bytes: Uint8Array, ccsid: number): string | Uint8Array {
-  if (ccsid === 0) return bytes;
+  if (isBinaryCcsid(ccsid)) return bytes;
   try {
     if (UTF16_CCSIDS.has(ccsid)) return decodeUtf16Be(bytes);
     if (isPureDbcsCcsid(ccsid)) return pureDbcsCodecForCcsid(ccsid).decode(bytes);

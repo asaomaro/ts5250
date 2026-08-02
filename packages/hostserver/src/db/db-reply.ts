@@ -6,7 +6,7 @@
  */
 import { As400Error } from "@as400web/base";
 import { codecForCcsid } from "@as400web/ebcdic";
-import { toColumnMeta, type ColumnMeta } from "./db-decode.js";
+import { toColumnMeta, isBinaryCcsid, type ColumnMeta } from "./db-decode.js";
 
 /**
  * 列定義 1 件あたりの固定長（DBOriginalDataFormat）。
@@ -105,7 +105,7 @@ function readFieldName(value: Uint8Array, fieldAt: number): string | undefined {
   const ccsid = v.getUint16(fieldAt + F.nameCcsid);
   const bytes = value.subarray(at, at + len);
   try {
-    return codecForCcsid(ccsid === 0 || ccsid === 65535 ? SQLCA_CCSID : ccsid)
+    return codecForCcsid(isBinaryCcsid(ccsid) ? SQLCA_CCSID : ccsid)
       .decode(bytes)
       .trimEnd();
   } catch {

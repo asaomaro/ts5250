@@ -480,10 +480,25 @@ spec に含むが今回は実装しなかったもの。各 work の decisions �
   - 実機なしの回帰: `packages/hostserver/test/lob-multi-segment.test.ts`
     （**文字で数える偽ホスト**。未修正のコードに当てると 6 件落ち、
     その値 `131070` / `262140` は実機の実測と一致する）
-- [ ] 純 DBCS（CCSID 300）と BLOB の **64KB 超**を実機で測る（上から分割）
-  - `isTwoByteCcsid` は 1200 と同じ枝／BLOB は `perChar=1` で混在 CLOB と同じ経路なので
-    **同じ道を通る**と判断して押した。倍々に伸ばす経路での二段キャストは未確認
-    （`20260801-pure-dbcs-dbclob` の手が大きな値でも使えるか）
+- [x] 純 DBCS（CCSID 300）と BLOB の **64KB 超**を実機で測る（上から分割）
+  - ~~`isTwoByteCcsid` は 1200 と同じ枝／BLOB は `perChar=1` で混在 CLOB と同じ経路なので
+    **同じ道を通る**と判断して押した~~ **← 押した判断は事実ではない。**
+    → `20260802-lob-big-dbcs-blob`（PR #290）で実測（18/18）。
+      **純 DBCS は推論どおり／BLOB は推論の外に事実があった**
+  - **BLOB の CCSID は `0` ではなく `65535`**（0xFFFF＝IBM の「変換しない」）。
+    `decodeLobBytes` は `0` しか見ておらず、**`catch`（未知の CCSID はバイト列で返す）に
+    落ちて偶然正しかった**——65535 に codec を足した瞬間に BLOB が黙って文字列へ化ける形。
+    doc（`@param ccsid 0 なら BLOB`）も嘘だった
+    - **同じ判定が 3 か所にあり 1 か所だけ欠けていた**（`db-reply.ts:108` /
+      `marker-encode.ts:233` は正しかった）。`isBinaryCcsid` に集約
+      （`20260801-dbclob-locator-decode` の「判定の重複」とまったく同じ形）
+  - **純 DBCS の 64KB 超は作れた。** 種だけ 1200 経由の二段キャストで作れば、
+    **連結（`P || P`）は同じ CCSID どうしなので変換が要らない**——15 回で 524,288 バイト。
+    `20260801-pure-dbcs-dbclob` は小さな値しか作っておらず、作り方が未知のままだった
+  - ⚠ **CCSID 16684 は測れない**（変更なし）。この実機に変換表が無いことを
+    `20260801-pure-dbcs-dbclob` で実測済み（1200 経由でも `-332`）。**別の実機が要る**
+  - 再現: `scripts/research-lob-big-dbcs-blob.mjs` /
+    確認: `scripts/verify-lob-big-dbcs-blob.mjs`
 - [x] **`unavailable` に `"failed"` を足す**
   - 取りに行って失敗した場合に `"not-requested"`（要求していない）と表示され、
     **嘘に近い**。型を 1 つ足すだけだが server / web-ui / CSV に波及する

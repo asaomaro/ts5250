@@ -39,17 +39,22 @@ interface Ask {
 /**
  * **文字で数えるホスト**の代役。
  *
+ * `perChar` は**引数で渡す**——`isTwoByteCcsid`（こちら側の判定）から導くと、
+ * 「自分の判定で自分の判定を試す」循環になり、判定が間違っていても通ってしまう。
+ * ここで表すのは**ホストの振る舞い**なので、実機で測った値をそのまま書く。
+ *
  * @param content 全体（バイト列）
- * @param ccsid   応答に載せる CCSID（1200 なら 2 バイト/文字）
+ * @param ccsid   応答に載せる CCSID
+ * @param perChar **ホストが**1 文字を何バイトで数えているか（実機の実測値）
  * @param opts.shortBy 応答本体を申告より短く返す（途中で切れた応答の再現）
  * @param opts.segmentUnits ホストが 1 応答で返す上限（文字）
  */
-function charCountingHost(
+function charCountingHostFor(
   content: Uint8Array,
   ccsid: number,
+  perChar: number,
   opts: { shortBy?: number; segmentUnits?: number } = {}
 ): { conn: DbConnection; asks: Ask[] } {
-  const perChar = ccsid === 1200 ? 2 : 1;
   const totalUnits = Math.floor(content.length / perChar);
   const asks: Ask[] = [];
   const conn = {
@@ -91,6 +96,15 @@ function charCountingHost(
     }
   } as unknown as DbConnection;
   return { conn, asks };
+}
+
+/** よく使う 2 系統の近道（UTF-16 は 2 バイト/文字、それ以外は 1） */
+function charCountingHost(
+  content: Uint8Array,
+  ccsid: number,
+  opts: { shortBy?: number; segmentUnits?: number } = {}
+): { conn: DbConnection; asks: Ask[] } {
+  return charCountingHostFor(content, ccsid, ccsid === 1200 ? 2 : 1, opts);
 }
 
 /** UTF-16BE のバイト列を作る（`あいうえおかきく` の繰り返し） */
@@ -199,6 +213,35 @@ describe("分割受信: 上限での切り詰め", () => {
     const got = await retrieveLob(conn, 1, { maxBytes: 100_000 });
     expect(got.bytes.length).toBe(100_000);
     expect([...got.bytes]).toEqual([...content.subarray(0, 100_000)]);
+  });
+});
+
+/**
+ * **純 DBCS（CCSID 300）と BLOB（65535）も同じ道を通る**
+ * （`20260802-lob-big-dbcs-blob` で実機確認）。
+ *
+ * PR #289 の時点では「`isTwoByteCcsid` が同じ枝だから同じはず」という**判断で押していた**。
+ * その推論こそが LOB の単位を 3 度踏ませた形なので、実機で測ったうえでここに固定する。
+ */
+describe("分割受信: 純 DBCS と BLOB", () => {
+  it("純 DBCS（300）は UTF-16 と同じく文字で進む", async () => {
+    const content = utf16(262_144); // 中身の並びは問わない。単位の扱いだけ見る
+    const { conn, asks } = charCountingHostFor(content, 300, 2, { segmentUnits: SEGMENT_UNITS });
+    const got = await retrieveLob(conn, 1, { maxBytes: 200_000 });
+    expect(asks[1]?.offset).toBe(65_535);
+    expect(got.bytes.length).toBe(200_000);
+    expect(got.totalLength).toBe(524_288);
+    expect([...got.bytes]).toEqual([...content.subarray(0, 200_000)]);
+  });
+
+  it("**BLOB（65535）はバイトで進む**（2 バイト扱いにしない）", async () => {
+    const content = ascii(262_144);
+    const { conn, asks } = charCountingHostFor(content, 65_535, 1, { segmentUnits: SEGMENT_UNITS });
+    const got = await retrieveLob(conn, 1, { maxBytes: 200_000 });
+    expect(asks[1]?.offset).toBe(65_535);
+    expect(got.bytes.length).toBe(200_000);
+    expect(got.totalLength).toBe(262_144);
+    expect([...got.bytes]).toEqual([...content.subarray(0, 200_000)]);
   });
 });
 

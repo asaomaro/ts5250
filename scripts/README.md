@@ -319,6 +319,20 @@ node --env-file=.env scripts/verify-ifs-limits.mjs
 > （`SEGMENT_UNITS`=65,535 に対し既定の上限が 65,536）。だから PR #248 / #251 の
 > 実機確認をすり抜けた。**既定値で測っても分割は起きない。**
 
+`research-lob-big-dbcs-blob.mjs` / `verify-lob-big-dbcs-blob.mjs`
+— **純 DBCS（CCSID 300）と BLOB の 64KB 超**（`20260802-lob-big-dbcs-blob`）。
+上の 2 本は UTF-16 と混在 CLOB しか測っておらず、残る 2 系統は
+「`isTwoByteCcsid` が同じ枝だから同じはず」という**判断で押されていた**。実測で閉じた（18/18）。
+
+> ⚠ **実機の BLOB は CCSID `65535`（0xFFFF＝「変換しない」）で来る。`0` ではない。**
+> `decodeLobBytes` は `0` しか見ておらず、**`catch` に落ちて偶然バイト列を返していた**
+> ——65535 に codec を足した瞬間に BLOB が文字列へ化ける形だった。`isBinaryCcsid` に集約済み。
+>
+> ⚠ **純 DBCS には直接の変換が無い**（ジョブの 5035 → 300 は `-332/57017`）。
+> `CAST(CAST(… AS DBCLOB CCSID 1200) AS DBCLOB CCSID 300)` と**1200 を経由する**。
+> ただし**連結（`P || P`）は同じ CCSID どうしなので変換が要らない**——
+> 種だけ二段キャストで作れば、あとは倍々に伸ばせる（15 回で 524,288 バイト）。
+
 `research-msgw.mjs` — **MSGW（スプールがライターの問い合わせで止まった状態）の実測**。
 既存の仮想プリンター装置を借り、用紙タイプをずらしたスプールで `CPA3394` を誘発して
 `retrieveMessage` / `answerMessage` を通す。**ライターは必ず止め、スプールは消す。装置は作らない・消さない。**
