@@ -84,6 +84,14 @@ const props = withDefaults(
     linkify?: boolean;
     /** 通信中（ホスト応答待ち）。入力欄を編集不可にしてプロテクトする */
     busy?: boolean;
+    /**
+     * **操作員メッセージ**（`20260802-message-line`）。画面の**最下行に重ねて**出す。
+     *
+     * ここで描くのは、ACS が**画面の 1 行として**出しているから——外側に置くと
+     * 字の大きさが画面と揃わず、画面の一部に見えない（`.grid` が font-size を持つので、
+     * 中に置けば桁も高さも自動で揃う）。
+     */
+    message?: string;
     /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
     cursor?: { row: number; col: number };
     /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
@@ -3150,6 +3158,11 @@ onBeforeUnmount(() => {
     @focusin="onGridFocusIn"
     @focusout="onGridFocusOut"
   >
+    <!--
+      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。
+      `pointer-events: none` で背面のセルの操作を邪魔しない。
+    -->
+    <div v-if="message" class="opmsg" role="status">{{ message }}</div>
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <!-- 矩形（ブロック）選択のハイライト -->
     <div v-if="rectSel" class="rect-sel" :style="rectStyle" aria-hidden="true"></div>
@@ -3385,6 +3398,25 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/**
+ * 操作員メッセージ（ホスト側・クライアント側の両方）。**画面の最下行に重ねる**。
+ *
+ * `.grid` の中に置くので **font-size を継承**し、画面本文と字の大きさが揃う
+ * （外側に置くと、画面だけが拡縮されて字だけ取り残される）。
+ * 背面は画面の地色で塗り、下にある行を隠す——ACS も同じ場所を使う。
+ */
+.opmsg {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  line-height: 1.25;
+  background: var(--crt);
+  color: var(--t-white, var(--ink));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
 .grid {
   position: relative;
   /* 桁位置は ch 単位・DBCS=2ch を仮定するので、和欧 1:2 を保つ日本語等幅を使う（--screen-mono） */

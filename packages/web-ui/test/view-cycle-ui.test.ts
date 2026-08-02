@@ -85,13 +85,13 @@ describe("キー押下で表示設定が順送りされ、通知が出る", () =
     expect(viewSettings.settings.surface).toBe("crt");
     expect(w.find(".pane").attributes("data-surface")).toBe("crt");
     // 通知（OIA の操作員メッセージ枠）に「項目: 新しい値」が出る
-    expect(w.find(".oia .notice").text()).toBe("画面の質感: CRT");
+    expect(w.find(".opmsg").text()).toBe("画面の質感: CRT");
 
     // もう一度押すと次の値（一巡）へ、通知も更新される
     await w.find(".pane").trigger("keydown", { key: "1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.surface).toBe("flat");
-    expect(w.find(".oia .notice").text()).toBe("画面の質感: フラット");
+    expect(w.find(".opmsg").text()).toBe("画面の質感: フラット");
     w.unmount();
   });
 
@@ -103,7 +103,7 @@ describe("キー押下で表示設定が順送りされ、通知が出る", () =
     await w.find(".pane").trigger("keydown", { key: "2", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.controls).toBe("underline");
-    expect(w.find(".oia .notice").text()).toBe("入力項目設定: 下線");
+    expect(w.find(".opmsg").text()).toBe("入力項目設定: 下線");
     w.unmount();
   });
 });
@@ -139,17 +139,17 @@ describe("既定バインドが実際のキー操作で効く", () => {
     await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.kana).toBe("kana");
-    expect(w.find(".oia .notice").text()).toBe("表示コード: カナ");
+    expect(w.find(".opmsg").text()).toBe("表示コード: カナ");
     await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.kana).toBe("latin");
-    expect(w.find(".oia .notice").text()).toBe("表示コード: 英");
+    expect(w.find(".opmsg").text()).toBe("表示コード: 英");
 
     expect(viewSettings.settings.sosi).toBe(false); // 初期値=非表示
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.sosi).toBe(true);
-    expect(w.find(".oia .notice").text()).toBe("SO/SI 表示: 表示");
+    expect(w.find(".opmsg").text()).toBe("SO/SI 表示: 表示");
 
     // もう一度押すと戻る（トグルとして使える）
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
-import StatusBar from "../src/components/StatusBar.vue";
+import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { sendKey } from "../src/session-controller.js";
 import { MSG_NO_RESPONSE } from "../src/composables/opMessages.js";
@@ -34,14 +35,17 @@ function seed(send: (m: unknown) => void = () => {}) {
 }
 
 describe("ホスト無応答の通知", () => {
-  it("SessionState.notice を StatusBar が操作員メッセージとして出す", async () => {
+  it("**`SessionState.notice` が画面の最下行に出る**", async () => {
+    // 出す場所は画面の中（`20260802-message-line`）なので、StatusBar 単体ではなく
+    // ペインごとマウントして見る
     const st = seed();
-    const w = mount(StatusBar, { props: { state: st, notice: st.notice ?? "" } });
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true } });
+    await nextTick();
     expect(w.text()).not.toContain(MSG_NO_RESPONSE);
 
     st.notice = MSG_NO_RESPONSE;
-    await w.setProps({ notice: st.notice ?? "" });
-    expect(w.find(".msg.notice").text()).toBe(MSG_NO_RESPONSE);
+    await nextTick();
+    expect(w.find(".opmsg").text()).toBe(MSG_NO_RESPONSE);
   });
 
   it("次の送信で通知が消える", () => {

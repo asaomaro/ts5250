@@ -566,6 +566,13 @@ function onNotice(text: string): void {
  * ローカル発はキー操作で消え、サーバー発は次の送信で消える（session-controller）。
  */
 const effectiveNotice = computed(() => notice.value || state.value?.notice || "");
+/**
+ * 画面の最下行に出す操作員メッセージ（ACS と同じ置き方）。
+ *
+ * **クライアント側が優先**し、無ければホスト側（`systemMessage`。WRITE ERROR CODE 由来）。
+ * ACS は**どちらも同じ見た目で同じ行**に出すので、色でも区別しない。
+ */
+const messageLine = computed(() => effectiveNotice.value || snapshot.value?.systemMessage || "");
 
 /** ScreenGrid 発の AID。キーボードの F キーと同じ扱いで送る。
  *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。
@@ -861,6 +868,7 @@ function onWheel(ev: WheelEvent): void {
         :edits="state!.edits"
         :focused="focused"
         :busy="busy"
+        :message="sysReqOpen ? '' : messageLine"
         :cursor="cursor"
         :show-shift-marks="view.sosi"
         :sbcs-view="sbcsView"

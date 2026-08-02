@@ -18,11 +18,6 @@ function snap(): ScreenSnapshot {
   } as unknown as ScreenSnapshot;
 }
 
-function stateWithHostMessage(msg: string): SessionState {
-  const st = state();
-  (st.snapshot as unknown as { systemMessage: string }).systemMessage = msg;
-  return st;
-}
 
 function state(): SessionState {
   return {
@@ -58,26 +53,3 @@ describe("StatusBar のカーソル位置表示（ACS 相当）", () => {
  * クライアント側メッセージはホストのメッセージを**隠す**（ACS 準拠）。
  * notice が消えれば systemMessage が自然に戻る（復帰のための状態は持たない）。
  */
-describe("メッセージの優先と復帰", () => {
-  it("notice があるときホストの systemMessage を出さない", () => {
-    const w = mount(StatusBar, {
-      props: { state: stateWithHostMessage("HOST MSG"), notice: MSG_BY_REASON.numeric }
-    });
-    const texts = w.findAll(".msg").map((e) => e.text());
-    expect(texts).toEqual([MSG_BY_REASON.numeric]);
-    expect(w.text(), "ホストのメッセージが同時に見えている").not.toContain("HOST MSG");
-  });
-
-  it("notice が消えるとホストの systemMessage へ戻る", async () => {
-    const w = mount(StatusBar, {
-      props: { state: stateWithHostMessage("HOST MSG"), notice: MSG_BY_REASON.numeric }
-    });
-    await w.setProps({ notice: "" });
-    expect(w.findAll(".msg").map((e) => e.text())).toEqual(["HOST MSG"]);
-  });
-
-  it("notice が無ければ従来どおりホストのメッセージを出す", () => {
-    const w = mount(StatusBar, { props: { state: stateWithHostMessage("HOST MSG") } });
-    expect(w.findAll(".msg").map((e) => e.text())).toEqual(["HOST MSG"]);
-  });
-});

@@ -87,8 +87,12 @@ async function moveOutOfField(w: ReturnType<typeof mountPane>) {
   expect(document.activeElement, "前提: 入力欄から出ている").toBe(w.find(".pane").element);
 }
 
+/**
+ * 操作員メッセージを読む。**画面の最下行**（`.opmsg`）に出る
+ * （`20260802-message-line` で StatusBar から移した。ACS と同じ置き方）。
+ */
 function statusText(w: ReturnType<typeof mountPane>): string {
-  return w.findComponent({ name: "StatusBar" }).text();
+  return w.find(".opmsg").exists() ? w.find(".opmsg").text() : "";
 }
 
 describe("保護領域での文字入力・削除", () => {

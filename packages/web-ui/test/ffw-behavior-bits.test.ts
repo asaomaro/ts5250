@@ -291,7 +291,9 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
     mounted.push(w);
     return w;
   }
-  const statusText = (w: ReturnType<typeof mountPane>) => w.findComponent({ name: "StatusBar" }).text();
+  // 操作員メッセージは**画面の最下行**（`.opmsg`）に出る（`20260802-message-line`）
+  const statusText = (w: ReturnType<typeof mountPane>) =>
+    w.find(".opmsg").exists() ? w.find(".opmsg").text() : "";
 
   beforeEach(() => {
     vi.useRealTimers();

@@ -127,11 +127,11 @@ const macroStop = computed<string | undefined>(() => {
     </span>
     <span v-else-if="macroStop" class="macro stopped" role="status">⏹ マクロ: {{ macroStop }}</span>
     <span class="mode">{{ insertMode ? "挿入" : "上書き" }}</span>
-    <span v-if="notice" class="msg notice" role="status">{{ notice }}</span>
-    <!-- クライアント側メッセージはホストのメッセージを**隠す**（ACS 準拠）。
-         systemMessage はスナップショットが保持し続けるため、notice が消えれば自然に戻る。
-         復帰のために状態を持つ必要は無い。 -->
-    <span v-if="!notice && snap?.systemMessage" class="msg">{{ snap.systemMessage }}</span>
+    <!--
+      **操作員メッセージはここに出さない**（`20260802-message-line`）。ACS はホスト側も
+      クライアント側も**エミュレータ画面の最下行**に出すので、`EmulatorPane` の
+      `.msgline` へ移した。同じ性質のものを 2 か所に散らさない。
+    -->
     <span class="fkeys">
       <button v-for="f in fkeys" :key="f.key" class="fk" @click="press(f.key)">{{ f.label }}</button>
       <!--

@@ -210,7 +210,12 @@ onBeforeUnmount(() => {
     <LoginView v-if="authStore.loaded && authStore.needsLogin" />
     <template v-else>
     <header class="topbar">
-      <span class="brand">5250 Web エミュレーター</span>
+      <!--
+        **製品名はヘッダーに置かない**（`20260802-message-line`）。
+        `5250 Web エミュレーター` は幅を食うだけで何の操作にもならず、狭い画面で
+        **ヘッダーを早々に折り返させていた**（利用者の指摘）。ここに置くのは
+        「いまどこに繋いでいるか」と操作の入口だけにする。
+      -->
       <!--
         ヘッダーに置くのは「いまどのシステムに繋いでいるか」と、このアプリ自身の管理だけ。
         IBM i の機能はランチャー（本体）に並ぶ——セッションを開くのと同じ「タブを開く」操作なので、
@@ -381,10 +386,6 @@ onBeforeUnmount(() => {
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   flex: none;
-}
-.brand {
-  font-family: var(--mono);
-  font-weight: 600;
 }
 .link {
   font-family: var(--mono);
