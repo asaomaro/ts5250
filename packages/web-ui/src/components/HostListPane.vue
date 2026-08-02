@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { systemsStore } from "../stores/systems.js";
+import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 
@@ -15,8 +16,12 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-const props = defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 /** jobs | objects | users */
 const kind = computed(() => props.tabId.replace(/^list:/, ""));
 
@@ -65,12 +70,15 @@ const title = computed(
  * 一覧はコマンドサーバー経由で、装置名も画面サイズも要らないのでシステムだけで足りる。
  */
 function sourceBody(): Record<string, string> {
-  return systemsStore.selected ? { system: systemsStore.selected } : {};
+  return props.system ? { system: props.system } : {};
 }
 
 async function load(): Promise<void> {
-  if (!systemsStore.selected) {
-    error.value = "システムを選んでください";
+  // **「システムを選んでください」ではない**（`20260802-tabs-own-system`）。
+  // タブは 1 つのシステムへの窓なので、ここが空なのは**設定から消えた**ときだけ。
+  // 利用者に選び直す手立ては無いので、文言は共通の定数に寄せる
+  if (!props.system) {
+    error.value = MSG_SYSTEM_GONE;
     return;
   }
   error.value = "";
@@ -103,9 +111,20 @@ async function load(): Promise<void> {
   });
 }
 
+/**
+ * **確認の文言に対象システムを入れる**（`20260802-tabs-own-system`）。
+ *
+ * 異なるシステムのタブを並べられるようになった以上、「どちらに対して実行するのか」が
+ * 文言に無いと取り違える。色ではなく**名前を文字で**出すのが要点——
+ * 確認ダイアログは OS が描くので、こちらの色は乗らない。
+ */
+function askOn(text: string): boolean {
+  return window.confirm(`[${systemsStore.nameOf(props.system ?? "")}] ${text}`);
+}
+
 /** 破壊的な操作は確認を挟む */
 async function act(action: string, target: Record<string, string>, confirmText?: string): Promise<void> {
-  if (confirmText && !window.confirm(confirmText)) return;
+  if (confirmText && !askOn(confirmText)) return;
   actionResult.value = undefined;
   await run(async () => {
   try {
@@ -142,20 +161,10 @@ onMounted(() => {
 });
 
 /**
- * システムが変わったら**表示中の行を捨てる**。
- *
- * 捨てないと、ヘッダーは新しいシステム名を出しているのに、並んでいるのは前のシステムの
- * ジョブ、という状態になる。誤って別システムのジョブを終了しかねない。
- * 自動で取り直さないのは、切り替えただけで意図しない問い合わせを飛ばさないため。
+ * **このタブのシステムは生涯変わらない**（`20260802-tabs-own-system`）。
+ * 以前はアプリ全体の選択値を見ていたため「切り替わったら中身を捨てる」監視が要ったが、
+ * いまは切り替わりようがない——捨てるのではなく、**そもそも変わらない**。
  */
-watch(
-  () => systemsStore.selected,
-  () => {
-    rows.value = [];
-    error.value = "";
-    actionResult.value = undefined;
-  }
-);
 </script>
 
 <template>

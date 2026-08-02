@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { systemColorIndex } from "../composables/systemColor.js";
 import type { PublicSystem, PublicSession, Watermark, IdleTimeout, SessionType, DtaqWatchSpec } from "@as400web/server";
 
 /**
@@ -24,6 +25,8 @@ export interface SystemForm {
   ccsid?: number;
   /** スプール（SCS）用 CCSID。5250 画面用の ccsid とは別物（spec 方針2） */
   spoolCcsid?: number;
+  /** システムカラー（パレット番号 1〜8）。未設定なら ref から自動で割り当てる */
+  color?: number;
   autoSignon?: boolean;
   signonUser?: string;
   /**
@@ -137,20 +140,28 @@ async function send(url: string, method: string, body: unknown): Promise<unknown
 export const systemsStore = reactive({
   systems: [] as PublicSystem[],
   sessions: [] as PublicSession[],
-  /** 選択中システムの ref。未選択なら undefined */
-  selected: undefined as string | undefined,
+  /**
+   * **メニューの対象＝新規タブの既定**（`20260802-tabs-own-system`）。
+   *
+   * 以前の名前は `selected`（選択中システム）で、**表示の絞り込み**と
+   * **要求の宛先**を兼ねていた。宛先はタブが持つようになり、絞り込みはやめたので、
+   * 残る役割はこれだけ——`selected` のままだと「絞り込み」の記憶で読み違える。
+   *
+   * 未設定なら undefined（システム選択画面が出る）。
+   */
+  menuSystem: undefined as string | undefined,
   /** サーバー設定を編集できるか（認証オフ or admin かつ永続化可） */
   editable: false,
   loaded: false,
 
   /** 選択中システムの実体 */
   get current(): PublicSystem | undefined {
-    return this.systems.find((s) => s.ref === this.selected);
+    return this.systems.find((s) => s.ref === this.menuSystem);
   },
 
   /** 選択中システムに属するセッション設定 */
   get currentSessions(): PublicSession[] {
-    return this.selected ? this.sessions.filter((s) => s.system === this.selected) : [];
+    return this.menuSystem ? this.sessions.filter((s) => s.system === this.menuSystem) : [];
   },
 
   /** 指定システムに属するセッション設定の数（カードの表示用） */
@@ -159,7 +170,20 @@ export const systemsStore = reactive({
   },
 
   select(ref: string | undefined): void {
-    this.selected = ref;
+    this.menuSystem = ref;
+  },
+
+  /**
+   * そのシステムのパレット番号（`20260802-tabs-own-system`）。
+   * 設定が無ければ ref から自動——**登録しただけで区別が付く**ようにするため。
+   */
+  colorOf(ref: string): number {
+    return systemColorIndex(ref, this.systems.find((s) => s.ref === ref)?.color);
+  },
+
+  /** 表示名（一覧に無ければ ref をそのまま。消えたシステムでも名前欄が空にならない） */
+  nameOf(ref: string): string {
+    return this.systems.find((s) => s.ref === ref)?.name ?? ref;
   },
 
   async refresh(): Promise<void> {
@@ -180,11 +204,11 @@ export const systemsStore = reactive({
       this.editable = sysBody.editable;
       this.loaded = true;
       // 選択が消えていたら外す（削除・権限変更のあと）
-      if (this.selected && !this.systems.some((s) => s.ref === this.selected)) {
-        this.selected = undefined;
+      if (this.menuSystem && !this.systems.some((s) => s.ref === this.menuSystem)) {
+        this.menuSystem = undefined;
       }
       // 1 つしか無いなら選ぶ手間を省く
-      if (!this.selected && this.systems.length === 1) this.selected = this.systems[0]!.ref;
+      if (!this.menuSystem && this.systems.length === 1) this.menuSystem = this.systems[0]!.ref;
     } catch {
       this.systems = [];
       this.sessions = [];
@@ -208,7 +232,7 @@ export const systemsStore = reactive({
   async removeSystem(ref: string): Promise<void> {
     const res = await fetch(`/api/systems/${encodeURIComponent(ref)}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await readError(res));
-    if (this.selected === ref) this.selected = undefined;
+    if (this.menuSystem === ref) this.menuSystem = undefined;
     await this.refresh();
   },
 

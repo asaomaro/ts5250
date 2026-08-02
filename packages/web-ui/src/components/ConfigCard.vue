@@ -7,6 +7,7 @@
  */
 import { computed, reactive, ref, watch } from "vue";
 import type { PublicSession, PublicSystem } from "@as400web/server";
+import { SYSTEM_COLOR_COUNT, systemColorVar } from "../composables/systemColor.js";
 import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores/systems.js";
 import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
@@ -259,6 +260,7 @@ function loadSystem(): void {
   sysForm.tls = s.tls ?? false;
   sysForm.ccsid = s.ccsid ?? DEFAULT_CCSID;
   sysForm.spoolCcsid = s.spoolCcsid ?? DEFAULT_SPOOL_CCSID;
+  sysForm.color = s.color; // 未設定のまま＝自動（ref から割り当てる）
   sysForm.autoSignon = s.autoSignon;
   sysForm.signonUser = s.signonUser ?? "";
   // パスワードは返らない。**空のまま送れば既存が保たれる**（サーバー側でそう扱う）
@@ -268,7 +270,7 @@ function loadSystem(): void {
 function loadSession(): void {
   const s = props.session;
   if (!s) {
-    sesForm.system = props.parentSystem ?? systemsStore.selected ?? "";
+    sesForm.system = props.parentSystem ?? systemsStore.menuSystem ?? "";
     return;
   }
   loadWatermark(s.watermark);
@@ -764,6 +766,43 @@ const infoRows = computed(() => {
           </select>
           <span class="hint">スプールの SCS 用。上の 5250 画面用とは別</span>
         </label>
+        <!--
+          **システムカラー**（`20260802-tabs-own-system`）。異なるシステムのタブを
+          並べたときの見分けに使う。持つのは**パレットの番号**だけで、色の実体は
+          テーマ側（`--sys-*`）にある——設定に生の色を書くと、テーマを変えるたびに
+          設定を直して回ることになる。
+          **未設定は「自動」**（システム ref から決定的に割り当て）。登録しただけで区別が付く。
+        -->
+        <div class="row">
+          <span class="cap">タブの色</span>
+          <span class="swatches" role="radiogroup" aria-label="タブの色">
+            <button
+              type="button"
+              class="swatch-btn auto"
+              role="radio"
+              :aria-checked="sysForm.color === undefined"
+              :class="{ on: sysForm.color === undefined }"
+              title="自動（名前から決める）"
+              @click="sysForm.color = undefined"
+            >
+              自動
+            </button>
+            <button
+              v-for="n in SYSTEM_COLOR_COUNT"
+              :key="n"
+              type="button"
+              class="swatch-btn"
+              role="radio"
+              :aria-checked="sysForm.color === n"
+              :class="{ on: sysForm.color === n }"
+              :style="{ background: systemColorVar(n) }"
+              :title="`色 ${n}`"
+              :aria-label="`色 ${n}`"
+              @click="sysForm.color = n"
+            ></button>
+          </span>
+          <span class="hint">タブ・ヘッダー・メニューでの見分けに使います</span>
+        </div>
         <label class="row"
           ><span class="cap">自動サインオン</span><input v-model="sysForm.autoSignon" type="checkbox"
         /></label>
@@ -1346,5 +1385,32 @@ const infoRows = computed(() => {
   color: var(--accent);
   font-size: 0.78rem;
   margin: 8px 0 0;
+}
+
+/* システムカラーの選択。色そのものが選択肢なので、文字ではなく面で見せる */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.swatch-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.swatch-btn.auto {
+  width: auto;
+  padding: 0 7px;
+  font-size: 11px;
+  background: var(--card);
+  color: var(--muted);
+}
+.swatch-btn.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 </style>

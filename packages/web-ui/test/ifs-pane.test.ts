@@ -10,14 +10,14 @@ import { systemsStore } from "../src/stores/systems.js";
  * 素直に書くとエラー画面になってしまう。そうなっていないことを固定する。
  */
 const realFetch = globalThis.fetch;
-const realSelected = systemsStore.selected;
+const realSelected = systemsStore.menuSystem;
 
 beforeEach(() => {
-  systemsStore.selected = "srv:s";
+  systemsStore.menuSystem = "srv:s";
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
-  systemsStore.selected = realSelected;
+  systemsStore.menuSystem = realSelected;
 });
 
 /**
@@ -71,7 +71,7 @@ function mockFetch(routes: Record<string, unknown>, status: Record<string, numbe
 
 async function paneWith(routes: Record<string, unknown>, status?: Record<string, number>) {
   mockFetch(routes, status);
-  const wrapper = mount(IfsPane, { props: { tabId: "ifs:files" } });
+  const wrapper = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
   await flushPromises();
   return wrapper;
 }
@@ -230,7 +230,7 @@ describe("プレビュー", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -311,7 +311,7 @@ describe("プレビュー", () => {
         headers: { "content-type": "application/json" }
       });
     }) as unknown as typeof fetch;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -353,7 +353,7 @@ describe("上位フォルダへ", () => {
       );
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     // フォルダへ入る
     await w.findAll(".entries li")[0]?.trigger("click");
@@ -389,7 +389,7 @@ describe("上位フォルダへ", () => {
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as unknown as typeof fetch;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -461,7 +461,7 @@ describe("操作系", () => {
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as unknown as typeof fetch;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -495,7 +495,7 @@ describe("操作系", () => {
     }) as unknown as typeof fetch;
     URL.createObjectURL = vi.fn(() => "blob:x") as unknown as typeof URL.createObjectURL;
     URL.revokeObjectURL = vi.fn() as unknown as typeof URL.revokeObjectURL;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     // 2 件目を選ぶ
     await w.findAll(".entries li")[1]?.trigger("click");
@@ -523,22 +523,41 @@ describe("操作系", () => {
 });
 
 /**
- * **システムを切り替えたら見えているものを捨てる。**
- * 捨てないと、ヘッダーは新しいシステムなのに一覧は前のシステムのまま、
- * 次の削除や上書きが**別システムのファイルに飛ぶ**。
+ * **アプリ全体の選択に引きずられない**（`20260802-tabs-own-system`）。
+ *
+ * 以前は「システムを切り替えたら見えているものを捨てる」だった——ペインが
+ * アプリ全体の選択値を要求の宛先に使っていたので、捨てないと次の操作が
+ * 別システムへ飛んだからである。いまはタブが自分のシステムを持つので、
+ * **捨てる必要が無い代わりに、宛先が動かないことを守る**。こちらのほうが強い性質。
  */
-describe("システムの切り替え", () => {
-  it("切り替えたら一覧と選択を捨てる", async () => {
-    const w = await paneWith({
-      list: { entries: [entry("only-on-s.txt")], hasMore: false, canContinue: false }
-    });
-    await w.findAll(".entries li")[0]?.trigger("click");
+describe("アプリ全体の選択に引きずられない", () => {
+  it("**選択が変わっても一覧はそのまま／要求は自分のシステムへ飛ぶ**", async () => {
+    const sent: (string | undefined)[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const limits = limitsResponse(url);
+      if (limits) return limits;
+      const body = JSON.parse(String(init?.body)) as { source: { system?: string } };
+      sent.push(body.source.system);
+      return new Response(
+        JSON.stringify({ entries: [entry("only-on-s.txt")], hasMore: false, canContinue: false }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     expect(w.text()).toContain("only-on-s.txt");
 
-    systemsStore.selected = "srv:other";
+    // アプリ全体の選択を別システムへ動かす
+    systemsStore.menuSystem = "srv:other";
     await flushPromises();
-    expect(w.text()).not.toContain("only-on-s.txt");
+    expect(w.text(), "選択に引きずられて捨てている").toContain("only-on-s.txt");
+
+    sent.length = 0;
+    await (w.vm as unknown as { reload(): Promise<void> }).reload();
+    await flushPromises();
+    expect(sent, "宛先が全体の選択に持っていかれた").toEqual(["srv:s"]);
+    w.unmount();
   });
 });
 
@@ -572,7 +591,7 @@ describe("アップロード", () => {
       );
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const input = w.find('input[type="file"]').element as HTMLInputElement;
     const files = [
@@ -614,7 +633,7 @@ describe("アップロード", () => {
       return false; // キャンセルする
     });
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const input = w.find('input[type="file"]').element as HTMLInputElement;
     Object.defineProperty(input, "files", {
@@ -684,7 +703,7 @@ describe("フォルダのアップロード", () => {
   it("中間フォルダも作る（深いファイルが親無しで落ちないように）", async () => {
     const sent = captureUpload();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
 
     await (w.vm as unknown as Pane).uploadPicked(
@@ -707,7 +726,7 @@ describe("フォルダのアップロード", () => {
       asked.push(String(m));
       return true;
     });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
 
     await (w.vm as unknown as Pane).uploadPicked(
@@ -724,7 +743,7 @@ describe("フォルダのアップロード", () => {
   it("キャンセルしたら 1 件も送らない", async () => {
     const sent = captureUpload();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
 
     await (w.vm as unknown as Pane).uploadPicked([picked("TOP/a.txt")], []);
@@ -738,7 +757,7 @@ describe("フォルダのアップロード", () => {
   it("空のフォルダも作る", async () => {
     const sent = captureUpload();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
 
     await (w.vm as unknown as Pane).uploadPicked([picked("TOP/a.txt")], ["TOP", "TOP/empty"]);
@@ -805,7 +824,7 @@ describe("フォルダのドロップ", () => {
     }) as unknown as typeof fetch;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
 
     const children = Array.from({ length: 150 }, (_, i) => fileEntry(`f${i}.txt`));
@@ -855,7 +874,7 @@ describe("アップロードの符号化", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await (w.vm as unknown as { uploadFiles(f: File[]): Promise<void> }).uploadFiles([
       new File([part], name)
@@ -928,7 +947,7 @@ describe("ツリー", () => {
 
   it("フォルダだけを並べ、ファイルは出さない", async () => {
     treeFetch({ "/": ["home/", "a.txt"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const rows = w.findAll(".tree-row").map((r) => r.text());
     expect(rows.some((r) => r.includes("home"))).toBe(true);
@@ -937,7 +956,7 @@ describe("ツリー", () => {
 
   it("展開すると子が増え、深さが付く", async () => {
     treeFetch({ "/": ["home/"], "/home": ["sub/"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const before = w.findAll(".tree-row").length;
 
@@ -960,7 +979,7 @@ describe("ツリー", () => {
   /** パスをキーにしているので、別階層の同名フォルダが混ざらない */
   it("同名フォルダが階層違いで共存する", async () => {
     treeFetch({ "/": ["home/", "tmp/"], "/home": ["sub/"], "/tmp": ["sub/"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     for (const name of ["home", "tmp"]) {
       const caret = w
@@ -976,7 +995,7 @@ describe("ツリー", () => {
 
   it("名前を押すと一覧がそこへ移る", async () => {
     const asked = treeFetch({ "/": ["home/"], "/home": ["x.txt"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w
       .findAll(".tree-row")
@@ -991,7 +1010,7 @@ describe("ツリー", () => {
   /** 既に開いているフォルダを名前で押しても畳まない（畳むと移動手段が無くなる） */
   it("開いているフォルダへ名前で移動しても畳まない", async () => {
     treeFetch({ "/": ["home/"], "/home": ["x.txt"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const row = () => w.findAll(".tree-row").find((r) => r.text().includes("home"));
     await row()?.find(".caret").trigger("click");
@@ -1005,7 +1024,7 @@ describe("ツリー", () => {
   /** 一覧を降りると、ツリーが現在地を示し、祖先が開く（RS1） */
   it("一覧を降りるとツリーに現在地が出る", async () => {
     treeFetch({ "/": ["home/"], "/home": ["USER/"], "/home/USER": ["x.txt"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li").find((li) => li.text().includes("home"))?.trigger("click");
     await flushPromises();
@@ -1022,7 +1041,7 @@ describe("ツリー", () => {
   /** ルートは畳めないので、開閉不可・aria-expanded を付けない（RS3） */
   it("ルート行は開閉不可で aria-expanded を持たない", async () => {
     treeFetch({ "/": ["home/"] });
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const caret = w.find('.tree-row[data-path="/"] .caret');
     expect(caret.attributes("disabled")).toBeDefined();
@@ -1072,7 +1091,7 @@ describe("アップロード中のシステム切り替え", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     // /sub へ移動してからアップロードを始める
     await w.findAll(".entries li")[0]?.trigger("click");
@@ -1086,7 +1105,7 @@ describe("アップロード中のシステム切り替え", () => {
     await flushPromises();
 
     // 送信の途中でシステムを切り替える
-    systemsStore.selected = "srv:other";
+    systemsStore.menuSystem = "srv:other";
     await flushPromises();
     firstWrite?.();
     await running;
@@ -1128,7 +1147,7 @@ describe("操作中の禁止", () => {
 
   it("通信中はヘッダーとツリーのボタンが disabled になる", async () => {
     const release = pendingList();
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     // 初回 list を保留したまま（busy = true）
     await flushPromises();
 
@@ -1147,7 +1166,7 @@ describe("操作中の禁止", () => {
 
 describe("アップロードの後始末（別システムへ飛ばさない）", () => {
   /** 切替後は、新システムの画面に結果を出さない・新システムへ list を飛ばさない（review QS1） */
-  it("アップロード中に切り替えたら、新システムに触れない", async () => {
+  it("アップロード中に全体の選択が変わっても、宛先は自分のシステムのまま", async () => {
     const listed: string[] = [];
     let firstWrite: (() => void) | undefined;
     globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -1173,7 +1192,7 @@ describe("アップロードの後始末（別システムへ飛ばさない）"
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     listed.length = 0; // 初回 list を除く
 
@@ -1181,17 +1200,15 @@ describe("アップロードの後始末（別システムへ飛ばさない）"
     const running = vm.uploadFiles([new File([new Blob([new Uint8Array([1])])], "one.txt")]);
     await flushPromises();
 
-    systemsStore.selected = "srv:other";
+    systemsStore.menuSystem = "srv:other";
     await flushPromises();
     firstWrite?.();
     await running;
     await flushPromises();
 
-    // 新システム（srv:other）に対する list が飛んでいない
+    // **アプリ全体の選択が動いても、飛ぶ先は自分のシステムのまま**
+    expect(listed.every((l) => l.startsWith("srv:s"))).toBe(true);
     expect(listed.every((l) => !l.startsWith("srv:other"))).toBe(true);
-    // 「置きました」を新しい画面に出さない
-    expect(w.text()).not.toContain("置きました");
-    expect(w.text()).toContain("切り替えた");
   });
 });
 
@@ -1217,7 +1234,7 @@ describe("上書き確認", () => {
     }) as unknown as typeof fetch;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false); // キャンセル
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const vm = w.vm as unknown as { uploadFiles(f: File[]): Promise<void> };
     await vm.uploadFiles([new File([new Blob([new Uint8Array([1])])], "dup.txt")]);
@@ -1252,7 +1269,7 @@ describe("上書き確認", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     const vm = w.vm as unknown as { uploadFiles(f: File[]): Promise<void> };
     const first = vm.uploadFiles([new File([new Blob([new Uint8Array([1])])], "a.txt")]);
@@ -1302,7 +1319,7 @@ describe("編集・保存", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1355,7 +1372,7 @@ describe("編集・保存", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1406,7 +1423,7 @@ describe("編集・保存", () => {
         headers: { "content-type": "application/json" }
       });
     }) as unknown as typeof fetch;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1442,7 +1459,7 @@ describe("編集・保存", () => {
         headers: { "content-type": "application/json" }
       });
     }) as unknown as typeof fetch;
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1488,7 +1505,7 @@ describe("削除・名前の変更", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.find(".entries li .pick").trigger("click");
     await flushPromises();
@@ -1523,7 +1540,7 @@ describe("削除・名前の変更", () => {
     }) as unknown as typeof fetch;
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.find(".entries li .pick").trigger("click");
     await flushPromises();
@@ -1558,7 +1575,7 @@ describe("削除・名前の変更", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.find(".entries li .pick").trigger("click");
     await flushPromises();
@@ -1583,7 +1600,7 @@ describe("削除・名前の変更", () => {
     }) as unknown as typeof fetch;
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("b.txt");
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1609,7 +1626,7 @@ describe("削除・名前の変更", () => {
     }) as unknown as typeof fetch;
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("../b.txt");
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     await w.findAll(".entries li")[0]?.trigger("click");
     await flushPromises();
@@ -1645,7 +1662,7 @@ describe("再読み込み", () => {
       });
     }) as unknown as typeof fetch;
 
-    const w = mount(IfsPane, { props: { tabId: "ifs:files" } });
+    const w = mount(IfsPane, { props: { tabId: "ifs:files", system: "srv:s" } });
     await flushPromises();
     expect(w.text()).not.toContain("b.txt");
 

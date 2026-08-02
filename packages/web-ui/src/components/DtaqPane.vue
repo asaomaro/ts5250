@@ -7,7 +7,7 @@
  * 一覧の text は CCSID の都合で best-effort（EBCDIC 解釈）——真値は hex 列を見る。
  */
 import { ref, computed } from "vue";
-import { systemsStore } from "../stores/systems.js";
+import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import {
@@ -31,10 +31,14 @@ import {
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
-const source = () => ({ system: systemsStore.selected });
+const source = () => ({ system: props.system });
 const { visible: slowLoading, busy, run } = useDelayedLoading();
 
 const library = ref("");
@@ -71,12 +75,12 @@ const queueReady = computed(
  * 下のフォームや表が上下に飛ぶ
  */
 const statusNote = computed(() => {
-  if (!systemsStore.selected) return "システムを選んでください。";
+  if (!props.system) return MSG_SYSTEM_GONE;
   if (!queueReady.value)
     return "ライブラリーとキュー名を入力してください（英数字と $ # @ _ . のみ・10 文字まで）。";
   return message.value;
 });
-const disabled = computed(() => busy.value || !systemsStore.selected || !queueReady.value);
+const disabled = computed(() => busy.value || !props.system || !queueReady.value);
 const keyed = computed(() => createType.value === "KEYED");
 
 /** 操作を包んで、エラーは日本語文言に、成功は note に落とす */

@@ -60,7 +60,7 @@ function liveSession(configRef: string, deviceName?: string): SessionState {
 beforeEach(() => {
   systemsStore.systems = [SYSTEM];
   systemsStore.sessions = [SESSION];
-  systemsStore.selected = SYSTEM.ref;
+  systemsStore.menuSystem = SYSTEM.ref;
   systemsStore.loaded = true;
   authStore.enabled = false;
   sessionsStore.byId.clear();

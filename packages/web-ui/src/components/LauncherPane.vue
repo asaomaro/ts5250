@@ -12,6 +12,8 @@ import { computed, onMounted, ref } from "vue";
 import type { PublicSession } from "@as400web/server";
 import { systemsStore } from "../stores/systems.js";
 import { workspaceStore } from "../stores/workspace.js";
+import SystemDot from "./SystemDot.vue";
+import { makePaneTabId } from "../paneLabels.js";
 import { authStore } from "../stores/auth.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -87,9 +89,13 @@ const APP_PANES = computed(() => {
   return out;
 });
 
-/** すでにワークスペースで開かれているか（「開く」か「表示」かの出し分け） */
-function isOpen(id: string): boolean {
-  return workspaceStore.groups().some((g) => g.tabs.includes(id));
+/**
+ * すでにワークスペースで開かれているか（「開く」か「表示」かの出し分け）。
+ * **判定は (機能, システム) の組**——A の SQL が開いていても B の SQL は「開く」。
+ */
+function isOpen(id: string, scoped = true): boolean {
+  const tab = tabIdFor(id, scoped);
+  return workspaceStore.groups().some((g) => g.tabs.includes(tab));
 }
 
 const selected = computed(() => systemsStore.current);
@@ -102,18 +108,34 @@ function selectSystem(ref: string): void {
 }
 
 /**
+ * そのタブ ID（`20260802-tabs-own-system`）。
+ *
+ * IBM i の機能は**システムごとに別のタブ**になる（`sql:query@own:a`）。
+ * このアプリ自身の画面（`scoped: false`。サービス一覧・管理）はシステムに紐づかないので
+ * ID をそのまま使う。
+ */
+function tabIdFor(id: string, scoped: boolean): string {
+  const sys = scoped ? systemsStore.menuSystem : undefined;
+  return sys ? makePaneTabId(id, sys) : id;
+}
+
+/**
  * 機能・管理画面を開く。**すでに開いていれば開き直さず、そこへ移動する**——
  * 「機能選択からアプリへ単純に移動したい」経路を、同じカードで兼ねるため。
+ *
+ * **開き直しでシステムを付け替えない**（`20260802-tabs-own-system`）。以前は
+ * `assignSystem` で既存タブを今のシステムへ付け替えていたが、それは
+ * **実行済みの結果が別システムのものに化ける**ということ。いまは (機能, システム) の
+ * 組ごとに別のタブなので、付け替える必要そのものが無い。
  */
 function openFeature(id: string, scoped = true): void {
-  const existing = workspaceStore.groups().find((g) => g.tabs.includes(id));
+  const tab = tabIdFor(id, scoped);
+  const existing = workspaceStore.groups().find((g) => g.tabs.includes(tab));
   if (existing) {
-    workspaceStore.setActiveTab(existing.id, id);
+    workspaceStore.setActiveTab(existing.id, tab);
     workspaceStore.focus(existing.id);
-    // IBM i の機能は、いま選択中のシステムのものとして見る
-    if (scoped && systemsStore.selected) workspaceStore.assignSystem(id, systemsStore.selected);
   } else {
-    workspaceStore.addSession(id, scoped ? systemsStore.selected : undefined);
+    workspaceStore.addSession(tab, scoped ? systemsStore.menuSystem : undefined);
   }
   workspaceStore.showLauncher = false;
 }
@@ -219,7 +241,7 @@ async function connect(ref: string, force = false): Promise<void> {
     <p v-if="error" class="err">{{ error }}</p>
 
     <!-- システム選択画面。未選択なら常にここ。選択済みでもパンくずから来られる -->
-    <template v-if="!systemsStore.selected || workspaceStore.showSystemPicker">
+    <template v-if="!systemsStore.menuSystem || workspaceStore.showSystemPicker">
       <p class="sec">システム</p>
       <div class="cards">
         <ConfigCard
@@ -228,7 +250,7 @@ async function connect(ref: string, force = false): Promise<void> {
           kind="system"
           :system="s"
           :dense="viewMode === 'list'"
-          :selected="s.ref === systemsStore.selected"
+          :selected="s.ref === systemsStore.menuSystem"
           @select="selectSystem"
           @done="systemsStore.refresh()"
         />
@@ -242,7 +264,11 @@ async function connect(ref: string, force = false): Promise<void> {
 
     <!-- 選択後: セッションと機能 -->
     <template v-else>
-      <p class="sec">{{ selected?.name }} のセッション</p>
+      <!-- **どのシステムのメニューを見ているか**を、タブと同じ色で示す -->
+      <p class="sec">
+        <SystemDot v-if="systemsStore.menuSystem" :system-ref="systemsStore.menuSystem" />
+        のセッション
+      </p>
       <div class="cards">
         <ConfigCard
           v-for="s in systemsStore.currentSessions"
@@ -260,11 +286,11 @@ async function connect(ref: string, force = false): Promise<void> {
           v-if="addingSession"
           kind="session"
           creating
-          :parent-system="systemsStore.selected"
+          :parent-system="systemsStore.menuSystem"
           @done="addingSession = false"
           @cancel="addingSession = false"
         />
-        <button v-else class="add" @click="addingSession = true">＋ セッションを追加</button>
+        <button v-else class="add" @click="addingSession = true">＋ {{ selected?.name }} にセッションを追加</button>
       </div>
 
       <p class="sec">このシステムの機能</p>
@@ -297,7 +323,7 @@ async function connect(ref: string, force = false): Promise<void> {
         <div class="nm">{{ a.name }}</div>
         <div class="desc">{{ a.desc }}</div>
         <div class="foot">
-          <button class="btn ghost" @click="openFeature(a.id, false)">{{ isOpen(a.id) ? "表示" : "開く" }}</button>
+          <button class="btn ghost" @click="openFeature(a.id, false)">{{ isOpen(a.id, false) ? "表示" : "開く" }}</button>
         </div>
       </div>
     </div>

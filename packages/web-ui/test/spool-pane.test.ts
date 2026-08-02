@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MSG_SYSTEM_GONE } from "../src/composables/opMessages.js";
 import { mount, flushPromises } from "@vue/test-utils";
 import SpoolPane from "../src/components/SpoolPane.vue";
 import { systemsStore } from "../src/stores/systems.js";
@@ -72,20 +73,21 @@ afterEach(() => {
 });
 
 async function mountPane() {
-  const w = mount(SpoolPane, { props: { tabId: "spool:files" } });
+  const w = mount(SpoolPane, { props: { tabId: "spool:files", system: SYSTEM.ref } });
   await flushPromises();
   return w;
 }
 
-describe("システム未選択のガード", () => {
-  it("接続を選んでいなければ取得せずに促す", async () => {
-    systemsStore.select(undefined);
-    const w = await mountPane();
+describe("システムが消えたときのガード", () => {
+  /** タブは 1 つのシステムへの窓なので、`system` が空なのは**消えた**ときだけ */
+  it("消えていたら取得せず理由を出す", async () => {
+    const w = mount(SpoolPane, { props: { tabId: "spool:files" } });
+    await flushPromises();
 
     await w.find("header button").trigger("click");
     await flushPromises();
 
-    expect(w.text()).toContain("システムを選んでください");
+    expect(w.text()).toContain(MSG_SYSTEM_GONE);
     w.unmount();
   });
 });
@@ -335,23 +337,23 @@ describe("応答の追い越し", () => {
     w.unmount();
   });
 
-  it("システムを切り替えたあとに旧システムの一覧が書き戻らない", async () => {
+  it("取得中に全体の選択が変わっても、自分の応答は表示する", async () => {
     const pending = deferredFetch();
-    const w = mount(SpoolPane, { props: { tabId: "spool:files" } });
+    const w = mount(SpoolPane, { props: { tabId: "spool:files", system: SYSTEM.ref } });
     await flushPromises();
     await w.find("header button").trigger("click");
 
-    // 取得中に切り替える
+    // 取得中にアプリ全体の選択を動かす（このタブの宛先は動かない）
     systemsStore.systems = [SYSTEM, { ...SYSTEM, ref: "own:s2", name: "別" }];
     systemsStore.select("own:s2");
     await flushPromises();
 
-    // 旧システムの応答が遅れて届く
+    // 自分のシステムへ出した要求の応答は、遅れて届いても表示してよい
     const listCall = pending.find((p) => p.url === "/api/host/spools");
     listCall?.resolve({ items: [ROW], count: 1, truncated: false });
     await flushPromises();
 
-    expect(w.text()).not.toContain("QPRTLIBL");
+    expect(w.text(), "自分の応答を捨てている").toContain("QPRTLIBL");
     w.unmount();
   });
 });
@@ -397,7 +399,14 @@ describe("ペインの登録", () => {
   });
 });
 
-describe("接続先の切り替え", () => {
+/**
+ * **アプリ全体の選択に引きずられない**（`20260802-tabs-own-system`）。
+ *
+ * 以前は「切り替えたら結果を捨てる」だった——ペインがアプリ全体の選択値を宛先に
+ * 使っていたので、捨てないと次の操作が別システムへ飛んだためである。
+ * いまはタブが自分のシステムを持つので、**捨てる必要が無い代わりに宛先が動かないことを守る**。
+ */
+describe("アプリ全体の選択に引きずられない", () => {
   it("システムを変えたら結果を捨てる（自動では取り直さない）", async () => {
     mockFetch({
       "/api/host/spools": { items: [ROW], count: 1, truncated: false }
@@ -411,7 +420,7 @@ describe("接続先の切り替え", () => {
     systemsStore.select("own:s2");
     await flushPromises();
 
-    expect(w.text()).not.toContain("QPRTLIBL");
+    expect(w.text(), "全体の選択に引きずられて捨てている").toContain("QPRTLIBL");
     w.unmount();
   });
 });

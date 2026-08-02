@@ -170,6 +170,16 @@ export const systemSchema = z
      * セッション階層には置かない: pull 型スプールはセッションに紐づかないため（spec 方針2）。
      */
     spoolCcsid: z.number().int().optional(),
+    /**
+     * **システムカラー**（`20260802-tabs-own-system`）。パレットの番号（1〜8）。
+     *
+     * 異なるシステムのタブを並べたときの見分けに使う。**生の色を持たない**のは、
+     * 色の実体をテーマ側（`--sys-*`）に置くため——設定ファイルに hex を書くと、
+     * テーマや配色を変えるたびに設定を直して回ることになる。
+     *
+     * 未設定なら**システム ref から自動で割り当てる**（登録しただけで区別が付く）。
+     */
+    color: z.number().int().min(1).max(8).optional(),
     /** 個人設定のみ。サーバー設定は所有者を持たない */
     owner: z.string().optional(),
     signon: signonSchema.optional()
@@ -447,6 +457,8 @@ export interface PublicSystem {
   ccsid?: number;
   /** スプール（SCS）用 CCSID。5250 画面用の `ccsid` とは別（spec 方針2） */
   spoolCcsid?: number;
+  /** システムカラー（パレット番号 1〜8）。未設定は画面側が ref から自動で割り当てる */
+  color?: number;
   owner?: string;
   /** 資格情報が設定されているか */
   autoSignon: boolean;

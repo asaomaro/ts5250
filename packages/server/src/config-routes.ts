@@ -46,6 +46,8 @@ interface SystemInput {
   ccsid?: unknown;
   /** スプール（SCS）用。5250 画面用の ccsid とは別（spec 方針2） */
   spoolCcsid?: unknown;
+  /** システムカラー（パレット番号 1〜8）。タブの見分けに使う */
+  color?: unknown;
   autoSignon?: unknown;
   signonUser?: unknown;
   password?: unknown;
@@ -83,7 +85,7 @@ function toSystemRecord(
   existing?: { signon?: Signon | undefined }
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of ["name", "host", "port", "tls", "ccsid", "spoolCcsid"] as const) {
+  for (const k of ["name", "host", "port", "tls", "ccsid", "spoolCcsid", "color"] as const) {
     if (input[k] !== undefined) out[k] = input[k];
   }
   /** 資格情報に触れていない更新では**既存を保つ**。落とすと黙ってパスワードが消える */

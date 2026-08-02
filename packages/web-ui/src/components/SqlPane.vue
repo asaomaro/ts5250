@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
-import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
@@ -33,8 +33,12 @@ import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 interface Column {
   name: string;
@@ -119,7 +123,7 @@ const sqlDetail = ref("");
 const lastLog = computed<SqlLogEntry | undefined>(() => logEntries.value[logEntries.value.length - 1]);
 
 const canRun = computed(
-  () => !loading.value && sql.value.trim().length > 0 && Boolean(systemsStore.selected)
+  () => !loading.value && sql.value.trim().length > 0 && Boolean(props.system)
 );
 
 /**
@@ -181,11 +185,11 @@ function recordConnection(info: ConnectionInfo | undefined): void {
  * 失敗しても実行時に開き直せばよいので、**画面には何も出さない**。
  */
 function warmUp(): void {
-  if (!systemsStore.selected) return;
+  if (!props.system) return;
   void fetch("/api/host/sql/warm", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: { system: systemsStore.selected } })
+    body: JSON.stringify({ source: { system: props.system } })
   })
     .then(async (res) => {
       // 暖機で実際に接続したなら、それもログに残す（「いつ繋がったか」が分かる）
@@ -195,11 +199,11 @@ function warmUp(): void {
 }
 
 onMounted(warmUp);
-// システムを選び直したら、そちらを暖める。前のシステムのジョブを出したままにしない
-watch(() => systemsStore.selected, () => {
-  conn.value = undefined;
-  warmUp();
-});
+/**
+ * **このタブのシステムは生涯変わらない**（`20260802-tabs-own-system`）。
+ * 以前はアプリ全体の選択値を見ていたため「選び直したら暖め直す」監視が要ったが、
+ * いまは切り替わりようがない——暖めるのはマウント時の 1 回でよい。
+ */
 
 /**
  * 保持してもらっている結果セットを手放す。
@@ -230,8 +234,11 @@ onUnmounted(() => void releaseResultSets());
  * どこまで通ったかが分かる方が調べやすい。
  */
 async function execute(): Promise<void> {
-  if (!systemsStore.selected) {
-    error.value = "システムを選んでください";
+  // **「システムを選んでください」ではない**（`20260802-tabs-own-system`）。
+  // タブは 1 つのシステムへの窓なので、ここが空なのは**設定から消えた**ときだけ。
+  // 利用者に選び直す手立ては無いので、文言は共通の定数に寄せる
+  if (!props.system) {
+    error.value = MSG_SYSTEM_GONE;
     return;
   }
   const statements = splitSqlStatements(sql.value);
@@ -263,7 +270,7 @@ async function executeOne(one: string, position: number, total: number): Promise
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        source: { system: systemsStore.selected },
+        source: { system: props.system },
         sql: one,
         pageSize: pageSize.value,
         ...(fetchLob.value ? { lobMaxBytes: 65536 } : {})

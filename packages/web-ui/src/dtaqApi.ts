@@ -65,7 +65,11 @@ export const KNOWN_ERROR_CODES = [
 ] as const;
 
 export interface DtaqSource {
-  /** `systemsStore.selected` をそのまま渡せるよう undefined を許す（未選択で呼ばれうる） */
+  /**
+   * **そのタブのシステム**（`20260802-tabs-own-system`）。
+   * `undefined` を許すのは、**設定から消えたとき**に空で来るため——呼び出し側が
+   * その場合は要求を出さない（出せば別システムへ飛びかねない）。
+   */
   system?: string | undefined;
   session?: string | undefined;
 }

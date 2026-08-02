@@ -41,7 +41,7 @@ function stubFetch(editable: boolean, systems: PublicSystem[], sessions: PublicS
 beforeEach(() => {
   systemsStore.systems = [];
   systemsStore.sessions = [];
-  systemsStore.selected = undefined;
+  systemsStore.menuSystem = undefined;
   systemsStore.editable = false;
   systemsStore.loaded = false;
   authStore.enabled = false;

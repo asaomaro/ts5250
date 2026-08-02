@@ -88,3 +88,13 @@ export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用でき
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
 /** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";
+
+/**
+ * **このタブのシステムが設定から消えた**（`20260802-tabs-own-system`）。
+ *
+ * タブは 1 つのシステムへの窓なので、その先が無くなったら**止めて理由を出す**。
+ * 黙って別システムへ要求を飛ばさないこと、そして黙って閉じない（書きかけの内容ごと
+ * 消える）ことの両方を満たす扱い。
+ */
+export const MSG_SYSTEM_GONE =
+  "このタブのシステムは設定から削除されました。操作できません。";

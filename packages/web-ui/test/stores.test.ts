@@ -139,7 +139,7 @@ describe("systemsStore（サーバー保存・API バックド）", () => {
     editable = false;
     systemsStore.systems = [];
     systemsStore.sessions = [];
-    systemsStore.selected = undefined;
+    systemsStore.menuSystem = undefined;
     systemsStore.editable = false;
     systemsStore.loaded = false;
     // fetch をモック（GET=一覧 / POST/PUT/DELETE=OK を返す）
@@ -192,7 +192,7 @@ describe("systemsStore（サーバー保存・API バックド）", () => {
   it("システムが 1 つだけなら選ぶ手間を省いて自動選択する", async () => {
     systems = [{ ref: "own:s-1", name: "only", host: "h", autoSignon: false }];
     await systemsStore.refresh();
-    expect(systemsStore.selected).toBe("own:s-1");
+    expect(systemsStore.menuSystem).toBe("own:s-1");
     expect(systemsStore.current?.name).toBe("only");
   });
 
@@ -237,7 +237,7 @@ describe("systemsStore（サーバー保存・API バックド）", () => {
     systemsStore.select("own:s-1");
     await systemsStore.removeSystem("own:s-1");
     expect(systemsStore.systems).toHaveLength(0);
-    expect(systemsStore.selected).toBeUndefined();
+    expect(systemsStore.menuSystem).toBeUndefined();
   });
 
   it("refresh で消えたシステムを選んでいたら選択を外す", async () => {
@@ -250,7 +250,7 @@ describe("systemsStore（サーバー保存・API バックド）", () => {
     systems = [{ ref: "own:a", name: "A", host: "h", autoSignon: false }];
     await systemsStore.refresh();
     // 消えた選択は外れる（ただし残り 1 件なので自動選択が働く）
-    expect(systemsStore.selected).toBe("own:a");
+    expect(systemsStore.menuSystem).toBe("own:a");
   });
 
   it("エラー応答は例外にして一覧を書き換えない", async () => {

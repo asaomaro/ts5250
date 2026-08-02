@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { GroupNode } from "../stores/workspace.js";
+import { systemColorVar } from "../composables/systemColor.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { watchesStore } from "../stores/watches.js";
 import { systemsStore } from "../stores/systems.js";
-import { PANE_LABELS, isPaneTab } from "../paneLabels.js";
+import { paneLabelOf, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
 import SessionInfo from "./SessionInfo.vue";
 import { isFileDrag } from "../dnd.js";
@@ -19,7 +20,9 @@ const reorder = ref<{ overId: string; after: boolean } | undefined>();
 /** セッションを持たない（＝接続の概念が無い）タブか。判定は paneLabels に集約している */
 const isPane = isPaneTab;
 function label(sessionId: string): string {
-  return PANE_LABELS[sessionId] ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
+  // **タブ ID から直接引かない**（`20260802-tabs-own-system`）。
+  // ID にシステムが付く（`sql:query@own:a`）ので、完全一致では外れる
+  return paneLabelOf(sessionId) ?? sessionsStore.get(sessionId)?.label ?? sessionId.slice(0, 6);
 }
 function connected(sessionId: string): boolean {
   if (isPane(sessionId)) return true;
@@ -30,7 +33,36 @@ function connected(sessionId: string): boolean {
  * 選択中システムに属するタブだけを描画する。
  * **`group.tabs` は変えない**——隠すだけで、切り替えて戻れば元どおり現れる。
  */
-const shownTabs = computed(() => workspaceStore.visibleTabs(props.group, systemsStore.selected));
+const shownTabs = computed(() => workspaceStore.visibleTabs(props.group));
+
+/**
+ * **システムカラーの帯**（`20260802-tabs-own-system`）。
+ * 異なるシステムのタブを並べたときの見分け。文字は着色せず、左端の帯で示す
+ * ——タブの文字色は既にアクティブ／非アクティブを表しているため。
+ */
+const systemOf = (t: string): string | undefined => workspaceStore.systemOf(t);
+function tabStyle(t: string): Record<string, string> {
+  const ref = systemOf(t);
+  return ref ? { "--tab-sys": systemColorVar(systemsStore.colorOf(ref)) } : {};
+}
+
+/**
+ * **ワークスペース全体で 2 システム以上開いているか。**
+ *
+ * 判定をペイン単位にすると、**タブを別のペインへ移しただけでラベルが伸び縮みする**。
+ * 全体で見れば、動かしても見え方が変わらない。
+ */
+const manySystems = computed(() => {
+  const refs = new Set<string>();
+  for (const g of workspaceStore.groups()) {
+    for (const t of g.tabs) {
+      const ref = workspaceStore.systemOf(t);
+      if (ref) refs.add(ref);
+    }
+  }
+  return refs.size >= 2;
+});
+const showSystemName = (t: string): boolean => manySystems.value && systemOf(t) !== undefined;
 
 
 /** タブを選ぶ。ランチャーが開いたままにならないよう閉じる */
@@ -192,9 +224,14 @@ function onStripLeave(ev: DragEvent): void {
       @dragend="onDragEnd"
       @dragover="onTabDragOver($event, t)"
       @drop="onTabDrop($event, t)"
+      :style="tabStyle(t)"
       @click="selectTab(t)"
     >
       <span class="dot" :class="{ live: connected(t) }"></span>
+      <!-- **システム名は 2 つ以上のシステムが開いているときだけ**（`20260802-tabs-own-system`）。
+           1 システムしか使っていない人の見た目は変えない。名前側に独自の省略を掛けて、
+           長いシステム名がタブ名を押し出さないようにする -->
+      <span v-if="showSystemName(t)" class="sysname">{{ systemsStore.nameOf(systemOf(t)!) }}</span>
       {{ label(t) }}
       <span v-if="unread(t) > 0" class="badge" :title="unreadTitle(t)">{{ unread(t) }}</span>
       <button
@@ -255,6 +292,32 @@ function onStripLeave(ev: DragEvent): void {
   background: var(--crt);
   color: var(--muted);
   cursor: grab;
+}
+/* システムカラーの帯（左端）。`--tab-sys` が無いタブ（システムに紐づかない画面）には出さない */
+.tab[style*="--tab-sys"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 0;
+  background: var(--tab-sys);
+}
+.tab[style*="--tab-sys"] {
+  padding-left: 11px; /* 帯のぶん本文を寄せる（8px + 3px） */
+}
+.sysname {
+  color: var(--muted);
+  /* **名前側だけを縮める**。長いシステム名がタブ名を押し出さないように */
+  max-width: 7ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sysname::after {
+  content: "｜";
+  color: var(--line);
 }
 .tab.on {
   color: var(--t-green);

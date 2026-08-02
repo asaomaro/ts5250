@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 async function run(sql: string) {
-  const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+  const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
   await w.find("textarea").setValue(sql);
   await w.find("header button").trigger("click");
   await flushPromises();

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MSG_SYSTEM_GONE } from "../src/composables/opMessages.js";
 import { mount, flushPromises } from "@vue/test-utils";
 import HostListPane from "../src/components/HostListPane.vue";
 import { systemsStore } from "../src/stores/systems.js";
@@ -54,7 +55,7 @@ describe("タブ ID で表示が切り替わる", () => {
     ["list:objects", "オブジェクト"],
     ["list:users", "ユーザー"]
   ])("%s は %s を表示する", async (tabId, title) => {
-    const w = mount(HostListPane, { props: { tabId } });
+    const w = mount(HostListPane, { props: { tabId, system: SYSTEM.ref } });
     await flushPromises();
     expect(w.text()).toContain(title);
     w.unmount();
@@ -63,7 +64,7 @@ describe("タブ ID で表示が切り替わる", () => {
 
 describe("取得元は選択中システム", () => {
   it("接続元をここで選び直させない（システムはパンくずが示す）", async () => {
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     // 接続元を選ぶ select は無い（絞り込みの select はある）
     const options = w.findAll("select option").map((o) => o.text());
@@ -79,7 +80,7 @@ describe("取得元は選択中システム", () => {
       "/api/sessions-config": { sessions: [] },
       "/api/host/list/jobs": { items: [] }
     });
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     await w.find("header button").trigger("click");
     await flushPromises();
@@ -92,7 +93,7 @@ describe("取得元は選択中システム", () => {
 
   it("システム未選択でも壊れない", async () => {
     systemsStore.select(undefined);
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     expect(w.text()).toContain("ジョブ");
     w.unmount();
@@ -101,7 +102,7 @@ describe("取得元は選択中システム", () => {
 
 describe("絞り込みの項目が種類ごとに変わる", () => {
   it("ジョブはユーザーと種別", async () => {
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     expect(w.text()).toContain("ユーザー");
     expect(w.text()).toContain("種別");
@@ -109,7 +110,7 @@ describe("絞り込みの項目が種類ごとに変わる", () => {
   });
 
   it("オブジェクトはライブラリと種別", async () => {
-    const w = mount(HostListPane, { props: { tabId: "list:objects" } });
+    const w = mount(HostListPane, { props: { tabId: "list:objects", system: SYSTEM.ref } });
     await flushPromises();
     expect(w.text()).toContain("ライブラリ");
     w.unmount();
@@ -123,7 +124,7 @@ describe("取得の失敗を表示する", () => {
       "/api/sessions-config": { sessions: [] },
       "/api/host/list/jobs": { __status: 502, error: "ユーザーとパスワードが登録されていません" }
     });
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     await w.find("header button").trigger("click");
     await flushPromises();
@@ -131,15 +132,22 @@ describe("取得の失敗を表示する", () => {
     w.unmount();
   });
 
-  it("システムを選ばずに取得したら促す", async () => {
+  /**
+   * **このタブのシステムが設定から消えたとき**（`20260802-tabs-own-system`）。
+   * 以前は「システム未選択」だったが、タブは 1 つのシステムへの窓になったので、
+   * `system` が空なのは消えたときだけ——利用者に選び直す手立ては無い。
+   */
+  it("システムが消えていたら取得せず理由を出す", async () => {
     mockFetch({ "/api/systems": { systems: [], editable: false }, "/api/sessions-config": { sessions: [] } });
-    systemsStore.systems = [];
-    systemsStore.select(undefined);
     const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
     await flushPromises();
     await w.find("header button").trigger("click");
     await flushPromises();
-    expect(w.text()).toContain("システムを選んでください");
+    expect(w.text()).toContain(MSG_SYSTEM_GONE);
+    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/host/"),
+      expect.anything()
+    );
     w.unmount();
   });
 });
@@ -154,7 +162,7 @@ describe("破壊的な操作は確認を挟む", () => {
         items: [{ name: "A1", library: "MYLIB", type: "*FILE" }]
       }
     });
-    const w = mount(HostListPane, { props: { tabId: "list:objects" } });
+    const w = mount(HostListPane, { props: { tabId: "list:objects", system: SYSTEM.ref } });
     await flushPromises();
     await w.find("header button").trigger("click");
     await flushPromises();
@@ -183,7 +191,7 @@ describe("列見出しの固定", () => {
         items: [{ number: "123456", user: "QUSER", name: "QZDASOINIT", status: "ACTIVE", type: "B", subtype: "" }]
       }
     });
-    const w = mount(HostListPane, { props: { tabId: "list:jobs" } });
+    const w = mount(HostListPane, { props: { tabId: "list:jobs", system: SYSTEM.ref } });
     await flushPromises();
     await w.find("header button").trigger("click");
     await flushPromises();

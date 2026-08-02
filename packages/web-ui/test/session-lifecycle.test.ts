@@ -34,7 +34,7 @@ function live(sessionId: string, configRef: string): SessionState {
 beforeEach(() => {
   sessionsStore.byId.clear();
   sessionsStore.order = [];
-  systemsStore.selected = undefined;
+  systemsStore.menuSystem = undefined;
   workspaceStore.init();
 });
 
@@ -47,19 +47,17 @@ describe("システム切替でセッションは切れない", () => {
 
     const g = workspaceStore.focusedGroup();
 
-    // JP を選択 → JP のタブだけ見える
+    // **システムを切り替えてもタブは隠れない**（`20260802-tabs-own-system`）。
+    // 並べて同時に見られることが要点で、接続はどちらも生きている
     systemsStore.select("own:sys-jp");
-    expect(workspaceStore.visibleTabs(g, systemsStore.selected)).toEqual(["s-jp"]);
+    expect(workspaceStore.visibleTabs(g)).toEqual(["s-jp", "s-pub"]);
 
-    // pub400 へ切替 → 見えるのは pub400 のタブ。**接続は 2 本とも生きている**
     systemsStore.select("own:sys-pub");
-    expect(workspaceStore.visibleTabs(g, systemsStore.selected)).toEqual(["s-pub"]);
+    expect(workspaceStore.visibleTabs(g)).toEqual(["s-jp", "s-pub"]);
     expect(sessionsStore.all.map((s) => s.sessionId)).toEqual(["s-jp", "s-pub"]);
     expect(sessionsStore.all.every((s) => s.connected)).toBe(true);
 
-    // JP へ戻す → タブがまた見える（作り直しではなく同じセッション）
     systemsStore.select("own:sys-jp");
-    expect(workspaceStore.visibleTabs(g, systemsStore.selected)).toEqual(["s-jp"]);
     expect(sessionsStore.get("s-jp")?.connected).toBe(true);
   });
 

@@ -60,7 +60,7 @@ beforeEach(() => {
   watchConnect.mockClear();
   systemsStore.systems = [SYSTEM];
   systemsStore.sessions = [WATCH];
-  systemsStore.selected = SYSTEM.ref;
+  systemsStore.menuSystem = SYSTEM.ref;
   systemsStore.loaded = true;
   authStore.enabled = false;
   sessionsStore.byId.clear();

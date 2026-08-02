@@ -29,6 +29,8 @@ import ServicesPane from "./ServicesPane.vue";
 import TransferPane from "./TransferPane.vue";
 import SpoolPane from "./SpoolPane.vue";
 import { workspaceStore } from "../stores/workspace.js";
+import { systemsStore } from "../stores/systems.js";
+import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import { openedPanes, paneSlotEls } from "../composables/openedPanes.js";
 import { PANE_PREFIXES } from "../paneLabels.js";
 
@@ -70,6 +72,18 @@ interface Entry {
   el: HTMLElement | undefined;
   /** いま見えているか（見えていないペインを裏で働かせないための合図） */
   active: boolean;
+  /**
+   * **このタブのシステム**（`20260802-tabs-own-system`）。
+   *
+   * 要求の宛先はここで決まる。**ペインに自分で引かせない**——引き方が 6 か所に散ると、
+   * 1 か所の直し忘れがそのまま「画面に出ているシステムと宛先が違う」に直結する。
+   *
+   * `undefined` になるのは**そのシステムが設定から消えたとき**（と、システムに
+   * 紐づかないアプリ画面＝サービス一覧・管理）。
+   */
+  system: string | undefined;
+  /** そのシステムが設定から消えている（銘板を出して操作させない） */
+  gone: boolean;
 }
 
 /**
@@ -89,11 +103,16 @@ const entries = computed<Entry[]>(() => {
     if (!comp) continue;
     const g = workspaceStore.groupOf(tab);
     if (!g) continue; // 閉じた（どのグループにも居ない）
+    const system = workspaceStore.systemOf(tab);
     out.push({
       tab,
       comp,
       el: paneSlotEls.get(tab),
-      active: !props.launcher && g.activeTab === tab
+      active: !props.launcher && g.activeTab === tab,
+      system,
+      // **消えたシステムのタブは黙って別システムへ飛ばさず、止めて理由を出す。**
+      // 閉じてしまうと書きかけの内容ごと消えるので、残して操作だけ塞ぐ
+      gone: system !== undefined && !systemsStore.systems.some((s) => s.ref === system)
     });
   }
   return out;
@@ -108,7 +127,12 @@ const entries = computed<Entry[]>(() => {
   -->
   <div class="pane-pool" aria-hidden="true">
     <Teleport v-for="e in entries" :key="e.tab" :to="e.el ?? 'body'" :disabled="!e.el">
-      <component :is="e.comp" :tab-id="e.tab" :active="e.active" />
+      <!--
+        **消えたシステムの銘板はここで出す。** ペイン 6 種にそれぞれ書かせると
+        文言が 6 か所へ散る。ペイン側は「`system` が無ければ操作させない」だけを守ればよい。
+      -->
+      <p v-if="e.gone" class="sys-gone" role="alert">{{ MSG_SYSTEM_GONE }}</p>
+      <component :is="e.comp" :tab-id="e.tab" :active="e.active" :system="e.gone ? undefined : e.system" />
     </Teleport>
   </div>
 </template>
@@ -116,5 +140,14 @@ const entries = computed<Entry[]>(() => {
 <style scoped>
 .pane-pool {
   display: none;
+}
+/* 銘板は受け皿の中（ペインの上）に出る。プールの `display:none` は継がない */
+.sys-gone {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--t-red, #c62828);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-bottom: 1px solid var(--line);
 }
 </style>

@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 async function run(sql = "SELECT 1 FROM SYSIBM.SYSDUMMY1") {
-  const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+  const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
   await w.find("textarea").setValue(sql);
   await w.find("header button").trigger("click");
   await flushPromises();
@@ -80,7 +80,7 @@ describe("実行", () => {
   });
 
   it("**ペインを開いた時点で接続を暖める**（実行を押してからの待ちを短くする）", async () => {
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     await flushPromises();
     const warm = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
       (c) => String(c[0]) === "/api/host/sql/warm"
@@ -92,14 +92,14 @@ describe("実行", () => {
 
   it("暖機が失敗しても画面には何も出さない（実行時に開き直せばよい）", async () => {
     globalThis.fetch = vi.fn(async () => { throw new Error("暖機に失敗"); }) as typeof fetch;
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     await flushPromises();
     expect(w.find(".error").exists()).toBe(false);
     w.unmount();
   });
 
   it("SQL が空なら実行ボタンが押せない", async () => {
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     await flushPromises();
     expect(w.find("header button").attributes("disabled")).toBeDefined();
     w.unmount();
@@ -170,9 +170,7 @@ describe("エラー表示", () => {
     w.unmount();
   });
 
-  it("システム未選択なら実行せず理由を出す", async () => {
-    systemsStore.systems = [];
-    systemsStore.select("");
+  it("システムが消えていたら実行せずボタンも無効（`20260802-tabs-own-system`）", async () => {
     const w = mount(SqlPane, { props: { tabId: "sql:query" } });
     await w.find("textarea").setValue("SELECT 1");
     await flushPromises();
@@ -454,7 +452,7 @@ describe("SQL 欄と結果欄の境界", () => {
    * （見た目とドラッグの追従は実ブラウザで確かめる）。
    */
   it("罫線がキーボードでも動かせる", async () => {
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     const splitter = w.find(".splitter");
     expect(splitter.attributes("role")).toBe("separator");
     const before = Number(/height:\s*(\d+)px/.exec(w.find("textarea").attributes("style") ?? "")?.[1]);
@@ -466,7 +464,7 @@ describe("SQL 欄と結果欄の境界", () => {
   });
 
   it("下限より小さくならない（結果欄に押し潰されない）", async () => {
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     const splitter = w.find(".splitter");
     for (let i = 0; i < 30; i++) await splitter.trigger("keydown", { key: "ArrowUp", shiftKey: true });
     const h = Number(/height:\s*(\d+)px/.exec(w.find("textarea").attributes("style") ?? "")?.[1]);
@@ -512,7 +510,7 @@ describe("クエリ一覧", () => {
   const items = (w: ReturnType<typeof mount>) => w.findAll(".qlist .qitem");
 
   it("最初は 1 本だけあり、閉じるボタンは出ない", () => {
-    const w = mount(SqlPane, { props: { tabId: "sql:query" } });
+    const w = mount(SqlPane, { props: { tabId: "sql:query", system: SYSTEM.ref } });
     expect(items(w)).toHaveLength(1);
     expect(w.find(".qclose").exists(), "最後の 1 本は閉じられない").toBe(false);
     w.unmount();

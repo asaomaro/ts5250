@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { systemsStore } from "../stores/systems.js";
 import { csvBlob, csvFileName, toCsv } from "../csv.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import LoadingBar from "./LoadingBar.vue";
@@ -29,8 +28,12 @@ import { parseCsv } from "@as400web/base";
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 /** IBM i のオブジェクト名。**判定の実体は core にあり、サーバーと同じものを使う** */
 const validName = isValidIdentifier;
@@ -166,7 +169,7 @@ async function loadFile(f: File): Promise<void> {
 
 // ---- 取り込み ----
 async function upload(): Promise<void> {
-  if (!systemsStore.selected || !targetOk.value || rows.value.length === 0) return;
+  if (!props.system || !targetOk.value || rows.value.length === 0) return;
   phase.value = "sending";
   rejections.value = [];
   result.value = undefined;
@@ -176,7 +179,7 @@ async function upload(): Promise<void> {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          source: { system: systemsStore.selected },
+          source: { system: props.system },
           library: library.value.trim().toUpperCase(),
           file: file.value.trim().toUpperCase(),
           columns: header.value,
@@ -210,7 +213,7 @@ const downloadColumns = ref<string[]>([]);
 const downloadError = ref("");
 
 async function download(): Promise<void> {
-  if (!systemsStore.selected || !targetOk.value) return;
+  if (!props.system || !targetOk.value) return;
   downloadError.value = "";
   downloadRows.value = [];
   await run(async () => {
@@ -224,7 +227,7 @@ async function download(): Promise<void> {
       const res = await fetch("/api/host/sql", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: { system: systemsStore.selected }, sql, maxRows: 1000 })
+        body: JSON.stringify({ source: { system: props.system }, sql, maxRows: 1000 })
       });
       const data = await res.json();
       if (!res.ok) {

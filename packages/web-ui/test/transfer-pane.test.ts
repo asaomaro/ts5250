@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 function mountPane() {
-  return mount(TransferPane, { props: { tabId: "transfer:data" } });
+  return mount(TransferPane, { props: { tabId: "transfer:data", system: SYSTEM.ref } });
 }
 
 /** CSV を読み込ませる（File.text() を経由せず、内部の解析経路を通す） */

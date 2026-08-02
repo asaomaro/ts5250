@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { systemsStore } from "../stores/systems.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { useIfsTree } from "../composables/useIfsTree.js";
@@ -22,6 +21,7 @@ import {
   type IfsUploadEntry
 } from "../ifsApi.js";
 import { isFileDrag } from "../dnd.js";
+import { systemsStore } from "../stores/systems.js";
 // **`catalog` サブパス（表ゼロ）から直接取る。** バレル（`@as400web/ebcdic`）に向けると
 // 変換表 18,900 行が丸ごとバンドルに入る（`20260801-library-extraction-tn5250` で実測: 約 4 倍）。
 import { TEXT_CCSIDS, ccsidLabel } from "@as400web/ebcdic/catalog";
@@ -41,11 +41,27 @@ import { TEXT_CCSIDS, ccsidLabel } from "@as400web/ebcdic/catalog";
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 const ROOT = "/";
-const source = () => ({ system: systemsStore.selected });
+const source = () => ({ system: props.system });
+
+/**
+ * **確認の文言に対象システムを入れる**（`20260802-tabs-own-system`）。
+ *
+ * 異なるシステムのタブを並べられるようになった以上、「どちらに対して実行するのか」が
+ * 文言に無いと取り違える。色ではなく**名前を文字で**出すのが要点——
+ * 確認ダイアログは OS が描くので、こちらの色は乗らない。
+ */
+function askOn(text: string): boolean {
+  return window.confirm(`[${systemsStore.nameOf(props.system ?? "")}] ${text}`);
+}
+
 const tree = useIfsTree(source);
 /**
  * サーバーの実効上限。**取れなくても機能は落とさない**——
@@ -430,7 +446,7 @@ async function removeSelected(): Promise<void> {
   const path = joined(entry.name);
 
   if (!entry.isDirectory) {
-    if (!window.confirm(`${entry.name} を削除します。よろしいですか？`)) return;
+    if (!askOn(`${entry.name} を削除します。よろしいですか？`)) return;
     await withAction("削除", async () => {
       await deleteFile(source(), path);
       await afterDelete(entry.name);
@@ -458,7 +474,7 @@ async function removeSelected(): Promise<void> {
     inside === 0
       ? `${entry.name}（空のフォルダ）を削除します。よろしいですか？`
       : `${entry.name} を中身ごと削除します。ファイル ${plan.files ?? 0} 件・フォルダ ${Math.max((plan.directories ?? 1) - 1, 0)} 件が消えます。よろしいですか？`;
-  if (!window.confirm(ask)) return;
+  if (!askOn(ask)) return;
   await withAction("削除", async () => {
     const done = await deleteFile(source(), path, { recursive: inside > 0 });
     await afterDelete(entry.name, done);
@@ -744,17 +760,11 @@ function onDrop(ev: DragEvent): void {
  * こちらは対象がファイルなので取り返しがつかない）。
  * 自動で取り直さないのは、切り替えただけで意図しない問い合わせを飛ばさないため。
  */
-watch(
-  () => systemsStore.selected,
-  () => {
-    tree.reset();
-    message.value = "システムを切り替えました。フォルダを選ぶと読み込みます";
-    currentPath.value = ROOT;
-    selected.value = undefined;
-    preview.clear();
-    actionError.value = "";
-  }
-);
+/**
+ * **このタブのシステムは生涯変わらない**（`20260802-tabs-own-system`）。
+ * 以前はアプリ全体の選択値を見ていたため「切り替わったら中身を捨てる」監視が要ったが、
+ * いまは切り替わりようがない——捨てるのではなく、**そもそも変わらない**。
+ */
 
 /**
  * テストから直接叩くための口。

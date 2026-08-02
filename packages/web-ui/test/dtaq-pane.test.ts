@@ -8,14 +8,14 @@ import { systemsStore } from "../src/stores/systems.js";
  * 偽 fetch を差し込んで固定する（描画を通してロジックを検証する）。
  */
 const realFetch = globalThis.fetch;
-const realSelected = systemsStore.selected;
+const realSelected = systemsStore.menuSystem;
 
 beforeEach(() => {
-  systemsStore.selected = "srv:s";
+  systemsStore.menuSystem = "srv:s";
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
-  systemsStore.selected = realSelected;
+  systemsStore.menuSystem = realSelected;
 });
 
 /** 呼ばれた (route, body) を記録しつつ、route→応答を返す偽 fetch */
@@ -37,7 +37,7 @@ function mockFetch(handler: (route: string, body: unknown) => { status?: number;
 /** ライブラリー/キューを入れて操作可能な状態にしたパネル */
 async function readyPane(handler: (route: string, body: unknown) => { status?: number; body: unknown }) {
   const calls = mockFetch(handler);
-  const w = mount(DtaqPane, { props: { tabId: "dtaq:entries" } });
+  const w = mount(DtaqPane, { props: { tabId: "dtaq:entries", system: "srv:s" } });
   const inputs = w.findAll("input");
   await inputs[0]!.setValue("MYLIB"); // ライブラリー
   await inputs[1]!.setValue("Q"); // キュー
@@ -48,7 +48,7 @@ async function readyPane(handler: (route: string, body: unknown) => { status?: n
 describe("入力ガード", () => {
   it("キュー未指定なら操作ボタンは無効", async () => {
     mockFetch(() => ({ body: {} }));
-    const w = mount(DtaqPane, { props: { tabId: "dtaq:entries" } });
+    const w = mount(DtaqPane, { props: { tabId: "dtaq:entries", system: "srv:s" } });
     await flushPromises();
     // 属性/一覧ボタンが disabled
     const headerButtons = w.find(".head").findAll("button");

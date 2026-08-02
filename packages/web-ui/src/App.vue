@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import DesignMenu from "./components/DesignMenu.vue";
 import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import MacroMenu from "./components/MacroMenu.vue";
@@ -10,6 +10,7 @@ import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
 import LauncherPane from "./components/LauncherPane.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
 import PanePool from "./components/PanePool.vue";
+import SystemDot from "./components/SystemDot.vue";
 import KeybindingsPanel from "./components/KeybindingsPanel.vue";
 import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
@@ -29,10 +30,10 @@ const hasVisibleTabs = computed(() => visibleTabCount.value > 0);
 const visibleTabCount = computed(() =>
   workspaceStore
     .groups()
-    .reduce((n, g) => n + workspaceStore.visibleTabs(g, systemsStore.selected).length, 0)
+    .reduce((n, g) => n + workspaceStore.visibleTabs(g).length, 0)
 );
 /** システム未選択なら常にシステム選択画面（そこから先が存在しない） */
-const showSystemPicker = computed(() => !systemsStore.selected || workspaceStore.showSystemPicker);
+const showSystemPicker = computed(() => !systemsStore.menuSystem || workspaceStore.showSystemPicker);
 /** ランチャーを出すか。タブが無いか、パンくずから明示的に呼ばれたとき */
 const showLauncher = computed(() => workspaceStore.showLauncher || !hasVisibleTabs.value);
 /** アカウント（API トークン発行 / ログアウト）ポップオーバー */
@@ -76,13 +77,10 @@ function liveCount(systemRef: string): number {
  * セレクタは絞り込みであって破棄ではない（移動しただけで 5250 の状態が失われるのは代償が大きすぎる）。
  */
 function onSelectSystem(ref: string): void {
+  // **タブには触らない**（`20260802-tabs-own-system`）。絞り込みをやめたので、
+  // システムを選び直しても見えるタブの集合は変わらない——寄せ直す先も無い
   systemsStore.select(ref || undefined);
   workspaceStore.showLauncher = false;
-  // 切り替え先で見えるタブがあれば、最後に見ていたものへ寄せる
-  for (const g of workspaceStore.groups()) {
-    const next = workspaceStore.activeTabFor(g, systemsStore.selected);
-    if (next !== undefined) g.activeTab = next;
-  }
 }
 
 /**
@@ -92,6 +90,22 @@ function onSelectSystem(ref: string): void {
  */
 const atSystems = computed(() => showSystemPicker.value);
 const atLauncher = computed(() => !atSystems.value && showLauncher.value);
+
+/**
+ * **メニューの対象を、開いた時点で固定する**（`20260802-tabs-own-system`・利用者の判断）。
+ *
+ * 対象は「いま見ているタブのシステム」に追従させる——A を触っていた流れでメニューを開けば
+ * A の続きが出る、が自然だから。ただし**開いている最中は動かさない**。開いた後に
+ * フォーカスが変わって対象が入れ替わると、押した先が意図と違うシステムになる。
+ *
+ * システムを持たないタブ（サービス一覧・管理）のときは**直前の対象を維持**する。
+ */
+watch(showLauncher, (open) => {
+  if (!open) return;
+  const g = workspaceStore.focusedGroup();
+  const sys = workspaceStore.systemOf(g.activeTab);
+  if (sys) systemsStore.select(sys);
+});
 const atWorkspace = computed(() => !atSystems.value && !showLauncher.value);
 
 /** システム選択画面へ。選択は保ったまま、一覧を見せるだけ */
@@ -120,7 +134,8 @@ function openAdmin(id: string): void {
     workspaceStore.setActiveTab(existing.id, id);
     workspaceStore.focus(existing.id);
   } else {
-    workspaceStore.addSession(id, systemsStore.selected);
+    // 管理タブはこのアプリ自身の画面。IBM i のシステムには紐づかない
+    workspaceStore.addSession(id);
   }
   workspaceStore.showLauncher = false;
 }
@@ -244,10 +259,14 @@ onBeforeUnmount(() => {
       -->
       <nav class="crumbs" aria-label="現在地">
         <button class="crumb" :class="{ on: atSystems }" :disabled="atSystems" @click="gotoSystems">
-          <span class="lvl">システム:</span> {{ systemsStore.current?.name ?? "—" }}
+          <!-- **色は点で出す**（`20260802-tabs-own-system`）。文字は着色しない
+               ——テーマをまたいだ文字色のコントラストを保証できないため -->
+          <span class="lvl">システム:</span>
+          <SystemDot v-if="systemsStore.menuSystem" :system-ref="systemsStore.menuSystem" />
+          <template v-else>—</template>
         </button>
         <!-- 未選択のときだけ、その先はまだ存在しないので出さない -->
-        <template v-if="systemsStore.selected">
+        <template v-if="systemsStore.menuSystem">
           <span class="sep">›</span>
           <button class="crumb" :class="{ on: atLauncher }" :disabled="atLauncher" @click="gotoLauncher">
             メニュー

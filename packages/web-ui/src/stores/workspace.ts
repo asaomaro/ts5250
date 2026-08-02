@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { isPaneTab, splitPaneTabId } from "../paneLabels.js";
 
 /** 分割ツリー: split（縦/横・比率）または group（タブ群）。「タブだけ」は深さ 1 の group */
 export interface SplitNode {
@@ -64,8 +65,6 @@ export const workspaceStore = reactive({
    * 対応表を別に持つ以外に辿る手段がない。
    */
   tabSystem: {} as Record<string, string>,
-  /** システムごとに最後に見ていたタブ。切り替えて戻ったときの復帰先 */
-  lastActiveBySystem: {} as Record<string, string>,
   /** ランチャー（メニュー）を前面に出すか */
   showLauncher: false,
   /** システム選択画面を出すか。**選択を外さずに一覧を見せる**ための状態 */
@@ -101,6 +100,22 @@ export const workspaceStore = reactive({
    */
   groupOf(tab: string): GroupNode | undefined {
     return groups(this.root).find((g) => g.tabs.includes(tab));
+  },
+
+  /**
+   * **そのタブのシステム**（`20260802-tabs-own-system`）。
+   *
+   * アプリ系タブは**タブ ID そのもの**が持つ（`sql:query@own:a`）。セッション系タブ
+   * （5250・プリンター）は ID を変えないので、従来どおり `tabSystem` から引く。
+   *
+   * **引き方をここ 1 か所に閉じる**のが要点。以前はアプリ系ペインが 6 か所で
+   * `systemsStore.selected`（当時の名前。アプリ全体で 1 つの値）を読んでいて、
+   * **画面に出ているシステムと要求の宛先が食い違いうる**状態だった。
+   */
+  systemOf(tab: string | undefined): string | undefined {
+    if (!tab) return undefined;
+    if (isPaneTab(tab)) return splitPaneTabId(tab).system;
+    return this.tabSystem[tab];
   },
 
   /** 指定グループの最大化を切り替える。分割されていないときは何もしない */
@@ -149,49 +164,25 @@ export const workspaceStore = reactive({
     if (!g.tabs.includes(sessionId)) g.tabs.push(sessionId);
     g.activeTab = sessionId;
     this.focusedGroupId = g.id;
-    if (systemRef !== undefined) {
-      this.tabSystem[sessionId] = systemRef;
-      this.lastActiveBySystem[systemRef] = sessionId;
-    }
+    if (systemRef !== undefined) this.tabSystem[sessionId] = systemRef;
   },
 
   /**
-   * 選択中システムに属するタブだけに絞る。
+   * **システムによる絞り込みはしない**（`20260802-tabs-own-system`）。
    *
-   * **これは描画側の派生であって、`tabs` 配列は書き換えない**（design の判断）。
-   * 配列から外して戻す形にすると、復元漏れが「閉じた」と区別できなくなる。
-   * 実体を触らなければ、そもそも失われようがない。
+   * 以前は選択中システムのタブだけを出していた。**異なるシステムのタブを並べて
+   * 同時に見たい**という要望に対し、それは真っ向から邪魔になる。
+   * 見分けはタブの色帯とシステム名が担う（`PaneTabs`）。
    *
-   * どのシステムにも紐づいていないタブ（対応表に無いもの）は常に見せる——
-   * 記録漏れで見えなくなるより、余計に見えるほうが安全。
+   * 実配列を返さないのは従来どおり——呼び出し側が結果を書き換えても group が壊れないように。
    */
-  visibleTabs(g: GroupNode, systemRef: string | undefined): string[] {
-    // 実配列を返さない。呼び出し側が結果を書き換えても group が壊れないようにする
-    // （「隠す」が「閉じる」に化けないための不変条件を、返り値の側でも守る）
-    if (systemRef === undefined) return [...g.tabs];
-    return g.tabs.filter((t) => {
-      const owner = this.tabSystem[t];
-      return owner === undefined || owner === systemRef;
-    });
-  },
-
-  /**
-   * 切り替え後に選ぶべきタブ。**最後に見ていたものへ戻す**（先頭固定より復帰が自然）。
-   * 見えるタブが無ければ undefined（ランチャーが出る）。
-   */
-  activeTabFor(g: GroupNode, systemRef: string | undefined): string | undefined {
-    const visible = this.visibleTabs(g, systemRef);
-    if (visible.length === 0) return undefined;
-    if (g.activeTab !== undefined && visible.includes(g.activeTab)) return g.activeTab;
-    const last = systemRef !== undefined ? this.lastActiveBySystem[systemRef] : undefined;
-    if (last !== undefined && visible.includes(last)) return last;
-    return visible[0];
+  visibleTabs(g: GroupNode): string[] {
+    return [...g.tabs];
   },
 
   /** タブの所属システムを記録する（セッション確立後など、後から分かる場合） */
   assignSystem(sessionId: string, systemRef: string): void {
     this.tabSystem[sessionId] = systemRef;
-    this.lastActiveBySystem[systemRef] = sessionId;
   },
 
   setActiveTab(groupId: string, sessionId: string): void {
@@ -287,11 +278,7 @@ export const workspaceStore = reactive({
       }
     }
     // 対応表からも外す（閉じたタブの所属を残さない）
-    const owner = this.tabSystem[sessionId];
     delete this.tabSystem[sessionId];
-    if (owner !== undefined && this.lastActiveBySystem[owner] === sessionId) {
-      delete this.lastActiveBySystem[owner];
-    }
     this.pruneEmpty();
   },
 

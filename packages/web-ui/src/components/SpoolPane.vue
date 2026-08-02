@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { systemsStore } from "../stores/systems.js";
+import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
@@ -23,8 +24,12 @@ import { useColumnWidths } from "../composables/useColumnWidths.js";
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
  * アンマウントせず `v-show` で隠すので、「マウント中＝見えている」ではなくなった。
  * 裏で働き続けてよいかの判断はこれで行う。
+ * `system`: **このタブのシステム参照**（`20260802-tabs-own-system`）。要求の宛先はこれ。
+ * **自分で `systemsStore` から引かない**——引き方が散ると、画面に出ているシステムと
+ * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
+ * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
-defineProps<{ tabId: string; active?: boolean }>();
+const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 /** 一覧の 1 行（サーバーの SpoolEntry と対） */
 interface SpoolRow {
@@ -112,7 +117,7 @@ const COLUMNS = [
  * 接続元をこのペインで選び直す必要はない。
  */
 function sourceBody(): Record<string, string> {
-  return systemsStore.selected ? { system: systemsStore.selected } : {};
+  return props.system ? { system: props.system } : {};
 }
 
 /** 空欄は送らない。core 側が未指定の項目に *ALL を補うため、空文字を渡すと絞り込んでしまう */
@@ -128,8 +133,11 @@ function filterBody(): Record<string, string> {
 }
 
 async function load(): Promise<void> {
-  if (!systemsStore.selected) {
-    error.value = "システムを選んでください";
+  // **「システムを選んでください」ではない**（`20260802-tabs-own-system`）。
+  // タブは 1 つのシステムへの窓なので、ここが空なのは**設定から消えた**ときだけ。
+  // 利用者に選び直す手立ては無いので、文言は共通の定数に寄せる
+  if (!props.system) {
+    error.value = MSG_SYSTEM_GONE;
     return;
   }
   error.value = "";
@@ -297,24 +305,10 @@ onMounted(() => {
 });
 
 /**
- * 接続先が変わったら結果を捨てる。**自動で取り直さない**——
- * 別システムに同じ条件を投げ直すのが正しいとは限らないため（HostListPane と同じ判断）。
+ * **このタブのシステムは生涯変わらない**（`20260802-tabs-own-system`）。
+ * 以前はアプリ全体の選択値を見ていたため「切り替わったら中身を捨てる」監視が要ったが、
+ * いまは切り替わりようがない——捨てるのではなく、**そもそも変わらない**。
  */
-watch(
-  () => systemsStore.selected,
-  () => {
-    // **進行中の要求を無効化してから**捨てる。番号を進めないと、
-    // 飛んでいる応答が後から旧システムの行を書き戻してしまう
-    listSeq++;
-    contentSeq++;
-    rows.value = [];
-    selected.value = undefined;
-    pages.value = [];
-    truncated.value = false;
-    error.value = "";
-    contentError.value = "";
-  }
-);
 </script>
 
 <template>

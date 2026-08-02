@@ -243,3 +243,52 @@ describe("ConfigStore: システムの削除", () => {
     expect(srv.listSystems(admin)).toHaveLength(0);
   });
 });
+
+/**
+ * **システムカラー**（`20260802-tabs-own-system`）。
+ *
+ * 異なるシステムのタブを並べたときの見分けに使う番号（1〜8）。保存できて、
+ * API の露出面（`publicSystem`）にも出ること。**色は資格情報ではない**ので、
+ * そのシステムが見える人には見せてよい——見えないと見分けの用を成さない。
+ */
+describe("システムカラー", () => {
+  it("保存され、一覧にも出る", () => {
+    const p = tmpFile("connections.json", {
+      systems: [{ id: "s1", name: "A", host: "h", owner: "alice", color: 5 }],
+      sessions: []
+    });
+    const store = PersonalConfigStore.fromFile(p, crypto);
+    expect(store.listSystems(alice)[0]?.color).toBe(5);
+  });
+
+  it("未設定なら出さない（画面側が ref から自動で割り当てる）", () => {
+    const p = tmpFile("connections.json", {
+      systems: [{ id: "s1", name: "A", host: "h", owner: "alice" }],
+      sessions: []
+    });
+    const store = PersonalConfigStore.fromFile(p, crypto);
+    expect(store.listSystems(alice)[0]).not.toHaveProperty("color");
+  });
+
+  it("**範囲外は設定として受け付けない**（1〜8 のパレット番号）", () => {
+    const p = tmpFile("connections.json", {
+      systems: [{ id: "s1", name: "A", host: "h", owner: "alice", color: 9 }],
+      sessions: []
+    });
+    expect(() => PersonalConfigStore.fromFile(p, crypto)).toThrow();
+  });
+
+  it("色を足しても資格情報は露出しない（白名簿のまま）", () => {
+    const p = tmpFile("connections.json", {
+      systems: [
+        { id: "s1", name: "A", host: "h", owner: "alice", color: 2, signon: { user: "U", passwordEnv: "SECRET_ENV" } }
+      ],
+      sessions: []
+    });
+    const store = PersonalConfigStore.fromFile(p, crypto);
+    const pub = store.listSystems(alice)[0]!;
+    expect(pub.color).toBe(2);
+    expect(pub).not.toHaveProperty("signon");
+    expect(JSON.stringify(pub), "資格情報の入口が露出している").not.toContain("SECRET_ENV");
+  });
+});

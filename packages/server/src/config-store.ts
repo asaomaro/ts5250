@@ -175,6 +175,8 @@ export abstract class ConfigStore {
     if (s.tls !== undefined) pub.tls = s.tls;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
     if (s.spoolCcsid !== undefined) pub.spoolCcsid = s.spoolCcsid;
+    // **色は資格情報ではない。** 見分けの手段なので、そのシステムが見える人には見せる
+    if (s.color !== undefined) pub.color = s.color;
     if (s.owner !== undefined) pub.owner = s.owner;
     // ユーザー名は編集フォームのプレフィル用にだけ返す。**パスワード機構は決して返さない**
     if (opts?.includeSignon && s.signon?.user !== undefined) pub.signonUser = s.signon.user;

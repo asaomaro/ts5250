@@ -13,7 +13,7 @@ import { systemsStore } from "../src/stores/systems.js";
 function setup(): ReturnType<typeof mount> {
   workspaceStore.init();
   workspaceStore.tabSystem = {};
-  systemsStore.selected = undefined;
+  systemsStore.menuSystem = undefined;
   const g = workspaceStore.groups()[0]!;
   g.tabs = ["a", "b"];
   g.activeTab = "a";
