@@ -86,6 +86,22 @@ const typedValue = () =>
   });
 /** メニュー（ランチャー）へ／ワークスペースへ */
 const goto = (label) => page.locator(".crumbs .crumb", { hasText: label }).click();
+/** データ転送タブを含むペイン（分割後にどちら側か決め打たない） */
+const transferGroup = () =>
+  page.locator(".group").filter({ has: page.locator(".pane-slot[data-tab='transfer:data']") }).first();
+/**
+ * タブを掴んで画面上の座標へ落とす。
+ * **`dragAndDrop` は使わない**——HTML5 の DnD はマウスを動かさないと `dragover` が
+ * 出ず、落とし場所（端 4 ゾーン／タブ帯）の判定が走らない。
+ */
+async function dragTabTo(label, x, y) {
+  await page.locator(".tabs .tab", { hasText: label }).first().hover();
+  await page.mouse.down();
+  await page.mouse.move(x, y, { steps: 12 });
+  await page.mouse.move(x, y, { steps: 2 }); // 最後にもう一度動かして dragover を確実に出す
+  await page.mouse.up();
+  await sleep(900);
+}
 
 try {
   await page.goto(`http://127.0.0.1:${PORT}/`);
@@ -150,6 +166,43 @@ try {
   await sleep(700);
   const afterSys = await gridSize();
   check(afterSys?.font === base?.font && afterSys?.h === base?.h, `画面の大きさが戻る（${afterSys?.font}px / ${afterSys?.w}x${afterSys?.h}）`);
+
+  // ---- 分割する（データ転送のタブを右端へ落とす） ----
+  // ここから先は `20260802-keep-pane-state-move`。実体は `PanePool` が持ち受け皿へ
+  // Teleport するので、木を組み替えても作り直されない——それを実物で確かめる。
+  log("\n### 分割する");
+  const paneBox = await page.locator(".group").first().boundingBox();
+  await dragTabTo("データ転送", paneBox.x + paneBox.width * 0.9, paneBox.y + paneBox.height * 0.5);
+  const groups = await page.locator(".group").count();
+  check(groups === 2, `2 つのペインに割れる（${groups}）`);
+  check((await typedValue()) === TYPED, "**分割しても打った内容が残る**");
+
+  // ---- 最大化・解除 ----
+  log("\n### 最大化・解除");
+  const before = await transferGroup().boundingBox();
+  await transferGroup().locator("button.maximize").click();
+  await sleep(700);
+  const maxed = await transferGroup().boundingBox();
+  check(maxed.width > before.width * 1.5, `**最大化で全面になる**（${Math.round(before.width)} → ${Math.round(maxed.width)}px）`);
+  check((await typedValue()) === TYPED, "最大化しても残る");
+  check((await page.locator(".grid").count()) === 1, "隠した側も作り直されていない（5250 の要素が残っている）");
+
+  await transferGroup().locator("button.maximize").click();
+  await sleep(700);
+  const restored = await transferGroup().boundingBox();
+  check(Math.abs(restored.width - before.width) < 4, `解除で元の比率に戻る（${Math.round(restored.width)}px）`);
+  check((await typedValue()) === TYPED, "**解除しても残る**");
+
+  // ---- タブを別のペインへ移す ----
+  log("\n### タブを別のペインへ移す");
+  const destTabs = page
+    .locator(".group")
+    .filter({ hasNot: page.locator(".pane-slot[data-tab='transfer:data']") })
+    .first()
+    .locator(".tabs");
+  const dest = await destTabs.boundingBox();
+  await dragTabTo("データ転送", dest.x + dest.width * 0.5, dest.y + dest.height * 0.5);
+  check((await typedValue()) === TYPED, "**別のペインへ移しても残る**");
 } catch (e) {
   fail++;
   log(`  FAIL 例外: ${e?.message ?? e}`);

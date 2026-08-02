@@ -92,11 +92,15 @@ export const workspaceStore = reactive({
     return this.root.type === "split";
   },
 
-  /** 実際に描画するツリー。最大化中はそのグループだけ（分割ツリーは保持したまま） */
-  displayRoot(): WsNode {
-    const id = this.maximizedGroupId;
-    if (id === undefined) return this.root;
-    return findGroup(this.root, id) ?? this.root;
+  /**
+   * そのタブを持っているグループ（無ければ `undefined`）。
+   *
+   * ペインの実体は `PanePool` が 1 か所で持ち、`<Teleport>` でグループ側の受け皿へ
+   * 差し込む（`20260802-keep-pane-state-move`）。プールが「いまどこへ差すか」を
+   * 決めるのにこれを使う。
+   */
+  groupOf(tab: string): GroupNode | undefined {
+    return groups(this.root).find((g) => g.tabs.includes(tab));
   },
 
   /** 指定グループの最大化を切り替える。分割されていないときは何もしない */

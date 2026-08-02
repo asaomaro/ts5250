@@ -9,6 +9,7 @@ import { downloadScreenHtml } from "./screenExport.js";
 import { nextPaneInDirection, type PaneDir } from "./composables/paneNav.js";
 import LauncherPane from "./components/LauncherPane.vue";
 import WorkspaceNode from "./components/WorkspaceNode.vue";
+import PanePool from "./components/PanePool.vue";
 import KeybindingsPanel from "./components/KeybindingsPanel.vue";
 import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
@@ -309,9 +310,17 @@ onBeforeUnmount(() => {
     <main :class="{ workspace: !showLauncher }">
       <LauncherPane v-show="showLauncher" />
       <div v-show="!showLauncher" class="ws-root">
-        <WorkspaceNode :node="workspaceStore.displayRoot()" />
+        <!-- **常に木の全体を描く**（`20260802-keep-pane-state-move`）。最大化中だけ
+             そのグループを描く形にしていた頃は、木が入れ替わって全ペインが作り直され、
+             状態が消えていた。最大化は `WorkspaceNode` の分割段が片側を隠して表す。 -->
+        <WorkspaceNode :node="workspaceStore.root" />
       </div>
     </main>
+    <!--
+      アプリ系ペインの**実体**。受け皿（`WorkspaceNode` の `.pane-slot`）へ Teleport する。
+      **`<main>` より後ろに置く**——差し込み先が先に描かれている必要がある。
+    -->
+    <PanePool :launcher="showLauncher" />
 
     </template>
   </div>

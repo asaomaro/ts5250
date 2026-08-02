@@ -23,23 +23,35 @@ describe("workspaceStore ペイン最大化", () => {
     expect(workspaceStore.isSplit()).toBe(false);
   });
 
-  it("最大化すると displayRoot がそのグループだけになり、ツリーは保持される", () => {
+  /**
+   * **最大化はツリーを書き換えない。**
+   *
+   * 以前は `displayRoot()`（最大化中はそのグループだけを返す）を描いていたが、
+   * **描く木が入れ替わると全ペインが作り直されて状態が消える**ため廃止した
+   * （`20260802-keep-pane-state-move`）。いまは常に `root` を描き、
+   * `WorkspaceNode` の分割段が「最大化したグループを含まない側」を隠す。
+   * ここで守るのは「印を立てるだけで木も比率も触らない」こと。
+   */
+  it("最大化しても木は書き換えない（印を立てるだけ）", () => {
     const [left, right] = splitTwo();
     const rootBefore = workspaceStore.root;
+    const ratioBefore = (workspaceStore.root as { ratio: number }).ratio;
     workspaceStore.toggleMaximize(right!.id);
-    expect(workspaceStore.displayRoot()).toBe(right);
+    expect(workspaceStore.maximizedGroupId).toBe(right!.id);
     expect(workspaceStore.focusedGroupId).toBe(right!.id);
-    // ツリー自体は書き換えない（元に戻せる）
     expect(workspaceStore.root).toBe(rootBefore);
+    expect((workspaceStore.root as { ratio: number }).ratio, "比率まで触ると解除で形が戻らない").toBe(ratioBefore);
     expect(workspaceStore.groups()).toEqual([left, right]);
   });
 
   it("もう一度押すと元に戻る", () => {
-    const [, right] = splitTwo();
+    const [left, right] = splitTwo();
+    const rootBefore = workspaceStore.root;
     workspaceStore.toggleMaximize(right!.id);
     workspaceStore.toggleMaximize(right!.id);
     expect(workspaceStore.maximizedGroupId).toBeUndefined();
-    expect(workspaceStore.displayRoot()).toBe(workspaceStore.root);
+    expect(workspaceStore.root).toBe(rootBefore);
+    expect(workspaceStore.groups()).toEqual([left, right]);
   });
 
   it("最大化中の split は分割せず合流（タブ移動）になる", () => {

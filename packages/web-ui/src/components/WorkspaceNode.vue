@@ -1,20 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, reactive, watch, type Component } from "vue";
+import { ref, computed, watch } from "vue";
 import EmulatorPane from "./EmulatorPane.vue";
 import PrinterPane from "./PrinterPane.vue";
-import AdminPane from "./AdminPane.vue";
-import HostListPane from "./HostListPane.vue";
-import SqlPane from "./SqlPane.vue";
-import IfsPane from "./IfsPane.vue";
-import DtaqPane from "./DtaqPane.vue";
-import WatchPane from "./WatchPane.vue";
-import ServicesPane from "./ServicesPane.vue";
-import TransferPane from "./TransferPane.vue";
-import SpoolPane from "./SpoolPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
-import { PANE_PREFIXES } from "../paneLabels.js";
+import { isPaneTab } from "../paneLabels.js";
+import { openedPanes, markPaneOpened, registerPaneSlot } from "../composables/openedPanes.js";
 import { isFileDrag } from "../dnd.js";
 
 const props = defineProps<{ node: WsNode }>();
@@ -85,73 +77,67 @@ const activeIsPrinter = computed(
 );
 
 /**
- * **タブ ID の接頭辞 → ペイン。**
- *
- * `Record<(typeof PANE_PREFIXES)[number], …>` にしているので、`paneLabels.ts` へ
- * 種類を足してここを忘れると**型エラーになる**（以前 `list:` の追加漏れで
- * タブを閉じる処理が壊れた前例がある。`paneLabels.ts` の注記）。
- *
- * 監視コンソール（`watch:`・push 型）と データ待ち行列（`dtaq:`・pull 型）は別のアプリ。
- * スプール（`spool:`・pull 型）とプリンターセッション（push 型）も別系統。
- */
-const APP_PANES: Record<(typeof PANE_PREFIXES)[number], Component> = {
-  "admin:": AdminPane,
-  "dtaq:": DtaqPane,
-  "ifs:": IfsPane,
-  "list:": HostListPane,
-  "sql:": SqlPane,
-  "transfer:": TransferPane,
-  "spool:": SpoolPane,
-  "svc:": ServicesPane,
-  "watch:": WatchPane
-};
-/** そのタブのアプリ系ペイン（セッション系タブなら undefined） */
-function appPaneOf(tab: string | undefined): Component | undefined {
-  if (!tab) return undefined;
-  const hit = PANE_PREFIXES.find((p) => tab.startsWith(p));
-  return hit ? APP_PANES[hit] : undefined;
-}
-
-/**
  * **開いたタブは閉じるまで生かす**（`20260802-keep-pane-state`）。
  *
- * 以前はアクティブなタブのペインだけを描いていたので、切り替えるたびに
- * アンマウントされ、**コンポーネントのローカル状態が丸ごと消えていた**
- * （SQL の入力・IFS の居場所・一覧の絞り込み……。利用者の指摘）。
- * 5250 だけ無事に見えたのは、状態が `sessionsStore` にあったから。
+ * アクティブなタブのペインだけを描いていた頃は、切り替えるたびにアンマウントされ、
+ * **コンポーネントのローカル状態が丸ごと消えていた**（SQL の入力・IFS の居場所・
+ * 一覧の絞り込み……。利用者の指摘）。5250 だけ無事に見えたのは、状態が
+ * `sessionsStore` にあったから。
  *
- * ここは「一度でもアクティブになったアプリ系タブ」を覚え、以後は**マウントしたまま
- * `v-show` で出し入れ**する。
+ * **実体はここに無い**（`20260802-keep-pane-state-move`）。ここが描くのは**受け皿**だけで、
+ * 中身は `PanePool` が `<Teleport>` で差し込む——グループに描かせると
+ * **タブを別グループへ移した瞬間に作り直される**ため。
  *
- * - **遅延マウント**: 一度も開いていないタブは作らない（起動時に全タブぶんの
- *   問い合わせが飛ぶのを避ける）。
- * - **後片付けはタブの開閉と一致**: 閉じれば `group.tabs` から消えてアンマウントされ、
+ * - **遅延マウント**: 一度も開いていないタブは受け皿を作らない（`openedPanes`）。
+ * - **後片付けはタブの開閉と一致**: 閉じれば `group.tabs` から消え、プールからも落ちて
  *   `onUnmounted`（SQL の結果セット解放など）が走る。**`<KeepAlive>` では
  *   閉じたタブのインスタンスがキャッシュに残り、ここが守れない。**
  */
-const opened = reactive(new Set<string>());
-watch(
-  () => group.value.activeTab,
-  (tab) => {
-    if (tab && appPaneOf(tab)) opened.add(tab);
-  },
-  { immediate: true }
-);
-/** いまマウントしておくアプリ系タブ。閉じた／移した分は `group.tabs` から消えて自然に落ちる */
-const liveTabs = computed(() => group.value.tabs.filter((t) => opened.has(t) && appPaneOf(t)));
+watch(() => group.value.activeTab, markPaneOpened, { immediate: true });
+/** 受け皿を出すアプリ系タブ。閉じた／移した分は `group.tabs` から消えて自然に落ちる */
+const liveTabs = computed(() => group.value.tabs.filter((t) => openedPanes.has(t) && isPaneTab(t)));
 /** アクティブタブがアプリ系か（5250／プリンターの分岐に使う） */
-const activeIsApp = computed(() => appPaneOf(group.value.activeTab) !== undefined);
+const activeIsApp = computed(() => isPaneTab(group.value.activeTab));
+
+/**
+ * **最大化は木を差し替えず、片側を隠して表す**（`20260802-keep-pane-state-move`）。
+ *
+ * 以前は `App` が `workspaceStore.displayRoot()`（最大化中はそのグループだけ）を描いていた。
+ * 描く木が丸ごと入れ替わるので、**最大化した側も含めて全ペインが作り直され**、
+ * 状態が消えていた（利用者の指摘）。
+ *
+ * いまは常に `root` を描き、この分割段が「最大化したグループを**含まない側**」を隠す。
+ * 比率（`split.ratio`）は書き換えないので、解除すれば元の形に戻る。
+ */
+function containsGroup(n: WsNode, id: string): boolean {
+  return n.type === "group" ? n.id === id : containsGroup(n.a, id) || containsGroup(n.b, id);
+}
+const maximizedIn = computed<{ a: boolean; b: boolean }>(() => {
+  const id = workspaceStore.maximizedGroupId;
+  if (id === undefined || props.node.type !== "split") return { a: false, b: false };
+  return { a: containsGroup(split.value.a, id), b: containsGroup(split.value.b, id) };
+});
+/** ちょうど片側だけが最大化のグループを含む＝この段で 1 枚に畳む。
+ *  どちらにも無い（木が食い違っている）ときは畳まない＝従来どおり両方出す */
+const soloed = computed(() => maximizedIn.value.a !== maximizedIn.value.b);
+const showA = computed(() => !soloed.value || maximizedIn.value.a);
+const showB = computed(() => !soloed.value || maximizedIn.value.b);
+/** 1 枚に畳んでいる側は全面。畳んでいなければ従来どおり比率どおり */
+const basisA = computed(() => (soloed.value ? "100%" : split.value.ratio * 100 + "%"));
+const basisB = computed(() => (soloed.value ? "100%" : (1 - split.value.ratio) * 100 + "%"));
 </script>
 
 <template>
   <div v-if="isSplit" ref="container" class="split" :class="split.dir">
-    <div class="split-child" :style="{ flexBasis: split.ratio * 100 + '%' }">
+    <!-- 最大化中は「そのグループを含まない側」と仕切りを隠す。木も比率も書き換えないので
+         解除すれば元の形に戻る（実体を作り直さないため。keep-pane-state-move） -->
+    <div v-show="showA" class="split-child" :style="{ flexBasis: basisA }">
       <WorkspaceNode :node="split.a" />
     </div>
-    <div class="divider" :class="split.dir" @pointerdown="onDividerDown">
+    <div v-show="!soloed" class="divider" :class="split.dir" @pointerdown="onDividerDown">
       <span class="grip"><i></i><i></i><i></i></span>
     </div>
-    <div class="split-child" :style="{ flexBasis: (1 - split.ratio) * 100 + '%' }">
+    <div v-show="showB" class="split-child" :style="{ flexBasis: basisB }">
       <WorkspaceNode :node="split.b" />
     </div>
   </div>
@@ -169,20 +155,26 @@ const activeIsApp = computed(() => appPaneOf(group.value.activeTab) !== undefine
     <PaneTabs :group="group" />
     <div class="group-body">
       <!--
-        アプリ系ペインは**開いたぶんを全部マウントしたまま**、見せる 1 枚だけ表示する。
-        包み紙（`.pane-slot`）を挟むのは、`v-show` がコンポーネントのルート要素に効くため
+        アプリ系ペインの**受け皿**。中身は `PanePool` が `<Teleport>` で差し込む
+        （実体をグループに描かせるとタブ移動で作り直される）。
+
+        `ref` で**実要素**を登録するのが肝——Teleport は `to` が変わったときだけ
+        行き先を引き直すので、セレクタ文字列にすると木を組み替えて受け皿が作り直されても
+        同じ文字列のままで、**外れた古い要素にぶら下がったまま**になる。
+
+        包み紙として `div` を挟むのは、`v-show` がコンポーネントのルート要素に効くため
         ——ルートが複数あるペインでも確実に隠れるようにする。
       -->
       <div
         v-for="t in liveTabs"
+        :ref="registerPaneSlot"
         v-show="t === group.activeTab"
         :key="t"
         class="pane-slot"
+        :data-pane-slot="`${group.id}/${t}`"
         :data-tab="t"
         :data-hidden="t === group.activeTab ? undefined : 'true'"
-      >
-        <component :is="appPaneOf(t)" :tab-id="t" :active="t === group.activeTab" />
-      </div>
+      ></div>
       <!--
         5250 とプリンターは**従来どおりアクティブな 1 つだけ**を描く。状態は
         `sessionsStore` にあるので再マウントで復元でき、`ScreenGrid` は 1 画面の DOM が
