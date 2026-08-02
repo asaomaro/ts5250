@@ -118,20 +118,26 @@ const atSystems = computed(() => showSystemPicker.value);
 const atLauncher = computed(() => !atSystems.value && showLauncher.value);
 
 /**
- * **メニューの対象を、開いた時点で固定する**（`20260802-tabs-own-system`・利用者の判断）。
+ * **ヘッダーは常に「いま見ているタブ」のシステムを映す**（`20260802-header-follows-tab`）。
  *
- * 対象は「いま見ているタブのシステム」に追従させる——A を触っていた流れでメニューを開けば
- * A の続きが出る、が自然だから。ただし**開いている最中は動かさない**。開いた後に
- * フォーカスが変わって対象が入れ替わると、押した先が意図と違うシステムになる。
+ * 以前はメニューを開いた瞬間にだけ合わせていた。そのため**タブを選び替えただけでは
+ * ヘッダーが変わらず**、A のタブを見ているのにヘッダーは B、という食い違いが起きていた
+ * （利用者の指摘）。異なるシステムのタブを並べられる以上、ヘッダーは
+ * 「いまどのシステムを見ているか」を常に正しく出す必要がある。
+ *
+ * ただし **メニュー（ランチャー）を出している間は動かさない**。開いた後に対象が
+ * 入れ替わると、押した先が意図と違うシステムになる（`20260802-tabs-own-system` の判断）。
+ * 監視の元を「メニュー中は `undefined`」にすることで、その間の更新を止めている。
  *
  * システムを持たないタブ（サービス一覧・管理）のときは**直前の対象を維持**する。
  */
-watch(showLauncher, (open) => {
-  if (!open) return;
-  const g = workspaceStore.focusedGroup();
-  const sys = workspaceStore.systemOf(g.activeTab);
-  if (sys) systemsStore.select(sys);
-});
+watch(
+  () => (showLauncher.value ? undefined : workspaceStore.systemOf(workspaceStore.focusedGroup().activeTab)),
+  (sys) => {
+    if (sys) systemsStore.select(sys);
+  },
+  { immediate: true }
+);
 const atWorkspace = computed(() => !atSystems.value && !showLauncher.value);
 
 /** システム選択画面へ。選択は保ったまま、一覧を見せるだけ */

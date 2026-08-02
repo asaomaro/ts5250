@@ -199,18 +199,50 @@ describe("(機能, システム) ごとに別のタブ", () => {
 });
 
 describe("メニューの対象", () => {
-  it("**開いた時点で、見ているタブのシステムに合わせる**", async () => {
+  /**
+   * **タブを選び替えただけでヘッダーが変わる**（`20260802-header-follows-tab`・利用者の指摘）。
+   *
+   * 以前はメニューを開いた瞬間にだけ合わせていたので、**A のタブを見ているのに
+   * ヘッダーは B**、という食い違いが起きていた。異なるシステムのタブを並べられる以上、
+   * ヘッダーは「いまどのシステムを見ているか」を常に正しく出す必要がある。
+   */
+  it("**タブを選び替えるとヘッダーのシステムが変わる**（メニューを開かなくても）", async () => {
     const w = mount(App, { attachTo: document.body });
     const g = workspaceStore.focusedGroup();
-    g.tabs = [makePaneTabId("sql:query", B.ref)];
+    g.tabs = [makePaneTabId("sql:query", A.ref), makePaneTabId("sql:query", B.ref)];
     g.activeTab = g.tabs[0];
-    systemsStore.select(A.ref); // 直前の対象は A
     await nextTick();
+    expect(systemsStore.menuSystem).toBe(A.ref);
 
-    workspaceStore.showLauncher = true;
+    g.activeTab = g.tabs[1];
     await nextTick();
+    expect(systemsStore.menuSystem, "タブを移ってもヘッダーが変わらない").toBe(B.ref);
 
-    expect(systemsStore.menuSystem, "見ているタブのシステムに追従していない").toBe(B.ref);
+    // パンくずの表示もそのシステムになっている
+    expect(w.find(".crumbs .crumb").text()).toContain(B.name);
+    w.unmount();
+  });
+
+  it("**別のペインへフォーカスを移してもヘッダーが追う**", async () => {
+    const w = mount(App, { attachTo: document.body });
+    const g0 = workspaceStore.focusedGroup();
+    const sqlA = makePaneTabId("sql:query", A.ref);
+    g0.tabs = [sqlA, makePaneTabId("ifs:files", B.ref)];
+    g0.activeTab = sqlA;
+    await nextTick();
+    workspaceStore.split(g0.id, "right", sqlA);
+    await nextTick();
+    const groups = workspaceStore.groups();
+    const left = groups.find((x) => !x.tabs.includes(sqlA))!;
+    const right = groups.find((x) => x.tabs.includes(sqlA))!;
+
+    workspaceStore.focus(right.id);
+    await nextTick();
+    expect(systemsStore.menuSystem).toBe(A.ref);
+
+    workspaceStore.focus(left.id);
+    await nextTick();
+    expect(systemsStore.menuSystem, "ペインを移ってもヘッダーが変わらない").toBe(B.ref);
     w.unmount();
   });
 

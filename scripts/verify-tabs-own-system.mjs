@@ -6,7 +6,7 @@
 //   2. **それぞれの要求が自分のシステムへ飛ぶ**（実際の HTTP の body を覗いて確かめる）
 //   3. 2 システム開いているときだけタブに**システム名**が出て、**色帯**が付く
 //   4. システムを選び直しても**タブが 1 枚も消えない**（以前は絞り込みで隠れていた）
-//   5. メニューの対象が**見ているタブのシステム**に追従する
+//   5. **ヘッダーが常に見ているタブのシステムを映す**（タブを選び替えただけで変わる）
 //
 // 実行: node --env-file=.env scripts/verify-tabs-own-system.mjs
 //   （事前に `npm run build` と `npm run build -w @as400web/web-ui` が要る）
@@ -178,16 +178,29 @@ try {
   tabs = await tabInfo();
   check(tabs.length === 2, `**切り替えてもタブが消えない**（${tabs.length}）`);
 
-  // ---- メニューの対象は見ているタブに追従する ----
-  log("\n### メニューの対象");
-  // B のタブを前面にしてからメニューを開く
-  const bTab = page.locator(".tabs .tab", { hasText: "ビー" }).first();
-  await bTab.click();
-  await sleep(400);
+  // ---- ヘッダーは常に見ているタブのシステムを映す ----
+  log("\n### ヘッダーのシステム表示");
+  const headerSystem = async () =>
+    (await page.locator(".crumbs .crumb").first().innerText()).replace(/\s+/g, " ");
+
+  // **タブを選び替えるだけで変わる**（メニューを開かない）。以前はここが変わらず、
+  // 「A のタブを見ているのにヘッダーは B」という食い違いが起きていた（利用者の指摘）
+  await page.locator(".tabs .tab", { hasText: "ビー" }).first().click();
+  await sleep(500);
+  const onB = await headerSystem();
+  check(onB.includes("ビー"), `**B のタブを選ぶとヘッダーが B**（${onB}）`);
+
+  await page.locator(".tabs .tab", { hasText: "エー" }).first().click();
+  await sleep(500);
+  const onA = await headerSystem();
+  check(onA.includes("エー"), `**A のタブを選ぶとヘッダーが A**（${onA}）`);
+
+  // メニューを開いても、そのタブのシステムのまま
   await crumb("メニュー").click();
   await page.waitForSelector(".launcher", { timeout: 10_000 });
-  const shown = await page.locator(".crumbs .crumb").first().innerText();
-  check(shown.includes("ビー"), `**見ているタブのシステムに追従する**（${shown.replace(/\\s+/g, " ")}）`);
+  const inMenu = await headerSystem();
+  check(inMenu.includes("エー"), `メニューを開いても同じ（${inMenu}）`);
+
 } catch (e) {
   fail++;
   log(`  FAIL 例外: ${e?.message ?? e}`);
