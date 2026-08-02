@@ -87,8 +87,10 @@ describe("所有（共有/個人）の語と移動 UI をどこにも出さな�
     expect(w.text()).not.toContain("にする");
     expect(w.text()).not.toContain("共有");
     expect(w.text()).not.toContain("個人");
-    // 保存先の移動は編集では選ばせない（作るときだけ決まる）
-    expect(w.text()).not.toContain("保管場所");
+    // 保存先の移動は編集では選ばせない（作るときだけ決まる）。
+    // **見出しで見る**——カード表示には「サーバー設定」のチップが出るので、
+    // 文字列の有無では判定できない（`20260802-config-form-polish` で見出しを改名した）
+    expect(w.findAll(".fgrid .row").some((r) => r.find(".cap").text() === "サーバー設定")).toBe(false);
     w.unmount();
   });
 });
@@ -149,7 +151,7 @@ describe("信頼設定（サーバー側の出力）は保存先とセッショ�
   });
 });
 
-describe("保管場所の選択は編集できる構成でだけ出す", () => {
+describe("「サーバー設定」の選択は編集できる構成でだけ出す", () => {
   async function createSystem(editable: boolean) {
     stubFetch(editable, []);
     systemsStore.editable = editable;
@@ -161,7 +163,7 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
   /**
    * 欄は**見出しで指す**（位置ではなく）。位置指定にすると、欄が 1 つ増えただけで
    * 別の欄へ書き込み、「保存が効かない」という無関係な失敗になる
-   * （`20260802-config-form-polish` で保管場所がチェックになったとき実際に踏んだ）。
+   * （`20260802-config-form-polish` で「サーバー設定」がチェックになったとき実際に踏んだ）。
    */
   function field(w: Awaited<ReturnType<typeof createSystem>>, cap: string) {
     return w.findAll(".fgrid .row").find((r) => r.find(".cap").text() === cap)!;
@@ -177,9 +179,9 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
     await flushPromises();
   }
 
-  it("editable=false では保管場所を選ばせず、自分の設定へ保存する", async () => {
+  it("editable=false では「サーバー設定」を選ばせず、自分の設定へ保存する", async () => {
     const w = await createSystem(false);
-    expect(w.text()).not.toContain("保管場所");
+    expect(w.findAll(".fgrid .row").some((r) => r.find(".cap").text() === "サーバー設定")).toBe(false);
     await fillAndSave(w);
 
     const post = calls.find((c) => c.url === "/api/systems" && c.method === "POST");
@@ -188,12 +190,12 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
     w.unmount();
   });
 
-  it("editable=true では保管場所をサーバー設定にできる", async () => {
+  it("editable=true では「サーバー設定」にできる", async () => {
     const w = await createSystem(true);
-    expect(w.text()).toContain("保管場所");
     // **2 択の select ではなくチェック 1 つ**（`20260802-config-form-polish`）——
-    // 既定は「自分の設定」で、サーバー設定にしたいときだけ入れる
-    await field(w, "保管場所").find('input[type="checkbox"]').setValue(true);
+    // 既定は「自分の設定」で、サーバー設定にしたいときだけ入れる。
+    // 見出しは**その設定の名前そのもの**（カードのチップ・ⓘ の詳細と同じ語）
+    await field(w, "サーバー設定").find('input[type="checkbox"]').setValue(true);
     await fillAndSave(w);
 
     const post = calls.find((c) => c.url === "/api/systems" && c.method === "POST");
@@ -205,7 +207,7 @@ describe("保管場所の選択は編集できる構成でだけ出す", () => {
 /**
  * **新規セッションの保存先は「選んだ親システム」から決まる。**
  *
- * セッションは参照先システムと同じ保管場所（ファイル）にしか置けない
+ * セッションは参照先システムと同じ側（ファイル）にしか置けない
  * （サーバー側 `config-store.ts` の `assertIntegrity` / `addSession`）。
  * 以前は `isServer` が `props.system?.ref ?? props.session?.ref` を見ており、
  * 新規セッションではどちらも `undefined` に落ちて `source`（システム作成フォームにしか無い

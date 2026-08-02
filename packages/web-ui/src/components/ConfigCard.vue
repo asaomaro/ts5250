@@ -60,7 +60,7 @@ const busy = ref(false);
 const error = ref("");
 const notice = ref("");
 
-/** 保管場所。サーバー設定は編集可能なときだけ選べる */
+/** サーバー設定に置くか。編集可能なときだけ選べる（既定は自分の設定） */
 const source = ref<"server" | "personal">("personal");
 /** チェック 1 つで表す（既定は自分の設定）。保存経路は従来どおり `source` を見る */
 const isServerSource = computed({
@@ -206,7 +206,7 @@ const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / 
 /**
  * 編集対象がサーバー設定か（信頼設定の欄を出す・保存先を選ぶ判定に使う）。
  *
- * セッションは**選んだ親システムと同じ保管場所**にしか置けない（config-store のスコープ規定）。
+ * セッションは**選んだ親システムと同じ側**にしか置けない（config-store のスコープ規定）。
  * 新規セッションには `props.session` がまだ無いので、`props.system?.ref ?? props.session?.ref`
  * では常に未定義に落ちて `source.value`（システム作成用の select。セッションには無い）を見てしまい、
  * 常に「自分の設定」を選んだのと同じ扱いになっていた——親がサーバー設定のシステムだと、
@@ -725,19 +725,18 @@ const infoRows = computed(() => {
 
       <div v-if="kind === 'system'" class="fgrid">
         <!--
-          保管場所。**チェック 1 つで表す**——「自分の設定」が既定で、
-          サーバー設定にしたいときだけ入れる（2 択の select より意思が読みやすい）。
+          **見出しはその設定の名前そのもの**（`サーバー設定`）。カードのチップも ⓘ の詳細も
+          同じ語を使っているので、ここだけ別の言い方（旧「保管場所」）にすると
+          **同じものが 2 つあるように見える**。チェックの隣に言い直しも置かない
+          ——見出しが名前を、チェックが入り切りを、補足が意味を担う。
 
           **「全員が使える」ではない。** サーバー設定は `assertProfileAccess` により
           **読むのも管理者だけ**。一般利用者に見えるのは「サービスが動いているか」だけ
           （`ServiceDef`。`20260801-services-pane`）。
         -->
         <label v-if="creating && systemsStore.editable" class="row full">
-          <span class="cap">保管場所</span>
-          <span class="tv">
-            <input v-model="isServerSource" type="checkbox" />
-            サーバー設定にする
-          </span>
+          <span class="cap">サーバー設定</span>
+          <span class="tv"><input v-model="isServerSource" type="checkbox" /></span>
           <span class="hint">
             管理者だけが参照・編集できる共有の設定です。<strong>サービス（常駐）にできるのはこちらだけ</strong>
             ——プリンターの自動出力・待ち行列の転送も、サーバー設定のセッションにしか置けません。
