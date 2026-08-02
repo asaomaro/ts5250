@@ -44,8 +44,16 @@ import type { DbConnection } from "./db-connection.js";
 
 const log = childLog({ component: "hostserver-lob" });
 
-/** 一度に要求するバイト数。原典が 64KB のバッファで分割受信するのに合わせる */
-const SEGMENT_BYTES = 0xffff;
+/**
+ * 一度に要求する量。**単位はホストと同じ「文字」**（`20260802-lob-multi-segment`）。
+ *
+ * 名前が `SEGMENT_BYTES` だった頃、これをバイトのつもりで `lobStartOffset` に流し込み、
+ * **2 バイト CCSID の分割受信で位置が 2 倍に飛んで中身が抜けていた**。
+ * 直したあとに同じ名前を残さない——名前が単位を偽っていたのが入口だった。
+ *
+ * 値は原典が 64KB のバッファで分割受信するのに合わせている。
+ */
+const SEGMENT_UNITS = 0xffff;
 /** 既定の取得上限。**全部取るを既定にしない**（大きな LOB でメモリを掴むため） */
 export const DEFAULT_LOB_MAX_BYTES = 64 * 1024;
 
@@ -64,6 +72,17 @@ export interface RetrievedLob {
  *
  * 1 応答に収まらないことがあるので、**開始オフセットを進めて繰り返す**。
  * 進まなくなったら打ち切る（無限ループにしない）。
+ *
+ * ## ⚠ ホストは位置も要求量も「文字」で数える
+ *
+ * `lobStartOffset` / `lobRequestedSize` / 応答の長さ / 総長——**全部が文字単位**
+ * （実機で確認。`20260802-lob-multi-segment` の research F1〜F3）。
+ * 2 バイト CCSID（UTF-16 / 純 DBCS）では **1 文字 = 2 バイト**なので、
+ * ここにバイト数を入れると位置が 2 倍に飛ぶ。
+ *
+ * だから**ループはホストと同じ単位（文字）で回し、換算は上限（バイト）を当てるときだけ**行う。
+ *
+ * `opts.startOffset` も**文字**。呼び出し元（`fillLobs`）は常に省略している。
  */
 export async function retrieveLob(
   conn: DbConnection,
@@ -71,25 +90,36 @@ export async function retrieveLob(
   opts: { maxBytes?: number; startOffset?: number } = {}
 ): Promise<RetrievedLob> {
   const maxBytes = opts.maxBytes ?? DEFAULT_LOB_MAX_BYTES;
-  let offset = opts.startOffset ?? 0;
+  /** ホストへ送る位置。**文字で数える** */
+  let offsetUnits = opts.startOffset ?? 0;
   const chunks: Uint8Array[] = [];
-  let received = 0;
+  /** 上限判定に使う量。**こちらはバイト** */
+  let receivedBytes = 0;
   let ccsid = 0;
-  /** ホストが申告した総長。**単位は CCSID 次第**なので、判明してから換算する */
-  let declaredTotal = 0;
-  let totalLength = 0;
+  /**
+   * 1 文字あたりのバイト数。**最初の応答の CCSID で確定する**ので、それまでは 1 と見なす。
+   * そのぶん 1 周目だけ上限を超えて届きうる（最大 1 セグメント）——最後に切り詰める。
+   */
+  let perChar = 1;
+  /** ホストが申告した総長。**文字数**（バイトへの換算は最後） */
+  let totalUnits = 0;
 
   for (;;) {
-    const want = Math.min(SEGMENT_BYTES, maxBytes - received);
-    if (want <= 0) break;
+    const remainingBytes = maxBytes - receivedBytes;
+    if (remainingBytes <= 0) break;
+    // **文字で頼む**（`perChar` 判明後は残りバイト数から割り出す）
+    const wantUnits = Math.min(SEGMENT_UNITS, Math.ceil(remainingBytes / perChar));
+    // 0 を頼まない。**いまの式では起きない**が、刻み方を変えたときに
+    // 「0 を頼んで空が返る」空回りへ落ちるのを塞いでおく
+    if (wantUnits <= 0) break;
 
     const reply = await conn.request({
       reqId: DB_REQ.retrieveLobData,
       orsBitmap: ORS.sendReplyImmediately | ORS.dataFormat | ORS.resultData,
       params: [
         uint32(DB_CP.lobLocatorHandle, locator),
-        uint32(DB_CP.lobRequestedSize, want),
-        uint32(DB_CP.lobStartOffset, offset),
+        uint32(DB_CP.lobRequestedSize, wantUnits),
+        uint32(DB_CP.lobStartOffset, offsetUnits),
         byte(DB_CP.lobTranslateIndicator, 0xf1),
         byte(DB_CP.lobReturnCurrentLength, 0xf1)
       ],
@@ -109,12 +139,12 @@ export async function retrieveLob(
     }
 
     const rawLength = findParam(reply, DB_CP.lobDataLength);
-    if (rawLength && rawLength.length >= 2 && declaredTotal === 0) {
-      declaredTotal = parseLobLength(rawLength);
+    if (rawLength && rawLength.length >= 2 && totalUnits === 0) {
+      totalUnits = parseLobLength(rawLength);
     }
 
     const rawData = findParam(reply, DB_CP.lobData);
-    if (!rawData || rawData.length <= 6) break;
+    if (!rawData || rawData.length < 2) break;
 
     const view = new DataView(rawData.buffer, rawData.byteOffset, rawData.byteLength);
     ccsid = view.getUint16(0);
@@ -122,25 +152,58 @@ export async function retrieveLob(
     // それ以外は【バイト数】。バイト数として読むと `日本語`（3 文字 / 6 バイト）が
     // 3 バイトに切られる（実機で踏んだ。`20260801-dbclob-locator-decode`）。
     // **SBCS だけで試すと一致してしまい判別できない**
-    const perChar = isTwoByteCcsid(ccsid) ? 2 : 1;
-    if (totalLength === 0) totalLength = declaredTotal * perChar;
-    const dataBytes = view.getUint32(2) * perChar;
-    const body = rawData.subarray(6, Math.min(6 + dataBytes, rawData.length));
-    if (body.length === 0) break;
+    perChar = isTwoByteCcsid(ccsid) ? 2 : 1;
+    // **本体が無くても CCSID までは読んでから抜ける。** 総長（文字数）をバイトへ
+    // 換算するのに要る——先に抜けると「総長は分かっているのに単位が分からない」ことになり、
+    // 2 バイト CCSID の申告が半分の値で返る
+    if (rawData.length <= 6) break;
+    const declaredBytes = view.getUint32(2) * perChar;
+    const body = rawData.subarray(6, Math.min(6 + declaredBytes, rawData.length));
+    // **申告値ではなく、届いたバイト数から文字数を割り出す。** 応答が途中で切れたときに
+    // 申告どおり進めると、届いていない分を飛ばす。半端な符号単位は混ぜない
+    const gotUnits = Math.floor(body.length / perChar);
+    if (gotUnits <= 0) break;
+    const used = body.subarray(0, gotUnits * perChar);
 
-    chunks.push(body);
-    received += body.length;
-    offset += body.length;
+    chunks.push(used);
+    receivedBytes += used.length;
+    offsetUnits += gotUnits;
 
-    if (totalLength > 0 && offset >= totalLength) break;
-    // **進まなくなったら打ち切る**（無限ループ防止）
-    if (body.length < want) break;
+    if (totalUnits > 0) {
+      if (offsetUnits >= totalUnits) break;
+    } else if (gotUnits < wantUnits) {
+      // **総長が分からないときだけ、短い応答を終端と見なす。**
+      // 総長が分かっているなら短い応答は「ホストが返せた分」でしかなく、
+      // ここで止めると途中で切れた値を全部だと思い込む
+      break;
+    }
   }
 
-  const bytes = concat(chunks, received);
+  const totalLength = totalUnits * perChar;
+  const bytes = trimToBytes(concat(chunks, receivedBytes), maxBytes, perChar);
   const truncated = totalLength > 0 && bytes.length < totalLength;
   log.debug(`retrieved LOB ${locator}: ${bytes.length}/${totalLength} bytes ccsid=${ccsid}`);
   return { bytes, ccsid, totalLength: totalLength || bytes.length, truncated };
+}
+
+/**
+ * 上限バイト数へ切り詰める。
+ *
+ * `perChar` は最初の応答まで分からないので**1 周目だけ多めに届きうる**
+ * （最大 1 セグメント）。戻り値としての約束——`maxBytes` を超えない——はここで守る。
+ *
+ * - 切るのは **`perChar` の倍数**の位置。UTF-16 を奇数バイトで切ると末尾が化ける。
+ * - **末尾が上位サロゲート単独になるならもう 1 単位落とす。** 対の途中で切ると
+ *   孤立サロゲートが残り、「打ち切られた」ではなく「壊れた」ように見える。
+ */
+function trimToBytes(bytes: Uint8Array, maxBytes: number, perChar: number): Uint8Array {
+  if (bytes.length <= maxBytes) return bytes;
+  let end = maxBytes - (maxBytes % perChar);
+  if (perChar === 2 && end >= 2) {
+    const last = (bytes[end - 2]! << 8) | bytes[end - 1]!;
+    if (last >= 0xd800 && last <= 0xdbff) end -= 2;
+  }
+  return bytes.subarray(0, Math.max(0, end));
 }
 
 /**
