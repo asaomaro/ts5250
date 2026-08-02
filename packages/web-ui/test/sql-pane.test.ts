@@ -421,19 +421,26 @@ describe("列幅のドラッグ", () => {
 
   it("ダブルクリックで既定へ戻す", async () => {
     const w = await run();
+    // **既定は「無指定」ではなく計算値**（`20260802-sql-table-virtualize`）。
+    // 行を間引く以上、幅は `auto` に任せず宣言する——戻り先はその計算値
+    const before = w.findAll("thead th")[1]?.attributes("style");
     await drag(w, 0, 300);
+    expect(w.findAll("thead th")[1]?.attributes("style")).toContain("300px");
     await w.findAll("thead .col-grip")[0]?.trigger("dblclick");
-    expect(w.findAll("thead th")[1]?.attributes("style")).toBeUndefined();
+    expect(w.findAll("thead th")[1]?.attributes("style")).toBe(before);
+    expect(w.findAll("thead th")[1]?.attributes("style")).not.toContain("300px");
     w.unmount();
   });
 
   it("**再実行で捨てる**（列の並びが変わると対応が狂うため）", async () => {
     const w = await run();
+    const before = w.findAll("thead th")[1]?.attributes("style");
     await drag(w, 0, 300);
     expect(w.findAll("thead th")[1]?.attributes("style")).toContain("300px");
     await w.find("header button").trigger("click");
     await flushPromises();
-    expect(w.findAll("thead th")[1]?.attributes("style")).toBeUndefined();
+    // 手で決めたぶんだけ捨て、計算値へ戻る（無指定には戻らない）
+    expect(w.findAll("thead th")[1]?.attributes("style")).toBe(before);
     w.unmount();
   });
 

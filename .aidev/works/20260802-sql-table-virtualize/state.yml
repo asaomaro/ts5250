@@ -1,0 +1,9 @@
+schema: 3
+slug: sql-table-virtualize
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: hostserver.md
