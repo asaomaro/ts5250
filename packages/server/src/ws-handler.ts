@@ -1,14 +1,14 @@
 import { As400Error } from "@as400web/base";
 import { type AidKey, type ScreenSnapshot } from "@as400web/tn5250";
 import { childLog } from "./log.js";
-import { SessionManager, type OpenOptions } from "./session-manager.js";
+import { SessionManager, type OpenOptions, type StoredReport } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
 import { withAudit } from "./audit.js";
-import type { WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
+import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
 import type { MacroStore } from "./macro-store.js";
 import { macroSecretRefSchema } from "./macro-types.js";
 
@@ -40,6 +40,17 @@ function hasRef(msg: { system?: string; session?: string }): boolean {
 /** 監査ログに残す出所。セッション参照があればそちらを優先する */
 function originOf(msg: { system?: string; session?: string }): string {
   return msg.session ?? msg.system ?? "direct";
+}
+
+/**
+ * 帳票を電文の形に落とす（`20260802-printer-report-history`）。
+ *
+ * **live の push（`report`）と開き直しの配り直し（`printer-opened.reports`）で同じ関数を通す。**
+ * 片方だけ `receivedAt` を載せると、「開き直すと時刻が出るのに、いま届いたものには無い」
+ * という説明しにくい差になる。**生バイト（`raw`）は載せない**——画面は等幅グリッドしか使わない。
+ */
+function spoolReportMsg(r: StoredReport): SpoolReportMsg {
+  return { id: r.id, pages: r.pages, receivedAt: r.receivedAt };
 }
 
 /** WSContext の最小インターフェース（@hono/node-server の WSContext / テストのモック双方に適合） */
@@ -455,8 +466,8 @@ export class WsConnection {
       const entry = await this.deps.sessions.openPrinter(opts);
       this.sessionId = entry.id;
       this.startHeartbeat();
-      const onReport = (r: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }): void =>
-        this.send({ type: "report", sessionId: entry.id, report: { id: r.id, pages: r.pages } });
+      const onReport = (r: StoredReport): void =>
+        this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) });
       // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
       // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
       entry.onReport = onReport;
@@ -492,7 +503,7 @@ export class WsConnection {
         outputWarnings: entry.outputWarnings,
         // **閉じている間に届いたぶんを渡す。** これが無いと
         // 「繋がったが閉じている間のものは見えない」になる
-        reports: entry.reports.map((r) => ({ id: r.id, pages: r.pages })),
+        reports: entry.reports.map(spoolReportMsg),
         receivedTotal: entry.receivedTotal,
         outputStatuses: entry.outputStatuses
       });

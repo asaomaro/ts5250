@@ -157,6 +157,14 @@ export interface SessionState {
   // ---- プリンターセッション（kind==="printer"）----
   /** 受信したスプール（帳票）一覧 */
   reports?: SpoolReportView[];
+  /**
+   * **累計受信数**（`20260802-printer-report-history`）。
+   *
+   * サーバー側の上限（`REPORT_LIMIT` 50 件）で**落ちた分も含む**ので、
+   * `reports.length` と一致しないことがある。差が「落ちた数」。
+   * 古いサーバー（送ってこない）では未設定＝`reports.length` に落とす。
+   */
+  receivedTotal?: number;
   /** ビューで選択中のスプール */
   selectedReportId?: string;
   /** 起動応答コード（I902 等）。**待ち受けていなければ無い**（接続していないため） */
@@ -239,6 +247,10 @@ export const sessionsStore = reactive({
     s.reports.push(report);
     if (!s.selectedReportId) s.selectedReportId = report.id;
     s.unread = (s.unread ?? 0) + 1;
+    // **累計はサーバー値から始めて増やす**（`20260802-printer-report-history`）。
+    // 開いた時点の `receivedTotal` は落ちた分を含んでいるので、そこに足せば含み続ける。
+    // `reports.length` で数え直すと、落ちた分がここで消える
+    if (s.receivedTotal !== undefined) s.receivedTotal++;
   },
 
   /** プリンタータブを表示したら未読をクリアする */

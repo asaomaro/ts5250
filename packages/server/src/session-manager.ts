@@ -214,6 +214,17 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
 }
 
 
+/**
+ * **サーバーが受け取った帳票**（`20260802-printer-report-history`）。
+ *
+ * `SpoolReport`（`@as400web/tn5250`）はプロトコル層の「届いた 1 スプール」で、
+ * **時計を持たない**。いつ受け取ったかはサーバーの関心事なので、ここで足す。
+ *
+ * これが無いと、常駐中に溜まった帳票を後から開いたときに受信時刻を
+ * **クライアントが現在時刻で押す**ことになり、夜中に出た帳票が全部「いま届いた」になる。
+ */
+export type StoredReport = SpoolReport & { receivedAt: number };
+
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
 export interface PrinterEntry {
   id: string;
@@ -243,7 +254,7 @@ export interface PrinterEntry {
    * 受信済みスプール（順）。**上限あり**（`REPORT_LIMIT`）——常駐は何日も動くので、
    * 超えたら古いものから落とす。落ちた分も含めた総数は `receivedTotal`
    */
-  reports: SpoolReport[];
+  reports: StoredReport[];
   /** 累計受信数（**落ちた分も含む**）。「何件来たか」を見失わないため */
   receivedTotal: number;
   /**
@@ -277,7 +288,7 @@ export interface PrinterEntry {
    * ws-handler が `session.on("report")` だけを見ていると救出分が画面に出ないので、
    * 配る側（`deliverReport`）から必ずこのフックを叩く。
    */
-  onReport?: (r: SpoolReport) => void;
+  onReport?: (r: StoredReport) => void;
   /** 書き出しできないスプールを拾う見張り（`startRescue`）。切断で止める */
   rescueTimer?: ReturnType<typeof setInterval> | undefined;
   /** 見張りが実行中か。前回が終わる前に次を走らせて二重取得しないための鍵 */
@@ -819,8 +830,13 @@ export class SessionManager {
    * 受信した帳票を配る（push でも救出でも同じ道を通す）。
    * ここを 1 本にしておかないと、救出した帳票だけ自動出力（PDF/印刷）から漏れる。
    */
-  private deliverReport(entry: PrinterEntry, report: SpoolReport): void {
+  private deliverReport(entry: PrinterEntry, incoming: SpoolReport): void {
     {
+      // **受信時刻はここでしか刻まない。** 配る道が 1 本なので、ここで刻めば
+      // push・待機者・自動出力・バッファのすべてが**同じ 1 個**を見る。
+      // 刻んだものを作り直さずに使い回すのが要点——`onReport` にだけ元の
+      // `incoming` を渡すと、live で届いた帳票にだけ時刻が無い、という差が生える
+      const report: StoredReport = { ...incoming, receivedAt: this.now() };
       entry.reports.push(report);
       entry.receivedTotal++;
       // **上限を超えたら古いものから落とす。** 常駐は何日も動くので無制限にできない。

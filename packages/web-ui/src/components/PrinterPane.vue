@@ -11,6 +11,21 @@ const emit = defineEmits<{ (e: "focus"): void }>();
 const session = computed(() => sessionsStore.get(props.sessionId));
 const reports = computed(() => session.value?.reports ?? []);
 
+/**
+ * 受信件数の表示（`20260802-printer-report-history`）。
+ *
+ * **累計と保持を区別する。** サーバーは 50 件で頭打ちにして古いものから落とすので、
+ * `reports.length` だけを「受信 N 件」と出すと、落ちた分がここで消える。
+ *
+ * **普段は括弧を出さない**——50 件を超えるまで起きない状態のために、常時 2 つ並べない。
+ * サービス一覧（`ServicesPane`）の `帳票 N 件（保持 M）` と同じ形にしてある。
+ */
+const countLabel = computed(() => {
+  const held = reports.value.length;
+  const total = session.value?.receivedTotal ?? held;
+  return total > held ? `受信 ${total} 件（保持 ${held}）` : `受信 ${held} 件`;
+});
+
 // ---- 未読クリア: このペインが表示されている＝ユーザーが見ている ----
 onMounted(() => sessionsStore.markSpoolRead(props.sessionId));
 watch(
@@ -237,7 +252,7 @@ function printReport(): void {
         {{ stateLabel }}<template v-if="stateError">: {{ stateError }}</template>
       </span>
       <span v-if="listening" class="muted">起動: {{ session?.startupCode ?? "-" }}</span>
-      <span class="muted">受信 {{ reports.length }} 件</span>
+      <span class="muted">{{ countLabel }}</span>
       <span class="spacer"></span>
       <!--
         待ち受けの開始/停止。**停止しても受信済みの帳票は消えない**——

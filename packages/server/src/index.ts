@@ -107,7 +107,8 @@ export type {
   WsJobInfoRes,
   WsError,
   WsClosed,
-  WsKeyDone
+  WsKeyDone,
+  SpoolReportMsg
 } from "./ws-messages.js";
 export { main } from "./main.js";
 

@@ -17,6 +17,8 @@
  */
 import { onUnmounted, computed, watch } from "vue";
 import { servicesStore } from "../stores/services.js";
+import { systemsStore } from "../stores/systems.js";
+import { useOpenConfigured } from "../composables/openConfigured.js";
 import type { PrinterRow, WatchRow } from "@as400web/server";
 
 /**
@@ -24,6 +26,20 @@ import type { PrinterRow, WatchRow } from "@as400web/server";
  * アンマウントせず `v-show` で隠すようになったので、「マウント中＝見えている」ではない。
  */
 const props = defineProps<{ tabId: string; active?: boolean }>();
+
+/**
+ * **帳票を読みに行く**（`20260802-printer-report-history`）。
+ *
+ * 一覧は `帳票 12 件（保持 10）` と出すのに、**そこから開けなかった**。
+ * 「あると書いてあるのに読めない」は「無い」より悪い。
+ *
+ * 開けば `printer-opened` で常駐中に溜まったぶんが届く（サーバー側は
+ * `20260801-printer-attach-by-ref` で既に配っている）。
+ *
+ * **下の `watch` より前に置く**——`immediate: true` が setup 中に走るので、
+ * 後ろに書くと初期化前に触ることになる。
+ */
+const openConfigured = useOpenConfigured();
 
 /**
  * **見えている間だけ定期取得する。**
@@ -35,8 +51,15 @@ const props = defineProps<{ tabId: string; active?: boolean }>();
 watch(
   () => props.active,
   (on) => {
-    if (on) void servicesStore.open();
-    else servicesStore.close();
+    if (on) {
+      void servicesStore.open();
+      // `開く` はセッション設定を引けないと押せない。**ここへ直接来ることがある**
+      // （タブを開いたままシステムを切り替える等）ので、無ければ引き直す
+      if (!systemsStore.loaded) void systemsStore.refresh();
+      // **開く処理の失敗は共有**（ランチャーと同じ ref）。持ち越すと、ランチャーで出た
+      // 「装置が使用中」がこのペインを開いた瞬間に出る。見えるようになった時点で捨てる
+      openConfigured.error.value = "";
+    } else servicesStore.close();
   },
   { immediate: true }
 );
@@ -125,6 +148,23 @@ function toggle(r: Row): void {
   }
 }
 
+/**
+ * 開けるか。**セッション設定が引けるときだけ**——`/api/printers` と
+ * `/api/sessions-config` はどちらも `ConfigResolver` 由来で `ref` は同じ名前空間だが、
+ * 認可の絞り方まで同じとは限らない。押しても始まらないボタンを置かない。
+ */
+function canOpen(r: Row): boolean {
+  return r.kind === "printer" && systemsStore.sessions.some((x) => x.ref === r.ref);
+}
+
+/** 操作の可否とは別。**読むだけ**なので `editable`（admin）で隠さない */
+function openPrinter(r: Row): void {
+  void openConfigured.open(r.ref);
+}
+
+/** 一覧の失敗と、開く操作の失敗。**新しい通知先を作らない**（同じ行に出す） */
+const errorText = computed(() => servicesStore.error || openConfigured.error.value);
+
 /** プリンターの警告（自動出力の失敗）。**編集できる相手にしか届かない**（文面にパスが載りうる） */
 const warnings = computed(() =>
   servicesStore.printers.flatMap((p) => (p.warnings ?? []).map((w) => ({ name: p.name, ...w })))
@@ -138,7 +178,7 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
       サーバーで動き続けるサービスの一覧です。<strong>ブラウザを閉じても止まりません。</strong>
       <span v-if="!servicesStore.editable" class="ro">（操作は管理者のみ）</span>
     </p>
-    <p v-if="servicesStore.error" class="err">{{ servicesStore.error }}</p>
+    <p v-if="errorText" class="err">{{ errorText }}</p>
 
     <section class="list">
       <div class="head">
@@ -201,7 +241,17 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
                 ⚠ 未達 {{ r.undelivered }} 件
               </span>
             </td>
-            <td>
+            <td class="ops">
+              <!-- **読むのは誰でも。** 開始/停止（admin のみ）とは条件が違う -->
+              <button
+                v-if="canOpen(r)"
+                class="btn ghost"
+                :disabled="Boolean(openConfigured.connecting.value)"
+                title="このプリンターを開いて、受信した帳票を読みます"
+                @click="openPrinter(r)"
+              >
+                開く
+              </button>
               <!-- **押しても 403 になるボタンを出さない。** 一覧は見えても操作は admin だけ -->
               <button
                 v-if="servicesStore.editable"
@@ -292,6 +342,14 @@ th:nth-child(2),
 th:nth-child(4) {
   color: var(--muted);
   white-space: nowrap;
+}
+/* 操作列。**セルを flex にしない**——`td` の表示型を変えると行の高さ揃えが崩れる。
+   ボタンは既定で横並びなので、間隔だけ足りればよい */
+td.ops {
+  white-space: nowrap;
+}
+td.ops .btn + .btn {
+  margin-left: 6px;
 }
 .chip {
   display: inline-block;

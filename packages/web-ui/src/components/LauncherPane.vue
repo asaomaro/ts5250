@@ -15,10 +15,11 @@ import { workspaceStore } from "../stores/workspace.js";
 import SystemDot from "./SystemDot.vue";
 import { makePaneTabId } from "../paneLabels.js";
 import { authStore } from "../stores/auth.js";
-import { openSession, openPrinterSession } from "../session-controller.js";
-import { sessionsStore } from "../stores/sessions.js";
-import { watchesStore } from "../stores/watches.js";
+import { openedSession, useOpenConfigured } from "../composables/openConfigured.js";
 import ConfigCard from "./ConfigCard.vue";
+
+/** 開く処理は共有（ランチャーとサービス一覧で同じ判断を使う） */
+const openConfigured = useOpenConfigured();
 
 /** カード / 一覧の表示切り替え（端末ごとに localStorage で保持。旧 UI から引き継ぐ） */
 const VIEW_KEY = "as400.launcherView";
@@ -32,8 +33,8 @@ function setViewMode(m: "card" | "list"): void {
 
 const addingSystem = ref(false);
 const addingSession = ref(false);
-const connecting = ref("");
-const error = ref("");
+/** 接続中の設定 ref と直近の失敗。**共有**——同時に 2 本開かせないため（`openConfigured`） */
+const { connecting, error } = openConfigured;
 
 onMounted(() => {
   void systemsStore.refresh();
@@ -141,91 +142,12 @@ function openFeature(id: string, scoped = true): void {
 }
 
 /**
- * その設定で既に開いているセッション（あれば）。
- * **システムを切り替えて戻ってきたときの誤操作を防ぐのが目的。** 戻るとメニューに出るのは
- * この設定カードだけで、タブが生きていることが見えない。そこで「接続」を押すと 2 本目が開き、
- * 装置名を固定していればホストが「使用中」としてネゴシエーション中にソケットを切る
- * （SESSION_CLOSED: closed during negotiation）。開いているならタブへ戻す。
+ * セッション設定から接続する。**中身は `openConfigured` に出してある**
+ * （`20260802-printer-report-history`）——サービス一覧からも同じ操作ができるようになり、
+ * 「開いていればタブへ戻す」「装置名の二重掴みを断る」「監視はセッションとして開かない」
+ * という判断を 2 か所に持ちたくないため。
  */
-function openedSession(ref: string): string | undefined {
-  return sessionsStore.all.find((x) => x.configRef === ref && x.connected)?.sessionId;
-}
-
-/** 同じ装置名で既に開いているセッション（別設定でも衝突する）。 */
-function deviceNameInUse(deviceName: string | undefined): string | undefined {
-  if (deviceName === undefined) return undefined;
-  return sessionsStore.all.find((x) => x.connected && x.meta?.deviceName === deviceName)?.label;
-}
-
-/** 既存タブを前面に出してワークスペースへ移る */
-function focusSession(sessionId: string): void {
-  const g = workspaceStore.groups().find((x) => x.tabs.includes(sessionId));
-  if (g) {
-    workspaceStore.setActiveTab(g.id, sessionId);
-    workspaceStore.focus(g.id);
-  }
-  workspaceStore.showLauncher = false;
-}
-
-/** セッション設定から接続する。**資格情報は送らない**——サーバーが参照から解決する */
-async function connect(ref: string, force = false): Promise<void> {
-  // 二重クリックで同じ装置名のセッションを 2 本開くと、2 本目がホスト側で弾かれる
-  if (connecting.value) return;
-  const s = systemsStore.currentSessions.find((x) => x.ref === ref);
-  if (!s) return;
-  // 既に開いているならタブへ戻す（明示的に「新しいセッション」を選んだときだけ 2 本目を開く）
-  const opened = openedSession(ref);
-  if (opened !== undefined && !force) {
-    focusSession(opened);
-    return;
-  }
-  // **監視は装置名を持たない。** 重複判定を通すと、装置名 undefined 同士で
-  // 誤って「使用中」に見えるうえ、そもそも 1 装置 1 接続の制約が無い（research F5）。
-  // 監視はサーバーのレジストリが所有するので、セッションとしては開かない
-  if (s.sessionType === "dtaqwatch") {
-    connecting.value = s.ref;
-    error.value = "";
-    try {
-      // **同じ設定の監視を二重に始めない。** 監視は消費するので、2 本掛かると
-      // 1 本ぶんのエントリを取り合って両方が欠ける（セッションで「開いていればタブへ戻す」のと同じ判断）
-      const already = watchesStore.watches.some((x) => x.ref === s.ref);
-      if (!already) await watchesStore.start(s.ref);
-      else await watchesStore.connect();
-      openFeature("watch:queues", false); // 監視コンソールを開く（開いていればそこへ移動）
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-      connecting.value = "";
-    }
-    return;
-  }
-  const busyLabel = deviceNameInUse(s.deviceName);
-  if (busyLabel !== undefined) {
-    error.value =
-      `装置名 ${s.deviceName} は「${busyLabel}」が使用中です。` +
-      `ホストは 1 つの装置に 1 接続しか許さないため、先に切断してください。`;
-    return;
-  }
-  connecting.value = s.ref;
-  error.value = "";
-  try {
-    const open = { type: "open" as const, kind: s.sessionType, session: s.ref };
-    const meta = {
-      host: selected.value?.host ?? "",
-      ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {})
-    };
-    if (s.sessionType === "printer") {
-      await openPrinterSession(open, s.name, meta, s.system, s.ref);
-    } else {
-      await openSession(open, s.name, meta, s.system, s.ref);
-    }
-    workspaceStore.showLauncher = false;
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    connecting.value = "";
-  }
-}
+const connect = openConfigured.open;
 </script>
 
 <template>

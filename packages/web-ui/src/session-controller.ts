@@ -1,4 +1,4 @@
-import type { WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
+import type { SpoolReportMsg, WsKeyField, WsOpen, WsServerMessage } from "@as400web/server";
 import { viewSettings } from "./stores/viewSettings.js";
 import type { AidKey } from "@as400web/tn5250";
 import { WsClient, wsUrl } from "./ws-client.js";
@@ -14,7 +14,8 @@ import {
   sessionsStore,
   type PcCommandView,
   type SessionState,
-  type SessionMeta
+  type SessionMeta,
+  type SpoolReportView
 } from "./stores/sessions.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
@@ -201,6 +202,23 @@ export async function openSession(
   });
 }
 
+/**
+ * 電文の帳票を画面の形へ（`20260802-printer-report-history`）。
+ *
+ * **`receivedAt` はサーバー由来を優先する。** live の push はこのあと
+ * `addReport` が「無ければ現在時刻」を押すので、版の古いサーバーでも従来どおり動く。
+ *
+ * 開き直しの配り直しでは**押さない**——いつ届いたか分からないものに現在時刻を書けば、
+ * 夜中に出た帳票が全部「いま届いた」になる。**分からないなら空**のほうが正しい。
+ */
+function toReportView(r: SpoolReportMsg): SpoolReportView {
+  return {
+    id: r.id,
+    pages: r.pages,
+    ...(r.receivedAt !== undefined ? { receivedAt: r.receivedAt } : {})
+  };
+}
+
 /** プリンターセッションを開き、stores 登録＋ワークスペース追加する（帳票を report で受信） */
 export async function openPrinterSession(
   open: WsOpen,
@@ -230,7 +248,19 @@ export async function openPrinterSession(
                 connected: true,
                 readOnly: true,
                 client,
-                reports: [],
+                // **閉じている間に届いた帳票を捨てない**（`20260802-printer-report-history`）。
+                // サーバーは `20260801-printer-attach-by-ref` から送っていたのに、
+                // ここが `[]` と書いて捨てていた——常駐が夜のうちに受け取った帳票が、
+                // 朝ブラウザを開くと 1 件も無い状態になっていた
+                reports: msg.reports.map(toReportView),
+                // **開いた直後に空のビューアを出さない。** 選ぶのは先頭＝一覧の `#1`
+                // （live の `addReport` と同じ規則。restore だけ「最新を選ぶ」にすると規則が 2 つになる）
+                ...(msg.reports[0] ? { selectedReportId: msg.reports[0].id } : {}),
+                // 累計（**サーバー側で落ちた分も含む**）。保持数との差が落ちた数
+                receivedTotal: msg.receivedTotal,
+                // **未読は 0 のまま。** ここで受け取るのは「閉じている間に届いた既存分」で、
+                // いま開いて見ているもの。`addReport` を回すと件数ぶんバッジが光り、
+                // 「新着 50 件」と嘘をつくことになる
                 // **待ち受けていなければ起動応答コードは無い**（接続していない）。
                 // `exactOptionalPropertyTypes` 下では undefined を入れられないので、キーごと落とす
                 ...(msg.startupCode !== undefined ? { startupCode: msg.startupCode } : {}),
@@ -252,7 +282,7 @@ export async function openPrinterSession(
               break;
             }
             case "report": {
-              sessionsStore.addReport(sessionId, msg.report);
+              sessionsStore.addReport(sessionId, toReportView(msg.report));
               break;
             }
             case "printer-warn": {

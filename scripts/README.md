@@ -362,3 +362,15 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 > **前の実行の残骸が装置を掴む**と何も届かないので、開始時に `ENDWTR` ＋ `CLROUTQ` する
 > （＝**そのキューのスプールを消す**。共有装置では注意）。
 > 用紙タイプはずらさない（ずらすと MSGW で止まる。それを狙うのは `research-msgw.mjs`）。
+
+`verify-printer-report-history.mjs` — **閉じている間に届いた帳票の配り直し**。
+ブラウザで開く → **WS を切る** → スプールを流す → **開き直して読める**ところまで見る。
+
+> **`WsConnection` を通す**のがこのスクリプトの要点。ほかのプリンター系は
+> `SessionManager` を直接叩くが、`20260802-printer-report-history` で壊れていたのは
+> **電文の層**（サーバーは `printer-opened.reports` に載せていたのに web-ui が捨てていた）。
+> 受け手側は vitest（`printer-report-restore.test.ts`）で、電文側をここで測る。
+>
+> 見るのは件数だけでなく**受信時刻**——`閉じた < 受信 < 開き直し` が成り立つかを確かめる。
+> 開いた時刻で押していると、この不等式が両側とも崩れる。
+> 資格情報は `passwordEnv` で env のまま渡し、設定オブジェクトに平文を置かない。

@@ -263,9 +263,22 @@ export interface WsPrinterOpened {
    * 上限（サーバー側 `REPORT_LIMIT`）を超えた古いものは落ちているので、
    * **総数は `receivedTotal` を見る**
    */
-  reports: { id: string; pages: { rows: number; cols: number; lines: string[] }[] }[];
+  reports: SpoolReportMsg[];
   /** 累計受信数（**落ちた分も含む**）。`reports.length` との差が「落ちた数」 */
   receivedTotal: number;
+}
+/**
+ * 電文に載せる 1 スプール（帳票）。`pages` は等幅グリッド（生 SCS は載せない）。
+ *
+ * **`receivedAt` は任意**（`20260802-printer-report-history`）——Electron 同梱版のように
+ * サーバーと web-ui の版がずれる経路があるので、無ければ受け手が現在時刻で押す
+ * 従来の見え方に落ちる。壊れないほうを既定にする。
+ */
+export interface SpoolReportMsg {
+  id: string;
+  pages: { rows: number; cols: number; lines: string[] }[];
+  /** サーバーが受け取った時刻（epoch ms）。**開いた時刻ではない** */
+  receivedAt?: number;
 }
 /** 1 スプールに対する自動出力の結果（成功も含む）。設定が無い側はキーを省略する */
 export interface SpoolOutputStatusMsg {
@@ -298,7 +311,7 @@ export interface WsPrinterOutputState {
 export interface WsReport {
   type: "report";
   sessionId: string;
-  report: { id: string; pages: { rows: number; cols: number; lines: string[] }[] };
+  report: SpoolReportMsg;
 }
 /**
  * PC コマンド（STRPCCMD）の実行状況。**サーバー発のみ**（開始時と完了時の 2 回）。
