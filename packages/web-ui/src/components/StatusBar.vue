@@ -165,7 +165,9 @@ const macroStop = computed<string | undefined>(() => {
       title="操作ログ"
       @click="emit('toggle-log')"
     >
-      {{ logOpen ? "▾" : "▴" }} ログ <span class="cnt">{{ logCount }}</span>
+      <!-- 三角は「その他」と同じ字にする（`▴`/`▾` は SMALL TRIANGLE で一回り小さく、
+           並べると揃って見えない。利用者の指摘）。`SqlPane` の「実行ログ」も同じ -->
+      {{ logOpen ? "▼" : "▲" }} ログ <span class="cnt">{{ logCount }}</span>
     </button>
     <span class="ime" :class="{ ng: !inputState.ok }" :title="inputState.ok ? 'この位置に入力できます' : '入力できません'">
       ⌨ {{ inputState.label }}

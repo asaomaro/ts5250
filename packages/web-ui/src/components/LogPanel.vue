@@ -106,7 +106,19 @@ watch(
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 5;
+  /**
+   * **画面の中に描くものより上。**
+   *
+   * `.grid` は `position: relative` でも `z-index: auto` なのでスタッキングコンテキストを
+   * 作らない——中の重ねもの（カーソル 4 / option のボタン 6 / option のリスト **7**）が
+   * そのままこの階層で比べられる。5 のままだと option の▾がログの上に透けた（利用者の指摘）。
+   *
+   * **`.grid` 側を `isolation: isolate` で閉じる手は採らない。** 透かし（`.wm`、2）は
+   * 「文字より上・矩形選択(3)/カーソル(4) より下」に意図して置かれており、閉じるとその意図が壊れる。
+   *
+   * 画面の中の最大は 7。**ここを下げるなら、まず 7 を確かめること。**
+   */
+  z-index: 10;
   border-top: 1px solid var(--crt-line);
   background: color-mix(in srgb, var(--crt-bezel) 94%, transparent);
   backdrop-filter: blur(2px);

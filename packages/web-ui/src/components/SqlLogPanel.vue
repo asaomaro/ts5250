@@ -94,7 +94,8 @@ function oneLine(sql: string): string {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 5;
+  /* `LogPanel` と揃える（同じ作法で開くものなので、重なり順も同じにしておく） */
+  z-index: 10;
   height: 50%;
   display: flex;
   flex-direction: column;

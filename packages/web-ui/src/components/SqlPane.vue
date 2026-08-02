@@ -717,7 +717,8 @@ function download(): void {
         title="SQL 実行ログ（この画面の中だけの記録です）"
         @click="logOpen = !logOpen"
       >
-        {{ logOpen ? "▾" : "▴" }} 実行ログ <span class="cnt">{{ logEntries.length }}</span>
+        <!-- 三角は `StatusBar` のログと同じ字（`▴`/`▾` は一回り小さく揃って見えない） -->
+        {{ logOpen ? "▼" : "▲" }} 実行ログ <span class="cnt">{{ logEntries.length }}</span>
       </button>
     </footer>
   </div>

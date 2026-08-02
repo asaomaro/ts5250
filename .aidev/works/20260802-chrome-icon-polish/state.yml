@@ -1,0 +1,8 @@
+schema: 3
+slug: chrome-icon-polish
+current: deliver
+approved: [requirement, spec, plan, coding, test, review, deliver]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

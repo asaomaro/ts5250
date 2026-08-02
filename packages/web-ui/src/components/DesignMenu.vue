@@ -47,8 +47,10 @@ onBeforeUnmount(() => {
   <div class="designer">
     <button class="dz-btn" :aria-expanded="open" aria-haspopup="menu" title="デザイン" @click.stop="toggleHeaderMenu(MENU_ID)">
       <span class="swatch" :style="{ background: current.swatch }"></span>
+      <!-- **三角は出さない**（利用者の指示）。ヘッダーの他のメニュー（⚙ 画面・マクロ）も
+           持っていないし、押せば開くことは見れば分かる。開くボタンであることは
+           `aria-haspopup` / `aria-expanded` が支援技術へ伝える。 -->
       <span class="dz-name">{{ current.name }}</span>
-      <span class="chev">▾</span>
     </button>
     <div v-if="open" class="dz-menu" role="menu">
       <div class="dz-sec">端末</div>
@@ -118,10 +120,6 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
   flex: none;
-}
-.chev {
-  color: var(--muted);
-  font-size: 9px;
 }
 .dz-menu {
   position: absolute;

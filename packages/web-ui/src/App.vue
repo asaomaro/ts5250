@@ -263,7 +263,9 @@ onBeforeUnmount(() => {
           title="今の画面を HTML で保存する（見えているとおり・単体で開ける）"
           @click="saveScreenHtml"
         >
-          🖹 HTML
+          <!-- 印は JSONL の書き出し（`LogPanel`）と揃える——どちらも
+               「ファイルを落とす」操作。`🖹` は文書の印で、操作を表していない -->
+          ⬇ HTML
         </button>
         <!-- マクロは 5250 セッション専用（記録も再生も画面操作なので） -->
         <MacroMenu v-if="activeIsEmulator" :session-id="activeSessionId" />
