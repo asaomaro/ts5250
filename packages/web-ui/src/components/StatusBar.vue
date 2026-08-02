@@ -225,6 +225,10 @@ const macroStop = computed<string | undefined>(() => {
           **単独では送らない。** 押した状態を保ち、次のファンクションキーと組み合わせる
           （`Ctrl+F1` 等はキー設定で意味が決まる）。
         -->
+        <!--
+          **案内の文字は出さない**（`20260802-key-palette-layout` の続き・利用者の指示）。
+          押されていることは塗りつぶしで分かるので、文字を足すと**折り返しの要因になるだけ**。
+        -->
         <button
           class="fk mod"
           :class="{ on: mod === 'ctrl' }"
@@ -258,7 +262,6 @@ const macroStop = computed<string | undefined>(() => {
     キー設定（`ctrl+F1` 等）がボタンからも同じように効く。
   -->
   <div v-if="padOpen" class="keypad">
-    <span v-if="mod" class="modhint">{{ mod === "ctrl" ? "Ctrl" : "Alt" }} ＋ ファンクションキー</span>
     <button v-for="k in fnKeys" :key="k" class="fk" @click="padFn(k)">{{ k }}</button>
   </div>
 </template>
@@ -287,11 +290,6 @@ const macroStop = computed<string | undefined>(() => {
 .fk:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-}
-.modhint {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--t-green);
 }
 /* 入力できない状態は色で分かるようにする（OIA と同じ役目） */
 .ime {
