@@ -88,7 +88,12 @@ async function call(name: string, args: Record<string, unknown>, user?: AuthUser
   const client = await connect(user);
   return (await client.callTool({ name, arguments: args })) as {
     isError?: boolean;
-    structuredContent?: { error?: { code?: string; message?: string } };
+    /**
+     * **エラー時は `structuredContent` を返さない。**
+     * `outputSchema` を持つツールでエラーを返すと、MCP クライアントが
+     * スキーマ検証で例外を投げて呼び出しごと失敗するため（`errorResult` の注記）。
+     * 検証はテキストに対して行う。
+     */
     content?: { text: string }[];
   };
 }
@@ -137,14 +142,14 @@ describe("接続先の指定", () => {
   it("system も session も無ければ CONFIG_ERROR", async () => {
     const r = await call("host_sql", { sql: "SELECT 1 FROM SYSIBM.SYSDUMMY1" });
     expect(r.isError).toBe(true);
-    expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
+    expect(r.content?.[0]?.text).toMatch(new RegExp(`^${"CONFIG_ERROR"}: `, "u"));
   });
 
   it("存在しない参照は解決に失敗する", async () => {
     // ConfigResolver は未知の参照を SESSION_NOT_FOUND として返す（未指定の CONFIG_ERROR と区別される）
     const r = await call("host_command", { system: "srv:nosuch", command: "DSPJOB" });
     expect(r.isError).toBe(true);
-    expect(r.structuredContent?.error?.code).toBe("SESSION_NOT_FOUND");
+    expect(r.content?.[0]?.text).toMatch(new RegExp(`^${"SESSION_NOT_FOUND"}: `, "u"));
   });
 });
 
@@ -176,8 +181,8 @@ describe("資格情報を持たない接続設定", () => {
     it(`${name}: 理由の分かる CONFIG_ERROR を返す`, async () => {
       const r = await call(name, { system: "srv:noauth", ...argsFor[name] });
       expect(r.isError).toBe(true);
-      expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
-      expect(r.structuredContent?.error?.message).toMatch(/ユーザーとパスワード/);
+      expect(r.content?.[0]?.text).toMatch(new RegExp(`^${"CONFIG_ERROR"}: `, "u"));
+      expect(r.content?.[0]?.text).toMatch(/ユーザーとパスワード/);
     });
   }
 });
@@ -193,8 +198,8 @@ describe("host_dtaq_create の整合チェック（HTTP ルートと同一に弾
       type: "KEYED"
     });
     expect(r.isError).toBe(true);
-    expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
-    expect(r.structuredContent?.error?.message).toMatch(/keyLength/);
+    expect(r.content?.[0]?.text).toMatch(new RegExp(`^${"CONFIG_ERROR"}: `, "u"));
+    expect(r.content?.[0]?.text).toMatch(/keyLength/);
   });
 
   it("非 KEYED で keyLength ありは CONFIG_ERROR", async () => {
@@ -207,8 +212,8 @@ describe("host_dtaq_create の整合チェック（HTTP ルートと同一に弾
       keyLength: 4
     });
     expect(r.isError).toBe(true);
-    expect(r.structuredContent?.error?.code).toBe("CONFIG_ERROR");
-    expect(r.structuredContent?.error?.message).toMatch(/keyLength/);
+    expect(r.content?.[0]?.text).toMatch(new RegExp(`^${"CONFIG_ERROR"}: `, "u"));
+    expect(r.content?.[0]?.text).toMatch(/keyLength/);
   });
 });
 

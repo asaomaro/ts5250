@@ -46,6 +46,11 @@ const FEATURES = [
   { id: "list:objects", name: "オブジェクト", desc: "ライブラリー内のオブジェクトを一覧する。" },
   { id: "sql:query", name: "SQL", desc: "SELECT を実行して結果を見る。CSV でダウンロードできる。" },
   {
+    id: "plan:explain",
+    name: "実行計画",
+    desc: "SQL の実行計画をグラフで見る。索引の助言も出る。一覧は特権が要る。"
+  },
+  {
     id: "transfer:data",
     name: "データ転送",
     desc: "表を CSV に落とす / CSV を表に取り込む。SQL を書かずに済む。"

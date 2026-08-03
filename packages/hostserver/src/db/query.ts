@@ -232,11 +232,25 @@ export async function queryLimited(
  * ⚠ **返したジェネレータを最後まで回すか `return()` すること。**
  * 放置するとカーソルと接続が開いたままになる。
  */
+export interface OpenedQuery {
+  columns: ColumnMeta[];
+  rows: AsyncGenerator<Row, void, undefined>;
+  /**
+   * カーソルを閉じて接続の占有を解く。**冪等**（何度呼んでもよい）。
+   *
+   * **`rows` を 1 度も回さないなら、これを呼ぶこと。** ジェネレータは本体が開始するまで
+   * `finally` を実行しないため、`rows.return()` だけでは解放されない
+   * （`20260802-sql-visual-explain` の research F9 で実測。以降その接続のすべての要求が
+   * 「another query is in progress」になった）。
+   */
+  close: () => Promise<void>;
+}
+
 export async function openQuery(
   conn: DbConnection,
   sql: string,
   opts: { blockSize?: number } = {}
-): Promise<{ columns: ColumnMeta[]; rows: AsyncGenerator<Row, void, undefined> }> {
+): Promise<OpenedQuery> {
   const release = conn.acquire();
   let format: ResultFormat;
   try {
@@ -250,15 +264,26 @@ export async function openQuery(
     throw e;
   }
   const blockSize = opts.blockSize ?? DEFAULT_BLOCK_SIZE;
+  let closed = false;
+  async function close(): Promise<void> {
+    if (closed) return;
+    closed = true;
+    try {
+      await closeCursor(conn);
+    } finally {
+      // **`release` は finally に置く。** 以前は `closeCursor` の後に並べていたので、
+      // カーソルを閉じる要求が失敗すると占有が解けずに接続が死んでいた
+      release();
+    }
+  }
   async function* iterate(): AsyncGenerator<Row, void, undefined> {
     try {
       yield* fetchAll(conn, format, blockSize);
     } finally {
-      await closeCursor(conn);
-      release();
+      await close();
     }
   }
-  return { columns: format.columns, rows: iterate() };
+  return { columns: format.columns, rows: iterate(), close };
 }
 
 /** SELECT を実行して 1 行ずつ返す（大きな結果セット向け） */

@@ -39,7 +39,23 @@ export {
 
 // database サーバー（SQL）
 export { DbConnection, type DbConnectOptions } from "./db/db-connection.js";
-export { openQuery } from "./db/query.js";
+export { openQuery, type OpenedQuery } from "./db/query.js";
+export {
+  buildQueryPlan,
+  buildCreateIndexStatement,
+  groupByStatement,
+  MONITOR_COLUMNS,
+  type QueryPlan,
+  type PlanBlock,
+  type PlanNode,
+  type PlanNodeKind,
+  type PlanNodeCategory,
+  type PlanAttribute,
+  type PlanSummary,
+  type PlanCapture,
+  type IndexAdvice,
+  type MonitorRecord
+} from "./db/plan-model.js";
 export { type LobOptions } from "./db/query.js";
 export { retrieveLob, freeLob, DEFAULT_LOB_MAX_BYTES, type RetrievedLob } from "./db/lob.js";
 export { query, stream, SqlError, type Row, type QueryResult } from "./db/query.js";
@@ -168,3 +184,18 @@ export {
   MarkerEncodeError,
   type MarkerRow
 } from "./db/marker-encode.js";
+export {
+  capturePlan,
+  readMonitorRecords,
+  monitorTableName,
+  type CaptureMode,
+  type CaptureOptions,
+  type CaptureResult
+} from "./db/plan-capture.js";
+export {
+  listPlansFromCache,
+  planFromCache,
+  type PlanListItem,
+  type PlanListResult
+} from "./db/plan-cache.js";
+export { pickStatementRecords } from "./db/plan-model.js";

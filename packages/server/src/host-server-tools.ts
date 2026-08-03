@@ -15,7 +15,17 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { As400Error } from "@ts5250/base";
-import { listJobs, listObjects, listUsers, queryLimited, dtaqDecodeEbcdic, type ProgramParameter } from "@ts5250/hostserver";
+import {
+  listJobs,
+  listObjects,
+  listUsers,
+  queryLimited,
+  dtaqDecodeEbcdic,
+  capturePlan,
+  listPlansFromCache,
+  type ProgramParameter,
+  type QueryPlan
+} from "@ts5250/hostserver";
 import { renderSpoolHtml } from "@ts5250/scs";
 import { type ConnectOptions } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
@@ -783,6 +793,146 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         try {
           const items = await listUsers(conn, compact(input.filter), { max: input.max ?? 200 });
           return jsonResult({ items, count: items.length });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  // ---- 実行計画（Visual Explain 相当） ----
+
+  /**
+   * 計画を MCP へ返す形に畳む。
+   *
+   * **表を丸ごと返さない。** ノードは既定 50 件までにし、切ったことは `truncated` で示す
+   * （黙って切ると「これで全部」と読まれる）。属性は `detail` を指定したときだけ載せる
+   * ——1 ノードあたり最大 10 項目あり、既定で付けると文脈を食い潰す。
+   */
+  const MAX_PLAN_NODES = 50;
+  const toPlanJson = (plan: QueryPlan, detail: boolean) => {
+    const flat = plan.blocks.flatMap((b) => b.nodes.map((n) => ({ block: b.number, node: n })));
+    const shown = flat.slice(0, MAX_PLAN_NODES);
+    return {
+      statement: plan.statement,
+      captured: plan.captured,
+      at: plan.at,
+      ...(plan.job ? { job: plan.job } : {}),
+      summary: plan.summary,
+      nodes: shown.map(({ block, node }) => ({
+        block,
+        kind: node.kind,
+        recordType: node.recordType,
+        label: node.label,
+        ...(node.table ? { table: `${node.table.schema}.${node.table.name}` } : {}),
+        ...(node.index ? { index: node.index.name } : {}),
+        ...(node.totalRows !== undefined ? { totalRows: node.totalRows } : {}),
+        ...(node.estimatedRows !== undefined ? { estimatedRows: node.estimatedRows } : {}),
+        ...(node.estimatedMs !== undefined ? { estimatedMs: node.estimatedMs } : {}),
+        ...(node.reasonCode ? { reasonCode: node.reasonCode } : {}),
+        ...(detail ? { attributes: node.attributes } : {})
+      })),
+      nodeCount: flat.length,
+      truncated: flat.length > shown.length,
+      advice: plan.advice.map((a) => ({
+        table: `${a.table.schema}.${a.table.name}`,
+        keyColumns: a.keyColumns,
+        createStatement: a.createStatement,
+        ...(a.totalRows !== undefined ? { totalRows: a.totalRows } : {})
+      })),
+      /** **未対応の記録種別を黙って捨てない**（版数差がここに出る。7.5 の 3015 等） */
+      unknownRecordTypes: plan.unknownRecordTypes
+    };
+  };
+
+  server.registerTool(
+    "host_sql_explain",
+    {
+      description:
+        "SQL の実行計画（アクセスプラン）を採って返す。遅い SQL の原因（表全体の走査・索引の未使用・" +
+        "推定行数と実測の乖離）を調べるために使う。" +
+        "**自ジョブの DB モニターで採るので特殊権限は要らない。**" +
+        "mode=run は文を実行してから計画を採る。mode=no-rows は結果行を返さずに計画だけ採る" +
+        "（**文はホストで実行される**——「実行しない」ではない。SELECT 系のみ）。" +
+        "**IBM i には『実行せずに計画だけ』の経路が無い**ため、UPDATE/DELETE を安全に調べることはできない。" +
+        "**既定は no-rows**——更新系の文は既定では拒否され、調べるには mode=run を明示して" +
+        "実際に実行する必要がある（取り消せないので呼ぶ側が明示的に選ぶ）。" +
+        "推奨インデックスがあれば advice に CREATE INDEX 文まで入れて返す（実行はしない）。",
+      inputSchema: {
+        ...targetShape,
+        sql: z.string(),
+        mode: z.enum(["run", "no-rows"]).optional(),
+        maxRows: z.number().int().positive().max(MAX_LIMIT).optional(),
+        /** ノードごとの属性まで返す。既定は返さない（トークン量を抑える） */
+        detail: z.boolean().optional()
+      },
+      // **返す欄をすべて宣言する。** MCP SDK は structuredContent を outputSchema で
+      // **厳密に検証**し、宣言されていない欄が 1 つでもあると
+      // `Structured content does not match the tool's output schema` で呼び出しごと落ちる。
+      // `captured` / `at` / `job` / `warnings` の宣言漏れで実際に落ちた（実機の MCP 検証で判明）。
+      outputSchema: {
+        statement: z.string(),
+        captured: z.string(),
+        at: z.string(),
+        job: z.string().optional(),
+        summary: z.record(z.string(), z.unknown()),
+        nodes: z.array(z.record(z.string(), z.unknown())),
+        nodeCount: z.number(),
+        truncated: z.boolean(),
+        advice: z.array(z.record(z.string(), z.unknown())),
+        unknownRecordTypes: z.array(z.number()),
+        warnings: z.array(z.string()).optional()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_sql_explain" }, async () => {
+        const conn = await openDb(target(input));
+        try {
+          const captured = await capturePlan(conn, input.sql, {
+            // **既定は no-rows。** run を既定にすると「この DELETE を explain して」で
+            // **本当に削除が走る**。行を返さない側を既定にすれば、更新系は
+            // `capturePlan` に拒否され、実行するには呼ぶ側が mode=run を明示することになる
+            mode: input.mode ?? "no-rows",
+            limit: input.maxRows ?? 200,
+            at: new Date().toISOString()
+          });
+          return jsonResult({
+            ...toPlanJson(captured.plan, input.detail ?? false),
+            ...(captured.warnings.length > 0 ? { warnings: captured.warnings } : {})
+          });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_plan_list",
+    {
+      description:
+        "プランキャッシュ（システム上に残っている実行計画）の上位 N を実行時間順に一覧する。" +
+        "自分が流していない SQL も見えるので、遅い処理を探すのに使う。" +
+        "**特殊権限（*JOBCTL 等）が要る。** 権限が無い接続では available:false と理由を返す" +
+        "（エラーにはしない）。個々の計画の中身は host_sql_explain とは別経路なので、" +
+        "ここでは文テキストと対象表までを返す。",
+      inputSchema: { ...targetShape, topN: z.number().int().positive().max(100).optional() },
+      outputSchema: {
+        available: z.boolean(),
+        reason: z.string().optional(),
+        items: z.array(z.record(z.string(), z.unknown())),
+        count: z.number()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_plan_list" }, async () => {
+        const conn = await openDb(target(input));
+        try {
+          const result = await listPlansFromCache(conn, input.topN ?? 20);
+          return jsonResult({
+            available: result.available,
+            ...(result.reason ? { reason: result.reason } : {}),
+            items: result.items,
+            count: result.items.length
+          });
         } finally {
           conn.close();
         }

@@ -1,0 +1,10 @@
+schema: 3
+slug: sql-visual-explain
+current: deliver
+approved: [requirement, research, spec, design, plan, coding, test, review, walkthrough, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+subtasks: [01-foundation, 02-capture, 03-ui]
+activeSubtask: done

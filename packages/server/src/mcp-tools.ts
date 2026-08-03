@@ -210,25 +210,40 @@ function fmtOpts(input: {
  * エラーを MCP の isError レスポンスに変換する。
  *
  * `SqlError` / `CommandError` は **診断に効く追加情報を型として持っている**ため、
- * code/message に潰さず error に載せる（SQLCODE を見ないと文法誤りと権限不足が区別できない）。
- * 5250 系ツールの既存の応答形は変えていない（フィールドの追加のみ）。
+ * code/message に潰さず載せる（SQLCODE を見ないと文法誤りと権限不足が区別できない）。
+ *
+ * ## ⚠ エラー時に `structuredContent` を返してはならない
+ *
+ * 以前は `structuredContent: { error: … }` を返していたが、**`outputSchema` を宣言している
+ * ツールがエラーを返すと、MCP クライアント側が例外を投げて呼び出しごと失敗していた**。
+ *
+ * SDK は `structuredContent` があれば **`isError` に関わらず** `outputSchema` で検証する
+ * （`@modelcontextprotocol/sdk` の `client/index.js`。コメントは「エラー時は検証しない」と
+ * 書いてあるが、実装は `if (result.structuredContent)` だけを見ている）。
+ * エラーの形（`{error:…}`）は当然どのツールのスキーマにも合わないので、
+ * `InvalidParams` になる。
+ *
+ * **`listTools()` を呼んだクライアントでだけ起きる**ため気づきにくい——検証子はツール一覧から
+ * 作られるので、一覧を取らないクライアントでは素通りする。実クライアントは必ず一覧を取る。
+ * `20260802-sql-visual-explain` の MCP 実機検証で `host_sql` の誤り経路を叩いて判明した。
+ *
+ * よって**構造化データは載せず、テキストに畳む**（MCP の `isError` は本来テキストで伝える形）。
+ * 追加情報は読めるようにテキストへ併記する。
  */
 export function errorResult(err: unknown) {
   const code = err instanceof As400Error ? err.code : "INTERNAL_ERROR";
   const message = err instanceof Error ? err.message : String(err);
-  const detail: Record<string, unknown> = {};
+  const detail: string[] = [];
   if (err instanceof SqlError) {
-    detail["sqlCode"] = err.sqlCode;
-    detail["sqlState"] = err.sqlState;
+    detail.push(`SQLCODE=${err.sqlCode}`, `SQLSTATE=${err.sqlState}`);
   }
   if (err instanceof CommandError && err.primary) {
-    detail["messageId"] = err.primary.id;
-    detail["messageText"] = err.primary.text;
+    detail.push(`messageId=${err.primary.id}`, `messageText=${err.primary.text}`);
   }
+  const suffix = detail.length > 0 ? ` (${detail.join(" ")})` : "";
   return {
     isError: true as const,
-    content: [{ type: "text" as const, text: `${code}: ${message}` }],
-    structuredContent: { error: { code, message, ...detail } }
+    content: [{ type: "text" as const, text: `${code}: ${message}${suffix}` }]
   };
 }
 

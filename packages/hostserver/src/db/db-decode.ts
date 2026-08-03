@@ -213,10 +213,32 @@ function inlineLob(meta: ColumnMeta, byteLength: number, value: string | Uint8Ar
   return { kind: "lob", locator: 0, maxSize: meta.lobMaxSize ?? 0, byteLength, value };
 }
 
-/** SBCS / 混在 CCSID のテキスト。UTF-16 の CCSID は直接読む */
+/**
+ * SBCS / 混在 CCSID のテキスト。UTF-16 の CCSID は直接読む。
+ *
+ * **バイナリ CCSID（`0` / `65535`）は 16 進文字列にする。**
+ * `isBinaryCcsid` は `decodeLobBytes`（`:275`）が既に通していたのに、**文字列列だけ取り残されていて**
+ * `codecForCcsid` が `RangeError: unsupported CCSID 65535` を投げていた
+ * （`As400Error` ではないので分類不能なエラーとして素通りする）。
+ * DB モニターの表（`QQJFLD` / `QXC43` が `CHAR` の 65535）へ `SELECT *` して踏んだ
+ * ——`20260802-sql-visual-explain` の research F8。
+ *
+ * **`Uint8Array` では返さない。** `DbValue` に足すと web-ui の描画・CSV 出力・MCP の JSON 直列化まで
+ * 波及する（`JSON.stringify(new Uint8Array([1]))` は `{"0":1}` に化ける）。
+ * `FOR BIT DATA` の慣習表現である 16 進なら、既存の経路がそのまま通る。
+ * `LobPlaceholder` も使わない——ロケーター・未取得理由を持つ **LOB 専用の型**で、意味が壊れる。
+ */
 function decodeText(bytes: Uint8Array, ccsid: number): string {
+  if (isBinaryCcsid(ccsid)) return toHex(bytes);
   if (UTF16_CCSIDS.has(ccsid)) return decodeUtf16Be(bytes);
   return codecForCcsid(ccsid).decode(bytes);
+}
+
+/** バイト列を大文字の 16 進にする（区切りなし） */
+function toHex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0").toUpperCase();
+  return out;
 }
 
 /** GRAPHIC / VARGRAPHIC。純 DBCS か UTF-16 のいずれか */

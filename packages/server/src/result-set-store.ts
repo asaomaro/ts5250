@@ -32,6 +32,16 @@ export interface ResultSet {
   columns: ColumnMeta[];
   /** 次の行を取り出す。カーソルは開いたまま */
   rows: AsyncGenerator<Row, void, undefined>;
+  /**
+   * カーソルを閉じる（`openQuery` が返す冪等な `close`）。
+   *
+   * **`rows.return()` に頼らない。** ジェネレータは本体が開始するまで `finally` を実行しないので、
+   * **1 度も反復していない結果セットは `return()` だけでは解放されない**
+   * （`20260802-sql-visual-explain` の research F9 で実測）。
+   * 現状は `host-sql.ts` が開いた直後に必ず 1 ページ読むので潜在的だったが、
+   * 「開くだけ開いて読まない」経路が増えると顕在化する。
+   */
+  closeCursor?: () => Promise<void>;
   conn: DbConnection;
   /**
    * 読み終わった接続の始末。既定は閉じる。
@@ -72,6 +82,8 @@ export class ResultSetStore {
     owner: string | undefined;
     columns: ColumnMeta[];
     rows: AsyncGenerator<Row, void, undefined>;
+    /** `openQuery` の冪等な `close`。渡すと 1 度も反復していなくても確実に解放できる */
+    closeCursor?: () => Promise<void>;
     conn: DbConnection;
     release?: (conn: DbConnection) => void;
   }): ResultSet {
@@ -88,6 +100,7 @@ export class ResultSetStore {
       owner: opts.owner,
       columns: opts.columns,
       rows: opts.rows,
+      ...(opts.closeCursor ? { closeCursor: opts.closeCursor } : {}),
       conn: opts.conn,
       release: opts.release ?? ((c) => c.close()),
       done: false,
@@ -162,12 +175,16 @@ export class ResultSetStore {
       }
     };
     log.debug(`closing result set ${id} (${this.sets.size} open)`);
+    // **`closeCursor` があればそちらを使う。** `rows.return()` は、1 度も反復していない
+    // ジェネレータでは `finally` を走らせないため解放されない（research F9）
+    const shut = (): Promise<unknown> =>
+      set.closeCursor ? set.closeCursor() : set.rows.return(undefined);
     if (opts.hard) {
-      void set.rows.return(undefined).catch(() => undefined);
+      void shut().catch(() => undefined);
       hardClose();
       return Promise.resolve();
     }
-    return set.rows.return(undefined).then(
+    return shut().then(
       () => set.release(set.conn),
       () => hardClose()
     );

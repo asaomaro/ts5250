@@ -98,3 +98,39 @@ export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてく
  */
 export const MSG_SYSTEM_GONE =
   "このタブのシステムは設定から削除されました。操作できません。";
+
+// ---- 実行計画（Visual Explain 相当。`20260802-sql-visual-explain`） ----
+
+/**
+ * 採取モードのラベル。
+ *
+ * **「実行しない」と書かない。** IBM i には文を実行せずに計画だけ得る経路が無く
+ * （research F7: prepare だけでは最適化記録が 0 件、最適化は open の時点で起きる）、
+ * `no-rows` は**行を返さないだけで文はホストで実行される**。
+ * できないことを匂わせる文言にすると、更新系でも安全だと誤解される。
+ */
+export const MSG_PLAN_MODE_RUN = "実行して計画";
+export const MSG_PLAN_MODE_NO_ROWS = "行を返さず計画";
+export const MSG_PLAN_MODE_NO_ROWS_HINT =
+  "結果行を返さずに計画だけ取ります（文はホストで実行されます。SELECT 系のみ）";
+export const MSG_PLAN_MODE_RUN_HINT = "文を実行してから計画を取ります";
+
+/** 索引の作成は取り消せない。**文を見せてから確認する** */
+export const MSG_PLAN_CREATE_INDEX_CONFIRM =
+  "この索引を作成します。ホスト上の変更で取り消せません。実行してよろしいですか";
+
+/** プランキャッシュを参照できないとき、履歴側へ逃がす案内 */
+export const MSG_PLAN_CACHE_FALLBACK = "このアプリで採った計画は「実行履歴」から見られます";
+
+/** 未対応の記録種別。**警告にしない**（毎回出ると版数差の信号が埋もれる） */
+export const MSG_PLAN_UNKNOWN_RECORDS = "この計画に含まれる未対応の記録種別";
+
+/** 保存の上限で古いものを落としたとき。**黙って消さない** */
+export const MSG_PLAN_SAVE_DROPPED = "保存の上限を超えたため、古い計画を削除しました";
+
+/**
+ * ブラウザに書き出せなかったとき。**「保存しました」で終わらせない**
+ * ——次に開いたときに黙って消えていることになる。
+ */
+export const MSG_PLAN_SAVE_NOT_PERSISTED =
+  "この計画をブラウザに保存できませんでした（容量が上限に達している可能性があります）。JSON で書き出してください";

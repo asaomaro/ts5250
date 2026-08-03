@@ -191,3 +191,74 @@ describe("所有", () => {
     expect(store.get(set.id, undefined)).toBeDefined();
   });
 });
+
+describe("closeCursor（1 度も読まずに閉じる経路）", () => {
+  /**
+   * `20260802-sql-visual-explain` の research F9: ジェネレータは**本体が開始するまで
+   * `finally` を実行しない**ので、1 度も反復していない結果セットは
+   * `rows.return()` だけではカーソルも接続の占有も解放されない。
+   *
+   * `openQuery` が返す冪等な `close` を預かる経路を足したので、そちらが使われることを固定する。
+   */
+  function neverStarted(): { gen: AsyncGenerator<Row, void, undefined>; started: () => boolean } {
+    let started = false;
+    async function* g(): AsyncGenerator<Row, void, undefined> {
+      started = true;
+      yield { ID: 1 } as Row;
+    }
+    return { gen: g(), started: () => started };
+  }
+
+  it("closeCursor を渡すと、1 度も読まずに閉じてもそれが呼ばれる", async () => {
+    const store = new ResultSetStore();
+    const { gen, started } = neverStarted();
+    const closeCursor = vi.fn(async () => undefined);
+    const { conn } = fakeConn();
+    const released: DbConnection[] = [];
+    const set = store.open({
+      owner: undefined,
+      columns,
+      rows: gen,
+      closeCursor,
+      conn,
+      release: (c) => released.push(c)
+    });
+
+    await store.close(set.id);
+
+    expect(closeCursor).toHaveBeenCalledTimes(1);
+    // **ジェネレータは開始していない**（＝ rows.return() では解放できなかった状況）
+    expect(started()).toBe(false);
+    expect(released).toEqual([conn]);
+  });
+
+  it("closeCursor が無ければ従来どおり rows.return() を使う（後方互換）", async () => {
+    const store = new ResultSetStore();
+    const { conn } = fakeConn();
+    const released: DbConnection[] = [];
+    const set = store.open({
+      owner: undefined,
+      columns,
+      rows: rowsOf(3),
+      conn,
+      release: (c) => released.push(c)
+    });
+
+    await store.next(set, 1);
+    await store.close(set.id);
+
+    expect(released).toEqual([conn]);
+  });
+
+  it("hard クローズでも closeCursor を通す", async () => {
+    const store = new ResultSetStore();
+    const closeCursor = vi.fn(async () => undefined);
+    const { conn, closed } = fakeConn();
+    const set = store.open({ owner: undefined, columns, rows: rowsOf(3), closeCursor, conn });
+
+    await store.close(set.id, { hard: true });
+
+    expect(closeCursor).toHaveBeenCalledTimes(1);
+    expect(closed()).toBe(true);
+  });
+});

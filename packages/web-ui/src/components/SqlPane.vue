@@ -9,6 +9,15 @@ import { csvBlob, csvFileName, toCsv } from "../csv.js";
 // 型は在り処（`@ts5250/hostserver`）から。`import type` なのでバンドルに入らない
 import type { LobPlaceholder } from "@ts5250/hostserver";
 import { splitSqlStatements, summarizeSql } from "@ts5250/base";
+import PlanViewer from "./PlanViewer.vue";
+import { explainSql, runSql, type CaptureMode, type IndexAdvice, type QueryPlan } from "../planApi.js";
+import { pushHistory } from "../planStore.js";
+import {
+  MSG_PLAN_MODE_RUN,
+  MSG_PLAN_MODE_NO_ROWS,
+  MSG_PLAN_MODE_RUN_HINT,
+  MSG_PLAN_MODE_NO_ROWS_HINT
+} from "../composables/opMessages.js";
 import SqlLogPanel from "./SqlLogPanel.vue";
 import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
@@ -125,6 +134,63 @@ const lastLog = computed<SqlLogEntry | undefined>(() => logEntries.value[logEntr
 const canRun = computed(
   () => !loading.value && sql.value.trim().length > 0 && Boolean(props.system)
 );
+
+// ---- 実行計画（Visual Explain 相当。`20260802-sql-visual-explain`） ----
+
+/** 採った計画。結果タブの隣の「計画」タブに出す */
+const plan = ref<QueryPlan | undefined>();
+const planBusy = ref(false);
+const planError = ref("");
+const showPlan = ref(false);
+
+/**
+ * `行を返さず計画` は SELECT 系でしか使えない（`capturePlan` が非クエリ文を拒む）が、
+ * **こちらの推測でボタンを塞がない。**
+ *
+ * `docs/UI-DESIGN.md` /（AGENTS.md「UI デザインガイド」）:
+ * 「環境の検出結果で選択肢を塞がない。**印を出すに留め、選ばせて結果で分からせる**」。
+ * 文種の判定は本来 hostserver 側にある純関数で、web-ui に写すと**同じ判定が 2 か所**になる
+ * （`db-decode.ts` がまさにそれで事故った）。サーバーは
+ * 「行を返さずに計画だけ取るモードは SELECT 系の文でのみ使えます」と明示して断るので、
+ * **押せるようにしておいて結果で分からせる**方が、判定の重複も塞ぎ過ぎも避けられる。
+ */
+
+/**
+ * 計画を採る。
+ *
+ * **`no-rows` を「実行しない」と呼ばない**——IBM i に文を実行せずに計画だけ得る経路は無く
+ * （research F7）、行を返さないだけで文はホストで実行される。
+ */
+async function explain(mode: CaptureMode): Promise<void> {
+  if (!props.system) return;
+  const statements = splitSqlStatements(sql.value);
+  // 複数文のときは**先頭の 1 文だけ**を対象にする（どれの計画か曖昧にしない）
+  const target = statements[0]?.sql ?? sql.value;
+  planBusy.value = true;
+  planError.value = "";
+  try {
+    const res = await explainSql({ source: props.system, sql: target, mode, maxRows: pageSize.value });
+    plan.value = res.plan;
+    showPlan.value = true;
+    pushHistory(res.plan);
+    // **警告を握り潰さない**（モニターが残った可能性など）
+    if (res.warnings?.length) planError.value = res.warnings.join(" / ");
+  } catch (e) {
+    planError.value = e instanceof Error ? e.message : String(e);
+    showPlan.value = true;
+  } finally {
+    planBusy.value = false;
+  }
+}
+
+/**
+ * 助言の索引を作る。**専用の入口を作らず既存の SQL 経路へ送る**——
+ * SQL 欄に同じ文を打てば通るので新しい権限を増やさず、監査もそのまま乗る。
+ */
+async function createIndex(advice: IndexAdvice): Promise<void> {
+  if (!props.system) return;
+  await runSql({ source: props.system, sql: advice.createStatement });
+}
 
 /**
  * 実行ログ。**フッターのボタンで開く**（5250 セッションの操作ログと同じ作法）。
@@ -596,6 +662,16 @@ function download(): void {
         LOB の中身も取得
       </label>
       <button :disabled="!canRun" @click="execute">{{ loading ? "実行中…" : "実行" }}</button>
+      <button :disabled="!canRun || planBusy" :title="MSG_PLAN_MODE_RUN_HINT" @click="explain('run')">
+        {{ planBusy ? "計画を取得中…" : MSG_PLAN_MODE_RUN }}
+      </button>
+      <button
+        :disabled="!canRun || planBusy"
+        :title="MSG_PLAN_MODE_NO_ROWS_HINT"
+        @click="explain('no-rows')"
+      >
+        {{ MSG_PLAN_MODE_NO_ROWS }}
+      </button>
       <button v-if="rows.length" class="link" @click="download">
         CSV をダウンロード（表示中の {{ rows.length }} 件）
       </button>
@@ -660,6 +736,19 @@ function download(): void {
         <span v-else class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
       </button>
     </div>
+
+    <!--
+      実行計画。**結果表とは別のパネル**に出す（表の代わりに差し替えると、
+      計画を見たあとに結果へ戻れなくなる）。閉じるまで出したままにする
+    -->
+    <section v-if="showPlan" class="plan-panel">
+      <header class="plan-panel-head">
+        <strong>実行計画</strong>
+        <button class="link" @click="showPlan = false">閉じる</button>
+      </header>
+      <p v-if="planError" class="plan-error">{{ planError }}</p>
+      <PlanViewer v-if="plan" :plan="plan" :on-create-index="createIndex" />
+    </section>
 
     <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
     <div class="results" @click="logOpen && (logOpen = false)">
@@ -958,4 +1047,27 @@ thead th:hover .col-grip::after,
 .logbtn.on { border-color: var(--accent); color: var(--accent); }
 /* 件数が伸びても右がずれないように幅を取る */
 .logbtn .cnt { min-width: 4ch; display: inline-block; text-align: right; font-variant-numeric: tabular-nums; }
+
+.plan-panel {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 6px 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+.plan-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.plan-panel-head strong {
+  font-size: 12px;
+}
+.plan-error {
+  color: var(--t-red);
+  font-size: 12px;
+  margin: 0 0 6px;
+}
 </style>

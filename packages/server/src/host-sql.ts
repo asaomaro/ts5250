@@ -215,6 +215,8 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
           owner: user?.username,
           columns,
           rows,
+          // **1 度も反復しないまま閉じても解放されるように**冪等な close を預ける（research F9）
+          closeCursor: opened.close,
           conn,
           // 読み終わったら閉じずに**プールへ返す**
           release: (used) => deps.pool.release(key, used)

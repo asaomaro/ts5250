@@ -1,0 +1,9 @@
+schema: 3
+slug: 03-ui
+parent: 20260802-sql-visual-explain
+current: review
+approved: [plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [01-foundation, 02-capture]
