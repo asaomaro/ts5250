@@ -45,6 +45,9 @@ const snap = computed(() => props.state.snapshot);
 const inputState = computed<{ label: string; ok: boolean }>(() => {
   if (!props.state.connected) return { label: "切断", ok: false };
   if (props.state.readOnly) return { label: "閲覧のみ", ok: false };
+  // **予約は readOnly より先に出さない**——閲覧専用は待っても変わらないが、
+  // 予約は解ければ戻る。どちらも入力できないので、変わらないほうを優先して出す
+  if (props.state.reservedBy) return { label: `${props.state.reservedBy} が操作中`, ok: false };
   const sn = snap.value;
   if (!sn) return { label: "—", ok: false };
   if (sn.keyboardLocked) return { label: "入力禁止", ok: false };

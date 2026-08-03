@@ -14,10 +14,16 @@ import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
 import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
-import { sendKey, selectGuiChoice, submitGuiSelection, noteActivity } from "../session-controller.js";
+import {
+  sendKey,
+  selectGuiChoice,
+  submitGuiSelection,
+  noteActivity,
+  breakReservation as breakReservationFor
+} from "../session-controller.js";
 import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
-import { MSG_PROTECTED } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved } from "../composables/opMessages.js";
 import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 
@@ -62,8 +68,18 @@ const watermark = computed(() => {
     user: s.job?.user ?? s.meta?.signonUser
   });
 });
+/**
+ * 予約（HLLAPI の `Reserve`）で自動操作に締め出されているか。
+ *
+ * `busy`（ホスト応答待ち）と分ける理由: busy は一瞬で解けるので黙って待たせてよいが、
+ * 予約は分単位で続きうる。**なぜ打てないかを出し、解除の口も出す**必要がある。
+ */
+const reservedBy = computed(() => state.value?.reservedBy);
 // 通信中（ホスト応答待ち）は入力プロテクト。loading は 0.5 秒超でスピナー表示
 const busy = computed(() => state.value?.busy ?? false);
+/** 入力を止める条件。**打鍵の入口すべてがここを見る**（経路ごとに書くと足し忘れる） */
+const inputBlocked = computed(() => busy.value || reservedBy.value !== undefined);
+const breakReservation = (): void => breakReservationFor(props.sessionId);
 const loading = computed(() => state.value?.loading ?? false);
 // カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
 const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
@@ -601,7 +617,7 @@ const messageLine = computed(() => effectiveNotice.value || snapshot.value?.syst
  *  **AUTO_ENTER 欄が満杯になったときの自動 Enter**（FFW 0x0080。`advanceIfFull` / `fieldExitKey`）。
  *  後者も `busy` / `keyboardLocked` のプロテクトに乗せたいので、同じ入口へ合流させている。 */
 function onFkeyAid(key: AidKey): void {
-  if (busy.value || snapshot.value?.keyboardLocked) return;
+  if (inputBlocked.value || snapshot.value?.keyboardLocked) return;
   emit("focus");
   focusMandatoryViolation(sendKey(props.sessionId, key, cursor.value));
 }
@@ -620,7 +636,7 @@ function editableFocused(): boolean {
 }
 
 function onPanePaste(ev: ClipboardEvent): void {
-  if (busy.value || snapshot.value?.keyboardLocked) return;
+  if (inputBlocked.value || snapshot.value?.keyboardLocked) return;
   if (editableFocused()) return; // 入力欄にフォーカスがある → ScreenGrid 側で処理する
   const text = ev.clipboardData?.getData("text") ?? "";
   if (!text) return;
@@ -749,7 +765,7 @@ function onKeydownCapture(): void {
   noteUserActivity();
 }
 function onKeydown(ev: KeyboardEvent): void {
-  if (busy.value) {
+  if (inputBlocked.value) {
     ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
     return;
   }
@@ -848,7 +864,7 @@ function onWheel(ev: WheelEvent): void {
   // 飛んでしまう——リストを送っただけで画面が送られるのは明らかに誤り。
   if (ev.target instanceof HTMLElement && ev.target.closest(".opt-hints")) return;
   ev.preventDefault(); // 端末はスクロールせずページ送りに割り当てる（ACS 準拠）
-  if (busy.value || snapshot.value?.keyboardLocked) return; // 通信中・ロック中は送らない
+  if (inputBlocked.value || snapshot.value?.keyboardLocked) return; // 通信中・予約中・ロック中は送らない
   const now = Date.now();
   if (now < wheelCooldownUntil) return;
   wheelCooldownUntil = now + 120;
@@ -918,6 +934,16 @@ function onWheel(ev: WheelEvent): void {
       <!-- 通信中プロテクト（0.5 秒超で loading クラス＝スピナー表示） -->
       <div v-if="busy" class="busy-overlay" :class="{ loading }" aria-busy="true">
         <div v-if="loading" class="spinner" role="status" aria-label="通信中"></div>
+      </div>
+      <!--
+        予約プロテクト（HLLAPI の Reserve）。**理由と解除の口を出す**——
+        自動化が落ちると Release が届かず、期限（2 分）まで打てないままになる
+      -->
+      <div v-if="reservedBy" class="reserved-overlay" role="status">
+        <div class="reserved-box">
+          <span>{{ msgReserved(reservedBy) }}</span>
+          <button type="button" @click="breakReservation">{{ MSG_RESERVE_BREAK }}</button>
+        </div>
       </div>
       <!--
         このセッションの操作ログ。**画面領域の中**に重ねる。
@@ -1020,6 +1046,31 @@ function onWheel(ev: WheelEvent): void {
   /* グリッドをコンテンツサイズに縮めたうえで中央寄せ（余白を上下・左右均等に） */
   align-items: center;
   justify-content: center;
+}
+/* 予約プロテクト: 通信中と違い**理由を見せる**ので、最初から覆う */
+.reserved-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--crt) 65%, transparent);
+}
+.reserved-box {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--t-green) 45%, transparent);
+  border-radius: 4px;
+  background: var(--crt);
+  color: var(--t-green);
+  font-size: 0.9rem;
+}
+.reserved-box button {
+  cursor: pointer;
 }
 /* 通信中プロテクト: ポインタ操作をブロック。0.5 秒までは透明、loading で薄く覆う */
 .busy-overlay {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SessionManager, nextDeviceName } from "../src/session-manager.js";
+import { SessionManager, nextDeviceName, RESERVATION_TTL_MS } from "../src/session-manager.js";
 import { As400Error } from "@ts5250/base";
 import { ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 import { readFileSync } from "node:fs";
@@ -91,6 +91,117 @@ describe("SessionManager", () => {
     (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
     expect(mgr.size).toBe(0);
     void entry;
+  });
+});
+
+/**
+ * **セッションの予約**（HLLAPI の `Reserve`/`Release`）。
+ *
+ * 自動操作の最中に人間が同じ画面へ書くのを止める仕掛け。検査の要点は 3 つ:
+ *
+ * 1. 予約中は**持ち主以外の書き込みが断られる**（経路を問わず——検査は `assertWritable` の内側）
+ * 2. **期限で自然に解ける**（落ちた自動化は `Release` を送れない）
+ * 3. **利用者が取り戻せる**（`forceRelease`）
+ */
+describe("セッションの予約", () => {
+  const setup = async (): Promise<{ mgr: SessionManager; id: string; tick: (ms: number) => void }> => {
+    let t = 1000;
+    const mgr = new SessionManager({ now: () => t });
+    const entry = await openReplay(mgr);
+    return { mgr, id: entry.id, tick: (ms) => (t += ms) };
+  };
+  /** 投げたエラーコードを取り出す（投げなければ `undefined`） */
+  const codeOf = (fn: () => unknown): string | undefined => {
+    try {
+      fn();
+      return undefined;
+    } catch (e) {
+      return e instanceof As400Error ? e.code : "not-As400Error";
+    }
+  };
+
+  it("予約中は**持ち主以外の書き込みを断る**（人間・MCP＝holder なし）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    expect(codeOf(() => mgr.assertWritable(id))).toBe("SESSION_RESERVED");
+    expect(codeOf(() => mgr.assertKeyAllowed(id, "Enter"))).toBe("SESSION_RESERVED");
+    mgr.closeAll();
+  });
+
+  it("**持ち主は通る**（自動化自身は書ける）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    expect(mgr.assertWritable(id, undefined, "auto").id).toBe(id);
+    expect(mgr.assertKeyAllowed(id, "Enter", undefined, "auto").id).toBe(id);
+    mgr.closeAll();
+  });
+
+  it("**別の主体は予約できない**（SESSION_RESERVED）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    expect(codeOf(() => mgr.reserve(id, "other", "HLLAPI"))).toBe("SESSION_RESERVED");
+    mgr.closeAll();
+  });
+
+  it("同じ主体の再予約は通る（期限の延長）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    expect(mgr.reserve(id, "auto", "HLLAPI").id).toBe(id);
+    mgr.closeAll();
+  });
+
+  it("**期限が切れたら解ける**（落ちた自動化が締め切ったままにしない）", async () => {
+    const { mgr, id, tick } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    tick(RESERVATION_TTL_MS + 1);
+    expect(mgr.reservationOf(id)).toBeUndefined();
+    expect(mgr.assertWritable(id).id).toBe(id);
+    mgr.closeAll();
+  });
+
+  it("**操作のたびに期限が延びる**（長い自動化の途中で切れない）", async () => {
+    const { mgr, id, tick } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    for (let i = 0; i < 5; i++) {
+      tick(RESERVATION_TTL_MS - 1);
+      mgr.touchReservation(id, "auto");
+    }
+    expect(mgr.reservationOf(id)?.holder).toBe("auto");
+    mgr.closeAll();
+  });
+
+  it("**持ち主でない解除は効かない**（横から外させない）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    mgr.release(id, "other");
+    expect(mgr.reservationOf(id)?.holder).toBe("auto");
+    mgr.closeAll();
+  });
+
+  it("**利用者は強制解除できる**（自動化が落ちたときの非常口）", async () => {
+    const { mgr, id } = await setup();
+    mgr.reserve(id, "auto", "HLLAPI");
+    mgr.forceRelease(id);
+    expect(mgr.reservationOf(id)).toBeUndefined();
+    expect(mgr.assertWritable(id).id).toBe(id);
+    mgr.closeAll();
+  });
+
+  it("**予約の変化が購読者へ届く**（ブラウザへ push するため）", async () => {
+    const { mgr, id } = await setup();
+    const seen: (string | undefined)[] = [];
+    mgr.get(id).onReservationChange = (r) => seen.push(r?.label);
+    mgr.reserve(id, "auto", "HLLAPI");
+    mgr.release(id, "auto");
+    expect(seen).toEqual(["HLLAPI", undefined]);
+    mgr.closeAll();
+  });
+
+  it("**閲覧専用は予約できない**（予約しても書けないので意味が変わらない）", async () => {
+    const mgr = new SessionManager({ now: () => 1000 });
+    const entry = await openReplay(mgr, true);
+    expect(codeOf(() => mgr.reserve(entry.id, "auto", "HLLAPI"))).toBe("READ_ONLY_SESSION");
+    mgr.closeAll();
   });
 });
 

@@ -134,3 +134,50 @@ describe("WsConnection: 保存済み接続の ID 参照 open", () => {
     expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "CONFIG_ERROR" });
   });
 });
+
+/**
+ * **予約中はブラウザから打てない。**
+ *
+ * この検査が要る理由: 締め出しは `SessionManager.assertKeyAllowed` の内側に置いてあり、
+ * ws-handler には予約を見るコードが 1 行も無い。**構造で効いていること**を経路側から確かめる。
+ */
+describe("WsConnection: 予約中の締め出し", () => {
+  const open = async (): Promise<ReturnType<typeof setup> & { id: string }> => {
+    const s = setup();
+    await s.conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const opened = s.sent[0] as { sessionId: string };
+    s.sent.length = 0;
+    return { ...s, id: opened.sessionId };
+  };
+
+  it("**予約中の key は SESSION_RESERVED**（打ちかけが別の画面へ載るのを防ぐ）", async () => {
+    const { conn, sent, mgr, id } = await open();
+    mgr.reserve(id, "auto", "HLLAPI");
+    sent.length = 0;
+    await conn.handle(JSON.stringify({ type: "key", key: "Enter" }));
+    expect(sent[0]).toMatchObject({ type: "error", code: "SESSION_RESERVED" });
+    mgr.closeAll();
+  });
+
+  it("**予約の開始・解除が push される**（画面を変えずに起きるので別メッセージ）", async () => {
+    const { sent, mgr, id } = await open();
+    mgr.reserve(id, "auto", "HLLAPI");
+    mgr.release(id, "auto");
+    expect(sent.filter((m) => m.type === "reserved")).toEqual([
+      { type: "reserved", by: "HLLAPI" },
+      { type: "reserved" }
+    ]);
+    mgr.closeAll();
+  });
+
+  it("**利用者は強制解除できる**（自動化が落ちて Release が来ないときの非常口）", async () => {
+    const { conn, mgr, id } = await open();
+    mgr.reserve(id, "auto", "HLLAPI");
+    await conn.handle(JSON.stringify({ type: "reserve-break" }));
+    expect(mgr.reservationOf(id)).toBeUndefined();
+    mgr.closeAll();
+  });
+
+  // 「解除後はまた打てる」は**ここでは検査しない**——Enter がホストの応答を待って
+  // 5 秒止まる（ReplayTransport に続きが無い）。解除の意味は session-manager.test.ts が持つ
+});

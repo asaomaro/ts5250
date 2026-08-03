@@ -43,6 +43,15 @@ export const MSG_NO_ROOM = "挿入する余地がありません";
 export const MSG_NO_RESPONSE = "ホストから応答がありませんでした";
 
 /**
+ * 予約（HLLAPI の `Reserve`）で入力が止まっていることを示す。
+ *
+ * **誰が触っているかを出す。** 「入力できません」だけだと不具合と区別できない。
+ */
+export const msgReserved = (by: string): string => `${by} が自動操作中です`;
+/** 予約を強制解除する非常口の説明（自動化が落ちて解除されないとき用） */
+export const MSG_RESERVE_BREAK = "解除して操作する";
+
+/**
  * PC コマンド（`STRPCCMD`）の実行通知。
  *
  * ホストが 5250 の画面に隠して送ってくるので、**何も出さないと「勝手に何かが動いた」

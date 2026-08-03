@@ -37,6 +37,8 @@ export interface OpenOptions extends ConnectOptions {
   readOnly?: boolean;
   /** 由来（プロファイル名 or "direct"）。list_sessions 表示用 */
   origin?: string;
+  /** どの設定から開いたか。外部の自動化が安定した名前で指せるようにする */
+  target?: SessionTarget;
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
   /**
@@ -119,10 +121,60 @@ export interface SessionJob {
   number?: string;
 }
 
+/**
+ * セッションの予約（HLLAPI の `Reserve`/`Release`）。
+ *
+ * **自動操作の最中に人間が同じ画面へ書くのを止める。** 5250 は入力欄の値を AID と一緒に送るため、
+ * ブラウザは Enter を押すまで打ちかけを手元に持っている。その間に自動操作が画面を変えると、
+ * 打ちかけが**別の画面の欄へ**送られる。HLLAPI がこの排他を仕様として持っているのはそのため。
+ */
+export interface SessionReservation {
+  /** 予約している主体を識別する不透明な値。**これと一致する書き手だけが通る** */
+  holder: string;
+  /** 画面に出す名前（例 `HLLAPI`）。利用者に「誰が触っているか」を見せる */
+  label: string;
+  /** 期限（epoch ms）。**過ぎたら無いものとして扱う** */
+  expiresAt: number;
+}
+
+/**
+ * 予約の寿命。**呼び出しのたびに延びる**（`touchReservation`）。
+ *
+ * 期限を置くのは、接続層が状態を持たない＝**落ちた自動化は `Release` を送れない**ため。
+ * これが無いと、Excel が落ちただけでセッションが永久に締め切られる。
+ *
+ * HLLAPI の `Wait`/`Pause` が最大 30 秒なので、その 4 倍を取る。
+ * それでも詰まるときのために、**持ち主でなくても解除できる口**（`forceRelease`）を用意する
+ * ——同じ利用者が自分のセッションを取り戻すだけなので、権限の穴にはならない。
+ */
+export const RESERVATION_TTL_MS = 120_000;
+
+/**
+ * **どの設定から開いたか。**
+ *
+ * 実行中のセッション id は起動のたびに変わるので、外部の自動化（HLLAPI・スクリプト）が
+ * 「**どのシステムのどのセッション**を操作したいか」を書けるようにするための安定した名前。
+ * 画面から直に host を指定して開いた場合は空になる（指せるのは id だけ）。
+ */
+export interface SessionTarget {
+  /** システム参照（`srv:<id>` / `own:<id>`） */
+  system?: string;
+  /** セッション設定参照 */
+  session?: string;
+  /** 設定上の名前（利用者が付けた分かりやすい名前） */
+  name?: string;
+}
+
 export interface SessionEntry {
   id: string;
   session: Session5250;
   readOnly: boolean;
+  /** どの設定から開いたか（HLLAPI などが指定に使う） */
+  target?: SessionTarget;
+  /** 予約（`Reserve`）。期限切れの判定込みで読むには `reservationOf` を使う */
+  reservation?: SessionReservation;
+  /** 予約の変化を購読者（ws-handler）へ知らせる。切断で解除する */
+  onReservationChange?: (r: SessionReservation | undefined) => void;
   host: string;
   origin: string;
   connectedAt: string;
@@ -525,6 +577,7 @@ export class SessionManager {
       readOnly: opts.readOnly ?? false,
       host: opts.host ?? "(injected)",
       origin: opts.origin ?? "direct",
+      ...(opts.target !== undefined ? { target: opts.target } : {}),
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
       pcCommandEnabled: opts.pcCommand?.enabled === true,
@@ -1029,21 +1082,100 @@ export class SessionManager {
     return this.ownedOnly([...this.sessions.values()], user);
   }
 
-  /** 書き込み操作の可否を検査（readOnly なら READ_ONLY_SESSION／所有者でなければ FORBIDDEN） */
-  assertWritable(id: string, user?: AuthUser): SessionEntry {
+  /**
+   * 有効な予約（期限切れなら `undefined`）。**期限切れはここで刈る**ので、
+   * 読み手が毎回 `expiresAt` を見比べる必要は無い。
+   */
+  reservationOf(id: string): SessionReservation | undefined {
+    const entry = this.sessions.get(id);
+    const r = entry?.reservation;
+    if (!entry || !r) return undefined;
+    if (r.expiresAt > this.now()) return r;
+    this.setReservation(entry, undefined);
+    return undefined;
+  }
+
+  private setReservation(entry: SessionEntry, r: SessionReservation | undefined): void {
+    if (r) entry.reservation = r;
+    else delete entry.reservation;
+    entry.onReservationChange?.(r);
+  }
+
+  /**
+   * セッションを予約する。**既に別の主体が持っていれば `SESSION_RESERVED`**
+   * （`assertWritable` の予約検査がそのまま効く）。
+   * 同じ主体の再予約は期限の延長として通る——HLLAPI 側で何度呼ばれても壊れない。
+   */
+  reserve(id: string, holder: string, label: string, user?: AuthUser): SessionEntry {
+    const entry = this.assertWritable(id, user, holder);
+    this.setReservation(entry, { holder, label, expiresAt: this.now() + RESERVATION_TTL_MS });
+    return entry;
+  }
+
+  /** 予約を解除する。**持ち主でなければ何もしない**（他人の予約を横から外させない） */
+  release(id: string, holder: string, user?: AuthUser): SessionEntry {
+    const entry = this.get(id, user);
+    const current = this.reservationOf(id);
+    if (current?.holder === holder) this.setReservation(entry, undefined);
+    return entry;
+  }
+
+  /**
+   * 予約を**持ち主でなくても**外す。利用者が自分のセッションを取り戻すための非常口。
+   *
+   * 自動化が落ちて `Release` を送れないまま期限が切れるのを待つ、という状況を避ける。
+   * `get` を通すので**自分のセッションにしか効かない**——権限の穴にはならない。
+   */
+  forceRelease(id: string, user?: AuthUser): SessionEntry {
+    const entry = this.get(id, user);
+    this.setReservation(entry, undefined);
+    return entry;
+  }
+
+  /** 予約の期限を延ばす（持ち主からの操作があったとき）。持ち主でなければ何もしない */
+  touchReservation(id: string, holder: string): void {
+    const entry = this.sessions.get(id);
+    const current = this.reservationOf(id);
+    if (!entry || current?.holder !== holder) return;
+    this.setReservation(entry, { ...current, expiresAt: this.now() + RESERVATION_TTL_MS });
+  }
+
+  /**
+   * 予約による締め出しを検査する。
+   *
+   * **`assertWritable` / `assertKeyAllowed` の内側に置く**——書き込みの経路は
+   * WebSocket・MCP・HLLAPI の 3 つあり、経路ごとに書くと足し忘れる。
+   * `holder` を渡さない呼び出し（＝人間や MCP）は、予約中なら一律で断られる。
+   */
+  private assertNotReserved(id: string, holder: string | undefined): void {
+    const r = this.reservationOf(id);
+    if (r && r.holder !== holder) {
+      throw new As400Error("SESSION_RESERVED", `session ${id} is reserved by ${r.label}`);
+    }
+  }
+
+  /**
+   * 書き込み操作の可否を検査（readOnly なら READ_ONLY_SESSION／所有者でなければ FORBIDDEN／
+   * 他の主体が予約中なら SESSION_RESERVED）。
+   *
+   * @param holder 予約の持ち主として振る舞う主体。**省略＝人間の操作**として扱う
+   */
+  assertWritable(id: string, user?: AuthUser, holder?: string): SessionEntry {
     const entry = this.get(id, user);
     if (entry.readOnly) {
       throw new As400Error("READ_ONLY_SESSION", `session ${id} is read-only`);
     }
+    this.assertNotReserved(id, holder);
     return entry;
   }
 
-  /** AID キーの可否を検査（readOnly は PageUp/PageDown のみ許可） */
-  assertKeyAllowed(id: string, key: AidKey, user?: AuthUser): SessionEntry {
+  /** AID キーの可否を検査（readOnly は PageUp/PageDown のみ許可。予約中は持ち主のみ） */
+  assertKeyAllowed(id: string, key: AidKey, user?: AuthUser, holder?: string): SessionEntry {
     const entry = this.get(id, user);
     if (entry.readOnly && !READONLY_ALLOWED_KEYS.has(key)) {
       throw new As400Error("READ_ONLY_SESSION", `key ${key} not allowed on read-only session`);
     }
+    this.assertNotReserved(id, holder);
     return entry;
   }
 

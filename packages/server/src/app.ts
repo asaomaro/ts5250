@@ -22,6 +22,7 @@ import { WatchRegistry } from "./watch-registry.js";
 import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostPlanRoutes } from "./host-plan.js";
+import { registerHllapiRoutes } from "./hllapi-routes.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
@@ -183,6 +184,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // 実行計画（Visual Explain 相当）。**同じプールを渡すが、キーに "explain" を足して分ける**
   // ——採取中は STRDBMON がその接続のジョブ全体を見ているので、通常の SQL と混線させない
   registerHostPlanRoutes(app, { resolver: deps.resolver, pool });
+  // HLLAPI / EHLLAPI ブリッジ。**ロジックはここ（TypeScript）に置き**、
+  // ネイティブの接続層は C ABI ↔ HTTP だけを担う
+  registerHllapiRoutes(app, { sessions: deps.sessions });
 
   // IFS のファイルブラウザ（一覧・読み書き・zip 一括取得）
   // 上限は zip64 非対応という**不変条件**に紐づく。CLI 経路だけで検査すると、

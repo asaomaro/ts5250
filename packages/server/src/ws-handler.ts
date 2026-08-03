@@ -1,7 +1,7 @@
 import { As400Error } from "@ts5250/base";
 import { type AidKey, type ScreenSnapshot } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
-import { SessionManager, type OpenOptions, type StoredReport } from "./session-manager.js";
+import { SessionManager, type OpenOptions, type SessionTarget, type StoredReport } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
@@ -130,6 +130,8 @@ export class WsConnection {
           return await this.onGuiSubmit(msg);
         case "printer-output":
           return await this.onPrinterOutput(msg);
+        case "reserve-break":
+          return this.onReserveBreak();
         case "watch-subscribe":
           return this.onWatchSubscribe();
         case "watch-start":
@@ -208,6 +210,17 @@ export class WsConnection {
    * 併せてハートビートを始める。監視だけの WS はセッションを持たないので
    * `onSocketClose` 以外に死を知る手が無く、半開きのまま push し続けるのを避ける。
    */
+  /**
+   * 予約を強制的に外す（利用者の非常口）。
+   *
+   * **自分のセッションにしか効かない**（`forceRelease` が `get` を通す）ので権限の穴にならない。
+   * これが無いと、自動化が落ちて `Release` を送れないまま期限（2 分）が切れるのを
+   * 待つしかなくなる。
+   */
+  private onReserveBreak(): void {
+    this.deps.sessions.forceRelease(this.requireSession(), this.user);
+  }
+
   private onWatchSubscribe(): void {
     const reg = this.requireWatches();
     this.detachWatch?.(); // 二重購読しない
@@ -382,7 +395,7 @@ export class WsConnection {
       let opts: OpenOptions;
       if (hasRef(msg)) {
         const target = this.resolveTarget(msg);
-        opts = { ...target.connect, origin: originOf(msg) };
+        opts = { ...target.connect, origin: originOf(msg), target: this.targetOf(msg) };
         // PC コマンドの実行設定はサーバー設定由来のときだけ入る（信頼境界の 5 層目）。
         // **ブラウザ直指定では絶対に付けない**——任意コマンド実行の入口になる
         if (target.pcCommand) opts.pcCommand = target.pcCommand;
@@ -403,9 +416,13 @@ export class WsConnection {
       });
       // PC コマンド（STRPCCMD）の実行状況を push。切断でフックを外す（リーク防止）
       entry.onPcCommandEvent = (event) => this.send({ type: "pc-command", sessionId: entry.id, event });
+      // 予約（HLLAPI の Reserve）の開始・解除を push。**画面と別に流す**——
+      // 予約は画面を変えずに始まり・終わるので、screen に相乗りさせると取りこぼす
+      entry.onReservationChange = (r) => this.send({ type: "reserved", ...(r ? { by: r.label } : {}) });
       this.detachScreen = () => {
         entry.session.off("screen", onScreen);
         delete entry.onPcCommandEvent;
+        delete entry.onReservationChange;
       };
       this.send({
         type: "opened",
@@ -413,6 +430,11 @@ export class WsConnection {
         screen: entry.session.snapshot(),
         ccsid: opts.ccsid ?? 37,
         pcCommand: entry.pcCommandEnabled,
+        // **後から入ったタブにも今の予約状態を伝える**（開始の push を聞き逃していても揃う）
+        ...(() => {
+          const r = this.deps.sessions.reservationOf(entry.id);
+          return r ? { reservedBy: r.label } : {};
+        })(),
         // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
         ...(entry.job !== undefined ? { job: entry.job } : {})
       });
@@ -520,6 +542,24 @@ export class WsConnection {
   }
 
   /** system / session 参照を解決する（認可・復号・printer 出力の判定は ConfigResolver 内） */
+  /**
+   * 開いた設定の**安定した名前**を記録する（`SessionEntry.target`）。
+   *
+   * 実行中のセッション id は起動のたびに変わるので、外部の自動化（HLLAPI）が
+   * 「**どのシステムのどのセッション**を操作したいか」を書けない。設定の参照と名前を
+   * 添えておけば、開き直しても同じ指定で当たる。
+   */
+  private targetOf(msg: WsClientMessage & { type: "open" }): SessionTarget {
+    const name = msg.session
+      ? this.deps.resolver.listSessions(this.user).find((s) => s.ref === msg.session)?.name
+      : undefined;
+    return {
+      ...(msg.system !== undefined ? { system: msg.system } : {}),
+      ...(msg.session !== undefined ? { session: msg.session } : {}),
+      ...(name !== undefined ? { name } : {})
+    };
+  }
+
   private resolveTarget(msg: WsClientMessage & { type: "open" }): ResolvedTarget {
     return this.deps.resolver.resolve(
       { system: msg.system, session: msg.session },

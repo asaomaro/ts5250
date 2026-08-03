@@ -1,0 +1,28 @@
+events:
+  - { ts: 2026-08-03T03:56:46Z, phase: requirement, event: start }
+  - { ts: 2026-08-03T03:57:55Z, phase: requirement, event: approved }
+  - { ts: 2026-08-03T03:57:55Z, phase: research, event: start }
+  - { ts: 2026-08-03T04:06:10Z, phase: research, event: approved }
+  - { ts: 2026-08-03T04:06:10Z, phase: spec, event: start }
+  - { ts: 2026-08-03T04:08:26Z, phase: spec, event: approved }
+  - { ts: 2026-08-03T04:08:26Z, phase: plan, event: start }
+  - { ts: 2026-08-03T04:09:06Z, phase: plan, event: approved, metrics: { tasks_planned: 2 } }
+  - { ts: 2026-08-03T10:03:23Z, phase: test, event: start }
+  - { ts: 2026-08-03T10:05:34Z, phase: test, event: approved, metrics: { passed: 3846, failed: 0 } }
+  - { ts: 2026-08-03T10:05:34Z, phase: review, event: start }
+  - { ts: 2026-08-03T10:08:08Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0 } }
+  - { ts: 2026-08-03T10:09:00Z, phase: walkthrough, event: start }
+  - { ts: 2026-08-03T10:09:00Z, phase: walkthrough, event: approved }
+  - { ts: 2026-08-03T10:09:14Z, phase: deliver, event: start }
+  - { ts: 2026-08-03T10:15:22Z, phase: deliver, event: approved, metrics: { pr: #296 } }
+  - { ts: 2026-08-03T11:17:57Z, phase: deliver, event: sent_back, metrics: { reason: Reserve/Release 未実装のため二重書き込みを防げない } }
+  - { ts: 2026-08-03T11:17:57Z, phase: coding, event: start }
+  - { ts: 2026-08-03T11:55:18Z, phase: coding, event: approved, metrics: { tasks_done: 6 } }
+  - { ts: 2026-08-03T11:55:18Z, phase: test, event: start }
+  - { ts: 2026-08-03T11:55:53Z, phase: test, event: approved, metrics: { passed: 3883, failed: 0 } }
+  - { ts: 2026-08-03T11:56:27Z, phase: review, event: start }
+  - { ts: 2026-08-03T11:56:27Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0 } }
+  - { ts: 2026-08-03T11:56:57Z, phase: walkthrough, event: start }
+  - { ts: 2026-08-03T11:56:57Z, phase: walkthrough, event: approved }
+  - { ts: 2026-08-03T11:57:07Z, phase: deliver, event: start }
+  - { ts: 2026-08-03T11:59:00Z, phase: deliver, event: approved, metrics: { pr: #296 } }

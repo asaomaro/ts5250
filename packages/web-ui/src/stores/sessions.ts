@@ -116,6 +116,14 @@ export interface SessionState {
   cursor: { row: number; col: number };
   connected: boolean;
   readOnly: boolean;
+  /**
+   * 予約（HLLAPI の `Reserve`）している主体の表示名。**予約中は入力を止める。**
+   *
+   * `readOnly` と別に持つ理由: あちらはセッションの性質で変わらない。
+   * こちらは自動操作の間だけで、解ければ元に戻る。表示も「閲覧のみ」ではなく
+   * 「誰が触っているか」を出す必要がある。
+   */
+  reservedBy?: string;
   client: WsClient;
   /**
    * ジョブ識別子。**接続と同時に `name`（＝装置名）だけ入ることがある**——
@@ -226,6 +234,25 @@ export const sessionsStore = reactive({
   remove(id: string): void {
     this.byId.delete(id);
     this.order = this.order.filter((x) => x !== id);
+  },
+
+  /**
+   * 予約の開始・解除を反映する。
+   *
+   * **開始時にローカル編集差分を捨てる。** 打ちかけを抱えたまま自動操作に画面を
+   * 変えられると、次の AID でその値が別の画面の欄に載る。
+   * （画面更新でも `updateScreen` が捨てるが、**予約は画面を変えずに始まる**ので
+   * ここでも捨てる必要がある）
+   */
+  setReserved(id: string, by: string | undefined): void {
+    const s = this.byId.get(id);
+    if (!s) return;
+    if (by !== undefined) {
+      s.reservedBy = by;
+      s.edits.clear();
+    } else {
+      delete s.reservedBy;
+    }
   },
 
   updateScreen(id: string, snapshot: ScreenSnapshot): void {

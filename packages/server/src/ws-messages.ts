@@ -165,7 +165,8 @@ export type WsClientMessage =
   | WsWatchResume
   | WsPrinterServiceStart
   | WsPrinterStart
-  | WsPrinterStop;
+  | WsPrinterStop
+  | WsReserveBreak;
 
 // ---- server → client ----
 export interface WsOpened {
@@ -181,10 +182,30 @@ export interface WsOpened {
    * 無効でもホストへの応答は返るので、利用者には「実行しない理由」を示すために使う
    */
   pcCommand: boolean;
+  /** 予約中ならその表示名。**後から入ったタブにも今の状態を伝える** */
+  reservedBy?: string;
 }
 export interface WsScreen {
   type: "screen";
   screen: ScreenSnapshot;
+}
+/**
+ * 予約（HLLAPI の `Reserve`）の状態が変わった。
+ *
+ * **画面と別のメッセージにしている**——予約は画面を変えずに始まり・終わるので、
+ * `screen` に相乗りさせると開始と解除を取りこぼす。
+ *
+ * これを受けた画面は入力を止め、**誰が触っているか**を出す。止めないと、
+ * 打ちかけが自動操作の変えた別の画面へ送られる。
+ */
+export interface WsReserved {
+  type: "reserved";
+  /** 予約している主体の表示名。**解除されたら省略される** */
+  by?: string;
+}
+/** 予約を強制的に外す（利用者の非常口）。自動化が落ちて `Release` を送れないとき用 */
+export interface WsReserveBreak {
+  type: "reserve-break";
 }
 /**
  * ジョブ識別子の通知（**サーバー発のみ**）。
@@ -387,6 +408,7 @@ export type WsServerMessage =
   | WsPing
   | WsOpened
   | WsScreen
+  | WsReserved
   | WsJobInfoRes
   | WsError
   | WsClosed

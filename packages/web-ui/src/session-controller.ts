@@ -126,6 +126,8 @@ export async function openSession(
                 cursor: msg.screen.cursor,
                 connected: true,
                 readOnly: open.readOnly ?? false,
+                // **後から入ったタブでも今の予約状態から始める**（開始の push は聞き逃している）
+                ...(msg.reservedBy !== undefined ? { reservedBy: msg.reservedBy } : {}),
                 ccsid: msg.ccsid,
                 client,
                 ...(meta ? { meta } : {}),
@@ -140,6 +142,12 @@ export async function openSession(
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);
+              break;
+            }
+            // 予約（HLLAPI の Reserve）の開始・解除。**画面と別に届く**——
+            // 予約は画面を変えずに始まり・終わるため
+            case "reserved": {
+              sessionsStore.setReserved(sessionId, msg.by);
               break;
             }
             case "screen": {
@@ -347,6 +355,16 @@ export async function openPrinterSession(
 }
 
 /** 自動出力（PDF 保存・自動印刷）の有効/無効を切り替える（サーバー応答で状態を反映） */
+/**
+ * 予約（HLLAPI の `Reserve`）を強制的に外す——利用者の非常口。
+ *
+ * **結果は待たない**——外れれば `reserved` が push で届く。
+ * 自動化が落ちると `Release` が来ないので、期限（2 分）を待たずに取り戻す口が要る。
+ */
+export function breakReservation(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "reserve-break" });
+}
+
 export function setPrinterOutput(sessionId: string, enabled: boolean): void {
   sessionsStore.get(sessionId)?.client.send({ type: "printer-output", enabled });
 }

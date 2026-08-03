@@ -1,0 +1,9 @@
+schema: 3
+slug: 01-server
+parent: 20260803-hllapi-bridge
+current: review
+approved: [plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

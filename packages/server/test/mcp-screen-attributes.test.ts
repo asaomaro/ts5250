@@ -15,9 +15,11 @@ const ESC = "\u001b";
  * - `include: ["ansi"]` … 色つき画面を**人向けの別ブロック**（`audience: ["user"]`）で返す
  * - `include: ["attributes"]` … 属性の変わり目を `structuredContent.attributes` で返す
  *
- * outputSchema を宣言しているツールは、SDK が structuredContent を**検証する**。
- * つまりこの経路を通すだけで、スキーマと実際の中身の食い違いも捕まえられる
- * （窓の見出しを文字列から構造へ変えたとき、スキーマが取り残されていた）。
+ * ⚠ **この経路だけでは structuredContent は検証されない。** SDK が検証するのは
+ * **クライアントが `listTools()` を受け取った後**で、ここは `callTool` しか呼んでいない。
+ * さらにフィクスチャは `fields: []` なので、欄まわりのスキーマ違反も通ってしまう
+ * （2026-08-04 に実機で `dupEnable` / `dbcsType` を持つ欄が落ちるまで気づけなかった）。
+ * **スキーマ適合の検査は `mcp-output-schema.test.ts` が持つ。**
  */
 const SID = "sess-1";
 

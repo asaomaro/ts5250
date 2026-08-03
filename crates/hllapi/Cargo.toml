@@ -1,0 +1,28 @@
+[package]
+name = "ts5250-hllapi"
+version = "0.1.0"
+edition = "2024"
+description = "HLLAPI / EHLLAPI bridge for ts5250 (thin C ABI to HTTP layer)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "ts5250hllapi"
+# HLLAPI クライアントは共有ライブラリを動的リンクする（Windows は DLL、Linux は .so）
+crate-type = ["cdylib", "rlib"]
+
+# **外部クレートを使わない。** 交換する形は 4 項目しかなく、std だけで書ける。
+# 利用者が自分の環境（多くは Windows）でビルドすることを想定した部品なので、
+# レジストリ取得なしにビルドできるほうが確実（spec 設計方針 2）。
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[features]
+# **検査を共有ライブラリ経由で走らせるための口**。
+# テスト実行ファイルをリンクできない環境（C コンパイラが無い等）でのみ使う。
+# 出荷する DLL には入れない。
+selftest = []

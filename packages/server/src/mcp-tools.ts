@@ -55,6 +55,7 @@ const fieldInputSchema = z.object({
   value: z.string()
 });
 
+/** 属性の変わり目。**こちらは `attributeRuns()` が組み立てる**ので増分の心配は無い */
 const attrRunSchema = z.object({
   row: z.number(),
   col: z.number(),
@@ -67,17 +68,34 @@ const attrRunSchema = z.object({
   nonDisplay: z.boolean().optional()
 });
 
-const fieldOutSchema = z.object({
-  index: z.number(),
-  row: z.number(),
-  col: z.number(),
-  length: z.number(),
-  protected: z.boolean(),
-  hidden: z.boolean(),
-  numeric: z.boolean(),
-  mdt: z.boolean(),
-  value: z.string()
-});
+/**
+ * 入力欄の structuredContent スキーマ。
+ *
+ * **`.passthrough()` にしてある。** ここへ渡すのは `ScreenSnapshot` の `Field` そのもので、
+ * 実物は下に並べたよりずっと多くの属性を持つ（`adjust` / `monocase` / `dupEnable` /
+ * `dbcsType` / `signedNumeric` …）。
+ *
+ * 既定の `z.object()` は JSON Schema で `additionalProperties: false` になり、
+ * **宣言していない属性が 1 つでも載ると SDK が structuredContent を弾く**
+ * （`get_screen` が丸ごと失敗する。しかも**クライアントが `tools/list` を呼んだ後だけ**
+ * 起きるので、生の JSON-RPC で叩いている限り気づけない）。
+ *
+ * 属性を宣言し足すだけでは、**次に `Field` が増えたときにまた同じことが起きる**。
+ * ドメイン型をそのまま流す口は、増分に耐える形にしておく。
+ */
+const fieldOutSchema = z
+  .object({
+    index: z.number(),
+    row: z.number(),
+    col: z.number(),
+    length: z.number(),
+    protected: z.boolean(),
+    hidden: z.boolean(),
+    numeric: z.boolean(),
+    mdt: z.boolean(),
+    value: z.string()
+  })
+  .passthrough();
 
 /** 拡張 5250 GUI 構造体の structuredContent スキーマ */
 const guiChoiceSchema = z.object({
@@ -87,51 +105,66 @@ const guiChoiceSchema = z.object({
   available: z.boolean(),
   numericChar: z.number().optional(),
   aid: z.number().optional()
-});
-const guiSchema = z.object({
-  selectionFields: z.array(
-    z.object({
-      id: z.number(),
-      row: z.number(),
-      col: z.number(),
-      kind: z.enum(["radio", "checkbox", "pushbutton", "menu"]),
-      fieldType: z.number(),
-      multiple: z.boolean(),
-      choices: z.array(guiChoiceSchema)
-    })
-  ),
-  windows: z.array(
-    z.object({
-      id: z.number(),
-      row: z.number(),
-      col: z.number(),
-      width: z.number(),
-      height: z.number(),
-      // WDWTITLE は文字だけでなく寄せ方・脚注か・色を持つ（枠の辺に描くために要る）
-      title: z
+}).passthrough();
+/**
+ * 拡張 5250 GUI 構造体の structuredContent スキーマ。
+ *
+ * **入れ子まで `.passthrough()`。** `fieldOutSchema` と同じ理由——`snap.gui` を
+ * そのまま流すので、ドメイン側が属性を増やしたときに MCP が落ちてはいけない。
+ */
+const guiSchema = z
+  .object({
+    selectionFields: z.array(
+      z
         .object({
-          text: z.string(),
-          align: z.enum(["center", "left", "right"]),
-          footer: z.boolean(),
-          cba: z.number()
+          id: z.number(),
+          row: z.number(),
+          col: z.number(),
+          kind: z.enum(["radio", "checkbox", "pushbutton", "menu"]),
+          fieldType: z.number(),
+          multiple: z.boolean(),
+          choices: z.array(guiChoiceSchema)
         })
-        .optional(),
-      restrictCursor: z.boolean(),
-      pulldown: z.boolean()
-    })
-  ),
-  scrollBars: z.array(
-    z.object({
-      id: z.number(),
-      row: z.number(),
-      col: z.number(),
-      horizontal: z.boolean(),
-      total: z.number(),
-      sliderPos: z.number(),
-      size: z.number()
-    })
-  )
-});
+        .passthrough()
+    ),
+    windows: z.array(
+      z
+        .object({
+          id: z.number(),
+          row: z.number(),
+          col: z.number(),
+          width: z.number(),
+          height: z.number(),
+          // WDWTITLE は文字だけでなく寄せ方・脚注か・色を持つ（枠の辺に描くために要る）
+          title: z
+            .object({
+              text: z.string(),
+              align: z.enum(["center", "left", "right"]),
+              footer: z.boolean(),
+              cba: z.number()
+            })
+            .passthrough()
+            .optional(),
+          restrictCursor: z.boolean(),
+          pulldown: z.boolean()
+        })
+        .passthrough()
+    ),
+    scrollBars: z.array(
+      z
+        .object({
+          id: z.number(),
+          row: z.number(),
+          col: z.number(),
+          horizontal: z.boolean(),
+          total: z.number(),
+          sliderPos: z.number(),
+          size: z.number()
+        })
+        .passthrough()
+    )
+  })
+  .passthrough();
 
 /** 画面を返すツールの structuredContent スキーマ。
  *  text（固定形式の画面イメージ）は content[].text と同内容を持たせる: outputSchema を持つツールでは

@@ -38,3 +38,6 @@ electron/app-stage/
 testlib-screens/
 *-screens/
 spool-html/
+
+# Rust のビルド成果物
+/crates/**/target/

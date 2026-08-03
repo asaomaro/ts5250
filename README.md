@@ -1103,3 +1103,19 @@ npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新�
   walkthrough / decisions / retro）。開発規約は [`AGENTS.md`](AGENTS.md)。
 - 検証環境: [PUB400.com](https://pub400.com)（要アカウント。週次再起動・接続数制限あり）。
 - 参考: RFC 1205 / RFC 4777 / SC30-3533、GNU tn5250（挙動・バイト仕様の参照のみ。GPL コードは非移植）。
+
+## HLLAPI / EHLLAPI
+
+既存の HLLAPI 資産（VB / C / Excel VBA など）から 5250 セッションを駆動できます。
+標準の `hllapi(int*, char*, int*, int*)` で受け、**画面は CP932（1 桁 = 1 バイト）**で返します。
+
+```c
+int func = 1; char data[1920] = "A"; int len = 1, rc = 0;
+hllapi(&func, data, &len, &rc);   /* Connect Presentation Space */
+```
+
+対応している機能・キーのニーモニック・戻り値・ビルド手順は
+**[docs/HLLAPI.md](docs/HLLAPI.md)** にまとめています。
+
+> ⚠ **Windows 版は未検証です**（開発環境に MSVC / mingw が無いため）。
+> クレートは OS 非依存に書いてありますが、動作は確認できていません。

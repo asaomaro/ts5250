@@ -58,6 +58,8 @@ export function statusOf(e: As400Error): 400 | 403 | 404 | 409 | 502 {
     // ホストの障害（502）でもない。以前は CONNECT_FAILED で 400 に落ちており、
     // 「ホストへ繋げなかった」と区別できなかった
     case "SESSION_LIMIT":
+    // 自動操作がセッションを予約している。**解除されれば通る**ので 409
+    case "SESSION_RESERVED":
       return 409;
     case "CONFIG_ERROR":
     case "CONNECT_FAILED":
