@@ -1,6 +1,14 @@
 import { reactive } from "vue";
 import { systemColorIndex } from "../composables/systemColor.js";
-import type { PublicSystem, PublicSession, Watermark, IdleTimeout, SessionType, DtaqWatchSpec } from "@ts5250/server";
+import type {
+  PublicSystem,
+  PublicSession,
+  Watermark,
+  IdleTimeout,
+  SessionType,
+  DtaqWatchSpec,
+  MsgWatchSpec
+} from "@ts5250/server";
 
 /**
  * システムとセッション設定（サーバー保存・単一の真実）。
@@ -72,6 +80,8 @@ export interface SessionConfigForm {
    * **種別との整合はサーバーが parse で強制する**（片方だけ送ると 400）。
    */
   dtaqWatch?: DtaqWatchSpec;
+  /** `msgwatch` のみ。常駐で待ち受けるメッセージ待ち行列（同上） */
+  msgWatch?: MsgWatchSpec;
   /**
    * サーバー設定の表示セッションのみ。個人設定に送るとサーバーが 400 を返す（信頼境界）。
    * ホストの `STRPCCMD` が届いたときにサーバー機でコマンドを実行する設定

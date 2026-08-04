@@ -176,10 +176,25 @@ export class CommandConnection {
   async call(
     program: string,
     library: string,
-    params: readonly ProgramParameter[]
+    params: readonly ProgramParameter[],
+    opts?: {
+      /**
+       * **この 1 往復だけ**の read タイムアウト（ミリ秒。`0` で無効＝無限に待つ）。
+       *
+       * 待つプログラム（`QMHRCVM` の待ち時間つき受信など）を呼ぶために要る——
+       * 既定は 20 秒なので、それより長く待つ呼び出しはソケットが先に切る。
+       *
+       * **接続既定は変えない**（同じ接続の他の呼び出しまで永久に待つようになる）。
+       * 相手が黙って消えた場合は TCP キープアライブが拾う（`transport/host-connection.ts`）。
+       */
+      readTimeoutMs?: number;
+    }
   ): Promise<{ result: CommandResult; outputs: (Uint8Array | undefined)[] }> {
     this.assertOpen();
-    const reply = await this.conn.request(buildCallProgramRequest(program, library, params));
+    const reply = await this.conn.request(
+      buildCallProgramRequest(program, library, params),
+      opts?.readTimeoutMs !== undefined ? { readTimeoutMs: opts.readTimeoutMs } : undefined
+    );
     // プログラム呼び出しは 0 以外に様々な値を返す（実機で 0x0501 を観測）。
     // コマンド実行と判定規則が違うので、ここでは戻りコードを絞らない
     const result = this.toResult(reply, `${library}/${program}`, false);

@@ -31,6 +31,11 @@ export {
   type IdleTimeout,
   type SessionType,
   type DtaqWatchSpec,
+  type MsgWatchSpec,
+  type WatchSpec,
+  msgWatchSchema,
+  sessionWatch,
+  sessionMsgWatch,
   type WebhookConfig,
   type PublicWebhook,
   type ConfigSource
@@ -90,6 +95,16 @@ export {
   type WatchSink,
   type WatchRegistryOptions
 } from "./watch-registry.js";
+// 待ち受けの「待ち方」（種類ごとに違うのはここだけ）
+export {
+  dtaqSource,
+  type WatchKind,
+  type WatchItem,
+  type WatchLink,
+  type WatchSource,
+  type WatchMessageInfo
+} from "./watch-source.js";
+export { msgqSource } from "./host-msgwatch.js";
 // 定義の変更を動いているサービスへ反映する
 // 待ち行列サービスの転送（**監視は消費するので、失敗はデータの喪失**）
 export {

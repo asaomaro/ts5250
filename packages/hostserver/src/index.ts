@@ -96,6 +96,17 @@ export {
   type ServiceProgramResult
 } from "./command/service-program.js";
 export {
+  buildReceiveParams,
+  parseReceivedMessage,
+  messageKeyToBytes,
+  MESSAGE_TYPES,
+  INQUIRY_TYPE,
+  type MessageSelector,
+  type MessageAction,
+  type ReceiveMessageSpec,
+  type ReceivedMessage
+} from "./command/message-receive.js";
+export {
   toProgramParameters,
   fromProgramOutputs,
   argByteLength,

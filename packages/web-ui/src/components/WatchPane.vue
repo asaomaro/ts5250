@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * データ待ち行列の**監視コンソール**（`20260723-dtaq-watch-notify`）。
+ * **監視コンソール**（`20260723-dtaq-watch-notify`）。
+ * データ待ち行列とメッセージ待ち行列の両方を扱う。
  *
  * 既存の「データ待ち行列」タブ（pull 型・押したときだけ要求）とは**別のアプリ**。
  * こちらは push 型で、**サーバーが常駐して待ち続ける**——ブラウザを閉じても、
@@ -10,9 +11,11 @@
  * ここは `watchesStore`（サーバーの写し）を描くだけ。開いたときに購読し直すことで、
  * 閉じていた間の到着が履歴に揃う。
  *
- * **監視は消費する**（エントリを取り出して消す）。その注意は開始時だけでなく**常時**出す。
+ * **データ待ち行列の監視は消費する**（エントリを取り出して消す）。その注意は開始時だけでなく**常時**出す。
+ * **メッセージ待ち行列は消費しない**（`*SAME` で読む）ので、同じ注意は出さない——
+ * 出すと嘘になり、出し続けると本当に効く注意まで読み飛ばされる。
  */
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { watchesStore } from "../stores/watches.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
@@ -47,6 +50,19 @@ watch(
 
 const at = (ms: number): string => new Date(ms).toLocaleTimeString("ja-JP", { hour12: false });
 
+/**
+ * 消費する注意を出すか。
+ *
+ * **黙るのは「メッセージ待ち行列しか無い」ときだけ。** これから足す人にこそ効く注意なので、
+ * 1 本も無いときは出す（開始時だけの表示にしないのが元々の要求）。
+ * メッセージ待ち行列は `*SAME` で読むので消費せず、そこで出すと**嘘になる**。
+ */
+const hasConsuming = computed(
+  () => watchesStore.watches.length === 0 || watchesStore.watches.some((w) => w.kind !== "msgq")
+);
+
+const kindLabel = (kind: string | undefined): string => (kind === "msgq" ? "メッセージ" : "データ");
+
 /** 監視の追加はセッション段から（requirement: 起動口はセッション設定） */
 function addWatch(): void {
   workspaceStore.showLauncher = true;
@@ -55,7 +71,7 @@ function addWatch(): void {
 
 <template>
   <div class="watch">
-    <p class="warn">⚠ {{ MSG_WATCH_CONSUMES }}</p>
+    <p v-if="hasConsuming" class="warn">⚠ {{ MSG_WATCH_CONSUMES }}</p>
     <p v-if="watchesStore.error" class="err">{{ watchesStore.error }}</p>
 
     <div class="cols">
@@ -65,12 +81,13 @@ function addWatch(): void {
           <button class="btn ghost" @click="addWatch">＋ 監視を追加</button>
         </div>
         <p v-if="watchesStore.watches.length === 0" class="empty">
-          監視はありません。「＋ 監視を追加」からセッション設定（種別: 待ち行列監視）を選んで接続してください。
+          監視はありません。「＋ 監視を追加」からセッション設定（種別: 待ち行列監視 / メッセージ待ち受け）を選んで接続してください。
         </p>
         <table v-else>
           <thead>
             <tr>
               <th>キュー</th>
+              <th>種類</th>
               <th class="n">受信</th>
               <th class="n">未読</th>
               <th>状態</th>
@@ -85,6 +102,7 @@ function addWatch(): void {
               @click="watchesStore.select(w.id)"
             >
               <td>{{ w.label }}</td>
+              <td class="kind">{{ kindLabel(w.kind) }}</td>
               <td class="n">{{ w.received }}</td>
               <td class="n">
                 <span v-if="watchesStore.unreadOf(w.id) > 0" class="badge">
@@ -145,11 +163,23 @@ function addWatch(): void {
         <p v-if="watchesStore.history.length === 0" class="empty">まだ届いていません。</p>
         <ol v-else class="entries">
           <!-- 新しいものを上に出す（届いた瞬間に気づくのが目的） -->
-          <li v-for="e in [...watchesStore.history].reverse()" :key="e.seq">
+          <li v-for="e in [...watchesStore.history].reverse()" :key="e.seq" :class="{ inq: e.message?.inquiry }">
             <span class="seq">#{{ e.seq }}</span>
             <span class="ts">{{ at(e.at) }}</span>
-            <span class="text">{{ e.text }}</span>
-            <span class="bytes">{{ e.bytes }}B</span>
+            <!-- **応答待ちを目立たせる**——ここを見落とすとジョブが止まったままになる -->
+            <span v-if="e.message?.inquiry" class="tag inqtag" title="応答しないとジョブが止まったままになります">
+              応答待ち
+            </span>
+            <span v-if="e.message?.id" class="tag" :title="e.message.type">{{ e.message.id }}</span>
+            <span class="text" :title="e.message?.help ?? ''">{{ e.text }}</span>
+            <!-- **切れたことを言う。** 黙って切ると短いメッセージに見えてしまう -->
+            <span v-if="e.message?.truncated" class="tag" title="本文が長すぎて途中までしか取れていません">
+              …切れています
+            </span>
+            <span v-if="e.message" class="bytes" :title="`メッセージキー ${e.message.key}`">
+              重大度 {{ e.message.severity }}
+            </span>
+            <span v-else class="bytes">{{ e.bytes }}B</span>
             <span v-if="e.sender" class="sender" :title="e.sender">送信者あり</span>
           </li>
         </ol>
@@ -182,6 +212,24 @@ function addWatch(): void {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
+}
+.kind {
+  color: var(--muted, #888);
+}
+/* **応答待ちは行ごと目立たせる**（`MessagePane` と同じ扱い） */
+.inq {
+  background: color-mix(in srgb, orange 18%, transparent);
+}
+.tag {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.8em;
+}
+.inqtag {
+  border-color: #c60;
+  color: #c60;
+  font-weight: 600;
 }
 .head {
   display: flex;

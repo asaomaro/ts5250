@@ -1,6 +1,6 @@
 /**
- * **サービス型の常駐ジョブを持つレジストリ。** 今回入れるのはデータ待ち行列の監視
- * （`kind: "dtaq"`）1 種だけ。
+ * **サービス型の常駐ジョブを持つレジストリ。**
+ * データ待ち行列（`kind: "dtaq"`）とメッセージ待ち行列（`kind: "msgq"`）を扱う。
  *
  * ## なぜ `SessionManager` に相乗りさせないか（spec 方針1）
  *
@@ -21,21 +21,26 @@
  *
  * ## 待ち方
  *
- * `read({ wait: -1 })` で**無通信のままブロックして待つ**（ポーリングしない）。
- * `wait < 0` は read タイムアウトを無効にするので、**相手が黙って消えても永久に待つ**——
- * それを検出するために core 側で TCP キープアライブを入れてある
- * （`transport/host-connection.ts`）。切れたらここが指数バックオフで張り直す。
+ * **無通信のままブロックして待つ**（ポーリングしない）。相手が黙って消えても
+ * 永久に待つことになるので、それを検出するために core 側で TCP キープアライブを
+ * 入れてある（`transport/host-connection.ts`）。切れたらここが指数バックオフで張り直す。
+ *
+ * ## 種類ごとの違いはここに書かない
+ *
+ * 「どう開くか」「どう 1 件待つか」だけが種類ごとに違い、それは `watch-source.ts` にある。
+ * **このクラスは何を待っているか知らない**——寿命・再接続・状態・履歴・所有・転送だけを見る。
  */
 import { randomUUID } from "node:crypto";
 import { As400Error } from "@ts5250/base";
-import { type DtaqConnection, dtaqDecodeEbcdic } from "@ts5250/hostserver";
+import type { CommandConnection, DtaqConnection } from "@ts5250/hostserver";
 import { type ConnectOptions } from "@ts5250/tn5250";
 import { assertOwner, type AuthUser } from "./auth.js";
 import type { ServiceState } from "./service-state.js";
-import type { DtaqWatchSpec } from "./config-types.js";
-import { fromBytes, toBytes, type DtaqEncoding } from "./host-dtaq.js";
-import { openDtaq } from "./host-connect.js";
+import type { WatchSpec } from "./config-types.js";
+import { msgqSource } from "./host-msgwatch.js";
+import { openCommand, openDtaq } from "./host-connect.js";
 import { childLog } from "./log.js";
+import { dtaqSource, type WatchItem, type WatchKind, type WatchLink, type WatchSource } from "./watch-source.js";
 
 const log = childLog({ component: "watch-registry" });
 
@@ -51,8 +56,8 @@ export type WatchState = ServiceState;
 /** API / WS へ出す監視 1 本 */
 export interface WatchView {
   id: string;
-  /** サービス型の種類。今は `"dtaq"` だけ（プリンターの常駐化は別作業） */
-  kind: "dtaq";
+  /** サービス型の種類（プリンターの常駐化は別作業） */
+  kind: WatchKind;
   /** 由来のセッション設定参照（`srv:` / `own:`） */
   ref: string;
   /** 表示名（`ライブラリー/キュー`） */
@@ -91,6 +96,11 @@ export interface WatchEntryView {
   bytes: number;
   /** 送信者情報（save sender 有効なキューのみ） */
   sender?: string;
+  /**
+   * メッセージ待ち行列のときの付随情報。**キーが入っているので応答にそのまま使える**。
+   * データ待ち行列には無い。
+   */
+  message?: WatchItem["message"];
 }
 
 /** 購読者へ流すイベント */
@@ -124,8 +134,10 @@ export interface WatchRegistryOptions {
   maxWatches?: number;
   /** 履歴の保持件数（監視あたり。既定 200）。超えたら古いものから落とす */
   historyLimit?: number;
-  /** 接続を開く手段。**テストで偽の接続を差し込むための口** */
+  /** データ待ち行列の接続を開く手段。**テストで偽の接続を差し込むための口** */
   connect?: (opts: ConnectOptions) => Promise<DtaqConnection>;
+  /** メッセージ待ち行列の接続を開く手段（同上） */
+  connectCommand?: (opts: ConnectOptions) => Promise<CommandConnection>;
   now?: () => number;
   /** 再接続の待ち（ms）。テストで縮める */
   backoffMs?: readonly number[];
@@ -151,8 +163,10 @@ const FATAL_CODES = new Set([
 
 interface Watch {
   view: WatchView;
-  spec: DtaqWatchSpec;
+  spec: WatchSpec;
   connect: ConnectOptions;
+  /** 種類ごとの「開き方・待ち方」。**張り直しをまたいで生きる**（カーソル等を持つ） */
+  source: WatchSource;
   /** 転送先（設定があるときだけ）。**HTTP の都合はこちらに閉じ込める** */
   sink?: WatchSink;
   history: WatchEntryView[];
@@ -165,7 +179,7 @@ interface Watch {
    * 終わった時点で印は立っている）。空振り検証で順序を入れ替えても落ちないのはそのため。
    */
   stopping: boolean;
-  conn?: DtaqConnection;
+  link?: WatchLink;
 }
 
 export class WatchRegistry {
@@ -174,6 +188,7 @@ export class WatchRegistry {
   private readonly maxWatches: number;
   private readonly historyLimit: number;
   private readonly openConn: (opts: ConnectOptions) => Promise<DtaqConnection>;
+  private readonly openCmd: (opts: ConnectOptions) => Promise<CommandConnection>;
   private readonly now: () => number;
   private readonly backoff: readonly number[];
   private readonly delay: (ms: number) => Promise<void>;
@@ -182,6 +197,7 @@ export class WatchRegistry {
     this.maxWatches = opts.maxWatches ?? 4;
     this.historyLimit = opts.historyLimit ?? 200;
     this.openConn = opts.connect ?? openDtaq;
+    this.openCmd = opts.connectCommand ?? openCommand;
     this.now = opts.now ?? (() => Date.now());
     this.backoff = opts.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -199,7 +215,7 @@ export class WatchRegistry {
   async start(opts: {
     ref: string;
     label: string;
-    spec: DtaqWatchSpec;
+    spec: WatchSpec;
     connect: ConnectOptions;
     owner?: string;
     /**
@@ -240,16 +256,17 @@ export class WatchRegistry {
   register(opts: {
     ref: string;
     label: string;
-    spec: DtaqWatchSpec;
+    spec: WatchSpec;
     connect: ConnectOptions;
     owner?: string;
     sink?: WatchSink;
   }): WatchView {
     const id = randomUUID();
+    const source = this.sourceFor(opts.spec, opts.connect);
     const watch: Watch = {
       view: {
         id,
-        kind: "dtaq",
+        kind: source.kind,
         ref: opts.ref,
         label: opts.label,
         state: "stopped",
@@ -259,6 +276,7 @@ export class WatchRegistry {
       },
       spec: opts.spec,
       connect: opts.connect,
+      source,
       ...(opts.sink ? { sink: opts.sink } : {}),
       history: [],
       stopping: false
@@ -286,8 +304,8 @@ export class WatchRegistry {
     assertOwner(w.view.owner, user);
     if (w.view.state === "stopped") return; // 冪等（二重に押されても壊れない）
     w.stopping = true;
-    w.conn?.close();
-    delete w.conn;
+    w.link?.close();
+    delete w.link;
     // **転送は止めない。** ここで捨てるのは筋が通らない——既に読み取った
     // エントリはホスト側から消えているので、捨てれば**ただのデータの喪失**になる。
     // 「待ち受けを止める」は「これ以上読まない」であって、
@@ -306,12 +324,16 @@ export class WatchRegistry {
    */
   update(
     id: string,
-    opts: { label: string; spec: DtaqWatchSpec; connect: ConnectOptions; sink?: WatchSink }
+    opts: { label: string; spec: WatchSpec; connect: ConnectOptions; sink?: WatchSink }
   ): boolean {
     const w = this.watches.get(id);
     if (!w) throw new As400Error("NOT_FOUND", `watch ${id} not found`);
     w.spec = opts.spec;
     w.connect = opts.connect;
+    // **開き方も差し替える**（カーソル等は新しい材料で取り直す）。
+    // いまの接続は落とさないので、効くのは開き直したときから
+    w.source = this.sourceFor(opts.spec, opts.connect);
+    w.view.kind = w.source.kind;
     w.view.label = opts.label;
     // **古い転送先は止めない。** 差し替えても、既に積んである未送分は配り切らせる
     // （止めると読み取り済みのデータが消える）。参照を外すだけで、自分で流し終える
@@ -357,7 +379,7 @@ export class WatchRegistry {
     // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
     delete w.view.stale;
     try {
-      w.conn = await this.openConn(w.connect);
+      w.link = await w.source.open();
     } catch (e) {
       // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
       // （`SessionManager.startPrinter` と同じ扱い）
@@ -434,7 +456,7 @@ export class WatchRegistry {
       // **ここが唯一の捨てどころ。** プロセスが畳まれるので配り切れない
       // （未送分はここで失われる。設定画面と文書に明記してある。design D1）
       w.sink?.stop();
-      w.conn?.close();
+      w.link?.close();
     }
     this.watches.clear();
   }
@@ -474,18 +496,20 @@ export class WatchRegistry {
     let attempt = 0;
     while (!w.stopping) {
       try {
-        if (!w.conn) {
-          w.conn = await this.openConn(w.connect);
+        if (!w.link) {
+          w.link = await w.source.open();
           // **繋がった時点で `listening` に戻す。** 受信できたときに戻す形だと、
           // 張り直せたのにエントリが来ないキューが永久に `reconnecting` に見える
           // ——「何も来ないのが正常」な監視では、それは嘘の表示になる
           attempt = 0;
           if (w.view.state !== "listening") this.setState(w, "listening");
         }
-        const entry = await w.conn.read(this.readOptions(w.spec));
-        // **空で戻るのは想定外**（wait=-1 は届くまで返らない）。念のため読み直す
-        if (!entry) continue;
-        this.push(w, entry);
+        const item = await w.link.next();
+        // **空で戻ることがある**——無限に待つので「時間切れ」は起きないが、
+        // 「待ったが対象ではなかった」（`onlyInquiry` で捨てた）ときに空が返る。
+        // どちらにせよ待ち直すだけでよい
+        if (!item) continue;
+        this.push(w, item);
       } catch (e) {
         if (w.stopping) return; // 停止による reject（障害ではない）
         const err = e as As400Error;
@@ -493,8 +517,8 @@ export class WatchRegistry {
           this.setState(w, "error", err.message);
           return; // **再試行しない**（待っても直らない）
         }
-        w.conn?.close();
-        delete w.conn;
+        w.link?.close();
+        delete w.link;
         this.setState(w, "reconnecting", err.message);
         const wait = this.backoff[Math.min(attempt, this.backoff.length - 1)] ?? 30_000;
         attempt += 1;
@@ -505,15 +529,15 @@ export class WatchRegistry {
   }
 
   /** 受信 1 件を履歴へ積んで配る。**上限を超えたら古いものから落とす**（監視は続く） */
-  private push(w: Watch, entry: { data: Uint8Array; senderInfo?: Uint8Array }): void {
+  private push(w: Watch, item: WatchItem): void {
     w.view.received += 1;
-    const encoding: DtaqEncoding = w.spec.encoding ?? "utf8";
     const view: WatchEntryView = {
       seq: w.view.received,
       at: this.now(),
-      text: fromBytes(entry.data, encoding),
-      bytes: entry.data.length,
-      ...(entry.senderInfo !== undefined ? { sender: dtaqDecodeEbcdic(entry.senderInfo) } : {})
+      text: item.text,
+      bytes: item.bytes,
+      ...(item.sender !== undefined ? { sender: item.sender } : {}),
+      ...(item.message !== undefined ? { message: item.message } : {})
     };
     w.history.push(view);
     if (w.history.length > this.historyLimit) w.history.splice(0, w.history.length - this.historyLimit);
@@ -533,17 +557,14 @@ export class WatchRegistry {
   }
 
   /**
-   * `read` の引数。**待機は常に無限**（`wait: -1`）——常駐監視の本体で、
+   * 種類ごとの「開き方・待ち方」を作る。**ここだけが種類を知っている。**
+   *
+   * 待機は常に無限（届くまで返らない）——常駐監視の本体で、
    * HTTP ルートの「無限待ち禁止」はここには適用しない（spec の非機能要件）。
    */
-  private readOptions(spec: DtaqWatchSpec): Parameters<DtaqConnection["read"]>[0] {
-    const keyEncoding: DtaqEncoding = spec.encoding ?? "utf8";
-    return {
-      name: spec.name,
-      library: spec.library,
-      wait: -1,
-      ...(spec.key !== undefined ? { key: toBytes(spec.key, keyEncoding) } : {}),
-      ...(spec.search !== undefined ? { search: spec.search } : {})
-    };
+  private sourceFor(spec: WatchSpec, connect: ConnectOptions): WatchSource {
+    return spec.kind === "msgq"
+      ? msgqSource({ spec, connect, open: this.openCmd })
+      : dtaqSource({ spec, connect, open: this.openConn });
   }
 }

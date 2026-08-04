@@ -31,7 +31,7 @@
 import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
-import { sessionDtaqWatch } from "./config-types.js";
+import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import { childLog } from "./log.js";
 
@@ -104,7 +104,9 @@ async function saveService(deps: ServiceReconcileDeps, ref: string): Promise<Rec
   if (!session) return { skipped: "セッション設定ではない" };
 
   if (session.sessionType === "printer") return await savePrinter(deps, ref, t);
-  if (session.sessionType === "dtaqwatch") return await saveWatch(deps, ref, t);
+  if (session.sessionType === "dtaqwatch" || session.sessionType === "msgwatch") {
+    return await saveWatch(deps, ref, t);
+  }
   return { skipped: "サービスの種別ではない" };
 }
 
@@ -157,8 +159,8 @@ async function savePrinter(
 
 async function saveWatch(deps: ServiceReconcileDeps, ref: string, t: Resolved): Promise<ReconcileResult> {
   if (!deps.watches) return { skipped: "監視レジストリが無い" };
-  const spec = t.session ? sessionDtaqWatch(t.session) : undefined;
-  if (!spec) return { skipped: "監視の設定を持っていない" };
+  const spec = t.session ? sessionWatch(t.session) : undefined;
+  if (!spec) return { skipped: "待ち受けの設定を持っていない" };
   const label = `${spec.library}/${spec.name}`;
   const sink = makeWatchSink(ref, t.webhook);
   const view = deps.watches.list().find((w) => w.ref === ref);

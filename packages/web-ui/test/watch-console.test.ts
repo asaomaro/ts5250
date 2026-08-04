@@ -48,6 +48,8 @@ const W1 = {
   startedAt: "2026-07-30T00:00:00Z"
 };
 const W2 = { ...W1, id: "w2", ref: "own:c2", label: "MYLIB/LOGQ" };
+/** メッセージ待ち行列の待ち受け。**こちらは消費しない**（`*SAME` で読む） */
+const M1 = { ...W1, id: "m1", kind: "msgq" as const, ref: "own:m1", label: "QSYS/QSYSOPR" };
 
 const deliver = (m: unknown): void => captured.handlers.onServerMessage(m);
 const entry = (seq: number, text: string) => ({ seq, at: 1_000_000, text, bytes: text.length });
@@ -167,6 +169,50 @@ describe("WatchPane", () => {
     deliver({ type: "watch-list", watches: [W1] });
     await nextTick();
     expect(w.text()).toContain(MSG_WATCH_CONSUMES);
+    w.unmount();
+  });
+
+  it("**メッセージ待ち行列だけなら消費の注意は出さない**（出すと嘘になる）", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    deliver({ type: "watch-list", watches: [M1] });
+    await nextTick();
+    expect(w.text()).not.toContain(MSG_WATCH_CONSUMES);
+    // データ待ち行列が 1 本でも混じれば出る
+    deliver({ type: "watch-list", watches: [M1, W1] });
+    await nextTick();
+    expect(w.text()).toContain(MSG_WATCH_CONSUMES);
+    w.unmount();
+  });
+
+  it("待ち受けの種類が分かる", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    deliver({ type: "watch-list", watches: [W1, M1] });
+    await nextTick();
+    expect(w.text()).toContain("メッセージ");
+    expect(w.text()).toContain("データ");
+    w.unmount();
+  });
+
+  it("**応答待ちは目立たせる**（見落とすとジョブが止まったままになる）", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    deliver({ type: "watch-list", watches: [M1] });
+    watchesStore.select("m1");
+    deliver({
+      type: "watch-entry",
+      watchId: "m1",
+      received: 1,
+      entry: {
+        seq: 1,
+        at: 0,
+        text: "Attributes of file QPDSPJOB not supported.",
+        bytes: 42,
+        message: { key: "00002290", id: "CPA3303", type: "INQUIRY", severity: 99, inquiry: true }
+      }
+    });
+    await nextTick();
+    expect(w.text()).toContain("応答待ち");
+    expect(w.text()).toContain("CPA3303");
+    expect(w.find("li.inq").exists()).toBe(true);
     w.unmount();
   });
 

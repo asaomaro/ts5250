@@ -135,6 +135,32 @@ const watchEncoding = computed({
   }
 });
 
+/**
+ * 待ち受けるメッセージ待ち行列の入力。**理由は `watchLibrary` と同じ**
+ * （未設定から始まるので、ネストへ直接束ねると 1 文字目で例外になる）。
+ */
+const msgWatchField = <K extends "library" | "name">(key: K) =>
+  computed({
+    get: () => sesForm.msgWatch?.[key] ?? "",
+    set: (v: string) => {
+      sesForm.msgWatch = { library: "", name: "", ...sesForm.msgWatch, [key]: v };
+    }
+  });
+const msgLibrary = msgWatchField("library");
+const msgName = msgWatchField("name");
+const msgOnlyInquiry = computed({
+  get: () => sesForm.msgWatch?.onlyInquiry === true,
+  set: (v: boolean) => {
+    sesForm.msgWatch = { library: "", name: "", ...sesForm.msgWatch, onlyInquiry: v };
+  }
+});
+const msgIncludeExisting = computed({
+  get: () => sesForm.msgWatch?.includeExisting === true,
+  set: (v: boolean) => {
+    sesForm.msgWatch = { library: "", name: "", ...sesForm.msgWatch, includeExisting: v };
+  }
+});
+
 /** 「無操作で切る」の選択肢（分）。任意の数値を打たせるほどの要求ではないので選択式にする */
 const IDLE_MINUTES = [5, 10, 15, 30, 60, 120, 240];
 /**
@@ -471,7 +497,22 @@ async function save(): Promise<void> {
         delete form.watermark;
         delete form.rescueAction;
         delete form.transformTo;
+      } else if (form.sessionType === "msgwatch") {
+        const w = sesForm.msgWatch;
+        form.msgWatch = {
+          library: (w?.library ?? "").trim().toUpperCase(),
+          name: (w?.name ?? "").trim().toUpperCase(),
+          ...(w?.onlyInquiry ? { onlyInquiry: true } : {}),
+          ...(w?.includeExisting ? { includeExisting: true } : {})
+        };
+        delete form.dtaqWatch;
+        delete form.screenSize;
+        delete form.enhanced;
+        delete form.watermark;
+        delete form.rescueAction;
+        delete form.transformTo;
       } else {
+        delete form.msgWatch;
         delete form.dtaqWatch;
       }
       if (form.sessionType === "printer") {
@@ -567,14 +608,22 @@ async function remove(): Promise<void> {
 
 /** セッション種別のアイコンと表記。旧 UI にあった見分けを引き継ぐ */
 const typeIcon = computed(() =>
-  props.session?.sessionType === "printer" ? "🖨" : props.session?.sessionType === "dtaqwatch" ? "👁" : "🖥"
+  props.session?.sessionType === "printer"
+    ? "🖨"
+    : props.session?.sessionType === "dtaqwatch"
+      ? "👁"
+      : props.session?.sessionType === "msgwatch"
+        ? "🔔"
+        : "🖥"
 );
 const typeLabel = computed(() =>
   props.session?.sessionType === "printer"
     ? "プリンター"
     : props.session?.sessionType === "dtaqwatch"
       ? "待ち行列監視"
-      : "5250 端末"
+      : props.session?.sessionType === "msgwatch"
+        ? "メッセージ待ち受け"
+        : "5250 端末"
 );
 
 /** 詳細（ⓘ）の開閉。旧 UI にあった接続設定の詳細表示を引き継ぐ */
@@ -610,11 +659,22 @@ const infoRows = computed(() => {
   rows.push({
     label: "種別",
     value:
-      o.sessionType === "printer" ? "プリンター" : o.sessionType === "dtaqwatch" ? "待ち行列監視" : "5250 端末"
+      o.sessionType === "printer"
+        ? "プリンター"
+        : o.sessionType === "dtaqwatch"
+          ? "待ち行列監視"
+          : o.sessionType === "msgwatch"
+            ? "メッセージ待ち受け"
+            : "5250 端末"
   });
   if (o.dtaqWatch) {
     rows.push({ label: "監視するキュー", value: `${o.dtaqWatch.library}/${o.dtaqWatch.name}` });
     rows.push({ label: "符号化", value: o.dtaqWatch.encoding ?? "utf8" });
+  }
+  if (o.msgWatch) {
+    rows.push({ label: "待ち受ける待ち行列", value: `${o.msgWatch.library}/${o.msgWatch.name}` });
+    rows.push({ label: "拾う範囲", value: o.msgWatch.onlyInquiry ? "応答待ちだけ" : "すべて" });
+    rows.push({ label: "始める位置", value: o.msgWatch.includeExisting ? "既にあるぶんも" : "始めた後のぶんだけ" });
   }
   rows.push({ label: "システム", value: parent?.name ?? o.system });
   // 接続先と資格情報はシステム側が持つ。辿った結果をここに出す
@@ -829,6 +889,7 @@ const infoRows = computed(() => {
             <option value="display">5250 表示</option>
             <option value="printer">プリンター</option>
             <option value="dtaqwatch">待ち行列監視</option>
+            <option value="msgwatch">メッセージ待ち受け</option>
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
@@ -874,6 +935,35 @@ const infoRows = computed(() => {
             </select>
           </label>
           <p class="row full watchwarn">⚠ {{ MSG_WATCH_CONSUMES }}</p>
+        </template>
+        <!--
+          メッセージ待ち受け。**消費しないので注意書きは出さない**——
+          `*SAME` で読むのでメッセージは待ち行列に残り、照会には後から応答できる。
+        -->
+        <template v-if="sesForm.sessionType === 'msgwatch'">
+          <label class="row">
+            <span class="cap">ライブラリー</span>
+            <input v-model="msgLibrary" maxlength="10" placeholder="QSYS" />
+          </label>
+          <label class="row">
+            <span class="cap">待ち行列名</span>
+            <input v-model="msgName" maxlength="10" placeholder="QSYSOPR" />
+          </label>
+          <label class="row">
+            <span class="cap" title="応答しないとジョブが止まったままになるものだけを拾います">
+              応答待ちだけ
+            </span>
+            <span class="tv"><input v-model="msgOnlyInquiry" type="checkbox" /></span>
+          </label>
+          <label class="row">
+            <span
+              class="cap"
+              title="入れると、始める前から溜まっているものも流します。QSYSOPR では数百件が一度に届くことがあります"
+            >
+              既にあるぶんも
+            </span>
+            <span class="tv"><input v-model="msgIncludeExisting" type="checkbox" /></span>
+          </label>
         </template>
         <!--
           待ち受けを自動で始めるか。**プリンターと待ち行列で同じ設定**（利用者の要望どおり）。

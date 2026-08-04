@@ -127,7 +127,12 @@ export abstract class ConfigStore {
    */
   listServiceDefs(user: AuthUser | undefined): ServiceDef[] {
     return [...this.sessions.values()]
-      .filter((s) => s.sessionType === "printer" || s.sessionType === "dtaqwatch")
+      // **サービス型を明示で並べる。**「display 以外」と書くと、
+      // 後から足した種別が黙ってサービス扱いになる
+      .filter(
+        (s) =>
+          s.sessionType === "printer" || s.sessionType === "dtaqwatch" || s.sessionType === "msgwatch"
+      )
       .filter((s) => this.canSeeService(this.ownerOf(s), user))
       .map((s) => {
         const d: ServiceDef = { ref: makeRef(this.source, s.id), name: s.name, sessionType: s.sessionType };

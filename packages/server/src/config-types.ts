@@ -20,7 +20,7 @@ export const screenSizeSchema = z.enum(["24x80", "27x132"]);
  * （データ待ち行列を常駐監視する）。装置名も画面サイズも使わない
  * （`20260723-dtaq-watch-notify` spec 方針1・research F5）。
  */
-export const sessionTypeSchema = z.enum(["display", "printer", "dtaqwatch"]);
+export const sessionTypeSchema = z.enum(["display", "printer", "dtaqwatch", "msgwatch"]);
 
 /**
  * **開いた直後／サーバー起動直後に待ち受けを開始するか**（既定 true）。
@@ -59,8 +59,48 @@ export const dtaqWatchSchema = z
     search: z.enum(["EQ", "NE", "LT", "LE", "GT", "GE"]).optional()
   })
   .strict();
+/**
+ * 常駐で待ち受けるメッセージ待ち行列の指定。
+ *
+ * **消費しない**——`QMHRCVM` を `*SAME` で呼ぶので、読んでもメッセージは残る。
+ * データ待ち行列の監視と違い「本番のコンシューマの取り分を奪う」問題が無いので、
+ * `MSG_WATCH_CONSUMES` の注意は出さない（出すと嘘になる）。
+ *
+ * **信頼設定ではない**（`dtaqWatch` と同じ理屈）。
+ */
+export const msgWatchSchema = z
+  .object({
+    /** ライブラリー名（EBCDIC 10 バイト固定） */
+    library: z.string().min(1).max(10),
+    /** 待ち行列名（同上。`QSYSOPR` など） */
+    name: z.string().min(1).max(10),
+    /**
+     * **照会だけ拾う。** 応答しないとジョブが止まったままになるものだけを見たい、が
+     * 一番多い使い方。絞りはこちらで行う——`*INQ` と `*NEXT` は同じ欄なので
+     * ホスト側では「次を待ちつつ照会だけ」が表現できない
+     */
+    onlyInquiry: z.boolean().optional(),
+    /**
+     * **始める前からあったものも流す**（既定 false）。
+     *
+     * 既定で流さないのは、`QSYSOPR` に数百件溜まっていることがあり、
+     * 始めた瞬間に全部が押し寄せると**通知として使い物にならない**ため。
+     */
+    includeExisting: z.boolean().optional()
+  })
+  .strict();
+
 export type SessionType = z.infer<typeof sessionTypeSchema>;
 export type DtaqWatchSpec = z.infer<typeof dtaqWatchSchema>;
+export type MsgWatchSpec = z.infer<typeof msgWatchSchema>;
+
+/**
+ * 待ち受け 1 本の指定。**種類で分かれる**。
+ *
+ * データ待ち行列側に `kind` を持たせていないのは、既存の設定ファイルに
+ * 後から必須項目を足さないため（省略＝`dtaq`）。
+ */
+export type WatchSpec = (DtaqWatchSpec & { kind?: "dtaq" | undefined }) | (MsgWatchSpec & { kind: "msgq" });
 
 /** プリンターセッションのサーバー側出力設定（PDF 自動蓄積・自動印刷）。**信頼設定** */
 export const printerSchema = z.object({
@@ -250,6 +290,8 @@ const sessionBase = {
    * **種別との整合は parse で強制する**（下記 `assertTypeConsistent`）。
    */
   dtaqWatch: dtaqWatchSchema.optional(),
+  /** `msgwatch` のみ。常駐で待ち受けるメッセージ待ち行列（同上） */
+  msgWatch: msgWatchSchema.optional(),
   /**
    * 無操作で切るまでの時間（display / printer 双方で意味を持つ）。
    *
@@ -272,9 +314,24 @@ const sessionBase = {
  * 持たせない判断と同じ考え方）。
  */
 function assertTypeConsistent(
-  s: { sessionType: SessionType; dtaqWatch?: DtaqWatchSpec | undefined; webhook?: unknown },
+  s: {
+    sessionType: SessionType;
+    dtaqWatch?: DtaqWatchSpec | undefined;
+    msgWatch?: MsgWatchSpec | undefined;
+    webhook?: unknown;
+  },
   ctx: z.RefinementCtx
 ): void {
+  if (s.sessionType === "msgwatch" && s.msgWatch === undefined) {
+    ctx.addIssue({ code: "custom", path: ["msgWatch"], message: "msgwatch セッションには msgWatch が必要です" });
+  }
+  if (s.sessionType !== "msgwatch" && s.msgWatch !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["msgWatch"],
+      message: `msgWatch は msgwatch セッションにしか指定できません（sessionType=${s.sessionType}）`
+    });
+  }
   if (s.sessionType === "dtaqwatch" && s.dtaqWatch === undefined) {
     ctx.addIssue({ code: "custom", path: ["dtaqWatch"], message: "dtaqwatch セッションには dtaqWatch が必要です" });
   }
@@ -393,6 +450,23 @@ export function sessionPrinter(s: AnySession): PrinterConfig | undefined {
  */
 export function sessionDtaqWatch(s: AnySession): DtaqWatchSpec | undefined {
   return s.sessionType === "dtaqwatch" ? s.dtaqWatch : undefined;
+}
+
+/** メッセージ待ち行列の待ち受け設定を取り出す（`sessionDtaqWatch` と同じ理由で種別も見る） */
+export function sessionMsgWatch(s: AnySession): MsgWatchSpec | undefined {
+  if (s.sessionType !== "msgwatch") return undefined;
+  return "msgWatch" in s ? s.msgWatch : undefined;
+}
+
+/**
+ * **待ち受けの指定を種類つきで取り出す。** 呼び出し側はこれ 1 つを見ればよい——
+ * 種別ごとの分岐がレジストリの外に散らないようにする。
+ */
+export function sessionWatch(s: AnySession): WatchSpec | undefined {
+  const dtaq = sessionDtaqWatch(s);
+  if (dtaq) return dtaq;
+  const msg = sessionMsgWatch(s);
+  return msg ? { ...msg, kind: "msgq" } : undefined;
 }
 
 /**
@@ -526,6 +600,8 @@ export interface PublicSession {
   idleTimeout?: IdleTimeout;
   /** `dtaqwatch` のみ。常駐監視するデータ待ち行列（信頼設定ではないので値ごと返す） */
   dtaqWatch?: DtaqWatchSpec;
+  /** `msgwatch` のみ。常駐で待ち受けるメッセージ待ち行列（同上） */
+  msgWatch?: MsgWatchSpec;
   /**
    * PC コマンド（STRPCCMD）の実行設定。**編集できる相手にだけ返す**（`includeTrusted`）。
    *

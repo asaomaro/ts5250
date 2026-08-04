@@ -25,7 +25,7 @@ import { As400Error } from "@ts5250/base";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
-import { sessionDtaqWatch } from "./config-types.js";
+import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import { childLog } from "./log.js";
 
@@ -76,7 +76,7 @@ export async function startAutoServices(deps: BootAutoStartDeps): Promise<BootAu
         }
         await startPrinter(deps, d.ref);
         result.started++;
-      } else if (d.sessionType === "dtaqwatch") {
+      } else if (d.sessionType === "dtaqwatch" || d.sessionType === "msgwatch") {
         // 待ち行列は**種別そのものがサービス型**なので `service` を見ない
         if (!deps.watches) {
           result.skipped++;
@@ -115,9 +115,9 @@ async function startPrinter(deps: BootAutoStartDeps, ref: string): Promise<void>
 
 async function startWatch(deps: BootAutoStartDeps, ref: string): Promise<void> {
   const t = deps.resolver.resolve({ session: ref }, undefined, (m) => log.warn(m));
-  const spec = t.session ? sessionDtaqWatch(t.session) : undefined;
+  const spec = t.session ? sessionWatch(t.session) : undefined;
   if (!spec) {
-    throw new As400Error("CONFIG_ERROR", `${ref} は監視の設定を持っていません`);
+    throw new As400Error("CONFIG_ERROR", `${ref} は待ち受けの設定を持っていません`);
   }
   const sink = makeWatchSink(ref, t.webhook);
   await deps.watches!.start({

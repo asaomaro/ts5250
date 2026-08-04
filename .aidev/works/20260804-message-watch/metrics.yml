@@ -1,0 +1,11 @@
+events:
+  - { ts: 2026-08-04T12:45:40Z, phase: requirement, event: approved }
+  - { ts: 2026-08-04T12:45:40Z, phase: research, event: approved }
+  - { ts: 2026-08-04T12:50:26Z, phase: spec, event: approved }
+  - { ts: 2026-08-04T12:51:27Z, phase: design, event: approved }
+  - { ts: 2026-08-04T12:51:27Z, phase: plan, event: approved, metrics: { tasks_planned: 10 } }
+  - { ts: 2026-08-04T13:49:03Z, phase: coding, event: approved, metrics: { tasks_done: 10 } }
+  - { ts: 2026-08-04T13:49:03Z, phase: test, event: approved }
+  - { ts: 2026-08-04T13:54:00Z, phase: review, event: approved }
+  - { ts: 2026-08-04T13:54:00Z, phase: walkthrough, event: approved }
+  - { ts: 2026-08-04T13:56:04Z, phase: deliver, event: approved, metrics: { pr: 303 } }

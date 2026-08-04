@@ -77,12 +77,13 @@ async function open(ref: string, force = false): Promise<void> {
   // **監視は装置名を持たない。** 重複判定を通すと、装置名 undefined 同士で
   // 誤って「使用中」に見えるうえ、そもそも 1 装置 1 接続の制約が無い（research F5）。
   // 監視はサーバーのレジストリが所有するので、セッションとしては開かない
-  if (s.sessionType === "dtaqwatch") {
+  if (s.sessionType === "dtaqwatch" || s.sessionType === "msgwatch") {
     connecting.value = s.ref;
     openError.value = "";
     try {
-      // **同じ設定の監視を二重に始めない。** 監視は消費するので、2 本掛かると
-      // 1 本ぶんのエントリを取り合って両方が欠ける（セッションで「開いていればタブへ戻す」のと同じ判断）
+      // **同じ設定の待ち受けを二重に始めない。** データ待ち行列は消費するので、2 本掛かると
+      // 1 本ぶんのエントリを取り合って両方が欠ける（セッションで「開いていればタブへ戻す」のと同じ判断）。
+      // メッセージ側は消費しないが、**同じものが 2 度通知される**ので同じく 1 本にする
       const already = watchesStore.watches.some((x) => x.ref === s.ref);
       if (!already) await watchesStore.start(s.ref);
       else await watchesStore.connect();

@@ -9,7 +9,7 @@ import {
   type StoredReport
 } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
-import { sessionDtaqWatch } from "./config-types.js";
+import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
@@ -337,11 +337,12 @@ export class WsConnection {
     const reg = this.requireWatches();
     await withAudit({ op: "ws_watch_start" }, async () => {
       const target = this.deps.resolver.resolve({ session: msg.session }, this.user, (m) => wsLog.warn(m));
-      const spec = target.session ? sessionDtaqWatch(target.session) : undefined;
+      const spec = target.session ? sessionWatch(target.session) : undefined;
       if (!spec) {
         throw new As400Error(
           "CONFIG_ERROR",
-          `${msg.session} は監視の設定を持っていません（種別 dtaqwatch のセッション設定を指定してください）`
+          `${msg.session} は待ち受けの設定を持っていません` +
+            "（種別 dtaqwatch / msgwatch のセッション設定を指定してください）"
         );
       }
       const sink = makeWatchSink(msg.session, target.webhook);

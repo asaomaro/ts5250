@@ -26,6 +26,7 @@
  * 画面のセッションタブが持つもので**サービスの一覧ではない**。
  */
 import type { Hono } from "hono";
+import type { WatchKind } from "./watch-source.js";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { SessionManager } from "./session-manager.js";
@@ -83,7 +84,13 @@ export interface PrinterRow extends ServiceRow {
 }
 
 export interface WatchRow extends ServiceRow {
-  /** 監視対象（`ライブラリー/キュー`） */
+  /**
+   * 待ち受けの種類。**画面が注意書きを出し分けるのに要る**——
+   * データ待ち行列は**消費する**（本番のコンシューマの取り分を奪う）が、
+   * メッセージ待ち行列は `*SAME` で読むので消えない。同じ注意を出すと嘘になる
+   */
+  kind?: WatchKind;
+  /** 待ち受け対象（`ライブラリー/キュー`） */
   label?: string;
   /** 転送が設定されているか（**URL は出さない**） */
   hasWebhook?: boolean;
@@ -143,7 +150,9 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
 
   app.get("/api/watches", (c) => {
     const user = c.get("user");
-    const defs = deps.resolver.listServiceDefs(user).filter((s) => s.sessionType === "dtaqwatch");
+    const defs = deps.resolver
+      .listServiceDefs(user)
+      .filter((s) => s.sessionType === "dtaqwatch" || s.sessionType === "msgwatch");
     const running = deps.watches?.list() ?? [];
     const detail = canOperate(c);
     const watches: WatchRow[] = defs.map((d) => {
@@ -159,6 +168,7 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
       };
       if (w) {
         row.id = w.id;
+        row.kind = w.kind;
         if (w.stale) row.stale = true;
         row.label = w.label;
         row.received = w.received;
