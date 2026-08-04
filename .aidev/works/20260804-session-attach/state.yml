@@ -1,0 +1,9 @@
+schema: 3
+slug: session-attach
+current: walkthrough
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260803-mcp-session-exclusion]
+backlog: session-exclusion.md

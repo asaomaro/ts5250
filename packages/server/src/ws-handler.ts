@@ -1,7 +1,13 @@
 import { As400Error } from "@ts5250/base";
 import { type AidKey, type ScreenSnapshot } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
-import { SessionManager, type OpenOptions, type SessionTarget, type StoredReport } from "./session-manager.js";
+import {
+  SessionManager,
+  type OpenOptions,
+  type SessionEntry,
+  type SessionTarget,
+  type StoredReport
+} from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionDtaqWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
@@ -86,6 +92,13 @@ export interface HeartbeatOptions {
 export class WsConnection {
   private sessionId: string | undefined;
   private detachScreen: (() => void) | undefined;
+  /**
+   * **このタブが開いたのではなく、既にあるセッションへ繋いだ**か。
+   *
+   * 切断時にセッションを閉じてよいかの判断に使う。**繋いだだけのタブは閉じない**
+   * ——閉じると、開いた人や MCP の作業をこちらの都合で殺すことになる。
+   */
+  private attached = false;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
@@ -391,6 +404,8 @@ export class WsConnection {
     if (this.sessionId) throw new As400Error("PROTOCOL_ERROR", "session already open on this connection");
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     await withAudit({ op: "ws_open" }, async () => {
+      // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
+      if (msg.sessionId !== undefined) return this.attach(msg.sessionId);
       // 保存済み設定（system / session）か、ブラウザ直指定か。解決は ConfigResolver に一本化されている
       let opts: OpenOptions;
       if (hasRef(msg)) {
@@ -407,27 +422,7 @@ export class WsConnection {
       const entry = await this.deps.sessions.open(opts);
       this.sessionId = entry.id;
       this.startHeartbeat();
-      // ホスト発の画面更新を push
-      const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
-      entry.session.on("screen", onScreen);
-      entry.session.on("closed", (reason) => {
-        this.send({ type: "closed", reason });
-        this.detachScreen?.();
-      });
-      // PC コマンド（STRPCCMD）の実行状況を push。切断でフックを外す（リーク防止）
-      entry.onPcCommandEvent = (event) => this.send({ type: "pc-command", sessionId: entry.id, event });
-      // 予約（HLLAPI の Reserve）の開始・解除を push。**画面と別に流す**——
-      // 予約は画面を変えずに始まり・終わるので、screen に相乗りさせると取りこぼす
-      entry.onReservationChange = (r) => this.send({ type: "reserved", ...(r ? { by: r.label } : {}) });
-      // **見ている人として数える。** 自動操作（MCP）が予約を取るかの判断に使う
-      // ——誰も見ていないセッションを締め切っても、守る相手が居ない
-      this.deps.sessions.addViewer(entry.id);
-      this.detachScreen = () => {
-        entry.session.off("screen", onScreen);
-        delete entry.onPcCommandEvent;
-        delete entry.onReservationChange;
-        this.deps.sessions.removeViewer(entry.id);
-      };
+      this.subscribeSession(entry);
       this.send({
         type: "opened",
         sessionId: entry.id,
@@ -553,6 +548,74 @@ export class WsConnection {
    * 「**どのシステムのどのセッション**を操作したいか」を書けない。設定の参照と名前を
    * 添えておけば、開き直しても同じ指定で当たる。
    */
+  /**
+   * 画面・PC コマンド・予約を購読し、**見ている人として数える**。
+   *
+   * 新規に開いたときも既存へ繋いだときも同じことをするので 1 箇所にまとめる
+   * ——**片方に足し忘れると、attach したタブだけ通知が来ない**という壊れ方をする。
+   */
+  private subscribeSession(entry: SessionEntry): void {
+    // ホスト発の画面更新を push
+    const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
+    entry.session.on("screen", onScreen);
+    entry.session.on("closed", (reason: string) => {
+      this.send({ type: "closed", reason });
+      this.detachScreen?.();
+    });
+    // PC コマンド（STRPCCMD）の実行状況を push。切断で購読を外す（リーク防止）。
+    // **自分の分だけ外れる**——同じセッションを別のタブも見ていることがある
+    const offPc = this.deps.sessions.subscribePcCommand(entry.id, (event) =>
+      this.send({ type: "pc-command", sessionId: entry.id, event })
+    );
+    // 予約（HLLAPI の Reserve）の開始・解除を push。**画面と別に流す**——
+    // 予約は画面を変えずに始まり・終わるので、screen に相乗りさせると取りこぼす
+    const offRes = this.deps.sessions.subscribeReservation(entry.id, (r) =>
+      this.send({ type: "reserved", ...(r ? { by: r.label } : {}) })
+    );
+    // **見ている人として数える。** 自動操作（MCP）が予約を取るかの判断に使う
+    // ——誰も見ていないセッションを締め切っても、守る相手が居ない
+    this.deps.sessions.addViewer(entry.id);
+    this.detachScreen = () => {
+      entry.session.off("screen", onScreen);
+      offPc();
+      offRes();
+      this.deps.sessions.removeViewer(entry.id);
+    };
+  }
+
+  /**
+   * **既存のセッションへ繋ぐ**（新規に開かない）。
+   *
+   * MCP や HLLAPI が開いた画面を、あとからブラウザで見るための経路。
+   * **状態を変えない**——繋ぎ直しただけで勝手に何かを再開しない
+   * （プリンターの `20260801-printer-attach-by-ref` と同じ判断）。
+   *
+   * 「存在し、自分のものか」の判定は **`sessions.get(id, user)` に任せる**。
+   * 画面側だけで見ると、リロード直後はまだ一覧が届いておらずすり抜ける。
+   */
+  private attach(sessionId: string): void {
+    const entry = this.deps.sessions.get(sessionId, this.user); // 無ければ／他人のものなら例外
+    this.sessionId = entry.id;
+    this.attached = true;
+    this.startHeartbeat();
+    this.subscribeSession(entry);
+    this.send({
+      type: "opened",
+      sessionId: entry.id,
+      screen: entry.session.snapshot(),
+      // **CCSID は `SessionEntry` が持っていない**（開いたときの設定に属する）。
+      // attach では既定を返す——画面の文字変換は既にセッション側で決まっており、
+      // ここで返す値は web-ui の入力補助（カナ大文字化）にしか使われない
+      ccsid: 37,
+      pcCommand: entry.pcCommandEnabled,
+      ...(() => {
+        const r = this.deps.sessions.reservationOf(entry.id);
+        return r ? { reservedBy: r.label } : {};
+      })(),
+      ...(entry.job !== undefined ? { job: entry.job } : {})
+    });
+  }
+
   private targetOf(msg: WsClientMessage & { type: "open" }): SessionTarget {
     const name = msg.session
       ? this.deps.resolver.listSessions(this.user).find((s) => s.ref === msg.session)?.name
@@ -666,7 +729,13 @@ export class WsConnection {
       // 利用者の期待に反する（design D1）。フック（onReport / onOutputWarn /
       // onOutputStatus）は上で外しているが、**記録はエントリ側に溜まり続ける**ので、
       // 開き直したときに閉じている間のぶんを読める
-      if (!this.deps.sessions.isResident(this.sessionId)) {
+      // **繋いだだけのタブはセッションを閉じない。** 開いた人や MCP がまだ使っている
+      // ——見に来た人が去っただけで相手の作業を殺してはいけない。
+      //
+      // 自分が開いたタブでも、**他に見ている人が残っていれば閉じない**
+      // （後から繋いだタブが残っているのに画面が消える、を避ける）
+      const otherViewers = this.deps.sessions.hasViewer(this.sessionId);
+      if (!this.attached && !otherViewers && !this.deps.sessions.isResident(this.sessionId)) {
         void this.deps.sessions.close(this.sessionId).catch(() => {});
       }
       this.sessionId = undefined;

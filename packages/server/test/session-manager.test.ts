@@ -190,7 +190,7 @@ describe("セッションの予約", () => {
   it("**予約の変化が購読者へ届く**（ブラウザへ push するため）", async () => {
     const { mgr, id } = await setup();
     const seen: (string | undefined)[] = [];
-    mgr.get(id).onReservationChange = (r) => seen.push(r?.label);
+    mgr.subscribeReservation(id, (r) => seen.push(r?.label));
     mgr.reserve(id, "auto", "HLLAPI");
     mgr.release(id, "auto");
     expect(seen).toEqual(["HLLAPI", undefined]);

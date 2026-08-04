@@ -10,6 +10,14 @@ import type { ServiceState } from "./service-state.js";
 // ---- client → server ----
 export interface WsOpen {
   type: "open";
+  /**
+   * **既存のセッションへ繋ぐ**（新規に開かない）。
+   *
+   * MCP や HLLAPI が開いた画面を、あとからブラウザで見るための口。
+   * **自分のものだけ**（`SessionManager.get` の所有者検査を通す）。
+   * これを指定したときは他の接続指定（`system` / `host` 等）を見ない。
+   */
+  sessionId?: string;
   /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
   kind?: "display" | "printer";
   /** システム参照（`srv:<name>` / `own:<id>`）。接続先と資格情報を決める */

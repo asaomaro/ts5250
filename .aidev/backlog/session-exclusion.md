@@ -1,7 +1,7 @@
 # セッションの排他（自動操作と人間の同居）
 
-**→ 2026-08-04、MCP 側を `20260803-mcp-session-exclusion` で着地。
-ブラウザの attach（下記の別項目）だけが残っている。**
+**→ 2026-08-04 に着地。MCP の排他は `20260803-mcp-session-exclusion`、
+ブラウザの attach は `20260804-session-attach`。このファイルは閉じた。**
 
 **1 つの 5250 セッションを、ブラウザ・MCP・HLLAPI の 3 つが同時に触れる。**
 書き込みが衝突する問題は `20260803-hllapi-bridge` で HLLAPI 側だけ塞いだ。
@@ -80,7 +80,7 @@ assertWritable(id, user, holder?)   ← holder を渡さない＝人間扱い＝
 `WsOpen` に `sessionId` の口が無く、`onOpen` は必ず `sessions.open()` で新規に開く。
 admin API も一覧と切断だけ（`/api/admin/sessions`）。
 
-- [ ] `WsOpen` に既存セッションへ繋ぐ口を足す（所有者検査つき）
+- [x] `WsOpen` に既存セッションへ繋ぐ口を足す（所有者検査つき）
 
 **前例がある。** プリンターは既に繋ぎ直せる（`20260801-printer-attach-by-ref`、
 `session-manager.ts:728`）。そこの判断はそのまま効く:

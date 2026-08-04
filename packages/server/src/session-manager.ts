@@ -181,8 +181,8 @@ export interface SessionEntry {
   target?: SessionTarget;
   /** 予約（`Reserve`）。期限切れの判定込みで読むには `reservationOf` を使う */
   reservation?: SessionReservation;
-  /** 予約の変化を購読者（ws-handler）へ知らせる。切断で解除する */
-  onReservationChange?: (r: SessionReservation | undefined) => void;
+  /** 予約の変化の購読者。**単数枠にしない**理由は `pcCommandSubscribers` と同じ */
+  reservationSubscribers?: Set<(r: SessionReservation | undefined) => void>;
   /**
    * 期限で予約を切るタイマー。
    *
@@ -197,7 +197,7 @@ export interface SessionEntry {
    * **予約を取るかどうかの判断に使う**——見ている人が居なければ、締め出す相手が居ないので
    * 予約は儀式でしかない（MCP が自分で開いたセッションが典型）。
    *
-   * **通知フック（`onReservationChange` 等）の有無で代用しない。** あれは通知の口であって
+   * **通知の購読（`reservationSubscribers` 等）の有無で代用しない。** あれは通知の口であって
    * 在席の印ではなく、通知が要らなくなった瞬間に判定が壊れる。
    */
   viewers: number;
@@ -213,8 +213,15 @@ export interface SessionEntry {
   pcCommandEnabled: boolean;
   /** PC コマンドの実行履歴（新しい順ではなく受信順。上限 `PC_COMMAND_HISTORY`） */
   pcCommands: PcCommandEvent[];
-  /** 実行状況の push フック（ws-handler が設定し、切断で解除する） */
-  onPcCommandEvent?: (e: PcCommandEvent) => void;
+  /**
+   * PC コマンドの実行状況の購読者。
+   *
+   * **単数枠にしない。** 1 枠で上書きしていた頃は、**2 つ目のタブが繋いだ時点で
+   * 1 つ目の通知が止まり**、どちらかが閉じると**残った方の通知も消えた**。
+   * `screen` は EventEmitter なので画面更新だけは両方に届き、
+   * 「画面は同期するのに通知は片方にしか来ない」という中途半端な壊れ方をする。
+   */
+  pcCommandSubscribers?: Set<(e: PcCommandEvent) => void>;
   /**
    * 画面履歴の記録（**頼まれたときだけ**動く）。エビデンス HTML を束ねるために使う。
    * 常時記録しないのは、使わない画面でメモリを食い続けるうえ、画面に写る入力値が
@@ -663,7 +670,7 @@ export class SessionManager {
     if (!entry) return;
     entry.pcCommands.push(event);
     if (entry.pcCommands.length > PC_COMMAND_HISTORY) entry.pcCommands.shift();
-    entry.onPcCommandEvent?.(event);
+    for (const fn of entry.pcCommandSubscribers ?? []) fn(event);
   }
 
   /**
@@ -1121,6 +1128,27 @@ export class SessionManager {
     return (this.sessions.get(id)?.viewers ?? 0) > 0;
   }
 
+  /**
+   * PC コマンドの実行状況を購読する。**返った関数を呼べば自分の分だけ外れる。**
+   *
+   * 解除を呼び出し側に閉じた関数で返すのが要点——`delete entry.onX` の形だと、
+   * **他の購読者の分まで消してしまう**（そうなっていた）。
+   */
+  subscribePcCommand(id: string, fn: (e: PcCommandEvent) => void): () => void {
+    const entry = this.sessions.get(id);
+    if (!entry) return () => undefined;
+    (entry.pcCommandSubscribers ??= new Set()).add(fn);
+    return () => entry.pcCommandSubscribers?.delete(fn);
+  }
+
+  /** 予約の変化を購読する。**返った関数を呼べば自分の分だけ外れる** */
+  subscribeReservation(id: string, fn: (r: SessionReservation | undefined) => void): () => void {
+    const entry = this.sessions.get(id);
+    if (!entry) return () => undefined;
+    (entry.reservationSubscribers ??= new Set()).add(fn);
+    return () => entry.reservationSubscribers?.delete(fn);
+  }
+
   /** 見ている人が増えた（ws-handler が呼ぶ） */
   addViewer(id: string): void {
     const entry = this.sessions.get(id);
@@ -1162,7 +1190,7 @@ export class SessionManager {
     } else {
       delete entry.reservation;
     }
-    entry.onReservationChange?.(r);
+    for (const fn of entry.reservationSubscribers ?? []) fn(r);
   }
 
   /**

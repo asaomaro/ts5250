@@ -298,6 +298,37 @@ try {
   await locator.first().fill("");
   await page.screenshot({ path: `${SHOTS}/8-field-by-id.png` });
 
+  // ---- 9. **2 つ目のタブが同じセッションへ繋げる（attach）** ----
+  const sid2 = sessions.list()[0].id;
+  const tab2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await tab2.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+  // **「セッション管理」はシステム選択より手前にある**（アプリのセクション）ので、そのまま開く
+  await tab2.waitForSelector(".fn.app", { timeout: 15_000 });
+  await tab2.locator(".fn.app", { hasText: "セッション管理" }).first().getByRole("button", { name: "開く" }).click();
+  await tab2.waitForTimeout(1500);
+  await tab2.screenshot({ path: `${SHOTS}/9a-tab2-list.png` });
+  await tab2.locator("tr", { hasText: "display" }).first().getByRole("button", { name: "開く" }).click();
+  await tab2.waitForSelector(".screen-wrap", { timeout: 20_000 });
+  await tab2.screenshot({ path: `${SHOTS}/9-second-tab.png` });
+
+  check("**2 つ目のタブが既存セッションを開けた**", (await tab2.locator(".screen-wrap").count()) > 0);
+  check("**新しい接続を作っていない**", sessions.size === 1, `${sessions.size} 件`);
+  check("**在席が 2**", sessions.get(sid2).viewers === 2, `${sessions.get(sid2).viewers} 人`);
+
+  // **予約の覆いが両方のタブに出る**（単数枠だった頃は片方にしか出なかった）
+  await mcp("send_key", { sessionId: sid2, key: "Enter" });
+  await page.waitForSelector(".reserved-overlay", { timeout: 8000 }).catch(() => {});
+  await tab2.waitForSelector(".reserved-overlay", { timeout: 8000 }).catch(() => {});
+  await tab2.screenshot({ path: `${SHOTS}/10-both-reserved.png` });
+  check("**覆いが 1 つ目のタブに出る**", (await page.locator(".reserved-overlay").count()) === 1);
+  check("**覆いが 2 つ目のタブにも出る**", (await tab2.locator(".reserved-overlay").count()) === 1);
+
+  // 2 つ目を閉じても 1 つ目は生きている
+  await tab2.close();
+  await new Promise((r) => setTimeout(r, 800));
+  check("**2 つ目を閉じてもセッションは残る**", sessions.size === 1, `${sessions.size} 件`);
+  check("**在席が 1 に戻る**", sessions.get(sid2).viewers === 1, `${sessions.get(sid2).viewers} 人`);
+
   sessions.closeAll?.();
 } catch (e) {
   check("例外なく完走する", false, String(e));

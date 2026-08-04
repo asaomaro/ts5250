@@ -69,6 +69,7 @@ export {
 export { registerTools, type ToolDeps } from "./mcp-tools.js";
 export { buildMcpServer } from "./mcp-server.js";
 export { buildApp, type AppDeps } from "./app.js";
+export { registerSessionRoutes, type SessionRouteDeps } from "./session-routes.js";
 export { WsConnection, type WsHandlerDeps, type WsSender } from "./ws-handler.js";
 export {
   WatchRegistry,

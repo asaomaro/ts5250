@@ -180,7 +180,7 @@ describe("MCP の排他", () => {
     (mgr as unknown as { sessions: Map<string, SessionEntry> }).sessions.set(SID, entry);
 
     const seen: (string | undefined)[] = [];
-    entry.onReservationChange = (r) => seen.push(r?.label);
+    mgr.subscribeReservation(SID, (r) => seen.push(r?.label));
     mgr.reserve(SID, "mcp:", "MCP", undefined, 40);
     await new Promise((r) => setTimeout(r, 120));
     // **誰も reservationOf を呼んでいない**のに解除が届いている

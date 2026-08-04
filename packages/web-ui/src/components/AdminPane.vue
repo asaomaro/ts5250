@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { openSession } from "../session-controller.js";
 import { ref, computed, watch } from "vue";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
@@ -25,6 +26,22 @@ interface SessionRow {
   origin: string;
   connectedAt: string;
 }
+/**
+ * **自分が開けるセッション**（`/api/sessions`。admin でも自分の分だけ）。
+ *
+ * 一覧そのものは admin API（全利用者）だが、**「開く」は自分のものにしか出さない**
+ * ——admin が既定で他人の画面を開く導線は作らない
+ * （`20260803-hllapi-bridge` で `Connect("A")` の既定を自分に限定したのと同じ判断）。
+ */
+interface OwnSession {
+  sessionId: string;
+  host?: string;
+  origin?: string;
+  connectedAt?: string;
+  name?: string;
+  viewers: number;
+  reservedBy?: string;
+}
 interface LogRow {
   ts: number;
   op: string;
@@ -35,6 +52,27 @@ interface LogRow {
 
 const users = ref<PublicUser[]>([]);
 const sessions = ref<SessionRow[]>([]);
+const own = ref<OwnSession[]>([]);
+const ownOf = (id: string): OwnSession | undefined => own.value.find((o) => o.sessionId === id);
+/**
+ * 表に出す行。**自分のセッションは必ず出す**（admin の一覧が使えない環境でも）。
+ * admin の一覧が取れていれば、そちらの情報（所有者・種別）で補う。
+ */
+const rows = computed<SessionRow[]>(() => {
+  const byId = new Map(sessions.value.map((r) => [r.id, r]));
+  for (const o of own.value) {
+    if (!byId.has(o.sessionId)) {
+      byId.set(o.sessionId, {
+        id: o.sessionId,
+        kind: "display",
+        host: o.host ?? "-",
+        origin: o.origin ?? "-",
+        connectedAt: o.connectedAt ?? ""
+      });
+    }
+  }
+  return [...byId.values()];
+});
 const logs = ref<LogRow[]>([]);
 const error = ref("");
 const issued = ref<{ username: string; token: string } | undefined>();
@@ -58,7 +96,15 @@ async function refresh(): Promise<void> {
   await run(async () => {
   try {
     if (view.value === "users") users.value = (await (await api("/api/admin/users")).json()).users;
-    else if (view.value === "sessions") sessions.value = (await (await api("/api/admin/sessions")).json()).sessions;
+    else if (view.value === "sessions") {
+      // **主たる出所は `/api/sessions`**（自分の分）。これは常に登録されている。
+      // admin の一覧（全利用者）は**あれば足す**——`registerAdminRoutes` は監査の
+      // 設定があるときだけ登録されるので、無い環境で一覧が空になってはいけない
+      own.value = (await (await api("/api/sessions")).json()).sessions;
+      sessions.value = await api("/api/admin/sessions")
+        .then(async (r) => (await r.json()).sessions as SessionRow[])
+        .catch(() => []);
+    }
     else if (view.value === "logs") logs.value = (await (await api("/api/admin/logs")).json()).events;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -97,6 +143,21 @@ async function issueToken(username: string): Promise<void> {
     error.value = e instanceof Error ? e.message : String(e);
   }
 }
+/**
+ * **既にあるセッションをこのタブで開く**（新規に接続しない）。
+ *
+ * MCP や HLLAPI が開いた画面を、あとから人が見るための導線。
+ * すでに別のタブが見ていても構わない——**両方に画面と予約の通知が届く**。
+ */
+async function attach(id: string): Promise<void> {
+  const o = ownOf(id);
+  try {
+    await openSession({ type: "open", sessionId: id }, o?.name ?? id.slice(0, 8));
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
 async function terminate(id: string): Promise<void> {
   try {
     await api(`/api/admin/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -155,17 +216,30 @@ watch(view, refresh, { immediate: true });
     <!-- セッション管理 -->
     <div v-else-if="view === 'sessions'" class="section">
       <table>
-        <thead><tr><th>種別</th><th>所有者</th><th>ホスト</th><th>由来</th><th>接続</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>種別</th><th>所有者</th><th>ホスト</th><th>由来</th><th>接続</th>
+            <th title="このセッションを見ているタブの数">見ている</th><th></th>
+          </tr>
+        </thead>
         <tbody>
-          <tr v-for="s in sessions" :key="s.id">
+          <tr v-for="s in rows" :key="s.id">
             <td>{{ s.kind }}</td>
             <td>{{ s.owner ?? "-" }}</td>
             <td>{{ s.host }}</td>
             <td>{{ s.origin }}</td>
-            <td>{{ new Date(s.connectedAt).toLocaleString() }}</td>
-            <td><button class="danger" @click="terminate(s.id)">切断</button></td>
+            <td>{{ s.connectedAt ? new Date(s.connectedAt).toLocaleString() : "-" }}</td>
+            <td>
+              {{ ownOf(s.id)?.viewers ?? "-" }}
+              <span v-if="ownOf(s.id)?.reservedBy" class="resv">{{ ownOf(s.id)?.reservedBy }} が操作中</span>
+            </td>
+            <td>
+              <!-- **開くのは自分のものだけ**。他人の画面を開く導線は作らない -->
+              <button v-if="ownOf(s.id)" @click="attach(s.id)">開く</button>
+              <button class="danger" @click="terminate(s.id)">切断</button>
+            </td>
           </tr>
-          <tr v-if="sessions.length === 0"><td colspan="6" class="empty">セッションなし</td></tr>
+          <tr v-if="rows.length === 0"><td colspan="7" class="empty">セッションなし</td></tr>
         </tbody>
       </table>
     </div>

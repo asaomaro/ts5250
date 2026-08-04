@@ -23,6 +23,7 @@ import { registerHostListRoutes } from "./host-lists.js";
 import { registerHostSqlRoutes } from "./host-sql.js";
 import { registerHostPlanRoutes } from "./host-plan.js";
 import { registerHllapiRoutes } from "./hllapi-routes.js";
+import { registerSessionRoutes } from "./session-routes.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
@@ -187,6 +188,9 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   // HLLAPI / EHLLAPI ブリッジ。**ロジックはここ（TypeScript）に置き**、
   // ネイティブの接続層は C ABI ↔ HTTP だけを担う
   registerHllapiRoutes(app, { sessions: deps.sessions });
+  // 開いているセッションの一覧（**自分の分だけ**）。MCP や HLLAPI が開いた画面を
+  // あとからブラウザで開く導線に使う
+  registerSessionRoutes(app, { sessions: deps.sessions });
 
   // IFS のファイルブラウザ（一覧・読み書き・zip 一括取得）
   // 上限は zip64 非対応という**不変条件**に紐づく。CLI 経路だけで検査すると、
