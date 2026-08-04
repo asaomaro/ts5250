@@ -29,7 +29,8 @@ import {
   fromProgramOutputs,
   type ProgramArg,
   buildServiceProgramParams,
-  splitServiceProgramOutputs
+  splitServiceProgramOutputs,
+  openQuery
 } from "@ts5250/hostserver";
 import { renderSpoolHtml } from "@ts5250/scs";
 import { type ConnectOptions } from "@ts5250/tn5250";
@@ -39,6 +40,7 @@ import { errorResult, type ToolDeps } from "./mcp-tools.js";
 import { uploadCsv, uploadRows } from "./host-upload.js";
 import { listSpools, readSpoolPages, DEFAULT_SPOOLS } from "./host-spools.js";
 import { openCommand, openDb, openIfs, openDtaq } from "./host-connect.js";
+import { buildListSql, buildSendCommand, buildReplyCommand, removeByKey } from "./host-message.js";
 import { toBytes, fromBytes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 
 const hostLog = childLog({ component: "host-server-tools" });
@@ -270,6 +272,21 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
       }).catch(errorResult)
   );
 
+  /** CL を 1 本流して結果を返す（メッセージ系で共有する） */
+  const runCommand = async (opts: Parameters<typeof openCommand>[0], command: string) => {
+    const conn = await openCommand(opts);
+    try {
+      const r = await conn.run(command);
+      return jsonResult({
+        success: r.success,
+        returnCode: r.returnCode,
+        messages: r.messages.map((m) => ({ id: m.id, text: m.text, severity: m.severity, kind: m.kind }))
+      });
+    } finally {
+      conn.close();
+    }
+  };
+
   // ---- コマンド / プログラム呼び出し ----
 
   /**
@@ -421,6 +438,128 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
             })),
             ...(input.returns === "int" ? { returnValue: split.returnValue ?? null } : {}),
             outputs: fromProgramOutputs(args, split.args, { ccsid }).map((v) => v ?? null)
+          });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  // ---- メッセージ待ち行列 ----
+
+  const msgShape = { queue: z.string(), library: z.string().optional() };
+
+  server.registerTool(
+    "host_list_messages",
+    {
+      description:
+        "メッセージ待ち行列のメッセージを一覧する（QSYSOPR など）。" +
+        "**`onlyInquiry: true` で応答すべきものだけ**に絞れる——照会に応答しないとジョブが止まったままになる。" +
+        "応答には `key`（16 進 8 桁）を host_reply_message へ渡す。",
+      inputSchema: {
+        ...targetShape,
+        ...msgShape,
+        max: z.number().int().min(1).max(500).optional(),
+        onlyInquiry: z.boolean().optional()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_list_messages" }, async () => {
+        const opts = target(input);
+        const db = await openDb(opts);
+        try {
+          const sql = buildListSql({
+            queue: input.queue.toUpperCase(),
+            library: (input.library ?? "*LIBL").toUpperCase(),
+            ccsid: opts.ccsid ?? 37,
+            max: input.max ?? 100,
+            ...(input.onlyInquiry !== undefined ? { onlyInquiry: input.onlyInquiry } : {})
+          });
+          const q = await openQuery(db, sql);
+          try {
+            const rows = [];
+            for await (const r of q.rows) rows.push(r);
+            return jsonResult({ messages: rows });
+          } finally {
+            await q.close();
+          }
+        } finally {
+          db.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_send_message",
+    {
+      description:
+        "メッセージを送る。宛先は `toUser`（利用者）か `toQueue`（待ち行列）。" +
+        "`inquiry: true` で照会（応答を待つ種別）にする——**待ち行列には 2 件入る**（SENDER と INQUIRY。IBM i の仕様）。",
+      inputSchema: {
+        ...targetShape,
+        text: z.string().max(494),
+        toUser: z.string().optional(),
+        toQueue: z.string().optional(),
+        toLibrary: z.string().optional(),
+        inquiry: z.boolean().optional(),
+        replyQueue: z.string().optional(),
+        replyLibrary: z.string().optional()
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_send_message" }, async () => runCommand(target(input), buildSendCommand(input as never))).catch(
+        errorResult
+      )
+  );
+
+  server.registerTool(
+    "host_reply_message",
+    {
+      description:
+        "**照会メッセージに応答する。** `key` は host_list_messages が返す 16 進 8 桁。" +
+        "同じ本文のメッセージが複数あっても、キーなら取り違えない。",
+      inputSchema: { ...targetShape, ...msgShape, key: z.string(), reply: z.string().max(132) }
+    },
+    async (input) =>
+      withAudit({ op: "host_reply_message" }, async () =>
+        runCommand(target(input), buildReplyCommand(input as never))
+      ).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_remove_messages",
+    {
+      description:
+        "メッセージを消す。`key` を指定すると 1 件、省略すると**全消し**。" +
+        "**戻せない操作**なので、消す前に host_list_messages で確かめること。",
+      inputSchema: { ...targetShape, ...msgShape, key: z.string().optional() }
+    },
+    async (input) =>
+      withAudit({ op: "host_remove_messages" }, async () => {
+        const opts = target(input);
+        const queue = input.queue.toUpperCase();
+        const library = (input.library ?? "*LIBL").toUpperCase();
+        if (input.key === undefined || input.key.trim() === "") {
+          return runCommand(opts, `CLRMSGQ MSGQ(${library}/${queue})`);
+        }
+        const conn = await openCommand(opts);
+        try {
+          // **`RMVMSG` は CL 内でしか使えない**ので API を直接呼ぶ
+          const r = await removeByKey(conn, {
+            queue,
+            library,
+            keyHex: input.key.toUpperCase(),
+            ccsid: opts.ccsid ?? 37
+          });
+          return jsonResult({
+            success: r.success,
+            returnCode: r.returnCode,
+            messages: r.messages.map((m: { id?: string; text?: string; severity?: number; kind?: string }) => ({
+              id: m.id,
+              text: m.text,
+              severity: m.severity,
+              kind: m.kind
+            }))
           });
         } finally {
           conn.close();

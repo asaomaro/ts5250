@@ -25,6 +25,7 @@ import { registerHostPlanRoutes } from "./host-plan.js";
 import { registerHllapiRoutes } from "./hllapi-routes.js";
 import { registerSessionRoutes } from "./session-routes.js";
 import { registerHostProgramRoutes } from "./host-program.js";
+import { registerHostMessageRoutes } from "./host-message.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
 import { registerHostUploadRoutes } from "./host-upload.js";
@@ -194,6 +195,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   registerSessionRoutes(app, { sessions: deps.sessions });
   // プログラム呼び出し（画面を経由せずに RPG / COBOL を呼ぶ）
   registerHostProgramRoutes(app, { resolver: deps.resolver });
+  // メッセージ待ち行列（照会への応答が主目的）
+  registerHostMessageRoutes(app, { resolver: deps.resolver });
 
   // IFS のファイルブラウザ（一覧・読み書き・zip 一括取得）
   // 上限は zip64 非対応という**不変条件**に紐づく。CLI 経路だけで検査すると、

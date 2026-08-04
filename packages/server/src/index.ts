@@ -71,6 +71,13 @@ export { buildMcpServer } from "./mcp-server.js";
 export { buildApp, type AppDeps } from "./app.js";
 export { registerSessionRoutes, type SessionRouteDeps } from "./session-routes.js";
 export { registerHostProgramRoutes, type HostProgramDeps } from "./host-program.js";
+export {
+  registerHostMessageRoutes,
+  buildListSql,
+  buildSendCommand,
+  buildReplyCommand,
+  type HostMessageDeps
+} from "./host-message.js";
 // ホストサーバーへの接続（**ポートの解決を含む**。手で組むと telnet の 23 を掴む）
 export { openCommand, openDb, openIfs } from "./host-connect.js";
 export { WsConnection, type WsHandlerDeps, type WsSender } from "./ws-handler.js";
