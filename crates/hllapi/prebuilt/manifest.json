@@ -1,0 +1,26 @@
+{
+  "source": {
+    "sha256": "b0d30ff6ce0ef7c26afb413430e17fc2de103542bf54a7c58f29a76b63859cbe",
+    "files": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "src/b64.rs",
+      "src/http.rs",
+      "src/json.rs",
+      "src/lib.rs",
+      "src/selftest.rs"
+    ]
+  },
+  "binaries": {
+    "x64": {
+      "path": "prebuilt/x64/ts5250hllapi.dll",
+      "sha256": "a9d673db7d25eb5be846bc9b0d08867b154b578e3190a62d2b69151de381edb3",
+      "bytes": 849920
+    },
+    "x86": {
+      "path": "prebuilt/x86/ts5250hllapi.dll",
+      "sha256": "6038a9c2d4c0ea117c817980c2625083656ee03629a4c48ff1b0ff98edb9f997",
+      "bytes": 920064
+    }
+  }
+}

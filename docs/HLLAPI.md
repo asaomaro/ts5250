@@ -296,7 +296,33 @@ f = 12: Call hllapi(f, d, l, r)   ' Release
 | 26 | Pause の途中で画面が変わった |
 | 28 | 欄の長さが 0 |
 
-## ビルド
+## ビルド済みの DLL を同梱している
+
+**Rust が入っていなければ、これをそのまま使える。**
+
+| 置き場所 | 使いどころ |
+|---|---|
+| `crates/hllapi/prebuilt/x64/ts5250hllapi.dll` | **64bit Office** |
+| `crates/hllapi/prebuilt/x86/ts5250hllapi.dll` | **32bit Office** |
+
+**Office と同じビット数のほう**を選んで、`ts5250hllapi.dll` の名前で置くこと
+（合っていないと「指定されたモジュールが見つかりません」になる。パスの問題ではない）。
+
+由来は `prebuilt/manifest.json` に記録してある——**どのソースから作ったか**（ソース木の
+sha256）と、各 DLL の sha256。ソースを変えて作り直し忘れると `npm test` が落ちる
+（`prebuilt-fresh.test.ts`）ので、**黙って古い DLL が配られることはない**。
+
+作り直すとき:
+
+```sh
+crates/hllapi/tools/update-prebuilt.sh
+```
+
+> これらは Linux から mingw で作った（`x86_64-pc-windows-gnu` / `i686-pc-windows-gnu`）。
+> エクスポート名と呼び出し規約は機械語まで確認済みだが、
+> **Windows 上での実行は検証していない**（下記）。
+
+## 自分でビルドする
 
 ```sh
 ./crates/hllapi/tools/build.sh              # そのホスト向け（.so / .dylib）

@@ -13,6 +13,18 @@
 | `check-dll.py` | 出来たものを検査する（エクスポート名・**呼び出し規約**） | どこでも |
 | `make-xlsm.ps1` | VBA を組み込んだ `.xlsm` を Excel に作らせる | Windows（要 Excel） |
 | `find-hllapi.ps1` | **その PC に入っている HLLAPI 実装**を探す（ACS / PCOMM 等） | Windows |
+| `update-prebuilt.sh` | **同梱している DLL を作り直す**（`../prebuilt/`） | Linux / macOS |
+| `prebuilt-manifest.py` | 同梱 DLL の由来（ソース木の指紋・sha256）を作る | どこでも |
+
+## 同梱している DLL（`../prebuilt/`）
+
+**Rust の入っていない環境の利用者のために、ビルド済みを置いている。**
+
+ビルド済みをリポジトリに置くと、**ソースを変えて作り直し忘れたときに黙って古いものが配られる**
+——利用者側では気づきようがない。`manifest.json` にソース木の指紋を残し、
+`packages/server/test/prebuilt-fresh.test.ts` が突き合わせる。**食い違えば `npm test` が落ちる。**
+
+ソースを変えたら `update-prebuilt.sh` を実行すること。
 
 ```sh
 crates/hllapi/tools/build.sh --windows          # .so ＋ DLL 64/32bit
