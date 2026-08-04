@@ -2,13 +2,29 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { As400Error } from "@ts5250/base";
 import { CommandError, SqlError } from "@ts5250/hostserver";
-import { type ConnectOptions, type ScreenSnapshot, type SendAidResult, type SendAidOptions, type AidKey } from "@ts5250/tn5250";
+import {
+  type ConnectOptions,
+  type ScreenSnapshot,
+  type SendAidResult,
+  type SendAidOptions,
+  type AidKey,
+} from "@ts5250/tn5250";
 import { childLog } from "./log.js";
-import { orphanSafeIdleTimeoutMs, SessionManager, type OpenOptions } from "./session-manager.js";
+import {
+  orphanSafeIdleTimeoutMs,
+  SessionManager,
+  type OpenOptions,
+} from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
-import { screenToText, screenToAnsi, attributeRuns, type FormatOptions, type ScreenSection } from "./format.js";
+import {
+  screenToText,
+  screenToAnsi,
+  attributeRuns,
+  type FormatOptions,
+  type ScreenSection,
+} from "./format.js";
 import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
@@ -35,9 +51,38 @@ export interface ToolDeps {
 }
 
 const AID_KEYS = [
-  "Enter", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
-  "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
-  "PageUp", "PageDown", "Clear", "Help", "Print", "SysReq", "Attn"
+  "Enter",
+  "F1",
+  "F2",
+  "F3",
+  "F4",
+  "F5",
+  "F6",
+  "F7",
+  "F8",
+  "F9",
+  "F10",
+  "F11",
+  "F12",
+  "F13",
+  "F14",
+  "F15",
+  "F16",
+  "F17",
+  "F18",
+  "F19",
+  "F20",
+  "F21",
+  "F22",
+  "F23",
+  "F24",
+  "PageUp",
+  "PageDown",
+  "Clear",
+  "Help",
+  "Print",
+  "SysReq",
+  "Attn",
 ] as const;
 
 // ---- 共通スキーマ ----
@@ -46,13 +91,15 @@ const includeSchema = z
   .optional()
   .describe(
     "含めるもの（既定 grid,fields）。attributes=表示属性の変わり目、" +
-      "ansi=色つき画面（人が端末で見る用。LLM 向けの本文には載せない）"
+      "ansi=色つき画面（人が端末で見る用。LLM 向けの本文には載せない）",
   );
-const rowsSchema = z.object({ from: z.number().int(), to: z.number().int() }).optional();
+const rowsSchema = z
+  .object({ from: z.number().int(), to: z.number().int() })
+  .optional();
 const cursorSchema = z.object({ row: z.number().int(), col: z.number().int() });
 const fieldInputSchema = z.object({
   field: z.union([z.number().int(), cursorSchema]),
-  value: z.string()
+  value: z.string(),
 });
 
 /** 属性の変わり目。**こちらは `attributeRuns()` が組み立てる**ので増分の心配は無い */
@@ -65,7 +112,7 @@ const attrRunSchema = z.object({
   underline: z.boolean().optional(),
   blink: z.boolean().optional(),
   columnSeparator: z.boolean().optional(),
-  nonDisplay: z.boolean().optional()
+  nonDisplay: z.boolean().optional(),
 });
 
 /**
@@ -93,19 +140,21 @@ const fieldOutSchema = z
     hidden: z.boolean(),
     numeric: z.boolean(),
     mdt: z.boolean(),
-    value: z.string()
+    value: z.string(),
   })
   .passthrough();
 
 /** 拡張 5250 GUI 構造体の structuredContent スキーマ */
-const guiChoiceSchema = z.object({
-  index: z.number(),
-  text: z.string(),
-  selected: z.boolean(),
-  available: z.boolean(),
-  numericChar: z.number().optional(),
-  aid: z.number().optional()
-}).passthrough();
+const guiChoiceSchema = z
+  .object({
+    index: z.number(),
+    text: z.string(),
+    selected: z.boolean(),
+    available: z.boolean(),
+    numericChar: z.number().optional(),
+    aid: z.number().optional(),
+  })
+  .passthrough();
 /**
  * 拡張 5250 GUI 構造体の structuredContent スキーマ。
  *
@@ -123,9 +172,9 @@ const guiSchema = z
           kind: z.enum(["radio", "checkbox", "pushbutton", "menu"]),
           fieldType: z.number(),
           multiple: z.boolean(),
-          choices: z.array(guiChoiceSchema)
+          choices: z.array(guiChoiceSchema),
         })
-        .passthrough()
+        .passthrough(),
     ),
     windows: z.array(
       z
@@ -141,14 +190,14 @@ const guiSchema = z
               text: z.string(),
               align: z.enum(["center", "left", "right"]),
               footer: z.boolean(),
-              cba: z.number()
+              cba: z.number(),
             })
             .passthrough()
             .optional(),
           restrictCursor: z.boolean(),
-          pulldown: z.boolean()
+          pulldown: z.boolean(),
         })
-        .passthrough()
+        .passthrough(),
     ),
     scrollBars: z.array(
       z
@@ -159,10 +208,10 @@ const guiSchema = z
           horizontal: z.boolean(),
           total: z.number(),
           sliderPos: z.number(),
-          size: z.number()
+          size: z.number(),
         })
-        .passthrough()
-    )
+        .passthrough(),
+    ),
   })
   .passthrough();
 
@@ -183,12 +232,63 @@ const screenOutShape = {
   systemMessage: z.string().optional(),
   gui: guiSchema.optional(),
   /** 表示属性の変わり目（include に attributes を入れたときだけ） */
-  attributes: z.array(attrRunSchema).optional()
+  attributes: z.array(attrRunSchema).optional(),
 };
+
+/**
+ * MCP が取る予約の期限。**HLLAPI の 2 分とは別**。
+ *
+ * HLLAPI は利用者が `Reserve` で明示的に取り、長い自動化の間ずっと保つ。
+ * MCP は道具の側が勝手に取るので、**書き終えたらすぐ手放したい**。
+ * 呼び出しのたびに延びるので、連射は 1 回の「MCP が操作中」に見え、終われば黙って消える。
+ *
+ * 実機の 1 往復は 1〜7 秒かかることがある（`scripts/README.md`）。
+ * 途中で解けて覆いが点滅しないよう、そこに余裕を足した値にする。
+ */
+export const MCP_RESERVATION_TTL_MS = 15_000;
+
+/** 予約の持ち主としての識別子。**HLLAPI と別にする**（互いを締め出せる必要がある） */
+const mcpHolder = (user?: AuthUser): string => `mcp:${user?.username ?? ""}`;
+
+/**
+ * **見ている人が居るときだけ**予約を取る。書き込みの直前に呼ぶ。
+ *
+ * 誰も見ていなければ何もしない——締め出す相手が居ないので、予約は儀式でしかない
+ * （MCP が自分で開いたセッションが典型）。
+ *
+ * **エージェントに囲わせない。** `reserve_session` のようなツールを作ると囲い忘れる。
+ * 道具の側が勝手に取り、期限で勝手に手放す。
+ *
+ * 他の自動化が持っていれば `SESSION_RESERVED` が飛ぶ——**書かずに断る**。
+ * 割り込んで画面を半端にしない。
+ */
+function claimForWrite(
+  sessions: SessionManager,
+  sessionId: string,
+  user?: AuthUser,
+): void {
+  if (!sessions.hasViewer(sessionId)) return;
+  const entry = sessions.get(sessionId, user);
+  const label =
+    entry.owner !== undefined &&
+    user !== undefined &&
+    entry.owner !== user.username
+      ? `${user.username}（MCP）`
+      : "MCP";
+  sessions.reserve(
+    sessionId,
+    mcpHolder(user),
+    label,
+    user,
+    MCP_RESERVATION_TTL_MS,
+  );
+}
 
 type FieldInput = z.infer<typeof fieldInputSchema>;
 
-function fieldTarget(f: FieldInput["field"]): { index: number } | { row: number; col: number } {
+function fieldTarget(
+  f: FieldInput["field"],
+): { index: number } | { row: number; col: number } {
   return typeof f === "number" ? { index: f } : { row: f.row, col: f.col };
 }
 
@@ -199,10 +299,19 @@ function fieldTarget(f: FieldInput["field"]): { index: number } | { row: number;
  * 読みにくいうえトークンを食うだけなので、`audience: ["user"]` を付けて分ける
  * （本文側は `["assistant"]`）。属性を機械可読で欲しい場合は `attributes` を使う。
  */
-function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boolean) {
+function screenResult(
+  snap: ScreenSnapshot,
+  fmt: FormatOptions,
+  timedOut?: boolean,
+) {
   const want = new Set(fmt.include ?? []);
   // ansi は表示形式であってセクションではない。テキスト側の include からは外す
-  const textFmt: FormatOptions = { ...fmt, ...(fmt.include ? { include: fmt.include.filter((s) => s !== "ansi") } : {}) };
+  const textFmt: FormatOptions = {
+    ...fmt,
+    ...(fmt.include
+      ? { include: fmt.include.filter((s) => s !== "ansi") }
+      : {}),
+  };
   const text = screenToText(snap, textFmt);
   const structured: Record<string, unknown> = {
     text,
@@ -211,19 +320,27 @@ function screenResult(snap: ScreenSnapshot, fmt: FormatOptions, timedOut?: boole
     cols: snap.cols,
     cursor: snap.cursor,
     keyboardLocked: snap.keyboardLocked,
-    fields: snap.fields
+    fields: snap.fields,
   };
-  if (snap.systemMessage !== undefined) structured["systemMessage"] = snap.systemMessage;
+  if (snap.systemMessage !== undefined)
+    structured["systemMessage"] = snap.systemMessage;
   if (snap.gui !== undefined) structured["gui"] = snap.gui;
   if (timedOut !== undefined) structured["timedOut"] = timedOut;
-  if (want.has("attributes")) structured["attributes"] = attributeRuns(snap, fmt);
-  type Block = { type: "text"; text: string; annotations: { audience: ("user" | "assistant")[] } };
-  const content: Block[] = [{ type: "text", text, annotations: { audience: ["assistant"] } }];
+  if (want.has("attributes"))
+    structured["attributes"] = attributeRuns(snap, fmt);
+  type Block = {
+    type: "text";
+    text: string;
+    annotations: { audience: ("user" | "assistant")[] };
+  };
+  const content: Block[] = [
+    { type: "text", text, annotations: { audience: ["assistant"] } },
+  ];
   if (want.has("ansi")) {
     content.unshift({
       type: "text",
       text: screenToAnsi(snap, fmt),
-      annotations: { audience: ["user"] }
+      annotations: { audience: ["user"] },
     });
   }
   return { content, structuredContent: structured };
@@ -271,12 +388,15 @@ export function errorResult(err: unknown) {
     detail.push(`SQLCODE=${err.sqlCode}`, `SQLSTATE=${err.sqlState}`);
   }
   if (err instanceof CommandError && err.primary) {
-    detail.push(`messageId=${err.primary.id}`, `messageText=${err.primary.text}`);
+    detail.push(
+      `messageId=${err.primary.id}`,
+      `messageText=${err.primary.text}`,
+    );
   }
   const suffix = detail.length > 0 ? ` (${detail.join(" ")})` : "";
   return {
     isError: true as const,
-    content: [{ type: "text" as const, text: `${code}: ${message}${suffix}` }]
+    content: [{ type: "text" as const, text: `${code}: ${message}${suffix}` }],
   };
 }
 
@@ -290,13 +410,24 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   const warn = (m: string): void => mcpLog.warn(m);
 
   /** system / session 参照を解決する。認可・復号・printer 出力の判定は ConfigResolver 内 */
-  const resolveTarget = (input: { system?: string | undefined; session?: string | undefined }) =>
-    resolver.resolve({ system: input.system, session: input.session }, user, warn);
+  const resolveTarget = (input: {
+    system?: string | undefined;
+    session?: string | undefined;
+  }) =>
+    resolver.resolve(
+      { system: input.system, session: input.session },
+      user,
+      warn,
+    );
 
-  const hasRef = (i: { system?: string | undefined; session?: string | undefined }): boolean =>
-    Boolean(i.system ?? i.session);
-  const originOf = (i: { system?: string | undefined; session?: string | undefined }): string =>
-    i.session ?? i.system ?? "direct";
+  const hasRef = (i: {
+    system?: string | undefined;
+    session?: string | undefined;
+  }): boolean => Boolean(i.system ?? i.session);
+  const originOf = (i: {
+    system?: string | undefined;
+    session?: string | undefined;
+  }): string => i.session ?? i.system ?? "direct";
 
   server.registerTool(
     "open_session",
@@ -316,9 +447,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         deviceName: z.string().optional(),
         enhanced: z.boolean().optional(),
         tls: z.boolean().optional(),
-        readOnly: z.boolean().optional()
+        readOnly: z.boolean().optional(),
       },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async (input) =>
       withAudit({ op: "open_session" }, async () => {
@@ -331,13 +462,13 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             readOnly: input.readOnly ?? false,
             // **MCP には切断の通知が無い**（ツール呼び出しごとの HTTP）。永続を通すと
             // 落ちたクライアントのセッションを閉じる者が居なくなるので、有限値に落とす（research F2）
-            idleTimeoutMs: mcpIdleTimeout(opts.idleTimeoutMs)
+            idleTimeoutMs: mcpIdleTimeout(opts.idleTimeoutMs),
           });
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -347,22 +478,30 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         "接続済みセッションの現在画面に、システムの資格情報を画面フィールド入力してサインオン（フォールバック）。" +
         "PUB400 等は auto-signon 済みの open_session を推奨。",
       inputSchema: { sessionId: z.string(), system: z.string() },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, system }) =>
       withAudit({ op: "signon", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId, user);
+          claimForWrite(sessions, sessionId, user);
+          const entry = sessions.assertWritable(
+            sessionId,
+            user,
+            mcpHolder(user),
+          );
           const opts = resolver.resolve({ system }, user, warn).connect;
           if (!opts.user || !opts.password) {
-            throw new As400Error("CONFIG_ERROR", `system ${system} has no signon credentials`);
+            throw new As400Error(
+              "CONFIG_ERROR",
+              `system ${system} has no signon credentials`,
+            );
           }
           const r = await fieldSignon(entry.session, opts.user, opts.password);
           return screenResult(r.screen, {}, r.timedOut);
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -370,17 +509,20 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       description: "セッションを切断する。",
       inputSchema: { sessionId: z.string() },
-      outputSchema: { closed: z.boolean() }
+      outputSchema: { closed: z.boolean() },
     },
     async ({ sessionId }) =>
       withAudit({ op: "close_session", sessionId }, async () => {
         try {
           await sessions.close(sessionId, user);
-          return { content: [{ type: "text" as const, text: "closed" }], structuredContent: { closed: true } };
+          return {
+            content: [{ type: "text" as const, text: "closed" }],
+            structuredContent: { closed: true },
+          };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -396,10 +538,12 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             origin: z.string(),
             connectedAt: z.string(),
             readOnly: z.boolean(),
-            keyboardLocked: z.boolean()
-          })
-        )
-      }
+            keyboardLocked: z.boolean(),
+            /** 予約中ならその表示名。**断られて初めて気づく、を避けるため** */
+            reservedBy: z.string().optional(),
+          }),
+        ),
+      },
     },
     async () =>
       withAudit({ op: "list_sessions" }, async () => {
@@ -409,13 +553,19 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           origin: e.origin,
           connectedAt: e.connectedAt,
           readOnly: e.readOnly,
-          keyboardLocked: e.session.keyboardLocked
+          keyboardLocked: e.session.keyboardLocked,
+          ...(() => {
+            const r = sessions.reservationOf(e.id);
+            return r ? { reservedBy: r.label } : {};
+          })(),
         }));
         return {
-          content: [{ type: "text" as const, text: `${list.length} session(s)` }],
-          structuredContent: { sessions: list }
+          content: [
+            { type: "text" as const, text: `${list.length} session(s)` },
+          ],
+          structuredContent: { sessions: list },
         };
-      })
+      }),
   );
 
   server.registerTool(
@@ -437,10 +587,10 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             port: z.number().optional(),
             tls: z.boolean().optional(),
             /** 自動サインオンが設定されているか（ユーザー名・パスワードは返さない） */
-            autoSignon: z.boolean()
-          })
-        )
-      }
+            autoSignon: z.boolean(),
+          }),
+        ),
+      },
     },
     async () =>
       withAudit({ op: "list_systems" }, async () => {
@@ -452,20 +602,25 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           host: s.host,
           ...(s.port !== undefined ? { port: s.port } : {}),
           ...(s.tls !== undefined ? { tls: s.tls } : {}),
-          autoSignon: s.autoSignon
+          autoSignon: s.autoSignon,
         }));
         return {
           content: [
             {
               type: "text" as const,
               text: systems.length
-                ? systems.map((e: { ref: string; name: string; host: string }) => `${e.ref} — ${e.name} (${e.host})`).join("\n")
-                : "利用できるシステムがありません"
-            }
+                ? systems
+                    .map(
+                      (e: { ref: string; name: string; host: string }) =>
+                        `${e.ref} — ${e.name} (${e.host})`,
+                    )
+                    .join("\n")
+                : "利用できるシステムがありません",
+            },
           ],
-          structuredContent: { systems }
+          structuredContent: { systems },
         };
-      })
+      }),
   );
 
   server.registerTool(
@@ -487,10 +642,10 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             system: z.string(),
             sessionType: z.enum(["display", "printer"]),
             deviceName: z.string().optional(),
-            screenSize: z.enum(["24x80", "27x132"]).optional()
-          })
-        )
-      }
+            screenSize: z.enum(["24x80", "27x132"]).optional(),
+          }),
+        ),
+      },
     },
     async () =>
       withAudit({ op: "list_session_configs" }, async () => {
@@ -500,7 +655,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           system: s.system,
           sessionType: s.sessionType,
           ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {}),
-          ...(s.screenSize !== undefined ? { screenSize: s.screenSize } : {})
+          ...(s.screenSize !== undefined ? { screenSize: s.screenSize } : {}),
         }));
         return {
           content: [
@@ -509,16 +664,21 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               text: list.length
                 ? list
                     .map(
-                      (e: { ref: string; name: string; sessionType: string; system: string }) =>
-                        `${e.ref} — ${e.name} (${e.sessionType}, system ${e.system})`
+                      (e: {
+                        ref: string;
+                        name: string;
+                        sessionType: string;
+                        system: string;
+                      }) =>
+                        `${e.ref} — ${e.name} (${e.sessionType}, system ${e.system})`,
                     )
                     .join("\n")
-                : "保存済みのセッション設定がありません"
-            }
+                : "保存済みのセッション設定がありません",
+            },
           ],
-          structuredContent: { sessions: list }
+          structuredContent: { sessions: list },
         };
-      })
+      }),
   );
 
   // ---- プリンターセッション（TN5250E: スプールを SCS 受信 → 等幅テキスト） ----
@@ -537,9 +697,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         port: z.number().int().optional(),
         deviceName: z.string().optional(),
         ccsid: z.number().int().optional(),
-        tls: z.boolean().optional()
+        tls: z.boolean().optional(),
       },
-      outputSchema: { sessionId: z.string(), startupCode: z.string() }
+      outputSchema: { sessionId: z.string(), startupCode: z.string() },
     },
     async (input) =>
       withAudit({ op: "open_printer_session" }, async () => {
@@ -552,7 +712,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
                 host: input.host ?? "",
                 ...(input.port !== undefined ? { port: input.port } : {}),
                 ...(input.ccsid !== undefined ? { ccsid: input.ccsid } : {}),
-                ...(input.tls !== undefined ? { tls: input.tls } : {})
+                ...(input.tls !== undefined ? { tls: input.tls } : {}),
               };
           const entry = await sessions.openPrinter({
             ...(src.host ? { host: src.host } : {}),
@@ -568,18 +728,23 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             ...withOutput(target?.printerOutput),
             // 表示セッションと同じ理由で永続を通さない（`mcpIdleTimeout`）
             idleTimeoutMs: mcpIdleTimeout(target?.connect.idleTimeoutMs),
-            origin: originOf(input)
+            origin: originOf(input),
           });
           // 待ち受けていなければ起動応答は無い（`autoStart ☐`。`20260801-service-start-stop`）
           const code = entry.session?.startupCode ?? entry.state;
           return {
-            content: [{ type: "text" as const, text: `printer session ${entry.id} (${code})` }],
-            structuredContent: { sessionId: entry.id, startupCode: code }
+            content: [
+              {
+                type: "text" as const,
+                text: `printer session ${entry.id} (${code})`,
+              },
+            ],
+            structuredContent: { sessionId: entry.id, startupCode: code },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -588,106 +753,144 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       description:
         "プリンターセッションで次のスプール（ジョブ完了 1 件）を待って取得する。既に届いていれば即返す。" +
         "timeoutMs 内に来なければ received=false。pages はページごとの等幅テキスト、text は全体。",
-      inputSchema: { sessionId: z.string(), timeoutMs: z.number().int().optional() },
+      inputSchema: {
+        sessionId: z.string(),
+        timeoutMs: z.number().int().optional(),
+      },
       outputSchema: {
         received: z.boolean(),
         spoolId: z.string().optional(),
         pages: z.array(z.string()).optional(),
-        text: z.string().optional()
-      }
+        text: z.string().optional(),
+      },
     },
     async ({ sessionId, timeoutMs }) =>
       withAudit({ op: "wait_spool", sessionId }, async () => {
         try {
           sessions.getPrinter(sessionId, user); // 存在確認（無ければ SESSION_NOT_FOUND）
-          const report = await sessions.waitSpool(sessionId, timeoutMs ?? 30_000, user);
+          const report = await sessions.waitSpool(
+            sessionId,
+            timeoutMs ?? 30_000,
+            user,
+          );
           if (!report) {
             return {
-              content: [{ type: "text" as const, text: "no spool received (timeout)" }],
-              structuredContent: { received: false }
+              content: [
+                { type: "text" as const, text: "no spool received (timeout)" },
+              ],
+              structuredContent: { received: false },
             };
           }
           const pages = report.pages.map((p) => p.lines.join("\n"));
           const text = pages.join("\n\n");
           return {
             content: [{ type: "text" as const, text }],
-            structuredContent: { received: true, spoolId: report.id, pages, text }
+            structuredContent: {
+              received: true,
+              spoolId: report.id,
+              pages,
+              text,
+            },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "list_spools",
     {
-      description: "プリンターセッションでこれまでに受信したスプールの一覧（ページ数付き）。",
+      description:
+        "プリンターセッションでこれまでに受信したスプールの一覧（ページ数付き）。",
       inputSchema: { sessionId: z.string() },
       outputSchema: {
-        spools: z.array(z.object({ spoolId: z.string(), pages: z.number() }))
-      }
+        spools: z.array(z.object({ spoolId: z.string(), pages: z.number() })),
+      },
     },
     async ({ sessionId }) =>
       withAudit({ op: "list_spools", sessionId }, async () => {
         try {
           const entry = sessions.getPrinter(sessionId, user);
-          const spools = entry.reports.map((r) => ({ spoolId: r.id, pages: r.pages.length }));
+          const spools = entry.reports.map((r) => ({
+            spoolId: r.id,
+            pages: r.pages.length,
+          }));
           return {
-            content: [{ type: "text" as const, text: `${spools.length} spool(s)` }],
-            structuredContent: { spools }
+            content: [
+              { type: "text" as const, text: `${spools.length} spool(s)` },
+            ],
+            structuredContent: { spools },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "get_spool",
     {
-      description: "受信済みスプールを spoolId 指定で再取得する（等幅テキスト）。",
+      description:
+        "受信済みスプールを spoolId 指定で再取得する（等幅テキスト）。",
       inputSchema: { sessionId: z.string(), spoolId: z.string() },
-      outputSchema: { pages: z.array(z.string()), text: z.string() }
+      outputSchema: { pages: z.array(z.string()), text: z.string() },
     },
     async ({ sessionId, spoolId }) =>
       withAudit({ op: "get_spool", sessionId }, async () => {
         try {
           const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
-          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          if (!report)
+            throw new As400Error(
+              "SESSION_NOT_FOUND",
+              `spool ${spoolId} not found`,
+            );
           const pages = report.pages.map((p) => p.lines.join("\n"));
           const text = pages.join("\n\n");
-          return { content: [{ type: "text" as const, text }], structuredContent: { pages, text } };
+          return {
+            content: [{ type: "text" as const, text }],
+            structuredContent: { pages, text },
+          };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "get_spool_pdf",
     {
-      description: "受信済みスプールを PDF に変換して取得する（base64）。SBCS/DBCS 対応・等幅・改ページ保持。",
+      description:
+        "受信済みスプールを PDF に変換して取得する（base64）。SBCS/DBCS 対応・等幅・改ページ保持。",
       inputSchema: { sessionId: z.string(), spoolId: z.string() },
-      outputSchema: { base64: z.string(), bytes: z.number() }
+      outputSchema: { base64: z.string(), bytes: z.number() },
     },
     async ({ sessionId, spoolId }) =>
       withAudit({ op: "get_spool_pdf", sessionId }, async () => {
         try {
           const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
-          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          if (!report)
+            throw new As400Error(
+              "SESSION_NOT_FOUND",
+              `spool ${spoolId} not found`,
+            );
           const pdf = await renderSpoolPdf(report.pages);
           const base64 = pdf.toString("base64");
           return {
-            content: [{ type: "text" as const, text: `PDF ${pdf.length} bytes (base64)` }],
-            structuredContent: { base64, bytes: pdf.length }
+            content: [
+              {
+                type: "text" as const,
+                text: `PDF ${pdf.length} bytes (base64)`,
+              },
+            ],
+            structuredContent: { base64, bytes: pdf.length },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   /**
@@ -705,50 +908,71 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         sessionId: z.string(),
         spoolId: z.string(),
         title: z.string().optional(),
-        note: z.string().optional()
+        note: z.string().optional(),
       },
-      outputSchema: { html: z.string(), bytes: z.number(), pages: z.number() }
+      outputSchema: { html: z.string(), bytes: z.number(), pages: z.number() },
     },
     async ({ sessionId, spoolId, title, note }) =>
       withAudit({ op: "get_spool_html", sessionId }, async () => {
         try {
           const entry = sessions.getPrinter(sessionId, user);
           const report = entry.reports.find((r) => r.id === spoolId);
-          if (!report) throw new As400Error("SESSION_NOT_FOUND", `spool ${spoolId} not found`);
+          if (!report)
+            throw new As400Error(
+              "SESSION_NOT_FOUND",
+              `spool ${spoolId} not found`,
+            );
           const html = renderSpoolHtml(report.pages, {
             capturedAt: new Date().toISOString(),
             sessionId,
             host: entry.host,
             spoolId,
             ...(title !== undefined ? { title } : {}),
-            ...(note !== undefined ? { note } : {})
+            ...(note !== undefined ? { note } : {}),
           });
           return {
-            content: [{ type: "text" as const, text: `HTML ${html.length} bytes (${report.pages.length} pages)` }],
-            structuredContent: { html, bytes: html.length, pages: report.pages.length }
+            content: [
+              {
+                type: "text" as const,
+                text: `HTML ${html.length} bytes (${report.pages.length} pages)`,
+              },
+            ],
+            structuredContent: {
+              html,
+              bytes: html.length,
+              pages: report.pages.length,
+            },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "get_screen",
     {
-      description: "現在の画面を取得（テキスト＋構造化）。include/rows で絞り込み可。",
-      inputSchema: { sessionId: z.string(), include: includeSchema, rows: rowsSchema },
-      outputSchema: screenOutShape
+      description:
+        "現在の画面を取得（テキスト＋構造化）。include/rows で絞り込み可。",
+      inputSchema: {
+        sessionId: z.string(),
+        include: includeSchema,
+        rows: rowsSchema,
+      },
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, include, rows }) =>
       withAudit({ op: "get_screen", sessionId }, async () => {
         try {
           const entry = sessions.get(sessionId, user);
-          return screenResult(entry.session.snapshot(), fmtOpts({ include, rows }));
+          return screenResult(
+            entry.session.snapshot(),
+            fmtOpts({ include, rows }),
+          );
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   /**
@@ -762,8 +986,12 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         "現在の画面を、5250 エミュレータの見た目を忠実に再現した自己完結 HTML で取得する（自動操作のエビデンス用）。" +
         "外部 CSS/JS/フォントを参照せず、HTML 単体で開ける。ダーク/ライトを画面上のボタンで切り替えられる。" +
         "決定的な変換なので、同じ画面からは常に同じ HTML が出る。",
-      inputSchema: { sessionId: z.string(), title: z.string().optional(), note: z.string().optional() },
-      outputSchema: { html: z.string(), bytes: z.number() }
+      inputSchema: {
+        sessionId: z.string(),
+        title: z.string().optional(),
+        note: z.string().optional(),
+      },
+      outputSchema: { html: z.string(), bytes: z.number() },
     },
     async ({ sessionId, title, note }) =>
       withAudit({ op: "get_screen_html", sessionId }, async () => {
@@ -775,16 +1003,18 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             host: entry.host,
             ...(entry.job ? { job: jobLabel(entry.job) } : {}),
             ...(title !== undefined ? { title } : {}),
-            ...(note !== undefined ? { note } : {})
+            ...(note !== undefined ? { note } : {}),
           });
           return {
-            content: [{ type: "text" as const, text: `HTML ${html.length} bytes` }],
-            structuredContent: { html, bytes: html.length }
+            content: [
+              { type: "text" as const, text: `HTML ${html.length} bytes` },
+            ],
+            structuredContent: { html, bytes: html.length },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   /**
@@ -797,8 +1027,11 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       description:
         "このセッションの画面遷移の記録を開始する（get_screen_history_html で HTML にまとめる）。" +
         "開始時点の画面が 1 コマ目になる。記録するのは画面と送信キーだけで、入力値は残さない。",
-      inputSchema: { sessionId: z.string(), limit: z.number().int().min(1).max(500).optional() },
-      outputSchema: { recording: z.boolean(), frames: z.number() }
+      inputSchema: {
+        sessionId: z.string(),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+      outputSchema: { recording: z.boolean(), frames: z.number() },
     },
     async ({ sessionId, limit }) =>
       withAudit({ op: "start_screen_recording", sessionId }, async () => {
@@ -808,20 +1041,24 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           entry.recorder.start();
           return {
             content: [{ type: "text" as const, text: "recording" }],
-            structuredContent: { recording: true, frames: entry.recorder.count }
+            structuredContent: {
+              recording: true,
+              frames: entry.recorder.count,
+            },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "stop_screen_recording",
     {
-      description: "画面遷移の記録を停止する。記録済みのコマは残るので、停止後に取り出せる。",
+      description:
+        "画面遷移の記録を停止する。記録済みのコマは残るので、停止後に取り出せる。",
       inputSchema: { sessionId: z.string() },
-      outputSchema: { recording: z.boolean(), frames: z.number() }
+      outputSchema: { recording: z.boolean(), frames: z.number() },
     },
     async ({ sessionId }) =>
       withAudit({ op: "stop_screen_recording", sessionId }, async () => {
@@ -830,12 +1067,15 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           entry.recorder?.stop();
           return {
             content: [{ type: "text" as const, text: "stopped" }],
-            structuredContent: { recording: false, frames: entry.recorder?.count ?? 0 }
+            structuredContent: {
+              recording: false,
+              frames: entry.recorder?.count ?? 0,
+            },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -848,9 +1088,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         sessionId: z.string(),
         title: z.string().optional(),
         note: z.string().optional(),
-        clear: z.boolean().optional()
+        clear: z.boolean().optional(),
       },
-      outputSchema: { html: z.string(), bytes: z.number(), frames: z.number() }
+      outputSchema: { html: z.string(), bytes: z.number(), frames: z.number() },
     },
     async ({ sessionId, title, note, clear }) =>
       withAudit({ op: "get_screen_history_html", sessionId }, async () => {
@@ -863,17 +1103,26 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             host: entry.host,
             ...(entry.job ? { job: jobLabel(entry.job) } : {}),
             ...(title !== undefined ? { title } : {}),
-            ...(note !== undefined ? { note } : {})
+            ...(note !== undefined ? { note } : {}),
           });
           if (clear) entry.recorder?.clear();
           return {
-            content: [{ type: "text" as const, text: `HTML ${html.length} bytes (${frames.length} frames)` }],
-            structuredContent: { html, bytes: html.length, frames: frames.length }
+            content: [
+              {
+                type: "text" as const,
+                text: `HTML ${html.length} bytes (${frames.length} frames)`,
+              },
+            ],
+            structuredContent: {
+              html,
+              bytes: html.length,
+              frames: frames.length,
+            },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -884,49 +1133,64 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       inputSchema: {
         sessionId: z.string(),
         timeoutMs: z.number().int().optional(),
-        until: z.object({ text: z.string(), row: z.number().int().optional() }).optional(),
+        until: z
+          .object({ text: z.string(), row: z.number().int().optional() })
+          .optional(),
         include: includeSchema,
-        rows: rowsSchema
+        rows: rowsSchema,
       },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, timeoutMs, until, include, rows }) =>
       withAudit({ op: "wait_screen", sessionId }, async () => {
         try {
           const entry = sessions.get(sessionId, user);
-          const opts: { timeoutMs?: number; until?: { text: string; row?: number } } = {};
+          const opts: {
+            timeoutMs?: number;
+            until?: { text: string; row?: number };
+          } = {};
           if (timeoutMs !== undefined) opts.timeoutMs = timeoutMs;
           if (until) {
-            opts.until = until.row !== undefined ? { text: until.text, row: until.row } : { text: until.text };
+            opts.until =
+              until.row !== undefined
+                ? { text: until.text, row: until.row }
+                : { text: until.text };
           }
           const r = await entry.session.waitForScreen(opts);
           return screenResult(r.screen, fmtOpts({ include, rows }), r.timedOut);
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
     "set_fields",
     {
-      description: "フィールドにローカル入力する（ホスト送信なし）。readOnly セッションは拒否。",
+      description:
+        "フィールドにローカル入力する（ホスト送信なし）。readOnly セッションは拒否。",
       inputSchema: { sessionId: z.string(), fields: z.array(fieldInputSchema) },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, fields }) =>
       withAudit(
         { op: "set_fields", sessionId, fields: fieldCoords(fields) },
         async () => {
           try {
-            const entry = sessions.assertWritable(sessionId, user);
-            for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
+            claimForWrite(sessions, sessionId, user);
+            const entry = sessions.assertWritable(
+              sessionId,
+              user,
+              mcpHolder(user),
+            );
+            for (const f of fields)
+              entry.session.setField(fieldTarget(f.field), f.value);
             return screenResult(entry.session.snapshot(), {});
           } catch (err) {
             return errorResult(err);
           }
-        }
-      )
+        },
+      ),
   );
 
   server.registerTool(
@@ -942,31 +1206,52 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         sysReqText: z
           .string()
           .optional()
-          .describe("システム要求行の文字列（SysReq 専用。省略でシステム要求メニュー）"),
+          .describe(
+            "システム要求行の文字列（SysReq 専用。省略でシステム要求メニュー）",
+          ),
         include: includeSchema,
-        rows: rowsSchema
+        rows: rowsSchema,
       },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, key, cursor, fields, sysReqText, include, rows }) =>
-      withAudit({ op: "send_key", sessionId, key, ...(fields ? { fields: fieldCoords(fields) } : {}) }, async () => {
-        try {
-          const entry = sessions.assertKeyAllowed(sessionId, key, user);
-          if (fields) {
-            sessions.assertWritable(sessionId, user);
-            for (const f of fields) entry.session.setField(fieldTarget(f.field), f.value);
+      withAudit(
+        {
+          op: "send_key",
+          sessionId,
+          key,
+          ...(fields ? { fields: fieldCoords(fields) } : {}),
+        },
+        async () => {
+          try {
+            claimForWrite(sessions, sessionId, user);
+            const entry = sessions.assertKeyAllowed(
+              sessionId,
+              key,
+              user,
+              mcpHolder(user),
+            );
+            if (fields) {
+              sessions.assertWritable(sessionId, user, mcpHolder(user));
+              for (const f of fields)
+                entry.session.setField(fieldTarget(f.field), f.value);
+            }
+            // 記録中なら、この画面遷移を起こした操作として次のコマに添える
+            entry.recorder?.noteKey(key);
+            const r = await entry.session.sendAid(key, {
+              ...(cursor ? { cursor } : {}),
+              ...(sysReqText !== undefined ? { sysReqText } : {}),
+            });
+            return screenResult(
+              r.screen,
+              fmtOpts({ include, rows }),
+              r.timedOut,
+            );
+          } catch (err) {
+            return errorResult(err);
           }
-          // 記録中なら、この画面遷移を起こした操作として次のコマに添える
-          entry.recorder?.noteKey(key);
-          const r = await entry.session.sendAid(key, {
-            ...(cursor ? { cursor } : {}),
-            ...(sysReqText !== undefined ? { sysReqText } : {})
-          });
-          return screenResult(r.screen, fmtOpts({ include, rows }), r.timedOut);
-        } catch (err) {
-          return errorResult(err);
-        }
-      })
+        },
+      ),
   );
 
   server.registerTool(
@@ -979,23 +1264,35 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         sessionId: z.string(),
         fieldId: z.number().int(),
         choiceIndex: z.number().int(),
-        selected: z.boolean().optional()
+        selected: z.boolean().optional(),
       },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, fieldId, choiceIndex, selected }) =>
       withAudit({ op: "select_gui_choice", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId, user);
-          const ok = entry.session.selectGuiChoice(fieldId, choiceIndex, selected ?? true);
+          claimForWrite(sessions, sessionId, user);
+          const entry = sessions.assertWritable(
+            sessionId,
+            user,
+            mcpHolder(user),
+          );
+          const ok = entry.session.selectGuiChoice(
+            fieldId,
+            choiceIndex,
+            selected ?? true,
+          );
           if (!ok) {
-            throw new As400Error("FIELD_TYPE", `選択できません（fieldId=${fieldId} choice=${choiceIndex}）`);
+            throw new As400Error(
+              "FIELD_TYPE",
+              `選択できません（fieldId=${fieldId} choice=${choiceIndex}）`,
+            );
           }
           return screenResult(entry.session.snapshot(), {});
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -1010,23 +1307,35 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         key: z.enum(AID_KEYS).optional(),
         cursor: cursorSchema.optional(),
         include: includeSchema,
-        rows: rowsSchema
+        rows: rowsSchema,
       },
-      outputSchema: screenOutShape
+      outputSchema: screenOutShape,
     },
     async ({ sessionId, fieldId, key, cursor, include, rows }) =>
-      withAudit({ op: "submit_gui_selection", sessionId, ...(key ? { key } : {}) }, async () => {
-        try {
-          const entry = sessions.assertWritable(sessionId, user);
-          const opts: SendAidOptions & { key?: AidKey } = {};
-          if (key) opts.key = key;
-          if (cursor) opts.cursor = cursor;
-          const r = await entry.session.submitGuiSelection(fieldId, opts);
-          return screenResult(r.screen, fmtOpts({ include, rows }), r.timedOut);
-        } catch (err) {
-          return errorResult(err);
-        }
-      })
+      withAudit(
+        { op: "submit_gui_selection", sessionId, ...(key ? { key } : {}) },
+        async () => {
+          try {
+            claimForWrite(sessions, sessionId, user);
+            const entry = sessions.assertWritable(
+              sessionId,
+              user,
+              mcpHolder(user),
+            );
+            const opts: SendAidOptions & { key?: AidKey } = {};
+            if (key) opts.key = key;
+            if (cursor) opts.cursor = cursor;
+            const r = await entry.session.submitGuiSelection(fieldId, opts);
+            return screenResult(
+              r.screen,
+              fmtOpts({ include, rows }),
+              r.timedOut,
+            );
+          } catch (err) {
+            return errorResult(err);
+          }
+        },
+      ),
   );
 
   server.registerTool(
@@ -1042,33 +1351,51 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               fields: z.array(fieldInputSchema).optional(),
               key: z.enum(AID_KEYS),
               cursor: cursorSchema.optional(),
-              expect: z.object({ text: z.string(), row: z.number().int().optional() }).optional()
-            })
+              expect: z
+                .object({ text: z.string(), row: z.number().int().optional() })
+                .optional(),
+            }),
           )
           .max(20),
         include: includeSchema,
-        rows: rowsSchema
+        rows: rowsSchema,
       },
       outputSchema: {
         executed: z.number(),
         stopped: z.boolean(),
         reason: z.string().optional(),
-        ...screenOutShape
-      }
+        ...screenOutShape,
+      },
     },
     async ({ sessionId, steps, include, rows }) =>
       withAudit({ op: "run_steps", sessionId }, async () => {
         try {
-          const entry = sessions.assertWritable(sessionId, user);
+          claimForWrite(sessions, sessionId, user);
+          const entry = sessions.assertWritable(
+            sessionId,
+            user,
+            mcpHolder(user),
+          );
           let executed = 0;
           let stopped = false;
           let reason: string | undefined;
           let last: SendAidResult | undefined;
           for (const step of steps) {
-            sessions.assertKeyAllowed(sessionId, step.key, user);
-            if (step.fields) for (const f of step.fields) entry.session.setField(fieldTarget(f.field), f.value);
+            claimForWrite(sessions, sessionId, user);
+            sessions.assertKeyAllowed(
+              sessionId,
+              step.key,
+              user,
+              mcpHolder(user),
+            );
+            if (step.fields)
+              for (const f of step.fields)
+                entry.session.setField(fieldTarget(f.field), f.value);
             entry.recorder?.noteKey(step.key);
-            last = await entry.session.sendAid(step.key, step.cursor ? { cursor: step.cursor } : {});
+            last = await entry.session.sendAid(
+              step.key,
+              step.cursor ? { cursor: step.cursor } : {},
+            );
             executed++;
             if (step.expect && !screenHas(last.screen, step.expect)) {
               stopped = true;
@@ -1077,13 +1404,21 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             }
           }
           const snap = last ? last.screen : entry.session.snapshot();
-          const base = screenResult(snap, fmtOpts({ include, rows }), last?.timedOut);
-          Object.assign(base.structuredContent, { executed, stopped, ...(reason ? { reason } : {}) });
+          const base = screenResult(
+            snap,
+            fmtOpts({ include, rows }),
+            last?.timedOut,
+          );
+          Object.assign(base.structuredContent, {
+            executed,
+            stopped,
+            ...(reason ? { reason } : {}),
+          });
           return base;
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 
   server.registerTool(
@@ -1098,9 +1433,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           name: z.string(),
           system: z.string().optional(),
           user: z.string().optional(),
-          number: z.string().optional()
-        })
-      }
+          number: z.string().optional(),
+        }),
+      },
     },
     async ({ sessionId }) =>
       withAudit({ op: "get_job_info", sessionId }, async () => {
@@ -1112,8 +1447,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             return errorResult(
               new As400Error(
                 "NOT_FOUND",
-                "このセッションのジョブ識別子は分かりません（起動応答が無いホストの可能性）"
-              )
+                "このセッションのジョブ識別子は分かりません（起動応答が無いホストの可能性）",
+              ),
             );
           }
           const text = job.number
@@ -1121,12 +1456,12 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             : `${job.name}${job.system ? ` (${job.system})` : ""}`;
           return {
             content: [{ type: "text" as const, text }],
-            structuredContent: { job }
+            structuredContent: { job },
           };
         } catch (err) {
           return errorResult(err);
         }
-      })
+      }),
   );
 }
 
@@ -1148,7 +1483,8 @@ function buildDirectOpts(input: {
   tls?: boolean;
   origin: string;
 } {
-  if (!input.host) throw new As400Error("CONFIG_ERROR", "host or profile required");
+  if (!input.host)
+    throw new As400Error("CONFIG_ERROR", "host or profile required");
   const o: {
     host: string;
     port?: number;
@@ -1160,7 +1496,7 @@ function buildDirectOpts(input: {
     origin: string;
   } = {
     host: input.host,
-    origin: "direct"
+    origin: "direct",
   };
   if (input.port !== undefined) o.port = input.port;
   if (input.ccsid !== undefined) o.ccsid = input.ccsid;
@@ -1177,9 +1513,16 @@ function fieldCoords(fields: FieldInput[]): { row: number; col: number }[] {
     .filter((f): f is { row: number; col: number } => typeof f !== "number");
 }
 
-function screenHas(snap: ScreenSnapshot, expect: { text: string; row?: number | undefined }): boolean {
-  const rows = expect.row !== undefined ? [snap.cells[expect.row - 1] ?? []] : snap.cells;
-  return rows.map((r) => r.map((c) => c.char).join("")).join("\n").includes(expect.text);
+function screenHas(
+  snap: ScreenSnapshot,
+  expect: { text: string; row?: number | undefined },
+): boolean {
+  const rows =
+    expect.row !== undefined ? [snap.cells[expect.row - 1] ?? []] : snap.cells;
+  return rows
+    .map((r) => r.map((c) => c.char).join(""))
+    .join("\n")
+    .includes(expect.text);
 }
 
 /**
@@ -1196,18 +1539,25 @@ function mcpIdleTimeout(v: number | "never" | undefined): number {
   if (v === "never") {
     mcpLog.warn(
       { idleTimeoutMs: ms },
-      "MCP セッションには永続を適用しない（切断が通知されないため）。有限値に落とした"
+      "MCP セッションには永続を適用しない（切断が通知されないため）。有限値に落とした",
     );
   }
   return ms;
 }
 
 /** プリンター出力設定を openPrinter のオプション断片へ（未設定なら空＝自動出力なし） */
-function withOutput(output: PrinterOutputConfig | undefined): { output?: PrinterOutputConfig } {
+function withOutput(output: PrinterOutputConfig | undefined): {
+  output?: PrinterOutputConfig;
+} {
   return output ? { output } : {};
 }
 
 /** ジョブ識別子の表示形（`番号/ユーザー/ジョブ名`。引けていなければ装置名だけ） */
-function jobLabel(job: { name: string; system?: string; user?: string; number?: string }): string {
+function jobLabel(job: {
+  name: string;
+  system?: string;
+  user?: string;
+  number?: string;
+}): string {
   return job.number ? `${job.number}/${job.user}/${job.name}` : job.name;
 }

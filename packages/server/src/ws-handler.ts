@@ -419,10 +419,14 @@ export class WsConnection {
       // 予約（HLLAPI の Reserve）の開始・解除を push。**画面と別に流す**——
       // 予約は画面を変えずに始まり・終わるので、screen に相乗りさせると取りこぼす
       entry.onReservationChange = (r) => this.send({ type: "reserved", ...(r ? { by: r.label } : {}) });
+      // **見ている人として数える。** 自動操作（MCP）が予約を取るかの判断に使う
+      // ——誰も見ていないセッションを締め切っても、守る相手が居ない
+      this.deps.sessions.addViewer(entry.id);
       this.detachScreen = () => {
         entry.session.off("screen", onScreen);
         delete entry.onPcCommandEvent;
         delete entry.onReservationChange;
+        this.deps.sessions.removeViewer(entry.id);
       };
       this.send({
         type: "opened",

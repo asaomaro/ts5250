@@ -1,0 +1,9 @@
+schema: 3
+slug: mcp-session-exclusion
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, walkthrough, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: session-exclusion.md

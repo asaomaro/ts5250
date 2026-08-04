@@ -135,6 +135,14 @@ export interface SessionReservation {
   label: string;
   /** 期限（epoch ms）。**過ぎたら無いものとして扱う** */
   expiresAt: number;
+  /**
+   * この予約の期限の長さ。**用途で違う。**
+   *
+   * HLLAPI は利用者が明示的に取り、長い自動化の間ずっと保つ（既定 2 分）。
+   * MCP は道具の側が勝手に取り、書き終えたら手放したい（数秒）。
+   * 定数 1 つでは両立しないので、**予約そのものが持つ**。
+   */
+  ttlMs: number;
 }
 
 /**
@@ -175,6 +183,24 @@ export interface SessionEntry {
   reservation?: SessionReservation;
   /** 予約の変化を購読者（ws-handler）へ知らせる。切断で解除する */
   onReservationChange?: (r: SessionReservation | undefined) => void;
+  /**
+   * 期限で予約を切るタイマー。
+   *
+   * **遅延評価では足りない。** `reservationOf` は読まれたときに刈るが、
+   * 誰も読まなければ**ブラウザへ解除が通知されない**——サーバーは通す状態なのに、
+   * 画面には覆いが出たまま人が締め出される（実機の E2E で踏んだ）。
+   */
+  reservationTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * このセッションを見ているブラウザの数。
+   *
+   * **予約を取るかどうかの判断に使う**——見ている人が居なければ、締め出す相手が居ないので
+   * 予約は儀式でしかない（MCP が自分で開いたセッションが典型）。
+   *
+   * **通知フック（`onReservationChange` 等）の有無で代用しない。** あれは通知の口であって
+   * 在席の印ではなく、通知が要らなくなった瞬間に判定が壊れる。
+   */
+  viewers: number;
   host: string;
   origin: string;
   connectedAt: string;
@@ -577,6 +603,8 @@ export class SessionManager {
       readOnly: opts.readOnly ?? false,
       host: opts.host ?? "(injected)",
       origin: opts.origin ?? "direct",
+      // **見ている人はまだ居ない。** ws-handler が繋いだ時点で足す
+      viewers: 0,
       ...(opts.target !== undefined ? { target: opts.target } : {}),
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
@@ -1083,6 +1111,29 @@ export class SessionManager {
   }
 
   /**
+   * このセッションを**ブラウザが見ているか**。
+   *
+   * 予約を取るかの判断に使う。**セッションの出どころで判断しない**——
+   * いまブラウザは既存セッションへ後から繋げないので「MCP が開いたもの＝誰も見ていない」が
+   * 成り立つが、**それは偶然の性質**で、後から繋げるようにした瞬間に崩れる。疎通の有無は不変。
+   */
+  hasViewer(id: string): boolean {
+    return (this.sessions.get(id)?.viewers ?? 0) > 0;
+  }
+
+  /** 見ている人が増えた（ws-handler が呼ぶ） */
+  addViewer(id: string): void {
+    const entry = this.sessions.get(id);
+    if (entry) entry.viewers += 1;
+  }
+
+  /** 見ている人が減った。**下限は 0**（二重に外しても壊れない） */
+  removeViewer(id: string): void {
+    const entry = this.sessions.get(id);
+    if (entry) entry.viewers = Math.max(0, entry.viewers - 1);
+  }
+
+  /**
    * 有効な予約（期限切れなら `undefined`）。**期限切れはここで刈る**ので、
    * 読み手が毎回 `expiresAt` を見比べる必要は無い。
    */
@@ -1096,8 +1147,21 @@ export class SessionManager {
   }
 
   private setReservation(entry: SessionEntry, r: SessionReservation | undefined): void {
-    if (r) entry.reservation = r;
-    else delete entry.reservation;
+    if (entry.reservationTimer) {
+      clearTimeout(entry.reservationTimer);
+      delete entry.reservationTimer;
+    }
+    if (r) {
+      entry.reservation = r;
+      // **期限が来たら自分で切って知らせる。** 読まれるのを待たない
+      const timer = setTimeout(() => {
+        if (entry.reservation === r) this.setReservation(entry, undefined);
+      }, Math.max(0, r.expiresAt - this.now()));
+      timer.unref?.();
+      entry.reservationTimer = timer;
+    } else {
+      delete entry.reservation;
+    }
     entry.onReservationChange?.(r);
   }
 
@@ -1106,9 +1170,15 @@ export class SessionManager {
    * （`assertWritable` の予約検査がそのまま効く）。
    * 同じ主体の再予約は期限の延長として通る——HLLAPI 側で何度呼ばれても壊れない。
    */
-  reserve(id: string, holder: string, label: string, user?: AuthUser): SessionEntry {
+  reserve(
+    id: string,
+    holder: string,
+    label: string,
+    user?: AuthUser,
+    ttlMs: number = RESERVATION_TTL_MS
+  ): SessionEntry {
     const entry = this.assertWritable(id, user, holder);
-    this.setReservation(entry, { holder, label, expiresAt: this.now() + RESERVATION_TTL_MS });
+    this.setReservation(entry, { holder, label, ttlMs, expiresAt: this.now() + ttlMs });
     return entry;
   }
 
@@ -1137,7 +1207,8 @@ export class SessionManager {
     const entry = this.sessions.get(id);
     const current = this.reservationOf(id);
     if (!entry || current?.holder !== holder) return;
-    this.setReservation(entry, { ...current, expiresAt: this.now() + RESERVATION_TTL_MS });
+    // **その予約自身の長さで延ばす**（HLLAPI と MCP で違う）
+    this.setReservation(entry, { ...current, expiresAt: this.now() + current.ttlMs });
   }
 
   /**

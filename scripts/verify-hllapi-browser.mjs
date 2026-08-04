@@ -240,6 +240,39 @@ try {
     (await screenText()) !== beforeMcp
   );
 
+  // ---- 7. **MCP が自動で予約する**（見ている人が居るときだけ）----
+  const sid = sessions.list()[0].id;
+  check("**ブラウザが見ている**（在席が数えられている）", sessions.hasViewer(sid));
+
+  const t0 = Date.now();
+  const auto = await mcp("send_key", { sessionId: sid, key: "Enter" });
+  const elapsed = Date.now() - t0;
+  check("MCP から打てた", !JSON.stringify(auto).includes("error"), `${elapsed}ms`);
+
+  // 予約は**書いている間だけ**。実機の 1 往復に対して期限が足りているかを測る
+  const held = sessions.reservationOf(sid);
+  check("**MCP が自動で予約した**（囲えと言われずに）", held?.label === "MCP", `label=${held?.label}`);
+  check(
+    `**1 往復（${elapsed}ms）に対して期限（${held?.ttlMs}ms）が足りている**`,
+    (held?.ttlMs ?? 0) > elapsed * 2,
+    `余裕 ${((held?.ttlMs ?? 0) / Math.max(elapsed, 1)).toFixed(1)} 倍`
+  );
+
+  await page.waitForSelector(".reserved-overlay", { timeout: 5000 }).catch(() => {});
+  await page.screenshot({ path: `${SHOTS}/6-mcp-reserved.png` });
+  const mcpBox = await page.locator(".reserved-box").innerText().catch(() => "");
+  check("**画面に「MCP が自動操作中です」が出る**", mcpBox.includes("MCP"), mcpBox.replace(/\n/gu, " "));
+
+  // **終われば自然に消える**（HLLAPI の 2 分と違い、短い期限）
+  await page
+    .waitForSelector(".reserved-overlay", { state: "detached", timeout: 30_000 })
+    .catch(() => {});
+  await page.screenshot({ path: `${SHOTS}/7-mcp-released.png` });
+  check(
+    "**放っておけば覆いが消える**（囲いを解く操作が要らない）",
+    (await page.locator(".reserved-overlay").count()) === 0
+  );
+
   sessions.closeAll?.();
 } catch (e) {
   check("例外なく完走する", false, String(e));

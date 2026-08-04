@@ -181,3 +181,38 @@ describe("WsConnection: 予約中の締め出し", () => {
   // 「解除後はまた打てる」は**ここでは検査しない**——Enter がホストの応答を待って
   // 5 秒止まる（ReplayTransport に続きが無い）。解除の意味は session-manager.test.ts が持つ
 });
+
+/**
+ * **在席の勘定**。MCP が予約を取るかの判断に使う——数え間違えると、
+ * 誰も見ていないのに覆いが出る／見ているのに出ない。
+ */
+describe("WsConnection: 見ている人を数える", () => {
+  it("**開けば増え、閉じれば減る**", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    expect(mgr.hasViewer(id)).toBe(true);
+    conn.onSocketClose();
+    expect(mgr.hasViewer(id)).toBe(false);
+    mgr.closeAll();
+  });
+
+  it("**二重に閉じても壊れない**（下限 0）", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    conn.onSocketClose();
+    conn.onSocketClose();
+    expect(mgr.hasViewer(id)).toBe(false);
+    mgr.closeAll();
+  });
+
+  it("**誰も繋いでいないセッションは在席 0**（MCP が開いた場合がこれ）", async () => {
+    const { mgr } = setup();
+    const entry = await mgr.open({ host: "h" }).catch(() => undefined);
+    if (entry) {
+      expect(mgr.hasViewer(entry.id)).toBe(false);
+      mgr.closeAll();
+    }
+  });
+});
