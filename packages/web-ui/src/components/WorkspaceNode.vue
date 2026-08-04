@@ -7,7 +7,7 @@ import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZ
 import { sessionsStore } from "../stores/sessions.js";
 import { isPaneTab } from "../paneLabels.js";
 import { openedPanes, markPaneOpened, registerPaneSlot } from "../composables/openedPanes.js";
-import { isFileDrag } from "../dnd.js";
+import { isFileDrag, TAB_MIME, TAB_GROUP_MIME } from "../dnd.js";
 
 const props = defineProps<{ node: WsNode }>();
 
@@ -65,7 +65,17 @@ function onDrop(ev: DragEvent): void {
   dropZone.value = undefined;
   if (!zone) return; // 中央ドロップは無効
   ev.preventDefault();
-  const sessionId = ev.dataTransfer?.getData("text/session");
+  /**
+   * **タブグループを先に見る**（`20260804-tab-groups`）。チップを掴んだドラッグは
+   * グループごとの分割になる。1 枚のタブとは別の型で載せてあるので取り違えない（`dnd.ts`）。
+   */
+  const tgId = ev.dataTransfer?.getData(TAB_GROUP_MIME) || workspaceStore.draggingTabGroup;
+  if (tgId) {
+    workspaceStore.draggingTabGroup = undefined;
+    workspaceStore.splitWithTabGroup(group.value.id, zone, tgId);
+    return;
+  }
+  const sessionId = ev.dataTransfer?.getData(TAB_MIME);
   if (!sessionId) return;
   workspaceStore.split(group.value.id, zone, sessionId);
 }

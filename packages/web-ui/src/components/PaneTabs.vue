@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { GroupNode } from "../stores/workspace.js";
+import type { GroupNode, TabGroup } from "../stores/workspace.js";
 import { systemColorVar } from "../composables/systemColor.js";
+import { tabGroupColorVar } from "../composables/tabGroupColor.js";
 import { appearance } from "../stores/appearance.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -9,13 +10,23 @@ import { watchesStore } from "../stores/watches.js";
 import { systemsStore } from "../stores/systems.js";
 import { paneLabelOf, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
+import { msgCloseTabGroup } from "../composables/opMessages.js";
 import SessionInfo from "./SessionInfo.vue";
-import { isFileDrag } from "../dnd.js";
+import TabGroupMenu from "./TabGroupMenu.vue";
+import { isFileDrag, TAB_MIME, TAB_GROUP_MIME } from "../dnd.js";
 
 const props = defineProps<{ group: GroupNode }>();
-const infoFor = ref<string | undefined>();
+/**
+ * 開いているポップオーバー。**セッション情報とタブグループのメニューは同時に開かない**
+ * （`20260804-tab-groups`）。別々の変数で持つと両方開いた状態を作れてしまう。
+ */
+const openPopover = ref<{ kind: "info" | "tabgroup"; id: string } | undefined>();
 // 並び替えプレビュー（どのタブの前/後ろに挿入されるか）
 const reorder = ref<{ overId: string; after: boolean } | undefined>();
+/** 重ねてグループ化する予告（このタブの上に落とすとまとまる） */
+const intoTab = ref<string | undefined>();
+/** タブを受け入れるタブグループのチップ（畳んだグループへの参加もここで受ける） */
+const intoChip = ref<string | undefined>();
 
 
 /** セッションを持たない（＝接続の概念が無い）タブか。判定は paneLabels に集約している */
@@ -34,17 +45,68 @@ function connected(sessionId: string): boolean {
  * 選択中システムに属するタブだけを描画する。
  * **`group.tabs` は変えない**——隠すだけで、切り替えて戻れば元どおり現れる。
  */
-const shownTabs = computed(() => workspaceStore.visibleTabs(props.group));
+const shownTabs = computed(() => new Set(workspaceStore.visibleTabs(props.group)));
+
+/**
+ * **タブ帯に並べるもの**（`20260804-tab-groups`）。チップとタブが混ざった一列。
+ *
+ * チップはそのグループの**最初のメンバーの直前**に入る。走査するのは `visibleTabs` ではなく
+ * `group.tabs`——**畳んだグループはメンバーが出ないのでチップだけが残る**必要があり、
+ * 隠れたタブの位置を知らないとチップを置く場所が決まらない。
+ * 「どのタブを出すか」の判断そのものは `visibleTabs`（ストア側の唯一の規則）に委ねる。
+ */
+type StripItem = { kind: "chip"; tg: TabGroup } | { kind: "tab"; id: string };
+const stripItems = computed<StripItem[]>(() => {
+  const visible = shownTabs.value;
+  const out: StripItem[] = [];
+  const seen = new Set<string>();
+  for (const t of props.group.tabs) {
+    const tg = workspaceStore.tabGroupOfTab(t);
+    if (tg && !seen.has(tg.id)) {
+      seen.add(tg.id);
+      out.push({ kind: "chip", tg });
+    }
+    if (visible.has(t)) out.push({ kind: "tab", id: t });
+  }
+  return out;
+});
+
+/** そのタブが属するタブグループ（無ければ undefined） */
+const tgOf = (t: string): TabGroup | undefined => workspaceStore.tabGroupOfTab(t);
+/** グループ内で最初 / 最後のメンバーか（外側の角だけ丸めるため） */
+function tgEdge(t: string): { first: boolean; last: boolean } {
+  const tg = tgOf(t);
+  if (!tg) return { first: false, last: false };
+  const members = props.group.tabs.filter((x) => workspaceStore.tabGroupOf[x] === tg.id);
+  return { first: members[0] === t, last: members[members.length - 1] === t };
+}
+/**
+ * 畳んだグループの中のタブがアクティブか。
+ *
+ * 折りたたみは**アクティブタブに干渉しない**ので、畳んだ中身が出続けることがある
+ * （利用者の判断）。タブ帯から消えた中身が出ている理由が読めるよう、チップに印を出す。
+ */
+function chipActive(tg: TabGroup): boolean {
+  const active = props.group.activeTab;
+  return !!active && workspaceStore.tabGroupOf[active] === tg.id;
+}
 
 /**
  * **システムカラーの帯**（`20260802-tabs-own-system`）。
  * 異なるシステムのタブを並べたときの見分け。文字は着色せず、左端の帯で示す
  * ——タブの文字色は既にアクティブ／非アクティブを表しているため。
+ *
+ * **タブグループの色と併存する**（`20260804-tab-groups`）。軸が違う（どのシステムか／
+ * どの作業か）ので、どちらも同時に要る。帯は左端 3px、グループ色は面（背景と下線）で出す。
  */
 const systemOf = (t: string): string | undefined => workspaceStore.systemOf(t);
 function tabStyle(t: string): Record<string, string> {
   const ref = systemOf(t);
-  return ref ? { "--tab-sys": systemColorVar(systemsStore.colorOf(ref)) } : {};
+  const tg = tgOf(t);
+  return {
+    ...(ref ? { "--tab-sys": systemColorVar(systemsStore.colorOf(ref)) } : {}),
+    ...(tg ? { "--tg": tabGroupColorVar(tg.color) } : {})
+  };
 }
 
 /**
@@ -113,13 +175,53 @@ function toggleMaximize(): void {
   workspaceStore.toggleMaximize(props.group.id);
 }
 
+// ---- タブグループの操作（`20260804-tab-groups`） ----
+
+/** チップ本体を押したらメニュー、`∨` を押したら折りたたみ（クリックの行き先を分ける） */
+function toggleMenu(tgId: string): void {
+  openPopover.value =
+    openPopover.value?.kind === "tabgroup" && openPopover.value.id === tgId
+      ? undefined
+      : { kind: "tabgroup", id: tgId };
+}
+function toggleCollapsed(tgId: string): void {
+  workspaceStore.toggleTabGroupCollapsed(tgId);
+}
+/**
+ * グループ内のタブをすべて閉じる。**枚数を示して確認する**——1 枚の ✕ と違い、
+ * まとめて消えるうえ 5250 セッションを含めば切断まで起きる。
+ * 閉じ方はタブごとに従来の経路へ流す（種別の分岐を二重に持たない）。
+ */
+function closeTabGroup(tgId: string): void {
+  const tabs = workspaceStore.tabGroupTabs(tgId);
+  if (tabs.length === 0) return;
+  if (globalThis.confirm && !globalThis.confirm(msgCloseTabGroup(tabs.length))) return;
+  openPopover.value = undefined;
+  for (const t of tabs) closeTab(t);
+}
+
 function onDragStart(ev: DragEvent, sessionId: string): void {
-  ev.dataTransfer?.setData("text/session", sessionId);
+  ev.dataTransfer?.setData(TAB_MIME, sessionId);
   workspaceStore.draggingSession = sessionId;
 }
 function onDragEnd(): void {
   workspaceStore.draggingSession = undefined;
+  clearMarks();
+}
+/** チップを掴んだらグループごと動かす。**タブの写しとは別の箱に入れる**（dnd.ts の注記） */
+function onChipDragStart(ev: DragEvent, tgId: string): void {
+  ev.dataTransfer?.setData(TAB_GROUP_MIME, tgId);
+  workspaceStore.draggingTabGroup = tgId;
+}
+function onChipDragEnd(): void {
+  workspaceStore.draggingTabGroup = undefined;
+  clearMarks();
+}
+/** ドロップ予告の印をまとめて消す */
+function clearMarks(): void {
   reorder.value = undefined;
+  intoTab.value = undefined;
+  intoChip.value = undefined;
   stripActive.value = false;
 }
 /**
@@ -130,21 +232,52 @@ function isTabDrag(ev?: DragEvent): boolean {
   if (ev && isFileDrag(ev)) return false;
   return !!workspaceStore.draggingSession;
 }
+/** タブグループごとのドラッグ中か（チップを掴んでいる） */
+function isGroupDrag(ev?: DragEvent): boolean {
+  if (ev && isFileDrag(ev)) return false;
+  return !!workspaceStore.draggingTabGroup;
+}
 /** ドラッグ中タブを除いた配列での挿入位置（0〜末尾）を計算して落とす */
 function dropAt(toIndex: number): void {
   const dragged = workspaceStore.draggingSession;
-  reorder.value = undefined;
-  stripActive.value = false;
+  clearMarks();
   workspaceStore.draggingSession = undefined;
   if (!dragged) return;
   workspaceStore.dropTabInto(props.group.id, dragged, toIndex);
 }
+
+/**
+ * **タブ上のドロップ位置**（`20260804-tab-groups`）。左右の端が並べ替え、真ん中が「重ねる」。
+ *
+ * 中央帯を**要素幅に比例**させ、前後の比較を**非厳密**にしてあるのが要点。
+ * jsdom の矩形は全て 0 なので、絶対 px の帯や厳密比較にすると幅 0 のときに中央へ倒れ、
+ * 既存の並べ替えテスト（`clientX:0`＝前 / `clientX:10`＝後ろ）が落ちる。
+ * 比例なら幅 0 で中央帯が潰れ、従来の中点判定にそのまま一致する。
+ */
+const CENTER_EDGE = 0.3;
+type TabZone = "before" | "center" | "after";
+function zoneOfTab(ev: DragEvent, el: HTMLElement): TabZone {
+  const r = el.getBoundingClientRect();
+  const rel = ev.clientX - r.left;
+  const edge = r.width * CENTER_EDGE;
+  if (rel <= edge) return "before";
+  if (rel >= r.width - edge) return "after";
+  return "center";
+}
+
 function onTabDragOver(ev: DragEvent, t: string): void {
-  if (!isTabDrag(ev)) return;
+  if (!isTabDrag(ev)) return; // グループのドラッグは帯（合流）へ通す
   ev.preventDefault();
   ev.stopPropagation(); // グループ全体（分割ゾーン）へは伝播させない
-  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-  reorder.value = { overId: t, after: ev.clientX > r.left + r.width / 2 };
+  const zone = zoneOfTab(ev, ev.currentTarget as HTMLElement);
+  const self = t === workspaceStore.draggingSession;
+  if (zone === "center" && !self) {
+    reorder.value = undefined;
+    intoTab.value = t;
+  } else {
+    intoTab.value = undefined;
+    reorder.value = { overId: t, after: zone === "after" };
+  }
   stripActive.value = false;
 }
 function onTabDrop(ev: DragEvent, t: string): void {
@@ -152,19 +285,50 @@ function onTabDrop(ev: DragEvent, t: string): void {
   ev.preventDefault();
   ev.stopPropagation();
   const dragged = workspaceStore.draggingSession!;
-  const after = reorder.value?.overId === t ? reorder.value.after : false;
+  const zone = zoneOfTab(ev, ev.currentTarget as HTMLElement);
   if (t === dragged) {
     // 自身へのドロップは無操作
-    reorder.value = undefined;
-    stripActive.value = false;
+    clearMarks();
     workspaceStore.draggingSession = undefined;
+    return;
+  }
+  if (zone === "center") {
+    clearMarks();
+    workspaceStore.draggingSession = undefined;
+    workspaceStore.groupTabs(props.group.id, t, dragged);
     return;
   }
   // ドラッグ中タブを除いた配列での挿入位置（t の前/後ろ）
   const rest = props.group.tabs.filter((x) => x !== dragged);
   const j = rest.indexOf(t);
-  dropAt(j < 0 ? rest.length : after ? j + 1 : j);
+  dropAt(j < 0 ? rest.length : zone === "after" ? j + 1 : j);
 }
+
+/** チップの上へタブを落としたらそのグループへ参加させる（**畳んだままでも受ける**） */
+function onChipDragOver(ev: DragEvent, tgId: string): void {
+  if (!isTabDrag(ev)) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  reorder.value = undefined;
+  intoTab.value = undefined;
+  intoChip.value = tgId;
+  stripActive.value = false;
+}
+function onChipDrop(ev: DragEvent, tgId: string): void {
+  if (!isTabDrag(ev)) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const dragged = workspaceStore.draggingSession!;
+  clearMarks();
+  workspaceStore.draggingSession = undefined;
+  // **末尾のメンバーの隣へ付ける**——チップへの追加は「このグループに足す」であって
+  // 割り込みではない。先頭を起点にすると 2 番目に挿し込まれて並びが入れ替わる
+  const members = workspaceStore.tabGroupTabs(tgId);
+  const anchor = members[members.length - 1];
+  // **展開はしない**（畳んだまま参加）。畳んだ状態が勝手に解けないようにする
+  if (anchor && anchor !== dragged) workspaceStore.groupTabs(props.group.id, anchor, dragged);
+}
+
 /**
  * タブの隙間・末尾の空き領域に落としたら末尾へ追加（合流）。
  *
@@ -174,16 +338,40 @@ function onTabDrop(ev: DragEvent, t: string): void {
  *
  * 以前は `if (!reorder.value)` で抑制していたため、タブ耳を通ってから空き領域へ移ると
  * 目印が残ったままになり、**帯のドロップ領域が出なくなっていた**。
+ *
+ * **タブグループごとのドラッグもここで受ける**（`20260804-tab-groups`）——
+ * グループの合流は「このペインへ持ってくる」であって挿入位置を持たないので、帯全体で足りる。
  */
 function onStripDragOver(ev: DragEvent): void {
+  if (isGroupDrag(ev)) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    reorder.value = undefined;
+    intoTab.value = undefined;
+    intoChip.value = undefined;
+    // 既にこのペインに載っているグループなら、移動先が変わらないので目印を出さない
+    stripActive.value = workspaceStore.paneOfTabGroup(workspaceStore.draggingTabGroup!)?.id !== props.group.id;
+    return;
+  }
   if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   reorder.value = undefined;
+  intoTab.value = undefined;
+  intoChip.value = undefined;
   // 同じグループ内の並べ替えでは合流の目印を出さない——移動先が変わらないので意味がない
   stripActive.value = !props.group.tabs.includes(workspaceStore.draggingSession!);
 }
 function onStripDrop(ev: DragEvent): void {
+  if (isGroupDrag(ev)) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const tgId = workspaceStore.draggingTabGroup!;
+    clearMarks();
+    workspaceStore.draggingTabGroup = undefined;
+    workspaceStore.moveTabGroupInto(props.group.id, tgId);
+    return;
+  }
   if (!isTabDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
@@ -200,8 +388,7 @@ function onStripDrop(ev: DragEvent): void {
 function onStripLeave(ev: DragEvent): void {
   const to = ev.relatedTarget as Node | null;
   if (to && (ev.currentTarget as HTMLElement).contains(to)) return;
-  stripActive.value = false;
-  reorder.value = undefined;
+  clearMarks();
 }
 </script>
 
@@ -213,42 +400,93 @@ function onStripLeave(ev: DragEvent): void {
     @dragleave="onStripLeave"
     @drop="onStripDrop"
   >
-    <div
-      v-for="t in shownTabs"
-      :key="t"
-      class="tab"
-      :class="{
-        on: group.activeTab === t,
-        off: !connected(t),
-        'drop-before': reorder?.overId === t && !reorder.after,
-        'drop-after': reorder?.overId === t && reorder.after
-      }"
-      draggable="true"
-      @dragstart="onDragStart($event, t)"
-      @dragend="onDragEnd"
-      @dragover="onTabDragOver($event, t)"
-      @drop="onTabDrop($event, t)"
-      :style="tabStyle(t)"
-      @click="selectTab(t)"
-    >
-      <span class="dot" :class="{ live: connected(t) }"></span>
-      <!-- **システム名は 2 つ以上のシステムが開いているときだけ**（`20260802-tabs-own-system`）。
-           1 システムしか使っていない人の見た目は変えない。名前側に独自の省略を掛けて、
-           長いシステム名がタブ名を押し出さないようにする -->
-      <span v-if="showSystemName(t)" class="sysname">{{ systemsStore.nameOf(systemOf(t)!) }}</span>
-      {{ label(t) }}
-      <span v-if="unread(t) > 0" class="badge" :title="unreadTitle(t)">{{ unread(t) }}</span>
-      <button
-        v-if="!isPane(t)"
-        class="info"
-        title="セッション情報"
-        @click.stop="infoFor = infoFor === t ? undefined : t"
+    <template v-for="item in stripItems" :key="item.kind === 'chip' ? `tg:${item.tg.id}` : item.id">
+      <!-- タブグループのチップ。**タブと同じ行**に置く（帯を高くしないため）。
+           本体を押すとメニュー、`∨` を押すと折りたたみ。掴めばグループごと移動する -->
+      <div
+        v-if="item.kind === 'chip'"
+        class="tg-chip"
+        :class="{ on: chipActive(item.tg), collapsed: item.tg.collapsed, 'chip-drop': intoChip === item.tg.id }"
+        :style="{ '--tg': tabGroupColorVar(item.tg.color) }"
+        :data-tab-group="item.tg.id"
+        draggable="true"
+        :title="item.tg.name || 'タブグループ'"
+        @dragstart="onChipDragStart($event, item.tg.id)"
+        @dragend="onChipDragEnd"
+        @dragover="onChipDragOver($event, item.tg.id)"
+        @drop="onChipDrop($event, item.tg.id)"
+        @click="toggleMenu(item.tg.id)"
       >
-        ⓘ
-      </button>
-      <button class="x" title="閉じる" @click.stop="closeTab(t)">✕</button>
-      <SessionInfo v-if="infoFor === t && !isPane(t)" :session-id="t" @close="infoFor = undefined" />
-    </div>
+        <span v-if="item.tg.name" class="tg-name">{{ item.tg.name }}</span>
+        <button
+          class="tg-fold"
+          :aria-pressed="item.tg.collapsed"
+          :title="item.tg.collapsed ? 'タブグループを展開' : 'タブグループを折りたたむ'"
+          @click.stop="toggleCollapsed(item.tg.id)"
+        >
+          {{ item.tg.collapsed ? "›" : "∨" }}
+        </button>
+        <TabGroupMenu
+          v-if="openPopover?.kind === 'tabgroup' && openPopover.id === item.tg.id"
+          :tg="item.tg"
+          @close="openPopover = undefined"
+          @close-all="closeTabGroup(item.tg.id)"
+        />
+      </div>
+
+      <div
+        v-else
+        class="tab"
+        :class="{
+          on: group.activeTab === item.id,
+          off: !connected(item.id),
+          'drop-before': reorder?.overId === item.id && !reorder.after,
+          'drop-after': reorder?.overId === item.id && reorder.after,
+          'drop-into': intoTab === item.id,
+          'tg-member': !!tgOf(item.id),
+          'tg-first': tgEdge(item.id).first,
+          'tg-last': tgEdge(item.id).last
+        }"
+        draggable="true"
+        @dragstart="onDragStart($event, item.id)"
+        @dragend="onDragEnd"
+        @dragover="onTabDragOver($event, item.id)"
+        @drop="onTabDrop($event, item.id)"
+        :style="tabStyle(item.id)"
+        @click="selectTab(item.id)"
+      >
+        <span class="dot" :class="{ live: connected(item.id) }"></span>
+        <!-- **システム名は 2 つ以上のシステムが開いているときだけ**（`20260802-tabs-own-system`）。
+             1 システムしか使っていない人の見た目は変えない。名前側に独自の省略を掛けて、
+             長いシステム名がタブ名を押し出さないようにする -->
+        <span v-if="showSystemName(item.id)" class="sysname">{{
+          systemsStore.nameOf(systemOf(item.id)!)
+        }}</span>
+        {{ label(item.id) }}
+        <span v-if="unread(item.id) > 0" class="badge" :title="unreadTitle(item.id)">{{
+          unread(item.id)
+        }}</span>
+        <button
+          v-if="!isPane(item.id)"
+          class="info"
+          title="セッション情報"
+          @click.stop="
+            openPopover =
+              openPopover?.kind === 'info' && openPopover.id === item.id
+                ? undefined
+                : { kind: 'info', id: item.id }
+          "
+        >
+          ⓘ
+        </button>
+        <button class="x" title="閉じる" @click.stop="closeTab(item.id)">✕</button>
+        <SessionInfo
+          v-if="openPopover?.kind === 'info' && openPopover.id === item.id && !isPane(item.id)"
+          :session-id="item.id"
+          @close="openPopover = undefined"
+        />
+      </div>
+    </template>
     <button
       v-if="showMaximize"
       class="maximize"
@@ -329,6 +567,24 @@ function onStripLeave(ev: DragEvent): void {
 .tab.off {
   opacity: 0.6;
 }
+/*
+  **タブグループのメンバー**（`20260804-tab-groups`）。
+  まとまりは**薄い背景と下線**で示す。`box-shadow` を使うのが要点——
+  border / padding / outline はレイアウトを押し広げ、**タブ帯が 1 行ぶん高くなる**
+  （高さはヘッダーと共有の `--chrome-row-h`＝28px に収める約束）。
+  折り返しても各タブが自分で装飾を持つので、まとまりが途切れて見えない。
+*/
+.tab.tg-member {
+  background: color-mix(in srgb, var(--tg) 16%, var(--crt));
+  box-shadow: inset 0 -2px 0 var(--tg);
+  border-radius: 0;
+}
+.tab.tg-member.tg-first {
+  border-top-left-radius: 6px;
+}
+.tab.tg-member.tg-last {
+  border-top-right-radius: 6px;
+}
 /* 並び替えの挿入位置インジケータ（ドラッグ中に前/後ろを示す） */
 .tab.drop-before::before,
 .tab.drop-after::after {
@@ -345,6 +601,54 @@ function onStripLeave(ev: DragEvent): void {
 }
 .tab.drop-after::after {
   right: -2px;
+}
+/* 重ねてグループ化する予告。**枠ではなく内側の影**で出す（高さを変えない） */
+.tab.drop-into {
+  box-shadow: inset 0 0 0 2px var(--t-green);
+  background: color-mix(in srgb, var(--t-green) 14%, var(--crt));
+}
+/* タブグループのチップ。タブと同じ行に収まる高さにする（帯を高くしない） */
+.tg-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--tg) 65%, transparent);
+  background: color-mix(in srgb, var(--tg) 30%, transparent);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+/* 畳んだ中のタブがアクティブなときの印（タブ帯から消えた中身が出ている理由を示す） */
+.tg-chip.on {
+  color: var(--t-white);
+  border-color: var(--tg);
+  background: color-mix(in srgb, var(--tg) 55%, transparent);
+}
+.tg-chip.chip-drop {
+  box-shadow: 0 0 0 2px var(--t-green);
+}
+.tg-name {
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tg-fold {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 1px;
+  font-size: 11px;
+  line-height: 1;
 }
 /* 最大化 / 元に戻す。タブの並びとは別物なので右端へ寄せる */
 .maximize {

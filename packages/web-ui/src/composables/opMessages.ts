@@ -143,3 +143,11 @@ export const MSG_PLAN_SAVE_DROPPED = "保存の上限を超えたため、古い
  */
 export const MSG_PLAN_SAVE_NOT_PERSISTED =
   "この計画をブラウザに保存できませんでした（容量が上限に達している可能性があります）。JSON で書き出してください";
+
+/**
+ * タブグループの一括クローズ。**枚数を示してから確認する**（`20260804-tab-groups`）——
+ * タブ 1 枚の ✕ と違って**まとめて消える**うえ、5250 セッションを含むと切断まで起きる。
+ * 取り消せない操作は文言で中身を見せてから確認する（`MSG_PLAN_CREATE_INDEX_CONFIRM` と同じ考え方）。
+ */
+export const msgCloseTabGroup = (n: number): string =>
+  `${n} 枚のタブを閉じます。接続中のセッションは切断されます`;
