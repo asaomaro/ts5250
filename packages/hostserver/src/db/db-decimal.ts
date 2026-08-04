@@ -109,3 +109,88 @@ function assertRange(data: Uint8Array, offset: number, len: number, what: string
     );
   }
 }
+
+// ---- 書く向き（プログラム呼び出しの入力パラメータ用） ----
+
+/**
+ * 数値を表す文字列を分解する。**`number` を経由しない**（読む向きと同じ理由）。
+ *
+ * `"-12.34"` → `{ negative: true, digits: "1234", scale: 2 }`
+ */
+function parseNumeric(text: string): { negative: boolean; digits: string; scale: number } {
+  const m = /^\s*([+-]?)(\d*)(?:\.(\d*))?\s*$/u.exec(text);
+  if (!m || (m[2] === "" && (m[3] ?? "") === "")) {
+    throw new As400Error("CONFIG_ERROR", `数値として読めません: ${JSON.stringify(text)}`);
+  }
+  const frac = m[3] ?? "";
+  return { negative: m[1] === "-", digits: `${m[2]}${frac}`, scale: frac.length };
+}
+
+/** 桁数と小数位に合わせて digits を伸縮する（あふれたら拒否） */
+function fitDigits(text: string, numDigits: number, scale: number): { negative: boolean; digits: string } {
+  const n = parseNumeric(text);
+  let digits = n.digits;
+  if (n.scale < scale) digits += "0".repeat(scale - n.scale);
+  else if (n.scale > scale) {
+    // **黙って丸めない。** 精度が落ちたことに気づけないほうが危ない
+    const dropped = digits.slice(digits.length - (n.scale - scale));
+    if (/[^0]/u.test(dropped)) {
+      throw new As400Error(
+        "CONFIG_ERROR",
+        `小数 ${scale} 桁に収まりません: ${JSON.stringify(text)}（切り捨てると値が変わる）`
+      );
+    }
+    digits = digits.slice(0, digits.length - (n.scale - scale));
+  }
+  digits = digits.replace(/^0+(?=\d)/u, "");
+  if (digits.length > numDigits) {
+    throw new As400Error("CONFIG_ERROR", `${numDigits} 桁に収まりません: ${JSON.stringify(text)}`);
+  }
+  return { negative: n.negative, digits: digits.padStart(numDigits, "0") };
+}
+
+/** 正の符号ニブル（IBM i の既定）。負は 0x0D */
+const SIGN_POSITIVE = 0x0f;
+const SIGN_NEGATIVE = 0x0d;
+
+/**
+ * 文字列 → パック 10 進数。`packedDecimalToString` の逆。
+ *
+ * **往復で値が変わらないこと**を検査で固定してある——符号ニブルと奇数桁の詰め方は
+ * 取り違えやすく、間違えても「それらしいバイト列」になるので気づきにくい。
+ */
+export function stringToPackedDecimal(text: string, numDigits: number, scale: number): Uint8Array {
+  const { negative, digits } = fitDigits(text, numDigits, scale);
+  // 読む向きと同じく、桁数が偶数なら 1 つ足して奇数にする
+  const odd = numDigits % 2 === 0 ? numDigits + 1 : numDigits;
+  const padded = digits.padStart(odd, "0");
+  const out = new Uint8Array(Math.floor(odd / 2) + 1);
+  let pos = 0;
+  let high = true;
+  for (const ch of padded) {
+    const v = ch.charCodeAt(0) - 48;
+    if (high) out[pos] = v << 4;
+    else out[pos] = (out[pos] ?? 0) | v;
+    if (!high) pos++;
+    high = !high;
+  }
+  // **最終ニブルが符号**（上位ニブルには最後の桁が入っている）
+  out[out.length - 1] = (out[out.length - 1]! & 0xf0) | (negative ? SIGN_NEGATIVE : SIGN_POSITIVE);
+  return out;
+}
+
+/**
+ * 文字列 → ゾーン 10 進数。`zonedDecimalToString` の逆。
+ *
+ * 1 バイト 1 桁（上位ニブルは 0xF）。**最終バイトの上位ニブルが符号**——
+ * パックと位置が違うので取り違えに注意（読む向きの注記と同じ）。
+ */
+export function stringToZonedDecimal(text: string, numDigits: number, scale: number): Uint8Array {
+  const { negative, digits } = fitDigits(text, numDigits, scale);
+  const out = new Uint8Array(numDigits);
+  for (let i = 0; i < numDigits; i++) {
+    out[i] = 0xf0 | (digits.charCodeAt(i) - 48);
+  }
+  out[numDigits - 1] = ((negative ? SIGN_NEGATIVE : SIGN_POSITIVE) << 4) | (out[numDigits - 1]! & 0x0f);
+  return out;
+}

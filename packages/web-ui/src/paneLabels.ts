@@ -8,7 +8,7 @@
  */
 
 /** セッションを持たないタブの ID 接頭辞。**新しい種類を足すときはここに追加する** */
-export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "plan:", "sql:", "transfer:", "spool:", "svc:", "watch:"] as const;
+export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "plan:", "pgm:", "sql:", "transfer:", "spool:", "svc:", "watch:"] as const;
 
 /** セッションを持たない（＝接続の概念が無い）タブか */
 export function isPaneTab(id: string | undefined): boolean {
@@ -74,6 +74,7 @@ export const PANE_LABELS: Record<string, string> = {
   "watch:queues": "待ち行列監視",
   // サーバー側で動き続けるものの一覧（プリンターと待ち行列をまとめて見る）
   "svc:services": "サービス",
+  "pgm:call": "プログラム呼び出し",
   "sql:query": "SQL",
   // SQL の実行計画（ACS の Visual Explain / Performance Center 相当）
   "plan:explain": "実行計画",

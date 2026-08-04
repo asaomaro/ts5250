@@ -21,6 +21,7 @@
 import { computed, type Component } from "vue";
 import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
+import ProgramPane from "./ProgramPane.vue";
 import SqlPane from "./SqlPane.vue";
 import PlanListPane from "./PlanListPane.vue";
 import IfsPane from "./IfsPane.vue";
@@ -55,6 +56,7 @@ const APP_PANES: Record<(typeof PANE_PREFIXES)[number], Component> = {
   "dtaq:": DtaqPane,
   "ifs:": IfsPane,
   "list:": HostListPane,
+  "pgm:": ProgramPane,
   "plan:": PlanListPane,
   "sql:": SqlPane,
   "transfer:": TransferPane,

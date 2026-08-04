@@ -55,6 +55,11 @@ const FEATURES = [
     name: "データ転送",
     desc: "表を CSV に落とす / CSV を表に取り込む。SQL を書かずに済む。"
   },
+  {
+    id: "pgm:call",
+    name: "プログラム呼び出し",
+    desc: "画面を経由せずに RPG / COBOL を呼ぶ。引数は型で書く。"
+  },
   { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" },
   {
     id: "ifs:files",

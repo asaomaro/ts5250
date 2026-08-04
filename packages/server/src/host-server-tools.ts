@@ -24,7 +24,12 @@ import {
   capturePlan,
   listPlansFromCache,
   type ProgramParameter,
-  type QueryPlan
+  type QueryPlan,
+  toProgramParameters,
+  fromProgramOutputs,
+  type ProgramArg,
+  buildServiceProgramParams,
+  splitServiceProgramOutputs
 } from "@ts5250/hostserver";
 import { renderSpoolHtml } from "@ts5250/scs";
 import { type ConnectOptions } from "@ts5250/tn5250";
@@ -267,6 +272,162 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
 
   // ---- コマンド / プログラム呼び出し ----
 
+  /**
+   * 呼び出し 1 引数のスキーマ。**数値も文字列でやり取りする**
+   * ——`number` は 2^53 を超えると精度を失い、金額のような値が静かに誤る。
+   */
+  const programArgSchema = z.object({
+    type: z.enum(["char", "packed", "zoned", "bin", "bytes", "null"]),
+    /** 既定は `in` */
+    dir: z.enum(["in", "out", "inout"]).optional(),
+    /** `in` / `inout` に要る。**数値も文字列**。`bytes` は base64 */
+    value: z.string().optional(),
+    /** `char` / `bytes` のバイト長 */
+    length: z.number().int().min(0).max(65535).optional(),
+    /** `packed` / `zoned` の桁数と小数位 */
+    digits: z.number().int().min(1).max(63).optional(),
+    decimals: z.number().int().min(0).max(63).optional(),
+    /** `bin` のバイト数 */
+    bytes: z.union([z.literal(2), z.literal(4), z.literal(8)]).optional()
+  });
+
+
+  server.registerTool(
+    "host_call_program",
+    {
+      description:
+        "ホストサーバー経由で IBM i のプログラム（RPG / COBOL / QSYS の API 等）を呼ぶ。" +
+        "画面を経由しないので、5250 の画面遷移を組まずに処理を呼べる。" +
+        "**引数の書き方は 2 通り**——`args`（型で書く。推奨）か `params`（生バイトの base64）。" +
+        "`args` なら文字は CCSID に従って符号化され、数値は詰め 10 進 / ゾーン 10 進 / 2 進へ変換される" +
+        "（**数値も文字列で渡す**。number は大きな値で精度を失うため）。" +
+        "型で表せない構造体は `args` の `bytes`（base64）で渡せる。" +
+        "出力は要求した順に返り、**入力専用の位置は null**。" +
+        "例: QSYS/QCMDEXC に char のコマンドと packed(15,5) の長さを渡す。",
+      inputSchema: {
+        ...targetShape,
+        program: z.string(),
+        library: z.string().describe("ライブラリー名。*LIBL も指定できる"),
+        /** 型で書く引数（推奨）。`params` と同時に指定しない */
+        args: z.array(programArgSchema).max(255).optional(),
+        /** 生バイトの引数（base64）。**`args` を使うなら要らない** */
+        params: z.array(programParamSchema).max(255).optional()
+      },
+      outputSchema: {
+        success: z.boolean(),
+        returnCode: z.number(),
+        messages: z.array(messageSchema),
+        /**
+         * 要求順。出力でない位置は null。
+         * **`args` なら型に従った値、`params` なら base64** ——入力の書き方に合わせる
+         */
+        outputs: z.array(z.string().nullable())
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_call_program" }, async () => {
+        if (input.args && input.params) {
+          return errorResult(
+            new As400Error("CONFIG_ERROR", "args と params は同時に指定できません（どちらか一方）")
+          );
+        }
+        const opts = target(input);
+        const conn = await openCommand(opts);
+        try {
+          const ccsid = opts.ccsid ?? 37;
+          const typed = input.args as ProgramArg[] | undefined;
+          const { result, outputs } = await conn.call(
+            input.program,
+            input.library,
+            typed
+              ? toProgramParameters(typed, { ccsid })
+              : toProgramParams(input.params ?? [])
+          );
+          return jsonResult({
+            success: result.success,
+            returnCode: result.returnCode,
+            messages: result.messages.map((m) => ({
+              id: m.id,
+              text: m.text,
+              severity: m.severity,
+              kind: m.kind
+            })),
+            // **入力の書き方に出力を合わせる**（型で書いたなら型で返す）
+            outputs: typed
+              ? fromProgramOutputs(typed, outputs, { ccsid }).map((v) => v ?? null)
+              : outputs.map((o) => (o ? Buffer.from(o).toString("base64") : null))
+          });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
+  server.registerTool(
+    "host_call_service_program",
+    {
+      description:
+        "ホストサーバー経由で**サービスプログラム（*SRVPGM）の手続き**を呼ぶ。" +
+        "引数の書き方は host_call_program の args と同じで、**`pass` で渡し方を選べる**" +
+        "（`reference` が既定 / `value` は値渡し。int などの小さな値で使う）。" +
+        "`returns: \"int\"` を指定すると戻り値が returnValue に入る。" +
+        "内部は QSYS/QZRUCLSP 経由——新しい電文は使っていない。",
+      inputSchema: {
+        ...targetShape,
+        serviceProgram: z.string(),
+        library: z.string().describe("ライブラリー名。*LIBL も指定できる"),
+        procedure: z.string().max(4000).describe("公開されている手続き名（大文字小文字を区別する）。長い装飾名も通る"),
+        returns: z.enum(["none", "int"]).optional(),
+        args: z.array(programArgSchema.extend({ pass: z.enum(["reference", "value"]).optional() })).max(255).optional()
+      },
+      outputSchema: {
+        success: z.boolean(),
+        returnCode: z.number(),
+        messages: z.array(messageSchema),
+        /** `returns: "int"` のときだけ入る */
+        returnValue: z.number().nullable().optional(),
+        outputs: z.array(z.string().nullable())
+      }
+    },
+    async (input) =>
+      withAudit({ op: "host_call_service_program" }, async () => {
+        const opts = target(input);
+        const conn = await openCommand(opts);
+        try {
+          const ccsid = opts.ccsid ?? 37;
+          const args = (input.args ?? []) as (ProgramArg & { pass?: "reference" | "value" })[];
+          const params = toProgramParameters(args, { ccsid });
+          const built = buildServiceProgramParams({
+            serviceProgram: input.serviceProgram,
+            library: input.library,
+            procedure: input.procedure,
+            ...(input.returns !== undefined ? { returns: input.returns } : {}),
+            args: params.map((param, i) => ({
+              param,
+              ...(args[i]?.pass !== undefined ? { pass: args[i]!.pass! } : {})
+            })),
+            ccsid
+          });
+          const { result, outputs } = await conn.call("QZRUCLSP", "QSYS", built);
+          const split = splitServiceProgramOutputs(outputs, args.length);
+          return jsonResult({
+            success: result.success,
+            returnCode: result.returnCode,
+            messages: result.messages.map((m) => ({
+              id: m.id,
+              text: m.text,
+              severity: m.severity,
+              kind: m.kind
+            })),
+            ...(input.returns === "int" ? { returnValue: split.returnValue ?? null } : {}),
+            outputs: fromProgramOutputs(args, split.args, { ccsid }).map((v) => v ?? null)
+          });
+        } finally {
+          conn.close();
+        }
+      }).catch(errorResult)
+  );
+
   server.registerTool(
     "host_command",
     {
@@ -302,54 +463,6 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         }
       }).catch(errorResult)
   );
-
-  server.registerTool(
-    "host_call_program",
-    {
-      description:
-        "ホストサーバー経由で IBM i のプログラム（QSYS の API 等）を呼ぶ。" +
-        "バイト列は Base64 で受け渡す。**出力パラメータは要求した順で返る前提**で位置合わせしている。",
-      inputSchema: {
-        ...targetShape,
-        program: z.string(),
-        library: z.string(),
-        params: z.array(programParamSchema)
-      },
-      outputSchema: {
-        success: z.boolean(),
-        returnCode: z.number(),
-        messages: z.array(messageSchema),
-        /** 要求順。出力でないパラメータの位置は null */
-        outputs: z.array(z.string().nullable())
-      }
-    },
-    async (input) =>
-      withAudit({ op: "host_call_program" }, async () => {
-        const conn = await openCommand(target(input));
-        try {
-          const { result, outputs } = await conn.call(
-            input.program,
-            input.library,
-            toProgramParams(input.params)
-          );
-          return jsonResult({
-            success: result.success,
-            returnCode: result.returnCode,
-            messages: result.messages.map((m) => ({
-              id: m.id,
-              text: m.text,
-              severity: m.severity,
-              kind: m.kind
-            })),
-            outputs: outputs.map((o) => (o ? Buffer.from(o).toString("base64") : null))
-          });
-        } finally {
-          conn.close();
-        }
-      }).catch(errorResult)
-  );
-
-  // ---- スプール（pull 型） ----
 
   server.registerTool(
     "host_list_spools",
