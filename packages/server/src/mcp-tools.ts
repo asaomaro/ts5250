@@ -18,6 +18,7 @@ import {
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
 import type { AuthUser } from "./auth.js";
+import { fieldId } from "@ts5250/tn5250";
 import {
   screenToText,
   screenToAnsi,
@@ -320,7 +321,9 @@ function screenResult(
     cols: snap.cols,
     cursor: snap.cursor,
     keyboardLocked: snap.keyboardLocked,
-    fields: snap.fields,
+    // **欄の識別子を載せる。** 外の MCP クライアントは `fieldId` を呼べないので、
+    // ここで derive して渡す（規則は `@ts5250/tn5250` の 1 つだけ）
+    fields: snap.fields.map((f) => ({ ...f, id: fieldId(f) })),
   };
   if (snap.systemMessage !== undefined)
     structured["systemMessage"] = snap.systemMessage;

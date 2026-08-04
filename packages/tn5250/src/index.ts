@@ -39,6 +39,26 @@ export type {
   GuiGridLine,
   GuiScrollBar
 } from "./screen/types.js";
+export {
+  screenLength,
+  posToRowCol,
+  rowColToPos,
+  fieldAt,
+  fieldStart,
+  fieldById,
+  fieldId,
+  isInputField,
+  nextInputField,
+  prevInputField,
+  screenText,
+  findAllText,
+  fieldAfterLabel,
+  fieldInRowWith,
+  AmbiguousMatchError,
+  type ScreenSize,
+  type MatchCandidate,
+  type NarrowOptions
+} from "./screen/search.js";
 
 // セッション（ConnectOptions に RFC 4777 自動サインオンの user/password を含む。decisions.md D3）
 export {

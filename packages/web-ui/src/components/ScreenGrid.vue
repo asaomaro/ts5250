@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldId } from "@ts5250/tn5250";
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@ts5250/tn5250";
 import {
@@ -3390,6 +3391,7 @@ onBeforeUnmount(() => {
             @beforeinput="onInputBeforeInput(seg.field!, $event as InputEvent)"
             @paste="onInputPaste(seg.field!, $event as ClipboardEvent)"
             :data-field-index="seg.field!.index"
+            :data-field="fieldId(seg.field!)"
             :data-slice="seg.slice ?? 0"
             @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
             @blur="onInputBlur(seg.field!, $event as FocusEvent)"

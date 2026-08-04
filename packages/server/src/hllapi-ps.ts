@@ -15,35 +15,45 @@
  * バイトで扱えば、`日本` は CP932 の 4 バイトとしてそのまま見つかる。
  */
 import type { Field, ScreenSnapshot } from "@ts5250/tn5250";
+import {
+  fieldAt,
+  fieldStart,
+  isInputField,
+  nextInputField,
+  posToRowCol,
+  prevInputField,
+  rowColToPos,
+  screenLength,
+  type ScreenSize
+} from "@ts5250/tn5250";
 import { encodeCp932 } from "./hllapi-cp932.js";
 
-/** 画面の大きさ（`ScreenSnapshot` の一部だけを使う） */
-export interface PsSize {
-  rows: number;
-  cols: number;
-}
-
-/** その PS のバイト数（＝桁数。1 起点の通し番号の上限） */
-export function psLength(size: PsSize): number {
-  return size.rows * size.cols;
-}
-
 /**
- * 1 起点の通し番号 → 行桁（どちらも 1 起点）。
- * **範囲外は `undefined`**——呼び出し側が `HRC.PS_POSITION_INVALID` に落とす。
+ * **桁位置と欄の走査は共有層（`@ts5250/tn5250`）へ移した。**
+ *
+ * スクリプトも MCP も同じことをしたいのに、ここに閉じていて HLLAPI からしか使えなかった。
+ * **振る舞いは変えていない**——ここは呼び出し側のために再輸出するだけ
+ * （HLLAPI 側のコードを一切触らずに済ませる）。
+ *
+ * **CP932 のバイト列を扱う部分だけがここに残る**。HLLAPI は 1 位置 = 1 バイトを要求するので、
+ * 検索もバイトで比べる必要があり、文字ベースの共有版とは用途が違う。
  */
-export function posToRowCol(pos: number, size: PsSize): { row: number; col: number } | undefined {
-  if (!Number.isInteger(pos) || pos < 1 || pos > psLength(size)) return undefined;
-  const zero = pos - 1;
-  return { row: Math.floor(zero / size.cols) + 1, col: (zero % size.cols) + 1 };
-}
+export {
+  fieldAt,
+  fieldStart,
+  isInputField,
+  nextInputField,
+  posToRowCol,
+  prevInputField,
+  rowColToPos
+};
 
-/** 行桁（1 起点）→ 1 起点の通し番号。**範囲外は `undefined`** */
-export function rowColToPos(row: number, col: number, size: PsSize): number | undefined {
-  if (!Number.isInteger(row) || !Number.isInteger(col)) return undefined;
-  if (row < 1 || row > size.rows || col < 1 || col > size.cols) return undefined;
-  return (row - 1) * size.cols + col;
-}
+/** その PS のバイト数（＝桁数）。共有層の `screenLength` と同じ */
+export const psLength = screenLength;
+
+/** @deprecated 共有層の `ScreenSize` を使うこと（名前だけ残す） */
+export type PsSize = ScreenSize;
+
 
 const SPACE = 0x20;
 const SUBSTITUTE = 0x3f; // '?'
@@ -142,54 +152,6 @@ export function psSearch(
   const hay = psBytes(snapshot);
   const at = backward ? lastIndexOfBytes(hay, needle, from - 1) : indexOfBytes(hay, needle, from - 1);
   return at < 0 ? undefined : at + 1;
-}
-
-/** その位置を含む欄。無ければ `undefined` */
-export function fieldAt(snapshot: ScreenSnapshot, pos: number): Field | undefined {
-  const size = { rows: snapshot.rows, cols: snapshot.cols };
-  if (posToRowCol(pos, size) === undefined) return undefined;
-  for (const f of snapshot.fields) {
-    const start = rowColToPos(f.row, f.col, size);
-    if (start === undefined) continue;
-    if (pos >= start && pos < start + f.length) return f;
-  }
-  return undefined;
-}
-
-/** 欄の先頭位置（1 起点）。求まらなければ `undefined` */
-export function fieldStart(field: Field, size: PsSize): number | undefined {
-  return rowColToPos(field.row, field.col, size);
-}
-
-/** 入力できる欄か */
-export function isInputField(f: Field): boolean {
-  return !f.protected;
-}
-
-/**
- * `pos` の**次の入力欄**（Tab 相当）。
- * 末尾まで無ければ**先頭へ回り込む**（5250 の Tab と同じ）。
- */
-export function nextInputField(snapshot: ScreenSnapshot, pos: number): Field | undefined {
-  const size = { rows: snapshot.rows, cols: snapshot.cols };
-  const inputs = snapshot.fields.filter(isInputField);
-  if (inputs.length === 0) return undefined;
-  const withPos = inputs
-    .map((f) => ({ f, start: fieldStart(f, size) ?? 0 }))
-    .sort((a, b) => a.start - b.start);
-  return (withPos.find((x) => x.start > pos) ?? withPos[0])?.f;
-}
-
-/** `pos` の**前の入力欄**（BackTab 相当）。先頭まで無ければ末尾へ回り込む */
-export function prevInputField(snapshot: ScreenSnapshot, pos: number): Field | undefined {
-  const size = { rows: snapshot.rows, cols: snapshot.cols };
-  const inputs = snapshot.fields.filter(isInputField);
-  if (inputs.length === 0) return undefined;
-  const withPos = inputs
-    .map((f) => ({ f, start: fieldStart(f, size) ?? 0 }))
-    .sort((a, b) => a.start - b.start);
-  const before = withPos.filter((x) => x.start < pos);
-  return (before.length > 0 ? before[before.length - 1] : withPos[withPos.length - 1])?.f;
 }
 
 /** 欄の現在値をバイトで切り出す。`hidden` な欄は空 */

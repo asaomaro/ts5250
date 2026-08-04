@@ -272,6 +272,31 @@ try {
     "**放っておけば覆いが消える**（囲いを解く操作が要らない）",
     (await page.locator(".reserved-overlay").count()) === 0
   );
+  // ---- 8. **Playwright が id で欄を指せる**（座標で当てなくてよい）----
+  const { fieldId } = await import("@ts5250/tn5250");
+  const snap = sessions.list()[0].session.snapshot();
+  const inputs = snap.fields.filter((f) => !f.protected);
+  check("画面に入力欄がある（検査が空振りしていない）", inputs.length > 0, `${inputs.length} 個`);
+
+  // **id は画面内で一意**——これが破れると DOM のセレクタが 2 つに当たる
+  const ids = new Set(snap.fields.map(fieldId));
+  check("**欄の id が一意**", ids.size === snap.fields.length, `${ids.size}/${snap.fields.length}`);
+
+  const targetId = fieldId(inputs[0]);
+  const locator = page.locator(`[data-field="${targetId}"]`);
+  const n = await locator.count();
+  check(
+    `**Playwright が id で欄を掴める**（\`[data-field="${targetId}"]\`）`,
+    n >= 1,
+    `${n} 個（欄が行をまたぐと slice ぶん増える）`
+  );
+
+  // 掴んだものが本当にその欄か——書いてみて確かめる
+  await locator.first().fill("ZZ");
+  const typed = await locator.first().inputValue();
+  check("**掴んだ欄に書ける**", typed.startsWith("ZZ"), `"${typed}"`);
+  await locator.first().fill("");
+  await page.screenshot({ path: `${SHOTS}/8-field-by-id.png` });
 
   sessions.closeAll?.();
 } catch (e) {
