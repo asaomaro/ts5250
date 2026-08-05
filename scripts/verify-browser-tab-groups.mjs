@@ -56,7 +56,9 @@ const run = (inner, cls = "", style = "") =>
 /** タブグループのチップ（角丸四角のボタン） */
 const chip = (name, fold) =>
   `<div class="tg-chip" ${hash}><span class="tg-name" ${hash}>${name}</span>` +
-  `<button class="tg-fold" ${hash}>${fold}</button></div>`;
+  // **`span` であってボタンではない**（押すのはチップ全体）。`button` で書くとブラウザ既定の
+  // 装飾が乗り、実物と違う絵になる——実際それで印が黒い塊に見えた
+  `<span class="tg-fold" ${hash}>${fold}</span></div>`;
 
 const page = (body) => `<!doctype html>
 <html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="./${css}"></head>
@@ -79,7 +81,7 @@ const plain =
 const grouped =
   `<div id="b" class="tabs" ${hash}>` +
   run(
-    chip("検証作業", "∨") +
+    chip("検証作業", "&gt;") +
       tab("SQL", "tg-member tg-first on", `${TG3}; ${SYS}`) + // 選択中のメンバー（濃く塗る）
       tab("IFS", "tg-member tg-last", `${TG3}; ${SYS}`),
     "grouped",
@@ -91,7 +93,7 @@ const grouped =
 // 3) 折りたたみ中（チップだけが残る。結ぶ相手が居ないので線は引かない）
 const collapsed =
   `<div id="c" class="tabs" ${hash}>` +
-  run(chip("片付け中", "›"), "grouped collapsed", "--tg: var(--tg-4)") +
+  run(chip("片付け中", "&lt;"), "grouped collapsed", "--tg: var(--tg-4)") +
   run(tab("監視")) +
   `</div>`;
 
@@ -124,6 +126,8 @@ const m = await p.evaluate(() => {
       getComputedStyle(document.querySelector("#b .tg-run.grouped"), "::before").height
     ),
     chipBottomGap: runBox.bottom - chip.bottom,
+    // 開閉の印は**素のグリフ**（地も枠も持たない）。ボタン要素にすると既定の装飾が乗る
+    foldBg: getComputedStyle(document.querySelector(".tg-fold")).backgroundColor,
     // ボタンらしい余白（チップは器の中で浮く）と、メンバー同士は詰める
     chipToFirst: members[0].left - chip.right,
     chipTopInset: chip.top - runBox.top,
@@ -172,6 +176,10 @@ if (m.chipTopInset <= 0) fail.push(`チップが run の上端に張り付いて
 // **ボタンの底が下端の線に接する**（利用者の指示）。食い込んでも浮いても駄目
 if (m.chipBottomGap !== m.lineHeight) {
   fail.push(`チップの底が線に接していない: 隙間 ${m.chipBottomGap}px / 線 ${m.lineHeight}px`);
+}
+// 開閉の印に地が付いていたら、素のグリフではなく装飾付きの部品になっている
+if (!/rgba\(0, 0, 0, 0\)|transparent/.test(m.foldBg)) {
+  fail.push(`開閉の印に背景が付いている（素のグリフにする）: ${m.foldBg}`);
 }
 if (m.chipToFirst <= 0 || m.chipToFirst > 8) fail.push(`チップと先頭タブの余白が不自然: ${m.chipToFirst}px`);
 if (m.betweenMembers !== 0) fail.push(`メンバー同士の間に隙間: ${m.betweenMembers}px`);

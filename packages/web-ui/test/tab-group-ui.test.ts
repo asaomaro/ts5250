@@ -63,21 +63,47 @@ describe("タブグループのチップ", () => {
     expect(style).toContain("--tg:");
   });
 
-  it("`∨` を押すと畳み、タブが消えてチップだけが残る（`›` に変わる）", async () => {
+  it("チップを押すと畳み、タブが消えてチップだけが残る", async () => {
     const w = mountTabs();
-    await w.find(".tg-fold").trigger("click");
+    expect(w.find(".tg-fold").text()).toBe(">"); // 開閉前
+    await w.find(".tg-chip").trigger("click");
 
     expect(w.findAll(".tab")).toHaveLength(1); // s3 のみ
     // 折りたたみ状態は run が持つ（線を引くかの判断がそこにあるため）
     expect(w.find(".tg-run.grouped").classes()).toContain("collapsed");
-    expect(w.find(".tg-fold").text()).toBe("›");
+    expect(w.find(".tg-fold").text()).toBe("<"); // 開閉後
+    expect(w.find(".menu").exists()).toBe(false); // 左クリックでメニューは開かない
+  });
+
+  it("右クリックはメニューだけ（開閉しない）", async () => {
+    const w = mountTabs();
+    const before = w.findAll(".tab").length;
+    await w.find(".tg-chip").trigger("contextmenu");
+
+    expect(w.find(".menu").exists()).toBe(true);
+    expect(w.findAll(".tab")).toHaveLength(before);
+    expect(w.find(".tg-run.grouped").classes()).not.toContain("collapsed");
+  });
+
+  it("開閉の印は同サイズの対（`docs/UI-DESIGN.md`「アイコングリフは同サイズの対を使う」）", async () => {
+    // 以前は `∨` と `›` で、別ブロックの異サイズ文字だったため開閉で大きさが変わっていた
+    const w = mountTabs();
+    const open = w.find(".tg-fold").text();
+    await w.find(".tg-chip").trigger("click");
+    const closed = w.find(".tg-fold").text();
+
+    expect([open, closed]).toEqual([">", "<"]);
+    expect(open.length).toBe(closed.length);
+    // 同じ Unicode ブロック（ASCII）＝同じ字幅
+    expect(open.codePointAt(0)!).toBeLessThan(0x80);
+    expect(closed.codePointAt(0)!).toBeLessThan(0x80);
   });
 
   it("畳んだ中のタブがアクティブなときはチップに印が出る（中身が出ている理由を示す）", async () => {
     const g = workspaceStore.focusedGroup();
     workspaceStore.setActiveTab(g.id, "s2");
     const w = mountTabs();
-    await w.find(".tg-fold").trigger("click");
+    await w.find(".tg-chip").trigger("click");
 
     expect(workspaceStore.focusedGroup().activeTab).toBe("s2"); // アクティブは動かない
     expect(w.find(".tg-chip").classes()).toContain("on");
@@ -142,7 +168,7 @@ describe("重ねてグループ化する D&D", () => {
   it("メニューはチップの中にあるが、ドラッグ対象からは外してある（名前欄の選択がドラッグに化けない）", async () => {
     workspaceStore.groupTabs(workspaceStore.focusedGroup().id, "s1", "s2");
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
 
     expect(w.find(".menu").attributes("draggable")).toBe("false");
     expect(w.find(".backdrop").attributes("draggable")).toBe("false");
@@ -190,7 +216,7 @@ describe("タブグループのポップアップ", () => {
 
   it("チップを押すと開き、名前入力・色 8 個・メニュー 2 項目が出る", async () => {
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
 
     expect(w.find(".menu").exists()).toBe(true);
     expect(w.find("input.name").exists()).toBe(true);
@@ -203,7 +229,7 @@ describe("タブグループのポップアップ", () => {
 
   it("外側（バックドロップ）クリックで閉じる", async () => {
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
     await w.find(".backdrop").trigger("click");
     expect(w.find(".menu").exists()).toBe(false);
   });
@@ -211,7 +237,7 @@ describe("タブグループのポップアップ", () => {
   it("名前を入力すると即反映され、色を選ぶと切り替わる", async () => {
     const tgId = workspaceStore.tabGroupOfTab("sql:query@own:a")!.id;
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
 
     await w.find("input.name").setValue("検証作業");
     expect(workspaceStore.tabGroups[tgId]!.name).toBe("検証作業");
@@ -222,7 +248,7 @@ describe("タブグループのポップアップ", () => {
 
   it("グループ化を解除するとチップが消え、タブは残る", async () => {
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
     await w.findAll(".item")[0]!.trigger("click");
 
     expect(Object.keys(workspaceStore.tabGroups)).toEqual([]);
@@ -233,7 +259,7 @@ describe("タブグループのポップアップ", () => {
   it("一括クローズは確認する。キャンセルすると 1 枚も閉じない", async () => {
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
     await w.findAll(".item")[1]!.trigger("click");
 
     expect(globalThis.confirm).toHaveBeenCalledOnce();
@@ -244,7 +270,7 @@ describe("タブグループのポップアップ", () => {
   it("確認を承認するとグループのタブだけが閉じる", async () => {
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const w = mountTabs();
-    await w.find(".tg-chip").trigger("click");
+    await w.find(".tg-chip").trigger("contextmenu");
     await w.findAll(".item")[1]!.trigger("click");
 
     expect(workspaceStore.focusedGroup().tabs).toEqual(["svc:list"]);

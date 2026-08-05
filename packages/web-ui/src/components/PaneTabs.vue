@@ -428,30 +428,35 @@ function onStripLeave(ev: DragEvent): void {
       :class="{ grouped: !!run.tg, collapsed: run.tg?.collapsed }"
       :style="run.tg ? { '--tg': tabGroupColorVar(run.tg.color) } : {}"
     >
-      <!-- タブグループのチップ。**角丸四角のボタン**として置き、タブとの関係は上の横線が示す。
-           本体を押すとメニュー、`∨` を押すと折りたたみ。掴めばグループごと移動する -->
+      <!--
+        タブグループのチップ。**角丸四角のボタン**として置き、タブとの関係は下の横線が示す。
+
+        **ボタン全体を押すと開閉、メニューは右クリック**（利用者の指示）。折りたたみは
+        いちばん頻度の高い操作なので、狙いの要る小さな矢印ではなくボタン全面に割り当てる。
+        掴めばグループごと移動する。
+      -->
       <div
         v-if="run.tg"
         class="tg-chip"
         :class="{ on: chipActive(run.tg), 'chip-drop': intoChip === run.tg.id }"
         :data-tab-group="run.tg.id"
         draggable="true"
-        :title="run.tg.name || 'タブグループ'"
+        role="button"
+        :aria-expanded="!run.tg.collapsed"
+        :title="`${run.tg.name || 'タブグループ'}（クリックで開閉・右クリックでメニュー）`"
         @dragstart="onChipDragStart($event, run.tg.id)"
         @dragend="onChipDragEnd"
         @dragover="onChipDragOver($event, run.tg.id)"
         @drop="onChipDrop($event, run.tg.id)"
-        @click="toggleMenu(run.tg.id)"
+        @click="toggleCollapsed(run.tg.id)"
+        @contextmenu.prevent="toggleMenu(run.tg.id)"
       >
         <span v-if="run.tg.name" class="tg-name">{{ run.tg.name }}</span>
-        <button
-          class="tg-fold"
-          :aria-pressed="run.tg.collapsed"
-          :title="run.tg.collapsed ? 'タブグループを展開' : 'タブグループを折りたたむ'"
-          @click.stop="toggleCollapsed(run.tg.id)"
-        >
-          {{ run.tg.collapsed ? "›" : "∨" }}
-        </button>
+        <!--
+          開閉の印。**同サイズの対**にする（`docs/UI-DESIGN.md`「アイコングリフは同サイズの対を使う」）
+          ——以前は `∨` と `›` で、別ブロックの異サイズ文字だったため開閉で大きさが変わっていた。
+        -->
+        <span class="tg-fold" aria-hidden="true">{{ run.tg.collapsed ? "<" : ">" }}</span>
         <TabGroupMenu
           v-if="openPopover?.kind === 'tabgroup' && openPopover.id === run.tg.id"
           :tg="run.tg"
@@ -751,14 +756,13 @@ function onStripLeave(ev: DragEvent): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 開閉の印。押すのはチップ全体なので、これ自体はボタンではない（当たり判定を持たせない） */
 .tg-fold {
-  border: none;
-  background: none;
   color: inherit;
-  cursor: pointer;
   padding: 0 1px;
   font-size: 11px;
   line-height: 1;
+  pointer-events: none;
 }
 /* 最大化 / 元に戻す。タブの並びとは別物なので右端へ寄せる */
 .maximize {

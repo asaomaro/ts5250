@@ -39,13 +39,20 @@ function ungroup(): void {
     **中に**マウントされるので、止めないとバックドロップのクリックがチップまで上がり、
     「閉じる → すぐ開き直す」になって永久に閉じない。
   -->
-  <div class="backdrop" draggable="false" @click.stop="emit('close')" @mousedown.stop></div>
+  <div
+    class="backdrop"
+    draggable="false"
+    @click.stop="emit('close')"
+    @mousedown.stop
+    @contextmenu.stop.prevent="emit('close')"
+  ></div>
   <!--
     **`draggable="false"` を明示する**。この部品は `draggable="true"` のチップの**中**に置かれるため、
     外さないと**名前入力欄でドラッグして文字を選ぼうとした瞬間にグループごとのドラッグが始まる**
     （ブラウザによる）。原因が見た目から辿れない種類の不具合なので、構造の側で塞ぐ。
   -->
-  <div class="menu" draggable="false" @click.stop @mousedown.stop>
+  <!-- メニューの中の右クリックは素通しにしない（親のチップまで上がると開き直しになる） -->
+  <div class="menu" draggable="false" @click.stop @mousedown.stop @contextmenu.stop>
     <input
       class="name"
       type="text"
