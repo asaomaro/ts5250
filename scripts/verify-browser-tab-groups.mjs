@@ -57,7 +57,7 @@ const grouped =
   `<div id="b" class="tabs" ${hash}>` +
   `<div class="tg-chip" ${hash} style="--tg: var(--tg-3)"><span class="tg-name" ${hash}>検証作業</span>` +
   `<button class="tg-fold" ${hash}>∨</button></div>` +
-  tab("SQL", "tg-member tg-first", "--tg: var(--tg-3)") +
+  tab("SQL", "tg-member tg-first on", "--tg: var(--tg-3)") + // 選択中のメンバー（濃く塗る）
   tab("IFS", "tg-member tg-last", "--tg: var(--tg-3)") +
   tab("監視") +
   `</div>`;
@@ -101,7 +101,11 @@ const m = await p.evaluate(() => {
     collapsedChip: document.querySelector("#c .tg-chip").getBoundingClientRect().height
   };
 });
-await p.screenshot({ path: join(dir, "tab-groups.png") });
+// **両テーマの絵を残す**。配色は `:root[data-theme]` で切り替わるので、
+// 片方だけ見て「読める」と判断すると、もう片方でコントラストが落ちていても気づけない
+await p.screenshot({ path: join(dir, "tab-groups-dark.png") });
+await p.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+await p.screenshot({ path: join(dir, "tab-groups-light.png") });
 await browser.close();
 
 const rows = [
@@ -134,7 +138,8 @@ if (m.afterGroup <= 0) fail.push(`グループの外まで詰まっている（�
 if (m.collapsedStrip !== m.plain) fail.push(`折りたたみでタブ帯が変わった: ${m.plain} → ${m.collapsedStrip}`);
 if (m.collapsedChip !== m.tab) fail.push(`折りたたみ中のチップがタブと違う高さ: ${m.collapsedChip} vs ${m.tab}`);
 
-console.log(`\nスクリーンショット: ${join(dir, "tab-groups.png")}`);
+console.log(`\nスクリーンショット: ${join(dir, "tab-groups-dark.png")}`);
+console.log(`                    ${join(dir, "tab-groups-light.png")}`);
 if (fail.length > 0) {
   console.error("\nRESULT: FAIL");
   for (const f of fail) console.error(`  - ${f}`);

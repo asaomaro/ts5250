@@ -321,8 +321,14 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
 
   it("色の線は上端に引く（ブラウザのタブグループと同じ向き）", () => {
     const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
-    expect(member).toMatch(/box-shadow:\s*inset 0 2px 0/); // 上端。下端なら `0 -2px 0`
+    expect(member).toMatch(/box-shadow:\s*inset 0 \d+px 0/); // 上端。下端なら `0 -Npx 0`
     expect(member).not.toMatch(/inset 0 -\d+px 0/);
+  });
+
+  it("メンバーの枠は消さずに透明にする（0 にすると内と外でタブの高さが変わる）", () => {
+    const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    expect(member).toMatch(/border-color:\s*transparent/);
+    expect(member).not.toMatch(/border(-top|-bottom)?-width:\s*0/);
   });
 
   it("グループの中は隙間を詰めてひと続きに見せる", () => {

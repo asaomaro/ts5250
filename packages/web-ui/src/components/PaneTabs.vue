@@ -574,11 +574,23 @@ function onStripLeave(ev: DragEvent): void {
   （高さはヘッダーと共有の `--chrome-row-h`＝28px に収める約束）。
   折り返しても各タブが自分で装飾を持つので、まとまりが途切れて見えない。
 */
+/*
+  **グループの中は「面」で見せる**（ブラウザのタブグループに寄せる。利用者の指摘）。
+
+  ブラウザのタブは**1 枚ずつ枠で囲まない**——上端の色線と細い仕切りだけで、
+  地はひと続きの面になっている。こちらも同じにする: メンバーの枠は透明にし、
+  仕切りは**右枠 1 本をグループ色の薄い線**にする（`--crt-line` の濃い枠だと
+  1 枚ずつ箱に見えて、まとまりが切れる）。
+
+  **枠は消すのではなく透明にする**のが要点。`border-width` を 0 にすると
+  その 1px ぶん背が縮み、グループの内と外でタブの高さが変わってしまう。
+*/
 .tab.tg-member {
-  background: color-mix(in srgb, var(--tg) 16%, var(--crt));
-  /* **色の線は上端**（ブラウザのタブグループと同じ）。枠線の色も合わせて 1 本に見せる */
-  box-shadow: inset 0 2px 0 var(--tg);
-  border-top-color: var(--tg);
+  background: color-mix(in srgb, var(--tg) 10%, var(--crt));
+  /* 色の線は上端（ブラウザと同じ向き）。枠を透明にしたので、この影が線そのもの */
+  box-shadow: inset 0 3px 0 var(--tg);
+  border-color: transparent;
+  border-right-color: color-mix(in srgb, var(--tg) 45%, transparent);
   border-radius: 0;
   /*
     **ひと続きに見せる。** 帯の `gap: 2px` を負のマージンで打ち消し、左枠を落として
@@ -588,8 +600,13 @@ function onStripLeave(ev: DragEvent): void {
   margin-left: -2px;
   border-left: none;
 }
+/* **選択中のタブだけ濃く塗る**（ブラウザと同じ）。文字色だけだと面の中で埋もれる */
+.tab.tg-member.on {
+  background: color-mix(in srgb, var(--tg) 26%, var(--crt));
+}
 .tab.tg-member.tg-last {
   border-top-right-radius: 6px;
+  border-right-color: transparent; /* 末尾の右は仕切りではないので出さない */
 }
 /* 並び替えの挿入位置インジケータ（ドラッグ中に前/後ろを示す） */
 .tab.drop-before::before,
@@ -630,16 +647,21 @@ function onStripLeave(ev: DragEvent): void {
   align-items: center;
   align-self: stretch;
   gap: 4px;
-  padding: 4px 6px;
-  border: 1px solid var(--tg);
+  padding: 4px 8px;
+  /* 枠は透明にして幅だけ残す（0 にするとタブと高さがずれる） */
+  border: 1px solid transparent;
   border-bottom: none;
   border-radius: 6px 0 0 0;
-  /* 色の線は上端。タブ側（`inset 0 2px 0`）と揃える */
-  box-shadow: inset 0 2px 0 var(--tg);
-  background: color-mix(in srgb, var(--tg) 34%, var(--crt));
-  color: var(--t-white);
+  /*
+    **べた塗りのピル**（ブラウザのタブグループと同じ）。面の左端が「グループの名札」で、
+    そこから右へタブが続く。抜き文字は地の色（`--crt`）——パレットは中間調なので、
+    暗いテーマでは暗い字、明るいテーマでは明るい字になり、どちらでも読める。
+  */
+  background: var(--tg);
+  color: var(--crt);
   font-family: var(--mono);
   font-size: 11px;
+  font-weight: 600;
   line-height: 1.4;
   cursor: grab;
   user-select: none;
@@ -648,9 +670,12 @@ function onStripLeave(ev: DragEvent): void {
 .tg-chip.collapsed {
   border-radius: 6px 6px 0 0;
 }
-/* 畳んだ中のタブがアクティブなときの印（タブ帯から消えた中身が出ている理由を示す） */
+/*
+  畳んだ中のタブがアクティブなときの印（タブ帯から消えた中身が出ている理由を示す）。
+  地はもう塗りつぶしなので、**内側の輪**で示す——色を変えると別のグループに見える。
+*/
 .tg-chip.on {
-  background: color-mix(in srgb, var(--tg) 70%, var(--crt));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--crt) 65%, transparent);
 }
 .tg-chip.chip-drop {
   box-shadow: inset 0 0 0 2px var(--t-green);
