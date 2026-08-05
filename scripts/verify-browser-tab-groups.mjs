@@ -46,28 +46,44 @@ const tab = (label, cls = "", style = "") =>
   `<div class="tab ${cls}" ${hash} style="${style}">` +
   `<span class="dot" ${hash}></span>${label}` +
   `<button class="x" ${hash}>✕</button></div>`;
+/** run（ひと続き）の器。グループ外のタブも 1 枚だけの run で包む（テンプレートと同じ） */
+const run = (inner, cls = "", style = "") =>
+  `<div class="tg-run ${cls}" ${hash} style="${style}">${inner}</div>`;
+/** タブグループのチップ（角丸四角のボタン） */
+const chip = (name, fold) =>
+  `<div class="tg-chip" ${hash}><span class="tg-name" ${hash}>${name}</span>` +
+  `<button class="tg-fold" ${hash}>${fold}</button></div>`;
 
 const page = (body) => `<!doctype html>
 <html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="./${css}"></head>
 <body style="margin:0;background:var(--crt)">${body}</body></html>`;
 
+const TG3 = "--tg: var(--tg-3)";
+
 // 1) グループなし  2) グループあり（チップ＋メンバー 2 枚）
-const plain = `<div id="a" class="tabs" ${hash}>${tab("SQL")}${tab("IFS")}${tab("監視")}</div>`;
+const plain =
+  `<div id="a" class="tabs" ${hash}>` +
+  run(tab("SQL")) +
+  run(tab("IFS")) +
+  run(tab("監視")) +
+  `</div>`;
 const grouped =
   `<div id="b" class="tabs" ${hash}>` +
-  `<div class="tg-chip" ${hash} style="--tg: var(--tg-3)"><span class="tg-name" ${hash}>検証作業</span>` +
-  `<button class="tg-fold" ${hash}>∨</button></div>` +
-  tab("SQL", "tg-member tg-first on", "--tg: var(--tg-3)") + // 選択中のメンバー（濃く塗る）
-  tab("IFS", "tg-member tg-last", "--tg: var(--tg-3)") +
-  tab("監視") +
+  run(
+    chip("検証作業", "∨") +
+      tab("SQL", "tg-member tg-first on", TG3) + // 選択中のメンバー（濃く塗る）
+      tab("IFS", "tg-member tg-last", TG3),
+    "grouped",
+    TG3
+  ) +
+  run(tab("監視")) +
   `</div>`;
 
-// 3) 折りたたみ中（チップだけが残る。メンバーが居ないので独立した 1 個として丸める）
+// 3) 折りたたみ中（チップだけが残る。結ぶ相手が居ないので線は引かない）
 const collapsed =
   `<div id="c" class="tabs" ${hash}>` +
-  `<div class="tg-chip collapsed" ${hash} style="--tg: var(--tg-4)"><span class="tg-name" ${hash}>片付け中</span>` +
-  `<button class="tg-fold" ${hash}>›</button></div>` +
-  tab("監視") +
+  run(chip("片付け中", "›"), "grouped collapsed", "--tg: var(--tg-4)") +
+  run(tab("監視")) +
   `</div>`;
 
 const dir = mkdtempSync(join(tmpdir(), "tg-"));
@@ -81,8 +97,9 @@ await p.goto(`file://${join(dir, "index.html")}`);
 const m = await p.evaluate(() => {
   const h = (id) => document.getElementById(id).getBoundingClientRect().height;
   const chip = document.querySelector(".tg-chip").getBoundingClientRect();
+  const runBox = document.querySelector("#b .tg-run.grouped").getBoundingClientRect();
   const members = [...document.querySelectorAll(".tab.tg-member")].map((e) => e.getBoundingClientRect());
-  const after = document.querySelector("#b .tab:not(.tg-member)").getBoundingClientRect();
+  const after = document.querySelector("#b .tg-run:not(.grouped) .tab").getBoundingClientRect();
   const plainTab = document.querySelector("#a .tab").getBoundingClientRect();
   return {
     plain: h("a"),
@@ -90,12 +107,14 @@ const m = await p.evaluate(() => {
     chip: chip.height,
     member: members[0].height,
     tab: plainTab.height,
-    // ひと続きに見えるか＝隙間の実測
+    // **線はグループ全体に架かる**（チップの左端から末尾タブの右端まで）
+    runSpansChip: Math.round(runBox.left - chip.left) === 0,
+    runSpansLast: Math.round(runBox.right - members[members.length - 1].right) === 0,
+    // ボタンらしい余白（チップは器の中で浮く）と、メンバー同士は詰める
     chipToFirst: members[0].left - chip.right,
+    chipTopInset: chip.top - runBox.top,
     betweenMembers: members[1].left - members[0].right,
     afterGroup: after.left - members[members.length - 1].right,
-    // 上端が揃っているか（段差があると別部品に見える）
-    topDelta: Math.abs(chip.top - members[0].top),
     // 折りたたみ中: チップだけが残る。ここでも行高を超えない
     collapsedStrip: h("c"),
     collapsedChip: document.querySelector("#c .tg-chip").getBoundingClientRect().height
@@ -113,11 +132,11 @@ const rows = [
   ["タブ帯（グループあり）", m.grouped],
   ["タブ 1 枚（グループ外）", m.tab],
   ["タブ 1 枚（メンバー）", m.member],
-  ["チップ", m.chip],
-  ["隙間: チップ→先頭タブ", m.chipToFirst],
+  ["チップ（ボタン）", m.chip],
+  ["余白: チップ→先頭タブ", m.chipToFirst],
+  ["余白: 線→チップ上端", m.chipTopInset],
   ["隙間: メンバー同士", m.betweenMembers],
   ["隙間: グループ→次のタブ", m.afterGroup],
-  ["上端のずれ", m.topDelta],
   ["タブ帯（折りたたみ中）", m.collapsedStrip],
   ["チップ（折りたたみ中）", m.collapsedChip]
 ];
@@ -128,15 +147,18 @@ if (m.grouped !== m.plain) fail.push(`タブ帯が高くなった: ${m.plain} �
 if (m.member !== m.tab) fail.push(`メンバータブの高さが変わった: ${m.tab} → ${m.member}`);
 if (m.plain !== 28) fail.push(`タブ帯が 28px（--chrome-row-h）でない: ${m.plain}`);
 if (m.chip > m.plain) fail.push(`チップが行高を超えた: ${m.chip} > ${m.plain}`);
-// ひと続き（利用者の指摘: チップが独立して見えていた）
-if (m.chip !== m.member) fail.push(`チップとタブの高さが違う（段差になる）: ${m.chip} vs ${m.member}`);
-if (m.topDelta !== 0) fail.push(`チップとタブの上端がずれている: ${m.topDelta}px`);
-if (m.chipToFirst !== 0) fail.push(`チップと先頭タブの間に隙間: ${m.chipToFirst}px`);
+// **線がグループ全体に架かる**（チップとタブを結ぶのはこの線。利用者の指摘）
+if (!m.runSpansChip) fail.push("上端の線がチップの左端まで届いていない");
+if (!m.runSpansLast) fail.push("上端の線が末尾タブの右端まで届いていない");
+// チップは角丸四角のボタン＝器の中で少し浮く。タブと同じ高さに張り付かせない
+if (m.chip >= m.member) fail.push(`チップがタブと同じ高さ（ボタンに見えない）: ${m.chip} vs ${m.member}`);
+if (m.chipTopInset <= 0) fail.push(`チップが線に接している（浮いて見えない）: ${m.chipTopInset}px`);
+if (m.chipToFirst <= 0 || m.chipToFirst > 8) fail.push(`チップと先頭タブの余白が不自然: ${m.chipToFirst}px`);
 if (m.betweenMembers !== 0) fail.push(`メンバー同士の間に隙間: ${m.betweenMembers}px`);
 if (m.afterGroup <= 0) fail.push(`グループの外まで詰まっている（境目が消える）: ${m.afterGroup}px`);
 // 折りたたみ中も同じ行に収まる（チップだけが残る状態）
 if (m.collapsedStrip !== m.plain) fail.push(`折りたたみでタブ帯が変わった: ${m.plain} → ${m.collapsedStrip}`);
-if (m.collapsedChip !== m.tab) fail.push(`折りたたみ中のチップがタブと違う高さ: ${m.collapsedChip} vs ${m.tab}`);
+if (m.collapsedChip !== m.chip) fail.push(`折りたたみでチップの大きさが変わった: ${m.chip} → ${m.collapsedChip}`);
 
 console.log(`\nスクリーンショット: ${join(dir, "tab-groups-dark.png")}`);
 console.log(`                    ${join(dir, "tab-groups-light.png")}`);

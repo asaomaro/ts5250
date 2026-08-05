@@ -68,7 +68,8 @@ describe("タブグループのチップ", () => {
     await w.find(".tg-fold").trigger("click");
 
     expect(w.findAll(".tab")).toHaveLength(1); // s3 のみ
-    expect(w.find(".tg-chip").classes()).toContain("collapsed");
+    // 折りたたみ状態は run が持つ（線を引くかの判断がそこにあるため）
+    expect(w.find(".tg-run.grouped").classes()).toContain("collapsed");
     expect(w.find(".tg-fold").text()).toBe("›");
   });
 
@@ -319,10 +320,16 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
     expect(chip, "チップに固定高を持たせない").not.toContain("height");
   });
 
-  it("色の線は上端に引く（ブラウザのタブグループと同じ向き）", () => {
-    const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
-    expect(member).toMatch(/box-shadow:\s*inset 0 \d+px 0/); // 上端。下端なら `0 -Npx 0`
-    expect(member).not.toMatch(/inset 0 -\d+px 0/);
+  it("色の線は run の上端に細く引く（グループとタブを結ぶのはこの線）", () => {
+    const line = /\.tg-run\.grouped::before \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    expect(line, ".tg-run.grouped::before が無い").not.toBe("");
+    expect(line).toMatch(/inset:\s*0 0 auto 0/); // 上端に張り付く
+    const h = /height:\s*(\d+)px/.exec(line);
+    expect(h, "線の太さが未指定").not.toBeNull();
+    expect(Number(h![1]), "線が太い（控えめにする）").toBeLessThanOrEqual(3);
+    // **疑似要素で前面に出す**——親の `inset` 影は子より下に描かれ、タブの地に隠れる
+    expect(line).toMatch(/position:\s*absolute/);
+    expect(line).toMatch(/z-index/);
   });
 
   it("メンバーの枠は消さずに透明にする（0 にすると内と外でタブの高さが変わる）", () => {
@@ -331,11 +338,16 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
     expect(member).not.toMatch(/border(-top|-bottom)?-width:\s*0/);
   });
 
-  it("グループの中は隙間を詰めてひと続きに見せる", () => {
-    const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
-    // 帯の `gap: 2px` を打ち消す（チップとタブが別部品に見えないように）
-    expect(member).toMatch(/margin-left:\s*-2px/);
-    expect(src).toContain("gap: 2px");
+  it("線は run が描き、レイアウトに影響しない（帯の高さを変えない）", () => {
+    const line = /\.tg-run\.grouped::before \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    for (const p of line.split(";").map((d) => d.split(":")[0]!.trim())) {
+      if (p === "" || p === "position" || p === "inset" || p === "height") continue;
+      expect(GROWS_ROW.includes(p), `線が ${p} を宣言している（絶対配置以外で場所を取る）`).toBe(false);
+    }
+  });
+
+  it("畳んだグループには線を引かない（結ぶ相手が居ない）", () => {
+    expect(src).toMatch(/\.tg-run\.grouped\.collapsed::before \{[^}]*content:\s*none/);
   });
 
   it("タブ帯の最低高は 28px のまま（ヘッダーと共有する行高）", () => {

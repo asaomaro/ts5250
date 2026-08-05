@@ -48,25 +48,40 @@ function connected(sessionId: string): boolean {
 const shownTabs = computed(() => new Set(workspaceStore.visibleTabs(props.group)));
 
 /**
- * **タブ帯に並べるもの**（`20260804-tab-groups`）。チップとタブが混ざった一列。
+ * **タブ帯に並べるもの**（`20260804-tab-groups`）。**run（ひと続き）の列**で持つ。
  *
- * チップはそのグループの**最初のメンバーの直前**に入る。走査するのは `visibleTabs` ではなく
- * `group.tabs`——**畳んだグループはメンバーが出ないのでチップだけが残る**必要があり、
- * 隠れたタブの位置を知らないとチップを置く場所が決まらない。
+ * グループは「チップ＋メンバー」で 1 つの run、グループ外のタブは 1 枚だけの run。
+ * **器で囲うのが要点**（利用者の指摘: ブラウザは上端の細い横線でグループとタブを結ぶ）——
+ * 線を各タブに描く方式だと、チップを四方角丸のボタンにした瞬間に**角のぶん線が途切れる**。
+ * run に 1 本引けば、チップとタブの間に隙間があっても線は続く。
+ *
+ * 走査するのは `visibleTabs` ではなく `group.tabs`——**畳んだグループはメンバーが出ないので
+ * チップだけの run になる**必要があり、隠れたタブの位置を知らないと run の場所が決まらない。
  * 「どのタブを出すか」の判断そのものは `visibleTabs`（ストア側の唯一の規則）に委ねる。
  */
-type StripItem = { kind: "chip"; tg: TabGroup } | { kind: "tab"; id: string };
-const stripItems = computed<StripItem[]>(() => {
+interface StripRun {
+  /** グループの run なら定義。素のタブは undefined（タブ 1 枚だけの run） */
+  tg?: TabGroup;
+  /** この run に並べるタブ（折りたたみ中のグループは空＝チップだけ） */
+  tabs: string[];
+}
+const stripItems = computed<StripRun[]>(() => {
   const visible = shownTabs.value;
-  const out: StripItem[] = [];
-  const seen = new Set<string>();
+  const out: StripRun[] = [];
+  const byId = new Map<string, StripRun>();
   for (const t of props.group.tabs) {
     const tg = workspaceStore.tabGroupOfTab(t);
-    if (tg && !seen.has(tg.id)) {
-      seen.add(tg.id);
-      out.push({ kind: "chip", tg });
+    if (!tg) {
+      if (visible.has(t)) out.push({ tabs: [t] });
+      continue;
     }
-    if (visible.has(t)) out.push({ kind: "tab", id: t });
+    let run = byId.get(tg.id);
+    if (!run) {
+      run = { tg, tabs: [] };
+      byId.set(tg.id, run);
+      out.push(run);
+    }
+    if (visible.has(t)) run.tabs.push(t);
   }
   return out;
 });
@@ -400,42 +415,54 @@ function onStripLeave(ev: DragEvent): void {
     @dragleave="onStripLeave"
     @drop="onStripDrop"
   >
-    <template v-for="item in stripItems" :key="item.kind === 'chip' ? `tg:${item.tg.id}` : item.id">
-      <!-- タブグループのチップ。**タブと同じ行**に置く（帯を高くしないため）。
+    <!--
+      **run（ひと続き）ごとに包む。** グループは「チップ＋メンバー」で 1 つ、グループ外の
+      タブは 1 枚だけの run。上端の細い横線は**この器**に引く——各タブに引くと、
+      チップを四方角丸のボタンにしたときに角のぶん線が途切れる（`stripItems` の注記）。
+      グループ外の run は装飾を持たないので、見た目は従来どおり。
+    -->
+    <div
+      v-for="run in stripItems"
+      :key="run.tg ? `tg:${run.tg.id}` : run.tabs[0]"
+      class="tg-run"
+      :class="{ grouped: !!run.tg, collapsed: run.tg?.collapsed }"
+      :style="run.tg ? { '--tg': tabGroupColorVar(run.tg.color) } : {}"
+    >
+      <!-- タブグループのチップ。**角丸四角のボタン**として置き、タブとの関係は上の横線が示す。
            本体を押すとメニュー、`∨` を押すと折りたたみ。掴めばグループごと移動する -->
       <div
-        v-if="item.kind === 'chip'"
+        v-if="run.tg"
         class="tg-chip"
-        :class="{ on: chipActive(item.tg), collapsed: item.tg.collapsed, 'chip-drop': intoChip === item.tg.id }"
-        :style="{ '--tg': tabGroupColorVar(item.tg.color) }"
-        :data-tab-group="item.tg.id"
+        :class="{ on: chipActive(run.tg), 'chip-drop': intoChip === run.tg.id }"
+        :data-tab-group="run.tg.id"
         draggable="true"
-        :title="item.tg.name || 'タブグループ'"
-        @dragstart="onChipDragStart($event, item.tg.id)"
+        :title="run.tg.name || 'タブグループ'"
+        @dragstart="onChipDragStart($event, run.tg.id)"
         @dragend="onChipDragEnd"
-        @dragover="onChipDragOver($event, item.tg.id)"
-        @drop="onChipDrop($event, item.tg.id)"
-        @click="toggleMenu(item.tg.id)"
+        @dragover="onChipDragOver($event, run.tg.id)"
+        @drop="onChipDrop($event, run.tg.id)"
+        @click="toggleMenu(run.tg.id)"
       >
-        <span v-if="item.tg.name" class="tg-name">{{ item.tg.name }}</span>
+        <span v-if="run.tg.name" class="tg-name">{{ run.tg.name }}</span>
         <button
           class="tg-fold"
-          :aria-pressed="item.tg.collapsed"
-          :title="item.tg.collapsed ? 'タブグループを展開' : 'タブグループを折りたたむ'"
-          @click.stop="toggleCollapsed(item.tg.id)"
+          :aria-pressed="run.tg.collapsed"
+          :title="run.tg.collapsed ? 'タブグループを展開' : 'タブグループを折りたたむ'"
+          @click.stop="toggleCollapsed(run.tg.id)"
         >
-          {{ item.tg.collapsed ? "›" : "∨" }}
+          {{ run.tg.collapsed ? "›" : "∨" }}
         </button>
         <TabGroupMenu
-          v-if="openPopover?.kind === 'tabgroup' && openPopover.id === item.tg.id"
-          :tg="item.tg"
+          v-if="openPopover?.kind === 'tabgroup' && openPopover.id === run.tg.id"
+          :tg="run.tg"
           @close="openPopover = undefined"
-          @close-all="closeTabGroup(item.tg.id)"
+          @close-all="closeTabGroup(run.tg.id)"
         />
       </div>
 
       <div
-        v-else
+        v-for="item in run.tabs.map((id) => ({ id }))"
+        :key="item.id"
         class="tab"
         :class="{
           on: group.activeTab === item.id,
@@ -486,7 +513,7 @@ function onStripLeave(ev: DragEvent): void {
           @close="openPopover = undefined"
         />
       </div>
-    </template>
+    </div>
     <button
       v-if="showMaximize"
       class="maximize"
@@ -519,6 +546,44 @@ function onStripLeave(ev: DragEvent): void {
   outline: 1px dashed var(--t-green);
   outline-offset: -2px;
   border-radius: 6px;
+}
+/*
+  **run（ひと続き）の器**（`20260804-tab-groups`）。グループは「チップ＋メンバー」で 1 つ、
+  グループ外のタブは 1 枚だけの run。
+
+  **上端の細い横線をここに引く**のが要点（利用者の指摘: ブラウザはこの線でグループと
+  タブを結び、太さは控えめ）。線を各タブに描くと、チップを四方角丸のボタンにした瞬間に
+  **角のぶん途切れる**。器に引けば、チップとタブの間に隙間があっても 1 本に見える。
+
+  `box-shadow` で描くので**レイアウトに影響しない**（`border-top` だと 2px 背が伸びる）。
+  グループ外の run は素通し——見た目は従来のタブのまま。
+*/
+.tg-run {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.tg-run.grouped {
+  position: relative;
+}
+/*
+  **線は疑似要素で前面に出す。** 親の `box-shadow: inset` は**子より下**に描かれるので、
+  地を持つタブに覆われて消えてしまう（実際それで見えなくなった）。
+  絶対配置なのでレイアウトには影響せず、タブ帯の高さは変わらない。
+*/
+.tg-run.grouped::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px; /* 控えめな太さ（ブラウザに合わせる） */
+  background: var(--tg);
+  border-radius: 6px 6px 0 0;
+  z-index: 1;
+  pointer-events: none;
+}
+/* 畳んだら結ぶ相手が居ないので線は引かない（チップだけのボタンになる） */
+.tg-run.grouped.collapsed::before {
+  content: none;
 }
 .tab {
   position: relative;
@@ -587,17 +652,10 @@ function onStripLeave(ev: DragEvent): void {
 */
 .tab.tg-member {
   background: color-mix(in srgb, var(--tg) 10%, var(--crt));
-  /* 色の線は上端（ブラウザと同じ向き）。枠を透明にしたので、この影が線そのもの */
-  box-shadow: inset 0 3px 0 var(--tg);
   border-color: transparent;
+  /* 仕切りは細い 1 本だけ（`--crt-line` の濃い枠だと 1 枚ずつ箱に見えて、まとまりが切れる） */
   border-right-color: color-mix(in srgb, var(--tg) 45%, transparent);
   border-radius: 0;
-  /*
-    **ひと続きに見せる。** 帯の `gap: 2px` を負のマージンで打ち消し、左枠を落として
-    「左隣の右枠」だけを仕切りにする。チップ → 先頭タブ → … → 末尾タブが 1 本の塊になる。
-    横方向だけの調整なので**タブ帯の高さには触れていない**。
-  */
-  margin-left: -2px;
   border-left: none;
 }
 /* **選択中のタブだけ濃く塗る**（ブラウザと同じ）。文字色だけだと面の中で埋もれる */
@@ -647,28 +705,23 @@ function onStripLeave(ev: DragEvent): void {
   align-items: center;
   align-self: stretch;
   gap: 4px;
-  padding: 4px 8px;
-  /* 枠は透明にして幅だけ残す（0 にするとタブと高さがずれる） */
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 6px 0 0 0;
+  padding: 0 8px;
+  border: none;
   /*
-    **べた塗りのピル**（ブラウザのタブグループと同じ）。面の左端が「グループの名札」で、
-    そこから右へタブが続く。抜き文字は地の色（`--crt`）——パレットは中間調なので、
-    暗いテーマでは暗い字、明るいテーマでは明るい字になり、どちらでも読める。
+    **角丸四角のボタン**（利用者の指摘: ブラウザはこの形）。四方を丸めて独立した押しやすい
+    見た目にし、タブとの関係は run の上端の線が示す。上下に少し余白を取ってボタンらしく
+    浮かせるが、**外側マージンなので run の高さは変わらない**（帯の 28px も動かない）。
   */
+  margin: 4px 4px 0 0;
+  border-radius: 6px;
   background: var(--tg);
   color: var(--crt);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1;
   cursor: grab;
   user-select: none;
-}
-/* 畳むとチップだけが残る＝独立した 1 個なので、両端とも丸める */
-.tg-chip.collapsed {
-  border-radius: 6px 6px 0 0;
 }
 /*
   畳んだ中のタブがアクティブなときの印（タブ帯から消えた中身が出ている理由を示す）。
