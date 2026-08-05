@@ -482,7 +482,14 @@ function onStripLeave(ev: DragEvent): void {
         :style="tabStyle(item.id)"
         @click="selectTab(item.id)"
       >
-        <span class="dot" :class="{ live: connected(item.id) }"></span>
+        <!--
+          **接続ランプはセッションを持つタブだけ**（`20260804-tab-groups` の指摘）。
+          アプリ系タブ（SQL・IFS・一覧…）は `connected()` が無条件に true を返すので、
+          点けても**常時緑**で何も表さない。SQL はサーバー側のプールが接続を温存するが、
+          鍵は「所有者＋ホスト＋ユーザー」でタブ単位ではなく（`db-pool.ts` の `poolKey`）、
+          そもそも「このタブが繋がっている」という状態が無い。意味の無い印は出さない。
+        -->
+        <span v-if="!isPane(item.id)" class="dot" :class="{ live: connected(item.id) }"></span>
         <!-- **システム名は 2 つ以上のシステムが開いているときだけ**（`20260802-tabs-own-system`）。
              1 システムしか使っていない人の見た目は変えない。名前側に独自の省略を掛けて、
              長いシステム名がタブ名を押し出さないようにする -->
@@ -600,19 +607,20 @@ function onStripLeave(ev: DragEvent): void {
   color: var(--muted);
   cursor: grab;
 }
-/* システムカラーの帯（左端）。`--tab-sys` が無いタブ（システムに紐づかない画面）には出さない */
-.tab[style*="--tab-sys"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  border-radius: 6px 0 0 0;
-  background: var(--tab-sys);
-}
+/*
+  **システムカラーの帯（下端）。** `--tab-sys` が無いタブ（システムに紐づかない画面）には出さない。
+
+  左端の縦帯から**下端の横線**へ移した（利用者の指示）。タブグループの線が上端に来たので、
+  上＝どのグループか / 下＝どのシステムか、と**辺で軸を割れる**。縦帯のままだと、
+  グループの線と直交する短い棒が並んで読み取りにくかった。
+
+  **疑似要素ではなく内側の影で描く。** `::before` / `::after` は**ドラッグ中の挿入位置の
+  目印が既に使っている**（`.drop-before` / `.drop-after`）。同じ疑似要素を取り合うと、
+  片方が指定しないプロパティだけ相手の値が残って崩れる。影ならレイアウトにも影響しない
+  （本文を寄せる `padding-left` も要らなくなった）。
+*/
 .tab[style*="--tab-sys"] {
-  padding-left: 11px; /* 帯のぶん本文を寄せる（8px + 3px） */
+  box-shadow: inset 0 -2px 0 var(--tab-sys);
 }
 .sysname {
   color: var(--muted);
@@ -689,15 +697,12 @@ function onStripLeave(ev: DragEvent): void {
   background: color-mix(in srgb, var(--t-green) 14%, var(--crt));
 }
 /*
-  **チップはタブと地続き**（ブラウザのタブグループと同じ。利用者の指摘）。
+  **チップはグループの名札ボタン**（ブラウザのタブグループと同じ。利用者の指摘）。
 
-  以前はチップだけ丸ピル・小さめの高さ・行の中央寄せで、`gap: 2px` を挟んで浮いていたため
-  **タブとは別の部品に見えていた**。いまは**タブと同じ箱**（同じ padding・枠・下枠なし）にして、
-  左端だけ角を丸め、右は角ばらせて次のタブへ続ける。隙間はメンバー側の負のマージンで潰す。
-
-  **高さは `align-self: stretch` で行に合わせる**のが要点。固定値やフォント寸法から決めると、
-  タブ側の文字サイズを変えたときに片方だけ伸びて**段差**になる（＝また別部品に見える）。
-  行の高さはタブが決めるので、それに従わせておけばずれようがない。
+  タブとの関係は**run の上端の線**が示すので、チップ自体はタブに接いでいない。
+  高さを `align-self: stretch` で行に合わせたうえで上下にマージンを取り、行の中で少し
+  浮かせる——固定値やフォント寸法から決めると、タブ側の文字サイズを変えたときに
+  片方だけ伸びて意図しない段差になる。行の高さはタブが決めるので、それに従わせておく。
 */
 .tg-chip {
   position: relative;

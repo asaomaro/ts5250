@@ -81,3 +81,38 @@ describe("PaneTabs 別ペインのタブをタブエリアへドロップして�
     expect(workspaceStore.draggingSession).toBeUndefined();
   });
 });
+
+/**
+ * **接続ランプはセッションを持つタブだけ**（`20260804-tab-groups` の指摘）。
+ *
+ * アプリ系タブ（SQL・IFS・一覧…）では `connected()` が無条件に true を返すので、
+ * 点けても常時緑で何も表さない。SQL はサーバー側のプールが接続を温存するが、鍵は
+ * 「所有者＋ホスト＋ユーザー」でタブ単位ではなく（`server/src/db-pool.ts` の `poolKey`）、
+ * そもそも「このタブが繋がっている」という状態が無い。意味の無い印は出さない。
+ */
+describe("PaneTabs 接続ランプ", () => {
+  beforeEach(() => {
+    workspaceStore.init();
+  });
+
+  it("アプリ系タブには出さない", () => {
+    workspaceStore.addSession("sql:query@own:a");
+    workspaceStore.addSession("ifs:files@own:a");
+    const w = mount(PaneTabs, { props: { group: workspaceStore.focusedGroup() } });
+
+    expect(w.findAll(".tab")).toHaveLength(2);
+    expect(w.findAll(".dot")).toHaveLength(0);
+    w.unmount();
+  });
+
+  it("セッションを持つタブには出す（切断中も出す＝灰で示す）", () => {
+    workspaceStore.addSession("s1"); // セッション系（接頭辞なし）
+    const w = mount(PaneTabs, { props: { group: workspaceStore.focusedGroup() } });
+
+    const dots = w.findAll(".dot");
+    expect(dots).toHaveLength(1);
+    // sessionsStore に居ないので未接続扱い＝ランプは点かない
+    expect(dots[0]!.classes()).not.toContain("live");
+    w.unmount();
+  });
+});

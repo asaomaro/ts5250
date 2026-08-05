@@ -41,10 +41,14 @@ if (!hash) {
   process.exit(1);
 }
 
-/** タブ 1 枚のマークアップ（`PaneTabs.vue` のテンプレートと同じ構造） */
+/**
+ * タブ 1 枚のマークアップ（`PaneTabs.vue` のテンプレートと同じ構造）。
+ *
+ * **接続ランプ（`.dot`）は描かない**——ここで並べるのはアプリ系タブ（SQL・IFS・監視）で、
+ * それらにはランプを出さないため（`PaneTabs.vue` の `v-if="!isPane(...)"`）。
+ */
 const tab = (label, cls = "", style = "") =>
-  `<div class="tab ${cls}" ${hash} style="${style}">` +
-  `<span class="dot" ${hash}></span>${label}` +
+  `<div class="tab ${cls}" ${hash} style="${style}">${label}` +
   `<button class="x" ${hash}>✕</button></div>`;
 /** run（ひと続き）の器。グループ外のタブも 1 枚だけの run で包む（テンプレートと同じ） */
 const run = (inner, cls = "", style = "") =>
@@ -59,20 +63,25 @@ const page = (body) => `<!doctype html>
 <body style="margin:0;background:var(--crt)">${body}</body></html>`;
 
 const TG3 = "--tg: var(--tg-3)";
+/**
+ * システムカラーの帯（下端）。**グループの線（上端）と同時に出せるか**を絵で確かめる
+ * ——上＝どのグループか / 下＝どのシステムか、と辺で軸を割っている。
+ */
+const SYS = "--tab-sys: var(--sys-1)";
 
 // 1) グループなし  2) グループあり（チップ＋メンバー 2 枚）
 const plain =
   `<div id="a" class="tabs" ${hash}>` +
-  run(tab("SQL")) +
-  run(tab("IFS")) +
+  run(tab("SQL", "", SYS)) +
+  run(tab("IFS", "", SYS)) +
   run(tab("監視")) +
   `</div>`;
 const grouped =
   `<div id="b" class="tabs" ${hash}>` +
   run(
     chip("検証作業", "∨") +
-      tab("SQL", "tg-member tg-first on", TG3) + // 選択中のメンバー（濃く塗る）
-      tab("IFS", "tg-member tg-last", TG3),
+      tab("SQL", "tg-member tg-first on", `${TG3}; ${SYS}`) + // 選択中のメンバー（濃く塗る）
+      tab("IFS", "tg-member tg-last", `${TG3}; ${SYS}`),
     "grouped",
     TG3
   ) +
