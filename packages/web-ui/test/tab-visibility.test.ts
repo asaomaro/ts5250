@@ -112,3 +112,49 @@ describe("一覧ペイン: 全体の選択に引きずられない", () => {
     w.unmount();
   });
 });
+
+/**
+ * **折りたたみは「見せ方」であって「開いているか」ではない**（`20260804-tab-groups`）。
+ *
+ * `visibleTabs`（＝タブ帯に描くタブ）を「タブが在るか」の判定に流用していたため、
+ * 全部を 1 つのタブグループへ入れて畳むと **0 枚と数えられ**、
+ * ワークスペースから締め出されてメニューへ戻され、ワークスペースのボタンも
+ * グレーアウトし、バッジの数も消えていた（利用者の指摘）。畳んでもタブは生きている。
+ */
+describe("畳んだタブグループのタブも「開いている」", () => {
+  it("全タブを畳んでもワークスペースに居られ、バッジは全数を出す", async () => {
+    const { mount } = await import("@vue/test-utils");
+    const { nextTick } = await import("vue");
+    const App = (await import("../src/App.vue")).default;
+    const { systemsStore } = await import("../src/stores/systems.js");
+    systemsStore.systems = [{ ref: "own:s1", name: "A", host: "a", autoSignon: false }];
+    systemsStore.sessions = [];
+    systemsStore.select("own:s1");
+
+    // **App をマウントしてから組む**（`App.vue` は setup 中に `workspaceStore.init()` を呼ぶ）
+    const w = mount(App, { attachTo: document.body });
+    const g = workspaceStore.focusedGroup();
+    g.tabs = [makePaneTabId("sql:query", "own:s1"), makePaneTabId("ifs:files", "own:s1")];
+    g.activeTab = g.tabs[0];
+    workspaceStore.groupTabs(g.id, g.tabs[0]!, g.tabs[1]!);
+    const tgId = workspaceStore.tabGroupOfTab(g.tabs[0]!)!.id;
+    await nextTick();
+    const badge = () => w.find(".tabbadge").text();
+    expect(badge()).toBe("2");
+
+    workspaceStore.toggleTabGroupCollapsed(tgId);
+    await nextTick();
+
+    // 描画からは消えるが……
+    expect(workspaceStore.visibleTabs(workspaceStore.focusedGroup())).toEqual([]);
+    // ……「開いている」判定は変わらない
+    expect(badge(), "畳んだだけでバッジから消えた").toBe("2");
+    // **「タブが無い」扱いにしない。** `disabled` は「既にワークスペースに居る」でも付くので、
+    // 理由が分かる `title`（タブ不在のときだけ入る）で見る
+    const crumb = w.findAll(".crumbs .crumb").find((b) => b.text().includes("ワークスペース"))!;
+    expect(crumb.attributes("title"), "タブが無い扱いになった").toBe("");
+    // タブ帯は残る（メニューへ追い出されていない）
+    expect(w.find(".tabs").exists(), "ワークスペースから締め出された").toBe(true);
+    w.unmount();
+  });
+});

@@ -97,9 +97,21 @@ const collapsed =
   run(tab("監視")) +
   `</div>`;
 
+/**
+ * 4) **ペインの中身が畳んだグループ 1 つだけ**。
+ *
+ * 伸長だけに任せていた頃は、この状態で行の高さがチップの文字高まで落ちて
+ * **ボタンが小さくなっていた**（利用者の指摘）。隣にタブが居る 3) では起きないので、
+ * 「タブが 1 枚も無い」場合を絵と実測の両方で持つ。
+ */
+const alone =
+  `<div id="d" class="tabs" ${hash}>` +
+  run(chip("これだけ", "&lt;"), "grouped collapsed", "--tg: var(--tg-5)") +
+  `</div>`;
+
 const dir = mkdtempSync(join(tmpdir(), "tg-"));
 writeFileSync(join(dir, css), cssText);
-writeFileSync(join(dir, "index.html"), page(plain + grouped + collapsed));
+writeFileSync(join(dir, "index.html"), page(plain + grouped + collapsed + alone));
 
 const browser = await chromium.launch();
 const p = await browser.newPage({ viewport: { width: 1000, height: 120 }, deviceScaleFactor: 3 });
@@ -135,7 +147,10 @@ const m = await p.evaluate(() => {
     afterGroup: after.left - members[members.length - 1].right,
     // 折りたたみ中: チップだけが残る。ここでも行高を超えない
     collapsedStrip: h("c"),
-    collapsedChip: document.querySelector("#c .tg-chip").getBoundingClientRect().height
+    collapsedChip: document.querySelector("#c .tg-chip").getBoundingClientRect().height,
+    // ペインの中身が畳んだグループ 1 つだけのとき（隣にタブが居ない）
+    aloneStrip: h("d"),
+    aloneChip: document.querySelector("#d .tg-chip").getBoundingClientRect().height
   };
 });
 // **両テーマの絵を残す**。配色は `:root[data-theme]` で切り替わるので、
@@ -158,7 +173,9 @@ const rows = [
   ["隙間: メンバー同士", m.betweenMembers],
   ["隙間: グループ→次のタブ", m.afterGroup],
   ["タブ帯（折りたたみ中）", m.collapsedStrip],
-  ["チップ（折りたたみ中）", m.collapsedChip]
+  ["チップ（折りたたみ中）", m.collapsedChip],
+  ["タブ帯（グループだけ）", m.aloneStrip],
+  ["チップ（グループだけ）", m.aloneChip]
 ];
 for (const [k, v] of rows) console.log(`${k.padEnd(24)} ${v.toFixed(2)}px`);
 
@@ -187,6 +204,9 @@ if (m.afterGroup <= 0) fail.push(`グループの外まで詰まっている（�
 // 折りたたみ中も同じ行に収まる（チップだけが残る状態）
 if (m.collapsedStrip !== m.plain) fail.push(`折りたたみでタブ帯が変わった: ${m.plain} → ${m.collapsedStrip}`);
 if (m.collapsedChip !== m.chip) fail.push(`折りたたみでチップの大きさが変わった: ${m.chip} → ${m.collapsedChip}`);
+// **タブが 1 枚も無くてもボタンは縮まない**（利用者の指摘）
+if (m.aloneChip !== m.chip) fail.push(`グループだけになるとチップが縮む: ${m.chip} → ${m.aloneChip}`);
+if (m.aloneStrip !== m.plain) fail.push(`グループだけでタブ帯の高さが変わった: ${m.plain} → ${m.aloneStrip}`);
 
 console.log(`\nスクリーンショット: ${join(dir, "tab-groups-dark.png")}`);
 console.log(`                    ${join(dir, "tab-groups-light.png")}`);

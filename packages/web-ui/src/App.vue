@@ -22,16 +22,20 @@ import { isPaneTab } from "./paneLabels.js";
 workspaceStore.init();
 
 /**
- * いま選択中システムに属する、見えるタブがあるか。
- * **フィルタ後で判定する**——別システムのタブが残っていても、いまのシステムに何も無ければ
- * ランチャーを出すのが正しい。
+ * 開いているタブがあるか（ワークスペースへ入れるか）。
+ *
+ * **`visibleTabs` で数えてはいけない**（`20260804-tab-groups`）。あちらは「タブ帯に
+ * **描く**タブ」で、畳んだタブグループのメンバーを外す——**畳んだだけでタブは生きている**のに、
+ * 数えると 0 になり「タブが無い」と判断されてしまう。実際に踏んだ:
+ * 全部を 1 つのグループへ入れて畳んだら、**ワークスペースから締め出されてメニューへ戻され、
+ * ワークスペースのボタンもグレーアウトし、バッジの数も消えた**。
+ *
+ * 「開いているか」の真実は `tabs`（持ち物）で、`visibleTabs`（見せ方）ではない。
  */
 const hasVisibleTabs = computed(() => visibleTabCount.value > 0);
-/** 選択中システムで開いているタブの総数（パンくずのバッジ用） */
+/** 開いているタブの総数（パンくずのバッジ用）。**畳んだグループの中も数える** */
 const visibleTabCount = computed(() =>
-  workspaceStore
-    .groups()
-    .reduce((n, g) => n + workspaceStore.visibleTabs(g).length, 0)
+  workspaceStore.groups().reduce((n, g) => n + g.tabs.length, 0)
 );
 /** システム未選択なら常にシステム選択画面（そこから先が存在しない） */
 const showSystemPicker = computed(() => !systemsStore.menuSystem || workspaceStore.showSystemPicker);

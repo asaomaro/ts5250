@@ -542,6 +542,13 @@ function onStripLeave(ev: DragEvent): void {
 .tabs {
   display: flex;
   gap: 2px;
+  /*
+    **タブ 1 枚の高さ**（`20260804-tab-groups`）。`padding 4+4` ＋ 行 12px ＋ 上枠 1px の実測値。
+    チップはこれを基準に大きさを決める——**タブが 1 枚も無いときに縮まないようにする**ため。
+    フレックスの伸長だけに任せると、ペインの中身が畳んだグループ 1 つになった瞬間、
+    行の高さがチップ自身の文字高になり、**ボタンが小さくなる**（実際に踏んだ）。
+  */
+  --tab-h: 26px;
   /* 上の余白を削って画面に回す（ACS 相当の余白に）。
      高さはヘッダーと同じ変数を見る（`--chrome-row-h`）——揃えるため */
   min-height: var(--chrome-row-h);
@@ -605,6 +612,9 @@ function onStripLeave(ev: DragEvent): void {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* `--tab-h` を実際の高さとして固定する（チップ側がこれを基準にするので、値と実物を合わせておく） */
+  box-sizing: border-box;
+  min-height: var(--tab-h);
   padding: 4px 8px;
   font-family: var(--mono);
   font-size: 12px;
@@ -730,6 +740,13 @@ function onStripLeave(ev: DragEvent): void {
     外側マージンなので **run の高さは変わらない**（帯の 28px も動かない）。
   */
   margin: 2px 4px 2px 0;
+  /*
+    **タブが無くても縮まない**（`20260804-tab-groups`）。上下マージン 2px ずつを引いた
+    「タブと同じ高さ」を最低値にする。伸長（`align-self: stretch`）だけに任せると、
+    ペインの中身が畳んだグループ 1 つになった瞬間に行の高さがチップの文字高まで落ちて、
+    ボタンが小さくなる。
+  */
+  min-height: calc(var(--tab-h) - 4px);
   border-radius: 6px;
   background: var(--tg);
   color: var(--crt);
