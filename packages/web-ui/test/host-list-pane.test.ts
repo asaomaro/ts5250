@@ -3,6 +3,7 @@ import { MSG_SYSTEM_GONE } from "../src/composables/opMessages.js";
 import { mount, flushPromises } from "@vue/test-utils";
 import HostListPane from "../src/components/HostListPane.vue";
 import { systemsStore } from "../src/stores/systems.js";
+import { makePaneTabId } from "../src/paneLabels.js";
 
 /**
  * 一覧ペイン。管理画面と同じ「特殊なタブ ID」方式で開く。
@@ -58,6 +59,37 @@ describe("タブ ID で表示が切り替わる", () => {
     const w = mount(HostListPane, { props: { tabId, system: SYSTEM.ref } });
     await flushPromises();
     expect(w.text()).toContain(title);
+    w.unmount();
+  });
+
+  /**
+   * **実際に開かれるタブ ID にはシステムが付く**（`list:jobs@own:s1`。`20260802-tabs-own-system`）。
+   *
+   * 上の `it.each` が**素の機能 ID**で書かれていたため、接頭辞を剥がすだけの実装
+   * （`tabId.replace(/^list:/, "")`）が `jobs@own:s1` を返していることに気づけず、
+   * 取得が **`unknown list kind: jobs@own:s-…`（404）** で落ちていた。
+   * 以降はここを**実物の形**で固定する。
+   */
+  it.each([
+    ["list:jobs", "jobs", "ジョブ"],
+    ["list:objects", "objects", "オブジェクト"],
+    ["list:users", "users", "ユーザー"]
+  ])("システム付きの %s でも %s として取得する", async (feature, kind, title) => {
+    mockFetch({
+      "/api/systems": { systems: [SYSTEM], editable: false },
+      "/api/sessions-config": { sessions: [] },
+      [`/api/host/list/${kind}`]: { items: [] }
+    });
+    const tabId = makePaneTabId(feature, SYSTEM.ref); // list:jobs@own:s1
+    const w = mount(HostListPane, { props: { tabId, system: SYSTEM.ref } });
+    await flushPromises();
+    expect(w.text()).toContain(title);
+
+    await w.find("header button").trigger("click");
+    await flushPromises();
+    const urls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls).toContain(`/api/host/list/${kind}`);
+    expect(urls.some((u) => u.includes("@"))).toBe(false); // システムを URL へ漏らさない
     w.unmount();
   });
 });

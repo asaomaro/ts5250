@@ -4,6 +4,7 @@ import { systemsStore } from "../stores/systems.js";
 import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
+import { paneFeatureOf } from "../paneLabels.js";
 
 /**
  * ジョブ・オブジェクト・ユーザーの一覧。
@@ -22,8 +23,15 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
  * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
 const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
-/** jobs | objects | users */
-const kind = computed(() => props.tabId.replace(/^list:/, ""));
+/**
+ * jobs | objects | users
+ *
+ * **必ず `paneFeatureOf` を通す**（`20260802-tabs-own-system`）。タブ ID にはシステムが付くので
+ * （`list:jobs@own:s-…`）、接頭辞を剥がすだけでは `jobs@own:s-…` になり、
+ * そのまま `/api/host/list/:kind` へ行って **`unknown list kind`（404）**になる。
+ * 同じ理由で `PANE_LABELS` の完全一致も外れる（`paneLabels.ts` の注記）。
+ */
+const kind = computed(() => paneFeatureOf(props.tabId).replace(/^list:/, ""));
 
 interface JobRow {
   name: string;

@@ -3,6 +3,7 @@ import { openSession } from "../session-controller.js";
 import { ref, computed, watch } from "vue";
 import LoadingBar from "./LoadingBar.vue";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
+import { paneFeatureOf } from "../paneLabels.js";
 
 /**
  * `tabId`: このペインのタブ ID。
@@ -11,7 +12,14 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
  * 裏で働き続けてよいかの判断はこれで行う。
  */
 const props = defineProps<{ tabId: string; active?: boolean }>();
-const view = computed(() => props.tabId.replace(/^admin:/, "")); // users | sessions | logs
+/**
+ * users | sessions | logs
+ *
+ * 管理タブは今のところ `scoped: false` で開くのでシステムは付かない（`LauncherPane`）。
+ * それでも `paneFeatureOf` を通すのは、**付いた瞬間に黙って壊れる**形を残さないため
+ * ——一覧ペインが同じ書き方でそうなった（`unknown list kind: jobs@own:s-…`）。
+ */
+const view = computed(() => paneFeatureOf(props.tabId).replace(/^admin:/, ""));
 
 interface PublicUser {
   username: string;
