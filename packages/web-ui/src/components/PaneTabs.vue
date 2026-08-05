@@ -574,17 +574,20 @@ function onStripLeave(ev: DragEvent): void {
   position: relative;
 }
 /*
-  **線は疑似要素で前面に出す。** 親の `box-shadow: inset` は**子より下**に描かれるので、
+  **グループの線は下端**（利用者の指示。システムの線と入れ替えた）。チップの底が
+  この線に接し、そこから右へメンバーのタブが続く——線がグループの土台になる。
+
+  **疑似要素で前面に出す。** 親の `box-shadow: inset` は**子より下**に描かれるので、
   地を持つタブに覆われて消えてしまう（実際それで見えなくなった）。
   絶対配置なのでレイアウトには影響せず、タブ帯の高さは変わらない。
 */
 .tg-run.grouped::before {
   content: "";
   position: absolute;
-  inset: 0 0 auto 0;
+  inset: auto 0 0 0;
   height: 2px; /* 控えめな太さ（ブラウザに合わせる） */
   background: var(--tg);
-  border-radius: 6px 6px 0 0;
+  border-radius: 0 0 6px 6px;
   z-index: 1;
   pointer-events: none;
 }
@@ -608,11 +611,11 @@ function onStripLeave(ev: DragEvent): void {
   cursor: grab;
 }
 /*
-  **システムカラーの帯（下端）。** `--tab-sys` が無いタブ（システムに紐づかない画面）には出さない。
+  **システムカラーの帯（上端）。** `--tab-sys` が無いタブ（システムに紐づかない画面）には出さない。
 
-  左端の縦帯から**下端の横線**へ移した（利用者の指示）。タブグループの線が上端に来たので、
-  上＝どのグループか / 下＝どのシステムか、と**辺で軸を割れる**。縦帯のままだと、
-  グループの線と直交する短い棒が並んで読み取りにくかった。
+  左端の縦帯 → 下端 → **上端**と移した（いずれも利用者の指示）。**上＝どのシステムか /
+  下＝どのグループか**で辺ごとに軸が分かれる。縦帯のままだと、横に走る線と直交する
+  短い棒が並んで読み取りにくかった。
 
   **疑似要素ではなく内側の影で描く。** `::before` / `::after` は**ドラッグ中の挿入位置の
   目印が既に使っている**（`.drop-before` / `.drop-after`）。同じ疑似要素を取り合うと、
@@ -620,7 +623,7 @@ function onStripLeave(ev: DragEvent): void {
   （本文を寄せる `padding-left` も要らなくなった）。
 */
 .tab[style*="--tab-sys"] {
-  box-shadow: inset 0 -2px 0 var(--tab-sys);
+  box-shadow: inset 0 2px 0 var(--tab-sys);
 }
 .sysname {
   color: var(--muted);
@@ -714,10 +717,14 @@ function onStripLeave(ev: DragEvent): void {
   border: none;
   /*
     **角丸四角のボタン**（利用者の指摘: ブラウザはこの形）。四方を丸めて独立した押しやすい
-    見た目にし、タブとの関係は run の上端の線が示す。上下に少し余白を取ってボタンらしく
-    浮かせるが、**外側マージンなので run の高さは変わらない**（帯の 28px も動かない）。
+    見た目にする。
+
+    **下マージンは線の太さちょうど**（2px）にしてある——ボタンの底が下端の線の上辺に
+    **接する**（利用者の指示）。線がボタンを土台のように支え、そこから右へタブが続く。
+    数字を変えるとボタンが線に食い込む／浮くので、線の太さと対で見ること。
+    外側マージンなので **run の高さは変わらない**（帯の 28px も動かない）。
   */
-  margin: 4px 4px 0 0;
+  margin: 2px 4px 2px 0;
   border-radius: 6px;
   background: var(--tg);
   color: var(--crt);

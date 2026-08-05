@@ -106,21 +106,22 @@ describe("タブの見分け", () => {
   });
 
   /**
-   * **帯は下端に引く**（`20260804-tab-groups` の指示）。タブグループの線が上端に来たので、
-   * 上＝どのグループか / 下＝どのシステムか、と辺で軸を割る。
+   * **帯は上端に引く**（`20260804-tab-groups` の指示）。タブグループの線が下端なので、
+   * 上＝どのシステムか / 下＝どのグループか、と辺で軸を割る。
    *
    * 描き方は**内側の影**。`::before` / `::after` は**ドラッグ中の挿入位置の目印**が
    * 既に使っており（`.drop-before` / `.drop-after`）、同じ疑似要素を取り合うと
    * 片方が指定しないプロパティだけ相手の値が残って崩れる。
    */
-  it("システムの線は下端に引く（疑似要素はドラッグの目印が使うので影で描く）", () => {
+  it("システムの線は上端に引く（疑似要素はドラッグの目印が使うので影で描く）", () => {
     const REL = existsSync("src/components/PaneTabs.vue")
       ? "src/components/PaneTabs.vue"
       : "packages/web-ui/src/components/PaneTabs.vue";
     const css = readFileSync(REL, "utf8");
     const rule = /\.tab\[style\*="--tab-sys"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule, "システム帯の規則が見つからない").not.toBe("");
-    expect(rule).toMatch(/box-shadow:\s*inset 0 -\d+px 0 var\(--tab-sys\)/); // 下端（上端なら符号が逆）
+    expect(rule).toMatch(/box-shadow:\s*inset 0 \d+px 0 var\(--tab-sys\)/); // 上端（下端なら符号が逆）
+    expect(rule).not.toMatch(/inset 0 -\d+px 0/);
     // 疑似要素は使わない（ドラッグの目印と衝突する）
     expect(css).not.toMatch(/\.tab\[style\*="--tab-sys"\]::(before|after)/);
   });

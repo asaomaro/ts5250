@@ -119,6 +119,11 @@ const m = await p.evaluate(() => {
     // **線はグループ全体に架かる**（チップの左端から末尾タブの右端まで）
     runSpansChip: Math.round(runBox.left - chip.left) === 0,
     runSpansLast: Math.round(runBox.right - members[members.length - 1].right) === 0,
+    // 線の太さ（疑似要素なので計算スタイルから取る）と、チップの底との距離
+    lineHeight: parseFloat(
+      getComputedStyle(document.querySelector("#b .tg-run.grouped"), "::before").height
+    ),
+    chipBottomGap: runBox.bottom - chip.bottom,
     // ボタンらしい余白（チップは器の中で浮く）と、メンバー同士は詰める
     chipToFirst: members[0].left - chip.right,
     chipTopInset: chip.top - runBox.top,
@@ -143,7 +148,9 @@ const rows = [
   ["タブ 1 枚（メンバー）", m.member],
   ["チップ（ボタン）", m.chip],
   ["余白: チップ→先頭タブ", m.chipToFirst],
-  ["余白: 線→チップ上端", m.chipTopInset],
+  ["余白: run 上端→チップ", m.chipTopInset],
+  ["線の太さ", m.lineHeight],
+  ["チップ底→run 下端", m.chipBottomGap],
   ["隙間: メンバー同士", m.betweenMembers],
   ["隙間: グループ→次のタブ", m.afterGroup],
   ["タブ帯（折りたたみ中）", m.collapsedStrip],
@@ -161,7 +168,11 @@ if (!m.runSpansChip) fail.push("上端の線がチップの左端まで届いて
 if (!m.runSpansLast) fail.push("上端の線が末尾タブの右端まで届いていない");
 // チップは角丸四角のボタン＝器の中で少し浮く。タブと同じ高さに張り付かせない
 if (m.chip >= m.member) fail.push(`チップがタブと同じ高さ（ボタンに見えない）: ${m.chip} vs ${m.member}`);
-if (m.chipTopInset <= 0) fail.push(`チップが線に接している（浮いて見えない）: ${m.chipTopInset}px`);
+if (m.chipTopInset <= 0) fail.push(`チップが run の上端に張り付いている: ${m.chipTopInset}px`);
+// **ボタンの底が下端の線に接する**（利用者の指示）。食い込んでも浮いても駄目
+if (m.chipBottomGap !== m.lineHeight) {
+  fail.push(`チップの底が線に接していない: 隙間 ${m.chipBottomGap}px / 線 ${m.lineHeight}px`);
+}
 if (m.chipToFirst <= 0 || m.chipToFirst > 8) fail.push(`チップと先頭タブの余白が不自然: ${m.chipToFirst}px`);
 if (m.betweenMembers !== 0) fail.push(`メンバー同士の間に隙間: ${m.betweenMembers}px`);
 if (m.afterGroup <= 0) fail.push(`グループの外まで詰まっている（境目が消える）: ${m.afterGroup}px`);

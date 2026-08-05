@@ -320,10 +320,10 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
     expect(chip, "チップに固定高を持たせない").not.toContain("height");
   });
 
-  it("色の線は run の上端に細く引く（グループとタブを結ぶのはこの線）", () => {
+  it("色の線は run の下端に細く引く（グループとタブを結ぶのはこの線）", () => {
     const line = /\.tg-run\.grouped::before \{([^}]*)\}/.exec(src)?.[1] ?? "";
     expect(line, ".tg-run.grouped::before が無い").not.toBe("");
-    expect(line).toMatch(/inset:\s*0 0 auto 0/); // 上端に張り付く
+    expect(line).toMatch(/inset:\s*auto 0 0 0/); // 下端に張り付く（上端なら `0 0 auto 0`）
     const h = /height:\s*(\d+)px/.exec(line);
     expect(h, "線の太さが未指定").not.toBeNull();
     expect(Number(h![1]), "線が太い（控えめにする）").toBeLessThanOrEqual(3);
@@ -348,6 +348,16 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
 
   it("畳んだグループには線を引かない（結ぶ相手が居ない）", () => {
     expect(src).toMatch(/\.tg-run\.grouped\.collapsed::before \{[^}]*content:\s*none/);
+  });
+
+  it("チップの下マージンは線の太さと一致する（ボタンの底が線に接する）", () => {
+    // ずれるとボタンが線に食い込む／浮く。線の太さと対で決まる値なので一緒に検査する
+    const line = /\.tg-run\.grouped::before \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    const lineH = Number(/height:\s*(\d+)px/.exec(line)?.[1]);
+    const chip = /\.tg-chip \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    const m = /margin:\s*\d+px \d+px (\d+)px/.exec(chip);
+    expect(m, "チップのマージンが読めない").not.toBeNull();
+    expect(Number(m![1])).toBe(lineH);
   });
 
   it("タブ帯の最低高は 28px のまま（ヘッダーと共有する行高）", () => {
