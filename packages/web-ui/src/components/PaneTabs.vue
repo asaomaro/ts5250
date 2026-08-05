@@ -576,11 +576,17 @@ function onStripLeave(ev: DragEvent): void {
 */
 .tab.tg-member {
   background: color-mix(in srgb, var(--tg) 16%, var(--crt));
-  box-shadow: inset 0 -2px 0 var(--tg);
+  /* **色の線は上端**（ブラウザのタブグループと同じ）。枠線の色も合わせて 1 本に見せる */
+  box-shadow: inset 0 2px 0 var(--tg);
+  border-top-color: var(--tg);
   border-radius: 0;
-}
-.tab.tg-member.tg-first {
-  border-top-left-radius: 6px;
+  /*
+    **ひと続きに見せる。** 帯の `gap: 2px` を負のマージンで打ち消し、左枠を落として
+    「左隣の右枠」だけを仕切りにする。チップ → 先頭タブ → … → 末尾タブが 1 本の塊になる。
+    横方向だけの調整なので**タブ帯の高さには触れていない**。
+  */
+  margin-left: -2px;
+  border-left: none;
 }
 .tab.tg-member.tg-last {
   border-top-right-radius: 6px;
@@ -607,33 +613,47 @@ function onStripLeave(ev: DragEvent): void {
   box-shadow: inset 0 0 0 2px var(--t-green);
   background: color-mix(in srgb, var(--t-green) 14%, var(--crt));
 }
-/* タブグループのチップ。タブと同じ行に収まる高さにする（帯を高くしない） */
+/*
+  **チップはタブと地続き**（ブラウザのタブグループと同じ。利用者の指摘）。
+
+  以前はチップだけ丸ピル・小さめの高さ・行の中央寄せで、`gap: 2px` を挟んで浮いていたため
+  **タブとは別の部品に見えていた**。いまは**タブと同じ箱**（同じ padding・枠・下枠なし）にして、
+  左端だけ角を丸め、右は角ばらせて次のタブへ続ける。隙間はメンバー側の負のマージンで潰す。
+
+  **高さは `align-self: stretch` で行に合わせる**のが要点。固定値やフォント寸法から決めると、
+  タブ側の文字サイズを変えたときに片方だけ伸びて**段差**になる（＝また別部品に見える）。
+  行の高さはタブが決めるので、それに従わせておけばずれようがない。
+*/
 .tg-chip {
   position: relative;
   display: inline-flex;
   align-items: center;
-  align-self: center;
+  align-self: stretch;
   gap: 4px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--tg) 65%, transparent);
-  background: color-mix(in srgb, var(--tg) 30%, transparent);
-  color: var(--muted);
+  padding: 4px 6px;
+  border: 1px solid var(--tg);
+  border-bottom: none;
+  border-radius: 6px 0 0 0;
+  /* 色の線は上端。タブ側（`inset 0 2px 0`）と揃える */
+  box-shadow: inset 0 2px 0 var(--tg);
+  background: color-mix(in srgb, var(--tg) 34%, var(--crt));
+  color: var(--t-white);
   font-family: var(--mono);
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.4;
   cursor: grab;
   user-select: none;
 }
+/* 畳むとチップだけが残る＝独立した 1 個なので、両端とも丸める */
+.tg-chip.collapsed {
+  border-radius: 6px 6px 0 0;
+}
 /* 畳んだ中のタブがアクティブなときの印（タブ帯から消えた中身が出ている理由を示す） */
 .tg-chip.on {
-  color: var(--t-white);
-  border-color: var(--tg);
-  background: color-mix(in srgb, var(--tg) 55%, transparent);
+  background: color-mix(in srgb, var(--tg) 70%, var(--crt));
 }
 .tg-chip.chip-drop {
-  box-shadow: 0 0 0 2px var(--t-green);
+  box-shadow: inset 0 0 0 2px var(--t-green);
 }
 .tg-name {
   max-width: 12ch;

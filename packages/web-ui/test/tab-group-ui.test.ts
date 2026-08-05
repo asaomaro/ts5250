@@ -273,24 +273,63 @@ describe("タブ帯の高さを増やさない（要件: 1px も高くしない�
       .filter((p) => p.length > 0 && !p.startsWith("/*"));
   }
 
-  it("メンバータブは背景・内側の影・角丸だけを足す（border / padding / height を触らない）", () => {
-    const allowed = new Set(["background", "box-shadow", "border-radius"]);
+  /**
+   * **縦のボックスを押し広げる宣言**。`.tab` の箱をそのまま使う要素（メンバータブ・予告）へ
+   * これを足すと、タブが高くなり帯ごと伸びる。横方向（`margin-left` / `border-left` /
+   * `border-radius`）や色だけの指定（`border-top-color`）は高さに影響しないので許す。
+   */
+  const GROWS_ROW = [
+    "height",
+    "min-height",
+    "padding",
+    "padding-top",
+    "padding-bottom",
+    "border",
+    "border-width",
+    "border-top",
+    "border-bottom",
+    "border-top-width",
+    "border-bottom-width",
+    "outline",
+    "outline-width",
+    "font-size",
+    "line-height",
+    "margin-top",
+    "margin-bottom"
+  ];
+
+  it("メンバータブは縦のボックスを触らない（背景・上端の線・角丸・横方向だけ）", () => {
     for (const p of propsOf(".tab.tg-member")) {
-      expect(allowed.has(p), `.tab.tg-member が ${p} を宣言している（帯が高くなる）`).toBe(true);
+      expect(GROWS_ROW.includes(p), `.tab.tg-member が ${p} を宣言している（帯が高くなる）`).toBe(false);
     }
   });
 
   it("重ねる予告も内側の影で出す（枠を足して押し広げない）", () => {
-    const allowed = new Set(["box-shadow", "background"]);
     for (const p of propsOf(".tab.drop-into")) {
-      expect(allowed.has(p), `.tab.drop-into が ${p} を宣言している`).toBe(true);
+      expect(GROWS_ROW.includes(p), `.tab.drop-into が ${p} を宣言している`).toBe(false);
     }
   });
 
-  it("チップはタブ帯の行高（28px）に収まる", () => {
-    const height = /\.tg-chip \{[^}]*height:\s*(\d+)px/.exec(src);
-    expect(height, "チップに固定高が無い").not.toBeNull();
-    expect(Number(height![1])).toBeLessThanOrEqual(24); // 上下の余白ぶんを残す
+  it("チップは高さを自分で決めず、行（＝タブ）に合わせる", () => {
+    // 固定値やフォント寸法から決めると、タブ側を変えたときに片方だけ伸びて段差になる
+    // ——チップが独立した部品に見えていた原因がこれだった（利用者の指摘）
+    const chip = propsOf(".tg-chip");
+    expect(chip).toContain("align-self");
+    expect(src).toMatch(/\.tg-chip \{[^}]*align-self:\s*stretch/);
+    expect(chip, "チップに固定高を持たせない").not.toContain("height");
+  });
+
+  it("色の線は上端に引く（ブラウザのタブグループと同じ向き）", () => {
+    const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    expect(member).toMatch(/box-shadow:\s*inset 0 2px 0/); // 上端。下端なら `0 -2px 0`
+    expect(member).not.toMatch(/inset 0 -\d+px 0/);
+  });
+
+  it("グループの中は隙間を詰めてひと続きに見せる", () => {
+    const member = /\.tab\.tg-member \{([^}]*)\}/.exec(src)?.[1] ?? "";
+    // 帯の `gap: 2px` を打ち消す（チップとタブが別部品に見えないように）
+    expect(member).toMatch(/margin-left:\s*-2px/);
+    expect(src).toContain("gap: 2px");
   });
 
   it("タブ帯の最低高は 28px のまま（ヘッダーと共有する行高）", () => {
