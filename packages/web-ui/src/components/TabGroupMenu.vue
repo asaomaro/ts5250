@@ -73,8 +73,17 @@ function ungroup(): void {
       ></button>
     </div>
     <div class="sep"></div>
-    <button class="item" @click="ungroup">⌧ グループ化を解除</button>
-    <button class="item" @click="emit('close-all')">⊗ グループ内のタブをすべて閉じる</button>
+    <!--
+      **記号は付けない**（利用者の指摘: 分かりにくい）。`⌧` と `⊗` はどちらも小さな
+      囲みに印で、並べると見分けが付かなかった。このアプリのメニューは元々**文字だけ**で
+      並べる（`MacroMenu` の「保存 / 破棄」、`ViewSettingsMenu` の各項目）——
+      記号を使うのは再生ボタン（`⏺ ▶ ⏸ ⏹`）のように意味が定着している所だけ。
+
+      2 つを見分けるのは**記号ではなく重み**にする。閉じる側は取り消せない操作なので
+      `danger`（赤）で示す——`HostListPane` の破壊的操作と同じ扱い。
+    -->
+    <button class="item" @click="ungroup">グループ化を解除</button>
+    <button class="item danger" @click="emit('close-all')">グループ内のタブをすべて閉じる</button>
   </div>
 </template>
 
@@ -153,5 +162,13 @@ function ungroup(): void {
 .item:hover {
   background: color-mix(in srgb, var(--t-green) 12%, transparent);
   color: var(--t-white);
+}
+/* 取り消せない操作は赤で示す（`HostListPane` の破壊的操作と同じ扱い） */
+.item.danger {
+  color: var(--t-red, #c62828);
+}
+.item.danger:hover {
+  background: color-mix(in srgb, var(--t-red, #c62828) 16%, transparent);
+  color: var(--t-red, #c62828);
 }
 </style>

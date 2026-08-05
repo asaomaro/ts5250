@@ -221,10 +221,14 @@ describe("タブグループのポップアップ", () => {
     expect(w.find(".menu").exists()).toBe(true);
     expect(w.find("input.name").exists()).toBe(true);
     expect(w.findAll(".swatch")).toHaveLength(8);
+    // **記号は付けない**（`⌧` と `⊗` は並べると見分けが付かなかった。利用者の指摘）。
+    // 2 つの区別は重み——取り消せない側を `danger`（赤）で示す
     expect(w.findAll(".item").map((b) => b.text())).toEqual([
-      "⌧ グループ化を解除",
-      "⊗ グループ内のタブをすべて閉じる"
+      "グループ化を解除",
+      "グループ内のタブをすべて閉じる"
     ]);
+    expect(w.findAll(".item")[0]!.classes()).not.toContain("danger");
+    expect(w.findAll(".item")[1]!.classes(), "取り消せない操作が目立たない").toContain("danger");
   });
 
   it("外側（バックドロップ）クリックで閉じる", async () => {

@@ -40,6 +40,20 @@ if (!hash) {
   console.error("PaneTabs の scoped スタイルが CSS に見つかりません");
   process.exit(1);
 }
+/**
+ * `TabGroupMenu.vue` の scoped 属性（別コンポーネントなので別のハッシュ）。
+ *
+ * **`.menu` だけで探さない**——`.menu` は他のコンポーネントにもあり、先に当たった方を拾うと
+ * 別物のハッシュになる（実際それで項目が横並びの、実物と違う絵になった）。
+ * `.menu` と `.swatch` の**両方**を持つハッシュだけが TabGroupMenu。
+ */
+const menuHash = [...cssText.matchAll(/\.menu\[(data-v-[a-z0-9]+)\]/g)]
+  .map((m) => m[1])
+  .find((h) => cssText.includes(`.swatch[${h}]`));
+if (!menuHash) {
+  console.error("TabGroupMenu の scoped スタイルが CSS に見つかりません");
+  process.exit(1);
+}
 
 /**
  * タブ 1 枚のマークアップ（`PaneTabs.vue` のテンプレートと同じ構造）。
@@ -109,12 +123,36 @@ const alone =
   run(chip("これだけ", "&lt;"), "grouped collapsed", "--tg: var(--tg-5)") +
   `</div>`;
 
+/**
+ * 5) **ポップアップ**（右クリックで開くメニュー）。
+ *
+ * これまで寸法しか見ておらず、絵で確かめていなかった——**記号だけの項目が
+ * 見分けられない**（`⌧` と `⊗`）ことに気づけなかった原因（利用者の指摘）。
+ * 位置決めは本物と同じ（チップの中・`top: 100%`）にする必要がないので、
+ * ここでは中身の読みやすさだけを見る。
+ */
+const menu =
+  `<div style="position:relative;height:210px">` +
+  `<div class="menu" ${menuHash} style="position:absolute;top:4px;left:8px">` +
+  `<input class="name" ${menuHash} placeholder="このグループに名前を付ける">` +
+  `<div class="palette" ${menuHash}>` +
+  [1, 2, 3, 4, 5, 6, 7, 8]
+    .map(
+      (c) =>
+        `<button class="swatch${c === 3 ? " on" : ""}" ${menuHash} style="--tg: var(--tg-${c})"></button>`
+    )
+    .join("") +
+  `</div><div class="sep" ${menuHash}></div>` +
+  `<button class="item" ${menuHash}>グループ化を解除</button>` +
+  `<button class="item danger" ${menuHash}>グループ内のタブをすべて閉じる</button>` +
+  `</div></div>`;
+
 const dir = mkdtempSync(join(tmpdir(), "tg-"));
 writeFileSync(join(dir, css), cssText);
-writeFileSync(join(dir, "index.html"), page(plain + grouped + collapsed + alone));
+writeFileSync(join(dir, "index.html"), page(plain + grouped + collapsed + alone + menu));
 
 const browser = await chromium.launch();
-const p = await browser.newPage({ viewport: { width: 1000, height: 120 }, deviceScaleFactor: 3 });
+const p = await browser.newPage({ viewport: { width: 1000, height: 330 }, deviceScaleFactor: 3 });
 await p.goto(`file://${join(dir, "index.html")}`);
 
 const m = await p.evaluate(() => {
