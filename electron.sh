@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ts5250 — Electron デスクトップ版の実行ファイル生成（Linux / macOS / WSL）
-#   ワークスペース依存 → ビルド（core/server + web-ui）→ Electron 依存 → アプリ一式の組み立て
+#   ワークスペース依存 → ビルド（ライブラリ/server + web-ui）→ Electron 依存 → アプリ一式の組み立て
 #   → 実行ファイル生成。
 #
 # 使い方:
@@ -32,7 +32,7 @@ fi
 
 # ビルド（dist 未生成 or --build 指定時）
 if [ "$FORCE_BUILD" = 1 ] || [ ! -f packages/server/dist/main.js ] || [ ! -f packages/web-ui/dist/index.html ]; then
-  echo "==> ビルド（core / server）"
+  echo "==> ビルド（ライブラリ / server）"
   npm run build
   echo "==> ビルド（web-ui / Vite）"
   npm run build -w @ts5250/web-ui

@@ -39,11 +39,37 @@ const ELECTRON_DIR = resolve(HERE, "..");
 const REPO = resolve(ELECTRON_DIR, "..");
 const STAGE = join(ELECTRON_DIR, "app-stage");
 
-/** 実行時に要る自前パッケージ（server が入口。core → ebcdic/scs と辿る） */
-const LIB_PACKAGES = ["ebcdic", "scs", "core", "server"];
-
 const log = (s) => process.stderr.write(`${s}\n`);
 const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
+
+/**
+ * 実行時に要る自前パッケージを、**入口（server）から依存を辿って集める**。
+ *
+ * **手で並べない。** 以前は `["ebcdic", "scs", "core", "server"]` と書き写していたため、
+ * `core` → `tn5250` の改名（`20260801-library-extraction-tn5250`）と `base` / `hostserver` の
+ * 追加に追随できず、`electron.sh --build` が
+ * 「ビルド成果物がありません: packages/core/dist」で止まっていた。
+ * **配布物だけが古い**という、動かして初めて分かる壊れ方をする。
+ *
+ * 依存の宣言（各 `package.json`）を単一の真実にすれば、パッケージを足しても改名しても
+ * ここは直さなくてよい。第三者依存を各 package.json から集めているのと同じ理由。
+ */
+function collectLibPackages(entry) {
+  const out = [];
+  const seen = new Set();
+  const visit = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const deps = readJson(join(REPO, "packages", name, "package.json")).dependencies ?? {};
+    for (const dep of Object.keys(deps)) {
+      if (dep.startsWith("@ts5250/")) visit(dep.slice("@ts5250/".length));
+    }
+    out.push(name); // 依存が先、利用側が後
+  };
+  visit(entry);
+  return out;
+}
+const LIB_PACKAGES = collectLibPackages("server");
 
 function requireBuilt(p, hint) {
   if (!existsSync(p)) {

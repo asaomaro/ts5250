@@ -4,7 +4,7 @@ rem (UTF-8) bytes in .bat files, which turns comment lines into stray commands.
 rem chcp 65001 only fixes DISPLAY of the child process (node) UTF-8 output below.
 chcp 65001 >nul
 rem ts5250 - Electron desktop packager (Windows)
-rem   workspace deps -> build (core/server + web-ui) -> Electron deps -> stage app -> build exe
+rem   workspace deps -> build (libs/server + web-ui) -> Electron deps -> stage app -> build exe
 rem
 rem Usage:
 rem   electron.bat            auto-build if not built, then build the exe
@@ -48,7 +48,7 @@ set "NEED_BUILD=%FORCE_BUILD%"
 if not exist packages\server\dist\main.js set "NEED_BUILD=1"
 if not exist packages\web-ui\dist\index.html set "NEED_BUILD=1"
 if "%NEED_BUILD%"=="1" (
-  echo ==^> build ^(core / server^)
+  echo ==^> build ^(libs / server^)
   call npm run build
   echo ==^> build ^(web-ui / Vite^)
   call npm run build -w @ts5250/web-ui
