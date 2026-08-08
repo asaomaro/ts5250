@@ -81,12 +81,68 @@ describe("ホストのカーソル位置を桁まで再現する", () => {
     w.unmount();
   });
 
-  it("カーソルが入力欄の外なら先頭欄へ寄せる（従来どおり）", async () => {
+  /**
+   * **入力欄の外を指されたら、その位置に置く**（自由カーソル）。先頭欄へ寄せない。
+   *
+   * SEU の走査検索（表示モード）がまさにこれ——ホストは見つかった文字列の頭に `IC` を
+   * 送るが、表示モードではその桁が保護欄。先頭欄へ寄せると `SEU==>` へ飛んでしまい、
+   * どこが見つかったのか分からなくなっていた（利用者の指摘）。ACS は指された桁に置く。
+   *
+   * 「ホストがカーソルを置かなかった画面」の正規化は protocol 層が済ませている
+   * （`session.ts` の `readRequested && !cursorSet` → `cursorToFirstInputField`）ので、
+   * ここへ来る「欄の外」はホストがわざと指した場合だけ。
+   */
+  it("カーソルが入力欄の外なら**寄せずに**その桁へ（欄には focus しない）", async () => {
     const w = mountGrid({ row: 20, col: 1 }); // どの欄にも属さない
     await focusPane(w);
-    const el = document.activeElement as HTMLInputElement;
-    expect(el.dataset["fieldIndex"]).toBe("1");
-    expect(el.selectionStart).toBe(0);
+    // 入力欄は掴まない（親がペインへ focus して自由カーソルにする）
+    expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement);
+    // 親へ「この桁だ」と伝えている（`reconcileFocus` がオーバーレイを出す）
+    const cursorEvents = w.findComponent({ name: "ScreenGrid" }).emitted("cursor") ?? [];
+    expect(cursorEvents.at(-1)).toEqual([20, 1]);
+    w.unmount();
+  });
+});
+
+/**
+ * SEU の走査検索（表示モード）を写した形。
+ *
+ * ホストは見つかった文字列の頭に `IC` を送る（実機で `row 6, col 10` を確認）。
+ * 表示モードではその桁が**保護欄**なので、先頭欄へ寄せると `SEU==>` へ飛び、
+ * どこが見つかったのか分からなくなっていた（利用者の指摘）。ACS は指された桁に置く。
+ */
+describe("SEU の走査検索（表示モード）", () => {
+  /** 保護欄（表示モードのソース行） */
+  function ro(index: number, row: number, col: number, length: number): Field {
+    return { ...fld(index, row, col, length), protected: true };
+  }
+
+  function seuSnap() {
+    // #1 = SEU==>（唯一の入力欄）、#2 = ソース行（保護）
+    return snap([fld(1, 2, 9, 60), ro(2, 6, 9, 60)], { row: 6, col: 10 });
+  }
+
+  it("`SEU==>` へ飛ばさない（入力欄を掴まない）", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: seuSnap(), focused: true, edits: new Map() },
+      attachTo: document.body
+    });
+    await nextTick();
+    await nextTick();
+    expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement);
+    w.unmount();
+  });
+
+  it("ホストが指した桁にカーソルのオーバーレイが出る", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: seuSnap(), focused: true, edits: new Map() },
+      attachTo: document.body
+    });
+    await nextTick();
+    const style = w.find(".cursor").attributes("style") ?? "";
+    // 0 起点: col 10 → 9ch、row 6 → 5 * 1.25em
+    expect(style).toContain("left: 9ch");
+    expect(style).toContain("top: 6.25em");
     w.unmount();
   });
 });

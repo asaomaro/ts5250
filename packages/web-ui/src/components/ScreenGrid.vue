@@ -1941,14 +1941,23 @@ function focusCursorField(): void {
    */
   const f = fieldAt(cur.row, cur.col, snap.fields, snap.cols, snap.rows);
   if (!f || f.protected) {
-    // ホストがカーソルを入力欄の外に置いた場合は従来どおり先頭欄へ（サインオン等）
-    const first = gridEl.value.querySelector<HTMLInputElement>(
-      'input.grid-input:not([readonly])[data-slice="0"]'
-    );
-    if (!first) return;
-    first.focus();
-    first.setSelectionRange(0, 0);
-    if (edit) edit.cursor = 0;
+    /**
+     * **入力欄の外を指されたら、その位置に置く**（自由カーソル）。先頭欄へ寄せない。
+     *
+     * SEU の走査検索（表示モード）はまさにこれ——ホストは見つかった文字列の頭に
+     * `IC` を送るが、表示モードではその桁が保護欄なので、先頭欄へ寄せると
+     * `SEU==>` へ飛んでしまい**どこが見つかったのか分からなくなる**（利用者の指摘）。
+     * ACS は指された桁にカーソルを置く。
+     *
+     * 「ホストがカーソルを置かなかった画面」を心配して先頭欄へ寄せていたが、
+     * **その正規化は既に protocol 層で済んでいる**——`session.ts` は
+     * `readRequested && !cursorSet` のときに `cursorToFirstInputField()` を通す。
+     * ここまで来る「欄の外」は、ホストが**わざと**そこを指した場合だけ。
+     */
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && gridEl.value.contains(active)) active.blur();
+    // 親（`reconcileFocus`）が入力欄を外してペインへ focus し、オーバーレイで桁を出す
+    emit("cursor", cur.row, cur.col);
     return;
   }
   const offset = caretInField(f, cur.row, cur.col, snap.cols, snap.rows);
