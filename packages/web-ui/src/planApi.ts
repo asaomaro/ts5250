@@ -10,6 +10,8 @@
 export type {
   QueryPlan,
   PlanBlock,
+  PlanTreeNode,
+  PlanTreeOpKind,
   PlanNode,
   PlanNodeKind,
   PlanAttribute,

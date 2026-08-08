@@ -15,6 +15,7 @@
     "test:flake-hunt": "bash scripts/flake-hunt.sh"
   },
   "dependencies": {
+    "@ts5250/base": "0.1.0",
     "@ts5250/ebcdic": "0.1.0",
     "@ts5250/server": "0.1.0",
     "@ts5250/tn5250": "0.1.0",

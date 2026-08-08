@@ -47,6 +47,8 @@ export {
   MONITOR_COLUMNS,
   type QueryPlan,
   type PlanBlock,
+  type PlanTreeNode,
+  type PlanTreeOpKind,
   type PlanNode,
   type PlanNodeKind,
   type PlanNodeCategory,

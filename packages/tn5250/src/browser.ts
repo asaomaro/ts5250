@@ -41,6 +41,14 @@ export {
   rawSentinel
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
+/**
+ * 欄の識別子（行・桁から作る純関数）。web-ui が欄ごとの `key` に使う。
+ *
+ * **root（`@ts5250/tn5250`）から取ってはいけない。** root は `transport/tcp.ts` 経由で
+ * `node:net` / `node:tls` を巻き込むので、ブラウザでは実行時に落ちる
+ * （`vite dev` でアプリが起動しなくなっていた。AGENTS.md「ブラウザから触る側は狭い入口を使う」）。
+ */
+export { fieldId } from "./screen/search.js";
 /** グリッド線の色コード表（5250 の属性バイトとは別物。DDS リファレンス GRDATR Table 14） */
 export { GRID_COLOR } from "./protocol/wdsf-parser.js";
 export type { ScreenColor } from "./screen/types.js";

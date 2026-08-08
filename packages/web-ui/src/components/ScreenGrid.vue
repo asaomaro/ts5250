@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { fieldId } from "@ts5250/tn5250";
+// **root ではなく browser 入口から**（root は node:net / node:tls を巻き込む）
+import { fieldId } from "@ts5250/tn5250/browser";
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@ts5250/tn5250";
 import {

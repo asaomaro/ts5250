@@ -202,3 +202,55 @@ describe("localStorage に書けないとき", () => {
     expect(pushHistory(plan()).persisted).toBe(true);
   });
 });
+
+/**
+ * **保存する計画は痩せさせる。** モニターの全列を持つと 1 件 110KB になり、
+ * 履歴 20 × 保存 20 で localStorage の容量に届く（実測）。
+ * 落とすのは「意味を確かめていない列」だけで、名前を与えた項目は残す。
+ */
+describe("保存時に列名のままの属性を落とす", () => {
+  const withRaw = (): QueryPlan => ({
+    statement: "SELECT 1",
+    captured: "run",
+    at: "2026-08-08T00:00:00Z",
+    blocks: [
+      {
+        number: 1,
+        nodes: [
+          {
+            id: "1-0",
+            kind: "table-scan",
+            category: "step",
+            recordType: 3000,
+            label: "表の走査: T",
+            attributes: [
+              { label: "総行数", value: "8", group: "表・索引" },
+              { label: "QQI9", value: "183", group: "モニターの記録（列名のまま）", raw: true }
+            ]
+          }
+        ]
+      }
+    ],
+    advice: [],
+    summary: { nodeCount: 1, stepCount: 1, blockCount: 1, tables: [], indexes: [], adviceCount: 0 },
+    unknownRecordTypes: []
+  });
+
+  it("履歴に積むとき列名のままの属性が落ちる（名前を与えた項目は残る）", () => {
+    pushHistory(withRaw());
+    const attrs = planStore.history[0]!.plan.blocks[0]!.nodes[0]!.attributes;
+    expect(attrs.map((a) => a.label)).toEqual(["総行数"]);
+  });
+
+  it("保存でも同じように落とす", () => {
+    savePlan(withRaw(), "test");
+    const attrs = planStore.saved[0]!.plan.blocks[0]!.nodes[0]!.attributes;
+    expect(attrs.some((a) => a.raw)).toBe(false);
+  });
+
+  it("**元の計画は変えない**（画面はそのまま全部出せる）", () => {
+    const plan = withRaw();
+    pushHistory(plan);
+    expect(plan.blocks[0]!.nodes[0]!.attributes).toHaveLength(2);
+  });
+});

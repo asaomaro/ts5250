@@ -258,10 +258,26 @@ watch(
   border-right: 1px solid var(--line);
   padding-right: 8px;
 }
+/* ビューアの枠。**ここではスクロールさせない**——図と詳細がそれぞれ自分でスクロールする
+   （`PlanViewer` の `.pv-main` / `.pv-side`）。ここを `auto` にすると、
+   一覧以外の領域にもう 1 本、全体の縦棒が出る（利用者の指摘） */
 .pl-viewer {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 中の `PlanViewer` に高さを渡す（`height: 100%` の受け皿になる） */
+.pl-viewer :deep(.plan-viewer) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 比較の見出しなど、ビューアの前に置くものは縮めない */
+.pl-viewer > .pl-compare-head,
+.pl-viewer > .pl-empty {
+  flex: none;
 }
 .pl-list {
   list-style: none;

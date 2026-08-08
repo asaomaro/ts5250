@@ -65,9 +65,10 @@ async function run(sql = "SELECT 1 FROM SYSIBM.SYSDUMMY1") {
 describe("実行", () => {
   it("選択中のシステムと SQL と pageSize を送る", async () => {
     const w = await run("SELECT 1 FROM SYSIBM.SYSDUMMY1");
-    // ペインを開いた時点で暖機を投げているので、実行の呼び出しを名指しで拾う
+    // ペインを開いた時点で暖機を、`FROM SYSIBM.` の時点で補完の問い合わせ（`SYSTABLES`）を
+    // 投げているので、**実行の呼び出しを中身で名指しして**拾う
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c) => String(c[0]) === "/api/host/sql"
+      (c) => String(c[0]) === "/api/host/sql" && String((c[1] as RequestInit).body).includes("SYSDUMMY1")
     );
     expect(call).toBeDefined();
     const body = JSON.parse(String((call?.[1] as RequestInit).body));
@@ -581,12 +582,14 @@ describe("結果の最大化", () => {
     await maxButton(w).trigger("click");
     await flushPromises();
     expect(w.find(".splitter").exists(), "境界は隠れる").toBe(false);
-    expect(w.find("textarea").attributes("style"), "SQL 欄は隠れる").toContain("display: none");
+    // 入力欄は候補を重ねる箱（`.editor-wrap`）ごと隠れる。**箱を見る**——
+    // `textarea` 自身の style には高さしか付かない
+    expect(w.find(".editor-wrap").attributes("style"), "SQL 欄は隠れる").toContain("display: none");
 
     await maxButton(w).trigger("click");
     await flushPromises();
     expect(w.find(".splitter").exists()).toBe(true);
-    expect(w.find("textarea").attributes("style")).not.toContain("display: none");
+    expect(w.find(".editor-wrap").attributes("style")).not.toContain("display: none");
     w.unmount();
   });
 });

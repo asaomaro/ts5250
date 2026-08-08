@@ -14,7 +14,7 @@
  * localStorage に置くが、**上限を設けて溜め込ませない**。
  */
 import { reactive } from "vue";
-import type { PlanNode, QueryPlan } from "./planApi.js";
+import type { PlanAttribute, PlanNode, PlanTreeNode, QueryPlan } from "./planApi.js";
 
 /** 保存の上限。超えたら古い順に落とす（**落としたことは呼び出し側に返す**） */
 export const MAX_SAVED = 20;
@@ -82,6 +82,40 @@ export function defaultName(plan: QueryPlan): string {
   return s.length > 60 ? `${s.slice(0, 60)}…` : s || "(名前なし)";
 }
 
+/**
+ * 保存用に痩せさせる。**列名のままの属性を落とす**。
+ *
+ * モニターの全列を持つと計画 1 件で 110KB になり、履歴 20 件 × 保存 20 件で
+ * localStorage の容量（おおむね 5MB）に届く——`write` は失敗を返すので画面は
+ * 止まらないが、**保存できないまま使い続ける**ことになる。
+ *
+ * 落とすのは**こちらが意味を確かめていない列**（`raw`）だけ。名前を与えた項目・
+ * 図・要約・助言はそのまま残るので、保存した計画の比較は今までどおり成り立つ。
+ * 見返したいときは同じ文をもう一度採ればよい。
+ */
+function slim(plan: QueryPlan): QueryPlan {
+  const strip = <T extends { attributes: PlanAttribute[] }>(x: T): T => ({
+    ...x,
+    attributes: x.attributes.filter((a) => !a.raw)
+  });
+  const tree = (t: PlanTreeNode | undefined): PlanTreeNode | undefined => {
+    if (!t) return undefined;
+    if (t.kind === "dial") return { ...t, nodes: t.nodes.map(strip) };
+    if (t.kind === "join") return { ...strip(t), left: tree(t.left)!, right: tree(t.right)! };
+    return { ...strip(t), source: tree(t.source)! };
+  };
+  return {
+    ...plan,
+    blocks: plan.blocks.map((b) => {
+      const out = { ...b, nodes: b.nodes.map(strip) };
+      const t = tree(b.joinTree);
+      if (t) out.joinTree = t;
+      else delete out.joinTree;
+      return out;
+    })
+  };
+}
+
 let seq = 0;
 function newId(at: string): string {
   seq += 1;
@@ -93,7 +127,7 @@ function newId(at: string): string {
  * 落とした件数を返す（黙って消さないため、呼び出し側が知らせられる）。
  */
 export function pushHistory(plan: QueryPlan): { dropped: number; persisted: boolean } {
-  const entry: StoredPlan = { id: newId(plan.at), name: defaultName(plan), plan };
+  const entry: StoredPlan = { id: newId(plan.at), name: defaultName(plan), plan: slim(plan) };
   planStore.history.unshift(entry);
   const dropped = Math.max(0, planStore.history.length - MAX_HISTORY);
   if (dropped > 0) planStore.history.splice(MAX_HISTORY, dropped);
@@ -106,7 +140,7 @@ export function savePlan(
   plan: QueryPlan,
   name?: string
 ): { dropped: number; entry: StoredPlan; persisted: boolean } {
-  const entry: StoredPlan = { id: newId(plan.at), name: name?.trim() || defaultName(plan), plan };
+  const entry: StoredPlan = { id: newId(plan.at), name: name?.trim() || defaultName(plan), plan: slim(plan) };
   planStore.saved.unshift(entry);
   const dropped = Math.max(0, planStore.saved.length - MAX_SAVED);
   if (dropped > 0) planStore.saved.splice(MAX_SAVED, dropped);

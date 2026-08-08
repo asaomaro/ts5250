@@ -95,11 +95,41 @@ export type PlanNodeKind =
  */
 export type PlanNodeCategory = "step" | "info";
 
-/** ノード詳細パネルに出す 1 項目 */
+/**
+ * ノード詳細パネルに出す 1 項目。
+ *
+ * `group` は ACS の詳細ダイアログと同じ**節見出し**。未指定は先頭の節に入る。
+ * **名前を与えた項目と、生の列名のままの項目を混ぜない**ため——
+ * 「モニターの記録（列名のまま）」の節に落ちているものは、**こちらが意味を
+ * 確かめていない列**だと分かるようにしている（AGENTS.md「名前を与えるのは実測した種別のみ」）。
+ */
 export interface PlanAttribute {
   label: string;
   value: string;
+  group?: string;
+  /**
+   * **こちらが意味を確かめていない列**（ラベルが列名そのもの）。
+   *
+   * 画面には出すが、**保存や MCP の応答からは落とす**ための印。
+   * 全列を持つと計画 1 件で 110KB になり、履歴 20 件 × 保存 20 件で
+   * localStorage の容量（おおむね 5MB）に届く。文字列の節名で判定すると
+   * 表示の都合で節名を変えたときに黙って壊れるので、真偽値で持つ。
+   */
+  raw?: boolean;
+  /**
+   * 元のモニター列名。**論理名を出しても列の ID は残す**——
+   * ACS の出力や IBM の資料と突き合わせるときに要る。
+   */
+  column?: string;
 }
+
+/** 属性の節。ACS の詳細ダイアログの区切りに合わせる */
+export const ATTR_GROUP_TABLE = "表・索引";
+export const ATTR_GROUP_ESTIMATE = "見積もり";
+export const ATTR_GROUP_JOIN = "結合";
+export const ATTR_GROUP_ADVICE = "索引の助言";
+/** 意味を確かめていない列。**捨てずに出すが、名前は与えない** */
+export const ATTR_GROUP_RAW = "モニターの全列";
 
 export interface PlanNode {
   /** `${ブロック番号}-${ブロック内の連番}` */
@@ -121,14 +151,80 @@ export interface PlanNode {
   estimatedMs?: number;
   /** `QQRCOD` オプティマイザの理由コード。実測で `T1` / `T3` / `I1` / `I2` / `F7` / `A0` を確認 */
   reasonCode?: string;
+  /**
+   * `QQJNP` 結合の位置（ダイヤル。**1 起点**）。結合に参加する記録だけが持つ。
+   * `0` は「参加していない」の意味で入るので**落とす**（`3007` が 0 を返すのを実測）。
+   */
+  joinPosition?: number;
+  /** `QQC21` 結合方式のコード。**実測で確かめたのは `NL`（ネステッドループ）だけ** */
+  joinMethod?: string;
+  /**
+   * `QVC14` 索引だけで足りたか。**`false` なら表から行を取り直す**
+   * ＝ACS が「テーブル・プローブ」として別のオブジェクトに描くもの。
+   */
+  indexOnly?: boolean;
   /** **値の入っていた列だけ**を並べる。未知種別はここが情報の全て */
   attributes: PlanAttribute[];
 }
+
+/**
+ * 図に描く**結合の木**。葉は 1 つのダイヤル（`QQJNP` が同じ記録のまとまり）、
+ * 内部の節は結合。
+ *
+ * **左深（left-deep）に組む。** IBM i の結合はダイヤルを 1 から順に重ねていく形で、
+ * `QQJNP` がその順位そのもの（2 表で 1・2、3 表で 1・2・3 になるのを実測）。
+ * `((ダイヤル1 ⋈ ダイヤル2) ⋈ ダイヤル3)` と読む。
+ *
+ * **これは推定ではない**——`QQJNP` という 1 列がそのまま順位を持っている。
+ * 以前「記録に親子リンクが無い」と結論したのは `QQQDTN` / `QQQDTL` しか見ていなかったため
+ * （`design.md` A1 の訂正）。
+ */
+export type PlanTreeNode =
+  | { kind: "dial"; id: string; position: number; nodes: PlanNode[] }
+  | {
+      kind: "join";
+      id: string;
+      label: string;
+      method?: string;
+      left: PlanTreeNode;
+      right: PlanTreeNode;
+      /** 詳細パネルに出す項目。**ノードと同じように選んで中が見られる** */
+      attributes: PlanAttribute[];
+    }
+  | {
+      kind: "op";
+      id: string;
+      label: string;
+      op: PlanTreeOpKind;
+      table?: { schema: string; name: string };
+      /** 通した行数（`final-select` は `3019` の `QQI7`） */
+      rows?: number;
+      source: PlanTreeNode;
+      /** 詳細パネルに出す項目 */
+      attributes: PlanAttribute[];
+    };
+
+/**
+ * 記録そのものではなく、**記録から導いた単項の演算**。
+ *
+ * - `table-probe`: 索引で当てた行を表から取り直す。`QVC14='N'`（索引だけでは足りない）から導く。
+ *   ACS も同じ位置に「テーブル・プローブ」を描く（実機の Visual Explain と突き合わせた）。
+ * - `final-select`: 文が返した行。`3019`（文レベルの要約）の `QQI7`。ACS の「最終選択」。
+ *
+ * **記録のノード（`PlanNode`）と混ぜない。** `recordType` を持たないものを `PlanNode` に
+ * 入れると「記録種別は必ず持つ」という約束が崩れる。
+ */
+export type PlanTreeOpKind = "table-probe" | "final-select";
 
 /** クエリブロック（`QQQDTN` 単位）。UNION などで複数になる */
 export interface PlanBlock {
   number: number;
   nodes: PlanNode[];
+  /**
+   * 結合の木。**ダイヤルが 2 つ以上あるときだけ**付く。
+   * 単表の計画では付かない（今までどおり縦に並べる）。
+   */
+  joinTree?: PlanTreeNode;
 }
 
 export interface IndexAdvice {
@@ -218,6 +314,36 @@ export interface MonitorRecord {
   QQRCOD: string | null;
   /** ジョブ名 */
   QQJOB: string | null;
+  /**
+   * 結合の位置（ダイヤル）。**結合の木はこの 1 列で決まる**——
+   * 2 表で 1・2、3 表で 1・2・3 になるのを実機 7.3 で実測した。
+   * 参加しない記録は `0` か null（`3007` が 0 を返す）。
+   */
+  QQJNP: number | null;
+  /** 結合方式。実測は `NL`（ネステッドループ）のみ。**知らないコードに名前を付けない** */
+  QQC21: string | null;
+  /**
+   * 索引のみアクセス（`Y`/`N`）。**`N` なら表から行を取り直す**＝ACS の「テーブル・プローブ」。
+   *
+   * 同じ結合を `SELECT *` と「索引のキー列だけ」で流して差分を採ったところ、
+   * 意味のある違いはこの 1 列だけだった（`N` → `Y`）。実機 7.3 実測。
+   */
+  QVC14: string | null;
+  /** 索引のライブラリ。`QQ1000` の索引名と組で使う */
+  QQILNM: string | null;
+  /** `3019`（文レベルの要約）が返した行数。**ACS の「最終選択」の数字がこれ** */
+  QQI7: number | null;
+  /**
+   * 読めた**全列**（列名 → 値）。値の入っていた列だけが入る。
+   *
+   * 上の型付きの欄は**判断に使う列**で、こちらは**見せるための全部**。
+   * ACS の詳細ダイアログは 40〜60 項目を出すが、その大半は
+   * `QQI3` / `QQIA` / `QVP156` のような**記録種別ごとに意味が変わる列**で、
+   * ホストの catalog にも説明が入っていない（実測。名前付きの列にしか
+   * `COLUMN_TEXT` が無い）。**意味を確かめていない列に名前を与えない**代わりに、
+   * 列名のまま全部出す——値が見えれば ACS と突き合わせられる。
+   */
+  raw?: Record<string, string | number>;
 }
 
 /**
@@ -240,7 +366,12 @@ export const MONITOR_COLUMNS = [
   "QQIDXA",
   "QQIDXD",
   "QQRCOD",
-  "QQJOB"
+  "QQJOB",
+  "QQJNP",
+  "QQC21",
+  "QVC14",
+  "QQILNM",
+  "QQI7"
 ] as const;
 
 /** 文レベルの要約であってノードではない記録種別（`QQQDTL=0` の `3019`。IBM: Rows Retrieved） */
@@ -319,6 +450,10 @@ const CONSUMED_RECORDS = new Set([1000, STATEMENT_SUMMARY_RECORD]);
 
 /** 索引の助言を運ぶ記録（IBM: Index advised (SQE)） */
 const RECORD_INDEX_ADVICE = 3020;
+/** 索引の使用（IBM: Index used）。**`QQ1000` にアクセスパス名が入る唯一の計画記録** */
+const RECORD_INDEX_USED = 3001;
+/** クエリ情報（IBM: Generic query information）。**文レベルの設定と環境がここに入る** */
+const RECORD_QUERY_INFO = 3014;
 
 function kindOf(recordType: number): PlanNodeKind {
   return KIND_BY_RECORD.get(recordType) ?? "other";
@@ -344,10 +479,21 @@ function tableOf(r: MonitorRecord): { schema: string; name: string } | undefined
   return { schema: trimOrUndefined(r.QVQLIB) ?? "", name };
 }
 
+/**
+ * 使った索引。
+ *
+ * **`3001` は `QQ1000` に実際のアクセスパス名を持つ**（`Q_TESTLIB_M_MENU_MENUCD_00001` のような
+ * システム生成の索引名）。`QVINAM` はその索引が載っている**ファイル名**なので、
+ * `QVINAM` だけを見ると「索引の使用: M_MENU」と表そのものの名前になってしまう。
+ * ACS も `QQILNM` + `QQ1000` を出している——実機の Visual Explain と突き合わせて確かめた。
+ *
+ * `QQ1000` が空のこともある（QSYS2 の表で実測）ので、そのときは `QVINAM` に落とす。
+ */
 function indexOf(r: MonitorRecord): { schema?: string; name: string } | undefined {
-  const name = trimOrUndefined(r.QVINAM);
+  const accessPath = r.QQRID === RECORD_INDEX_USED ? trimOrUndefined(r.QQ1000) : undefined;
+  const name = accessPath ?? trimOrUndefined(r.QVINAM);
   if (!name) return undefined;
-  const schema = trimOrUndefined(r.QVILIB);
+  const schema = trimOrUndefined(accessPath ? (r.QQILNM ?? r.QVILIB) : r.QVILIB);
   return schema === undefined ? { name } : { schema, name };
 }
 
@@ -364,26 +510,97 @@ function labelOf(kind: PlanNodeKind, r: MonitorRecord): string {
   return table ? `${base}: ${table.name}` : base;
 }
 
-/** 値の入っていた列だけを属性にする。**未知種別ではここが情報の全て** */
-function attributesOf(r: MonitorRecord): PlanAttribute[] {
+/**
+ * **記録種別ごとに意味が確かめられた列**だけの名前。
+ *
+ * ACS の詳細ダイアログと突き合わせて**値が一意に一致した列だけ**を載せている
+ * （2026-08-08。利用者提供の ACS 出力を正解データにした）。
+ * 一致が曖昧だったもの（同じ値の列が複数）や、ACS 側が計算している値
+ * （`処理された行数の合計 = 反復 × 行数` など）は**入れない**。
+ *
+ * ⚠ **記録種別で分ける。** 同じ `QQI5` が `3001` では索引の項目数、`3014` では
+ * 最適化時間（ミリ秒）だった。一律に名付けると必ず嘘になる。
+ */
+const NAMED_BY_RECORD: Record<number, Record<string, { label: string; group: string }>> = {
+  // 表の走査（ACS「テーブルのスキャン」）
+  3000: {
+    QQI3: { label: "テーブル・サイズ(バイト)", group: ATTR_GROUP_TABLE }
+  },
+  // 索引の使用（ACS「索引プローブ」＋「テーブル・プローブ」）
+  3001: {
+    QQIA: { label: "索引論理ページ・サイズ", group: ATTR_GROUP_TABLE },
+    QVP156: { label: "テーブル・サイズ(バイト)", group: ATTR_GROUP_TABLE }
+  },
+  // クエリ情報（ACS「最終選択」の大半がここ）
+  3014: {
+    QQI5: { label: "最適化時間(ミリ秒)", group: ATTR_GROUP_ESTIMATE },
+    QQC83: { label: "QRO ハッシュ", group: ATTR_GROUP_ESTIMATE },
+    QQC81: { label: "最適化ゴール", group: ATTR_GROUP_ESTIMATE },
+    QQC103: { label: "QUERY オプション・テーブル", group: ATTR_GROUP_ESTIMATE }
+  },
+  // 文レベルの要約（ACS「最終選択」の行数）
+  3019: {
+    QQI7: { label: "返した行数", group: ATTR_GROUP_ESTIMATE }
+  }
+};
+
+/**
+ * 値の入っていた列を属性にする。**未知種別ではここが情報の全て**。
+ *
+ * 2 段構え:
+ * 1. 意味を確かめた列に**日本語の名前**を付けて節に分ける
+ * 2. 残りは**列名のまま**「モニターの記録」の節へ——ACS が出している項目の多くは
+ *    ここに生の値として入る。名前を与えないのは、記録種別ごとに意味が変わる列で、
+ *    ホストの catalog にも説明が無いため（実測）。**捨てるより出す**
+ */
+function attributesOf(r: MonitorRecord, labels: ReadonlyMap<string, string>): PlanAttribute[] {
   const out: PlanAttribute[] = [];
-  const push = (label: string, value: string | number | null | undefined): void => {
+  /** 名前を与えて出した列。生の列として二重に出さないため控える */
+  const named = new Set<string>();
+  const push = (label: string, value: string | number | null | undefined, group?: string, column?: string): void => {
     if (value === null || value === undefined) return;
     const s = typeof value === "string" ? value.trim() : String(value);
     if (s === "") return;
-    out.push({ label, value: s });
+    out.push({
+      label,
+      value: s,
+      ...(group !== undefined ? { group } : {}),
+      ...(column !== undefined ? { column } : {})
+    });
+    if (column) named.add(column);
   };
   const table = tableOf(r);
-  push("記録種別", r.QQRID);
-  push("クエリブロック", r.QQQDTN);
-  push("表", table ? `${table.schema}/${table.name}` : undefined);
-  push("索引", indexOf(r)?.name);
-  push("総行数", r.QQTOTR);
-  push("推定行数", r.QQREST);
-  push("推定処理時間(ms)", r.QQEPT);
-  push("理由コード", r.QQRCOD);
-  push("索引助言", r.QQIDXA);
-  push("助言キー列", r.QQIDXD);
+  push("記録種別", r.QQRID, ATTR_GROUP_TABLE, "QQRID");
+  push("クエリブロック", r.QQQDTN, ATTR_GROUP_TABLE, "QQQDTN");
+  push("表", table ? `${table.schema}/${table.name}` : undefined, ATTR_GROUP_TABLE);
+  push("索引", indexOf(r)?.name, ATTR_GROUP_TABLE);
+  push("総行数", r.QQTOTR, ATTR_GROUP_TABLE, "QQTOTR");
+  push("推定行数", r.QQREST, ATTR_GROUP_ESTIMATE, "QQREST");
+  push("推定処理時間(ms)", r.QQEPT, ATTR_GROUP_ESTIMATE, "QQEPT");
+  push("理由コード", r.QQRCOD, ATTR_GROUP_ESTIMATE, "QQRCOD");
+  // **`0` は「結合に参加していない」**（`3007` で実測）。ダイヤル番号として出さない
+  const joined = numOrUndefined(r.QQJNP) !== undefined && r.QQJNP! >= 1;
+  push("結合位置", joined ? r.QQJNP : null, ATTR_GROUP_JOIN, "QQJNP");
+  // **`QQC21` を「結合方式」と呼べるのは結合に参加する記録だけ。**
+  // 記録種別ごとに意味が違う列で、`3019` では `A1`、`3014` では `N` が入る（実測）。
+  // 一律に「結合方式」と書くと、結合していない記録に嘘のラベルが付く
+  push("結合方式", joined ? r.QQC21 : null, ATTR_GROUP_JOIN, joined ? "QQC21" : undefined);
+  push("索引のみアクセス", r.QVC14, ATTR_GROUP_TABLE, "QVC14");
+  push("索引助言", r.QQIDXA, ATTR_GROUP_ADVICE, "QQIDXA");
+  push("助言キー列", r.QQIDXD, ATTR_GROUP_ADVICE, "QQIDXD");
+
+  // 記録種別ごとに確かめた列
+  for (const [column, spec] of Object.entries(NAMED_BY_RECORD[r.QQRID] ?? {})) {
+    push(spec.label, r.raw?.[column] ?? null, spec.group, column);
+  }
+
+  // **残りも全部出す。** ACS が出している項目の多くはここに入る。
+  // ホストの catalog に論理名があればそれを見出しにし、無ければ列名のまま
+  for (const [column, value] of Object.entries(r.raw ?? {})) {
+    if (named.has(column)) continue;
+    push(labels.get(column) ?? column, value, ATTR_GROUP_RAW, column);
+    out[out.length - 1]!.raw = true;
+  }
   return out;
 }
 
@@ -411,6 +628,143 @@ export function buildCreateIndexStatement(
 }
 
 /**
+ * 結合方式のコード → 表示名。
+ *
+ * **実測で確かめたものだけに名前を付ける**（AGENTS.md「名前付きノードは実測した種別のみ」）。
+ * 実機 7.3 で確認できたのは `NL` だけ。それ以外はコードのまま見せて、
+ * 「知らないものを知っているふりで名付けない」。
+ */
+function dedupeByLabel(items: PlanAttribute[]): PlanAttribute[] {
+  const seen = new Set<string>();
+  return items.filter((a) => (seen.has(a.label) ? false : (seen.add(a.label), true)));
+}
+
+function joinLabelOf(method: string | undefined): string {
+  if (method === "NL") return "ネステッドループ結合";
+  return method ? `結合（${method}）` : "結合";
+}
+
+/**
+ * ダイヤル（`QQJNP`）から**左深の結合の木**を組む。
+ *
+ * ダイヤルが 1 つ以下なら木にしない（`undefined` を返す）——結合していない計画で
+ * 「結合」の節を出すのは嘘になるし、単表の見え方も変えたくない。
+ *
+ * **結合方式は「右側のダイヤル」から採る**。IBM i の記録では、そのダイヤルを
+ * どう繋いだかがそのダイヤルの記録に載る（両側 `NL` で一致するのを実測しているが、
+ * 意味として正しいのは右側）。
+ *
+ * ⚠ **結合種別（内部/外部）は載せない。** `LEFT OUTER JOIN` を流しても `QQC22` は
+ * `IN` のままだった（実測）。書き換えられたのか別の意味なのか確かめられていないので、
+ * 「内部結合」と名乗らせると嘘になる。
+ */
+export function buildJoinTree(
+  nodes: PlanNode[],
+  blockNumber: number,
+  /** `3019` が返した行数（`QQI7`）。あれば「最終選択」を根に載せる */
+  rowsReturned?: number,
+  /** 文レベルの属性（`3019` ＋ `3014`）。**ACS の「最終選択」の中身** */
+  statementAttributes: PlanAttribute[] = []
+): PlanTreeNode | undefined {
+  const dials = new Map<number, PlanNode[]>();
+  for (const n of nodes) {
+    if (n.joinPosition === undefined) continue;
+    const list = dials.get(n.joinPosition) ?? [];
+    list.push(n);
+    dials.set(n.joinPosition, list);
+  }
+  const positions = [...dials.keys()].sort((a, b) => a - b);
+  if (positions.length < 2) return undefined;
+
+  const dialOf = (p: number): PlanTreeNode => ({
+    kind: "dial",
+    id: `${blockNumber}-d${p}`,
+    position: p,
+    nodes: dials.get(p) ?? []
+  });
+
+  /**
+   * 索引で当てただけで行が揃わないダイヤル（`indexOnly === false`）。
+   * **結合でそのダイヤルが入った直後**に「テーブル・プローブ」を挟む——
+   * ネステッドループでは、突き合わせが成立してから内側の行を取りに行くため。
+   * 2 表の実機比較では ACS と同じ位置・同じ表になった。
+   */
+  const probesFor = (position: number): PlanNode[] =>
+    (dials.get(position) ?? []).filter((n) => n.indexOnly === false && n.table !== undefined);
+
+  /**
+   * **行数は載せない。** ダイヤルの `QQREST` は「1 回の突き合わせで当たる行数」で、
+   * プローブを通過する総行数ではない（実測 1・ACS の表示は 8）。
+   * 手元の数字と意味が違うものを並べると読み違える。数えられるのは `3019` の返却行数だけ。
+   */
+  const probeOp = (node: PlanNode, source: PlanTreeNode, seq: string): PlanTreeNode => ({
+    kind: "op",
+    id: `${blockNumber}-p${seq}`,
+    label: `テーブル・プローブ: ${node.table?.name ?? ""}`,
+    op: "table-probe",
+    ...(node.table ? { table: node.table } : {}),
+    source,
+    // **導いた根拠を先頭に置く。** なぜこの節があるのかが分からないと、
+    // 「記録に無いものが出ている」としか読めない
+    attributes: [
+      { label: "この節の根拠", value: "索引だけでは列が揃わない（索引のみアクセス = N）" },
+      ...node.attributes
+    ]
+  });
+
+  let tree: PlanTreeNode = dialOf(positions[0]!);
+  for (let i = 1; i < positions.length; i++) {
+    const right = dialOf(positions[i]!);
+    // 方式は右側のダイヤルの記録から。**空文字は「無い」と同じ**に扱う
+    const method = (dials.get(positions[i]!) ?? []).map((n) => n.joinMethod).find((m) => m !== undefined);
+    const rightTable = (dials.get(positions[i]!) ?? []).map((n) => n.table).find((t) => t !== undefined);
+    tree = {
+      kind: "join",
+      id: `${blockNumber}-j${i}`,
+      label: joinLabelOf(method),
+      ...(method !== undefined ? { method } : {}),
+      left: tree,
+      right,
+      // **分かっていることだけ**を並べる（結合種別は `QQC22` が当てにならないので出さない）
+      attributes: [
+        ...(method !== undefined ? [{ label: "結合方式", value: method }] : []),
+        { label: "ここまでのダイヤル", value: positions.slice(0, i).join("・") },
+        { label: "取り込むダイヤル", value: String(positions[i]) },
+        ...(rightTable ? [{ label: "取り込む表", value: `${rightTable.schema}/${rightTable.name}` }] : [])
+      ]
+    };
+    // **最初の結合では外側（ダイヤル 1）のぶんも一緒に**——そこで初めて行が確定する
+    const owed = i === 1 ? [positions[0]!, positions[i]!] : [positions[i]!];
+    for (const p of owed) {
+      for (const [k, node] of probesFor(p).entries()) tree = probeOp(node, tree, `${i}-${p}-${k}`);
+    }
+  }
+
+  // ACS の「最終選択」。**行数が採れたときだけ**（無い数字を空欄で見せない）
+  if (rowsReturned !== undefined) {
+    tree = {
+      kind: "op",
+      id: `${blockNumber}-final`,
+      label: "最終選択",
+      op: "final-select",
+      rows: rowsReturned,
+      source: tree,
+      // **`3019` の一般の属性は使わない。** 記録種別ごとに列の意味が違い、
+      // `QQC21='A1'` を「結合方式」として出してしまう（実測）。意味の分かる 2 つだけ載せる
+      // **文レベルの情報をここへ集める。** ACS の「最終選択」も同じ中身。
+      // `3014` と `3019` は記録種別・ジョブ・時刻など同じ列を両方持つので、
+      // **同じラベルは先に来たものだけ残す**（並べると同じ行が 2 度出る）
+      attributes: dedupeByLabel([
+        { label: "この節の根拠", value: "記録 3014（クエリ情報）と 3019（文レベルの要約）", group: ATTR_GROUP_ESTIMATE },
+        { label: "返した行数", value: String(rowsReturned), group: ATTR_GROUP_ESTIMATE },
+        ...statementAttributes
+      ])
+    };
+  }
+  return tree;
+}
+
+/**
  * モニター記録を 1 つの実行計画に畳む。
  *
  * @param records 1 つの文（同じ `QQUCNT`）に属する記録。**呼び出し側で絞ってから渡す**
@@ -418,8 +772,16 @@ export function buildCreateIndexStatement(
  */
 export function buildQueryPlan(
   records: MonitorRecord[],
-  meta: { captured: PlanCapture; at: string; statement?: string; elapsedMs?: number }
+  meta: {
+    captured: PlanCapture;
+    at: string;
+    statement?: string;
+    elapsedMs?: number;
+    /** モニター列 → 論理名（ホストの catalog 由来）。無ければ列名のまま出る */
+    columnLabels?: ReadonlyMap<string, string>;
+  }
 ): QueryPlan {
+  const labels = meta.columnLabels ?? new Map<string, string>();
   // 文テキストは記録のどれかに入る。**一番長いものを採る**——
   // `3010`（ホスト変数）にも QQ1000 が入り、そちらは値の羅列で文ではない
   const statement =
@@ -434,9 +796,23 @@ export function buildQueryPlan(
   const unknown = new Set<number>();
   const advice: IndexAdvice[] = [];
 
+  /** `3019` が返した行数。ノードにはしないが「最終選択」の数字として使う */
+  let rowsReturned: number | undefined;
+  /**
+   * 文レベルの情報（`3019` と `3014`）。**ACS の「最終選択」はここが中身**——
+   * 最適化ゴール・QAQQINI・環境・クライアント情報まで、あの長い一覧の大半は `3014` にある。
+   */
+  const statementAttributes: PlanAttribute[] = [];
+
   for (const r of records) {
     // `QQQDTL=0` の `3019` は文レベルの要約。**ノードにしない**（design の実測）
-    if (r.QQRID === STATEMENT_SUMMARY_RECORD) continue;
+    if (r.QQRID === STATEMENT_SUMMARY_RECORD) {
+      rowsReturned = numOrUndefined(r.QQI7) ?? rowsReturned;
+      statementAttributes.push(...attributesOf(r, labels));
+      continue;
+    }
+    // `3014`（クエリ情報）は付帯情報のノードにもするが、**最終選択にも載せる**
+    if (r.QQRID === RECORD_QUERY_INFO) statementAttributes.push(...attributesOf(r, labels));
 
     const kind = kindOf(r.QQRID);
     // **未対応種別は、ノードにできたかに関わらず積む。**
@@ -457,7 +833,7 @@ export function buildQueryPlan(
       category: categoryOf(kind),
       recordType: r.QQRID,
       label: labelOf(kind, r),
-      attributes: attributesOf(r)
+      attributes: attributesOf(r, labels)
     };
     const table = tableOf(r);
     if (table) node.table = table;
@@ -471,6 +847,13 @@ export function buildQueryPlan(
     if (estimatedMs !== undefined) node.estimatedMs = estimatedMs;
     const reasonCode = trimOrUndefined(r.QQRCOD);
     if (reasonCode !== undefined) node.reasonCode = reasonCode;
+    // **`0` は「参加していない」**（`3007` が 0 を返すのを実測）。ダイヤルは 1 起点
+    const joinPosition = numOrUndefined(r.QQJNP);
+    if (joinPosition !== undefined && joinPosition >= 1) node.joinPosition = joinPosition;
+    const joinMethod = trimOrUndefined(r.QQC21);
+    if (joinMethod !== undefined) node.joinMethod = joinMethod;
+    const indexOnly = trimOrUndefined(r.QVC14);
+    if (indexOnly !== undefined) node.indexOnly = indexOnly === "Y";
     nodes.push(node);
     blockMap.set(block, nodes);
 
@@ -492,7 +875,18 @@ export function buildQueryPlan(
 
   const blocks: PlanBlock[] = [...blockMap.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([number, nodes]) => ({ number, nodes }));
+    .map(([number, nodes]) => {
+      const block: PlanBlock = { number, nodes };
+      // **図に出すステップだけで組む。** 付帯情報（`3014` 等）は木の節にしない
+      const joinTree = buildJoinTree(
+        nodes.filter((n) => n.category === "step"),
+        number,
+        rowsReturned,
+        statementAttributes
+      );
+      if (joinTree) block.joinTree = joinTree;
+      return block;
+    });
 
   const allNodes = blocks.flatMap((b) => b.nodes);
   const tables = [...new Set(allNodes.filter((n) => n.table).map((n) => `${n.table?.schema}.${n.table?.name}`))];
@@ -534,11 +928,37 @@ function normalizeStatement(s: string): string {
  * DB モニターは**ジョブ全体**を採るので、`STRDBMON` / `ENDDBMON` の `CALL` など
  * 対象外の記録が必ず混ざる。そこで 2 段で選ぶ:
  *
- * 1. `QQ1000` が対象の文と一致する記録の `QQUCNT`
+ * 1. `QQ1000` が対象の文と一致し、**かつ計画記録を持つ** `QQUCNT`
  * 2. 一致が無ければ、**計画記録（`QQQDTN` を持つもの）が最も多い `QQUCNT`**
  *
  * 2 段目が要るのは、**長い文で `QQ1000` が切り詰められる**ことがあるため
  * （列幅の上限に当たる）。前方一致も見て、それでも駄目なら件数で決める。
+ *
+ * ## 1 段目で「計画記録を持つ群」に限る理由（実機 7.3 で実測）
+ *
+ * 同じ文のテキストが **`QQUCNT` の違う 2 つの群**に現れる。`STRDBMON` 直後の
+ * `QQUCNT=0` は**モニター自身の目印（`3018`）と、これから実行する文の要約（`1000`）**
+ * を持つ受け皿で、**計画記録を 1 件も持たない**。実行の記録は別の `QQUCNT`
+ * （実測で 3・5・7…）に付く。
+ *
+ * ```
+ * #0 QQUCNT=0 QQRID=3018                     ← STRDBMON の目印
+ * #1 QQUCNT=0 QQRID=1000 QQ1000="SELECT …"   ← 文のテキストだけ（計画は無い）
+ * #2 QQUCNT=3 QQRID=3000 QQQDTN=1            ← ここからが本体
+ * …
+ * #8 QQUCNT=3 QQRID=1000 QQ1000="SELECT …"
+ * ```
+ *
+ * 群は**現れた順**に並ぶので `QQUCNT=0` が先に当たる。件数を見ずに「先に一致した群」を
+ * 返していたため、**リテラルを含まない文はことごとく空の計画になっていた**
+ * （`SELECT * FROM TESTLIB.M_MENUTR T1 INNER JOIN …` で再現）。
+ * リテラルを含む文が無事だったのは、ホストが `WHERE X = 'QSYS2'` を `?` に置き換えて
+ * 記録する（値は `3010` に入る）ので**テキストが一致せず 2 段目に落ちていた**だけ
+ * ——つまり偶然で、`QSYS2` を対象にした検証文ばかり試していて気づけなかった。
+ *
+ * 計画記録を持たない群を飛ばしても**他人の計画を掴むことにはならない**——
+ * `capturePlan` はモニターの窓の中で対象の文と `ENDDBMON` の `CALL` しか流さず、
+ * 計画記録が付くのは対象の文だけだから（`QQUCNT=0` の受け皿と 2 群だけになるのを実測）。
  *
  * **どれも選べなければ空配列を返す**——空の計画を「成功」として返さないため、
  * 呼び出し側がそうと分かるようにする。
@@ -548,23 +968,36 @@ export function pickStatementRecords(records: MonitorRecord[], sql: string): Mon
   if (groups.size === 0) return [];
   const want = normalizeStatement(sql);
 
-  // 1 段目: 完全一致 → 前方一致（切り詰め対策）
+  /** 計画記録（ブロック番号を持つもの）の数。**0 の群は答えになり得ない** */
+  const planCount = (list: MonitorRecord[]): number => list.filter((r) => r.QQQDTN !== null).length;
+
+  // 1 段目: 文が一致する群のうち**計画記録を持つもの**。完全一致 → 前方一致（切り詰め対策）。
+  // 同点なら先に現れたほうを採る（決定的にする）
   for (const exact of [true, false]) {
+    let best: MonitorRecord[] = [];
+    let bestCount = 0;
     for (const [, list] of groups) {
+      const count = planCount(list);
+      // **計画記録を持たない群は、文が一致しても選ばない**（下の注記）
+      if (count === 0 || count <= bestCount) continue;
       const hit = list.some((r) => {
         const text = normalizeStatement(r.QQ1000 ?? "");
         if (text === "") return false;
         return exact ? text === want : want.startsWith(text) && text.length >= 20;
       });
-      if (hit) return list;
+      if (hit) {
+        best = list;
+        bestCount = count;
+      }
     }
+    if (bestCount > 0) return best;
   }
 
   // 2 段目: 計画記録が最も多い群。**同数なら先に現れたほうを採る**（決定的にする）
   let best: MonitorRecord[] = [];
   let bestCount = 0;
   for (const [, list] of groups) {
-    const count = list.filter((r) => r.QQQDTN !== null).length;
+    const count = planCount(list);
     if (count > bestCount) {
       best = list;
       bestCount = count;

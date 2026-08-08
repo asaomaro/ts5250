@@ -29,7 +29,13 @@ function mockSequence(bodies: { status?: number; body: unknown }[]): { sent: str
   globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
     const target = String(url);
     if (target === "/api/host/sql" && init?.body) {
-      sent.push(JSON.parse(String(init.body)).sql as string);
+      const sql = JSON.parse(String(init.body)).sql as string;
+      // **補完の問い合わせは順番を食わない。** `FROM QTEMP.` まで打った時点で
+      // 列・表の候補を引きに行くので、素通しさせないと本題の応答がずれる
+      if (/QSYS2\.SYS(TABLES|COLUMNS)/u.test(sql)) {
+        return { ok: true, status: 200, json: async () => ({ rows: [] }) } as Response;
+      }
+      sent.push(sql);
       const entry = bodies[n++] ?? { body: {} };
       return {
         ok: entry.status === undefined,

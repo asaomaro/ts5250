@@ -80,7 +80,7 @@ describe("グラフ／ツリーの切替", () => {
 describe("ノードの詳細", () => {
   it("選ぶ前は案内を出す", () => {
     const w = mount(PlanViewer, { props: { plan: plan() } });
-    expect(w.text()).toContain("ノードを選ぶと詳細が出ます");
+    expect(w.text()).toContain("図の箱を選ぶと詳細が出ます");
   });
 
   it("ツリーでノードを選ぶと属性が出る", async () => {
@@ -186,5 +186,67 @@ describe("採取モードの表示", () => {
   it("プランキャッシュ由来と分かる", () => {
     const w = mount(PlanViewer, { props: { plan: plan({ captured: "plan-cache" }) } });
     expect(w.text()).toContain("プランキャッシュ");
+  });
+});
+
+/**
+ * **結合・テーブル・プローブ・最終選択も選べる**（ACS と同じ）。
+ * 記録そのものではない節にも「なぜこの節があるか」を出す——
+ * 出どころが分からないと「記録に無いものが出ている」としか読めない。
+ */
+describe("導いた節も選べる", () => {
+  function joinPlan() {
+    const d1 = { kind: "dial" as const, id: "1-d1", position: 1, nodes: [node({ id: "n1", joinPosition: 1 })] };
+    const d2 = { kind: "dial" as const, id: "1-d2", position: 2, nodes: [node({ id: "n2", joinPosition: 2 })] };
+    const join = {
+      kind: "join" as const,
+      id: "1-j1",
+      label: "ネステッドループ結合",
+      method: "NL",
+      left: d1,
+      right: d2,
+      attributes: [{ label: "結合方式", value: "NL" }]
+    };
+    const final = {
+      kind: "op" as const,
+      id: "1-final",
+      label: "最終選択",
+      op: "final-select" as const,
+      rows: 8,
+      source: join,
+      attributes: [
+        { label: "この節の根拠", value: "記録 3019（文レベルの要約）" },
+        { label: "返した行数", value: "8" }
+      ]
+    };
+    return plan({ blocks: [{ number: 1, nodes: [node({ id: "n1", joinPosition: 1 }), node({ id: "n2", joinPosition: 2 })], joinTree: final }] });
+  }
+
+  it("図の結合を押すと属性が出る", async () => {
+    const w = mount(PlanViewer, { props: { plan: joinPlan() } });
+    await w.find(".pg-join").trigger("click");
+    expect(w.text()).toContain("結合方式");
+    expect(w.text()).toContain("NL");
+  });
+
+  it("図の最終選択を押すと**導いた根拠**が出る（記録に無いものだと分かるように）", async () => {
+    const w = mount(PlanViewer, { props: { plan: joinPlan() } });
+    await w.find(".pg-op").trigger("click");
+    expect(w.text()).toContain("この節の根拠");
+    expect(w.text()).toContain("記録 3019");
+    expect(w.text()).toContain("返した行数");
+  });
+
+  it("選んだものの名前を詳細の頭に出す（ツリーから選んでも何を見ているか分かる）", async () => {
+    const w = mount(PlanViewer, { props: { plan: joinPlan() } });
+    await w.find(".pg-join").trigger("click");
+    expect(w.find(".pv-selected-label").text()).toBe("ネステッドループ結合");
+  });
+
+  it("ツリー表示でも背骨を選べる", async () => {
+    const w = mount(PlanViewer, { props: { plan: joinPlan() } });
+    await w.findAll("button").find((b) => b.text() === "ツリー")!.trigger("click");
+    await w.find(".pv-spine-btn").trigger("click");
+    expect(w.text()).toContain("結合方式");
   });
 });

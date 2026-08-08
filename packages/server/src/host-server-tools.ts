@@ -25,6 +25,7 @@ import {
   listPlansFromCache,
   type ProgramParameter,
   type QueryPlan,
+  type PlanTreeNode,
   toProgramParameters,
   fromProgramOutputs,
   type ProgramArg,
@@ -1061,6 +1062,45 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
    * ——1 ノードあたり最大 10 項目あり、既定で付けると文脈を食い潰す。
    */
   const MAX_PLAN_NODES = 50;
+  /**
+   * 結合の順を平らな配列にする。**画面と同じ情報を MCP にも返す**
+   * （図でしか分からない、を作らない）。左深なので「ここまでのダイヤル」＋「足すダイヤル」で表せる。
+   */
+  const joinStepsOf = (plan: QueryPlan) => {
+    const out: {
+      block: number;
+      step: "join" | "table-probe" | "final-select";
+      label: string;
+      joined?: number[];
+      with?: number;
+      rows?: number;
+    }[] = [];
+    for (const b of plan.blocks) {
+      // 左深なので根から左（＝下から上）へ降りて、集めた順をひっくり返す
+      const spine: PlanTreeNode[] = [];
+      let cur = b.joinTree;
+      while (cur && cur.kind !== "dial") {
+        spine.unshift(cur);
+        cur = cur.kind === "join" ? cur.left : cur.source;
+      }
+      const acc: number[] = cur?.kind === "dial" ? [cur.position] : [];
+      for (const item of spine) {
+        if (item.kind === "join") {
+          if (item.right.kind !== "dial") break;
+          out.push({ block: b.number, step: "join", label: item.label, joined: [...acc], with: item.right.position });
+          acc.push(item.right.position);
+        } else if (item.kind === "op") {
+          out.push({
+            block: b.number,
+            step: item.op,
+            label: item.label,
+            ...(item.rows !== undefined ? { rows: item.rows } : {})
+          });
+        }
+      }
+    }
+    return out;
+  };
   const toPlanJson = (plan: QueryPlan, detail: boolean) => {
     const flat = plan.blocks.flatMap((b) => b.nodes.map((n) => ({ block: b.number, node: n })));
     const shown = flat.slice(0, MAX_PLAN_NODES);
@@ -1081,7 +1121,12 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         ...(node.estimatedRows !== undefined ? { estimatedRows: node.estimatedRows } : {}),
         ...(node.estimatedMs !== undefined ? { estimatedMs: node.estimatedMs } : {}),
         ...(node.reasonCode ? { reasonCode: node.reasonCode } : {}),
-        ...(detail ? { attributes: node.attributes } : {})
+        // 結合の位置（ダイヤル）。**どの表がどの順で重なるか**はこれと `joins` で分かる
+        ...(node.joinPosition !== undefined ? { joinPosition: node.joinPosition } : {}),
+        // **列名のままの属性は返さない。** 1 ノードで 90 項目を超え、
+        // 意味を確かめていない列名（`QQI9=183`）は読む側の役に立たないまま文脈を食う。
+        // 画面では出している（人は ACS と突き合わせられる）
+        ...(detail ? { attributes: node.attributes.filter((a) => !a.raw) } : {})
       })),
       nodeCount: flat.length,
       truncated: flat.length > shown.length,
@@ -1091,6 +1136,13 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         createStatement: a.createStatement,
         ...(a.totalRows !== undefined ? { totalRows: a.totalRows } : {})
       })),
+      /**
+       * 結合とその後の処理を上から順に並べたもの（`QQJNP` のダイヤル順に左深）。
+       * `table-probe`（索引だけでは足りず表から取り直す）と `final-select`（返した行数）を含む。
+       * **結合していない計画では空**。
+       * ⚠ **内部/外部は載せない**——`QQC22` は `LEFT OUTER JOIN` でも `IN` を返す（実測）。
+       */
+      joins: joinStepsOf(plan),
       /** **未対応の記録種別を黙って捨てない**（版数差がここに出る。7.5 の 3015 等） */
       unknownRecordTypes: plan.unknownRecordTypes
     };
@@ -1131,6 +1183,8 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         nodeCount: z.number(),
         truncated: z.boolean(),
         advice: z.array(z.record(z.string(), z.unknown())),
+        // **宣言漏れは呼び出しごと落ちる**（上の注記）。結合の順もここに足す
+        joins: z.array(z.record(z.string(), z.unknown())),
         unknownRecordTypes: z.array(z.number()),
         warnings: z.array(z.string()).optional()
       }

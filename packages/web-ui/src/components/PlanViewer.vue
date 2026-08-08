@@ -2,11 +2,12 @@
 /**
  * 実行計画のビューア。**グラフ／ツリーを切り替えて見る**。
  *
- * ## 階層は 3 層で、演算子木ではない
+ * ## 結合しているときだけ木になる
  *
- * 文 → クエリブロック（`QQQDTN`）→ ノード（`design.md` A1）。
- * DB モニターの記録に親子リンクは無いので、**推定で木を組まない**。
- * ツリー表示もこの 3 層をそのまま出す。
+ * 文 → クエリブロック（`QQQDTN`）→ ノード、が土台（`design.md` A1）。
+ * そのうえで**結合の順位は `QQJNP`（ダイヤル）が持っている**ので、
+ * 結合のある計画は「ダイヤル → 結合」の木として出す（A1 の訂正）。
+ * 結合していない計画は今までどおり並べるだけ——**無い階層をでっち上げない**。
  *
  * ## 知らない記録種別を隠さない
  *
@@ -17,7 +18,8 @@
  */
 import { computed, ref, watch } from "vue";
 import PlanGraph from "./PlanGraph.vue";
-import type { IndexAdvice, PlanNode, QueryPlan } from "../planApi.js";
+import type { IndexAdvice, PlanAttribute, PlanBlock, PlanNode, QueryPlan } from "../planApi.js";
+import { flattenJoinTree, type PlanSelection } from "../planLayout.js";
 import { diffPlans } from "../planStore.js";
 import {
   MSG_PLAN_CREATE_INDEX_CONFIRM,
@@ -34,7 +36,12 @@ const props = defineProps<{
 
 type ViewMode = "graph" | "tree";
 const view = ref<ViewMode>("graph");
-const selected = ref<PlanNode | undefined>();
+/**
+ * 選択中のもの。**記録のノードとは限らない**——結合・テーブル・プローブ・最終選択も選べる
+ * （ACS と同じ）。共通の形（`id` / `label` / `attributes`）だけを持つので、
+ * 詳細パネルは何を選んだかで分岐しなくてよい。`PlanNode` は構造的にこれを満たす。
+ */
+const selected = ref<PlanSelection | undefined>();
 const creating = ref("");
 const createError = ref("");
 
@@ -47,6 +54,76 @@ watch(
   }
 );
 
+/**
+ * ツリー表示の並び。**図（`PlanGraph`）と同じ開き方**をするため
+ * `flattenJoinTree` を共有する（2 か所で開くと図と一覧で順序がずれる）。
+ *
+ * 結合が無いブロックは見出しの無い 1 群——今までの見え方を変えない。
+ */
+interface TreeGroup {
+  key: string;
+  label: string;
+  nodes: PlanNode[];
+}
+
+function groupsOf(block: PlanBlock): TreeGroup[] {
+  const steps = block.nodes.filter((n) => n.category === "step");
+  const flat = block.joinTree ? flattenJoinTree(block.joinTree) : undefined;
+  if (!flat) return [{ key: `b${block.number}`, label: "", nodes: steps }];
+  const out: TreeGroup[] = flat.dials.map((d) => ({
+    key: d.id,
+    label: `ダイヤル ${d.position}`,
+    nodes: d.nodes
+  }));
+  // **ダイヤルに属さないステップも必ず出す**（索引の助言など。落とすと図より情報が減る）
+  const others = steps.filter((n) => n.joinPosition === undefined);
+  if (others.length > 0) out.push({ key: `b${block.number}-others`, label: "ダイヤルに属さない", nodes: others });
+  return out;
+}
+
+/**
+ * 背骨（結合とその後の処理）を上から順に文にする。
+ * **図と同じ並び**になるよう `flattenJoinTree` を共有する。
+ */
+function spineOf(block: PlanBlock): { key: string; text: string; item: PlanSelection }[] {
+  const flat = block.joinTree ? flattenJoinTree(block.joinTree) : undefined;
+  if (!flat) return [];
+  const joined: number[] = [];
+  return flat.spine.map((item) => {
+    const sel: PlanSelection = { id: item.id, label: item.label, attributes: item.attributes };
+    if (item.kind === "join") {
+      const before = joined.length > 0 ? joined.join("・") : String(flat.dials[0]?.position ?? 1);
+      if (joined.length === 0) joined.push(flat.dials[0]?.position ?? 1);
+      const rightPos = flat.dials[item.dialIndex]?.position;
+      joined.push(rightPos ?? item.dialIndex + 1);
+      return { key: item.id, text: `ダイヤル ${before} と ${rightPos} を ${item.label}`, item: sel };
+    }
+    return {
+      key: item.id,
+      text: item.rows !== undefined ? `${item.label}（${item.rows.toLocaleString()} 行）` : item.label,
+      item: sel
+    };
+  });
+}
+
+/**
+ * 詳細を節ごとに束ねる。ACS の詳細ダイアログと同じ見え方にするため。
+ *
+ * **節の並びは属性が現れた順**——`plan-model.ts` が意味の分かるものから並べているので、
+ * ここで並べ替えると「確かめた項目が先」という並びが崩れる。
+ * 節名が無い項目は先頭の束に入れる（節を持たない古い計画 JSON を読んでも壊れない）。
+ */
+const detailGroups = computed<{ name: string; raw: boolean; items: PlanAttribute[] }[]>(() => {
+  const out: { name: string; raw: boolean; items: PlanAttribute[] }[] = [];
+  for (const a of selected.value?.attributes ?? []) {
+    const name = a.group ?? "";
+    const found = out.find((g) => g.name === name);
+    if (found) found.items.push(a);
+    else out.push({ name, raw: a.raw === true, items: [a] });
+  }
+  return out;
+});
+
 const allNodes = computed(() => props.plan.blocks.flatMap((b) => b.nodes));
 /**
  * **付帯情報は図に出さない。** `3006`（アクセスプランの再作成）や `3014`（クエリ情報）は
@@ -55,8 +132,8 @@ const allNodes = computed(() => props.plan.blocks.flatMap((b) => b.nodes));
 const infoNodes = computed(() => allNodes.value.filter((n) => n.category === "info"));
 const diff = computed(() => (props.compareWith ? diffPlans(props.plan, props.compareWith) : undefined));
 
-function select(node: PlanNode): void {
-  selected.value = node;
+function select(item: PlanSelection): void {
+  selected.value = item;
 }
 
 async function createIndex(advice: IndexAdvice): Promise<void> {
@@ -127,16 +204,34 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
           <li v-for="block in plan.blocks" :key="block.number">
             <span class="pv-block">クエリブロック {{ block.number }}</span>
             <ul>
-              <li v-for="node in block.nodes.filter((n) => n.category === 'step')" :key="node.id">
+              <li v-for="g in groupsOf(block)" :key="g.key">
+                <!-- 結合が無いブロックでは見出しを出さない（今までの見え方を変えない） -->
+                <span v-if="g.label" class="pv-dial">{{ g.label }}</span>
+                <ul :class="{ 'pv-plain': !g.label }">
+                  <li v-for="node in g.nodes" :key="node.id">
+                    <button
+                      type="button"
+                      class="pv-tree-node"
+                      :class="[`pn-${node.kind}`, { on: node.id === selected?.id }]"
+                      @click="select(node)"
+                    >
+                      {{ node.label }}
+                      <small v-if="node.estimatedRows !== undefined">推定 {{ node.estimatedRows.toLocaleString() }} 行</small>
+                      <small v-if="node.reasonCode">理由 {{ node.reasonCode }}</small>
+                    </button>
+                  </li>
+                </ul>
+              </li>
+              <!-- 結合の順。**ダイヤルの下**に置いて「重ねていく」順に読ませる。
+                   図と同じく**選んで詳細が見られる** -->
+              <li v-for="j in spineOf(block)" :key="j.key" class="pv-join-step">
                 <button
                   type="button"
-                  class="pv-tree-node"
-                  :class="[`pn-${node.kind}`, { on: node.id === selected?.id }]"
-                  @click="select(node)"
+                  class="pv-spine-btn"
+                  :class="{ on: j.key === selected?.id }"
+                  @click="select(j.item)"
                 >
-                  {{ node.label }}
-                  <small v-if="node.estimatedRows !== undefined">推定 {{ node.estimatedRows.toLocaleString() }} 行</small>
-                  <small v-if="node.reasonCode">理由 {{ node.reasonCode }}</small>
+                  {{ j.text }}
                 </button>
               </li>
             </ul>
@@ -147,13 +242,47 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
       <aside class="pv-side">
         <section>
           <h3>ノードの詳細</h3>
-          <p v-if="!selected" class="pv-empty">ノードを選ぶと詳細が出ます</p>
-          <dl v-else class="pv-attrs">
-            <div v-for="a in selected.attributes" :key="a.label">
-              <dt>{{ a.label }}</dt>
-              <dd>{{ a.value }}</dd>
-            </div>
-          </dl>
+          <p v-if="!selected" class="pv-empty">図の箱を選ぶと詳細が出ます</p>
+          <template v-else>
+          <p class="pv-selected-label">{{ selected.label }}</p>
+          <!--
+            節ごとに区切る（ACS の詳細ダイアログと同じ）。
+            「モニターの記録（列名のまま）」に入っているものは**意味を確かめていない列**で、
+            名前を与えていないことが節の見出しで分かる
+          -->
+          <!--
+            **ここだけをスクロールさせる。** 「最終選択」は 160 項目を超える（ACS も同じ量）ので、
+            そのまま流すと図が画面外へ押し出される
+          -->
+          <div class="pv-attr-scroll">
+            <template v-for="g in detailGroups.filter((x) => !x.raw)" :key="g.name">
+              <h4 v-if="g.name" class="pv-attr-group">{{ g.name }}</h4>
+              <dl class="pv-attrs">
+                <div v-for="a in g.items" :key="a.label">
+                  <dt>{{ a.label }}</dt>
+                  <dd>{{ a.value }}</dd>
+                </div>
+              </dl>
+            </template>
+            <!--
+              **確かめた項目を先に、モニターの全列は畳んで後ろに置く**——
+              全部並べると 100 項目を超えて、読みたい数行が埋もれる
+            -->
+            <details v-for="g in detailGroups.filter((x) => x.raw)" :key="g.name" class="pv-attr-more">
+              <summary>{{ g.name }}（{{ g.items.length }} 件）</summary>
+              <dl class="pv-attrs">
+                <div v-for="a in g.items" :key="a.column ?? a.label">
+                  <!-- 論理名が取れた列は名前で出し、**列の ID も添える**（ACS と突き合わせるため） -->
+                  <dt>
+                    {{ a.label }}
+                    <small v-if="a.column && a.column !== a.label" class="pv-col-id">{{ a.column }}</small>
+                  </dt>
+                  <dd>{{ a.value }}</dd>
+                </div>
+              </dl>
+            </details>
+          </div>
+          </template>
         </section>
 
         <section v-if="infoNodes.length > 0">
@@ -206,10 +335,19 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
 </template>
 
 <style scoped>
+/*
+ * 見出しは動かさず、**図と詳細がそれぞれ自分でスクロールする**。
+ *
+ * 以前は外側（`SqlPane` の `.plan-view` / `PlanListPane` の `.pl-viewer`）が
+ * まとめてスクロールしていたため、(1) 図・詳細・ペイン全体で縦棒が 3 本出る、
+ * (2) 図の横棒が SVG の直後＝画面の途中に出て、その下が死んだ余白になる、
+ * という状態だった（利用者の指摘）。**高さを親から貰い切る**形に直してある。
+ */
 .plan-viewer {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
   min-height: 0;
 }
 .pv-head {
@@ -247,20 +385,27 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
 .pv-body {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  /* **伸ばす**（flex-start だと子が中身なりの高さになり、下に余白が残る） */
+  align-items: stretch;
+  flex: 1 1 auto;
   min-height: 0;
 }
+/* 図側。**ここが唯一のスクロール枠**——横棒が枠の下端に出る */
 .pv-main {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   overflow: auto;
 }
+/* 詳細側。**図とは別に縦スクロールする** */
 .pv-side {
   flex: 0 0 280px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   font-size: 12px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .pv-side h3 {
   margin: 0 0 4px;
@@ -295,6 +440,78 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
   list-style: none;
   padding-left: 14px;
   margin: 2px 0 8px;
+}
+.pv-dial {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* 見出しの無い群は入れ子のぶんの字下げを戻す（従来の見え方を保つ） */
+.pv-plain {
+  padding-left: 0;
+  margin-left: -14px;
+}
+.pv-join-step {
+  font-size: 12px;
+  padding: 0 0 0 6px;
+  border-left: 2px solid var(--accent);
+  margin-top: 4px;
+}
+.pv-spine-btn {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.pv-spine-btn:hover {
+  background: var(--accent-soft);
+}
+.pv-spine-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+/* 何を選んでいるかを詳細の頭に出す。図の外（ツリー表示）から選んだときに要る */
+.pv-selected-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* 節の見出し。**名前を与えた項目と生の列名を見分ける唯一の手がかり**なので薄くしすぎない */
+.pv-attr-group {
+  margin: 8px 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+.pv-attr-group:first-child {
+  margin-top: 0;
+}
+/* 詳細の中身。**ここではスクロールさせない**——`.pv-side` が枠ごとスクロールするので、
+   入れ子にすると縦棒が 2 本並ぶ（以前は親の高さが決まらず 55vh で頭打ちにしていた） */
+/* モニターの全列。**既定は畳む**——読みたい数行が 100 項目に埋もれないように */
+.pv-attr-more {
+  margin-top: 8px;
+}
+.pv-attr-more summary {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+/* 列の ID。論理名の脇に小さく添える（ACS や IBM の資料と突き合わせるため） */
+.pv-col-id {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-left: 4px;
 }
 .pv-block {
   font-size: 11px;

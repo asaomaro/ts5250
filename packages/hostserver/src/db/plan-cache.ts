@@ -34,6 +34,7 @@ import type { DbConnection } from "./db-connection.js";
 import { executeStatement } from "./execute.js";
 import { SqlError } from "./query.js";
 import { readMonitorRecords, monitorTableName } from "./plan-capture.js";
+import { monitorColumnLabels } from "./plan-column-text.js";
 import { buildQueryPlan, groupByStatement, type MonitorRecord, type QueryPlan } from "./plan-model.js";
 
 const log = childLog({ component: "hostserver-plan-cache" });
@@ -156,5 +157,7 @@ export async function planFromCache(
       "その計画は見つかりませんでした（プランキャッシュの内容が変わった可能性があります）"
     );
   }
-  return buildQueryPlan(group, { captured: "plan-cache", at });
+  // 採取と同じく列の論理名を添える（一覧から開いた計画でも見え方を揃える）
+  const columnLabels = await monitorColumnLabels(conn);
+  return buildQueryPlan(group, { captured: "plan-cache", at, columnLabels });
 }

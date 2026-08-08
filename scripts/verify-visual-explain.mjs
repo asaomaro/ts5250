@@ -52,6 +52,27 @@ function showPlan(plan) {
 
 const SQL = "SELECT COUNT(*) AS N FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = 'QSYS2'";
 
+/**
+ * **リテラルを含まない文**も必ず試す。
+ *
+ * `WHERE X = 'QSYS2'` のような文はホストが値を `?` に置き換えて記録する（値は `3010` に入る）ので、
+ * モニターの `QQ1000` が投げた文と**一致しない**。上の `SQL` はその形なので、
+ * 「文が一致した群を選ぶ」経路が壊れていても件数で選ぶ 2 段目に落ちて通ってしまう。
+ * リテラルの無い文は逐語で記録されるため、**選び方の誤りがここでしか出ない**
+ * （実際、`STRDBMON` 直後の `QQUCNT=0`（計画記録を持たない受け皿）を先に掴んでいて、
+ * この形の文がことごとく空の計画になっていた。利用者の報告で判明）。
+ */
+const SQL_NO_LITERAL = "SELECT TABLE_NAME, TABLE_SCHEMA FROM QSYS2.SYSTABLES FETCH FIRST 5 ROWS ONLY";
+
+/**
+ * **結合する文**。`QQJNP`（ダイヤル）から左深の木が組めることを実機で押さえる
+ * （`design.md` A1 の訂正）。カタログ表どうしなら特別な権限もデータも要らない。
+ */
+const SQL_JOIN =
+  "SELECT T.TABLE_NAME, C.COLUMN_NAME FROM QSYS2.SYSTABLES T " +
+  "INNER JOIN QSYS2.SYSCOLUMNS C ON C.TABLE_NAME = T.TABLE_NAME AND C.TABLE_SCHEMA = T.TABLE_SCHEMA " +
+  "FETCH FIRST 5 ROWS ONLY";
+
 async function main() {
   line(`### ${which} host=${cfg.host}`);
   const conn = await DbConnection.connect(cfg);
@@ -68,6 +89,61 @@ async function main() {
       showPlan(r.plan);
       if (r.rows !== undefined) throw new Error("no-rows なのに行が返っている");
       return "行なし（期待どおり）";
+    });
+
+    await step("**リテラルを含まない文**でも計画が採れる（QQ1000 が逐語で記録される形）", async () => {
+      const r = await capturePlan(conn, SQL_NO_LITERAL, { mode: "run", at: new Date().toISOString() });
+      showPlan(r.plan);
+      if (r.plan.summary.nodeCount === 0) throw new Error("ノードが 0 件（群の選び方が壊れている）");
+      return `ノード ${r.plan.summary.nodeCount} 件`;
+    });
+
+    await step("**結合は木になる**（`QQJNP` のダイヤル順に左深）", async () => {
+      // ODP 再利用を避けるため、結合の検証は毎回新しい接続で採る
+      const fresh = await DbConnection.connect(cfg);
+      try {
+        const r = await capturePlan(fresh, SQL_JOIN, { mode: "run", at: new Date().toISOString() });
+        const tree = r.plan.blocks.find((b) => b.joinTree)?.joinTree;
+        if (!tree) throw new Error("結合の木が組まれていない");
+        // 根は「最終選択」などの単項の節でありうるので、まず素通しして結合まで降りる
+        const dials = [];
+        let label = "";
+        let cur = tree;
+        while (cur.kind !== "dial") {
+          if (cur.kind === "op") { cur = cur.source; continue; }
+          dials.unshift(cur.right);
+          label = cur.label;
+          cur = cur.left;
+        }
+        dials.unshift(cur);
+        if (label === "") throw new Error("結合の節が無い");
+        line(`  ${dials.map((d) => `ダイヤル${d.position}: ${d.nodes.map((n) => n.label).join("・")}`).join(" / ")}`);
+        line(`  結合: ${label}`);
+        if (dials.length < 2) throw new Error("ダイヤルが 2 つ未満");
+        return `ダイヤル ${dials.length} / ${label}`;
+      } finally {
+        fresh.close();
+      }
+    });
+
+    await step("**最終選択とテーブル・プローブ**が木に載る（ACS と同じ数のオブジェクト）", async () => {
+      const fresh = await DbConnection.connect(cfg);
+      try {
+        const r = await capturePlan(fresh, SQL_JOIN, { mode: "run", at: new Date().toISOString() });
+        const root = r.plan.blocks.find((b) => b.joinTree)?.joinTree;
+        // 根から降りて単項の節を数える
+        const ops = [];
+        let cur = root;
+        while (cur && cur.kind !== "dial") {
+          if (cur.kind === "op") ops.push(`${cur.op}${cur.rows !== undefined ? `(${cur.rows})` : ""}`);
+          cur = cur.kind === "join" ? cur.left : cur.source;
+        }
+        line(`  導いた節: ${ops.join(" / ") || "なし"}`);
+        if (!ops.some((o) => o.startsWith("final-select"))) throw new Error("最終選択が無い（3019 の QQI7 を拾えていない）");
+        return ops.join(" / ");
+      } finally {
+        fresh.close();
+      }
     });
 
     await step("no-rows は非クエリ文を拒む", async () => {

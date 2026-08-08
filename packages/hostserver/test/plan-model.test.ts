@@ -31,6 +31,12 @@ const rec = (over: Partial<MonitorRecord> & { QQRID: number }): MonitorRecord =>
   QQIDXD: null,
   QQRCOD: null,
   QQJOB: null,
+  // 既定は「結合していない」。木のテストだけが明示的に入れる
+  QQJNP: null,
+  QQC21: null,
+  QVC14: null,
+  QQILNM: null,
+  QQI7: null,
   ...over
 });
 
@@ -120,9 +126,50 @@ describe("記録種別の写像", () => {
   it("other でも値の入った列は属性に残る（情報を落とさない）", () => {
     const plan = buildQueryPlan([rec({ QQRID: 5002, QQRCOD: "X1", QQTOTR: 7 })], META);
     const attrs = plan.blocks[0]?.nodes[0]?.attributes ?? [];
-    expect(attrs).toContainEqual({ label: "記録種別", value: "5002" });
-    expect(attrs).toContainEqual({ label: "理由コード", value: "X1" });
-    expect(attrs).toContainEqual({ label: "総行数", value: "7" });
+    // 節（`group`）が付くので、ラベルと値だけを見る
+    const pairs = attrs.map((a) => `${a.label}=${a.value}`);
+    expect(pairs).toContain("記録種別=5002");
+    expect(pairs).toContain("理由コード=X1");
+    expect(pairs).toContain("総行数=7");
+  });
+
+  /**
+   * ACS の詳細ダイアログは 40〜60 項目を出す。その大半は記録種別ごとに意味が変わる列で、
+   * ホストの catalog にも説明が無い（実測）。**名前は与えないが、値は全部出す**——
+   * 捨てると ACS と突き合わせられなくなる。
+   */
+  it("名前を与えていない列も**列名のまま**属性に出す（ACS と突き合わせられるように）", () => {
+    const plan = buildQueryPlan(
+      [rec({ QQRID: 3000, QVQTBL: "T", raw: { QQI3: 344, QQF1: 2676, QVBNDY: "C" } })],
+      META
+    );
+    const attrs = plan.blocks[0]?.nodes[0]?.attributes ?? [];
+    // `3000` の `QQI3` は確かめた列なので名前が付く（ACS「テーブル・サイズ」）
+    expect(attrs).toContainEqual({
+      label: "テーブル・サイズ(バイト)", value: "344", group: "表・索引", column: "QQI3"
+    });
+    // 確かめていない列は列名のまま、別の節へ。**列の ID は必ず残す**（ACS と突き合わせる）
+    expect(attrs).toContainEqual({
+      label: "QQF1", value: "2676", group: "モニターの全列", raw: true, column: "QQF1"
+    });
+    expect(attrs).toContainEqual({
+      label: "QVBNDY", value: "C", group: "モニターの全列", raw: true, column: "QVBNDY"
+    });
+    // **二重に出さない**（名前を付けた列を生の側にも出さない）
+    expect(attrs.filter((a) => a.value === "344")).toHaveLength(1);
+  });
+
+  it("**同じ列でも記録種別が違えば名前を変える**（`QQI5` は 3001 と 3014 で意味が違う）", () => {
+    const asIndex = buildQueryPlan([rec({ QQRID: 3001, raw: { QQI5: 213 } })], META);
+    const asInfo = buildQueryPlan([rec({ QQRID: 3014, raw: { QQI5: 9 } })], META);
+    // 3001 の QQI5 は名前を与えていない（値の一致が曖昧だった）ので列名のまま
+    expect(asIndex.blocks[0]?.nodes[0]?.attributes).toContainEqual({
+      label: "QQI5", value: "213", group: "モニターの全列", raw: true, column: "QQI5"
+    });
+    // 3014 の QQI5 は ACS の「最適化時間」と一意に一致した
+    expect(asInfo.blocks[0]?.nodes[0]?.attributes).toContainEqual({
+      label: "最適化時間(ミリ秒)", value: "9", group: "見積もり", column: "QQI5"
+    });
   });
 });
 
@@ -340,5 +387,224 @@ describe("読み出す列", () => {
   it("MONITOR_COLUMNS は MonitorRecord のキーと一致する（SELECT * を使わないための単一の真実）", () => {
     const keys = Object.keys(rec({ QQRID: 0 })).sort();
     expect([...MONITOR_COLUMNS].sort()).toEqual(keys);
+  });
+});
+
+/**
+ * 結合の木。**`QQJNP`（ダイヤル）1 列で決まる**——2 表で 1・2、3 表で 1・2・3 になるのを
+ * 実機 7.3 で実測した（`design.md` A1 の訂正）。
+ */
+describe("結合の木", () => {
+  const joined = (over: Partial<MonitorRecord> & { QQRID: number }) =>
+    rec({ QQC21: "NL", ...over });
+
+  it("2 つのダイヤルを左深に組む（ACS と同じ読み方になる）", () => {
+    const plan = buildQueryPlan(
+      [
+        joined({ QQRID: 3000, QQJNP: 1, QVQLIB: "TESTLIB", QVQTBL: "M_MENUTR" }),
+        joined({ QQRID: 3001, QQJNP: 2, QVQLIB: "TESTLIB", QVQTBL: "M_MENU" })
+      ],
+      META
+    );
+    const tree = plan.blocks[0]?.joinTree;
+    expect(tree?.kind).toBe("join");
+    if (tree?.kind !== "join") return;
+    expect(tree.left.kind).toBe("dial");
+    expect(tree.right.kind).toBe("dial");
+    if (tree.left.kind === "dial") expect(tree.left.position).toBe(1);
+    if (tree.right.kind === "dial") expect(tree.right.position).toBe(2);
+  });
+
+  it("3 つ以上は左深に重なる（((1 ⋈ 2) ⋈ 3)）", () => {
+    const plan = buildQueryPlan(
+      [
+        joined({ QQRID: 3000, QQJNP: 1 }),
+        joined({ QQRID: 3001, QQJNP: 2 }),
+        joined({ QQRID: 3001, QQJNP: 3 })
+      ],
+      META
+    );
+    const root = plan.blocks[0]?.joinTree;
+    expect(root?.kind).toBe("join");
+    if (root?.kind !== "join") return;
+    // 根の右は最後のダイヤル、左はさらに結合
+    if (root.right.kind === "dial") expect(root.right.position).toBe(3);
+    expect(root.left.kind).toBe("join");
+  });
+
+  it("**実測した `NL` にだけ名前を付ける**（知らないコードは名乗らせない）", () => {
+    const nl = buildQueryPlan(
+      [joined({ QQRID: 3000, QQJNP: 1 }), joined({ QQRID: 3001, QQJNP: 2 })],
+      META
+    ).blocks[0]?.joinTree;
+    expect(nl?.kind === "join" && nl.label).toBe("ネステッドループ結合");
+
+    const unknown = buildQueryPlan(
+      [rec({ QQRID: 3000, QQJNP: 1, QQC21: "XX" }), rec({ QQRID: 3001, QQJNP: 2, QQC21: "XX" })],
+      META
+    ).blocks[0]?.joinTree;
+    expect(unknown?.kind === "join" && unknown.label).toBe("結合（XX）");
+  });
+
+  it("ダイヤルが 1 つなら木にしない（単表の見え方を変えない）", () => {
+    const plan = buildQueryPlan([joined({ QQRID: 3000, QQJNP: 1 })], META);
+    expect(plan.blocks[0]?.joinTree).toBeUndefined();
+  });
+
+  it("結合していない計画には木が付かない", () => {
+    const plan = buildQueryPlan([rec({ QQRID: 3000 }), rec({ QQRID: 3001 })], META);
+    expect(plan.blocks[0]?.joinTree).toBeUndefined();
+  });
+
+  /** `3007`（オプティマイザの打ち切り）が `QQJNP=0` を返すのを実測している */
+  it("**`QQJNP=0` は「参加していない」**——ダイヤル 0 を作らない", () => {
+    const plan = buildQueryPlan(
+      [
+        joined({ QQRID: 3000, QQJNP: 1 }),
+        joined({ QQRID: 3001, QQJNP: 2 }),
+        joined({ QQRID: 3007, QQJNP: 0 })
+      ],
+      META
+    );
+    const tree = plan.blocks[0]?.joinTree;
+    expect(tree?.kind === "join" && tree.left.kind === "dial" && tree.left.position).toBe(1);
+    // 0 のノードはダイヤルに入らない（属性にも出さない）
+    const timeout = plan.blocks[0]?.nodes.find((n) => n.recordType === 3007);
+    expect(timeout?.joinPosition).toBeUndefined();
+    expect(timeout?.attributes.some((a) => a.label === "結合位置")).toBe(false);
+  });
+
+  it("同じダイヤルの記録はまとまる（副問合せが結合へ書き換わる形）", () => {
+    const plan = buildQueryPlan(
+      [
+        joined({ QQRID: 3000, QQJNP: 1 }),
+        joined({ QQRID: 3023, QQJNP: 1 }),
+        joined({ QQRID: 3001, QQJNP: 2 })
+      ],
+      META
+    );
+    const tree = plan.blocks[0]?.joinTree;
+    expect(tree?.kind === "join" && tree.left.kind === "dial" && tree.left.nodes).toHaveLength(2);
+  });
+
+  it("付帯情報は木の節にしない（`3014` などが枝に混ざらない）", () => {
+    const plan = buildQueryPlan(
+      [
+        joined({ QQRID: 3000, QQJNP: 1 }),
+        joined({ QQRID: 3001, QQJNP: 2 }),
+        joined({ QQRID: 3014, QQJNP: 1 })
+      ],
+      META
+    );
+    const tree = plan.blocks[0]?.joinTree;
+    expect(tree?.kind === "join" && tree.left.kind === "dial" && tree.left.nodes).toHaveLength(1);
+  });
+});
+
+/**
+ * ACS の Visual Explain には出ていて、記録には直接無いもの。
+ * どちらも**記録から導ける**ことを実機で確かめてある（`design.md` の 4.）。
+ */
+describe("導いた節（テーブル・プローブ／最終選択）", () => {
+  const dial = (over: Partial<MonitorRecord> & { QQRID: number }) => rec({ QQC21: "NL", ...over });
+
+  it("索引だけで足りないダイヤルの後ろにテーブル・プローブを挟む（`QVC14='N'`）", () => {
+    const plan = buildQueryPlan(
+      [
+        dial({ QQRID: 3000, QQJNP: 1, QVQLIB: "TESTLIB", QVQTBL: "M_MENUTR" }),
+        dial({ QQRID: 3001, QQJNP: 2, QVQLIB: "TESTLIB", QVQTBL: "M_MENU", QVC14: "N" })
+      ],
+      META
+    );
+    const root = plan.blocks[0]?.joinTree;
+    expect(root?.kind).toBe("op");
+    if (root?.kind !== "op") return;
+    expect(root.op).toBe("table-probe");
+    expect(root.label).toBe("テーブル・プローブ: M_MENU");
+    expect(root.source.kind).toBe("join");
+  });
+
+  it("**索引だけで足りるなら挟まない**（`QVC14='Y'`）", () => {
+    const plan = buildQueryPlan(
+      [
+        dial({ QQRID: 3000, QQJNP: 1 }),
+        dial({ QQRID: 3001, QQJNP: 2, QVQLIB: "TESTLIB", QVQTBL: "M_MENU", QVC14: "Y" })
+      ],
+      META
+    );
+    expect(plan.blocks[0]?.joinTree?.kind).toBe("join");
+  });
+
+  it("`3019` の QQI7 から最終選択を根に載せる（ACS の「最終選択」の数字）", () => {
+    const plan = buildQueryPlan(
+      [
+        dial({ QQRID: 3000, QQJNP: 1 }),
+        dial({ QQRID: 3001, QQJNP: 2 }),
+        rec({ QQRID: 3019, QQQDTN: 1, QQI7: 8 })
+      ],
+      META
+    );
+    const root = plan.blocks[0]?.joinTree;
+    expect(root?.kind === "op" && root.op).toBe("final-select");
+    expect(root?.kind === "op" && root.rows).toBe(8);
+    // 要約そのものはノードにしないまま（従来どおり）
+    expect(plan.blocks[0]?.nodes.some((n) => n.recordType === 3019)).toBe(false);
+  });
+
+  it("行数が採れなければ最終選択を出さない（無い数字を空欄で見せない）", () => {
+    const plan = buildQueryPlan([dial({ QQRID: 3000, QQJNP: 1 }), dial({ QQRID: 3001, QQJNP: 2 })], META);
+    expect(plan.blocks[0]?.joinTree?.kind).toBe("join");
+  });
+
+  it("索引名は `QQ1000` のアクセスパス名を使う（ACS と同じ名前になる）", () => {
+    const plan = buildQueryPlan(
+      [rec({ QQRID: 3001, QVQLIB: "TESTLIB", QVQTBL: "M_MENU", QVINAM: "M_MENU", QVILIB: "TESTLIB", QQILNM: "TESTLIB", QQ1000: "Q_TESTLIB_M_MENU_MENUCD_00001" })],
+      META
+    );
+    const node = plan.blocks[0]?.nodes[0];
+    expect(node?.index?.name).toBe("Q_TESTLIB_M_MENU_MENUCD_00001");
+    expect(node?.label).toBe("索引の使用: Q_TESTLIB_M_MENU_MENUCD_00001");
+  });
+
+  it("`QQ1000` が空なら `QVINAM` に落とす（QSYS2 の表で実測）", () => {
+    const plan = buildQueryPlan([rec({ QQRID: 3001, QVINAM: "QADBILLB", QVILIB: "QSYS" })], META);
+    expect(plan.blocks[0]?.nodes[0]?.index?.name).toBe("QADBILLB");
+  });
+});
+
+/**
+ * ホストの catalog から取れた論理名を見出しに使う。
+ * 取れない列（`QQI9` 等）は**列名のまま**——どこにも論理名が無いので推測しない。
+ */
+describe("列の論理名", () => {
+  const labels = new Map([
+    ["QQTFN", "照会されたテーブルの名前"],
+    ["QQF1", "処理時間"]
+  ]);
+
+  it("catalog の論理名を見出しにし、列の ID も残す", () => {
+    const plan = buildQueryPlan(
+      [rec({ QQRID: 3000, QVQTBL: "T", raw: { QQTFN: "M_MENUTR", QQI9: 183 } })],
+      { ...META, columnLabels: labels }
+    );
+    const attrs = plan.blocks[0]?.nodes[0]?.attributes ?? [];
+    expect(attrs).toContainEqual({
+      label: "照会されたテーブルの名前",
+      value: "M_MENUTR",
+      group: "モニターの全列",
+      raw: true,
+      column: "QQTFN"
+    });
+    // 論理名が無い列は列名のまま
+    expect(attrs).toContainEqual({
+      label: "QQI9", value: "183", group: "モニターの全列", raw: true, column: "QQI9"
+    });
+  });
+
+  it("論理名が無くても壊れない（引けなかったホストでも計画は出る）", () => {
+    const plan = buildQueryPlan([rec({ QQRID: 3000, QVQTBL: "T", raw: { QQTFN: "X" } })], META);
+    expect(plan.blocks[0]?.nodes[0]?.attributes).toContainEqual({
+      label: "QQTFN", value: "X", group: "モニターの全列", raw: true, column: "QQTFN"
+    });
   });
 });

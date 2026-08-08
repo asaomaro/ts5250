@@ -253,6 +253,47 @@ describe("対象の文を選ぶ", () => {
   it("記録が空なら空", () => {
     expect(pickStatementRecords([], "SELECT 1")).toEqual([]);
   });
+
+  /**
+   * 実機 7.3 の実測形。**同じ文のテキストが 2 つの群に現れる**——
+   * `STRDBMON` 直後の `QQUCNT=0` は目印（`3018`）と文の要約（`1000`）だけを持ち、
+   * 計画記録を 1 件も持たない。群は現れた順なので `QQUCNT=0` が先に当たる。
+   *
+   * 件数を見ずに「先に一致した群」を返していたため、**リテラルを含まない文は
+   * ことごとく空の計画になっていた**（利用者の報告で判明）。リテラルを含む文が
+   * 無事だったのは、ホストが値を `?` に置き換えて記録するのでテキストが一致せず、
+   * 2 段目（件数で選ぶ）に落ちていたという**偶然**による。
+   */
+  it("文が一致しても**計画記録を持たない群は選ばない**（STRDBMON 直後の QQUCNT=0）", () => {
+    const SQL = "SELECT * FROM TESTLIB.M_MENUTR T1 INNER JOIN TESTLIB.M_MENU T2 ON T2.MENUCD = T1.CMENUCD";
+    const picked = pickStatementRecords(
+      [
+        // 受け皿の群。**文のテキストは持つが計画記録（QQQDTN）は無い**
+        rec({ QQRID: 3018, QQUCNT: 0, QQQDTN: null }),
+        rec({ QQRID: 1000, QQUCNT: 0, QQQDTN: null, QQ1000: SQL }),
+        // 実行の群。こちらに計画が付く
+        rec({ QQRID: 3000, QQUCNT: 3, QQQDTN: 1 }),
+        rec({ QQRID: 3001, QQUCNT: 3, QQQDTN: 1 }),
+        rec({ QQRID: 1000, QQUCNT: 3, QQQDTN: null, QQ1000: SQL }),
+        rec({ QQRID: 1000, QQUCNT: 0, QQQDTN: null, QQ1000: "CALL QSYS2.QCMDEXC('ENDDBMON JOB(*)')" })
+      ],
+      SQL
+    );
+    expect(picked[0]?.QQUCNT).toBe(3);
+    expect(buildQueryPlan(picked, { captured: "run", at: AT }).summary.nodeCount).toBe(2);
+  });
+
+  it("前方一致（切り詰め）でも計画記録を持たない群は選ばない", () => {
+    const long = `SELECT ${"A".repeat(60)} FROM T`;
+    const picked = pickStatementRecords(
+      [
+        rec({ QQRID: 1000, QQUCNT: 0, QQQDTN: null, QQ1000: long.slice(0, 40) }),
+        rec({ QQRID: 3000, QQUCNT: 4, QQQDTN: 1, QQ1000: long.slice(0, 40) })
+      ],
+      long
+    );
+    expect(picked[0]?.QQUCNT).toBe(4);
+  });
 });
 
 describe("ODP 再利用で計画が採れないとき", () => {

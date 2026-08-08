@@ -40,6 +40,7 @@ import type { ColumnMeta, DbValue } from "./db-decode.js";
 import { executeStatement } from "./execute.js";
 import { openQuery, queryLimited, type LobOptions, type Row } from "./query.js";
 import { isNonQueryStatement } from "./statement-kind.js";
+import { monitorColumnLabels } from "./plan-column-text.js";
 import {
   buildQueryPlan,
   pickStatementRecords,
@@ -127,6 +128,17 @@ function asText(v: DbValue): string | null {
   return typeof v === "string" ? v : null;
 }
 
+/** 生の列として持つ値。数値と文字だけ（日付等は文字に落ちてくる） */
+function rawValue(v: DbValue): string | number | null {
+  if (typeof v === "number") return v;
+  if (typeof v === "bigint") return Number(v);
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t === "" ? null : t;
+  }
+  return null;
+}
+
 /** 読み出した行をモニター記録に写す。**`SELECT` した列だけを見る** */
 function toRecord(row: Row): MonitorRecord {
   return {
@@ -145,8 +157,63 @@ function toRecord(row: Row): MonitorRecord {
     QQIDXA: asText(row["QQIDXA"] ?? null),
     QQIDXD: asText(row["QQIDXD"] ?? null),
     QQRCOD: asText(row["QQRCOD"] ?? null),
-    QQJOB: asText(row["QQJOB"] ?? null)
+    QQJOB: asText(row["QQJOB"] ?? null),
+    QQJNP: asNumber(row["QQJNP"] ?? null),
+    QQC21: asText(row["QQC21"] ?? null),
+    QVC14: asText(row["QVC14"] ?? null),
+    QQILNM: asText(row["QQILNM"] ?? null),
+    QQI7: asNumber(row["QQI7"] ?? null),
+    // **値の入っている列だけ**を持つ。空欄まで運ぶと 282 列 × 記録数になる
+    raw: Object.fromEntries(
+      Object.entries(row)
+        .map(([k, v]) => [k, rawValue(v)] as const)
+        .filter((e): e is readonly [string, string | number] => e[1] !== null)
+    )
   };
+}
+
+/**
+ * 読み出す列を決める。
+ *
+ * **モニター表は 282 列**あり、そのうち 3 列が CCSID 65535 で読めない（`design.md` F8）。
+ * ACS の詳細ダイアログはこの中の 40〜60 項目を出しているので、
+ * **手で選んだ 21 列では同じ情報を出せない**。そこでモニター表の元になっている
+ * `QSYS/QAQQDBMN` の列一覧をホストから引いて、読める列を全部読む。
+ *
+ * **列名を焼き込まない**のは版数差があるため——7.5 に無い列を `SELECT` に並べると
+ * 採取ごと失敗する。引けなかったときは従来の固定列に落とす（**計画が採れなくなるより良い**）。
+ * 接続ごとに 1 回だけ引いて使い回す。
+ */
+const columnCache = new WeakMap<DbConnection, readonly string[]>();
+
+async function monitorColumns(conn: DbConnection): Promise<readonly string[]> {
+  const cached = columnCache.get(conn);
+  if (cached) return cached;
+  try {
+    const res = await queryLimited(
+      conn,
+      // **`CCSID <> 65535` だけでは数値列が落ちる**（数値列の CCSID は NULL で、
+      // `NULL <> 65535` は真にならない）。実際これで文字列の列しか拾えず、
+      // 「判断に使う列が欠けている」と見なして固定列へ落ちていた
+      "SELECT COLUMN_NAME FROM QSYS2.SYSCOLUMNS " +
+        "WHERE TABLE_SCHEMA = 'QSYS' AND TABLE_NAME = 'QAQQDBMN' " +
+        "AND (CCSID IS NULL OR CCSID <> 65535) " +
+        "ORDER BY ORDINAL_POSITION",
+      { limit: 400 }
+    );
+    const names = res.rows
+      .map((r) => (typeof r["COLUMN_NAME"] === "string" ? r["COLUMN_NAME"].trim() : ""))
+      .filter((n) => /^[A-Z0-9_]+$/u.test(n));
+    // **判断に使う列が欠けていたら使わない**（型付きの欄が空になって静かに壊れる）
+    const complete = MONITOR_COLUMNS.every((c) => names.includes(c));
+    const out = names.length > 0 && complete ? names : MONITOR_COLUMNS;
+    columnCache.set(conn, out);
+    return out;
+  } catch (e) {
+    log.debug(`monitor column discovery failed; falling back to the fixed list: ${String(e)}`);
+    columnCache.set(conn, MONITOR_COLUMNS);
+    return MONITOR_COLUMNS;
+  }
 }
 
 /**
@@ -157,7 +224,8 @@ const MAX_MONITOR_ROWS = 2000;
 
 /** モニター表を読む。**列を明示する**（CCSID 65535 の 3 列を避ける。research F8） */
 export async function readMonitorRecords(conn: DbConnection, table: string): Promise<MonitorRecord[]> {
-  const sql = `SELECT ${MONITOR_COLUMNS.join(", ")} FROM QTEMP.${table}`;
+  const columns = await monitorColumns(conn);
+  const sql = `SELECT ${columns.join(", ")} FROM QTEMP.${table}`;
   const result = await queryLimited(conn, sql, { limit: MAX_MONITOR_ROWS });
   return result.rows.map(toRecord);
 }
@@ -238,10 +306,13 @@ export async function capturePlan(
 
     const all = await readMonitorRecords(conn, table);
     const records = pickStatementRecords(all, sql);
+    // 列の論理名。**引けなくても計画は出す**（列名のまま出るだけ）
+    const columnLabels = await monitorColumnLabels(conn);
     const plan = buildQueryPlan(records, {
       captured: opts.mode,
       at: opts.at,
       statement: sql,
+      columnLabels,
       ...(opts.mode === "run" ? { elapsedMs } : {})
     });
 

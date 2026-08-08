@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { MSG_SYSTEM_GONE } from "../composables/opMessages.js";
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import LoadingBar from "./LoadingBar.vue";
 import PaneSplitter from "./PaneSplitter.vue";
 import { usePaneSplit } from "../composables/usePaneSplit.js";
@@ -19,6 +19,11 @@ import {
   MSG_PLAN_MODE_NO_ROWS_HINT
 } from "../composables/opMessages.js";
 import SqlLogPanel from "./SqlLogPanel.vue";
+import SqlCompletion from "./SqlCompletion.vue";
+import { toggleLineComment, indentLines, outdentLines } from "../sqlEdit.js";
+import { isTablePosition, qualifierAt, resolveQualifier, tableRefsOf } from "../sqlRefs.js";
+import { fetchColumns, fetchTables, type Candidate, type CandidateKind } from "../sqlColumns.js";
+import { caretPosition } from "../composables/caretPosition.js";
 import SqlResultTable from "./SqlResultTable.vue";
 import { appendSqlLog, type SqlLogEntry } from "../sqlLog.js";
 
@@ -137,11 +142,24 @@ const canRun = computed(
 
 // ---- 実行計画（Visual Explain 相当。`20260802-sql-visual-explain`） ----
 
-/** 採った計画。結果タブの隣の「計画」タブに出す */
+/**
+ * 採った計画。**結果タブと同じ帯の「実行計画」タブ**に出す。
+ *
+ * 以前は SQL 欄と結果表の**間**に挟んだパネルだったが、`.sql-pane` は縦積みで
+ * 掴める境界が「SQL 欄／結果欄」の 1 本しか無く、挟まれた段は伸び縮みさせられない。
+ * `max-height: 60vh` の内側でグラフがほとんど見えなかった（利用者の指摘）。
+ * タブにすれば結果表と**同じ領域**を丸ごと使うので、既存の境界ドラッグと
+ * 「最大化」がそのまま計画にも効く（新しい操作を覚えさせない）。
+ */
 const plan = ref<QueryPlan | undefined>();
 const planBusy = ref(false);
 const planError = ref("");
-const showPlan = ref(false);
+/** 計画タブが帯にあるか。**閉じるまで残す**——結果を見てから計画へ戻れるように */
+const planOpen = ref(false);
+/** 計画タブの ID。結果タブは `tab-N` なので衝突しない */
+const PLAN_TAB_ID = "plan";
+/** いま計画タブを見ているか。**結果側の描画はこれで抑える**（同じ領域を奪い合う） */
+const planActive = computed(() => planOpen.value && activeTabId.value === PLAN_TAB_ID);
 
 /**
  * `行を返さず計画` は SELECT 系でしか使えない（`capturePlan` が非クエリ文を拒む）が、
@@ -168,19 +186,33 @@ async function explain(mode: CaptureMode): Promise<void> {
   const target = statements[0]?.sql ?? sql.value;
   planBusy.value = true;
   planError.value = "";
+  // **押した先を先に見せる**。採取はモニターの起動ぶん数秒かかるので、後から開くと
+  // それまで結果表のままで「押しても何も起きない」ように見える
+  planOpen.value = true;
+  activeTabId.value = PLAN_TAB_ID;
   try {
     const res = await explainSql({ source: props.system, sql: target, mode, maxRows: pageSize.value });
     plan.value = res.plan;
-    showPlan.value = true;
     pushHistory(res.plan);
     // **警告を握り潰さない**（モニターが残った可能性など）
     if (res.warnings?.length) planError.value = res.warnings.join(" / ");
   } catch (e) {
     planError.value = e instanceof Error ? e.message : String(e);
-    showPlan.value = true;
   } finally {
     planBusy.value = false;
   }
+}
+
+/**
+ * 計画タブを閉じる。**採った計画も捨てる**（帯だけ残しても開き直せない）。
+ * 履歴（`planStore`）には積んであるので、見返したいときは実行計画ペインから開ける。
+ */
+function closePlan(): void {
+  planOpen.value = false;
+  plan.value = undefined;
+  planError.value = "";
+  // 見ていたタブが消えるので結果の先頭へ戻す（結果が無ければ空＝案内文に戻る）
+  if (activeTabId.value === PLAN_TAB_ID) activeTabId.value = tabs.value[0]?.id ?? "";
 }
 
 /**
@@ -315,6 +347,8 @@ async function execute(): Promise<void> {
   // 接続をサーバーがプールから拾えず、再実行のたびに 4〜6 秒かかる（実測で気づいた）
   await releaseResultSets();
   tabs.value = [];
+  // **計画タブは閉じない**が、焦点は結果へ戻す——前の計画を見たまま新しい結果が
+  // 隠れると「実行したのに変わらない」ように見える（最初の結果タブが選ばれる）
   activeTabId.value = "";
   executed.value = true;
 
@@ -470,12 +504,185 @@ async function loadMore(): Promise<void> {
 
 
 
-/** Ctrl+Enter で実行（textarea 内なので Enter は改行のまま残す） */
+// ---- SQL 欄のキー操作と列の補完 ----
+
+/**
+ * 入力欄の実体。**選択範囲を戻すのに要る**——`v-model` で書き換えると
+ * キャレットが末尾へ飛ぶので、更新後に自分で置き直す。
+ */
+const editor = ref<HTMLTextAreaElement | undefined>();
+
+/**
+ * 編集結果を流し込む。**`nextTick` を挟んでから選択を戻す**——
+ * `sql.value` を変えた時点ではまだ DOM に反映されておらず、先に位置を書いても消える。
+ */
+async function applyEdit(result: { text: string; start: number; end: number }): Promise<void> {
+  sql.value = result.text;
+  await nextTick();
+  const el = editor.value;
+  if (!el) return;
+  el.selectionStart = result.start;
+  el.selectionEnd = result.end;
+}
+
+/**
+ * 補完の候補。`.` を打つと出る。
+ *
+ * - `別名.` / `表名.` … その表の**列**
+ * - `ライブラリー.` … そのライブラリーの**表**
+ *
+ * **`textarea` のままにする**（CodeMirror 等は入れない。AGENTS.md のバンドル規律）。
+ * 候補は入力欄に重ねた別の箱で、キーはこちらで捌く——候補側にフォーカスを渡すと
+ * 日本語の変換中に確定してしまう。
+ */
+const completion = ref<
+  { items: Candidate[]; kind: CandidateKind; index: number; left: number; top: number } | undefined
+>();
+/** いま出ている候補が置き換える範囲（`.` の次〜キャレット） */
+let completionRange: { from: number; to: number } | undefined;
+/** 打鍵のたびに前の問い合わせが後から返って上書きしないための世代番号 */
+let completionSeq = 0;
+
+function closeCompletion(): void {
+  completion.value = undefined;
+  completionRange = undefined;
+  // **返ってきた結果を捨てる**（閉じたあとに前の問い合わせが開き直さないように）
+  completionSeq += 1;
+}
+
+/**
+ * キャレットの手前を見て候補を出す。**`.` の直後と、その後の打ち足しの両方**で走る。
+ *
+ * 表が解けない・列が引けないときは**黙って閉じる**——候補が出ないだけで、
+ * SQL を書く手は止めない。
+ */
+async function updateCompletion(): Promise<void> {
+  const el = editor.value;
+  if (!el || !props.system) return closeCompletion();
+  const caret = el.selectionEnd;
+  // 範囲選択中は出さない（選択を潰す操作になる）
+  if (el.selectionStart !== caret) return closeCompletion();
+  const q = qualifierAt(sql.value, caret);
+  if (!q) return closeCompletion();
+
+  /**
+   * 列か表かを決める。
+   *
+   * **表を書く位置（`FROM ライブラリー.`）は先に弾く**——`tableRefsOf` から見ると
+   * `FROM TESTLIB` は表 1 つに見えるので、素直に解くと「`TESTLIB` という表の列」を
+   * 引きに行って空振りする。それ以外は別名・表名で解き、解けなければ
+   * ライブラリーとみなす（`WHERE TESTLIB.` のような書き方も拾える）。
+   */
+  const ref = isTablePosition(sql.value, q.start)
+    ? undefined
+    : resolveQualifier(tableRefsOf(sql.value), q.qualifier);
+  const kind: CandidateKind = ref ? "column" : "table";
+
+  const seq = ++completionSeq;
+  const found = ref
+    ? await fetchColumns(props.system, ref)
+    : await fetchTables(props.system, q.qualifier);
+  // 打鍵が進んでいたら捨てる
+  if (seq !== completionSeq) return;
+  const prefix = q.prefix.toUpperCase();
+  const items = found.filter((c) => c.name.toUpperCase().startsWith(prefix)).slice(0, 50);
+  if (items.length === 0) return closeCompletion();
+
+  const at = caretPosition(el, q.from);
+  completionRange = { from: q.from, to: q.to };
+  completion.value = { items, kind, index: 0, left: at.left, top: at.top + at.height };
+}
+
+/** 候補を確定する。**`.` の後ろに打ちかけていた文字を置き換える** */
+async function pickCompletion(item: Candidate): Promise<void> {
+  const range = completionRange;
+  if (!range) return;
+  const text = sql.value.slice(0, range.from) + item.name + sql.value.slice(range.to);
+  const caret = range.from + item.name.length;
+  closeCompletion();
+  await applyEdit({ text, start: caret, end: caret });
+  editor.value?.focus();
+}
+
+function moveCompletion(delta: number): void {
+  const c = completion.value;
+  if (!c) return;
+  c.index = (c.index + delta + c.items.length) % c.items.length;
+}
+
+/**
+ * SQL 欄のキー操作。
+ *
+ * - Ctrl+Enter … 実行（`textarea` なので Enter は改行のまま残す）
+ * - Ctrl+/ … 選択行のコメントを切り替え
+ * - Tab / Shift+Tab … インデントの追加・削除
+ * - 候補が出ている間は ↑↓ / Enter / Tab / Esc が候補側の操作になる
+ *
+ * ⚠ **Tab を奪うとキーボードだけで欄から出られなくなる。** Esc で候補を閉じたうえで、
+ * **Esc の直後の Tab は素通しする**（`escaped`）ことで逃げ道を残す。
+ */
+let escaped = false;
+
 function onKeydown(e: KeyboardEvent): void {
+  const el = editor.value;
+  const c = completion.value;
+
+  if (c) {
+    if (e.key === "ArrowDown") return e.preventDefault(), moveCompletion(1);
+    if (e.key === "ArrowUp") return e.preventDefault(), moveCompletion(-1);
+    if (e.key === "Enter" || e.key === "Tab") {
+      // **変換中の Enter は取らない**（日本語入力の確定を横取りしない）
+      if (e.isComposing) return;
+      e.preventDefault();
+      void pickCompletion(c.items[c.index]!);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeCompletion();
+      return;
+    }
+  }
+
+  if (e.key === "Escape") {
+    // 次の Tab を素通しさせる（フォーカスの逃げ道）
+    escaped = true;
+    return;
+  }
+
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canRun.value) {
     e.preventDefault();
     void execute();
+    return;
   }
+
+  // `/` は配列によって `.` などになるが、`code` は物理キーなので両方見る
+  if ((e.ctrlKey || e.metaKey) && (e.key === "/" || e.code === "Slash") && el) {
+    e.preventDefault();
+    void applyEdit(toggleLineComment(sql.value, el.selectionStart, el.selectionEnd));
+    return;
+  }
+
+  if (e.key === "Tab" && el) {
+    if (escaped) {
+      // Esc の直後だけは素通し（欄から出る）
+      escaped = false;
+      return;
+    }
+    e.preventDefault();
+    const edit = e.shiftKey
+      ? outdentLines(sql.value, el.selectionStart, el.selectionEnd)
+      : indentLines(sql.value, el.selectionStart, el.selectionEnd);
+    void applyEdit(edit);
+    return;
+  }
+
+  escaped = false;
+}
+
+/** 打つたび・動くたびに候補を出し直す。**閉じる判断もここ**（`.` から離れたら消える） */
+function onEditorInput(): void {
+  void updateCompletion();
 }
 
 /**
@@ -502,6 +709,14 @@ interface QuerySnapshot {
   executed: boolean;
   error: string;
   sqlDetail: string;
+  /**
+   * 実行計画も**クエリごとに持つ**。1 本の ref を共有していると、クエリを切り替えても
+   * 前のクエリの計画がタブに残り、どの文の計画なのか分からなくなる
+   * （計画をタブにして結果と同じ帯へ並べたことで、この食い違いが目に見えるようになった）
+   */
+  plan: QueryPlan | undefined;
+  planError: string;
+  planOpen: boolean;
 }
 
 let querySeq = 0;
@@ -513,7 +728,10 @@ function blankQuery(): QuerySnapshot {
     activeTabId: "",
     executed: false,
     error: "",
-    sqlDetail: ""
+    sqlDetail: "",
+    plan: undefined,
+    planError: "",
+    planOpen: false
   };
 }
 
@@ -547,6 +765,9 @@ function captureActive(): void {
   q.executed = executed.value;
   q.error = error.value;
   q.sqlDetail = sqlDetail.value;
+  q.plan = plan.value;
+  q.planError = planError.value;
+  q.planOpen = planOpen.value;
 }
 
 function restore(q: QuerySnapshot): void {
@@ -556,6 +777,9 @@ function restore(q: QuerySnapshot): void {
   executed.value = q.executed;
   error.value = q.error;
   sqlDetail.value = q.sqlDetail;
+  plan.value = q.plan;
+  planError.value = q.planError;
+  planOpen.value = q.planOpen;
 }
 
 function selectQuery(id: number): void {
@@ -684,20 +908,40 @@ function download(): void {
       </button>
     </header>
 
-    <textarea
-      v-show="!split.maximized.value"
-      v-model="sql"
-      class="editor"
-      :style="{ height: `${split.topHeight.value}px` }"
-      spellcheck="false"
-      placeholder="SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 100 ROWS ONLY"
-      @keydown="onKeydown"
-    ></textarea>
+    <!-- 候補を重ねる基準。入力欄の左上を原点に置きたいので position: relative -->
+    <div v-show="!split.maximized.value" class="editor-wrap">
+      <textarea
+        ref="editor"
+        v-model="sql"
+        class="editor"
+        :style="{ height: `${split.topHeight.value}px` }"
+        spellcheck="false"
+        placeholder="SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 100 ROWS ONLY"
+        @keydown="onKeydown"
+        @input="onEditorInput"
+        @click="onEditorInput"
+        @blur="closeCompletion"
+      ></textarea>
+      <SqlCompletion
+        v-if="completion"
+        :items="completion.items"
+        :kind="completion.kind"
+        :index="completion.index"
+        :left="completion.left"
+        :top="completion.top"
+        @pick="pickCompletion"
+      />
+    </div>
     <p v-show="!split.maximized.value" class="hint">
       SELECT も更新（INSERT / UPDATE / DELETE / CREATE …）も実行できます（Ctrl+Enter で実行）。
       <strong>更新は取り消せません。</strong><strong>「;」で区切ると順に実行し、
       結果ごとにタブが出ます。</strong>下までスクロールするか End / PageDown で続きを読み足します
       （「1 度に取得」はその 1 回ぶんの件数）。
+      <br />
+      Ctrl+/ でコメントの切り替え、Tab / Shift+Tab で字下げ。
+      <strong>表名や別名に「.」を打つと列の候補、ライブラリー名に「.」を打つと表の候補が出ます</strong>
+      （↑↓ で選び、Enter か Tab で確定）。
+      Tab で欄から出たいときは Esc を押してから Tab を押します。
     </p>
 
     <!-- SQL 欄と結果欄の境界。この罫線を掴んで高さを変える -->
@@ -715,10 +959,11 @@ function download(): void {
     </p>
 
     <!--
-      結果タブ。**2 つ以上のときだけ出す**——単一文の見え方を変えないため
-      （1 つのときにタブ帯を出すと、今までの画面に無かった段が増える）
+      結果と実行計画のタブ帯。**2 つ以上のときだけ出す**——単一文の見え方を変えないため
+      （1 つのときにタブ帯を出すと、今までの画面に無かった段が増える）。
+      計画タブがあるときは 1 本でも出す——切り替えと「閉じる」の手立てがここにしか無い
     -->
-    <div v-if="tabs.length > 1" class="rtabs" role="tablist" aria-label="結果">
+    <div v-if="tabs.length > 1 || planOpen" class="rtabs" role="tablist" aria-label="結果">
       <button
         v-for="t in tabs"
         :key="t.id"
@@ -735,23 +980,45 @@ function download(): void {
         <span v-if="t.execute" class="rtab-count">{{ t.execute.hasRowCount ? t.execute.updateCount : "済" }}</span>
         <span v-else class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
       </button>
-    </div>
 
-    <!--
-      実行計画。**結果表とは別のパネル**に出す（表の代わりに差し替えると、
-      計画を見たあとに結果へ戻れなくなる）。閉じるまで出したままにする
-    -->
-    <section v-if="showPlan" class="plan-panel">
-      <header class="plan-panel-head">
-        <strong>実行計画</strong>
-        <button class="link" @click="showPlan = false">閉じる</button>
-      </header>
-      <p v-if="planError" class="plan-error">{{ planError }}</p>
-      <PlanViewer v-if="plan" :plan="plan" :on-create-index="createIndex" />
-    </section>
+      <!--
+        実行計画のタブ。**結果を置き換えるのではなく並べる**ので、計画を見たあとに
+        結果へ戻れる（別パネルにしていた理由はタブでも満たせる）。
+        閉じる ✕ はタブの中に重ねる。`role="tablist"` の直下にタブ以外のボタンを
+        並べたくないので、包みは `presentation` にして中身だけを親へ見せる
+      -->
+      <span v-if="planOpen" class="rtab-slot" role="presentation">
+        <button
+          class="rtab plan"
+          role="tab"
+          :class="{ sel: planActive }"
+          :aria-selected="planActive"
+          :title="plan?.statement || '実行計画'"
+          @click="selectTab(PLAN_TAB_ID)"
+        >
+          <span class="rtab-name">実行計画</span>
+          <!-- 失敗・警告は帯の時点で分かるようにする（開かないと気づけないのを避ける） -->
+          <span v-if="planError" class="rtab-count err">!</span>
+          <span v-else-if="plan" class="rtab-count">{{ plan.summary.stepCount }}</span>
+        </button>
+        <button class="rtab-x" title="実行計画を閉じる" @click="closePlan">✕</button>
+      </span>
+    </div>
 
     <!-- ログを重ねる基準。ここを position: relative にしないとパネルが置けない -->
     <div class="results" @click="logOpen && (logOpen = false)">
+    <!--
+      実行計画。**結果表と同じ枠を丸ごと使う**——ここがスクロールするので、
+      グラフが縦に伸びても SQL 欄との境界を動かせば見える高さを取れる
+    -->
+    <div v-if="planActive" class="plan-view">
+      <LoadingBar v-if="planBusy" label="計画を取得しています…" />
+      <p v-if="planError" class="plan-error">{{ planError }}</p>
+      <PlanViewer v-if="plan" :plan="plan" :on-create-index="createIndex" />
+    </div>
+
+    <!-- 結果側。計画タブを見ている間は出さない（同じ領域なので重なる） -->
+    <template v-else>
     <!--
       **タブごとに表のインスタンスを保つ**（KeepAlive）。切り替えのたびに作り直すと
       200 行 × 40 列で 220〜280ms のブロッキングが出て、描画後に操作を受け付けない
@@ -785,6 +1052,7 @@ function download(): void {
     <p v-else-if="!executed && !error && !rows.length" class="empty">
       接続を選び、SQL を入力して「実行」を押してください。実行できる範囲は IBM i の権限によります。
     </p>
+    </template>
 
       <!-- .sql-pane 直下に置くとフッターを覆ってしまうので、結果領域の中に置く -->
       <SqlLogPanel
@@ -881,6 +1149,8 @@ function download(): void {
 header { flex: none; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 h2 { margin: 0; font-size: 13px; font-family: var(--mono); font-weight: 700; }
 label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+/* 候補を重ねる基準。入力欄と同じ矩形にするため、余白も枠も持たせない */
+.editor-wrap { flex: none; position: relative; width: 100%; }
 .editor { flex: none;
   width: 100%;
   box-sizing: border-box;
@@ -921,14 +1191,17 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
    固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
    表の領域を不透明にして、固定列と本文を同じ地の上に載せる */
 /* 結果領域。ログパネルを重ねる基準（position: relative）になる */
-/* 結果タブ。2 つ以上のときだけ出る（単一文の見え方を変えない） */
+/* 結果と実行計画のタブ。2 つ以上のときだけ出る（単一文の見え方を変えない）。
+   **色は実在する変数から取る**——`--border` / `--bg` / `--fg` はこのリポジトリに
+   定義が無く、var() の解決に失敗したプロパティは初期値へ落ちる。`border` の
+   shorthand では border-style が none になるので、枠が一切描かれていなかった */
 .rtabs {
   display: flex;
   gap: 4px;
   padding: 4px 6px 0;
   overflow-x: auto;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .rtab {
   display: flex;
@@ -936,17 +1209,17 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
   gap: 6px;
   max-width: 260px;
   padding: 3px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-bottom: none;
   border-radius: 6px 6px 0 0;
-  background: var(--bg);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
 }
 .rtab.sel {
   background: var(--accent-soft);
-  color: var(--fg);
+  color: var(--ink);
   border-color: var(--accent);
 }
 .rtab-no {
@@ -960,6 +1233,38 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .rtab-count {
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
+}
+.rtab-count.err {
+  color: #c62828;
+  font-weight: 700;
+  opacity: 1;
+}
+/* 計画タブは「閉じる」を内側に重ねる。包み自体は見た目を持たない（枠はタブ側） */
+.rtab-slot {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.rtab.plan {
+  /* ✕ のぶんだけ右を空ける。文字と重ねない */
+  padding-right: 26px;
+}
+.rtab-x {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.rtab-x:hover {
+  color: #c62828;
 }
 
 .results { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -1048,22 +1353,22 @@ thead th:hover .col-grip::after,
 /* 件数が伸びても右がずれないように幅を取る */
 .logbtn .cnt { min-width: 4ch; display: inline-block; text-align: right; font-variant-numeric: tabular-nums; }
 
-.plan-panel {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 8px;
-  margin: 6px 0;
-  max-height: 60vh;
-  overflow: auto;
-}
-.plan-panel-head {
+/* 実行計画。高さは親（.results）から貰うので、SQL 欄との境界を動かせばそのまま広がる。
+   **スクロールはここではしない**——図と詳細が別々に縦スクロールする
+   （`PlanViewer` の `.pv-main` / `.pv-side`）。ここを `auto` にすると
+   その 2 本に加えてペイン全体の縦棒が出て、どれを動かせばよいか分からなくなる */
+.plan-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 4px 0;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-direction: column;
 }
-.plan-panel-head strong {
-  font-size: 12px;
+/* 中の `PlanViewer` に高さを渡す（`height: 100%` の受け皿になる） */
+.plan-view :deep(.plan-viewer) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .plan-error {
   color: var(--t-red);
