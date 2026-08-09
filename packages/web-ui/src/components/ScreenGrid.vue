@@ -711,6 +711,9 @@ function cellClass(c: Cell): string {
   // DSPATR(CS)＝桁区切り。core は解析してセルに持っていたが、描画側が**素通ししていた**ため
   // DSPF の区切り線が画面に一切出ていなかった（dspf-report (1)）。
   if (hasRealColsep(c.color, c.columnSeparator)) cls.push("a-colsep");
+  // **ホストが「表せない」と言ってきた桁は塗り潰す**（ACS と同じ見せ方）。
+  // 空白のままだと「ヘルプが虫食い」としか見えず、文字が落ちたことが分からない
+  if (c.kind === "unmappable") cls.push("a-unmappable");
   return cls.join(" ");
 }
 
