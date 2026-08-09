@@ -329,3 +329,69 @@ describe("applyDataStream — DBCS（SO/SI）", () => {
     expect(snap.cells[1]).toHaveLength(80);
   });
 });
+
+/**
+ * **表せない文字（0x1F）はオーダーではない。**
+ *
+ * 英語システム（PUB400）へカタカナのコードページ（CCSID 5026＝CP 290）で繋ぐと、
+ * ヘルプ本文の英小文字がすべて 0x1F で届く（1076 バイトに 531 個。実測）。
+ * 同じ画面を CCSID 37 / 5035 で採ると 0 個。
+ *
+ * オーダーとして扱うと解析がそこで崩れ、復帰の途中で SBA の行桁パラメータ
+ * （`11 04 05`）の `0x04` を ESC と読み違え、**末尾の READ MDT FIELDS ごと捨てる**。
+ * 読み取り要求が消えるので鍵盤が開かず「ホストからの応答待ち」で固まる（利用者報告）。
+ */
+describe("表せない文字（0x1F）", () => {
+  /** `WTD` で "IBM i" 相当（小文字が 0x1F に置き換わった形）を書き、末尾に READ を置く */
+  const record = () =>
+    Uint8Array.from([
+      0x04, 0x11, 0x00, 0x00, // ESC WTD CC1 CC2
+      0x11, 0x01, 0x01, // SBA(1,1)
+      0x20, // 属性
+      0xc9, 0xc2, 0xd4, 0x40, 0x1f, // "IBM" + 空白 + 表せない 1 文字
+      0x11, 0x04, 0x05, // SBA(4,5) — **行バイトが 0x04**（ESC と紛らわしい）
+      0x20,
+      0xc8, 0x1f, 0x1f, 0x1f, // "H" + 表せない 3 文字
+      0x04, 0x52, 0x00, 0x00 // ESC READ MDT FIELDS
+    ]);
+
+  it("1 桁を占める空白として置き、解析を続ける", () => {
+    const buf = new ScreenBuffer(24, 80);
+    const result = applyDataStream(record(), buf, codec, () => {});
+    // 属性が 1 桁、そのあと "IBM" と空白 2 つ（元の空白と表せない文字）
+    expect(rowText(buf, 1).slice(1, 6)).toBe("IBM");
+    void result;
+  });
+
+  it("**末尾の READ を捨てない**（捨てると鍵盤が開かず応答待ちで固まる）", () => {
+    const buf = new ScreenBuffer(24, 80);
+    const result = applyDataStream(record(), buf, codec, () => {});
+    expect(result.readRequested).toBe(true);
+    expect(result.unlockKeyboard).toBe(true);
+  });
+
+  /** 理由と直し方まで言う。黙って空白にすると「ヘルプが虫食い」としか見えない */
+  it("何個あったかと、CCSID を変えれば直ることを 1 度だけ知らせる", () => {
+    const buf = new ScreenBuffer(24, 80);
+    const warnings: string[] = [];
+    applyDataStream(record(), buf, codec, (w) => warnings.push(w));
+    const hit = warnings.filter((w) => w.includes("表せない文字"));
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toContain("4 個");
+    expect(hit[0]).toContain("CCSID");
+  });
+
+  /** 未知オーダーからの復帰も、**直後が既知コマンドの ESC** だけを信じる */
+  it("未知オーダーの後、SBA のパラメータを ESC と読み違えない", () => {
+    const buf = new ScreenBuffer(24, 80);
+    const rec = Uint8Array.from([
+      0x04, 0x11, 0x00, 0x00,
+      0x1e, // 未知オーダー
+      0x11, 0x04, 0x05, // SBA(4,5) — 0x04 が続く
+      0x20, 0xc1,
+      0x04, 0x52, 0x00, 0x00 // ESC READ MDT FIELDS
+    ]);
+    const result = applyDataStream(rec, buf, codec, () => {});
+    expect(result.readRequested).toBe(true);
+  });
+});
