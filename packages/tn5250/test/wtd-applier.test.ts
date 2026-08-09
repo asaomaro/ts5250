@@ -363,6 +363,25 @@ describe("表せない文字（0x1F）", () => {
     void result;
   });
 
+  /**
+   * **空白と区別できるようにする。** 区別しないと「ヘルプが虫食い」としか見えず、
+   * 文字が落ちたことが分からない。ACS も同じ桁を塗り潰しで描く（利用者提供の画面）。
+   *
+   * 塗り潰しは**種類（kind）で描き分ける**——█ 等を字として入れると和文フォントで
+   * 全角になり、`ch` 単位で置いている桁が右へずれる（実測で 1.5〜2 倍）。
+   */
+  it("種類を unmappable にする（空白と区別できる／桁はずらさない）", () => {
+    const buf = new ScreenBuffer(24, 80);
+    applyDataStream(record(), buf, codec, () => {});
+    const row = buf.snapshot("t", false).cells[0]!;
+    // 属性(0) + "IBM"(1-3) + 空白(4) + 表せない(5)
+    expect(row[5]!.kind).toBe("unmappable");
+    expect(row[5]!.char).toBe(" ");
+    expect(row[4]!.kind).toBe("sbcs"); // 本物の空白は sbcs のまま
+    // **生バイトは載せない**（カタカナ表示モードが半角カナへ読み替えてしまう）
+    expect(row[5]!.rawByte).toBeUndefined();
+  });
+
   it("**末尾の READ を捨てない**（捨てると鍵盤が開かず応答待ちで固まる）", () => {
     const buf = new ScreenBuffer(24, 80);
     const result = applyDataStream(record(), buf, codec, () => {});
