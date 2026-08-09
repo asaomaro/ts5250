@@ -44,6 +44,7 @@ import { monitorColumnLabels } from "./plan-column-text.js";
 import {
   buildQueryPlan,
   pickStatementRecords,
+  pickAllStatements,
   MONITOR_COLUMNS,
   type MonitorRecord,
   type QueryPlan
@@ -65,6 +66,18 @@ export interface CaptureOptions {
 
 export interface CaptureResult {
   plan: QueryPlan;
+  /**
+   * 同じ採取に含まれる**他の文の計画**（実行順）。組が 1 つのときは付かない。
+   * 手続きの `CALL` は中のカーソルごとに別の組になるので、ここに 2 本目以降が入る。
+   * **`plan` はそのまま**——既存の保存済み JSON・実行履歴の形を変えないため。
+   */
+  plans?: QueryPlan[];
+  /**
+   * `plans` の中で `plan` と同じ記録から作られたものの位置。
+   * **文テキストでは突き合わせられない**——`plan` は利用者が書いた文（`CALL …`）を名乗り、
+   * `plans` の要素は中のカーソルの文を名乗るため。画面はこれを初期選択にする。
+   */
+  primaryIndex?: number;
   /** `run` のときだけ。`no-rows` では返さない */
   rows?: Row[];
   columns?: ColumnMeta[];
@@ -348,7 +361,43 @@ export async function capturePlan(
       );
     }
 
+    /**
+     * **同じ採取に含まれる他の文の計画。**
+     *
+     * 手続きの `CALL` は中のカーソルごとに別の組になる。1 組しか返さないと
+     * 2 本目以降が見えないので、計画記録を持つ組を実行順で全部渡す。
+     *
+     * **`plan` は今までどおり**（既存の保存済み JSON・実行履歴を読めなくしない）。
+     * 組が 1 つしか無ければ付けない——普通の SELECT の応答を変えないため。
+     */
+    const groups = pickAllStatements(all);
+    const plans =
+      groups.length > 1
+        ? groups.map((g: MonitorRecord[]) =>
+            buildQueryPlan(g, {
+              captured: opts.mode,
+              at: opts.at,
+              columnLabels,
+              // **文テキストは組ごとに違う**（中のカーソルの SELECT）。
+              // ここで `sql` を渡すと全部 `CALL …` になって選べなくなる
+              ...(opts.mode === "run" ? { elapsedMs } : {})
+            })
+          )
+        : undefined;
+    // **文の組の番号（`QQUCNT`）で突き合わせる。** 文テキストでは合わない（`plan` は
+    // 書いた文、`plans` の要素は中のカーソルの文を名乗る）し、配列の同一性でも合わない
+    // ——`pickStatementRecords` と `pickAllStatements` はそれぞれ別に組み直すため
+    const primaryKey = records[0]?.QQUCNT;
+    const primaryIndex =
+      primaryKey === undefined || primaryKey === null
+        ? -1
+        : groups.findIndex((g: MonitorRecord[]) => g[0]?.QQUCNT === primaryKey);
+
     const result: CaptureResult = { plan, warnings };
+    if (plans) {
+      result.plans = plans;
+      if (primaryIndex >= 0) result.primaryIndex = primaryIndex;
+    }
     if (target.rows) result.rows = target.rows;
     if (target.columns) result.columns = target.columns;
     if (target.truncated !== undefined) result.truncated = target.truncated;

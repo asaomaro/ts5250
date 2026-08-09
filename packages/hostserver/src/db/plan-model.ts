@@ -1011,6 +1011,36 @@ export function pickStatementRecords(records: MonitorRecord[], sql: string): Mon
  * 一覧（プランキャッシュ）で使う——**2 段目の `DUMP_PLAN_CACHE` を呼ばずに済ませる**ため
  * （`design.md` 判断 A5）。
  */
+/**
+ * 計画記録を持つ**すべての**文の組を、実行順（`QQUCNT` の昇順）で返す。
+ *
+ * **手続きの `CALL` は中のカーソルごとに別の組になる。** 実機で `DYNAMIC RESULT SETS 2`
+ * の手続きを採ったときの実測:
+ *
+ * ```
+ * QQUCNT=0 計画記録 0 件  CALL TESTLIB.SQLDEMORS2()          ← 受け皿（計画は無い）
+ * QQUCNT=3 計画記録 7 件  DECLARE C1 CURSOR … ORDER BY ID
+ * QQUCNT=4 計画記録 4 件  DECLARE C2 CURSOR … COUNT(*)
+ * ```
+ *
+ * `pickStatementRecords` は 1 組しか返さないので、**2 本目以降が見えない**。
+ * 画面で選ばせるにはここで全部返す。
+ *
+ * **計画記録を持たない組は落とす**（`pickStatementRecords` と同じ規則）——
+ * `QQUCNT=0` の受け皿を「中身の無い計画」として並べても選ぶ意味が無い。
+ */
+export function pickAllStatements(records: MonitorRecord[]): MonitorRecord[][] {
+  const groups = groupByStatement(records);
+  const kept: { key: number; list: MonitorRecord[] }[] = [];
+  for (const [key, list] of groups) {
+    if (!list.some((r) => r.QQQDTN !== null)) continue;
+    kept.push({ key, list });
+  }
+  // **実行順に並べる**（現れた順ではない）。画面の選択が呼び出しの順と揃うように
+  kept.sort((a, b) => a.key - b.key);
+  return kept.map((x) => x.list);
+}
+
 export function groupByStatement(records: MonitorRecord[]): Map<number, MonitorRecord[]> {
   const out = new Map<number, MonitorRecord[]>();
   for (const r of records) {

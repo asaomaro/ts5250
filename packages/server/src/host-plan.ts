@@ -208,6 +208,10 @@ export function registerHostPlanRoutes(app: Hono<{ Variables: AuthVars }>, deps:
       );
       return c.json({
         plan: captured.plan,
+        // **同じ採取に含まれる他の文の計画**（手続きの `CALL` は中のカーソルごとに別の文）。
+        // `plan` は据え置き——保存済み JSON・実行履歴の形を変えないため
+        ...(captured.plans ? { plans: captured.plans } : {}),
+        ...(captured.primaryIndex !== undefined ? { primaryIndex: captured.primaryIndex } : {}),
         ...(captured.columns ? { columns: captured.columns.map((col) => ({ name: col.name, typeName: col.typeName })) } : {}),
         ...(captured.rows ? { rows: toJsonRows(captured.rows) } : {}),
         ...(captured.truncated !== undefined ? { truncated: captured.truncated } : {}),
