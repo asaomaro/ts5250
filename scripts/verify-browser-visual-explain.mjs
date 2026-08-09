@@ -30,7 +30,7 @@ import { chromium } from "playwright";
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PORT = 3491;
-const TMP = "/tmp/as400-verify-ve-browser";
+const TMP = process.env.VE_TMP ?? "/tmp/as400-verify-ve-browser";
 const SHOTS = `${TMP}/shots`;
 mkdirSync(SHOTS, { recursive: true });
 
@@ -45,7 +45,8 @@ if (!process.env["AS400_PASSWORD"]) {
   process.exit(1);
 }
 
-const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
+// 設定の置き場は差し替えられる（個人の `connections.json` に実機が無い環境でも走らせるため）
+const cfg = JSON.parse(readFileSync(process.env.VE_CONN ?? "connections.json", "utf8"));
 const sys = cfg.systems.find((s) => s.name === "実機");
 // **値はファイルに落とさない**（環境変数の名前だけ）
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
@@ -74,12 +75,21 @@ const shot = async (name) => {
   log(`shot: ${SHOTS}/${name}.png`);
 };
 
-const SQL = "SELECT COUNT(*) AS N FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = 'QSYS2'";
+/**
+ * 検証に使う文。**差し替えられる**（`VE_SQL`）——手続きの `CALL` でも計画が採れることを
+ * 見たいときに使う。
+ *
+ * ⚠ **差し替えると後半の項目は当てにならない。** 索引の助言・「行を返さず計画」・
+ * 実行履歴の件数は、この既定の SELECT が出すものを前提に書いてある
+ * （`CALL` は助言が出ず、行を返さないモードは SELECT 系のみ）。回帰として数えるのは
+ * 既定のまま走らせたときだけ。
+ */
+const SQL = process.env.VE_SQL ?? "SELECT COUNT(*) AS N FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = 'QSYS2'";
 
 /** 計画パネルが出る（または誤りが出る）まで待つ */
 async function waitPlan() {
   await page
-    .waitForFunction(() => document.querySelector(".plan-panel .plan-viewer, .plan-panel .plan-error") !== null, {
+    .waitForFunction(() => document.querySelector(".plan-view .plan-viewer, .plan-view .plan-error") !== null, {
       timeout: 60000
     })
     .catch(() => undefined);
@@ -89,7 +99,9 @@ async function waitPlan() {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  // **システムが 1 つだけならアプリが自動で選ぶ**（選択画面が出ない）
+  const pick = page.locator(".card:has-text('実機') >> button:has-text('選択')");
+  if ((await pick.count()) > 0) await pick.first().click();
   await page.waitForSelector(".fn:has-text('SQL')", { timeout: 10000 });
 
   // ---- 1. SQL ペインからの導線 ----
@@ -108,49 +120,51 @@ try {
   await waitPlan();
   await shot("02-plan-graph");
 
-  const panel = page.locator(".plan-panel");
-  check("計画パネルが出る", await panel.isVisible());
-  const err = await page.locator(".plan-panel .plan-error").count();
-  check("誤りが出ていない", err === 0, err > 0 ? await page.locator(".plan-panel .plan-error").innerText() : "");
+  const panel = page.locator(".plan-view");
+  check("計画タブが出る", await panel.isVisible());
+  const err = await page.locator(".plan-view .plan-error").count();
+  check("誤りが出ていない", err === 0, err > 0 ? await page.locator(".plan-view .plan-error").innerText() : "");
 
   // ---- 2. グラフの描画 ----
-  const svgNodes = await page.locator(".plan-panel svg g.pg-node").count();
+  const svgNodes = await page.locator(".plan-view svg g.pg-node").count();
   check("**SVG にノードが描かれている**", svgNodes > 0, `${svgNodes} ノード`);
-  const stepText = await page.locator(".plan-panel .pv-summary").innerText();
+  const stepText = await page.locator(".plan-view .pv-summary").innerText();
   check("要約にステップ数とノード計が出る", stepText.includes("ステップ") && stepText.includes("ノード計"), stepText.replace(/\n/gu, " "));
 
-  const labels = (await page.locator(".plan-panel svg g.pg-node text.pg-label").allTextContents()).map((t) => t ?? "");
+  const labels = (await page.locator(".plan-view svg g.pg-node text.pg-label").allTextContents()).map((t) => t ?? "");
   check("**記録種別に名前が付いている**（「記録 nnnn」だけではない）",
     labels.some((t) => t.includes("表の走査") || t.includes("索引の使用")), labels.join(" / "));
   check("図に付帯情報を出していない",
     !labels.some((t) => t.includes("クエリ情報") || t.includes("アクセスプランの再作成")), labels.join(" / "));
 
   // ---- 3. ノードを選ぶと属性が出る ----
-  await page.locator(".plan-panel svg g.pg-node").first().click();
+  await page.locator(".plan-view svg g.pg-node").first().click();
   await sleep(300);
-  const attrs = await page.locator(".plan-panel .pv-attrs").innerText().catch(() => "");
+  // **複数の組に分かれて出る**（表・索引 / 見積もり / モニターの全列）ので、
+  // 1 つに絞らず全部つないで見る——絞ると Playwright の strict 判定で落ちる
+  const attrs = (await page.locator(".plan-view .pv-attrs").allInnerTexts()).join("\n");
   check("ノードを選ぶと属性が出る", attrs.includes("記録種別"), attrs.replace(/\n/gu, " ").slice(0, 120));
   await shot("03-node-selected");
 
   // ---- 4. ツリー表示 ----
-  await page.click(".plan-panel button:has-text('ツリー')");
+  await page.click(".plan-view button:has-text('ツリー')");
   await sleep(300);
-  const treeNodes = await page.locator(".plan-panel .pv-tree-node").count();
+  const treeNodes = await page.locator(".plan-view .pv-tree-node").count();
   check("ツリーに切り替わり、同じ数のノードが出る", treeNodes === svgNodes, `tree=${treeNodes} / svg=${svgNodes}`);
   await shot("04-plan-tree");
-  await page.click(".plan-panel button:has-text('グラフ')");
+  await page.click(".plan-view button:has-text('グラフ')");
 
   // ---- 5. 付帯情報と索引助言 ----
-  const side = await page.locator(".plan-panel .pv-side").innerText();
+  const side = await page.locator(".plan-view .pv-side").innerText();
   check("付帯情報が脇に出る", side.includes("付帯情報"), side.replace(/\n/gu, " ").slice(0, 120));
   check("索引の助言に CREATE INDEX 文が出る", side.includes("CREATE INDEX"), side.replace(/\n/gu, " ").slice(0, 200));
   // **押さない**（索引の作成は破壊的操作。ボタンが在ることだけ確かめる）
-  check("作成ボタンが在る（押さない）", (await page.locator(".plan-panel button:has-text('この索引を作成')").count()) > 0);
+  check("作成ボタンが在る（押さない）", (await page.locator(".plan-view button:has-text('この索引を作成')").count()) > 0);
 
   // ---- 6. 行を返さず計画 ----
   await page.click(".sql-pane header button:has-text('行を返さず計画')");
   await waitPlan();
-  const meta = await page.locator(".plan-panel .pv-meta").innerText().catch(() => "");
+  const meta = await page.locator(".plan-view .pv-meta").innerText().catch(() => "");
   check("**行を返さず計画**でも計画が出る", meta.includes("行を返さず計画"), meta.replace(/\n/gu, " ").slice(0, 120));
   await shot("05-no-rows");
 

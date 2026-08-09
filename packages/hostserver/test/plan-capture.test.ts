@@ -324,3 +324,155 @@ describe("ODP 再利用で計画が採れないとき", () => {
     );
   });
 });
+
+/**
+ * **手続きの結果セットは計画と一緒に返す。**
+ *
+ * SELECT の「実行して計画」は行と計画の両方を返す。`CALL` だけ計画しか出ないと、
+ * 同じボタンの意味が文によって変わってしまう（実機で `CALL … SQLDEMORS()` を
+ * 掛けたときに気づいた）。
+ */
+describe("CALL の結果セットを計画と一緒に返す", () => {
+  const REQ_EXECUTE = 0x1805;
+  const REQ_OPEN_AND_DESCRIBE = 0x1804;
+  const REQ_FETCH = 0x180b;
+  const CP_CURSOR_NAME = 0x380b;
+  const CP_DATA_FORMAT = 0x3805;
+  const CP_EXT_RESULT_DATA = 0x380e;
+  /** `execute.ts` が手続きの結果セットに使うカーソル名（`query.ts` の C1 とは別） */
+  const CALL_CURSOR = "ASEXECC";
+
+  /** EBCDIC(37) の識別子を読み戻す（カーソル名でどちらの読み出しかを見分ける） */
+  function cursorOf(frame: Frame): string {
+    const p = frame.params.find((x) => x.cp === CP_CURSOR_NAME);
+    if (!p) return "";
+    let s = "";
+    for (const b of p.value.subarray(4)) {
+      // 使うのは英大文字と数字だけなので、その範囲だけ戻せば足りる
+      if (b >= 0xc1 && b <= 0xc9) s += String.fromCharCode(b - 0xc1 + 65);
+      else if (b >= 0xd1 && b <= 0xd9) s += String.fromCharCode(b - 0xd1 + 74);
+      else if (b >= 0xe2 && b <= 0xe9) s += String.fromCharCode(b - 0xe2 + 83);
+      else if (b >= 0xf0 && b <= 0xf9) s += String.fromCharCode(b - 0xf0 + 48);
+    }
+    return s;
+  }
+
+  /** SQLCODE +466（結果セットが 1 個ある）。SQLERRMC は「名前・名前・数」 */
+  function sqlca466(): Uint8Array {
+    const out = sqlcaOk();
+    const v = new DataView(out.buffer);
+    v.setInt32(12, 466);
+    v.setUint16(16, 2 + 2 + 2 + 2 + 2);
+    v.setUint16(18, 2);
+    v.setUint16(22, 2);
+    v.setUint16(26, 1);
+    return out;
+  }
+
+  /** 列定義（元形式・INTEGER 1 列「ID」） */
+  function format1(): Uint8Array {
+    const out = new Uint8Array(8 + 54);
+    const v = new DataView(out.buffer);
+    v.setUint16(4, 1);
+    v.setUint16(6, 4);
+    v.setUint16(8 + 2, 496);
+    v.setUint16(8 + 4, 4);
+    v.setUint16(8 + 20, 2);
+    v.setUint16(8 + 22, 37);
+    out.set([0xc9, 0xc4], 8 + 24);
+    return out;
+  }
+
+  /** 1 行（ID=5） */
+  function row1(): Uint8Array {
+    const out = new Uint8Array(20 + 2 + 4);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, 1);
+    v.setUint16(8, 1);
+    v.setUint16(10, 2);
+    v.setUint32(16, 4);
+    v.setUint32(22, 5);
+    return out;
+  }
+
+  /**
+   * 手続きの読み出しにだけ答える偽の接続。
+   * **カーソル名で見分ける**——モニター表の読み出し（`queryLimited`）も
+   * 同じ要求 ID を通るので、素朴に答えると計画の読み出しまで壊れる。
+   */
+  function callConn() {
+    let fetched = 0;
+    /**
+     * 直前に準備した文。**採取手順そのものも `CALL QSYS2.QCMDEXC(…)` を通る**ので、
+     * 「CALL なら結果セットあり」と答えると `STRDBMON` にまで結果セットが生えてしまう
+     * （最初にそう書いて、測っていたのが採取側の読み出しだった）
+     */
+    let prepared = "";
+    const request = vi.fn(async (frame: Frame) => {
+      const mine = cursorOf(frame) === CALL_CURSOR;
+      if (frame.reqId === REQ_PREPARE_AND_DESCRIBE) prepared = sentSql(frame) ?? "";
+      if (frame.reqId === REQ_EXECUTE) {
+        const rs = prepared.startsWith("CALL TESTLIB.");
+        return {
+          params: [{ cp: CP_SQLCA, value: rs ? sqlca466() : sqlcaOk() }],
+          dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+        };
+      }
+      if (mine && frame.reqId === REQ_OPEN_AND_DESCRIBE) {
+        return {
+          params: [{ cp: CP_DATA_FORMAT, value: format1() }, { cp: CP_SQLCA, value: sqlcaOk() }],
+          dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+        };
+      }
+      if (mine && frame.reqId === REQ_FETCH) {
+        fetched += 1;
+        const done = sqlcaOk();
+        if (fetched > 1) new DataView(done.buffer).setInt32(12, 100);
+        return {
+          params: [
+            { cp: CP_EXT_RESULT_DATA, value: fetched === 1 ? row1() : new Uint8Array(0) },
+            { cp: CP_SQLCA, value: done }
+          ],
+          dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+        };
+      }
+      return {
+        params: [
+          { cp: CP_SQLCA, value: sqlcaOk() },
+          { cp: CP_SUPER_EXTENDED_FORMAT, value: emptyFormat() }
+        ],
+        dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+      };
+    });
+    return { request, acquire: () => () => {} } as unknown as DbConnection;
+  }
+
+  const CP_BLOCKING_FACTOR = 0x380c;
+
+  /**
+   * **上限を渡していること**を、手続きのカーソルへ出した fetch の要求件数で見る。
+   * 渡していなければ既定の 200 で読みに行くので、値が変われば分かる。
+   * （計画記録が 0 件なので `capturePlan` 自体は投げる。見たいのはその手前）
+   */
+  it("画面の取得上限を結果セットの読み出しに渡す", async () => {
+    const frames: Frame[] = [];
+    const base = callConn();
+    const conn = {
+      ...base,
+      request: async (frame: Frame) => {
+        frames.push(frame);
+        return (base as unknown as { request: (f: Frame) => Promise<unknown> }).request(frame);
+      }
+    } as unknown as DbConnection;
+
+    await capturePlan(conn, "CALL TESTLIB.P()", { mode: "run", at: AT, limit: 7 }).catch(
+      () => undefined
+    );
+
+    const fetches = frames.filter((f) => f.reqId === REQ_FETCH && cursorOf(f) === CALL_CURSOR);
+    expect(fetches.length).toBeGreaterThan(0);
+    const bf = fetches[0]!.params.find((p2) => p2.cp === CP_BLOCKING_FACTOR)!;
+    // **上限＋1 行**まで要求する（続きがあるかを測った事実で決めるため）
+    expect(new DataView(bf.value.buffer, bf.value.byteOffset).getUint32(0)).toBe(8);
+  });
+});

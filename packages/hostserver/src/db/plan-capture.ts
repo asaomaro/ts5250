@@ -251,7 +251,19 @@ async function runTarget(
     return { columns: opened.columns };
   }
   if (isNonQueryStatement(sql)) {
-    await executeStatement(conn, sql);
+    const done = await executeStatement(conn, sql, {
+      resultLimit: opts.limit ?? 200,
+      ...(opts.lob ? { lob: opts.lob } : {})
+    });
+    // **手続きが返した結果セットも渡す。** SELECT の「実行して計画」は行と計画の
+    // 両方を返すので、`CALL` だけ計画しか出ないと同じボタンの意味が変わってしまう
+    if (done.resultSet) {
+      return {
+        rows: done.resultSet.rows,
+        columns: done.resultSet.columns,
+        truncated: done.resultSet.truncated
+      };
+    }
     return {};
   }
   const result = await queryLimited(conn, sql, {
