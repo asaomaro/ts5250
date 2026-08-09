@@ -219,10 +219,16 @@ describe("CALL の結果セット", () => {
     w.unmount();
   });
 
-  it("2 個以上あるときは**何個あって何個目を出しているか**を言う", async () => {
+  /**
+   * **取れないことまで言う。** 「1 個目を表示」だけだと、2 個目を出す操作を
+   * 画面の中で探させてしまう（ホストがこの経路に 1 個目しか出さない）。
+   */
+  it("2 個以上あるときは**何個あって何個目か**と、残りが取れないことを言う", async () => {
     mockSequence([{ body: withResultSet(3, { resultSets: 2 }) }]);
     const w = await run("CALL TESTLIB.P()");
-    expect(w.find(".done").text()).toContain("結果セット 2 個のうち 1 個目");
+    const text = w.find(".done").text();
+    expect(text).toContain("結果セット 2 個のうち 1 個目");
+    expect(text).toContain("取得できません");
     w.unmount();
   });
 

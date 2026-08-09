@@ -143,7 +143,12 @@ const executeMessage = computed(() => {
   if (!e) return "";
   const head = e.hasRowCount ? `${e.updateCount} 行に影響しました。` : "実行しました。";
   if (e.resultSets === undefined) return head;
-  const many = e.resultSets > 1 ? `結果セット ${e.resultSets} 個のうち 1 個目を表示しています。` : "結果セットを表示しています。";
+  // **取れないことまで言う。** 「1 個目を表示」だけだと、2 個目を出す操作を探させてしまう
+  // ——ホストがこの経路に 1 個目しか出さない（`execute.ts` の注記。実機で確認済み）
+  const many =
+    e.resultSets > 1
+      ? `結果セット ${e.resultSets} 個のうち 1 個目を表示しています（2 個目以降はこの経路では取得できません）。`
+      : "結果セットを表示しています。";
   const cut = e.truncated ? `先頭 ${rows.value.length} 件だけです（続きは取得しません）。` : "";
   return `${head}${many}${cut}`;
 });
