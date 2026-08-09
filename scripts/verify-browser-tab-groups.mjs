@@ -26,10 +26,15 @@ import { readdirSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+// **`console` は使わない**（`no-console`。他の verify-browser-* と同じ書き方）。
+// このリポジトリは stdio MCP を持つので、stdout を汚す経路を仕組みで塞いである
+const out = (s) => process.stdout.write(s + "\n");
+const err = (s) => process.stderr.write(s + "\n");
+
 const DIST = "packages/web-ui/dist/assets";
 const css = readdirSync(DIST).find((f) => f.endsWith(".css"));
 if (!css) {
-  console.error("ビルド済み CSS が見つかりません。npm run build -w @ts5250/web-ui を先に実行してください");
+  err("ビルド済み CSS が見つかりません。npm run build -w @ts5250/web-ui を先に実行してください");
   process.exit(1);
 }
 const cssText = readFileSync(join(DIST, css), "utf8");
@@ -37,7 +42,7 @@ const cssText = readFileSync(join(DIST, css), "utf8");
 // scoped スタイルの属性（`data-v-xxxxxxxx`）を実物から拾う——手で書くとビルドのたびにずれる
 const hash = /\.tg-chip\[(data-v-[a-z0-9]+)\]/.exec(cssText)?.[1];
 if (!hash) {
-  console.error("PaneTabs の scoped スタイルが CSS に見つかりません");
+  err("PaneTabs の scoped スタイルが CSS に見つかりません");
   process.exit(1);
 }
 /**
@@ -51,7 +56,7 @@ const menuHash = [...cssText.matchAll(/\.menu\[(data-v-[a-z0-9]+)\]/g)]
   .map((m) => m[1])
   .find((h) => cssText.includes(`.swatch[${h}]`));
 if (!menuHash) {
-  console.error("TabGroupMenu の scoped スタイルが CSS に見つかりません");
+  err("TabGroupMenu の scoped スタイルが CSS に見つかりません");
   process.exit(1);
 }
 
@@ -215,7 +220,7 @@ const rows = [
   ["タブ帯（グループだけ）", m.aloneStrip],
   ["チップ（グループだけ）", m.aloneChip]
 ];
-for (const [k, v] of rows) console.log(`${k.padEnd(24)} ${v.toFixed(2)}px`);
+for (const [k, v] of rows) out(`${k.padEnd(24)} ${v.toFixed(2)}px`);
 
 const fail = [];
 if (m.grouped !== m.plain) fail.push(`タブ帯が高くなった: ${m.plain} → ${m.grouped}`);
@@ -246,11 +251,11 @@ if (m.collapsedChip !== m.chip) fail.push(`折りたたみでチップの大き�
 if (m.aloneChip !== m.chip) fail.push(`グループだけになるとチップが縮む: ${m.chip} → ${m.aloneChip}`);
 if (m.aloneStrip !== m.plain) fail.push(`グループだけでタブ帯の高さが変わった: ${m.plain} → ${m.aloneStrip}`);
 
-console.log(`\nスクリーンショット: ${join(dir, "tab-groups-dark.png")}`);
-console.log(`                    ${join(dir, "tab-groups-light.png")}`);
+out(`\nスクリーンショット: ${join(dir, "tab-groups-dark.png")}`);
+out(`                    ${join(dir, "tab-groups-light.png")}`);
 if (fail.length > 0) {
-  console.error("\nRESULT: FAIL");
-  for (const f of fail) console.error(`  - ${f}`);
+  err("\nRESULT: FAIL");
+  for (const f of fail) err(`  - ${f}`);
   process.exit(1);
 }
-console.log("\nRESULT: PASS（グループの有無でタブ帯の高さが変わらない）");
+out("\nRESULT: PASS（グループの有無でタブ帯の高さが変わらない）");
