@@ -442,6 +442,28 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 > 開いた時刻で押していると、この不等式が両側とも崩れる。
 > 資格情報は `passwordEnv` で env のまま渡し、設定オブジェクトに平文を置かない。
 
+## SQL 画面（SELECT 以外）の検証用資産（実機 / TESTLIB）
+
+| スクリプト | 内容 |
+|---|---|
+| `build-sqldemo.mjs` | `TESTLIB` に `SQLDEMO*` 一式を作って**残す**（表・ビュー・索引・トリガー・手続き 3 種・関数）。手続きは **OUT パラメーター**・**結果セット 1 個**・**結果セット 2 個**の 3 通りで、SQL 画面の見え方を人が確かめるためのもの。**DDL はこのスクリプトが持ち物**で、SQL 画面へそのまま貼っても通る形で書いてある（複合文をコピーして実行できる）。毎回作り直す（先に DROP する）。 |
+| `verify-browser-sql-exec.mjs` | 実ブラウザで SQL 画面を操作する回帰（25 項目）。**自前の `SQLEXEC*` を作って最後に消す**——`DROP` が効くこと自体が検証対象なので、残す資産（上の `SQLDEMO*`）とは名前を分けてある。 |
+
+```sh
+node --env-file=.env scripts/build-sqldemo.mjs    # 検証用資産を作る（残る）
+AS400_PASSWORD=... node scripts/verify-browser-sql-exec.mjs
+```
+
+作ったあと SQL 画面で試すもの:
+
+```sql
+SELECT * FROM TESTLIB.SQLDEMO ORDER BY ID;
+CALL TESTLIB.SQLDEMOP(1, 1.50, ?);   -- 出力パラメーター
+CALL TESTLIB.SQLDEMORS();            -- 結果セット 1 個
+CALL TESTLIB.SQLDEMORS2();           -- 結果セット 2 個（1 個目だけ出る）
+SELECT ID, TESTLIB.SQLDEMOF(ID) FROM TESTLIB.SQLDEMO ORDER BY ID;
+```
+
 ## SQL 実行計画（Visual Explain 相当）
 
 `20260802-sql-visual-explain`。**自ジョブの DB モニター**（`STRDBMON JOB(*)`）で計画を採る。
