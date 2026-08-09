@@ -114,6 +114,28 @@ export const ORDER = {
   SF: 0x1d // Start of Field
 } as const;
 
+/**
+ * **オーダーではない。ホストが「このコードページで表せない」と言うために置く印。**
+ *
+ * PUB400（英語システム）へ **CCSID 5026**（＝コードページ 290・カタカナ）で繋ぎ、
+ * メインメニューや PDM で F1（ヘルプ）を押すと、ヘルプ本文の**英小文字がすべて
+ * このバイトに置き換わって届く**（1076 バイトの記録に 531 個。実測）。
+ * 同じ画面を CCSID 37 / 5035 で採ると 0 個で、本文もそのまま読める
+ * ——つまり 290 に英小文字の割り当てが無いことをホストが埋めている。
+ *
+ * **オーダーとして扱ってはならない。** 扱うと解析がそこで崩れ、復帰の途中で
+ * SBA の行桁パラメータ（`11 04 05`）の `0x04` を ESC と読み違え、
+ * **レコード末尾の READ MDT FIELDS ごと捨てる**。読み取り要求が失われるので
+ * 鍵盤が開かず、画面は途中まで出たまま「ホストからの応答待ち」で固まる（利用者報告）。
+ */
+export const UNMAPPABLE = 0x1f;
+
+/** コマンドとして既知のバイトか（未知オーダーからの復帰で ESC を見極めるのに使う） */
+const COMMAND_BYTES: ReadonlySet<number> = new Set(Object.values(COMMAND));
+export function isKnownCommand(b: number): boolean {
+  return COMMAND_BYTES.has(b);
+}
+
 /** AID コード（キーボード → ホスト） */
 export const AID = {
   ENTER: 0xf1,
