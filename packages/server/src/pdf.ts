@@ -1,16 +1,20 @@
 import PDFDocument from "pdfkit";
 import type { LogicalPage } from "@ts5250/scs";
+import { candidateFontPaths, findMonoCjkFont } from "./pdf-font.js";
 
 /**
  * 論理ページ（等幅グリッド）→ PDF。等幅フォントで各行を描画し、ページ＝改ページ。
- * 既定は Noto Sans Mono CJK JP（Latin 半角＋日本語全角を 1 フォントで等幅に賄う。DBCS 対応）。
- * フォントを読めない場合は標準 Courier にフォールバックする（SBCS のみ・DBCS は化ける）。
+ *
+ * 埋め込むフォントは**システムから探す**（`pdf-font.ts`）。Linux は Noto Sans Mono CJK、
+ * Windows は MS ゴシック等。パスを 1 本焼き込んでいたため、Windows では
+ * `C:\usr\share\fonts\…` を探しに行って必ず失敗していた（利用者の報告）。
+ * 見つからない場合は標準 Courier にフォールバックする（SBCS のみ・DBCS は化ける）。
  */
 
 export interface PdfOptions {
-  /** 埋め込むフォントのパス（TTF/OTF/TTC）。省略時は Noto Sans Mono CJK */
+  /** 埋め込むフォントのパス（TTF/OTF/TTC）。省略時はシステムから探す（`pdf-font.ts`） */
   fontPath?: string;
-  /** .ttc コレクションから選ぶ postscript 名（例 NotoSansMonoCJKjp-Regular） */
+  /** .ttc コレクションから選ぶ postscript 名（例 `MS-Gothic` / `NotoSansMonoCJKjp-Regular`） */
   fontName?: string;
   /** フォントサイズ（pt）。既定 8（132 桁でも LETTER に収まる） */
   fontSize?: number;
@@ -20,8 +24,6 @@ export interface PdfOptions {
   margin?: number;
 }
 
-const DEFAULT_FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
-const DEFAULT_FONT_NAME = "NotoSansMonoCJKjp-Regular";
 
 export function renderSpoolPdf(
   pages: LogicalPage[],
@@ -40,13 +42,24 @@ export function renderSpoolPdf(
     doc.on("error", reject);
   });
 
-  // 等幅 CJK フォント（失敗時は Courier）
-  try {
-    doc.registerFont("mono", opts.fontPath ?? DEFAULT_FONT_PATH, opts.fontName ?? DEFAULT_FONT_NAME);
-    doc.font("mono");
-  } catch (e) {
+  // 等幅 CJK フォント（失敗時は Courier）。
+  // **明示指定が最優先**、無ければシステムから探す（`pdf-font.ts`）
+  const found = opts.fontPath ? { path: opts.fontPath, face: opts.fontName } : findMonoCjkFont();
+  if (found) {
+    try {
+      doc.registerFont("mono", found.path, found.face);
+      doc.font("mono");
+    } catch (e) {
+      doc.font("Courier");
+      warn?.(`CJK フォントを読めませんでした（DBCS は文字化けの可能性）: ${e instanceof Error ? e.message : e}`);
+    }
+  } else {
     doc.font("Courier");
-    warn?.(`CJK フォントを読めませんでした（DBCS は文字化けの可能性）: ${e instanceof Error ? e.message : e}`);
+    // **どこを探したかを出す**。無いのか、探し先が違うのかを利用者が切り分けられるように
+    warn?.(
+      "等幅の CJK フォントが見つかりませんでした（DBCS は文字化けの可能性）。" +
+        `探した場所: ${candidateFontPaths().join(" / ")}`
+    );
   }
   doc.fontSize(fontSize);
   const lineHeight = fontSize * 1.2;
