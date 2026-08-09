@@ -107,6 +107,14 @@ interface ExecuteInfo {
    * **これが手続きの結果そのもの**なので、出さないと呼んだ意味が分からない。
    */
   outputs?: (string | number | boolean | null)[];
+  /**
+   * 手続きが返した結果セットの数（`CALL` で `SQLCODE +466`）。
+   * **表に出せるのは 1 個目だけ**なので、2 個以上あることは文章で言う——
+   * 黙って 1 個目だけ出すと「全部見た」と思わせてしまう。
+   */
+  resultSets?: number;
+  /** 結果セットを上限で切ったか（続きは取りに行けない） */
+  truncated?: boolean;
 }
 
 const tabs = ref<ResultTab[]>([]);
@@ -123,11 +131,21 @@ const hasMore = computed(() => activeTab.value?.hasMore ?? false);
  * **行が 0 件の SELECT と混ぜない**ためにタブの `execute` の有無で見る。
  */
 const executeInfo = computed(() => activeTab.value?.execute);
-/** 行数に意味がある文は件数を、意味が無い文（DDL）は完了だけを伝える */
+/**
+ * 行数に意味がある文は件数を、意味が無い文（DDL）は完了だけを伝える。
+ *
+ * **手続きの結果セットは数を必ず言う。** 表に出せるのは 1 個目だけなので、
+ * 2 個以上あることを黙っていると「全部見た」と思わせてしまう。
+ * 上限で切ったことも同じ理由で言う（続きは取りに行けない）。
+ */
 const executeMessage = computed(() => {
   const e = executeInfo.value;
   if (!e) return "";
-  return e.hasRowCount ? `${e.updateCount} 行に影響しました。` : "実行しました。";
+  const head = e.hasRowCount ? `${e.updateCount} 行に影響しました。` : "実行しました。";
+  if (e.resultSets === undefined) return head;
+  const many = e.resultSets > 1 ? `結果セット ${e.resultSets} 個のうち 1 個目を表示しています。` : "結果セットを表示しています。";
+  const cut = e.truncated ? `先頭 ${rows.value.length} 件だけです（続きは取得しません）。` : "";
+  return `${head}${many}${cut}`;
 });
 const resultSetId = computed(() => activeTab.value?.resultSetId ?? "");
 const expired = computed(() => activeTab.value?.expired ?? false);
@@ -417,7 +435,9 @@ async function executeOne(one: string, position: number, total: number): Promise
               updateCount: Number(data.updateCount ?? 0),
               hasRowCount: Boolean(data.hasRowCount),
               ...(data.warning ? { warning: data.warning } : {}),
-              ...(Array.isArray(data.outputs) ? { outputs: data.outputs } : {})
+              ...(Array.isArray(data.outputs) ? { outputs: data.outputs } : {}),
+              ...(typeof data.resultSets === "number" ? { resultSets: data.resultSets } : {}),
+              ...(data.truncated ? { truncated: true } : {})
             }
           }
         : {})
@@ -953,6 +973,7 @@ function download(): void {
       <strong>CREATE PROCEDURE / FUNCTION / TRIGGER はそのまま貼れます</strong>
       （BEGIN … END の中の「;」では切りません）。
       CALL の出力パラメーターは「?」と書くと値が返ります（入力に値が要る位置には値を書いてください）。
+      手続きが返す結果セットも表に出ます（<strong>出せるのは 1 個目だけ</strong>）。
       <br />
       Ctrl+/ でコメントの切り替え、Tab / Shift+Tab で字下げ。
       <strong>表名や別名に「.」を打つと列の候補、ライブラリー名に「.」を打つと表の候補が出ます</strong>
@@ -992,8 +1013,12 @@ function download(): void {
       >
         <span class="rtab-no">{{ t.index }}</span>
         <span class="rtab-name">{{ summarizeSql(t.sql) }}</span>
-        <!-- 非クエリ文は行が無い。**行数の意味が無い文は「済」**（0 と出すと 0 行に見える） -->
-        <span v-if="t.execute" class="rtab-count">{{ t.execute.hasRowCount ? t.execute.updateCount : "済" }}</span>
+        <!--
+          非クエリ文は行が無い。**行数の意味が無い文は「済」**（0 と出すと 0 行に見える）。
+          ただし手続きの結果セットは行があるので、そちらは件数を出す
+        -->
+        <span v-if="t.execute && t.rows.length" class="rtab-count">{{ t.rows.length }}</span>
+        <span v-else-if="t.execute" class="rtab-count">{{ t.execute.hasRowCount ? t.execute.updateCount : "済" }}</span>
         <span v-else class="rtab-count">{{ t.rows.length }}{{ t.hasMore ? "+" : "" }}</span>
       </button>
 

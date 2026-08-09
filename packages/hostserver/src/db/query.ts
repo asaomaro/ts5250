@@ -223,6 +223,67 @@ export async function queryLimited(
 }
 
 /**
+ * **手続きが返した結果セット**を読む（`CALL` → `SQLCODE +466` のあと）。
+ *
+ * `queryLimited` と違い**文を準備しない**——準備も実行も済んでいて、
+ * ホスト側にカーソルがぶら下がっている状態から始める（`execute.ts` が呼ぶ）。
+ * 列定義は prepare ではなく**この open の応答**に載る（CALL は準備の時点では
+ * 結果の形が決まらない。SR-OSAKA で実測）。
+ *
+ * **占有はしない。** 呼び出し側（`executeStatement`）が既に握っている区間の続きなので、
+ * ここで `acquire()` すると自分自身と衝突する。
+ */
+export async function readProcedureResultSet(
+  conn: DbConnection,
+  opts: { statement: string; cursor: string; limit: number; lob?: LobOptions }
+): Promise<LimitedResult> {
+  const opened = await conn.request({
+    reqId: DB_REQ.openAndDescribe,
+    orsBitmap:
+      ORS.sendReplyImmediately | ORS.dataFormat | ORS.extendedColumnDescriptors | ORS.sqlca,
+    params: [
+      identifier(DB_CP.prepareStatementName, opts.statement),
+      identifier(DB_CP.cursorName, opts.cursor)
+    ],
+    allowTemplateError: true
+  });
+  checkSqlca(opened, "open procedure result set");
+
+  const rawExt = findParam(opened, DB_CP.superExtendedDataFormat);
+  const rawOrig = findParam(opened, DB_CP.dataFormat);
+  let format: ResultFormat;
+  if (rawExt && rawExt.length > 0) {
+    const ext = parseSuperExtendedDataFormat(rawExt);
+    format = { columns: ext.columns.map(toColumnMeta), recordSize: ext.recordSize };
+  } else if (rawOrig && rawOrig.length > 0) {
+    format = parseDataFormat(rawOrig);
+  } else {
+    const t = opened.dbTemplate;
+    throw new As400Error(
+      "PROTOCOL_ERROR",
+      `手続きの結果セットの列定義が返りませんでした（rcClass=${t.rcClass}, code=${t.rcClassReturnCode}）`
+    );
+  }
+
+  const rows: Row[] = [];
+  let truncated = false;
+  try {
+    // **上限＋1 行まで読む**（`queryLimited` と同じ理由。ちょうどのときに嘘をつかない）
+    for await (const row of fetchAll(conn, format, DEFAULT_BLOCK_SIZE, opts.limit + 1, opts.cursor)) {
+      if (rows.length >= opts.limit) {
+        truncated = true;
+        break;
+      }
+      rows.push(row);
+    }
+  } finally {
+    await closeCursor(conn, opts.cursor);
+  }
+  if (opts.lob) await fillLobs(conn, rows, opts.lob);
+  return { columns: format.columns, rows, truncated };
+}
+
+/**
  * カーソルを開いたまま「列定義」と「行のジェネレータ」を返す。
  *
  * `stream()` は列定義を返さないため、**画面のページング**のように
@@ -407,7 +468,9 @@ async function* fetchAll(
   conn: DbConnection,
   format: ResultFormat,
   blockSize: number,
-  maxRows?: number
+  maxRows?: number,
+  /** 読むカーソル。手続きの結果セットは別名のカーソルで開く（既定は SELECT 用） */
+  cursor: string = CURSOR_NAME
 ): AsyncGenerator<Row, void, undefined> {
   let sent = 0;
   for (;;) {
@@ -418,7 +481,7 @@ async function* fetchAll(
       reqId: DB_REQ.fetch,
       orsBitmap: ORS.sendReplyImmediately | ORS.resultData | ORS.sqlca,
       params: [
-        identifier(DB_CP.cursorName, CURSOR_NAME),
+        identifier(DB_CP.cursorName, cursor),
         num(DB_CP.blockingFactor, want, 4)
       ],
       allowTemplateError: true
@@ -509,11 +572,11 @@ function isLobPlaceholder(v: DbValue): v is LobPlaceholder {
   return typeof v === "object" && v !== null && (v as LobPlaceholder).kind === "lob";
 }
 
-async function closeCursor(conn: DbConnection): Promise<void> {
+async function closeCursor(conn: DbConnection, cursor: string = CURSOR_NAME): Promise<void> {
   try {
     await conn.request({
       reqId: DB_REQ.closeCursor,
-      params: [identifier(DB_CP.cursorName, CURSOR_NAME)],
+      params: [identifier(DB_CP.cursorName, cursor)],
       allowTemplateError: true
     });
   } catch (e) {
