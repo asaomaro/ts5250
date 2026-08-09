@@ -206,7 +206,7 @@ describe("成否の判定", () => {
   });
 });
 
-describe("パラメータマーカー付きは断る", () => {
+describe("パラメータマーカー付きは断る（CALL を除く）", () => {
   it("? を含む文は実行前に断る（埋める道が無いまま実行させない）", async () => {
     const { conn, sent } = fakeConn([OK, OK]);
     const err = await executeStatement(conn, "DELETE FROM T WHERE ID = ?").catch((e: unknown) => e);
@@ -219,5 +219,127 @@ describe("パラメータマーカー付きは断る", () => {
   it("文字列リテラルの中の ? は断らない", async () => {
     const { conn } = fakeConn([OK, OK]);
     await expect(executeStatement(conn, "UPDATE T SET S = '?'")).resolves.toBeDefined();
+  });
+});
+
+/**
+ * **`CALL` の `?` だけは通す**。あれは値を書く場所ではなく**出力を受け取る場所**で、
+ * 断ると手続きの OUT を画面から見る手段が無くなる（実機で経路を実測）。
+ * DML の `?` を通さないのは従来どおり——値の無いまま NULL を書き込んでしまうため。
+ */
+describe("CALL の出力パラメーター", () => {
+  const CP_MARKER_FORMAT_REPLY = 0x3813;
+  const CP_EXT_RESULT_DATA = 0x380e;
+  const REQ_CHANGE_DESCRIPTOR = 0x1e00;
+
+  /** マーカー形式 1 つ（DECIMAL(7,2)、4 バイト）。ヘッダー 16 ＋ 記述子 48 */
+  function markerFormat(): Uint8Array {
+    const out = new Uint8Array(16 + 48);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, 1); // 列数
+    v.setUint32(12, 4); // 行サイズ
+    const at = 16;
+    v.setUint16(at + 0, 48); // 記述子長
+    v.setUint16(at + 2, 485); // DECIMAL（NULL 可の +1 は付けない）
+    v.setUint32(at + 4, 4); // バイト長
+    v.setUint16(at + 8, 2); // 位取り
+    v.setUint16(at + 10, 7); // 精度
+    v.setUint16(at + 12, 0); // CCSID
+    return out;
+  }
+
+  /** 実行後の応答に載る出力値（+17.00 を 4 バイトのパック 10 進で） */
+  function outputRow(): Uint8Array {
+    const out = new Uint8Array(20 + 2 + 4);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, 1); // 行数
+    v.setUint16(8, 1); // 列数
+    v.setUint16(10, 2); // 指標サイズ
+    v.setUint32(16, 4); // 行サイズ
+    out.set([0x00, 0x01, 0x70, 0x0f], 22);
+    return out;
+  }
+
+  const PREP_WITH_MARKER = {
+    params: [
+      { cp: CP_SQLCA, value: sqlca(0) },
+      { cp: CP_MARKER_FORMAT_REPLY, value: markerFormat() }
+    ]
+  };
+  const EXEC_WITH_OUTPUT = {
+    params: [
+      { cp: CP_SQLCA, value: sqlca(0) },
+      { cp: CP_EXT_RESULT_DATA, value: outputRow() }
+    ]
+  };
+
+  it("形式を登録してから実行し、出力値を返す", async () => {
+    const { conn, sent } = fakeConn([PREP_WITH_MARKER, { params: [] }, EXEC_WITH_OUTPUT]);
+    const res = await executeStatement(conn, "CALL P(1, 2.25, ?)");
+
+    expect(sent.map((f) => f.reqId)).toEqual([
+      REQ_PREPARE_AND_DESCRIBE,
+      REQ_CHANGE_DESCRIPTOR,
+      REQ_EXECUTE
+    ]);
+    expect(res.outputs).toEqual(["17.00"]);
+  });
+
+  /** 値は持たないので NULL を送る（どの位置が入力かは分からない。docstring の判断） */
+  it("入力としては NULL を送る", async () => {
+    const { conn, sent } = fakeConn([PREP_WITH_MARKER, { params: [] }, EXEC_WITH_OUTPUT]);
+    await executeStatement(conn, "CALL P(1, 2.25, ?)");
+
+    const data = sent[2]!.params.find((p) => p.cp === CP_MARKER_DATA)!;
+    // 指標はヘッダー（20 バイト）の直後。0xFFFF が NULL
+    const v = new DataView(data.value.buffer, data.value.byteOffset);
+    expect(v.getUint16(20)).toBe(0xffff);
+  });
+
+  it("マーカーの無い CALL は今までどおり（形式の登録に行かない）", async () => {
+    const { conn, sent } = fakeConn([
+      { params: [{ cp: CP_SQLCA, value: sqlca(0) }, { cp: CP_MARKER_FORMAT_REPLY, value: new Uint8Array(0) }] },
+      OK
+    ]);
+    const res = await executeStatement(conn, "CALL QSYS2.QCMDEXC('DSPLIBL')");
+    expect(sent.map((f) => f.reqId)).toEqual([REQ_PREPARE_AND_DESCRIBE, REQ_EXECUTE]);
+    expect(res.outputs).toBeUndefined();
+  });
+
+  /**
+   * **出力が読めなくても実行は成功している。** ここで投げると
+   * 「手続きは動いたのに失敗と表示される」ことになる。
+   */
+  it("出力を復号できなくても成功として返す", async () => {
+    const { conn } = fakeConn([
+      PREP_WITH_MARKER,
+      { params: [] },
+      { params: [{ cp: CP_SQLCA, value: sqlca(0) }, { cp: CP_EXT_RESULT_DATA, value: new Uint8Array(5) }] }
+    ]);
+    const res = await executeStatement(conn, "CALL P(?)");
+    expect(res.hasRowCount).toBe(false);
+    expect(res.outputs).toBeUndefined();
+  });
+});
+
+/**
+ * **ホストが言ったことを捨てない。** SQLCA が空になる失敗は実在する
+ * （結果セットを返す手続きの CALL は `rcClass=2 / -403` ＋ SQLCA 0 バイト。実機で実測）。
+ * 理由を落とすと「判定できません」しか出ず、利用者は原因に辿り着けない。
+ */
+describe("失敗の理由", () => {
+  const CP_MESSAGE_ID = 0x3801;
+
+  it("SQLCA が無いときはホストのメッセージと rcClass を添える", async () => {
+    // メッセージ ID は CCSID(2) ＋ 本文（EBCDIC 37 の "PWS0011"）
+    const id = Uint8Array.from([0x00, 0x25, 0xd7, 0xe6, 0xe2, 0xf0, 0xf0, 0xf1, 0xf1]);
+    const request = vi.fn(async () => ({
+      params: [{ cp: CP_MESSAGE_ID, value: id }],
+      dbTemplate: { rcClass: 2, rcClassReturnCode: -403 }
+    }));
+    const conn = { request, acquire: () => () => {} } as unknown as DbConnection;
+    const err = await executeStatement(conn, "CALL P()").catch((e: unknown) => e);
+    expect(String((err as Error).message)).toContain("rcClass=2 rc=-403");
+    expect(String((err as Error).message)).toContain("PWS0011");
   });
 });

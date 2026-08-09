@@ -20,6 +20,16 @@
  *
  * コミットメント制御は使っていない。**成功と確認できたときだけ成功として扱う**
  * ——SQLCA が読めない応答は失敗とする（`insert.ts` と同じ安全側の判断）。
+ *
+ * ## `CALL` の `?`（出力パラメーター）
+ *
+ * `CALL P(1, ?)` の `?` は**値を書く場所ではなく、結果を受け取る場所**である。
+ * 断ってしまうと手続きの OUT を画面から見る手段が無くなるので、CALL に限って通す
+ * （`insert.ts` と同じ `changeDescriptor` → `execute` の道を使い、
+ * 実行後の応答に載る値を読む。実機で実測）。
+ *
+ * **入力としては NULL を送る。** 位置ごとに IN か OUT かはこちらには分からず、
+ * 値を書く UI も無い。入力に値が要る位置には値をそのまま書いてもらう。
  */
 import { As400Error } from "@ts5250/base";
 import { childLog } from "@ts5250/base";
@@ -28,8 +38,13 @@ import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
 import type { DbConnection, DbReply } from "./db-connection.js";
 import { parseSqlca } from "./db-reply.js";
+import { parseExtendedResultData } from "./db-reply-ext.js";
+import { parseMarkerFormat, type MarkerFormat } from "./marker-format.js";
+import { encodeMarkerRow, buildMarkerData } from "./marker-encode.js";
+import { decodeRow, type ColumnMeta, type DbValue } from "./db-decode.js";
+import { typeName, jsTypeOf } from "./db-types.js";
 import { SqlError } from "./query.js";
-import { hasParameterMarker, isRowCountStatement } from "./statement-kind.js";
+import { hasParameterMarker, isCallStatement, isRowCountStatement } from "./statement-kind.js";
 
 const log = childLog({ component: "hostserver-sql-execute" });
 
@@ -44,6 +59,8 @@ const IDENTIFIER_CCSID = 37;
 const STATEMENT_TYPE_OTHER = 1;
 /** この経路が使う文名。`insert.ts` の `ASUPLOAD` とは**別にする** */
 const STATEMENT_NAME = "ASEXEC";
+/** マーカー・ディスクリプタのハンドル（RPB ハンドルとは別の欄） */
+const DESCRIPTOR_HANDLE = 1;
 
 /** 結果を返さない文の実行結果 */
 export interface ExecuteResult {
@@ -60,21 +77,28 @@ export interface ExecuteResult {
    * 捨てると「作られたのに何も言われない」になる。
    */
   warning?: { sqlCode: number; sqlState: string };
+  /**
+   * `?` に対応する値（`CALL` の出力パラメーター）。マーカーが無い文では付かない。
+   * 並びは文中の `?` と同じ順。**入力として送った位置には NULL が返る**。
+   */
+  outputs?: DbValue[];
 }
 
 /**
  * 結果を返さない文を実行する。
  *
  * @throws `SqlError` SQLCODE が負のとき（構文誤り・存在しない表・経路違い `-518`）
- * @throws `As400Error("CONFIG_ERROR")` パラメータマーカー（`?`）を含むとき
+ * @throws `As400Error("CONFIG_ERROR")` `CALL` 以外でパラメータマーカー（`?`）を含むとき
  */
 export async function executeStatement(conn: DbConnection, sql: string): Promise<ExecuteResult> {
-  if (hasParameterMarker(sql)) {
+  const markersAllowed = isCallStatement(sql);
+  if (hasParameterMarker(sql) && !markersAllowed) {
     // `CONFIG_ERROR` を使うのは「**指定の不備**で、直す先はこちら側」だから（`errors.ts` の定義。
     // HTTP 400）。`SQL_ERROR` はホストが判定した誤りに使う——ここはホストへ行く前に断っている
     throw new As400Error(
       "CONFIG_ERROR",
-      "パラメータマーカー（?）を含む文はこの経路では実行できません（値を埋めた文を送ってください）"
+      "パラメータマーカー（?）を含む文はこの経路では実行できません（値を埋めた文を送ってください）。" +
+        "? を使えるのは CALL の出力パラメーターだけです"
     );
   }
   const release = conn.acquire();
@@ -93,14 +117,32 @@ export async function executeStatement(conn: DbConnection, sql: string): Promise
     });
     checkSqlca(prep, "文を準備できませんでした");
 
-    // 2) 実行。**マーカーデータは載せない**（マーカーが無い文だけを扱う。research F2）
+    // **マーカーが要るかはサーバーの申告で決める**（文の `?` を数えない）。
+    // 形式は長さ 0 で返ることがあり（マーカー無し）、そのときは登録するものが無い
+    const rawFormat = markersAllowed ? findParam(prep, DB_CP.parameterMarkerFormat) : undefined;
+    const format =
+      rawFormat && rawFormat.length > 0 ? parseMarkerFormat(rawFormat) : undefined;
+    const withMarkers = format !== undefined && format.fields.length > 0;
+    if (withMarkers) await changeDescriptor(conn, format);
+
+    // 2) 実行。マーカーが無ければデータは載せない（research F2）
     const exec = await conn.request({
       reqId: DB_REQ.execute,
-      // **診断ビットを常に立てる**。立てないと失敗が空の SQLCA だけになり原因が分からない
-      orsBitmap: ORS.sendReplyImmediately | ORS.sqlca | ORS.messageId | ORS.firstLevelText,
+      // **診断ビットを常に立てる**。立てないと失敗が空の SQLCA だけになり原因が分からない。
+      // マーカーがあるときは出力値が要るので結果データも要求する
+      orsBitmap:
+        ORS.sendReplyImmediately |
+        ORS.sqlca |
+        ORS.messageId |
+        ORS.firstLevelText |
+        (withMarkers ? ORS.resultData : 0),
+      ...(withMarkers ? { parameterMarkerHandle: DESCRIPTOR_HANDLE } : {}),
       params: [
         identifier(DB_CP.prepareStatementName, STATEMENT_NAME),
-        num(DB_CP.sqlStatementType, STATEMENT_TYPE_OTHER, 2)
+        num(DB_CP.sqlStatementType, STATEMENT_TYPE_OTHER, 2),
+        ...(withMarkers
+          ? [{ cp: DB_CP.extendedParameterMarkerData, value: nullMarkerData(format) }]
+          : [])
       ],
       allowTemplateError: true
     });
@@ -116,10 +158,86 @@ export async function executeStatement(conn: DbConnection, sql: string): Promise
       result.warning = { sqlCode: ca.sqlCode, sqlState: ca.sqlState };
       log.debug(`statement succeeded with warning: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}`);
     }
+    if (withMarkers) {
+      const outputs = readOutputs(exec, format);
+      if (outputs) result.outputs = outputs;
+    }
     return result;
   } finally {
     release();
   }
+}
+
+/** マーカー形式を登録する（`insert.ts` と同じ手順・同じ理由で SQLCA も要求する） */
+async function changeDescriptor(conn: DbConnection, format: MarkerFormat): Promise<void> {
+  const reply = await conn.request({
+    reqId: DB_REQ.changeDescriptor,
+    orsBitmap: ORS.sendReplyImmediately | ORS.sqlca | ORS.messageId | ORS.firstLevelText,
+    // **RPB ハンドルではなくマーカーのハンドル欄**（template のオフセット 16）
+    parameterMarkerHandle: DESCRIPTOR_HANDLE,
+    params: [{ cp: DB_CP.extendedParameterMarkerFormat, value: format.raw }],
+    allowTemplateError: true
+  });
+  // **ここは SQLCA を求めない。** 成功しても SQLCA を返さない（実測では
+  // `rcClass=0` ＋「PWS0002 機能が正常に完了した。」だけ）。求めると必ず失敗する。
+  // 書き込みではなく形式の登録なので、template の成否で足りる
+  const raw = findParam(reply, DB_CP.sqlca);
+  const ca = raw ? parseSqlca(raw) : undefined;
+  if (reply.dbTemplate.rcClass !== 0 || (ca !== undefined && ca.sqlCode < 0)) {
+    throw new As400Error(
+      "SQL_ERROR",
+      `パラメータマーカーの形式を登録できませんでした${hostDetail(reply)}`
+    );
+  }
+}
+
+/** すべて NULL の 1 行。**入力値は持たない**（上の docstring の判断） */
+function nullMarkerData(format: MarkerFormat): Uint8Array {
+  const row = encodeMarkerRow(format, format.fields.map(() => null));
+  return buildMarkerData(format, [row]);
+}
+
+/**
+ * 実行後の応答から `?` の値を読む。
+ *
+ * マーカーの形式は**結果列と同じ並び**なので、そのまま列として復号できる。
+ * 応答に結果データが無ければ `undefined`（出力を持たない手続きはこれになる）。
+ */
+function readOutputs(reply: DbReply, format: MarkerFormat): DbValue[] | undefined {
+  const raw = findParam(reply, DB_CP.extendedResultData) ?? findParam(reply, DB_CP.resultData);
+  if (!raw || raw.length === 0) return undefined;
+  try {
+    const { rows, nulls } = parseExtendedResultData(raw);
+    const row = rows[0];
+    if (!row) return undefined;
+    const columns = format.fields.map(markerColumn);
+    const decoded = decodeRow(row, columns, nulls[0] ?? []);
+    return columns.map((c) => decoded[c.name] ?? null);
+  } catch (e) {
+    // **出力が読めなくても実行そのものは成功している。** ここで投げると
+    // 「手続きは動いたのに失敗と表示される」ことになる
+    log.debug(`could not decode output parameters: ${String(e)}`);
+    return undefined;
+  }
+}
+
+/** マーカー 1 つを列として見る（復号は列と同じ規則） */
+function markerColumn(f: MarkerFormat["fields"][number], i: number): ColumnMeta {
+  // 型コードは NULL 可なら +1 されている（結果列と同じ規則）
+  const nullable = f.sqlType % 2 === 1;
+  const type = nullable ? f.sqlType - 1 : f.sqlType;
+  return {
+    name: `?${i + 1}`,
+    type,
+    typeName: typeName(type),
+    offset: f.offset,
+    length: f.length,
+    scale: f.scale,
+    precision: f.precision,
+    ccsid: f.ccsid,
+    nullable,
+    jsType: jsTypeOf(type)
+  };
 }
 
 /**
@@ -137,12 +255,52 @@ function checkSqlca(reply: DbReply, what: string): { sqlCode: number; sqlState: 
   const raw = findParam(reply, DB_CP.sqlca);
   const ca = raw ? parseSqlca(raw) : undefined;
   if (!ca) {
-    throw new As400Error("PROTOCOL_ERROR", `${what}（応答に SQLCA がなく成否を判定できません）`);
+    // **ホストが言ったことを捨てない。** SQLCA が空になる失敗は実在する
+    // （結果セットを返す手続きの `CALL` は `rcClass=2 / -403` で SQLCA が 0 バイト。
+    // 実機で実測）。理由を落とすと「判定できません」しか出ず、原因に辿り着けない
+    throw new As400Error(
+      "PROTOCOL_ERROR",
+      `${what}（応答に SQLCA がなく成否を判定できません）${hostDetail(reply)}`
+    );
   }
   if (ca.sqlCode < 0) {
-    throw new SqlError(ca.sqlCode, ca.sqlState, `${what}: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}`);
+    throw new SqlError(
+      ca.sqlCode,
+      ca.sqlState,
+      `${what}: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}${hostDetail(reply)}`
+    );
   }
   return ca;
+}
+
+/**
+ * ホストが添えた診断（`rcClass` とメッセージ）を読める形にする。
+ *
+ * **メッセージ本文の CCSID は本文の先頭 2 バイトに載っている**——固定で 37 と読むと
+ * 日本語のメッセージが化けて、結局読めない（実測で「文字変換中にエラーが起こった。」が
+ * 判読不能になった）。
+ */
+function hostDetail(reply: DbReply): string {
+  const parts: string[] = [];
+  const t = reply.dbTemplate;
+  if (t.rcClass !== 0) parts.push(`rcClass=${t.rcClass} rc=${t.rcClassReturnCode}`);
+  const id = findParam(reply, DB_CP.messageId);
+  // メッセージ ID は CCSID(2) ＋ 本文（長さ欄を持たない）
+  if (id && id.length > 2) parts.push(decodeHostText(id, 2));
+  const text = findParam(reply, DB_CP.messageText);
+  // 本文は CCSID(2) ＋ 長さ(2) ＋ 本体
+  if (text && text.length > 4) parts.push(decodeHostText(text, 4));
+  return parts.length > 0 ? ` [${parts.join(" ")}]` : "";
+}
+
+/** 先頭 2 バイトの CCSID で復号する。読めない CCSID は捨てる（診断は付加情報） */
+function decodeHostText(value: Uint8Array, at: number): string {
+  try {
+    const ccsid = (value[0]! << 8) | value[1]!;
+    return codecForCcsid(ccsid).decode(value.subarray(at)).trim();
+  } catch {
+    return "";
+  }
 }
 
 function sqlText(cp: number, value: string): { cp: number; value: Uint8Array } {

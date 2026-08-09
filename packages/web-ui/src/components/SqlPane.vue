@@ -102,6 +102,11 @@ interface ExecuteInfo {
   hasRowCount: boolean;
   /** 警告つき成功（`7905` など）。**捨てると「作られたのに何も言われない」になる** */
   warning?: { sqlCode: number; sqlState: string };
+  /**
+   * `CALL P(…, ?)` の出力パラメーター（`?` と同じ並び）。
+   * **これが手続きの結果そのもの**なので、出さないと呼んだ意味が分からない。
+   */
+  outputs?: (string | number | boolean | null)[];
 }
 
 const tabs = ref<ResultTab[]>([]);
@@ -411,7 +416,8 @@ async function executeOne(one: string, position: number, total: number): Promise
             execute: {
               updateCount: Number(data.updateCount ?? 0),
               hasRowCount: Boolean(data.hasRowCount),
-              ...(data.warning ? { warning: data.warning } : {})
+              ...(data.warning ? { warning: data.warning } : {}),
+              ...(Array.isArray(data.outputs) ? { outputs: data.outputs } : {})
             }
           }
         : {})
@@ -933,10 +939,20 @@ function download(): void {
       />
     </div>
     <p v-show="!split.maximized.value" class="hint">
-      SELECT も更新（INSERT / UPDATE / DELETE / CREATE …）も実行できます（Ctrl+Enter で実行）。
+      SELECT も更新（INSERT / UPDATE / DELETE / MERGE）も定義（CREATE / DROP / ALTER）も実行できます
+      （Ctrl+Enter で実行）。
       <strong>更新は取り消せません。</strong><strong>「;」で区切ると順に実行し、
       結果ごとにタブが出ます。</strong>下までスクロールするか End / PageDown で続きを読み足します
       （「1 度に取得」はその 1 回ぶんの件数）。
+      <br />
+      <!--
+        **手続き・関数の作り方をここに書く。** `BEGIN … END` の中の `;` は区切りにしない
+        と決めたので、他の SQL と同じように貼って実行できる——それが分からないと
+        「`;` で切られるはず」と思って避けてしまう
+      -->
+      <strong>CREATE PROCEDURE / FUNCTION / TRIGGER はそのまま貼れます</strong>
+      （BEGIN … END の中の「;」では切りません）。
+      CALL の出力パラメーターは「?」と書くと値が返ります（入力に値が要る位置には値を書いてください）。
       <br />
       Ctrl+/ でコメントの切り替え、Tab / Shift+Tab で字下げ。
       <strong>表名や別名に「.」を打つと列の候補、ライブラリー名に「.」を打つと表の候補が出ます</strong>
@@ -1041,12 +1057,33 @@ function download(): void {
       結果を返さない文（DML / DDL）の結果。**表の代わりにここへ出す**。
       警告（SQLCODE > 0）も併記する——捨てると「作られたのに何も言われない」になる
     -->
-    <p v-if="executeInfo" class="done">
-      {{ executeMessage }}
-      <span v-if="executeInfo.warning" class="detail">
-        （警告 SQLCODE={{ executeInfo.warning.sqlCode }} SQLSTATE={{ executeInfo.warning.sqlState }}）
-      </span>
-    </p>
+    <!--
+      **`v-if` の連なりを切らない。** 間に別の要素を挟むと `v-else-if` が繋がらず、
+      非クエリ文の結果と一緒に「該当する行はありません」まで出る（テストで踏んだ）
+    -->
+    <template v-if="executeInfo">
+      <p class="done">
+        {{ executeMessage }}
+        <span v-if="executeInfo.warning" class="detail">
+          （警告 SQLCODE={{ executeInfo.warning.sqlCode }} SQLSTATE={{ executeInfo.warning.sqlState }}）
+        </span>
+      </p>
+      <!--
+        `CALL P(…, ?)` の出力パラメーター。**表と同じ体裁で出す**——手続きの結果は
+        これしか無いので、本文と同じ重みで読めないと呼んだ意味が分からない
+      -->
+      <table v-if="executeInfo.outputs" class="outparams">
+        <thead>
+          <tr><th>?</th><th>値</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(v, i) in executeInfo.outputs" :key="i">
+            <td class="n">?{{ i + 1 }}</td>
+            <td :class="{ null: v === null }">{{ v === null ? "NULL" : v }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
 
     <p v-else-if="executed && !error && !loading && !rows.length" class="empty">該当する行はありません。</p>
     <p v-else-if="!executed && !error && !rows.length" class="empty">
@@ -1187,6 +1224,11 @@ th, td { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .empty { color: var(--muted); text-align: center; }
 /* 非クエリ文の結果。**エラーと見間違えないよう**赤にはしない（成功の報告） */
 .done { padding: 8px 4px; border-left: 3px solid var(--accent); }
+/* 出力パラメーター。**結果表と同じ体裁**にする（読み方を 2 通り覚えさせない）。
+   **幅は中身ぶんだけ**——親が伸ばすので `width: auto` では効かず、`?` と値の間に
+   画面幅ぶんの空白が空いた（実ブラウザで確認）。`max-content` と `align-self` で止める */
+.outparams { width: max-content; max-width: 100%; align-self: start; margin: 0 4px 8px; }
+.outparams .n { color: var(--muted); }
 /* 地の色を明示する。親（.group）が半透明の緑を重ねているため、
    固定列にだけ色を敷くと**そこだけ色がずれる**（実ブラウザの拡大で判明）。
    表の領域を不透明にして、固定列と本文を同じ地の上に載せる */

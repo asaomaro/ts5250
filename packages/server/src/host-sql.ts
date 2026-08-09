@@ -153,6 +153,10 @@ async function runNonQuery(
       updateCount: result.updateCount,
       hasRowCount: result.hasRowCount,
       ...(result.warning ? { warning: result.warning } : {}),
+      // `CALL P(…, ?)` の出力パラメーター。**bigint は文字列にする**（他の経路と同じ理由）
+      ...(result.outputs
+        ? { outputs: result.outputs.map((v) => (typeof v === "bigint" ? v.toString() : v)) }
+        : {}),
       connection: info
     });
   } catch (e) {

@@ -172,3 +172,24 @@ describe("クエリと混ぜたとき", () => {
     w.unmount();
   });
 });
+
+/**
+ * **`CALL P(…, ?)` の出力パラメーター。** 手続きの結果はこれしか無いので、
+ * 出さないと呼んだ意味が分からない（実機で実機確認した経路）。
+ */
+describe("CALL の出力パラメーター", () => {
+  it("? の並びと値を表に出す", async () => {
+    mockSequence([{ body: { kind: "execute", updateCount: 0, hasRowCount: false, outputs: ["19.25", null] } }]);
+    const w = await run("CALL TESTLIB.P(1, ?, ?)");
+    const cells = w.findAll(".outparams tbody td").map((c) => c.text());
+    expect(cells).toEqual(["?1", "19.25", "?2", "NULL"]);
+    w.unmount();
+  });
+
+  it("出力が無ければ表は出ない（DDL・DML の見え方を変えない）", async () => {
+    mockSequence([{ body: executed(1, true) }]);
+    const w = await run("DELETE FROM QTEMP.T WHERE ID = 1");
+    expect(w.find(".outparams").exists()).toBe(false);
+    w.unmount();
+  });
+});

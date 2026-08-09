@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isNonQueryStatement, hasParameterMarker } from "../src/db/statement-kind.js";
+import { isNonQueryStatement, hasParameterMarker, isCallStatement } from "../src/db/statement-kind.js";
 
 /**
  * 文の振り分け。**誤ると利用者に「SELECT を書いたのに実行できない」と見える**
@@ -92,5 +92,20 @@ describe("パラメータマーカー", () => {
 
   it("文字列の中の -- はコメントではない", () => {
     expect(hasParameterMarker("UPDATE T SET S = '--' WHERE ID = ?")).toBe(true);
+  });
+});
+
+/**
+ * `CALL` だけは `?` を通す（`execute.ts`）。あれは値を書く場所ではなく
+ * **出力を受け取る場所**なので、断ると手続きの OUT を見る手段が無くなる。
+ */
+describe("isCallStatement", () => {
+  it("先頭の 1 語が CALL のときだけ true", () => {
+    expect(isCallStatement("CALL TESTLIB.P(1, ?)")).toBe(true);
+    expect(isCallStatement("  call p()")).toBe(true);
+    expect(isCallStatement("-- 呼ぶ\nCALL P()")).toBe(true);
+    expect(isCallStatement("SELECT * FROM CALL")).toBe(false);
+    expect(isCallStatement("CALLBACK")).toBe(false);
+    expect(isCallStatement("DELETE FROM T WHERE ID = ?")).toBe(false);
   });
 });
