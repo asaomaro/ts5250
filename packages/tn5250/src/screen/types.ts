@@ -2,7 +2,15 @@
 
 export type ScreenColor = "green" | "white" | "red" | "turquoise" | "yellow" | "pink" | "blue";
 
-export type CellKind = "sbcs" | "dbcs-lead" | "dbcs-tail" | "so" | "si" | "attr";
+/**
+ * セルの種類。
+ *
+ * `unmappable` は**ホストが「このコードページでは表せない」と言って送ってきた桁**
+ * （0x1F。`UNMAPPABLE` を参照）。文字は空白だが、**空白と区別できるようにする**
+ * ——区別しないと「ヘルプが虫食い」としか見えない。ACS も同じ桁を塗り潰しで描く
+ * （利用者提供の画面で確認）。
+ */
+export type CellKind = "sbcs" | "dbcs-lead" | "dbcs-tail" | "so" | "si" | "attr" | "unmappable";
 
 export interface Cell {
   /** 表示文字 1 文字。attr/so/si と nonDisplay は常に " " */

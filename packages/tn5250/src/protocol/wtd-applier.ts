@@ -352,10 +352,10 @@ function applyWtd(
        * 見出しや罫線が総崩れになる。オーダーとして扱うと解析が崩れ、レコード末尾の
        * READ ごと捨てて「応答待ち」で固まる。
        *
-       * **rawByte は渡さない**（`ORDER.UNKNOWN_1C` と同じ理由）。受信した文字バイトでは
-       * ないので、カタカナ表示モードが半角カナへ読み替えてしまう。
+       * **空白と区別できるようにする**（`setUnmappable`）——区別しないと
+       * 「ヘルプが虫食い」としか見えない。ACS も同じ桁を塗り潰しで描く。
        */
-      buf.setChar(addr++, " ");
+      buf.setUnmappable(addr++);
       unmappable++;
       continue;
     }

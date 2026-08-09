@@ -202,6 +202,10 @@ body {
 /* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
    文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */
 .a-colsep { border-left: 1px solid currentColor; }
+/* **表せない文字**（ホストが 0x1F で潰してきた桁）。文字色で塗り潰す——ACS と同じ見せ方。
+   **字を入れずに背景で描く**のが要点で、█ 等を入れると和文フォントで全角になり桁がずれる
+   （実測で 1.5〜2 倍）。反転（.a-reverse）が掛かっている桁でも読めるよう色は --cell に従う */
+.a-unmappable { background: var(--cell-bg, var(--cell)); }
 .a-blink { animation: blink5250 1.1s steps(1) infinite; }
 @keyframes blink5250 {
   50% { opacity: 0.25; }

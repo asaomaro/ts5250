@@ -67,7 +67,7 @@ const UNDISPLAYABLE = "\uFFFD";
  * 内部セル: 属性バイト or 文字（Unicode）。null = 未設定（既定属性の空白）。
  * charKind は so/si/dbcs-lead/dbcs-tail を保持（既定 sbcs。DBCS の桁位置維持に使う）。
  */
-type CharKind = "sbcs" | "so" | "si" | "dbcs-lead" | "dbcs-tail";
+type CharKind = "sbcs" | "so" | "si" | "dbcs-lead" | "dbcs-tail" | "unmappable";
 export type InternalCell =
   | { type: "attr"; byte: number }
   | { type: "char"; char: string; charKind: CharKind; rawByte?: number }
@@ -112,6 +112,8 @@ function cellKindFor(charKind: CharKind): CellKind {
       return "dbcs-lead";
     case "dbcs-tail":
       return "dbcs-tail";
+    case "unmappable":
+      return "unmappable";
     default:
       return "sbcs";
   }
@@ -582,6 +584,23 @@ export class ScreenBuffer {
     this.noteWrite(addr);
     this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char, charKind: "sbcs", ...(rawByte !== undefined ? { rawByte } : {}) };
+  }
+
+  /**
+   * 「このコードページでは表せない」とホストが言ってきた桁を置く。
+   *
+   * **文字は空白**（1 桁を占める）。描き分けは種類（`kind`）でするので、
+   * 幅の広い記号を入れて桁をずらす心配が無い——画面は `ch` 単位で桁を置いており、
+   * 全角になりうる字（█ 等）を入れると以降の桁が右へずれる（実測で 1.5〜2 倍）。
+   *
+   * **rawByte は渡さない**（`ORDER.UNKNOWN_1C` と同じ理由）。受信した文字バイトでは
+   * ないので、カタカナ表示モードが半角カナへ読み替えてしまう。
+   */
+  setUnmappable(addr: number): void {
+    this.checkAddr(addr);
+    this.noteWrite(addr);
+    this.dropRetainedInRow(addr);
+    this.cells[addr] = { type: "char", char: " ", charKind: "unmappable" };
   }
 
   /** SO/SI 制御桁を配置（見た目は空白・1 桁占有。DBCS 桁位置維持の要） */
