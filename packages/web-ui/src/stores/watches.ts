@@ -29,8 +29,6 @@ const state = reactive({
   histories: new Map<string, WatchEntryView[]>(),
   /** 監視ごとの未読（タブを開いたら 0 に戻す） */
   unread: new Map<string, number>(),
-  /** 一覧で選んでいる監視 */
-  selected: undefined as string | undefined,
   /** 直近のエラー（開始に失敗した等）。画面に出す */
   error: "",
   connected: false
@@ -38,12 +36,6 @@ const state = reactive({
 
 let client: WsClient | undefined;
 let connecting: Promise<void> | undefined;
-
-/** 選択中の監視の履歴を持っていなければ取り寄せる（一覧の到着後・行の選択時に呼ぶ） */
-function requestHistoryIfMissing(): void {
-  const id = state.selected;
-  if (id !== undefined && !state.histories.has(id)) client?.send({ type: "watch-history", watchId: id });
-}
 
 function onMessage(msg: WsServerMessage): void {
   switch (msg.type) {
@@ -56,14 +48,6 @@ function onMessage(msg: WsServerMessage): void {
           state.unread.delete(id);
         }
       }
-      if (state.selected && !msg.watches.some((w) => w.id === state.selected)) {
-        state.selected = msg.watches[0]?.id;
-      }
-      state.selected ??= msg.watches[0]?.id;
-      // **選んだ監視の履歴をここで取り寄せる。** 一覧が来ただけでは履歴は付いてこないので、
-      // リロード後は「監視は出ているのに履歴が空」になる（実機 E2E で踏んだ）。
-      // requirement の「開き直すと閉じていた間の到着が履歴にある」はここが要る
-      requestHistoryIfMissing();
       break;
     case "watch-entry": {
       const list = state.histories.get(msg.watchId) ?? [];
@@ -99,9 +83,6 @@ export const watchesStore = reactive({
   get watches(): WatchView[] {
     return state.watches;
   },
-  get selected(): string | undefined {
-    return state.selected;
-  },
   get error(): string {
     return state.error;
   },
@@ -109,9 +90,26 @@ export const watchesStore = reactive({
     return state.connected;
   },
 
-  /** 選択中の監視の履歴（新しいものが後ろ） */
-  get history(): WatchEntryView[] {
-    return state.selected ? (state.histories.get(state.selected) ?? []) : [];
+  /**
+   * その監視の履歴（新しいものが後ろ）。
+   *
+   * **選んでいる監視は画面側が持つ**——監視コンソールはシステムごとに分かれた
+   * （`watchScope.ts`）ので、選択が store にあると **2 枚のコンソールが 1 つの選択を
+   * 奪い合う**（片方で行を選ぶともう片方の履歴まで入れ替わる）。
+   */
+  historyOf(id: string | undefined): WatchEntryView[] {
+    return id === undefined ? [] : (state.histories.get(id) ?? []);
+  },
+
+  /**
+   * 履歴をまだ持っていなければ取り寄せる（行を選んだとき・一覧が届いたときに呼ぶ）。
+   *
+   * **一覧が来ただけでは履歴は付いてこない。** これを呼ばないとリロード後に
+   * 「監視は出ているのに履歴が空」になる（実機 E2E で踏んだ）。requirement の
+   * 「開き直すと閉じていた間の到着が履歴にある」はここが要る。
+   */
+  ensureHistory(id: string | undefined): void {
+    if (id !== undefined && !state.histories.has(id)) client?.send({ type: "watch-history", watchId: id });
   },
 
   /** その監視の未読件数（一覧の行に出す） */
@@ -119,7 +117,12 @@ export const watchesStore = reactive({
     return state.unread.get(id) ?? 0;
   },
 
-  /** 全監視の未読合計（**タブのバッジ**。requirement） */
+  /**
+   * 全監視の未読合計。
+   *
+   * **タブのバッジはこれではない**——コンソールがシステムごとに分かれてからは、
+   * そのタブに出る監視だけを数える（`watchScope.ts` の `unreadForTab`）。
+   */
   get totalUnread(): number {
     let n = 0;
     for (const v of state.unread.values()) n += v;
@@ -177,18 +180,16 @@ export const watchesStore = reactive({
     client?.send({ type: "watch-resume", watchId: id });
   },
 
-  /** 行を選ぶ。履歴を持っていなければ取り寄せる */
-  select(id: string): void {
-    state.selected = id;
-    requestHistoryIfMissing();
-  },
-
   /**
    * 未読を消す（**タブを開いたとき**）。プリンターの `markSpoolRead` と同じ挙動。
    * 履歴そのものは消さない。
+   *
+   * **消す範囲を受け取る。** コンソールはシステムごとに分かれたので、全部消すと
+   * 開いていないシステムの新着まで既読になり、そのタブのバッジが二度と出ない。
    */
-  markRead(): void {
-    state.unread.clear();
+  markRead(ids?: readonly string[]): void {
+    if (ids === undefined) state.unread.clear();
+    else for (const id of ids) state.unread.delete(id);
   },
 
   /** テスト用の初期化 */
@@ -196,7 +197,6 @@ export const watchesStore = reactive({
     state.watches = [];
     state.histories.clear();
     state.unread.clear();
-    state.selected = undefined;
     state.error = "";
     state.connected = false;
     client = undefined;

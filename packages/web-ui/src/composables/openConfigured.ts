@@ -3,6 +3,7 @@ import { systemsStore } from "../stores/systems.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { watchesStore } from "../stores/watches.js";
+import { makePaneTabId } from "../paneLabels.js";
 import { openSession, openPrinterSession } from "../session-controller.js";
 
 /**
@@ -87,7 +88,7 @@ async function open(ref: string, force = false): Promise<void> {
       const already = watchesStore.watches.some((x) => x.ref === s.ref);
       if (!already) await watchesStore.start(s.ref);
       else await watchesStore.connect();
-      openWatchConsole(); // 監視コンソールを開く（開いていればそこへ移動）
+      openWatchConsole(s.system); // 監視コンソールを開く（開いていればそこへ移動）
     } catch (e) {
       openError.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -127,16 +128,20 @@ async function open(ref: string, force = false): Promise<void> {
 
 /**
  * 監視コンソールのタブを開く（開いていればそこへ移動）。
- * **システムに紐づけない**——監視はサーバーのレジストリが所有し、1 枚で全部を出す。
+ *
+ * **システムごとに 1 枚**（`watchScope.ts`）。以前は紐づけずに 1 枚で全部を出していたが、
+ * それだとタブにシステムカラーの帯が付かない（利用者の指摘）。帯は「このタブはどの
+ * システムを相手にしているか」を表すものなので、他のアプリ系タブと同じく
+ * `watch:queues@own:a` の形にして、中身もそのシステムぶんに絞る。
  */
-function openWatchConsole(): void {
-  const tab = "watch:queues";
+function openWatchConsole(system: string): void {
+  const tab = makePaneTabId("watch:queues", system);
   const existing = workspaceStore.groups().find((g) => g.tabs.includes(tab));
   if (existing) {
     workspaceStore.setActiveTab(existing.id, tab);
     workspaceStore.focus(existing.id);
   } else {
-    workspaceStore.addSession(tab);
+    workspaceStore.addSession(tab, system);
   }
   workspaceStore.showLauncher = false;
 }

@@ -110,11 +110,17 @@ describe("dtaqwatch の接続", () => {
     w.unmount();
   });
 
-  it("監視コンソールのタブが開く", async () => {
+  /**
+   * **タブはそのシステムのもの**（`watchScope.ts`）。ID にシステムを載せないと
+   * タブ帯にシステムカラーが付かず、他のアプリ系タブと見え方が揃わない（利用者の指摘）。
+   */
+  it("監視コンソールのタブが**そのシステムで**開く", async () => {
     const w = mount(LauncherPane);
     await flushPromises();
     await connect(w);
-    expect(workspaceStore.groups().some((g) => g.tabs.includes("watch:queues"))).toBe(true);
+    const tab = "watch:queues@own:s-1";
+    expect(workspaceStore.groups().some((g) => g.tabs.includes(tab))).toBe(true);
+    expect(workspaceStore.systemOf(tab)).toBe("own:s-1");
     w.unmount();
   });
 
