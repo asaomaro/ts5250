@@ -75,7 +75,7 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
   待ち行列ごと止まる）。詰まったスプールは**取得経路（pull）で救出**し、日本語も桁揃えのまま読めます
   （→ [プリンターセッション](#プリンターセッションスプール受信) / [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md)）
 - ブラウザではセッションと同様に**タブ**で表示（スプール一覧＋ビュー）、テキスト保存・印刷
-- **サーバー側 PDF**: 受信スプールを PDF 化（Noto Sans Mono CJK で日本語も等幅）。サーバー設定のセッションに `printer` を書くと
+- **サーバー側 PDF**: 受信スプールを PDF 化（等幅 CJK フォントを OS から自動で探すので日本語も桁が揃う）。サーバー設定のセッションに `printer` を書くと
   **指定フォルダへ自動蓄積**・**物理プリンターへ自動印刷**、web-ui/MCP から **PDF ダウンロード**
 
 **PC コマンド（STRPCO / STRPCCMD）**
@@ -793,8 +793,12 @@ DBCS は SCS 中の SO/SI 付き全角を 2 桁のグリフに展開）。ブラ
 
 #### サーバー側 PDF / 蓄積 / 印刷
 
-受信スプールをサーバーで **PDF 化**でき（等幅・改ページ保持・SBCS/DBCS 対応。既定フォントは
-Noto Sans Mono CJK、無ければ Courier に degrade）、次を提供します。
+受信スプールをサーバーで **PDF 化**でき（等幅・改ページ保持・SBCS/DBCS 対応）、次を提供します。
+
+埋め込むフォントは**動いている OS から自動で探す**（Linux は Noto Sans Mono CJK、
+Windows は MS ゴシック／BIZ-UDGothic）。`.ttc` の中から**半角 1 : 全角 2 の等幅の書体**を
+実際に開いて選ぶので、フォント名を設定しなくてよい。見つからなければ Courier に degrade する
+（SBCS のみ・DBCS は化ける）。`printer.pdfFontPath` / `pdfFontName` を書けばその指定が優先される。
 
 - **PDF ダウンロード**: web-ui の「PDF ダウンロード」ボタン、または `GET /api/spool/:sessionId/:spoolId/pdf`、
   MCP `get_spool_pdf`（base64）でオンデマンド取得。
