@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import type { SpoolReport } from "@ts5250/tn5250";
 import { renderSpoolPdf, type PdfOptions } from "./pdf.js";
+import { printOnWindows, PAGE_BREAK } from "./print-windows.js";
 
 /**
  * プリンターセッションの受信スプールに対するサーバー側処理（PDF 自動蓄積・物理自動印刷）。
@@ -12,7 +13,12 @@ import { renderSpoolPdf, type PdfOptions } from "./pdf.js";
 export interface PrinterOutputConfig {
   /** 受信ごとに PDF を貯めるディレクトリ（プロファイル設定） */
   autoPdfDir?: string;
-  /** 受信ごとに自動印刷するプリンター名（lp -d の宛先） */
+  /**
+   * 受信ごとに自動印刷するプリンター名。
+   *
+   * 宛先の解釈は OS に任せる——Linux/macOS は `lp -d`、Windows は
+   * プリントキューの名前（`Get-Printer` の Name）。
+   */
   autoPrint?: string;
   /** PDF 生成オプション（フォント・サイズ等） */
   pdf?: PdfOptions;
@@ -40,6 +46,14 @@ export interface HandleReportResult {
 }
 
 const sanitize = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, "_");
+
+/**
+ * 論理ページを 1 本のテキストにする。**改ページは `\f`**——受け手（`print-windows.ts`）は
+ * ここで紙を分ける。ホストが決めた改ページをそのまま紙に写すため、行を詰めない。
+ */
+export function pagesAsText(report: SpoolReport): string {
+  return report.pages.map((p) => p.lines.join("\n")).join(PAGE_BREAK);
+}
 
 function stamp(ms: number): string {
   const d = new Date(ms);
@@ -92,10 +106,28 @@ export async function handleReport(
   }
 
   if (cfg.autoPrint) {
-    const tmp = join(tmpdir(), `spool-${sanitize(report.id)}-${now()}.pdf`);
+    /**
+     * **Windows へはテキストを渡す。** PDF をキューへ流す標準の手段が無いので、
+     * 論理ページを等幅で描いてドライバー経由で出す（`print-windows.ts`）。
+     * スプールはもともと等幅の桁組みなので、PDF に起こしてから印刷するのと中身は同じ。
+     */
+    const isWin = process.platform === "win32";
+    const tmp = join(
+      tmpdir(),
+      `spool-${sanitize(report.id)}-${now()}.${isWin ? "txt" : "pdf"}`
+    );
     try {
-      await writeFile(tmp, pdf);
-      const r = await lpPrint(cfg.autoPrint, tmp, warn);
+      await writeFile(tmp, isWin ? pagesAsText(report) : pdf, isWin ? "utf8" : undefined);
+      const r = isWin
+        ? await printOnWindows(
+            {
+              printer: cfg.autoPrint,
+              file: tmp,
+              ...(cfg.pdf?.fontSize !== undefined ? { size: cfg.pdf.fontSize } : {})
+            },
+            warn
+          )
+        : await lpPrint(cfg.autoPrint, tmp, warn);
       result.printed = r.ok;
       if (!r.ok && r.error !== undefined) result.printError = r.error;
     } catch (e) {
@@ -125,6 +157,21 @@ async function printRaw(
     result.pdfError = "ホスト変換済みの印刷データは PDF にできません（印刷はそのまま流します）";
   }
   if (!cfg.autoPrint) return result;
+  if (process.platform === "win32") {
+    /**
+     * **Windows では未対応。** ホスト変換済みのバイト列はプリンターの言語そのものなので、
+     * ドライバーを通さずスプーラーへ raw で流す必要がある（`lp -o raw` に相当）。
+     * それには winspool の P/Invoke が要り、**実機で確かめられていない**ので実装しない。
+     * 黙って化けた紙を出すより、理由を返して気づけるようにする。
+     */
+    const msg =
+      "ホスト変換済みの印刷データ（rawPrint）の自動印刷は Windows では未対応です" +
+      "（ホスト変換を使わない設定にするか、Linux 上のサーバーから印刷してください）";
+    warn(msg);
+    result.printed = false;
+    result.printError = msg;
+    return result;
+  }
   const tmp = join(tmpdir(), `spool-${sanitize(report.id)}-${now()}.prn`);
   try {
     await writeFile(tmp, report.raw);

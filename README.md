@@ -800,6 +800,14 @@ Windows は MS ゴシック／BIZ-UDGothic）。`.ttc` の中から**半角 1 : 
 実際に開いて選ぶので、フォント名を設定しなくてよい。見つからなければ Courier に degrade する
 （SBCS のみ・DBCS は化ける）。`printer.pdfFontPath` / `pdfFontName` を書けばその指定が優先される。
 
+**自動印刷の宛先はプリンターの名前**で書く。解釈は OS に任せる——Linux / macOS は `lp -d`、
+Windows は**プリントキューの名前**（`Get-Printer` の Name）。Windows では PDF をキューへ流す
+標準の手段が無いので（既定の PDF ハンドラである Edge は `print` / `printto` の verb を持たない）、
+論理ページを**等幅フォントで描いてドライバー経由**で出す。リモートのプリンターでもそのまま通る。
+
+⚠ **ホスト変換済み（HPT）の自動印刷は Windows では未対応**。スプーラーへ raw で流す必要があり、
+未検証のまま入れていない。ホスト変換を使わない設定にするか、Linux 上のサーバーから印刷する。
+
 - **PDF ダウンロード**: web-ui の「PDF ダウンロード」ボタン、または `GET /api/spool/:sessionId/:spoolId/pdf`、
   MCP `get_spool_pdf`（base64）でオンデマンド取得。
 - **PDF 自動蓄積 / 物理自動印刷**: サーバー設定のセッションに `printer` を設定すると、受信ごとに指定フォルダへ
