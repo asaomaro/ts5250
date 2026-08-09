@@ -23,6 +23,13 @@ import type { QueryPlan } from "@ts5250/hostserver";
 
 export interface ExplainResponse {
   plan: QueryPlan;
+  /**
+   * 同じ採取に含まれる**他の文の計画**（実行順）。文が 1 つのときは付かない。
+   * 手続きの `CALL` は中のカーソルごとに別の文になるので、ここに 2 本目以降が入る。
+   */
+  plans?: QueryPlan[];
+  /** `plans` の中で `plan` と同じ記録から作られたものの位置（初期選択） */
+  primaryIndex?: number;
   rows?: Record<string, unknown>[];
   columns?: { name: string; typeName: string }[];
   truncated?: boolean;

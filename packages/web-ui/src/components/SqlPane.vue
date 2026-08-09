@@ -175,6 +175,15 @@ const canRun = computed(
  * 「最大化」がそのまま計画にも効く（新しい操作を覚えさせない）。
  */
 const plan = ref<QueryPlan | undefined>();
+/**
+ * 同じ採取に含まれる文の一覧（実行順）。**手続きの `CALL` は中のカーソルごとに別の文**に
+ * なるので、2 本目以降はここに入る。普通の SELECT では空のまま。
+ */
+const plans = ref<QueryPlan[]>([]);
+/** いま見ている文（`plans` の位置） */
+const planIndex = ref(0);
+/** 画面に出す計画。選択が無ければ採取の主計画 */
+const shownPlan = computed<QueryPlan | undefined>(() => plans.value[planIndex.value] ?? plan.value);
 const planBusy = ref(false);
 const planError = ref("");
 /** 計画タブが帯にあるか。**閉じるまで残す**——結果を見てから計画へ戻れるように */
@@ -216,6 +225,12 @@ async function explain(mode: CaptureMode): Promise<void> {
   try {
     const res = await explainSql({ source: props.system, sql: target, mode, maxRows: pageSize.value });
     plan.value = res.plan;
+    // **主計画がどれかを選択にも反映する**。`plans` は実行順なので、
+    // 位置を合わせないと開いた瞬間に別の文が選ばれて見える
+    plans.value = res.plans ?? [];
+    // **どれが主計画かはサーバーが言う**。文テキストでは突き合わせられない
+    // （`plan` は書いた文、`plans` の要素は中のカーソルの文を名乗る）
+    planIndex.value = res.primaryIndex ?? 0;
     pushHistory(res.plan);
     // **警告を握り潰さない**（モニターが残った可能性など）
     if (res.warnings?.length) planError.value = res.warnings.join(" / ");
@@ -233,6 +248,8 @@ async function explain(mode: CaptureMode): Promise<void> {
 function closePlan(): void {
   planOpen.value = false;
   plan.value = undefined;
+  plans.value = [];
+  planIndex.value = 0;
   planError.value = "";
   // 見ていたタブが消えるので結果の先頭へ戻す（結果が無ければ空＝案内文に戻る）
   if (activeTabId.value === PLAN_TAB_ID) activeTabId.value = tabs.value[0]?.id ?? "";
@@ -1055,7 +1072,14 @@ function download(): void {
     <div v-if="planActive" class="plan-view">
       <LoadingBar v-if="planBusy" label="計画を取得しています…" />
       <p v-if="planError" class="plan-error">{{ planError }}</p>
-      <PlanViewer v-if="plan" :plan="plan" :on-create-index="createIndex" />
+      <PlanViewer
+        v-if="shownPlan"
+        :plan="shownPlan"
+        :plans="plans"
+        :plan-index="planIndex"
+        :on-create-index="createIndex"
+        @pick-plan="planIndex = $event"
+      />
     </div>
 
     <!-- 結果側。計画タブを見ている間は出さない（同じ領域なので重なる） -->

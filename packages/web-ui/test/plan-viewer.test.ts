@@ -250,3 +250,53 @@ describe("導いた節も選べる", () => {
     expect(w.text()).toContain("結合方式");
   });
 });
+
+/**
+ * **どの文の計画を見るか**の選択（手続きの `CALL` は中のカーソルごとに別の文になる）。
+ *
+ * 要点は 2 つ:
+ * - **1 つのときは出さない**（普通の SELECT の見え方を変えない）
+ * - 見出しはカーソル宣言の前置きを落とす——`DECLARE C1 CURSOR … FOR SELECT …` のままだと
+ *   どの文も「DECLARE C…」で始まって見分けが付かない
+ */
+describe("計画を出す文の選択", () => {
+  const c1 = plan({ statement: "DECLARE C1 CURSOR WITH RETURN FOR SELECT ID , NAME FROM ASAOLIB . SQLDEMO ORDER BY ID" });
+  const c2 = plan({ statement: "DECLARE C2 CURSOR WITH RETURN FOR SELECT COUNT ( * ) AS N FROM ASAOLIB . SQLDEMO" });
+
+  it("文が 1 つなら選択を出さない", () => {
+    const w = mount(PlanViewer, { props: { plan: c1, plans: [c1], planIndex: 0 } });
+    expect(w.find(".pv-picker").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("plans を渡さないときも選択を出さない（既存の呼び出しを変えない）", () => {
+    const w = mount(PlanViewer, { props: { plan: c1 } });
+    expect(w.find(".pv-picker").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("2 つ以上なら並べ、いま見ているものに印が付く", () => {
+    const w = mount(PlanViewer, { props: { plan: c2, plans: [c1, c2], planIndex: 1 } });
+    const picks = w.findAll(".pv-picker .pv-pick");
+    expect(picks).toHaveLength(2);
+    expect(picks[1]!.classes()).toContain("on");
+    expect(picks[0]!.classes()).not.toContain("on");
+    w.unmount();
+  });
+
+  it("見出しはカーソル宣言の前置きを落とす（全文は title で読める）", () => {
+    const w = mount(PlanViewer, { props: { plan: c1, plans: [c1, c2], planIndex: 0 } });
+    const first = w.findAll(".pv-picker .pv-pick")[0]!;
+    expect(first.text()).toContain("SELECT ID");
+    expect(first.text()).not.toContain("DECLARE");
+    expect(first.attributes("title")).toBe(c1.statement);
+    w.unmount();
+  });
+
+  it("押すと親へ位置を伝える（状態は親が持つ）", async () => {
+    const w = mount(PlanViewer, { props: { plan: c1, plans: [c1, c2], planIndex: 0 } });
+    await w.findAll(".pv-picker .pv-pick")[1]!.trigger("click");
+    expect(w.emitted("pick-plan")?.[0]).toEqual([1]);
+    w.unmount();
+  });
+});
