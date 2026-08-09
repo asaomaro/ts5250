@@ -17,6 +17,7 @@
  * 版数差の信号が埋もれる。
  */
 import { computed, ref, watch } from "vue";
+import { summarizeSql } from "@ts5250/base";
 import PlanGraph from "./PlanGraph.vue";
 import type { IndexAdvice, PlanAttribute, PlanBlock, PlanNode, QueryPlan } from "../planApi.js";
 import { flattenJoinTree, type PlanSelection } from "../planLayout.js";
@@ -28,11 +29,31 @@ import {
 
 const props = defineProps<{
   plan: QueryPlan;
+  /**
+   * 同じ採取に含まれる文の一覧（実行順）。**2 つ以上のときだけ選択を出す**——
+   * 普通の SELECT は 1 つなので、そのときの見え方は今までと変わらない。
+   * 手続きの `CALL` は中のカーソルごとに別の文になるのでここが 2 つ以上になる。
+   */
+  plans?: QueryPlan[] | undefined;
+  /** いま選んでいる文（`plans` の位置）。**状態は親が持つ** */
+  planIndex?: number | undefined;
   /** 比較の相手。指定すると比較表示になる */
   compareWith?: QueryPlan | undefined;
   /** 索引作成を実行する（親が `/api/host/sql` へ送る）。**未指定なら文を見せるだけ** */
   onCreateIndex?: ((advice: IndexAdvice) => Promise<void>) | undefined;
 }>();
+
+const emit = defineEmits<{ (e: "pick-plan", index: number): void }>();
+
+/**
+ * 選択の見出し。**カーソル宣言の前置きを落とす**——
+ * `DECLARE C1 CURSOR WITH RETURN FOR SELECT …` のままだと、どの文も
+ * 「DECLARE C…」で始まって見分けが付かない。全文は `title` で読める。
+ */
+function planLabel(p: QueryPlan): string {
+  const body = p.statement.replace(/^DECLARE\s+\S+\s+CURSOR\b[\s\S]*?\bFOR\s+/iu, "");
+  return summarizeSql(body || p.statement, 44);
+}
 
 type ViewMode = "graph" | "tree";
 const view = ref<ViewMode>("graph");
@@ -155,6 +176,24 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
 <template>
   <div class="plan-viewer">
     <header class="pv-head">
+      <!--
+        **どの文の計画を見るか**（`plans` が 2 つ以上のときだけ）。
+        1 つのときは出さない——普通の SELECT の見え方を変えないため
+      -->
+      <div v-if="plans && plans.length > 1" class="pv-picker" role="group" aria-label="計画を出す文">
+        <span class="pv-picker-label">対象</span>
+        <button
+          v-for="(p, i) in plans"
+          :key="i"
+          type="button"
+          class="theme-btn pv-pick"
+          :class="{ on: i === (planIndex ?? 0) }"
+          :title="p.statement"
+          @click="emit('pick-plan', i)"
+        >
+          <span class="pv-pick-no">{{ i + 1 }}</span>{{ planLabel(p) }}
+        </button>
+      </div>
       <div class="pv-modes" role="group" aria-label="表示の切替">
         <button type="button" class="theme-btn" :class="{ on: view === 'graph' }" @click="view = 'graph'">
           グラフ
@@ -359,6 +398,32 @@ async function createIndex(advice: IndexAdvice): Promise<void> {
 .pv-modes {
   display: flex;
   gap: 4px;
+}
+/* **どの文の計画かの選択。** 行を丸ごと使う（`flex-basis: 100%`）——
+   要約と同じ行に混ぜると、文が 3 つ以上のときに要約が押し出されて読めなくなる */
+.pv-picker {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+}
+.pv-picker-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 文は長い。**押せる幅は保ちつつ切り詰める**（全文は title で読める） */
+.pv-pick {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.pv-pick-no {
+  margin-right: 6px;
+  color: var(--muted);
 }
 .theme-btn.on {
   background: var(--accent-soft);

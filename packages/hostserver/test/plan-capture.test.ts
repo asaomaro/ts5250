@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { capturePlan, monitorTableName } from "../src/db/plan-capture.js";
-import { buildQueryPlan, pickStatementRecords, type MonitorRecord } from "../src/db/plan-model.js";
+import {
+  buildQueryPlan,
+  pickStatementRecords,
+  pickAllStatements,
+  type MonitorRecord
+} from "../src/db/plan-model.js";
 import { As400Error } from "@ts5250/base";
 import type { DbConnection } from "../src/db/db-connection.js";
 
@@ -474,5 +479,58 @@ describe("CALL の結果セットを計画と一緒に返す", () => {
     const bf = fetches[0]!.params.find((p2) => p2.cp === CP_BLOCKING_FACTOR)!;
     // **上限＋1 行**まで要求する（続きがあるかを測った事実で決めるため）
     expect(new DataView(bf.value.buffer, bf.value.byteOffset).getUint32(0)).toBe(8);
+  });
+});
+
+/**
+ * **手続きの `CALL` は中のカーソルごとに別の文の組になる。**
+ *
+ * SR-OSAKA で `DYNAMIC RESULT SETS 2` の手続きを採ったときの実測:
+ *
+ * ```
+ * QQUCNT=0 計画記録 0 件  CALL ASAOLIB.SQLDEMORS2()   ← 受け皿
+ * QQUCNT=3 計画記録 7 件  DECLARE C1 CURSOR … ORDER BY ID
+ * QQUCNT=4 計画記録 4 件  DECLARE C2 CURSOR … COUNT(*)
+ * ```
+ *
+ * 1 組しか返さないと 2 本目以降が見えないので、画面で選ばせるために全部返す。
+ */
+describe("計画を持つ文の組をすべて返す", () => {
+  /** 計画記録を持たない受け皿（`QQQDTN` が無い） */
+  const shell = (over: Partial<MonitorRecord> & { QQRID: number; QQUCNT: number }): MonitorRecord => ({
+    ...rec(over),
+    QQQDTN: null
+  });
+
+  it("実行順（QQUCNT 昇順）で返す", () => {
+    const groups = pickAllStatements([
+      rec({ QQRID: 3000, QQUCNT: 4, QQ1000: "SELECT COUNT(*) FROM T" }),
+      rec({ QQRID: 3000, QQUCNT: 3, QQ1000: "SELECT A FROM T" }),
+      rec({ QQRID: 3003, QQUCNT: 3 })
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.[0]?.QQUCNT).toBe(3);
+    expect(groups[0]).toHaveLength(2);
+    expect(groups[1]?.[0]?.QQUCNT).toBe(4);
+  });
+
+  /** 受け皿（`CALL` 自身）は計画を持たない。並べても選ぶ意味が無い */
+  it("計画記録を持たない組は落とす", () => {
+    const groups = pickAllStatements([
+      shell({ QQRID: 3018, QQUCNT: 0 }),
+      shell({ QQRID: 1000, QQUCNT: 0, QQ1000: "CALL ASAOLIB.P()" }),
+      rec({ QQRID: 3000, QQUCNT: 3, QQ1000: "SELECT A FROM T" })
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.[0]?.QQUCNT).toBe(3);
+  });
+
+  it("1 つも無ければ空（空の計画を並べない）", () => {
+    expect(pickAllStatements([shell({ QQRID: 3018, QQUCNT: 0 })])).toEqual([]);
+  });
+
+  /** 普通の SELECT は 1 組。**画面は 2 組以上のときだけ選択を出す**ので、ここが 1 なら今までどおり */
+  it("普通の SELECT は 1 組だけ", () => {
+    expect(pickAllStatements([rec({ QQRID: 3000, QQUCNT: 3, QQ1000: "SELECT A FROM T" })])).toHaveLength(1);
   });
 });
