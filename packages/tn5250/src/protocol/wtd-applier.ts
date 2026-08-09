@@ -3,7 +3,7 @@ import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import type { WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
-import { ESC, COMMAND, ORDER, isAttribute } from "./constants.js";
+import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
 import { detectPcoMarker, readPcCommand, type PcCommandRequest } from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
 
@@ -284,10 +284,20 @@ function applyWtd(
 
   let addr = 0; // WTD 開始時のバッファアドレスは SBA で設定される（未設定時は先頭）
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
+  /**
+   * 「表せない文字」の数。**1 度だけまとめて知らせる**——1 画面に 500 個以上出る
+   * （実測）ので 1 バイトずつ警告するとログが埋まる。
+   */
+  let unmappable = 0;
 
   while (r.remaining > 0) {
     const b = r.peek();
-    if (b === ESC) return; // 次のコマンドへ
+    if (b === ESC) {
+      // 次のコマンドへ。**抜ける前に知らせる**——ここが WTD の正常な終わりなので、
+      // 関数末尾だけに置くと（ほぼ毎回ここで返るため）警告が出ない
+      warnUnmappable(unmappable, warn);
+      return;
+    }
 
     // PC Organizer の標識（非表示属性＋固定 11 バイト）。**消費しない**——
     // 標識・コマンド本文は今までどおり画面へ書く（非表示なので見えない）。
@@ -333,6 +343,20 @@ function applyWtd(
       // NUL は表示データ（ブランク）。フィールド初期値等でインラインに現れる
       buf.eraseRange(addr, addr);
       addr++;
+      continue;
+    }
+    if (b === UNMAPPABLE) {
+      /**
+       * **オーダーではなく「表せない文字」の印**（`UNMAPPABLE` の doc を参照）。
+       * 1 桁を占める文字として扱い、**空白として置く**——桁がずれるとヘルプ本文の
+       * 見出しや罫線が総崩れになる。オーダーとして扱うと解析が崩れ、レコード末尾の
+       * READ ごと捨てて「応答待ち」で固まる。
+       *
+       * **rawByte は渡さない**（`ORDER.UNKNOWN_1C` と同じ理由）。受信した文字バイトでは
+       * ないので、カタカナ表示モードが半角カナへ読み替えてしまう。
+       */
+      buf.setChar(addr++, " ");
+      unmappable++;
       continue;
     }
     switch (b) {
@@ -411,15 +435,39 @@ function applyWtd(
       default:
         warn(`unknown order 0x${b.toString(16)} — skipping to next command`);
         // **オーダーの長さは分からないが、レコード全体を捨てない。**
-        // ESC(0x04) は表示データ（0x40 以上）にも他のオーダーにも現れないので、
-        // 次の ESC まで読み飛ばして次のコマンドから復帰できる。ここでレコードの
-        // 残り全部を捨てると、後続の WRITE（キーボード解放の CC2 等）や READ が
-        // 丸ごと失われ、ホストは送ったつもりでもクライアントの鍵盤が開かず
-        // 「応答待ちのまま固まる」（実機で正体不明のオーダーに当たったときに観測）。
-        while (r.remaining > 0 && r.peek() !== ESC) r.u8();
+        // 次のコマンドまで読み飛ばして復帰する。捨ててしまうと、後続の WRITE
+        // （キーボード解放の CC2 等）や READ が丸ごと失われ、ホストは送ったつもりでも
+        // クライアントの鍵盤が開かず「応答待ちのまま固まる」。
+        //
+        // **`0x04` を見つけただけでは ESC と決めない。** `0x04` はオーダーの
+        // パラメータにも現れる——実測した PUB400 のヘルプ画面では `11 04 05`
+        // （SBA 行 4 桁 5）の行バイトを ESC と読み違え、続く `05` を未知コマンドと見なして
+        // **末尾の READ MDT FIELDS ごと捨てていた**。直後が既知のコマンドである
+        // ものだけを ESC と認めれば、この取り違えは起きない。
+        while (r.remaining > 0) {
+          if (r.peek() === ESC && r.remaining >= 2 && isKnownCommand(r.peekAt(1))) break;
+          r.u8();
+        }
+        warnUnmappable(unmappable, warn);
         return;
     }
   }
+  warnUnmappable(unmappable, warn);
+}
+
+/**
+ * 「表せない文字」があったことを**理由と直し方まで添えて**1 度だけ知らせる。
+ *
+ * 黙って空白にすると、利用者には「ヘルプが虫食いで出る」としか見えない。
+ * 直せるのは接続の CCSID なので、そこまで書く。
+ */
+function warnUnmappable(count: number, warn: WarnFn): void {
+  if (count === 0) return;
+  warn(
+    `ホストがこのコードページで表せない文字を ${count} 個送ってきました（空白にしました）。` +
+      "英語のシステムへカタカナのコードページ（CCSID 930 / 5026＝コードページ 290）で" +
+      "繋いだときに起きます。接続設定の CCSID を 37 か 5035 にすると読めるようになります。"
+  );
 }
 
 /**
