@@ -461,8 +461,24 @@ SELECT * FROM ASAOLIB.SQLDEMO ORDER BY ID;
 CALL ASAOLIB.SQLDEMOP(1, 1.50, ?);   -- 出力パラメーター
 CALL ASAOLIB.SQLDEMORS();            -- 結果セット 1 個
 CALL ASAOLIB.SQLDEMORS2();           -- 結果セット 2 個（1 個目だけ出る）
+CALL ASAOLIB.SQLDEMOPICK();          -- その 2 個目（ロケーター経由の雛形）
 SELECT ID, ASAOLIB.SQLDEMOF(ID) FROM ASAOLIB.SQLDEMO ORDER BY ID;
 ```
+
+> ⚠ **アプリを止めてから実行する。** 起動したままだとプールの接続が表を掴んでいて
+> `DROP` が 20 秒で時間切れになり、そこで接続が使えなくなる（スクリプトは理由を出して止まる）。
+
+### 2 個目以降の結果セット
+
+ホストサーバー経由では、手続きが返す結果セットは **1 個目しか開けない**。2 個目を開こうとすると
+`SQLCODE -517`（選択ステートメントではない）で断られる。SR-OSAKA で 10 通り試して確認した
+——カーソル名を変える／取り切る前に開く／閉じてから開き直す／手続き側の名前（`C1`・`C2`）で開く／
+`describe` を挟む／`openDescribeFetch`／文名を分けて 2 度 `execute`／実行し直す／
+文の種別 0〜6 の総当たり／ORS を全ビット。**どれも 1 個目が返る。**
+
+SQL の側には道がある（`ASSOCIATE RESULT SET LOCATORS`）。ただし**読んだ行をクライアントへ
+返すには列の形を知った器が要る**ので汎用にはできない。`SQLDEMOPICK` がその雛形で、
+`SQLDEMORS2` の 2 個目を一時表へ写して `WITH RETURN` で返している。
 
 ## SQL 実行計画（Visual Explain 相当）
 
