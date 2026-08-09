@@ -32,7 +32,9 @@ vi.mock("../src/ws-client.js", () => ({
   }
 }));
 
+import type { PublicSession } from "@ts5250/server";
 import { watchesStore } from "../src/stores/watches.js";
+import { systemsStore } from "../src/stores/systems.js";
 import WatchPane from "../src/components/WatchPane.vue";
 import PaneTabs from "../src/components/PaneTabs.vue";
 import { MSG_WATCH_CONSUMES } from "../src/composables/opMessages.js";
@@ -51,6 +53,25 @@ const W2 = { ...W1, id: "w2", ref: "own:c2", label: "MYLIB/LOGQ" };
 /** メッセージ待ち行列の待ち受け。**こちらは消費しない**（`*SAME` で読む） */
 const M1 = { ...W1, id: "m1", kind: "msgq" as const, ref: "own:m1", label: "QSYS/QSYSOPR" };
 
+/**
+ * 監視の由来の設定。**監視自身はシステムを持たない**ので、ここから引く
+ * （`watchScope.ts`）。`W1`/`M1` は A のもの、`W2` は B のもの。
+ */
+const SESSIONS = [
+  { ref: "own:c1", name: "注文", system: "own:s-A", sessionType: "dtaqwatch" },
+  { ref: "own:c2", name: "ログ", system: "own:s-B", sessionType: "dtaqwatch" },
+  { ref: "own:m1", name: "操作員", system: "own:s-A", sessionType: "msgwatch" }
+] as PublicSession[];
+
+/**
+ * 既定は**設定を持たない**状態にしておく（絞り込みを見るテストだけが `SESSIONS` を入れる）。
+ * `loaded` を立てるのは、`WatchPane` が設定を取りに行かないようにするため。
+ */
+beforeEach(() => {
+  systemsStore.sessions = [];
+  systemsStore.loaded = true;
+});
+
 const deliver = (m: unknown): void => captured.handlers.onServerMessage(m);
 const entry = (seq: number, text: string) => ({ seq, at: 1_000_000, text, bytes: text.length });
 
@@ -67,16 +88,15 @@ describe("watchesStore: サーバーの写し", () => {
     expect(captured.send).toHaveBeenCalledWith({ type: "watch-subscribe" });
   });
 
-  it("watch-list で一覧が入り、先頭が選ばれる", () => {
+  it("watch-list で一覧が入る", () => {
     deliver({ type: "watch-list", watches: [W1, W2] });
     expect(watchesStore.watches.map((w) => w.label)).toEqual(["MYLIB/ORDERQ", "MYLIB/LOGQ"]);
-    expect(watchesStore.selected).toBe("w1");
   });
 
   it("watch-entry で履歴が増え、未読が増える", () => {
     deliver({ type: "watch-list", watches: [W1] });
     deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "ORD-1"), received: 1 });
-    expect(watchesStore.history.map((e) => e.text)).toEqual(["ORD-1"]);
+    expect(watchesStore.historyOf("w1").map((e) => e.text)).toEqual(["ORD-1"]);
     expect(watchesStore.unreadOf("w1")).toBe(1);
     expect(watchesStore.watches[0]?.received).toBe(1);
   });
@@ -95,7 +115,21 @@ describe("watchesStore: サーバーの写し", () => {
     deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
     watchesStore.markRead();
     expect(watchesStore.totalUnread).toBe(0);
-    expect(watchesStore.history).toHaveLength(1);
+    expect(watchesStore.historyOf("w1")).toHaveLength(1);
+  });
+
+  /**
+   * **既読にする範囲を指定できる。** コンソールはシステムごとに分かれたので
+   * （`watchScope.ts`）、開いたタブが全部を既読にすると、別システムの新着が
+   * 読まれないまま消えてバッジが二度と出ない。
+   */
+  it("markRead は渡した監視だけを既読にする", () => {
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
+    deliver({ type: "watch-entry", watchId: "w2", entry: entry(1, "b"), received: 1 });
+    watchesStore.markRead(["w1"]);
+    expect(watchesStore.unreadOf("w1")).toBe(0);
+    expect(watchesStore.unreadOf("w2")).toBe(1);
   });
 
   it("状態の変化が反映される（黙って止まらない）", () => {
@@ -112,39 +146,18 @@ describe("watchesStore: サーバーの写し", () => {
     deliver({ type: "watch-entry", watchId: "w2", entry: entry(1, "x"), received: 1 });
     deliver({ type: "watch-list", watches: [W1] }); // w2 が停止された
     expect(watchesStore.totalUnread).toBe(0);
-    expect(watchesStore.selected).toBe("w1");
+    expect(watchesStore.historyOf("w2")).toEqual([]);
   });
 
-  /**
-   * **一覧が来た時点で履歴も取り寄せる。** リロード後は
-   * 「監視は出ているのに履歴が空」になっていた（実機 E2E で踏んだ）。
-   * requirement の「開き直すと閉じていた間の到着が履歴にある」がこれ。
-   */
-  it("watch-list が来たら選択中の履歴を取り寄せる（リロード後の空白を作らない）", () => {
-    captured.send.mockClear();
-    deliver({ type: "watch-list", watches: [W1] });
-    expect(captured.send).toHaveBeenCalledWith({ type: "watch-history", watchId: "w1" });
-  });
-
-  it("既に履歴を持っていれば取り寄せ直さない", () => {
-    deliver({ type: "watch-list", watches: [W1] });
-    deliver({ type: "watch-history", watchId: "w1", entries: [entry(1, "x")] });
-    captured.send.mockClear();
-    deliver({ type: "watch-list", watches: [W1] });
-    expect(captured.send).not.toHaveBeenCalled();
-  });
-
-  it("行を選ぶと履歴を持っていなければ取り寄せる", () => {
+  it("ensureHistory は持っていなければ取り寄せる（一度届けば聞き直さない）", () => {
     deliver({ type: "watch-list", watches: [W1, W2] });
     captured.send.mockClear();
-    watchesStore.select("w2");
+    watchesStore.ensureHistory("w2");
     expect(captured.send).toHaveBeenCalledWith({ type: "watch-history", watchId: "w2" });
-    // 一度届けば取り寄せ直さない
     deliver({ type: "watch-history", watchId: "w2", entries: [entry(1, "hist")] });
     captured.send.mockClear();
-    watchesStore.select("w1");
-    watchesStore.select("w2");
-    expect(captured.send).not.toHaveBeenCalledWith({ type: "watch-history", watchId: "w2" });
+    watchesStore.ensureHistory("w2");
+    expect(captured.send).not.toHaveBeenCalled();
   });
 
   it("開始・停止のメッセージを送る", async () => {
@@ -195,8 +208,7 @@ describe("WatchPane", () => {
 
   it("**応答待ちは目立たせる**（見落とすとジョブが止まったままになる）", async () => {
     const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
-    deliver({ type: "watch-list", watches: [M1] });
-    watchesStore.select("m1");
+    deliver({ type: "watch-list", watches: [M1] }); // 1 本だけなので自動で選ばれる
     deliver({
       type: "watch-entry",
       watchId: "m1",
@@ -295,6 +307,103 @@ describe("WatchPane", () => {
     expect(watchesStore.totalUnread, "見えたのに未読が残っている").toBe(0);
     w.unmount();
   });
+
+  /**
+   * **一覧が届いたら先頭を選び、履歴を取り寄せる。** 以前は store がやっていたが、
+   * コンソールがシステムごとに分かれて選択が画面側のものになった（`watchScope.ts`）。
+   * ここが抜けるとリロード後に「監視は出ているのに履歴が空」になる（実機 E2E で踏んだ）。
+   */
+  it("一覧が届いたら先頭の履歴を取り寄せる（リロード後の空白を作らない）", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    await nextTick();
+    captured.send.mockClear();
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    await nextTick();
+    expect(captured.send).toHaveBeenCalledWith({ type: "watch-history", watchId: "w1" });
+    w.unmount();
+  });
+
+  it("行を選ぶとその履歴に切り替わる", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    deliver({ type: "watch-history", watchId: "w2", entries: [entry(1, "LOG-1")] });
+    await nextTick();
+    await w.findAll("tbody tr")[1]!.trigger("click");
+    await nextTick();
+    expect(w.find(".hist").text()).toContain("MYLIB/LOGQ");
+    expect(w.find(".entries").text()).toContain("LOG-1");
+    w.unmount();
+  });
+});
+
+/**
+ * **1 枚 = 1 システム**（`watchScope.ts`）。タブにシステムカラーの帯を出す以上、
+ * 中身も 1 システムぶんでなければ帯が嘘になる（利用者の指摘が発端）。
+ */
+describe("WatchPane: システムごとの絞り込み", () => {
+  beforeEach(async () => {
+    watchesStore.reset();
+    await watchesStore.connect();
+    systemsStore.sessions = SESSIONS;
+  });
+
+  const mountFor = (sys: string) =>
+    mount(WatchPane, { props: { tabId: `watch:queues@${sys}`, active: true } });
+
+  it("そのシステムの監視だけを出す", async () => {
+    const w = mountFor("own:s-A");
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    await nextTick();
+    expect(w.text()).toContain("MYLIB/ORDERQ");
+    expect(w.text()).not.toContain("MYLIB/LOGQ");
+    w.unmount();
+  });
+
+  it("システムを持たない古いタブは全部出す（作り直させない）", async () => {
+    const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    await nextTick();
+    expect(w.text()).toContain("MYLIB/ORDERQ");
+    expect(w.text()).toContain("MYLIB/LOGQ");
+    w.unmount();
+  });
+
+  /**
+   * **設定を引けない監視は落とさない。** 他人の個人設定で始まった監視を管理者が
+   * 見ている場合など、`ref` から設定に辿り着けないことがある。落とすと
+   * **消費し続けているものが画面から消える**——重複して見えるほうがはるかに軽い。
+   */
+  it("設定を引けない監視はどのタブにも出す", async () => {
+    const w = mountFor("own:s-A");
+    deliver({ type: "watch-list", watches: [{ ...W1, id: "x1", ref: "own:unknown", label: "謎/Q" }] });
+    await nextTick();
+    expect(w.text()).toContain("謎/Q");
+    w.unmount();
+  });
+
+  /** 既読も 1 システムぶん——全部消すと別システムのバッジが二度と出ない */
+  it("既読にするのは出ている監視だけ", async () => {
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
+    deliver({ type: "watch-entry", watchId: "w2", entry: entry(1, "b"), received: 1 });
+    const w = mountFor("own:s-A");
+    await nextTick();
+    expect(watchesStore.unreadOf("w1")).toBe(0);
+    expect(watchesStore.unreadOf("w2"), "別システムまで既読にしている").toBe(1);
+    w.unmount();
+  });
+
+  /**
+   * **消費の注意もそのタブの中身で決める。** メッセージ待ち受けしか無いシステムで
+   * 出すと嘘になる（`*SAME` で読むので消費しない）。
+   */
+  it("メッセージ待ち受けしか無いシステムでは消費の注意を出さない", async () => {
+    const w = mountFor("own:s-A");
+    deliver({ type: "watch-list", watches: [M1, W2] });
+    await nextTick();
+    expect(w.text()).not.toContain(MSG_WATCH_CONSUMES);
+    w.unmount();
+  });
 });
 
 describe("PaneTabs: pane タブの未読バッジ", () => {
@@ -308,11 +417,9 @@ describe("PaneTabs: pane タブの未読バッジ", () => {
    * `sessionsStore.get()` は pane タブの id では何も返さないので、
    * 分岐が無いと監視の未読は永久に出ない。
    */
-  function mountTabs() {
+  function mountTabs(tabs = ["watch:queues"]) {
     return mount(PaneTabs, {
-      props: {
-        group: { id: "g1", tabs: ["watch:queues"], activeTab: "watch:queues" }
-      } as never,
+      props: { group: { id: "g1", tabs, activeTab: tabs[0] } } as never,
       global: { stubs: { SessionInfo: true } }
     });
   }
@@ -332,8 +439,37 @@ describe("PaneTabs: pane タブの未読バッジ", () => {
     await nextTick();
     const badge = w.find(".badge");
     expect(badge.exists()).toBe(true);
-    expect(badge.text()).toBe("2"); // 全キュー合計
+    expect(badge.text()).toBe("2"); // このタブに出るキューの合計
     expect(badge.attributes("title")).toBe("新着エントリ");
+    w.unmount();
+  });
+
+  /**
+   * **タブにシステムカラーの帯が出る**（利用者の指摘が発端）。
+   *
+   * 帯は `--tab-sys` の有無で出る（`.tab[style*="--tab-sys"]`）。監視コンソールだけが
+   * システムに紐づかない 1 枚だったため、ここが空で帯が付いていなかった。
+   */
+  it("**監視コンソールのタブにシステムカラーが付く**", async () => {
+    const w = mountTabs(["watch:queues@own:s-A"]);
+    await nextTick();
+    expect(w.find(".tab").attributes("style")).toContain("--tab-sys");
+    w.unmount();
+  });
+
+  /**
+   * **別システムの新着でバッジを光らせない**（`watchScope.ts`）。
+   * コンソールはシステムごとに分かれたので、全合計を出すと
+   * 「開いても何も無いのにバッジだけ出ている」になる。
+   */
+  it("**そのシステムの未読だけを数える**", async () => {
+    systemsStore.sessions = SESSIONS;
+    deliver({ type: "watch-list", watches: [W1, W2] });
+    deliver({ type: "watch-entry", watchId: "w1", entry: entry(1, "a"), received: 1 });
+    deliver({ type: "watch-entry", watchId: "w2", entry: entry(1, "b"), received: 1 });
+    const w = mountTabs(["watch:queues@own:s-A"]);
+    await nextTick();
+    expect(w.find(".badge").text()).toBe("1");
     w.unmount();
   });
 });

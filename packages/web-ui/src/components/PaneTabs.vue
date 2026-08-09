@@ -6,7 +6,7 @@ import { tabGroupColorVar } from "../composables/tabGroupColor.js";
 import { appearance } from "../stores/appearance.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
-import { watchesStore } from "../stores/watches.js";
+import { unreadForTab } from "../watchScope.js";
 import { systemsStore } from "../stores/systems.js";
 import { paneLabelOf, isPaneTab } from "../paneLabels.js";
 import { closeSession } from "../session-controller.js";
@@ -159,9 +159,12 @@ function selectTab(id: string): void {
  * セッションを持たないので `watchesStore`（サーバーの写し）から引く。
  * `sessionsStore.get()` は pane タブの id では何も返さないため、
  * ここで分けなければ監視の未読は永久に出ない（research F6）。
+ *
+ * **監視はそのタブに出る分だけ数える**（`watchScope.ts`）。コンソールはシステムごとに
+ * 分かれたので、全合計を出すと別システムの新着でバッジが光ってしまう。
  */
 function unread(id: string): number {
-  if (id.startsWith("watch:")) return watchesStore.totalUnread;
+  if (id.startsWith("watch:")) return unreadForTab(id);
   return sessionsStore.get(id)?.unread ?? 0;
 }
 /** バッジの説明。種別ごとに何の未読かを言う */

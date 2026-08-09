@@ -7,17 +7,23 @@
  * こちらは push 型で、**サーバーが常駐して待ち続ける**——ブラウザを閉じても、
  * このタブを閉じても監視は止まらない（requirement）。
  *
- * したがってこのコンポーネントは**状態を持たない**。真実はサーバーのレジストリにあり、
- * ここは `watchesStore`（サーバーの写し）を描くだけ。開いたときに購読し直すことで、
- * 閉じていた間の到着が履歴に揃う。
+ * 真実はサーバーのレジストリにあり、ここは `watchesStore`（サーバーの写し）を描くだけ。
+ * 開いたときに購読し直すことで、閉じていた間の到着が履歴に揃う。
+ * **選んでいる行だけはここが持つ**——コンソールはシステムごとに分かれたので、
+ * store に置くと 2 枚が 1 つの選択を奪い合う。
+ *
+ * **1 枚 = 1 システム**（`watchScope.ts`）。タブにシステムカラーの帯を出す以上、
+ * 中身も 1 システムぶんでなければ帯が嘘になる。
  *
  * **データ待ち行列の監視は消費する**（エントリを取り出して消す）。その注意は開始時だけでなく**常時**出す。
  * **メッセージ待ち行列は消費しない**（`*SAME` で読む）ので、同じ注意は出さない——
  * 出すと嘘になり、出し続けると本当に効く注意まで読み飛ばされる。
  */
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { watchesStore } from "../stores/watches.js";
+import { systemsStore } from "../stores/systems.js";
 import { workspaceStore } from "../stores/workspace.js";
+import { watchesForTab } from "../watchScope.js";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
 
 /**
@@ -28,7 +34,31 @@ const props = defineProps<{ tabId: string; active?: boolean }>();
 
 onMounted(() => {
   void watchesStore.connect();
+  // **監視をシステムへ割り振るのに設定が要る**（`ref` → `system`）。
+  // 無いと絞り込みが空振りして、動いている監視が 1 本も出ない
+  if (!systemsStore.loaded) void systemsStore.refresh();
 });
+
+/** このタブに出す監視（このタブのシステムぶん） */
+const watches = computed(() => watchesForTab(props.tabId));
+
+/** 選んでいる監視。**このタブだけのもの**（store には置かない） */
+const selected = ref<string | undefined>();
+/**
+ * 選択を一覧に追従させる。まだ選んでいない・選んだものが消えたなら先頭へ。
+ * 選び直したら履歴を取り寄せる——一覧が来ただけでは履歴は付いてこない。
+ */
+watch(
+  [watches, selected],
+  ([list, sel]) => {
+    if (sel === undefined || !list.some((w) => w.id === sel)) selected.value = list[0]?.id;
+    else watchesStore.ensureHistory(sel);
+  },
+  { immediate: true }
+);
+
+const history = computed(() => watchesStore.historyOf(selected.value));
+const selectedLabel = computed(() => watches.value.find((w) => w.id === selected.value)?.label);
 
 /**
  * **見えている間だけ既読にする。**
@@ -36,14 +66,18 @@ onMounted(() => {
  * 以前は「マウント中ずっと」だった——タブを切り替えてもアンマウントされていたので、
  * それで「開いている間」と同義だった。隠れたまま生き続ける今それを続けると、
  * **裏で全部既読にしてしまい未読バッジが二度と出ない**（バッジは
- * `PaneTabs` が `watchesStore.totalUnread` から出している）。
+ * `PaneTabs` が `unreadForTab` から出している）。
+ *
+ * **消すのはこのタブに出ている監視だけ。** 全部消すと、開いていないシステムの
+ * 新着まで既読になってそちらのバッジが出なくなる。
  *
  * 見えた瞬間にも既読にしたいので `immediate: true`。
  */
+const unread = computed(() => watches.value.filter((w) => watchesStore.unreadOf(w.id) > 0));
 watch(
-  () => [props.active, watchesStore.totalUnread] as const,
-  ([on, n]) => {
-    if (on && n > 0) watchesStore.markRead();
+  () => [props.active, unread.value] as const,
+  ([on, list]) => {
+    if (on && list.length > 0) watchesStore.markRead(list.map((w) => w.id));
   },
   { immediate: true }
 );
@@ -58,7 +92,7 @@ const at = (ms: number): string => new Date(ms).toLocaleTimeString("ja-JP", { ho
  * メッセージ待ち行列は `*SAME` で読むので消費せず、そこで出すと**嘘になる**。
  */
 const hasConsuming = computed(
-  () => watchesStore.watches.length === 0 || watchesStore.watches.some((w) => w.kind !== "msgq")
+  () => watches.value.length === 0 || watches.value.some((w) => w.kind !== "msgq")
 );
 
 const kindLabel = (kind: string | undefined): string => (kind === "msgq" ? "メッセージ" : "データ");
@@ -80,7 +114,7 @@ function addWatch(): void {
           <span>監視中</span>
           <button class="btn ghost" @click="addWatch">＋ 監視を追加</button>
         </div>
-        <p v-if="watchesStore.watches.length === 0" class="empty">
+        <p v-if="watches.length === 0" class="empty">
           監視はありません。「＋ 監視を追加」からセッション設定（種別: 待ち行列監視 / メッセージ待ち受け）を選んで接続してください。
         </p>
         <table v-else>
@@ -96,10 +130,10 @@ function addWatch(): void {
           </thead>
           <tbody>
             <tr
-              v-for="w in watchesStore.watches"
+              v-for="w in watches"
               :key="w.id"
-              :class="{ sel: w.id === watchesStore.selected }"
-              @click="watchesStore.select(w.id)"
+              :class="{ sel: w.id === selected }"
+              @click="selected = w.id"
             >
               <td>{{ w.label }}</td>
               <td class="kind">{{ kindLabel(w.kind) }}</td>
@@ -155,15 +189,13 @@ function addWatch(): void {
         <div class="head">
           <span>
             履歴
-            <template v-if="watchesStore.selected">
-              — {{ watchesStore.watches.find((w) => w.id === watchesStore.selected)?.label }}
-            </template>
+            <template v-if="selectedLabel">— {{ selectedLabel }}</template>
           </span>
         </div>
-        <p v-if="watchesStore.history.length === 0" class="empty">まだ届いていません。</p>
+        <p v-if="history.length === 0" class="empty">まだ届いていません。</p>
         <ol v-else class="entries">
           <!-- 新しいものを上に出す（届いた瞬間に気づくのが目的） -->
-          <li v-for="e in [...watchesStore.history].reverse()" :key="e.seq" :class="{ inq: e.message?.inquiry }">
+          <li v-for="e in [...history].reverse()" :key="e.seq" :class="{ inq: e.message?.inquiry }">
             <span class="seq">#{{ e.seq }}</span>
             <span class="ts">{{ at(e.at) }}</span>
             <!-- **応答待ちを目立たせる**——ここを見落とすとジョブが止まったままになる -->
