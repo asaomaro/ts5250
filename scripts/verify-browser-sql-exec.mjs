@@ -1,7 +1,7 @@
 // 実ブラウザ（web-ui）で実機に**結果を返さない SQL 文**を実行できるか検証する。
 //
 //   CREATE TABLE（DDL）→ INSERT → UPDATE → DELETE → MERGE → SELECT で中身を確認
-//   → CREATE PROCEDURE / FUNCTION（複合文）→ CALL（出力パラメーター）→ DROP
+//   → CREATE PROCEDURE / FUNCTION（複合文）→ CALL（出力パラメーター・結果セット）→ DROP
 //
 // **「実際にホストの表が変わったか」はここでしか確かめられない。** 単体テストは偽の接続で
 // 要求の形と SQLCODE の扱いを固定しているだけで、書けたかどうかは実機に聞くほかない。
@@ -34,6 +34,8 @@ const T = "SQLEXECB";
 /** 複合文（`BEGIN … END`）の検証で作る手続き・関数 */
 const P = "SQLEXECP";
 const F = "SQLEXECF";
+/** 結果セットを返す手続き（`SQLCODE +466` の経路） */
+const R = "SQLEXECR";
 
 const results = [];
 const check = (n, ok, d = "") => {
@@ -223,7 +225,28 @@ try {
   check("作った関数が SELECT から使える", used.includes("m") && used.includes("n"), used.slice(0, 300));
   await shot("12-function");
 
+  // --- 結果セットを返す手続き（`SQLCODE +466`）---
+  await run(`DROP PROCEDURE ${LIB}.${R}`);
+  const rsProc = await run(
+    [
+      `CREATE PROCEDURE ${LIB}.${R} () LANGUAGE SQL DYNAMIC RESULT SETS 1`,
+      "BEGIN",
+      `  DECLARE C9 CURSOR WITH RETURN FOR SELECT ID, S FROM ${LIB}.${T} ORDER BY ID;`,
+      "  OPEN C9;",
+      "END"
+    ].join("\n")
+  );
+  check("結果セットを返す手続きを作れる", rsProc.includes("実行しました"), rsProc.slice(0, 200));
+  const rs = await run(`CALL ${LIB}.${R}()`);
+  check("**結果セットを返す CALL が実行できる**", !rs.includes("SQLCODE=-"), rs.slice(0, 200));
+  check("**結果セットがあることを言う**", rs.includes("結果セット"), rs.slice(0, 200));
+  // 表に行が出ている（`m` / `n` は MERGE で入れた値）
+  const rsRows = await page.locator(".rows-scroll tbody tr, table tbody tr").count();
+  check("**結果セットが表で出る**", rsRows > 0 && rs.includes("m"), `rows=${rsRows}`);
+  await shot("13-call-resultset");
+
   // --- 後片付け ---
+  await run(`DROP PROCEDURE ${LIB}.${R}`);
   await run(`DROP FUNCTION ${LIB}.${F}`);
   const dp = await run(`DROP PROCEDURE ${LIB}.${P}`);
   check("**DROP PROCEDURE できる**", dp.includes("実行しました"), dp.slice(0, 200));

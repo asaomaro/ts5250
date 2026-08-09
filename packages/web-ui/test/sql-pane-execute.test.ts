@@ -193,3 +193,52 @@ describe("CALL の出力パラメーター", () => {
     w.unmount();
   });
 });
+
+/**
+ * **手続きが返した結果セット**（`CALL` → `SQLCODE +466`）。
+ * 表に出せるのは 1 個目だけなので、2 個以上あることは必ず文章で言う
+ * ——黙って 1 個目だけ出すと「全部見た」と思わせてしまう。
+ */
+describe("CALL の結果セット", () => {
+  const withResultSet = (rows: number, extra: Record<string, unknown> = {}) => ({
+    kind: "execute",
+    updateCount: 0,
+    hasRowCount: false,
+    columns: [{ name: "ID", typeName: "INTEGER", nullable: false }],
+    rows: Array.from({ length: rows }, (_, i) => ({ ID: i + 1 })),
+    rowCount: rows,
+    resultSets: 1,
+    ...extra
+  });
+
+  it("結果セットを表で出し、結果セットがあることを言う", async () => {
+    mockSequence([{ body: withResultSet(3) }]);
+    const w = await run("CALL TESTLIB.P()");
+    expect(w.find(".done").text()).toContain("結果セットを表示しています");
+    expect(w.findAll("tbody tr").length).toBe(3);
+    w.unmount();
+  });
+
+  it("2 個以上あるときは**何個あって何個目を出しているか**を言う", async () => {
+    mockSequence([{ body: withResultSet(3, { resultSets: 2 }) }]);
+    const w = await run("CALL TESTLIB.P()");
+    expect(w.find(".done").text()).toContain("結果セット 2 個のうち 1 個目");
+    w.unmount();
+  });
+
+  it("上限で切ったことを言う（続きは取りに行けない）", async () => {
+    mockSequence([{ body: withResultSet(2, { truncated: true }) }]);
+    const w = await run("CALL TESTLIB.P()");
+    expect(w.find(".done").text()).toContain("先頭 2 件だけです");
+    w.unmount();
+  });
+
+  it("結果セットの無い CALL は今までどおり（余計なことを言わない）", async () => {
+    mockSequence([{ body: executed(0, false) }]);
+    const w = await run("CALL TESTLIB.P()");
+    const text = w.find(".done").text();
+    expect(text).toContain("実行しました");
+    expect(text).not.toContain("結果セット");
+    w.unmount();
+  });
+});

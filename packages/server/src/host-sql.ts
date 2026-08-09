@@ -131,7 +131,14 @@ function toJsonRows(rows: readonly Record<string, unknown>[]) {
 async function runNonQuery(
   c: Context<{ Variables: AuthVars }>,
   deps: HostSqlDeps,
-  args: { source: z.infer<typeof sourceSchema>; sql: string; user: AuthVars["user"] }
+  args: {
+    source: z.infer<typeof sourceSchema>;
+    sql: string;
+    user: AuthVars["user"];
+    /** 手続きが返した結果セットから読む行数の上限 */
+    limit: number;
+    lobMaxBytes?: number;
+  }
 ): Promise<Response> {
   const connectStart = Date.now();
   let conn: DbConnection | undefined;
@@ -144,7 +151,10 @@ async function runNonQuery(
     const acquired = await deps.pool.acquire(key, () => openDb(opts));
     conn = acquired.conn;
     const connectMs = Date.now() - connectStart;
-    const result = await executeStatement(conn, args.sql);
+    const result = await executeStatement(conn, args.sql, {
+      resultLimit: args.limit,
+      ...(args.lobMaxBytes ? { lob: { maxBytes: args.lobMaxBytes } } : {})
+    });
     // **素性を採ってから手放す**。返した後は別の要求がその接続を使い始めうる
     const info = connectionInfo(conn, acquired.reused, connectMs);
     deps.pool.release(key, conn);
@@ -157,6 +167,20 @@ async function runNonQuery(
       ...(result.outputs
         ? { outputs: result.outputs.map((v) => (typeof v === "bigint" ? v.toString() : v)) }
         : {}),
+      /**
+       * 手続きが返した結果セット。**クエリと同じ形の列・行で返す**ので、画面は
+       * SELECT と同じ表で出せる。`kind` は `execute` のまま——出力パラメーターや
+       * 「結果セット N 個」を一緒に伝える必要があり、クエリの形には入らない。
+       */
+      ...(result.resultSet
+        ? {
+            columns: toColumns(result.resultSet.columns),
+            rows: toJsonRows(result.resultSet.rows),
+            rowCount: result.resultSet.rows.length,
+            truncated: result.resultSet.truncated
+          }
+        : {}),
+      ...(result.resultSets !== undefined ? { resultSets: result.resultSets } : {}),
       connection: info
     });
   } catch (e) {
@@ -183,7 +207,15 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
 
     // --- 結果を返さない文（DML / DDL）。**クエリ経路では実行できない**ので先に振り分ける ---
     if (isNonQueryStatement(sql)) {
-      return await runNonQuery(c, deps, { source, sql, user });
+      return await runNonQuery(c, deps, {
+        source,
+        sql,
+        user,
+        // 手続きの結果セットは**ページングしない**（カーソルを掴み続けない）ので、
+        // 画面の「1 度に取得」をそのまま上限として使い、切ったら `truncated` で言う
+        limit: pageSize ?? maxRows ?? DEFAULT_ROWS,
+        ...(lobMaxBytes !== undefined ? { lobMaxBytes } : {})
+      });
     }
 
     // --- ページング（pageSize 指定時）。**結果セットを保持**して続きを /next で返す ---

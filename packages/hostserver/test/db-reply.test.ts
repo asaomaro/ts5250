@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDataFormat, parseResultData, parseSqlca } from "../src/db/db-reply.js";
+import { parseDataFormat, parseResultData, parseSqlca, resultSetCountOf } from "../src/db/db-reply.js";
 import { DB2 } from "../src/db/db-types.js";
 import { As400Error } from "@ts5250/base";
 
@@ -139,5 +139,42 @@ describe("parseSqlca", () => {
 
   it("短すぎる場合は undefined（解析全体を落とさない）", () => {
     expect(parseSqlca(new Uint8Array(10))).toBeUndefined();
+  });
+});
+
+/**
+ * `SQLCODE +466` が言う結果セットの数。SQLERRMC は「2 バイト長 ＋ 本体」のトークンが並び、
+ * SQL0466 では手続き名・スキーマ名のあとに**数が 2 バイトそのまま**置かれる
+ * （実機で実測: `0014 | 0007 "RSPROC2" | 0007 "TESTLIB" | 0002`）。
+ */
+describe("resultSetCountOf", () => {
+  /** 名前 2 つ ＋ 数 の SQLERRMC を持つ SQLCA */
+  function sqlca466(count: number, nameLen = 7): Uint8Array {
+    const out = new Uint8Array(136);
+    const v = new DataView(out.buffer);
+    v.setInt32(12, 466);
+    v.setUint16(16, 2 + nameLen + 2 + nameLen + 2);
+    let at = 18;
+    for (let i = 0; i < 2; i++) {
+      v.setUint16(at, nameLen);
+      at += 2 + nameLen;
+    }
+    v.setUint16(at, count);
+    return out;
+  }
+
+  it("末尾の 2 バイトを数として読む", () => {
+    expect(resultSetCountOf(sqlca466(1))).toBe(1);
+    expect(resultSetCountOf(sqlca466(2))).toBe(2);
+    // 名前の長さが変わっても位置を追える（固定オフセットで読まない）
+    expect(resultSetCountOf(sqlca466(3, 4))).toBe(3);
+  });
+
+  /** **読めないなら黙って諦める。** 推測した数を出すほうが害が大きい */
+  it("形が合わなければ undefined", () => {
+    expect(resultSetCountOf(new Uint8Array(10))).toBeUndefined();
+    const broken = sqlca466(2);
+    new DataView(broken.buffer).setUint16(16, 99); // SQLERRML が中身と合わない
+    expect(resultSetCountOf(broken)).toBeUndefined();
   });
 });

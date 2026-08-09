@@ -183,6 +183,35 @@ export interface Sqlca {
   updateCount: number;
 }
 
+/**
+ * `SQLCODE +466`（手続きが結果セットを返した）が言う**結果セットの数**。
+ *
+ * SQLERRMC は「2 バイトの長さ ＋ 本体」のトークンが並ぶ。SQL0466 では
+ * 手続き名・スキーマ名の 2 トークンのあとに**数が 2 バイトそのまま**置かれる
+ * （実機で実測: `0014 | 0007 "RSPROC2" | 0007 "TESTLIB" | 0002`）。
+ *
+ * **読めなければ `undefined`。** 数を出せなくても結果セットは取れるので、
+ * ここで失敗しても本題は続けられる——推測した数を出すほうが害が大きい。
+ */
+export function resultSetCountOf(value: Uint8Array): number | undefined {
+  if (value.length < 136) return undefined;
+  const v = new DataView(value.buffer, value.byteOffset, value.byteLength);
+  const len = v.getUint16(16);
+  // SQLERRMC は 18 から最大 70 バイト
+  if (len < 2 || len > 70) return undefined;
+  const end = 18 + len;
+  let at = 18;
+  for (;;) {
+    const remaining = end - at;
+    // 末尾に 2 バイトだけ残ったら、それが数
+    if (remaining === 2) return v.getUint16(at);
+    if (remaining < 2) return undefined;
+    const tokenLen = v.getUint16(at);
+    at += 2 + tokenLen;
+    if (at > end) return undefined;
+  }
+}
+
 /** SQLCA（CP 0x3807）。SQLCODE と SQLSTATE の位置は固定 */
 export function parseSqlca(value: Uint8Array): Sqlca | undefined {
   if (value.length < 136) return undefined;

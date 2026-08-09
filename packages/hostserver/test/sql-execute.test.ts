@@ -343,3 +343,142 @@ describe("失敗の理由", () => {
     expect(String((err as Error).message)).toContain("PWS0011");
   });
 });
+
+/**
+ * **結果セットを返す手続きの `CALL`**（`SQLCODE +466`）。
+ *
+ * 実機（）で分かったこと:
+ * - `execute` に**カーソル名を添えないと** `rcClass=2 / -403` で断られ、SQLCA すら返らない
+ * - 添えると `+466`（結果セットが N 個）になり、そのカーソルから読める
+ * - **読めるのは 1 個目だけ**（2 個目を開くと `-517`）。数は SQLERRMC の末尾に載る
+ */
+describe("CALL の結果セット", () => {
+  const CP_CURSOR_NAME = 0x380b;
+  const CP_DATA_FORMAT = 0x3805;
+  const CP_EXT_RESULT_DATA = 0x380e;
+  const REQ_OPEN_AND_DESCRIBE = 0x1804;
+  const REQ_FETCH = 0x180b;
+  const REQ_CLOSE = 0x180a;
+
+  /** SQLCODE +466 の SQLCA。SQLERRMC は「名前・名前・数」（実機の並び） */
+  function sqlca466(count: number): Uint8Array {
+    const out = sqlca(466, 0, "0100C");
+    const v = new DataView(out.buffer);
+    const name = [0xd7, 0xf1]; // EBCDIC "P1"
+    v.setUint16(16, 2 + name.length + 2 + name.length + 2); // SQLERRML
+    let at = 18;
+    for (let i = 0; i < 2; i++) {
+      v.setUint16(at, name.length);
+      out.set(name, at + 2);
+      at += 2 + name.length;
+    }
+    v.setUint16(at, count);
+    return out;
+  }
+
+  /** 列定義（元形式・INTEGER 1 列）。8 ＋ 54 バイト */
+  function format1(): Uint8Array {
+    const out = new Uint8Array(8 + 54);
+    const v = new DataView(out.buffer);
+    v.setUint16(4, 1); // 列数
+    v.setUint16(6, 4); // レコード長
+    v.setUint16(8 + 2, 496); // INTEGER
+    v.setUint16(8 + 4, 4); // 長さ
+    v.setUint16(8 + 20, 2); // 名前の長さ
+    v.setUint16(8 + 22, 37); // 名前の CCSID
+    out.set([0xc9, 0xc4], 8 + 24); // "ID"
+    return out;
+  }
+
+  /** n 行（ID は 7, 8, …） */
+  function rowsN(n: number): Uint8Array {
+    const out = new Uint8Array(20 + 2 * n + 4 * n);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, n);
+    v.setUint16(8, 1);
+    v.setUint16(10, 2);
+    v.setUint32(16, 4);
+    for (let i = 0; i < n; i++) v.setUint32(20 + 2 * n + 4 * i, 7 + i);
+    return out;
+  }
+
+  function callConn(count = 1, rowCount = 1) {
+    const sent: Frame[] = [];
+    const request = vi.fn(async (frame: Frame) => {
+      sent.push(frame);
+      switch (frame.reqId) {
+        case REQ_PREPARE_AND_DESCRIBE:
+          return { params: [{ cp: CP_SQLCA, value: sqlca(0) }], dbTemplate: okTemplate };
+        case REQ_EXECUTE:
+          return { params: [{ cp: CP_SQLCA, value: sqlca466(count) }], dbTemplate: okTemplate };
+        case REQ_OPEN_AND_DESCRIBE:
+          return {
+            params: [{ cp: CP_DATA_FORMAT, value: format1() }, { cp: CP_SQLCA, value: sqlca(0) }],
+            dbTemplate: okTemplate
+          };
+        case REQ_FETCH: {
+          // 2 回目は「もう無い」（SQLCODE 100）
+          const fetched = sent.filter((f) => f.reqId === REQ_FETCH).length;
+          return {
+            params: [
+              { cp: CP_EXT_RESULT_DATA, value: fetched === 1 ? rowsN(rowCount) : new Uint8Array(0) },
+              { cp: CP_SQLCA, value: sqlca(fetched === 1 ? 0 : 100) }
+            ],
+            dbTemplate: okTemplate
+          };
+        }
+        default:
+          return { params: [{ cp: CP_SQLCA, value: sqlca(0) }], dbTemplate: okTemplate };
+      }
+    });
+    const conn = { request, acquire: () => () => {} } as unknown as DbConnection;
+    return { conn, sent };
+  }
+
+  it("**CALL にはカーソル名を添える**（添えないとホストが -403 で断る）", async () => {
+    const { conn, sent } = callConn();
+    await executeStatement(conn, "CALL P()");
+    const exec = sent.find((f) => f.reqId === REQ_EXECUTE)!;
+    expect(exec.params.map((p) => p.cp)).toContain(CP_CURSOR_NAME);
+  });
+
+  it("CALL 以外にはカーソル名を添えない（今までの経路を変えない）", async () => {
+    const { conn, sent } = fakeConn([OK, OK]);
+    await executeStatement(conn, "DELETE FROM QTEMP.T");
+    for (const f of sent) expect(f.params.map((p) => p.cp)).not.toContain(CP_CURSOR_NAME);
+  });
+
+  it("開いて読んで閉じる。行と列を返す", async () => {
+    const { conn, sent } = callConn();
+    const res = await executeStatement(conn, "CALL P()");
+    expect(sent.map((f) => f.reqId)).toContain(REQ_OPEN_AND_DESCRIBE);
+    expect(sent.map((f) => f.reqId)).toContain(REQ_CLOSE);
+    expect(res.resultSet?.columns.map((c) => c.name)).toEqual(["ID"]);
+    expect(res.resultSet?.rows).toEqual([{ ID: 7 }]);
+    expect(res.resultSets).toBe(1);
+  });
+
+  /** **+466 は警告ではない**（結果セットがあるという知らせ）。警告として出すと嘘になる */
+  it("+466 を警告として返さない", async () => {
+    const { conn } = callConn();
+    const res = await executeStatement(conn, "CALL P()");
+    expect(res.warning).toBeUndefined();
+  });
+
+  it("結果セットが 2 個以上あることを伝える（1 個目しか出せないので黙らない）", async () => {
+    const { conn } = callConn(2);
+    const res = await executeStatement(conn, "CALL P()");
+    expect(res.resultSets).toBe(2);
+  });
+
+  /** **切ったことを黙らない**（続きは取りに行けないので、言わないと「全部見た」に見える） */
+  it("上限で切ったら truncated を立てる", async () => {
+    const cut = await executeStatement(callConn(1, 3).conn, "CALL P()", { resultLimit: 2 });
+    expect(cut.resultSet?.rows).toHaveLength(2);
+    expect(cut.resultSet?.truncated).toBe(true);
+
+    const whole = await executeStatement(callConn(1, 2).conn, "CALL P()", { resultLimit: 2 });
+    expect(whole.resultSet?.rows).toHaveLength(2);
+    expect(whole.resultSet?.truncated).toBe(false);
+  });
+});

@@ -37,13 +37,13 @@ import { codecForCcsid } from "@ts5250/ebcdic";
 import { findParam } from "../datastream.js";
 import { DB_CP, DB_REQ, ORS } from "./db-datastream.js";
 import type { DbConnection, DbReply } from "./db-connection.js";
-import { parseSqlca } from "./db-reply.js";
+import { parseSqlca, resultSetCountOf } from "./db-reply.js";
 import { parseExtendedResultData } from "./db-reply-ext.js";
 import { parseMarkerFormat, type MarkerFormat } from "./marker-format.js";
 import { encodeMarkerRow, buildMarkerData } from "./marker-encode.js";
 import { decodeRow, type ColumnMeta, type DbValue } from "./db-decode.js";
 import { typeName, jsTypeOf } from "./db-types.js";
-import { SqlError } from "./query.js";
+import { SqlError, readProcedureResultSet, type LobOptions } from "./query.js";
 import { hasParameterMarker, isCallStatement, isRowCountStatement } from "./statement-kind.js";
 
 const log = childLog({ component: "hostserver-sql-execute" });
@@ -59,8 +59,20 @@ const IDENTIFIER_CCSID = 37;
 const STATEMENT_TYPE_OTHER = 1;
 /** この経路が使う文名。`insert.ts` の `ASUPLOAD` とは**別にする** */
 const STATEMENT_NAME = "ASEXEC";
+/**
+ * 手続きの結果セットを受けるカーソル名。
+ * `query.ts` の `C1` とは**別にする**——同じ接続で踏み合わないように。
+ */
+const CURSOR_NAME = "ASEXECC";
 /** マーカー・ディスクリプタのハンドル（RPB ハンドルとは別の欄） */
 const DESCRIPTOR_HANDLE = 1;
+/**
+ * 手続きが結果セットを返したときの SQLCODE。
+ * **失敗ではない**——「使える結果セットが N 個ある」という知らせ。
+ */
+const SQLCODE_RESULT_SETS = 466;
+/** 結果セットから読む既定の行数（画面が指定しなければこれ） */
+const DEFAULT_RESULT_LIMIT = 200;
 
 /** 結果を返さない文の実行結果 */
 export interface ExecuteResult {
@@ -82,6 +94,24 @@ export interface ExecuteResult {
    * 並びは文中の `?` と同じ順。**入力として送った位置には NULL が返る**。
    */
   outputs?: DbValue[];
+  /**
+   * 手続きが返した結果セット（`CALL` で `SQLCODE +466` のとき）。
+   *
+   * **取れるのは 1 個目だけ。** 2 個目を開こうとすると `SQLCODE -517`
+   * （選択ステートメントではない）で断られる（実機で実測）。
+   * いくつあったかは `resultSets` で伝え、黙って捨てない。
+   */
+  resultSet?: { columns: ColumnMeta[]; rows: Record<string, DbValue>[]; truncated: boolean };
+  /** 手続きが返した結果セットの数（ホストの申告）。読めなければ付かない */
+  resultSets?: number;
+}
+
+/** `executeStatement` の任意設定 */
+export interface ExecuteOptions {
+  /** 結果セットから読む行数の上限（既定 200） */
+  resultLimit?: number;
+  /** 結果セットの LOB の取り方（指定しなければロケーターのまま） */
+  lob?: LobOptions;
 }
 
 /**
@@ -90,7 +120,11 @@ export interface ExecuteResult {
  * @throws `SqlError` SQLCODE が負のとき（構文誤り・存在しない表・経路違い `-518`）
  * @throws `As400Error("CONFIG_ERROR")` `CALL` 以外でパラメータマーカー（`?`）を含むとき
  */
-export async function executeStatement(conn: DbConnection, sql: string): Promise<ExecuteResult> {
+export async function executeStatement(
+  conn: DbConnection,
+  sql: string,
+  options: ExecuteOptions = {}
+): Promise<ExecuteResult> {
   const markersAllowed = isCallStatement(sql);
   if (hasParameterMarker(sql) && !markersAllowed) {
     // `CONFIG_ERROR` を使うのは「**指定の不備**で、直す先はこちら側」だから（`errors.ts` の定義。
@@ -138,6 +172,10 @@ export async function executeStatement(conn: DbConnection, sql: string): Promise
         (withMarkers ? ORS.resultData : 0),
       ...(withMarkers ? { parameterMarkerHandle: DESCRIPTOR_HANDLE } : {}),
       params: [
+        // **`CALL` にはカーソル名を添える。** 添えないと、結果セットを返す手続きは
+        // `rcClass=2 / -403` で断られ、SQLCA すら返らない（実機で実測）。
+        // 添えると `SQLCODE +466`（結果セットが N 個ある）になり、このカーソルから読める
+        ...(markersAllowed ? [identifier(DB_CP.cursorName, CURSOR_NAME)] : []),
         identifier(DB_CP.prepareStatementName, STATEMENT_NAME),
         num(DB_CP.sqlStatementType, STATEMENT_TYPE_OTHER, 2),
         ...(withMarkers
@@ -154,13 +192,25 @@ export async function executeStatement(conn: DbConnection, sql: string): Promise
       // 「DDL の完了」と「0 行に影響した DML」を件数からは区別できない（research F3）
       hasRowCount: isRowCountStatement(sql)
     };
-    if (ca.sqlCode > 0) {
+    if (ca.sqlCode > 0 && ca.sqlCode !== SQLCODE_RESULT_SETS) {
       result.warning = { sqlCode: ca.sqlCode, sqlState: ca.sqlState };
       log.debug(`statement succeeded with warning: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}`);
     }
     if (withMarkers) {
       const outputs = readOutputs(exec, format);
       if (outputs) result.outputs = outputs;
+    }
+    // **+466 は警告ではなく「結果セットがある」という知らせ。** 続けて読む
+    if (ca.sqlCode === SQLCODE_RESULT_SETS) {
+      const raw = findParam(exec, DB_CP.sqlca);
+      const count = raw ? resultSetCountOf(raw) : undefined;
+      if (count !== undefined) result.resultSets = count;
+      result.resultSet = await readProcedureResultSet(conn, {
+        statement: STATEMENT_NAME,
+        cursor: CURSOR_NAME,
+        limit: options.resultLimit ?? DEFAULT_RESULT_LIMIT,
+        ...(options.lob ? { lob: options.lob } : {})
+      });
     }
     return result;
   } finally {
