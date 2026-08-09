@@ -98,7 +98,15 @@ export interface ExecuteResult {
    * 手続きが返した結果セット（`CALL` で `SQLCODE +466` のとき）。
    *
    * **取れるのは 1 個目だけ。** 2 個目を開こうとすると `SQLCODE -517`
-   * （選択ステートメントではない）で断られる（SR-OSAKA で実測）。
+   * （選択ステートメントではない）で断られる。SR-OSAKA で 10 通り試して確かめた——
+   * カーソル名を変える／取り切る前に開く／閉じてから開き直す／手続き側の名前（`C1`・`C2`）で開く／
+   * `describe` を挟む／`openDescribeFetch` を使う／文名を分けて 2 度 `execute` する／
+   * 実行し直す／文の種別 0〜6 を総当たり／ORS を全ビット立てる。**どれも 1 個目が返る**。
+   *
+   * SQL の側には道がある（`ASSOCIATE RESULT SET LOCATORS`）が、読んだ行をクライアントへ
+   * 返すには**列の形を知った器**が要るので汎用にできない。雛形を
+   * `scripts/build-sqldemo-osaka.mjs`（`SQLDEMOPICK`）に置いてある。
+   *
    * いくつあったかは `resultSets` で伝え、黙って捨てない。
    */
   resultSet?: { columns: ColumnMeta[]; rows: Record<string, DbValue>[]; truncated: boolean };

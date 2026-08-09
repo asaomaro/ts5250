@@ -10,6 +10,7 @@
 //   SQLDEMORS   手続き（結果セット 1 個）      → `CALL ASAOLIB.SQLDEMORS()`
 //   SQLDEMORS2  手続き（結果セット 2 個）      → 「2 個のうち 1 個目」の表示を見る
 //   SQLDEMOF    関数（スカラー）              → `SELECT ASAOLIB.SQLDEMOF(ID) FROM …`
+//   SQLDEMOPICK 手続き（SQLDEMORS2 の**2 個目**の結果セットを返す）
 //   SQLDEMOTR   トリガー（AFTER INSERT）
 //
 // **DDL はこのファイルが持ち物**。SQL 画面へそのまま貼っても通る形で書いてある
@@ -64,6 +65,7 @@ const DROPS = [
   `DROP PROCEDURE ${LIB}.SQLDEMOP`,
   `DROP PROCEDURE ${LIB}.SQLDEMORS`,
   `DROP PROCEDURE ${LIB}.SQLDEMORS2`,
+  `DROP PROCEDURE ${LIB}.SQLDEMOPICK`,
   `DROP TABLE ${LIB}.SQLDEMOLOG`,
   `DROP TABLE ${LIB}.SQLDEMO`
 ];
@@ -138,6 +140,41 @@ const DDL = [
        OPEN C2;
      END`
   ],
+  /**
+   * **2 個目以降の結果セットを見るための包み。**
+   *
+   * ホストサーバー経由では、手続きが返す結果セットは **1 個目しか開けない**
+   * （2 個目を開こうとすると `SQLCODE -517`。カーソル名の変え方・開く順・
+   * 文名を分ける・実行し直す…と 10 通り試して SR-OSAKA で確認した）。
+   *
+   * SQL の側には道がある——`ASSOCIATE RESULT SET LOCATORS` でロケーターを受け取れば、
+   * 何個目でも読める。ただし**読んだ行をクライアントへ返すには器が要る**ので、
+   * 一時表へ写して、それを `WITH RETURN` で返す。**列の形が分かっている手続き専用**の
+   * 書き方になる（汎用にはできない。だから画面の機能にはせず、雛形として置く）。
+   */
+  [
+    "手続き（SQLDEMORS2 の 2 個目を返す）",
+    `CREATE PROCEDURE ${LIB}.SQLDEMOPICK () LANGUAGE SQL DYNAMIC RESULT SETS 1
+     BEGIN
+       DECLARE L1 RESULT_SET_LOCATOR VARYING;
+       DECLARE L2 RESULT_SET_LOCATOR VARYING;
+       DECLARE V INT;
+       DECLARE DONE INT DEFAULT 0;
+       DECLARE OUT1 CURSOR WITH RETURN FOR SELECT N FROM SESSION.RS2PICK;
+       DECLARE CONTINUE HANDLER FOR NOT FOUND SET DONE = 1;
+       DECLARE GLOBAL TEMPORARY TABLE RS2PICK (N INT) WITH REPLACE;
+       CALL ${LIB}.SQLDEMORS2();
+       ASSOCIATE RESULT SET LOCATORS (L1, L2) WITH PROCEDURE ${LIB}.SQLDEMORS2;
+       ALLOCATE CUR2 CURSOR FOR RESULT SET L2;
+       FETCH CUR2 INTO V;
+       WHILE DONE = 0 DO
+         INSERT INTO SESSION.RS2PICK VALUES (V);
+         FETCH CUR2 INTO V;
+       END WHILE;
+       CLOSE CUR2;
+       OPEN OUT1;
+     END`
+  ],
   [
     "関数",
     `CREATE FUNCTION ${LIB}.SQLDEMOF (P_ID INT) RETURNS DECIMAL(9,2)
@@ -159,8 +196,21 @@ try {
     // 無ければ落ちる。**それでよい**（作り直しが目的なので、消せたかは問わない）
     try {
       await executeStatement(conn, sql);
-    } catch {
-      /* 無ければ良い */
+    } catch (e) {
+      /**
+       * **握り潰してよいのは「無い」だけ。**
+       *
+       * 誰かが表を掴んでいると `DROP` は応答せず、20 秒で時間切れになる。
+       * その時点で接続は使えなくなるので、黙って進むと**以降すべてが
+       * 「接続が中断されました」で失敗し、本当の原因が見えない**（実際に踏んだ——
+       * アプリを起動したままだと、プールの接続がロックを持っている）。
+       */
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/timed out|abandoned/u.test(msg)) {
+        err(`${sql} が応答しません: ${msg}`);
+        err("同じ表を掴んでいるものがあります。アプリ（start.sh / electron）を止めてから実行してください。");
+        process.exit(2);
+      }
     }
   }
   for (const [what, sql] of DDL) {
@@ -199,6 +249,7 @@ try {
   out(`  CALL ${LIB}.SQLDEMOP(1, 1.50, ?)      -- 出力パラメーター`);
   out(`  CALL ${LIB}.SQLDEMORS()               -- 結果セット 1 個`);
   out(`  CALL ${LIB}.SQLDEMORS2()              -- 結果セット 2 個（1 個目だけ出る）`);
+  out(`  CALL ${LIB}.SQLDEMOPICK()             -- その 2 個目（ロケーター経由の雛形）`);
   out(`  SELECT ID, ${LIB}.SQLDEMOF(ID) FROM ${LIB}.SQLDEMO ORDER BY ID`);
 } finally {
   conn.close();
