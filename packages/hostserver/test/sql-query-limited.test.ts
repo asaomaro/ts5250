@@ -425,3 +425,52 @@ describe("開けなかったときも占有を解く", () => {
     expect(f.isBusy()).toBe(false);
   });
 });
+
+/**
+ * **名前を返さない表がある**（`QSYS2.SYSROUTINES` は実機で全列が空）。
+ * 空のまま通すと全列が同じ名前になり、行を連想配列に詰めた時点で
+ * **最後の 1 列以外が消える**——2 列の結果が 1 列になって画面に出た（実機で踏んだ）。
+ */
+describe("列名が空のとき", () => {
+  /** 超拡張列定義（INTEGER 2 列）。**可変長部を持たない＝名前が空** */
+  function formatNoName(): Uint8Array {
+    const FIXED = 16;
+    const REPEAT = 48;
+    const out = new Uint8Array(FIXED + REPEAT * 2);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, 2); // 列数
+    v.setUint32(12, 8); // レコード長
+    for (let i = 0; i < 2; i++) {
+      const base = FIXED + REPEAT * i;
+      v.setUint16(base + 2, 496); // INTEGER
+      v.setUint32(base + 4, 4);
+      v.setUint16(base + 12, 65535);
+    }
+    return out;
+  }
+
+  it("位置で名前を付ける（列が消えない）", async () => {
+    const conn = {
+      acquire: () => () => {},
+      request: async (frame: { reqId: number }) => {
+        if (frame.reqId === REQ.prepareAndDescribe) {
+          return {
+            params: [
+              { cp: CP_SUPER_EXT_FORMAT, value: formatNoName() },
+              { cp: CP_SQLCA, value: sqlca() }
+            ],
+            dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+          };
+        }
+        // open / fetch / close はいずれも「行なし」で足りる（見たいのは列名だけ）
+        return {
+          params: [{ cp: CP_SQLCA, value: sqlca(frame.reqId === REQ.fetch ? 100 : 0) }],
+          dbTemplate: { rcClass: 0, rcClassReturnCode: 0 }
+        };
+      }
+    } as unknown as DbConnection;
+
+    const res = await queryLimited(conn, "SELECT A, B FROM T", { limit: 10 });
+    expect(res.columns.map((c) => c.name)).toEqual(["COL1", "COL2"]);
+  });
+});

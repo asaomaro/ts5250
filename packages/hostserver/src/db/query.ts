@@ -369,13 +369,19 @@ async function openCursor(conn: DbConnection): Promise<void> {
   checkSqlca(opened, "open cursor");
 }
 
-/** 超拡張形式の列を既存の ColumnMeta に写す（下流はこの型だけを見る） */
-function toColumnMeta(c: ExtColumn): ColumnMeta {
+/**
+ * 超拡張形式の列を既存の ColumnMeta に写す（下流はこの型だけを見る）。
+ *
+ * **名前が空なら位置で名前を付ける。** 名前を返さない表がある（`QSYS2.SYSROUTINES` は
+ * 実機で全列が空）。空のまま通すと**全列が同じ名前になり、行を連想配列にした時点で
+ * 最後の 1 列以外が消える**——2 列の結果が 1 列になって画面に出た（実機で踏んだ）。
+ */
+function toColumnMeta(c: ExtColumn, index: number): ColumnMeta {
   // 型コードは NULL 可なら +1 されている（元形式と同じ規則）
   const nullable = c.sqlType % 2 === 1;
   const type = nullable ? c.sqlType - 1 : c.sqlType;
   return {
-    name: c.name,
+    name: c.name.trim().length > 0 ? c.name : `COL${index + 1}`,
     type,
     typeName: typeName(type),
     offset: c.offset,

@@ -71,6 +71,17 @@ export function isNonQueryStatement(sql: string): boolean {
 }
 
 /**
+ * 手続きの呼び出しか。
+ *
+ * **`?` を許すのはこの文だけ**（`execute.ts`）。CALL の `?` は出力パラメーターの
+ * 受け皿で、値を書く場所が無い——これを断ると手続きの結果を画面から見る手段が消える。
+ * 一方 DML の `?` は「値を書き忘れた文」であり、通すと NULL を書き込んでしまう。
+ */
+export function isCallStatement(sql: string): boolean {
+  return headOf(sql) === "CALL";
+}
+
+/**
  * その文の「影響行数」に意味があるか（DML か）。
  *
  * DDL に添えて「0 行に影響しました」と出さないための判定。
