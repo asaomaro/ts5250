@@ -29,6 +29,19 @@ describe("parseDataFormat（実機の応答・元形式）", () => {
     expect(f.columns.map((c) => c.name)).toEqual(["ID", "C_CHAR"]);
   });
 
+  /**
+   * **空白だけの名前は「無い」扱い**にする。名前を返さない表がある
+   * （`QSYS2.SYSROUTINES` は実機で全列が空）。空のまま通すと全列が同じ名前になり、
+   * 行を連想配列に詰めた時点で**最後の 1 列以外が消える**（2 列が 1 列になって画面に出た）。
+   */
+  it("名前が空白だけなら位置で名前を付ける", () => {
+    const blank = new Uint8Array(REAL_FORMAT);
+    // 1 列目の名前（8 + 24 の位置に 2 バイト）を EBCDIC の空白で潰す
+    blank[8 + 24] = 0x40;
+    blank[8 + 24 + 1] = 0x40;
+    expect(parseDataFormat(blank).columns.map((c) => c.name)).toEqual(["COL1", "C_CHAR"]);
+  });
+
   it("型と NULL 可を読む（0x01C5 = CHAR+1 = NULL 可）", () => {
     expect(f.columns[0]!.type).toBe(DB2.SMALLINT);
     expect(f.columns[0]!.nullable).toBe(false);

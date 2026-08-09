@@ -1,6 +1,7 @@
 // 実ブラウザ（web-ui）で SR-OSAKA に**結果を返さない SQL 文**を実行できるか検証する。
 //
-//   CREATE TABLE（DDL）→ INSERT → UPDATE → DELETE → SELECT で中身を確認 → DROP
+//   CREATE TABLE（DDL）→ INSERT → UPDATE → DELETE → MERGE → SELECT で中身を確認
+//   → CREATE PROCEDURE / FUNCTION（複合文）→ CALL（出力パラメーター）→ DROP
 //
 // **「実際にホストの表が変わったか」はここでしか確かめられない。** 単体テストは偽の接続で
 // 要求の形と SQLCODE の扱いを固定しているだけで、書けたかどうかは実機に聞くほかない。
@@ -30,6 +31,9 @@ mkdirSync(SHOTS, { recursive: true });
 /** 後片付けが要らない QTEMP ではなく**実ライブラリー**で試す（警告 7905 の経路も見る） */
 const LIB = "ASAOLIB";
 const T = "SQLEXECB";
+/** 複合文（`BEGIN … END`）の検証で作る手続き・関数 */
+const P = "SQLEXECP";
+const F = "SQLEXECF";
 
 const results = [];
 const check = (n, ok, d = "") => {
@@ -37,7 +41,9 @@ const check = (n, ok, d = "") => {
   process.stdout.write(`${ok ? "OK  " : "NG  "} ${n}${d ? ` — ${d}` : ""}\n`);
 };
 
-const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
+// 設定の置き場は差し替えられる（`SQLEXEC_TMP` と同じ扱い）。
+// 個人の `connections.json` に SR-OSAKA を置いていない環境でも走らせるため
+const cfg = JSON.parse(readFileSync(process.env.SQLEXEC_CONN ?? "connections.json", "utf8"));
 const sys = cfg.systems.find((s) => s.name === "SR-OSAKA");
 if (!process.env.AS400_PASSWORD) {
   log("AS400_PASSWORD が未設定です");
@@ -94,7 +100,10 @@ async function run(sql) {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('SR-OSAKA') >> button:has-text('選択')");
+  // **システムが 1 つだけならアプリが自動で選ぶ**（選択画面が出ない）。
+  // 出たときだけ押す——無条件に待つと、1 システムの環境では必ず時間切れになる
+  const pick = page.locator(".card:has-text('SR-OSAKA') >> button:has-text('選択')");
+  if ((await pick.count()) > 0) await pick.first().click();
   await page.waitForSelector(".fn:has-text('SQL')", { timeout: 10000 });
   await page.click(".fn:has-text('SQL') >> button");
   await page.waitForSelector(".sql-pane textarea", { timeout: 15000 });
@@ -160,7 +169,64 @@ try {
   check("2 番目のタブは表（追加した行が見える）", second.includes("3") && second.includes("c"));
   await shot("08-mixed-2");
 
+  // --- MERGE（DML の 4 つ目。UPDATE と INSERT が 1 文に混ざる） ---
+  const merged = await run(
+    `MERGE INTO ${LIB}.${T} T USING (VALUES (3, 'm'), (4, 'n')) AS S(ID, S) ON T.ID = S.ID ` +
+      `WHEN MATCHED THEN UPDATE SET T.S = S.S WHEN NOT MATCHED THEN INSERT (ID, S) VALUES (S.ID, S.S)`
+  );
+  check("**MERGE で 2 行に影響したと出る**", merged.includes("2 行に影響しました"), merged.slice(0, 200));
+
+  // --- 複合文（`BEGIN … END`）。**本体の `;` で切らないこと**が要点 ---
+  await run(`DROP PROCEDURE ${LIB}.${P}`);
+  const proc = await run(
+    [
+      `CREATE PROCEDURE ${LIB}.${P} (IN P_ID INT, OUT P_S CHAR(10))`,
+      "LANGUAGE SQL",
+      "BEGIN",
+      `  DECLARE C1 CURSOR FOR SELECT S FROM ${LIB}.${T} WHERE ID = P_ID;`,
+      "  DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET P_S = 'ERR';",
+      "  OPEN C1;",
+      "  FETCH C1 INTO P_S;",
+      "  CLOSE C1;",
+      "  IF P_S IS NULL THEN",
+      "    SET P_S = 'NONE';",
+      "  END IF;",
+      "END"
+    ].join("\n")
+  );
+  check("**複合文の手続きが 1 文として通る**", proc.includes("実行しました"), proc.slice(0, 200));
+  check("本体の `;` で切られていない（タブは 1 つ）", (await page.locator(".rtab").count()) <= 1);
+  await shot("10-create-procedure");
+
+  // --- CALL の出力パラメーター（`?`） ---
+  const called = await run(`CALL ${LIB}.${P}(3, ?)`);
+  check("**CALL が実行できる**", called.includes("実行しました"), called.slice(0, 200));
+  const outs = await page.locator(".outparams tbody td").allInnerTexts();
+  check("**出力パラメーターが値付きで出る**", outs[0] === "?1" && outs[1]?.trim() === "m", outs.join("|"));
+  await shot("11-call-out");
+
+  // --- 関数（複合文）と、その利用 ---
+  await run(`DROP FUNCTION ${LIB}.${F}`);
+  const fn = await run(
+    [
+      `CREATE FUNCTION ${LIB}.${F} (P_ID INT) RETURNS CHAR(10)`,
+      "LANGUAGE SQL READS SQL DATA",
+      "BEGIN",
+      "  DECLARE V CHAR(10);",
+      `  SET V = (SELECT S FROM ${LIB}.${T} WHERE ID = P_ID);`,
+      "  RETURN CASE WHEN V IS NULL THEN 'NONE' ELSE V END;",
+      "END"
+    ].join("\n")
+  );
+  check("**複合文の関数が 1 文として通る**", fn.includes("実行しました"), fn.slice(0, 200));
+  const used = await run(`SELECT ID, ${LIB}.${F}(ID) AS V FROM ${LIB}.${T} ORDER BY ID`);
+  check("作った関数が SELECT から使える", used.includes("m") && used.includes("n"), used.slice(0, 300));
+  await shot("12-function");
+
   // --- 後片付け ---
+  await run(`DROP FUNCTION ${LIB}.${F}`);
+  const dp = await run(`DROP PROCEDURE ${LIB}.${P}`);
+  check("**DROP PROCEDURE できる**", dp.includes("実行しました"), dp.slice(0, 200));
   const dropped = await run(`DROP TABLE ${LIB}.${T}`);
   check("**DROP できる**（後片付け）", dropped.includes("実行しました"), dropped.slice(0, 200));
   await shot("09-drop");

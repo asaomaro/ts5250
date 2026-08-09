@@ -95,6 +95,11 @@ export function parseDataFormat(value: Uint8Array): ResultFormat {
 /**
  * 列名。列定義内に長さ・CCSID とともに埋め込まれている。
  * 読めない場合は undefined を返し、既定名にフォールバックする（名前で解析全体を落とさない）。
+ *
+ * **空白だけの名前も「無い」として扱う。** 名前を返さない表がある
+ * （`QSYS2.SYSROUTINES` は実機で全列が空。長さは持っているが中身が空白）。
+ * そのまま `""` を通すと**全列が同じ名前になり、行を連想配列に詰めた時点で
+ * 最後の 1 列以外が消える**——画面には 1 列しか出ない（実機で踏んだ）。
  */
 function readFieldName(value: Uint8Array, fieldAt: number): string | undefined {
   const v = new DataView(value.buffer, value.byteOffset, value.byteLength);
@@ -104,13 +109,15 @@ function readFieldName(value: Uint8Array, fieldAt: number): string | undefined {
   if (at + len > value.length) return undefined;
   const ccsid = v.getUint16(fieldAt + F.nameCcsid);
   const bytes = value.subarray(at, at + len);
+  let name: string;
   try {
-    return codecForCcsid(isBinaryCcsid(ccsid) ? SQLCA_CCSID : ccsid)
+    name = codecForCcsid(isBinaryCcsid(ccsid) ? SQLCA_CCSID : ccsid)
       .decode(bytes)
       .trimEnd();
   } catch {
-    return codecForCcsid(SQLCA_CCSID).decode(bytes).trimEnd();
+    name = codecForCcsid(SQLCA_CCSID).decode(bytes).trimEnd();
   }
+  return name.trim().length > 0 ? name : undefined;
 }
 
 export interface ResultData {
