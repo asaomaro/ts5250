@@ -6,6 +6,10 @@ TN3270 プロトコルの純 TypeScript 実装。telnet ネゴシエーション
 対応範囲: **基本 TN3270**（RFC 1576）、SBCS（CCSID 37）＋ **DBCS（930/939・日本語）**、
 モデル 2〜5（標準 24x80 ＋ 代替 32x80 / 43x80 / 27x132）、平文 TCP ＋ TLS。
 
+**接続先はメインフレームだけではない。** IBM i の telnet サーバーも 3270 端末を受け入れる
+（`x3270` の説明にある "the AS/400's 3270 emulation"）。実測で **pub400（IBM i 7.5）** と
+**日本語 IBM i（7.3）** のサインオン画面に到達できることを確認している。
+
 **対象外**: TN3270E（RFC 2355）、プリンター（3287 / LU type 3）、IND$FILE、構造化フィールドの本格対応。
 
 > **`@ts5250/tn5250` とは同位で、互いに依存しない。** telnet の枠組みは似ているが中身は別物——
@@ -53,6 +57,19 @@ kind:   attr  sbcs sbcs sbcs   so   lead  tail   si   sbcs
 
 フィールドは保持せず `snapshot()` のたびに属性桁を走査して導出する（`decisions.md` D8）。
 
+## ホストによる違い（実測）
+
+同じ 3270 でも**ホストによって使う符号が違う**。両方に対応している。
+
+| | Hercules / MVS 3.8j | **IBM i** |
+|---|---|---|
+| コマンドコード | EBCDIC 系（`F5` / `F1` / `F3`…） | **SNA 系**（`05` / `01` / **`11`**…） |
+| WSF Query | 撃ってこない | **撃つ。応答しないと画面が来ない** |
+| 画面の届き方 | 直接 | **`Outbound 3270DS` に包まれる** |
+| DBCS の申告 | 不要 | **日本語機は Query Reply に DBCS 記述子が要る** |
+
+`normalizeCommand()` が系統を吸収するので、利用側は意識しなくてよい。
+
 ## 検証環境
 
 ローカルに **TK4-（MVS 3.8j）を docker で立て**、参照クライアント **`s3270`**（x3270 suite・
@@ -62,6 +79,10 @@ BSD-3-Clause）と突き合わせて検証している。
 sh test/harness/testenv.sh up      # TK4- 起動（IPL 完了まで待つ）＋ s3270 イメージ構築
 TN3270_E2E=1 npx vitest run        # 照合を含めて実行
 sh test/harness/testenv.sh down
+
+# 実 IBM i に当てる（入力欄のある画面はこちらでしか得られない）
+TN3270_IBMI=pub400.com npx vitest run test/e2e-ibmi.test.ts
+TN3270_IBMI=<日本語機> TN3270_IBMI_CCSID=930 npx vitest run test/e2e-ibmi.test.ts
 ```
 
 テストは 2 段構成（`decisions.md` D10）:
@@ -74,7 +95,9 @@ sh test/harness/testenv.sh down
 **照合で得たバイト列は fixture に落として単体段へ還元する**ので、一度照合すれば
 以後は docker 無しでも回帰が効く。
 
-> **日本語 DBCS は実ホスト無しで検証している。** ローカルに立てられる MVS 3.8j（1981 年）は
+> **日本語 DBCS は 2 通りで検証している。** 実 IBM i（日本語機）と、実ホスト無しの合成データストリーム。
+>
+> 実ホスト無しでも検証できる理由: ローカルに立てられる MVS 3.8j（1981 年）は
 > 英語 SBCS 専用だが、DBCS は「ホストが SO/SI と DBCS バイトを送る」というデータストリーム上の
 > 取り決めなので、**自前の `@ts5250/ebcdic` で符号化した日本語**を `mini3270` から流して
 > `s3270 -codepage cp930/cp939` と突き合わせれば足りる。

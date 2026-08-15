@@ -278,8 +278,14 @@ sequenceDiagram
 先頭バイトの上位 2 ビットが `00` なら 14 ビット形式、それ以外は 12 ビット形式として復号する。
 16 ビット形式は代替サイズが 4,096 桁を超える場合に用いる。
 
-**WSF（`F3`）は今回、Query Reply の要求に応答する最小限に留める。**
-グラフィックス・Programmed Symbols は対象外（requirement）。
+**〔訂正〕WSF は「読み飛ばす」ではなく実装した。** 当初はスコープ外に置いたが、
+**IBM i は WSF Query に応答しないと画面を出さず、画面本体も `Outbound 3270DS` として
+WSF に包んで送ってくる**（deliver 後の実測で判明）。したがって次を実装した:
+`Read Partition Query` への Query Reply、`Outbound 3270DS` の展開、`Set Reply Mode` の受理。
+グラフィックス・Programmed Symbols は引き続き対象外。
+
+**〔追記〕コマンドコードは 2 系統ある。** EBCDIC 系（Hercules）と SNA 系（IBM i）。
+`normalizeCommand()` で吸収する（decisions D11）。
 
 ### 3. バッファモデル（実測に基づく・D3）
 

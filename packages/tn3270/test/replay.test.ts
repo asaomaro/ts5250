@@ -89,6 +89,28 @@ describe("replay（docker 不要）", () => {
     expect(records[0]!.hex.startsWith("f5")).toBe(true); // Erase/Write
   });
 
+  it("**IBM i の記録を再生するとサインオン画面が組み上がる**", () => {
+    // SNA 系コマンドコード ＋ WSF Query ＋ Outbound 3270DS の経路を docker 無しで固定する。
+    // ここが緑なら「IBM i に繋がる」ことが実ホスト無しで回帰する
+    const entries = loadEntries("ibmi-signon.jsonl");
+    const s = new Tn3270Session({ host: "replay", model: 2, ccsid: 37 });
+    const transport = ReplayTransport.fromEntries(entries);
+    let screens = 0;
+    s.on("screen", () => screens++);
+    s.attach(transport);
+
+    expect(screens).toBeGreaterThan(0);
+    const snap = s.snapshot();
+    expect(snap.fields.length).toBeGreaterThan(10); // サインオン画面は欄が多い
+    const text = snap.cells.map((r) => r.map((c) => c.char).join("").trimEnd()).join("\n");
+    expect(text).toContain("PUB400");
+    expect(text).toContain("Your user name");
+
+    // **Query Reply を返していること**（返さないとホストは画面を出さない）
+    const sent = transport.sent.map(toHex).join("");
+    expect(sent).toContain("88"); // AID_STRUCTURED_FIELD で始まる応答
+  });
+
   it("送信バイトも記録される（照合に使える）", () => {
     const entries = loadEntries("dbcs-cp930.jsonl");
     const s = new Tn3270Session({ host: "replay", model: 2, ccsid: 930 });

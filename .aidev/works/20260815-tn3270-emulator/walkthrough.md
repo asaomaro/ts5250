@@ -22,6 +22,34 @@ flowchart LR
   T --> API["Tn3270Session<br/>connect / type / send / snapshot"]
 ```
 
+## 追記: IBM i 対応（レビュー時に増えた分）
+
+**3270 の接続先はメインフレームだけではない。** IBM i の telnet サーバーも 3270 端末を
+受け入れる。実測で **pub400（IBM i 7.5）** と**日本語 IBM i（7.3）**のサインオン画面に到達した。
+
+IBM i に繋ぐには TK4- では不要だった 3 点が要る:
+
+```mermaid
+sequenceDiagram
+  participant H as IBM i
+  participant C as tn3270
+  H->>C: 11 00 00 01 ff 02
+  Note over H,C: SNA 系の WSF(0x11) で Read Partition Query
+  C->>H: 88 … QueryReply(Summary/UsableArea/CharacterSets…)
+  Note over C: **DBCS 機は CharacterSets に DBCS 記述子が要る**
+  H->>C: 11 043a 40 00 f5 c2 …
+  Note over H,C: 画面は Outbound 3270DS(0x40) に包まれて来る
+  C->>C: 封筒を開けて中の 3270DS を適用
+```
+
+**この 3 点は spec でスコープ外に置いていた**（「WSF は記録して読み飛ばす」）。
+TK4- が Query を撃たず EBCDIC 系コマンドしか使わないため、必要性が見えなかった。
+**検証環境が要求しないものはスコープから静かに落ちる**——`decisions.md` D13 に教訓として残した。
+
+レビューでは `protocol/query-reply.ts` の**申告範囲**を見てほしい。
+持っていない機能（DDM / RPQ Names / Reply Modes）は**意図的に申告していない**——
+申告は「これができる」という約束で、嘘をつくとホストがそれを前提にしたデータを送ってくる。
+
 ## 重点的に見てほしい 4 点
 
 ### 1. 定数がすべて実測で決まっていること（`protocol/constants.ts`）

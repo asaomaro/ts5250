@@ -7,7 +7,27 @@
  * に置いてある（`attr.trc` / `order.trc` / `wcc3.trc` / `negotiation-hercules.trc`）。
  */
 
-/** ホスト → 端末のコマンド（レコードの先頭 1 バイト） */
+/**
+ * ホスト → 端末のコマンド（レコードの先頭 1 バイト）。
+ *
+ * **コマンドコードは 2 系統ある。** 実測（`cmd.trc`。両系統を s3270 に流して復号名を読んだ）:
+ *
+ * | コマンド | EBCDIC 系 | SNA 系 |
+ * |---|---|---|
+ * | Write | F1 | 01 |
+ * | Erase/Write | F5 | 05 |
+ * | Erase/Write Alternate | 7E | 0D |
+ * | Read Buffer | F2 | 02 |
+ * | Read Modified | F6 | 06 |
+ * | Read Modified All | 6E | 0E |
+ * | Erase All Unprotected | 6F | 0F |
+ * | Write Structured Field | F3 | **11** |
+ *
+ * **どちらが来るかはホスト次第**——Hercules（MVS 3.8j）は EBCDIC 系、
+ * **IBM i は SNA 系**を使う（実測: 接続直後に `11 00 00 01 ff 02` を送ってくる）。
+ * s3270 は両方を受理する。**片方だけ実装すると、もう片方のホストに繋がらない**
+ * （実際、EBCDIC 系だけで IBM i に繋いだら画面が来ないまま止まった）。
+ */
 export const CMD3270 = {
   /** 消さずに書く */
   WRITE: 0xf1,
@@ -26,6 +46,28 @@ export const CMD3270 = {
   /** 構造化フィールド */
   WRITE_STRUCTURED_FIELD: 0xf3
 } as const;
+
+/** SNA 系のコマンドコード（実測）。値は EBCDIC 系の対応するコマンドへ写す */
+const SNA_TO_EBCDIC: Readonly<Record<number, number>> = {
+  0x01: CMD3270.WRITE,
+  0x05: CMD3270.ERASE_WRITE,
+  0x0d: CMD3270.ERASE_WRITE_ALTERNATE,
+  0x02: CMD3270.READ_BUFFER,
+  0x06: CMD3270.READ_MODIFIED,
+  0x0e: CMD3270.READ_MODIFIED_ALL,
+  0x0f: CMD3270.ERASE_ALL_UNPROTECTED,
+  0x11: CMD3270.WRITE_STRUCTURED_FIELD
+};
+
+/**
+ * コマンドコードを EBCDIC 系に正規化する。
+ *
+ * **判定を 1 か所に閉じる**——ここを通してからパーサに渡せば、
+ * 以降は系統を気にしなくてよい。未知の値はそのまま返す（呼び出し側が未知として記録する）。
+ */
+export function normalizeCommand(byte: number): number {
+  return SNA_TO_EBCDIC[byte] ?? byte;
+}
 
 /**
  * オーダー（コマンドの後ろに並ぶ）。

@@ -1,8 +1,9 @@
 import { childLog } from "@ts5250/base";
 import { ByteReader } from "./bytes.js";
-import { CMD3270, ORDER, WCC, XA, SO, SI } from "./constants.js";
+import { CMD3270, ORDER, WCC, XA, SO, SI, normalizeCommand } from "./constants.js";
 import { decodeAddress } from "./address.js";
 import type { Screen3270 } from "../screen/buffer.js";
+import { splitStructuredFields, asQueryRequest, SF_TYPE, type QueryRequest } from "./query-reply.js";
 
 const log = childLog({ component: "tn3270-inbound" });
 
@@ -20,7 +21,7 @@ const log = childLog({ component: "tn3270-inbound" });
 export type ReadRequest = "read-buffer" | "read-modified" | "read-modified-all" | null;
 
 export interface UnknownItem {
-  kind: "command" | "order";
+  kind: "command" | "order" | "structured-field";
   byte: number;
   offset: number;
 }
@@ -33,6 +34,8 @@ export interface InboundResult {
   alarm: boolean;
   /** ホストが応答を求めた場合 */
   read: ReadRequest;
+  /** 構造化フィールドの要求（Query）。**応答しないとホストが画面を出さない** */
+  structuredField?: QueryRequest;
   /** 未知のコマンド／オーダー。**落とさずに記録する**（spec のエラー処理） */
   unknown: UnknownItem[];
 }
@@ -48,7 +51,9 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
   };
   if (record.length === 0) return result;
 
-  const command = r.u8();
+  // **系統を吸収してから分岐する**（EBCDIC 系 / SNA 系。constants.ts 参照）
+  const rawCommand = r.u8();
+  const command = normalizeCommand(rawCommand);
   switch (command) {
     case CMD3270.ERASE_WRITE:
       screen.resize(false); // 標準 24x80（spec D5）
@@ -75,14 +80,38 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
     case CMD3270.READ_MODIFIED_ALL:
       result.read = "read-modified-all";
       return result;
-    case CMD3270.WRITE_STRUCTURED_FIELD:
-      // 構造化フィールドは今回のスコープ外（Query Reply の最小応答は subtask 03 以降）。
-      // **落とさずに記録して読み飛ばす**
-      result.unknown.push({ kind: "command", byte: command, offset: 0 });
+    case CMD3270.WRITE_STRUCTURED_FIELD: {
+      // **IBM i は接続直後に Query を撃ち、応答を待ってから画面を出す**（実測）。
+      // 画面本体も `Outbound 3270DS` として**この封筒に入って**来るので、
+      // ここを読み飛ばすと画面が一切出ない。
+      // **1 レコードに複数の SF が入る**（画面の後ろに Set Reply Mode が続く形を実測）。
+      for (const sf of splitStructuredFields(record)) {
+        const q = asQueryRequest(sf);
+        if (q !== null) {
+          result.structuredField = q;
+          continue;
+        }
+        if (sf.type === SF_TYPE.OUTBOUND_3270DS) {
+          // 封筒を開けて中身を適用する。body の先頭 1 バイトはパーティション ID
+          const inner = sf.body.subarray(1);
+          if (inner.length > 0) {
+            const r = applyInbound(screen, inner);
+            result.keyboardRestored ||= r.keyboardRestored;
+            result.resetMdt ||= r.resetMdt;
+            result.alarm ||= r.alarm;
+            result.unknown.push(...r.unknown);
+            if (r.read !== null) result.read = r.read;
+          }
+          continue;
+        }
+        if (sf.type === SF_TYPE.SET_REPLY_MODE) continue; // 返すものは無い
+        result.unknown.push({ kind: "structured-field", byte: sf.type, offset: 0 });
+      }
       return result;
+    }
     default:
-      result.unknown.push({ kind: "command", byte: command, offset: 0 });
-      log.debug(`unknown 3270 command 0x${command.toString(16)}`);
+      result.unknown.push({ kind: "command", byte: rawCommand, offset: 0 });
+      log.debug(`unknown 3270 command 0x${rawCommand.toString(16)}`);
       return result;
   }
 

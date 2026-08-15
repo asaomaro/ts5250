@@ -9,6 +9,7 @@ import { snapshot } from "../screen/snapshot.js";
 import type { ScreenSnapshot } from "../screen/types.js";
 import { applyInbound } from "../protocol/inbound.js";
 import { buildReadModified, buildReadBuffer } from "../protocol/outbound.js";
+import { buildQueryReply } from "../protocol/query-reply.js";
 import { parseFieldAttr } from "../screen/attributes.js";
 import { Emitter } from "./emitter.js";
 import { isShortForm, type AidKey } from "./aid-keys.js";
@@ -128,6 +129,19 @@ export class Tn3270Session {
     const result = applyInbound(this.screen, record);
     if (result.unknown.length > 0) {
       log.debug(`unknown items in record: ${JSON.stringify(result.unknown)}`);
+    }
+    // **Query には必ず応答する**——IBM i はこれを待ってから画面を出す（実測）
+    if (result.structuredField !== undefined && this.telnet) {
+      this.telnet.sendRecord(
+        buildQueryReply({
+          model: this.opts.model ?? 2,
+          extendedAttributes: (this.opts.family ?? "3279") === "3279",
+          // **DBCS の CCSID なら DBCS を申告する**——申告しないと日本語ホストは黙る（実測）
+          dbcs: codecForCcsid(this.ccsid).isDbcs
+        })
+      );
+      log.debug(`replied to structured field query (${result.structuredField.kind})`);
+      return;
     }
     // ホストが読み取りを求めてきたら応答する（AID は 0x60。実測）
     if (result.read !== null && this.telnet) {

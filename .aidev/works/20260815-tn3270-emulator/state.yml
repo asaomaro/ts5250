@@ -1,7 +1,7 @@
 schema: 3
 slug: tn3270-emulator
 current: deliver
-approved: [requirement, research, spec, design, plan, test, review, walkthrough, deliver]
+approved: [requirement, research, spec, design, plan, test, review, walkthrough, coding, deliver]
 mode: autonomous
 humanGates: [requirement, spec]
 maxSendBacks: 3
