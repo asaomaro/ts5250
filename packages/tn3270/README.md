@@ -94,6 +94,12 @@ kind:   attr  sbcs sbcs sbcs   so   lead  tail   si   sbcs
 **落ちるのは 5250 固有の拡張機能だけ**で、IBM i が 3270 クライアント向けに degrade している。
 実装側の取りこぼしではない。
 
+> **COBOL も同じ仕組み。** IBM i では COBOL も RPG と同様に **DDS 表示ファイル**で画面を出す
+> （`ASSIGN TO WORKSTATION-<file>` ＋ `COPY DDS-ALL-FORMATS` ＋ `WRITE / READ … FORMAT IS`）。
+> 検証のため ILE COBOL プログラムを実機で作って 3270 から実行し、入力の受け渡しまで確認した。
+> **画面定義の形式（DDS / CICS BMS / ISPF パネル…）はホスト側の書き方の問題**で、
+> 線上を流れるのはどれも標準の 3270 データストリームなので、この実装からは区別が要らない。
+
 > **CCSID の選択が効く。** 同じ画面でも `930`（カタカナ）で読むと英小文字がカタカナに化け、
 > `5035`（英小文字）なら正しく出る。どちらが正しいかは**ホストのジョブ CCSID 次第**で、
 > 実装は申告した CCSID どおりに忠実に描く。社内機は `5035`（`scripts/README.md` の記載どおり）。
