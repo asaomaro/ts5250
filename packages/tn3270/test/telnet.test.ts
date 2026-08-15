@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { TelnetLayer } from "../src/telnet/telnet.js";
 import type { Transport } from "../src/transport/types.js";
-import { IAC, CMD, OPT, TT_IS, TT_SEND } from "../src/telnet/constants.js";
+import { IAC, CMD, OPT, TT_IS, TT_SEND, ENV_IS, ENV_SEND } from "../src/telnet/constants.js";
 
 /** テスト用の Transport。送信バイトを溜め、任意のバイト列を受信として流し込める */
 class MockTransport implements Transport {
@@ -69,8 +69,8 @@ describe("基本 TN3270 の telnet 交渉（research F2 の実測列）", () => 
     t.recv(IAC, CMD.DO, 0x03);
     expect(hex(t.sentFlat)).toBe("fffc03"); // WONT SGA
     t.sent = [];
-    t.recv(IAC, CMD.WILL, 0x27); // NEW-ENVIRON(39)
-    expect(hex(t.sentFlat)).toBe("fffe27"); // DONT
+    t.recv(IAC, CMD.WILL, 0x2c); // 未定義のオプション
+    expect(hex(t.sentFlat)).toBe("fffe2c"); // DONT
   });
 });
 
@@ -167,5 +167,62 @@ describe("交渉ループの防止（RFC 854）", () => {
     t.sent = [];
     t.recv(IAC, CMD.DO, 0x03);
     expect(t.sentFlat).toEqual([]);
+  });
+});
+
+describe("NEW-ENVIRON（IBM i 向けのコードページ申告）", () => {
+  it("**IBM i は NEW-ENVIRON を送ってくるので断らない**", () => {
+    // 素の 3270 ホスト（Hercules）は送ってこないが、IBM i は 5250 と同じ telnet サーバーを使う。
+    // 断るとコードページを申告できず、variant 文字（'@' 等）が化けて CPF1120 になる
+    const t = new MockTransport();
+    new TelnetLayer(t, { terminalType: "IBM-3279-2-E" });
+    t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+    expect(hex(t.sentFlat)).toBe("fffb27"); // WILL NEW-ENVIRON（WONT ではない）
+  });
+
+  it("SEND に対して KBDTYPE / CODEPAGE / CHARSET を返す", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E",
+      kbdType: "USB",
+      codePage: 37,
+      charSet: 697
+    });
+    t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+    t.sent = [];
+    t.recv(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    const sent = t.sentFlat;
+    expect(sent[0]).toBe(IAC);
+    expect(sent[1]).toBe(CMD.SB);
+    expect(sent[2]).toBe(OPT.NEW_ENVIRON);
+    expect(sent[3]).toBe(ENV_IS);
+    const text = String.fromCharCode(...sent.filter((b) => b >= 0x20 && b < 0x7f));
+    expect(text).toContain("KBDTYPE");
+    expect(text).toContain("USB");
+    expect(text).toContain("CODEPAGE");
+    expect(text).toContain("37");
+    expect(text).toContain("CHARSET");
+    expect(text).toContain("697");
+    expect(sent.slice(-2)).toEqual([IAC, CMD.SE]);
+  });
+
+  it("申告する値が無ければ空の IS を返す（断らない）", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, { terminalType: "X" });
+    t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+    t.sent = [];
+    t.recv(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    expect(hex(t.sentFlat)).toBe("fffa2700fff0"); // SB NEW-ENVIRON IS SE
+  });
+
+  it("装置名も申告できる", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, { terminalType: "X", deviceName: "MYDEV01" });
+    t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+    t.sent = [];
+    t.recv(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    const text = String.fromCharCode(...t.sentFlat.filter((b) => b >= 0x20 && b < 0x7f));
+    expect(text).toContain("DEVNAME");
+    expect(text).toContain("MYDEV01");
   });
 });

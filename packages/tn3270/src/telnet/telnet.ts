@@ -1,12 +1,27 @@
 import { childLog } from "@ts5250/base";
 import type { Transport } from "../transport/types.js";
-import { IAC, CMD, OPT, TT_IS, TT_SEND } from "./constants.js";
+import {
+  IAC, CMD, OPT, TT_IS, TT_SEND,
+  ENV_IS, ENV_SEND, ENV_VALUE, ENV_USERVAR
+} from "./constants.js";
 
 const log = childLog({ component: "tn3270-telnet" });
 
 export interface TelnetOptions {
   /** 端末タイプ名（例 `IBM-3279-2-E@03C0`）。TERMINAL-TYPE IS で回答する */
   terminalType: string;
+  /**
+   * RFC 2877 の USERVAR KBDTYPE / CODEPAGE / CHARSET（NEW-ENVIRON で申告）。
+   *
+   * **IBM i に繋ぐときに要る。** 申告しないとホストはシステム既定のコードページで
+   * 仮想デバイスを作り、variant 文字（`'@'` 等）が食い違う。
+   * 素の 3270 ホスト（Hercules 等）は NEW-ENVIRON を送ってこないので影響しない。
+   */
+  kbdType?: string | undefined;
+  codePage?: number | undefined;
+  charSet?: number | undefined;
+  /** RFC 4777 のデバイス名（NEW-ENVIRON の USERVAR DEVNAME） */
+  deviceName?: string | undefined;
 }
 
 /**
@@ -131,7 +146,13 @@ export class TelnetLayer {
   private answered = new Set<string>();
 
   private handleOption(cmd: number, opt: number): void {
-    const known = opt === OPT.BINARY || opt === OPT.TERMINAL_TYPE || opt === OPT.END_OF_RECORD;
+    const known =
+      opt === OPT.BINARY ||
+      opt === OPT.TERMINAL_TYPE ||
+      opt === OPT.END_OF_RECORD ||
+      // **IBM i は NEW-ENVIRON を送ってくる**。断るとコードページを申告できず
+      // variant 文字が化ける（`constants.ts` の OPT.NEW_ENVIRON 参照）
+      opt === OPT.NEW_ENVIRON;
     if (!known) {
       // 知らないオプションは断る。**落とさない**——断れば相手は続行できる
       const reply = cmd === CMD.DO || cmd === CMD.DONT ? CMD.WONT : CMD.DONT;
@@ -197,7 +218,36 @@ export class TelnetLayer {
       i++;
     }
     if (opt === OPT.TERMINAL_TYPE && body[0] === TT_SEND) this.sendTerminalType();
+    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) this.sendEnviron();
     return i;
+  }
+
+  /**
+   * NEW-ENVIRON の SEND に応える。
+   *
+   * **ホストが要求した変数を選り分けずに、こちらが申告したいものを IS で返す**
+   * （RFC 1572 は要求に無い変数を返すことを許す）。IBM i はこれでデバイスを作る。
+   */
+  private sendEnviron(): void {
+    const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
+    const put = (name: string, value: string): void => {
+      payload.push(ENV_USERVAR, ...ascii(name), ENV_VALUE, ...ascii(value));
+    };
+    if (this.opts.deviceName !== undefined) put("DEVNAME", this.opts.deviceName);
+    // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる。
+    // **KBDTYPE は必須**——CODEPAGE/CHARSET だけでは反応しないホストがある（5250 側の実機知見）
+    if (this.opts.kbdType !== undefined) put("KBDTYPE", this.opts.kbdType);
+    if (this.opts.codePage !== undefined) put("CODEPAGE", String(this.opts.codePage));
+    if (this.opts.charSet !== undefined) put("CHARSET", String(this.opts.charSet));
+
+    const out: number[] = [IAC, CMD.SB];
+    for (const b of payload) {
+      out.push(b);
+      if (b === IAC) out.push(IAC);
+    }
+    out.push(IAC, CMD.SE);
+    log.debug(`SENT SB NEW-ENVIRON IS (${payload.length} bytes)`);
+    this.transport.send(Uint8Array.from(out));
   }
 
   private sendTerminalType(): void {
@@ -212,4 +262,9 @@ export class TelnetLayer {
     log.debug(`SENT SB TERMINAL-TYPE IS ${name}`);
     this.transport.send(Uint8Array.from(out));
   }
+}
+
+/** 変数名・値は ASCII（RFC 1572） */
+function ascii(s: string): number[] {
+  return [...s].map((c) => c.charCodeAt(0) & 0xff);
 }

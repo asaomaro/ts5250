@@ -4,6 +4,7 @@ import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
 import { terminalTypeFor, type Model3270, type TerminalFamily } from "../telnet/terminal-type.js";
+import { deviceEnvFor } from "../telnet/device-env.js";
 import { Screen3270 } from "../screen/buffer.js";
 import { snapshot } from "../screen/snapshot.js";
 import type { ScreenSnapshot } from "../screen/types.js";
@@ -104,7 +105,13 @@ export class Tn3270Session {
   attach(transport: Transport): void {
     this.transport = transport;
     if (this.state === "disconnected") this.state = "negotiating";
+    // **CCSID からコードページを申告する**（IBM i 向け。素の 3270 ホストは NEW-ENVIRON を送らない）
+    const dev = deviceEnvFor(this.ccsid);
     const telnet = new TelnetLayer(transport, {
+      ...(dev !== undefined
+        ? { kbdType: dev.kbdType, codePage: dev.codePage, charSet: dev.charSet }
+        : {}),
+      ...(this.opts.deviceName !== undefined ? { deviceName: this.opts.deviceName } : {}),
       terminalType: terminalTypeFor({
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
         ...(this.opts.family !== undefined ? { family: this.opts.family } : {}),
