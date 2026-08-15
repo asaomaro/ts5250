@@ -252,9 +252,11 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         break;
       }
       case ORDER.GE: {
-        // 次の 1 文字は拡張文字集合。**文字としては普通に置く**
-        // （どの集合かは Query Reply で申告した範囲にしか来ないため）
-        put(r.u8());
+        // **次の 1 バイトは代替文字集合**（APL 記号・罫線素片）。
+        // 通常の EBCDIC として置くと `GE 0xC1` が `A` になってしまう（実測で発覚）
+        screen.writeCharGe(addr, r.u8());
+        screen.setExt(addr, curColor, curHilite);
+        addr = screen.wrap(addr + 1);
         break;
       }
       default:

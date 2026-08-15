@@ -1,5 +1,5 @@
 import { ByteWriter } from "./bytes.js";
-import { encodeAddress } from "./address.js";
+import { encodeAddress, encodeAttribute } from "./address.js";
 import { NUL, ORDER } from "./constants.js";
 import { parseFieldAttr } from "../screen/attributes.js";
 import type { Screen3270 } from "../screen/buffer.js";
@@ -66,8 +66,19 @@ export function buildReadModified(
 /**
  * バッファ全体を返す（`Read Buffer` コマンドへの応答）。
  *
- * **未検証**——TK4- はこのコマンドを撃ってこなかったので実測の裏付けが無い。
- * 形は Read Modified に倣い、属性桁は属性バイトをそのまま置く。
+ * 形は `AID(0x60) + カーソル(2) + 全桁` で、**属性桁は `SF` オーダー(0x1D) ＋ 属性バイトの
+ * 2 バイトで表す**（裸の属性バイトではない）。
+ *
+ * **実測で確定した**（`e2e-orders.test.ts`）。当初は属性バイトをそのまま置いていたが、
+ * s3270 と突き合わせたら食い違った:
+ *
+ * ```
+ * s3270 : … 6040 40 **1d60** d9c2 …   ← SF + 属性
+ * 当初  : … 6040 40 **60**   d9c2 …   ← 属性を裸で置いていた（誤り）
+ * ```
+ *
+ * TK4- も IBM i もこのコマンドを撃ってこなかったので、**実ホストだけ見ていては
+ * 見つからない誤り**だった。
  */
 export function buildReadBuffer(screen: Screen3270): Uint8Array {
   const w = new ByteWriter();
@@ -75,7 +86,8 @@ export function buildReadBuffer(screen: Screen3270): Uint8Array {
   const [hi, lo] = encodeAddress(screen.cursor, screen.size);
   w.u8(hi).u8(lo);
   for (let p = 0; p < screen.size; p++) {
-    w.u8(screen.isAttrPos(p) ? screen.attrAt(p) : screen.charAt(p));
+    if (screen.isAttrPos(p)) w.u8(ORDER.SF).u8(encodeAttribute(screen.attrAt(p)));
+    else w.u8(screen.charAt(p));
   }
   return w.toUint8Array();
 }

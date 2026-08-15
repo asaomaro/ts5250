@@ -1,4 +1,5 @@
 import { As400Error } from "@ts5250/base";
+import { ATTR } from "./constants.js";
 
 /**
  * バッファアドレスの符号化・復号（12 / 14 / 16 ビット）。**純関数**。
@@ -82,4 +83,21 @@ export function toRowCol(addr: number, cols: number): { row: number; col: number
 /** 1 始まりの行・桁 → 通し番号 */
 export function fromRowCol(row: number, col: number, cols: number): number {
   return (row - 1) * cols + (col - 1);
+}
+
+/**
+ * **欄属性バイトを「送信形式」に直す。**
+ *
+ * Read Buffer で属性桁を返すとき、**受け取ったバイトをそのまま返すのではない**。
+ * 意味を持つ 6 ビット（`ATTR.MEANINGFUL`）だけを残し、**アドレスと同じ CODE 表**で
+ * 引き直した値を送る。制御コードと衝突しない図形文字にするための決まりで、
+ * アドレスの 12 ビット形式とまったく同じ理屈が属性バイトにも効いている。
+ *
+ * 実測: 0x00〜0xff の 256 通りすべてを SF で書き込んで s3270 に Read Buffer を撃ち、
+ * 応答を数えた（`artifacts/s3270-readbuffer-attr-256.hex`）。
+ * 例——`00`→`40`、`02`→`40`（0x02 は落ちる）、`f2`→`f0`、`ff`→`7d`。
+ * **256 通り全部が `CODE[attr & 0x3d]` に一致した。**
+ */
+export function encodeAttribute(attr: number): number {
+  return CODE[attr & ATTR.MEANINGFUL]!;
 }

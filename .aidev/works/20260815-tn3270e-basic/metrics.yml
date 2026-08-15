@@ -20,3 +20,8 @@ events:
   - { ts: 2026-08-15T16:35:09Z, phase: test, event: approved, metrics: { passed: 162, failed: 0 } }
   - { ts: 2026-08-15T16:35:09Z, phase: review, event: approved, metrics: { must: 0, should: 1, nit: 0 } }
   - { ts: 2026-08-15T16:35:09Z, phase: deliver, event: approved }
+  - { ts: 2026-08-15T16:39:25Z, phase: coding, event: start }
+  - { ts: 2026-08-15T16:52:52Z, phase: coding, event: approved }
+  - { ts: 2026-08-15T16:52:52Z, phase: test, event: approved, metrics: { passed: 168, failed: 0 } }
+  - { ts: 2026-08-15T16:52:52Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0 } }
+  - { ts: 2026-08-15T16:52:52Z, phase: deliver, event: approved }

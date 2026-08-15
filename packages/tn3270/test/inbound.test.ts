@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Screen3270 } from "../src/screen/buffer.js";
 import { applyInbound } from "../src/protocol/inbound.js";
 import { snapshot } from "../src/screen/snapshot.js";
+import { graphicEscapeChar } from "../src/screen/graphic-escape.js";
 import { encodeAddress } from "../src/protocol/address.js";
 import { CMD3270, ORDER, WCC, XA, COLOR, HILITE } from "../src/protocol/constants.js";
 
@@ -172,10 +173,16 @@ describe("オーダー", () => {
     expect(s.charAt(11)).toBe(E["A"]); // 非保護欄の先頭に書かれた
   });
 
-  it("GE の次の 1 文字はそのまま置く", () => {
+  it("**GE の次の 1 バイトは代替文字集合**——生バイトは保つが GE 印を立てる", () => {
     const s = new Screen3270(2);
-    applyInbound(s, ds(CMD3270.ERASE_WRITE, 0x00, sba(0), ORDER.GE, E["A"]!));
-    expect(s.charAt(0)).toBe(E["A"]);
+    applyInbound(s, ds(CMD3270.ERASE_WRITE, 0x00, sba(0), ORDER.GE, E["A"]!, txt("A")));
+    expect(s.charAt(0)).toBe(E["A"]); // バッファには生バイトのまま入る
+    expect(s.isGe(0)).toBe(true);
+    expect(s.isGe(1)).toBe(false); // 効くのは次の 1 バイトだけ
+    // 描画は代替文字集合で引く。0xc1 は "A" ではなく "⁼"（s3270 実測）
+    const cells = snapshot(s).cells;
+    expect(cells[0]![0]!.char).toBe("\u207c");
+    expect(cells[0]![1]!.char).toBe("A");
   });
 
   it("未知のオーダーは落とさず記録して読み飛ばす", () => {
@@ -233,5 +240,25 @@ describe("フィールド導出（snapshot）", () => {
     expect(snap.cells[0]![0]!.kind).toBe("attr");
     expect(snap.cells[0]![0]!.char).toBe(" ");
     expect(snap.cells[0]![1]!.char).toBe("A");
+  });
+});
+
+describe("代替文字集合（GE）の対応表", () => {
+  /**
+   * `GE` に 0x40〜0xfe を総当たりで続けた画面を s3270 に流し、描かれた文字を読み取った表。
+   * **実ホスト（TK4-・IBM i）は GE を一度も送ってこなかった**ので、
+   * ここは s3270 との突き合わせだけが裏付けになる。
+   */
+  it("**実測した代表値**を引ける", () => {
+    expect(graphicEscapeChar(0xc1)).toBe("\u207c"); // ⁼
+    expect(graphicEscapeChar(0x85)).toBe("\u2502"); // │ 罫線素片
+    expect(graphicEscapeChar(0x8c)).toBe("\u2264"); // ≤
+    expect(graphicEscapeChar(0xd0)).toBe("}");
+  });
+
+  it("**対応の無いバイトは undefined**（空白が描かれる位置）", () => {
+    expect(graphicEscapeChar(0x40)).toBeUndefined();
+    expect(graphicEscapeChar(0x00)).toBeUndefined();
+    expect(graphicEscapeChar(0xff)).toBeUndefined();
   });
 });

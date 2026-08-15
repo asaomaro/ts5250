@@ -52,6 +52,13 @@ export interface Mini3270 {
   requestedName(): string | undefined;
   /** クライアントから受け取ったサブネゴシエーション本文の記録（交渉列の突き合わせ用） */
   negotiation(): string[];
+  /**
+   * **クライアントが送ってきたアプリのレコード**（IAC EOR で切り出し・二重化を解除済み）を hex で。
+   * AID 応答や Read Buffer の応答を突き合わせるのに使う。
+   */
+  inbound(): string[];
+  /** 交渉後に追加のレコードを送る（`Read Buffer` コマンド等を後から撃つ） */
+  send(record: Uint8Array): void;
   close(): Promise<void>;
 }
 
@@ -83,6 +90,8 @@ export function startMini3270(opts: Mini3270Options): Promise<Mini3270> {
   const sockets = new Set<Socket>();
 
   let announcedType: string | undefined;
+  const inboundRecs: string[] = [];
+  let live: Socket | undefined;
   let eDeviceType: string | undefined;
   let eRequestedName: string | undefined;
   const negLog: string[] = [];
@@ -90,6 +99,9 @@ export function startMini3270(opts: Mini3270Options): Promise<Mini3270> {
 
   const server: Server = createServer((sock) => {
     sockets.add(sock);
+    live = sock;
+    /** アプリのレコードを切り出すための持ち越しバッファ */
+    let appBuf: number[] = [];
     sock.on("close", () => sockets.delete(sock));
     sock.on("error", () => {
       /* 切断は無視（テスト側が close する） */
@@ -204,6 +216,43 @@ export function startMini3270(opts: Mini3270Options): Promise<Mini3270> {
         phase = 2;
         startBinEor();
         if (!useE || eReady || fellBack) sendData();
+        return;
+      }
+
+      // **クライアントのアプリレコードを切り出す**。
+      //
+      // telnet の制御列を正しく飛ばす必要がある——`IAC` の次の 1 バイトだけ飛ばす作りだと
+      // `IAC WILL EOR`(fffb19) の `19` が本文に紛れ込む（実際に踏んだ。応答の比較が
+      // 先頭 `1919…` で汚れた）。コマンド長は種類で違うので分けて数える。
+      if (phase >= 2 || eReady) {
+        for (let i = 0; i < b.length; i++) {
+          const c = b[i]!;
+          if (c !== IAC) {
+            appBuf.push(c);
+            continue;
+          }
+          const next = b[i + 1];
+          if (next === undefined) break;
+          if (next === IAC) {
+            appBuf.push(IAC); // 二重化の解除
+            i++;
+          } else if (next === EOR) {
+            if (appBuf.length > 0) {
+              // TN3270E ならクライアントも 5 バイトヘッダを付けてくる
+              const rec = useE && !fellBack ? appBuf.slice(5) : appBuf;
+              inboundRecs.push(Buffer.from(rec).toString("hex"));
+            }
+            appBuf = [];
+            i++;
+          } else if (next === 0xfb || next === 0xfc || next === 0xfd || next === 0xfe) {
+            i += 2; // WILL / WONT / DO / DONT はオプション番号まで 3 バイト
+          } else if (next === SB) {
+            const se = b.indexOf(SE, i + 2);
+            i = se < 0 ? b.length : se;
+          } else {
+            i++; // 2 バイトの制御
+          }
+        }
       }
     });
   });
@@ -216,6 +265,14 @@ export function startMini3270(opts: Mini3270Options): Promise<Mini3270> {
         deviceType: () => eDeviceType,
         requestedName: () => eRequestedName,
         negotiation: () => [...negLog],
+        inbound: () => [...inboundRecs],
+        send: (record: Uint8Array): void => {
+          const framed = useE && !fellBack
+            ? Uint8Array.from([0x00, 0x00, 0x00, 0x00, 0x00, ...record])
+            : record;
+          live?.write(escapeIac(framed));
+          live?.write(Uint8Array.from([IAC, EOR]));
+        },
         close: () =>
           new Promise((done) => {
             for (const s of sockets) s.destroy();

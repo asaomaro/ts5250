@@ -144,7 +144,14 @@ export const ATTR = {
   /** 表示種別の 2 ビット。下の DISPLAY_* と比較する */
   DISPLAY_MASK: 0x0c,
   NUMERIC: 0x10,
-  PROTECTED: 0x20
+  PROTECTED: 0x20,
+  /**
+   * **意味を持つビットだけを残すマスク**（MDT｜表示種別｜数字｜保護）。
+   * 残りの 3 ビット（0x02・0x40・0x80）は仕様上「未使用」で、
+   * ホストが何を入れて来ても無視してよい——というより、**送り返すときは落とす**
+   * （`encodeAttribute()` を参照）。
+   */
+  MEANINGFUL: 0x3d
 } as const;
 
 export const DISPLAY = {

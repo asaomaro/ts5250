@@ -1,6 +1,7 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic/codec";
 import { NUL, SO, SI } from "../protocol/constants.js";
 import { parseFieldAttr } from "./attributes.js";
+import { graphicEscapeChar } from "./graphic-escape.js";
 import { colorOf, highlightOf } from "./attributes.js";
 import type { Screen3270 } from "./buffer.js";
 import type { Cell, CellKind, Field, ScreenSnapshot } from "./types.js";
@@ -108,7 +109,9 @@ function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
         continue;
       }
       const kind: CellKind = "sbcs";
-      const ch = byte === NUL ? " " : codec.decode(Uint8Array.of(byte));
+      // **`GE` で置かれた桁は代替文字集合で読む**（通常の EBCDIC ではない）
+      const ge = screen.isGe(addr) ? graphicEscapeChar(byte) : undefined;
+      const ch = ge ?? (byte === NUL ? " " : codec.decode(Uint8Array.of(byte)));
       line.push({
         char: base.nonDisplay ? " " : ch,
         kind,

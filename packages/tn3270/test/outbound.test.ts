@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Screen3270 } from "../src/screen/buffer.js";
 import { applyInbound } from "../src/protocol/inbound.js";
 import { buildReadModified, buildReadBuffer } from "../src/protocol/outbound.js";
-import { encodeAddress } from "../src/protocol/address.js";
+import { encodeAddress, encodeAttribute } from "../src/protocol/address.js";
 import { CMD3270, ORDER } from "../src/protocol/constants.js";
 import { AID, AID_NONE } from "../src/session/aid-keys.js";
 
@@ -121,11 +121,28 @@ describe("Read Modified の形（実測と一致すること）", () => {
 });
 
 describe("Read Buffer", () => {
-  it("AID 0x60 + カーソル + 全桁を返す", () => {
+  it("**属性桁は SF オーダー＋属性バイトで返す**（s3270 と突き合わせて確定）", () => {
+    // 当初は属性バイトを裸で置いていたが、s3270 は `1d60` と SF を出していた。
+    // TK4- も IBM i もこのコマンドを撃ってこないので、実ホストでは見つからない誤りだった
     const s = probeScreen();
     const out = buildReadBuffer(s);
     expect(out[0]).toBe(AID_NONE);
-    expect(out.length).toBe(3 + s.size);
-    expect(out[3]).toBe(0x00); // 桁 0 は属性桁（attr=0x00）
+    // 桁 0 は属性桁 → SF(0x1d) + 属性(0x00) の 2 バイト
+    expect(out[3]).toBe(ORDER.SF);
+    // **属性バイトはそのまま返さない**——意味を持つ 6 ビットを CODE 表で引き直す。
+    // 0x00 は 0x40 になる（s3270 と 256 通りで突き合わせ済み）
+    expect(out[4]).toBe(encodeAttribute(0x00));
+    expect(out[4]).toBe(0x40);
+    // 全長 = AID(1) + カーソル(2) + 全桁 + 属性桁の数（SF の分だけ増える）
+    const attrCount = s.attrPositions().length;
+    expect(out.length).toBe(3 + s.size + attrCount);
+  });
+
+  it("属性桁以外は生バイトをそのまま並べる", () => {
+    const s = probeScreen();
+    s.writeChar(1, 0xc1);
+    const out = buildReadBuffer(s);
+    // 桁 0 が SF+attr の 2 バイトなので、桁 1 の文字は index 5
+    expect(out[5]).toBe(0xc1);
   });
 });

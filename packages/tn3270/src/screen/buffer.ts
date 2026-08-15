@@ -41,6 +41,13 @@ export class Screen3270 {
   /** 拡張属性（SFE / SA / MF が設定）。桁ごと */
   private extColor: Uint8Array;
   private extHilite: Uint8Array;
+  /**
+   * 1 = その桁は `GE`（Graphic Escape）で置かれた＝**代替文字集合**として読む。
+   *
+   * 生バイトだけでは通常の EBCDIC と区別できないので、印を別に持つ。
+   * 「保持は生バイト、意味は導出」の方針は保ったまま、**導出に必要な情報だけ**を足している。
+   */
+  private geMark: Uint8Array;
 
   private cursorPos = 0;
   private alt = false;
@@ -58,6 +65,7 @@ export class Screen3270 {
     this.fieldAttr = new Uint8Array(n);
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
+    this.geMark = new Uint8Array(n);
   }
 
   get size(): number {
@@ -106,6 +114,7 @@ export class Screen3270 {
     this.fieldAttr = new Uint8Array(n);
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
+    this.geMark = new Uint8Array(n);
     this.cursorPos = 0;
   }
 
@@ -116,6 +125,7 @@ export class Screen3270 {
     this.fieldAttr.fill(0);
     this.extColor.fill(0);
     this.extHilite.fill(0);
+    this.geMark.fill(0);
     this.cursorPos = 0;
   }
 
@@ -125,11 +135,24 @@ export class Screen3270 {
     this.chars[p] = byte;
     this.attrMark[p] = 0;
     this.fieldAttr[p] = 0;
+    this.geMark[p] = 0;
+  }
+
+  /** `GE` で 1 文字置く（代替文字集合として読む印を付ける） */
+  writeCharGe(addr: number, byte: number): void {
+    this.writeChar(addr, byte);
+    this.geMark[this.wrap(addr)] = 1;
+  }
+
+  /** その桁が `GE` で置かれたか */
+  isGe(addr: number): boolean {
+    return this.geMark[this.wrap(addr)] === 1;
   }
 
   /** 属性桁を置く（`SF` / `SFE`）。**その桁は文字を持たない** */
   startField(addr: number, attr: number): void {
     const p = this.wrap(addr);
+    this.geMark[p] = 0;
     this.attrMark[p] = 1;
     this.fieldAttr[p] = attr;
     this.chars[p] = NUL;
