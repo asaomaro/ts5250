@@ -103,7 +103,11 @@ kind:   attr  sbcs sbcs sbcs   so   lead  tail   si   sbcs
 > なお **COBOL 標準の `SCREEN SECTION` は IBM i では使えない**（実機で確認）。
 > ILE COBOL（5770WDS V7R3M0）は `SCREEN` をセクション見出しとして認識せず、
 > `LNC2913 'SCREEN' で構文エラーが検出された` で落ちる。OPM COBOL（`CRTCBLPGM`）も同様。
-> IBM i の画面入出力は表示ファイル一本と考えてよい。
+> `SCREEN SECTION` は PC 系 COBOL（Micro Focus / GnuCOBOL 等）の系譜で、IBM の機械には無い。
+>
+> 表示ファイルを使わない `DISPLAY` / `ACCEPT` は**通る**が、出るのは
+> 「プログラム・メッセージの表示」という**行単位のメッセージ画面**で、設計された画面ではない
+> （簡単なプロンプトやデバッグ向け）。**アプリケーションの画面は表示ファイル一本**と考えてよい。
 
 > **CCSID の選択が効く。** 同じ画面でも `930`（カタカナ）で読むと英小文字がカタカナに化け、
 > `5035`（英小文字）なら正しく出る。どちらが正しいかは**ホストのジョブ CCSID 次第**で、
