@@ -3,7 +3,12 @@ import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { TelnetLayer } from "../telnet/telnet.js";
-import { terminalTypeFor, type Model3270, type TerminalFamily } from "../telnet/terminal-type.js";
+import {
+  terminalTypeFor,
+  deviceTypeFor,
+  type Model3270,
+  type TerminalFamily
+} from "../telnet/terminal-type.js";
 import { deviceEnvFor } from "../telnet/device-env.js";
 import { Screen3270 } from "../screen/buffer.js";
 import { snapshot } from "../screen/snapshot.js";
@@ -34,6 +39,14 @@ export interface Connect3270Options {
   deviceName?: string;
   /** 画面文字の CCSID。既定 37。930 / 939 で DBCS */
   ccsid?: number;
+  /**
+   * TN3270E（RFC 2355）を使うか。既定 `true`。
+   *
+   * ホストが `DO TN3270E` を提示したときだけ効く。提示しないホスト
+   * （実測: TK4- / IBM i）とは**従来どおり基本 TN3270 で繋ぐ**。
+   * `false` にすると提示されても断って基本へ後退する。
+   */
+  tn3270e?: boolean;
   connectTimeoutMs?: number;
   negotiateTimeoutMs?: number;
 }
@@ -74,6 +87,16 @@ export class Tn3270Session {
     return this.state;
   }
 
+  /** TN3270E で接続しているか */
+  get isTn3270e(): boolean {
+    return this.telnet?.isTn3270e ?? false;
+  }
+
+  /** サーバが割り当てた device-name（TN3270E 時のみ） */
+  get assignedDeviceName(): string | undefined {
+    return this.telnet?.deviceName;
+  }
+
   on<K extends keyof Events>(event: K, fn: (...args: Events[K]) => void): void {
     this.events.on(event, fn);
   }
@@ -112,11 +135,17 @@ export class Tn3270Session {
         ? { kbdType: dev.kbdType, codePage: dev.codePage, charSet: dev.charSet }
         : {}),
       ...(this.opts.deviceName !== undefined ? { deviceName: this.opts.deviceName } : {}),
+      // **TN3270E 用の型名は基本 TN3270 とは別物**（`IBM-3278-*` / `IBM-3279-*`。RFC 2355 §7.1）
+      deviceType: deviceTypeFor({
+        ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
+        ...(this.opts.extended !== undefined ? { extended: this.opts.extended } : {})
+      }),
+      ...(this.opts.tn3270e !== undefined ? { tn3270e: this.opts.tn3270e } : {}),
       terminalType: terminalTypeFor({
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
         ...(this.opts.family !== undefined ? { family: this.opts.family } : {}),
-        ...(this.opts.extended !== undefined ? { extended: this.opts.extended } : {}),
-        ...(this.opts.deviceName !== undefined ? { deviceName: this.opts.deviceName } : {})
+        ...(this.opts.extended !== undefined ? { extended: this.opts.extended } : {})
+        // **`@<装置名>` は telnet 層が基本経路でだけ付ける**（TN3270E は CONNECT で渡すため）
       })
     });
     this.telnet = telnet;

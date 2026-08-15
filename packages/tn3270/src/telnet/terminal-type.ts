@@ -67,3 +67,31 @@ export function terminalTypeFor(opts: TerminalTypeOptions = {}): string {
 export function alternateSizeFor(model: Model3270 = 2): { rows: number; cols: number } {
   return ALTERNATE_SIZE[model];
 }
+
+/**
+ * **TN3270E 用の device-type**（RFC 2355 §7.1）。基本 TN3270 の型名とは**別物**。
+ *
+ * RFC 2355 が挙げる有効な端末 device-type は `IBM-3278-*` 系だけで、
+ * 基本 TN3270 で使う `IBM-3279-*` は載っていない:
+ *
+ * > Valid device-types are:
+ * >   terminals: IBM-3278-2  IBM-3278-2-E … IBM-3278-5  IBM-3278-5-E  IBM-DYNAMIC
+ *
+ * 3278 を使うのは呼称の都合で、能力を制限する意味ではない——RFC は
+ * 「`IBM-3278-2-E` の交渉は物理 3279 の機能を排除しない。クライアントの能力は
+ * **Read Partition Query と Query Reply の組み合わせ**で示される」と明記している。
+ *
+ * **実測が裏付けている**: 同じ s3270 が、基本 TN3270 では `IBM-3279-2-E`、
+ * TN3270E では `IBM-3278-2-E` と名乗り分けていた。
+ *
+ * `-E` は「拡張データストリームの一部を支える意思がある」クライアントだけが名乗る。
+ * 本実装は拡張色・ハイライトを実装しているので名乗ってよい。
+ *
+ * **LU 名はここに含めない**——TN3270E では `CONNECT <名前>` で別に渡す（`terminalTypeFor`
+ * の `@<装置名>` 慣行は基本 TN3270 専用）。
+ */
+export function deviceTypeFor(opts: { model?: Model3270; extended?: boolean } = {}): string {
+  const model = opts.model ?? 2;
+  const extended = opts.extended ?? true;
+  return `IBM-3278-${model}${extended ? "-E" : ""}`;
+}

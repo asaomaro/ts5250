@@ -87,11 +87,17 @@ export class S3270 {
     return (await this.action("Query(ConnectionState)"))[0] ?? "";
   }
 
-  /** 3270 モードに入るまで待つ */
+  /**
+   * 3270 モードに入るまで待つ。
+   *
+   * **TN3270E では状態名が違う**——基本は `connected-3270` だが TN3270E は
+   * `connected-tn3270e`。片方しか見ないと「モードに入らない」と誤判定する（実際に踏んだ）。
+   */
   async waitReady(tries = 40, sleepMs = 250): Promise<boolean> {
+    const ok = new Set(["connected-3270", "connected-tn3270e"]);
     for (let i = 0; i < tries; i++) {
       try {
-        if ((await this.connectionState()) === "connected-3270") return true;
+        if (ok.has(await this.connectionState())) return true;
       } catch {
         /* 起動直後は繋がらないことがある */
       }
