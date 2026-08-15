@@ -1,0 +1,10 @@
+schema: 3
+slug: tn3270-emulator
+current: deliver
+approved: [requirement, research, spec, design, plan, test, review, walkthrough, deliver]
+mode: autonomous
+humanGates: [requirement, spec]
+maxSendBacks: 3
+dependsOn: []
+subtasks: [01-foundation-telnet, 02-datastream-inbound, 03-input-outbound, 04-dbcs, 05-trace-fixtures]
+activeSubtask: done

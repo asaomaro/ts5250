@@ -44,12 +44,17 @@ export default tseslint.config(
     // ——pino を直接 import していた頃の名残で、`setLogSink` の注入式にした今は Node API を使わない。
     files: [
       "packages/base/src/**",
-      "packages/core/src/**",
+      "packages/tn5250/src/**",
+      "packages/tn3270/src/**",
       "packages/ebcdic/src/**",
       "packages/hostserver/src/**",
       "packages/scs/src/**"
     ],
-    ignores: ["packages/core/src/transport/**", "packages/hostserver/src/transport/**"],
+    ignores: [
+      "packages/tn5250/src/transport/**",
+      "packages/tn3270/src/transport/**",
+      "packages/hostserver/src/transport/**"
+    ],
     rules: {
       "no-restricted-imports": [
         "error",

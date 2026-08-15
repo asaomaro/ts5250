@@ -1,0 +1,9 @@
+schema: 3
+slug: 02-datastream-inbound
+parent: 20260815-tn3270-emulator
+current: review
+approved: [plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [01-foundation-telnet]
