@@ -412,6 +412,32 @@ export function stopPrinter(sessionId: string): void {
  * @returns 必須検証で止めたときはその違反。送ったときは `undefined`
  *          （呼び出し側が該当欄へフォーカスを移せるように返す）
  */
+/**
+ * **3270 に無いキーの読み替え。** `undefined` は「この端末では押せない」。
+ *
+ * | 5250 のキー | 3270 |
+ * |---|---|
+ * | `PageUp` / `PageDown` | **`F7` / `F8`** |
+ * | `Attn` / `SysReq` | 押せない（基本 TN3270E には機能が無い） |
+ * | `Help` / `Print` | 押せない（3270 に AID が無い） |
+ *
+ * **ページ送りは実機で測って決めた**——IBM i を 3270 で操作すると
+ * `PF8` で次ページ・`PF7` で前ページに動き、`PA1`/`PA2` では動かない
+ * （社内機のサブファイル画面で確認）。x3270 も同じ割り当てのキーマップを同梱している。
+ *
+ * **読み替えを送信の一本道に置く**のが肝心——キーボード・状態バーのボタン・マクロが
+ * 同じ関数を通るので、片方だけ直すと「キーボードでは動くのにボタンでは動かない」になる。
+ */
+function aidFor3270(key: AidKey): AidKey | undefined {
+  if (key === "PageUp") return "F7";
+  if (key === "PageDown") return "F8";
+  if (key === "Attn" || key === "SysReq" || key === "Help" || key === "Print") return undefined;
+  return key;
+}
+
+/** 3270 で押せないキーを押されたときの案内（黙って捨てない） */
+const MSG_NOT_ON_3270 = "このキーは 3270 端末にはありません。";
+
 export function sendKey(
   sessionId: string,
   key: AidKey,
@@ -430,13 +456,24 @@ export function sendKey(
       return hit;
     }
   }
+  // **端末の種類でキーを読み替える**（3270 には PageUp/Attn 等が無い）
+  let outKey = key;
+  if (s.meta?.terminal === "3270") {
+    const mapped = aidFor3270(key);
+    if (mapped === undefined) {
+      s.notice = MSG_NOT_ON_3270;
+      return;
+    }
+    outKey = mapped;
+  }
   delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
-  recordSend(sessionId, key, cursor ?? s.cursor, sysReqText);
+  // **記録は送った側のキー**——再生したときに同じことが起きるように
+  recordSend(sessionId, outKey, cursor ?? s.cursor, sysReqText);
   s.client.send({
     type: "key",
-    key,
+    key: outKey,
     ...(cursor ? { cursor } : {}),
     ...(fields.length > 0 ? { fields } : {}),
     ...(sysReqText !== undefined ? { sysReqText } : {})

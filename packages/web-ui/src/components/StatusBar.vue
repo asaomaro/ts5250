@@ -124,6 +124,9 @@ function padAid(k: AidKey): void {
  * この OIA が担う。**止まった理由も出す**——「押したのに動かない」と
  * 「画面が一致せず止めた」を利用者が区別できないと、原因を追えない。
  */
+/** 3270 端末か。**押せないキーを無効にする**ために見る（押せて効かないのが一番分かりにくい） */
+const is3270 = computed(() => props.state.meta?.terminal === "3270");
+
 const macro = computed<{ label: string; cls: string; title: string } | undefined>(() => {
   const m = props.state.macro;
   if (!m) return undefined;
@@ -210,12 +213,34 @@ const macroStop = computed<string | undefined>(() => {
       -->
       <template v-if="padOpen">
         <!-- **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため） -->
-        <button class="fk" :disabled="!!mod" title="割込（アテンション）" @click="padAid('Attn')">Attn</button>
-        <button class="fk" :disabled="!!mod" title="システム要求（行を開く）" @click="padAid('SysReq')">
+        <button
+          class="fk"
+          :disabled="!!mod || is3270"
+          :title="is3270 ? '3270 端末にはありません' : '割込（アテンション）'"
+          @click="padAid('Attn')"
+        >
+          Attn
+        </button>
+        <button
+          class="fk"
+          :disabled="!!mod || is3270"
+          :title="is3270 ? '3270 端末にはありません' : 'システム要求（行を開く）'"
+          @click="padAid('SysReq')"
+        >
           SysReq
         </button>
-        <button class="fk" :disabled="!!mod" title="前ページ" @click="padAid('PageUp')">PageUp</button>
-        <button class="fk" :disabled="!!mod" title="次ページ" @click="padAid('PageDown')">PageDown</button>
+        <!-- 3270 ではページ送りが PF7 / PF8 になる（実測）。押し味は変えず、説明だけ変える -->
+        <button class="fk" :disabled="!!mod" :title="is3270 ? '前ページ（3270 では F7）' : '前ページ'" @click="padAid('PageUp')">
+          PageUp
+        </button>
+        <button
+          class="fk"
+          :disabled="!!mod"
+          :title="is3270 ? '次ページ（3270 では F8）' : '次ページ'"
+          @click="padAid('PageDown')"
+        >
+          PageDown
+        </button>
         <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
         <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
         <button

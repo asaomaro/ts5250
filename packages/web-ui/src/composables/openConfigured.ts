@@ -118,6 +118,8 @@ async function open(ref: string, force = false): Promise<void> {
       // **そのセッション自身のシステムから引く**（選択中システムではない）。
       // サービス一覧は別システムのプリンターも並べるので、選択中を見ると別の機械の名前が付く
       host: systemsStore.systems.find((x) => x.ref === s.system)?.host ?? "",
+      // **端末の種類は送信側が見る**（3270 は押せるキーが違う）
+      ...(s.terminal !== undefined ? { terminal: s.terminal } : {}),
       ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {})
     };
     if (s.sessionType === "printer") {

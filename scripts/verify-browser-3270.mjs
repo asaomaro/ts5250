@@ -146,10 +146,27 @@ try {
   check("Enter でホストが応答し画面が変わる", after !== beforeText, (after.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 60));
   await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/3270-after-key.png" });
 
-  // ファンクションキー（3270 の PF）が送れる
+  // **ファンクションキーが実際にホストへ届くか**（例外が出ないだけでは足りない）
+  const beforeF = await screenText();
+  const framesBeforeF = frames.length;
   await page.keyboard.press("F3");
-  await page.waitForTimeout(2000);
-  check("PF キーで例外が出ない", errors.length === 0, errors.join(" | "));
+  await page.waitForTimeout(3000);
+  const wsErr = frames.slice(framesBeforeF).map((f) => { try { return JSON.parse(f); } catch { return null; } })
+    .filter((m) => m && m.type === "error");
+  check("F3 で WS エラーが出ない", wsErr.length === 0, wsErr.map((e) => `${e.code}:${e.message}`).join(" | "));
+  check("F3 でホストが応答する", (await screenText()) !== beforeF);
+  // PageDown / PageUp
+  const framesBeforeP = frames.length;
+  await page.keyboard.press("PageDown");
+  await page.waitForTimeout(3000);
+  const wsErrP = frames.slice(framesBeforeP).map((f) => { try { return JSON.parse(f); } catch { return null; } })
+    .filter((m) => m && m.type === "error");
+  check("PageDown で WS エラーが出ない", wsErrP.length === 0, wsErrP.map((e) => `${e.code}:${e.message}`).join(" | "));
+  // **PageDown は 3270 では F8 として出る**（実測: IBM i はこれでページ送りする）
+  const pageSent = sentFrames.map((f) => { try { return JSON.parse(f); } catch { return null; } })
+    .filter((m) => m && m.type === "key").pop();
+  check("PageDown が F8 として送られる", pageSent?.key === "F8", JSON.stringify(pageSent?.key));
+  check("ページのエラーが出ていない", errors.length === 0, errors.join(" | "));
 } catch (e) {
   ok = false;
   log("EXCEPTION: " + (e?.message ?? String(e)));
