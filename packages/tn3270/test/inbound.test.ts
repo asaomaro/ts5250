@@ -116,7 +116,13 @@ describe("オーダー", () => {
     );
     expect(s.isAttrPos(0)).toBe(true);
     expect(s.attrAt(0)).toBe(0x20);
-    expect(s.extAt(1).color).toBe(COLOR.RED);
+    // **欄の拡張属性は属性桁に置く**——文字桁には配らない（x3270 と同じ持ち方）。
+    // 当初は文字側にも複写していたが、それだと文字モードの応答で
+    // 「文字ごとに色が指定されている」ことになってしまい s3270 と食い違う
+    expect(s.extAt(0).color).toBe(COLOR.RED);
+    expect(s.extAt(1).color).toBe(0);
+    // 表示では欄の色が引き継がれる
+    expect(snapshot(s).cells[0]![1]!.color).toBe("red");
   });
 
   it("SA は以降の文字に効く", () => {

@@ -153,6 +153,8 @@ describe.skipIf(!enabled)("Read Buffer の応答（実測の裏付けが無か�
     const screen = Uint8Array.from([
       CMD3270.ERASE_WRITE, WCC.RESTORE,
       ...sba(0), ORDER.SF, 0x60, ...txt("RB"),
+      // **`GE` で置いた桁も混ぜる**——応答に `GE` が前置されるかを見るため
+      ORDER.GE, 0xc1,
       ...sba(10), ORDER.SF, 0x00, ...txt("IN")
     ]);
     const readBuffer = Uint8Array.from([CMD3270.READ_BUFFER]);

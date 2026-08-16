@@ -51,9 +51,18 @@ function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
       const ext = screen.extAt(addr);
       const ap = screen.fieldAttrPosFor(addr);
       const fa = ap >= 0 ? parseFieldAttr(screen.attrAt(ap)) : null;
-      const hl = highlightOf(ext.hilite);
+      // **文字ごとの指定が無ければ欄の指定を引く**（x3270 と同じ解き方）。
+      // `SFE` の色は属性桁にだけ置いてあり、文字側には配っていない
+      const fx = ap >= 0 ? screen.extAt(ap) : { color: 0, hilite: 0 };
+      const color = ext.color !== 0 ? ext.color : fx.color;
+      const hilite = ext.hilite !== 0 ? ext.hilite : fx.hilite;
+      const bgByte = screen.backgroundAt(addr) !== 0
+        ? screen.backgroundAt(addr)
+        : ap >= 0 ? screen.backgroundAt(ap) : 0;
+      const hl = highlightOf(hilite);
       const base = {
-        color: colorOf(ext.color),
+        color: colorOf(color),
+        background: colorOf(bgByte),
         intensified: fa?.intensified ?? false,
         reverse: hl.reverse,
         underline: hl.underline,

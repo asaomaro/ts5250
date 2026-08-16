@@ -168,6 +168,11 @@ export const DISPLAY = {
  * `42` は `foreground(red)`、`41` は `highlighting(blink)` と復号された。
  */
 export const XA = {
+  /**
+   * **全属性**。`SA 00 00` で**それまでの `SA` 指定をまとめて取り消す**。
+   * 取り消しに `BASIC`(0xc0) を使うのは誤り（x3270 は 0x00 で見ている）。
+   */
+  ALL: 0x00,
   /** 基本 3270 属性（SFE の中で SF と同じ属性バイトを運ぶ） */
   BASIC: 0xc0,
   HIGHLIGHT: 0x41,
@@ -244,3 +249,19 @@ export const SI = 0x0f;
 
 /** 空の桁（Erase/Write 後の初期値） */
 export const NUL = 0x00;
+
+/**
+ * **応答モード**（構造化フィールド `Set Reply Mode` 0x09）。
+ *
+ * ホストが「読み取りの応答に拡張属性まで載せろ」と指示するための設定。
+ * 既定は `FIELD`——`Erase/Write`・`Erase/Write Alternate` で**この既定に戻る**が、
+ * **平の `Write` では戻らない**（実測で切り分けた）。
+ */
+export const REPLY_MODE = {
+  /** 属性桁は `SF`＋属性バイトだけ */
+  FIELD: 0x00,
+  /** 属性桁を `SFE` で返し、欄の拡張属性も載せる */
+  EXTENDED_FIELD: 0x01,
+  /** さらに**文字ごとの属性**を `SA` オーダーで載せる（載せる種類はホストが指定する） */
+  CHARACTER: 0x02
+} as const;

@@ -3,7 +3,7 @@ import { Screen3270 } from "../src/screen/buffer.js";
 import { applyInbound } from "../src/protocol/inbound.js";
 import { buildReadModified, buildReadBuffer } from "../src/protocol/outbound.js";
 import { encodeAddress, encodeAttribute } from "../src/protocol/address.js";
-import { CMD3270, ORDER } from "../src/protocol/constants.js";
+import { CMD3270, ORDER, XA } from "../src/protocol/constants.js";
 import { AID, AID_NONE } from "../src/session/aid-keys.js";
 
 function hex(b: Uint8Array): string {
@@ -144,5 +144,61 @@ describe("Read Buffer", () => {
     const out = buildReadBuffer(s);
     // 桁 0 が SF+attr の 2 バイトなので、桁 1 の文字は index 5
     expect(out[5]).toBe(0xc1);
+  });
+});
+
+describe("応答モード（Set Reply Mode）", () => {
+  /** 色・下線つきの欄と、途中で色を変えた文字を持つ画面 */
+  function colored(): Screen3270 {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([
+        CMD3270.ERASE_WRITE, 0x00,
+        ORDER.SBA, ...encodeAddress(0),
+        ORDER.SFE, 0x03, XA.BASIC, 0x60, XA.FOREGROUND, 0xf2, XA.HIGHLIGHT, 0xf4,
+        0xc1, 0xc2,
+        ORDER.SA, XA.FOREGROUND, 0xf1, 0xc3,
+        ORDER.SBA, ...encodeAddress(20), ORDER.SF, 0x00
+      ])
+    );
+    return s;
+  }
+  const hex = (b: Uint8Array): string => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+  it("**欄モードは SF ＋属性だけ**（拡張属性を載せない）", () => {
+    const out = hex(buildReadBuffer(colored(), null, { reply: { mode: 0, types: [] } }));
+    expect(out).toContain("1d60");
+    expect(out).not.toContain("29");
+  });
+
+  it("**拡張欄モードは SFE で返す**——並びは基本→前景→背景→ハイライト→文字セット", () => {
+    const out = hex(buildReadBuffer(colored(), null, { reply: { mode: 1, types: [] } }));
+    expect(out).toContain("2903c06042f241f4"); // 3 組。値が 0 の背景と文字セットは載らない
+    expect(out).toContain("2901c040"); // 拡張属性の無い欄は基本だけ
+    expect(out).not.toContain("28"); // 文字ごとの SA は出さない
+  });
+
+  it("**文字モードは SA を挟む**——ただしホストが並べた種類だけ", () => {
+    const s = colored();
+    const withFg = hex(buildReadBuffer(s, null, { reply: { mode: 2, types: [XA.FOREGROUND] } }));
+    expect(withFg).toContain("2842f1"); // 色が変わった桁で 1 度だけ
+    expect(withFg.match(/2842/g)?.length).toBe(2); // 変わったときと 0 に戻ったとき
+
+    const noTypes = hex(buildReadBuffer(s, null, { reply: { mode: 2, types: [] } }));
+    expect(noTypes).not.toContain("28"); // 種類が並んでいなければ何も載せない
+  });
+
+  it("**`GE` で置いた桁は `GE` を前置して返す**（s3270 と突き合わせ済み）", () => {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([
+        CMD3270.ERASE_WRITE, 0x00,
+        ORDER.SBA, ...encodeAddress(0), ORDER.SF, 0x60, ORDER.GE, 0xc1
+      ])
+    );
+    const out = hex(buildReadBuffer(s));
+    expect(out).toContain("08c1"); // GE ＋ バイト
   });
 });

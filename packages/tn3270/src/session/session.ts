@@ -14,9 +14,9 @@ import { Screen3270 } from "../screen/buffer.js";
 import { snapshot } from "../screen/snapshot.js";
 import type { ScreenSnapshot } from "../screen/types.js";
 import { applyInbound } from "../protocol/inbound.js";
-import { buildReadModified, buildReadBuffer } from "../protocol/outbound.js";
+import { buildReadModified, buildReadBuffer, type ReplyMode } from "../protocol/outbound.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
-import { CHARSET, SO, SI } from "../protocol/constants.js";
+import { CHARSET, REPLY_MODE, SO, SI } from "../protocol/constants.js";
 import { parseFieldAttr } from "../screen/attributes.js";
 import { Emitter } from "./emitter.js";
 import { isShortForm, type AidKey } from "./aid-keys.js";
@@ -92,6 +92,12 @@ export class Tn3270Session {
    * キーボードが復旧すると（WCC の復旧ビット、または `EAU`）**忘れる**。
    */
   private lastAid: AidKey | null = null;
+
+  /**
+   * **応答モード**（`Set Reply Mode`）。既定は欄モード。
+   * `Erase/Write` 系で既定へ戻る——平の `Write` では戻らない（実測）。
+   */
+  private reply: ReplyMode = { mode: REPLY_MODE.FIELD, types: [] };
 
   get status(): SessionState {
     return this.state;
@@ -189,6 +195,11 @@ export class Tn3270Session {
       log.debug(`replied to structured field query (${result.structuredField.kind})`);
       return;
     }
+    // **応答モード**——消して書く＋リセットビットで既定へ戻り、構造化フィールドで設定される。
+    // 順序が大事: 同じレコードに両方入っていれば、設定の方が残る
+    if (result.resetReplyMode === true) this.reply = { mode: REPLY_MODE.FIELD, types: [] };
+    if (result.replyMode !== undefined) this.reply = result.replyMode;
+
     // **キーボードが復旧したら覚えている AID を捨てる**（実測）。
     // 読みへの応答より先に——`EAU` は復旧させたうえで応答を求めないので順序は問われないが、
     // 「復旧＝新しい取引の始まり」という意味づけを 1 か所に置いておく
@@ -198,9 +209,10 @@ export class Tn3270Session {
     if (result.read !== null && this.telnet) {
       const reply =
         result.read === "read-buffer"
-          ? buildReadBuffer(this.screen, this.lastAid)
+          ? buildReadBuffer(this.screen, this.lastAid, { reply: this.reply })
           : buildReadModified(this.screen, this.lastAid, {
-              all: result.read === "read-modified-all"
+              all: result.read === "read-modified-all",
+              reply: this.reply
             });
       this.telnet.sendRecord(reply);
       return;
@@ -312,7 +324,7 @@ export class Tn3270Session {
   send(key: AidKey): void {
     this.assertUnlocked();
     if (!this.telnet) throw new As400Error("SESSION_CLOSED", "not connected");
-    const record = buildReadModified(this.screen, key);
+    const record = buildReadModified(this.screen, key, { reply: this.reply });
     this.telnet.sendRecord(record);
     this.lastAid = key; // ホストが後から読みに来たときに使う
     if (key === "clear") {

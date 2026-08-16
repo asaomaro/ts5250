@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Tn3270Session } from "../src/session/session.js";
 import type { Transport } from "../src/transport/types.js";
 import { encodeAddress } from "../src/protocol/address.js";
-import { CMD3270, ORDER, WCC } from "../src/protocol/constants.js";
+import { CMD3270, ORDER, WCC, XA } from "../src/protocol/constants.js";
 import { IAC, CMD, OPT, TT_SEND } from "../src/telnet/constants.js";
 
 class MockTransport implements Transport {
@@ -285,5 +285,67 @@ describe("画面イベント", () => {
     sendScreen(t);
     expect(seen.length).toBe(1);
     expect(seen[0]).toBe(2);
+  });
+});
+
+describe("応答モードの寿命", () => {
+  /** `Set Reply Mode` の構造化フィールド */
+  const srm = (mode: number, types: number[] = []): number[] => [
+    CMD3270.WRITE_STRUCTURED_FIELD, 0x00, 5 + types.length, 0x09, 0x00, mode, ...types
+  ];
+
+  function coloredScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.FOREGROUND, 0xf2,
+      ...sba(20), ORDER.SF, 0x00
+    ]);
+  }
+
+  it("**指定するまでは欄モード**", () => {
+    const { s, t } = connected();
+    coloredScreen(t);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("1d60");
+    expect(s.status).toBe("ready");
+  });
+
+  it("**拡張欄モードにすると SFE で返す**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**平の Write では戻らない**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**消して書くだけでも戻らない**——WCC のリセットビットが要る（実測）", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    coloredScreen(t); // Erase/Write だが WCC は RESTORE だけ
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**消して書く＋リセットビットで戻る**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESET | WCC.RESTORE,
+      ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.FOREGROUND, 0xf2
+    ]);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("1d60");
+    expect(t.lastRecord).not.toContain("2902");
   });
 });
