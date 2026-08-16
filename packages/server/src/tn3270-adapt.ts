@@ -107,9 +107,12 @@ export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[
       throw new As400Error("PROTOCOL_ERROR", "secretRef is not supported on a 3270 session");
     }
     const ref = f.field;
+    // **添字は 1 始まり**（`Field.index` の規約。5250 の口と同じ数え方）。
+    // 配列の添字として使うと 1 つずれ、TK4- の入力欄に打ったつもりが
+    // **隣の保護欄に当たって `FIELD_PROTECTED`** になる（ブラウザ E2E で踏んだ）
     const target =
       typeof ref === "number"
-        ? snap.fields[ref]
+        ? snap.fields.find((x) => x.index === ref)
         : snap.fields.find((x) => x.row === ref.row && x.col === ref.col);
     if (target === undefined) {
       throw new As400Error("FIELD_NOT_FOUND", `no field at ${JSON.stringify(ref)}`);

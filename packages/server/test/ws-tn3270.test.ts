@@ -106,6 +106,36 @@ describe("WS から 3270 端末を開く", () => {
     }
   }, 30_000);
 
+  /**
+   * **添字は 1 始まり**（`Field.index` の規約）。配列の添字として使うと 1 つずれる。
+   * ブラウザ E2E で踏んだ——UI は欄を添字で指すので、TK4- の入力欄に打ったつもりが
+   * **隣の保護欄に当たって `FIELD_PROTECTED`** になった。
+   */
+  it("**欄の添字は 1 始まりで解決する**（ブラウザが指す数え方）", async () => {
+    const port = await start(3453);
+    const { conn, sent, tn3270 } = setup();
+    try {
+      await conn.handle(JSON.stringify({ type: "open", terminal: "3270", host: "127.0.0.1", port }));
+      expect(await waitFor(() => sent.some((m) => m.type === "screen"))).toBe(true);
+      const screen = [...sent].reverse().find((m) => m.type === "screen") as Extract<
+        WsServerMessage,
+        { type: "screen" }
+      >;
+      const input = screen.screen.fields.find((f) => !f.protected)!;
+      const before = mini!.inbound().length;
+      // **index で指す**（座標ではなく）
+      await conn.handle(
+        JSON.stringify({ type: "key", key: "Enter", fields: [{ field: input.index, value: "XY" }] })
+      );
+      expect(sent.some((m) => m.type === "error"), "保護欄に当たっている").toBe(false);
+      expect(await waitFor(() => mini!.inbound().length > before)).toBe(true);
+      expect(mini!.inbound()[before] ?? "").toContain("e7e8"); // "XY"
+    } finally {
+      tn3270.closeAll();
+      await mini?.close();
+    }
+  }, 30_000);
+
   it("**5250 専用の操作は 3270 セッションで断る**", async () => {
     const port = await start(3452);
     const { conn, sent, tn3270 } = setup();
