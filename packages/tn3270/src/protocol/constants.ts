@@ -244,6 +244,13 @@ export const COLOR = {
 } as const;
 
 /** DBCS の切り替え（バッファ上でそれぞれ 1 桁を占める。research F5 実測） */
+/**
+ * **重複キー**（Dup）。ホストへは 0x1c として送られ、「上の行と同じ」を意味する。
+ * 打つと**次の欄へ飛ぶ**（実測）。
+ */
+export const DUP = 0x1c;
+/** **欄区切り**（Field Mark）。0x1e。欄の中の区切りを表す。カーソルは 1 つ進むだけ */
+export const FIELD_MARK = 0x1e;
 export const SO = 0x0e;
 export const SI = 0x0f;
 

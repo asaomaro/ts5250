@@ -447,3 +447,118 @@ describe("カーソル移動キー", () => {
     expect(addr(s)).toBe(17);
   });
 });
+
+describe("挿入モードと特殊キー", () => {
+  function inputScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x60,
+      ...sba(20), ORDER.SF, 0x00,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(11), ORDER.IC
+    ]);
+  }
+  const row = (s: Tn3270Session, from: number, to: number): string =>
+    s.snapshot().cells[0]!.slice(from, to).map((c) => c.char).join("");
+  const addr = (s: Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: Tn3270Session, a: number): void => s.setCursor(1, a + 1);
+
+  it("**既定は上書き**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABC");
+    go(s, 11);
+    s.type("D");
+    expect(row(s, 11, 15)).toBe("DBC ");
+  });
+
+  it("**挿入モードは後ろへずらす**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABC");
+    go(s, 11);
+    s.setInsertMode(true);
+    s.type("D");
+    expect(row(s, 11, 15)).toBe("DABC");
+  });
+
+  it("**満杯の欄には挿入できない**——末尾に NUL が要る", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABCDE");
+    go(s, 11);
+    s.setInsertMode(true);
+    expect(() => s.type("F")).toThrow(/no room/);
+    expect(row(s, 11, 16)).toBe("ABCDE"); // 何も動いていない
+  });
+
+  it("**AID を送ると挿入モードは解ける**（実測）", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    s.setInsertMode(true);
+    s.send("enter");
+    expect(s.insertMode).toBe(false);
+  });
+
+  it("**キーボードの復旧でも解ける**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    s.setInsertMode(true);
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    expect(s.insertMode).toBe(false);
+  });
+
+  it("**Dup は 0x1c を置いて次の欄へ**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("A");
+    s.dup();
+    expect(s.snapshot().cells[0]![12]!.rawByte).toBe(0x1c);
+    expect(addr(s)).toBe(21);
+  });
+
+  it("**Field Mark は 0x1e を置いて 1 桁進むだけ**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("A");
+    s.fieldMark();
+    expect(s.snapshot().cells[0]![12]!.rawByte).toBe(0x1e);
+    expect(addr(s)).toBe(13);
+  });
+
+  it("**入力消去は全欄を消して MDT も落とす**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("AB");
+    go(s, 21);
+    s.type("12");
+    s.eraseInput();
+    expect(row(s, 11, 16).trim()).toBe("");
+    expect(row(s, 21, 26).trim()).toBe("");
+    expect(addr(s)).toBe(11);
+    expect(s.snapshot().fields.some((f) => f.modified)).toBe(false);
+  });
+
+  /** **制限が無いことも事実**——数字欄でも英字が通る（s3270 と一致） */
+  it("**数字欄に英字も打てる**（制限は掛かっていない）", () => {
+    const { s, t } = connected();
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(20), ORDER.SF, 0x10, ...sba(26), ORDER.SF, 0x60, ...sba(21), ORDER.IC
+    ]);
+    go(s, 21);
+    expect(() => s.type("ABC")).not.toThrow();
+    expect(row(s, 21, 24)).toBe("ABC");
+  });
+});

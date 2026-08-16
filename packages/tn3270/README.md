@@ -165,7 +165,9 @@ TN3270_IBMI=<日本語機> TN3270_IBMI_CCSID=930 npx vitest run test/e2e-ibmi.te
 **左右は DBCS の上で 2 桁動くが、上下は桁をそのまま辿る**（実測でそう分かれていた）。
 欄を埋め切ったときの行き先は次の欄の属性で変わり、**保護＋数字なら自動スキップ**する。
 
-編集キーは `backspace()` / `erase()` / `delete()` / `eraseEof()`。
+編集キーは `backspace()` / `erase()` / `delete()` / `eraseEof()` / `eraseInput()` /
+`dup()` / `fieldMark()`。`setInsertMode(true)` で**挿入モード**（AID を送ると解ける）。
+**数字欄に入力制限は無い**——数字ビットは自動スキップのためのもので、英字も打てる（実測）。
 **後退キー（`backspace`）は消さない**——3270 ではカーソル移動で、消すのは `erase()`。
 どれも DBCS を 1 文字として扱う。
 

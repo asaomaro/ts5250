@@ -16,7 +16,7 @@ import type { ScreenSnapshot } from "../screen/types.js";
 import { applyInbound } from "../protocol/inbound.js";
 import { buildReadModified, buildReadBuffer, type ReplyMode } from "../protocol/outbound.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
-import { CHARSET, REPLY_MODE, SO, SI, NUL } from "../protocol/constants.js";
+import { CHARSET, REPLY_MODE, SO, SI, NUL, DUP, FIELD_MARK } from "../protocol/constants.js";
 import { DB, dbcsStates, normalizeDbcs } from "../screen/dbcs.js";
 
 /**
@@ -105,6 +105,12 @@ export class Tn3270Session {
    * `Erase/Write` 系で既定へ戻る——平の `Write` では戻らない（実測）。
    */
   private reply: ReplyMode = { mode: REPLY_MODE.FIELD, types: [] };
+
+  /**
+   * **挿入モード。** 打った文字が上書きではなく**割り込み**になり、欄の後ろがずれる。
+   * **AID を送るかキーボードが復旧すると解ける**（実測）——取引が変わるので持ち越さない。
+   */
+  private insert = false;
 
   get status(): SessionState {
     return this.state;
@@ -210,7 +216,10 @@ export class Tn3270Session {
     // **キーボードが復旧したら覚えている AID を捨てる**（実測）。
     // 読みへの応答より先に——`EAU` は復旧させたうえで応答を求めないので順序は問われないが、
     // 「復旧＝新しい取引の始まり」という意味づけを 1 か所に置いておく
-    if (result.keyboardRestored) this.lastAid = null;
+    if (result.keyboardRestored) {
+      this.lastAid = null;
+      this.insert = false;
+    }
 
     // ホストが読み取りを求めてきたら応答する
     if (result.read !== null && this.telnet) {
@@ -307,15 +316,19 @@ export class Tn3270Session {
     const out = kind === "dbcs" || !dbcs ? body : onSi ? [...body, SI] : [SO, ...body, SI];
     const at = onSi && !dbcs ? s.wrap(s.cursor + 1) : s.cursor; // 英数は `SI` の後ろへ
 
-    this.assertRoom(at, out.length, home);
+    // **挿入モードなら後ろへずらす。** `SI` の上に割り込むときは `SI` 自身が右へ動くので、
+    // こちらが書くのは 2 バイトだけ（`out` の末尾の `SI` は押し出された分と重なる）
+    const write = this.insert && onSi && dbcs ? body : out;
+    if (this.insert) this.shiftRight(at, write.length);
+    this.assertRoom(at, write.length, home);
     let p = at;
-    for (const b of out) {
+    for (const b of write) {
       s.writeChar(p, b, kind === "dbcs" ? CHARSET.DBCS : 0);
       s.setMdtFor(p, true);
       p = s.wrap(p + 1);
     }
     // **末尾の `SI` にはカーソルを乗せたまま**——続けて打てば区間がそのまま伸びる
-    let next = out[out.length - 1] === SI ? s.wrap(p - 1) : p;
+    let next = out[out.length - 1] === SI && !(this.insert && onSi && dbcs) ? s.wrap(p - 1) : p;
     // **属性桁の上には止まらない**（実測: 欄をちょうど埋めると次の桁へ抜ける）。
     // ただし次が**自動スキップ欄**（保護＋数字）なら、その先の非保護欄まで飛ぶ
     if (s.isAttrPos(next)) {
@@ -347,6 +360,47 @@ export class Tn3270Session {
         throw new As400Error("FIELD_PROTECTED", `field at (${rc.row},${rc.col}) is protected`);
       }
     }
+  }
+
+  /** 挿入モードか */
+  get insertMode(): boolean {
+    return this.insert;
+  }
+
+  /** 挿入モードを切り替える（`Reset` に相当するのは `setInsertMode(false)`） */
+  setInsertMode(on: boolean): void {
+    this.insert = on;
+  }
+
+  /** **入力欄をすべて消してホームへ**（入力消去キー）。MDT も落ちる（実測） */
+  eraseInput(): void {
+    this.assertUnlocked();
+    this.screen.eraseUnprotected();
+    this.screen.setCursor(this.screen.firstUnprotected());
+    this.afterEdit();
+  }
+
+  /** **重複キー**。0x1c を置いて**次の欄へ飛ぶ**（実測） */
+  dup(): void {
+    this.assertUnlocked();
+    this.putControl(DUP);
+    this.screen.setCursor(this.screen.nextUnprotected(this.screen.cursor));
+  }
+
+  /** **欄区切りキー**。0x1e を置いてカーソルを 1 つ進めるだけ（実測） */
+  fieldMark(): void {
+    this.assertUnlocked();
+    this.putControl(FIELD_MARK);
+    this.screen.setCursor(this.screen.wrap(this.screen.cursor + 1));
+  }
+
+  /** 制御文字を 1 桁置く（`Dup` / `Field Mark`）。カーソルは呼び手が決める */
+  private putControl(byte: number): void {
+    const s = this.screen;
+    const home = s.fieldAttrPosFor(s.cursor);
+    this.assertRoom(s.cursor, 1, home);
+    s.writeChar(s.cursor, byte, s.charsetAt(s.cursor));
+    s.setMdtFor(s.cursor, true);
   }
 
   /** **最初の非保護桁へ**（ホームキー）。非保護欄が無ければ 0 桁目 */
@@ -495,6 +549,32 @@ export class Tn3270Session {
     this.afterEdit();
   }
 
+  /**
+   * **挿入のために欄の中身を右へずらす。**
+   *
+   * ずらせるのは**欄の末尾に NUL が `n` 桁ある**ときだけ——足りなければ何も動かさず
+   * `FIELD_OVERFLOW`（実測: 満杯の欄への挿入は s3270 も撥ねる）。
+   */
+  private shiftRight(from: number, n: number): void {
+    const s = this.screen;
+    const end = this.fieldEnd(from);
+    const len = this.distance(from, end);
+    const room = (): boolean => {
+      if (len < n) return false;
+      for (let k = 1; k <= n; k++) if (s.charAt(s.wrap(end - k)) !== NUL) return false;
+      return true;
+    };
+    if (!room()) {
+      throw new As400Error("FIELD_OVERFLOW", `no room to insert at ${from}`);
+    }
+    for (let k = 1; k <= len - n; k++) {
+      const dst = s.wrap(end - k);
+      const src = s.wrap(dst - n);
+      s.writeChar(dst, s.charAt(src), s.charsetAt(src));
+    }
+    s.setMdtFor(from, true);
+  }
+
   /** `from` から `len` 桁を NUL にして MDT を立てる */
   private blank(from: number, len: number): void {
     for (let k = 0; k < len; k++) {
@@ -549,6 +629,7 @@ export class Tn3270Session {
     const record = buildReadModified(this.screen, key, { reply: this.reply });
     this.telnet.sendRecord(record);
     this.lastAid = key; // ホストが後から読みに来たときに使う
+    this.insert = false; // **取引が変わるので挿入モードは持ち越さない**（実測）
     if (key === "clear") {
       // Clear は画面を消してカーソルを先頭へ戻す
       this.screen.clear();
