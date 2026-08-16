@@ -58,8 +58,13 @@ export function toWireScreen(session: Tn3270Session, sessionId: string): ScreenS
     cursor: snap.cursor,
     keyboardLocked: snap.keyboardLocked,
     cells,
-    // **`modified` は 5250 では `mdt`**。名前が違うだけで意味は同じ（変更データタグ）
-    fields: snap.fields.map(
+    // **長さ 0 の欄は落とす。** 3270 は属性桁が隣接すると中身の無い欄ができるが、
+    // 5250 側の消費者は「欄は 1 桁以上ある」前提で書かれている（描画も入力も置き場が無い）。
+    // 落とさないと **web-ui が桁を進められず無限ループでタブごと落ちる**（pub400 で踏んだ）。
+    // 添字（`index`）は振り直さない——入力欄の指定に使うため、番号は元のまま保つ
+    fields: snap.fields
+      .filter((f) => f.length > 0)
+      .map(
       (f): Field => ({
         index: f.index,
         row: f.row,
@@ -71,7 +76,7 @@ export function toWireScreen(session: Tn3270Session, sessionId: string): ScreenS
         mdt: f.modified,
         value: f.value
       })
-    )
+      )
   };
 }
 

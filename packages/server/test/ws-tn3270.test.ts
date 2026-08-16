@@ -183,6 +183,43 @@ describe("3270 → Web の変換", () => {
     ).rejects.toThrow(/not supported/);
   });
 
+  /**
+   * 3270 は属性桁が隣接すると**中身の無い欄**ができる。5250 側の消費者は
+   * 「欄は 1 桁以上ある」前提なので、そのまま渡すと**描画が桁を進められず落ちる**
+   * （pub400 のサインオン画面で実際にタブごと落ちた）。
+   */
+  it("**長さ 0 の欄は落とす**（5250 側の消費者は 1 桁以上を前提にしている）", async () => {
+    const { Tn3270Session } = await import("@ts5250/tn3270");
+    const { IAC, CMD, OPT, TT_SEND } = await import("../../tn3270/src/telnet/constants.js");
+    let dataFn: ((d: Uint8Array) => void) | undefined;
+    const s = new Tn3270Session({ host: "x", model: 2 });
+    s.attach({
+      send: () => undefined, close: () => undefined,
+      onData: (fn) => (dataFn = fn), onClose: () => undefined, onError: () => undefined
+    });
+    const recv = (...b: number[]): void => dataFn?.(Uint8Array.from(b));
+    recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    // **属性桁を隣り合わせて置く**——間に中身が無いので長さ 0 の欄になる
+    recv(
+      0xf5, 0xc2,
+      0x11, 0x40, 0x40, 0x1d, 0x60, // SBA(0) SF
+      0x1d, 0x00, // すぐ次の桁に SF → 手前の欄は長さ 0
+      0xc1, 0xc2,
+      IAC, CMD.EOR
+    );
+    const raw = s.snapshot().fields;
+    expect(raw.some((f) => f.length === 0), "長さ 0 の欄が作れていない").toBe(true);
+    const wire = toWireScreen(s, "sid");
+    expect(wire.fields.every((f) => f.length > 0)).toBe(true);
+    // **添字は振り直さない**——入力欄の指定に使うため番号を保つ
+    expect(wire.fields.map((f) => f.index)).toEqual(
+      raw.filter((f) => f.length > 0).map((f) => f.index)
+    );
+  });
+
   it("**画面は 5250 の型に写る**（web-ui は無改修）", async () => {
     const { Tn3270Session } = await import("@ts5250/tn3270");
     const { IAC, CMD, OPT, TT_SEND } = await import("../../tn3270/src/telnet/constants.js");
