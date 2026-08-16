@@ -16,7 +16,14 @@ import type { ScreenSnapshot } from "../screen/types.js";
 import { applyInbound } from "../protocol/inbound.js";
 import { buildReadModified, buildReadBuffer, type ReplyMode } from "../protocol/outbound.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
-import { CHARSET, REPLY_MODE, SO, SI } from "../protocol/constants.js";
+import { CHARSET, REPLY_MODE, SO, SI, NUL } from "../protocol/constants.js";
+import { DB, dbcsStates, normalizeDbcs } from "../screen/dbcs.js";
+
+/**
+ * 入力欄が DBCS をどう受け取るか（s3270 実測）。
+ * `plain` は日本語を撥ね、`mixed` は `SO`/`SI` で包み、`dbcs` は生で置いて英数を撥ねる。
+ */
+type FieldKind = "plain" | "mixed" | "dbcs";
 import { parseFieldAttr } from "../screen/attributes.js";
 import { Emitter } from "./emitter.js";
 import { isShortForm, type AidKey } from "./aid-keys.js";
@@ -261,63 +268,194 @@ export class Tn3270Session {
   type(text: string): void {
     this.assertUnlocked();
     const codec = codecForCcsid(this.ccsid);
-    const { bytes } = codec.encode(text);
-    const out = this.shapeForField(bytes);
-    for (const b of out) {
-      const pos = this.screen.cursor;
-      if (this.screen.isAttrPos(pos)) {
-        throw new As400Error("FIELD_PROTECTED", `cannot type over a field attribute at ${pos}`);
-      }
-      if (this.screen.isProtectedAt(pos)) {
-        const rc = this.screen.rowColOf(pos);
-        throw new As400Error("FIELD_PROTECTED", `field at (${rc.row},${rc.col}) is protected`);
-      }
-      this.screen.writeChar(pos, b, this.screen.charsetAt(pos));
-      this.screen.setMdtFor(pos, true);
-      this.screen.setCursor(pos + 1);
-    }
-    // **末尾の `SI` にはカーソルを乗せたまま**にする（実測）。
-    // 続けて打てば DBCS 区間がそのまま伸びる——`SI` を追い越すと区間が閉じてしまう
-    if (out[out.length - 1] === SI) this.screen.setCursor(this.screen.cursor - 1);
+    const kind = this.fieldKind();
+    // **打ち始めた欄**を覚えておく。ここから外れたら「入り切らなかった」と言える
+    const home = this.screen.fieldAttrPosFor(this.screen.cursor);
+    for (const ch of [...text]) this.typeOne([...codec.encode(ch).bytes], kind, home);
+    this.afterEdit();
   }
 
   /**
-   * **打ち込むバイト列を欄の種類に合わせる。**
+   * **1 文字を置く。**
    *
-   * 3270 の入力欄は DBCS の受け取り方が 3 通りある（s3270 実測）:
+   * 桁数の勘定が文字ごとに変わるので、バイト列をまとめて流し込むことはできない
+   * （s3270 実測——欄に入り切らない文字は**手前まで書いて、その 1 文字だけを撥ねる**）:
    *
-   * | 欄 | 日本語 | 英数 |
+   * | 状況 | 要る桁 | 置くもの |
    * |---|---|---|
-   * | 素の欄 | **撥ねる** | そのまま |
-   * | 混在入力（`XA.INPUT_CONTROL`=1） | `SO` … `SI` で包む | そのまま |
-   * | DBCS 欄（`XA.CHARSET`=`0xf8`） | **`SO`/`SI` を付けずに生で** | **撥ねる** |
-   *
-   * 撥ねるところが肝心で、s3270 は「Operator error」でキーボードを施錠する。
-   * ここを素通しにすると、**ホストが受け取れないバイトを送ってしまう**。
+   * | DBCS 欄の日本語 | 2 | 生の 2 バイト |
+   * | 混在欄の日本語（区間の外） | 4 | `SO` ＋ 2 バイト ＋ `SI` |
+   * | 混在欄の日本語（`SI` の上） | 3 | 2 バイト ＋ `SI` を 1 つ右へ |
+   * | 英数 | 1 | 1 バイト |
    */
-  private shapeForField(bytes: Uint8Array): number[] {
-    const ap = this.screen.fieldAttrPosFor(this.screen.cursor);
-    const dbcsField = ap >= 0 && this.screen.charsetAt(ap) === CHARSET.DBCS;
-    const mixed = ap >= 0 && this.screen.inputControlAt(ap);
-    const hasDbcs = bytes.includes(SO);
-
-    if (dbcsField) {
-      // DBCS 欄は DBCS しか入らない——全体が 1 つの DBCS 区間になっていること
-      const b = [...bytes];
-      const ok = b.length > 2 && b[0] === SO && b[b.length - 1] === SI
-        && !b.slice(1, -1).some((x) => x === SO || x === SI);
-      if (b.length > 0 && !ok) {
-        throw new As400Error("FIELD_TYPE", "DBCS field accepts double-byte characters only");
-      }
-      return b.slice(1, -1); // **SO/SI は付けない**
-    }
-    if (hasDbcs && !mixed) {
+  private typeOne(bytes: number[], kind: FieldKind, home: number): void {
+    const s = this.screen;
+    const dbcs = bytes[0] === SO;
+    if (dbcs && kind === "plain") {
       throw new As400Error(
         "FIELD_TYPE",
         "field does not accept double-byte input (no input-control attribute)"
       );
     }
-    return [...bytes];
+    if (!dbcs && kind === "dbcs") {
+      throw new As400Error("FIELD_TYPE", "DBCS field accepts double-byte characters only");
+    }
+
+    // **`SI` の上にいるなら区間の続き**——`SO` を置き直さず、`SI` を右へずらす
+    const onSi = s.charAt(s.cursor) === SI;
+    const body = dbcs ? bytes.slice(1, -1) : bytes;
+    const out = kind === "dbcs" || !dbcs ? body : onSi ? [...body, SI] : [SO, ...body, SI];
+    const at = onSi && !dbcs ? s.wrap(s.cursor + 1) : s.cursor; // 英数は `SI` の後ろへ
+
+    this.assertRoom(at, out.length, home);
+    let p = at;
+    for (const b of out) {
+      s.writeChar(p, b, kind === "dbcs" ? CHARSET.DBCS : 0);
+      s.setMdtFor(p, true);
+      p = s.wrap(p + 1);
+    }
+    // **末尾の `SI` にはカーソルを乗せたまま**——続けて打てば区間がそのまま伸びる
+    let next = out[out.length - 1] === SI ? s.wrap(p - 1) : p;
+    // 属性桁の上には止まらない（実測: 欄をちょうど埋めると次の桁へ抜ける）
+    if (s.isAttrPos(next)) next = s.wrap(next + 1);
+    s.setCursor(next);
+  }
+
+  /**
+   * `from` から `len` 桁が書けるか。
+   *
+   * **打ち始めた欄から外れたら「入り切らない」**（`FIELD_OVERFLOW`）。
+   * 欄の切れ目に当たったのか、そもそも保護欄なのかで利用者が次に取る手が変わるので分けている
+   * ——欄を埋め切った続きは属性桁ではなく**次の欄の中**に当たることがあり、
+   * そこを `FIELD_PROTECTED` と言うと「非保護欄に打ったのに保護と言われる」ことになる。
+   */
+  private assertRoom(from: number, len: number, home: number): void {
+    for (let k = 0; k < len; k++) {
+      const p = this.screen.wrap(from + k);
+      const outside = this.screen.fieldAttrPosFor(p) !== home;
+      if (this.screen.isAttrPos(p) || outside) {
+        if (!outside) {
+          throw new As400Error("FIELD_PROTECTED", `cannot type over a field attribute at ${p}`);
+        }
+        throw new As400Error("FIELD_OVERFLOW", `input does not fit in the field at ${p}`);
+      }
+      if (this.screen.isProtectedAt(p)) {
+        const rc = this.screen.rowColOf(p);
+        throw new As400Error("FIELD_PROTECTED", `field at (${rc.row},${rc.col}) is protected`);
+      }
+    }
+  }
+
+  /**
+   * **カーソルを 1 文字ぶん左へ**（3270 の後退キー。**消さない**）。
+   * DBCS の上では 2 桁動く（実測: s3270 の `BackSpace()` はカーソルだけを動かす）。
+   */
+  backspace(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const prev = s.wrap(s.cursor - 1);
+    if (s.isAttrPos(prev)) return; // 欄の先頭より手前へは出ない
+    s.setCursor(this.dbcsAt(prev) === DB.TAIL ? s.wrap(s.cursor - 2) : prev);
+  }
+
+  /**
+   * **カーソルの手前の 1 文字を消す**（破壊的な後退）。
+   * 混在欄で区間が空になったら `SO` と `SI` も落とす（実測）。
+   */
+  erase(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const prev = s.wrap(s.cursor - 1);
+    if (s.isAttrPos(prev)) return;
+    const wide = this.dbcsAt(prev) === DB.TAIL;
+    let from = wide ? s.wrap(s.cursor - 2) : prev;
+    let len = wide ? 2 : 1;
+    // **区間が空になるなら `SO`/`SI` ごと**
+    const before = s.wrap(from - 1);
+    const after = s.wrap(from + len);
+    if (wide && s.charAt(before) === SO && s.charAt(after) === SI) {
+      from = before;
+      len += 2;
+    }
+    this.blank(from, len);
+    s.setCursor(from);
+    this.afterEdit();
+  }
+
+  /**
+   * **カーソル位置の 1 文字を消し、後ろを詰める**（削除キー）。
+   * DBCS なら 2 桁ぶん詰める。カーソルは動かない。
+   */
+  delete(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const cur = s.cursor;
+    if (s.isAttrPos(cur) || s.isProtectedAt(cur)) return;
+    const width = this.dbcsAt(cur) === DB.LEAD ? 2 : 1;
+    const end = this.fieldEnd(cur);
+    for (let p = cur; p !== end; p = s.wrap(p + 1)) {
+      const src = s.wrap(p + width);
+      const inside = this.distance(p, end) > width;
+      s.writeChar(p, inside ? s.charAt(src) : NUL, inside ? s.charsetAt(src) : s.charsetAt(p));
+    }
+    s.setMdtFor(cur, true);
+    this.afterEdit();
+  }
+
+  /** **カーソルから欄の終わりまで消す**（EOF 消去）。カーソルは動かない */
+  eraseEof(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    if (s.isAttrPos(s.cursor) || s.isProtectedAt(s.cursor)) return;
+    this.blank(s.cursor, this.distance(s.cursor, this.fieldEnd(s.cursor)));
+    this.afterEdit();
+  }
+
+  /** `from` から `len` 桁を NUL にして MDT を立てる */
+  private blank(from: number, len: number): void {
+    for (let k = 0; k < len; k++) {
+      const p = this.screen.wrap(from + k);
+      this.screen.writeChar(p, NUL, this.screen.charsetAt(p));
+      this.screen.setMdtFor(p, true);
+    }
+  }
+
+  /** その桁を含む欄の**次の属性桁**の位置 */
+  private fieldEnd(addr: number): number {
+    const s = this.screen;
+    for (let k = 1; k <= s.size; k++) {
+      const p = s.wrap(addr + k);
+      if (s.isAttrPos(p)) return p;
+    }
+    return s.wrap(addr); // 属性桁が 1 つも無い画面
+  }
+
+  private distance(from: number, to: number): number {
+    const d = to - from;
+    return d >= 0 ? d : d + this.screen.size;
+  }
+
+  /** その桁の DBCS 状態（SBCS のセッションでは常に `DB.NONE`） */
+  private dbcsAt(addr: number): number {
+    if (!codecForCcsid(this.ccsid).isDbcs) return DB.NONE;
+    return dbcsStates(this.screen, true)[addr] ?? DB.NONE;
+  }
+
+  /**
+   * **編集の後始末。** ホストの書き込みと同じ均しを掛ける
+   * ——成立しない DBCS の対を空白に、宙に浮いた左半分を NUL に。
+   * s3270 もキー操作の後に同じ処理を通している（実測: DBCS 欄で消した桁が空白になる）。
+   */
+  private afterEdit(): void {
+    if (codecForCcsid(this.ccsid).isDbcs) normalizeDbcs(this.screen);
+  }
+
+  /** カーソルのいる欄が DBCS をどう受け取るか */
+  private fieldKind(): FieldKind {
+    const ap = this.screen.fieldAttrPosFor(this.screen.cursor);
+    if (ap >= 0 && this.screen.charsetAt(ap) === CHARSET.DBCS) return "dbcs";
+    if (ap >= 0 && this.screen.inputControlAt(ap)) return "mixed";
+    return "plain";
   }
 
   /** AID キーを送る。送信後はキーボードがロックされ、ホストの restore で解ける */

@@ -345,3 +345,128 @@ describe("文字セット属性による DBCS（SO/SI を使わない道）", ()
     expect(textOf(s)).toBe("日本語");
   });
 });
+
+describe("編集キーと欄溢れ（DBCS の境界）", () => {
+  /**
+   * 短い欄を 3 つ持つ画面でセッションを作る。
+   * 素の欄 11〜15 ／ 混在入力 21〜25 ／ DBCS 欄 41〜45（どれも 5 桁）
+   */
+  async function edit(): Promise<import("../src/session/session.js").Tn3270Session> {
+    const { Tn3270Session } = await import("../src/session/session.js");
+    const { IAC, CMD, OPT, TT_SEND } = await import("../src/telnet/constants.js");
+    type T = import("../src/transport/types.js").Transport;
+    let dataFn: ((d: Uint8Array) => void) | undefined;
+    const t: T = {
+      send: () => undefined,
+      close: () => undefined,
+      onData: (fn) => (dataFn = fn),
+      onClose: () => undefined,
+      onError: () => undefined
+    };
+    const s = new Tn3270Session({ host: "x", model: 2, ccsid: 930 });
+    s.attach(t);
+    const recv = (...b: number[]): void => dataFn?.(Uint8Array.from(b));
+    recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    recv(
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60, 0xd7,
+      ...sba(10), ORDER.SF, 0x00, ...sba(16), ORDER.SF, 0x60,
+      ...sba(20), ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(40), ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS,
+      ...sba(46), ORDER.SF, 0x60,
+      IAC, CMD.EOR
+    );
+    return s;
+  }
+  /** 画面のセル（`kind` 込み）を見るための取り出し */
+  const at = (s: import("../src/session/session.js").Tn3270Session, addr: number) =>
+    s.snapshot().cells[Math.floor(addr / 80)]![addr % 80]!;
+  const cursorAddr = (s: import("../src/session/session.js").Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: import("../src/session/session.js").Tn3270Session, addr: number): void =>
+    s.setCursor(1, addr + 1);
+
+  it("**欄をちょうど埋めるとカーソルは属性桁を跨ぐ**", async () => {
+    const s = await edit();
+    go(s, 11);
+    s.type("ABCDE");
+    expect(cursorAddr(s)).toBe(17); // 16 は属性桁なので止まらない
+  });
+
+  it("**入り切らない文字だけを撥ねる**——手前までは書けている", async () => {
+    const s = await edit();
+    go(s, 11);
+    expect(() => s.type("ABCDEF")).toThrow(/does not fit/);
+    expect(at(s, 15).char).toBe("E"); // 5 文字目までは入った
+  });
+
+  it("**DBCS 欄で 2 桁ぶんの空きが無ければ撥ねる**", async () => {
+    const s = await edit();
+    go(s, 41);
+    expect(() => s.type("日本語")).toThrow(/does not fit/);
+    expect(at(s, 41).char).toBe("日");
+    expect(at(s, 43).char).toBe("本"); // 2 文字目までは入った
+  });
+
+  it("**混在欄は SO/SI のぶんも桁を食う**（4 桁 → 2 文字目で溢れる）", async () => {
+    const s = await edit();
+    go(s, 21);
+    expect(() => s.type("日本")).toThrow(/does not fit/);
+    expect(at(s, 21).kind).toBe("so");
+    expect(at(s, 24).kind).toBe("si"); // SI は残る
+  });
+
+  it("**後退キーは DBCS の上で 2 桁動く**（消さない）", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    expect(cursorAddr(s)).toBe(45);
+    s.backspace();
+    expect(cursorAddr(s)).toBe(43);
+    expect(at(s, 43).char).toBe("本"); // 消えていない
+  });
+
+  it("**破壊的な後退は DBCS 1 文字ぶん消す**", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    s.erase();
+    expect(at(s, 41).char).toBe("日");
+    expect(at(s, 43).char).not.toBe("本");
+  });
+
+  it("**混在欄では SO/SI ごと消える**（区間が空になるため）", async () => {
+    const s = await edit();
+    go(s, 21);
+    s.type("日");
+    s.erase();
+    expect(at(s, 21).kind).not.toBe("so");
+    expect(at(s, 24).kind).not.toBe("si");
+    expect(cursorAddr(s)).toBe(21);
+  });
+
+  it("**削除キーは DBCS を 2 桁ぶん詰める**", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    go(s, 41);
+    s.delete();
+    expect(at(s, 41).char).toBe("本"); // 後ろが詰まってくる
+    expect(cursorAddr(s)).toBe(41);
+  });
+
+  it("**EOF 消去はカーソルから欄の終わりまで**", async () => {
+    const s = await edit();
+    go(s, 21);
+    s.type("日");
+    go(s, 21);
+    s.eraseEof();
+    for (let a = 21; a <= 25; a++) expect(at(s, a).char.trim()).toBe("");
+  });
+});
