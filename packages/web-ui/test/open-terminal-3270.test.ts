@@ -28,7 +28,10 @@ const session = (extra: Partial<PublicSession>): PublicSession =>
 beforeEach(() => {
   openSession.mockClear();
   systemsStore.systems = [SYSTEM];
-  sessionsStore.sessions = [];
+  // **開いているセッションを空にする**——`open()` は「同じ設定が既に開いていればタブへ戻す」
+  // ので、残っていると接続そのものが起きない
+  sessionsStore.byId.clear();
+  sessionsStore.order = [];
 });
 
 describe("端末の種類を開く指示へ載せる", () => {
