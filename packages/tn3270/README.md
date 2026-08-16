@@ -161,6 +161,10 @@ TN3270_IBMI=<日本語機> TN3270_IBMI_CCSID=930 npx vitest run test/e2e-ibmi.te
 桁数の勘定が文字ごとに変わる。欄に入り切らない文字は `FIELD_OVERFLOW` で撥ねる
 （手前の文字までは書けている。s3270 と同じ）。
 
+移動キーは `home()` / `tab()` / `backTab()` / `left()` / `right()` / `up()` / `down()` / `newline()`。
+**左右は DBCS の上で 2 桁動くが、上下は桁をそのまま辿る**（実測でそう分かれていた）。
+欄を埋め切ったときの行き先は次の欄の属性で変わり、**保護＋数字なら自動スキップ**する。
+
 編集キーは `backspace()` / `erase()` / `delete()` / `eraseEof()`。
 **後退キー（`backspace`）は消さない**——3270 ではカーソル移動で、消すのは `erase()`。
 どれも DBCS を 1 文字として扱う。

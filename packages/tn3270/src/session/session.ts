@@ -316,8 +316,11 @@ export class Tn3270Session {
     }
     // **末尾の `SI` にはカーソルを乗せたまま**——続けて打てば区間がそのまま伸びる
     let next = out[out.length - 1] === SI ? s.wrap(p - 1) : p;
-    // 属性桁の上には止まらない（実測: 欄をちょうど埋めると次の桁へ抜ける）
-    if (s.isAttrPos(next)) next = s.wrap(next + 1);
+    // **属性桁の上には止まらない**（実測: 欄をちょうど埋めると次の桁へ抜ける）。
+    // ただし次が**自動スキップ欄**（保護＋数字）なら、その先の非保護欄まで飛ぶ
+    if (s.isAttrPos(next)) {
+      next = parseFieldAttr(s.attrAt(next)).autoSkip ? s.nextUnprotected(next) : s.wrap(next + 1);
+    }
     s.setCursor(next);
   }
 
@@ -344,6 +347,87 @@ export class Tn3270Session {
         throw new As400Error("FIELD_PROTECTED", `field at (${rc.row},${rc.col}) is protected`);
       }
     }
+  }
+
+  /** **最初の非保護桁へ**（ホームキー）。非保護欄が無ければ 0 桁目 */
+  home(): void {
+    this.assertUnlocked();
+    this.screen.setCursor(this.screen.firstUnprotected());
+  }
+
+  /** **次の非保護欄の先頭へ**（タブ）。最後まで行ったら先頭へ回り込む */
+  tab(): void {
+    this.assertUnlocked();
+    this.screen.setCursor(this.screen.nextUnprotected(this.screen.cursor));
+  }
+
+  /**
+   * **手前の非保護欄の先頭へ**（後退タブ）。
+   * **欄の途中にいるなら、まずその欄の先頭へ**戻る（実測）——1 回で前の欄まで飛ばない。
+   */
+  backTab(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const ap = s.fieldAttrPosFor(s.cursor);
+    const start = ap >= 0 ? s.wrap(ap + 1) : 0;
+    if (ap >= 0 && !s.isProtectedAt(s.cursor) && s.cursor !== start) {
+      s.setCursor(start);
+      return;
+    }
+    const from = ap >= 0 ? ap : s.cursor;
+    for (let k = 1; k <= s.size; k++) {
+      const p = s.wrap(from - k);
+      if (s.isAttrPos(p) && !parseFieldAttr(s.attrAt(p)).protected) {
+        s.setCursor(s.wrap(p + 1));
+        return;
+      }
+    }
+  }
+
+  /**
+   * **カーソルを 1 文字ぶん左右へ。**
+   *
+   * **欄をまたぐ**——属性桁の上にも乗る（実測。移動キーは欄を見ない）。
+   * DBCS の上だけは 1 文字＝2 桁として動く。
+   */
+  left(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const prev = s.wrap(s.cursor - 1);
+    s.setCursor(this.dbcsAt(prev) === DB.TAIL ? s.wrap(s.cursor - 2) : prev);
+  }
+
+  right(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    s.setCursor(s.wrap(s.cursor + (this.dbcsAt(s.cursor) === DB.LEAD ? 2 : 1)));
+  }
+
+  /**
+   * **上下は真上・真下へ**（1 行ぶん）。
+   * **DBCS の右半分に着いてもそのまま**（実測。左右と違って寄せない）。
+   */
+  up(): void {
+    this.assertUnlocked();
+    this.screen.setCursor(this.screen.wrap(this.screen.cursor - this.screen.cols));
+  }
+
+  down(): void {
+    this.assertUnlocked();
+    this.screen.setCursor(this.screen.wrap(this.screen.cursor + this.screen.cols));
+  }
+
+  /**
+   * **次の行の頭へ**（改行キー）。そこが打てない桁なら**その先の非保護欄の先頭**まで進む
+   * （実測: 行頭が非保護ならそこで止まり、保護なら次の欄まで飛ぶ）。
+   */
+  newline(): void {
+    this.assertUnlocked();
+    const s = this.screen;
+    const row = Math.floor(s.cursor / s.cols);
+    const head = s.wrap(((row + 1) % s.rows) * s.cols);
+    const writable = !s.isAttrPos(head) && !s.isProtectedAt(head);
+    s.setCursor(writable ? head : s.nextUnprotected(s.wrap(head - 1)));
   }
 
   /**

@@ -349,3 +349,101 @@ describe("応答モードの寿命", () => {
     expect(t.lastRecord).not.toContain("2902");
   });
 });
+
+describe("カーソル移動キー", () => {
+  /** 0 保護 ／ 10 非保護(11-15) ／ 16 自動スキップ(保護＋数字) ／ 20 非保護(21-25) ／ 26 保護 */
+  function movScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x30,
+      ...sba(20), ORDER.SF, 0x00,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(11), ORDER.IC
+    ]);
+  }
+  const addr = (s: Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: Tn3270Session, a: number): void => s.setCursor(Math.floor(a / 80) + 1, (a % 80) + 1);
+
+  it("**Home は最初の非保護桁へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 5);
+    s.home();
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**Tab は次の非保護欄の先頭へ**（保護欄は飛ばす）", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 13); // 欄の途中からでも次の欄へ
+    s.tab();
+    expect(addr(s)).toBe(21);
+    s.tab(); // 最後まで行ったら回り込む
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**BackTab はまず欄の先頭へ**、先頭にいるなら手前の欄へ", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 23);
+    s.backTab();
+    expect(addr(s)).toBe(21);
+    s.backTab();
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**左右は欄をまたぐ**——属性桁の上にも乗る（実測）", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.left();
+    expect(addr(s)).toBe(20); // 属性桁
+    s.right();
+    s.right();
+    expect(addr(s)).toBe(22);
+  });
+
+  it("**上下は真上・真下へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.down();
+    expect(addr(s)).toBe(101);
+    s.up();
+    expect(addr(s)).toBe(21);
+  });
+
+  it("**改行は次の行頭、打てなければその先の非保護欄へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.newline(); // 80 は保護欄の中なので回り込んで 11
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**自動スキップ欄は埋めた勢いで飛び越える**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 11);
+    s.type("ABCDE"); // 欄(11-15)を埋める。16 は保護＋数字
+    expect(addr(s)).toBe(21); // 17 ではなく次の非保護欄まで
+  });
+
+  it("**自動スキップでなければ属性桁の次で止まる**", () => {
+    const { s, t } = connected();
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x60, // 保護だが数字ではない
+      ...sba(11), ORDER.IC
+    ]);
+    go(s, 11);
+    s.type("ABCDE");
+    expect(addr(s)).toBe(17);
+  });
+});
