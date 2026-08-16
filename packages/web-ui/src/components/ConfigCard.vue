@@ -87,6 +87,8 @@ const sesForm = reactive<SesFormState>({
   name: "",
   system: "",
   sessionType: "display",
+  terminal: "5250" as "5250" | "3270",
+  model3270: 2 as 2 | 5,
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
@@ -307,6 +309,8 @@ function loadSession(): void {
   sesForm.autoStart = s.autoStart;
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
+  sesForm.terminal = s.terminal ?? "5250";
+  sesForm.model3270 = s.model3270 ?? 2;
   sesForm.deviceName = s.deviceName ?? "";
   sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.transformTo = s.transformTo ?? "";
@@ -480,6 +484,17 @@ async function save(): Promise<void> {
       const tt = (sesForm.transformTo ?? "").trim();
       if (tt) form.transformTo = tt;
       else delete form.transformTo;
+      // **既定（5250）は保存しない**——設定ファイルに既定値を書き散らさない。
+      // 3270 のときは画面サイズ（5250 の語彙）を送らず、代わりにモデルを送る
+      if (sesForm.terminal === "3270") {
+        form.terminal = "3270";
+        form.model3270 = sesForm.model3270 ?? 2;
+        delete form.screenSize;
+        delete form.enhanced;
+      } else {
+        delete form.terminal;
+        delete form.model3270;
+      }
       // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
       // 外した**ので、画面から保存した定義は必ず自分の値を持つ
       // （`--idle-timeout` は、手書きで未指定のままの定義にだけ効く）
@@ -521,6 +536,9 @@ async function save(): Promise<void> {
         delete form.screenSize;
         delete form.enhanced;
         delete form.watermark; // 透かしは画面のもの。プリンターには持たせない
+        // 端末の種類は display のもの
+        delete form.terminal;
+        delete form.model3270;
       } else {
         // display は printer 専用項目を送らない
         delete form.rescueAction;
@@ -982,9 +1000,23 @@ const infoRows = computed(() => {
           </span>
         </label>
         <label v-if="sesForm.sessionType === 'display'" class="row">
+          <span class="cap">端末の種類</span>
+          <select v-model="sesForm.terminal">
+            <option value="5250">5250（IBM i）</option>
+            <option value="3270">3270（メインフレーム）</option>
+          </select>
+        </label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal !== '3270'" class="row">
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">
             <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+        </label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '3270'" class="row">
+          <span class="cap">モデル</span>
+          <select v-model.number="sesForm.model3270">
+            <option :value="2">2（24x80）</option>
+            <option :value="5">5（27x132）</option>
           </select>
         </label>
         <label class="row">

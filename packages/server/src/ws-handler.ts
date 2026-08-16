@@ -16,6 +16,8 @@ import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
 import { withAudit } from "./audit.js";
 import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
 import type { MacroStore } from "./macro-store.js";
+import type { Tn3270Manager } from "./tn3270-manager.js";
+import { applyFields, toAid3270, toWireScreen } from "./tn3270-adapt.js";
 import { macroSecretRefSchema } from "./macro-types.js";
 
 const wsLog = childLog({ component: "ws-handler" });
@@ -36,6 +38,12 @@ export interface WsHandlerDeps {
    * 未指定なら秘密参照を含むキー送信は拒否される（黙って空文字で送らない）。
    */
   macros?: MacroStore;
+  /**
+   * **3270 端末のセッション**。未指定なら `terminal: "3270"` の `open` を断る。
+   * 5250 の `sessions` と**別に持つ**理由は spec D5——`SessionEntry.session` の型を
+   * 差し替えずに済ませ、既存経路への影響を切る。
+   */
+  tn3270?: Tn3270Manager;
 }
 
 /** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
@@ -91,6 +99,13 @@ export interface HeartbeatOptions {
  */
 export class WsConnection {
   private sessionId: string | undefined;
+  /**
+   * **3270 セッションの id**。`sessionId`（5250）とは別枠にしてある——
+   * 同じ枠に入れると、5250 専用の経路（予約・watch・PC コマンド）が
+   * 型では通ってしまい、実行時に初めて壊れる。
+   */
+  private session3270: string | undefined;
+  private detach3270: (() => void) | undefined;
   private detachScreen: (() => void) | undefined;
   /**
    * **このタブが開いたのではなく、既にあるセッションへ繋いだ**か。
@@ -402,8 +417,11 @@ export class WsConnection {
   }
 
   private async onOpen(msg: WsClientMessage & { type: "open" }): Promise<void> {
-    if (this.sessionId) throw new As400Error("PROTOCOL_ERROR", "session already open on this connection");
+    if (this.sessionId ?? this.session3270) {
+      throw new As400Error("PROTOCOL_ERROR", "session already open on this connection");
+    }
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
+    if (msg.terminal === "3270") return this.onOpen3270(msg);
     await withAudit({ op: "ws_open" }, async () => {
       // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
       if (msg.sessionId !== undefined) return this.attach(msg.sessionId);
@@ -443,6 +461,81 @@ export class WsConnection {
         if (job?.user !== undefined && this.sessionId === entry.id) {
           this.send({ type: "jobinfo", job });
         }
+      });
+    });
+  }
+
+  /**
+   * **3270 端末のセッションを開く。**
+   *
+   * 5250 の `onOpen` と分けているのは spec D5——保存済み設定（system / session）の解決や
+   * 自動サインオン・予約・ジョブ情報は 5250 の世界のもので、3270 には無い。
+   * **ホスト直指定だけ**を受ける（保存済み設定への対応は要求が出てから）。
+   */
+  private async onOpen3270(msg: WsClientMessage & { type: "open" }): Promise<void> {
+    const mgr = this.deps.tn3270;
+    if (mgr === undefined) {
+      throw new As400Error("CONFIG_ERROR", "3270 terminal is not enabled on this server");
+    }
+    // **保存済み設定（system / session 参照）でも、ホスト直指定でも開ける。**
+    // 解決は 5250 と同じ `ConfigResolver` に通す——接続先と資格情報の決まり方を
+    // 端末の種類ごとに分岐させない（信頼境界を二重に書かないため）
+    const connect = hasRef(msg) ? this.resolveTarget(msg).connect : undefined;
+    const host = connect?.host ?? msg.host;
+    if (host === undefined) throw new As400Error("CONFIG_ERROR", "host or profile required");
+    await withAudit({ op: "ws_open" }, async () => {
+      const port = msg.port ?? connect?.port;
+      const ccsid = msg.ccsid ?? connect?.ccsid;
+      const tls = msg.tls ?? connect?.tls;
+      const entry = await mgr.open({
+        host,
+        ...(port !== undefined ? { port } : {}),
+        ...(msg.model !== undefined ? { model: msg.model } : {}),
+        ...(ccsid !== undefined ? { ccsid } : {}),
+        ...(tls !== undefined ? { tls } : {}),
+        ...(msg.readOnly !== undefined ? { readOnly: msg.readOnly } : {}),
+        ...(this.user !== undefined ? { owner: this.user.username } : {})
+      });
+      this.session3270 = entry.id;
+      this.startHeartbeat();
+      const push = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
+      entry.subscribers.add(push);
+      this.detach3270 = () => entry.subscribers.delete(push);
+      this.send({
+        type: "opened",
+        sessionId: entry.id,
+        screen: toWireScreen(entry.session, entry.id),
+        ccsid: ccsid ?? 37,
+        pcCommand: false
+      });
+    });
+  }
+
+  /**
+   * 3270 のキー送信。
+   *
+   * 5250 と違い**ホスト応答を待たない**——3270 は AID を送るとキーボードが施錠され、
+   * ホストが `WCC` の復旧ビットで解く。応答画面は `screen` イベントで届くので、
+   * `key-done` には**送った直後の画面**（施錠状態が見える）を載せる。
+   */
+  private async onKey3270(msg: WsClientMessage & { type: "key" }): Promise<void> {
+    const mgr = this.deps.tn3270;
+    const id = this.session3270;
+    if (mgr === undefined || id === undefined) {
+      throw new As400Error("SESSION_NOT_FOUND", "no 3270 session opened on this connection");
+    }
+    await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
+      const entry = mgr.get(id, this.user?.username);
+      if (entry.readOnly) throw new As400Error("READ_ONLY_SESSION", "session is read-only");
+      const aid = toAid3270(msg.key);
+      if (msg.cursor) entry.session.setCursor(msg.cursor.row, msg.cursor.col);
+      if (msg.fields && msg.fields.length > 0) applyFields(entry.session, msg.fields);
+      entry.session.send(aid);
+      this.send({
+        type: "key-done",
+        sessionId: id,
+        screen: toWireScreen(entry.session, id),
+        timedOut: false
       });
     });
   }
@@ -637,6 +730,7 @@ export class WsConnection {
   }
 
   private async onKey(msg: WsClientMessage & { type: "key" }): Promise<void> {
+    if (this.session3270 !== undefined) return this.onKey3270(msg);
     const id = this.requireSession();
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
@@ -710,7 +804,14 @@ export class WsConnection {
   }
 
   private requireSession(): string {
-    if (!this.sessionId) throw new As400Error("SESSION_NOT_FOUND", "no session opened on this connection");
+    if (!this.sessionId) {
+      // **3270 のときは理由を言い分ける。** 「セッションが無い」と返すと、
+      // 開いているのに使えないのか、そもそも開いていないのかが利用者に分からない
+      if (this.session3270 !== undefined) {
+        throw new As400Error("PROTOCOL_ERROR", "this operation is not available on a 3270 session");
+      }
+      throw new As400Error("SESSION_NOT_FOUND", "no session opened on this connection");
+    }
     return this.sessionId;
   }
 
@@ -724,6 +825,14 @@ export class WsConnection {
     this.detachScreen = undefined;
     this.detachReport?.();
     this.detachReport = undefined;
+    this.detach3270?.();
+    this.detach3270 = undefined;
+    if (this.session3270 !== undefined) {
+      // **3270 は見ている人が閉じたら切る。** 5250 のように MCP や HLLAPI が
+      // 同じセッションを共有する経路がまだ無いので、残す理由が無い
+      this.deps.tn3270?.close(this.session3270);
+      this.session3270 = undefined;
+    }
     if (this.sessionId) {
       // **常駐プリンターは切らない。** 監視と同じで、購読を外すだけ——
       // 「設定が仕事をする」サービス型なので、タブを閉じたら帳票が来なくなるのは

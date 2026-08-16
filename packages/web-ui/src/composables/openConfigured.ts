@@ -106,7 +106,14 @@ async function open(ref: string, force = false): Promise<void> {
   connecting.value = s.ref;
   openError.value = "";
   try {
-    const openMsg = { type: "open" as const, kind: s.sessionType, session: s.ref };
+    // **端末の種類を載せる**——サーバーはこれを見て 3270 の経路へ振り分ける。
+    // 5250 のときは付けない（既定なので、載せても意味が同じで読み手を惑わす）
+    const openMsg = {
+      type: "open" as const,
+      kind: s.sessionType,
+      session: s.ref,
+      ...(s.terminal === "3270" ? { terminal: "3270" as const, model: s.model3270 ?? 2 } : {})
+    };
     const meta = {
       // **そのセッション自身のシステムから引く**（選択中システムではない）。
       // サービス一覧は別システムのプリンターも並べるので、選択中を見ると別の機械の名前が付く

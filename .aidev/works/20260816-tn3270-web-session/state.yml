@@ -1,0 +1,8 @@
+schema: 3
+slug: tn3270-web-session
+current: review
+approved: [requirement, spec, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260815-tn3270e-basic]

@@ -50,6 +50,10 @@ export interface SessionConfigForm {
   name: string;
   system: string;
   sessionType: SessionType;
+  /** 端末の種類（既定 5250）。`display` にだけ意味がある */
+  terminal?: "5250" | "3270";
+  /** 3270 のモデル（既定 2）。2 と 5 のみ */
+  model3270?: 2 | 5;
   deviceName?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
