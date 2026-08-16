@@ -107,7 +107,7 @@ describe("Read Modified の形（実測と一致すること）", () => {
     const s = probeScreen();
     s.writeChar(1, 0xc1);
     s.setMdtFor(1, true);
-    const out = buildReadModified(s, null, { hostInitiated: true });
+    const out = buildReadModified(s, null);
     expect(out[0]).toBe(AID_NONE);
   });
 

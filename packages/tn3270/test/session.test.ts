@@ -165,6 +165,116 @@ describe("ホスト起動の読み取りに応答する", () => {
     expect(t.lastRecord.startsWith("60")).toBe(true);
     expect(t.lastRecord).toMatch(/11.{4}c1c2ffef$/);
   });
+
+  /**
+   * **端末は直前の AID を覚えている**（s3270 実測）。
+   * ホスト起因の読みは 0x60 固定ではなく、覚えている AID を先頭に置く。
+   */
+  it("**PA1 の後の Read Modified は AID 1 バイトだけ**（短形式を繰り返す）", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.setCursor(1, 2);
+    s.type("AB");
+    s.send("pa1");
+    expect(t.lastRecord).toBe("6cffef"); // 押下そのものも短形式
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord).toBe("6cffef"); // 読みにも短形式で答える
+  });
+
+  it("**Read Modified All は短形式を無視して欄まで返す**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.setCursor(1, 2);
+    s.type("AB");
+    s.send("pa1");
+    t.recvRecord([CMD3270.READ_MODIFIED_ALL]);
+    expect(t.lastRecord.startsWith("6c")).toBe(true); // AID は覚えたまま
+    expect(t.lastRecord).toMatch(/11.{4}c1c2ffef$/); // 欄が付く
+  });
+
+  it("**Read Buffer も覚えている AID を返す**（0x60 固定ではない）", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord.startsWith("6c")).toBe(true);
+  });
+
+  it("**キーボードが復旧すると AID を忘れる**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord.startsWith("60")).toBe(true);
+  });
+
+  it("**復旧ビットの無い書き込みでは忘れない**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.WRITE, 0x00]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord).toBe("6cffef");
+  });
+});
+
+describe("Erase All Unprotected（EAU）", () => {
+  /** 保護＋MDT / 非保護＋MDT / 非保護 の 3 欄 */
+  function mdtScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x61, 0xd7,       // 保護＋MDT。"P"
+      ...sba(10), ORDER.SF, 0x01, 0xc1, 0xc1, // 非保護＋MDT。"AA"
+      ...sba(30), ORDER.SF, 0x60
+    ]);
+  }
+
+  it("**非保護欄だけ消す**——保護欄の文字は残る", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    const rows = s.snapshot().cells.map((r) => r.map((c) => c.char).join(""));
+    expect(rows[0]!.slice(1, 2)).toBe("P");     // 保護欄は残る
+    expect(rows[0]!.slice(11, 13).trim()).toBe(""); // 非保護欄は消える
+  });
+
+  it("**MDT を落とすのは非保護欄だけ**（保護欄の MDT は残る。実測）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    const fields = s.snapshot().fields;
+    const prot = fields.find((f) => f.attrRow === 1 && f.attrCol === 1)!;
+    const unprot = fields.find((f) => f.attrRow === 1 && f.attrCol === 11)!;
+    expect(prot.modified).toBe(true);
+    expect(unprot.modified).toBe(false);
+  });
+
+  it("**カーソルは最初の非保護桁へ**（実測）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    s.setCursor(5, 5);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    expect(s.snapshot().cursor).toEqual({ row: 1, col: 12 }); // アドレス 11
+  });
+
+  it("**応答は返さない**——WCC もオーダーも無い命令", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    const before = t.sent.length;
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    expect(t.sent.length).toBe(before);
+    expect(s.status).toBe("ready"); // キーボードは復旧する
+  });
+
+  it("**覚えている AID も忘れる**（キーボードが復旧するため）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord.startsWith("60")).toBe(true);
+  });
 });
 
 describe("画面イベント", () => {

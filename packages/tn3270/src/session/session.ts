@@ -83,6 +83,15 @@ export class Tn3270Session {
     this.ccsid = opts.ccsid ?? 37;
   }
 
+  /**
+   * **端末が覚えている AID。**
+   *
+   * ホスト起因の読み（`Read Modified` / `Read Modified All` / `Read Buffer`）は、
+   * **直前に操作者が押したキーの AID を先頭に置く**——0x60 固定ではない（実測）。
+   * キーボードが復旧すると（WCC の復旧ビット、または `EAU`）**忘れる**。
+   */
+  private lastAid: AidKey | null = null;
+
   get status(): SessionState {
     return this.state;
   }
@@ -179,12 +188,19 @@ export class Tn3270Session {
       log.debug(`replied to structured field query (${result.structuredField.kind})`);
       return;
     }
-    // ホストが読み取りを求めてきたら応答する（AID は 0x60。実測）
+    // **キーボードが復旧したら覚えている AID を捨てる**（実測）。
+    // 読みへの応答より先に——`EAU` は復旧させたうえで応答を求めないので順序は問われないが、
+    // 「復旧＝新しい取引の始まり」という意味づけを 1 か所に置いておく
+    if (result.keyboardRestored) this.lastAid = null;
+
+    // ホストが読み取りを求めてきたら応答する
     if (result.read !== null && this.telnet) {
       const reply =
         result.read === "read-buffer"
-          ? buildReadBuffer(this.screen)
-          : buildReadModified(this.screen, null, { hostInitiated: true });
+          ? buildReadBuffer(this.screen, this.lastAid)
+          : buildReadModified(this.screen, this.lastAid, {
+              all: result.read === "read-modified-all"
+            });
       this.telnet.sendRecord(reply);
       return;
     }
@@ -254,6 +270,7 @@ export class Tn3270Session {
     if (!this.telnet) throw new As400Error("SESSION_CLOSED", "not connected");
     const record = buildReadModified(this.screen, key);
     this.telnet.sendRecord(record);
+    this.lastAid = key; // ホストが後から読みに来たときに使う
     if (key === "clear") {
       // Clear は画面を消してカーソルを先頭へ戻す
       this.screen.clear();

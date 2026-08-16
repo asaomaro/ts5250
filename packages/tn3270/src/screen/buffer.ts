@@ -248,6 +248,14 @@ export class Screen3270 {
   }
 
   /** 次の非保護欄の先頭へ（`PT` オーダー） */
+  /**
+   * **先頭から探した最初の非保護桁。** 非保護欄が無ければ 0。
+   * `EAU`（Erase All Unprotected）のカーソル位置に使う（実測）。
+   */
+  firstUnprotected(): number {
+    return this.nextUnprotected(this.size - 1);
+  }
+
   nextUnprotected(from: number): number {
     const n = this.size;
     let p = this.wrap(from);

@@ -37,8 +37,15 @@ import { AID, AID_NONE, isShortForm, type AidKey } from "../session/aid-keys.js"
  */
 
 export interface OutboundOptions {
-  /** ホスト起動の読み取りへの応答なら true（AID は 0x60 になる） */
-  hostInitiated?: boolean;
+  /**
+   * **`Read Modified All`（0x6e）なら true。**
+   *
+   * 違いは**短形式の扱いだけ**——`PA1`〜`PA3`・`Clear` の後、
+   * `Read Modified` は AID 1 バイトだけを返すが、`Read Modified All` は
+   * **短形式を無視して欄まで返す**（s3270 実測）。
+   * ホストが「PA キーの後でも入力内容が欲しい」ときに使う、そのための命令。
+   */
+  all?: boolean;
 }
 
 /**
@@ -50,11 +57,11 @@ export function buildReadModified(
   opts: OutboundOptions = {}
 ): Uint8Array {
   const w = new ByteWriter();
-  const aid = key === null || opts.hostInitiated ? AID_NONE : AID[key];
-  w.u8(aid);
+  w.u8(key === null ? AID_NONE : AID[key]);
 
-  // **短形式は AID 1 バイトだけ**（実測）。カーソルも欄も送らない
-  if (key !== null && isShortForm(key)) return w.toUint8Array();
+  // **短形式は AID 1 バイトだけ**（実測）。カーソルも欄も送らない。
+  // ただし `Read Modified All` は短形式を無視する
+  if (key !== null && isShortForm(key) && opts.all !== true) return w.toUint8Array();
 
   const [hi, lo] = encodeAddress(screen.cursor, screen.size);
   w.u8(hi).u8(lo);
@@ -80,9 +87,11 @@ export function buildReadModified(
  * TK4- も IBM i もこのコマンドを撃ってこなかったので、**実ホストだけ見ていては
  * 見つからない誤り**だった。
  */
-export function buildReadBuffer(screen: Screen3270): Uint8Array {
+export function buildReadBuffer(screen: Screen3270, key: AidKey | null = null): Uint8Array {
   const w = new ByteWriter();
-  w.u8(AID_NONE);
+  // **Read Buffer も覚えている AID を返す**——0x60 固定ではない。
+  // `PA1` の後に Read Buffer を撃つと s3270 は `6c` を先頭に置いた（実測）
+  w.u8(key === null ? AID_NONE : AID[key]);
   const [hi, lo] = encodeAddress(screen.cursor, screen.size);
   w.u8(hi).u8(lo);
   for (let p = 0; p < screen.size; p++) {

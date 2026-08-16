@@ -68,6 +68,8 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
       break;
     case CMD3270.ERASE_ALL_UNPROTECTED:
       screen.eraseUnprotected();
+      // **カーソルは最初の非保護桁へ**（実測。非保護欄が無ければ 0）
+      screen.setCursor(screen.firstUnprotected());
       screen.setKeyboardLocked(false);
       result.keyboardRestored = true;
       return result; // WCC もオーダーも無い
