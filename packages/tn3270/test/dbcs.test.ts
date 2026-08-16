@@ -4,7 +4,7 @@ import { Screen3270 } from "../src/screen/buffer.js";
 import { applyInbound } from "../src/protocol/inbound.js";
 import { snapshot } from "../src/screen/snapshot.js";
 import { encodeAddress } from "../src/protocol/address.js";
-import { CMD3270, ORDER, WCC, SO, SI } from "../src/protocol/constants.js";
+import { CMD3270, ORDER, WCC, XA, CHARSET, SO, SI } from "../src/protocol/constants.js";
 
 /**
  * DBCS（日本語）の桁勘定。
@@ -106,7 +106,7 @@ describe("cp939（japanese-latin）", () => {
 });
 
 describe("異常系", () => {
-  it("SI が来ないまま行末に達しても壊れない", () => {
+  it("**SI が来なければ DBCS 区間は行を越えて続く**（s3270 と一致）", () => {
     const s = new Screen3270(2);
     applyInbound(
       s,
@@ -118,8 +118,11 @@ describe("異常系", () => {
     );
     const snap = snapshot(s, { ccsid: 930 });
     expect(snap.cells[0]![2]!.char).toBe("日");
-    // 行が変わったら DBCS 区間は解除される（行ごとに判定するため）
-    expect(snap.cells[1]![0]!.kind).toBe("sbcs");
+    // **行の切れ目では終わらない**——対の左右は区間の先頭からの偶奇で決まるため。
+    // 当初は行ごとに判定していたが、s3270 と突き合わせて誤りと分かった
+    expect(snap.cells[1]![0]!.kind).not.toBe("sbcs");
+    // 中身が NUL のままなら DBCS として成立しないので空白として描く
+    expect(snap.cells[1]![0]!.char.trim()).toBe("");
   });
 
   it("DBCS を SBCS の CCSID で読んでも落ちない", () => {
@@ -197,5 +200,94 @@ describe("入力側の DBCS", () => {
     // 中身 4 桁に 5 バイト書こうとすると 5 バイト目が属性桁に当たる
     expect(s.isAttrPos(5)).toBe(true);
     expect(s.isProtectedAt(6)).toBe(true);
+  });
+});
+
+describe("文字セット属性による DBCS（SO/SI を使わない道）", () => {
+  const raw = (t: string): number[] =>
+    [...codecForCcsid(930).encode(t).bytes].filter((b) => b !== SO && b !== SI);
+
+  /** 属性桁を 0 に置き、1 から `body` を流す */
+  function run(body: number[]): Screen3270 {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([CMD3270.ERASE_WRITE, WCC.RESTORE, ...sba(0), ORDER.SF, 0x60, ...body])
+    );
+    return s;
+  }
+  const textOf = (s: Screen3270, row = 0): string =>
+    snapshot(s, { ccsid: 930 })
+      .cells[row]!.map((c) => (c.kind === "dbcs-tail" ? "" : c.char))
+      .join("")
+      .trim();
+
+  it("**SFE の文字セット属性で欄まるごと DBCS**（SO/SI 不要）", () => {
+    const s = run([
+      ...sba(1), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.DBCS, ...raw("日本語")
+    ]);
+    expect(textOf(s)).toBe("日本語");
+  });
+
+  it("**SA の文字セット属性は文字の並びだけ**に効く", () => {
+    const s = run([
+      ORDER.SA, XA.CHARSET, CHARSET.DBCS, ...raw("東京"),
+      ORDER.SA, XA.CHARSET, CHARSET.BASE, 0xc1, 0xc2
+    ]);
+    expect(textOf(s)).toBe("東京AB");
+  });
+
+  it("**0xf1 は APL であって DBCS ではない**", () => {
+    const s = run([
+      ...sba(1), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.APL, ...raw("福岡")
+    ]);
+    expect(textOf(s)).not.toContain("福岡");
+  });
+
+  it("**MF で既存の欄を DBCS に変えられる**", () => {
+    const s = run([...sba(1), ORDER.SF, 0x60, ...raw("大阪"), ...sba(1), ORDER.MF, 0x01, XA.CHARSET, CHARSET.DBCS]);
+    expect(textOf(s)).toBe("大阪");
+  });
+
+  it("**行末をまたぐ DBCS**——左半分が 80 桁目、右半分が次行 1 桁目", () => {
+    const jp = raw("北海道");
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([CMD3270.ERASE_WRITE, WCC.RESTORE, ...sba(75), ORDER.SF, 0x60, SO, ...jp, SI])
+    );
+    const snap = snapshot(s, { ccsid: 930 });
+    expect(snap.cells[0]![79]!.kind).toBe("dbcs-lead"); // 80 桁目が左半分
+    expect(snap.cells[1]![0]!.kind).toBe("dbcs-tail"); // 次行 1 桁目が右半分
+    expect(snap.cells[0]![79]!.char).toBe("海");
+  });
+
+  it("**相方の来ない左半分は文字にしない**", () => {
+    const jp = raw("北海道");
+    const s = run([SO, jp[0]!, jp[1]!, jp[2]!, SI]);
+    expect(textOf(s)).toBe("北"); // 3 バイト目は宙に浮く
+  });
+
+  /**
+   * **x3270 との差**（意図的）。
+   *
+   * x3270 は DBCS 欄の対を作る後処理を「アドレス 0 を支配する属性桁の**次**から
+   * 一周」で回している。そのため**その属性桁自身が処理されず**、
+   * アドレス 0 を含む欄が DBCS でも対にならない（画面の先頭に DBCS 欄を置くと日本語が化ける）。
+   * 実測で 3 通り確かめた——先頭に置くと化け、他の欄があると化けない。
+   *
+   * **こちらは化けない実装にした。**規格から外れているのではなく単なる回り込みの取りこぼしで、
+   * 真似ると利用者に見える日本語が壊れるため。
+   */
+  it("**画面の先頭に置いた DBCS 欄も対にする**（x3270 は取りこぼす）", () => {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([
+        CMD3270.ERASE_WRITE, WCC.RESTORE,
+        ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.DBCS, ...raw("日本語")
+      ])
+    );
+    expect(textOf(s)).toBe("日本語");
   });
 });

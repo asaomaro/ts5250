@@ -138,6 +138,8 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
   // SA が設定した拡張属性は**以降の文字に効く**。record 内だけのローカル状態
   let curColor = 0;
   let curHilite = 0;
+  /** `SA` で指定中の文字セット（`CHARSET.DBCS` なら以降の文字が DBCS） */
+  let curCharset = 0;
   /**
    * DBCS 区間（SO 〜 SI）の中か。
    *
@@ -148,7 +150,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
   let inDbcs = false;
 
   const put = (byte: number): void => {
-    screen.writeChar(addr, byte);
+    screen.writeChar(addr, byte, curCharset);
     screen.setExt(addr, curColor, curHilite);
     addr = screen.wrap(addr + 1);
   };
@@ -180,6 +182,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         addr = screen.wrap(addr + 1); // **属性は 1 桁を占める**
         curColor = 0;
         curHilite = 0;
+        curCharset = 0;
         break;
       }
       case ORDER.SFE: {
@@ -187,19 +190,24 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         let attr = 0;
         let color = 0;
         let hilite = 0;
+        let charset = 0;
         for (let i = 0; i < pairs; i++) {
           const type = r.u8();
           const value = r.u8();
           if (type === XA.BASIC) attr = value;
           else if (type === XA.FOREGROUND) color = value;
           else if (type === XA.HIGHLIGHT) hilite = value;
+          else if (type === XA.CHARSET) charset = value;
           // 未知の type は無視（落とさない）
         }
         screen.startField(addr, attr);
         screen.setExt(addr, color, hilite);
+        // **属性桁に置いた文字セットは欄全体に効く**——DBCS 欄はこれで作る（SO/SI は要らない）
+        screen.setCharset(addr, charset);
         addr = screen.wrap(addr + 1);
         curColor = color;
         curHilite = hilite;
+        curCharset = 0; // 欄が変われば文字単位の指定は御破算
         break;
       }
       case ORDER.SA: {
@@ -207,9 +215,11 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         const value = r.u8();
         if (type === XA.FOREGROUND) curColor = value;
         else if (type === XA.HIGHLIGHT) curHilite = value;
+        else if (type === XA.CHARSET) curCharset = value;
         else if (type === XA.BASIC && value === 0) {
           curColor = 0;
           curHilite = 0;
+          curCharset = 0;
         }
         break;
       }
@@ -222,6 +232,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
           if (type === XA.BASIC && screen.isAttrPos(addr)) screen.startField(addr, value);
           else if (type === XA.FOREGROUND) screen.setExt(addr, value, screen.extAt(addr).hilite);
           else if (type === XA.HIGHLIGHT) screen.setExt(addr, screen.extAt(addr).color, value);
+          else if (type === XA.CHARSET) screen.setCharset(addr, value);
         }
         addr = screen.wrap(addr + 1);
         break;
@@ -239,7 +250,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         let p = addr;
         const n = screen.size;
         for (let i = 0; i < n; i++) {
-          screen.writeChar(p, ch);
+          screen.writeChar(p, ch, curCharset);
           screen.setExt(p, curColor, curHilite);
           p = screen.wrap(p + 1);
           if (p === stop) break;

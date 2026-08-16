@@ -177,6 +177,20 @@ export const XA = {
 } as const;
 
 /**
+ * **文字セット属性（`XA.CHARSET`）の値。**
+ *
+ * `0xf8` が DBCS——**これが SO/SI と並ぶ「もう一つの DBCS の入口」**。
+ * SFE で欄ごと DBCS にする／SA で文字の並びだけ DBCS にする、の 2 通りで効く。
+ * `0xf1` は APL で DBCS ではない（x3270 も `0xf1` だけを APL に振り分けている）。
+ * それ以外の値は基本文字集合として扱う。
+ */
+export const CHARSET = {
+  BASE: 0x00,
+  APL: 0xf1,
+  DBCS: 0xf8
+} as const;
+
+/**
  * 拡張ハイライト（XA.HIGHLIGHT の値）。**実測**（`color2.trc`。F0〜F4 を流して復号を読んだ）:
  * `F0`→normal / `F1`→blink / `F2`→reverse / `F3`→**unknown（未定義）** / `F4`→underscore。
  *

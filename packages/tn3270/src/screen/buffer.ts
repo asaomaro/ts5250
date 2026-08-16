@@ -48,6 +48,8 @@ export class Screen3270 {
    * 「保持は生バイト、意味は導出」の方針は保ったまま、**導出に必要な情報だけ**を足している。
    */
   private geMark: Uint8Array;
+  /** 桁ごとの文字セット属性（`XA.CHARSET` の値）。0 は基本文字集合 */
+  private extCharset: Uint8Array;
 
   private cursorPos = 0;
   private alt = false;
@@ -66,6 +68,7 @@ export class Screen3270 {
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
     this.geMark = new Uint8Array(n);
+    this.extCharset = new Uint8Array(n);
   }
 
   get size(): number {
@@ -115,6 +118,7 @@ export class Screen3270 {
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
     this.geMark = new Uint8Array(n);
+    this.extCharset = new Uint8Array(n);
     this.cursorPos = 0;
   }
 
@@ -126,16 +130,18 @@ export class Screen3270 {
     this.extColor.fill(0);
     this.extHilite.fill(0);
     this.geMark.fill(0);
+    this.extCharset.fill(0);
     this.cursorPos = 0;
   }
 
   /** 文字を書く。**属性桁は消える**（データが上書きしたのだから） */
-  writeChar(addr: number, byte: number): void {
+  writeChar(addr: number, byte: number, charset = 0): void {
     const p = this.wrap(addr);
     this.chars[p] = byte;
     this.attrMark[p] = 0;
     this.fieldAttr[p] = 0;
     this.geMark[p] = 0;
+    this.extCharset[p] = charset;
   }
 
   /** `GE` で 1 文字置く（代替文字集合として読む印を付ける） */
@@ -158,6 +164,7 @@ export class Screen3270 {
     this.chars[p] = NUL;
     this.extColor[p] = 0;
     this.extHilite[p] = 0;
+    this.extCharset[p] = 0;
   }
 
   isAttrPos(addr: number): boolean {
@@ -181,6 +188,18 @@ export class Screen3270 {
   extAt(addr: number): { color: number; hilite: number } {
     const p = this.wrap(addr);
     return { color: this.extColor[p]!, hilite: this.extHilite[p]! };
+  }
+
+  /**
+   * **文字セット属性を置く。**属性桁に置けば欄全体、文字桁に置けばその 1 桁に効く
+   * （`XA.CHARSET`。`CHARSET.DBCS` なら DBCS）。
+   */
+  setCharset(addr: number, charset: number): void {
+    this.extCharset[this.wrap(addr)] = charset;
+  }
+
+  charsetAt(addr: number): number {
+    return this.extCharset[this.wrap(addr)]!;
   }
 
   /**
