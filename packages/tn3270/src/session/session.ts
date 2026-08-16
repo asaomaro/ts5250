@@ -16,6 +16,7 @@ import type { ScreenSnapshot } from "../screen/types.js";
 import { applyInbound } from "../protocol/inbound.js";
 import { buildReadModified, buildReadBuffer } from "../protocol/outbound.js";
 import { buildQueryReply } from "../protocol/query-reply.js";
+import { CHARSET, SO, SI } from "../protocol/constants.js";
 import { parseFieldAttr } from "../screen/attributes.js";
 import { Emitter } from "./emitter.js";
 import { isShortForm, type AidKey } from "./aid-keys.js";
@@ -171,7 +172,7 @@ export class Tn3270Session {
   }
 
   private onRecord(record: Uint8Array): void {
-    const result = applyInbound(this.screen, record);
+    const result = applyInbound(this.screen, record, { dbcs: codecForCcsid(this.ccsid).isDbcs });
     if (result.unknown.length > 0) {
       log.debug(`unknown items in record: ${JSON.stringify(result.unknown)}`);
     }
@@ -249,7 +250,8 @@ export class Tn3270Session {
     this.assertUnlocked();
     const codec = codecForCcsid(this.ccsid);
     const { bytes } = codec.encode(text);
-    for (const b of bytes) {
+    const out = this.shapeForField(bytes);
+    for (const b of out) {
       const pos = this.screen.cursor;
       if (this.screen.isAttrPos(pos)) {
         throw new As400Error("FIELD_PROTECTED", `cannot type over a field attribute at ${pos}`);
@@ -258,10 +260,52 @@ export class Tn3270Session {
         const rc = this.screen.rowColOf(pos);
         throw new As400Error("FIELD_PROTECTED", `field at (${rc.row},${rc.col}) is protected`);
       }
-      this.screen.writeChar(pos, b);
+      this.screen.writeChar(pos, b, this.screen.charsetAt(pos));
       this.screen.setMdtFor(pos, true);
       this.screen.setCursor(pos + 1);
     }
+    // **末尾の `SI` にはカーソルを乗せたまま**にする（実測）。
+    // 続けて打てば DBCS 区間がそのまま伸びる——`SI` を追い越すと区間が閉じてしまう
+    if (out[out.length - 1] === SI) this.screen.setCursor(this.screen.cursor - 1);
+  }
+
+  /**
+   * **打ち込むバイト列を欄の種類に合わせる。**
+   *
+   * 3270 の入力欄は DBCS の受け取り方が 3 通りある（s3270 実測）:
+   *
+   * | 欄 | 日本語 | 英数 |
+   * |---|---|---|
+   * | 素の欄 | **撥ねる** | そのまま |
+   * | 混在入力（`XA.INPUT_CONTROL`=1） | `SO` … `SI` で包む | そのまま |
+   * | DBCS 欄（`XA.CHARSET`=`0xf8`） | **`SO`/`SI` を付けずに生で** | **撥ねる** |
+   *
+   * 撥ねるところが肝心で、s3270 は「Operator error」でキーボードを施錠する。
+   * ここを素通しにすると、**ホストが受け取れないバイトを送ってしまう**。
+   */
+  private shapeForField(bytes: Uint8Array): number[] {
+    const ap = this.screen.fieldAttrPosFor(this.screen.cursor);
+    const dbcsField = ap >= 0 && this.screen.charsetAt(ap) === CHARSET.DBCS;
+    const mixed = ap >= 0 && this.screen.inputControlAt(ap);
+    const hasDbcs = bytes.includes(SO);
+
+    if (dbcsField) {
+      // DBCS 欄は DBCS しか入らない——全体が 1 つの DBCS 区間になっていること
+      const b = [...bytes];
+      const ok = b.length > 2 && b[0] === SO && b[b.length - 1] === SI
+        && !b.slice(1, -1).some((x) => x === SO || x === SI);
+      if (b.length > 0 && !ok) {
+        throw new As400Error("FIELD_TYPE", "DBCS field accepts double-byte characters only");
+      }
+      return b.slice(1, -1); // **SO/SI は付けない**
+    }
+    if (hasDbcs && !mixed) {
+      throw new As400Error(
+        "FIELD_TYPE",
+        "field does not accept double-byte input (no input-control attribute)"
+      );
+    }
+    return [...bytes];
   }
 
   /** AID キーを送る。送信後はキーボードがロックされ、ホストの restore で解ける */

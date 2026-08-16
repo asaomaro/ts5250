@@ -138,7 +138,11 @@ describe("異常系", () => {
 });
 
 describe("入力側の DBCS", () => {
-  it("type() で日本語を打つと SO/SI 込みでバッファに入る", async () => {
+  /** 交渉済みのセッションと、指定した属性の非保護欄を 1 つ持つ画面を作る */
+  async function session(fieldOrders: number[]): Promise<{
+    s: import("../src/session/session.js").Tn3270Session;
+    sent: number[][];
+  }> {
     const { Tn3270Session } = await import("../src/session/session.js");
     const { IAC, CMD, OPT, TT_SEND } = await import("../src/telnet/constants.js");
     type T = import("../src/transport/types.js").Transport;
@@ -159,15 +163,29 @@ describe("入力側の DBCS", () => {
     recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
     recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
     recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
-    // 非保護欄を 1 つ置いた画面
     recv(
       CMD3270.ERASE_WRITE, WCC.RESTORE,
-      ...sba(0), ORDER.SF, 0x00,
+      ...sba(0), ...fieldOrders,
       ...sba(40), ORDER.SF, 0x20,
       ...sba(1), ORDER.IC,
       IAC, CMD.EOR
     );
+    return { s, sent };
+  }
+  const lastHex = (sent: number[][]): string =>
+    (sent[sent.length - 1] ?? []).map((b) => b.toString(16).padStart(2, "0")).join("");
 
+  it("**素の欄は日本語を撥ねる**（入力制御が無い欄。s3270 も Operator error）", async () => {
+    const { s } = await session([ORDER.SF, 0x00]);
+    s.setCursor(1, 2);
+    expect(() => s.type("日本")).toThrow(/double-byte/);
+    expect(() => s.type("AB")).not.toThrow(); // 英数は通る
+  });
+
+  it("**混在入力の欄は SO/SI で包む**——カーソルは末尾の SI に乗る", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01
+    ]);
     s.setCursor(1, 2);
     s.type("日本");
 
@@ -177,11 +195,47 @@ describe("入力側の DBCS", () => {
     expect(row[2]!.char).toBe("日");
     expect(row[4]!.char).toBe("本");
     expect(row[6]!.kind).toBe("si");
-    // **MDT が立ち、送信バイトに DBCS がそのまま乗る**
+    expect(snap.cursor).toEqual({ row: 1, col: 7 }); // アドレス 6＝SI の桁
     expect(snap.fields[0]!.modified).toBe(true);
+
     s.send("enter");
-    const last = (sent[sent.length - 1] ?? []).map((b) => b.toString(16).padStart(2, "0")).join("");
-    expect(last).toMatch(/0e4562456{1,2}6.*0f/); // SO … SI が含まれる
+    expect(lastHex(sent)).toContain("0e4562456" + "60f");
+  });
+
+  it("**混在入力の欄では DBCS の並びごとに SO/SI が付く**", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01
+    ]);
+    s.setCursor(1, 2);
+    s.type("A日B");
+    s.send("enter");
+    // A / SO 日 SI / B —— 英数は裸、日本語だけが包まれる
+    expect(lastHex(sent)).toContain("c10e45620fc2");
+  });
+
+  it("**DBCS 欄は SO/SI を付けずに生で置く**", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS
+    ]);
+    s.setCursor(1, 2);
+    s.type("日本");
+
+    const snap = s.snapshot();
+    expect(snap.cells[0]![1]!.char).toBe("日"); // SO を挟まないので 1 桁目から
+    expect(snap.cells[0]![3]!.char).toBe("本");
+    expect(snap.cursor).toEqual({ row: 1, col: 6 }); // アドレス 5
+
+    s.send("enter");
+    const hex = lastHex(sent);
+    expect(hex).toContain("45624566");
+    expect(hex).not.toContain("0e45"); // SO が付いていない
+  });
+
+  it("**DBCS 欄は英数を撥ねる**", async () => {
+    const { s } = await session([ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS]);
+    s.setCursor(1, 2);
+    expect(() => s.type("AB")).toThrow(/double-byte/);
+    expect(() => s.type("日A")).toThrow(/double-byte/); // 混ぜても駄目
   });
 
   it("欄からあふれた入力は次の欄の属性桁で止まる（**現状の挙動を固定**）", () => {

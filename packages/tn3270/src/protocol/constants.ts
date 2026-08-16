@@ -173,7 +173,12 @@ export const XA = {
   HIGHLIGHT: 0x41,
   FOREGROUND: 0x42,
   CHARSET: 0x43,
-  BACKGROUND: 0x45
+  BACKGROUND: 0x45,
+  /**
+   * **入力制御**。値 1 で「この欄は SBCS と DBCS の混在入力を受け付ける」。
+   * これが立っていない普通の欄に日本語を打とうとすると、**s3270 は入力を撥ねる**（実測）。
+   */
+  INPUT_CONTROL: 0xfe
 } as const;
 
 /**

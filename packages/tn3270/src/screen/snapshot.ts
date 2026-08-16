@@ -1,5 +1,6 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic/codec";
-import { NUL, SO, SI, CHARSET } from "../protocol/constants.js";
+import { NUL, SO, SI } from "../protocol/constants.js";
+import { DB, dbcsStates, validDbcsPair } from "./dbcs.js";
 import { parseFieldAttr } from "./attributes.js";
 import { graphicEscapeChar } from "./graphic-escape.js";
 import { colorOf, highlightOf } from "./attributes.js";
@@ -39,84 +40,8 @@ export function snapshot(screen: Screen3270, opts: SnapshotOptions = {}): Screen
   };
 }
 
-/** 桁ごとの DBCS 状態 */
-const DB = { NONE: 0, LEAD: 1, TAIL: 2, DEAD: 3 } as const;
-
-/**
- * **DBCS の対として成立するバイト対か。**
- *
- * 両方が 0x40〜0xfe に収まっていること——これだけ。
- * 成立しない対は**空白 2 桁**として描く（s3270 は対のバイトを空白に置き換える）。
- * DBCS 区間が終わらないまま NUL の海に出たとき、ここで止まる。
- */
-function validDbcsPair(lead: number, tail: number): boolean {
-  return lead >= 0x40 && lead <= 0xfe && tail >= 0x40 && tail <= 0xfe;
-}
-
-/**
- * **DBCS の対を画面全体で先に決める。**
- *
- * DBCS 区間に入る道は **3 本**ある（x3270 の `enum dbcs_why` と同じ切り口）:
- *
- * 1. **`SO` 〜 `SI`** —— 普通の欄の中に DBCS の小区間を作る
- * 2. **DBCS 欄** —— `SFE` の文字セット属性（`0xf8`）で**欄まるごと**。SO/SI は使わない
- * 3. **`SA` の文字セット属性** —— 文字の並びだけを DBCS にする
- *
- * どの入り口でも、**対の左右は区間の先頭からの偶奇**で決まる。行では決まらない——
- * だから **DBCS 1 文字が行末で割れる**（左半分が 80 桁目、右半分が次行 1 桁目）。
- * s3270 は割れても正しく描く（実測）ので、こちらも行ではなく通し番号で数える。
- *
- * 対にならなかった左半分（**dead position**）は文字を持たない扱いにする。
- */
-function dbcsStates(screen: Screen3270, codec: Codec): Uint8Array {
-  const n = screen.size;
-  const out = new Uint8Array(n);
-  if (!codec.isDbcs) return out; // SBCS の画面では対を作らない
-
-  // アドレス 0 を支配する属性桁は**画面の末尾から回り込む**ことがある。
-  // その欄が DBCS なら 0 桁目から既に区間の途中——区間の先頭は属性桁の次
-  const first = screen.fieldAttrPosFor(0);
-  let dbcsField = first >= 0 && screen.charsetAt(first) === CHARSET.DBCS;
-  let start = dbcsField ? screen.wrap(first + 1) : -1;
-  let inSo = false;
-
-  for (let addr = 0; addr < n; addr++) {
-    if (screen.isAttrPos(addr)) {
-      dbcsField = screen.charsetAt(addr) === CHARSET.DBCS;
-      start = dbcsField ? addr + 1 : -1;
-      inSo = false;
-      continue;
-    }
-    const byte = screen.charAt(addr);
-    if (byte === SO) {
-      inSo = true;
-      start = addr + 1;
-      continue;
-    }
-    if (byte === SI) {
-      inSo = false;
-      start = -1;
-      continue;
-    }
-    if (screen.charsetAt(addr) === CHARSET.DBCS) {
-      if (start < 0) start = addr; // SA で始まる区間
-    } else if (!inSo && !dbcsField) {
-      start = -1;
-    }
-    if (start < 0) continue;
-    // **区間の先頭からの偶奇**で左右を決める（回り込みを考えて n を足してから割る）
-    out[addr] = (addr + n - start) % 2 === 0 ? DB.LEAD : DB.TAIL;
-  }
-
-  // 右半分が続かなかった左半分は文字にならない
-  for (let addr = 0; addr < n; addr++) {
-    if (out[addr] === DB.LEAD && out[(addr + 1) % n] !== DB.TAIL) out[addr] = DB.DEAD;
-  }
-  return out;
-}
-
 function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
-  const db = dbcsStates(screen, codec);
+  const db = dbcsStates(screen, codec.isDbcs);
   const out: Cell[][] = [];
   for (let row = 0; row < screen.rows; row++) {
     const line: Cell[] = [];

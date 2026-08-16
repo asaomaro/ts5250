@@ -1,6 +1,7 @@
 import { childLog } from "@ts5250/base";
 import { ByteReader } from "./bytes.js";
 import { CMD3270, ORDER, WCC, XA, SO, SI, normalizeCommand } from "./constants.js";
+import { normalizeDbcs } from "../screen/dbcs.js";
 import { decodeAddress } from "./address.js";
 import type { Screen3270 } from "../screen/buffer.js";
 import { splitStructuredFields, asQueryRequest, SF_TYPE, type QueryRequest } from "./query-reply.js";
@@ -40,7 +41,21 @@ export interface InboundResult {
   unknown: UnknownItem[];
 }
 
-export function applyInbound(screen: Screen3270, record: Uint8Array): InboundResult {
+export interface InboundOptions {
+  /**
+   * **DBCS のセッションか**（CCSID 930 / 939 など）。
+   *
+   * 立っているときだけ、書き込みの後に DBCS の後始末をする（`normalizeDbcs`）。
+   * x3270 も同じ作りで、SBCS のコードページでは DBCS の対を一切作らない。
+   */
+  dbcs?: boolean;
+}
+
+export function applyInbound(
+  screen: Screen3270,
+  record: Uint8Array,
+  opts: InboundOptions = {}
+): InboundResult {
   const r = new ByteReader(record);
   const result: InboundResult = {
     keyboardRestored: false,
@@ -97,7 +112,7 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
           // 封筒を開けて中身を適用する。body の先頭 1 バイトはパーティション ID
           const inner = sf.body.subarray(1);
           if (inner.length > 0) {
-            const r = applyInbound(screen, inner);
+            const r = applyInbound(screen, inner, opts);
             result.keyboardRestored ||= r.keyboardRestored;
             result.resetMdt ||= r.resetMdt;
             result.alarm ||= r.alarm;
@@ -118,6 +133,9 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
   }
 
   applyOrders(screen, r, result);
+  // **書き込みの後始末**——成立しない DBCS の対を空白に、宙に浮いた左半分を NUL にする。
+  // 表示だけでなく**送り返すバイト**に効く（DBCS 欄の余りは空白として送られる）
+  if (opts.dbcs === true) normalizeDbcs(screen);
   return result;
 }
 
@@ -191,6 +209,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         let color = 0;
         let hilite = 0;
         let charset = 0;
+        let inputCtl = false;
         for (let i = 0; i < pairs; i++) {
           const type = r.u8();
           const value = r.u8();
@@ -198,12 +217,14 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
           else if (type === XA.FOREGROUND) color = value;
           else if (type === XA.HIGHLIGHT) hilite = value;
           else if (type === XA.CHARSET) charset = value;
+          else if (type === XA.INPUT_CONTROL) inputCtl = value === 1;
           // 未知の type は無視（落とさない）
         }
         screen.startField(addr, attr);
         screen.setExt(addr, color, hilite);
         // **属性桁に置いた文字セットは欄全体に効く**——DBCS 欄はこれで作る（SO/SI は要らない）
         screen.setCharset(addr, charset);
+        screen.setInputControl(addr, inputCtl);
         addr = screen.wrap(addr + 1);
         curColor = color;
         curHilite = hilite;
@@ -233,6 +254,7 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
           else if (type === XA.FOREGROUND) screen.setExt(addr, value, screen.extAt(addr).hilite);
           else if (type === XA.HIGHLIGHT) screen.setExt(addr, screen.extAt(addr).color, value);
           else if (type === XA.CHARSET) screen.setCharset(addr, value);
+          else if (type === XA.INPUT_CONTROL) screen.setInputControl(addr, value === 1);
         }
         addr = screen.wrap(addr + 1);
         break;

@@ -50,6 +50,8 @@ export class Screen3270 {
   private geMark: Uint8Array;
   /** 桁ごとの文字セット属性（`XA.CHARSET` の値）。0 は基本文字集合 */
   private extCharset: Uint8Array;
+  /** 属性桁の入力制御（`XA.INPUT_CONTROL`）。1 なら混在入力を許す欄 */
+  private extInputCtl: Uint8Array;
 
   private cursorPos = 0;
   private alt = false;
@@ -69,6 +71,7 @@ export class Screen3270 {
     this.extHilite = new Uint8Array(n);
     this.geMark = new Uint8Array(n);
     this.extCharset = new Uint8Array(n);
+    this.extInputCtl = new Uint8Array(n);
   }
 
   get size(): number {
@@ -119,6 +122,7 @@ export class Screen3270 {
     this.extHilite = new Uint8Array(n);
     this.geMark = new Uint8Array(n);
     this.extCharset = new Uint8Array(n);
+    this.extInputCtl = new Uint8Array(n);
     this.cursorPos = 0;
   }
 
@@ -131,6 +135,7 @@ export class Screen3270 {
     this.extHilite.fill(0);
     this.geMark.fill(0);
     this.extCharset.fill(0);
+    this.extInputCtl.fill(0);
     this.cursorPos = 0;
   }
 
@@ -165,6 +170,7 @@ export class Screen3270 {
     this.extColor[p] = 0;
     this.extHilite[p] = 0;
     this.extCharset[p] = 0;
+    this.extInputCtl[p] = 0;
   }
 
   isAttrPos(addr: number): boolean {
@@ -200,6 +206,15 @@ export class Screen3270 {
 
   charsetAt(addr: number): number {
     return this.extCharset[this.wrap(addr)]!;
+  }
+
+  /** 属性桁に入力制御を置く（`XA.INPUT_CONTROL`。混在入力を許すか） */
+  setInputControl(addr: number, on: boolean): void {
+    this.extInputCtl[this.wrap(addr)] = on ? 1 : 0;
+  }
+
+  inputControlAt(addr: number): boolean {
+    return this.extInputCtl[this.wrap(addr)] === 1;
   }
 
   /**
