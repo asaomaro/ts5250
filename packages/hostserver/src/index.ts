@@ -90,6 +90,20 @@ export {
 } from "./command/command-message.js";
 export type { ProgramParameter } from "./command/command-datastream.js";
 export {
+  retrieveCommandTemplate,
+  parseCommandTemplate,
+  type CommandTemplate,
+  type CommandParam,
+  type RetrieveOptions
+} from "./command/command-template.js";
+export {
+  buildCommand,
+  formatValue,
+  type CommandValue,
+  type BuildOptions
+} from "./command/command-build.js";
+export { runCommandTemplate, CommandTemplateCache } from "./command/command-run.js";
+export {
   buildServiceProgramParams,
   splitServiceProgramOutputs,
   type PassBy,
