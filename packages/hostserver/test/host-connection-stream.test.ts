@@ -35,6 +35,10 @@ function fakeHost(replies: Buffer[][]): Promise<number> {
   return new Promise((resolve) => {
     let turn = 0;
     server = createServer((sock) => {
+      // **偽サーバー側の切断は無視する。** 検証は接続を途中で閉じるので、
+      // こちらのソケットに ECONNRESET が上がる。拾わないと Node の未処理例外になり、
+      // 全件緑でも `npm test` が 1 で終わる（この工程で踏んだ）
+      sock.on("error", () => undefined);
       sock.on("data", () => {
         const batch = replies[turn++] ?? [];
         for (const f of batch) sock.write(f);

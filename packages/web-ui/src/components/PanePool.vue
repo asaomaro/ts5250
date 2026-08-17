@@ -23,6 +23,7 @@ import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
 import MessagePane from "./MessagePane.vue";
 import ProgramPane from "./ProgramPane.vue";
+import PcmlPane from "./PcmlPane.vue";
 import SqlPane from "./SqlPane.vue";
 import PlanListPane from "./PlanListPane.vue";
 import IfsPane from "./IfsPane.vue";
@@ -59,6 +60,7 @@ const APP_PANES: Record<(typeof PANE_PREFIXES)[number], Component> = {
   "list:": HostListPane,
   "msg:": MessagePane,
   "pgm:": ProgramPane,
+  "pcml:": PcmlPane,
   "plan:": PlanListPane,
   "sql:": SqlPane,
   "transfer:": TransferPane,
