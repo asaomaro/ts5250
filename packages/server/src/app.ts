@@ -26,6 +26,7 @@ import { registerHllapiRoutes } from "./hllapi-routes.js";
 import { registerSessionRoutes } from "./session-routes.js";
 import { registerHostProgramRoutes } from "./host-program.js";
 import { registerHostPcmlRoutes } from "./host-pcml.js";
+import { registerHostCommandRoutes } from "./host-command.js";
 import { registerHostMessageRoutes } from "./host-message.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
@@ -198,6 +199,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   registerHostProgramRoutes(app, { resolver: deps.resolver });
   // 同じ呼び出しを**記述（PCML）から**駆動する。構造体と配列を名前で扱える
   registerHostPcmlRoutes(app, { resolver: deps.resolver });
+  // CL コマンドのプロンプト（F4 相当）。定義を引く口と、組んで実行する口
+  registerHostCommandRoutes(app, { resolver: deps.resolver });
   // メッセージ待ち行列（照会への応答が主目的）
   registerHostMessageRoutes(app, { resolver: deps.resolver });
 

@@ -70,6 +70,11 @@ const FEATURES = [
     name: "PCML 呼び出し",
     desc: "コンパイラが吐いた `.pcml` から呼ぶ。**構造体と配列を名前で**扱える。"
   },
+  {
+    id: "cmd:prompt",
+    name: "コマンド入力支援",
+    desc: "CL コマンドの定義を引いて欄を並べる（実機の F4）。書き方を覚えていなくても打てる。"
+  },
   { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" },
   {
     id: "ifs:files",

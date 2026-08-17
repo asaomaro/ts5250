@@ -21,6 +21,7 @@
 import { computed, type Component } from "vue";
 import AdminPane from "./AdminPane.vue";
 import HostListPane from "./HostListPane.vue";
+import CommandPane from "./CommandPane.vue";
 import MessagePane from "./MessagePane.vue";
 import ProgramPane from "./ProgramPane.vue";
 import PcmlPane from "./PcmlPane.vue";
@@ -55,6 +56,7 @@ const props = defineProps<{
  */
 const APP_PANES: Record<(typeof PANE_PREFIXES)[number], Component> = {
   "admin:": AdminPane,
+  "cmd:": CommandPane,
   "dtaq:": DtaqPane,
   "ifs:": IfsPane,
   "list:": HostListPane,
