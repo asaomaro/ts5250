@@ -681,10 +681,13 @@ PA1 PF1..PF12 → F1..F12        PA2 PF1..PF12 → F13..F24
 
 | スクリプト | 内容 |
 |---|---|
-| `verify-3270-keys-osaka.mjs` | 実機で F3 / F4 / F12 / F13・ページ送り・Help / Print / SysReq / Attn が効くことを確かめる（14 項目） |
+| `verify-3270-keys-osaka.mjs` | 実機で F3 / F4 / F12 / F13・ページ送り・Help / Print / SysReq / Attn が効くことを確かめる（14 項目）。**`PROBE=PUB400` で pub400 にも当たる**（画面が英語なので目印は両対応） |
 | `verify-browser-3270-keys-osaka.mjs` | 実ブラウザで F4 / F12 が効くことを確かめる |
 
-実測（SR-OSAKA）:
+**2 台の IBM i で確かめた**（社内機 V7R5M0 ／ pub400）——どちらも **14 PASS / 0 FAIL**。
+装置名では 2 台の答えが割れたので、キーの対応表も両方に当てている。
+
+実測:
 
 - `PA1` を送ると**施錠される**。解けるまで **31 ミリ秒**。待ってから `PFn` を送る
 - **F13〜F24 は素の `PF13`〜`PF24`** で足りる（`PA2`+`PF1` と同じ画面が出た）
@@ -701,12 +704,15 @@ PA1 PF1..PF12 → F1..F12        PA2 PF1..PF12 → F13..F24
 先頭行は変わらず、ヘルプは*窓*で重なるので先頭行が元のまま。**画面全体で突き合わせる**こと。
 実測で効いた形:
 
-```
-Help  (PF1)  → 「IBM I メインメニュー－ヘルプ」の窓
-Print (PF4)  → 「省略時の印刷装置ファイルに対して印刷操作が完了した。」
-SysReq(PF11) → 24 行目に入力行 → Enter で「システム要求」メニュー
-Attn  (PF9)  → 「EVXX01 コマンド入力」（注意プログラム）
-```
+| キー | 社内機（日本語） | pub400（英語） |
+|---|---|---|
+| Help (PF1) | 「IBM I メインメニュー－ヘルプ」の窓 | `Help — IBM i Main Menu` |
+| Print (PF4) | 「印刷操作が完了した。」 | `Print operation complete to the default printer` |
+| SysReq (PF11) | 24 行目に入力行 → Enter で「システム要求」 | 同左（`System Request`） |
+| Attn (PF9) | 「EVXX01 コマンド入力」 | **`Operational Assistant (ASSIST) Menu`** |
+
+⚠ **Attn で出る画面はシステム次第**（注意プログラム＝`ATNPGM`）。題名で判定せず、
+**画面が変わったこと**で見ること。
 
 ⚠ **s3270 は社内ホスト相手の物差しに使えない。** docker は開発コンテナの外で動くため
 到達できない（`not-connected` になる）。TK4- 相手なら使える。

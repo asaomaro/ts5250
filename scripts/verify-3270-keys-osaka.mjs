@@ -5,23 +5,43 @@
 // 「ヘルプ－ 3270 キーボード・マッピング」画面（3270 で繋いで `PF2`）。
 //
 // 実行: node --env-file=.env scripts/verify-3270-keys-osaka.mjs
+//       PROBE=PUB400 を付けると pub400 に当たる（**画面が英語**なので目印を両対応にしてある）
+//
+// ⚠ **1 台で確かめて一般化しない。** 装置名では 2 台の IBM i が違う答えを返した
+// （pub400 は受け入れ、社内機は接続を切る）。キーの対応表は IBM i 共通のはずだが、
+// **確かめるまでは分からない**ので両方に当てられるようにしてある。
 import { Tn3270Session } from "@ts5250/tn3270";
 
-const host = process.env.AS400_HOST;
-const user = process.env.AS400_USER;
-const password = process.env.AS400_PASSWORD;
-if (!host || !user || !password) { process.stderr.write("環境変数が足りません\n"); process.exit(2); }
+const PRE = process.env.PROBE === "PUB400" ? "PUB400" : "AS400";
+const host = process.env[`${PRE}_HOST`];
+const user = process.env[`${PRE}_USER`];
+const password = process.env[`${PRE}_PASSWORD`];
+if (!host || !user || !password) { process.stderr.write(`${PRE}_HOST / _USER / _PASSWORD が要ります\n`); process.exit(2); }
+
+/** 画面の目印。**pub400 は英語**なので、日本語と英語の両方を見る */
+const M = {
+  menu: /メインメニュー|Main Menu/u,
+  wrkactjob: /活動ジョブ処理|Work with Active Jobs/u,
+  info: /情報援助|Information Assist/u,
+  rejected: /できません|not allowed|not valid/iu,
+  help: /ヘルプ|Help/u,
+  print: /印刷操作|[Pp]rint operation|印刷/u,
+  sysreq: /システム要求|System Request/u,
+  attn: /コマンド入力|Command Entry/u,
+  /** 注意プログラム。ホストの設定（ATNPGM）次第で何も出ないことがある */
+  atnAny: /コマンド入力|Command Entry|援助|Assist/u
+};
 
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const check = (c, m) => { if (c) { pass++; log(`  PASS ${m}`); } else { fail++; log(`  FAIL ${m}`); } };
 
-const s = new Tn3270Session({ host, port: 23, ccsid: Number(process.env.AS400_CCSID ?? 930) });
+const s = new Tn3270Session({ host, port: 23, ccsid: Number(process.env.PROBE_CCSID ?? (PRE === "PUB400" ? 37 : 930)) });
 await s.connect(); await sleep(2500);
 const L = () => s.snapshot().cells.map((r) => r.map((c) => c.char).join("").replace(/\s+$/u, ""));
 const head = () => L().find((t) => t.trim() !== "")?.trim().slice(0, 44) ?? "";
-const rejected = () => L().some((t) => t.includes("できません"));
+const rejected = () => L().some((t) => M.rejected.test(t));
 const cmdField = () => s.snapshot().fields.filter((x) => !x.protected).find((x) => x.row >= 19);
 /**
  * メインメニューに素の状態で戻っているか。
@@ -31,8 +51,10 @@ const cmdField = () => s.snapshot().fields.filter((x) => !x.protected).find((x) 
  * （最初これで、ヘルプを開いたまま次のキーを試していた）。
  */
 const atMenu = () =>
-  head().includes("メインメニュー") &&
-  !L().some((t) => /ヘルプ|システム要求|コマンド入力|印刷操作/u.test(t));
+  M.menu.test(head()) &&
+  !L().some((t) =>
+    /ヘルプ|システム要求|コマンド入力|印刷操作|Help|System Request|Command Entry|Operational Assistant/u.test(t)
+  );
 const toMenu = async () => {
   for (let i = 0; i < 5 && !atMenu(); i++) {
     await s.sendFunctionKey(12).catch(() => undefined); await sleep(2500);
@@ -50,20 +72,20 @@ s.setCursor(f[0].row, f[0].col); s.type(user);
 s.setCursor(f[1].row, f[1].col); s.type(password);
 s.send("enter"); await sleep(4000);
 s.send("enter"); await sleep(4000);
-check(head().includes("メインメニュー"), `サインオンしてメニューに着いた（${head()}）`);
+check(M.menu.test(L().join("\n")), `サインオンしてメニューに着いた（${head()}）`);
 
 log("\n### 2. F キー");
 {
   const c = cmdField(); if (c) { s.setCursor(c.row, c.col); s.type("WRKACTJOB"); }
   await s.sendFunctionKey(4); await sleep(5000);
-  check(head().includes("活動ジョブ処理"), `**F4（プロンプト）が効く** → ${head()}`);
+  check(M.wrkactjob.test(L().join("\n")), `**F4（プロンプト）が効く** → ${head()}`);
   check(!rejected(), "「機能キーは使用できません」が出ない");
   await s.sendFunctionKey(12); await sleep(4000);
-  check(head().includes("メインメニュー"), `**F12（取り消し）が効く** → ${head()}`);
+  check(M.menu.test(L().join("\n")), `**F12（取り消し）が効く** → ${head()}`);
 }
 {
   await s.sendFunctionKey(13); await sleep(4000);
-  check(head().includes("情報援助"), `**F13（情報援助）が効く** → ${head()}`);
+  check(M.info.test(L().join("\n")), `**F13（情報援助）が効く** → ${head()}`);
   await toMenu();
 }
 
@@ -76,7 +98,7 @@ log("\n### 3. ページ送り（素の PF7 / PF8）");
   check(L().join("") !== before, "PF8 で次ページへ進む");
   check(!rejected(), "拒否されない");
   await s.sendFunctionKey(3); await sleep(4000);
-  check(head().includes("メインメニュー"), `**F3（終了）が効く** → ${head()}`);
+  check(M.menu.test(L().join("\n")), `**F3（終了）が効く** → ${head()}`);
 }
 
 log("\n### 4. IBM i でだけ割り当てのあるキー");
@@ -90,8 +112,8 @@ log("\n### 4. IBM i でだけ割り当てのあるキー");
     const before = whole();
     s.send("pf1"); await sleep(4000);   // Help
     check(
-      whole() !== before && L().some((t) => t.includes("ヘルプ")),
-      `**Help（PF1）が効く** → ${L().find((t) => t.includes("ヘルプ"))?.trim().slice(0, 44)}`
+      whole() !== before && L().some((t) => M.help.test(t)),
+      `**Help（PF1）が効く** → ${L().find((t) => M.help.test(t))?.trim().slice(0, 44)}`
     );
     await toMenu();
   }
@@ -99,8 +121,8 @@ log("\n### 4. IBM i でだけ割り当てのあるキー");
     const before = whole();
     s.send("pf4"); await sleep(4000);   // Print
     check(
-      whole() !== before && L().some((t) => t.includes("印刷操作")),
-      `**Print（PF4）が効く** → ${L().find((t) => t.includes("印刷操作"))?.trim().slice(0, 44)}`
+      whole() !== before && L().some((t) => M.print.test(t)),
+      `**Print（PF4）が効く** → ${L().find((t) => M.print.test(t))?.trim().slice(0, 44)}`
     );
     await toMenu();
   }
@@ -108,19 +130,23 @@ log("\n### 4. IBM i でだけ割り当てのあるキー");
     s.send("pf11"); await sleep(3000);  // SysReq → 入力行が出る
     s.send("enter"); await sleep(3500); // → システム要求メニュー
     check(
-      L().some((t) => t.includes("システム要求")),
-      `**SysReq（PF11）が効く** → ${L().find((t) => t.includes("システム要求"))?.trim().slice(0, 44)}`
+      L().some((t) => M.sysreq.test(t)),
+      `**SysReq（PF11）が効く** → ${L().find((t) => M.sysreq.test(t))?.trim().slice(0, 44)}`
     );
     s.send("pf3"); await sleep(3000);
     await toMenu();
   }
   {
-    s.send("pf9"); await sleep(4000);   // Attn → 注意プログラム（コマンド入力）
+    // ⚠ **出る画面はシステム次第**（注意プログラム＝ATNPGM）。実測:
+    //   社内機 → 「EVXX01 コマンド入力」 ／ pub400 → 「Operational Assistant (ASSIST) Menu」
+    // だから**画面が変わったこと**で判定する。特定の題名を当てにしない
+    const before = whole();
+    s.send("pf9"); await sleep(4500);
     check(
-      L().some((t) => t.includes("コマンド入力")),
-      `**Attn（PF9）が効く** → ${L().find((t) => t.includes("コマンド入力"))?.trim().slice(0, 44)}`
+      whole() !== before && !rejected(),
+      `**Attn（PF9）が効く**（注意プログラムが開く） → ${head()}`
     );
-    s.send("pf3"); await sleep(3000);
+    await s.sendFunctionKey(3).catch(() => undefined); await sleep(3000);
     await toMenu();
   }
 }
