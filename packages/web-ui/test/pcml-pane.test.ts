@@ -155,6 +155,54 @@ describe("可変長の配列", () => {
     expect(w.text()).toContain("件数が LISTER.COUNT で決まります");
   });
 
+  it("**件数が出力で決まるなら「呼ぶまで分かりません」と言う**（入れようがない）", async () => {
+    const OUT_COUNT = {
+      version: "4.0",
+      programs: [
+        {
+          name: "G",
+          fields: [
+            { name: "n", path: "G.n", type: "int", usage: "output", length: 4 },
+            { name: "rows", path: "G.rows", type: "char", usage: "output", length: 4, count: "G.n" }
+          ]
+        }
+      ]
+    };
+    const { w } = await loaded((route) => ({ body: route === "parse" ? OUT_COUNT : {} }));
+    expect(w.text()).toContain("呼ぶまで分かりません");
+  });
+
+  it("**呼んだあとは、返った件数ぶん並ぶ**", async () => {
+    const OUT_COUNT = {
+      version: "4.0",
+      programs: [
+        {
+          name: "G",
+          fields: [
+            { name: "n", path: "G.n", type: "int", usage: "output", length: 4 },
+            { name: "rows", path: "G.rows", type: "char", usage: "output", length: 4, count: "G.n" }
+          ]
+        }
+      ]
+    };
+    const { w } = await loaded((route) =>
+      route === "parse"
+        ? { body: OUT_COUNT }
+        : {
+            body: {
+              success: true,
+              returnCode: 0,
+              messages: [],
+              values: { "G.n": "2", "G.rows(1)": "AAA", "G.rows(2)": "BBB" }
+            }
+          }
+    );
+    await w.find('[data-testid="pcml-call"]').trigger("click");
+    await flushPromises();
+    expect(w.find('[data-out="G.rows(1)"]').text()).toBe("AAA");
+    expect(w.find('[data-out="G.rows(2)"]').text()).toBe("BBB");
+  });
+
   it("件数を入れると、その数だけ並ぶ", async () => {
     const { w } = await loaded((route) => ({ body: route === "parse" ? VAR : {} }));
     await w.find('[data-kwd="LISTER.COUNT"]').setValue("2");

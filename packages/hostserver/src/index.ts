@@ -129,6 +129,7 @@ export {
   type PcmlType,
   type PcmlUsage
 } from "./command/pcml-parse.js";
+export { readProgramOutputs, type PcmlReadInput } from "./command/pcml-read.js";
 export {
   buildPcmlCall,
   readPcmlOutputs,
