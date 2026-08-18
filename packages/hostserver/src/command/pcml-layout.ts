@@ -91,13 +91,13 @@ export function pcmlTarget(program: PcmlProgram): { program: string; library: st
   return { program: name.toUpperCase(), library: library.toUpperCase() };
 }
 
-/** 葉 1 つのひな形と、そのバイト長 */
-function templateOf(field: PcmlField): ProgramArg {
+/** 葉 1 つのひな形。`length` は**解決済みの整数**を受け取る（名前指定がありうるため） */
+function templateOf(field: PcmlField, resolved: number | undefined): ProgramArg {
   const need = (what: string): number => {
-    if (field.length === undefined) {
+    if (resolved === undefined) {
       throw new As400Error("CONFIG_ERROR", `${field.path}: ${what} には length が要ります`);
     }
-    return field.length;
+    return resolved;
   };
   switch (field.type) {
     case "char":
@@ -129,7 +129,43 @@ function templateOf(field: PcmlField): ProgramArg {
   }
 }
 
-/** `count` を件数に解く。**決まらなければ呼ばない**（0 件にすると領域外を壊す） */
+/**
+ * 名前で指された数（`count` / `length`）を解く。
+ *
+ * **決まらなければ呼ばない。** 件数を 0 にするとホストが領域外に書き、
+ * 長さを 0 にすると以降の位置が全部ずれる。
+ *
+ * 指す先が**出力**なら、呼ぶ前には決まらない——その旨を言って断る
+ * （「入れてください」と言われても入れようがないため）。
+ */
+function numberFrom(
+  field: PcmlField,
+  ref: string,
+  what: "件数" | "長さ",
+  values: Readonly<Record<string, string>>,
+  program: PcmlProgram
+): number {
+  const raw = values[ref] ?? fieldInit(program, ref);
+  if (raw === undefined || raw.trim() === "") {
+    const target = findField(program, ref);
+    if (target?.usage === "output") {
+      throw new As400Error(
+        "CONFIG_ERROR",
+        `${field.path} の${what}は ${ref} で決まりますが、${ref} は出力なので呼ぶ前には決まりません（この経路では扱えません）`
+      );
+    }
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `${field.path} の${what}は ${ref} で決まります。呼ぶ前に ${ref} を入れてください`
+    );
+  }
+  if (!/^\d+$/u.test(raw.trim())) {
+    throw new As400Error("CONFIG_ERROR", `${ref} = ${JSON.stringify(raw)} は${what}になりません`);
+  }
+  return Number.parseInt(raw.trim(), 10);
+}
+
+/** `count` を件数に解く */
 function countOf(
   field: PcmlField,
   values: Readonly<Record<string, string>>,
@@ -137,24 +173,30 @@ function countOf(
 ): number {
   if (field.count === undefined) return 1;
   if (typeof field.count === "number") return field.count;
-  // 入力値が無ければ、指している項目の `init`（記述が持つ既定）に落ちる
-  const raw = values[field.count] ?? fieldInit(program, field.count);
-  if (raw === undefined || raw.trim() === "") {
-    throw new As400Error(
-      "CONFIG_ERROR",
-      `${field.path} の件数は ${field.count} で決まります。呼ぶ前に ${field.count} を入れてください`
-    );
-  }
-  if (!/^\d+$/u.test(raw.trim())) {
-    throw new As400Error("CONFIG_ERROR", `${field.count} = ${JSON.stringify(raw)} は件数になりません`);
-  }
-  return Number.parseInt(raw.trim(), 10);
+  return numberFrom(field, field.count, "件数", values, program);
 }
 
-/** 木を葉に開く。戻りは消費したバイト数 */
+/** `length` をバイト長（`packed`/`zoned` は桁数）に解く */
+function lengthOf(
+  field: PcmlField,
+  values: Readonly<Record<string, string>>,
+  program: PcmlProgram
+): number | undefined {
+  if (field.length === undefined) return undefined;
+  if (typeof field.length === "number") return field.length;
+  return numberFrom(field, field.length, "長さ", values, program);
+}
+
+/**
+ * 木を葉に開く。戻りは消費したバイト数。
+ *
+ * **名前の無い項目（予約域）はバイトだけ進めて `slots` に入れない**——
+ * 原典も完全名を付けず、名前で触れない。入れ子ごと触れなくなる。
+ */
 function planField(
   field: PcmlField,
   path: string,
+  addressable: boolean,
   values: Readonly<Record<string, string>>,
   program: PcmlProgram,
   arg: number,
@@ -163,22 +205,60 @@ function planField(
   out: PcmlSlot[]
 ): number {
   const n = countOf(field, values, program);
+  const mine = addressable && field.path !== "";
   let at = offset;
   for (let i = 0; i < n; i++) {
     // **配列は 1 始まり**（PCML の慣習）。件数 1 の非配列は添字を付けない
     const here = field.count === undefined ? path : `${path}(${i + 1})`;
     if (field.type === "struct") {
       for (const member of field.fields ?? []) {
-        at += planField(member, `${here}.${member.name}`, values, program, arg, at, member.ccsid ?? ccsid, out);
+        at += planField(
+          member,
+          mine ? `${here}.${member.name}` : "",
+          mine,
+          values,
+          program,
+          arg,
+          at,
+          member.ccsid ?? ccsid,
+          out
+        );
       }
     } else {
-      const spec = templateOf(field);
+      const spec = templateOf(field, lengthOf(field, values, program));
       const byteLength = argByteLength(spec);
-      out.push({ path: here, arg, offset: at, byteLength, usage: field.usage, spec, ccsid });
+      if (mine) out.push({ path: here, arg, offset: at, byteLength, usage: field.usage, spec, ccsid });
       at += byteLength;
     }
   }
   return at - offset;
+}
+
+/**
+ * **受け取る長さ**を決める。
+ *
+ * IBM の取得系 API は「受取域の長さ」を入力で渡し、記述は `outputsize` でそれを指す。
+ * **算出値より小さければ断る**——ホストが書ける場所が足りず、返るバイトが途中で切れる。
+ * 切れたことに気づけない形の失敗になる。
+ */
+function outLengthOf(
+  field: PcmlField,
+  computed: number,
+  values: Readonly<Record<string, string>>,
+  program: PcmlProgram
+): number {
+  if (field.outputsize === undefined) return computed;
+  const want =
+    typeof field.outputsize === "number"
+      ? field.outputsize
+      : numberFrom(field, field.outputsize, "長さ", values, program);
+  if (want < computed) {
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `${field.path} の受け取る長さ ${want} は、記述が要る ${computed} より小さいです（ホストが書ける場所が足りません）`
+    );
+  }
+  return want;
 }
 
 /** 引数 1 本の向きを、中の葉から決める */
@@ -212,12 +292,23 @@ export function buildPcmlCall(
   for (const field of program.fields) {
     const argIndex = args.length;
     const mine: PcmlSlot[] = [];
-    const length = planField(field, field.path, values, program, argIndex, 0, field.ccsid ?? opts.ccsid, mine);
-    const dir = dirOfLeaves(mine);
+    const length = planField(
+      field,
+      field.path,
+      true,
+      values,
+      program,
+      argIndex,
+      0,
+      field.ccsid ?? opts.ccsid,
+      mine
+    );
+    const outLength = outLengthOf(field, length, values, program);
+    const dir = dirOfLeaves(mine.length > 0 ? mine : [{ usage: field.usage } as PcmlSlot]);
 
     if (dir === "out") {
-      // 送るものが無い。**長さだけ**渡す
-      args.push({ type: "bytes", dir, length });
+      // 送るものが無い。**受け取る長さだけ**渡す
+      args.push({ type: "bytes", dir, length, outLength });
     } else {
       const buf = new Uint8Array(length);
       for (const slot of mine) {
@@ -235,7 +326,7 @@ export function buildPcmlCall(
         });
         buf.set(bytes.subarray(0, slot.byteLength), slot.offset);
       }
-      args.push({ type: "bytes", dir, length, value: toBase64(buf) });
+      args.push({ type: "bytes", dir, length, outLength, value: toBase64(buf) });
     }
     slots.push(...mine);
   }
@@ -246,10 +337,9 @@ export function buildPcmlCall(
   return call;
 }
 
-/** その葉の `init`。**配列の添字は落として**元の記述を引く */
-function fieldInit(program: PcmlProgram, slotPath: string): string | undefined {
-  const bare = slotPath.replace(/\(\d+\)/gu, "");
-  const parts = bare.split(".");
+/** 完全名から記述の項目を引く。**配列の添字は落とす**（記述には添字が無い） */
+function findField(program: PcmlProgram, path: string): PcmlField | undefined {
+  const parts = path.replace(/\(\d+\)/gu, "").split(".");
   if (parts[0] !== program.name) return undefined;
   let fields: readonly PcmlField[] = program.fields;
   let found: PcmlField | undefined;
@@ -258,7 +348,12 @@ function fieldInit(program: PcmlProgram, slotPath: string): string | undefined {
     if (!found) return undefined;
     fields = found.fields ?? [];
   }
-  return found?.init;
+  return found;
+}
+
+/** その葉の `init` */
+function fieldInit(program: PcmlProgram, slotPath: string): string | undefined {
+  return findField(program, slotPath)?.init;
 }
 
 /** 呼んだ結果を**名前つき**で読む */

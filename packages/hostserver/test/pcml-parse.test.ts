@@ -161,7 +161,7 @@ describe("壊れた記述は行番号つきで断る", () => {
   });
 });
 
-describe("並びを変える属性は、黙って読まずに断る", () => {
+describe("飛び先が出力で決まる属性は、黙って読まずに断る", () => {
   const err = (attr: string): string => {
     const text = `<pcml version="1.0"><program name="A">\n<data name="X" type="char" length="1" ${attr} />\n</program></pcml>`;
     try {
@@ -172,18 +172,9 @@ describe("並びを変える属性は、黙って読まずに断る", () => {
     throw new Error("通ってしまった");
   };
 
-  // **無視すると別のバイト列を組む**——「読めたつもりで位置がずれる」形の失敗になる
-  it("`minvrm` / `maxvrm`（その OS 版にだけ在る項目）", () => {
-    expect(err('minvrm="V5R4M0"')).toMatch(/2 行目.*minvrm.*まだ扱えません/u);
-    expect(err('maxvrm="V7R1M0"')).toMatch(/maxvrm/u);
-  });
-
-  it("`offset` / `offsetfrom`（順に詰めるのではなく明示位置）", () => {
-    expect(err('offset="16"')).toMatch(/offset/u);
+  // 飛び先は**返ってきたバイトを読むまで分からない**。静的な割り付けには載らない
+  it("`offset` / `offsetfrom`", () => {
+    expect(err('offset="16"')).toMatch(/2 行目.*offset.*まだ扱えません/u);
     expect(err('offsetfrom="HDR"')).toMatch(/offsetfrom/u);
-  });
-
-  it("`outputsize`（出力領域を別に決める）", () => {
-    expect(err('outputsize="4096"')).toMatch(/outputsize/u);
   });
 });

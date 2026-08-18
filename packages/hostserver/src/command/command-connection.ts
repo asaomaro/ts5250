@@ -88,7 +88,14 @@ export class CommandConnection {
     private readonly conn: HostConnection,
     readonly info: CommandServerInfo,
     readonly host: string,
-    readonly port: number
+    readonly port: number,
+    /**
+     * ホストの版。`(V << 16) + (R << 8) + M`。
+     *
+     * signon サーバーが返す値をそのまま持つ。PCML の `minvrm` / `maxvrm` は
+     * **引数の本数を変える**ので、これが無いと版つきの記述を安全に扱えない。
+     */
+    readonly hostVrm: number
   ) {}
 
   static async connect(opts: CommandConnectOptions): Promise<CommandConnection> {
@@ -142,7 +149,7 @@ export class CommandConnection {
       if (info.warning !== undefined) {
         log.warn(`command server exchange attributes warning: ${info.warning}`);
       }
-      return new CommandConnection(conn, info, opts.host, port);
+      return new CommandConnection(conn, info, opts.host, port, signonInfo.info.rawVersion);
     } catch (e) {
       conn.close();
       throw e;

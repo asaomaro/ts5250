@@ -121,6 +121,8 @@ export {
 // PCML（プログラム界面の記述）。出どころはコンパイラ＋IFS——ホスト API は無い
 export {
   parsePcml,
+  pcmlNeedsHostVersion,
+  type PcmlParseOptions,
   type PcmlDocument,
   type PcmlProgram,
   type PcmlField,

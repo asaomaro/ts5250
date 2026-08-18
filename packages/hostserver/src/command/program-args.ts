@@ -53,8 +53,14 @@ export type ProgramArg =
   | { type: "bin"; dir?: ArgDirection; value?: string; bytes: 2 | 4 | 8; signed?: boolean }
   /** 浮動小数（IEEE 754・ビッグエンディアン）。RPG の `float(4)` / `float(8)` */
   | { type: "float"; dir?: ArgDirection; value?: string; bytes: 4 | 8 }
-  /** **逃げ道**。base64 でそのまま渡す（型で表せない構造体など） */
-  | { type: "bytes"; dir?: ArgDirection; value?: string; length: number }
+  /**
+   * **逃げ道**。base64 でそのまま渡す（型で表せない構造体など）。
+   *
+   * `outLength` は**受け取る長さ**（省略時は `length`）。IBM の取得系 API は
+   * 「受取域」と「受取域の長さ」を組で渡し、**送る量より受け取る量の方が大きい**
+   * ——PCML の `outputsize` がこれにあたる。
+   */
+  | { type: "bytes"; dir?: ArgDirection; value?: string; length: number; outLength?: number }
   /** ヌルポインタ */
   | { type: "null" };
 
@@ -267,9 +273,11 @@ export function toProgramParameters(
     if (a.type === "null") return { type: "null" };
     const dir = dirOf(a);
     const length = argByteLength(a);
-    if (dir === "out") return { type: "out", length };
+    // 受け取る長さは送る長さと**別に決まりうる**（`outLength`）
+    const outLength = a.type === "bytes" ? (a.outLength ?? length) : length;
+    if (dir === "out") return { type: "out", length: outLength };
     const data = encodeArgValue(a, `引数 ${i + 1}`, opts);
-    return dir === "inout" ? { type: "inout", data, length } : { type: "in", data };
+    return dir === "inout" ? { type: "inout", data, length: outLength } : { type: "in", data };
   });
 }
 
