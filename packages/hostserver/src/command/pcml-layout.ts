@@ -21,9 +21,9 @@
  */
 import { As400Error } from "@ts5250/base";
 import type { PcmlDocument, PcmlField, PcmlProgram, PcmlUsage } from "./pcml-parse.js";
+import { readProgramOutputs } from "./pcml-read.js";
 import {
   argByteLength,
-  decodeArgValue,
   encodeArgValue,
   type ArgCodecOptions,
   type ProgramArg
@@ -43,11 +43,19 @@ export interface PcmlSlot {
   spec: ProgramArg;
   /** この葉の CCSID（項目指定が無ければ接続のもの） */
   ccsid: number;
+  /** CCSID が**読むまで決まらない**場合の指し先。入力に使うなら断る */
+  dynamicCcsid?: string;
 }
 
 export interface PcmlCall {
   program: string;
   library: string;
+  /** 記述そのもの。**読むときに件数・長さ・CCSID・飛び先を解く**のに要る */
+  spec: PcmlProgram;
+  /** 呼ぶときに使った入力値（件数などが入力で決まる形のため） */
+  values: Readonly<Record<string, string>>;
+  /** 接続の CCSID */
+  ccsid: number;
   /** サービスプログラムのときの手続き名 */
   entrypoint?: string;
   args: ProgramArg[];
@@ -89,6 +97,17 @@ export function pcmlTarget(program: PcmlProgram): { program: string; library: st
     throw new As400Error("CONFIG_ERROR", `path="${path}" からプログラム名を取れません`);
   }
   return { program: name.toUpperCase(), library: library.toUpperCase() };
+}
+
+/**
+ * 割り付けの時点で決まる CCSID。
+ *
+ * `ccsid="…名前…"` は**読むまで分からない**ので、ここでは引き継ぎ値のままにする。
+ * **入力に使う項目でそれをやると誤った文字を送る**ので、詰めるところで断る
+ * （下の「送る値を詰める」）。IBM 同梱の記述でも名前指定は出力の受取域にしか無い。
+ */
+function staticCcsid(field: PcmlField, fallback: number): number {
+  return typeof field.ccsid === "number" ? field.ccsid : fallback;
 }
 
 /** 葉 1 つのひな形。`length` は**解決済みの整数**を受け取る（名前指定がありうるため） */
@@ -220,14 +239,18 @@ function planField(
           program,
           arg,
           at,
-          member.ccsid ?? ccsid,
+          staticCcsid(member, ccsid),
           out
         );
       }
     } else {
       const spec = templateOf(field, lengthOf(field, values, program));
       const byteLength = argByteLength(spec);
-      if (mine) out.push({ path: here, arg, offset: at, byteLength, usage: field.usage, spec, ccsid });
+      if (mine) {
+        const slot: PcmlSlot = { path: here, arg, offset: at, byteLength, usage: field.usage, spec, ccsid };
+        if (typeof field.ccsid === "string") slot.dynamicCcsid = field.ccsid;
+        out.push(slot);
+      }
       at += byteLength;
     }
   }
@@ -261,6 +284,22 @@ function outLengthOf(
   return want;
 }
 
+/**
+ * 入力に使う引数の中に**飛び先**があれば断る。
+ *
+ * IBM 同梱の 16 本では `offset` は**すべて出力の受取域の中**にある。
+ * 入力側の実例が無いので、実装していない——**測っていないものは動くと言えない**。
+ */
+function rejectInputOffset(field: PcmlField): void {
+  if (field.offset !== undefined) {
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `${field.path || "（名前なしの項目）"}: 入力に使う引数の offset はまだ扱えません`
+    );
+  }
+  for (const member of field.fields ?? []) rejectInputOffset(member);
+}
+
 /** 引数 1 本の向きを、中の葉から決める */
 function dirOfLeaves(leaves: readonly PcmlSlot[]): "in" | "out" | "inout" {
   if (leaves.length === 0) return "in";
@@ -292,24 +331,38 @@ export function buildPcmlCall(
   for (const field of program.fields) {
     const argIndex = args.length;
     const mine: PcmlSlot[] = [];
-    const length = planField(
-      field,
-      field.path,
-      true,
-      values,
-      program,
-      argIndex,
-      0,
-      field.ccsid ?? opts.ccsid,
-      mine
-    );
-    const outLength = outLengthOf(field, length, values, program);
+    const plan = (): number =>
+      planField(field, field.path, true, values, program, argIndex, 0, staticCcsid(field, opts.ccsid), mine);
+
+    // **出力だけの引数は、割り付けが立たなくてもよい。**
+    // 受取域の中身は「返ってきたバイトを読みながら」決まる（`pcml-read.ts`）ので、
+    // 呼ぶ前に並びを固定できるとは限らない——件数も長さも出力で決まりうる。
+    // ただし `outputsize` が無ければ長さが決められないので、そのときは立てるしかない。
+    let length: number | undefined;
+    if (field.usage === "output" && field.outputsize !== undefined) {
+      try {
+        length = plan();
+      } catch {
+        // 立たなくても構わない。**失うのは下の「小さすぎないか」の確認だけ**で、
+        // 読み取りはこの割り付けを使わない
+        mine.length = 0;
+        length = undefined;
+      }
+    } else {
+      length = plan();
+    }
+
+    const outLength = outLengthOf(field, length ?? 0, values, program);
     const dir = dirOfLeaves(mine.length > 0 ? mine : [{ usage: field.usage } as PcmlSlot]);
 
     if (dir === "out") {
       // 送るものが無い。**受け取る長さだけ**渡す
-      args.push({ type: "bytes", dir, length, outLength });
+      args.push({ type: "bytes", dir, length: length ?? outLength, outLength });
     } else {
+      if (length === undefined) {
+        throw new As400Error("CONFIG_ERROR", `${field.path}: 送る内容の長さを決められません`);
+      }
+      rejectInputOffset(field);
       const buf = new Uint8Array(length);
       for (const slot of mine) {
         if (slot.usage === "output") continue; // ホストが書く場所。触らない
@@ -320,6 +373,13 @@ export function buildPcmlCall(
         if (use === undefined) {
           // **黙って埋めない。** 空白や 0 を勝手に送ると、ホストはそれを正当な入力として扱う
           throw new As400Error("CONFIG_ERROR", `${slot.path} は ${slot.usage} なので値が要ります`);
+        }
+        if (slot.dynamicCcsid !== undefined) {
+          // 送る文字の CCSID が「読むまで分からない」——**間違った符号で送るより断る**
+          throw new As400Error(
+            "CONFIG_ERROR",
+            `${slot.path} の ccsid は ${slot.dynamicCcsid} で決まりますが、入力には使えません（読むまで分かりません）`
+          );
         }
         const bytes = encodeArgValue({ ...slot.spec, value: use } as ProgramArg, slot.path, {
           ccsid: slot.ccsid
@@ -332,7 +392,7 @@ export function buildPcmlCall(
   }
 
   const target = pcmlTarget(program);
-  const call: PcmlCall = { ...target, args, slots };
+  const call: PcmlCall = { ...target, spec: program, values, ccsid: opts.ccsid, args, slots };
   if (program.entrypoint !== undefined) call.entrypoint = program.entrypoint;
   return call;
 }
@@ -356,21 +416,16 @@ function fieldInit(program: PcmlProgram, slotPath: string): string | undefined {
   return findField(program, slotPath)?.init;
 }
 
-/** 呼んだ結果を**名前つき**で読む */
+/**
+ * 呼んだ結果を**名前つき**で読む。
+ *
+ * 中身は `pcml-read.ts` に委ねる——**返ってきたバイトを先頭から順に解く**。
+ * 静的な割り付けを当てはめないのは、飛び先・件数・長さ・CCSID が
+ * 「そこまでに読めた値」で決まるため（`offset` を含む記述）。
+ */
 export function readPcmlOutputs(
   call: PcmlCall,
   outputs: readonly (Uint8Array | undefined)[]
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const slot of call.slots) {
-    if (slot.usage === "input") continue;
-    const raw = outputs[slot.arg];
-    if (raw === undefined) continue;
-    if (slot.offset + slot.byteLength > raw.length) continue;
-    const value = decodeArgValue(slot.spec, raw.subarray(slot.offset, slot.offset + slot.byteLength), {
-      ccsid: slot.ccsid
-    });
-    if (value !== undefined) out[slot.path] = value;
-  }
-  return out;
+  return readProgramOutputs({ spec: call.spec, values: call.values, ccsid: call.ccsid }, outputs);
 }

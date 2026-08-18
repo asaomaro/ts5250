@@ -53,7 +53,8 @@ export interface PcmlField {
   length?: number | string;
   /** `packed`/`zoned` は小数位、`int` は符号の別 */
   precision?: number;
-  ccsid?: number;
+  /** 整数、または**完全名**（`ccsid="ccsidOfTheReturnedHomeDirectoryName"`） */
+  ccsid?: number | string;
   init?: string;
   passby?: "reference" | "value";
   /** 整数、または**完全名**（相対名は解決済み） */
@@ -65,6 +66,15 @@ export interface PcmlField {
    * 送る量より受け取る量の方が大きいので、算出値とは別に持つ。
    */
   outputsize?: number | string;
+  /**
+   * **飛び先**。整数、または完全名。基点は `offsetfrom`。
+   *
+   * IBM の書式は「前詰め＋末尾に可変長」で、可変長の位置を頭の整数で知らせる。
+   * 長さ 0 の名前なし項目が「しおり」として置かれることが多い。
+   */
+  offset?: number | string;
+  /** 飛び先の基点。整数（`0` は引数の先頭）、完全名、または省略（＝親の開始位置） */
+  offsetfrom?: number | string;
   /** `type === "struct"` のときのメンバー */
   fields?: PcmlField[];
   /** 完全名（`PCMLTST.REC.NM`）。名前で引くときの鍵。**予約域は `""`** */
@@ -248,28 +258,7 @@ const TYPES = new Set(["char", "int", "packed", "zoned", "float", "byte", "struc
 /** 型としては正しいが**まだ扱えない**もの。黙って落とさず、名指しで断る */
 const NOT_YET = new Set(["date", "time", "timestamp", "varchar"]);
 
-/**
- * **飛び先が出力の値で決まる属性。** いまの割り付けは呼ぶ前に固定するので載らない。
- *
- * ```xml
- * <data name="offsetToHomeDirectory" type="int"  length="4"/>   ← ホストが書く値
- * <data                              type="byte" length="0"
- *       offset="offsetToHomeDirectory" offsetfrom="0"/>          ← そこまで飛べ
- * ```
- *
- * 無視すると**読めたつもりで位置がずれる**。読めないと言う方が安全。
- * 出力の読み取りを「先頭から順に解く」に作り替えたら外す。
- */
-const LAYOUT_ATTRS = ["offset", "offsetfrom"] as const;
 
-function rejectLayoutAttrs(node: RawNode): void {
-  for (const name of LAYOUT_ATTRS) {
-    const raw = node.attrs.get(name);
-    if (raw !== undefined && raw !== "") {
-      bad(node.line, `${name}="${raw}" はまだ扱えません（並びが変わるため、黙って読みません）`);
-    }
-  }
-}
 
 /**
  * `VvRrMm` を数にする。**`(V << 16) + (R << 8) + M`**——原典の `AS400.generateVRM` と同じ。
@@ -352,7 +341,6 @@ function toField(
   ctx: BuildContext,
   seen: readonly string[]
 ): PcmlField {
-  rejectLayoutAttrs(node);
   const name = node.attrs.get("name") ?? "";
   if (name.includes(".") || name.includes(" ")) {
     bad(node.line, `name="${name}" に "." や空白は使えません`);
@@ -375,9 +363,21 @@ function toField(
     outputsize = /^\d+$/u.test(outRaw) ? Number.parseInt(outRaw, 10) : outRaw;
   }
 
+  // **飛び先**。整数、または他の項目の値。基点は `offsetfrom`（省略時は親の開始位置）
+  const offsetRaw = node.attrs.get("offset");
+  const offsetFromRaw = node.attrs.get("offsetfrom");
+
   const field: PcmlField = { name, path, type: "struct", usage };
   if (count !== undefined) field.count = count;
   if (outputsize !== undefined) field.outputsize = outputsize;
+  if (offsetRaw !== undefined && offsetRaw !== "") {
+    field.offset = /^\d+$/u.test(offsetRaw) ? Number.parseInt(offsetRaw, 10) : offsetRaw;
+  }
+  if (offsetFromRaw !== undefined && offsetFromRaw !== "") {
+    field.offsetfrom = /^\d+$/u.test(offsetFromRaw)
+      ? Number.parseInt(offsetFromRaw, 10)
+      : offsetFromRaw;
+  }
 
   if (node.tag === "struct") {
     // **その場に書かれた構造体**。子がそのままメンバーになる
@@ -398,8 +398,11 @@ function toField(
   }
   const precision = intAttr(node, "precision");
   if (precision !== undefined) field.precision = precision;
-  const ccsid = intAttr(node, "ccsid");
-  if (ccsid !== undefined) field.ccsid = ccsid;
+  // **`ccsid` も名前でありうる**（`ccsid="ccsidOfTheReturnedHomeDirectoryName"`）
+  const ccsidRaw = node.attrs.get("ccsid");
+  if (ccsidRaw !== undefined && ccsidRaw !== "") {
+    field.ccsid = /^\d+$/u.test(ccsidRaw) ? Number.parseInt(ccsidRaw, 10) : ccsidRaw;
+  }
   const init = node.attrs.get("init");
   if (init !== undefined) field.init = init;
   const passby = node.attrs.get("passby");
@@ -431,33 +434,43 @@ const NUMERIC = new Set(["int", "packed", "zoned"]);
  * 規則（`PcmlDocNode.resolveRelativeNode`）: **自分の親から根に向かって遡り**、
  * 各段で `<その段の完全名>.<相対名>` を平坦表に引く。**最初に当たったもの**を採る。
  */
-type RefAttr = "count" | "outputsize" | "length";
+type RefAttr = "count" | "outputsize" | "length" | "ccsid" | "offset" | "offsetfrom";
 
-function resolveRef(field: PcmlField, attr: RefAttr, ctx: BuildContext): string {
+/**
+ * 相対名を**完全名**に解く。
+ *
+ * 規則（`PcmlDocNode.resolveRelativeNode`）: **親から根に向かって遡り**、
+ * 各段で `<その段の完全名>.<相対名>` を平坦表に引く。**最初に当たったもの**を採る。
+ *
+ * **起点は親**であって自分ではない。名前の無い項目（しおり）は完全名を持たないので、
+ * 自分の名前から遡ろうとすると起点が消える——`RUser.pcml` のしおりで実際に踏み、
+ * 無関係な `<struct>` 定義の項目を拾っていた。
+ */
+function resolveRef(field: PcmlField, attr: RefAttr, parentPath: string, ctx: BuildContext): string {
   const relative = field[attr] as string;
-  // 名前を持たない項目（予約域）は完全名が無いので、根から探すしかない
-  const parts = field.path === "" ? [] : field.path.split(".");
-  for (let depth = parts.length - 1; depth >= 0; depth--) {
+  const parts = parentPath === "" ? [] : parentPath.split(".");
+  for (let depth = parts.length; depth >= 0; depth--) {
     const prefix = parts.slice(0, depth).join(".");
     const candidate = prefix === "" ? relative : `${prefix}.${relative}`;
     if (ctx.flat.has(candidate)) return candidate;
   }
-  // 予約域から参照している場合など、遡り先が無いときは平坦表を末尾一致で探す
-  const tail = [...ctx.flat.keys()].find((k) => k === relative || k.endsWith(`.${relative}`));
-  if (tail !== undefined) return tail;
+  // **末尾一致で拾わない。** 似た名前の別の定義を黙って掴むより、読めないと言う方が安全
   throw new As400Error(
     "CONFIG_ERROR",
-    `${field.path === "" ? "（名前なしの項目）" : field.path} の ${attr}="${relative}" に当たる項目がありません`
+    `${field.path === "" ? `${parentPath} の中の名前なしの項目` : field.path} の ${attr}="${relative}" に当たる項目がありません`
   );
 }
 
-function resolveRefs(fields: readonly PcmlField[], ctx: BuildContext): void {
+function resolveRefs(fields: readonly PcmlField[], parentPath: string, ctx: BuildContext): void {
   for (const f of fields) {
-    for (const attr of ["count", "outputsize", "length"] as const) {
+    for (const attr of ["count", "outputsize", "length", "ccsid", "offset", "offsetfrom"] as const) {
       if (typeof f[attr] !== "string") continue;
-      const resolved = resolveRef(f, attr, ctx);
+      const resolved = resolveRef(f, attr, parentPath, ctx);
       const target = ctx.flat.get(resolved);
-      if (target && !NUMERIC.has(target.type)) {
+      // **`offsetfrom` だけは数を指さない**——先祖の**開始位置**を指す（構造体でよい）。
+      // 実測（IBM 同梱 16 本）では 17 件すべて `offsetfrom="0"` だが、
+      // 原典は名前も許すので同じにしておく
+      if (attr !== "offsetfrom" && target && !NUMERIC.has(target.type)) {
         throw new As400Error(
           "CONFIG_ERROR",
           `${f.path} の ${attr} が指す ${resolved} は ${target.type} で、${attr === "count" ? "件数" : "長さ"}になりません`
@@ -465,7 +478,7 @@ function resolveRefs(fields: readonly PcmlField[], ctx: BuildContext): void {
       }
       (f as Record<RefAttr, number | string>)[attr] = resolved;
     }
-    if (f.fields) resolveRefs(f.fields, ctx);
+    if (f.fields) resolveRefs(f.fields, f.path === "" ? parentPath : f.path, ctx);
   }
 }
 
@@ -535,7 +548,7 @@ export function parsePcml(text: string, opts: PcmlParseOptions = {}): PcmlDocume
 
   if (programs.size === 0) throw new As400Error("CONFIG_ERROR", "PCML: <program> がありません");
 
-  for (const program of programs.values()) resolveRefs(program.fields, ctx);
+  for (const program of programs.values()) resolveRefs(program.fields, program.name, ctx);
 
   const doc: PcmlDocument = { structs, programs };
   const version = root.attrs.get("version");

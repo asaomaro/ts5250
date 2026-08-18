@@ -621,3 +621,38 @@ CL の `QCDRCMDD` に当たるものは RPG には無い。
 
 ⚠ **受取域が記述の要る大きさより小さければ断る。** ホストが書ける場所が足りず、
 返るバイトが途中で切れる——**切れたことに気づけない**形の失敗になる。
+
+### 飛び先つきの記述（出力を先頭から順に解く）
+
+IBM の書式は「前詰め＋末尾に可変長」で、**可変長の位置・件数・長さ・CCSID を頭の整数で知らせる**。
+呼ぶ前に割り付けを固定できないので、**返ってきたバイトを先頭から順に解く**
+（`packages/hostserver/src/command/pcml-read.ts`）。
+
+| スクリプト | 内容 |
+|---|---|
+| `verify-pcml-dynamic-osaka.mjs` | IBM の `RUser.pcml`（`USRI0300`）を呼び、**ホームディレクトリを QSYS2.USER_INFO と突き合わせる** |
+| `verify-browser-pcml-dynamic-osaka.mjs` | 実ブラウザで同じことをする。件数が出力で決まる行の見せ方まで |
+
+実測（SR-OSAKA / `USRI0300`）:
+
+```
+offsetToHomeDirectory = 722          ← 飛び先はホストが書いた値
+homeDirectory CCSID   = 1200         ← **UTF-16**
+homeDirectory 長さ    = 20 バイト     ← 出力で決まる
+homeDirectoryNameValue = "/home/***"  ← SQL の HOME_DIRECTORY と一致
+localePathName        = "*SYSVAL"     ← 長さも出力で決まる
+```
+
+⚠ **IFS の道は EBCDIC で返らない。** `ccsidOfTheReturnedHomeDirectoryName` の実測値は
+**1200（UTF-16）**で、`codecForCcsid`（EBCDIC 専用）では読めない。
+`pcml-read.ts` は 1200 / 13488 / 17584 / 1208 / 819 / 367 / 1252 を `TextDecoder` に回す。
+**測って初めて分かった**もので、記述からは読み取れない。
+
+⚠ **相対名の起点は「親」であって「自分」ではない。** `RUser.pcml` のしおり
+（`<data type="byte" length="0" offset="…"/>`）は**名前が無い**ので完全名を持たない。
+自分の完全名から遡ろうとすると起点が消え、末尾一致の逃げ道を作ると
+**無関係な `<struct>` 定義の項目を黙って掴む**（実際に踏んだ）。逃げ道は消した。
+
+⚠ **前には戻らない。** 飛び先が現在位置より前なら何もしない（原典と同じ）。
+`RUser.pcml` は 3 つのしおりが同じ `offsetfrom="0"` を使うので、
+戻る実装だと 2 つ目以降で位置が壊れる。

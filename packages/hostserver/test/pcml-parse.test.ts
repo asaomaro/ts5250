@@ -161,20 +161,39 @@ describe("壊れた記述は行番号つきで断る", () => {
   });
 });
 
-describe("飛び先が出力で決まる属性は、黙って読まずに断る", () => {
-  const err = (attr: string): string => {
-    const text = `<pcml version="1.0"><program name="A">\n<data name="X" type="char" length="1" ${attr} />\n</program></pcml>`;
-    try {
-      parsePcml(text);
-    } catch (e) {
-      return (e as Error).message;
-    }
-    throw new Error("通ってしまった");
-  };
+describe("飛び先（`offset` / `offsetfrom`）", () => {
+  const doc = parsePcml(
+    [
+      '<pcml version="4.0"><program name="P">',
+      '<data name="off" type="int" length="4" usage="output" />',
+      '<data type="byte" length="0" offset="off" offsetfrom="0" usage="output" />',
+      '<data name="tail" type="char" length="4" usage="output" />',
+      "</program></pcml>"
+    ].join("\n")
+  );
 
-  // 飛び先は**返ってきたバイトを読むまで分からない**。静的な割り付けには載らない
-  it("`offset` / `offsetfrom`", () => {
-    expect(err('offset="16"')).toMatch(/2 行目.*offset.*まだ扱えません/u);
-    expect(err('offsetfrom="HDR"')).toMatch(/offsetfrom/u);
+  it("**相対名は完全名に解ける**", () => {
+    expect(doc.programs.get("P")!.fields[1]!.offset).toBe("P.off");
+  });
+
+  it("整数の基点はそのまま（`0` は引数の先頭）", () => {
+    expect(doc.programs.get("P")!.fields[1]!.offsetfrom).toBe(0);
+  });
+
+  it("整数の飛び先も読める", () => {
+    const d = parsePcml('<pcml version="4.0"><program name="P"><data name="X" type="char" length="1" offset="16" /></program></pcml>');
+    expect(d.programs.get("P")!.fields[0]!.offset).toBe(16);
+  });
+
+  it("**`offsetfrom` は数を指さない**（先祖の開始位置を指すので構造体でよい）", () => {
+    const d = parsePcml(
+      [
+        '<pcml version="4.0"><program name="P">',
+        '<struct name="H"><data name="a" type="char" length="2" /></struct>',
+        '<data name="X" type="char" length="1" offset="1" offsetfrom="H" />',
+        "</program></pcml>"
+      ].join("\n")
+    );
+    expect(d.programs.get("P")!.fields[1]!.offsetfrom).toBe("P.H");
   });
 });
