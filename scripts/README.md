@@ -728,3 +728,15 @@ IBM i は装置名を **NEW-ENVIRON の `DEVNAME`**（RFC 4777）で受け取る
 | スクリプト | 内容 |
 |---|---|
 | `verify-3270-devname-osaka.mjs` | 装置名が使われるか／断られるなら理由が出るかを確かめる（`PROBE_HOST` で相手を替えられる） |
+
+**メインフレーム側（`@名前`）は TK4- の E2E で覆っている**:
+
+```sh
+sh packages/tn3270/test/harness/testenv.sh up
+TN3270_E2E=1 npx vitest run --root packages/tn3270
+```
+
+⚠ `terminalTypeFor({ deviceName })` で**名前を埋めた文字列を渡す**試験だけでは、
+`TelnetLayer` が自分で `@名前` を付ける道を通らない。そちらは
+「IBM i には付けない」という条件を持つので、**付ける側**を実ホストで直接見る試験を足してある
+（`e2e-negotiation.test.ts`。送ったバイトに `@03C0` が載ることまで確かめる）。
