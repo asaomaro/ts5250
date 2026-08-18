@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pcml SYSTEM "pcml.dtd">
+<!-- 実機 API の PCML に近い形（手書き）。IBM の一覧 API はこの作りをしている:
+     「何件返したか」を整数で受け、その件数だけ並ぶ配列を同じ呼び出しで受け取る。 -->
+<pcml version="4.0">
+   <struct name="ENTRY">
+      <data name="NAME" type="char" length="10" />
+      <data name="SIZE" type="int" length="4" precision="32" />
+   </struct>
+   <program name="LISTER" path="/QSYS.LIB/DEMO.LIB/LISTER.PGM" threadsafe="true">
+      <data name="COUNT" type="int" length="4" precision="31" usage="inputoutput" init="2" />
+      <data name="ENTRIES" type="struct" struct="ENTRY" count="COUNT" usage="output" />
+      <data name="RATIO" type="float" length="8" usage="output" />
+      <data name="FLAGS" type="byte" length="3" usage="input" />
+   </program>
+</pcml>

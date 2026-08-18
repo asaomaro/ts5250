@@ -560,3 +560,32 @@ node --env-file=.env scripts/verify-visual-explain-e2e.mjs pub400   # PUB400 (7.
 SDK は `isError` に関わらず `outputSchema` で検証するので、エラーの形（`{error:…}`）を載せると
 **クライアント側が例外を投げて呼び出しごと失敗する**。`listTools()` を呼んだクライアントでだけ
 起きるため気づきにくい（`mcp-tools.ts` の `errorResult` の注記）。
+
+## PCML（プログラム界面の記述）から呼ぶ
+
+`pgm:call` は**位置指定**で、構造体は base64 の手詰めになる。PCML はその上に載る「記述」で、
+構造体と配列を**名前**で扱えるようにする。出どころは**コンパイラ**——
+jt400 の `ProgramCallDocument` は構築子 8 つのいずれもホストへ問い合わせない（原典で確認）。
+CL の `QCDRCMDD` に当たるものは RPG には無い。
+
+| スクリプト | 内容 |
+|---|---|
+| `research-pcml.mjs` | `CRTBNDRPG … PGMINFO(*PCML) INFOSTMF('/…')` が**実機で通るか**を測り、吐かれた PCML を採る。試験片 `TESTLIB/PCMLTST` もここで作る |
+| `research-pcml-layout.mjs` | **宣言どおりのバイト並びで実機が受け取るか**を、生バイトで組んで測る（構造体＝連結／配列＝反復の確認） |
+| `verify-pcml.mjs` | 同じ往復を**名前だけ**で行う（手詰めが消えたことの確認）。記述は IFS から読む |
+| `verify-browser-pcml.mjs` | 実ブラウザ（Playwright）で PCML ペインを操作。読み込み・入れ子の描画・呼び出し・結果の表示・断り方まで |
+
+実測（実機）で確かめたこと:
+
+- **PCML は 819（ISO 8859-1）でタグ付けされる**。UTF-8 ではない
+- RPG の `const` は `usage="input"`、それ以外は `inputoutput`
+- `int(10)` → `length="4" precision="31"`、`int(20)` → `length="8" precision="63"`（**符号つき**）
+- **構造体はメンバーの連結、配列は要素の反復**——詰め物も境界合わせも無い
+
+⚠ **`.pcml` の `count` は整数とは限らない。** 他の項目名を書くと**その値が件数**になる
+（IBM の一覧 API はこの形）。**件数が決まらないまま呼んではならない**——0 件として組むと、
+ホストは「0 件ぶんの領域」に書き込んで領域外を壊す。`buildPcmlCall` は決まらなければ拒否する。
+
+⚠ **10 進や整数の変換の失敗には項目名を付ける。** `stringToPackedDecimal` は値しか知らないので、
+そのままだと `数値として読めません: ""` だけが出る。構造体の中では**どの欄か探せない**。
+`encodeArgValue` が呼び名を前置する（実ブラウザの検証でこれを踏んだ）。

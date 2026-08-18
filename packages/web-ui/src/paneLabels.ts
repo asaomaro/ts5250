@@ -8,7 +8,7 @@
  */
 
 /** セッションを持たないタブの ID 接頭辞。**新しい種類を足すときはここに追加する** */
-export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "plan:", "pgm:", "msg:", "sql:", "transfer:", "spool:", "svc:", "watch:"] as const;
+export const PANE_PREFIXES = ["admin:", "dtaq:", "ifs:", "list:", "plan:", "pgm:", "pcml:", "msg:", "sql:", "transfer:", "spool:", "svc:", "watch:"] as const;
 
 /** セッションを持たない（＝接続の概念が無い）タブか */
 export function isPaneTab(id: string | undefined): boolean {
@@ -76,6 +76,8 @@ export const PANE_LABELS: Record<string, string> = {
   "svc:services": "サービス",
   "msg:queue": "メッセージ",
   "pgm:call": "プログラム呼び出し",
+  // 位置指定の `pgm:call` に対して、記述（PCML）から名前で呼ぶ方
+  "pcml:call": "PCML 呼び出し",
   "sql:query": "SQL",
   // SQL の実行計画（ACS の Visual Explain / Performance Center 相当）
   "plan:explain": "実行計画",

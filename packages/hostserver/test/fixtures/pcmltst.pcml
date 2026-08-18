@@ -1,0 +1,21 @@
+<pcml version="6.0">
+   <!-- RPG program: PCMLTST  -->
+   <!-- created: 2026-08-17-22.13.10 -->
+   <!-- source: TESTLIB/QRPGLESRC(PCMLTST) -->
+   <!-- 2 -->
+   <struct name="CUSTT">
+      <data name="ID" type="packed" length="7" precision="0" usage="inherit" />
+      <data name="NM" type="char" length="20" usage="inherit" />
+      <data name="RATE" type="packed" length="9" precision="4" usage="inherit" />
+   </struct>
+   <!-- 7 -->
+   <program name="PCMLTST" path="/QSYS.LIB/TESTLIB.LIB/PCMLTST.PGM">
+      <data name="INTXT" type="char" length="10" usage="input" />
+      <data name="IONUM" type="packed" length="9" precision="2" usage="inputoutput" />
+      <data name="REC" type="struct" struct="CUSTT" usage="inputoutput" />
+      <data name="ITEMS" type="char" length="5" count="4" usage="inputoutput" />
+      <data name="CNT" type="int" length="4" precision="31" usage="inputoutput" />
+      <data name="BIG" type="int" length="8" precision="63" usage="inputoutput" />
+      <data name="AMT" type="zoned" length="7" precision="2" usage="inputoutput" />
+   </program>
+</pcml>
