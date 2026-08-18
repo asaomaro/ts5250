@@ -25,6 +25,7 @@ import { registerHostPlanRoutes } from "./host-plan.js";
 import { registerHllapiRoutes } from "./hllapi-routes.js";
 import { registerSessionRoutes } from "./session-routes.js";
 import { registerHostProgramRoutes } from "./host-program.js";
+import { registerHostPcmlRoutes } from "./host-pcml.js";
 import { registerHostMessageRoutes } from "./host-message.js";
 import { registerHostIfsRoutes } from "./host-ifs.js";
 import { registerHostDtaqRoutes, DEFAULT_DTAQ_RECEIVE_MAX_WAIT_SEC } from "./host-dtaq.js";
@@ -195,6 +196,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
   registerSessionRoutes(app, { sessions: deps.sessions });
   // プログラム呼び出し（画面を経由せずに RPG / COBOL を呼ぶ）
   registerHostProgramRoutes(app, { resolver: deps.resolver });
+  // 同じ呼び出しを**記述（PCML）から**駆動する。構造体と配列を名前で扱える
+  registerHostPcmlRoutes(app, { resolver: deps.resolver });
   // メッセージ待ち行列（照会への応答が主目的）
   registerHostMessageRoutes(app, { resolver: deps.resolver });
 

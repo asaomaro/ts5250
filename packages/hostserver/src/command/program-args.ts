@@ -44,8 +44,15 @@ export type ProgramArg =
   | { type: "packed"; dir?: ArgDirection; value?: string; digits: number; decimals?: number }
   /** ゾーン 10 進数 */
   | { type: "zoned"; dir?: ArgDirection; value?: string; digits: number; decimals?: number }
-  /** 2 進整数（符号つき・ビッグエンディアン） */
-  | { type: "bin"; dir?: ArgDirection; value?: string; bytes: 2 | 4 | 8 }
+  /**
+   * 2 進整数（ビッグエンディアン）。**既定は符号つき**。
+   *
+   * `signed: false` で符号なしになる——PCML が `precision` で符号を指定するため
+   * （16/32/64 が符号なし。`pcml-parse.ts` の注記）。
+   */
+  | { type: "bin"; dir?: ArgDirection; value?: string; bytes: 2 | 4 | 8; signed?: boolean }
+  /** 浮動小数（IEEE 754・ビッグエンディアン）。RPG の `float(4)` / `float(8)` */
+  | { type: "float"; dir?: ArgDirection; value?: string; bytes: 4 | 8 }
   /** **逃げ道**。base64 でそのまま渡す（型で表せない構造体など） */
   | { type: "bytes"; dir?: ArgDirection; value?: string; length: number }
   /** ヌルポインタ */
@@ -117,25 +124,23 @@ export function argByteLength(a: ProgramArg): number {
     case "zoned":
       return a.digits;
     case "bin":
+    case "float":
       return a.bytes;
     case "null":
       return 0;
   }
 }
 
-function requireValue(a: ProgramArg, index: number): string {
+function requireValue(a: ProgramArg, label: string): string {
   const v = "value" in a ? a.value : undefined;
   if (v === undefined) {
     // **黙って空で送らない。** ホストは受け取った空白を正当な入力として扱う
-    throw new As400Error(
-      "CONFIG_ERROR",
-      `引数 ${index + 1}（${a.type}）は ${dirOf(a)} なので value が要ります`
-    );
+    throw new As400Error("CONFIG_ERROR", `${label}（${a.type}）は ${dirOf(a)} なので value が要ります`);
   }
   return v;
 }
 
-function encodeBin(text: string, bytes: 2 | 4 | 8): Uint8Array {
+function encodeBin(text: string, bytes: 2 | 4 | 8, signed: boolean): Uint8Array {
   let v: bigint;
   try {
     v = BigInt(text.trim());
@@ -143,8 +148,8 @@ function encodeBin(text: string, bytes: 2 | 4 | 8): Uint8Array {
     throw new As400Error("CONFIG_ERROR", `整数として読めません: ${JSON.stringify(text)}`);
   }
   const bits = BigInt(bytes * 8);
-  const min = -(1n << (bits - 1n));
-  const max = (1n << (bits - 1n)) - 1n;
+  const min = signed ? -(1n << (bits - 1n)) : 0n;
+  const max = signed ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n;
   if (v < min || v > max) {
     throw new As400Error("CONFIG_ERROR", `${bytes} バイトに収まりません: ${text}`);
   }
@@ -157,32 +162,70 @@ function encodeBin(text: string, bytes: 2 | 4 | 8): Uint8Array {
   return out;
 }
 
-function decodeBin(data: Uint8Array): string {
+function decodeBin(data: Uint8Array, signed: boolean): string {
   let u = 0n;
   for (const b of data) u = (u << 8n) | BigInt(b);
+  if (!signed) return u.toString();
   const bits = BigInt(data.length * 8);
-  const signed = u >= 1n << (bits - 1n) ? u - (1n << bits) : u;
-  return signed.toString();
+  return (u >= 1n << (bits - 1n) ? u - (1n << bits) : u).toString();
 }
 
-/** 入力の中身をバイト列にする */
-function encodeArg(a: ProgramArg, index: number, opts: ArgCodecOptions): Uint8Array {
+/**
+ * 浮動小数。**`DataView` を使う**——ビット並びを自分で組むより、
+ * 丸めと非正規化数を取り違える危険が無い。
+ */
+function encodeFloat(text: string, bytes: 4 | 8): Uint8Array {
+  const v = Number(text.trim());
+  if (!Number.isFinite(v)) {
+    throw new As400Error("CONFIG_ERROR", `浮動小数として読めません: ${JSON.stringify(text)}`);
+  }
+  const out = new Uint8Array(bytes);
+  const view = new DataView(out.buffer);
+  if (bytes === 4) view.setFloat32(0, v, false);
+  else view.setFloat64(0, v, false);
+  return out;
+}
+
+function decodeFloat(data: Uint8Array): string {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return String(data.length === 4 ? view.getFloat32(0, false) : view.getFloat64(0, false));
+}
+
+/**
+ * 入力の中身をバイト列にする。
+ *
+ * `label` は失敗したときに出す**呼び名**（`引数 3` / `PCMLTST.REC.NM`）。
+ * 位置しか言えないと、構造体の中で桁が合わないときに探せない。
+ */
+export function encodeArgValue(a: ProgramArg, label: string, opts: ArgCodecOptions): Uint8Array {
+  try {
+    return encodeArgInner(a, label, opts);
+  } catch (e) {
+    // **どの項目で失敗したかを必ず言う。** 10 進や整数の変換は値しか知らないので、
+    // そのままだと `数値として読めません: ""` だけが画面に出て、構造体の中では探せない
+    const err = e as As400Error;
+    if (err.message.startsWith(label)) throw err;
+    throw new As400Error(err.code ?? "CONFIG_ERROR", `${label}: ${err.message}`);
+  }
+}
+
+function encodeArgInner(a: ProgramArg, label: string, opts: ArgCodecOptions): Uint8Array {
   switch (a.type) {
     case "char": {
-      const v = requireValue(a, index);
+      const v = requireValue(a, label);
       const { bytes, substituted } = codecForCcsid(opts.ccsid).encode(v);
       if (substituted > 0) {
         // **黙って化けさせない。** 置き換わった文字がそのままホストへ渡る
         throw new As400Error(
           "CONFIG_ERROR",
-          `引数 ${index + 1} に CCSID ${opts.ccsid} で表せない文字があります`
+          `${label} に CCSID ${opts.ccsid} で表せない文字があります`
         );
       }
       if (bytes.length > a.length) {
         // **黙って切らない。** 切った結果がそのままホストへ渡り、誤った値で動く
         throw new As400Error(
           "CONFIG_ERROR",
-          `引数 ${index + 1} が ${a.length} バイトに収まりません（${bytes.length} バイト）`
+          `${label} が ${a.length} バイトに収まりません（${bytes.length} バイト）`
         );
       }
       // 足りない分は**空白で埋める**（IBM i の作法。NUL ではない）
@@ -191,17 +234,19 @@ function encodeArg(a: ProgramArg, index: number, opts: ArgCodecOptions): Uint8Ar
       return out;
     }
     case "packed":
-      return stringToPackedDecimal(requireValue(a, index), a.digits, a.decimals ?? 0);
+      return stringToPackedDecimal(requireValue(a, label), a.digits, a.decimals ?? 0);
     case "zoned":
-      return stringToZonedDecimal(requireValue(a, index), a.digits, a.decimals ?? 0);
+      return stringToZonedDecimal(requireValue(a, label), a.digits, a.decimals ?? 0);
     case "bin":
-      return encodeBin(requireValue(a, index), a.bytes);
+      return encodeBin(requireValue(a, label), a.bytes, a.signed ?? true);
+    case "float":
+      return encodeFloat(requireValue(a, label), a.bytes);
     case "bytes": {
-      const raw = fromBase64(requireValue(a, index));
+      const raw = fromBase64(requireValue(a, label));
       if (raw.length > a.length) {
         throw new As400Error(
           "CONFIG_ERROR",
-          `引数 ${index + 1} が ${a.length} バイトに収まりません（${raw.length} バイト）`
+          `${label} が ${a.length} バイトに収まりません（${raw.length} バイト）`
         );
       }
       const out = new Uint8Array(a.length);
@@ -223,9 +268,29 @@ export function toProgramParameters(
     const dir = dirOf(a);
     const length = argByteLength(a);
     if (dir === "out") return { type: "out", length };
-    const data = encodeArg(a, i, opts);
+    const data = encodeArgValue(a, `引数 ${i + 1}`, opts);
     return dir === "inout" ? { type: "inout", data, length } : { type: "in", data };
   });
+}
+
+/** バイト列 1 つを型に従って読む。`null` は読むものが無いので `undefined` */
+export function decodeArgValue(a: ProgramArg, raw: Uint8Array, opts: ArgCodecOptions): string | undefined {
+  switch (a.type) {
+    case "char":
+      return codecForCcsid(opts.ccsid).decode(raw);
+    case "packed":
+      return packedDecimalToString(raw, 0, a.digits, a.decimals ?? 0);
+    case "zoned":
+      return zonedDecimalToString(raw, 0, a.digits, a.decimals ?? 0);
+    case "bin":
+      return decodeBin(raw, a.signed ?? true);
+    case "float":
+      return decodeFloat(raw);
+    case "bytes":
+      return toBase64(raw);
+    case "null":
+      return undefined;
+  }
 }
 
 /**
@@ -240,18 +305,7 @@ export function fromProgramOutputs(
 ): (string | undefined)[] {
   return args.map((a, i) => {
     const raw = outputs[i];
-    if (raw === undefined || a.type === "null" || dirOf(a) === "in") return undefined;
-    switch (a.type) {
-      case "char":
-        return codecForCcsid(opts.ccsid).decode(raw);
-      case "packed":
-        return packedDecimalToString(raw, 0, a.digits, a.decimals ?? 0);
-      case "zoned":
-        return zonedDecimalToString(raw, 0, a.digits, a.decimals ?? 0);
-      case "bin":
-        return decodeBin(raw);
-      case "bytes":
-        return toBase64(raw);
-    }
+    if (raw === undefined || dirOf(a) === "in") return undefined;
+    return decodeArgValue(a, raw, opts);
   });
 }

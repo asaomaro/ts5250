@@ -111,11 +111,29 @@ export {
 export {
   toProgramParameters,
   fromProgramOutputs,
+  encodeArgValue,
+  decodeArgValue,
   argByteLength,
   type ProgramArg,
   type ArgDirection,
   type ArgCodecOptions
 } from "./command/program-args.js";
+// PCML（プログラム界面の記述）。出どころはコンパイラ＋IFS——ホスト API は無い
+export {
+  parsePcml,
+  type PcmlDocument,
+  type PcmlProgram,
+  type PcmlField,
+  type PcmlType,
+  type PcmlUsage
+} from "./command/pcml-parse.js";
+export {
+  buildPcmlCall,
+  readPcmlOutputs,
+  pcmlTarget,
+  type PcmlCall,
+  type PcmlSlot
+} from "./command/pcml-layout.js";
 export {
   stringToPackedDecimal,
   stringToZonedDecimal,

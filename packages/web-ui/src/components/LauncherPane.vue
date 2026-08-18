@@ -65,6 +65,11 @@ const FEATURES = [
     name: "プログラム呼び出し",
     desc: "画面を経由せずに RPG / COBOL を呼ぶ。引数は型で書く。"
   },
+  {
+    id: "pcml:call",
+    name: "PCML 呼び出し",
+    desc: "コンパイラが吐いた `.pcml` から呼ぶ。**構造体と配列を名前で**扱える。"
+  },
   { id: "list:users", name: "ユーザー", desc: "ユーザープロファイルと権限を一覧する。" },
   {
     id: "ifs:files",

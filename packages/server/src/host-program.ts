@@ -28,14 +28,16 @@ export interface HostProgramDeps {
 }
 
 const argSchema = z.object({
-  type: z.enum(["char", "packed", "zoned", "bin", "bytes", "null"]),
+  type: z.enum(["char", "packed", "zoned", "bin", "float", "bytes", "null"]),
   dir: z.enum(["in", "out", "inout"]).optional(),
   /** `in` / `inout` に要る。**数値も文字列**。`bytes` は base64 */
   value: z.string().optional(),
   length: z.number().int().min(0).max(65535).optional(),
   digits: z.number().int().min(1).max(63).optional(),
   decimals: z.number().int().min(0).max(63).optional(),
-  bytes: z.union([z.literal(2), z.literal(4), z.literal(8)]).optional()
+  bytes: z.union([z.literal(2), z.literal(4), z.literal(8)]).optional(),
+  /** `bin` の符号。**既定は符号つき**（PCML は `precision` で符号なしを指定する） */
+  signed: z.boolean().optional()
 });
 
 /** サービスプログラム用。`pass` は**参照渡しが既定** */
