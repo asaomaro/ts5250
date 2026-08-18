@@ -43,10 +43,14 @@ interface FakeOpts {
   outputs?: (Uint8Array | undefined)[];
   files?: Record<string, { data: Uint8Array; ccsid?: number }>;
   target?: string[];
+  /** ホストの版（`(V << 16) + (R << 8) + M`） */
+  vrm?: number;
 }
 
 function fakeCommand(opts: FakeOpts): CommandConnection {
   return {
+    // signon が返すホストの版。`minvrm` / `maxvrm` の判定に使われる
+    hostVrm: opts.vrm ?? (7 << 16) + (5 << 8),
     async call(program: string, library: string, params: ProgramParameter[]) {
       opts.target?.push(`${library}/${program}`);
       opts.seen?.push(params);
@@ -220,5 +224,52 @@ describe("call", () => {
       values: VALUES
     });
     expect(((await res.json()) as { error: string }).error).toMatch(/サービスプログラム/u);
+  });
+});
+
+
+describe("ホストの版", () => {
+  /** `minvrm` は**引数の本数を変える**（原典は列から丸ごと落とす） */
+  const VRM_DOC = `<pcml version="4.0">
+  <program name="P" path="/QSYS.LIB/D.LIB/P.PGM">
+    <data name="A" type="char" length="4" usage="input" init="a" />
+    <data name="B" type="char" length="4" usage="input" init="b" minvrm="V7R1M0" />
+  </program>
+</pcml>`;
+
+  it("**版に届いていれば引数に入る**", async () => {
+    const seen: ProgramParameter[][] = [];
+    const app = appWith({ seen, vrm: (7 << 16) + (5 << 8) });
+    const res = await post(app, "call", { source: SOURCE, text: VRM_DOC, program: "P" });
+    expect(res.status).toBe(200);
+    expect(seen[0]).toHaveLength(2);
+  });
+
+  it("**版に届かなければ引数から外れる**（本数が変わる）", async () => {
+    const seen: ProgramParameter[][] = [];
+    const app = appWith({ seen, vrm: (5 << 16) + (4 << 8) });
+    const res = await post(app, "call", { source: SOURCE, text: VRM_DOC, program: "P" });
+    expect(res.status).toBe(200);
+    expect(seen[0]).toHaveLength(1);
+  });
+
+  it("parse も接続があれば版を使う", async () => {
+    const app = appWith({ vrm: (5 << 16) + (4 << 8) });
+    const res = await post(app, "parse", { source: SOURCE, text: VRM_DOC });
+    const body = (await res.json()) as { programs: { fields: { name: string }[] }[] };
+    expect(body.programs[0]?.fields.map((f) => f.name)).toEqual(["A"]);
+  });
+
+  it("**接続が無ければ断る**（勝手に通すと本数がずれる）", async () => {
+    const res = await post(appWith({}), "parse", { text: VRM_DOC });
+    expect(res.status).not.toBe(200);
+    expect(((await res.json()) as { error: string }).error).toMatch(/ホストの版が分かりません/u);
+  });
+
+  it("版が要らない記述では接続を開かない", async () => {
+    const target: string[] = [];
+    const app = appWith({ target });
+    await post(app, "parse", { source: SOURCE, text: PCML });
+    expect(target).toEqual([]); // call していない＝接続を開いていない
   });
 });

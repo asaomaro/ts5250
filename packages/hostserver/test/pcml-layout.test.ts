@@ -131,12 +131,25 @@ describe("可変長の配列", () => {
     const doc = parsePcml(
       [
         '<pcml version="1.0"><program name="P">',
+        // 配列が先、件数が後——**組み立ては先頭から進む**ので、ここで件数が要る
+        '<data name="A" type="char" length="4" count="N" usage="output" />',
+        '<data name="N" type="int" length="4" usage="input" />',
+        "</program></pcml>"
+      ].join("\n")
+    );
+    expect(() => buildPcmlCall(doc, "P", {}, O)).toThrow(/呼ぶ前に P\.N を入れて/u);
+  });
+
+  it("**件数が出力で決まる形は、入れようがないと言って断る**", () => {
+    const doc = parsePcml(
+      [
+        '<pcml version="1.0"><program name="P">',
         '<data name="N" type="int" length="4" usage="output" />',
         '<data name="A" type="char" length="4" count="N" usage="output" />',
         "</program></pcml>"
       ].join("\n")
     );
-    expect(() => buildPcmlCall(doc, "P", {}, O)).toThrow(/呼ぶ前に P\.N を入れて/u);
+    expect(() => buildPcmlCall(doc, "P", {}, O)).toThrow(/P\.N は出力なので呼ぶ前には決まりません/u);
   });
 });
 
