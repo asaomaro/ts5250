@@ -342,39 +342,30 @@ export class TelnetLayer {
    * NEW-ENVIRON の SEND に応える。
    *
    * **ホストが要求した変数を選り分けずに、こちらが申告したいものを IS で返す**
-   * （RFC 1572 は要求に無い変数を返すことを許す）。
+   * （RFC 1572 は要求に無い変数を返すことを許す）。IBM i はこれでデバイスを作る。
    *
-   * ## `DEVNAME` は送らない（実測）
+   * ## 装置名はここで渡す（`@名前` ではない）
    *
-   * NEW-ENVIRON を要求してくるのは **IBM i だけ**（TK4- / z/OS は要求しない）。
-   * その IBM i は、**3270 の接続で `DEVNAME` を受け取ると交渉後に黙ってソケットを閉じる**。
+   * IBM i は **`DEVNAME`（RFC 4777）で装置名を受け取る**。実測（pub400）:
    *
    * ```
-   * DEVNAME=AS3270A  → 交渉は通るが、Query Reply の直後に CLOSE。画面は 1 文字も来ない
-   * DEVNAME 無し      → ready。画面が来る
+   * 装置名なし        → Display name: QPADEV000N
+   * DEVNAME=TSTDEV01 → Display name: **TSTDEV01**
    * ```
    *
-   * 名前を 4 通り（`AS3270A` / `TST3270X` / `QPADEV0099` / `D3270TST`）試して全て同じ。
-   * `DEVNAME` を止めるだけで通るところまで確かめた（この 1 行が引き金）。
+   * 一方、端末タイプに `@名前` を付けると**交渉が 15 秒で時間切れ**になる
+   * （pub400 / SR-OSAKA の 2 台で同じ）。だから IBM i には `@名前` を付けない。
    *
-   * 背景: `DEVNAME` は RFC 4777 の **5250 向け**の仕組みで、3270 の装置名は
-   * TN3270E の `CONNECT`（RFC 2355）で渡すのが筋。**IBM i は TN3270E を提示しない**ので
-   * （実測）、この接続では装置名を通す道が無い。
-   *
-   * 装置名は **`@名前`（Hercules 系）** と **TN3270E の `CONNECT`** の 2 経路だけで扱う。
+   * ⚠ **受け入れるかはホストの設定次第。** SR-OSAKA は同じ要求で
+   * **画面を送らずに接続を閉じる**（仮想装置の自動作成が効いていない等）。
+   * そのときは `session.ts` が理由を添えて閉じる。
    */
   private sendEnviron(): void {
     const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
     const put = (name: string, value: string): void => {
       payload.push(ENV_USERVAR, ...ascii(name), ENV_VALUE, ...ascii(value));
     };
-    if (this.opts.deviceName !== undefined) {
-      // **黙って無視しない。** 設定したのに効かないのは、理由が見えないと追えない
-      log.warn(
-        `装置名 ${this.opts.deviceName} は使いません: ` +
-          `このホストは NEW-ENVIRON を使う（IBM i）ため、3270 では装置名を受け付けません`
-      );
-    }
+    if (this.opts.deviceName !== undefined) put("DEVNAME", this.opts.deviceName);
     // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる。
     // **KBDTYPE は必須**——CODEPAGE/CHARSET だけでは反応しないホストがある（5250 側の実機知見）
     if (this.opts.kbdType !== undefined) put("KBDTYPE", this.opts.kbdType);

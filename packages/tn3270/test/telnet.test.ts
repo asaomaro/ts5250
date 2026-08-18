@@ -216,24 +216,22 @@ describe("NEW-ENVIRON（IBM i 向けのコードページ申告）", () => {
   });
 
   /**
-   * **`DEVNAME` は送らない。**
+   * **装置名は `DEVNAME` で渡す**（RFC 4777）。
    *
-   * NEW-ENVIRON を要求してくるのは IBM i だけで、その IBM i は 3270 の接続で
-   * `DEVNAME` を受け取ると**交渉後に黙ってソケットを閉じる**（実測。名前を 4 通り試して
-   * 全て同じで、この 1 行を止めるだけで通った）。
+   * 実測（pub400）: `DEVNAME=TSTDEV01` を送ると画面の Display name が **TSTDEV01** になる。
+   * 端末タイプに `@名前` を付ける方は**交渉が時間切れ**になる（pub400 / 社内機の 2 台で同じ）。
    *
-   * `DEVNAME` は RFC 4777 の 5250 向けの仕組みで、3270 の装置名は TN3270E の
-   * `CONNECT` で渡すのが筋。IBM i は TN3270E を提示しないので、この接続では道が無い。
+   * ⚠ 受け入れるかは**ホストの設定次第**。社内機は同じ要求で画面を送らずに閉じる。
    */
-  it("**装置名は NEW-ENVIRON に載せない**（IBM i が接続を切る）", () => {
+  it("装置名は NEW-ENVIRON の `DEVNAME` で申告する", () => {
     const t = new MockTransport();
     new TelnetLayer(t, { terminalType: "X", deviceName: "MYDEV01" });
     t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
     t.sent = [];
     t.recv(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
     const text = String.fromCharCode(...t.sentFlat.filter((b) => b >= 0x20 && b < 0x7f));
-    expect(text).not.toContain("DEVNAME");
-    expect(text).not.toContain("MYDEV01");
+    expect(text).toContain("DEVNAME");
+    expect(text).toContain("MYDEV01");
   });
 });
 

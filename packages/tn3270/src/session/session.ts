@@ -80,6 +80,17 @@ type Events = {
  */
 export class Tn3270Session {
   private transport: Transport | undefined;
+  /**
+   * 画面に中身が届いたか。**レコードの有無では見分けられない**——
+   * 装置名を断るホストも、閉じる前に構造化フィールドの問い合わせは 1 つ送ってくる（実測）。
+   */
+  private get gotScreen(): boolean {
+    for (let a = 0; a < this.screen.size; a++) {
+      const b = this.screen.charAt(a);
+      if (b !== 0x00 && b !== 0x40) return true;
+    }
+    return false;
+  }
   private telnet: TelnetLayer | undefined;
   private screen: Screen3270;
   private events = new Emitter<Events>();
@@ -204,7 +215,16 @@ export class Tn3270Session {
     telnet.onRecord((record) => this.onRecord(record));
     transport.onClose((reason) => {
       this.state = "closed";
-      this.events.emit("close", reason);
+      // **装置名を要求して画面が 1 つも来ないまま閉じられたら、それを言う。**
+      // 実測: 同じ要求を pub400 は受け入れ（Display name が要求どおりになる）、
+      // 社内機は**画面を送らずに閉じる**。ホスト側の設定（仮想装置の自動作成など）の差で、
+      // 素の「socket closed」だけでは利用者が装置名に辿り着けない
+      const why =
+        this.opts.deviceName !== undefined && !this.gotScreen
+          ? `${reason}（装置名 ${this.opts.deviceName} を要求したところ、` +
+            `ホストが画面を送らずに閉じました。この名前を使えない可能性があります）`
+          : reason;
+      this.events.emit("close", why);
     });
     transport.onError((err) => this.events.emit("error", err));
     transport.start?.();

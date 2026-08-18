@@ -143,21 +143,20 @@ describe("装置名の渡し方", () => {
   }
 
   /**
-   * **IBM i は 3270 の接続で装置名を受け付けない**（実測）。
+   * **装置名の渡し方は 1 つだけ**——IBM i は `DEVNAME`（RFC 4777）で受け取る。
    *
-   * - 端末タイプに `@名前` → **交渉が 15 秒で時間切れ**
-   * - NEW-ENVIRON に `DEVNAME` → 交渉は通るが**直後にソケットを閉じる**
-   *   （名前を 4 通り試して全て同じ。`DEVNAME` を止めるだけで通った）
-   * - TN3270E の `CONNECT`（3270 本来の道）は **IBM i が TN3270E を提示しない**ので使えない
+   * 実測（pub400）: `DEVNAME=TSTDEV01` → 画面の Display name が **TSTDEV01** になる。
+   * 端末タイプの `@名前` は**交渉が 15 秒で時間切れ**（pub400 / 社内機の 2 台で同じ）。
    *
-   * だからどちらの経路にも載せない。**指定は効かないが、繋がらなくなることもない。**
+   * ⚠ 受け入れるかは**ホストの設定次第**。社内機は同じ要求で画面を送らずに閉じる
+   * （そのときは `session.ts` が理由を添える）。**仕組みが無いのではなく、断られている。**
    */
-  it("**IBM i には `@名前` も `DEVNAME` も送らない**（どちらも接続を壊す）", () => {
+  it("**IBM i には `DEVNAME` だけ**（`@名前` は交渉が止まる）", () => {
     const t = connectWith(true, "AS01");
     expect(terminalType(t)).toBe("IBM-3279-2-E");
     expect(terminalType(t)).not.toContain("@");
-    expect(environ(t) ?? "").not.toContain("DEVNAME");
-    expect(environ(t) ?? "").not.toContain("AS01");
+    expect(environ(t)).toContain("DEVNAME");
+    expect(environ(t)).toContain("AS01");
   });
 
   it("それでも CODEPAGE などは送る（文字化けを防ぐため必要）", () => {
