@@ -40,6 +40,11 @@ export interface Open3270Options {
   readOnly?: boolean;
   owner?: string;
   connectTimeoutMs?: number;
+  /**
+   * 装置名（LU 名）。**渡し方はホストで変わる**——IBM i は NEW-ENVIRON の `DEVNAME`、
+   * それ以外は端末タイプの `@名前`。どちらにするかは telnet 層が交渉を見て決める。
+   */
+  deviceName?: string;
 }
 
 export class Tn3270Manager {
@@ -57,6 +62,7 @@ export class Tn3270Manager {
       model,
       ccsid: opts.ccsid ?? 37,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+      ...(opts.deviceName !== undefined ? { deviceName: opts.deviceName } : {}),
       ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {})
     });
     const entry: Tn3270Entry = {

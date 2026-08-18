@@ -271,6 +271,9 @@ export class TelnetLayer {
   private markAgreed(opt: number): void {
     if (opt === OPT.BINARY) this.binaryAgreed = true;
     if (opt === OPT.END_OF_RECORD) this.eorAgreed = true;
+    // **端末タイプを送るより前に立てる必要がある**（`sendTerminalType` が見る）。
+    // 実測の順は `DO NEW-ENVIRON` → `SB TERMINAL-TYPE SEND` なので、DO で立てれば間に合う
+    if (opt === OPT.NEW_ENVIRON) this.sawNewEnviron = true;
     if (opt === OPT.TN3270E && this.tn3270e === undefined) {
       // `WILL TN3270E` を返した。以降のサブネゴシエーションは交渉器に委ねる
       const o: Tn3270eOptions = { deviceType: this.opts.deviceType! };
@@ -339,14 +342,39 @@ export class TelnetLayer {
    * NEW-ENVIRON の SEND に応える。
    *
    * **ホストが要求した変数を選り分けずに、こちらが申告したいものを IS で返す**
-   * （RFC 1572 は要求に無い変数を返すことを許す）。IBM i はこれでデバイスを作る。
+   * （RFC 1572 は要求に無い変数を返すことを許す）。
+   *
+   * ## `DEVNAME` は送らない（実測）
+   *
+   * NEW-ENVIRON を要求してくるのは **IBM i だけ**（TK4- / z/OS は要求しない）。
+   * その IBM i は、**3270 の接続で `DEVNAME` を受け取ると交渉後に黙ってソケットを閉じる**。
+   *
+   * ```
+   * DEVNAME=AS3270A  → 交渉は通るが、Query Reply の直後に CLOSE。画面は 1 文字も来ない
+   * DEVNAME 無し      → ready。画面が来る
+   * ```
+   *
+   * 名前を 4 通り（`AS3270A` / `TST3270X` / `QPADEV0099` / `D3270TST`）試して全て同じ。
+   * `DEVNAME` を止めるだけで通るところまで確かめた（この 1 行が引き金）。
+   *
+   * 背景: `DEVNAME` は RFC 4777 の **5250 向け**の仕組みで、3270 の装置名は
+   * TN3270E の `CONNECT`（RFC 2355）で渡すのが筋。**IBM i は TN3270E を提示しない**ので
+   * （実測）、この接続では装置名を通す道が無い。
+   *
+   * 装置名は **`@名前`（Hercules 系）** と **TN3270E の `CONNECT`** の 2 経路だけで扱う。
    */
   private sendEnviron(): void {
     const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
     const put = (name: string, value: string): void => {
       payload.push(ENV_USERVAR, ...ascii(name), ENV_VALUE, ...ascii(value));
     };
-    if (this.opts.deviceName !== undefined) put("DEVNAME", this.opts.deviceName);
+    if (this.opts.deviceName !== undefined) {
+      // **黙って無視しない。** 設定したのに効かないのは、理由が見えないと追えない
+      log.warn(
+        `装置名 ${this.opts.deviceName} は使いません: ` +
+          `このホストは NEW-ENVIRON を使う（IBM i）ため、3270 では装置名を受け付けません`
+      );
+    }
     // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる。
     // **KBDTYPE は必須**——CODEPAGE/CHARSET だけでは反応しないホストがある（5250 側の実機知見）
     if (this.opts.kbdType !== undefined) put("KBDTYPE", this.opts.kbdType);
@@ -388,12 +416,18 @@ export class TelnetLayer {
   }
 
   private sendTerminalType(): void {
-    // **`@<装置名>` は基本 TN3270 の慣行**。TN3270E では `CONNECT` で渡すので付けない
+    // **`@<装置名>` は基本 TN3270 の慣行**。TN3270E では `CONNECT` で渡すので付けない。
+    //
+    // **IBM i には付けてはならない。** あちらは装置名を NEW-ENVIRON の `DEVNAME` で
+    // 受け取り、`IBM-3279-2-E@AS3270A` という端末タイプは解さない——実測で
+    // **交渉が 15 秒で時間切れ**になった。`DEVNAME` は `sendEnviron` が既に送っている。
     const base = this.opts.terminalType;
-    const name =
-      this.opts.deviceName !== undefined && !base.includes("@") && this.tn3270e === undefined
-        ? `${base}@${this.opts.deviceName}`
-        : base;
+    const useSuffix =
+      this.opts.deviceName !== undefined &&
+      !base.includes("@") &&
+      this.tn3270e === undefined &&
+      !this.sawNewEnviron;
+    const name = useSuffix ? `${base}@${this.opts.deviceName}` : base;
     const out: number[] = [IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_IS];
     for (let k = 0; k < name.length; k++) {
       const c = name.charCodeAt(k) & 0xff; // 端末タイプ名は ASCII

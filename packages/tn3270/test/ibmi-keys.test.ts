@@ -115,3 +115,80 @@ describe("F キーの送り方", () => {
     await expect(s.sendFunctionKey(25)).rejects.toThrow(/1〜24 の範囲外/u);
   });
 });
+
+describe("装置名の渡し方", () => {
+  /** 端末タイプの `IS` として送った文字列 */
+  const terminalType = (t: MockTransport): string | undefined => {
+    const rec = t.sent.find((r) => r[0] === IAC && r[1] === CMD.SB && r[2] === OPT.TERMINAL_TYPE);
+    return rec?.slice(4, rec.length - 2).map((b) => String.fromCharCode(b)).join("");
+  };
+
+  /** NEW-ENVIRON の `IS` に載せた文字列 */
+  const environ = (t: MockTransport): string | undefined => {
+    const rec = t.sent.find((r) => r[0] === IAC && r[1] === CMD.SB && r[2] === OPT.NEW_ENVIRON);
+    return rec?.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
+  };
+
+  function connectWith(newEnviron: boolean, deviceName: string): MockTransport {
+    const t = new MockTransport();
+    const s = new Tn3270Session({ host: "x", model: 2, deviceName });
+    s.attach(t);
+    if (newEnviron) {
+      t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+      t.recv(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    }
+    t.recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    t.recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    return t;
+  }
+
+  /**
+   * **IBM i は 3270 の接続で装置名を受け付けない**（実測）。
+   *
+   * - 端末タイプに `@名前` → **交渉が 15 秒で時間切れ**
+   * - NEW-ENVIRON に `DEVNAME` → 交渉は通るが**直後にソケットを閉じる**
+   *   （名前を 4 通り試して全て同じ。`DEVNAME` を止めるだけで通った）
+   * - TN3270E の `CONNECT`（3270 本来の道）は **IBM i が TN3270E を提示しない**ので使えない
+   *
+   * だからどちらの経路にも載せない。**指定は効かないが、繋がらなくなることもない。**
+   */
+  it("**IBM i には `@名前` も `DEVNAME` も送らない**（どちらも接続を壊す）", () => {
+    const t = connectWith(true, "AS01");
+    expect(terminalType(t)).toBe("IBM-3279-2-E");
+    expect(terminalType(t)).not.toContain("@");
+    expect(environ(t) ?? "").not.toContain("DEVNAME");
+    expect(environ(t) ?? "").not.toContain("AS01");
+  });
+
+  it("それでも CODEPAGE などは送る（文字化けを防ぐため必要）", () => {
+    const t = connectWith(true, "AS01");
+    expect(environ(t)).toContain("CODEPAGE");
+  });
+
+  it("**メインフレームには従来どおり `@名前`**（Hercules の慣行。実測で受理）", () => {
+    const t = connectWith(false, "AS01");
+    expect(terminalType(t)).toBe("IBM-3279-2-E@AS01");
+  });
+
+  it("装置名を指定しなければどちらも素の端末タイプ", () => {
+    for (const newEnviron of [true, false]) {
+      const t = new MockTransport();
+      const s = new Tn3270Session({ host: "x", model: 2 });
+      s.attach(t);
+      if (newEnviron) t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);
+      t.recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+      t.recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+      expect(terminalType(t)).toBe("IBM-3279-2-E");
+    }
+  });
+
+  it("**`DO NEW-ENVIRON` だけでも印が立つ**（端末タイプに間に合わせる）", () => {
+    const t = new MockTransport();
+    const s = new Tn3270Session({ host: "x", model: 2, deviceName: "AS01" });
+    s.attach(t);
+    t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON); // SB SEND はまだ来ていない
+    t.recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    t.recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    expect(terminalType(t)).toBe("IBM-3279-2-E");
+  });
+});

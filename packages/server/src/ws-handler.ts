@@ -487,12 +487,16 @@ export class WsConnection {
       const port = msg.port ?? connect?.port;
       const ccsid = msg.ccsid ?? connect?.ccsid;
       const tls = msg.tls ?? connect?.tls;
+      // **装置名は 5250 と同じ順**（直指定が保存済み設定より優先）。
+      // 渡し方（NEW-ENVIRON の DEVNAME か端末タイプの `@名前` か）は telnet 層が決める
+      const deviceName = msg.deviceName ?? connect?.deviceName;
       const entry = await mgr.open({
         host,
         ...(port !== undefined ? { port } : {}),
         ...(msg.model !== undefined ? { model: msg.model } : {}),
         ...(ccsid !== undefined ? { ccsid } : {}),
         ...(tls !== undefined ? { tls } : {}),
+        ...(deviceName !== undefined ? { deviceName } : {}),
         ...(msg.readOnly !== undefined ? { readOnly: msg.readOnly } : {}),
         ...(this.user !== undefined ? { owner: this.user.username } : {})
       });
