@@ -60,9 +60,25 @@ function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
       };
 
       if (screen.isAttrPos(addr)) {
-        // 属性桁。**1 桁を占めるが文字は持たない**
+        // 属性桁。**1 桁を占めるが文字は持たない**。
+        //
+        // **見た目は欄から引き継がない。** 原典は属性桁を `xattrset(defattr)` ——
+        // 既定の属性——で空白として描く（`c3270/screen.c` の描画）。
+        // 引き継ぐと、下線つきの入力欄の**手前の桁に下線が 1 つ描かれる**。
+        // 実機（IBM i のサインオン）で `_` として見えた: 入力欄が 53 桁目から始まり、
+        // 52 桁目の属性桁に下線が乗っていた。5250 側は同じ場面で落としている
+        // （`tn5250/src/screen/buffer.ts` の属性桁）。**色だけは残す**のも 5250 と同じ。
         dbcs = false;
-        line.push({ char: " ", kind: "attr", ...base, intensified: false, nonDisplay: false });
+        line.push({
+          char: " ",
+          kind: "attr",
+          ...base,
+          intensified: false,
+          nonDisplay: false,
+          reverse: false,
+          underline: false,
+          blink: false
+        });
         continue;
       }
       if (byte === SO) {
