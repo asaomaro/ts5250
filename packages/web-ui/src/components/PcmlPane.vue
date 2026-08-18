@@ -99,17 +99,32 @@ function hintOf(f: Field): string {
   }
 }
 
-/** `count` を件数に解く。決まらなければ `undefined`（並べようがない） */
+/**
+ * `count` を件数に解く。決まらなければ `undefined`（並べようがない）。
+ *
+ * **呼んだあとの結果を先に見る**——IBM の書式は件数を出力で知らせる
+ * （`count="numberOfSupplementalGroups"`）。呼ぶ前は並べようがないが、
+ * 呼んだあとは並べられる。
+ */
 function countOf(f: Field): number | undefined {
   if (f.count === undefined) return 1;
   if (typeof f.count === "number") return f.count;
-  const raw = values.value[f.count] ?? initOf(f.count);
+  const raw = result.value?.values?.[f.count] ?? values.value[f.count] ?? initOf(f.count);
   if (raw === undefined || !/^\d+$/u.test(raw.trim())) return undefined;
   return Number.parseInt(raw.trim(), 10);
 }
 
-/** 完全名から記述の `init` を引く（配列の添字は落とす） */
-function initOf(fullPath: string): string | undefined {
+/** 件数を決める項目が出力なら、呼ぶ前には決まらない（入れようがない） */
+function countHint(f: Field): string {
+  const ref = String(f.count);
+  const target = fieldAt(ref);
+  return target?.usage === "output"
+    ? `件数は ${ref} で決まります。**呼ぶまで分かりません**`
+    : `件数が ${ref} で決まります。先に入れてください`;
+}
+
+/** 完全名から記述の項目を引く */
+function fieldAt(fullPath: string): Field | undefined {
   const parts = fullPath.replace(/\(\d+\)/gu, "").split(".");
   if (!program.value || parts[0] !== program.value.name) return undefined;
   let list: Field[] = program.value.fields;
@@ -119,7 +134,12 @@ function initOf(fullPath: string): string | undefined {
     if (!found) return undefined;
     list = found.fields ?? [];
   }
-  return found?.init;
+  return found;
+}
+
+/** 完全名から記述の `init` を引く */
+function initOf(fullPath: string): string | undefined {
+  return fieldAt(fullPath)?.init;
 }
 
 /**
@@ -151,7 +171,7 @@ function rowsOf(
         heading: true,
         type: f.type,
         usage: f.usage,
-        hint: `件数が ${String(f.count)} で決まります。先に入れてください`
+        hint: countHint(f)
       });
       continue;
     }

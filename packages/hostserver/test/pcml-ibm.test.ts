@@ -98,9 +98,43 @@ describe("RUserList（`minvrm` が引数の本数を変える）", () => {
   });
 });
 
-describe("まだ通らないもの", () => {
-  it("**`offset` を使う記述は理由を言って断る**（RUser）", () => {
-    expect(() => parsePcml(ibm("RUser"), { vrm: V7R5 })).toThrow(/offset=.*まだ扱えません/u);
+describe("RUser（飛び先・出力で決まる件数と長さと CCSID）", () => {
+  const doc = parsePcml(ibm("RUser"), { vrm: V7R5 });
+
+  it("解析できる", () => {
+    expect([...doc.programs.keys()]).toEqual([
+      "qsyrusri_usri0100",
+      "qsyrusri_usri0200",
+      "qsyrusri_usri0300",
+      "qokschd"
+    ]);
+  });
+
+  it("**しおり（長さ 0 の名前なし項目）が飛び先を持つ**", () => {
+    const rec = doc.programs.get("qsyrusri_usri0300")!.fields[0]!;
+    const marks = rec.fields!.filter((f) => f.offset !== undefined);
+    expect(marks).toHaveLength(3);
+    expect(marks[0]!.offset).toBe("qsyrusri_usri0300.receiverVariable.offsetToArrayOfSupplementalGroups");
+    expect(marks[0]!.offsetfrom).toBe(0);
+    expect(marks[0]!.length).toBe(0);
+  });
+
+  it("**出力で決まる件数・長さ・CCSID が完全名に解ける**", () => {
+    const rec = doc.programs.get("qsyrusri_usri0300")!.fields[0]!;
+    const groups = rec.fields!.find((f) => f.name === "supplementalGroups")!;
+    expect(groups.count).toBe("qsyrusri_usri0300.receiverVariable.numberOfSupplementalGroups");
+
+    const locale = rec.fields!.find((f) => f.name === "localePathName")!;
+    expect(locale.length).toBe("qsyrusri_usri0300.receiverVariable.lengthOfLocalePathName");
+
+    const home = rec.fields!.find((f) => f.name === "homeDirectory")!;
+    const value = home.fields!.find((f) => f.name === "homeDirectoryNameValue")!;
+    expect(value.length).toBe(
+      "qsyrusri_usri0300.receiverVariable.homeDirectory.numberOfBytesInTheHomeDirectoryName"
+    );
+    expect(value.ccsid).toBe(
+      "qsyrusri_usri0300.receiverVariable.homeDirectory.ccsidOfTheReturnedHomeDirectoryName"
+    );
   });
 });
 
