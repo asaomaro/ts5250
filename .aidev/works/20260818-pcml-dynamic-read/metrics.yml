@@ -6,3 +6,4 @@ events:
   - { ts: 2026-08-18T10:56:30Z, phase: coding, event: approved }
   - { ts: 2026-08-18T10:56:30Z, phase: test, event: approved }
   - { ts: 2026-08-18T10:57:00Z, phase: review, event: approved }
+  - { ts: 2026-08-18T10:57:57Z, phase: deliver, event: approved }
