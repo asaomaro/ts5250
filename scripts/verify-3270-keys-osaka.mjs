@@ -23,10 +23,21 @@ const L = () => s.snapshot().cells.map((r) => r.map((c) => c.char).join("").repl
 const head = () => L().find((t) => t.trim() !== "")?.trim().slice(0, 44) ?? "";
 const rejected = () => L().some((t) => t.includes("できません"));
 const cmdField = () => s.snapshot().fields.filter((x) => !x.protected).find((x) => x.row >= 19);
+/**
+ * メインメニューに素の状態で戻っているか。
+ *
+ * ⚠ **先頭行では判定できない**——ヘルプは*窓*で重なるので、開いていても先頭行は
+ * 「MAIN … メインメニュー」のまま。窓の中身まで見ないと「戻った」を誤判定する
+ * （最初これで、ヘルプを開いたまま次のキーを試していた）。
+ */
+const atMenu = () =>
+  head().includes("メインメニュー") &&
+  !L().some((t) => /ヘルプ|システム要求|コマンド入力|印刷操作/u.test(t));
 const toMenu = async () => {
-  for (let i = 0; i < 4 && !head().includes("メインメニュー"); i++) {
+  for (let i = 0; i < 5 && !atMenu(); i++) {
     await s.sendFunctionKey(12).catch(() => undefined); await sleep(2500);
-    if (!head().includes("メインメニュー")) { s.send("enter"); await sleep(2500); }
+    if (!atMenu()) { await s.sendFunctionKey(3).catch(() => undefined); await sleep(2500); }
+    if (!atMenu()) { s.send("enter"); await sleep(2500); }
   }
 };
 
@@ -66,6 +77,52 @@ log("\n### 3. ページ送り（素の PF7 / PF8）");
   check(!rejected(), "拒否されない");
   await s.sendFunctionKey(3); await sleep(4000);
   check(head().includes("メインメニュー"), `**F3（終了）が効く** → ${head()}`);
+}
+
+log("\n### 4. IBM i でだけ割り当てのあるキー");
+{
+  // ⚠ **先頭行だけを見ると取りこぼす**。SysReq は 24 行目に入力行が出るだけで、
+  // 先頭行は変わらない。画面全体で突き合わせること（最初これで見落とした）
+  const whole = () => L().join("\n");
+
+  await toMenu();
+  {
+    const before = whole();
+    s.send("pf1"); await sleep(4000);   // Help
+    check(
+      whole() !== before && L().some((t) => t.includes("ヘルプ")),
+      `**Help（PF1）が効く** → ${L().find((t) => t.includes("ヘルプ"))?.trim().slice(0, 44)}`
+    );
+    await toMenu();
+  }
+  {
+    const before = whole();
+    s.send("pf4"); await sleep(4000);   // Print
+    check(
+      whole() !== before && L().some((t) => t.includes("印刷操作")),
+      `**Print（PF4）が効く** → ${L().find((t) => t.includes("印刷操作"))?.trim().slice(0, 44)}`
+    );
+    await toMenu();
+  }
+  {
+    s.send("pf11"); await sleep(3000);  // SysReq → 入力行が出る
+    s.send("enter"); await sleep(3500); // → システム要求メニュー
+    check(
+      L().some((t) => t.includes("システム要求")),
+      `**SysReq（PF11）が効く** → ${L().find((t) => t.includes("システム要求"))?.trim().slice(0, 44)}`
+    );
+    s.send("pf3"); await sleep(3000);
+    await toMenu();
+  }
+  {
+    s.send("pf9"); await sleep(4000);   // Attn → 注意プログラム（コマンド入力）
+    check(
+      L().some((t) => t.includes("コマンド入力")),
+      `**Attn（PF9）が効く** → ${L().find((t) => t.includes("コマンド入力"))?.trim().slice(0, 44)}`
+    );
+    s.send("pf3"); await sleep(3000);
+    await toMenu();
+  }
 }
 
 log(`\n${pass} PASS / ${fail} FAIL`);
