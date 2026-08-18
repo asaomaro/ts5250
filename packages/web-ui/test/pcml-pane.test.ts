@@ -73,14 +73,27 @@ describe("記述の読み込み", () => {
     expect(calls[0]?.body).toMatchObject({ path: "/home/ASAO/pcmltst.pcml", source: { system: "srv:s" } });
   });
 
-  it("貼り付けでも読める（接続が要らない）", async () => {
+  it("貼り付けでも読める", async () => {
     const calls = mockFetch(() => ({ body: PARSED }));
     const w = mount(PcmlPane, { props: { tabId: "pcml:call", system: "srv:s" } });
     await w.findAll('input[type="radio"]')[1]!.setValue();
     await w.find('[data-testid="pcml-text"]').setValue("<pcml version=\"6.0\"></pcml>");
     await w.find('[data-testid="pcml-load"]').trigger("click");
     await flushPromises();
-    expect(calls[0]?.body).toMatchObject({ text: '<pcml version="6.0"></pcml>' });
+    // **接続も添える**——`minvrm` を持つ記述はホストの版が要る（引数の本数が変わる）
+    expect(calls[0]?.body).toMatchObject({
+      text: '<pcml version="6.0"></pcml>',
+      source: { system: "srv:s" }
+    });
+  });
+
+  it("システムを選んでいなければ、貼り付けは接続なしで送る", async () => {
+    const calls = mockFetch(() => ({ body: PARSED }));
+    const w = mount(PcmlPane, { props: { tabId: "pcml:call" } });
+    await w.findAll('input[type="radio"]')[1]!.setValue();
+    await w.find('[data-testid="pcml-text"]').setValue("<pcml/>");
+    await w.find('[data-testid="pcml-load"]').trigger("click");
+    await flushPromises();
     expect((calls[0]?.body as { source?: unknown }).source).toBeUndefined();
   });
 
@@ -203,5 +216,46 @@ describe("呼ぶ", () => {
     await w.find('[data-testid="pcml-call"]').trigger("click");
     await flushPromises();
     expect(w.find('[data-testid="pcml-error"]').text()).toContain("PCMLTST.REC.NM");
+  });
+});
+
+
+describe("名前の無い項目（予約域）", () => {
+  /** IBM の書式は予約バイトを必ず持つ。**触れないが場所は取る** */
+  const RESERVED = {
+    version: "1.0",
+    programs: [
+      {
+        name: "qsyrusri",
+        fields: [
+          {
+            name: "receiver",
+            path: "qsyrusri.receiver",
+            type: "struct",
+            usage: "output",
+            fields: [
+              { name: "userProfile", path: "qsyrusri.receiver.userProfile", type: "char", usage: "output", length: 10 },
+              { name: "", path: "", type: "byte", usage: "output", length: 1 },
+              { name: "badSignonAttempts", path: "qsyrusri.receiver.badSignonAttempts", type: "int", usage: "output", length: 4 }
+            ]
+          },
+          { name: "receiverLength", path: "qsyrusri.receiverLength", type: "int", usage: "input", length: 4 }
+        ]
+      }
+    ]
+  };
+
+  it("**画面には出す**（隠すと長さが合わない理由が分からない）", async () => {
+    const { w } = await loaded((route) => ({ body: route === "parse" ? RESERVED : {} }));
+    expect(w.text()).toContain("（予約）");
+  });
+
+  it("**入力欄も結果欄も持たない**（名前で触れない）", async () => {
+    const { w } = await loaded((route) => ({ body: route === "parse" ? RESERVED : {} }));
+    const kwds = w.findAll("[data-kwd]").map((e) => e.attributes("data-kwd"));
+    expect(kwds).toEqual(["qsyrusri.receiverLength"]);
+    const outs = w.findAll("[data-out]").map((e) => e.attributes("data-out"));
+    expect(outs).not.toContain("");
+    expect(outs).toContain("qsyrusri.receiver.badSignonAttempts");
   });
 });

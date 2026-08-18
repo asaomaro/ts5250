@@ -17,6 +17,7 @@ import { codecForCcsid } from "@ts5250/ebcdic";
 import {
   buildPcmlCall,
   parsePcml,
+  pcmlNeedsHostVersion,
   readPcmlOutputs,
   toProgramParameters,
   type CommandConnection,
@@ -128,9 +129,23 @@ export function registerHostPcmlRoutes(app: Hono<{ Variables: AuthVars }>, deps:
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
+    const body = parsed.data;
+    const user = c.get("user");
     try {
-      const text = await loadText(parsed.data, c.get("user"));
-      return c.json(documentToJson(parsePcml(text)));
+      const text = await loadText(body, user);
+      // **版は要るときだけ取りに行く**（接続は安くない）。
+      // `minvrm` / `maxvrm` は引数の本数を変えるので、勝手に通してはならない
+      let vrm: number | undefined;
+      if (pcmlNeedsHostVersion(text) && body.source !== undefined) {
+        const opts = resolveSource(deps.resolver, body.source, user);
+        const conn = await (deps.connect ?? openCommand)(opts);
+        try {
+          vrm = conn.hostVrm;
+        } finally {
+          conn.close();
+        }
+      }
+      return c.json(documentToJson(parsePcml(text, vrm !== undefined ? { vrm } : {})));
     } catch (e) {
       const err = e as As400Error;
       return c.json({ error: err.message, code: err.code ?? "UNKNOWN" }, statusOf(err));
@@ -148,7 +163,10 @@ export function registerHostPcmlRoutes(app: Hono<{ Variables: AuthVars }>, deps:
     let conn: CommandConnection | undefined;
     try {
       const text = await loadText(body, user);
-      const doc = parsePcml(text);
+      const opts = resolveSource(deps.resolver, body.source, user);
+      // **呼ぶときは必ず接続がある**ので、版はそこから取る
+      conn = await (deps.connect ?? openCommand)(opts);
+      const doc = parsePcml(text, { vrm: conn.hostVrm });
       const program = doc.programs.get(body.program);
       if (program?.entrypoint !== undefined) {
         // **黙って *PGM として呼ばない**——サービスプログラムは呼び方が別物で、
@@ -158,11 +176,8 @@ export function registerHostPcmlRoutes(app: Hono<{ Variables: AuthVars }>, deps:
           `${body.program} は entrypoint を持つサービスプログラムです。この経路では呼べません`
         );
       }
-      const opts = resolveSource(deps.resolver, body.source, user);
       const ccsid = opts.ccsid ?? 37;
       const call = buildPcmlCall(doc, body.program, body.values ?? {}, { ccsid });
-
-      conn = await (deps.connect ?? openCommand)(opts);
       const { result, outputs } = await conn.call(
         call.program,
         call.library,

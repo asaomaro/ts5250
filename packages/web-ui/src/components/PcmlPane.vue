@@ -18,11 +18,14 @@ import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 interface Field {
+  /** 名前なしの予約域は `""` */
   name: string;
+  /** 予約域は `""`（名前では触れない） */
   path: string;
   type: string;
   usage: "input" | "output" | "inputoutput";
-  length?: number;
+  /** 整数、または長さを持つ別項目の完全名 */
+  length?: number | string;
   precision?: number;
   ccsid?: number;
   init?: string;
@@ -40,7 +43,9 @@ interface Program {
 
 /** 画面に並べる 1 行（葉、または構造体の見出し） */
 interface Row {
+  /** **予約域は `""`**（名前で触れない）。表の鍵には使えないので `key` を別に持つ */
   path: string;
+  key: string;
   label: string;
   depth: number;
   /** 見出し（構造体・配列の親）は入力欄を持たない */
@@ -73,20 +78,22 @@ const program = computed(() => doc.value?.programs.find((p) => p.name === chosen
 
 /** その項目の型を人に読める形で（長さと桁が合っているかを目で確かめられるように） */
 function hintOf(f: Field): string {
+  // **長さは名前でありうる**（`length="bytesReturned"`）。その場合は名前を出す
+  const n = f.length;
   switch (f.type) {
     case "char":
-      return `文字 ${f.length}`;
+      return `文字 ${n}`;
     case "byte":
-      return `生バイト ${f.length}（base64）`;
+      return `生バイト ${n}（base64）`;
     case "packed":
-      return `詰め 10 進 ${f.length}.${f.precision ?? 0}`;
+      return `詰め 10 進 ${n}.${f.precision ?? 0}`;
     case "zoned":
-      return `ゾーン 10 進 ${f.length}.${f.precision ?? 0}`;
+      return `ゾーン 10 進 ${n}.${f.precision ?? 0}`;
     case "int":
       // **符号は precision で決まる**（16/32/64 が符号なし）
-      return `整数 ${f.length} バイト${f.precision === (f.length ?? 0) * 8 ? "・符号なし" : ""}`;
+      return `整数 ${n} バイト${typeof n === "number" && f.precision === n * 8 ? "・符号なし" : ""}`;
     case "float":
-      return `浮動小数 ${f.length} バイト`;
+      return `浮動小数 ${n} バイト`;
     default:
       return f.type;
   }
@@ -115,16 +122,31 @@ function initOf(fullPath: string): string | undefined {
   return found?.init;
 }
 
-/** 記述を行に開く（サーバーの組み立てと同じ順序・同じ名前） */
-function rowsOf(fields: readonly Field[], depth: number, prefix: string): Row[] {
+/**
+ * 記述を行に開く（サーバーの組み立てと同じ順序・同じ名前）。
+ *
+ * **名前の無い項目（予約域）も出す**——バイトを占めているので、
+ * 隠すと「なぜ長さが合わないのか」が画面から分からなくなる。ただし触れない。
+ */
+function rowsOf(
+  fields: readonly Field[],
+  depth: number,
+  prefix: string,
+  addressable: boolean,
+  keyPrefix: string
+): Row[] {
   const out: Row[] = [];
-  for (const f of fields) {
+  for (const [at, f] of fields.entries()) {
+    const mine = addressable && f.name !== "";
+    const base = mine ? (prefix === "" ? f.path : `${prefix}.${f.name}`) : "";
+    const key = `${keyPrefix}/${at}`;
+    const label = mine ? f.name : "（予約）";
     const n = countOf(f);
-    const base = prefix === "" ? f.path : `${prefix}.${f.name}`;
     if (n === undefined) {
       out.push({
         path: base,
-        label: f.name,
+        key,
+        label,
         depth,
         heading: true,
         type: f.type,
@@ -134,23 +156,44 @@ function rowsOf(fields: readonly Field[], depth: number, prefix: string): Row[] 
       continue;
     }
     for (let i = 0; i < n; i++) {
-      const here = f.count === undefined ? base : `${base}(${i + 1})`;
-      const label = f.count === undefined ? f.name : `${f.name}(${i + 1})`;
+      const here = !mine || f.count === undefined ? base : `${base}(${i + 1})`;
+      const shown = f.count === undefined ? label : `${label}(${i + 1})`;
+      const rowKey = f.count === undefined ? key : `${key}#${i}`;
       if (f.type === "struct") {
-        out.push({ path: here, label, depth, heading: true, type: "struct", usage: f.usage, hint: "構造体" });
-        out.push(...rowsOf(f.fields ?? [], depth + 1, here));
+        out.push({
+          path: here,
+          key: rowKey,
+          label: shown,
+          depth,
+          heading: true,
+          type: "struct",
+          usage: f.usage,
+          hint: "構造体"
+        });
+        out.push(...rowsOf(f.fields ?? [], depth + 1, here, mine, rowKey));
       } else {
-        out.push({ path: here, label, depth, heading: false, type: f.type, usage: f.usage, hint: hintOf(f) });
+        out.push({
+          path: here,
+          key: rowKey,
+          label: shown,
+          depth,
+          heading: false,
+          type: f.type,
+          usage: f.usage,
+          hint: hintOf(f)
+        });
       }
     }
   }
   return out;
 }
 
-const rows = computed<Row[]>(() => (program.value ? rowsOf(program.value.fields, 0, "") : []));
+const rows = computed<Row[]>(() =>
+  program.value ? rowsOf(program.value.fields, 0, "", true, program.value.name) : []
+);
 
-/** 値を入れる欄を出すか（出力専用はホストが書く場所） */
-const editable = (r: Row): boolean => !r.heading && r.usage !== "output";
+/** 値を入れる欄を出すか（出力専用と予約域はホストの領分） */
+const editable = (r: Row): boolean => !r.heading && r.path !== "" && r.usage !== "output";
 
 const canLoad = computed(() =>
   source.value === "text" ? text.value.trim() !== "" : !!props.system && path.value.trim() !== ""
@@ -166,8 +209,9 @@ async function load(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(
+        // **貼り付けでも接続を添える**——`minvrm` を持つ記述はホストの版が要る
         source.value === "text"
-          ? { text: text.value }
+          ? { ...(props.system ? { source: { system: props.system } } : {}), text: text.value }
           : { source: { system: props.system }, path: path.value.trim() }
       )
     });
@@ -278,7 +322,7 @@ async function call(): Promise<void> {
           <tr><th>項目</th><th>型</th><th>向き</th><th>値</th><th>結果</th></tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="r.path" :class="{ heading: r.heading }">
+          <tr v-for="r in rows" :key="r.key" :class="{ heading: r.heading }">
             <td :style="{ paddingLeft: `${0.4 + r.depth * 1}rem` }">{{ r.label }}</td>
             <td class="dim">{{ r.hint }}</td>
             <td class="dim">
@@ -293,7 +337,7 @@ async function call(): Promise<void> {
               />
               <span v-else class="dim">—</span>
             </td>
-            <td :data-out="r.path">{{ result?.values?.[r.path] ?? "" }}</td>
+            <td :data-out="r.path || undefined">{{ r.path ? (result?.values?.[r.path] ?? "") : "" }}</td>
           </tr>
         </tbody>
       </table>
