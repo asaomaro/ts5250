@@ -84,6 +84,14 @@ export class TelnetLayer {
   /** TN3270E の交渉器。`DO TN3270E` を受理したときだけ作る */
   private tn3270e: Tn3270eNegotiator | undefined;
   private tn3270eFailure: string | undefined;
+  /**
+   * ホストが NEW-ENVIRON を交渉してきたか。
+   *
+   * **これが IBM i の見分けになる**（実測）。IBM i は `DO NEW-ENVIRON` を出し、
+   * 5250 流のシード（`IBMRSEED …`）まで送ってくる。TK4- / z/OS は出さない。
+   * `DO TN3270E` では見分けられない——**IBM i は TN3270E を提示しない**（実測）。
+   */
+  private sawNewEnviron = false;
 
   constructor(
     private readonly transport: Transport,
@@ -107,6 +115,11 @@ export class TelnetLayer {
   }
 
   /** TN3270E の交渉が失敗した理由（REJECT / impasse）。成功なら undefined */
+  /** ホストが NEW-ENVIRON を交渉してきたか（IBM i の見分けに使う素の事実） */
+  get negotiatedNewEnviron(): boolean {
+    return this.sawNewEnviron;
+  }
+
   get tn3270eError(): string | undefined {
     return this.tn3270eFailure;
   }
@@ -313,7 +326,11 @@ export class TelnetLayer {
       i++;
     }
     if (opt === OPT.TERMINAL_TYPE && body[0] === TT_SEND) this.sendTerminalType();
-    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) this.sendEnviron();
+    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) {
+      // **ここが IBM i の印**。SEND を投げてくるのは IBM i だけ（実測）
+      this.sawNewEnviron = true;
+      this.sendEnviron();
+    }
     if (opt === OPT.TN3270E) this.handleTn3270e(body);
     return i;
   }

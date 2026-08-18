@@ -8,7 +8,7 @@
 **無条件に適用してはならない**。見分けは交渉で付く——IBM i は `DO NEW-ENVIRON` を出して
 5250 流のシード交換をするが、TK4- / z/OS は出さない（実測）。
 
-## - [ ] F1〜F12 を `PA1` ＋ `PFn` で送る（IBM i のとき）
+## - [x] F1〜F12 を `PA1` ＋ `PFn` で送る（IBM i のとき）— 2026-08-18 完了
 
 **いま F キーが実質使えない。** 実機で `PF3` を送ると
 「**機能キーは使用できません。**」と返る。5250 で同じ画面に F3 を送ると受理される。
@@ -56,12 +56,20 @@ PageUp / PageDown → F7 / F8 の読み替えは PF7 / PF8 と一致しており
 
 1. **配線されていない**——`Open3270Options`（`server/src/tn3270-manager.ts`）に
    `deviceName` が無く、`onOpen3270`（`ws-handler.ts`）も渡していない
-2. **渡しても届かない**——IBM i は装置名を **NEW-ENVIRON の `DEVNAME`** で受け取る。
-   実測した交渉では、こちらは `KBDTYPE` / `CODEPAGE` / `CHARSET` しか送っていない。
-   `Connect3270Options.deviceName` は端末タイプに `@名前` を付ける方式
-   （Hercules の流儀。TK4- で実測して入れたもの）で、**IBM i には効かない**
+2. **渡すと交渉が止まる**——`telnet.ts` は装置名を**端末タイプにも `@名前` として付ける**
+   （`telnet.ts:377`。Hercules の流儀で、TK4- 向けに実測して入れたもの）。
+   IBM i は `IBM-3279-2-E@AS3270A` を解さない:
 
-つまり **2 通りの届け方を持つ**必要がある。ここでも「IBM i かどうか」の見分けが要る。
+   ```
+   装置名の指定＝なし      → 表示装置: QPADEV000D
+   装置名の指定＝AS3270A   → **3270 negotiation timed out after 15000ms**
+   ```
+
+> ⚠ **当初「DEVNAME を送っていない」と書いたのは誤り。** `sendEnviron`（`telnet.ts:332`）は
+> **既に `DEVNAME` を送っている**。本当の問題は `@名前` の方——**IBM i のときは付けない**、
+> それだけで済む見込み。
+
+見分けは **`Tn3270Session.isIbmI`**（F キーの工程で入れた）がそのまま使える。
 
 ## 測り直すときの手順
 

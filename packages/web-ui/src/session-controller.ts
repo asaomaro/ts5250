@@ -413,30 +413,19 @@ export function stopPrinter(sessionId: string): void {
  *          （呼び出し側が該当欄へフォーカスを移せるように返す）
  */
 /**
- * **3270 に無いキーの読み替え。** `undefined` は「この端末では押せない」。
+ * **3270 のキーの読み替えは画面では行わない。**
  *
- * | 5250 のキー | 3270 |
- * |---|---|
- * | `PageUp` / `PageDown` | **`F7` / `F8`** |
- * | `Attn` / `SysReq` | 押せない（基本 TN3270E には機能が無い） |
- * | `Help` / `Print` | 押せない（3270 に AID が無い） |
+ * 割り当てはホストの種類で変わる——IBM i では 3270 の `PF3` は F3 ではなく
+ * 「画面の消去」で、F1〜F12 は `PA1` ＋ `PFn` で送る。メインフレームは `PFn` がそのまま Fn。
+ * **どちらのホストかを知っているのはサーバーだけ**なので、表をここにも置くと必ずずれる。
  *
- * **ページ送りは実機で測って決めた**——IBM i を 3270 で操作すると
- * `PF8` で次ページ・`PF7` で前ページに動き、`PA1`/`PA2` では動かない
- * （社内機のサブファイル画面で確認）。x3270 も同じ割り当てのキーマップを同梱している。
+ * 以前はここで `PageUp` を `F7` に写していたが、F キーの送り方が変わると
+ * **ページ送りが F7 になって壊れる**。読み替えごとサーバーへ移した
+ * （`server/src/tn3270-adapt.ts` の `planKey3270`）。
  *
- * **読み替えを送信の一本道に置く**のが肝心——キーボード・状態バーのボタン・マクロが
- * 同じ関数を通るので、片方だけ直すと「キーボードでは動くのにボタンでは動かない」になる。
+ * 送れないキーは**サーバーが理由を返す**。
  */
-function aidFor3270(key: AidKey): AidKey | undefined {
-  if (key === "PageUp") return "F7";
-  if (key === "PageDown") return "F8";
-  if (key === "Attn" || key === "SysReq" || key === "Help" || key === "Print") return undefined;
-  return key;
-}
 
-/** 3270 で押せないキーを押されたときの案内（黙って捨てない） */
-const MSG_NOT_ON_3270 = "このキーは 3270 端末にはありません。";
 
 export function sendKey(
   sessionId: string,
@@ -456,16 +445,8 @@ export function sendKey(
       return hit;
     }
   }
-  // **端末の種類でキーを読み替える**（3270 には PageUp/Attn 等が無い）
-  let outKey = key;
-  if (s.meta?.terminal === "3270") {
-    const mapped = aidFor3270(key);
-    if (mapped === undefined) {
-      s.notice = MSG_NOT_ON_3270;
-      return;
-    }
-    outKey = mapped;
-  }
+  // **読み替えはしない**（上の注記）。3270 の割り当てはサーバーが決める
+  const outKey = key;
   delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）

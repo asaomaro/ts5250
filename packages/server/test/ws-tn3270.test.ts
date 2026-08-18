@@ -4,7 +4,7 @@ import { SessionManager } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { Tn3270Manager } from "../src/tn3270-manager.js";
-import { toAid3270, toWireScreen } from "../src/tn3270-adapt.js";
+import { planKey3270, toWireScreen } from "../src/tn3270-adapt.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
 import { startMini3270, type Mini3270 } from "../../tn3270/test/harness/mini3270.js";
 
@@ -165,14 +165,48 @@ describe("WS から 3270 端末を開く", () => {
 });
 
 describe("3270 → Web の変換", () => {
-  it("**使えないキーは読み替えずに拒否する**", () => {
-    expect(toAid3270("Enter")).toBe("enter");
-    expect(toAid3270("F13")).toBe("pf13");
-    expect(toAid3270("PA2")).toBe("pa2");
-    expect(toAid3270("Clear")).toBe("clear");
-    // 5250 にしか無いキー——F7 に化けさせない
-    for (const k of ["PageUp", "PageDown", "Help", "Print", "SysReq", "Attn", "F25"]) {
-      expect(() => toAid3270(k), k).toThrow(/not available/);
+  /**
+   * **キーの割り当てはホストの種類で変わる。**
+   *
+   * IBM i では 3270 の `PF3` は F3 ではなく「画面の消去」で、F1〜F12 は
+   * `PA1` ＋ `PFn`。メインフレーム（z/OS / TK4-）は `PFn` がそのまま Fn。
+   * 出典は IBM i 自身の「ヘルプ－ 3270 キーボード・マッピング」画面（実機で読んだ）。
+   */
+  it("Enter / Clear / PA は素の AID", () => {
+    for (const isIbmI of [true, false]) {
+      expect(planKey3270("Enter", isIbmI)).toEqual({ kind: "aid", aid: "enter" });
+      expect(planKey3270("Clear", isIbmI)).toEqual({ kind: "aid", aid: "clear" });
+      expect(planKey3270("PA2", isIbmI)).toEqual({ kind: "aid", aid: "pa2" });
+    }
+  });
+
+  it("**F キーは「F キーとして」渡す**（送り方はセッションが決める）", () => {
+    expect(planKey3270("F3", true)).toEqual({ kind: "functionKey", n: 3 });
+    expect(planKey3270("F3", false)).toEqual({ kind: "functionKey", n: 3 });
+    expect(planKey3270("F24", true)).toEqual({ kind: "functionKey", n: 24 });
+  });
+
+  it("**ページ送りは素の PF7 / PF8**（F7 / F8 とは別物）", () => {
+    // IBM i の PF7/PF8 は「前ページ・キー / 次ページ・キー」そのもの。
+    // F7 として送ると PA1 が前置され、**別のキーになる**
+    expect(planKey3270("PageUp", true)).toEqual({ kind: "aid", aid: "pf7" });
+    expect(planKey3270("PageDown", true)).toEqual({ kind: "aid", aid: "pf8" });
+    expect(planKey3270("PageUp", false)).toEqual({ kind: "aid", aid: "pf7" });
+  });
+
+  it("**Attn / SysReq / Help / Print は IBM i でだけ通る**", () => {
+    expect(planKey3270("Attn", true)).toEqual({ kind: "aid", aid: "pf9" });
+    expect(planKey3270("SysReq", true)).toEqual({ kind: "aid", aid: "pf11" });
+    expect(planKey3270("Help", true)).toEqual({ kind: "aid", aid: "pf1" });
+    expect(planKey3270("Print", true)).toEqual({ kind: "aid", aid: "pf4" });
+    for (const k of ["Attn", "SysReq", "Help", "Print"]) {
+      expect(() => planKey3270(k, false), k).toThrow(/メインフレーム/u);
+    }
+  });
+
+  it("知らないキーは理由を言って断る", () => {
+    for (const k of ["F25", "F0", "Roll", ""]) {
+      expect(() => planKey3270(k, true), k).toThrow(/3270 端末では送れません/u);
     }
   });
 

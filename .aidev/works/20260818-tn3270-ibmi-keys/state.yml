@@ -1,0 +1,9 @@
+schema: 3
+slug: tn3270-ibmi-keys
+current: review
+approved: [requirement, research, spec, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: tn3270-ibmi.md

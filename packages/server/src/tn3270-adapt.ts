@@ -81,19 +81,60 @@ export function toWireScreen(session: Tn3270Session, sessionId: string): ScreenS
 }
 
 /**
- * WS のキー名 → 3270 の AID。
+ * 押されたキーを**どう送るか**。
  *
- * **使えないキーは読み替えずに拒否する**（spec D4）——`PageUp` を `F7` に写すような
- * 気の利かせ方は、ホストのアプリが F7 に別の意味を持たせていたときに取り返しがつかない。
+ * - `aid` … その AID をそのまま送る
+ * - `functionKey` … **5250 の F キー**として送る（IBM i では `PA1` ＋ `PFn` の 2 往復）
  */
-export function toAid3270(key: string): Aid3270 {
-  if (key === "Enter") return "enter";
-  if (key === "Clear") return "clear";
+export type Key3270Plan = { kind: "aid"; aid: Aid3270 } | { kind: "functionKey"; n: number };
+
+/**
+ * IBM i でだけ割り当てのあるキー。
+ *
+ * 出典は **IBM i 自身**の「ヘルプ－ 3270 キーボード・マッピング」画面
+ * （3270 で繋いで `PF2`）。推測ではない。
+ */
+const IBMI_ONLY: Readonly<Record<string, Aid3270>> = {
+  Attn: "pf9", // アテンション
+  SysReq: "pf11", // システム要求
+  Help: "pf1", // 5250 ヘルプ・テキスト
+  Print: "pf4" // 画面の印刷
+};
+
+/**
+ * WS のキー名 → 送り方。
+ *
+ * ## なぜホストの種類で変わるのか
+ *
+ * **IBM i では 3270 の `PFn` は F キーではない。** `PF3` は「画面の消去」で、
+ * F1〜F12 を押すには `PA1` ＋ `PFn` を送る。メインフレーム（z/OS / TK4-）は
+ * `PFn` がそのまま Fn。**同じ表を両方に当てると必ずどちらかが壊れる。**
+ *
+ * ## ページ送りは F7 / F8 ではない
+ *
+ * IBM i の `PF7` / `PF8` は「前ページ・キー / 次ページ・キー」そのもの。
+ * **F7 / F8 として送ってはならない**（`PA1` を前置すると別のキーになる）。
+ * メインフレームでも `PF7` / `PF8` が慣行なので、どちらも素の AID を送る。
+ */
+export function planKey3270(key: string, isIbmI: boolean): Key3270Plan {
+  if (key === "Enter") return { kind: "aid", aid: "enter" };
+  if (key === "Clear") return { kind: "aid", aid: "clear" };
+  // **ページ送りは素の PF7 / PF8**（F7 / F8 とは別物）
+  if (key === "PageUp") return { kind: "aid", aid: "pf7" };
+  if (key === "PageDown") return { kind: "aid", aid: "pf8" };
   const pa = /^PA([123])$/.exec(key);
-  if (pa) return `pa${pa[1]}` as Aid3270;
+  if (pa) return { kind: "aid", aid: `pa${pa[1]}` as Aid3270 };
   const pf = /^F([1-9]|1[0-9]|2[0-4])$/.exec(key);
-  if (pf) return `pf${pf[1]}` as Aid3270;
-  throw new As400Error("PROTOCOL_ERROR", `key ${key} is not available on a 3270 terminal`);
+  if (pf) return { kind: "functionKey", n: Number(pf[1]) };
+  const only = IBMI_ONLY[key];
+  if (only !== undefined) {
+    if (isIbmI) return { kind: "aid", aid: only };
+    throw new As400Error(
+      "PROTOCOL_ERROR",
+      `${key} はこのホスト（メインフレーム）の 3270 には割り当てがありません`
+    );
+  }
+  throw new As400Error("PROTOCOL_ERROR", `${key} は 3270 端末では送れません`);
 }
 
 /**

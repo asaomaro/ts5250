@@ -17,7 +17,7 @@ import { withAudit } from "./audit.js";
 import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
 import type { MacroStore } from "./macro-store.js";
 import type { Tn3270Manager } from "./tn3270-manager.js";
-import { applyFields, toAid3270, toWireScreen } from "./tn3270-adapt.js";
+import { applyFields, planKey3270, toWireScreen } from "./tn3270-adapt.js";
 import { macroSecretRefSchema } from "./macro-types.js";
 
 const wsLog = childLog({ component: "ws-handler" });
@@ -527,10 +527,13 @@ export class WsConnection {
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = mgr.get(id, this.user?.username);
       if (entry.readOnly) throw new As400Error("READ_ONLY_SESSION", "session is read-only");
-      const aid = toAid3270(msg.key);
+      // **ホストの種類で送り方が変わる**（IBM i の F キーは `PA1` ＋ `PFn`）。
+      // 表はここ 1 か所にしか置かない——画面側にも置くと必ずずれる
+      const plan = planKey3270(msg.key, entry.session.isIbmI);
       if (msg.cursor) entry.session.setCursor(msg.cursor.row, msg.cursor.col);
       if (msg.fields && msg.fields.length > 0) applyFields(entry.session, msg.fields);
-      entry.session.send(aid);
+      if (plan.kind === "functionKey") await entry.session.sendFunctionKey(plan.n);
+      else entry.session.send(plan.aid);
       this.send({
         type: "key-done",
         sessionId: id,

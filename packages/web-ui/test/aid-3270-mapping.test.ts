@@ -23,17 +23,15 @@ import { openSession, sendKey } from "../src/session-controller.js";
 import { sessionsStore } from "../src/stores/sessions.js";
 
 /**
- * **3270 に無いキーの扱い。**
+ * **画面はキーを読み替えない。**
  *
- * 5250 の口には `PageUp` / `PageDown` / `Attn` / `SysReq` があるが、**3270 には無い**。
- * そのまま送るとサーバーが弾き、利用者には「押しても効かない」としか見えない
- * （実際にブラウザで踏んだ）。
+ * 3270 の割り当ては**ホストの種類で変わる**——IBM i では `PF3` は F3 ではなく
+ * 「画面の消去」で、F1〜F12 は `PA1` ＋ `PFn`。メインフレームは `PFn` がそのまま Fn。
+ * どちらかを知っているのは**サーバーだけ**なので、表を画面にも置くと必ずずれる。
  *
- * ページ送りは**実機で測って決めた**——IBM i を 3270 で操作すると `PF8` で次ページ・
- * `PF7` で前ページに動き、`PA1`/`PA2` では動かない。x3270 も同じ割り当てを同梱している。
- *
- * **読み替えは送信の一本道に置く**——キーボードも状態バーのボタンもここを通るので、
- * 片方だけ直すと「キーボードでは動くのにボタンでは動かない」になる。
+ * 以前はここで `PageUp` を `F7` に写していたが、F キーの送り方が変わると
+ * **ページ送りが F7 になって壊れる**。読み替えごとサーバーへ移した
+ * （`server/src/tn3270-adapt.ts` の `planKey3270`）。
  */
 const snap = (): ScreenSnapshot => ({
   sessionId: "s1", rows: 24, cols: 80, cursor: { row: 1, col: 1 },
@@ -51,26 +49,28 @@ async function open(terminal?: "5250" | "3270"): Promise<void> {
 const sentKey = (): string | undefined =>
   (captured.send.mock.calls.at(-1)?.[0] as { key?: string } | undefined)?.key;
 
-describe("3270 で押せないキーの読み替え", () => {
+describe("3270 でもキーはそのまま送る", () => {
   beforeEach(() => {
     sessionsStore.byId.clear();
     sessionsStore.order = [];
   });
 
-  it("**PageDown は F8、PageUp は F7 として出る**（実機で測った割り当て）", async () => {
+  it("**ページ送りは読み替えない**（サーバーが素の PF7 / PF8 に落とす）", async () => {
     await open("3270");
     sendKey("s1", "PageDown");
-    expect(sentKey()).toBe("F8");
+    expect(sentKey()).toBe("PageDown");
     sessionsStore.get("s1")!.busy = false;
     sendKey("s1", "PageUp");
-    expect(sentKey()).toBe("F7");
+    expect(sentKey()).toBe("PageUp");
   });
 
-  it("**Attn / SysReq は送らずに案内を出す**（黙って捨てない）", async () => {
+  it("**Attn / SysReq も送る**（IBM i では使える。断るならサーバーが理由を返す）", async () => {
     await open("3270");
     sendKey("s1", "Attn");
-    expect(captured.send).not.toHaveBeenCalled();
-    expect(sessionsStore.get("s1")!.notice).toMatch(/3270/);
+    expect(sentKey()).toBe("Attn");
+    sessionsStore.get("s1")!.busy = false;
+    sendKey("s1", "SysReq");
+    expect(sentKey()).toBe("SysReq");
   });
 
   it("**F キーと Enter はそのまま**", async () => {

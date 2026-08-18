@@ -126,6 +126,26 @@ export class Tn3270Session {
     return this.telnet?.deviceName;
   }
 
+  /** ホストが NEW-ENVIRON を交渉してきたか（素の事実） */
+  get negotiatedNewEnviron(): boolean {
+    return this.telnet?.negotiatedNewEnviron ?? false;
+  }
+
+  /**
+   * **相手が IBM i か。**
+   *
+   * 根拠は「NEW-ENVIRON を交渉してきたか」——実測で IBM i だけが `DO NEW-ENVIRON` を出し、
+   * 5250 流のシードまで送ってくる。TK4- / z/OS は出さない。
+   *
+   * **`isTn3270e` では見分けられない**。IBM i は `DO TN3270E` を提示しない（実測）。
+   *
+   * これが要るのは**キーの割り当てが違う**ため。IBM i では 3270 の `PF3` は F3 ではなく
+   * 「画面の消去」で、5250 の F1〜F12 は `PA1` ＋ `PFn` で送る（`sendFunctionKey`）。
+   */
+  get isIbmI(): boolean {
+    return this.negotiatedNewEnviron;
+  }
+
   on<K extends keyof Events>(event: K, fn: (...args: Events[K]) => void): void {
     this.events.on(event, fn);
   }
@@ -637,6 +657,55 @@ export class Tn3270Session {
     this.screen.setKeyboardLocked(true);
     this.state = "locked";
     log.debug(`sent AID ${key}${isShortForm(key) ? " (short form)" : ""}`);
+  }
+
+  /**
+   * **5250 の F キー（1〜24）を送る。**
+   *
+   * IBM i では 3270 の `PFn` は F キーではない——`PF3` は「画面の消去」で、
+   * F キーを押すには **`PA1` を押してから `PFn`** を押す（IBM i 自身の
+   * 「ヘルプ－ 3270 キーボード・マッピング」画面。3270 で繋いで `PF2`）。
+   *
+   * ```
+   * PA1 PF1..PF12 → F1..F12
+   * PA2 PF1..PF12 → F13..F24
+   * ```
+   *
+   * **F13〜F24 は素の `PF13`〜`PF24` で足りる**（実測。往復が 1 回で済むので短い方を採る）。
+   *
+   * `PA1` を送ると**キーボードが施錠される**ので、解けるのを待ってから `PFn` を送る。
+   * 実測では **31 ミリ秒**で解けた。解けなければ時間切れで断る——
+   * 黙って握ると「押したのに何も起きない」になり、原因にたどり着けない。
+   *
+   * メインフレーム（z/OS / TK4-）では素の `PFn` をそのまま送る（従来どおり）。
+   */
+  async sendFunctionKey(n: number, opts: { timeoutMs?: number } = {}): Promise<void> {
+    if (!Number.isInteger(n) || n < 1 || n > 24) {
+      throw new As400Error("PROTOCOL_ERROR", `F${n} は 1〜24 の範囲外です`);
+    }
+    const pf = `pf${n}` as AidKey;
+    // IBM i でも F13〜F24 は素の PFn（実測）
+    if (!this.isIbmI || n > 12) {
+      this.send(pf);
+      return;
+    }
+    this.send("pa1");
+    await this.waitUnlocked(opts.timeoutMs ?? 5000, `F${n}`);
+    this.send(pf);
+  }
+
+  /** 施錠が解けるまで待つ。解けなければ**理由を言って断る** */
+  private async waitUnlocked(timeoutMs: number, what: string): Promise<void> {
+    const started = Date.now();
+    while (this.screen.keyboardLocked) {
+      if (Date.now() - started >= timeoutMs) {
+        throw new As400Error(
+          "KEYBOARD_LOCKED",
+          `${what}: PA1 のあとホストが ${timeoutMs}ms たっても入力を許しませんでした`
+        );
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
   }
 
   /** 変更された欄（MDT が立っている欄）の一覧。デバッグ・検証用 */
