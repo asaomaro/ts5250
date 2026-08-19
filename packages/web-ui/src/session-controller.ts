@@ -412,6 +412,21 @@ export function stopPrinter(sessionId: string): void {
  * @returns 必須検証で止めたときはその違反。送ったときは `undefined`
  *          （呼び出し側が該当欄へフォーカスを移せるように返す）
  */
+/**
+ * **3270 のキーの読み替えは画面では行わない。**
+ *
+ * 割り当てはホストの種類で変わる——IBM i では 3270 の `PF3` は F3 ではなく
+ * 「画面の消去」で、F1〜F12 は `PA1` ＋ `PFn` で送る。メインフレームは `PFn` がそのまま Fn。
+ * **どちらのホストかを知っているのはサーバーだけ**なので、表をここにも置くと必ずずれる。
+ *
+ * 以前はここで `PageUp` を `F7` に写していたが、F キーの送り方が変わると
+ * **ページ送りが F7 になって壊れる**。読み替えごとサーバーへ移した
+ * （`server/src/tn3270-adapt.ts` の `planKey3270`）。
+ *
+ * 送れないキーは**サーバーが理由を返す**。
+ */
+
+
 export function sendKey(
   sessionId: string,
   key: AidKey,
@@ -430,13 +445,16 @@ export function sendKey(
       return hit;
     }
   }
+  // **読み替えはしない**（上の注記）。3270 の割り当てはサーバーが決める
+  const outKey = key;
   delete s.notice; // 前回の通知は次の操作で消す
   const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
-  recordSend(sessionId, key, cursor ?? s.cursor, sysReqText);
+  // **記録は送った側のキー**——再生したときに同じことが起きるように
+  recordSend(sessionId, outKey, cursor ?? s.cursor, sysReqText);
   s.client.send({
     type: "key",
-    key,
+    key: outKey,
     ...(cursor ? { cursor } : {}),
     ...(fields.length > 0 ? { fields } : {}),
     ...(sysReqText !== undefined ? { sysReqText } : {})

@@ -254,6 +254,18 @@ const sessionBase = {
   system: z.string().min(1),
   sessionType: sessionTypeSchema,
   /**
+   * **端末の種類**（既定 5250）。`display` にだけ意味がある。
+   *
+   * `sessionType` と分けてあるのは**軸が直交する**ため——あちらは
+   * セッションの種別（画面／プリンター／監視）で、こちらは端末の種類。
+   */
+  terminal: z.enum(["5250", "3270"]).optional(),
+  /**
+   * 3270 のモデル（既定 2）。代替画面サイズを決める。
+   * **2（24x80）と 5（27x132）だけ**——3（32 行）・4（43 行）は web-ui の画面型に収まらない。
+   */
+  model3270: z.union([z.literal(2), z.literal(5)]).optional(),
+  /**
    * 開いた直後／サーバー起動直後に**待ち受けを開始するか**（既定 true）。
    * `printer` と `dtaqwatch` にだけ意味がある（`display` は画面なので常に開く）。
    */
@@ -586,6 +598,10 @@ export interface PublicSession {
   name: string;
   system: string;
   sessionType: SessionType;
+  /** 端末の種類（既定 5250）。`display` にだけ意味がある */
+  terminal?: "5250" | "3270";
+  /** 3270 のモデル（既定 2）。2 と 5 のみ */
+  model3270?: 2 | 5;
   deviceName?: string;
   /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
   rescueAction?: "hold" | "delete";

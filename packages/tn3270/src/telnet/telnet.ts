@@ -84,6 +84,14 @@ export class TelnetLayer {
   /** TN3270E の交渉器。`DO TN3270E` を受理したときだけ作る */
   private tn3270e: Tn3270eNegotiator | undefined;
   private tn3270eFailure: string | undefined;
+  /**
+   * ホストが NEW-ENVIRON を交渉してきたか。
+   *
+   * **これが IBM i の見分けになる**（実測）。IBM i は `DO NEW-ENVIRON` を出し、
+   * 5250 流のシード（`IBMRSEED …`）まで送ってくる。TK4- / z/OS は出さない。
+   * `DO TN3270E` では見分けられない——**IBM i は TN3270E を提示しない**（実測）。
+   */
+  private sawNewEnviron = false;
 
   constructor(
     private readonly transport: Transport,
@@ -107,6 +115,11 @@ export class TelnetLayer {
   }
 
   /** TN3270E の交渉が失敗した理由（REJECT / impasse）。成功なら undefined */
+  /** ホストが NEW-ENVIRON を交渉してきたか（IBM i の見分けに使う素の事実） */
+  get negotiatedNewEnviron(): boolean {
+    return this.sawNewEnviron;
+  }
+
   get tn3270eError(): string | undefined {
     return this.tn3270eFailure;
   }
@@ -258,6 +271,9 @@ export class TelnetLayer {
   private markAgreed(opt: number): void {
     if (opt === OPT.BINARY) this.binaryAgreed = true;
     if (opt === OPT.END_OF_RECORD) this.eorAgreed = true;
+    // **端末タイプを送るより前に立てる必要がある**（`sendTerminalType` が見る）。
+    // 実測の順は `DO NEW-ENVIRON` → `SB TERMINAL-TYPE SEND` なので、DO で立てれば間に合う
+    if (opt === OPT.NEW_ENVIRON) this.sawNewEnviron = true;
     if (opt === OPT.TN3270E && this.tn3270e === undefined) {
       // `WILL TN3270E` を返した。以降のサブネゴシエーションは交渉器に委ねる
       const o: Tn3270eOptions = { deviceType: this.opts.deviceType! };
@@ -313,7 +329,11 @@ export class TelnetLayer {
       i++;
     }
     if (opt === OPT.TERMINAL_TYPE && body[0] === TT_SEND) this.sendTerminalType();
-    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) this.sendEnviron();
+    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) {
+      // **ここが IBM i の印**。SEND を投げてくるのは IBM i だけ（実測）
+      this.sawNewEnviron = true;
+      this.sendEnviron();
+    }
     if (opt === OPT.TN3270E) this.handleTn3270e(body);
     return i;
   }
@@ -323,6 +343,22 @@ export class TelnetLayer {
    *
    * **ホストが要求した変数を選り分けずに、こちらが申告したいものを IS で返す**
    * （RFC 1572 は要求に無い変数を返すことを許す）。IBM i はこれでデバイスを作る。
+   *
+   * ## 装置名はここで渡す（`@名前` ではない）
+   *
+   * IBM i は **`DEVNAME`（RFC 4777）で装置名を受け取る**。実測（pub400）:
+   *
+   * ```
+   * 装置名なし        → Display name: QPADEV000N
+   * DEVNAME=TSTDEV01 → Display name: **TSTDEV01**
+   * ```
+   *
+   * 一方、端末タイプに `@名前` を付けると**交渉が 15 秒で時間切れ**になる
+   * （pub400 / 実機の 2 台で同じ）。だから IBM i には `@名前` を付けない。
+   *
+   * ⚠ **受け入れるかはホストの設定次第。** 実機は同じ要求で
+   * **画面を送らずに接続を閉じる**（仮想装置の自動作成が効いていない等）。
+   * そのときは `session.ts` が理由を添えて閉じる。
    */
   private sendEnviron(): void {
     const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
@@ -371,12 +407,18 @@ export class TelnetLayer {
   }
 
   private sendTerminalType(): void {
-    // **`@<装置名>` は基本 TN3270 の慣行**。TN3270E では `CONNECT` で渡すので付けない
+    // **`@<装置名>` は基本 TN3270 の慣行**。TN3270E では `CONNECT` で渡すので付けない。
+    //
+    // **IBM i には付けてはならない。** あちらは装置名を NEW-ENVIRON の `DEVNAME` で
+    // 受け取り、`IBM-3279-2-E@AS3270A` という端末タイプは解さない——実測で
+    // **交渉が 15 秒で時間切れ**になった。`DEVNAME` は `sendEnviron` が既に送っている。
     const base = this.opts.terminalType;
-    const name =
-      this.opts.deviceName !== undefined && !base.includes("@") && this.tn3270e === undefined
-        ? `${base}@${this.opts.deviceName}`
-        : base;
+    const useSuffix =
+      this.opts.deviceName !== undefined &&
+      !base.includes("@") &&
+      this.tn3270e === undefined &&
+      !this.sawNewEnviron;
+    const name = useSuffix ? `${base}@${this.opts.deviceName}` : base;
     const out: number[] = [IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_IS];
     for (let k = 0; k < name.length; k++) {
       const c = name.charCodeAt(k) & 0xff; // 端末タイプ名は ASCII

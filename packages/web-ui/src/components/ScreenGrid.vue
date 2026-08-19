@@ -1139,7 +1139,11 @@ const rows = computed<Segment[][]>(() => {
     while (c < snap.cols) {
       const addr = r * snap.cols + c;
       const start = sliceStart.get(addr);
-      if (start) {
+      // **幅 0 のスライスは桁を占めない**——入力欄も置かず、桁も進めない。
+      // ここで `c += 0` すると**同じ桁を回り続けて segs が無限に伸び、タブごと落ちる**。
+      // 3270 は属性桁が隣接すると**長さ 0 の欄**ができる（IBM i の 3270 変換で実際に出た）。
+      // 5250 では起きないので、この形は今回初めて踏んだ。
+      if (start && start.width > 0) {
         // スライス内の色バンド（埋め込み属性で欄途中の色が変わる場合に 2 つ以上になる）
         const bands = inputColorBands(row, c, start.width);
         // スライス＝この行に出るぶんだけの input（行またぎ欄は行ごとに 1 つずつ）

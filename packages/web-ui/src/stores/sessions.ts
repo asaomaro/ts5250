@@ -20,6 +20,8 @@ export interface SessionMeta {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   sessionType?: "display" | "printer";
+  /** 端末の種類（既定 5250）。**使えるキーが変わる**ので送信側が見る */
+  terminal?: "5250" | "3270";
   autoSignon?: boolean;
   signonUser?: string;
 }

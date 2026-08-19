@@ -44,6 +44,42 @@ describe.skipIf(!enabled)("TK4- との telnet 交渉（実接続）", () => {
     }
   }, 30_000);
 
+  /**
+   * **`deviceName` を渡すと `@名前` が付く経路**を実ホストで通す。
+   *
+   * 上の試験は `terminalTypeFor({ deviceName })` で**あらかじめ名前を埋めた**文字列を渡すので、
+   * `TelnetLayer` が自分で `@名前` を付ける道は通らない。そちらは
+   * 「IBM i（NEW-ENVIRON を交渉するホスト）には付けない」という条件を持つようになったので、
+   * **付ける側**が実ホストで壊れていないことを直接見る。
+   */
+  it("**`deviceName` を渡すと `@名前` を付けて掴める**（NEW-ENVIRON を出さないホスト）", async () => {
+    const transport = await TcpTransport.connect({ host, port, connectTimeoutMs: 10_000 });
+    const sent: string[] = [];
+    const tap = {
+      send(d: Uint8Array) {
+        sent.push([...d].map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join(""));
+        transport.send(d);
+      },
+      close: () => transport.close(),
+      onData: (fn: (d: Uint8Array) => void) => transport.onData(fn),
+      onClose: (fn: (r: string) => void) => transport.onClose(fn),
+      onError: (fn: (e: Error) => void) => transport.onError(fn),
+      start: () => transport.start?.()
+    };
+    try {
+      const telnet = new TelnetLayer(tap, {
+        terminalType: terminalTypeFor({ model: 2 }),
+        deviceName: "03C0"
+      });
+      const negotiated = new Promise<void>((resolve) => telnet.onNegotiated(resolve));
+      await withTimeout(negotiated, 10_000, "`@名前` つきの交渉が終わらない");
+      // 端末タイプに `@03C0` を載せて送ったこと自体も見る（交渉成立だけだと素通りしうる）
+      expect(sent.join(" ")).toContain("@03C0");
+    } finally {
+      transport.close();
+    }
+  }, 30_000);
+
   it("TSO 端末（03C0）を装置指定で掴める", async () => {
     const transport = await TcpTransport.connect({ host, port, connectTimeoutMs: 10_000 });
     try {

@@ -87,6 +87,8 @@ const sesForm = reactive<SesFormState>({
   name: "",
   system: "",
   sessionType: "display",
+  terminal: "5250" as "5250" | "3270",
+  model3270: 2 as 2 | 5,
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
@@ -307,6 +309,8 @@ function loadSession(): void {
   sesForm.autoStart = s.autoStart;
   sesForm.system = s.system;
   sesForm.sessionType = s.sessionType;
+  sesForm.terminal = s.terminal ?? "5250";
+  sesForm.model3270 = s.model3270 ?? 2;
   sesForm.deviceName = s.deviceName ?? "";
   sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.transformTo = s.transformTo ?? "";
@@ -480,6 +484,17 @@ async function save(): Promise<void> {
       const tt = (sesForm.transformTo ?? "").trim();
       if (tt) form.transformTo = tt;
       else delete form.transformTo;
+      // **既定（5250）は保存しない**——設定ファイルに既定値を書き散らさない。
+      // 3270 のときは画面サイズ（5250 の語彙）を送らず、代わりにモデルを送る
+      if (sesForm.terminal === "3270") {
+        form.terminal = "3270";
+        form.model3270 = sesForm.model3270 ?? 2;
+        delete form.screenSize;
+        delete form.enhanced;
+      } else {
+        delete form.terminal;
+        delete form.model3270;
+      }
       // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
       // 外した**ので、画面から保存した定義は必ず自分の値を持つ
       // （`--idle-timeout` は、手書きで未指定のままの定義にだけ効く）
@@ -521,6 +536,9 @@ async function save(): Promise<void> {
         delete form.screenSize;
         delete form.enhanced;
         delete form.watermark; // 透かしは画面のもの。プリンターには持たせない
+        // 端末の種類は display のもの
+        delete form.terminal;
+        delete form.model3270;
       } else {
         // display は printer 専用項目を送らない
         delete form.rescueAction;
@@ -616,6 +634,11 @@ const typeIcon = computed(() =>
         ? "🔔"
         : "🖥"
 );
+/**
+ * 一覧の札。**画面のセッションは端末の種類まで出す**——
+ * `sessionType` は「何をするか」しか言わないので、`display` を一律 `5250 端末` と
+ * 呼ぶと 3270 のセッションが 5250 に見える。一覧はここでしか見分けられない。
+ */
 const typeLabel = computed(() =>
   props.session?.sessionType === "printer"
     ? "プリンター"
@@ -623,7 +646,9 @@ const typeLabel = computed(() =>
       ? "待ち行列監視"
       : props.session?.sessionType === "msgwatch"
         ? "メッセージ待ち受け"
-        : "5250 端末"
+        : props.session?.terminal === "3270"
+          ? "3270 端末"
+          : "5250 端末"
 );
 
 /** 詳細（ⓘ）の開閉。旧 UI にあった接続設定の詳細表示を引き継ぐ */
@@ -745,7 +770,9 @@ const infoRows = computed(() => {
         <span v-if="system?.ccsid"> ccsid {{ system.ccsid }}</span>
       </div>
       <div v-else class="meta">
-        <span v-if="session?.screenSize">{{ session.screenSize }}</span
+        <!-- 3270 は `screenSize` を持たない（モデルで決まる）ので、そのままだと空欄になる -->
+        <span v-if="session?.terminal === '3270'">モデル {{ session?.model3270 ?? 2 }}</span>
+        <span v-else-if="session?.screenSize">{{ session.screenSize }}</span
         ><br />
         {{ session?.deviceName || "装置名なし" }}
         <span v-if="session?.ccsid"> ccsid {{ session.ccsid }}</span>
@@ -883,13 +910,27 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">名前</span><input v-model="sesForm.name" /></label>
+        <!--
+          **「種類」と「端末の種類」は軸が違う**（`config-types.ts` の注記）。
+          種類はセッションが何をするか（画面／プリンター／監視）、端末の種類はどの端末か。
+          だから種類の選択肢に 5250 と書かない——書くと「5250 表示なのに 3270」になる。
+          決めるものと決まるものを離さないため、端末の種類はすぐ隣に置く
+          （この下の 画面サイズ／モデル が端末の種類で入れ替わる）。
+        -->
         <label class="row">
           <span class="cap">種類</span>
           <select v-model="sesForm.sessionType" :disabled="!creating">
-            <option value="display">5250 表示</option>
+            <option value="display">表示（画面）</option>
             <option value="printer">プリンター</option>
             <option value="dtaqwatch">待ち行列監視</option>
             <option value="msgwatch">メッセージ待ち受け</option>
+          </select>
+        </label>
+        <label v-if="sesForm.sessionType === 'display'" class="row">
+          <span class="cap">端末の種類</span>
+          <select v-model="sesForm.terminal">
+            <option value="5250">5250（IBM i）</option>
+            <option value="3270">3270（メインフレーム）</option>
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
@@ -981,10 +1022,17 @@ const infoRows = computed(() => {
             開いたら開始
           </span>
         </label>
-        <label v-if="sesForm.sessionType === 'display'" class="row">
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal !== '3270'" class="row">
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">
             <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </select>
+        </label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '3270'" class="row">
+          <span class="cap">モデル</span>
+          <select v-model.number="sesForm.model3270">
+            <option :value="2">2（24x80）</option>
+            <option :value="5">5（27x132）</option>
           </select>
         </label>
         <label class="row">

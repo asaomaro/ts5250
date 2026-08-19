@@ -5,6 +5,7 @@ import { upgradeWebSocket } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { buildMcpServer } from "./mcp-server.js";
 import { WsConnection } from "./ws-handler.js";
+import { Tn3270Manager } from "./tn3270-manager.js";
 import { renderSpoolPdf } from "./pdf.js";
 import {
   assertOwner,
@@ -46,6 +47,11 @@ export interface AppDeps extends ToolDeps {
   auth?: AuthContext;
   /** 監査ログバッファ（管理者画面のログ取得用） */
   audit?: AuditBuffer;
+  /**
+   * **3270 端末のセッション**。未指定なら内部で 1 つ作る
+   * （5250 と別枠で持つ理由は 3270 側 spec D5）。
+   */
+  tn3270?: Tn3270Manager;
   /**
    * マクロ（画面操作の記録・再生）のストア。未指定なら**メモリのみ**で動く
    * （テスト・組み込み経路。永続化しないだけで機能は同じ）。
@@ -175,6 +181,8 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
 
   // マクロの CRUD。認可は MacroStore の assertOwner に集約する（経路ごとに書かない）
   const macros = deps.macros ?? new MacroStore();
+  // **3270 は 5250 と別枠**。渡されなければここで作る（既定で有効）
+  const tn3270 = deps.tn3270 ?? new Tn3270Manager();
   registerMacroRoutes(app, { macros });
 
   // ジョブ・オブジェクト・ユーザー一覧（接続を持つユーザーなら誰でも。
@@ -311,7 +319,7 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
         onOpen(_evt, ws) {
           conn = new WsConnection(
             // マクロの秘密は ws 経路でしか解決しない（spec D11）。同じストアを渡す
-            { ...deps, macros, watches },
+            { ...deps, macros, watches, tn3270 },
             {
               send: (data) => ws.send(data),
               close: () => ws.close()
