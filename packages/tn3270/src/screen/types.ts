@@ -35,6 +35,11 @@ export interface Cell {
   char: string;
   kind: CellKind;
   color: ScreenColor;
+  /**
+   * **背景色**（`XA.BACKGROUND`）。指定が無ければ `default`。
+   * 3279 の拡張属性で、実際に使うホストは多くないが**応答モードで返す必要がある**ので持っている。
+   */
+  background: ScreenColor;
   intensified: boolean;
   reverse: boolean;
   underline: boolean;

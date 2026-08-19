@@ -1,6 +1,7 @@
 import { childLog } from "@ts5250/base";
 import { ByteReader } from "./bytes.js";
 import { CMD3270, ORDER, WCC, XA, SO, SI, normalizeCommand } from "./constants.js";
+import { normalizeDbcs } from "../screen/dbcs.js";
 import { decodeAddress } from "./address.js";
 import type { Screen3270 } from "../screen/buffer.js";
 import { splitStructuredFields, asQueryRequest, SF_TYPE, type QueryRequest } from "./query-reply.js";
@@ -38,9 +39,37 @@ export interface InboundResult {
   structuredField?: QueryRequest;
   /** 未知のコマンド／オーダー。**落とさずに記録する**（spec のエラー処理） */
   unknown: UnknownItem[];
+  /**
+   * **応答モードの指定**（`Set Reply Mode`）。受け取ったらセッションが覚える。
+   * `types` は文字モードで載せる属性の種類（ホストが並べてくる）。
+   */
+  replyMode?: { mode: number; types: number[] };
+  /**
+   * **応答モードを既定へ戻す合図。**
+   *
+   * 条件は 2 つ揃ったときだけ——**`Erase/Write` 系**であり、かつ
+   * **WCC のリセットビット（0x40）が立っている**こと。
+   * 「`Erase/Write` なら戻る」と思って書いたら s3270 と食い違った
+   * （`WCC.RESTORE` だけの `Erase/Write` では戻らない）。
+   */
+  resetReplyMode?: boolean;
 }
 
-export function applyInbound(screen: Screen3270, record: Uint8Array): InboundResult {
+export interface InboundOptions {
+  /**
+   * **DBCS のセッションか**（CCSID 930 / 939 など）。
+   *
+   * 立っているときだけ、書き込みの後に DBCS の後始末をする（`normalizeDbcs`）。
+   * x3270 も同じ作りで、SBCS のコードページでは DBCS の対を一切作らない。
+   */
+  dbcs?: boolean;
+}
+
+export function applyInbound(
+  screen: Screen3270,
+  record: Uint8Array,
+  opts: InboundOptions = {}
+): InboundResult {
   const r = new ByteReader(record);
   const result: InboundResult = {
     keyboardRestored: false,
@@ -57,17 +86,19 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
   switch (command) {
     case CMD3270.ERASE_WRITE:
       screen.resize(false); // 標準 24x80（spec D5）
-      applyWcc(screen, r.u8(), result);
+      applyWcc(screen, r.u8(), result, true);
       break;
     case CMD3270.ERASE_WRITE_ALTERNATE:
       screen.resize(true); // 代替サイズ（spec D5）
-      applyWcc(screen, r.u8(), result);
+      applyWcc(screen, r.u8(), result, true);
       break;
     case CMD3270.WRITE:
       applyWcc(screen, r.u8(), result);
       break;
     case CMD3270.ERASE_ALL_UNPROTECTED:
       screen.eraseUnprotected();
+      // **カーソルは最初の非保護桁へ**（実測。非保護欄が無ければ 0）
+      screen.setCursor(screen.firstUnprotected());
       screen.setKeyboardLocked(false);
       result.keyboardRestored = true;
       return result; // WCC もオーダーも無い
@@ -95,16 +126,24 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
           // 封筒を開けて中身を適用する。body の先頭 1 バイトはパーティション ID
           const inner = sf.body.subarray(1);
           if (inner.length > 0) {
-            const r = applyInbound(screen, inner);
+            const r = applyInbound(screen, inner, opts);
             result.keyboardRestored ||= r.keyboardRestored;
             result.resetMdt ||= r.resetMdt;
             result.alarm ||= r.alarm;
             result.unknown.push(...r.unknown);
             if (r.read !== null) result.read = r.read;
+            if (r.replyMode !== undefined) result.replyMode = r.replyMode;
+            if (r.resetReplyMode === true) result.resetReplyMode = true;
           }
           continue;
         }
-        if (sf.type === SF_TYPE.SET_REPLY_MODE) continue; // 返すものは無い
+        if (sf.type === SF_TYPE.SET_REPLY_MODE) {
+          // body: パーティション ID(1) ＋ モード(1) ＋ 文字モードで載せる属性の種類…
+          if (sf.body.length >= 2) {
+            result.replyMode = { mode: sf.body[1]!, types: [...sf.body.subarray(2)] };
+          }
+          continue; // 応答は返さない（実測）
+        }
         result.unknown.push({ kind: "structured-field", byte: sf.type, offset: 0 });
       }
       return result;
@@ -116,10 +155,20 @@ export function applyInbound(screen: Screen3270, record: Uint8Array): InboundRes
   }
 
   applyOrders(screen, r, result);
+  // **書き込みの後始末**——成立しない DBCS の対を空白に、宙に浮いた左半分を NUL にする。
+  // 表示だけでなく**送り返すバイト**に効く（DBCS 欄の余りは空白として送られる）
+  if (opts.dbcs === true) normalizeDbcs(screen);
   return result;
 }
 
-function applyWcc(screen: Screen3270, wcc: number, result: InboundResult): void {
+function applyWcc(
+  screen: Screen3270,
+  wcc: number,
+  result: InboundResult,
+  erase = false
+): void {
+  // **消して書く＋リセットビット**の両方が揃ったときだけ応答モードが戻る（実測）
+  if (erase && (wcc & WCC.RESET) !== 0) result.resetReplyMode = true;
   if ((wcc & WCC.RESET_MDT) !== 0) {
     screen.resetAllMdt();
     result.resetMdt = true;
@@ -136,6 +185,9 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
   // SA が設定した拡張属性は**以降の文字に効く**。record 内だけのローカル状態
   let curColor = 0;
   let curHilite = 0;
+  /** `SA` で指定中の文字セット（`CHARSET.DBCS` なら以降の文字が DBCS） */
+  let curCharset = 0;
+  let curBg = 0;
   /**
    * DBCS 区間（SO 〜 SI）の中か。
    *
@@ -146,8 +198,9 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
   let inDbcs = false;
 
   const put = (byte: number): void => {
-    screen.writeChar(addr, byte);
+    screen.writeChar(addr, byte, curCharset);
     screen.setExt(addr, curColor, curHilite);
+    screen.setBackground(addr, curBg);
     addr = screen.wrap(addr + 1);
   };
 
@@ -175,9 +228,9 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
       case ORDER.SF: {
         const attr = r.u8();
         screen.startField(addr, attr);
+        // **`SA` の指定は欄をまたいで生き続ける**——属性桁を置いても消えない（実測）。
+        // 消えるのは `SA 00 00` と、次の書き込みコマンドの先頭
         addr = screen.wrap(addr + 1); // **属性は 1 桁を占める**
-        curColor = 0;
-        curHilite = 0;
         break;
       }
       case ORDER.SFE: {
@@ -185,19 +238,29 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         let attr = 0;
         let color = 0;
         let hilite = 0;
+        let bg = 0;
+        let charset = 0;
+        let inputCtl = false;
         for (let i = 0; i < pairs; i++) {
           const type = r.u8();
           const value = r.u8();
           if (type === XA.BASIC) attr = value;
           else if (type === XA.FOREGROUND) color = value;
           else if (type === XA.HIGHLIGHT) hilite = value;
+          else if (type === XA.BACKGROUND) bg = value;
+          else if (type === XA.CHARSET) charset = value;
+          else if (type === XA.INPUT_CONTROL) inputCtl = value === 1;
           // 未知の type は無視（落とさない）
         }
         screen.startField(addr, attr);
         screen.setExt(addr, color, hilite);
+        // **属性桁に置いた文字セットは欄全体に効く**——DBCS 欄はこれで作る（SO/SI は要らない）
+        screen.setCharset(addr, charset);
+        screen.setInputControl(addr, inputCtl);
+        screen.setBackground(addr, bg);
+        // **欄の拡張属性は属性桁に置くだけ**——文字側には配らない。
+        // 表示のときに「文字の指定が無ければ欄の指定」を引く（x3270 と同じ解き方）
         addr = screen.wrap(addr + 1);
-        curColor = color;
-        curHilite = hilite;
         break;
       }
       case ORDER.SA: {
@@ -205,9 +268,14 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         const value = r.u8();
         if (type === XA.FOREGROUND) curColor = value;
         else if (type === XA.HIGHLIGHT) curHilite = value;
-        else if (type === XA.BASIC && value === 0) {
+        else if (type === XA.BACKGROUND) curBg = value;
+        else if (type === XA.CHARSET) curCharset = value;
+        else if (type === XA.ALL) {
+          // **まとめて取り消し**。0xc0 ではなく 0x00 で見る（x3270 実測）
           curColor = 0;
           curHilite = 0;
+          curBg = 0;
+          curCharset = 0;
         }
         break;
       }
@@ -220,6 +288,9 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
           if (type === XA.BASIC && screen.isAttrPos(addr)) screen.startField(addr, value);
           else if (type === XA.FOREGROUND) screen.setExt(addr, value, screen.extAt(addr).hilite);
           else if (type === XA.HIGHLIGHT) screen.setExt(addr, screen.extAt(addr).color, value);
+          else if (type === XA.BACKGROUND) screen.setBackground(addr, value);
+          else if (type === XA.CHARSET) screen.setCharset(addr, value);
+          else if (type === XA.INPUT_CONTROL) screen.setInputControl(addr, value === 1);
         }
         addr = screen.wrap(addr + 1);
         break;
@@ -237,8 +308,9 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         let p = addr;
         const n = screen.size;
         for (let i = 0; i < n; i++) {
-          screen.writeChar(p, ch);
+          screen.writeChar(p, ch, curCharset);
           screen.setExt(p, curColor, curHilite);
+          screen.setBackground(p, curBg);
           p = screen.wrap(p + 1);
           if (p === stop) break;
         }
@@ -252,9 +324,12 @@ function applyOrders(screen: Screen3270, r: ByteReader, result: InboundResult): 
         break;
       }
       case ORDER.GE: {
-        // 次の 1 文字は拡張文字集合。**文字としては普通に置く**
-        // （どの集合かは Query Reply で申告した範囲にしか来ないため）
-        put(r.u8());
+        // **次の 1 バイトは代替文字集合**（APL 記号・罫線素片）。
+        // 通常の EBCDIC として置くと `GE 0xC1` が `A` になってしまう（実測で発覚）
+        screen.writeCharGe(addr, r.u8());
+        screen.setExt(addr, curColor, curHilite);
+        screen.setBackground(addr, curBg);
+        addr = screen.wrap(addr + 1);
         break;
       }
       default:

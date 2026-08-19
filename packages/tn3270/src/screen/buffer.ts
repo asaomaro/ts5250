@@ -41,6 +41,19 @@ export class Screen3270 {
   /** 拡張属性（SFE / SA / MF が設定）。桁ごと */
   private extColor: Uint8Array;
   private extHilite: Uint8Array;
+  /**
+   * 1 = その桁は `GE`（Graphic Escape）で置かれた＝**代替文字集合**として読む。
+   *
+   * 生バイトだけでは通常の EBCDIC と区別できないので、印を別に持つ。
+   * 「保持は生バイト、意味は導出」の方針は保ったまま、**導出に必要な情報だけ**を足している。
+   */
+  private geMark: Uint8Array;
+  /** 桁ごとの文字セット属性（`XA.CHARSET` の値）。0 は基本文字集合 */
+  private extCharset: Uint8Array;
+  /** 桁ごとの背景色（`XA.BACKGROUND`） */
+  private extBg: Uint8Array;
+  /** 属性桁の入力制御（`XA.INPUT_CONTROL`）。1 なら混在入力を許す欄 */
+  private extInputCtl: Uint8Array;
 
   private cursorPos = 0;
   private alt = false;
@@ -58,6 +71,10 @@ export class Screen3270 {
     this.fieldAttr = new Uint8Array(n);
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
+    this.geMark = new Uint8Array(n);
+    this.extCharset = new Uint8Array(n);
+    this.extBg = new Uint8Array(n);
+    this.extInputCtl = new Uint8Array(n);
   }
 
   get size(): number {
@@ -106,6 +123,10 @@ export class Screen3270 {
     this.fieldAttr = new Uint8Array(n);
     this.extColor = new Uint8Array(n);
     this.extHilite = new Uint8Array(n);
+    this.geMark = new Uint8Array(n);
+    this.extCharset = new Uint8Array(n);
+    this.extBg = new Uint8Array(n);
+    this.extInputCtl = new Uint8Array(n);
     this.cursorPos = 0;
   }
 
@@ -116,25 +137,46 @@ export class Screen3270 {
     this.fieldAttr.fill(0);
     this.extColor.fill(0);
     this.extHilite.fill(0);
+    this.geMark.fill(0);
+    this.extCharset.fill(0);
+    this.extBg.fill(0);
+    this.extInputCtl.fill(0);
     this.cursorPos = 0;
   }
 
   /** 文字を書く。**属性桁は消える**（データが上書きしたのだから） */
-  writeChar(addr: number, byte: number): void {
+  writeChar(addr: number, byte: number, charset = 0): void {
     const p = this.wrap(addr);
     this.chars[p] = byte;
     this.attrMark[p] = 0;
     this.fieldAttr[p] = 0;
+    this.geMark[p] = 0;
+    this.extCharset[p] = charset;
+  }
+
+  /** `GE` で 1 文字置く（代替文字集合として読む印を付ける） */
+  writeCharGe(addr: number, byte: number): void {
+    this.writeChar(addr, byte);
+    this.geMark[this.wrap(addr)] = 1;
+  }
+
+  /** その桁が `GE` で置かれたか */
+  isGe(addr: number): boolean {
+    return this.geMark[this.wrap(addr)] === 1;
   }
 
   /** 属性桁を置く（`SF` / `SFE`）。**その桁は文字を持たない** */
   startField(addr: number, attr: number): void {
     const p = this.wrap(addr);
+    this.geMark[p] = 0;
     this.attrMark[p] = 1;
     this.fieldAttr[p] = attr;
     this.chars[p] = NUL;
     this.extColor[p] = 0;
     this.extHilite[p] = 0;
+    this.extCharset[p] = 0;
+    this.extInputCtl[p] = 0;
+    this.extBg[p] = 0;
   }
 
   isAttrPos(addr: number): boolean {
@@ -158,6 +200,35 @@ export class Screen3270 {
   extAt(addr: number): { color: number; hilite: number } {
     const p = this.wrap(addr);
     return { color: this.extColor[p]!, hilite: this.extHilite[p]! };
+  }
+
+  /**
+   * **文字セット属性を置く。**属性桁に置けば欄全体、文字桁に置けばその 1 桁に効く
+   * （`XA.CHARSET`。`CHARSET.DBCS` なら DBCS）。
+   */
+  setCharset(addr: number, charset: number): void {
+    this.extCharset[this.wrap(addr)] = charset;
+  }
+
+  charsetAt(addr: number): number {
+    return this.extCharset[this.wrap(addr)]!;
+  }
+
+  setBackground(addr: number, color: number): void {
+    this.extBg[this.wrap(addr)] = color;
+  }
+
+  backgroundAt(addr: number): number {
+    return this.extBg[this.wrap(addr)]!;
+  }
+
+  /** 属性桁に入力制御を置く（`XA.INPUT_CONTROL`。混在入力を許すか） */
+  setInputControl(addr: number, on: boolean): void {
+    this.extInputCtl[this.wrap(addr)] = on ? 1 : 0;
+  }
+
+  inputControlAt(addr: number): boolean {
+    return this.extInputCtl[this.wrap(addr)] === 1;
   }
 
   /**
@@ -225,6 +296,14 @@ export class Screen3270 {
   }
 
   /** 次の非保護欄の先頭へ（`PT` オーダー） */
+  /**
+   * **先頭から探した最初の非保護桁。** 非保護欄が無ければ 0。
+   * `EAU`（Erase All Unprotected）のカーソル位置に使う（実測）。
+   */
+  firstUnprotected(): number {
+    return this.nextUnprotected(this.size - 1);
+  }
+
   nextUnprotected(from: number): number {
     const n = this.size;
     let p = this.wrap(from);
