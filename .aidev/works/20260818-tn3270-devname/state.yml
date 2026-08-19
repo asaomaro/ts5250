@@ -1,0 +1,9 @@
+schema: 3
+slug: tn3270-devname
+current: deliver
+approved: [requirement, research, spec, plan, coding, test, review, deliver]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: tn3270-ibmi.md

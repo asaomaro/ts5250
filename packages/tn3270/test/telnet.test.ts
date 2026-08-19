@@ -215,7 +215,15 @@ describe("NEW-ENVIRON（IBM i 向けのコードページ申告）", () => {
     expect(hex(t.sentFlat)).toBe("fffa2700fff0"); // SB NEW-ENVIRON IS SE
   });
 
-  it("装置名も申告できる", () => {
+  /**
+   * **装置名は `DEVNAME` で渡す**（RFC 4777）。
+   *
+   * 実測（pub400）: `DEVNAME=TSTDEV01` を送ると画面の Display name が **TSTDEV01** になる。
+   * 端末タイプに `@名前` を付ける方は**交渉が時間切れ**になる（pub400 / 社内機の 2 台で同じ）。
+   *
+   * ⚠ 受け入れるかは**ホストの設定次第**。社内機は同じ要求で画面を送らずに閉じる。
+   */
+  it("装置名は NEW-ENVIRON の `DEVNAME` で申告する", () => {
     const t = new MockTransport();
     new TelnetLayer(t, { terminalType: "X", deviceName: "MYDEV01" });
     t.recv(IAC, CMD.DO, OPT.NEW_ENVIRON);

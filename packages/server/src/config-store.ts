@@ -196,6 +196,8 @@ export abstract class ConfigStore {
       system: makeRef(this.source, s.system),
       sessionType: s.sessionType
     };
+    if (s.terminal !== undefined) pub.terminal = s.terminal;
+    if (s.model3270 !== undefined) pub.model3270 = s.model3270;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
