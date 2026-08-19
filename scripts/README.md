@@ -60,6 +60,7 @@ node --env-file=.env tools/hostserver-check/dist/sql.js \
 | スクリプト | 内容 |
 |---|---|
 | `build-attrtest.mjs` | `MARO1` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
+| `verify-command-template.mjs` | **CL コマンドのテンプレート**（`QCDRCMDD`）: 定義を引き、引用の要る値（`'`・空白・小文字・日本語）でコマンドを組み、実機で通して**読み戻して一致**を見る。許されない値を打つ前に弾くことも。 |
 | `verify-attributes.mjs` | 表示検証: `CLRTPGM`（7 色・反転・下線・高輝度・桁区切り・点滅・DBCS）＋ `INLPGM`（埋め込み属性バイトの色切替）。**CCSID 1399**。 |
 | `verify-input.mjs` | 入力検証（core）: `INPPGM` の 4 欄の型（numeric/SBCS/open/pure）＋ O/J のエコー往復。**CCSID 1399**。 |
 | `verify-browser-dbcs.mjs` | 入力検証（実ブラウザ）: DBCS 往復＋**フィールド型ルール**（J は SBCS 不可・A は DBCS 不可・NUM は英字不可）を実 IME(CDP)で。 |
