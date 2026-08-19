@@ -1,6 +1,6 @@
 import { ByteWriter } from "./bytes.js";
-import { encodeAddress } from "./address.js";
-import { NUL, ORDER } from "./constants.js";
+import { encodeAddress, encodeAttribute } from "./address.js";
+import { NUL, ORDER, XA, CHARSET, REPLY_MODE } from "./constants.js";
 import { parseFieldAttr } from "../screen/attributes.js";
 import type { Screen3270 } from "../screen/buffer.js";
 import { AID, AID_NONE, isShortForm, type AidKey } from "../session/aid-keys.js";
@@ -36,9 +36,26 @@ import { AID, AID_NONE, isShortForm, type AidKey } from "../session/aid-keys.js"
  * > **測った状態が何だったかを確かめる**のが要る、という実例。
  */
 
+/** 応答モードの設定（`Set Reply Mode` で受け取ったもの） */
+export interface ReplyMode {
+  /** `REPLY_MODE.FIELD` / `EXTENDED_FIELD` / `CHARACTER` */
+  mode: number;
+  /** 文字モードで載せる属性の種類（ホストが並べてくる。並んでいないものは載せない） */
+  types: number[];
+}
+
 export interface OutboundOptions {
-  /** ホスト起動の読み取りへの応答なら true（AID は 0x60 になる） */
-  hostInitiated?: boolean;
+  /** 応答モード。省略時は欄モード（拡張属性を載せない） */
+  reply?: ReplyMode;
+  /**
+   * **`Read Modified All`（0x6e）なら true。**
+   *
+   * 違いは**短形式の扱いだけ**——`PA1`〜`PA3`・`Clear` の後、
+   * `Read Modified` は AID 1 バイトだけを返すが、`Read Modified All` は
+   * **短形式を無視して欄まで返す**（s3270 実測）。
+   * ホストが「PA キーの後でも入力内容が欲しい」ときに使う、そのための命令。
+   */
+  all?: boolean;
 }
 
 /**
@@ -50,34 +67,126 @@ export function buildReadModified(
   opts: OutboundOptions = {}
 ): Uint8Array {
   const w = new ByteWriter();
-  const aid = key === null || opts.hostInitiated ? AID_NONE : AID[key];
-  w.u8(aid);
+  w.u8(key === null ? AID_NONE : AID[key]);
 
-  // **短形式は AID 1 バイトだけ**（実測）。カーソルも欄も送らない
-  if (key !== null && isShortForm(key)) return w.toUint8Array();
+  // **短形式は AID 1 バイトだけ**（実測）。カーソルも欄も送らない。
+  // ただし `Read Modified All` は短形式を無視する
+  if (key !== null && isShortForm(key) && opts.all !== true) return w.toUint8Array();
 
   const [hi, lo] = encodeAddress(screen.cursor, screen.size);
   w.u8(hi).u8(lo);
 
-  for (const data of modifiedFieldData(screen)) w.bytes(data);
+  for (const data of modifiedFieldData(screen, opts.reply)) w.bytes(data);
   return w.toUint8Array();
 }
 
 /**
  * バッファ全体を返す（`Read Buffer` コマンドへの応答）。
  *
- * **未検証**——TK4- はこのコマンドを撃ってこなかったので実測の裏付けが無い。
- * 形は Read Modified に倣い、属性桁は属性バイトをそのまま置く。
+ * 形は `AID(0x60) + カーソル(2) + 全桁` で、**属性桁は `SF` オーダー(0x1D) ＋ 属性バイトの
+ * 2 バイトで表す**（裸の属性バイトではない）。
+ *
+ * **実測で確定した**（`e2e-orders.test.ts`）。当初は属性バイトをそのまま置いていたが、
+ * s3270 と突き合わせたら食い違った:
+ *
+ * ```
+ * s3270 : … 6040 40 **1d60** d9c2 …   ← SF + 属性
+ * 当初  : … 6040 40 **60**   d9c2 …   ← 属性を裸で置いていた（誤り）
+ * ```
+ *
+ * TK4- も IBM i もこのコマンドを撃ってこなかったので、**実ホストだけ見ていては
+ * 見つからない誤り**だった。
  */
-export function buildReadBuffer(screen: Screen3270): Uint8Array {
+export function buildReadBuffer(
+  screen: Screen3270,
+  key: AidKey | null = null,
+  opts: OutboundOptions = {}
+): Uint8Array {
   const w = new ByteWriter();
-  w.u8(AID_NONE);
+  // **Read Buffer も覚えている AID を返す**——0x60 固定ではない。
+  // `PA1` の後に Read Buffer を撃つと s3270 は `6c` を先頭に置いた（実測）
+  w.u8(key === null ? AID_NONE : AID[key]);
   const [hi, lo] = encodeAddress(screen.cursor, screen.size);
   w.u8(hi).u8(lo);
+  const sa = new SaTracker(opts.reply);
   for (let p = 0; p < screen.size; p++) {
-    w.u8(screen.isAttrPos(p) ? screen.attrAt(p) : screen.charAt(p));
+    if (screen.isAttrPos(p)) w.bytes(fieldAttrBytes(screen, p, opts.reply));
+    else w.bytes(sa.charBytes(screen, p));
   }
   return w.toUint8Array();
+}
+
+/**
+ * **属性桁の書き出し。** 応答モードで形が変わる（s3270 実測）。
+ *
+ * ```
+ * 欄モード       1d 60                          SF ＋ 属性
+ * 拡張欄・文字   29 03 c0 60 42 f2 41 f4        SFE ＋ 組数 ＋ 対
+ * ```
+ *
+ * **並びは決まっている**——基本(0xc0) → 前景(0x42) → 背景(0x45) → ハイライト(0x41) →
+ * 文字セット(0x43)。ホストが送ってきた順ではない（順を変えて撃って確かめた）。
+ * **値が 0 の拡張属性は載せない**（基本属性だけは必ず載る）。
+ */
+function fieldAttrBytes(screen: Screen3270, p: number, reply?: ReplyMode): number[] {
+  const attr = encodeAttribute(screen.attrAt(p));
+  if (reply === undefined || reply.mode === REPLY_MODE.FIELD) return [ORDER.SF, attr];
+
+  const pairs: number[] = [XA.BASIC, attr];
+  const { color, hilite } = screen.extAt(p);
+  const bg = screen.backgroundAt(p);
+  const cs = screen.charsetAt(p);
+  if (color !== 0) pairs.push(XA.FOREGROUND, color);
+  if (bg !== 0) pairs.push(XA.BACKGROUND, bg);
+  if (hilite !== 0) pairs.push(XA.HIGHLIGHT, normalizeHilite(hilite));
+  if (cs === CHARSET.DBCS || cs === CHARSET.APL) pairs.push(XA.CHARSET, cs);
+  return [ORDER.SFE, pairs.length / 2, ...pairs];
+}
+
+/** ハイライトは下位 3 ビットだけが意味を持ち、返すときは 0xf0 を立てる（実測） */
+function normalizeHilite(v: number): number {
+  return (v & 0x07) | 0xf0;
+}
+
+/**
+ * **文字モードで `SA` オーダーを挟む。**
+ *
+ * ホストが `Set Reply Mode` で並べた種類だけを、**値が変わった桁で** 1 度ずつ出す。
+ * 直前の値を覚えて比べる必要があるので、走査をまたいで状態を持つ。
+ * 併せて **`GE` で置かれた桁には `GE` を前置する**——生バイトだけ返すと、
+ * ホストは代替文字集合だったことを知りようがない。
+ */
+class SaTracker {
+  private prev = new Map<number, number>();
+  constructor(private readonly reply?: ReplyMode) {}
+
+  /**
+   * @param faPos その桁を支配する属性桁。`>= 0` なら**文字に指定が無いとき欄の値を使う**
+   *   （`Read Modified` はこちら。`Read Buffer` は文字の値だけを見る——x3270 の呼び分けと同じ）
+   */
+  charBytes(screen: Screen3270, p: number, faPos = -1): number[] {
+    const out: number[] = [];
+    if (this.reply !== undefined && this.reply.mode === REPLY_MODE.CHARACTER) {
+      const pick = (own: number, fa: number): number => (own !== 0 ? own : faPos >= 0 ? fa : 0);
+      const cs = pick(screen.charsetAt(p), faPos >= 0 ? screen.charsetAt(faPos) : 0);
+      const gr = pick(screen.extAt(p).hilite, faPos >= 0 ? screen.extAt(faPos).hilite : 0);
+      const wanted: [number, number][] = [
+        [XA.FOREGROUND, pick(screen.extAt(p).color, faPos >= 0 ? screen.extAt(faPos).color : 0)],
+        [XA.BACKGROUND, pick(screen.backgroundAt(p), faPos >= 0 ? screen.backgroundAt(faPos) : 0)],
+        [XA.HIGHLIGHT, gr === 0 ? 0 : normalizeHilite(gr)],
+        [XA.CHARSET, cs === CHARSET.DBCS || cs === CHARSET.APL ? cs : 0]
+      ];
+      for (const [type, value] of wanted) {
+        if (!this.reply.types.includes(type)) continue;
+        if ((this.prev.get(type) ?? 0) === value) continue;
+        this.prev.set(type, value);
+        out.push(ORDER.SA, type, value);
+      }
+    }
+    if (screen.isGe(p)) out.push(ORDER.GE);
+    out.push(screen.charAt(p));
+    return out;
+  }
 }
 
 /**
@@ -86,11 +195,12 @@ export function buildReadBuffer(screen: Screen3270): Uint8Array {
  * **末尾・途中の NUL は落とす**（実測: s3270 は `"AB"` とだけ送り、欄の残り桁を埋めてこない）。
  * 3270 は NUL と空白(0x40)を区別するので、NUL を空白に読み替えてはならない。
  */
-function* modifiedFieldData(screen: Screen3270): Generator<number[]> {
+function* modifiedFieldData(screen: Screen3270, reply?: ReplyMode): Generator<number[]> {
   const positions = screen.attrPositions();
+  const sa = new SaTracker(reply);
   if (positions.length === 0) {
     // **非フォーマット画面**: 画面全体を 1 つの入力として、SBA を付けずに送る（実測）
-    yield trimNul(collect(screen, 0, screen.size));
+    yield collect(screen, 0, screen.size, sa, -1);
     return;
   }
   for (let i = 0; i < positions.length; i++) {
@@ -99,19 +209,31 @@ function* modifiedFieldData(screen: Screen3270): Generator<number[]> {
     const nextAp = positions[(i + 1) % positions.length]!;
     const len = nextAp > ap ? nextAp - ap - 1 : screen.size - ap - 1 + nextAp;
     const start = screen.wrap(ap + 1);
-    const data = trimNul(collect(screen, start, len));
+    const data = collect(screen, start, len, sa, ap);
     // **SBA は欄の中身の先頭を指す**（属性桁の次）
     yield [ORDER.SBA, ...encodeAddress(start, screen.size), ...data];
   }
 }
 
-function collect(screen: Screen3270, from: number, len: number): number[] {
+/**
+ * 欄の中身を取り出す。**NUL の桁は丸ごと飛ばす**——バイトも `SA` も `GE` も出さない
+ * （実測: s3270 は `"AB"` とだけ送り、欄の残り桁を埋めてこない）。
+ * 3270 は NUL と空白(0x40)を区別するので、NUL を空白に読み替えてはならない。
+ */
+function collect(
+  screen: Screen3270,
+  from: number,
+  len: number,
+  sa: SaTracker,
+  faPos: number
+): number[] {
   const out: number[] = [];
-  for (let k = 0; k < len; k++) out.push(screen.charAt(screen.wrap(from + k)));
+  for (let k = 0; k < len; k++) {
+    const p = screen.wrap(from + k);
+    if (screen.charAt(p) === NUL) continue;
+    out.push(...sa.charBytes(screen, p, faPos));
+  }
   return out;
 }
 
 /** 末尾の NUL を落とす（途中の NUL も送らない＝詰めて送る） */
-function trimNul(bytes: number[]): number[] {
-  return bytes.filter((b) => b !== NUL);
-}

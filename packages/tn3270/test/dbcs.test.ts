@@ -4,7 +4,7 @@ import { Screen3270 } from "../src/screen/buffer.js";
 import { applyInbound } from "../src/protocol/inbound.js";
 import { snapshot } from "../src/screen/snapshot.js";
 import { encodeAddress } from "../src/protocol/address.js";
-import { CMD3270, ORDER, WCC, SO, SI } from "../src/protocol/constants.js";
+import { CMD3270, ORDER, WCC, XA, CHARSET, SO, SI } from "../src/protocol/constants.js";
 
 /**
  * DBCS（日本語）の桁勘定。
@@ -106,7 +106,7 @@ describe("cp939（japanese-latin）", () => {
 });
 
 describe("異常系", () => {
-  it("SI が来ないまま行末に達しても壊れない", () => {
+  it("**SI が来なければ DBCS 区間は行を越えて続く**（s3270 と一致）", () => {
     const s = new Screen3270(2);
     applyInbound(
       s,
@@ -118,8 +118,11 @@ describe("異常系", () => {
     );
     const snap = snapshot(s, { ccsid: 930 });
     expect(snap.cells[0]![2]!.char).toBe("日");
-    // 行が変わったら DBCS 区間は解除される（行ごとに判定するため）
-    expect(snap.cells[1]![0]!.kind).toBe("sbcs");
+    // **行の切れ目では終わらない**——対の左右は区間の先頭からの偶奇で決まるため。
+    // 当初は行ごとに判定していたが、s3270 と突き合わせて誤りと分かった
+    expect(snap.cells[1]![0]!.kind).not.toBe("sbcs");
+    // 中身が NUL のままなら DBCS として成立しないので空白として描く
+    expect(snap.cells[1]![0]!.char.trim()).toBe("");
   });
 
   it("DBCS を SBCS の CCSID で読んでも落ちない", () => {
@@ -135,7 +138,11 @@ describe("異常系", () => {
 });
 
 describe("入力側の DBCS", () => {
-  it("type() で日本語を打つと SO/SI 込みでバッファに入る", async () => {
+  /** 交渉済みのセッションと、指定した属性の非保護欄を 1 つ持つ画面を作る */
+  async function session(fieldOrders: number[]): Promise<{
+    s: import("../src/session/session.js").Tn3270Session;
+    sent: number[][];
+  }> {
     const { Tn3270Session } = await import("../src/session/session.js");
     const { IAC, CMD, OPT, TT_SEND } = await import("../src/telnet/constants.js");
     type T = import("../src/transport/types.js").Transport;
@@ -156,15 +163,29 @@ describe("入力側の DBCS", () => {
     recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
     recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
     recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
-    // 非保護欄を 1 つ置いた画面
     recv(
       CMD3270.ERASE_WRITE, WCC.RESTORE,
-      ...sba(0), ORDER.SF, 0x00,
+      ...sba(0), ...fieldOrders,
       ...sba(40), ORDER.SF, 0x20,
       ...sba(1), ORDER.IC,
       IAC, CMD.EOR
     );
+    return { s, sent };
+  }
+  const lastHex = (sent: number[][]): string =>
+    (sent[sent.length - 1] ?? []).map((b) => b.toString(16).padStart(2, "0")).join("");
 
+  it("**素の欄は日本語を撥ねる**（入力制御が無い欄。s3270 も Operator error）", async () => {
+    const { s } = await session([ORDER.SF, 0x00]);
+    s.setCursor(1, 2);
+    expect(() => s.type("日本")).toThrow(/double-byte/);
+    expect(() => s.type("AB")).not.toThrow(); // 英数は通る
+  });
+
+  it("**混在入力の欄は SO/SI で包む**——カーソルは末尾の SI に乗る", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01
+    ]);
     s.setCursor(1, 2);
     s.type("日本");
 
@@ -174,11 +195,47 @@ describe("入力側の DBCS", () => {
     expect(row[2]!.char).toBe("日");
     expect(row[4]!.char).toBe("本");
     expect(row[6]!.kind).toBe("si");
-    // **MDT が立ち、送信バイトに DBCS がそのまま乗る**
+    expect(snap.cursor).toEqual({ row: 1, col: 7 }); // アドレス 6＝SI の桁
     expect(snap.fields[0]!.modified).toBe(true);
+
     s.send("enter");
-    const last = (sent[sent.length - 1] ?? []).map((b) => b.toString(16).padStart(2, "0")).join("");
-    expect(last).toMatch(/0e4562456{1,2}6.*0f/); // SO … SI が含まれる
+    expect(lastHex(sent)).toContain("0e4562456" + "60f");
+  });
+
+  it("**混在入力の欄では DBCS の並びごとに SO/SI が付く**", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01
+    ]);
+    s.setCursor(1, 2);
+    s.type("A日B");
+    s.send("enter");
+    // A / SO 日 SI / B —— 英数は裸、日本語だけが包まれる
+    expect(lastHex(sent)).toContain("c10e45620fc2");
+  });
+
+  it("**DBCS 欄は SO/SI を付けずに生で置く**", async () => {
+    const { s, sent } = await session([
+      ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS
+    ]);
+    s.setCursor(1, 2);
+    s.type("日本");
+
+    const snap = s.snapshot();
+    expect(snap.cells[0]![1]!.char).toBe("日"); // SO を挟まないので 1 桁目から
+    expect(snap.cells[0]![3]!.char).toBe("本");
+    expect(snap.cursor).toEqual({ row: 1, col: 6 }); // アドレス 5
+
+    s.send("enter");
+    const hex = lastHex(sent);
+    expect(hex).toContain("45624566");
+    expect(hex).not.toContain("0e45"); // SO が付いていない
+  });
+
+  it("**DBCS 欄は英数を撥ねる**", async () => {
+    const { s } = await session([ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS]);
+    s.setCursor(1, 2);
+    expect(() => s.type("AB")).toThrow(/double-byte/);
+    expect(() => s.type("日A")).toThrow(/double-byte/); // 混ぜても駄目
   });
 
   it("欄からあふれた入力は次の欄の属性桁で止まる（**現状の挙動を固定**）", () => {
@@ -197,5 +254,219 @@ describe("入力側の DBCS", () => {
     // 中身 4 桁に 5 バイト書こうとすると 5 バイト目が属性桁に当たる
     expect(s.isAttrPos(5)).toBe(true);
     expect(s.isProtectedAt(6)).toBe(true);
+  });
+});
+
+describe("文字セット属性による DBCS（SO/SI を使わない道）", () => {
+  const raw = (t: string): number[] =>
+    [...codecForCcsid(930).encode(t).bytes].filter((b) => b !== SO && b !== SI);
+
+  /** 属性桁を 0 に置き、1 から `body` を流す */
+  function run(body: number[]): Screen3270 {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([CMD3270.ERASE_WRITE, WCC.RESTORE, ...sba(0), ORDER.SF, 0x60, ...body])
+    );
+    return s;
+  }
+  const textOf = (s: Screen3270, row = 0): string =>
+    snapshot(s, { ccsid: 930 })
+      .cells[row]!.map((c) => (c.kind === "dbcs-tail" ? "" : c.char))
+      .join("")
+      .trim();
+
+  it("**SFE の文字セット属性で欄まるごと DBCS**（SO/SI 不要）", () => {
+    const s = run([
+      ...sba(1), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.DBCS, ...raw("日本語")
+    ]);
+    expect(textOf(s)).toBe("日本語");
+  });
+
+  it("**SA の文字セット属性は文字の並びだけ**に効く", () => {
+    const s = run([
+      ORDER.SA, XA.CHARSET, CHARSET.DBCS, ...raw("東京"),
+      ORDER.SA, XA.CHARSET, CHARSET.BASE, 0xc1, 0xc2
+    ]);
+    expect(textOf(s)).toBe("東京AB");
+  });
+
+  it("**0xf1 は APL であって DBCS ではない**", () => {
+    const s = run([
+      ...sba(1), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.APL, ...raw("福岡")
+    ]);
+    expect(textOf(s)).not.toContain("福岡");
+  });
+
+  it("**MF で既存の欄を DBCS に変えられる**", () => {
+    const s = run([...sba(1), ORDER.SF, 0x60, ...raw("漢字"), ...sba(1), ORDER.MF, 0x01, XA.CHARSET, CHARSET.DBCS]);
+    expect(textOf(s)).toBe("漢字");
+  });
+
+  it("**行末をまたぐ DBCS**——左半分が 80 桁目、右半分が次行 1 桁目", () => {
+    const jp = raw("北海道");
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([CMD3270.ERASE_WRITE, WCC.RESTORE, ...sba(75), ORDER.SF, 0x60, SO, ...jp, SI])
+    );
+    const snap = snapshot(s, { ccsid: 930 });
+    expect(snap.cells[0]![79]!.kind).toBe("dbcs-lead"); // 80 桁目が左半分
+    expect(snap.cells[1]![0]!.kind).toBe("dbcs-tail"); // 次行 1 桁目が右半分
+    expect(snap.cells[0]![79]!.char).toBe("海");
+  });
+
+  it("**相方の来ない左半分は文字にしない**", () => {
+    const jp = raw("北海道");
+    const s = run([SO, jp[0]!, jp[1]!, jp[2]!, SI]);
+    expect(textOf(s)).toBe("北"); // 3 バイト目は宙に浮く
+  });
+
+  /**
+   * **x3270 との差**（意図的）。
+   *
+   * x3270 は DBCS 欄の対を作る後処理を「アドレス 0 を支配する属性桁の**次**から
+   * 一周」で回している。そのため**その属性桁自身が処理されず**、
+   * アドレス 0 を含む欄が DBCS でも対にならない（画面の先頭に DBCS 欄を置くと日本語が化ける）。
+   * 実測で 3 通り確かめた——先頭に置くと化け、他の欄があると化けない。
+   *
+   * **こちらは化けない実装にした。**規格から外れているのではなく単なる回り込みの取りこぼしで、
+   * 真似ると利用者に見える日本語が壊れるため。
+   */
+  it("**画面の先頭に置いた DBCS 欄も対にする**（x3270 は取りこぼす）", () => {
+    const s = new Screen3270(2);
+    applyInbound(
+      s,
+      Uint8Array.from([
+        CMD3270.ERASE_WRITE, WCC.RESTORE,
+        ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.CHARSET, CHARSET.DBCS, ...raw("日本語")
+      ])
+    );
+    expect(textOf(s)).toBe("日本語");
+  });
+});
+
+describe("編集キーと欄溢れ（DBCS の境界）", () => {
+  /**
+   * 短い欄を 3 つ持つ画面でセッションを作る。
+   * 素の欄 11〜15 ／ 混在入力 21〜25 ／ DBCS 欄 41〜45（どれも 5 桁）
+   */
+  async function edit(): Promise<import("../src/session/session.js").Tn3270Session> {
+    const { Tn3270Session } = await import("../src/session/session.js");
+    const { IAC, CMD, OPT, TT_SEND } = await import("../src/telnet/constants.js");
+    type T = import("../src/transport/types.js").Transport;
+    let dataFn: ((d: Uint8Array) => void) | undefined;
+    const t: T = {
+      send: () => undefined,
+      close: () => undefined,
+      onData: (fn) => (dataFn = fn),
+      onClose: () => undefined,
+      onError: () => undefined
+    };
+    const s = new Tn3270Session({ host: "x", model: 2, ccsid: 930 });
+    s.attach(t);
+    const recv = (...b: number[]): void => dataFn?.(Uint8Array.from(b));
+    recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    recv(
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60, 0xd7,
+      ...sba(10), ORDER.SF, 0x00, ...sba(16), ORDER.SF, 0x60,
+      ...sba(20), ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.INPUT_CONTROL, 0x01,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(40), ORDER.SFE, 0x02, XA.BASIC, 0x00, XA.CHARSET, CHARSET.DBCS,
+      ...sba(46), ORDER.SF, 0x60,
+      IAC, CMD.EOR
+    );
+    return s;
+  }
+  /** 画面のセル（`kind` 込み）を見るための取り出し */
+  const at = (s: import("../src/session/session.js").Tn3270Session, addr: number) =>
+    s.snapshot().cells[Math.floor(addr / 80)]![addr % 80]!;
+  const cursorAddr = (s: import("../src/session/session.js").Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: import("../src/session/session.js").Tn3270Session, addr: number): void =>
+    s.setCursor(1, addr + 1);
+
+  it("**欄をちょうど埋めるとカーソルは属性桁を跨ぐ**", async () => {
+    const s = await edit();
+    go(s, 11);
+    s.type("ABCDE");
+    expect(cursorAddr(s)).toBe(17); // 16 は属性桁なので止まらない
+  });
+
+  it("**入り切らない文字だけを撥ねる**——手前までは書けている", async () => {
+    const s = await edit();
+    go(s, 11);
+    expect(() => s.type("ABCDEF")).toThrow(/does not fit/);
+    expect(at(s, 15).char).toBe("E"); // 5 文字目までは入った
+  });
+
+  it("**DBCS 欄で 2 桁ぶんの空きが無ければ撥ねる**", async () => {
+    const s = await edit();
+    go(s, 41);
+    expect(() => s.type("日本語")).toThrow(/does not fit/);
+    expect(at(s, 41).char).toBe("日");
+    expect(at(s, 43).char).toBe("本"); // 2 文字目までは入った
+  });
+
+  it("**混在欄は SO/SI のぶんも桁を食う**（4 桁 → 2 文字目で溢れる）", async () => {
+    const s = await edit();
+    go(s, 21);
+    expect(() => s.type("日本")).toThrow(/does not fit/);
+    expect(at(s, 21).kind).toBe("so");
+    expect(at(s, 24).kind).toBe("si"); // SI は残る
+  });
+
+  it("**後退キーは DBCS の上で 2 桁動く**（消さない）", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    expect(cursorAddr(s)).toBe(45);
+    s.backspace();
+    expect(cursorAddr(s)).toBe(43);
+    expect(at(s, 43).char).toBe("本"); // 消えていない
+  });
+
+  it("**破壊的な後退は DBCS 1 文字ぶん消す**", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    s.erase();
+    expect(at(s, 41).char).toBe("日");
+    expect(at(s, 43).char).not.toBe("本");
+  });
+
+  it("**混在欄では SO/SI ごと消える**（区間が空になるため）", async () => {
+    const s = await edit();
+    go(s, 21);
+    s.type("日");
+    s.erase();
+    expect(at(s, 21).kind).not.toBe("so");
+    expect(at(s, 24).kind).not.toBe("si");
+    expect(cursorAddr(s)).toBe(21);
+  });
+
+  it("**削除キーは DBCS を 2 桁ぶん詰める**", async () => {
+    const s = await edit();
+    go(s, 41);
+    s.type("日本");
+    go(s, 41);
+    s.delete();
+    expect(at(s, 41).char).toBe("本"); // 後ろが詰まってくる
+    expect(cursorAddr(s)).toBe(41);
+  });
+
+  it("**EOF 消去はカーソルから欄の終わりまで**", async () => {
+    const s = await edit();
+    go(s, 21);
+    s.type("日");
+    go(s, 21);
+    s.eraseEof();
+    for (let a = 21; a <= 25; a++) expect(at(s, a).char.trim()).toBe("");
   });
 });

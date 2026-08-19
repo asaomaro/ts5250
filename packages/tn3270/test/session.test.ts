@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Tn3270Session } from "../src/session/session.js";
 import type { Transport } from "../src/transport/types.js";
 import { encodeAddress } from "../src/protocol/address.js";
-import { CMD3270, ORDER, WCC } from "../src/protocol/constants.js";
+import { CMD3270, ORDER, WCC, XA } from "../src/protocol/constants.js";
 import { IAC, CMD, OPT, TT_SEND } from "../src/telnet/constants.js";
 
 class MockTransport implements Transport {
@@ -165,6 +165,116 @@ describe("ホスト起動の読み取りに応答する", () => {
     expect(t.lastRecord.startsWith("60")).toBe(true);
     expect(t.lastRecord).toMatch(/11.{4}c1c2ffef$/);
   });
+
+  /**
+   * **端末は直前の AID を覚えている**（s3270 実測）。
+   * ホスト起因の読みは 0x60 固定ではなく、覚えている AID を先頭に置く。
+   */
+  it("**PA1 の後の Read Modified は AID 1 バイトだけ**（短形式を繰り返す）", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.setCursor(1, 2);
+    s.type("AB");
+    s.send("pa1");
+    expect(t.lastRecord).toBe("6cffef"); // 押下そのものも短形式
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord).toBe("6cffef"); // 読みにも短形式で答える
+  });
+
+  it("**Read Modified All は短形式を無視して欄まで返す**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.setCursor(1, 2);
+    s.type("AB");
+    s.send("pa1");
+    t.recvRecord([CMD3270.READ_MODIFIED_ALL]);
+    expect(t.lastRecord.startsWith("6c")).toBe(true); // AID は覚えたまま
+    expect(t.lastRecord).toMatch(/11.{4}c1c2ffef$/); // 欄が付く
+  });
+
+  it("**Read Buffer も覚えている AID を返す**（0x60 固定ではない）", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord.startsWith("6c")).toBe(true);
+  });
+
+  it("**キーボードが復旧すると AID を忘れる**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord.startsWith("60")).toBe(true);
+  });
+
+  it("**復旧ビットの無い書き込みでは忘れない**", () => {
+    const { s, t } = connected();
+    sendScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.WRITE, 0x00]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord).toBe("6cffef");
+  });
+});
+
+describe("Erase All Unprotected（EAU）", () => {
+  /** 保護＋MDT / 非保護＋MDT / 非保護 の 3 欄 */
+  function mdtScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x61, 0xd7,       // 保護＋MDT。"P"
+      ...sba(10), ORDER.SF, 0x01, 0xc1, 0xc1, // 非保護＋MDT。"AA"
+      ...sba(30), ORDER.SF, 0x60
+    ]);
+  }
+
+  it("**非保護欄だけ消す**——保護欄の文字は残る", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    const rows = s.snapshot().cells.map((r) => r.map((c) => c.char).join(""));
+    expect(rows[0]!.slice(1, 2)).toBe("P");     // 保護欄は残る
+    expect(rows[0]!.slice(11, 13).trim()).toBe(""); // 非保護欄は消える
+  });
+
+  it("**MDT を落とすのは非保護欄だけ**（保護欄の MDT は残る。実測）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    const fields = s.snapshot().fields;
+    const prot = fields.find((f) => f.attrRow === 1 && f.attrCol === 1)!;
+    const unprot = fields.find((f) => f.attrRow === 1 && f.attrCol === 11)!;
+    expect(prot.modified).toBe(true);
+    expect(unprot.modified).toBe(false);
+  });
+
+  it("**カーソルは最初の非保護桁へ**（実測）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    s.setCursor(5, 5);
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    expect(s.snapshot().cursor).toEqual({ row: 1, col: 12 }); // アドレス 11
+  });
+
+  it("**応答は返さない**——WCC もオーダーも無い命令", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    const before = t.sent.length;
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    expect(t.sent.length).toBe(before);
+    expect(s.status).toBe("ready"); // キーボードは復旧する
+  });
+
+  it("**覚えている AID も忘れる**（キーボードが復旧するため）", () => {
+    const { s, t } = connected();
+    mdtScreen(t);
+    s.send("pa1");
+    t.recvRecord([CMD3270.ERASE_ALL_UNPROTECTED]);
+    t.recvRecord([CMD3270.READ_MODIFIED]);
+    expect(t.lastRecord.startsWith("60")).toBe(true);
+  });
 });
 
 describe("画面イベント", () => {
@@ -175,5 +285,280 @@ describe("画面イベント", () => {
     sendScreen(t);
     expect(seen.length).toBe(1);
     expect(seen[0]).toBe(2);
+  });
+});
+
+describe("応答モードの寿命", () => {
+  /** `Set Reply Mode` の構造化フィールド */
+  const srm = (mode: number, types: number[] = []): number[] => [
+    CMD3270.WRITE_STRUCTURED_FIELD, 0x00, 5 + types.length, 0x09, 0x00, mode, ...types
+  ];
+
+  function coloredScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.FOREGROUND, 0xf2,
+      ...sba(20), ORDER.SF, 0x00
+    ]);
+  }
+
+  it("**指定するまでは欄モード**", () => {
+    const { s, t } = connected();
+    coloredScreen(t);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("1d60");
+    expect(s.status).toBe("ready");
+  });
+
+  it("**拡張欄モードにすると SFE で返す**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**平の Write では戻らない**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**消して書くだけでも戻らない**——WCC のリセットビットが要る（実測）", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    coloredScreen(t); // Erase/Write だが WCC は RESTORE だけ
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("2902c06042f2");
+  });
+
+  it("**消して書く＋リセットビットで戻る**", () => {
+    const { t } = connected();
+    coloredScreen(t);
+    t.recvRecord(srm(1));
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESET | WCC.RESTORE,
+      ...sba(0), ORDER.SFE, 0x02, XA.BASIC, 0x60, XA.FOREGROUND, 0xf2
+    ]);
+    t.recvRecord([CMD3270.READ_BUFFER]);
+    expect(t.lastRecord).toContain("1d60");
+    expect(t.lastRecord).not.toContain("2902");
+  });
+});
+
+describe("カーソル移動キー", () => {
+  /** 0 保護 ／ 10 非保護(11-15) ／ 16 自動スキップ(保護＋数字) ／ 20 非保護(21-25) ／ 26 保護 */
+  function movScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x30,
+      ...sba(20), ORDER.SF, 0x00,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(11), ORDER.IC
+    ]);
+  }
+  const addr = (s: Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: Tn3270Session, a: number): void => s.setCursor(Math.floor(a / 80) + 1, (a % 80) + 1);
+
+  it("**Home は最初の非保護桁へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 5);
+    s.home();
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**Tab は次の非保護欄の先頭へ**（保護欄は飛ばす）", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 13); // 欄の途中からでも次の欄へ
+    s.tab();
+    expect(addr(s)).toBe(21);
+    s.tab(); // 最後まで行ったら回り込む
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**BackTab はまず欄の先頭へ**、先頭にいるなら手前の欄へ", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 23);
+    s.backTab();
+    expect(addr(s)).toBe(21);
+    s.backTab();
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**左右は欄をまたぐ**——属性桁の上にも乗る（実測）", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.left();
+    expect(addr(s)).toBe(20); // 属性桁
+    s.right();
+    s.right();
+    expect(addr(s)).toBe(22);
+  });
+
+  it("**上下は真上・真下へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.down();
+    expect(addr(s)).toBe(101);
+    s.up();
+    expect(addr(s)).toBe(21);
+  });
+
+  it("**改行は次の行頭、打てなければその先の非保護欄へ**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 21);
+    s.newline(); // 80 は保護欄の中なので回り込んで 11
+    expect(addr(s)).toBe(11);
+  });
+
+  it("**自動スキップ欄は埋めた勢いで飛び越える**", () => {
+    const { s, t } = connected();
+    movScreen(t);
+    go(s, 11);
+    s.type("ABCDE"); // 欄(11-15)を埋める。16 は保護＋数字
+    expect(addr(s)).toBe(21); // 17 ではなく次の非保護欄まで
+  });
+
+  it("**自動スキップでなければ属性桁の次で止まる**", () => {
+    const { s, t } = connected();
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x60, // 保護だが数字ではない
+      ...sba(11), ORDER.IC
+    ]);
+    go(s, 11);
+    s.type("ABCDE");
+    expect(addr(s)).toBe(17);
+  });
+});
+
+describe("挿入モードと特殊キー", () => {
+  function inputScreen(t: MockTransport): void {
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(0), ORDER.SF, 0x60,
+      ...sba(10), ORDER.SF, 0x00,
+      ...sba(16), ORDER.SF, 0x60,
+      ...sba(20), ORDER.SF, 0x00,
+      ...sba(26), ORDER.SF, 0x60,
+      ...sba(11), ORDER.IC
+    ]);
+  }
+  const row = (s: Tn3270Session, from: number, to: number): string =>
+    s.snapshot().cells[0]!.slice(from, to).map((c) => c.char).join("");
+  const addr = (s: Tn3270Session): number => {
+    const c = s.snapshot().cursor;
+    return (c.row - 1) * 80 + c.col - 1;
+  };
+  const go = (s: Tn3270Session, a: number): void => s.setCursor(1, a + 1);
+
+  it("**既定は上書き**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABC");
+    go(s, 11);
+    s.type("D");
+    expect(row(s, 11, 15)).toBe("DBC ");
+  });
+
+  it("**挿入モードは後ろへずらす**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABC");
+    go(s, 11);
+    s.setInsertMode(true);
+    s.type("D");
+    expect(row(s, 11, 15)).toBe("DABC");
+  });
+
+  it("**満杯の欄には挿入できない**——末尾に NUL が要る", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("ABCDE");
+    go(s, 11);
+    s.setInsertMode(true);
+    expect(() => s.type("F")).toThrow(/no room/);
+    expect(row(s, 11, 16)).toBe("ABCDE"); // 何も動いていない
+  });
+
+  it("**AID を送ると挿入モードは解ける**（実測）", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    s.setInsertMode(true);
+    s.send("enter");
+    expect(s.insertMode).toBe(false);
+  });
+
+  it("**キーボードの復旧でも解ける**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    s.setInsertMode(true);
+    t.recvRecord([CMD3270.WRITE, WCC.RESTORE]);
+    expect(s.insertMode).toBe(false);
+  });
+
+  it("**Dup は 0x1c を置いて次の欄へ**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("A");
+    s.dup();
+    expect(s.snapshot().cells[0]![12]!.rawByte).toBe(0x1c);
+    expect(addr(s)).toBe(21);
+  });
+
+  it("**Field Mark は 0x1e を置いて 1 桁進むだけ**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("A");
+    s.fieldMark();
+    expect(s.snapshot().cells[0]![12]!.rawByte).toBe(0x1e);
+    expect(addr(s)).toBe(13);
+  });
+
+  it("**入力消去は全欄を消して MDT も落とす**", () => {
+    const { s, t } = connected();
+    inputScreen(t);
+    go(s, 11);
+    s.type("AB");
+    go(s, 21);
+    s.type("12");
+    s.eraseInput();
+    expect(row(s, 11, 16).trim()).toBe("");
+    expect(row(s, 21, 26).trim()).toBe("");
+    expect(addr(s)).toBe(11);
+    expect(s.snapshot().fields.some((f) => f.modified)).toBe(false);
+  });
+
+  /** **制限が無いことも事実**——数字欄でも英字が通る（s3270 と一致） */
+  it("**数字欄に英字も打てる**（制限は掛かっていない）", () => {
+    const { s, t } = connected();
+    t.recvRecord([
+      CMD3270.ERASE_WRITE, WCC.RESTORE,
+      ...sba(20), ORDER.SF, 0x10, ...sba(26), ORDER.SF, 0x60, ...sba(21), ORDER.IC
+    ]);
+    go(s, 21);
+    expect(() => s.type("ABC")).not.toThrow();
+    expect(row(s, 21, 24)).toBe("ABC");
   });
 });

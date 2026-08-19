@@ -4,8 +4,7 @@ import {
   encodeAddress,
   toRowCol,
   fromRowCol,
-  MAX_12BIT
-} from "../src/protocol/address.js";
+  MAX_12BIT, encodeAttribute } from "../src/protocol/address.js";
 
 describe("バッファアドレス 12 ビット形式", () => {
   it("実測値と一致する（negotiation-hercules.trc）", () => {
@@ -64,5 +63,35 @@ describe("行桁の相互変換", () => {
   it("27x132（モデル 5）でも合う", () => {
     expect(fromRowCol(27, 132, 132)).toBe(27 * 132 - 1);
     expect(toRowCol(27 * 132 - 1, 132)).toEqual({ row: 27, col: 132 });
+  });
+});
+
+describe("欄属性バイトの送信形式（encodeAttribute）", () => {
+  /**
+   * 0x00〜0xff の 256 通りを SF で書き込み、s3270 に Read Buffer を撃って応答を採った
+   * （`artifacts/s3270-readbuffer-attr-256.hex`）。**全 256 通りが `CODE[attr & 0x3d]`** だった。
+   * ここでは代表値と不変条件を押さえる。
+   */
+  it("**意味の無いビットは落ちる**（0x02 / 0x40 / 0x80）", () => {
+    expect(encodeAttribute(0x00)).toBe(0x40); // 実測
+    expect(encodeAttribute(0x02)).toBe(0x40); // 0x02 は無視される
+    expect(encodeAttribute(0x40)).toBe(0x40);
+    expect(encodeAttribute(0x80)).toBe(0x40);
+    expect(encodeAttribute(0xc2)).toBe(0x40); // 3 ビットまとめて落ちる
+  });
+
+  it("**意味のあるビットは残る**（実測値と一致）", () => {
+    expect(encodeAttribute(0x60)).toBe(0x60); // 保護。s3270 もそのまま返した
+    expect(encodeAttribute(0xf2)).toBe(0xf0); // 実測
+    expect(encodeAttribute(0xff)).toBe(0x7d); // 実測。全ビット立て → 0x3d を引き直す
+    expect(encodeAttribute(0xcc)).toBe(0x4c); // 実測
+    expect(encodeAttribute(0xe0)).toBe(0x60); // 実測
+  });
+
+  it("**アドレスと同じ表**を使う——6 ビット値として引き直すだけ", () => {
+    for (let a = 0; a < 256; a++) {
+      const [, lo] = encodeAddress(a & 0x3d);
+      expect(encodeAttribute(a)).toBe(lo);
+    }
   });
 });

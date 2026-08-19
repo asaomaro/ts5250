@@ -1,6 +1,8 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic/codec";
 import { NUL, SO, SI } from "../protocol/constants.js";
+import { DB, dbcsStates, validDbcsPair } from "./dbcs.js";
 import { parseFieldAttr } from "./attributes.js";
+import { graphicEscapeChar } from "./graphic-escape.js";
 import { colorOf, highlightOf } from "./attributes.js";
 import type { Screen3270 } from "./buffer.js";
 import type { Cell, CellKind, Field, ScreenSnapshot } from "./types.js";
@@ -39,19 +41,28 @@ export function snapshot(screen: Screen3270, opts: SnapshotOptions = {}): Screen
 }
 
 function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
+  const db = dbcsStates(screen, codec.isDbcs);
   const out: Cell[][] = [];
   for (let row = 0; row < screen.rows; row++) {
     const line: Cell[] = [];
-    let dbcs = false; // SO 〜 SI の区間か
     for (let col = 0; col < screen.cols; col++) {
       const addr = row * screen.cols + col;
       const byte = screen.charAt(addr);
       const ext = screen.extAt(addr);
       const ap = screen.fieldAttrPosFor(addr);
       const fa = ap >= 0 ? parseFieldAttr(screen.attrAt(ap)) : null;
-      const hl = highlightOf(ext.hilite);
+      // **文字ごとの指定が無ければ欄の指定を引く**（x3270 と同じ解き方）。
+      // `SFE` の色は属性桁にだけ置いてあり、文字側には配っていない
+      const fx = ap >= 0 ? screen.extAt(ap) : { color: 0, hilite: 0 };
+      const color = ext.color !== 0 ? ext.color : fx.color;
+      const hilite = ext.hilite !== 0 ? ext.hilite : fx.hilite;
+      const bgByte = screen.backgroundAt(addr) !== 0
+        ? screen.backgroundAt(addr)
+        : ap >= 0 ? screen.backgroundAt(ap) : 0;
+      const hl = highlightOf(hilite);
       const base = {
-        color: colorOf(ext.color),
+        color: colorOf(color),
+        background: colorOf(bgByte),
         intensified: fa?.intensified ?? false,
         reverse: hl.reverse,
         underline: hl.underline,
@@ -68,7 +79,6 @@ function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
         // 実機（IBM i のサインオン）で `_` として見えた: 入力欄が 53 桁目から始まり、
         // 52 桁目の属性桁に下線が乗っていた。5250 側は同じ場面で落としている
         // （`tn5250/src/screen/buffer.ts` の属性桁）。**色だけは残す**のも 5250 と同じ。
-        dbcs = false;
         line.push({
           char: " ",
           kind: "attr",
@@ -82,33 +92,41 @@ function buildCells(screen: Screen3270, codec: Codec): Cell[][] {
         continue;
       }
       if (byte === SO) {
-        dbcs = true;
         line.push({ char: " ", kind: "so", ...base });
         continue;
       }
       if (byte === SI) {
-        dbcs = false;
         line.push({ char: " ", kind: "si", ...base });
         continue;
       }
-      if (dbcs) {
-        // DBCS は 2 桁で 1 文字。lead 側にだけ文字を入れる
-        const isLead = line.length === 0 || line[line.length - 1]?.kind !== "dbcs-lead";
-        if (isLead) {
-          const tail = screen.charAt(addr + 1);
-          const cp = codec.decodeDbcsPair?.(byte, tail);
-          line.push({
-            char: cp !== undefined && cp > 0 ? String.fromCodePoint(cp) : " ",
-            kind: "dbcs-lead",
-            ...base
-          });
-        } else {
-          line.push({ char: "", kind: "dbcs-tail", ...base });
-        }
+      if (db[addr] === DB.LEAD) {
+        // DBCS は 2 桁で 1 文字。lead 側にだけ文字を入れる。
+        // **相方は次のアドレス**——行末なら次の行の 1 桁目になる
+        const tail = screen.charAt((addr + 1) % screen.size);
+        // **DBCS として成立しない対は空白 2 桁として描く**（s3270 と同じ）。
+        // 画面の残りが NUL のまま DBCS 区間が続くと、ここが効いて空白になる
+        const ok = validDbcsPair(byte, tail);
+        const cp = ok ? codec.decodeDbcsPair?.(byte, tail) : codec.decodeDbcsPair?.(0x40, 0x40);
+        line.push({
+          char: cp !== undefined && cp > 0 ? String.fromCodePoint(cp) : " ",
+          kind: "dbcs-lead",
+          ...base
+        });
+        continue;
+      }
+      if (db[addr] === DB.TAIL) {
+        line.push({ char: "", kind: "dbcs-tail", ...base });
+        continue;
+      }
+      if (db[addr] === DB.DEAD) {
+        // 相方の来なかった左半分。**文字にはしない**
+        line.push({ char: " ", kind: "sbcs", ...base, rawByte: byte });
         continue;
       }
       const kind: CellKind = "sbcs";
-      const ch = byte === NUL ? " " : codec.decode(Uint8Array.of(byte));
+      // **`GE` で置かれた桁は代替文字集合で読む**（通常の EBCDIC ではない）
+      const ge = screen.isGe(addr) ? graphicEscapeChar(byte) : undefined;
+      const ch = ge ?? (byte === NUL ? " " : codec.decode(Uint8Array.of(byte)));
       line.push({
         char: base.nonDisplay ? " " : ch,
         kind,
