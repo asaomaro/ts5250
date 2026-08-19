@@ -1,0 +1,49 @@
+# attr.trc — s3270 のトレースから**測定に使った行だけ**を抜き出したもの。
+# 元は 470 行（s3270 内部のイベントログを含む）。ここでは 45 行。
+# `<` = ホスト→クライアント / `>` = 逆。`...` 続きの行は直前の復号の折り返し。
+
+ Build options: --enable-local-process
+ Model 3279-4-E, 43 rows x 80 cols, color display, extended data stream, color emulation, code page bracket
+20260815.093117.756 Keyboard unlock(kybd_connect) -NOT_CONNECTED
+20260815.093117.756 Keyboard lock(kybd_connect) +NOT_CONNECTED
+20260815.093117.775 Keyboard unlock(kybd_connect) -NOT_CONNECTED
+20260815.093117.775 Keyboard lock(kybd_connect) +AWAITING_FIRST
+< 0x0   fffd18
+20260815.093117.777 RCVD DO TERMINAL TYPE
+> 0x0   fffb18
+20260815.093117.777 SENT WILL TERMINAL TYPE
+< 0x0   fffa1801fff0
+20260815.093117.778 RCVD SB TERMINAL TYPE SEND
+> 0x0   fffa180049424d2d333237392d342d45fff0
+20260815.093117.778 SENT SB TERMINAL TYPE IS IBM-3279-4-E SE
+< 0x0   fffd19fffb19fffd00fffb00
+20260815.093117.779 RCVD DO END OF RECORD
+> 0x0   fffb19
+20260815.093117.779 SENT WILL END OF RECORD
+20260815.093117.779 RCVD WILL END OF RECORD
+> 0x0   fffd19
+20260815.093117.779 SENT DO END OF RECORD
+20260815.093117.779 RCVD DO BINARY
+> 0x0   fffb00
+20260815.093117.779 SENT WILL BINARY
+20260815.093117.779 RCVD WILL BINARY
+> 0x0   fffd00
+20260815.093117.779 SENT DO BINARY
+< 0x0   f5c31140401d0011c1501d0111c2601d0211c3f01d0411c5401d0811c6501d10
+< 0x20  11c7601d2011c8f01d40114a401d80114b501d0c114c601d28114df01d2c114f
+< 0x40  401d111150501de011d1601de811d2f01df011d4401df8
+< 0x0   ffef
+< EraseWrite(reset,restore,resetMDT) SetBufferAddress(1,1) StartField(defau ...
+... lt) SetBufferAddress(2,1) StartField(modified) SetBufferAddress(3,1) St ...
+... artField(default) SetBufferAddress(4,1) StartField(detectable) SetBuffe ...
+... rAddress(5,1) StartField(intensified) SetBufferAddress(6,1) StartField( ...
+... numeric) SetBufferAddress(7,1) StartField(protected) SetBufferAddress(8 ...
+... ,1) StartField(default) SetBufferAddress(9,1) StartField(default) SetBu ...
+... fferAddress(10,1) StartField(nondisplay) SetBufferAddress(11,1) StartFi ...
+... eld(protected,intensified) SetBufferAddress(12,1) StartField(protected, ...
+... nondisplay) SetBufferAddress(13,1) StartField(numeric,modified) SetBuff ...
+... erAddress(14,1) StartField(protected) SetBufferAddress(15,1) StartField ...
+... (protected,intensified) SetBufferAddress(16,1) StartField(protected,ski ...
+... p) SetBufferAddress(17,1) StartField(protected,skip,intensified)
+20260815.093118.224 Keyboard unlock(ctlr_write) -AWAITING_FIRST
+20260815.093118.224 RCVD EOR

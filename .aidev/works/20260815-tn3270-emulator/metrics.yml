@@ -1,0 +1,29 @@
+events:
+  - { ts: 2026-08-15T07:03:30Z, phase: requirement, event: start }
+  - { ts: 2026-08-15T07:15:19Z, phase: requirement, event: approved }
+  - { ts: 2026-08-15T07:15:38Z, phase: research, event: start }
+  - { ts: 2026-08-15T07:33:28Z, phase: research, event: approved }
+  - { ts: 2026-08-15T07:36:53Z, phase: spec, event: start }
+  - { ts: 2026-08-15T08:47:03Z, phase: spec, event: approved }
+  - { ts: 2026-08-15T08:47:19Z, phase: design, event: start }
+  - { ts: 2026-08-15T08:49:59Z, phase: design, event: approved }
+  - { ts: 2026-08-15T08:50:16Z, phase: plan, event: start }
+  - { ts: 2026-08-15T08:51:47Z, phase: plan, event: approved, metrics: { tasks_planned: 5 } }
+  - { ts: 2026-08-15T10:46:09Z, phase: test, event: start }
+  - { ts: 2026-08-15T10:53:45Z, phase: test, event: approved, metrics: { passed: 103, failed: 0 } }
+  - { ts: 2026-08-15T10:53:45Z, phase: review, event: start }
+  - { ts: 2026-08-15T10:55:14Z, phase: review, event: approved, metrics: { must: 0, should: 2, nit: 1 } }
+  - { ts: 2026-08-15T10:56:07Z, phase: walkthrough, event: start }
+  - { ts: 2026-08-15T10:57:09Z, phase: walkthrough, event: approved }
+  - { ts: 2026-08-15T10:57:57Z, phase: deliver, event: approved }
+  - { ts: 2026-08-15T12:11:36Z, phase: review, event: sent_back }
+  - { ts: 2026-08-15T12:11:36Z, phase: coding, event: start }
+  - { ts: 2026-08-15T12:25:24Z, phase: coding, event: approved, metrics: { tasks_done: 5 } }
+  - { ts: 2026-08-15T12:25:24Z, phase: test, event: approved, metrics: { passed: 118, failed: 0 } }
+  - { ts: 2026-08-15T12:25:24Z, phase: review, event: approved, metrics: { must: 4, should: 0, nit: 0 } }
+  - { ts: 2026-08-15T12:25:44Z, phase: walkthrough, event: approved }
+  - { ts: 2026-08-15T12:25:55Z, phase: deliver, event: approved }
+  - { ts: 2026-08-15T12:55:45Z, phase: coding, event: approved, metrics: { tasks_done: 5 } }
+  - { ts: 2026-08-15T12:55:45Z, phase: test, event: approved, metrics: { passed: 124, failed: 0 } }
+  - { ts: 2026-08-15T12:55:45Z, phase: review, event: approved, metrics: { must: 1, should: 0, nit: 1 } }
+  - { ts: 2026-08-15T12:55:45Z, phase: deliver, event: approved }

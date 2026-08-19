@@ -1,0 +1,122 @@
+# aid.trc — s3270 のトレースから**測定に使った行だけ**を抜き出したもの。
+# 元は 1172 行（s3270 内部のイベントログを含む）。ここでは 118 行。
+# `<` = ホスト→クライアント / `>` = 逆。`...` 続きの行は直前の復号の折り返し。
+
+ Build options: --enable-local-process
+ Model 3279-2-E, 24 rows x 80 cols, color display, extended data stream, color emulation, code page bracket
+20260815.095642.492 Keyboard unlock(kybd_connect) -NOT_CONNECTED
+20260815.095642.492 Keyboard lock(kybd_connect) +NOT_CONNECTED
+20260815.095642.495 Keyboard unlock(kybd_connect) -NOT_CONNECTED
+20260815.095642.495 Keyboard lock(kybd_connect) +AWAITING_FIRST
+< 0x0   fffd18
+20260815.095642.496 RCVD DO TERMINAL TYPE
+> 0x0   fffb18
+20260815.095642.496 SENT WILL TERMINAL TYPE
+< 0x0   fffa1801fff0
+20260815.095642.497 RCVD SB TERMINAL TYPE SEND
+> 0x0   fffa180049424d2d333237392d322d45fff0
+20260815.095642.497 SENT SB TERMINAL TYPE IS IBM-3279-2-E SE
+< 0x0   fffd19fffb19fffd00fffb00
+20260815.095642.498 RCVD DO END OF RECORD
+> 0x0   fffb19
+20260815.095642.498 SENT WILL END OF RECORD
+20260815.095642.498 RCVD WILL END OF RECORD
+> 0x0   fffd19
+20260815.095642.498 SENT DO END OF RECORD
+20260815.095642.498 RCVD DO BINARY
+> 0x0   fffb00
+20260815.095642.498 SENT WILL BINARY
+20260815.095642.498 RCVD WILL BINARY
+> 0x0   fffd00
+20260815.095642.498 SENT DO BINARY
+< 0x0   f5c31140401d001140d41d20114b5a1d00114bf81d201140c113
+< 0x0   ffef
+< EraseWrite(reset,restore,resetMDT) SetBufferAddress(1,1) StartField(defau ...
+... lt) SetBufferAddress(1,21) StartField(protected) SetBufferAddress(10,11 ...
+... ) StartField(default) SetBufferAddress(10,41) StartField(protected) Set ...
+... BufferAddress(1,2) InsertCursor
+20260815.095642.743 Keyboard unlock(ctlr_write) -AWAITING_FIRST
+20260815.095642.743 RCVD EOR
+20260815.095642.769 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> Enter(1,2)
+> 0x0   7d40c1ffef
+20260815.095642.769 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095642.811 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095642.811 RCVD EOR
+20260815.095642.820 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> PF1(1,2)
+> 0x0   f140c1ffef
+20260815.095642.820 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095642.863 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095642.863 RCVD EOR
+20260815.095642.872 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> PF12(1,2)
+> 0x0   7c40c1ffef
+20260815.095642.872 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095642.919 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095642.919 RCVD EOR
+20260815.095642.926 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> PF24(1,2)
+> 0x0   4c40c1ffef
+20260815.095642.926 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095642.971 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095642.971 RCVD EOR
+20260815.095642.979 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> PA1
+> 0x0   6cffef
+20260815.095642.979 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095643.023 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095643.023 RCVD EOR
+20260815.095643.032 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> PA3
+> 0x0   6bffef
+20260815.095643.032 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095643.079 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095643.079 RCVD EOR
+20260815.095643.088 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> Clear
+> 0x0   6dffef
+20260815.095643.088 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095643.131 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095643.131 RCVD EOR
+< 0x0   f6
+< 0x0   ffef
+< ReadModified
+> NoAID(10,14) 'ABZZ'
+> 0x0   604b5dc1c2e9e9ffef
+20260815.095643.164 SENT EOR
+20260815.095643.164 RCVD EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095643.207 RCVD EOR
+20260815.095643.273 Keyboard lock(key_AID) +OIA_TWAIT +OIA_LOCKED
+> Enter(10,14) 'ABZZ'
+> 0x0   7d4b5dc1c2e9e9ffef
+20260815.095643.273 SENT EOR
+< 0x0   f102
+< 0x0   ffef
+< Write(restore)
+20260815.095643.274 Keyboard unlock(do_reset) -OIA_TWAIT -OIA_LOCKED
+20260815.095643.274 RCVD EOR

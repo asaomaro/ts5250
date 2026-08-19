@@ -1,0 +1,9 @@
+schema: 3
+slug: 04-dbcs
+parent: 20260815-tn3270-emulator
+current: review
+approved: [plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [02-datastream-inbound]

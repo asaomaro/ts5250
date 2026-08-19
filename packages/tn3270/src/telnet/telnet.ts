@@ -1,0 +1,270 @@
+import { childLog } from "@ts5250/base";
+import type { Transport } from "../transport/types.js";
+import {
+  IAC, CMD, OPT, TT_IS, TT_SEND,
+  ENV_IS, ENV_SEND, ENV_VALUE, ENV_USERVAR
+} from "./constants.js";
+
+const log = childLog({ component: "tn3270-telnet" });
+
+export interface TelnetOptions {
+  /** 端末タイプ名（例 `IBM-3279-2-E@03C0`）。TERMINAL-TYPE IS で回答する */
+  terminalType: string;
+  /**
+   * RFC 2877 の USERVAR KBDTYPE / CODEPAGE / CHARSET（NEW-ENVIRON で申告）。
+   *
+   * **IBM i に繋ぐときに要る。** 申告しないとホストはシステム既定のコードページで
+   * 仮想デバイスを作り、variant 文字（`'@'` 等）が食い違う。
+   * 素の 3270 ホスト（Hercules 等）は NEW-ENVIRON を送ってこないので影響しない。
+   */
+  kbdType?: string | undefined;
+  codePage?: number | undefined;
+  charSet?: number | undefined;
+  /** RFC 4777 のデバイス名（NEW-ENVIRON の USERVAR DEVNAME） */
+  deviceName?: string | undefined;
+}
+
+/**
+ * 基本 TN3270（RFC 1576）の telnet 層。
+ *
+ * **交渉の並びは research F2 で Hercules から実測したものが唯一の根拠**
+ * （`artifacts/negotiation-hercules.trc`）。RFC 1576 の記載とも一致する:
+ *
+ * ```
+ * < fffd18                       DO   TERMINAL-TYPE
+ * > fffb18                       WILL TERMINAL-TYPE
+ * < fffa1801fff0                 SB   TERMINAL-TYPE SEND
+ * > fffa1800 <型名> fff0          SB   TERMINAL-TYPE IS
+ * < fffd19 fffb19                DO / WILL END-OF-RECORD
+ * > fffb19 / fffd19              WILL / DO END-OF-RECORD
+ * < fffd00 fffb00                DO / WILL BINARY
+ * > fffb00 / fffd00              WILL / DO BINARY
+ * < <3270 データストリーム> ffef
+ * ```
+ *
+ * **5250 と違い SGA / NEW-ENVIRON は扱わない**。知らないオプションは DONT/WONT で断る
+ * （落とさない——断るのが telnet の作法で、相手はそれで続行できる）。
+ *
+ * レコード境界は `IAC EOR`。**SB 本文中の IAC(FF) は二重化**されるので受信時に戻す。
+ */
+export class TelnetLayer {
+  private buf: number[] = [];
+  private recordFn: ((record: Uint8Array) => void) | undefined;
+  private negotiatedFn: (() => void) | undefined;
+  /** BINARY と EOR の双方が合意できたら「3270 モード」に入ったとみなす */
+  private binaryAgreed = false;
+  private eorAgreed = false;
+  private announced = false;
+
+  constructor(
+    private readonly transport: Transport,
+    private readonly opts: TelnetOptions
+  ) {
+    transport.onData((data) => this.feed(data));
+  }
+
+  onRecord(fn: (record: Uint8Array) => void): void {
+    this.recordFn = fn;
+  }
+
+  /** BINARY / EOR の合意が揃った時点で 1 回だけ発火する */
+  onNegotiated(fn: () => void): void {
+    this.negotiatedFn = fn;
+  }
+
+  /** アプリのレコードを送る（IAC を二重化し、末尾に IAC EOR を付ける） */
+  sendRecord(payload: Uint8Array): void {
+    const out: number[] = [];
+    for (const b of payload) {
+      out.push(b);
+      if (b === IAC) out.push(IAC); // 本文中の FF は二重化
+    }
+    out.push(IAC, CMD.EOR);
+    this.transport.send(Uint8Array.from(out));
+  }
+
+  /**
+   * 受信バイトを食わせる。telnet の制御列を取り除き、`IAC EOR` ごとに
+   * アプリのレコードとして `onRecord` へ渡す。
+   *
+   * **TCP はどこで切れるか分からない**ので、途中で終わった telnet 列（`IAC` だけ、
+   * `IAC DO` だけ、`IAC SB …` の SE 待ち）は `pending` に持ち越して次の chunk と繋ぐ。
+   * ここを持ち越さないと、**分割されたときだけ交渉が壊れる**——再現しにくい形で。
+   */
+  private pending: number[] = [];
+
+  private feed(data: Uint8Array): void {
+    for (const b of data) this.pending.push(b);
+
+    let i = 0;
+    const n = this.pending.length;
+    while (i < n) {
+      const b = this.pending[i]!;
+      if (b !== IAC) {
+        this.buf.push(b);
+        i++;
+        continue;
+      }
+      const next = this.pending[i + 1];
+      if (next === undefined) break; // IAC だけで途切れた → 持ち越し
+      if (next === IAC) {
+        this.buf.push(IAC); // 二重化の解除
+        i += 2;
+      } else if (next === CMD.EOR) {
+        this.emitRecord();
+        i += 2;
+      } else if (next === CMD.SB) {
+        const consumed = this.handleSubnegotiation(i + 2);
+        if (consumed < 0) break; // SE がまだ来ていない → 持ち越し
+        i = consumed;
+      } else if (next === CMD.DO || next === CMD.DONT || next === CMD.WILL || next === CMD.WONT) {
+        const opt = this.pending[i + 2];
+        if (opt === undefined) break; // オプション番号待ち → 持ち越し
+        this.handleOption(next, opt);
+        i += 3;
+      } else {
+        i += 2; // 2 バイトの制御（NOP 等）は読み飛ばす
+      }
+    }
+    this.pending = this.pending.slice(i);
+  }
+
+  private emitRecord(): void {
+    const record = Uint8Array.from(this.buf);
+    this.buf = [];
+    if (record.length > 0) this.recordFn?.(record);
+  }
+
+  /**
+   * 既に応答済みの (方向, オプション) 対。**再応答を抑えるために要る。**
+   *
+   * RFC 854 は「状態が変わらないなら応答してはならない」と定める——さもないと
+   * 双方が肯定応答を返し続けて**交渉が無限ループになる**。Hercules は各オプションを
+   * 1 回しか送らないので実測では踏まなかったが、踏んだときに黙ってループするのは最悪なので
+   * 実装で塞ぐ（`will:0` / `do:25` のような鍵で持つ）。
+   */
+  private answered = new Set<string>();
+
+  private handleOption(cmd: number, opt: number): void {
+    const known =
+      opt === OPT.BINARY ||
+      opt === OPT.TERMINAL_TYPE ||
+      opt === OPT.END_OF_RECORD ||
+      // **IBM i は NEW-ENVIRON を送ってくる**。断るとコードページを申告できず
+      // variant 文字が化ける（`constants.ts` の OPT.NEW_ENVIRON 参照）
+      opt === OPT.NEW_ENVIRON;
+    if (!known) {
+      // 知らないオプションは断る。**落とさない**——断れば相手は続行できる
+      const reply = cmd === CMD.DO || cmd === CMD.DONT ? CMD.WONT : CMD.DONT;
+      if (this.once(`refuse:${reply}:${opt}`)) {
+        log.debug(`unknown telnet option ${opt}; refusing`);
+        this.transport.send(Uint8Array.from([IAC, reply, opt]));
+      }
+      return;
+    }
+    if (cmd === CMD.DO) {
+      if (this.once(`will:${opt}`)) this.transport.send(Uint8Array.from([IAC, CMD.WILL, opt]));
+      this.markAgreed(opt);
+    } else if (cmd === CMD.WILL) {
+      if (this.once(`do:${opt}`)) this.transport.send(Uint8Array.from([IAC, CMD.DO, opt]));
+      this.markAgreed(opt);
+    }
+    // DONT / WONT は合意を取り下げるだけ。3270 では実質来ない
+  }
+
+  /** その応答をまだ返していなければ true（返したことを記録する） */
+  private once(key: string): boolean {
+    if (this.answered.has(key)) return false;
+    this.answered.add(key);
+    return true;
+  }
+
+  private markAgreed(opt: number): void {
+    if (opt === OPT.BINARY) this.binaryAgreed = true;
+    if (opt === OPT.END_OF_RECORD) this.eorAgreed = true;
+    if (this.binaryAgreed && this.eorAgreed && !this.announced) {
+      this.announced = true;
+      log.debug("3270 mode established (BINARY + EOR)");
+      this.negotiatedFn?.();
+    }
+  }
+
+  /**
+   * `IAC SB <opt> … IAC SE` を処理する。`pending` 内の `start`（opt の位置）から読む。
+   * 戻り値は SE の次の位置。**SE がまだ届いていなければ -1**（持ち越しの合図）。
+   */
+  private handleSubnegotiation(start: number): number {
+    const opt = this.pending[start];
+    if (opt === undefined) return -1;
+    let i = start + 1;
+    const body: number[] = [];
+    for (;;) {
+      const b = this.pending[i];
+      if (b === undefined) return -1; // SE 待ち
+      if (b === IAC) {
+        const nx = this.pending[i + 1];
+        if (nx === undefined) return -1;
+        if (nx === IAC) {
+          body.push(IAC); // 本文中の二重化を解除
+          i += 2;
+          continue;
+        }
+        if (nx === CMD.SE) {
+          i += 2;
+          break;
+        }
+      }
+      body.push(b);
+      i++;
+    }
+    if (opt === OPT.TERMINAL_TYPE && body[0] === TT_SEND) this.sendTerminalType();
+    if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) this.sendEnviron();
+    return i;
+  }
+
+  /**
+   * NEW-ENVIRON の SEND に応える。
+   *
+   * **ホストが要求した変数を選り分けずに、こちらが申告したいものを IS で返す**
+   * （RFC 1572 は要求に無い変数を返すことを許す）。IBM i はこれでデバイスを作る。
+   */
+  private sendEnviron(): void {
+    const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
+    const put = (name: string, value: string): void => {
+      payload.push(ENV_USERVAR, ...ascii(name), ENV_VALUE, ...ascii(value));
+    };
+    if (this.opts.deviceName !== undefined) put("DEVNAME", this.opts.deviceName);
+    // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる。
+    // **KBDTYPE は必須**——CODEPAGE/CHARSET だけでは反応しないホストがある（5250 側の実機知見）
+    if (this.opts.kbdType !== undefined) put("KBDTYPE", this.opts.kbdType);
+    if (this.opts.codePage !== undefined) put("CODEPAGE", String(this.opts.codePage));
+    if (this.opts.charSet !== undefined) put("CHARSET", String(this.opts.charSet));
+
+    const out: number[] = [IAC, CMD.SB];
+    for (const b of payload) {
+      out.push(b);
+      if (b === IAC) out.push(IAC);
+    }
+    out.push(IAC, CMD.SE);
+    log.debug(`SENT SB NEW-ENVIRON IS (${payload.length} bytes)`);
+    this.transport.send(Uint8Array.from(out));
+  }
+
+  private sendTerminalType(): void {
+    const name = this.opts.terminalType;
+    const out: number[] = [IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_IS];
+    for (let k = 0; k < name.length; k++) {
+      const c = name.charCodeAt(k) & 0xff; // 端末タイプ名は ASCII
+      out.push(c);
+      if (c === IAC) out.push(IAC);
+    }
+    out.push(IAC, CMD.SE);
+    log.debug(`SENT SB TERMINAL-TYPE IS ${name}`);
+    this.transport.send(Uint8Array.from(out));
+  }
+}
+
+/** 変数名・値は ASCII（RFC 1572） */
+function ascii(s: string): number[] {
+  return [...s].map((c) => c.charCodeAt(0) & 0xff);
+}
