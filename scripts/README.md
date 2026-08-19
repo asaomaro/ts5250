@@ -6,6 +6,11 @@
 > （例: `crates/hllapi/tools/`）。**`build-*.mjs` は「IBM i 上にテスト用の資産を作る」**
 > 意味であって、ソフトウェアをビルドするスクリプトではない——同じ `build-` でも別物。
 
+> **3270（メインフレーム）の検証環境はここではない。** `@ts5250/tn3270` は実 IBM i ではなく
+> **docker 上の TK4-（MVS 3.8j）**に当てるため、環境構築は
+> `packages/tn3270/test/harness/testenv.sh` に置いてある（`sh …/testenv.sh up`）。
+> 参照クライアントは `s3270`（x3270 suite・BSD-3-Clause）。
+
 ## 実行方法
 
 ビルド後、資格情報を環境変数で渡して実行する（`.env` は gitignore、パスワードはコミットしない）:
