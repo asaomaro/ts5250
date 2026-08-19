@@ -60,6 +60,7 @@ node --env-file=.env tools/hostserver-check/dist/sql.js \
 | スクリプト | 内容 |
 |---|---|
 | `build-attrtest.mjs` | `MYLIB` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
+| `verify-browser-command-prompt.mjs` | **コマンド入力支援**（実機の F4 相当・実ブラウザ）: 定義を引いて欄が並ぶ／必須の印／選択肢／既定値の表示、**「確かめる」で走る文字列そのもの**が見えること、実行してホストのメッセージが返ることまで。 |
 | `verify-command-template.mjs` | **CL コマンドのテンプレート**（`QCDRCMDD`）: 定義を引き、引用の要る値（`'`・空白・小文字・日本語）でコマンドを組み、実機で通して**読み戻して一致**を見る。許されない値を打つ前に弾くことも。 |
 | `verify-attributes.mjs` | 表示検証: `CLRTPGM`（7 色・反転・下線・高輝度・桁区切り・点滅・DBCS）＋ `INLPGM`（埋め込み属性バイトの色切替）。**CCSID 1399**。 |
 | `verify-input.mjs` | 入力検証（core）: `INPPGM` の 4 欄の型（numeric/SBCS/open/pure）＋ O/J のエコー往復。**CCSID 1399**。 |
