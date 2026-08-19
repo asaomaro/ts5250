@@ -21,21 +21,27 @@ import { fileURLToPath } from "node:url";
  *   scs     … スプール展開。base（全角判定）と ebcdic を使う
  *   hostserver … ホストサーバー群。base / ebcdic / scs を使う
  *   tn5250  … 5250 端末プロトコル。base / ebcdic / scs（プリンターセッション）を使う
+ *   tn3270  … 3270 端末プロトコル。base / ebcdic を使う（scs は不要——プリンターは対象外）
  *
- * **hostserver と tn5250 は同位**——互いに依存しない（どちらが上でもない）。
- * 表では tn5250 を上に置いているが、`hostserver → tn5250` も `tn5250 → hostserver` も
- * 両方とも禁止として検査する（下の SIBLINGS）。
+ * **hostserver / tn5250 / tn3270 はいずれも同位**——互いに依存しない（どれが上でもない）。
+ * 表では順に並べているが、`hostserver → tn5250` も `tn5250 → hostserver` も、
+ * `tn5250 → tn3270` も `tn3270 → tn5250` も、両方向とも禁止として検査する（下の SIBLINGS）。
+ *
+ * **tn3270 を足したときにここへ 2 行書くだけで済む**のがこの設計の狙い——
+ * パッケージが 7 つになると組み合わせは 21 通りあり、個別に辺を書く形では書き忘れが素通りする。
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGES = join(here, "..", "..");
 
 /** 下ほど上位。上位は下位を import してよいが、逆はしてはならない */
-const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250"] as const;
+const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250", "tn3270"] as const;
 
 /** 互いに依存してはならない対（同位のパッケージ） */
 const SIBLINGS: readonly (readonly [string, string])[] = [
   ["hostserver", "tn5250"],
+  ["tn5250", "tn3270"], // 5250 と 3270 は別プロトコル。層を共有しない
+  ["hostserver", "tn3270"],
   ["base", "ebcdic"] // どちらも依存ゼロを売りにしている
 ];
 
