@@ -226,3 +226,146 @@ describe("NEW-ENVIRON（IBM i 向けのコードページ申告）", () => {
     expect(text).toContain("MYDEV01");
   });
 });
+
+describe("TN3270E の受理と後退（RFC 2355）", () => {
+  const CMD3270E = { DEVICE_TYPE: 0x02, FUNCTIONS: 0x03, IS: 0x04, REQUEST: 0x07, SEND: 0x08 };
+  const asc = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+
+  /** DO TN3270E → …→ ready まで進める */
+  function negotiateE(t: MockTransport, telnet: TelnetLayer): void {
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.SEND, CMD3270E.DEVICE_TYPE, IAC, CMD.SE);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.DEVICE_TYPE, CMD3270E.IS,
+      ...asc("IBM-3278-2-E"), 0x01, ...asc("TERM7"), IAC, CMD.SE);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.FUNCTIONS, CMD3270E.IS, IAC, CMD.SE);
+    t.recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    t.recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    void telnet;
+  }
+
+  it("device-type があれば DO TN3270E に WILL で応じる", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, { terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E" });
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    expect(hex(t.sentFlat)).toBe("fffb28");
+  });
+
+  it("**device-type が無ければ断る**（基本 TN3270 のまま）", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, { terminalType: "IBM-3279-2-E" });
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    expect(hex(t.sentFlat)).toBe("fffc28"); // WONT
+  });
+
+  it("**tn3270e:false なら断って基本へ後退する**", () => {
+    const t = new MockTransport();
+    new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E", tn3270e: false
+    });
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    expect(hex(t.sentFlat)).toBe("fffc28");
+  });
+
+  it("交渉が完了すると isTn3270e と deviceName が立つ", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E"
+    });
+    let negotiated = false;
+    telnet.onNegotiated(() => (negotiated = true));
+    negotiateE(t, telnet);
+    expect(telnet.isTn3270e).toBe(true);
+    expect(telnet.deviceName).toBe("TERM7");
+    expect(negotiated).toBe(true);
+  });
+
+  it("**BINARY/EOR だけでは発火しない**——TN3270E が ready になるまで待つ", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E"
+    });
+    let negotiated = false;
+    telnet.onNegotiated(() => (negotiated = true));
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    t.recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    t.recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    expect(negotiated).toBe(false); // 交渉が終わっていない
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.SEND, CMD3270E.DEVICE_TYPE, IAC, CMD.SE);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.DEVICE_TYPE, CMD3270E.IS, ...asc("IBM-3278-2-E"), IAC, CMD.SE);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.FUNCTIONS, CMD3270E.IS, IAC, CMD.SE);
+    expect(negotiated).toBe(true);
+  });
+
+  it("**送信に 5 バイトヘッダが付く**", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E"
+    });
+    negotiateE(t, telnet);
+    t.sent = [];
+    telnet.sendRecord(Uint8Array.from([0x7d, 0x40, 0x40]));
+    expect(hex(t.sentFlat)).toBe("00000000007d4040ffef");
+  });
+
+  it("**受信の 5 バイトヘッダが剥がれ、3270-DATA だけが上位へ渡る**", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E"
+    });
+    const got: string[] = [];
+    telnet.onRecord((r) => got.push(hex([...r])));
+    negotiateE(t, telnet);
+
+    t.recv(0x00, 0x00, 0x00, 0x00, 0x00, 0xf5, 0xc3, IAC, CMD.EOR);   // 3270-DATA
+    t.recv(0x05, 0x00, 0x00, 0x00, 0x00, 0xc1, IAC, CMD.EOR);         // NVT-DATA → 読み飛ばす
+    t.recv(0x7f, 0x00, 0x00, 0x00, 0x00, 0xc2, IAC, CMD.EOR);         // 未知 → 読み飛ばす
+    t.recv(0x00, 0x00, IAC, CMD.EOR);                                  // 5 バイト未満 → 読み飛ばす
+    expect(got).toEqual(["f5c3"]);
+  });
+
+  it("基本 TN3270 ではヘッダを付けない（退行しないこと）", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, { terminalType: "IBM-3279-2-E" });
+    const got: string[] = [];
+    telnet.onRecord((r) => got.push(hex([...r])));
+    t.recv(IAC, CMD.DO, OPT.END_OF_RECORD, IAC, CMD.WILL, OPT.END_OF_RECORD);
+    t.recv(IAC, CMD.DO, OPT.BINARY, IAC, CMD.WILL, OPT.BINARY);
+    t.sent = [];
+    telnet.sendRecord(Uint8Array.from([0x7d, 0x40, 0x40]));
+    expect(hex(t.sentFlat)).toBe("7d4040ffef");
+    t.recv(0xf5, 0xc3, IAC, CMD.EOR);
+    expect(got).toEqual(["f5c3"]);
+  });
+
+  it("**`@装置名` は基本経路でだけ付く**（TN3270E は CONNECT で渡すため）", () => {
+    // 基本経路
+    const t1 = new MockTransport();
+    new TelnetLayer(t1, { terminalType: "IBM-3279-2-E", deviceName: "MYLU" });
+    t1.recv(IAC, CMD.DO, OPT.TERMINAL_TYPE);
+    t1.sent = [];
+    t1.recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    expect(String.fromCharCode(...t1.sentFlat.filter((b) => b >= 0x20 && b < 0x7f))).toContain("@MYLU");
+
+    // TN3270E 経路では付かない
+    const t2 = new MockTransport();
+    new TelnetLayer(t2, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E", deviceName: "MYLU"
+    });
+    t2.recv(IAC, CMD.DO, OPT.TN3270E);
+    t2.sent = [];
+    t2.recv(IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+    expect(String.fromCharCode(...t2.sentFlat.filter((b) => b >= 0x20 && b < 0x7f))).not.toContain("@MYLU");
+  });
+
+  it("REJECT を受けると理由が残る", () => {
+    const t = new MockTransport();
+    const telnet = new TelnetLayer(t, {
+      terminalType: "IBM-3279-2-E", deviceType: "IBM-3278-2-E", deviceName: "TAKEN"
+    });
+    t.recv(IAC, CMD.DO, OPT.TN3270E);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.SEND, CMD3270E.DEVICE_TYPE, IAC, CMD.SE);
+    t.recv(IAC, CMD.SB, OPT.TN3270E, CMD3270E.DEVICE_TYPE, 0x06, 0x05, 0x01, IAC, CMD.SE);
+    expect(telnet.isTn3270e).toBe(false);
+    expect(telnet.tn3270eError).toMatch(/DEVICE-IN-USE/);
+  });
+});

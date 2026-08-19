@@ -111,6 +111,26 @@ describe("replay（docker 不要）", () => {
     expect(sent).toContain("88"); // AID_STRUCTURED_FIELD で始まる応答
   });
 
+  it("**TN3270E の記録を再生できる**（docker 無しで交渉と 5 バイトヘッダを固定）", () => {
+    const entries = loadEntries("tn3270e-basic.jsonl");
+    const s = new Tn3270Session({ host: "replay", model: 2 });
+    const transport = ReplayTransport.fromEntries(entries);
+    let screens = 0;
+    s.on("screen", () => screens++);
+    s.attach(transport);
+
+    expect(screens).toBeGreaterThan(0);
+    expect(s.isTn3270e, "TN3270E として再生されていない").toBe(true);
+    expect(s.assignedDeviceName).toBe("FIXLU");
+    const text = s.snapshot().cells.map((r) => r.map((c) => c.char).join("").trimEnd()).join("\n");
+    expect(text).toContain("TN3270E BASIC");
+
+    // **送信側に 5 バイトヘッダ付きのレコードが出ている**こと
+    const sent = transport.sent.map(toHex).join("");
+    expect(sent).toContain("fffb28"); // WILL TN3270E
+    expect(sent).toMatch(/fffa2802 ?07/.source.replace(" ?", "")); // DEVICE-TYPE REQUEST
+  });
+
   it("送信バイトも記録される（照合に使える）", () => {
     const entries = loadEntries("dbcs-cp930.jsonl");
     const s = new Tn3270Session({ host: "replay", model: 2, ccsid: 930 });

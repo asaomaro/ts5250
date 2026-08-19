@@ -144,7 +144,14 @@ export const ATTR = {
   /** 表示種別の 2 ビット。下の DISPLAY_* と比較する */
   DISPLAY_MASK: 0x0c,
   NUMERIC: 0x10,
-  PROTECTED: 0x20
+  PROTECTED: 0x20,
+  /**
+   * **意味を持つビットだけを残すマスク**（MDT｜表示種別｜数字｜保護）。
+   * 残りの 3 ビット（0x02・0x40・0x80）は仕様上「未使用」で、
+   * ホストが何を入れて来ても無視してよい——というより、**送り返すときは落とす**
+   * （`encodeAttribute()` を参照）。
+   */
+  MEANINGFUL: 0x3d
 } as const;
 
 export const DISPLAY = {
@@ -161,12 +168,36 @@ export const DISPLAY = {
  * `42` は `foreground(red)`、`41` は `highlighting(blink)` と復号された。
  */
 export const XA = {
+  /**
+   * **全属性**。`SA 00 00` で**それまでの `SA` 指定をまとめて取り消す**。
+   * 取り消しに `BASIC`(0xc0) を使うのは誤り（x3270 は 0x00 で見ている）。
+   */
+  ALL: 0x00,
   /** 基本 3270 属性（SFE の中で SF と同じ属性バイトを運ぶ） */
   BASIC: 0xc0,
   HIGHLIGHT: 0x41,
   FOREGROUND: 0x42,
   CHARSET: 0x43,
-  BACKGROUND: 0x45
+  BACKGROUND: 0x45,
+  /**
+   * **入力制御**。値 1 で「この欄は SBCS と DBCS の混在入力を受け付ける」。
+   * これが立っていない普通の欄に日本語を打とうとすると、**s3270 は入力を撥ねる**（実測）。
+   */
+  INPUT_CONTROL: 0xfe
+} as const;
+
+/**
+ * **文字セット属性（`XA.CHARSET`）の値。**
+ *
+ * `0xf8` が DBCS——**これが SO/SI と並ぶ「もう一つの DBCS の入口」**。
+ * SFE で欄ごと DBCS にする／SA で文字の並びだけ DBCS にする、の 2 通りで効く。
+ * `0xf1` は APL で DBCS ではない（x3270 も `0xf1` だけを APL に振り分けている）。
+ * それ以外の値は基本文字集合として扱う。
+ */
+export const CHARSET = {
+  BASE: 0x00,
+  APL: 0xf1,
+  DBCS: 0xf8
 } as const;
 
 /**
@@ -213,8 +244,31 @@ export const COLOR = {
 } as const;
 
 /** DBCS の切り替え（バッファ上でそれぞれ 1 桁を占める。research F5 実測） */
+/**
+ * **重複キー**（Dup）。ホストへは 0x1c として送られ、「上の行と同じ」を意味する。
+ * 打つと**次の欄へ飛ぶ**（実測）。
+ */
+export const DUP = 0x1c;
+/** **欄区切り**（Field Mark）。0x1e。欄の中の区切りを表す。カーソルは 1 つ進むだけ */
+export const FIELD_MARK = 0x1e;
 export const SO = 0x0e;
 export const SI = 0x0f;
 
 /** 空の桁（Erase/Write 後の初期値） */
 export const NUL = 0x00;
+
+/**
+ * **応答モード**（構造化フィールド `Set Reply Mode` 0x09）。
+ *
+ * ホストが「読み取りの応答に拡張属性まで載せろ」と指示するための設定。
+ * 既定は `FIELD`——`Erase/Write`・`Erase/Write Alternate` で**この既定に戻る**が、
+ * **平の `Write` では戻らない**（実測で切り分けた）。
+ */
+export const REPLY_MODE = {
+  /** 属性桁は `SF`＋属性バイトだけ */
+  FIELD: 0x00,
+  /** 属性桁を `SFE` で返し、欄の拡張属性も載せる */
+  EXTENDED_FIELD: 0x01,
+  /** さらに**文字ごとの属性**を `SA` オーダーで載せる（載せる種類はホストが指定する） */
+  CHARACTER: 0x02
+} as const;

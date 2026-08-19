@@ -4,6 +4,13 @@ import {
   IAC, CMD, OPT, TT_IS, TT_SEND,
   ENV_IS, ENV_SEND, ENV_VALUE, ENV_USERVAR
 } from "./constants.js";
+import {
+  Tn3270eNegotiator,
+  splitHeader,
+  withHeader,
+  DATA_TYPE,
+  type Tn3270eOptions
+} from "./tn3270e.js";
 
 const log = childLog({ component: "tn3270-telnet" });
 
@@ -20,8 +27,27 @@ export interface TelnetOptions {
   kbdType?: string | undefined;
   codePage?: number | undefined;
   charSet?: number | undefined;
-  /** RFC 4777 のデバイス名（NEW-ENVIRON の USERVAR DEVNAME） */
+  /**
+   * デバイス名（LU 名）。**経路によって渡し方が変わる**:
+   * - 基本 TN3270 … 端末タイプ文字列に `@<名前>` を付ける（実測で通る慣行）
+   * - TN3270E …… `DEVICE-TYPE REQUEST <型名> CONNECT <名前>`（RFC 2355 §7.1.2）
+   *
+   * どちらの経路になるかは交渉が始まるまで分からないので、**ここで保持して
+   * 発火した側でだけ使う**（二重指定を避ける）。NEW-ENVIRON の `DEVNAME` にも使う。
+   */
   deviceName?: string | undefined;
+  /**
+   * TN3270E 用の device-type（`IBM-3278-*`）。**省略すると TN3270E を使わない。**
+   * 基本 TN3270 の `terminalType`（`IBM-3279-*`）とは別物（RFC 2355 §7.1）。
+   */
+  deviceType?: string | undefined;
+  /**
+   * TN3270E を使うか（既定 `true`）。`false` なら `DO TN3270E` に `WONT` で応じ、
+   * **基本 TN3270 へ後退する**。後退経路をテストで踏むために要る。
+   */
+  tn3270e?: boolean | undefined;
+  /** `FUNCTIONS` の往復上限（`Tn3270eNegotiator` へ渡す） */
+  maxFunctionRounds?: number | undefined;
 }
 
 /**
@@ -55,6 +81,9 @@ export class TelnetLayer {
   private binaryAgreed = false;
   private eorAgreed = false;
   private announced = false;
+  /** TN3270E の交渉器。`DO TN3270E` を受理したときだけ作る */
+  private tn3270e: Tn3270eNegotiator | undefined;
+  private tn3270eFailure: string | undefined;
 
   constructor(
     private readonly transport: Transport,
@@ -67,15 +96,37 @@ export class TelnetLayer {
     this.recordFn = fn;
   }
 
+  /** TN3270E で接続しているか（交渉完了後に確定する） */
+  get isTn3270e(): boolean {
+    return this.tn3270e?.state === "ready";
+  }
+
+  /** サーバが割り当てた device-name（TN3270E 時のみ） */
+  get deviceName(): string | undefined {
+    return this.tn3270e?.deviceName;
+  }
+
+  /** TN3270E の交渉が失敗した理由（REJECT / impasse）。成功なら undefined */
+  get tn3270eError(): string | undefined {
+    return this.tn3270eFailure;
+  }
+
   /** BINARY / EOR の合意が揃った時点で 1 回だけ発火する */
   onNegotiated(fn: () => void): void {
     this.negotiatedFn = fn;
   }
 
-  /** アプリのレコードを送る（IAC を二重化し、末尾に IAC EOR を付ける） */
+  /**
+   * アプリのレコードを送る（IAC を二重化し、末尾に IAC EOR を付ける）。
+   *
+   * **TN3270E なら 5 バイトヘッダを前置する**（`3270-DATA`。RFC 2355 §8.1）。
+   * ヘッダは封筒なので**この層で付ける**——上位（`outbound.ts` / `session`）は
+   * 基本 TN3270 と同じものを渡すだけでよい。
+   */
   sendRecord(payload: Uint8Array): void {
+    const framed = this.isTn3270e ? withHeader(payload, DATA_TYPE.DATA_3270) : payload;
     const out: number[] = [];
-    for (const b of payload) {
+    for (const b of framed) {
       out.push(b);
       if (b === IAC) out.push(IAC); // 本文中の FF は二重化
     }
@@ -129,10 +180,32 @@ export class TelnetLayer {
     this.pending = this.pending.slice(i);
   }
 
+  /**
+   * 1 レコードを上位へ渡す。
+   *
+   * **TN3270E なら 5 バイトヘッダを剥がし、`3270-DATA` だけを渡す**（§8.1 / §9）。
+   * `NVT-DATA` はモード切替の要求（§9.1）だが NVT は実装しないので読み飛ばす。
+   * 未知の種別も**落とさずに記録して読み飛ばす**。
+   */
   private emitRecord(): void {
     const record = Uint8Array.from(this.buf);
     this.buf = [];
-    if (record.length > 0) this.recordFn?.(record);
+    if (record.length === 0) return;
+
+    if (!this.isTn3270e) {
+      this.recordFn?.(record);
+      return;
+    }
+    const split = splitHeader(record);
+    if (split === null) {
+      log.debug(`TN3270E record shorter than header (${record.length} bytes); skipped`);
+      return;
+    }
+    if (split.header.dataType !== DATA_TYPE.DATA_3270) {
+      log.debug(`TN3270E data-type 0x${split.header.dataType.toString(16)} not handled; skipped`);
+      return;
+    }
+    if (split.body.length > 0) this.recordFn?.(split.body);
   }
 
   /**
@@ -146,13 +219,16 @@ export class TelnetLayer {
   private answered = new Set<string>();
 
   private handleOption(cmd: number, opt: number): void {
+    // **TN3270E を使うか**は 2 条件——利用側が有効にしていて、device-type を渡していること
+    const wantTn3270e = (this.opts.tn3270e ?? true) && this.opts.deviceType !== undefined;
     const known =
       opt === OPT.BINARY ||
       opt === OPT.TERMINAL_TYPE ||
       opt === OPT.END_OF_RECORD ||
       // **IBM i は NEW-ENVIRON を送ってくる**。断るとコードページを申告できず
       // variant 文字が化ける（`constants.ts` の OPT.NEW_ENVIRON 参照）
-      opt === OPT.NEW_ENVIRON;
+      opt === OPT.NEW_ENVIRON ||
+      (opt === OPT.TN3270E && wantTn3270e);
     if (!known) {
       // 知らないオプションは断る。**落とさない**——断れば相手は続行できる
       const reply = cmd === CMD.DO || cmd === CMD.DONT ? CMD.WONT : CMD.DONT;
@@ -182,11 +258,30 @@ export class TelnetLayer {
   private markAgreed(opt: number): void {
     if (opt === OPT.BINARY) this.binaryAgreed = true;
     if (opt === OPT.END_OF_RECORD) this.eorAgreed = true;
-    if (this.binaryAgreed && this.eorAgreed && !this.announced) {
-      this.announced = true;
-      log.debug("3270 mode established (BINARY + EOR)");
-      this.negotiatedFn?.();
+    if (opt === OPT.TN3270E && this.tn3270e === undefined) {
+      // `WILL TN3270E` を返した。以降のサブネゴシエーションは交渉器に委ねる
+      const o: Tn3270eOptions = { deviceType: this.opts.deviceType! };
+      if (this.opts.deviceName !== undefined) o.deviceName = this.opts.deviceName;
+      if (this.opts.maxFunctionRounds !== undefined) o.maxFunctionRounds = this.opts.maxFunctionRounds;
+      this.tn3270e = new Tn3270eNegotiator(o);
+      log.debug("TN3270E accepted; awaiting SEND DEVICE-TYPE");
     }
+    this.maybeAnnounce();
+  }
+
+  /**
+   * 交渉完了を 1 回だけ知らせる。
+   *
+   * **TN3270E のときは交渉器が `ready` になるまで待つ。** BINARY / EOR だけで発火させると、
+   * セッションが使える気になった直後に送信してホストに弾かれる。
+   */
+  private maybeAnnounce(): void {
+    if (this.announced) return;
+    if (!this.binaryAgreed || !this.eorAgreed) return;
+    if (this.tn3270e !== undefined && this.tn3270e.state !== "ready") return;
+    this.announced = true;
+    log.debug(this.isTn3270e ? "TN3270E mode established" : "3270 mode established (BINARY + EOR)");
+    this.negotiatedFn?.();
   }
 
   /**
@@ -219,6 +314,7 @@ export class TelnetLayer {
     }
     if (opt === OPT.TERMINAL_TYPE && body[0] === TT_SEND) this.sendTerminalType();
     if (opt === OPT.NEW_ENVIRON && body[0] === ENV_SEND) this.sendEnviron();
+    if (opt === OPT.TN3270E) this.handleTn3270e(body);
     return i;
   }
 
@@ -250,8 +346,37 @@ export class TelnetLayer {
     this.transport.send(Uint8Array.from(out));
   }
 
+  /**
+   * `IAC SB TN3270E … IAC SE` の本文を交渉器に渡し、返ってきた本文を包んで送り返す。
+   * **交渉のロジックは `tn3270e.ts` に閉じている**（この層はソケットへの出し入れだけ）。
+   */
+  private handleTn3270e(body: readonly number[]): void {
+    const neg = this.tn3270e;
+    if (neg === undefined) return;
+    const reply = neg.handle(body);
+    if (reply !== null) {
+      const out: number[] = [IAC, CMD.SB, OPT.TN3270E];
+      for (const b of reply) {
+        out.push(b);
+        if (b === IAC) out.push(IAC);
+      }
+      out.push(IAC, CMD.SE);
+      this.transport.send(Uint8Array.from(out));
+    }
+    if (neg.state === "rejected" || neg.state === "failed") {
+      this.tn3270eFailure = neg.error ?? "TN3270E negotiation failed";
+      log.debug(this.tn3270eFailure);
+    }
+    this.maybeAnnounce();
+  }
+
   private sendTerminalType(): void {
-    const name = this.opts.terminalType;
+    // **`@<装置名>` は基本 TN3270 の慣行**。TN3270E では `CONNECT` で渡すので付けない
+    const base = this.opts.terminalType;
+    const name =
+      this.opts.deviceName !== undefined && !base.includes("@") && this.tn3270e === undefined
+        ? `${base}@${this.opts.deviceName}`
+        : base;
     const out: number[] = [IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_IS];
     for (let k = 0; k < name.length; k++) {
       const c = name.charCodeAt(k) & 0xff; // 端末タイプ名は ASCII
