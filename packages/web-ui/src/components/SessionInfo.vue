@@ -66,7 +66,10 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
   if (!s) return [];
   const m = s.meta ?? {};
   const rows: { label: string; value: string }[] = [];
-  rows.push({ label: "種別", value: isPrinter.value ? "プリンター" : "5250端末" });
+  // **端末の種類まで出す。** `kind` は画面／プリンターしか言わないので、
+  // 表示セッションを一律 `5250端末` と書くと 3270 のセッションが 5250 に見える
+  const terminal = m.terminal === "3270" ? "3270端末" : "5250端末";
+  rows.push({ label: "種別", value: isPrinter.value ? "プリンター" : terminal });
   if (m.host) rows.push({ label: "ホスト", value: `${m.host}${m.port ? ":" + m.port : ""}` });
   const ccsid = s.ccsid ?? m.ccsid;
   if (ccsid !== undefined) rows.push({ label: "CCSID", value: String(ccsid) });
