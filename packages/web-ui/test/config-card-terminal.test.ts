@@ -84,3 +84,25 @@ describe("編集画面", () => {
     w.unmount();
   });
 });
+
+describe("ⓘ の詳細", () => {
+  /** 札（一覧）と詳細（ⓘ）で別々に書いていたので、**詳細だけ 5250 のまま**だった */
+  const info = async (over: Record<string, unknown> = {}): Promise<string> => {
+    const w = card(over);
+    await w.find("button.info").trigger("click");
+    return w.text();
+  };
+
+  it("**3270 のセッションは詳細でも「3270 端末」**", async () => {
+    expect(await info({ terminal: "3270" })).toContain("3270 端末");
+  });
+
+  it("5250 は従来どおり", async () => {
+    expect(await info()).toContain("5250 端末");
+  });
+
+  it("プリンターや監視は端末の種類に関係しない", async () => {
+    expect(await info({ sessionType: "printer" })).toContain("プリンター");
+    expect(await info({ sessionType: "dtaqwatch" })).toContain("待ち行列監視");
+  });
+});

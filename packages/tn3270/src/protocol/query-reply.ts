@@ -224,12 +224,19 @@ export function buildQueryReply(opts: QueryReplyOptions = {}): Uint8Array {
     ]);
   }
 
-  // ImplicitPartition: 標準サイズと代替サイズを申告する
+  // ImplicitPartition: 標準サイズと代替サイズを申告する。
+  //
+  // **4 つとも 2 バイトで書く。** 自己定義パラメータの長さ `0x0b` は
+  // 「LL(1) + ID(1) + FLAGS(1) + 幅高さ 4 つ × 2 バイト」の 11。標準サイズだけ
+  // 1 バイトで書くと後続が 1 桁ずつずれ、**ホストは代替幅を 24 桁と読む**
+  // （実測: TK4- の TSO が行モードの出力を 24 桁で折り、
+  //  `IKJ56714A ENTER CURRENT` ＋ `***` に切れた）
   sf(w, [
     QR.IMPLICIT_PARTITION,
     0x00, 0x00,
     0x0b, 0x01, 0x00,
-    PRIMARY_SIZE.cols, PRIMARY_SIZE.rows,
+    (PRIMARY_SIZE.cols >> 8) & 0xff, PRIMARY_SIZE.cols & 0xff,
+    (PRIMARY_SIZE.rows >> 8) & 0xff, PRIMARY_SIZE.rows & 0xff,
     (alt.cols >> 8) & 0xff, alt.cols & 0xff,
     (alt.rows >> 8) & 0xff, alt.rows & 0xff
   ]);

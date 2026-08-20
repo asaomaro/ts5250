@@ -681,17 +681,8 @@ const infoRows = computed(() => {
   const parent = systemsStore.systems.find((x) => x.ref === o.system);
   rows.push({ label: "名称", value: o.name });
   rows.push({ label: "区分", value: o.ref.startsWith("srv:") ? "サーバー設定" : "自分の設定" });
-  rows.push({
-    label: "種別",
-    value:
-      o.sessionType === "printer"
-        ? "プリンター"
-        : o.sessionType === "dtaqwatch"
-          ? "待ち行列監視"
-          : o.sessionType === "msgwatch"
-            ? "メッセージ待ち受け"
-            : "5250 端末"
-  });
+  // 札（`typeLabel`）と同じ言い方にする。**別々に書くと必ず片方だけ直し忘れる**
+  rows.push({ label: "種別", value: typeLabel.value });
   if (o.dtaqWatch) {
     rows.push({ label: "監視するキュー", value: `${o.dtaqWatch.library}/${o.dtaqWatch.name}` });
     rows.push({ label: "符号化", value: o.dtaqWatch.encoding ?? "utf8" });
