@@ -46,6 +46,7 @@ export default tseslint.config(
       "packages/base/src/**",
       "packages/tn5250/src/**",
       "packages/tn3270/src/**",
+      "packages/vt/src/**",
       "packages/ebcdic/src/**",
       "packages/hostserver/src/**",
       "packages/scs/src/**"
@@ -53,6 +54,7 @@ export default tseslint.config(
     ignores: [
       "packages/tn5250/src/transport/**",
       "packages/tn3270/src/transport/**",
+      "packages/vt/src/transport/**",
       "packages/hostserver/src/transport/**"
     ],
     rules: {
