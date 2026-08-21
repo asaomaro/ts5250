@@ -1,5 +1,5 @@
 import { Emitter } from "./emitter.js";
-import { As400Error } from "@ts5250/base";
+import { As400Error, deviceEnvFor } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
@@ -9,7 +9,7 @@ import {
   startupCodeMeaning,
   STARTUP_SUCCESS_CODES
 } from "../telnet/startup-record.js";
-import { deviceEnvFor, printerTerminalTypeFor } from "./terminal-type.js";
+import { printerTerminalTypeFor } from "./terminal-type.js";
 import { ScsDecoder, type LogicalPage } from "@ts5250/scs";
 
 /** 受信した 1 スプール（帳票）。ジョブ完了ごとに 1 件。 */
