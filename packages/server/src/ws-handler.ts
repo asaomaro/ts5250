@@ -195,7 +195,12 @@ export class WsConnection {
       // `CONNECT_FAILED` から `CONFIG_ERROR` / `SESSION_LIMIT` へ分かれた時点で、
       // 列挙のままなら「開けなかった」が致命的でなくなっていた
       // （`20260729-connect-failed-semantics` spec 方針3）。
-      const fatal = code === "SESSION_CLOSED" || this.sessionId === undefined;
+      // **3270 のセッションは `session3270` に入る**（`sessionId` ではない）。
+      // `sessionId` だけを見ていたため、**3270 では生きているセッション上の無害なエラーまで
+      // `fatal: true`** になっていた——「この欄には 2 バイト文字を打てません」
+      // （`FIELD_TYPE`）で接続ごと畳め、と言っていたことになる。
+      // 状態で決める以上、**状態の在り処を全部見る**（`onOpen` の重複検査と同じ形）。
+      const fatal = code === "SESSION_CLOSED" || (this.sessionId ?? this.session3270) === undefined;
       this.sendError(code, err instanceof Error ? err.message : String(err), fatal);
     }
   }
