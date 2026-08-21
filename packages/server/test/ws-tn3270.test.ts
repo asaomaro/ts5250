@@ -152,6 +152,33 @@ describe("WS から 3270 端末を開く", () => {
     }
   }, 30_000);
 
+  /**
+   * **`fatal` は状態で決める**（`ws-lifetime.test.ts`「error の fatal は状態で決まる」）。
+   * その状態が 3270 では `session3270` に入るので、`sessionId` だけを見ていると
+   * **生きているセッション上の無害なエラーまで `fatal: true`** になる。
+   *
+   * 実際に踏んだのは MVS 3.8j の混在欄の検証で、素の欄に日本語を打ったとき
+   * （`FIELD_TYPE: field does not accept double-byte input`）。**打てないと言うだけの話**で、
+   * セッションは何ともなっていない。
+   */
+  it("**生きている 3270 セッションのエラーは fatal でない**", async () => {
+    const port = await start(3454);
+    const { conn, sent, tn3270 } = setup();
+    try {
+      await conn.handle(JSON.stringify({ type: "open", terminal: "3270", host: "127.0.0.1", port }));
+      expect(await waitFor(() => sent.some((m) => m.type === "screen"))).toBe(true);
+      sent.length = 0;
+      // 在りもしない欄を指す＝**セッションは無事なまま**のエラー
+      await conn.handle(
+        JSON.stringify({ type: "key", key: "Enter", fields: [{ field: { row: 9, col: 9 }, value: "X" }] })
+      );
+      expect(sent[0]).toMatchObject({ type: "error", code: "FIELD_NOT_FOUND", fatal: false });
+    } finally {
+      tn3270.closeAll();
+      await mini?.close();
+    }
+  }, 30_000);
+
   it("**3270 が無効なサーバーでは断る**", async () => {
     const sent: WsServerMessage[] = [];
     const server = new ServerConfigStore({ systems: [], sessions: [] });
