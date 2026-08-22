@@ -5,8 +5,15 @@ import { join, resolve } from "node:path";
 import { checkOutputDir } from "../src/output-dir.js";
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), "outdir-"));
-/** root は権限を無視するため、書込不可のテストは成立しない */
-const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+/**
+ * 書込不可のテストが成立しない環境。
+ *
+ * - **root**: 権限を無視するので書けてしまう
+ * - **Windows**: `chmod` に読み取り専用ビットしか無く、**ディレクトリーへの書き込みは
+ *   止まらない**（実際の制御は ACL）。`0o500` を渡しても書けるので判定が反転する
+ */
+const cannotDenyWrite =
+  (typeof process.getuid === "function" && process.getuid() === 0) || process.platform === "win32";
 
 describe("checkOutputDir（PDF 出力先の保存時検証）", () => {
   it("正常なディレクトリは ok で、解決後の絶対パスを返す", async () => {
@@ -39,7 +46,7 @@ describe("checkOutputDir（PDF 出力先の保存時検証）", () => {
     if (!r.ok) expect(r.reason).toMatch(/フォルダではありません/);
   });
 
-  it.skipIf(isRoot)("書き込めないディレクトリは「書き込めません」", async () => {
+  it.skipIf(cannotDenyWrite)("書き込めないディレクトリは「書き込めません」", async () => {
     const dir = tmp();
     chmodSync(dir, 0o500); // r-x: 読めるが書けない
     try {

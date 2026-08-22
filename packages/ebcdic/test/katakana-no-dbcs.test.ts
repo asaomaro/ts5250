@@ -45,7 +45,12 @@ function reachableFrom(entry: string): Map<string, number> {
 
 describe("@ts5250/ebcdic/katakana は DBCS 表を引き込まない", () => {
   const reached = reachableFrom("katakana.ts");
-  const rel = (f: string): string => f.slice(srcDir.length + 1);
+  /**
+   * src からの相対パス。**区切りは `/` に正規化する**——Windows では `\` になり、
+   * `/tables\/ibm\d+\.ts$/` のような比較が外れて**ガードが素通しする**（fail-open）。
+   * 手法は `catalog-no-tables.test.ts` と同じ。
+   */
+  const rel = (f: string): string => f.slice(srcDir.length + 1).replaceAll("\\", "/");
   const files = [...reached.keys()].map(rel).sort();
 
   /**

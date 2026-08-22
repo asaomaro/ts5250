@@ -1,21 +1,41 @@
 import { describe, it, expect } from "vitest";
 import { createServer, type Server } from "node:tls";
 import { once } from "node:events";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TcpTransport } from "../src/transport/tcp.js";
 import { As400Error } from "@ts5250/base";
 
-/** 自己署名証明書を openssl で生成（テスト用） */
+/**
+ * 自己署名証明書を openssl で生成（テスト用）。
+ *
+ * **一時ディレクトリーは Node で作る。** 以前は `mktemp -d` を呼んでいたが、
+ * Windows では Git 同梱の `mktemp` が **MSYS のパス**（`/tmp/tmp.xxxx`）を返し、
+ * Node からは `C:\tmp\…` として解決されて読み書きできない（実測で 3 件が落ちた）。
+ * `mkdtempSync` なら OS の作法どおりのパスになる。
+ */
 function selfSigned(): { key: string; cert: string } {
-  const dir = execFileSync("mktemp", ["-d"]).toString().trim();
+  const dir = mkdtempSync(join(tmpdir(), "tn5250-tls-"));
+  const key = join(dir, "k.pem");
+  const cert = join(dir, "c.pem");
   execFileSync("openssl", [
     "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-    "-keyout", `${dir}/k.pem`, "-out", `${dir}/c.pem`,
+    "-keyout", key, "-out", cert,
     "-days", "1", "-subj", "/CN=localhost"
   ]);
-  return { key: readFileSync(`${dir}/k.pem`, "utf8"), cert: readFileSync(`${dir}/c.pem`, "utf8") };
+  return { key: readFileSync(key, "utf8"), cert: readFileSync(cert, "utf8") };
 }
+
+/**
+ * `openssl` が使えるか。**ENOENT だけを「未インストール」と見る**
+ * （`zip-writer.test.ts` と同じ考え方。無い環境では「TLS が壊れた」ではなく
+ * 「検証手段が無い」が正しい）。飛ばした事実は vitest の skip として残る。
+ */
+const HAS_OPENSSL =
+  (spawnSync("openssl", ["version"], { stdio: "ignore" }).error as NodeJS.ErrnoException | undefined)
+    ?.code !== "ENOENT";
 
 async function withTlsServer(fn: (port: number, cert: string) => Promise<void>): Promise<void> {
   const { key, cert } = selfSigned();
@@ -31,7 +51,7 @@ async function withTlsServer(fn: (port: number, cert: string) => Promise<void>):
   }
 }
 
-describe("TcpTransport TLS", () => {
+describe.skipIf(!HAS_OPENSSL)("TcpTransport TLS", () => {
   it("自己署名証明書は既定検証で TLS_CERT_INVALID", async () => {
     await withTlsServer(async (port) => {
       await expect(
