@@ -6,7 +6,8 @@ import {
   type OpenOptions,
   type SessionEntry,
   type SessionTarget,
-  type StoredReport
+  type StoredReport,
+  type PcCommandEvent
 } from "./session-manager.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionWatch } from "./config-types.js";
@@ -491,6 +492,7 @@ export class WsConnection {
         screen: entry.session.snapshot(),
         ccsid: opts.ccsid ?? 37,
         pcCommand: entry.pcCommandEnabled,
+        ...this.pcCommandBacklog(entry.id),
         // **後から入ったタブにも今の予約状態を伝える**（開始の push を聞き逃していても揃う）
         ...(() => {
           const r = this.deps.sessions.reservationOf(entry.id);
@@ -889,12 +891,25 @@ export class WsConnection {
       // ここで返す値は web-ui の入力補助（カナ大文字化）にしか使われない
       ccsid: 37,
       pcCommand: entry.pcCommandEnabled,
+      ...this.pcCommandBacklog(entry.id),
       ...(() => {
         const r = this.deps.sessions.reservationOf(entry.id);
         return r ? { reservedBy: r.label } : {};
       })(),
       ...(entry.job !== undefined ? { job: entry.job } : {})
     });
+  }
+
+  /**
+   * 留守中に実行された PC コマンドを `opened` に載せる（無ければ載せない）。
+   *
+   * `pc-command` の push は**購読者にしか届かない**ので、ブラウザを閉じている間の分は
+   * 誰にも知らされないまま記録だけが残る。繋ぎ直しで渡す
+   * （backlog `pc-command.md`「常駐セッションでの扱い」）。
+   */
+  private pcCommandBacklog(id: string): { pcCommands?: PcCommandEvent[] } {
+    const history = this.deps.sessions.pcCommandHistory(id);
+    return history.length > 0 ? { pcCommands: history } : {};
   }
 
   private targetOf(msg: WsClientMessage & { type: "open" }): SessionTarget {

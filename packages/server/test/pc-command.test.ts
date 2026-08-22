@@ -203,3 +203,70 @@ describe("pcCommandHostname", () => {
     expect(pcCommandHostname()).toBeTruthy();
   });
 });
+
+/**
+ * **プログラム名照合**（backlog `pc-command.md`「許可パターンの書きやすさ」）。
+ *
+ * 正規表現 1 本だと引数まで自分で書かねばならず、書き損じがそのまま緩い門になる。
+ * `prog:notepad` と書けるようにした。**前方一致は採らない**——`notepad; rm -rf /` が
+ * 素通りするため、この形でも**引数のメタ文字は塞ぐ**。
+ *
+ * ⚠ 空白で切った先頭語だけを見るのでは足りない。`notepad & del x` の先頭語は
+ * `notepad` なので、そこだけ見ると通ってしまう（`spawn` は `shell: true`）。
+ */
+describe("isAllowed — prog: 接頭辞", () => {
+  const allow = ["prog:notepad"];
+
+  it("名前だけの実行を許す", () => {
+    expect(isAllowed("notepad", allow)).toBe(true);
+  });
+
+  it("**引数が付いていても許す**（正規表現で書かずに済む）", () => {
+    expect(isAllowed("notepad C:\\tmp\\a.txt", allow)).toBe(true);
+    expect(isAllowed("notepad 日本語.txt", allow)).toBe(true);
+  });
+
+  it("大文字小文字は区別しない（ホストからは大文字で届く）", () => {
+    expect(isAllowed("NOTEPAD a.txt", allow)).toBe(true);
+  });
+
+  it("**別のプログラムは通さない**", () => {
+    expect(isAllowed("notepadx a.txt", allow)).toBe(false);
+    expect(isAllowed("del a.txt", allow)).toBe(false);
+  });
+
+  it("**前置きで名前を偽っても通さない**", () => {
+    expect(isAllowed("cmd /c notepad", allow)).toBe(false);
+  });
+
+  it.each([
+    ["notepad & del x", "&"],
+    ["notepad && del x", "&&"],
+    ["notepad; del x", ";"],
+    ["notepad | del x", "|"],
+    ["notepad > out.txt", ">"],
+    ["notepad `del x`", "バッククォート"],
+    ["notepad $(del x)", "$()"],
+    ["notepad \na.txt", "改行"]
+  ])("**引数にシェルのメタ文字があれば通さない**: %s", (command) => {
+    expect(isAllowed(command, allow)).toBe(false);
+  });
+
+  it("**名前が空の `prog:` は全部素通りにしない**", () => {
+    expect(isAllowed("del a.txt", ["prog:"])).toBe(false);
+  });
+
+  it("正規表現の書き方は今までどおり効く（並べて書ける）", () => {
+    expect(isAllowed("notepad a.txt", ["prog:calc", "notepad .*"])).toBe(true);
+  });
+});
+
+describe("invalidAllowPattern — prog: 接頭辞", () => {
+  it("`prog:` 形は正規表現として検証しない（`(` を含む名前でも弾かない）", () => {
+    expect(invalidAllowPattern(["prog:my(app"])).toBeUndefined();
+  });
+
+  it("**名前が空の `prog:` は保存させない**（書いたのに効かないパターンを残さない）", () => {
+    expect(invalidAllowPattern(["prog:"])).toBe("prog:");
+  });
+});

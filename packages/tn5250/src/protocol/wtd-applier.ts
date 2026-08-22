@@ -4,7 +4,12 @@ import type { ScreenBuffer } from "../screen/buffer.js";
 import type { WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
-import { detectPcoMarker, readPcCommand, type PcCommandRequest } from "./pc-command.js";
+import {
+  detectPcoMarker,
+  readPcCommand,
+  PCO_SCAN_BYTES,
+  type PcCommandRequest
+} from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
 
 /** データストリーム適用の結果（キーボード状態の遷移は Session が判断する） */
@@ -61,7 +66,6 @@ const CC2_ALARM = 0x04;
 /** PC Organizer 標識の先頭バイト（非表示属性）。ここを見てから 11 バイトを照合する */
 const PCO_ATTR = 0x27;
 /** 標識照合＋コマンド本文の読み取りに覗く最大バイト数 */
-const PCO_MARKER_SCAN = 512;
 
 export type WarnFn = (message: string) => void;
 
@@ -330,11 +334,18 @@ function applyWtd(
     // 標識・コマンド本文は今までどおり画面へ書く（非表示なので見えない）。
     // 検出だけ結果に載せ、実行と応答は Session が行う（`pc-command.ts`）
     if (b === PCO_ATTR) {
-      // 標識(11) + PAUSE(1) + 本文（実機の上限は 123。余裕を見て 512）
-      const ahead = r.peekUpTo(PCO_MARKER_SCAN);
+      // 標識(11) + PAUSE(1) + 本文。窓は**上限いっぱいの DBCS 本文**まで届く大きさ
+      const ahead = r.peekUpTo(PCO_SCAN_BYTES);
       const kind = detectPcoMarker(ahead);
-      if (kind === "start") result.pcCommand = readPcCommand(ahead, (x) => codec.decodeByte(x));
-      else if (kind === "end") result.pcCommandEnd = true;
+      if (kind === "start") {
+        const req = readPcCommand(ahead, (x) => codec.decode(x));
+        if (req.truncated) {
+          // **切れた本文は渡さない。** 実行すると利用者の意図と違うコマンドが走る
+          warn(`PC command body was truncated at ${PCO_SCAN_BYTES} bytes; ignored`);
+        } else {
+          result.pcCommand = req;
+        }
+      } else if (kind === "end") result.pcCommandEnd = true;
     }
 
     r.u8();

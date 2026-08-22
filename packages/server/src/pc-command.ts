@@ -29,8 +29,18 @@ export interface PcCommandConfig {
   /** 作業ディレクトリー */
   cwd?: string;
   /**
-   * 許可パターン（正規表現・**全体一致**）。指定するとこれに合わないコマンドは実行しない。
+   * 許可パターン。指定するとこれに合わないコマンドは実行しない。
    * 省略時は「有効ならすべて実行」。緩いパターンは緩い門にしかならない点は運用者の責任。
+   *
+   * 2 つの書き方がある:
+   *
+   * - **正規表現・全体一致**（既定）——`notepad .*\.txt`
+   * - **`prog:` 接頭辞でプログラム名照合**——`prog:notepad` は `notepad` に
+   *   任意の引数が付いたものを許す。**引数にシェルのメタ文字が無いときだけ**
+   *
+   * `prog:` を足したのは、正規表現 1 本だと**引数まで自分で書かねばならず**、
+   * 書き損じが緩い門になりやすいため（backlog `pc-command.md`）。
+   * **前方一致は採らない**——`notepad; rm -rf /` が素通りする。
    */
   allow?: string[];
 }
@@ -52,13 +62,48 @@ export function pcCommandHostname(): string {
   return hostname();
 }
 
+/** プログラム名照合の接頭辞 */
+const PROG_PREFIX = "prog:";
+
+/**
+ * シェルに意味を持つ文字。**`spawn(..., { shell: true })` で走らせている**ので、
+ * 引数にこれらが混ざると別のコマンドを繋げられる（`notepad & del x`）。
+ *
+ * ⚠ **空白で切った先頭語だけを見るのでは足りない**——`notepad & del x` の先頭語は
+ * `notepad` で、素通りしてしまう。引数側も見ること。
+ */
+const SHELL_META = /[;&|`$><\n\r()]/u;
+
+/**
+ * `prog:NAME` の照合。`NAME` に**任意の引数**が付いたものを許すが、
+ * **引数にシェルのメタ文字が無いときだけ**。
+ *
+ * プログラム名は**大文字小文字を区別しない**（ホストからは大文字で届くことが多く、
+ * Windows のコマンド名も区別しない）。
+ */
+function matchesProgram(command: string, name: string): boolean {
+  const trimmed = command.trim();
+  const sep = trimmed.search(/\s/u);
+  const head = sep === -1 ? trimmed : trimmed.slice(0, sep);
+  if (head.toLowerCase() !== name.toLowerCase()) return false;
+  const rest = sep === -1 ? "" : trimmed.slice(sep + 1);
+  return !SHELL_META.test(rest);
+}
+
 /**
  * 許可パターンの検査。**全体一致**でしか通さない（前方一致にすると
  * `notepad; rm -rf /` のような後置きが素通りする）。
+ *
+ * `prog:` 接頭辞は**プログラム名照合**（引数は自由。ただしメタ文字は不可）。
  */
 export function isAllowed(command: string, allow: readonly string[] | undefined): boolean {
   if (!allow || allow.length === 0) return true;
   return allow.some((p) => {
+    if (p.startsWith(PROG_PREFIX)) {
+      const name = p.slice(PROG_PREFIX.length);
+      // 名前が空の `prog:` は**全部素通り**になるので、一致しないに倒す
+      return name.length > 0 && matchesProgram(command, name);
+    }
     try {
       return new RegExp(`^(?:${p})$`).test(command);
     } catch {
@@ -72,6 +117,12 @@ export function isAllowed(command: string, allow: readonly string[] | undefined)
 /** `allow` に書けるか（保存前の検証用。壊れた正規表現を永続化しない） */
 export function invalidAllowPattern(patterns: readonly string[]): string | undefined {
   for (const p of patterns) {
+    if (p.startsWith(PROG_PREFIX)) {
+      // **名前が空の `prog:` は保存させない**——一致しないに倒してはいるが、
+      // 「書いたのに効かない」パターンを永続化する意味が無い
+      if (p.length === PROG_PREFIX.length) return p;
+      continue;
+    }
     try {
       new RegExp(`^(?:${p})$`);
     } catch {
