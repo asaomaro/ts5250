@@ -1,0 +1,6 @@
+- [x] 1. 原典を直に読む（tn5250 / tn5250j）
+- [x] 2. 一致点と相違点を確定
+- [x] 3. buildReadImmediateResponse
+- [x] 4. wtd-applier ＋ session
+- [x] 5. 試験 10 件
+- [x] 6. 古い試験の更新

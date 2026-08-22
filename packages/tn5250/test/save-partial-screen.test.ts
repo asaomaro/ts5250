@@ -275,8 +275,17 @@ describe("パラメータ無しのコマンドは捨てずに進む", () => {
     });
   }
 
-  it("READ IMMEDIATE は**応答していない**ことを警告で明示する", () => {
-    const { warns } = apply([ESC, 0x72]);
+  it("**READ IMMEDIATE(0x72) は応答するようになった**（`20260822-read-immediate`）", () => {
+    // 以前は「応答していない」と警告するだけだった。原典 2 つを読んで書き起こし、
+    // 届いたら即座に欄を返すようにしてある（`read-immediate.test.ts` に詳細）
+    const { result, warns } = apply([ESC, 0x72]);
+    expect(result.readImmediateRequested).toBe(true);
+    expect(warns.some((w) => w.includes("応答していない"))).toBe(false);
+  });
+
+  it("**0x83（ALT）は今も応答しない**（2 実装で扱いが割れているため）", () => {
+    const { result, warns } = apply([ESC, 0x83]);
+    expect(result.readImmediateRequested).toBe(false);
     expect(warns.some((w) => w.includes("応答していない"))).toBe(true);
   });
 

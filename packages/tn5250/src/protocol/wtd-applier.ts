@@ -20,6 +20,11 @@ export interface ApplyResult {
   saveScreenRequested: boolean;
   /** ホストが READ SCREEN を送ってきた（現在の画面イメージを送り返す必要がある） */
   readScreenRequested: boolean;
+  /**
+   * READ IMMEDIATE（0x72）が来た。**利用者を待たずにその場で欄を送り返す**
+   * （`buildReadImmediateResponse`）。`readRequested` と違い**入力待ちに入らない**。
+   */
+  readImmediateRequested: boolean;
   /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
   readScreenExtendedRequested: boolean;
   /** このレコード中で IC/MC によりカーソル位置が明示された */
@@ -80,6 +85,7 @@ export function applyDataStream(
     queryRequested: false,
     saveScreenRequested: false,
     readScreenRequested: false,
+    readImmediateRequested: false,
     readScreenExtendedRequested: false,
     cursorSet: false,
     lastWrite: { cleared: false, restored: false, cells: 0 }
@@ -183,14 +189,23 @@ export function applyDataStream(
         warn(`READ SCREEN TO PRINT (0x${cmd.toString(16)}) — 印刷要求には応答しない（後続は処理する）`);
         break;
       case COMMAND.READ_IMMEDIATE:
+        // **利用者を待たずに欄を送り返す**（原典 GNU tn5250 `tn5250_session_read_immediate`）。
+        // パラメータは無い（原典も 1 バイトも読まない）。中身の決まりは
+        // `buildReadImmediateResponse` の JSDoc に原典の該当箇所ごと控えてある。
+        //
+        // **実機で裏を取ってある**（実機 / IBM i 7.3）。通常の画面では届かないが、
+        // IBM 自身が発行する API（DSM の `QsnReadImm`）で出させて往復を確かめた
+        // （`scripts/diag-read-immediate.mjs`）。
+        result.readImmediateRequested = true;
+        break;
       case COMMAND.READ_IMMEDIATE_ALT:
-        // ⚠ **本来は応答が要る読み取り要求**（原典 tn5250 は 0x72 を実装しており、
-        // MDT の有無に関わらず全フィールドを即送信する）。**応答は実装していない**
-        // ——実機で届いたことが無く、応答の正しさを確かめられないため。
-        // 届いた事実に気づけるよう警告を残す（backlog に原典の実装方法を控えてある）。
+        // ⚠ **0x83 は実装しない。** 2 実装で扱いが割れている——tn5250(C) は無視し、
+        // tn5250j は `readImmediate` として **MDT の欄だけ**を送る（`sf.mdt` で絞る）。
+        // しかも tn5250j 側は**行・桁・AID の前置きを書いていない**（同クラスの
+        // `sendAidKey` は書いている）ので、そのまま倣うのは危うい。実機で届いたことも無い。
         warn(
-          `READ IMMEDIATE (0x${cmd.toString(16)}) — **応答していない**（未実装）。` +
-            `ホストが待つ場合は無反応になる`
+          `READ IMMEDIATE ALT (0x${cmd.toString(16)}) — **応答していない**（2 実装で扱いが割れており、` +
+            `実機で届いたことも無い）。ホストが待つ場合は無反応になる`
         );
         break;
       case COMMAND.WRITE_TO_DISPLAY:

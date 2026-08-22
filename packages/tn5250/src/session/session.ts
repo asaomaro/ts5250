@@ -4,6 +4,7 @@ import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
+  buildReadImmediateResponse,
   buildFlagRecord,
   buildCancelInviteAck
 } from "../protocol/read-response.js";
@@ -502,6 +503,15 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.readScreenExtendedRequested) {
         // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
         this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec));
+        return;
+      }
+      if (result.readImmediateRequested) {
+        // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。
+        // `readRequested` と違い**入力待ちに入らない**——ホストは続けて何かを送ってくる。
+        // 中身の決まり（AID 0・master MDT が門番・欄ごとの MDT は見ない）は
+        // `buildReadImmediateResponse` の JSDoc に原典ごと控えてある。
+        const { record } = buildReadImmediateResponse(this.buf, this.codec);
+        this.telnet.sendRecord(record);
         return;
       }
       if (result.readScreenRequested) {
