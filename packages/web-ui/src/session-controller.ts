@@ -270,6 +270,10 @@ export async function openVtSession(
               vtStore.setTitle(sessionId, msg.title);
               break;
             }
+            case "vt-echo": {
+              vtStore.setHostEchoes(sessionId, msg.hostEchoes);
+              break;
+            }
             case "closed": {
               const s = sessionsStore.get(sessionId);
               if (s) s.connected = false;

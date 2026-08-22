@@ -502,6 +502,17 @@ export interface WsVtFrameMessage {
   frame: WsVtFrame;
 }
 
+/**
+ * ホストが `ECHO` を握ったかが変わった。**画面に変化が無いときはこちらで届く。**
+ *
+ * 交渉は接続の直後に終わるとは限らないので、`vt-opened` の値を握ったままにすると
+ * 「エコーを返していません」の案内が出たまま残る。
+ */
+export interface WsVtEcho {
+  type: "vt-echo";
+  hostEchoes: boolean;
+}
+
 /** `OSC 0/2` のタイトル。タブ名に使う */
 export interface WsVtTitle {
   type: "vt-title";
@@ -512,6 +523,7 @@ export type WsServerMessage =
   | WsVtOpened
   | WsVtFrameMessage
   | WsVtTitle
+  | WsVtEcho
   | WsWatchList
   | WsWatchEntry
   | WsWatchState

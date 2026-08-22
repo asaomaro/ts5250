@@ -44,16 +44,20 @@ const showLauncher = computed(() => workspaceStore.showLauncher || !hasVisibleTa
 /** アカウント（API トークン発行 / ログアウト）ポップオーバー */
 const showAccount = ref(false);
 /**
- * アクティブ（フォーカス中）ペインのタブが 5250 エミュレーター（表示セッション）か。
+ * アクティブ（フォーカス中）ペインのタブが 5250 / 3270 エミュレーター（表示セッション）か。
  * SO/SI・カナ・リンク・キーの各トグルはエミュレーター専用なので、これが true のときだけ出す。
  * 接続画面表示中・プリンター/管理タブ・空ペインでは false。
+ *
+ * **VT も false。** キーの一覧・HTML 保存・マクロ・表示設定はどれもフィールドモデルと
+ * `ScreenSnapshot` の上に建っており、VT には対応するものが無い——**出すと「押しても
+ * 何も起きない」で混乱させる**（spec D9）。
  */
 const activeIsEmulator = computed(() => {
   if (showLauncher.value) return false;
   const tab = workspaceStore.focusedGroup().activeTab;
   if (!tab || isPaneTab(tab)) return false;
   const s = sessionsStore.get(tab);
-  return !!s && s.kind !== "printer";
+  return !!s && s.kind !== "printer" && s.meta?.terminal !== "vt";
 });
 /** アクティブなエミュレーターセッション id（画面設定メニューの対象。非エミュ時は空） */
 const activeSessionId = computed(() => {

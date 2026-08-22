@@ -586,10 +586,20 @@ export class WsConnection {
       this.vtFrames = new VtFrameBuilder();
       this.startHeartbeat();
 
+      // **交渉は開いたあとに終わることがある。** `vt-opened` の時点の値を握ったままにすると
+      // 「エコーを返していません」の案内が出たまま残る（実ブラウザ検証で踏んだ）
+      let lastEcho = entry.session.hostEchoes;
       const push = (snap: Parameters<Parameters<typeof entry.subscribers.add>[0]>[0]): void => {
         const frame = this.vtFrames?.build(snap);
+        const echo = entry.session.hostEchoes;
+        const echoChanged = echo !== lastEcho;
+        lastEcho = echo;
         // **変化が無ければ送らない**（差分が空の通で回線を埋めない）
-        if (frame !== undefined) this.send({ type: "vt-frame", frame });
+        if (frame === undefined) {
+          if (echoChanged) this.send({ type: "vt-echo", hostEchoes: echo });
+          return;
+        }
+        this.send({ type: "vt-frame", frame: echoChanged ? { ...frame, hostEchoes: echo } : frame });
       };
       const pushTitle = (title: string): void => this.send({ type: "vt-title", title });
       const pushClose = (reason: string): void => this.send({ type: "closed", reason });

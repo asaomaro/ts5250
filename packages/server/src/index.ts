@@ -139,6 +139,7 @@ export type {
   WsVtOpened,
   WsVtFrameMessage,
   WsVtTitle,
+  WsVtEcho,
   WsVtInput,
   WsVtResize,
   WsVtFrame,
