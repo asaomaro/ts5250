@@ -40,10 +40,13 @@ describe("復号（CCSID 指定）", () => {
   });
 
   it("未対応の CCSID は例外", () => {
-    expect(() => decodeCcsidText(850, Uint8Array.from([0x41]))).toThrow(RangeError);
-    expect(canDecodeCcsid(850)).toBe(false);
+    // **850 / 437 は 2026-08-22 から読める**（同梱の表。`oem-tables.ts`）。
+    // ここは「どの経路にも無い CCSID」で見る
+    expect(() => decodeCcsidText(9999, Uint8Array.from([0x41]))).toThrow(RangeError);
+    expect(canDecodeCcsid(9999)).toBe(false);
     expect(canDecodeCcsid(1399)).toBe(true);
     expect(canDecodeCcsid(819)).toBe(true);
+    expect(canDecodeCcsid(850), "同梱の表で読める").toBe(true);
   });
 });
 
@@ -122,7 +125,9 @@ describe("符号化（保存）", () => {
     expect(canEncodeCcsid(1399)).toBe(true);
     expect(canEncodeCcsid(819)).toBe(true);
     expect(canEncodeCcsid(1200)).toBe(true);
-    expect(canEncodeCcsid(850)).toBe(false);
+    expect(canEncodeCcsid(850), "単バイトなので逆引きで戻せる").toBe(true);
+    expect(canEncodeCcsid(9999), "どの経路にも無い").toBe(false);
+    expect(canEncodeCcsid(943), "多バイトなので読み取り専用").toBe(false);
   });
 });
 

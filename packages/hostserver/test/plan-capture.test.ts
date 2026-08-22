@@ -43,6 +43,13 @@ interface Frame {
 }
 
 const REQ_PREPARE_AND_DESCRIBE = 0x1803;
+/**
+ * 1 往復の道（`executeImmediate`）。**マーカーの無い非クエリ文はこちらを通る**
+ * ので、文を記録する偽の接続は両方を拾わないと取りこぼす（2026-08-22）。
+ */
+const REQ_EXECUTE_IMMEDIATE = 0x1806;
+const isStatementRequest = (reqId: number): boolean =>
+  reqId === REQ_PREPARE_AND_DESCRIBE || reqId === REQ_EXECUTE_IMMEDIATE;
 const CP_SQL_TEXT = 0x3807;
 
 /** 送った SQL 文（UTF-16BE で載る）を読み戻す */
@@ -63,7 +70,7 @@ function sentSql(frame: Frame): string | undefined {
 function fakeConn(opts: { failOn?: RegExp } = {}) {
   const statements: string[] = [];
   const request = vi.fn(async (frame: Frame) => {
-    if (frame.reqId === REQ_PREPARE_AND_DESCRIBE) {
+    if (isStatementRequest(frame.reqId)) {
       const sql = sentSql(frame);
       if (sql !== undefined) statements.push(sql);
       if (sql !== undefined && opts.failOn?.test(sql)) {
@@ -415,7 +422,7 @@ describe("CALL の結果セットを計画と一緒に返す", () => {
     let prepared = "";
     const request = vi.fn(async (frame: Frame) => {
       const mine = cursorOf(frame) === CALL_CURSOR;
-      if (frame.reqId === REQ_PREPARE_AND_DESCRIBE) prepared = sentSql(frame) ?? "";
+      if (isStatementRequest(frame.reqId)) prepared = sentSql(frame) ?? "";
       if (frame.reqId === REQ_EXECUTE) {
         const rs = prepared.startsWith("CALL TESTLIB.");
         return {

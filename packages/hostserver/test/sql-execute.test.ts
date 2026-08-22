@@ -52,6 +52,8 @@ function fakeConn(replies: { params: { cp: number; value: Uint8Array }[] }[]) {
 
 const REQ_PREPARE_AND_DESCRIBE = 0x1803;
 const REQ_EXECUTE = 0x1805;
+/** 1 往復の道（`executeImmediate`）。2026-08-22 に実機で通ることを確かめて採用した */
+const REQ_EXECUTE_IMMEDIATE = 0x1806;
 /** マーカーの登録・受け渡し。**この経路では 1 つも載せない** */
 const CP_MARKER_FORMAT_REQ = 0x381e;
 const CP_MARKER_DATA = 0x381f;
@@ -59,45 +61,57 @@ const CP_MARKER_DATA = 0x381f;
 const OK = { params: [{ cp: CP_SQLCA, value: sqlca(0) }] };
 
 describe("要求の形", () => {
-  it("prepareAndDescribe → execute の 2 要求で、マーカーは 1 つも載せない", async () => {
-    const { conn, sent } = fakeConn([OK, OK]);
+  /**
+   * **マーカーの無い非クエリ文は 1 往復**（`executeImmediate`）。
+   *
+   * かつては「`executeImmediate` は `rcClass=2 / -215` で拒否される」と記録していたが、
+   * **それは誤りで、拒否していたのはこちらの組み立てだった**——パラメータ値の
+   * CCSID(2)＋長さ(2) の前置きを付けていなかったため、ホストは
+   * `PWS0011 文字変換中にエラーが起こった` を返していた（2026-08-22 に実機で確認）。
+   */
+  it("**非クエリ文は executeImmediate の 1 要求**（マーカーは 1 つも載せない）", async () => {
+    const { conn, sent } = fakeConn([OK]);
     await executeStatement(conn, "DELETE FROM QTEMP.T");
 
-    expect(sent.map((f) => f.reqId)).toEqual([REQ_PREPARE_AND_DESCRIBE, REQ_EXECUTE]);
-    for (const f of sent) {
-      const cps = f.params.map((p) => p.cp);
-      expect(cps).not.toContain(CP_MARKER_FORMAT_REQ);
-      expect(cps).not.toContain(CP_MARKER_DATA);
-    }
+    expect(sent.map((f) => f.reqId)).toEqual([REQ_EXECUTE_IMMEDIATE]);
+    const cps = sent[0]!.params.map((p) => p.cp);
+    expect(cps).not.toContain(CP_MARKER_FORMAT_REQ);
+    expect(cps).not.toContain(CP_MARKER_DATA);
   });
 
-  it("文型 1 を送る（research F4。実機で DML も DDL も通った値）", async () => {
-    const { conn, sent } = fakeConn([OK, OK]);
-    await executeStatement(conn, "CREATE TABLE QTEMP.T (ID INT)");
-
-    for (const f of sent) {
-      const type = f.params.find((p) => p.cp === 0x3812);
-      expect(type).toBeDefined();
-      expect(new DataView(type!.value.buffer, type!.value.byteOffset).getUint16(0)).toBe(1);
-    }
+  it("**1 要求に載るのは文テキストだけ**（文名も文型も要らない）", async () => {
+    const { conn, sent } = fakeConn([OK]);
+    await executeStatement(conn, "INSERT INTO QTEMP.T VALUES (1)");
+    expect(sent[0]!.params.map((p) => p.cp)).toEqual([0x3807]);
   });
 
-  it("文名は insert.ts（ASUPLOAD）と別（同じ RPB で踏み合わないため）", async () => {
-    const { conn, sent } = fakeConn([OK, OK]);
-    await executeStatement(conn, "DELETE FROM QTEMP.T");
-
-    const name = sent[0]!.params.find((p) => p.cp === 0x3806)!;
-    // CCSID(2) ＋ 長さ(2) ＋ EBCDIC の文名
-    expect(new DataView(name.value.buffer, name.value.byteOffset).getUint16(0)).toBe(37);
-    const text = Buffer.from(name.value.slice(4)).toString("latin1");
-    expect(text).not.toBe("ASUPLOAD");
-    // execute 側も同じ文名を指す（別名だと「準備していない文」を実行しに行く）
-    const name2 = sent[1]!.params.find((p) => p.cp === 0x3806)!;
-    expect(Buffer.from(name2.value.slice(4)).toString("latin1")).toBe(text);
+  /**
+   * **DDL も 1 往復に載せる。** 2 実機で同じ文を両方の道に流し、`rcClass` も `SQLCODE` も
+   * 一致することを確かめた（`CREATE TABLE` / `VIEW` / `INDEX` / `ALIAS` / `DROP` /
+   * `GRANT` / `COMMENT` / `LABEL` / `CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` …）。
+   *
+   * ⚠ **比べるときは 2 往復の道も `execute` まで走らせること。** `prepareAndDescribe`
+   * だけで止めると `CREATE PROCEDURE` が「1 往復だけ失敗する」ように見える——
+   * 実際は QTEMP に routine を作れないだけで、**両方の道で `-457`**。この測り違いを一度している。
+   */
+  it.each([
+    ["CREATE TABLE QTEMP.T (ID INT)"],
+    ["CREATE PROCEDURE QTEMP.P () LANGUAGE SQL BEGIN END"],
+    ["DROP TABLE QTEMP.T"],
+    ["GRANT SELECT ON QTEMP.T TO PUBLIC"],
+    ["INSERT INTO QTEMP.T VALUES (1)"],
+    ["UPDATE QTEMP.T SET K = 1"],
+    ["DELETE FROM QTEMP.T"],
+    ["MERGE INTO QTEMP.T A USING QTEMP.U B ON A.K = B.K WHEN MATCHED THEN UPDATE SET A.V = B.V"],
+    ["  -- コメント\n  insert into QTEMP.T values (1)"]
+  ])("**非クエリ文は 1 要求**: %s", async (sql) => {
+    const { conn, sent } = fakeConn([OK]);
+    await executeStatement(conn, sql);
+    expect(sent.map((f) => f.reqId)).toEqual([REQ_EXECUTE_IMMEDIATE]);
   });
 
   it("文テキストは CCSID 13488（UTF-16BE）で、日本語もそのまま載る", async () => {
-    const { conn, sent } = fakeConn([OK, OK]);
+    const { conn, sent } = fakeConn([OK]);
     await executeStatement(conn, "UPDATE T SET S = '日本'");
 
     const sql = sent[0]!.params.find((p) => p.cp === 0x3807)!;
@@ -112,13 +126,13 @@ describe("要求の形", () => {
   });
 
   it("SQLCA を必ず要求する（立てないと失敗の理由が分からない）", async () => {
-    const { conn, sent } = fakeConn([OK, OK]);
+    const { conn, sent } = fakeConn([OK]);
     await executeStatement(conn, "DELETE FROM QTEMP.T");
     for (const f of sent) expect(f.orsBitmap! & 0x02000000).toBeTruthy();
   });
 
   it("実行区間を占有し、終わったら解放する", async () => {
-    const { conn, releases } = fakeConn([OK, OK]);
+    const { conn, releases } = fakeConn([OK]);
     await executeStatement(conn, "DELETE FROM QTEMP.T");
     expect(releases()).toBe(1);
   });
@@ -132,24 +146,24 @@ describe("要求の形", () => {
 
 describe("成否の判定", () => {
   it("SQLCODE 0 は成功。影響行数を返す", async () => {
-    const { conn } = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(0, 2) }] }]);
+    const { conn } = fakeConn([{ params: [{ cp: CP_SQLCA, value: sqlca(0, 2) }] }]);
     const res = await executeStatement(conn, "UPDATE QTEMP.T SET S = 'z'");
     expect(res).toEqual({ updateCount: 2, hasRowCount: true });
   });
 
   it("正の SQLCODE は警告つき成功（7905 = 表は作られた。research F6）", async () => {
-    const { conn } = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(7905, 0, "01567") }] }]);
+    const { conn } = fakeConn([{ params: [{ cp: CP_SQLCA, value: sqlca(7905, 0, "01567") }] }]);
     const res = await executeStatement(conn, "CREATE TABLE TESTLIB.T (ID INT)");
     expect(res.warning).toEqual({ sqlCode: 7905, sqlState: "01567" });
     expect(res.updateCount).toBe(0);
   });
 
-  it("prepare 段の警告では止まらない（execute まで進む）", async () => {
+  it("2 要求の道では prepare 段の警告で止まらない（execute まで進む）", async () => {
     const { conn, sent } = fakeConn([
       { params: [{ cp: CP_SQLCA, value: sqlca(7905, 0, "01567") }] },
       { params: [{ cp: CP_SQLCA, value: sqlca(0, 1) }] }
     ]);
-    const res = await executeStatement(conn, "CREATE TABLE TESTLIB.T (ID INT)");
+    const res = await executeStatement(conn, "CALL QSYS2.NOSUCH()");
     expect(sent).toHaveLength(2);
     expect(res.updateCount).toBe(1);
   });
@@ -162,20 +176,33 @@ describe("成否の判定", () => {
     expect((err as SqlError).sqlState).toBe("42601");
   });
 
-  it("prepare が失敗したら execute を呼ばない（存在しない表で書きに行かない）", async () => {
+  it("存在しない表なら 1 要求で終わる（書きに行かない）", async () => {
     const { conn, sent } = fakeConn([{ params: [{ cp: CP_SQLCA, value: sqlca(-204, 0, "42704") }] }]);
     await expect(executeStatement(conn, "DELETE FROM QTEMP.NOSUCH")).rejects.toThrow(SqlError);
     expect(sent).toHaveLength(1);
   });
 
-  it("execute の -518（経路違い）も失敗として伝える", async () => {
-    const { conn } = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(-518, 0, "07003") }] }]);
+  /**
+   * ⚠ **`SELECT` を 1 往復の道に載せてはならない。** 実機（/ pub400 の両方）で
+   * `executeImmediate` に `SELECT` を渡すと **`rcClass=0 / SQLCODE 0` で黙って通る**
+   * ——行は 1 つも返らないので「実行できたのに何も起きない」になる。
+   * 2 要求の道は同じ文を `-518 / 07003` で明確に断るので、**クエリはそちらへ回す**。
+   */
+  it("**クエリは 2 要求の道へ回す**（-518 で明確に断らせる）", async () => {
+    const { conn, sent } = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(-518, 0, "07003") }] }]);
     const err = await executeStatement(conn, "SELECT * FROM QTEMP.T").catch((e: unknown) => e);
+    expect(sent.map((f) => f.reqId)).toEqual([REQ_PREPARE_AND_DESCRIBE, REQ_EXECUTE]);
     expect((err as SqlError).sqlCode).toBe(-518);
   });
 
+  it("**括弧で始まるクエリも 2 要求の道**（先頭語が取れない文）", async () => {
+    const { conn, sent } = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(-518, 0, "07003") }] }]);
+    await executeStatement(conn, "(SELECT 1 FROM A) UNION (SELECT 2 FROM B)").catch(() => undefined);
+    expect(sent[0]!.reqId).toBe(REQ_PREPARE_AND_DESCRIBE);
+  });
+
   it("SQLCA が無い応答は失敗（書き込みは取り消せないので成功にしない）", async () => {
-    const { conn } = fakeConn([OK, { params: [] }]);
+    const { conn } = fakeConn([{ params: [] }]);
     const err = await executeStatement(conn, "DELETE FROM QTEMP.T").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(As400Error);
     expect((err as As400Error).code).toBe("PROTOCOL_ERROR");
@@ -186,13 +213,13 @@ describe("成否の判定", () => {
    * 件数から「行数の意味」を決めると DDL に「0 行に影響しました」と出てしまう。
    */
   it("DDL は同じ 0 でも hasRowCount が false（DML の 0 行と混ぜない）", async () => {
-    const ddl = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(0, 0) }] }]);
+    const ddl = fakeConn([{ params: [{ cp: CP_SQLCA, value: sqlca(0, 0) }] }]);
     expect(await executeStatement(ddl.conn, "DROP TABLE QTEMP.T")).toEqual({
       updateCount: 0,
       hasRowCount: false
     });
 
-    const dml = fakeConn([OK, { params: [{ cp: CP_SQLCA, value: sqlca(0, 0) }] }]);
+    const dml = fakeConn([{ params: [{ cp: CP_SQLCA, value: sqlca(0, 0) }] }]);
     expect(await executeStatement(dml.conn, "DELETE FROM QTEMP.T WHERE 1 = 0")).toEqual({
       updateCount: 0,
       hasRowCount: true
@@ -480,5 +507,89 @@ describe("CALL の結果セット", () => {
     const whole = await executeStatement(callConn(1, 2).conn, "CALL P()", { resultLimit: 2 });
     expect(whole.resultSet?.rows).toHaveLength(2);
     expect(whole.resultSet?.truncated).toBe(false);
+  });
+});
+
+/**
+ * **`?` に値を渡して実行する**（backlog `hostserver.md`「マーカー付きの非クエリ文を実行する」）。
+ *
+ * 以前は `CALL` 以外の `?` を**実行前に断って**いた。「値を埋めた文を送れば足りる」からだが、
+ * **引用符や日本語が混ざる値を自分で埋め込むのは危うい**。値は `parameters` で渡せるようにした。
+ *
+ * 実機 2 機で確認済み（2026-08-22）——`INSERT` / `UPDATE` / `DELETE`、`O'Brien "x"` のような
+ * 引用符入りの値、NULL。pub400（CCSID 273）では日本語が
+ * `CCSID 273 では書けない文字が含まれます` で**断られる**（黙って化けない）。
+ */
+describe("パラメータマーカーに値を渡す", () => {
+  /**
+   * マーカー 2 つぶんの形式（`0x3813`）。ヘッダ 16 ＋ 欄ごと 48 バイト。
+   * **`rowSize` はサーバーの申告**なので、欄長の合計と一致させないと解析が拒否する。
+   */
+  const FORMAT_2 = (() => {
+    const HEADER = 16;
+    const FIELD = 48;
+    const LEN = 10;
+    const out = new Uint8Array(HEADER + FIELD * 2);
+    const v = new DataView(out.buffer);
+    v.setUint32(4, 2); // 欄数
+    v.setUint32(12, LEN * 2); // 1 行のバイト数
+    for (const i of [0, 1]) {
+      const at = HEADER + i * FIELD;
+      v.setUint16(at + 2, 452); // 固定長文字
+      v.setUint32(at + 4, LEN);
+      v.setUint16(at + 12, 37); // CCSID
+    }
+    return out;
+  })();
+  const CP_MARKER_FORMAT_REPLY = 0x3813;
+  const withFormat = {
+    params: [
+      { cp: CP_SQLCA, value: sqlca(0) },
+      { cp: CP_MARKER_FORMAT_REPLY, value: FORMAT_2 }
+    ]
+  };
+
+  it("**値を渡せば `?` を通す**（2 要求の道＋形式登録）", async () => {
+    const { conn, sent } = fakeConn([withFormat, OK, OK]);
+    await executeStatement(conn, "INSERT INTO QTEMP.T VALUES (?, ?)", {
+      parameters: ["1", "x"]
+    });
+    // prepareAndDescribe → changeDescriptor → execute
+    expect(sent.map((f) => f.reqId)).toEqual([REQ_PREPARE_AND_DESCRIBE, 0x1e00, REQ_EXECUTE]);
+  });
+
+  it("**値の数が合わなければホストへ行く前に断る**", async () => {
+    const { conn } = fakeConn([withFormat, OK, OK]);
+    const err = await executeStatement(conn, "INSERT INTO QTEMP.T VALUES (?, ?)", {
+      parameters: ["1"]
+    }).catch((e: unknown) => e);
+    expect((err as As400Error).code).toBe("CONFIG_ERROR");
+    expect((err as Error).message).toContain("2 個");
+    expect((err as Error).message).toContain("1 個");
+  });
+
+  it("**`?` が無いのに値を渡したら断る**（黙って捨てない）", async () => {
+    const { conn, sent } = fakeConn([OK]);
+    const err = await executeStatement(conn, "INSERT INTO QTEMP.T VALUES (1)", {
+      parameters: ["1"]
+    }).catch((e: unknown) => e);
+    expect((err as As400Error).code).toBe("CONFIG_ERROR");
+    expect(sent, "ホストへ行かない").toHaveLength(0);
+  });
+
+  it("値を渡さなければ今までどおり断る（既定は安全側）", async () => {
+    const { conn } = fakeConn([OK]);
+    const err = await executeStatement(conn, "INSERT INTO QTEMP.T VALUES (?, ?)").catch(
+      (e: unknown) => e
+    );
+    expect((err as As400Error).code).toBe("CONFIG_ERROR");
+  });
+
+  it("**値つきは 1 往復の道に載せない**（形式の登録が要る）", async () => {
+    const { conn, sent } = fakeConn([withFormat, OK, OK]);
+    await executeStatement(conn, "DELETE FROM QTEMP.T WHERE K = ? AND V = ?", {
+      parameters: ["1", "x"]
+    });
+    expect(sent[0]!.reqId).not.toBe(REQ_EXECUTE_IMMEDIATE);
   });
 });

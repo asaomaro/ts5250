@@ -17,6 +17,13 @@ import type { DbConnection } from "../src/db/db-connection.js";
 const CP_SQLCA = 0x3807;
 const CP_SUPER_EXTENDED_FORMAT = 0x3812;
 const REQ_PREPARE_AND_DESCRIBE = 0x1803;
+/**
+ * 1 往復の道（`executeImmediate`）。**マーカーの無い非クエリ文はこちらを通る**
+ * ので、文を記録する偽の接続は両方を拾わないと取りこぼす（2026-08-22）。
+ */
+const REQ_EXECUTE_IMMEDIATE = 0x1806;
+const isStatementRequest = (reqId: number): boolean =>
+  reqId === REQ_PREPARE_AND_DESCRIBE || reqId === REQ_EXECUTE_IMMEDIATE;
 const CP_SQL_TEXT = 0x3807;
 
 function sqlca(sqlCode: number, sqlState: string): Uint8Array {
@@ -56,7 +63,7 @@ function sentSql(frame: Frame): string | undefined {
 function fakeConn(fail?: { sqlCode: number; sqlState: string }) {
   const statements: string[] = [];
   const request = vi.fn(async (frame: Frame) => {
-    if (frame.reqId === REQ_PREPARE_AND_DESCRIBE) {
+    if (isStatementRequest(frame.reqId)) {
       const sql = sentSql(frame);
       if (sql !== undefined) statements.push(sql);
       if (fail && sql?.includes("DUMP_PLAN_CACHE_TOPN")) {
