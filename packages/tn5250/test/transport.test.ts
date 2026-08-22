@@ -83,3 +83,55 @@ describe("TcpTransport", () => {
     });
   });
 });
+
+/**
+ * **キープアライブが実際に立つ**ことの確認（backlog `hostserver.md`）。
+ *
+ * 効果は**分単位の無通信でしか現れない**ので、外しても型検査もテストもビルドも通る
+ * ——サイズも挙動も何も変わらず、誰も気づかないまま落ちる。
+ *
+ * ## なぜ要るのか（実機で測った）
+ *
+ * 2026-08-22・実機: **常駐プリンターは 15 分のアイドルで帳票が届かなくなる**。
+ * そのとき `entry.state` は `listening` のままで、**こちら側からは何も見えない**。
+ * ホスト側のライターは動いており（`状態=STR`）、**接続が黙って死んでいた**。
+ * 同じ実機で待ち行列監視は 45 分を越えられており、あちらは
+ * `hostserver` 側の接続で `setKeepAlive` が入っていた——入っていない方だけが落ちていた。
+ *
+ * ⚠ **`setKeepAlive` の状態は Node から読み出せない**ので、呼び出しを覗いて確かめる。
+ */
+describe("キープアライブ", () => {
+  /** `Socket.prototype.setKeepAlive` を覗く。**実際の接続経路を通す**のが要点 */
+  async function keepAliveArgsOf(connect: (port: number) => Promise<unknown>): Promise<unknown[][]> {
+    const { Socket } = await import("node:net");
+    const calls: unknown[][] = [];
+    const original = Socket.prototype.setKeepAlive;
+    Socket.prototype.setKeepAlive = function patched(...args: unknown[]) {
+      calls.push(args);
+      return (original as (...a: unknown[]) => unknown).apply(this, args) as never;
+    } as typeof original;
+    try {
+      await withEchoServer(async (port) => {
+        await connect(port);
+      });
+    } finally {
+      Socket.prototype.setKeepAlive = original;
+    }
+    return calls;
+  }
+
+  it("**平文の接続でキープアライブを立てる**", async () => {
+    const calls = await keepAliveArgsOf((port) =>
+      TcpTransport.connect({ host: "127.0.0.1", port })
+    );
+    expect(calls.length, "setKeepAlive が呼ばれる").toBeGreaterThan(0);
+    expect(calls[0]).toEqual([true, 60_000]);
+  });
+
+  it("**待ち時間はホストサーバー側と同じ 60 秒**（同じ性質の待ちを別の値にしない）", async () => {
+    const calls = await keepAliveArgsOf((port) =>
+      TcpTransport.connect({ host: "127.0.0.1", port })
+    );
+    for (const c of calls) expect(c[1]).toBe(60_000);
+  });
+});
