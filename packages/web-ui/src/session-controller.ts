@@ -17,6 +17,7 @@ import {
   type SessionMeta,
   type SpoolReportView
 } from "./stores/sessions.js";
+import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
 import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
@@ -196,6 +197,90 @@ export async function openSession(
             }
             case "error":
               setBusy(sessionId, false);
+              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              break;
+          }
+        }
+      },
+      label
+    );
+    client
+      .connect()
+      .then(() => client.send({ ...open }))
+      .catch(reject);
+  });
+}
+
+/**
+ * **VT セッションを開く。**
+ *
+ * 5250 / プリンターと別の関数にしているのは、**やり取りするメッセージが丸ごと違う**ため
+ * （`vt-opened` / `vt-frame` / `vt-title`）。同じ関数に押し込むと、5250 の分岐の中に
+ * VT だけ通る道が増えて読めなくなる。
+ *
+ * 画面の中身は `vtStore` に置き、`sessionsStore` には**タブとして並ぶための最小限**だけ入れる
+ * （`snapshot` は持たない——VT に `ScreenSnapshot` は無い）。
+ */
+export async function openVtSession(
+  open: WsOpen,
+  label: string,
+  meta?: SessionMeta,
+  systemRef?: string,
+  configRef?: string
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let sessionId = "";
+    const client = new WsClient(
+      WS_URL(),
+      {
+        onServerMessage(msg: WsServerMessage) {
+          switch (msg.type) {
+            case "vt-opened": {
+              sessionId = msg.sessionId;
+              client.setSessionId(sessionId);
+              vtStore.create(sessionId, msg.frame, {
+                encoding: msg.encoding,
+                ibmI: msg.ibmI,
+                hostEchoes: msg.hostEchoes
+              });
+              sessionsStore.add({
+                sessionId,
+                label,
+                snapshot: undefined,
+                edits: new Map(),
+                cursor: { row: 1, col: 1 },
+                connected: true,
+                readOnly: open.readOnly ?? false,
+                client,
+                pcCommandEnabled: false,
+                pcCommands: [],
+                ...(meta ? { meta } : {}),
+                ...(configRef !== undefined ? { configRef } : {}),
+                ...(systemRef !== undefined ? { systemRef } : {})
+              } as SessionState);
+              workspaceStore.addSession(sessionId, systemRef);
+              resolve(sessionId);
+              break;
+            }
+            case "vt-frame": {
+              vtStore.apply(sessionId, msg.frame);
+              break;
+            }
+            case "vt-title": {
+              vtStore.setTitle(sessionId, msg.title);
+              break;
+            }
+            case "vt-echo": {
+              vtStore.setHostEchoes(sessionId, msg.hostEchoes);
+              break;
+            }
+            case "closed": {
+              const s = sessionsStore.get(sessionId);
+              if (s) s.connected = false;
+              vtStore.setConnected(sessionId, false);
+              break;
+            }
+            case "error":
               if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
               break;
           }

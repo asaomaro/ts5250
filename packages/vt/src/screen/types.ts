@@ -74,6 +74,13 @@ export interface VtSnapshot {
   readonly cells: readonly (readonly VtCell[])[];
   /** 主画面から流れ出た行（代替画面のぶんは入らない。spec D7） */
   readonly scrollback: readonly (readonly VtCell[])[];
+  /**
+   * これまでに履歴へ送った**延べ本数**（上限で捨てたぶんも数える）。
+   *
+   * 上限に達すると `scrollback.length` は変わらなくなる。**長さだけでは
+   * 「増えたか」が分からない**ので、差分を送る利用側はこちらを見る。
+   */
+  readonly scrollbackTotal: number;
   /** 代替画面を表示中か */
   readonly alternate: boolean;
   /** `OSC 0/2` で設定されたウィンドウタイトル */

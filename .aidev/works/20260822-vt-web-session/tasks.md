@@ -1,0 +1,8 @@
+- [x] 1. WS メッセージ型と wire 変換（差分・palette・run-length）— 18237c0
+- [x] 2. VtManager ＋ ws-handler ＋ coalesce（16ms）
+- [x] 3. 設定スキーマ（terminal: "vt" / vtEncoding）
+- [x] 4. VtPane.vue（描画・スクロールバック・カーソル）— 3e3db5e
+- [x] 5. 打鍵・貼り付け・IME・マウス
+- [x] 6. 大きさの測定と NAWS
+- [x] 7. 表記（ConfigCard / SessionInfo / ヘッダーの出し分け）
+- [x] 8. テスト（server 20 / web-ui 34）＋ 実ブラウザ検証（Linux 22 / pub400 6）

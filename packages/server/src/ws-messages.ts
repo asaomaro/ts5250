@@ -1,9 +1,12 @@
 import type { ScreenSnapshot } from "@ts5250/tn5250";
+import type { WsVtFrame } from "./vt-wire.js";
 import type { PcCommandEvent } from "./session-manager.js";
 import type { SessionJob } from "./session-manager.js";
 import type { MacroSecretRef } from "./macro-types.js";
 import type { WatchView, WatchEntryView } from "./watch-registry.js";
 import type { ServiceState } from "./service-state.js";
+
+export type { WsVtFrame, WsVtLine, WsVtRun, WsVtStyle } from "./vt-wire.js";
 
 /** WebSocket メッセージ型（server が定義し web-ui が type-only import で共有。spec「Web 向けプロトコル」） */
 
@@ -26,8 +29,11 @@ export interface WsOpen {
    * `kind` と混ぜていないのは**軸が直交する**ため——あちらはセッションの種別（画面／プリンター）で、
    * こちらは端末の種類。1 つの列挙に畳むと `kind: "printer"` × `terminal: "3270"`
    * （TN3270E プリンター）を足したくなったときに破綻する。
+   *
+   * **`vt` は文字モード**——フィールドも AID キーも無く、専用のペインで描く。
+   * 画面のやり取りも別メッセージ（`vt-*`）になる。
    */
-  terminal?: "5250" | "3270";
+  terminal?: "5250" | "3270" | "vt";
   /**
    * **3270 のモデル**（既定 2）。代替画面サイズを決める。
    *
@@ -48,6 +54,19 @@ export interface WsOpen {
   deviceName?: string;
   enhanced?: boolean;
   tls?: boolean;
+  /**
+   * **VT の画面の大きさ**（`terminal: "vt"` のときだけ）。ブラウザがペインを測って渡す。
+   * `screenSize` と分けているのは、VT が固定の 2 種類ではなく**任意**だから。
+   */
+  vtRows?: number;
+  vtCols?: number;
+  /**
+   * **VT の文字符号化**（既定 `utf-8`）。
+   *
+   * `ccsid` とは軸が違う——あちらは IBM i にコードページを申告するためのもので、
+   * こちらは画面に流れるバイト列の読み方。
+   */
+  encoding?: "utf-8" | "shift_jis" | "euc-jp";
   /** RFC 4777 自動サインオン（host 直指定時。system/session 指定時はシステム側の signon を使う） */
   user?: string;
   password?: string;
@@ -173,8 +192,47 @@ export interface WsPrinterServiceStart {
   session: string;
 }
 
+/**
+ * **VT への入力。**
+ *
+ * 打鍵を**意味のまま**送り、バイト列への符号化は server が行う（spec D4）。
+ * `DECCKM` / `DECKPAM` / bracketed paste / マウスの様式は server の `VtTerminal` が
+ * 持っているので、ブラウザ側で符号化すると**モードの写しを 2 つ持つ**ことになり必ずずれる。
+ */
+export interface WsVtInput {
+  type: "vt-input";
+  /** 名前つきのキー（`ArrowUp` / `F5` / `Enter` …）。`@ts5250/vt` の `VtKeyName` */
+  key?: string;
+  /** 打った文字（IME の確定でまとめて来ることがある） */
+  text?: string;
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+  /** 貼り付け（bracketed paste が有効なら server が包む） */
+  paste?: string;
+  /** マウス（報告が有効なときだけ server が送る） */
+  mouse?: {
+    button: "left" | "middle" | "right" | "wheelUp" | "wheelDown";
+    row: number;
+    col: number;
+    kind: "down" | "up" | "move";
+    ctrl?: boolean;
+    alt?: boolean;
+    shift?: boolean;
+  };
+}
+
+/** VT の画面の大きさが変わった（ペインの寸法から測った値）。NAWS でホストへ伝わる */
+export interface WsVtResize {
+  type: "vt-resize";
+  rows: number;
+  cols: number;
+}
+
 export type WsClientMessage =
   | WsOpen
+  | WsVtInput
+  | WsVtResize
   | WsKey
   | WsCloseReq
   | WsGuiSelect
@@ -423,7 +481,49 @@ export interface WsWatchHistoryRes {
   entries: WatchEntryView[];
 }
 
+/**
+ * **VT のセッションが開いた。** 最初の 1 通だけ全行が入る（以降は `vt-frame` の差分）。
+ */
+export interface WsVtOpened {
+  type: "vt-opened";
+  sessionId: string;
+  frame: WsVtFrame;
+  /** 実効の符号化 */
+  encoding: string;
+  /** IBM i か（画面側の案内を変えるのに使う） */
+  ibmI: boolean;
+  /** ホストがエコーを握ったか＝文字モードが成立しているか */
+  hostEchoes: boolean;
+}
+
+/** VT の画面の差分（`vt-wire.ts` の `VtFrameBuilder` が作る） */
+export interface WsVtFrameMessage {
+  type: "vt-frame";
+  frame: WsVtFrame;
+}
+
+/**
+ * ホストが `ECHO` を握ったかが変わった。**画面に変化が無いときはこちらで届く。**
+ *
+ * 交渉は接続の直後に終わるとは限らないので、`vt-opened` の値を握ったままにすると
+ * 「エコーを返していません」の案内が出たまま残る。
+ */
+export interface WsVtEcho {
+  type: "vt-echo";
+  hostEchoes: boolean;
+}
+
+/** `OSC 0/2` のタイトル。タブ名に使う */
+export interface WsVtTitle {
+  type: "vt-title";
+  title: string;
+}
+
 export type WsServerMessage =
+  | WsVtOpened
+  | WsVtFrameMessage
+  | WsVtTitle
+  | WsVtEcho
   | WsWatchList
   | WsWatchEntry
   | WsWatchState

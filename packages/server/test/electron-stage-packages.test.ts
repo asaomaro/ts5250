@@ -62,7 +62,7 @@ describe("electron の配布物に入る自前パッケージ", () => {
   it("いま切り出してあるライブラリを取りこぼさない", () => {
     // 改名・追加でここが変わったら、配布物側も自動で追随していることの確認
     expect(collect("server").sort()).toEqual(
-      ["base", "ebcdic", "hostserver", "scs", "server", "tn3270", "tn5250"].sort()
+      ["base", "ebcdic", "hostserver", "scs", "server", "tn3270", "tn5250", "vt"].sort()
     );
   });
 

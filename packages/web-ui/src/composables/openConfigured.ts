@@ -4,7 +4,7 @@ import { sessionsStore } from "../stores/sessions.js";
 import { workspaceStore } from "../stores/workspace.js";
 import { watchesStore } from "../stores/watches.js";
 import { makePaneTabId } from "../paneLabels.js";
-import { openSession, openPrinterSession } from "../session-controller.js";
+import { openSession, openPrinterSession, openVtSession } from "../session-controller.js";
 
 /**
  * **保存済みセッション設定を開く唯一の経路**（`20260802-printer-report-history`）。
@@ -112,7 +112,15 @@ async function open(ref: string, force = false): Promise<void> {
       type: "open" as const,
       kind: s.sessionType,
       session: s.ref,
-      ...(s.terminal === "3270" ? { terminal: "3270" as const, model: s.model3270 ?? 2 } : {})
+      ...(s.terminal === "3270" ? { terminal: "3270" as const, model: s.model3270 ?? 2 } : {}),
+      // **VT は大きさをここでは決めない。** ペインが載ってから測って `vt-resize` で伝える
+      // ——開く前にペインは存在しないので、測りようがない
+      ...(s.terminal === "vt"
+        ? {
+            terminal: "vt" as const,
+            ...(s.vtEncoding !== undefined ? { encoding: s.vtEncoding } : {})
+          }
+        : {})
     };
     const meta = {
       // **そのセッション自身のシステムから引く**（選択中システムではない）。
@@ -120,10 +128,13 @@ async function open(ref: string, force = false): Promise<void> {
       host: systemsStore.systems.find((x) => x.ref === s.system)?.host ?? "",
       // **端末の種類は送信側が見る**（3270 は押せるキーが違う）
       ...(s.terminal !== undefined ? { terminal: s.terminal } : {}),
+      ...(s.vtEncoding !== undefined ? { vtEncoding: s.vtEncoding } : {}),
       ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {})
     };
     if (s.sessionType === "printer") {
       await openPrinterSession(openMsg, s.name, meta, s.system, s.ref);
+    } else if (s.terminal === "vt") {
+      await openVtSession(openMsg, s.name, meta, s.system, s.ref);
     } else {
       await openSession(openMsg, s.name, meta, s.system, s.ref);
     }

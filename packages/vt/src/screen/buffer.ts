@@ -19,6 +19,14 @@ export class VtBuffer {
   private lines: VtCell[][] = [];
   /** 主画面から流れ出た行。**代替画面のぶんは入れない**（spec D7） */
   private readonly scroll: VtCell[][] = [];
+  /**
+   * これまでに履歴へ送った**延べ本数**。
+   *
+   * 上限に達すると `scroll.length` は変わらなくなるので、**長さだけでは増えたかどうかが
+   * 分からない**（利用側が差分を送ろうとして詰まる）。累計を持てば
+   * 「何本増えて、頭から何本落ちたか」が引き算で出る。
+   */
+  private scrollTotal = 0;
   /** 代替画面に移る前の主画面（`undefined` なら主画面を表示中） */
   private saved: { lines: VtCell[][]; cursorRow: number; cursorCol: number } | undefined;
 
@@ -46,6 +54,11 @@ export class VtBuffer {
 
   get scrollback(): readonly VtCell[][] {
     return this.scroll;
+  }
+
+  /** これまでに履歴へ送った延べ本数（上限で捨てたぶんも数える） */
+  get scrollbackTotal(): number {
+    return this.scrollTotal;
   }
 
   get displayLines(): readonly VtCell[][] {
@@ -216,6 +229,7 @@ export class VtBuffer {
 
   private pushScrollback(line: VtCell[]): void {
     if (this.scrollbackLimit <= 0) return;
+    this.scrollTotal++;
     this.scroll.push(line);
     if (this.scroll.length > this.scrollbackLimit) this.scroll.shift();
   }
@@ -386,6 +400,7 @@ export class VtBuffer {
   hardReset(style: VtStyle): void {
     this.saved = undefined;
     this.scroll.length = 0;
+    this.scrollTotal = 0;
     this.lines = Array.from({ length: this.rows }, () => this.blankLine(style));
     this.row = 0;
     this.col = 0;

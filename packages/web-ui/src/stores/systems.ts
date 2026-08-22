@@ -51,9 +51,11 @@ export interface SessionConfigForm {
   system: string;
   sessionType: SessionType;
   /** 端末の種類（既定 5250）。`display` にだけ意味がある */
-  terminal?: "5250" | "3270";
+  terminal?: "5250" | "3270" | "vt";
   /** 3270 のモデル（既定 2）。2 と 5 のみ */
   model3270?: 2 | 5;
+  /** VT の文字符号化（`terminal: "vt"` のみ。既定 utf-8） */
+  vtEncoding?: "utf-8" | "shift_jis" | "euc-jp";
   deviceName?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
