@@ -57,6 +57,13 @@ export interface WsVtFrame {
   scrollback?: WsVtRun[][];
   /** スクロールバックの古い方が捨てられた本数（上限に達したとき） */
   scrollbackDropped?: number;
+  /**
+   * ホストが `ECHO` を握ったか＝文字モードが成立しているか。**変わったときだけ載る。**
+   *
+   * `vt-opened` の時点ではまだ交渉が終わっていないことがある——実ブラウザ検証で
+   * 「エコーを返していません」の案内が出たまま残った。**画面に出す値は追随させる。**
+   */
+  hostEchoes?: boolean;
 }
 
 /**

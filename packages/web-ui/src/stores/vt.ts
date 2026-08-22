@@ -86,6 +86,11 @@ export const vtStore = {
     if (s !== undefined) s.title = title;
   },
 
+  setHostEchoes(id: string, on: boolean): void {
+    const s = byId.get(id);
+    if (s !== undefined) s.hostEchoes = on;
+  },
+
   setConnected(id: string, connected: boolean): void {
     const s = byId.get(id);
     if (s !== undefined) s.connected = connected;
@@ -182,6 +187,8 @@ function applyFrame(s: VtViewState, frame: WsVtFrame): void {
   s.cursor = frame.cursor;
   s.alternate = frame.alternate;
   s.title = frame.title;
+  // **交渉は開いたあとに終わることがある**ので、載ってきたら更新する
+  if (frame.hostEchoes !== undefined) s.hostEchoes = frame.hostEchoes;
 
   for (const line of frame.lines) {
     if (line.row < 0 || line.row >= s.lines.length) continue;
