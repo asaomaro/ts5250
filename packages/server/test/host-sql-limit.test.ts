@@ -295,4 +295,24 @@ describe("ページング経路は変えていない", () => {
     const body = await res.json();
     expect(body.kind).toBe("execute");
   });
+
+  /**
+   * **「1 ページだけ見て閉じる」使い方でも接続を掴まない。**
+   *
+   * backlog `hostserver.md` は「ページング経路も上限つき取得に寄せるか」を保留にしていた
+   * ——掴んだままだと次の実行が接続を使い回せず、小さな表でも毎回 6 秒かかるため。
+   * ⚠ **だが寄せる必要は無い**: 読み切った（`hasMore: false`）ページは、その場で
+   * 結果セットを閉じて接続をプールへ返している。
+   *
+   * 寄せてしまうと**「続きを読む」が成立しなくなる**（結果セットを保持しないので）。
+   * 掴む問題だけがここで解けているなら、経路は分けたままでよい。
+   */
+  it("**1 ページで読み切ったら結果セット ID を返さない**（続きを取りに行かせない）", async () => {
+    const fake = fakeConn(10);
+    const res = await appWith(fake).post({ sql: "SELECT ID FROM T", pageSize: 50 });
+    const body = await res.json();
+    expect(body.rowCount).toBe(10);
+    expect(body.hasMore).toBe(false);
+    expect(body.resultSetId, "掴み続けないので id を渡さない").toBeUndefined();
+  });
 });

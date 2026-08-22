@@ -5,17 +5,23 @@
 // **その「載り方」がこちらの復号（型コードで判定して 4 バイトのロケーターを読む）と
 // 両立するか**は実機でしか分からないので、ここで測る。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
-//         scripts/research-lob-threshold.mjs
+// 実行:
+//   node --env-file=.env scripts/research-lob-threshold.mjs            # 既定 AS400（実機）
+//   HOSTPRE=PUB400 AS400_LIB=QGPL node --env-file=.env scripts/research-lob-threshold.mjs
 //
-// 表は TESTLIB/LOBTHR を作り直す（冪等）。読み取りだけでは測れないので作る。
+// **往復が支配的な相手ほどしきい値が効く**ので、LAN（実機）だけでなく
+// インターネット越し（pub400）でも測れるようにしてある。
+//
+// 表は `<AS400_LIB>/LOBTHR` を作り直す（冪等）。読み取りだけでは測れないので作る。
+// ⚠ **pub400 は公開の共有機**。使うライブラリは QGPL に限り、最後に必ず落とす。
 import { DbConnection, query, executeStatement } from "@ts5250/hostserver";
 
-const host = process.env.AS400_HOST;
-const user = process.env.AS400_USER;
-const password = process.env.AS400_PASSWORD;
+const PRE = process.env.HOSTPRE ?? "AS400";
+const host = process.env[`${PRE}_HOST`];
+const user = process.env[`${PRE}_USER`];
+const password = process.env[`${PRE}_PASSWORD`];
 if (!host || !user || !password) {
-  process.stderr.write("AS400_HOST / AS400_USER / AS400_PASSWORD を環境変数で渡してください\n");
+  process.stderr.write(`${PRE}_HOST / ${PRE}_USER / ${PRE}_PASSWORD を環境変数で渡してください\n`);
   process.exit(2);
 }
 
