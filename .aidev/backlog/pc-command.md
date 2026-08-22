@@ -11,13 +11,23 @@
 
 ## 未検証（実装は入っているが確かめられていない）
 
-⚠ **ここに残っている 3 件は Windows 実機でしか進まない**（PC Organizer を持つ環境、
-プロセスツリーの観察、Windows ビルドでの実行）。それ以外は 2026-08-22 に片づけた。
+⚠ **ここに残っている 2 件は Windows 実機でしか進まない**（プロセスツリーの観察、
+Windows ビルドでの実行）。それ以外は 2026-08-22 に片づけた。
 
-- [ ] **PCO 終了標識** `27 00 FC D7 C3 D6 40 83 80 82 00` の実物確認
+- [x] **PCO 終了標識** `27 00 FC D7 C3 D6 40 83 80 82 00` の実物確認
   - 実機に `ENDPCO` コマンドが無く誘発できなかった（research D6）。値は xtn5250 の定数から採った
   - 現状は「一致したら実行せず実行キーだけ返す」保守的な扱い。**誤検出しても害が無い**形にしてある
-  - PC Organizer を持つ環境（Windows の PCOMM / ACS）を ACS タップで捕まえれば採れるはず
+  - ~~PC Organizer を持つ環境（Windows の PCOMM / ACS）を ACS タップで捕まえれば採れるはず~~
+  → **Windows は要らなかった**（`20260822-pco-end-marker`・PR #353）。前提を測り直したら道があった:
+    - `ENDPCO` が無いのは 7.3 / 7.5 とも本当（`CHKOBJ` で `CPF9801`）。`STRPCO` のパラメータは
+      **`PCTA(*YES|*NO)` の 1 つだけ**で終了指定は無い（`retrieveCommandTemplate` で確認）
+    - ⚠ **だが「コマンドで終わらせる」以外の道があった**——`STRPCO` したあと **`SIGNOFF`** すると、
+      ホストがサインオン画面と一緒にこの標識を送ってくる
+  → **xtn5250 から採った値は実機のバイト列と一致した**。位置は開始標識と同じ `SBA(1,1)` の直後、
+    末尾は `READ MDT FIELDS`——**ホストは応答を待っている**ので、
+    「実行せず実行キーだけ返す」という扱いはこれで裏が取れた（返さないと待ち続ける）
+  → 実機のレコードを回帰資産にした（`fixtures/pc-command/pco-end-signoff.hex`）。
+    再現は `scripts/research-pco-end-marker.mjs`
 - [x] **Windows での実行経路**（`spawn(..., { shell: true })` → `cmd.exe /c`）
   - Linux でしか確認していない。Electron 版を Windows で動かして `start` / `notepad` を試す
   - **2026-07-30 に Windows 実機で確認され、不具合 1 件が見つかって直った**
