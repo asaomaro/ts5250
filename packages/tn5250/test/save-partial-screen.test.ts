@@ -258,10 +258,6 @@ describe("セッションが応答を送り返す", () => {
  */
 describe("パラメータ無しのコマンドは捨てずに進む", () => {
   const CASES: [string, number][] = [
-    ["READ SCREEN TO PRINT", 0x66],
-    ["READ SCREEN TO PRINT EXTENDED", 0x68],
-    ["READ SCREEN TO PRINT GRID", 0x6a],
-    ["READ SCREEN TO PRINT EXT GRID", 0x6c],
     ["READ IMMEDIATE", 0x72],
     ["READ IMMEDIATE ALT", 0x83]
   ];
@@ -283,10 +279,10 @@ describe("パラメータ無しのコマンドは捨てずに進む", () => {
     expect(warns.some((w) => w.includes("応答していない"))).toBe(false);
   });
 
-  it("**0x83（ALT）は今も応答しない**（2 実装で扱いが割れているため）", () => {
+  it("**0x83（ALT）も応答するようになった**（実機で「返さないと固まる」と分かった）", () => {
     const { result, warns } = apply([ESC, 0x83]);
-    expect(result.readImmediateRequested).toBe(false);
-    expect(warns.some((w) => w.includes("応答していない"))).toBe(true);
+    expect(result.readMdtImmediateAltRequested).toBe(true);
+    expect(warns.some((w) => w.includes("応答していない"))).toBe(false);
   });
 
   it("本当に未知のコマンドは従来どおりレコードの残りを捨てる（気づけるように）", () => {

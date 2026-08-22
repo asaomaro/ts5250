@@ -58,6 +58,44 @@ export function buildReadMdtResponse(
 }
 
 /**
+ * **READ MDT IMMEDIATE ALT（0x83）応答。**
+ *
+ * `0x72` と同じく**利用者を待たずに即送信**し、**AID は 0**。違うのは**欄の選び方**——
+ * 名前どおり **MDT の立った欄だけ**を送る（`0x72` は全ての欄）。
+ *
+ * ## なぜ実装したか（2026-08-22）
+ *
+ * ~~2 実装で扱いが割れているので入れない~~ ← **実機で測ったら固まった。**
+ *
+ * IBM の DSM API `QsnReadMDTImmAlt`（`QSYSINC/H(QSNAPI)`）で実機から発行させると:
+ *
+ * ```
+ * 受信  12B  04 83        ← パラメータ無し
+ * 送信  （無し）           ← 当方は返していなかった
+ * 結果  こちらは応答待ちで時間切れ／ホスト側は QsnReadMDTImmAlt から戻ってこない
+ * ```
+ *
+ * **返さないとホストが待つ**——backlog `datastream-commands.md` が存在する理由そのもの
+ * （「捨てた後ろに READ があると入力待ちに入り、利用者には『待機中』としか見えない」）。
+ *
+ * ## 中身の根拠
+ *
+ * tn5250j `ScreenFields.readFormatTable` が `CMD_READ_MDT_IMMEDIATE_ALT` を
+ * `masterMDT` の門番 ＋ `sf.mdt` の絞り込みで送る。**`buildReadMdtResponse` に AID 0 を
+ * 渡したものと同値**（門番は「MDT の立った欄が 0 個なら何も送らない」に畳める）。
+ *
+ * tn5250(C) は `0x83` を無視するが、**無視すると固まる**ことが実機で分かった以上、
+ * 「2 実装が一致した点だけ」の原則より**実測を採る**。
+ */
+export function buildReadMdtImmediateAltResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
+  return buildReadMdtResponse(buf, codec, 0, cursor);
+}
+
+/**
  * **READ IMMEDIATE（0x72）応答。**
  *
  * 形は Read MDT Fields と同じ（行・桁・AID ＋ SBA ＋ 欄データ）だが、中身が 2 つ違う:

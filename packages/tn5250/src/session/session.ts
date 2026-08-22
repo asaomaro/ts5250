@@ -5,6 +5,7 @@ import { OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
   buildReadImmediateResponse,
+  buildReadMdtImmediateAltResponse,
   buildFlagRecord,
   buildCancelInviteAck
 } from "../protocol/read-response.js";
@@ -511,6 +512,13 @@ export class Session5250 extends Emitter<SessionEvents> {
         // 中身の決まり（AID 0・master MDT が門番・欄ごとの MDT は見ない）は
         // `buildReadImmediateResponse` の JSDoc に原典ごと控えてある。
         const { record } = buildReadImmediateResponse(this.buf, this.codec);
+        this.telnet.sendRecord(record);
+        return;
+      }
+      if (result.readMdtImmediateAltRequested) {
+        // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、
+        // 送るのは **MDT の立った欄だけ**（名前どおり）。返さないとホストが固まる。
+        const { record } = buildReadMdtImmediateAltResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
         return;
       }

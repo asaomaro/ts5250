@@ -1,0 +1,8 @@
+- [x] 1. DSM のヘッダーを読む（QsnRollUp / QsnReadMDTImmAlt / QsnPutInpCmd / QsnPutOutCmd）
+- [x] 2. dscmd.c ＋ build/diag スクリプト
+- [x] 3. ROLL の実測（方向ビットと引数の並びが確定）
+- [x] 4. 0x83 の実装（待つことを確認 → 実装 → 受理を確認）
+- [x] 5. 0x66/0x68/0x6A/0x6C の実装（同上）
+- [x] 6. 未知コマンドは待たないことを確認（負応答は入れない）
+- [x] 7. テスト 12 件（実機のバイト列）
+- [x] 8. backlog を 4 件とも閉じる

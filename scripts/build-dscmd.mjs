@@ -14,7 +14,7 @@
 // この script は C ソースを IFS に置いて `CRTBNDC ... SRCSTMF(...)` でコンパイルするだけ。
 // **走らせるのは `diag-read-immediate.mjs`**（5250 セッションから CALL してトレースを見る）。
 //
-// 実行: node --env-file=.env scripts/build-rdimm.mjs
+// 実行: node --env-file=.env scripts/build-dscmd.mjs
 import { readFileSync } from "node:fs";
 import { CommandConnection, IfsConnection } from "@ts5250/hostserver";
 
@@ -23,10 +23,10 @@ const user = process.env.AS400_USER;
 const password = process.env.AS400_PASSWORD;
 if (!host || !user || !password) { process.stderr.write("AS400_* が要ります\n"); process.exit(2); }
 
-const LIB = process.env.RDIMM_LIB ?? "TESTLIB";
-const PGM = process.env.RDIMM_PGM ?? "RDIMM";
-const STMF = process.env.RDIMM_SRC ?? `/tmp/${PGM.toLowerCase()}.c`;
-const LOGF = process.env.RDIMM_LOG ?? `/tmp/${PGM.toLowerCase()}.log`;
+const LIB = process.env.DSCMD_LIB ?? "TESTLIB";
+const PGM = process.env.DSCMD_PGM ?? "DSCMD";
+const STMF = process.env.DSCMD_SRC ?? `/tmp/${PGM.toLowerCase()}.c`;
+const LOGF = process.env.DSCMD_LOG ?? `/tmp/${PGM.toLowerCase()}.log`;
 const out = (s) => process.stdout.write(s + "\n");
 
 /**
@@ -35,10 +35,10 @@ const out = (s) => process.stdout.write(s + "\n");
  * 欄が無ければ応答は「行・桁・AID(0)」の 3 バイトになるはずで、**それでも往復が成立するか**が
  * 見たいこと。`printf` は DSM と混ぜない方がよいので、結果は**データ域**へ書いて後から読む。
  */
-// **ソースは `scripts/host-src/rdimm.c`**（テンプレート文字列に埋めるとエスケープ事故が起きる。
+// **ソースは `scripts/host-src/dscmd.c`**（テンプレート文字列に埋めるとエスケープ事故が起きる。
 // 実際に一度踏んだ——`\n` が二重になって型の直しが効かなかった）
-const SOURCE = readFileSync(new URL("./host-src/rdimm.c", import.meta.url), "utf8")
-  .replace("RDIMM_LOG", JSON.stringify(LOGF));
+const SOURCE = readFileSync(new URL("./host-src/dscmd.c", import.meta.url), "utf8")
+  .replace("DSCMD_LOG", JSON.stringify(LOGF));
 
 
 const cmd = await CommandConnection.connect({ host, user, password });
@@ -75,7 +75,7 @@ out(`\n# コンパイル（${LIB}/${PGM}）`);
 await run(`DLTPGM PGM(${LIB}/${PGM})`, { allowFail: true });
 // **TGTCCSID(*JOB) を指定する**——IFS のソースは UTF-8(1208) で置いたので、既定のままだと化ける
 // **SYSIFCOPT(*IFSIO)**——fopen を IFS のストリーム・ファイルへ向ける（既定はレコード・ファイル）
-await run(`CRTBNDC PGM(${LIB}/${PGM}) SRCSTMF('${STMF}') TGTCCSID(*JOB) SYSIFCOPT(*IFSIO) TEXT('READ IMMEDIATE(0x72) の実機検証')`);
+await run(`CRTBNDC PGM(${LIB}/${PGM}) SRCSTMF('${STMF}') TGTCCSID(*JOB) SYSIFCOPT(*IFSIO) TEXT('5250 コマンドを実機から発行させる')`);
 // ⚠ **CRTBNDC は失敗しても戻りコード 0 で返ることがある**（実測。CZM1613 が診断メッセージ止まり）。
 // 「OK」を信じず、**物が在るかを確かめる**
 // ⚠ **CRTBNDC は失敗しても戻りコード 0 で返る**（実測。CZM1613 は診断メッセージ止まり）。

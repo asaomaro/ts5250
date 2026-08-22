@@ -760,33 +760,49 @@ TN3270_E2E=1 npx vitest run --root packages/tn3270
 「IBM i には付けない」という条件を持つので、**付ける側**を実ホストで直接見る試験を足してある
 （`e2e-negotiation.test.ts`。送ったバイトに `@03C0` が載ることまで確かめる）。
 
-### READ IMMEDIATE(0x72) を実機で出させる
+### 実機に任意の 5250 コマンドを発行させる
 
-`0x72` は通常の画面では届かない（20 画面 142 レコードの census でも 0 件）。だが
-**IBM 自身が発行する API を出荷している**——動的画面管理（DSM）の `QsnReadImm`
-（`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。
+**「実機で届かないから確かめられない」は誤りだった。** IBM 自身が 5250 コマンドを発行する
+API を出荷している——**動的画面管理（DSM）**。`QSYSINC/H(QSNAPI)` に手続きが揃っており、
+**任意のコマンドバイトを出す口もある**。
 
 | スクリプト | 内容 |
 |---|---|
-| `build-rdimm.mjs` | `scripts/host-src/rdimm.c` を IFS へ置き `CRTBNDC` する（`TESTLIB/RDIMM`） |
-| `diag-read-immediate.mjs` | 5250 セッションから `CALL` し、**送受信の生バイト**とホスト側のログを見る |
+| `build-dscmd.mjs` | `scripts/host-src/dscmd.c` を IFS へ置き `CRTBNDC`（`TESTLIB/DSCMD`） |
+| `diag-5250-commands.mjs` | 5250 セッションから `CALL` し、**送受信の生バイト**とホスト側のログを見る |
+| `build-rdimm.mjs` / `diag-read-immediate.mjs` | 0x72 専用（先に作った方。`dscmd` に統合してある） |
 
 ```sh
-node --env-file=.env scripts/build-rdimm.mjs
-node --env-file=.env scripts/diag-read-immediate.mjs
-# 片付け: DLTPGM TESTLIB/RDIMM ＋ /tmp/rdimm.c /tmp/rdimm.log
+node --env-file=.env scripts/build-dscmd.mjs
+node --env-file=.env scripts/diag-5250-commands.mjs ROLLUP ROLLDOWN READIMM READIMMALT PRTSCR BADCMD
+# 片付け: DLTPGM TESTLIB/DSCMD ＋ /tmp/dscmd.c /tmp/dscmd.log
 ```
 
-⚠ **`CRTBNDC` は失敗しても戻りコード 0 で返る**（実測。`CZM1613 The compilation failed.` が
-診断メッセージ止まりで、`CommandConnection.run` は成功と判定する）。
-**「OK」を信じず `CHKOBJ` で物を確かめること。** 一度これで「プログラムが見つからない」まで
-気づかずに進んだ。
+| 要求 | API | 届くバイト |
+|---|---|---|
+| `ROLLUP` / `ROLLDOWN` | `QsnRollUp` / `QsnRollDown` | `04 23 03 02 14` / `04 23 83 02 14` |
+| `READIMM` | `QsnReadImm` | `04 72` |
+| `READIMMALT` | `QsnReadMDTImmAlt` | `04 83` |
+| `PRTSCR` | `QsnPutInpCmd(0x66, …)` | `04 66` |
+| `BADCMD` | `QsnPutOutCmd(0xFE, …)` | `04 fe` |
 
-⚠ **`Q_Bin4` は `long`、`Q_Handle_T` も `long`。** `int` で受けると `CZM0280`、
+**`QsnPutInpCmd` / `QsnPutOutCmd` は第 1 引数がコマンドバイトそのもの**なので、
+ここに無いコマンドも同じやり方で出せる。結論は `.aidev/backlog/datastream-commands.md`。
+
+⚠ **`CRTBNDC` は失敗しても戻りコード 0 で返ることがある**（`CZM1613 The compilation failed.` が
+診断メッセージ止まり）。**「OK」を信じず `CHKOBJ` で物を確かめること。** 一度これで
+「プログラムが見つからない」まで気づかずに進んだ。**失敗時はメッセージを投げる前に出す**
+（投げてから出すと中身が見えないまま落ちる。これも踏んだ）。
+
+⚠ **`Q_Bin4` も `Q_Handle_T` も `long`。** `int` で受けると `CZM0280`、
 ハンドルに `NULL` を渡しても `CZM0280`。`0` を渡す。
 
-⚠ **C ソースをテンプレート文字列に埋めない。** エスケープが二重になって型の直しが
-効かなかった（実際に踏んだ）。`scripts/host-src/` に実ファイルで置く。
+⚠ **DSM の引数は必ずヘッダーで確かめる。** `QsnRtvDta` を 5 引数だと思って書いて落とし、
+`QsnRollUp` の並びを `(上端, 下端, 行数)` だと思って `CPFA315` で落とした
+（正しくは `(行数, 上端, 下端)`。**エラーメッセージの本文が並びを教えてくれる**）。
+
+⚠ **C ソースをテンプレート文字列に埋めない。** エスケープが二重になって型の直しが効かなかった。
+`scripts/host-src/` に実ファイルで置く。
 
 ⚠ **`fopen` を IFS へ向けるには `SYSIFCOPT(*IFSIO)`** が要る（既定はレコード・ファイル）。
 
