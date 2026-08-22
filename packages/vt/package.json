@@ -1,0 +1,27 @@
+{
+  "name": "@ts5250/vt",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "VT / xterm character-mode terminal — telnet negotiation, DEC ANSI parser, screen buffer with scrollback, key encoding, and trace/replay.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ts5250/base": "0.1.0"
+  }
+}

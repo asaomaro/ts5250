@@ -1,0 +1,11 @@
+- [ ] 1. device-env を base へ（tn5250 / tn3270 を切り替え）
+- [ ] 2. @ts5250/vt の骨と依存方向テスト
+- [ ] 3. text/codec（復号・符号化）
+- [ ] 4. protocol/parser（DEC ANSI 状態機械）
+- [ ] 5. screen/buffer（格子・スクロールバック・代替画面・全角）
+- [ ] 6. screen/terminal（CSI/ESC/SGR/モード/応答）
+- [ ] 7. input/keys（打鍵の符号化）
+- [ ] 8. telnet（交渉）
+- [ ] 9. transport ＋ session
+- [ ] 10. trace（記録・再生）
+- [ ] 11. 実機検証スクリプト（Linux / pub400）

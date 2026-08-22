@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { terminalTypeFor, isDbcsCcsid, deviceEnvFor } from "../src/session/terminal-type.js";
+import { terminalTypeFor, isDbcsCcsid } from "../src/session/terminal-type.js";
+import { deviceEnvFor } from "@ts5250/base";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 
 describe("terminalTypeFor", () => {

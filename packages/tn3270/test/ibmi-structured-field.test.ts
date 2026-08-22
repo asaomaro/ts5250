@@ -170,7 +170,7 @@ describe("Query Reply", () => {
 
 describe("CCSID → デバイス属性（RFC 2877）", () => {
   it("英語と日本語で申告値が変わる", async () => {
-    const { deviceEnvFor } = await import("../src/telnet/device-env.js");
+    const { deviceEnvFor } = await import("@ts5250/base");
     expect(deviceEnvFor(37)).toEqual({ kbdType: "USB", codePage: 37, charSet: 697 });
     // 日本語 DBCS は **SBCS 部**を申告する（930 はカタカナ 290）
     expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
@@ -178,7 +178,7 @@ describe("CCSID → デバイス属性（RFC 2877）", () => {
   });
 
   it("未知の CCSID は申告しない", async () => {
-    const { deviceEnvFor } = await import("../src/telnet/device-env.js");
+    const { deviceEnvFor } = await import("@ts5250/base");
     expect(deviceEnvFor(1234)).toBeUndefined();
   });
 });

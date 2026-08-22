@@ -1,5 +1,5 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
-import { As400Error } from "@ts5250/base";
+import { As400Error, deviceEnvFor } from "@ts5250/base";
 import { parseRecord } from "../protocol/gds.js";
 import { OPCODE } from "../protocol/constants.js";
 import {
@@ -31,7 +31,7 @@ import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
 import { Emitter } from "./emitter.js";
 import { aidCodeOf, aidKeyForCode, type AidKey } from "./aid-keys.js";
-import { terminalTypeFor, deviceEnvFor } from "./terminal-type.js";
+import { terminalTypeFor } from "./terminal-type.js";
 
 export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "closed";
 
