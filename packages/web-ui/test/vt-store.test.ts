@@ -143,8 +143,9 @@ describe("状態", () => {
     const id = open();
     vtStore.setTitle(id, "T");
     expect(vtStore.get(id)?.title).toBe("T");
-    vtStore.setConnected(id, false);
+    vtStore.setConnected(id, false, "理由つき");
     expect(vtStore.get(id)?.connected).toBe(false);
+    expect(vtStore.get(id)?.closeReason).toBe("理由つき");
     vtStore.setFollowTail(id, false);
     expect(vtStore.get(id)?.followTail).toBe(false);
   });

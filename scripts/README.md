@@ -854,4 +854,38 @@ NEW-ENVIRON で `KBDTYPE` / `CODEPAGE` / `CHARSET` を申告しないと、ホ�
   与え、QBASE 側には `WRKSTNTYPE(*ASCII) AT(*ENTER)` を足して拾わせない。
   **影響は VT だけ**だが、サブシステム記述・経路指定・ジョブ待ち行列を作る作業になる。
 
+### B を実際に当てた結果（2026-08-22。**適用して確かめ、戻した**）
+
+`setup-vt-subsystem-osaka.mjs apply` を SR-OSAKA に当てた。**1 枚目の壁は破れた。**
+
+- `ASAOLIB/VTSBS`（`SGNDSPF(QSYS2924/QDSIGNON)`・`WRKSTNTYPE(*ASCII) AT(*SIGNON)`）を起こし、
+  QBASE に `WRKSTNTYPE(*ASCII) AT(*ENTER)` を 1 行足した
+- **画面が届くようになった**——英語のサインオン画面が出て `Subsystem . . : VTSBS` と表示される。
+  `CPF1194` のループは止まった
+- **サインオンも通り、対話ジョブが起動した**（`CPF1124 サブシステム VTSBS のジョブ
+  121774/***/QPADEV000B が開始された`）
+
+**ただし 2 枚目の壁があった。小文字が `-` に落ちる。**
+
+```
+                                   S--- O-          ← "Sign On"
+                       S-------- . . . . :   VTSBS  ← "Subsystem"
+```
+
+`QCHRID = 1172 / 290`——**日本語カタカナの EBCDIC で、小文字が存在しない**。VT の仮想装置は
+`CHRID(*SYSVAL)` でこれを継ぐので、英語（697/37）の画面を送る途中で小文字が落ちる。
+CCSID の申告を 37 に変えても同じ（装置側の話なので効かない）。
+
+→ **日本語 IBM i を VT で使うのは現実的でない**と判断し、**戻した**
+（`rollback`。QBASE のワークステーション項目は `*ALL`/`*CONS`/`5555` の元の姿に復帰、
+`ASAOLIB` に残り物なし、3270 の疎通も確認済み）。
+
+さらに解くなら `QIBM_QTG_DEVINIT`（TELNET の装置初期化出口）で装置の `CHRID` を英語系に
+するのが IBM の口だが、**検証用途には見合わない**。IBM i 相手の VT 検証は pub400 で足りる。
+
+⚠ **これは SR-OSAKA の設定漏れではなく、日本語 IBM i の構造**（`QLANGID(JPN)` の機械は
+サインオン画面が日本語＝DBCS）。ただし**測ったのは日本語カタカナ系 1 台と英語系 1 台だけ**で、
+「日本語 IBM i なら共通」は機構からの推論。JEB 系（コードページ 1027・小文字あり）なら
+2 枚目の壁は無いはず。
+
 ⚠ **サインオンの失敗は QMAXSIGN に数えられる。** SR-OSAKA は 3 回。試行を重ねない。

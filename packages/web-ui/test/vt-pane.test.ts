@@ -216,6 +216,14 @@ describe("案内", () => {
     w.unmount();
   });
 
+  it("**理由が来ていたら添えて出す**（真っ白な画面と 5 文字だけにしない）", async () => {
+    const { id, w } = open();
+    vtStore.setConnected(id, false, "IBM i と交渉できたが画面が届かないまま閉じました");
+    await w.vm.$nextTick();
+    expect(w.text()).toContain("画面が届かないまま閉じました");
+    w.unmount();
+  });
+
   it("**ホストがエコーを返していないことを言う**（打っても出ない理由が分かるように）", async () => {
     const id = "vt-noecho";
     ids.push(id);

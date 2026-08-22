@@ -277,7 +277,10 @@ export async function openVtSession(
             case "closed": {
               const s = sessionsStore.get(sessionId);
               if (s) s.connected = false;
-              vtStore.setConnected(sessionId, false);
+              // **理由をそのまま渡す。** サーバーは「何を確かめればよいか」まで添えてくる
+              // （画面が届かないまま閉じた IBM i など）。捨てると利用者は真っ白な画面と
+              // 「切断されました」の 5 文字だけを見ることになる
+              vtStore.setConnected(sessionId, false, msg.reason);
               break;
             }
             case "error":

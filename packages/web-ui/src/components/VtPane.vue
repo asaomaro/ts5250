@@ -350,7 +350,9 @@ onBeforeUnmount(() => {
         <div class="vt-cursor" :class="{ off: focused !== true }" :style="cursorStyle"></div>
       </div>
     </div>
-    <div v-if="view && !view.connected" class="vt-closed">切断されました</div>
+    <div v-if="view && !view.connected" class="vt-closed">
+      切断されました{{ view.closeReason ? "——" + view.closeReason : "" }}
+    </div>
     <div v-else-if="view && !view.hostEchoes" class="vt-note">
       ホストがエコーを返していません（打った文字は画面に出ません）
     </div>

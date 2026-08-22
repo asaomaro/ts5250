@@ -37,6 +37,12 @@ export interface VtViewState {
   ibmI: boolean;
   encoding: string;
   connected: boolean;
+  /**
+   * 切断の理由。**サーバーが手掛かりを添えて送ってくる**ので捨てない——
+   * 「IBM i と交渉できたが画面が届かないまま閉じました……」のように、
+   * 何を確かめればよいかまで入っている。
+   */
+  closeReason?: string;
   /** 利用者を最下部へ引き戻すか（自分で遡っている間は引き戻さない） */
   followTail: boolean;
 }
@@ -91,9 +97,11 @@ export const vtStore = {
     if (s !== undefined) s.hostEchoes = on;
   },
 
-  setConnected(id: string, connected: boolean): void {
+  setConnected(id: string, connected: boolean, reason?: string): void {
     const s = byId.get(id);
-    if (s !== undefined) s.connected = connected;
+    if (s === undefined) return;
+    s.connected = connected;
+    if (reason !== undefined && reason !== "") s.closeReason = reason;
   },
 
   setFollowTail(id: string, follow: boolean): void {
