@@ -132,7 +132,7 @@ describe("データストリームからの受け口", () => {
     expect(warns.filter((w) => w.includes("unknown command"))).toEqual([]);
   });
 
-  it("**0x83（ALT）は実装しない**——2 実装で扱いが割れているので警告に留める", () => {
+  it("**0x83（ALT）も即応答を要求する**（実機で「返さないと固まる」と分かった）", () => {
     const b = makeBuffer();
     const warns: string[] = [];
     const r = applyDataStream(
@@ -141,8 +141,8 @@ describe("データストリームからの受け口", () => {
       codec,
       (m) => warns.push(m)
     );
-    expect(r.readImmediateRequested).toBe(false);
-    expect(warns.some((w) => w.includes("READ IMMEDIATE ALT"))).toBe(true);
+    expect(r.readMdtImmediateAltRequested).toBe(true);
+    expect(warns.some((w) => w.includes("応答していない"))).toBe(false);
   });
 });
 
