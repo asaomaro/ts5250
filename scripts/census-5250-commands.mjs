@@ -18,8 +18,21 @@ const log = (s) => process.stderr.write(s + "\n");
 const out = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+// **置き場が 2 つある**（個人設定 `connections.json` / サーバー設定 `profiles.local.json`）。
+// 片方だけを見ていると、設定を移した日から黙って動かなくなる
+const sys = (() => {
+  for (const f of ["profiles.local.json", "connections.json"]) {
+    try {
+      const hit = JSON.parse(readFileSync(f, "utf8")).systems?.find((x) => x.name === "実機");
+      if (hit) return hit;
+    } catch { /* 無ければ次 */ }
+  }
+  return undefined;
+})();
+if (!sys) {
+  out("実機の定義が profiles.local.json / connections.json のどちらにもありません");
+  process.exit(1);
+}
 const password = process.env.AS400_PASSWORD;
 if (!password) {
   out("AS400_PASSWORD が未設定です");
@@ -63,8 +76,21 @@ const BATTERY = [
   { cmd: "WRKOBJ OBJ(TESTLIB/*ALL)", exit: ["F3"], note: "オブジェクト一覧（サブファイル）" },
   { cmd: "STRPDM", exit: ["F3"], note: "PDM メニュー" },
   { cmd: "GO CMDIFS", exit: ["F3"], note: "コマンド・メニュー" },
-  { cmd: "QSH", exit: ["F3"], note: "Qshell（0x03 を送ってくる。対照）" }
+  { cmd: "QSH", exit: ["F3"], note: "Qshell（0x03 を送ってくる。対照）" },
+
+  // ---- 2026-08-22 追加: **ROLL(0x23) / READ IMMEDIATE(0x72) を届かせにいく** ----
+  // backlog は「System/36 環境や古いアプリが候補（未確認）」としていた。**確かめる。**
+  { cmd: "GO ASSIST", exit: ["F3"], note: "操作援助（古い作りのメニュー）" },
+  { cmd: "DSPPFM FILE(QGPL/QCLSRC)", exit: ["F3"], note: "メンバー表示（旧来の全画面。流れる）" },
+  { cmd: "WRKMBRPDM FILE(QGPL/QCLSRC)", exit: ["F3"], note: "メンバー一覧（サブファイル）" },
+  { cmd: "DSPOBJD OBJ(QGPL/*ALL) OBJTYPE(*ALL)", exit: ["F3"], note: "オブジェクト記述（流れる）" },
+  { cmd: "WRKUSRJOB", exit: ["F3"], note: "利用者ジョブ" },
+  { cmd: "GO MAIN", exit: ["F3"], note: "メインメニュー（メニュー経路）" },
+  { cmd: "DSPSYSVAL SYSVAL(QCHRID)", exit: ["Enter"], note: "システム値の表示（単票）" },
+  { cmd: "WRKCFGSTS CFGTYPE(*DEV) CFGD(QPADEV*)", exit: ["F3"], note: "構成状況（サブファイル）" },
+  { cmd: "STRS36", exit: ["F3", "Enter"], note: "**System/36 環境**（ROLL の第一候補）" }
 ];
+
 
 const records = [];
 const warns = [];

@@ -1,0 +1,5 @@
+- [x] 1. census の画面を 11 → 20 に
+- [x] 2. profiles.local.json / connections.json の両方を見る
+- [x] 3. 実機で回す（142 レコード）
+- [x] 4. STRS36 が効いていないことと、その理由（S/36 環境が未導入）を確認
+- [x] 5. backlog / scripts/README に記録
