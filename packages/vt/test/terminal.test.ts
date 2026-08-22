@@ -446,3 +446,30 @@ describe("大きさを変える", () => {
     expect(t.snapshot().cells[0]!.map((c) => c.char).join("")).toBe("abcd ");
   });
 });
+
+describe("代替画面のまま大きさを変える", () => {
+  it("**抜けたときに行数の合った主画面が戻る**", () => {
+    const t = new VtTerminal(6, 20, 10);
+    const p = new VtParser();
+    t.handle(p.feed(enc.encode("main1\r\nmain2")));
+    t.handle(p.feed(enc.encode("\x1b[?1049halt")));
+    t.resize(3, 10);
+    t.handle(p.feed(enc.encode("\x1b[?1049l")));
+    const s = t.snapshot();
+    expect(s.rows).toBe(3);
+    expect(s.cells.length).toBe(3);
+    expect(s.cells.every((r) => r.length === 10)).toBe(true);
+    // 上から詰められるので main2 は残る
+    expect(s.cells.map((r) => r.map((c) => c.char).join("").trim())).toContain("main2");
+  });
+
+  it("カーソルも画面の中に収まる", () => {
+    const t = new VtTerminal(10, 20, 10);
+    const p = new VtParser();
+    t.handle(p.feed(enc.encode("\x1b[9;18H\x1b[?1049h")));
+    t.resize(4, 8);
+    t.handle(p.feed(enc.encode("\x1b[?1049l")));
+    expect(t.buffer.row).toBeLessThan(4);
+    expect(t.buffer.col).toBeLessThan(8);
+  });
+});

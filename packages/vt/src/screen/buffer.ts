@@ -281,8 +281,7 @@ export class VtBuffer {
     const line = this.lines[this.row];
     if (line === undefined) return;
     this.clearHalf(this.row, this.col);
-    const removed = line.splice(this.col, 0, ...Array.from({ length: n }, () => blankCell(style)));
-    void removed;
+    line.splice(this.col, 0, ...Array.from({ length: n }, () => blankCell(style)));
     line.length = this.cols;
   }
 
@@ -360,14 +359,21 @@ export class VtBuffer {
       const line = this.scroll[i];
       if (line !== undefined) this.scroll[i] = fit(line);
     }
-    if (this.saved !== undefined) this.saved.lines = this.saved.lines.map(fit);
-
-    while (this.lines.length > rows) {
-      // 下から詰めると入力中の行が消えるので、**上から履歴へ送る**
-      const gone = this.lines.shift();
-      if (gone !== undefined && !this.alternate) this.pushScrollback(gone);
-      if (this.row > 0) this.row -= 1;
+    if (this.saved !== undefined) {
+      // **退避してある主画面も同じ行数に揃える。** 揃えないと `vi` を代替画面で開いたまま
+      // 窓を変えたとき、抜けた瞬間に行数の合わない画面が戻る
+      const saved = this.saved.lines.map(fit);
+      this.saved.cursorRow = shrinkTo(saved, rows, this.saved.cursorRow);
+      while (saved.length < rows) saved.push(this.blankLine(style));
+      this.saved.lines = saved;
+      this.saved.cursorCol = clamp(this.saved.cursorCol, 0, cols - 1);
     }
+
+    // **カーソルより下から先に捨てる。** 上から捨てると、画面の上の方にしか書いていない
+    // 状態（シェルを開いた直後など）で**書いた内容だけが消えて空行が残る**
+    this.row = shrinkTo(this.lines, rows, this.row, (gone) => {
+      if (!this.alternate) this.pushScrollback(gone);
+    });
     while (this.lines.length < rows) this.lines.push(this.blankLine(style));
     this.rows = rows;
     this.resetMargins();
@@ -389,3 +395,30 @@ export class VtBuffer {
 }
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
+
+/**
+ * 行数を `rows` まで減らす。**カーソルより下を先に捨て**、足りなければ上から捨てる。
+ *
+ * 上からだけ捨てると、画面の上にしか書いていない状態で**書いた内容が消えて空行が残る**。
+ * 下からだけ捨てると、画面いっぱいのときに入力中の行が消える。両方を見る必要がある。
+ *
+ * 戻り値は新しいカーソル行。
+ */
+function shrinkTo<T>(
+  lines: T[],
+  rows: number,
+  cursorRow: number,
+  onDropTop?: (line: T) => void
+): number {
+  let row = cursorRow;
+  while (lines.length > rows) {
+    if (lines.length - 1 > row) {
+      lines.pop();
+      continue;
+    }
+    const gone = lines.shift();
+    if (gone !== undefined) onDropTop?.(gone);
+    if (row > 0) row -= 1;
+  }
+  return clamp(row, 0, Math.max(0, rows - 1));
+}
