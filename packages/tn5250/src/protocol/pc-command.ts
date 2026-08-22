@@ -28,11 +28,39 @@ export const PCO_END: readonly number[] = [
 /** 標識に続く PAUSE 指定: `'a'`(0x81) = 待たない。それ以外（実測は 0x80）= 待つ */
 const PAUSE_NO_WAIT = 0x81;
 
+/** シフトアウト／シフトイン（DBCS 区間の囲み） */
+const SO = 0x0e;
+const SI = 0x0f;
+
+/**
+ * V7R2 以降の `PCCMD` パラメータ上限（**文字数**。research D4）。
+ *
+ * SR-OSAKA（7.3）では 200 文字を受け付けず対話ジョブが止まったので、
+ * **この値まで実機で出せたわけではない**。「ここまでは来うる」の上限として扱う。
+ */
+export const PCCMD_MAX_CHARS = 1023;
+
+/**
+ * 標識を見つけたときに先読みするバイト数。
+ *
+ * ⚠ **上限いっぱいの本文が入る大きさが要る。** 以前は 512 で、本文が約 500 バイトを
+ * 越えると**黙って切れていた**（切れたことすら分からない）。DBCS は 1 文字 2 バイトなので
+ * 最悪 `PCCMD_MAX_CHARS * 2`、加えて SO/SI の囲みぶんの余裕を見る。
+ */
+export const PCO_SCAN_BYTES = PCO_START.length + 1 + PCCMD_MAX_CHARS * 2 + 64;
+
 /** ホストから届いた PC コマンド */
 export interface PcCommandRequest {
   command: string;
   /** `PAUSE(*YES)` 相当。コマンドの終了を待ってからホストへ実行キーを返す */
   wait: boolean;
+  /**
+   * **本文の終端に届かないまま先読み窓を使い切った。**
+   *
+   * 切れた本文をそのまま実行すると、**利用者の意図と違うコマンドが走る**
+   * （`del a.txt b.txt` が `del a.txt` になる類）。呼び出し側は実行せずに捨てること。
+   */
+  truncated: boolean;
 }
 
 export type PcoMarkerKind = "start" | "end";
@@ -65,18 +93,53 @@ export function detectPcoMarker(bytes: Uint8Array | undefined): PcoMarkerKind | 
  * 「表示可能データ（0x40 以上）が続く限り」で切り、末尾の空白だけを落とす。
  * 27x132 の 1 行（132 桁）を越えても**ホストは折返しに SBA を挟まない**ので、
  * データストリームを素直に読み進めればよい（research D4）。
+ *
+ * ## DBCS を含む本文
+ *
+ * ⚠ **1 バイトずつ復号してはいけない。** SO(0x0e) / SI(0x0f) は `0x40` 未満なので、
+ * 素朴に「0x40 未満で終わり」とすると**最初の全角文字で本文が切れる**
+ * （日本語のパスを含むコマンドが頭だけになる）。
+ *
+ * SO/SI は**本文の一部として集め、復号はコーデックに任せる**——`decode` が
+ * SO/SI のステートマシンを持っており、DBCS 対を 1 文字に畳んでくれる。
+ * ここで持つのは「どこまでが本文か」の判断だけにする。
  */
 export function readPcCommand(
   data: Uint8Array,
-  decodeByte: (b: number) => number
+  decode: (bytes: Uint8Array) => string
 ): PcCommandRequest {
   const pause = data[PCO_START.length];
   const wait = pause !== PAUSE_NO_WAIT;
-  let command = "";
-  for (let i = PCO_START.length + 1; i < data.length; i++) {
+  const raw: number[] = [];
+  let dbcs = false;
+  let terminated = false;
+  let i = PCO_START.length + 1;
+  for (; i < data.length; i++) {
     const b = data[i]!;
-    if (b < 0x40) break; // オーダー（RA 等）＝本文の終わり
-    command += String.fromCharCode(decodeByte(b));
+    if (b === SO) {
+      dbcs = true;
+      raw.push(b);
+      continue;
+    }
+    if (b === SI) {
+      dbcs = false;
+      raw.push(b);
+      continue;
+    }
+    // オーダー（RA 等）＝本文の終わり。DBCS 区間の中でも同じ——
+    // 対の途中に 0x40 未満が出るのは並びが壊れているときなので、そこで切る
+    if (b < 0x40) {
+      terminated = true;
+      break;
+    }
+    raw.push(b);
   }
-  return { command: command.replace(/\s+$/, ""), wait };
+  // SI で閉じないまま終わったら閉じる（`decode` が最後の 1 バイトを対の頭と誤らないように）
+  if (dbcs) raw.push(SI);
+  return {
+    command: decode(Uint8Array.from(raw)).replace(/\s+$/u, ""),
+    wait,
+    // 窓を使い切って終端に届いていない＝切れている可能性がある
+    truncated: !terminated && i >= data.length
+  };
 }

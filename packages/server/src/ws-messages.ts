@@ -266,6 +266,13 @@ export interface WsOpened {
   pcCommand: boolean;
   /** 予約中ならその表示名。**後から入ったタブにも今の状態を伝える** */
   reservedBy?: string;
+  /**
+   * **留守中に実行された PC コマンド**（受信順。無ければ載せない）。
+   *
+   * `pc-command` は購読者にしか届かないので、ブラウザを閉じている間に届いたコマンドは
+   * **実行されたのに誰にも知らされなかった**。繋ぎ直しで渡して、後から追えるようにする。
+   */
+  pcCommands?: PcCommandEvent[];
 }
 export interface WsScreen {
   type: "screen";

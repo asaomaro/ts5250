@@ -1134,6 +1134,18 @@ export class SessionManager {
    * 解除を呼び出し側に閉じた関数で返すのが要点——`delete entry.onX` の形だと、
    * **他の購読者の分まで消してしまう**（そうなっていた）。
    */
+  /**
+   * **これまでに実行した PC コマンド**（受信順。上限 `PC_COMMAND_HISTORY`）。
+   *
+   * ブラウザを閉じている間に届いたコマンドは**実行はされるが通知が届かない**——
+   * 購読者がいないので `pc-command` は誰にも配られず、記録だけが残っていた。
+   * 繋ぎ直したときに「留守中に何が走ったか」を渡せるようにする
+   * （backlog `pc-command.md`「常駐セッションでの扱い」）。
+   */
+  pcCommandHistory(id: string): PcCommandEvent[] {
+    return [...(this.sessions.get(id)?.pcCommands ?? [])];
+  }
+
   subscribePcCommand(id: string, fn: (e: PcCommandEvent) => void): () => void {
     const entry = this.sessions.get(id);
     if (!entry) return () => undefined;
