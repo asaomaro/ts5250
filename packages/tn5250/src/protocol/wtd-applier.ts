@@ -25,6 +25,11 @@ export interface ApplyResult {
    * （`buildReadImmediateResponse`）。`readRequested` と違い**入力待ちに入らない**。
    */
   readImmediateRequested: boolean;
+  /**
+   * READ MDT IMMEDIATE ALT（0x83）が来た。`0x72` と同じく即送信だが、
+   * **MDT の立った欄だけ**を送る（`buildReadMdtImmediateAltResponse`）。
+   */
+  readMdtImmediateAltRequested: boolean;
   /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
   readScreenExtendedRequested: boolean;
   /** このレコード中で IC/MC によりカーソル位置が明示された */
@@ -86,6 +91,7 @@ export function applyDataStream(
     saveScreenRequested: false,
     readScreenRequested: false,
     readImmediateRequested: false,
+    readMdtImmediateAltRequested: false,
     readScreenExtendedRequested: false,
     cursorSet: false,
     lastWrite: { cleared: false, restored: false, cells: 0 }
@@ -183,10 +189,17 @@ export function applyDataStream(
       // 当方も**捨てずに次のコマンドへ進む**——レコードごと捨てると後続の READ を失い、
       // キーボードが開かないまま固まる（この不具合をこれまで 3 回踏んでいる）。
       case COMMAND.READ_SCREEN_TO_PRINT:
-      case COMMAND.READ_SCREEN_TO_PRINT_EXTENDED:
       case COMMAND.READ_SCREEN_TO_PRINT_GRID:
+        // **画面イメージを返す**（`READ SCREEN`(0x62) と同じ形）。印刷要求なので
+        // ホストは受け取った画像を印刷経路へ回す。**返さないとホストが固まる**
+        // ——実機で `QsnPutInpCmd(0x66)` を出させて確かめた
+        // （`scripts/diag-5250-commands-osaka.mjs`）。
+        result.readScreenRequested = true;
+        break;
+      case COMMAND.READ_SCREEN_TO_PRINT_EXTENDED:
       case COMMAND.READ_SCREEN_TO_PRINT_EXT_GRID:
-        warn(`READ SCREEN TO PRINT (0x${cmd.toString(16)}) — 印刷要求には応答しない（後続は処理する）`);
+        // 拡張版。`READ SCREEN EXTENDED`(0x64) と同じ行区切り形式で返す
+        result.readScreenExtendedRequested = true;
         break;
       case COMMAND.READ_IMMEDIATE:
         // **利用者を待たずに欄を送り返す**（原典 GNU tn5250 `tn5250_session_read_immediate`）。
@@ -199,14 +212,13 @@ export function applyDataStream(
         result.readImmediateRequested = true;
         break;
       case COMMAND.READ_IMMEDIATE_ALT:
-        // ⚠ **0x83 は実装しない。** 2 実装で扱いが割れている——tn5250(C) は無視し、
-        // tn5250j は `readImmediate` として **MDT の欄だけ**を送る（`sf.mdt` で絞る）。
-        // しかも tn5250j 側は**行・桁・AID の前置きを書いていない**（同クラスの
-        // `sendAidKey` は書いている）ので、そのまま倣うのは危うい。実機で届いたことも無い。
-        warn(
-          `READ IMMEDIATE ALT (0x${cmd.toString(16)}) — **応答していない**（2 実装で扱いが割れており、` +
-            `実機で届いたことも無い）。ホストが待つ場合は無反応になる`
-        );
+        // **MDT の立った欄だけを即送信する**（名前どおり。`buildReadMdtImmediateAltResponse`）。
+        // パラメータは無い（実機で 12B ＝ ヘッダ 10 ＋ `04 83` を確認）。
+        //
+        // ⚠ **返さないとホストが固まる。** tn5250(C) は無視しているが、実機で
+        // `QsnReadMDTImmAlt` を発行させたら**こちらは応答待ちで時間切れ、ホストは API から
+        // 戻ってこなかった**（`scripts/diag-5250-commands-osaka.mjs`）。
+        result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY:
         applyWtd(r, buf, codec, result, warn);
