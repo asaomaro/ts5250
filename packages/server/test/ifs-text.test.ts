@@ -73,9 +73,37 @@ describe("決定表", () => {
 
   it("タグが無い・0・65535・未対応なら、読めなければ諦める", () => {
     const bytes = ebcdic(37, "hello\n");
-    for (const tag of [undefined, 0, 65535, 850]) {
+    // **850 は 2026-08-22 から読める**ので「未対応」の例には使えない（`oem-tables.ts`）
+    for (const tag of [undefined, 0, 65535, 9999]) {
       expect(decodeIfsText(bytes, tag)).toEqual({ ok: false, failure: "unsupported" });
     }
+  });
+
+  /**
+   * **CCSID 850 / 437 は同梱の表で読む**（backlog `hostserver.md`）。
+   *
+   * ⚠ **決定表の順は変わらない**——中身が UTF-8 として読めればそちらが先に当たる
+   * （実機のタグはたいてい中身を説明していない。research F4）。
+   * この表が効くのは**中身の推定が外れたとき**だけ。
+   */
+  it("**中身が UTF-8 として読めなければ、850 のタグどおりに読む**", () => {
+    // 0xc1 0xc2 は UTF-8 として不正。CP850 では ┴┬
+    const r = decodeIfsText(Uint8Array.from([0xc1, 0xc2]), 850);
+    expect(r).toMatchObject({ ok: true, value: { content: "┴┬", ccsid: 850, detectedBy: "tag" } });
+  });
+
+  it("437 のタグでも読む（同じバイトが別の文字になる）", () => {
+    expect(decodeIfsText(Uint8Array.from([0xb5]), 437)).toMatchObject({
+      ok: true,
+      value: { content: "╡", ccsid: 437 }
+    });
+  });
+
+  it("**中身の推定が先**（UTF-8 の中身に 850 のタグなら中身を採る）", () => {
+    expect(decodeIfsText(utf8("日本語"), 850)).toMatchObject({
+      ok: true,
+      value: { content: "日本語", ccsid: 1208, detectedBy: "content" }
+    });
   });
 
   it("タグが中身と食い違って復号に失敗しても、例外にはしない", () => {
@@ -85,7 +113,7 @@ describe("決定表", () => {
   });
 
   it("手動指定が未対応・復号不能ならそれぞれの理由を返す", () => {
-    expect(decodeIfsText(utf8("a"), undefined, 850)).toEqual({
+    expect(decodeIfsText(utf8("a"), undefined, 9999)).toEqual({
       ok: false,
       failure: "manual-unsupported"
     });
