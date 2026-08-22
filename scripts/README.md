@@ -769,6 +769,12 @@ TN3270_E2E=1 npx vitest run --root packages/tn3270
 |---|---|
 | `verify-vt-linux.mjs` | docker の telnetd 相手に実アプリで確かめる（22 項目。`vi` の代替画面・`less` のページ送り・256 色/24 ビット色・日本語の 2 桁占有・NAWS のリサイズ・`tmux` との突合） |
 | `verify-vt-ibmi.mjs` | IBM i に VT で繋いでサインオン → メインメニュー → `DSPLIBL` → サインオフ（9 項目。`PROBE=AS400` で社内機） |
+| `verify-browser-vt.mjs` | **実ブラウザ**で VT ペインを通す（22 項目。Linux 相手。コマンドの往復・色・日本語・IME・`vi`・履歴・リサイズ・5250 の道具を出さないこと） |
+| `verify-browser-vt-ibmi.mjs` | **実ブラウザ**で IBM i に VT サインオン（UI 経路でもコードページの申告が効いているか） |
+| `capture-vt-trace.mjs` | 実バイト列を JSONL に採る（`packages/vt/test/fixtures/`）。**IBM i はサインオン画面までで採り終える**ので資格情報が入らない |
+
+⚠ **VT の画面文字は `innerText` で取れる**（span で描くため）。5250 / 3270 は `<input>` の
+value に入るので取れない——**ペインごとに違う**ことを忘れない。
 
 ### Linux 側の検証環境
 

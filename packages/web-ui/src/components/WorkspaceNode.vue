@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import EmulatorPane from "./EmulatorPane.vue";
 import PrinterPane from "./PrinterPane.vue";
+import VtPane from "./VtPane.vue";
 import PaneTabs from "./PaneTabs.vue";
 import { workspaceStore, type WsNode, type SplitNode, type GroupNode, type DropZone } from "../stores/workspace.js";
 import { sessionsStore } from "../stores/sessions.js";
@@ -84,6 +85,11 @@ const focused = computed(() => workspaceStore.focusedGroupId === group.value.id)
 /** アクティブタブがプリンターセッションかどうか（ペイン内容の出し分け） */
 const activeIsPrinter = computed(
   () => !!group.value.activeTab && sessionsStore.get(group.value.activeTab)?.kind === "printer"
+);
+
+/** アクティブタブが VT かどうか。**端末の種類で見る**（`kind` は画面／プリンターしか言わない） */
+const activeIsVt = computed(
+  () => !!group.value.activeTab && sessionsStore.get(group.value.activeTab)?.meta?.terminal === "vt"
 );
 
 /**
@@ -192,6 +198,16 @@ const basisB = computed(() => (soloed.value ? "100%" : (1 - split.value.ratio) *
       -->
       <PrinterPane
         v-if="group.activeTab && !activeIsApp && activeIsPrinter"
+        :session-id="group.activeTab"
+        :focused="focused"
+        @focus="workspaceStore.focus(group.id)"
+      />
+      <!--
+        VT は**別のペイン**。フィールドも AID キーも無く、履歴を遡る画面なので
+        `ScreenGrid` の上には載らない（spec「VT は既存のペインに載らない」）
+      -->
+      <VtPane
+        v-else-if="group.activeTab && !activeIsApp && activeIsVt"
         :session-id="group.activeTab"
         :focused="focused"
         @focus="workspaceStore.focus(group.id)"

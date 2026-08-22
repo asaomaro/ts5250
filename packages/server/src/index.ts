@@ -134,7 +134,18 @@ export type {
   WsError,
   WsClosed,
   WsKeyDone,
-  SpoolReportMsg
+  SpoolReportMsg,
+  // VT（文字モード端末）。web-ui が画面を組み立てるのに要る
+  WsVtOpened,
+  WsVtFrameMessage,
+  WsVtTitle,
+  WsVtEcho,
+  WsVtInput,
+  WsVtResize,
+  WsVtFrame,
+  WsVtLine,
+  WsVtRun,
+  WsVtStyle
 } from "./ws-messages.js";
 export { main } from "./main.js";
 

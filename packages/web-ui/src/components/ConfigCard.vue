@@ -89,6 +89,7 @@ const sesForm = reactive<SesFormState>({
   sessionType: "display",
   terminal: "5250" as "5250" | "3270",
   model3270: 2 as 2 | 5,
+  vtEncoding: "utf-8" as "utf-8" | "shift_jis" | "euc-jp",
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
   rescueAction: "hold" as "hold" | "delete",
@@ -311,6 +312,7 @@ function loadSession(): void {
   sesForm.sessionType = s.sessionType;
   sesForm.terminal = s.terminal ?? "5250";
   sesForm.model3270 = s.model3270 ?? 2;
+  sesForm.vtEncoding = s.vtEncoding ?? "utf-8";
   sesForm.deviceName = s.deviceName ?? "";
   sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.transformTo = s.transformTo ?? "";
@@ -491,9 +493,18 @@ async function save(): Promise<void> {
         form.model3270 = sesForm.model3270 ?? 2;
         delete form.screenSize;
         delete form.enhanced;
+        delete form.vtEncoding;
+      } else if (sesForm.terminal === "vt") {
+        // **VT に画面サイズは無い**——ペインの寸法がそのまま `stty size` になる
+        form.terminal = "vt";
+        form.vtEncoding = sesForm.vtEncoding ?? "utf-8";
+        delete form.model3270;
+        delete form.screenSize;
+        delete form.enhanced;
       } else {
         delete form.terminal;
         delete form.model3270;
+        delete form.vtEncoding;
       }
       // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
       // 外した**ので、画面から保存した定義は必ず自分の値を持つ
@@ -539,6 +550,7 @@ async function save(): Promise<void> {
         // 端末の種類は display のもの
         delete form.terminal;
         delete form.model3270;
+        delete form.vtEncoding;
       } else {
         // display は printer 専用項目を送らない
         delete form.rescueAction;
@@ -648,7 +660,9 @@ const typeLabel = computed(() =>
         ? "メッセージ待ち受け"
         : props.session?.terminal === "3270"
           ? "3270 端末"
-          : "5250 端末"
+          : props.session?.terminal === "vt"
+            ? "VT 端末"
+            : "5250 端末"
 );
 
 /** 詳細（ⓘ）の開閉。旧 UI にあった接続設定の詳細表示を引き継ぐ */
@@ -922,6 +936,24 @@ const infoRows = computed(() => {
           <select v-model="sesForm.terminal">
             <option value="5250">5250（IBM i）</option>
             <option value="3270">3270（メインフレーム）</option>
+            <option value="vt">VT（文字モード）</option>
+          </select>
+        </label>
+        <!--
+          VT の符号化。**CCSID とは軸が違う**——あちらは IBM i にコードページを申告する
+          ためのもので、こちらは画面に流れるバイト列の読み方
+        -->
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === 'vt'" class="row">
+          <span
+            class="cap"
+            title="画面に流れるバイト列の読み方です。IBM i の PASE や AIX の日本語ロケールでは Shift_JIS / EUC-JP が使われます"
+          >
+            文字符号化
+          </span>
+          <select v-model="sesForm.vtEncoding">
+            <option value="utf-8">UTF-8</option>
+            <option value="shift_jis">Shift_JIS</option>
+            <option value="euc-jp">EUC-JP</option>
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
@@ -1013,7 +1045,10 @@ const infoRows = computed(() => {
             開いたら開始
           </span>
         </label>
-        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal !== '3270'" class="row">
+        <label
+          v-if="sesForm.sessionType === 'display' && sesForm.terminal !== '3270' && sesForm.terminal !== 'vt'"
+          class="row"
+        >
           <span class="cap">画面サイズ</span>
           <select v-model="sesForm.screenSize">
             <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>

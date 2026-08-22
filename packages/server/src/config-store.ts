@@ -198,6 +198,7 @@ export abstract class ConfigStore {
     };
     if (s.terminal !== undefined) pub.terminal = s.terminal;
     if (s.model3270 !== undefined) pub.model3270 = s.model3270;
+    if (s.vtEncoding !== undefined) pub.vtEncoding = s.vtEncoding;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
