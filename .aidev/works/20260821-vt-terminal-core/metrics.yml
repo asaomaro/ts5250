@@ -1,0 +1,5 @@
+events:
+  - { ts: 2026-08-21T23:10:43Z, phase: requirement, event: approved }
+  - { ts: 2026-08-21T23:26:29Z, phase: research, event: approved }
+  - { ts: 2026-08-21T23:28:12Z, phase: spec, event: approved }
+  - { ts: 2026-08-21T23:28:34Z, phase: plan, event: approved }

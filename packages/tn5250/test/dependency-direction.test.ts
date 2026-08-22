@@ -22,8 +22,9 @@ import { fileURLToPath } from "node:url";
  *   hostserver … ホストサーバー群。base / ebcdic / scs を使う
  *   tn5250  … 5250 端末プロトコル。base / ebcdic / scs（プリンターセッション）を使う
  *   tn3270  … 3270 端末プロトコル。base / ebcdic を使う（scs は不要——プリンターは対象外）
+ *   vt      … VT/xterm 文字モード端末。**base だけ**を使う（EBCDIC の世界ではない）
  *
- * **hostserver / tn5250 / tn3270 はいずれも同位**——互いに依存しない（どれが上でもない）。
+ * **hostserver / tn5250 / tn3270 / vt はいずれも同位**——互いに依存しない（どれが上でもない）。
  * 表では順に並べているが、`hostserver → tn5250` も `tn5250 → hostserver` も、
  * `tn5250 → tn3270` も `tn3270 → tn5250` も、両方向とも禁止として検査する（下の SIBLINGS）。
  *
@@ -35,14 +36,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const PACKAGES = join(here, "..", "..");
 
 /** 下ほど上位。上位は下位を import してよいが、逆はしてはならない */
-const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250", "tn3270"] as const;
+const LAYERS = ["base", "ebcdic", "scs", "hostserver", "tn5250", "tn3270", "vt"] as const;
 
 /** 互いに依存してはならない対（同位のパッケージ） */
 const SIBLINGS: readonly (readonly [string, string])[] = [
   ["hostserver", "tn5250"],
   ["tn5250", "tn3270"], // 5250 と 3270 は別プロトコル。層を共有しない
   ["hostserver", "tn3270"],
-  ["base", "ebcdic"] // どちらも依存ゼロを売りにしている
+  ["base", "ebcdic"], // どちらも依存ゼロを売りにしている
+  // VT は他のどれとも同位。**ebcdic も使わない**（ASCII / UTF-8 の世界）
+  ["vt", "hostserver"],
+  ["vt", "tn5250"],
+  ["vt", "tn3270"],
+  ["vt", "scs"],
+  ["vt", "ebcdic"]
 ];
 
 function collect(dir: string): string[] {
