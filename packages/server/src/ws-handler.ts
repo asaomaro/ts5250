@@ -231,7 +231,13 @@ export class WsConnection {
       // `fatal: true`** になっていた——「この欄には 2 バイト文字を打てません」
       // （`FIELD_TYPE`）で接続ごと畳め、と言っていたことになる。
       // 状態で決める以上、**状態の在り処を全部見る**（`onOpen` の重複検査と同じ形）。
-      const fatal = code === "SESSION_CLOSED" || (this.sessionId ?? this.session3270) === undefined;
+      //
+      // ⚠ **セッションの置き場を増やしたらここも増やす。** 3270 を足したときに漏れて
+      // 上の不具合になり、VT でも同じ形が繰り返せる状態だった。
+      // `onOpen` / `dispose` / ここ の 3 か所が同じ列を見る。
+      const fatal =
+        code === "SESSION_CLOSED" ||
+        (this.sessionId ?? this.session3270 ?? this.sessionVt) === undefined;
       this.sendError(code, err instanceof Error ? err.message : String(err), fatal);
     }
   }
