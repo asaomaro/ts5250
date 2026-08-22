@@ -760,6 +760,36 @@ TN3270_E2E=1 npx vitest run --root packages/tn3270
 「IBM i には付けない」という条件を持つので、**付ける側**を実ホストで直接見る試験を足してある
 （`e2e-negotiation.test.ts`。送ったバイトに `@03C0` が載ることまで確かめる）。
 
+### READ IMMEDIATE(0x72) を実機で出させる
+
+`0x72` は通常の画面では届かない（20 画面 142 レコードの census でも 0 件）。だが
+**IBM 自身が発行する API を出荷している**——動的画面管理（DSM）の `QsnReadImm`
+（`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-rdimm-osaka.mjs` | `scripts/host-src/rdimm.c` を IFS へ置き `CRTBNDC` する（`ASAOLIB/RDIMM`） |
+| `diag-read-immediate-osaka.mjs` | 5250 セッションから `CALL` し、**送受信の生バイト**とホスト側のログを見る |
+
+```sh
+node --env-file=.env scripts/build-rdimm-osaka.mjs
+node --env-file=.env scripts/diag-read-immediate-osaka.mjs
+# 片付け: DLTPGM ASAOLIB/RDIMM ＋ /tmp/rdimm.c /tmp/rdimm.log
+```
+
+⚠ **`CRTBNDC` は失敗しても戻りコード 0 で返る**（実測。`CZM1613 The compilation failed.` が
+診断メッセージ止まりで、`CommandConnection.run` は成功と判定する）。
+**「OK」を信じず `CHKOBJ` で物を確かめること。** 一度これで「プログラムが見つからない」まで
+気づかずに進んだ。
+
+⚠ **`Q_Bin4` は `long`、`Q_Handle_T` も `long`。** `int` で受けると `CZM0280`、
+ハンドルに `NULL` を渡しても `CZM0280`。`0` を渡す。
+
+⚠ **C ソースをテンプレート文字列に埋めない。** エスケープが二重になって型の直しが
+効かなかった（実際に踏んだ）。`scripts/host-src/` に実ファイルで置く。
+
+⚠ **`fopen` を IFS へ向けるには `SYSIFCOPT(*IFSIO)`** が要る（既定はレコード・ファイル）。
+
 ## VT（文字モード端末）
 
 **5250 / 3270 と根本的に違う。** ブロックモードではなく文字モード——フィールドも MDT も AID キーも

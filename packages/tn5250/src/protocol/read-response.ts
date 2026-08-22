@@ -54,12 +54,84 @@ export function buildReadMdtResponse(
   aid: number,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
+  return buildFieldResponse(buf, codec, aid, buf.mdtFields(), cursor);
+}
+
+/**
+ * **READ IMMEDIATE（0x72）応答。**
+ *
+ * 形は Read MDT Fields と同じ（行・桁・AID ＋ SBA ＋ 欄データ）だが、中身が 2 つ違う:
+ *
+ * 1. **AID は 0**。利用者が押した鍵ではなく、ホストが「いま送れ」と言っているだけ
+ * 2. **欄ごとの MDT を見ない**——`master MDT`（画面のどこかが変更されたか）が立っていれば
+ *    **全ての欄**を送る。立っていなければ**欄を 1 つも送らない**（行・桁・AID だけ）
+ *
+ * 原典 GNU tn5250 `session.c` の `tn5250_session_read_immediate` →
+ * `tn5250_session_send_fields(This, 0)` の `case CMD_READ_IMMEDIATE`:
+ *
+ * ```c
+ * case CMD_READ_IMMEDIATE:
+ *     if (tn5250_dbuffer_mdt(dbuffer)) {          // ← 画面単位の門番
+ *         field = dbuffer->field_list;
+ *         do { tn5250_session_send_field(...); field = field->next; }  // 欄ごとの MDT は見ない
+ *         while (field != dbuffer->field_list);
+ *     }
+ *     break;
+ * ```
+ *
+ * **`master MDT` は「MDT の立った欄が 1 つでもあるか」と同値**（`field.c` の
+ * `tn5250_field_set_mdt` と同時に `tn5250_dbuffer_set_mdt` が呼ばれる）。
+ *
+ * ## 2 実装の突き合わせ（`20260822-read-immediate`）
+ *
+ * tn5250j は **`0x72` を扱わず**、`0x83`（READ MDT IMMEDIATE ALT）だけを実装している
+ * （`tnvt.readImmediate` → `ScreenFields.readFormatTable`）。**矛盾ではなく別のコマンド**——
+ * 名前どおり `0x83` は MDT の欄だけを送る（`sf.mdt` で絞る）。**両者が一致するのは**
+ * 「`masterMDT` が門番」「待たずに即送信」「レコードの opcode は PUT_GET」の 3 点。
+ *
+ * ⚠ tn5250j の `readImmediate` は**行・桁・AID の前置きを書いていない**
+ * （同じクラスの `sendAidKey` は書いている）。手落ちと見て tn5250 側に合わせた。
+ *
+ * ## 実機で裏を取った（2026-08-22・SR-OSAKA / IBM i 7.3）
+ *
+ * 通常の画面では届かないが、**IBM 自身が 0x72 を発行する API を出荷している**——
+ * 動的画面管理（DSM）の `QsnReadImm`（`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。
+ * これを呼ぶ C プログラムを実機に置いて発行させた（`scripts/build-rdimm-osaka.mjs` /
+ * `scripts/diag-read-immediate-osaka.mjs`）。
+ *
+ * ```
+ * 受信  12B  04 72                       ← パラメータ無し
+ * 送信  34B  14 07 00 11 14 07 c3c1d3d3  ← 行20 桁7 **AID=0x00** ＋ SBA(20,7) ＋ "CALL…"
+ * ホスト側  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0   ← エラー無しで受理
+ * ```
+ *
+ * 送った 24 バイトのうち**欄データ 21 バイトをホストが受け取っている**（残り 3 は行・桁・AID）。
+ * 直前の Enter が `AID=0xf1` なのに対しこちらは `0x00`——**原典どおり**。
+ */
+export function buildReadImmediateResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
+  // **画面単位の MDT が門番**。立っていなければ欄は 1 つも送らない
+  const fields = buf.mdtFields().length > 0 ? buf.orderedFields() : [];
+  return buildFieldResponse(buf, codec, 0, fields, cursor);
+}
+
+/** 行・桁・AID ＋ 指定された欄の並び。`buildReadMdtResponse` と READ IMMEDIATE で共有する */
+function buildFieldResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  aid: number,
+  fields: readonly InternalField[],
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
   const w = new ByteWriter();
   const cur = cursor ?? buf.rowColOf(buf.cursorAddr);
   w.u8(cur.row).u8(cur.col).u8(aid);
 
   let substituted = 0;
-  for (const f of buf.mdtFields()) {
+  for (const f of fields) {
     const { row, col } = buf.rowColOf(f.startAddr);
     w.u8(ORDER.SBA).u8(row).u8(col);
     // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル。

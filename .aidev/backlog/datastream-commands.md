@@ -117,11 +117,46 @@ tn5250（C）と tn5250j（Java）の該当実装を読み、当方と 1 つず�
   - **2026-08-22: 古いアプリ側は空振り**（`GO ASSIST` / `DSPPFM` / `WRKMBRPDM` / `DSPOBJD` /
     `WRKUSRJOB` / `GO MAIN` / `WRKCFGSTS`。どれも `CLEAR UNIT` ＋ `WTD` で描き直す）
   - **S/36 環境は SR-OSAKA では試せない**（`STRS36` も `QSSP` も無い）。**別の機械が要る**
-- [ ] **`READ IMMEDIATE`(0x72) の応答**——届かなかったので入れていない
-  - 原典の実装は「MDT の有無に関わらず**全フィールドを即送信**」
-    （tn5250 `tn5250_session_read_immediate`: `read_opcode` を 0x72 にして `send_fields(This, 0)`。
-    AID コードは 0 で送る）。届いたらこの通りに実装すればよい
-  - `0x83`（ALT）は原典も未実装（無視）
+- [x] **`READ IMMEDIATE`(0x72) の応答** — **実装した**（`20260822-read-immediate` / PR #347）
+  - ~~原典の実装は「MDT の有無に関わらず**全フィールドを即送信**」~~
+    **← この要約は不正確だった。** 原典を読み直すと**門番がある**:
+
+    ```c
+    case CMD_READ_IMMEDIATE:
+        if (tn5250_dbuffer_mdt(dbuffer)) {   // ← 画面単位の MDT。立っていなければ欄を 1 つも送らない
+            do { tn5250_session_send_field(...); } while (...);   // 欄ごとの MDT は見ない
+        }
+    ```
+
+    正しくは「**画面のどこかが変更されていれば全ての欄**を送る／変更が無ければ
+    **行・桁・AID(0) だけ**」。`master_mdt` は「MDT の立った欄が 1 つでもあるか」と同値
+    （`field.c` の `tn5250_field_set_mdt` と同時に `tn5250_dbuffer_set_mdt` が呼ばれる）
+  - **tn5250j との突き合わせで分かったこと**: tn5250j は **`0x72` を扱わず**、
+    `0x83`（READ MDT IMMEDIATE ALT）だけを実装している。**矛盾ではなく別のコマンド**——
+    名前どおり `0x83` は MDT の欄だけを送る（`sf.mdt` で絞る）。
+    **2 実装が一致するのは**「`masterMDT` が門番」「待たずに即送信」
+    「レコードの opcode は PUT_GET」の 3 点で、実装したのはその範囲
+  - ⚠ tn5250j の `readImmediate` は**行・桁・AID の前置きを書いていない**
+    （同クラスの `sendAidKey` は書いている）。手落ちと見て tn5250 側に合わせた
+  - **実機で裏を取った**（2026-08-22・SR-OSAKA / IBM i 7.3）。通常の画面では届かないが、
+    **IBM 自身が 0x72 を発行する API を出荷している**——動的画面管理（DSM）の `QsnReadImm`
+    （`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。**IBM の一次資料で opcode が確定**し、
+    かつ**発行させる手段になる**。C プログラムを実機に置いて呼んだ:
+
+    ```
+    受信  12B  04 72                       ← パラメータ無し
+    送信  34B  14 07 00 11 14 07 c3c1d3d3  ← 行20 桁7 AID=0x00 ＋ SBA(20,7) ＋ "CALL…"
+    ホスト  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0   ← エラー無しで受理
+    ```
+
+    送った 24 バイトのうち**欄データ 21 バイトをホストが受け取っている**。
+    直前の Enter が `AID=0xf1` なのに対しこちらは `0x00`——**原典どおり**。
+    資材は `scripts/build-rdimm-osaka.mjs` / `scripts/diag-read-immediate-osaka.mjs` /
+    `scripts/host-src/rdimm.c`
+- [ ] **`READ IMMEDIATE ALT`(0x83) の応答** — **入れていない**
+  - **2 実装で扱いが割れている**（tn5250 は無視、tn5250j は MDT の欄だけ送る）うえ、
+    tn5250j 側は前置きを書いておらず倣うのが危うい。実機で届いたことも無い
+  - 届いたら警告を出す（`READ IMMEDIATE ALT (0x83) — 応答していない…`）
 - [ ] `READ SCREEN TO PRINT` 系（0x66 / 0x68 / 0x6A / 0x6C）の**応答**——届かなかった
   - 原典も未実装（無視）。印刷要求なので、実装するなら画面イメージを印刷経路へ回すことになる
 - [ ] **未知のコマンドに対する負応答**
