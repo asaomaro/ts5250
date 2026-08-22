@@ -216,3 +216,65 @@ describe("WsConnection: 見ている人を数える", () => {
     }
   });
 });
+
+/**
+ * **留守中に実行された PC コマンドを、繋ぎ直しで渡す**
+ * （backlog `pc-command.md`「常駐セッションでの扱い」）。
+ *
+ * `pc-command` の push は**購読者にしか届かない**。ブラウザを閉じている間に届いた
+ * STRPCCMD は**実行はされる**が、通知は誰にも配られず記録だけが残っていた。
+ * 「黙って実行しない」という約束は、繋ぎ直しでも守られていないといけない。
+ */
+describe("PC コマンドの留守番", () => {
+  /** セッションを開き、購読を切ってから PC コマンドの記録を積む */
+  async function withHistory() {
+    const s = setup();
+    await s.conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (s.sent[0] as { sessionId: string }).sessionId;
+    // 実行係を通さずに履歴だけ積む（実行の中身はここの関心ではない）
+    const mgr = s.mgr as unknown as {
+      pushPcCommandEvent: (id: string, e: unknown) => void;
+    };
+    mgr.pushPcCommandEvent(id, {
+      command: "notepad a.txt",
+      wait: false,
+      at: 1,
+      hostname: "pc",
+      outcome: { status: "started" }
+    });
+    return { ...s, id };
+  }
+
+  it("**attach の opened に留守中の実行が載る**", async () => {
+    const { mgr, id } = await withHistory();
+    const sent: WsServerMessage[] = [];
+    const server = new ServerConfigStore({ systems: [], sessions: [] });
+    const conn2 = new WsConnection(
+      { sessions: mgr, resolver: new ConfigResolver(server, new PersonalConfigStore()) },
+      { send: (d) => sent.push(JSON.parse(d)), close: () => {} }
+    );
+    // 既存セッションへ繋ぐのは `open` に `sessionId` を添える形（別の型は無い）
+    await conn2.handle(JSON.stringify({ type: "open", sessionId: id }));
+    const opened = sent.find((m) => m.type === "opened") as { pcCommands?: { command: string }[] };
+    expect(opened.pcCommands, "留守中の実行が届く").toHaveLength(1);
+    expect(opened.pcCommands?.[0]?.command).toBe("notepad a.txt");
+  });
+
+  it("**記録が無ければ欄ごと載せない**（空配列を送らない）", async () => {
+    const { conn, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    expect(sent[0]).not.toHaveProperty("pcCommands");
+  });
+
+  it("履歴は取り出しても消えない（別のタブも同じものを見る）", async () => {
+    const { mgr, id } = await withHistory();
+    expect(mgr.pcCommandHistory(id)).toHaveLength(1);
+    expect(mgr.pcCommandHistory(id)).toHaveLength(1);
+  });
+
+  it("**取り出した配列を触っても本体は変わらない**（複製を返す）", async () => {
+    const { mgr, id } = await withHistory();
+    mgr.pcCommandHistory(id).length = 0;
+    expect(mgr.pcCommandHistory(id)).toHaveLength(1);
+  });
+});

@@ -135,11 +135,17 @@ export async function openSession(
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
                 pcCommandEnabled: msg.pcCommand,
-                pcCommands: [],
+                // **留守中に実行された分から始める。** `pc-command` の push は
+                // 繋いでいる間しか届かないので、閉じている間の実行は
+                // ここで受け取らないと**誰にも知らされないまま消える**
+                pcCommands: (msg.pcCommands ?? []).slice(-PC_COMMAND_VIEW_LIMIT),
                 ...(configRef !== undefined ? { configRef } : {}),
                 ...(systemRef !== undefined ? { systemRef } : {})
               };
               sessionsStore.add(state);
+              // **黙って実行しない**は繋ぎ直しでも同じ——留守中の分も最後の 1 件を知らせる
+              const missed = state.pcCommands?.at(-1);
+              if (missed) state.notice = pcCommandNotice(missed);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);

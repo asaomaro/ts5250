@@ -85,7 +85,7 @@ describe("STRPCCMD を受けたセッション", () => {
     feed([...REC_PAUSE_NO, ...IAC_EOR]);
     await sleep(50);
 
-    expect(seen).toEqual([{ command: "echo NOWAIT", wait: false }]);
+    expect(seen).toEqual([{ command: "echo NOWAIT", wait: false, truncated: false }]);
     expect(sentEnterAck(written.slice(before)), "実行キーを返している").toBe(true);
     await p;
   });
