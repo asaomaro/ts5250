@@ -50,7 +50,7 @@ Windows ビルドでの実行）。~~ → **2026-08-23 に Windows 実機で両�
       **効かなかった手**（`detached` 単独・`cmd.exe` 直接呼び出し・CCSID・EDR）は
       `pc-command.ts` の docstring に表で残してある
 - [x] **別の Windows 実機で測り直した（`CALL START` は消えるか）** — 2026-08-23 完了
-      （`20260823-pccmd-windows-verify`。**再現しない**）
+      （`20260823-pccmd-windows-verify` / PR #355。**再現しない**）
   - Windows 11 Pro build 26200.9168（`cmd.exe` 10.0.26100.8875）・Node 24.18.0・
     Electron 32.3.3・Defender ＋ ESET の実機で **40 ケース**
     （コマンドの形 8 × spawn 指定 4 × アプリ種別 2 × 親プロセス 3 ＋ argv 突合 8）。
@@ -71,7 +71,7 @@ Windows ビルドでの実行）。~~ → **2026-08-23 に Windows 実機で両�
   - 再訪するとき最初に測るもの: `ComSpec` の指す先 / `cmd.exe` の版 /
     `HKCU|HKLM\Software\Microsoft\Command Processor` の `AutoRun` /
     親プロセスがジョブに入っているか / `app.exe` の置き場（`NET USE` した UNC 共有か）
-- [x] **Windows 実機での回帰確認の自動化** — 2026-08-23 完了
+- [x] **Windows 実機での回帰確認の自動化** — 2026-08-23 完了（`20260823-pccmd-windows-verify` / PR #355）
   - `packages/server/test/pc-command-windows.test.ts`（`describe.skipIf(!isWin)`）。
     **本番の `runPcCommand` 経路**で「アプリ」を起動し、**シェルが終わったあとも
     書き足し続けるか**で生存を測る（`CALL START …` / `CMD /C "NET USE & CALL START …"` /
