@@ -193,9 +193,9 @@ export function applyDataStream(
         // パラメータは無い（原典も 1 バイトも読まない）。中身の決まりは
         // `buildReadImmediateResponse` の JSDoc に原典の該当箇所ごと控えてある。
         //
-        // ⚠ **実機で届いたことは無い**（2026-08-22 に 20 画面 142 レコードで再確認）。
-        // 原典 2 つを読んで書き起こしたもので、**実機での裏取りはできていない**。
-        // 届いたら固まるより、原典どおりに返す方がまだ良い、という判断で入れてある。
+        // **実機で裏を取ってある**（SR-OSAKA / IBM i 7.3）。通常の画面では届かないが、
+        // IBM 自身が発行する API（DSM の `QsnReadImm`）で出させて往復を確かめた
+        // （`scripts/diag-read-immediate-osaka.mjs`）。
         result.readImmediateRequested = true;
         break;
       case COMMAND.READ_IMMEDIATE_ALT:

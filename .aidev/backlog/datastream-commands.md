@@ -138,8 +138,21 @@ tn5250（C）と tn5250j（Java）の該当実装を読み、当方と 1 つず�
     「レコードの opcode は PUT_GET」の 3 点で、実装したのはその範囲
   - ⚠ tn5250j の `readImmediate` は**行・桁・AID の前置きを書いていない**
     （同クラスの `sendAidKey` は書いている）。手落ちと見て tn5250 側に合わせた
-  - ⚠ **実機では依然として未確認**（20 画面 142 レコードでも届かない）。
-    原典から書き起こしたもので、**実機の裏取りはできていない**
+  - **実機で裏を取った**（2026-08-22・SR-OSAKA / IBM i 7.3）。通常の画面では届かないが、
+    **IBM 自身が 0x72 を発行する API を出荷している**——動的画面管理（DSM）の `QsnReadImm`
+    （`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。**IBM の一次資料で opcode が確定**し、
+    かつ**発行させる手段になる**。C プログラムを実機に置いて呼んだ:
+
+    ```
+    受信  12B  04 72                       ← パラメータ無し
+    送信  34B  14 07 00 11 14 07 c3c1d3d3  ← 行20 桁7 AID=0x00 ＋ SBA(20,7) ＋ "CALL…"
+    ホスト  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0   ← エラー無しで受理
+    ```
+
+    送った 24 バイトのうち**欄データ 21 バイトをホストが受け取っている**。
+    直前の Enter が `AID=0xf1` なのに対しこちらは `0x00`——**原典どおり**。
+    資材は `scripts/build-rdimm-osaka.mjs` / `scripts/diag-read-immediate-osaka.mjs` /
+    `scripts/host-src/rdimm.c`
 - [ ] **`READ IMMEDIATE ALT`(0x83) の応答** — **入れていない**
   - **2 実装で扱いが割れている**（tn5250 は無視、tn5250j は MDT の欄だけ送る）うえ、
     tn5250j 側は前置きを書いておらず倣うのが危うい。実機で届いたことも無い

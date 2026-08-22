@@ -92,8 +92,21 @@ export function buildReadMdtResponse(
  * ⚠ tn5250j の `readImmediate` は**行・桁・AID の前置きを書いていない**
  * （同じクラスの `sendAidKey` は書いている）。手落ちと見て tn5250 側に合わせた。
  *
- * ⚠ **実機で届いたことは無い**（2026-08-22 に 20 画面 142 レコードで再確認）。
- * 原典 2 つを読んで書き起こしたもので、**実機での裏取りはできていない**。
+ * ## 実機で裏を取った（2026-08-22・SR-OSAKA / IBM i 7.3）
+ *
+ * 通常の画面では届かないが、**IBM 自身が 0x72 を発行する API を出荷している**——
+ * 動的画面管理（DSM）の `QsnReadImm`（`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。
+ * これを呼ぶ C プログラムを実機に置いて発行させた（`scripts/build-rdimm-osaka.mjs` /
+ * `scripts/diag-read-immediate-osaka.mjs`）。
+ *
+ * ```
+ * 受信  12B  04 72                       ← パラメータ無し
+ * 送信  34B  14 07 00 11 14 07 c3c1d3d3  ← 行20 桁7 **AID=0x00** ＋ SBA(20,7) ＋ "CALL…"
+ * ホスト側  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0   ← エラー無しで受理
+ * ```
+ *
+ * 送った 24 バイトのうち**欄データ 21 バイトをホストが受け取っている**（残り 3 は行・桁・AID）。
+ * 直前の Enter が `AID=0xf1` なのに対しこちらは `0x00`——**原典どおり**。
  */
 export function buildReadImmediateResponse(
   buf: ScreenBuffer,

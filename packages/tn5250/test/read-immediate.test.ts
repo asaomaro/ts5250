@@ -12,9 +12,14 @@ import type { Transport } from "../src/transport/types.js";
  * **READ IMMEDIATE（0x72）**。
  *
  * ホストが「利用者を待たずに、いま画面の欄を送れ」と言ってくるコマンド。
- * **実機で届いたことは無い**（2026-08-22 に 20 画面 142 レコードで再確認）。
- * 原典 2 つを読んで書き起こしたので、ここで固定するのは**原典と一致していること**であって
- * 実機との一致ではない。
+ * 通常の画面では届かない（20 画面 142 レコードの census でも 0 件）が、
+ * **実機で裏を取ってある**——IBM 自身が発行する API（DSM の `QsnReadImm`）で出させ、
+ * 往復が成立することを確かめた（`scripts/diag-read-immediate-osaka.mjs`）:
+ *
+ * ```
+ * 受信  04 72                          送信  14 07 00 11 14 07 c3c1d3d3
+ * ホスト側  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0
+ * ```
  *
  * ## 原典（GNU tn5250 `session.c`）
  *
