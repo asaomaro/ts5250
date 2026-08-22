@@ -13,6 +13,7 @@
     { "path": "../scs" },
     { "path": "../hostserver" },
     { "path": "../tn5250" },
-    { "path": "../tn3270" }
+    { "path": "../tn3270" },
+    { "path": "../vt" }
   ]
 }
