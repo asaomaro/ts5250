@@ -52,8 +52,13 @@ export function openCommand(opts: ConnectOptions): Promise<CommandConnection> {
 }
 
 /** database サーバー接続（SQL） */
-export function openDb(opts: ConnectOptions): Promise<DbConnection> {
-  return DbConnection.connect(hostAuthFrom(opts));
+export function openDb(opts: ConnectOptions, lobFieldThreshold?: number): Promise<DbConnection> {
+  return DbConnection.connect({
+    ...hostAuthFrom(opts),
+    // **接続時の属性**（`setServerAttributes`）。あとから変えられないので、
+    // 違う値の接続を混ぜないよう**プールの鍵にも混ぜる**（`poolKey`）
+    ...(lobFieldThreshold !== undefined ? { lobFieldThreshold } : {})
+  });
 }
 
 /**

@@ -469,7 +469,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 
 | ツール | 概要 |
 |---|---|
-| `host_sql` | SELECT を実行し列メタデータ付きで結果を返す。**SELECT 専用**（更新は `host_command` の `RUNSQL`）。`maxRows`（既定 200）は**ホストから取得する行数の上限**で、続きがあれば `truncated: true` |
+| `host_sql` | SQL を実行する。SELECT は列メタデータ付きで結果を返す。**INSERT/UPDATE/DELETE/DDL は `allowWrite: true` を明示したときだけ**実行する。`maxRows`（既定 200）は**ホストから取得する行数の上限**で、続きがあれば `truncated: true` |
 | `host_upload_table` | CSV を表へ**追加**（INSERT のみ。更新・削除・表作成はしない）。`csv` か `columns`＋`rows` で渡す |
 | `host_command` | CL コマンドを実行し、成否とメッセージ（`CPF…` の ID・重大度）を構造化して返す。**非対話のみ** |
 | `host_call_program` | プログラム / QSYS API を呼ぶ（パラメータは Base64） |
@@ -1050,6 +1050,19 @@ LOG_LEVEL=debug ./start.sh
 > **接続が閉じると無効**になるため（別接続で使うと `-815`）、
 > 「一覧を表示してから、あとでクリックして中身を取る」という作りはできません。
 > 取得は**同じクエリの中**（`lobMaxBytes` の指定）で行ってください。
+
+> 📌 **`lobThreshold` を指定すると、小さい LOB は行データに載って返ります。**
+> ロケーターを 1 つずつ引き直す往復が消えるので、**往復が高い相手ほど効きます**。
+> 実測（LOB セル 6 個・インターネット越しの pub400）:
+>
+> | 指定 | 往復 | 所要 |
+> |---|---|---|
+> | 既定（0）＋ `lobMaxBytes` で中身を取る | 12 | 5,014ms |
+> | `lobThreshold: 65536` | 4 | **1,306ms** |
+>
+> ただし**行そのものが膨らみます**（中身を取らない既定の 982B → 5,078B）。
+> 大きくしすぎるとメモリを掴むので、必要な範囲で指定してください。
+> これは**接続時の属性**なので、値ごとに別の接続が張られます。
 
 ---
 
