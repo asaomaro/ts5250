@@ -77,6 +77,7 @@ export class VtTerminal {
       },
       cells: this.buffer.displayLines.map((l) => l.slice()),
       scrollback: this.buffer.scrollback.map((l) => l.slice()),
+      scrollbackTotal: this.buffer.scrollbackTotal,
       alternate: this.buffer.alternate,
       title: this.title
     };

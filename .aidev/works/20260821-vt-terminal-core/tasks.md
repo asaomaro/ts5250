@@ -1,11 +1,11 @@
-- [ ] 1. device-env を base へ（tn5250 / tn3270 を切り替え）
-- [ ] 2. @ts5250/vt の骨と依存方向テスト
-- [ ] 3. text/codec（復号・符号化）
-- [ ] 4. protocol/parser（DEC ANSI 状態機械）
-- [ ] 5. screen/buffer（格子・スクロールバック・代替画面・全角）
-- [ ] 6. screen/terminal（CSI/ESC/SGR/モード/応答）
-- [ ] 7. input/keys（打鍵の符号化）
-- [ ] 8. telnet（交渉）
-- [ ] 9. transport ＋ session
-- [ ] 10. trace（記録・再生）
-- [ ] 11. 実機検証スクリプト（Linux / pub400）
+- [x] 1. device-env を base へ（tn5250 / tn3270 を切り替え）— f34f9f6
+- [x] 2. @ts5250/vt の骨と依存方向テスト — 009d62d
+- [x] 3. text/codec（復号・符号化）— 逆引き表は実行時生成。同梱データ 0 バイト
+- [x] 4. protocol/parser（DEC ANSI 状態機械）— 分割到着・不正列・8 ビット C1
+- [x] 5. screen/buffer（格子・スクロールバック・代替画面・全角・遅延折返し）
+- [x] 6. screen/terminal（CSI/ESC/SGR/モード/応答）＋ charset ＋ sgr
+- [x] 7. input/keys（打鍵・貼り付け・マウス）
+- [x] 8. telnet（交渉。TTYPE / NAWS / ECHO / SGA / BINARY / NEW-ENVIRON）
+- [x] 9. transport ＋ session — 4894996
+- [x] 10. trace（記録・再生）＋ 実機バイト列の fixture — e002ed1
+- [x] 11. 実機検証スクリプト（Linux 22/22・pub400 9/9）

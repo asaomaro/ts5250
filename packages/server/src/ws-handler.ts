@@ -18,6 +18,9 @@ import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerM
 import type { MacroStore } from "./macro-store.js";
 import type { Tn3270Manager } from "./tn3270-manager.js";
 import { applyFields, planKey3270, toWireScreen } from "./tn3270-adapt.js";
+import type { VtManager } from "./vt-manager.js";
+import { VtFrameBuilder, type WsVtFrame } from "./vt-wire.js";
+import type { VtKeyName, VtEncoding } from "@ts5250/vt";
 import { macroSecretRefSchema } from "./macro-types.js";
 
 const wsLog = childLog({ component: "ws-handler" });
@@ -44,6 +47,7 @@ export interface WsHandlerDeps {
    * 差し替えずに済ませ、既存経路への影響を切る。
    */
   tn3270?: Tn3270Manager;
+  vt?: VtManager;
 }
 
 /** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
@@ -97,6 +101,19 @@ export interface HeartbeatOptions {
  * ①`onSocketClose`（ブラウザを閉じた）と ②このハートビート（半開きソケット）の 2 つだけ。
  * どちらも WS 前提なので、**WS を持たない MCP 経路は `orphanSafeIdleTimeoutMs` が受け持つ**。
  */
+/** 画面がまだ無いときの空フレーム（`vt-opened` は必ず 1 通出す） */
+function emptyVtFrame(rows: number, cols: number): WsVtFrame {
+  return {
+    rows,
+    cols,
+    cursor: { row: 0, col: 0, visible: true },
+    alternate: false,
+    title: "",
+    styles: [],
+    lines: []
+  };
+}
+
 export class WsConnection {
   private sessionId: string | undefined;
   /**
@@ -106,6 +123,14 @@ export class WsConnection {
    */
   private session3270: string | undefined;
   private detach3270: (() => void) | undefined;
+  /**
+   * **VT セッションの id**。5250 / 3270 とさらに別枠——画面の型も入力の経路も違うので、
+   * 同じ枠に入れると 5250 専用の経路が型では通ってしまう（3270 と同じ理由）。
+   */
+  private sessionVt: string | undefined;
+  private detachVt: (() => void) | undefined;
+  /** VT の差分を作る器。**接続 1 本につき 1 つ**（前回送った内容を覚えている） */
+  private vtFrames: VtFrameBuilder | undefined;
   private detachScreen: (() => void) | undefined;
   /**
    * **このタブが開いたのではなく、既にあるセッションへ繋いだ**か。
@@ -152,6 +177,12 @@ export class WsConnection {
           return await this.onOpen(msg);
         case "key":
           return await this.onKey(msg);
+        case "vt-input":
+          // **VT は打鍵ごとに来る。** 監査には残さない——`text` に打った文字そのものが
+          // 入るので、パスワードを打っている最中の中身を記録することになる
+          return this.onVtInput(msg);
+        case "vt-resize":
+          return this.onVtResize(msg);
         case "gui-select":
           return await this.onGuiSelect(msg);
         case "gui-submit":
@@ -417,11 +448,12 @@ export class WsConnection {
   }
 
   private async onOpen(msg: WsClientMessage & { type: "open" }): Promise<void> {
-    if (this.sessionId ?? this.session3270) {
+    if (this.sessionId ?? this.session3270 ?? this.sessionVt) {
       throw new As400Error("PROTOCOL_ERROR", "session already open on this connection");
     }
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     if (msg.terminal === "3270") return this.onOpen3270(msg);
+    if (msg.terminal === "vt") return this.onOpenVt(msg);
     await withAudit({ op: "ws_open" }, async () => {
       // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
       if (msg.sessionId !== undefined) return this.attach(msg.sessionId);
@@ -513,6 +545,133 @@ export class WsConnection {
         pcCommand: false
       });
     });
+  }
+
+  /**
+   * **VT のセッションを開く。**
+   *
+   * 3270 と同じく、保存済み設定（`system` / `session`）もホスト直指定も受ける
+   * ——解決は 5250 と同じ `ConfigResolver` に通し、接続先と資格情報の決まり方を
+   * 端末の種類ごとに分岐させない。
+   *
+   * **画面の大きさはブラウザが測って渡す。** VT は 24x80 固定ではなく、
+   * ペインの寸法がそのまま `stty size` になる。
+   */
+  private async onOpenVt(msg: WsClientMessage & { type: "open" }): Promise<void> {
+    const mgr = this.deps.vt;
+    if (mgr === undefined) {
+      throw new As400Error("CONFIG_ERROR", "VT terminal is not enabled on this server");
+    }
+    const connect = hasRef(msg) ? this.resolveTarget(msg).connect : undefined;
+    const host = connect?.host ?? msg.host;
+    if (host === undefined) throw new As400Error("CONFIG_ERROR", "host or profile required");
+    await withAudit({ op: "ws_open" }, async () => {
+      const port = msg.port ?? connect?.port;
+      const ccsid = msg.ccsid ?? connect?.ccsid;
+      const tls = msg.tls ?? connect?.tls;
+      const deviceName = msg.deviceName ?? connect?.deviceName;
+      const entry = await mgr.open({
+        host,
+        ...(port !== undefined ? { port } : {}),
+        ...(msg.vtRows !== undefined ? { rows: msg.vtRows } : {}),
+        ...(msg.vtCols !== undefined ? { cols: msg.vtCols } : {}),
+        ...(msg.encoding !== undefined ? { encoding: msg.encoding as VtEncoding } : {}),
+        ...(ccsid !== undefined ? { ccsid } : {}),
+        ...(tls !== undefined ? { tls } : {}),
+        ...(deviceName !== undefined ? { deviceName } : {}),
+        ...(msg.readOnly !== undefined ? { readOnly: msg.readOnly } : {}),
+        ...(this.user !== undefined ? { owner: this.user.username } : {})
+      });
+      this.sessionVt = entry.id;
+      this.vtFrames = new VtFrameBuilder();
+      this.startHeartbeat();
+
+      const push = (snap: Parameters<Parameters<typeof entry.subscribers.add>[0]>[0]): void => {
+        const frame = this.vtFrames?.build(snap);
+        // **変化が無ければ送らない**（差分が空の通で回線を埋めない）
+        if (frame !== undefined) this.send({ type: "vt-frame", frame });
+      };
+      const pushTitle = (title: string): void => this.send({ type: "vt-title", title });
+      const pushClose = (reason: string): void => this.send({ type: "closed", reason });
+      entry.subscribers.add(push);
+      entry.titleSubscribers.add(pushTitle);
+      entry.closeSubscribers.add(pushClose);
+      this.detachVt = () => {
+        entry.subscribers.delete(push);
+        entry.titleSubscribers.delete(pushTitle);
+        entry.closeSubscribers.delete(pushClose);
+      };
+
+      // 最初の 1 通だけ全行
+      const frame = this.vtFrames.build(entry.session.snapshot(), true);
+      this.send({
+        type: "vt-opened",
+        sessionId: entry.id,
+        frame: frame ?? emptyVtFrame(entry.session.snapshot().rows, entry.session.snapshot().cols),
+        encoding: entry.encoding,
+        ibmI: entry.session.isIbmI,
+        hostEchoes: entry.session.hostEchoes
+      });
+    });
+  }
+
+  /**
+   * **VT への入力。**
+   *
+   * 打鍵は意味のまま届き、バイト列への符号化は `VtSession` が現在のモードで行う（spec D4）。
+   * 監査は**キーの名前だけ**を残す——`text` には打った文字そのものが入るので、
+   * パスワードを入力している最中の内容を記録に残してはならない。
+   */
+  private onVtInput(msg: WsClientMessage & { type: "vt-input" }): void {
+    const mgr = this.deps.vt;
+    const id = this.sessionVt;
+    if (mgr === undefined || id === undefined) {
+      throw new As400Error("SESSION_NOT_FOUND", "no VT session opened on this connection");
+    }
+    const entry = mgr.get(id, this.user?.username);
+    if (entry.readOnly) throw new As400Error("READ_ONLY_SESSION", "session is read-only");
+    if (msg.paste !== undefined) {
+      entry.session.paste(msg.paste);
+      return;
+    }
+    if (msg.mouse !== undefined) {
+      entry.session.mouse(msg.mouse);
+      return;
+    }
+    if (msg.key !== undefined) {
+      entry.session.key({
+        key: msg.key as VtKeyName,
+        ...(msg.ctrl !== undefined ? { ctrl: msg.ctrl } : {}),
+        ...(msg.alt !== undefined ? { alt: msg.alt } : {}),
+        ...(msg.shift !== undefined ? { shift: msg.shift } : {})
+      });
+      return;
+    }
+    if (msg.text !== undefined && msg.text !== "") {
+      // **`Ctrl` つきの文字は `key` ではなく `text` で来る**（`Ctrl+C` など）
+      if (msg.ctrl === true || msg.alt === true) {
+        entry.session.key({
+          text: msg.text,
+          ...(msg.ctrl !== undefined ? { ctrl: msg.ctrl } : {}),
+          ...(msg.alt !== undefined ? { alt: msg.alt } : {})
+        });
+        return;
+      }
+      entry.session.text(msg.text);
+    }
+  }
+
+  /** ペインの大きさが変わった。**NAWS でホストへ伝わり `stty size` が追随する** */
+  private onVtResize(msg: WsClientMessage & { type: "vt-resize" }): void {
+    const mgr = this.deps.vt;
+    const id = this.sessionVt;
+    if (mgr === undefined || id === undefined) {
+      throw new As400Error("SESSION_NOT_FOUND", "no VT session opened on this connection");
+    }
+    const entry = mgr.get(id, this.user?.username);
+    entry.session.resize(msg.rows, msg.cols);
+    // **大きさが変わったら全行を送り直す**（差分の土台が変わっているため）
+    this.vtFrames?.reset();
   }
 
   /**
@@ -738,6 +897,11 @@ export class WsConnection {
 
   private async onKey(msg: WsClientMessage & { type: "key" }): Promise<void> {
     if (this.session3270 !== undefined) return this.onKey3270(msg);
+    if (this.sessionVt !== undefined) {
+      // **VT にはキーの一括送信が無い。** フィールドも AID キーも無いので、
+      // `key` を受けても何を送ればよいか決まらない。`vt-input` を使わせる
+      throw new As400Error("PROTOCOL_ERROR", "VT のセッションでは vt-input を使ってください");
+    }
     const id = this.requireSession();
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
@@ -817,6 +981,9 @@ export class WsConnection {
       if (this.session3270 !== undefined) {
         throw new As400Error("PROTOCOL_ERROR", "this operation is not available on a 3270 session");
       }
+      if (this.sessionVt !== undefined) {
+        throw new As400Error("PROTOCOL_ERROR", "this operation is not available on a VT session");
+      }
       throw new As400Error("SESSION_NOT_FOUND", "no session opened on this connection");
     }
     return this.sessionId;
@@ -832,6 +999,14 @@ export class WsConnection {
     this.detachScreen = undefined;
     this.detachReport?.();
     this.detachReport = undefined;
+    this.detachVt?.();
+    this.detachVt = undefined;
+    this.vtFrames = undefined;
+    if (this.sessionVt !== undefined) {
+      // **VT も見ている人が閉じたら切る**（3270 と同じ。共有する経路がまだ無い）
+      this.deps.vt?.close(this.sessionVt);
+      this.sessionVt = undefined;
+    }
     this.detach3270?.();
     this.detach3270 = undefined;
     if (this.session3270 !== undefined) {

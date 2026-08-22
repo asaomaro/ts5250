@@ -1,0 +1,8 @@
+- [ ] 1. WS メッセージ型と wire 変換（差分・palette・run-length）
+- [ ] 2. VtManager ＋ ws-handler ＋ coalesce
+- [ ] 3. 設定スキーマ（terminal: "vt" / encoding）
+- [ ] 4. VtPane.vue（描画・スクロールバック）
+- [ ] 5. 打鍵・貼り付け・IME・マウス
+- [ ] 6. 大きさの測定と NAWS
+- [ ] 7. 表記（ConfigCard / SessionInfo / タブ）
+- [ ] 8. テストと実ブラウザ検証

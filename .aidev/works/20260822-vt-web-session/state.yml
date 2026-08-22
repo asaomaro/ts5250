@@ -1,0 +1,8 @@
+schema: 3
+slug: vt-web-session
+current: plan
+approved: [requirement, spec, plan]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: [20260821-vt-terminal-core]
