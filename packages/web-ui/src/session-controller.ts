@@ -369,6 +369,9 @@ export async function openPrinterSession(
                 // **「開く」と「待ち受ける」は別。** `自動で待ち受け開始 ☐` なら
                 // `stopped` で返り、利用者の開始ボタンを待つ
                 state: msg.state,
+                // **止まった理由を捨てない。** `printer-state` の push は繋いでいる間しか
+                // 届かないので、ここで受けないと「エラーとだけ出て理由が無い」になる
+                ...(msg.error !== undefined ? { serviceError: msg.error } : {}),
                 // 自動出力（PDF/印刷）の状態。設定がある場合のみ UI にトグルを出す
                 outputConfigured: msg.hasOutput,
                 outputEnabled: msg.outputEnabled,

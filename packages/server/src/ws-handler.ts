@@ -801,6 +801,9 @@ export class WsConnection {
         // **「開く」と「待ち受ける」は別。** `autoStart ☐` なら `stopped` で返り、
         // 起動応答コードはまだ無い（`20260801-service-start-stop`）
         state: entry.state,
+        // **止まった理由も渡す。** push は繋いでいる間しか届かないので、
+        // これが無いと「エラーとだけ出て理由が無い」になる
+        ...(entry.error !== undefined ? { error: entry.error } : {}),
         ...(entry.session ? { startupCode: entry.session.startupCode } : {}),
         hasOutput: entry.output !== undefined,
         outputEnabled: entry.outputEnabled,

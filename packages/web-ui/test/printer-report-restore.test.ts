@@ -166,3 +166,43 @@ describe("受信時刻を送らないサーバー", () => {
     expect(sessionsStore.get(id)?.reports?.[0]?.receivedAt).toBeUndefined();
   });
 });
+
+/**
+ * **止まった理由も捨てない。**
+ *
+ * `printer-state` の push は繋いでいる間しか届かない。誰も見ていない間に止まった常駐は、
+ * 開き直しの `printer-opened` でしか理由を受け取れない——帳票（上）と同じ最後の 1 ホップ。
+ * 受け手が捨てると **「エラー」とだけ出て理由が無い**。
+ */
+describe("開き直したときの停止理由", () => {
+  const openedWithError = (error?: string) => ({
+    type: "printer-opened",
+    sessionId: "prt-1",
+    state: "error",
+    ...(error !== undefined ? { error } : {}),
+    hasOutput: false,
+    outputEnabled: true,
+    outputWarnings: [],
+    outputStatuses: [],
+    reports: [],
+    receivedTotal: 0
+  });
+
+  it("**理由がストアに入る**（捨てない）", async () => {
+    const id = await open(openedWithError("device is in use by another session"));
+    expect(sessionsStore.get(id)?.state).toBe("error");
+    expect(sessionsStore.get(id)?.serviceError).toBe("device is in use by another session");
+  });
+
+  it("理由が無ければ立てない（空文字にしない）", async () => {
+    const id = await open(openedWithError());
+    expect(sessionsStore.get(id)?.state).toBe("error");
+    expect(sessionsStore.get(id)?.serviceError).toBeUndefined();
+  });
+
+  it("**待ち受け中なら理由は無い**（前の失敗を引きずらない）", async () => {
+    const id = await open(printerOpened([]));
+    expect(sessionsStore.get(id)?.state).toBe("listening");
+    expect(sessionsStore.get(id)?.serviceError).toBeUndefined();
+  });
+});
