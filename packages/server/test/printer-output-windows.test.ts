@@ -51,7 +51,9 @@ describe("ホスト変換済み（rawPrint）", () => {
     }
   });
 
-  it("Windows 以外は従来どおり lp へ（lp が無ければその理由が返る）", async () => {
+  // **Windows 実機では前提が反転する**ので skip する（上の 1 件が spy で win32 を
+  // 装って Windows 側を見ており、こちらは「装っていないとき」の対照）
+  it.skipIf(process.platform === "win32")("Windows 以外は従来どおり lp へ（lp が無ければその理由が返る）", async () => {
     const r = await handleReport(report([["x"]]), { autoPrint: "p", rawPrint: true }, () => {});
     // この環境に lp は無いので失敗するが、**Windows 用の文言にはならない**
     expect(r.printError ?? "").not.toContain("Windows では未対応");
