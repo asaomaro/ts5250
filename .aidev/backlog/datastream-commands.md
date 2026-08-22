@@ -26,6 +26,47 @@
 | `WRITE_STRUCTURED_FIELD`(0xf3) | 1 |
 | `RESTORE_PARTIAL_SCREEN`(0x13) | 1 |
 
+## 数え直した（2026-08-22・20 画面／142 レコード・`20260822-datastream-census-2`）
+
+前回は 11 画面 83 レコード。**backlog の指示どおり census を再実行**し、
+`ROLL` と `READ IMMEDIATE` を届かせにいくために画面を 9 つ足した
+（`GO ASSIST` / `DSPPFM` / `WRKMBRPDM` / `DSPOBJD` / `WRKUSRJOB` / `GO MAIN` /
+`DSPSYSVAL` / `WRKCFGSTS` / `STRS36`）。
+
+| コマンド（レコード先頭） | 回数 |
+|---|---|
+| `CLEAR_UNIT`(0x40) | 109 |
+| `WRITE_TO_DISPLAY`(0x11) | 16 |
+| `WRITE_STRUCTURED_FIELD`(0xf3) | 2 |
+| `SAVE_PARTIAL_SCREEN`(0x03) | 2 |
+| **`RESTORE_SCREEN`(0x12)** | 1 |
+
+- **未知のコマンドは 0 件**（142 レコード中）。実装は今のところ取りこぼしていない
+- **`ROLL`(0x23) は今回も届かなかった**
+- **`READ IMMEDIATE`(0x72) も届かなかった**
+- 前回は `RESTORE_PARTIAL_SCREEN`(0x13) が 1 件、今回は **`RESTORE_SCREEN`(0x12) が 1 件**。
+  どちらも実装済みなので実害は無いが、**回によって出る方が変わる**
+
+### ⚠ System/36 の仮説は「潰した」のではなく「**この機械では試せない**」
+
+`ROLL` の候補として backlog が挙げていた System/36 環境を試したが、**`STRS36` を実行しても
+メインメニューに戻るだけ**だった。調べると SR-OSAKA には S/36 環境が入っていない:
+
+| | |
+|---|---|
+| `QSYS/STRS36`（CMD） | **無い** |
+| `QSYS/STRS36PRC`（CMD） | **無い** |
+| `QSSP`（LIB） | **無い** |
+| `5770WDS` option 32（S/36 互換 RPG II コンパイラ） | 在る（**コンパイラだけ**。実行環境ではない） |
+
+**S/36 環境のある機械が要る。** ここで「候補ではなかった」と結論してはいけない。
+
+### census スクリプトが動かなくなっていた（直した）
+
+`connections.json` だけを見ていたが、SR-OSAKA の定義が `profiles.local.json`（サーバー設定）へ
+移っており、**`Cannot read properties of undefined` で落ちていた**。両方を見るようにした。
+**設定の置き場が 2 つある以上、片方だけを見る補助スクリプトは黙って壊れる。**
+
 ## 確認済み
 
 - [x] **RESTORE PARTIAL SCREEN（0x13）は届く**——**QSH を F3 で抜けるとき**
@@ -64,11 +105,18 @@ tn5250（C）と tn5250j（Java）の該当実装を読み、当方と 1 つず�
 **11 画面では 1 件も届かなかった**ので、実装は増やさない（形式を推測で書かない方針のまま）。
 数え直す前に上記の census を再実行すること。
 
+**2026-08-22 に数え直した（20 画面／142 レコード。`20260822-datastream-census-2`）。結果は同じ——1 件も届かない。**
+よって**方針は据え置き**（この日の作業では実装を足していない）。次に疑うなら
+**S/36 環境のある機械**（SR-OSAKA には入っていない。上節）。
+
 - [ ] **ROLL（0x23）**
   - 実装は入っている（`方向＋行数(1) 上端(1) 下端(1)`。SC30-3533 / tn5250 の定義）が**未実測**
   - 流れる画面（`DSPJOBLOG` / `WRKACTJOB` / `STRSQL` / `QSH`）でも、
     ホストは `CLEAR UNIT` ＋ `WTD` で**描き直していた**
-  - どの画面が使うのかは依然として不明。System/36 環境や古いアプリが候補と見られる（未確認）
+  - どの画面が使うのかは依然として不明。System/36 環境や古いアプリが候補と見られる
+  - **2026-08-22: 古いアプリ側は空振り**（`GO ASSIST` / `DSPPFM` / `WRKMBRPDM` / `DSPOBJD` /
+    `WRKUSRJOB` / `GO MAIN` / `WRKCFGSTS`。どれも `CLEAR UNIT` ＋ `WTD` で描き直す）
+  - **S/36 環境は SR-OSAKA では試せない**（`STRS36` も `QSSP` も無い）。**別の機械が要る**
 - [ ] **`READ IMMEDIATE`(0x72) の応答**——届かなかったので入れていない
   - 原典の実装は「MDT の有無に関わらず**全フィールドを即送信**」
     （tn5250 `tn5250_session_read_immediate`: `read_opcode` を 0x72 にして `send_fields(This, 0)`。
