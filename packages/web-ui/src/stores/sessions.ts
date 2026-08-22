@@ -20,8 +20,10 @@ export interface SessionMeta {
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   sessionType?: "display" | "printer";
-  /** 端末の種類（既定 5250）。**使えるキーが変わる**ので送信側が見る */
-  terminal?: "5250" | "3270";
+  /** 端末の種類（既定 5250）。**使えるキーが変わる**ので送信側が見る。`vt` は専用ペイン */
+  terminal?: "5250" | "3270" | "vt";
+  /** VT の文字符号化（`terminal: "vt"` のみ） */
+  vtEncoding?: string;
   autoSignon?: boolean;
   signonUser?: string;
 }

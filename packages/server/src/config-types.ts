@@ -259,7 +259,15 @@ const sessionBase = {
    * `sessionType` と分けてあるのは**軸が直交する**ため——あちらは
    * セッションの種別（画面／プリンター／監視）で、こちらは端末の種類。
    */
-  terminal: z.enum(["5250", "3270"]).optional(),
+  terminal: z.enum(["5250", "3270", "vt"]).optional(),
+  /**
+   * **VT の文字符号化**（既定 `utf-8`）。`terminal: "vt"` にだけ意味がある。
+   *
+   * `ccsid` とは軸が違う——あちらは IBM i にコードページを申告するためのもので、
+   * こちらは画面に流れるバイト列の読み方。IBM i の PASE や AIX の日本語ロケールでは
+   * Shift_JIS / EUC-JP が現役。
+   */
+  vtEncoding: z.enum(["utf-8", "shift_jis", "euc-jp"]).optional(),
   /**
    * 3270 のモデル（既定 2）。代替画面サイズを決める。
    * **2（24x80）と 5（27x132）だけ**——3（32 行）・4（43 行）は web-ui の画面型に収まらない。
@@ -599,7 +607,9 @@ export interface PublicSession {
   system: string;
   sessionType: SessionType;
   /** 端末の種類（既定 5250）。`display` にだけ意味がある */
-  terminal?: "5250" | "3270";
+  terminal?: "5250" | "3270" | "vt";
+  /** VT の文字符号化（既定 utf-8）。`terminal: "vt"` にだけ意味がある */
+  vtEncoding?: "utf-8" | "shift_jis" | "euc-jp";
   /** 3270 のモデル（既定 2）。2 と 5 のみ */
   model3270?: 2 | 5;
   deviceName?: string;
