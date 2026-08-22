@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseCommandTemplate } from "../src/command/command-template.js";
+import { parseCommandTemplate, retrieveCommandTemplate } from "../src/command/command-template.js";
 import { buildCommand, formatValue } from "../src/command/command-build.js";
 
 /**
@@ -141,5 +141,66 @@ describe("組み立て", () => {
   it("**逃げ道**——テンプレートに無いキーワードも通せる（検証はされない）", () => {
     const out = buildCommand(crtlib, { LIB: "L", NEWKWD: "V" }, { allowUnknown: true });
     expect(out).toBe("CRTLIB LIB(L) NEWKWD(V)");
+  });
+});
+
+/**
+ * **引けなかった理由をホストの言葉で返す。**
+ *
+ * 以前は出力が空だと一律 `QCDRCMDD returned no data for CRTLIB` だった。
+ * これは**握り潰し**で、利用者は自分で直せる問題なのか分からない。
+ *
+ * 2 実機を並べて測って分かった（`scripts/compare-hosts-osaka-pub400.mjs`）:
+ *
+ * | 実機 | `CRTLIB` |
+ * |---|---|
+ * | SR-OSAKA（7.3） | rc=0 / 出力 2 個（引ける） |
+ * | pub400（7.5） | rc=1281 / 出力 0 個 / **`CPF9802 Not authorized to object CRTLIB in QSYS.`** |
+ *
+ * **版数の差ではなく権限の差**。pub400 は公開の共有機なのでライブラリ作成を落としている。
+ * メッセージは呼び出しの戻りに載っていたのに、こちらが捨てていた。
+ */
+describe("定義が引けないときのエラー", () => {
+  const conn = (result: { returnCode: number; messages: { id: string; text?: string }[] }): never =>
+    ({
+      call: () => Promise.resolve({ result: { success: false, ...result }, outputs: [] })
+    }) as never;
+
+  it("**権限が無ければ ACCESS_DENIED**（実機 pub400 の CPF9802）", async () => {
+    await expect(
+      retrieveCommandTemplate(
+        conn({ returnCode: 1281, messages: [{ id: "CPF9802", text: "Not authorized to object CRTLIB in QSYS." }] }),
+        "CRTLIB"
+      )
+    ).rejects.toMatchObject({ code: "ACCESS_DENIED" });
+  });
+
+  it("**ホストの文言をそのまま見せる**（握り潰さない）", async () => {
+    const err = await retrieveCommandTemplate(
+      conn({ returnCode: 1281, messages: [{ id: "CPF9802", text: "Not authorized to object CRTLIB in QSYS." }] }),
+      "CRTLIB"
+    ).catch((e: Error) => e);
+    expect(err.message).toContain("CPF9802");
+    expect(err.message).toContain("Not authorized");
+    expect(err.message).toContain("*LIBL/CRTLIB");
+  });
+
+  it("対象が無ければ NOT_FOUND", async () => {
+    await expect(
+      retrieveCommandTemplate(conn({ returnCode: 1281, messages: [{ id: "CPF9801", text: "Object not found." }] }), "NOSUCH")
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("**知らない CPF は丸めない**（推測でコードを選ばない）", async () => {
+    await expect(
+      retrieveCommandTemplate(conn({ returnCode: 1281, messages: [{ id: "CPF1234", text: "何か" }] }), "X")
+    ).rejects.toMatchObject({ code: "HOST_SERVER_UNSUPPORTED" });
+  });
+
+  it("メッセージが無ければ戻りコードを見せる（黙って消さない）", async () => {
+    const err = await retrieveCommandTemplate(conn({ returnCode: 7, messages: [] }), "X").catch(
+      (e: Error) => e
+    );
+    expect(err.message).toContain("rc=7");
   });
 });
