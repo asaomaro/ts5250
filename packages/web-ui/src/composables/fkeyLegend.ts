@@ -304,6 +304,24 @@ export function detectWindowRect(
   const reverse = isOverlayWrite(snap) ? detectReverseFrame(snap) : null;
   const candidate = border && reverse && containedIn(reverse, border) ? reverse : (border ?? reverse);
 
+  // **入力欄が枠の外に出ていたら窓ではない**（backlog `window-detect.md` の補助条件）。
+  //
+  // 罫線経路は条件が緩く、左右に `:` が並ぶ帳票を窓と誤る（実測 ③）。そこで
+  // **ホストが差し替えた欄の一覧**で裏を取る——実機（/ IBM i 7.3）で測ると、
+  // 窓が開いた瞬間にホストは欄の一覧を丸ごと入れ替える:
+  //
+  // | 画面 | 入力欄 |
+  // |---|---|
+  // | WRKOBJPDM（背景） | **12 個**（見出し・オプション列・コマンド行） |
+  // | その上に F1 ヘルプ窓 | **1 個だけ**（r11c9 ＝ 窓の内側） |
+  //
+  // **本物の窓では背景の欄が残らない**ので、この条件は本物を殺さない。
+  // 採取した実データは `test/fixtures/window-stack/real-fields-pdm-help.json`。
+  //
+  // ⚠ **欄が 1 つも無い画面には掛からない**（条件が空振りする）。ヘルプ窓のように
+  // 入力欄を持たない窓が多いので、これは「効くときだけ効く」安価な補助にとどまる。
+  if (candidate && hasInputOutside(snap, candidate)) return null;
+
   // 前画面が渡されていれば「窓は背景の上に開く」ことで裏を取る（`introducedOutside`）。
   // 渡されなければここで終わり＝**従来と 1 つも結果が変わらない**。
   if (!candidate || !prev) return candidate;
@@ -406,6 +424,25 @@ function introducedOutside(
  *
  * 部分的な重なりは扱わない。どちらが前面か判断できないので、従来どおり罫線枠を返して挙動を変えない。
  */
+/**
+ * 入力できる欄が矩形の外にあるか。
+ *
+ * **保護欄は見ない。** 背景の見出しや説明文は保護欄で、窓が開いても残ることがある
+ * （枠の外に文字があるのは当たり前で、それは窓を否定しない）。**打てる欄**が外にあるときだけ、
+ * 「ホストはまだ背景を触らせるつもりだ＝窓ではない」と言える。
+ *
+ * 欄の**右端まで**見る（`col + length - 1`）。左端だけだと、枠の内側から始まって外へはみ出す
+ * 欄を通してしまう。
+ */
+function hasInputOutside(snap: ScreenSnapshot, rect: WindowRect): boolean {
+  for (const f of snap.fields) {
+    if (f.protected) continue;
+    if (f.row < rect.row1 || f.row > rect.row2) return true;
+    if (f.col < rect.col1 || f.col + f.length - 1 > rect.col2) return true;
+  }
+  return false;
+}
+
 function containedIn(a: WindowRect, b: WindowRect): boolean {
   return a.row1 >= b.row1 && a.row2 <= b.row2 && a.col1 >= b.col1 && a.col2 <= b.col2;
 }

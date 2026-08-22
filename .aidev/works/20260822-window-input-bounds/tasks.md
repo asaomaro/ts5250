@@ -1,0 +1,5 @@
+- [x] 1. 実機で測る（窓が開くと欄の一覧が差し替わることを確認）
+- [x] 2. fixture 採取（scripts/diag-window-fields.mjs）
+- [x] 3. hasInputOutside の実装
+- [x] 4. テスト 9 件
+- [x] 5. 回帰確認（既存 1,733 件緑）
