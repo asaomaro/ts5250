@@ -123,7 +123,7 @@ afterAll(() => {
 
 describe("非クエリ文の実行", () => {
   it("DML は kind: \"execute\" と影響行数を返す", async () => {
-    const fake = fakeConn([sqlca(0), sqlca(0, 3)]);
+    const fake = fakeConn([sqlca(0, 3)]);
     const res = await appWith(fake).post("DELETE FROM QTEMP.T WHERE ID > 0");
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -133,19 +133,19 @@ describe("非クエリ文の実行", () => {
     // 接続の素性は既存の応答と同じ形で添える（障害切り分けのため）
     expect(body.connection.job).toBe("123456/QUSER/QZDASOINIT");
     expect(body.connection.reused).toBe(true);
-    // prepareAndDescribe → execute の 2 往復
-    expect(fake.sent.map((f) => f.reqId)).toEqual([0x1803, 0x1805]);
+    // **executeImmediate の 1 往復**（2026-08-22 に実機で確かめて切り替えた）
+    expect(fake.sent.map((f) => f.reqId)).toEqual([0x1806]);
   });
 
   it("DDL は hasRowCount が false（「0 行に影響しました」と出さない）", async () => {
-    const fake = fakeConn([sqlca(0), sqlca(0, 0)]);
+    const fake = fakeConn([sqlca(0, 0)]);
     const body = await (await appWith(fake).post("CREATE TABLE QTEMP.T (ID INT)")).json();
     expect(body.kind).toBe("execute");
     expect(body.hasRowCount).toBe(false);
   });
 
   it("警告つき成功は warning を添えて 200（表は作られたのに黙るのを防ぐ）", async () => {
-    const fake = fakeConn([sqlca(0), sqlca(7905, 0, "01567")]);
+    const fake = fakeConn([sqlca(7905, 0, "01567")]);
     const res = await appWith(fake).post("CREATE TABLE ASAOLIB.T (ID INT)");
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -153,7 +153,7 @@ describe("非クエリ文の実行", () => {
   });
 
   it("成功した接続はプールへ返す（次の実行を 6 秒待たせない）", async () => {
-    const fake = fakeConn([sqlca(0), sqlca(0, 1)]);
+    const fake = fakeConn([sqlca(0, 1)]);
     const { pool, post } = appWith(fake);
     await post("INSERT INTO QTEMP.T VALUES(1)");
     expect(pool.idleSize).toBe(1);
@@ -231,21 +231,26 @@ describe("失敗の扱い", () => {
 });
 
 /**
- * **どちらの経路を通ったかを文名で見分ける。** クエリ経路（`query.ts`）は `S1`、
- * 非クエリ経路（`execute.ts`）は `ASEXEC` を使う。
- * 応答の形（`kind`）だけで見ると「クエリ経路が別の理由で落ちた」場合と区別できない。
+ * **どちらの経路を通ったかを要求 ID と文名で見分ける。**
+ *
+ * クエリ経路（`query.ts`）は `prepareAndDescribe`(0x1803) に文名 `S1` を添える。
+ * 非クエリ経路（`execute.ts`）は**マーカーが無ければ `executeImmediate`(0x1806) の 1 往復**で、
+ * 文名を送らない。応答の形（`kind`）だけで見ると
+ * 「クエリ経路が別の理由で落ちた」場合と区別できない。
  */
 describe("振り分け", () => {
   const stop = new SqlError(-999, "XXXXX", "テスト用に止める");
 
-  async function routeOf(sql: string): Promise<{ name: string | undefined; kind: unknown }> {
+  async function routeOf(
+    sql: string
+  ): Promise<{ name: string | undefined; reqId: number | undefined; kind: unknown }> {
     const fake = fakeConn([], stop);
     const body = await (await appWith(fake).post(sql)).json();
-    return { name: fake.names[0], kind: body.kind };
+    return { name: fake.names[0], reqId: fake.sent[0]?.reqId, kind: body.kind };
   }
 
   it("SELECT はクエリ経路（勝手に -518 で落とさない）", async () => {
-    expect(await routeOf("SELECT * FROM QTEMP.T")).toEqual({ name: "S1", kind: undefined });
+    expect(await routeOf("SELECT * FROM QTEMP.T")).toMatchObject({ name: "S1", kind: undefined });
   });
 
   it("先頭のコメント付き SELECT もクエリ経路（コメントで判定を誤らせない）", async () => {
@@ -262,7 +267,13 @@ describe("振り分け", () => {
     expect((await routeOf(sql)).name).toBe("S1");
   });
 
-  it("DELETE は非クエリ経路（文名が別＝insert.ts と踏み合わない）", async () => {
-    expect((await routeOf("DELETE FROM QTEMP.T")).name).toBe("ASEXEC");
+  it("**DELETE は非クエリ経路の 1 往復**（文名を送らない）", async () => {
+    const r = await routeOf("DELETE FROM QTEMP.T");
+    expect(r.reqId).toBe(0x1806);
+    expect(r.name, "文名は載らない").toBeUndefined();
+  });
+
+  it("**クエリは 1 往復の道に載せない**（-518 で明確に断らせる）", async () => {
+    expect((await routeOf("SELECT * FROM QTEMP.T")).reqId).toBe(0x1803);
   });
 });

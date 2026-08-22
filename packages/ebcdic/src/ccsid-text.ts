@@ -3,15 +3,18 @@
  *
  * EBCDIC 系は既存の `codecForCcsid`（表を同梱している）、
  * それ以外（UTF-8 / ISO-8859-1 / UTF-16 / Windows-1252 / Shift_JIS）は Web 標準の
- * `TextDecoder` に橋渡しする。**表を増やさずに済む範囲は増やさない**——
- * CCSID 850 / 437 は Node の `TextDecoder` に無いが、実機で 850 タグが付くのは
- * 「中身は UTF-8 / ASCII なのにサーバー既定のタグが付いた」ケースで、
- * 復号の決定表ではタグより先に中身の推定が当たる（research F4）。
- * 本当に CP850 の内容が現れたら `tools/gen-tables` で表を起こすこと。
+ * `TextDecoder` に橋渡しする。
+ *
+ * **CCSID 850 / 437 だけは `TextDecoder` に無い**（WHATWG の一覧に無い）ので、
+ * 同梱の表で読む（`oem-tables.ts`）。実機で 850 タグが付くのはたいてい
+ * 「中身は UTF-8 / ASCII なのにサーバー既定のタグが付いた」ケースで、決定表では
+ * タグより先に中身の推定が当たる（research F4）——**それでも、本当に CP850 の内容が
+ * 来たときに読めないままにはしない**。
  *
  * ピュアロジック層なので `node:*` は使わない（`TextDecoder` / `TextEncoder` は Web 標準）。
  */
 import { codecForCcsid } from "./codec.js";
+import { OEM_TABLES, decodeOem, reverseOem } from "./oem-tables.js";
 import type { LineEnding } from "./ccsid-catalog.js";
 
 export { TEXT_CCSIDS, ccsidLabel } from "./ccsid-catalog.js";
@@ -79,6 +82,11 @@ function reverseTableFor(label: string): Map<number, number> {
   return table;
 }
 
+/** OEM 単バイト系（850 / 437）か。`TextDecoder` に無いので同梱の表で読む */
+function oemTableFor(ccsid: number): readonly number[] | undefined {
+  return OEM_TABLES.get(ccsid);
+}
+
 /** EBCDIC 系（同梱の表で読める）か */
 export function isEbcdicCcsid(ccsid: number): boolean {
   try {
@@ -91,7 +99,7 @@ export function isEbcdicCcsid(ccsid: number): boolean {
 
 /** この CCSID で復号できるか */
 export function canDecodeCcsid(ccsid: number): boolean {
-  return DECODER_LABELS.has(ccsid) || isEbcdicCcsid(ccsid);
+  return DECODER_LABELS.has(ccsid) || oemTableFor(ccsid) !== undefined || isEbcdicCcsid(ccsid);
 }
 
 /**
@@ -99,6 +107,8 @@ export function canDecodeCcsid(ccsid: number): boolean {
  * 復号できても符号化できない CCSID がある（Shift_JIS 系）。
  */
 export function canEncodeCcsid(ccsid: number): boolean {
+  // 単バイトなので逆引きで戻せる
+  if (oemTableFor(ccsid) !== undefined) return true;
   if (isEbcdicCcsid(ccsid)) return true;
   const label = DECODER_LABELS.get(ccsid);
   if (label === undefined) return false;
@@ -116,6 +126,9 @@ export function canEncodeCcsid(ccsid: number): boolean {
  * 利用者が選び直せるようにしている。
  */
 export function decodeCcsidText(ccsid: number, bytes: Uint8Array): CcsidText {
+  const oem = oemTableFor(ccsid);
+  // NEL の正規化はしない——ASCII 系の 0x85 は改行ではない
+  if (oem !== undefined) return { text: decodeOem(oem, bytes), newline: "lf" };
   const label = DECODER_LABELS.get(ccsid);
   if (label !== undefined) {
     const text = new TextDecoder(label, { fatal: true }).decode(bytes);
@@ -137,6 +150,8 @@ export function encodeCcsidText(
   text: string,
   opts: { newline?: LineEnding } = {}
 ): { bytes: Uint8Array; substituted: number } {
+  const oem = oemTableFor(ccsid);
+  if (oem !== undefined) return encodeWithReverse(reverseOem(oem), text);
   const label = DECODER_LABELS.get(ccsid);
   if (label === undefined) {
     const source = opts.newline === "nel" ? text.replaceAll("\n", NEL) : text;
@@ -153,7 +168,14 @@ export function encodeCcsidText(
   if (!SINGLE_BYTE_LABELS.has(label)) {
     throw new RangeError(`cannot encode to CCSID ${ccsid} (decode only)`);
   }
-  const table = reverseTableFor(label);
+  return encodeWithReverse(reverseTableFor(label), text);
+}
+
+/** 逆引き表で 1 バイトずつ戻す。マップ不能は SUB に落として数える */
+function encodeWithReverse(
+  table: ReadonlyMap<number, number>,
+  text: string
+): { bytes: Uint8Array; substituted: number } {
   const bytes = new Uint8Array(text.length);
   let substituted = 0;
   for (let i = 0; i < text.length; i++) {
