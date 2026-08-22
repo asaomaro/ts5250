@@ -57,6 +57,12 @@ export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./ident
 
 /** 全角判定（East Asian Width）。桁を数える側と描く側で表を分けない */
 export { isFullWidth, isCertainWideGlyph } from "./east-asian-width.js";
+
+/**
+ * RFC 2877 のデバイス属性（KBDTYPE/CODEPAGE/CHARSET）。**tn5250 / tn3270 / vt の 3 つが要る**
+ * が、どれの持ち物でもないのでここに置く（`device-env.ts` の冒頭に経緯）。
+ */
+export { deviceEnvFor, type DeviceEnv } from "./device-env.js";
 /** CSV 解析（取り込みの入口。web-ui と MCP が同じ実装を使う） */
 export { parseCsv, type CsvParseResult } from "./csv-parse.js";
 /** SQL の複数文分割。純テキスト処理なので UI から直接使う（表も I/O も引き込まない） */

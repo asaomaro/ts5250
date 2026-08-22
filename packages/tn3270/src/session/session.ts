@@ -1,4 +1,4 @@
-import { As400Error, childLog } from "@ts5250/base";
+import { As400Error, childLog, deviceEnvFor } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
@@ -9,7 +9,7 @@ import {
   type Model3270,
   type TerminalFamily
 } from "../telnet/terminal-type.js";
-import { deviceEnvFor } from "../telnet/device-env.js";
+
 import { Screen3270 } from "../screen/buffer.js";
 import { snapshot } from "../screen/snapshot.js";
 import type { ScreenSnapshot } from "../screen/types.js";

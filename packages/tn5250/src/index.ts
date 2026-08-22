@@ -89,9 +89,7 @@ export {
 export {
   terminalTypeFor,
   printerTerminalTypeFor,
-  isDbcsCcsid,
-  deviceEnvFor,
-  type DeviceEnv
+  isDbcsCcsid
 } from "./session/terminal-type.js";
 
 // transport / telnet（capture スクリプト・テスト・上位実装向け）

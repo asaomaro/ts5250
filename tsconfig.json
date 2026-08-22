@@ -20,6 +20,9 @@
       "path": "packages/tn3270"
     },
     {
+      "path": "packages/vt"
+    },
+    {
       "path": "packages/server"
     },
     {
