@@ -265,3 +265,74 @@ describe("入力の検証", () => {
     expect(r.isError).toBe(true);
   });
 });
+
+/**
+ * **`host_sql` から結果を返さない文を実行する**（backlog `hostserver.md`）。
+ *
+ * 以前は SELECT 専用で、更新は `host_command` の `RUNSQL` に回していた。
+ * ⚠ **これは安全の境界になっていなかった**——`host_command` から `RUNSQL` を撃てば
+ * 同じことができるので、`host_sql` を縛っても書き込みは止まらない。止まっていたのは
+ * 「構造化された影響行数が返ること」だけだった。
+ *
+ * そこで**意図を毎回述べさせる**形にした。`allowWrite: true` が無ければ、
+ * ホストへ行く前に断る——「SELECT のつもりで打った文が更新だった」を防ぐ。
+ */
+describe("host_sql の書き込み", () => {
+  const NON_QUERY = [
+    "DELETE FROM QTEMP.T",
+    "INSERT INTO QTEMP.T VALUES (1)",
+    "UPDATE QTEMP.T SET K = 1",
+    "CREATE TABLE QTEMP.T (K INT)",
+    "DROP TABLE QTEMP.T"
+  ];
+
+  it.each(NON_QUERY)("**allowWrite なしでは断る**（ホストへ行かない）: %s", async (sql) => {
+    const r = await call("host_sql", { system: "srv:noauth", sql });
+    expect(r.isError).toBe(true);
+    // **接続に行く前に断っている**（資格情報を持たない設定なので、
+    // 行っていれば CONNECT_FAILED や認証の誤りになる）
+    expect(r.content?.[0]?.text).toMatch(/^CONFIG_ERROR: /u);
+    expect(r.content?.[0]?.text).toContain("allowWrite");
+  });
+
+  it("**allowWrite: false も断る**（明示的な false を素通ししない）", async () => {
+    const r = await call("host_sql", {
+      system: "srv:noauth",
+      sql: "DELETE FROM QTEMP.T",
+      allowWrite: false
+    });
+    expect(r.content?.[0]?.text).toContain("allowWrite");
+  });
+
+  it.each([
+    ["SELECT * FROM QTEMP.T"],
+    ["-- 数える\nSELECT COUNT(*) FROM QTEMP.T"],
+    ["WITH t AS (SELECT 1 AS N FROM SYSIBM.SYSDUMMY1) SELECT N FROM t"],
+    ["(SELECT 1 FROM SYSIBM.SYSDUMMY1) UNION (SELECT 2 FROM SYSIBM.SYSDUMMY1)"]
+  ])("クエリは allowWrite 無しで通る（断るのは非クエリだけ）: %s", async (sql) => {
+    const r = await call("host_sql", { system: "srv:noauth", sql });
+    // 資格情報が無いので接続で落ちる＝**allowWrite の門は越えている**
+    expect(r.content?.[0]?.text).not.toContain("allowWrite");
+  });
+
+  it("`allowWrite` は入力スキーマに載っている（呼び出し側が知れる）", async () => {
+    const client = await connect();
+    const t = (await client.listTools()).tools.find((x) => x.name === "host_sql")!;
+    const props = Object.keys(
+      (t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    );
+    expect(props).toContain("allowWrite");
+  });
+
+  it("**出力スキーマが 2 つの形を表せる**（kind で見分ける）", async () => {
+    const client = await connect();
+    const t = (await client.listTools()).tools.find((x) => x.name === "host_sql")!;
+    const props = Object.keys(
+      (t.outputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    );
+    expect(props).toContain("kind");
+    expect(props).toContain("rows");
+    expect(props).toContain("updateCount");
+    expect(props).toContain("hasRowCount");
+  });
+});
