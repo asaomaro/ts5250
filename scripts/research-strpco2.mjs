@@ -1,5 +1,5 @@
 // 調査ラウンド 2: STRPCO のパラメーター（F4 プロンプト）と、PC Organizer 関連コマンドの実在確認。
-// 実行: node --env-file=.env scripts/research-strpco2.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-strpco2.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { Session5250, DbConnection, query } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";

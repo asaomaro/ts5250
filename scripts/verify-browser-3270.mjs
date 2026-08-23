@@ -7,7 +7,7 @@
 // **相手は選べる**（3270 を受けるホストなら何でもよい）:
 //   既定  = ローカルの TK4-（MVS 3.8j）。先に起動しておく:
 //           sh packages/tn3270/test/harness/testenv.sh up
-//   IBM i = TN3270_HOST=pub400.com TN3270_CCSID=37 node --env-file=.env scripts/verify-browser-3270.mjs
+//   IBM i = TN3270_HOST=pub400.com TN3270_CCSID=37 node --env-file=.env --env-file=.env.verify scripts/verify-browser-3270.mjs
 //
 // **メインフレームだけで確かめない**——このライブラリの主な接続先は IBM i で、
 // あちらは 5250 の世界を 3270 へ橋渡しする（画面の作りが違う）。実行: node scripts/verify-browser-3270.mjs

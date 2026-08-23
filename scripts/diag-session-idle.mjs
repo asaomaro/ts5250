@@ -14,8 +14,8 @@
 //   - pub400:   `QINACTITV = 120`（分）→ 使える
 //
 // 実行:
-//   HOSTPRE=PUB400 IDLE_MIN=30 node --env-file=.env scripts/diag-session-idle.mjs
-//   HOSTPRE=AS400  IDLE_MIN=8  node --env-file=.env scripts/diag-session-idle.mjs  # 10 分未満で
+//   HOSTPRE=PUB400 IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-session-idle.mjs
+//   HOSTPRE=AS400  IDLE_MIN=8  node --env-file=.env --env-file=.env.verify scripts/diag-session-idle.mjs  # 10 分未満で
 //
 // 副作用: 対話セッションを 1 本張り、アイドルを挟んで Enter を 1 回送るだけ。
 import { appendFileSync } from "node:fs";

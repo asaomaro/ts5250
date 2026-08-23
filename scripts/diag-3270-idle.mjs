@@ -9,8 +9,8 @@
 // ただし 5250 表示では 13 分でも 30 分でも発火しなかった（実測）。
 //
 // 実行:
-//   IDLE_MIN=30 node --env-file=.env scripts/diag-3270-idle.mjs                  # 実機
-//   HOSTPRE=PUB400 IDLE_MIN=30 node --env-file=.env scripts/diag-3270-idle.mjs   # pub400
+//   IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-3270-idle.mjs                  # 実機
+//   HOSTPRE=PUB400 IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-3270-idle.mjs   # pub400
 //
 // ⚠ **pub400 で測る意味**: 同じ pub400 で **5250 表示は 30 分を越え、VT は死ぬ**。
 // 3270 がどちらに付くかで「非 5250 が死ぬ」のか「VT だけ」なのかが割れる。

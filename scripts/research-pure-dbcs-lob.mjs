@@ -6,7 +6,7 @@
 //
 // ロケーター経由とインライン（しきい値以下）の**両方**で確かめる。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-pure-dbcs-lob.mjs
 import { DbConnection, executeStatement, query } from "@ts5250/hostserver";
 

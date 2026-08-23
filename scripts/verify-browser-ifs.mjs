@@ -10,10 +10,10 @@
 //
 // **PNG / PDF / アップロード分のフィクスチャは自分で用意して片付ける**。
 // 実機の残置に依存すると、片付けた後に「無いのでスキップ」となり検証が静かに減る（実際に起きた）。
-// ただし /home/USER/ifsdemo と hello.txt / nihongo.txt は実機に用意されている前提。
+// ただし ${PUB400_USER}/ifsdemo と hello.txt / nihongo.txt は実機に用意されている前提。
 // jsdom では 4 の「本当に表示されたか」を確かめられないためブラウザで担保する。
-// 前提: npm run build 済み。実機に /home/USER/ifsdemo。
-// 実行: node --env-file=.env scripts/verify-browser-ifs.mjs
+// 前提: npm run build 済み。実機に ${PUB400_USER}/ifsdemo。
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-ifs.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

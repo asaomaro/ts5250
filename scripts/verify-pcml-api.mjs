@@ -11,7 +11,7 @@
 // 返った値は**独立した経路**（QSYS2.USER_INFO）と突き合わせる——
 // 「呼べた」ではなく「正しく返った」を言うため。
 //
-// 実行: node --env-file=.env scripts/verify-pcml-api.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-pcml-api.mjs
 import { readFileSync } from "node:fs";
 import {
   CommandConnection,

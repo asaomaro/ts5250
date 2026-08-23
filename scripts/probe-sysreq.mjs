@@ -8,7 +8,7 @@
 // 3) は `Session5250.handleRecord` が返す。**この script は手で ack を足さない**——
 // 足すと本体が壊れていても通ってしまい、実機検証の意味が無くなる。
 //
-// 実行: node --env-file=.env scripts/probe-sysreq.mjs [SysReq に打つ文字列]
+// 実行: node --env-file=.env --env-file=.env.verify scripts/probe-sysreq.mjs [SysReq に打つ文字列]
 //   SRQ_ATTN=1     … SysReq ではなく Attn を送る（画面下部のコマンド入力欄を見る）
 //   SRQ_SYS=pub400 … 接続先システム名（既定実機）
 //   SRQ_DEV=…      … 装置名。実機は事前定義された名前しか受け付けず QPADEV000x のみ自動作成が通る。

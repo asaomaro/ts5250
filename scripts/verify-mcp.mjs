@@ -1,6 +1,6 @@
 // T12: MCP E2E（実機）— stdio MCP サーバーを起動し、MCP クライアントから
 // open_session(session)→get_screen→send_key→get_job_info→close_session を検証する。
-// 実行: node --env-file=.env scripts/verify-mcp.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-mcp.mjs
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 

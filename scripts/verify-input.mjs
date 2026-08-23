@@ -5,10 +5,10 @@
 //   ※型ごとの入力可否ルール（J は SBCS 不可 等）はフロント検証＝ web-ui の acceptsChar 単体テスト
 //     （test/field-validate.test.ts）と verify-browser-dbcs.mjs（ブラウザ）で担保。
 // DBCS を扱うためセッションは CCSID 1399。
-// 実行: node --env-file=.env scripts/verify-input.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-input.mjs
 import { Session5250 } from "@ts5250/tn5250";
 
-const LIB = process.env.PUB400_LIB ?? "MYLIB";
+const LIB = process.env.PUB400_LIB ?? "TESTLIB";
 const log = (s) => process.stderr.write(s + "\n");
 const results = [];
 const check = (name, cond, detail = "") => { results.push(!!cond); log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };

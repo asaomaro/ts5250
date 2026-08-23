@@ -1,6 +1,6 @@
 // 自動サインオン→Query Reply→メニュー のフロー trace を採取（回帰資産）。
 // 送信データ（パスワード含む NEW-ENVIRON・Query Reply）は maskTx 既定 ON で伏字化。
-// 実行: node --env-file=.env scripts/capture-autosignon.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/capture-autosignon.mjs
 import { writeFileSync, appendFileSync } from "node:fs";
 import { Session5250, TcpTransport, TraceRecorder } from "@ts5250/tn5250";
 

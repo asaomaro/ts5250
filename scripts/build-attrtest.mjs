@@ -1,16 +1,16 @@
 // 表示属性 E2E 用のテスト画面を実機（PUB400 等）に作成・コンパイルする。
-// <LIB>（既定 MYLIB）に 2 つのフィクスチャを作る:
+// <LIB>（既定 TESTLIB）に 2 つのフィクスチャを作る:
 //   - CLRTDSP/CLRTPGM: フィールド単位の COLOR/DSPATR＋DBCS（日本語）
 //   - INLTST/INLPGM  : インライン色制御（フィールドデータ中に属性バイト 0x20-0x3F を埋め込み）
 // ソース投入は IFS/FTP 不要で、コマンド行から RUNSQL INSERT（各行を単一 SQL 文字列リテラルで）。
 //   - SQL 連結 || は不可（ホストが変体文字 | を認識せず "Token | was not valid"）→ 1 行=1 リテラル。
 //   - RUNSQL は COMMIT(*NONE) 必須。CL の引用符二重化＋コマンド行 153 桁制限に収める。
 // 冪等（RMVM/ADDPFM/DROP+CREATE ALIAS/DLTF/DLTPGM）。作成後は scripts/verify-attributes.mjs で検証。
-// 実行: node --env-file=.env scripts/build-attrtest.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-attrtest.mjs
 import { Session5250 } from "@ts5250/tn5250";
 import { codecForCcsid } from "@ts5250/tn5250/codec";
 
-const LIB = process.env.PUB400_LIB ?? "MYLIB";
+const LIB = process.env.PUB400_LIB ?? "TESTLIB";
 const DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 const log = (s) => process.stderr.write(s + "\n");
 

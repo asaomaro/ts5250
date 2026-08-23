@@ -12,16 +12,16 @@
 //   - 5250 の装置も `*NONASCII` → 影響なし
 //
 // 実行:
-//   node --env-file=.env scripts/setup-vt-subsystem.mjs status    # 今の姿を見る
-//   node --env-file=.env scripts/setup-vt-subsystem.mjs apply     # 作って始める
-//   node --env-file=.env scripts/setup-vt-subsystem.mjs rollback  # 元に戻す
+//   node --env-file=.env --env-file=.env.verify scripts/setup-vt-subsystem.mjs status    # 今の姿を見る
+//   node --env-file=.env --env-file=.env.verify scripts/setup-vt-subsystem.mjs apply     # 作って始める
+//   node --env-file=.env --env-file=.env.verify scripts/setup-vt-subsystem.mjs rollback  # 元に戻す
 //
 // ⚠ **制御サブシステム QBASE のワークステーション項目に手を入れる。**
 // 足すのは `WRKSTNTYPE(*ASCII) AT(*ENTER)` の 1 行だけで、`*ALL`/`*CONS`/`5555` は触らない。
 // 戻すのは `RMVWSE` 1 つ。
 import { DbConnection, query, executeStatement } from "@ts5250/hostserver";
 
-const SBSD_LIB = process.env.VT_SBSD_LIB ?? "TESTLIB";
+const SBSD_LIB = process.env.VT_SBSD_LIB ?? process.env.AS400_LIB ?? "TESTLIB";
 const SBSD = process.env.VT_SBSD ?? "VTSBS";
 /** 英語（非 DBCS）のサインオン画面。**IBM 出荷の 2 次言語ライブラリのもの** */
 const SGNDSPF = process.env.VT_SGNDSPF ?? "QSYS2924/QDSIGNON";

@@ -6,7 +6,7 @@
 //
 // **`dataCcsid` は受け口があるだけで、実機が採用するかを測っていない**——それを測る。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-ifs-dataccsid.mjs
 //
 // 副作用: /home/USER 配下にファイルを数個作り、**最後に消す**。

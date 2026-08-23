@@ -4,7 +4,7 @@
 //   2) DBCS(全角)セルの上端が同一行の SBCS テキストと揃う（旧 bug: 全角が約 5px 上へずれる）
 // を検証する。jsdom では描画を検証できないためブラウザで担保する。
 // 前提: npm run build 済み。profiles.local.json に CCSID 1399 プロファイル。CLRTPGM は build-attrtest.mjs で作成。
-// 実行: node --env-file=.env scripts/verify-browser-render.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-render.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

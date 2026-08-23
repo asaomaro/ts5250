@@ -9,7 +9,7 @@
 //   2. 当方が応答を書き出すか（AID は 0）
 //   3. **ホストが受け付けるか**（プログラムの戻り値をデータ域から読む）
 //
-// 実行: node --env-file=.env scripts/diag-read-immediate.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/diag-read-immediate.mjs
 import { Session5250 } from "@ts5250/tn5250";
 import { IfsConnection } from "@ts5250/hostserver";
 import { codecForCcsid } from "@ts5250/ebcdic";

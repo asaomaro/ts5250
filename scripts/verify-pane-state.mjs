@@ -10,7 +10,7 @@
 //   3. その間ずっと **5250 の画面の大きさが変わらない**（高さの連鎖が切れていない）
 //   4. 一度も開いていないタブは**マウントされていない**
 //
-// 実行: node --env-file=.env scripts/verify-pane-state.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-pane-state.mjs
 //   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 実機へ表示セッションを 1 本張って画面を読むだけ。装置名は指定せずホストに採らせる。

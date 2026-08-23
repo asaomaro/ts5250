@@ -17,18 +17,34 @@
 
 ```sh
 npm run build
-node --env-file=.env scripts/<name>.mjs
+node --env-file=.env --env-file=.env.verify scripts/<name>.mjs
 ```
 
+`.env` は秘密、`.env.verify` は実機の識別子（下記）。**2 つとも渡す。**
+
 必要な環境変数: `PUB400_USER` / `PUB400_PASSWORD`（自動サインオン）。任意: `PUB400_HOST`（既定 pub400.com）、
-`PUB400_DEVNAME`、`PUB400_LIB`（既定 MYLIB）。各スクリプトは成功で終了コード 0、失敗で 1。
+`PUB400_DEVNAME`、`PUB400_LIB`（既定 `TESTLIB`）。各スクリプトは成功で終了コード 0、失敗で 1。
+
+> 🔑 **実機の固有名はリポジトリに置かない。** システム名・ライブラリ名・装置名・ユーザー名は
+> すべて環境変数から採り、コード側の既定値は `TESTLIB` / `AS400` のような**当たり障りのない
+> プレースホルダ**にしてある。書かないと既定値のまま実機に当たり、「ライブラリが見つからない」で落ちる。
+>
+> 置き場は**秘密かどうかで 2 つに分ける**（どちらも `.gitignore` 済み）。
+>
+> | ファイル | 中身 | 変数 |
+> |---|---|---|
+> | **`.env`** | 秘密。アプリ（`start.sh` / Electron）もこれだけを読む | `AS400_SECRET_KEY`（master key・自動生成）/ `AS400_HOST` / `AS400_USER` / `AS400_PASSWORD` / `PUB400_HOST` / `PUB400_USER` / `PUB400_PASSWORD` |
+> | **`.env.verify`** | 秘密でない識別子。**エージェントが読んでよい情報源** | `AS400_SYSTEM`（`profiles.local.json` 上のシステム名）/ `AS400_SESSION`（同セッション設定名）/ `AS400_LIB` / `AS400_DEVNAME` / `AS400_PRTDEV` / `AS400_IFS_DIR` / `PUB400_LIB` / `PUB400_PRTDEV` |
+>
+> ひな形は [`.env.verify.example`](../.env.verify.example)（追跡）。`.env.verify` はそこからコピーして作る。
+> **`--env-file` の複数指定は Node 20.12+** が要る（`package.json` の `engines` はアプリの要件なので `>=20` のまま）。
 
 ## 検証に使う実機
 
-| 機械 | 版数 | パスワードレベル | 備考 |
-|---|---|---|---|
-| **実機**（社内・LAN） | **IBM i 7.3**（`V7R3M0`） | **0**（DES 経路） | CCSID 5035 / SBCS は 5026 系。ライブラリ `TESTLIB` |
-| **PUB400**（インターネット・TLS） | **IBM i 7.5**（`V7R5M0`。2026-08-02 に実測） | **3**（SHA 経路。同日実測） | ライブラリ `MYLIB`。1 往復 4〜7 秒。**特殊権限なし** |
+| 機械 | 指定する変数 | 版数 | パスワードレベル | 備考 |
+|---|---|---|---|---|
+| **実機**（日本語機） | `AS400_*` | **IBM i 7.3**（`V7R3M0`） | **0**（DES 経路） | CCSID 5035 / SBCS は 5026 系。検証オブジェクトは `AS400_LIB` に置く |
+| **PUB400** | `PUB400_*` | **IBM i 7.5**（`V7R5M0`。2026-08-02 に実測） | **3**（SHA 経路。同日実測） | 1 往復 4〜7 秒。**特殊権限なし** |
 
 > ⚠ **2026-08-01 より前の記録は実機を「IBM i 7.5」と書いているが誤り。**
 > `.aidev/works/*` の research / walkthrough 等 15 件超が該当する（過去の記録なので
@@ -40,11 +56,11 @@ node --env-file=.env scripts/<name>.mjs
 
 ```sh
 # 1. サインオンサーバーの VRM
-node --env-file=.env tools/hostserver-check/dist/main.js --host "$AS400_HOST"
+node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/main.js --host "$AS400_HOST"
 #    → "server version : V7R3M0" / "password level : 0"
 
 # 2. 累積 PTF パッケージ（ID は Cyyddd<rrr> で末尾 3 桁が版数）
-node --env-file=.env tools/hostserver-check/dist/sql.js \
+node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/sql.js \
   "SELECT PTF_GROUP_NAME, PTF_GROUP_DESCRIPTION FROM QSYS2.GROUP_PTF_INFO"
 #    → SF99730 / "CUMULATIVE PTF PACKAGE C9116730" ＝ 7.3.0
 ```
@@ -56,7 +72,7 @@ node --env-file=.env tools/hostserver-check/dist/sql.js \
 
 ## 表示属性 E2E（DBCS・文字色・背景色・属性・インライン色）
 
-`MYLIB` に作った 2 組の DDS/RPGLE フィクスチャで、エミュレーターの属性デコードを検証する。
+`TESTLIB` に作った 2 組の DDS/RPGLE フィクスチャで、エミュレーターの属性デコードを検証する。
 
 - **CLRTDSP/CLRTPGM** — フィールド単位の `COLOR`/`DSPATR` ＋ DBCS(日本語) 出力欄（表示）
 - **INLTST/INLPGM** — インライン色制御（フィールドデータ中に属性バイト 0x20–0x3F を埋め込み、桁ごとに色切替）（表示）
@@ -74,15 +90,15 @@ node --env-file=.env tools/hostserver-check/dist/sql.js \
 | `verify-browser-select.mjs` | 矩形選択回帰（実ブラウザ）: カーソルが選択の始点に置かれ、マウス／キーボードで広げても動かない（ACS 相当）／ダブルクリックで語を選択（入力欄上の native 語選択を畳んで blur できるか）／カーソルが選択ハイライトより上に描かれる（jsdom は scoped CSS を解決しないため）。 |
 | `verify-browser-paste.mjs` | 複数行ペースト回帰（実ブラウザ・12 項目）: `STRSQL` の SQL 入力エリア（独立した入力欄が縦に並ぶ）へ矩形の形のまま落ちる／書いた範囲だけ上書きし後ろの既存文字を残す（`123456` へ `789` → `789456`）／行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる／帯の幅で折り返しあふれは次の帯行の同じ桁へ／挿入モードは後続を右へずらし入り切らねば「挿入する余地がありません」で何も書かない／ペースト後もカーソルが動かない。**SQL は実行しない**（Enter を押さない）ためホストは変更しない。 |
 | `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（Ctrl+Delete）は消すだけで欄を出ない／Erase Input（Ctrl+Backspace）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
-| `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（G02/C01）を掴めているかも見る。**要 `MYLIB/QDDSSRC`**。 |
+| `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（G02/C01）を掴めているかも見る。**要 `TESTLIB/QDDSSRC`**。 |
 | `verify-printer.mjs` | プリンターセッション検証（core・実機）: `PrinterSession` で待ち受け → 表示セッションから自前スプールをそのプリンター OUTQ へ回し（`CHGJOB OUTQ`＋`DSPLIBL OUTPUT(*PRINT)`）→ ライターの用紙タイプ問い合わせ（`CPA3394`）に `I` で応答 → SCS を受信して "Library List" 帳票を桁揃えで展開できることを確認。**自分のデバイスにのみスプールを回す**ためホストを汚さない。 |
-| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・実機・CCSID 1399）: `MYLIB` のライブラリテキストを日本語に変えて `DSPLIBL` を印刷 → SCS 中の SO/SI 付き全角を受信し、帳票に日本語が桁揃えで載ることを確認（検証後にテキストを戻す）。**要 MYLIB**。 |
+| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・実機・CCSID 1399）: `TESTLIB` のライブラリテキストを日本語に変えて `DSPLIBL` を印刷 → SCS 中の SO/SI 付き全角を受信し、帳票に日本語が桁揃えで載ることを確認（検証後にテキストを戻す）。**要 TESTLIB**。 |
 
 ```sh
-node --env-file=.env scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）
-node --env-file=.env scripts/verify-attributes.mjs   # 表示検証
-node --env-file=.env scripts/verify-input.mjs        # 入力検証（core）
-node --env-file=.env scripts/verify-browser-dbcs.mjs # 入力検証（ブラウザ/IME）
+node --env-file=.env --env-file=.env.verify scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）
+node --env-file=.env --env-file=.env.verify scripts/verify-attributes.mjs   # 表示検証
+node --env-file=.env --env-file=.env.verify scripts/verify-input.mjs        # 入力検証（core）
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-dbcs.mjs # 入力検証（ブラウザ/IME）
 ```
 
 補足:
@@ -103,7 +119,7 @@ node --env-file=.env scripts/verify-browser-dbcs.mjs # 入力検証（ブラウ�
 - 「接続 → 操作 → アサート → `finally` で後始末」を素直に書く。
 
 ```sh
-node --env-file=.env scripts/example-automation.mjs
+node --env-file=.env --env-file=.env.verify scripts/example-automation.mjs
 ```
 
 要点: `sendAid` にカーソル桁を載せる／`waitForScreen(until.text)` でホスト応答をサーバ側ブロック待ち（ポーリング不要）／
@@ -121,8 +137,8 @@ node --env-file=.env scripts/example-automation.mjs
 | `research-strpco.mjs` / `2` / `3` | 調査用。`traceRecords` で受信レコードを hex 採取（1）、`STRPCO`/`STRPCCMD` の F4 プロンプトと QSYS の PC 系コマンド一覧（2）、テスト CL 経由の長いコマンド（3）。 |
 
 ```sh
-node --env-file=.env scripts/build-pcotest.mjs    # 初回/再作成
-node --env-file=.env scripts/verify-pcocmd.mjs    # E2E（28 アサーション）
+node --env-file=.env --env-file=.env.verify scripts/build-pcotest.mjs    # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-pcocmd.mjs    # E2E（28 アサーション）
 ```
 
 注意:
@@ -178,13 +194,13 @@ FFW の ADJUST 指定に基づく右寄せと、Field Exit / Erase EOF / Erase I
 | `census-5250-commands.mjs` | 調査用。**実機の画面が実際に使う 5250 コマンドを数える**。読み取り専用の画面 **20 件**（`STRSQL`/`DSPMSG`/`WRKACTJOB`/`WRKSYSSTS`/`DSPJOBLOG`/`WRKSPLF`/`DSPLIBL`/`WRKOBJ`/`STRPDM`/`GO CMDIFS`/`QSH` ＋ **ROLL を狙った古い画面 9 件**＝`GO ASSIST`/`DSPPFM`/`WRKMBRPDM`/`DSPOBJD`/`WRKUSRJOB`/`GO MAIN`/`DSPSYSVAL`/`WRKCFGSTS`/`STRS36`）を巡り、各画面で PageDown/PageUp も送る。**正確さの度合いを分けて出す**——レコード先頭（正確）／実装の未知判定（決定的）／全走査（参考。WTD 内の 0x04 も拾う）。結論は `.aidev/backlog/datastream-commands.md`。⚠ **システムの定義は `profiles.local.json` と `connections.json` の両方を見る**（片方へ移した日に黙って落ちた実績あり）。 |
 
 ```sh
-node --env-file=.env scripts/build-adjtest.mjs      # 初回/再作成
-node --env-file=.env scripts/verify-browser-adjust.mjs    # E2E（15 項目）
-node --env-file=.env scripts/build-ffwtest.mjs      # 初回/再作成
-node --env-file=.env scripts/verify-browser-ffw.mjs       # E2E（18 項目）
-node --env-file=.env scripts/build-sgntest.mjs      # 初回/再作成
-node --env-file=.env scripts/verify-browser-sign.mjs      # E2E（9 項目）
-node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・約 5 分かかる）
+node --env-file=.env --env-file=.env.verify scripts/build-adjtest.mjs      # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-adjust.mjs    # E2E（15 項目）
+node --env-file=.env --env-file=.env.verify scripts/build-ffwtest.mjs      # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-ffw.mjs       # E2E（18 項目）
+node --env-file=.env --env-file=.env.verify scripts/build-sgntest.mjs      # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-sign.mjs      # E2E（9 項目）
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-idle.mjs      # E2E（11 項目・約 5 分かかる）
 ```
 
 注意:
@@ -262,8 +278,8 @@ node --env-file=.env scripts/verify-browser-idle.mjs      # E2E（11 項目・�
   ファイル用の入力とは別物なので、セレクタは `:not([webkitdirectory])` で書き分ける。
 
 ```sh
-node --env-file=.env scripts/verify-browser-ifs.mjs
-node --env-file=.env scripts/verify-ifs-limits.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-ifs-fileops.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-ifs-limits.mjs
 ```
 
 `verify-browser-ifs.mjs` は同じペインの pub400（`/home/USER/ifsdemo`）版。プレビュー（画像・PDF）と
@@ -511,7 +527,7 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 | `verify-browser-sql-exec.mjs` | 実ブラウザで SQL 画面を操作する回帰（25 項目）。**自前の `SQLEXEC*` を作って最後に消す**——`DROP` が効くこと自体が検証対象なので、残す資産（上の `SQLDEMO*`）とは名前を分けてある。 |
 
 ```sh
-node --env-file=.env scripts/build-sqldemo.mjs    # 検証用資産を作る（残る）
+node --env-file=.env --env-file=.env.verify scripts/build-sqldemo.mjs    # 検証用資産を作る（残る）
 AS400_PASSWORD=... node scripts/verify-browser-sql-exec.mjs
 ```
 
@@ -549,7 +565,7 @@ SQL の側には道がある（`ASSOCIATE RESULT SET LOCATORS`）。ただし**�
 
 | スクリプト | 内容 |
 |---|---|
-| `research-visual-explain-as400{,2,3,4,5}.mjs` | 調査（サービスの有無・引数・記録の形・`explain only` の可否・`PROCESS_DETAILED_MONITOR` の探索） |
+| `research-visual-explain{,2,3,4,5}.mjs` | 調査（サービスの有無・引数・記録の形・`explain only` の可否・`PROCESS_DETAILED_MONITOR` の探索） |
 | `research-visual-explain-pub400.mjs` | 7.5・非特権での挙動（版数と権限の差を切り分ける） |
 | `research-visual-explain-compare.mjs` | **同一 SQL** で 7.3 / 7.5 を突き合わせる（`as400` / `pub400` を引数で切替） |
 | `research-visual-explain-shapes.mjs` | 結合・集約・副問合せ・UNION で出る記録種別と階層列（`QQQDTN` / `QQQDTL`） |
@@ -557,8 +573,8 @@ SQL の側には道がある（`ASSOCIATE RESULT SET LOCATORS`）。ただし**�
 | `verify-visual-explain-e2e.mjs` | **REST 経由の統合検証**（`buildApp` を通す。`pub400` 引数あり） |
 
 ```sh
-node --env-file=.env scripts/verify-visual-explain-e2e.mjs          # 実機 (7.3・全特権)
-node --env-file=.env scripts/verify-visual-explain-e2e.mjs pub400   # PUB400 (7.5・特権なし)
+node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-e2e.mjs          # 実機 (7.3・全特権)
+node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-e2e.mjs pub400   # PUB400 (7.5・特権なし)
 ```
 
 実測で分かった落とし穴（コードのコメントにも残してある）:
@@ -827,8 +843,8 @@ API を出荷している——**動的画面管理（DSM）**。`QSYSINC/H(QSNA
 | `build-rdimm.mjs` / `diag-read-immediate.mjs` | 0x72 専用（先に作った方。`dscmd` に統合してある） |
 
 ```sh
-node --env-file=.env scripts/build-dscmd.mjs
-node --env-file=.env scripts/diag-5250-commands.mjs ROLLUP ROLLDOWN READIMM READIMMALT PRTSCR BADCMD
+node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs
+node --env-file=.env --env-file=.env.verify scripts/diag-5250-commands.mjs ROLLUP ROLLDOWN READIMM READIMMALT PRTSCR BADCMD
 # 片付け: DLTPGM TESTLIB/DSCMD ＋ /tmp/dscmd.c /tmp/dscmd.log
 ```
 

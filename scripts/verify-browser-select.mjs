@@ -12,7 +12,7 @@
 //      下に置くとハイライトに沈む）。jsdom は scoped CSS を解決しないためここで担保する。
 //
 // 前提: npm run build 済み（web-ui も）。profiles.local.json にプロファイル。
-// 実行: node --env-file=.env scripts/verify-browser-select.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-select.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

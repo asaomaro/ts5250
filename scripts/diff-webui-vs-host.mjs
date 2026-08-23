@@ -11,7 +11,7 @@
 //   3. 桁位置 — 入力欄が占める桁を **ブラウザ上の実測 px から ch に換算**して照合
 //   4. カーソル — 実測位置
 //
-// 実行: AS400_USER=.. AS400_PASSWORD=.. node --env-file=.env scripts/diff-webui-vs-host.mjs <出力先>
+// 実行: AS400_USER=.. AS400_PASSWORD=.. node --env-file=.env --env-file=.env.verify scripts/diff-webui-vs-host.mjs <出力先>
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

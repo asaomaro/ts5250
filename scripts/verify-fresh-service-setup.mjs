@@ -9,7 +9,7 @@
 //
 // までを通す。**途中で 1 か所でも詰まれば「できるようになった」とは言えない。**
 //
-// 実行: node --env-file=.env scripts/verify-fresh-service-setup.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-fresh-service-setup.mjs
 //   （`.env` は**実機の接続先を渡すため**だけに使う。サーバーは別の空ディレクトリで
 //    起動するので、master key も設定ファイルもそちらには無い）
 //

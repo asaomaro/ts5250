@@ -20,7 +20,7 @@
 // 中身を書き換えて残したい場合は名前を変えること。
 //
 // 実行:
-//   node --env-file=.env scripts/build-sqldemo.mjs
+//   node --env-file=.env --env-file=.env.verify scripts/build-sqldemo.mjs
 //   AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node scripts/build-sqldemo.mjs
 import { readFileSync } from "node:fs";
 import { DbConnection, executeStatement, queryLimited } from "@ts5250/hostserver";
@@ -46,14 +46,14 @@ function target() {
     } catch {
       continue;
     }
-    const sys = (cfg.systems ?? []).find((s) => s.name === "実機");
+    const sys = (cfg.systems ?? []).find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
     if (!sys?.signon?.passwordEnc) continue;
     const crypto = SecretCrypto.fromEnv();
     if (!crypto) break;
     return { host: sys.host, user: sys.signon.user, password: crypto.decrypt(sys.signon.passwordEnc) };
   }
   err("接続先が分かりません。AS400_HOST / AS400_USER / AS400_PASSWORD を渡すか、");
-  err("connections.json か profiles.local.json に実機を置いて --env-file=.env で実行してください。");
+  err("connections.json か profiles.local.json に実機を置いて --env-file=.env --env-file=.env.verify で実行してください。");
   process.exit(2);
 }
 

@@ -1,6 +1,6 @@
 // 実ブラウザ（web-ui）で実機へ接続し、EMPSFR のサブファイル画面を
 // 先頭ページ／最終ページでスクリーンショットする。
-// 前提: npm run build（web-ui dist）済み。実行: node --env-file=.env scripts/shot-empsfl.mjs
+// 前提: npm run build（web-ui dist）済み。実行: node --env-file=.env --env-file=.env.verify scripts/shot-empsfl.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

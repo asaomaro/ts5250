@@ -8,9 +8,9 @@
 //      （単体では `printer-residency.test.ts` が 60 件投入で押さえているだけ）
 //
 // 実行:
-//   node --env-file=.env scripts/measure-printer-residency-long.mjs            # 既定 90 分
-//   MINUTES=240 node --env-file=.env scripts/measure-printer-residency-long.mjs
-//   MINUTES=0 node --env-file=.env scripts/measure-printer-residency-long.mjs  # 上限だけ見る
+//   node --env-file=.env --env-file=.env.verify scripts/measure-printer-residency-long.mjs            # 既定 90 分
+//   MINUTES=240 node --env-file=.env --env-file=.env.verify scripts/measure-printer-residency-long.mjs
+//   MINUTES=0 node --env-file=.env --env-file=.env.verify scripts/measure-printer-residency-long.mjs  # 上限だけ見る
 //
 // ⚠ **アイドルの間は何も送らない。** 定期的に叩くと「使い続けていれば保つ」しか分からない。
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、自分のジョブのスプールを流す。

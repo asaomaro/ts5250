@@ -3,7 +3,7 @@
 // 「ブラウザを閉じても帳票が届き、PDF が保存される」——これが成立するかを見る。
 // 単体テストは偽の接続なので、**実機のスプールが本当に PDF になるところ**は測れない。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/verify-printer-residency.mjs
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、自分のジョブのスプールを 1 件流す。

@@ -449,8 +449,8 @@ C コンパイラが無いとテスト実行ファイルをリンクできない
 
 ```sh
 python3 crates/hllapi/tools/check-dll.py crates/hllapi/target/*/release/*.dll
-node --env-file=.env scripts/verify-hllapi.mjs
-node --env-file=.env scripts/verify-hllapi-browser.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-hllapi.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-hllapi-browser.mjs
 ```
 
 `ctypes` を挟むのは、**C ABI をそのまま叩く**ため。TypeScript から HTTP を叩くだけでは

@@ -2,7 +2,7 @@
 //
 // 実機は交渉まで進むのに画面が 1 バイトも来ない。**読むだけ**——構成は何も変えない。
 //
-// 実行: node --env-file=.env scripts/diag-vt.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/diag-vt.mjs
 //       PROBE=PUB400 で比較対象（動く方）を見る
 //
 // ## 分かっていること（2026-08-22 実測）

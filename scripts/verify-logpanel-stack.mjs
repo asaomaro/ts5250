@@ -11,7 +11,7 @@
 // 板をログパネルの上に重ねて置き、`elementFromPoint` がどちらを返すかを見る。
 // 板が返ればログパネルが負けている＝直っていない。
 //
-// 実行: node --env-file=.env scripts/verify-logpanel-stack.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-logpanel-stack.mjs
 //   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 実機へ表示セッションを 1 本張って画面を読むだけ。装置名は指定せずホストに採らせる。

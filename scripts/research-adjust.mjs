@@ -9,12 +9,12 @@
 // FFW の解釈は core を通さず**この場で独立に**パースする。core 側の解釈が正しいかまで
 // 同時に確かめたいので、検証対象の実装に依存させない。
 //
-// 実行: node --env-file=.env scripts/research-adjust.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-adjust.mjs
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const log = (s) => process.stdout.write(s + "\n");
 const err = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

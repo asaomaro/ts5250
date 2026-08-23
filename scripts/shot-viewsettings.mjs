@@ -1,6 +1,6 @@
 // 実ブラウザ(web-ui)で実機へ接続し、画面設定の「配色(端末色/意味色)」と
 // 「画面の質感(CRT/フラット)」の before/after を撮る。
-// 前提: npm run build 済み。実行: node --env-file=.env scripts/shot-viewsettings.mjs
+// 前提: npm run build 済み。実行: node --env-file=.env --env-file=.env.verify scripts/shot-viewsettings.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

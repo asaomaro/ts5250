@@ -2,7 +2,7 @@
 // 実機: TLS(992) 接続・DBCS 端末タイプ(IBM-5555-G02)受理・27x132 端末(IBM-3477-FC)受理。
 // 画面サイズが実際に効くか（SEU が 132 桁で来るか）は verify-screen-size.mjs が見る。
 // リプレイ: 合成 DBCS fixture で日本語デコード・桁維持。
-// 実行: node --env-file=.env scripts/verify-dbcs-tls.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-dbcs-tls.mjs
 import { readFileSync } from "node:fs";
 import { Session5250, ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 

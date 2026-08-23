@@ -14,7 +14,7 @@
 // この script は C ソースを IFS に置いて `CRTBNDC ... SRCSTMF(...)` でコンパイルするだけ。
 // **走らせるのは `diag-read-immediate.mjs`**（5250 セッションから CALL してトレースを見る）。
 //
-// 実行: node --env-file=.env scripts/build-rdimm.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-rdimm.mjs
 import { readFileSync } from "node:fs";
 import { CommandConnection, IfsConnection } from "@ts5250/hostserver";
 

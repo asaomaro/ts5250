@@ -6,7 +6,7 @@
 // ⚠ **ホストによっては画面が来ない**（実機。`scripts/README.md` の VT 節）。
 // ⚠ **サインオンの失敗は QMAXSIGN に数えられる**（pub400=5 / 実機=3）。試行を重ねない。
 //
-// 実行: node --env-file=.env scripts/verify-browser-vt-ibmi.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-vt-ibmi.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";

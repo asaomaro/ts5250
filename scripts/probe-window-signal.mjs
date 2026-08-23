@@ -1,6 +1,6 @@
 // 調査: 「窓が出ている」ことを罫線文字以外から判定できるか。
 // F1 ヘルプ前後のデータストリームを実機から採り、CLEAR の有無と書き込み範囲（SBA）を見る。
-// 実行: node --env-file=.env scripts/probe-window-signal.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/probe-window-signal.mjs
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";

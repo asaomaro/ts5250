@@ -1,13 +1,13 @@
 // 実機の TESTLIB に「複雑な表示機能テスト画面」を作成・コンパイル・実行する。
 //   FEATDSPF/FEATPGM: EDTCDE / EDTWRD / 文字色(COLOR) / 背景色(COLOR+DSPATR(RI)) /
 //   DSPATR 各種 / CNTFLD(継続入力欄の行あふれ) / DBCS 分断 を 3 画面で網羅。
-// 実行: node --env-file=.env scripts/build-feat.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-feat.mjs
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { codecForCcsid } from "@ts5250/tn5250/codec";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
+const LIB = process.env.AS400_LIB ?? "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join("").replace(/\s+$/, ""));

@@ -1,6 +1,6 @@
 // T2: WebSocket E2E（実機）— サーバーを起動し、WS クライアントで /ws に接続して
 // open(session)→opened(メニュー)→key(F1)→screen→jobinfo を実機 PUB400 で検証する。
-// 実行: node --env-file=.env scripts/verify-ws.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-ws.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";

@@ -12,7 +12,7 @@
 // カラーの 2 つ（24x80=G02 / 27x132=C01）を選んだ経緯があるため、色が落ちていないことも併せて見る
 // （B01・G01 を掴むと青/桃/黄が落ちて 4 色になる）。
 //
-// 実行: node --env-file=.env scripts/verify-screen-size.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-screen-size.mjs
 import { Session5250 } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");

@@ -1,6 +1,6 @@
 // TESTLIB の各プログラムがどの表示装置ファイル(DSPF)を使うかを DSPPGMREF で確かめる。
 // 名前の規約（XXXPGM ↔ XXXDSPF）に頼らず、実機の参照情報で決める。
-// 実行: node --env-file=.env scripts/probe-testlib-refs.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/probe-testlib-refs.mjs
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 

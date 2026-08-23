@@ -15,8 +15,8 @@
 //   - そのうえでスプールを 1 件流し、届くか／OUTQ に積まれたままかを見る
 //
 // 実行:
-//   node --env-file=.env scripts/diag-printer-idle-cause.mjs            # 既定 16 分アイドル
-//   IDLE_MIN=30 node --env-file=.env scripts/diag-printer-idle-cause.mjs
+//   node --env-file=.env --env-file=.env.verify scripts/diag-printer-idle-cause.mjs            # 既定 16 分アイドル
+//   IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-printer-idle-cause.mjs
 //
 // 副作用: 既存の仮想プリンター装置を借りる（既定 PRT_TEST）。スプールは 2 件流し、後始末する。
 import { appendFileSync } from "node:fs";

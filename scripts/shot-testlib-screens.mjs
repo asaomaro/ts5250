@@ -4,7 +4,7 @@
 // 対象は DSPPGMREF で「表示装置ファイルを参照する」と分かったものだけ
 // （scripts/probe-testlib-refs.mjs の結果）。
 //
-// 実行: node --env-file=.env scripts/shot-testlib-screens.mjs <出力ディレクトリ>
+// 実行: node --env-file=.env --env-file=.env.verify scripts/shot-testlib-screens.mjs <出力ディレクトリ>
 import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -12,7 +12,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const OUTDIR = process.argv[2] ?? "testlib-screens";
 mkdirSync(OUTDIR, { recursive: true });
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 /**
  * AS400_CCSID を与えると host 直指定＋その CCSID で開く（比較用）。
  * 未指定なら connections.json の保存値（＝実機に合わせた 5026）を使う。

@@ -1,5 +1,5 @@
 // 実ブラウザ(web-ui)で実機へ接続し、FEATPGM の 3 画面を SO/SI 表示 ON で撮る。
-// 前提: npm run build 済み。実行: node --env-file=.env scripts/shot-feat.mjs
+// 前提: npm run build 済み。実行: node --env-file=.env --env-file=.env.verify scripts/shot-feat.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

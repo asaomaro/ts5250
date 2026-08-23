@@ -2,7 +2,7 @@
 //
 // **ユニットテストで埋まらない穴はここ**——ws-handler が `sysReqText` を core まで渡せているか、
 // Cancel Invite の ack がサーバー経由でも成立するかは、実際に繋がないと分からない。
-// 実行: node --env-file=.env scripts/verify-ws-sysreq.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-ws-sysreq.mjs
 //   SRQ_DEV=QPADEV000x（既定 QPADEV0002）
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

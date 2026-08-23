@@ -5,6 +5,7 @@ dist/
 # flaky テスト追跡の失敗ログ（scripts/flake-hunt.sh）
 .flake-logs/
 .env
+.env.verify
 *.log
 .aidev/current
 *.local.json

@@ -6,7 +6,7 @@
 //
 // 併せて、**構造体と配列がどう書き出されるか**を見る（うちに一番足りていない所）。
 //
-// 実行: node --env-file=.env scripts/research-pcml.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-pcml.mjs
 //
 // 副作用: TESTLIB に PCMLTST を作り、IFS に .pcml を残す（後から消せる）。
 import { CommandConnection, DbConnection, IfsConnection, executeStatement } from "@ts5250/hostserver";

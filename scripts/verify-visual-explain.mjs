@@ -1,8 +1,8 @@
 /**
  * 実行計画の採取を実機で確かめる（開発中の疎通確認）。
  *
- *   node --env-file=.env scripts/verify-visual-explain.mjs           # 実機 (7.3)
- *   node --env-file=.env scripts/verify-visual-explain.mjs pub400    # PUB400 (7.5)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain.mjs           # 実機 (7.3)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain.mjs pub400    # PUB400 (7.5)
  *
  * 確かめること:
  *   - `run` / `no-rows` の両モードで計画が採れる

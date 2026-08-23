@@ -9,7 +9,7 @@
 // ホームディレクトリを **QSYS2.USER_INFO と突き合わせる**——
 // 飛び先も長さも CCSID も正しくないと一致しない。
 //
-// 実行: node --env-file=.env scripts/verify-pcml-dynamic.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-pcml-dynamic.mjs
 import { readFileSync } from "node:fs";
 import {
   CommandConnection,

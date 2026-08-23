@@ -1,8 +1,8 @@
 /**
  * 実行計画の MCP ツールを実機で確かめる。
  *
- *   node --env-file=.env scripts/verify-visual-explain-mcp.mjs           # 実機 (7.3・全特権)
- *   node --env-file=.env scripts/verify-visual-explain-mcp.mjs pub400    # PUB400 (7.5・特権なし)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-mcp.mjs           # 実機 (7.3・全特権)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-mcp.mjs pub400    # PUB400 (7.5・特権なし)
  *
  * 見るもの:
  *   - `host_sql_explain` が計画を構造化データで返す

@@ -11,7 +11,7 @@
 // 直す前は 2 と 3 が右へ 8px・下へ 7px ずれていた（`.grid` の padding を ACS 相当へ
 // 詰めたのに、重ねる要素の `margin: 8px 0 0 10px` が 12 か所残っていた）。
 //
-// 実行: node --env-file=.env scripts/verify-cursor-align.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-cursor-align.mjs
 //   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 実機へ表示セッションを 1 本張って**画面を読むだけ**。装置名は指定せず

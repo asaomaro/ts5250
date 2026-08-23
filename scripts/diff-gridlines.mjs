@@ -2,7 +2,7 @@
 // **web-ui** と **renderScreenHtml** の両方に描かせて 1 本ずつ実測比較する。
 // あわせてホストが送ってきた生の値（minorType / value1 / value2 / lineStyle / color）も出す。
 //
-// 実行: AS400_USER=.. AS400_PASSWORD=.. node --env-file=.env scripts/diff-gridlines.mjs <出力先>
+// 実行: AS400_USER=.. AS400_PASSWORD=.. node --env-file=.env --env-file=.env.verify scripts/diff-gridlines.mjs <出力先>
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

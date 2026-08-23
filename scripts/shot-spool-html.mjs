@@ -1,7 +1,7 @@
 // 実機で実際にスプールを1件作り、MCP の host_get_spool(format=html) で HTML に落とす。
 // pull 型（ホストサーバー経由）なのでプリンターセッションもライターも要らない。
 //
-// 実行: node --env-file=.env scripts/shot-spool-html.mjs <出力先.html>
+// 実行: node --env-file=.env --env-file=.env.verify scripts/shot-spool-html.mjs <出力先.html>
 import { writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";

@@ -9,7 +9,7 @@
 // 検証は画面の一覧だけに頼らず、**ホストの実体**（IFS API の list / read）でも突き合わせる。
 //
 // 前提: npm run build && npm run build -w @ts5250/web-ui。`connections.json` に実機。
-// 実行: node --env-file=.env scripts/verify-browser-ifs.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-ifs-fileops.mjs
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { serve } from "@hono/node-server";

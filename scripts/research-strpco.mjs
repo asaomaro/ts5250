@@ -2,7 +2,7 @@
 // **生バイトで捕捉**する調査スクリプト（.aidev/works/20260728-strpco-strpccmd/research.md）。
 //
 // 推測で実装しないための工程（AGENTS.md「既存プロトコル実装の移植」）。
-// 実行: node --env-file=.env scripts/research-strpco.mjs [出力先]
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-strpco.mjs [出力先]
 import { readFileSync, writeFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";

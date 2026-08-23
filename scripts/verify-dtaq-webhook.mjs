@@ -7,7 +7,7 @@
 //      受け手の障害がホスト側の業務の障害になる
 //   2. 諦めた分が**未達として残る**（監視は消費するので、黙って消えたら気づけない）
 //
-// 実行: node --env-file=.env scripts/verify-dtaq-webhook.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-dtaq-webhook.mjs
 //   （事前に `npm run build` が要る）
 //
 // 副作用: `TESTLIB/DTQHOOK` を**自動で作って消す**。受け口はこのプロセス内に立てる。

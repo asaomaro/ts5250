@@ -8,7 +8,7 @@
 // 実機の fixture（`test/fixtures/window-stack/`）は**テキストと lastWrite しか持たない**ので、
 // この問いは既存の資産では答えられない。だから測りに行く。**読むだけ**。
 //
-// 実行: node --env-file=.env scripts/diag-window-fields.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/diag-window-fields.mjs
 import { Session5250 } from "@ts5250/tn5250";
 
 const host = process.env.AS400_HOST;

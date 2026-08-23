@@ -1,5 +1,5 @@
 // research: 拡張5250（TESTLIB/EXTPGM）の gui 実データと、F キー凡例検出の共存を実機で確認する。
-// 実行: node --env-file=.env scripts/research-ext-gui.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-ext-gui.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

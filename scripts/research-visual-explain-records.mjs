@@ -1,8 +1,8 @@
 /**
  * DB モニターの**記録種別ごとに、どの列が埋まるか**を実測する。
  *
- *   node --env-file=.env scripts/research-visual-explain-records.mjs           # 実機 (7.3)
- *   node --env-file=.env scripts/research-visual-explain-records.mjs pub400    # PUB400 (7.5)
+ *   node --env-file=.env --env-file=.env.verify scripts/research-visual-explain-records.mjs           # 実機 (7.3)
+ *   node --env-file=.env --env-file=.env.verify scripts/research-visual-explain-records.mjs pub400    # PUB400 (7.5)
  *
  * `plan-model.ts` は**中身を実測した種別にしか名前を与えない**方針なので、
  * 名前を増やすにはここで根拠を採る必要がある。

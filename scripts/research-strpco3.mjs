@@ -1,12 +1,12 @@
 // 調査ラウンド 3: テスト用 CL（TESTLIB/PCOTEST・PCOLONG）を実行し、
 //   (1) 200 文字コマンドがデータストリーム上でどう並ぶか
 //   (2) エミュレーターが実行キーを返したあと CL が STRPCCMD の**先へ進む**か（データ域 PCOMARK）
-// を実測する。実行: node --env-file=.env scripts/research-strpco3.mjs [出力先]
+// を実測する。実行: node --env-file=.env --env-file=.env.verify scripts/research-strpco3.mjs [出力先]
 import { readFileSync, writeFileSync } from "node:fs";
 import { Session5250, CommandConnection } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const OUT = process.argv[2] ?? "/tmp/strpco-cap3.txt";
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

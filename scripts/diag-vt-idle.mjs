@@ -12,8 +12,8 @@
 // （ホストが ECHO を握っているので、送った文字は画面に現れる）。
 //
 // 実行:
-//   IDLE_MIN=30 node --env-file=.env scripts/diag-vt-idle.mjs            # サインオン画面のまま
-//   SIGNON=1 IDLE_MIN=30 node --env-file=.env scripts/diag-vt-idle.mjs   # サインオンしてから
+//   IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-vt-idle.mjs            # サインオン画面のまま
+//   SIGNON=1 IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-vt-idle.mjs   # サインオンしてから
 //
 // ⚠ **この 2 つは別のことを測る。** サインオン画面のまま放置した接続は、
 // ホストが「使われていない装置」として片づけているかもしれない

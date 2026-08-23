@@ -6,7 +6,7 @@
 // とくに `answerMessage` は応答文字列だけ NUL 終端で送っており、
 // MSGREPLY が固定長を要求するなら隣の値を巻き込む恐れがある——それを確かめる。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-msgw.mjs
 //
 // 副作用: 仮想プリンター装置（毎回別名）と自分のジョブのスプールを 1 件作る。

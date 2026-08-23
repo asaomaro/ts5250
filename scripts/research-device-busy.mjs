@@ -6,7 +6,7 @@
 // が出る。**こちらの解析器が壊れているように読める**が、本当の理由（装置が使用中）は
 // どこにも出ない。何が届いているのかを生バイトで見る。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-device-busy.mjs
 //
 // 副作用: **自分の設定にある装置名**（既定 DEV1）で 2 本開くだけ。装置は作らない・消さない。

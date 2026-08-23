@@ -5,7 +5,7 @@
 // 単発接続（呼び出しごとに開いて閉じる）のこのプロジェクトでは、
 // 後者が真なら明示的な解放は要らない——それを判断するための実測。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-lob-free.mjs
 //
 // 表は `research-lob-threshold.mjs` が作る TESTLIB.LOBTHR を使う（無ければ作る）。

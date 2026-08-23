@@ -9,7 +9,7 @@
 //   F2. 純 DBCS の 64KB 超で、往復の単位と中身が UTF-16 と同じか
 //   F3. BLOB（CCSID 0）の 64KB 超で、**バイト列のまま**返るか（文字列に化けないか）
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-lob-big-dbcs-blob.mjs
 //
 // 副作用: 自分のライブラリーに表を 1 つ作り、**finally で必ず消す**。

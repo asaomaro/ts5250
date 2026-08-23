@@ -5,7 +5,7 @@
 //   2. `自動で待ち受け開始 ☐` の定義を開いたとき、画面が**停止中**に見えるか
 //   3. 開始ボタンで**本当にホストへ繋がる**か（装置を掴めるか）
 //
-// 実行: node --env-file=.env scripts/verify-service-ui.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-service-ui.mjs
 //   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、スプールを 1 件も流さない。

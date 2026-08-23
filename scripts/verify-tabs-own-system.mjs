@@ -8,7 +8,7 @@
 //   4. システムを選び直しても**タブが 1 枚も消えない**（以前は絞り込みで隠れていた）
 //   5. **ヘッダーが常に見ているタブのシステムを映す**（タブを選び替えただけで変わる）
 //
-// 実行: node --env-file=.env scripts/verify-tabs-own-system.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-tabs-own-system.mjs
 //   （事前に `npm run build` と `npm run build -w @ts5250/web-ui` が要る）
 //
 // 副作用: **SQL を 2 回投げるだけ**（`SYSIBM.SYSDUMMY1` の SELECT）。

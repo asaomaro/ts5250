@@ -8,8 +8,8 @@
 //   7) 削除 → 削除後の属性取得が NOT_FOUND（日本語文言）
 //
 // **フィクスチャ（キュー）は E2E が自分で作って片付ける**（実機の残置に依存しない）。
-// 前提: npm run build 済み。実機の MYLIB ライブラリに書ける資格情報（profiles.local.json / .env）。
-// 実行: node --env-file=.env scripts/verify-browser-dtaq.mjs
+// 前提: npm run build 済み。実機の TESTLIB ライブラリに書ける資格情報（profiles.local.json / .env）。
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-dtaq.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

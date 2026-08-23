@@ -1,7 +1,7 @@
 /**
- * **メッセージ待ち行列の実機検証**（実機）。
+ * **メッセージ待ち行列の実機検証**。
  *
- *   node --env-file=.env scripts/verify-message-queue.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-message-queue.mjs
  *
  * **`QSYSOPR` は触らない。** 共有の待ち行列なので、専用のものを作って使い、最後に消す。
  * 照会 → 一覧 → 応答 → 削除の往復を通す。

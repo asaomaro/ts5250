@@ -1,4 +1,4 @@
-// PC コマンド（STRPCO / STRPCCMD）の実機検証（実機）。
+// PC コマンド（STRPCO / STRPCCMD）の実機検証。
 //
 // ホスト側のテスト CL `TESTLIB/PCOTEST`（`scripts/build-pcotest.mjs` で作成）が
 // データ域 PCOCMD / PCOWAIT を読んで STRPCO → STRPCCMD を実行する。
@@ -6,13 +6,13 @@
 // 実際に繋いで、**ファイルが作られたか**で判定する
 // ——ホストは実行の有無を検証しないので「ホストが進んだ」だけでは実行できた証拠にならない（research D5）。
 //
-// 実行: node --env-file=.env scripts/verify-pcocmd.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-pcocmd.mjs
 import { readFileSync, existsSync, rmSync } from "node:fs";
 import { Session5250, CommandConnection } from "@ts5250/tn5250";
 import { runPcCommand } from "../packages/server/dist/pc-command.js";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join("").replace(/\s+$/, ""));

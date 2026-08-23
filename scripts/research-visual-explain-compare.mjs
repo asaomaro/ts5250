@@ -1,8 +1,8 @@
 /**
  * Visual Explain 追加調査: 2 機を同じ手順で測って突き合わせる。
  *
- *   node --env-file=.env scripts/research-visual-explain-compare.mjs as400
- *   node --env-file=.env scripts/research-visual-explain-compare.mjs pub400
+ *   node --env-file=.env --env-file=.env.verify scripts/research-visual-explain-compare.mjs as400
+ *   node --env-file=.env --env-file=.env.verify scripts/research-visual-explain-compare.mjs pub400
  *
  * 調べること:
  *   (1) PLAN_IDENTIFIER の在りか（ダンプ表のどの列か）と、DUMP_PLAN_CACHE 単一取得の成否

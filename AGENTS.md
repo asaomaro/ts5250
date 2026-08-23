@@ -289,6 +289,33 @@ REST は**経路を階層で分け**（`/api/systems` / `/api/sessions-config`�
 
 ---
 
+## 実機の識別子（`.env.verify`）
+
+**リポジトリに利用者の環境の固有名詞を書かない。** システム名・ライブラリ名・装置名・IFS パス・
+ユーザー名は、コード側では**当たり障りのない既定**（`TESTLIB` / `AS400` / `PRT_TEST` / `USER`）に
+しておき、実際の値は環境変数から採る。
+
+置き場は**秘密かどうかで 2 つに分ける**。
+
+| ファイル | 中身 | 読んでよいか |
+|---|---|---|
+| `.env` | **秘密**——`AS400_SECRET_KEY`（master key）・`AS400_PASSWORD` / `PUB400_PASSWORD`・接続先ホスト・ユーザー名 | **読まない。** `--env-file` で渡すだけ。値を出力・転記しない |
+| `.env.verify` | **秘密でない識別子**——`AS400_SYSTEM` / `AS400_SESSION` / `AS400_LIB` / `AS400_DEVNAME` / `AS400_PRTDEV` / `AS400_IFS_DIR` / `PUB400_LIB` / `PUB400_PRTDEV` | **読んでよい。** 実機を触る作業の情報源はここ |
+
+- **どちらも `.gitignore` 済み**なので `git ls-files` / `git grep` には出ない。
+  **実機に関わる作業を頼まれたら、まず `.env.verify` を読むこと**——リポジトリを探しても答えは無い。
+- キーの一覧と用途は `.env.verify.example`（追跡）にある。値が無ければ既定のまま実機に当たり、
+  「ライブラリが見つからない」等で落ちる。
+- 検証スクリプトの実行は **2 ファイル渡し**:
+  `node --env-file=.env --env-file=.env.verify scripts/<name>.mjs`
+  （`--env-file` の複数指定は Node 20.12+。`package.json` の `engines` はアプリの要件なので `>=20` のまま）
+- **アプリ本体（`start.sh` / `start.bat` / Electron）が読むのは `.env` だけ。** `.env.verify` を
+  アプリに渡さない——サーバーが使わない変数を実行時環境に混ぜない。
+- 実機の特性（版数・CCSID・パスワードレベル・注意点）は `scripts/README.md`「検証に使う実機」と
+  `.env.verify` のコメントにある。`--env-file` は `#` コメントを無視するので、両立できる。
+
+---
+
 ## セキュリティ
 
 - **秘密情報はコミットしない**（`.gitignore` 済み）。パスワードは環境変数（`passwordEnv`）で渡す。

@@ -21,7 +21,7 @@
 // **どの段でも出なければ、それ自体が結論**——「ホスト側からは誘発できない」を
 // 推測ではなく測定で言えるようにする。
 //
-// 実行: node --env-file=.env scripts/research-pco-end-marker.mjs [出力先]
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-pco-end-marker.mjs [出力先]
 import { readFileSync, writeFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";

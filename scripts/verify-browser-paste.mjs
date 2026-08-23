@@ -13,7 +13,7 @@
 // STRSQL では Enter を押さない（＝SQL を実行しない）。F3 で抜けるだけなのでホストは変更しない。
 //
 // 前提: npm run build 済み（web-ui も）。profiles.local.json にプロファイル。
-// 実行: node --env-file=.env scripts/verify-browser-paste.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-paste.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

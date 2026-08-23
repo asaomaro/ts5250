@@ -1,7 +1,7 @@
 /**
- * **プログラム呼び出しの実機検証**（実機）。
+ * **プログラム呼び出しの実機検証**。
  *
- *   node --env-file=.env scripts/verify-program-call.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-program-call.mjs
  *
  * ## なぜ `QCMDEXC` から通すのか
  *

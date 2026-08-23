@@ -3,7 +3,7 @@
 // カーソル移動・入力順・ペーストを検証する。実アプリ構成（EmulatorPane 込み）を通すのが要点。
 //   ※ ScreenGrid 単体のハーネスでは EmulatorPane のフォーカス調停を通らず不具合を見逃す。
 // 前提: npm run build && npm run build -w @ts5250/web-ui 済み。profiles.local.json に CCSID 1399 のプロファイル。
-// 実行: node --env-file=.env scripts/verify-browser-cmdline.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-cmdline.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

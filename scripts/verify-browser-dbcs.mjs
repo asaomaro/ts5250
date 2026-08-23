@@ -5,7 +5,7 @@
 //   ※ DBCS は CCSID 1399 セッションが必須（既定 pub400=CCSID 37 では不可）。
 //   ※ 事前に build-attrtest.mjs で INPTST/INPPGM を作成しておくこと。
 // 前提: npm run build 済み。profiles.local.json に CCSID 1399 のプロファイルがあること。
-// 実行: node --env-file=.env scripts/verify-browser-dbcs.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-dbcs.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import {

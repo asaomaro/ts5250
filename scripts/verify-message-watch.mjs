@@ -1,7 +1,7 @@
 /**
- * **メッセージ待ち行列の待ち受けの実機検証**（実機）。
+ * **メッセージ待ち行列の待ち受けの実機検証**。
  *
- *   node --env-file=.env scripts/verify-message-watch.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-message-watch.mjs
  *
  * 確かめること:
  *

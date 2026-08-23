@@ -1,5 +1,5 @@
 // 修正後の connections.json で実機へ再接続し、TESTLIB の中身を一覧する。
-// 実行: node --env-file=.env scripts/list-testlib.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/list-testlib.mjs
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 

@@ -6,8 +6,8 @@
 // 両立するか**は実機でしか分からないので、ここで測る。
 //
 // 実行:
-//   node --env-file=.env scripts/research-lob-threshold.mjs            # 既定 AS400（実機）
-//   HOSTPRE=PUB400 AS400_LIB=QGPL node --env-file=.env scripts/research-lob-threshold.mjs
+//   node --env-file=.env --env-file=.env.verify scripts/research-lob-threshold.mjs            # 既定 AS400（実機）
+//   HOSTPRE=PUB400 AS400_LIB=QGPL node --env-file=.env --env-file=.env.verify scripts/research-lob-threshold.mjs
 //
 // **往復が支配的な相手ほどしきい値が効く**ので、LAN（実機）だけでなく
 // インターネット越し（pub400）でも測れるようにしてある。

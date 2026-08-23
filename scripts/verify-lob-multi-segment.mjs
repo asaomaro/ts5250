@@ -7,7 +7,7 @@
 //
 // 事実の採取は `research-lob-multi-segment.mjs`。こちらは**直った後の値**を検査する。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/verify-lob-multi-segment.mjs
 //
 // 副作用: 自分のライブラリーに表を 1 つ作り、**finally で必ず消す**。

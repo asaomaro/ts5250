@@ -1,5 +1,5 @@
 // T13: RFC 4777 NEW-ENVIRON 自動サインオン（ゼロシード）の実機検証（decisions.md D3）。
-// 実行: node --env-file=.env scripts/verify-autosignon.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-autosignon.mjs
 import { Session5250 } from "@ts5250/tn5250";
 
 const user = process.env.PUB400_USER;

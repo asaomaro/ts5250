@@ -1,8 +1,8 @@
 /**
  * 実行計画の統合検証（REST 経由・実機）。
  *
- *   node --env-file=.env scripts/verify-visual-explain-e2e.mjs            # 実機 (7.3・全特権)
- *   node --env-file=.env scripts/verify-visual-explain-e2e.mjs pub400     # PUB400 (7.5・特権なし)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-e2e.mjs            # 実機 (7.3・全特権)
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-visual-explain-e2e.mjs pub400     # PUB400 (7.5・特権なし)
  *
  * `20260802-sql-visual-explain` の受け入れ基準を、**サーバーの REST を通して**確かめる
  * （`verify-visual-explain.mjs` は hostserver の関数を直接叩く疎通確認）。

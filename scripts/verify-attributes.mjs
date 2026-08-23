@@ -2,11 +2,11 @@
 //   - CLRTPGM: 文字色 7 種・反転(背景)・下線・高輝度・桁区切り・点滅・DBCS(日本語)
 //   - INLPGM : インライン色制御（フィールドデータ中に埋め込んだ属性バイトで桁ごとに色切替）
 // DBCS を出すためセッションは CCSID 1399。
-// 実行: node --env-file=.env scripts/verify-attributes.mjs
-//   前提: <LIB>（既定 MYLIB）に CLRTPGM/INLPGM が存在すること（無ければ build-attrtest.mjs を先に）。
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-attributes.mjs
+//   前提: <LIB>（既定 TESTLIB）に CLRTPGM/INLPGM が存在すること（無ければ build-attrtest.mjs を先に）。
 import { Session5250 } from "@ts5250/tn5250";
 
-const LIB = process.env.PUB400_LIB ?? "MYLIB";
+const LIB = process.env.PUB400_LIB ?? "TESTLIB";
 const log = (s) => process.stderr.write(s + "\n");
 const results = [];
 const check = (name, cond, detail = "") => { results.push(!!cond); log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };

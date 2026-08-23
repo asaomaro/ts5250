@@ -1,7 +1,7 @@
 /**
  * **E2E: DLL から実機のエミュレータ画面を操作し、ブラウザで結果を見る。**
  *
- *   node --env-file=.env scripts/verify-hllapi-browser.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-hllapi-browser.mjs
  *
  * `verify-hllapi.mjs` は C ABI とサーバーの間だけを見る。こちらは**端から端まで**——
  * 共有ライブラリ（VBA が呼ぶのと同じ実体）→ HTTP → セッション → **実物のブラウザ**。

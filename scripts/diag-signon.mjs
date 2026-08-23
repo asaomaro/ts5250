@@ -1,7 +1,7 @@
 // 手動 field-signon の送出バイト診断。
 //   自動サインオンなしで PUB400 に接続 → signon 画面のフィールド構造を出力 →
 //   user/password をセットして Enter 時に送出する Read 応答レコードを採取・16 進ダンプする。
-// 実行: node --env-file=.env scripts/diag-signon.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/diag-signon.mjs
 import { Session5250, TcpTransport } from "@ts5250/tn5250";
 
 const log = (s) => process.stderr.write(s + "\n");

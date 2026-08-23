@@ -1,7 +1,7 @@
 // 実機にサインオンし、認証後の画面を MCP 経由で HTML に落とす。
 //
 // 資格情報はこのファイルに書かない。実行時に環境変数で渡す:
-//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env scripts/shot-signedon.mjs out.html
+//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify scripts/shot-signedon.mjs out.html
 //
 // 装置名はホスト採番に任せる（固定装置名を使い回すと前ジョブの回復画面に当たる）。
 import { writeFileSync } from "node:fs";

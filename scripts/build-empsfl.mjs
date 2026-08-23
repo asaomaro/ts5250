@@ -3,13 +3,13 @@
 //   - EMPDSPF: サブファイル表示ファイル（SFL01 / SFLCTL CTL01, SFLSIZ/SFLPAG/SFLDSP/SFLEND(*MORE)）
 //   - EMPSFR : EMPMST を読み SFL01 をロードして EXFMT CTL01 する RPGLE
 // ソース投入は IFS/FTP 不要。コマンド行から RUNSQL INSERT（1 行=1 リテラル、COMMIT(*NONE)）。
-// 実行: node --env-file=.env scripts/build-empsfl.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-empsfl.mjs
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { codecForCcsid } from "@ts5250/tn5250/codec";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
+const LIB = process.env.AS400_LIB ?? "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 // 日本語ラベルは DDS 定数にすると SO/SI がコマンド行 SQL の引用符入れ子を壊すため、
 // CTL01 の出力フィールドにして RPG の 16 進リテラル x'0E..0F'（純 ASCII）で埋める。
 const cp939 = codecForCcsid(939);

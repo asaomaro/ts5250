@@ -2,7 +2,7 @@
 // インストール済みフォントの列挙（Local Font Access）は headless では効かないので、
 // **queryLocalFonts を差し込んで**一覧つきの見た目も確認する。
 // 設定メニューはエミュレーター画面（セッション）のヘッダーに出るので、実機へ 1 本繋ぐ。
-//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env scripts/shot-fontmenu.mjs
+//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify scripts/shot-fontmenu.mjs
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";

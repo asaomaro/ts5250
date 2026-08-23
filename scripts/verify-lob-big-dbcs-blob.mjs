@@ -5,7 +5,7 @@
 // **UTF-16（1200）と混在 CLOB** だけで、この 2 系統は「同じ枝だから同じはず」という
 // **判断で押していた**。LOB の単位はその同型の推論で 3 度踏んでいるので、実測で閉じる。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/verify-lob-big-dbcs-blob.mjs
 //
 // 副作用: 自分のライブラリーに表を 1 つ作り、**finally で必ず消す**。

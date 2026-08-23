@@ -1,6 +1,6 @@
 // T16: Playwright ヘッドレス E2E（実機）— build 済み web-ui を server 静的配信で起動し、
 // 実ブラウザで 接続→グリッド描画→フィールド入力→Enter/F キー遷移→テーマ切替→ログ表示 を検証する。
-// 前提: npm run build（web-ui dist）済み。実行: node --env-file=.env scripts/verify-browser.mjs
+// 前提: npm run build（web-ui dist）済み。実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser.mjs
 import { readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

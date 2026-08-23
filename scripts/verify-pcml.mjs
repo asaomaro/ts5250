@@ -5,7 +5,7 @@
 //
 // 記述は**実機の IFS から読む**（コンパイラが `PGMINFO(*PCML)` で吐いたもの）。
 //
-// 実行: node --env-file=.env scripts/verify-pcml.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-pcml.mjs
 // 前提: scripts/research-pcml.mjs で TESTLIB/PCMLTST と .pcml を作ってあること。
 import {
   CommandConnection,

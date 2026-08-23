@@ -9,7 +9,7 @@
 //   QSYRUSRI … ユーザー情報の取得（出力 1 つ・別の書式）
 // どちらも**中身を検証できる**ので、「呼べた」ではなく「正しく返った」を言える。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-call-program.mjs
 //
 // 副作用なし（読み取りのみ）。

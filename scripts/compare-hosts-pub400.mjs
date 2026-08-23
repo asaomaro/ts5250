@@ -7,8 +7,8 @@
 // 実機は **7.3**、pub400 は **7.5**。**同じことを両方で測って並べる**。
 //
 // 実行:
-//   node --env-file=.env scripts/compare-hosts-pub400.mjs           # 両方
-//   node --env-file=.env scripts/compare-hosts-pub400.mjs AS400     # 片方だけ
+//   node --env-file=.env --env-file=.env.verify scripts/compare-hosts-pub400.mjs           # 両方
+//   node --env-file=.env --env-file=.env.verify scripts/compare-hosts-pub400.mjs AS400     # 片方だけ
 //
 // ⚠ **pub400 は公開の共有機**。作るものは `QTEMP` と `/tmp` に閉じ、後始末する。
 // ⚠ **サインオンの失敗は QMAXSIGN に数えられる**（実機=3 / pub400=5）。

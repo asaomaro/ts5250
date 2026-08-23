@@ -6,7 +6,7 @@
 //
 // **長さの単位（文字数 vs バイト数）と、UTF-16 の復号**——どちらが原因かを生バイトで確かめる。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-dbclob-locator.mjs
 import { DbConnection, executeStatement, query } from "@ts5250/hostserver";
 

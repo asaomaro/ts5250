@@ -13,7 +13,7 @@
 // ⚠ **共有の公開機なので掃除コマンドは打たない**（`CLROUTQ` / `ENDWTR` を無条件に撃たない）。
 // 装置はセッションごとに作られるので、前の実行の残骸は残らない。
 //
-// 実行: IDLE_MIN=30 node --env-file=.env scripts/diag-printer-idle-pub400.mjs
+// 実行: IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-printer-idle-pub400.mjs
 import { appendFileSync } from "node:fs";
 import { SessionManager } from "@ts5250/server";
 import { CommandConnection, DbConnection } from "@ts5250/hostserver";

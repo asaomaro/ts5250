@@ -5,7 +5,7 @@
 //
 // 実行:
 //   node scripts/capture-vt-trace.mjs linux  > packages/vt/test/fixtures/linux-vi.jsonl
-//   node --env-file=.env scripts/capture-vt-trace.mjs pub400 > packages/vt/test/fixtures/ibmi-signon.jsonl
+//   node --env-file=.env --env-file=.env.verify scripts/capture-vt-trace.mjs pub400 > packages/vt/test/fixtures/ibmi-signon.jsonl
 import { VtSession, Trace, traced, TcpTransport } from "@ts5250/vt";
 
 const mode = process.argv[2] ?? "linux";

@@ -10,7 +10,7 @@
 //
 // ソース投入は IFS/FTP 不要。RUNSQL で QTMPSRC に入れて CPYF で移す（build-gridtest3.mjs と同方式。
 // **ADDPFM の SRCTYPE(CLP) が要る**——省くとコンパイラがソース種別を決められず CPF0820 で落ちる）。
-// 実行: node --env-file=.env scripts/build-pcotest.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-pcotest.mjs
 import { readFileSync } from "node:fs";
 import { CommandConnection } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";

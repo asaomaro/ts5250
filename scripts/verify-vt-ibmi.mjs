@@ -9,7 +9,7 @@
 //
 // ⚠ **サインオンの失敗は数える。** QMAXSIGN は pub400=5 / 実機=3。
 //
-// 実行: node --env-file=.env scripts/verify-vt-ibmi.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-vt-ibmi.mjs
 //       PROBE=AS400 を付けると社内機に当たる（画面が来ないことの確認になる）
 import { VtSession } from "@ts5250/vt";
 

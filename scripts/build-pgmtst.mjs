@@ -1,7 +1,7 @@
 /**
  * **プログラム呼び出しの検証用 CL プログラム**を実機に作る（冪等）。
  *
- *   node --env-file=.env scripts/build-pgmtst.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/build-pgmtst.mjs
  *
  * `TESTLIB/PGMTST` は**参照渡しの引数を書き換える**だけの小さなプログラム:
  *

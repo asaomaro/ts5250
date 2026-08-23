@@ -8,7 +8,7 @@
 //
 // 前提: npm run build && npm run build -w @ts5250/web-ui。
 //       scripts/research-pcml.mjs で TESTLIB/PCMLTST と .pcml を作ってあること。
-// 実行: node --env-file=.env scripts/verify-browser-pcml.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-pcml.mjs
 import { mkdirSync, rmSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

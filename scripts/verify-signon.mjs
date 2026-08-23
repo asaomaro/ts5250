@@ -1,5 +1,5 @@
 // T13: PUB400 実機検証 — サインオン → メニュー → signoff の往復と trace 採取。
-// 実行: node --env-file=.env scripts/verify-signon.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-signon.mjs
 // trace は maskTx 既定 ON（パスワードを含む送信データは伏字化して保存）。
 import { writeFileSync, appendFileSync } from "node:fs";
 import { Session5250, TcpTransport, TraceRecorder } from "@ts5250/tn5250";
@@ -7,7 +7,7 @@ import { Session5250, TcpTransport, TraceRecorder } from "@ts5250/tn5250";
 const user = process.env.PUB400_USER;
 const password = process.env.PUB400_PASSWORD;
 if (!user || !password) {
-  process.stderr.write("PUB400_USER / PUB400_PASSWORD が未設定です（--env-file=.env）\n");
+  process.stderr.write("PUB400_USER / PUB400_PASSWORD が未設定です（--env-file=.env --env-file=.env.verify）\n");
   process.exit(1);
 }
 const host = process.env.PUB400_HOST ?? "pub400.com";

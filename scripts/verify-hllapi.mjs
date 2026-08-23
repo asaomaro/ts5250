@@ -1,7 +1,7 @@
 /**
  * HLLAPI ブリッジの検証（**本物の C ABI** ＋ 実機セッション）。
  *
- *   node --env-file=.env scripts/verify-hllapi.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-hllapi.mjs
  *
  * ## なぜ Python を挟むのか
  *

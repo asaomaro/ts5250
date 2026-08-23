@@ -13,8 +13,8 @@
 // `entry.session` を消す（自動再接続は無い）。その瞬間の経過時間が答え。
 //
 // 実行:
-//   node --env-file=.env scripts/measure-printer-idle-drop.mjs            # 既定 40 分まで見る
-//   MINUTES=120 node --env-file=.env scripts/measure-printer-idle-drop.mjs
+//   node --env-file=.env --env-file=.env.verify scripts/measure-printer-idle-drop.mjs            # 既定 40 分まで見る
+//   MINUTES=120 node --env-file=.env --env-file=.env.verify scripts/measure-printer-idle-drop.mjs
 //
 // 副作用: 既存の仮想プリンター装置を借りるだけ（既定 PRT_TEST）。**スプールは流さない。**
 import { appendFileSync } from "node:fs";

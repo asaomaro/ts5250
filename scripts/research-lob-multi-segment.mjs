@@ -12,7 +12,7 @@
 // **SBCS だけで測っても分からない**（文字数＝バイト数で一致してしまう）。
 // 2 バイト CCSID（UTF-16 = 1200）で測るのがこのスクリプトの要点。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/research-lob-multi-segment.mjs
 //
 // 副作用: 自分のライブラリーに表を 1 つ作り、**finally で必ず消す**。

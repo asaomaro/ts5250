@@ -17,7 +17,7 @@
 // ⚠ **VT のソケットには触らない。** 触るとアイドルが崩れる。
 // 装置名を先に控えて、**別のホストサーバー接続から**ジョブの生死を 60 秒ごとに見る。
 //
-// 実行: IDLE_MIN=30 node --env-file=.env scripts/diag-vt-idle-job.mjs
+// 実行: IDLE_MIN=30 node --env-file=.env --env-file=.env.verify scripts/diag-vt-idle-job.mjs
 import { appendFileSync } from "node:fs";
 import { VtSession } from "@ts5250/vt";
 import { DbConnection, query } from "@ts5250/hostserver";

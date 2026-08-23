@@ -3,7 +3,7 @@
 // build 済み web-ui を server で配信し、Playwright で「コマンド入力支援」を開いて
 // 定義を引き、欄を埋め、実行して、**ホストのメッセージが返る**ところまで見る。
 //
-// 実行: node --env-file=.env scripts/verify-browser-command-prompt.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-command-prompt.mjs
 // 必要な環境変数: AS400_HOST / AS400_USER / AS400_PASSWORD
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

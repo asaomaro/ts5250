@@ -9,7 +9,7 @@
 // 画面上で右寄せできているだけでは、送信経路（core の内容検証・末尾空白の扱い）を通った保証がない。
 //
 // 前提: npm run build 済み。`connections.json` に実機と DEV1。
-// 実行: node --env-file=.env scripts/verify-browser-adjust.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-browser-adjust.mjs
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

@@ -4,7 +4,7 @@
 // 引用の作法は机上では確かめられない——`TEXT('It''s …')` が本当に打った通りに入るかは、
 // ホストに作らせて読み戻すしかない。
 //
-// 実行: node --env-file=.env scripts/verify-command-template.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-command-template.mjs
 // 必要な環境変数: AS400_HOST / AS400_USER / AS400_PASSWORD
 import { CommandConnection, retrieveCommandTemplate, buildCommand, runCommandTemplate, CommandTemplateCache, DbConnection, queryLimited } from "@ts5250/hostserver";
 const host = process.env.AS400_HOST, user = process.env.AS400_USER, password = process.env.AS400_PASSWORD;

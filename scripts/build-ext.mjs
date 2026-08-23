@@ -1,12 +1,12 @@
 // 実機の TESTLIB に「拡張5250(GUI) 要素テスト画面」を作成・コンパイルする。
 //   EXTDSPF/EXTPGM: SNGCHCFLD(ラジオ) / MLTCHCFLD(チェックボックス) / PSHBTNFLD(ボタン) /
 //   WINDOW(ポップアップ) を Enhanced 5250 で描く。enhanced=true のセッションで撮影する。
-// 実行: node --env-file=.env scripts/build-ext.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/build-ext.mjs
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
+const LIB = process.env.AS400_LIB ?? "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join("").replace(/\s+$/, ""));

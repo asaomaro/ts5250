@@ -1,6 +1,6 @@
 // 実機の窓画面（TESTLIB/GRIDCL7 = GRIDTST5）で F3 ボタンを押し、
 // 応答なしでタイムアウトしないこと＋エラー行にメッセージが出ることを Web UI で確かめる。
-//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env scripts/shot-window-fkey.mjs
+//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify scripts/shot-window-fkey.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

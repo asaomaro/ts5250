@@ -9,7 +9,7 @@
 //   * 配列は「同じ型を count 回並べただけ」か
 // 生の `bytes` で組んで往復させ、RPG が書いた値が期待位置に現れるかを見る。
 //
-// 実行: node --env-file=.env scripts/research-pcml-layout.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-pcml-layout.mjs
 // 前提: research-pcml.mjs で TESTLIB/PCMLTST を作ってあること。
 import { CommandConnection, toProgramParameters, fromProgramOutputs,
          packedByteLength, packedDecimalToString } from "@ts5250/hostserver";

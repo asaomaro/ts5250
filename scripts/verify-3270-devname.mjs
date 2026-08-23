@@ -11,7 +11,7 @@
 // このスクリプトは**両方を許す**——「効く」か「理由の分かる形で断られる」かのどちらかなら合格。
 // 黙って壊れる（時間切れ・素の socket closed）のが不合格。
 //
-// 実行: node --env-file=.env scripts/verify-3270-devname.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-3270-devname.mjs
 //       PROBE_HOST=pub400.com PROBE_CCSID=37 で pub400 にも当てられる
 import { Tn3270Session } from "@ts5250/tn3270";
 

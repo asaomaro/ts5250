@@ -3,7 +3,7 @@
 // 単体テストは偽の接続なので、**停止で装置を本当に手放しているか**は測れない。
 // 手放していなければ、再開時に「装置が使用中」で繋がらない——そこを見る。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/verify-printer-startstop.mjs
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、スプールを 1 件流す。

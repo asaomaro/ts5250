@@ -8,7 +8,7 @@
 // `SessionManager` を直接叩く既存スクリプト（residency / startstop）と違い、
 // **`WsConnection` を通す**——壊れていたのがこの層（電文の投影）だから。
 //
-// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env \
+// 実行: AS400_HOST=... AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify \
 //         scripts/verify-printer-report-history.mjs
 //
 // 副作用: 既存の仮想プリンター装置を借り（既定 PRT_TEST）、自分のジョブのスプールを 1 件流す。

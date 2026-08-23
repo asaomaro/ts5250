@@ -8,7 +8,7 @@
 //   READIMM            → READ IMMEDIATE(0x72)
 //   READIMMALT         → READ MDT IMMEDIATE ALT(0x83)  ⚠ 当方は応答しない。**待たされるか**を見る
 //
-// 実行: node --env-file=.env scripts/diag-5250-commands.mjs [要求...]
+// 実行: node --env-file=.env --env-file=.env.verify scripts/diag-5250-commands.mjs [要求...]
 //       既定は ROLLUP ROLLDOWN READIMM
 import { Session5250 } from "@ts5250/tn5250";
 import { IfsConnection } from "@ts5250/hostserver";

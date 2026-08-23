@@ -4,7 +4,7 @@
 // F1〜F12 は `PA1` ＋ `PFn`。出典は IBM i 自身の
 // 「ヘルプ－ 3270 キーボード・マッピング」画面（3270 で繋いで `PF2`）。
 //
-// 実行: node --env-file=.env scripts/verify-3270-keys.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/verify-3270-keys.mjs
 //       PROBE=PUB400 を付けると pub400 に当たる（**画面が英語**なので目印を両対応にしてある）
 //
 // ⚠ **1 台で確かめて一般化しない。** 装置名では 2 台の IBM i が違う答えを返した

@@ -1,7 +1,7 @@
 /**
  * 実行計画の画面検証（実ブラウザ・実機）。
  *
- *   node --env-file=.env scripts/verify-browser-visual-explain.mjs
+ *   node --env-file=.env --env-file=.env.verify scripts/verify-browser-visual-explain.mjs
  *
  * 単体テストは偽 `fetch` で動かしているので、**実ホストから返る本物の計画で画面が成立するか**は
  * ここでしか分からない（ノード数・ラベル・SVG の描画・一覧ペイン）。

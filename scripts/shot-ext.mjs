@@ -1,5 +1,5 @@
 // 実ブラウザ(web-ui, enhanced=true)で実機へ接続し、EXTPGM の拡張5250 GUI を撮る。
-// 実行: node --env-file=.env scripts/shot-ext.mjs
+// 実行: node --env-file=.env --env-file=.env.verify scripts/shot-ext.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";

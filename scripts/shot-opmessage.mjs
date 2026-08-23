@@ -1,5 +1,5 @@
 // クライアント側の操作員メッセージ（保護領域への入力・欄の型違反）が日本語で出るかを実画面で見る。
-//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env scripts/shot-opmessage.mjs
+//   AS400_USER=... AS400_PASSWORD=... node --env-file=.env --env-file=.env.verify scripts/shot-opmessage.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
