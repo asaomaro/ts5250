@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "ts5250 — IBM i (AS/400) 5250 エミュレーター Electron デスクトップ版",
+  "author": "asaomaro",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "prepare-app": "node scripts/prepare-app.mjs",
-    "dist": "npm run prepare-app && electron-builder"
+    "seed-wincodesign": "node scripts/seed-wincodesign.mjs",
+    "dist": "npm run seed-wincodesign && npm run prepare-app && electron-builder"
   },
   "devDependencies": {
     "electron": "^32.0.0",
@@ -39,8 +41,7 @@
     "win": {
       "target": [
         "nsis"
-      ],
-      "signAndEditExecutable": false
+      ]
     },
     "mac": {
       "target": [

@@ -221,14 +221,20 @@ electron.bat --build    :: 強制再ビルドしてから作る
   （GUI アプリでは stderr を読む人がいないため）。
 - **Windows 用 exe は Windows 上で作ります。** NSIS を使うため、Linux から作るには wine が要ります。
   `./electron.sh` はその環境の形式（AppImage / dmg）を作ります。
-- **exe のリソース編集（`signAndEditExecutable`）は切ってあります。** 有効だと electron-builder が
-  rcedit のために `winCodeSign` パッケージを取りに行き、その中の **macOS 用シンボリックリンク**を
-  展開する段で失敗します（Windows でシンボリックリンクを作るには開発者モードか管理者権限が要る。
-  `ERROR: Cannot create symbolic link … libcrypto.dylib`）。**署名証明書を使っていない以上、
-  この工程で得るものはファイルプロパティの製品名・バージョンだけ**なので、
-  誰の環境でもビルドが通ることを優先しました。
-  必要なら Windows の開発者モードを有効にしたうえで `electron/package.json` の
-  `win.signAndEditExecutable` を消せば従来どおりになります。
+- **アイコンは `electron/build/icon.ico` を使います。** electron-builder は `icon.ico` が無いと
+  `icon.png` から自動変換しますが、その結果は 256×256 の 1 エントリだけになり、タスクバーや
+  エクスプローラの 16・32px 表示が縮小のぼけになります。16〜256px を焼いた ico をコミットして
+  あります。元絵（`icon.png`）を差し替えたら `pwsh -File electron/scripts/make-icon-ico.ps1` で
+  作り直してください。
+- **ビルド前に `winCodeSign` キャッシュを整えます（`electron/scripts/seed-wincodesign.mjs`）。**
+  exe にアイコンとバージョン情報を焼く rcedit は、electron-builder が `winCodeSign` パッケージから
+  取ってきます。ところがこの 7z には **macOS 用シンボリックリンク**が入っており、Windows で
+  リンクを作るには開発者モードか管理者権限が要るため、無い環境では展開が失敗してビルドごと
+  落ちます（`ERROR: Cannot create symbolic link … libcrypto.dylib`）。そこで `npm run dist` の
+  最初に、**`darwin/` を除いて展開したものをキャッシュに置きます**。rcedit は Windows 版しか
+  使わないので darwin/ は要りません。
+  以前は `win.signAndEditExecutable: false` で rcedit ごと外していましたが、それだと
+  **インストールしたアプリのアイコンが Electron 既定のまま**になるのでやめました。
 
 ---
 
