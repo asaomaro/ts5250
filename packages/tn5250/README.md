@@ -1,8 +1,12 @@
 # @ts5250/tn5250
 
 TN5250 プロトコルの純 TypeScript 実装。telnet ネゴシエーション（RFC 1205 / RFC 4777）、
-5250 データストリーム解釈（SC30-3533-04）、画面モデル、EBCDIC⇔Unicode 変換、
-トレース/リプレイを提供する。
+5250 データストリーム解釈（SC30-3533-04）、画面モデル、画面の HTML 化（`screen-html.ts`）、
+トレース/リプレイを提供する。EBCDIC ⇔ Unicode 変換は `@ts5250/ebcdic`、スプール（SCS）の
+展開は `@ts5250/scs` に分かれている。
+
+**ホストサーバー（SQL / IFS / DTAQ / CL …）はここには無い。** `@ts5250/hostserver` に切り出した
+（「画面エミュレーションは要らないが SQL は投げたい」に応えるため）。
 
 対応範囲: SBCS（CCSID 37）＋ **DBCS（930/939/1399・日本語）**、24x80 ＋ **27x132**、平文 TCP ＋ **TLS**。
 CCSID で DBCS を有効化（`ccsid: 1399` 等）、`screenSize: "27x132"`、`tls: true`（既定ポート 992・証明書検証既定 ON）。
@@ -36,8 +40,10 @@ session.disconnect();
 
 ## 設計メモ
 
-- **ピュアロジックと I/O の分離**: Node API 依存は `transport/`（socket）と `log.ts`（pino）のみ。
-  パーサ・画面モデル・変換はブラウザでも動く（lint で強制）。
+- **ピュアロジックと I/O の分離**: Node API 依存は `transport/`（socket）のみ。
+  パーサ・画面モデル・変換はブラウザでも動く（lint で強制）。ログは `@ts5250/base` の
+  **既定 no-op の sink**（`setLogSink` で注入）を使う——ライブラリ利用者にロガーを強制しない。
+  ブラウザからは **`@ts5250/tn5250/browser`** を import する。
 - **画面モデルが唯一の真実**: セルは Unicode で保持し、送信時に MDT フィールドだけ再エンコードする。
 - **属性桁・SO/SI 桁も 1 セル**として保持し、どの行でも桁位置が 1:1 対応する。
   hidden フィールド / nonDisplay セルは snapshot 生成時点でマスク済み（平文が外に出ない）。
@@ -52,3 +58,9 @@ node scripts/capture-signon.mjs           # リポジトリルートで実行
 `ReplayTransport` に trace（JSONL）を渡すと、実ホストなしで
 ネゴシエーション〜画面適用〜AID 送信の回帰テストができる（`test/session.test.ts` 参照）。
 資格情報を送るキャプチャでは `TraceRecorder` の既定（`maskTx: true`）を必ず維持すること。
+
+## 接続の維持
+
+TCP キープアライブを入れてある。**入れる前は LAN の常駐プリンターが 15 分のアイドルで
+帳票を受け取らなくなり、しかも状態は「待ち受け中」のままだった**（＝こちらから障害が見えない）。
+入れたあとは 18 分・50 分のアイドル明けでも 1 秒で届く。

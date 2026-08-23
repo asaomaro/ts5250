@@ -1,7 +1,10 @@
 # @ts5250/web-ui
 
-ブラウザで 5250 画面を表示・操作する Web エミュレーター（Vue 3 + Vite）。
-`@ts5250/server` の WebSocket（1 接続 = 1 セッション）に接続する。
+ブラウザの端末エミュレーター（**5250 / 3270 / VT**）と、IBM i の機能画面（SQL・IFS・
+データ待ち行列・メッセージ …）を提供する（Vue 3 + Vite）。端末は `@ts5250/server` の
+WebSocket（**1 接続 = 1 セッション**）、機能画面は REST（`/api/host/*`）を使う。
+
+見た目・振る舞いの規約は [`docs/UI-DESIGN.md`](../../docs/UI-DESIGN.md)。
 
 ## 開発
 
@@ -21,9 +24,11 @@ node packages/server/dist/main.js --http 3400 --profiles profiles.json \
   --web-root packages/web-ui/dist       # server が dist を静的配信
 ```
 
-## 構成（design の web-ui モジュール表に対応）
+## 構成
 
-- `stores/` — sessions（画面・編集差分・カーソル・WS クライアント）/ workspace（分割ツリー・フォーカス・D&D）/
+- `stores/` — sessions（画面・編集差分・カーソル・WS クライアント）/ vt（VT の画面）/
+  workspace（タブ・タブグループ・分割ツリー・フォーカス・D&D）/ systems / services / watches /
+  macros / auth / appearance（アプリ全体の外観）/ viewSettings（**ペイン単位の表示**）/
   connections（**接続設定はサーバー保存**。localStorage 保存は廃止＝単一の真実はサーバー。
   **認証情報はブラウザに保持しない**——パスワードはサーバーで AES-256-GCM 暗号化され、
   API は平文も暗号文も返さない）/ log（リング 500・sessionId タグ・**hidden マスク**・往復時間・JSONL）

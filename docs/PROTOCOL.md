@@ -2,7 +2,7 @@
 
 本書は、この実装（`packages/tn5250`）が扱う **TN5250 / 5250 データストリームのバイトレベル仕様**を集約し、
 **他言語でのクリーンルーム再実装**を可能にすることを目的とする。上位契約（画面モデル・MCP ツール・WebSocket）
-は `spec.md` を、設計判断の背景は各 `decisions.md` を参照。**バイト一致の検証**は `packages/tn5250/test/fixtures/*.jsonl`
+は [`README.md`](../README.md) を、設計判断の背景は `.aidev/works/*/decisions.md` を参照。**バイト一致の検証**は `packages/tn5250/test/fixtures/*.jsonl`
 （言語非依存の trace）をリプレイして行う。
 
 参照: RFC 1205（5250 telnet）/ RFC 1572（NEW-ENVIRON）/ RFC 4777（自動サインオン）/ SC30-3533-04 /
@@ -408,9 +408,10 @@ Attn は常にデータ無し。**SysReq はシステム要求行に打たれた
 
 ## 8. 画面モデル・上位契約・エラー
 
-- **画面スナップショット（ScreenSnapshot）**・**フィールド/セル**・MCP 12 ツール・WebSocket メッセージ・
-  設定プロファイルの契約は `spec.md`（「インターフェース / データ構造」）を参照。GUI 構造体（`gui`）の
-  スナップショット表現は spec と `screen/types.ts` を参照。
+- **画面スナップショット（ScreenSnapshot）**・**フィールド/セル**・MCP ツール・WebSocket メッセージ・
+  設定プロファイルの契約は [`README.md`](../README.md) と
+  [`packages/server/README.md`](../packages/server/README.md) を参照。GUI 構造体（`gui`）の
+  スナップショット表現は `screen/types.ts` を参照。
 - エラー処理: 未対応コマンド/オーダーは警告＋hex ダンプで読み飛ばし、回復不能時のみ切断（spec「エラー処理」）。
 
 ---
