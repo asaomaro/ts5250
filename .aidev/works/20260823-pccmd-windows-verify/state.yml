@@ -1,9 +1,0 @@
-schema: 3
-slug: pccmd-windows-verify
-current: review
-approved: [requirement, research, spec, plan, coding, test, review]
-mode: interactive
-humanGates: []
-maxSendBacks: 3
-dependsOn: []
-backlog: pc-command.md
