@@ -1,0 +1,28 @@
+# 作業ツリーを**どの OS でも同一バイト**にする。
+#
+# なぜ要るか: 同梱 DLL の鮮度検査（`packages/server/test/prebuilt-fresh.test.ts`）は
+# **ソース木の sha256** を `crates/hllapi/prebuilt/manifest.json` と突き合わせる。
+# `core.autocrlf=true` の Windows チェックアウトでは `.rs` / `Cargo.toml` が CRLF になり、
+# **中身は同じなのに「古い DLL が配られている」と誤判定する**（2026-08-23 に実測）。
+# バイト指紋の検査は「作業ツリーが同一バイト」を前提にしているので、そこを宣言で固める。
+# `start.bat` / `electron.bat` を LF のまま保っている既存の方針とも揃う
+# （cmd.exe は LF のバッチをそのまま実行できる）。
+* text=auto eol=lf
+
+# 変換してはいけないもの（`text=auto` の自動判定に任せず明示する）
+*.dll binary
+*.png binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.ttf binary
+*.ttc binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.xlsm binary
+*.zip binary
+
+# 原典は**取り込んだままのバイト**で保つ（Unicode.org の ICU マッピング表。
+# CRLF で配布されており、変換すると生成物の裏取りが原典と一致しなくなる）
+tools/gen-tables/ucm/*.ucm -text

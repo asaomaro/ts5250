@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,10 +10,18 @@ import {
   stripCallBeforeStart
 } from "../src/pc-command.js";
 
+/** どちらのシェルでも 5 秒待つ（cmd.exe に `sleep` は無い。node は必ず在る） */
+const SLEEP_5 = `"${process.execPath}" -e "setTimeout(() => {}, 5000)"`;
+
 /**
  * PC コマンド（STRPCCMD）の実行。**既定は無効**で、明示的に有効化したときだけ動く。
  * ホストが送ってきた文字列をそのまま OS のシェルへ渡す機能なので、
  * 「有効化していないのに動く」経路が無いことをここで固める。
+ *
+ * **コマンド文字列は cmd.exe と POSIX シェルの両方で通る形で書く。** この機能は
+ * Windows でしか確かめられない部分を持つ（`pc-command-windows.test.ts`）ので、
+ * この suite 自体も Windows で走らないと回帰確認が半分になる——実際 `test -d .` は
+ * Windows で落ち、`sleep` は Git 同梱の `sleep.exe` が PATH に居るかどうかで結果が変わっていた。
  */
 describe("runPcCommand", () => {
   it("設定が無ければ実行しない（既定は無効）", async () => {
@@ -41,12 +49,12 @@ describe("runPcCommand", () => {
   });
 
   it("PAUSE(*NO) は完了を待たずに started で返る", async () => {
-    const r = await runPcCommand({ command: "sleep 5", wait: false }, { enabled: true });
+    const r = await runPcCommand({ command: SLEEP_5, wait: false }, { enabled: true });
     expect(r).toEqual({ status: "started" });
   });
 
   it("待つ指定で上限を超えたら打ち切って失敗として返す（ホストは待たせない）", async () => {
-    const r = await runPcCommand({ command: "sleep 5", wait: true }, { enabled: true, timeoutMs: 150 });
+    const r = await runPcCommand({ command: SLEEP_5, wait: true }, { enabled: true, timeoutMs: 150 });
     expect(r.status).toBe("failed");
     if (r.status === "failed") expect(r.error).toMatch(/timed out/);
   });
@@ -66,9 +74,21 @@ describe("runPcCommand", () => {
   });
 
   it("作業ディレクトリーを指定できる", async () => {
-    const r = await runPcCommand({ command: "test -d .", wait: true }, { enabled: true, cwd: "/tmp" });
-    expect(r.status).toBe("ran");
-    if (r.status === "ran") expect(r.exitCode).toBe(0);
+    // **効いたことを結果で見る**（`test -d .` は成功しても cwd を見たことにならず、
+    // そのうえ POSIX 専用で Windows では走らない）。`echo … > 相対パス` はどちらの
+    // シェルでも cwd に書くので、書かれた場所が cwd の証拠になる
+    const dir = mkdtempSync(join(tmpdir(), "pccmd-cwd-"));
+    try {
+      const r = await runPcCommand(
+        { command: "echo x > marker.txt", wait: true },
+        { enabled: true, cwd: dir }
+      );
+      expect(r.status).toBe("ran");
+      if (r.status === "ran") expect(r.exitCode).toBe(0);
+      expect(existsSync(join(dir, "marker.txt"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -178,8 +198,8 @@ describe("許可判定は利用者が書いた文字列で行う", () => {
  *
  * `stdio` は `ignore` なので出力からは見えない。そこで**シェルに書かせて読む**
  * ——`echo CALL START > file` は置換されると `echo START > file` になるので、
- * ファイルの中身が「渡した文字列」の証拠になる（POSIX 前提。この suite の
- * `sleep` / `exit 3` / `test -d .` と同じ扱い）。
+ * ファイルの中身が「渡した文字列」の証拠になる（`echo … > file` は cmd.exe でも
+ * POSIX シェルでも同じ意味なので、**Windows でもそのまま走る**）。
  */
 describe("spawn に渡すのは置換後の文字列", () => {
   it("CALL START が落ちた文字列で実行される", async () => {

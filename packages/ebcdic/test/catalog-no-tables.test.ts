@@ -51,7 +51,12 @@ function reachableFrom(entry: string): Map<string, number> {
 
 describe("@ts5250/ebcdic/catalog は変換表を引き込まない", () => {
   const fromCatalog = reachableFrom("catalog.ts");
-  const rel = (f: string): string => f.slice(srcDir.length + 1);
+  /**
+   * src からの相対パス。**区切りは `/` に正規化する**——Windows では `\` になり、
+   * `startsWith("tables/")` が**常に false になってガードが素通しする**（fail-open）。
+   * 実際 Windows 実機で対照のテストだけが落ちて気づいた（`20260823-windows-test-run`）。
+   */
+  const rel = (f: string): string => f.slice(srcDir.length + 1).replaceAll("\\", "/");
 
   it("到達可能なファイルに tables/ が 1 つも含まれない", () => {
     const files = [...fromCatalog.keys()].map(rel).sort();
