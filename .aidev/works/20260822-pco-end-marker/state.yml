@@ -1,0 +1,9 @@
+schema: 3
+slug: pco-end-marker
+current: review
+approved: [requirement, spec, plan, coding, test, review]
+mode: autonomous
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+backlog: pc-command.md

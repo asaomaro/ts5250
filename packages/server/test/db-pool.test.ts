@@ -35,6 +35,25 @@ describe("鍵の分離", () => {
   it("同じ資格情報なら同じ鍵", () => {
     expect(poolKey("alice", AUTH)).toBe(poolKey("alice", { ...AUTH }));
   });
+
+  /**
+   * **LOB のしきい値は接続時の属性**（`setServerAttributes`）で、あとから変えられない。
+   *
+   * 鍵に混ぜないと、しきい値 0 で張った接続を「65536 で開いたつもり」の要求に貸してしまい、
+   * **指定が黙って効かない**——応答は正しく見えるのに往復だけ増えたまま、という気づけない形で出る。
+   */
+  it("**しきい値が違えば別の鍵**（別設定の接続を貸さない）", () => {
+    expect(poolKey("alice", AUTH, 65536)).not.toBe(poolKey("alice", AUTH));
+    expect(poolKey("alice", AUTH, 65536)).not.toBe(poolKey("alice", AUTH, 1024));
+  });
+
+  it("同じしきい値なら同じ鍵（使い回しは効く）", () => {
+    expect(poolKey("alice", AUTH, 65536)).toBe(poolKey("alice", AUTH, 65536));
+  });
+
+  it("**未指定と 0 は同じ鍵**（既定は 1 つに寄せる）", () => {
+    expect(poolKey("alice", AUTH)).toBe(poolKey("alice", AUTH, 0));
+  });
 });
 
 describe("貸し借り", () => {

@@ -1,0 +1,9 @@
+schema: 3
+slug: windows-test-run
+current: review
+approved: [requirement, spec, plan, coding, test, review]
+mode: interactive
+humanGates: []
+maxSendBacks: 3
+dependsOn: [pccmd-windows-verify]
+backlog: windows-test-run.md

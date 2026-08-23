@@ -329,6 +329,11 @@ export interface PrinterEntry {
   openOpts: OpenPrinterOptions;
   /** 状態が変わったときに呼ぶ（ws-handler が設定し、切断で解除する） */
   onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
+  /**
+   * 張り直しの輪が回っているか。**停止でここを落とすと待ち明けに抜ける**
+   * （タイマーを持たずに降ろせる）。
+   */
+  reconnecting?: boolean;
   host: string;
   origin: string;
   connectedAt: string;
@@ -432,6 +437,26 @@ const OUTPUT_WARN_LIMIT = 20;
  * ここから落ちても**最後の砦はファイルの方**。
  */
 const REPORT_LIMIT = 50;
+
+/**
+ * 常駐プリンターを張り直す待ち（指数バックオフ。最後の値で頭打ち）。
+ * `watch-registry` の `DEFAULT_BACKOFF_MS` と同じ刻み——**同じ性質の待ちを別の値にしない**。
+ */
+const PRINTER_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+
+/**
+ * 張り直しても直らないエラー。**待つ意味が無い**ので `error` で止める。
+ * `watch-registry` の `FATAL_CODES` と同じ考え方。
+ */
+const PRINTER_FATAL_CODES = new Set([
+  "ACCESS_DENIED",
+  "FORBIDDEN",
+  "NOT_FOUND",
+  "UNAUTHENTICATED",
+  "CONFIG_ERROR",
+  "SESSION_REJECTED"
+]);
+
 /** 出力結果の保持上限 */
 const OUTPUT_STATUS_LIMIT = 100;
 
@@ -484,6 +509,11 @@ export interface SessionManagerOptions {
   /** 現在時刻（テスト注入用） */
   now?: () => number;
   /**
+   * 張り直しの待ち（テスト注入用）。**既定は本物の待ち**なので、
+   * 差し替えないとテストが分単位になる（`WatchRegistry` の `delay` と同じ口）。
+   */
+  delay?: (ms: number) => Promise<void>;
+  /**
    * ジョブ識別子の照会。**テストで偽の応答を差し込むための口**。
    *
    * 既定はコマンドサーバー（`QGYOLJOB`）。これが無いと
@@ -531,6 +561,8 @@ export class SessionManager {
   /** 書き出しできないスプールを拾う見張りの間隔（既定 10 秒） */
   private readonly rescueIntervalMs: number;
   private readonly now: () => number;
+  /** 張り直しの待ち。**テストで即時にする**（実待ちを入れるとテストが分単位になる） */
+  private readonly delay: (ms: number) => Promise<void>;
   private readonly lookupJobs: LookupJobs;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -540,6 +572,7 @@ export class SessionManager {
     this.maxResidentPrinters = opts.maxResidentPrinters ?? DEFAULT_MAX_RESIDENT_PRINTERS;
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
+    this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
   }
 
@@ -854,29 +887,89 @@ export class SessionManager {
     if (!entry.resident && this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
-    const opts = entry.openOpts;
-    let session: PrinterSession;
     try {
-      session = await PrinterSession.connect({ ...opts, id });
+      await this.connectPrinter(entry);
     } catch (e) {
       // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
       this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
       throw e;
     }
+    return entry;
+  }
+
+  /**
+   * 実際に接続して待ち受けに入る。**開始と張り直しで同じ道を通す**——
+   * 分けると、張り直したときだけ救出の見張りが付かない類の差が生える。
+   *
+   * 失敗は投げる（状態をどうするかは呼び出し側が決める。開始は `error`、
+   * 張り直しは `reconnecting` のまま次を待つ）。
+   */
+  private async connectPrinter(entry: PrinterEntry): Promise<void> {
+    const opts = entry.openOpts;
+    const session = await PrinterSession.connect({ ...opts, id: entry.id });
     entry.session = session;
     entry.lastActivity = this.now();
     session.on("report", (report) => this.deliverReport(entry, report));
     session.on("closed", () => {
       for (const w of entry.waiters.splice(0)) w(undefined);
       this.stopRescue(entry);
-      // **明示停止なら状態は `stopped`。** `stopPrinter` が先に立てているので上書きしない
-      if (entry.state !== "stopped") this.setPrinterState(entry, "error", "disconnected");
       delete entry.session;
+      // **明示停止なら状態は `stopped`。** `stopPrinter` が先に立てているので上書きしない
+      if (entry.state === "stopped") return;
+      // **常駐は張り直す。** 何も届かない時間が長いのが正常なので、落ちたまま放置すると
+      // 「常駐しているつもりで届かない」状態に静かに入る
+      // （実機で 15 分のアイドル後に届かなくなるのを観測した）
+      if (entry.resident) void this.reconnectPrinter(entry);
+      else this.setPrinterState(entry, "error", "disconnected");
     });
     // 書き出しプログラムが処理できないスプールを拾う見張り（装置名＝OUTQ が要る）
     this.startRescue(entry, opts);
     this.setPrinterState(entry, "listening", undefined, session.startupCode);
-    return entry;
+  }
+
+  /**
+   * **常駐プリンターを張り直す**（`watch-registry` の `loop` と同じ考え方）。
+   *
+   * 待ち行列監視は最初からこれを持っており、実機で 45 分のアイドルを越えられている。
+   * プリンターには無く、**実機で 15 分のアイドル後に帳票が届かなくなる**のを観測した
+   * （`scripts/measure-printer-idle-drop.mjs`）。状態機械（`service-state.ts`）は
+   * `listening --> reconnecting --> listening` を定義しているのに、
+   * プリンターだけ `error` へ直行していた——**設計と実装が食い違っていた**。
+   *
+   * ⚠ **待っても直らない失敗では試さない**（`PRINTER_FATAL_CODES`）。
+   * 権限や設定の誤りを投げ直してもホストに負荷を掛けるだけで直らない。
+   */
+  private async reconnectPrinter(entry: PrinterEntry): Promise<void> {
+    if (entry.reconnecting === true) return; // 二重に走らせない
+    entry.reconnecting = true;
+    this.setPrinterState(entry, "reconnecting", "disconnected");
+    let attempt = 0;
+    try {
+      while (entry.reconnecting === true && entry.state === "reconnecting") {
+        const wait = PRINTER_BACKOFF_MS[Math.min(attempt, PRINTER_BACKOFF_MS.length - 1)] ?? 30_000;
+        attempt += 1;
+        await this.delay(wait);
+        // 待っている間に止められた／別経路で張り直された
+        if (entry.reconnecting !== true || entry.state !== "reconnecting") return;
+        try {
+          await this.connectPrinter(entry);
+          sessionLog.info({ sessionId: entry.id, attempt }, "printer reconnected");
+          return;
+        } catch (e) {
+          const err = e as As400Error;
+          if (err.code !== undefined && PRINTER_FATAL_CODES.has(err.code)) {
+            this.setPrinterState(entry, "error", err.message);
+            return; // **再試行しない**（待っても直らない）
+          }
+          sessionLog.warn(
+            { sessionId: entry.id, attempt, wait, err: err.message },
+            "printer reconnecting"
+          );
+        }
+      }
+    } finally {
+      entry.reconnecting = false;
+    }
   }
 
   /**
@@ -891,6 +984,8 @@ export class SessionManager {
     if (entry.state === "stopped") return entry; // 冪等
     // **先に状態を立てる**——`closed` ハンドラが「障害」と誤って記録しないように
     this.setPrinterState(entry, "stopped");
+    // 張り直しの途中なら降ろす（待ち明けに `stopped` を見て抜ける）
+    entry.reconnecting = false;
     this.stopRescue(entry);
     entry.session?.disconnect();
     delete entry.session;
@@ -974,6 +1069,9 @@ export class SessionManager {
    * 見ればよいか決められないため。資格情報が無いときも同じ（pull 経路が開けない）。
    */
   private startRescue(entry: PrinterEntry, opts: OpenPrinterOptions): void {
+    // **前のタイマーを必ず落としてから張る。** 上書きするだけだと古い間隔が回り続け、
+    // 張り直すたびに救出が二重・三重に走る（張り直しを入れて届きやすくなった経路）
+    this.stopRescue(entry);
     const outputQueue = opts.deviceName;
     if (!outputQueue || opts.host === undefined || opts.user === undefined) return;
     const connect: ConnectOptions = {
@@ -1134,6 +1232,18 @@ export class SessionManager {
    * 解除を呼び出し側に閉じた関数で返すのが要点——`delete entry.onX` の形だと、
    * **他の購読者の分まで消してしまう**（そうなっていた）。
    */
+  /**
+   * **これまでに実行した PC コマンド**（受信順。上限 `PC_COMMAND_HISTORY`）。
+   *
+   * ブラウザを閉じている間に届いたコマンドは**実行はされるが通知が届かない**——
+   * 購読者がいないので `pc-command` は誰にも配られず、記録だけが残っていた。
+   * 繋ぎ直したときに「留守中に何が走ったか」を渡せるようにする
+   * （backlog `pc-command.md`「常駐セッションでの扱い」）。
+   */
+  pcCommandHistory(id: string): PcCommandEvent[] {
+    return [...(this.sessions.get(id)?.pcCommands ?? [])];
+  }
+
   subscribePcCommand(id: string, fn: (e: PcCommandEvent) => void): () => void {
     const entry = this.sessions.get(id);
     if (!entry) return () => undefined;
@@ -1291,6 +1401,12 @@ export class SessionManager {
     if (printer) {
       assertOwner(printer.owner, user);
       // **破棄は停止と別**——停止は残す、破棄は消す（`20260801-service-start-stop`）
+      //
+      // ⚠ **張り直しを先に降ろす。** 降ろさずに `disconnect()` すると `closed` ハンドラが
+      // 「障害で落ちた常駐」と読んで張り直しに入る——**捨てたはずのエントリが
+      // 接続を張り続ける**（マップからは消えているので誰も止められない）。
+      printer.reconnecting = false;
+      printer.state = "stopped";
       this.stopRescue(printer);
       printer.session?.disconnect();
       this.printers.delete(id);

@@ -18,12 +18,17 @@ export type LineEnding = "lf" | "nel";
 /**
  * 手動選択に出す候補。**実機で多い順**に並べる（research F4: 819 が最多、次いで 850・1208）。
  *
- * CCSID 850 は復号手段を持たないので出さない（`ccsid-text.ts` の冒頭を参照）。
  * `writable: false` は「読めるが書けない」＝保存に使えないもの。
+ *
+ * **850 / 437 は同梱の表で読み書きする**（`TextDecoder` に無い。`oem-tables.ts`）。
+ * 実機で 850 タグが付くのはたいてい中身が UTF-8 / ASCII のときで、決定表では
+ * 中身の推定が先に当たる——ここに出すのは**本当に CP850 の内容だったとき**に
+ * 利用者が選び直せるようにするため。
  */
 export const TEXT_CCSIDS: readonly { ccsid: number; label: string; writable: boolean }[] = [
   { ccsid: 1208, label: "1208 (UTF-8)", writable: true },
   { ccsid: 819, label: "819 (ISO 8859-1)", writable: true },
+  { ccsid: 850, label: "850 (PC 多言語ラテン 1)", writable: true },
   { ccsid: 1200, label: "1200 (UTF-16BE)", writable: true },
   { ccsid: 37, label: "37 (EBCDIC 英語)", writable: true },
   { ccsid: 273, label: "273 (EBCDIC ドイツ語)", writable: true },
@@ -32,6 +37,7 @@ export const TEXT_CCSIDS: readonly { ccsid: number; label: string; writable: boo
   { ccsid: 939, label: "939 (EBCDIC 日本語・英小文字)", writable: true },
   { ccsid: 930, label: "930 (EBCDIC 日本語・カタカナ)", writable: true },
   { ccsid: 1252, label: "1252 (Windows-1252)", writable: true },
+  { ccsid: 437, label: "437 (PC US)", writable: true },
   { ccsid: 943, label: "943 (Shift_JIS)", writable: false }
 ];
 

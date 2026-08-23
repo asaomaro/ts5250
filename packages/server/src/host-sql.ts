@@ -48,6 +48,11 @@ const MAX_ROWS = 1000;
 const DEFAULT_ROWS = 200;
 /** LOB 1 セルあたりの上限。これ以上は受け付けない */
 const MAX_LOB_BYTES = 1024 * 1024;
+/**
+ * `lobThreshold` の上限（15MB）。ライブラリ側の `clampLobThreshold` と同じ値。
+ * **ここで先に断る**——通してから黙って丸められると、指定が効いていないことに気づけない。
+ */
+const MAX_LOB_THRESHOLD = 15 * 1024 * 1024;
 
 const sqlRequestSchema = z
   .object({
@@ -57,7 +62,21 @@ const sqlRequestSchema = z
     /** LOB の中身も取得する。**既定では取りに行かない**（大きな LOB でメモリを掴むため） */
     lobMaxBytes: z.number().int().positive().max(MAX_LOB_BYTES).optional(),
     /** 1 度に取得する件数。指定すると結果セットを保持し、続きを /next で取れる */
-    pageSize: z.number().int().positive().max(MAX_ROWS).optional()
+    pageSize: z.number().int().positive().max(MAX_ROWS).optional(),
+    /**
+     * **これ以下の LOB を行データに載せて返させる**（バイト。既定 0＝載せない）。
+     *
+     * ロケーターを 1 つずつ引き直す往復が消える。実測（LOB セル 6 個）:
+     *
+     * | 実機 | 既定 0 ＋ 中身取得 | しきい値 65536 |
+     * |---|---|---|
+     * | 実機（LAN） | 12 往復 / 132,757B | 4 往復 / 5,078B |
+     * | pub400（インターネット） | 12 往復 / 5,014ms | 4 往復 / **1,306ms** |
+     *
+     * ⚠ **行そのものが膨らむ**（中身を取らない既定の 982B → 5,078B）。
+     * 大きくしすぎると静かにメモリを食うので上限を設けてある。
+     */
+    lobThreshold: z.number().int().min(0).max(MAX_LOB_THRESHOLD).optional()
   })
   .strict();
 
@@ -138,6 +157,8 @@ async function runNonQuery(
     /** 手続きが返した結果セットから読む行数の上限 */
     limit: number;
     lobMaxBytes?: number;
+    /** これ以下の LOB を行データに載せさせる（接続時の属性） */
+    lobThreshold?: number;
   }
 ): Promise<Response> {
   const connectStart = Date.now();
@@ -147,8 +168,8 @@ async function runNonQuery(
     // **解決も try の中で行う。** 資格情報を持たない設定では `hostAuthFrom` が投げるので、
     // 外に置くと 500 になって「ユーザーとパスワードが未登録」を伝えられない
     const opts = resolveSource(deps.resolver, args.source, args.user);
-    key = poolKey(args.user?.username, hostAuthFrom(opts));
-    const acquired = await deps.pool.acquire(key, () => openDb(opts));
+    key = poolKey(args.user?.username, hostAuthFrom(opts), args.lobThreshold);
+    const acquired = await deps.pool.acquire(key, () => openDb(opts, args.lobThreshold));
     conn = acquired.conn;
     const connectMs = Date.now() - connectStart;
     const result = await executeStatement(conn, args.sql, {
@@ -202,7 +223,7 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, 400);
     }
-    const { source, sql, maxRows, lobMaxBytes, pageSize } = parsed.data;
+    const { source, sql, maxRows, lobMaxBytes, pageSize, lobThreshold } = parsed.data;
     const user = c.get("user");
 
     // --- 結果を返さない文（DML / DDL）。**クエリ経路では実行できない**ので先に振り分ける ---
@@ -214,15 +235,16 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
         // 手続きの結果セットは**ページングしない**（カーソルを掴み続けない）ので、
         // 画面の「1 度に取得」をそのまま上限として使い、切ったら `truncated` で言う
         limit: pageSize ?? maxRows ?? DEFAULT_ROWS,
-        ...(lobMaxBytes !== undefined ? { lobMaxBytes } : {})
+        ...(lobMaxBytes !== undefined ? { lobMaxBytes } : {}),
+        ...(lobThreshold !== undefined ? { lobThreshold } : {})
       });
     }
 
     // --- ページング（pageSize 指定時）。**結果セットを保持**して続きを /next で返す ---
     if (pageSize !== undefined) {
       const opts = resolveSource(deps.resolver, source, user);
-      const key = poolKey(user?.username, hostAuthFrom(opts));
-      const open = () => openDb(opts);
+      const key = poolKey(user?.username, hostAuthFrom(opts), lobThreshold);
+      const open = () => openDb(opts, lobThreshold);
       let conn: DbConnection | undefined;
       // **接続の確立にかかった時間とジョブを画面へ返す**。約 4.6 秒かかることがあり、
       // 「SQL が遅い」のか「接続が遅い」のかを利用者が切り分けられないため
@@ -345,6 +367,8 @@ export function registerHostSqlRoutes(app: Hono<{ Variables: AuthVars }>, deps: 
       const opts = resolveSource(deps.resolver, parsed.data.source, user);
       const started = Date.now();
       let info: ReturnType<typeof connectionInfo> | undefined;
+      // **温めるのは既定（しきい値なし）の鍵だけ。** `lobThreshold` 付きは別の鍵になり、
+      // そちらは使うときに張る——めったに使わない設定のために接続を寝かせない
       await deps.pool.warm(poolKey(user?.username, hostAuthFrom(opts)), async () => {
         const conn = await openDb(opts);
         info = connectionInfo(conn, false, Date.now() - started);

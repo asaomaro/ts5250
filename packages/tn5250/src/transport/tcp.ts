@@ -12,6 +12,32 @@ export interface TcpConnectOptions {
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
 }
 
+/**
+ * TCP キープアライブを始めるまでの無通信時間。
+ *
+ * ⚠ **これが無いと、無通信の接続が黙って死ぬ。** 5250 は「何も届かないのが正常」な
+ * 使い方（常駐プリンター・帳票待ち）があり、その間パケットが 1 つも流れない。
+ * 途中の NAT やファイアウォールがその接続を落としても、**どちらの端も気づかない**
+ * ——送ろうとして初めて分かる。
+ *
+ * 実機で測って分かった（2026-08-22・`scripts/measure-printer-idle-drop.mjs`）:
+ * 常駐プリンターは **15 分のアイドルで届かなくなる**。同じ実機で待ち行列監視は
+ * 45 分を越えられており、**あちらはホストサーバー側の接続でキープアライブが入っていた**
+ * （`hostserver/src/transport/host-connection.ts` の `setKeepAlive(true, 60_000)`）。
+ * こちらだけ入っていなかった。
+ *
+ * ⚠ **効き方は 2 つあり、主役は前者**:
+ *
+ *   1. **経路上の機器に「使っている」と見せ続ける**——NAT やファイアウォールの
+ *      アイドル表を更新するので、そもそも落とされない
+ *   2. 落とされた場合に**気づけるようにする**——ただし探査の間隔と回数は OS の設定なので、
+ *      死んだと判定するまで**さらに数分**かかる（Linux の既定で 75 秒 × 9 回）。
+ *      その間に届いた帳票は取りこぼす。だから「気づく」に頼らず「落とされない」を狙う
+ *
+ * 値はホストサーバー側と揃える——**同じ性質の待ちを別の値にしない**。
+ */
+const KEEPALIVE_DELAY_MS = 60_000;
+
 /** 平文 TCP / TLS の Transport 実装（node:net・node:tls） */
 export class TcpTransport implements Transport {
   private dataFn: ((data: Uint8Array) => void) | undefined;
@@ -34,6 +60,8 @@ export class TcpTransport implements Transport {
     return new Promise((resolve, reject) => {
       const socket = netConnect({ host: opts.host, port: opts.port });
       socket.setNoDelay(true);
+      // **無通信でも生死が分かるようにする**（上の定数の注記）
+      socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
@@ -72,6 +100,8 @@ export class TcpTransport implements Transport {
         ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
       });
       socket.setNoDelay(true);
+      // **無通信でも生死が分かるようにする**（上の定数の注記）
+      socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
       const timer = setTimeout(() => {
         socket.destroy();
         reject(

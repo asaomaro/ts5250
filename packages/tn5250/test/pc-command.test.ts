@@ -2,7 +2,14 @@ import { describe, it, expect } from "vitest";
 import { codecForCcsid } from "@ts5250/ebcdic";
 import { parseRecord } from "../src/protocol/gds.js";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
-import { detectPcoMarker, PCO_START, PCO_END } from "../src/protocol/pc-command.js";
+import {
+  detectPcoMarker,
+  PCO_START,
+  PCO_END,
+  PCCMD_MAX_CHARS,
+  PCO_SCAN_BYTES,
+  readPcCommand
+} from "../src/protocol/pc-command.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 
 /**
@@ -57,13 +64,13 @@ function apply(record: string) {
 describe("PC Organizer の標識検出（実機レコード）", () => {
   it("PAUSE(*NO) は待たない指定として、コマンド本文を取り出す", () => {
     const { result } = apply(REC_PAUSE_NO);
-    expect(result.pcCommand).toEqual({ command: "echo NOWAIT", wait: false });
+    expect(result.pcCommand).toEqual({ command: "echo NOWAIT", wait: false, truncated: false });
     expect(result.pcCommandEnd).toBeUndefined();
   });
 
   it("PAUSE(*YES) は待つ指定になる（差は標識直後の 1 バイトだけ）", () => {
     const { result } = apply(REC_PAUSE_YES);
-    expect(result.pcCommand).toEqual({ command: "echo WAITME", wait: true });
+    expect(result.pcCommand).toEqual({ command: "echo WAITME", wait: true, truncated: false });
   });
 
   it("行を跨ぐ 123 文字のコマンドも欠けずに読める", () => {
@@ -122,5 +129,109 @@ describe("通常の画面では PC コマンドを検出しない", () => {
     const { result } = apply(broken);
     expect(result.pcCommand).toBeUndefined();
     expect(result.pcCommandEnd).toBeUndefined();
+  });
+});
+
+/**
+ * **DBCS を含むコマンド本文**（backlog `pc-command.md`）。
+ *
+ * 標識の読み取りは SBCS 前提で書かれていた——1 バイトずつ復号し、`0x40` 未満で終端と見なす。
+ * **SO(0x0e) は `0x40` 未満**なので、日本語を含むコマンドは**最初の全角文字で切れていた**。
+ *
+ * `notepad 日本語.txt` は `notepad ` だけになり、**引数の無い notepad が起動する**。
+ * 実行してしまう以上、これは黙って間違ったことをする類の欠陥。
+ *
+ * ⚠ 本文だけを差し替え、**標識の前後は実機レコードのまま**使う（合成した頭では
+ * 前置きの orders が違ってしまい、本物の並びで確かめたことにならない）。
+ */
+
+/** 実機レコードの、標識に至るまでのデータ部 */
+const REAL_PREFIX = ((): Uint8Array => {
+  const data = parseRecord(hex(REC_PAUSE_NO)).data;
+  for (let i = 0; i + PCO_START.length <= data.length; i++) {
+    if (PCO_START.every((b, k) => data[i + k] === b)) return data.slice(0, i);
+  }
+  throw new Error("fixture に標識が無い");
+})();
+
+/** RA で本文を終え、READ MDT FIELDS で締める（実機レコードの尻尾と同じ） */
+const REAL_SUFFIX = [0x02, 0x0d, 0x4b, 0x00, 0x04, 0x52, 0x00, 0x00];
+
+function streamOf(body: readonly number[], suffix: readonly number[] = REAL_SUFFIX): Uint8Array {
+  return Uint8Array.from([...REAL_PREFIX, ...PCO_START, 0x81, ...body, ...suffix]);
+}
+
+function runStream(body: readonly number[], suffix?: readonly number[]) {
+  const buf = new ScreenBuffer({ alternate: "27x132" });
+  const warns: string[] = [];
+  const result = applyDataStream(streamOf(body, suffix), buf, codec, (m) => warns.push(m));
+  return { result, warns };
+}
+
+describe("DBCS を含む本文", () => {
+  const sbcs = (t: string): number[] => [...codec.encode(t).bytes];
+  const readBody = (t: string): string | undefined => runStream(sbcs(t)).result.pcCommand?.command;
+
+  it("**全角を含む本文が最後まで読める**（以前は SO で切れていた）", () => {
+    expect(sbcs("notepad 日本語.txt"), "SO が入っていること自体を確かめる").toContain(0x0e);
+    expect(readBody("notepad 日本語.txt")).toBe("notepad 日本語.txt");
+  });
+
+  it("全角のあとに半角が続いても崩れない（SI で戻る）", () => {
+    expect(readBody("start 表計算 /B a.exe")).toBe("start 表計算 /B a.exe");
+  });
+
+  it("全角だけの本文も読める", () => {
+    expect(readBody("日本語")).toBe("日本語");
+  });
+
+  it("**SI で閉じないまま終わっても落ちない**（並びが壊れたレコード）", () => {
+    // SO のあと DBCS 対を 1 つ置いて、SI を付けずにオーダーで終える
+    const { result } = runStream([0x0e, 0x44, 0xc0]);
+    expect(result.pcCommand?.truncated).toBe(false);
+    expect(result.pcCommand?.command).toHaveLength(1);
+  });
+});
+
+/**
+ * **上限いっぱいの本文**（backlog `pc-command.md` の「V7R2 以降の `PCCMD` 1023 文字上限」）。
+ *
+ * 先読み窓は **512 バイト**だった。V7R2 以降のホストは **1023 文字**まで送れるので、
+ * 約 500 バイトを越える本文は**黙って切れていた**——切れたことすら分からない。
+ * `del a.txt b.txt` が `del a.txt` になる類で、**実行してしまうと実害が出る**。
+ */
+describe("長い本文", () => {
+  const ascii = (n: number): number[] => [...codec.encode("A".repeat(n)).bytes];
+  /**
+   * 長い本文では実機尻尾の `RA (13,75)` が**使えない**——本文がその桁を追い越すので
+   * `RA target < current` になる。ESC で締める（`0x04` も `0x40` 未満＝本文の終わり）
+   */
+  const ESC_READ = [0x04, 0x52, 0x00, 0x00];
+
+  it("**上限 1023 文字が欠けずに読める**（以前は約 500 で切れた）", () => {
+    const { result } = runStream(ascii(PCCMD_MAX_CHARS), ESC_READ);
+    expect(result.pcCommand?.command).toHaveLength(PCCMD_MAX_CHARS);
+    expect(result.pcCommand?.truncated).toBe(false);
+  });
+
+  it("以前の窓（512）を越える長さでも読める", () => {
+    expect(runStream(ascii(600), ESC_READ).result.pcCommand?.command).toHaveLength(600);
+  });
+
+  /**
+   * ここだけ `readPcCommand` を直に呼ぶ。窓ぶん（2122 バイト）の本文は
+   * **24x80 の画面に入りきらない**ので、applier 経由では書き込みで先に落ちる。
+   * 見たいのは「窓を使い切ったと分かるか」なので、読み取り側で確かめる。
+   */
+  it("窓を使い切ったら **truncated** が立つ（終端に届いていない）", () => {
+    const data = Uint8Array.from([...PCO_START, 0x81, ...ascii(PCO_SCAN_BYTES)]);
+    expect(readPcCommand(data, (b) => codec.decode(b)).truncated).toBe(true);
+  });
+
+  it("終端オーダーに届けば **truncated** は立たない", () => {
+    const data = Uint8Array.from([...PCO_START, 0x81, ...ascii(50), 0x02]);
+    const req = readPcCommand(data, (b) => codec.decode(b));
+    expect(req.truncated).toBe(false);
+    expect(req.command).toHaveLength(50);
   });
 });

@@ -12,6 +12,7 @@
  */
 import { As400Error } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic";
+import { errorCodeForCpf } from "../cpf-errors.js";
 import type {
   CreateOptions,
   DtaqAttributes,
@@ -339,13 +340,6 @@ export function parseCpfId(frame: Uint8Array): string | undefined {
   return undefined;
 }
 
-/** NOT_FOUND に写す CPF（オブジェクトなし） */
-const CPF_NOT_FOUND = new Set(["CPF9801", "CPF2105", "CPF3AA1"]);
-/** ACCESS_DENIED に写す CPF（権限なし） */
-const CPF_ACCESS_DENIED = new Set(["CPF9802", "CPF2189", "CPF2216"]);
-/** ALREADY_EXISTS に写す CPF（既に存在） */
-const CPF_ALREADY_EXISTS = new Set(["CPF9870"]);
-
 /**
  * 共通応答（0x8002）の rc と CPF メッセージを、**呼び出し側が区別できる** `As400Error` に写す。
  *
@@ -365,11 +359,8 @@ export function dtaqFailure(what: string, frame: Uint8Array): As400Error {
   const rc = commonReplyRc(frame);
   const cpf = parseCpfId(frame);
   const detail = `${what} failed (rc=0x${rc.toString(16)}${cpf ? `, ${cpf}` : ""})`;
-  if (cpf) {
-    if (CPF_NOT_FOUND.has(cpf)) return new As400Error("NOT_FOUND", detail);
-    if (CPF_ACCESS_DENIED.has(cpf)) return new As400Error("ACCESS_DENIED", detail);
-    if (CPF_ALREADY_EXISTS.has(cpf)) return new As400Error("ALREADY_EXISTS", detail);
-  }
+  const mapped = cpf === undefined ? undefined : errorCodeForCpf(cpf);
+  if (mapped !== undefined) return new As400Error(mapped, detail);
   // キー付きでないのにキーを指定した等の不整合
   if (rc === DTAQ_RC.keyMismatch) return new As400Error("CONFIG_ERROR", detail);
   return new As400Error("PROTOCOL_ERROR", detail);

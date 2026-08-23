@@ -241,11 +241,21 @@ describe("read", () => {
   });
 
   it("読めなかったときはタグを添えて返す（UI が手掛かりを出せる）", async () => {
-    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2]) }, tags: { "/d/f": 850 } });
+    // **850 は 2026-08-22 から読める**ので、読めないタグの例には使えない
+    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2]) }, tags: { "/d/f": 9999 } });
     expect(await (await call(app, "read", { path: "/d/f" })).json()).toMatchObject({
       content: null,
       code: "UNSUPPORTED_ENCODING",
-      tagCcsid: 850
+      tagCcsid: 9999
+    });
+  });
+
+  it("**850 のタグなら同梱の表で読む**（中身が UTF-8 として読めないとき）", async () => {
+    const app = appWith({ files: { "/d/f": new Uint8Array([0xc1, 0xc2]) }, tags: { "/d/f": 850 } });
+    expect(await (await call(app, "read", { path: "/d/f" })).json()).toMatchObject({
+      content: "┴┬",
+      ccsid: 850,
+      detectedBy: "tag"
     });
   });
 
@@ -257,7 +267,7 @@ describe("read", () => {
 
   it("手動指定が未対応・読めないときは 400（利用者の選択の問題なので）", async () => {
     const app = appWith({ files: { "/d/f": new Uint8Array([0xc1]) } });
-    const unsupported = await call(app, "read", { path: "/d/f", ccsid: 850 });
+    const unsupported = await call(app, "read", { path: "/d/f", ccsid: 9999 });
     expect(unsupported.status).toBe(400);
     expect(await unsupported.json()).toMatchObject({ code: "UNSUPPORTED_CCSID" });
 

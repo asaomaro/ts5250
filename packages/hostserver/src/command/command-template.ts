@@ -1,5 +1,6 @@
 import { As400Error } from "@ts5250/base";
-import type { CommandConnection } from "./command-connection.js";
+import type { CommandConnection, CommandResult } from "./command-connection.js";
+import { errorCodeForCpf } from "../cpf-errors.js";
 
 /**
  * **CL コマンドの定義（テンプレート）を取ってくる。**
@@ -95,6 +96,36 @@ function int32(n: number): Uint8Array {
 }
 
 /**
+ * **出力が返らなかったときの理由をホストのメッセージで語る。**
+ *
+ * `QCDRCMDD` は失敗すると出力パラメータを埋めずに戻る。ここで
+ * `QCDRCMDD returned no data` とだけ言うと、**利用者は自分で直せる問題なのかどうか
+ * 分からない**。呼び出しの戻りにはホストのメッセージが載っているので、それを見せる。
+ *
+ * 実測（2026-08-22・pub400 / IBM i 7.5）:
+ *
+ * ```
+ * CRTLIB → rc=1281(0x501) 出力=0  CPF9802 Not authorized to object CRTLIB in QSYS.
+ * SNDMSG → rc=0           出力=2  （成功）
+ * ```
+ *
+ * pub400 は公開の共有機なので `QSYS/CRTLIB` の権限を落としている。**版数の差ではない**
+ * ——同じ `CRTLIB` が実機（7.3）では引ける。
+ */
+function noDataFailure(command: string, library: string, result: CommandResult): As400Error {
+  const msg = result.messages[0];
+  if (msg === undefined) {
+    return new As400Error(
+      "HOST_SERVER_UNSUPPORTED",
+      `QCDRCMDD returned no data for ${library}/${command} (rc=${result.returnCode})`
+    );
+  }
+  const detail = `${library}/${command}: ${msg.id} ${(msg.text ?? "").trim()}`.trimEnd();
+  // 知らない CPF は HOST_SERVER_UNSUPPORTED のまま（推測で丸めない）
+  return new As400Error(errorCodeForCpf(msg.id) ?? "HOST_SERVER_UNSUPPORTED", detail);
+}
+
+/**
  * コマンド定義を引く。
  *
  * **2 回呼ぶ**——1 回目は「必要な長さ」を聞くためだけ。コマンドによって XML の量が
@@ -112,7 +143,7 @@ export async function retrieveCommandTemplate(
   qualified.set(ebcdicName(library, 10), 10);
 
   const callOnce = async (receiveLength: number): Promise<Uint8Array> => {
-    const { outputs } = await conn.call("QCDRCMDD", "QSYS", [
+    const { result, outputs } = await conn.call("QCDRCMDD", "QSYS", [
       { type: "in", data: qualified },
       { type: "in", data: int32(receiveLength) },
       { type: "in", data: ebcdicName("DEST0100", 8) },
@@ -123,7 +154,7 @@ export async function retrieveCommandTemplate(
     ]);
     const received = outputs.find((o) => o !== undefined && o.length >= HEADER_LEN);
     if (received === undefined) {
-      throw new As400Error("HOST_SERVER_UNSUPPORTED", `QCDRCMDD returned no data for ${command}`);
+      throw noDataFailure(command, library, result);
     }
     return received;
   };

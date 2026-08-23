@@ -29,8 +29,18 @@ export interface PcCommandConfig {
   /** 作業ディレクトリー */
   cwd?: string;
   /**
-   * 許可パターン（正規表現・**全体一致**）。指定するとこれに合わないコマンドは実行しない。
+   * 許可パターン。指定するとこれに合わないコマンドは実行しない。
    * 省略時は「有効ならすべて実行」。緩いパターンは緩い門にしかならない点は運用者の責任。
+   *
+   * 2 つの書き方がある:
+   *
+   * - **正規表現・全体一致**（既定）——`notepad .*\.txt`
+   * - **`prog:` 接頭辞でプログラム名照合**——`prog:notepad` は `notepad` に
+   *   任意の引数が付いたものを許す。**引数にシェルのメタ文字が無いときだけ**
+   *
+   * `prog:` を足したのは、正規表現 1 本だと**引数まで自分で書かねばならず**、
+   * 書き損じが緩い門になりやすいため（backlog `pc-command.md`）。
+   * **前方一致は採らない**——`notepad; rm -rf /` が素通りする。
    */
   allow?: string[];
 }
@@ -52,13 +62,48 @@ export function pcCommandHostname(): string {
   return hostname();
 }
 
+/** プログラム名照合の接頭辞 */
+const PROG_PREFIX = "prog:";
+
+/**
+ * シェルに意味を持つ文字。**`spawn(..., { shell: true })` で走らせている**ので、
+ * 引数にこれらが混ざると別のコマンドを繋げられる（`notepad & del x`）。
+ *
+ * ⚠ **空白で切った先頭語だけを見るのでは足りない**——`notepad & del x` の先頭語は
+ * `notepad` で、素通りしてしまう。引数側も見ること。
+ */
+const SHELL_META = /[;&|`$><\n\r()]/u;
+
+/**
+ * `prog:NAME` の照合。`NAME` に**任意の引数**が付いたものを許すが、
+ * **引数にシェルのメタ文字が無いときだけ**。
+ *
+ * プログラム名は**大文字小文字を区別しない**（ホストからは大文字で届くことが多く、
+ * Windows のコマンド名も区別しない）。
+ */
+function matchesProgram(command: string, name: string): boolean {
+  const trimmed = command.trim();
+  const sep = trimmed.search(/\s/u);
+  const head = sep === -1 ? trimmed : trimmed.slice(0, sep);
+  if (head.toLowerCase() !== name.toLowerCase()) return false;
+  const rest = sep === -1 ? "" : trimmed.slice(sep + 1);
+  return !SHELL_META.test(rest);
+}
+
 /**
  * 許可パターンの検査。**全体一致**でしか通さない（前方一致にすると
  * `notepad; rm -rf /` のような後置きが素通りする）。
+ *
+ * `prog:` 接頭辞は**プログラム名照合**（引数は自由。ただしメタ文字は不可）。
  */
 export function isAllowed(command: string, allow: readonly string[] | undefined): boolean {
   if (!allow || allow.length === 0) return true;
   return allow.some((p) => {
+    if (p.startsWith(PROG_PREFIX)) {
+      const name = p.slice(PROG_PREFIX.length);
+      // 名前が空の `prog:` は**全部素通り**になるので、一致しないに倒す
+      return name.length > 0 && matchesProgram(command, name);
+    }
     try {
       return new RegExp(`^(?:${p})$`).test(command);
     } catch {
@@ -72,6 +117,12 @@ export function isAllowed(command: string, allow: readonly string[] | undefined)
 /** `allow` に書けるか（保存前の検証用。壊れた正規表現を永続化しない） */
 export function invalidAllowPattern(patterns: readonly string[]): string | undefined {
   for (const p of patterns) {
+    if (p.startsWith(PROG_PREFIX)) {
+      // **名前が空の `prog:` は保存させない**——一致しないに倒してはいるが、
+      // 「書いたのに効かない」パターンを永続化する意味が無い
+      if (p.length === PROG_PREFIX.length) return p;
+      continue;
+    }
     try {
       new RegExp(`^(?:${p})$`);
     } catch {
@@ -98,10 +149,33 @@ export function invalidAllowPattern(patterns: readonly string[]): string | undef
  *
  * ## 分かっていないこと
  *
- * **根本原因は未特定**（Windows のジョブオブジェクト絡みで、`spawn()` の子プロセスが
- * `CALL` 経由の入れ子で起動されると巻き添えで終了させられる、と見られる）。
+ * **根本原因は未特定**（当時の見立ては「Windows のジョブオブジェクト絡みで、`spawn()` の
+ * 子プロセスが `CALL` 経由の入れ子で起動されると巻き添えで終了させられる」）。
  * `CALL` は本来バッチファイル・ラベル呼び出し用で、`START` のような内部コマンドに
  * 付けても意味は変わらないため、**実行前に安全に取り除ける**という回避策を採っている。
+ *
+ * ## 別の Windows 実機で測り直した（2026-08-23。**再現しない**）
+ *
+ * Windows 11 Pro（build 26200.9168 / `cmd.exe` 10.0.26100.8875）・Node 24.18・
+ * Electron 32.3.3・Defender ＋ ESET の実機で **40 ケース**測り、
+ * **`CALL START` でも起動したアプリは 1 件も消えなかった**
+ * （`20260823-pccmd-windows-verify` の research.md に生の測定値）:
+ *
+ * | 振った軸 | 中身 | 結果 |
+ * |---|---|---|
+ * | コマンドの形（8） | `CALL START` / `START` / `CMD /C "…"` の入れ子 / `NET USE &` 連結 / 直接実行 | **全部生存**（唯一の例外は `START /B` に**タイトルを付けない**形——exe パスがタイトルとして食われ、**次のトークンがファイルの関連付けで開かれる**。`START` を組み立てる側の落とし穴） |
+ * | spawn の指定（4） | 本番の指定 / `detached` 無し / `windowsHide` 無し / `stdio: "inherit"` | **全部生存** |
+ * | アプリの種類（2） | コンソール（node.exe）/ GUI（notepad.exe） | **全部生存** |
+ * | 親プロセス（3） | bash 起動の node / cmd.exe 起動の node / **Electron の main プロセス**（配布形と同じ経路） | **全部生存**。どれも**ジョブオブジェクトに入っていない**（`IsProcessInJob` で実測） |
+ * | `CALL` の解析差 | 起動された側が受け取った `argv`（パスに空白を含む形も） | **`CALL` の有無で完全に同一**（引用符の剥がれも起きない） |
+ *
+ * → **「`CALL` が原因」はこの機械では成り立たない。** 原資料の機械で何が効いていたかは
+ * 依然として分かっていない（あの環境には届かない）。**回避策は残す**——`CALL START` の
+ * `CALL` は意味を持たないので落としても無害で、実機 1 台に「落とせば直った」という
+ * 観測がある以上、外す理由が無い。**再発したらまず測るもの**: `ComSpec` の指す先・
+ * `cmd.exe` の版・`Command Processor` の `AutoRun`・親がジョブに入っているか・
+ * app.exe の置き場（UNC 共有か）。生存そのものの回帰は
+ * `packages/server/test/pc-command-windows.test.ts`（Windows でだけ走る）。
  *
  * ## 効かなかった手（再調査の手戻り防止）
  *

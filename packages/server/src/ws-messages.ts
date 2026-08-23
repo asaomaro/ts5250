@@ -266,6 +266,13 @@ export interface WsOpened {
   pcCommand: boolean;
   /** 予約中ならその表示名。**後から入ったタブにも今の状態を伝える** */
   reservedBy?: string;
+  /**
+   * **留守中に実行された PC コマンド**（受信順。無ければ載せない）。
+   *
+   * `pc-command` は購読者にしか届かないので、ブラウザを閉じている間に届いたコマンドは
+   * **実行されたのに誰にも知らされなかった**。繋ぎ直しで渡して、後から追えるようにする。
+   */
+  pcCommands?: PcCommandEvent[];
 }
 export interface WsScreen {
   type: "screen";
@@ -345,6 +352,14 @@ export interface WsPrinterOpened {
    * 開いても `stopped` のままで、利用者の開始操作を待つ
    */
   state: ServiceState;
+  /**
+   * `state === "error"` のときの理由。
+   *
+   * ⚠ **後から繋いだ画面にも渡す。** `printer-state` の push は**繋いでいる間しか届かない**ので、
+   * 誰も見ていない間に止まった常駐プリンターは、朝ブラウザを開いても
+   * **「エラー」とだけ出て理由が無い**状態になっていた（VT の切断理由と同じ形）。
+   */
+  error?: string;
   /**
    * 起動応答コード（`I902` 等）。**待ち受けていなければ無い**——
    * 接続していないので、ホストから応答をもらっていない

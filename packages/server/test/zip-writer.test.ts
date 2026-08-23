@@ -31,8 +31,20 @@ function isInstalled(cmd: string): boolean {
   return err?.code !== "ENOENT";
 }
 
+/**
+ * `python3` が**実際に走るか**。Windows には既定で「アプリ実行エイリアス」
+ * （`…\WindowsApps\python3.exe`）が置かれており、**起動はできる**（＝ENOENT にならない）が、
+ * 走らせると「Python was not found」と言って失敗する。**ENOENT だけでは見分けられない**
+ * ので、ここだけは些細なプログラムを実際に走らせて終了コードを見る
+ * （`-c pass` の 0 は python では当てにできる。`-h` の扱いがコマンドごとに違うのとは別の話）。
+ */
+function python3Works(): boolean {
+  const r = spawnSync("python3", ["-c", "pass"], { stdio: "ignore" });
+  return r.error === undefined && r.status === 0;
+}
+
 const HAS_UNZIP = isInstalled("unzip");
-const HAS_PYTHON3 = isInstalled("python3");
+const HAS_PYTHON3 = python3Works();
 
 let dir: string | undefined;
 afterEach(() => {
