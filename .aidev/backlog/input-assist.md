@@ -1,3 +1,8 @@
+---
+backlog: input-assist
+kind: standing
+---
+
 # 入力支援 UI（datepicker / timepicker ほか）
 
 5250 の入力欄に、ブラウザらしい入力支援を出せないかという検討。

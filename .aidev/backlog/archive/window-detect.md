@@ -1,3 +1,8 @@
+---
+backlog: window-detect
+kind: topic
+---
+
 # ウィンドウ判定（罫線推測をやめて受信データで決める）
 
 ウィンドウ装飾（`windowFrame` / `windowBackdrop`）を出す範囲を、**画面に描かれた罫線から

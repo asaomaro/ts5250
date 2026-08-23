@@ -1,3 +1,8 @@
+---
+backlog: pc-command
+kind: standing
+---
+
 # PC コマンド（STRPCO / STRPCCMD）
 
 2026-07-28 に `STRPCCMD` の検出・実行・信頼境界まで実装した

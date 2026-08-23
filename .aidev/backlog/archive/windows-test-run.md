@@ -1,3 +1,8 @@
+---
+backlog: windows-test-run
+kind: topic
+---
+
 # Windows 実機でテストを回す
 
 2026-08-23 に **Windows 11 実機でテスト一式を初めて全部緑にした**

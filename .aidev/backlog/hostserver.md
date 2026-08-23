@@ -1,3 +1,8 @@
+---
+backlog: hostserver
+kind: standing
+---
+
 # ホストサーバー（ACS データ転送相当）
 
 2026-07-18 に signon 認証まで実装済み（`.aidev/works/20260718-acs-data-transfer`）。

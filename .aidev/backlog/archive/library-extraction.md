@@ -1,3 +1,8 @@
+---
+backlog: library-extraction
+kind: topic
+---
+
 # ライブラリ切り出し
 
 `packages/core` の各層を他プロジェクトから使えるライブラリとして切り出す構想。

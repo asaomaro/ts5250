@@ -1,3 +1,8 @@
+---
+backlog: field-input
+kind: topic
+---
+
 # フィールド入力仕様（FFW 挙動ビット・ローカル編集キー）
 
 2026-07-28 に「EDTWRD / EDTMSK に対応できているか」を調べた際、**FFW の挙動ビットが

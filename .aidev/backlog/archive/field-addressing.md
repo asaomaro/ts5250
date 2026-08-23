@@ -1,3 +1,8 @@
+---
+backlog: field-addressing
+kind: topic
+---
+
 # 画面の欄の指し方（id と検索）
 
 **→ 2026-08-04、`20260804-field-addressing` で着地。**

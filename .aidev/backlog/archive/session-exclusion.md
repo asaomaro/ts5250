@@ -1,3 +1,8 @@
+---
+backlog: session-exclusion
+kind: topic
+---
+
 # セッションの排他（自動操作と人間の同居）
 
 **→ 2026-08-04 に着地。MCP の排他は `20260803-mcp-session-exclusion`、

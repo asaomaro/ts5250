@@ -1,3 +1,8 @@
+---
+backlog: datastream-commands
+kind: standing
+---
+
 # 5250 データストリームの未実装コマンド
 
 `wtd-applier.ts` の `default` 節は**未知のコマンドでレコードの残りごと捨てる**。
@@ -76,6 +81,16 @@
     続きを ESC と読み違えて `expected ESC, got 0x0 — discarding rest of record` で
     **ホストが返した画像と後続の READ を捨てていた**
     （F3 直後に別レコードで描き直されるため症状としては見えていなかった）
+
+- [x] **`expected ESC, got 0xc0` の由来** — **データストリームの話ではなかった**
+  （`20260802-device-busy-record` / PR #292・`74b317ba`）
+  - 正体は**起動応答の失敗コード `8902`（装置が使用中）**。表示セッションがそれを取りこぼし、
+    続きをデータストリームとして読んで `expected ESC, got 0xc0` を出していた
+  - 症状が解析エラーに見えたのでこの台帳へ積んだが、**原因は交渉段階**だった。
+    `PrinterSession.handleStartup` は元からコードで判断していたので、**表示側をそちらへ揃えた**
+  - 失敗コードの意味表は `packages/tn5250/src/telnet/startup-record.ts:41`
+    （`8902: "Device not available."`。20 件そろっているのに表示だけ辿り着けていなかった）
+  - 文言には**要求した装置名を添えた**（`（装置 DEV1）`）——無いとどの装置が使用中か分からない
 
 ## 原典で確定した（2026-07-30・`20260730-tn5250-cross-check`）
 
