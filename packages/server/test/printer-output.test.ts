@@ -35,7 +35,9 @@ describe("handleReport", () => {
     expect(readdirSync(dir)).toHaveLength(0);
   });
 
-  it("autoPrint は lp 不在なら warn して printed=false（degrade）", async () => {
+  // **Windows は `lp` を通らない**（`printer-output.ts` の win32 分岐がテキストを
+  // ドライバー経由で出す）。同じ degrade は `printer-output-windows.test.ts` が見ている
+  it.skipIf(process.platform === "win32")("autoPrint は lp 不在なら warn して printed=false（degrade）", async () => {
     const warns: string[] = [];
     const r = await handleReport(report, { autoPrint: "PRT1" }, (m) => warns.push(m));
     // この環境に lp が無いので false（lp があるサーバーでのみ true）

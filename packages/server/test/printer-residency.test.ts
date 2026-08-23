@@ -303,3 +303,156 @@ describe("帳票バッファの上限", () => {
     expect(entry.delivered).toBeLessThanOrEqual(entry.reports.length);
   });
 });
+
+/**
+ * **落ちたら張り直す**（backlog `hostserver.md`「常駐プリンターを長時間保てるか」）。
+ *
+ * 状態機械（`service-state.ts`）は `listening --> reconnecting --> listening` を定義しているのに、
+ * **プリンターだけ `error` へ直行していた**——待ち行列監視は最初から張り直しを持っており、
+ * 実機で 45 分のアイドルを越えられている。
+ *
+ * 実機で測ったら差が出た（`scripts/measure-printer-idle-drop.mjs`）:
+ * **常駐プリンターは 15 分のアイドル後に帳票が届かなくなる**。落ちたまま誰も張り直さないので、
+ * 「常駐しているつもりで届かない」状態に静かに入る——**黙って壊れる形**。
+ */
+describe("落ちたときの張り直し", () => {
+  /**
+   * 切断を起こせる偽の接続。
+   *
+   * ⚠ `transport` は**実体**を注入する口なので、張り直しでも同じ実体が使われる。
+   * 「張り直した」は**インスタンスの数ではなく `start()` の回数**で数える。
+   */
+  class Droppable extends FakeTransport {
+    starts = 0;
+    private closeFn: (() => void) | undefined;
+    constructor() {
+      super((t) => t.feed(startup()));
+    }
+    override start(): void {
+      this.starts += 1;
+      super.start();
+    }
+    override onClose(fn: () => void): void {
+      this.closeFn = fn;
+    }
+    drop(): void {
+      this.closeFn?.();
+    }
+  }
+
+  /** 待たない SessionManager（既定の待ちは秒〜分単位になる） */
+  const noWait = (): SessionManager => new SessionManager({ delay: async () => undefined });
+
+  async function openDroppable(sessions: SessionManager, service: boolean) {
+    const tr = new Droppable();
+    const entry = await sessions.openPrinter({
+      ...(service ? { service: true } : {}),
+      transport: tr
+    });
+    return { entry, tr };
+  }
+
+  /** 張り直しはマイクロタスクで進む（待ちを潰してあるので実時間は要らない） */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it("**常駐が落ちたら張り直して listening へ戻る**", async () => {
+    const sessions = noWait();
+    const { entry, tr } = await openDroppable(sessions, true);
+    expect(entry.state).toBe("listening");
+    expect(tr.starts).toBe(1);
+
+    tr.drop();
+    await settle();
+
+    expect(entry.state, "張り直せたら listening に戻る").toBe("listening");
+    expect(tr.starts, "接続を張り直した").toBe(2);
+    expect(entry.session, "接続を持っている").toBeDefined();
+    sessions.stopPrinter(entry.id);
+  });
+
+  it("**何度落ちても張り直す**（1 回きりにしない）", async () => {
+    const sessions = noWait();
+    const { entry, tr } = await openDroppable(sessions, true);
+    for (let i = 0; i < 3; i++) {
+      tr.drop();
+      await settle();
+    }
+    expect(entry.state).toBe("listening");
+    expect(tr.starts).toBe(4);
+    sessions.stopPrinter(entry.id);
+  });
+
+  it("**常駐でないプリンターは今までどおり error**（張り直さない）", async () => {
+    const sessions = noWait();
+    const { entry, tr } = await openDroppable(sessions, false);
+    tr.drop();
+    await settle();
+    expect(entry.state).toBe("error");
+    expect(entry.error).toBe("disconnected");
+    expect(tr.starts, "張り直していない").toBe(1);
+  });
+
+  it("**明示停止は張り直しを起こさない**（利用者の意思を障害と取り違えない）", async () => {
+    const sessions = noWait();
+    const { entry, tr } = await openDroppable(sessions, true);
+    sessions.stopPrinter(entry.id);
+    await settle();
+    expect(entry.state).toBe("stopped");
+    expect(tr.starts, "張り直していない").toBe(1);
+  });
+
+  it("**張り直し中は待ち受け扱い**（枠を空けたと誤らない）", async () => {
+    // 待ちを潰さない＝張り直しが進まない状態で、落ちた直後を見る
+    const sessions = new SessionManager({ delay: () => new Promise(() => undefined) });
+    const tr = new Droppable();
+    const entry = await sessions.openPrinter({ service: true, transport: tr });
+    tr.drop();
+    await settle();
+    expect(entry.state).toBe("reconnecting");
+    expect(sessions.isResident(entry.id)).toBe(true);
+    sessions.stopPrinter(entry.id);
+  });
+});
+
+/**
+ * **破棄したエントリが張り直しを続けないこと。**
+ *
+ * ⚠ `close()` は一覧からエントリを消す。張り直しを降ろさずに切ると、`closed` ハンドラが
+ * 「障害で落ちた常駐」と読んで**捨てたはずのエントリが接続を張り続ける**
+ * ——マップから消えているので誰も止められない。張り直しを入れたときに踏みかけた。
+ */
+describe("破棄と張り直し", () => {
+  class Counting extends FakeTransport {
+    starts = 0;
+    private closeFn: (() => void) | undefined;
+    constructor() {
+      super((t) => t.feed(startup()));
+    }
+    override start(): void {
+      this.starts += 1;
+      super.start();
+    }
+    override onClose(fn: () => void): void {
+      this.closeFn = fn;
+    }
+  }
+
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it("**close したら張り直さない**（捨てたエントリが接続を掴み続けない）", async () => {
+    const sessions = new SessionManager({ delay: async () => undefined });
+    const tr = new Counting();
+    const entry = await sessions.openPrinter({ service: true, transport: tr });
+    expect(tr.starts).toBe(1);
+
+    await sessions.close(entry.id);
+    await settle();
+
+    expect(tr.starts, "張り直していない").toBe(1);
+    expect(entry.state).toBe("stopped");
+  });
+});

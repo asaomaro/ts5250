@@ -1,14 +1,37 @@
 /**
  * 結果を返さない SQL 文（DML / DDL）の実行。
  *
- * ## なぜ `executeImmediate` を使わないか
+ * ## 2 つの道
  *
- * `executeImmediate`(0x1806) と `prepare`(0x1800) は実機で `rcClass=2 / -215` に拒否される
- * （`20260723-sql-multi-statement` research F2）。一方
- * **`prepareAndDescribe`(0x1803) → `execute`(0x1805) は DML も DDL も通る**
- * （SR-OSAKA で実測。`20260730-sql-non-query-statements` research F1）。
- * `insert.ts` が既に使っている道で、そこから `changeDescriptor` を落とせばよい
- * ——マーカーが無い文ではマーカー形式が**空（0 バイト）で返る**ので登録するものが無い（同 F2）。
+ * **マーカーの無い非クエリ文は `executeImmediate`(0x1806) で 1 往復**。
+ * それ以外（`CALL`・マーカー付き・クエリ）は
+ * `prepareAndDescribe`(0x1803) → `execute`(0x1805) の 2 往復。
+ *
+ * ⚠ **かつて「`executeImmediate` は `rcClass=2 / -215` で拒否される」と記録していたが、
+ * それは誤りだった**（`20260723-sql-multi-statement` research F2）。2026-08-22 に
+ * 実機で撃ち直したところ、**拒否していたのはこちらの組み立て**——パラメータ値の
+ * **CCSID(2)＋長さ(2) の前置きを付けていなかった**ため、ホストは
+ * `PWS0011 文字変換中にエラーが起こった` を返していた。前置きを付けたら DDL も DML も通る。
+ *
+ * ## 2 つの道が同じ結果になることの確認
+ *
+ * 2 実機（SR-OSAKA 7.3 / pub400 7.5）で同じ文を両方の道に流して比べた（2026-08-22）。
+ * `INSERT` / `UPDATE` / `DELETE` / `MERGE`（副問合せ・日本語込み）、
+ * `CREATE TABLE` / `VIEW` / `INDEX` / `ALIAS`、`DROP`、`GRANT`、`COMMENT`、`LABEL`、
+ * `SET SCHEMA`、`CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `TYPE` / `VARIABLE`——
+ * **すべて `rcClass` も `SQLCODE` も影響行数も一致した**。
+ *
+ * ⚠ **比べるときは 2 往復の道も `execute` まで走らせること。** `prepareAndDescribe`
+ * だけで止めて比べると、`CREATE PROCEDURE` などが「1 往復だけ失敗する」ように見える
+ * ——実際は QTEMP に routine を作れないだけで、**両方の道で `-457`** になる。
+ * この測り違いを一度している。
+ *
+ * ## ⚠ クエリだけは `executeImmediate` に流してはならない
+ *
+ * **`SELECT` を `executeImmediate` に渡すと `rcClass=0 / SQLCODE 0` で黙って通る**
+ * （2 実機とも）。行は 1 つも返らないので、**「実行できたのに何も起きない」**になる。
+ * 2 往復の道は同じ `SELECT` を `-518 / 07003` で明確に断る。
+ * だから**先頭語で非クエリと分かった文だけ**を 1 往復の道に載せる。
  *
  * ## ⚠ 接続の占有
  *
@@ -44,7 +67,12 @@ import { encodeMarkerRow, buildMarkerData } from "./marker-encode.js";
 import { decodeRow, type ColumnMeta, type DbValue } from "./db-decode.js";
 import { typeName, jsTypeOf } from "./db-types.js";
 import { SqlError, readProcedureResultSet, type LobOptions } from "./query.js";
-import { hasParameterMarker, isCallStatement, isRowCountStatement } from "./statement-kind.js";
+import {
+  hasParameterMarker,
+  isCallStatement,
+  isNonQueryStatement,
+  isRowCountStatement
+} from "./statement-kind.js";
 
 const log = childLog({ component: "hostserver-sql-execute" });
 
@@ -120,31 +148,58 @@ export interface ExecuteOptions {
   resultLimit?: number;
   /** 結果セットの LOB の取り方（指定しなければロケーターのまま） */
   lob?: LobOptions;
+  /**
+   * パラメータマーカー（`?`）に埋める値。**文中の `?` と同じ順**。
+   *
+   * 渡さなければ `?` を含む文は**実行前に断る**（`CALL` を除く）。値を埋めた文を
+   * 送れば済む場面が多いので既定は断る側に倒してあるが、**値に引用符や日本語が混ざる
+   * 文字列を自分で埋め込むのは危うい**——そこはこの引数で渡す。
+   *
+   * 値は文字列（または NULL）で渡す。数値・日付も**文字列のまま**でよい
+   * ——ホストが列の型に合わせて解釈する（`insert.ts` の一括投入と同じ扱い）。
+   */
+  parameters?: readonly (string | null)[];
 }
 
 /**
  * 結果を返さない文を実行する。
  *
  * @throws `SqlError` SQLCODE が負のとき（構文誤り・存在しない表・経路違い `-518`）
- * @throws `As400Error("CONFIG_ERROR")` `CALL` 以外でパラメータマーカー（`?`）を含むとき
+ * @throws `As400Error("CONFIG_ERROR")` `?` を含むのに `parameters` も `CALL` でもないとき、
+ *   または `parameters` の数が `?` の数と合わないとき
  */
 export async function executeStatement(
   conn: DbConnection,
   sql: string,
   options: ExecuteOptions = {}
 ): Promise<ExecuteResult> {
-  const markersAllowed = isCallStatement(sql);
+  // **値を渡されたなら `?` を通す。** 渡されなければ `CALL` の出力パラメーターだけ
+  const bound = options.parameters;
+  const markersAllowed = isCallStatement(sql) || bound !== undefined;
   if (hasParameterMarker(sql) && !markersAllowed) {
     // `CONFIG_ERROR` を使うのは「**指定の不備**で、直す先はこちら側」だから（`errors.ts` の定義。
     // HTTP 400）。`SQL_ERROR` はホストが判定した誤りに使う——ここはホストへ行く前に断っている
     throw new As400Error(
       "CONFIG_ERROR",
-      "パラメータマーカー（?）を含む文はこの経路では実行できません（値を埋めた文を送ってください）。" +
-        "? を使えるのは CALL の出力パラメーターだけです"
+      "パラメータマーカー（?）を含む文はこの経路では実行できません" +
+        "（値を埋めた文を送るか、parameters に値を渡してください）。" +
+        "parameters なしで ? を使えるのは CALL の出力パラメーターだけです"
+    );
+  }
+  if (bound !== undefined && !hasParameterMarker(sql)) {
+    // **黙って捨てない。** 値を渡したのに効いていない状態は気づけない
+    throw new As400Error(
+      "CONFIG_ERROR",
+      "parameters を渡しましたが、文にパラメータマーカー（?）がありません"
     );
   }
   const release = conn.acquire();
   try {
+    // **1 往復で済む道**——マーカーが無く、先頭語で非クエリと分かる文だけ。
+    // クエリを混ぜると黙って通ってしまう（上の docstring）
+    if (!markersAllowed && isNonQueryStatement(sql)) {
+      return await executeImmediate(conn, sql);
+    }
     // 1) 準備。**構文誤り・存在しない表はここで分かる**（research F5）
     const prep = await conn.request({
       reqId: DB_REQ.prepareAndDescribe,
@@ -187,7 +242,7 @@ export async function executeStatement(
         identifier(DB_CP.prepareStatementName, STATEMENT_NAME),
         num(DB_CP.sqlStatementType, STATEMENT_TYPE_OTHER, 2),
         ...(withMarkers
-          ? [{ cp: DB_CP.extendedParameterMarkerData, value: nullMarkerData(format) }]
+          ? [{ cp: DB_CP.extendedParameterMarkerData, value: markerData(format, bound) }]
           : [])
       ],
       allowTemplateError: true
@@ -226,6 +281,44 @@ export async function executeStatement(
   }
 }
 
+/**
+ * **1 往復で実行する**（`executeImmediate` 0x1806）。準備と実行が 1 要求にまとまる。
+ *
+ * 1 文あたりの実測（2026-08-22）:
+ *
+ * | 実機 | 1 文あたり |
+ * |---|---|
+ * | SR-OSAKA（LAN・7.3） | 12〜28ms |
+ * | pub400（インターネット・7.5） | 265〜341ms |
+ *
+ * 往復が支配的な相手ほど効く。**行数・警告・エラーは 2 往復の道と同じように取れる**
+ * （`INSERT … VALUES` 3 件で `updateCount=3`、存在しない表の `DROP` で `-204`、
+ * 構文誤りで `-104`）。
+ *
+ * ⚠ **クエリを渡してはならない**——黙って `SQLCODE 0` で通る。呼び出し側で弾くこと。
+ */
+async function executeImmediate(conn: DbConnection, sql: string): Promise<ExecuteResult> {
+  const reply = await conn.request({
+    reqId: DB_REQ.executeImmediate,
+    // **診断ビットを常に立てる**。立てないと失敗が空の SQLCA だけになり原因が分からない
+    orsBitmap:
+      ORS.sendReplyImmediately | ORS.sqlca | ORS.messageId | ORS.firstLevelText,
+    params: [sqlText(DB_CP.sqlStatementText, sql)],
+    allowTemplateError: true
+  });
+  const ca = checkSqlca(reply, "文を実行できませんでした");
+  const result: ExecuteResult = {
+    updateCount: Math.max(0, ca.updateCount),
+    // **文の側で決める。** SQLCA は DDL でも `updateCount: 0` を返す（research F3）
+    hasRowCount: isRowCountStatement(sql)
+  };
+  if (ca.sqlCode > 0 && ca.sqlCode !== SQLCODE_RESULT_SETS) {
+    result.warning = { sqlCode: ca.sqlCode, sqlState: ca.sqlState };
+    log.debug(`statement succeeded with warning: SQLCODE=${ca.sqlCode} SQLSTATE=${ca.sqlState}`);
+  }
+  return result;
+}
+
 /** マーカー形式を登録する（`insert.ts` と同じ手順・同じ理由で SQLCA も要求する） */
 async function changeDescriptor(conn: DbConnection, format: MarkerFormat): Promise<void> {
   const reply = await conn.request({
@@ -249,9 +342,26 @@ async function changeDescriptor(conn: DbConnection, format: MarkerFormat): Promi
   }
 }
 
-/** すべて NULL の 1 行。**入力値は持たない**（上の docstring の判断） */
-function nullMarkerData(format: MarkerFormat): Uint8Array {
-  const row = encodeMarkerRow(format, format.fields.map(() => null));
+/**
+ * マーカーへ送る 1 行。
+ *
+ * `values` を渡さなければ**すべて NULL**——`CALL` の `?` は「値を書く場所ではなく
+ * 結果を受け取る場所」なので、入力値を持たない（上の docstring の判断）。
+ *
+ * 渡されたときは**数が合っているかをここで確かめる**。ホストの申告した欄数と
+ * 突き合わせるので、`?` の数え違い（引用符の中の `?` など）もここで出る。
+ */
+function markerData(
+  format: MarkerFormat,
+  values: readonly (string | null)[] | undefined
+): Uint8Array {
+  if (values !== undefined && values.length !== format.fields.length) {
+    throw new As400Error(
+      "CONFIG_ERROR",
+      `parameters の数が合いません（文の ? は ${format.fields.length} 個 / 渡された値は ${values.length} 個）`
+    );
+  }
+  const row = encodeMarkerRow(format, values ?? format.fields.map(() => null));
   return buildMarkerData(format, [row]);
 }
 

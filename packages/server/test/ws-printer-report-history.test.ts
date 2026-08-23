@@ -117,3 +117,46 @@ describe("帳票の配り直しと受信時刻", () => {
     mgr.closeAll();
   });
 });
+
+/**
+ * **止まった理由も配り直す。**
+ *
+ * `printer-state` の push は**繋いでいる間しか届かない**。常駐プリンターが誰も見ていない間に
+ * 止まると、朝ブラウザを開いても **「エラー」とだけ出て理由が無い**状態になっていた
+ * ——帳票の配り直し（上）と同じ形の取りこぼしで、VT の切断理由でも同じことをやっていた。
+ */
+describe("止まった理由の配り直し", () => {
+  /** `setPrinterState` は private。状態を作る道はここ 1 本なので直接叩く */
+  function fail(mgr: SessionManager, reason: string): void {
+    const m = mgr as unknown as {
+      setPrinterState: (e: unknown, s: string, err?: string) => void;
+    };
+    m.setPrinterState(mgr.listPrinters()[0]!, "error", reason);
+  }
+
+  it("**開き直すと理由が届く**（エラーとだけ出さない）", async () => {
+    const { mgr, connect } = setup(() => CLOCK);
+    const first = connect();
+    await first.conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    first.conn.dispose();
+    // 誰も見ていない間に止まる
+    fail(mgr, "device is in use by another session");
+
+    const second = connect();
+    await second.conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    const opened = openedOf(second.sent)!;
+    expect(opened.state).toBe("error");
+    expect(opened.error, "理由が載る").toBe("device is in use by another session");
+    mgr.closeAll();
+  });
+
+  it("**理由が無ければ欄ごと載せない**（空文字を送らない）", async () => {
+    const { mgr, connect } = setup(() => CLOCK);
+    const { conn, sent } = connect();
+    await conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    const opened = openedOf(sent)!;
+    expect(opened.state).toBe("listening");
+    expect(opened).not.toHaveProperty("error");
+    mgr.closeAll();
+  });
+});

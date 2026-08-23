@@ -20,6 +20,8 @@ import {
   listObjects,
   listUsers,
   queryLimited,
+  executeStatement,
+  isNonQueryStatement,
   dtaqDecodeEbcdic,
   capturePlan,
   listPlansFromCache,
@@ -142,9 +144,10 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
     "host_sql",
     {
       description:
-        "ホストサーバー（database）経由で SELECT を実行し、列メタデータ付きで結果を返す。" +
-        "**SELECT 専用**——INSERT/UPDATE/DELETE/DDL は実行できない（更新は host_command で RUNSQL を使う）。" +
+        "ホストサーバー（database）経由で SQL を実行する。SELECT は列メタデータ付きで結果を返す。" +
         "5250 の画面操作を介さないため、画面レイアウトに影響されない。" +
+        "**INSERT/UPDATE/DELETE/DDL は allowWrite: true を明示したときだけ実行する**" +
+        "——取り消せないので、書くつもりであることを毎回述べさせる。" +
         "**maxRows はホストから取得する行数の上限**（既定 200）——上限に達したら結果セットを" +
         "打ち切るので、大きな表でも全行を読み込まない。続きがある場合は truncated: true を返す。" +
         "LOB 列は既定でロケーターのみ返す。中身が要るときは lobMaxBytes を指定する。",
@@ -153,30 +156,78 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         sql: z.string(),
         maxRows: z.number().int().positive().max(MAX_LIMIT).optional(),
         /** LOB の中身も取る場合の 1 セルあたり上限（バイト）。既定は取りに行かない */
-        lobMaxBytes: z.number().int().positive().max(1024 * 1024).optional()
+        lobMaxBytes: z.number().int().positive().max(1024 * 1024).optional(),
+        /**
+         * **これ以下の LOB を行データに載せて返させる**（バイト。既定 0＝載せない）。
+         *
+         * ロケーターを 1 つずつ引き直す往復が消えるので、**往復が高い相手ほど効く**。
+         * 実測（LOB セル 6 個・pub400・インターネット越し）:
+         * 既定 0 ＋ `lobMaxBytes` は 12 往復 / 5,014ms、しきい値 65536 なら 4 往復 / 1,306ms。
+         *
+         * ⚠ **行そのものが膨らむ**（中身を取らない既定の 982B → 5,078B）ので大きくしすぎない。
+         */
+        lobThreshold: z.number().int().min(0).max(15 * 1024 * 1024).optional(),
+        /**
+         * **結果を返さない文（INSERT/UPDATE/DELETE/DDL）を実行してよいか。** 既定 false。
+         *
+         * ⚠ **これは安全の境界ではない。** `host_command` から `RUNSQL` を撃てば同じことが
+         * できるので、SELECT 専用に縛っても書き込みは止まらない。**意図を毎回述べさせる**
+         * ためのもので、「SELECT のつもりで打った文が更新だった」を防ぐ。
+         */
+        allowWrite: z.boolean().optional()
       },
       outputSchema: {
-        columns: z.array(
-          z.object({
-            name: z.string(),
-            typeName: z.string(),
-            length: z.number(),
-            scale: z.number(),
-            precision: z.number(),
-            ccsid: z.number(),
-            nullable: z.boolean()
-          })
-        ),
-        rows: z.array(z.record(z.string(), z.unknown())),
-        rowCount: z.number(),
+        /** `"query"`＝行が返った / `"execute"`＝結果を返さない文を実行した */
+        kind: z.enum(["query", "execute"]),
+        /** 以下はクエリのとき */
+        columns: z
+          .array(
+            z.object({
+              name: z.string(),
+              typeName: z.string(),
+              length: z.number(),
+              scale: z.number(),
+              precision: z.number(),
+              ccsid: z.number(),
+              nullable: z.boolean()
+            })
+          )
+          .optional(),
+        rows: z.array(z.record(z.string(), z.unknown())).optional(),
+        rowCount: z.number().optional(),
         /** 上限で**取得を打ち切ったか**（続きがある）。切ったことを黙らない */
-        truncated: z.boolean()
+        truncated: z.boolean().optional(),
+        /** 以下は結果を返さない文のとき */
+        updateCount: z.number().optional(),
+        /** 影響行数に意味があるか。**DDL の 0 と DML の 0 行を混ぜない** */
+        hasRowCount: z.boolean().optional(),
+        /** 正の SQLCODE（成功だが伝えるべきこと。実ライブラリーへの CREATE は 7905） */
+        warning: z.object({ sqlCode: z.number(), sqlState: z.string() }).optional()
       }
     },
     async (input) =>
       withAudit({ op: "host_sql" }, async () => {
-        const conn = await openDb(target(input));
+        // **結果を返さない文は明示のときだけ。** 接続する前に断る——
+        // 断るつもりの呼び出しでホストへ出て行かない
+        const write = isNonQueryStatement(input.sql);
+        if (write && input.allowWrite !== true) {
+          throw new As400Error(
+            "CONFIG_ERROR",
+            "結果を返さない文（INSERT/UPDATE/DELETE/DDL）は allowWrite: true を指定したときだけ実行します" +
+              "（取り消せないため）"
+          );
+        }
+        const conn = await openDb(target(input), input.lobThreshold);
         try {
+          if (write) {
+            const r = await executeStatement(conn, input.sql);
+            return jsonResult({
+              kind: "execute" as const,
+              updateCount: r.updateCount,
+              hasRowCount: r.hasRowCount,
+              ...(r.warning ? { warning: r.warning } : {})
+            });
+          }
           const max = input.maxRows ?? 200;
           // **上限はホストからの取得量の上限**。`queryLimited` が上限＋1 行で結果セットを
           // 打ち切る（20,000 行の表で 1.2MB / 2.1 秒 → 約 12KB / 45ms。
@@ -188,6 +239,7 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
           });
           const rows = result.rows;
           return jsonResult({
+            kind: "query" as const,
             columns: result.columns.map((c) => ({
               name: c.name,
               typeName: c.typeName,

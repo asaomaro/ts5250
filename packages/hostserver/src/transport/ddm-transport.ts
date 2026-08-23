@@ -46,6 +46,10 @@ export function openDdmTransport(opts: DdmTransportOptions): Promise<DdmTranspor
           ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
         })
       : netConnect({ host: opts.host, port: opts.port });
+    // **無通信でも生死が分かるようにする。** 無いと NAT やファイアウォールに落とされても
+    // どちらの端も気づかず、送ろうとして初めて分かる。
+    // 値は `host-connection.ts` と揃える（同じ性質の待ちを別の値にしない）
+    socket.setKeepAlive(true, 60_000);
 
     let buffer = Buffer.alloc(0);
     /** 受信済みで未消費のフレーム。要求より先に届くことがある（チェイン応答） */
