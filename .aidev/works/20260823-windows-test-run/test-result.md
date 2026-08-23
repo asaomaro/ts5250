@@ -6,24 +6,26 @@ Windows 11 Pro build 10.0.26200.9168 / Node 24.18.0 / npm 11.16.0。
 外部コマンドの在否: `unzip` **在り**（Git 同梱 6.00）/ `openssl` **在り**（3.5.7）/
 `python3` **無し**（Store のアプリ実行エイリアスだけが在る）/ `lp` `lpstat` **無し**。
 
-## 全体（`npm test`）
+## 全体（`npm test`。**`develop` の上**＝#354 の次）
 
 | workspace | 結果 |
 |---|---|
 | `@ts5250/base` | 52 passed |
-| `@ts5250/ebcdic` | **83 passed**（うち 3 件はこの作業で直した） |
-| `@ts5250/hostserver` | 972 passed |
+| `@ts5250/ebcdic` | **99 passed**（うち 3 件はこの作業で直した） |
+| `@ts5250/hostserver` | 991 passed |
 | `@ts5250/scs` | 25 passed |
-| `@ts5250/server` | **1,230 passed / 16 skipped**（0 failed） |
+| `@ts5250/server` | **1,288 passed / 16 skipped**（0 failed） |
 | `@ts5250/tn3270` | 254 passed / 38 skipped |
-| `@ts5250/tn5250` | **468 passed**（うち 3 件はこの作業で直した） |
+| `@ts5250/tn5250` | **485 passed**（うち 3 件はこの作業で直した） |
 | `@ts5250/vt` | 185 passed |
-| `@ts5250/web-ui` | **1,742 passed**（パッケージ dir から実行） |
+| `@ts5250/web-ui` | **1,745 passed**（パッケージ dir から実行） |
 | `@ts5250/gen-tables` | 10 passed |
 | `npm run lint` | 緑（error 0） |
 | `npm run build`（`tsc -b` ＋ web-ui の `vue-tsc`） | 緑 |
 
-**failed 0。** 起点は「`packages/server` が 1,246 件中 11 件 failed」だった。
+**failed 0。** 起点は「`packages/server` が 1,246 件中 11 件 failed」だった
+（起点は**古い `main`** で測った値。着手時に古い main から分岐していたため。
+件数の差は develop 側でテストが増えている分）。
 
 ## skip の内訳（**飛ばした事実を握り潰さない**）
 

@@ -1,7 +1,7 @@
 # Windows 実機でテストを回す
 
 2026-08-23 に **Windows 11 実機でテスト一式を初めて全部緑にした**
-（起票 `20260823-pccmd-windows-verify` / PR #355 → 片づけ `20260823-windows-test-run` / PR #356）。
+（起票 `20260823-pccmd-windows-verify` → 片づけ `20260823-windows-test-run`。どちらも PR #357）。
 落ちていたものは**すべてテスト側の前提**で、製品の不具合は 1 件も無かった。
 
 ## 回すのに要ること（この順で潰す）
@@ -14,12 +14,15 @@
 
 ## 実測（Windows 11 Pro build 26200.9168 / Node 24.18.0）
 
+⚠ **下 3 行は古い `main`（#348 相当）で測った**——着手時に古い main から分岐していた。
+最後の行は `develop`（#354 の上）で測った値で、develop の方がテストが多い分だけ件数が大きい。
+
 | 段階 | 結果 |
 |---|---|
 | 整える前 | 27 ファイルが collect 失敗 |
 | 整えた直後 | `packages/server` **1,243 件中 12 件 failed** |
 | PC コマンドの回帰を入れた後 | 1,246 件中 11 件 failed（新規 3 件が緑・`test -d .` を 1 件直した） |
-| **この作業のあと** | **全 workspace 緑**: base 52 / ebcdic 83 / hostserver 972 / scs 25 / **server 1,230 passed ＋ 16 skipped** / tn3270 254＋38 skipped / tn5250 468 / vt 185 / web-ui 1,742 / gen-tables 10。`npm run lint` ・ `npm run build`（vue-tsc 込み）も緑 |
+| **この作業のあと（develop の上）** | **全 workspace 緑**: base 52 / ebcdic 99 / hostserver 991 / scs 25 / **server 1,288 passed ＋ 16 skipped** / tn3270 254＋38 skipped / tn5250 485 / vt 185 / web-ui 1,745 / gen-tables 10。`npm run lint` ・ `npm run build`（vue-tsc 込み）も緑 |
 
 ## 片づけたもの
 
