@@ -10,13 +10,13 @@ import { chromium } from "playwright";
 
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const OUT = "/tmp/claude-1000/-workspaces-as400-web-emulator/cff7c584-0ab5-4be3-b08e-bc65bf027295/scratchpad";
+const OUT = "/tmp/ts5250-work";
 const PORT = 3471;
 
 // connections.json をコピーし、装置名をユニークにして読み込む（装置名重複の回復画面を避ける）
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
 const dev = ("WEBSH" + String(Date.now()).slice(-4)).slice(0, 10);
-for (const s of cfg.sessions) if (s.name === "DEV1") s.deviceName = dev;
+for (const s of cfg.sessions) if (s.name === (process.env.AS400_SESSION ?? "DEV1")) s.deviceName = dev;
 const tmpCfg = `${OUT}/conn-shot.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 

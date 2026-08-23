@@ -16,7 +16,7 @@ const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
  */
 describe("userIdEbcdic37（要求 CP 0x1104 用）", () => {
   it("CCSID 37 の 10 バイトに 0x40 詰めする", () => {
-    // USER → D4 C1 D9 D6、残り 6 バイトは EBCDIC 空白 0x40
+    // USER → E4 E2 C5 D9、残り 6 バイトは EBCDIC 空白 0x40
     expect(hex(userIdEbcdic37("USER"))).toBe("e4e2c5d9" + "40".repeat(6));
   });
 
@@ -51,8 +51,8 @@ describe("userIdUnicode（ハッシュ入力用）", () => {
   it("UTF-16BE 20 バイトに空白詰めする", () => {
     const b = userIdUnicode("USER");
     expect(b).toHaveLength(20);
-    // M=0x004D A=0x0041 R=0x0052 O=0x004F、残り 6 文字は UTF-16BE の空白 0x0020
-    expect(hex(b)).toBe("004d00410052004f" + "0020".repeat(6));
+    // U=0x0055 S=0x0053 E=0x0045 R=0x0052、残り 6 文字は UTF-16BE の空白 0x0020
+    expect(hex(b)).toBe("0055005300450052" + "0020".repeat(6));
   });
 
   it("大文字化する", () => {

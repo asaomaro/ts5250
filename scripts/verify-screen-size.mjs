@@ -21,7 +21,7 @@ const host = process.env.PUB400_HOST ?? "pub400.com";
 const dev = () => "WEBS" + Math.random().toString(36).slice(2, 6).toUpperCase();
 
 const findCmd = (s) => s.fields.find((f) => !f.protected && f.row >= 19) ?? s.fields.find((f) => !f.protected);
-const SEU = "STRSEU SRCFILE(MYLIB/QDDSSRC) SRCMBR(CLRTDSP) OPTION(5)";
+const SEU = "STRSEU SRCFILE(TESTLIB/QDDSSRC) SRCMBR(CLRTDSP) OPTION(5)";
 
 /** 期待する対応表（端末タイプと、SEU＝*DS4 画面で実際に来るサイズ） */
 const CASES = [
@@ -62,7 +62,7 @@ for (const c of CASES) {
       snap = s.snapshot();
       let cur = snap;
       for (let i = 0; i < 3 && !findCmd(cur); i++) cur = (await s.sendAid("Enter", { timeoutMs: 8000 })).screen;
-      s.setField({ index: findCmd(cur).index }, "CALL MYLIB/CLRTPGM");
+      s.setField({ index: findCmd(cur).index }, "CALL TESTLIB/CLRTPGM");
       cur = (await s.sendAid("Enter", { timeoutMs: 15000 })).screen;
       const colors = new Set();
       for (const row of cur.cells) for (const cell of row) if (cell.color) colors.add(cell.color);

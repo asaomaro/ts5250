@@ -15,7 +15,7 @@ server/web-ui との結合は親の統合 test に委ねる。
     `dtaqFailure`/`parseCpfId` の rc+CPF→エラーコード写像。
 - lint（eslint）/ build（tsc -b）クリーン。
 
-## 実機検証（PUB400 / MYLIB、spike `npm run dtaq`）
+## 実機検証（PUB400 / TESTLIB、spike `npm run dtaq`）
 
 | 項目 | 結果 |
 |---|---|

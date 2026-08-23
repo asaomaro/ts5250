@@ -73,7 +73,7 @@ function describe(ffw) {
 
 const captured = [];
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 // 装置名は使い回す（ユニーク名は QAUTOVRT 上限に当たる）。直前の実行が残っていることがあるので
 // プールを順に試す（scripts/README.md の作法）
 async function connect() {

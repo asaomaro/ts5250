@@ -5,7 +5,7 @@ import { parseMarkerFormat } from "../src/db/marker-format.js";
  * マーカー形式の解析。
  *
  * **テストデータは実機（PUB400）の応答そのもの**である。
- * スパイクで `INSERT INTO MYLIB.ZZPM (C, N) VALUES (?, ?)` を prepare したときに
+ * スパイクで `INSERT INTO TESTLIB.ZZPM (C, N) VALUES (?, ?)` を prepare したときに
  * サーバーが返した `0x3813` の中身を、そのまま回帰資産として固定してある。
  * 手で組んだ想定値ではないので、「読み方が実機と合っているか」を守れる。
  */
@@ -16,7 +16,7 @@ const bytes = (hex: string): Uint8Array =>
 
 /**
  * 実機（PUB400）が返した 138 バイトそのまま。
- * `CREATE TABLE MYLIB.ZZFMT (C CHAR(10), N INTEGER)` に対する
+ * `CREATE TABLE TESTLIB.ZZFMT (C CHAR(10), N INTEGER)` に対する
  * `INSERT INTO ... (C, N) VALUES (?, ?)` の prepare 応答。
  */
 const REAL_FORMAT = bytes(`

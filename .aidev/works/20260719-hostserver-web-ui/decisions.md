@@ -15,8 +15,8 @@
 |---|---|---|
 | `SELECT 1 FROM SYSIBM.SYSDUMMY1` | 成功 | — |
 | `VALUES 1` | 成功 | — |
-| `DELETE FROM MYLIB.A1 WHERE 1=0` | `PROTOCOL_ERROR` | — |
-| `CREATE TABLE MYLIB.ZZPROBE (C1 INT)` | `PROTOCOL_ERROR` | **作られていない**（`DLTOBJ` が `CPF2105 not found`） |
+| `DELETE FROM TESTLIB.A1 WHERE 1=0` | `PROTOCOL_ERROR` | — |
+| `CREATE TABLE TESTLIB.ZZPROBE (C1 INT)` | `PROTOCOL_ERROR` | **作られていない**（`DLTOBJ` が `CPF2105 not found`） |
 | `CALL QSYS2.QCMDEXC('CRTDTAARA …')` | `PROTOCOL_ERROR` | **作られていない**（別経路の一覧で `count=0`） |
 | `SELECT …; DROP TABLE …` | `SQL_ERROR` `SQLCODE=-104` | — |
 

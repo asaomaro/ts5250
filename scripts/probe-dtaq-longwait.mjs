@@ -17,7 +17,7 @@ import { DtaqConnection } from "@ts5250/tn5250";
 
 const out = (s) => process.stdout.write(s + "\n");
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 if (!password) { out("AS400_PASSWORD が未設定です"); process.exit(1); }
 
@@ -26,7 +26,7 @@ const argOf = (name, fallback) => {
   return i >= 0 ? (process.argv[i + 1] ?? fallback) : fallback;
 };
 const MINUTES = Number(argOf("--minutes", "45"));
-const LIB = argOf("--library", "TESTLIB");
+const LIB = argOf("--library", process.env.AS400_LIB ?? "TESTLIB");
 const Q = "DTQLONG";
 const enc = (s) => new TextEncoder().encode(s);
 const dec = (b) => new TextDecoder().decode(b);

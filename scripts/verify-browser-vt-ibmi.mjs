@@ -16,7 +16,7 @@ import { chromium } from "playwright";
 const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3481;
 const NAME = "VT-IBMI";
-const SHOT = "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad";
+const SHOT = "/tmp/ts5250-work";
 const PRE = process.env.PROBE === "AS400" ? "AS400" : "PUB400";
 let ok = true;
 const check = (name, cond, detail = "") => {

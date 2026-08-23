@@ -42,7 +42,7 @@ function writeToDisplay(orders: number[]): number[] {
 /**
  * **KSN00/KSN20（YB0200RD・YB0270RD）の罫線が全く表示されない不具合の再現テスト。**
  *
- * 実機（）のトレースで、`WRITE KSN20`（罫線を描く）の直後に
+ * 実機のトレースで、`WRITE KSN20`（罫線を描く）の直後に
  * **CLEAR UNIT ALTERNATE が送られてくる**ことを確認した。SFLCTL(SFLDSPCTL) を持つ
  * 画面（YB0270R）の 1 回の画面構築の中で何度も現れる、ごく普通の 5250 データストリーム。
  *

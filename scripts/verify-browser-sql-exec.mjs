@@ -29,7 +29,7 @@ const SHOTS = `${TMP}/shots`;
 mkdirSync(SHOTS, { recursive: true });
 
 /** 後片付けが要らない QTEMP ではなく**実ライブラリー**で試す（警告 7905 の経路も見る） */
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const T = "SQLEXECB";
 /** 複合文（`BEGIN … END`）の検証で作る手続き・関数 */
 const P = "SQLEXECP";
@@ -46,7 +46,7 @@ const check = (n, ok, d = "") => {
 // 設定の置き場は差し替えられる（`SQLEXEC_TMP` と同じ扱い）。
 // 個人の `connections.json` に実機を置いていない環境でも走らせるため
 const cfg = JSON.parse(readFileSync(process.env.SQLEXEC_CONN ?? "connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!process.env.AS400_PASSWORD) {
   log("AS400_PASSWORD が未設定です");
   process.exit(1);

@@ -21,4 +21,4 @@
 ## 公開と検証
 
 - [x] T10: `index.ts` に公開 API と `SqlError` を追加、`errors.ts` に `SQL_ERROR` を追加（依存: T9）
-- [x] T11: 実機検証 — `MYLIB.SQLTYPES` の全型を突き合わせ、SQL エラー 2 ケース、TLS/平文の双方（依存: T10）
+- [x] T11: 実機検証 — `TESTLIB.SQLTYPES` の全型を突き合わせ、SQL エラー 2 ケース、TLS/平文の双方（依存: T10）

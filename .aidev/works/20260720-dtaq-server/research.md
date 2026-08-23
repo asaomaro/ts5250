@@ -37,7 +37,7 @@ signon → `resolveServicePort(host, "dataQueue", {tls})` → `startHostServer(c
 
 ## F2: 受信応答 0x8003 のレイアウト（実機の hex で確定）
 
-`MYLIB/DTAQSPK`（FIFO, saveSender）に `first` を送って peek した応答 **69 バイト**:
+`TESTLIB/DTAQSPK`（FIFO, saveSender）に `first` を送って peek した応答 **69 バイト**:
 
 ```
      0  00 00 00 45 00 00 e0 07 00 00 00 00 00 00 00 00   ← 全長0x45=69, ServerID 0xe007
@@ -175,4 +175,4 @@ DTAQ は無限待ちのため read タイムアウト制御）。
 - LIFO / キー付き / クリア / 属性取得は spike 未検証。coding 中に実機で確かめる
 - **実機検証手段**: `npm run dtaq`（spike）と QSYS2 の SQL サービス
   （`DATA_QUEUE_ENTRIES` 等）で自前プロトコルと突き合わせられる。
-  PUB400 の MYLIB ライブラリにキューを作れる（確認済み・都度片付ける）
+  PUB400 の TESTLIB ライブラリにキューを作れる（確認済み・都度片付ける）

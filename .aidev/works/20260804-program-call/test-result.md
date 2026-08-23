@@ -9,7 +9,7 @@
 | `db-decimal-write.test.ts`（10） | **読み書きの往復**（正・負・奇数桁・小数）、符号ニブルの位置、拒否 |
 | `program-args.test.ts`（15） | 型付き変換、既定値、境界、**黙って切らない／化けさせない** |
 
-## 実機（）— 7/7
+## 実機— 7/7
 
 `node --env-file=.env scripts/verify-program-call.mjs`
 

@@ -35,7 +35,7 @@ const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
 const tmpCfg = `${TMP}/conn-sign.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 const crypto = SecretCrypto.fromEnv();
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 // **パスワードはスクリプトに書かない。** 環境変数か、暗号化済み設定の復号で得る（AGENTS.md セキュリティ）
 const password = process.env.AS400_PASSWORD ?? crypto.decrypt(sys.signon.passwordEnc);
 const user = sys.signon.user;

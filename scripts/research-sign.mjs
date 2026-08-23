@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const log = (s) => process.stdout.write(s + "\n");
 const err = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -133,7 +133,7 @@ async function cmd(session, text, timeoutMs = 30000) {
 }
 
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD ?? SecretCrypto.fromEnv().decrypt(sys.signon.passwordEnc);
 const session = await connectHost(sys, password);
 try {

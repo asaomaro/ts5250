@@ -1,6 +1,6 @@
 // research probe (milestone 1b): tn5250 のプリンター NEW-ENVIRON を正確に再現した生 telnet 交渉。
 // IBMFONT=12 / IBMTRANSFORM=0 を含めて 8925 が変わるかを確かめ、ハンドシェイク不備を排除する。
-import { TcpTransport, codecForCcsid, deviceEnvFor } from "file:///workspaces/as400-web-emulator/packages/core/dist/index.js";
+import { TcpTransport, codecForCcsid, deviceEnvFor } from "file:///workspaces/ts5250/packages/core/dist/index.js";
 
 const HOST = process.env.PUB400_HOST ?? "pub400.com";
 const USER = process.env.PUB400_USER;

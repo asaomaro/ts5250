@@ -24,7 +24,7 @@ import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 
-const LIB = "MYLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const NAME = "DTAQB2E"; // browser e2e 用
 const results = [];
 const check = (name, ok, detail = "") => {

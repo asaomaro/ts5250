@@ -243,7 +243,7 @@ export class SqlError extends Tn5250Error {
 | requirement の完了条件 | 満たし方 |
 |---|---|
 | database に接続・認証（TLS/平文） | `DbConnection.connect()`。実機で双方確認 |
-| `SELECT *` で全行・全列 | `MYLIB.SQLTYPES`（2 行）を実機で取得 |
+| `SELECT *` で全行・全列 | `TESTLIB.SQLTYPES`（2 行）を実機で取得 |
 | 各型が期待どおりの値 | 検証表の既知の値と突き合わせ（下表） |
 | 10 進数の精度 | `N_DEC = -12345678.91` が文字列で一致。`N_BIG = 9007199254740993` が `bigint` で一致 |
 | NULL と空文字の区別 | 行 2（全列 NULL）と行 1 の `C_CHAR='ABC'` を比較 |

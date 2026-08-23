@@ -19,7 +19,7 @@ import {
 import { registerHostServerTools } from "../packages/server/dist/host-server-tools.js";
 
 const out = (s) => process.stdout.write(s + "\n");
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const T = "SQLLIMIT";
 const ROWS = 20000;
 
@@ -30,7 +30,7 @@ const check = (n, ok, d = "") => {
 };
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 if (!password) {
   out("AS400_PASSWORD が未設定です");
@@ -38,7 +38,7 @@ if (!password) {
 }
 // **設定に書くのは環境変数の名前だけ**（値はファイルに落とさない）
 const forApp = JSON.parse(JSON.stringify(cfg));
-forApp.systems.find((s) => s.name === "実機").signon = {
+forApp.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).signon = {
   user: sys.signon.user,
   passwordEnv: "AS400_PASSWORD"
 };
@@ -91,7 +91,7 @@ try {
 
   const t0 = Date.now();
   const res = await hostSql({
-    system: "srv:" + forApp.systems.find((s) => s.name === "実機").id,
+    system: "srv:" + forApp.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).id,
     sql: `SELECT ID, S FROM ${LIB}.${T} ORDER BY ID`,
     maxRows: 200
   });
@@ -107,7 +107,7 @@ try {
   const exact = JSON.parse(
     (
       await hostSql({
-        system: "srv:" + forApp.systems.find((s) => s.name === "実機").id,
+        system: "srv:" + forApp.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).id,
         sql: `SELECT ID FROM ${LIB}.${T} WHERE ID <= 200 ORDER BY ID`,
         maxRows: 200
       })
@@ -127,7 +127,7 @@ try {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body)
     });
-  const src = { system: "srv:" + forApp.systems.find((s) => s.name === "実機").id };
+  const src = { system: "srv:" + forApp.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).id };
   const t1 = Date.now();
   const restRes = await post({ source: src, sql: `SELECT ID, S FROM ${LIB}.${T} ORDER BY ID`, maxRows: 50 });
   const restMs = Date.now() - t1;

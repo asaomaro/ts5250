@@ -19,7 +19,7 @@ web-ui との結合は親の統合 test に委ねる。
   user/password/host が無い・資格情報無しで CONFIG_ERROR）。
 - lint / build（tsc -b, 全パッケージ）クリーン。
 
-## 実機検証（PUB400 / MYLIB、HTTP ルートを app.request で直接叩く）
+## 実機検証（PUB400 / TESTLIB、HTTP ルートを app.request で直接叩く）
 
 `ServerConfigStore` に pub400 システム（`signon.passwordEnv`）を積み、実 `openDtaq` で 6 ルートを往復:
 

@@ -34,7 +34,7 @@
 文言も直した。「システムを選んでください」は**もう選べない**——タブは 1 つのシステムへの窓なので、
 `system` が空なのは**設定から消えた**ときだけ。共通の `MSG_SYSTEM_GONE` に寄せた。
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `node --env-file=.env scripts/verify-tabs-own-system.mjs` — **12 passed / 0 failed**
 

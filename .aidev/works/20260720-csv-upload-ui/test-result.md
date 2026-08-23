@@ -46,7 +46,7 @@ node --env-file=.env dist/upload.js --tls
 ### (b) 日本語（CCSID 5035 / 930） ❌ **未達**
 
 ```
-❌ [PROTOCOL_ERROR] ファイルを開けませんでした（MYLIB/ZZUP2）:
+❌ [PROTOCOL_ERROR] ファイルを開けませんでした（TESTLIB/ZZUP2）:
    CPF427D Substitution characters may be used in data conversion. ×2
 ```
 

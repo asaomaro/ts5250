@@ -169,12 +169,12 @@ describe("資格情報を持たない接続設定", () => {
     host_list_jobs: {},
     host_list_objects: {},
     host_list_users: {},
-    host_dtaq_send: { library: "MYLIB", name: "Q", data: "x" },
-    host_dtaq_receive: { library: "MYLIB", name: "Q" },
-    host_dtaq_create: { library: "MYLIB", name: "Q", maxEntryLength: 100, type: "FIFO" },
-    host_dtaq_clear: { library: "MYLIB", name: "Q" },
-    host_dtaq_delete: { library: "MYLIB", name: "Q" },
-    host_dtaq_attributes: { library: "MYLIB", name: "Q" }
+    host_dtaq_send: { library: "TESTLIB", name: "Q", data: "x" },
+    host_dtaq_receive: { library: "TESTLIB", name: "Q" },
+    host_dtaq_create: { library: "TESTLIB", name: "Q", maxEntryLength: 100, type: "FIFO" },
+    host_dtaq_clear: { library: "TESTLIB", name: "Q" },
+    host_dtaq_delete: { library: "TESTLIB", name: "Q" },
+    host_dtaq_attributes: { library: "TESTLIB", name: "Q" }
   };
 
   for (const name of HOST_TOOLS) {
@@ -192,7 +192,7 @@ describe("host_dtaq_create の整合チェック（HTTP ルートと同一に弾
   it("KEYED で keyLength 無しは keyLength を促す CONFIG_ERROR", async () => {
     const r = await call("host_dtaq_create", {
       system: "srv:noauth",
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 100,
       type: "KEYED"
@@ -205,7 +205,7 @@ describe("host_dtaq_create の整合チェック（HTTP ルートと同一に弾
   it("非 KEYED で keyLength ありは CONFIG_ERROR", async () => {
     const r = await call("host_dtaq_create", {
       system: "srv:noauth",
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 100,
       type: "FIFO",

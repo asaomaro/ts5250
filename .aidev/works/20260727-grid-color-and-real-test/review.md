@@ -25,6 +25,6 @@ core 3 ファイル＋web-ui 1 ファイル＋テスト 2 ファイル。
 
 - クリーンビルド ／ lint ／ `vue-tsc` 込み web-ui ビルド：成功
 - core 832 件 ／ web-ui 923 件 ／ 全 workspace 2,430 passed / 4 failed（既知の環境要因）
-- 実機（）: グリッド線 2 本・窓枠とも警告ゼロで解釈
+- 実機: グリッド線 2 本・窓枠とも警告ゼロで解釈
 
 **判定: must 0 / should 0 / nit 1（許容）。review 通過。**

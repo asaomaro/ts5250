@@ -120,7 +120,7 @@ describe("宛先はタブのシステム（全体の選択に引きずられな�
     const sent = captureFetch(() => ({ ok: true }));
     const w = mount(DtaqPane, { props: { tabId: `dtaq:entries@${MINE}`, system: MINE } });
     const inputs = w.findAll("input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("Q");
     await flushPromises();
     await w.find("textarea").setValue("hello");
@@ -137,7 +137,7 @@ describe("宛先はタブのシステム（全体の選択に引きずられな�
     const [dl] = w.findAll(".seg button");
     await dl!.trigger("click");
     const inputs = w.findAll("input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("T");
     await flushPromises();
     // **`.go` で指す。** 文字で探すと方向切替の「↓ 取得」に当たって何も起きない（実際に踏んだ）

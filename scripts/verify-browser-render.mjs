@@ -49,7 +49,7 @@ function buildResolver(profiles, crypto) {
 
 
 const log = (s) => process.stderr.write(s + "\n");
-const LIB = process.env.PUB400_LIB ?? "MYLIB";
+const LIB = process.env.PUB400_LIB ?? "TESTLIB";
 const PORT = 3468;
 
 const sessions = new SessionManager();

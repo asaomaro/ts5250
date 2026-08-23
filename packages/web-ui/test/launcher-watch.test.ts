@@ -50,7 +50,7 @@ const WATCH: PublicSession = {
   name: "注文キュー",
   system: "own:s-1",
   sessionType: "dtaqwatch",
-  dtaqWatch: { library: "MYLIB", name: "ORDERQ" }
+  dtaqWatch: { library: "TESTLIB", name: "ORDERQ" }
 } as PublicSession;
 
 beforeEach(() => {

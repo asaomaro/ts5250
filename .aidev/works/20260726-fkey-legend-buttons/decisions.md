@@ -76,4 +76,4 @@
   かえって分かりにくい。畳んだ行にすることでメニュー全体も短くなった。
 - 影響: `spec.md` D7（「よく使う 3 つ＋その他」）は無効。`stores/viewSettings.ts` /
   `ViewSettingsMenu.vue` / `ScreenGrid.vue`（ボタンに位置を持たせる）/ `EmulatorPane.vue`。
-  実機（）で新 UI の開閉・選択後も閉じないこと・凡例のボタン化を確認した。
+  実機で新 UI の開閉・選択後も閉じないこと・凡例のボタン化を確認した。

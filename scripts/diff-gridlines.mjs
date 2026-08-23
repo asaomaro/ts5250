@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 const OUT = process.argv[2] ?? "gridline-diff";
 mkdirSync(OUT, { recursive: true });
 const PORT = 3514;
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const PROGRAMS = ["GRIDCL", "GRIDCL2", "GRIDCL3", "GRIDCL4", "GRIDCL5", "GRIDCL6", "GRIDCL7", "EXTPGM"];
 
 /** 原典（wdsf-parser.ts GRID_LINE_STYLE / Wireshark vals_tn5250_deg_lines と IBM DDS Table 15） */
@@ -27,7 +27,7 @@ const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-for (const sess of cfg.sessions) if (sess.name === "DEV1") sess.deviceName = "";
+for (const sess of cfg.sessions) if (sess.name === (process.env.AS400_SESSION ?? "DEV1")) sess.deviceName = "";
 const tmpCfg = `${OUT}/conn.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 

@@ -5,7 +5,7 @@
   - **F1: 不要**。IBM-3812-1 のまま CCSID 1399 を KBDTYPE/CODEPAGE/CHARSET で申告すれば PUB400 実機で
     I902（Session successfully started）で接続でき、DBCS スプールも届く（推測でなく実機で確定）。
 - Q2: DBCS スプールをどう生成・採取するか？
-  - **F2**: 表示セッション（CCSID 1399）で `CHGLIB LIB(MYLIB) TEXT('日本語テスト')` → `DSPLIBL OUTPUT(*PRINT)`。
+  - **F2**: 表示セッション（CCSID 1399）で `CHGLIB LIB(TESTLIB) TEXT('日本語テスト')` → `DSPLIBL OUTPUT(*PRINT)`。
     受信 SCS 732B に SO(0x0E) を確認。採取物を golden fixture 化（`scs-print-dbcs.bin`）。
 - Q3: SCS 内の DBCS 表現は？
   - **F3**: 5250 表示と同じく SO(0x0E)/SI(0x0F) で全角区間を囲み、区間内は 2 バイト＝全角 1 文字。

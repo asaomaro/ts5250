@@ -55,7 +55,7 @@ describe("dtaq datastream ビルダ", () => {
   });
 
   it("作成（0x0003）: type バイトと keyLength を書く", () => {
-    const f = buildCreate({ name: "TESTDQ", library: "MYLIB", maxEntryLength: 200, type: "KEYED", keyLength: 16, saveSender: true });
+    const f = buildCreate({ name: "TESTDQ", library: "TESTLIB", maxEntryLength: 200, type: "KEYED", keyLength: 16, saveSender: true });
     expectHeader(f, 100, 80, DTAQ_REQ.create);
     expect(view(f).getUint32(40)).toBe(200); // 最大エントリ長
     expect(f[45]).toBe(0xf1); // saveSender=true

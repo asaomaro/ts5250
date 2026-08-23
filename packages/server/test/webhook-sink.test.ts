@@ -44,11 +44,11 @@ describe("送れたとき", () => {
   it("2xx で成功。**本文にキュー名・連番・本文が載る**", async () => {
     const { fn, calls } = fakeFetch([200]);
     const s = new WebhookSink("srv:w1", cfg(), undefined, { fetch: fn, ...nowait });
-    s.deliver(entry(1), "MYLIB/ORDERQ");
+    s.deliver(entry(1), "TESTLIB/ORDERQ");
     await settle();
     expect(s.stats).toMatchObject({ delivered: 1, failed: 0, pending: 0 });
     expect(JSON.parse(calls[0]!.body)).toMatchObject({
-      queue: "MYLIB/ORDERQ",
+      queue: "TESTLIB/ORDERQ",
       ref: "srv:w1",
       seq: 1,
       text: "ORD-1"

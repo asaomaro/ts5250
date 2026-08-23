@@ -38,7 +38,7 @@ async function post(body: unknown) {
 }
 
 const SRC = { system: "srv:noauth" };
-const BASE = { source: SRC, library: "MYLIB", file: "TESTPF", columns: ["A"], rows: [["x"]] };
+const BASE = { source: SRC, library: "TESTLIB", file: "TESTPF", columns: ["A"], rows: [["x"]] };
 
 describe("入力の検証", () => {
   it("接続先を指定しなければ 400", async () => {
@@ -91,7 +91,7 @@ describe("行数の上限はサーバー側で強制される", () => {
 describe("識別子の絞り込み（SQL への連結を避けられない箇所の防壁）", () => {
   it.each([
     ["引用符", "MAR'O1"],
-    ["セミコロン", "MYLIB;X"],
+    ["セミコロン", "TESTLIB;X"],
     ["空白", "MAR O1"],
     ["長すぎる", "ABCDEFGHIJK"],
     ["SQL 断片", "X' OR '1'='1"]

@@ -57,7 +57,7 @@ function personal(owner?: string) {
         name: "注文キュー",
         system: "s",
         sessionType: "dtaqwatch",
-        dtaqWatch: { library: "MYLIB", name: "ORDERQ" },
+        dtaqWatch: { library: "TESTLIB", name: "ORDERQ" },
         ...(owner ? { owner } : {})
       },
       // 監視でない設定（種別違いを弾けることの確認用）
@@ -96,7 +96,7 @@ describe("watch-* は open を要さない", () => {
     await ws.handle(JSON.stringify({ type: "watch-subscribe" }));
     await ws.handle(JSON.stringify({ type: "watch-start", session: "own:w1" }));
     expect(last("watch-list")?.watches).toHaveLength(1);
-    expect(last("watch-list")?.watches[0]).toMatchObject({ label: "MYLIB/ORDERQ", state: "listening" });
+    expect(last("watch-list")?.watches[0]).toMatchObject({ label: "TESTLIB/ORDERQ", state: "listening" });
     watches.closeAll();
   });
 

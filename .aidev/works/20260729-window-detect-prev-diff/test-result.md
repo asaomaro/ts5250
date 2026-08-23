@@ -39,7 +39,7 @@ Tests  1 failed | 9 passed (10)
 ## 実機 fixture の内訳（13 対）
 
 本物の窓 9 対（メニュー/DSPLIBL/WRKSYSSTS/WRKACTJOB/DSPSYSVAL/WRKSPLF/WRKOBJPDM/DSPMSG の F1、
-Attn の窓）＋ 通常画面 4 対。採取元は実機 34 対（実機・IBM i 7.5）。
+Attn の窓）＋ 通常画面 4 対。採取元は実機 34 対（IBM i 7.5）。
 
 ## 未検証の穴
 

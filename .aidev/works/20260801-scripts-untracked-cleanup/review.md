@@ -8,7 +8,7 @@
 
 - [should] `scripts/shot-testlib-screens.mjs:21-25` — **env 化が既定の使い方を壊していた**。
   このスクリプトは `AS400_CCSID` を与えたときだけ host 直指定で開き、**未指定なら
-  `connections.json` の保存値（`{ system: osakaRef }`）で開く**（86 行）。
+  `connections.json` の保存値（`{ system: sysRef }`）で開く**（86 行）。
   つまり `AS400_HOST` は**条件付きでしか要らない**のに、無条件の
   `if (!HOST) exit(2)` を足したため、既定の（CCSID を上書きしない）実行が
   **起動直後に落ちる**ようになっていた。
@@ -34,7 +34,7 @@
   `check-*` 3 / `diff-*` 2 ＋単発 3 ＝ **29**（`git status` の実数で照合）
 - **他 4 本の env 必須化は正しい**（`check-html-determinism` / `probe-ccsid` /
   `shot-signedon` / `shot-signon` はいずれも `open_session` で無条件に `host` を使う）
-- **出力メタ文字列 2 か所**（`shot-signedon-as400:87` / `shot-signon-as400:54`）が
+- **出力メタ文字列 2 か所**（`shot-signedon:87` / `shot-signon:54`）が
   変数から組まれている（固定文字列の残りなし）
 - `_probe` の改名でスクリプトの挙動は変わらない（元から呼ばれていない）
 

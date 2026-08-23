@@ -228,7 +228,7 @@ JDBC の全 getter/setter と Java 型間の相互変換を持つため。我々
 
 ## 追記: スパイクの実行結果（実機 PUB400）
 
-`MYLIB.ZZPM (C CHAR(10), N INTEGER)` を作り、`INSERT ... VALUES (?, ?)` で検証した。
+`TESTLIB.ZZPM (C CHAR(10), N INTEGER)` を作り、`INSERT ... VALUES (?, ?)` で検証した。
 
 ### F10: **マーカー形式の取得は成功**（`0x3813` が返る）✅
 
@@ -329,7 +329,7 @@ JDBC の全 getter/setter と Java 型間の相互変換を持つため。我々
 
 ### F14: 実機で要件を全部満たした ✅
 
-`MYLIB.ZZPM2 (ID INTEGER NOT NULL, JP CHAR(20) CCSID 5035, VC VARCHAR(30), NL INTEGER)`
+`TESTLIB.ZZPM2 (ID INTEGER NOT NULL, JP CHAR(20) CCSID 5035, VC VARCHAR(30), NL INTEGER)`
 
 | 検証 | 結果 |
 |---|---|

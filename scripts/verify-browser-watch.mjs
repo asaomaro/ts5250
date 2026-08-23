@@ -32,7 +32,7 @@ const TMP = process.env.WATCH_TMP ?? "/tmp/as400-verify-watch";
 const SHOTS = `${TMP}/shots`;
 mkdirSync(SHOTS, { recursive: true });
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const QUEUE = "DTQWATCH";
 const results = [];
 const check = (n, ok, d = "") => {
@@ -41,7 +41,7 @@ const check = (n, ok, d = "") => {
 };
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 if (!password) {
   log("AS400_PASSWORD が未設定です");
@@ -51,7 +51,7 @@ if (!password) {
 // 使えず `passwordEnc` を復号できないため、解決器が「ユーザーとパスワードが登録されていない」で
 // 断る（実際に踏んだ）。`passwordEnv` は運用者向けの正規の経路なので、その道で確かめる。
 // **書くのは環境変数の名前だけ**——値はファイルに落とさない（AGENTS.md セキュリティ）。
-const target = cfg.systems.find((s) => s.name === "実機");
+const target = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 target.signon = { user: target.signon.user, passwordEnv: "AS400_PASSWORD" };
 
 // **監視の設定を足す。** 監視は保存済み設定からしか始められない（設計）

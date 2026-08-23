@@ -9,7 +9,7 @@
 - Q5: DBCS 列の扱いは？（列ごとの CCSID か、SO/SI が入るか）
 - Q6: NULL 指標の形式は？
 - Q7: 10 進数の精度をどう扱うか
-- Q8: PUB400 で USER は MYLIB に表を作成できるか
+- Q8: PUB400 で USER は TESTLIB に表を作成できるか
 
 ## 判明した事実
 
@@ -109,7 +109,7 @@ fieldName(fieldIndex, name)
 
 ### F7: 日付・時刻・タイムスタンプは「書式化された固定長文字列」
 
-実機の `DSPFFD MYLIB/SQLTYPES` で確認:
+実機の `DSPFFD TESTLIB/SQLTYPES` で確認:
 
 ```
 D_DATE   DATE       長さ10  バッファ10  オフセット55   Date Format: *ISO   CCSID 273
@@ -155,12 +155,12 @@ newRowData(row, tempData);
 いずれも **`double` を経由しない文字列変換が用意されている**。Q7 の答えとして、
 精度を落とさない実装は可能。
 
-### F10: PUB400 で USER は MYLIB に表を作成できる（実機で確認）
+### F10: PUB400 で USER は TESTLIB に表を作成できる（実機で確認）
 
-`RUNSQL SQL('CREATE TABLE MYLIB.SQLTEST1 (C1 CHAR(5))')` が成功し、
-`DSPOBJD` で `MYLIB/SQLTEST1 *FILE PF` を確認した（検証後に削除済み）。
+`RUNSQL SQL('CREATE TABLE TESTLIB.SQLTEST1 (C1 CHAR(5))')` が成功し、
+`DSPOBJD` で `TESTLIB/SQLTEST1 *FILE PF` を確認した（検証後に削除済み）。
 
-### F11: 検証用テーブル `MYLIB.SQLTYPES` を作成済み
+### F11: 検証用テーブル `TESTLIB.SQLTYPES` を作成済み
 
 型を網羅したテスト表を実機に用意した。**以降の作業で再利用する**。
 
@@ -246,6 +246,6 @@ plan で **subtask 分割を検討する**（プロトコル層 / 型変換層 /
 - **10 進数と BIGINT の返し方を spec で決める**（推奨: 10 進数は文字列。BIGINT は要検討）
 - **純 DBCS CCSID（16684 / 300）の変換表を用意できるか確認する**。
   `tools/gen-tables` で生成できるかが鍵
-- 検証は `MYLIB.SQLTYPES`（F11）を使う。**行 2 が全 NULL** なので NULL 検証に使える
+- 検証は `TESTLIB.SQLTYPES`（F11）を使う。**行 2 が全 NULL** なので NULL 検証に使える
 - 前段の非機能要件を踏襲: ピュア層は Node API 非依存、**グローバル（`Buffer` 等）も使わない**
 - 規模的に subtask 分割の候補。plan で判断する

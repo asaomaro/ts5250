@@ -126,8 +126,8 @@ resume(id: string): void; // → { type: "watch-resume", watchId: id }
 
 ```
 キュー         受信  未読  状態     操作
-MYLIB/ORDERQ    12    3   監視中   [停止]
-MYLIB/LOGQ       0    -   停止中   [開始]
+TESTLIB/ORDERQ    12    3   監視中   [停止]
+TESTLIB/LOGQ       0    -   停止中   [開始]
 ```
 
 ### エッジケース

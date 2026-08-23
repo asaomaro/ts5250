@@ -9,12 +9,12 @@ import { chromium } from "playwright";
 
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const OUT = "/tmp/claude-1000/-workspaces-as400-web-emulator/cff7c584-0ab5-4be3-b08e-bc65bf027295/scratchpad";
+const OUT = "/tmp/ts5250-work";
 const PORT = 3507;
 
 // DEV1 セッションに enhanced=true を付けて拡張5250 を広告する
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-for (const s of cfg.sessions) if (s.name === "DEV1") s.enhanced = true;
+for (const s of cfg.sessions) if (s.name === (process.env.AS400_SESSION ?? "DEV1")) s.enhanced = true;
 const tmpCfg = `${OUT}/conn-ext.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 const crypto = SecretCrypto.fromEnv();

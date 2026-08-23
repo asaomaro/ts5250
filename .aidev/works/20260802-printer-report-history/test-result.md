@@ -31,7 +31,7 @@
 
 `printer-residency.test.ts`（attach 4 件・上限 3 件）も緑のまま。
 
-## 実機検証（実機）
+## 実機検証
 
 `scripts/verify-printer-report-history.mjs` — **13 passed / 0 failed**。
 

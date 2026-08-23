@@ -20,6 +20,7 @@ import {
   ConfigResolver
 } from "@ts5250/server";
 import { chromium } from "playwright";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 
 const PORT = 3491;
 const PCML_PATH = process.env.PCML_PATH ?? "/home/USER/pcmltst.pcml";
@@ -43,7 +44,7 @@ const user = process.env.AS400_USER;
 if (!host || !user) throw new Error("AS400_HOST / AS400_USER が要ります");
 const sys = {
   id: "as400",
-  name: "実機",
+  name: (process.env.AS400_SYSTEM ?? "AS400"),
   host,
   signon: { user, passwordEnv: "AS400_PASSWORD" }
 };
@@ -77,7 +78,7 @@ const got = async (path) => (await page.locator(`[data-out="${path}"]`).textCont
 try {
   await page.goto(`http://localhost:${PORT}/`);
   // システムが 1 つだけなら選択画面は出ない（自動で選ばれる）
-  const picker = page.locator(".card", { hasText: "実機" }).locator("button", { hasText: "選択" });
+  const picker = page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).locator("button", { hasText: "選択" });
   if ((await picker.count()) > 0) await picker.first().click();
 
   await page.locator(".fn", { hasText: "PCML 呼び出し" }).first().waitFor({ timeout: 30000 });
@@ -95,7 +96,7 @@ try {
   check("記述からプログラムを選べる", chosen === "PCMLTST", chosen);
   check(
     "path から呼び先が読める",
-    (await page.locator(".section .note").first().textContent())?.includes("TESTLIB"),
+    (await page.locator(".section .note").first().textContent())?.includes(LIB),
     "画面に /QSYS.LIB/TESTLIB.LIB/PCMLTST.PGM が出る"
   );
 

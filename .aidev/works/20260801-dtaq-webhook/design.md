@@ -86,7 +86,7 @@ X-As400-Signature: sha256=<hex>            ← 秘密があるとき。本文の
 
 ```json
 {
-  "queue":   "MYLIB/ORDERQ",
+  "queue":   "TESTLIB/ORDERQ",
   "ref":     "srv:受注監視",
   "seq":     42,
   "at":      "2026-08-02T01:23:45.678Z",

@@ -27,7 +27,7 @@ const check = (name, ok, detail = "") => {
   log(`${ok ? "OK  " : "NG  "} ${name}${detail ? ` — ${detail}` : ""}`);
 };
 
-const sys = { id: "sys1", name: "実機", host, signon: { user, passwordEnv: "AS400_PASSWORD" }, ccsid: 930 };
+const sys = { id: "sys1", name: (process.env.AS400_SYSTEM ?? "AS400"), host, signon: { user, passwordEnv: "AS400_PASSWORD" }, ccsid: 930 };
 const ses = { id: "t1", name: "TEST-3270", system: "sys1", sessionType: "display", terminal: "3270", model3270: 2 };
 const resolver = new ConfigResolver(
   new ServerConfigStore({ systems: [], sessions: [] }),
@@ -55,7 +55,7 @@ const body = () =>
 
 try {
   await page.goto(`http://localhost:${PORT}/`);
-  const pick = page.locator(".card", { hasText: "実機" }).locator("button", { hasText: "選択" });
+  const pick = page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).locator("button", { hasText: "選択" });
   if ((await pick.count()) > 0) await pick.first().click();
   await page.locator(".card", { hasText: "TEST-3270" }).first().locator("button", { hasText: "接続" }).click();
   await page.waitForTimeout(7000);

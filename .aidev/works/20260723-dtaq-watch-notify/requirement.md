@@ -67,10 +67,10 @@
 
 タブの中身:
   監視中          受信  未読
-  ▶ MYLIB/ORDERQ   12    3      ← 選択中。行ごとに停止できる
-    MYLIB/LOGQ      7    2
+  ▶ TESTLIB/ORDERQ   12    3      ← 選択中。行ごとに停止できる
+    TESTLIB/LOGQ      7    2
   [＋監視を追加]
-  ── MYLIB/ORDERQ の履歴 ──
+  ── TESTLIB/ORDERQ の履歴 ──
   #12 22:41:03 "ORD-1043" 18B
 ```
 

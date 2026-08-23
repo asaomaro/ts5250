@@ -1,6 +1,6 @@
 # 調査: host_call_program の正常系（実機）
 
-実機 **実機（IBM i 7.3）**。再現は `scripts/research-call-program.mjs`（**副作用なし**）。
+**実機（IBM i 7.3）**。再現は `scripts/research-call-program.mjs`（**副作用なし**）。
 
 ## 選んだ API
 

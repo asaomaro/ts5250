@@ -43,13 +43,13 @@ const W1 = {
   id: "w1",
   kind: "dtaq" as const,
   ref: "own:c1",
-  label: "MYLIB/ORDERQ",
+  label: "TESTLIB/ORDERQ",
   // `listening`（旧 `watching`）。プリンターと語彙を共有する（`service-state.ts`）
   state: "listening" as const,
   received: 0,
   startedAt: "2026-07-30T00:00:00Z"
 };
-const W2 = { ...W1, id: "w2", ref: "own:c2", label: "MYLIB/LOGQ" };
+const W2 = { ...W1, id: "w2", ref: "own:c2", label: "TESTLIB/LOGQ" };
 /** メッセージ待ち行列の待ち受け。**こちらは消費しない**（`*SAME` で読む） */
 const M1 = { ...W1, id: "m1", kind: "msgq" as const, ref: "own:m1", label: "QSYS/QSYSOPR" };
 
@@ -90,7 +90,7 @@ describe("watchesStore: サーバーの写し", () => {
 
   it("watch-list で一覧が入る", () => {
     deliver({ type: "watch-list", watches: [W1, W2] });
-    expect(watchesStore.watches.map((w) => w.label)).toEqual(["MYLIB/ORDERQ", "MYLIB/LOGQ"]);
+    expect(watchesStore.watches.map((w) => w.label)).toEqual(["TESTLIB/ORDERQ", "TESTLIB/LOGQ"]);
   });
 
   it("watch-entry で履歴が増え、未読が増える", () => {
@@ -241,7 +241,7 @@ describe("WatchPane", () => {
     deliver({ type: "watch-entry", watchId: "w1", entry: entry(13, "ORD-13"), received: 13 });
     await nextTick();
     const row = w.find("tbody tr");
-    expect(row.text()).toContain("MYLIB/ORDERQ");
+    expect(row.text()).toContain("TESTLIB/ORDERQ");
     expect(row.text()).toContain("13");
     expect(row.text()).toContain("監視中");
     w.unmount();
@@ -330,7 +330,7 @@ describe("WatchPane", () => {
     await nextTick();
     await w.findAll("tbody tr")[1]!.trigger("click");
     await nextTick();
-    expect(w.find(".hist").text()).toContain("MYLIB/LOGQ");
+    expect(w.find(".hist").text()).toContain("TESTLIB/LOGQ");
     expect(w.find(".entries").text()).toContain("LOG-1");
     w.unmount();
   });
@@ -354,8 +354,8 @@ describe("WatchPane: システムごとの絞り込み", () => {
     const w = mountFor("own:s-A");
     deliver({ type: "watch-list", watches: [W1, W2] });
     await nextTick();
-    expect(w.text()).toContain("MYLIB/ORDERQ");
-    expect(w.text()).not.toContain("MYLIB/LOGQ");
+    expect(w.text()).toContain("TESTLIB/ORDERQ");
+    expect(w.text()).not.toContain("TESTLIB/LOGQ");
     w.unmount();
   });
 
@@ -363,8 +363,8 @@ describe("WatchPane: システムごとの絞り込み", () => {
     const w = mount(WatchPane, { props: { tabId: "watch:queues" } });
     deliver({ type: "watch-list", watches: [W1, W2] });
     await nextTick();
-    expect(w.text()).toContain("MYLIB/ORDERQ");
-    expect(w.text()).toContain("MYLIB/LOGQ");
+    expect(w.text()).toContain("TESTLIB/ORDERQ");
+    expect(w.text()).toContain("TESTLIB/LOGQ");
     w.unmount();
   });
 

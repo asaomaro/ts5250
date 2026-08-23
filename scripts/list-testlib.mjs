@@ -21,7 +21,7 @@ let sessionId;
 try {
   const sys = (await call("list_systems", {})).structuredContent.systems;
   log("systems: " + sys.map((s) => `${s.ref}(${s.name}, autoSignon=${s.autoSignon})`).join(", "));
-  const as400 = sys.find((s) => s.name === "実機");
+  const as400 = sys.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
   if (!as400) throw new Error("実機が見つからない");
 
   // system 参照で開く（装置名はホスト採番。保存済みの資格情報で自動サインオン）

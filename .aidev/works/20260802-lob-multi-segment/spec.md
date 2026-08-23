@@ -114,7 +114,7 @@ interface RetrievedLob { bytes; ccsid; totalLength; truncated }
 
 - **`SBCS だけで試すと通ってしまう`**——`lob.ts` の既存コメントが警告しているのに、
   分割の経路では守られていなかった。**単体テストは 2 バイト CCSID を主役にする。**
-- 実機（）は共用の本番機。表は自分のライブラリーに作り `finally` で消す。
+- 実機は共用の本番機。表は自分のライブラリーに作り `finally` で消す。
 - 検証スクリプトに内部 IP を書かない（`process.env.AS400_HOST`、既定値なし）。
 
 ## 受け入れ基準との対応

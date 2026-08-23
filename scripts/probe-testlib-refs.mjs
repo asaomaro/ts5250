@@ -21,7 +21,7 @@ const call = async (name, args) => {
 let sessionId;
 try {
   const sys = (await call("list_systems", {})).structuredContent.systems;
-  const as400 = sys.find((s) => s.name === "実機");
+  const as400 = sys.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
   sessionId = (await call("open_session", { system: as400.ref })).structuredContent.sessionId;
   await call("wait_screen", { sessionId, timeoutMs: 4000 });
 

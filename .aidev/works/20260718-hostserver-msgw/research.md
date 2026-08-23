@@ -39,7 +39,7 @@ MSGW を発生させるには writer が用紙交換等を尋ねる必要があ�
 | 特殊権限の確認 | **`*NONE`**（`QSYS2.USER_INFO`） |
 | `STRPRTWTR DEV(PRT_TEST)` | `CPF3464 "Not authorized to output queue PRT_TEST in library QUSRSYS."` |
 | `ENDWTR` / `CHGWTR` | `CPF3313 "Writer not active nor on job queue."` |
-| **自分の OUTQ を作成**（`CRTOUTQ MYLIB/TESTQ`） | **成功** |
+| **自分の OUTQ を作成**（`CRTOUTQ TESTLIB/TESTQ`） | **成功** |
 | 自分の OUTQ を指定して `STRPRTWTR` | **コマンドは成功するが writer が常駐しない** |
 | 用紙タイプ不一致で誘発 | スプールは `READY` のまま。MSGW にならない |
 

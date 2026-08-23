@@ -6,7 +6,7 @@ import { detectWindowRect } from "../src/composables/fkeyLegend.js";
 import type { Cell, ScreenSnapshot, WriteExtent } from "@ts5250/tn5250";
 
 /**
- * **実機（/ IBM i 7.3）のメインメニューで F1 を押したヘルプ窓。**
+ * **実機（IBM i 7.3）のメインメニューで F1 を押したヘルプ窓。**
  *
  * backlog の実測表でいう ①（本物の窓。上下 `.`・左右 `:`・枠外の非空白 130 セル）そのもの。
  * 2026-07-29 に実機から採取した。同時に採った `lastWrite` が重要:

@@ -69,7 +69,7 @@ research が「利用者に依頼が必要」として残していた唯一の�
 （キープアライブのパケットは実トラフィックなので、経路上のアイドル回収の対象から外れる）。
 再現手段は `scripts/probe-dtaq-longwait.mjs --minutes 45`。
 
-## 実機実測 ②: ブラウザ E2E（実機・10/10）
+## 実機実測 ②: ブラウザ E2E（10/10）
 
 `scripts/verify-browser-watch.mjs`。
 

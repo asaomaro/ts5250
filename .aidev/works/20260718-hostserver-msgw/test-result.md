@@ -17,7 +17,7 @@
 |---|---|
 | 特殊権限 | **`*NONE`** |
 | `STRPRTWTR DEV(PRT_TEST)` | `CPF3464` OUTQ に権限なし |
-| **自分の OUTQ を作成** | **成功**（`CRTOUTQ MYLIB/TESTQ`） |
+| **自分の OUTQ を作成** | **成功**（`CRTOUTQ TESTLIB/TESTQ`） |
 | 自分の OUTQ で `STRPRTWTR` | コマンドは成功するが**writer が常駐しない** |
 | 用紙タイプ不一致で誘発 | スプールは `READY` のまま |
 
@@ -31,7 +31,7 @@ core 433（うち本作業の新規 10）/ server 192 / web-ui 279 = **904**。
 
 ## 実機の後片付け
 
-テスト中に作成したスプール 12 件と OUTQ `MYLIB/TESTQ` を**削除済み**。
+テスト中に作成したスプール 12 件と OUTQ `TESTLIB/TESTQ` を**削除済み**。
 元からあった 3 件のみの状態に戻した。
 
 ## 未検証の範囲（deliver へ引き継ぐ）

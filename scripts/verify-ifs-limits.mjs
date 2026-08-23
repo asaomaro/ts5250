@@ -46,7 +46,7 @@ const check = (name, ok, detail = "") => {
 // ---- サーバー（connections.json をそのまま使う。パスワードはスクリプトに書かない）----
 const crypto = SecretCrypto.fromEnv();
 const conn = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conn.systems.find((s) => s.name === "実機");
+const sys = conn.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!sys) throw new Error("connections.json に実機がない");
 const resolver = new ConfigResolver(
   new ServerConfigStore({ systems: [], sessions: [] }, crypto),
@@ -185,25 +185,25 @@ try {
   };
 
   await page.goto(`http://localhost:${PORT}/`);
-  await page.locator(".card", { hasText: "実機" }).first().waitFor({ timeout: 30000 });
-  await page.locator(".card", { hasText: "実機" }).first().locator("button", { hasText: "選択" }).click();
+  await page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).first().waitFor({ timeout: 30000 });
+  await page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).first().locator("button", { hasText: "選択" }).click();
   await page.locator(".fn", { hasText: "IFS" }).first().locator("button").first().click();
   await page.waitForSelector(".ifs", { timeout: 30000 });
   await page.locator(".entries li").first().waitFor({ timeout: 60000 });
 
-  // /home/USER/test まで辿る。
-  // **一覧に出る名前は `USER`（大文字）。** IFS は解決時に大小を区別しないので
-  // API は `/home/asao` でも通るが、画面には格納されている綴りが出る
+  // BASE/test まで辿る。
+  // **画面に出るのは格納されている綴り。** IFS は解決時に大小を区別しないので
+  // API は小文字でも通るが、一覧の行を掴むには綴りを合わせる必要がある
   for (const [step, expect] of [
-    ["home", "USER"],
-    ["USER", "test"],
+    ["home", LEAF],
+    [LEAF, "test"],
     ["test", "small.txt"]
   ]) {
     await row(step).click();
     await row(expect).waitFor({ timeout: 60000 });
   }
   const crumbs = (await page.locator("nav.crumbs button").allTextContents()).join("/");
-  check(`準備 ${DIR} まで辿れる`, /asao/i.test(crumbs) && crumbs.includes("test"), crumbs);
+  check(`準備 ${DIR} まで辿れる`, new RegExp(LEAF, "i").test(crumbs) && crumbs.includes("test"), crumbs);
   await shot("01-dir");
 
   // ---- L2: 先回り ------------------------------------------------------------

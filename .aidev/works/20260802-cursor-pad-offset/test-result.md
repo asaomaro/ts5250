@@ -23,7 +23,7 @@
 （`styleBlock()` が CSS コメントを落とす。落とさないと注記の `var(--grid-pad-x, 2px)` を
 自分で踏む——実際に踏んで直した）。
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `node --env-file=.env scripts/verify-cursor-align.mjs` — **7 passed / 0 failed**
 

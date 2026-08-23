@@ -17,7 +17,7 @@ import type { InternalField } from "../screen/buffer.js";
  *
  * GNU tn5250 `session.c:551-566`（Read MDT Fields の組み立て）の移植。
  *
- * **実機で裏づけ済み**（実機・2026-07-30。`scripts/research-sign.mjs`）:
+ * **実機で裏づけ済み**（2026-07-30。`scripts/research-sign.mjs`）:
  * - `-12`（先頭に符号）を送ると**符号が黙って落ちて `12` になる**＝いまの実装では負値が送れない
  * - `    12-` を 7 バイトそのまま送ると **CPF5257（入出力エラー）**＝桁あふれ
  * - `    12`（6 バイト）は `12` として通る

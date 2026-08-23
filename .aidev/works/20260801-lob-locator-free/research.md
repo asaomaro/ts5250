@@ -1,6 +1,6 @@
 # 調査: LOB ロケーターの解放（0x1819）
 
-実機 **実機（IBM i 7.3・平文）**。再現は `scripts/research-lob-free.mjs`
+**実機（IBM i 7.3・平文）**。再現は `scripts/research-lob-free.mjs`
 （表 `TESTLIB.LOBFREE` を作り直す）。
 
 ## F1. 解放は効く

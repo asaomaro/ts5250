@@ -16,6 +16,7 @@ import {
   toProgramParameters
 } from "@ts5250/hostserver";
 
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const host = process.env.AS400_HOST;
 const user = process.env.AS400_USER;
 const password = process.env.AS400_PASSWORD;
@@ -62,7 +63,7 @@ try {
 
   log("\n### 2. 名前だけで呼ぶ");
   const call = buildPcmlCall(doc, "PCMLTST", VALUES, { ccsid: CCSID });
-  check(call.library === "TESTLIB", `呼び先は ${call.library}/${call.program}（path から解いた）`);
+  check(call.library === LIB, `呼び先は ${call.library}/${call.program}（path から解いた）`);
   check(call.args.length === 7, `引数は 7 本（実測 ${call.args.length}）`);
 
   const { result, outputs } = await cmd.call(call.program, call.library, toProgramParameters(call.args, { ccsid: CCSID }));

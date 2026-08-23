@@ -22,6 +22,6 @@
   入力検証（zod strict・wait 範囲・encoding enum）、ステータス写像（NOT_FOUND→404 等）、
   encoding 往復（utf8/base64/ebcdic）、受信の空→`entry:null`、senderInfo デコード。
   MCP ツールの入出力スキーマも軽く固定。
-- [x] T6: 実機 curl で 6 ルートを検証（PUB400/MYLIB）。QSYS2 の SQL サービス
+- [x] T6: 実機 curl で 6 ルートを検証（PUB400/TESTLIB）。QSYS2 の SQL サービス
   （`DATA_QUEUE_ENTRIES` / `DATA_QUEUE_INFO`）と突き合わせ。都度片付ける。
   `npm run -w @as400web/server test` と lint / build がクリーン。

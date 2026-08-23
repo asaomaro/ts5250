@@ -1,6 +1,6 @@
 # 調査: ロケーター経由の DBCLOB はなぜ壊れるか
 
-実機 **実機（IBM i 7.3）**。再現は `scripts/research-dbclob-locator.mjs`
+**実機（IBM i 7.3）**。再現は `scripts/research-dbclob-locator.mjs`
 （表 `TESTLIB.DBCLOBT` に `DBCLOB(1K) CCSID 1200` と `CLOB(1K)`（混在 5035）を作り直す）。
 
 ## F1. 申告長の単位は CCSID で変わる

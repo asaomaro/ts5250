@@ -38,8 +38,8 @@ lint 規約は `/^_/u` に一致する名前を許す（`@typescript-eslint/no-u
 | 対象 | 規模 | 扱い | 理由 |
 |---|---|---|---|
 | `has` × 4（`shot-buttons` / `shot-crt` / `shot-empsfl` / `shot-font`） | 1 行 | **消す** | `(await page.locator("body").innerText()).includes(t)` の別名。要るときに 1 行で書き直せる |
-| `constant`（`build-empsfl-as400:40`） | 1 行 | **消す** | 同上（DDS 定数行の組み立て） |
-| `probe`（`shot-fkey-as400:42-84`） | **44 行** | **`_probe` に改名して残す** | 画面の DOM から GUI 要素・入力欄・凡例を読み `probe-<label>.json` に落とす探査関数。**書き直しは安くない**。診断スクリプトが必要時に呼ぶ道具を持つのは不自然でない |
+| `constant`（`build-empsfl:40`） | 1 行 | **消す** | 同上（DDS 定数行の組み立て） |
+| `probe`（`shot-fkey:42-84`） | **44 行** | **`_probe` に改名して残す** | 画面の DOM から GUI 要素・入力欄・凡例を読み `probe-<label>.json` に落とす探査関数。**書き直しは安くない**。診断スクリプトが必要時に呼ぶ道具を持つのは不自然でない |
 
 `_probe` には「今の通し実行では呼んでいない。要るときに呼ぶ」と 1 行の理由を添える。
 

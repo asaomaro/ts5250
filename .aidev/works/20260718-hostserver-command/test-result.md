@@ -19,8 +19,8 @@
 host=pub400.com tls=true V7R5M0 ccsid=273 dsLevel=11
 
 成功  rc=0x0    CHGJOB CCSID(273)
-成功  rc=0x0    ADDLIBLE LIB(MYLIB)      CPC2196 [info/0] Library MYLIB added to library list.
-成功  rc=0x0    RMVLIBLE LIB(MYLIB)      CPC2197 [info/0] Library MYLIB removed from library list.
+成功  rc=0x0    ADDLIBLE LIB(TESTLIB)      CPC2196 [info/0] Library TESTLIB added to library list.
+成功  rc=0x0    RMVLIBLE LIB(TESTLIB)      CPC2197 [info/0] Library TESTLIB removed from library list.
 失敗  rc=0x400  NOSUCHCMD                CPD0030 [error/30] Command NOSUCHCMD in library *LIBL not found.
                                          CPF0001 [error/30] Error found on NOSUCHCMD command.
 失敗  rc=0x400  DSPLIB LIB(NOSUCHLIB)    CPF2110 [severe/40] Library NOSUCHLIB not found.

@@ -48,7 +48,7 @@ function wideSelect(rows, cols = COLS) {
 }
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!process.env.AS400_PASSWORD) {
   log("AS400_PASSWORD が未設定です");
   process.exit(1);

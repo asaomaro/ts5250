@@ -73,7 +73,7 @@ flowchart TD
 - ランチャーの既存テスト（`launcher-open-existing` / `launcher-watch`）が緑のまま
   ＝抽出で壊していない。
 
-### 実機（）
+### 実機
 
 `scripts/verify-printer-report-history.mjs`:
 待ち受け開始 → **WS を切る** → 帳票を出す → **開き直して読める・時刻が出す前の時刻**

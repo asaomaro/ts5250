@@ -86,40 +86,40 @@ describe("send", () => {
   it("utf8 テキストをバイト列にして write する", async () => {
     const calls: string[] = [];
     const res = await call(appWith({ calls }), "send", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       data: "hello"
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(calls).toContain("write MYLIB/Q 5 key=0");
+    expect(calls).toContain("write TESTLIB/Q 5 key=0");
   });
 
   it("base64 はバイナリとして復号する", async () => {
     const calls: string[] = [];
     // "AAECAwQ=" = 5 bytes
     await call(appWith({ calls }), "send", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       data: "AAECAwQ=",
       encoding: "base64"
     });
-    expect(calls).toContain("write MYLIB/Q 5 key=0");
+    expect(calls).toContain("write TESTLIB/Q 5 key=0");
   });
 
   it("キー付きは key も変換して渡す", async () => {
     const calls: string[] = [];
     await call(appWith({ calls }), "send", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       data: "v",
       key: "0010"
     });
-    expect(calls.some((c) => c.startsWith("write MYLIB/Q 1 key=4"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("write TESTLIB/Q 1 key=4"))).toBe(true);
   });
 
   it("キュー名が 10 文字を超えると 400", async () => {
-    const res = await call(appWith({}), "send", { library: "MYLIB", name: "TOOLONGNAME11", data: "x" });
+    const res = await call(appWith({}), "send", { library: "TESTLIB", name: "TOOLONGNAME11", data: "x" });
     expect(res.status).toBe(400);
   });
 
@@ -127,7 +127,7 @@ describe("send", () => {
     const calls: string[] = [];
     // "!!!!" は base64 の文字集合外。Buffer.from は無視して 0 バイトにするので明示的に弾く
     const res = await call(appWith({ calls }), "send", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       data: "!!!!",
       encoding: "base64"
@@ -140,7 +140,7 @@ describe("send", () => {
 
 describe("receive", () => {
   it("空キューは entry:null（エラーにしない）", async () => {
-    const res = await call(appWith({ reads: [undefined] }), "receive", { library: "MYLIB", name: "Q" });
+    const res = await call(appWith({ reads: [undefined] }), "receive", { library: "TESTLIB", name: "Q" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ entry: null });
   });
@@ -151,7 +151,7 @@ describe("receive", () => {
       data: new TextEncoder().encode("hello"),
       senderInfo: Uint8Array.from([0xc1, 0xc2, 0x40, 0x40])
     };
-    const res = await call(appWith({ reads: [entry] }), "receive", { library: "MYLIB", name: "Q" });
+    const res = await call(appWith({ reads: [entry] }), "receive", { library: "TESTLIB", name: "Q" });
     const body = (await res.json()) as { entry: { data: string; bytes: number; senderInfo?: string } };
     expect(body.entry.data).toBe("hello");
     expect(body.entry.bytes).toBe(5);
@@ -162,7 +162,7 @@ describe("receive", () => {
     // EBCDIC273 の 0xC1 0xC2 は "AB"。utf8 デコードなら別物になるので、経路を判別できる
     const entry: DtaqEntry = { data: Uint8Array.from([0xc1, 0xc2]) };
     const res = await call(appWith({ reads: [entry] }), "receive", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       encoding: "ebcdic"
     });
@@ -174,7 +174,7 @@ describe("receive", () => {
   it("wait を上限でクランプする（無限待ちを HTTP から作らせない）", async () => {
     const calls: string[] = [];
     await call(appWith({ calls, reads: [undefined] }, 30), "receive", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       wait: 999
     });
@@ -182,14 +182,14 @@ describe("receive", () => {
   });
 
   it("負の wait は 400（無限待ちは弾く）", async () => {
-    const res = await call(appWith({}), "receive", { library: "MYLIB", name: "Q", wait: -1 });
+    const res = await call(appWith({}), "receive", { library: "TESTLIB", name: "Q", wait: -1 });
     expect(res.status).toBe(400);
   });
 
   it("キー検索は key と search を渡す", async () => {
     const calls: string[] = [];
     await call(appWith({ calls, reads: [undefined] }), "receive", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       key: "0020",
       search: "GE",
@@ -202,7 +202,7 @@ describe("receive", () => {
 describe("create", () => {
   it("KEYED で keyLength 無しは 400", async () => {
     const res = await call(appWith({}), "create", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 100,
       type: "KEYED"
@@ -212,7 +212,7 @@ describe("create", () => {
 
   it("非 KEYED で keyLength ありは 400", async () => {
     const res = await call(appWith({}), "create", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 100,
       type: "FIFO",
@@ -223,7 +223,7 @@ describe("create", () => {
 
   it("maxEntryLength の上限（64512 超）は 400", async () => {
     const res = await call(appWith({}), "create", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 70000,
       type: "FIFO"
@@ -234,7 +234,7 @@ describe("create", () => {
   it("FIFO 作成は 200", async () => {
     const calls: string[] = [];
     const res = await call(appWith({ calls }), "create", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q",
       maxEntryLength: 100,
       type: "FIFO"
@@ -247,18 +247,18 @@ describe("create", () => {
 describe("attributes / clear / delete", () => {
   it("attributes をそのまま返す", async () => {
     const attrs: DtaqAttributes = { maxEntryLength: 333, type: "KEYED", keyLength: 7, saveSender: true };
-    const res = await call(appWith({ attributes: attrs }), "attributes", { library: "MYLIB", name: "Q" });
+    const res = await call(appWith({ attributes: attrs }), "attributes", { library: "TESTLIB", name: "Q" });
     expect(await res.json()).toEqual(attrs);
   });
 
   it("clear はキーを渡せる", async () => {
     const calls: string[] = [];
-    await call(appWith({ calls }), "clear", { library: "MYLIB", name: "Q", key: "0010" });
-    expect(calls.some((c) => c.startsWith("clear MYLIB/Q key=4"))).toBe(true);
+    await call(appWith({ calls }), "clear", { library: "TESTLIB", name: "Q", key: "0010" });
+    expect(calls.some((c) => c.startsWith("clear TESTLIB/Q key=4"))).toBe(true);
   });
 
   it("delete は 200", async () => {
-    const res = await call(appWith({}), "delete", { library: "MYLIB", name: "Q" });
+    const res = await call(appWith({}), "delete", { library: "TESTLIB", name: "Q" });
     expect(res.status).toBe(200);
   });
 });
@@ -273,7 +273,7 @@ describe("エラー写像（core の As400Error → HTTP ステータス）", ()
   for (const [code, status] of cases) {
     it(`${code} → ${status}`, async () => {
       const res = await call(appWith({ fail: new As400Error(code as never, "boom") }), "attributes", {
-        library: "MYLIB",
+        library: "TESTLIB",
         name: "Q"
       });
       expect(res.status).toBe(status);
@@ -282,7 +282,7 @@ describe("エラー写像（core の As400Error → HTTP ステータス）", ()
 
   it("PROTOCOL_ERROR は 502（上流の失敗）", async () => {
     const res = await call(appWith({ fail: new As400Error("PROTOCOL_ERROR", "boom") }), "delete", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q"
     });
     expect(res.status).toBe(502);
@@ -291,7 +291,7 @@ describe("エラー写像（core の As400Error → HTTP ステータス）", ()
   it("失敗しても接続は閉じる", async () => {
     const calls: string[] = [];
     await call(appWith({ calls, fail: new As400Error("PROTOCOL_ERROR", "x") }), "delete", {
-      library: "MYLIB",
+      library: "TESTLIB",
       name: "Q"
     });
     expect(calls).toContain("close");

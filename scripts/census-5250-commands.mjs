@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sys = (() => {
   for (const f of ["profiles.local.json", "connections.json"]) {
     try {
-      const hit = JSON.parse(readFileSync(f, "utf8")).systems?.find((x) => x.name === "実機");
+      const hit = JSON.parse(readFileSync(f, "utf8")).systems?.find((x) => x.name === (process.env.AS400_SYSTEM ?? "AS400"));
       if (hit) return hit;
     } catch { /* 無ければ次 */ }
   }

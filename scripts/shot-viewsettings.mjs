@@ -10,7 +10,7 @@ import { chromium } from "playwright";
 
 const log = (s) => process.stderr.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const OUT = "/tmp/claude-1000/-workspaces-as400-web-emulator/cff7c584-0ab5-4be3-b08e-bc65bf027295/scratchpad";
+const OUT = "/tmp/ts5250-work";
 const PORT = 3477;
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));

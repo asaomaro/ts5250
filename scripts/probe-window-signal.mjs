@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (s) => process.stderr.write(s + "\n");
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機") ?? cfg.systems[0];
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")) ?? cfg.systems[0];
 const sess = (cfg.sessions ?? []).find((s) => s.system === sys.name && s.kind !== "printer") ?? {};
 const crypto = SecretCrypto.fromEnv();
 const password = sys.password ? crypto.decrypt(sys.password) : undefined;

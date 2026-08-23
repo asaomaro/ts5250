@@ -32,7 +32,7 @@
 `fkey-button-ui` / `sysreq-line` …）、**個別に走らせるとすべて通る**。
 固定 `nextTick` 待ちに依存したテスト群で、本件が触っていない場所。別途の課題。
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `node --env-file=.env scripts/verify-pane-state.mjs` — **11 passed / 0 failed**
 

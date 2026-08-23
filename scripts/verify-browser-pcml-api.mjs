@@ -44,7 +44,7 @@ const user = process.env.AS400_USER;
 if (!host || !user) throw new Error("AS400_HOST / AS400_USER が要ります");
 const sys = {
   id: "as400",
-  name: "実機",
+  name: (process.env.AS400_SYSTEM ?? "AS400"),
   host,
   signon: { user, passwordEnv: "AS400_PASSWORD" }
 };
@@ -80,7 +80,7 @@ const USER = (process.env.AS400_USER ?? "").toUpperCase();
 
 try {
   await page.goto(`http://localhost:${PORT}/`);
-  const picker = page.locator(".card", { hasText: "実機" }).locator("button", { hasText: "選択" });
+  const picker = page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).locator("button", { hasText: "選択" });
   if ((await picker.count()) > 0) await picker.first().click();
 
   await page.locator(".fn", { hasText: "PCML 呼び出し" }).first().waitFor({ timeout: 30000 });

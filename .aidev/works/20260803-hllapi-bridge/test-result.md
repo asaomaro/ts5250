@@ -11,7 +11,7 @@
 | `ws-handler.test.ts`（3 件） | **経路側から**締め出しが効くこと |
 | `pane-reserved.test.ts`（7 件） | 覆い・入力停止・打ちかけ破棄。**対照つき** |
 
-## 実機 C ABI（実機・日本語画面）— 33/33
+## 実機 C ABI（日本語画面）— 33/33
 
 `node --env-file=.env scripts/verify-hllapi.mjs`。Python `ctypes` で本物の C ABI。
 

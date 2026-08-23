@@ -7,7 +7,7 @@ import { assertIdentifier } from "../src/ddm/column-meta.js";
  */
 describe("assertIdentifier", () => {
   it("正規化して返す（前後空白の除去と大文字化）", () => {
-    expect(assertIdentifier(" testlib ", "ライブラリ名")).toBe("MYLIB");
+    expect(assertIdentifier(" testlib ", "ライブラリ名")).toBe("TESTLIB");
   });
 
   it("IBM i で使える記号を通す", () => {

@@ -104,8 +104,8 @@ rc=0  CCSID=273  NLV="2924"  版数=V7R5M0  データストリームレベル=11
 ```
 cmd="CHGJOB CCSID(273)"          rc=0x0    messages=0
 cmd="CHGLIBL LIBL(QGPL QTEMP)"   rc=0x0    messages=1  CPC2101 sev=0 "Library list changed."
-cmd="ADDLIBLE LIB(MYLIB)"        rc=0x0    messages=1  CPC2196 sev=0 "Library MYLIB added to library list."
-cmd="RMVLIBLE LIB(MYLIB)"        rc=0x0    messages=1  CPC2197 sev=0 "Library MYLIB removed from library list."
+cmd="ADDLIBLE LIB(TESTLIB)"        rc=0x0    messages=1  CPC2196 sev=0 "Library TESTLIB added to library list."
+cmd="RMVLIBLE LIB(TESTLIB)"        rc=0x0    messages=1  CPC2197 sev=0 "Library TESTLIB removed from library list."
 cmd="NOSUCHCMD"                  rc=0x400  messages=2  CPD0030 sev=30 "Command NOSUCHCMD in library *LIBL not found."
                                                        CPF0001 sev=30 "Error found on NOSUCHCMD command."
 cmd="DSPLIB LIB(NOSUCHLIB)"      rc=0x400  messages=1  CPF2110 sev=40 "Library NOSUCHLIB not found."
@@ -121,7 +121,7 @@ cmd="DSPLIB LIB(NOSUCHLIB)"      rc=0x400  messages=1  CPF2110 sev=40 "Library N
 | コマンド | 用途 |
 |---|---|
 | `CHGJOB CCSID(273)` | 成功・メッセージ 0 件 |
-| `ADDLIBLE LIB(MYLIB)` → `RMVLIBLE LIB(MYLIB)` | 成功・情報メッセージあり。対で元に戻る |
+| `ADDLIBLE LIB(TESTLIB)` → `RMVLIBLE LIB(TESTLIB)` | 成功・情報メッセージあり。対で元に戻る |
 | `NOSUCHCMD` | 失敗・`CPD0030` |
 | `DSPLIB LIB(NOSUCHLIB)` | 失敗・`CPF2110` 重大度 40 |
 

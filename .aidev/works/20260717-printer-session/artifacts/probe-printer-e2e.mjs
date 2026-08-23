@@ -1,6 +1,6 @@
 // research probe (milestone 2): プリンターセッションを維持したまま、表示セッションから自前の
 // スプールをそのプリンター OUTQ へ回し、SCS が降ってくるかを端から端まで確認・キャプチャする。
-import { TcpTransport, Session5250, codecForCcsid, deviceEnvFor } from "file:///workspaces/as400-web-emulator/packages/core/dist/index.js";
+import { TcpTransport, Session5250, codecForCcsid, deviceEnvFor } from "file:///workspaces/ts5250/packages/core/dist/index.js";
 import { writeFileSync } from "node:fs";
 
 const HOST = process.env.PUB400_HOST ?? "pub400.com";
@@ -148,7 +148,7 @@ for (const r of prt.state.records) {
 if (dataRecs.length) {
   const payloads = dataRecs.map((r) => r.bytes.subarray(10));
   const all = Buffer.concat(payloads.map((p) => Buffer.from(p)));
-  writeFileSync("/tmp/claude-1000/-workspaces-as400-web-emulator/0d514ddf-60ce-4ba1-85fd-79b8f8491d4e/scratchpad/scs-capture.bin", all);
+  writeFileSync("/tmp/ts5250-work/scs-capture.bin", all);
   console.log(`\n✅ SCS 受信! payload ${all.length} bytes を scs-capture.bin に保存`);
   console.log("  先頭 hex:", hex(all.subarray(0, Math.min(all.length, 60))));
   console.log("  EBCDIC :", JSON.stringify(codec.decode(all.subarray(0, Math.min(all.length, 80)))));

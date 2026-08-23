@@ -1,6 +1,6 @@
 // 実ブラウザでの IFS パネル E2E。build 済み web-ui を server で配信し、Playwright で:
 //   1) ランチャーから IFS を開き、ルートの一覧が出る
-//   2) フォルダを辿って /home/USER/ifsdemo まで降りられる
+//   2) フォルダを辿って ${PUB400_USER}/ifsdemo まで降りられる
 //   3) 左のツリーから同じ場所へ移動できる
 //   4) テキスト（UTF-8）を選ぶと中身が表示される
 //   5) 画像を選ぶと <img> が実際に描画される（naturalWidth > 0。src が付いただけでは分からない）
@@ -28,7 +28,7 @@ import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 
-const DEMO = "/home/USER/ifsdemo";
+const DEMO = `/home/${process.env.PUB400_USER ?? "USER"}/ifsdemo`;
 const results = [];
 const check = (name, ok, detail = "") => {
   results.push({ name, ok, detail });
@@ -204,7 +204,7 @@ async function main() {
       const res = await fetch("/api/host/ifs/read", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: { system: "srv:pub400.com" }, path: "/home/USER/ifsdemo/e2e-edit.txt" })
+        body: JSON.stringify({ source: { system: "srv:pub400.com" }, path: "${PUB400_USER}/ifsdemo/e2e-edit.txt" })
       });
       return (await res.json()).content;
     });

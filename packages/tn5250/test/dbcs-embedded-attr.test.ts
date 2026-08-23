@@ -118,7 +118,7 @@ describe("DBCS 欄の埋め込み属性（編集・送信で失わない）", ()
  * そこで生バイトのセンチネル化を DBCS 欄だけ除外していたため、SO/SI・全角のバイトが
  * U+FFFD のまま返り、送信時に SUB(0x3F) へ化けて**ソースが壊れていた**。
  *
- * 実機（/ TESTLIB/QJPNTEST）で確認した現象:
+ * 実機（TESTLIB/QJPNTEST）で確認した現象:
  *   編集前 C1 C2 28 0E 45E2 45C9 0F C3 C4   （AB + 属性 + SO 設通 SI + CD）
  *   編集後 3F E7 28 3F 3F 3F 3F 3F 3F 3F 3F （日本語が全部 SUB に潰れた）
  */

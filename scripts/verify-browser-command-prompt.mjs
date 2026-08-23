@@ -91,13 +91,13 @@ try {
   check("走った文字列が返る（引用はサーバーが付ける）", (ran ?? "").includes("TEXT('It''s a prompt test')"), ran ?? "");
   const after = await page.evaluate(() => document.body.innerText);
   check("ホストのメッセージが出る", /CPC2102|成功/.test(after), (after.match(/CPC\d+[^\n]*/) ?? [""])[0]);
-  await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/cmd-prompt.png" });
+  await page.screenshot({ path: "/tmp/ts5250-work/cmd-prompt.png" });
 
   check("ページのエラーが出ていない", errors.length === 0, errors.join(" | "));
 } catch (e) {
   ok = false;
   log("EXCEPTION: " + (e?.message ?? String(e)));
-  await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/cmd-prompt-fail.png" }).catch(() => {});
+  await page.screenshot({ path: "/tmp/ts5250-work/cmd-prompt-fail.png" }).catch(() => {});
 } finally {
   // 後片付け（作ったライブラリーを消す）
   await fetch(`http://localhost:${PORT}/api/host/command/run`, {

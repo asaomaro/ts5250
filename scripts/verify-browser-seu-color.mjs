@@ -54,7 +54,7 @@ async function main() {
 
     // コマンド行に STRSEU を入力して Enter
     // コマンド入力欄（グリッド入力）をクリックして打鍵
-    const cmd = "STRSEU SRCFILE(MYLIB/QTESTSRC) SRCMBR(COLORTEST) OPTION(2)";
+    const cmd = "STRSEU SRCFILE(TESTLIB/QTESTSRC) SRCMBR(COLORTEST) OPTION(2)";
     // 一番下の入力欄にフォーカス。command line は最後の grid-input のことが多い
     const inputs = page.locator("input.grid-input");
     const n = await inputs.count();

@@ -189,7 +189,7 @@ async function connectHost(sys, password) {
 }
 
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = SecretCrypto.fromEnv().decrypt(sys.signon.passwordEnc);
 const session = await connectHost(sys, password);
 try {

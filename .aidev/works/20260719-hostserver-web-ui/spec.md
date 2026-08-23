@@ -18,8 +18,8 @@ requirement の指摘どおり、前作業（MCP）の D1 をそのまま流用*
 |---|---|---|
 | `SELECT 1 FROM SYSIBM.SYSDUMMY1` | 成功 | — |
 | `VALUES 1` | 成功（結果セットを返す） | — |
-| `DELETE FROM MYLIB.A1 WHERE 1=0` | `PROTOCOL_ERROR`（結果セットが無い） | — |
-| `CREATE TABLE MYLIB.ZZPROBE (C1 INT)` | `PROTOCOL_ERROR` | **作られていない**（`DLTOBJ` が `CPF2105 not found`） |
+| `DELETE FROM TESTLIB.A1 WHERE 1=0` | `PROTOCOL_ERROR`（結果セットが無い） | — |
+| `CREATE TABLE TESTLIB.ZZPROBE (C1 INT)` | `PROTOCOL_ERROR` | **作られていない**（`DLTOBJ` が `CPF2105 not found`） |
 | `CALL QSYS2.QCMDEXC('CRTDTAARA …')` | `PROTOCOL_ERROR` | **作られていない**（別経路の一覧で `count=0` を確認） |
 | `SELECT … ; DROP TABLE …`（複文） | `SQL_ERROR` `SQLCODE=-104` | — |
 

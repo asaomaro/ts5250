@@ -64,7 +64,7 @@ node --env-file=.env tools/hostserver-check/dist/sql.js \
 
 | スクリプト | 内容 |
 |---|---|
-| `build-attrtest.mjs` | `MYLIB` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
+| `build-attrtest.mjs` | `TESTLIB` に上記 3 組を作成・コンパイル（冪等）。ソースはコマンド行から `RUNSQL INSERT` で投入（IFS 不要）。 |
 | `verify-browser-command-prompt.mjs` | **コマンド入力支援**（実機の F4 相当・実ブラウザ）: 定義を引いて欄が並ぶ／必須の印／選択肢／既定値の表示、**「確かめる」で走る文字列そのもの**が見えること、実行してホストのメッセージが返ることまで。 |
 | `verify-command-template.mjs` | **CL コマンドのテンプレート**（`QCDRCMDD`）: 定義を引き、引用の要る値（`'`・空白・小文字・日本語）でコマンドを組み、実機で通して**読み戻して一致**を見る。許されない値を打つ前に弾くことも。 |
 | `verify-attributes.mjs` | 表示検証: `CLRTPGM`（7 色・反転・下線・高輝度・桁区切り・点滅・DBCS）＋ `INLPGM`（埋め込み属性バイトの色切替）。**CCSID 1399**。 |
@@ -90,7 +90,7 @@ node --env-file=.env scripts/verify-browser-dbcs.mjs # 入力検証（ブラウ�
 - **DBCS（日本語）は CCSID 1399 のセッションが必須**。既定 `pub400`(CCSID 37) では表示も入力もできない。
   `profiles.json.example` の `pub400jp`(CCSID 1399) のように DBCS プロファイルを用意して接続する
   （ブラウザ操作でも同様。手動接続フォームなら CCSID に 1399 を指定）。ブラウザでの日本語入力は IME 経由（compositionend で取り込み）。
-- DBCS 入力欄は DDS データ型 `O`（DBCS-open）。フィクスチャは E2E 再利用のため MYLIB に残置している。
+- DBCS 入力欄は DDS データ型 `O`（DBCS-open）。フィクスチャは E2E 再利用のため TESTLIB に残置している。
 
 ## テスト自動化のテンプレート
 

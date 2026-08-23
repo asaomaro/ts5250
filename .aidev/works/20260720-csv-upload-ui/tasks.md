@@ -34,7 +34,7 @@
 - [x] T7: `writeAll()` を新規追加（依存: T6）。`buildS38Buf(records)` を括り出し、
       `write()` はそれへの薄い委譲にする（DD3）。`WriteAllResult`（`committedRows` /
       `uncertainRange`）を返す。単体テスト: バッチ分割数・境界・`uncertainRange` の算出
-- [x] **T8: 実機確認（ゲート）** — `MYLIB.TESTPF` へバッチで複数件書き、SQL で読み返して一致を確認。
+- [x] **T8: 実機確認（ゲート）** — `TESTLIB.TESTPF` へバッチで複数件書き、SQL で読み返して一致を確認。
       **往復回数が件数でなくバッチ数になっていること**を計測で示す（依存: T7）。
       ⚠ **ここを通るまで T11 以降に進まない**。崩れたら spec へ差し戻す
 
@@ -85,8 +85,8 @@
 ## 仕上げ
 
 - [x] T19: **実機通し確認**（依存: T18）。**(b) は DDM の制約で未達**（`decisions.md` D4）。
-      (a) `MYLIB.TESTPF` へ CSV から投入 → SQL で読み返して一致
-      (b) `MYLIB.CSVUPJP` へ日本語を投入 → 読み返して一致（**基準行 ID=2 と突き合わせ**）
+      (a) `TESTLIB.TESTPF` へ CSV から投入 → SQL で読み返して一致
+      (b) `TESTLIB.CSVUPJP` へ日本語を投入 → 読み返して一致（**基準行 ID=2 と突き合わせ**）
       (c) CCSID 273 の列に日本語を含む CSV → **1 行も書かずに**拒否されること
       (d) 100 行の性能（往復回数と実時間を記録し、1 行 1 往復との差を示す）
       (e) 取得側で表を CSV に落とし、日本語が壊れないこと

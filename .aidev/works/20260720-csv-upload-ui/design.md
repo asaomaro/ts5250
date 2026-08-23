@@ -282,7 +282,7 @@ flowchart LR
 1. `ColumnLayoutInput` に `ccsid` を足す変更が**全体の起点**。ここが決まらないと下流が書けない。
 2. `column-meta.ts` を作る際、**現行の `tools/hostserver-check/src/ddm.ts` を置き換える**
    （2 つの SYSCOLUMNS クエリが残らないようにする）。
-3. 実機検証は `MYLIB.TESTPF`（CHAR(5)×4・CCSID 273）と `MYLIB.CSVUPJP`
+3. 実機検証は `TESTLIB.TESTPF`（CHAR(5)×4・CCSID 273）と `TESTLIB.CSVUPJP`
    （CCSID 5035/930・**ID=2 に既知の日本語**）を使う。後者は research で仕込み済み。
 4. エラー写像（`HOST_SERVER_UNSUPPORTED` → 400）は既存 SQL 経路にも影響する。
    **既存テストへの影響を確認する**こと。

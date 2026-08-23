@@ -21,7 +21,7 @@ const log = (s) => process.stderr.write(s + "\n");
 const PORT = 3479;
 const NAME = "VT-LINUX";
 const VT_PORT = Number(process.env.VT_PORT ?? 2331);
-const SHOT = "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad";
+const SHOT = "/tmp/ts5250-work";
 let ok = true;
 const check = (name, cond, detail = "") => {
   log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);

@@ -23,7 +23,7 @@
 受け皿の DOM だけが作り直される——文字列は同じままなので Teleport が引き直さず、
 外れた古い要素にぶら下がる（decisions.md D1）。この経路をこのテストが押さえている。
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `node --env-file=.env scripts/verify-pane-state.mjs` — **19 passed / 0 failed**
 （`20260802-keep-pane-state` の 11 項目に 8 項目を追加）

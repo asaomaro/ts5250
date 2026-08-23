@@ -78,7 +78,7 @@
 **画面の経路にだけ**プールを持つ。MCP の `host_sql` は単発完結のまま
 （`20260719-hostserver-mcp-tools` D2 の根拠は「MCP は単発で叩かれる用途」であり、これは該当しない）。
 
-### 実測（PUB400・`SELECT * FROM MYLIB.TESTPF`）
+### 実測（PUB400・`SELECT * FROM TESTLIB.TESTPF`）
 
 | | 所要 |
 |---|---|

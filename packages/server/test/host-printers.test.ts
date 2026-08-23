@@ -39,7 +39,7 @@ const entry = (over: Partial<PrinterEntry> & { id: string }): PrinterEntry =>
 const view = (over: Partial<WatchView> & { id: string; ref: string }): WatchView =>
   ({
     kind: "dtaq",
-    label: "MYLIB/Q",
+    label: "TESTLIB/Q",
     state: "listening",
     received: 0,
     startedAt: "2026-08-01T00:00:00.000Z",
@@ -156,11 +156,11 @@ describe("GET /api/watches（定義ベース）", () => {
   it("動いている監視には状態と件数が添う（**本文は載せない**）", async () => {
     const app = appWith({
       defs: [def({ ref: "srv:w1", sessionType: "dtaqwatch" })],
-      watches: [view({ id: "w1", ref: "srv:w1", received: 12, label: "MYLIB/ORDERQ" })],
+      watches: [view({ id: "w1", ref: "srv:w1", received: 12, label: "TESTLIB/ORDERQ" })],
       history: 5
     });
     const body = await get(app, "/api/watches");
-    expect(body.watches[0]).toMatchObject({ id: "w1", received: 12, buffered: 5, label: "MYLIB/ORDERQ" });
+    expect(body.watches[0]).toMatchObject({ id: "w1", received: 12, buffered: 5, label: "TESTLIB/ORDERQ" });
     expect(JSON.stringify(body.watches[0])).not.toContain("text");
   });
 

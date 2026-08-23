@@ -41,7 +41,7 @@ const check = (n, ok, d = "") => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
 // **待ち受けの定義をサーバー設定として入れる**（種別 msgwatch のセッション）
 cfg.sessions = [

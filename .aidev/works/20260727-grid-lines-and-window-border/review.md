@@ -24,6 +24,6 @@ core 5 ファイル＋web-ui 2 ファイル＋テスト 2 ファイル。
 
 - クリーンビルド ／ lint ／ `vue-tsc` 込み web-ui ビルド：成功
 - core 828 件 ／ web-ui 922 件 ／ 全 workspace 2,425 passed / 4 failed（既知の環境要因）
-- 実機（）: DSPF をコンパイルして表示し、警告ゼロで窓枠を解釈
+- 実機: DSPF をコンパイルして表示し、警告ゼロで窓枠を解釈
 
 **判定: must 0 / should 0 / nit 1（PR に明記）。review 通過。**

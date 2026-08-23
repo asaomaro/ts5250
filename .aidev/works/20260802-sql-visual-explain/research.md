@@ -4,7 +4,7 @@
 
 | 機 | 版数 | 権限 | 接続 | 再現スクリプト |
 |---|---|---|---|---|
-| **実機** `192.0.2.1` | **V7R3M0** | `USER` = `*ALLOBJ *JOBCTL *SPLCTL *SAVSYS *AUDIT *IOSYSCFG`（全特権） | 平文 | `scripts/research-visual-explain-as400{,2,3,4,5}.mjs` |
+| **実機** `192.0.2.1` | **V7R3M0** | `USER` = `*ALLOBJ *JOBCTL *SPLCTL *SAVSYS *AUDIT *IOSYSCFG`（全特権） | 平文 | `scripts/research-visual-explain{,2,3,4,5}.mjs` |
 | **PUB400** `pub400.com` | **V7R5M0**（本調査で実測） | `USER` = **特殊権限なし**（`SPECIAL_AUTHORITIES` が NULL） | TLS / パスワードレベル 3 | `scripts/research-visual-explain-pub400.mjs` |
 
 > **PUB400 の版数を実測した。** これまで `scripts/README.md` の表は過去記録からの引き写しだったが、

@@ -38,7 +38,7 @@ vitest server 27 files / 253 tests 通過（うち本作業の新規 22 件）
 | `host_command` | ✅ | `CHGJOB CCSID(273)` 成功（returnCode 0） |
 | `host_command`（失敗系） | ✅ | `NOSUCHCMD` → `success:false` / `CPD0030`＋`CPF0001` を構造化して取得。**例外にせずメッセージを返す設計どおり** |
 | `host_list_jobs` | ✅ | SCPF / QSYSARB / QSYSARB2 の 3 件 |
-| `host_list_objects` | ✅ | MYLIB の 5 件（CLRTPGM / INLPGM / INPPGM / A1 / CLRTDSP） |
+| `host_list_objects` | ✅ | TESTLIB の 5 件（CLRTPGM / INLPGM / INPPGM / A1 / CLRTDSP） |
 | `host_list_users` | ✅ | 4 件（ENGMTZ / USER / SANDEP981 / VENSUJA） |
 | `host_list_spools` | ✅ | QPJOBLOG 等。OUTQ・ページ数・サイズ・日時まで取得 |
 | `host_get_spool`（text） | ✅ | 744 行。先頭行に `5770SS1 V7R5M0 220415 … Job Log … PUB400` |

@@ -26,7 +26,7 @@ const CONF = join(tmpdir(), "ts5250-conn-srq.json");
 
 // 装置名だけ差し替えた設定を作る（利用者が使っている DEV1 を奪わない）
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 cfg.sessions = [
   { id: "srq", name: "SRQ", system: sys.id, sessionType: "display", deviceName: DEV, screenSize: "24x80", ccsid: 939 }
 ];

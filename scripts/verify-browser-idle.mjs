@@ -37,10 +37,10 @@ const check = (n, ok, d = "") => {
 };
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
-const as01 = cfg.sessions.find((s) => s.name === "DEV1");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
+const baseSess = cfg.sessions.find((s) => s.name === (process.env.AS400_SESSION ?? "DEV1"));
 // **1 分で切れるセッション設定を足す。** 装置名は DEV1 と同じ（同時には使わない）
-cfg.sessions.push({ ...as01, id: `${as01.id}-t1`, name: "DEV1-1MIN", idleTimeout: 1 });
+cfg.sessions.push({ ...baseSess, id: `${baseSess.id}-t1`, name: "DEV1-1MIN", idleTimeout: 1 });
 const tmpCfg = `${TMP}/conn-idle.json`;
 mkdirSync(TMP, { recursive: true });
 writeFileSync(tmpCfg, JSON.stringify(cfg));

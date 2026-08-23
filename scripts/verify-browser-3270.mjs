@@ -129,7 +129,7 @@ try {
   );
   const bodyText = await page.evaluate(() => document.body.innerText);
   check("状態表示に画面サイズが出る", /24x80/.test(bodyText));
-  await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/3270-welcome.png" });
+  await page.screenshot({ path: "/tmp/ts5250-work/3270-welcome.png" });
 
   // 入力欄（Logon ===>）に打って Enter
   const inputs = page.locator("input.grid-input:not([readonly])");
@@ -144,7 +144,7 @@ try {
   const after = await screenText();
   // **画面が変わったこと**をホスト応答の印にする（応答文はホストごとに違う）
   check("Enter でホストが応答し画面が変わる", after !== beforeText, (after.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 60));
-  await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/3270-after-key.png" });
+  await page.screenshot({ path: "/tmp/ts5250-work/3270-after-key.png" });
 
   // **ファンクションキーが実際にホストへ届くか**（例外が出ないだけでは足りない）
   const beforeF = await screenText();
@@ -170,7 +170,7 @@ try {
 } catch (e) {
   ok = false;
   log("EXCEPTION: " + (e?.message ?? String(e)));
-  await page.screenshot({ path: "/tmp/claude-1000/-workspaces-ts5250/db6726f4-59da-4ee2-9e11-7de778d4b88d/scratchpad/3270-fail.png" }).catch(() => {});
+  await page.screenshot({ path: "/tmp/ts5250-work/3270-fail.png" }).catch(() => {});
   // **何が届いていたか**を出す（届いていないのか、描けていないのかの切り分け）
   const kinds = frames.map((f) => { try { return JSON.parse(f).type; } catch { return "?"; } });
   log("WS 受信: " + JSON.stringify(kinds));

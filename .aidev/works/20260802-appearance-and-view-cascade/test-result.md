@@ -19,7 +19,7 @@
 - ボタンが `⚙ 表示` / `外観`
 - タブのシステム名トグル: **OFF なら名前は出ないが色帯は残る**
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `node --env-file=.env scripts/verify-view-cascade.mjs` — **9 passed / 0 failed**
 

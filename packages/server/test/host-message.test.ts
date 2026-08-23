@@ -73,7 +73,7 @@ describe("組み立て", () => {
   });
 
   it("小文字は大文字にそろえる（IBM i の名前は大文字）", () => {
-    expect(buildSendCommand({ source: src, text: "x", toUser: "asao" })).toContain("TOUSR(USER)");
+    expect(buildSendCommand({ source: src, text: "x", toUser: "user" })).toContain("TOUSR(USER)");
   });
 });
 

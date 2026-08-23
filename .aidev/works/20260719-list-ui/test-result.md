@@ -8,7 +8,7 @@
 | 2 | 一覧が表示される | ✅ 実機の API 経由で 3 種とも |
 | 3 | 絞り込みが効く | ✅ ライブラリ・ユーザー・種別 |
 | 4 | ジョブ操作 | ✅ 保留/解放/終了の CL を組み立て。実機のジョブで経路を確認 |
-| 5 | オブジェクト削除 | ✅ **使い捨ての `MYLIB/UITEST` を作って削除**（`CPC2191`） |
+| 5 | オブジェクト削除 | ✅ **使い捨ての `TESTLIB/UITEST` を作って削除**（`CPC2191`） |
 | 6 | 失敗時にメッセージ ID | ✅ `CPF2105 "Object NOSUCHOBJ ... not found."` |
 | 7 | コンポーネントテスト | ✅ UI 10 件 / サーバー 10 件 |
 | 8 | 既存テストが緑 | ✅ |
@@ -16,10 +16,10 @@
 ## 実機での確認（API 経由）
 
 ```
-オブジェクト: MYLIB CLRTPGM *PGM / INLPGM *PGM / A1 *FILE ...
+オブジェクト: TESTLIB CLRTPGM *PGM / INLPGM *PGM / A1 *FILE ...
 ジョブ:       000000/QSYS/SCPF *ACTIVE X ...
 ユーザー:     ENGMTZ / USER / SANDEP981 / VENSUJA
-削除:         MYLIB/UITEST(*DTAARA) → CPC2191 "deleted."
+削除:         TESTLIB/UITEST(*DTAARA) → CPC2191 "deleted."
 失敗:         NOSUCHOBJ → CPF2105 [severe] "not found."
 ```
 

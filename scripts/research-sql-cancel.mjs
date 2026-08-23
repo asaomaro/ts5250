@@ -27,7 +27,7 @@ const T = "CANCELT";
 const ROWS = 1000;
 
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 if (!password) {
   out("AS400_PASSWORD が未設定です");

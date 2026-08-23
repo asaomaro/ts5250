@@ -179,7 +179,7 @@ describe("WDSF GUI — 除去コマンド", () => {
   /**
    * **CLEAR UNIT は GUI 構造体も消す（CLEAR UNIT ALTERNATE とは違う）。**
    *
-   * 実機（、PB1000R）のトレースで、CREATE WINDOW の窓を閉じて呼び出し元へ戻るとき、
+   * 実機（PB1000R）のトレースで、CREATE WINDOW の窓を閉じて呼び出し元へ戻るとき、
    * REM_GUI_WINDOW 等を送らず素の CLEAR UNIT だけで窓を暗黙に消していることを確認した。
    * 一方 CLEAR UNIT ALTERNATE は SFLCTL の再描画で何度も送られてくるが GUI は消さない
    * （YB0270R の KSN20 罫線のテスト、wdsf-applier-grid-lines.test.ts 参照）。

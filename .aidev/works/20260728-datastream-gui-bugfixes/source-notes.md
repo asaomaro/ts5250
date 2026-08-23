@@ -90,7 +90,7 @@ PB1000R のように「素の CLEAR UNIT だけで窓を暗黙に消す」実装
 +   * CLEAR UNIT: 既定サイズ（24x80）でクリアし、GUI 構造体も消す。
 +   *
 +   * **CLEAR UNIT ALTERNATE（`clearUnitAlternate()`）とは違い、こちらは GUI 構造体を消す。**
-+   * 実機（、PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
++   * 実機（PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
 +   * 画面へ戻るとき、REM_GUI_WINDOW 等の専用コマンドを送らず、素の CLEAR UNIT だけで
 +   * 窓を暗黙に消していることを確認した（RESTORE SCREEN で戻る実装もあるが、それとは別の経路）。
 +   * CLEAR UNIT ALTERNATE 側で GUI を消さないようにしたときと同じ理屈を逆向きに適用している
@@ -540,7 +540,7 @@ GUI が消えるに戻ったため）。実機トレースの根拠を説明す�
 +  /**
 +   * **CLEAR UNIT は GUI 構造体も消す（CLEAR UNIT ALTERNATE とは違う）。**
 +   *
-+   * 実機（、PB1000R）のトレースで、CREATE WINDOW の窓を閉じて呼び出し元へ戻るとき、
++   * 実機（PB1000R）のトレースで、CREATE WINDOW の窓を閉じて呼び出し元へ戻るとき、
 +   * REM_GUI_WINDOW 等を送らず素の CLEAR UNIT だけで窓を暗黙に消していることを確認した。
 +   * 一方 CLEAR UNIT ALTERNATE は SFLCTL の再描画で何度も送られてくるが GUI は消さない
 +   * （YB0270R の KSN20 罫線のテスト、wdsf-applier-grid-lines.test.ts 参照）。
@@ -635,7 +635,7 @@ function writeToDisplay(orders: number[]): number[] {
 /**
  * **KSN00/KSN20（YB0200RD・YB0270RD）の罫線が全く表示されない不具合の再現テスト。**
  *
- * 実機（）のトレースで、`WRITE KSN20`（罫線を描く）の直後に
+ * 実機のトレースで、`WRITE KSN20`（罫線を描く）の直後に
  * **CLEAR UNIT ALTERNATE が送られてくる**ことを確認した。SFLCTL(SFLDSPCTL) を持つ
  * 画面（YB0270R）の 1 回の画面構築の中で何度も現れる、ごく普通の 5250 データストリーム。
  *

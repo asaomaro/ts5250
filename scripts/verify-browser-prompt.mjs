@@ -35,7 +35,7 @@ const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
 const tmpCfg = `${TMP}/conn-prompt.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 const crypto = SecretCrypto.fromEnv();
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 const user = sys.signon.user;
 if (!password) { log("AS400_PASSWORD が未設定です"); process.exit(1); }

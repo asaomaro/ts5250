@@ -15,7 +15,7 @@
 - 表示設定に `theme` が**無い**こと
 - `ReportText`: リンク化が効く／切れる／**改行をまたいでリンクにしない**
 
-## 実機検証（実機・実ブラウザ）
+## 実機検証（実ブラウザ）
 
 `AS400_BASELINE_GRID="rgb(247, 248, 244)" node --env-file=.env scripts/verify-view-cascade.mjs`
 — **12 passed / 0 failed**

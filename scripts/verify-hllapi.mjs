@@ -90,7 +90,7 @@ print(json.dumps({"rc": rc.value, "length": ln.value, "bytes": len(out),
 
 // ---- サーバーを起こす ----
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
 const tmpCfg = `${TMP}/conn.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));

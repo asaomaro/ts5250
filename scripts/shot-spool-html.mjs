@@ -25,7 +25,7 @@ const json = (r) => JSON.parse(r.content[0].text);
 
 try {
   const sys = (await call("list_systems", {})).structuredContent.systems;
-  const source = { system: sys.find((s) => s.name === "実機").ref };
+  const source = { system: sys.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).ref };
 
   // 1. 帳票を1件作る（DBCS を含む一覧にしたいので DSPLIB を使う）
   const cmd = json(await call("host_command", { ...source, command: "DSPLIB LIB(TESTLIB) OUTPUT(*PRINT)" }));

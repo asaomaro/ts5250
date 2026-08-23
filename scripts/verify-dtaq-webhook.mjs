@@ -33,7 +33,7 @@ if (!host || !user || !password) {
   process.stderr.write("AS400_HOST / AS400_USER / AS400_PASSWORD を環境変数で渡してください\n");
   process.exit(2);
 }
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const QUEUE = "DTQHOOK";
 const HOOK_PORT = Number(process.env.HOOK_PORT ?? 3491);
 const APP_PORT = Number(process.env.PORT ?? 3492);

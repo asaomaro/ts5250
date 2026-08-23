@@ -984,7 +984,7 @@ const infoRows = computed(() => {
         <template v-if="sesForm.sessionType === 'dtaqwatch'">
           <label class="row">
             <span class="cap">ライブラリー</span>
-            <input v-model="watchLibrary" maxlength="10" placeholder="MYLIB" />
+            <input v-model="watchLibrary" maxlength="10" placeholder="TESTLIB" />
           </label>
           <label class="row">
             <span class="cap">キュー名</span>

@@ -191,7 +191,7 @@ describe("破壊的な操作は確認を挟む", () => {
       "/api/systems": { systems: [SYSTEM], editable: false },
       "/api/sessions-config": { sessions: [] },
       "/api/host/list/objects": {
-        items: [{ name: "A1", library: "MYLIB", type: "*FILE" }]
+        items: [{ name: "A1", library: "TESTLIB", type: "*FILE" }]
       }
     });
     const w = mount(HostListPane, { props: { tabId: "list:objects", system: SYSTEM.ref } });

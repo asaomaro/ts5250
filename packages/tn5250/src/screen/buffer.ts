@@ -461,7 +461,7 @@ export class ScreenBuffer {
    * CLEAR UNIT: 既定サイズ（24x80）でクリアし、GUI 構造体も消す。
    *
    * **CLEAR UNIT ALTERNATE（`clearUnitAlternate()`）とは違い、こちらは GUI 構造体を消す。**
-   * 実機（、PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
+   * 実機（PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
    * 画面へ戻るとき、REM_GUI_WINDOW 等の専用コマンドを送らず、素の CLEAR UNIT だけで
    * 窓を暗黙に消していることを確認した（RESTORE SCREEN で戻る実装もあるが、それとは別の経路）。
    * CLEAR UNIT ALTERNATE 側で GUI を消さないようにしたときと同じ理屈を逆向きに適用している

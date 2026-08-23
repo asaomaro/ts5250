@@ -17,7 +17,7 @@ let label = "connect";
 const warn = (w) => (w.startsWith("rx record") ? captured.push({ label, line: w }) : log("WARN: " + w));
 
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = SecretCrypto.fromEnv().decrypt(sys.signon.passwordEnc);
 const auth = { host: sys.host, user: sys.signon.user, password, ccsid: sys.ccsid ?? 37 };
 

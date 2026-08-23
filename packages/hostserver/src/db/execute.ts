@@ -15,7 +15,7 @@
  *
  * ## 2 つの道が同じ結果になることの確認
  *
- * 2 実機（7.3 / pub400 7.5）で同じ文を両方の道に流して比べた（2026-08-22）。
+ * 2 実機（IBM i 7.3 / pub400 7.5）で同じ文を両方の道に流して比べた（2026-08-22）。
  * `INSERT` / `UPDATE` / `DELETE` / `MERGE`（副問合せ・日本語込み）、
  * `CREATE TABLE` / `VIEW` / `INDEX` / `ALIAS`、`DROP`、`GRANT`、`COMMENT`、`LABEL`、
  * `SET SCHEMA`、`CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `TYPE` / `VARIABLE`——

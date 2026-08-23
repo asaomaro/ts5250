@@ -17,6 +17,7 @@ import { serve } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import { chromium } from "playwright";
 import { buildApp, SessionManager, ServerConfigStore, PersonalConfigStore, ConfigResolver } from "@ts5250/server";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 
 const PORT = 3495;
 const TMP = "/tmp/ts5250-progcall";
@@ -29,7 +30,7 @@ const check = (n, ok, d = "") => {
 };
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
 cfg.sessions = [];
 writeFileSync(`${TMP}/cfg.json`, JSON.stringify(cfg));
@@ -106,7 +107,7 @@ try {
   // TESTLIB/PGMTST は参照渡しの引数を書き換えるだけの CL（`scripts/build-pgmtst.mjs` で作る）:
   //   &NUM（詰め 10 進 15,5） = &NUM * 2
   //   &TXT（文字 20）        = 'ECHO:' + &TXT
-  const r6 = await callProgram("PGMTST", "TESTLIB", [
+  const r6 = await callProgram("PGMTST", LIB, [
     { type: "packed", dir: "inout", value: "21", digits: 15, decimals: 5 },
     { type: "char", dir: "inout", value: "ABC", length: 20 }
   ]);
@@ -120,7 +121,7 @@ try {
       `outputs[1]=${JSON.stringify(r6.body.outputs?.[1])}`);
 
     // **負の値**——符号ニブルの取り違えはここでだけ出る
-    const r7 = await callProgram("PGMTST", "TESTLIB", [
+    const r7 = await callProgram("PGMTST", LIB, [
       { type: "packed", dir: "inout", value: "-1.5", digits: 15, decimals: 5 },
       { type: "char", dir: "inout", value: "X", length: 20 }
     ]);
@@ -128,7 +129,7 @@ try {
       `outputs[0]=${JSON.stringify(r7.body.outputs?.[0])}`);
 
     // **小数**——桁合わせの取り違えはここで出る
-    const r8 = await callProgram("PGMTST", "TESTLIB", [
+    const r8 = await callProgram("PGMTST", LIB, [
       { type: "packed", dir: "inout", value: "0.00003", digits: 15, decimals: 5 },
       { type: "char", dir: "inout", value: "Y", length: 20 }
     ]);
@@ -137,7 +138,7 @@ try {
   }
 
   // ---- 5.7 **ゾーン 10 進の往復**（RPG。CL の *DEC は詰めなのでゾーンは表せない）----
-  const z1 = await callProgram("PGMTSTZ", "TESTLIB", [
+  const z1 = await callProgram("PGMTSTZ", LIB, [
     { type: "zoned", dir: "inout", value: "21", digits: 7, decimals: 2 },
     { type: "char", dir: "inout", value: "AB", length: 20 }
   ]);
@@ -146,7 +147,7 @@ try {
   } else {
     check("**ゾーンの数値が往復する**（21 → 42）", z1.body.outputs?.[0] === "42.00",
       `outputs[0]=${JSON.stringify(z1.body.outputs?.[0])}`);
-    const z2 = await callProgram("PGMTSTZ", "TESTLIB", [
+    const z2 = await callProgram("PGMTSTZ", LIB, [
       { type: "zoned", dir: "inout", value: "-1.5", digits: 7, decimals: 2 },
       { type: "char", dir: "inout", value: "C", length: 20 }
     ]);
@@ -163,7 +164,7 @@ try {
       body: JSON.stringify({
         source: { system: `srv:${sys.id}` },
         serviceProgram: "SRVTST",
-        library: "TESTLIB",
+        library: LIB,
         procedure,
         ...(returns ? { returns } : {}),
         args

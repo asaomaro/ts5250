@@ -17,7 +17,7 @@ import { WatchRegistry, type WatchEvent } from "../src/watch-registry.js";
 import type { AuthUser } from "../src/auth.js";
 import type { DtaqWatchSpec } from "../src/config-types.js";
 
-const SPEC: DtaqWatchSpec = { library: "MYLIB", name: "ORDERQ" };
+const SPEC: DtaqWatchSpec = { library: "TESTLIB", name: "ORDERQ" };
 const CONNECT = { host: "h", user: "u", password: "p" };
 const alice: AuthUser = { username: "alice", role: "user" };
 const bob: AuthUser = { username: "bob", role: "user" };
@@ -83,7 +83,7 @@ function setup(opts: { conns?: FakeConn[]; maxWatches?: number; historyLimit?: n
 describe("受信して積んで配る", () => {
   it("届いたエントリが履歴に入り、購読者へ配られる", async () => {
     const { reg, conns, events } = setup();
-    const w = await reg.start({ ref: "own:c1", label: "MYLIB/ORDERQ", spec: SPEC, connect: CONNECT });
+    const w = await reg.start({ ref: "own:c1", label: "TESTLIB/ORDERQ", spec: SPEC, connect: CONNECT });
     await settle();
     conns[0]!.deliver("ORD-1043");
     await settle();
@@ -227,7 +227,7 @@ describe("停止と障害を区別する", () => {
     const { reg, events, connCount } = setup({ conns: [a, new FakeConn()] });
     await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
     await settle();
-    a.failWith(new As400Error("ACCESS_DENIED", "not authorized to MYLIB/ORDERQ"));
+    a.failWith(new As400Error("ACCESS_DENIED", "not authorized to TESTLIB/ORDERQ"));
     await settle();
     expect(connCount()).toBe(1); // 張り直していない
     expect(reg.list()[0]).toMatchObject({ state: "error", error: expect.stringContaining("not authorized") });
@@ -349,7 +349,7 @@ describe("待ち方", () => {
     });
     await reg.start({ ref: "own:c1", label: "l", spec: SPEC, connect: CONNECT });
     await settle();
-    expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "ORDERQ", library: "MYLIB", wait: -1 });
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ name: "ORDERQ", library: "TESTLIB", wait: -1 });
     reg.closeAll();
   });
 
@@ -363,7 +363,7 @@ describe("待ち方", () => {
     await reg.start({
       ref: "own:c1",
       label: "l",
-      spec: { library: "MYLIB", name: "KEYQ", key: "AB", search: "GE" },
+      spec: { library: "TESTLIB", name: "KEYQ", key: "AB", search: "GE" },
       connect: CONNECT
     });
     await settle();

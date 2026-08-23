@@ -1,6 +1,6 @@
 # 調査: LOB フィールドしきい値を実機で測る
 
-実機 **実機（IBM i 7.3・平文）**。再現スクリプトは
+**実機（IBM i 7.3・平文）**。再現スクリプトは
 `scripts/research-lob-threshold.mjs`（表 `TESTLIB.LOBTHR` を作り直す）。
 
 フィクスチャ（2 行）:

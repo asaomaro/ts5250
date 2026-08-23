@@ -6,7 +6,7 @@ import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (s) => process.stderr.write(s + "\n");
-const OUT = "/tmp/claude-1000/-workspaces-as400-web-emulator/cff7c584-0ab5-4be3-b08e-bc65bf027295/scratchpad";
+const OUT = "/tmp/ts5250-work";
 const PORT = 3489;
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
 writeFileSync(`${OUT}/conn-k.json`, JSON.stringify(cfg));

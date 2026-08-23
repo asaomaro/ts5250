@@ -85,7 +85,7 @@ out.writeShort(batchSize); // Blocking factor.
 
 ### F4: PUB400 の実データは CCSID 273 で、**37 固定は明確に誤り**
 
-`MYLIB` の全 CHAR 列を実機で確認した結果:
+`TESTLIB` の全 CHAR 列を実機で確認した結果:
 
 | 表 | 列 | 型 | CCSID |
 |---|---|---|---|
@@ -218,7 +218,7 @@ flowchart LR
 ユーザーの承認を得て PUB400 に検証用の表を作り、申し送り 5・6 を実測で解消した。
 
 ```sql
-CREATE TABLE MYLIB.CSVUPJP (
+CREATE TABLE TESTLIB.CSVUPJP (
   ID SMALLINT NOT NULL,
   C_SBCS CHAR(20) CCSID 273,
   C_JP   CHAR(20) CCSID 5035,   -- 混在（→ core では 939 のエイリアス）
@@ -245,7 +245,7 @@ CREATE TABLE MYLIB.CSVUPJP (
 
 ### F9: **CL/RUNSQL 経由では日本語が 0x3F に置換される**（検証手順を縛る事実）
 
-`RUNSQL SQL('INSERT INTO MYLIB.CSVUPJP VALUES(1, ''abc'', ''日本語テスト'', ''カナ'')')` の結果:
+`RUNSQL SQL('INSERT INTO TESTLIB.CSVUPJP VALUES(1, ''abc'', ''日本語テスト'', ''カナ'')')` の結果:
 
 - 戻り: `SQL0335 Character conversion resulted in substitution characters.`（警告）
 - 読み返し: `HEX(C_JP)` = `3F3F3F3F3F3F4040…` — **全文字が 0x3F（置換文字）**。
@@ -286,14 +286,14 @@ ASCII 文字だけで構成されるため CL 経路を通り、ホスト側で�
 （上表はこの方法で仕込んだ）。
 
 → 検証手順が広がる: 期待値を `UX''` で仕込んでおき、**DDM で書いた行と SQL で読み比べる**ことができる。
-`MYLIB.CSVUPJP` の ID=2 をその基準行として残してある。
+`TESTLIB.CSVUPJP` の ID=2 をその基準行として残してある。
 
 ### F11: **ACS のデータ転送は database サーバー（8471）を使う。DDM ではない**
 
 T19 の実機検証で DDM が行き詰まった（F12）ため、「そもそも DDM を挟む必要があるのか」を
 ユーザーの問いをきっかけに検証した。
 
-**実測**（ACS で `MYLIB/TESTPF` を転送し、直後に接続先ポートを確認）:
+**実測**（ACS で `TESTLIB/TESTPF` を転送し、直後に接続先ポートを確認）:
 
 ```
 netstat -n | findstr /i ":446 :8471"
@@ -325,7 +325,7 @@ database サーバーは prepare/execute で INSERT を実行できる。
 作成方法が同じで CCSID だけが違うため、原因は CCSID で確定。
 我々の UFCB は原典（jtopenlite `sendS38OpenRequest`）と**完全に一致**しており実装漏れではない。
 
-あわせて DDS 作成の物理ファイル（`MYLIB/TESTPF`）は
+あわせて DDS 作成の物理ファイル（`TESTLIB/TESTPF`）は
 `CPF4135 Record format name for member TESTPF was not valid.` で開けない。
 `open` の既定が「様式名＝ファイル名」だが、DDS ファイルでは一致しないことがある。
 

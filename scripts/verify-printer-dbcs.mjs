@@ -41,7 +41,7 @@ assert(prt.startupCode === "I902", `起動応答が I902（実際: ${prt.startup
 
 const disp = await connectDisplay();
 try {
-  await run(disp, `CHGLIB LIB(MYLIB) TEXT('${JP}')`);
+  await run(disp, `CHGLIB LIB(TESTLIB) TEXT('${JP}')`);
   await run(disp, `CHGJOB OUTQ(${PRTDEV})`);
   await run(disp, "DSPLIBL OUTPUT(*PRINT)");
   await sleep(2000);
@@ -60,7 +60,7 @@ try {
   const t0 = Date.now();
   while (Date.now() - t0 < 20000 && reports.length === 0) await sleep(500);
 } finally {
-  await run(disp, "CHGLIB LIB(MYLIB) TEXT(' ')").catch(() => {}); // テキストを戻す
+  await run(disp, "CHGLIB LIB(TESTLIB) TEXT(' ')").catch(() => {}); // テキストを戻す
   await disp.disconnect();
 }
 
@@ -70,8 +70,8 @@ if (reports.length) {
   const text = reports[0].pages.map((p) => p.lines.join("\n")).join("\n");
   assert(hasSO, "受信 SCS に SO(0x0E)＝DBCS シフトが含まれる");
   assert(text.includes(JP), `帳票に日本語 '${JP}' が含まれる`);
-  assert(/MYLIB {7}CUR {20}日本語/.test(text), "MYLIB 行の説明桁に日本語が桁揃えで載る");
-  log("--- 受信帳票（MYLIB 行）---\n" + text.split("\n").filter((l) => /MYLIB/.test(l)).join("\n"));
+  assert(/TESTLIB {7}CUR {20}日本語/.test(text), "TESTLIB 行の説明桁に日本語が桁揃えで載る");
+  log("--- 受信帳票（TESTLIB 行）---\n" + text.split("\n").filter((l) => /TESTLIB/.test(l)).join("\n"));
 }
 prt.disconnect();
 log(`\n${fail === 0 ? "OK" : "NG"} — ${pass} passed, ${fail} failed`);

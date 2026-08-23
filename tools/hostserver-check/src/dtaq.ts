@@ -5,7 +5,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run dtaq -w @ts5250/hostserver-check -- --tls --library MYLIB
+ *     npm run dtaq -w @ts5250/hostserver-check -- --tls --library TESTLIB
  *   さらに無限待ちも見るなら: -- --tls --wait-test
  *
  * 検証内容:
@@ -32,7 +32,7 @@ function argValue(name: string, fallback: string): string {
   const at = process.argv.indexOf(name);
   return at >= 0 ? (process.argv[at + 1] ?? fallback) : fallback;
 }
-const library = argValue("--library", "MYLIB");
+const library = argValue("--library", "TESTLIB");
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);

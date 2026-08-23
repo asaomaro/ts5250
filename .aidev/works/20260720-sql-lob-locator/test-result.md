@@ -64,7 +64,7 @@ vitest server 271 / web-ui 393（変更なし）
 
 ## 実機の後片付け
 
-`MYLIB/ZZBIG` / `ZZLOC` / `ZZLOC2` は削除済み。
+`TESTLIB/ZZBIG` / `ZZLOC` / `ZZLOC2` は削除済み。
 
 ## 未検証の範囲（引き継ぎ）
 

@@ -34,7 +34,7 @@ vitest server 271 tests（変更なし）
 同じ経路で確認しても、レコード配置の計算が間違っていることに気づけない。
 
 ```
-1. MYLIB/ZZDDM を作成
+1. TESTLIB/ZZDDM を作成
 2. レイアウト（SQL 由来）: NAME:char@0+10 QTY:packed@10+3 AMT:zoned@13+7 SEQ:int@20+4 = 24 バイト
 3. open: recordLength=24 increment=28 nullMapOffset=24
    ✅ SQL 由来のレコード長がホストの申告と一致
@@ -89,9 +89,9 @@ CCSID 37（SBCS）のコーデックに日本語を渡すと置換文字にな�
 `DECIMAL(5,0)` が通らず、`DECIMAL(5, 0)`（カンマの後に空白）なら通る。**
 
 ```
-NG  CREATE TABLE MYLIB.ZZT4 (B DECIMAL(5,0))    → SQL0104 Token ( was not valid
-OK  CREATE TABLE MYLIB.ZZT6 (B DECIMAL(5, 0))   → SQL7905（作成成功）
-OK  CREATE TABLE MYLIB.ZZT3 (A CHAR(10), B INTEGER)  → 成功
+NG  CREATE TABLE TESTLIB.ZZT4 (B DECIMAL(5,0))    → SQL0104 Token ( was not valid
+OK  CREATE TABLE TESTLIB.ZZT6 (B DECIMAL(5, 0))   → SQL7905（作成成功）
+OK  CREATE TABLE TESTLIB.ZZT3 (A CHAR(10), B INTEGER)  → 成功
 ```
 
 `CHAR(10)` は通るので括弧自体は問題なく、**括弧内のカンマ直後に数字が続く形**が
@@ -99,7 +99,7 @@ CL の解釈で壊れる。DDM とは無関係だが、RUNSQL を使う人が確
 
 ### 実機の後片付け
 
-検証で作った `MYLIB/ZZDDM` と、切り分け用の `ZZT1` / `ZZT3` / `ZZT5` / `ZZT6` /
+検証で作った `TESTLIB/ZZDDM` と、切り分け用の `ZZT1` / `ZZT3` / `ZZT5` / `ZZT6` /
 `ZZT7` / `ZZT8` は**すべて削除済み**（`ZZT2` / `ZZT4` は作成に失敗したので存在しない）。
 
 ## 未検証の範囲（引き継ぎ）

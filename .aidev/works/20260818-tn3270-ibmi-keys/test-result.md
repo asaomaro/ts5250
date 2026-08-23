@@ -1,6 +1,6 @@
 # 試験結果
 
-## 実機（）— **10 PASS / 0 FAIL**
+## 実機— **10 PASS / 0 FAIL**
 
 `scripts/verify-3270-keys.mjs`
 

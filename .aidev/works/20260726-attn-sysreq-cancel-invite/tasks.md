@@ -43,4 +43,4 @@
 - [x] T13: `docs/PROTOCOL.md` 6.2 に Cancel Invite の往復（ホスト `0x0A` → 端末 `0x0A`）と
       データ付き SysReq のバイト列を追記する（依存: T2, T3）
 - [x] T14: `scripts/probe-sysreq.mjs` を、手動で ack を返していた部分を外して**本体の実装に任せる**形へ整理し、
-      実機（）で Attn のコマンド入力窓と SysReq のシステム要求メニューを確認する（依存: T2, T3）
+      実機で Attn のコマンド入力窓と SysReq のシステム要求メニューを確認する（依存: T2, T3）

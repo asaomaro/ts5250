@@ -88,7 +88,7 @@ dumpFields(snap, "Specify Members to Work With");
 const fFile = snap.fields.find((f) => !f.protected && f.row === 5);
 const fLib = snap.fields.find((f) => !f.protected && f.row === 7);
 if (fFile) session.setField({ index: fFile.index }, "QRPGSRC");
-if (fLib) session.setField({ index: fLib.index }, process.env.PUB400_LIB ?? "MYLIB");
+if (fLib) session.setField({ index: fLib.index }, process.env.PUB400_LIB ?? "TESTLIB");
 recv.length = 0;
 capturing = true;
 r = await session.sendAid("Enter", { timeoutMs: 8000 });

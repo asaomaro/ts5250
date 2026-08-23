@@ -1,6 +1,6 @@
 # 調査: IFS の新規ファイルに付くタグ
 
-実機 **実機（IBM i 7.3）**。再現は `scripts/research-ifs-dataccsid.mjs`
+**実機（IBM i 7.3）**。再現は `scripts/research-ifs-dataccsid.mjs`
 （`/home/USER` にファイルを作り、**最後に消す**）。
 
 | # | 条件 | 付いたタグ |

@@ -43,7 +43,7 @@ const check = (name, ok, detail = "") => {
 // ---- サーバー（connections.json をそのまま使う。パスワードはスクリプトに書かない）----
 const crypto = SecretCrypto.fromEnv();
 const conn = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conn.systems.find((s) => s.name === "実機");
+const sys = conn.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!sys) throw new Error("connections.json に実機がない");
 const resolver = new ConfigResolver(
   new ServerConfigStore({ systems: [], sessions: [] }, crypto),
@@ -145,25 +145,25 @@ try {
   await page.goto(`http://localhost:${PORT}/`);
 
   // システムを選ぶ（connections.json に 2 システムあるので既定では決まらない）
-  await page.locator(".card", { hasText: "実機" }).first().waitFor({ timeout: 30000 });
-  await page.locator(".card", { hasText: "実機" }).first().locator("button", { hasText: "選択" }).click();
+  await page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).first().waitFor({ timeout: 30000 });
+  await page.locator(".card", { hasText: (process.env.AS400_SYSTEM ?? "AS400") }).first().locator("button", { hasText: "選択" }).click();
 
   // ランチャーの「IFS」カードを開く
   await page.locator(".fn", { hasText: "IFS" }).first().locator("button").first().click();
   await page.waitForSelector(".ifs", { timeout: 30000 });
   await page.locator(".entries li").first().waitFor({ timeout: 60000 });
 
-  // ---- /home/USER まで辿る ----
+  // ---- BASE まで辿る ----
   for (const [step, expect] of [
-    ["home", "USER"],
-    ["USER", "builds"]
+    ["home", LEAF],
+    [LEAF, "builds"]
   ]) {
     await row(step).click();
     await row(expect).waitFor({ timeout: 60000 });
   }
   const crumbs = (await page.locator("nav.crumbs button").allTextContents()).join("/");
-  check("/home/USER まで辿れる", crumbs.includes("home") && crumbs.includes("USER"), crumbs);
-  await shot("01-asao");
+  check(`${BASE} まで辿れる`, crumbs.includes("home") && crumbs.includes(LEAF), crumbs);
+  await shot("01-user");
 
   // ---- 1. フォルダの作成（新規フォルダ → TEST）----
   promptAnswer = "TEST";
@@ -453,7 +453,7 @@ try {
   const left = await hostNames(BASE);
   if (left.includes("TEST")) {
     await api("delete", { path: DIR, recursive: true });
-    log("後始末: /home/USER/TEST を API で削除した");
+    log(`後始末: ${BASE}/TEST を API で削除した`);
   }
   writeFileSync(`${TMP}/dialogs.json`, JSON.stringify(dialogs, null, 2));
   await browser.close();

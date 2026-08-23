@@ -6,7 +6,7 @@
 - **F2 CJK 等幅フォント**: システムに **Noto Sans Mono CJK JP** がある
   （`/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`、postscript 名 `NotoSansMonoCJKjp-Regular`）。
   **等幅かつ Latin（半角）＋日本語（全角＝半角2倍）を 1 フォントで賄える**→ 帳票グリッドをそのまま
-  再現できる。スモークで「MYLIB … 日本語テスト」を 58KB の正常 PDF に描画確認（半角 advance=5pt@10）。
+  再現できる。スモークで「TESTLIB … 日本語テスト」を 58KB の正常 PDF に描画確認（半角 advance=5pt@10）。
   - フォント名指定の注意: `.ttc` はコレクションなので postscript 名（`NotoSansMonoCJKjp-Regular`）で選ぶ。
     「Noto Serif CJK JP」等の表示名では pdfkit がロードに失敗する。
   - フォント欠落時は標準 Courier にフォールバック（SBCS のみ。DBCS は警告して degrade）。

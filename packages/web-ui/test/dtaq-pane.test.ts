@@ -39,7 +39,7 @@ async function readyPane(handler: (route: string, body: unknown) => { status?: n
   const calls = mockFetch(handler);
   const w = mount(DtaqPane, { props: { tabId: "dtaq:entries", system: "srv:s" } });
   const inputs = w.findAll("input");
-  await inputs[0]!.setValue("MYLIB"); // ライブラリー
+  await inputs[0]!.setValue("TESTLIB"); // ライブラリー
   await inputs[1]!.setValue("Q"); // キュー
   await flushPromises();
   return { w, calls };
@@ -68,7 +68,7 @@ describe("送信", () => {
     await flushPromises();
     const call = calls.find((c) => c.route === "dtaq/send");
     expect(call).toBeDefined();
-    expect(call!.body).toMatchObject({ library: "MYLIB", name: "Q", data: "hello" });
+    expect(call!.body).toMatchObject({ library: "TESTLIB", name: "Q", data: "hello" });
     expect(w.text()).toContain("送信しました");
   });
 });

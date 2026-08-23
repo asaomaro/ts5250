@@ -3,7 +3,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run sql -w @ts5250/hostserver-check -- --tls "SELECT * FROM MYLIB.SQLTYPES"
+ *     npm run sql -w @ts5250/hostserver-check -- --tls "SELECT * FROM TESTLIB.SQLTYPES"
  */
 import "./log-init.js";
 import { As400Error } from "@ts5250/base";
@@ -13,7 +13,7 @@ const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];
 const password = process.env["AS400_PASSWORD"] ?? process.env["PUB400_PASSWORD"];
 const useTls = process.argv.includes("--tls");
-const sql = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "SELECT * FROM MYLIB.SQLTYPES";
+const sql = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "SELECT * FROM TESTLIB.SQLTYPES";
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);

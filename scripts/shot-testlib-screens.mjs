@@ -53,7 +53,7 @@ const call = async (name, args) => {
   return r;
 };
 
-let osakaRef;
+let sysRef;
 let sessionId;
 
 const snap = async () =>
@@ -87,14 +87,14 @@ async function connect() {
   sessionId = (
     await call(
       "open_session",
-      CCSID_OVERRIDE ? { host: HOST, port: 23, ccsid: CCSID_OVERRIDE } : { system: osakaRef }
+      CCSID_OVERRIDE ? { host: HOST, port: 23, ccsid: CCSID_OVERRIDE } : { system: sysRef }
     )
   ).structuredContent.sessionId;
   await call("wait_screen", { sessionId, timeoutMs: 5000 });
   for (let i = 0; i < 6; i++) {
     const s = await snap();
     if (atMenu(s)) break;
-    if (isSignon(s)) await call("signon", { sessionId, system: osakaRef });
+    if (isSignon(s)) await call("signon", { sessionId, system: sysRef });
     else await call("send_key", { sessionId, key: "Enter" });
     await call("wait_screen", { sessionId, timeoutMs: 5000 });
   }
@@ -132,8 +132,8 @@ async function backToMenu() {
 const summary = [];
 try {
   const sys = (await call("list_systems", {})).structuredContent.systems;
-  osakaRef = sys.find((s) => s.name === "実機")?.ref;
-  if (!osakaRef) throw new Error("実機が見つからない");
+  sysRef = sys.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"))?.ref;
+  if (!sysRef) throw new Error("実機が見つからない");
   await connect();
   log(`接続: ${sessionId.slice(0, 8)}… / MAIN メニュー`);
 

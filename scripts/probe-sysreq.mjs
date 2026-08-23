@@ -25,7 +25,7 @@ const REQUEST = process.argv[2] ?? "";
 const ATTN = process.env.SRQ_ATTN === "1";
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === (process.env.SRQ_SYS ?? "実機"));
+const sys = cfg.systems.find((s) => s.name === (process.env.SRQ_SYS ?? process.env.AS400_SYSTEM ?? "AS400"));
 const crypto = SecretCrypto.fromEnv();
 const password = crypto.decrypt(sys.signon.passwordEnc);
 

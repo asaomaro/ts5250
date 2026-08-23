@@ -65,7 +65,7 @@ describe("識別子の検証（サーバーと同じ規則）", () => {
     ["空", "", "TESTPF"],
     ["長すぎる", "ABCDEFGHIJK", "TESTPF"],
     ["記号", "MAR-O1", "TESTPF"],
-    ["ファイル側", "MYLIB", "A;B"]
+    ["ファイル側", "TESTLIB", "A;B"]
   ])("**%s なら実行ボタンを押せない**", async (_n, lib, file) => {
     const w = mountPane();
     const inputs = w.findAll("header input");
@@ -112,7 +112,7 @@ describe("取り込みの状態遷移", () => {
     const w = mountPane();
     await loadCsv(w, "TEST1,TEST2\na,b");
     const inputs = w.findAll("header input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("TESTPF");
     await w.find("button.go").trigger("click");
     await flushPromises();
@@ -133,7 +133,7 @@ describe("取り込みの状態遷移", () => {
     const w = mountPane();
     await loadCsv(w, "A\n1\n2");
     const inputs = w.findAll("header input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("TESTPF");
     await w.find("button.go").trigger("click");
     await flushPromises();
@@ -152,7 +152,7 @@ describe("取り込みの状態遷移", () => {
     const w = mountPane();
     await loadCsv(w, "A\n1\n2");
     const inputs = w.findAll("header input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("TESTPF");
     await w.find("button.go").trigger("click");
     await flushPromises();
@@ -185,7 +185,7 @@ describe("取得", () => {
       String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1].body)
     );
     // 識別子は大文字に正規化される
-    expect(body.sql).toBe("SELECT * FROM MYLIB.SQLTYPES WHERE ID < 100");
+    expect(body.sql).toBe("SELECT * FROM TESTLIB.SQLTYPES WHERE ID < 100");
     w.unmount();
   });
 
@@ -194,14 +194,14 @@ describe("取得", () => {
     const w = mountPane();
     await w.findAll(".seg button")[0]!.trigger("click");
     const inputs = w.findAll("header input");
-    await inputs[0]!.setValue("MYLIB");
+    await inputs[0]!.setValue("TESTLIB");
     await inputs[1]!.setValue("TESTPF");
     await w.find("button.go").trigger("click");
     await flushPromises();
     const body = JSON.parse(
       String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1].body)
     );
-    expect(body.sql).toBe("SELECT * FROM MYLIB.TESTPF");
+    expect(body.sql).toBe("SELECT * FROM TESTLIB.TESTPF");
     w.unmount();
   });
 

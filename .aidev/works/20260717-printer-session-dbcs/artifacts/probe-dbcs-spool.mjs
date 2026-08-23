@@ -1,6 +1,6 @@
-// research: 実機で DBCS スプールを採取できるか試す。CCSID 1399 で MYLIB のライブラリテキストを
+// research: 実機で DBCS スプールを採取できるか試す。CCSID 1399 で TESTLIB のライブラリテキストを
 // 日本語に変え、DSPLIBL OUTPUT(*PRINT) をプリンター OUTQ へ回して SCS に SO/SI が乗るか見る。
-import { PrinterSession, Session5250, codecForCcsid } from "file:///workspaces/as400-web-emulator/packages/core/dist/index.js";
+import { PrinterSession, Session5250, codecForCcsid } from "file:///workspaces/ts5250/packages/core/dist/index.js";
 import { writeFileSync } from "node:fs";
 
 const HOST = process.env.PUB400_HOST ?? "pub400.com";
@@ -36,8 +36,8 @@ log(`プリンター起動: ${prt.startupCode} device=${PRTDEV} (CCSID 1399)`);
 
 const disp = await connectDisplay();
 try {
-  // MYLIB のテキストを日本語に（DBCS 入力が通るか）。通れば DSPLIBL に日本語が載る
-  let scr = await run(disp, "CHGLIB LIB(MYLIB) TEXT('日本語テスト')");
+  // TESTLIB のテキストを日本語に（DBCS 入力が通るか）。通れば DSPLIBL に日本語が載る
+  let scr = await run(disp, "CHGLIB LIB(TESTLIB) TEXT('日本語テスト')");
   const t = textOf(scr);
   const errLine = t.split("\n").map((l) => l.trim()).find((l) => /CPF|CPD|not|error|エラー/i.test(l));
   log("CHGLIB 結果: " + (errLine ?? "OK(変更?)"));
@@ -61,18 +61,18 @@ try {
   while (Date.now() - t0 < 20000 && reports.length === 0) await sleep(500);
 } finally {
   // 後始末: テキストを戻す
-  await run(disp, "CHGLIB LIB(MYLIB) TEXT(' ')").catch(() => {});
+  await run(disp, "CHGLIB LIB(TESTLIB) TEXT(' ')").catch(() => {});
   await disp.disconnect();
 }
 
 if (reports.length) {
   const raw = reports[0].raw;
   const hasSO = [...raw].some((b) => b === 0x0e);
-  writeFileSync("/tmp/claude-1000/-workspaces-as400-web-emulator/0d514ddf-60ce-4ba1-85fd-79b8f8491d4e/scratchpad/scs-capture-dbcs.bin", Buffer.from(raw));
+  writeFileSync("/tmp/ts5250-work/scs-capture-dbcs.bin", Buffer.from(raw));
   const text = reports[0].pages.map((p) => p.lines.join("\n")).join("\n");
   log(`受信 ${raw.length}B, SO(0x0E) 含む=${hasSO}`);
-  log("--- 帳票（MYLIB 行あたり）---");
-  log(text.split("\n").filter((l) => /MYLIB|日本|語|テスト/.test(l)).join("\n") || "(MYLIB 行見つからず)");
+  log("--- 帳票（TESTLIB 行あたり）---");
+  log(text.split("\n").filter((l) => /TESTLIB|日本|語|テスト/.test(l)).join("\n") || "(TESTLIB 行見つからず)");
   log(text.split("\n").slice(6, 10).join("\n"));
   process.exit(hasSO ? 0 : 2);
 } else {

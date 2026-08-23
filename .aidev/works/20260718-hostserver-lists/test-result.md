@@ -5,7 +5,7 @@
 | # | 基準 | 結果 |
 |---|---|---|
 | 1 | ジョブを一覧 | ✅ 30 件。ユーザー絞り込みも動作（実機） |
-| 2 | オブジェクトを一覧 | ✅ MYLIB の 20 件（実機） |
+| 2 | オブジェクトを一覧 | ✅ TESTLIB の 20 件（実機） |
 | 2 | ユーザーを一覧 | ✅ 4 件（実機） |
 | 3 | 共通部分の共有 | ✅ `list/openlist.ts` |
 | 4 | 単体テスト | ✅ 12 件 |
@@ -13,9 +13,9 @@
 ## 実機での確認
 
 ```
-オブジェクト（MYLIB）: 20 件
-  MYLIB  CLRTPGM  *PGM
-  MYLIB  CLRTDSP  *FILE
+オブジェクト（TESTLIB）: 20 件
+  TESTLIB  CLRTPGM  *PGM
+  TESTLIB  CLRTDSP  *FILE
   ...
 ユーザー: 4 件
   ENGMTZ / USER / SANDEP981 / VENSUJA

@@ -79,7 +79,7 @@ flowchart TD
 - `PaneTabs`: pane タブに未読バッジが出る（セッションが無くても）
 - `LauncherPane`: `dtaqwatch` の接続が**装置名の重複判定を通らない**
 
-### 実機（）
+### 実機
 
 - `scripts/probe-dtaq-longwait.mjs --minutes 45`（**並行実行中**）で
   長時間アイドルの生存を確かめる

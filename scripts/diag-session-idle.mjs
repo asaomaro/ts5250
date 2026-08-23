@@ -42,7 +42,7 @@ const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join("").replace(/\s
 let closedReason;
 
 /**
- * 接続する。**装置名は順に試す**——自動構成を切っている実機（）では
+ * 接続する。**装置名は順に試す**——自動構成を切っている実機では
  * 登録済みの名前しか使えず、使用中なら `8940` で拒否される（`scripts/README.md`）。
  * `<PRE>_DEVNAMES` を省くと装置名を指定しない（pub400 のように自動構成が効く相手向け）。
  */

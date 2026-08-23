@@ -28,7 +28,7 @@ const host = process.env["AS400_HOST"] ?? process.env["PUB400_HOST"] ?? "pub400.
 const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];
 const password = process.env["AS400_PASSWORD"] ?? process.env["PUB400_PASSWORD"];
 const useTls = process.argv.includes("--tls");
-const library = "MYLIB";
+const library = "TESTLIB";
 
 function out(s: string): void {
   process.stdout.write(`${s}\n`);

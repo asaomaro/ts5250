@@ -35,8 +35,8 @@ const tmpCfg = `${TMP}/conn-adjust.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 const crypto = SecretCrypto.fromEnv();
 // **パスワードはスクリプトに書かない。** 既存の暗号化済み設定を復号して使う（AGENTS.md セキュリティ）
-const password = crypto.decrypt(cfg.systems.find((s) => s.name === "実機").signon.passwordEnc);
-const user = cfg.systems.find((s) => s.name === "実機").signon.user;
+const password = crypto.decrypt(cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).signon.passwordEnc);
+const user = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")).signon.user;
 
 const resolver = new ConfigResolver(
   ServerConfigStore.fromFile(tmpCfg, crypto),

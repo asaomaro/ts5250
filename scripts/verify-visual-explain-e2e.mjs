@@ -25,7 +25,7 @@ import {
 } from "@ts5250/server";
 
 const which = process.argv[2] === "pub400" ? "pub400" : "as400";
-const SYS_NAME = which === "pub400" ? "pub400" : "実機";
+const SYS_NAME = which === "pub400" ? "pub400" : (process.env.AS400_SYSTEM ?? "AS400");
 const PASSWORD_ENV = which === "pub400" ? "PUB400_PASSWORD" : "AS400_PASSWORD";
 const TMP = "/tmp/as400-verify-visual-explain";
 

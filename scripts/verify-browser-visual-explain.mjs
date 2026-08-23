@@ -47,7 +47,7 @@ if (!process.env["AS400_PASSWORD"]) {
 
 // 設定の置き場は差し替えられる（個人の `connections.json` に実機が無い環境でも走らせるため）
 const cfg = JSON.parse(readFileSync(process.env.VE_CONN ?? "connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 // **値はファイルに落とさない**（環境変数の名前だけ）
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
 const tmpCfg = `${TMP}/conn.json`;

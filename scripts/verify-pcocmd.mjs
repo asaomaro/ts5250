@@ -24,7 +24,7 @@ const check = (ok, name, detail = "") => {
 };
 
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!sys) { log("connections.json に実機がない"); process.exit(1); }
 const password = SecretCrypto.fromEnv().decrypt(sys.signon.passwordEnc);
 const auth = { host: sys.host, user: sys.signon.user, password, ccsid: sys.ccsid ?? 37 };

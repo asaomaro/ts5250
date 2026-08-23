@@ -15,7 +15,7 @@
 | `SELECT *` を使わない | `MESSAGE_KEY` が BINARY で DB 層が断る |
 | 本文を CCSID 付きで CAST | VARGRAPHIC のままだと読めない |
 
-## 実機（）— 18/18
+## 実機— 18/18
 
 **`QSYSOPR` は触っていない。** 専用の待ち行列（`TESTLIB/TSTMSGQ`）を作って使い、最後に消した。
 

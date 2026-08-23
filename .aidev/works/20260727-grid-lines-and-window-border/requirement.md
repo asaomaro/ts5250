@@ -56,7 +56,7 @@ ulbc(1) / tbc(1) / urbc(1) / lbc(1) / rbc(1) / llbc(1) / bbc(1) / lrbc(1)`
 - `packages/core/src/protocol/wdsf-parser.ts` — 0x60 / 0x61 のパース、Border Presentation の読み取り
 - `packages/core/src/protocol/wtd-applier.ts` / `screen/buffer.ts` — グリッド線の状態保持
 - `packages/web-ui/src/components/ScreenGrid.vue` — グリッド線の描画・ホスト指定枠の反映
-- 単体テスト＋**実機（）で DSPF をコンパイルして表示確認**
+- 単体テスト＋**実機で DSPF をコンパイルして表示確認**
 
 ### 対象外
 - グリッド線の印刷（`READ SCREEN TO PRINT WITH GRIDLINES`）
@@ -75,4 +75,4 @@ ulbc(1) / tbc(1) / urbc(1) / lbc(1) / rbc(1) / llbc(1) / bbc(1) / lrbc(1)`
 - [ ] ホストが Border Presentation を送らない窓は**従来どおりクライアント設定の枠**
 - [ ] 修正前に落ちる回帰テストがある
 - [ ] build / test / lint / vue-tsc ビルドが通る
-- [ ] **実機の実機で GRDLIN / WDWBORDER を使った DSPF を表示して確認**
+- [ ] **実機で GRDLIN / WDWBORDER を使った DSPF を表示して確認**

@@ -22,7 +22,7 @@ import { chromium } from "playwright";
 const OUT = process.argv[2] ?? "webui-diff";
 mkdirSync(OUT, { recursive: true });
 const PORT = 3512;
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const PROGRAMS = process.env.ONLY ? process.env.ONLY.split(",") : [
   "ADJPGM", "DTMPGM", "EDTPGM", "EMPSFR", "EXTPGM", "FEATPGM", "FFWPGM", "OPTPGM", "SGNPGM",
   "GRIDCL", "GRIDCL2", "GRIDCL3", "GRIDCL4", "GRIDCL5", "GRIDCL6", "GRIDCL7"
@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 「対話式ジョブの回復」画面から始まり、比較したい画面に辿り着けない。
 // 設定を写して装置名だけ空にし、ホスト採番に任せる（shot-ext.mjs と同じ流儀）。
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-for (const sess of cfg.sessions) if (sess.name === "DEV1") sess.deviceName = "";
+for (const sess of cfg.sessions) if (sess.name === (process.env.AS400_SESSION ?? "DEV1")) sess.deviceName = "";
 const tmpCfg = `${OUT}/conn-diff.json`;
 writeFileSync(tmpCfg, JSON.stringify(cfg));
 

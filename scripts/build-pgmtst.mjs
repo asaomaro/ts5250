@@ -32,7 +32,7 @@ mkdirSync(TMP, { recursive: true });
 const log = (s) => process.stdout.write(s + "\n");
 
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 sys.signon = { user: sys.signon.user, passwordEnv: "AS400_PASSWORD" };
 cfg.sessions = [];
 writeFileSync(`${TMP}/cfg.json`, JSON.stringify(cfg));

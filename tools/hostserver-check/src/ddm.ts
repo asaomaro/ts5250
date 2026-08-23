@@ -7,7 +7,7 @@
  *
  * 使い方:
  *   AS400_USER=xxx AS400_PASSWORD=yyy \
- *     npm run ddm -w @ts5250/hostserver-check -- --tls [--library MYLIB]
+ *     npm run ddm -w @ts5250/hostserver-check -- --tls [--library TESTLIB]
  */
 import "./log-init.js";
 import { As400Error } from "@ts5250/base";
@@ -18,7 +18,7 @@ const user = process.env["AS400_USER"] ?? process.env["PUB400_USER"];
 const password = process.env["AS400_PASSWORD"] ?? process.env["PUB400_PASSWORD"];
 const useTls = process.argv.includes("--tls");
 const libIdx = process.argv.indexOf("--library");
-const library = (libIdx >= 0 ? process.argv[libIdx + 1] : undefined) ?? "MYLIB";
+const library = (libIdx >= 0 ? process.argv[libIdx + 1] : undefined) ?? "TESTLIB";
 const table = "ZZDDM";
 
 function out(s: string): void {

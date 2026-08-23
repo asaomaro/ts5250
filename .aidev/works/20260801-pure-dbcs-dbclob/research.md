@@ -1,6 +1,6 @@
 # 調査: 純 DBCS の DBCLOB（実機）
 
-実機 **実機（IBM i 7.3）**。再現は `scripts/research-pure-dbcs-lob.mjs`。
+**実機（IBM i 7.3）**。再現は `scripts/research-pure-dbcs-lob.mjs`。
 
 ## F1. ジョブの CCSID から純 DBCS への**直接変換が無い**
 

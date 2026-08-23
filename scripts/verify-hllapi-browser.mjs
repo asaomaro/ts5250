@@ -88,7 +88,7 @@ print(json.dumps({"rc": r.value, "len": l.value,
 
 // **実機の接続設定をそのまま借りる**（TLS・ポート・資格情報。手で組むと negotiation で落ちる）
 const cfg = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = cfg.systems.find((s) => s.name === "実機");
+const sys = cfg.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 if (!sys) {
   process.stderr.write("connections.json に実機がありません\n");
   process.exit(1);

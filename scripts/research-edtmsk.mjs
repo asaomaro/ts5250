@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 
-const LIB = "TESTLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rows = (s) => s.cells.map((r) => r.map((c) => c.char).join("").replace(/\s+$/, ""));
@@ -123,7 +123,7 @@ async function connectHost(sys, password) {
 
 const captured = [];
 const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === "実機");
+const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
 const password = process.env.AS400_PASSWORD;
 if (!password) { log("AS400_PASSWORD が未設定です"); process.exit(1); }
 const session = await connectHost(sys, password);

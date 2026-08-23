@@ -69,7 +69,7 @@ FF 0x0C / CR 0x0D / NL 0x15 / ORDER_2B 0x2B / PP 0x34 / RFF 0x3A）なので、
 |---|---|
 | `PUB400SYS SYS  $ PUB400.COM global pr…` | **38** |
 | `QSYS       SYS  System Library` | **38** |
-| `MYLIB      CUR  日本語テスト`（DBCS） | **38** |
+| `TESTLIB      CUR  日本語テスト`（DBCS） | **38** |
 | `QGPL       USR  General Purpose Librar…` | **38** |
 
 **DBCS 行も SBCS 行と同じ桁 38 に揃っている。** SO/SI に 1 桁ずつ割り当てると DBCS 行だけ

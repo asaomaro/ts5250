@@ -4,7 +4,7 @@ import { DB2 } from "../src/db/db-types.js";
 import { As400Error } from "@ts5250/base";
 
 /**
- * 実機テスト表 MYLIB.SQLTYPES の型を、固定バイト列で再現して検証する。
+ * 実機テスト表 TESTLIB.SQLTYPES の型を、固定バイト列で再現して検証する。
  * 実機との突き合わせは T11 で行い、ここは変換ロジックの回帰検出に徹する。
  */
 const meta = (over: Partial<ColumnMeta> & { type: number; offset: number; length: number }): ColumnMeta =>

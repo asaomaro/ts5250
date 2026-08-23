@@ -7,7 +7,7 @@ import { PersonalConfigStore } from "../src/config-store.js";
 
 describe("dtaqwatch セッションのスキーマ", () => {
   const base = { id: "w", name: "n", system: "s" };
-  const spec = { library: "MYLIB", name: "ORDERQ" };
+  const spec = { library: "TESTLIB", name: "ORDERQ" };
 
   it("dtaqwatch ＋ dtaqWatch は通る", () => {
     const r = personalSessionSchema.safeParse({ ...base, sessionType: "dtaqwatch", dtaqWatch: spec });

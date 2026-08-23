@@ -3,12 +3,18 @@
 IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェント用）と **Web エミュレーター**（ブラウザ／デスクトップ）の
 2 つのフロントから操作できるツール群です。TN5250 プロトコルを **純 TypeScript** で実装しており、外部の 5250
 ライブラリや IBM ACS の jar には依存しません。両フロントは共通の 5250 コア（`packages/tn5250`）を使うため、
-画面の見え方・振る舞いが定義上一致します。
+画面の見え方・振る舞いが定義上一致します。**3270**（`packages/tn3270`）と **VT / xterm**（`packages/vt`）の
+端末も同じ土台に載っており、同じ画面の同じタブから開けます。
 
 - **AI から操作**: MCP ツール経由で LLM が 5250 アプリを自動操作（サインオン・画面取得・キー送信・ジョブ情報 …）、
   プリンタースプールの取得も可能。
 - **人が操作**: ブラウザ／Electron の忠実な 5250 エミュレーターで、ACS に近い操作感。
+- **画面を介さずにも**: ホストサーバー（`packages/hostserver`）経由で SQL・CL・IFS・データ待ち行列・
+  メッセージ待ち行列・プログラム呼び出しを、**装置もセッションも要らず単発**で扱えます（MCP からもブラウザからも）。
 - **帳票も**: TN5250E プリンターセッションでスプール出力を受信し、等幅帳票／PDF として表示・保存・印刷（SBCS＋DBCS）。
+- **常駐もする**: プリンター・データ待ち行列・メッセージ待ち行列の待ち受けを**サーバー側のサービス**として
+  常駐させられます（ブラウザを閉じていても取りこぼしません）。
+- **既存資産から**: HLLAPI / EHLLAPI（VB / C / Excel VBA 等）で 5250 セッションを駆動できます。
 - **共有もできる**: 任意で認証・per-user 分離・管理者画面（既定は無認証のローカル運用）。
 - **検証実績**: [PUB400.com](https://pub400.com)（IBM i 7.5・英語）に対する実機 E2E で動作確認済み。
   日本語（DBCS）まわり——CCSID 930/939、罫線・窓、日本語帳票、SCS の桁揃え——は
@@ -19,6 +25,9 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 ## ✨ 特徴
 
 **プロトコル / 接続**
+- **端末は 3 種類**——**5250**（IBM i）／**3270**（メインフレーム。IBM i の 3270 も可。基本 TN3270 ＋
+  基本 TN3270E = RFC 2355 §9）／**VT / xterm**（PASE・AIX・Linux。UTF-8 / Shift_JIS / EUC-JP）。
+  セッション設定の `terminal` で選びます（→ [端末の種類](#端末の種類5250--3270--vt)）
 - RFC 4777 **NEW-ENVIRON 自動サインオン**（バインド時認証。PUB400 で確認済み）
 - telnet ネゴシエーション（BINARY / EOR / TERMINAL-TYPE / NEW-ENVIRON）、**TLS**（既定ポート 992・証明書検証既定 ON）
 - **画面サイズ**を接続ごとに 24x80 / 27x132 から選択（端末タイプで申告し、ホストが対応画面を
@@ -78,6 +87,34 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - **サーバー側 PDF**: 受信スプールを PDF 化（等幅 CJK フォントを OS から自動で探すので日本語も桁が揃う）。サーバー設定のセッションに `printer` を書くと
   **指定フォルダへ自動蓄積**・**物理プリンターへ自動印刷**、web-ui/MCP から **PDF ダウンロード**
 
+**IBM i の機能（5250 の画面を介さない）**
+- ホストサーバー経由なので**装置もセッションも要りません**。ブラウザの「このシステムの機能」からも、
+  MCP の `host_*` ツールからも同じ経路を使います
+- **SQL**（SELECT / 更新 / DDL・手続き・関数・`CALL`・結果セット・CSV 出力）、**実行計画**（ACS の
+  Visual Explain 相当。索引の助言つき）、**データ転送**（表 ⇔ CSV）
+- **IFS**（閲覧・取得・配置・作成・改名・削除・zip 一括取得・フォルダごとのアップロード）
+- **データ待ち行列**（送受信・peek・作成・クリア・削除・属性）、**メッセージ待ち行列**（閲覧・送信・
+  **照会への応答**・削除）
+- **ジョブ / オブジェクト / ユーザー**の一覧（ジョブの保留・解放・終了、オブジェクト削除）
+- **スプール**（既存の出力待ち行列を検索して閲覧 / PDF 保存。pull 型）
+- **CL コマンド**（コマンド定義を引いて欄を並べる＝実機の **F4 プロンプト**相当）
+- **プログラム呼び出し**（RPG / COBOL / QSYS API を型付きの引数で）、**PCML 呼び出し**（コンパイラや
+  IBM が配る `.pcml` から構造体・配列を名前で扱う）
+
+**常駐サービス（サーバー側）**
+- セッション設定に `sessionType` を書くと、サーバーが起動時から**待ち受けを常駐**させます——
+  `printer`（帳票）／`dtaqwatch`（データ待ち行列）／`msgwatch`（メッセージ待ち行列）
+- ブラウザを閉じていても受け続け、開き直せば**動いている常駐に合流**します
+- 開始 / 停止は画面の「サービス」から。`autoStart: false` なら登録だけして待機
+- `dtaqwatch` は届いたエントリを **Webhook 転送**できます（**サーバー設定のみ**の信頼設定）
+- **TCP キープアライブ**を入れてあります（無いと LAN の常駐プリンターが 15 分のアイドルで
+  `listening` のまま黙って届かなくなりました）。落ちたら**張り直します**
+
+**HLLAPI / EHLLAPI**
+- 既存の HLLAPI 資産（VB / C / Excel VBA など）から 5250 セッションを駆動できます
+- ネイティブの部品（Rust の DLL / .so）は **C ABI ↔ HTTP** だけを担い、機能番号の意味も画面の解釈も
+  TypeScript 側にあります（**機能を増やしても DLL の差し替えは不要**）→ [`docs/HLLAPI.md`](docs/HLLAPI.md)
+
 **PC コマンド（STRPCO / STRPCCMD）**
 - ホストの `STRPCCMD` が送ってくるコマンドを受け取り、**エミュレーターのサーバープロセスが動いている機械**で
   実行します（自分の PC で起動していればその PC、サーバー運用ならサーバー機。ブラウザ側の PC では動きません）
@@ -97,7 +134,7 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - **管理者画面**（ユーザー管理・全セッション管理・監査ログ）をタブで展開
 
 **MCP サーバー**
-- stdio ＋ Streamable HTTP、**40 ツール**（5250 経由 23 ＋ ホストサーバー経由 17 → [ツール一覧](#ツール一覧40)）
+- stdio ＋ Streamable HTTP、**48 ツール**（5250 経由 24 ＋ ホストサーバー経由 24 → [ツール一覧](#ツール一覧48)）
 - 画面は **テキスト（LLM 可読）＋ structuredContent** で返却（桁維持・GUI 構造体・fields/cursor）。
   **自己完結 HTML** でも取れ（`get_screen_html`）、画面遷移を記録して 1 枚の HTML にまとめられる
   （自動操作のエビデンス用）
@@ -108,18 +145,43 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 
 ## 🏗 構成（npm workspaces モノレポ）
 
-| パッケージ | 役割 |
+| ディレクトリ | 役割 |
 |---|---|
-| `packages/tn5250` | TN5250 プロトコルコア（telnet・5250 データストリーム・画面モデル・ホストサーバー・trace/replay） |
+| `packages/base` | 全体の土台（エラー語彙 `As400Error` / `ErrorCode`、注入式のログ sink、オブジェクト名の検証）。**依存ゼロ** |
 | `packages/ebcdic` | EBCDIC ⇔ Unicode 変換（**外部依存ゼロ**。SBCS / SO-SI 混在 DBCS / 純 DBCS） |
-| `packages/scs` | スプール（SCS）のバイト列 → 論理ページ展開。依存は `ebcdic` のみ |
-| `packages/server` | MCP サーバー（stdio + Streamable HTTP）・WebSocket/REST・web-ui 静的配信 |
-| `packages/web-ui` | ブラウザ 5250 エミュレーター（Vue 3 + Vite） |
+| `packages/scs` | スプール（SCS）のバイト列 → 論理ページ展開 |
+| `packages/tn5250` | TN5250 プロトコル（telnet・5250 データストリーム・画面モデル・trace/replay） |
+| `packages/tn3270` | TN3270 プロトコル（基本 TN3270 ＋ 基本 TN3270E。メインフレーム／IBM i の 3270） |
+| `packages/vt` | VT / xterm 文字モード端末（DEC ANSI パーサ・スクロールバック・キー符号化・文字符号化） |
+| `packages/hostserver` | IBM i ホストサーバークライアント（サインオン・SQL/DB・IFS・DDM・データ待ち行列・スプール・各種一覧・リモートコマンド）。**5250 を含まない** |
+| `packages/server` | MCP サーバー（stdio + Streamable HTTP）・WebSocket/REST・常駐サービス・web-ui 静的配信 |
+| `packages/web-ui` | ブラウザの端末エミュレーター＋IBM i 機能画面（Vue 3 + Vite） |
+| `crates/hllapi` | HLLAPI / EHLLAPI の C ABI 接続層（Rust。DLL / .so）→ [`docs/HLLAPI.md`](docs/HLLAPI.md) |
+| `electron/` | デスクトップ配布（Electron + electron-builder） |
 | `tools/gen-tables` | ICU `.ucm` → TS 変換テーブル生成（ビルド時ツール） |
 | `tools/hostserver-check` | ホストサーバー（SQL / CL / DDM / IFS / DTAQ）を実機で叩く手動チェック |
 
-依存の向きは `ebcdic ← scs ← core ← server / web-ui` の一方向。**`ebcdic` と `scs` は TN5250 一式を
-引き込まずに単体で使えます**（「EBCDIC 変換だけ欲しい」「スプールを読みたいだけ」に応えるため）。
+依存は一方向です。`base` と `ebcdic` はどこにも依存せず、`scs` がその上に載り、
+**`tn5250` / `tn3270` / `vt` / `hostserver` は互いに依存しません**（それぞれ独立に土台へ載ります）。
+`server` がそれらを束ね、`web-ui` は `server`（型）と `tn5250` を使います。
+
+```
+1. base / ebcdic  … 依存ゼロ
+2. scs            … base + ebcdic
+3. tn5250 / tn3270 / vt / hostserver … 同位（互いに依存しない）
+     tn5250      ← base, ebcdic, scs   （プリンターセッションが SCS を復号する）
+     tn3270      ← base, ebcdic        （プリンターは対象外なので scs が要らない）
+     vt          ← base                （EBCDIC の世界ではない）
+     hostserver  ← base, ebcdic, scs
+4. server         … 3 をすべて束ねる
+5. web-ui         … server（型）＋ tn5250
+```
+
+層の順序は `packages/tn5250/test/dependency-direction.test.ts` が 1 か所で宣言し、全パッケージを
+走査して検査します（個別に辺を書き足す形だと、書き忘れた組み合わせが素通りするため）。
+
+**`ebcdic` / `scs` / `hostserver` は端末プロトコル一式を引き込まずに単体で使えます**
+（「EBCDIC 変換だけ欲しい」「スプールを読みたいだけ」「SQL だけ叩きたい」に応えるため）。
 ESM、Node ≥ 20。
 
 ---
@@ -351,6 +413,9 @@ electron.bat --build    :: 強制再ビルドしてから作る
    - **Ctrl+V**: 複数行テキストは貼り付け開始桁を起点に矩形の形のまま下方向へ。挿入モードでは入り切らないと
      「挿入する余地がありません」が出て何も書き換えません（→ [複数行ペースト](#複数行ペーストの規則acs-実機準拠)）
    - **タブ**: Alt+Shift+PageUp/Down で切替、D&D で並び替え・別ペインへ合流。**ペイン**: Alt+Shift+矢印で移動、端 D&D で分割
+     - **開いたタブは閉じるまで生きています**（切り替えても最大化しても状態を失いません）
+     - **タブはシステムを持ちます**——別々のシステムを並べて同時に見られます（タブ帯の色の線がシステムを示します）
+     - **タブグループ**にまとめられます（チップを全面クリックで開閉・右クリックでメニュー）
    - **ローカル編集キー**（ホストへは送らず端末内で完結します。「⌨ キー」から好きなキーへ割り当て直せます）
      - **Field Exit**（既定 Ctrl+Enter）: カーソル以降を欄末尾まで消し、**フィールドの指定どおり右寄せ**して
        次の入力欄へ。右寄せはゼロ埋め（DDS の `CHECK(RZ)`）／空白埋め（`CHECK(RB)`）と、
@@ -400,7 +465,25 @@ electron.bat --build    :: 強制再ビルドしてから作る
          **未取得（`(LOB)`）と混ぜません**。取得失敗の理由はサーバーのログ（`warn`）に出ます
        - CSV にも同じ区別が出ます（`(LOB)` / `(LOB: 取得失敗)`）。
          **どの状態でも空欄にはしません**——空欄は SQL の NULL と見分けが付かなくなるためです
+   - **実行計画**: SQL の実行計画を**グラフで**見る（ACS の Visual Explain 相当）。索引の助言も出ます。
+     どの文の計画を見るかを選べます（**採取済みの計画の一覧には特権が要ります**）
+   - **データ転送**: SQL を書かずに**表 → CSV / CSV → 表**（ACS の「データ転送」に相当。
+     取り込みは **INSERT のみ**で、更新・削除・表の作成はしません）
+   - **メッセージ**: メッセージ待ち行列（`QSYSOPR` など）を読む・送る・**応答待ちの照会に答える**・削除する
+   - **プログラム呼び出し**: 画面を経由せずに RPG / COBOL / QSYS API を**型付きの引数**で呼ぶ
+   - **PCML 呼び出し**: コンパイラや IBM が配る `.pcml` を読み込み、**構造体と配列を名前で**扱って呼ぶ
+   - **コマンド入力支援**: CL コマンドの定義を引いて欄を並べる（実機の **F4 プロンプト**相当）。
+     書き方を覚えていなくても打てます
+   - **IFS**: フォルダを辿ってファイルを見る / 取り出す / 置く（作成・改名・削除・**zip 一括取得**・
+     **フォルダごとのアップロード**＝「フォルダをアップロード」ボタン、またはフォルダのドラッグ＆ドロップ）
+   - **データ待ち行列**: エントリの送受信・ピーク、作成・クリア・削除・属性表示
+   - **スプール**: 出力待ち行列にある**既存**のスプールを検索して中身を読む / PDF 保存
+     （プリンターセッションのタブ＝push 型とは別物。こちらは pull 型で過去の分も取れます）
    - 見える範囲・実行できる範囲は、接続設定の資格情報が **IBM i 上で持つ権限**が決めます
+5. **このアプリ自身を扱う画面**（IBM i ではなく ts5250 の状態を見ます）:
+   - **サービス**: サーバーで動き続けているプリンター・待ち行列の一覧。**開始・停止**もできます
+     （→ [常駐サービス](#常駐サービスプリンター--待ち行列の待ち受け)）
+   - **セッション管理 / ログ / ユーザー管理**（管理者向け → [認証・per-user 分離](#-認証per-user-分離任意)）
 
 > 💡 画面サインオン・自動サインオン（RFC 4777）のどちらでも接続できます（PUB400 実機で確認）。
 > 画面サインオンで **`CPF1120`（ユーザー不存在/パスワード不一致）** が出るのに自動サインオンは通る、という
@@ -628,20 +711,51 @@ WebSocket の `open` メッセージも同じ `system` / `session` / `host` を�
   （UI で設定した AES-256-GCM 暗号文）。解決順は `passwordEnc > passwordEnv`。**平文の `password` は廃止**しました
   （後方互換のため、`signon.password` を含むファイルは起動時に明示エラーになります。`passwordEnv` へ移行してください）。
 - **システム側**に指定できるのは `tls: true`（ポート既定 992）と `ccsid`（930/939/1399 等で DBCS。既定値）。
+- **`sessionType` は 4 種類**: `display`（画面）/ `printer`（帳票の受信）/ `dtaqwatch`（データ待ち行列の
+  待ち受け）/ `msgwatch`（メッセージ待ち行列の待ち受け）。後ろの 3 つは**サーバー側で常駐**できます
+  （→ [常駐サービス](#常駐サービスプリンター--待ち行列の待ち受け)）。
 - **セッション設定側**（種別を問わない）: `deviceName`、`deviceNameRetry: true`（装置名が使用中なら
   末尾の数字を繰り上げて再試行。既定 false ＝「その名前で繋ぎたい」意図をすり替えない）、
-  `ccsid`（システムの既定を上書き）。
-  - **`sessionType: "display"` のときだけ**効くもの: `screenSize`（`"24x80"` / `"27x132"`）、
+  `ccsid`（システムの既定を上書き）、`idleTimeout`（無操作で切るまでの**分**。`"never"` で切らない。
+  未設定はサーバー既定 `--idle-timeout` に従う。**`0` も `null` も「切らない」の印にしません**——
+  未設定・転記漏れと見分けが付かなくなるため）。
+  - **`sessionType: "display"` のときだけ**効くもの: `terminal`（`"5250"` 既定 / `"3270"` / `"vt"` →
+    [端末の種類](#端末の種類5250--3270--vt)）、`screenSize`（`"24x80"` / `"27x132"`）、
+    `model3270`（`2` 既定 / `5`）、`vtEncoding`（`"utf-8"` 既定 / `"shift_jis"` / `"euc-jp"`）、
     `enhanced: true`（拡張 5250 GUI 広告）、`watermark`（画面の透かし →
     [ウォーターマーク](#ウォーターマーク画面に重ねる透かし)）、
     `pcCommand`（PC コマンド実行。**サーバー設定のみ** → [PC コマンド](#pc-コマンドstrpco--strpccmd)）。
   - **`sessionType: "printer"` のときだけ**効くもの: `rescueAction`（`hold` 既定 / `delete`）、
     `transformTo`（HPT の機種。例 `"*HP4"`）、`printer`（自動 PDF / 印刷。**サーバー設定のみ**）。
+  - **`sessionType: "dtaqwatch"` / `"msgwatch"` のときだけ**効くもの: `dtaqWatch` / `msgWatch`（対象の
+    ライブラリー・名前と絞り込み）、`webhook`（`dtaqwatch` のみ。**サーバー設定のみ**）。
+  - **常駐する種別（`printer` / `dtaqwatch` / `msgwatch`）で**効くもの: `autoStart`（既定 `true`。
+    `false` ならサーバー起動時に立ち上げず、登録だけして待機）。
+- **種別と設定の整合は読み込み時に強制します。** `dtaqwatch` なのに `dtaqWatch` が無い、`display` なのに
+  `msgWatch` がある——といった設定は**受け取った時点で弾きます**（「監視のつもりで登録したのに何も
+  起きない」を作らないため）。
 - **UI からの編集**: サーバー設定は接続画面のカードから編集/削除できます（**認証オフ、または admin ユーザーのとき**
   のみ。一般ユーザーには読み取り専用）。接続情報に加え、**自動サインオンのユーザー/パスワードも編集可能**で、
   パスワードは AES-256-GCM で暗号化して `passwordEnc` に保存されます（平文はファイルにもレスポンスにも残さない）。
   `printer` 出力設定などの信頼設定と、運用者が env で設定した `passwordEnv` は**サーバー側で保持**され、
   ブラウザ入力からは変更・注入できません（安全境界）。`passwordEnc` を使うには master key（`AS400_SECRET_KEY`）が必要です。
+
+### 端末の種類（5250 / 3270 / VT）
+
+**`sessionType`（何のセッションか）と `terminal`（どの端末か）は別の軸**です。前者は画面 / 帳票 / 監視、
+後者は端末の種類で、`terminal` は `sessionType: "display"` のときだけ意味を持ちます。
+
+| `terminal` | 相手 | 実装 | 画面 | 備考 |
+|---|---|---|---|---|
+| `5250`（既定） | IBM i | `packages/tn5250` | フィールド＋AID キー | 24x80 / 27x132、DBCS、拡張 5250 GUI |
+| `3270` | メインフレーム／**IBM i の 3270 も可** | `packages/tn3270` | フィールド＋AID キー | 基本 TN3270 ＋ 基本 TN3270E（RFC 2355 §9）。`model3270` は **2（24x80）と 5（27x132）だけ** |
+| `vt` | PASE・AIX・Linux 等 | `packages/vt` | **文字モード**（フィールドも AID も無い） | `vtEncoding` で UTF-8 / Shift_JIS / EUC-JP。専用ペインで描画・スクロールバックあり |
+
+- **3270 と VT はブラウザ（WebSocket）専用**です。**MCP ツールは 5250 のみ**を扱います
+  （`open_session` に端末の種類はありません）。
+- 3270 のモデルは **2 と 5 だけ**に絞っています。3（32 行）・4（43 行）は web-ui の画面型に収まりません。
+- **VT は `ccsid` を使いません。** `ccsid` は IBM i にコードページを申告するためのもので、VT の
+  `vtEncoding` は画面に流れるバイト列の読み方です（軸が違います）。
 
 ### 画面サイズ（24x80 / 27x132）
 
@@ -1126,23 +1240,27 @@ LOG_LEVEL=debug ./start.sh
 
 ```sh
 npm install
-npm run build        # tsc -b（全パッケージ）
-npm run build -w @ts5250/web-ui   # Web UI（vue-tsc + vite）
+npm run build        # tsc -b（全パッケージ）＋ web-ui の型チェック（vue-tsc）
+npm run build -w @ts5250/web-ui   # Web UI の配信物を作る（vue-tsc → vite build）
 npm test             # vitest（全パッケージ）
 npm run lint         # eslint
 npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新時のみ）
+npm run gen:icons    # アプリアイコンを再生成（元絵を差し替えたときのみ）
 ```
 
-- **trace-first**: 実機トレース（JSONL）を `packages/tn5250/test/fixtures/` に採取し、パーサ・画面モデルは
+- **trace-first**: 実機トレース（JSONL）を各端末パッケージの `test/fixtures/` に採取し、パーサ・画面モデルは
   リプレイでオフライン回帰。実機 E2E / 診断スクリプトは `scripts/`（実行規約は
   [`scripts/README.md`](scripts/README.md)。要 `.env` の資格情報）。
+  **3270 の検証環境だけは IBM i ではありません**——docker 上の TK4-（MVS 3.8j）で、環境構築は
+  `packages/tn3270/test/harness/testenv.sh` にあります。
 - **web-ui のテストはパッケージ dir から実行する**（`cd packages/web-ui && npx vitest run`）。
   ルートから実行すると Vite の vue plugin とフィクスチャの相対パスが解決されず、実際とは違う失敗が出ます。
 - **ビルドに `vue-tsc` を含める**: `vite build` はテンプレートの型チェックをしないので、
-  `npm run build -w @ts5250/web-ui`（`vue-tsc -b && vite build`）を必ず通します。
+  `npm run build -w @ts5250/web-ui`（`vue-tsc -b` → `vite build`）を必ず通します。
+  ルートの `npm run build` にも web-ui の型チェックが入っています（配信物は作りません）。
 - **ログは stderr のみ**（stdio MCP の stdout 汚染禁止）。`console.*` は lint 禁止。
-  アプリ（server）は自前の pino、ライブラリ（core / ebcdic / scs）は既定 no-op の sink
-  （`setLogSink` で注入）を使う——ライブラリ利用者にロガーを強制しないため。
+  アプリ（server）は自前の pino、ライブラリ（`base` / `ebcdic` / `scs` / `tn5250` / `tn3270` / `vt` /
+  `hostserver`）は既定 no-op の sink（`setLogSink` で注入）を使う——ライブラリ利用者にロガーを強制しないため。
 - 秘密情報はコミットしない（`.gitignore` 済み）。`.env`（master key）・`*.local.json`・
   `connections.json`・`macros.json`（`secretEnc` を持つ）。
 
@@ -1175,18 +1293,35 @@ npm run gen:tables   # .ucm から変換テーブルを再生成（.ucm 更新�
   自動印刷はサーバーに `lp`（CUPS 等）がある環境でのみ動作する。
 - **認証のログインセッション・監査ログは in-memory**。サーバー再起動でログインは切れ、ログ（既定 500 件）も消える。
   永続化（DB/ファイル）や外部 IdP/LDAP・多要素認証は未対応。
+- **VT のセッションは長時間のアイドルで死ぬことがある。原因は未特定。** pub400 では 30 分のアイドルで
+  7 回中 6 回落ちました。同時刻に並走させると **VT だけが落ちて 5250 は生きる**ので VT 固有です。
+  **TCP キープアライブも telnet `IAC NOP` も効きませんでした**（NOP は実装して実機で外れたので撤去）。
+  ホスト側の対話ジョブは生きたままで `close` も届きません。5250 / 3270 / 常駐サービスは
+  キープアライブで解決済みです（→ [常駐サービス](#常駐サービスプリンター--待ち行列の待ち受け)）。
+- **3270 のモデルは 2（24x80）と 5（27x132）だけ。** 3（32 行）・4（43 行）は web-ui の画面型に収まらない。
+  TN3270E は**基本（RFC 2355 §9）まで**で、RESPONSES / BIND-IMAGE などの任意機能とプリンター
+  （3287 / LU type 3）・IND$FILE は対象外。
+- **3270 と VT は MCP から扱えない**（ブラウザ／WebSocket 専用）。MCP ツールは 5250 のみ。
+- **`host_sql_explain` に「実行せずに計画だけ」は無い。** IBM i にその経路が無いためで、既定の
+  `mode: "no-rows"` も**文自体はホストで実行されます**（結果行を返さないだけ）。そのため更新系の文は
+  既定で拒否し、調べるには `mode: "run"` を明示させます。
 
 ---
 
 ## 📎 補足
 
 - **ワイヤ仕様（他言語移植用）**: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — telnet ネゴ／RFC 4777 自動サインオン／
-  GDS レコード／WTD オーダー／属性・FFW/FCW／Query Reply／WDSF GUI／Read 応答のバイトレベル仕様。
+  GDS レコード／WTD オーダー／属性・FFW/FCW／Query Reply／WDSF GUI／Read 応答のバイトレベル仕様（5250）。
   移植版の検証は `packages/tn5250/test/fixtures/*.jsonl`（言語非依存 trace）のリプレイで行える。
+  3270 / VT のワイヤ仕様は各パッケージの README（[`packages/tn3270`](packages/tn3270/README.md) /
+  [`packages/vt`](packages/vt/README.md)）とソース中の注記にある。
 - **印刷経路の実測記録**: [`docs/HOST-PRINT-TRANSFORM.md`](docs/HOST-PRINT-TRANSFORM.md) — 日本語（DBCS）帳票が
   プリンターセッションで書き出せない件の調査記録。効いた対処／効かなかった対処、Host Print Transform の
   出力実測、符号表を探して空振りした経緯まで。**同じ道を再び辿らないための記録**。
-- 設計資料: `.aidev/works/20260714-5250-mcp-web-emulator/`（requirement / research / spec / design / plan /
+- **HLLAPI / EHLLAPI**: [`docs/HLLAPI.md`](docs/HLLAPI.md) — 対応している機能番号・キーのニーモニック・
+  戻り値・ビルド手順・WSL から Windows の VBA で使う場合の落とし穴。
+- **web-ui の見た目・振る舞いの規約**: [`docs/UI-DESIGN.md`](docs/UI-DESIGN.md)。
+- 設計資料: `.aidev/works/`（作業ごとに requirement / research / spec / design / plan /
   walkthrough / decisions / retro）。開発規約は [`AGENTS.md`](AGENTS.md)。
 - 検証環境: [PUB400.com](https://pub400.com)（要アカウント。週次再起動・接続数制限あり）。
 - 参考: RFC 1205 / RFC 4777 / SC30-3533、GNU tn5250（挙動・バイト仕様の参照のみ。GPL コードは非移植）。

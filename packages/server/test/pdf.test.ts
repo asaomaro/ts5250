@@ -13,7 +13,7 @@ describe("renderSpoolPdf", () => {
   });
 
   it("DBCS（日本語）を含むページも埋め込みフォントで生成できる", async () => {
-    const pdf = await renderSpoolPdf([page(["   MYLIB   日本語テスト"])]);
+    const pdf = await renderSpoolPdf([page(["   TESTLIB   日本語テスト"])]);
     expect(isPdf(pdf)).toBe(true);
     // CJK フォント埋め込みで相応のサイズになる
     expect(pdf.length).toBeGreaterThan(1000);
