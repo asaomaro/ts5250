@@ -97,7 +97,7 @@ async function runCmd(text) {
 async function connect(cardName) {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   await page.waitForSelector(`.card:has-text('${cardName}')`, { timeout: 10000 });
   await page.click(`.card:has-text('${cardName}') >> button:has-text('接続')`);
   await page.waitForFunction(
@@ -156,7 +156,7 @@ try {
   // ---------- 1. 設定 UI ----------
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   await page.waitForSelector(".card:has-text('DEV1-1MIN')", { timeout: 10000 });
   await page.click(".card:has-text('DEV1-1MIN') >> button:has-text('編集')");
   await sleep(600);

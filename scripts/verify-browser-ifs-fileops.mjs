@@ -1,6 +1,6 @@
 // 実ブラウザ（web-ui）で実機の IFS ペインを一通り操作する E2E。
 //
-// `/home/USER/TEST` を作り、**画面の操作だけ**で次を確かめる:
+// `${AS400_IFS_DIR}/TEST` を作り、**画面の操作だけ**で次を確かめる:
 //   フォルダ: 作成 / 一覧に出る / まとめてダウンロード（zip） / 改名 / 削除（中身ごと）/ アップロード可否
 //   ファイル: アップロード / プレビュー / 保存（編集）/ ダウンロード（中身一致）/ 改名 / 削除
 //
@@ -25,7 +25,9 @@ import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 
 const PORT = 3487;
-const BASE = "/home/USER";
+const BASE = process.env.AS400_IFS_DIR ?? "/home/USER";
+/** 画面の一覧に出る行名（IFS は解決時に大小を区別しないが、表示は格納された綴り） */
+const LEAF = BASE.split("/").filter(Boolean).pop();
 const DIR = `${BASE}/TEST`;
 const TMP = process.env.IFS_TMP ?? "/tmp/as400-verify-ifs";
 const SHOTS = `${TMP}/shots`;

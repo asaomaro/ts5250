@@ -143,7 +143,7 @@ async function widthsAt(scrollTop) {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   await page.waitForSelector(".fn:has-text('SQL')", { timeout: 10000 });
   await page.click(".fn:has-text('SQL') >> button");
   await page.waitForSelector(".sql-pane textarea", { timeout: 15000 });

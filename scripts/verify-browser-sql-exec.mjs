@@ -104,7 +104,7 @@ try {
   await page.waitForSelector(".launcher", { timeout: 20000 });
   // **システムが 1 つだけならアプリが自動で選ぶ**（選択画面が出ない）。
   // 出たときだけ押す——無条件に待つと、1 システムの環境では必ず時間切れになる
-  const pick = page.locator(".card:has-text('実機') >> button:has-text('選択')");
+  const pick = page.locator(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   if ((await pick.count()) > 0) await pick.first().click();
   await page.waitForSelector(".fn:has-text('SQL')", { timeout: 10000 });
   await page.click(".fn:has-text('SQL') >> button");

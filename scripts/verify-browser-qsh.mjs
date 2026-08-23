@@ -107,7 +107,7 @@ try {
   for (const dev of DEV_POOL) {
     await page.goto(`http://localhost:${PORT}/`);
     await page.waitForSelector(".launcher", { timeout: 20000 });
-    await page.click(".card:has-text('実機') >> button:has-text('選択')");
+    await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
     await page.waitForSelector(`.card:has-text('QSH E2E ${dev}')`, { timeout: 10000 });
     await page.click(`.card:has-text('QSH E2E ${dev}') >> button:has-text('接続')`);
     try {

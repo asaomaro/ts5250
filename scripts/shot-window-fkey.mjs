@@ -31,11 +31,11 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 820 }, dev
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
   let ok = false;
   for (let a = 1; a <= 8 && !ok; a++) {
-    await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+    await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
     try { await page.waitForSelector("input.grid-input", { timeout: 15000 }); ok = true; }
     catch { log(`装置使用中 ${a}`); await sleep(11000); }
   }

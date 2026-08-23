@@ -82,9 +82,9 @@ async function runCmd(text) {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
-  await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
   await page.waitForFunction(
     () => /サインオン|ユーザー|回復|メインメニュー/.test(document.body.innerText),
     { timeout: 25000 }

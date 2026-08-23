@@ -100,7 +100,7 @@ try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
   // **システムが 1 つだけならアプリが自動で選ぶ**（選択画面が出ない）
-  const pick = page.locator(".card:has-text('実機') >> button:has-text('選択')");
+  const pick = page.locator(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   if ((await pick.count()) > 0) await pick.first().click();
   await page.waitForSelector(".fn:has-text('SQL')", { timeout: 10000 });
 

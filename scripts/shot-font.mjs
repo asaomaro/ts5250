@@ -23,11 +23,11 @@ const shot = async (n, loc) => { await (loc ?? page).screenshot({ path: `${OUT}/
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
   let ok = false;
   for (let a = 1; a <= 6 && !ok; a++) {
-    await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+    await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
     try { await page.waitForSelector("input.grid-input", { timeout: 18000 }); ok = true; }
     catch { log(`busy ${a}`); await sleep(12000); }
   }

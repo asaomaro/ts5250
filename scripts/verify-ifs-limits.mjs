@@ -28,7 +28,9 @@ import { SecretCrypto } from "../packages/server/dist/secret-crypto.js";
 import { chromium } from "playwright";
 
 const PORT = 3489;
-const BASE = "/home/asao";
+const BASE = process.env.AS400_IFS_DIR ?? "/home/USER";
+/** 画面の一覧に出る行名（IFS は大小を区別しないが、表示は格納された綴り） */
+const LEAF = BASE.split("/").filter(Boolean).pop();
 const DIR = `${BASE}/test`;
 const TMP = "/tmp/as400-verify-ifs-limits";
 const SHOTS = `${TMP}/shots`;

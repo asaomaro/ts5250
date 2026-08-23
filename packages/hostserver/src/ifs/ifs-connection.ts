@@ -212,7 +212,7 @@ export class IfsConnection {
    * 壊れ方を実機で踏んだ（編集の保存・アップロードの上書きの両方）。
    *
    * `dataCcsid` は**新規作成時に付くタグ**を決める（既存ファイルのタグは変わらない。
-   * 置き換えでも実機は元のタグを保つ——`verify-browser-ifs.mjs` と
+   * 置き換えでも実機は元のタグを保つ——`verify-browser-ifs-fileops.mjs` と
    * `research-ifs-dataccsid.mjs` の両方で確認）。
    *
    * **指定しないと中身と食い違うタグが付く。** 既定の 0 は「サーバー既定」で、

@@ -122,7 +122,7 @@ try {
 
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   await page.waitForSelector(".card:has-text('E2E 監視')", { timeout: 10000 });
   await shot("01-launcher");
 
@@ -175,7 +175,7 @@ try {
   // 監視はサーバーのレジストリが持っているので、これで消えてはいけない
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
   await page.waitForSelector(".card:has-text('E2E 監視')", { timeout: 10000 });
   await page.click(".card:has-text('E2E 監視') >> button:has-text('接続')");
   await page.waitForSelector(".watch", { timeout: 15000 });

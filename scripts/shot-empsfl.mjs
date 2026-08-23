@@ -45,9 +45,9 @@ try {
   await page.waitForSelector(".launcher", { timeout: 20000 });
   log("app loaded");
   // システム実機を選択 → セッション DEV1 に接続
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
-  await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
   // サインオン画面が出るまで待つ
   await page.waitForFunction(() => document.body.innerText.includes("サインオン") || document.body.innerText.includes("ユーザー"), { timeout: 25000 });
   log("signon screen");
@@ -58,9 +58,9 @@ try {
   await sleep(500);
   const inputs = page.locator("input.grid-input");
   log("grid-input count = " + (await inputs.count()));
-  await inputs.nth(0).pressSequentially("USER", { delay: 50 });
+  await inputs.nth(0).pressSequentially(process.env.AS400_USER ?? "", { delay: 50 });
   await sleep(150);
-  await inputs.nth(1).pressSequentially("PASSWORD", { delay: 50 });
+  await inputs.nth(1).pressSequentially(process.env.AS400_PASSWORD ?? "", { delay: 50 });
   await sleep(300);
   await shot("debug-signon.png");
   log("nth0=" + JSON.stringify(await inputs.nth(0).inputValue()) + " nth1=" + JSON.stringify(await inputs.nth(1).inputValue()));

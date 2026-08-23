@@ -21,10 +21,10 @@ const ctx = await browser.newContext({ viewport: { width: 1400, height: 820 }, d
 const page = await ctx.newPage();
 const connect = async () => {
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
   for (let a = 1; a <= 8; a++) {
-    await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+    await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
     try { await page.waitForSelector("input.grid-input", { timeout: 15000 }); return true; } catch { log(`busy ${a}`); await sleep(11000); }
   }
   return false;

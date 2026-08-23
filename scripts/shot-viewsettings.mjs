@@ -49,15 +49,15 @@ async function pickSetting(rowLabel, optLabel) {
 try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  await page.click(".card:has-text('実機') >> button:has-text('選択')");
-  await page.waitForSelector(".card:has-text('DEV1')", { timeout: 10000 });
+  await page.click(`.card:has-text('${process.env.AS400_SYSTEM ?? "AS400"}') >> button:has-text('選択')`);
+  await page.waitForSelector(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}')`, { timeout: 10000 });
 
   // 装置 DEV1 は前ジョブが掴んでいると "socket closed / 使用中" で落ちる。数十秒で解放されるのでリトライ。
   // 接続成功＝エミュレーター画面(input.grid-input)が出た、で判定する
   // （ランチャーの "ユーザー" カード等に誤マッチしないため本文テキストでは判定しない）。
   let connected = false;
   for (let attempt = 1; attempt <= 6 && !connected; attempt++) {
-    await page.click(".card:has-text('DEV1') >> button:has-text('接続')");
+    await page.click(`.card:has-text('${process.env.AS400_SESSION ?? "DEV1"}') >> button:has-text('接続')`);
     try {
       await page.waitForSelector("input.grid-input", { timeout: 18000 });
       connected = true;
@@ -75,10 +75,10 @@ try {
   async function signOn() {
     const inputs = page.locator("input.grid-input");
     await inputs.nth(0).click(); await page.keyboard.press("Home");
-    await inputs.nth(0).pressSequentially("USER", { delay: 45 });
+    await inputs.nth(0).pressSequentially(process.env.AS400_USER ?? "", { delay: 45 });
     await sleep(120);
     await inputs.nth(1).click(); await page.keyboard.press("Home");
-    await inputs.nth(1).pressSequentially("PASSWORD", { delay: 45 });
+    await inputs.nth(1).pressSequentially(process.env.AS400_PASSWORD ?? "", { delay: 45 });
     await sleep(180);
     await clickEnter();
   }
