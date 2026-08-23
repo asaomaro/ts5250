@@ -27,7 +27,18 @@ function fakeBin(cmds: Record<string, string>): string {
   return dir;
 }
 
-describe("checkPrintDest（自動印刷の宛先チェック）", () => {
+/**
+ * **Windows では suite ごと skip する。**
+ *
+ * 偽コマンドは `#!/bin/sh` のスクリプト（拡張子なし）で、**Windows は実行できない**
+ * ——`lp` / `lpstat` が「在るのに動かない」状態になり、
+ * 6 件のうち 4 件が**別の理由でたまたま通り、2 件が落ちる**という当てにならない結果になる。
+ *
+ * そもそも `checkPrintDest` が見ているのは CUPS（`lp` / `lpstat`）で、
+ * **Windows の自動印刷は別経路**（`printer-output.ts` の win32 分岐。
+ * 検証は `printer-output-windows.test.ts`）。ここを Windows で走らせる意味は無い。
+ */
+describe.skipIf(process.platform === "win32")("checkPrintDest（自動印刷の宛先チェック）", () => {
   it("lp が無ければ「自動印刷が動きません」と警告する", async () => {
     fakeBin({}); // 何も置かない
     const r = await checkPrintDest("Office");
