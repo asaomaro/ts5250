@@ -127,7 +127,38 @@ describe("renderScreenHtml — 桁がずれない（忠実さの核）", () => {
     const snap = snapWith();
     snap.cursor = { row: 3, col: 5 };
     const html = renderScreenHtml(snap);
-    expect(html).toContain('class="cur" style="left:4ch;top:2.5em"'); // (3-1)*1.25=2.5
+    expect(html).toContain('class="cur" style="left:4ch;top:2.5em;width:1ch"'); // (3-1)*1.25=2.5
+  });
+
+  /**
+   * **全角の上ではカーソルも 2 桁ぶん。**
+   *
+   * ACS は DBCS 1 文字ぜんぶにカーソルが当たる。1 桁だけ塗ると「文字の左半分に
+   * 載っている」ように見え、**カーソルが文字単位で動いている**ことと画面が食い違う。
+   * tail に載ったときは lead から覆う（同じ 1 文字なので見え方を変えない）。
+   * 対を失った全角は表示自体が 1 桁なので 1 桁のまま。
+   */
+  it("全角の上ではカーソルが 2 桁ぶんを覆う（tail に載っても lead から）", () => {
+    const lead = snapWith((c) => {
+      c[2]![4] = cell("日", { kind: "dbcs-lead" });
+      c[2]![5] = cell("", { kind: "dbcs-tail" });
+    });
+    lead.cursor = { row: 3, col: 5 };
+    expect(renderScreenHtml(lead)).toContain('class="cur" style="left:4ch;top:2.5em;width:2ch"');
+
+    const tail = snapWith((c) => {
+      c[2]![4] = cell("日", { kind: "dbcs-lead" });
+      c[2]![5] = cell("", { kind: "dbcs-tail" });
+    });
+    tail.cursor = { row: 3, col: 6 }; // tail の上
+    expect(renderScreenHtml(tail)).toContain('class="cur" style="left:4ch;top:2.5em;width:2ch"');
+
+    // 対を失った全角（孤児 lead）は表示が 1 桁なのでカーソルも 1 桁
+    const orphan = snapWith((c) => {
+      c[2]![4] = cell("日", { kind: "dbcs-lead" });
+    });
+    orphan.cursor = { row: 3, col: 5 };
+    expect(renderScreenHtml(orphan)).toContain('class="cur" style="left:4ch;top:2.5em;width:1ch"');
   });
 });
 

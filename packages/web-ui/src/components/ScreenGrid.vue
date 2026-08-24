@@ -164,6 +164,24 @@ function inputChar(ch: string, field: Field): string {
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
 const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
+
+/**
+ * **ブロックカーソルが覆う範囲**（桁と桁数）。
+ *
+ * **全角の上では 2 桁ぶんを覆う**——ACS は DBCS 1 文字ぜんぶにカーソルが当たる。
+ * 1 桁だけ塗ると「文字の左半分にカーソルが載っている」ように見え、**カーソルが
+ * 文字単位で動いている**（移動は既に 1 文字単位）ことと画面が食い違う。
+ * tail に載ったときは lead から覆う（同じ 1 文字なので見え方を変えない）。
+ * 対を失った全角（孤児 lead / 孤児 tail）は表示自体が 1 桁なので 1 桁のまま。
+ */
+const cursorBox = computed(() => {
+  const { row, col } = effCursor.value;
+  const cells = props.snapshot.cells[row - 1];
+  const here = cells?.[col - 1];
+  if (cells && here?.kind === "dbcs-lead" && hasTail(cells, col - 1)) return { col, cols: 2 };
+  if (cells && here?.kind === "dbcs-tail" && hasLead(cells, col - 1)) return { col: col - 1, cols: 2 };
+  return { col, cols: 1 };
+});
 // カーソルが編集可能フィールド上か（field モード）。true なら native キャレットが担うのでオーバーレイは隠す。
 // 矩形選択中は入力欄を blur しているので native キャレットが居らず、位置が欄上でもオーバーレイに担わせる
 // （さもないとカーソルが欄の中にある間キャレットが消える。ACS は始点にカーソルを残す）。
@@ -3235,7 +3253,11 @@ onBeforeUnmount(() => {
       v-if="!cursorOnEditable"
       class="cursor"
       :class="{ live: focused }"
-      :style="{ left: (effCursor.col - 1) + 'ch', top: (effCursor.row - 1) * 1.25 + 'em' }"
+      :style="{
+        left: (cursorBox.col - 1) + 'ch',
+        top: (effCursor.row - 1) * 1.25 + 'em',
+        width: cursorBox.cols + 'ch'
+      }"
       aria-hidden="true"
     ></div>
     <!-- 拡張 5250 GUI オーバーレイ（ウィンドウ枠・選択フィールド・スクロールバー） -->
@@ -3522,6 +3544,8 @@ onBeforeUnmount(() => {
 .cursor {
   position: absolute;
   margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  /* 幅は inline style（cursorBox）が決める——全角の上では 2 桁ぶん。
+     ここは全角セルが取れないときの既定 */
   width: 1ch;
   height: 1.25em;
   background: color-mix(in srgb, var(--t-green) 45%, transparent);
