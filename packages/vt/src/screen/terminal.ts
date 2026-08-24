@@ -4,7 +4,7 @@ import { VtBuffer } from "./buffer.js";
 import { charsetFor, mapChar, type CharsetId } from "./charset.js";
 import { defaultModes, type VtModes } from "./modes.js";
 import { applySgr } from "./sgr.js";
-import { DEFAULT_STYLE, type VtSnapshot, type VtStyle } from "./types.js";
+import { DEFAULT_STYLE, eraseStyleOf, type VtSnapshot, type VtStyle } from "./types.js";
 
 const log = childLog({ component: "vt-terminal" });
 
@@ -26,6 +26,16 @@ export class VtTerminal {
   readonly modes: VtModes = defaultModes();
   style: VtStyle = DEFAULT_STYLE;
   title = "";
+
+  /**
+   * 消去・スクロール・挿入削除で**新しく現れる桁**を塗る見た目（BCE。`eraseStyleOf` の項）。
+   *
+   * `this.style` をそのまま渡してはいけない——下線や反転まで引き継ぐと、書いていない桁に
+   * 罫が走ったり画面が反転の地色で埋まったりする。**書く（`print`）だけが `this.style`**。
+   */
+  private get eraseStyle(): VtStyle {
+    return eraseStyleOf(this.style);
+  }
 
   /** タブ位置（既定 8 桁ごと） */
   private tabs = new Set<number>();
@@ -84,7 +94,7 @@ export class VtTerminal {
   }
 
   resize(rows: number, cols: number): void {
-    this.buffer.resize(rows, cols, this.style);
+    this.buffer.resize(rows, cols, this.eraseStyle);
     this.resetTabs();
   }
 
@@ -96,7 +106,7 @@ export class VtTerminal {
       // 結合文字・異体字セレクタは桁を消費せず直前のセルに足す
       if (isCombining(ch) && this.buffer.combine(ch)) continue;
       const mapped = mapChar(ch, cs);
-      if (this.modes.insert) this.buffer.insertChars(1, this.style);
+      if (this.modes.insert) this.buffer.insertChars(1, this.eraseStyle);
       this.buffer.write(mapped, this.style, this.modes.autoWrap);
     }
   }
@@ -112,7 +122,7 @@ export class VtTerminal {
         return;
       case 0x09: this.tabForward(1); return;
       case 0x0a: case 0x0b: case 0x0c: // LF / VT / FF
-        this.buffer.lineFeed(this.style);
+        this.buffer.lineFeed(this.eraseStyle);
         if (this.modes.newLine) this.buffer.moveTo(this.buffer.row, 0);
         return;
       case 0x0d: this.buffer.moveTo(this.buffer.row, 0); return;
@@ -135,9 +145,9 @@ export class VtTerminal {
     switch (final) {
       case "7": this.saveCursor(); return;
       case "8": this.restoreCursor(); return;
-      case "D": this.buffer.lineFeed(this.style); return;              // IND
-      case "M": this.buffer.reverseIndex(this.style); return;          // RI
-      case "E": this.buffer.moveTo(this.buffer.row, 0); this.buffer.lineFeed(this.style); return; // NEL
+      case "D": this.buffer.lineFeed(this.eraseStyle); return;         // IND
+      case "M": this.buffer.reverseIndex(this.eraseStyle); return;     // RI
+      case "E": this.buffer.moveTo(this.buffer.row, 0); this.buffer.lineFeed(this.eraseStyle); return; // NEL
       case "H": this.tabs.add(this.buffer.col); return;                // HTS
       case "=": this.modes.applicationKeypad = true; return;           // DECKPAM
       case ">": this.modes.applicationKeypad = false; return;          // DECKPNM
@@ -180,8 +190,10 @@ export class VtTerminal {
     if (intermediates === "$" || intermediates === "\"" || intermediates === " ") return;
 
     const b = this.buffer;
+    // **消去系は `this.style` ではなく `this.eraseStyle`**（BCE）。`eraseStyleOf` の項を見よ
+    const es = this.eraseStyle;
     switch (final) {
-      case "@": b.insertChars(n(), this.style); return;                      // ICH
+      case "@": b.insertChars(n(), es); return;                              // ICH
       case "A": b.moveBy(-n(), 0); return;                                   // CUU
       case "B": case "e": b.moveBy(n(), 0); return;                          // CUD / VPR
       case "C": case "a": b.moveBy(0, n()); return;                          // CUF / HPR
@@ -191,14 +203,14 @@ export class VtTerminal {
       case "G": case "`": b.moveTo(b.row, n() - 1); return;                  // CHA / HPA
       case "H": case "f": this.cup(raw(0) ?? 1, raw(1) ?? 1); return;        // CUP / HVP
       case "I": this.tabForward(n()); return;                                // CHT
-      case "J": b.eraseInDisplay(clampMode(raw(0) ?? 0, 3), this.style); return; // ED
-      case "K": b.eraseInLine(clampMode(raw(0) ?? 0, 2) as 0 | 1 | 2, this.style); return; // EL
-      case "L": b.insertLines(n(), this.style); return;                      // IL
-      case "M": b.deleteLines(n(), this.style); return;                      // DL
-      case "P": b.deleteChars(n(), this.style); return;                      // DCH
-      case "S": b.scrollUp(n(), this.style); return;                         // SU
-      case "T": b.scrollDown(n(), this.style); return;                       // SD
-      case "X": b.eraseChars(n(), this.style); return;                       // ECH
+      case "J": b.eraseInDisplay(clampMode(raw(0) ?? 0, 3), es); return;         // ED
+      case "K": b.eraseInLine(clampMode(raw(0) ?? 0, 2) as 0 | 1 | 2, es); return; // EL
+      case "L": b.insertLines(n(), es); return;                              // IL
+      case "M": b.deleteLines(n(), es); return;                              // DL
+      case "P": b.deleteChars(n(), es); return;                              // DCH
+      case "S": b.scrollUp(n(), es); return;                                 // SU
+      case "T": b.scrollDown(n(), es); return;                               // SD
+      case "X": b.eraseChars(n(), es); return;                               // ECH
       case "Z": this.tabBack(n()); return;                                   // CBT
       case "c": replies.push(ascii(DA1)); return;                            // DA1
       case "d": b.moveTo(n() - 1, b.col); return;                            // VPA
@@ -243,7 +255,7 @@ export class VtTerminal {
           // DECCOLM: **桁を変える権限は利用側にある**（勝手に画面を作り替えない）。
           // 要求されたことだけ覚えて、規格どおり画面を消してカーソルを戻す
           this.modes.columns132 = on;
-          this.buffer.eraseInDisplay(2, this.style);
+          this.buffer.eraseInDisplay(2, this.eraseStyle);
           this.buffer.moveTo(0, 0);
           break;
         case 5: this.modes.reverseVideo = on; break;
@@ -255,7 +267,7 @@ export class VtTerminal {
         case 12: break; // カーソル点滅。描画側の好みなので保持しない
         case 25: this.modes.cursorVisible = on; break;
         case 47: case 1047:
-          if (on) this.buffer.enterAlternate(this.style);
+          if (on) this.buffer.enterAlternate(this.eraseStyle);
           else this.buffer.leaveAlternate();
           break;
         case 1048:
@@ -263,7 +275,7 @@ export class VtTerminal {
           break;
         case 1049:
           // **`1049` は「カーソル退避 ＋ 代替画面 ＋ 消去」**。`vi` も `less` もこれしか使わない
-          if (on) { this.saveCursor(); this.buffer.enterAlternate(this.style); }
+          if (on) { this.saveCursor(); this.buffer.enterAlternate(this.eraseStyle); }
           else { this.buffer.leaveAlternate(); this.restoreCursor(); }
           break;
         case 1000: this.modes.mouse = on ? "click" : "off"; break;

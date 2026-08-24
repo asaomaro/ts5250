@@ -50,6 +50,20 @@ export const DEFAULT_STYLE: VtStyle = Object.freeze({
 });
 
 /**
+ * 消去で埋めるセルの見た目。**引き継ぐのは背景色だけ**（BCE = Back Color Erase）。
+ *
+ * xterm / DEC の消去（`ED` / `EL` / `ECH`）と、挿入・削除・スクロールで**新しく現れる桁**は
+ * 現在の背景色で塗り、前景色・太字・下線・反転・点滅は**既定へ戻す**。現在の見た目を
+ * 丸ごと引き継ぐと、下線が有効なまま画面消去が来ただけで**空行すべてに横罫が走り**
+ * （pub400 の VT 画面で実際に出た）、反転が有効なままなら**画面全部が反転の地色**になる。
+ *
+ * 背景も既定なら `DEFAULT_STYLE` をそのまま返す——**同じ見た目のセルはインスタンスを
+ * 共有する**（`VtStyle` の項）ので、消すたびに等価なオブジェクトを作らない。
+ */
+export const eraseStyleOf = (style: VtStyle): VtStyle =>
+  style.bg.kind === "default" ? DEFAULT_STYLE : { ...DEFAULT_STYLE, bg: style.bg };
+
+/**
  * 1 桁ぶん。
  *
  * `width` の意味（spec D6）:

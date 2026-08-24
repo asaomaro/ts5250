@@ -112,6 +112,131 @@ describe("消去", () => {
   });
 });
 
+/**
+ * **消去は背景色だけを引き継ぐ**（BCE = Back Color Erase）。
+ *
+ * 実機の pub400 で「下線を出したまま画面消去が来ると空行すべてに横罫が走る」
+ * 「反転のまま消すと画面が地色で埋まる」が出た。xterm / DEC は消去に**背景色しか**
+ * 使わないので、ここでその規則を全部の消去系に固定する。
+ */
+describe("消去の見た目（BCE）", () => {
+  /** 「消えた桁」の見た目。既定へ戻っているべき項目をまとめて見る */
+  const erased = (t: VtTerminal, row: number, col: number) => {
+    const s = at(t, row, col).style;
+    return { bold: s.bold, underline: s.underline, reverse: s.reverse, blink: s.blink, fg: s.fg };
+  };
+  const plain = { bold: false, underline: false, reverse: false, blink: false, fg: { kind: "default" } };
+
+  it("**下線が有効なまま ED しても消えた桁は下線を持たない**（空行に横罫が走らない）", () => {
+    const { t } = run("abc\x1b[4m\x1b[2J");
+    expect(at(t, 0, 0).style.underline).toBe(false);
+    expect(at(t, 3, 10).style.underline).toBe(false);
+  });
+
+  it("**反転が有効なまま ED しても画面が反転の地色にならない**", () => {
+    const { t } = run("\x1b[7m\x1b[2J");
+    expect(at(t, 0, 0).style.reverse).toBe(false);
+  });
+
+  it("太字・点滅・前景色も既定へ戻す", () => {
+    const { t } = run("\x1b[1;5;31m\x1b[2J");
+    expect(erased(t, 0, 0)).toEqual(plain);
+  });
+
+  it("**背景色だけは引き継ぐ**（SGR 41 → ED でセルの bg が赤）", () => {
+    const { t } = run("\x1b[41m\x1b[2J");
+    expect(at(t, 0, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+    expect(erased(t, 0, 0)).toEqual(plain);
+  });
+
+  it("下線＋背景色でも背景色だけが残る", () => {
+    const { t } = run("\x1b[4;44m\x1b[2J");
+    expect(at(t, 2, 3).style.bg).toEqual({ kind: "indexed", index: 4 });
+    expect(at(t, 2, 3).style.underline).toBe(false);
+  });
+
+  it("ED 0 / ED 1 も同じ規則", () => {
+    expect(erased(run("\x1b[3;3H\x1b[4;41m\x1b[0J").t, 4, 0)).toEqual(plain);
+    expect(erased(run("\x1b[3;3H\x1b[4;41m\x1b[1J").t, 0, 0)).toEqual(plain);
+    expect(at(run("\x1b[3;3H\x1b[4;41m\x1b[0J").t, 4, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("EL / ECH も同じ規則", () => {
+    expect(erased(run("abcdef\x1b[4;41m\x1b[1;3H\x1b[0K").t, 0, 3)).toEqual(plain);
+    expect(erased(run("abcdef\x1b[4;41m\x1b[1;3H\x1b[1K").t, 0, 0)).toEqual(plain);
+    expect(erased(run("abcdef\x1b[4;41m\x1b[1;2H\x1b[3X").t, 0, 2)).toEqual(plain);
+    expect(at(run("abcdef\x1b[4;41m\x1b[1;2H\x1b[3X").t, 0, 2).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("**挿入・削除で新しく現れる桁**も同じ規則（ICH / DCH）", () => {
+    // ICH: 押し出したあとに空く桁
+    const ich = run("abcdef\x1b[4;41m\x1b[1;2H\x1b[2@").t;
+    expect(erased(ich, 0, 1)).toEqual(plain);
+    expect(at(ich, 0, 1).style.bg).toEqual({ kind: "indexed", index: 1 });
+    // DCH: 詰めたあとに右端へ足す桁
+    const dch = run("abcdef\x1b[4;41m\x1b[1;2H\x1b[2P").t;
+    expect(erased(dch, 0, 19)).toEqual(plain);
+    expect(at(dch, 0, 19).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("**挿入・削除で新しく現れる行**も同じ規則（IL / DL）", () => {
+    const il = run("a\r\nb\r\nc\x1b[4;41m\x1b[2;1H\x1b[1L").t;
+    expect(erased(il, 1, 0)).toEqual(plain);
+    expect(at(il, 1, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+    const dl = run("a\r\nb\r\nc\x1b[4;41m\x1b[2;1H\x1b[1M").t;
+    expect(erased(dl, 5, 0)).toEqual(plain);
+  });
+
+  it("**スクロールで湧く行**も同じ規則（SU / SD）", () => {
+    expect(erased(run("\x1b[4;7;41m\x1b[2S").t, 5, 0)).toEqual(plain);
+    expect(at(run("\x1b[4;7;41m\x1b[2S").t, 5, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+    expect(erased(run("\x1b[4;7;41m\x1b[2T").t, 0, 0)).toEqual(plain);
+  });
+
+  it("**LF で押し出したときに湧く行**も同じ規則（下線のまま `cat` を流したときに出る）", () => {
+    const { t } = run("\x1b[6;1H\x1b[4;41m\n", 6, 20);
+    expect(erased(t, 5, 0)).toEqual(plain);
+    expect(at(t, 5, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("RI（`ESC M`）で上端に湧く行も同じ規則", () => {
+    const { t } = run("\x1b[1;1H\x1b[4m\x1bM", 6, 20);
+    expect(erased(t, 0, 0)).toEqual(plain);
+  });
+
+  it("**折返しで湧く行**も同じ規則（書いた文字だけが下線を持つ）", () => {
+    const { t } = run("\x1b[6;1H\x1b[4m" + "A".repeat(21), 6, 20);
+    expect(at(t, 5, 0).style.underline).toBe(true);  // 折り返して書いた 21 文字目
+    expect(at(t, 5, 10).style.underline).toBe(false); // 書いていない桁
+  });
+
+  it("代替画面へ入るときの消去も同じ規則（`vi` は下線を出したまま入ってくる）", () => {
+    const { t } = run("\x1b[4;41m\x1b[?1049h");
+    expect(erased(t, 0, 0)).toEqual(plain);
+    expect(at(t, 0, 0).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("DECCOLM（`?3h`）の消去も同じ規則", () => {
+    const { t } = run("\x1b[4m\x1b[?3h");
+    expect(erased(t, 0, 0)).toEqual(plain);
+  });
+
+  it("大きさを変えて増えた桁も同じ規則", () => {
+    const { t } = run("\x1b[4;41m");
+    t.resize(8, 30);
+    expect(erased(t, 0, 25)).toEqual(plain);
+    expect(at(t, 0, 25).style.bg).toEqual({ kind: "indexed", index: 1 });
+  });
+
+  it("**書くほうは今までどおり現在の見た目**（BCE を書き込みに広げない）", () => {
+    const { t } = run("\x1b[4;7;1;41mX");
+    const s = at(t, 0, 0).style;
+    expect(s.underline).toBe(true);
+    expect(s.reverse).toBe(true);
+    expect(s.bold).toBe(true);
+  });
+});
+
 describe("挿入・削除", () => {
   it("ICH は右へ押し出す", () => {
     const { t } = run("abcdef\x1b[1;2H\x1b[2@");

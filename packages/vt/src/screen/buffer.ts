@@ -1,5 +1,5 @@
 import { isFullWidth } from "@ts5250/base";
-import { blankCell, DEFAULT_STYLE, type VtCell, type VtStyle } from "./types.js";
+import { blankCell, DEFAULT_STYLE, eraseStyleOf, type VtCell, type VtStyle } from "./types.js";
 
 /**
  * **セル格子とカーソル。命令の意味は知らない**（それは `terminal.ts`）。
@@ -78,24 +78,27 @@ export class VtBuffer {
    */
   write(ch: string, style: VtStyle, autoWrap: boolean): void {
     const w = isFullWidth(ch) ? 2 : 1;
+    // **折返しで湧く桁は「書いた見た目」ではなく消去の見た目**（BCE）。下線や反転を
+    // 引き継ぐと、折返しで送り込まれた空行や行末の詰め物にまで罫・地色が乗る
+    const erase = eraseStyleOf(style);
 
     if (this.wrapPending && autoWrap) {
       this.wrapPending = false;
       this.col = 0;
-      this.lineFeed(style);
+      this.lineFeed(erase);
     }
 
     // **行末に 1 桁しか無い全角**: 折返しが効くなら次行へ送る。効かないなら書かずに捨てる
     if (w === 2 && this.col === this.cols - 1) {
       if (!autoWrap) return;
-      this.setCell(this.row, this.col, blankCell(style));
+      this.setCell(this.row, this.col, blankCell(erase));
       this.col = 0;
-      this.lineFeed(style);
+      this.lineFeed(erase);
     }
 
     if (this.col >= this.cols) {
       if (!autoWrap) { this.col = this.cols - 1; }
-      else { this.col = 0; this.lineFeed(style); }
+      else { this.col = 0; this.lineFeed(erase); }
     }
 
     if (w === 2) {
@@ -246,6 +249,10 @@ export class VtBuffer {
   }
 
   // ---- 消す ----
+  //
+  // **ここへ渡ってくる `style` は消去の見た目**（`eraseStyleOf` を通した後）。背景色だけを
+  // 引き継ぎ、下線・反転は落ちている——命令の解釈は `terminal.ts` の仕事なので、
+  // どの命令が BCE の対象かの判断もあちらに置く。
 
   /** `EL`: 0=カーソルから右 / 1=左からカーソルまで / 2=行全体 */
   eraseInLine(mode: 0 | 1 | 2, style: VtStyle): void {
