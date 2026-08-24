@@ -217,11 +217,22 @@
   違う**。1em を前提にした固定量は、内容領域の広いフォントで隣の行へはみ出す
   （実測: Noto Sans Mono CJK JP は内容領域 1.4em。行送り 18.75px に対し塗りが 25px になった）。
   CSS からフォントの内容領域は読めないので、**箱を合わせる**のが唯一の font-independent な解。
-- MCP の HTML（`packages/tn5250/src/screen-html.ts` の `.ln span`）にも**同じ処置**がある。
-  出口が 2 つあるので、片方だけ直すと「画面では繋がるのに証拠 HTML では切れている」になる。
-- 実画素の確認は `scripts/verify-browser-reverse-rows.mjs`（塗りの高さ・隣の行への侵入）と
-  `scripts/verify-cursor-align.mjs`（文字とカーソルの位置）。**jsdom は描画しない**ので、
-  単体テストが見ているのは *隙間やはみ出しを生まない書き方* だけ。
+- **背景を塗る描画系はこれで 3 つ。どれも同じ扱いにする**——片方だけ直すと
+  「画面では繋がるのに証拠 HTML では切れている」「5250 は直ったのに VT は縞のまま」になる。
+
+  | 描画系 | 対象 | 箱にする選択子 |
+  |---|---|---|
+  | 5250 / 3270（web-ui） | `ScreenGrid.vue` | `.grid-span` / `.wide-cell` / `.half-cell` |
+  | VT（web-ui） | `VtPane.vue` | `.vt-line span`（高さは `--vt-line-h`） |
+  | MCP の HTML | `packages/tn5250/src/screen-html.ts` | `.ln span` |
+
+  **3270 は 5250 と同じ `ScreenGrid` を通る**（`server/src/tn3270-adapt.ts` の `toWireScreen()` が
+  同じ `ScreenSnapshot` へ写す）ので、別途の手当ては要らない。スプール（SCS）は run 単位の
+  背景色を持たないので対象外。
+- 実画素の確認は `scripts/verify-browser-reverse-rows.mjs`（5250・塗りの高さ・隣の行への侵入）、
+  `scripts/verify-browser-vt-reverse.mjs`（VT）、`scripts/verify-cursor-align.mjs`（文字と
+  カーソルの位置）。**jsdom は描画しない**ので、単体テストが見ているのは
+  *隙間やはみ出しを生まない書き方* だけ。
 
 ## ウィンドウの装飾（重ねるだけ）
 
