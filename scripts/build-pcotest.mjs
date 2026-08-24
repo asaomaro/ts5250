@@ -106,7 +106,10 @@ async function putSource(file, member, srcType, lines) {
       .map((line, j) => `(${i + j + 1}.00,0,''${line.replace(/'/g, "''''")}'')`)
       .join(",");
     if (!await run(
-      `RUNSQL SQL('INSERT INTO ${LIB}.QTMPSRC (SRCSEQ,SRCDAT,SRCDTA) VALUES ${values}') COMMIT(*NONE)`,
+      // **小数点をジョブ任せにしない**——`RUNSQL` の `DECMPT` 既定は `*JOB` で、
+      // pub400 は `QDECFMT=J`（小数点がカンマ）。`(1.00,0,…)` は SQL0104、
+      // `(2,0,…)` は `2,0` が 1 個の数と読まれて SQL0117 になる（pub400 で実測）。
+      `RUNSQL SQL('INSERT INTO ${LIB}.QTMPSRC (SRCSEQ,SRCDAT,SRCDTA) VALUES ${values}') COMMIT(*NONE) DECMPT(*PERIOD)`,
       `  行${i + 1}〜${i + chunk.length}`
     )) return false;
   }
