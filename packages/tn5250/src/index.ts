@@ -27,6 +27,7 @@ export type {
   Cell,
   Field,
   FieldAdjust,
+  ContinuedPart,
   ScreenColor,
   CellKind,
   GuiConstructs,
