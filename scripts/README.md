@@ -133,13 +133,25 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-reverse-rows.
 | スクリプト | 内容 |
 |---|---|
 | `verify-browser-vt-reverse.mjs` | 回帰 E2E（実ブラウザ＋docker の telnet ホスト・6 項目）。背景色（SGR 40-47 / 反転 7）の行が縦に続く塊に**地色の画素が無い**／幅違いの帯で**塗りが行送りを超えない**／背景色の有無で**桁がずれない**。⚠ 直す前は 8 行の塊に地色が 28 画素出る（確認済み）。 |
+| `verify-browser-vt-reverse-ibmi.mjs` | 回帰 E2E（実ブラウザ＋**pub400 の VT**・10 項目）。同じ物差しで**実 IBM i** を測る——VT の翻訳（5250 → ASCII）はホストがやるので、docker の Linux が出す背景色とは出どころが別。`<LIB>/REVCL` / `REVCL2`（`build-revtest.mjs` を pub400 に向けて作る）を CALL して測り、`page.addStyleTag` で**修正前相当に戻した比較**まで取る（実測: 28 画素 → 0）。⚠ 履歴が積もるので測る枠は `.vt-pane`（見えている範囲）。⚠ サインオンの失敗は QMAXSIGN（pub400 は 5）に数えられる。⚠ 実測: IBM i の VT は `COLOR()` を落とし **reverse だけ**を送ってくる。 |
 
 ```sh
 docker build -t ts5250-vt-telnetd scripts/vt-telnetd
 docker run -d --name ts5250-vt -p 2331:23 ts5250-vt-telnetd
 node scripts/verify-browser-vt-reverse.mjs
 docker rm -f ts5250-vt
+
+# 実 IBM i（pub400）でも測る。テスト画面は先に pub400 側へ作る
+env $(grep -E '^PUB400_(HOST|USER|PASSWORD)=' .env | sed 's/^PUB400_/AS400_/') AS400_LIB=$PUB400_LIB \
+  node --env-file=.env --env-file=.env.verify scripts/build-revtest.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-vt-reverse-ibmi.mjs
 ```
+
+> 📌 **`RUNSQL` でソースを入れるときは `DECMPT(*PERIOD)` を付ける。** 既定は `*JOB` で、
+> **pub400 は `QDECFMT=J`（小数点がカンマ）**。`(1.00,0,…)` は `SQL0104`、`(2,0,…)` は
+> `2,0` が 1 個の数と読まれて `SQL0117`（値の数が合わない）になる。実機（日本語機）では
+> たまたま通っていたので、**pub400 に向けた瞬間に落ちる**。`build-*.mjs` の投入は対応済み。
+> なお SQL ホストサーバー経由（`DbConnection` / `executeStatement`）はこの影響を受けない。
 
 > 📌 **塗る高さは「文字ランの箱＝行送り」で決める**（`display:inline-block` ＋ `height:1.25em` ＋
 > `vertical-align:top`）。**固定量を足す手は使わない**——必要な量は「行送り − 内容領域」÷2 で、
