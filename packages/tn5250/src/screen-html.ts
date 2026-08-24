@@ -179,10 +179,25 @@ function renderRow(row: readonly Cell[]): string {
 const X = (col0: number): string => `${col0}ch`;
 const Y = (row0: number): string => `${row0 * 1.25}em`;
 
+/**
+ * ブロックカーソル。**全角の上では 2 桁ぶんを覆う**——ACS は DBCS 1 文字ぜんぶに
+ * カーソルが当たる。1 桁だけ塗ると「文字の左半分に載っている」ように見える。
+ * tail に載ったときは lead から覆う（同じ 1 文字なので見え方を変えない）。
+ * 対を失った全角は表示自体が 1 桁なので 1 桁のまま（web-ui の `cursorBox` と同じ規則）。
+ */
 function cursorHtml(snap: ScreenSnapshot): string {
   const { row, col } = snap.cursor;
   if (row < 1 || col < 1 || row > snap.rows || col > snap.cols) return "";
-  return `<div class="cur" style="left:${X(col - 1)};top:${Y(row - 1)}"></div>`;
+  const cells = snap.cells[row - 1];
+  const here = cells?.[col - 1];
+  let left = col - 1;
+  let cols = 1;
+  if (here?.kind === "dbcs-lead" && cells?.[col]?.kind === "dbcs-tail") cols = 2;
+  else if (here?.kind === "dbcs-tail" && cells?.[col - 2]?.kind === "dbcs-lead") {
+    left = col - 2;
+    cols = 2;
+  }
+  return `<div class="cur" style="left:${X(left)};top:${Y(row - 1)};width:${cols}ch"></div>`;
 }
 
 /**
@@ -440,6 +455,7 @@ font-size:15px;line-height:1.25;white-space:pre}
 @keyframes bl{50%{opacity:.25}}
 @media (prefers-reduced-motion:reduce){.a-b{animation:none}}
 .cur,.fld,.gl,.gwin,.gwt,.gsel,.gsb{position:absolute;pointer-events:none}
+/* 幅は要素側の style が決める（全角の上では 2ch）。ここは既定 */
 .cur{width:1ch;height:1.25em;background:var(--t-white);opacity:.55}
 .fld{height:1.25em;border-bottom:1px dotted var(--crt-line)}
 .fld-p{border-bottom-style:none}

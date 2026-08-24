@@ -185,6 +185,52 @@ try {
   check(Math.abs(dx) < TOL, `横位置が content box 基準と一致（${dx.toFixed(2)}px）`);
   check(Math.abs(dy) < TOL, `縦位置が content box 基準と一致（${dy.toFixed(2)}px）`);
   check(Math.abs(m.cursor.width - m.charW) < TOL, `幅が 1 桁ぶん（${m.cursor.width.toFixed(2)} vs ${m.charW.toFixed(2)}）`);
+
+  // ---- 4. 全角の上ではカーソルが 2 桁ぶん（ACS 準拠） ----
+  //
+  // 移動は既に**文字単位**なのに覆う幅が 1 桁だと「文字の左半分に載っている」ように見え、
+  // 動きと見た目が食い違う。ACS は DBCS 1 文字ぜんぶにカーソルを当てる。
+  // 日本語機の画面なら保護領域に全角があるので、そこを**クリックして**確かめる。
+  log("\n### 4. 全角の上のカーソル");
+  // **全角の桁は行のテキストから数える。** `.wide-cell` の箱に入るのは
+  // East Asian Width が Ambiguous な文字だけで、普通の仮名・漢字は素のランに入る
+  // ——箱を探すだけだと「全角が画面に無い」と誤判定する（実際に踏んだ）。
+  const wide = await page.evaluate(() => {
+    const FULL = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uff60\uffe0-\uffe6]/;
+    const rows = [...document.querySelectorAll(".grid .grid-row")];
+    for (let r = 0; r < rows.length; r++) {
+      const text = rows[r].textContent ?? "";
+      let col = 1;
+      for (const ch of text) {
+        if (FULL.test(ch)) return { row: r + 1, col, ch }; // col は 1 始まりの桁
+        col += 1;
+      }
+    }
+    return null;
+  });
+  if (!wide) {
+    log("  （全角の桁が画面に無いので飛ばす）");
+  } else {
+    // その桁の中央をクリック（lead に載せる）
+    await page.mouse.click(
+      m.contentLeft + (wide.col - 0.5) * m.charW,
+      m.contentTop + (wide.row - 0.5) * m.lineH
+    );
+    await sleep(400);
+    const w = await page.evaluate(() => {
+      const cur = document.querySelector(".cursor");
+      if (!cur) return null;
+      const r = cur.getBoundingClientRect();
+      return { left: r.left, width: r.width, col: Math.round(parseFloat(cur.style.left)) + 1 };
+    });
+    if (!w) check(false, "全角の桁をクリックしてもブロックカーソルが出ない");
+    else {
+      const want = m.contentLeft + (wide.col - 1) * m.charW;
+      log(`  全角「${wide.ch}」 行 ${wide.row} 桁 ${wide.col} / カーソル left=${w.left.toFixed(1)}（想定 ${want.toFixed(1)}）幅=${w.width.toFixed(2)}`);
+      check(Math.abs(w.width - m.charW * 2) < TOL, `**カーソルが 2 桁ぶん**（${w.width.toFixed(2)} vs ${(m.charW * 2).toFixed(2)}）`);
+      check(Math.abs(w.left - want) < TOL, `**その全角の左端から覆う**（差 ${(w.left - want).toFixed(2)}px）`);
+    }
+  }
 } catch (e) {
   fail++;
   log(`  FAIL 例外: ${e?.message ?? e}`);
