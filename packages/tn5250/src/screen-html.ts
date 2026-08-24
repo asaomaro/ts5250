@@ -432,9 +432,11 @@ font-size:15px;line-height:1.25;white-space:pre}
    並ぶ——ACS は隙間なく繋がる。box-shadow で上下へ半行送り（line-height 1.25 の (1.25-1)/2
    ＝0.125em）ぶん同じ色を延ばす。**描画だけが伸びレイアウトは動かない**ので、
    桁・行で置く重ねもの（カーソル・罫線・窓）とはずれない。web-ui の .a-reverse と同値
-   （STYLE はテンプレートリテラルなので、この中では逆引用符を使えない）。 */
+   （STYLE はテンプレートリテラルなので、この中では逆引用符を使えない）。
+   **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、被覆の足りない
+   画素が同系色の細い線として残る（実画素で確認）。1 画素未満なので隣の行へは実質出ない。 */
 .a-r{background:var(--cell);color:var(--crt);
-box-shadow:0 .125em 0 0 var(--cell),0 -.125em 0 0 var(--cell)}
+box-shadow:0 calc(.125em + .5px) 0 0 var(--cell),0 calc(-.125em - .5px) 0 0 var(--cell)}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
 @keyframes bl{50%{opacity:.25}}

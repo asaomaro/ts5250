@@ -299,8 +299,9 @@ const reportBands = (label, r, shotPath) => {
   }
   if (shotPath) log(`  画像: ${shotPath}`);
   check(r.bands === LAYOUT.wideBands, `${label}: 広い帯が ${LAYOUT.wideBands} 本見つかる（実際 ${r.bands} 本）`);
-  // 1 CSS px は縁のアンチエイリアス分の許容
-  check(r.paintedMax <= limit + 1, `${label}: 帯の塗りが上下へはみ出していない（${r.paintedMax}px ≦ ${limit.toFixed(2)}px）`);
+  // **1 CSS px の許容**は縁のアンチエイリアスと、`.a-reverse` が持つ端数の丸め代（+0.5px）の分。
+  // ここを 0 にすると丸め代そのものが落ちる——見たいのは「1 画素を超えて隣へ乗っていないか」。
+  check(r.paintedMax <= limit + 1, `${label}: 帯の塗りが上下へはみ出していない（${r.paintedMax}px ≦ ${limit.toFixed(2)}px＋1px の許容）`);
   for (const [where, v] of [["上", r.above], ["下", r.below]]) {
     check(v.inside.band === 0, `${label}: ${where}の行の内容領域に隣の帯の色が入っていない（${v.inside.band} 画素）`);
     check(

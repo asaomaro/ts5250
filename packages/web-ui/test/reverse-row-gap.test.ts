@@ -26,6 +26,9 @@ const read = (rel: string): string => {
   throw new Error(`${rel} が見つからない`);
 };
 
+/** 端数の丸め代（1 画素未満）。実画素の検証は `scripts/verify-browser-reverse-rows.mjs` */
+const ROUNDING = "0.5px";
+
 const css = read("styles.css");
 const grid = read("components/ScreenGrid.vue");
 
@@ -44,11 +47,16 @@ describe("縦に並んだ反転は隙間なく繋がる", () => {
     expect(lineHeight).toBe(1.25);
     const halfLeading = (lineHeight - 1) / 2; // 0.125em
 
-    const shadow = /box-shadow:\s*([^;]*)/.exec(reverseBlock())?.[1] ?? "";
+    const shadow = (/box-shadow:\s*([^;]*)/.exec(reverseBlock())?.[1] ?? "").replace(/\s+/g, " ");
     expect(shadow, ".a-reverse に box-shadow が無い（行間の隙間が戻る）").not.toBe("");
-    // 上下 2 本とも**背景と同じ変数**で延ばす（別の色だと隙間だけ色が違って見える）
-    expect(shadow).toContain(`0 ${halfLeading}em 0 0 var(--cell-bg)`);
-    expect(shadow).toContain(`0 -${halfLeading}em 0 0 var(--cell-bg)`);
+    // 上下 2 本とも**背景と同じ変数**で延ばす（別の色だと隙間だけ色が違って見える）。
+    // **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、
+    // 被覆の足りない画素が同系色の細い線として残る（実画素で確認済み）。
+    // 1 画素未満に留めるのが条件で、これを超えると隣の行の内容領域へ食い込む。
+    expect(shadow).toContain(`calc(${halfLeading}em + ${ROUNDING})`);
+    expect(shadow).toContain(`calc(-${halfLeading}em - ${ROUNDING})`);
+    expect(shadow).toContain("var(--cell-bg)");
+    expect(parseFloat(ROUNDING), "丸め代は 1 画素未満に留める").toBeLessThan(1);
   });
 
   it("延ばすのは描画だけ（レイアウトを動かさない）", () => {

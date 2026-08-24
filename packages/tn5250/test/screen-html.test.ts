@@ -195,9 +195,13 @@ describe("renderScreenHtml — 表示属性", () => {
     const halfLeading = (lineHeight - 1) / 2; // 0.125
     const rule = /\.a-r\{([^}]*)\}/.exec(html)?.[1] ?? "";
     const shadow = /box-shadow:([^;}]*)/.exec(rule)?.[1] ?? "";
-    // 上下 2 本。色は背景と同じ --cell（別の値だと隙間が違う色で埋まる）
-    expect(shadow).toContain(`0 ${String(halfLeading).replace(/^0/, "")}em 0 0 var(--cell)`);
-    expect(shadow).toContain(`0 -${String(halfLeading).replace(/^0/, "")}em 0 0 var(--cell)`);
+    const em = String(halfLeading).replace(/^0/, ""); // ".125"（CSS は先頭の 0 を落として書く）
+    // 上下 2 本。色は背景と同じ --cell（別の値だと隙間が違う色で埋まる）。
+    // **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、
+    // 被覆の足りない画素が同系色の細い線として残る。web-ui の `.a-reverse` と同値。
+    expect(shadow).toContain(`calc(${em}em + .5px)`);
+    expect(shadow).toContain(`calc(-${em}em - .5px)`);
+    expect(shadow).toContain("var(--cell)");
   });
 
   it("非表示（nonDisplay）の桁は伏せる", () => {
