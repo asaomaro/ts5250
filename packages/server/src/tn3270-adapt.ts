@@ -141,9 +141,21 @@ export function planKey3270(key: string, isIbmI: boolean): Key3270Plan {
  * 入力欄への書き込み。
  *
  * `field` は**添字**または**行桁**。どちらも今の画面の欄一覧から解決する。
- * 書き込みは **カーソルを欄の先頭へ置いて `type()`**——3270 の `type()` は
+ * 書き込みは **カーソルを欄の先頭へ置いて `eraseEof()` → `type()`**——3270 の `type()` は
  * 欄の種類（素／混在入力／DBCS 欄）を見て日本語を撥ねたり `SO`/`SI` で包んだりするので、
  * こちらで文字を作り分けない。
+ *
+ * **消してから打つ理由**——`value` は「欄の**完全な**値」（web-ui は打鍵のたびに欄全体を
+ * `edits` に載せ、送信時にその値を送る）。5250 の口（`Session.setField` → `setFieldValue`）は
+ * **欄まるごと置き換える**ので、3270 も同じ意味にしないと web-ui から見て挙動が食い違う。
+ * ところが 3270 の `type()` は**カーソル位置から上書きするだけ**なので、消さずに打つと
+ * 前の値の末尾が残る（実機 IBM i: `EDTLIBLZ` の上に `CCC` を打つと **`CCCLIBLZ`** が
+ * ホストへ届いた）。
+ *
+ * 消し方は `eraseEof`＝**NUL 埋め**（空白ではない）。3270 の Read Modified は NUL の桁を
+ * 丸ごと飛ばすので、打たれていない桁はホストへ送られない＝実機の 3270 端末（s3270）と同じ。
+ * `eraseEof` は MDT も立てるため、**空文字（欄を空にして送る）もホストへ届く**
+ * ——`type("")` だけでは何も起きず、前の値がそのまま送られていた。
  */
 export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[]): void {
   const snap = session.snapshot();
@@ -167,6 +179,9 @@ export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[
       throw new As400Error("FIELD_PROTECTED", `field at (${target.row},${target.col}) is protected`);
     }
     session.setCursor(target.row, target.col);
+    // **先に欄を消す**（上の俯瞰コメント）。順序は固定——`type()` はカーソルを進めるので、
+    // 打った後に消すと打った内容ごと消える
+    session.eraseEof();
     session.type(f.value);
   }
 }

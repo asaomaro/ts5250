@@ -26,6 +26,19 @@ const SCREEN = Uint8Array.from([
   0x11, 0x40, 0x4b, 0x13 // SBA(11) IC
 ]);
 
+/**
+ * `SCREEN` と同じ作りで、**入力欄にホストが値を書いてある**（アドレス 11〜18 に `EDTLIBLZ`）。
+ * 「前の値が欄に残っている」状態を作るための画面。
+ */
+const SCREEN_FILLED = Uint8Array.from([
+  0xf5, 0xc2, // EraseWrite + WCC restore
+  0x11, 0x40, 0x40, 0x1d, 0x60, 0xe4, 0xe2, 0xc5, 0xd9, // SBA(0) SF(保護) "USER"
+  0x11, 0x40, 0x4a, 0x1d, 0x00, // SBA(10) SF(非保護)
+  0xc5, 0xc4, 0xe3, 0xd3, 0xc9, 0xc2, 0xd3, 0xe9, // "EDTLIBLZ"（欄の先頭 11 から）
+  0x11, 0x40, 0x5a, 0x1d, 0x60, // SBA(26) SF(保護)
+  0x11, 0x40, 0x4b, 0x13 // SBA(11) IC
+]);
+
 function setup(): { conn: WsConnection; sent: WsServerMessage[]; tn3270: Tn3270Manager } {
   const sent: WsServerMessage[] = [];
   const server = new ServerConfigStore({ systems: [], sessions: [] });
@@ -130,6 +143,70 @@ describe("WS から 3270 端末を開く", () => {
       expect(sent.some((m) => m.type === "error"), "保護欄に当たっている").toBe(false);
       expect(await waitFor(() => mini!.inbound().length > before)).toBe(true);
       expect(mini!.inbound()[before] ?? "").toContain("e7e8"); // "XY"
+    } finally {
+      tn3270.closeAll();
+      await mini?.close();
+    }
+  }, 30_000);
+
+  /**
+   * **欄はまるごと置き換わる**（5250 の `setField` と同じ意味）。
+   *
+   * 実機の IBM i で踏んだ: 誤ったコマンド `EDTLIBLZ` を送ってエラー画面が返り、
+   * `CCC` に直して送ると**ホストには `CCCLIBLZ` が届いた**。3270 の `type()` は
+   * カーソル位置から**上書きするだけ**なので、消さずに打つと前の値の末尾が残る。
+   */
+  it("**前の値より短い値を入れても前の値の残りが送られない**", async () => {
+    const port = 3455;
+    mini = await startMini3270({ records: [SCREEN_FILLED], port });
+    const { conn, sent, tn3270 } = setup();
+    try {
+      await conn.handle(JSON.stringify({ type: "open", terminal: "3270", host: "127.0.0.1", port }));
+      expect(await waitFor(() => sent.some((m) => m.type === "screen"))).toBe(true);
+      const screen = [...sent].reverse().find((m) => m.type === "screen") as Extract<
+        WsServerMessage,
+        { type: "screen" }
+      >;
+      const input = screen.screen.fields.find((f) => !f.protected)!;
+      expect(input.value.trimEnd(), "前の値が欄に入っていない").toBe("EDTLIBLZ");
+      const before = mini!.inbound().length;
+      await conn.handle(
+        JSON.stringify({ type: "key", key: "Enter", fields: [{ field: input.index, value: "CCC" }] })
+      );
+      expect(sent.some((m) => m.type === "error"), JSON.stringify(sent.find((m) => m.type === "error"))).toBe(false);
+      expect(await waitFor(() => mini!.inbound().length > before)).toBe(true);
+      const rec = mini!.inbound()[before] ?? "";
+      expect(rec).toContain("c3c3c3"); // 打った "CCC"
+      // **前の値の残り "LIBLZ" が付いてこない**（NUL の桁は Read Modified に載らない）
+      expect(rec, "前の値の残りがホストへ送られている").not.toContain("d3c9c2d3e9");
+      expect(rec.endsWith("c3c3c3"), rec).toBe(true);
+    } finally {
+      tn3270.closeAll();
+      await mini?.close();
+    }
+  }, 30_000);
+
+  /**
+   * **空値は「欄を空にして送る」**。`type("")` は何もしないので、消す処理が無いと
+   * 前の値がそのままホストへ届いてしまう（MDT も立たない）。
+   */
+  it("**空値を送ると欄が空のままホストへ届く**", async () => {
+    const port = 3456;
+    mini = await startMini3270({ records: [SCREEN_FILLED], port });
+    const { conn, sent, tn3270 } = setup();
+    try {
+      await conn.handle(JSON.stringify({ type: "open", terminal: "3270", host: "127.0.0.1", port }));
+      expect(await waitFor(() => sent.some((m) => m.type === "screen"))).toBe(true);
+      const before = mini!.inbound().length;
+      await conn.handle(
+        JSON.stringify({ type: "key", key: "Enter", fields: [{ field: { row: 1, col: 12 }, value: "" }] })
+      );
+      expect(await waitFor(() => mini!.inbound().length > before)).toBe(true);
+      const rec = mini!.inbound()[before] ?? "";
+      expect(rec, "前の値がホストへ送られている").not.toContain("c5c4e3"); // "EDT"
+      // AID(7d) ＋ カーソル(2) の後は **SBA ＋ アドレスだけ**＝変更欄として空で届く
+      expect(rec.startsWith("7d")).toBe(true);
+      expect(rec.slice(6), rec).toMatch(/^11[0-9a-f]{4}$/u);
     } finally {
       tn3270.closeAll();
       await mini?.close();
