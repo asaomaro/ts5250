@@ -180,28 +180,28 @@ describe("renderScreenHtml — 表示属性", () => {
   });
 
   /**
-   * **縦に並んだ反転の間に地色の隙間を作らない。**
+   * **縦に並んだ反転の間に地色の隙間を作らない／隣の行へはみ出さない。**
    *
-   * 行間（line-height の余白）は文字要素の背景では塗られない（CSS の仕様）ので、
-   * 反転が複数行続くと行と行の間に地色が横線として並ぶ。ACS は隙間なく繋がって見えるため、
-   * box-shadow で上下へ**半行送りぶん**同じ色を延ばしている。
-   * 延ばす量は `.grid` の line-height と対（(1.25 - 1) / 2 = 0.125em）で、
-   * **片方だけ直すと隙間が戻る**——ここで一緒に固定する。
+   * 素のインライン要素は内容領域（フォントの ascent+descent）にしか背景を塗らないので、
+   * 反転が縦に続くと行間に地色が横線として並ぶ。**box-shadow 等で固定量を足す手は使わない**
+   * ——足りるかどうかはフォント次第で、内容領域の広いフォントでは隣の行へはみ出す
+   * （実測: Noto Sans Mono CJK JP で行送り 18.75px に対し塗り 25px）。
+   * 文字ランの箱そのものを行送りに合わせる（`.ln span`）ことで、
+   * 足りない／はみ出すが原理的に起きない。実画素の確認は
+   * `scripts/verify-browser-reverse-rows.mjs`。
    */
-  it("反転は上下へ半行送りぶん背景を延ばす（行間の隙間を埋める）", () => {
+  it("文字ランは行送りぶんの箱（反転が行間まで塗られ、隣の行へは出ない）", () => {
     const html = renderScreenHtml(snapWith());
     const lineHeight = Number(/\.grid\{[^}]*line-height:([\d.]+)/.exec(html)?.[1]);
     expect(lineHeight).toBe(1.25);
-    const halfLeading = (lineHeight - 1) / 2; // 0.125
+    const run = /\.ln span\{([^}]*)\}/.exec(html)?.[1] ?? "";
+    expect(run).toContain("display:inline-block");
+    expect(run).toContain(`height:${lineHeight}em`); // 行送りと同じ高さ
+    expect(run).toContain("vertical-align:top"); // 箱の上端を行の上端へ
+    // **固定量で足すのは禁止**（フォント次第で足りない／はみ出す）
     const rule = /\.a-r\{([^}]*)\}/.exec(html)?.[1] ?? "";
-    const shadow = /box-shadow:([^;}]*)/.exec(rule)?.[1] ?? "";
-    const em = String(halfLeading).replace(/^0/, ""); // ".125"（CSS は先頭の 0 を落として書く）
-    // 上下 2 本。色は背景と同じ --cell（別の値だと隙間が違う色で埋まる）。
-    // **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、
-    // 被覆の足りない画素が同系色の細い線として残る。web-ui の `.a-reverse` と同値。
-    expect(shadow).toContain(`calc(${em}em + .5px)`);
-    expect(shadow).toContain(`calc(-${em}em - .5px)`);
-    expect(shadow).toContain("var(--cell)");
+    expect(rule).not.toContain("box-shadow");
+    expect(rule).not.toContain("padding");
   });
 
   it("非表示（nonDisplay）の桁は伏せる", () => {

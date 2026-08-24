@@ -413,7 +413,7 @@ font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,"BIZ UDGothic","MS Goth
 font-size:15px;line-height:1.25;white-space:pre}
 .ln{height:1.25em}
 /* 全角は必ず箱に入れて 2 桁を占めさせる（フォントに依らせない）。h は対を失った全角 */
-.w,.h{display:inline-block;overflow:hidden;vertical-align:top;text-align:left}
+.w,.h{overflow:hidden;text-align:left}
 .w{width:2ch}
 .h{width:1ch}
 /* 色は class ごとに --cell へも控える。**反転で currentColor を使ってはいけない**——
@@ -427,16 +427,14 @@ font-size:15px;line-height:1.25;white-space:pre}
 .c-pink{color:var(--t-pink);--cell:var(--t-pink)}
 .c-blue{color:var(--t-blue);--cell:var(--t-blue)}
 .a-u{text-decoration:underline}
-/* **行間は文字要素の背景では塗られない**（CSS の仕様）。1 行だけなら気付かないが、
-   複数行連続する反転（サインオン splash のロゴ等）では行と行の間に地色の隙間が横線として
-   並ぶ——ACS は隙間なく繋がる。box-shadow で上下へ半行送り（line-height 1.25 の (1.25-1)/2
-   ＝0.125em）ぶん同じ色を延ばす。**描画だけが伸びレイアウトは動かない**ので、
-   桁・行で置く重ねもの（カーソル・罫線・窓）とはずれない。web-ui の .a-reverse と同値
-   （STYLE はテンプレートリテラルなので、この中では逆引用符を使えない）。
-   **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、被覆の足りない
-   画素が同系色の細い線として残る（実画素で確認）。1 画素未満なので隣の行へは実質出ない。 */
-.a-r{background:var(--cell);color:var(--crt);
-box-shadow:0 calc(.125em + .5px) 0 0 var(--cell),0 calc(-.125em - .5px) 0 0 var(--cell)}
+/* **文字ランは行送りぶんの箱にする**（web-ui の .grid-span と同じ考え方）。
+   素のインライン要素は内容領域（フォントの ascent+descent）にしか背景を塗らないので、
+   反転が縦に続くと行間に地色の隙間が横線として並ぶ。box-shadow 等で固定量を足す手は
+   **内容領域が広いフォントで隣の行へはみ出す**（実測: Noto Sans Mono CJK JP で
+   行送り 18.75px に対し塗り 25px）。必要な量はフォントごとに違い CSS から読めないため、
+   箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
+.a-r{background:var(--cell);color:var(--crt)}
+.ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
 @keyframes bl{50%{opacity:.25}}
