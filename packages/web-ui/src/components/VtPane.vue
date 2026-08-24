@@ -418,6 +418,26 @@ onBeforeUnmount(() => {
   white-space: pre;
 }
 
+/**
+ * **run は「行送りぶんの箱」にする。**
+ *
+ * 素のインライン要素は**内容領域（フォントの ascent+descent）にしか背景を塗らない**ので、
+ * 背景色（SGR 40-47 / 反転 7）の行が縦に続くと、行と行の間に地色が横線として並ぶ。
+ * VT は `vi` / `mc` / `tmux` のように**背景色を面で敷く**アプリが普通なので、
+ * 縞が画面いっぱいに出る（実測: 8 行の塊に地色が 28 画素）。
+ *
+ * box-shadow 等で固定量を足す手は使わない——必要な量は「行送り − 内容領域」÷2 で、
+ * 内容領域はフォントごとに違い、1em を前提にした固定量は広いフォントで隣の行へはみ出す。
+ * `ScreenGrid.vue`（5250 / 3270）の `.grid-span` と同じ考え方で、箱そのものを行送りに合わせる。
+ * `vertical-align: top` と `height` は対で必要（上端を行の上端へ合わせる）。
+ * 実画素の確認は `scripts/verify-browser-vt-reverse.mjs`。
+ */
+.vt-line span {
+  display: inline-block;
+  height: var(--vt-line-h);
+  vertical-align: top;
+}
+
 /* 見本は測るためだけのもの。**位置を占めない**が、フォントは本文と同じでなければならない */
 .vt-probe {
   position: absolute;

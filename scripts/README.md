@@ -126,6 +126,21 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-reverse-rows.
 
 手で見るなら `CALL <LIB>/REVCL`（隙間）と `CALL <LIB>/REVCL2`（はみ出し）。どちらも Enter で終わる。
 
+**VT も同じ穴を持つ**（`VtPane.vue` は別の描画系）。こちらは**実機を使わない**——
+検証用の telnet ホスト（`scripts/vt-telnetd`）に繋いで測る。VT のサインオン失敗は
+`QMAXSIGN` に数えられるので、実機で試し撃ちしない。
+
+| スクリプト | 内容 |
+|---|---|
+| `verify-browser-vt-reverse.mjs` | 回帰 E2E（実ブラウザ＋docker の telnet ホスト・6 項目）。背景色（SGR 40-47 / 反転 7）の行が縦に続く塊に**地色の画素が無い**／幅違いの帯で**塗りが行送りを超えない**／背景色の有無で**桁がずれない**。⚠ 直す前は 8 行の塊に地色が 28 画素出る（確認済み）。 |
+
+```sh
+docker build -t ts5250-vt-telnetd scripts/vt-telnetd
+docker run -d --name ts5250-vt -p 2331:23 ts5250-vt-telnetd
+node scripts/verify-browser-vt-reverse.mjs
+docker rm -f ts5250-vt
+```
+
 > 📌 **塗る高さは「文字ランの箱＝行送り」で決める**（`display:inline-block` ＋ `height:1.25em` ＋
 > `vertical-align:top`）。**固定量を足す手は使わない**——必要な量は「行送り − 内容領域」÷2 で、
 > 内容領域はフォントごとに違うため。同じ HTML をフォントだけ替えて測った実測:
