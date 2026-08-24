@@ -253,12 +253,29 @@ export class ScreenBuffer {
     this.systemMessage = undefined;
   }
 
-  /** GUI 構造体をすべて除去（画面クリア・REM_ALL_GUI_CONSTRUCTS 時） */
+  /** GUI 構造体をすべて除去（REM_ALL_GUI_CONSTRUCTS 専用コマンド時） */
   clearGui(): void {
+    this.closeWindowsAndSelections();
+    this.guiGridLines = [];
+  }
+
+  /**
+   * **窓・選択フィールド・スクロールバーだけを閉じる（罫線は残す）。**
+   *
+   * `clearUnit()` から使う。実機（PB1000R）のトレースで、CREATE WINDOW の窓を素の
+   * CLEAR UNIT だけで暗黙に閉じることは確認できたが、**罫線（GRDATR/GRDLIN）まで
+   * 一緒に消えることは確認していない**。むしろ罫線には専用の寿命管理コマンド
+   * （Clear Grid Line Buffer 0x61・項目ごとの erase フラグ）が別にあり、実機トレースでも
+   * KSN20 の罫線を描いた**同じ画面構築の中で**後続の（OVERLAY を付けない）レコードの
+   * 書き込みが CLEAR UNIT を伴って送られてきた——ここで罫線まで消すと、その画面では
+   * 罫線が最終的に一切表示されないことになる（S9R167D で確認: 罫線を描いた直後、
+   * 同じレコード内で CLEAR UNIT が来て消えていた）。ACS はこの罫線を表示し続けるため、
+   * 窓を閉じる効果と罫線を消す効果を分けた。
+   */
+  private closeWindowsAndSelections(): void {
     this.guiSelections = [];
     this.guiWindows = [];
     this.guiScrollBars = [];
-    this.guiGridLines = [];
   }
 
   /** DEFINE SELECTION FIELD を GUI 選択フィールドとして登録（位置は 1 始まり row/col） */
@@ -404,9 +421,23 @@ export class ScreenBuffer {
     this.guiScrollBars = removeByPos(this.guiScrollBars, row, col);
   }
 
-  /** CLEAR UNIT ALTERNATE: 27x132 へ切替えクリア（許可時のみ。24x80 端末では呼び出し側が警告） */
+  /**
+   * CLEAR UNIT ALTERNATE: 27x132 へ切替えクリア（許可時）。
+   *
+   * **未許可（24x80 端末）でも GUI 構造体は残したままクリアする。** DBCS 端末（SEU 等）は
+   * alternate を申告していなくてもこの命令を送ってくる（実機で確認）。S9R167D のような
+   * 24x80 専用（`DSPSIZ(24 80 *DS3)`）の SFLCTL(SFLDSPCTL) 画面でも同じことが起こり、
+   * 呼び出し側が「未許可なら `clearUnit()` へ倒す」実装だと、`clearUnit()` の `clearGui()` で
+   * 罫線（GRDATR/GRDLIN）ごと消えてしまう——`clearUnitAlternate()` 自体を直した A の修正が、
+   * 24x80 専用画面では素通しになっていた（KSN20 と同じ共有罫線レコードを使う画面での再発）。
+   * 戻り値は「実際に 27x132 へ切り替わったか」を保つ（呼び出し側の警告ログ用）。
+   */
   clearUnitAlternate(): boolean {
-    if (!this.alternate) return false;
+    if (!this.alternate) {
+      this.resize(24, 80);
+      this.noteClear();
+      return false;
+    }
     this.resize(this.alternate.rows, this.alternate.cols);
     this.noteClear();
     return true;
@@ -458,18 +489,21 @@ export class ScreenBuffer {
   }[] = [];
 
   /**
-   * CLEAR UNIT: 既定サイズ（24x80）でクリアし、GUI 構造体も消す。
+   * CLEAR UNIT: 既定サイズ（24x80）でクリアし、窓・選択フィールド・スクロールバーを閉じる。
    *
-   * **CLEAR UNIT ALTERNATE（`clearUnitAlternate()`）とは違い、こちらは GUI 構造体を消す。**
+   * **CLEAR UNIT ALTERNATE（`clearUnitAlternate()`）とは違い、こちらは窓等を閉じる。**
    * 実機（PB1000R）のトレースで、CREATE WINDOW で出した窓を閉じて呼び出し元の
    * 画面へ戻るとき、REM_GUI_WINDOW 等の専用コマンドを送らず、素の CLEAR UNIT だけで
    * 窓を暗黙に消していることを確認した（RESTORE SCREEN で戻る実装もあるが、それとは別の経路）。
    * CLEAR UNIT ALTERNATE 側で GUI を消さないようにしたときと同じ理屈を逆向きに適用している
    * ——各コマンドが実機で実際にどう使われているかで判断するしかない。
+   *
+   * **罫線（GRDATR/GRDLIN）は `closeWindowsAndSelections()` の説明のとおり対象外**——
+   * ここまで一括に `clearGui()` を呼んでいたのは検証していない拡大適用だった。
    */
   clearUnit(): void {
     this.resize(24, 80);
-    this.clearGui();
+    this.closeWindowsAndSelections();
     this.noteClear();
   }
 

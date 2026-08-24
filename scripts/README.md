@@ -403,6 +403,26 @@ node --env-file=.env --env-file=.env.verify scripts/verify-ifs-limits.mjs
 > `AS400_HOST` から組む——固定文字列にすると、別ホストへ繋いだのに説明文だけ元のまま残り、
 > **動作に出ないので気づけない**（`shot-signedon.mjs` / `shot-signon.mjs` に注記）。
 
+## 罫線（GRDATR/GRDLIN）と画面クリアの共存（実機 / `AS400_LIB`）
+
+ホストは**罫線を描いた直後に画面クリアを送ってくる**ことがある（S9R167D で確認）。
+罫線には専用の消去コマンド（Clear Grid Line Buffer 0x61）が別にあり、ACS はこのクリアで
+罫線を消さない。**画面バッファ・web-ui・MCP の HTML と出口が 3 つある**ので、3 本に分けてある。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-gridtest6.mjs` | `AS400_LIB` に `GRIDTST6`（罫線 13 本の `GRDRCD` ＋ **OVERLAY 無し**の本文レコード ＋ 対照の OVERLAY 付き）と `GRIDCL8` / `GRIDCL9` を作る。**`DSPSIZ(24 80 *DS3)`＝alternate 未申告**にしてあるのが要点で、27x132 を申告した画面向けの修正が素通りする条件を再現する。⚠ DDS の定数は**機能欄 36 桁**（引用符込み 34 文字）に収める——超えると 80 桁で切られ `CPD7508`＋`CPD7596` が並ぶ。ソース行は SRCDTA の **100 桁**まで（`SQL0404`）。どちらも送る前に落とすようにしてある。 |
+| `verify-gridlines-clear-unit.mjs` | 回帰（実機・24x80 と 27x132 の 2 周・10 項目）。**画面バッファに罫線が残るか**。受信レコードを**画面バッファを Proxy で包んで流し直し**、適用器が呼んだ順（`applyGridLines` → `clearUnit`）をそのまま並べる——バイト列の素朴走査は SBA の引数の 0x04 を拾って**過大に出る**ので使わない。`VERIFY_TRACE_OUT` に受信レコードを保存でき、**修正前の実装へ流し直す**証拠に使える（実測: 修正前 0 本 → 修正後 13 本）。装置名は指定せずホストに採らせる。 |
+| `verify-browser-gridlines.mjs` | 回帰 E2E（実ブラウザ＋実機・5 項目）。**web-ui が `.grid-line` を実際に描くか**を DOM の本数と画像で見る。画面バッファに残っていても描画側で落ちれば利用者には「出ない」ままなので、バッファとは別に見る。`SHOT_OUT` に画像が出る。 |
+| `verify-mcp-gridlines-html.mjs` | 回帰（実機・MCP stdio・10 項目）。**`get_screen_html` の HTML にも罫線が入るか**（`screen-html.ts` は web-ui とは別の描画系）。`MCP_HTML_OUT` に HTML を残す。⚠ MCP の固定形式は全角 1 文字を 2 桁に見せる（「サ イ ン ・ オ ン」）ので、**画面文字の照合は空白を落としてから**行う。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-gridtest6.mjs          # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-gridlines-clear-unit.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-gridlines.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-mcp-gridlines-html.mjs
+```
+
 ## 他クライアントの実測（tap-proxy）
 
 `tap-proxy.mjs` は **IBM ACS 等の他クライアントと実機のやり取りを実測する中継タップ**。

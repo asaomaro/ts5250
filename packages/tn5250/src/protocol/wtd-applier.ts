@@ -126,10 +126,11 @@ export function applyDataStream(
         // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
         r.u8();
-        // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）では通常クリアにフォールバック
+        // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
+        // 現在のサイズでクリアする（GUI 構造体は残す）ので、`clearUnit()` へは倒さない
+        // ——そちらは `closeWindowsAndSelections()` を呼び、窓・選択フィールドまで消してしまう。
         if (!buf.clearUnitAlternate()) {
-          warn("CLEAR UNIT ALTERNATE on 24x80 terminal — falling back to CLEAR UNIT");
-          buf.clearUnit();
+          warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing without dropping GUI constructs");
         }
         break;
       }
