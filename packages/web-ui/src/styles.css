@@ -197,7 +197,28 @@ body {
    （旧実装は background:currentColor で文字色＝背景色になり文字が見えなかった）。 */
 /* --cell-bg は input 側（.grid-input）が背景を受け取るための橋渡し。
    input は既定背景を消す必要があるが、直に transparent と書くとこの反転を潰してしまう。 */
-.a-reverse { --cell-bg: var(--cell); background: var(--cell-bg); color: var(--crt); }
+/* **行間（line-height の余白）は文字要素の背景では塗られない**（CSS の仕様。半行送り分が
+   地色のまま透けて見える）。1 行だけなら気付かないが、罫線状に複数行連続する反転
+   （例: サインオン splash のロゴ）では行と行の間に地色の隙間が横線として並んで見える
+   ——ACS は隙間なく繋がって見えるので、そこだけ別物になっていた。
+   box-shadow で上下へ半行送り分だけ**同じ色を延ばす**（描画だけが伸び、レイアウトは動かない
+   ＝桁・行の座標に載る重ねもの（カーソル・罫線・窓）とずれない）。
+   0.125em ＝ `.grid` の line-height 1.25 の半行送り（(1.25 - 1) / 2）。
+   伸ばした先で別の色の反転行と接しても、後に描く側の色で上書きされるだけで混色しない。
+
+   **+0.5px は端数の丸め代**。行の位置は端数を持つ（font-size が実測で決まるため）ので、
+   理論値ちょうどだと上下の影が境界で「ぴたり出会う」形になり、被覆の足りない画素が
+   同系色の細い線として残る（実機・実画素で確認: 継ぎ目の濁り 10 画素 → 0.5px 足して 0）。
+   足す量は 1 画素未満に留める——隣の行の内容領域へ食い込む量も 0.5px 未満で、
+   `scripts/verify-browser-reverse-rows.mjs` の「はみ出し」判定の許容内に収まる。 */
+.a-reverse {
+  --cell-bg: var(--cell);
+  background: var(--cell-bg);
+  color: var(--crt);
+  box-shadow:
+    0 calc(0.125em + 0.5px) 0 0 var(--cell-bg),
+    0 calc(-0.125em - 0.5px) 0 0 var(--cell-bg);
+}
 .a-reverse .grid-link { color: var(--crt); }
 /* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
    文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */

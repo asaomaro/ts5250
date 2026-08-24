@@ -169,12 +169,39 @@ describe("renderScreenHtml — 表示属性", () => {
    */
   it("反転は --cell を背景に使う（currentColor だと文字が消える）", () => {
     const html = renderScreenHtml(snapWith());
-    expect(html).toContain(".a-r{background:var(--cell);color:var(--crt)}");
+    const rule = /\.a-r\{([^}]*)\}/.exec(html)?.[1] ?? "";
+    expect(rule).toContain("background:var(--cell)");
+    expect(rule).toContain("color:var(--crt)");
     expect(html).not.toContain("background:currentColor");
     // 7 色すべてが --cell を持たないと、その色の反転だけ背景が消える
     for (const c of ["green", "white", "red", "turquoise", "yellow", "pink", "blue"]) {
       expect(html).toContain(`--cell:var(--t-${c})`);
     }
+  });
+
+  /**
+   * **縦に並んだ反転の間に地色の隙間を作らない。**
+   *
+   * 行間（line-height の余白）は文字要素の背景では塗られない（CSS の仕様）ので、
+   * 反転が複数行続くと行と行の間に地色が横線として並ぶ。ACS は隙間なく繋がって見えるため、
+   * box-shadow で上下へ**半行送りぶん**同じ色を延ばしている。
+   * 延ばす量は `.grid` の line-height と対（(1.25 - 1) / 2 = 0.125em）で、
+   * **片方だけ直すと隙間が戻る**——ここで一緒に固定する。
+   */
+  it("反転は上下へ半行送りぶん背景を延ばす（行間の隙間を埋める）", () => {
+    const html = renderScreenHtml(snapWith());
+    const lineHeight = Number(/\.grid\{[^}]*line-height:([\d.]+)/.exec(html)?.[1]);
+    expect(lineHeight).toBe(1.25);
+    const halfLeading = (lineHeight - 1) / 2; // 0.125
+    const rule = /\.a-r\{([^}]*)\}/.exec(html)?.[1] ?? "";
+    const shadow = /box-shadow:([^;}]*)/.exec(rule)?.[1] ?? "";
+    const em = String(halfLeading).replace(/^0/, ""); // ".125"（CSS は先頭の 0 を落として書く）
+    // 上下 2 本。色は背景と同じ --cell（別の値だと隙間が違う色で埋まる）。
+    // **+0.5px は端数の丸め代**——理論値ちょうどだと上下の影が境界でぴたり出会い、
+    // 被覆の足りない画素が同系色の細い線として残る。web-ui の `.a-reverse` と同値。
+    expect(shadow).toContain(`calc(${em}em + .5px)`);
+    expect(shadow).toContain(`calc(-${em}em - .5px)`);
+    expect(shadow).toContain("var(--cell)");
   });
 
   it("非表示（nonDisplay）の桁は伏せる", () => {
