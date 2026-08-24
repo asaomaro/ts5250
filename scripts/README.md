@@ -108,6 +108,28 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-dbcs.mjs # �
   （ブラウザ操作でも同様。手動接続フォームなら CCSID に 1399 を指定）。ブラウザでの日本語入力は IME 経由（compositionend で取り込み）。
 - DBCS 入力欄は DDS データ型 `O`（DBCS-open）。フィクスチャは E2E 再利用のため TESTLIB に残置している。
 
+## 反転（背景色）の連続（実機 / `AS400_LIB`）
+
+行間（line-height の余白）は文字要素の背景では塗られないので、反転が縦に続くと行と行の間に
+地色が横線として並ぶ（ACS は隙間なく繋がる）。**jsdom は描画しない**ので、隙間そのものは
+実画素でしか測れない——単体テストが見ているのは *隙間を作らない書き方* だけ。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-revtest.mjs` | `AS400_LIB` に `REVTST`（**空白だけの反転**を縦に 8 行 ＋ 別色で 3 行）と `REVCL` を作る。空白なのは実画素で測るため——文字があるとその画素は反転の文字色（＝地色と同じ値）になり、隙間と見分けが付かない。 |
+| `verify-browser-reverse-rows.mjs` | 回帰 E2E（実ブラウザ＋実機・9 項目）。**web-ui と MCP の HTML を同じ物差しで測る**。撮った PNG を data URI でブラウザへ戻し、canvas の `getImageData` で反転の塊を縦に走査して地色の画素を数える（Node 側に画像デコーダーを持ち込まない）。⚠ **隙間が出るかはフォントの縦メトリクス次第**——この環境の既定（Noto Sans Mono CJK JP）は内容領域が行送りより大きく元から隙間が出ないので、総称 `monospace` へ差し替えた 2 周目が本番。⚠ 桁と幅が同じでも**縦に途切れていれば別の塊**として測る（間の普通の行がまるごと「隙間」に化ける）。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-revtest.mjs              # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-reverse-rows.mjs
+```
+
+> 📌 **延ばす量は 0.125em（行送り 1.25 の半行送り）**。実測（この環境・`monospace`・拡大率 2）:
+> 地色が透ける画素は **0.125em でも 0.2em でも 0**。ただし境目に**混ざった 1 CSS px** が
+> 0.125em では 7 か所中 3 か所に残り（濁った画素 6／MCP の HTML で 10）、0.2em では 0 になる。
+> 0.2em は**セル 1 つぶんを超えて塗る**（隣の行の字の領域へ 0.075em 食い込む）ので、
+> **理論値の 0.125em を採る**——残るのは地色ではなく同系色の 1px で、地色の横線とは別物。
+
 ## テスト自動化のテンプレート
 
 `example-automation.mjs` は **Session5250 でテスト自動化を書くための雛形**（LLM 非依存・ヘッドレス。

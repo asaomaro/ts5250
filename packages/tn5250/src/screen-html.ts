@@ -427,7 +427,14 @@ font-size:15px;line-height:1.25;white-space:pre}
 .c-pink{color:var(--t-pink);--cell:var(--t-pink)}
 .c-blue{color:var(--t-blue);--cell:var(--t-blue)}
 .a-u{text-decoration:underline}
-.a-r{background:var(--cell);color:var(--crt)}
+/* **行間は文字要素の背景では塗られない**（CSS の仕様）。1 行だけなら気付かないが、
+   複数行連続する反転（サインオン splash のロゴ等）では行と行の間に地色の隙間が横線として
+   並ぶ——ACS は隙間なく繋がる。box-shadow で上下へ半行送り（line-height 1.25 の (1.25-1)/2
+   ＝0.125em）ぶん同じ色を延ばす。**描画だけが伸びレイアウトは動かない**ので、
+   桁・行で置く重ねもの（カーソル・罫線・窓）とはずれない。web-ui の .a-reverse と同値
+   （STYLE はテンプレートリテラルなので、この中では逆引用符を使えない）。 */
+.a-r{background:var(--cell);color:var(--crt);
+box-shadow:0 .125em 0 0 var(--cell),0 -.125em 0 0 var(--cell)}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
 @keyframes bl{50%{opacity:.25}}
