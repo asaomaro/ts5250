@@ -11,6 +11,12 @@
 // **1 件ずつ単独コンパイル**して、通る書き方を実機に教えてもらう。
 //
 // 実行: AS400_PASSWORD=... node scripts/build-dttest.mjs
+//
+// ⚠ **接続先の引き方が古い**（`connections.json` を見るが、実機は `profiles.local.json` へ移った）。
+// 2026-08-25 の 8 桁日付欄の追加では、ここが生成する DDS をそのまま**ホストサーバー経由**で
+// `QDDSSRC(DTMDSPF)` へ入れ、`CRTDSPF` / `CRTBNDRPG` を掛けて作り直した（対話サインオンを
+// 繰り返さないため。QMAXSIGN 配慮）。**DDS の中身はこのファイルが真実**で、実機の
+// ソースメンバーと 1 行ずつ一致することを確認済み。
 import { readFileSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 
@@ -47,7 +53,24 @@ const CASES = [
   { nm: "TMW", lab: "時刻 EDTWRD+MSK", f: (r) => numf("TMW", 6, 0, "B", r, 24, ["EDTWRD('  :  :  ')", "EDTMSK('&&:&&:&&')"]) },
   { nm: "TMO", lab: "時刻 EDTWRD のみ", f: (r) => numf("TMO", 6, 0, "B", r, 24, ["EDTWRD('  :  :  ')"]) },
   { nm: "SSN", lab: "SSN 3-2-4", f: (r) => numf("SSN", 9, 0, "B", r, 24, ["EDTWRD('   -  -    ')", "EDTMSK('&&&-&&-&&&&')"]) },
-  { nm: "PLN", lab: "素の 6,0（対照）", f: (r) => numf("PLN", 6, 0, "B", r, 24, []) }
+  { nm: "PLN", lab: "素の 6,0（対照）", f: (r) => numf("PLN", 6, 0, "B", r, 24, []) },
+
+  /**
+   * **8 桁の日付欄（`9999/99/99`）**。利用者が実務で使う形はこちら
+   * （6 桁の `EDTCDE(Y)` ではなく、西暦 4 桁＋月 2 桁＋日 2 桁）。
+   *
+   * `EDTWRD('    /  /  ')` は 10 桁（数字位置 4+2+2 ＝ 8 桁ぶん）。ただし**先頭が空白だと
+   * ゼロ抑制が効いて値 0 のとき欄が丸ごと空白になり、`/` の骨組みが画面に出ない**。
+   * 骨組みを出したままにするには編集ワードの先頭に `0`（ゼロ抑制の打ち切り）を置く
+   * ——`D8Z` 以降がそれ。両方を並べて、**骨組みの有無で打鍵の挙動が変わるか**も見る。
+   *
+   * 行は 18〜22（既存 8 件は 3〜17 の奇数行を使う。DSPSIZ 既定の 24x80 に収める）。
+   */
+  { nm: "D8W", row: 18, lab: "8桁 EDTWRD のみ", f: (r) => numf("D8W", 8, 0, "B", r, 24, ["EDTWRD('    /  /  ')"]) },
+  { nm: "D8Z", row: 19, lab: "8桁 EDTWRD(0止め)", f: (r) => numf("D8Z", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')"]) },
+  { nm: "D8M", row: 20, lab: "8桁 EDTWRD+MSK(&)", f: (r) => numf("D8M", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('&&&&/&&/&&')"]) },
+  { nm: "D8B", row: 21, lab: "8桁 EDTWRD+MSK(空白)", f: (r) => numf("D8B", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    /  /  ')"]) },
+  { nm: "D8Y", row: 22, lab: "8桁 EDTCDE(Y)", f: (r) => numf("D8Y", 8, 0, "B", r, 24, ["EDTCDE(Y)"]) }
 ];
 
 const head = () => [rec("DTMR"), kwd("CA03(03)"), constant(1, 3, "DATE / TIME MASK TEST"), constant(1, 50, "F3=exit")];
@@ -55,7 +78,8 @@ const ddsOne = (c) => [rec("DTMR"), kwd("CA03(03)"), ...c.f(3)];
 function ddsFor(cases) {
   const body = head();
   cases.forEach((c, i) => {
-    const r = 3 + i * 2;
+    // 行は明示指定を優先する（8 桁の日付欄は 24 行に収めるため 1 行刻みで並べる）
+    const r = c.row ?? 3 + i * 2;
     body.push(constant(r, 3, c.nm)); // **英数字のみ**（日本語だと INSERT が長さ超過する。実測）
     body.push(...c.f(r));
   });
