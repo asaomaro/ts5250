@@ -44,6 +44,50 @@ function isSignedNumeric(f: InternalField): boolean {
 }
 
 /**
+ * **継続入力フィールドは先頭区間 1 つに畳む。**
+ *
+ * ホストは DDS の `EDTMSK` 等で 1 つの入力欄を編集文字（`/` など）で分割し、区間ごとに
+ * SF を送ってくる（FCW `0x8601`/`0x8603`/`0x8602`）。**画面上は別々の欄でも、ホストから見れば
+ * 1 つの欄**なので、返すのは**先頭区間の位置に載せた全区間の連結値 1 つだけ**。
+ *
+ * GNU tn5250 `session.c` `tn5250_session_send_field`:
+ * > We also must only send back data for the first subfield of a continuous field.
+ * > All subfields are treated as one and are sent as part of the first subfield.
+ * （先頭でなければ `return` して 1 バイトも送らない。tn5250j も `ScreenField.getString` が
+ * 先頭区間から後続を連結する形で同じ結果を出す。）
+ *
+ * MDT は `setFieldValue` が先頭区間へ畳んでいるので普通は先頭しか来ないが、ホストが
+ * FFW の MDT ビットを中間・最終だけに立てて送ってきても**値を落とさない**よう、
+ * ここでも並びの先頭へ寄せてから重複を除く。
+ */
+function foldContinued(buf: ScreenBuffer, fields: readonly InternalField[]): InternalField[] {
+  const out: InternalField[] = [];
+  for (const f of fields) {
+    const target = f.continued === undefined ? f : (buf.continuedRun(f)[0] ?? f);
+    if (!out.includes(target)) out.push(target);
+  }
+  return out;
+}
+
+/**
+ * 送信する欄の値。継続入力フィールドの先頭区間なら**全区間を連結**した値を返す。
+ *
+ * 連結の前に区間ごとの末尾空白を落としてはいけない——落とすと `2026` + `1 ` + `31` が
+ * `2026131` へ詰まり、**桁がずれてホストに届く**。tn5250 も区間ごとに欄長ぶんを
+ * そのまま連結し、**連結し終えた最後にだけ**末尾を落とす（`session.c` の「Strip trailing NULs」）。
+ */
+function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
+  if (f.continued === undefined) {
+    return isSignedNumeric(f) ? signedNumericValue(buf.fieldValue(f, true), codec) : buf.fieldValue(f);
+  }
+  const joined = buf
+    .continuedRun(f)
+    .map((seg) => buf.fieldValue(seg, true))
+    .join("");
+  return isSignedNumeric(f) ? signedNumericValue(joined, codec) : joined.replace(/ +$/, "");
+}
+
+/**
  * Read MDT Fields 応答（クライアント → ホスト）を構築する。
  * 形式: カーソル行(1) 桁(1) + AID(1) + [SBA(行,桁) + フィールドデータ(EBCDIC)]*（MDT の立つフィールドのみ・画面順）
  * 送信時の再エンコードはここで行う（design: 画面は Unicode 保持・送信時変換）。
@@ -169,14 +213,14 @@ function buildFieldResponse(
   w.u8(cur.row).u8(cur.col).u8(aid);
 
   let substituted = 0;
-  for (const f of fields) {
+  // 継続入力フィールドは先頭区間 1 つに畳む（中間・最終は単独では送らない）
+  for (const f of foldContinued(buf, fields)) {
     const { row, col } = buf.rowColOf(f.startAddr);
     w.u8(ORDER.SBA).u8(row).u8(col);
     // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル。
     // **符号付き数値欄だけは符号桁を見るため末尾ブランクを残した値**から作る（上の関数）。
-    const value = isSignedNumeric(f)
-      ? signedNumericValue(buf.fieldValue(f, true), codec)
-      : buf.fieldValue(f);
+    // 継続入力フィールドは全区間を連結した値になる。
+    const value = sendValue(buf, f, codec);
     // **センチネル位置には生の属性バイトを出す**（編集で動いた桁にそのまま書き戻す＝色/バイトが追従）。
     // センチネル以外の連続部分だけを codec でエンコードし、センチネルは 1 バイトそのまま挟む。
     let run = "";

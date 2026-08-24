@@ -1,7 +1,7 @@
 import { As400Error } from "@ts5250/base";
 import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
-import type { WriteExtent } from "../screen/types.js";
+import type { ContinuedPart, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
 import {
@@ -585,17 +585,33 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   }
   // FCW（上位 2 ビットが 10）: DBCS 種別等を解釈（SC30-3533 / tn5250 の ideographic FCW）
   let dbcsType: "pure" | "open" | "either" | undefined;
+  let continued: ContinuedPart | undefined;
   while (r.remaining >= 2 && (r.peek() & 0xc0) === 0x80) {
     const fcw = r.u16();
     if (fcw === 0x8200) dbcsType = "pure"; // ideographic-only
     else if (fcw === 0x8240) dbcsType = "either"; // ideographic-either
     else if (fcw === 0x8280 || fcw === 0x82c0) dbcsType = "open"; // ideographic-open
+    // **継続入力フィールド（CONTINUED_ENTRY = 0x86）**。ホストが DDS の `EDTMSK` 等で
+    // 1 つの入力欄を編集文字（`/` など）で分割したとき、区間ごとの SF にこの FCW が付く。
+    // 下位バイト 1=先頭 / 3=中間 / 2=最終（GNU tn5250 `session.c` の StartOfField、
+    // tn5250j `ScreenField.isContinuedFirst/Middle/Last`、Wireshark の tn5250 ディセクタが一致）。
+    //
+    // ⚠ **`0x8680` はワードラップで別物**——継続と誤認すると送信で欄を勝手に畳んでしまう。
+    // 値が完全一致するものだけを拾う（マスク判定にしない）。
+    //
+    // 実機（IBM i 7.3・`ASAOLIB/MSKTST`）で採った生バイト:
+    //   `1d 43 00 86 01 24 00 02` … (3,23) len=2 先頭
+    //   `1d 43 00 86 03 24 00 02` … (3,26) len=2 中間
+    //   `1d 43 00 86 02 24 00 02` … (3,29) len=2 最終
+    else if (fcw === 0x8601) continued = "first";
+    else if (fcw === 0x8603) continued = "middle";
+    else if (fcw === 0x8602) continued = "last";
   }
   const attr = r.u8();
   const length = r.u16();
   buf.setAttr(addr, attr);
   const fieldStart = addr + 1;
-  buf.addField(fieldStart, length, ffw, attr, dbcsType);
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued);
   return fieldStart;
 }
 

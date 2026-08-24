@@ -33,6 +33,17 @@ export interface Cell {
  */
 export type FieldAdjust = "right-zero" | "right-blank" | "mandatory-fill";
 
+/**
+ * **継続入力フィールド（Continued Entry Field）の区間の役割。**
+ *
+ * DDS の `EDTMSK`（編集マスク）等でホストが 1 つの入力欄を編集文字で分割すると、
+ * ホストは**区間ごとに SF オーダーを送り**、FCW `0x86xx` で並びの位置を教えてくる
+ * （`0x8601`=先頭 / `0x8603`=中間 / `0x8602`=最終）。区間の間の編集文字（`/` 等）は
+ * 保護された静的文字。**送信は先頭区間 1 つに全区間の連結値を載せる**
+ * （GNU tn5250 `session.c` `tn5250_session_send_field`）ため、この役割が要る。
+ */
+export type ContinuedPart = "first" | "middle" | "last";
+
 export interface Field {
   /** snapshot 時点の連番（1 始まり・画面順） */
   index: number;
@@ -110,6 +121,14 @@ export interface Field {
    */
   dupEnable?: boolean;
   dbcsType?: "pure" | "open" | "either";
+  /**
+   * 継続入力フィールド（EDTMSK 等でホストが編集文字を挟んで分割した欄）で、この欄が
+   * 何番目の区間かを表す。**単独欄では undefined**（`dbcsType` / `adjust` と同じ流儀）。
+   *
+   * 区間は**画面上は別々の欄**だが、**ホストから見れば 1 つの欄**——値は先頭区間の位置に
+   * 連結して送られる（`read-response.ts`）。UI はここを見て区間をまたぐ移動を組み立てる。
+   */
+  continued?: ContinuedPart;
   mdt: boolean;
   value: string;
 }

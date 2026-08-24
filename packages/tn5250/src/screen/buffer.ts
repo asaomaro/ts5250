@@ -18,6 +18,7 @@ import {
 import type {
   Cell,
   CellKind,
+  ContinuedPart,
   Field,
   FieldAdjust,
   GuiConstructs,
@@ -82,6 +83,8 @@ export interface InternalField {
   mdt: boolean;
   /** DBCS フィールド種別（FCW 由来。undefined = SBCS） */
   dbcsType?: "pure" | "open" | "either";
+  /** 継続入力フィールドの区間の役割（FCW 0x8601/0x8603/0x8602 由来。undefined = 単独欄） */
+  continued?: ContinuedPart;
 }
 
 /**
@@ -682,7 +685,8 @@ export class ScreenBuffer {
     length: number,
     ffw: number,
     attrByte: number,
-    dbcsType?: "pure" | "open" | "either"
+    dbcsType?: "pure" | "open" | "either",
+    continued?: ContinuedPart
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -700,13 +704,43 @@ export class ScreenBuffer {
       ffw,
       attrByte,
       mdt: (ffw & FFW.MDT) !== 0,
-      ...(dbcsType !== undefined ? { dbcsType } : {})
+      ...(dbcsType !== undefined ? { dbcsType } : {}),
+      ...(continued !== undefined ? { continued } : {})
     });
   }
 
   /** 画面順のフィールド一覧（1 始まり index はこの順） */
   orderedFields(): readonly InternalField[] {
     return [...this.fields].sort((a, b) => a.startAddr - b.startAddr);
+  }
+
+  /**
+   * **継続入力フィールドの区間の並び**（先頭 → 最終）を、その並びに属する任意の区間から得る。
+   * 単独欄（`continued === undefined`）を渡したら自分 1 つだけを返す。
+   *
+   * ホストは区間を**画面順に連続して**送ってくる（5494 Functions Reference が「そう並ぶ」と
+   * 決めている。GNU tn5250 `session.c` も「連続していて他の欄が混ざらない」前提で歩く）ので、
+   * 画面順の前後をたどるだけで並びが決まる。
+   *
+   * MDT の集約（`setFieldValue`）と送信の連結（`read-response.ts`）が共通で使う。
+   */
+  continuedRun(field: InternalField): readonly InternalField[] {
+    if (field.continued === undefined) return [field];
+    const ordered = this.orderedFields();
+    let i = ordered.indexOf(field);
+    if (i < 0) return [field];
+    // 先頭区間まで戻る（tn5250 `field.c` tn5250_field_set_mdt / tn5250j `ScreenField.setMDT` と同じ歩き方）。
+    // ホストが先頭を送り損ねた壊れた並びでも、継続でない欄に当たったら止めて無限に戻らない。
+    while (i > 0 && ordered[i]?.continued !== "first" && ordered[i - 1]?.continued !== undefined) i--;
+    const run: InternalField[] = [];
+    for (let j = i; j < ordered.length; j++) {
+      const f = ordered[j];
+      if (f === undefined || f.continued === undefined) break;
+      if (j > i && f.continued === "first") break; // 次の継続欄の始まり＝この並びは終わり
+      run.push(f);
+      if (f.continued === "last") break;
+    }
+    return run.length > 0 ? run : [field];
   }
 
   /**
@@ -769,7 +803,14 @@ export class ScreenBuffer {
         this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
       }
     }
-    field.mdt = true;
+    // **継続入力フィールドの MDT は先頭区間だけに立てる。**
+    // 送信は「先頭区間の位置に全区間の連結値を 1 つ」なので（GNU tn5250 `session.c`
+    // tn5250_session_send_field）、中間・最終にも立てると同じ塊を何度も送ることになる。
+    // 逆に中間だけ編集したときは先頭に立て直さないと**その編集が 1 バイトも送られない**
+    // （実機で確認: 中間区間だけ 07 に変えると `000/00/07` になり月がホストへ届かなかった）。
+    // tn5250 `field.c` tn5250_field_set_mdt と tn5250j `ScreenField.setMDT` も同じ畳み方をする。
+    const first = this.continuedRun(field)[0] ?? field;
+    first.mdt = true;
   }
 
   /**
@@ -1011,6 +1052,8 @@ export class ScreenBuffer {
       if ((f.ffw & FFW.MANDATORY_ENTER) !== 0) field.mandatoryEnter = true;
       if ((f.ffw & FFW.DUP_ENABLE) !== 0) field.dupEnable = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
+      // 区間をまたぐカーソル移動・Field Exit を web-ui / MCP が組み立てるために出す
+      if (f.continued !== undefined) field.continued = f.continued;
       return field;
     });
 
