@@ -3561,6 +3561,28 @@ onBeforeUnmount(() => {
   height: 1.25em;
   white-space: pre;
 }
+/**
+ * **文字ランは「行送りぶんの箱」にする。**
+ *
+ * 素のインライン要素は**内容領域（フォントの ascent+descent）にしか背景を塗らない**ので、
+ * 反転（`.a-reverse`）が縦に続くと行と行の間に地色の隙間が横線として並ぶ（ACS は繋がる）。
+ * 逆に box-shadow 等で固定量を足すと、**内容領域が広いフォントでは隣の行へはみ出す**
+ * （実測: Noto Sans Mono CJK JP は内容領域 1.4em。行送り 18.75px に対し塗りが 25px になった）。
+ * 必要な量はフォントごとに違い CSS からは読めないので、**箱そのものを行送りに合わせる**。
+ * これなら足りない/はみ出すが原理的に起きない。
+ *
+ * `vertical-align: top` と `height` は対で必要——箱の上端を行の上端に合わせることで、
+ * 中の文字は行送り 1.25 の行box に置かれ、素のインラインだったときと同じ位置に載る。
+ * 実画素の確認は `scripts/verify-browser-reverse-rows.mjs`（塗りの高さ）と
+ * `scripts/verify-cursor-align.mjs`（文字とカーソルの位置）。
+ */
+.grid-span,
+.wide-cell,
+.half-cell {
+  display: inline-block;
+  height: 1.25em;
+  vertical-align: top;
+}
 .grid-span {
   text-shadow: var(--t-glow) currentColor;
 }
@@ -3727,10 +3749,10 @@ onBeforeUnmount(() => {
 }
 
 .wide-cell {
-  display: inline-block;
+  /* display / height / vertical-align は上の「文字ランの箱」で揃える（ここで baseline に
+     戻すと、反転の背景がこの桁だけ行間まで届かない） */
   width: 2ch;
   text-align: center;
-  vertical-align: baseline;
 }
 /* 対（lead＋tail）を失った全角セル。ホストが片割れの桁へ上書きすると出る。
    ACS は左半分だけを描いて分断された形にするので、1ch の箱でクリップして同じ見え方にする
@@ -3741,10 +3763,9 @@ onBeforeUnmount(() => {
    2px 上へずれ、その行全体が縦にずれて見える（利用者報告の「高さ方向のずれ」）。
    clip-path は描画だけを切りレイアウトに影響しないので、ずれずに同じ見た目になる。 */
 .half-cell {
-  display: inline-block;
+  /* display / height / vertical-align は上の「文字ランの箱」で揃える */
   width: 1ch;
   clip-path: inset(0);
-  vertical-align: baseline;
 }
 /* 暗い背景に明るい文字を置くと既定のサブピクセル描画で太く・にじんで見える。
    グレースケール描画にすると輪郭が締まる */
