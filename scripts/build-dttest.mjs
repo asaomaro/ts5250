@@ -1,14 +1,13 @@
 // 実機の TESTLIB に **EDTMSK（編集マスク）つき入力欄**の検証用表示ファイルを作る。
 //
-// 問い（`.aidev/backlog/input-assist.md`）:
-//   datepicker の判定材料は「**EDTMSK が付いた欄は分解されて届く**」——同一行に連続する数値欄と
-//   その間の保護された 1 桁の区切り文字。ところが backlog のこの数値は
-//   **合成データストリームで測った値**で、実機で確かめていない。
-//   直近（PR #212）で `EDTCDE`/`EDTWRD` は「用途 B でも書けるが**分解されず**、
-//   編集文字が欄の中に入って来る」と実測済みなので、**EDTMSK が本当に分解を起こすのかは未検証**。
+// **`EDTMSK` の `&` は「保護する桁」**——区切り（`/` `:` `-`）の桁に置く。ここを間違えて
+// 数字の桁に `&` を置くと、`CRTDSPF` が **CPD7494 / CPD7520 でキーワードごと無視**するので、
+// 「EDTMSK を付けたのに何も変わらない」という誤った観測になる（2026-07〜08 に実際に踏んだ。
+// `.aidev/backlog/input-assist.md` の訂正を参照）。
 //
-// **EDTMSK のマスクの綴りも推測しない。** 候補（`&` で入力位置 / 空白で入力位置 / 数字位置に文字）を
-// **1 件ずつ単独コンパイル**して、通る書き方を実機に教えてもらう。
+// 正しく書くと、ホストは欄を**継続入力フィールド**（FCW `0x8601`/`0x8603`/`0x8602`＝先頭/中間/最終）に
+// **分解して**送ってくる。区切りは保護された静的文字になり、打鍵は区間から区間へ渡っていく。
+// 実測は `.aidev/backlog/input-assist.md`、実装は `feat/continued-entry-field`。
 //
 // 実行: AS400_PASSWORD=... node scripts/build-dttest.mjs
 //
@@ -42,17 +41,19 @@ function numf(name, len, dec, usage, r, c, kw = []) {
 }
 
 /**
- * 検証したい構成。**EDTMSK のマスクの綴りが分からない**ので候補を並べる。
- * `EDTCDE(Y)` は 6,0 を `nn/nn/nn`（8 桁）に編集するので、マスクも 8 桁で書く。
+ * 検証したい構成。マスクは**編集後の桁数と同じ長さ**で書き、`&` は**区切りの桁**に置く
+ * （`EDTCDE(Y)` は 6,0 を `nn/nn/nn`＝8 桁に編集するので、区切りは 3 桁目と 6 桁目）。
+ * 対照（マスク無し）と、片方の区切りだけ保護した形も並べて、分解のされ方を見る。
  */
 const CASES = [
-  { nm: "DMA", lab: "Y + MSK(&)", f: (r) => numf("DMA", 6, 0, "B", r, 24, ["EDTCDE(Y)", "EDTMSK('&& && &&')"]) },
-  { nm: "DMB", lab: "Y + MSK(blank)", f: (r) => numf("DMB", 6, 0, "B", r, 24, ["EDTCDE(Y)", "EDTMSK('  /  /  ')"]) },
-  { nm: "DMC", lab: "Y + MSK(&&/&&/&&)", f: (r) => numf("DMC", 6, 0, "B", r, 24, ["EDTCDE(Y)", "EDTMSK('&&/&&/&&')"]) },
+  { nm: "DMA", lab: "Y + MSK 両方保護", f: (r) => numf("DMA", 6, 0, "B", r, 24, ["EDTCDE(Y)", "EDTMSK('  &  &  ')"]) },
+  { nm: "DMB", lab: "Y のみ（対照）", f: (r) => numf("DMB", 6, 0, "B", r, 24, ["EDTCDE(Y)"]) },
+  // **片方の区切りだけ保護**すると何区間になるか（2 区間か・3 区間か）を見る材料
+  { nm: "DMC", lab: "Y + MSK 片方だけ保護", f: (r) => numf("DMC", 6, 0, "B", r, 24, ["EDTCDE(Y)", "EDTMSK('  &     ')"]) },
   { nm: "DTY", lab: "Y のみ（対照）", f: (r) => numf("DTY", 6, 0, "B", r, 24, ["EDTCDE(Y)"]) },
-  { nm: "TMW", lab: "時刻 EDTWRD+MSK", f: (r) => numf("TMW", 6, 0, "B", r, 24, ["EDTWRD('  :  :  ')", "EDTMSK('&&:&&:&&')"]) },
+  { nm: "TMW", lab: "時刻 EDTWRD+MSK", f: (r) => numf("TMW", 6, 0, "B", r, 24, ["EDTWRD('  :  :  ')", "EDTMSK('  &  &  ')"]) },
   { nm: "TMO", lab: "時刻 EDTWRD のみ", f: (r) => numf("TMO", 6, 0, "B", r, 24, ["EDTWRD('  :  :  ')"]) },
-  { nm: "SSN", lab: "SSN 3-2-4", f: (r) => numf("SSN", 9, 0, "B", r, 24, ["EDTWRD('   -  -    ')", "EDTMSK('&&&-&&-&&&&')"]) },
+  { nm: "SSN", lab: "SSN 3-2-4", f: (r) => numf("SSN", 9, 0, "B", r, 24, ["EDTWRD('   -  -    ')", "EDTMSK('   &  &    ')"]) },
   { nm: "PLN", lab: "素の 6,0（対照）", f: (r) => numf("PLN", 6, 0, "B", r, 24, []) },
 
   /**
@@ -68,8 +69,8 @@ const CASES = [
    */
   { nm: "D8W", row: 18, lab: "8桁 EDTWRD のみ", f: (r) => numf("D8W", 8, 0, "B", r, 24, ["EDTWRD('    /  /  ')"]) },
   { nm: "D8Z", row: 19, lab: "8桁 EDTWRD(0止め)", f: (r) => numf("D8Z", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')"]) },
-  { nm: "D8M", row: 20, lab: "8桁 EDTWRD+MSK(&)", f: (r) => numf("D8M", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('&&&&/&&/&&')"]) },
-  { nm: "D8B", row: 21, lab: "8桁 EDTWRD+MSK(空白)", f: (r) => numf("D8B", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    /  /  ')"]) },
+  { nm: "D8M", row: 20, lab: "8桁 EDTWRD+MSK 両方保護", f: (r) => numf("D8M", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    &  &  ')"]) },
+  { nm: "D8B", row: 21, lab: "8桁 MSK 片方だけ保護", f: (r) => numf("D8B", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    &     ')"]) },
   { nm: "D8Y", row: 22, lab: "8桁 EDTCDE(Y)", f: (r) => numf("D8Y", 8, 0, "B", r, 24, ["EDTCDE(Y)"]) }
 ];
 
@@ -170,7 +171,7 @@ try {
     log("########## 単独コンパイルは省略（DT_SKIP_PROBE） ##########");
     okCases.push(...CASES);
   } else {
-    log("########## 単独コンパイル（どの EDTMSK の綴りが通るか） ##########");
+    log("########## 単独コンパイル（どの構成が通るか） ##########");
     for (const c of CASES) if (await tryCompile(ddsOne(c), c.lab)) okCases.push(c);
   }
   log(`\n【結果】書ける: ${okCases.map((c) => c.lab).join(" / ") || "なし"}`);
