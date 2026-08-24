@@ -1,6 +1,7 @@
 // 実機に「反転（背景色）が縦に連続する」画面を作る。
-//   <LIB>/REVTST … 表示ファイル（記述は下の DDS 配列）
-//   <LIB>/REVCL  … それを表示する CL
+//   <LIB>/REVTST … 表示ファイル（記述は下の DDS 配列。画面は 2 つ）
+//   <LIB>/REVCL  … 画面1（同じ幅の帯を縦に重ねる＝行間の隙間を見る）
+//   <LIB>/REVCL2 … 画面2（**幅の違う帯**を交互に重ねる＝上下へのはみ出しを見る）
 //
 // **何を見るための画面か。** 行間（line-height の余白）は文字要素の背景では塗られないので、
 // 反転が縦に続くと行と行の間に地色が横線として並ぶ（ACS は隙間なく繋がって見える）。
@@ -10,6 +11,12 @@
 //
 // **空白だけの定数にしてある**のは実画素で測るため。文字があるとその画素は反転の文字色
 // （＝地色と同じ値）になり、隙間と見分けが付かない。
+//
+// **画面2（幅違い）の狙い。** 隙間を埋める処置は「背景を上下へ延ばす」形なので、延ばしすぎると
+// 逆に**隣の行へ被さる**。同じ幅の帯を重ねただけでは、被さった先も同じ色なので見えない——
+// そこで幅を交互に変え、**広い帯だけがはみ出す桁**を作る。そこには上下の行の地色しか無いので、
+// 塗った高さをそのまま測れる。加えて広い帯の**すぐ上と下の行に文字**を置き、
+// 同じ文字を帯の外の桁にも並べる（対照）。被れば内側の文字だけ画素が減る。
 //
 // ソース投入は IFS/FTP 不要。RUNSQL で QTMPSRC に入れて CPYF で移す（build-gridtest3.mjs と同方式）。
 // 資格情報は環境変数からのみ受け取る（引数はプロセス一覧に見える）。
@@ -45,6 +52,28 @@ const RED_TOP = 16; // 隣接する別色の反転
 const RED_ROWS = 3;
 const COL = 20;
 
+// --- 画面2（幅違いの帯）のレイアウト。**検証スクリプトと数値を合わせること** ---
+const WIDE = 32; // 広い帯の桁数（定数は引用符込み 34 文字までなので、これが上限）
+const NARROW = 12; // 狭い帯の桁数
+const BAND_TOP = 6; // 広い帯の先頭行（以降 広・狭 と交互）
+const BAND_PAIRS = 3; // 広狭の組の数（最後にもう 1 本広い帯を置くので 広は 4 本）
+const TEXT_IN = 34; // 帯の中に入る桁（広い帯だけが届く範囲）に置く文字
+const TEXT_OUT = 60; // 帯の外（対照）に置く同じ文字
+const TEXT = "XXXXXXXXXXXX";
+/**
+ * **上下の行の文字は帯と別の色にする。** 既定色（緑）のままだと帯の色と同じになり、
+ * 「帯が被った画素」と「文字の画素」を色で見分けられない——実画素で測る側が困る。
+ * 帯の色（下）と重ならない色を選ぶこと。
+ */
+const TEXT_COLOR = "TRQ";
+/**
+ * **帯は 1 本ずつ色を変える。** 同じ色で重ねると、はみ出して隣の行に被っても
+ * 被った先が同じ色なので**目にも実画素にも出ない**。隣り合う帯を別の色にすれば、
+ * はみ出しは「隣の行に違う色が乗る」形で出る（DDS リファレンス Table 15 の色名）。
+ * 上下の文字（TRQ）と、そのすぐ隣に来る帯（1 本目・最後）は別の色にしてある。
+ */
+const BAND_COLORS = ["GRN", "WHT", "PNK", "YLW", "BLU", "GRN", "RED"];
+
 /** 空白だけの反転行（`DSPATR(RI)` は定数の次の行に置く＝直前の定数に掛かる） */
 const reverseRow = (row, color) => [
   cons(row, COL, " ".repeat(WIDTH)),
@@ -63,10 +92,55 @@ const DDS = [
   cons(22, 2, "PRESS ENTER TO END")
 ];
 
+/** 幅と色を指定した反転行（画面2 用） */
+const bandRow = (row, width, color) => [
+  cons(row, COL, " ".repeat(width)),
+  kwd(`COLOR(${color})`),
+  kwd("DSPATR(RI)")
+];
+
+/**
+ * 画面2 の行の並び: 広・狭 を交互に置き、最後にもう 1 本広い帯を置く。
+ * **広い帯の上下は必ず「狭い帯か文字の行」**になるので、広い帯だけが届く桁
+ * （COL+NARROW 〜 COL+WIDE）では、上下に地色しか無い状態で塗った高さを測れる。
+ */
+const BAND_ROWS = [
+  ...Array.from({ length: BAND_PAIRS }, (_, i) => [
+    bandRow(BAND_TOP + i * 2, WIDE, BAND_COLORS[i * 2]),
+    bandRow(BAND_TOP + i * 2 + 1, NARROW, BAND_COLORS[i * 2 + 1])
+  ]).flat(),
+  bandRow(BAND_TOP + BAND_PAIRS * 2, WIDE, BAND_COLORS[BAND_PAIRS * 2])
+];
+const BAND_LAST = BAND_TOP + BAND_PAIRS * 2; // 最後の広い帯の行
+
+const DDS2 = [
+  rec("MAIN2"),
+  cons(1, 2, "REVTST2 BAND WIDTHS"),
+  cons(3, 2, "WIDE/NARROW COLORED - NO BLEED"),
+  // 広い帯の**すぐ上**の行。帯の中（TEXT_IN）と外（TEXT_OUT）に同じ文字を置いて見比べる
+  cons(BAND_TOP - 1, TEXT_IN, TEXT),
+  kwd(`COLOR(${TEXT_COLOR})`),
+  cons(BAND_TOP - 1, TEXT_OUT, TEXT),
+  kwd(`COLOR(${TEXT_COLOR})`),
+  ...BAND_ROWS.flat(),
+  // 広い帯の**すぐ下**の行
+  cons(BAND_LAST + 1, TEXT_IN, TEXT),
+  kwd(`COLOR(${TEXT_COLOR})`),
+  cons(BAND_LAST + 1, TEXT_OUT, TEXT),
+  kwd(`COLOR(${TEXT_COLOR})`),
+  cons(22, 2, "PRESS ENTER TO END")
+];
+
 const CL = [
   "             PGM",
   `             DCLF       FILE(${LIB}/REVTST) RCDFMT(MAIN)`,
   "             SNDRCVF    RCDFMT(MAIN)",
+  "             ENDPGM"
+];
+const CL2 = [
+  "             PGM",
+  `             DCLF       FILE(${LIB}/REVTST) RCDFMT(MAIN2)`,
+  "             SNDRCVF    RCDFMT(MAIN2)",
   "             ENDPGM"
 ];
 
@@ -125,18 +199,20 @@ async function putSource(file, member, lines) {
   return await run(`CPYF FROMFILE(${LIB}/QTMPSRC) TOFILE(${LIB}/${file}) FROMMBR(QTMPSRC) TOMBR(${member}) MBROPT(*REPLACE) FMTOPT(*NOCHK)`, `  ${file}(${member}) へ複写`);
 }
 
-log("== DDS（REVTST: 反転の連続）==");
-if (!await putSource("QDDSSRC", "REVTST", DDS)) process.exit(1);
+log("== DDS（REVTST: 反転の連続 ＋ 幅違いの帯）==");
+if (!await putSource("QDDSSRC", "REVTST", [...DDS, ...DDS2])) process.exit(1);
 await cn.run(`DLTF FILE(${LIB}/REVTST)`);
 if (!await run(`CRTDSPF FILE(${LIB}/REVTST) SRCFILE(${LIB}/QDDSSRC) SRCMBR(REVTST)`)) {
   log("(コンパイル失敗。上のメッセージを見て DDS を直す)");
   process.exit(1);
 }
 
-log("== REVCL ==");
-if (!await putSource("QCLSRC", "REVCL", CL)) process.exit(1);
-await cn.run(`DLTPGM PGM(${LIB}/REVCL)`);
-if (!await run(`CRTBNDCL PGM(${LIB}/REVCL) SRCFILE(${LIB}/QCLSRC) SRCMBR(REVCL)`)) process.exit(1);
+for (const [mbr, src] of [["REVCL", CL], ["REVCL2", CL2]]) {
+  log(`== ${mbr} ==`);
+  if (!await putSource("QCLSRC", mbr, src)) process.exit(1);
+  await cn.run(`DLTPGM PGM(${LIB}/${mbr})`);
+  if (!await run(`CRTBNDCL PGM(${LIB}/${mbr}) SRCFILE(${LIB}/QCLSRC) SRCMBR(${mbr})`)) process.exit(1);
+}
 
 cn.close();
 log("完了");
