@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout } from "../src/composables/fieldValidate.js";
 import type { Field } from "@ts5250/tn5250";
+import { attrSentinel, rawSentinel } from "@ts5250/tn5250/browser";
 
 function fld(o: Partial<Field>): Field {
   return { index: 1, row: 1, col: 1, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "", ...o };
@@ -161,8 +162,8 @@ describe("dbcsViewLayout.sliceRange: 折返し境界にまたがる全角の桁�
  * センチネルが運ぶのは 1 バイトなので 1 と数えるのが正しい。
  */
 describe("dbcsByteLength とセンチネル", () => {
-  const ATTR_SENT = String.fromCharCode(0xe028); // 属性 0x28
-  const RAW_SENT = String.fromCharCode(0xe0ff); // 生バイト 0xFF
+  const ATTR_SENT = attrSentinel(0x28); // 属性 0x28（基点は決め打ちしない）
+  const RAW_SENT = rawSentinel(0xff); // 生バイト 0xFF
 
   it("属性センチネルは 1 バイト", () => {
     expect(dbcsByteLength(ATTR_SENT)).toBe(1);
@@ -198,7 +199,7 @@ describe("dbcsByteLength とセンチネル", () => {
  * センチネルが載るようになった副作用）。
  */
 describe("列ビューとセンチネル", () => {
-  const ATTR = String.fromCharCode(0xe028); // 属性 0x28
+  const ATTR = attrSentinel(0x28); // 属性 0x28
 
   it("センチネルの前後に SO/SI を入れない", () => {
     // A X [属性] 設計 C D → 属性は SBCS なので SO は全角の直前に来る

@@ -23,37 +23,66 @@
  * 送信側はどちらも「生バイトをそのまま書く」だけなので `isRawSentinel` の一択でよい。
  */
 
-/** センチネルの基点。バイト b(0x00–0xFF) → U+E000+b */
-const BASE = 0xe000;
+/**
+ * センチネルの基点。バイト b(0x00–0xFF) → **U+DC00+b**（単独のローサロゲート）。
+ *
+ * **基本多言語面（BMP）の私用面 U+E000–U+F8FF は使えない。** そこは**外字**（ユーザー定義
+ * 文字）の落ち先で、当方の DBCS 変換表がまるごと埋めている——実測で CCSID 930/939/1399/
+ * 300/16684 の表が U+E000〜U+F83C の 6205 個を使い、**256 連続の空きが 1 つも無い**。
+ * 930 の外字 0x6941〜0x6A40 はちょうど U+E000〜U+E0FF で、**旧基点と完全に重なっていた**。
+ *
+ * 【実機で分かった不具合】外字を含む DBCS 欄を編集して送ると、**外字 1 文字が生バイト 1 つ
+ * （0x00）に化けて SO/SI ごと消える**（実機 IBM i 7.3・`ASAOLIB/UDCPGM` で外字 ＋ `AB` を
+ * 送ると、ホストは外字を失った値を受け取った）。web-ui は DBCS 欄を編集するとき値をセルから
+ * 組み立て直す（`logicalFromCells`）ので、外字とセンチネルを見分けられなかった。
+ *
+ * **なぜ単独ローサロゲートか。**
+ * - 変換表の落ち先と**構造的に衝突しない**（表が返すのは常に完全な文字＝スカラー値。
+ *   単独サロゲートは「文字ではない」ので、どの符号化文字集合からも出てこない）。
+ * - **1 コード単位で収まる**。桁の勘定（`slice` / `padEnd` / 欄長）はセンチネルを
+ *   「1 桁」として数える前提で組んであり、第 15 面（サロゲート対＝2 コード単位）へ移すと
+ *   その勘定が全部ずれる（実際に `inputScrollValue` の桁詰めが 1 桁ずれた）。
+ * - Python の `surrogateescape`（PEP 383）と同じ手口で、**バイトを可逆に運ぶ**用途の定石。
+ *
+ * ⚠ **判定は必ず符号位置で行う**（`codePointAt`）。`for (const ch of s)` はサロゲート対を
+ * 1 文字として返すので、CCSID 1399 の BMP 外漢字（実測 909 対。例 U+2000B）を
+ * センチネルと取り違えない。**コード単位の添字 `s[i]` で判定してはいけない**——
+ * BMP 外の文字の下位サロゲートを拾ってしまう。
+ *
+ * ⚠ 単独サロゲートは UTF-8 にできない。**外へ出す前に必ず落とすか置き換える**
+ * （表示は `stripSentinels`、送信は生バイト、JSON は `JSON.stringify` が
+ * `\udcXX` へ逃がすので往復できる）。
+ */
+const BASE = 0xdc00;
 /** 埋め込み画面属性の範囲 */
 const ATTR_LOW = BASE + 0x20;
 const ATTR_HIGH = BASE + 0x3f;
 
 /** 属性バイト(0x20–0x3F)をセンチネル文字にする */
 export function attrSentinel(byte: number): string {
-  return String.fromCharCode(BASE + byte);
+  return String.fromCodePoint(BASE + byte);
 }
 
 /** 生バイト(0x00–0xFF)をセンチネル文字にする（表示できない SBCS バイト用） */
 export function rawSentinel(byte: number): string {
-  return String.fromCharCode(BASE + (byte & 0xff));
+  return String.fromCodePoint(BASE + (byte & 0xff));
 }
 
 /** その 1 文字が**属性**センチネルか（色の解釈が要るのはこれだけ） */
 export function isAttrSentinel(ch: string): boolean {
-  const c = ch.charCodeAt(0);
-  return c >= ATTR_LOW && c <= ATTR_HIGH;
+  const c = ch.codePointAt(0);
+  return c !== undefined && c >= ATTR_LOW && c <= ATTR_HIGH;
 }
 
 /** その 1 文字が生バイトを運ぶセンチネルか（属性センチネルを含む） */
 export function isRawSentinel(ch: string): boolean {
-  const c = ch.charCodeAt(0);
-  return c >= BASE && c <= BASE + 0xff;
+  const c = ch.codePointAt(0);
+  return c !== undefined && c >= BASE && c <= BASE + 0xff;
 }
 
 /** センチネル文字から元のバイトを取り出す */
 export function sentinelByte(ch: string): number {
-  return ch.charCodeAt(0) - BASE;
+  return (ch.codePointAt(0) ?? BASE) - BASE;
 }
 
 /** センチネル文字から元の属性バイトを取り出す（`sentinelByte` の別名。属性用の呼び名） */

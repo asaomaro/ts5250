@@ -3,6 +3,7 @@ import { reactive, nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
+import { rawSentinel } from "@ts5250/tn5250/browser";
 
 /**
  * **入力欄の埋め込み属性（欄途中の色替え）を色付きオーバーレイで表現する。**
@@ -13,7 +14,7 @@ import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
  * オーバーレイの色境界は**値のセンチネル**で決まるので、編集で属性が動けば色も動く。
  */
 /** 属性バイト → センチネル文字（core screen/attr-sentinel と同じ規約） */
-const SENT = (b: number): string => String.fromCharCode(0xe000 + b);
+const SENT = (b: number): string => rawSentinel(b);
 
 function cell(char: string, extra: Partial<Cell> = {}): Cell {
   return {

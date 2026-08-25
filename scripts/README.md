@@ -370,6 +370,29 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-cursor-progre
 
 実機で採った SOH: `len=7 本体=[00 00 00 18 00 08 04]` → エラー行 24、マスクは **F3 と F12 だけ**。
 
+## 外字（UDC）とセンチネルの衝突（実機 / `AS400_LIB`）
+
+CCSID 930 の外字（0x6941〜）は Unicode の**私用面 U+E000〜**へ落ちる。ts5250 は
+「表示できないバイト・埋め込み属性」を値の中で運ぶセンチネルにも私用面 U+E000+byte を
+使っており、**U+E000〜U+E0FF がまるごと重なっていた**。web-ui は DBCS 欄を編集するとき
+値をセルから組み立て直す（`logicalFromCells`）ので、外字がセンチネルと見分けられず
+**生バイト 1 つに化けて SO/SI ごと消えていた**。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-udctest.mjs` | `AS400_LIB` に `UDCDSPF`/`UDCPGM` を作る（冪等）。`O`（DBCS open）の入力欄に外字 1 文字（`x'0E69410F'`＝SO + 6941 + SI）を出し、送り返された値が `x'0E69410FC1C2'`（＋`AB`）かどうかを **SAME / DIFF / NONE** で表示する。⚠ DBCS の欄を持つ表示ファイルは `CRTDSPF … IGCDTA(*YES)` が要る。 |
+| `verify-browser-udc-roundtrip.mjs` | 回帰 E2E（実ブラウザ＋実機・5 項目）。外字が**欄に文字として出る**（空白へ潰されない）／末尾に `AB` を打って Enter すると**ホストが SAME を返す**。⚠ 直す前の実測: `RESULT=DIFF`・`ECHO=" AB"`（外字が消えた）。⚠ **字形は出ない**（ホストの外字フォントの話）。見ているのはバイトの identity。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-udctest.mjs        # 初回/再作成
+npm run build -w @ts5250/web-ui
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-udc-roundtrip.mjs
+```
+
+> 📌 **センチネルの基点は BMP の私用面に置けない。** 実測で CCSID 930/939/1399/300/16684 の
+> 変換表が U+E000〜U+F83C の 6205 個を使っており、**256 連続の空きが 1 つも無い**。
+> 単独ローサロゲート（U+DC00+byte）へ移した理由は `attr-sentinel.ts` の JSDoc を参照。
+
 ## IFS ファイルブラウザ（実機 / /home/USER）
 
 | スクリプト | 内容 |

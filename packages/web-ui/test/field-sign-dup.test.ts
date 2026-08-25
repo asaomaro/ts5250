@@ -4,7 +4,7 @@ import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { fieldSign, dupFill, DUP_BYTE, type EditState } from "../src/composables/fieldEdit.js";
 import { MSG_DUP_DISALLOWED } from "../src/composables/opMessages.js";
-import { rawSentinel } from "@ts5250/tn5250/browser";
+import { rawSentinel, isRawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
@@ -70,7 +70,10 @@ describe("Dup（純ロジック）", () => {
 
   it("複写文字は 0x1C を運ぶセンチネル", () => {
     expect(DUP_BYTE).toBe(0x1c);
-    expect(rawSentinel(DUP_BYTE).codePointAt(0)).toBe(0xe000 + 0x1c);
+    // **基点は決め打ちしない**（外字と衝突するので第 15 面へ移した）。
+    // 見るのは「生バイト 0x1C を運ぶセンチネルである」ことだけ。
+    expect(isRawSentinel(rawSentinel(DUP_BYTE))).toBe(true);
+    expect(sentinelByte(rawSentinel(DUP_BYTE))).toBe(0x1c);
   });
 });
 
