@@ -1,7 +1,7 @@
 import type { Codec } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
-import { ORDER, OPCODE, FFW } from "./constants.js";
+import { ORDER, OPCODE, FFW, AID } from "./constants.js";
 import { buildRecord, type RecordHeaderFlags } from "./gds.js";
 import { isRawSentinel, rawSentinel, sentinelByte } from "../screen/attr-sentinel.js";
 import type { InternalField } from "../screen/buffer.js";
@@ -88,6 +88,25 @@ function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
 }
 
 /**
+ * AID バイト → F キーの番号（F1〜F24）。それ以外（Enter・Help・ロール等）は `undefined`。
+ * SOH の申告は F キーにしか無いので、ここで拾えないものは常に「送る」側になる。
+ */
+function functionKeyNumber(aid: number): number | undefined {
+  if (aid >= AID.F1 && aid <= AID.F12) return aid - AID.F1 + 1;
+  if (aid >= AID.F13 && aid <= AID.F24) return aid - AID.F13 + 13;
+  return undefined;
+}
+
+/**
+ * **その AID で欄データを送ってよいか**（SOH の申告。`ScreenBuffer.sendsDataForAid`）。
+ * 原典も同じ門番を通す（GNU tn5250 `tn5250_session_send_fields` の
+ * `send_data_for_aid_key`、tn5250j `ScreenFields.readFormatTable` の `dataIncluded[]`）。
+ */
+function sendsData(buf: ScreenBuffer, aid: number): boolean {
+  return buf.sendsDataForAid(functionKeyNumber(aid));
+}
+
+/**
  * Read MDT Fields 応答（クライアント → ホスト）を構築する。
  * 形式: カーソル行(1) 桁(1) + AID(1) + [SBA(行,桁) + フィールドデータ(EBCDIC)]*（MDT の立つフィールドのみ・画面順）
  * 送信時の再エンコードはここで行う（design: 画面は Unicode 保持・送信時変換）。
@@ -98,7 +117,8 @@ export function buildReadMdtResponse(
   aid: number,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
-  return buildFieldResponse(buf, codec, aid, buf.mdtFields(), cursor);
+  // **CA キー（SOH で申告されたキー）では欄を 1 つも送らない。** カーソル位置と AID だけを返す。
+  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor);
 }
 
 /**
@@ -217,8 +237,9 @@ function buildFlatFieldResponse(
   const cur = cursor ?? buf.rowColOf(buf.cursorAddr);
   w.u8(cur.row).u8(cur.col).u8(aid);
 
-  // **画面単位の MDT が門番**。立っていなければ欄は 1 つも送らない
-  const fields = buf.mdtFields().length > 0 ? buf.orderedFields() : [];
+  // **画面単位の MDT と SOH の申告が門番**。どちらかで落ちれば欄は 1 つも送らない
+  // （0x72 は AID 0 ＝ホスト主導なので申告の対象外）。
+  const fields = buf.mdtFields().length > 0 && sendsData(buf, aid) ? buf.orderedFields() : [];
   let substituted = 0;
   for (const f of foldContinued(buf, fields)) {
     const width = flatWidth(buf, f);

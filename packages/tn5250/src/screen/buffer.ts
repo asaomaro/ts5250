@@ -532,6 +532,12 @@ export class ScreenBuffer {
   clearUnit(): void {
     this.resize(24, 80);
     this.closeWindowsAndSelections();
+    // **画面を消したら AID の申告も捨てる**（次の画面の SOH が来るまで「申告なし」＝送る側）。
+    // 残すと、申告の無い画面で F12 の欄データを黙って落とすことになる。
+    // **CLEAR UNIT ALTERNATE（0x20）では捨てない**——あちらは SFLCTL の再描画のたびに
+    // 何度も来る（罫線が消えた不具合と同じ経路）。申告を消すと、その画面の残りの操作で
+    // CA キーが CF キーに戻ってしまう。
+    this.aidNoDataMask = 0;
     this.noteClear();
   }
 
@@ -617,6 +623,44 @@ export class ScreenBuffer {
     this.pending.restored = true;
     this.noteWriteRange(0, this.rows * this.cols - 1);
     return true;
+  }
+
+  /**
+   * **SOH（0x01）が申告する「欄データを送らない AID キー」の 24 ビット。**
+   *
+   * ホストは DDS の `CAnn`（コマンド・アテンション）で定義したキーをここへ立てて送る。
+   * 立っているキーでは**打鍵した値を 1 バイトも返さない**——`CFnn`（コマンド・ファンクション）
+   * との違いはこれだけで、FFW にも SF にも出てこない。
+   *
+   * ビットの並び（GNU tn5250 `send_data_for_aid_key`、tn5250j `dataIncluded[]` が一致）:
+   * ヘッダ本体の 5〜7 バイト目が **F24〜F17 / F16〜F9 / F8〜F1**、各バイトは LSB が小さい番号。
+   *
+   * 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `CA03`/`CA12`/`CF06`）で採った値:
+   * `SOH len=7 本体=[00 00 00 18 00 08 04]` → **F3 と F12 だけが立つ**（CF06 は立たない）。
+   */
+  private aidNoDataMask = 0;
+
+  /**
+   * SOH のヘッダ本体を受け取ってマスクを更新する。**7 バイト未満なら申告なし**（0）。
+   * 本体は `[フラグ, 予約, 再順序付け, エラー行, マスク×3]`。
+   */
+  setHeaderData(body: readonly number[] | Uint8Array): void {
+    const b = Array.from(body);
+    this.aidNoDataMask =
+      b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
+  }
+
+  /**
+   * その AID キーで**欄データを送るか**。ホストが申告していないキー（Enter・Help・
+   * ロール等）と AID 0（ホスト主導の READ）は常に送る。
+   *
+   * `keyNumber` は F1〜F24 の番号（それ以外は `undefined`）。
+   */
+  sendsDataForAid(keyNumber: number | undefined): boolean {
+    if (keyNumber === undefined || keyNumber < 1 || keyNumber > 24) return true;
+    const group = Math.floor((keyNumber - 1) / 8); // 0=F1〜F8 / 1=F9〜F16 / 2=F17〜F24
+    const byte = (this.aidNoDataMask >> (8 * group)) & 0xff;
+    return ((byte >> ((keyNumber - 1) % 8)) & 1) === 0;
   }
 
   /**

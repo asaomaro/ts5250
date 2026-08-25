@@ -344,6 +344,24 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-keystroke-rul
 手で見るなら `CALL <LIB>/AUDPGM`（F3 で終了）。直す前の実測は
 **①`1.5` がそのまま入る（通知なし）／②`-` で次欄へ飛ぶ／③画面 `1234567` に対しホストは `123456`**。
 
+## AID キーと欄データ（CA / CF）・カーソル送り（実機 / `AS400_LIB`）
+
+**`CA` キー（コマンド・アテンション）では欄データを送らない。** どのキーが CA かは
+**SOH オーダー（0x01）のヘッダ**でしか届かない——FFW にも SF にも出てこない。
+本体 5〜7 バイト目の 24 ビットが F24〜F1 に対応し、立っているキーでは欄データを送らない。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-keytest.mjs` | `AS400_LIB` に `KEYDSPF`/`KEYPGM` を作る（冪等）。`CA03` / `CA12`（データを送らない）と `CF06`（送る）、入力欄 `IN1`〜`IN3`（`IN1` に **`FLDCSRPRG(IN3)`**）、受け取った値を出す `EKEY`/`EIN1`〜`EIN3` を並べる。 |
+| `verify-aid-data-mask.mjs` | 回帰（core 直・実機・9 項目）。**描画は関係ない**ので `Session5250` で直に見る。SOH の 24 ビットを**生レコードから独立にパース**して申告を確かめ、F12（CA）で欄データが届かない／F6（CF）と Enter では届くことを `HOST RECEIVED` で見る。⚠ 直す前の実測: F12 で `IN1="AAA"` がホストへ届いていた。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-keytest.mjs        # 初回/再作成
+node --env-file=.env --env-file=.env.verify scripts/verify-aid-data-mask.mjs
+```
+
+実機で採った SOH: `len=7 本体=[00 00 00 18 00 08 04]` → エラー行 24、マスクは **F3 と F12 だけ**。
+
 ## IFS ファイルブラウザ（実機 / /home/USER）
 
 | スクリプト | 内容 |

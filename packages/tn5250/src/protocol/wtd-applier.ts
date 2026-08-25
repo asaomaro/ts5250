@@ -452,9 +452,15 @@ function applyWtd(
         break;
       }
       case ORDER.SOH: {
-        // フォーマットテーブルの開始: 既存フィールドをクリアし、エラー行等のヘッダを読み飛ばす
+        // フォーマットテーブルの開始: 既存フィールドをクリアし、ヘッダを読む。
+        //
+        // **ヘッダは読み捨てない。** 本体 5〜7 バイト目の 24 ビットが「**欄データを送らない
+        // AID キー**」の申告で（DDS の `CAnn`）、ここを捨てていたため F12 で打鍵した値まで
+        // 送っていた——「F12 で取り消したのに反映される」型の事故になる。
+        // 並びと意味は `ScreenBuffer.setHeaderData` の JSDoc（実機で採った値つき）。
         const len = r.u8();
-        r.skip(len);
+        const body = r.bytes(len);
+        buf.setHeaderData(body);
         buf.clearFormatTable();
         break;
       }
