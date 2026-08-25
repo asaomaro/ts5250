@@ -18,6 +18,14 @@ export interface ApplyResult {
   unlockKeyboard: boolean;
   /** Read 系コマンドを受けた（＝ホストが入力を待っている） */
   readRequested: boolean;
+  /**
+   * **入力待ちに入った Read のコマンドバイト**（`0x52` / `0x82` / `0x42`）。
+   *
+   * **応答の形式がこれで変わる。** `0x52`/`0x82` は `SBA + MDT の立った欄`、
+   * `0x42` は **SBA 無し・全欄・欄長そのまま**（`buildReadInputFieldsResponse`）。
+   * どの Read で待たされているかを憶えておかないと、次の AID で誤った形式を返す。
+   */
+  readCommand?: number;
   alarm: boolean;
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
@@ -127,10 +135,11 @@ export function applyDataStream(
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
         r.u8();
         // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
-        // 現在のサイズでクリアする（GUI 構造体は残す）ので、`clearUnit()` へは倒さない
-        // ——そちらは `closeWindowsAndSelections()` を呼び、窓・選択フィールドまで消してしまう。
+        // 現在のサイズでクリアするので、`clearUnit()` へは倒さない——**罫線の扱いが違う**
+        // （`clearUnit()` 経由だと 24x80 専用画面で罫線が消える。KSN20 / S9R167D の回帰）。
+        // 窓・選択フィールドは 0x40 と同じく閉じる（実機 WINCUA で残骸を確認。`buffer.ts` 参照）。
         if (!buf.clearUnitAlternate()) {
-          warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing without dropping GUI constructs");
+          warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing at current size (grid lines kept)");
         }
         break;
       }
@@ -247,6 +256,9 @@ export function applyDataStream(
         applyCc(r.u8(), buf, result);
         applyCc2(r.u8(), result);
         result.readRequested = true;
+        // **どの Read で待つかを残す。** `0x42` だけ応答の形式が違う
+        // （SBA 無し・全欄・欄長そのまま。`buildReadInputFieldsResponse` の JSDoc に実測ごと控えた）
+        result.readCommand = cmd;
         result.unlockKeyboard = true; // Read はキーボードを解放して入力を待つ
         break;
       }

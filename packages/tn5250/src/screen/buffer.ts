@@ -235,16 +235,18 @@ export class ScreenBuffer {
   /**
    * **文字セル・サイズだけを変更する共通処理。GUI 構造体には触れない——呼び出し側の責任。**
    *
-   * `clearUnitAlternate()` から呼ぶときは GUI 構造体（窓・選択フィールド・スクロールバー・
-   * 罫線）を残す。CLEAR UNIT ALTERNATE は SFLCTL の再描画のたびに何度も送られてくる
-   * （実機・YB0270R で確認。KSN20 罫線が「一度描かれた直後に消える」不具合の原因
-   * だった）。罫線は WDSF の専用コマンド（Clear Grid Line Buffer 0x61・GRDATR/GRDLIN
-   * 主構造の flag1 bit0 等）で寿命管理されており、CLEAR UNIT ALTERNATE 側で消す必要はない。
+   * `clearUnit()` も `clearUnitAlternate()` も**窓・選択フィールド・スクロールバーは閉じる**
+   * （`closeWindowsAndSelections()` を各自で呼ぶ）が、**罫線の扱いだけが違う**:
    *
-   * 一方 `clearUnit()` は自分で `clearGui()` を追加で呼ぶ（実機 PB1000R で、CREATE WINDOW
-   * の窓を閉じるときに素の CLEAR UNIT だけで窓を暗黙に消すことを確認したため）。
-   * つまり GUI 構造体を消すかどうかはコマンドの種類（0x40 と 0x20）で実際に異なる——
-   * ここでは両者に共通する「文字セル・サイズ」の変更だけを行う。
+   * - `clearUnit()`（0x40）は罫線も残す（`closeWindowsAndSelections()` は罫線を触らない）
+   * - `clearUnitAlternate()`（0x20）も罫線を残す。CLEAR UNIT ALTERNATE は SFLCTL の
+   *   再描画のたびに何度も送られてくる（実機・YB0270R で確認。KSN20 罫線が
+   *   「一度描かれた直後に消える」不具合の原因だった）。罫線は WDSF の専用コマンド
+   *   （Clear Grid Line Buffer 0x61・GRDATR/GRDLIN 主構造の flag1 bit0 等）で
+   *   寿命管理されているので、ここで消す必要はない
+   *
+   * 罫線ごと消すのは `clearGui()`（REM_ALL_GUI_CONSTRUCTS 専用）だけ。
+   * ここでは全員に共通する「文字セル・サイズ」の変更だけを行う。
    */
   private resize(rows: 24 | 27, cols: 80 | 132): void {
     this.rows = rows;
@@ -427,15 +429,38 @@ export class ScreenBuffer {
   /**
    * CLEAR UNIT ALTERNATE: 27x132 へ切替えクリア（許可時）。
    *
-   * **未許可（24x80 端末）でも GUI 構造体は残したままクリアする。** DBCS 端末（SEU 等）は
+   * **未許可（24x80 端末）でも罫線は残したままクリアする。** DBCS 端末（SEU 等）は
    * alternate を申告していなくてもこの命令を送ってくる（実機で確認）。S9R167D のような
    * 24x80 専用（`DSPSIZ(24 80 *DS3)`）の SFLCTL(SFLDSPCTL) 画面でも同じことが起こり、
    * 呼び出し側が「未許可なら `clearUnit()` へ倒す」実装だと、`clearUnit()` の `clearGui()` で
    * 罫線（GRDATR/GRDLIN）ごと消えてしまう——`clearUnitAlternate()` 自体を直した A の修正が、
    * 24x80 専用画面では素通しになっていた（KSN20 と同じ共有罫線レコードを使う画面での再発）。
    * 戻り値は「実際に 27x132 へ切り替わったか」を保つ（呼び出し側の警告ログ用）。
+   *
+   * ## 窓は閉じる（2026-08-25 に直した）
+   *
+   * ~~GUI 構造体は**一切**残す~~ ← **窓を残すと画面に残骸が出る。実機で再現した。**
+   *
+   * 元の観測（`20260728-datastream-gui-bugfixes`）で「消えては困る」と分かったのは
+   * **罫線だけ**で、窓まで残す必要は一度も観測されていなかった。窓まで残していたのは
+   * `closeWindowsAndSelections()` がまだ無く、`clearGui()`（罫線も消す）しか無かったため。
+   *
+   * 実機で確かめた（2026-08-25・`scripts/host-src/dscmd.c` の `WINCUA`）:
+   * DSM に背景 → `CREATE WINDOW`(WDSF 0xD9/0x51) → `CLEAR UNIT ALTERNATE` を順に出させると、
+   *
+   * ```
+   * 受信 04 20 00                          ← CUA
+   * 受信 04 11 00 00 11 02 02 …AFTER CUA…  ← ホストは画面を作り直している
+   * gui.windows = [{ row: 5, col: 10, width: 20, height: 5, title: "WN" }]  ← **残ったまま**
+   * ```
+   *
+   * ホストは画面を消して別のものを描いているのに、こちらは 20x5 の枠と見出しを描き続ける
+   * ——**画面に残骸が出る**。参照実装 2 つ（tn5250 `dbuffer.c` / tn5250j `Screen5250`）も
+   * CUA で窓を閉じる。罫線は `closeWindowsAndSelections()` の対象外なので巻き添えにならない。
    */
   clearUnitAlternate(): boolean {
+    // **窓・選択フィールド・スクロールバーは閉じる。罫線は残す**（上のコメント）
+    this.closeWindowsAndSelections();
     if (!this.alternate) {
       this.resize(24, 80);
       this.noteClear();

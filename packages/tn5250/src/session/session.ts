@@ -1,9 +1,10 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor } from "@ts5250/base";
 import { parseRecord } from "../protocol/gds.js";
-import { OPCODE } from "../protocol/constants.js";
+import { COMMAND, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
+  buildReadInputFieldsResponse,
   buildReadImmediateResponse,
   buildReadMdtImmediateAltResponse,
   buildFlagRecord,
@@ -133,6 +134,13 @@ export class Session5250 extends Emitter<SessionEvents> {
   private startupInfo: StartupResponse | undefined;
   /** 1 レコード目かどうか。起動応答の判定はここだけで行う */
   private firstRecord = true;
+  /**
+   * **いま入力待ちにさせている Read のコマンドバイト。**
+   *
+   * `0x52`（READ MDT FIELDS）が普通で、これが既定。`0x42`（READ INPUT FIELDS）のときだけ
+   * **応答の形式が変わる**ので、AID を返すときに見る（`buildReadInputFieldsResponse`）。
+   */
+  private readCommand: number = COMMAND.READ_MDT_FIELDS;
   private pendingAid:
     | { resolve: (r: SendAidResult) => void; timer: ReturnType<typeof setTimeout> }
     | undefined;
@@ -342,7 +350,13 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (aid === undefined) {
       throw new As400Error("PROTOCOL_ERROR", `unsupported AID key: ${key}`);
     }
-    const { record, substituted } = buildReadMdtResponse(this.buf, this.codec, aid, cursor);
+    // **待たされている Read の種類で形式が変わる。** `0x42`（READ INPUT FIELDS）だけは
+    // SBA 無し・全欄・欄長そのままの平坦形式（`buildReadInputFieldsResponse` の JSDoc）。
+    const build =
+      this.readCommand === COMMAND.READ_INPUT_FIELDS
+        ? buildReadInputFieldsResponse
+        : buildReadMdtResponse;
+    const { record, substituted } = build(this.buf, this.codec, aid, cursor);
     if (substituted > 0) this.warn(`${substituted} character(s) substituted on send`);
     return record;
   }
@@ -370,10 +384,20 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
     const matches = (snap: ScreenSnapshot): boolean => {
       if (!opts.until) return false; // until 無し = 次の更新を待つ（現在画面では解決しない）
-      const rows =
-        opts.until.row !== undefined ? [snap.cells[opts.until.row - 1] ?? []] : snap.cells;
-      const text = rows.map((r) => r.map((c) => c.char).join("")).join("\n");
-      return text.includes(opts.until.text);
+      if (opts.until.row !== undefined) {
+        // 行を指定されたら**その行のセルだけ**を見る（システムメッセージは行を持たない）
+        const row = snap.cells[opts.until.row - 1] ?? [];
+        return row.map((c) => c.char).join("").includes(opts.until.text);
+      }
+      const text = snap.cells.map((r) => r.map((c) => c.char).join("")).join("\n");
+      if (text.includes(opts.until.text)) return true;
+      // **WRITE ERROR CODE（0x21/0x22）のメッセージは画面セルに入らない。**
+      // ホストは専用のコマンドでエラー行へ出すので `systemMessage` に載る（`get_screen` の
+      // `=== Message ===`）。ここでセルしか見ないと、**エラーを待てない**——実機で
+      // `ASAOLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
+      // 「小数部分の使用法が正しくないか，…」が `systemMessage` にだけ現れ、
+      // 24 行目のセルは空のままだった（2026-08-25）。
+      return snap.systemMessage !== undefined && snap.systemMessage.includes(opts.until.text);
     };
     // until 指定時、現在画面が既に条件を満たしていれば即座に返す（遅延メッセージが既出のケース）
     if (opts.until && matches(this.snapshot())) {
@@ -509,8 +533,8 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.readImmediateRequested) {
         // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。
         // `readRequested` と違い**入力待ちに入らない**——ホストは続けて何かを送ってくる。
-        // 中身の決まり（AID 0・master MDT が門番・欄ごとの MDT は見ない）は
-        // `buildReadImmediateResponse` の JSDoc に原典ごと控えてある。
+        // 中身の決まり（AID 0・画面単位の MDT が門番・**SBA 無しの平坦形式**）は
+        // `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
         const { record } = buildReadImmediateResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
         return;
@@ -537,6 +561,10 @@ export class Session5250 extends Emitter<SessionEvents> {
         void this.runPcCommand(result.pcCommand);
         return;
       }
+      // **どの Read で待たされているかを憶える**（次の AID で返す形式が変わる）。
+      // Read の無いレコード（画面だけ描くもの）では触らない——同じ画面構築が
+      // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
+      if (result.readCommand !== undefined) this.readCommand = result.readCommand;
       if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
         // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
