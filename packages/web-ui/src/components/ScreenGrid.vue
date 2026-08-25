@@ -1284,7 +1284,7 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
 function logicalValue(f: Field): string {
   const edited = props.edits.get(f.index);
   if (edited !== undefined) return edited;
-  if (f.dbcsType) return logicalFromCells(f);
+  if (f.dbcsType || f.dbcsContent) return logicalFromCells(f);
   return f.value;
 }
 
@@ -1531,7 +1531,10 @@ let composeReplacedSelection = false;
 
 /** DBCS 欄はライブ列ビュー編集（純論理値・非パディング・挿入モード）で扱う。 */
 function isDbcsEdit(f: Field): boolean {
-  return !!f.dbcsType && !f.hidden;
+  // **申告が無くても中身が DBCS なら列ビューで編集する**（`dbcsContent`）。値は生バイトで
+  // 届くので、素の SBCS 経路に流すと画面が空白になり、編集すると桁が壊れる。
+  // 打てる文字の制限は `dbcsType` のまま（ホストが SBCS と申告した欄に全角は打たせない）。
+  return (!!f.dbcsType || !!f.dbcsContent) && !f.hidden;
 }
 
 function beginEdit(f: Field, inputEl: HTMLInputElement): void {

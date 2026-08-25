@@ -381,7 +381,7 @@ CCSID 930 の外字（0x6941〜）は Unicode の**私用面 U+E000〜**へ落�
 | スクリプト | 内容 |
 |---|---|
 | `build-udctest.mjs` | `AS400_LIB` に `UDCDSPF`/`UDCPGM` を作る（冪等）。`O`（DBCS open）の入力欄に外字 1 文字（`x'0E69410F'`＝SO + 6941 + SI）を出し、送り返された値が `x'0E69410FC1C2'`（＋`AB`）かどうかを **SAME / DIFF / NONE** で表示する。⚠ DBCS の欄を持つ表示ファイルは `CRTDSPF … IGCDTA(*YES)` が要る。 |
-| `verify-browser-udc-roundtrip.mjs` | 回帰 E2E（実ブラウザ＋実機・5 項目）。外字が**欄に文字として出る**（空白へ潰されない）／末尾に `AB` を打って Enter すると**ホストが SAME を返す**。⚠ 直す前の実測: `RESULT=DIFF`・`ECHO=" AB"`（外字が消えた）。⚠ **字形は出ない**（ホストの外字フォントの話）。見ているのはバイトの identity。 |
+| `verify-browser-udc-roundtrip.mjs` | 回帰 E2E（実ブラウザ＋実機・7 項目）。外字が**欄に文字として出る**（空白へ潰されない）／末尾に `AB` を打って Enter すると**ホストが SAME を返す**。⚠ 直す前の実測: `RESULT=DIFF`・`ECHO=" AB"`（外字が消えた）。⚠ **字形は出ない**（ホストの外字フォントの話）。見ているのはバイトの identity。**`IN2`** は別件——DDS で `A`（SBCS）と申告した欄に SO/SI 入りの DBCS データが載る形（日本語機では珍しくない）。打鍵せず送り返すだけで原本のバイトが返るか（直す前は `DIFF`＝SO/SI が付け直されて 2 バイト増え、欄からあふれていた）と、**欄に日本語が表示されているか**を見る。 |
 
 ```sh
 node --env-file=.env --env-file=.env.verify scripts/build-udctest.mjs        # 初回/再作成

@@ -58,6 +58,14 @@ const DDS = [
   fld("EOK", 4, "A", "O", 5, 30),
   cons(7, 2, "ECHO"),
   fld("EIN1", 10, "O", "O", 7, 30),
+  // **DBCS 種別を申告していない欄（`A`）に DBCS データが入っている場合。**
+  // 日本語機では珍しくない（SO/SI 込みのバイトをそのまま持つ char 欄）。
+  // `DSPATR(MDT)` を付けて**打鍵せずに送り返させる**——端末が保持している値がそのまま届く。
+  cons(9, 2, "IN2 (SBCS DECL + DBCS)"),
+  fld("IN2", 10, "A", "B", 9, 30),
+  kwd("DSPATR(MDT)"),
+  cons(11, 2, "RESULT2"),
+  fld("EOK2", 4, "A", "O", 11, 30),
   cons(20, 2, "TYPE AB AT THE END"),
   cons(22, 2, "ENTER=SEND  F3=EXIT")
 ];
@@ -68,10 +76,14 @@ const RPG = [
   `dcl-f UDCDSPF workstn extdesc('${LIB}/UDCDSPF') extfile(*extdesc);`,
   "dcl-s shown char(10);",
   "dcl-s want char(10);",
+  "dcl-s shown2 char(10);",
   "shown = x'0E69410F';",
   "want = x'0E69410FC1C2';",
+  // SO + 「設通」（0x4481 0x4482）+ SI。申告なしの char 欄へそのまま置く
+  "shown2 = x'0E448144820F';",
   "dou *in03;",
   "  IN1 = shown;",
+  "  IN2 = shown2;",
   "  exfmt UDCR;",
   "  if IN1 = want;",
   "    EOK = 'SAME';",
@@ -81,6 +93,11 @@ const RPG = [
   "    EOK = 'DIFF';",
   "  endif;",
   "  EIN1 = IN1;",
+  "  if IN2 = shown2;",
+  "    EOK2 = 'SAME';",
+  "  else;",
+  "    EOK2 = 'DIFF';",
+  "  endif;",
   "enddo;",
   "*inlr = *on;",
   "return;"

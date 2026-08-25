@@ -37,6 +37,9 @@ const PORT = Number(process.env.PORT ?? 3499);
 
 const IN1 = { row: 3, col: 30 };
 const EOK_ROW = 5, ECHO_ROW = 7;
+// **DBCS 種別を申告していない欄（`A`）に DBCS データが入っている場合**（`DSPATR(MDT)` 付き）。
+// 打鍵しなくても送り返されるので、端末が保持している値がそのまま届く。
+const EOK2_ROW = 11;
 
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -135,6 +138,16 @@ try {
   log(`  画像: ${shot}`);
   check(eok !== "NONE", `欄がホストへ送り返されている（実際 ${JSON.stringify(eok)}）`);
   check(eok === "SAME", `外字が壊れずに届く（実際 ${JSON.stringify(eok)}）`);
+
+  // --- SBCS 申告の欄に入った DBCS データ（SO/SI）も原本のまま返るか ---
+  log(`\n### DBCS 種別を申告していない欄（SO/SI 入り）`);
+  const eok2 = (await line(EOK2_ROW)).slice(29, 33).trim();
+  // **画面にも中身が出ていること。** 値を生バイトで運ぶ以上、表示はセルから組み立て直さないと
+  // 欄が真っ白になる（送信は直っても人には読めない、という直し方をしない）。
+  const in2 = await page.locator(`input.grid-input[data-field="f9c30"]`).inputValue();
+  log(`  RESULT2=${JSON.stringify(eok2)} / 欄の表示=${JSON.stringify(in2)}`);
+  check(eok2 === "SAME", `SO/SI 込みで原本のバイトが返る（実際 ${JSON.stringify(eok2)}）`);
+  check(/[ぁ-んァ-ン一-龠]/.test(in2), `欄に日本語が表示されている（実際 ${JSON.stringify(in2)}）`);
 
   await page.keyboard.press("F3");
   await sleep(1500);
