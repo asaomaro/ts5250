@@ -85,6 +85,8 @@ export interface InternalField {
   dbcsType?: "pure" | "open" | "either";
   /** 継続入力フィールドの区間の役割（FCW 0x8601/0x8603/0x8602 由来。undefined = 単独欄） */
   continued?: ContinuedPart;
+  /** カーソル送り先の欄番号（FCW 0x88nn 由来。undefined = 画面順どおり） */
+  cursorProgression?: number;
 }
 
 /**
@@ -755,7 +757,8 @@ export class ScreenBuffer {
     ffw: number,
     attrByte: number,
     dbcsType?: "pure" | "open" | "either",
-    continued?: ContinuedPart
+    continued?: ContinuedPart,
+    cursorProgression?: number
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -774,7 +777,8 @@ export class ScreenBuffer {
       attrByte,
       mdt: (ffw & FFW.MDT) !== 0,
       ...(dbcsType !== undefined ? { dbcsType } : {}),
-      ...(continued !== undefined ? { continued } : {})
+      ...(continued !== undefined ? { continued } : {}),
+      ...(cursorProgression !== undefined ? { cursorProgression } : {})
     });
   }
 
@@ -1123,6 +1127,8 @@ export class ScreenBuffer {
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       // 区間をまたぐカーソル移動・Field Exit を web-ui / MCP が組み立てるために出す
       if (f.continued !== undefined) field.continued = f.continued;
+      // カーソル送り（FLDCSRPRG）。移動を組み立てるのは UI 側
+      if (f.cursorProgression !== undefined) field.cursorProgression = f.cursorProgression;
       return field;
     });
 

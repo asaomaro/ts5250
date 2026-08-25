@@ -355,10 +355,18 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-keystroke-rul
 | `build-keytest.mjs` | `AS400_LIB` に `KEYDSPF`/`KEYPGM` を作る（冪等）。`CA03` / `CA12`（データを送らない）と `CF06`（送る）、入力欄 `IN1`〜`IN3`（`IN1` に **`FLDCSRPRG(IN3)`**）、受け取った値を出す `EKEY`/`EIN1`〜`EIN3` を並べる。 |
 | `verify-aid-data-mask.mjs` | 回帰（core 直・実機・9 項目）。**描画は関係ない**ので `Session5250` で直に見る。SOH の 24 ビットを**生レコードから独立にパース**して申告を確かめ、F12（CA）で欄データが届かない／F6（CF）と Enter では届くことを `HOST RECEIVED` で見る。⚠ 直す前の実測: F12 で `IN1="AAA"` がホストへ届いていた。 |
 
+| `verify-browser-cursor-progression.mjs` | 回帰 E2E（実ブラウザ＋実機・5 項目）。`FLDCSRPRG(IN3)` を書いた `IN1` から **Tab で `IN3` へ飛ぶ**／指定の無い欄は画面順どおり／**欄が満杯になった自動送りでも指定先へ行く**。⚠ 直す前の実測: どちらも画面順の次（`IN2`＝`f5c30`）へ行っていた。 |
+
 ```sh
 node --env-file=.env --env-file=.env.verify scripts/build-keytest.mjs        # 初回/再作成
 node --env-file=.env --env-file=.env.verify scripts/verify-aid-data-mask.mjs
+npm run build -w @ts5250/web-ui
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-cursor-progression.mjs
 ```
+
+カーソル送りのワイヤ値は欄#1 に `0x8803`（下位バイト＝送り先の**欄番号**）。
+**Shift+Tab には効かせていない**——tn5250j は逆引きするが GNU tn5250 はせず、
+どちらが実機と同じか確かめる手段が無いため（ACS 不可）。
 
 実機で採った SOH: `len=7 本体=[00 00 00 18 00 08 04]` → エラー行 24、マスクは **F3 と F12 だけ**。
 

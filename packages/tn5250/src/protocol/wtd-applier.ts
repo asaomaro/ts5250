@@ -604,6 +604,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   // FCW（上位 2 ビットが 10）: DBCS 種別等を解釈（SC30-3533 / tn5250 の ideographic FCW）
   let dbcsType: "pure" | "open" | "either" | undefined;
   let continued: ContinuedPart | undefined;
+  let cursorProgression: number | undefined;
   while (r.remaining >= 2 && (r.peek() & 0xc0) === 0x80) {
     const fcw = r.u16();
     if (fcw === 0x8200) dbcsType = "pure"; // ideographic-only
@@ -624,12 +625,20 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     else if (fcw === 0x8601) continued = "first";
     else if (fcw === 0x8603) continued = "middle";
     else if (fcw === 0x8602) continued = "last";
+    // **カーソル送り（CURSOR_PROGRESSION_ENTRY_FIELD = 0x88nn）**。DDS の `FLDCSRPRG`。
+    // 下位バイトが**送り先の欄番号**（1 始まり・画面順）。ホストが入力の順序をアプリの都合で
+    // 決める仕組みで、無視すると「Tab で飛ぶ先が実機と違う」ことになる。
+    // 参照実装 2 つとも下位バイトをそのまま持つ（GNU tn5250 `session.c` の
+    // `nextfieldprogressionid`、tn5250j `ScreenField.setFCWs` の `cursorProg = fcw2`）。
+    //
+    // 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
+    else if ((fcw & 0xff00) === 0x8800) cursorProgression = fcw & 0x00ff;
   }
   const attr = r.u8();
   const length = r.u16();
   buf.setAttr(addr, attr);
   const fieldStart = addr + 1;
-  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued);
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression);
   return fieldStart;
 }
 
