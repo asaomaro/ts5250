@@ -130,3 +130,59 @@ describe("外字を含む DBCS 欄の往復（実機 UDCPGM の再現）", () =>
     expect(sentinelByte([...back][1]!)).toBe(0x9f);
   });
 });
+
+/**
+ * **DBCS 種別の申告が無い欄に SO/SI 入りのデータが載る場合**（日本語機の char 欄）。
+ *
+ * 値を 1 文字ずつの復号値で持つと、送信時に codec が SO/SI を付け直して**2 バイト増え**、
+ * 欄長が固定なので末尾が落ちる。実機（`ASAOLIB/UDCPGM` の `IN2`）で、打鍵せず送り返すだけで
+ * ホストが `DIFF` を返すことを確認した。門番は申告ではなく**中身**で決める。
+ */
+describe("申告の無い欄に載った DBCS データ", () => {
+  /** SO + 「あい」(0x4481 0x4482) + SI + "AB" が SBCS 申告（FCW 無し）の欄に入っている */
+  function sbcsFieldWithDbcs(): ScreenBuffer {
+    const b = new ScreenBuffer();
+    applyDataStream(
+      Uint8Array.from([
+        ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x20,
+        ORDER.SBA, 3, 9, ORDER.SF, 0x40, 0x20, 0x20, 0x00, 0x0c,
+        ORDER.SBA, 3, 10, 0x0e, 0x44, 0x81, 0x44, 0x82, 0x0f, 0xc1, 0xc2
+      ]),
+      b,
+      codec,
+      () => {}
+    );
+    return b;
+  }
+  const ORIGINAL = [0x0e, 0x44, 0x81, 0x44, 0x82, 0x0f, 0xc1, 0xc2];
+
+  it("**触らず送り返せば原本のバイトのまま**（SO/SI が増えない）", () => {
+    const b = sbcsFieldWithDbcs();
+    b.setFieldValue(b.fieldByIndex(1), b.snapshot("s").fields[0]!.value);
+    const d = dataOf(buildReadMdtResponse(b, codec, AID.ENTER, { row: 3, col: 10 }).record);
+    expect(d.slice(6)).toEqual(ORIGINAL);
+  });
+
+  it("`dbcsContent` を立てて UI に「中身が DBCS」だと伝える（表示はセルから組み立てる）", () => {
+    const f = sbcsFieldWithDbcs().snapshot("s").fields[0]!;
+    expect(f.dbcsType).toBeUndefined(); // ホストの申告は SBCS のまま
+    expect(f.dbcsContent).toBe(true);
+  });
+
+  it("SO/SI の無い普通の SBCS 欄には立てない（従来どおりの値）", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(
+      Uint8Array.from([
+        ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x20,
+        ORDER.SBA, 3, 9, ORDER.SF, 0x40, 0x20, 0x20, 0x00, 0x04,
+        ORDER.SBA, 3, 10, 0xc1, 0xc2
+      ]),
+      b,
+      codec,
+      () => {}
+    );
+    const f = b.snapshot("s").fields[0]!;
+    expect(f.dbcsContent).toBeUndefined();
+    expect(f.value).toBe("AB");
+  });
+});

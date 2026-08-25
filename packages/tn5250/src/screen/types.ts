@@ -122,6 +122,16 @@ export interface Field {
   dupEnable?: boolean;
   dbcsType?: "pure" | "open" | "either";
   /**
+   * **ホストは DBCS 種別を申告していないのに、中身に SO/SI 入りの DBCS データが載っている欄。**
+   *
+   * 日本語機では珍しくない（DDS で `A` と書いた char 欄にバイトをそのまま置くプログラム）。
+   * この欄の `value` は `dbcsType` 付きと同じく**生バイトのセンチネル列**で運ぶ
+   * （復号値に直すと送信時に SO/SI が付け直されて桁が増え、欄からあふれる）。
+   * 表示・編集はセルから組み立てること。**入力の型制限は `dbcsType` のまま**——
+   * ホストが SBCS と申告した欄に DBCS を打てるようにはしない。
+   */
+  dbcsContent?: boolean;
+  /**
    * 継続入力フィールド（EDTMSK 等でホストが編集文字を挟んで分割した欄）で、この欄が
    * 何番目の区間かを表す。**単独欄では undefined**（`dbcsType` / `adjust` と同じ流儀）。
    *

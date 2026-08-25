@@ -904,7 +904,14 @@ export class ScreenBuffer {
     // 不整合（{ だけ・} だけ）も、全角ランからの再構成では表せず落ちてしまうため、生バイトを
     // 保持して送信時にそのまま戻す。編集された欄（setFieldValue が SBCS セルに書き換える＝
     // 構造セルが無い）は従来どおり論理値を返し、codec.encode が SO/SI を付け直す。
-    if (field.dbcsType !== undefined && this.hasDbcsStructure(field)) {
+    //
+    // **門番は「ホストが DBCS 種別を申告したか」ではなく「中身に SO/SI があるか」。**
+    // 日本語機では、DDS で `A`（SBCS）と書かれた欄に SO/SI 込みの DBCS データがそのまま
+    // 載ってくることがある（char 欄にバイトを置くだけのプログラム）。申告で門番していたため、
+    // その欄は 1 文字ずつの復号値になり、**送信時に codec が SO/SI を付け直して 2 バイト増える**
+    // ——欄長が固定なので末尾が落ち、ホストには別の値が届いていた
+    // （実機 `ASAOLIB/UDCPGM` の `IN2` で確認: 打鍵せず送り返すだけで `DIFF`）。
+    if (this.hasDbcsStructure(field)) {
       return this.dbcsRawFieldValue(field);
     }
     // **SBCS 欄の埋め込み属性はセンチネル文字で返す**（値の中で識別・移動できるように）。
@@ -1137,6 +1144,8 @@ export class ScreenBuffer {
       if ((f.ffw & FFW.MANDATORY_ENTER) !== 0) field.mandatoryEnter = true;
       if ((f.ffw & FFW.DUP_ENABLE) !== 0) field.dupEnable = true;
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
+      // **申告は無いのに中身が DBCS の欄**。値は生バイトで運ぶので、表示はセルから組み立てる
+      else if (this.hasDbcsStructure(f)) field.dbcsContent = true;
       // 区間をまたぐカーソル移動・Field Exit を web-ui / MCP が組み立てるために出す
       if (f.continued !== undefined) field.continued = f.continued;
       // カーソル送り（FLDCSRPRG）。移動を組み立てるのは UI 側
