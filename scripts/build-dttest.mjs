@@ -16,7 +16,7 @@
 // `QDDSSRC(DTMDSPF)` へ入れ、`CRTDSPF` / `CRTBNDRPG` を掛けて作り直した（対話サインオンを
 // 繰り返さないため。QMAXSIGN 配慮）。**DDS の中身はこのファイルが真実**で、実機の
 // ソースメンバーと 1 行ずつ一致することを確認済み。
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 
 const LIB = process.env.AS400_LIB ?? "TESTLIB", DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
@@ -71,7 +71,17 @@ const CASES = [
   { nm: "D8Z", row: 19, lab: "8桁 EDTWRD(0止め)", f: (r) => numf("D8Z", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')"]) },
   { nm: "D8M", row: 20, lab: "8桁 EDTWRD+MSK 両方保護", f: (r) => numf("D8M", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    &  &  ')"]) },
   { nm: "D8B", row: 21, lab: "8桁 MSK 片方だけ保護", f: (r) => numf("D8B", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    &     ')"]) },
-  { nm: "D8Y", row: 22, lab: "8桁 EDTCDE(Y)", f: (r) => numf("D8Y", 8, 0, "B", r, 24, ["EDTCDE(Y)"]) }
+  { nm: "D8Y", row: 22, lab: "8桁 EDTCDE(Y)", f: (r) => numf("D8Y", 8, 0, "B", r, 24, ["EDTCDE(Y)"]) },
+
+  /**
+   * **色と下線を付けた 8 桁の日付欄**（利用者の実画面と同じ形）。
+   *
+   * 区切り文字（`/`）は**保護された別の欄**として送られてくるので、
+   *   - 色: 区間の色が区切りの桁で既定色（緑）に戻っていないか
+   *   - 下線: 区切りの下線が入力欄の下線と 1 本に繋がっているか
+   * を見るには、**既定色・下線無しでない**欄が要る（素の欄では差が出ない）。
+   */
+  { nm: "D8U", row: 23, lab: "8桁 MSK + 色 + 下線", f: (r) => numf("D8U", 8, 0, "B", r, 24, ["EDTWRD('0   /  /  ')", "EDTMSK('    &  &  ')", "COLOR(WHT)", "DSPATR(UL)"]) }
 ];
 
 const head = () => [rec("DTMR"), kwd("CA03(03)"), constant(1, 3, "DATE / TIME MASK TEST"), constant(1, 50, "F3=exit")];
@@ -143,8 +153,23 @@ async function connectHost(sys, password) {
   throw last;
 }
 
-const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
+// **接続先は環境変数を優先する。** `connections.json` は古い検証用の設定で、実機が
+// 載っていないことがある（実際に `AS400_SYSTEM` の名前が無く落ちた）。名前で見つからなければ
+// `AS400_HOST` / `AS400_USER` から組み立てる（他の build-*.mjs と同じ受け取り方）。
+const conns = existsSync("connections.json")
+  ? JSON.parse(readFileSync("connections.json", "utf8"))
+  : { systems: [] };
+const sys =
+  conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")) ??
+  (process.env.AS400_HOST
+    ? {
+        host: process.env.AS400_HOST,
+        port: 23,
+        ccsid: Number(process.env.AS400_CCSID ?? 930),
+        signon: { user: process.env.AS400_USER }
+      }
+    : undefined);
+if (!sys) { log("接続先が見つかりません（AS400_HOST か connections.json を設定してください）"); process.exit(1); }
 const password = process.env.AS400_PASSWORD;
 if (!password) { log("AS400_PASSWORD が未設定です"); process.exit(1); }
 const session = await connectHost(sys, password);
@@ -183,7 +208,9 @@ try {
 
   const RPG = [
     "**free",
-    "dcl-f DTMDSPF workstn;",
+    // **ライブラリーを名指しする**（`extdesc` はコンパイル時の記述、`extfile` は実行時のファイル）。
+    // *LIBL 任せだと `ADDLIBLE` の効かないコンパイル・ジョブで RNF2120 になる（実際に踏んだ）。
+    `dcl-f DTMDSPF workstn extdesc('${LIB}/DTMDSPF') extfile(*extdesc);`,
     "dou *in03;",
     "  exfmt DTMR;",
     "enddo;",

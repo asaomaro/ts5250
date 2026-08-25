@@ -192,7 +192,19 @@ body {
 .c-yellow { color: var(--t-yellow); --cell: var(--t-yellow); }
 .c-pink { color: var(--t-pink); --cell: var(--t-pink); }
 .c-blue { color: var(--t-blue); --cell: var(--t-blue); }
-.a-underline { text-decoration: underline; text-underline-offset: 2px; }
+/*
+ * **`border-bottom` で引く（`text-decoration: underline` は使わない）。**
+ *
+ * EDTMSK で分解された継続入力欄（`年月度` 欄の `22/22`）は、区切り文字 `/` だけが
+ * 欄の外＝入力欄でない素の `.grid-span` になる。`.grid-input.a-underline`（下記）は
+ * 二重下線を避けるため `border-bottom` で下線を引いており、こちらだけ
+ * `text-decoration: underline` のままだと、
+ *   1. 縦位置が揃わない（text-underline-offset とボーダーの位置は別物）
+ *   2. ブラウザ既定の text-decoration-skip-ink が `/` の斜めの画素を避けて線を欠く
+ * の二重の理由で `/` の下線だけ浮いて見える（利用者のスクリーンショット報告）。
+ * ACS は 1 本の連続した線に見えるので、入力欄と同じ `border-bottom` に揃える。
+ */
+.a-underline { border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent); }
 /* 反転(背景色): 背景をセル色、文字を CRT 地色にして前景/背景を入れ替える
    （旧実装は background:currentColor で文字色＝背景色になり文字が見えなかった）。 */
 /* --cell-bg は input 側（.grid-input）が背景を受け取るための橋渡し。
