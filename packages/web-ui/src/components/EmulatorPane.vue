@@ -211,6 +211,9 @@ function moveCell(dir: Dir): void {
 // 満杯時は欄外へ論理カーソルが出て input が blur 済み（activeElement がペイン）なので、
 // focusByOffset ではなく満杯欄の index から次欄を特定する。
 function onFieldFull(fieldIndex: number): void {
+  // ホストが指定したカーソル送り（FLDCSRPRG）が最優先。無ければ画面順の次へ
+  const to = progressionStop(fieldIndex);
+  if (to) { focusStop(to); return; }
   const flds = editableFields();
   const els = editableInputs();
   const cur = flds.findIndex((f) => f.index === fieldIndex);
@@ -314,6 +317,31 @@ function tabStops(): HTMLElement[] {
   );
 }
 
+/**
+ * **カーソル送り（FLDCSRPRG / FCW 0x88nn）の行き先。**
+ *
+ * ホストが「この欄を出たら画面順の次ではなくこの欄へ」と指定してくる仕組み。
+ * 入力の順序をアプリの都合で決める画面（伝票の明細と合計を行き来する等）で使われ、
+ * 無視すると **Tab で飛ぶ先が実機と違う**。
+ *
+ * 参照実装 2 つとも「Tab（次の欄）」と「満杯・Field Exit での自動送り」の両方で見る
+ * （GNU tn5250 `display.c` の `tn5250_display_set_cursor_next_field` と
+ * `tn5250_display_interactive_addch`、tn5250j `ScreenFields.gotoFieldNext`）。
+ * 送り先が無い・保護欄なら**画面順どおりに倒す**（原典も見つからなければ `sf.next` へ落ちる）。
+ *
+ * ⚠ **Shift+Tab（逆方向）には効かせない。** tn5250j は逆引き（自分を指している欄を探す）まで
+ * するが GNU tn5250 は前方だけで、**どちらが実機と同じかを確かめる手段が無い**（ACS 不可）。
+ * 確かめられないほうは実装しない側へ倒す（`fieldSign` の num-only と同じ判断）。
+ */
+function progressionStop(fromFieldIndex: number): HTMLElement | undefined {
+  const from = snapshot.value?.fields.find((f) => f.index === fromFieldIndex);
+  const to = from?.cursorProgression;
+  if (to === undefined) return undefined;
+  const target = snapshot.value?.fields.find((f) => f.index === to);
+  if (!target || target.protected) return undefined;
+  return inputForSlice(target.index, 0);
+}
+
 /** タブ停止点へフォーカスする（入力欄なら先頭桁にキャレットを置く） */
 function focusStop(el: HTMLElement | undefined): void {
   if (!el) return;
@@ -343,6 +371,12 @@ function focusByOffset(delta: number): void {
   }
   const cur = stops.indexOf(document.activeElement as HTMLElement);
   if (cur !== -1) {
+    // ホストがカーソル送りを指定した欄からの前進だけは、その行き先を優先する
+    const active = stops[cur];
+    if (delta > 0 && active instanceof HTMLInputElement) {
+      const to = progressionStop(Number(active.dataset["fieldIndex"]));
+      if (to) { focusStop(to); return; }
+    }
     focusStop(stops[(cur + delta + stops.length) % stops.length]);
     return;
   }

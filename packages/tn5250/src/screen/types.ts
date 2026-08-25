@@ -129,6 +129,15 @@ export interface Field {
    * 連結して送られる（`read-response.ts`）。UI はここを見て区間をまたぐ移動を組み立てる。
    */
   continued?: ContinuedPart;
+  /**
+   * **カーソル送り**（FCW `0x88nn`。DDS の `FLDCSRPRG`）。この欄を出たとき、
+   * 画面順の次ではなく**この番号の欄**へ移る。番号は `index` と同じ 1 始まりの欄番号。
+   *
+   * ホストが「入力の順序」をアプリの都合で決める仕組みで、無指定なら `undefined`
+   * （`dbcsType` / `adjust` と同じ流儀）。実機で `FLDCSRPRG(IN3)` を書いた欄が
+   * `0x8803` で来ることを実測済み。
+   */
+  cursorProgression?: number;
   mdt: boolean;
   value: string;
 }
