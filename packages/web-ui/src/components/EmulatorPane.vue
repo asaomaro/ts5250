@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { AidKey, ScreenSnapshot } from "@ts5250/tn5250";
+import type { AidKey, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
 import LogPanel from "./LogPanel.vue";
@@ -26,6 +26,7 @@ import { isKatakanaCcsid } from "../hostCodePages.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved } from "../composables/opMessages.js";
 import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
+import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
 
 const props = defineProps<{ sessionId: string; focused: boolean }>();
 /** この画面（セッション）の実効表示設定＝セッション上書き ?? アプリ既定 */
@@ -314,7 +315,38 @@ function tabStops(): HTMLElement[] {
     paneEl.value.querySelectorAll<HTMLElement>(
       'input.grid-input:not([readonly])[data-slice="0"], button.fkey-btn'
     )
-  );
+    // **EDTMSK で分割された欄は先頭区間だけを停止点にする。** ホストは区切り文字（`/`）を挟んだ
+    // 別々の欄として送ってくるが、ACS は並び全体で**1 つの入力欄**なので、区切りごとに Tab が
+    // 止まるのは実機と違う（`22/22` の日付欄で Tab を 3 回押さないと次の項目へ行けなかった）。
+    // 打鍵の自動送り（満杯 → 次区間）は別経路（`onFieldFull`）なので、ここを絞っても影響しない。
+  ).filter((el) => {
+    const f = fieldOfStop(el);
+    return f === undefined || isTabStopField(f);
+  });
+}
+
+/** 停止点の入力欄が担当している欄（ボタン等は undefined） */
+function fieldOfStop(el: HTMLElement): Field | undefined {
+  if (!(el instanceof HTMLInputElement)) return undefined;
+  const idx = Number(el.dataset["fieldIndex"]);
+  return snapshot.value?.fields.find((f) => f.index === idx);
+}
+
+/**
+ * いまフォーカスがある停止点の位置。**分割欄の中間・最終区間に居るときは、その並びの
+ * 先頭区間を現在地とみなす**（停止点から外してあるので素の `indexOf` では見つからない）。
+ * こうすると Tab は並びの次の欄へ、Shift+Tab は並びの前の欄へ——単独欄と同じ動きになる。
+ */
+function currentStopIndex(stops: HTMLElement[]): number {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) return -1;
+  const direct = stops.indexOf(active);
+  if (direct !== -1) return direct;
+  const f = fieldOfStop(active);
+  if (!f || f.continued === undefined) return -1;
+  const first = continuedRunOf(snapshot.value?.fields ?? [], f)[0];
+  if (!first) return -1;
+  return stops.findIndex((el) => fieldOfStop(el)?.index === first.index);
 }
 
 /**
@@ -369,10 +401,10 @@ function focusByOffset(delta: number): void {
     onCursor(1, 1);
     return;
   }
-  const cur = stops.indexOf(document.activeElement as HTMLElement);
+  const cur = currentStopIndex(stops);
   if (cur !== -1) {
     // ホストがカーソル送りを指定した欄からの前進だけは、その行き先を優先する
-    const active = stops[cur];
+    const active = document.activeElement instanceof HTMLInputElement ? document.activeElement : stops[cur];
     if (delta > 0 && active instanceof HTMLInputElement) {
       const to = progressionStop(Number(active.dataset["fieldIndex"]));
       if (to) { focusStop(to); return; }

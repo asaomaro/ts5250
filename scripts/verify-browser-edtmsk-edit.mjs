@@ -67,6 +67,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, dev
 await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://localhost:${PORT}` });
 
 const sel = (col) => `input.grid-input[data-field="f${ROW}c${col}"]`;
+const focusedField = () => page.evaluate(() => document.activeElement?.getAttribute?.("data-field") ?? undefined);
 const segValues = async () => Promise.all(SEG.map(async (c) => (await page.locator(sel(c)).inputValue()).replace(/\s+$/, "")));
 const shown = async () => (await segValues()).join("/");
 async function focusSeg(i, caret = 0) {
@@ -203,6 +204,30 @@ try {
   const afterPaste = await shown();
   log(`  "2026/08/25" をペースト: ${afterPaste}`);
   check(afterPaste === "2026/08/25", `区切り込みでも桁がずれない（実際 ${afterPaste}）`);
+
+  // --- ⑤ Tab は区間ごとに止まらない（並び全体で 1 つの欄） ---
+  log("\n### ⑤ Tab の移動単位");
+  const segIds = SEG.map((c) => `f${ROW}c${c}`);
+  await focusSeg(0);
+  await page.keyboard.press("Tab");
+  await sleep(250);
+  const tab1 = await focusedField();
+  log(`  先頭区間で Tab → ${tab1}（区間は ${segIds.join(" ")}）`);
+  check(!segIds.slice(1).includes(tab1 ?? ""), `中間・最終区間で止まらない（実際 ${tab1}）`);
+
+  await focusSeg(1);
+  await page.keyboard.press("Tab");
+  await sleep(250);
+  const tab2 = await focusedField();
+  log(`  中間区間で Tab → ${tab2}`);
+  check(!segIds.includes(tab2 ?? ""), `並びの外へ出る（実際 ${tab2}）`);
+
+  await focusSeg(2);
+  await page.keyboard.press("Shift+Tab");
+  await sleep(250);
+  const tab3 = await focusedField();
+  log(`  最終区間で Shift+Tab → ${tab3}`);
+  check(!segIds.includes(tab3 ?? ""), `後戻りも並びを 1 つとして飛び越す（実際 ${tab3}）`);
 
   const shot = join(OUT, "edtmsk-edit.png");
   await page.locator(".pane").screenshot({ path: shot });
