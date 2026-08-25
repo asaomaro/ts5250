@@ -393,6 +393,26 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-udc-roundtrip
 > 変換表が U+E000〜U+F83C の 6205 個を使っており、**256 連続の空きが 1 つも無い**。
 > 単独ローサロゲート（U+DC00+byte）へ移した理由は `attr-sentinel.ts` の JSDoc を参照。
 
+## EDTMSK 分割欄（区切り文字をまたぐ編集・色・下線。実機 / `AS400_LIB`）
+
+ホストは `EDTMSK` で割った数値欄を、区切り文字（`/`）を挟んだ**複数の別々の欄**として送る
+（`Field.continued` = first/middle/last）。ACS はこれを**まるごと 1 つの入力欄**として見せる
+——色も下線も区切りで途切れず、Backspace/Delete は区切りをまたいで詰め直す。
+
+| スクリプト | 内容 |
+|---|---|
+| `build-dttest.mjs` | `AS400_LIB` に `DTMDSPF`/`DTMPGM` を作る。**`D8U`**（8 桁 `EDTWRD('0   /  /  ')` ＋ `EDTMSK` ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`）が色と下線の検証用——**素の欄では差が出ない**。⚠ 接続先は環境変数（`AS400_HOST`）を優先し、`connections.json` に無くても動く。⚠ RPG の `dcl-f` は `extdesc` でライブラリーを名指しする（*LIBL 任せだとコンパイルが落ちる）。 |
+| `verify-browser-edtmsk-edit.mjs` | 回帰 E2E（実ブラウザ＋実機・11 項目）。区切りの**色が入力欄と同じ**／**下線が `border-bottom` で同じ高さ**／末尾からの **Backspace ×3 が区間をまたいで詰まる**／先頭の **Delete が後続区間から桁を引き寄せる**／`2026/08/25` を**区切り込みでペーストしても桁がずれない**。⚠ 8 桁打つと自動送りで欄を出るので、Backspace の前に最終区間へ置き直すこと（さもないと別の欄を消す）。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-dttest.mjs        # 初回/再作成（数分）
+npm run build -w @ts5250/web-ui
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-edtmsk-edit.mjs
+```
+
+直す前の実測: 区切りの色 `rgb(26,127,55)`（緑・入力欄は白）／下線なし／Backspace ×3 で
+`2026/08/`（区切りで止まる）／Delete は先頭区間だけ／ペーストは `2026/00/8` にずれる。
+
 ## IFS ファイルブラウザ（実機 / /home/USER）
 
 | スクリプト | 内容 |
