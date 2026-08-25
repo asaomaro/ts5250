@@ -140,3 +140,59 @@ describe("CLEAR UNIT と罫線・窓の共存（S9R167D 実機トレース）", 
     expect(buf.snapshot("t", false).gui).toBeUndefined();
   });
 });
+
+/**
+ * **CLEAR UNIT ALTERNATE も窓は閉じる（2026-08-25・実機で再現した残骸）。**
+ *
+ * ~~CUA では GUI 構造体を一切消さない~~ ← **窓を残すと画面に残骸が出る。**
+ *
+ * 罫線を守るために窓まで残していたのは `closeWindowsAndSelections()`（罫線を対象外にする）が
+ * まだ無かった頃の名残で、`20260728-datastream-gui-bugfixes` で観測されたのは
+ * **罫線が消える症状だけ**。窓まで残す必要は一度も観測されていない。
+ *
+ * 実機で確かめた（`scripts/host-src/dscmd.c` の `WINCUA`。DSM に背景 → CREATE WINDOW →
+ * CLEAR UNIT ALTERNATE を順に出させる）:
+ *
+ * ```
+ * 受信 04 11 00 00 11 05 0a 15 00 16 d9 51 …   ← 窓 (5,10) 20x5 見出し "WN"
+ * 受信 04 20 00                                 ← CLEAR UNIT ALTERNATE
+ * 受信 04 11 00 00 11 02 02 …AFTER CUA…         ← ホストは画面を作り直している
+ * gui.windows = [{ row: 5, col: 10, width: 20, height: 5, title: "WN" }]  ← **残ったまま**
+ * ```
+ *
+ * 参照実装 2 つ（tn5250 `dbuffer.c` / tn5250j `Screen5250`）も CUA で窓を閉じる。
+ */
+describe("CLEAR UNIT ALTERNATE と窓（実機 WINCUA）", () => {
+  /** 実機で出させたのと同じ CREATE WINDOW（境界＋見出し "WN"） */
+  const createWindow = wdsf(0x51, [
+    0x00, 0x00, 0x00, 0x05, 0x14,
+    0x05, 0x01, 0x80, 0x38, 0x38,
+    0x08, 0x10, 0x00, 0x00, 0x00, 0x00, 0xe6, 0xd5
+  ]);
+
+  it("窓は閉じる（残すと画面に残骸が出る。実機で再現）", () => {
+    const buf = new ScreenBuffer();
+    const stream = [
+      ...writeToDisplay([ORDER.SBA, 5, 10, ...createWindow]),
+      ESC,
+      COMMAND.CLEAR_UNIT_ALTERNATE,
+      0x00
+    ];
+    applyDataStream(Uint8Array.from(stream), buf, codec, () => {});
+    expect(buf.snapshot("t", false).gui?.windows ?? []).toEqual([]);
+  });
+
+  it("**罫線は巻き添えにしない**（窓を閉じても罫線は残る＝KSN20 の回帰）", () => {
+    const buf = new ScreenBuffer({ alternate: "27x132" });
+    const stream = [
+      ...writeToDisplay([...wdsf(0x60, gridDrawBody), ORDER.SBA, 5, 10, ...createWindow]),
+      ESC,
+      COMMAND.CLEAR_UNIT_ALTERNATE,
+      0x00
+    ];
+    applyDataStream(Uint8Array.from(stream), buf, codec, () => {});
+    const gui = buf.snapshot("t", false).gui;
+    expect(gui?.gridLines).toHaveLength(1);
+    expect(gui?.windows ?? []).toEqual([]);
+  });
+});

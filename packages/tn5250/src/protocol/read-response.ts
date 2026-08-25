@@ -140,64 +140,192 @@ export function buildReadMdtImmediateAltResponse(
 }
 
 /**
- * **READ IMMEDIATE（0x72）応答。**
+ * **READ INPUT FIELDS（0x42）／ READ IMMEDIATE（0x72）応答。**
  *
- * 形は Read MDT Fields と同じ（行・桁・AID ＋ SBA ＋ 欄データ）だが、中身が 2 つ違う:
+ * **この 2 つだけ形式が違う。** `0x52`/`0x82`/`0x83` は `SBA(行,桁) + 値` を MDT の立った欄に
+ * ついてだけ並べるが、`0x42`/`0x72` は
  *
- * 1. **AID は 0**。利用者が押した鍵ではなく、ホストが「いま送れ」と言っているだけ
- * 2. **欄ごとの MDT を見ない**——`master MDT`（画面のどこかが変更されたか）が立っていれば
- *    **全ての欄**を送る。立っていなければ**欄を 1 つも送らない**（行・桁・AID だけ）
+ *   - **SBA を付けない**
+ *   - **画面順に全ての欄**（欄ごとの MDT は見ない。門番は画面単位の MDT だけ）
+ *   - **欄長ぶんそのまま**（NUL は 0x40＝空白へ。**末尾も落とさない**）
  *
- * 原典 GNU tn5250 `session.c` の `tn5250_session_read_immediate` →
- * `tn5250_session_send_fields(This, 0)` の `case CMD_READ_IMMEDIATE`:
+ * という**位置で区切る平坦な並び**になる。原典 GNU tn5250 `session.c`
+ * `tn5250_session_send_field` が `CMD_READ_INPUT_FIELDS` と `CMD_READ_IMMEDIATE` を
+ * **同じ枝**で扱っているところがそれ:
  *
  * ```c
+ * case CMD_READ_INPUT_FIELDS:
  * case CMD_READ_IMMEDIATE:
- *     if (tn5250_dbuffer_mdt(dbuffer)) {          // ← 画面単位の門番
- *         field = dbuffer->field_list;
- *         do { tn5250_session_send_field(...); field = field->next; }  // 欄ごとの MDT は見ない
- *         while (field != dbuffer->field_list);
- *     }
- *     break;
+ *     for (n = 0; n < size; n++)
+ *         tn5250_buffer_append_byte(buf, data[n] == 0 ? 0x40 : data[n]);
+ *     break;                                  // ← SBA なし・欄長そのまま・末尾を落とさない
  * ```
  *
- * **`master MDT` は「MDT の立った欄が 1 つでもあるか」と同値**（`field.c` の
- * `tn5250_field_set_mdt` と同時に `tn5250_dbuffer_set_mdt` が呼ばれる）。
+ * tn5250j も同じ（`ScreenFields.readFormatTable` は `CMD_READ_INPUT_FIELDS` で
+ * `sf.mdt` の絞り込みも `setSBA` も通らない）。
  *
- * ## 2 実装の突き合わせ（`20260822-read-immediate`）
+ * 違いは AID と門番だけ:
  *
- * tn5250j は **`0x72` を扱わず**、`0x83`（READ MDT IMMEDIATE ALT）だけを実装している
- * （`tnvt.readImmediate` → `ScreenFields.readFormatTable`）。**矛盾ではなく別のコマンド**——
- * 名前どおり `0x83` は MDT の欄だけを送る（`sf.mdt` で絞る）。**両者が一致するのは**
- * 「`masterMDT` が門番」「待たずに即送信」「レコードの opcode は PUT_GET」の 3 点。
+ * | | 0x42 | 0x72 |
+ * |---|---|---|
+ * | AID | 利用者が押した鍵（読み取りは入力待ちに入る） | **0**（待たずに即送信） |
+ * | 門番 | 画面単位の MDT ＋ `send_data_for_aid_key` | 画面単位の MDT |
  *
- * ⚠ tn5250j の `readImmediate` は**行・桁・AID の前置きを書いていない**
- * （同じクラスの `sendAidKey` は書いている）。手落ちと見て tn5250 側に合わせた。
+ * ## 実機で確かめた（2026-08-25・実機 / IBM i 7.3）
  *
- * ## 実機で裏を取った（2026-08-22・実機 / IBM i 7.3）
+ * ~~0x72 は実機で裏を取ってある~~ ← **往復が成立することしか見ていなかった。**
+ * DSM の `QsnReadImm` は**受け取ったバイト列を素通しで返すだけ**で、形式は検証していない。
  *
- * 通常の画面では届かないが、**IBM 自身が 0x72 を発行する API を出荷している**——
- * 動的画面管理（DSM）の `QsnReadImm`（`QSYSINC/H(QSNAPI)` に `#define QSN_READ_IMM 0x72`）。
- * これを呼ぶ C プログラムを実機に置いて発行させた（`scripts/build-rdimm.mjs` /
- * `scripts/diag-read-immediate.mjs`）。
+ * 位置と長さの分かっている試験画面（欄長 **10 / 6 / 8**、値は `"ABC"` / 未入力 /
+ * `"12345678"`）を `QsnPutOutCmd(0x11, …)` で描かせ、`0x52`（対照）・`0x42`・`0x72` を
+ * 順に発行させて、**ホストが受け取ったバイト列**を `QsnRtv*` で取り出した
+ * （`scripts/host-src/dscmd.c` の `READINP` / `READINPIMM`）。
  *
  * ```
- * 受信  12B  04 72                       ← パラメータ無し
- * 送信  34B  14 07 00 11 14 07 c3c1d3d3  ← 行20 桁7 **AID=0x00** ＋ SBA(20,7) ＋ "CALL…"
- * ホスト側  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0   ← エラー無しで受理
+ * [0x52 対照] QsnRtvFldCnt=2  fld[1] (5,10) len=3 "ABC"  fld[2] (9,10) len=8 "12345678"
+ *             → ホストが**欄へ分解できている**
+ * [0x42 生]   QsnRtvFldCnt → CPFA32E（この読み取りでは欄へ分解しない）
+ *             QsnRtvFldDta = 11050ac1c2c311090af1f2f3f4f5f6f7f8   ← 17 バイト
+ * [0x72]      QsnRtvFldCnt → CPFA32E
+ *             QsnRtvFldDta = 11050ac1c2c311070a11090af1f2f3f4f5f6f7f8  ← 20 バイト
  * ```
  *
- * 送った 24 バイトのうち**欄データ 21 バイトをホストが受け取っている**（残り 3 は行・桁・AID）。
- * 直前の Enter が `AID=0xf1` なのに対しこちらは `0x00`——**原典どおり**。
+ * **`0x42`/`0x72` ではホストは欄へ分解しない**（`QsnRtvFldCnt` が CPFA32E＝
+ * 「この入力操作では作られない情報」）。つまり**応用プログラムが欄長で切る**しかない。
+ * 欄長 10/6/8 で切るとこうなっていた（当方が SBA 付きで返していたとき）:
+ *
+ * ```
+ * 切片1(10) 11050ac1c2c311090af1   ← 期待は "ABC" ＋ 空白 7
+ * 切片2(6)  f2f3f4f5f6f7           ← 期待は 空白 6
+ * 切片3(8)  f8 ＋ 足りない 7 バイト  ← 期待は "12345678"
+ * ```
+ *
+ * **打った値と一致しない。** SBA のバイトが値として混ざり、全長も 24 に足りない。
+ * 平坦形式へ直すと 3 + 24 バイトになり、10/6/8 で切ると打った値そのものになる。
+ *
+ * ⚠ **`QsnReadInp`（API 経由の 0x42）は `CPFA306`（この装置ではサポートされない）で
+ * 出せない。** 上の `[0x42 生]` は `QsnPutInpCmd(0x42, …)` で生のコマンドとして出したもの。
+ * 通常の運用で 0x42 が届く見込みは薄いが、**届いたときに値が壊れる**ことは実測できた。
+ */
+function buildFlatFieldResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  aid: number,
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
+  const w = new ByteWriter();
+  const cur = cursor ?? buf.rowColOf(buf.cursorAddr);
+  w.u8(cur.row).u8(cur.col).u8(aid);
+
+  // **画面単位の MDT が門番**。立っていなければ欄は 1 つも送らない
+  const fields = buf.mdtFields().length > 0 ? buf.orderedFields() : [];
+  let substituted = 0;
+  for (const f of foldContinued(buf, fields)) {
+    const width = flatWidth(buf, f);
+    // 一旦別の入れ物へ書いてから**欄長ぶんに詰める**——DBCS（1 文字 2 バイト）や
+    // センチネル（1 文字 1 バイト）が混ざると文字数では桁が合わないため、
+    // **バイト数で** 0x40（空白）詰め・切り詰めをする。位置で区切る形式なので長さが命。
+    const tmp = new ByteWriter();
+    substituted += writeValue(tmp, flatValue(buf, f, codec), codec);
+    const bytes = tmp.toUint8Array();
+    w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
+    for (let i = bytes.length; i < width; i++) w.u8(0x40);
+  }
+  return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array()), substituted };
+}
+
+/** 平坦形式で 1 欄が占めるバイト数。符号付き数値だけは**符号桁を送らない**ぶん 1 短い */
+function flatWidth(buf: ScreenBuffer, f: InternalField): number {
+  const total =
+    f.continued === undefined
+      ? f.length
+      : buf.continuedRun(f).reduce((n, seg) => n + seg.length, 0);
+  return isSignedNumeric(f) ? total - 1 : total;
+}
+
+/**
+ * 平坦形式で送る値。**末尾空白を落とさない**（落とすと後続の欄との境目がずれる）。
+ *
+ * 符号付き数値だけは `signedNumericValue` と同じ加工をする——符号桁は送らず、負なら
+ * 最終桁のゾーンを 0xD にする。**実機で裏づけ済みの加工**（`signedNumericValue` の
+ * JSDoc 参照。7 バイトそのままだと CPF5257）なので平坦形式でも同じにする。
+ *
+ * ⚠ 原典 tn5250 のこの枝は `for (n = 0; n < size - 1; n++)` のあとに `data[size-2]` を
+ * もう一度足しており、**最終桁が二重に出る**（`CMD_READ_MDT_FIELDS` 側にある `size--` が
+ * 抜けている）。桁数が合わなくなるので**写さない**。
+ */
+function flatValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
+  const full =
+    f.continued === undefined
+      ? buf.fieldValue(f, true)
+      : buf
+          .continuedRun(f)
+          .map((seg) => buf.fieldValue(seg, true))
+          .join("");
+  if (!isSignedNumeric(f)) return full;
+  const sign = full.slice(-1);
+  let digits = full.slice(0, -1);
+  if (sign === "-") {
+    const last = digits.slice(-1);
+    if (last >= "0" && last <= "9") {
+      const b = codec.encode(last).bytes[0];
+      if (b !== undefined) digits = digits.slice(0, -1) + rawSentinel(0xd0 | (b & 0x0f));
+    }
+  }
+  return digits;
+}
+
+/**
+ * **READ INPUT FIELDS（0x42）応答。** 形式は `buildFlatFieldResponse` の JSDoc を参照。
+ * `0x72` と違い**利用者が押した鍵の AID を載せる**（原典も `aidcode != 0` を assert する）。
+ */
+export function buildReadInputFieldsResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  aid: number,
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
+  return buildFlatFieldResponse(buf, codec, aid, cursor);
+}
+
+/**
+ * **READ IMMEDIATE（0x72）応答。** 形式は `buildFlatFieldResponse` の JSDoc を参照。
+ * **AID は 0**（利用者が押した鍵ではなく、ホストが「いま送れ」と言っているだけ）。
  */
 export function buildReadImmediateResponse(
   buf: ScreenBuffer,
   codec: Codec,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
-  // **画面単位の MDT が門番**。立っていなければ欄は 1 つも送らない
-  const fields = buf.mdtFields().length > 0 ? buf.orderedFields() : [];
-  return buildFieldResponse(buf, codec, 0, fields, cursor);
+  return buildFlatFieldResponse(buf, codec, 0, cursor);
+}
+
+/**
+ * 欄の値を 1 つ書き出す。**センチネル位置には生の属性バイトを出す**
+ * （編集で動いた桁にそのまま書き戻す＝色/バイトが追従）。センチネル以外の連続部分だけを
+ * codec でエンコードし、センチネルは 1 バイトそのまま挟む。戻り値は置換された文字数。
+ */
+function writeValue(w: ByteWriter, value: string, codec: Codec): number {
+  let substituted = 0;
+  let run = "";
+  const flushRun = (): void => {
+    if (run.length > 0) {
+      const enc = codec.encode(run);
+      substituted += enc.substituted;
+      w.bytes(enc.bytes);
+      run = "";
+    }
+  };
+  for (const ch of value) {
+    if (isRawSentinel(ch)) {
+      flushRun();
+      w.u8(sentinelByte(ch));
+    } else {
+      run += ch;
+    }
+  }
+  flushRun();
+  return substituted;
 }
 
 /** 行・桁・AID ＋ 指定された欄の並び。`buildReadMdtResponse` と READ IMMEDIATE で共有する */
@@ -221,26 +349,7 @@ function buildFieldResponse(
     // **符号付き数値欄だけは符号桁を見るため末尾ブランクを残した値**から作る（上の関数）。
     // 継続入力フィールドは全区間を連結した値になる。
     const value = sendValue(buf, f, codec);
-    // **センチネル位置には生の属性バイトを出す**（編集で動いた桁にそのまま書き戻す＝色/バイトが追従）。
-    // センチネル以外の連続部分だけを codec でエンコードし、センチネルは 1 バイトそのまま挟む。
-    let run = "";
-    const flushRun = (): void => {
-      if (run.length > 0) {
-        const enc = codec.encode(run);
-        substituted += enc.substituted;
-        w.bytes(enc.bytes);
-        run = "";
-      }
-    };
-    for (const ch of value) {
-      if (isRawSentinel(ch)) {
-        flushRun();
-        w.u8(sentinelByte(ch));
-      } else {
-        run += ch;
-      }
-    }
-    flushRun();
+    substituted += writeValue(w, value, codec);
   }
 
   return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array()), substituted };

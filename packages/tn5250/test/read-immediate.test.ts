@@ -13,13 +13,18 @@ import type { Transport } from "../src/transport/types.js";
  *
  * ホストが「利用者を待たずに、いま画面の欄を送れ」と言ってくるコマンド。
  * 通常の画面では届かない（20 画面 142 レコードの census でも 0 件）が、
- * **実機で裏を取ってある**——IBM 自身が発行する API（DSM の `QsnReadImm`）で出させ、
- * 往復が成立することを確かめた（`scripts/diag-read-immediate.mjs`）:
+ * IBM 自身が発行する API（DSM の `QsnReadImm`）で実機から出させられる。
  *
- * ```
- * 受信  04 72                          送信  14 07 00 11 14 07 c3c1d3d3
- * ホスト側  QsnReadImm rc=21 bytesRead=21 fdbk_bytes=0
- * ```
+ * ## 応答の形式は 2026-08-25 に直した（実機の実測で）
+ *
+ * ~~往復が成立することを確かめた~~ ← **成立するだけだった。** `QsnReadImm` は受け取った
+ * バイト列を素通しで返すので、**形式が正しいかは検証していない**。
+ *
+ * 位置と長さの分かっている試験画面（欄長 **10 / 6 / 8**）を実機に描かせ、`0x52`（対照）と
+ * `0x72` を並べて**ホストが受け取ったバイト列**を取り出した（`scripts/host-src/dscmd.c` の
+ * `READINPIMM`）。`0x52` はホストが欄へ分解できる（`QsnRtvFldCnt=2`）が、**`0x72` は
+ * 分解しない**（`CPFA32E`）——**応用プログラムが欄長で切る**しかない。当方が SBA 付きで
+ * 返していたときは、10/6/8 で切ると `11050ac1c2c311070a11` … と**打った値と一致しなかった**。
  *
  * ## 原典（GNU tn5250 `session.c`）
  *
@@ -76,11 +81,18 @@ describe("buildReadImmediateResponse", () => {
     // 1 つ目だけ打つ。2 つ目は MDT が立たない
     b.setFieldValue(b.fieldByIndex(1), "TARO");
     const d = dataOf(buildReadImmediateResponse(b, codec, { row: 1, col: 1 }).record);
-    // 欄 1: SBA(5,25) + "TARO"
-    expect(d.slice(3, 6)).toEqual([ORDER.SBA, 5, 25]);
-    expect(d.slice(6, 10)).toEqual([...codec.encode("TARO").bytes]);
-    // **欄 2 も来る**（MDT が立っていなくても）
-    expect(d.slice(10, 13)).toEqual([ORDER.SBA, 6, 25]);
+    // **SBA は付かない**。欄 1（長さ 10）が欄長ぶんそのまま来る
+    expect(d.slice(3, 13)).toEqual([...codec.encode("TARO      ").bytes]);
+    // **欄 2 も来る**（MDT が立っていなくても）。長さ 8 の空白
+    expect(d.slice(13, 21)).toEqual([...codec.encode("        ").bytes]);
+    expect(d).toHaveLength(3 + 10 + 8);
+  });
+
+  it("**SBA を 1 つも出さない**（位置ではなく欄長で区切る形式）", () => {
+    const b = makeBuffer();
+    b.setFieldValue(b.fieldByIndex(1), "TARO");
+    const d = dataOf(buildReadImmediateResponse(b, codec, { row: 1, col: 1 }).record);
+    expect(d.filter((x, i) => x === ORDER.SBA && i >= 3)).toEqual([]);
   });
 
   it("**どの欄も変更されていなければ、欄を 1 つも送らない**（master MDT が門番）", () => {
@@ -89,12 +101,22 @@ describe("buildReadImmediateResponse", () => {
     expect(d).toEqual([2, 3, 0]); // 行・桁・AID だけ
   });
 
-  it("2 つとも打てば 2 つとも来る", () => {
+  it("2 つとも打てば 2 つとも来る（欄長ぶんに詰められる）", () => {
     const b = makeBuffer();
     b.setFieldValue(b.fieldByIndex(1), "AA");
     b.setFieldValue(b.fieldByIndex(2), "BB");
     const d = dataOf(buildReadImmediateResponse(b, codec, { row: 1, col: 1 }).record);
-    expect(d.filter((x, i) => x === ORDER.SBA && i >= 3).length).toBe(2);
+    expect(d.slice(3, 13)).toEqual([...codec.encode("AA        ").bytes]);
+    expect(d.slice(13, 21)).toEqual([...codec.encode("BB      ").bytes]);
+  });
+
+  it("**末尾空白を落とさない**——落とすと後続の欄との境目がずれる", () => {
+    const b = makeBuffer();
+    b.setFieldValue(b.fieldByIndex(2), "Z");
+    const d = dataOf(buildReadImmediateResponse(b, codec, { row: 1, col: 1 }).record);
+    // 欄 1 は打っていないが**長さ 10 の空白**が出る（門番は画面単位の MDT）
+    expect(d.slice(3, 13)).toEqual([...codec.encode("          ").bytes]);
+    expect(d.slice(13, 21)).toEqual([...codec.encode("Z       ").bytes]);
   });
 
   it("カーソルを渡さなければ画面のカーソル位置を使う", () => {
