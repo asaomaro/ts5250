@@ -1040,8 +1040,17 @@ export class ScreenBuffer {
     // 下線・カラー等の属性がフィールドを越えて非編集エリアへ漏れるのを防ぐため、フィールド終端
     // （startAddr+length）に明示属性が無ければ既定属性へ戻す。
     // 打ち切り位置＝現在の欄の終端 ＋ SOH で消される前から引き継いだ終端
+    //
+    // **継続入力フィールド（EDTMSK 分割）の先頭・中間区間はここに含めない。** その「終端」は
+    // 区間の間の保護された区切り文字（例: `/`）の位置で、まだ同じ続きの欄——次区間の SF が
+    // 自分の属性バイトを置くまで、色は前区間から引き継がれるのが正しい（ACS と実機がそう見せる）。
+    // ここに含めてしまうと区切り文字だけ既定色に戻り、EDTMSK 欄の色が区切りの桁で途切れる
+    // （利用者のスクリーンショット報告: `年月度` 欄の `/` から先の色が変わる）。
     const fieldEnds = new Set<number>(this.retainedEnds);
-    for (const f of this.fields) fieldEnds.add(f.startAddr + f.length);
+    for (const f of this.fields) {
+      if (f.continued === "first" || f.continued === "middle") continue;
+      fieldEnds.add(f.startAddr + f.length);
+    }
     let attr = DEFAULT_ATTR;
     for (let r = 0; r < this.rows; r++) {
       const rowCells: Cell[] = [];
