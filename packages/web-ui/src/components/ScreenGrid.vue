@@ -2059,6 +2059,113 @@ function deleteSelection(f: Field, el: HTMLInputElement): boolean {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// 継続入力フィールド（EDTMSK 分割）をまたぐ Backspace / Delete。
+//
+// ホストは EDTMSK で割った数値欄を、区切り文字（`/` 等）を挟んだ**複数の別々の欄**として送る
+// （`Field.continued` = "first"/"middle"/"last"）。しかし ACS はこれを**まるごと 1 つの入力欄**
+// として扱い、区切りは編集上ただのマスクとして透過する——Backspace/Delete が区切りの前後で
+// 止まらず、区間をまたいで詰め直す（利用者の実機比較で確認: `12/34` の末尾から Backspace を
+// 繰り返すと `4 / `、先頭から Delete を繰り返すと ` / ` になる。区間ごとに独立させると
+// 前者は ` /34`、後者は `12/ 3` のように区切りで止まってしまう）。
+//
+// **Backspace は「これ以上戻れない」ときだけ区間をまたがず、他は常に全区間の合成バッファへ
+// 適用する**（区間の途中に居ても、詰め直しが後続区間まで届くことがあるため——3 区間以上の
+// 欄で最初の区間の途中を Backspace すると、最終区間まで 1 桁ずつ詰まる）。
+// ---------------------------------------------------------------------------
+
+/** 継続入力フィールドの区間の並び（先頭→最終）。単独欄（`continued` 無し）は自分 1 つだけ。
+ *  core の `ScreenBuffer.continuedRun` と同じ歩き方（区間は画面順で連続している前提）。 */
+function continuedRunOf(f: Field): Field[] {
+  if (f.continued === undefined) return [f];
+  const ordered = [...props.snapshot.fields].sort((a, b) => a.index - b.index);
+  let i = ordered.findIndex((x) => x.index === f.index);
+  if (i < 0) return [f];
+  while (i > 0 && ordered[i]?.continued !== "first" && ordered[i - 1]?.continued !== undefined) i--;
+  const run: Field[] = [];
+  for (let j = i; j < ordered.length; j++) {
+    const x = ordered[j];
+    if (!x || x.continued === undefined) break;
+    if (j > i && x.continued === "first") break; // 次の継続欄の先頭＝この並びは終わり
+    run.push(x);
+    if (x.continued === "last") break;
+  }
+  return run.length > 0 ? run : [f];
+}
+
+/** 欄 f の合成バッファ内での開始オフセット（先行区間の長さの合計）。単独欄は 0。*/
+function continuedOffsetOf(f: Field): number {
+  if (f.continued === undefined) return 0;
+  let acc = 0;
+  for (const x of continuedRunOf(f)) {
+    if (x.index === f.index) break;
+    acc += visLen(x);
+  }
+  return acc;
+}
+
+function padChars(chars: readonly string[], len: number): string[] {
+  const out = chars.slice(0, len);
+  while (out.length < len) out.push(" ");
+  return out;
+}
+
+/** 編集モデルを経由しない欄（＝現在フォーカス中でない区間）への直接コミット。
+ *  `writeSlices` 付近の「全スライスへ直接書く」のと同じ理由: `:value` は v-memo で
+ *  キャッシュされ、他欄の更新だけでは再評価されない。 */
+function commitFieldValueDirect(x: Field, val: string): void {
+  const trimmed = val.replace(/ +$/, "");
+  if (trimmed !== baselineValue(x)) emit("edit", x.index, trimmed);
+  const elx = inputForSlice(x, 0);
+  if (elx) elx.value = displayText(stripSentinels(val));
+}
+
+/**
+ * 継続入力フィールドの区間をまたいで Backspace/Delete を適用する。
+ *
+ * f の区間を含む並び全体をつないだ「合成バッファ」へ fieldEdit の純関数（backspace/del）を
+ * そのまま適用し、結果を区間ごとの長さで割り戻す。カーソルが着地した区間へ編集モデルと
+ * フォーカスを移し、それ以外の区間は直接コミットする。
+ */
+function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void {
+  const cur = edit!;
+  const run = continuedRunOf(f);
+  const lens = run.map((x) => visLen(x));
+  const offsets: number[] = [];
+  {
+    let acc = 0;
+    for (const len of lens) {
+      offsets.push(acc);
+      acc += len;
+    }
+  }
+  const at = run.findIndex((x) => x.index === f.index);
+  const merged = run.flatMap((x, k) => (k === at ? cur.chars : padChars([...logicalValue(x)], lens[k]!)));
+  const result = apply({ chars: merged, cursor: offsets[at]! + cur.cursor, insertMode: cur.insertMode });
+
+  let targetIdx = run.length - 1;
+  for (let k = 0; k < run.length; k++) {
+    if (result.cursor <= offsets[k]! + lens[k]!) {
+      targetIdx = k;
+      break;
+    }
+  }
+  run.forEach((x, k) => {
+    if (k === targetIdx) return;
+    commitFieldValueDirect(x, result.chars.slice(offsets[k]!, offsets[k]! + lens[k]!).join(""));
+  });
+
+  const target = run[targetIdx]!;
+  edit = {
+    chars: result.chars.slice(offsets[targetIdx]!, offsets[targetIdx]! + lens[targetIdx]!),
+    cursor: result.cursor - offsets[targetIdx]!,
+    insertMode: result.insertMode
+  };
+  editFieldIndex = target.index;
+  const targetEl = inputForSlice(target, 0);
+  if (targetEl) sync(targetEl, target);
+}
+
 /** input の keydown 制御。印字文字は上書き/挿入、編集キーは 5250 挙動、AID/移動キーはペインへ委譲 */
 function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (props.busy) {
@@ -2116,6 +2223,19 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       sync(el, f);
       return;
     }
+    // **継続入力フィールド（EDTMSK 分割）は区間をまたいで詰め直す**（ACS 準拠。上の
+    // `editAcrossContinued` のコメント参照）。DBCS は対象外（列ビューが絡み複雑になるため
+    // 未対応。EDTMSK 欄は数値専用で実質起きない）。
+    if (f.continued !== undefined && !isDbcsEdit(f)) {
+      // 合成バッファの先頭（＝並び全体の先頭区間の桁 0）まで戻っていれば、
+      // 単独欄の「欄の先頭」と同じく前の欄へ移る。
+      if (continuedOffsetOf(f) + edit.cursor === 0) {
+        emit("field-prev", f.index);
+        return;
+      }
+      editAcrossContinued(f, backspace);
+      return;
+    }
     // **欄の先頭では削除せず前の欄の末尾へ移る**（原典どおり。`field-prev` のコメント参照）
     if (edit.cursor === 0) {
       emit("field-prev", f.index);
@@ -2127,7 +2247,15 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   if (ev.key === "Delete" && plain) {
     ev.preventDefault();
-    if (!deleteSelection(f, el)) edit = del(edit);
+    if (!deleteSelection(f, el)) {
+      // 継続入力フィールドは区間をまたいで詰め直す（Backspace と同じ理由）。
+      // 合成バッファの末尾では `del()` が無変化を返すだけなので、境界の事前判定は要らない。
+      if (f.continued !== undefined && !isDbcsEdit(f)) {
+        editAcrossContinued(f, del);
+        return;
+      }
+      edit = del(edit);
+    }
     sync(el, f);
     return;
   }
@@ -2600,6 +2728,18 @@ function pasteFrom(
       while (rest.length > 0 && col <= cols) {
         const t = nextWritableAt(row, col);
         if (!t) break; // この行にはもう入力欄が無い → 次の行へ
+        // **継続入力フィールド（EDTMSK 分割）の区間へ渡すぶんは、先頭の型違反文字を読み飛ばす。**
+        // ACS は区切り文字（`/` 等）をただのマスクとして扱うため、`"12/34"` をペーストしても
+        // 区切りは欄の桁を 1 つも消費しない。`nextWritableAt` は画面上の区切りの桁をすでに
+        // 読み飛ばしているが、クリップボードの文字列側に残った区切り文字はここで同じく
+        // 読み飛ばさないと、次の区間の先頭桁がその文字に食われてずれる
+        // （`overwriteInto` の「型違反も桁を消費する」は独立した欄どうしの話で、こちらとは別）。
+        if (t.field.continued !== undefined) {
+          let chars = [...rest]; // コードポイント単位（サロゲート対を割らない）
+          while (chars.length > 0 && !acceptsChar(t.field, chars[0]!)) chars = chars.slice(1);
+          rest = chars.join("");
+          if (rest.length === 0) break;
+        }
         const from = Math.max(col, t.col);
         const end = bandEndCol(t.field, row, from);
         if (end === undefined) break;
