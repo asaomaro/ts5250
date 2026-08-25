@@ -76,8 +76,33 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
   // ACS: "Field requires alphabetic characters."
   "alpha-only": "この項目には英字しか入力できません",
   // ACS: "Data not allowed in this field."（DDS 35 桁の `I` = Inhibit keyboard entry）
-  "kbd-inhibited": "この項目はキーボードから入力できません"
+  "kbd-inhibited": "この項目はキーボードから入力できません",
+  // ACS: "Only a sign is allowed in this position."（符号付き数値欄の最終桁＝符号桁）
+  "sign-position": "符号桁には数字を入力できません（符号は - / + キーで入れます）"
 };
+
+/**
+ * **送信が拒否された理由を操作員に見せる。** ホスト応答待ちを解くだけで黙っていると、
+ * 「Enter を押したのに何も起きない」＝不具合と区別が付かない
+ * （実機で数字専用欄に `.` を打ってから Enter を押すと、`FIELD_TYPE` で 1 バイトも
+ * 飛ばないまま画面が固まったように見えていた）。
+ *
+ * 頭に日本語の要約を置き、**元のメッセージも残す**——どの欄のどの値かは元の文にしかない。
+ */
+const NOTICE_BY_ERROR: Record<string, string> = {
+  FIELD_TYPE: "入力できない文字があるため送信しませんでした",
+  FIELD_OVERFLOW: "欄の桁数を超えているため送信しませんでした",
+  FIELD_PROTECTED: "保護された欄には入力できません",
+  FIELD_NOT_FOUND: "指定された欄がありません",
+  KEYBOARD_LOCKED: "キーボードがロックされています",
+  READ_ONLY_SESSION: "閲覧専用のセッションです",
+  SESSION_RESERVED: "他の使い手が自動操作中です"
+};
+
+export function wsErrorNotice(code: string, message: string): string {
+  const head = NOTICE_BY_ERROR[code];
+  return head ? `${head}（${message}）` : `エラー: ${message}`;
+}
 
 /**
  * ホストが「入力必須」「全桁充填」と指定した欄が満たされていないときの通知（FFW の
