@@ -47,6 +47,7 @@ import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle }
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
+import { continuedRunOf as runOf } from "../composables/continuedRun.js";
 import {
   fieldSlices,
   fieldSpan,
@@ -2077,23 +2078,9 @@ function deleteSelection(f: Field, el: HTMLInputElement): boolean {
 // 欄で最初の区間の途中を Backspace すると、最終区間まで 1 桁ずつ詰まる）。
 // ---------------------------------------------------------------------------
 
-/** 継続入力フィールドの区間の並び（先頭→最終）。単独欄（`continued` 無し）は自分 1 つだけ。
- *  core の `ScreenBuffer.continuedRun` と同じ歩き方（区間は画面順で連続している前提）。 */
+/** 継続入力フィールドの区間の並び（先頭→最終）。導出は `composables/continuedRun.ts` に 1 か所。 */
 function continuedRunOf(f: Field): Field[] {
-  if (f.continued === undefined) return [f];
-  const ordered = [...props.snapshot.fields].sort((a, b) => a.index - b.index);
-  let i = ordered.findIndex((x) => x.index === f.index);
-  if (i < 0) return [f];
-  while (i > 0 && ordered[i]?.continued !== "first" && ordered[i - 1]?.continued !== undefined) i--;
-  const run: Field[] = [];
-  for (let j = i; j < ordered.length; j++) {
-    const x = ordered[j];
-    if (!x || x.continued === undefined) break;
-    if (j > i && x.continued === "first") break; // 次の継続欄の先頭＝この並びは終わり
-    run.push(x);
-    if (x.continued === "last") break;
-  }
-  return run.length > 0 ? run : [f];
+  return runOf(props.snapshot.fields, f);
 }
 
 /** 欄 f の合成バッファ内での開始オフセット（先行区間の長さの合計）。単独欄は 0。*/

@@ -402,7 +402,7 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-udc-roundtrip
 | スクリプト | 内容 |
 |---|---|
 | `build-dttest.mjs` | `AS400_LIB` に `DTMDSPF`/`DTMPGM` を作る。**`D8U`**（8 桁 `EDTWRD('0   /  /  ')` ＋ `EDTMSK` ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`）が色と下線の検証用——**素の欄では差が出ない**。⚠ 接続先は環境変数（`AS400_HOST`）を優先し、`connections.json` に無くても動く。⚠ RPG の `dcl-f` は `extdesc` でライブラリーを名指しする（*LIBL 任せだとコンパイルが落ちる）。 |
-| `verify-browser-edtmsk-edit.mjs` | 回帰 E2E（実ブラウザ＋実機・11 項目）。区切りの**色が入力欄と同じ**／**下線が `border-bottom` で同じ高さ**／末尾からの **Backspace ×3 が区間をまたいで詰まる**／先頭の **Delete が後続区間から桁を引き寄せる**／`2026/08/25` を**区切り込みでペーストしても桁がずれない**。⚠ 8 桁打つと自動送りで欄を出るので、Backspace の前に最終区間へ置き直すこと（さもないと別の欄を消す）。 |
+| `verify-browser-edtmsk-edit.mjs` | 回帰 E2E（実ブラウザ＋実機・14 項目）。区切りの**色が入力欄と同じ**／**下線が `border-bottom` で同じ高さ**／末尾からの **Backspace ×3 が区間をまたいで詰まる**／先頭の **Delete が後続区間から桁を引き寄せる**／`2026/08/25` を**区切り込みでペーストしても桁がずれない**／**Tab が区間ごとに止まらない**（並び全体で 1 つの欄）。⚠ 8 桁打つと自動送りで欄を出るので、Backspace の前に最終区間へ置き直すこと（さもないと別の欄を消す）。 |
 
 ```sh
 node --env-file=.env --env-file=.env.verify scripts/build-dttest.mjs        # 初回/再作成（数分）
