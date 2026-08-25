@@ -25,17 +25,20 @@ import type { InternalField } from "../screen/buffer.js";
  * 加工後の最終桁は `rawSentinel` で運ぶ（呼び出し側が生バイト 1 つとして書き出す）。
  */
 function signedNumericValue(full: string, codec: Codec): string {
-  const sign = full.slice(-1);
-  let digits = full.slice(0, -1); // ① 符号桁は送らない
+  // **符号位置で切る。** センチネルは第 15 面（サロゲート対）なので、コード単位で
+  // `slice(-1)` するとサロゲートを割ってしまう（数値欄に生バイトが混じる画面で踏む）。
+  const chars = [...full];
+  const sign = chars[chars.length - 1] ?? "";
+  const digits = chars.slice(0, -1); // ① 符号桁は送らない
   if (sign === "-") {
-    const last = digits.slice(-1);
+    const last = digits[digits.length - 1] ?? "";
     if (last >= "0" && last <= "9") {
       const b = codec.encode(last).bytes[0];
       // ② ゾーンを 0xD へ（EBCDIC の数字は 0xF0–0xF9。下位 4 ビットが数字）
-      if (b !== undefined) digits = digits.slice(0, -1) + rawSentinel(0xd0 | (b & 0x0f));
+      if (b !== undefined) digits[digits.length - 1] = rawSentinel(0xd0 | (b & 0x0f));
     }
   }
-  return digits.replace(/ +$/, ""); // 末尾空白は従来どおり落とす
+  return digits.join("").replace(/ +$/, ""); // 末尾空白は従来どおり落とす
 }
 
 /** その欄が符号付き数値（FFW shift 0x0700）か */
@@ -284,16 +287,18 @@ function flatValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
           .map((seg) => buf.fieldValue(seg, true))
           .join("");
   if (!isSignedNumeric(f)) return full;
-  const sign = full.slice(-1);
-  let digits = full.slice(0, -1);
+  // 符号位置で切る（`signedNumericValue` と同じ理由）
+  const chars = [...full];
+  const sign = chars[chars.length - 1] ?? "";
+  const digits = chars.slice(0, -1);
   if (sign === "-") {
-    const last = digits.slice(-1);
+    const last = digits[digits.length - 1] ?? "";
     if (last >= "0" && last <= "9") {
       const b = codec.encode(last).bytes[0];
-      if (b !== undefined) digits = digits.slice(0, -1) + rawSentinel(0xd0 | (b & 0x0f));
+      if (b !== undefined) digits[digits.length - 1] = rawSentinel(0xd0 | (b & 0x0f));
     }
   }
-  return digits;
+  return digits.join("");
 }
 
 /**

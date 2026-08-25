@@ -3,6 +3,7 @@ import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { buildReadMdtResponse } from "../src/protocol/read-response.js";
 import { codecForCcsid } from "@ts5250/ebcdic";
+import { isAttrSentinel, attrSentinelByte } from "../src/screen/attr-sentinel.js";
 import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(930);
@@ -56,12 +57,10 @@ describe("DBCS 欄の埋め込み属性（編集・送信で失わない）", ()
   it("値に属性がセンチネルとして載る", () => {
     const buf = dbcsFieldWith([...e("ABC"), ATTR, ...e("DEF")]);
     const v = buf.fieldValue(buf.fieldByIndex(1));
-    const sentinels = [...v].filter((ch) => {
-      const cp = ch.codePointAt(0)!;
-      return cp >= 0xe020 && cp <= 0xe03f;
-    });
+    // **基点は決め打ちしない**（センチネルは第 15 面へ移した。外字と衝突するため）
+    const sentinels = [...v].filter((ch) => isAttrSentinel(ch));
     expect(sentinels).toHaveLength(1);
-    expect(sentinels[0]!.codePointAt(0)! - 0xe000).toBe(ATTR);
+    expect(attrSentinelByte(sentinels[0]!)).toBe(ATTR);
   });
 
   it("制御コードに触れない編集を書き戻しても属性セルが残る", () => {

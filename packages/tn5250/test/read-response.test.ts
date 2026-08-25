@@ -91,7 +91,8 @@ describe("buildReadMdtResponse", () => {
     b.setAttr(fs + 2, 0x28); // 欄の position 2 に埋め込み属性（赤 0x28）
 
     // fieldValue はその桁をセンチネルで返す（値の中で識別・移動できる）
-    const value = b.fieldValue(b.fieldByIndex(1));
+    // **符号位置で数える**（センチネルは第 15 面＝サロゲート対）
+    const value = [...b.fieldValue(b.fieldByIndex(1))];
     expect(isAttrSentinel(value[2]!)).toBe(true);
     expect(attrSentinelByte(value[2]!)).toBe(0x28);
 
@@ -192,15 +193,16 @@ describe("表示できない SBCS バイトの保持", () => {
     const b = bufferWithUnmappedByte();
     const value = b.fieldValue(b.fieldByIndex(1));
     expect(value).not.toContain("�");
-    expect(isRawSentinel(value[1]!)).toBe(true);
-    expect(sentinelByte(value[1]!)).toBe(UNMAPPED);
+    const chars = [...value]; // センチネルは第 15 面（サロゲート対）なので符号位置で見る
+    expect(isRawSentinel(chars[1]!)).toBe(true);
+    expect(sentinelByte(chars[1]!)).toBe(UNMAPPED);
   });
 
   it("編集して送信しても元のバイトで返る（SUB に化けない）", () => {
     const b = bufferWithUnmappedByte();
     const value = b.fieldValue(b.fieldByIndex(1));
     // 末尾を打ち替える（該当バイトの桁は触らない）
-    b.setFieldValue(b.fieldByIndex(1), value.slice(0, 2) + "X");
+    b.setFieldValue(b.fieldByIndex(1), [...value].slice(0, 2).join("") + "X");
 
     const { record, substituted } = buildReadMdtResponse(b, dbcsCodec, AID.ENTER, {
       row: 5,

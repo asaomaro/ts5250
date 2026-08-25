@@ -3,6 +3,7 @@ import { reactive, nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
+import { rawSentinel } from "@ts5250/tn5250/browser";
 
 /**
  * **フォーカス中の入力欄の value に、埋め込み属性のセンチネル（U+E020–E03F）を絶対に入れない。**
@@ -19,7 +20,7 @@ import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
  * jsdom では実フォントのグリフ幅を測れないため、**不変条件そのもの**——フォーカス中の value に
  * センチネルが含まれないこと——をガードする（これが両症状の共通の根本原因）。
  */
-const SENT = (b: number): string => String.fromCharCode(0xe000 + b);
+const SENT = (b: number): string => rawSentinel(b);
 const hasSentinel = (s: string): boolean => [...s].some((ch) => {
   const c = ch.charCodeAt(0);
   return c >= 0xe020 && c <= 0xe03f;

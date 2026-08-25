@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
+import { attrSentinel, rawSentinel } from "@ts5250/tn5250/browser";
 
 /**
  * **画面に出ていない桁は、クリップボードにも「見えているとおり」の空白で載せる。**
@@ -57,8 +58,8 @@ async function copyRect(
 }
 
 /** 値に埋め込まれるセンチネル（core の attr-sentinel と同じ規則: U+E000 + バイト） */
-const ATTR_SENTINEL = String.fromCharCode(0xe000 + 0x28); // 欄途中の色替え（赤）
-const RAW_SENTINEL = String.fromCharCode(0xe000 + 0x9f); // 表示できない SBCS バイト
+const ATTR_SENTINEL = attrSentinel(0x28); // 欄途中の色替え（赤）
+const RAW_SENTINEL = rawSentinel(0x9f); // 表示できない SBCS バイト
 
 describe("表示されない桁のコピー", () => {
   it("入力欄の埋め込み属性・表示不能バイトは空白 1 桁で写る（桁もずれない）", async () => {

@@ -852,14 +852,17 @@ export class ScreenBuffer {
       const { row, col } = this.rowColOf(field.startAddr);
       throw new As400Error("FIELD_PROTECTED", `field at (${row},${col}) is protected`);
     }
-    if (!skipCharLengthCheck && value.length > field.length) {
+    // **符号位置で数える。** センチネルは第 15 面（サロゲート対＝2 コード単位）なので、
+    // `value.length` で数えると桁数を過大に見積もって FIELD_OVERFLOW になる。
+    const chars = [...value];
+    if (!skipCharLengthCheck && chars.length > field.length) {
       throw new As400Error(
         "FIELD_OVERFLOW",
-        `value length ${value.length} exceeds field length ${field.length}`
+        `value length ${chars.length} exceeds field length ${field.length}`
       );
     }
     for (let i = 0; i < field.length; i++) {
-      const ch = value[i];
+      const ch = chars[i];
       // **センチネル文字は埋め込み属性セルとして書く**——値の中で属性が編集に追従して動いた
       // 位置に、その属性バイトのセルを置き直す（桁ずれ・色ずれ・送信での破壊を防ぐ）。
       if (ch !== undefined && isAttrSentinel(ch)) {
