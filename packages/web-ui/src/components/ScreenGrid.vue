@@ -23,6 +23,7 @@ import {
 import {
   acceptsChar,
   rejectReason,
+  isSignPosition,
   dbcsByteLength,
   dbcsViewLayout,
   columnViewLayout,
@@ -1907,6 +1908,11 @@ function dupKey(): void {
  * ペースト・マクロ・MCP はこの経路を通らない（打鍵だけの規則）。
  */
 function signKeyHack(f: Field, key: string): boolean {
+  // **数字専用欄は対象外。** ここを `f.numeric`（シフト 3/5/7 すべて）にしていると、
+  // 数字しか入らない欄で `-` を打ち間違えただけで**カーソル以降が消えて次欄へ飛ぶ**
+  // （実機 `ASAOLIB/AUDPGM` の `DGT` 欄で `1234` → `12` になるのを確認）。
+  // 参照実装も num-only と signed-num だけを対象にしている（GNU tn5250 `display.c`）。
+  if (f.digitsOnly === true) return false;
   if (!f.numeric || (key !== "-" && key !== "+")) return false;
   fieldSignKey(key === "-");
   return true;
@@ -2172,6 +2178,12 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     const why = rejectReason(f, ch);
     if (why) {
       emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
+      return;
+    }
+    // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。`-` / `+` は上の
+    // `signKeyHack` で Field− / Field+ として拾われるので、ここへは来ない。
+    if (isSignPosition(f, edit.cursor, visLen(f))) {
+      emit("notice", MSG_BY_REASON["sign-position"]);
       return;
     }
     let trial: EditState;

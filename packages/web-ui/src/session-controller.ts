@@ -8,7 +8,8 @@ import {
   MSG_PC_COMMAND_DISABLED,
   MSG_PC_COMMAND_DONE,
   MSG_PC_COMMAND_FAILED,
-  MSG_PC_COMMAND_RUNNING
+  MSG_PC_COMMAND_RUNNING,
+  wsErrorNotice
 } from "./composables/opMessages.js";
 import {
   sessionsStore,
@@ -201,10 +202,20 @@ export async function openSession(
               setBusy(sessionId, false);
               break;
             }
-            case "error":
+            case "error": {
               setBusy(sessionId, false);
-              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              if (!sessionId) {
+                reject(new Error(`${msg.code}: ${msg.message}`));
+                break;
+              }
+              // **開いた後のエラーは操作員に見せる。** 待ちを解くだけで黙っていると、
+              // 送信が拒否されても画面は何も変わらず「Enter が効かない」としか見えない
+              // （実機で数字専用欄に `.` を入れて Enter → `FIELD_TYPE` で 1 バイトも
+              // 飛ばないまま無反応だった）。致命的なものは `closed` 側が別に扱う。
+              const s = sessionsStore.get(sessionId);
+              if (s) s.notice = wsErrorNotice(msg.code, msg.message);
               break;
+            }
           }
         }
       },

@@ -21,7 +21,8 @@ export type RejectReason =
   | "alphanumeric" // 半角(A)項目に全角
   | "dbcs-required" // J 型(全角専用)項目に全角以外
   | "alpha-only" // 英字専用(X)項目に英字以外
-  | "kbd-inhibited"; // キーボード入力不可(I)項目
+  | "kbd-inhibited" // キーボード入力不可(I)項目
+  | "sign-position"; // 符号付き数値欄の符号桁（最終桁）へ数字を打とうとした
 
 export function rejectReason(field: Field, ch: string): RejectReason | undefined {
   if (ch.length === 0) return "alphanumeric";
@@ -40,6 +41,13 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
 
   // 英字専用（DDS 35 桁の `X`）。許容集合は core の validateFieldContent と揃える
   if (field.alphaOnly && !/[A-Za-z,.\- ]/.test(ch)) return "alpha-only";
+
+  // **数字専用（FFW シフト 5 / DDS 35 桁の `D`）は本当に数字しか受け付けない。**
+  // ここを `numeric` 一括にしていると `.` `,` `+` `-` 空白が打ててしまい、**打てるのに送れない**
+  // ——core の `validateFieldContent` は数字のみに制限しているので、Enter で `FIELD_TYPE` になり
+  // ホストへ 1 バイトも飛ばない（実機 `ASAOLIB/AUDPGM` の `DGT` 欄で再現）。
+  // 参照実装も digits-only は数字のみ（GNU tn5250 `field.c` / tn5250j `Screen5250.java`）。
+  if (field.digitsOnly && !/[0-9]/.test(ch)) return "numeric";
 
   // 数値型（数字・, . - + と空白を許可）
   if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return "numeric";
@@ -307,3 +315,21 @@ export interface DbcsSliceRange {
  * レンダラー（`spool-html.ts`）と同じ判定を使う。ここは従来どおりの名前で再輸出するだけ。
  */
 export { isFullWidth, isCertainWideGlyph };
+
+/**
+ * **符号付き数値欄の符号桁（最終桁）は打鍵で埋めない。**
+ *
+ * 5250 の符号付き数値欄はワイヤ上 `桁数 + 1` バイトで、最終桁は符号（空白 = 正 / `-` = 負）。
+ * 送信時に core が符号桁を落とすため（`read-response.ts` の `signedNumericValue`）、
+ * ここを数字で埋められると**画面に見えている桁がホストへ届かない**——
+ * 実機 `ASAOLIB/AUDPGM` の `SGN`（`6S 0`・欄長 7）で `1234567` と打って
+ * ホスト側が `123456` を受け取ることを確認した。
+ *
+ * 符号は `-` / `+` キー（Field− / Field+）で入れる——そちらは打鍵経路の手前で拾う。
+ * 原典も符号桁では符号キー以外を弾く（GNU tn5250 `display.c` の signed-num 分岐）。
+ *
+ * `cursor` は欄内の位置、`visLen` は画面上の桁数（`fieldSpan`）。
+ */
+export function isSignPosition(field: Field, cursor: number, visLen: number): boolean {
+  return field.signedNumeric === true && visLen > 0 && cursor >= visLen - 1;
+}
