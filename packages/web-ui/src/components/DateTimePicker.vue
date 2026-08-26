@@ -271,14 +271,18 @@ function onKeydown(ev: KeyboardEvent): void {
     class="dtp crt-pop"
     :data-pop="pop"
     role="dialog"
-    :aria-label="tab === 'date' ? MSG_DATE_PICKER : MSG_TIME_PICKER"
+    :aria-label="`${tab === 'date' ? MSG_DATE_PICKER : MSG_TIME_PICKER}（${MSG_DTP_FORMAT(label)}）`"
     @mousedown.stop.prevent
     @keydown="onKeydown"
     @focusin="onFocusIn"
   >
-    <!-- 見出し: 解釈中の書式を必ず出す。桁順を固定している以上、名乗る責任がある -->
-    <div class="dtp-head">
-      <div v-if="showTabs" class="dtp-tabs" role="tablist">
+    <!--
+      見出しはタブがあるときだけ。**書式の説明テキストは出さない**（利用者指示 2026-08-26）
+      ——端末画面に重ねる小さな部品で、毎回同じ一文が場所を取る。
+      解釈中の書式は `aria-label` に残してあるので、読み上げでは分かる。
+    -->
+    <div v-if="showTabs" class="dtp-head">
+      <div class="dtp-tabs" role="tablist">
         <button
           type="button" class="dtp-tab" role="tab" :aria-selected="tab === 'date'"
           :tabindex="tab === 'date' ? 0 : -1"
@@ -290,7 +294,6 @@ function onKeydown(ev: KeyboardEvent): void {
           @mousedown.stop.prevent @click.stop="tab = 'time'"
         >{{ MSG_DTP_TAB_TIME }}</button>
       </div>
-      <span class="dtp-fmt">{{ MSG_DTP_FORMAT(label) }}</span>
     </div>
 
     <div v-if="tab === 'date'" class="dtp-cal">
@@ -401,12 +404,6 @@ function onKeydown(ev: KeyboardEvent): void {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.dtp-fmt {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 0.9em;
-  white-space: nowrap;
-}
 .dtp-nav {
   display: flex;
   gap: 4px;
@@ -457,18 +454,28 @@ function onKeydown(ev: KeyboardEvent): void {
   display: flex;
   gap: 3px;
 }
+/*
+  時刻の列。**スクロールバーは出さない**（利用者指示）——3 列それぞれに縦棒が立つと、
+  端末画面に重ねる小さな部品としては騒がしく、桁の並びも読みにくい。
+  スクロール自体は残す: ホイール・矢印（`moveCell` の `focus()` が可視域へ送る）・
+  開いた直後の初期フォーカスで現在値まで自動で送られるので、操作は塞がらない。
+*/
 .dtp-col {
   display: flex;
   flex-direction: column;
   max-height: 11em;
   overflow-y: auto;
+  scrollbar-width: none; /* Firefox / Chromium 121+ */
+  -ms-overflow-style: none; /* 旧 Edge */
+}
+.dtp-col::-webkit-scrollbar {
+  display: none; /* WebKit / 旧 Chromium */
 }
 .dtp-cell {
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
 }
 /* 端末調では中身の色も CRT の緑側へ寄せる（`.opt-hints` の crt 意匠と同じ考え方） */
-.dtp[data-pop="crt"] .dtp-fmt,
 .dtp[data-pop="crt"] .dtp-wd {
   color: var(--t-yellow);
 }

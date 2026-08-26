@@ -282,9 +282,11 @@ try {
   const dfoc = await focusInPicker();
   log(`  開いた直後のフォーカス: ${JSON.stringify(dfoc)}`);
   check(dfoc?.day === "7", `フォーカスがピッカーの現在値の日へ移る（実際 ${JSON.stringify(dfoc)}）`);
-  const fmt = await page.locator(".dtp-fmt").innerText();
-  log(`  見出し: ${fmt}`);
-  check(fmt.includes("YYYY/MM/DD"), `解釈中の書式を名乗る（実際 ${fmt}）`);
+  // 書式の説明は**画面に出さない**（利用者指示）。読み上げ用に `aria-label` へ残してある
+  const fmt = await page.locator(".dtp").getAttribute("aria-label");
+  log(`  aria-label: ${fmt}`);
+  check((await page.locator(".dtp-fmt").count()) === 0, "書式の説明テキストは画面に出さない");
+  check(fmt?.includes("YYYY/MM/DD") === true, `解釈中の書式は読み上げに残る（実際 ${fmt}）`);
   const ym = await page.locator(".dtp-ym").innerText();
   log(`  カレンダーの年月: ${ym}（欄の現在値 ${await shown()} から開く）`);
   check(ym === "2019/03", `**未送信の編集込みの現在値**から開く（今日ではない。実際 ${ym}）`);
@@ -350,10 +352,10 @@ try {
   await page.keyboard.press("Alt+ArrowDown");
   await sleep(400);
   const tabsAfter = await page.locator(".dtp-tabs").count();
-  const fmtAfter = await page.locator(".dtp-fmt").innerText();
-  log(`  値が入った後: タブ ${tabsAfter} 件 / 見出し ${fmtAfter}`);
+  const fmtAfter = await page.locator(".dtp").getAttribute("aria-label");
+  log(`  値が入った後: タブ ${tabsAfter} 件 / aria-label ${fmtAfter}`);
   check(tabsAfter === 0, "区切りが見えたらタブは消える（曖昧 → 確定の単調な絞り込み）");
-  check(fmtAfter.includes("HH:MM:SS"), `時刻として名乗る（実際 ${fmtAfter}）`);
+  check(fmtAfter?.includes("HH:MM:SS") === true, `時刻として名乗る（実際 ${fmtAfter}）`);
   await page.keyboard.press("Escape");
   await sleep(250);
 

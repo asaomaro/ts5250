@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -144,22 +146,28 @@ describe("導線", () => {
   });
 });
 
-describe("解釈中の書式を名乗る（桁順を固定している以上の責任）", () => {
-  it("日付欄では YYYY/MM/DD と出す", async () => {
+describe("解釈中の書式は読み上げに残す（画面には出さない）", () => {
+  /**
+   * **書式の説明テキストは画面に出さない**（利用者指示 2026-08-26）——端末画面に重ねる
+   * 小さな部品で、毎回同じ一文が場所を取る。ただし桁順は固定しているので、
+   * **`aria-label` には残す**（読み上げでは何として入力されるか分かる）。
+   */
+  it("日付欄は aria-label に YYYY/MM/DD を含み、画面には書式を出さない", async () => {
     const w = mountGrid("panel");
     await open(w);
-    expect(w.find(".dtp-fmt").text()).toBe(MSG_DTP_FORMAT("YYYY/MM/DD"));
-    expect(w.find(".dtp").attributes("aria-label")).toBe(MSG_DATE_PICKER);
+    expect(w.find(".dtp").attributes("aria-label")).toBe(`${MSG_DATE_PICKER}（${MSG_DTP_FORMAT("YYYY/MM/DD")}）`);
+    expect(w.find(".dtp-fmt").exists()).toBe(false);
     w.unmount();
   });
 
-  it("時刻欄（`:`）では HH:MM:SS と出し、タブは出さない（種別が確定している）", async () => {
+  it("時刻欄（`:`）は HH:MM:SS を名乗り、タブも見出しも出さない（種別が確定している）", async () => {
     const w = mountGrid("panel", TIME_FIELDS, ":");
     await open(w);
-    expect(w.find(".dtp-fmt").text()).toBe(MSG_DTP_FORMAT("HH:MM:SS"));
-    expect(w.find(".dtp").attributes("aria-label")).toBe(MSG_TIME_PICKER);
+    expect(w.find(".dtp").attributes("aria-label")).toBe(`${MSG_TIME_PICKER}（${MSG_DTP_FORMAT("HH:MM:SS")}）`);
     expect(w.find(".dtp-btn").attributes("aria-label")).toBe(MSG_TIME_PICKER); // ボタンも種別を名乗る
     expect(w.find(".dtp-tabs").exists()).toBe(false);
+    // タブが無い欄では**見出しごと出さない**（空の余白を作らない）
+    expect(w.find(".dtp-head").exists()).toBe(false);
     w.unmount();
   });
 
@@ -602,6 +610,39 @@ describe("Tab はピッカーの中で巡回する", () => {
       visited.push(active()!);
     }
     expect(visited).toEqual([...list.slice(1), list[0]]);
+    w.unmount();
+  });
+});
+
+/**
+ * **時刻の列にスクロールバーを出さない**（利用者指示 2026-08-26）。
+ * 3 列それぞれに縦棒が立つと、端末画面に重ねる小さな部品としては騒がしい。
+ * scoped CSS は vitest の DOM に効かないので**ビルド後の CSS を直接検査**する
+ * （`view-cycle-ui.test.ts` の CRT 検査・`view-settings-palette.test.ts` の見本検査と同じ作法）。
+ */
+describe("時刻の列の見た目", () => {
+  it("スクロールバーを消す指定がビルド後の CSS に載っている", () => {
+    const dir = join(process.cwd(), "dist/assets");
+    if (!existsSync(dir)) return; // 未ビルド時はスキップ
+    const css = readdirSync(dir)
+      .filter((f) => f.endsWith(".css"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .join("\n");
+    if (!css) return;
+    // **`.dtp-cols`（列を並べる箱）に先に当たらないよう境界を効かせる。**
+    // scoped CSS はクラス名の直後に `[data-v-…]` が付くので、そこまで含めて拾う。
+    const col = /\.dtp-col\[data-v-[^\]]+\][^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    expect(col, ".dtp-col の規則が見つからない").not.toBe("");
+    expect(col).toContain("scrollbar-width:none");
+    // WebKit 系は擬似要素で消す（別の規則になり、scoped の属性がクラス名の直後に入る）
+    expect(/\.dtp-col\[data-v-[^\]]+\]::-webkit-scrollbar/.test(css), "WebKit 向けの指定が無い").toBe(true);
+  });
+
+  it("スクロール自体は残す（現在値まで送れる）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    // 60 個の分が 11em に収まらない＝スクロールできる状態のままにしておく
+    expect(w.findAll('.dtp-col')[1]!.findAll(".dtp-cell")).toHaveLength(60);
     w.unmount();
   });
 });
