@@ -287,3 +287,54 @@ describe("オプション欄の選択肢（UI）", () => {
     w.unmount();
   });
 });
+
+/**
+ * **`Tab` はリストの中で巡回する**（日付・時刻ピッカーと `composables/focusTrap.ts` を共有）。
+ * 抜けると開いたままのリストへキーボードだけでは戻れない。出口は `Esc` と選択。
+ */
+describe("Tab はリストの中で巡回する", () => {
+  const active = () => document.activeElement as HTMLElement | null;
+  const tab = (shift = false) => {
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: shift, bubbles: true, cancelable: true }));
+  };
+
+  it("末尾で `Tab` を押すと先頭へ戻り、先頭で `Shift+Tab` を押すと末尾へ回る", async () => {
+    const w = mountGrid("panel");
+    await w.find(".opt-btn").trigger("click");
+    await nextTick();
+    const items = w.findAll(".opt-hint").map((i) => i.element as HTMLElement);
+    expect(items.length).toBeGreaterThan(1);
+
+    items[items.length - 1]!.focus();
+    tab();
+    await nextTick();
+    expect(active()).toBe(items[0]);
+
+    tab(true);
+    await nextTick();
+    expect(active()).toBe(items[items.length - 1]);
+    w.unmount();
+  });
+
+  /**
+   * **「外へ出ない」だけを見ても意味が無い。** jsdom は合成 `keydown` で実際のタブ移動を
+   * 起こさないので、トラップが無くてもフォーカスはその場に留まり素通りする。
+   * **項目を順に一周して先頭へ戻る**ことまで見る。
+   */
+  it("`Tab` を項目の数だけ押すと一周して先頭へ戻る", async () => {
+    const w = mountGrid("panel");
+    await w.find(".opt-btn").trigger("click");
+    await nextTick();
+    const items = w.findAll(".opt-hint").map((i) => i.element as HTMLElement);
+    items[0]!.focus();
+    const visited: HTMLElement[] = [];
+    for (let i = 0; i < items.length; i++) {
+      tab();
+      await nextTick();
+      expect(active()?.closest(".opt-hints"), `${i + 1} 回目で外へ出た`).not.toBeNull();
+      visited.push(active()!);
+    }
+    expect(visited).toEqual([...items.slice(1), items[0]]);
+    w.unmount();
+  });
+});

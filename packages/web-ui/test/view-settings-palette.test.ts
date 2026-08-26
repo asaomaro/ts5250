@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ViewSettingsMenu from "../src/components/ViewSettingsMenu.vue";
@@ -186,5 +188,73 @@ describe("ウィンドウ設定はセクションで分かれる（ユーザー�
     expect(viewSettings.settings.windowFrame).toBe("raised");
     expect(viewSettings.settings.windowBackdrop).toBe("blur");
     w.unmount();
+  });
+});
+
+/**
+ * **デザイン候補には見本を付ける。**
+ *
+ * `optHints`（オプション欄の選択肢）は候補名だけで**見本が無いまま**出ていた
+ * ——利用者が「パネル」と「枠」と「端末調」の違いを選ぶ前に見分けられない。
+ * 日付・時刻ピッカー（`dtPicker`）を足すときに同じ穴を広げないよう、
+ * **展開できる設定はすべて見本を持つ**ことを一般の契約として固定する。
+ */
+describe("デザイン候補の見本", () => {
+  /**
+   * メニューの行の作られ方（`MENU_ROWS`）に合わせる。**`group` を持つ項目は 1 行にまとまり**
+   * （ウィンドウ設定＝ウィンドウ／背景）、その行は常に展開できる。行を項目と取り違えると
+   * 「背景」という行を探して見つからない。
+   */
+  const ROWS = (() => {
+    const out: { label: string; items: typeof VIEW_ITEMS }[] = [];
+    for (const it of VIEW_ITEMS) {
+      if (it.group) {
+        const head = out.find((r) => r.items[0]!.group === it.group);
+        if (head) head.items.push(it);
+        else out.push({ label: it.groupLabel ?? it.label, items: [it] });
+      } else if (it.expandable) {
+        out.push({ label: it.label, items: [it] });
+      }
+    }
+    return out;
+  })();
+
+  it("候補には見本の掛け先（`data-kind` / `data-style`）が付いている", async () => {
+    const w = await openMenu();
+    for (const r of ROWS) {
+      await row(w, r.label).find(".vsm-toggle").trigger("click");
+      await nextTick();
+      for (const item of r.items) {
+        const pal = w.findAll(".vsm-palette").find((p) => p.attributes("aria-label") === `${item.label}のデザイン`);
+        expect(pal, `${item.label} の候補が出ていない`).toBeDefined();
+        for (const o of item.opts) {
+          const prev = pal!.findAll(".pal-prev").find((x) => x.attributes("data-style") === String(o.value));
+          expect(prev, `${item.label} / ${o.label} の見本が無い`).toBeDefined();
+          expect(prev!.attributes("data-kind")).toBe(item.key);
+        }
+      }
+      // 開けるのは同時に 1 行だけなので、次の行を開けば自然に畳まれる
+    }
+    w.unmount();
+  });
+
+  /**
+   * scoped CSS は vitest の DOM に適用されないため、**ビルド後の CSS** を直接検査する
+   * （`view-cycle-ui.test.ts` の CRT 検査と同じ作法）。
+   * **掛け先があっても規則が 1 つも無ければ見本は素のまま**——そこが `optHints` で起きていた。
+   */
+  it("展開できる設定はどれも見本の規則を持つ（素のままの候補を作らない）", () => {
+    const dir = join(process.cwd(), "dist/assets");
+    if (!existsSync(dir)) return; // 未ビルド時はスキップ
+    const css = readdirSync(dir)
+      .filter((f) => f.endsWith(".css"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .join("\n");
+    if (!css) return;
+    // **ビルド後は属性値の引用符が落ちる**（`[data-kind=controls]`）。両方の綴りを許す。
+    const has = (k: string) => css.includes(`data-kind=${k}]`) || css.includes(`data-kind="${k}"]`);
+    // **CSS 全文を expect に渡さない**（落ちたときに数十 KB が出て読めなくなる）。
+    const missing = ROWS.flatMap((r) => r.items).filter((i) => !has(i.key)).map((i) => i.key);
+    expect(missing, "見本の規則が 1 つも無い設定").toEqual([]);
   });
 });

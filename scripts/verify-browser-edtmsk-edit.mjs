@@ -7,6 +7,15 @@
 //   ③ Backspace / Delete は区切りをまたいで詰め直す
 //   ④ `2026/08/25` のように区切りを含めてペーストしても桁がずれない
 //
+// あわせて**日付・時刻ピッカー**（画面設定「日付・時刻の選択」）も見る:
+//   ⑥ `D8U`（4,2,2 ＋ `/`）で選んだ日付が全区間へ入り、**ホストへ届いて返ってくる**
+//   ⑦ `TMW`（2,2,2）は**空欄だと区切りが画面に出ない**ので日付 / 時刻のタブが出る。
+//      時刻を入れてホストが `:` を刷ると、次に開いたときは時刻に確定してタブが消える
+//      （曖昧 → 確定の**単調な絞り込み**。decisions D3）
+//   ⑧ **キーボードだけで完結する**——`Alt+↓` で開くとフォーカスがピッカーへ移り、
+//      矢印と `Enter` で全区間を決め、`Esc` で欄へ戻ってそのまま送れる（マウス不要）。
+//      **`Tab` は部品の中で巡回する**（本物のタブ移動は実ブラウザでしか測れない）
+//
 // 検証資材は scripts/build-dttest.mjs が作る <LIB>/DTMDSPF ＋ DTMPGM の **`D8U`**
 // （8 桁 EDTWRD+EDTMSK ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`。素の欄では色も下線も差が出ない）。
 //
@@ -37,6 +46,9 @@ const COL = 24; // 欄の開始桁
 // 区間: 4 桁 + `/` + 2 桁 + `/` + 2 桁
 const SEG = [COL, COL + 5, COL + 8];
 const SEPCOL = [COL + 4, COL + 7];
+// 時刻欄 TMW（EDTWRD('  :  :  ') + EDTMSK）。区間: 2 桁 + 区切り + 2 桁 + 区切り + 2 桁
+const TROW = Number(process.env.TMW_ROW ?? 11);
+const TSEG = [COL, COL + 3, COL + 6];
 
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +79,18 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, dev
 await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://localhost:${PORT}` });
 
 const sel = (col) => `input.grid-input[data-field="f${ROW}c${col}"]`;
+const selAt = (row, col) => `input.grid-input[data-field="f${row}c${col}"]`;
+/** 行 row の区間 cols の現在値（末尾空白を落とす） */
+const valuesAt = async (row, cols) =>
+  Promise.all(cols.map(async (c) => (await page.locator(selAt(row, c)).inputValue()).replace(/\s+$/, "")));
 const focusedField = () => page.evaluate(() => document.activeElement?.getAttribute?.("data-field") ?? undefined);
+/** フォーカスがピッカーの中にあるか＋その要素の目印（キーボード操作の検証に使う） */
+const focusInPicker = () =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!(a instanceof HTMLElement) || !a.closest(".dtp")) return null;
+    return { cls: a.className, col: a.dataset.col ?? null, val: a.dataset.val ?? null, day: a.dataset.day ?? null };
+  });
 const segValues = async () => Promise.all(SEG.map(async (c) => (await page.locator(sel(c)).inputValue()).replace(/\s+$/, "")));
 const shown = async () => (await segValues()).join("/");
 async function focusSeg(i, caret = 0) {
@@ -117,6 +140,11 @@ const inputInfo = (col) =>
   }, sel(col));
 
 try {
+  // **ピッカーは既定 OFF**（推測を含む機能を勝手に有効化しない）。検証のため保存値を先に入れておく
+  // ——画面設定メニューを操作するより壊れにくく、「既定では出ない」ことも同時に示せる。
+  await page.addInitScript(() => {
+    localStorage.setItem("as400.view.settings", JSON.stringify({ dtPicker: "panel" }));
+  });
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
   if ((await page.locator(".card:has-text('DSP')").count()) === 0) {
@@ -228,6 +256,251 @@ try {
   const tab3 = await focusedField();
   log(`  最終区間で Shift+Tab → ${tab3}`);
   check(!segIds.includes(tab3 ?? ""), `後戻りも並びを 1 つとして飛び越す（実際 ${tab3}）`);
+
+  // --- ⑥ 日付ピッカー（D8U・4,2,2 ＋ `/`）---
+  log("\n### ⑥ 日付ピッカー");
+  // 判定できた欄にだけボタンが出る。DTMPGM では DMA / TMW / D8M / D8U の 4 件
+  // （SSN は `3,2,4` なので形の段階で落ちる＝ここに出てはいけない）
+  const btnCount = await page.locator(".dtp-btn").count();
+  log(`  ピッカーのボタン: ${btnCount} 件`);
+  check(btnCount === 4, `日付・時刻とみなせる欄にだけボタンが出る（SSN は出ない。実際 ${btnCount} 件）`);
+
+  // **今日と重ならない日付を先に入れる。** 実行日と同じ年月だと「現在値から開く」のか
+  // 「今日にフォールバックした」のかが区別できず、チェックが偶然通ってしまう
+  // （実際にそうなっていた。review M2）。ここは**未送信のローカル編集**でもある——
+  // ピッカーは `Field.value`（ホストの値）ではなく画面に見えている値から開く必要がある。
+  await page.evaluate(() => navigator.clipboard.writeText("2019/03/07"));
+  await focusSeg(0, 0);
+  await page.keyboard.press("Control+v");
+  await sleep(400);
+  check((await shown()) === "2019/03/07", `打った値が欄に入っている（実際 ${await shown()}）`);
+
+  await focusSeg(0, 0);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  check(await page.locator(".dtp").isVisible(), "Alt+↓ でピッカーが開く");
+  const dfoc = await focusInPicker();
+  log(`  開いた直後のフォーカス: ${JSON.stringify(dfoc)}`);
+  check(dfoc?.day === "7", `フォーカスがピッカーの現在値の日へ移る（実際 ${JSON.stringify(dfoc)}）`);
+  // 書式の説明は**画面に出さない**（利用者指示）。読み上げ用に `aria-label` へ残してある
+  const fmt = await page.locator(".dtp").getAttribute("aria-label");
+  log(`  aria-label: ${fmt}`);
+  check((await page.locator(".dtp-fmt").count()) === 0, "書式の説明テキストは画面に出さない");
+  check(fmt?.includes("YYYY/MM/DD") === true, `解釈中の書式は読み上げに残る（実際 ${fmt}）`);
+  const ym = await page.locator(".dtp-ym").innerText();
+  log(`  カレンダーの年月: ${ym}（欄の現在値 ${await shown()} から開く）`);
+  check(ym === "2019/03", `**未送信の編集込みの現在値**から開く（今日ではない。実際 ${ym}）`);
+
+  // **カレンダーのホイールと月送りキー**（`PageUp`/`PageDown`＝月、`Shift` 付き＝年。APG）。
+  // ホイールで端末のページ送りが飛ばないこと・月が送られることを実ブラウザで見る。
+  const ymNow = () => page.locator(".dtp-ym").innerText();
+  const calBox = await page.locator(".dtp-cal").boundingBox();
+  await page.mouse.move(calBox.x + calBox.width / 2, calBox.y + calBox.height / 2);
+  await page.mouse.wheel(0, 240);
+  await sleep(400);
+  check((await ymNow()) === "2019/04", `ホイールで翌月へ送られる（実際 ${await ymNow()}）`);
+  check((await page.locator(".dtp").count()) === 1, "ホイールでカレンダーが閉じない");
+  await page.mouse.wheel(0, -240);
+  await sleep(400);
+  check((await ymNow()) === "2019/03", `上へ回すと前の月へ戻る（実際 ${await ymNow()}）`);
+
+  await page.keyboard.press("PageDown");
+  await sleep(300);
+  check((await ymNow()) === "2019/04", `PageDown で翌月（実際 ${await ymNow()}）`);
+  await page.keyboard.press("Shift+PageDown");
+  await sleep(300);
+  check((await ymNow()) === "2020/04", `Shift+PageDown で翌年（実際 ${await ymNow()}）`);
+  await page.keyboard.press("Shift+PageUp");
+  await page.keyboard.press("PageUp");
+  await sleep(400);
+  check((await ymNow()) === "2019/03", `送り戻して元へ（実際 ${await ymNow()}）`);
+  check((await page.locator(".dtp").count()) === 1, "月送りキーでも閉じない（端末へ流していない）");
+
+  // **矢印で月をまたいでもフォーカスがピッカーから外れない**（利用者報告の再発防止）。
+  // 月が変わると日のボタンは作り直され、送り先にその日が無いとフォーカス中の要素が消える。
+  // **jsdom は要素が消えてもフォーカスを落とさないので、これは実ブラウザでしか出ない。**
+  // **日はクリックすると確定して閉じる**ので、位置決めは矢印で行う（7 → 28 → 31）
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowDown"); await sleep(120); }
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowRight"); await sleep(120); }
+  check((await focusInPicker())?.day === "31", `矢印で 3/31 まで移動できる（実際 ${JSON.stringify(await focusInPicker())}）`);
+  await page.keyboard.press("ArrowRight"); // 4/1 へ渡る
+  await sleep(400);
+  const crossed = await focusInPicker();
+  log(`  3/31 で → を押した後: ${await ymNow()} / フォーカス ${JSON.stringify(crossed)}`);
+  check((await ymNow()) === "2019/04", `→ で翌月へ渡る（実際 ${await ymNow()}）`);
+  check(crossed !== null, `**月をまたいでもフォーカスがピッカーに残る**（実際 ${JSON.stringify(crossed)}）`);
+  check(crossed?.day === "1", `送り先の日にフォーカスが乗る（実際 ${JSON.stringify(crossed)}）`);
+  await page.keyboard.press("ArrowLeft"); // 3/31 へ戻る
+  await sleep(400);
+  check((await focusInPicker())?.day === "31", "← で戻ってもフォーカスが残る");
+  check((await ymNow()) === "2019/03", `月も戻る（実際 ${await ymNow()}）`);
+
+  await page.locator(".dtp-day").nth(14).click(); // 15 日
+  await sleep(400);
+  const picked = await shown();
+  log(`  15 日を選んだ: ${picked}`);
+  check(picked === "2019/03/15", `選んだ日付が全区間へ入る（実際 ${picked}）`);
+  check((await page.locator(".dtp").count()) === 0, "日付を選ぶとピッカーは閉じる");
+
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const echoed = await shown();
+  log(`  Enter でホストへ送って返ってきた値: ${echoed}`);
+  check(echoed === "2019/03/15", `**ホストへ届いて返ってくる**（実際 ${echoed}）`);
+
+  // --- ⑦ 時刻ピッカー（TMW・2,2,2）---
+  log("\n### ⑦ 時刻ピッカー（曖昧 → 確定）");
+  const tEmpty = await valuesAt(TROW, TSEG);
+  log(`  TMW の現在値: ${JSON.stringify(tEmpty)}（空なら区切りが画面に出ていない）`);
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  check(await page.locator(".dtp").isVisible(), "時刻欄でもピッカーが開く");
+  const hasTabs = (await page.locator(".dtp-tabs").count()) === 1;
+  log(`  日付 / 時刻のタブ: ${hasTabs ? "あり" : "なし"}`);
+  check(hasTabs, "区切りが画面に出ていないので、日付か時刻かを利用者に選ばせる");
+
+  await page.locator(".dtp-tab", { hasText: "時刻" }).click();
+  await sleep(250);
+  // **時は 10 以上を選ぶ。** `TMW` の編集ワードは `'  :  :  '` で先頭に `0` が無いため、
+  // ホストは**時の先頭ゼロを抑制**して返す（`09` を送ると ` 9:30:15` で返る。実測 2026-08-26）。
+  // 送受信は正しいが期待値が読みにくくなるので、抑制の掛からない値で往復を見る
+  // （`D8U` は `'0   /  /  '` なので抑制されない＝⑥ はそのまま比較できる）。
+  await sleep(400); // タブ切替の直後は列がスクロールする。落ち着いてから押す
+  const pick = (col, text) =>
+    page.locator(".dtp-col").nth(col).locator(".dtp-cell", { hasText: new RegExp(`^${text}$`) }).click();
+  await pick(0, "13");
+  await sleep(250);
+  await pick(1, "30");
+  await sleep(250);
+  await pick(2, "15");
+  await sleep(350);
+  // **時刻は確定するまで欄へ書かない**（下書き）。日付と違い 1 列では値が定まらないため
+  const tDraft = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  13/30/15 を選んだ時点の欄: ${JSON.stringify(tDraft)}`);
+  check(tDraft === "::", `確定前は欄に書かれない（実際 ${JSON.stringify(tDraft)}）`);
+  check((await page.locator(".dtp").count()) === 1, "時刻は選んでも開いたまま（1 クリックでは定まらない）");
+
+  // **Esc は閉じるだけで取り消しになる**（書いていないので巻き戻す仕掛けが要らない）
+  await page.keyboard.press("Escape");
+  await sleep(350);
+  check((await page.locator(".dtp").count()) === 0, "Esc で閉じる");
+  check((await valuesAt(TROW, TSEG)).join(":") === "::", "Esc の後も欄は変わらない（取り消し）");
+
+  // 開き直して選び、**「確定」ボタン**で書いて閉じる（マウスだけの確定手段）
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  await page.locator(".dtp-tab", { hasText: "時刻" }).click();
+  await sleep(500);
+  await pick(0, "13");
+  await sleep(200);
+  await pick(1, "30");
+  await sleep(200);
+  await pick(2, "15");
+  await sleep(200);
+  await page.locator(".dtp-ok").click();
+  await sleep(400);
+  const tPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  「確定」を押した後: ${tPicked}`);
+  check(tPicked === "13:30:15", `確定で全区間へ入る（実際 ${tPicked}）`);
+  check((await page.locator(".dtp").count()) === 0, "「確定」でピッカーが閉じる");
+
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const tEchoed = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  Enter でホストへ送って返ってきた値: ${tEchoed}`);
+  check(tEchoed === "13:30:15", `**ホストへ届いて返ってくる**（実際 ${tEchoed}）`);
+
+  // ホストが `:` を刷ったので、次に開いたときは時刻に確定している
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  const tabsAfter = await page.locator(".dtp-tabs").count();
+  const fmtAfter = await page.locator(".dtp").getAttribute("aria-label");
+  log(`  値が入った後: タブ ${tabsAfter} 件 / aria-label ${fmtAfter}`);
+  check(tabsAfter === 0, "区切りが見えたらタブは消える（曖昧 → 確定の単調な絞り込み）");
+  check(fmtAfter?.includes("HH:MM:SS") === true, `時刻として名乗る（実際 ${fmtAfter}）`);
+  await page.keyboard.press("Escape");
+  await sleep(250);
+
+  // --- ⑧ キーボードだけで完結する（種別が確定した TMW を使う＝タブを経由しない）---
+  log("\n### ⑧ キーボードだけの操作");
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  const kf0 = await focusInPicker();
+  log(`  開いた直後: ${JSON.stringify(kf0)}`);
+  check(kf0?.col === "0" && kf0?.val === "13", `時の列の現在値へフォーカスが移る（実際 ${JSON.stringify(kf0)}）`);
+
+  // **時刻は `Space` が「選ぶだけ」、`Enter` が「選んで閉じる」**（時・分・秒が独立していて
+  // 1 列では値が完成しないため。ドロップダウンと日付は APG どおり両方とも「選んで閉じる」）。
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Space");
+  await sleep(300);
+  const kf1 = await focusInPicker();
+  check(kf1 !== null, `Space の後も**フォーカスがピッカーに残る**（実際 ${JSON.stringify(kf1)}）`);
+  check((await page.locator(".dtp").count()) === 1, "Space では閉じない（残りの列を決められる）");
+  check((await valuesAt(TROW, TSEG)).join(":") === "13:30:15", "Space の時点では欄に書かない（下書き）");
+
+  await page.keyboard.press("ArrowRight");
+  await sleep(150);
+  check((await focusInPicker())?.col === "1", "→ で分の列へ渡る");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await sleep(300);
+
+  await page.keyboard.press("ArrowRight");
+  await sleep(150);
+  check((await focusInPicker())?.col === "2", "→ で秒の列へ渡る");
+
+  // **ホイールはピッカーの中で効く**（端末のページ送りにしない）。除外が漏れていたときは
+  // ホストへ Roll が飛び、再表示で**ピッカーが閉じていた**。本物の native スクロールは
+  // 実ブラウザでしか起きないので、ここで見る。
+  const colBox = await page.locator(".dtp-col").first().boundingBox();
+  await page.mouse.move(colBox.x + colBox.width / 2, colBox.y + colBox.height / 2);
+  await page.mouse.wheel(0, 240);
+  await sleep(500);
+  check((await page.locator(".dtp").count()) === 1, "**ホイールでピッカーが閉じない**");
+  check((await focusInPicker()) !== null, "ホイールでフォーカスも外れない");
+  const scrolled = await page.locator(".dtp-col").first().evaluate((e) => e.scrollTop);
+  log(`  ホイール後の列の scrollTop: ${scrolled}`);
+  check(scrolled > 0, `列自身がスクロールする（実際 ${scrolled}）`);
+
+  // **Tab はピッカーの中で巡回する**（抜けると開いたままの部品へキーだけで戻れない）。
+  // 実ブラウザなので合成イベントではなく**本物のタブ移動**が起きる——jsdom では測れない所。
+  const before = await focusInPicker();
+  let escaped = false;
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press("Tab");
+    if ((await focusInPicker()) === null) { escaped = true; break; }
+  }
+  check(!escaped, "Tab を 14 回押してもピッカーの外へ出ない（中で巡回する）");
+  for (let i = 0; i < 14; i++) await page.keyboard.press("Shift+Tab");
+  const after = await focusInPicker();
+  log(`  Tab 一巡の前後: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  check(after !== null, "Shift+Tab でも外へ出ない");
+
+  // 秒を 1 つ進めて **Enter で確定して閉じる**
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  const kPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  キーボードだけで選んだ: ${kPicked}`);
+  check(kPicked === "12:31:16", `Space と Enter だけで全区間が決まる（実際 ${kPicked}）`);
+  check((await page.locator(".dtp").count()) === 0, "**Enter で確定してピッカーが閉じる**");
+  check((await focusedField()) === `f${TROW}c${TSEG[0]}`, `Enter の後は欄へフォーカスが戻る（実際 ${await focusedField()}）`);
+
+  // そのまま Enter でホストへ送れる（マウス不要）
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const kEchoed = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  Enter でホストへ送って返ってきた値: ${kEchoed}`);
+  check(kEchoed === "12:31:16", `**マウスを 1 度も使わずホストへ届く**（実際 ${kEchoed}）`);
 
   const shot = join(OUT, "edtmsk-edit.png");
   await page.locator(".pane").screenshot({ path: shot });
