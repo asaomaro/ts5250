@@ -102,12 +102,16 @@ function focusDayEl(d: number): void {
  * ホイールの操作でフォーカスを奪うと、押し続けられなくなる。
  */
 async function shiftCalendar(deltaMonth: number, deltaYear: number, refocus: boolean): Promise<void> {
+  if (refocus) anchorFocus(); // 作り直しでフォーカスが落ちないよう先に預ける（`moveDay` と同じ理由）
   if (deltaYear !== 0) year.value += deltaYear;
   if (deltaMonth !== 0) shiftMonth(deltaMonth);
   const d = Math.min(activeDay.value ?? focusDay.value, daysInMonth(year.value, month.value));
   activeDay.value = d;
   await nextTick();
-  if (refocus) focusDayEl(d);
+  if (!refocus) return;
+  const el = rootEl.value?.querySelector<HTMLElement>(`.dtp-day[data-day="${d}"]`);
+  if (el) el.focus();
+  else anchorFocus();
 }
 
 /**
@@ -241,9 +245,24 @@ onMounted(focusInitial);
 // タブを切り替えたら、切り替え先の中身へフォーカスを移す（タブに残ると矢印が効かない）
 watch(tab, () => void focusInitial());
 
+/**
+ * **月をまたぐ前に、ピッカー自身へフォーカスを預ける。**
+ *
+ * 月が変わると日のボタンは作り直され、送り先にその日が無いと**フォーカス中の要素が消える**
+ * （3/31 → 4 月）。消えた瞬間ブラウザはフォーカスを `body` へ落とし、その隙に
+ * **背後の端末の欄へ持っていかれる**——利用者報告の症状。
+ * ルート要素は作り直されないので、ここへ預けておけば落ちる先が無くなる。
+ * jsdom は要素が消えてもフォーカスを落とさないため、**この不具合は実ブラウザでしか出ない**。
+ */
+function anchorFocus(): void {
+  rootEl.value?.focus();
+}
+
 /** 日を移動して、移った先にフォーカスを置く。月をまたぐときは月送りも行う。 */
 async function moveDay(from: number, delta: number): Promise<void> {
   let target = from + delta;
+  const crossing = target < 1 || target > daysInMonth(year.value, month.value);
+  if (crossing) anchorFocus();
   if (target < 1) {
     shiftMonth(-1);
     target += daysInMonth(year.value, month.value);
@@ -251,8 +270,11 @@ async function moveDay(from: number, delta: number): Promise<void> {
     target -= daysInMonth(year.value, month.value);
     shiftMonth(1);
   }
+  activeDay.value = target; // 先に決めておく（ロービング tabindex を初回描画から正しくする）
   await nextTick();
-  rootEl.value?.querySelector<HTMLElement>(`.dtp-day[data-day="${target}"]`)?.focus();
+  const el = rootEl.value?.querySelector<HTMLElement>(`.dtp-day[data-day="${target}"]`);
+  if (el) el.focus();
+  else anchorFocus(); // 念のため——**部品の外へは出さない**
 }
 
 /** 時刻の列の中／列の間を移動する。列内は**巡回**する（23 時の下は 0 時）。 */
@@ -323,6 +345,7 @@ function onKeydown(ev: KeyboardEvent): void {
   if (t.classList.contains("dtp-tab") && showTabs.value) {
     if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
       ev.preventDefault();
+      ev.stopPropagation();
       tab.value = tab.value === "date" ? "time" : "date";
     }
     return;
@@ -331,6 +354,10 @@ function onKeydown(ev: KeyboardEvent): void {
     const from = Number(t.dataset.day);
     if (!Number.isFinite(from)) return;
     ev.preventDefault();
+    // **ペインへ流さない。** 流すとキーマップの local 経路が拾い、端末の欄へフォーカスを
+    // 戻してしまう（月をまたぐ操作で実際に起きた。ペイン側の早期 return は `ev.target` の
+    // 位置で判定するので、**要素が作り直される瞬間には当てにならない**）。
+    ev.stopPropagation();
     // 週の中での位置（日曜始まり。`leading` は月初の空きマス数）
     const wd = (leading.value + from - 1) % 7;
     if (ev.key === "Home" || ev.key === "End") {
@@ -338,7 +365,7 @@ function onKeydown(ev: KeyboardEvent): void {
       const d = ev.key === "Home" ? Math.max(1, from - wd) : Math.min(max, from + (6 - wd));
       activeDay.value = d;
       void nextTick().then(() => focusDayEl(d));
-      return;
+      return; // 同じ月の中なので要素は消えない（`anchorFocus` は要らない）
     }
     // 左右は 1 日、上下は 1 週（カレンダーの並びと同じ動き）
     const delta = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : ev.key === "ArrowUp" ? -7 : 7;
@@ -349,6 +376,7 @@ function onKeydown(ev: KeyboardEvent): void {
     const col = Number(t.dataset.col), val = Number(t.dataset.val);
     if (!Number.isFinite(col) || !Number.isFinite(val)) return;
     ev.preventDefault();
+    ev.stopPropagation(); // 同上——ピッカーが扱うキーは端末へ漏らさない
     if (ev.key === "ArrowLeft") moveCell(col, val, -1, 0);
     else if (ev.key === "ArrowRight") moveCell(col, val, 1, 0);
     else moveCell(col, val, 0, ev.key === "ArrowUp" ? -1 : 1);
@@ -362,6 +390,7 @@ function onKeydown(ev: KeyboardEvent): void {
     class="dtp crt-pop"
     :data-pop="pop"
     role="dialog"
+    tabindex="-1"
     :aria-label="`${tab === 'date' ? MSG_DATE_PICKER : MSG_TIME_PICKER}（${MSG_DTP_FORMAT(label)}）`"
     @mousedown.stop.prevent
     @keydown="onKeydown"
@@ -468,6 +497,7 @@ function onKeydown(ev: KeyboardEvent): void {
 /* 面・枠・端末調は `.crt-pop`（styles.css）が持つ。ここは並びと寸法だけ。 */
 .dtp {
   position: absolute;
+  outline: none; /* `tabindex=-1` は預け先であって操作対象ではないので、輪郭は出さない */
   margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
   z-index: 7;
   padding: 4px;

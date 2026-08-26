@@ -316,6 +316,25 @@ try {
   check((await ymNow()) === "2019/03", `送り戻して元へ（実際 ${await ymNow()}）`);
   check((await page.locator(".dtp").count()) === 1, "月送りキーでも閉じない（端末へ流していない）");
 
+  // **矢印で月をまたいでもフォーカスがピッカーから外れない**（利用者報告の再発防止）。
+  // 月が変わると日のボタンは作り直され、送り先にその日が無いとフォーカス中の要素が消える。
+  // **jsdom は要素が消えてもフォーカスを落とさないので、これは実ブラウザでしか出ない。**
+  // **日はクリックすると確定して閉じる**ので、位置決めは矢印で行う（7 → 28 → 31）
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowDown"); await sleep(120); }
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("ArrowRight"); await sleep(120); }
+  check((await focusInPicker())?.day === "31", `矢印で 3/31 まで移動できる（実際 ${JSON.stringify(await focusInPicker())}）`);
+  await page.keyboard.press("ArrowRight"); // 4/1 へ渡る
+  await sleep(400);
+  const crossed = await focusInPicker();
+  log(`  3/31 で → を押した後: ${await ymNow()} / フォーカス ${JSON.stringify(crossed)}`);
+  check((await ymNow()) === "2019/04", `→ で翌月へ渡る（実際 ${await ymNow()}）`);
+  check(crossed !== null, `**月をまたいでもフォーカスがピッカーに残る**（実際 ${JSON.stringify(crossed)}）`);
+  check(crossed?.day === "1", `送り先の日にフォーカスが乗る（実際 ${JSON.stringify(crossed)}）`);
+  await page.keyboard.press("ArrowLeft"); // 3/31 へ戻る
+  await sleep(400);
+  check((await focusInPicker())?.day === "31", "← で戻ってもフォーカスが残る");
+  check((await ymNow()) === "2019/03", `月も戻る（実際 ${await ymNow()}）`);
+
   await page.locator(".dtp-day").nth(14).click(); // 15 日
   await sleep(400);
   const picked = await shown();

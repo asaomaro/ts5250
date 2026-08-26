@@ -26,12 +26,16 @@ function cell(ch = " "): Cell {
 function fld(over: Partial<Field> & { index: number; row: number; col: number; length: number }): Field {
   return { protected: false, hidden: false, numeric: true, mdt: false, value: "", ...over } as Field;
 }
-/** 行 3 に素の欄、行 11 に時刻の分割欄（実機 DTMDSPF の DMA / TMW と同じ並び） */
+const DROW = 13;
+/** 行 3 に素の欄、行 11 に時刻、行 13 に日付の分割欄（実機 DTMDSPF の DMA / TMW / D8U と同じ並び） */
 const FIELDS: Field[] = [
   fld({ index: 1, row: 3, col: COL, length: 8 }),
   fld({ index: 2, row: TROW, col: COL, length: 2, continued: "first", value: "13" }),
   fld({ index: 3, row: TROW, col: COL + 3, length: 2, continued: "middle", value: "30" }),
-  fld({ index: 4, row: TROW, col: COL + 6, length: 2, continued: "last", value: "15" })
+  fld({ index: 4, row: TROW, col: COL + 6, length: 2, continued: "last", value: "15" }),
+  fld({ index: 5, row: DROW, col: COL, length: 4, continued: "first", value: "2019" }),
+  fld({ index: 6, row: DROW, col: COL + 5, length: 2, continued: "middle", value: "03" }),
+  fld({ index: 7, row: DROW, col: COL + 8, length: 2, continued: "last", value: "31" })
 ];
 function snap(): ScreenSnapshot {
   const cells: Cell[][] = [];
@@ -42,6 +46,8 @@ function snap(): ScreenSnapshot {
   }
   cells[TROW - 1]![COL + 1] = cell(":");
   cells[TROW - 1]![COL + 4] = cell(":");
+  cells[DROW - 1]![COL + 3] = cell("/");
+  cells[DROW - 1]![COL + 6] = cell("/");
   return { sessionId: SID, rows: 24, cols: 80, cursor: { row: TROW, col: COL },
     keyboardLocked: false, cells, fields: FIELDS } as unknown as ScreenSnapshot;
 }
@@ -253,6 +259,61 @@ describe("ピッカーの上のホイール", () => {
     w.find(".pane").element.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
     await nextTick(); await nextTick();
     expect(sent.filter((m) => /PageDown/.test(JSON.stringify(m))).length).toBeGreaterThan(0);
+    w.unmount();
+  });
+});
+
+/**
+ * **矢印で月をまたいだときにフォーカスを失わない。**
+ *
+ * 月が変わると日のボタンは作り直され、**フォーカス中の要素が消える**ことがある
+ * （3/31 → 4/1 のように、送り先にその日が無い場合）。消えた瞬間フォーカスは `body` へ落ち、
+ * ペイン側の調停が拾って**背後の端末の欄へ戻してしまう**——利用者報告の症状。
+ * ペインごと立てないと再現しない（`ScreenGrid` 単体ではペインの調停が無い）。
+ */
+describe("矢印で月をまたぐときのフォーカス", () => {
+  async function openDate() {
+    const p = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await p.find('input.grid-input[data-field-index="5"]').trigger("focus");
+    await nextTick();
+    await p.find(".pane").trigger("keydown", { key: "ArrowDown", altKey: true });
+    await nextTick(); await nextTick();
+    return p;
+  }
+
+  it("3/31 で → を押すと 4/1 へ移り、フォーカスはピッカーに残る", async () => {
+    const w = await openDate();
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    expect(active()?.dataset.day).toBe("31");
+
+    press("ArrowRight");
+    await nextTick(); await nextTick(); await nextTick();
+
+    expect(w.find(".dtp-ym").text()).toBe("2019/04");
+    expect(active()?.closest(".dtp"), "ピッカーからフォーカスが外れた").not.toBeNull();
+    expect(active()?.dataset.day).toBe("1");
+    w.unmount();
+  });
+
+  it("4/1 で ← を押すと 3/31 へ戻り、フォーカスはピッカーに残る", async () => {
+    const w = await openDate();
+    press("ArrowRight"); // 4/1 へ
+    await nextTick(); await nextTick(); await nextTick();
+    press("ArrowLeft");
+    await nextTick(); await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    expect(active()?.closest(".dtp"), "ピッカーからフォーカスが外れた").not.toBeNull();
+    expect(active()?.dataset.day).toBe("31");
+    w.unmount();
+  });
+
+  it("↓ で月をまたいでもフォーカスはピッカーに残る", async () => {
+    const w = await openDate();
+    press("ArrowDown"); // 3/31 + 7 → 4/7
+    await nextTick(); await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/04");
+    expect(active()?.closest(".dtp"), "ピッカーからフォーカスが外れた").not.toBeNull();
     w.unmount();
   });
 });
