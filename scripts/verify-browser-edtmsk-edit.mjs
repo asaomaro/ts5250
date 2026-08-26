@@ -12,6 +12,8 @@
 //   ⑦ `TMW`（2,2,2）は**空欄だと区切りが画面に出ない**ので日付 / 時刻のタブが出る。
 //      時刻を入れてホストが `:` を刷ると、次に開いたときは時刻に確定してタブが消える
 //      （曖昧 → 確定の**単調な絞り込み**。decisions D3）
+//   ⑧ **キーボードだけで完結する**——`Alt+↓` で開くとフォーカスがピッカーへ移り、
+//      矢印と `Enter` で全区間を決め、`Esc` で欄へ戻ってそのまま送れる（マウス不要）
 //
 // 検証資材は scripts/build-dttest.mjs が作る <LIB>/DTMDSPF ＋ DTMPGM の **`D8U`**
 // （8 桁 EDTWRD+EDTMSK ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`。素の欄では色も下線も差が出ない）。
@@ -81,6 +83,13 @@ const selAt = (row, col) => `input.grid-input[data-field="f${row}c${col}"]`;
 const valuesAt = async (row, cols) =>
   Promise.all(cols.map(async (c) => (await page.locator(selAt(row, c)).inputValue()).replace(/\s+$/, "")));
 const focusedField = () => page.evaluate(() => document.activeElement?.getAttribute?.("data-field") ?? undefined);
+/** フォーカスがピッカーの中にあるか＋その要素の目印（キーボード操作の検証に使う） */
+const focusInPicker = () =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!(a instanceof HTMLElement) || !a.closest(".dtp")) return null;
+    return { cls: a.className, col: a.dataset.col ?? null, val: a.dataset.val ?? null, day: a.dataset.day ?? null };
+  });
 const segValues = async () => Promise.all(SEG.map(async (c) => (await page.locator(sel(c)).inputValue()).replace(/\s+$/, "")));
 const shown = async () => (await segValues()).join("/");
 async function focusSeg(i, caret = 0) {
@@ -269,6 +278,9 @@ try {
   await page.keyboard.press("Alt+ArrowDown");
   await sleep(400);
   check(await page.locator(".dtp").isVisible(), "Alt+↓ でピッカーが開く");
+  const dfoc = await focusInPicker();
+  log(`  開いた直後のフォーカス: ${JSON.stringify(dfoc)}`);
+  check(dfoc?.day === "7", `フォーカスがピッカーの現在値の日へ移る（実際 ${JSON.stringify(dfoc)}）`);
   const fmt = await page.locator(".dtp-fmt").innerText();
   log(`  見出し: ${fmt}`);
   check(fmt.includes("YYYY/MM/DD"), `解釈中の書式を名乗る（実際 ${fmt}）`);
@@ -343,6 +355,52 @@ try {
   check(fmtAfter.includes("HH:MM:SS"), `時刻として名乗る（実際 ${fmtAfter}）`);
   await page.keyboard.press("Escape");
   await sleep(250);
+
+  // --- ⑧ キーボードだけで完結する（種別が確定した TMW を使う＝タブを経由しない）---
+  log("\n### ⑧ キーボードだけの操作");
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  const kf0 = await focusInPicker();
+  log(`  開いた直後: ${JSON.stringify(kf0)}`);
+  check(kf0?.col === "0" && kf0?.val === "13", `時の列の現在値へフォーカスが移る（実際 ${JSON.stringify(kf0)}）`);
+
+  // 時: 1 つ上（13 → 12）を Enter で決める
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await sleep(300);
+  const kf1 = await focusInPicker();
+  check(kf1 !== null, `Enter の後も**フォーカスがピッカーに残る**（実際 ${JSON.stringify(kf1)}）`);
+
+  // 分・秒へ矢印で渡って決める
+  await page.keyboard.press("ArrowRight");
+  await sleep(150);
+  check((await focusInPicker())?.col === "1", "→ で分の列へ渡る");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await sleep(300);
+  await page.keyboard.press("ArrowRight");
+  await sleep(150);
+  check((await focusInPicker())?.col === "2", "→ で秒の列へ渡る");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await sleep(300);
+
+  const kPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  キーボードだけで選んだ: ${kPicked}`);
+  check(kPicked === "12:31:16", `矢印と Enter だけで全区間が決まる（実際 ${kPicked}）`);
+
+  // Esc で閉じて欄へ戻り、そのまま Enter でホストへ送れる（マウス不要）
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  check((await page.locator(".dtp").count()) === 0, "Esc で閉じる");
+  check((await focusedField()) === `f${TROW}c${TSEG[0]}`, `Esc で欄へフォーカスが戻る（実際 ${await focusedField()}）`);
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const kEchoed = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  Enter でホストへ送って返ってきた値: ${kEchoed}`);
+  check(kEchoed === "12:31:16", `**マウスを 1 度も使わずホストへ届く**（実際 ${kEchoed}）`);
 
   const shot = join(OUT, "edtmsk-edit.png");
   await page.locator(".pane").screenshot({ path: shot });

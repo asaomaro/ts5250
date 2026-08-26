@@ -390,3 +390,135 @@ describe("画面設定から選べる（optHints と同じ仕組み）", () => {
     }
   });
 });
+
+/**
+ * **キーボードだけで操作を完結できること**（`optHints` のリストと同じ約束）。
+ *
+ * 開いた直後にフォーカスがピッカーへ移らないと、矢印も `Enter` も欄へ行ってしまい
+ * マウスが要る。さらに時刻は「選んでも開いたまま」なので、**1 列選ぶたびに欄へ
+ * フォーカスを戻されると分・秒へ進めない**（`pasteFrom` の `sync` が欄へ移すため）。
+ */
+describe("キーボードだけで完結する", () => {
+  const active = () => document.activeElement as HTMLElement | null;
+
+  it("開くとフォーカスがピッカーへ移る（欄に残らない）", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    expect(active()?.closest(".dtp")).not.toBeNull();
+    w.unmount();
+  });
+
+  it("日付は「選択済み ＞ 今日」の順で初期フォーカスが決まる", async () => {
+    const now = new Date();
+    // 値が読めない欄 → 今日にフォーカス
+    const w1 = mountGrid("panel");
+    await open(w1);
+    expect(active()?.dataset.day).toBe(String(now.getDate()));
+    expect(active()?.getAttribute("aria-current")).toBe("date");
+    w1.unmount();
+
+    // 値のある欄 → その日にフォーカス（実行日に依存しない年で固定）
+    const w2 = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w2);
+    expect(active()?.dataset.day).toBe("7");
+    expect(active()?.getAttribute("aria-pressed")).toBe("true");
+    w2.unmount();
+  });
+
+  it("矢印で日を移動する（左右で 1 日・上下で 1 週）", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w);
+    const key = async (k: string) => {
+      await active()!.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+      await nextTick();
+    };
+    await key("ArrowRight");
+    expect(active()?.dataset.day).toBe("8");
+    await key("ArrowDown");
+    expect(active()?.dataset.day).toBe("15");
+    await key("ArrowUp");
+    expect(active()?.dataset.day).toBe("8");
+    await key("ArrowLeft");
+    expect(active()?.dataset.day).toBe("7");
+    w.unmount();
+  });
+
+  it("月をまたぐ移動では月が送られる", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "01"]])));
+    await open(w);
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+    await nextTick();
+    await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/02"); // 3/1 の左は 2 月へ
+    expect(active()?.dataset.day).toBe("28");
+    w.unmount();
+  });
+
+  it("`Enter` で日を決められる（button の既定動作）", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w);
+    await active()!.click(); // Enter/Space は button の click に落ちる
+    await nextTick();
+    const edits = new Map(((w.emitted("edit") as unknown[][] | undefined) ?? []).map(([i, v]) => [i as number, v as string]));
+    expect(edits.get(2)).toBe("07");
+    w.unmount();
+  });
+
+  it("時刻は列を選んでも**フォーカスがピッカーに残り**、矢印で次の列へ進める", async () => {
+    const edits = reactive(new Map<number, string>());
+    const w = mountGrid("panel", TIME_FIELDS, ":", false, edits);
+    const pump = () => {
+      for (const [i, v] of (w.emitted("edit") as unknown[][] | undefined) ?? []) edits.set(i as number, v as string);
+    };
+    await open(w);
+    // 初期フォーカスは「時」の列の現在値
+    expect(active()?.dataset.col).toBe("0");
+
+    await active()!.click(); // その時を決定
+    pump(); await nextTick();
+    // **欄へ戻されていない**——ここが戻ると分・秒へ進めない
+    expect(active()?.closest(".dtp")).not.toBeNull();
+
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(active()?.dataset.col).toBe("1"); // 分の列へ
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(active()?.dataset.col).toBe("2"); // 秒の列へ
+    w.unmount();
+  });
+
+  it("列の中は上下で巡回する（0 時の上は 23 時）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":", false, reactive(new Map([[0, "00"], [1, "00"], [2, "00"]])));
+    await open(w);
+    expect(active()?.dataset.val).toBe("0");
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(active()?.dataset.val).toBe("23");
+    w.unmount();
+  });
+
+  it("`both` はタブの左右で切り替わり、切り替え先の中身へフォーカスが移る", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, " "); // 区切りが空白＝both
+    await open(w);
+    expect(active()?.classList.contains("dtp-day")).toBe(true); // 既定は日付タブ
+    const tabTime = w.findAll(".dtp-tab")[1]!;
+    (tabTime.element as HTMLElement).focus();
+    tabTime.element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await nextTick();
+    await nextTick();
+    expect(active()?.classList.contains("dtp-cell")).toBe(true); // 時刻の列へ移っている
+    w.unmount();
+  });
+
+  it("`Esc` で閉じて欄へ戻る（フォーカスが宙に浮かない）", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    expect(active()?.classList.contains("grid-input")).toBe(true);
+    w.unmount();
+  });
+});

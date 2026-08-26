@@ -1145,7 +1145,13 @@ watch(dateTimeTargets, () => { dtOpenKey.value = null; }); // 画面が変わっ
  */
 const dtOpenValues = ref<readonly string[]>([]);
 
-/** ピッカーを開く（ボタン押下・`Alt+↓` の共通経路）。実効値の捕獲もここで行う */
+/**
+ * ピッカーを開く（ボタン押下・`Alt+↓` の共通経路）。実効値の捕獲もここで行う。
+ *
+ * **フォーカスの移動はピッカー側が自分で行う**（`DateTimePicker` の `onMounted`）——
+ * 中のどの要素へ置くか（選択済みの日 / 今日 / 現在の時）はピッカーしか知らないため。
+ * `optHints` はここ（`openOptAt`）で DOM を引いて移しているが、あちらは平坦なリストなので済んでいる。
+ */
 function openDtFor(t: DateTimeTarget): void {
   dtOpenValues.value = t.run.map((f) => logicalValue(f));
   dtOpenKey.value = t.run[0]!.index;
@@ -1214,8 +1220,14 @@ function writeDateTime(t: DateTimeTarget, digits: string): void {
   if (digits === "") return;
   const first = t.run[0]!;
   const el = inputForSlice(first, 0);
+  // **ピッカーの中のフォーカスを覚えておく。** `pasteFrom` の focus 経路は `sync` が
+  // 欄へフォーカスを移すので、そのままだと**時刻の列を 1 つ選ぶたびに欄へ戻され**、
+  // 続けて矢印で分・秒を選べない（キーボードだけで完結しなくなる）。
+  const active = document.activeElement;
+  const inPicker = active instanceof HTMLElement && active.closest(".dtp") !== null ? active : null;
   pasteFrom({ row: first.row, col: first.col }, digits, el ? { f: first, el, startOffset: 0 } : undefined, true);
-  el?.focus(); // 以降の打鍵は通常どおり欄へ
+  if (inPicker && document.contains(inPicker)) inPicker.focus();
+  else el?.focus(); // ピッカーの外から書いた（マウス操作等）なら欄へ戻す
 }
 
 /** 日付は 1 クリックで値が定まるので、書いたら閉じる（`chooseOption` と同じ即時確定） */

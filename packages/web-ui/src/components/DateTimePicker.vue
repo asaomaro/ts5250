@@ -19,7 +19,7 @@
  * 桁順（どの区間が年 / 月 / 日か）は固定なので、**解釈中の書式を見出しに必ず出す**
  * （違えば利用者は直接打鍵に切り替えられる）。
  */
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   daysInMonth,
   formatLabel,
@@ -91,6 +91,16 @@ const leading = computed(() => new Date(year.value, month.value - 1, 1).getDay()
 const days = computed(() => Array.from({ length: daysInMonth(year.value, month.value) }, (_, i) => i + 1));
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
+/** 今日の日（表示中の月に限る）。カレンダー上で「今日」が分かるようにする */
+const todayDay = computed(() =>
+  year.value === today.getFullYear() && month.value === today.getMonth() + 1 ? today.getDate() : null
+);
+/**
+ * 開いた直後にフォーカスを置く日。**選択済み ＞ 今日 ＞ 1 日**。
+ * 月送りをした後は「その月に選択済みの日」は無いので、今日か 1 日に落ちる。
+ */
+const focusDay = computed(() => selDay.value ?? todayDay.value ?? 1);
+
 function chooseDay(d: number): void {
   selDay.value = d;
   emit("pick-date", { year: year.value, month: month.value, day: d });
@@ -132,17 +142,105 @@ function chooseNow(): void {
   emit("pick-time", { hour: hour.value, minute: minute.value, second: second.value });
 }
 
-/** `Esc` で閉じる。**このコンポーネント自身の keydown だけ**を購読する（グリッドには足さない）。 */
+// ---------------------------------------------------------------------------
+// キーボードだけで操作を完結させる（`optHints` のリストと同じ約束）。
+//
+// - 開いたら**フォーカスをピッカーへ移す**（`optHints` の `openOptAt` と同じ）。
+//   移さないと、開いた直後の矢印・Enter が欄へ行ってしまい、マウスが要る。
+// - 矢印で候補を移動し、`Enter` / `Space` で決定（`button` の既定動作）。
+// - `Esc` で閉じて欄へ戻る。
+//
+// **購読するのはこのコンポーネント自身の `keydown` だけ**——グリッドには足さない
+// （矩形選択・コピー＆ペーストを妨げないための約束）。
+// ---------------------------------------------------------------------------
+
+const rootEl = ref<HTMLElement | null>(null);
+
+/** 開いた直後にフォーカスを置く要素（選択済み ＞ 今日/現在値 ＞ 先頭）。 */
+function initialTarget(): HTMLElement | null {
+  const r = rootEl.value;
+  if (!r) return null;
+  return (
+    r.querySelector<HTMLElement>('[data-dtp-initial="true"]') ??
+    r.querySelector<HTMLElement>(".dtp-day, .dtp-cell")
+  );
+}
+async function focusInitial(): Promise<void> {
+  await nextTick();
+  initialTarget()?.focus();
+}
+onMounted(focusInitial);
+// タブを切り替えたら、切り替え先の中身へフォーカスを移す（タブに残ると矢印が効かない）
+watch(tab, () => void focusInitial());
+
+/** 日を移動して、移った先にフォーカスを置く。月をまたぐときは月送りも行う。 */
+async function moveDay(from: number, delta: number): Promise<void> {
+  let target = from + delta;
+  if (target < 1) {
+    shiftMonth(-1);
+    target += daysInMonth(year.value, month.value);
+  } else if (target > daysInMonth(year.value, month.value)) {
+    target -= daysInMonth(year.value, month.value);
+    shiftMonth(1);
+  }
+  await nextTick();
+  rootEl.value?.querySelector<HTMLElement>(`.dtp-day[data-day="${target}"]`)?.focus();
+}
+
+/** 時刻の列の中／列の間を移動する。列内は**巡回**する（23 時の下は 0 時）。 */
+function moveCell(col: number, val: number, dCol: number, dVal: number): void {
+  const cols = hasSecond.value ? 3 : 2;
+  const nextCol = Math.min(Math.max(col + dCol, 0), cols - 1);
+  const len = nextCol === 0 ? HOURS.length : MINUTES.length;
+  const cur = nextCol === col ? val : nextCol === 0 ? hour.value : nextCol === 1 ? minute.value : second.value;
+  const nextVal = ((cur + dVal) % len + len) % len;
+  rootEl.value
+    ?.querySelector<HTMLElement>(`.dtp-cell[data-col="${nextCol}"][data-val="${nextVal}"]`)
+    ?.focus();
+}
+
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key === "Escape") {
     ev.stopPropagation();
     emit("close");
+    return;
+  }
+  const t = ev.target;
+  if (!(t instanceof HTMLElement)) return;
+  const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key);
+  if (!arrow || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+
+  // タブの上では左右でタブを切り替える（切り替え後は中身へフォーカスが移る）
+  if (t.classList.contains("dtp-tab") && showTabs.value) {
+    if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+      ev.preventDefault();
+      tab.value = tab.value === "date" ? "time" : "date";
+    }
+    return;
+  }
+  if (t.classList.contains("dtp-day")) {
+    const from = Number(t.dataset.day);
+    if (!Number.isFinite(from)) return;
+    ev.preventDefault();
+    // 左右は 1 日、上下は 1 週（カレンダーの並びと同じ動き）
+    const delta = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : ev.key === "ArrowUp" ? -7 : 7;
+    void moveDay(from, delta);
+    return;
+  }
+  if (t.classList.contains("dtp-cell")) {
+    const col = Number(t.dataset.col), val = Number(t.dataset.val);
+    if (!Number.isFinite(col) || !Number.isFinite(val)) return;
+    ev.preventDefault();
+    if (ev.key === "ArrowLeft") moveCell(col, val, -1, 0);
+    else if (ev.key === "ArrowRight") moveCell(col, val, 1, 0);
+    else moveCell(col, val, 0, ev.key === "ArrowUp" ? -1 : 1);
   }
 }
 </script>
 
 <template>
   <div
+    ref="rootEl"
     class="dtp crt-pop"
     :data-pop="pop"
     role="dialog"
@@ -188,7 +286,10 @@ function onKeydown(ev: KeyboardEvent): void {
           :key="'d' + d"
           type="button"
           class="dtp-day"
+          :data-day="d"
+          :data-dtp-initial="d === focusDay || undefined"
           :aria-pressed="d === selDay"
+          :aria-current="d === todayDay ? 'date' : undefined"
           @mousedown.stop.prevent
           @click.stop="chooseDay(d)"
         >{{ d }}</button>
@@ -200,6 +301,7 @@ function onKeydown(ev: KeyboardEvent): void {
         <div class="dtp-col" role="listbox">
           <button
             v-for="h in HOURS" :key="'h' + h" type="button" class="dtp-cell"
+            data-col="0" :data-val="h" :data-dtp-initial="h === hour || undefined"
             :aria-selected="h === hour" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('h', h)"
           >{{ two(h) }}</button>
@@ -207,6 +309,7 @@ function onKeydown(ev: KeyboardEvent): void {
         <div class="dtp-col" role="listbox">
           <button
             v-for="m in MINUTES" :key="'m' + m" type="button" class="dtp-cell"
+            data-col="1" :data-val="m"
             :aria-selected="m === minute" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('mi', m)"
           >{{ two(m) }}</button>
@@ -214,6 +317,7 @@ function onKeydown(ev: KeyboardEvent): void {
         <div v-if="hasSecond" class="dtp-col" role="listbox">
           <button
             v-for="s in MINUTES" :key="'s' + s" type="button" class="dtp-cell"
+            data-col="2" :data-val="s"
             :aria-selected="s === second" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('s', s)"
           >{{ two(s) }}</button>
