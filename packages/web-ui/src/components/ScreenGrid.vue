@@ -57,6 +57,7 @@ import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DATE_PICK
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
+import { cycleTab } from "../composables/focusTrap.js";
 import {
   fieldSlices,
   fieldSpan,
@@ -1091,6 +1092,10 @@ function onOptListKeydown(ev: KeyboardEvent): void {
     closeOptHints();
     return;
   }
+  // **`Tab` はリストの中で巡回させる。** 抜けると開いたままのリストへキーだけでは戻れない
+  // （出口は `Esc` と選択。`composables/focusTrap.ts` にピッカーと共通で置いてある）
+  const list = gridEl.value?.querySelector<HTMLElement>(".opt-hints");
+  if (list && cycleTab(list, ev)) return;
   if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
   ev.preventDefault();
   ev.stopPropagation();

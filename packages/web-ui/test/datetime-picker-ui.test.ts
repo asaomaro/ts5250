@@ -522,3 +522,86 @@ describe("キーボードだけで完結する", () => {
     w.unmount();
   });
 });
+
+/**
+ * **`Tab` は部品の中で巡回する**（`composables/focusTrap.ts` をオプション選択肢と共有）。
+ *
+ * 抜けてしまうと、開いたままの部品へキーボードだけでは戻れない（外側クリックでしか
+ * 閉じられない）。出口は `Esc` と選択——**キーで明示的に踏む**のが約束。
+ *
+ * 日のグリッド・時刻の列は**ロービング tabindex**で「まとまりで 1 停止点」にしてある。
+ * 全部を tabindex 0 にすると `Tab` が 60 個の分を 1 つずつ辿ることになって使えない。
+ */
+describe("Tab はピッカーの中で巡回する", () => {
+  const active = () => document.activeElement as HTMLElement | null;
+  const tab = (shift = false) => {
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: shift, bubbles: true, cancelable: true }));
+  };
+  const stops = (w: ReturnType<typeof mountGrid>) =>
+    w.findAll('.dtp button:not([tabindex="-1"]), .dtp [tabindex="0"]');
+
+  it("時刻の列は 1 列 1 停止点（60 個の分を 1 つずつ辿らない）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    // 時 24 + 分 60 + 秒 60 = 144 個あるが、停止点は各列 1 つ
+    expect(w.findAll(".dtp-cell").length).toBeGreaterThan(140);
+    expect(stops(w).filter((e) => e.classes().includes("dtp-cell"))).toHaveLength(3);
+    w.unmount();
+  });
+
+  it("日のグリッドも 1 停止点", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    expect(w.findAll(".dtp-day").length).toBeGreaterThan(27);
+    expect(stops(w).filter((e) => e.classes().includes("dtp-day"))).toHaveLength(1);
+    w.unmount();
+  });
+
+  it("末尾で `Tab` を押すと先頭へ戻る（外へ抜けない）", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    const list = stops(w).map((e) => e.element as HTMLElement);
+    expect(list.length).toBeGreaterThan(1);
+
+    list[list.length - 1]!.focus();
+    tab();
+    await nextTick();
+    expect(active()).toBe(list[0]);
+    expect(active()?.closest(".dtp")).not.toBeNull();
+    w.unmount();
+  });
+
+  it("先頭で `Shift+Tab` を押すと末尾へ回る", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    const list = stops(w).map((e) => e.element as HTMLElement);
+    list[0]!.focus();
+    tab(true);
+    await nextTick();
+    expect(active()).toBe(list[list.length - 1]);
+    w.unmount();
+  });
+
+  /**
+   * **「外へ出ない」だけを見ても意味が無い。** jsdom は合成 `keydown` で実際のタブ移動を
+   * 起こさないので、トラップが無くてもフォーカスはその場に留まり素通りする（実際に踏んだ）。
+   * **停止点を順に一周して先頭へ戻る**ことまで見る。
+   */
+  it("`Tab` を停止点の数だけ押すと一周して先頭へ戻る", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    const list = stops(w).map((e) => e.element as HTMLElement);
+    expect(list.length).toBeGreaterThan(2);
+
+    list[0]!.focus();
+    const visited: HTMLElement[] = [];
+    for (let i = 0; i < list.length; i++) {
+      tab();
+      await nextTick();
+      expect(active()?.closest(".dtp"), `${i + 1} 回目で外へ出た`).not.toBeNull();
+      visited.push(active()!);
+    }
+    expect(visited).toEqual([...list.slice(1), list[0]]);
+    w.unmount();
+  });
+});

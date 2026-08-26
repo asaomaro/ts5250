@@ -13,7 +13,8 @@
 //      時刻を入れてホストが `:` を刷ると、次に開いたときは時刻に確定してタブが消える
 //      （曖昧 → 確定の**単調な絞り込み**。decisions D3）
 //   ⑧ **キーボードだけで完結する**——`Alt+↓` で開くとフォーカスがピッカーへ移り、
-//      矢印と `Enter` で全区間を決め、`Esc` で欄へ戻ってそのまま送れる（マウス不要）
+//      矢印と `Enter` で全区間を決め、`Esc` で欄へ戻ってそのまま送れる（マウス不要）。
+//      **`Tab` は部品の中で巡回する**（本物のタブ移動は実ブラウザでしか測れない）
 //
 // 検証資材は scripts/build-dttest.mjs が作る <LIB>/DTMDSPF ＋ DTMPGM の **`D8U`**
 // （8 桁 EDTWRD+EDTMSK ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`。素の欄では色も下線も差が出ない）。
@@ -390,6 +391,20 @@ try {
   const kPicked = (await valuesAt(TROW, TSEG)).join(":");
   log(`  キーボードだけで選んだ: ${kPicked}`);
   check(kPicked === "12:31:16", `矢印と Enter だけで全区間が決まる（実際 ${kPicked}）`);
+
+  // **Tab はピッカーの中で巡回する**（抜けると開いたままの部品へキーだけで戻れない）。
+  // 実ブラウザなので合成イベントではなく**本物のタブ移動**が起きる——jsdom では測れない所。
+  const before = await focusInPicker();
+  let escaped = false;
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press("Tab");
+    if ((await focusInPicker()) === null) { escaped = true; break; }
+  }
+  check(!escaped, "Tab を 14 回押してもピッカーの外へ出ない（中で巡回する）");
+  for (let i = 0; i < 14; i++) await page.keyboard.press("Shift+Tab");
+  const after = await focusInPicker();
+  log(`  Tab 一巡の前後: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  check(after !== null, "Shift+Tab でも外へ出ない");
 
   // Esc で閉じて欄へ戻り、そのまま Enter でホストへ送れる（マウス不要）
   await page.keyboard.press("Escape");

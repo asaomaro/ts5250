@@ -20,6 +20,7 @@
  * （違えば利用者は直接打鍵に切り替えられる）。
  */
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { cycleTab } from "../composables/focusTrap.js";
 import {
   daysInMonth,
   formatLabel,
@@ -156,6 +157,29 @@ function chooseNow(): void {
 
 const rootEl = ref<HTMLElement | null>(null);
 
+/**
+ * **ロービング tabindex**（日のグリッド・時刻の列を「まとまりで 1 停止点」にする）。
+ *
+ * 全部を tabindex 0 にすると、`Tab` が 60 個の分を 1 つずつ辿ることになって使えない。
+ * ARIA の複合ウィジェットの作法どおり、**現在の 1 つだけを 0 にして残りを -1** にし、
+ * 中の移動は矢印に任せる。`focusin` で追うのでクリックでも矢印でも追従する。
+ */
+const activeDay = ref<number | null>(null);
+const activeCell = ref<{ col: number; val: number } | null>(null);
+function onFocusIn(ev: FocusEvent): void {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.day !== undefined) activeDay.value = Number(t.dataset.day);
+  else if (t.dataset.col !== undefined) activeCell.value = { col: Number(t.dataset.col), val: Number(t.dataset.val) };
+}
+/** その日が「日のグリッドの停止点」か */
+const rovingDay = computed(() => activeDay.value ?? focusDay.value);
+/** その列の停止点になる値（フォーカス中の値 ＞ その列の現在値） */
+function rovingVal(col: number): number {
+  if (activeCell.value?.col === col) return activeCell.value.val;
+  return col === 0 ? hour.value : col === 1 ? minute.value : second.value;
+}
+
 /** 開いた直後にフォーカスを置く要素（選択済み ＞ 今日/現在値 ＞ 先頭）。 */
 function initialTarget(): HTMLElement | null {
   const r = rootEl.value;
@@ -205,6 +229,9 @@ function onKeydown(ev: KeyboardEvent): void {
     emit("close");
     return;
   }
+  // **`Tab` はピッカーの中で巡回させる。** 抜けると開いたままのピッカーへキーだけでは
+  // 戻れない（出口は `Esc` と選択）。オプション選択肢と同じ仕組みを共有する。
+  if (rootEl.value && cycleTab(rootEl.value, ev)) return;
   const t = ev.target;
   if (!(t instanceof HTMLElement)) return;
   const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key);
@@ -247,16 +274,19 @@ function onKeydown(ev: KeyboardEvent): void {
     :aria-label="tab === 'date' ? MSG_DATE_PICKER : MSG_TIME_PICKER"
     @mousedown.stop.prevent
     @keydown="onKeydown"
+    @focusin="onFocusIn"
   >
     <!-- 見出し: 解釈中の書式を必ず出す。桁順を固定している以上、名乗る責任がある -->
     <div class="dtp-head">
       <div v-if="showTabs" class="dtp-tabs" role="tablist">
         <button
           type="button" class="dtp-tab" role="tab" :aria-selected="tab === 'date'"
+          :tabindex="tab === 'date' ? 0 : -1"
           @mousedown.stop.prevent @click.stop="tab = 'date'"
         >{{ MSG_DTP_TAB_DATE }}</button>
         <button
           type="button" class="dtp-tab" role="tab" :aria-selected="tab === 'time'"
+          :tabindex="tab === 'time' ? 0 : -1"
           @mousedown.stop.prevent @click.stop="tab = 'time'"
         >{{ MSG_DTP_TAB_TIME }}</button>
       </div>
@@ -287,6 +317,7 @@ function onKeydown(ev: KeyboardEvent): void {
           type="button"
           class="dtp-day"
           :data-day="d"
+          :tabindex="d === rovingDay ? 0 : -1"
           :data-dtp-initial="d === focusDay || undefined"
           :aria-pressed="d === selDay"
           :aria-current="d === todayDay ? 'date' : undefined"
@@ -301,7 +332,8 @@ function onKeydown(ev: KeyboardEvent): void {
         <div class="dtp-col" role="listbox">
           <button
             v-for="h in HOURS" :key="'h' + h" type="button" class="dtp-cell"
-            data-col="0" :data-val="h" :data-dtp-initial="h === hour || undefined"
+            data-col="0" :data-val="h" :tabindex="h === rovingVal(0) ? 0 : -1"
+            :data-dtp-initial="h === hour || undefined"
             :aria-selected="h === hour" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('h', h)"
           >{{ two(h) }}</button>
@@ -309,7 +341,7 @@ function onKeydown(ev: KeyboardEvent): void {
         <div class="dtp-col" role="listbox">
           <button
             v-for="m in MINUTES" :key="'m' + m" type="button" class="dtp-cell"
-            data-col="1" :data-val="m"
+            data-col="1" :data-val="m" :tabindex="m === rovingVal(1) ? 0 : -1"
             :aria-selected="m === minute" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('mi', m)"
           >{{ two(m) }}</button>
@@ -317,7 +349,7 @@ function onKeydown(ev: KeyboardEvent): void {
         <div v-if="hasSecond" class="dtp-col" role="listbox">
           <button
             v-for="s in MINUTES" :key="'s' + s" type="button" class="dtp-cell"
-            data-col="2" :data-val="s"
+            data-col="2" :data-val="s" :tabindex="s === rovingVal(2) ? 0 : -1"
             :aria-selected="s === second" role="option"
             @mousedown.stop.prevent @click.stop="pickTime('s', s)"
           >{{ two(s) }}</button>
