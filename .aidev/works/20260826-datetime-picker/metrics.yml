@@ -23,3 +23,5 @@ events:
   - { ts: 2026-08-26T10:29:28Z, phase: walkthrough, event: approved }
   - { ts: 2026-08-26T10:30:52Z, phase: deliver, event: approved, metrics: { files_changed: 12, insertions: 1816, deletions: 37 } }
   - { ts: 2026-08-26T10:31:00Z, phase: deliver, event: start }
+  - { ts: 2026-08-26T14:05:34Z, phase: retro, event: start }
+  - { ts: 2026-08-26T14:08:12Z, phase: retro, event: approved }
