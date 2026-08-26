@@ -88,6 +88,45 @@ function shiftMonth(delta: number): void {
   else month.value = m;
 }
 
+/** その日の要素へフォーカスを置く（存在すれば） */
+function focusDayEl(d: number): void {
+  rootEl.value?.querySelector<HTMLElement>(`.dtp-day[data-day="${d}"]`)?.focus();
+}
+
+/**
+ * 月／年を送り、**同じ日を保ったまま**フォーカスを追従させる。
+ *
+ * 送り先にその日が無ければ**月末へ丸める**（1/31 → 2/28）。APG の Date Picker Dialog も
+ * 「同じ日、無ければ月末」で、丸めないとフォーカス中の要素が消えて行き先を失う。
+ * `refocus` は**フォーカスが日のグリッドに居るときだけ** true にする——`‹ ›` ボタンや
+ * ホイールの操作でフォーカスを奪うと、押し続けられなくなる。
+ */
+async function shiftCalendar(deltaMonth: number, deltaYear: number, refocus: boolean): Promise<void> {
+  if (deltaYear !== 0) year.value += deltaYear;
+  if (deltaMonth !== 0) shiftMonth(deltaMonth);
+  const d = Math.min(activeDay.value ?? focusDay.value, daysInMonth(year.value, month.value));
+  activeDay.value = d;
+  await nextTick();
+  if (refocus) focusDayEl(d);
+}
+
+/**
+ * カレンダー上のホイールで月を送る（**時刻の列では何もしない**——列自身がスクロールする）。
+ *
+ * **主要な datepicker はホイールに月送りを割り当てない**（Ant Design / MUI / jQuery UI ほか）。
+ * ここで採るのは、端末のペインがホイールをページ送りに使っており、ピッカーの中では
+ * それを止めている＝**ホイールが無反応になる**ため。同じ部品の時刻タブでは列が動くので、
+ * 日付タブだけ無反応なのは据わりが悪い（利用者の判断で採用。decisions D23）。
+ */
+function onWheel(ev: WheelEvent): void {
+  if (Math.abs(ev.deltaY) < 4) return;
+  const t = ev.target;
+  if (!(t instanceof HTMLElement) || !t.closest(".dtp-cal")) return; // 時刻の列は native スクロールに任せる
+  ev.preventDefault();
+  const onDay = document.activeElement instanceof HTMLElement && document.activeElement.classList.contains("dtp-day");
+  void shiftCalendar(ev.deltaY > 0 ? 1 : -1, 0, onDay);
+}
+
 /** 月の頭の空きマス数（日曜始まり）。`Date` の月は 0 始まり。 */
 const leading = computed(() => new Date(year.value, month.value - 1, 1).getDay());
 const days = computed(() => Array.from({ length: daysInMonth(year.value, month.value) }, (_, i) => i + 1));
@@ -267,7 +306,17 @@ function onKeydown(ev: KeyboardEvent): void {
     }
   }
 
-  const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key);
+  // **`PageUp` / `PageDown` で月、`Shift` 付きで年**（APG の Date Picker Dialog）。
+  // 日のグリッドの上だけで受ける。時刻の列では既定（列のスクロール）に任せる。
+  if ((ev.key === "PageUp" || ev.key === "PageDown") && t.classList.contains("dtp-day")) {
+    ev.preventDefault();
+    ev.stopPropagation(); // ペインの端末ページ送りへ流さない
+    const dir = ev.key === "PageDown" ? 1 : -1;
+    void shiftCalendar(ev.shiftKey ? 0 : dir, ev.shiftKey ? dir : 0, true);
+    return;
+  }
+
+  const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(ev.key);
   if (!arrow || ev.altKey || ev.ctrlKey || ev.metaKey) return;
 
   // タブの上では左右でタブを切り替える（切り替え後は中身へフォーカスが移る）
@@ -282,6 +331,15 @@ function onKeydown(ev: KeyboardEvent): void {
     const from = Number(t.dataset.day);
     if (!Number.isFinite(from)) return;
     ev.preventDefault();
+    // 週の中での位置（日曜始まり。`leading` は月初の空きマス数）
+    const wd = (leading.value + from - 1) % 7;
+    if (ev.key === "Home" || ev.key === "End") {
+      const max = daysInMonth(year.value, month.value);
+      const d = ev.key === "Home" ? Math.max(1, from - wd) : Math.min(max, from + (6 - wd));
+      activeDay.value = d;
+      void nextTick().then(() => focusDayEl(d));
+      return;
+    }
     // 左右は 1 日、上下は 1 週（カレンダーの並びと同じ動き）
     const delta = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : ev.key === "ArrowUp" ? -7 : 7;
     void moveDay(from, delta);
@@ -307,6 +365,7 @@ function onKeydown(ev: KeyboardEvent): void {
     :aria-label="`${tab === 'date' ? MSG_DATE_PICKER : MSG_TIME_PICKER}（${MSG_DTP_FORMAT(label)}）`"
     @mousedown.stop.prevent
     @keydown="onKeydown"
+    @wheel="onWheel"
     @focusin="onFocusIn"
   >
     <!--
@@ -333,12 +392,12 @@ function onKeydown(ev: KeyboardEvent): void {
       <div class="dtp-nav">
         <button
           type="button" class="dtp-step" :aria-label="MSG_DTP_PREV_MONTH"
-          @mousedown.stop.prevent @click.stop="shiftMonth(-1)"
+          @mousedown.stop.prevent @click.stop="shiftCalendar(-1, 0, false)"
         >‹</button>
         <span class="dtp-ym">{{ year }}/{{ two(month) }}</span>
         <button
           type="button" class="dtp-step" :aria-label="MSG_DTP_NEXT_MONTH"
-          @mousedown.stop.prevent @click.stop="shiftMonth(1)"
+          @mousedown.stop.prevent @click.stop="shiftCalendar(1, 0, false)"
         >›</button>
         <button
           type="button" class="dtp-now" @mousedown.stop.prevent @click.stop="chooseToday"

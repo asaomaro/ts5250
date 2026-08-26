@@ -291,6 +291,31 @@ try {
   log(`  カレンダーの年月: ${ym}（欄の現在値 ${await shown()} から開く）`);
   check(ym === "2019/03", `**未送信の編集込みの現在値**から開く（今日ではない。実際 ${ym}）`);
 
+  // **カレンダーのホイールと月送りキー**（`PageUp`/`PageDown`＝月、`Shift` 付き＝年。APG）。
+  // ホイールで端末のページ送りが飛ばないこと・月が送られることを実ブラウザで見る。
+  const ymNow = () => page.locator(".dtp-ym").innerText();
+  const calBox = await page.locator(".dtp-cal").boundingBox();
+  await page.mouse.move(calBox.x + calBox.width / 2, calBox.y + calBox.height / 2);
+  await page.mouse.wheel(0, 240);
+  await sleep(400);
+  check((await ymNow()) === "2019/04", `ホイールで翌月へ送られる（実際 ${await ymNow()}）`);
+  check((await page.locator(".dtp").count()) === 1, "ホイールでカレンダーが閉じない");
+  await page.mouse.wheel(0, -240);
+  await sleep(400);
+  check((await ymNow()) === "2019/03", `上へ回すと前の月へ戻る（実際 ${await ymNow()}）`);
+
+  await page.keyboard.press("PageDown");
+  await sleep(300);
+  check((await ymNow()) === "2019/04", `PageDown で翌月（実際 ${await ymNow()}）`);
+  await page.keyboard.press("Shift+PageDown");
+  await sleep(300);
+  check((await ymNow()) === "2020/04", `Shift+PageDown で翌年（実際 ${await ymNow()}）`);
+  await page.keyboard.press("Shift+PageUp");
+  await page.keyboard.press("PageUp");
+  await sleep(400);
+  check((await ymNow()) === "2019/03", `送り戻して元へ（実際 ${await ymNow()}）`);
+  check((await page.locator(".dtp").count()) === 1, "月送りキーでも閉じない（端末へ流していない）");
+
   await page.locator(".dtp-day").nth(14).click(); // 15 日
   await sleep(400);
   const picked = await shown();

@@ -722,3 +722,122 @@ describe("時刻は Space で選び、Enter で確定して閉じる", () => {
     w.unmount();
   });
 });
+
+/**
+ * **カレンダーの月・年送り**（WAI-ARIA APG の Date Picker Dialog）。
+ *
+ * `PageUp` / `PageDown` で月、`Shift` 付きで年、`Home` / `End` で週の端。
+ * これが無いと、月を変えるのに `‹` `›` ボタンまで `Tab` で移動するしかない。
+ * **送り先にその日が無ければ月末へ丸める**（1/31 → 2/28）——丸めないと
+ * フォーカス中の要素が消えて行き先を失う。
+ */
+describe("カレンダーの月・年送り", () => {
+  const active = () => document.activeElement as HTMLElement | null;
+  const press = (key: string, init: KeyboardEventInit = {}) =>
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+  /** 2019/03/07 の日付欄を開く（実行日に依存しない） */
+  const openAt = async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w);
+    return w;
+  };
+
+  it("`PageDown` / `PageUp` で月を送り、同じ日にフォーカスが残る", async () => {
+    const w = await openAt();
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    press("PageDown");
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/04");
+    expect(active()?.dataset.day).toBe("7");
+    press("PageUp");
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    w.unmount();
+  });
+
+  it("`Shift+PageDown` / `Shift+PageUp` で年を送る", async () => {
+    const w = await openAt();
+    press("PageDown", { shiftKey: true });
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2020/03");
+    press("PageUp", { shiftKey: true });
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    w.unmount();
+  });
+
+  it("送り先にその日が無ければ月末へ丸める（1/31 → 2/28）", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "01"], [2, "31"]])));
+    await open(w);
+    expect(active()?.dataset.day).toBe("31");
+    press("PageDown");
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/02");
+    expect(active()?.dataset.day).toBe("28");
+    w.unmount();
+  });
+
+  it("`Home` / `End` で週の端へ移る", async () => {
+    const w = await openAt(); // 2019/03/07 は木曜（3/1 が金曜）
+    press("Home");
+    await nextTick(); await nextTick();
+    expect(active()?.dataset.day).toBe("3"); // その週の日曜
+    press("End");
+    await nextTick(); await nextTick();
+    expect(active()?.dataset.day).toBe("9"); // その週の土曜
+    w.unmount();
+  });
+
+  it("`PageUp` はペインへ流さない（端末のページ送りにしない）", async () => {
+    const w = await openAt();
+    const ev = new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true });
+    let reachedGrid = false;
+    w.element.addEventListener("keydown", () => { reachedGrid = true; });
+    active()!.dispatchEvent(ev);
+    await nextTick();
+    expect(reachedGrid).toBe(false);
+    expect(ev.defaultPrevented).toBe(true);
+    w.unmount();
+  });
+});
+
+/**
+ * **カレンダー上のホイールで月を送る**（利用者の判断で採用。decisions D23）。
+ *
+ * 主要な datepicker はホイールに月送りを割り当てないが、端末のペインはホイールを
+ * ページ送りに使っており、ピッカーの中ではそれを止めている＝**ホイールが無反応になる**。
+ * 同じ部品の時刻タブでは列が動くので、日付タブだけ無反応なのは据わりが悪い。
+ */
+describe("カレンダー上のホイール", () => {
+  it("月が送られ、既定のスクロールは止める", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w);
+    expect(w.find(".dtp-ym").text()).toBe("2019/03");
+    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    w.find(".dtp-cal").element.dispatchEvent(ev);
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/04");
+    expect(ev.defaultPrevented).toBe(true);
+    w.unmount();
+  });
+
+  it("上へ回すと前の月へ戻る", async () => {
+    const w = mountGrid("panel", DATE_FIELDS, "/", false, reactive(new Map([[0, "2019"], [1, "03"], [2, "07"]])));
+    await open(w);
+    w.find(".dtp-cal").element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp-ym").text()).toBe("2019/02");
+    w.unmount();
+  });
+
+  it("**時刻の列では月送りをしない**（列自身のスクロールに任せる）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    w.find(".dtp-col").element.dispatchEvent(ev);
+    await nextTick();
+    // 既定を止めない＝native スクロールが生きている
+    expect(ev.defaultPrevented).toBe(false);
+    w.unmount();
+  });
+});
