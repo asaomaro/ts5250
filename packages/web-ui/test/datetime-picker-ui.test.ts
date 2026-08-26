@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { VIEW_ITEMS, viewSettings } from "../src/stores/viewSettings.js";
+import { VIEW_ITEMS, viewSettings, initViewSettings } from "../src/stores/viewSettings.js";
+import ViewSettingsMenu from "../src/components/ViewSettingsMenu.vue";
 import { MSG_DATE_PICKER, MSG_DTP_FORMAT, MSG_TIME_PICKER } from "../src/composables/opMessages.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
@@ -325,5 +326,67 @@ describe("矩形選択・クリップボードを妨げない", () => {
     expect(w.find(".dtp").exists()).toBe(false);
     expect(ev.defaultPrevented).toBe(false);
     w.unmount();
+  });
+});
+
+/**
+ * **画面設定から有効/無効とデザインを選べること。**
+ *
+ * backlog（`input-assist.md`）の上位要求:「ここに積んだ機能はすべて画面設定から有効/無効と
+ * デザインを選べること。**勝手に有効化しない**」。`optHints` と同じく `VIEW_ITEMS` に足すことで、
+ * **画面設定メニューとキー設定（順送り）の両方に自動で出る**——2 か所に書かない。
+ */
+describe("画面設定から選べる（optHints と同じ仕組み）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    initViewSettings();
+  });
+
+  it("画面設定メニューに「日付・時刻の選択」の行が出て、意匠を 4 つから選べる", async () => {
+    // 5250 ペインの設定メニューは `keys` を渡さない＝ VIEW_ITEMS 全部を出す
+    // （帳票ペインだけ `linkify` / `font` に絞られる。App.vue の REPORT_VIEW_KEYS）
+    const w = mount(ViewSettingsMenu, { props: { sessionId: "dtp-menu" }, attachTo: document.body });
+    await w.find(".vsm-btn").trigger("click"); // ⚙ 表示 を開く
+    await nextTick();
+
+    const rows = w.findAll(".vsm-row");
+    const row = rows.find((r) => r.find(".vsm-label").exists() && r.find(".vsm-label").text().includes("日付・時刻の選択"));
+    expect(row, "画面設定メニューに項目が出ていない").toBeDefined();
+
+    // 候補が多い項目は畳んである（`expandable`）。開いて初めてデザイン候補が並ぶ
+    await row!.find(".vsm-toggle").trigger("click");
+    await nextTick();
+    const pal = w.findAll(".vsm-palette").find((g) => g.attributes("aria-label") === "日付・時刻の選択のデザイン");
+    expect(pal, "デザイン候補が出ていない").toBeDefined();
+    expect(pal!.findAll(".pal-name").map((b) => b.text().replace("·", "").trim())).toEqual([
+      "無効", "パネル", "枠", "端末調"
+    ]);
+
+    // 選ぶと保存値が変わる（＝ここから有効化とデザインの変更ができる）
+    await pal!.findAll(".pal-item")[3]!.trigger("click");
+    expect(viewSettings.settings.dtPicker).toBe("crt");
+    w.unmount();
+  });
+
+  it("キー設定の順送りで 無効 → パネル → 枠 → 端末調 → 無効 と一巡する", () => {
+    expect(viewSettings.settings.dtPicker).toBe("none");
+    for (const expected of ["panel", "outline", "crt", "none"] as const) {
+      viewSettings.cycle("dtPicker");
+      expect(viewSettings.settings.dtPicker).toBe(expected);
+    }
+  });
+
+  it("選んだ意匠が実際にピッカーへ効く（`data-pop`）", async () => {
+    for (const style of ["panel", "outline", "crt"] as const) {
+      const w = mount(ScreenGrid, {
+        props: { snapshot: snapOf(DATE_FIELDS, "/"), edits: new Map(), focused: true, dtPicker: style },
+        attachTo: document.body
+      });
+      await w.find(".dtp-btn").trigger("click");
+      await nextTick();
+      expect(w.find(".dtp").attributes("data-pop")).toBe(style);
+      expect(w.find(".dtp").classes()).toContain("crt-pop"); // 共通の意匠（styles.css）に載る
+      w.unmount();
+    }
   });
 });
