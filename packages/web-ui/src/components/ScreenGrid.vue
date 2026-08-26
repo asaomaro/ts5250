@@ -1194,6 +1194,9 @@ function openDateTimePicker(): boolean {
 /**
  * 閉じる。既定では並びの先頭区間へフォーカスを戻す。
  * `refocus: false` は**外側クリックで閉じるとき**（クリック先からフォーカスを奪い返さない）。
+ *
+ * **取り消しの仕掛けは要らない**——時刻は確定するまで欄へ書かず、日付は選んだ瞬間に
+ * 確定して閉じるので、「閉じる」＝「まだ書いていない」が常に成り立つ。
  */
 function closeDtPicker(refocus = true): void {
   const t = dtShown.value;
@@ -1225,14 +1228,8 @@ function writeDateTime(t: DateTimeTarget, digits: string): void {
   if (digits === "") return;
   const first = t.run[0]!;
   const el = inputForSlice(first, 0);
-  // **ピッカーの中のフォーカスを覚えておく。** `pasteFrom` の focus 経路は `sync` が
-  // 欄へフォーカスを移すので、そのままだと**時刻の列を 1 つ選ぶたびに欄へ戻され**、
-  // 続けて矢印で分・秒を選べない（キーボードだけで完結しなくなる）。
-  const active = document.activeElement;
-  const inPicker = active instanceof HTMLElement && active.closest(".dtp") !== null ? active : null;
   pasteFrom({ row: first.row, col: first.col }, digits, el ? { f: first, el, startOffset: 0 } : undefined, true);
-  if (inPicker && document.contains(inPicker)) inPicker.focus();
-  else el?.focus(); // ピッカーの外から書いた（マウス操作等）なら欄へ戻す
+  el?.focus(); // 書いたら必ず閉じるので、フォーカスは欄へ返す
 }
 
 /** 日付は 1 クリックで値が定まるので、書いたら閉じる（`chooseOption` と同じ即時確定） */
@@ -1243,11 +1240,15 @@ function onPickDate(v: DateValue): void {
   closeDtPicker(); // 閉じ方の経路は 1 つにする（フォーカスは欄へ戻る）
 }
 
-/** 時刻は列を選ぶたびに下書き全体を書き、**開いたまま**にする（1 クリックでは定まらないため） */
+/**
+ * 時刻の確定（`Enter` か「確定」ボタン）。**ここへ来るのは確定のときだけ**——
+ * 列を選んでいる間はピッカーの中の下書きで、欄には書かない（`DateTimePicker` の `pickTime`）。
+ */
 function onPickTime(v: TimeValue): void {
   const t = dtShown.value;
   if (!t) return;
   writeDateTime(t, formatTime(t, v));
+  closeDtPicker();
 }
 
 /** カレンダー（見出し＋曜日＋6 週）のおおよその高さ（行）。**開く向きの判断にだけ**使う */

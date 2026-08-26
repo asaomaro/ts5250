@@ -221,11 +221,11 @@ describe("選ぶと欄が変わる（既存の貼り付け経路で書く）", (
   });
 
   /**
-   * **書き込みでピッカーが閉じてはいけない。** 検出（`dateTimeTargets`）を欄の値に依存させると、
-   * 自分の書き込みで作り直され、それを監視している close の watch が発火して**1 列選んだ時点で
-   * 閉じる**——実機 E2E で踏んだ（decisions D14）。3 列とも選べることで固定する。
+   * **時刻は確定するまで書かない**（下書き）。3 列とも触れることを固定する
+   * ——検出（`dateTimeTargets`）を欄の値に依存させると自分の書き込みで作り直され、
+   * close の watch が発火して 1 列で閉じてしまう（decisions D14 で踏んだ形）。
    */
-  it("時刻は列を選ぶたびに書き、**3 列とも**選べる（途中で閉じない）", async () => {
+  it("時刻は 3 列とも選べ、確定するまで欄へ書かない", async () => {
     // **`reactive` にするのが要点。** アプリ側の `edits` は `sessionsStore`（`reactive`）配下の
     // Map で、`set` が Vue の依存を発火させる。素の Map で書くと「値に依存する computed が
     // 作り直される」現象そのものが再現せず、テストが素通りする（実際に踏んだ）。
@@ -247,7 +247,9 @@ describe("選ぶと欄が変わる（既存の貼り付け経路で書く）", (
     pump(); await nextTick();
     expect(w.find(".dtp").exists()).toBe(true);
 
-    expect([edits.get(0), edits.get(1), edits.get(2)]).toEqual(["13", "30", "15"]);
+    // **確定していないので欄は 1 桁も変わらない**
+    expect(w.emitted("edit")).toBeUndefined();
+    expect([edits.get(0), edits.get(1), edits.get(2)]).toEqual([undefined, undefined, undefined]);
     w.unmount();
   });
 
@@ -473,7 +475,7 @@ describe("キーボードだけで完結する", () => {
     w.unmount();
   });
 
-  it("時刻は列を選んでも**フォーカスがピッカーに残り**、矢印で次の列へ進める", async () => {
+  it("時刻は列を選んでもフォーカスがピッカーに残り、矢印で次の列へ進める", async () => {
     const edits = reactive(new Map<number, string>());
     const w = mountGrid("panel", TIME_FIELDS, ":", false, edits);
     const pump = () => {
@@ -678,13 +680,24 @@ describe("時刻は Space で選び、Enter で確定して閉じる", () => {
     w.unmount();
   });
 
-  it("`Space`（＝クリック相当）では閉じない——3 列を順に決められる", async () => {
+  it("`Space`（＝クリック相当）では閉じず、欄にも書かない——3 列を順に決められる", async () => {
     const w = mountGrid("panel", TIME_FIELDS, ":");
     await open(w);
     await active()!.click(); // Space は button の click に落ちる
     await nextTick();
     expect(w.find(".dtp").exists()).toBe(true);
     expect(active()?.closest(".dtp")).not.toBeNull();
+    expect(w.emitted("edit")).toBeUndefined(); // 下書きのまま
+    w.unmount();
+  });
+
+  it("「確定」ボタンでも書いて閉じる（マウスだけの確定手段）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    await w.find(".dtp-ok").trigger("click");
+    await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    expect(w.emitted("edit")).toBeDefined();
     w.unmount();
   });
 

@@ -125,3 +125,89 @@ describe("ピッカーを閉じた後のフォーカス（ペインごと）", (
     w.unmount();
   });
 });
+
+/**
+ * **逐次反映は「プレビュー」であって確定ではない。**
+ *
+ * 時刻は列を選ぶたびに欄へ書く（背後の欄で組み立ての途中が見える）。この形を採るなら
+ * **`Esc` は開いた時点へ戻す**のが揃った約束——APG のダイアログも、逐次反映する実装系も
+ * `Esc` は取り消し。戻さないと「やめた」つもりの操作で欄が変わったままになる。
+ *
+ * ただし**外側クリックでは戻さない**。マウスだけで時刻を決める人には「列を押す →
+ * 別の場所を押して終わり」以外の確定手段が無いので、そこで巻き戻すと決められなくなる。
+ */
+/**
+ * **時刻は確定するまで欄へ書かない**（ダイアログの作法）。
+ *
+ * 時・分・秒が独立していて 1 列では値が定まらないので、日付のような「選んだ瞬間に確定」に
+ * できない。中では下書きを組み立て、**`Enter` か「確定」で一度だけ書く**。
+ * こうすると `Esc` は「閉じるだけ」で自然に取り消しになり、欄を巻き戻す仕掛けが要らない。
+ */
+describe("時刻は確定するまで欄へ書かない", () => {
+  const values = (w: ReturnType<typeof mount>) =>
+    [2, 3, 4].map((i) => (w.find(`input.grid-input[data-field-index="${i}"]`).element as HTMLInputElement).value.trim());
+
+  async function open() {
+    const p = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await p.find('input.grid-input[data-field-index="2"]').trigger("focus");
+    await nextTick();
+    await p.find(".pane").trigger("keydown", { key: "ArrowDown", altKey: true });
+    await nextTick(); await nextTick();
+    return p;
+  }
+
+  it("列を選んでも欄は変わらない（下書きのまま）", async () => {
+    const w = await open();
+    expect(values(w)).toEqual(["13", "30", "15"]);
+    press("ArrowDown"); // 時を 1 つ進める
+    await nextTick();
+    await active()!.click(); // Space 相当＝下書きに入れるだけ
+    await nextTick();
+    expect(values(w), "確定前に欄が変わっている").toEqual(["13", "30", "15"]);
+    expect(w.emitted("edit")).toBeUndefined();
+    expect(w.find(".dtp").exists()).toBe(true); // 開いたまま
+    w.unmount();
+  });
+
+  it("`Esc` で閉じると何も書かれない（取り消しの仕掛けが要らない）", async () => {
+    const w = await open();
+    press("ArrowDown");
+    await nextTick();
+    await active()!.click();
+    await nextTick();
+    press("Escape");
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    expect(values(w), "Esc の後に欄が変わっている").toEqual(["13", "30", "15"]);
+    w.unmount();
+  });
+
+  it("「確定」ボタンで下書きが欄へ入り、閉じる（マウスだけでも決められる）", async () => {
+    const w = await open();
+    press("ArrowDown");
+    await nextTick();
+    const picked = active()!.dataset.val!;
+    await active()!.click(); // 下書きへ
+    await nextTick();
+    await w.find(".dtp-ok").trigger("click");
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    expect(values(w)[0]).toBe(String(Number(picked)).padStart(2, "0"));
+    expect(values(w).slice(1)).toEqual(["30", "15"]); // 触っていない列は元のまま
+    w.unmount();
+  });
+
+  it("外側クリックで閉じても書かれない（確定を踏んでいない）", async () => {
+    const w = await open();
+    press("ArrowDown");
+    await nextTick();
+    await active()!.click();
+    await nextTick();
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await nextTick(); await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    expect(values(w)).toEqual(["13", "30", "15"]);
+    w.unmount();
+  });
+});

@@ -906,7 +906,7 @@ function onKeydown(ev: KeyboardEvent): void {
   // （値を書くと `sync` が欄へフォーカスを戻すため）ので、ピッカー自身の keydown では届かない。
   // ここが唯一の経路になる。フォーカスがピッカーの中にあるときは上で早期 return 済み。
   if (ev.key === "Escape" && gridRef.value?.dtPickerOpen?.()) {
-    gridRef.value.closeDtPicker();
+    gridRef.value.closeDtPicker(); // 時刻は確定するまで書かないので、閉じるだけで取り消しになる
     ev.preventDefault();
     return;
   }

@@ -36,6 +36,8 @@ export const MSG_DTP_FORMAT = (f: string): string => `${f} として入力しま
 /** 区切りが画面に出ておらず日付か時刻か決められないときのタブ */
 export const MSG_DTP_TAB_DATE = "日付";
 export const MSG_DTP_TAB_TIME = "時刻";
+/** 時刻を確定してピッカーを閉じるボタン（時・分・秒が独立していて 1 列では値が決まらないため要る） */
+export const MSG_DTP_CONFIRM = "確定";
 /** 今日 / 現在時刻へ戻すボタン */
 export const MSG_DTP_TODAY = "今日";
 export const MSG_DTP_NOW = "現在時刻";

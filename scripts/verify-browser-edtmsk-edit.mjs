@@ -323,22 +323,46 @@ try {
   // ホストは**時の先頭ゼロを抑制**して返す（`09` を送ると ` 9:30:15` で返る。実測 2026-08-26）。
   // 送受信は正しいが期待値が読みにくくなるので、抑制の掛からない値で往復を見る
   // （`D8U` は `'0   /  /  '` なので抑制されない＝⑥ はそのまま比較できる）。
-  await page.locator(".dtp-col").nth(0).locator(".dtp-cell").nth(13).click(); // 13 時
+  await sleep(400); // タブ切替の直後は列がスクロールする。落ち着いてから押す
+  const pick = (col, text) =>
+    page.locator(".dtp-col").nth(col).locator(".dtp-cell", { hasText: new RegExp(`^${text}$`) }).click();
+  await pick(0, "13");
   await sleep(250);
-  await page.locator(".dtp-col").nth(1).locator(".dtp-cell").nth(30).click(); // 30 分
+  await pick(1, "30");
   await sleep(250);
-  await page.locator(".dtp-col").nth(2).locator(".dtp-cell").nth(15).click(); // 15 秒
+  await pick(2, "15");
   await sleep(350);
-  const tPicked = (await valuesAt(TROW, TSEG)).join(":");
-  log(`  13/30/15 を選んだ: ${tPicked}`);
-  check(tPicked === "13:30:15", `選んだ時刻が全区間へ入る（実際 ${tPicked}）`);
+  // **時刻は確定するまで欄へ書かない**（下書き）。日付と違い 1 列では値が定まらないため
+  const tDraft = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  13/30/15 を選んだ時点の欄: ${JSON.stringify(tDraft)}`);
+  check(tDraft === "::", `確定前は欄に書かれない（実際 ${JSON.stringify(tDraft)}）`);
   check((await page.locator(".dtp").count()) === 1, "時刻は選んでも開いたまま（1 クリックでは定まらない）");
 
-  // `Alt+↓` で開くとフォーカスは欄に残る（値を書くと sync が欄へ戻す）ので、
-  // `Esc` はピッカー自身ではなく**ペインの既存ハンドラ**が拾って閉じる（decisions D12）。
+  // **Esc は閉じるだけで取り消しになる**（書いていないので巻き戻す仕掛けが要らない）
   await page.keyboard.press("Escape");
-  await sleep(300);
-  check((await page.locator(".dtp").count()) === 0, "欄にフォーカスがある状態の `Esc` でも閉じる");
+  await sleep(350);
+  check((await page.locator(".dtp").count()) === 0, "Esc で閉じる");
+  check((await valuesAt(TROW, TSEG)).join(":") === "::", "Esc の後も欄は変わらない（取り消し）");
+
+  // 開き直して選び、**「確定」ボタン**で書いて閉じる（マウスだけの確定手段）
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  await page.locator(".dtp-tab", { hasText: "時刻" }).click();
+  await sleep(500);
+  await pick(0, "13");
+  await sleep(200);
+  await pick(1, "30");
+  await sleep(200);
+  await pick(2, "15");
+  await sleep(200);
+  await page.locator(".dtp-ok").click();
+  await sleep(400);
+  const tPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  「確定」を押した後: ${tPicked}`);
+  check(tPicked === "13:30:15", `確定で全区間へ入る（実際 ${tPicked}）`);
+  check((await page.locator(".dtp").count()) === 0, "「確定」でピッカーが閉じる");
 
   await page.keyboard.press("Enter");
   await sleep(2500);
@@ -377,6 +401,7 @@ try {
   const kf1 = await focusInPicker();
   check(kf1 !== null, `Space の後も**フォーカスがピッカーに残る**（実際 ${JSON.stringify(kf1)}）`);
   check((await page.locator(".dtp").count()) === 1, "Space では閉じない（残りの列を決められる）");
+  check((await valuesAt(TROW, TSEG)).join(":") === "13:30:15", "Space の時点では欄に書かない（下書き）");
 
   await page.keyboard.press("ArrowRight");
   await sleep(150);

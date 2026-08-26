@@ -34,6 +34,7 @@ import {
   MSG_DATE_PICKER,
   MSG_DTP_FORMAT,
   MSG_DTP_NEXT_MONTH,
+  MSG_DTP_CONFIRM,
   MSG_DTP_NOW,
   MSG_DTP_PREV_MONTH,
   MSG_DTP_TAB_DATE,
@@ -125,14 +126,19 @@ const MINUTES = Array.from({ length: 60 }, (_, i) => i);
 const two = (n: number): string => String(n).padStart(2, "0");
 
 /**
- * 時刻は**列を選ぶたびに下書き全体を書き込む**（開いたまま）。
- * 日付と違って 1 クリックでは値が定まらないので、確定ボタンを置くより
- * 「選ぶたびに欄が追従する」ほうが結果が見えて確かめやすい。
+ * 時刻は**確定するまで欄へ書かない**（`Space` / クリックは下書きを更新するだけ）。
+ *
+ * 時・分・秒が独立していて 1 列では値が定まらないので、日付のような「選んだ瞬間に確定」に
+ * できない。ダイアログの作法どおり**中では下書きを組み立て、確定で一度だけ書く**
+ * ——こうすると `Esc` は「閉じるだけ」で自然に取り消しになる（欄を巻き戻す仕掛けが要らない）。
  */
 function pickTime(part: "h" | "mi" | "s", v: number): void {
   if (part === "h") hour.value = v;
   else if (part === "mi") minute.value = v;
   else second.value = v;
+}
+/** 下書きを欄へ書いて閉じる（`Enter` と「確定」ボタンの共通経路。親が書き込みと close を行う） */
+function commitTime(): void {
   emit("pick-time", { hour: hour.value, minute: minute.value, second: second.value });
 }
 function chooseNow(): void {
@@ -140,7 +146,6 @@ function chooseNow(): void {
   hour.value = n.getHours();
   minute.value = n.getMinutes();
   second.value = hasSecond.value ? n.getSeconds() : 0;
-  emit("pick-time", { hour: hour.value, minute: minute.value, second: second.value });
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +231,7 @@ function moveCell(col: number, val: number, dCol: number, dVal: number): void {
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key === "Escape") {
     ev.stopPropagation();
-    emit("close");
+    emit("close"); // 何も書いていないので、閉じるだけで取り消しになる
     return;
   }
   // **`Tab` はピッカーの中で巡回させる。** 抜けると開いたままのピッカーへキーだけでは
@@ -250,14 +255,14 @@ function onKeydown(ev: KeyboardEvent): void {
   if (ev.key === "Enter" && t.classList.contains("dtp-cell")) {
     const col = Number(t.dataset.col), val = Number(t.dataset.val);
     if (Number.isFinite(col) && Number.isFinite(val)) {
-      // `button` の既定動作（keydown での click）を止めて、選択と close を 1 度だけ行う
+      // `button` の既定動作（keydown での click）を止めて、選択と確定を 1 度だけ行う
       ev.preventDefault();
       // **伝播も止める。** 止めないとペインまで上がって **AID の Enter がホストへ送られる**
       // ——ピッカーは同期的に閉じるので、ペイン側の「開いている間は無視」の条件が
       // event が届く頃には既に外れている（実機で画面が再表示され、カーソルが先頭欄へ飛んだ）。
       ev.stopPropagation();
       pickTime(col === 0 ? "h" : col === 1 ? "mi" : "s", val);
-      emit("close");
+      commitTime();
       return;
     }
   }
@@ -386,9 +391,16 @@ function onKeydown(ev: KeyboardEvent): void {
           >{{ two(s) }}</button>
         </div>
       </div>
-      <button type="button" class="dtp-now" @mousedown.stop.prevent @click.stop="chooseNow">
-        {{ MSG_DTP_NOW }}
-      </button>
+      <div class="dtp-foot">
+        <button type="button" class="dtp-now" @mousedown.stop.prevent @click.stop="chooseNow">
+          {{ MSG_DTP_NOW }}
+        </button>
+        <!-- **マウスだけの利用者にも確定手段が要る。** 時・分・秒が独立していて
+             「押した瞬間に決まる」形にできないため（`Enter` と同じ経路） -->
+        <button type="button" class="dtp-ok" @mousedown.stop.prevent @click.stop="commitTime">
+          {{ MSG_DTP_CONFIRM }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -416,6 +428,7 @@ function onKeydown(ev: KeyboardEvent): void {
 .dtp-tab,
 .dtp-step,
 .dtp-now,
+.dtp-ok,
 .dtp-day,
 .dtp-cell {
   border: 0;
@@ -470,7 +483,9 @@ function onKeydown(ev: KeyboardEvent): void {
 .dtp-day:hover,
 .dtp-day:focus-visible,
 .dtp-cell:hover,
-.dtp-cell:focus-visible {
+.dtp-cell:focus-visible,
+.dtp-ok:hover,
+.dtp-ok:focus-visible {
   background: var(--accent-soft);
 }
 .dtp-day[aria-pressed="true"],
@@ -481,6 +496,20 @@ function onKeydown(ev: KeyboardEvent): void {
 .dtp-cols {
   display: flex;
   gap: 3px;
+}
+.dtp-foot {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 3px;
+}
+.dtp-ok {
+  padding: 1px 9px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.dtp[data-pop="crt"] .dtp-ok {
+  color: var(--t-turquoise);
 }
 /*
   時刻の列。**スクロールバーは出さない**（利用者指示）——3 列それぞれに縦棒が立つと、
