@@ -163,3 +163,24 @@ autonomous 実行中の重要判断（protocol.md「10. 逸脱記録」）。
   その並びに `event start` が現れない（`verify` の WARN で事後に気付いた）。
   他工程は冒頭で `event start` を打つ形になっているので、deliver だけ抜けやすい。
 - 影響: retro / insights で deliver のリードタイムを見るときはこの work を除外する。
+
+## D16: デザイン候補の見本を `optHints` にも足す（利用者要望・deliver 後の追補）
+
+- 背景: PR 提出後、利用者から「ドロップダウン・datepicker・timepicker に見本を付けて」。
+  調べると **`optHints` には元から見本（`.pal-prev[data-kind=…]`）が無く**、
+  `dtPicker` もそれに揃っていた（`controls` / `buttons` / `windowFrame` / `windowBackdrop` にはある）。
+  候補名だけでは「パネル」「枠」「端末調」の違いを選ぶ前に見分けられない。
+- 決定: **両方に見本を足す。** `optHints` と `dtPicker` は同じ意匠（`.crt-pop`）を着るので、
+  見本の規則も **1 組にまとめて共有**する（片方だけ直して食い違うのを防ぐ）。
+  見本の値は `.crt-pop` の実体と同じものを使う——**見本が本体と違う見た目を見せたら意味が無い**。
+- **datepicker と timepicker は 1 つの設定（`dtPicker`）**なので見本も 1 組。
+  2 つは同じポップオーバーの面を共有しており、日付・時刻で意匠を別々にする理由が無い。
+- 再発防止: **「展開できる設定はどれも見本の規則を持つ」を一般の契約としてテストで固定**した
+  （`view-settings-palette.test.ts`）。scoped CSS は vitest の DOM に効かないので
+  **ビルド後の CSS を直接検査**する（`view-cycle-ui.test.ts` の CRT 検査と同じ作法）。
+  これが無いと、次に設定を足す人が同じ穴を開ける。
+- **踏んだ罠 2 つ**（テストを書くとき）:
+  - **ビルド後は属性値の引用符が落ちる**（`[data-kind=controls]`）。`includes('[data-kind="controls"]')`
+    では全件 miss になる。両方の綴りを許す。
+  - **`group` を持つ項目は 1 行にまとまる**（ウィンドウ設定＝ウィンドウ／背景）。項目名で行を探すと
+    「背景」という行が無くて落ちる。`MENU_ROWS` と同じ組み立てをテスト側でも行う。

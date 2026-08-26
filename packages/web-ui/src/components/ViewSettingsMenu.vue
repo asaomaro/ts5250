@@ -556,6 +556,41 @@ onBeforeUnmount(() => {
 .pal-prev[data-kind="buttons"][data-style="raised"] { background: color-mix(in srgb, var(--ink) 10%, transparent); box-shadow: 0 1px 2px color-mix(in srgb, #000 30%, transparent); border-radius: 3px; }
 .pal-prev[data-kind="buttons"][data-style="link"] { color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); }
 
+/*
+  画面に**重ねるポップオーバー**の見本（オプション欄の選択肢 / 日付・時刻ピッカー）。
+  どちらも同じ意匠を着る（`.crt-pop`・styles.css）ので、見本も 1 組にまとめる——
+  片方だけ直して食い違うのを防ぐ。**値は `.crt-pop` の実体と同じものを使う**
+  （見本が本体と違う見た目を見せたら見本の意味が無い）。
+*/
+.pal-prev[data-kind="optHints"][data-style="none"],
+.pal-prev[data-kind="dtPicker"][data-style="none"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* パネル: 面＋枠＋影（素の状態） */
+.pal-prev[data-kind="optHints"][data-style="panel"],
+.pal-prev[data-kind="dtPicker"][data-style="panel"] {
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line), 0 3px 7px -3px color-mix(in srgb, #000 55%, transparent);
+  border-radius: 5px;
+}
+/* 枠: 面を持たず輪郭だけ（影も無い） */
+.pal-prev[data-kind="optHints"][data-style="outline"],
+.pal-prev[data-kind="dtPicker"][data-style="outline"] {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 5px;
+}
+/* 端末調: CRT の緑に寄せる（本体は等幅の画面フォントに切り替わる） */
+.pal-prev[data-kind="optHints"][data-style="crt"],
+.pal-prev[data-kind="dtPicker"][data-style="crt"] {
+  background: var(--crt-bezel);
+  color: var(--t-green);
+  box-shadow: inset 0 0 0 1px var(--crt-line);
+  border-radius: 5px;
+  font-family: var(--screen-mono);
+}
+
 /* 画面フォントのセレクト */
 .vsm-select {
   width: 100%;
