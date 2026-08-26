@@ -859,11 +859,22 @@ function onKeydown(ev: KeyboardEvent): void {
   ) {
     return;
   }
-  // **Alt+↓ でオプション欄のドロップダウンを開く**（コンボボックスの慣用キー）。
+  // **日付・時刻ピッカーも同じ扱い。** 開いている間はピッカー内のキー操作を優先する
+  // （`Esc` はピッカー自身が閉じるために使う）。
+  if (
+    gridRef.value?.dtPickerOpen?.() &&
+    ev.target instanceof HTMLElement &&
+    ev.target.closest(".dtp")
+  ) {
+    return;
+  }
+  // **Alt+↓ でオプション欄のドロップダウン / 日付・時刻ピッカーを開く**（コンボボックスの慣用キー）。
   // フォーカスしただけでは開かない——一覧を移動するたびにリストが視界を塞ぐため。
   // `Alt+矢印` はペイン移動から `Alt+Shift+矢印` へ移してここを空けた（App.vue）。
+  // **同じ欄で両方が成立することは無い**（Opt 欄は長さ 1〜2 の単独欄、ピッカーは継続欄）ので、
+  // 順に試して開けたほうを採る。**新しいリスナーは足さない**——ここは既存の 1 か所。
   if (ev.altKey && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && ev.key === "ArrowDown") {
-    if (gridRef.value?.openOptHints()) {
+    if (gridRef.value?.openOptHints() || gridRef.value?.openDateTimePicker?.()) {
       ev.preventDefault();
       return;
     }
@@ -888,6 +899,16 @@ function onKeydown(ev: KeyboardEvent): void {
       ev.preventDefault();
       return;
     }
+  }
+  // **日付・時刻ピッカーが開いている間の `Esc` は「ピッカーを閉じる」に使う。**
+  // `optHints` がリスト内の Esc を握り潰すのと同じ趣旨——開いている間は他の Esc 割当
+  // （下のブロック選択の解除等）を発火させない。ピッカーは `Alt+↓` で開くと**フォーカスが欄に残る**
+  // （値を書くと `sync` が欄へフォーカスを戻すため）ので、ピッカー自身の keydown では届かない。
+  // ここが唯一の経路になる。フォーカスがピッカーの中にあるときは上で早期 return 済み。
+  if (ev.key === "Escape" && gridRef.value?.dtPickerOpen?.()) {
+    gridRef.value.closeDtPicker();
+    ev.preventDefault();
+    return;
   }
   // Escape・カーソル移動でブロック選択を解除（ACS 相当）。
   // selAnchor で条件付けないこと: あれはキーボード選択のアンカーで、マウスで選択した場合は
@@ -980,6 +1001,7 @@ function onWheel(ev: WheelEvent): void {
         :window-frame="view.windowFrame"
         :window-backdrop="view.windowBackdrop"
         :opt-hints="view.optHints"
+        :dt-picker="view.dtPicker"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"

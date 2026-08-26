@@ -43,8 +43,17 @@ import {
   type OptionSpan
 } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@ts5250/tn5250/browser";
-import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle } from "../stores/viewSettings.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
+import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle, DtPickerStyle } from "../stores/viewSettings.js";
+import DateTimePicker from "./DateTimePicker.vue";
+import {
+  detectDateTimeFields,
+  formatDate,
+  formatTime,
+  type DateTimeTarget,
+  type DateValue,
+  type TimeValue
+} from "../composables/dateTimeField.js";
+import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DATE_PICKER, MSG_TIME_PICKER, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -108,10 +117,12 @@ const props = withDefaults(
     windowBackdrop?: WindowBackdrop;
     /** オプション欄の選択肢の見せ方（既定 none。推測を含む機能は勝手に有効化しない） */
     optHints?: OptHintStyle;
+    /** EDTMSK 分割欄の日付・時刻ピッカーの見せ方（既定 none。同上） */
+    dtPicker?: DtPickerStyle;
   }>(),
   {
     linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none",
-    optHints: "none", sbcsView: "host"
+    optHints: "none", dtPicker: "none", sbcsView: "host"
   }
 );
 const emit = defineEmits<{
@@ -294,7 +305,7 @@ const decoWindow = computed<WindowRect | null>(() => {
 
 /**
  * 桁・行を絶対座標へ（`.gui-window` と同じ ch/em 基準。桁割りには影響しない）。
- * **Opt 欄のボタンと `F4` の導線で共有する**（同じ寸法・同じ係数にそろえるため）。
+ * **Opt 欄のボタン・日付/時刻ピッカーで共有する**（同じ寸法・同じ係数にそろえるため）。
  */
 function optBtnStyle(p: { row: number; col: number }): Record<string, string> {
   // **1 行 = 1.25em**（winRectStyle と同じ係数）。1em で置くと行がずれる
@@ -1087,6 +1098,156 @@ function onOptListKeydown(ev: KeyboardEvent): void {
   const at = items.indexOf(document.activeElement as HTMLElement);
   const next = ev.key === "ArrowDown" ? at + 1 : at - 1;
   items[(next + items.length) % items.length]?.focus();
+}
+
+// ---------------------------------------------------------------------------
+// EDTMSK 分割欄の日付・時刻ピッカー。
+//
+// 判定は `composables/dateTimeField.ts`（形が先・区切りが後。decisions D2）。ここは
+// **ボタンを置く / 開閉する / 選ばれた値を既存の貼り付け経路で書く**だけを担う。
+// 作法は `optHints` と同じ——フォーカスしただけでは開かない・`mousedown.stop.prevent`・
+// **グリッドに新しい keydown を足さない**（矩形選択とコピー＆ペーストを妨げないため）。
+// ---------------------------------------------------------------------------
+
+/** 画面上の日付・時刻とみなせる分割欄。設定 ON のときだけ検出する（`optionHints` と同じ理由） */
+const dateTimeTargets = computed<DateTimeTarget[]>(() =>
+  props.dtPicker === "none" ? [] : detectDateTimeFields(props.snapshot, displayChar)
+);
+
+/** ボタンを置く桁（最終区間の右隣 1 桁）。**そこが実際に空いているときだけ**出す（`optButtons` と同じ判断） */
+const dtButtons = computed<{ key: number; row: number; col: number; label: string }[]>(() =>
+  dateTimeTargets.value
+    .filter((t) => {
+      if (t.btn.col > props.snapshot.cols) return false;
+      const c = props.snapshot.cells[t.btn.row - 1]?.[t.btn.col - 1];
+      return c !== undefined && displayChar(c) === " ";
+    })
+    .map((t) => ({
+      key: t.run[0]!.index,
+      row: t.btn.row,
+      col: t.btn.col,
+      // 種別が確定している欄はそう名乗る（`both` は日付/時刻のどちらにもなるので日付側の語を使う）
+      label: t.kind === "time" ? MSG_TIME_PICKER : MSG_DATE_PICKER
+    }))
+);
+
+/** ピッカーを開いている並びの**先頭区間の欄 index**。明示操作（ボタン押下 / Alt+↓）でだけ入る */
+const dtOpenKey = ref<number | null>(null);
+watch(dateTimeTargets, () => { dtOpenKey.value = null; }); // 画面が変わったら閉じる
+
+/**
+ * 開いた時点の**実効値**（未送信のローカル編集込み・区間の並びと 1:1）。
+ *
+ * **開くときに 1 度だけ捕まえる。** `dateTimeTargets` を実効値に依存させると、打鍵や
+ * ピッカー自身の書き込みのたびに作り直され、上の `watch` が**開いた直後に閉じてしまう**
+ * （時刻の列を選ぶたびに閉じる。実機 E2E で踏んだ。decisions D14）。
+ * ホストが送った `Field.value` ではなく画面に見えている値を使うのが要点（review M2）。
+ */
+const dtOpenValues = ref<readonly string[]>([]);
+
+/** ピッカーを開く（ボタン押下・`Alt+↓` の共通経路）。実効値の捕獲もここで行う */
+function openDtFor(t: DateTimeTarget): void {
+  dtOpenValues.value = t.run.map((f) => logicalValue(f));
+  dtOpenKey.value = t.run[0]!.index;
+}
+
+/** ボタンのトグル。開くときは実効値を捕まえる。 */
+function toggleDtAt(key: number): void {
+  if (dtOpenKey.value === key) {
+    closeDtPicker();
+    return;
+  }
+  const t = dateTimeTargets.value.find((x) => x.run[0]!.index === key);
+  if (t) openDtFor(t);
+}
+
+const dtShown = computed<DateTimeTarget | null>(
+  () => dateTimeTargets.value.find((t) => t.run[0]!.index === dtOpenKey.value) ?? null
+);
+
+/** フォーカス中の欄が属する並び（`Alt+↓` の対象）。区間のどこにいても並び全体が対象になる */
+const dtTarget = computed<DateTimeTarget | null>(() => {
+  const f = focusedField.value;
+  if (!f) return null;
+  return dateTimeTargets.value.find((t) => t.run.some((x) => x.index === f.index)) ?? null;
+});
+
+/** Alt+↓ で開く（ペインの onKeydown から呼ぶ）。開ければ true */
+function openDateTimePicker(): boolean {
+  const t = dtTarget.value;
+  if (!t) return false;
+  openDtFor(t);
+  return true;
+}
+
+/**
+ * 閉じる。既定では並びの先頭区間へフォーカスを戻す。
+ * `refocus: false` は**外側クリックで閉じるとき**（クリック先からフォーカスを奪い返さない）。
+ */
+function closeDtPicker(refocus = true): void {
+  const t = dtShown.value;
+  dtOpenKey.value = null;
+  if (!refocus || !t) return;
+  inputForSlice(t.run[0]!, 0)?.focus();
+}
+
+/** 外側を押したら閉じる。`onDocMousedownForOpt` と同じく `preventDefault` はしない（矩形選択を潰さない） */
+function onDocMousedownForDt(ev: MouseEvent): void {
+  const t = ev.target;
+  if (t instanceof HTMLElement && t.closest(".dtp, .dtp-btn")) return;
+  closeDtPicker(false);
+}
+watch(dtOpenKey, (key) => {
+  if (key === null) document.removeEventListener("mousedown", onDocMousedownForDt);
+  else document.addEventListener("mousedown", onDocMousedownForDt);
+});
+onBeforeUnmount(() => document.removeEventListener("mousedown", onDocMousedownForDt));
+
+/**
+ * ピッカーで選んだ値を欄へ書く。
+ *
+ * **区切りを含まない桁数ちょうどの数字列**を先頭区間の位置へ流す——`pasteFrom` が区間へ分配し、
+ * MDT の畳み込みと送信の連結は core が行う（`buffer.ts` / `read-response.ts`）。
+ * `forceOverwrite` は挿入モードでも欄の値を置き換えるため（欄長ちょうどの挿入は入り切らない）。
+ */
+function writeDateTime(t: DateTimeTarget, digits: string): void {
+  if (digits === "") return;
+  const first = t.run[0]!;
+  const el = inputForSlice(first, 0);
+  pasteFrom({ row: first.row, col: first.col }, digits, el ? { f: first, el, startOffset: 0 } : undefined, true);
+  el?.focus(); // 以降の打鍵は通常どおり欄へ
+}
+
+/** 日付は 1 クリックで値が定まるので、書いたら閉じる（`chooseOption` と同じ即時確定） */
+function onPickDate(v: DateValue): void {
+  const t = dtShown.value;
+  if (!t) return;
+  writeDateTime(t, formatDate(t, v));
+  closeDtPicker(); // 閉じ方の経路は 1 つにする（フォーカスは欄へ戻る）
+}
+
+/** 時刻は列を選ぶたびに下書き全体を書き、**開いたまま**にする（1 クリックでは定まらないため） */
+function onPickTime(v: TimeValue): void {
+  const t = dtShown.value;
+  if (!t) return;
+  writeDateTime(t, formatTime(t, v));
+}
+
+/** カレンダー（見出し＋曜日＋6 週）のおおよその高さ（行）。**開く向きの判断にだけ**使う */
+const DT_POPOVER_ROWS = 11;
+/**
+ * ピッカーの位置。**欄に重ねない**（`optListStyle` と同じ利用者指示）——
+ * 欄の先頭桁から、その 1 行下に開く（ボタン自身も隠さない）。
+ *
+ * **画面下部の欄では上向きに開く。** 24 行画面の 20 行目より下だと下向きでは画面外へ出て
+ * 押せなくなる（実機の `DTMDSPF` は日付欄が行 20・23 にある）。高さは中身で変わるので
+ * 行数で見積もらず、`translateY(-100%)` で**欄の上端に下端を合わせる**。
+ */
+function dtListStyle(t: DateTimeTarget): Record<string, string> {
+  const row = t.run[0]!.row;
+  const below = row + DT_POPOVER_ROWS <= props.snapshot.rows;
+  const st = optBtnStyle({ row: below ? row + 1 : row, col: t.run[0]!.col });
+  return below ? st : { ...st, transform: "translateY(-100%)" };
 }
 
 /**
@@ -2693,12 +2854,19 @@ function columnOffsetOfCaret(f: Field, viewCaret: number): number {
 /**
  * 画面座標 `start` を起点に流し込む。**欄外（保護領域）からのペーストもここを通る。**
  * `focus` は入力欄にフォーカスがある場合のみ渡す（編集モデルの更新に使う）。
+ *
+ * `forceOverwrite` は**選択部品（日付・時刻ピッカー）から欄の値を丸ごと差し替えるとき**に使う。
+ * 挿入モードのままだと「欄長ちょうどの文字列を offset 0 へ挿入」＝入り切らずに
+ * `MSG_NO_ROOM` で弾かれる（既に値の入った 8 桁の日付欄で起きる）。ピッカーはカーソル位置への
+ * 貼り付けではなく**欄の値の置き換え**なので、挿入・上書きの区別が意味を持たない。
  */
 function pasteFrom(
   start: { row: number; col: number },
   text: string,
-  focus?: { f: Field; el: HTMLInputElement; startOffset: number }
+  focus?: { f: Field; el: HTMLInputElement; startOffset: number },
+  forceOverwrite = false
 ): void {
+  const useInsert = insertMode.value && !forceOverwrite;
   const lines = text.split(/\r?\n/);
   const { cols, rows } = props.snapshot;
   // 帯行へ割り付ける。同じ欄に複数回書くことがある（行またぎ欄・帯の折返し）ため、欄ごとに
@@ -2760,7 +2928,7 @@ function pasteFrom(
   for (const { field, parts } of targets.values()) {
     let val = logicalValue(field);
     for (const p of parts) {
-      if (insertMode.value) {
+      if (useInsert) {
         // 挿入モードは 1 文字でも不可なら**一切貼らない**（ACS）。上書きは桁を消費するだけ
         const why = firstRejection(field, p.line);
         if (why) {
@@ -2768,7 +2936,7 @@ function pasteFrom(
           return;
         }
       }
-      const next = insertMode.value
+      const next = useInsert
         ? insertInto(field, val, p.offset, p.line)
         : overwriteInto(field, val, p.offset, p.line);
       if (next === undefined) {
@@ -3350,7 +3518,11 @@ defineExpose({
   // オプション欄のドロップダウン（ペインの Alt+↓・Esc から呼ぶ）
   openOptHints,
   optHintsOpen: () => optOpenRow.value !== null,
-  closeOptHints
+  closeOptHints,
+  // 日付・時刻ピッカー（ペインの Alt+↓・キー優先判定から呼ぶ）
+  openDateTimePicker,
+  dtPickerOpen: () => dtOpenKey.value !== null,
+  closeDtPicker
 });
 
 // 画面が更新されたら矩形選択は破棄する
@@ -3377,6 +3549,7 @@ onBeforeUnmount(() => {
     }"
     :data-focused="focused"
     :data-opt-hints="optHints"
+    :data-dt-picker="dtPicker"
     @click="onGridClick"
     @dblclick="onGridDblclick"
     @mousedown="onGridMousedown"
@@ -3433,7 +3606,8 @@ onBeforeUnmount(() => {
 
     <div
       v-if="optPopoverShown"
-      class="opt-hints"
+      class="opt-hints crt-pop"
+      :data-pop="optHints"
       :style="optListStyle(optPopoverShown)"
       role="listbox"
       :aria-label="MSG_OPT_HINTS"
@@ -3455,6 +3629,35 @@ onBeforeUnmount(() => {
         <span class="opt-hint-l">{{ o.label }}</span>
       </button>
     </div>
+
+    <!--
+      EDTMSK 分割欄の日付・時刻ピッカー。作法は上の Opt 選択肢と同じ:
+      **フォーカスしただけでは開かない**（クリックか Alt+↓）／`mousedown.stop.prevent` で
+      矩形選択とフォーカスを守る／tabindex は開いている間だけ 0（Tab の停止数を増やさない）。
+    -->
+    <button
+      v-for="b in dtButtons"
+      :key="'db' + b.key"
+      type="button"
+      class="dtp-btn"
+      :style="optBtnStyle(b)"
+      :tabindex="dtOpenKey === b.key ? 0 : -1"
+      :aria-expanded="dtOpenKey === b.key"
+      :aria-label="b.label"
+      @mousedown.stop.prevent
+      @click.stop="toggleDtAt(b.key)"
+    >▾</button>
+
+    <DateTimePicker
+      v-if="dtShown"
+      :target="dtShown"
+      :values="dtOpenValues"
+      :pop="dtPicker"
+      :style="dtListStyle(dtShown)"
+      @pick-date="onPickDate"
+      @pick-time="onPickTime"
+      @close="closeDtPicker()"
+    />
 
     <template v-if="decoWindow">
       <div
@@ -3827,6 +4030,31 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
+/* 日付・時刻ピッカーのボタン。寸法・位置は Opt 欄のボタンとそろえる（`optBtnStyle` を共有） */
+.dtp-btn {
+  position: absolute;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  z-index: 6;
+  width: 1ch;
+  height: 1.25em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.dtp-btn:hover,
+.dtp-btn:focus-visible {
+  opacity: 1;
+}
+.grid[data-dt-picker="crt"] .dtp-btn {
+  color: var(--t-turquoise);
+}
+
+/* 面・枠・端末調は `.crt-pop`（styles.css）に共通で置いてある。ここは位置と並びだけ。 */
 .opt-hints {
   position: absolute;
   margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
@@ -3837,12 +4065,6 @@ onBeforeUnmount(() => {
   max-height: 14em;
   overflow-y: auto;
   padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--ink);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
-  font-family: var(--sans);
   font-size: 0.8em;
   line-height: 1.5;
 }
@@ -3878,20 +4100,7 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 
-/* 枠: 面を持たず輪郭だけ。画面の内容を隠しすぎたくないとき */
-.grid[data-opt-hints="outline"] .opt-hints {
-  background: var(--paper);
-  border-color: var(--accent);
-  box-shadow: none;
-}
-
-/* 端末調: CRT の緑に寄せる。画面と地続きに見せたいとき */
-.grid[data-opt-hints="crt"] .opt-hints {
-  background: var(--crt-bezel);
-  color: var(--t-green);
-  border-color: var(--crt-line);
-  font-family: var(--screen-mono);
-}
+/* 面（枠 / 端末調）は `.crt-pop[data-pop]` が持つ。ここは中身の色だけを合わせる。 */
 .grid[data-opt-hints="crt"] .opt-hint-n {
   color: var(--t-yellow);
 }

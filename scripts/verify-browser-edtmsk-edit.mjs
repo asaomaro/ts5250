@@ -7,6 +7,12 @@
 //   ③ Backspace / Delete は区切りをまたいで詰め直す
 //   ④ `2026/08/25` のように区切りを含めてペーストしても桁がずれない
 //
+// あわせて**日付・時刻ピッカー**（画面設定「日付・時刻の選択」）も見る:
+//   ⑥ `D8U`（4,2,2 ＋ `/`）で選んだ日付が全区間へ入り、**ホストへ届いて返ってくる**
+//   ⑦ `TMW`（2,2,2）は**空欄だと区切りが画面に出ない**ので日付 / 時刻のタブが出る。
+//      時刻を入れてホストが `:` を刷ると、次に開いたときは時刻に確定してタブが消える
+//      （曖昧 → 確定の**単調な絞り込み**。decisions D3）
+//
 // 検証資材は scripts/build-dttest.mjs が作る <LIB>/DTMDSPF ＋ DTMPGM の **`D8U`**
 // （8 桁 EDTWRD+EDTMSK ＋ `COLOR(WHT)` ＋ `DSPATR(UL)`。素の欄では色も下線も差が出ない）。
 //
@@ -37,6 +43,9 @@ const COL = 24; // 欄の開始桁
 // 区間: 4 桁 + `/` + 2 桁 + `/` + 2 桁
 const SEG = [COL, COL + 5, COL + 8];
 const SEPCOL = [COL + 4, COL + 7];
+// 時刻欄 TMW（EDTWRD('  :  :  ') + EDTMSK）。区間: 2 桁 + 区切り + 2 桁 + 区切り + 2 桁
+const TROW = Number(process.env.TMW_ROW ?? 11);
+const TSEG = [COL, COL + 3, COL + 6];
 
 const log = (s) => process.stdout.write(s + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -67,6 +76,10 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, dev
 await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://localhost:${PORT}` });
 
 const sel = (col) => `input.grid-input[data-field="f${ROW}c${col}"]`;
+const selAt = (row, col) => `input.grid-input[data-field="f${row}c${col}"]`;
+/** 行 row の区間 cols の現在値（末尾空白を落とす） */
+const valuesAt = async (row, cols) =>
+  Promise.all(cols.map(async (c) => (await page.locator(selAt(row, c)).inputValue()).replace(/\s+$/, "")));
 const focusedField = () => page.evaluate(() => document.activeElement?.getAttribute?.("data-field") ?? undefined);
 const segValues = async () => Promise.all(SEG.map(async (c) => (await page.locator(sel(c)).inputValue()).replace(/\s+$/, "")));
 const shown = async () => (await segValues()).join("/");
@@ -117,6 +130,11 @@ const inputInfo = (col) =>
   }, sel(col));
 
 try {
+  // **ピッカーは既定 OFF**（推測を含む機能を勝手に有効化しない）。検証のため保存値を先に入れておく
+  // ——画面設定メニューを操作するより壊れにくく、「既定では出ない」ことも同時に示せる。
+  await page.addInitScript(() => {
+    localStorage.setItem("as400.view.settings", JSON.stringify({ dtPicker: "panel" }));
+  });
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
   if ((await page.locator(".card:has-text('DSP')").count()) === 0) {
@@ -228,6 +246,103 @@ try {
   const tab3 = await focusedField();
   log(`  最終区間で Shift+Tab → ${tab3}`);
   check(!segIds.includes(tab3 ?? ""), `後戻りも並びを 1 つとして飛び越す（実際 ${tab3}）`);
+
+  // --- ⑥ 日付ピッカー（D8U・4,2,2 ＋ `/`）---
+  log("\n### ⑥ 日付ピッカー");
+  // 判定できた欄にだけボタンが出る。DTMPGM では DMA / TMW / D8M / D8U の 4 件
+  // （SSN は `3,2,4` なので形の段階で落ちる＝ここに出てはいけない）
+  const btnCount = await page.locator(".dtp-btn").count();
+  log(`  ピッカーのボタン: ${btnCount} 件`);
+  check(btnCount === 4, `日付・時刻とみなせる欄にだけボタンが出る（SSN は出ない。実際 ${btnCount} 件）`);
+
+  // **今日と重ならない日付を先に入れる。** 実行日と同じ年月だと「現在値から開く」のか
+  // 「今日にフォールバックした」のかが区別できず、チェックが偶然通ってしまう
+  // （実際にそうなっていた。review M2）。ここは**未送信のローカル編集**でもある——
+  // ピッカーは `Field.value`（ホストの値）ではなく画面に見えている値から開く必要がある。
+  await page.evaluate(() => navigator.clipboard.writeText("2019/03/07"));
+  await focusSeg(0, 0);
+  await page.keyboard.press("Control+v");
+  await sleep(400);
+  check((await shown()) === "2019/03/07", `打った値が欄に入っている（実際 ${await shown()}）`);
+
+  await focusSeg(0, 0);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  check(await page.locator(".dtp").isVisible(), "Alt+↓ でピッカーが開く");
+  const fmt = await page.locator(".dtp-fmt").innerText();
+  log(`  見出し: ${fmt}`);
+  check(fmt.includes("YYYY/MM/DD"), `解釈中の書式を名乗る（実際 ${fmt}）`);
+  const ym = await page.locator(".dtp-ym").innerText();
+  log(`  カレンダーの年月: ${ym}（欄の現在値 ${await shown()} から開く）`);
+  check(ym === "2019/03", `**未送信の編集込みの現在値**から開く（今日ではない。実際 ${ym}）`);
+
+  await page.locator(".dtp-day").nth(14).click(); // 15 日
+  await sleep(400);
+  const picked = await shown();
+  log(`  15 日を選んだ: ${picked}`);
+  check(picked === "2019/03/15", `選んだ日付が全区間へ入る（実際 ${picked}）`);
+  check((await page.locator(".dtp").count()) === 0, "日付を選ぶとピッカーは閉じる");
+
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const echoed = await shown();
+  log(`  Enter でホストへ送って返ってきた値: ${echoed}`);
+  check(echoed === "2019/03/15", `**ホストへ届いて返ってくる**（実際 ${echoed}）`);
+
+  // --- ⑦ 時刻ピッカー（TMW・2,2,2）---
+  log("\n### ⑦ 時刻ピッカー（曖昧 → 確定）");
+  const tEmpty = await valuesAt(TROW, TSEG);
+  log(`  TMW の現在値: ${JSON.stringify(tEmpty)}（空なら区切りが画面に出ていない）`);
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  check(await page.locator(".dtp").isVisible(), "時刻欄でもピッカーが開く");
+  const hasTabs = (await page.locator(".dtp-tabs").count()) === 1;
+  log(`  日付 / 時刻のタブ: ${hasTabs ? "あり" : "なし"}`);
+  check(hasTabs, "区切りが画面に出ていないので、日付か時刻かを利用者に選ばせる");
+
+  await page.locator(".dtp-tab", { hasText: "時刻" }).click();
+  await sleep(250);
+  // **時は 10 以上を選ぶ。** `TMW` の編集ワードは `'  :  :  '` で先頭に `0` が無いため、
+  // ホストは**時の先頭ゼロを抑制**して返す（`09` を送ると ` 9:30:15` で返る。実測 2026-08-26）。
+  // 送受信は正しいが期待値が読みにくくなるので、抑制の掛からない値で往復を見る
+  // （`D8U` は `'0   /  /  '` なので抑制されない＝⑥ はそのまま比較できる）。
+  await page.locator(".dtp-col").nth(0).locator(".dtp-cell").nth(13).click(); // 13 時
+  await sleep(250);
+  await page.locator(".dtp-col").nth(1).locator(".dtp-cell").nth(30).click(); // 30 分
+  await sleep(250);
+  await page.locator(".dtp-col").nth(2).locator(".dtp-cell").nth(15).click(); // 15 秒
+  await sleep(350);
+  const tPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  13/30/15 を選んだ: ${tPicked}`);
+  check(tPicked === "13:30:15", `選んだ時刻が全区間へ入る（実際 ${tPicked}）`);
+  check((await page.locator(".dtp").count()) === 1, "時刻は選んでも開いたまま（1 クリックでは定まらない）");
+
+  // `Alt+↓` で開くとフォーカスは欄に残る（値を書くと sync が欄へ戻す）ので、
+  // `Esc` はピッカー自身ではなく**ペインの既存ハンドラ**が拾って閉じる（decisions D12）。
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  check((await page.locator(".dtp").count()) === 0, "欄にフォーカスがある状態の `Esc` でも閉じる");
+
+  await page.keyboard.press("Enter");
+  await sleep(2500);
+  const tEchoed = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  Enter でホストへ送って返ってきた値: ${tEchoed}`);
+  check(tEchoed === "13:30:15", `**ホストへ届いて返ってくる**（実際 ${tEchoed}）`);
+
+  // ホストが `:` を刷ったので、次に開いたときは時刻に確定している
+  await page.locator(selAt(TROW, TSEG[0])).click();
+  await sleep(200);
+  await page.keyboard.press("Alt+ArrowDown");
+  await sleep(400);
+  const tabsAfter = await page.locator(".dtp-tabs").count();
+  const fmtAfter = await page.locator(".dtp-fmt").innerText();
+  log(`  値が入った後: タブ ${tabsAfter} 件 / 見出し ${fmtAfter}`);
+  check(tabsAfter === 0, "区切りが見えたらタブは消える（曖昧 → 確定の単調な絞り込み）");
+  check(fmtAfter.includes("HH:MM:SS"), `時刻として名乗る（実際 ${fmtAfter}）`);
+  await page.keyboard.press("Escape");
+  await sleep(250);
 
   const shot = join(OUT, "edtmsk-edit.png");
   await page.locator(".pane").screenshot({ path: shot });

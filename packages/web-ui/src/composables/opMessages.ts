@@ -24,6 +24,26 @@ export const MSG_PROTECTED = "カーソルが保護された区域にあるた�
 export const MSG_OPT_HINTS = "オプションの選択肢";
 
 /**
+ * `EDTMSK` で分割された日付欄・時刻欄に出す選択部品のラベル。
+ *
+ * **どの区間が年・月・日かは画面に書かれていない**（ホストは分解の形しか送らない）ので、
+ * ピッカーは**解釈中の書式を見出しに出す**（`MSG_DTP_FORMAT`）。違えば直接打鍵に切り替えられる。
+ */
+export const MSG_DATE_PICKER = "日付の選択";
+export const MSG_TIME_PICKER = "時刻の選択";
+/** 見出しに出す「この書式として入力します」の言い回し。`{f}` に `YYYY/MM/DD` 等が入る */
+export const MSG_DTP_FORMAT = (f: string): string => `${f} として入力します`;
+/** 区切りが画面に出ておらず日付か時刻か決められないときのタブ */
+export const MSG_DTP_TAB_DATE = "日付";
+export const MSG_DTP_TAB_TIME = "時刻";
+/** 今日 / 現在時刻へ戻すボタン */
+export const MSG_DTP_TODAY = "今日";
+export const MSG_DTP_NOW = "現在時刻";
+/** 年月送り */
+export const MSG_DTP_PREV_MONTH = "前の月";
+export const MSG_DTP_NEXT_MONTH = "次の月";
+
+/**
  * データ待ち行列の常駐監視は**エントリを取り出して消す**（本番のコンシューマの取り分を奪う）。
  *
  * requirement の明示要求で、**開始時だけでなく監視中も常に出す**——

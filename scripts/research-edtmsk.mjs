@@ -8,9 +8,12 @@
 // **検証対象の実装（core の screen 層）に依存させない。** `traceRecords` の生バイトを
 // 独立にパースして SF オーダーを並べる（`research-adjust.mjs` と同じ作法）。
 //
+// ⚠ **2026-08-25 訂正: EDTMSK は欄を分解する。** 当時「分解しない」と結論したのは、マスクの `&` を
+// 数字の桁に置いていて `CRTDSPF` に無視されていたため（`.aidev/backlog/input-assist.md`）。
+//
 // 前提: `build-dttest.mjs` 済み（TESTLIB/DTMPGM）。
-// 実行: AS400_PASSWORD=... node scripts/research-edtmsk.mjs
-import { readFileSync } from "node:fs";
+// 実行: node --env-file=.env --env-file=.env.verify scripts/research-edtmsk.mjs
+import { readFileSync, existsSync } from "node:fs";
 import { Session5250 } from "@ts5250/tn5250";
 
 const LIB = process.env.AS400_LIB ?? "TESTLIB";
@@ -122,8 +125,23 @@ async function connectHost(sys, password) {
 }
 
 const captured = [];
-const conns = JSON.parse(readFileSync("connections.json", "utf8"));
-const sys = conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400"));
+// **接続先は環境変数を優先する。** `connections.json` は古い検証用の設定で、実機が載っていない
+// ことがある（2026-08-26 に実際に踏んだ——`AS400` が無く `MVSTAP` だけ残っていた）。名前で
+// 見つからなければ `AS400_HOST` / `AS400_USER` から組み立てる（`build-dttest.mjs` と同じ受け取り方）。
+const conns = existsSync("connections.json")
+  ? JSON.parse(readFileSync("connections.json", "utf8"))
+  : { systems: [] };
+const sys =
+  conns.systems.find((s) => s.name === (process.env.AS400_SYSTEM ?? "AS400")) ??
+  (process.env.AS400_HOST
+    ? {
+        host: process.env.AS400_HOST,
+        port: 23,
+        ccsid: Number(process.env.AS400_CCSID ?? 930),
+        signon: { user: process.env.AS400_USER }
+      }
+    : null);
+if (!sys) { log("接続先が見つかりません（AS400_HOST か connections.json を設定してください）"); process.exit(1); }
 const password = process.env.AS400_PASSWORD;
 if (!password) { log("AS400_PASSWORD が未設定です"); process.exit(1); }
 const session = await connectHost(sys, password);

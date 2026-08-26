@@ -49,6 +49,12 @@ export type WindowFrame = "none" | "shadow" | "raised" | "outline";
 export type WindowBackdrop = "none" | "smoke" | "frost" | "blur";
 /** オプション欄の選択肢の見せ方。none は出さない（既定） */
 export type OptHintStyle = "none" | "panel" | "outline" | "crt";
+/**
+ * 日付・時刻ピッカーの見せ方。none は出さない（既定）。
+ * 意匠の候補は `OptHintStyle` と揃える——同じ CRT 画面に重なるポップオーバーどうしで
+ * 見た目が食い違うと落ち着かない（CSS は `.crt-pop` を共有する）。
+ */
+export type DtPickerStyle = "none" | "panel" | "outline" | "crt";
 
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
@@ -71,6 +77,11 @@ export interface ViewSettings {
    * **推測を含む機能なので既定は none**（勝手に有効化しない。`windowFrame` の既定が none なのと同じ扱い）。
    */
   optHints: OptHintStyle;
+  /**
+   * `EDTMSK` で分割された日付欄・時刻欄に出す選択部品の見せ方。
+   * **推測を含む機能なので既定は none**（`optHints` と同じ扱い）。
+   */
+  dtPicker: DtPickerStyle;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
 }
@@ -119,6 +130,19 @@ export const VIEW_ITEMS: ViewItemDef[] = [
     wide: true,
     expandable: true,
     // 画面に重ねる部品なので、CRT の上での馴染み方を選べるようにする（buttons と同じ考え方）
+    opts: [
+      { value: "none", label: "無効" },
+      { value: "panel", label: "パネル" },
+      { value: "outline", label: "枠" },
+      { value: "crt", label: "端末調" },
+    ],
+  },
+  {
+    key: "dtPicker",
+    label: "日付・時刻の選択",
+    wide: true,
+    expandable: true,
+    // 画面に重ねる部品なので、CRT の上での馴染み方を選べるようにする（optHints と同じ考え方）
     opts: [
       { value: "none", label: "無効" },
       { value: "panel", label: "パネル" },
@@ -199,6 +223,7 @@ const FALLBACK: ViewSettings = {
   kana: "auto", // ホストの表のまま
   linkify: true,
   optHints: "none", // 推測を含むので既定は出さない
+  dtPicker: "none", // 同上（日付・時刻の判定も推測を含む）
   controls: "plain",
   colorMode: "literal", // 端末色
   surface: "flat",

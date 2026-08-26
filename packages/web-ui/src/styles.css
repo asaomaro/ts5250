@@ -413,5 +413,32 @@ button:disabled:hover {
   --t-green:#248a3d; --t-white:#1d1d1f; --t-red:#d70015; --t-turquoise:#0071a4; --t-yellow:#a15c00; --t-pink:#af52de; --t-blue:#007aff;
 }
 
+/* CRT 画面に重ねるポップオーバーの**共通の意匠**（面・枠・端末調）。
+   オプション欄の選択肢（`.opt-hints`）と日付・時刻ピッカー（`.dtp`）が共有する——
+   同じ画面に重なる部品どうしで見た目が食い違うと落ち着かないため（decisions D7）。
+   **位置・並び・寸法は各部品側が持つ。ここは「面」だけを決める。**
+   意匠の選択は要素の `data-pop`（= 画面設定の値）で切り替える。`panel` は素の状態。 */
+.crt-pop {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  font-family: var(--sans);
+}
+/* 枠: 面を持たず輪郭だけ。画面の内容を隠しすぎたくないとき */
+.crt-pop[data-pop="outline"] {
+  background: var(--paper);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+/* 端末調: CRT の緑に寄せる。画面と地続きに見せたいとき */
+.crt-pop[data-pop="crt"] {
+  background: var(--crt-bezel);
+  color: var(--t-green);
+  border-color: var(--crt-line);
+  font-family: var(--screen-mono);
+}
+
 /* コントロール表現（プレーン/下線/塗り/枠）は ScreenGrid.vue の scoped 側で定義する
    （.grid-input と同じ scope に置くことで、scoped の詳細度に確実に勝たせるため）。 */
