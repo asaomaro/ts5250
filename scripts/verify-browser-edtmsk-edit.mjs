@@ -414,6 +414,19 @@ try {
   await sleep(150);
   check((await focusInPicker())?.col === "2", "→ で秒の列へ渡る");
 
+  // **ホイールはピッカーの中で効く**（端末のページ送りにしない）。除外が漏れていたときは
+  // ホストへ Roll が飛び、再表示で**ピッカーが閉じていた**。本物の native スクロールは
+  // 実ブラウザでしか起きないので、ここで見る。
+  const colBox = await page.locator(".dtp-col").first().boundingBox();
+  await page.mouse.move(colBox.x + colBox.width / 2, colBox.y + colBox.height / 2);
+  await page.mouse.wheel(0, 240);
+  await sleep(500);
+  check((await page.locator(".dtp").count()) === 1, "**ホイールでピッカーが閉じない**");
+  check((await focusInPicker()) !== null, "ホイールでフォーカスも外れない");
+  const scrolled = await page.locator(".dtp-col").first().evaluate((e) => e.scrollTop);
+  log(`  ホイール後の列の scrollTop: ${scrolled}`);
+  check(scrolled > 0, `列自身がスクロールする（実際 ${scrolled}）`);
+
   // **Tab はピッカーの中で巡回する**（抜けると開いたままの部品へキーだけで戻れない）。
   // 実ブラウザなので合成イベントではなく**本物のタブ移動**が起きる——jsdom では測れない所。
   const before = await focusInPicker();

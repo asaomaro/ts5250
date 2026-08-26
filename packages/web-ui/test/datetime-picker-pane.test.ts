@@ -211,3 +211,48 @@ describe("時刻は確定するまで欄へ書かない", () => {
     w.unmount();
   });
 });
+
+/**
+ * **重ねた部品の上のホイールは、その部品の中で効く**（端末へ流さない）。
+ *
+ * ペインのホイールは端末のページ送り（`PageUp`/`PageDown`）に割り当ててある。
+ * ピッカーの上でそれが走ると**ホストへ Roll が飛び、再表示でピッカーが閉じる**——
+ * 実際にそうなっていた（除外がオプション選択肢にだけ入っていてピッカーが漏れていた）。
+ * 除外の集合は `composables/focusTrap.ts` の `OVERLAY_SELECTOR` に一元化してある。
+ */
+describe("ピッカーの上のホイール", () => {
+  async function open() {
+    const p = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await p.find('input.grid-input[data-field-index="2"]').trigger("focus");
+    await nextTick();
+    await p.find(".pane").trigger("keydown", { key: "ArrowDown", altKey: true });
+    await nextTick(); await nextTick();
+    return p;
+  }
+
+  it("ホストへページ送りを送らず、ピッカーも閉じない", async () => {
+    const w = await open();
+    sent.length = 0;
+    const col = w.find(".dtp-col").element as HTMLElement;
+    const ev = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    col.dispatchEvent(ev);
+    await nextTick(); await nextTick();
+
+    const rolls = sent.filter((m) => /PageDown|PageUp/.test(JSON.stringify(m)));
+    expect(rolls, "ホストへ Roll が飛んでいる").toEqual([]);
+    // 既定を止めていない＝native スクロールが生きている（列が自分でスクロールできる）
+    expect(ev.defaultPrevented, "既定が止められている（列がスクロールできない）").toBe(false);
+    expect(w.find(".dtp").exists(), "ピッカーが閉じている").toBe(true);
+    w.unmount();
+  });
+
+  it("ピッカーの外のホイールは従来どおり端末のページ送りになる", async () => {
+    const w = await open();
+    sent.length = 0;
+    w.find(".pane").element.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
+    await nextTick(); await nextTick();
+    expect(sent.filter((m) => /PageDown/.test(JSON.stringify(m))).length).toBeGreaterThan(0);
+    w.unmount();
+  });
+});

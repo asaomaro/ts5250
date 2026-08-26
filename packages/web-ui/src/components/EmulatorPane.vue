@@ -23,6 +23,7 @@ import {
 } from "../session-controller.js";
 import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
+import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved } from "../composables/opMessages.js";
 import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
@@ -946,10 +947,11 @@ function onKeydown(ev: KeyboardEvent): void {
 let wheelCooldownUntil = 0;
 function onWheel(ev: WheelEvent): void {
   if (Math.abs(ev.deltaY) < 4) return; // 微小ジッタは無視
-  // **オプション選択肢のリスト上ではリスト自身をスクロールさせる。**
+  // **画面に重ねた部品の上では、その部品自身をスクロールさせる。**
   // ここで preventDefault すると native スクロールが死に、さらにホストへ Roll（PageUp/Down）が
-  // 飛んでしまう——リストを送っただけで画面が送られるのは明らかに誤り。
-  if (ev.target instanceof HTMLElement && ev.target.closest(".opt-hints")) return;
+  // 飛んでしまう——部品を送っただけで画面が送られるのは明らかに誤り。
+  // 対象は `OVERLAY_SELECTOR` に一元化してある（個別に足すと取りこぼす。実際ピッカーが漏れていた）。
+  if (ev.target instanceof HTMLElement && ev.target.closest(OVERLAY_SELECTOR)) return;
   ev.preventDefault(); // 端末はスクロールせずページ送りに割り当てる（ACS 準拠）
   if (inputBlocked.value || snapshot.value?.keyboardLocked) return; // 通信中・予約中・ロック中は送らない
   const now = Date.now();
