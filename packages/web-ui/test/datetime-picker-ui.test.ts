@@ -646,3 +646,66 @@ describe("時刻の列の見た目", () => {
     w.unmount();
   });
 });
+
+/**
+ * **`Enter` と `Space` の役割**。
+ *
+ * ドロップダウンと日付は、APG でもネイティブでも**どちらも「選んで閉じる」**
+ * （1 つ選べば値が完成するので分ける理由が無い）。`button` の既定動作がそのまま正解。
+ * 時刻だけは**時・分・秒が独立**していて 1 列では値が完成しないため、
+ * **`Space` は選ぶだけ／`Enter` は選んで閉じる**に分ける。
+ */
+describe("時刻は Space で選び、Enter で確定して閉じる", () => {
+  const active = () => document.activeElement as HTMLElement | null;
+  const press = (key: string) =>
+    active()!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
+  it("`Enter` で値が入り、ピッカーが閉じて欄へ戻る", async () => {
+    const edits = reactive(new Map<number, string>());
+    const w = mountGrid("panel", TIME_FIELDS, ":", false, edits);
+    await open(w);
+    expect(active()?.dataset.col).toBe("0");
+    press("ArrowDown"); // 時を 1 つ進める（この時点では値を書かない）
+    await nextTick();
+    const picked = active()!.dataset.val!;
+    press("Enter");
+    await nextTick();
+
+    expect(w.find(".dtp").exists()).toBe(false); // 閉じる
+    expect(active()?.classList.contains("grid-input")).toBe(true); // 欄へ戻る
+    const last = new Map(((w.emitted("edit") as unknown[][] | undefined) ?? []).map(([i, v]) => [i as number, v as string]));
+    expect(last.get(0)).toBe(String(Number(picked)).padStart(2, "0"));
+    w.unmount();
+  });
+
+  it("`Space`（＝クリック相当）では閉じない——3 列を順に決められる", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    await active()!.click(); // Space は button の click に落ちる
+    await nextTick();
+    expect(w.find(".dtp").exists()).toBe(true);
+    expect(active()?.closest(".dtp")).not.toBeNull();
+    w.unmount();
+  });
+
+  it("矢印だけでは値を書かない（`Space` / `Enter` を踏むまで欄は変わらない）", async () => {
+    const w = mountGrid("panel", TIME_FIELDS, ":");
+    await open(w);
+    press("ArrowDown");
+    await nextTick();
+    press("ArrowRight");
+    await nextTick();
+    expect(w.emitted("edit")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("日付は `Enter` も `Space` も「選んで閉じる」（APG どおり・分けない）", async () => {
+    const w = mountGrid("panel");
+    await open(w);
+    expect(active()?.classList.contains("dtp-day")).toBe(true);
+    await active()!.click(); // Enter/Space はどちらも button の click に落ちる
+    await nextTick();
+    expect(w.find(".dtp").exists()).toBe(false);
+    w.unmount();
+  });
+});

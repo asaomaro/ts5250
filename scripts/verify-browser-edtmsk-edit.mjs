@@ -369,30 +369,25 @@ try {
   log(`  開いた直後: ${JSON.stringify(kf0)}`);
   check(kf0?.col === "0" && kf0?.val === "13", `時の列の現在値へフォーカスが移る（実際 ${JSON.stringify(kf0)}）`);
 
-  // 時: 1 つ上（13 → 12）を Enter で決める
+  // **時刻は `Space` が「選ぶだけ」、`Enter` が「選んで閉じる」**（時・分・秒が独立していて
+  // 1 列では値が完成しないため。ドロップダウンと日付は APG どおり両方とも「選んで閉じる」）。
   await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
   await sleep(300);
   const kf1 = await focusInPicker();
-  check(kf1 !== null, `Enter の後も**フォーカスがピッカーに残る**（実際 ${JSON.stringify(kf1)}）`);
+  check(kf1 !== null, `Space の後も**フォーカスがピッカーに残る**（実際 ${JSON.stringify(kf1)}）`);
+  check((await page.locator(".dtp").count()) === 1, "Space では閉じない（残りの列を決められる）");
 
-  // 分・秒へ矢印で渡って決める
   await page.keyboard.press("ArrowRight");
   await sleep(150);
   check((await focusInPicker())?.col === "1", "→ で分の列へ渡る");
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
   await sleep(300);
+
   await page.keyboard.press("ArrowRight");
   await sleep(150);
   check((await focusInPicker())?.col === "2", "→ で秒の列へ渡る");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  await sleep(300);
-
-  const kPicked = (await valuesAt(TROW, TSEG)).join(":");
-  log(`  キーボードだけで選んだ: ${kPicked}`);
-  check(kPicked === "12:31:16", `矢印と Enter だけで全区間が決まる（実際 ${kPicked}）`);
 
   // **Tab はピッカーの中で巡回する**（抜けると開いたままの部品へキーだけで戻れない）。
   // 実ブラウザなので合成イベントではなく**本物のタブ移動**が起きる——jsdom では測れない所。
@@ -408,11 +403,17 @@ try {
   log(`  Tab 一巡の前後: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
   check(after !== null, "Shift+Tab でも外へ出ない");
 
-  // Esc で閉じて欄へ戻り、そのまま Enter でホストへ送れる（マウス不要）
-  await page.keyboard.press("Escape");
-  await sleep(300);
-  check((await page.locator(".dtp").count()) === 0, "Esc で閉じる");
-  check((await focusedField()) === `f${TROW}c${TSEG[0]}`, `Esc で欄へフォーカスが戻る（実際 ${await focusedField()}）`);
+  // 秒を 1 つ進めて **Enter で確定して閉じる**
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await sleep(400);
+  const kPicked = (await valuesAt(TROW, TSEG)).join(":");
+  log(`  キーボードだけで選んだ: ${kPicked}`);
+  check(kPicked === "12:31:16", `Space と Enter だけで全区間が決まる（実際 ${kPicked}）`);
+  check((await page.locator(".dtp").count()) === 0, "**Enter で確定してピッカーが閉じる**");
+  check((await focusedField()) === `f${TROW}c${TSEG[0]}`, `Enter の後は欄へフォーカスが戻る（実際 ${await focusedField()}）`);
+
+  // そのまま Enter でホストへ送れる（マウス不要）
   await page.keyboard.press("Enter");
   await sleep(2500);
   const kEchoed = (await valuesAt(TROW, TSEG)).join(":");

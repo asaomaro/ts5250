@@ -234,6 +234,34 @@ function onKeydown(ev: KeyboardEvent): void {
   if (rootEl.value && cycleTab(rootEl.value, ev)) return;
   const t = ev.target;
   if (!(t instanceof HTMLElement)) return;
+
+  /*
+    **時刻だけ `Enter` と `Space` の役割を分ける。**
+
+    ドロップダウン（select-only combobox）と日付（date picker dialog）は、WAI-ARIA APG でも
+    OS のネイティブでも **`Enter` / `Space` はどちらも「選んで閉じる」**——1 つ選べば値が
+    完成するので分ける理由が無い。`button` の既定動作がそのまま正解になっている。
+
+    時刻は**時・分・秒が独立**していて 1 列選んでも値が完成しないため、この形にできない。
+    APG に標準パターンも無い（実装系では「OK ボタン」か「Enter で確定」が普通）。
+    そこで **`Space` は選ぶだけ（開いたまま）／`Enter` は選んで閉じる**に分ける。
+    値は列を選ぶたびに欄へ書いているので、閉じた時点の値がそのまま確定値になる。
+  */
+  if (ev.key === "Enter" && t.classList.contains("dtp-cell")) {
+    const col = Number(t.dataset.col), val = Number(t.dataset.val);
+    if (Number.isFinite(col) && Number.isFinite(val)) {
+      // `button` の既定動作（keydown での click）を止めて、選択と close を 1 度だけ行う
+      ev.preventDefault();
+      // **伝播も止める。** 止めないとペインまで上がって **AID の Enter がホストへ送られる**
+      // ——ピッカーは同期的に閉じるので、ペイン側の「開いている間は無視」の条件が
+      // event が届く頃には既に外れている（実機で画面が再表示され、カーソルが先頭欄へ飛んだ）。
+      ev.stopPropagation();
+      pickTime(col === 0 ? "h" : col === 1 ? "mi" : "s", val);
+      emit("close");
+      return;
+    }
+  }
+
   const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key);
   if (!arrow || ev.altKey || ev.ctrlKey || ev.metaKey) return;
 
