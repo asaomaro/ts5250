@@ -105,7 +105,17 @@ function cellClass(c: Cell): string {
   if (c.reverse) cls += " a-r";
   if (c.blink) cls += " a-b";
   if (hasRealColsep(c.color, c.columnSeparator)) cls += " a-cs";
+  // **SO/SI 桁に印が載っているときだけ淡色にする**（web-ui の `.a-shift` と同じ意図）。
+  // 呼び出し側が `{ }` を入れて渡すことがあり（web-ui の SO/SI マーク表示）、ホストのデータに
+  // ある本物の `{ }` と同じ字なので、色を分けないと**どちらが制御桁か分からない**。
+  // 印を入れていない（char は空白）ときは何も足さない——ランを割って span を増やさないため。
+  if (isShiftMarked(c)) cls += " a-so";
   return cls;
+}
+
+/** SO/SI 桁に表示用の印が載っているか（載っていなければ空白＝ふつうの 1 桁） */
+function isShiftMarked(c: Cell): boolean {
+  return (c.kind === "so" || c.kind === "si") && !c.nonDisplay && c.char !== "" && c.char !== " ";
 }
 
 /**
@@ -449,6 +459,10 @@ font-size:15px;line-height:1.25;white-space:pre}
    行送り 18.75px に対し塗り 25px）。必要な量はフォントごとに違い CSS から読めないため、
    箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
 .a-r{background:var(--cell);color:var(--crt)}
+/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift と同じ）。
+   color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る */
+.a-so{color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
+.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}

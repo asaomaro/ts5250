@@ -348,6 +348,34 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
    * 枠の矩形は 行 row〜row+height+1 / 桁 col+1〜col+width+4。宣言位置のまま置くと
    * 左へ 1 桁ずれる（web-ui の `windowStyle` は既に +1 で描いている）。
    */
+  /**
+   * **SO/SI マークは淡色にする。** 呼び出し側（web-ui の画面 HTML 保存）は SO/SI 桁に
+   * `{ }` を入れて渡す。ホストのデータにある本物の `{ }` と同じ字なので、色を分けないと
+   * **どちらが制御桁か分からない**（画面と同じ問題。web-ui は `.a-shift` で分けている）。
+   */
+  it("印の載った SO/SI 桁だけ淡色クラスを付ける（本物の { } は素のまま）", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("{", { kind: "so" });
+      c[0]![1] = cell("取", { kind: "dbcs-lead" });
+      c[0]![2] = cell("", { kind: "dbcs-tail" });
+      c[0]![3] = cell("}", { kind: "si" });
+      c[0]![4] = cell("{"); // ホストのデータにある本物の {
+    });
+    const html = renderScreenHtml(snap);
+    expect(html).toContain('<span class="c-green a-so">{</span>');
+    expect(html).toContain('<span class="c-green a-so">}</span>');
+    // 淡色にするのは 2 桁だけ（本物の { は素のランのまま）
+    expect(html.match(/class="c-green a-so"/g)).toHaveLength(2);
+  });
+
+  it("印の無い SO/SI 桁はランを割らない（span を増やさない）", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell(" ", { kind: "so" });
+      c[0]![1] = cell(" ", { kind: "si" });
+    });
+    expect(renderScreenHtml(snap)).not.toContain('a-so"');
+  });
+
   it("窓の枠は col+1 から描く（web-ui の windowStyle と同じ矩形）", () => {
     const snap = snapWith();
     snap.gui = {

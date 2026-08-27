@@ -87,3 +87,131 @@ describe("SO/SI マーク表示（DBCS 宣言の無い欄）", () => {
     expect(inputValueOf(true)).toHaveLength(8);
   });
 });
+
+
+/**
+ * **SO/SI マークは淡色で描く**（`a-shift`）。
+ *
+ * 表示は ACS と同じ `{ }` だが、ホストのデータに本物の `{ }` が混ざると**どちらが制御桁か
+ * 見分けが付かない**（利用者の指摘。SEU でソースを見ると実際に混ざる）。色だけを分けるので、
+ * **桁・文字・コピー・送信値は 1 つも変えない**——ここが崩れると桁ずれになる。
+ */
+
+/** 24x80 の空画面 */
+function blankCells(): Cell[][] {
+  const cells: Cell[][] = [];
+  for (let r = 0; r < 24; r++) {
+    const row: Cell[] = [];
+    for (let c = 0; c < 80; c++) row.push(cell(" "));
+    cells.push(row);
+  }
+  return cells;
+}
+
+function snapOf(cells: Cell[][], fields: Field[] = []): ScreenSnapshot {
+  return {
+    sessionId: "s",
+    rows: 24,
+    cols: 80,
+    cursor: { row: 1, col: 1 },
+    keyboardLocked: false,
+    cells,
+    fields
+  };
+}
+
+/** 行 1 に「SO 取 SI」＋本物の `{}` を置く（欄の外＝素のテキストラン） */
+function snapshotWithTextMarks(): ScreenSnapshot {
+  const cells = blankCells();
+  const row = cells[0]!;
+  row[0] = cell(" ", { kind: "so" });
+  row[1] = cell("取", { kind: "dbcs-lead" });
+  row[2] = cell("", { kind: "dbcs-tail" });
+  row[3] = cell(" ", { kind: "si" });
+  row[4] = cell("{");
+  row[5] = cell("}");
+  return snapOf(cells);
+}
+
+describe("SO/SI マークの淡色表示", () => {
+  it("SO/SI だけが淡色になり、本物の { } はそのまま", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapshotWithTextMarks(), edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    // 淡色なのは SO/SI の 2 桁だけ（本物の { } は素のテキストのまま）
+    expect(w.findAll("span.a-shift").map((s) => s.text())).toEqual(["{", "}"]);
+    // 文字そのものは変わらない（マーク 2 つ＋本物 2 つ＝ブレースは 4 つ）
+    const line = w.findAll(".grid-row")[0]!.element.textContent ?? "";
+    expect(line.startsWith("{取}{}")).toBe(true);
+    w.unmount();
+  });
+
+  it("マーク表示 OFF なら淡色の桁は無い（従来どおり空白）", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapshotWithTextMarks(), edits: new Map(), focused: false, showShiftMarks: false }
+    });
+    expect(w.findAll("span.a-shift")).toHaveLength(0);
+    const line = w.findAll(".grid-row")[0]!.element.textContent ?? "";
+    expect(line.startsWith(" 取 {}")).toBe(true);
+    w.unmount();
+  });
+
+  it("**印を素で出さない**（列ビューに入れる SO/SI の印は画面に漏れない）", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapshotWithTextMarks(), edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    const text = w.element.textContent ?? "";
+    expect(text.includes("\u000e") || text.includes("\u000f")).toBe(false);
+    w.unmount();
+  });
+
+  it("凡例ボタンは割れず、中の SO/SI だけ淡色になる", () => {
+    const cells = blankCells();
+    const row = cells[0]!;
+    const head = [..."F3="];
+    head.forEach((ch, i) => (row[i] = cell(ch)));
+    row[3] = cell(" ", { kind: "so" });
+    row[4] = cell("終", { kind: "dbcs-lead" });
+    row[5] = cell("", { kind: "dbcs-tail" });
+    row[6] = cell("了", { kind: "dbcs-lead" });
+    row[7] = cell("", { kind: "dbcs-tail" });
+    row[8] = cell(" ", { kind: "si" });
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapOf(cells), edits: new Map(), focused: false, showShiftMarks: true, buttons: "box" }
+    });
+    const btns = w.findAll("button.fkey-btn");
+    expect(btns.map((b) => b.text())).toEqual(["F3={終了}"]);
+    expect(btns[0]!.findAll("span.a-shift").map((s) => s.text())).toEqual(["{", "}"]);
+    w.unmount();
+  });
+});
+
+describe("SO/SI マークの淡色表示（入力欄）", () => {
+  /** `<input>` は 1 要素 1 色なので、桁ごとの色はオーバーレイで描く */
+  function mountField(showShiftMarks: boolean) {
+    const snapshot = snapshotWithShiftCells();
+    snapshot.fields = [FIELD];
+    return mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused: true, showShiftMarks }
+    });
+  }
+
+  it("欄の中の SO/SI も淡色になる（入力欄の値は従来どおり）", () => {
+    const w = mountField(true);
+    const overlay = w.find(".input-overlay");
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.findAll("span.a-shift").map((s) => s.text())).toEqual(["{", "}"]);
+    // オーバーレイの文字列は入力欄の値と 1 文字も違わない（違うと桁がずれて見える）
+    const value = (w.find("input.grid-input").element as HTMLInputElement).value;
+    expect(overlay.element.textContent).toBe(value);
+    expect(value.startsWith("{取引}")).toBe(true);
+    w.unmount();
+  });
+
+  it("マーク表示 OFF ならオーバーレイを重ねない（従来の描画のまま）", () => {
+    const w = mountField(false);
+    expect(w.find(".input-overlay").exists()).toBe(false);
+    expect(w.findAll("span.a-shift")).toHaveLength(0);
+    w.unmount();
+  });
+});
