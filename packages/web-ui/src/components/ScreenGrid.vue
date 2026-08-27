@@ -678,6 +678,84 @@ function displayChar(c: Cell): string {
   return c.char === "" ? " " : displayText(c.char);
 }
 
+/**
+ * **SO/SI マークは本物の `{ }` と見分けが付くよう淡く描く**（利用者の指摘）。
+ *
+ * 表示そのものは ACS と同じ `{ }` だが、ホストのデータに本物の `{ }` が混ざると
+ * **どちらが制御桁なのか分からない**（SEU でソースを見ると実際に混ざる）。色を分けるには
+ * 「その桁が SO/SI 由来か」を**描く直前まで運ぶ**必要があるので、列ビューには印を入れておき、
+ * 描くときだけ淡色の `{ }` に開く。
+ *
+ * 印に ASCII の SO(0x0E)/SI(0x0F) を使うのは、**桁の数えで 1 桁になる**から
+ * （私用領域は `isFullWidth` が全角と見なして桁がずれる。`SHIFT_MARK` と同じ理由）。
+ * **値そのもの——`<input>` の `:value`・クリップボード・送信データ——には出さない。**
+ */
+const SO_VIEW = "\u000e";
+const SI_VIEW = "\u000f";
+
+/** SO/SI 桁に入れる文字を決める（undefined を返せば `displayChar` の見た目に任せる）。
+ *  用途で欲しいものが違うので関数で受ける——コピーは「制御桁の印」（非表示桁にも印が要る）、
+ *  淡色描画は「開く前の印」（非表示桁は ACS 同様なにも描かない）。 */
+type ShiftMarkOf = (cell: Cell) => string | undefined;
+
+/** SO/SI マークを**描く**桁か（マーク表示 ON かつ非表示桁でない） */
+function isShiftMarkCell(c: Cell): boolean {
+  return props.showShiftMarks === true && !c.nonDisplay && (c.kind === "so" || c.kind === "si");
+}
+
+/** 淡色描画用の印（`displayChar` が `{ }` を出す桁だけを印にする） */
+const viewMarkOf: ShiftMarkOf = (c) =>
+  isShiftMarkCell(c) ? (c.kind === "so" ? SO_VIEW : SI_VIEW) : undefined;
+
+/**
+ * 入力欄の列ビューを組むときの SO/SI 桁の扱い。**渡さなければ見た目そのまま**（`{ }` か空白）で、
+ * 渡すと印入りの版になる。`ofCell` はセル由来の列ビュー用、`so`/`si` は純論理値から
+ * 組み直す列ビュー用（`dbcsViewLayout`）。
+ *
+ * **印入りの版は `:value` と同じ関数で組む**（`sliceValue` に渡すだけ）。別々に組むと
+ * 1 桁ずれた瞬間にオーバーレイと入力欄の文字が食い違い、**桁ずれとして目に見える**。
+ */
+interface ShiftMarkStyle {
+  ofCell: ShiftMarkOf;
+  so: string;
+  si: string;
+}
+const VIEW_MARKS: ShiftMarkStyle = { ofCell: viewMarkOf, so: SO_VIEW, si: SI_VIEW };
+
+/** text ランに積む 1 文字。SO/SI マークは印で積む（描画時に淡色の `{ }` へ開く）。
+ *  **印も 1 文字・1 桁**なので、凡例 span の index も桁も `displayChar` のときと変わらない。 */
+function runChar(c: Cell): string {
+  return viewMarkOf(c) ?? displayChar(c);
+}
+
+/** 印を含むか。含まなければ分割せずそのまま描ける（＝素のテキストノードのまま・DOM を増やさない） */
+function hasShiftView(s: string): boolean {
+  return s.includes(SO_VIEW) || s.includes(SI_VIEW);
+}
+
+/** 印 1 文字を表示文字へ開く（印でなければそのまま） */
+function openShiftChar(ch: string): string {
+  return ch === SO_VIEW ? "{" : ch === SI_VIEW ? "}" : ch;
+}
+
+/** 印を開いた文字列（色を分けない用途＝リンクの中。**印を素で出さない**ための保険） */
+function openShiftMarks(s: string): string {
+  return hasShiftView(s) ? [...s].map(openShiftChar).join("") : s;
+}
+
+/** 印の位置で分割し、マークだけ淡色（`shift`）に分ける。印が無ければ 1 要素で返す。 */
+function markRuns(s: string): { text: string; shift: boolean }[] {
+  if (!hasShiftView(s)) return [{ text: s, shift: false }];
+  const out: { text: string; shift: boolean }[] = [];
+  for (const ch of s) {
+    const shift = ch === SO_VIEW || ch === SI_VIEW;
+    const last = out[out.length - 1];
+    if (last && last.shift === shift) last.text += openShiftChar(ch);
+    else out.push({ text: openShiftChar(ch), shift });
+  }
+  return out;
+}
+
 // リンク化: 既定 ON（withDefaults）。再解釈表示中は文字が別解釈になるため無効化（誤検出・桁崩れ防止）
 const linkEnabled = computed(() => props.linkify && props.sbcsView === "host");
 
@@ -686,12 +764,38 @@ function linkParts(text: string): LinkPart[] {
   return linkEnabled.value ? splitLinks(text) : [{ text }];
 }
 
+/**
+ * 素のテキスト部分。リンクに割ったうえで、**SO/SI マークだけを別の部分に切り出す**
+ * （淡色で描くため。`markRuns` と同じ分け方）。
+ *
+ * **印が無ければ切らない**——素のテキストは 1 つのテキストノードのままにしておきたい
+ * （桁ぶんの span を並べると DOM が増える。ラン化して DOM を減らす方針は `rows` の注記参照）。
+ * リンクの中は色を 1 つしか持てないので、印は開くだけ（URL に全角が混ざることはまず無い）。
+ */
+function textParts(text: string): DecoPart[] {
+  const out: DecoPart[] = [];
+  for (const p of linkParts(text)) {
+    if (p.href !== undefined) {
+      out.push({ ...p, text: openShiftMarks(p.text) });
+      continue;
+    }
+    if (!hasShiftView(p.text)) {
+      out.push(p);
+      continue;
+    }
+    for (const r of markRuns(p.text)) out.push(r.shift ? { text: r.text, shift: true } : { text: r.text });
+  }
+  return out;
+}
+
 /** 描画部品。href=リンク / aid=機能キーのボタン / どちらも無ければ素のテキスト */
 interface DecoPart extends LinkPart {
   aid?: AidKey;
   /** ボタンの画面上の位置（Tab の移動先計算に使う） */
   row?: number;
   col?: number;
+  /** SO/SI マーク桁（淡色で描く）。素のテキスト部分だけが持つ */
+  shift?: boolean;
 }
 
 /**
@@ -701,16 +805,17 @@ interface DecoPart extends LinkPart {
  */
 function decoParts(seg: Segment): DecoPart[] {
   const spans = seg.spans;
-  if (!spans || spans.length === 0) return linkParts(seg.text);
+  if (!spans || spans.length === 0) return textParts(seg.text);
   const out: DecoPart[] = [];
   let pos = 0;
   for (const s of spans) {
     if (s.from < pos) continue; // 念のため（span 同士は重ならない）
-    if (s.from > pos) out.push(...linkParts(seg.text.slice(pos, s.from)));
+    if (s.from > pos) out.push(...textParts(seg.text.slice(pos, s.from)));
+    // 凡例ボタンは 1 要素で切らない（切るとボタンが割れる）。中の印はテンプレート側で開く
     out.push({ text: seg.text.slice(s.from, s.to), aid: s.key, row: s.row, col: s.col });
     pos = s.to;
   }
-  if (pos < seg.text.length) out.push(...linkParts(seg.text.slice(pos)));
+  if (pos < seg.text.length) out.push(...textParts(seg.text.slice(pos)));
   return out;
 }
 
@@ -829,8 +934,9 @@ function displayCols(ch: string): number {
  * 1 桁右にずれる。
  */
 function withShiftCodes(text: string): string {
-  const so = props.showShiftMarks ? "{" : " ";
-  const si = props.showShiftMarks ? "}" : " ";
+  // 画面の SO/SI 桁と同じく**印**で積む（描画時に淡色の `{ }` へ開く。`SO_VIEW` 参照）
+  const so = props.showShiftMarks ? SO_VIEW : " ";
+  const si = props.showShiftMarks ? SI_VIEW : " ";
   let out = "";
   let inDbcs = false;
   for (const ch of text) {
@@ -869,6 +975,24 @@ function classAtColumn(
 }
 
 /**
+ * この入力欄を**オーバーレイで描く**か。`<input>` は 1 要素につき 1 色しか出せないので、
+ * **桁ごとに色が要る欄**だけ色付き span を重ねて描く（休止時のみ。`.input-overlay` の注記参照）。
+ *
+ * 要るのは 2 つ:
+ * - **埋め込み属性**（欄途中の色替え。SEU のソース）
+ * - **SO/SI マーク**（本物の `{ }` と見分けが付くよう淡色にする）
+ *
+ * マークの有無は**そのとき表示している値**から見る（セルからではなく）。空の DBCS 欄に
+ * 全角を打つと、セルに SO/SI が無くても表示には `{ }` が出るため——`rows`（snapshot 由来）で
+ * 決めると、その欄だけマークが濃いまま取り残される。
+ */
+function overlaid(seg: Segment): boolean {
+  if (seg.colorBands) return true;
+  if (!props.showShiftMarks) return false;
+  return hasShiftView(sliceValue(seg.field!, seg.slice ?? 0, VIEW_MARKS));
+}
+
+/**
  * オーバーレイに出す色付きラン。色の出どころは**欄によって 2 通り**ある。
  *
  * **(A) 値にセンチネルがある欄（SBCS）**——値の中のセンチネル（＝埋め込み属性）で切り替える。
@@ -890,7 +1014,8 @@ function classAtColumn(
 function overlayRuns(seg: Segment): { text: string; cls: string }[] {
   // **末尾の詰めは「文字数」ではなく「桁」で数える。** 全角 1 文字は 2 桁を占めるので、
   // padEnd(文字数) だと全角のぶんだけ余計に埋まり、入力欄の表示値より長くなる（桁ずれ）。
-  const raw = sliceValue(seg.field!, seg.slice ?? 0);
+  // SO/SI マークを淡色で描くため、印入りの列ビューで組む（`VIEW_MARKS`）
+  const raw = sliceValue(seg.field!, seg.slice ?? 0, props.showShiftMarks ? VIEW_MARKS : undefined);
   let rawCols = 0;
   for (const ch of raw) rawCols += displayCols(ch);
   const value = raw + " ".repeat(Math.max(0, (seg.width ?? 0) - rawCols));
@@ -899,7 +1024,9 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
   let text = "";
   const push = (): void => {
     if (text.length > 0) {
-      runs.push({ text, cls });
+      // 表示できないバイト（U+FFFD）は入力欄（displayText）と同じく空白にする。
+      // 生の U+FFFD は多くのフォントで全角になり、オーバーレイだけ桁がずれる
+      runs.push({ text: displayText(text), cls });
       text = "";
     }
   };
@@ -909,12 +1036,15 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
     const bands = seg.colorBands ?? [];
     let col = 0;
     for (const ch of value) {
-      const at = classAtColumn(bands, col) ?? seg.cls;
+      const shift = ch === SO_VIEW || ch === SI_VIEW;
+      const color = classAtColumn(bands, col) ?? seg.cls;
+      // SO/SI マークは桁の色のまま淡くする（`a-shift`）＝本物の `{ }` と見分けが付く
+      const at = shift ? `${color} a-shift` : color;
       if (at !== cls) {
         push();
         cls = at;
       }
-      text += isRawSentinel(ch) ? " " : ch;
+      text += shift ? openShiftChar(ch) : isRawSentinel(ch) ? " " : ch;
       col += displayCols(ch);
     }
     push();
@@ -927,7 +1057,8 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
       text += " "; // 属性桁は新色の空白 1 桁
     } else {
       // 表示できないバイトのセンチネルは色を変えない。空白 1 桁で桁だけ保つ
-      text += isRawSentinel(ch) ? " " : ch;
+      // （この経路の値に SO/SI マークは入らないが、印を素で出さないよう開いておく）
+      text += isRawSentinel(ch) ? " " : openShiftChar(ch);
     }
   }
   push();
@@ -1397,7 +1528,7 @@ const rows = computed<Segment[][]>(() => {
           continue;
         }
         if (cellClass(cellHere) !== cls) break;
-        const shown = displayChar(cellHere);
+        const shown = runChar(cellHere);
         // 対を失った全角セルは 1 桁に切り詰める。孤児 tail は文字を持たないので空白 1 桁。
         // **確実に全角のグリフでも必ず箱に入れる**——素のランへ積むとフォントが 2 桁で描き、
         // それがそのまま桁ずれになる。
@@ -1496,7 +1627,7 @@ function logicalFromCells(f: Field): string {
  *  SO/SI は実位置のまま（空 {} や不整合 { だけ・} だけ も保持）、SBCS は displayChar で
  *  表示コード再解釈、全角は 1 文字（2 桁）で採用する。span（displayChar）と完全に一致する。
  *  純論理値からの再構成（dbcsViewLayout）と違い SO/SI を落とさない。 */
-function restViewFromCells(f: Field, shiftMark?: string): string {
+function restViewFromCells(f: Field, markOf?: ShiftMarkOf): string {
   let v = "";
   for (const sl of slicesOf(f)) {
     const row = props.snapshot.cells[sl.row - 1];
@@ -1511,10 +1642,14 @@ function restViewFromCells(f: Field, shiftMark?: string): string {
         continue;
       }
       if (cell.kind === "dbcs-tail") continue; // lead が 2 桁ぶんを担う
-      // shiftMark 指定時は SO/SI をその印にする（コピー経路が制御桁を識別するため。SHIFT_MARK 参照）
-      if (shiftMark !== undefined && (cell.kind === "so" || cell.kind === "si")) {
-        v += shiftMark;
-        continue;
+      // markOf 指定時は SO/SI をその印にする（コピー経路は制御桁の識別に、淡色描画は
+      // 開く前の印に使う。undefined が返れば displayChar の見た目に任せる。ShiftMarkOf 参照）
+      if (markOf && (cell.kind === "so" || cell.kind === "si")) {
+        const mark = markOf(cell);
+        if (mark !== undefined) {
+          v += mark;
+          continue;
+        }
       }
       // displayChar が SO/SI マーク・表示コード再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
       v += displayChar(cell);
@@ -1560,14 +1695,14 @@ function maskSafe(f: Field, value: string): string {
 
 /** スライス（行ごとの input）に表示する値。論理値の該当区間を切り出しスライス幅へ揃える。
  *  SBCS は 1 桁=1 文字なので単純な切り出し。DBCS は全角が 2 桁を占めるため「桁」で割る。 */
-function sliceValue(f: Field, sliceIdx: number): string {
+function sliceValue(f: Field, sliceIdx: number, marks?: ShiftMarkStyle): string {
   const s = slicesOf(f)[sliceIdx];
   if (!s) return "";
   // 休止表示なので props 由来のレイアウトを使う（編集モデルを見ると blur で値が戻らない）
-  if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f), s);
+  if (isDbcsEdit(f)) return dbcsSliceText(dbcsRestLayout(f, marks), s);
   // 表示コード再解釈中の休止 SBCS 欄は、span（displayChar）と同じくセルの生バイトから読み直す。
   // これをしないと span だけ再解釈・input は素のままで食い違う（表示コード切替が input に効かない）。
-  if (usesShiftCells(f) || usesRecodedCells(f)) return shiftCellsView(s);
+  if (usesShiftCells(f) || usesRecodedCells(f)) return shiftCellsView(s, marks?.ofCell);
   if (s.offset === 0 && s.width >= visLen(f)) return displayValue(f); // 単一スライス
   return displayValue(f).slice(s.offset, s.offset + s.width).padEnd(s.width, " ");
 }
@@ -1619,7 +1754,7 @@ function usesRecodedCells(f: Field): boolean {
 }
 
 /** 欄のセルからそのまま列ビューを作る（SO/SI は表示マーク・表示コード再解釈・全角は 1 文字で 2 桁ぶん）。 */
-function shiftCellsView(s: FieldSlice): string {
+function shiftCellsView(s: FieldSlice, markOf?: ShiftMarkOf): string {
   const row = props.snapshot.cells[s.row - 1];
   if (!row) return "".padEnd(s.width, " ");
   let out = "";
@@ -1630,6 +1765,11 @@ function shiftCellsView(s: FieldSlice): string {
       continue;
     }
     if (cell.kind === "dbcs-tail") continue; // lead 側が 2 桁ぶんを担う
+    const mark = cell.kind === "so" || cell.kind === "si" ? markOf?.(cell) : undefined;
+    if (mark !== undefined) {
+      out += mark; // 淡色描画用の印（restViewFromCells と同じ扱い）
+      continue;
+    }
     // displayChar が SO/SI マーク・カナ再解釈・nonDisplay 抑止をまとめて扱う（span と一致）
     out += displayChar(cell);
   }
@@ -1669,16 +1809,20 @@ function displayValue(f: Field): string {
 
 /** 休止時（props 由来）の列ビューのレイアウト。編集モデルは見ない。
  *  :value バインド・blur の復帰・矩形コピーはこちら、編集中の同期は dbcsLayoutOf を使う。 */
-function dbcsRestLayout(f: Field): DbcsViewLayout {
+function dbcsRestLayout(f: Field, marks?: ShiftMarkStyle): DbcsViewLayout {
   // セルから忠実に列ビューを組む条件:
   //  - 休止・未編集: SO/SI の実位置・空・不整合を保持（#144）。
   //  - **フォーカス中でも recodeViewActive（未打鍵の再解釈表示欄）**: フォーカスしても再解釈を維持する。
   // 編集済み・打鍵後の欄は送信値（logicalValue）由来の再構成列ビューを使う（従来どおり・素の値）。
   const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
   if (resting || recodeViewActive(f)) {
-    return columnViewLayout(restViewFromCells(f));
+    return columnViewLayout(restViewFromCells(f, marks?.ofCell));
   }
-  return dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), soMark(), siMark());
+  return dbcsViewLayout(
+    padDbcs(f, [...logicalValue(f)]).join(""),
+    marks?.so ?? soMark(),
+    marks?.si ?? siMark()
+  );
 }
 
 // ---- フィールド編集（native input 制御方式: keydown を制御して 5250 上書きモード等を実現） ----
@@ -3283,7 +3427,7 @@ function copyViewOf(f: Field): string {
   if (f.dbcsType) {
     const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
     const view = resting || recodeViewActive(f)
-      ? restViewFromCells(f, SHIFT_MARK)
+      ? restViewFromCells(f, () => SHIFT_MARK)
       : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), SHIFT_MARK, SHIFT_MARK).view;
     return displayText(view); // 外字は残す（センチネルは DBCS 欄の値には入らない）
   }
@@ -3578,7 +3722,12 @@ onBeforeUnmount(() => {
       操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。
       `pointer-events: none` で背面のセルの操作を邪魔しない。
     -->
-    <div v-if="message" class="opmsg" role="status">{{ shiftedMessage }}</div>
+    <div v-if="message" class="opmsg" role="status"><template
+      v-for="(m, k) in markRuns(shiftedMessage)"
+      :key="k"
+    ><span v-if="m.shift" class="a-shift">{{ m.text }}</span><template
+      v-else
+    >{{ m.text }}</template></template></div>
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <!-- 矩形（ブロック）選択のハイライト -->
     <div v-if="rectSel" class="rect-sel" :style="rectStyle" aria-hidden="true"></div>
@@ -3777,11 +3926,11 @@ onBeforeUnmount(() => {
         <span
           v-if="seg.kind === 'input'"
           class="input-cell"
-          :class="{ overlaid: !!seg.colorBands }"
+          :class="{ overlaid: overlaid(seg) }"
         >
           <input
             class="grid-input"
-            :class="[seg.cls, { 'has-overlay': !!seg.colorBands }]"
+            :class="[seg.cls, { 'has-overlay': overlaid(seg) }]"
             :style="{ width: (seg.width ?? seg.field!.length) + 'ch' }"
             :value="displayText(stripSentinels(sliceValue(seg.field!, seg.slice ?? 0)))"
             :readonly="seg.field!.protected"
@@ -3803,7 +3952,7 @@ onBeforeUnmount(() => {
             @compositionstart="onCompositionStart(seg.field!, $event as CompositionEvent)"
             @compositionend="onCompositionEnd(seg.field!, $event as CompositionEvent)"
           />
-          <span v-if="seg.colorBands" class="input-overlay" aria-hidden="true"><span
+          <span v-if="overlaid(seg)" class="input-overlay" aria-hidden="true"><span
             v-for="(run, ri) in overlayRuns(seg)"
             :key="ri"
             class="grid-span"
@@ -3842,7 +3991,15 @@ onBeforeUnmount(() => {
             :title="`${p.aid} を送る`"
             @mousedown.prevent
             @click.stop="onFkeyClick(p.aid)"
-          >{{ p.text }}</button><template v-else>{{ p.text }}</template></template></span>
+          ><template
+            v-for="(m, k) in markRuns(p.text)"
+            :key="k"
+          ><span v-if="m.shift" class="a-shift">{{ m.text }}</span><template
+            v-else
+          >{{ m.text }}</template></template></button><span
+            v-else-if="p.shift"
+            class="a-shift"
+          >{{ p.text }}</span><template v-else>{{ p.text }}</template></template></span>
       </template>
     </div>
   </div>

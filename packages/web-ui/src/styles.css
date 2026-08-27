@@ -219,6 +219,20 @@ body {
    （実測: Noto Sans Mono CJK JP で行送り 18.75px に対し塗り 25px）。 */
 .a-reverse { --cell-bg: var(--cell); background: var(--cell-bg); color: var(--crt); }
 .a-reverse .grid-link { color: var(--crt); }
+/*
+ * **SO/SI マーク（`{ }`）は淡く描く。** ホストのデータに本物の `{ }` が混ざると、
+ * 同じ色では**どちらが制御桁か見分けが付かない**（利用者の指摘。SEU のソースで実際に混ざる）。
+ *
+ * 色は「桁の色（--cell）を地色（--crt）へ寄せて」作る。`color` の値の中の `currentColor` は
+ * **親から継いだ色**に解決されるため使えない——属性色（.c-*）は同じ要素／親の .grid-span に
+ * 載っているので、--cell を見るのが唯一ぶれない足場になる。
+ * 詳細度は属性色と同じ (0,1,0) なので、**必ず .c-* より後ろに置く**（前だと色が勝てない）。
+ */
+.a-shift { color: color-mix(in srgb, var(--cell, currentColor) 30%, var(--crt)); }
+/* 反転桁は前景と背景が入れ替わるため、薄める向きも逆にする（地色を桁の色へ寄せる）。
+   同一要素（オーバーレイのラン）と親子（素のラン内のマーク）の両方が起こる。 */
+.a-reverse .a-shift,
+.a-reverse.a-shift { color: color-mix(in srgb, var(--crt) 30%, var(--cell)); }
 /* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
    文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */
 .a-colsep { border-left: 1px solid currentColor; }
