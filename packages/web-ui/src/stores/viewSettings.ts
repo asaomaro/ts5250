@@ -11,6 +11,21 @@ import type { ScreenFontId } from "../composables/screenFonts.js";
 export type ControlStyle =
   | "plain" | "underline" | "filled" | "box" | "boxRound" | "inset" | "dashed" | "glow";
 /**
+ * **SO/SI マークの見せ方**（画面設定「SO/SI 表示」。ACS の Ctrl+F 相当）。
+ *
+ * 出す／出さないの 2 値だった頃の名残で `sosi` という名前だが、**濃さを選べる 3 値**にした。
+ * `dim`（薄目）は本物の `{ }` と見分けが付くよう淡く描く（#381）。ただし淡いと見えにくい環境
+ * （明るい部屋・低コントラストの配色）があるため、もう少し濃い `strong`（濃目）も選べる。
+ *
+ * **濃目もふつうの文字より薄い。** 桁の色そのままにすると本物の `{ }` と区別が付かなくなり、
+ * マークを色分けした意味が消える——「読みやすさ」と「見分け」の両立が要るので、
+ * 濃目は**薄目とふつうの文字の中間**に置く（実際の配合は `.a-shift` の CSS）。
+ */
+export type SosiView = "none" | ShiftMarkTone;
+/** 画面グリッドに渡す**実効の濃さ**（出すかどうかは別の prop で表す。`SbcsView` と同じ考え方） */
+export type ShiftMarkTone = "dim" | "strong";
+
+/**
  * SBCS の表示コード（ACS の表示コード切替）。
  *
  * **切り替えとは「もう一方の表で読み直すこと」**——CCSID 930 の SBCS 部（CP290）と
@@ -59,7 +74,8 @@ export type DtPickerStyle = "none" | "panel" | "outline" | "crt";
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
 export interface ViewSettings {
-  sosi: boolean;
+  /** SO/SI マークの見せ方（非表示／薄目／濃目） */
+  sosi: SosiView;
   /** SBCS の表示コード（ACS の表示コード切替）。既定 auto＝ホストの表のまま */
   kana: KanaView;
   linkify: boolean;
@@ -110,7 +126,16 @@ export interface ViewItemDef {
   expandable?: boolean;
 }
 export const VIEW_ITEMS: ViewItemDef[] = [
-  { key: "sosi", label: "SO/SI 表示", opts: [{ value: false, label: "非表示" }, { value: true, label: "表示" }] },
+  {
+    key: "sosi",
+    label: "SO/SI 表示",
+    // 順送り（ctrl+F3）は 非表示 → 薄目 → 濃目 の順に回る。既定を先頭に置くのは他の項目と同じ。
+    opts: [
+      { value: "none", label: "非表示" },
+      { value: "dim", label: "薄目" },
+      { value: "strong", label: "濃目" },
+    ],
+  },
   {
     key: "kana",
     label: "表示コード",
@@ -219,7 +244,7 @@ export function viewItem(key: string): ViewItemDef | undefined {
 // 単層の保存キー（旧二層の as400.view.defaults とは分ける＝新しい初期値をクリーンに適用）。
 const STORAGE_KEY = "as400.view.settings";
 const FALLBACK: ViewSettings = {
-  sosi: false, // 非表示
+  sosi: "none", // 非表示
   kana: "auto", // ホストの表のまま
   linkify: true,
   optHints: "none", // 推測を含むので既定は出さない
@@ -268,6 +293,15 @@ function migrate(v: ViewSettings): ViewSettings {
   if (typeof (out.kana as unknown) === "boolean") {
     out.kana = (out.kana as unknown as boolean) ? "kana" : "auto";
   }
+  // 旧 `sosi: boolean`（2 値）を 3 値へ。**利用者から見た見え方は変えない**——
+  // 旧 true は #381 以降「淡色で出す」挙動なので `dim`、旧 false はそのまま `none`。
+  if (typeof (out.sosi as unknown) === "boolean") {
+    out.sosi = (out.sosi as unknown as boolean) ? "dim" : "none";
+  }
+  // 濃目を「桁の色そのまま」で作っていた頃の値。**読めない値は黙って薄目に倒れる**ので
+  // （`view.sosi === "strong"` に一致せず既定の `dim` になる）、濃目にしたつもりが
+  // 薄目のまま——という食い違いになる。保存値を現行の名前へ寄せて断ち切る。
+  if ((out.sosi as string) === "full") out.sosi = "strong";
   if ((out.controls as string) === "rich") out.controls = "box";
   if ((out.buttons as string) === "rich") out.buttons = "box";
   // 廃止した `promptHint`（F4 の導線）。**保存値から落とす**——残しても読む側が

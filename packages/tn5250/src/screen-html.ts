@@ -55,6 +55,24 @@ export interface ScreenHtmlMeta {
   note?: string;
 }
 
+/**
+ * **描き方の指定**（メタ情報＝見出しに載る事実とは別物なので分けて受ける）。
+ *
+ * 呼び出し側が SO/SI 桁に `{ }` を載せてくるとき（web-ui の画面 HTML 保存）だけ効く。
+ */
+export interface ScreenHtmlStyle {
+  /**
+   * SO/SI マークの**濃さ**（既定 `dim`＝薄目）。マークはホストのデータにある本物の `{ }` と
+   * 見分けが付くよう淡く描くが、淡すぎて読み取りにくい環境もあるので `strong`＝濃目も選べる
+   * （web-ui の画面設定「SO/SI 表示」に対応）。**どちらもふつうの文字より薄い**
+   * ——桁の色そのままにすると本物の `{ }` と区別が付かず、色を分けた意味が消えるため。
+   */
+  shiftMarkTone?: ShiftMarkTone;
+}
+
+/** SO/SI マークの濃さ。薄目（既定）／濃目（薄目とふつうの文字の中間） */
+export type ShiftMarkTone = "dim" | "strong";
+
 /** 履歴 1 コマ。画面と、その画面を出した操作 */
 export interface ScreenHistoryEntry {
   screen: ScreenSnapshot;
@@ -99,7 +117,7 @@ function hasRealColsep(color: ScreenColor, columnSeparator: boolean): boolean {
   return columnSeparator && color !== "yellow" && color !== "turquoise";
 }
 
-function cellClass(c: Cell): string {
+function cellClass(c: Cell, tone: ShiftMarkTone): string {
   let cls = `c-${c.color}`;
   if (c.underline) cls += " a-u";
   if (c.reverse) cls += " a-r";
@@ -109,7 +127,8 @@ function cellClass(c: Cell): string {
   // 呼び出し側が `{ }` を入れて渡すことがあり（web-ui の SO/SI マーク表示）、ホストのデータに
   // ある本物の `{ }` と同じ字なので、色を分けないと**どちらが制御桁か分からない**。
   // 印を入れていない（char は空白）ときは何も足さない——ランを割って span を増やさないため。
-  if (isShiftMarked(c)) cls += " a-so";
+  // 濃さ（薄目／濃目）は修飾子で足す。どちらもふつうの文字より薄い（`.a-so` の CSS）。
+  if (isShiftMarked(c)) cls += tone === "strong" ? " a-so a-so-strong" : " a-so";
   return cls;
 }
 
@@ -146,7 +165,7 @@ const isTail = (c: Cell | undefined): boolean => c?.kind === "dbcs-tail";
  * `h`（1 桁の箱）は**対を失った全角**のため。ホストが桁末尾で全角を切ると lead だけ、
  * あるいは tail だけが残る。ACS はこれを 1 桁ぶんの分断された字形で見せるので合わせる。
  */
-function renderRow(row: readonly Cell[]): string {
+function renderRow(row: readonly Cell[], tone: ShiftMarkTone): string {
   let out = "";
   let runCls = "";
   let runText = "";
@@ -157,7 +176,7 @@ function renderRow(row: readonly Cell[]): string {
   };
   for (let i = 0; i < row.length; i++) {
     const c = row[i]!;
-    const cls = cellClass(c);
+    const cls = cellClass(c, tone);
     // lead の次が tail＝正常な全角。lead 側で 2 桁ぶんを描き、tail 桁は読み飛ばす
     if (isLead(c) && isTail(row[i + 1])) {
       flush();
@@ -360,8 +379,9 @@ function guiHtml(gui: GuiConstructs | undefined): string {
  * **1 画面ぶんのマークアップ。単票も履歴もここを通る。**
  * 分けると 1 枚で見たときと履歴で見たときの絵が食い違い、証拠として使えなくなる。
  */
-function screenFigure(snap: ScreenSnapshot, caption: string): string {
-  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r)}</div>`).join("");
+function screenFigure(snap: ScreenSnapshot, caption: string, style: ScreenHtmlStyle): string {
+  const tone = style.shiftMarkTone ?? "dim";
+  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r, tone)}</div>`).join("");
   const oia = [
     `<span>行/列 <b>${String(snap.cursor.row).padStart(2, "0")}/${String(snap.cursor.col).padStart(3, "0")}</b></span>`,
     `<span>画面 <b>${snap.rows}x${snap.cols}</b></span>`,
@@ -460,9 +480,13 @@ font-size:15px;line-height:1.25;white-space:pre}
    箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
 .a-r{background:var(--cell);color:var(--crt)}
 /* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift と同じ）。
-   color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る */
+   color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る。
+   濃目（.a-so-strong）は薄目とふつうの文字の中間——同じ色にすると見分けが付かなくなる。
+   詳細度が同点になるので、修飾子は必ず後ろに置く（web-ui の .a-shift-strong と同じ） */
 .a-so{color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
 .a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
+.a-so.a-so-strong{color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
+.a-r .a-so.a-so-strong,.a-r.a-so.a-so-strong{color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
@@ -550,9 +574,13 @@ function header(title: string): string {
  * @param snap 画面スナップショット
  * @param meta 見出しに載せる情報（**日時は呼び出し側が渡す**。この関数は時計を持たない）
  */
-export function renderScreenHtml(snap: ScreenSnapshot, meta: ScreenHtmlMeta = {}): string {
+export function renderScreenHtml(
+  snap: ScreenSnapshot,
+  meta: ScreenHtmlMeta = {},
+  style: ScreenHtmlStyle = {}
+): string {
   const title = meta.title ?? "5250 画面";
-  return page(title, header(title) + metaHtml(meta) + screenFigure(snap, ""), THEME_JS);
+  return page(title, header(title) + metaHtml(meta) + screenFigure(snap, "", style), THEME_JS);
 }
 
 /**
@@ -564,7 +592,8 @@ export function renderScreenHtml(snap: ScreenSnapshot, meta: ScreenHtmlMeta = {}
  */
 export function renderScreenHistoryHtml(
   entries: readonly ScreenHistoryEntry[],
-  meta: ScreenHtmlMeta = {}
+  meta: ScreenHtmlMeta = {},
+  style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面の履歴";
   if (entries.length === 0) {
@@ -579,7 +608,7 @@ export function renderScreenHistoryHtml(
       if (e.key) parts.push(`送信キー: ${e.key}`);
       if (e.capturedAt) parts.push(e.capturedAt);
       if (e.note) parts.push(e.note);
-      return screenFigure(e.screen, esc(parts.join("　·　")));
+      return screenFigure(e.screen, esc(parts.join("　·　")), style);
     })
     .join("");
   const nav =

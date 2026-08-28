@@ -170,10 +170,10 @@ describe("ホストの行と同じ形にする（SO/SI）", () => {
    */
   const body = (w: ReturnType<typeof mountPane>): string => raw(w).replace(/^ /, "");
 
-  afterEach(() => viewSettings.set("sosi", false));
+  afterEach(() => viewSettings.set("sosi", "none"));
 
   it("**`{ }` 表示のとき、全角の前後に印が付く**（ホストの行と同じ見え方）", async () => {
-    viewSettings.set("sosi", true);
+    viewSettings.set("sosi", "dim");
     seed(snap({ systemMessage: "あA" }));
     const w = mountPane();
     await nextTick();
@@ -195,7 +195,7 @@ describe("ホストの行と同じ形にする（SO/SI）", () => {
   });
 
   it("全角で終わるメッセージは末尾にも SI が入る", async () => {
-    viewSettings.set("sosi", true);
+    viewSettings.set("sosi", "strong");
     seed(snap({ systemMessage: "Aあ" }));
     const w = mountPane();
     await nextTick();

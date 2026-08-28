@@ -368,6 +368,23 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html.match(/class="c-green a-so"/g)).toHaveLength(2);
   });
 
+  /**
+   * **濃さは呼び出し側が決める。** web-ui の画面設定「SO/SI 表示」は 非表示 / 薄目 / 濃目 の
+   * 3 値で、濃目も**ふつうの文字より薄い**（同じ色にすると本物の `{ }` と見分けが付かない）。
+   * ここが追従しないと**画面と保存した HTML で色が食い違う**。
+   */
+  it("shiftMarkTone: strong なら濃さの修飾子を足す（濃目）", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("{", { kind: "so" });
+      c[0]![1] = cell("取", { kind: "dbcs-lead" });
+      c[0]![2] = cell("", { kind: "dbcs-tail" });
+      c[0]![3] = cell("}", { kind: "si" });
+    });
+    const html = renderScreenHtml(snap, {}, { shiftMarkTone: "strong" });
+    expect(html).toContain('<span class="c-green a-so a-so-strong">{</span>');
+    expect(html).toContain('<span class="c-green a-so a-so-strong">}</span>');
+  });
+
   it("印の無い SO/SI 桁はランを割らない（span を増やさない）", () => {
     const snap = snapWith((c) => {
       c[0]![0] = cell(" ", { kind: "so" });

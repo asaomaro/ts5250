@@ -43,7 +43,7 @@ import {
   type OptionSpan
 } from "../composables/fkeyLegend.js";
 import { GRID_COLOR } from "@ts5250/tn5250/browser";
-import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle, DtPickerStyle } from "../stores/viewSettings.js";
+import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle, DtPickerStyle, ShiftMarkTone } from "../stores/viewSettings.js";
 import DateTimePicker from "./DateTimePicker.vue";
 import {
   detectDateTimeFields,
@@ -90,6 +90,13 @@ const props = withDefaults(
     /** SO を { ・SI を } で表示する（ACS の Ctrl+F 相当。既定は空白） */
     showShiftMarks?: boolean;
     /**
+     * SO/SI マークの**濃さ**（既定 `dim`＝薄目）。マークはホストのデータにある本物の `{ }` と
+     * 見分けが付くよう淡く描くが（`.a-shift` の注記）、淡すぎて読み取りにくい環境
+     * （明るい部屋・低コントラストの配色）があるので `strong`＝濃目も選べる。
+     * **どちらもふつうの文字より薄い**——桁の色そのままでは見分けが付かなくなるため。
+     */
+    shiftMarkTone?: ShiftMarkTone;
+    /**
      * SBCS の実効表示コード（ACS の表示コード切替）。`host` はホストの表のまま＝再解釈しない。
      * `kana`/`latin` は生バイトを対の表で読み直す（親が CCSID と突き合わせて決める）。
      */
@@ -123,7 +130,7 @@ const props = withDefaults(
   }>(),
   {
     linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none",
-    optHints: "none", dtPicker: "none", sbcsView: "host"
+    optHints: "none", dtPicker: "none", sbcsView: "host", shiftMarkTone: "dim"
   }
 );
 const emit = defineEmits<{
@@ -703,6 +710,15 @@ function isShiftMarkCell(c: Cell): boolean {
   return props.showShiftMarks === true && !c.nonDisplay && (c.kind === "so" || c.kind === "si");
 }
 
+/**
+ * SO/SI マークに付ける class。**濃さが変わるだけで、色を分けること自体は変わらない**
+ * ——薄目も濃目もふつうの文字より薄く、本物の `{ }` と見分けが付く（配合は `.a-shift` の CSS）。
+ * `a-shift` は必ず付けたうえで濃目だけ修飾子を足す（反転桁の規則を 2 度書かないため）。
+ */
+const shiftClass = computed(() =>
+  props.shiftMarkTone === "strong" ? "a-shift a-shift-strong" : "a-shift"
+);
+
 /** 淡色描画用の印（`displayChar` が `{ }` を出す桁だけを印にする） */
 const viewMarkOf: ShiftMarkOf = (c) =>
   isShiftMarkCell(c) ? (c.kind === "so" ? SO_VIEW : SI_VIEW) : undefined;
@@ -1039,7 +1055,7 @@ function overlayRuns(seg: Segment): { text: string; cls: string }[] {
       const shift = ch === SO_VIEW || ch === SI_VIEW;
       const color = classAtColumn(bands, col) ?? seg.cls;
       // SO/SI マークは桁の色のまま淡くする（`a-shift`）＝本物の `{ }` と見分けが付く
-      const at = shift ? `${color} a-shift` : color;
+      const at = shift ? `${color} ${shiftClass.value}` : color;
       if (at !== cls) {
         push();
         cls = at;
@@ -3725,7 +3741,7 @@ onBeforeUnmount(() => {
     <div v-if="message" class="opmsg" role="status"><template
       v-for="(m, k) in markRuns(shiftedMessage)"
       :key="k"
-    ><span v-if="m.shift" class="a-shift">{{ m.text }}</span><template
+    ><span v-if="m.shift" :class="shiftClass">{{ m.text }}</span><template
       v-else
     >{{ m.text }}</template></template></div>
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
@@ -3919,7 +3935,11 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </template>
-    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled, renderTick]">
+    <!-- v-memo の依存には**行の見た目を変えるものを全部**入れる。SO/SI マークの濃さ
+         （`shiftClass`）は文字も桁も変えず class だけが変わるので、ここに入れないと
+         `segs` が同じまま＝行が再描画されず、**画面の中だけ濃淡が切り替わらない**
+         （操作員メッセージ行は v-memo が無いので切り替わり、食い違いとして見えた）。 -->
+    <div v-for="(segs, r) in rows" :key="r" class="grid-row" v-memo="[segs, linkEnabled, renderTick, shiftClass]">
       <template v-for="(seg, i) in segs" :key="i">
         <!-- 入力欄。埋め込み属性で色替えのある欄は色付きオーバーレイを重ねる（overlaid）。
              通常欄は input-cell が display:contents で素通し＝従来と同じレイアウト。 -->
@@ -3994,11 +4014,11 @@ onBeforeUnmount(() => {
           ><template
             v-for="(m, k) in markRuns(p.text)"
             :key="k"
-          ><span v-if="m.shift" class="a-shift">{{ m.text }}</span><template
+          ><span v-if="m.shift" :class="shiftClass">{{ m.text }}</span><template
             v-else
           >{{ m.text }}</template></template></button><span
             v-else-if="p.shift"
-            class="a-shift"
+            :class="shiftClass"
           >{{ p.text }}</span><template v-else>{{ p.text }}</template></template></span>
       </template>
     </div>

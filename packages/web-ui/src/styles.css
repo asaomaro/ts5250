@@ -233,6 +233,18 @@ body {
    同一要素（オーバーレイのラン）と親子（素のラン内のマーク）の両方が起こる。 */
 .a-reverse .a-shift,
 .a-reverse.a-shift { color: color-mix(in srgb, var(--crt) 30%, var(--cell)); }
+/*
+ * **濃目**（画面設定「SO/SI 表示＝濃目」）。薄目の 30% では読み取りにくい環境
+ * （明るい部屋・低コントラストの配色）向けに濃くするが、**桁の色そのままにはしない**
+ * ——同じ色にすると本物の `{ }` と区別が付かなくなり、色を分けた意味が消える。
+ * だから薄目（30%）とふつうの文字（100%）の間（65%）に置く。
+ *
+ * `.a-shift` に**重ねて**効かせる（詳細度 (0,2,0)）ので、必ず上の 2 規則より後ろに置く
+ * ——`.a-reverse .a-shift` も (0,2,0) で、同点なら後勝ちになる。反転桁の側は (0,3,0)。
+ */
+.a-shift.a-shift-strong { color: color-mix(in srgb, var(--cell, currentColor) 65%, var(--crt)); }
+.a-reverse .a-shift.a-shift-strong,
+.a-reverse.a-shift.a-shift-strong { color: color-mix(in srgb, var(--crt) 65%, var(--cell)); }
 /* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
    文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */
 .a-colsep { border-left: 1px solid currentColor; }

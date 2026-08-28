@@ -215,3 +215,78 @@ describe("SO/SI マークの淡色表示（入力欄）", () => {
     w.unmount();
   });
 });
+
+/**
+ * **「濃目」（`shiftMarkTone: "strong"`）は薄目より濃く、ふつうの文字より薄い。**
+ *
+ * 淡色は本物の `{ }` と見分けるための工夫だが、明るい部屋や低コントラストの配色では
+ * **マークそのものが読み取りにくい**。そこで濃さを選べるようにした（画面設定 SO/SI 表示＝
+ * 非表示 / 薄目 / 濃目）。**桁の色そのままにはしない**——同じ色にすると本物の `{ }` と
+ * 区別が付かなくなり、色を分けた意味が消えるため。差は色だけで、桁・文字・値は薄目と同じ。
+ */
+describe("SO/SI マークの濃目表示", () => {
+  function mountStrong(snapshot: ScreenSnapshot, focused = false) {
+    return mount(ScreenGrid, {
+      props: { snapshot, edits: new Map(), focused, showShiftMarks: true, shiftMarkTone: "strong" }
+    });
+  }
+
+  it("淡色クラスに濃さの修飾子が付く（薄目と同じ桁・同じ文字）", () => {
+    const w = mountStrong(snapshotWithTextMarks());
+    const marks = w.findAll("span.a-shift");
+    expect(marks.map((m) => m.text())).toEqual(["{", "}"]);
+    // 修飾子が付くのはマークだけ。`a-shift` 自体は付いたまま（反転桁の規則を共有する）
+    expect(marks.every((m) => m.classes().includes("a-shift-strong"))).toBe(true);
+    const line = w.findAll(".grid-row")[0]!.element.textContent ?? "";
+    expect(line.startsWith("{取}{}")).toBe(true); // 薄目と同じ絵（色だけが違う）
+    w.unmount();
+  });
+
+  it("薄目には修飾子を付けない（既定は薄目）", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapshotWithTextMarks(), edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    expect(w.findAll("span.a-shift-strong")).toHaveLength(0);
+    w.unmount();
+  });
+
+  it("**印を素で出さない**（濃目でも列ビューの印は画面に漏れない）", () => {
+    const w = mountStrong(snapshotWithTextMarks());
+    const text = w.element.textContent ?? "";
+    expect(text.includes("\u000e") || text.includes("\u000f")).toBe(false);
+    w.unmount();
+  });
+
+  /**
+   * **切り替えたら画面の中も追従する。** 行は `v-memo` でキャッシュしており、濃さは
+   * 文字も桁も変えず class だけが変わる——依存に入れ忘れると `segs` が同じまま行が
+   * 再描画されず、**操作員メッセージ行だけ切り替わって画面の中は取り残される**
+   * （利用者の指摘）。設定を変えたあとの状態を見るため `setProps` で確かめる。
+   */
+  it("薄目 ⇄ 濃目 を切り替えると画面の中の桁も追従する", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapshotWithTextMarks(), edits: new Map(), focused: false, showShiftMarks: true }
+    });
+    expect(w.findAll("span.a-shift-strong")).toHaveLength(0);
+    await w.setProps({ shiftMarkTone: "strong" });
+    expect(w.findAll("span.a-shift-strong").map((m) => m.text())).toEqual(["{", "}"]);
+    await w.setProps({ shiftMarkTone: "dim" });
+    expect(w.findAll("span.a-shift-strong")).toHaveLength(0);
+    expect(w.findAll("span.a-shift").map((m) => m.text())).toEqual(["{", "}"]);
+    w.unmount();
+  });
+
+  it("入力欄のオーバーレイにも修飾子が付く（値は薄目と同じ）", () => {
+    const snapshot = snapshotWithShiftCells();
+    snapshot.fields = [FIELD];
+    const w = mountStrong(snapshot, true);
+    const overlay = w.find(".input-overlay");
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.findAll("span.a-shift-strong").map((m) => m.text())).toEqual(["{", "}"]);
+    // オーバーレイの文字列は入力欄の値と 1 文字も違わない（違うと桁がずれて見える）
+    const value = (w.find("input.grid-input").element as HTMLInputElement).value;
+    expect(overlay.element.textContent).toBe(value);
+    expect(value.startsWith("{取引}")).toBe(true);
+    w.unmount();
+  });
+});

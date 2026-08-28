@@ -58,7 +58,7 @@ export function localActionOf(t: string): LocalEditAction {
 const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
   1: {
     "ctrl+F1": "view:kana", // 表示コード（自動 → カナ → 英）
-    "ctrl+F3": "view:sosi" // SO/SI 表示 ⇄ 非表示
+    "ctrl+F3": "view:sosi" // SO/SI 表示（非表示 → 薄目 → 濃目）
   },
   2: {
     // ローカル編集キー。ブラウザ既定（単語削除・履歴戻る）は捕捉時に preventDefault で抑える

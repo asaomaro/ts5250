@@ -79,7 +79,7 @@ beforeEach(() => {
   });
   // 表示設定は全画面共通の保存値。テスト間で持ち越さないよう既定へ戻す
   viewSettings.set("kana", "auto");
-  viewSettings.set("sosi", false);
+  viewSettings.set("sosi", "none");
 });
 
 afterEach(() => {
@@ -133,11 +133,21 @@ describe("画面を HTML で保存", () => {
     expect(written).not.toContain("表示コード=");
   });
 
-  it("SO/SI 表示を反映する", () => {
+  it("SO/SI 表示「薄目」を反映する（マークは淡色クラス付き）", () => {
     addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
-    viewSettings.set("sosi", true);
+    viewSettings.set("sosi", "dim");
     downloadScreenHtml(SID);
-    expect(written).toContain("{");
-    expect(written).toContain("SO・SI 表示あり");
+    // CSS にも `.a-so` は出るので、**桁に付いた**ことを class 属性の形で見る
+    expect(written).toContain('<span class="c-green a-so">{</span>');
+    expect(written).toContain("SO・SI 表示=薄目");
+  });
+
+  /** 「濃目」も**ふつうの文字より薄い**（薄目との違いは濃さだけ）。画面と絵を食い違わせない。 */
+  it("SO/SI 表示「濃目」はマークに濃さの修飾子を足す", () => {
+    addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
+    viewSettings.set("sosi", "strong");
+    downloadScreenHtml(SID);
+    expect(written).toContain('<span class="c-green a-so a-so-strong">{</span>');
+    expect(written).toContain("SO・SI 表示=濃目");
   });
 });
