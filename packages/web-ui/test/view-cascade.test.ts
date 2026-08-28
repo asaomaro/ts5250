@@ -42,16 +42,16 @@ afterEach(() => {
 
 describe("カスケード", () => {
   it("**既定は上書きしていないセッション全部に効く**", () => {
-    viewSettings.set("sosi", true);
-    expect(viewSettings.effective(S1).sosi).toBe(true);
-    expect(viewSettings.effective(S2).sosi).toBe(true);
+    viewSettings.set("sosi", "dim");
+    expect(viewSettings.effective(S1).sosi).toBe("dim");
+    expect(viewSettings.effective(S2).sosi).toBe("dim");
   });
 
   it("**個別指定はそのセッションだけ**（他は既定のまま）", () => {
-    viewSettings.setOverride(S1, "sosi", true);
-    expect(viewSettings.effective(S1).sosi).toBe(true);
-    expect(viewSettings.effective(S2).sosi, "隣のセッションまで変わっている").toBe(false);
-    expect(viewSettings.settings.sosi, "既定まで書き換えている").toBe(false);
+    viewSettings.setOverride(S1, "sosi", "dim");
+    expect(viewSettings.effective(S1).sosi).toBe("dim");
+    expect(viewSettings.effective(S2).sosi, "隣のセッションまで変わっている").toBe("none");
+    expect(viewSettings.settings.sosi, "既定まで書き換えている").toBe("none");
   });
 
   it("**個別指定したら既定の変更に追従しない**", () => {
@@ -72,27 +72,39 @@ describe("カスケード", () => {
   });
 
   it("すべて既定に戻すと、そのセッションの上書きが全部消える", () => {
-    viewSettings.setOverride(S1, "sosi", true);
+    viewSettings.setOverride(S1, "sosi", "dim");
     viewSettings.setOverride(S1, "surface", "crt");
     expect(viewSettings.hasOverrides(S1)).toBe(true);
     viewSettings.clearAll(S1);
     expect(viewSettings.hasOverrides(S1)).toBe(false);
-    expect(viewSettings.effective(S1).sosi).toBe(false);
+    expect(viewSettings.effective(S1).sosi).toBe("none");
   });
 
   it("`set` は既定を書く（キー設定からの順送りはアプリ全体の操作）", () => {
-    viewSettings.setOverride(S1, "sosi", true);
+    viewSettings.setOverride(S1, "sosi", "strong");
     viewSettings.cycle("sosi");
-    expect(viewSettings.settings.sosi, "既定が動いていない").toBe(true);
-    expect(viewSettings.effective(S1).sosi, "上書きが既定に食われている").toBe(true);
+    expect(viewSettings.settings.sosi, "既定が動いていない").toBe("dim");
+    expect(viewSettings.effective(S1).sosi, "上書きが既定に食われている").toBe("strong");
   });
 });
 
 describe("移行", () => {
+  /**
+   * **読めない値は黙って薄目に倒れる**（`view.sosi === "strong"` に一致しないため）。
+   * 濃目を「桁の色そのまま」で作っていた頃の保存値 `full` がそのまま残っていると、
+   * 濃目を選んだつもりなのに薄目のまま——**設定が効いていないように見える**。
+   */
+  it("濃目の旧値（full）を現行の名前へ読み替える", () => {
+    localStorage.setItem("as400.view.settings", JSON.stringify({ sosi: "full" }));
+    initViewSettings();
+    expect(viewSettings.settings.sosi).toBe("strong");
+  });
+
   it("**既存の保存値は既定として読む／上書きは空で始まる**（見え方が変わらない）", () => {
+    // 旧 `sosi: true`（2 値）は 3 値の `dim`（薄目）へ読み替わる＝#381 以降の見え方のまま
     localStorage.setItem("as400.view.settings", JSON.stringify({ sosi: true, surface: "crt" }));
     initViewSettings();
-    expect(viewSettings.settings.sosi).toBe(true);
+    expect(viewSettings.settings.sosi).toBe("dim");
     expect(viewSettings.settings.surface).toBe("crt");
     // どのセッションから見ても同じ＝移行前と同じ見え方
     expect(viewSettings.effective(S1)).toEqual(viewSettings.settings);
@@ -128,8 +140,8 @@ describe("表示メニュー", () => {
     const seg = row(w, "設定の対象").findAll(".seg button");
     expect(seg.find((b) => b.text() === "全体の既定")!.classes()).toContain("on");
     // その層で変えると既定が動く
-    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "表示")!.trigger("click");
-    expect(viewSettings.settings.sosi).toBe(true);
+    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "薄目")!.trigger("click");
+    expect(viewSettings.settings.sosi).toBe("dim");
     expect(viewSettings.hasOverrides(S1), "既定層なのに上書きを作っている").toBe(false);
     w.unmount();
   });
@@ -137,9 +149,9 @@ describe("表示メニュー", () => {
   it("**このセッション層では上書きになり、既定は動かない**", async () => {
     const w = await openMenu(mountMenu());
     await row(w, "設定の対象").findAll(".seg button").find((b) => b.text() === "このセッション")!.trigger("click");
-    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "表示")!.trigger("click");
+    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "薄目")!.trigger("click");
     expect(viewSettings.isOverridden(S1, "sosi")).toBe(true);
-    expect(viewSettings.settings.sosi, "既定まで動いている").toBe(false);
+    expect(viewSettings.settings.sosi, "既定まで動いている").toBe("none");
     w.unmount();
   });
 
@@ -195,7 +207,7 @@ describe("表示メニュー", () => {
   it("個別指定した項目に印が出て、すべて既定に戻すで消える", async () => {
     const w = await openMenu(mountMenu());
     await row(w, "設定の対象").findAll(".seg button").find((b) => b.text() === "このセッション")!.trigger("click");
-    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "表示")!.trigger("click");
+    await row(w, "SO/SI 表示").findAll(".seg button").find((b) => b.text() === "薄目")!.trigger("click");
     await nextTick();
     expect(row(w, "SO/SI 表示").find(".vsm-mark").exists()).toBe(true);
 

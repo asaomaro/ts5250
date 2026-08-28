@@ -147,17 +147,24 @@ describe("既定バインドが実際のキー操作で効く", () => {
     expect(viewSettings.settings.kana).toBe("latin");
     expect(w.find(".opmsg").text()).toBe("表示コード :  英");
 
-    expect(viewSettings.settings.sosi).toBe(false); // 初期値=非表示
+    expect(viewSettings.settings.sosi).toBe("none"); // 初期値=非表示
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
     await nextTick();
-    expect(viewSettings.settings.sosi).toBe(true);
+    expect(viewSettings.settings.sosi).toBe("dim");
     // この操作自体が SO/SI 表示を ON にするので、**通知そのものにも印が付く**
-    expect(w.find(".opmsg").text()).toBe("SO/SI {表示}: {表示}");
+    expect(w.find(".opmsg").text()).toBe("SO/SI {表示}: {薄目}");
 
-    // もう一度押すと戻る（トグルとして使える）
+    // 3 値なので、次は「濃目」（印は出たまま・色だけ変わる）
     await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
     await nextTick();
-    expect(viewSettings.settings.sosi).toBe(false);
+    expect(viewSettings.settings.sosi).toBe("strong");
+    expect(w.find(".opmsg").text()).toBe("SO/SI {表示}: {濃目}");
+
+    // 一巡して非表示へ戻る（印が消えるので通知からも `{ }` が消える）
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await nextTick();
+    expect(viewSettings.settings.sosi).toBe("none");
+    expect(w.find(".opmsg").text()).toBe("SO/SI  表示 :  非表示");
     w.unmount();
   });
 
