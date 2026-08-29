@@ -1,0 +1,9 @@
+schema: 3
+slug: offline-regression-ci
+current: deliver
+approved: [requirement, spec, plan, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []

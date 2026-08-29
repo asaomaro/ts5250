@@ -1,0 +1,43 @@
+# オフライン回帰。**実機に触らない範囲**を PR ごとに回す。
+#
+# 起票元は as400-coding-helper の backlog「CI を整える」。
+# このリポジトリには CI が無く、約 5,400 のテストと lint / build が揃っているのに
+# **PR で自動的に回っていなかった**（手元で回すのを忘れると誰も気付かない）。
+#
+# **資格情報を置かない。** `.env` / `.env.verify` は CI に持ち込まない
+# （AGENTS.md「実資格情報・秘密をコメント/ドキュメント/成果物に書かない」と同じ線）。
+# 実機を要するテストはもともと skip される。
+#
+# **Rust（`crates/hllapi`）は対象外。** npm のビルド経路に入っていないので、
+# 入れるならツールチェーンの用意が要る＝「オフライン回帰」の範囲を超える。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # package.json の engines.node は >=20
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: lint（console.* 禁止・ピュアロジック層の node:* 制限を含む）
+        run: npm run lint
+
+      # **build を test より先に置く。** 型が壊れていれば test の失敗より
+      # build の失敗の方が原因が分かりやすい。
+      - name: build（tsc -b ＋ web-ui の vue-tsc）
+        run: npm run build
+
+      - name: test（全ワークスペース。実機を要するものは skip される）
+        run: npm test
