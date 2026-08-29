@@ -51,3 +51,56 @@ CI が回るのは `main` の内容なので、**マージ後に改めて緑を�
 | AC2 資格情報を要しない | ✓ 実機テストは skip される |
 | AC3 手元で同じ手順が通る | ✓ 3 コマンドとも rc=0 |
 | AC4 揺れを隠さず記録 | ✓ 上記 |
+
+---
+
+# CI を回して分かったこと（2026-08-29・追記）
+
+**CI は初回で落ちた。そして落ちたのが収穫だった。**
+手元（Node 24）では 3 コマンドとも緑なのに、**GitHub の runner（Node 20）で 2 件落ちる**。
+どちらも**テストが環境を前提にしている**箇所で、この作業で入れた変更とは無関係。
+
+## 1. `packages/ebcdic/test/ccsid-text.test.ts` — CCSID 1252 の `EUR` が往復しない
+
+```
+AssertionError: expected 'A<SUB>\n' to be 'A<EUR>\n'
+```
+
+`<SUB>` は U+001A。**ユーロ記号（U+20AC）の逆引きが作れていない。**
+
+原因は `packages/ebcdic/src/ccsid-text.ts:68` の `reverseTableFor`:
+
+```ts
+const decoder = new TextDecoder(label);          // ← ランタイムの表を使う
+for (let b = 0; b < 256; b++) { ... table.set(cp, b); }
+```
+
+**逆引き表をランタイムの `TextDecoder` から作っている**ので、ICU のデータが違えば
+表も変わる。手元の Node 24（full ICU）では `0x80` がユーロ記号になるが、
+runner の Node 20 ではそうならず、逆引き表に入らない。
+
+`package.json` の `engines.node` は **`>=20`** なので、**宣言している下限で動いていない**。
+
+## 2. `packages/server/test/printer-output-runtime.test.ts` — CJK フォントが無い
+
+```
+AssertionError: expected '等幅の CJK フォントが見つかりませんでした（DBCS は文字化けの可能...'
+                to match /PDF 保存に失敗|ENOENT/
+```
+
+runner に**等幅の CJK フォントが入っていない**ため、コードが PDF 保存に到達する前に
+フォントの警告を出す。テストは「PDF 保存の失敗」を期待している。
+
+## この PR の扱い
+
+**draft にした。** 緑にする手はあるが、どれも筋が悪い:
+
+| 手 | なぜ採らないか |
+|---|---|
+| CI の Node を 24 にする | `engines` の下限 20 で動かない事実を**隠す**ことになる |
+| 2 つのテストを直す | **他人のテストの期待値を外から書き換える**話。1 は実装側の問題でもある |
+| その 2 ファイルを CI から外す | 回帰を回す目的に反する |
+
+**判断は残す。** CI の枠組み自体は正しく動いており（lint / build は緑、
+test も 2 件を除いて約 5,400 件が緑）、**入れた瞬間に実在の環境依存を 2 件見つけた**。
+これは CI が仕事をしている証拠であって、CI の欠陥ではない。
