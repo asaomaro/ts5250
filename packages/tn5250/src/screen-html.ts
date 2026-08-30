@@ -57,21 +57,16 @@ export interface ScreenHtmlMeta {
 
 /**
  * **描き方の指定**（メタ情報＝見出しに載る事実とは別物なので分けて受ける）。
- *
- * 呼び出し側が SO/SI 桁に `{ }` を載せてくるとき（web-ui の画面 HTML 保存）だけ効く。
  */
 export interface ScreenHtmlStyle {
   /**
-   * SO/SI マークの**濃さ**（既定 `dim`＝薄目）。マークはホストのデータにある本物の `{ }` と
-   * 見分けが付くよう淡く描くが、淡すぎて読み取りにくい環境もあるので `strong`＝濃目も選べる
-   * （web-ui の画面設定「SO/SI 表示」に対応）。**どちらもふつうの文字より薄い**
-   * ——桁の色そのままにすると本物の `{ }` と区別が付かず、色を分けた意味が消えるため。
+   * SO/SI マークを**最初から出しておく**か（既定 false＝非表示）。
+   *
+   * **出す／出さないはページ内で切り替えられる**（CSS だけのトグル。`TOGGLE_CSS` 参照）ので、
+   * ここで決まるのは初期状態だけ。web-ui は画面と同じ状態で開くために渡す。
    */
-  shiftMarkTone?: ShiftMarkTone;
+  shiftMarks?: boolean;
 }
-
-/** SO/SI マークの濃さ。薄目（既定）／濃目（薄目とふつうの文字の中間） */
-export type ShiftMarkTone = "dim" | "strong";
 
 /** 履歴 1 コマ。画面と、その画面を出した操作 */
 export interface ScreenHistoryEntry {
@@ -117,24 +112,37 @@ function hasRealColsep(color: ScreenColor, columnSeparator: boolean): boolean {
   return columnSeparator && color !== "yellow" && color !== "turquoise";
 }
 
-function cellClass(c: Cell, tone: ShiftMarkTone): string {
+function cellClass(c: Cell): string {
   let cls = `c-${c.color}`;
   if (c.underline) cls += " a-u";
   if (c.reverse) cls += " a-r";
   if (c.blink) cls += " a-b";
   if (hasRealColsep(c.color, c.columnSeparator)) cls += " a-cs";
-  // **SO/SI 桁に印が載っているときだけ淡色にする**（web-ui の `.a-shift` と同じ意図）。
-  // 呼び出し側が `{ }` を入れて渡すことがあり（web-ui の SO/SI マーク表示）、ホストのデータに
-  // ある本物の `{ }` と同じ字なので、色を分けないと**どちらが制御桁か分からない**。
-  // 印を入れていない（char は空白）ときは何も足さない——ランを割って span を増やさないため。
-  // 濃さ（薄目／濃目）は修飾子で足す。どちらもふつうの文字より薄い（`.a-so` の CSS）。
-  if (isShiftMarked(c)) cls += tone === "strong" ? " a-so a-so-strong" : " a-so";
   return cls;
 }
 
-/** SO/SI 桁に表示用の印が載っているか（載っていなければ空白＝ふつうの 1 桁） */
-function isShiftMarked(c: Cell): boolean {
-  return (c.kind === "so" || c.kind === "si") && !c.nonDisplay && c.char !== "" && c.char !== " ";
+/**
+ * **SO/SI 桁にマークを描くか。**
+ *
+ * マークは**常に HTML に入れておき、見せるかどうかは CSS のトグルで決める**（`TOGGLE_CSS`）。
+ * `{ }` はホストのデータにある本物の `{ }` と同じ字なので、色を分けないと**どちらが制御桁か
+ * 分からない**（web-ui の `.a-shift` と同じ意図。淡色は `.a-so`）。
+ *
+ * 非表示（nonDisplay）桁には描かない——ACS は非表示属性の桁に何も描かない（web-ui の
+ * `displayChar` と同じ規則）。
+ */
+function isShiftCell(c: Cell): boolean {
+  return (c.kind === "so" || c.kind === "si") && !c.nonDisplay;
+}
+
+/** SO/SI 桁に出す字。**セルの `char` は見ない**——制御桁なので中身は無く、印はこちらで決める */
+function shiftMarkChar(c: Cell): string {
+  return c.kind === "so" ? "{" : "}";
+}
+
+/** その画面に SO/SI 桁があるか（**無ければトグルを出さない**＝押しても何も起きない部品を置かない） */
+function hasShiftCells(snap: ScreenSnapshot): boolean {
+  return snap.cells.some((row) => row.some(isShiftCell));
 }
 
 /**
@@ -165,7 +173,7 @@ const isTail = (c: Cell | undefined): boolean => c?.kind === "dbcs-tail";
  * `h`（1 桁の箱）は**対を失った全角**のため。ホストが桁末尾で全角を切ると lead だけ、
  * あるいは tail だけが残る。ACS はこれを 1 桁ぶんの分断された字形で見せるので合わせる。
  */
-function renderRow(row: readonly Cell[], tone: ShiftMarkTone): string {
+function renderRow(row: readonly Cell[]): string {
   let out = "";
   let runCls = "";
   let runText = "";
@@ -176,7 +184,14 @@ function renderRow(row: readonly Cell[], tone: ShiftMarkTone): string {
   };
   for (let i = 0; i < row.length; i++) {
     const c = row[i]!;
-    const cls = cellClass(c, tone);
+    const cls = cellClass(c);
+    // SO/SI 桁は**必ず自分の span に切り出す**——見せ隠しを CSS のトグルでやるため。
+    // `visibility` で隠すので箱は残り、**桁は 1 つも動かない**（`display:none` は不可）。
+    if (isShiftCell(c)) {
+      flush();
+      out += `<span class="${cls} a-so">${shiftMarkChar(c)}</span>`;
+      continue;
+    }
     // lead の次が tail＝正常な全角。lead 側で 2 桁ぶんを描き、tail 桁は読み飛ばす
     if (isLead(c) && isTail(row[i + 1])) {
       flush();
@@ -379,9 +394,8 @@ function guiHtml(gui: GuiConstructs | undefined): string {
  * **1 画面ぶんのマークアップ。単票も履歴もここを通る。**
  * 分けると 1 枚で見たときと履歴で見たときの絵が食い違い、証拠として使えなくなる。
  */
-function screenFigure(snap: ScreenSnapshot, caption: string, style: ScreenHtmlStyle): string {
-  const tone = style.shiftMarkTone ?? "dim";
-  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r, tone)}</div>`).join("");
+function screenFigure(snap: ScreenSnapshot, caption: string): string {
+  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r)}</div>`).join("");
   const oia = [
     `<span>行/列 <b>${String(snap.cursor.row).padStart(2, "0")}/${String(snap.cursor.col).padStart(3, "0")}</b></span>`,
     `<span>画面 <b>${snap.rows}x${snap.cols}</b></span>`,
@@ -422,24 +436,55 @@ function metaHtml(meta: ScreenHtmlMeta, extra: [string, string][] = []): string 
 }
 
 /**
+ * **表示の切り替えを JS 無しで作る。**
+ *
+ * チェックボックスと `:checked ~`（一般兄弟結合子）だけで動くので、**JS を切っても・
+ * CSP で script を止められても切り替えが生きる**。エビデンスとして配る HTML なので、
+ * 読み手の環境に依存する部分は少ないほうがいい。
+ *
+ * 状態を持つ `<input>` は**本文（`.page`）より前**に置く必要がある——CSS は先祖にも前の
+ * 兄弟にも遡れず、辿れるのは後ろの兄弟だけだから。入力そのものは画面に出さないが、
+ * `display:none` にすると Tab 順から外れてキーボードで押せなくなるので、1px に潰して隠す。
+ *
+ * ラベルは**今の状態**を出す（従来のテーマボタンと同じ流儀）。CSS は字を差し替えられないので、
+ * 両方の字を入れておいて `:checked` で出し分ける。
+ */
+const TOGGLE_CSS = `
+.tg{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
+#t:focus-visible ~ .page label[for=t],#s:focus-visible ~ .page label[for=s]{
+outline:2px solid var(--t-green);outline-offset:1px}
+.btn>span{display:none}
+.btn>.st-off{display:inline}
+#t:checked ~ .page label[for=t]>.st-off,#s:checked ~ .page label[for=s]>.st-off{display:none}
+#t:checked ~ .page label[for=t]>.st-on,#s:checked ~ .page label[for=s]>.st-on{display:inline}
+#s:checked ~ .page .a-so{visibility:visible}
+`;
+
+/**
  * 端末の配色。`web-ui/src/styles.css` の実値を焼き込む（外部 CSS を参照しないため）。
- * 既定はダーク、`data-theme="light"` でペーパー調。
+ * 既定はダーク、`#t`（テーマのチェックボックス）を入れるとペーパー調。
+ *
+ * **明色の変数は `:root` ではなく `.page` に置く。** チェックボックスから `:root` は辿れない
+ * （CSS は先祖へ遡れない）が、**後ろの兄弟**なら `~` で辿れるので、本文をまるごと `.page` に
+ * 入れてそこへ被せる。`body` は `:root` のダークのままなので、地色は `.page` が自分で塗る
+ * （`min-height:100vh` で画面いっぱいを覆う）。
  */
 const STYLE = `
 :root{--bg:#0b0f0d;--fg:#c9d6cd;--card:#111815;--line:#22302a;--muted:#8ba396;
 --crt:#050d09;--crt-bezel:#0c1710;--crt-line:#16281d;
 --t-green:#3ddc84;--t-white:#e8f0e8;--t-red:#ff6161;--t-turquoise:#4dd8d8;
 --t-yellow:#e8d44d;--t-pink:#ff8ad8;--t-blue:#6ea8ff;--t-glow:0 0 1px}
-:root[data-theme=light]{--bg:#f4f6f2;--fg:#1f2937;--card:#fff;--line:#d3d9cf;--muted:#5b6b61;
+#t:checked ~ .page{--bg:#f4f6f2;--fg:#1f2937;--card:#fff;--line:#d3d9cf;--muted:#5b6b61;
 --crt:#f7f8f4;--crt-bezel:#eceee8;--crt-line:#d3d9cf;
 --t-green:#1a7f37;--t-white:#1f2937;--t-red:#c62828;--t-turquoise:#007c8a;
 --t-yellow:#9a6b00;--t-pink:#c02679;--t-blue:#2456c4;--t-glow:0 0 0}
 *{box-sizing:border-box}
-body{margin:0;padding:16px;background:var(--bg);color:var(--fg);
+body{margin:0;background:var(--bg);color:var(--fg);
 font:13px/1.5 ui-sans-serif,system-ui,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.page{min-height:100vh;padding:16px;background:var(--bg);color:var(--fg)}
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 h1{font-size:15px;margin:0}
-button{font:inherit;height:28px;padding:0 10px;display:inline-flex;align-items:center;
+button,.btn{font:inherit;height:28px;padding:0 10px;display:inline-flex;align-items:center;
 background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
 button:disabled{opacity:.45;cursor:default}
 .meta{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0 0 12px;
@@ -479,14 +524,15 @@ font-size:15px;line-height:1.25;white-space:pre}
    行送り 18.75px に対し塗り 25px）。必要な量はフォントごとに違い CSS から読めないため、
    箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
 .a-r{background:var(--cell);color:var(--crt)}
-/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift と同じ）。
+/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift「濃目」と同じ配合）。
    color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る。
-   濃目（.a-so-strong）は薄目とふつうの文字の中間——同じ色にすると見分けが付かなくなる。
-   詳細度が同点になるので、修飾子は必ず後ろに置く（web-ui の .a-shift-strong と同じ） */
-.a-so{color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
-.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
-.a-so.a-so-strong{color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
-.a-r .a-so.a-so-strong,.a-r.a-so.a-so-strong{color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
+   **既定は隠す。** visibility なので箱は残り、出し入れしても桁は 1 つも動かない
+   （display:none は桁が詰まるので使えない）。見せるのは #s:checked（TOGGLE_CSS）。
+   user-select:none は web-ui に合わせる——マークは制御桁の印であってデータではないので、
+   選択してコピーした文字列に混ぜない。 */
+.a-so{visibility:hidden;user-select:none;-webkit-user-select:none;
+color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
+.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
@@ -515,17 +561,14 @@ font-size:15px;line-height:1.25;white-space:pre}
 .frames{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px}
 .frames button.on{outline:2px solid var(--t-green)}
 [hidden]{display:none!important}
-`;
+${TOGGLE_CSS}`;
 
-/** テーマ切替（＋履歴版はナビ）。**JS はこれだけ。切っても画面は読める** */
-const THEME_JS = `
-var r=document.documentElement;
-document.getElementById('t').onclick=function(){
-  var d=r.getAttribute('data-theme')==='light';
-  r.setAttribute('data-theme',d?'dark':'light');
-  this.textContent=d?'☀ ライト':'🌙 ダーク';
-};`;
-
+/**
+ * 履歴のコマ送り。**JS はこれだけになった**（テーマ切替と SO/SI 表示は CSS だけで動く）。
+ *
+ * ここを CSS にしないのは、コマ数ぶんのラベルと規則を並べることになり、
+ * **ページ数に比例して HTML と CSS が膨らむ**ため。単票は JS ゼロで出る。
+ */
 const NAV_JS = `
 var fs=[].slice.call(document.querySelectorAll('figure.scr'));
 var bs=[].slice.call(document.querySelectorAll('.frames button'));
@@ -547,20 +590,45 @@ document.addEventListener('keydown',function(e){
 });
 show(0);`;
 
-function page(title: string, bodyHtml: string, js: string): string {
+/** ページに置く切り替え。`sosi` はその画面に SO/SI 桁があるときだけ true にする */
+interface Toggles {
+  sosi: boolean;
+  /** SO/SI マークを最初から出しておくか */
+  sosiOn: boolean;
+}
+
+/**
+ * ページの外枠。**状態を持つ `<input>` は `.page` の前**に置く（`TOGGLE_CSS` の注記）。
+ *
+ * `js` が空なら `<script>` を出さない——単票は切り替えを CSS で作ったので JS が要らない。
+ */
+function page(title: string, bodyHtml: string, js: string, tg: Toggles): string {
   return (
     `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><style>${STYLE}</style></head><body>` +
+    `<input class="tg" type="checkbox" id="t">` +
+    (tg.sosi ? `<input class="tg" type="checkbox" id="s"${tg.sosiOn ? " checked" : ""}>` : "") +
+    `<div class="page">` +
     bodyHtml +
-    `<script>${js}</script></body></html>`
+    `</div>` +
+    (js ? `<script>${js}</script>` : "") +
+    `</body></html>`
   );
 }
 
-function header(title: string): string {
+/** 状態を出すラベル（`st-off` が素の状態、`st-on` がチェック済みの状態） */
+function toggleLabel(id: string, off: string, on: string): string {
+  return `<label class="btn" for="${id}"><span class="st-off">${off}</span><span class="st-on">${on}</span></label>`;
+}
+
+function header(title: string, tg: Toggles): string {
   return (
     `<header><h1>${esc(title)}</h1>` +
-    `<button id="t" type="button">🌙 ダーク</button></header>`
+    toggleLabel("t", "🌙 ダーク", "☀ ライト") +
+    // SO/SI 桁が 1 つも無い画面には出さない（押しても何も起きない部品を置かない）
+    (tg.sosi ? toggleLabel("s", "SO/SI 非表示", "SO/SI 表示") : "") +
+    `</header>`
   );
 }
 
@@ -580,7 +648,9 @@ export function renderScreenHtml(
   style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面";
-  return page(title, header(title) + metaHtml(meta) + screenFigure(snap, "", style), THEME_JS);
+  const tg: Toggles = { sosi: hasShiftCells(snap), sosiOn: style.shiftMarks === true };
+  // 単票は切り替えを CSS で作ったので **`<script>` を出さない**
+  return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, ""), "", tg);
 }
 
 /**
@@ -596,8 +666,12 @@ export function renderScreenHistoryHtml(
   style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面の履歴";
+  const tg: Toggles = {
+    sosi: entries.some((e) => hasShiftCells(e.screen)),
+    sosiOn: style.shiftMarks === true
+  };
   if (entries.length === 0) {
-    return page(title, header(title) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, THEME_JS);
+    return page(title, header(title, tg) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, "", tg);
   }
   const label = (e: ScreenHistoryEntry, i: number): string =>
     `${i + 1}${e.key ? ` ${e.key}` : ""}`;
@@ -608,7 +682,7 @@ export function renderScreenHistoryHtml(
       if (e.key) parts.push(`送信キー: ${e.key}`);
       if (e.capturedAt) parts.push(e.capturedAt);
       if (e.note) parts.push(e.note);
-      return screenFigure(e.screen, esc(parts.join("　·　")), style);
+      return screenFigure(e.screen, esc(parts.join("　·　")));
     })
     .join("");
   const nav =
@@ -617,7 +691,8 @@ export function renderScreenHistoryHtml(
     `<span id="pos"></span><button id="n" type="button">次 →</button></div>`;
   return page(
     title,
-    header(title) + metaHtml(meta, [["コマ数", String(entries.length)]]) + nav + figures,
-    THEME_JS + NAV_JS
+    header(title, tg) + metaHtml(meta, [["コマ数", String(entries.length)]]) + nav + figures,
+    NAV_JS,
+    tg
   );
 }

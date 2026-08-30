@@ -133,21 +133,24 @@ describe("画面を HTML で保存", () => {
     expect(written).not.toContain("表示コード=");
   });
 
-  it("SO/SI 表示「薄目」を反映する（マークは淡色クラス付き）", () => {
+  /**
+   * **SO/SI は書き出す側で焼き込まない。** マークは `renderScreenHtml` が常に HTML へ入れ、
+   * 読み手が**ページ内のトグル（CSS だけ）**で出し入れできる。ここから渡すのは
+   * 「開いたときに出ているか」だけ——画面と同じ状態で開くための初期値である。
+   */
+  it("SO/SI 表示中は、開いた時点でマークが出ている状態にする", () => {
     addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
     viewSettings.set("sosi", "dim");
     downloadScreenHtml(SID);
-    // CSS にも `.a-so` は出るので、**桁に付いた**ことを class 属性の形で見る
     expect(written).toContain('<span class="c-green a-so">{</span>');
-    expect(written).toContain("SO・SI 表示=薄目");
+    expect(written).toContain('id="s" checked');
   });
 
-  /** 「濃目」も**ふつうの文字より薄い**（薄目との違いは濃さだけ）。画面と絵を食い違わせない。 */
-  it("SO/SI 表示「濃目」はマークに濃さの修飾子を足す", () => {
+  it("SO/SI 非表示なら、開いた時点では出ていない（トグルは置く）", () => {
     addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
-    viewSettings.set("sosi", "strong");
+    viewSettings.set("sosi", "none");
     downloadScreenHtml(SID);
-    expect(written).toContain('<span class="c-green a-so a-so-strong">{</span>');
-    expect(written).toContain("SO・SI 表示=濃目");
+    expect(written).toContain('<input class="tg" type="checkbox" id="s">');
+    expect(written).not.toContain('id="s" checked');
   });
 });

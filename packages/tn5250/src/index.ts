@@ -122,7 +122,6 @@ export {
   renderScreenHistoryHtml,
   type ScreenHtmlMeta,
   type ScreenHtmlStyle,
-  type ShiftMarkTone,
   type ScreenHistoryEntry
 } from "./screen-html.js";
 

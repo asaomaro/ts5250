@@ -50,12 +50,11 @@ describe("renderScreenHtml — エビデンスとして成立する条件", () =
     const evil = '<script>alert("x")</script>';
     const snap = snapWith((c) => putText(c, evil));
     const html = renderScreenHtml(snap, { note: evil, sessionId: evil, title: evil });
-    // 画面・メタ・title のどこにも生の <script> が出ない（末尾の実装スクリプトを除く）
-    const body = html.slice(0, html.lastIndexOf("<script>"));
-    expect(body).not.toContain("<script>alert");
-    expect(body).toContain("&lt;script&gt;");
+    // 画面・メタ・title のどこにも生の <script> が出ない（単票はそもそも script を持たない）
+    expect(html).not.toContain("<script");
+    expect(html).toContain("&lt;script&gt;");
     // 属性値に生の " が漏れない（title 属性・data 属性が割れない）
-    expect(body).not.toContain('alert("x")');
+    expect(html).not.toContain('alert("x")');
   });
 
   it("外部リソースを一切参照しない（自己完結）", () => {
@@ -68,20 +67,32 @@ describe("renderScreenHtml — エビデンスとして成立する条件", () =
     expect(html).not.toMatch(/<link/);
   });
 
-  it("JS を切っても画面が読める（描画は静的 HTML/CSS だけ）", () => {
+  /**
+   * **単票は JS を 1 行も持たない。** 描画はもともと静的だったが、テーマ切替と SO/SI 表示も
+   * CSS だけのトグルにしたので `<script>` が要らなくなった——JS を切った環境でも、
+   * CSP で script を止められた環境でも、**読むことも切り替えることもできる**。
+   */
+  it("単票は script を出さない（切り替えまで CSS だけで動く）", () => {
     const snap = snapWith((c) => putText(c, "READABLE"));
     const html = renderScreenHtml(snap);
-    const body = html.slice(0, html.lastIndexOf("<script>"));
-    expect(body).toContain("READABLE"); // script より前に画面がある
+    expect(html).not.toContain("<script");
+    expect(html).toContain("READABLE");
   });
 
-  it("押せる部品を置かない（読み取り専用のエビデンス）", () => {
+  /**
+   * **押せる部品を置かないのは「画面の中」の話。** 読み取り専用の記録なので、欄も AID ボタンも
+   * 出さない（出すと「押せる」と誤解させる）。ページのクローム（テーマ・SO/SI の切り替え）は
+   * 画面ではなく**見え方**を変えるものなので、この規則の対象ではない。
+   */
+  it("画面の中に押せる部品を置かない（読み取り専用のエビデンス）", () => {
     const fields: Field[] = [
       { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "typed" }
     ];
     const html = renderScreenHtml(snapWith(undefined, fields));
-    expect(html).not.toContain("<input");
-    expect(html).not.toContain("<textarea");
+    const figure = html.slice(html.indexOf("<figure"), html.indexOf("</figure>"));
+    expect(figure).not.toContain("<input");
+    expect(figure).not.toContain("<textarea");
+    expect(figure).not.toContain("<button");
   });
 
   /** `fields[].value` を出さない＝非表示欄の中身を HTML に載せる経路を作らない */
@@ -349,16 +360,20 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
    * 左へ 1 桁ずれる（web-ui の `windowStyle` は既に +1 で描いている）。
    */
   /**
-   * **SO/SI マークは淡色にする。** 呼び出し側（web-ui の画面 HTML 保存）は SO/SI 桁に
-   * `{ }` を入れて渡す。ホストのデータにある本物の `{ }` と同じ字なので、色を分けないと
-   * **どちらが制御桁か分からない**（画面と同じ問題。web-ui は `.a-shift` で分けている）。
+   * **SO/SI マークは常に HTML へ入れ、見せるかどうかは CSS のトグルで決める。**
+   *
+   * `{ }` はホストのデータにある本物の `{ }` と同じ字なので、色を分けないと**どちらが
+   * 制御桁か分からない**（web-ui の `.a-shift` と同じ問題）。淡色クラスは制御桁にだけ付く。
+   *
+   * 印はセルの `char` ではなく `kind` から決める——制御桁に中身は無く、`{ }` はこちらの
+   * 表示上の都合だから。
    */
-  it("印の載った SO/SI 桁だけ淡色クラスを付ける（本物の { } は素のまま）", () => {
+  it("SO/SI 桁だけ淡色クラス付きの span にする（本物の { } は素のまま）", () => {
     const snap = snapWith((c) => {
-      c[0]![0] = cell("{", { kind: "so" });
+      c[0]![0] = cell("", { kind: "so" });
       c[0]![1] = cell("取", { kind: "dbcs-lead" });
       c[0]![2] = cell("", { kind: "dbcs-tail" });
-      c[0]![3] = cell("}", { kind: "si" });
+      c[0]![3] = cell("", { kind: "si" });
       c[0]![4] = cell("{"); // ホストのデータにある本物の {
     });
     const html = renderScreenHtml(snap);
@@ -368,29 +383,40 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html.match(/class="c-green a-so"/g)).toHaveLength(2);
   });
 
-  /**
-   * **濃さは呼び出し側が決める。** web-ui の画面設定「SO/SI 表示」は 非表示 / 薄目 / 濃目 の
-   * 3 値で、濃目も**ふつうの文字より薄い**（同じ色にすると本物の `{ }` と見分けが付かない）。
-   * ここが追従しないと**画面と保存した HTML で色が食い違う**。
-   */
-  it("shiftMarkTone: strong なら濃さの修飾子を足す（濃目）", () => {
+  /** 非表示（nonDisplay）桁には描かない——ACS は非表示属性の桁に何も描かない */
+  it("非表示桁の SO/SI にはマークを置かない", () => {
     const snap = snapWith((c) => {
-      c[0]![0] = cell("{", { kind: "so" });
-      c[0]![1] = cell("取", { kind: "dbcs-lead" });
-      c[0]![2] = cell("", { kind: "dbcs-tail" });
-      c[0]![3] = cell("}", { kind: "si" });
+      c[0]![0] = cell("", { kind: "so", nonDisplay: true });
+      c[0]![1] = cell("", { kind: "si", nonDisplay: true });
     });
-    const html = renderScreenHtml(snap, {}, { shiftMarkTone: "strong" });
-    expect(html).toContain('<span class="c-green a-so a-so-strong">{</span>');
-    expect(html).toContain('<span class="c-green a-so a-so-strong">}</span>');
+    const html = renderScreenHtml(snap);
+    expect(html).not.toContain('a-so"'); // 桁には付かない（CSS の .a-so は残る）
+    expect(html).not.toContain('id="s"'); // 出す桁が無いので切り替えも出さない
   });
 
-  it("印の無い SO/SI 桁はランを割らない（span を増やさない）", () => {
-    const snap = snapWith((c) => {
-      c[0]![0] = cell(" ", { kind: "so" });
-      c[0]![1] = cell(" ", { kind: "si" });
+  /**
+   * **切り替えは CSS だけ**（チェックボックス＋`:checked ~`）。`shiftMarks` で決まるのは
+   * 開いたときの状態だけで、読み手はページ内で出し入れできる。
+   */
+  it("SO/SI の切り替えを置き、初期状態は shiftMarks で決まる", () => {
+    const withShift = snapWith((c) => {
+      c[0]![0] = cell("", { kind: "so" });
+      c[0]![1] = cell("", { kind: "si" });
     });
-    expect(renderScreenHtml(snap)).not.toContain('a-so"');
+    const off = renderScreenHtml(withShift);
+    expect(off).toContain('<input class="tg" type="checkbox" id="s">'); // 既定は非表示
+    expect(off).toContain('label class="btn" for="s"');
+    const on = renderScreenHtml(withShift, {}, { shiftMarks: true });
+    expect(on).toContain('<input class="tg" type="checkbox" id="s" checked>');
+  });
+
+  /** SO/SI 桁が 1 つも無い画面に切り替えを出さない（押しても何も起きない部品を置かない） */
+  it("SO/SI 桁が無ければ切り替えを出さない", () => {
+    const html = renderScreenHtml(snapWith((c) => putText(c, "ABC")));
+    expect(html).not.toContain('id="s"');
+    expect(html).not.toContain('for="s"');
+    // テーマの切り替えは常にある
+    expect(html).toContain('<input class="tg" type="checkbox" id="t">');
   });
 
   it("窓の枠は col+1 から描く（web-ui の windowStyle と同じ矩形）", () => {
@@ -440,6 +466,19 @@ describe("renderScreenHistoryHtml — 描画経路を二重に持たない", () 
   it("決定的（同じ履歴から同じ HTML）", () => {
     const e = [{ screen: snapA }, { screen: snapB, key: "F3" }];
     expect(renderScreenHistoryHtml(e)).toBe(renderScreenHistoryHtml(e));
+  });
+
+  /**
+   * **履歴の JS はコマ送りだけ。** テーマ切替と SO/SI 表示は単票と同じ CSS のトグルなので、
+   * script に残るのはコマ送りだけになった（コマ送りを CSS にするとラベルと規則が
+   * ページ数に比例して膨らむため、ここは JS のまま）。
+   */
+  it("履歴の script はコマ送りだけ（テーマ切替は CSS）", () => {
+    const html = renderScreenHistoryHtml([{ screen: snapA }, { screen: snapB }]);
+    const js = html.slice(html.lastIndexOf("<script>"));
+    expect(js).toContain("figure.scr"); // コマ送り
+    expect(js).not.toContain("data-theme"); // テーマ切替は残っていない
+    expect(html).toContain('<input class="tg" type="checkbox" id="t">');
   });
 
   it("外部リソースを参照しない", () => {
