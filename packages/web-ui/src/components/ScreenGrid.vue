@@ -658,7 +658,13 @@ function displayText(s: string): string {
  * （`recodes()` が先に false を返す）。
  */
 function recodeChar(rawByte: number): string {
-  return props.sbcsView === "kana" ? katakanaChar(rawByte) : latinChar(rawByte);
+  const ch = props.sbcsView === "kana" ? katakanaChar(rawByte) : latinChar(rawByte);
+  // **読み直した結果が制御文字になることがある**（EBCDIC の SBCS 表は 256 中 96 バイトを
+  // C0/C1/DEL へ写す）。そのまま出すと豆腐（□）になるので、`displayText` と同じく空白へ。
+  // **潰すのはここだけ**——`displayText` を制御文字全体へ広げると、列ビューが印に使う
+  // ASCII SO/SI（`SO_VIEW` / `SI_VIEW`＝U+000E / U+000F）まで消える。
+  const c = ch.codePointAt(0) ?? 0;
+  return c < 0x20 || (c >= 0x7f && c <= 0x9f) ? " " : ch;
 }
 
 /**

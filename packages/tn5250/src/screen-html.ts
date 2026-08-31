@@ -220,14 +220,32 @@ function cellChar(c: Cell): string {
 /**
  * その桁を**指定した読みで**描いたときの字。
  *
- * 読み直せるのは**生バイトを持つ SBCS だけ**（DBCS・属性桁・オーダー由来は元が無い）。
- * 持たない桁は `cellChar` と同じ字になる＝切り替えても動かない。
+ * 読み直せるのは **`kind` が `sbcs` で生バイトを持つ桁だけ**（web-ui の `recodes` と同じ条件）。
+ * **`rawByte` があることは条件にならない**——属性桁も `rawByte`（属性バイト）を載せている
+ * （web-ui が編集の種値を作るのに要る）。それを読み直すと 0x20〜0x3F が C0/C1 の制御文字に
+ * 化け、欄の先頭ごとに豆腐（□）が並ぶ（利用者の報告）。
+ *
+ * 読み直した結果が制御文字になることは、生の SBCS バイトでも起こりうる。
+ * **描けない字は半角スペースにする**——ACS と同じで、web-ui の `displayText` と同じ扱い。
  * 非表示桁も伏せたまま——読みを変えても伏せる約束は変わらない。
  */
 function cellCharAs(c: Cell, reading: SbcsReading): string {
-  if (c.nonDisplay || c.rawByte === undefined) return cellChar(c);
+  if (c.nonDisplay || c.kind !== "sbcs" || c.rawByte === undefined) return cellChar(c);
   const ch = reading === "kana" ? katakanaChar(c.rawByte) : latinChar(c.rawByte);
-  return ch === "" || ch === UNDISPLAYABLE ? " " : ch;
+  return displayableChar(ch);
+}
+
+/**
+ * 描けない字を半角スペースに落とす。
+ *
+ * 対象は制御文字（C0 / DEL / C1）と、表にマップが無いことを表す U+FFFD。そのまま出すと
+ * フォント次第で豆腐（□）になり、U+FFFD は**多くのフォントで全角幅**なので 1 桁のはずが
+ * 2 桁を占めて行末までずれる（web-ui の `displayText` に同じ注記がある）。
+ */
+function displayableChar(ch: string): string {
+  const c = ch.codePointAt(0);
+  if (c === undefined) return " ";
+  return c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0xfffd ? " " : ch;
 }
 
 /**

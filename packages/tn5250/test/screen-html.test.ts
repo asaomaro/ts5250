@@ -333,6 +333,11 @@ describe("renderScreenHtml — 罫線の幾何", () => {
   });
 });
 
+/** 画面の行だけを取り出す（CSS の改行を制御文字として拾わないため） */
+function rowsOf(html: string): string {
+  return (html.match(/<div class="ln">.*?<\/div>/g) ?? []).join("");
+}
+
 describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
   /**
    * **表示できないバイト（U+FFFD）は空白にする。** EBCDIC の表にマップの無いバイトを
@@ -559,6 +564,37 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     });
     const html = renderScreenHtml(snap, {}, { sbcs: { host: "kana" } });
     expect(html).not.toContain('id="k"');
+  });
+
+  /**
+   * **属性桁は読み直さない。** `rawByte` を持つのは SBCS だけ——ではない: 属性桁も
+   * 属性バイトを載せている（web-ui が編集の種値を作るのに要る）。`kind` を見ずに
+   * `rawByte` だけで判定すると 0x20〜0x3F が C0/C1 の制御文字に化け、
+   * **欄の先頭ごとに豆腐（□）が並ぶ**（利用者の報告）。判定は web-ui の `recodes` と同じ。
+   */
+  it("属性桁は rawByte を持っていても読み直さない", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell(" ", { kind: "attr", rawByte: 0x20 });
+      c[0]![1] = cell(" ", { kind: "attr", rawByte: 0x27 });
+    });
+    const html = renderScreenHtml(snap, {}, { sbcs: { host: "kana" } });
+    expect(html).not.toContain('class="c-green va"');
+    expect(html).not.toContain('id="k"'); // 読み替わる桁が無いので切り替えも出ない
+    expect(rowsOf(html)).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+  });
+
+  /**
+   * 生の SBCS バイトでも、読み直した先が制御文字になることはある
+   * （EBCDIC の SBCS 表は 256 中 96 バイトを C0/C1/DEL へ写す）。**描けない字は空白**
+   * ——豆腐にならないうえ、U+FFFD のように全角幅で桁をずらす字も出さない。
+   */
+  it("読み直して制御文字になる桁は空白にする", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("X", { rawByte: 0x05 }); // 両表とも制御文字（U+0009）
+    });
+    const html = renderScreenHtml(snap, {}, { sbcs: { host: "latin" } });
+    expect(html).toContain('<span class="c-green vb"> </span>');
+    expect(rowsOf(html)).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
   });
 
   /** 渡されなければ何も足さない（MCP の書き出しはこれまでどおり 1 通り） */

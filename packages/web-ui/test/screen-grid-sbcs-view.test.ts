@@ -110,4 +110,26 @@ describe("sbcsView — 生バイトを持たないセルは触らない", () => 
     expect(firstRowText(snap, "kana")).toContain("日");
     expect(firstRowText(snap, "latin")).toContain("日");
   });
+
+  /**
+   * **属性桁は読み直さない。** `rawByte` を持つのは SBCS だけ——ではない: 属性桁も
+   * 属性バイトを載せている（web-ui が編集の種値を作るのに要る）。`kind` を見ずに
+   * `rawByte` だけで判定すると、0x20〜0x3F が C0/C1 の制御文字に化けて豆腐（□）が並ぶ。
+   */
+  it("属性桁は rawByte を持っていても再解釈されない", () => {
+    const snap = screenWith(" ", { kind: "attr", rawByte: 0x20 });
+    for (const view of ["kana", "latin"] as const) {
+      expect(firstRowText(snap, view)).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    }
+  });
+
+  /**
+   * 生の SBCS バイトでも、読み直した先が制御文字になることはある
+   * （EBCDIC の SBCS 表は 256 中 96 バイトを C0/C1/DEL へ写す）。**描けない字は空白**。
+   */
+  it("読み直して制御文字になる桁は空白にする", () => {
+    const snap = screenWith("X", { rawByte: 0x05 }); // 両表とも制御文字（U+0009）
+    expect(firstRowText(snap, "kana")).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(firstRowText(snap, "latin")).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+  });
 });
