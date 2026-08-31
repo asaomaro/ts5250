@@ -55,6 +55,28 @@ function safeFileName(name: string): string {
   return cleaned.length > 0 ? cleaned : "screen";
 }
 
+/**
+ * ファイル名に入れる時刻。**ブラウザのローカル時刻**で作る。
+ *
+ * 以前は `toISOString()`＝UTC だった。日本から保存すると 9 時間ずれた名前が付き、
+ * **いつ撮った画面かを名前で追えない**——保存した HTML を並べて突き合わせる使い方なので、
+ * ここがずれると効かない。
+ *
+ * 形は `YYYY-MM-DDTHH-MM-SS` のまま保つ。**ロケール書式（`toLocaleString`）は使わない**
+ * ——`/` や `:` はファイル名に使えない環境があり、桁揃えもロケール次第で崩れて
+ * **名前順が時刻順にならなくなる**。合わせるのは時刻の値であって書式ではない。
+ *
+ * 中身の `capturedAt` は UTC（`Z` 付き）のまま。あちらは機械が読む事実なので、
+ * オフセットが明示された形のほうがよい。
+ */
+function localStamp(d: Date): string {
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`
+  );
+}
+
 /** ジョブ識別子の表示形（`番号/ユーザー/ジョブ名`。引けていなければ装置名だけ） */
 function jobLabel(job: { name: string; user?: string; number?: string } | undefined): string | undefined {
   if (!job) return undefined;
@@ -88,7 +110,7 @@ export function downloadScreenHtml(sessionId: string, now = new Date()): string 
       : {})
   }, { shiftMarks: view.sosi });
 
-  const stamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const stamp = localStamp(now);
   const name = `${safeFileName(s.label)}-${stamp}.html`;
   const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
   const a = document.createElement("a");

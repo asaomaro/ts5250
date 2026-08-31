@@ -100,13 +100,46 @@ describe("画面を HTML で保存", () => {
 
   it("完結した HTML をセッション名つきのファイル名で保存する", () => {
     addSession(snapshotWith([...("HELLO" as string)].map((c) => cell(c))));
-    const name = downloadScreenHtml(SID, new Date("2026-08-01T09:30:00Z"));
+    // ローカル時刻の各要素から作る＝**どのタイムゾーンで走らせても同じ名前**になる
+    const name = downloadScreenHtml(SID, new Date(2026, 7, 1, 9, 30, 0));
     expect(name).toBe("DEV1-2026-08-01T09-30-00.html");
     expect(downloadName).toBe(name);
     expect(written).toMatch(/^<!DOCTYPE html>/);
     expect(written).toContain("HELLO");
     expect(written).toContain("192.0.2.1"); // 接続先をメタに載せる
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:x");
+  });
+
+  /**
+   * **ファイル名の時刻はブラウザのローカル時刻。**
+   *
+   * UTC のままだと、日本から保存した画面に 9 時間前の名前が付く。保存した HTML を並べて
+   * 突き合わせる使い方なので、名前の時刻が手元の時計と合っていないと効かない。
+   *
+   * 走らせる環境のタイムゾーンに依存させないため、この 2 件だけ `TZ` を明示して測る
+   * （手元は Asia/Tokyo、CI は UTC）。
+   */
+  it.each([
+    ["Asia/Tokyo", "DEV1-2026-08-01T18-30-00.html"],
+    ["America/New_York", "DEV1-2026-08-01T05-30-00.html"]
+  ])("UTC ではなくローカル時刻で名前を付ける（TZ=%s）", (tz, expected) => {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+      addSession(snapshotWith([cell("A")]));
+      // 同じ瞬間（UTC 09:30）でも、名前は見ている場所の時計で決まる
+      expect(downloadScreenHtml(SID, new Date("2026-08-01T09:30:00Z"))).toBe(expected);
+    } finally {
+      process.env.TZ = prev;
+    }
+  });
+
+  /** 桁は必ず 2 桁に揃える（名前順＝時刻順を崩さない） */
+  it("月日・時分秒を 0 詰めする", () => {
+    addSession(snapshotWith([cell("A")]));
+    expect(downloadScreenHtml(SID, new Date(2026, 0, 2, 3, 4, 5))).toBe(
+      "DEV1-2026-01-02T03-04-05.html"
+    );
   });
 
   /**
