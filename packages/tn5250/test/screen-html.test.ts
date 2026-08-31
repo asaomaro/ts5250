@@ -440,6 +440,32 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html).toContain('<input class="tg" type="checkbox" id="t">');
   });
 
+  /**
+   * **画面下の状態行は項目が分かれて見えること。**
+   *
+   * `.oia` の規則がまるごと無かったため、素の inline のまま並んで
+   * 「行/列 01/001画面 24x80入力可」と繋がって出ていた（利用者の指摘）。
+   * 項目は個別の `<span>` になっているので、**間隔さえ与えれば分かれる**——
+   * 区切り文字を挟む方向には行かない（注記であって桁の絵ではない）。
+   */
+  it("状態行（OIA）に間隔を与える（項目が繋がって見えない）", () => {
+    const html = renderScreenHtml(snapWith((c) => putText(c, "ABC")));
+    // 項目はそれぞれ独立した span（ここが 1 つに潰れていたら間隔では直せない）
+    expect(html).toContain("<span>画面 <b>24x80</b></span>");
+    expect(html).toContain('<span class="ok">入力可</span>');
+    // 並べ方の規則があること。gap が無ければ字が隣接する
+    expect(html).toMatch(/\.oia\{[^}]*display:flex/);
+    expect(html).toMatch(/\.oia\{[^}]*gap:12px/);
+  });
+
+  /** 応答待ちは色で分ける（web-ui の `.lock` と同じ） */
+  it("応答待ちの状態行に色の規則がある", () => {
+    const snap = { ...snapWith((c) => putText(c, "ABC")), keyboardLocked: true };
+    const html = renderScreenHtml(snap);
+    expect(html).toContain('<span class="lock">🔒 応答待ち</span>');
+    expect(html).toContain(".lock{color:var(--t-yellow)}");
+  });
+
   it("窓の枠は col+1 から描く（web-ui の windowStyle と同じ矩形）", () => {
     const snap = snapWith();
     snap.gui = {

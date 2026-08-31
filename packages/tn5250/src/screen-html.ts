@@ -507,7 +507,8 @@ const STYLE = `
 :root{--bg:#0b0f0d;--fg:#c9d6cd;--card:#111815;--line:#22302a;--muted:#8ba396;
 --crt:#050d09;--crt-bezel:#0c1710;--crt-line:#16281d;
 --t-green:#3ddc84;--t-white:#e8f0e8;--t-red:#ff6161;--t-turquoise:#4dd8d8;
---t-yellow:#e8d44d;--t-pink:#ff8ad8;--t-blue:#6ea8ff;--t-glow:0 0 1px}
+--t-yellow:#e8d44d;--t-pink:#ff8ad8;--t-blue:#6ea8ff;--t-glow:0 0 1px;
+--mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"BIZ UDGothic","MS Gothic",monospace}
 #t:checked ~ .page{--bg:#f4f6f2;--fg:#1f2937;--card:#fff;--line:#d3d9cf;--muted:#5b6b61;
 --crt:#f7f8f4;--crt-bezel:#eceee8;--crt-line:#d3d9cf;
 --t-green:#1a7f37;--t-white:#1f2937;--t-red:#c62828;--t-turquoise:#007c8a;
@@ -533,7 +534,7 @@ border-radius:8px;padding:10px}
    padding があると絶対配置だけ数 px ずれる（web-ui はその補正を各所に持っている）。
    最初から持たなければ、ずれる余地が無い。 */
 .grid{position:relative;background:var(--crt);color:var(--t-green);
-font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,"BIZ UDGothic","MS Gothic",monospace;
+font-family:var(--mono);
 font-size:15px;line-height:1.25;white-space:pre}
 .ln{height:1.25em}
 /* 全角は必ず箱に入れて 2 桁を占めさせる（フォントに依らせない）。h は対を失った全角 */
@@ -593,6 +594,18 @@ color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
 .gc.sel{box-shadow:inset 0 0 0 1px currentColor}
 .gc.na{opacity:.45}
 .gsb{width:1ch;height:1.25em;background:var(--crt-line)}
+/* 画面下の状態行（OIA）。web-ui の StatusBar と同じ実値。
+   **項目の区切りは gap で作る。** 規則が無かった頃は素の inline のまま並び、
+   「行/列 01/001画面 24x80入力可」と繋がって読めなかった（利用者の指摘）。
+   区切り文字を挟まないのは、ここが桁の絵ではなく**注記**だからで、
+   折り返しても崩れない間隔のほうが素直に効く。
+   ※ここは STYLE のテンプレートリテラル内。バッククォートは書けない。 */
+.oia{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:5px 10px;
+font-family:var(--mono);font-size:11px;color:var(--muted);
+background:var(--crt-bezel);border-top:1px solid var(--crt-line)}
+.oia b{color:var(--t-green)}
+.lock{color:var(--t-yellow)}
+.msg{color:var(--t-red)}
 .frames{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px}
 .frames button.on{outline:2px solid var(--t-green)}
 [hidden]{display:none!important}
