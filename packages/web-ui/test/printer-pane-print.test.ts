@@ -80,8 +80,11 @@ describe("PrinterPane: 印刷", () => {
     const html = cap.written();
     expect(html).toMatch(/^<!DOCTYPE html>/);
     expect(html).toContain("<title>");
-    // フォントスタックのインライン再掲が消えていること
-    expect(html).not.toContain("HackGen Console NF");
+    // **アプリ側の変数を持ち込まない。** 別ウィンドウに `--screen-mono` は届かないので、
+    // ここで組み立てると二重管理になる。フォントは配布 HTML が自前の候補を持つ
+    // （読み手がページ内で選べる。`spool-html.ts` の `SPOOL_FONTS`）。
+    expect(html).not.toContain("--screen-mono");
+    expect(html).toContain("--sheet-mono");
     w.unmount();
   });
 

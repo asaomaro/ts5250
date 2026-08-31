@@ -72,11 +72,16 @@ const activeSessionId = computed(() => {
  * ただし項目は同じではない——5250 画面専用の設定を並べても効かないので、
  * **そのペインで実際に効くものだけ**を渡す。
  *
- * 帳票の本文は SCS の復号を通った Unicode 文字列として届き、SO/SI は復号時に
- * 消費され、生バイトは端末に来ない。したがって SO/SI 表示・表示コードは
- * **この経路では実装できない**ので出さない（spec の注記を参照）。
+ * 5250 画面専用のもの（入力欄の見せ方・カーソル・窓など）は帳票に無いので出さない。
+ *
+ * **SO/SI 表示と表示コードはここにもある。** かつては「SCS の復号で SO/SI が消費され、
+ * 生バイトも来ないので実装できない」と書いてあったが、`ScsDecoder` が桁ごとの生バイトと
+ * SO/SI 位置を残すようになったので効くようになった（`ReportText` の注記）。
+ *
+ * **テーマ（通常/ダーク）はここに出さない。** アプリ全体の「外観」が持っている
+ * ——同じことを 2 か所から変えられるようにすると、どちらが効いているのか分からなくなる。
  */
-const REPORT_VIEW_KEYS: readonly (keyof ViewSettings)[] = ["linkify", "font"];
+const REPORT_VIEW_KEYS: readonly (keyof ViewSettings)[] = ["sosi", "kana", "linkify", "font"];
 const viewMenuTarget = computed<
   { sessionId: string; keys?: readonly (keyof ViewSettings)[] } | undefined
 >(() => {

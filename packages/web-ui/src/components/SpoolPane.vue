@@ -32,6 +32,15 @@ import { useColumnWidths } from "../composables/useColumnWidths.js";
  */
 const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
+/**
+ * 帳票の復号 CCSID。**表示コード切替（カナ ⇄ 英）の向きを決めるのに要る**
+ * ——「そのまま復号した字がどちらの読みか」はここでしか分からない。
+ * 未設定なら既定（`DEFAULT_SPOOL_CCSID`）で、そちらは英小文字系。
+ */
+const spoolCcsid = computed(
+  () => systemsStore.systems.find((x) => x.ref === props.system)?.spoolCcsid
+);
+
 /** 一覧の 1 行（サーバーの SpoolEntry と対） */
 interface SpoolRow {
   jobName: string;
@@ -439,7 +448,7 @@ onMounted(() => {
       <pre v-else-if="contentLoading" class="muted">読み込んでいます…</pre>
       <!-- 本文は共用の `ReportText` へ（`⚙ 表示` のリンク化・フォントが効く）。
            カスケードの鍵はタブ ID——スプールはセッションを持たないため -->
-      <ReportText v-else :session-id="tabId" :text="selectedText" />
+      <ReportText v-else :session-id="tabId" :pages="pages" :ccsid="spoolCcsid" />
     </section>
   </div>
 </template>
