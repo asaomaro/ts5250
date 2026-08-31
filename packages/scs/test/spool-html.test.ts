@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderSpoolHtml } from "../src/spool-html.js";
-import type { LogicalPage } from "../src/scs.js";
+import { ScsDecoder, type LogicalPage } from "../src/scs.js";
+import { codecForCcsid } from "@ts5250/ebcdic";
 
 /**
  * スプール（帳票）→ 自己完結 HTML。`renderSpoolPdf` の HTML 版。
@@ -40,10 +41,22 @@ describe("renderSpoolHtml — エビデンスとして成立する条件", () =>
     expect(html).toContain("&amp;");
   });
 
-  it("読み取り専用の記録なので入力欄を出さない", () => {
+  /**
+   * **押せる部品を置かないのは「紙の中」の話。** 帳票そのものは読み取り専用の記録なので、
+   * 入力欄も編集の導線も出さない。ページのクローム（テーマ・フォント・SO/SI・表示コードの
+   * 切り替え）は紙ではなく**見え方**を変えるもので、この規則の対象ではない
+   * ——それらは CSS だけで動かすために隠した `<input>` を使う（`TOGGLE_CSS` の注記）。
+   */
+  it("紙の中に押せる部品を置かない（読み取り専用の記録）", () => {
     const html = renderSpoolHtml([page(["X"])]);
-    expect(html).not.toMatch(/<input\b/);
-    expect(html).not.toMatch(/<textarea\b/);
+    const sheet = html.slice(html.indexOf("<figure"), html.indexOf("</figure>"));
+    expect(sheet).not.toMatch(/<input\b/);
+    expect(sheet).not.toMatch(/<textarea\b/);
+    expect(sheet).not.toMatch(/<button\b/);
+    // クロームの入力は**隠した状態用**だけ（値を打たせる欄は 1 つも無い）
+    expect(html.match(/<input\b[^>]*>/g) ?? []).toSatisfy((all: string[]) =>
+      all.every((t) => /type="(checkbox|radio)"/.test(t) && t.includes('class="tg"'))
+    );
   });
 });
 
@@ -83,6 +96,92 @@ describe("renderSpoolHtml — 桁がずれない", () => {
   it("桁数は cols で固定する", () => {
     const html = renderSpoolHtml([page(["X"], 132)]);
     expect(html).toContain('style="width:132ch"');
+  });
+});
+
+/**
+ * **見え方の切り替えは CSS だけで作る。** チェックボックス／ラジオと `:checked ~` で動くので、
+ * JS を切っても・CSP で script を止められても切り替えが生きる。JS に残るのはページ送りだけ。
+ */
+describe("renderSpoolHtml — 見え方の切り替え", () => {
+  const dbcsPage = (): LogicalPage => {
+    const codec = codecForCcsid(1399);
+    return new ScsDecoder(1399).decode(codec.encode("AB日本語 exit").bytes)[0]!;
+  };
+
+  it("テーマは JS ではなく CSS のトグルで切り替える", () => {
+    const html = renderSpoolHtml([page(["X"])]);
+    expect(html).toContain('<input class="tg" type="checkbox" id="t">');
+    expect(html).toContain("#t:checked ~ .page{");
+    // 旧実装の JS が残っていない（script はページ送りだけ）
+    expect(html).not.toContain("data-theme");
+    const js = html.slice(html.lastIndexOf("<script>"));
+    expect(js).toContain("figure.pg");
+    expect(js).not.toContain("getElementById('t')");
+  });
+
+  it("フォントは候補を順送りできる（自己完結なので Web フォントは積まない）", () => {
+    const html = renderSpoolHtml([page(["X"])]);
+    expect(html).toContain('<input class="tg" type="radio" name="g" id="g0" checked>');
+    expect(html).toContain("フォント: 標準");
+    expect(html).toContain("フォント: 白源 HackGen");
+    expect(html).toContain("--sheet-mono:");
+    expect(html).not.toMatch(/@font-face|https?:/); // 外から取ってこない
+  });
+
+  it("指定のフォントで開く", () => {
+    const html = renderSpoolHtml([page(["X"])], {}, { font: "udev" });
+    expect(html).toMatch(/id="g4" checked/);
+  });
+
+  /**
+   * SO/SI は桁を占めないので、印を出すと**その行は右へずれる**。既定を非表示にしてあるのは
+   * そのため——紙と突き合わせるときは消しておく。
+   */
+  it("SO/SI の印を入れ、出すかは CSS で決める", () => {
+    const html = renderSpoolHtml([dbcsPage()]);
+    expect(html).toContain('<span class="so">{</span>');
+    expect(html).toContain('<span class="so">}</span>');
+    expect(html).toContain(".so{display:none"); // 既定は非表示
+    expect(html).toContain("#s:checked ~ .page .so{display:inline-block}");
+    expect(html).toContain('<input class="tg" type="checkbox" id="s">');
+  });
+
+  it("SO/SI 表示で開くよう指定できる", () => {
+    const html = renderSpoolHtml([dbcsPage()], {}, { shiftMarks: true });
+    expect(html).toMatch(/id="s" checked/);
+  });
+
+  it("SO/SI の無い帳票には切り替えを出さない", () => {
+    const html = renderSpoolHtml([page(["ABC"])]);
+    expect(html).not.toContain('id="s"');
+  });
+
+  /** 表示コード切替。読みで字が変わる区間だけ 2 つ出す（変わらない区間は素のまま） */
+  it("両方の読みを入れ、CSS で差し替える", () => {
+    const html = renderSpoolHtml([dbcsPage()], {}, { sbcs: { host: "latin" } });
+    expect(html).toContain('<span class="va">exit</span>');
+    expect(html).toContain('<span class="vb">ｵﾒｹﾎ</span>');
+    expect(html).toContain(".sheet .vb{display:none}");
+    expect(html).toContain("#k:checked ~ .page .sheet .va{display:none}");
+    // 向きはホストの読みで決まる（英系ホストなので 英 ⇄ カナ）
+    expect(html).toContain("表示コード: 英");
+    expect(html).toContain("表示コード: カナ");
+  });
+
+  it("読み替わる桁が無ければ表示コードの切り替えを出さない", () => {
+    // 大文字と数字は 2 表で同じ位置
+    const codec = codecForCcsid(1399);
+    const p = new ScsDecoder(1399).decode(codec.encode("ABC123").bytes)[0]!;
+    const html = renderSpoolHtml([p], {}, { sbcs: { host: "latin" } });
+    expect(html).not.toContain('id="k"');
+    expect(html).not.toContain('class="va"');
+  });
+
+  it("渡さなければ表示コードの切り替えは出ない（従来どおり 1 通り）", () => {
+    const html = renderSpoolHtml([dbcsPage()]);
+    expect(html).not.toContain('id="k"');
+    expect(html).not.toContain('class="va"');
   });
 });
 
