@@ -135,22 +135,32 @@ describe("画面を HTML で保存", () => {
 
   /**
    * **SO/SI は書き出す側で焼き込まない。** マークは `renderScreenHtml` が常に HTML へ入れ、
-   * 読み手が**ページ内のトグル（CSS だけ）**で出し入れできる。ここから渡すのは
-   * 「開いたときに出ているか」だけ——画面と同じ状態で開くための初期値である。
+   * 読み手が**ページ内の順送り（CSS だけ）**で 非表示 / 薄目 / 濃目 を選べる。ここから渡すのは
+   * 「開いたときの見せ方」だけ——画面と同じ状態で開くための初期値である。
+   *
+   * **画面設定の 3 値をそのまま渡す**のが肝で、ここが 2 値に落ちると「濃目」で保存しても
+   * 薄目で開くことになり、画面と保存した HTML で絵が食い違う。
    */
-  it("SO/SI 表示中は、開いた時点でマークが出ている状態にする", () => {
+  it("SO/SI 表示「薄目」は、薄目の状態で開く", () => {
     addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
     viewSettings.set("sosi", "dim");
     downloadScreenHtml(SID);
     expect(written).toContain('<span class="c-green a-so">{</span>');
-    expect(written).toContain('id="s" checked');
+    expect(written).toContain('id="s1" checked');
   });
 
-  it("SO/SI 非表示なら、開いた時点では出ていない（トグルは置く）", () => {
+  it("SO/SI 表示「濃目」は、濃目の状態で開く", () => {
+    addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
+    viewSettings.set("sosi", "strong");
+    downloadScreenHtml(SID);
+    expect(written).toContain('id="s2" checked');
+  });
+
+  it("SO/SI 非表示なら、開いた時点では出ていない（順送りは置く）", () => {
     addSession(snapshotWith([cell("", { kind: "so" }), cell("あ", { kind: "dbcs-lead" })]));
     viewSettings.set("sosi", "none");
     downloadScreenHtml(SID);
-    expect(written).toContain('<input class="tg" type="checkbox" id="s">');
-    expect(written).not.toContain('id="s" checked');
+    expect(written).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
+    expect(written).toContain('for="s2">SO/SI 薄目</label>');
   });
 });

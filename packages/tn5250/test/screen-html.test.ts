@@ -391,30 +391,51 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     });
     const html = renderScreenHtml(snap);
     expect(html).not.toContain('a-so"'); // 桁には付かない（CSS の .a-so は残る）
-    expect(html).not.toContain('id="s"'); // 出す桁が無いので切り替えも出さない
+    expect(html).not.toContain('name="s"'); // 出す桁が無いので切り替えも出さない
   });
 
   /**
-   * **切り替えは CSS だけ**（チェックボックス＋`:checked ~`）。`shiftMarks` で決まるのは
-   * 開いたときの状態だけで、読み手はページ内で出し入れできる。
+   * **切り替えは CSS だけ**（ラジオ＋`:checked ~`）で、**画面設定と同じ 3 値**
+   * （非表示 / 薄目 / 濃目）を順送りできる。`shiftMarks` で決まるのは開いたときの状態だけ。
+   *
+   * ここが 2 値に落ちると、画面で「濃目」にして保存した HTML を開いても薄目でしか読めない
+   * ——**画面と保存した HTML で絵が食い違う**ので、3 値であること自体を測る。
    */
-  it("SO/SI の切り替えを置き、初期状態は shiftMarks で決まる", () => {
+  it("SO/SI は 3 値の順送りを置き、初期状態は shiftMarks で決まる", () => {
     const withShift = snapWith((c) => {
       c[0]![0] = cell("", { kind: "so" });
       c[0]![1] = cell("", { kind: "si" });
     });
     const off = renderScreenHtml(withShift);
-    expect(off).toContain('<input class="tg" type="checkbox" id="s">'); // 既定は非表示
-    expect(off).toContain('label class="btn" for="s"');
-    const on = renderScreenHtml(withShift, {}, { shiftMarks: true });
-    expect(on).toContain('<input class="tg" type="checkbox" id="s" checked>');
+    // 状態の数だけラジオがあり、既定（非表示）が入っている
+    expect(off).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
+    expect(off).toContain('<input class="tg" type="radio" name="s" id="s1">');
+    expect(off).toContain('<input class="tg" type="radio" name="s" id="s2">');
+    // ラベルは 3 つ置くが、見えるのは今の状態のものだけ（`.sw` と `:checked ~` で出し分け）
+    expect(off).toContain('<label class="btn sw" for="s1">SO/SI 非表示</label>');
+    expect(off).toContain('<label class="btn sw" for="s2">SO/SI 薄目</label>');
+    expect(off).toContain('<label class="btn sw" for="s0">SO/SI 濃目</label>');
+
+    const dim = renderScreenHtml(withShift, {}, { shiftMarks: "dim" });
+    expect(dim).toContain('id="s1" checked');
+    const strong = renderScreenHtml(withShift, {}, { shiftMarks: "strong" });
+    expect(strong).toContain('id="s2" checked');
+  });
+
+  /** 濃目は**薄目とふつうの文字の中間**（同じ色にすると本物の `{ }` と見分けが付かない） */
+  it("薄目と濃目で配合が違い、どちらもふつうの文字より薄い", () => {
+    const html = renderScreenHtml(snapWith((c) => {
+      c[0]![0] = cell("", { kind: "so" });
+    }));
+    expect(html).toContain("color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))"); // 薄目
+    expect(html).toContain("color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))"); // 濃目
   });
 
   /** SO/SI 桁が 1 つも無い画面に切り替えを出さない（押しても何も起きない部品を置かない） */
   it("SO/SI 桁が無ければ切り替えを出さない", () => {
     const html = renderScreenHtml(snapWith((c) => putText(c, "ABC")));
-    expect(html).not.toContain('id="s"');
-    expect(html).not.toContain('for="s"');
+    expect(html).not.toContain('name="s"');
+    expect(html).not.toContain('for="s0"');
     // テーマの切り替えは常にある
     expect(html).toContain('<input class="tg" type="checkbox" id="t">');
   });

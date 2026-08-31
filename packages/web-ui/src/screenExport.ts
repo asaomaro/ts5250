@@ -12,8 +12,9 @@
  * 「英」で見ているときに実際に起こる。so、描く前にセルを表示設定で写し替える。
  *
  * **SO/SI マークはここでは触らない。** `renderScreenHtml` が SO/SI 桁を見て自分で `{ }` を
- * 置き、**ページ内のトグル（CSS だけ）で出し入れできる**ようにしている。こちらから渡すのは
- * 「開いたときに出ているか」（`shiftMarks`）だけ——画面と同じ状態で開くための初期値である。
+ * 置き、**ページ内で 非表示 → 薄目 → 濃目 を順送りできる**ようにしている（CSS だけのトグル）。
+ * こちらから渡すのは「開いたときの見せ方」（`shiftMarks`）だけ——画面設定と同じ 3 値をそのまま
+ * 渡し、画面と同じ状態で開くための初期値にする。
  *
  * 写し替えは**表示に関わる分だけ**。配色（literal/semantic）と質感（CRT/flat）は持ち込まない
  * ——`renderScreenHtml` は自前の見た目を持っており、そこまで二重管理にすると
@@ -85,7 +86,7 @@ export function downloadScreenHtml(sessionId: string, now = new Date()): string 
     ...(sbcsView !== "host"
       ? { note: `表示設定を反映: 表示コード=${sbcsView === "kana" ? "カナ" : "英"}` }
       : {})
-  }, { shiftMarks: view.sosi !== "none" });
+  }, { shiftMarks: view.sosi });
 
   const stamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const name = `${safeFileName(s.label)}-${stamp}.html`;

@@ -60,13 +60,31 @@ export interface ScreenHtmlMeta {
  */
 export interface ScreenHtmlStyle {
   /**
-   * SO/SI マークを**最初から出しておく**か（既定 false＝非表示）。
+   * SO/SI マークの**開いたときの見せ方**（既定 `none`＝非表示）。
    *
-   * **出す／出さないはページ内で切り替えられる**（CSS だけのトグル。`TOGGLE_CSS` 参照）ので、
-   * ここで決まるのは初期状態だけ。web-ui は画面と同じ状態で開くために渡す。
+   * **非表示 → 薄目 → 濃目 はページ内で順送りできる**（CSS だけのトグル。`TOGGLE_CSS` 参照）
+   * ので、ここで決まるのは初期状態だけ。web-ui は画面と同じ状態で開くために渡す。
    */
-  shiftMarks?: boolean;
+  shiftMarks?: ShiftMarkView;
 }
+
+/**
+ * SO/SI マークの見せ方。非表示／薄目／濃目（web-ui の画面設定「SO/SI 表示」と同じ 3 値）。
+ *
+ * **濃目もふつうの文字より薄い**——桁の色そのままにすると本物の `{ }` と区別が付かず、
+ * 色を分けた意味が消える。薄目は淡すぎて読み取りにくい環境があるので、その中間を用意する。
+ */
+export type ShiftMarkView = "none" | "dim" | "strong";
+
+/** SO/SI の順送りの順（web-ui の ctrl+F3 と同じ。既定を先頭に置く） */
+const SOSI_VIEWS = ["none", "dim", "strong"] as const;
+
+/** 切り替えラベルに出す名前（web-ui の画面設定と同じ言葉） */
+const SOSI_LABELS: Record<ShiftMarkView, string> = {
+  none: "SO/SI 非表示",
+  dim: "SO/SI 薄目",
+  strong: "SO/SI 濃目"
+};
 
 /** 履歴 1 コマ。画面と、その画面を出した操作 */
 export interface ScreenHistoryEntry {
@@ -447,17 +465,33 @@ function metaHtml(meta: ScreenHtmlMeta, extra: [string, string][] = []): string 
  * `display:none` にすると Tab 順から外れてキーボードで押せなくなるので、1px に潰して隠す。
  *
  * ラベルは**今の状態**を出す（従来のテーマボタンと同じ流儀）。CSS は字を差し替えられないので、
- * 両方の字を入れておいて `:checked` で出し分ける。
+ * 2 値（テーマ）は両方の字を入れて `:checked` で出し分け、3 値（SO/SI）は**状態の数だけ
+ * ラベルを置いて 1 つだけ見せる**。
+ *
+ * **3 値の順送りはラジオで作る。** ラベル i は「今が状態 i」のときだけ見え、押すと次の状態の
+ * ラジオが入る（`for` が次を指す）——つまり**ボタン 1 つが 非表示 → 薄目 → 濃目 → 非表示 と
+ * 回る**。web-ui の画面設定（ctrl+F3 の順送り）と同じ回り方なので、保存した HTML でも
+ * 画面と同じ 3 値が選べる。
  */
 const TOGGLE_CSS = `
 .tg{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
-#t:focus-visible ~ .page label[for=t],#s:focus-visible ~ .page label[for=s]{
-outline:2px solid var(--t-green);outline-offset:1px}
+#t:focus-visible ~ .page label[for=t],
+#s0:focus-visible ~ .page label[for=s1],
+#s1:focus-visible ~ .page label[for=s2],
+#s2:focus-visible ~ .page label[for=s0]{outline:2px solid var(--t-green);outline-offset:1px}
 .btn>span{display:none}
 .btn>.st-off{display:inline}
-#t:checked ~ .page label[for=t]>.st-off,#s:checked ~ .page label[for=s]>.st-off{display:none}
-#t:checked ~ .page label[for=t]>.st-on,#s:checked ~ .page label[for=s]>.st-on{display:inline}
-#s:checked ~ .page .a-so{visibility:visible}
+#t:checked ~ .page label[for=t]>.st-off{display:none}
+#t:checked ~ .page label[for=t]>.st-on{display:inline}
+.sw{display:none}
+#s0:checked ~ .page label[for=s1],
+#s1:checked ~ .page label[for=s2],
+#s2:checked ~ .page label[for=s0]{display:inline-flex}
+#s1:checked ~ .page .a-so{visibility:visible}
+#s2:checked ~ .page .a-so{visibility:visible;
+color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
+#s2:checked ~ .page .a-r .a-so,#s2:checked ~ .page .a-r.a-so{
+color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
 `;
 
 /**
@@ -524,15 +558,16 @@ font-size:15px;line-height:1.25;white-space:pre}
    行送り 18.75px に対し塗り 25px）。必要な量はフォントごとに違い CSS から読めないため、
    箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
 .a-r{background:var(--cell);color:var(--crt)}
-/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift「濃目」と同じ配合）。
+/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift と同じ配合）。
    color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る。
+   ここに書くのは**薄目**で、濃目は #s2:checked が上から塗る（TOGGLE_CSS）。
    **既定は隠す。** visibility なので箱は残り、出し入れしても桁は 1 つも動かない
-   （display:none は桁が詰まるので使えない）。見せるのは #s:checked（TOGGLE_CSS）。
+   （display:none は桁が詰まるので使えない）。見せるのは #s1/#s2:checked（TOGGLE_CSS）。
    user-select:none は web-ui に合わせる——マークは制御桁の印であってデータではないので、
    選択してコピーした文字列に混ぜない。 */
 .a-so{visibility:hidden;user-select:none;-webkit-user-select:none;
-color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
-.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
+color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
+.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}
@@ -593,8 +628,8 @@ show(0);`;
 /** ページに置く切り替え。`sosi` はその画面に SO/SI 桁があるときだけ true にする */
 interface Toggles {
   sosi: boolean;
-  /** SO/SI マークを最初から出しておくか */
-  sosiOn: boolean;
+  /** SO/SI マークの初期状態（ページ内で順送りできるので、決まるのは開いたときだけ） */
+  sosiView: ShiftMarkView;
 }
 
 /**
@@ -608,7 +643,13 @@ function page(title: string, bodyHtml: string, js: string, tg: Toggles): string 
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><style>${STYLE}</style></head><body>` +
     `<input class="tg" type="checkbox" id="t">` +
-    (tg.sosi ? `<input class="tg" type="checkbox" id="s"${tg.sosiOn ? " checked" : ""}>` : "") +
+    // 3 値は**状態の数だけラジオ**を置く（1 つのボタンで順送りするため。`TOGGLE_CSS`）
+    (tg.sosi
+      ? SOSI_VIEWS.map(
+          (v, i) =>
+            `<input class="tg" type="radio" name="s" id="s${i}"${v === tg.sosiView ? " checked" : ""}>`
+        ).join("")
+      : "") +
     `<div class="page">` +
     bodyHtml +
     `</div>` +
@@ -622,12 +663,22 @@ function toggleLabel(id: string, off: string, on: string): string {
   return `<label class="btn" for="${id}"><span class="st-off">${off}</span><span class="st-on">${on}</span></label>`;
 }
 
+/**
+ * SO/SI の順送りボタン。**ラベル i は「今が状態 i」のときだけ見え、押すと次の状態に進む**
+ * ——見えているのは常に 1 つなので、利用者にはボタン 1 つが回っているように見える。
+ */
+function sosiLabels(): string {
+  return SOSI_VIEWS.map(
+    (v, i) => `<label class="btn sw" for="s${(i + 1) % SOSI_VIEWS.length}">${SOSI_LABELS[v]}</label>`
+  ).join("");
+}
+
 function header(title: string, tg: Toggles): string {
   return (
     `<header><h1>${esc(title)}</h1>` +
     toggleLabel("t", "🌙 ダーク", "☀ ライト") +
     // SO/SI 桁が 1 つも無い画面には出さない（押しても何も起きない部品を置かない）
-    (tg.sosi ? toggleLabel("s", "SO/SI 非表示", "SO/SI 表示") : "") +
+    (tg.sosi ? sosiLabels() : "") +
     `</header>`
   );
 }
@@ -648,7 +699,7 @@ export function renderScreenHtml(
   style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面";
-  const tg: Toggles = { sosi: hasShiftCells(snap), sosiOn: style.shiftMarks === true };
+  const tg: Toggles = { sosi: hasShiftCells(snap), sosiView: style.shiftMarks ?? "none" };
   // 単票は切り替えを CSS で作ったので **`<script>` を出さない**
   return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, ""), "", tg);
 }
@@ -668,7 +719,7 @@ export function renderScreenHistoryHtml(
   const title = meta.title ?? "5250 画面の履歴";
   const tg: Toggles = {
     sosi: entries.some((e) => hasShiftCells(e.screen)),
-    sosiOn: style.shiftMarks === true
+    sosiView: style.shiftMarks ?? "none"
   };
   if (entries.length === 0) {
     return page(title, header(title, tg) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, "", tg);

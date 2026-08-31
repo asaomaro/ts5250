@@ -63,5 +63,6 @@ export {
   renderScreenHistoryHtml,
   type ScreenHtmlMeta,
   type ScreenHtmlStyle,
+  type ShiftMarkView,
   type ScreenHistoryEntry
 } from "./screen-html.js";
