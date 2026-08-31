@@ -159,6 +159,7 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 | `packages/web-ui` | ブラウザの端末エミュレーター＋IBM i 機能画面（Vue 3 + Vite） |
 | `crates/hllapi` | HLLAPI / EHLLAPI の C ABI 接続層（Rust。DLL / .so）→ [`docs/HLLAPI.md`](docs/HLLAPI.md) |
 | `electron/` | デスクトップ配布（Electron + electron-builder） |
+| `launcher/` | 起動スクリプト（`start.*` / `electron.*`）共通の門番。Node のバージョン確認と、成果物がソースより古くないかの判定 |
 | `tools/gen-tables` | ICU `.ucm` → TS 変換テーブル生成（ビルド時ツール） |
 | `tools/hostserver-check` | ホストサーバー（SQL / CL / DDM / IFS / DTAQ）を実機で叩く手動チェック |
 
@@ -189,7 +190,8 @@ ESM、Node ≥ 20。
 
 ## 🚀 クイックスタート
 
-**前提**: Node.js ≥ 20、npm。IBM i 接続先（例: 無料の [PUB400.com](https://pub400.com) アカウント）。
+**前提**: Node.js `^20.19.0 || >=22.12.0`（ビルドに使う vite / rolldown の要求。`package.json` の
+`engines.node` が唯一の出どころで、起動スクリプトがそこを読んで確認します）、npm。IBM i 接続先（例: 無料の [PUB400.com](https://pub400.com) アカウント）。
 
 ### Web エミュレーター（ブラウザ）
 

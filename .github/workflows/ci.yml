@@ -25,8 +25,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # package.json の engines.node は >=20
-          node-version: 20
+          # **宣言の下限を回す。** `engines.node` は `^20.19.0 || >=22.12.0`（vite / rolldown の
+          # 要求）。上限側だけを回すと、下限の環境で落ちる変更が CI をすり抜ける。
+          node-version: "20.19"
           cache: npm
 
       - run: npm ci

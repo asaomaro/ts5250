@@ -4,7 +4,7 @@
 #   → 実行ファイル生成。
 #
 # 使い方:
-#   ./electron.sh            # 未ビルドなら自動ビルドしてから生成
+#   ./electron.sh            # 未ビルド・ソースが新しければ自動ビルドしてから生成
 #   ./electron.sh --build    # 強制再ビルドしてから生成
 #
 # 生成物は electron/dist/ に出ます。**Windows は単一のインストーラ exe**
@@ -20,7 +20,11 @@ cd "$(dirname "$0")"
 FORCE_BUILD=0
 [ "${1:-}" = "--build" ] && FORCE_BUILD=1
 
-command -v node >/dev/null 2>&1 || { echo "Node.js (>=20) が必要です" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "Node.js が必要です（必要版は package.json の engines.node）" >&2; exit 1; }
+# **バージョンまで見る。** ビルドに使う vite / rolldown は新しめの Node を要求し、満たさないと
+# ネイティブバイナリの取得あたりで落ちる。npm の engines は既定で警告どまりなので止まらず、
+# **古い dist が残ったまま先へ進む**——配信されるのは古い UI なのに画面は動くので気づけない。
+node launcher/preflight.mjs --check-node
 
 # ワークスペース依存（未取得時 or ロックファイルが node_modules より新しいとき）。
 # 「node_modules があるか」だけでは、ワークスペースが増えた版を pull したときに
@@ -30,8 +34,10 @@ if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.j
   npm install
 fi
 
-# ビルド（dist 未生成 or --build 指定時）
-if [ "$FORCE_BUILD" = 1 ] || [ ! -f packages/server/dist/main.js ] || [ ! -f packages/web-ui/dist/index.html ]; then
+# ビルド（未ビルド / ソースが成果物より新しい / --build 指定時）。
+# **「index.html があるか」だけでは足りない。** 存在だけを見ていた頃は、`dist` が
+# **あるけど古い**状態を素通りし、何週間も前の UI を配信し続けていた（実際に起きた）。
+if [ "$FORCE_BUILD" = 1 ] || [ "$(node launcher/preflight.mjs --needs-build)" = 1 ]; then
   echo "==> ビルド（ライブラリ / server）"
   npm run build
   echo "==> ビルド（web-ui / Vite）"
