@@ -64,5 +64,7 @@ export {
   type ScreenHtmlMeta,
   type ScreenHtmlStyle,
   type ShiftMarkView,
+  type SbcsToggle,
+  type SbcsReading,
   type ScreenHistoryEntry
 } from "./screen-html.js";

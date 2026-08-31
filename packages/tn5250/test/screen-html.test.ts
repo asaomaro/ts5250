@@ -499,6 +499,78 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html).toContain(".lock{color:var(--t-yellow)}");
   });
 
+  /**
+   * **表示コード（カナ ⇄ 英）は両方を HTML に入れ、CSS で差し替える。**
+   *
+   * CCSID 930 の SBCS 部（CP290）と 939 の SBCS 部（CP1027）はカタカナと英小文字の位置が
+   * 入れ替わった鏡像で、**どちらの表で読むかは受け手の都合**。以前は書き出す側が片方を
+   * 焼き込んでいたので、保存した HTML では読み替えられなかった。
+   *
+   * 出し分けは `display` で片方だけを見せる——**必ずどちらかが出ている**ので桁は動かない。
+   */
+  it("読みで字が変わる連なりは 2 つ出す（片方だけを見せる）", () => {
+    // 0x85 0xa7 0x89 0xa3 = 1027 で "exit" / 290 では半角カナ
+    const bytes = [0x85, 0xa7, 0x89, 0xa3];
+    const snap = snapWith((c) => {
+      bytes.forEach((b, i) => (c[0]![i] = cell("ｵ", { rawByte: b })));
+    });
+    const html = renderScreenHtml(snap, {}, { sbcs: { host: "kana" } });
+    expect(html).toContain('<span class="c-green va">ｵｵｵｵ');
+    expect(html).toContain('<span class="c-green vb">exit');
+    // 素の状態はホストの読み。押すともう一方に差し替わる
+    expect(html).toContain('<input class="tg" type="checkbox" id="k">');
+    expect(html).toContain('<span class="st-off">表示コード: カナ</span>');
+    expect(html).toContain('<span class="st-on">表示コード: 英</span>');
+    // 桁が動かないよう、隠す側も見せる側も display で入れ替える
+    expect(html).toContain(".ln .vb{display:none}");
+    expect(html).toContain("#k:checked ~ .page .ln .va{display:none}");
+    expect(html).toContain("#k:checked ~ .page .ln .vb{display:inline-block}");
+  });
+
+  /** `initial` で開いたときの側が決まる（画面と同じ見え方で開くため） */
+  it("initial がホストの読みと違えば、もう一方で開く", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("ｵ", { rawByte: 0x85 });
+    });
+    const on = renderScreenHtml(snap, {}, { sbcs: { host: "kana", initial: "latin" } });
+    expect(on).toContain('id="k" checked');
+    const off = renderScreenHtml(snap, {}, { sbcs: { host: "kana", initial: "kana" } });
+    expect(off).toContain('<input class="tg" type="checkbox" id="k">');
+  });
+
+  /** 読みで字が変わらない連なりは 1 つのまま＝**HTML はほとんど太らない** */
+  it("読み直しても同じ字の連なりは二重に出さない", () => {
+    const snap = snapWith((c) => {
+      // 数字は 290 / 1027 のどちらでも同じ位置
+      [0xf1, 0xf2, 0xf3].forEach((b, i) => (c[0]![i] = cell(String(i + 1), { rawByte: b })));
+    });
+    const html = renderScreenHtml(snap, {}, { sbcs: { host: "kana" } });
+    expect(html).not.toContain('class="c-green va"');
+    // 読み替わる桁が 1 つも無いので切り替えも出さない
+    expect(html).not.toContain('id="k"');
+  });
+
+  /** 生バイトを持たない桁（DBCS・属性桁・オーダー由来）は読み直せない */
+  it("生バイトの無い桁は読みを変えても動かない", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("あ", { kind: "dbcs-lead" });
+      c[0]![1] = cell("", { kind: "dbcs-tail" });
+      c[0]![2] = cell("X"); // rawByte 無し
+    });
+    const html = renderScreenHtml(snap, {}, { sbcs: { host: "kana" } });
+    expect(html).not.toContain('id="k"');
+  });
+
+  /** 渡されなければ何も足さない（MCP の書き出しはこれまでどおり 1 通り） */
+  it("sbcs を渡さなければ切り替えも代替の字も出さない", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("ｵ", { rawByte: 0x85 });
+    });
+    const html = renderScreenHtml(snap);
+    expect(html).not.toContain('id="k"');
+    expect(html).not.toContain('class="c-green va"');
+  });
+
   it("窓の枠は col+1 から描く（web-ui の windowStyle と同じ矩形）", () => {
     const snap = snapWith();
     snap.gui = {

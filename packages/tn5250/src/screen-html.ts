@@ -36,6 +36,9 @@ import type {
   ScreenSnapshot
 } from "./screen/types.js";
 import { GRID_COLOR, GRID_LINE_STYLE } from "./protocol/wdsf-parser.js";
+// **サブパスから取る**（`browser.ts` の注記）。変換表は純粋だが重く、
+// 入口ごと引き込むとブラウザ向けの束が太る。
+import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
 
 /** コーデックが「この表にマップの無いバイト」を返すときの文字（`buffer.ts` と同じ） */
 const UNDISPLAYABLE = "�";
@@ -66,6 +69,43 @@ export interface ScreenHtmlStyle {
    * ので、ここで決まるのは初期状態だけ。web-ui は画面と同じ状態で開くために渡す。
    */
   shiftMarks?: ShiftMarkView;
+
+  /**
+   * **表示コードの切り替え**（カナ ⇄ 英）を付ける。
+   *
+   * 渡すと、SBCS の生バイトを**もう一方の表で読み直した字も HTML に入れ**、
+   * ページ内で差し替えられるようにする（CSS だけのトグル。`TOGGLE_CSS` 参照）。
+   * 読み直しても字が 1 つも変わらない画面には切り替えを出さない。
+   */
+  sbcs?: SbcsToggle;
+}
+
+/**
+ * 表示コード切替の指定。
+ *
+ * **切り替えとは「もう一方の表で読み直すこと」**——CCSID 930 の SBCS 部（CP290）と
+ * 939 の SBCS 部（CP1027）はカタカナと英小文字の位置が入れ替わった鏡像である
+ * （web-ui の `KanaView` と同じ考え方）。
+ */
+export interface SbcsToggle {
+  /**
+   * **そのまま描いた字がどちらの読みか。** ホストの CCSID を知っているのは呼び出し側だけなので
+   * ここで受け取る。こちらは「もう一方」を生バイトから作るだけ。
+   */
+  host: SbcsReading;
+  /** 開いたときにどちらを見せるか（既定は `host`＝ホストが返した字そのまま） */
+  initial?: SbcsReading;
+}
+
+/** SBCS の読み。カナ（CP290 系）／英（CP1027 系） */
+export type SbcsReading = "kana" | "latin";
+
+/** 切り替えラベルに出す名前（web-ui の画面設定「表示コード」と同じ言葉） */
+const SBCS_LABELS: Record<SbcsReading, string> = { kana: "カナ", latin: "英" };
+
+/** もう一方の読み */
+function otherReading(r: SbcsReading): SbcsReading {
+  return r === "kana" ? "latin" : "kana";
 }
 
 /**
@@ -177,6 +217,27 @@ function cellChar(c: Cell): string {
   return c.char;
 }
 
+/**
+ * その桁を**指定した読みで**描いたときの字。
+ *
+ * 読み直せるのは**生バイトを持つ SBCS だけ**（DBCS・属性桁・オーダー由来は元が無い）。
+ * 持たない桁は `cellChar` と同じ字になる＝切り替えても動かない。
+ * 非表示桁も伏せたまま——読みを変えても伏せる約束は変わらない。
+ */
+function cellCharAs(c: Cell, reading: SbcsReading): string {
+  if (c.nonDisplay || c.rawByte === undefined) return cellChar(c);
+  const ch = reading === "kana" ? katakanaChar(c.rawByte) : latinChar(c.rawByte);
+  return ch === "" || ch === UNDISPLAYABLE ? " " : ch;
+}
+
+/**
+ * 読み直すと字が変わる桁があるか（**無ければ切り替えを出さない**＝
+ * 押しても何も起きない部品を置かない。`hasShiftCells` と同じ方針）。
+ */
+function hasSbcsAlt(snap: ScreenSnapshot, alt: SbcsReading): boolean {
+  return snap.cells.some((row) => row.some((c) => cellCharAs(c, alt) !== cellChar(c)));
+}
+
 const isLead = (c: Cell | undefined): boolean => c?.kind === "dbcs-lead";
 const isTail = (c: Cell | undefined): boolean => c?.kind === "dbcs-tail";
 
@@ -191,14 +252,34 @@ const isTail = (c: Cell | undefined): boolean => c?.kind === "dbcs-tail";
  * `h`（1 桁の箱）は**対を失った全角**のため。ホストが桁末尾で全角を切ると lead だけ、
  * あるいは tail だけが残る。ACS はこれを 1 桁ぶんの分断された字形で見せるので合わせる。
  */
-function renderRow(row: readonly Cell[]): string {
+function renderRow(row: readonly Cell[], alt: SbcsReading | undefined): string {
   let out = "";
   let runCls = "";
   let runText = "";
+  let runAlt = "";
+  /** いまの連なりが「読みで字が変わる」側か。**変わる／変わらないの境目で連なりを切る** */
+  let runDiff = false;
+  /**
+   * **二重に出すのは、読みで字が変わる区間だけ。**
+   *
+   * 属性が同じでも**読み替わるかどうかが変わる位置で連なりを切る**ので、
+   * 空白・数字・英大文字（＝画面の大半。どちらの表でも同じ位置）は 1 つのまま残る。
+   * 切らずに連なりごと二重化すると、行に 1 文字カナがあるだけで行全体が 2 倍になる。
+   *
+   * 出し分けは `display` で 1 つだけ見せる——**必ず片方が出ている**ので桁は動かない
+   * （SO/SI の印は「出ない状態」があるから箱を残す必要があり、あちらとは事情が違う）。
+   */
   const flush = (): void => {
     if (runText === "") return;
-    out += `<span class="${runCls}">${esc(runText)}</span>`;
+    if (runDiff) {
+      out +=
+        `<span class="${runCls} va">${esc(runText)}</span>` +
+        `<span class="${runCls} vb">${esc(runAlt)}</span>`;
+    } else {
+      out += `<span class="${runCls}">${esc(runText)}</span>`;
+    }
     runText = "";
+    runAlt = "";
   };
   for (let i = 0; i < row.length; i++) {
     const c = row[i]!;
@@ -223,11 +304,16 @@ function renderRow(row: readonly Cell[]): string {
       out += `<span class="h ${cls}">${esc(isTail(c) ? " " : cellChar(c))}</span>`;
       continue;
     }
-    if (cls !== runCls) {
+    const text = cellChar(c);
+    const altText = alt === undefined ? text : cellCharAs(c, alt);
+    const diff = altText !== text;
+    if (cls !== runCls || diff !== runDiff) {
       flush();
       runCls = cls;
+      runDiff = diff;
     }
-    runText += cellChar(c);
+    runText += text;
+    runAlt += altText;
   }
   flush();
   return out;
@@ -412,8 +498,8 @@ function guiHtml(gui: GuiConstructs | undefined): string {
  * **1 画面ぶんのマークアップ。単票も履歴もここを通る。**
  * 分けると 1 枚で見たときと履歴で見たときの絵が食い違い、証拠として使えなくなる。
  */
-function screenFigure(snap: ScreenSnapshot, caption: string): string {
-  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r)}</div>`).join("");
+function screenFigure(snap: ScreenSnapshot, caption: string, alt: SbcsReading | undefined): string {
+  const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r, alt)}</div>`).join("");
   const oia = [
     `<span>行/列 <b>${String(snap.cursor.row).padStart(2, "0")}/${String(snap.cursor.col).padStart(3, "0")}</b></span>`,
     `<span>画面 <b>${snap.rows}x${snap.cols}</b></span>`,
@@ -476,13 +562,19 @@ function metaHtml(meta: ScreenHtmlMeta, extra: [string, string][] = []): string 
 const TOGGLE_CSS = `
 .tg{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
 #t:focus-visible ~ .page label[for=t],
+#k:focus-visible ~ .page label[for=k],
 #s0:focus-visible ~ .page label[for=s1],
 #s1:focus-visible ~ .page label[for=s2],
 #s2:focus-visible ~ .page label[for=s0]{outline:2px solid var(--t-green);outline-offset:1px}
 .btn>span{display:none}
 .btn>.st-off{display:inline}
-#t:checked ~ .page label[for=t]>.st-off{display:none}
-#t:checked ~ .page label[for=t]>.st-on{display:inline}
+#t:checked ~ .page label[for=t]>.st-off,#k:checked ~ .page label[for=k]>.st-off{display:none}
+#t:checked ~ .page label[for=t]>.st-on,#k:checked ~ .page label[for=k]>.st-on{display:inline}
+/* 表示コードの出し分け。**必ず片方だけが出る**ので桁は動かない。
+   .ln span が (0,1,1) なので、打ち消す側はクラス 2 つ (0,2,0) で書く。 */
+.ln .vb{display:none}
+#k:checked ~ .page .ln .va{display:none}
+#k:checked ~ .page .ln .vb{display:inline-block}
 .sw{display:none}
 #s0:checked ~ .page label[for=s1],
 #s1:checked ~ .page label[for=s2],
@@ -647,6 +739,8 @@ interface Toggles {
   sosi: boolean;
   /** SO/SI マークの初期状態（ページ内で順送りできるので、決まるのは開いたときだけ） */
   sosiView: ShiftMarkView;
+  /** 表示コードの切り替え。読み直しても字が変わらない画面では出さない */
+  sbcs: SbcsToggle | undefined;
 }
 
 /**
@@ -666,6 +760,12 @@ function page(title: string, bodyHtml: string, js: string, tg: Toggles): string 
           (v, i) =>
             `<input class="tg" type="radio" name="s" id="s${i}"${v === tg.sosiView ? " checked" : ""}>`
         ).join("")
+      : "") +
+    // 表示コードは 2 値なのでチェックボックス 1 つ（素＝ホストの読み、入れると もう一方）
+    (tg.sbcs
+      ? `<input class="tg" type="checkbox" id="k"${
+          (tg.sbcs.initial ?? tg.sbcs.host) !== tg.sbcs.host ? " checked" : ""
+        }>`
       : "") +
     `<div class="page">` +
     bodyHtml +
@@ -696,6 +796,13 @@ function header(title: string, tg: Toggles): string {
     toggleLabel("t", "🌙 ダーク", "☀ ライト") +
     // SO/SI 桁が 1 つも無い画面には出さない（押しても何も起きない部品を置かない）
     (tg.sosi ? sosiLabels() : "") +
+    (tg.sbcs
+      ? toggleLabel(
+          "k",
+          `表示コード: ${SBCS_LABELS[tg.sbcs.host]}`,
+          `表示コード: ${SBCS_LABELS[otherReading(tg.sbcs.host)]}`
+        )
+      : "") +
     `</header>`
   );
 }
@@ -716,9 +823,14 @@ export function renderScreenHtml(
   style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面";
-  const tg: Toggles = { sosi: hasShiftCells(snap), sosiView: style.shiftMarks ?? "none" };
+  const alt = style.sbcs ? otherReading(style.sbcs.host) : undefined;
+  const tg: Toggles = {
+    sosi: hasShiftCells(snap),
+    sosiView: style.shiftMarks ?? "none",
+    sbcs: alt !== undefined && hasSbcsAlt(snap, alt) ? style.sbcs : undefined
+  };
   // 単票は切り替えを CSS で作ったので **`<script>` を出さない**
-  return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, ""), "", tg);
+  return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, "", alt), "", tg);
 }
 
 /**
@@ -734,9 +846,12 @@ export function renderScreenHistoryHtml(
   style: ScreenHtmlStyle = {}
 ): string {
   const title = meta.title ?? "5250 画面の履歴";
+  const alt = style.sbcs ? otherReading(style.sbcs.host) : undefined;
   const tg: Toggles = {
     sosi: entries.some((e) => hasShiftCells(e.screen)),
-    sosiView: style.shiftMarks ?? "none"
+    sosiView: style.shiftMarks ?? "none",
+    sbcs:
+      alt !== undefined && entries.some((e) => hasSbcsAlt(e.screen, alt)) ? style.sbcs : undefined
   };
   if (entries.length === 0) {
     return page(title, header(title, tg) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, "", tg);
@@ -750,7 +865,7 @@ export function renderScreenHistoryHtml(
       if (e.key) parts.push(`送信キー: ${e.key}`);
       if (e.capturedAt) parts.push(e.capturedAt);
       if (e.note) parts.push(e.note);
-      return screenFigure(e.screen, esc(parts.join("　·　")));
+      return screenFigure(e.screen, esc(parts.join("　·　")), alt);
     })
     .join("");
   const nav =

@@ -4,50 +4,28 @@
  * **サーバーへ往復しない。** スナップショットは既にブラウザ側にあるので、
  * core の `renderScreenHtml` をその場で呼べば済む（スプールと違い取り直しが要らない）。
  *
- * ## 「表示している内容」を出す
+ * ## 見え方は**焼き込まず、切り替えられる形で渡す**
  *
- * `renderScreenHtml` はホストのスナップショットをそのまま描くが、**画面には web-ui の
- * 表示設定が効いている**（表示コードの再解釈・SO/SI マーク）。素のまま書き出すと、
- * 画面には `F3=exit` と出ているのに HTML は `F3=ｵﾒｹﾎ` になる——カナ系ホスト（930/5026）を
- * 「英」で見ているときに実際に起こる。so、描く前にセルを表示設定で写し替える。
+ * 画面には web-ui の表示設定が効いている（表示コードの再解釈・SO/SI マーク）。素のまま
+ * 書き出すと、画面には `F3=exit` と出ているのに HTML は `F3=ｵﾒｹﾎ` になる——カナ系ホスト
+ * （930/5026）を「英」で見ているときに実際に起こる。
  *
- * **SO/SI マークはここでは触らない。** `renderScreenHtml` が SO/SI 桁を見て自分で `{ }` を
- * 置き、**ページ内で 非表示 → 薄目 → 濃目 を順送りできる**ようにしている（CSS だけのトグル）。
- * こちらから渡すのは「開いたときの見せ方」（`shiftMarks`）だけ——画面設定と同じ 3 値をそのまま
- * 渡し、画面と同じ状態で開くための初期値にする。
+ * かつてはここでセルを写し替えて**焼き込んで**いたが、いまは `renderScreenHtml` が
+ * **両方の読みを HTML に入れ、ページ内の CSS トグルで差し替える**。SO/SI も同じで、
+ * 印は向こうが置き、非表示 → 薄目 → 濃目 を読み手が選べる。
  *
- * 写し替えは**表示に関わる分だけ**。配色（literal/semantic）と質感（CRT/flat）は持ち込まない
+ * だからここから渡すのは**開いたときの状態**だけ——画面と同じ見え方で開くための初期値である。
+ * ホストの CCSID を知っているのはこちらだけなので、「そのまま描いた字がどちらの読みか」
+ * （`sbcs.host`）も併せて渡す。
+ *
+ * 渡すのは**表示に関わる分だけ**。配色（literal/semantic）と質感（CRT/flat）は持ち込まない
  * ——`renderScreenHtml` は自前の見た目を持っており、そこまで二重管理にすると
  * 「画面設定を変えたらエビデンスの色も変わる」ことになって証拠として読みにくい。
  */
-import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
-import { renderScreenHtml } from "@ts5250/tn5250/browser";
-// 表示コード切替は狭い入口から（`ScreenGrid.vue` の同じ注記を参照）
-import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
+import { renderScreenHtml, type SbcsReading } from "@ts5250/tn5250/browser";
 import { sessionsStore } from "./stores/sessions.js";
-import { viewSettings, resolveSbcsView, type SbcsView } from "./stores/viewSettings.js";
+import { viewSettings, resolveSbcsView } from "./stores/viewSettings.js";
 import { isKatakanaCcsid } from "./hostCodePages.js";
-
-/**
- * 表示コードの再解釈をスナップショットに焼き込む。**判定は ScreenGrid の `displayChar` と
- * 同じ**（非表示桁は触らない → 生バイトを対の表で読み直す）。ここがずれると
- * 「画面と書き出した HTML で字が違う」になる。
- */
-function applyView(snap: ScreenSnapshot, sbcsView: SbcsView): ScreenSnapshot {
-  if (sbcsView === "host") return snap; // 触る必要が無い
-  const recode = (b: number): string => (sbcsView === "kana" ? katakanaChar(b) : latinChar(b));
-  const cells = snap.cells.map((row) =>
-    row.map((c: Cell) => {
-      if (c.nonDisplay) return c; // 非表示桁は renderScreenHtml が伏せる
-      // 読み直せるのは生バイトを持つ SBCS だけ（DBCS・属性桁・オーダー由来は元が無い）
-      if (c.kind === "sbcs" && c.rawByte !== undefined) {
-        return { ...c, char: recode(c.rawByte) };
-      }
-      return c;
-    })
-  );
-  return { ...snap, cells };
-}
 
 /** ファイル名に使えない文字を落とす（`host-spools.ts` の `safeFileName` と同じ考え方） */
 function safeFileName(name: string): string {
@@ -93,22 +71,24 @@ export function downloadScreenHtml(sessionId: string, now = new Date()): string 
   if (!s?.snapshot) return undefined;
 
   const view = viewSettings.effective(sessionId);
-  const sbcsView = resolveSbcsView(view.kana, isKatakanaCcsid(s.ccsid));
-  const snap = applyView(s.snapshot, sbcsView);
+  const hostIsKatakana = isKatakanaCcsid(s.ccsid);
+  // ホストが返した字そのものがどちらの読みか。`resolveSbcsView` の `host` はこれを指す
+  const hostReading: SbcsReading = hostIsKatakana ? "kana" : "latin";
+  const sbcsView = resolveSbcsView(view.kana, hostIsKatakana);
 
   const host = s.meta?.host;
-  const html = renderScreenHtml(snap, {
+  const html = renderScreenHtml(s.snapshot, {
     capturedAt: now.toISOString(),
     sessionId,
     title: `${s.label} — 5250 画面`,
     ...(host ? { host } : {}),
     ...(jobLabel(s.job) ? { job: jobLabel(s.job)! } : {}),
-    // 素のスナップショットと違う見え方で出したときは、その旨を残す（後から読む人のため）。
-    // SO/SI はページ内で切り替えられるので、注記に残すのは表示コードだけ
-    ...(sbcsView !== "host"
-      ? { note: `表示設定を反映: 表示コード=${sbcsView === "kana" ? "カナ" : "英"}` }
-      : {})
-  }, { shiftMarks: view.sosi });
+    // 見え方はどれもページ内で切り替えられるので、注記には残さない
+    // ——「この HTML はこう見えている」を固定する意味が無くなった
+  }, {
+    shiftMarks: view.sosi,
+    sbcs: { host: hostReading, initial: sbcsView === "host" ? hostReading : sbcsView }
+  });
 
   const stamp = localStamp(now);
   const name = `${safeFileName(s.label)}-${stamp}.html`;

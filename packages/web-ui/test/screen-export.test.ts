@@ -145,8 +145,11 @@ describe("画面を HTML で保存", () => {
   /**
    * **ここが本題。** カナ系ホスト（5026）を「英」で見ているとき、画面は生バイトを
    * 1027 の表で読み直して `exit` と出している。書き出しも同じでなければならない。
+   *
+   * 焼き込みはやめたので、**両方の読みが HTML に入り**、開いた時点で画面と同じ側
+   * （ここでは英）が出る。読み手はページ内でカナへ戻せる。
    */
-  it("表示コード「英」を反映する（画面と同じ字が出る）", () => {
+  it("表示コード「英」で見ているなら、英で開く（カナも HTML に入る）", () => {
     // 0x85 0xa7 0x89 0xa3 = 1027 で "exit" / 290 では半角カナ
     const bytes = [0x85, 0xa7, 0x89, 0xa3];
     addSession(
@@ -155,15 +158,39 @@ describe("画面を HTML で保存", () => {
     );
     viewSettings.set("kana", "latin");
     downloadScreenHtml(SID);
-    expect(written).toContain("exit");
-    expect(written).toContain("表示コード=英"); // 素のままでない旨を注記に残す
+    expect(written).toContain("exit"); // 英の読み
+    expect(written).toContain("ｵｵｵｵ"); // カナの読みも入っている（切り替えられる）
+    expect(written).toContain('id="k" checked'); // 開いた時点は英＝ホストの読みの反対側
   });
 
-  it("表示コードが「自動」ならホストの解釈のまま出す", () => {
-    addSession(snapshotWith([cell("ｵ", { kind: "sbcs", rawByte: 0x85 })]), 5026);
+  it("表示コードが「自動」ならホストの解釈のまま開く", () => {
+    const bytes = [0x85, 0xa7, 0x89, 0xa3];
+    addSession(
+      snapshotWith(bytes.map((b) => cell("ｵ", { kind: "sbcs", rawByte: b }))),
+      5026
+    );
     downloadScreenHtml(SID);
-    expect(written).toContain("ｵ");
-    expect(written).not.toContain("表示コード=");
+    expect(written).toContain("ｵｵｵｵ");
+    expect(written).toContain('<input class="tg" type="checkbox" id="k">'); // 素＝ホストの読み
+    // カナ系ホストなので、切り替えの相手は「英」
+    expect(written).toContain('<span class="st-off">表示コード: カナ</span>');
+    expect(written).toContain('<span class="st-on">表示コード: 英</span>');
+  });
+
+  /** 英小文字系ホスト（939 等）では、そのままが「英」で相手が「カナ」になる */
+  it("英系ホストでは切り替えの向きが逆になる", () => {
+    addSession(snapshotWith([cell("e", { kind: "sbcs", rawByte: 0x85 })]), 939);
+    downloadScreenHtml(SID);
+    expect(written).toContain('<span class="st-off">表示コード: 英</span>');
+    expect(written).toContain('<span class="st-on">表示コード: カナ</span>');
+  });
+
+  /** 読み直しても字が変わらない画面には切り替えを出さない（押しても何も起きない部品を置かない） */
+  it("読み替わる桁が無ければ表示コードの切り替えを出さない", () => {
+    addSession(snapshotWith([cell("A")]), 5026); // 生バイトを持たない＝読み直せない
+    downloadScreenHtml(SID);
+    expect(written).not.toContain('id="k"');
+    expect(written).not.toContain('for="k"');
   });
 
   /**
