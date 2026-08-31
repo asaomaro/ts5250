@@ -204,7 +204,7 @@ function renderRow(row: readonly Cell[]): string {
     const c = row[i]!;
     const cls = cellClass(c);
     // SO/SI 桁は**必ず自分の span に切り出す**——見せ隠しを CSS のトグルでやるため。
-    // `visibility` で隠すので箱は残り、**桁は 1 つも動かない**（`display:none` は不可）。
+    // 隠すのは字の色だけなので箱は残り、**桁は 1 つも動かない**（`.a-so` の注記）。
     if (isShiftCell(c)) {
       flush();
       out += `<span class="${cls} a-so">${shiftMarkChar(c)}</span>`;
@@ -487,8 +487,11 @@ const TOGGLE_CSS = `
 #s0:checked ~ .page label[for=s1],
 #s1:checked ~ .page label[for=s2],
 #s2:checked ~ .page label[for=s0]{display:inline-flex}
-#s1:checked ~ .page .a-so{visibility:visible}
-#s2:checked ~ .page .a-so{visibility:visible;
+#s1:checked ~ .page .a-so{text-decoration-color:currentColor;
+color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
+#s1:checked ~ .page .a-r .a-so,#s1:checked ~ .page .a-r.a-so{
+color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
+#s2:checked ~ .page .a-so{text-decoration-color:currentColor;
 color:color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))}
 #s2:checked ~ .page .a-r .a-so,#s2:checked ~ .page .a-r.a-so{
 color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
@@ -559,16 +562,17 @@ font-size:15px;line-height:1.25;white-space:pre}
    行送り 18.75px に対し塗り 25px）。必要な量はフォントごとに違い CSS から読めないため、
    箱そのものを行送りに合わせる。vertical-align:top と height は対で必要。 */
 .a-r{background:var(--cell);color:var(--crt)}
-/* SO/SI マークは本物の { } と見分けが付くよう淡く描く（web-ui の .a-shift と同じ配合）。
-   color の中の currentColor は親の色に解決されるため、桁の色は --cell から採る。
-   ここに書くのは**薄目**で、濃目は #s2:checked が上から塗る（TOGGLE_CSS）。
-   **既定は隠す。** visibility なので箱は残り、出し入れしても桁は 1 つも動かない
-   （display:none は桁が詰まるので使えない）。見せるのは #s1/#s2:checked（TOGGLE_CSS）。
+/* SO/SI マークの既定は**隠す**。見せるのは #s1/#s2:checked（TOGGLE_CSS）。
+   **隠すのは字の色だけ。** visibility:hidden は箱ごと消えるので、背景色の付いた桁
+   （反転）では**背景まで消えていた**（利用者の報告）。桁区切りの罫線も同じ理由で消える。
+   反転・下線・桁区切りは**制御桁そのものの見た目**であって印の一部ではないから、
+   印を出していないときも残す——web-ui がそこに空白 1 桁を描くのと同じ絵になる。
+   下線は色に連動する（text-decoration-color の既定は currentColor）ので、隠している間は
+   桁の色で引き直す。display:none は桁が詰まるので、どの状態でも使えない。
    user-select:none は web-ui に合わせる——マークは制御桁の印であってデータではないので、
    選択してコピーした文字列に混ぜない。 */
-.a-so{visibility:hidden;user-select:none;-webkit-user-select:none;
-color:color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))}
-.a-r .a-so,.a-r.a-so{color:color-mix(in srgb,var(--crt) 30%,var(--cell))}
+.a-so{color:transparent;text-decoration-color:var(--cell,currentColor);
+user-select:none;-webkit-user-select:none}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
 .a-cs{border-left:1px solid var(--cell)}
 .a-b{animation:bl 1s step-end infinite}

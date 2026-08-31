@@ -383,6 +383,39 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html.match(/class="c-green a-so"/g)).toHaveLength(2);
   });
 
+  /**
+   * **背景色の付いた桁でマークを隠しても、背景は残る。**
+   *
+   * `visibility:hidden` は箱ごと消すので、反転（背景色）の SO/SI 桁では**背景まで消えていた**
+   * （利用者の報告）。桁区切りの罫線も同じ理由で消える。反転・下線・桁区切りは
+   * **制御桁そのものの見た目**であって印の一部ではないから、印を出していない間も残す
+   * ——web-ui がそこに空白 1 桁を描くのと同じ絵になる。
+   */
+  it("反転した SO/SI 桁は、マークを隠しても背景が消えない", () => {
+    const snap = snapWith((c) => {
+      c[0]![0] = cell("", { kind: "so", reverse: true });
+    });
+    const html = renderScreenHtml(snap);
+    // 桁は反転クラスを持ったまま、印のクラスも付く（背景は .a-r が塗る）
+    expect(html).toContain('<span class="c-green a-r a-so">{</span>');
+    // 隠し方は**字の色**。箱ごと消す手段（visibility / display）は規則に入れない
+    // ——注記の中には字として出てくるので、`.a-so` の規則に限って見る
+    expect(html).toMatch(/\.a-so\{[^}]*color:transparent/);
+    expect(html).not.toMatch(/\.a-so\{[^}]*visibility/);
+    expect(html).not.toMatch(/\.a-so\{[^}]*display:/);
+  });
+
+  /** 下線は色に連動するため、隠している間は桁の色で引き直す（web-ui の空白 1 桁と同じ絵） */
+  it("隠している間も下線は桁の色で残る", () => {
+    const html = renderScreenHtml(snapWith((c) => {
+      c[0]![0] = cell("", { kind: "so", underline: true });
+    }));
+    expect(html).toContain('<span class="c-green a-u a-so">{</span>');
+    expect(html).toMatch(/\.a-so\{[^}]*text-decoration-color:var\(--cell,currentColor\)/);
+    // 印が見えている状態では、下線も印と同じ濃さに戻す
+    expect(html).toMatch(/#s1:checked ~ \.page \.a-so\{text-decoration-color:currentColor/);
+  });
+
   /** 非表示（nonDisplay）桁には描かない——ACS は非表示属性の桁に何も描かない */
   it("非表示桁の SO/SI にはマークを置かない", () => {
     const snap = snapWith((c) => {
