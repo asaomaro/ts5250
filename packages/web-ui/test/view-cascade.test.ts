@@ -5,6 +5,7 @@ import ViewSettingsMenu from "../src/components/ViewSettingsMenu.vue";
 import DesignMenu from "../src/components/DesignMenu.vue";
 import PaneTabs from "../src/components/PaneTabs.vue";
 import ReportText from "../src/components/ReportText.vue";
+import type { LogicalPage } from "@ts5250/scs";
 import { viewSettings, initViewSettings } from "../src/stores/viewSettings.js";
 import { appearance, initAppearance } from "../src/stores/appearance.js";
 import { workspaceStore } from "../src/stores/workspace.js";
@@ -273,14 +274,19 @@ describe("タブのシステム名トグル", () => {
 /**
  * **帳票の画面の「表示」**（`20260802-view-menu-refine`・利用者の指示）。
  *
- * プリンターセッションとスプールでも `⚙ 表示` を出す。ただし項目は
- * **その経路で実際に効くもの**だけ——帳票の本文は SCS の復号を通った Unicode 文字列で
- * 届き、SO/SI は復号時に消費されるので、SO/SI 表示と表示コードは実装できない。
+ * プリンターセッションとスプールでも `⚙ 表示` を出す。
+ *
+ * **本文はページで渡す。** かつては 1 本のテキストで受けていたが、`ScsDecoder` が桁ごとの
+ * 生バイトと SO/SI 位置を残すようになり、SO/SI 表示と表示コードもここで効くようになった
+ * ——それらは文字列からは復元できないので、ページのまま渡す必要がある。
  */
+/** 行を並べた 1 ページ（テストの見通しのため） */
+const pg = (...lines: string[]): LogicalPage => ({ rows: lines.length, cols: 80, lines });
+
 describe("帳票の画面の表示設定", () => {
   it("**リンク化が効く**（URL が `<a>` になる）", () => {
     const w = mount(ReportText, {
-      props: { sessionId: "p1", text: "詳細は https://example.com/x を参照\n次の行" }
+      props: { sessionId: "p1", pages: [pg("詳細は https://example.com/x を参照", "次の行")] }
     });
     const a = w.find("a");
     expect(a.exists()).toBe(true);
@@ -289,9 +295,23 @@ describe("帳票の画面の表示設定", () => {
     w.unmount();
   });
 
+  /**
+   * **ルート要素の `class="report"` はペインとの約束。**
+   *
+   * `SpoolPane` / `PrinterPane` は `.viewer .report` でスクロールと等幅を効かせている。
+   * かつてルートは `<pre>` で、ペイン側も `.viewer pre` で掴んでいた——ルートを
+   * `<div>` に変えたときにセレクタを直し忘れ、**スプール側のスクロールバーが消えた**
+   * （利用者の指摘）。名前を変えるならペイン側も一緒に直す、をここで固定する。
+   */
+  it("ルート要素に report クラスを付ける（ペインのスクロール指定の掛かり先）", () => {
+    const w = mount(ReportText, { props: { sessionId: "p1", pages: [pg("X")] } });
+    expect(w.element.classList.contains("report")).toBe(true);
+    w.unmount();
+  });
+
   it("リンク化を切ると素のまま出る", () => {
     viewSettings.setOverride("p1", "linkify", false);
-    const w = mount(ReportText, { props: { sessionId: "p1", text: "https://example.com/x" } });
+    const w = mount(ReportText, { props: { sessionId: "p1", pages: [pg("https://example.com/x")] } });
     expect(w.find("a").exists()).toBe(false);
     expect(w.text()).toContain("https://example.com/x");
     w.unmount();
@@ -299,9 +319,105 @@ describe("帳票の画面の表示設定", () => {
   });
 
   it("**改行をまたいでリンクにしない**（行ごとに探す）", () => {
-    const w = mount(ReportText, { props: { sessionId: "p1", text: "https://example.com\n/x" } });
+    const w = mount(ReportText, { props: { sessionId: "p1", pages: [pg("https://example.com", "/x")] } });
     expect(w.findAll("a")).toHaveLength(1);
     expect(w.find("a").text()).toBe("https://example.com");
     w.unmount();
+  });
+
+  /**
+   * **SO/SI 表示と表示コードが帳票でも効く。**
+   *
+   * かつては「SCS の復号で SO/SI が消費され、生バイトも来ない」ので実装できなかった。
+   * `ScsDecoder` が桁ごとの生バイト（`raw`）と SO/SI 位置（`shifts`）を残すようになり、
+   * **画面と配布 HTML が同じ `reportLineSegs` を通る**形で効くようになった。
+   */
+  describe("SO/SI 表示と表示コード", () => {
+    /** 0x85 0xa7 0x89 0xa3 = 1027 で "exit" / 290 では半角カナ */
+    const withRaw = (): LogicalPage => ({
+      rows: 1,
+      cols: 4,
+      lines: ["exit"],
+      raw: [[0x85, 0xa7, 0x89, 0xa3]],
+      shifts: [[]]
+    });
+
+    afterEach(() => viewSettings.clearAll("p1"));
+
+    it("表示コードを「カナ」にすると読み直す（英系ホストの帳票）", () => {
+      const w = mount(ReportText, { props: { sessionId: "p1", pages: [withRaw()], ccsid: 1399 } });
+      expect(w.text()).toContain("exit");
+      viewSettings.setOverride("p1", "kana", "kana");
+      const w2 = mount(ReportText, { props: { sessionId: "p1", pages: [withRaw()], ccsid: 1399 } });
+      expect(w2.text()).toContain("ｵﾒｹﾎ");
+      expect(w2.text()).not.toContain("exit");
+      w.unmount();
+      w2.unmount();
+    });
+
+    /**
+     * カナ系ホスト（5026）は**そのままがカナ**なので、読み直す先は「英」になる。
+     * 同じ生バイトでも、ホストの表がどちらかで切替の向きが変わる。
+     */
+    it("カナ系ホスト（5026）では向きが逆になる", () => {
+      const kanaHost = (): LogicalPage => ({
+        rows: 1,
+        cols: 4,
+        lines: ["ｵﾒｹﾎ"], // 5026 が復号した字
+        raw: [[0x85, 0xa7, 0x89, 0xa3]],
+        shifts: [[]]
+      });
+      const auto = mount(ReportText, { props: { sessionId: "p1", pages: [kanaHost()], ccsid: 5026 } });
+      expect(auto.text()).toContain("ｵﾒｹﾎ"); // 自動＝そのまま
+      viewSettings.setOverride("p1", "kana", "latin");
+      const w = mount(ReportText, { props: { sessionId: "p1", pages: [kanaHost()], ccsid: 5026 } });
+      expect(w.text()).toContain("exit");
+      auto.unmount();
+      w.unmount();
+    });
+
+    /** 印は桁の境目に重ねて描くので、**出しても消しても桁は 1 つも動かない** */
+    it("SO/SI 表示にすると印が出る（既定は出ない）", () => {
+      const withShift = (): LogicalPage => ({
+        rows: 1,
+        cols: 2,
+        lines: ["日"],
+        raw: [[]],
+        shifts: [[{ col: 1, kind: "so" }, { col: 3, kind: "si" }]]
+      });
+      const off = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      expect(off.text()).not.toContain("{");
+      viewSettings.setOverride("p1", "sosi", "dim");
+      const on = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      expect(on.text()).toContain("{");
+      expect(on.text()).toContain("}");
+      // **印は幅を持たない。** 桁の境目に重ねて置くので、本文の桁は動かない
+      const marks = on.findAll(".so");
+      expect(marks).toHaveLength(2);
+      expect(marks[0]!.attributes("style")).toContain("left: 0ch");
+      expect(marks[1]!.attributes("style")).toContain("left: 2ch");
+      off.unmount();
+      on.unmount();
+    });
+
+    /** 印の有無で本文の桁が動かない（印は本文の外に置かれている） */
+    it("SO/SI の有無で本文が変わらない", () => {
+      const withShift = (): LogicalPage => ({
+        rows: 1,
+        cols: 2,
+        lines: ["日"],
+        raw: [[]],
+        shifts: [[{ col: 1, kind: "so" }, { col: 3, kind: "si" }]]
+      });
+      const off = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      const body = (w: ReturnType<typeof mount>): string =>
+        w.findAll(".ln").map((l) => l.findAll(".w").map((x) => x.text()).join("")).join("\n");
+      const before = body(off);
+      viewSettings.setOverride("p1", "sosi", "dim");
+      const on = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      expect(body(on)).toBe(before);
+      off.unmount();
+      on.unmount();
+    });
   });
 });

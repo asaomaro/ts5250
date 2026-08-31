@@ -4,6 +4,8 @@ import ReportText from "./ReportText.vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 import { setPrinterOutput, startPrinter, stopPrinter } from "../session-controller.js";
 import { renderSpoolHtml } from "@ts5250/scs/spool-html";
+import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
+import { viewSettings } from "../stores/viewSettings.js";
 
 const props = defineProps<{ sessionId: string; focused?: boolean }>();
 const emit = defineEmits<{ (e: "focus"): void }>();
@@ -221,17 +223,39 @@ async function downloadPdf(): Promise<void> {
  * (3) 全角の桁が開いた先のフォント任せになる——の 3 つを抱えていた。
  * 同じ帳票の絵を 2 か所で持たない（`spool-html.ts` が唯一の経路）。
  */
+/**
+ * 配布 HTML の**開いたときの見え方**。画面（`ReportText`）と同じ状態にする。
+ *
+ * 中身の切り替え（テーマ・フォント・SO/SI・表示コード）はページ側が CSS だけで持つので、
+ * ここから渡すのは初期値にすぎない。
+ */
+function spoolStyle(): Parameters<typeof renderSpoolHtml>[2] {
+  const view = viewSettings.effective(props.sessionId);
+  const host = isKatakanaCcsid(session.value?.ccsid) ? "kana" : "latin";
+  return {
+    font: view.font,
+    // 画面設定と同じ 3 値をそのまま渡す（帳票 HTML も 非表示 / 薄目 / 濃目）
+    shiftMarks: view.sosi,
+    sbcs: { host, initial: view.kana === "auto" ? host : view.kana }
+  };
+}
+
 function printReport(): void {
   const r = selected.value;
   if (!r) return;
   const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(
-    renderSpoolHtml(r.pages, {
-      title: `${session.value?.label ?? "スプール"} — ${r.id}`,
-      ...(r.receivedAt !== undefined ? { capturedAt: new Date(r.receivedAt).toISOString() } : {}),
-      spoolId: r.id
-    })
+    renderSpoolHtml(
+      r.pages,
+      {
+        title: `${session.value?.label ?? "スプール"} — ${r.id}`,
+        ...(r.receivedAt !== undefined ? { capturedAt: new Date(r.receivedAt).toISOString() } : {}),
+        spoolId: r.id
+      },
+      // **画面と同じ見え方で開く。** 中身の切り替えはページ側が持つので、渡すのは初期値だけ
+      spoolStyle()
+    )
   );
   w.document.close();
   w.focus();
@@ -358,7 +382,7 @@ function printReport(): void {
           <p class="hint">画面で読みたい場合は、セッション設定の「印刷の経路」を「画面で見る」に戻してください。</p>
         </div>
         <!-- 本文は共用の `ReportText` へ（`⚙ 表示` のリンク化・フォントが効く） -->
-        <ReportText v-else-if="selected" :session-id="sessionId" :text="selectedText" />
+        <ReportText v-else-if="selected" :session-id="sessionId" :pages="selected.pages" :ccsid="session?.ccsid" />
         <div v-else class="viewer-empty">スプールを選択すると帳票を表示します</div>
       </div>
     </div>
@@ -639,6 +663,9 @@ function printReport(): void {
   overflow: auto;
   padding: 8px;
 }
+/* `ReportText` のルートは `<div class="report">`（`SpoolPane` の同じ注記を参照）。
+   `pre` だけを掴むと等幅指定が外れる。 */
+.viewer .report,
 .viewer pre {
   margin: 0;
   /* 以前は DejaVu Sans Mono/Courier New で日本語が等幅にならなかった。

@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import type { LogicalPage } from "@ts5250/scs";
+import { displayableChar } from "@ts5250/scs";
 import { candidateFontPaths, findMonoCjkFont } from "./pdf-font.js";
 
 /**
@@ -69,8 +70,12 @@ export function renderSpoolPdf(
     doc.addPage();
     let y = margin;
     for (const line of page.lines) {
+      // **描けない字は半角スペースへ**（HTML・画面と同じ扱い。`displayableChar`）。
+      // 復号コードページにマップの無いバイトはコーデックが U+FFFD で返すので、
+      // 素通しすると紙に `◆` が混ざる——しかも多くのフォントで全角幅なので桁までずれる。
+      const text = [...line].map(displayableChar).join("");
       // lineBreak:false で折り返さず 1 行として描く（等幅フォントで桁が揃う）
-      doc.text(line.length > 0 ? line : " ", margin, y, { lineBreak: false });
+      doc.text(text.length > 0 ? text : " ", margin, y, { lineBreak: false });
       y += lineHeight;
     }
   }

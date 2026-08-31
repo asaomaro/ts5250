@@ -36,6 +36,7 @@ import {
   openQuery
 } from "@ts5250/hostserver";
 import { renderSpoolHtml } from "@ts5250/scs";
+import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { type ConnectOptions } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 import { withAudit } from "./audit.js";
@@ -727,12 +728,17 @@ export function registerHostServerTools(server: McpServer, deps: ToolDeps): void
         if (input.format === "pages") return jsonResult({ pages });
         if (input.format === "html") {
           // 描画は push 型の get_spool_html と**同じ関数**を通す（帳票の絵を 2 つ持たない）
-          const html = renderSpoolHtml(pages, {
-            capturedAt: new Date().toISOString(),
-            spoolId: `${input.id.fileName}/${input.id.jobName}/${input.id.fileNumber}`,
-            ...(input.title !== undefined ? { title: input.title } : {}),
-            ...(input.note !== undefined ? { note: input.note } : {})
-          });
+          const html = renderSpoolHtml(
+            pages,
+            {
+              capturedAt: new Date().toISOString(),
+              spoolId: `${input.id.fileName}/${input.id.jobName}/${input.id.fileNumber}`,
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.note !== undefined ? { note: input.note } : {})
+            },
+            // 復号に使った CCSID から、そのままの字がどちらの読みかを決める
+            { sbcs: { host: isKatakanaCcsid(input.ccsid) ? "kana" : "latin" } }
+          );
           return jsonResult({ html, bytes: html.length });
         }
         return jsonResult({ lines: pages.flatMap((p) => p.lines) });

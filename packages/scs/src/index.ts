@@ -4,7 +4,14 @@
  * 依存は `@ts5250/ebcdic` のみ——TN5250 のプロトコル一式を引き込まずに、
  * 「スプールを読んで帳票にする」用途だけを満たす。
  */
-export { ScsDecoder, type LogicalPage } from "./scs.js";
+export { ScsDecoder, type LogicalPage, type ShiftMark } from "./scs.js";
+export {
+  reportLineSegs,
+  lineHasAlt,
+  displayableChar,
+  type ReportSeg,
+  type SbcsReading
+} from "./report-line.js";
 
 /**
  * 論理ページ → 自己完結 HTML（帳票のプレビュー・印刷）。
@@ -17,4 +24,9 @@ export { ScsDecoder, type LogicalPage } from "./scs.js";
  * `document.*` が現れるのは**生成する HTML の中身**であって、このモジュール自身は
  * `node:*` にも DOM にも触れない（`tsconfig` の `types: []` が保証している）。
  */
-export { renderSpoolHtml, type SpoolHtmlMeta } from "./spool-html.js";
+export {
+  renderSpoolHtml,
+  type SpoolHtmlMeta,
+  type SpoolHtmlStyle,
+  type SpoolSbcsToggle
+} from "./spool-html.js";

@@ -21,6 +21,7 @@ import { As400Error } from "@ts5250/base";
 import { type LogicalPage } from "@ts5250/scs";
 import { listSpooledFiles, type SpoolEntry, type SpoolId, type SpoolListFilter } from "@ts5250/hostserver";
 import { renderSpoolHtml } from "@ts5250/scs";
+import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { type ConnectOptions } from "@ts5250/tn5250";
 import type { AuthVars } from "./auth.js";
 import type { ConfigResolver } from "./config-resolver.js";
@@ -220,11 +221,18 @@ export function registerHostSpoolRoutes(
       const opts = resolveSource(deps.resolver, body.source, c.get("user"));
       const pages = await readSpoolPages(opts, body.id);
       const label = `${body.id.fileName}-${body.id.jobName}-${body.id.fileNumber}`;
-      const html = renderSpoolHtml(pages, {
-        capturedAt: new Date().toISOString(),
-        spoolId: label,
-        title: `スプール ${body.id.fileName}`
-      });
+      // **復号に使った CCSID を渡す**——「そのまま復号した字がカナと英のどちらの読みか」は
+      // ここでしか分からない。渡すとページ内で読み替えられるようになる。
+      const ccsid = opts.spoolCcsid ?? DEFAULT_SPOOL_CCSID;
+      const html = renderSpoolHtml(
+        pages,
+        {
+          capturedAt: new Date().toISOString(),
+          spoolId: label,
+          title: `スプール ${body.id.fileName}`
+        },
+        { sbcs: { host: isKatakanaCcsid(ccsid) ? "kana" : "latin" } }
+      );
       const name = safeFileName(label);
       return new Response(html, {
         headers: {

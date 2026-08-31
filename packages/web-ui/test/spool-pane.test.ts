@@ -205,7 +205,7 @@ describe("中身の表示", () => {
       }
     });
 
-    const text = w.find("pre").text();
+    const text = w.find(".report").text();
     expect(text).toContain("一枚目");
     expect(text).toContain("(改ページ)");
     expect(text).toContain("二枚目");
@@ -332,8 +332,8 @@ describe("応答の追い越し", () => {
 
     // 見出しは B。本文も B でなければならない
     expect(w.text()).toContain("OTHER");
-    expect(w.find("pre").text()).toContain("Bの本文");
-    expect(w.find("pre").text()).not.toContain("Aの本文");
+    expect(w.find(".report").text()).toContain("Bの本文");
+    expect(w.find(".report").text()).not.toContain("Aの本文");
     w.unmount();
   });
 

@@ -59,6 +59,17 @@ export { assertIdentifier, isValidIdentifier, IDENTIFIER_PATTERN } from "./ident
 export { isFullWidth, isCertainWideGlyph } from "./east-asian-width.js";
 
 /**
+ * 配布 HTML（エビデンス）で選べる等幅フォント。**画面 HTML と帳票 HTML が共有する**
+ * ——2 か所に書き写すと候補がずれるため、土台に 1 つだけ置く。
+ */
+export {
+  EVIDENCE_FONTS,
+  STD_MONO_STACK,
+  evidenceFontIndex,
+  type EvidenceFont
+} from "./evidence-fonts.js";
+
+/**
  * RFC 2877 のデバイス属性（KBDTYPE/CODEPAGE/CHARSET）。**tn5250 / tn3270 / vt の 3 つが要る**
  * が、どれの持ち物でもないのでここに置く（`device-env.ts` の冒頭に経緯）。
  */

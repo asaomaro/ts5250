@@ -30,6 +30,7 @@ import { renderSpoolPdf } from "./pdf.js";
 import type { PrinterOutputConfig } from "./printer-output.js";
 import { fieldSignon } from "./signon.js";
 import { renderSpoolHtml } from "@ts5250/scs";
+import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { renderScreenHtml, renderScreenHistoryHtml } from "@ts5250/tn5250";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { withAudit } from "./audit.js";
@@ -925,14 +926,23 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               "SESSION_NOT_FOUND",
               `spool ${spoolId} not found`,
             );
-          const html = renderSpoolHtml(report.pages, {
-            capturedAt: new Date().toISOString(),
-            sessionId,
-            host: entry.host,
-            spoolId,
-            ...(title !== undefined ? { title } : {}),
-            ...(note !== undefined ? { note } : {}),
-          });
+          const html = renderSpoolHtml(
+            report.pages,
+            {
+              capturedAt: new Date().toISOString(),
+              sessionId,
+              host: entry.host,
+              spoolId,
+              ...(title !== undefined ? { title } : {}),
+              ...(note !== undefined ? { note } : {}),
+            },
+            // 復号に使った CCSID から、そのままの字がどちらの読みかを決める
+            {
+              sbcs: {
+                host: isKatakanaCcsid(entry.openOpts.ccsid) ? "kana" : "latin",
+              },
+            },
+          );
           return {
             content: [
               {
