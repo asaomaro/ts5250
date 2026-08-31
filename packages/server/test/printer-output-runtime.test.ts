@@ -103,7 +103,13 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     entry.onOutputWarn = (w) => pushed.push(w.message);
     feedSpool(t);
     expect(await waitFor(() => entry.outputWarnings.length > 0)).toBe(true);
-    expect(entry.outputWarnings[0]!.message).toMatch(/PDF 保存に失敗|ENOENT/);
+    // **並びを決め打ちしない。** `renderSpoolPdf` は CJK フォントが見つからないと
+    // 先に警告を 1 本積む（フォントの無いランナーで実際に起きて、ここが落ちた）。
+    // 見たいのは「保存の失敗が積まれたか」なので、並びではなく**在ること**で測る。
+    expect(
+      entry.outputWarnings.map((w) => w.message).join("\n"),
+      "保存の失敗が積まれていない"
+    ).toMatch(/PDF 保存に失敗|ENOENT/);
     expect(pushed.length).toBeGreaterThan(0);
     // 受信自体は成功している
     expect(entry.reports.length).toBe(1);

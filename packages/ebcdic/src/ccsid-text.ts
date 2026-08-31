@@ -5,8 +5,10 @@
  * それ以外（UTF-8 / ISO-8859-1 / UTF-16 / Windows-1252 / Shift_JIS）は Web 標準の
  * `TextDecoder` に橋渡しする。
  *
- * **CCSID 850 / 437 だけは `TextDecoder` に無い**（WHATWG の一覧に無い）ので、
- * 同梱の表で読む（`oem-tables.ts`）。実機で 850 タグが付くのはたいてい
+ * **同梱の表で読む CCSID がある**（`oem-tables.ts`）。850 / 437 は `TextDecoder` に無いから、
+ * 1252 / 5348 は `TextDecoder` の結果が**実行環境で変わる**から——Node は full ICU 無しだと
+ * `windows-1252` を ISO-8859-1 として扱い、0x80〜0x9F が黙って化ける（CI で踏んだ）。
+ * 実機で 850 タグが付くのはたいてい
  * 「中身は UTF-8 / ASCII なのにサーバー既定のタグが付いた」ケースで、決定表では
  * タグより先に中身の推定が当たる（research F4）——**それでも、本当に CP850 の内容が
  * 来たときに読めないままにはしない**。
@@ -40,8 +42,8 @@ const NEL = "\u0085";
 const DECODER_LABELS: ReadonlyMap<number, string> = new Map([
   [1208, "utf-8"],
   [819, "iso-8859-1"],
-  [1252, "windows-1252"],
-  [5348, "windows-1252"],
+  // **1252 / 5348 はここに置かない。** Node は full ICU 無しだと `windows-1252` を
+  // ISO-8859-1 として扱い、0x80〜0x9F が黙って化ける。同梱の表で読む（`oem-tables.ts`）
   [1200, "utf-16be"],
   [13488, "utf-16be"],
   [17584, "utf-16be"],
@@ -56,11 +58,12 @@ const DECODER_LABELS: ReadonlyMap<number, string> = new Map([
  *
  * `TextEncoder` は **UTF-8 しか吐けない**ので、それ以外は自前で戻す:
  * - UTF-16BE は素直に 2 バイトずつ
- * - 単バイト系（819 / 1252）は「全 256 バイトを復号して逆引き表を作る」ことで表を持たずに戻せる
+ * - 単バイト系（819）は「全 256 バイトを復号して逆引き表を作る」ことで表を持たずに戻せる
+ *   （1252 / 5348 は `TextDecoder` が環境で変わるので同梱の表を使う。`oem-tables.ts`）
  * - Shift_JIS 系（932 / 943）は多バイトのため同じ手が使えない。**読み取り専用**とする
  *   （保存しようとしたら呼び出し側が断る。`canEncodeCcsid`）
  */
-const SINGLE_BYTE_LABELS = new Set(["iso-8859-1", "windows-1252"]);
+const SINGLE_BYTE_LABELS = new Set(["iso-8859-1"]);
 
 /** 単バイト系の逆引き表（Unicode → バイト）。初回だけ作って使い回す */
 const reverseTables = new Map<string, Map<number, number>>();
@@ -75,14 +78,14 @@ function reverseTableFor(label: string): Map<number, number> {
     one[0] = b;
     const ch = decoder.decode(one);
     const cp = ch.codePointAt(0);
-    // 逆引きは**最初に現れたバイトを採る**（Windows-1252 の未定義位置が U+FFFD に潰れるため）
+    // 逆引きは**最初に現れたバイトを採る**（未定義位置が U+FFFD に潰れるため）
     if (cp !== undefined && cp !== 0xfffd && !table.has(cp)) table.set(cp, b);
   }
   reverseTables.set(label, table);
   return table;
 }
 
-/** OEM 単バイト系（850 / 437）か。`TextDecoder` に無いので同梱の表で読む */
+/** 同梱の表で読む単バイト系か（850 / 437 / 1252 / 5348。`oem-tables.ts` の注記） */
 function oemTableFor(ccsid: number): readonly number[] | undefined {
   return OEM_TABLES.get(ccsid);
 }
