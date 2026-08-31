@@ -4,7 +4,7 @@
  * 依存は `@ts5250/ebcdic` のみ——TN5250 のプロトコル一式を引き込まずに、
  * 「スプールを読んで帳票にする」用途だけを満たす。
  */
-export { ScsDecoder, type LogicalPage } from "./scs.js";
+export { ScsDecoder, type LogicalPage, type ShiftMark } from "./scs.js";
 
 /**
  * 論理ページ → 自己完結 HTML（帳票のプレビュー・印刷）。

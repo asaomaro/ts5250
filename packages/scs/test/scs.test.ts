@@ -53,6 +53,51 @@ describe("ScsDecoder", () => {
     expect(pages[0]!.cols).toBe(10);
   });
 
+  /**
+   * **表示コード切替（カナ ⇄ 英）のために、桁ごとの生バイトを残す。**
+   *
+   * 復号済みの `lines` からは、CP290 と CP1027 のどちらの表で読むべきかを選び直せない
+   * （両表はカタカナと英小文字の位置が入れ替わった鏡像なので、元のバイトが要る）。
+   */
+  it("SBCS の桁に生 EBCDIC バイトを残す", () => {
+    const codec = codecForCcsid(1399);
+    const pages = new ScsDecoder(1399).decode(codec.encode("AB").bytes);
+    const raw = pages[0]!.raw!;
+    expect(raw[0]![0]).toBe(0xc1); // A
+    expect(raw[0]![1]).toBe(0xc2); // B
+    // 読み直せば同じバイトから別の字が出る（＝切替の材料になっている）
+    expect(String.fromCharCode(raw[0]![0]!)).not.toBe("A"); // EBCDIC のまま持っている
+  });
+
+  /** 全角とその継続桁には生バイトを残さない（読み直す対象ではない） */
+  it("全角の桁には生バイトを残さない", () => {
+    const codec = codecForCcsid(1399);
+    const pages = new ScsDecoder(1399).decode(codec.encode("A日B").bytes);
+    const raw = pages[0]!.raw!;
+    expect(raw[0]![0]).toBe(0xc1); // A
+    expect(raw[0]![1]).toBeUndefined(); // 日（前半）
+    expect(raw[0]![2]).toBeUndefined(); // 日（継続桁）
+    expect(raw[0]![3]).toBe(0xc2); // B
+  });
+
+  /**
+   * **SO/SI の位置を残す。** SO/SI 自身は桁を占めない（この復号器は昔からシフトで桁を
+   * 進めない）ので、`col` は**その直後に来る桁**を指す。印をどう描くかは描く側の判断で、
+   * ここでは位置だけを渡す。
+   */
+  it("SO/SI の位置を残す（桁は占めない）", () => {
+    const codec = codecForCcsid(1399);
+    const pages = new ScsDecoder(1399).decode(codec.encode("A日B").bytes);
+    const p = pages[0]!;
+    expect(p.shifts![0]).toEqual([
+      { col: 2, kind: "so" }, // A の次＝全角の始まり
+      { col: 4, kind: "si" }  // 全角 2 桁のあと
+    ]);
+    // **桁は動いていない**（lines も cols もこれまでどおり）
+    expect(p.lines[0]).toBe("A日B");
+    expect(p.cols).toBe(4);
+  });
+
   it("DBCS 全角の直後に SBCS が続いても桁がずれない（NL 跨ぎ）", () => {
     const codec = codecForCcsid(1399);
     const line1 = codec.encode("名前").bytes; // 全角2文字=4桁

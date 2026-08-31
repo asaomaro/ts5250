@@ -16,6 +16,33 @@ export interface LogicalPage {
   rows: number;
   cols: number;
   lines: string[];
+  /**
+   * 桁ごとの生 EBCDIC バイト（**SBCS だけ**。全角・その継続桁・オーダー由来は `undefined`）。
+   * `raw[r][c-1]` が `lines[r]` の c 桁目に対応する。
+   *
+   * **表示コード切替（カナ ⇄ 英）のために持つ。** 復号済みの `lines` からは、
+   * CP290 と CP1027 のどちらの表で読むべきかを後から選び直せない
+   * （両表はカタカナと英小文字の位置が入れ替わった鏡像で、元のバイトが要る）。
+   *
+   * **`lines` は 1 文字も変えない。** ここは並走する追加情報であって、
+   * PDF・テキスト・検索がこれまでどおり `lines` を使い続けられるようにしてある。
+   */
+  raw?: (number | undefined)[][];
+  /**
+   * SO/SI が現れた位置。`col` は**その直後に来る桁**（1 起点）で、SO/SI 自身は桁を占めない
+   * （この復号器は昔からシフトで桁を進めない。`lines` の桁位置はそのまま）。
+   *
+   * **SO/SI 表示のために持つ。** 印をどう描くか——桁を 1 つ使うのか、`lines` の桁を
+   * 動かさずに見せるのか——は描く側の判断なので、ここでは位置だけを渡す。
+   */
+  shifts?: ShiftMark[][];
+}
+
+/** SO/SI の位置（`LogicalPage.shifts`） */
+export interface ShiftMark {
+  /** その直後に来る桁（1 起点） */
+  col: number;
+  kind: "so" | "si";
 }
 
 // SCS 単バイト制御（scs.h の定数）
@@ -57,6 +84,9 @@ export class ScsDecoder {
   decode(scs: Uint8Array): LogicalPage[] {
     const pages: LogicalPage[] = [];
     let grid: string[][] = []; // grid[r-1][c-1]
+    // 桁ごとの生バイトと SO/SI 位置。**grid と同じ添字**で並走させる（`LogicalPage.raw` の注記）
+    let rawGrid: (number | undefined)[][] = [];
+    let shiftGrid: ShiftMark[][] = [];
     let row = 1;
     let col = 1;
     let maxRow = 0;
@@ -72,10 +102,12 @@ export class ScsDecoder {
       }
       while (line.length < c) line.push(" ");
     };
-    const put = (ch: string): void => {
+    const put = (ch: string, rawByte?: number): void => {
       if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
       cellAt(col);
       grid[row - 1]![col - 1] = ch;
+      // 生バイトは SBCS の桁にだけ残す（読み直せるのはこれだけ）
+      (rawGrid[row - 1] ??= [])[col - 1] = rawByte;
       if (row > maxRow) maxRow = row;
       if (col > maxCol) maxCol = col;
       col += 1;
@@ -90,15 +122,27 @@ export class ScsDecoder {
       if (col + 1 > maxCol) maxCol = col + 1;
       col += 2;
     };
+    /** いまの桁の直前に SO/SI があった、と記録する（SO/SI 自身は桁を占めない） */
+    const markShift = (kind: "so" | "si"): void => {
+      if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
+      (shiftGrid[row - 1] ??= []).push({ col, kind });
+    };
+
     const flushPage = (): void => {
       if (maxRow === 0 && maxCol === 0) return; // 空ページは出さない
       const lines: string[] = [];
+      const raw: (number | undefined)[][] = [];
+      const shifts: ShiftMark[][] = [];
       for (let r = 0; r < maxRow; r++) {
         const line = grid[r] ?? [];
         lines.push(line.join("").replace(/\s+$/, "")); // 行末の空白は落とす
+        raw.push(rawGrid[r] ?? []);
+        shifts.push(shiftGrid[r] ?? []);
       }
-      pages.push({ rows: maxRow, cols: maxCol, lines });
+      pages.push({ rows: maxRow, cols: maxCol, lines, raw, shifts });
       grid = [];
+      rawGrid = [];
+      shiftGrid = [];
       maxRow = 0;
       maxCol = 0;
     };
@@ -122,6 +166,7 @@ export class ScsDecoder {
       if (this.isDbcs && dbcsMode) {
         if (b === SI) {
           dbcsMode = false;
+          markShift("si");
           continue;
         }
         if (b === SO) {
@@ -161,7 +206,7 @@ export class ScsDecoder {
           for (let k = 0; k < count; k++) {
             const rb = next();
             if (rb < 0) break;
-            put(String.fromCodePoint(this.codec.decodeByte(rb)));
+            put(String.fromCodePoint(this.codec.decodeByte(rb)), rb);
           }
           break;
         }
@@ -184,8 +229,10 @@ export class ScsDecoder {
         }
         default:
           // SBCS モード: SO で DBCS モードへ、それ以外は SBCS 1 バイト
-          if (this.isDbcs && b === SO) dbcsMode = true;
-          else put(String.fromCodePoint(this.codec.decodeByte(b)));
+          if (this.isDbcs && b === SO) {
+            dbcsMode = true;
+            markShift("so");
+          } else put(String.fromCodePoint(this.codec.decodeByte(b)), b);
           break;
       }
     }
