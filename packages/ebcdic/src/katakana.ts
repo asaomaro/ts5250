@@ -40,3 +40,14 @@ export function katakanaChar(byte: number): string {
 export function latinChar(byte: number): string {
   return String.fromCharCode(ibm939Sbcs.ebcdicToUnicode[byte & 0xff] ?? 0xfffd);
 }
+
+/**
+ * その CCSID の SBCS 部が**カタカナ側の表**（CP290）か。
+ *
+ * 「そのまま復号した字がカナと英のどちらの読みか」を決めるのはこれ 1 つで、
+ * 画面・保存 HTML・帳票のすべてが同じ答えを使う。**2 表がここに住んでいるので、
+ * どちらを使っているかの判定もここに置く**——別の場所に書き写すと必ずずれる。
+ */
+export function isKatakanaCcsid(ccsid: number | undefined): boolean {
+  return ccsid === 930 || ccsid === 5026;
+}

@@ -41,7 +41,11 @@ export function hostCodePageOf(ccsid: number | undefined): HostCodePage | undefi
   return HOST_CODE_PAGES.find((p) => p.ccsid === ccsid);
 }
 
-/** カタカナ系（英小文字入力を大文字化する）コードページか。 */
-export function isKatakanaCcsid(ccsid: number | undefined): boolean {
-  return hostCodePageOf(ccsid)?.katakana === true;
-}
+/**
+ * カタカナ系（英小文字入力を大文字化する）コードページか。
+ *
+ * **判定は `@ts5250/ebcdic/katakana` に一本化してある**——2 表（CP290 / CP1027）が
+ * 住んでいる場所と同じにしないと、表を足したときに片方だけ直して食い違う。
+ * 上の一覧の `katakana` はドロップダウンの説明用で、判定には使わない。
+ */
+export { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
