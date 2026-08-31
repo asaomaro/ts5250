@@ -109,6 +109,28 @@ describe("符号化（保存）", () => {
     }
   });
 
+  /**
+   * **Windows-1252 の上位は同梱の表で読む。**
+   *
+   * Node は full ICU 無しで起動すると `windows-1252` を ISO-8859-1 として扱い、
+   * 0x80〜0x9F が `€` `™` ではなく C1 制御になる——**黙って化ける**うえ、保存では
+   * `€` が SUB に落ちる。CI（小 ICU のランナー）で実際に踏んだので、表を同梱して
+   * どの環境でも同じ結果にした。ここは `TextDecoder` と突き合わせず**値そのもの**で測る
+   * （突き合わせると、壊れている環境では期待値まで一緒に壊れて検出できない）。
+   */
+  it("Windows-1252 の 0x80〜0x9F を環境に依らず読む", () => {
+    const at = (b: number): string => decodeCcsidText(1252, new Uint8Array([b])).text;
+    expect(at(0x80)).toBe("€");
+    expect(at(0x99)).toBe("™");
+    expect(at(0x93)).toBe("\u201c"); // “
+    expect(at(0x94)).toBe("\u201d"); // ”
+    expect(at(0x96)).toBe("–");
+    // 0xa0 以降は ISO-8859-1 と同じ
+    expect(at(0xe9)).toBe("é");
+    // 5348（ユーロ付き Windows Latin-1）も同じ表で読む
+    expect(decodeCcsidText(5348, new Uint8Array([0x80])).text).toBe("€");
+  });
+
   it("単バイト系でマップ不能な文字は SUB に落として件数を返す", () => {
     const { bytes, substituted } = encodeCcsidText(819, "A日");
     expect(substituted).toBe(1);
