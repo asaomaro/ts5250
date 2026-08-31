@@ -450,14 +450,33 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(off).toContain('<input class="tg" type="radio" name="s" id="s1">');
     expect(off).toContain('<input class="tg" type="radio" name="s" id="s2">');
     // ラベルは 3 つ置くが、見えるのは今の状態のものだけ（`.sw` と `:checked ~` で出し分け）
-    expect(off).toContain('<label class="btn sw" for="s1">SO/SI 非表示</label>');
-    expect(off).toContain('<label class="btn sw" for="s2">SO/SI 薄目</label>');
-    expect(off).toContain('<label class="btn sw" for="s0">SO/SI 濃目</label>');
+    // 変化するのは末尾の語だけ。**固定幅の箱に入れて**ボタンの幅を変えない（`.tv` の注記）
+    expect(off).toContain('<label class="btn sw" for="s1">SO/SI <span class="tv sosi">非表示</span></label>');
+    expect(off).toContain('<label class="btn sw" for="s2">SO/SI <span class="tv sosi">薄目</span></label>');
+    expect(off).toContain('<label class="btn sw" for="s0">SO/SI <span class="tv sosi">濃目</span></label>');
 
     const dim = renderScreenHtml(withShift, {}, { shiftMarks: "dim" });
     expect(dim).toContain('id="s1" checked');
     const strong = renderScreenHtml(withShift, {}, { shiftMarks: "strong" });
     expect(strong).toContain('id="s2" checked');
+  });
+
+  /**
+   * **どのボタンも「今の状態」を字で出す。**
+   *
+   * 変化する部分を固定幅の箱（`.tv`）に入れたとき、`.btn>span{display:none}` が
+   * その箱ごと隠してしまい、SO/SI だけ状態の語が消えた（利用者の指摘）。
+   * 隠してよいのは 2 値ボタンの裏側（`.st-on`）だけ。
+   */
+  it("状態の語を隠す規則は .st-on だけに掛ける", () => {
+    const html = renderScreenHtml(snapWith((c) => {
+      c[0]![0] = cell("", { kind: "so" });
+    }));
+    expect(html).toContain(".btn>.st-on{display:none}");
+    // span を一括で隠さない（固定幅の箱まで消える）
+    expect(html).not.toContain(".btn>span{display:none}");
+    // 現在の状態（既定＝非表示）のラベルは中身を持っている
+    expect(html).toContain('<span class="tv sosi">非表示</span>');
   });
 
   /** 濃目は**薄目とふつうの文字の中間**（同じ色にすると本物の `{ }` と見分けが付かない） */
@@ -467,6 +486,26 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     }));
     expect(html).toContain("color-mix(in srgb,var(--cell,currentColor) 30%,var(--crt))"); // 薄目
     expect(html).toContain("color-mix(in srgb,var(--cell,currentColor) 65%,var(--crt))"); // 濃目
+  });
+
+  /**
+   * **フォントの切り替えは帳票 HTML と同じ作り**（利用者の指示で画面 HTML にも足した）。
+   * 候補は `@ts5250/base` の `EVIDENCE_FONTS` を両方が共有する——2 か所に書くとずれる。
+   * 自己完結なので Web フォントは積まず、読み手の環境にある物を指名するだけ。
+   */
+  it("フォントを順送りできる（JS 無し・外部フォントも参照しない）", () => {
+    const html = renderScreenHtml(snapWith((c) => putText(c, "ABC")));
+    expect(html).toContain('<input class="tg" type="radio" name="g" id="g0" checked>');
+    expect(html).toContain("フォント: 標準");
+    expect(html).toContain("フォント: 白源 HackGen");
+    expect(html).toContain("#g0:checked ~ .page{--mono:");
+    expect(html).not.toContain("<script");
+    expect(html).not.toMatch(/@font-face|https?:/);
+  });
+
+  it("指定のフォントで開く", () => {
+    const html = renderScreenHtml(snapWith((c) => putText(c, "ABC")), {}, { font: "udev" });
+    expect(html).toContain('id="g4" checked');
   });
 
   /** SO/SI 桁が 1 つも無い画面に切り替えを出さない（押しても何も起きない部品を置かない） */
@@ -524,8 +563,8 @@ describe("renderScreenHtml — web-ui と絵を食い違わせない", () => {
     expect(html).toContain('<span class="c-green vb">exit');
     // 素の状態はホストの読み。押すともう一方に差し替わる
     expect(html).toContain('<input class="tg" type="checkbox" id="k">');
-    expect(html).toContain('<span class="st-off">表示コード: カナ</span>');
-    expect(html).toContain('<span class="st-on">表示コード: 英</span>');
+    expect(html).toContain('表示コード: <span class="st-off tv kana">カナ</span>');
+    expect(html).toContain('<span class="st-on tv kana">英</span>');
     // 桁が動かないよう、隠す側も見せる側も display で入れ替える
     expect(html).toContain(".ln .vb{display:none}");
     expect(html).toContain("#k:checked ~ .page .ln .va{display:none}");

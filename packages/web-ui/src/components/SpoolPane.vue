@@ -522,6 +522,11 @@ tbody tr.sel { background: var(--accent-soft); }
 .viewer-bar { display: flex; gap: 10px; align-items: center; padding: 6px 0; flex: none; }
 /* 右寄せは最大化ボタンから。PDF はその隣に並べる */
 .viewer-bar .max { margin-left: auto; }
+/* **本文と読み込み中の両方を掴む。** `ReportText` のルートは `<pre>` から
+   `<div class="report">` になった（SO/SI の印を重ねる基準を行ごとに持つため）。
+   ここが `pre` だけだと**スクロールも等幅も外れる**——実際に外れて、
+   スプール側のスクロールバーが消えた（利用者の指摘）。 */
+.viewer .report,
 .viewer pre {
   flex: 1 1 auto;
   min-height: 0;

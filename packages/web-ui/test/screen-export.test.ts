@@ -173,16 +173,17 @@ describe("画面を HTML で保存", () => {
     expect(written).toContain("ｵｵｵｵ");
     expect(written).toContain('<input class="tg" type="checkbox" id="k">'); // 素＝ホストの読み
     // カナ系ホストなので、切り替えの相手は「英」
-    expect(written).toContain('<span class="st-off">表示コード: カナ</span>');
-    expect(written).toContain('<span class="st-on">表示コード: 英</span>');
+    // （変化する語だけが固定幅の箱に入る。`screen-html.ts` の `.tv` の注記）
+    expect(written).toContain('表示コード: <span class="st-off tv kana">カナ</span>');
+    expect(written).toContain('<span class="st-on tv kana">英</span>');
   });
 
   /** 英小文字系ホスト（939 等）では、そのままが「英」で相手が「カナ」になる */
   it("英系ホストでは切り替えの向きが逆になる", () => {
     addSession(snapshotWith([cell("e", { kind: "sbcs", rawByte: 0x85 })]), 939);
     downloadScreenHtml(SID);
-    expect(written).toContain('<span class="st-off">表示コード: 英</span>');
-    expect(written).toContain('<span class="st-on">表示コード: カナ</span>');
+    expect(written).toContain('表示コード: <span class="st-off tv kana">英</span>');
+    expect(written).toContain('<span class="st-on tv kana">カナ</span>');
   });
 
   /** 読み直しても字が変わらない画面には切り替えを出さない（押しても何も起きない部品を置かない） */
@@ -221,6 +222,6 @@ describe("画面を HTML で保存", () => {
     viewSettings.set("sosi", "none");
     downloadScreenHtml(SID);
     expect(written).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
-    expect(written).toContain('for="s2">SO/SI 薄目</label>');
+    expect(written).toContain('for="s2">SO/SI <span class="tv sosi">薄目</span></label>');
   });
 });

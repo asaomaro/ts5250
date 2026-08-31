@@ -234,7 +234,8 @@ function spoolStyle(): Parameters<typeof renderSpoolHtml>[2] {
   const host = isKatakanaCcsid(session.value?.ccsid) ? "kana" : "latin";
   return {
     font: view.font,
-    shiftMarks: view.sosi !== "none",
+    // 画面設定と同じ 3 値をそのまま渡す（帳票 HTML も 非表示 / 薄目 / 濃目）
+    shiftMarks: view.sosi,
     sbcs: { host, initial: view.kana === "auto" ? host : view.kana }
   };
 }
@@ -662,6 +663,9 @@ function printReport(): void {
   overflow: auto;
   padding: 8px;
 }
+/* `ReportText` のルートは `<div class="report">`（`SpoolPane` の同じ注記を参照）。
+   `pre` だけを掴むと等幅指定が外れる。 */
+.viewer .report,
 .viewer pre {
   margin: 0;
   /* 以前は DejaVu Sans Mono/Courier New で日本語が等幅にならなかった。

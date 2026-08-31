@@ -87,7 +87,10 @@ export function downloadScreenHtml(sessionId: string, now = new Date()): string 
     // ——「この HTML はこう見えている」を固定する意味が無くなった
   }, {
     shiftMarks: view.sosi,
-    sbcs: { host: hostReading, initial: sbcsView === "host" ? hostReading : sbcsView }
+    sbcs: { host: hostReading, initial: sbcsView === "host" ? hostReading : sbcsView },
+    // 画面と同じ字で開く。**候補に無い名前なら標準へ落ちる**（環境で選んだフォントは
+    // 読み手の機械に無いことがあるので、配布 HTML は自前の候補しか指名しない）
+    font: view.font
   });
 
   const stamp = localStamp(now);

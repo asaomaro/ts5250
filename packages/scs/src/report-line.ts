@@ -6,15 +6,15 @@
  *
  * - **全角**は 2 桁の箱に入れる必要がある（フォントに桁幅を委ねない）
  * - **読みで字が変わる区間**は 2 通りの字を持つ（表示コード切替。カナ ⇄ 英）
- * - **SO/SI** は印を描く位置を持つ
  *
  * ここを 1 か所にしておかないと、「画面ではこう見えるのに保存した HTML では違う」が起きる。
  * 桁と文字列の添字は**一致しない**（全角が 1 文字で 2 桁を占める）ので、桁は別に数える。
+ *
+ * **SO/SI の印はここに入れない。** 印は桁を持たず、`shifts` の桁位置に**重ねて**描く
+ * ——文字の流れに挟むと印の有無で桁が動いてしまう（`ShiftMark` の注記）。
  */
 import { isFullWidth } from "@ts5250/base";
 import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
-import type { ShiftMark } from "./scs.js";
-
 /** SBCS の読み。カナ（CP290 系）／英（CP1027 系） */
 export type SbcsReading = "kana" | "latin";
 
@@ -23,16 +23,18 @@ export type ReportSeg =
   /** 半角の連なり。`alt` があれば読みで字が変わる（無ければどちらの読みでも同じ） */
   | { kind: "text"; text: string; alt?: string }
   /** 全角 1 文字（2 桁の箱に入れる） */
-  | { kind: "wide"; text: string }
-  /** SO/SI の印。**桁を 1 つ借りる**（SCS の SO/SI は桁を占めないため、出すと右へずれる） */
-  | { kind: "mark"; text: "{" | "}" };
+  | { kind: "wide"; text: string };
 
 /**
- * 描けない字を半角スペースに落とす。
+ * 描けない字を半角スペースに落とす（ACS と同じ。web-ui の `displayText` と同じ扱い）。
+ *
+ * **そのまま復号した字にも掛ける。** 帳票の復号コードページにマップの無いバイトを
+ * コーデックは U+FFFD で返すので、素通しすると `◆`（U+FFFD の字形）が本文に混ざる
+ * ——DSPFMT の帳票で実際に出た（利用者の報告。CCSID 1399 では 256 中 29 バイトが該当）。
+ * しかも U+FFFD は**多くのフォントで全角幅**なので、1 桁のはずが 2 桁を占めて行がずれる。
  *
  * EBCDIC の SBCS 表は 256 バイト中 96 バイトを制御文字（C0 / DEL / C1）へ写すので、
- * 読み直した先が制御文字になることがある。そのまま出すと豆腐（□）になり、
- * マップの無いバイトを表す U+FFFD は**多くのフォントで全角幅**なので桁までずれる。
+ * 読み直した先が制御文字になることもある。そちらも豆腐（□）になるので同じく伏せる。
  */
 export function displayableChar(ch: string): string {
   const c = ch.codePointAt(0);
@@ -50,16 +52,12 @@ function recode(byte: number, reading: SbcsReading): string {
  *
  * @param line   `LogicalPage.lines` の 1 行
  * @param raw    `LogicalPage.raw` の同じ行（桁ごとの生バイト）。無ければ読み直さない
- * @param shifts `LogicalPage.shifts` の同じ行（SO/SI の位置）。`marks` が false なら使わない
  * @param alt    もう一方の読み。`undefined` なら 1 通りだけ
- * @param marks  SO/SI の印を区間に入れるか
  */
 export function reportLineSegs(
   line: string,
   raw: readonly (number | undefined)[] = [],
-  shifts: readonly ShiftMark[] = [],
-  alt?: SbcsReading,
-  marks = false
+  alt?: SbcsReading
 ): ReportSeg[] {
   const out: ReportSeg[] = [];
   let run = "";
@@ -72,16 +70,10 @@ export function reportLineSegs(
     run = "";
     runAlt = "";
   };
-  const putMarks = (at: number): void => {
-    if (!marks) return;
-    for (const m of shifts) {
-      if (m.col !== at) continue;
-      flush();
-      out.push({ kind: "mark", text: m.kind === "so" ? "{" : "}" });
-    }
-  };
-  for (const ch of line) {
-    putMarks(col);
+  for (const raw0 of line) {
+    // **そのまま側にも掛ける**（`displayableChar` の注記）。全角の判定より先に通すのは、
+    // U+FFFD が全角幅で描かれる環境があり、箱に入れると 2 桁を占めてしまうため。
+    const ch = displayableChar(raw0);
     if (isFullWidth(ch)) {
       flush();
       out.push({ kind: "wide", text: ch });
@@ -100,7 +92,6 @@ export function reportLineSegs(
     col += 1;
   }
   flush();
-  putMarks(col); // 行末で閉じる SI
   return out;
 }
 
@@ -112,7 +103,8 @@ export function lineHasAlt(
 ): boolean {
   if (!raw) return false;
   let col = 1;
-  for (const ch of line) {
+  for (const raw0 of line) {
+    const ch = displayableChar(raw0);
     if (isFullWidth(ch)) {
       col += 2;
       continue;

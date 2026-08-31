@@ -26,6 +26,9 @@ import type { LogicalPage } from "./scs.js";
 // **行の組み立ては共用**（`report-line.ts`）。画面（web-ui の ReportText）と同じ関数を通す
 // ——ここを別々に書くと「画面ではこう見えるのに保存した HTML では違う」が起きる。
 import { reportLineSegs, lineHasAlt, type ReportSeg, type SbcsReading } from "./report-line.js";
+import type { ShiftMark } from "./scs.js";
+// **フォントの候補は画面 HTML と共有する**（`@ts5250/base`）——2 か所に書くと候補がずれる
+import { EVIDENCE_FONTS, evidenceFontIndex } from "@ts5250/base";
 
 /** エビデンスの見出しに載せる情報。**日時は呼び出し側が渡す**（この層は時計を持たない） */
 export interface SpoolHtmlMeta {
@@ -48,16 +51,15 @@ export interface SpoolHtmlMeta {
  */
 export interface SpoolHtmlStyle {
   /**
-   * SO/SI マークを最初から出しておくか（既定 false＝非表示）。
+   * SO/SI マークの**開いたときの見せ方**（既定 `none`＝非表示）。
    *
-   * **出すと桁が右へずれる。** SCS の SO/SI は桁を占めない（`ScsDecoder` は昔から
-   * シフトで桁を進めない）ので、印を描くには桁を 1 つ借りるしかない。既定を非表示に
-   * してあるのはそのため——**紙と突き合わせるときは消しておく**。
+   * 非表示 → 薄目 → 濃目 をページ内で順送りできる（画面 HTML と同じ 3 値）。印は桁を
+   * 占めない（桁の境目に重ねて描く）ので、**どの状態でも桁は 1 つも動かない**。
    */
-  shiftMarks?: boolean;
+  shiftMarks?: ShiftMarkView;
   /** 表示コード切替（カナ ⇄ 英）。渡すと両方の読みを HTML に入れる */
   sbcs?: SpoolSbcsToggle;
-  /** 開いたときのフォント（`SPOOL_FONTS` の id。既定は先頭＝標準） */
+  /** 開いたときのフォント（`EVIDENCE_FONTS` の id。既定は先頭＝標準） */
   font?: string;
 }
 
@@ -72,20 +74,20 @@ export interface SpoolSbcsToggle {
 }
 
 /**
- * 選べるフォント。**自己完結なので Web フォントは積めない**——読み手の環境にある物だけを
- * 指名し、無ければ標準へ落ちる（どの候補も最後に標準の並びを足してある）。
- * 候補は web-ui の画面フォントと同じ顔ぶれにしてある。
+ * SO/SI マークの見せ方。非表示／薄目／濃目（画面 HTML・web-ui の画面設定と同じ 3 値）。
+ * **濃目もふつうの文字より薄い**——本物の `{ }` と区別が付かなくなると色を分けた意味が消える。
  */
-const STD_STACK = `ui-monospace,"SFMono-Regular",Menlo,Consolas,"BIZ UDGothic","MS Gothic",monospace`;
-const SPOOL_FONTS: { id: string; label: string; stack: string }[] = [
-  { id: "std", label: "標準", stack: STD_STACK },
-  { id: "bizud", label: "BIZ UDゴシック", stack: `"BIZ UDGothic","BIZ UDPGothic",${STD_STACK}` },
-  { id: "msg", label: "MS ゴシック", stack: `"MS Gothic","Osaka-Mono",${STD_STACK}` },
-  { id: "hackgen", label: "白源 HackGen", stack: `"HackGen Console NF","HackGen35 Console NF","HackGen Console","HackGen",${STD_STACK}` },
-  { id: "udev", label: "UDEV Gothic", stack: `"UDEV Gothic NF","UDEV Gothic 35NF","UDEV Gothic",${STD_STACK}` },
-  { id: "plemol", label: "PlemolJP", stack: `"PlemolJP Console NF","PlemolJP Console","PlemolJP",${STD_STACK}` },
-  { id: "cica", label: "Cica", stack: `"Cica",${STD_STACK}` }
-];
+export type ShiftMarkView = "none" | "dim" | "strong";
+
+/** SO/SI の順送りの順（既定を先頭に置く） */
+const SOSI_VIEWS = ["none", "dim", "strong"] as const;
+
+/** 切り替えラベルに出す名前 */
+const SOSI_LABELS: Record<ShiftMarkView, string> = {
+  none: "非表示",
+  dim: "薄目",
+  strong: "濃目"
+};
 
 /** もう一方の読み */
 function otherReading(r: SbcsReading): SbcsReading {
@@ -115,23 +117,38 @@ function esc(s: string): string {
  * - 全角は 2 桁の箱（`w`）に入れる——フォントに桁幅を委ねない
  * - 読みで字が変わる区間だけ 2 つ出す（`va`＝そのまま／`vb`＝もう一方）。変わらない区間は
  *   素のテキストのまま＝**span も増えず HTML も太らない**
- * - SO/SI の印は常に入れておき、見せるかは CSS で決める（`TOGGLE_CSS`）
+ * - SO/SI の印は**文字の流れに挟まず、桁の境目に重ねて置く**。印は幅を持たないので、
+ *   出しても消しても桁は 1 つも動かない（`markHtml` の注記）
  */
 function renderLine(
   line: string,
   raw: readonly (number | undefined)[],
-  shifts: readonly import("./scs.js").ShiftMark[],
+  shifts: readonly ShiftMark[],
   alt: SbcsReading | undefined
 ): string {
-  return reportLineSegs(line, raw, shifts, alt, true)
+  const body = reportLineSegs(line, raw, alt)
     .map((seg: ReportSeg) => {
       if (seg.kind === "wide") return `<span class="w">${esc(seg.text)}</span>`;
-      if (seg.kind === "mark") return `<span class="so">${seg.text}</span>`;
       return seg.alt === undefined
         ? esc(seg.text)
         : `<span class="va">${esc(seg.text)}</span><span class="vb">${esc(seg.alt)}</span>`;
     })
     .join("");
+  return body + shifts.map(markHtml).join("");
+}
+
+/**
+ * SO/SI の印。**桁を占めない**——`position:absolute` で桁の境目に重ね、幅は持たせない。
+ *
+ * 文字の流れに挟むと、印を出した行だけ右へずれる。実採取の帳票（PUB400 の Library List）で
+ * 確かめたとおり、**SO/SI に桁を与えると DBCS の行だけ 1 桁ずれて他の行と食い違う**
+ * ——ホストは SO/SI が桁を占めない前提で桁を組んでいる。だから重ねて描くしかない。
+ *
+ * `left` は桁の境目（`col - 1` 桁ぶん）。`ch` は**この要素自身のフォント**で解決されるので、
+ * ここで字の大きさを変えないこと（変えると位置がずれる）。
+ */
+function markHtml(m: ShiftMark): string {
+  return `<span class="so" style="left:${m.col - 1}ch">${m.kind === "so" ? "{" : "}"}</span>`;
 }
 
 /** 1 ページ。桁数は `cols`（等幅の箱の幅）で固定する */
@@ -180,29 +197,69 @@ function metaHtml(meta: SpoolHtmlMeta, extra: [string, string][]): string {
  * フォントは 2 値ではないので、SO/SI の順送りと同じ形にする: 状態の数だけラベルを置き、
  * 「今の状態」のものだけ見せ、押すと次へ進む＝**ボタン 1 つが候補を一巡する**。
  */
-const FONT_CSS = SPOOL_FONTS.map(
+/**
+ * ページ送りの規則。**枚数に比例して増える**が、その代わり JS が 1 行も要らない
+ * ——配るエビデンスなので、読み手の環境（JS 無効・CSP）に依存しないほうを採る。
+ */
+function pageCss(n: number): string {
+  return Array.from({ length: n }, (_, i) =>
+    `#pg${i}:checked ~ .page figure.pg[data-page="${i + 1}"]{display:block}\n` +
+    `#pg${i}:checked ~ .page label[for=pg${i}]{outline:2px solid var(--fg)}`
+  ).join("\n");
+}
+
+const FONT_CSS = EVIDENCE_FONTS.map(
   (f, i) =>
     `#g${i}:checked ~ .page .sheet{--sheet-mono:${f.stack}}\n` +
-    `#g${i}:checked ~ .page label[for=g${(i + 1) % SPOOL_FONTS.length}]{display:inline-flex}`
+    `#g${i}:checked ~ .page label[for=g${(i + 1) % EVIDENCE_FONTS.length}]{display:inline-flex}`
 ).join("\n");
 
 const TOGGLE_CSS = `
 .fw{display:none}
 .tg{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
-.btn>span{display:none}
-.btn>.st-off{display:inline}
-#t:checked ~ .page label[for=t]>.st-off,#k:checked ~ .page label[for=k]>.st-off,
-#s:checked ~ .page label[for=s]>.st-off{display:none}
-#t:checked ~ .page label[for=t]>.st-on,#k:checked ~ .page label[for=k]>.st-on,
-#s:checked ~ .page label[for=s]>.st-on{display:inline}
+/* 2 値のボタンは両方の字を入れておき、**素の状態のほうだけ**を出す。
+   ここを .btn>span で一括に隠すと、変化部分を固定幅の箱（.tv）に入れた
+   SO/SI の語まで消える——実際に消えて「現在の状態が出ない」になった（利用者の指摘）。
+   隠すのは .st-on だけでよい。
+   ※ここは STYLE のテンプレートリテラル内。バッククォートは書けない。 */
+.btn>.st-on{display:none}
+/* **トグルで変化する部分は固定幅にする。** 押すたびに字数が変わると
+   ボタンの幅が変わり、後ろのボタンが左右に動く（利用者の指摘）。
+   変化する部分だけを固定幅の箱に入れれば、状態が変わっても幅は同じ。
+   web-ui のヘッダー（App.vue の .tv）と同じ手。
+   **フォント名だけは固定できない**——候補も字数も環境で変わるので、
+   その 1 つだけを一番右に置いて、幅が変わっても後続に響かないようにしてある。 */
+.tv{display:inline-block;text-align:left;white-space:nowrap}
+.tv.theme{width:5.4em}
+.tv.sosi{width:3.2em}
+.tv.kana{width:2.4em}
+#t:checked ~ .page label[for=t]>.st-off,#k:checked ~ .page label[for=k]>.st-off{display:none}
+#t:checked ~ .page label[for=t]>.st-on,#k:checked ~ .page label[for=k]>.st-on{display:inline-block}
+/* SO/SI は 3 値。ラベル i は「今が状態 i」のときだけ見え、押すと次へ進む
+   ＝ボタン 1 つが 非表示 → 薄目 → 濃目 と回る（画面 HTML と同じ作り） */
+.sw{display:none}
+#s0:checked ~ .page label[for=s1],
+#s1:checked ~ .page label[for=s2],
+#s2:checked ~ .page label[for=s0]{display:inline-flex}
+/* ページ送り。**JS を使わない**——ラジオ 1 つが 1 ページに対応し、押した番号のページだけ出す。
+   ラジオなので、束にフォーカスすれば矢印キーでページを送れる（前は JS でやっていた）。 */
+figure.pg{display:none}
+.nav label.jump.on{outline:2px solid var(--fg)}
 /* 表示コード: 必ず片方だけが出るので桁は動かない */
 .sheet .vb{display:none}
 #k:checked ~ .page .sheet .va{display:none}
 #k:checked ~ .page .sheet .vb{display:inline}
-/* SO/SI: 桁を 1 つ借りて描く。本物の { } と見分けが付くよう淡く */
-.so{display:none;width:1ch;color:color-mix(in srgb,var(--ink) 45%,var(--paper));
-user-select:none;-webkit-user-select:none}
-#s:checked ~ .page .so{display:inline-block}
+/* SO/SI: **桁を占めない**。桁の境目に重ねて置き、幅は持たせない（markHtml の注記。
+   ここは STYLE のテンプレートリテラル内なのでバッククォートは書けない）
+   ——出しても消しても桁が 1 つも動かないのはこのため。
+   本物の { } と見分けが付くよう淡く描き、本文ではないので選択・コピーにも混ぜない。 */
+.ln{position:relative}
+.so{display:none;position:absolute;top:0;width:1ch;margin-left:-.5ch;text-align:center;
+pointer-events:none;user-select:none;-webkit-user-select:none}
+#s1:checked ~ .page .so{display:inline-block;
+color:color-mix(in srgb,var(--ink) 30%,var(--paper))}
+#s2:checked ~ .page .so{display:inline-block;
+color:color-mix(in srgb,var(--ink) 65%,var(--paper))}
 `;
 
 /**
@@ -255,37 +312,7 @@ font-size:13px;line-height:1.35;white-space:pre}
 }
 ${TOGGLE_CSS}${FONT_CSS}`;
 
-/**
- * ページ送り。**JS はこれだけになった**（テーマ・表示コード・SO/SI・フォントは CSS だけで動く）。
- *
- * ここを CSS にしないのは、ページ数ぶんのラベルと規則を並べることになり
- * **枚数に比例して HTML と CSS が膨らむ**ため。切っても中身は読める
- * （印刷用 CSS が全ページを出すので、JS 無しでも全ページが縦に並ぶ）。
- */
-const JS = `
-var pgs=[].slice.call(document.querySelectorAll('figure.pg'));
-var bs=[].slice.call(document.querySelectorAll('.nav .jump'));
-var i=0;
-function show(n){
-  i=Math.max(0,Math.min(pgs.length-1,n));
-  pgs.forEach(function(p,k){p.hidden=k!==i});
-  bs.forEach(function(b,k){b.className='jump'+(k===i?' on':'')});
-  document.getElementById('p').disabled=i===0;
-  document.getElementById('n').disabled=i===pgs.length-1;
-  document.getElementById('pos').textContent=(i+1)+' / '+pgs.length;
-}
-document.getElementById('p').onclick=function(){show(i-1)};
-document.getElementById('n').onclick=function(){show(i+1)};
-bs.forEach(function(b,k){b.onclick=function(){show(k)}});
-document.addEventListener('keydown',function(e){
-  if(e.key==='ArrowLeft')show(i-1);
-  if(e.key==='ArrowRight')show(i+1);
-});
-// 印刷時は全ページを見せる（1 ページだけ印刷される事故を防ぐ）
-function showAll(v){pgs.forEach(function(p){p.hidden=v?false:pgs.indexOf(p)!==i})}
-window.addEventListener('beforeprint',function(){showAll(true)});
-window.addEventListener('afterprint',function(){showAll(false)});
-show(0);`;
+
 
 /**
  * スプール 1 件ぶんのエビデンス HTML。
@@ -294,8 +321,12 @@ show(0);`;
  * @param meta 見出しに載せる情報（**日時は呼び出し側が渡す**）
  */
 /** 状態を出すラベル（`st-off` が素の状態、`st-on` がチェック済みの状態） */
-function toggleLabel(id: string, off: string, on: string): string {
-  return `<label class="btn" for="${id}"><span class="st-off">${esc(off)}</span><span class="st-on">${esc(on)}</span></label>`;
+function toggleLabel(id: string, off: string, on: string, tv: string, prefix = ""): string {
+  return (
+    `<label class="btn" for="${id}">${esc(prefix)}` +
+    `<span class="st-off tv ${tv}">${esc(off)}</span>` +
+    `<span class="st-on tv ${tv}">${esc(on)}</span></label>`
+  );
 }
 
 /**
@@ -303,9 +334,21 @@ function toggleLabel(id: string, off: string, on: string): string {
  * ——見えているのは常に 1 つなので、利用者にはボタン 1 つが回っているように見える。
  */
 function fontLabels(): string {
-  return SPOOL_FONTS.map(
+  return EVIDENCE_FONTS.map(
     (f, i) =>
-      `<label class="btn fw" for="g${(i + 1) % SPOOL_FONTS.length}">フォント: ${esc(f.label)}</label>`
+      `<label class="btn fw" for="g${(i + 1) % EVIDENCE_FONTS.length}">フォント: ${esc(f.label)}</label>`
+  ).join("");
+}
+
+/**
+ * SO/SI の順送りボタン。**ラベル i は「今が状態 i」のときだけ見え、押すと次の状態に進む**
+ * ——見えているのは常に 1 つなので、利用者にはボタン 1 つが回っているように見える。
+ */
+function sosiLabels(): string {
+  return SOSI_VIEWS.map(
+    (v, i) =>
+      `<label class="btn sw" for="s${(i + 1) % SOSI_VIEWS.length}">` +
+      `SO/SI <span class="tv sosi">${SOSI_LABELS[v]}</span></label>`
   ).join("");
 }
 
@@ -336,37 +379,52 @@ export function renderSpoolHtml(
   const alt = style.sbcs ? otherReading(style.sbcs.host) : undefined;
   const showSbcs = alt !== undefined && hasSbcsAlt(list, alt);
   const showSosi = hasShifts(list);
-  const fontIdx = Math.max(0, SPOOL_FONTS.findIndex((f) => f.id === style.font));
+  const fontIdx = evidenceFontIndex(style.font);
   const body =
     `<header><h1>${esc(title)}</h1>` +
-    toggleLabel("t", "☀ 通常", "🌙 ダーク") +
-    fontLabels() +
+    // **フォントは一番右**（`.tv` の注記）。候補名の幅は環境で変わるので、
+    // 後ろに何も置かなければ幅が変わっても他のボタンは動かない。
+    toggleLabel("t", "☀ 通常", "🌙 ダーク", "theme") +
     // 出す桁が無い帳票には出さない（押しても何も起きない部品を置かない）
-    (showSosi ? toggleLabel("s", "SO/SI 非表示", "SO/SI 表示") : "") +
+    (showSosi ? sosiLabels() : "") +
     (showSbcs && style.sbcs
       ? toggleLabel(
           "k",
-          `表示コード: ${SBCS_LABELS[style.sbcs.host]}`,
-          `表示コード: ${SBCS_LABELS[otherReading(style.sbcs.host)]}`
+          SBCS_LABELS[style.sbcs.host],
+          SBCS_LABELS[otherReading(style.sbcs.host)],
+          "kana",
+          "表示コード: "
         )
       : "") +
+    fontLabels() +
     `</header>` +
     metaHtml(meta, [["ページ数", String(pages.length)]]) +
+    // ページ送りはラジオのラベル。**押せる部品は置くが JS は持たない**
     `<div class="nav">` +
-    list.map((_, i) => `<button type="button" class="jump">${i + 1}</button>`).join("") +
-    `</div><div class="nav">` +
-    `<button id="p" type="button">← 前</button><span id="pos"></span>` +
-    `<button id="n" type="button">次 →</button></div>` +
+    list.map((_, i) => `<label class="btn jump" for="pg${i}">${i + 1}</label>`).join("") +
+    `</div>` +
     list.map((p, i) => pageFigure(p, i, list.length, showSbcs ? alt : undefined)).join("");
   return (
     `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-    `<title>${esc(title)}</title><style>${STYLE}</style></head><body>` +
+    // ページ送りの規則は枚数で決まるので、ここで足す（`pageCss` の注記）
+    `<title>${esc(title)}</title><style>${STYLE}${pageCss(list.length)}</style></head><body>` +
     `<input class="tg" type="checkbox" id="t">` +
-    SPOOL_FONTS.map(
+    EVIDENCE_FONTS.map(
       (_, i) => `<input class="tg" type="radio" name="g" id="g${i}"${i === fontIdx ? " checked" : ""}>`
     ).join("") +
-    (showSosi ? `<input class="tg" type="checkbox" id="s"${style.shiftMarks ? " checked" : ""}>` : "") +
+    // ページ 1 枚につきラジオ 1 つ（束にフォーカスすれば矢印キーで送れる）
+    list
+      .map((_, i) => `<input class="tg" type="radio" name="pg" id="pg${i}"${i === 0 ? " checked" : ""}>`)
+      .join("") +
+    (showSosi
+      ? SOSI_VIEWS.map(
+          (v, i) =>
+            `<input class="tg" type="radio" name="s" id="s${i}"${
+              v === (style.shiftMarks ?? "none") ? " checked" : ""
+            }>`
+        ).join("")
+      : "") +
     (showSbcs && style.sbcs
       ? `<input class="tg" type="checkbox" id="k"${
           (style.sbcs.initial ?? style.sbcs.host) !== style.sbcs.host ? " checked" : ""
@@ -374,6 +432,6 @@ export function renderSpoolHtml(
       : "") +
     `<div class="page">` +
     body +
-    `</div><script>${JS}</script></body></html>`
+    `</div></body></html>`
   );
 }

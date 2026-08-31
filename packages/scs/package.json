@@ -12,6 +12,10 @@
     "./spool-html": {
       "types": "./dist/spool-html.d.ts",
       "default": "./dist/spool-html.js"
+    },
+    "./report-line": {
+      "types": "./dist/report-line.d.ts",
+      "default": "./dist/report-line.js"
     }
   },
   "files": [

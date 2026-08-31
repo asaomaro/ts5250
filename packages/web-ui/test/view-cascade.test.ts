@@ -295,6 +295,20 @@ describe("帳票の画面の表示設定", () => {
     w.unmount();
   });
 
+  /**
+   * **ルート要素の `class="report"` はペインとの約束。**
+   *
+   * `SpoolPane` / `PrinterPane` は `.viewer .report` でスクロールと等幅を効かせている。
+   * かつてルートは `<pre>` で、ペイン側も `.viewer pre` で掴んでいた——ルートを
+   * `<div>` に変えたときにセレクタを直し忘れ、**スプール側のスクロールバーが消えた**
+   * （利用者の指摘）。名前を変えるならペイン側も一緒に直す、をここで固定する。
+   */
+  it("ルート要素に report クラスを付ける（ペインのスクロール指定の掛かり先）", () => {
+    const w = mount(ReportText, { props: { sessionId: "p1", pages: [pg("X")] } });
+    expect(w.element.classList.contains("report")).toBe(true);
+    w.unmount();
+  });
+
   it("リンク化を切ると素のまま出る", () => {
     viewSettings.setOverride("p1", "linkify", false);
     const w = mount(ReportText, { props: { sessionId: "p1", pages: [pg("https://example.com/x")] } });
@@ -362,7 +376,7 @@ describe("帳票の画面の表示設定", () => {
       w.unmount();
     });
 
-    /** SO/SI は桁を占めないので、印を出すとその行は右へずれる（既定は非表示） */
+    /** 印は桁の境目に重ねて描くので、**出しても消しても桁は 1 つも動かない** */
     it("SO/SI 表示にすると印が出る（既定は出ない）", () => {
       const withShift = (): LogicalPage => ({
         rows: 1,
@@ -377,6 +391,31 @@ describe("帳票の画面の表示設定", () => {
       const on = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
       expect(on.text()).toContain("{");
       expect(on.text()).toContain("}");
+      // **印は幅を持たない。** 桁の境目に重ねて置くので、本文の桁は動かない
+      const marks = on.findAll(".so");
+      expect(marks).toHaveLength(2);
+      expect(marks[0]!.attributes("style")).toContain("left: 0ch");
+      expect(marks[1]!.attributes("style")).toContain("left: 2ch");
+      off.unmount();
+      on.unmount();
+    });
+
+    /** 印の有無で本文の桁が動かない（印は本文の外に置かれている） */
+    it("SO/SI の有無で本文が変わらない", () => {
+      const withShift = (): LogicalPage => ({
+        rows: 1,
+        cols: 2,
+        lines: ["日"],
+        raw: [[]],
+        shifts: [[{ col: 1, kind: "so" }, { col: 3, kind: "si" }]]
+      });
+      const off = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      const body = (w: ReturnType<typeof mount>): string =>
+        w.findAll(".ln").map((l) => l.findAll(".w").map((x) => x.text()).join("")).join("\n");
+      const before = body(off);
+      viewSettings.setOverride("p1", "sosi", "dim");
+      const on = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
+      expect(body(on)).toBe(before);
       off.unmount();
       on.unmount();
     });

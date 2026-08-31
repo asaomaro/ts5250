@@ -39,6 +39,8 @@ import { GRID_COLOR, GRID_LINE_STYLE } from "./protocol/wdsf-parser.js";
 // **サブパスから取る**（`browser.ts` の注記）。変換表は純粋だが重く、
 // 入口ごと引き込むとブラウザ向けの束が太る。
 import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
+// **候補は帳票 HTML と共有する**（`@ts5250/base`）——2 か所に書くと候補がずれる
+import { EVIDENCE_FONTS, evidenceFontIndex } from "@ts5250/base";
 
 /** コーデックが「この表にマップの無いバイト」を返すときの文字（`buffer.ts` と同じ） */
 const UNDISPLAYABLE = "�";
@@ -78,6 +80,14 @@ export interface ScreenHtmlStyle {
    * 読み直しても字が 1 つも変わらない画面には切り替えを出さない。
    */
   sbcs?: SbcsToggle;
+
+  /**
+   * 開いたときのフォント（`EVIDENCE_FONTS` の id。既定は先頭＝標準）。
+   *
+   * **ページ内で候補を順送りできる**（CSS だけのトグル）ので、ここで決まるのは初期状態だけ。
+   * web-ui は画面と同じ字で開くために渡す。
+   */
+  font?: string;
 }
 
 /**
@@ -121,9 +131,9 @@ const SOSI_VIEWS = ["none", "dim", "strong"] as const;
 
 /** 切り替えラベルに出す名前（web-ui の画面設定と同じ言葉） */
 const SOSI_LABELS: Record<ShiftMarkView, string> = {
-  none: "SO/SI 非表示",
-  dim: "SO/SI 薄目",
-  strong: "SO/SI 濃目"
+  none: "非表示",
+  dim: "薄目",
+  strong: "濃目"
 };
 
 /** 履歴 1 コマ。画面と、その画面を出した操作 */
@@ -577,17 +587,39 @@ function metaHtml(meta: ScreenHtmlMeta, extra: [string, string][] = []): string 
  * 回る**。web-ui の画面設定（ctrl+F3 の順送り）と同じ回り方なので、保存した HTML でも
  * 画面と同じ 3 値が選べる。
  */
+const FONT_CSS = EVIDENCE_FONTS.map(
+  (f, i) =>
+    `#g${i}:checked ~ .page{--mono:${f.stack}}\n` +
+    `#g${i}:checked ~ .page label[for=g${(i + 1) % EVIDENCE_FONTS.length}]{display:inline-flex}`
+).join("\n");
+
 const TOGGLE_CSS = `
 .tg{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
+/* フォントは 3 値以上なので SO/SI と同じ順送り（ボタン 1 つが候補を一巡する） */
+.fw{display:none}
 #t:focus-visible ~ .page label[for=t],
 #k:focus-visible ~ .page label[for=k],
 #s0:focus-visible ~ .page label[for=s1],
 #s1:focus-visible ~ .page label[for=s2],
 #s2:focus-visible ~ .page label[for=s0]{outline:2px solid var(--t-green);outline-offset:1px}
-.btn>span{display:none}
-.btn>.st-off{display:inline}
+/* 2 値のボタンは両方の字を入れておき、**素の状態のほうだけ**を出す。
+   ここを .btn>span で一括に隠すと、変化部分を固定幅の箱（.tv）に入れた
+   SO/SI の語まで消える——実際に消えて「現在の状態が出ない」になった（利用者の指摘）。
+   隠すのは .st-on だけでよい。
+   ※ここは STYLE のテンプレートリテラル内。バッククォートは書けない。 */
+.btn>.st-on{display:none}
+/* **トグルで変化する部分は固定幅にする。** 押すたびに字数が変わると
+   ボタンの幅が変わり、**後ろのボタンが左右に動く**（利用者の指摘）。
+   変化する部分だけを固定幅の箱に入れれば、状態が変わっても幅は同じ。
+   web-ui のヘッダー（App.vue の .tv）と同じ手。
+   **フォント名だけは固定できない**——候補も字数も環境で変わるので、
+   その 1 つだけを一番右に置いて、幅が変わっても後続に響かないようにしてある。 */
+.tv{display:inline-block;text-align:left;white-space:nowrap}
+.tv.theme{width:5.4em}
+.tv.sosi{width:3.2em}
+.tv.kana{width:2.4em}
 #t:checked ~ .page label[for=t]>.st-off,#k:checked ~ .page label[for=k]>.st-off{display:none}
-#t:checked ~ .page label[for=t]>.st-on,#k:checked ~ .page label[for=k]>.st-on{display:inline}
+#t:checked ~ .page label[for=t]>.st-on,#k:checked ~ .page label[for=k]>.st-on{display:inline-block}
 /* 表示コードの出し分け。**必ず片方だけが出る**ので桁は動かない。
    .ln span が (0,1,1) なので、打ち消す側はクラス 2 つ (0,2,0) で書く。 */
 .ln .vb{display:none}
@@ -723,7 +755,7 @@ background:var(--crt-bezel);border-top:1px solid var(--crt-line)}
 .frames{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;font-size:12px}
 .frames button.on{outline:2px solid var(--t-green)}
 [hidden]{display:none!important}
-${TOGGLE_CSS}`;
+${TOGGLE_CSS}${FONT_CSS}`;
 
 /**
  * 履歴のコマ送り。**JS はこれだけになった**（テーマ切替と SO/SI 表示は CSS だけで動く）。
@@ -759,6 +791,8 @@ interface Toggles {
   sosiView: ShiftMarkView;
   /** 表示コードの切り替え。読み直しても字が変わらない画面では出さない */
   sbcs: SbcsToggle | undefined;
+  /** 開いたときのフォント（`EVIDENCE_FONTS` の位置） */
+  fontIdx: number;
 }
 
 /**
@@ -772,6 +806,10 @@ function page(title: string, bodyHtml: string, js: string, tg: Toggles): string 
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><style>${STYLE}</style></head><body>` +
     `<input class="tg" type="checkbox" id="t">` +
+    EVIDENCE_FONTS.map(
+      (_, i) =>
+        `<input class="tg" type="radio" name="g" id="g${i}"${i === tg.fontIdx ? " checked" : ""}>`
+    ).join("") +
     // 3 値は**状態の数だけラジオ**を置く（1 つのボタンで順送りするため。`TOGGLE_CSS`）
     (tg.sosi
       ? SOSI_VIEWS.map(
@@ -793,9 +831,28 @@ function page(title: string, bodyHtml: string, js: string, tg: Toggles): string 
   );
 }
 
-/** 状態を出すラベル（`st-off` が素の状態、`st-on` がチェック済みの状態） */
-function toggleLabel(id: string, off: string, on: string): string {
-  return `<label class="btn" for="${id}"><span class="st-off">${off}</span><span class="st-on">${on}</span></label>`;
+/**
+ * 状態を出すラベル（`st-off` が素の状態、`st-on` がチェック済みの状態）。
+ *
+ * `prefix` は状態で変わらない部分、`tv` は**変化する部分を入れる固定幅の箱**の種類。
+ * 分けているのは、押すたびに幅が変わって後ろのボタンが動くのを避けるため（`.tv` の注記）。
+ */
+function toggleLabel(id: string, off: string, on: string, tv: string, prefix = ""): string {
+  return (
+    `<label class="btn" for="${id}">${prefix}` +
+    `<span class="st-off tv ${tv}">${off}</span><span class="st-on tv ${tv}">${on}</span></label>`
+  );
+}
+
+/**
+ * フォントの順送りボタン。**ラベル i は「今が候補 i」のときだけ見え、押すと次へ進む**
+ * ——見えているのは常に 1 つなので、利用者にはボタン 1 つが回っているように見える。
+ */
+function fontLabels(): string {
+  return EVIDENCE_FONTS.map(
+    (f, i) =>
+      `<label class="btn fw" for="g${(i + 1) % EVIDENCE_FONTS.length}">フォント: ${esc(f.label)}</label>`
+  ).join("");
 }
 
 /**
@@ -804,23 +861,30 @@ function toggleLabel(id: string, off: string, on: string): string {
  */
 function sosiLabels(): string {
   return SOSI_VIEWS.map(
-    (v, i) => `<label class="btn sw" for="s${(i + 1) % SOSI_VIEWS.length}">${SOSI_LABELS[v]}</label>`
+    (v, i) =>
+      `<label class="btn sw" for="s${(i + 1) % SOSI_VIEWS.length}">` +
+      `SO/SI <span class="tv sosi">${SOSI_LABELS[v]}</span></label>`
   ).join("");
 }
 
 function header(title: string, tg: Toggles): string {
   return (
     `<header><h1>${esc(title)}</h1>` +
-    toggleLabel("t", "🌙 ダーク", "☀ ライト") +
+    // **フォントは一番右**（`.tv` の注記）。候補名の幅は環境で変わるので、
+    // 後ろに何も置かなければ幅が変わっても他のボタンは動かない。
+    toggleLabel("t", "🌙 ダーク", "☀ ライト", "theme") +
     // SO/SI 桁が 1 つも無い画面には出さない（押しても何も起きない部品を置かない）
     (tg.sosi ? sosiLabels() : "") +
     (tg.sbcs
       ? toggleLabel(
           "k",
-          `表示コード: ${SBCS_LABELS[tg.sbcs.host]}`,
-          `表示コード: ${SBCS_LABELS[otherReading(tg.sbcs.host)]}`
+          SBCS_LABELS[tg.sbcs.host],
+          SBCS_LABELS[otherReading(tg.sbcs.host)],
+          "kana",
+          "表示コード: "
         )
       : "") +
+    fontLabels() +
     `</header>`
   );
 }
@@ -845,7 +909,8 @@ export function renderScreenHtml(
   const tg: Toggles = {
     sosi: hasShiftCells(snap),
     sosiView: style.shiftMarks ?? "none",
-    sbcs: alt !== undefined && hasSbcsAlt(snap, alt) ? style.sbcs : undefined
+    sbcs: alt !== undefined && hasSbcsAlt(snap, alt) ? style.sbcs : undefined,
+    fontIdx: evidenceFontIndex(style.font)
   };
   // 単票は切り替えを CSS で作ったので **`<script>` を出さない**
   return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, "", alt), "", tg);
@@ -869,7 +934,8 @@ export function renderScreenHistoryHtml(
     sosi: entries.some((e) => hasShiftCells(e.screen)),
     sosiView: style.shiftMarks ?? "none",
     sbcs:
-      alt !== undefined && entries.some((e) => hasSbcsAlt(e.screen, alt)) ? style.sbcs : undefined
+      alt !== undefined && entries.some((e) => hasSbcsAlt(e.screen, alt)) ? style.sbcs : undefined,
+    fontIdx: evidenceFontIndex(style.font)
   };
   if (entries.length === 0) {
     return page(title, header(title, tg) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, "", tg);
