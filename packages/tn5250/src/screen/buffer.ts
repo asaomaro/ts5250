@@ -830,6 +830,16 @@ export class ScreenBuffer {
     if (first !== undefined) this.cursorAddr = first.startAddr;
   }
 
+  /** いまのカーソルが保護欄（または欄の外）にあり、入力できる欄がどこかにあるか */
+  cursorIsUnenterable(): boolean {
+    const inField = this.fields.find(
+      (f) => this.cursorAddr >= f.startAddr && this.cursorAddr < f.startAddr + f.length
+    );
+    const enterable = this.orderedFields().some((f) => (f.ffw & FFW.BYPASS) === 0);
+    if (!enterable) return false;
+    return inField === undefined || (inField.ffw & FFW.BYPASS) !== 0;
+  }
+
   fieldByIndex(index1: number): InternalField {
     const f = this.orderedFields()[index1 - 1];
     if (!f) throw new As400Error("FIELD_NOT_FOUND", `field #${index1} not found`);
