@@ -487,6 +487,8 @@ export class Session5250 extends Emitter<SessionEvents> {
       }
     }
     let unlocked = false;
+    // このレコードを当てる**前**のカーソル。ホストがカーソルを動かしたかを見るのに使う
+    const cursorBefore = this.buf.cursorAddr;
     try {
       const parsed = parseRecord(record);
       // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
@@ -568,6 +570,24 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
         // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
+        this.buf.cursorToFirstInputField();
+      } else if (result.readRequested && this.buf.cursorAddr === cursorBefore && this.buf.cursorIsUnenterable()) {
+        /**
+         * **画面が変わったのにカーソルが 1 桁も動かず、そこが入力できない桁**なら、
+         * 最初の入力欄へ寄せる（ACS と同じ）。
+         *
+         * 「上で入力 → Enter → 上がプロテクトされ、下が展開する」画面で踏む。アプリは
+         * カーソルを動かしておらず、ホストが送ってくるのは**operator が居た桁のまま**＝
+         * いまは保護欄。そこに置くと打っても操作員エラーになり、利用者は Tab を押すまで
+         * 入力できない（利用者の報告。ACS は下の入力欄へ入る）。
+         *
+         * **「動いていない」を条件にするのが肝。** ホストが**わざと**保護欄を指す画面が
+         * あり（SEU の走査検索——見つかった桁にカーソルを置く）、そちらは寄せてはいけない
+         * （寄せると `SEU==>` へ飛んで、どこが見つかったのか分からなくなる。過去の指摘）。
+         * 実機で並べて測ると、両者はここで分かれる:
+         *   展開画面 … 3/12 → 3/12（動かない）・保護欄の中
+         *   SEU 走査 … 2/9 → 11/53（動く）・保護欄の中
+         */
         this.buf.cursorToFirstInputField();
       }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
