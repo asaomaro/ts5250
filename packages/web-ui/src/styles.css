@@ -183,6 +183,34 @@ body {
   font-size: 14px;
 }
 
+/*
+ * **スクロールバーをアプリの配色に合わせる。**
+ *
+ * OS 既定のままだと、暗い画面に明るいスクロールバーが出て浮く。とくに Electron で
+ * ウィンドウを小さくしたときに出る**文書全体のスクロールバー**が目立つ（利用者の指摘）。
+ *
+ * 色は既存のトークンから作る——テーマ（通常/ダーク）もスキン（Notion/Slack/…）も
+ * それぞれ `--muted` / `--line` を持っているので、**新しいトークンを足さなくても全部に追従する**。
+ *
+ * 標準の `scrollbar-color` と WebKit の疑似要素を**両方**書く。Chromium は 121 以降で
+ * 標準側を読み（読んだ場合は疑似要素を無視する）、それ以前と古い WebKit は疑似要素を読む。
+ * 幅は指定しない——**細くするのは好みの問題**で、ここで直したいのは色だけ。
+ */
+* {
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
 /* 5250 属性カラー（セルの class にマップ。ScreenGrid が付与）。
    --cell は反転(背景色)時の背景に使う（color を crt に上書きしても背景色を保てるように別変数で保持）。 */
 .c-green { color: var(--t-green); --cell: var(--t-green); }
