@@ -1163,12 +1163,19 @@ function onWheel(ev: WheelEvent): void {
 .reserved-box button {
   cursor: pointer;
 }
-/* 通信中プロテクト: ポインタ操作をブロック。0.5 秒までは透明、loading で薄く覆う */
+/* 通信中プロテクト: ポインタ操作をブロック。0.5 秒までは透明、loading で薄く覆う。
+   **カーソルは変えない。** ホストとの往復はたいてい一瞬で、その間だけ OS の砂時計に
+   変わるのが目障りだった（利用者の指摘）。砂時計は 0.5 秒を超えた `loading` のときだけ
+   出す——スピナーと薄い覆いを出すのと同じ境目にすれば、「待たされている」合図は残る。
+
+   覆う前と同じ形（`text`）にするのは、**この覆いが画面領域（.screen-wrap）だけを覆う**
+   から。その下は一面のテキストなので、下と同じにすれば変化そのものが見えない。
+   `auto` や `inherit` だと、中身の無い要素なので矢印に化けて結局ちらつく。 */
 .busy-overlay {
   position: absolute;
   inset: 0;
   z-index: 5;
-  cursor: progress;
+  cursor: text;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1176,6 +1183,7 @@ function onWheel(ev: WheelEvent): void {
   transition: background 0.2s ease;
 }
 .busy-overlay.loading {
+  cursor: progress;
   background: color-mix(in srgb, var(--crt) 55%, transparent);
 }
 .spinner {
