@@ -944,7 +944,12 @@ export class WsConnection {
     const id = this.requireSession();
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
-      if (msg.fields && msg.fields.length > 0) {
+      // **フラグレコードには欄を書かない。** Attn / SysReq のレコードは画面の MDT を載せない
+      // （`buildAidRecord`）ので、書いても送られない。それどころか `setField` は施錠中に
+      // `KEYBOARD_LOCKED` を投げるので、**逃げ道であるはずの SysReq が、未送信の入力が
+      // 残っているだけで使えなくなる**（画面は打った文字を必ず添えて送ってくる）
+      const flagKey = msg.key === "Attn" || msg.key === "SysReq";
+      if (!flagKey && msg.fields && msg.fields.length > 0) {
         this.deps.sessions.assertWritable(id, this.user);
         // **秘密の解決はフィールドを 1 つでも書く前に済ませる**（spec D11）。
         // 途中で失敗して throw すると、それまでに書いた欄だけがホストに残り、
@@ -961,9 +966,21 @@ export class WsConnection {
       const res = await entry.session.sendAid(msg.key as AidKey, {
         ...(msg.cursor ? { cursor: msg.cursor } : {}),
         // システム要求行の文字列。SysReq 以外に付いていれば core が PROTOCOL_ERROR で弾く
-        ...(msg.sysReqText !== undefined ? { sysReqText: msg.sysReqText } : {})
+        ...(msg.sysReqText !== undefined ? { sysReqText: msg.sysReqText } : {}),
+        // **画面は期限を設けずに待つ。** 人が見ている端末なので、時間で諦める理由が無い
+        // ——実機・ACS・tn5250j・lib5250 はどれも `X SYSTEM` を点けたまま待ち、
+        // 抜ける口は Attn / SysReq のほうに置いている（`aid-response-timeout`）。
+        // 30 秒で切ると、時間の掛かる CALL のたびに「応答がありません」と嘘をつき、
+        // 施錠を偽って解いていた。ws は 1 通ずつ独立に処理される（`app.ts` の `void handle`）ので、
+        // ここで待ち続けても**あとから来る Attn / SysReq は先に通る**
+        timeoutMs: "never"
       });
-      this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
+      // **フラグキーには返さない。** `key-done` は「応答待ちを解く合図」で、
+      // Attn / SysReq はそもそも待たない（画面側も busy に載せていない）。返すと、
+      // **応答待ちの最中に押した Attn が、元の待ちの busy を解いて**しまう
+      if (!flagKey) {
+        this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
+      }
     });
   }
 

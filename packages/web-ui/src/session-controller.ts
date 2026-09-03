@@ -9,6 +9,7 @@ import {
   MSG_PC_COMMAND_DONE,
   MSG_PC_COMMAND_FAILED,
   MSG_PC_COMMAND_RUNNING,
+  MSG_WAITING_LONG,
   wsErrorNotice
 } from "./composables/opMessages.js";
 import {
@@ -30,6 +31,17 @@ const WS_URL = wsUrl;
 /** ローディング表示までの猶予（この時間内に応答が来ればスピナーを出さない） */
 const LOADING_DELAY_MS = 500;
 const loadingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * 「待っています」を出すまでの時間。
+ *
+ * **旧タイムアウトと同じ 30 秒に合わせてある。** 以前はこの時点で「応答がありませんでした」と
+ * 嘘をつき、施錠まで解いていた（`.aidev/backlog/aid-response-timeout.md`）。廃止しただけだと
+ * 黙って待たせ続けることになり、「時間の掛かる処理」と「本当に固まった」を利用者が区別できない。
+ * 事実だけを言い、抜け道（Attn / SysReq）を添えるものに置き換える。
+ */
+const LONG_WAIT_NOTICE_MS = 30_000;
+const longWaitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * 在席の合図を送る間隔（ms）。打鍵のたびに送るとただの無駄なので間引く。
@@ -58,14 +70,19 @@ export function noteActivity(sessionId: string): void {
   s.client.send({ type: "activity" });
 }
 
-/** 通信中フラグを設定。busy 中は入力プロテクト、0.5 秒超でローディング表示 */
+/**
+ * 通信中フラグを設定。busy 中は入力プロテクト、0.5 秒超でローディング表示、
+ * 30 秒超で「待っています」（`LONG_WAIT_NOTICE_MS`）。
+ */
 function setBusy(sessionId: string, busy: boolean): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
-  const timer = loadingTimers.get(sessionId);
-  if (timer) {
-    clearTimeout(timer);
-    loadingTimers.delete(sessionId);
+  for (const timers of [loadingTimers, longWaitTimers]) {
+    const timer = timers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      timers.delete(sessionId);
+    }
   }
   s.busy = busy;
   if (busy) {
@@ -78,8 +95,20 @@ function setBusy(sessionId: string, busy: boolean): void {
         loadingTimers.delete(sessionId);
       }, LOADING_DELAY_MS)
     );
+    longWaitTimers.set(
+      sessionId,
+      setTimeout(() => {
+        const cur = sessionsStore.get(sessionId);
+        // **上書きしない**——先に出ている通知（PC コマンド等）のほうが具体的
+        if (cur?.busy && !cur.notice) cur.notice = MSG_WAITING_LONG;
+        longWaitTimers.delete(sessionId);
+      }, LONG_WAIT_NOTICE_MS)
+    );
   } else {
     s.loading = false;
+    // **待ちが解けたら自分で片付ける。** 通知は次の送信まで残る仕組みなので、
+    // 置きっぱなしだと応答が返った新しい画面に「待っています」が残る
+    if (s.notice === MSG_WAITING_LONG) delete s.notice;
   }
 }
 
@@ -97,6 +126,21 @@ function setBusy(sessionId: string, busy: boolean): void {
  */
 function inputInhibited(s: SessionState): boolean {
   return s.busy === true || s.snapshot?.keyboardLocked === true;
+}
+
+/**
+ * **施錠中でも送れるキー**（5250 のフラグレコード）。
+ *
+ * Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では応答待ちの
+ * 最中にこそ使う（システム要求メニューの「2. 前の要求の終了」）。プロテクトに巻き込むと、
+ * **待たされている時だけ逃げ道が消える**。画面は期限を設けずに待つようになったので
+ * （`ws-handler.onKey` の `timeoutMs: "never"`）、この口が唯一の出口になる。
+ *
+ * **欄は載せない**——フラグレコードは MDT を運ばないので送っても届かず、
+ * 打ちかけのパスワードを無駄に流すだけになる（サーバー側も書き込みを飛ばす）。
+ */
+function isFlagKey(key: AidKey): boolean {
+  return key === "Attn" || key === "SysReq";
 }
 
 /** 画面に残す PC コマンドの件数（サーバー側の保持と同じ）。古いものから捨てる */
@@ -563,7 +607,8 @@ export function sendKey(
   sysReqText?: string
 ): MandatoryFinding | undefined {
   const s = sessionsStore.get(sessionId);
-  if (!s || inputInhibited(s)) return; // 通信中・ホスト施錠中は送らない（プロテクト）
+  // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
+  if (!s || (inputInhibited(s) && !isFlagKey(key))) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
   // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
   // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
@@ -577,7 +622,8 @@ export function sendKey(
   // **読み替えはしない**（上の注記）。3270 の割り当てはサーバーが決める
   const outKey = key;
   delete s.notice; // 前回の通知は次の操作で消す
-  const fields = [...s.edits.entries()].map(([field, value]) => ({ field, value }));
+  // フラグキーには欄を載せない（`isFlagKey` の注記）
+  const fields = isFlagKey(key) ? [] : [...s.edits.entries()].map(([field, value]) => ({ field, value }));
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
   // **記録は送った側のキー**——再生したときに同じことが起きるように
   recordSend(sessionId, outKey, cursor ?? s.cursor, sysReqText);
@@ -588,7 +634,11 @@ export function sendKey(
     ...(fields.length > 0 ? { fields } : {}),
     ...(sysReqText !== undefined ? { sysReqText } : {})
   });
-  setBusy(sessionId, true);
+  // **フラグキーは busy に載せない。** 応答を待たないキーなので待ちようが無く、
+  // 載せると「応答待ちの最中に押した Attn」が**元の待ちの busy を解いて**しまう
+  // （サーバーもフラグキーには `key-done` を返さない）。プロテクトは施錠（`keyboardLocked`）が
+  // 引き続き効くので、押せるようになるわけではない
+  if (!isFlagKey(key)) setBusy(sessionId, true);
 }
 
 /** 再生時に送る 1 欄。値そのものか、**マクロの秘密への参照**（spec D11） */
@@ -661,10 +711,13 @@ export function submitGuiSelection(
 export function closeSession(sessionId: string): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
-  const timer = loadingTimers.get(sessionId);
-  if (timer) {
-    clearTimeout(timer);
-    loadingTimers.delete(sessionId);
+  // 閉じた id の記憶を残さない（`setBusy` と同じ 2 本を畳む）
+  for (const timers of [loadingTimers, longWaitTimers]) {
+    const timer = timers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      timers.delete(sessionId);
+    }
   }
   s.client.send({ type: "close" });
   s.client.close();

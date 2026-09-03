@@ -1210,7 +1210,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     "send_key",
     {
       description:
-        "フィールドを反映しカーソルを設定して AID キーを送信、更新後画面を返す。readOnly は PageUp/Down のみ。",
+        "フィールドを反映しカーソルを設定して AID キーを送信、更新後画面を返す。readOnly は PageUp/Down のみ。" +
+        "時間の掛かる処理を呼ぶときは timeoutMs を伸ばす（既定 30 秒を超えると timedOut=true で現画面が返る）。",
       inputSchema: {
         sessionId: z.string(),
         key: z.enum(AID_KEYS),
@@ -1222,12 +1223,22 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           .describe(
             "システム要求行の文字列（SysReq 専用。省略でシステム要求メニュー）",
           ),
+        // **自動操作に「期限なし」は出さない。** ツール呼び出しは必ず値を返さねばならず、
+        // 無期限にすると相手側のタイムアウトで切られたときに何が起きたか分からなくなる。
+        // 画面（web-ui）だけが期限なしで待つ（`ws-handler.onKey`）
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .max(3_600_000)
+          .optional()
+          .describe("キーボードアンロック待ちの上限（ms。既定 30000）"),
         include: includeSchema,
         rows: rowsSchema,
       },
       outputSchema: screenOutShape,
     },
-    async ({ sessionId, key, cursor, fields, sysReqText, include, rows }) =>
+    async ({ sessionId, key, cursor, fields, sysReqText, timeoutMs, include, rows }) =>
       withAudit(
         {
           op: "send_key",
@@ -1254,6 +1265,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             const r = await entry.session.sendAid(key, {
               ...(cursor ? { cursor } : {}),
               ...(sysReqText !== undefined ? { sysReqText } : {}),
+              ...(timeoutMs !== undefined ? { timeoutMs } : {}),
             });
             return screenResult(
               r.screen,

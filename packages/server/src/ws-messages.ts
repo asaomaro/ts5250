@@ -313,6 +313,9 @@ export interface WsJobInfoRes {
  * **画面が返らないキーがあるため必要**——応答画面は screen イベントで push されるが、
  * ホストが表示を変えない場合はイベントが起きず、クライアントの「応答待ち」が永久に残る。
  * sendAid の完了そのものを伝えることで、画面の有無に依らず待ちを解ける。
+ *
+ * **Attn / SysReq には送らない**——フラグレコードは応答を待たないので解くべき待ちが無く、
+ * 送ると「応答待ちの最中に押した Attn が元の待ちを解く」ことになる（`ws-handler.onKey`）。
  */
 export interface WsKeyDone {
   type: "key-done";

@@ -3,7 +3,7 @@ backlog: aid-response-timeout
 kind: standing
 ---
 
-# AID 応答タイムアウト（既定 30 秒）を廃止できるか
+# AID 応答タイムアウト（既定 30 秒）を廃止できるか → **廃止した**（2026-09-03）
 
 `Session5250.sendAndWait` は AID 送信後 **30 秒**で待ちを打ち切り、`timedOut: true` で
 その時点の画面を返す（`packages/tn5250/src/session/session.ts` の `sendAndWait`）。
@@ -49,15 +49,36 @@ kind: standing
 同 spec は 30 秒タイマーを明示的に「現状の安全弁」と書いている。**安全弁を外すなら、先に
 Attn / SysReq を施錠中でも通す**（＝方針 5 の見送りを解く）のが順序。
 
-## 落とし所の案
+## 落とし所
 
-- **対話（ws）**: 応答タイムアウトを無くす。🔒 とスピナーを出したまま待ち、
-  抜けたいときは Attn / SysReq（2）。実機・ACS・tn5250j・lib5250 と同じ形になる
-- **自動操作（MCP / HLLAPI / マクロ）**: **上限は残す**。呼び出しは必ず値を返さねばならず、
-  HLLAPI は時間切れを `PS_BUSY`（rc=4）で返す約束、MCP `send_key` も `timedOut` を返す口がある。
-  ただし既定 30 秒は短い（バッチ処理を呼ぶ用途で普通に超える）ので、設定で伸ばせるようにする
-- タイムアウトで **`state = "ready"` に戻すのはやめる**。施錠はホストの事実であって、
-  こちらの都合で偽ってよいものではない。戻さないなら Attn / SysReq の口が要る（上と同じ前提）
+- [x] **対話（ws）**: 応答タイムアウトを無くした。🔒 とスピナーを出したまま待ち、
+  抜けたいときは Attn / SysReq（2）。実機・ACS・tn5250j・lib5250 と同じ形
+  （`packages/server/src/ws-handler.ts` の `onKey`＝`timeoutMs: "never"`）
+- [x] **自動操作（MCP / HLLAPI / マクロ）**: 上限は残した。呼び出しは必ず値を返さねばならず、
+  HLLAPI は時間切れを `PS_BUSY`（rc=4）で返す約束。既定 30 秒が短い件は
+  MCP `send_key` に `timeoutMs`（最大 1 時間）を足して伸ばせるようにした
+  （`packages/server/src/mcp-tools.ts`）
+- [x] タイムアウトで **`state = "ready"` に戻すのをやめた**（`session.ts` の `sendAndWait`）。
+  施錠はホストの事実で、こちらの都合で偽ってよいものではない
+- [x] **前提だった「施錠中の Attn / SysReq」を通した**（`session.ts` の `sendAid`＝
+  フラグレコードは `assertNotClosed` だけ）。`20260726-attn-sysreq-cancel-invite` の方針 5 を解いた。
+  併せて ws は**フラグキーに欄を書かない**（`setField` が施錠中に投げ、打ちかけの入力だけで
+  逃げ道が塞がるため）／**`key-done` を返さない**（返すと元の待ちの busy が解ける）
+- [x] 30 秒で嘘をつく代わりに**事実だけを言う通知**を置いた
+  （`MSG_WAITING_LONG`＝「ホストの応答を待っています（Attn / SysReq で中断できます）」）。
+  黙って待たせ続けると「時間の掛かる処理」と「本当に固まった」を利用者が区別できない
+
+### 実機で確かめた（2026-09-03・`scripts/verify-aid-no-timeout.mjs`・8/8 OK）
+
+日本語 IBM i（`AS400_SYSTEM`）に `DLYJOB DLY(60)` を投げて実測:
+
+| 見たこと | 結果 |
+|---|---|
+| 送信 5 秒後、ホストは施錠しているか | 施錠 |
+| 35 秒（旧実装が諦めていた 30 秒の後）で待ちを打ち切らないか | 打ち切らない |
+| 同じ時点で施錠が解けていないか | 解けていない |
+| 施錠中の Attn が `KEYBOARD_LOCKED` を投げないか | 投げない（ホストも応じた） |
+| 施錠中の SysReq「2」が通り、走っている要求を切れるか | 切れて、待っていた AID が解決した |
 
 ## 関連
 

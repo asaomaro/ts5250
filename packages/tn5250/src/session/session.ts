@@ -84,8 +84,18 @@ export interface ConnectOptions {
 
 export interface SendAidOptions {
   cursor?: { row: number; col: number };
-  /** キーボードアンロック待ちのタイムアウト（既定 30 秒。Attn / SysReq は待たないので無効） */
-  timeoutMs?: number;
+  /**
+   * キーボードアンロック待ちのタイムアウト。既定 30 秒（Attn / SysReq は待たないので無効）。
+   *
+   * **`"never"` は期限を設けない**——原典（tn5250j / lib5250）にも実機の OIA にも
+   * 「時間で諦めて施錠を解く」という動作は無く、`X SYSTEM` は**点いたまま待つのが正常**
+   * （`aid-response-timeout` の裏取り）。人が見ている端末はこちらに倒す。
+   *
+   * 自動操作（MCP / HLLAPI）は**必ず値を返さねばならない**ので有限値を使う。
+   * `0` や負値を「無期限」の印にしないのは `idleTimeout` と同じ理由——未設定・転記漏れと
+   * 見分けが付かなくなる。
+   */
+  timeoutMs?: number | "never";
   /**
    * **SysReq 専用**: システム要求行に打たれた文字列。セッションの CCSID で EBCDIC 化して
    * SRQ レコードのデータに載せる（空・未指定ならデータ無し＝システム要求メニューが出る）。
@@ -142,7 +152,7 @@ export class Session5250 extends Emitter<SessionEvents> {
    */
   private readCommand: number = COMMAND.READ_MDT_FIELDS;
   private pendingAid:
-    | { resolve: (r: SendAidResult) => void; timer: ReturnType<typeof setTimeout> }
+    | { resolve: (r: SendAidResult) => void; timer?: ReturnType<typeof setTimeout> }
     | undefined;
 
   private constructor(opts: ConnectOptions) {
@@ -310,7 +320,19 @@ export class Session5250 extends Emitter<SessionEvents> {
    * タイムアウトはエラーにせず timedOut: true で現画面を返す。
    */
   sendAid(key: AidKey, opts: SendAidOptions = {}): Promise<SendAidResult> {
-    this.assertReady();
+    // **フラグレコードだけは施錠中でも通す。**
+    //
+    // 5250 の Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では
+    // `X SYSTEM` の最中にこそ使う（IBM の System Request メニュー「2. 前の要求の終了」）。
+    // ここで `assertReady()` に掛けると、**待たされている時だけ逃げ道が消える**——
+    // 以前は 30 秒のタイムアウトが施錠を勝手に解いていたので目立たなかったが、
+    // 期限を設けない待ち（`timeoutMs: "never"`）を許すなら、この口は必ず開いていなければならない
+    // （`.aidev/backlog/aid-response-timeout.md`）。
+    //
+    // 施錠中でも**レコードとして正しい**: フラグレコードは画面の MDT を読まないので、
+    // 施錠中のバッファに触れずに組める（`buildAidRecord` 参照）。
+    if (key === "Attn" || key === "SysReq") this.assertNotClosed();
+    else this.assertReady();
     const record = this.buildAidRecord(key, opts.cursor, opts.sysReqText);
     if (key === "Attn" || key === "SysReq") {
       // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
@@ -318,8 +340,10 @@ export class Session5250 extends Emitter<SessionEvents> {
       // ACS も 2 回目では何も起きない——待って何か出すのは ACS に無い反応になる。
       //
       // **待たなくても取りこぼさない**: 1 回目で窓が出るのはホストが「その後に」画面を送るからで、
-      // それは handleRecord → screen イベントで届く。sendAid の解決は busy（多重送信プロテクト）を
-      // 解く合図にすぎない。`locked` にもしない——応答が来ない 2 回目でロックが残り 🔒 が消えなくなる。
+      // それは handleRecord → screen イベントで届く。`locked` にもしない——応答が来ない 2 回目で
+      // ロックが残り 🔒 が消えなくなる。**施錠中に送っても状態は動かさない**——
+      // 元の AID の待ち（`pendingAid`）はそのまま生かす。ホストが Attn に応えて画面を返せば、
+      // その画面のアンロックで元の待ちが解ける（それが「前の要求を切った」ということ）。
       this.telnet.sendRecord(record);
       return Promise.resolve({ screen: this.snapshot(), timedOut: false });
     }
@@ -361,17 +385,32 @@ export class Session5250 extends Emitter<SessionEvents> {
     return record;
   }
 
-  /** レコードを送信し、キーボードアンロック（新画面）まで待つ共通ロジック */
-  private sendAndWait(record: Uint8Array, timeoutMs?: number): Promise<SendAidResult> {
+  /**
+   * レコードを送信し、キーボードアンロック（新画面）まで待つ共通ロジック。
+   *
+   * **時間切れでも施錠は解かない。** 施錠は「ホストがまだ入力を受け付けていない」という
+   * **ホスト側の事実**であって、こちらの待ちくたびれで書き換えてよいものではない。
+   * 以前は `locked → ready` に戻していたため、時間の掛かるプログラムを CALL しただけで
+   * OIA の 🔒 が消え、入力プロテクトが外れ、ホストが Read を出していないのに次の AID を
+   * 通してしまっていた（`.aidev/backlog/aid-response-timeout.md`）。
+   *
+   * 待ちを打ち切っても呼び出し側は `timedOut: true` で戻れる（自動操作は値を返せる）。
+   * 施錠から抜ける口は時間ではなく **Attn / SysReq**——原典と同じ形にする。
+   */
+  private sendAndWait(record: Uint8Array, timeoutMs?: number | "never"): Promise<SendAidResult> {
     this.state = "locked";
     return new Promise<SendAidResult>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingAid = undefined;
-        // design の状態機械: Locked → Ready（タイムアウト・timedOut=true で画面返却）
-        if (this.state === "locked") this.state = "ready";
-        resolve({ screen: this.snapshot(), timedOut: true });
-      }, timeoutMs ?? 30_000);
-      this.pendingAid = { resolve, timer };
+      // `"never"` は期限なし。**タイマーを積まない**——`setTimeout(Infinity)` は
+      // 即時発火に丸められるので、値で表そうとすると静かに 1ms のタイムアウトになる
+      const ms = timeoutMs ?? 30_000;
+      const timer =
+        ms === "never"
+          ? undefined
+          : setTimeout(() => {
+              this.pendingAid = undefined;
+              resolve({ screen: this.snapshot(), timedOut: true });
+            }, ms);
+      this.pendingAid = timer !== undefined ? { resolve, timer } : { resolve };
       this.telnet.sendRecord(record);
     });
   }
@@ -434,8 +473,12 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.telnet.close();
   }
 
-  private assertReady(): void {
+  private assertNotClosed(): void {
     if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
+  }
+
+  private assertReady(): void {
+    this.assertNotClosed();
     if (this.state !== "ready") {
       throw new As400Error("KEYBOARD_LOCKED", `keyboard is locked (state=${this.state})`);
     }
