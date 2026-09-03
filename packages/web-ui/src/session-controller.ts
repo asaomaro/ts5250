@@ -83,6 +83,22 @@ function setBusy(sessionId: string, busy: boolean): void {
   }
 }
 
+/**
+ * **手入力を受け付けない状態か**（`busy` ＋ ホストのキーボード施錠）。
+ *
+ * `busy` は「この画面が出した往復がまだ帰っていない」、`keyboardLocked` は
+ * 「**ホストがまだ開けていない**」で、出所が違う。`busy` だけを見ると、ホストが施錠したまま
+ * 画面を書いてきた隙間で AID が抜け、core の `assertReady` が `KEYBOARD_LOCKED` を投げる
+ * ——利用者には「押したのにエラーになる」としか見えない。送信の合流点であるこの関数群で
+ * 両方を見て、**ホストへ出す前に**止める。
+ *
+ * 再生（`sendKeyWithFields`）は通さない——あちらは自動操作の経路で、待ちも失敗の扱いも
+ * マクロ側が持っている。
+ */
+function inputInhibited(s: SessionState): boolean {
+  return s.busy === true || s.snapshot?.keyboardLocked === true;
+}
+
 /** 画面に残す PC コマンドの件数（サーバー側の保持と同じ）。古いものから捨てる */
 const PC_COMMAND_VIEW_LIMIT = 20;
 
@@ -161,7 +177,12 @@ export async function openSession(
             case "screen": {
               sessionsStore.updateScreen(sessionId, msg.screen);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
-              setBusy(sessionId, false);
+              // **施錠されたままの画面では待ちを解かない。** ホストは応答の途中でも画面を
+              // 書いてくる（時間の掛かる CALL の前置き等）。それで待ちを解くと 0.5 秒の
+              // 猶予タイマーごと潰れ、**どれだけ待たされてもスピナーが出ない**うえ、
+              // 入力プロテクトまで外れる（利用者の報告）。解くのは実際に開いた画面か
+              // `key-done`（送信の完了そのもの）だけにする。
+              if (!msg.screen.keyboardLocked) setBusy(sessionId, false);
               break;
             }
             case "key-done": {
@@ -542,7 +563,7 @@ export function sendKey(
   sysReqText?: string
 ): MandatoryFinding | undefined {
   const s = sessionsStore.get(sessionId);
-  if (!s || s.busy) return; // 通信中は多重送信しない（プロテクト）
+  if (!s || inputInhibited(s)) return; // 通信中・ホスト施錠中は送らない（プロテクト）
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
   // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
   // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
@@ -630,7 +651,7 @@ export function submitGuiSelection(
   cursor?: { row: number; col: number }
 ): void {
   const s = sessionsStore.get(sessionId);
-  if (!s || s.busy) return;
+  if (!s || inputInhibited(s)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない
   noteUnrecordable(sessionId);
   s.client.send({ type: "gui-submit", fieldId, ...(cursor ? { cursor } : {}) });

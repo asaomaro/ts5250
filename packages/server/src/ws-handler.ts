@@ -1009,7 +1009,11 @@ export class WsConnection {
       const opts: { key?: AidKey; cursor?: { row: number; col: number } } = {};
       if (msg.key) opts.key = msg.key as AidKey;
       if (msg.cursor) opts.cursor = msg.cursor;
-      await entry.session.submitGuiSelection(msg.fieldId, opts);
+      const res = await entry.session.submitGuiSelection(msg.fieldId, opts);
+      // **`key` と同じく完了そのものを伝える**（`onKey` の注記と同じ理由）。画面は screen
+      // イベントでも届くが、施錠されたままの画面では画面側が待ちを解かないので、
+      // これが無いとタイムアウト復帰で待ちが残る（GUI 選択の確定だけが取り残される）。
+      this.send({ type: "key-done", sessionId: id, screen: res.screen, timedOut: res.timedOut });
     });
   }
 

@@ -24,13 +24,13 @@ vi.mock("../src/ws-client.js", () => ({
 import { openSession, sendKey } from "../src/session-controller.js";
 import { sessionsStore } from "../src/stores/sessions.js";
 
-function snap(): ScreenSnapshot {
+function snap(keyboardLocked = false): ScreenSnapshot {
   return {
     sessionId: "s1",
     rows: 24,
     cols: 80,
     cursor: { row: 1, col: 1 },
-    keyboardLocked: false,
+    keyboardLocked,
     cells: [],
     fields: []
   };
@@ -84,6 +84,33 @@ describe("通信中プロテクト・0.5 秒ローディング", () => {
     captured.handlers.onServerMessage({ type: "screen", screen: snap() });
     vi.advanceTimersByTime(500); // タイマーは解除済み
     expect(sessionsStore.get("s1")!.loading).toBe(false);
+  });
+
+  it("施錠されたままの画面では待ちを解かず、0.5 秒でスピナーを出す", async () => {
+    // 時間の掛かる CALL は、走り出す前にホストが画面を 1 枚書いてくることがある。
+    // そこで待ちを解くと猶予タイマーごと潰れ、どれだけ待たされてもスピナーが出なかった
+    await open();
+    sendKey("s1", "Enter");
+    vi.advanceTimersByTime(200);
+    captured.handlers.onServerMessage({ type: "screen", screen: snap(true) });
+    const s = sessionsStore.get("s1")!;
+    expect(s.busy).toBe(true); // 施錠されたまま＝まだ応答ではない
+    vi.advanceTimersByTime(300);
+    expect(s.loading).toBe(true);
+
+    captured.handlers.onServerMessage({ type: "screen", screen: snap() }); // 開いた画面で解ける
+    expect(s.busy).toBe(false);
+    expect(s.loading).toBe(false);
+  });
+
+  it("施錠中（busy でなくても）は送信をプロテクトする", async () => {
+    // ホスト発の施錠（応答待ちの途中経過）では busy が立たない。
+    // ここを通すと core の assertReady が KEYBOARD_LOCKED を投げるだけになる
+    await open();
+    captured.handlers.onServerMessage({ type: "screen", screen: snap(true) });
+    expect(sessionsStore.get("s1")!.busy).toBeFalsy(); // 送っていないので busy は立たない
+    sendKey("s1", "Enter");
+    expect(captured.send).not.toHaveBeenCalled();
   });
 
   it("通信中（busy）は多重送信をプロテクトする", async () => {
