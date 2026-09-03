@@ -165,6 +165,17 @@ const emit = defineEmits<{
 const gui = computed(() => props.snapshot.gui);
 
 /**
+ * **入力を受け付けない状態**（`busy` ＋ ホストのキーボード施錠）。
+ *
+ * `busy` はこの画面が出した往復の在庫、`keyboardLocked` は**ホストが開けていない**という事実で、
+ * 出所が違う。`busy` だけで守ると、ホストが施錠したまま画面を 1 枚書いてきた隙間
+ * （時間の掛かる CALL の途中経過）で打てるようになり、打っても core の `assertReady` が
+ * `KEYBOARD_LOCKED` を投げて「打てるのに Enter が効かない」になる。3270 は
+ * そもそも応答を待たない（`key-done` が即返る）ので、施錠を見ないと守りが無い。
+ */
+const inhibited = computed(() => props.busy === true || props.snapshot.keyboardLocked);
+
+/**
  * 入力 1 文字を格納する形へ直す。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。
  *
  * 大文字化する理由は**2 つあり、どちらか一方でも真なら大文字化する**。同じ結果でも根拠が別なので、
@@ -843,7 +854,7 @@ function decoParts(seg: Segment): DecoPart[] {
 
 /** 凡例ボタンの押下。ホストへは親（EmulatorPane）が送る。 */
 function onFkeyClick(key: AidKey): void {
-  if (props.busy || props.snapshot.keyboardLocked) return; // 通信中・ロック中は送らない
+  if (inhibited.value) return; // 通信中・ロック中は送らない
   emit("aid", key);
 }
 
@@ -2503,8 +2514,8 @@ function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void
 
 /** input の keydown 制御。印字文字は上書き/挿入、編集キーは 5250 挙動、AID/移動キーはペインへ委譲 */
 function onInputKeydown(f: Field, ev: KeyboardEvent): void {
-  if (props.busy) {
-    ev.preventDefault(); // 通信中は入力プロテクト
+  if (inhibited.value) {
+    ev.preventDefault(); // 通信中・ホスト施錠中は入力プロテクト
     return;
   }
   if (f.protected) {
@@ -2881,7 +2892,7 @@ function onInputCut(f: Field, ev: ClipboardEvent): void {
   if (!sel) return;
   ev.clipboardData?.setData("text/plain", sel.text);
   ev.preventDefault();
-  if (props.busy || f.protected) return; // 通信中・保護欄は削除しない
+  if (inhibited.value || f.protected) return; // 通信中・ロック中・保護欄は削除しない
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
   const chars = [...edit.chars];
@@ -3165,16 +3176,16 @@ function pasteFrom(
   }
 }
 
-/** 通信中・保護欄では beforeinput をブロック（貼り付けは @paste で扱う）。 */
+/** 通信中・ロック中・保護欄では beforeinput をブロック（貼り付けは @paste で扱う）。 */
 function onInputBeforeInput(f: Field, ev: InputEvent): void {
-  if ((f.protected || props.busy) && ev.inputType === "insertFromPaste") ev.preventDefault();
+  if ((f.protected || inhibited.value) && ev.inputType === "insertFromPaste") ev.preventDefault();
 }
 
 /** paste（clipboardData から取得。単一行 input は beforeinput の data が改行を落とすため paste で扱う）。
  *  改行を含めば下方向の連続入力欄へ分配、単一行なら caret へ挿入（型・バイト予算で整形）。 */
 function onInputPaste(f: Field, ev: ClipboardEvent): void {
   ev.preventDefault();
-  if (props.busy) return;
+  if (inhibited.value) return;
   const text = ev.clipboardData?.getData("text") ?? "";
   if (!text) return;
   const el = ev.target as HTMLInputElement;
@@ -3240,7 +3251,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
  *  欄先頭に出てしまう。合成開始桁より前の実文字を value に残し caret をその末尾へ置くことで、
  *  既入力を見せたまま候補を入力位置に出しつつ、以降の挿入余地（maxlength）を確保する。 */
 function onCompositionStart(f: Field, ev: CompositionEvent): void {
-  if (f.protected || props.busy) return;
+  if (f.protected || inhibited.value) return;
   // hidden 欄は value が伏せ字（●）で実値ではないため、el.value を読む IME 経路に乗せてはならない
   // （乗せると ● 自体がモデルへ流れ込む）。パスワードに IME は不要なので合成を無効化する。
   if (f.hidden) {

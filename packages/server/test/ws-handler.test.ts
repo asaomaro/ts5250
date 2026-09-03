@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -276,5 +276,86 @@ describe("PC コマンドの留守番", () => {
     const { mgr, id } = await withHistory();
     mgr.pcCommandHistory(id).length = 0;
     expect(mgr.pcCommandHistory(id)).toHaveLength(1);
+  });
+});
+
+/**
+ * **画面（ws）の応答待ちは期限を設けない**（`aid-response-timeout`）。
+ *
+ * 原典（tn5250j / lib5250）にも実機の OIA にも「時間で諦めて施錠を解く」動作は無い。
+ * 30 秒で切っていたころは、時間の掛かる CALL のたびに「応答がありません」と嘘をつき、
+ * 施錠を偽って解いていた。代わりに**抜ける口を Attn / SysReq に置く**——ws は 1 通ずつ
+ * 独立に処理される（`app.ts` の `void handle`）ので、待っている最中の 1 通も先に通る。
+ */
+describe("WsConnection: 応答待ちと逃げ道", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+
+  /** open 済みで、Enter を送って**ホストが黙っている**（＝施錠されたまま）状態を作る */
+  async function waiting() {
+    const { conn, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    sent.length = 0;
+    // **await しない**——期限を設けずに待つので、この promise は解決しない
+    void conn.handle(JSON.stringify({ type: "key", key: "Enter" }));
+    await tick();
+    return { conn, sent };
+  }
+
+  it("応答が来なければ key-done を返さずに待ち続ける（30 秒で諦めない）", async () => {
+    // **時計を進めて確かめる**——旧実装（既定 30 秒）ならここで timedOut の key-done が返る。
+    // 心拍は止めておく（`deadMs` を無限大に）——半開き判定でセッションが閉じると、
+    // `handleClose` が待ちを `timedOut: true` で解いて**別の理由の key-done**が混ざる
+    vi.useFakeTimers();
+    try {
+      const sent: WsServerMessage[] = [];
+      const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+      const resolver = new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+      const conn = new WsConnection(
+        { sessions: mgr, resolver },
+        { send: (d) => sent.push(JSON.parse(d)), close: () => {} },
+        undefined,
+        { deadMs: Number.MAX_SAFE_INTEGER }
+      );
+      await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+      sent.length = 0;
+      void conn.handle(JSON.stringify({ type: "key", key: "Enter" }));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(sent.filter((m) => m.type === "key-done")).toHaveLength(0);
+      expect(sent.filter((m) => m.type === "error")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("応答待ちの最中でも Attn は通る（施錠中の逃げ道）", async () => {
+    const { conn, sent } = await waiting();
+    await conn.handle(JSON.stringify({ type: "key", key: "Attn" }));
+    await tick();
+    expect(sent.filter((m) => m.type === "error")).toHaveLength(0);
+    // **フラグキーには key-done を返さない**——返すと元の待ちの busy が解けてしまう
+    expect(sent.filter((m) => m.type === "key-done")).toHaveLength(0);
+  });
+
+  it("応答待ちの最中の SysReq は、打ちかけの欄が付いていても通る", async () => {
+    // 画面は打った文字を必ず添えて送ってくる。欄を書こうとすると `setField` が
+    // KEYBOARD_LOCKED を投げ、**逃げ道が未送信の入力だけで塞がる**
+    const { conn, sent } = await waiting();
+    await conn.handle(
+      JSON.stringify({
+        type: "key",
+        key: "SysReq",
+        sysReqText: "2",
+        fields: [{ field: 1, value: "X" }]
+      })
+    );
+    await tick();
+    expect(sent.filter((m) => m.type === "error")).toHaveLength(0);
+  });
+
+  it("応答待ちの最中の通常キーは施錠で断る（逃げ道を広げすぎない）", async () => {
+    const { conn, sent } = await waiting();
+    await conn.handle(JSON.stringify({ type: "key", key: "F3" }));
+    await tick();
+    expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "KEYBOARD_LOCKED" });
   });
 });

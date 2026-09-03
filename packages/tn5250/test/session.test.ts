@@ -157,12 +157,16 @@ describe("Session5250 リプレイ E2E", () => {
     expect(d.slice(15)).toEqual(e("MYPASS"));
   });
 
-  it("応答が来なければ timedOut=true で現画面を返し Ready に戻る", async () => {
+  it("応答が来なければ timedOut=true で現画面を返す（施錠は解かない）", async () => {
     const { session } = await connectReplay(signonEntries());
     session.setField({ index: 1 }, "X");
     const result = await session.sendAid("Enter", { timeoutMs: 30 });
     expect(result.timedOut).toBe(true);
-    expect(session.currentState).toBe("ready");
+    // **施錠はホスト側の事実**。待ちくたびれで `ready` に戻すと OIA の 🔒 が消え、
+    // ホストが Read を出していないのに次の AID を通してしまう
+    // （`.aidev/backlog/aid-response-timeout.md`）。抜ける口は Attn / SysReq
+    expect(session.currentState).toBe("locked");
+    expect(session.keyboardLocked).toBe(true);
   });
 
   it("Locked 中の setField / sendAid は KEYBOARD_LOCKED", async () => {
@@ -319,6 +323,84 @@ describe("Session5250 リプレイ E2E", () => {
     );
     expect(() => session.setField({ row: 1, col: 1 }, "X")).toThrow(
       expect.objectContaining({ code: "FIELD_NOT_FOUND" })
+    );
+  });
+});
+
+/**
+ * **時間で諦めない待ち（`timeoutMs: "never"`）と、施錠中の逃げ道。**
+ *
+ * 原典（tn5250j / lib5250）には AID 応答の打ち切りタイマーが無く、実機の OIA も
+ * `X SYSTEM` を点けたまま待つ。人が見ている端末（web-ui）はそちらに倒し、
+ * 抜ける口は時間ではなく **Attn / SysReq**（システム要求メニュー「2. 前の要求の終了」）に置く。
+ * 自動操作（MCP / HLLAPI）は値を返さねばならないので有限値のまま。
+ * 経緯は `.aidev/backlog/aid-response-timeout.md`。
+ */
+describe("期限なしの応答待ちと施錠中の逃げ道", () => {
+  it('timeoutMs: "never" は自分では諦めない', async () => {
+    const { session } = await connectReplay(signonEntries()); // 以降ホストは何も返さない
+    let settled = false;
+    void session.sendAid("Enter", { timeoutMs: "never" }).then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(settled).toBe(false);
+    expect(session.keyboardLocked).toBe(true);
+    session.disconnect(); // 切断だけが待ちを終わらせる（handleClose が解決する）
+  });
+
+  it('timeoutMs: "never" もホストのアンロックで解ける', async () => {
+    const { session } = await connectReplay(scenario());
+    session.setField({ index: 1 }, "U");
+    const r = await session.sendAid("Enter", { timeoutMs: "never" });
+    expect(r.timedOut).toBe(false);
+    expect(session.currentState).toBe("ready");
+  });
+
+  it("施錠中でも Attn は送れる（時間切れのあとも逃げ道が残る）", async () => {
+    const { transport, session } = await connectReplay(signonEntries());
+    const timedOut = await session.sendAid("Enter", { timeoutMs: 20 });
+    expect(timedOut.timedOut).toBe(true);
+    expect(session.keyboardLocked).toBe(true); // 施錠は解けていない
+
+    const before = transport.sentChunks.length;
+    const r = await session.sendAid("Attn"); // **投げない**——ここが逃げ道
+    expect(r.timedOut).toBe(false);
+    expect(transport.sentChunks.length).toBe(before + 1);
+    const raw = [...(transport.sentChunks.at(-1) as Uint8Array)];
+    expect(parseRecord(Uint8Array.from(raw.slice(0, -2))).flags.atn).toBe(true);
+  });
+
+  it("施錠中でも SysReq は送れる（システム要求メニューの 2 で切る）", async () => {
+    const { transport, session } = await connectReplay(signonEntries());
+    await session.sendAid("Enter", { timeoutMs: 20 });
+    expect(session.keyboardLocked).toBe(true);
+
+    const r = await session.sendAid("SysReq", { sysReqText: "2" });
+    expect(r.timedOut).toBe(false);
+    const raw = [...(transport.sentChunks.at(-1) as Uint8Array)];
+    const parsed = parseRecord(Uint8Array.from(raw.slice(0, -2)));
+    expect(parsed.flags.srq).toBe(true);
+    expect([...parsed.data]).toEqual(e("2"));
+  });
+
+  it("施錠中の通常 AID は今までどおり KEYBOARD_LOCKED（逃げ道を広げすぎない）", async () => {
+    const { session } = await connectReplay(signonEntries());
+    await session.sendAid("Enter", { timeoutMs: 20 });
+    expect(() => session.sendAid("Enter")).toThrow(
+      expect.objectContaining({ code: "KEYBOARD_LOCKED" })
+    );
+    expect(() => session.sendAid("F3")).toThrow(
+      expect.objectContaining({ code: "KEYBOARD_LOCKED" })
+    );
+  });
+
+  it("閉じたセッションでは Attn / SysReq も SESSION_CLOSED", async () => {
+    const { session } = await connectReplay(signonEntries());
+    session.disconnect();
+    expect(() => session.sendAid("Attn")).toThrow(
+      expect.objectContaining({ code: "SESSION_CLOSED" })
+    );
+    expect(() => session.sendAid("SysReq")).toThrow(
+      expect.objectContaining({ code: "SESSION_CLOSED" })
     );
   });
 });
