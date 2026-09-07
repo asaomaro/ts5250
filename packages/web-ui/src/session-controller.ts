@@ -9,7 +9,6 @@ import {
   MSG_PC_COMMAND_DONE,
   MSG_PC_COMMAND_FAILED,
   MSG_PC_COMMAND_RUNNING,
-  MSG_WAITING_LONG,
   wsErrorNotice
 } from "./composables/opMessages.js";
 import {
@@ -33,15 +32,23 @@ const LOADING_DELAY_MS = 500;
 const loadingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * 「待っています」を出すまでの時間。
+ * **待たされている間、こちらからは何も言わない**（ACS と同じ）。
  *
- * **旧タイムアウトと同じ 30 秒に合わせてある。** 以前はこの時点で「応答がありませんでした」と
- * 嘘をつき、施錠まで解いていた（`.aidev/backlog/aid-response-timeout.md`）。廃止しただけだと
- * 黙って待たせ続けることになり、「時間の掛かる処理」と「本当に固まった」を利用者が区別できない。
- * 事実だけを言い、抜け道（Attn / SysReq）を添えるものに置き換える。
+ * 一時期ここに 30 秒の通知（`MSG_WAITING_LONG`）を置いていた。旧タイムアウトが同じ 30 秒で
+ * 「応答がありませんでした」と**嘘をついて施錠まで解いて**いたので、廃止するにあたり
+ * 「事実だけを言うもの」に置き換えたつもりだった。**やめた**（利用者の指摘）:
+ *
+ *   - **ACS も実機もそんなメッセージを出さない。** 応答待ちに出るのは OIA の `X SYSTEM`
+ *     （こちらでは 🔒 とスピナー）だけで、何秒たっても文言は出ずに黙って待つ
+ *   - 操作員メッセージは本来**打鍵への反応**（`opMessages.ts` の ACS 原文つきの定数群）。
+ *     これだけが利用者の操作と無関係に勝手に出る、性質の違うものになっていた
+ *   - メッセージ行はクライアント優先（`EmulatorPane` の `messageLine`）なので、
+ *     **ホストが出している進捗表示を押しのけていた**（実機の `SNDPGMMSG … MSGTYPE(*STATUS)` で確認)
+ *
+ * 嘘をつくのをやめた時点で目的の大半は済んでいる。「時間が掛かっている」と「固まった」の
+ * 区別は、ACS と同じく利用者が Attn / SysReq（システム要求メニューの「2. 前の要求の終了」）で
+ * 確かめる。
  */
-const LONG_WAIT_NOTICE_MS = 30_000;
-const longWaitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * 在席の合図を送る間隔（ms）。打鍵のたびに送るとただの無駄なので間引く。
@@ -70,23 +77,18 @@ export function noteActivity(sessionId: string): void {
   s.client.send({ type: "activity" });
 }
 
-/**
- * 通信中フラグを設定。busy 中は入力プロテクト、0.5 秒超でローディング表示、
- * 30 秒超で「待っています」（`LONG_WAIT_NOTICE_MS`）。
- */
+/** 通信中フラグを設定。busy 中は入力プロテクト、0.5 秒超でローディング表示 */
 function setBusy(sessionId: string, busy: boolean): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
-  for (const timers of [loadingTimers, longWaitTimers]) {
-    const timer = timers.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      timers.delete(sessionId);
-    }
+  const timer = loadingTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    loadingTimers.delete(sessionId);
   }
   s.busy = busy;
+  s.loading = false;
   if (busy) {
-    s.loading = false;
     loadingTimers.set(
       sessionId,
       setTimeout(() => {
@@ -95,20 +97,6 @@ function setBusy(sessionId: string, busy: boolean): void {
         loadingTimers.delete(sessionId);
       }, LOADING_DELAY_MS)
     );
-    longWaitTimers.set(
-      sessionId,
-      setTimeout(() => {
-        const cur = sessionsStore.get(sessionId);
-        // **上書きしない**——先に出ている通知（PC コマンド等）のほうが具体的
-        if (cur?.busy && !cur.notice) cur.notice = MSG_WAITING_LONG;
-        longWaitTimers.delete(sessionId);
-      }, LONG_WAIT_NOTICE_MS)
-    );
-  } else {
-    s.loading = false;
-    // **待ちが解けたら自分で片付ける。** 通知は次の送信まで残る仕組みなので、
-    // 置きっぱなしだと応答が返った新しい画面に「待っています」が残る
-    if (s.notice === MSG_WAITING_LONG) delete s.notice;
   }
 }
 
@@ -711,13 +699,11 @@ export function submitGuiSelection(
 export function closeSession(sessionId: string): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
-  // 閉じた id の記憶を残さない（`setBusy` と同じ 2 本を畳む）
-  for (const timers of [loadingTimers, longWaitTimers]) {
-    const timer = timers.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      timers.delete(sessionId);
-    }
+  // 閉じた id の記憶を残さない（`setBusy` と同じものを畳む）
+  const timer = loadingTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    loadingTimers.delete(sessionId);
   }
   s.client.send({ type: "close" });
   s.client.close();
