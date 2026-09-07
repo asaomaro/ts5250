@@ -108,6 +108,36 @@ export interface KeymapHandlers {
 }
 
 /**
+ * **そのキーは「固まった要求から抜ける」ためのものか**（5250 のフラグレコード = Attn / SysReq）。
+ *
+ * 通信中の入力プロテクトは**この 2 つだけ通す**（`EmulatorPane.onKeydown`）。応答待ちの最中に
+ * こそ使うキーで、そこで止めると**待たされている時だけ逃げ道が消える**——core と ws は既に
+ * 施錠中でも通すようにしてある（`session.sendAid` / `ws-handler.onKey`）のに、画面側の門で
+ * 止まっていた（`20260726-attn-sysreq-cancel-invite` の方針 5 の積み残し）。
+ *
+ * **既定の割り当ては無い**（`classifyKey` は Attn / SysReq を返さない）ので、実質はキー設定で
+ * 割り当てた人だけが通る道になる。それでも `classifyKey` まで見るのは、既定が付いた日に
+ * ここだけ古くならないようにするため。
+ */
+export function isEscapeAidEvent(ev: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  const isFlag = (t: string): boolean => t === "Attn" || t === "SysReq";
+  const custom = keybindingsStore.resolve(ev);
+  if (custom !== undefined) {
+    // ローカル処理（表示切替・マクロ・編集キー）はホストへ行かないので対象外
+    if (isViewBinding(custom) || isMacroBinding(custom) || isLocalBinding(custom)) return false;
+    return isFlag(custom);
+  }
+  const { aid } = classifyKey(ev);
+  return aid !== undefined && isFlag(aid);
+}
+
+/**
  * キーダウンを捕捉し、対象キーは preventDefault してブラウザ既定動作より 5250 操作を優先する
  * （spec: F1 ヘルプ・F5 リロード・PageUp スクロール等を抑止）。フォーカスペインのみ作用。
  */

@@ -82,6 +82,11 @@ function onFocusOut(): void {
   left: 0;
   right: 0;
   bottom: 0;
+  /* **通信中プロテクトの膜より前に出す**（`EmulatorPane` の `.busy-overlay` は z-index 5）。
+     応答待ちの最中こそこの行を使うのに、膜が pointer events を横取りしてマウスで触れなかった
+     （実機で確認）。行は開いた時点で自分の入力欄へフォーカスするので打鍵はできていたが、
+     一度どこかを触ると戻れない。 */
+  z-index: 6;
   display: flex;
   align-items: center;
   gap: 8px;

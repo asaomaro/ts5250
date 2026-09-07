@@ -1280,14 +1280,21 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during
 |---|---|
 | OIA「▲ その他」→ **Attn** | **送れる**（`key: Attn` のフレームが飛ぶ） |
 | OIA「▲ その他」→ **SysReq** | **行が開き、入力欄へフォーカスも入る** |
-| その行に `2` を打つ | **打てない**——`""` のまま（`EmulatorPane.onKeydown` が `inputBlocked` で全キーを `preventDefault`。システム要求行の入力は `.pane` の子なので巻き込まれる） |
-| そのまま実行キー | 送れるが `sysReqText: ""`＝メニュー要求だけ。**システム要求メニューが出て施錠が解ける**ので、そこで `2` を選べば要求は切れる（2 手かかる） |
-| キーボードに割り当てた Attn / SysReq | **効かない**（同じ `inputBlocked` の門で止まる。既定の割り当ては無いので、キー設定をした人だけが踏む） |
-| マウスでシステム要求行をクリック | **触れない**（`.busy-overlay` が pointer events を横取りする。行は自動でフォーカスするので実害は無い） |
+| その行に `2` を打つ | **打てる**（`sysReqText: "2"` がレコードに載る） |
+| そのまま実行キー | **走っている要求が 1 手で切れ、待ちが解ける** |
+| マウスでシステム要求行をクリック | **触れる** |
+| キーボードに割り当てた Attn / SysReq | **通る**（単体テスト `test/escape-during-busy.test.ts`。既定の割り当ては無いのでキー設定をした人だけの道） |
 
-⚠ **`20260726-attn-sysreq-cancel-invite` の方針 5 は core と ws では解いたが、画面側の
-`onKeydown` には残っている。** 「待たされている時だけ逃げ道が細る」状態なので、
-直すならフラグキーとシステム要求行を `inputBlocked` の門から外す。
+もともとは**画面側だけが逃げ道を塞いでいた**（`20260726-attn-sysreq-cancel-invite` の方針 5 の
+積み残し）。core（`session.sendAid`）も ws（`ws-handler.onKey`）も施錠中のフラグキーを通すのに、
+`EmulatorPane.onKeydown` が `inputBlocked` で**全キーを `preventDefault`** していたため、
+`SysReq` → `2` が「空送信でメニューを出してから選ぶ」2 手になっていた。いまは
+
+- システム要求行の判定を**入力プロテクトより先**に置く（行への打鍵は潰さない）
+- 門は **Attn / SysReq だけ通す**（`useKeymap` の `isEscapeAidEvent`）
+- `.sysreq` を膜（`.busy-overlay`、z-index 5）より前に出す（z-index 6）
+
+の 3 点で、待ちの最中でも 1 手で抜けられる。
 
 ### 呼んだプログラムが MSGW になったとき（実機 / `MSGWTST`）
 
