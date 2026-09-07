@@ -27,6 +27,12 @@ const PORT = Number(process.env.ESCAPE_PORT ?? 3492);
 const SYSTEM = process.env.AS400_SYSTEM ?? "AS400";
 const SESSION = process.env.AS400_SESSION ?? "DEV1";
 const LIB = process.env.AS400_LIB ?? "TESTLIB";
+/**
+ * 待ちを作るコマンド。既定は `STSLOOP`（60 秒）。**資産の無いホストでも測れる**ように
+ * 差し替えられる（PUB400 なら `ESCAPE_CMD='DLYJOB DLY(90)'`）——見たいのは
+ * 「待たされている最中に抜けられるか」だけで、待ちの作り方は問わない。
+ */
+const WAIT_CMD = process.env.ESCAPE_CMD ?? `CALL ${LIB}/STSLOOP`;
 const USER = process.env.AS400_USER ?? "";
 const PASSWORD = process.env.AS400_PASSWORD ?? "";
 const TMP = process.env.ESCAPE_TMP ?? "/tmp/ts5250-escape";
@@ -164,17 +170,17 @@ try {
   const cmdEl = page.locator("input.grid-input:not([readonly])").first();
   await cmdEl.click();
   await page.keyboard.press("Home");
-  await page.keyboard.type(`CALL ${LIB}/STSLOOP`, { delay: 15 });
+  await page.keyboard.type(WAIT_CMD, { delay: 15 });
   await page.keyboard.press("Enter");
   await sleep(4000);
   const waiting = await probe();
   check("待ちに入っている（スピナー＋施錠）", waiting.busy && waiting.loading, JSON.stringify({ busy: waiting.busy, loading: waiting.loading, lock: waiting.lock }));
   await shot("01-waiting");
 
-  // ---- 1. キーボード: ペインの打鍵が通るか ----
-  // **Attn / SysReq に既定のキー割り当ては無い**（キー設定で任意のキーへ割り当てる）。
-  // ここでは代わりに「ペインの keydown が待ち中に生きているか」を見る——生きていなければ、
-  // 割り当てたキーもそこへ届かない（`onKeydown` は `inputBlocked` で全キーを潰す）。
+  // ---- 1. キーボード: 普通のキーは従来どおり止まるか ----
+  // **止まるのが正しい**（多重送信のプロテクト）。通すのは Attn / SysReq だけで、
+  // そちらはキー設定で割り当てた人だけが通る道なので、単体テスト
+  // （`test/escape-during-busy.test.ts`）で見る。
   const beforeKb = sent.length;
   await page.locator(".pane").first().click({ position: { x: 400, y: 300 } });
   await page.keyboard.press("F3");
@@ -205,16 +211,23 @@ try {
   await sleep(600);
   const opened = await probe();
   check("3. 待ち中でも SysReq の行が開く", sysErr === "" && opened.sysreqOpen, sysErr || `sysreqOpen=${opened.sysreqOpen}`);
-  // **クリックしない。** 行は開いた時点で自分の入力欄へフォーカスする（`SysReqLine` の watch）。
-  // 加えて待ち中は通信中プロテクトの膜（`.busy-overlay`）が全面を覆うので、
-  // そもそもマウスでは行に触れない（実測。膜が pointer events を横取りする）
+  // **まずクリックせずに打つ。** 行は開いた時点で自分の入力欄へフォーカスするので、
+  // マウスを使わずに「2」まで届くのが本来の姿（マウスで触れることは 4' で別に見る）
   const focused = await page.evaluate(() => document.activeElement?.id ?? "");
-  check("3' 行を開くと入力欄へフォーカスが入る（マウスでは触れない）", focused === "sysreq-input", `activeElement=${focused}`);
+  check("3' 行を開くと入力欄へフォーカスが入る", focused === "sysreq-input", `activeElement=${focused}`);
   await page.keyboard.type("2", { delay: 50 });
   await sleep(400);
   const typed = await probe();
   check("4. その行に「2」を打ち込める（入力プロテクトに潰されない）", typed.sysreqText === "2",
     `行の中身: ${JSON.stringify(typed.sysreqText)}`);
+  // 膜（`.busy-overlay`）より前に出したので、マウスでも触れる
+  const clickable = await page
+    .locator(".sysreq .inp")
+    .click({ timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  check("4' マウスでも行に触れる（通信中プロテクトの膜が横取りしない）", clickable,
+    clickable ? "" : ".busy-overlay に遮られた");
   await shot("03-sysreq-typed");
 
   // ---- 4. 実行キーで送って、走っている要求が切れるか ----

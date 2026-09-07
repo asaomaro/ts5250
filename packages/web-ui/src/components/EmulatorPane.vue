@@ -12,7 +12,7 @@ import { logStore } from "../stores/log.js";
 import { sessionsStore } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
-import { makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
+import { isEscapeAidEvent, makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
 import {
   sendKey,
@@ -832,10 +832,6 @@ function onKeydownCapture(): void {
   noteUserActivity();
 }
 function onKeydown(ev: KeyboardEvent): void {
-  if (inputBlocked.value) {
-    ev.preventDefault(); // 通信中は入力プロテクト（キー操作を無効化）
-    return;
-  }
   // システム要求行が開いている間は 5250 のキー処理を止める。**入力欄は .pane の子なので
   // keydown がここまでバブルしてくる**——素通しすると実行キーが「行の確定」と「5250 の Enter 送信」の
   // 両方に解釈され、二重に送ってしまう。
@@ -844,7 +840,17 @@ function onKeydown(ev: KeyboardEvent): void {
   // 確定・取り消しのハンドラが先に走って sysReqOpen を false にしてから、同じイベントが
   // ここへバブルしてくるため。Esc を SysReq に割り当てていると（利用者の想定用途そのもの）、
   // 取り消しの Esc がそのまま再び行を開いてしまい、二度と閉じられなくなる。
+  //
+  // **この判定は入力プロテクトより先に置く。** 後ろに置くと、通信中は下の `preventDefault` が
+  // 行への打鍵まで潰し、**「2. 前の要求の終了」の `2` が入力できない**——固まった要求から
+  // 抜けるための行が、固まっている時だけ使えないことになる（実機で確認）。
   if (sysReqOpen.value || (ev.target instanceof HTMLElement && ev.target.closest(".sysreq"))) return;
+  // 通信中は入力プロテクト（キー操作を無効化）。**Attn / SysReq だけは通す**——
+  // 応答待ちの最中にこそ使う逃げ道で、core も ws も施錠中の送信を許している（`isEscapeAidEvent`）
+  if (inputBlocked.value && !isEscapeAidEvent(ev)) {
+    ev.preventDefault();
+    return;
+  }
   // 機能キーボタン・オプション選択肢のボタンにフォーカスがあるときの Space は
   // 「そのボタンを押す」（普通のボタンと同じ）。
   // 明示的に処理するのは、下の isProtectedEdit が Space を preventDefault してしまい
