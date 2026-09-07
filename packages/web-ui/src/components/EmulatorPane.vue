@@ -1164,9 +1164,12 @@ function onWheel(ev: WheelEvent): void {
   cursor: pointer;
 }
 /* 通信中プロテクト: ポインタ操作をブロック。0.5 秒までは透明、loading で薄く覆う。
-   **カーソルは変えない。** ホストとの往復はたいてい一瞬で、その間だけ OS の砂時計に
-   変わるのが目障りだった（利用者の指摘）。砂時計は 0.5 秒を超えた `loading` のときだけ
-   出す——スピナーと薄い覆いを出すのと同じ境目にすれば、「待たされている」合図は残る。
+
+   **砂時計は出さない（`cursor` は最後まで変えない）。** 待っているのはホストであって
+   **ts5250 が応答しなくなっている訳ではない**（利用者の指摘）。OS の砂時計／`progress` は
+   「このアプリが固まっている・処理中で反応しない」の合図なので、ここで出すと事実と違う
+   ——実際、待ちの最中でも OIA の Attn / SysReq は押せるし、タブの切り替えも操作ログも動く。
+   長い待ちは 0.5 秒超のスピナーと薄い覆い、それに OIA の 🔒 で示せば足りる。
 
    覆う前と同じ形（`text`）にするのは、**この覆いが画面領域（.screen-wrap）だけを覆う**
    から。その下は一面のテキストなので、下と同じにすれば変化そのものが見えない。
@@ -1183,7 +1186,6 @@ function onWheel(ev: WheelEvent): void {
   transition: background 0.2s ease;
 }
 .busy-overlay.loading {
-  cursor: progress;
   background: color-mix(in srgb, var(--crt) 55%, transparent);
 }
 .spinner {

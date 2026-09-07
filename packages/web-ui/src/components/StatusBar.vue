@@ -67,10 +67,13 @@ const inputState = computed<{ label: string; ok: boolean }>(() => {
  * **説明を消すのではなく移す**——`title` に残せば、初めて触る人も辿れる。
  */
 const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
-  // **「その他」を開いている間は確定キーだけ残す**（`20260802-key-palette-layout`）。
-  // 一覧に F1〜F24 が全部出ているので、常時行にも並べると同じキーが 2 か所に出る
+  // **「その他」を開いている間は出さない**（`20260802-key-palette-layout`）。
+  // 一覧に F1〜F24 が全部出ているので、常時行にも並べると同じキーが 2 か所に出る。
+  //
+  // **`⏎` はここに含めない。** 「その他」の左隣に置き続けるため、開閉に関わらず
+  // テンプレート側で最後に 1 つだけ出す（開いた途端に位置が変わるのを避ける。利用者の指摘）。
   padOpen.value
-    ? [{ key: "Enter" as AidKey, label: "⏎", hint: "実行" }]
+    ? []
     : shift.value
     ? [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].map((n) => ({ key: `F${n}` as AidKey, label: `F${n}` }))
     : [
@@ -78,8 +81,7 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
         { key: "F3", label: "F3", hint: "終了" },
         { key: "F4", label: "F4", hint: "プロンプト" },
         { key: "F5", label: "F5", hint: "更新" },
-        { key: "F12", label: "F12", hint: "取消" },
-        { key: "Enter", label: "⏎", hint: "実行" }
+        { key: "F12", label: "F12", hint: "取消" }
       ]
 );
 function press(k: AidKey): void {
@@ -89,8 +91,10 @@ function press(k: AidKey): void {
 /**
  * **その他のキー**の一覧（`20260802-key-palette`）。
  *
- * 常時出すのは「よく押すもの」だけにして、残りはここへ畳む——常時 8 個並べても
- * 押す頻度は大きく違い、幅だけ食う。Attn / SysReq もここへ移した（利用者の指示）。
+ * ここへ畳むのは **F1〜F24 の一覧と、その修飾（Ctrl / Alt）、カーソル移動・ページ送り**だけ。
+ * **Esc / Attn / SysReq は常時表示**（利用者の指示）——畳んでいると、待たされている最中に
+ * 押したい Attn / SysReq が 2 手先になる。Home / End / PageUp / PageDown は
+ * キーボードの素のキーで足りるので、こちらへ戻した（利用者の指示）。
  */
 const padOpen = ref(false);
 
@@ -162,6 +166,17 @@ const macroStop = computed<string | undefined>(() => {
 </script>
 
 <template>
+  <!--
+    ファンクションキーの一覧。**右寄せ**にして、下の行の「その他」ボタンの側へ揃える
+    （利用者の指示）。押されたキーはペインの keydown 処理へ流すので、
+    キー設定（`ctrl+F1` 等）がボタンからも同じように効く。
+
+    **フッター（OIA）より上に出す。** 下に足すと、開くたびに OIA が画面の内側へ押し上げられて
+    見に行く場所が変わる（利用者の指摘）。上に積めば OIA は最下段のまま動かない。
+  -->
+  <div v-if="padOpen" class="keypad">
+    <button v-for="k in fnKeys" :key="k" class="fk" @click="padFn(k)">{{ k }}</button>
+  </div>
   <div class="oia">
     <!-- 操作ログのトグル。フッターが 2 行にならないよう、ここに収める -->
     <button
@@ -199,38 +214,61 @@ const macroStop = computed<string | undefined>(() => {
         {{ f.label }}
       </button>
       <!--
+        **Esc / Attn / SysReq は常時出す**（利用者の指示）。F1 などと同じ扱いで「その他」には
+        畳まない——一覧（F1〜F24）には無いキーなので、開いている間も出したままでよい。
+        並びは **F12 と ⏎ の間**（`fkeys` の最後が F12、この下が ⏎）。
+
+        ページ送りとカーソル移動（PageUp / PageDown / Home / End）は**畳んだほうへ戻した**
+        （利用者の指示）——キーボードの素のキーで足りるので、常時 4 つ並べるほどではない。
+
         Attn / SysReq はキー設定（⌨ キー）で任意のキーへ割り当てられるが、既定のバインドを持たない。
         設定を触らない利用者にも押せる導線として、他の AID と同じ .fk 意匠でここに並べる。
         SysReq だけは**押しても送らない**——画面下部のシステム要求行を開くのが実機・ACS の動きで、
         送信は行を確定したときなので、親（EmulatorPane）に投げて入口を 1 本にする。
+
+        **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため）。
       -->
+      <button
+        class="fk"
+        :disabled="!!mod"
+        title="Esc（割り当てがあれば実行）"
+        @click="emit('combo', { key: 'Escape' })"
+      >
+        Esc
+      </button>
+      <button
+        class="fk"
+        :disabled="!!mod || is3270"
+        :title="is3270 ? '3270 端末にはありません' : '割込（アテンション）'"
+        @click="padAid('Attn')"
+      >
+        Attn
+      </button>
+      <button
+        class="fk"
+        :disabled="!!mod || is3270"
+        :title="is3270 ? '3270 端末にはありません' : 'システム要求（行を開く）'"
+        @click="padAid('SysReq')"
+      >
+        SysReq
+      </button>
       <!--
-        **その他のキー**（`20260802-key-palette`）。常時出すのはよく押すものだけにして、
-        残りはここへ畳む。Attn / SysReq もこちらへ移した。
+        **その他のキー**（`20260802-key-palette`）。ここへ畳むのは F1〜F24 の一覧と、
+        その修飾（Ctrl / Alt）、それにカーソル移動・ページ送りだけ。
 
         開いている間は**この行に並べる**（`20260802-key-palette-layout`・利用者の指示）
         ——別の行を足すと 3 行になり、そのぶん画面が狭くなる。
       -->
       <template v-if="padOpen">
-        <!-- **修飾トグル中はファンクションキー以外を無効にする**（組み合わせが 5250 に無いため） -->
-        <button
-          class="fk"
-          :disabled="!!mod || is3270"
-          :title="is3270 ? '3270 端末にはありません' : '割込（アテンション）'"
-          @click="padAid('Attn')"
-        >
-          Attn
-        </button>
-        <button
-          class="fk"
-          :disabled="!!mod || is3270"
-          :title="is3270 ? '3270 端末にはありません' : 'システム要求（行を開く）'"
-          @click="padAid('SysReq')"
-        >
-          SysReq
-        </button>
+        <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
+        <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
         <!-- 3270 ではページ送りが PF7 / PF8 になる（実測）。押し味は変えず、説明だけ変える -->
-        <button class="fk" :disabled="!!mod" :title="is3270 ? '前ページ（3270 では F7）' : '前ページ'" @click="padAid('PageUp')">
+        <button
+          class="fk"
+          :disabled="!!mod"
+          :title="is3270 ? '前ページ（3270 では F7）' : '前ページ'"
+          @click="padAid('PageUp')"
+        >
           PageUp
         </button>
         <button
@@ -240,16 +278,6 @@ const macroStop = computed<string | undefined>(() => {
           @click="padAid('PageDown')"
         >
           PageDown
-        </button>
-        <button class="fk" :disabled="!!mod" title="行頭へ" @click="emit('combo', { key: 'Home' })">Home</button>
-        <button class="fk" :disabled="!!mod" title="行末へ" @click="emit('combo', { key: 'End' })">End</button>
-        <button
-          class="fk"
-          :disabled="!!mod"
-          title="Esc（割り当てがあれば実行）"
-          @click="emit('combo', { key: 'Escape' })"
-        >
-          Esc
         </button>
         <!--
           **単独では送らない。** 押した状態を保ち、次のファンクションキーと組み合わせる
@@ -276,6 +304,11 @@ const macroStop = computed<string | undefined>(() => {
           Alt
         </button>
       </template>
+      <!--
+        **⏎ は常に「その他」の左隣**（利用者の指示）。`fkeys` に入れて開閉で出し分けると、
+        開いた途端に列の先頭へ飛んでしまい、押す場所が変わる。
+      -->
+      <button class="fk" title="実行" @click="press('Enter')">⏎</button>
       <button
         class="fk more"
         :class="{ on: padOpen }"
@@ -285,14 +318,6 @@ const macroStop = computed<string | undefined>(() => {
         {{ padOpen ? "▼" : "▲" }} その他
       </button>
     </span>
-  </div>
-  <!--
-    ファンクションキーの一覧。**右寄せ**にして、上の行の「その他」ボタンの側へ揃える
-    （利用者の指示）。押されたキーはペインの keydown 処理へ流すので、
-    キー設定（`ctrl+F1` 等）がボタンからも同じように効く。
-  -->
-  <div v-if="padOpen" class="keypad">
-    <button v-for="k in fnKeys" :key="k" class="fk" @click="padFn(k)">{{ k }}</button>
   </div>
 </template>
 

@@ -22,7 +22,6 @@ vi.mock("../src/ws-client.js", () => ({
 }));
 
 import { openSession, sendKey } from "../src/session-controller.js";
-import { MSG_WAITING_LONG } from "../src/composables/opMessages.js";
 import { sessionsStore } from "../src/stores/sessions.js";
 
 function snap(keyboardLocked = false): ScreenSnapshot {
@@ -154,23 +153,26 @@ describe("通信中プロテクト・0.5 秒ローディング", () => {
   });
 
   /**
-   * **30 秒で嘘をつくのをやめた代わりに、事実だけを言う。** 旧実装はこの時点で
-   * 「応答がありませんでした」と出して施錠まで解いていた（まだ走っているのに）。
+   * **待たされている間、こちらからは何も言わない**（ACS と同じ）。
+   *
+   * 旧実装は 30 秒で「応答がありませんでした」と嘘をついて施錠まで解いていた。それをやめた
+   * 折に「事実だけを言う」通知を同じ 30 秒に置いたが、**ACS にも実機にもそんなメッセージは
+   * 無い**うえ、ホストが出している進捗表示（`MSGTYPE(*STATUS)`）を押しのけるので消した。
+   * 出るのはスピナーと OIA の 🔒 だけ。
    */
-  it("30 秒待たされたら「待っています」を出し、応答が返ったら消す", async () => {
+  it("何秒待たされても操作員メッセージは出さない（スピナーと施錠表示だけ）", async () => {
     await open();
     sendKey("s1", "Enter");
     const s = sessionsStore.get("s1")!;
-    vi.advanceTimersByTime(29_999);
+    vi.advanceTimersByTime(30_000);
     expect(s.notice).toBeUndefined();
-    vi.advanceTimersByTime(1);
-    expect(s.notice).toBe(MSG_WAITING_LONG);
-
-    captured.handlers.onServerMessage({ type: "screen", screen: snap() });
-    expect(s.notice).toBeUndefined(); // 新しい画面に持ち越さない
+    vi.advanceTimersByTime(300_000); // 5 分待っても同じ
+    expect(s.notice).toBeUndefined();
+    expect(s.busy).toBe(true); // 待ちそのものは続いている
+    expect(s.loading).toBe(true);
   });
 
-  it("先に出ている通知は上書きしない", async () => {
+  it("先に出ている通知を待ち時間で消したりしない", async () => {
     await open();
     sendKey("s1", "Enter");
     const s = sessionsStore.get("s1")!;

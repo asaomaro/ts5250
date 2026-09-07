@@ -1213,3 +1213,112 @@ node --env-file=.env --env-file=.env.verify scripts/verify-aid-no-timeout.mjs
 
 ⚠ **待ち時間そのものが検証対象**なので 1 回およそ 2 分かかる。`VERIFY_DELAY_SEC` で
 `DLYJOB` の秒数を変えられるが、**旧実装の 30 秒より確実に長く**しないと意味が無い。
+
+---
+
+## 長い処理のローディング表示（実機 / CL 2 本）
+
+期限なしの待ちにしたあと「**ローディングが解除されない**」という報告が出た。待ちを解く合図は
+2 つしかない——**施錠が解けた画面**（`session-controller` の `if (!keyboardLocked)`）か
+`key-done`——ので、60 秒走る CL を呼んで、押した瞬間から終わるまでを実ブラウザで見る。
+
+| スクリプト | 何を作る／何を見るか |
+|---|---|
+| `build-msgloop.mjs` | 実機に CL を 3 本作る（冪等）。`MSGLOOP`＝60 秒・1 秒ごとに `SNDMSG`（利用者の待ち行列へ）、`STSLOOP`＝60 秒・1 秒ごとに状況メッセージ（`TOPGMQ(*EXT) MSGTYPE(*STATUS)`＝**画面へ**）、`MSGCLR`＝検証が積んだメッセージを鍵で 1 通ずつ消す後始末用。 |
+| `verify-browser-msgloop-loading.mjs` | 実ブラウザで `CALL` して 250ms ごとに観測。**0.5 秒超でスピナーが出る**／**30 秒を越えても待ちを打ち切らない**／**30 秒で「待っています」が出る**／**プログラムが終わったらローディングが消えて打てるようになる**。WS フレーム（`screen` の `keyboardLocked`・`key-done`）も時刻つきで残す。 |
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/build-msgloop.mjs
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-msgloop-loading.mjs
+```
+
+### 実測（2026-09-07・SR-OSAKA / AS01・16/16 OK）
+
+| | MSGLOOP（`SNDMSG`） | STSLOOP（状況メッセージ） |
+|---|---|---|
+| 送信後 60 秒に届いた `screen` | **0 件** | **60 件（すべて `locked=true`）** |
+| スピナー | 1.1 秒で表示・以後ずっと | 1.0 秒で表示・以後ずっと |
+| OIA の 🔒 | **出ない**（施錠された画面が来ないので画面側は知りようがない） | 出る |
+| 操作員メッセージ | **出ない**（ACS 準拠。30 秒通知は廃止した） | **出ない**——ホストの進捗表示がそのまま残る |
+| マウスカーソル | **砂時計にしない**（`cursor: text` のまま） | 同左 |
+| ローディング解除 | **62.5 秒**（`screen locked=false` ＋ `key-done`） | **62.5 秒**（同上） |
+
+⚠ **`SNDMSG` は表示セッションに何も届けない。** 待ち行列に積まれるだけで、60 秒のあいだ 5250 の
+レコードは 1 本も来なかった（実測）。**「施錠された画面では待ちを解かない」規則を通るのは
+`STSLOOP` のほう**で、進捗の見せ方を実機で試すならこちらを使う。
+
+⚠ **`RMVMSG` はコマンドサーバーから直に打てない**（`CPD0031`。`QCMDEXC` 経由でも同じ）。
+CL プログラムの中でしか許されていないので `MSGCLR` を経由する。**`MONMSG` を外してはいけない**
+——古い鍵で `CPF2410` が上がると関数チェックになり、`QZRCSRVS` の事前開始ジョブが
+`CPA0701` の応答待ち（MSGW）で固まって残る（実機で踏んだ）。待ち行列名も引数で渡す
+——サーバージョブの `RTVJOBA USER()` は `QUSER` を返す。
+
+⚠ **待ちの最中も砂時計は出さない**（`EmulatorPane` の `.busy-overlay`）。待っているのはホストで、
+**ts5250 が応答しなくなっている訳ではない**（利用者の指摘）——実際、待ちの最中でも OIA の
+Attn / SysReq は押せ、タブの切り替えも操作ログも動く。合図はスピナーと薄い覆い、OIA の 🔒 だけ。
+
+⚠ **待たされている間、こちらからは何も言わない**（`session-controller` の `setBusy`）。
+一時期 30 秒で「ホストの応答を待っています（Attn / SysReq で中断できます）」を出していたが、
+**ACS にも実機にもそんなメッセージは無く**、ホストが出している進捗表示まで押しのけていたので
+廃止した（利用者の指摘）。応答待ちに出るのはスピナーと OIA の 🔒 だけ。
+
+⚠ 1 回およそ 4 分（60 秒 × 2 ＋ サインオン）。`MSGLOOP_SECS` で秒数は変えられる。
+
+### 応答待ちの最中に Attn / SysReq で抜けられるか（実機 / STSLOOP を使う）
+
+画面は期限を設けずに待つので、**固まった要求から抜ける口は Attn / SysReq しか無い**。core と
+ws が施錠中でもフラグキーを通すことは `verify-aid-no-timeout.mjs` で確認済みだが、
+**画面（web-ui）から実際に押せるか**は別問題なので、こちらで測る。
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during-wait.mjs
+```
+
+実測（2026-09-07・`CALL ASAOLIB/STSLOOP` の待ち中）:
+
+| 経路 | 結果 |
+|---|---|
+| OIA「▲ その他」→ **Attn** | **送れる**（`key: Attn` のフレームが飛ぶ） |
+| OIA「▲ その他」→ **SysReq** | **行が開き、入力欄へフォーカスも入る** |
+| その行に `2` を打つ | **打てない**——`""` のまま（`EmulatorPane.onKeydown` が `inputBlocked` で全キーを `preventDefault`。システム要求行の入力は `.pane` の子なので巻き込まれる） |
+| そのまま実行キー | 送れるが `sysReqText: ""`＝メニュー要求だけ。**システム要求メニューが出て施錠が解ける**ので、そこで `2` を選べば要求は切れる（2 手かかる） |
+| キーボードに割り当てた Attn / SysReq | **効かない**（同じ `inputBlocked` の門で止まる。既定の割り当ては無いので、キー設定をした人だけが踏む） |
+| マウスでシステム要求行をクリック | **触れない**（`.busy-overlay` が pointer events を横取りする。行は自動でフォーカスするので実害は無い） |
+
+⚠ **`20260726-attn-sysreq-cancel-invite` の方針 5 は core と ws では解いたが、画面側の
+`onKeydown` には残っている。** 「待たされている時だけ逃げ道が細る」状態なので、
+直すならフラグキーとシステム要求行を `inputBlocked` の門から外す。
+
+### 呼んだプログラムが MSGW になったとき（実機 / `MSGWTST`）
+
+**ローディングが解除されない**のは「ホストが解錠を送ってこない」ときだけで、実際にそうなるのは
+**呼んだプログラムが応答待ち（MSGW）に入り、その照会が画面以外へ出た場合**である。
+`build-msgloop.mjs` が作る `MSGWTST` がその状態を作る。
+
+```sh
+CALL ASAOLIB/MSGWTST          ← 画面はここで固まる（スピナーが出たまま）
+```
+
+`<AS400_LIB>/INQMSGQ`（この検証用に作る自前の待ち行列）にメッセージが来るまで
+`RCVMSG … WAIT(*MAX)` で待つ。**ジョブは MSGW、表示装置には 1 バイトも来ない。**
+抜け方は 3 つ:
+
+| 抜け方 | どうする |
+|---|---|
+| 端末から | `SysReq` →「2. 前の要求の終了」（`verify-browser-escape-during-wait.mjs` の主題） |
+| 別経路から | `SNDMSG MSG('GO') TOMSGQ(<AS400_LIB>/INQMSGQ)`（コマンドサーバーからも打てる） |
+| 最後の手段 | `ENDJOB` |
+
+実機で確かめた作り方の落とし穴（どれも `CPF0801` / 無言終了で 1 往復ずつ失った）:
+
+- `SNDPGMMSG … TOMSGQ(…) MSGTYPE(*INQ) KEYVAR(&K)` の鍵は**非プログラム待ち行列の鍵として通らない**。
+  `RCVMSG … MSGKEY(&K) MSGTYPE(*RPY)` は `CPF2410`（鍵が見つからない）で即落ちる
+- 鍵を外して `MSGTYPE(*RPY)` にすると、今度は**応答を置いても起きない**（MSGW のまま）。
+  `MSGTYPE(*ANY)` で待つのが確実
+- **プログラムレベルの `MONMSG`（`DCL` の直後）に `EXEC(RETURN)` は書けない**——`CPF0801` になる。
+  各コマンドの直後に置く
+- `MONMSG` で握り潰すだけにすると**失敗が無言**になる。失敗の理由（メッセージ ID）を
+  待ち行列へ吐かせてから終わる形にしておくと、外から SQL で読める
+
+⚠ **`SNDRPY` の既定は `RMV(*YES)`**（照会と応答をまとめて消す）。待っている `RCVMSG` が
+鍵を見失うので、`MSGWRPY` は `RMV(*NO)` で答える。
