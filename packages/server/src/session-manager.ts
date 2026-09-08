@@ -1407,8 +1407,20 @@ export class SessionManager {
    * `dispose` の 3 判断とアイドル掃除が決める。
    */
   private reapHold(id: string): void {
-    if (this.hasViewer(id)) {
+    const entry = this.sessions.get(id);
+    if (entry && this.hasViewer(id)) {
       this.cancelHold(id);
+      // **持ち主が戻らなかったセッションを、寿命なしで放流しない。**
+      //
+      // 猶予を解いただけだと、このセッションは**持ち主の居ない普通のセッション**になる。
+      // 見に来ただけの接続は `dispose` で閉じない側（`attached`）なので、その閲覧タブが
+      // 去っても誰も畳まず、ブラウザ経路の既定アイドル上限は `"never"`——**枠と装置記述を
+      // 握ったまま永久に残る**。
+      //
+      // 持ち主が居ないという点は MCP が開いて放置されたセッションと同じ状態なので、
+      // **同じ回収の仕組みに乗せる**（`orphanSafeIdleTimeoutMs` の根拠と同一）。
+      // エントリ個別の値は既に個別設定があるならそちらを尊重する。
+      entry.idleTimeoutMs = orphanSafeIdleTimeoutMs(entry.idleTimeoutMs);
       return;
     }
     void this.close(id).catch(() => undefined);
@@ -1638,24 +1650,19 @@ export class SessionManager {
       // **猶予切れも刈る。** タイマー（`holdForReconnect`）が本筋だが、取り逃すと
       // 掴んだままのセッションが残る——アイドル上限が既定 `"never"` なので、
       // ここで拾わないと二度と回収されない
-      const held = entry.heldUntil !== undefined;
-      const heldOver = entry.heldUntil !== undefined && entry.heldUntil <= now;
-      // **猶予切れは見ている人が居れば刈らない**（タイマー側の `reapHold` と同じ規則。
-      // 経路によって結論が変わると、どちらが本当か読めなくなる）
-      if (heldOver && this.hasViewer(id)) {
-        this.cancelHold(id);
+      if (entry.heldUntil !== undefined) {
+        // **猶予中の寿命を決めるのは `heldUntil` ひとつ**（decisions D5 / D12）。
+        //
+        // `expired()` が見る `lastActivity` は**切断後は誰も進めない**（進めるのは
+        // `touch` ＝ WS からの合図）。アイドル上限を有限に設定した環境（例 1 分）だと、
+        // 90 秒の猶予が明ける前にそちらが先に真になり、**猶予が丸ごと無効になる**。
+        //
+        // 期限が来たときの畳み方は**タイマー側と同じ `reapHold` に通す**——
+        // 経路によって結論が変わると、どちらが本当か読めなくなる
+        if (entry.heldUntil <= now) this.reapHold(id);
         continue;
       }
-      // **猶予のあいだはアイドル上限を当てない。**
-      //
-      // `expired()` が見る `lastActivity` は**切断後は誰も進めない**（進めるのは
-      // `touch` ＝ WS からの合図）。アイドル上限を有限に設定した環境（例 1 分）だと、
-      // 90 秒の猶予が明ける前にこちらが先に真になり、**猶予が丸ごと無効になる**。
-      // 猶予は「利用者がまだ戻ってくるかもしれない」という明示的な保持なので、
-      // その間の寿命を決めるのは `heldUntil` ひとつにする。
-      if (held && !heldOver) continue;
-      if (expired(entry) || heldOver) {
-        if (entry.holdTimer) clearTimeout(entry.holdTimer);
+      if (expired(entry)) {
         entry.recorder?.stop(); // `close` と後始末を揃える（購読を残すとリークする）
         entry.session.disconnect();
         this.sessions.delete(id);

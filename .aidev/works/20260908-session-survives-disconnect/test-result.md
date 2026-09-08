@@ -2,18 +2,18 @@
 
 ## 実行したもの
 
-**ラウンド 2**（review ラウンド1 の差し戻しを反映したあと）。
+**ラウンド 3**（review ラウンド2 の差し戻しを反映したあと）。数字は最新の実行値。
 
 - `npm run build`（`tsc -b`：ライブラリ 7 パッケージ ＋ server） — 成功
 - `npm run build -w @ts5250/web-ui`（`vue-tsc -b && vite build`） — 成功
   （chunk サイズの警告のみ。既存の警告で本件とは無関係）
 - `npm run lint`（`eslint .`） — **0 件**（exit 0）
-- パッケージごとのテスト（`npx vitest run`。**合計 5539 passed / 0 failed / 41 skipped**）
+- パッケージごとのテスト（`npx vitest run`。**合計 5543 passed / 0 failed / 41 skipped**）
   - `packages/base` — 52 / `packages/ebcdic` — 100 / `packages/scs` — 41
   - `packages/hostserver` — 991
   - `packages/tn3270` — 254（+38 skipped）/ `packages/tn5250` — 584 / `packages/vt` — 202
-  - `packages/server` — **1337**（+3 skipped）
-  - `packages/web-ui` — **1978**（4 シャードの合計: 469 + 535 + 542 + 432）
+  - `packages/server` — **1340**（+3 skipped）
+  - `packages/web-ui` — **1979**（4 シャードの合計: 469 + 535 + 543 + 432）
 - `aidev smoke`（`node launcher/smoke.mjs`） — **pass**
 
 > **ルートから `npx vitest run` を直接叩いた分は判定に使っていない。** AGENTS.md が
@@ -24,7 +24,7 @@
 > **この環境ではメモリが足りず、既定の並列度で全件を一度に流せない**（7.7GB。
 > `npm test` も `--maxWorkers=2` も途中で OS に落とされた）。そのため web-ui は
 > `--shard=n/4` に割って単一ワーカーで流している。**割り方による取りこぼしは無い**
-> ——4 シャードの合計（1978）が単一実行時の件数と一致する。
+> ——4 シャードの合計（1979）が単一実行時の件数と一致する。
 
 ## 受け入れ基準ごとの判定
 
@@ -56,7 +56,7 @@
   「既存セッションへ繋いだだけのタブは繋ぎ直しに行かない」。
   MCP / HLLAPI が開いたセッションは `ws-handler` を通らないので猶予に入らない（設計上の帰結）。
 - **AC9**（既存が緑のまま、回帰テストが追加されている）: **pass**
-  — 追加は **54 件**（サーバー 27 / クライアント 27）。既存はすべて緑。
+  — 追加は **60 件**（サーバー 30 / クライアント 30）。既存はすべて緑。
   振る舞いを変えた 3 件（`session-attach` / `ws-handler` / `ws-lifetime`）は、
   緩めるのではなく**新旧の対比が残る形**に書き換えた（`decisions.md` D9）。
 - **AC10**（繋ぎ直せなかった理由を示して切断状態にする）: **pass**
@@ -85,7 +85,7 @@
 
 ## 失敗の証跡
 
-**ラウンド 2 では失敗が発生していない。**
+**ラウンド 3 では失敗が発生していない。**
 
 **ラウンド 1 では lint が落ちていた**（`test-result.md` に「指摘なし」と書いたのは、
 smoke スクリプトを足す前の実行結果を見た誤り。review 工程で拾って差し戻した）:

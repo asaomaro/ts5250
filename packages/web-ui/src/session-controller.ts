@@ -136,7 +136,15 @@ function inputInhibited(s: SessionState): boolean {
  */
 function refuseIfDisconnected(s: SessionState): boolean {
   if (s.connected) return false;
-  s.notice = s.endedByHost ? MSG_SESSION_ENDED : MSG_NOT_CONNECTED;
+  // **既に出ている切断の理由を上書きしない。** 繋ぎ直しを諦めた理由・猶予切れ・
+  // 対象外の経路の案内は、どれも**この汎用文より具体的**（review ラウンド2）。
+  // 打鍵 1 回で「サーバーと繋がっていないため送信できません」＝**待てば戻る含み**に
+  // すり替わると、ラウンド1 で潰した嘘がここで復活する。
+  // 切断中は通知が消えない（送信の手前で戻るので `delete s.notice` を通らない）ので、
+  // 埋まっていれば残す
+  if (s.notice === undefined) {
+    s.notice = s.endedByHost ? MSG_SESSION_ENDED : MSG_NOT_CONNECTED;
+  }
   return true;
 }
 
@@ -238,6 +246,12 @@ function abortReconnect(sessionId: string): void {
   if (inflight) {
     pendingResumes.delete(sessionId);
     inflight.cancel(); // 遅れて届く `onClose` で next() が走らないようにしてから閉じる
+    // **座を引き取っていたら返す。** サーバーは `open { resume }` を受けた時点で
+    // `cancelHold` と `claim` を済ませているので、黙って口を閉じると
+    // **利用者が閉じたはずのセッションが猶予ぶん生き残る**。`close` は
+    // まだ開いていなければ捨てられ、開いていれば `dispose` が畳む——どちらの順でも正しい
+    // （review ラウンド2。`opened` 側のガードだけでは、配送済みの `opened` を取りこぼす）
+    inflight.client.send({ type: "close" });
     inflight.client.close();
   }
 }
@@ -265,18 +279,17 @@ function startReconnect(sessionId: string, label: string): void {
   // `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を
   // 見せた末に生のエラー文が出る）。VT とプリンターは開く関数から別で、
   // それぞれ自前の `onClose` に載っているのでここへは来ない（`kind` は保険）
-  if (s.kind === "printer" || s.meta?.terminal === "3270") {
-    // **黙って切らない。** 3270 はサーバー側でもその場でホストセッションが閉じるので、
-    // 開き直す以外に手が無い。何も言わないと、次の打鍵で出るのは
-    // 「サーバーと繋がっていないため送信できません」＝**待てば戻る含み**の嘘になる
-    // （プリンターは自分の `onClose` で同じことをしている）
+  // **繋ぎ直さない枝は、どれも黙って戻らない**（review ラウンド2）。
+  //
+  // 何も言わないと、次の打鍵で出るのは「サーバーと繋がっていないため送信できません」
+  // ＝**待てば戻る含み**の嘘になる。ここに当たるのはどれも**開き直す以外に手が無い**枝:
+  //   - 3270 … サーバー側でもその場でホストセッションが閉じる（対象外。D3）
+  //   - 見に来ただけのタブ … 座を引き取らない約束なので繋ぎ直せない（D4 / D13）
+  //   - プリンター … 自分の `onClose` で同じことをしている（保険でここにも書く）
+  if (s.kind === "printer" || s.meta?.terminal === "3270" || s.attachedOnly) {
     s.notice = MSG_CONNECTION_LOST;
     return;
   }
-  // **見に来ただけのタブは持ち主にならない**（decisions D4）。`resume` は座を引き取る
-  // 電文なので、ここを通すと**瞬断 1 回で相手のセッションの持ち主になり**、
-  // 次にこのタブを閉じたときに相手の作業ごと畳む
-  if (s.attachedOnly) return;
   // **ホストが終わっているなら繋ぎ直さない。** 戻る先が無いうえ、はしごを回すと
   // 「サーバーと繋がっていません」という嘘の理由を出すことになる
   if (s.endedByHost) return;

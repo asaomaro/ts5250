@@ -216,6 +216,35 @@ describe("古い接続の後始末", () => {
   });
 });
 
+describe("`closed` の意味を取り違えさせない（review ラウンド1）", () => {
+  /**
+   * `closed` は 2 つの出所から飛ぶ。**ホストが本当に終わった側だけ `ended` を立てる。**
+   *
+   * サーバーは心拍の死判定でも（＝猶予を張ったうえで）`dispose` の末尾から `closed` を送る。
+   * 区別しないと、片方向だけ詰まった回線のタブが「ホストが終わった」と読んで
+   * **二度と繋ぎ直さず、しかも嘘の理由を出す**。
+   */
+  it("ホスト側が終わったときは `ended: true` を立てる", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const first = await openNew(mgr);
+    // ホスト側の接続が終わった（transport が閉じた）
+    mgr.get(first.id).session.disconnect();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(first.sent.find((m) => m.type === "closed")).toMatchObject({ ended: true });
+  });
+
+  it("**この接続の後始末で送る `closed` には `ended` を付けない**（セッションは生きうる）", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const first = await openNew(mgr);
+    first.c.onSocketClose(); // 転送断＝猶予に入る
+    const closed = first.sent.find((m) => m.type === "closed") as { ended?: boolean } | undefined;
+    expect(closed).toBeTruthy();
+    expect(closed?.ended).toBeUndefined();
+    expect(mgr.isHeld(first.id)).toBe(true); // 実際、セッションは保持されている
+    mgr.closeAll();
+  });
+});
+
 describe("猶予の対象は 5250 表示セッションだけ（AC8）", () => {
   it("**非常駐プリンターは転送断でも即閉じる**（猶予に入れない）", async () => {
     const mgr = new InjectingManager(() => new ReplayTransport(signon()));

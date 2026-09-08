@@ -358,6 +358,8 @@ describe("転送断からの繋ぎ直し", () => {
 
     expect(s.connected).toBe(false); // 切れたことは見せる
     expect(s.reconnect).toBeUndefined();
+    // **黙って戻らない**——繋ぎ直さない枝はどれも案内を出す
+    expect(s.notice).toBe(MSG_CONNECTION_LOST);
     await runAttempt(60_000);
     expect(clients).toHaveLength(1); // `resume` を 1 通も出していない
   });
@@ -406,6 +408,24 @@ describe("転送断からの繋ぎ直し", () => {
     expect(clients[0]!.send).not.toHaveBeenCalled();
     expect(s.busy).toBeFalsy(); // 送った側が立てる busy が戻っていない
     expect(s.notice).toBe(MSG_NOT_CONNECTED);
+  });
+
+  /**
+   * **具体的な理由を打鍵 1 回で潰さない**（review ラウンド2）。
+   * 諦めた理由・猶予切れ・対象外の案内は、どれも汎用文より具体的。
+   */
+  it("繋ぎ直しを諦めた理由は、次の打鍵で上書きされない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+
+    sendKey("s1", "Enter");
+
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
   });
 
   it("繋がっていないあいだは送らず、**転送断だと言う**", async () => {
@@ -494,16 +514,25 @@ describe("転送断からの繋ぎ直し", () => {
     expect(inflight.close).toHaveBeenCalled();
   });
 
-  it("閉じたあとに `opened` が返っても、そのセッションを引き取らせない", async () => {
+  /**
+   * **利用者が閉じたら、飛行中の試行が引き取った座も返す**（review ラウンド1 の must、
+   * ラウンド2 で経路を修正）。
+   *
+   * サーバーは `open { resume }` を受けた時点で `cancelHold` と `claim` を済ませている。
+   * 口を黙って閉じるだけだと、**利用者が閉じたはずのセッションが猶予ぶん生き残る**。
+   *
+   * ラウンド1 のテストは `sessionsStore.remove` を直接呼んでいて `closeSession` を
+   * 通していなかったため、ラウンド2 で入れた `settled` ガードがこの経路を塞いでも
+   * 緑のままだった——**本物の入口から叩く**。
+   */
+  it("利用者が閉じたら、飛行中の試行にも close を送ってから畳む", async () => {
     await open();
     clients[0]!.handlers.onClose?.();
     await runAttempt(1_000);
     const inflight = clients[1]!;
-    sessionsStore.remove("s1"); // タブが先に消えた（`closeSession` の後半だけを再現）
 
-    inflight.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap(), pcCommand: false });
+    closeSession("s1");
 
-    // サーバー側は `cancelHold` + `claim` を済ませているので、こちらから畳まないと残る
     expect(inflight.send).toHaveBeenCalledWith({ type: "close" });
     expect(inflight.close).toHaveBeenCalled();
   });

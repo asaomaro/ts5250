@@ -17,7 +17,11 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
-import { SessionManager, DEFAULT_RECONNECT_GRACE_MS } from "../src/session-manager.js";
+import {
+  SessionManager,
+  DEFAULT_RECONNECT_GRACE_MS,
+  ORPHAN_IDLE_TIMEOUT_MS
+} from "../src/session-manager.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const signon = () =>
@@ -224,6 +228,34 @@ describe("猶予とアイドル上限の関係", () => {
     });
     mgr.holdForReconnect(entry.id);
     t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+});
+
+describe("猶予が明けたのに見ている人が居る場合（review ラウンド2）", () => {
+  /**
+   * **寿命なしで放流しない。**
+   *
+   * 猶予を解いただけだと、持ち主の居ない普通のセッションになる。見に来ただけの接続は
+   * `dispose` で閉じない側なので、その閲覧タブが去っても誰も畳まず、ブラウザ経路の
+   * 既定アイドル上限は `"never"`——枠と装置記述を握ったまま永久に残る。
+   */
+  it("猶予は解けるが、孤児回収のアイドル上限が付く", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id);
+    mgr.addViewer(entry.id);
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+
+    expect(mgr.size).toBe(1);
+    expect(mgr.isHeld(entry.id)).toBe(false);
+    // **永久には残さない**——持ち主が居ない点は MCP の放置セッションと同じ状態
+    expect(mgr.get(entry.id).idleTimeoutMs).toBe(ORPHAN_IDLE_TIMEOUT_MS);
+
+    t += ORPHAN_IDLE_TIMEOUT_MS + 1;
     sweep(mgr);
     expect(mgr.size).toBe(0);
   });
