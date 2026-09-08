@@ -67,3 +67,6 @@ events:
   - { ts: 2026-09-08T08:35:11Z, phase: review, event: debug, metrics: { stage: start, round: 1 } }
   - { ts: 2026-09-08T08:42:12Z, phase: review, event: debug, metrics: { stage: report, round: 1, category: logic, next_action: stop_for_human, confidence: high } }
   - { ts: 2026-09-08T09:29:42Z, phase: review, event: approved, metrics: { must: 4, should: 14, nit: 9, ac_total: 16, ac_covered: 16, tasks_no_ac: 0, tasks_ac_none: 1 } }
+  - { ts: 2026-09-08T09:30:55Z, phase: deliver, event: start }
+  - { ts: 2026-09-08T09:31:26Z, phase: deliver, event: approved, metrics: { files_changed: 20, insertions: 2979, deletions: 88 } }
+  - { ts: 2026-09-08T09:31:52Z, phase: review, event: debug, metrics: { stage: report, round: 1, category: logic, next_action: block, confidence: high } }
