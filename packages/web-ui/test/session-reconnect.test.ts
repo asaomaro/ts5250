@@ -1,0 +1,574 @@
+/**
+ * 転送が落ちたときの繋ぎ直し（`20260908-session-survives-disconnect`）。
+ *
+ * 実機で「応答待ちのローディングが解除されない／開き直すと前回セッションが閉じられた警告が出る」
+ * という報告が出た。サーバーは転送断でセッションをすぐ閉じず猶予として保持するようになったので、
+ * クライアントは**同じセッションへ繋ぎ直せる**。ここで固定するのは:
+ *
+ *   - 切れたら自動で繋ぎ直しに入り、`resume: true` を送ること
+ *   - 成功したら**口だけ差し替え、打ちかけの入力（`edits`）は残す**こと
+ *   - 「そのセッションはもう無い」と言われたら**再試行せず、押しても無駄なボタンも出さない**こと
+ *   - 転送が繋がらないまま尽きたときだけ**手動の繋ぎ直しを出す**こと
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ScreenSnapshot } from "@ts5250/tn5250";
+import { MSG_RECONNECT_GAVE_UP } from "../src/composables/opMessages.js";
+
+/** 生成された WsClient を順に捕まえる（1 本目＝最初の接続、2 本目以降＝繋ぎ直し） */
+interface Fake {
+  handlers: { onServerMessage: (m: unknown) => void; onClose?: () => void };
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  connectResult: Promise<void>;
+}
+let clients: Fake[] = [];
+let connectFails = false;
+
+vi.mock("../src/ws-client.js", () => ({
+  wsUrl: () => "ws://test/ws",
+  WsClient: class {
+    send = vi.fn();
+    close = vi.fn();
+    /** **自分の promise を持つ**（最後に作られたものを返すと、2 本作ってから繋ぐ形で崩れる） */
+    private readonly connectResult: Promise<void>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(_url: string, handlers: any) {
+      this.connectResult = connectFails ? Promise.reject(new Error("nope")) : Promise.resolve();
+      this.connectResult.catch(() => undefined); // 未処理の rejection にしない
+      clients.push({ handlers, send: this.send, close: this.close, connectResult: this.connectResult });
+    }
+    connect() {
+      return this.connectResult;
+    }
+    setHiddenIndexes() {}
+    setSessionId() {}
+  }
+}));
+
+import {
+  openSession,
+  sendKey,
+  retryReconnect,
+  closeSession,
+  submitGuiSelection
+} from "../src/session-controller.js";
+import { sessionsStore } from "../src/stores/sessions.js";
+import {
+  MSG_CONNECTION_LOST,
+  MSG_NOT_CONNECTED,
+  MSG_NO_RESPONSE,
+  MSG_SESSION_ENDED
+} from "../src/composables/opMessages.js";
+
+function snap(keyboardLocked = false): ScreenSnapshot {
+  return {
+    sessionId: "s1",
+    rows: 24,
+    cols: 80,
+    cursor: { row: 1, col: 1 },
+    keyboardLocked,
+    cells: [],
+    fields: []
+  } as unknown as ScreenSnapshot;
+}
+
+/** ゆらぎ（±20%）を消して、待ち時間を表どおりに進められるようにする */
+const noJitter = (): void => {
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+};
+
+/** 繋ぎ直しの待ちを 1 段ぶん進めて、その試行を走らせる */
+async function runAttempt(ms: number): Promise<void> {
+  await vi.advanceTimersByTimeAsync(ms);
+}
+
+describe("転送断からの繋ぎ直し", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    noJitter();
+    clients = [];
+    connectFails = false;
+    sessionsStore.byId.clear();
+    sessionsStore.order = [];
+  });
+  afterEach(() => {
+    // **モジュール側の待ち・飛行中の口を畳んでから次のテストへ。**
+    // `sessionsStore` を消すだけでは `reconnectTimers` / `pendingResumes` が残り、
+    // 次のテスト（同じ id `"s1"` を使う）が前のモックに `close()` を打つ
+    if (sessionsStore.get("s1")) closeSession("s1");
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function open() {
+    const p = openSession({ type: "open", host: "h" }, "t");
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    return sessionsStore.get("s1")!;
+  }
+
+  it("切れたら繋ぎ直しに入り、`resume: true` を送る", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+
+    await runAttempt(1_000);
+
+    expect(clients).toHaveLength(2);
+    expect(clients[1]!.send).toHaveBeenCalledWith({ type: "open", sessionId: "s1", resume: true });
+  });
+
+  it("**成功したら口だけ差し替え、セッションはそのまま続く**", async () => {
+    const s = await open();
+    const first = s.client;
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: snap(),
+      pcCommand: false
+    });
+
+    expect(s.connected).toBe(true);
+    expect(s.reconnect).toBeUndefined();
+    expect(s.client).not.toBe(first);
+    expect(sessionsStore.get("s1")).toBe(s); // 作り直していない（同じセッションの続き）
+  });
+
+  /**
+   * **打ちかけの入力は繋ぎ直しで捨てる**（`decisions.md` D11）。
+   *
+   * 設計の当初は「口だけ差し替えるので `edits` は残る」としていたが、繋ぎ直しで返るのは
+   * **留守中にホストが書いた「いまの画面」**で、こちらが打っていた画面とは限らない。
+   * 別の画面の欄へ打鍵を載せると、業務システムに**違う値を送ってしまう**。
+   * 残すより捨てるほうが安全側なので、既存の `updateScreen` の規則（新画面で差分を捨てる）に
+   * そのまま乗せている。
+   */
+  it("打ちかけの入力は捨てる（別の画面へ載せない）", async () => {
+    const s = await open();
+    s.edits.set(3, "ABC");
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: snap(),
+      pcCommand: false
+    });
+
+    expect(s.edits.size).toBe(0);
+  });
+
+  it("失敗したら間隔を空けて次を試す（1s → 2s → 4s …）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+
+    await runAttempt(1_000);
+    clients[1]!.handlers.onClose?.(); // 1 回目が繋がらなかった
+    expect(s.reconnect).toEqual({ attempt: 2, max: 5 });
+
+    await runAttempt(2_000);
+    expect(clients).toHaveLength(3);
+  });
+
+  it("**試行が尽きたら手動の繋ぎ直しを出す**（転送はいずれ戻りうる）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+
+    expect(s.reconnect).toBeUndefined();
+    expect(s.reconnectFailed).toBe("retry");
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+  });
+
+  it("手動の繋ぎ直しは、はしごを最初から回し直す", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+    expect(s.reconnectFailed).toBe("retry");
+
+    retryReconnect("s1");
+
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+    expect(s.reconnectFailed).toBeUndefined();
+  });
+
+  it("**押し直しを 2 回続けても止まらない**（連打・キーリピートで固まらない）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+    const before = clients.length;
+
+    retryReconnect("s1");
+    retryReconnect("s1");
+    await runAttempt(1_000);
+
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+    expect(clients.length).toBeGreaterThan(before); // 実際に試行が走っている
+  });
+
+  it("**「そのセッションはもう無い」なら再試行せず、ボタンも出さない**", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "error",
+      code: "SESSION_NOT_FOUND",
+      message: "session s1 not found"
+    });
+
+    expect(s.reconnect).toBeUndefined();
+    expect(s.reconnectFailed).toBe("gone"); // 手動ボタンは出さない側
+    expect(s.connected).toBe(false);
+    expect(clients[1]!.close).toHaveBeenCalled();
+
+    // **もう入り直さない**——押しても同じ理由で失敗するはしごを回さない。
+    // 待ちが畳まれただけではなく、**再入の口（元の接続の遅れた `close`）を叩いても
+    // 入らない**ことまで見る
+    const before = clients.length;
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(60_000);
+    expect(s.reconnect).toBeUndefined();
+    expect(clients).toHaveLength(before);
+  });
+
+  it("黙り込んだ試行は 10 秒で捨てる（誰も見ていない窓を作らない）", async () => {
+    await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    expect(clients).toHaveLength(2);
+
+    await runAttempt(10_000); // 応答が無いまま上限
+
+    expect(clients[1]!.close).toHaveBeenCalled();
+  });
+
+  /**
+   * **留守中にホストが書いた画面がそのまま出る**（AC3）。
+   * サーバーの `attach` は「いまの画面」を返すので、こちらは反映するだけでよい。
+   */
+  it("繋ぎ直したら、留守中にホストが書いた画面が出る", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const later = { ...snap(), cursor: { row: 7, col: 9 } };
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: later,
+      pcCommand: false
+    });
+
+    // reactive でラップされるので同一性ではなく値で見る
+    expect(s.snapshot).toStrictEqual(later);
+    expect(s.cursor).toEqual({ row: 7, col: 9 });
+  });
+
+  it("繋ぎ直しの `opened` から予約状態も取り込む（覆いが実態とずれない）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: snap(),
+      pcCommand: false,
+      reservedBy: "macro"
+    });
+
+    expect(s.reservedBy).toBe("macro");
+  });
+
+  /**
+   * **消える向きも見る。** 留守中に予約が解除されていたのに取り込まないと、
+   * 覆いが残ったまま打てなくなる（次の `reserved` push まで復帰できない）。
+   */
+  it("留守中に予約が解除されていたら、繋ぎ直しで覆いも外れる", async () => {
+    const s = await open();
+    sessionsStore.setReserved("s1", "macro");
+    expect(s.reservedBy).toBe("macro");
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: snap(),
+      pcCommand: false
+      // reservedBy 無し＝もう予約されていない
+    });
+
+    expect(s.reservedBy).toBeUndefined();
+  });
+
+  /**
+   * **3270 は繋ぎ直しの対象外**（`decisions.md` D3）。
+   *
+   * 3270 は 5250 と同じ `openSession` で開かれるので `kind` が付かない。素通しすると
+   * `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗し、「再接続中」を見せた末に
+   * 生のエラー文が出る。**それでも応答待ちは解けていなければならない**。
+   */
+  it("3270 は繋ぎ直さないが、待ちは解けて切断になり、**理由も出る**", async () => {
+    const p = openSession({ type: "open", host: "h" }, "t", { terminal: "3270" });
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    const s = sessionsStore.get("s1")!;
+    sendKey("s1", "Enter");
+    expect(s.busy).toBe(true);
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.busy).toBe(false);
+    expect(s.connected).toBe(false);
+    expect(s.reconnect).toBeUndefined();
+    // **黙って切らない**——開き直す以外に手が無いことを言う
+    expect(s.notice).toBe(MSG_CONNECTION_LOST);
+    await runAttempt(60_000);
+    expect(clients).toHaveLength(1); // 試行を 1 回も出していない
+  });
+
+  /**
+   * **見に来ただけのタブは持ち主にならない**（`decisions.md` D4）。
+   *
+   * MCP / HLLAPI が開いた画面を後から覗くタブが瞬断で `resume` を送ると、座を引き取って
+   * しまう。次にそのタブを閉じたときに**相手の作業ごと畳む**ことになる。
+   */
+  it("既存セッションへ繋いだだけのタブは、繋ぎ直しに行かない", async () => {
+    const p = openSession({ type: "open", sessionId: "s1" }, "t");
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    const s = sessionsStore.get("s1")!;
+    expect(s.attachedOnly).toBe(true);
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.connected).toBe(false); // 切れたことは見せる
+    expect(s.reconnect).toBeUndefined();
+    // **黙って戻らない**——繋ぎ直さない枝はどれも案内を出す
+    expect(s.notice).toBe(MSG_CONNECTION_LOST);
+    await runAttempt(60_000);
+    expect(clients).toHaveLength(1); // `resume` を 1 通も出していない
+  });
+
+  /**
+   * **ホストが終わったあとに転送も落ちても、繋ぎ直さない。**
+   * 戻る先が無いうえ、はしごを回すと「サーバーと繋がっていません」という嘘の理由が出る。
+   */
+  it("ホスト側が終わっているセッションは繋ぎ直さない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed", ended: true });
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.reconnect).toBeUndefined();
+    sendKey("s1", "Enter");
+    expect(s.notice).toBe(MSG_SESSION_ENDED);
+  });
+
+  /**
+   * **サーバーの後始末の `closed` を「ホストが終わった」と読まない**（review ラウンド1）。
+   *
+   * サーバーは心拍の死判定でも（＝猶予を張ったうえで）`dispose` の末尾から `closed` を送る。
+   * 片方向だけ詰まった回線やスリープ復帰のタブがそれを受け取ると、無条件に立てる実装では
+   * **二度と繋ぎ直さず、しかも「セッションは終了しています」と嘘の理由**を出していた。
+   */
+  it("`ended` の無い `closed`（サーバーの後始末）では繋ぎ直しを止めない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "heartbeat timeout" });
+    expect(s.endedByHost).toBeFalsy();
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+    await runAttempt(1_000);
+    expect(clients[1]!.send).toHaveBeenCalledWith({ type: "open", sessionId: "s1", resume: true });
+  });
+
+  it("**送信の口はどれも繋がっていなければ止める**（GUI 選択で覆いが戻らない）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    clients[0]!.send.mockClear();
+
+    submitGuiSelection("s1", 1);
+
+    expect(clients[0]!.send).not.toHaveBeenCalled();
+    expect(s.busy).toBeFalsy(); // 送った側が立てる busy が戻っていない
+    expect(s.notice).toBe(MSG_NOT_CONNECTED);
+  });
+
+  /**
+   * **具体的な理由を打鍵 1 回で潰さない**（review ラウンド2）。
+   * 諦めた理由・猶予切れ・対象外の案内は、どれも汎用文より具体的。
+   */
+  it("繋ぎ直しを諦めた理由は、次の打鍵で上書きされない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+
+    sendKey("s1", "Enter");
+
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+  });
+
+  /**
+   * **切断より前の通知が居座って、切断の理由が出ないことがあってはならない**（review ラウンド3）。
+   * 守りたいのは「この切断について出した理由」であって、「何か出ていれば残す」ではない。
+   */
+  it("切断より前の通知は捨てて、切断の理由を出す", async () => {
+    const s = await open();
+    // ホスト無応答の通知が出ている状態から切れる
+    clients[0]!.handlers.onServerMessage({ type: "key-done", screen: snap(), timedOut: true });
+    expect(s.notice).toBe(MSG_NO_RESPONSE);
+
+    clients[0]!.handlers.onClose?.();
+    sendKey("s1", "Enter");
+
+    expect(s.notice).toBe(MSG_NOT_CONNECTED);
+  });
+
+  /**
+   * **打ち切った試行の口が、生きているセッションを書き換えない**（review ラウンド3）。
+   * `screen` は `updateScreen` が `connected = true` を立てるので、素通しすると
+   * はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる。
+   */
+  it("打ち切った試行から遅れて届いた画面で、接続中に戻らない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const stale = clients[1]!;
+    stale.handlers.onClose?.(); // この試行は失敗＝打ち切り
+    expect(s.connected).toBe(false);
+
+    stale.handlers.onServerMessage({ type: "screen", screen: snap() });
+
+    expect(s.connected).toBe(false);
+  });
+
+  it("繋がっていないあいだは送らず、**転送断だと言う**", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    clients[0]!.send.mockClear();
+
+    sendKey("s1", "Enter");
+
+    expect(clients[0]!.send).not.toHaveBeenCalled();
+    expect(s.notice).toBe(MSG_NOT_CONNECTED);
+  });
+
+  /**
+   * **理由を取り違えない。** `connected` は転送が落ちたときにも、ホスト側のセッションが
+   * 終わったとき（サーバー発 `closed`）にも落ちる。後者では転送は生きているので
+   * 「サーバーと繋がっていない」は嘘になる。
+   */
+  it("ホスト側が終わっている場合は、転送断とは別の理由を言う", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed", ended: true });
+    expect(s.connected).toBe(false);
+    expect(s.reconnect).toBeUndefined(); // 繋ぎ直しには入っていない
+
+    sendKey("s1", "Enter");
+
+    expect(s.notice).toBe(MSG_SESSION_ENDED);
+  });
+
+  /**
+   * **走っている最中の切断通知でやり直さない。**
+   *
+   * 古い口の `close` イベントは、既に次の試行が飛んだあとに遅れて届くことがある。
+   * そこで入り直すと、**飛行中の試行を畳んではしごを頭から回す**——繋がりかけていた
+   * ものを自分で切ることになる。
+   */
+  it("**二重に走らせない**（遅れて来た切断通知が、飛行中の試行を畳まない）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    expect(clients).toHaveLength(2);
+
+    clients[0]!.handlers.onClose?.(); // 古い口の通知が遅れて届いた
+
+    expect(clients[1]!.close).not.toHaveBeenCalled();
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+  });
+
+  it("**そもそも開けない場合も次の間隔へ回す**（サーバー再起動中の典型）", async () => {
+    const s = await open();
+    connectFails = true;
+    clients[0]!.handlers.onClose?.();
+
+    await runAttempt(1_000);
+
+    expect(s.reconnect).toEqual({ attempt: 2, max: 5 });
+  });
+
+  it("繋ぎ直しの `opened` から PC コマンドの履歴とジョブも取り込む", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: snap(),
+      pcCommand: true,
+      pcCommands: [{ at: 1, command: "WRKACTJOB", wait: false, hostname: "pc" }],
+      job: { name: "WEBEMU01", user: "TANAKA" }
+    });
+
+    expect(s.pcCommandEnabled).toBe(true);
+    expect(s.pcCommands).toHaveLength(1);
+    expect(s.job?.name).toBe("WEBEMU01");
+  });
+
+  it("**利用者が閉じたら、飛行中の繋ぎ直しも畳む**（持ち主不在のセッションを残さない）", async () => {
+    await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const inflight = clients[1]!;
+
+    closeSession("s1");
+
+    expect(inflight.close).toHaveBeenCalled();
+  });
+
+  /**
+   * **利用者が閉じたら、飛行中の試行が引き取った座も返す**（review ラウンド1 の must、
+   * ラウンド2 で経路を修正）。
+   *
+   * サーバーは `open { resume }` を受けた時点で `cancelHold` と `claim` を済ませている。
+   * 口を黙って閉じるだけだと、**利用者が閉じたはずのセッションが猶予ぶん生き残る**。
+   *
+   * ラウンド1 のテストは `sessionsStore.remove` を直接呼んでいて `closeSession` を
+   * 通していなかったため、ラウンド2 で入れた `settled` ガードがこの経路を塞いでも
+   * 緑のままだった——**本物の入口から叩く**。
+   */
+  it("利用者が閉じたら、飛行中の試行にも close を送ってから畳む", async () => {
+    await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const inflight = clients[1]!;
+
+    closeSession("s1");
+
+    expect(inflight.send).toHaveBeenCalledWith({ type: "close" });
+    expect(inflight.close).toHaveBeenCalled();
+  });
+});

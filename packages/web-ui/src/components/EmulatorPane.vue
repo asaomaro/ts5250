@@ -19,6 +19,7 @@ import {
   selectGuiChoice,
   submitGuiSelection,
   noteActivity,
+  retryReconnect,
   breakReservation as breakReservationFor
 } from "../session-controller.js";
 import { play } from "../macro-engine.js";
@@ -1064,6 +1065,7 @@ function onWheel(ev: WheelEvent): void {
       @toggle-log="logOpen = !logOpen"
       @sysreq="onAid('SysReq')"
       @combo="onPaletteKey"
+      @reconnect="retryReconnect(sessionId)"
     />
   </div>
 </template>

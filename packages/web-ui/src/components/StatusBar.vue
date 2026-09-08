@@ -4,6 +4,7 @@ import type { AidKey } from "@ts5250/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
 import { fieldAt } from "../composables/useCursor.js";
+import { MSG_RECONNECT_RETRY } from "../composables/opMessages.js";
 
 const props = defineProps<{
   state: SessionState;
@@ -28,6 +29,8 @@ const emit = defineEmits<{
    * ——ボタン専用の対応表を別に持つと、設定を変えたときに片方だけ古くなる。
    */
   (e: "combo", ev: { key: string; ctrlKey?: boolean; altKey?: boolean }): void;
+  /** 手動の繋ぎ直し（自動の再試行が尽きたとき） */
+  (e: "reconnect"): void;
 }>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
@@ -43,6 +46,11 @@ const snap = computed(() => props.state.snapshot);
  * 5250 の OIA と同じく、**いまその位置に打てるか**を示す。
  */
 const inputState = computed<{ label: string; ok: boolean }>(() => {
+  // **繋ぎ直している最中は「切断」より先に出す**（`20260908-session-survives-disconnect`）。
+  // どちらも `connected === false` だが、**利用者にとっては別の状態**——
+  // 「切れた（何か操作が要る）」と「戻そうとしている（待てばよい）」を混ぜない
+  const rc = props.state.reconnect;
+  if (rc) return { label: `再接続中 (${rc.attempt}/${rc.max})`, ok: false };
   if (!props.state.connected) return { label: "切断", ok: false };
   if (props.state.readOnly) return { label: "閲覧のみ", ok: false };
   // **予約は readOnly より先に出さない**——閲覧専用は待っても変わらないが、
@@ -190,9 +198,33 @@ const macroStop = computed<string | undefined>(() => {
            並べると揃って見えない。利用者の指摘）。`SqlPane` の「実行ログ」も同じ -->
       {{ logOpen ? "▼" : "▲" }} ログ <span class="cnt">{{ logCount }}</span>
     </button>
-    <span class="ime" :class="{ ng: !inputState.ok }" :title="inputState.ok ? 'この位置に入力できます' : '入力できません'">
+    <!--
+      **再接続の表示は覆わない・奪わない。** `role="status"`（マクロ状態と同じ）で
+      読み上げには載せるが、フォーカスは動かさない——奪うと打鍵が画面へ届かなくなる
+      （`20260908-session-survives-disconnect` AC-I1 / AC-I4）。
+    -->
+    <span
+      class="ime"
+      :class="{ ng: !inputState.ok }"
+      :role="state.reconnect ? 'status' : undefined"
+      :title="inputState.ok ? 'この位置に入力できます' : '入力できません'"
+    >
       ⌨ {{ inputState.label }}
     </span>
+    <!--
+      **手動の繋ぎ直しは、押して意味があるときだけ出す。** 猶予切れ（`"gone"`）では
+      押しても同じ理由で失敗するので出さない。素の `<button>` なので
+      フォーカス移動＋Enter で押せる（AC-I2 / AC-I3）。
+    -->
+    <button
+      v-if="state.reconnectFailed === 'retry'"
+      class="fk retry"
+      title="サーバーへの繋ぎ直しをもう一度試します"
+      @click="emit('reconnect')"
+      @keydown.enter.stop
+    >
+      ↻ {{ MSG_RECONNECT_RETRY }}
+    </button>
     <span v-if="cur" class="pos" title="カーソル位置（行/列）">
       <b>{{ String(cur.row).padStart(2, "0") }}/{{ String(cur.col).padStart(3, "0") }}</b>
     </span>
@@ -456,5 +488,21 @@ const macroStop = computed<string | undefined>(() => {
 .fk:hover {
   color: var(--t-green);
   border-color: var(--t-green);
+}
+/* 手動の繋ぎ直しは `.fk` の意匠に乗せる（フッターのボタンは 1 系統に揃える。
+   `docs/UI-DESIGN.md`）。色は配色変数から採り、生色を書かない */
+/* **繋ぎ直しは `.fk` の意匠に乗せる**（UI-DESIGN「ボタン意匠（面の系統に合わせる）」）。
+   ここは CRT ペインの面なので、クローム側の `--accent` を持ち込むと系統が混ざり、
+   端末スキンと別々に動くぶん配色の当てが外れる。
+   **注意を引く色は端末パレットから採る**——押さないと戻らない状態なので、
+   他の `.fk` に埋もれない黄にする（`20260908-session-survives-disconnect` AC-I2）。 */
+.retry {
+  color: var(--t-yellow);
+  border-color: var(--t-yellow);
+}
+.retry:hover {
+  color: var(--crt);
+  background: var(--t-yellow);
+  border-color: var(--t-yellow);
 }
 </style>

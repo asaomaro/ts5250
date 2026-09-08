@@ -22,8 +22,11 @@ const fixtureDir = join(here, "..", "..", "tn5250", "test", "fixtures");
 const signon = () => parseTraceJsonl(readFileSync(join(fixtureDir, "pub400-signon.jsonl"), "utf8"));
 
 class InjectingManager extends SessionManager {
-  constructor(private readonly makeTransport: () => Transport) {
-    super();
+  constructor(
+    private readonly makeTransport: () => Transport,
+    opts?: ConstructorParameters<typeof SessionManager>[0]
+  ) {
+    super(opts);
   }
   override open(opts: Parameters<SessionManager["open"]>[0]) {
     return super.open({ ...opts, transport: this.makeTransport() });
@@ -126,8 +129,25 @@ describe("既存セッションへの attach", () => {
     mgr.closeAll();
   });
 
-  it("最後の 1 つが閉じればセッションも閉じる（従来どおり）", async () => {
+  /**
+   * **最後の 1 つが「落ちた」のと「閉じた」のは別物**
+   * （`20260908-session-survives-disconnect`）。
+   *
+   * 以前はどちらもその場でセッションを閉じていた。回線が一瞬落ちただけでホストの
+   * 対話ジョブまで失われるため、転送断は猶予に入れて繋ぎ直しを待つようにした。
+   */
+  it("最後の 1 つが転送断で落ちたら、猶予のあいだ残る", async () => {
     const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const first = await openNew(mgr);
+    first.c.onSocketClose();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mgr.size).toBe(1);
+    expect(mgr.isHeld(first.id)).toBe(true);
+    mgr.closeAll();
+  });
+
+  it("猶予を無効にすれば従来どおり即座に閉じる", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()), { reconnectGraceMs: 0 });
     const first = await openNew(mgr);
     first.c.onSocketClose();
     await new Promise((r) => setTimeout(r, 20));

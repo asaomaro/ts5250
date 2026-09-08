@@ -21,6 +21,18 @@ export interface WsOpen {
    * これを指定したときは他の接続指定（`system` / `host` 等）を見ない。
    */
   sessionId?: string;
+  /**
+   * **持ち主として戻る**（`sessionId` と併用したときだけ意味を持つ。
+   * `20260908-session-survives-disconnect` decisions D4）。
+   *
+   * 転送が落ちて猶予に入っているセッションを引き取り、**閉じる責任も引き継ぐ**。
+   * 既定（`false`）は従来の attach——「見に来ただけ」なので、去ってもセッションを閉じない。
+   *
+   * **意味を分けているのは、閉じる責任が逆だから。** MCP が開いた画面をブラウザで覗く
+   * 既存の使い方（見に来た人は相手の作業を殺さない）を保ったまま、回線が落ちて戻ってきた
+   * 持ち主だけがセッションを畳めるようにする。
+   */
+  resume?: boolean;
   /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
   kind?: "display" | "printer";
   /**
@@ -339,6 +351,22 @@ export interface WsError {
 export interface WsClosed {
   type: "closed";
   reason: string;
+  /**
+   * **ホスト側のセッションが本当に終わったか**（`20260908-session-survives-disconnect`）。
+   *
+   * `closed` は 2 つの出所から飛ぶ:
+   *   - ホストとの接続が終わった（`session.on("closed")` / VT の `closeSubscribers`）→ **`true`**
+   *   - この WS 接続の後始末（`dispose`）→ **付けない**。セッションは猶予として
+   *     生きていることも、他のタブが見ていることもある
+   *
+   * **区別しないと繋ぎ直しが死ぬ。** サーバーは心拍の死判定でも（＝猶予を張ったうえで）
+   * `dispose` の末尾から `closed` を送る。片方向だけ詰まった回線やスリープ復帰の
+   * タブがそれを受け取り、「ホストが終わった」と読むと**二度と繋ぎ直さず、
+   * しかも嘘の理由を出す**（実際はサーバーが保持中）。
+   *
+   * 省略されたら「分からない」＝繋ぎ直しを止める理由にはしない（古いサーバーとの互換）。
+   */
+  ended?: boolean;
 }
 /** 出力（PDF 保存・自動印刷）の警告 1 件 */
 export interface PrinterOutputWarning {

@@ -142,6 +142,15 @@ export class WsConnection {
   private attached = false;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * **このセッションの持ち主としての印**
+   * （`SessionManager.claim`。`20260908-session-survives-disconnect` decisions D7）。
+   *
+   * 後始末（`dispose`）の前に「まだ自分が持ち主か」を確かめるために持つ。半開きの回線では
+   * クライアントが先に見切って繋ぎ直すので、**古いこのハンドラが後から後始末に入ったとき、
+   * 既に別の接続が引き取っている**ことがある。印が無いと、そこで復帰済みのセッションを閉じる。
+   */
+  private holderToken: number | undefined;
   /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
   private detachWatch: (() => void) | undefined;
   /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
@@ -245,7 +254,9 @@ export class WsConnection {
 
   /** WebSocket 切断時に呼ぶ（セッションを破棄） */
   onSocketClose(): void {
-    this.dispose("websocket closed");
+    // **意図しない切断**。利用者が閉じた（`close` メッセージ）のとは別物として扱う
+    // ——こちらだけが繋ぎ直しの猶予に値する（`20260908-session-survives-disconnect` decisions D5）
+    this.dispose("websocket closed", { transportLost: true });
   }
 
   /**
@@ -443,7 +454,7 @@ export class WsConnection {
         // 半開き（TCP は死んでいるのに close イベントが来ない）。send はローカルで成功するので
         // 送信の失敗では気づけない。ここで自分から畳む
         wsLog.warn({ sessionId: this.sessionId }, "no client response; closing half-open websocket");
-        this.dispose("heartbeat timeout");
+        this.dispose("heartbeat timeout", { transportLost: true });
         this.ws.close();
         return;
       }
@@ -468,7 +479,7 @@ export class WsConnection {
     if (msg.terminal === "vt") return this.onOpenVt(msg);
     await withAudit({ op: "ws_open" }, async () => {
       // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
-      if (msg.sessionId !== undefined) return this.attach(msg.sessionId);
+      if (msg.sessionId !== undefined) return this.attach(msg.sessionId, { resume: msg.resume === true });
       // 保存済み設定（system / session）か、ブラウザ直指定か。解決は ConfigResolver に一本化されている
       let opts: OpenOptions;
       if (hasRef(msg)) {
@@ -484,6 +495,7 @@ export class WsConnection {
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
       this.sessionId = entry.id;
+      this.holderToken = this.deps.sessions.claim(entry.id);
       this.startHeartbeat();
       this.subscribeSession(entry);
       this.send({
@@ -615,7 +627,8 @@ export class WsConnection {
         this.send({ type: "vt-frame", frame: echoChanged ? { ...frame, hostEchoes: echo } : frame });
       };
       const pushTitle = (title: string): void => this.send({ type: "vt-title", title });
-      const pushClose = (reason: string): void => this.send({ type: "closed", reason });
+      // VT もホスト側が終わった通知（`dispose` の後始末とは別物）
+      const pushClose = (reason: string): void => this.send({ type: "closed", reason, ended: true });
       entry.subscribers.add(push);
       entry.titleSubscribers.add(pushTitle);
       entry.closeSubscribers.add(pushClose);
@@ -769,6 +782,7 @@ export class WsConnection {
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.openPrinter(opts);
       this.sessionId = entry.id;
+      this.holderToken = this.deps.sessions.claim(entry.id);
       this.startHeartbeat();
       const onReport = (r: StoredReport): void =>
         this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) });
@@ -845,7 +859,9 @@ export class WsConnection {
     const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
     entry.session.on("screen", onScreen);
     entry.session.on("closed", (reason: string) => {
-      this.send({ type: "closed", reason });
+      // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
+      // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+      this.send({ type: "closed", reason, ended: true });
       this.detachScreen?.();
     });
     // PC コマンド（STRPCCMD）の実行状況を push。切断で購読を外す（リーク防止）。
@@ -873,16 +889,32 @@ export class WsConnection {
    * **既存のセッションへ繋ぐ**（新規に開かない）。
    *
    * MCP や HLLAPI が開いた画面を、あとからブラウザで見るための経路。
-   * **状態を変えない**——繋ぎ直しただけで勝手に何かを再開しない
+   * 既定（`resume` なし）は**状態を変えない**——繋ぎ直しただけで勝手に何かを再開しない
    * （プリンターの `20260801-printer-attach-by-ref` と同じ判断）。
+   *
+   * **`resume: true` だけは状態を変える**（`20260908-session-survives-disconnect` D4）:
+   * 猶予を解き、持ち主の座を引き取る。「見に来た人」ではなく「回線が落ちて戻ってきた
+   * 持ち主」なので、去るときにセッションを畳む責任も持つ。
    *
    * 「存在し、自分のものか」の判定は **`sessions.get(id, user)` に任せる**。
    * 画面側だけで見ると、リロード直後はまだ一覧が届いておらずすり抜ける。
+   *
+   * **この経路に来るのは 5250 表示セッションだけ**——`kind: "printer"` と
+   * `terminal: "3270" | "vt"` は `onOpen` の手前で振り分けられ、`sessionId` ごと見られない。
+   * `sessionId` の無い `resume: true` も同じく無視される（新規 open として扱う）。
    */
-  private attach(sessionId: string): void {
+  private attach(sessionId: string, opts?: { resume?: boolean }): void {
     const entry = this.deps.sessions.get(sessionId, this.user); // 無ければ／他人のものなら例外
     this.sessionId = entry.id;
-    this.attached = true;
+    if (opts?.resume === true) {
+      // **持ち主として戻る**（`20260908-session-survives-disconnect` decisions D4）。
+      // `attached` を立てない＝去るときにこの接続がセッションを畳む。猶予も解く
+      // ——ここで解かないと、繋ぎ直した直後に元の期限で足元から閉じられる
+      this.deps.sessions.cancelHold(entry.id);
+      this.holderToken = this.deps.sessions.claim(entry.id);
+    } else {
+      this.attached = true;
+    }
     this.startHeartbeat();
     this.subscribeSession(entry);
     this.send({
@@ -1049,7 +1081,7 @@ export class WsConnection {
     return this.sessionId;
   }
 
-  private dispose(reason: string): void {
+  private dispose(reason: string, opts?: { transportLost?: boolean }): void {
     this.stopHeartbeat();
     // **監視は止めない。** 購読を外すだけ——監視はレジストリが所有しており、
     // ブラウザを閉じても続くことが要件（research F1）
@@ -1086,12 +1118,38 @@ export class WsConnection {
       //
       // 自分が開いたタブでも、**他に見ている人が残っていれば閉じない**
       // （後から繋いだタブが残っているのに画面が消える、を避ける）
+      // **座は無条件に返す**（閉じるかどうかとは別）。この接続はもう居ないのだから、
+      // 持ち主のままにしておくと、**残った接続が「持ち主が居る」と読んで誰も閉じなくなる**。
+      // 3 判断の内側で返していた頃は、他に見ている人が居る経路で返し損ねて孤児になった
+      // （`20260908-session-survives-disconnect` decisions D7 / D10）
+      const wasHolder = this.deps.sessions.releaseHolder(this.sessionId, this.holderToken);
       const otherViewers = this.deps.sessions.hasViewer(this.sessionId);
       if (!this.attached && !otherViewers && !this.deps.sessions.isResident(this.sessionId)) {
-        void this.deps.sessions.close(this.sessionId).catch(() => {});
+        // 半開きでは、クライアントが先に見切って繋ぎ直したあとに古いこのハンドラが
+        // （心拍の死判定で）ここへ来る。そのまま閉じると**復帰済みのセッションを殺す**。
+        // かといって「交代済みなら何もしない」だけでは、**新しい持ち主が先に去った場合に
+        // 誰も閉じない**。だから見るのは 2 つ——自分が持ち主だったかと、いま持ち主が居るか。
+        const abandoned = !this.deps.sessions.hasHolder(this.sessionId);
+        if (!wasHolder && !abandoned) {
+          // 交代済みで、相手がまだ居る。閉じも猶予もしない
+        } else if (opts?.transportLost === true) {
+          // **回線が落ちただけなら少し待つ。** ホストの対話ジョブは画面遷移の途中状態を
+          // 持つので、掛け直せるなら掛け直させる（`20260908-session-survives-disconnect` decisions D5）。
+          // `holdForReconnect` の `false` は「閉じてよい」ではない——既に猶予中の場合も
+          // 含むので、`isHeld` と併せて見る
+          const held = this.deps.sessions.holdForReconnect(this.sessionId);
+          if (!held && !this.deps.sessions.isHeld(this.sessionId)) {
+            void this.deps.sessions.close(this.sessionId).catch(() => {});
+          }
+        } else {
+          void this.deps.sessions.close(this.sessionId).catch(() => {});
+        }
       }
       this.sessionId = undefined;
+      this.holderToken = undefined;
     }
+    // **`ended` は付けない。** ここはこの WS 接続の後始末で、セッションは猶予として
+    // 生きていることも、他のタブが見ていることもある（`WsClosed.ended` の注記）
     this.send({ type: "closed", reason });
   }
 

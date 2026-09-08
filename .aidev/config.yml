@@ -1,0 +1,6 @@
+# aidev（開発ワークフロー）の PJ 設定。
+#
+# smokeCommand: **ビルドした成果物が「最初の使える状態」まで到達するか**を確かめる。
+# 単体テストが緑でも配線が壊れて起動しないことは起きるので、テストとは別に見る。
+# 実体は launcher/smoke.mjs（サーバーを起こして /healthz と / を叩き、必ず終わる）。
+smokeCommand: node launcher/smoke.mjs

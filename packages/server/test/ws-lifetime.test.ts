@@ -164,7 +164,10 @@ describe("ハートビート", () => {
     }
   });
 
-  it("応答が無いまま deadMs を超えたら破棄して socket を閉じる", async () => {
+  // **猶予に入るのは「セッション」だけ**（`20260908-session-survives-disconnect`）。
+  // 半開きと判断した接続は今までどおり畳み、`closed` も返す——変わったのは
+  // ホストとのセッションを即座に切らなくなったこと
+  it("応答が無いまま deadMs を超えたら socket を閉じる（セッションは猶予に入る）", async () => {
     vi.useFakeTimers();
     try {
       let t = 0;
@@ -178,7 +181,10 @@ describe("ハートビート", () => {
       }
       expect(sent.at(-1)).toMatchObject({ type: "closed", reason: "heartbeat timeout" });
       expect(isClosed()).toBe(true);
-      expect(mgr.size).toBe(0);
+      // 残っているだけでなく、**猶予として**残っていることまで見る
+      expect(mgr.size).toBe(1);
+      expect([...(mgr as unknown as { sessions: Map<string, unknown> }).sessions.keys()].some((k) => mgr.isHeld(k))).toBe(true);
+      mgr.closeAll();
     } finally {
       vi.useRealTimers();
     }

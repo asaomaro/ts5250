@@ -80,12 +80,21 @@ describe("WsConnection", () => {
     expect(mgr.size).toBe(0);
   });
 
-  it("onSocketClose でセッションが破棄される", async () => {
-    const { conn, mgr } = setup();
+  /**
+   * **転送断は「利用者が閉じた」と別扱い**（`20260908-session-survives-disconnect`）。
+   * 上の `close` は即座に破棄されるのに対し、こちらは猶予に入って繋ぎ直しを待つ。
+   */
+  it("onSocketClose では猶予に入り、すぐには破棄されない", async () => {
+    const { conn, sent, mgr } = setup();
     await conn.handle(JSON.stringify({ type: "open", host: "h" }));
     expect(mgr.size).toBe(1);
+    const id = (sent[0] as { sessionId: string }).sessionId;
     conn.onSocketClose();
-    expect(mgr.size).toBe(0);
+    // **「残っている」だけでは足りない。** 保持者の照合が誤って false になると
+    // 「閉じも猶予もしない＝永久に残る」に退行し、size だけ見る検査は緑のまま通る
+    expect(mgr.size).toBe(1);
+    expect(mgr.isHeld(id)).toBe(true);
+    mgr.closeAll();
   });
 });
 
