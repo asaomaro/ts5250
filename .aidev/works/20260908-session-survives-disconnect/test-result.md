@@ -8,7 +8,7 @@
 - `npx vue-tsc -b --force`（web-ui。`tsconfig.test.json` 込みのクリーン型検査） — 成功
 - `npm test`（各ワークスペースの test スクリプト） — **4361 passed / 0 failed / 41 skipped**（exit 0）
   - `packages/server` — 1335 passed / 3 skipped
-  - `packages/web-ui` — 1977 passed
+  - `packages/web-ui` — 1977 passed（`--maxWorkers=2` でも 1977 passed / exit 0）
   - `packages/tn5250` — 584 passed
   - `packages/tn3270` — 254 passed / 38 skipped
   - `packages/vt` — 202 passed
@@ -119,5 +119,11 @@ SIGTERM で素直に終わるところまで見て必ず終了する。
   本件と無関係の既存分。green だが**全数検証ではない**。
 - **並行実行時のフレーク 1 件**: `packages/web-ui/test/tab-visibility.test.ts` の
   「全タブを畳んでもワークスペースに居られ、バッジは全数を出す」が、全ファイル並行実行時に
-  5 秒のタイムアウトで落ちることがある（単体実行では 8/8 通る）。**本件の変更とは無関係**で、
-  coding 前から同じ振る舞い。retro の候補として残す。
+  5 秒のタイムアウトで落ちることがある。**本件の変更とは無関係**で、切り分けの根拠は 3 つ:
+  - 単体実行では通る（8/8）。
+  - **ワーカー数を絞れば全件通る**（`npx vitest run --maxWorkers=2` で 1977 passed / exit 0）。
+  - この環境はメモリ 7.7GB で、既定の並列度だと逼迫する（同じスイートを 3 連続で流したら
+    **OS がメモリ不足でプロセスを落とした**）。落ちるのは 5 秒のタイムアウトで、
+    アサーションの失敗ではない。
+  つまり原因は**実行環境の負荷**であって実装ではない。CI の並列度かこのテストのタイムアウトを
+  見直す価値はあるので、retro の候補として残す。

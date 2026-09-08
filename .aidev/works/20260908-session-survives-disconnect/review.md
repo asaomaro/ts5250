@@ -232,3 +232,64 @@
   止めたはずのはしごを 1 段書き戻す / 対応: 修正済（打ち切りの手も一緒に持つ）
 - [nit][conv:-] `connected === false` の理由の持ち主が割れており、ホスト終了後に転送も落ちると
   `sendKey` が嘘の理由を出す / 対応: 修正済（`endedByHost` を足して出し分ける。decisions D13）
+
+## ラウンド 1（2026-09-08T07:35:22Z）
+
+**差分**: main からの 4 コミット / 20 ファイル / +2518 −86。coding 中のタスク点検 13 ラウンド
+（指摘 84 件）とクロス点検（7 件）で潰した分は**再掲していない**。
+
+- [must][conv:agents!] `launcher/smoke.mjs` が `console.*` を 4 箇所で使っており、
+  **`npx eslint .` が error 4 件で落ちる**（AGENTS.md「`console.*` は lint で禁止」。
+  隣の `launcher/preflight.mjs` は同じ用途で `process.stderr.write` を使っている）。
+  `.aidev/config.yml` から毎回叩かれる新規スクリプトなので CI が必ず赤くなる /
+  対応: 差し戻し
+- [must][conv:-] **アイドル上限を有限に設定した環境で、猶予が丸ごと無効になる**。
+  `sweepIdle` の `expired()` は `lastActivity` を見るが、切断後は誰も進めない。
+  上限が 1 分の設定なら、90 秒の猶予中に `expired()` が先に真になってセッションを切る。
+  `heldUntil` は刈り取り条件に OR で足しただけで、`expired()` を抑止していない /
+  対応: 差し戻し
+- [must][conv:-] **サーバーの `closed` を無条件に「ホストが終わった」と読んでいる**。
+  `dispose` は**心拍の死判定で猶予を張ったあとにも** `closed` を送る（末尾で必ず送る）。
+  片方向だけ詰まった回線やスリープ復帰でこれを受け取ったタブは `endedByHost` が立ち、
+  **二度と繋ぎ直さず**、次の打鍵で「セッションは終了しています」という**嘘の理由**を出す
+  （実際はサーバーが 90 秒保持中）。`endedByHost` を落とす経路も無い /
+  対応: 差し戻し
+- [should][conv:-] 打ち切り `"gone"` の通知が**生の英語＋セッション UUID** になる
+  （`SESSION_NOT_FOUND` / `FORBIDDEN` が `NOTICE_BY_ERROR` に無く、`wsErrorNotice` が
+  「エラー: session 3f2a…-… not found」を返す）。猶予切れは**はしごが尽きる最も普通の終わり方**で、
+  しかも `"gone"` では再接続ボタンも出さないため、操作員に残るのはこの一行だけ / 対応: 差し戻し
+- [should][conv:-] `launcher/smoke.mjs` の `stop()` が**既に終了した子プロセス**を扱えない。
+  ポート衝突で即死すると `child.once("exit")` はもう発火せず、5 秒待って
+  「SIGTERM で終わりませんでした」と**実態と逆の理由**で失敗する。
+  **ポートのフォールバックが、それを用意した当の場面で到達不能** / 対応: 差し戻し
+- [should][conv:-] **3270 だけ切断時に何の案内も出ない**。`startReconnect` が黙って return するので
+  OIA の「切断」以外に手掛かりが無く、次の打鍵で出るのは `MSG_NOT_CONNECTED`（＝待てば戻る含み）。
+  3270 は `dispose` がその場でホストセッションを閉じており**開き直す以外に手が無い**——
+  D13 が潰した「同じ `connected===false` から逆の案内を出す」がここに残っている / 対応: 差し戻し
+- [should][conv:-] `connect()` が pending のまま試行の上限に達すると、`client.close()` を呼ぶだけで
+  `connect()` の promise は reject されず（CONNECTING のソケットに `close` イベントが飛ぶかは
+  ブラウザ実装依存）、`.catch(() => next())` も `onClose` も来ないまま**試行が宙に浮く** / 対応: 差し戻し
+- [should][conv:-] 繋ぎ直しの `opened` で `ccsid` を上書きしない理由はコメントにあるが、
+  `readOnly` を落としている理由が無い（次に触る人が意図か漏れか区別できない） / 対応: 差し戻し
+- [nit][conv:-] `WsClient.connect()` が生きている `pingWatchdog` / `closeFallback` を畳まず、
+  見張りの発火時に閉じるのも捕捉した `ws` ではなく `this.ws`。同一インスタンスで繋ぎ直すと
+  **旧ソケットの見張りが新しいソケットを閉じる**（前ラウンドで close ハンドラ側だけ直した残り半分） /
+  対応: 差し戻し
+- [nit][conv:-] `tryResume` の `opened` 分岐だけ `settled` / `pendingResumes` の同一性ガードが無い。
+  いま到達不能なのは「閉じたソケットには message が配送されない」というブラウザ仕様に依るだけで、
+  コードからは読めない / 対応: 差し戻し
+- [nit][conv:-] 繋ぎ直しのたびに**古い PC コマンドの通知が出し直される**（`opened` の `pcCommands` は
+  サーバー側の履歴全体なので、切断前に見た最後の 1 件が `missed` として再掲される） / 対応: 差し戻し
+- [nit][conv:-] `smoke.mjs` の `PORTS` が固定 3 ポートで、同一ホストの並列ジョブと衝突しうる /
+  対応: 差し戻し（空きポートを取る形にする）
+- [nit][conv:-] `ws-ping-watchdog.test.ts` の `FakeSocket.close()` が `close` イベントを発火しないのは
+  意図的だが、テスト名からは「代役の制約」と「実装の保証」のどちらを見ているか読み取りにくい /
+  対応: 差し戻し
+- [nit][conv:-] `holdForReconnect` の `false` が 3 通りを兼ねることと、`isHeld` の `false`（期限切れ）が
+  `dispose` で同じ条件に混ざっている / 対応: **対応不要**——JSDoc が警告済みで、呼び出し順で正しく動く
+- [nit][conv:-] `reconnectTimers` / `pendingResumes` がモジュールスコープで、`SessionState` に持たせた
+  `reconnect` と持ち主が分かれている / 対応: **対応不要**——`sessionsStore.remove` の呼び出しは
+  `closeSession` 内だけで、そこが両方を畳んでいる
+- [should][conv:-] 猶予中は `maxSessions`（既定 8）の枠を占め続ける（8 タブ同時瞬断で全枠が 90 秒埋まる） /
+  対応: **対応不要**——design「1. 転送断 → 猶予」と decisions D5 / D12 で認識のうえ受容した設計判断。
+  PR 本文の「既知の制約」へ引き継ぐ

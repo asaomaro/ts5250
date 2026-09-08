@@ -179,6 +179,11 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
  * 頭に日本語の要約を置き、**元のメッセージも残す**——どの欄のどの値かは元の文にしかない。
  */
 const NOTICE_BY_ERROR: Record<string, string> = {
+  // **繋ぎ直しの終わり方として一番普通の 2 つ**（`20260908-session-survives-disconnect`）。
+  // 入れておかないと「エラー: session 3f2a…-… not found」という**生の英語＋UUID** が
+  // 操作員に残る一行になる（`"gone"` では再接続ボタンも出さないので、本当にこれだけ）
+  SESSION_NOT_FOUND: "セッションは既に終了しています（開き直してください）",
+  FORBIDDEN: "このセッションを操作する権限がありません",
   FIELD_TYPE: "入力できない文字があるため送信しませんでした",
   FIELD_OVERFLOW: "欄の桁数を超えているため送信しませんでした",
   FIELD_PROTECTED: "保護された欄には入力できません",

@@ -26,8 +26,11 @@ const READY_TIMEOUT_MS = 30_000;
 /** 終了シグナルのあと、素直に終わるのを待つ上限 */
 const EXIT_TIMEOUT_MS = 5_000;
 
+// **`console.*` は使わない**（AGENTS.md「ログは stderr のみ」。`preflight.mjs` と同じ流儀）
+const out = (msg) => process.stdout.write(`${msg}\n`);
+const note = (msg) => process.stderr.write(`${msg}\n`);
 const fail = (msg) => {
-  console.error(`smoke: ${msg}`);
+  note(`smoke: ${msg}`);
   process.exit(1);
 };
 
@@ -40,8 +43,27 @@ for (const p of [SERVER, join(WEB_ROOT, "index.html")]) {
 const profiles = join(mkdtempSync(join(tmpdir(), "ts5250-smoke-")), "profiles.json");
 writeFileSync(profiles, JSON.stringify({ systems: [], sessions: [] }));
 
-/** 空いていそうな高位ポート。使用中なら次を試す（CI の並列実行で衝突しうる） */
-const PORTS = [34971, 34972, 34973];
+/**
+ * **空いているポートを OS に選ばせる。**
+ *
+ * 固定ポートを並べると、同じホストで並列に走るジョブ同士で衝突する。
+ * 0 番で listen して割り当てられた番号を読み、閉じてから渡す（取り合いの窓は残るが、
+ * 失敗しても下のループが次を取り直す）。
+ */
+async function freePort() {
+  const { createServer } = await import("node:net");
+  return await new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** 取り合いで負けることがあるので、何回か取り直す */
+const ATTEMPTS = 3;
 
 async function get(port, path) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -68,6 +90,10 @@ async function run(port) {
     stdio: ["ignore", "inherit", "inherit"]
   });
   const stop = async () => {
+    // **既に終わっている子に SIGTERM を送って待たない。** 待つと、ポート衝突で即死した
+    // ときに「SIGTERM で終わりませんでした」という**実態と逆の理由**で落ち、
+    // しかも下のポート取り直しへ進めなくなる
+    if (child.exitCode !== null || child.signalCode !== null) return;
     child.kill("SIGTERM");
     const gone = await Promise.race([
       new Promise((r) => child.once("exit", () => r(true))),
@@ -91,13 +117,14 @@ async function run(port) {
   if (index.status !== 200 || !index.body.includes("<div id=\"app\"")) {
     fail(`/ が Web UI を返しませんでした（status=${index.status}）`);
   }
-  console.log(`smoke: /healthz ok, / が Web UI を返した (port ${port})`);
-  console.log(`smoke: ${health.body}`);
+  out(`smoke: /healthz ok, / が Web UI を返した (port ${port})`);
+  out(`smoke: ${health.body}`);
   return true;
 }
 
-for (const port of PORTS) {
+for (let i = 0; i < ATTEMPTS; i++) {
+  const port = await freePort();
   if (await run(port)) process.exit(0);
-  console.error(`smoke: port ${port} で起動できませんでした。次を試します`);
+  note(`smoke: port ${port} で起動できませんでした。取り直します`);
 }
-fail("どのポートでも起動できませんでした");
+fail(`${ATTEMPTS} 回試して起動できませんでした`);

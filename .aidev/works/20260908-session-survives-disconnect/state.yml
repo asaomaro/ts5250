@@ -1,7 +1,7 @@
 schema: 11
 slug: session-survives-disconnect
 current: coding
-approved: [requirements, research, design, tasks, coding]
+approved: [requirements, research, design, tasks]
 mode: autonomous
 profile: full
 humanGates: []

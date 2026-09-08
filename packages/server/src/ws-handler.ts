@@ -627,7 +627,8 @@ export class WsConnection {
         this.send({ type: "vt-frame", frame: echoChanged ? { ...frame, hostEchoes: echo } : frame });
       };
       const pushTitle = (title: string): void => this.send({ type: "vt-title", title });
-      const pushClose = (reason: string): void => this.send({ type: "closed", reason });
+      // VT もホスト側が終わった通知（`dispose` の後始末とは別物）
+      const pushClose = (reason: string): void => this.send({ type: "closed", reason, ended: true });
       entry.subscribers.add(push);
       entry.titleSubscribers.add(pushTitle);
       entry.closeSubscribers.add(pushClose);
@@ -858,7 +859,9 @@ export class WsConnection {
     const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
     entry.session.on("screen", onScreen);
     entry.session.on("closed", (reason: string) => {
-      this.send({ type: "closed", reason });
+      // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
+      // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+      this.send({ type: "closed", reason, ended: true });
       this.detachScreen?.();
     });
     // PC コマンド（STRPCCMD）の実行状況を push。切断で購読を外す（リーク防止）。
@@ -1145,6 +1148,8 @@ export class WsConnection {
       this.sessionId = undefined;
       this.holderToken = undefined;
     }
+    // **`ended` は付けない。** ここはこの WS 接続の後始末で、セッションは猶予として
+    // 生きていることも、他のタブが見ていることもある（`WsClosed.ended` の注記）
     this.send({ type: "closed", reason });
   }
 

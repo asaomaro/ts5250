@@ -190,3 +190,41 @@ describe("持ち主の座（claim / releaseHolder / hasHolder）", () => {
     mgr.closeAll();
   });
 });
+
+describe("猶予とアイドル上限の関係", () => {
+  /**
+   * **猶予のあいだはアイドル上限を当てない**（review ラウンド1）。
+   *
+   * `expired()` が見る `lastActivity` は切断後は誰も進めない。アイドル上限を有限に
+   * 設定した環境では、猶予が明ける前にそちらが先に真になり、**猶予が丸ごと無効になる**。
+   */
+  it("アイドル上限が猶予より短くても、猶予中は刈られない", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await mgr.open({
+      transport: new ReplayTransport(signon()),
+      host: "h",
+      idleTimeoutMs: 60_000 // 猶予（90 秒）より短い設定
+    });
+    mgr.holdForReconnect(entry.id);
+    t += 70_000; // アイドル上限は超えたが、猶予はまだ明けていない
+    sweep(mgr);
+    expect(mgr.size).toBe(1);
+    expect(mgr.isHeld(entry.id)).toBe(true);
+    mgr.closeAll();
+  });
+
+  it("猶予が明ければ、そのときに刈られる", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await mgr.open({
+      transport: new ReplayTransport(signon()),
+      host: "h",
+      idleTimeoutMs: 60_000
+    });
+    mgr.holdForReconnect(entry.id);
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+});

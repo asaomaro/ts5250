@@ -265,7 +265,14 @@ function startReconnect(sessionId: string, label: string): void {
   // `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を
   // 見せた末に生のエラー文が出る）。VT とプリンターは開く関数から別で、
   // それぞれ自前の `onClose` に載っているのでここへは来ない（`kind` は保険）
-  if (s.kind === "printer" || s.meta?.terminal === "3270") return;
+  if (s.kind === "printer" || s.meta?.terminal === "3270") {
+    // **黙って切らない。** 3270 はサーバー側でもその場でホストセッションが閉じるので、
+    // 開き直す以外に手が無い。何も言わないと、次の打鍵で出るのは
+    // 「サーバーと繋がっていないため送信できません」＝**待てば戻る含み**の嘘になる
+    // （プリンターは自分の `onClose` で同じことをしている）
+    s.notice = MSG_CONNECTION_LOST;
+    return;
+  }
   // **見に来ただけのタブは持ち主にならない**（decisions D4）。`resume` は座を引き取る
   // 電文なので、ここを通すと**瞬断 1 回で相手のセッションの持ち主になり**、
   // 次にこのタブを閉じたときに相手の作業ごと畳む
@@ -337,13 +344,21 @@ function tryResume(sessionId: string, label: string, index: number): void {
   // **黙り込んだ試行を捨てる**（`RESUME_ATTEMPT_TIMEOUT_MS` の注記）
   const deadline = setTimeout(() => {
     if (settled) return;
-    client.close(); // `onClose` → `next()` に合流させる。打ち切りの経路を増やさない
+    client.close();
+    // **`close()` だけでは足りない。** `connect()` が pending のまま（CONNECTING の
+    // ソケット）だと `close` イベントが飛ぶかはブラウザ実装依存で、`onClose` も
+    // `connect()` の reject も来ないことがある。そのとき試行が宙に浮くので、
+    // ここからも次の間隔へ回す（`next()` は 1 度しか効かない）
+    next();
   }, RESUME_ATTEMPT_TIMEOUT_MS);
   const client = new WsClient(
     WS_URL(),
     {
       onServerMessage(msg: WsServerMessage) {
         if (msg.type === "opened") {
+          // **他の 2 経路と同じガードを置く。** いま到達しないのは「閉じたソケットには
+          // message が配送されない」というブラウザ仕様に依っているだけで、コードからは読めない
+          if (settled || pendingResumes.get(sessionId)?.client !== client) return;
           settled = true;
           clearTimeout(deadline);
           pendingResumes.delete(sessionId);
@@ -372,12 +387,17 @@ function tryResume(sessionId: string, label: string, index: number): void {
           // 「黙って実行しない」が繋ぎ直しでだけ破れる
           sessionsStore.setReserved(sessionId, msg.reservedBy);
           cur.pcCommandEnabled = msg.pcCommand;
+          // **通知は「留守中に増えた分」だけ。** `opened` に載るのはサーバー側の履歴全体なので、
+          // 最後の 1 件をそのまま知らせると**切断前に一度見せたものを毎回出し直す**
+          const lastSeenAt = cur.pcCommands?.at(-1)?.at;
           cur.pcCommands = (msg.pcCommands ?? []).slice(-PC_COMMAND_VIEW_LIMIT);
           const missed = cur.pcCommands.at(-1);
-          if (missed) cur.notice = pcCommandNotice(missed);
+          if (missed && missed.at !== lastSeenAt) cur.notice = pcCommandNotice(missed);
           if (msg.job !== undefined) cur.job = msg.job;
-          // **`ccsid` は上書きしない。** サーバーの `attach` は既定（37）を返すだけで、
-          // 実際の値は開いたときの設定に属する（`ws-handler.attach` の注記）
+          // **`ccsid` と `readOnly` は上書きしない。** サーバーの `attach` は `ccsid` に
+          // 既定（37）を返すだけで、`readOnly` はそもそも載せない——どちらも
+          // **開いたときの設定に属する**もので、繋ぎ直しで変わる値ではない
+          // （`ws-handler.attach` の注記）
           setBusy(sessionId, false);
           return;
         }
@@ -502,9 +522,11 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       const s = sessionsStore.get(sessionId);
       if (s) {
         s.connected = false;
-        // **ホストが終わったことを覚える。** このあと転送も落ちると、区別が付かないまま
-        // 繋ぎ直しのはしごを回して「サーバーと繋がっていません」と**嘘の理由**を出す
-        s.endedByHost = true;
+        // **ホストが本当に終わったときだけ覚える**（`WsClosed.ended`）。
+        // サーバーは**心拍の死判定で猶予を張ったあとにも** `closed` を送るので、
+        // 無条件に立てると「保持されているのに二度と繋ぎ直さない」うえ、
+        // 次の打鍵で「セッションは終了しています」と**嘘の理由**を出す
+        if (msg.ended === true) s.endedByHost = true;
       }
       setBusy(sessionId, false);
       break;

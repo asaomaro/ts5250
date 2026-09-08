@@ -53,7 +53,11 @@ import {
   submitGuiSelection
 } from "../src/session-controller.js";
 import { sessionsStore } from "../src/stores/sessions.js";
-import { MSG_NOT_CONNECTED, MSG_SESSION_ENDED } from "../src/composables/opMessages.js";
+import {
+  MSG_CONNECTION_LOST,
+  MSG_NOT_CONNECTED,
+  MSG_SESSION_ENDED
+} from "../src/composables/opMessages.js";
 
 function snap(keyboardLocked = false): ScreenSnapshot {
   return {
@@ -318,7 +322,7 @@ describe("転送断からの繋ぎ直し", () => {
    * `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗し、「再接続中」を見せた末に
    * 生のエラー文が出る。**それでも応答待ちは解けていなければならない**。
    */
-  it("3270 は繋ぎ直さないが、待ちは解けて切断になる", async () => {
+  it("3270 は繋ぎ直さないが、待ちは解けて切断になり、**理由も出る**", async () => {
     const p = openSession({ type: "open", host: "h" }, "t", { terminal: "3270" });
     clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
     await p;
@@ -331,6 +335,8 @@ describe("転送断からの繋ぎ直し", () => {
     expect(s.busy).toBe(false);
     expect(s.connected).toBe(false);
     expect(s.reconnect).toBeUndefined();
+    // **黙って切らない**——開き直す以外に手が無いことを言う
+    expect(s.notice).toBe(MSG_CONNECTION_LOST);
     await runAttempt(60_000);
     expect(clients).toHaveLength(1); // 試行を 1 回も出していない
   });
@@ -362,13 +368,32 @@ describe("転送断からの繋ぎ直し", () => {
    */
   it("ホスト側が終わっているセッションは繋ぎ直さない", async () => {
     const s = await open();
-    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed" });
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed", ended: true });
 
     clients[0]!.handlers.onClose?.();
 
     expect(s.reconnect).toBeUndefined();
     sendKey("s1", "Enter");
     expect(s.notice).toBe(MSG_SESSION_ENDED);
+  });
+
+  /**
+   * **サーバーの後始末の `closed` を「ホストが終わった」と読まない**（review ラウンド1）。
+   *
+   * サーバーは心拍の死判定でも（＝猶予を張ったうえで）`dispose` の末尾から `closed` を送る。
+   * 片方向だけ詰まった回線やスリープ復帰のタブがそれを受け取ると、無条件に立てる実装では
+   * **二度と繋ぎ直さず、しかも「セッションは終了しています」と嘘の理由**を出していた。
+   */
+  it("`ended` の無い `closed`（サーバーの後始末）では繋ぎ直しを止めない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "heartbeat timeout" });
+    expect(s.endedByHost).toBeFalsy();
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+    await runAttempt(1_000);
+    expect(clients[1]!.send).toHaveBeenCalledWith({ type: "open", sessionId: "s1", resume: true });
   });
 
   it("**送信の口はどれも繋がっていなければ止める**（GUI 選択で覆いが戻らない）", async () => {
@@ -401,7 +426,7 @@ describe("転送断からの繋ぎ直し", () => {
    */
   it("ホスト側が終わっている場合は、転送断とは別の理由を言う", async () => {
     const s = await open();
-    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed" });
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed", ended: true });
     expect(s.connected).toBe(false);
     expect(s.reconnect).toBeUndefined(); // 繋ぎ直しには入っていない
 

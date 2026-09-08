@@ -85,6 +85,10 @@ export class WsClient {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // **前の接続の見張りを畳んでから始める。** 同じインスタンスで繋ぎ直したとき、
+      // 旧ソケットの見張りが 90 秒後に**新しいソケットを閉じる**のを防ぐ
+      this.clearPingWatchdog();
+      this.clearCloseFallback();
       this.closeNotified = false;
       this.rejectConnect = reject;
       const ws = new WebSocket(this.url);
@@ -161,7 +165,9 @@ export class WsClient {
       // **自分から畳んで、あとは既存の切断経路に任せる。** ここで独自の通知を作ると、
       // `close` が飛ぶ切れ方と半開きとで復帰の道筋が 2 本になる
       this.log("event", "ping-timeout", `no ping for ${PING_DEAD_MS}ms; closing`);
-      this.ws?.close();
+      // **閉じるのは見張り始めたソケット**（`this.ws` ではない）。繋ぎ直しで差し替わって
+      // いた場合に、新しいソケットを巻き添えにしない
+      ws?.close();
       // **`close` イベントが来ない場合の保険**（半開きでは来ないことがある）
       if (ws) this.closeFallback = setTimeout(() => this.notifyClosed(ws), CLOSE_EVENT_GRACE_MS);
     }, PING_DEAD_MS);

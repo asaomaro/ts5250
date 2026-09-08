@@ -1638,6 +1638,7 @@ export class SessionManager {
       // **猶予切れも刈る。** タイマー（`holdForReconnect`）が本筋だが、取り逃すと
       // 掴んだままのセッションが残る——アイドル上限が既定 `"never"` なので、
       // ここで拾わないと二度と回収されない
+      const held = entry.heldUntil !== undefined;
       const heldOver = entry.heldUntil !== undefined && entry.heldUntil <= now;
       // **猶予切れは見ている人が居れば刈らない**（タイマー側の `reapHold` と同じ規則。
       // 経路によって結論が変わると、どちらが本当か読めなくなる）
@@ -1645,6 +1646,14 @@ export class SessionManager {
         this.cancelHold(id);
         continue;
       }
+      // **猶予のあいだはアイドル上限を当てない。**
+      //
+      // `expired()` が見る `lastActivity` は**切断後は誰も進めない**（進めるのは
+      // `touch` ＝ WS からの合図）。アイドル上限を有限に設定した環境（例 1 分）だと、
+      // 90 秒の猶予が明ける前にこちらが先に真になり、**猶予が丸ごと無効になる**。
+      // 猶予は「利用者がまだ戻ってくるかもしれない」という明示的な保持なので、
+      // その間の寿命を決めるのは `heldUntil` ひとつにする。
+      if (held && !heldOver) continue;
       if (expired(entry) || heldOver) {
         if (entry.holdTimer) clearTimeout(entry.holdTimer);
         entry.recorder?.stop(); // `close` と後始末を揃える（購読を残すとリークする）
