@@ -2,25 +2,29 @@
 
 ## 実行したもの
 
+**ラウンド 2**（review ラウンド1 の差し戻しを反映したあと）。
+
 - `npm run build`（`tsc -b`：ライブラリ 7 パッケージ ＋ server） — 成功
 - `npm run build -w @ts5250/web-ui`（`vue-tsc -b && vite build`） — 成功
   （chunk サイズの警告のみ。既存の警告で本件とは無関係）
-- `npx vue-tsc -b --force`（web-ui。`tsconfig.test.json` 込みのクリーン型検査） — 成功
-- `npm test`（各ワークスペースの test スクリプト） — **4361 passed / 0 failed / 41 skipped**（exit 0）
-  - `packages/server` — 1335 passed / 3 skipped
-  - `packages/web-ui` — 1977 passed（`--maxWorkers=2` でも 1977 passed / exit 0）
-  - `packages/tn5250` — 584 passed
-  - `packages/tn3270` — 254 passed / 38 skipped
-  - `packages/vt` — 202 passed
-  - 残りのライブラリ（base / ebcdic / scs / hostserver） — 合計 10 passed
-- `npm run lint`（eslint） — 指摘なし
+- `npm run lint`（`eslint .`） — **0 件**（exit 0）
+- パッケージごとのテスト（`npx vitest run`。**合計 5539 passed / 0 failed / 41 skipped**）
+  - `packages/base` — 52 / `packages/ebcdic` — 100 / `packages/scs` — 41
+  - `packages/hostserver` — 991
+  - `packages/tn3270` — 254（+38 skipped）/ `packages/tn5250` — 584 / `packages/vt` — 202
+  - `packages/server` — **1337**（+3 skipped）
+  - `packages/web-ui` — **1978**（4 シャードの合計: 469 + 535 + 542 + 432）
 - `aidev smoke`（`node launcher/smoke.mjs`） — **pass**
 
 > **ルートから `npx vitest run` を直接叩いた分は判定に使っていない。** AGENTS.md が
 > 「web-ui のテストはパッケージ dir から実行する。ルートから実行すると Vite の vue plugin と
 > フィクスチャの相対パスが解決されず、実際とは違う失敗が出る」と明記している流し方で、
-> 実際に web-ui 側だけが大量に落ちた。`npm test` は各ワークスペースの dir で走るので、
-> そちらを正とする。
+> 実際に web-ui 側だけが大量に落ちた。パッケージ dir から流したものを正とする。
+
+> **この環境ではメモリが足りず、既定の並列度で全件を一度に流せない**（7.7GB。
+> `npm test` も `--maxWorkers=2` も途中で OS に落とされた）。そのため web-ui は
+> `--shard=n/4` に割って単一ワーカーで流している。**割り方による取りこぼしは無い**
+> ——4 シャードの合計（1978）が単一実行時の件数と一致する。
 
 ## 受け入れ基準ごとの判定
 
@@ -52,7 +56,7 @@
   「既存セッションへ繋いだだけのタブは繋ぎ直しに行かない」。
   MCP / HLLAPI が開いたセッションは `ws-handler` を通らないので猶予に入らない（設計上の帰結）。
 - **AC9**（既存が緑のまま、回帰テストが追加されている）: **pass**
-  — 追加は **48 件**（サーバー 25 / クライアント 23）。既存はすべて緑。
+  — 追加は **54 件**（サーバー 27 / クライアント 27）。既存はすべて緑。
   振る舞いを変えた 3 件（`session-attach` / `ws-handler` / `ws-lifetime`）は、
   緩めるのではなく**新旧の対比が残る形**に書き換えた（`decisions.md` D9）。
 - **AC10**（繋ぎ直せなかった理由を示して切断状態にする）: **pass**
@@ -81,7 +85,22 @@
 
 ## 失敗の証跡
 
-このラウンドでは失敗が発生していない（`npm test` は exit 0）。
+**ラウンド 2 では失敗が発生していない。**
+
+**ラウンド 1 では lint が落ちていた**（`test-result.md` に「指摘なし」と書いたのは、
+smoke スクリプトを足す前の実行結果を見た誤り。review 工程で拾って差し戻した）:
+
+```
+$ npx eslint .
+
+/workspaces/ts5250/launcher/smoke.mjs
+   30:3  error  Unexpected console statement  no-console
+   94:3  error  Unexpected console statement  no-console
+   95:3  error  Unexpected console statement  no-console
+  101:3  error  Unexpected console statement  no-console
+
+✖ 4 problems (4 errors, 0 warnings)
+```
 
 coding 工程の途中では、振る舞いの変更に伴って既存 3 件が落ちた。いずれも
 **「転送断で即座に閉じる」を固定していたテスト**で、変更の意図どおりに書き換えた
@@ -91,9 +110,9 @@ coding 工程の途中では、振る舞いの変更に伴って既存 3 件が�
 
 ```
 $ node launcher/smoke.mjs
-{"level":40,"time":1788851149343,"msg":"AS400_SECRET_KEY not set: saved auto-signon passwords are disabled"}
-{"level":30,"time":1788851149355,"host":"127.0.0.1","port":34971,"auth":false,"msg":"5250 MCP/Web server started (localhost only. 公開するには --users と --host を指定)"}
-smoke: /healthz ok, / が Web UI を返した (port 34971)
+{"level":40,"msg":"AS400_SECRET_KEY not set: saved auto-signon passwords are disabled"}
+{"level":30,"host":"127.0.0.1","port":39751,"auth":false,"msg":"5250 MCP/Web server started (localhost only. 公開するには --users と --host を指定)"}
+smoke: /healthz ok, / が Web UI を返した (port 39751)
 smoke: {"status":"ok","sessions":0}
 smoke: pass (exit 0)
 ```
@@ -121,7 +140,7 @@ SIGTERM で素直に終わるところまで見て必ず終了する。
   「全タブを畳んでもワークスペースに居られ、バッジは全数を出す」が、全ファイル並行実行時に
   5 秒のタイムアウトで落ちることがある。**本件の変更とは無関係**で、切り分けの根拠は 3 つ:
   - 単体実行では通る（8/8）。
-  - **ワーカー数を絞れば全件通る**（`npx vitest run --maxWorkers=2` で 1977 passed / exit 0）。
+  - **ワーカー数を絞れば全件通る**（`--maxWorkers=2` / `--shard` 分割の単一ワーカーとも緑）。
   - この環境はメモリ 7.7GB で、既定の並列度だと逼迫する（同じスイートを 3 連続で流したら
     **OS がメモリ不足でプロセスを落とした**）。落ちるのは 5 秒のタイムアウトで、
     アサーションの失敗ではない。

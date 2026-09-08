@@ -242,49 +242,56 @@
   **`npx eslint .` が error 4 件で落ちる**（AGENTS.md「`console.*` は lint で禁止」。
   隣の `launcher/preflight.mjs` は同じ用途で `process.stderr.write` を使っている）。
   `.aidev/config.yml` から毎回叩かれる新規スクリプトなので CI が必ず赤くなる /
-  対応: 差し戻し
+  対応: 修正済（`process.stdout.write` / `process.stderr.write` に。`npx eslint .` 緑）
 - [must][conv:-] **アイドル上限を有限に設定した環境で、猶予が丸ごと無効になる**。
   `sweepIdle` の `expired()` は `lastActivity` を見るが、切断後は誰も進めない。
   上限が 1 分の設定なら、90 秒の猶予中に `expired()` が先に真になってセッションを切る。
   `heldUntil` は刈り取り条件に OR で足しただけで、`expired()` を抑止していない /
-  対応: 差し戻し
+  対応: 修正済（猶予中は `expired()` を当てない。回帰テスト 2 件＋変異注入で確認）
 - [must][conv:-] **サーバーの `closed` を無条件に「ホストが終わった」と読んでいる**。
   `dispose` は**心拍の死判定で猶予を張ったあとにも** `closed` を送る（末尾で必ず送る）。
   片方向だけ詰まった回線やスリープ復帰でこれを受け取ったタブは `endedByHost` が立ち、
   **二度と繋ぎ直さず**、次の打鍵で「セッションは終了しています」という**嘘の理由**を出す
   （実際はサーバーが 90 秒保持中）。`endedByHost` を落とす経路も無い /
-  対応: 差し戻し
+  対応: 修正済（`WsClosed.ended` を足し、**ホストが本当に終わった側だけ**立てる。回帰テスト追加）
 - [should][conv:-] 打ち切り `"gone"` の通知が**生の英語＋セッション UUID** になる
   （`SESSION_NOT_FOUND` / `FORBIDDEN` が `NOTICE_BY_ERROR` に無く、`wsErrorNotice` が
   「エラー: session 3f2a…-… not found」を返す）。猶予切れは**はしごが尽きる最も普通の終わり方**で、
-  しかも `"gone"` では再接続ボタンも出さないため、操作員に残るのはこの一行だけ / 対応: 差し戻し
+  しかも `"gone"` では再接続ボタンも出さないため、操作員に残るのはこの一行だけ /
+  対応: 修正済（`SESSION_NOT_FOUND` / `FORBIDDEN` を `NOTICE_BY_ERROR` に足した）
 - [should][conv:-] `launcher/smoke.mjs` の `stop()` が**既に終了した子プロセス**を扱えない。
   ポート衝突で即死すると `child.once("exit")` はもう発火せず、5 秒待って
   「SIGTERM で終わりませんでした」と**実態と逆の理由**で失敗する。
-  **ポートのフォールバックが、それを用意した当の場面で到達不能** / 対応: 差し戻し
+  **ポートのフォールバックが、それを用意した当の場面で到達不能** /
+  対応: 修正済（終了済みなら待たない。あわせて固定ポートをやめ、空きを OS に選ばせる）
 - [should][conv:-] **3270 だけ切断時に何の案内も出ない**。`startReconnect` が黙って return するので
   OIA の「切断」以外に手掛かりが無く、次の打鍵で出るのは `MSG_NOT_CONNECTED`（＝待てば戻る含み）。
   3270 は `dispose` がその場でホストセッションを閉じており**開き直す以外に手が無い**——
-  D13 が潰した「同じ `connected===false` から逆の案内を出す」がここに残っている / 対応: 差し戻し
+  D13 が潰した「同じ `connected===false` から逆の案内を出す」がここに残っている /
+  対応: 修正済（`MSG_CONNECTION_LOST` を出す。回帰テストで固定）
 - [should][conv:-] `connect()` が pending のまま試行の上限に達すると、`client.close()` を呼ぶだけで
   `connect()` の promise は reject されず（CONNECTING のソケットに `close` イベントが飛ぶかは
-  ブラウザ実装依存）、`.catch(() => next())` も `onClose` も来ないまま**試行が宙に浮く** / 対応: 差し戻し
+  ブラウザ実装依存）、`.catch(() => next())` も `onClose` も来ないまま**試行が宙に浮く** /
+  対応: 修正済（上限のタイマーからも `next()` を呼ぶ）
 - [should][conv:-] 繋ぎ直しの `opened` で `ccsid` を上書きしない理由はコメントにあるが、
-  `readOnly` を落としている理由が無い（次に触る人が意図か漏れか区別できない） / 対応: 差し戻し
+  `readOnly` を落としている理由が無い（次に触る人が意図か漏れか区別できない） /
+  対応: 修正済（どちらも「開いたときの設定に属する」と明記）
 - [nit][conv:-] `WsClient.connect()` が生きている `pingWatchdog` / `closeFallback` を畳まず、
   見張りの発火時に閉じるのも捕捉した `ws` ではなく `this.ws`。同一インスタンスで繋ぎ直すと
   **旧ソケットの見張りが新しいソケットを閉じる**（前ラウンドで close ハンドラ側だけ直した残り半分） /
-  対応: 差し戻し
+  対応: 修正済（`connect()` で畳み、見張りは捕捉したソケットを閉じる）
 - [nit][conv:-] `tryResume` の `opened` 分岐だけ `settled` / `pendingResumes` の同一性ガードが無い。
   いま到達不能なのは「閉じたソケットには message が配送されない」というブラウザ仕様に依るだけで、
-  コードからは読めない / 対応: 差し戻し
+  コードからは読めない /
+  対応: 修正済（同じガードを置いた）
 - [nit][conv:-] 繋ぎ直しのたびに**古い PC コマンドの通知が出し直される**（`opened` の `pcCommands` は
-  サーバー側の履歴全体なので、切断前に見た最後の 1 件が `missed` として再掲される） / 対応: 差し戻し
+  サーバー側の履歴全体なので、切断前に見た最後の 1 件が `missed` として再掲される） /
+  対応: 修正済（前回見た最後の 1 件と `at` が違うときだけ知らせる）
 - [nit][conv:-] `smoke.mjs` の `PORTS` が固定 3 ポートで、同一ホストの並列ジョブと衝突しうる /
-  対応: 差し戻し（空きポートを取る形にする）
+  対応: 修正済（`listen(0)` で空きを取る）
 - [nit][conv:-] `ws-ping-watchdog.test.ts` の `FakeSocket.close()` が `close` イベントを発火しないのは
   意図的だが、テスト名からは「代役の制約」と「実装の保証」のどちらを見ているか読み取りにくい /
-  対応: 差し戻し
+  対応: 修正済（代役側の注記に「何を見ているか」を書いた）
 - [nit][conv:-] `holdForReconnect` の `false` が 3 通りを兼ねることと、`isHeld` の `false`（期限切れ）が
   `dispose` で同じ条件に混ざっている / 対応: **対応不要**——JSDoc が警告済みで、呼び出し順で正しく動く
 - [nit][conv:-] `reconnectTimers` / `pendingResumes` がモジュールスコープで、`SessionState` に持たせた
