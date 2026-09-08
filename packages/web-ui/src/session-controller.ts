@@ -3,12 +3,17 @@ import { viewSettings } from "./stores/viewSettings.js";
 import type { AidKey } from "@ts5250/tn5250";
 import { WsClient, wsUrl } from "./ws-client.js";
 import {
+  MSG_CONNECTION_LOST,
   MSG_NO_RESPONSE,
+  MSG_NOT_CONNECTED,
   MSG_PC_COMMAND_DENIED,
   MSG_PC_COMMAND_DISABLED,
   MSG_PC_COMMAND_DONE,
   MSG_PC_COMMAND_FAILED,
   MSG_PC_COMMAND_RUNNING,
+  MSG_RECONNECT_GAVE_UP,
+  MSG_SESSION_ENDED,
+  MSG_VT_CONNECTION_LOST,
   wsErrorNotice
 } from "./composables/opMessages.js";
 import {
@@ -149,6 +154,318 @@ function pcCommandNotice(e: PcCommandView): string {
   }
 }
 
+/**
+ * **繋ぎ直しの待ち時間**（ms）。1 秒から倍々に伸ばし、5 回で打ち切る（累計 31 秒）。
+ *
+ * サーバー側の猶予（既定 60 秒）の内側に収まるようにしてある——猶予が切れたあとに
+ * 叩いても「そのセッションはもう無い」と言われるだけで、回線に無駄な負荷を掛ける。
+ *
+ * **倍々にするのは、繋がらない相手を叩き続けないため。** サーバーの再起動では
+ * 全タブが同時に落ちるので、間隔を空けないと復帰しかけたサーバーを揃って殴りに行く。
+ */
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
+
+/**
+ * 待ち時間に掛けるゆらぎ（±20%）。
+ *
+ * **同時に落ちたタブを散らす**ためだけのもの。揃ったまま再試行すると、
+ * 1 台のサーバーに対して山が立つ（`RECONNECT_DELAYS_MS` の注記と同じ理由）。
+ */
+function withJitter(ms: number): number {
+  return Math.round(ms * (0.8 + Math.random() * 0.4));
+}
+
+/**
+ * **1 回の試行に掛ける上限**（ms）。
+ *
+ * 繋がったのに `opened` も `error` も返らない、という黙り方がありうる。`WsClient` の
+ * 半開き見張りは**最初の `ping` を受けてから**しか張らず、サーバーは `attach` 成功後にしか
+ * 心拍を始めないので、**この窓だけは誰も見ていない**。放っておくと、ソケットが自然に
+ * 閉じるまで（分単位もある）ループが止まったままになる。
+ */
+const RESUME_ATTEMPT_TIMEOUT_MS = 10_000;
+
+/** 繋ぎ直し待ちのタイマー。セッションを閉じたら畳む（`setBusy` と同じ扱い） */
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * **いま飛んでいる繋ぎ直しの口**。
+ *
+ * 待ちタイマーを畳むだけでは足りない——発火済みの試行は自分の `WsClient` を持って
+ * 走っており、**利用者がタブを閉じたあとに `opened` が返ると、サーバー側では
+ * `cancelHold` と `claim` が済んでいる**（＝閉じたはずのセッションが持ち主不在で生き残る）。
+ * 掴んでおいて、閉じるときにこちらからも畳む。
+ */
+const pendingResumes = new Map<string, WsClient>();
+
+/** 繋ぎ直しの待ちを畳む（成功・打ち切り・利用者が閉じた、のいずれでも） */
+function clearReconnectTimer(sessionId: string): void {
+  const t = reconnectTimers.get(sessionId);
+  if (t !== undefined) {
+    clearTimeout(t);
+    reconnectTimers.delete(sessionId);
+  }
+}
+
+/** 待ちも飛行中の口も畳む（利用者が閉じた・別経路でやり直す） */
+function abortReconnect(sessionId: string): void {
+  clearReconnectTimer(sessionId);
+  const inflight = pendingResumes.get(sessionId);
+  if (inflight) {
+    pendingResumes.delete(sessionId);
+    inflight.close();
+  }
+}
+
+/**
+ * **繋ぎ直しを始める**（`20260908-session-survives-disconnect` design「2. 復帰」）。
+ *
+ * 呼ぶのは WebSocket が閉じたとき。**利用者が閉じた場合は呼ばれない**——
+ * `closeSession` が先に store から消しているので、ここで見つからずに戻る。
+ *
+ * サーバー側はこの間セッションを猶予として保持している。繋ぎ直せれば
+ * **同じホストセッションの続き**から操作できる（打ちかけの入力も残る——
+ * 差し替えるのは `client` だけで `edits` には触らない）。
+ */
+function startReconnect(sessionId: string, label: string): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s || s.kind === "printer") return; // 猶予保持の対象は 5250 表示セッションだけ
+  // **もう無いと言われたセッションには行かない。** 5 段のはしごを丸ごと回し直しても
+  // 同じ理由で断られるだけ（`giveUpReconnect` の `"gone"`）
+  if (s.reconnectFailed === "gone") return;
+  // **走っているかはセッションの状態で見る**（モジュールの Map ではなく）。
+  // Map は id をまたいで残りうるが、`reconnect` はセッションと一緒に生まれて消える
+  // ——`activitySentAt` を state に置いたのと同じ理由
+  if (s.reconnect !== undefined) return;
+  abortReconnect(sessionId); // 取り残しがあれば畳んでから始める
+  s.connected = false;
+  setBusy(sessionId, false);
+  delete s.reconnectFailed;
+  scheduleReconnect(sessionId, label, 0);
+}
+
+/** 次の試行を予約する。回数が尽きたら手動の繋ぎ直しに委ねる */
+function scheduleReconnect(sessionId: string, label: string, index: number): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  const delay = RECONNECT_DELAYS_MS[index];
+  if (delay === undefined) {
+    // **転送が繋がらないまま尽きた。** 時間が経てば直りうるので、押し直せる口を出す
+    giveUpReconnect(sessionId, MSG_RECONNECT_GAVE_UP, "retry");
+    return;
+  }
+  s.reconnect = { attempt: index + 1, max: RECONNECT_DELAYS_MS.length };
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(sessionId);
+    tryResume(sessionId, label, index);
+  }, withJitter(delay));
+  reconnectTimers.set(sessionId, timer);
+}
+
+/**
+ * **繋ぎ直しを諦める**（理由つき。状態の書き込みはここ 1 か所に寄せる）。
+ *
+ * `reason` が `"retry"` なら押し直す口を出す。`"gone"` は**出さない**うえ、
+ * 以後この経路に入り直さない——押しても同じ理由で失敗するため。
+ */
+function giveUpReconnect(sessionId: string, notice: string, reason: "retry" | "gone"): void {
+  abortReconnect(sessionId);
+  const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  delete s.reconnect;
+  s.reconnectFailed = reason;
+  s.connected = false;
+  s.notice = notice;
+}
+
+/** 1 回ぶんの繋ぎ直し。成功すれば `client` を差し替え、失敗すれば次の間隔へ回す */
+function tryResume(sessionId: string, label: string, index: number): void {
+  if (!sessionsStore.get(sessionId)) return;
+  // **この試行の後始末は 1 度だけ。** `connect()` の失敗と `onClose` は両方来うる
+  let settled = false;
+  const next = (): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(deadline);
+    if (pendingResumes.get(sessionId) === client) pendingResumes.delete(sessionId);
+    scheduleReconnect(sessionId, label, index + 1);
+  };
+  // **黙り込んだ試行を捨てる**（`RESUME_ATTEMPT_TIMEOUT_MS` の注記）
+  const deadline = setTimeout(() => {
+    if (settled) return;
+    client.close(); // `onClose` → `next()` に合流させる。打ち切りの経路を増やさない
+  }, RESUME_ATTEMPT_TIMEOUT_MS);
+  const client = new WsClient(
+    WS_URL(),
+    {
+      onServerMessage(msg: WsServerMessage) {
+        if (msg.type === "opened") {
+          settled = true;
+          clearTimeout(deadline);
+          pendingResumes.delete(sessionId);
+          const cur = sessionsStore.get(sessionId);
+          if (!cur) {
+            // **利用者が先にタブを閉じていた。** サーバー側はもう `cancelHold` と `claim` を
+            // 済ませているので、こちらから畳まないと**持ち主不在のセッションが生き残る**
+            client.send({ type: "close" });
+            client.close();
+            return;
+          }
+          client.setSessionId(sessionId);
+          // **差し替えるのは口だけ。** `edits`（打ちかけの入力）には触らない
+          cur.client = client;
+          cur.connected = true;
+          delete cur.reconnect;
+          delete cur.reconnectFailed;
+          delete cur.notice;
+          clearReconnectTimer(sessionId);
+          // 留守中にホストが書いた画面がそのまま返る（サーバーの `attach` が現在の画面を返す）
+          sessionsStore.updateScreen(sessionId, msg.screen);
+          client.setHiddenIndexes(hiddenIndexes(msg.screen));
+          // **画面以外も取り込む。** `opened` には予約・PC コマンド・ジョブが載っている。
+          // 予約を落とすと、**切れている間に解除されていても覆いが残って打てない**
+          // （逆も同じで、始まっていたのに打ててしまう）。PC コマンドを落とすと
+          // 「黙って実行しない」が繋ぎ直しでだけ破れる
+          sessionsStore.setReserved(sessionId, msg.reservedBy);
+          cur.pcCommandEnabled = msg.pcCommand;
+          cur.pcCommands = (msg.pcCommands ?? []).slice(-PC_COMMAND_VIEW_LIMIT);
+          const missed = cur.pcCommands.at(-1);
+          if (missed) cur.notice = pcCommandNotice(missed);
+          if (msg.job !== undefined) cur.job = msg.job;
+          // **`ccsid` は上書きしない。** サーバーの `attach` は既定（37）を返すだけで、
+          // 実際の値は開いたときの設定に属する（`ws-handler.attach` の注記）
+          setBusy(sessionId, false);
+          return;
+        }
+        if (msg.type === "error" && !settled) {
+          // **繋がったが引き取れなかった**（猶予切れ・他人のもの）。時間が経っても
+          // 回復しないので再試行しない。理由はサーバーのものをそのまま見せる
+          settled = true;
+          clearTimeout(deadline);
+          pendingResumes.delete(sessionId);
+          giveUpReconnect(sessionId, wsErrorNotice(msg.code, msg.message), "gone");
+          client.close();
+          return;
+        }
+        applyDisplayMessage(sessionId, client, msg);
+      },
+      onClose() {
+        if (!settled) {
+          next(); // この試行が失敗した。次の間隔へ
+          return;
+        }
+        // 一度は繋がったのに、また切れた。**最初からやり直す**
+        // （差し替え済みの口が自分のときだけ——古い試行の後始末で巻き込まない）
+        if (sessionsStore.get(sessionId)?.client === client) startReconnect(sessionId, label);
+      }
+    },
+    label
+  );
+  pendingResumes.set(sessionId, client);
+  client
+    .connect()
+    .then(() => client.send({ type: "open", sessionId, resume: true }))
+    .catch(() => next());
+}
+
+/**
+ * **手動で繋ぎ直す**（試行が尽きたあとの逃げ道。AC-I2）。
+ *
+ * 自動の再試行と同じ経路を最初から回す。押せる状態になっているのは
+ * 「転送が繋がらないまま尽きた」ときだけで、猶予切れでは出していない。
+ */
+export function retryReconnect(sessionId: string): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  abortReconnect(sessionId);
+  // **走行中の印を先に落とす。** 落とさずに `startReconnect` へ入ると
+  // 「既に走っている」で弾かれ、**タイマーは畳んだのに印だけ残る**＝二度と動かない
+  // （ボタン連打やキーリピートで踏める）
+  delete s.reconnect;
+  delete s.reconnectFailed;
+  startReconnect(sessionId, s.label);
+}
+
+/**
+ * **`opened` 以外の 5250 受信処理**（`sessionId` が未確定のうちにも呼ばれうる）。
+ *
+ * 新規に開いたときと**繋ぎ直したとき**で同じ処理が要る（`20260908-session-survives-disconnect`）。
+ * 分岐を 2 か所に写すと、片方だけ直された瞬間に「繋ぎ直したタブでだけ通知が来ない」という
+ * 壊れ方をする——`ws-handler.subscribeSession` が 1 か所にまとめてあるのと同じ理由。
+ *
+ * **`opened` と、開く前の `error` はここに入れない**。あちらは呼び出し側の事情
+ * （状態を作るのか差し替えるのか／`openSession` の Promise を落とすのか）で分かれる。
+ */
+function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerMessage): void {
+  switch (msg.type) {
+    // 予約（HLLAPI の Reserve）の開始・解除。**画面と別に届く**——
+    // 予約は画面を変えずに始まり・終わるため
+    case "reserved": {
+      sessionsStore.setReserved(sessionId, msg.by);
+      break;
+    }
+    case "screen": {
+      sessionsStore.updateScreen(sessionId, msg.screen);
+      client.setHiddenIndexes(hiddenIndexes(msg.screen));
+      // **施錠されたままの画面では待ちを解かない。** ホストは応答の途中でも画面を
+      // 書いてくる（時間の掛かる CALL の前置き等）。それで待ちを解くと 0.5 秒の
+      // 猶予タイマーごと潰れ、**どれだけ待たされてもスピナーが出ない**うえ、
+      // 入力プロテクトまで外れる（利用者の報告）。解くのは実際に開いた画面か
+      // `key-done`（送信の完了そのもの）だけにする。
+      if (!msg.screen.keyboardLocked) setBusy(sessionId, false);
+      break;
+    }
+    case "key-done": {
+      // 画面を変えないキーでも待ちを解く。加えて**完了時点の画面を必ず反映する**——
+      // タイムアウト復帰ではホストからの screen イベントが起きず、
+      // keyboardLocked: true の画面が残って 🔒 が消えなくなる。
+      sessionsStore.updateScreen(sessionId, msg.screen);
+      client.setHiddenIndexes(hiddenIndexes(msg.screen));
+      // 無応答のまま待ちが尽きたことは**明示する**。無言で戻すと「押したのに何も
+      // 起きない」が不具合と区別できない（Attn は既に窓が出ていると無視される）。
+      if (msg.timedOut === true) {
+        const s = sessionsStore.get(sessionId);
+        if (s) s.notice = MSG_NO_RESPONSE;
+      }
+      setBusy(sessionId, false);
+      break;
+    }
+    // ジョブ識別子は**サーバー発だけ**（画面に触れずに取れたものが遅れて届く）。
+    // 要求する口は無いので busy も動かさない
+    case "jobinfo": {
+      const s = sessionsStore.get(sessionId);
+      if (s) s.job = msg.job;
+      break;
+    }
+    // PC コマンド（STRPCCMD）。ホストが画面に隠して送ってくるので、
+    // 何が・どこで動いたかを必ず知らせる（黙って実行しない）
+    case "pc-command": {
+      const s = sessionsStore.get(sessionId);
+      if (!s) break;
+      (s.pcCommands ??= []).push(msg.event);
+      if (s.pcCommands.length > PC_COMMAND_VIEW_LIMIT) s.pcCommands.shift();
+      s.notice = pcCommandNotice(msg.event);
+      break;
+    }
+    case "closed": {
+      const s = sessionsStore.get(sessionId);
+      if (s) s.connected = false;
+      setBusy(sessionId, false);
+      break;
+    }
+    case "error": {
+      setBusy(sessionId, false);
+      // **開いた後のエラーは操作員に見せる。** 待ちを解くだけで黙っていると、
+      // 送信が拒否されても画面は何も変わらず「Enter が効かない」としか見えない
+      // （実機で数字専用欄に `.` を入れて Enter → `FIELD_TYPE` で 1 バイトも
+      // 飛ばないまま無反応だった）。致命的なものは `closed` 側が別に扱う。
+      const s = sessionsStore.get(sessionId);
+      if (s) s.notice = wsErrorNotice(msg.code, msg.message);
+      break;
+    }
+  }
+}
+
 /** 接続を開き、セッションを stores に登録してワークスペースに追加する */
 export async function openSession(
   open: WsOpen,
@@ -200,76 +517,42 @@ export async function openSession(
               resolve(sessionId);
               break;
             }
-            // 予約（HLLAPI の Reserve）の開始・解除。**画面と別に届く**——
-            // 予約は画面を変えずに始まり・終わるため
-            case "reserved": {
-              sessionsStore.setReserved(sessionId, msg.by);
-              break;
-            }
-            case "screen": {
-              sessionsStore.updateScreen(sessionId, msg.screen);
-              client.setHiddenIndexes(hiddenIndexes(msg.screen));
-              // **施錠されたままの画面では待ちを解かない。** ホストは応答の途中でも画面を
-              // 書いてくる（時間の掛かる CALL の前置き等）。それで待ちを解くと 0.5 秒の
-              // 猶予タイマーごと潰れ、**どれだけ待たされてもスピナーが出ない**うえ、
-              // 入力プロテクトまで外れる（利用者の報告）。解くのは実際に開いた画面か
-              // `key-done`（送信の完了そのもの）だけにする。
-              if (!msg.screen.keyboardLocked) setBusy(sessionId, false);
-              break;
-            }
-            case "key-done": {
-              // 画面を変えないキーでも待ちを解く。加えて**完了時点の画面を必ず反映する**——
-              // タイムアウト復帰ではホストからの screen イベントが起きず、
-              // keyboardLocked: true の画面が残って 🔒 が消えなくなる。
-              sessionsStore.updateScreen(sessionId, msg.screen);
-              client.setHiddenIndexes(hiddenIndexes(msg.screen));
-              // 無応答のまま待ちが尽きたことは**明示する**。無言で戻すと「押したのに何も
-              // 起きない」が不具合と区別できない（Attn は既に窓が出ていると無視される）。
-              if (msg.timedOut === true) {
-                const s = sessionsStore.get(sessionId);
-                if (s) s.notice = MSG_NO_RESPONSE;
-              }
-              setBusy(sessionId, false);
-              break;
-            }
-            // ジョブ識別子は**サーバー発だけ**（画面に触れずに取れたものが遅れて届く）。
-            // 要求する口は無いので busy も動かさない
-            case "jobinfo": {
-              const s = sessionsStore.get(sessionId);
-              if (s) s.job = msg.job;
-              break;
-            }
-            // PC コマンド（STRPCCMD）。ホストが画面に隠して送ってくるので、
-            // 何が・どこで動いたかを必ず知らせる（黙って実行しない）
-            case "pc-command": {
-              const s = sessionsStore.get(sessionId);
-              if (!s) break;
-              (s.pcCommands ??= []).push(msg.event);
-              if (s.pcCommands.length > PC_COMMAND_VIEW_LIMIT) s.pcCommands.shift();
-              s.notice = pcCommandNotice(msg.event);
-              break;
-            }
-            case "closed": {
-              const s = sessionsStore.get(sessionId);
-              if (s) s.connected = false;
-              setBusy(sessionId, false);
-              break;
-            }
+            // **開く前のエラーだけは呼び出し側で受ける**（この Promise を落とす必要がある）
             case "error": {
-              setBusy(sessionId, false);
               if (!sessionId) {
+                setBusy(sessionId, false);
                 reject(new Error(`${msg.code}: ${msg.message}`));
                 break;
               }
-              // **開いた後のエラーは操作員に見せる。** 待ちを解くだけで黙っていると、
-              // 送信が拒否されても画面は何も変わらず「Enter が効かない」としか見えない
-              // （実機で数字専用欄に `.` を入れて Enter → `FIELD_TYPE` で 1 バイトも
-              // 飛ばないまま無反応だった）。致命的なものは `closed` 側が別に扱う。
-              const s = sessionsStore.get(sessionId);
-              if (s) s.notice = wsErrorNotice(msg.code, msg.message);
+              applyDisplayMessage(sessionId, client, msg);
               break;
             }
+            // 開いたあとの受信は共用の処理へ（繋ぎ直しでも同じものを通す）
+            default:
+              applyDisplayMessage(sessionId, client, msg);
           }
+        },
+        /**
+         * **接続が死んだら待ちを解く。**
+         *
+         * `closed`（サーバー発）と違い、WebSocket が閉じただけのときは何も届かない。
+         * 以前はここに口が無く、`busy` / `loading` が立ったまま残っていた——実機で
+         * 「応答待ちのスピナーが消えず、操作ログの最後は closed」という報告になった
+         * （ホストへの往復が長いほど当たりやすい）。覆いが残ると Attn / SysReq の
+         * 逃げ道も押せず、しかも押せたところで送り先はもう無い。
+         *
+         * **切れたことは必ず言う。** 黙って解くと、待っていた要求がホストに届いたのか
+         * 途中で消えたのかが利用者に分からない。
+         */
+        onClose() {
+          const s = sessionsStore.get(sessionId);
+          if (!s) return; // 利用者が閉じた（`closeSession` が先に store から消している）
+          setBusy(sessionId, false);
+          s.connected = false;
+          // **すぐ繋ぎ直しに入る。** サーバーはこの間セッションを猶予として保持しているので、
+          // 「開き直してください」と言う前にこちらで戻せる。戻せなかったときだけ
+          // `giveUpReconnect` が理由を出す（`MSG_CONNECTION_LOST` はもう使わない）
+          startReconnect(sessionId, label);
         }
       },
       label
@@ -357,6 +640,13 @@ export async function openVtSession(
               if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
               break;
           }
+        },
+        // 5250 と同じ理由（サーバー発の `closed` は届かないことがある）。VT には
+        // `busy` が無いので、状態表示だけ「切断」に落とす
+        onClose() {
+          const s = sessionsStore.get(sessionId);
+          if (s) s.connected = false;
+          vtStore.setConnected(sessionId, false, MSG_VT_CONNECTION_LOST);
         }
       },
       label
@@ -504,6 +794,16 @@ export async function openPrinterSession(
               if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
               break;
           }
+        },
+        // 5250 と同じ理由。**受信済みの帳票は消さない**——見ている途中で接続だけ
+        // 切れることがあり、消すと読みかけの帳票ごと消える
+        onClose() {
+          const s = sessionsStore.get(sessionId);
+          if (s) {
+            s.connected = false;
+            s.notice = MSG_CONNECTION_LOST;
+          }
+          setBusy(sessionId, false);
         }
       },
       label
@@ -595,8 +895,20 @@ export function sendKey(
   sysReqText?: string
 ): MandatoryFinding | undefined {
   const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  // **繋がっていなければ理由を出して止める。** `WsClient.send` は OPEN でなければ黙って
+  // 捨てるので、そのまま通すと「押したのに何も起きない」になる。フラグキー（Attn / SysReq）も
+  // 同じ——送り先が無いのだから逃げ道にならない
+  if (!s.connected) {
+    // **理由を取り違えない。** `connected` は転送が落ちたときにも、ホスト側の
+    // セッションが終わったとき（サーバー発 `closed`）にも落ちる。後者では転送は
+    // 生きているので「サーバーと繋がっていない」は嘘になる
+    const transportLost = s.reconnect !== undefined || s.reconnectFailed !== undefined;
+    s.notice = transportLost ? MSG_NOT_CONNECTED : MSG_SESSION_ENDED;
+    return;
+  }
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
-  if (!s || (inputInhibited(s) && !isFlagKey(key))) return;
+  if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
   // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
   // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
@@ -699,6 +1011,9 @@ export function submitGuiSelection(
 export function closeSession(sessionId: string): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
+  // **繋ぎ直しは待ちも飛行中の口も畳む。** 待ちだけ消しても、発火済みの試行は
+  // 走り続けて `opened` を受け取ってしまう（サーバー側は引き取り済みになる）
+  abortReconnect(sessionId);
   // 閉じた id の記憶を残さない（`setBusy` と同じものを畳む）
   const timer = loadingTimers.get(sessionId);
   if (timer) {

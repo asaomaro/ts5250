@@ -21,6 +21,18 @@ export interface WsOpen {
    * これを指定したときは他の接続指定（`system` / `host` 等）を見ない。
    */
   sessionId?: string;
+  /**
+   * **持ち主として戻る**（`sessionId` と併用したときだけ意味を持つ。
+   * `20260908-session-survives-disconnect` decisions D4）。
+   *
+   * 転送が落ちて猶予に入っているセッションを引き取り、**閉じる責任も引き継ぐ**。
+   * 既定（`false`）は従来の attach——「見に来ただけ」なので、去ってもセッションを閉じない。
+   *
+   * **意味を分けているのは、閉じる責任が逆だから。** MCP が開いた画面をブラウザで覗く
+   * 既存の使い方（見に来た人は相手の作業を殺さない）を保ったまま、回線が落ちて戻ってきた
+   * 持ち主だけがセッションを畳めるようにする。
+   */
+  resume?: boolean;
   /** セッション種別（既定 display）。printer は TN5250E プリンターセッション */
   kind?: "display" | "printer";
   /**
