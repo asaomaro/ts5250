@@ -251,6 +251,28 @@ describe("転送断からの繋ぎ直し", () => {
     expect(clients[1]!.close).toHaveBeenCalled();
   });
 
+  /**
+   * **留守中にホストが書いた画面がそのまま出る**（AC3）。
+   * サーバーの `attach` は「いまの画面」を返すので、こちらは反映するだけでよい。
+   */
+  it("繋ぎ直したら、留守中にホストが書いた画面が出る", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const later = { ...snap(), cursor: { row: 7, col: 9 } };
+
+    clients[1]!.handlers.onServerMessage({
+      type: "opened",
+      sessionId: "s1",
+      screen: later,
+      pcCommand: false
+    });
+
+    // reactive でラップされるので同一性ではなく値で見る
+    expect(s.snapshot).toStrictEqual(later);
+    expect(s.cursor).toEqual({ row: 7, col: 9 });
+  });
+
   it("繋ぎ直しの `opened` から予約状態も取り込む（覆いが実態とずれない）", async () => {
     const s = await open();
     clients[0]!.handlers.onClose?.();
