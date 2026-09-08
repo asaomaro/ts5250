@@ -272,6 +272,15 @@ export interface SessionEntry {
    */
   holderToken?: number;
   /**
+   * **一度でも持ち主が付いたか**（`claim` が立てる。以後降ろさない）。
+   *
+   * 「持ち主が去った」と「そもそも持ち主という概念で管理していない」を区別するために持つ。
+   * 前者だけが孤児回収の対象で、後者（MCP / HLLAPI が開いたセッション）は
+   * **開くときに自分で寿命を決めている**（`orphanSafeIdleTimeoutMs`）ので、
+   * こちらが上限を重ねると「引数なしのマネージャは永続」という既定を黙って壊す。
+   */
+  hadHolder?: boolean;
+  /**
    * **繋ぎ直しを待っている期限**（epoch ms）。転送が落ちたときだけ入る（D5）。
    * 期限は下の `holdTimer` が畳むが、**`sweepIdle` も保険として刈る**
    * ——タイマーを取り逃した場合に、掴んだままのセッションが残らないようにする。
@@ -434,6 +443,8 @@ export interface PrinterEntry {
   idleTimeoutMs?: IdleLimit;
   /** いまこのセッションを持っている接続（表示セッションの `holderToken` と同じ意味） */
   holderToken?: number;
+  /** 一度でも持ち主が付いたか（表示セッションの `hadHolder` と同じ意味） */
+  hadHolder?: boolean;
   /**
    * **常駐**（サービス型）。WS が切れても切らず、アイドル掃除でも消さない。
    *
@@ -1334,7 +1345,10 @@ export class SessionManager {
     // `sessionId` にはプリンターの id も入る（`onOpenPrinter`）ので、片方だけ見ると
     // **プリンターが永久に「持ち主なし」**になり、切断しても閉じなくなる
     const entry = this.sessions.get(id) ?? this.printers.get(id);
-    if (entry) entry.holderToken = token;
+    if (entry) {
+      entry.holderToken = token;
+      entry.hadHolder = true;
+    }
     return token;
   }
 
@@ -1409,18 +1423,10 @@ export class SessionManager {
   private reapHold(id: string): void {
     const entry = this.sessions.get(id);
     if (entry && this.hasViewer(id)) {
+      // **猶予を解くだけでよい。** 持ち主が戻らなかったセッションは「持ち主の居ない
+      // セッション」になるが、その寿命は `idleLimitOf` が**規則として**孤児回収の上限に
+      // 落とす（設定値そのものは書き換えない。review ラウンド3）
       this.cancelHold(id);
-      // **持ち主が戻らなかったセッションを、寿命なしで放流しない。**
-      //
-      // 猶予を解いただけだと、このセッションは**持ち主の居ない普通のセッション**になる。
-      // 見に来ただけの接続は `dispose` で閉じない側（`attached`）なので、その閲覧タブが
-      // 去っても誰も畳まず、ブラウザ経路の既定アイドル上限は `"never"`——**枠と装置記述を
-      // 握ったまま永久に残る**。
-      //
-      // 持ち主が居ないという点は MCP が開いて放置されたセッションと同じ状態なので、
-      // **同じ回収の仕組みに乗せる**（`orphanSafeIdleTimeoutMs` の根拠と同一）。
-      // エントリ個別の値は既に個別設定があるならそちらを尊重する。
-      entry.idleTimeoutMs = orphanSafeIdleTimeoutMs(entry.idleTimeoutMs);
       return;
     }
     void this.close(id).catch(() => undefined);
@@ -1640,6 +1646,33 @@ export class SessionManager {
    * 1 つ作って全部と比べると、セッション設定の値が効かない。
    * `"never"`（永続）のエントリは対象外。
    */
+  /**
+   * **このエントリに効くアイドル上限**（`20260908-session-survives-disconnect` review ラウンド3）。
+   *
+   * 設定値（エントリ個別 → マネージャ既定）に、**持ち主が居ないセッションの上限**を重ねる。
+   *
+   * 既定が `"never"`（永続）でいられる根拠は「WS の切断と心拍が孤児を回収する」ことだった。
+   * **持ち主が居なくなった瞬間、その根拠は消える**——去った接続はもう回収しに来ないし、
+   * 見に来ただけの接続は `dispose` で閉じない側なので、放っておくと枠と装置記述を
+   * 握ったまま永久に残る。そこで**持ち主不在のあいだだけ**、MCP の放置セッションと同じ
+   * 上限（`ORPHAN_IDLE_TIMEOUT_MS`）を掛ける。
+   *
+   * **設定を書き換えないのが要点。** 書き換える形にしていた頃は (a) 持ち主が戻っても
+   * 元に戻す経路が無く、(b) 有限に設定したサーバーでは上限が**延びる**という、
+   * 回収を強めるつもりの変更が緩める向きに働く穴があった。規則として重ねれば、
+   * `claim` で持ち主が戻った瞬間に自然と元の寿命へ戻り、短いほうが常に勝つ。
+   */
+  private idleLimitOf(entry: SessionEntry): IdleLimit {
+    const configured = entry.idleTimeoutMs ?? this.idleTimeoutMs;
+    // **対象は「持ち主が居て、去った」セッションだけ。**
+    // 一度も持ち主が付いていないもの（MCP / HLLAPI が開いた分）は開くときに自分で
+    // 寿命を決めており、ここで上限を重ねると「引数なしのマネージャは永続」という
+    // 既定を黙って壊す（実際に既存テストが落ちた）
+    if (entry.hadHolder !== true || entry.holderToken !== undefined) return configured;
+    if (configured === "never") return ORPHAN_IDLE_TIMEOUT_MS;
+    return Math.min(configured, ORPHAN_IDLE_TIMEOUT_MS);
+  }
+
   private sweepIdle(): void {
     const now = this.now();
     const expired = (entry: { lastActivity: number; idleTimeoutMs?: IdleLimit }): boolean => {
@@ -1662,13 +1695,19 @@ export class SessionManager {
         if (entry.heldUntil <= now) this.reapHold(id);
         continue;
       }
-      if (expired(entry)) {
+      const limit = this.idleLimitOf(entry);
+      if (limit !== "never" && entry.lastActivity < now - limit) {
         entry.recorder?.stop(); // `close` と後始末を揃える（購読を残すとリークする）
         entry.session.disconnect();
         this.sessions.delete(id);
       }
     }
     for (const [id, entry] of this.printers) {
+      // **プリンターは `idleLimitOf` を通さない**（表示セッション専用）。
+      // 猶予（`holdForReconnect`）の対象外で、転送が落ちればその場で閉じるので、
+      // 「持ち主が去って宙に浮く」状態がそもそも作れない——main と同じ扱いのままにする。
+      // `claim` はプリンターにも打つが、あれは**古いハンドラに殺させない**ためだけのもの。
+      //
       // **常駐は掃除しない。** 何も届かない状態が正常なので、
       // アイドルを「使われていない」の合図にできない（design D1 / watch-registry と同じ理屈）
       if (entry.resident) continue;

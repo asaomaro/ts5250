@@ -56,6 +56,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import {
   MSG_CONNECTION_LOST,
   MSG_NOT_CONNECTED,
+  MSG_NO_RESPONSE,
   MSG_SESSION_ENDED
 } from "../src/composables/opMessages.js";
 
@@ -426,6 +427,40 @@ describe("転送断からの繋ぎ直し", () => {
     sendKey("s1", "Enter");
 
     expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+  });
+
+  /**
+   * **切断より前の通知が居座って、切断の理由が出ないことがあってはならない**（review ラウンド3）。
+   * 守りたいのは「この切断について出した理由」であって、「何か出ていれば残す」ではない。
+   */
+  it("切断より前の通知は捨てて、切断の理由を出す", async () => {
+    const s = await open();
+    // ホスト無応答の通知が出ている状態から切れる
+    clients[0]!.handlers.onServerMessage({ type: "key-done", screen: snap(), timedOut: true });
+    expect(s.notice).toBe(MSG_NO_RESPONSE);
+
+    clients[0]!.handlers.onClose?.();
+    sendKey("s1", "Enter");
+
+    expect(s.notice).toBe(MSG_NOT_CONNECTED);
+  });
+
+  /**
+   * **打ち切った試行の口が、生きているセッションを書き換えない**（review ラウンド3）。
+   * `screen` は `updateScreen` が `connected = true` を立てるので、素通しすると
+   * はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる。
+   */
+  it("打ち切った試行から遅れて届いた画面で、接続中に戻らない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const stale = clients[1]!;
+    stale.handlers.onClose?.(); // この試行は失敗＝打ち切り
+    expect(s.connected).toBe(false);
+
+    stale.handlers.onServerMessage({ type: "screen", screen: snap() });
+
+    expect(s.connected).toBe(false);
   });
 
   it("繋がっていないあいだは送らず、**転送断だと言う**", async () => {

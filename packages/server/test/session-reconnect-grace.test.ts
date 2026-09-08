@@ -241,10 +241,15 @@ describe("猶予が明けたのに見ている人が居る場合（review ラウ
    * `dispose` で閉じない側なので、その閲覧タブが去っても誰も畳まず、ブラウザ経路の
    * 既定アイドル上限は `"never"`——枠と装置記述を握ったまま永久に残る。
    */
-  it("猶予は解けるが、孤児回収のアイドル上限が付く", async () => {
+  it("猶予は解けるが、永久には残さない（持ち主不在の上限が掛かる）", async () => {
     let t = 1_000_000;
     const mgr = makeManager({ now: () => t });
     const entry = await open(mgr);
+    // **ブラウザが開いたセッションを再現する**（`ws-handler` は open の直後に claim する）。
+    // 一度も持ち主が付かないセッション（MCP / HLLAPI）は対象外なので、ここを省くと
+    // 上限が掛からない
+    const token = mgr.claim(entry.id);
+    mgr.releaseHolder(entry.id, token);
     mgr.holdForReconnect(entry.id);
     mgr.addViewer(entry.id);
     t += DEFAULT_RECONNECT_GRACE_MS + 1;
@@ -252,11 +257,104 @@ describe("猶予が明けたのに見ている人が居る場合（review ラウ
 
     expect(mgr.size).toBe(1);
     expect(mgr.isHeld(entry.id)).toBe(false);
-    // **永久には残さない**——持ち主が居ない点は MCP の放置セッションと同じ状態
-    expect(mgr.get(entry.id).idleTimeoutMs).toBe(ORPHAN_IDLE_TIMEOUT_MS);
+    // **設定は書き換えない**——寿命は規則として重ねる（review ラウンド3）
+    expect(mgr.get(entry.id).idleTimeoutMs).toBeUndefined();
 
     t += ORPHAN_IDLE_TIMEOUT_MS + 1;
     sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+
+  /**
+   * **持ち主が戻れば元の寿命に戻る**（review ラウンド3）。
+   * 設定を書き換える形にしていた頃は、戻す経路が無く 30 分の上限を持ち続けていた。
+   */
+  it("持ち主が戻れば、持ち主不在の上限は掛からなくなる", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await open(mgr);
+    const first = mgr.claim(entry.id);
+    mgr.releaseHolder(entry.id, first);
+    mgr.holdForReconnect(entry.id);
+    mgr.addViewer(entry.id);
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr); // 猶予は明けたが、見ている人が居るので残る
+
+    mgr.claim(entry.id); // 手動の繋ぎ直しで持ち主が戻った
+    t += ORPHAN_IDLE_TIMEOUT_MS + 1;
+    sweep(mgr);
+
+    expect(mgr.size).toBe(1); // 既定は「永続」なので切られない
+    mgr.closeAll();
+  });
+
+  /**
+   * **持ち主が去れば、他に見ている人が居ても永久には残らない**（review ラウンド3）。
+   * 猶予に入らない枝（他に viewer が居る）でも同じ規則が効く。
+   */
+  it("持ち主が去ったセッションは、猶予に入らなくても上限が掛かる", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await open(mgr);
+    const token = mgr.claim(entry.id);
+    mgr.addViewer(entry.id);
+    mgr.releaseHolder(entry.id, token); // 持ち主が去った（猶予には入らなかった）
+
+    t += ORPHAN_IDLE_TIMEOUT_MS + 1;
+    sweep(mgr);
+
+    expect(mgr.size).toBe(0);
+  });
+
+  /** **短いほうが常に勝つ**（設定が長くても、持ち主が居なければ 30 分で回収する） */
+  it("設定が孤児回収より長くても、持ち主不在なら 30 分で回収する", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await mgr.open({
+      transport: new ReplayTransport(signon()),
+      host: "h",
+      idleTimeoutMs: 60 * 60_000 // 孤児回収の 30 分より**長い**設定
+    });
+    const token = mgr.claim(entry.id);
+    mgr.releaseHolder(entry.id, token);
+
+    t += ORPHAN_IDLE_TIMEOUT_MS + 1;
+    sweep(mgr);
+
+    expect(mgr.size).toBe(0);
+  });
+
+  /**
+   * **一度も持ち主が付いていないセッションは対象外**（MCP / HLLAPI が開いた分）。
+   * あちらは開くときに自分で寿命を決めているので、ここで上限を重ねると
+   * 「引数なしのマネージャは永続」という既定を黙って壊す。
+   */
+  it("一度も持ち主が付いていないセッションには上限を掛けない", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    await open(mgr); // claim しない＝MCP / HLLAPI が開いたのと同じ状態
+
+    t += ORPHAN_IDLE_TIMEOUT_MS + 1;
+    sweep(mgr);
+
+    expect(mgr.size).toBe(1);
+    mgr.closeAll();
+  });
+
+  it("設定が孤児回収より短ければ、その設定が勝つ（上限が延びない）", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await mgr.open({
+      transport: new ReplayTransport(signon()),
+      host: "h",
+      idleTimeoutMs: 5 * 60_000
+    });
+    const token = mgr.claim(entry.id);
+    mgr.releaseHolder(entry.id, token);
+
+    t += 5 * 60_000 + 1;
+    sweep(mgr);
+
     expect(mgr.size).toBe(0);
   });
 });

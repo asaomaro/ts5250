@@ -128,8 +128,14 @@ function inputInhibited(s: SessionState): boolean {
  * 「押したのに何も起きない」になる。さらに送信の口の一部は送ったあと `setBusy(true)` を
  * 立てるので、**再接続中に覆いが戻り、二度と解けなくなる**（この work が消しに来た症状）。
  *
- * **送信の入口すべてがここを通る**——1 か所にしか置かないと、経路が増えたときに漏れる
- * （実際、`sendKey` にだけ置いていた頃は GUI 選択とマクロ再生が素通りしていた）。
+ * **5250 表示セッションの送信の入口はすべてここを通る**——1 か所にしか置かないと、
+ * 経路が増えたときに漏れる（実際、`sendKey` にだけ置いていた頃は GUI 選択とマクロ再生が
+ * 素通りしていた）。
+ *
+ * **VT とプリンターの送信口（`vt-input` / `printer-*`）は通らない**。あちらは繋ぎ直しの
+ * 対象外で、切断の見せ方も自前のペインが持っている（`VtPane` の「切断されました」、
+ * `PrinterPane` の待ち受け状態）。ここへ引き込むと、対象外と決めた経路の UX を
+ * この work で作り替えることになる——**通す/通さないの境界は「繋ぎ直しの対象か」と同じ**。
  *
  * 理由は 2 つに分ける: 転送が落ちている（繋ぎ直せば戻る）／ホスト側が終わっている
  * （待っても戻らない）。同じ `connected === false` から逆の案内を出さないため。
@@ -274,6 +280,10 @@ function startReconnect(sessionId: string, label: string): void {
   // ——ここを門の内側に置いていた頃は、対象外の経路でスピナーが残った
   setBusy(sessionId, false);
   s.connected = false;
+  // **切断より前の通知は捨てる**（review ラウンド3）。`refuseIfDisconnected` は
+  // 「この切断について出した理由」を守るが、条件が「何か出ていれば」なので、
+  // 直前の `MSG_NO_RESPONSE` 等が居座ると**切断の理由が一度も出ない**
+  delete s.notice;
   // **猶予保持の対象は 5250 表示セッションだけ**（`decisions.md` D3）。
   // 3270 は 5250 と同じ `openSession` で開かれるので `kind` が付かず、素通しすると
   // `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を
@@ -424,6 +434,10 @@ function tryResume(sessionId: string, label: string, index: number): void {
           client.close();
           return;
         }
+        // **打ち切った試行の口からの更新を通さない**（review ラウンド3）。
+        // とくに `screen` は `updateScreen` が `connected = true` を立てるので、
+        // はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる
+        if (pendingResumes.get(sessionId)?.client !== client) return;
         applyDisplayMessage(sessionId, client, msg);
       },
       onClose() {
@@ -535,6 +549,8 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       const s = sessionsStore.get(sessionId);
       if (s) {
         s.connected = false;
+        // **切断より前の通知は捨てる**（`startReconnect` と同じ理由。review ラウンド3）
+        delete s.notice;
         // **ホストが本当に終わったときだけ覚える**（`WsClosed.ended`）。
         // サーバーは**心拍の死判定で猶予を張ったあとにも** `closed` を送るので、
         // 無条件に立てると「保持されているのに二度と繋ぎ直さない」うえ、
