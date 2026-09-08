@@ -121,13 +121,32 @@ describe("`ping` の見張り（半開きの検知）", () => {
     expect(closed).toBe(1);
   });
 
-  it("`close` イベントが来た場合、保険と二重に流さない", async () => {
+  /**
+   * **保険が先に流れたあと、遅れて `close` イベントが来ても二度流さない。**
+   *
+   * 順番が逆（イベントが先）だと保険は解除されるだけなので、
+   * **ラッチ（`closeNotified`）が効いていることを確かめられるのはこの順だけ**。
+   */
+  it("保険が流れたあとに `close` イベントが来ても、二重に流さない", async () => {
+    let closed = 0;
+    await connect(() => closed++);
+    socket.deliver({ type: "ping" });
+
+    vi.advanceTimersByTime(90_000 + 3_000); // 保険まで流れ切る
+    expect(closed).toBe(1);
+
+    socket.fire("close", {}); // ブラウザが遅れてイベントを飛ばしてきた
+
+    expect(closed).toBe(1);
+  });
+
+  it("`close` イベントが先に来た場合、保険は流れない", async () => {
     let closed = 0;
     await connect(() => closed++);
     socket.deliver({ type: "ping" });
 
     vi.advanceTimersByTime(90_000);
-    socket.fire("close", {}); // 遅れてイベントが飛んできた
+    socket.fire("close", {}); // 見張りの直後にイベントが飛んできた
     vi.advanceTimersByTime(3_000);
 
     expect(closed).toBe(1);

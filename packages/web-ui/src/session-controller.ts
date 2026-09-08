@@ -229,7 +229,18 @@ function abortReconnect(sessionId: string): void {
  */
 function startReconnect(sessionId: string, label: string): void {
   const s = sessionsStore.get(sessionId);
-  if (!s || s.kind === "printer") return; // 猶予保持の対象は 5250 表示セッションだけ
+  if (!s) return;
+  // **切断として見せるのは、繋ぎ直すかどうかに関わらず先に済ませる。**
+  // 下の門で戻る場合（対象外・諦め済み・走行中）も応答待ちは解けていなければならない
+  // ——ここを門の内側に置いていた頃は、対象外の経路でスピナーが残った
+  setBusy(sessionId, false);
+  s.connected = false;
+  // **猶予保持の対象は 5250 表示セッションだけ**（`decisions.md` D3）。
+  // プリンターは `kind`、3270 は `meta.terminal` で見分ける——3270 は 5250 と同じ
+  // `openSession` で開かれるので `kind` が付かず、素通しすると `resume` が
+  // サーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を見せた末に
+  // 生のエラー文が出る）。VT は開く関数から別（`openVtSession`）なのでここへ来ない
+  if (s.kind === "printer" || s.meta?.terminal === "3270") return;
   // **もう無いと言われたセッションには行かない。** 5 段のはしごを丸ごと回し直しても
   // 同じ理由で断られるだけ（`giveUpReconnect` の `"gone"`）
   if (s.reconnectFailed === "gone") return;
@@ -238,8 +249,6 @@ function startReconnect(sessionId: string, label: string): void {
   // ——`activitySentAt` を state に置いたのと同じ理由
   if (s.reconnect !== undefined) return;
   abortReconnect(sessionId); // 取り残しがあれば畳んでから始める
-  s.connected = false;
-  setBusy(sessionId, false);
   delete s.reconnectFailed;
   scheduleReconnect(sessionId, label, 0);
 }
@@ -533,7 +542,7 @@ export async function openSession(
           }
         },
         /**
-         * **接続が死んだら待ちを解く。**
+         * **接続が死んだら待ちを解き、繋ぎ直しに入る。**
          *
          * `closed`（サーバー発）と違い、WebSocket が閉じただけのときは何も届かない。
          * 以前はここに口が無く、`busy` / `loading` が立ったまま残っていた——実機で
@@ -541,17 +550,13 @@ export async function openSession(
          * （ホストへの往復が長いほど当たりやすい）。覆いが残ると Attn / SysReq の
          * 逃げ道も押せず、しかも押せたところで送り先はもう無い。
          *
-         * **切れたことは必ず言う。** 黙って解くと、待っていた要求がホストに届いたのか
-         * 途中で消えたのかが利用者に分からない。
+         * **切れたことは黙って飲み込まない。** ただし言い方は OIA の再接続表示に任せる
+         * ——サーバーはこの間セッションを猶予として保持しているので、
+         * 「開き直してください」と言う前にこちらで戻せる（だから 5250 では
+         * `MSG_CONNECTION_LOST` を使わない）。戻せなかったときだけ `giveUpReconnect` が
+         * 理由を出す。待ちの解除と切断表示は `startReconnect` が先頭で済ませる。
          */
         onClose() {
-          const s = sessionsStore.get(sessionId);
-          if (!s) return; // 利用者が閉じた（`closeSession` が先に store から消している）
-          setBusy(sessionId, false);
-          s.connected = false;
-          // **すぐ繋ぎ直しに入る。** サーバーはこの間セッションを猶予として保持しているので、
-          // 「開き直してください」と言う前にこちらで戻せる。戻せなかったときだけ
-          // `giveUpReconnect` が理由を出す（`MSG_CONNECTION_LOST` はもう使わない）
           startReconnect(sessionId, label);
         }
       },
@@ -641,12 +646,23 @@ export async function openVtSession(
               break;
           }
         },
-        // 5250 と同じ理由（サーバー発の `closed` は届かないことがある）。VT には
-        // `busy` が無いので、状態表示だけ「切断」に落とす
+        /**
+         * **VT は繋ぎ直さない**（`20260908-session-survives-disconnect` の対象外）。
+         *
+         * 猶予保持は 5250 表示セッションだけで、VT はサーバー側の `dispose` が転送断で
+         * その場で閉じる（画面を共有する経路がそもそも無い）。戻る先が無いので、
+         * 5250 と違ってここでは「開き直してください」を出す。
+         *
+         * **理由は上書きしない**——ホスト都合で閉じた場合は `closed` が詳しい理由を
+         * 添えて先に届いており（`vtStore.closeReason`）、汎用文で潰すと
+         * 「切断されました」の 5 文字だけに戻る。
+         */
         onClose() {
           const s = sessionsStore.get(sessionId);
-          if (s) s.connected = false;
-          vtStore.setConnected(sessionId, false, MSG_VT_CONNECTION_LOST);
+          if (!s) return; // 利用者が閉じた（store から消えている）
+          s.connected = false;
+          const known = vtStore.get(sessionId)?.closeReason;
+          vtStore.setConnected(sessionId, false, known ?? MSG_VT_CONNECTION_LOST);
         }
       },
       label
@@ -795,15 +811,26 @@ export async function openPrinterSession(
               break;
           }
         },
-        // 5250 と同じ理由。**受信済みの帳票は消さない**——見ている途中で接続だけ
-        // 切れることがあり、消すと読みかけの帳票ごと消える
+        /**
+         * **プリンターは繋ぎ直さない**（`20260908-session-survives-disconnect` の対象外）。
+         *
+         * 理由は「戻る先が無い」ことではなく、**`resume` の口が無い**こと——
+         * サーバーの `attach` は 5250 専用で、プリンターの繋ぎ直しは設定（`ref`）で
+         * 開き直す別の経路（`20260801-printer-attach-by-ref`）に載っている。
+         *
+         * **`notice` は書くが、いまのプリンターペインはそれを描いていない**
+         * （`PrinterPane` は `state` と `serviceError` を出す）。利用者に届くのは
+         * タブの接続状態だけ——ここは残課題として `retro.md` に送る。書き込み自体は
+         * `SessionState` の規約どおりなので、描く側が足りていないだけ。
+         *
+         * **受信済みの帳票は消さない**——見ている途中で接続だけ切れることがあり、
+         * 消すと読みかけの帳票ごと消える。
+         */
         onClose() {
           const s = sessionsStore.get(sessionId);
-          if (s) {
-            s.connected = false;
-            s.notice = MSG_CONNECTION_LOST;
-          }
-          setBusy(sessionId, false);
+          if (!s) return; // 利用者が閉じた（store から消えている）
+          s.connected = false;
+          s.notice = MSG_CONNECTION_LOST;
         }
       },
       label
