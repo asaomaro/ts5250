@@ -122,6 +122,25 @@ function inputInhibited(s: SessionState): boolean {
 }
 
 /**
+ * **繋がっていない相手へ送ろうとしたら止めて理由を出す**（`20260908-session-survives-disconnect`）。
+ *
+ * `WsClient.send` は OPEN でなければ**黙って捨てる**ので、素通しすると
+ * 「押したのに何も起きない」になる。さらに送信の口の一部は送ったあと `setBusy(true)` を
+ * 立てるので、**再接続中に覆いが戻り、二度と解けなくなる**（この work が消しに来た症状）。
+ *
+ * **送信の入口すべてがここを通る**——1 か所にしか置かないと、経路が増えたときに漏れる
+ * （実際、`sendKey` にだけ置いていた頃は GUI 選択とマクロ再生が素通りしていた）。
+ *
+ * 理由は 2 つに分ける: 転送が落ちている（繋ぎ直せば戻る）／ホスト側が終わっている
+ * （待っても戻らない）。同じ `connected === false` から逆の案内を出さないため。
+ */
+function refuseIfDisconnected(s: SessionState): boolean {
+  if (s.connected) return false;
+  s.notice = s.endedByHost ? MSG_SESSION_ENDED : MSG_NOT_CONNECTED;
+  return true;
+}
+
+/**
  * **施錠中でも送れるキー**（5250 のフラグレコード）。
  *
  * Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では応答待ちの
@@ -155,10 +174,12 @@ function pcCommandNotice(e: PcCommandView): string {
 }
 
 /**
- * **繋ぎ直しの待ち時間**（ms）。1 秒から倍々に伸ばし、5 回で打ち切る（累計 31 秒）。
+ * **繋ぎ直しの待ち時間**（ms）。1 秒から倍々に伸ばし、5 回で打ち切る。
  *
- * サーバー側の猶予（既定 60 秒）の内側に収まるようにしてある——猶予が切れたあとに
- * 叩いても「そのセッションはもう無い」と言われるだけで、回線に無駄な負荷を掛ける。
+ * **サーバー側の猶予（`DEFAULT_RECONNECT_GRACE_MS` ＝ 90 秒）の内側に収める**。
+ * 最悪ケースの壁時計は **(1+2+4+8+16) × 1.2 ＝ 37.2 秒 ＋ 5 × `RESUME_ATTEMPT_TIMEOUT_MS`
+ * ＝ 87.2 秒**。猶予が切れたあとに叩いても「そのセッションはもう無い」と言われるだけで、
+ * 回線に無駄な負荷を掛ける。**ここを増やすなら猶予も見直すこと**（decisions D12）。
  *
  * **倍々にするのは、繋がらない相手を叩き続けないため。** サーバーの再起動では
  * 全タブが同時に落ちるので、間隔を空けないと復帰しかけたサーバーを揃って殴りに行く。
@@ -189,14 +210,17 @@ const RESUME_ATTEMPT_TIMEOUT_MS = 10_000;
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * **いま飛んでいる繋ぎ直しの口**。
+ * **いま飛んでいる繋ぎ直しの試行**。
  *
  * 待ちタイマーを畳むだけでは足りない——発火済みの試行は自分の `WsClient` を持って
  * 走っており、**利用者がタブを閉じたあとに `opened` が返ると、サーバー側では
  * `cancelHold` と `claim` が済んでいる**（＝閉じたはずのセッションが持ち主不在で生き残る）。
  * 掴んでおいて、閉じるときにこちらからも畳む。
+ *
+ * **口だけでなく打ち切りの手も持つ。** `close()` するだけだと、遅れて届く `onClose` が
+ * 「次の間隔へ」を走らせ、**止めたはずのはしごが 1 段書き戻る**。
  */
-const pendingResumes = new Map<string, WsClient>();
+const pendingResumes = new Map<string, { client: WsClient; cancel: () => void }>();
 
 /** 繋ぎ直しの待ちを畳む（成功・打ち切り・利用者が閉じた、のいずれでも） */
 function clearReconnectTimer(sessionId: string): void {
@@ -213,7 +237,8 @@ function abortReconnect(sessionId: string): void {
   const inflight = pendingResumes.get(sessionId);
   if (inflight) {
     pendingResumes.delete(sessionId);
-    inflight.close();
+    inflight.cancel(); // 遅れて届く `onClose` で next() が走らないようにしてから閉じる
+    inflight.client.close();
   }
 }
 
@@ -236,11 +261,18 @@ function startReconnect(sessionId: string, label: string): void {
   setBusy(sessionId, false);
   s.connected = false;
   // **猶予保持の対象は 5250 表示セッションだけ**（`decisions.md` D3）。
-  // プリンターは `kind`、3270 は `meta.terminal` で見分ける——3270 は 5250 と同じ
-  // `openSession` で開かれるので `kind` が付かず、素通しすると `resume` が
-  // サーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を見せた末に
-  // 生のエラー文が出る）。VT は開く関数から別（`openVtSession`）なのでここへ来ない
+  // 3270 は 5250 と同じ `openSession` で開かれるので `kind` が付かず、素通しすると
+  // `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を
+  // 見せた末に生のエラー文が出る）。VT とプリンターは開く関数から別で、
+  // それぞれ自前の `onClose` に載っているのでここへは来ない（`kind` は保険）
   if (s.kind === "printer" || s.meta?.terminal === "3270") return;
+  // **見に来ただけのタブは持ち主にならない**（decisions D4）。`resume` は座を引き取る
+  // 電文なので、ここを通すと**瞬断 1 回で相手のセッションの持ち主になり**、
+  // 次にこのタブを閉じたときに相手の作業ごと畳む
+  if (s.attachedOnly) return;
+  // **ホストが終わっているなら繋ぎ直さない。** 戻る先が無いうえ、はしごを回すと
+  // 「サーバーと繋がっていません」という嘘の理由を出すことになる
+  if (s.endedByHost) return;
   // **もう無いと言われたセッションには行かない。** 5 段のはしごを丸ごと回し直しても
   // 同じ理由で断られるだけ（`giveUpReconnect` の `"gone"`）
   if (s.reconnectFailed === "gone") return;
@@ -281,6 +313,9 @@ function giveUpReconnect(sessionId: string, notice: string, reason: "retry" | "g
   abortReconnect(sessionId);
   const s = sessionsStore.get(sessionId);
   if (!s) return;
+  // **諦めた先でも応答待ちを残さない。** 解いているのが `startReconnect` の先頭だけだと、
+  // 諦めるまでの間に何かが `setBusy(true)` を立てるとスピナーが永久に残る
+  setBusy(sessionId, false);
   delete s.reconnect;
   s.reconnectFailed = reason;
   s.connected = false;
@@ -296,7 +331,7 @@ function tryResume(sessionId: string, label: string, index: number): void {
     if (settled) return;
     settled = true;
     clearTimeout(deadline);
-    if (pendingResumes.get(sessionId) === client) pendingResumes.delete(sessionId);
+    if (pendingResumes.get(sessionId)?.client === client) pendingResumes.delete(sessionId);
     scheduleReconnect(sessionId, label, index + 1);
   };
   // **黙り込んだ試行を捨てる**（`RESUME_ATTEMPT_TIMEOUT_MS` の注記）
@@ -370,7 +405,14 @@ function tryResume(sessionId: string, label: string, index: number): void {
     },
     label
   );
-  pendingResumes.set(sessionId, client);
+  pendingResumes.set(sessionId, {
+    client,
+    // **止めたら止まる**——打ち切ったあとに遅れて `onClose` が来ても何もしない
+    cancel: () => {
+      settled = true;
+      clearTimeout(deadline);
+    }
+  });
   client
     .connect()
     .then(() => client.send({ type: "open", sessionId, resume: true }))
@@ -458,7 +500,12 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
     }
     case "closed": {
       const s = sessionsStore.get(sessionId);
-      if (s) s.connected = false;
+      if (s) {
+        s.connected = false;
+        // **ホストが終わったことを覚える。** このあと転送も落ちると、区別が付かないまま
+        // 繋ぎ直しのはしごを回して「サーバーと繋がっていません」と**嘘の理由**を出す
+        s.endedByHost = true;
+      }
       setBusy(sessionId, false);
       break;
     }
@@ -510,6 +557,8 @@ export async function openSession(
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
                 pcCommandEnabled: msg.pcCommand,
+                // **繋いだだけか、自分で開いたか**（decisions D4）。前者は繋ぎ直さない
+                ...(open.sessionId !== undefined ? { attachedOnly: true } : {}),
                 // **留守中に実行された分から始める。** `pc-command` の push は
                 // 繋いでいる間しか届かないので、閉じている間の実行は
                 // ここで受け取らないと**誰にも知らされないまま消える**
@@ -850,7 +899,11 @@ export async function openPrinterSession(
  * 自動化が落ちると `Release` が来ないので、期限（2 分）を待たずに取り戻す口が要る。
  */
 export function breakReservation(sessionId: string): void {
-  sessionsStore.get(sessionId)?.client.send({ type: "reserve-break" });
+  const s = sessionsStore.get(sessionId);
+  // **繋がっていなければ送らない。** 死んだ口へ投げても捨てられるだけで、
+  // 覆いが外れたように見えて実際は外れていない、という食い違いになる
+  if (!s || refuseIfDisconnected(s)) return;
+  s.client.send({ type: "reserve-break" });
 }
 
 export function setPrinterOutput(sessionId: string, enabled: boolean): void {
@@ -926,14 +979,7 @@ export function sendKey(
   // **繋がっていなければ理由を出して止める。** `WsClient.send` は OPEN でなければ黙って
   // 捨てるので、そのまま通すと「押したのに何も起きない」になる。フラグキー（Attn / SysReq）も
   // 同じ——送り先が無いのだから逃げ道にならない
-  if (!s.connected) {
-    // **理由を取り違えない。** `connected` は転送が落ちたときにも、ホスト側の
-    // セッションが終わったとき（サーバー発 `closed`）にも落ちる。後者では転送は
-    // 生きているので「サーバーと繋がっていない」は嘘になる
-    const transportLost = s.reconnect !== undefined || s.reconnectFailed !== undefined;
-    s.notice = transportLost ? MSG_NOT_CONNECTED : MSG_SESSION_ENDED;
-    return;
-  }
+  if (refuseIfDisconnected(s)) return;
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
   if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
@@ -987,6 +1033,7 @@ export function sendKeyWithFields(
 ): void {
   const s = sessionsStore.get(sessionId);
   if (!s || s.busy) return;
+  if (refuseIfDisconnected(s)) return;
   delete s.notice;
   s.client.send({
     type: "key",
@@ -1011,9 +1058,12 @@ export function selectGuiChoice(
   choiceIndex: number,
   selected: boolean
 ): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s) return;
+  if (refuseIfDisconnected(s)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない
   noteUnrecordable(sessionId);
-  sessionsStore.get(sessionId)?.client.send({ type: "gui-select", fieldId, choiceIndex, selected });
+  s.client.send({ type: "gui-select", fieldId, choiceIndex, selected });
 }
 
 /**
@@ -1029,6 +1079,7 @@ export function submitGuiSelection(
 ): void {
   const s = sessionsStore.get(sessionId);
   if (!s || inputInhibited(s)) return;
+  if (refuseIfDisconnected(s)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない
   noteUnrecordable(sessionId);
   s.client.send({ type: "gui-submit", fieldId, ...(cursor ? { cursor } : {}) });

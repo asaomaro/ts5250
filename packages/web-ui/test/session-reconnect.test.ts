@@ -45,7 +45,13 @@ vi.mock("../src/ws-client.js", () => ({
   }
 }));
 
-import { openSession, sendKey, retryReconnect, closeSession } from "../src/session-controller.js";
+import {
+  openSession,
+  sendKey,
+  retryReconnect,
+  closeSession,
+  submitGuiSelection
+} from "../src/session-controller.js";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { MSG_NOT_CONNECTED, MSG_SESSION_ENDED } from "../src/composables/opMessages.js";
 
@@ -305,6 +311,54 @@ describe("転送断からの繋ぎ直し", () => {
     expect(s.reconnect).toBeUndefined();
     await runAttempt(60_000);
     expect(clients).toHaveLength(1); // 試行を 1 回も出していない
+  });
+
+  /**
+   * **見に来ただけのタブは持ち主にならない**（`decisions.md` D4）。
+   *
+   * MCP / HLLAPI が開いた画面を後から覗くタブが瞬断で `resume` を送ると、座を引き取って
+   * しまう。次にそのタブを閉じたときに**相手の作業ごと畳む**ことになる。
+   */
+  it("既存セッションへ繋いだだけのタブは、繋ぎ直しに行かない", async () => {
+    const p = openSession({ type: "open", sessionId: "s1" }, "t");
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    const s = sessionsStore.get("s1")!;
+    expect(s.attachedOnly).toBe(true);
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.connected).toBe(false); // 切れたことは見せる
+    expect(s.reconnect).toBeUndefined();
+    await runAttempt(60_000);
+    expect(clients).toHaveLength(1); // `resume` を 1 通も出していない
+  });
+
+  /**
+   * **ホストが終わったあとに転送も落ちても、繋ぎ直さない。**
+   * 戻る先が無いうえ、はしごを回すと「サーバーと繋がっていません」という嘘の理由が出る。
+   */
+  it("ホスト側が終わっているセッションは繋ぎ直さない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "host closed" });
+
+    clients[0]!.handlers.onClose?.();
+
+    expect(s.reconnect).toBeUndefined();
+    sendKey("s1", "Enter");
+    expect(s.notice).toBe(MSG_SESSION_ENDED);
+  });
+
+  it("**送信の口はどれも繋がっていなければ止める**（GUI 選択で覆いが戻らない）", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    clients[0]!.send.mockClear();
+
+    submitGuiSelection("s1", 1);
+
+    expect(clients[0]!.send).not.toHaveBeenCalled();
+    expect(s.busy).toBeFalsy(); // 送った側が立てる busy が戻っていない
+    expect(s.notice).toBe(MSG_NOT_CONNECTED);
   });
 
   it("繋がっていないあいだは送らず、**転送断だと言う**", async () => {

@@ -204,3 +204,31 @@
   汎用文で上書きする / 対応: 修正済（既存の理由を優先する。T11・ラウンド1）
 - [nit][conv:-] プリンター経路の `setBusy(sessionId, false)` は空振り（プリンターに送信の口が無い） /
   対応: 修正済（落とした。T11・ラウンド1）
+
+## タスクをまたぐ点検（`protocol-check.md`「(b)」の `cross`）
+
+- [must][conv:-] **「見に来ただけのタブ」が瞬断 1 回で持ち主に昇格する**——`resume` を送る門が
+  printer/3270 しか見ておらず、MCP が開いた画面を覗くタブも座を引き取ってしまう。
+  次にそのタブを閉じると相手の作業ごと畳む（D4 が守ると宣言した不変条件の破れ） /
+  対応: 修正済（`attachedOnly` を `WsOpen.sessionId` の有無から刻んで門で弾く。
+  回帰テスト＋変異注入で確認。decisions D13）
+- [must][conv:-] **「繋がっていなければ送らない」が `sendKey` 1 か所にしかない**。
+  `sendKeyWithFields` / `selectGuiChoice` / `submitGuiSelection` / `breakReservation` は素通りし、
+  うち 2 経路は送信後に `setBusy(true)` を立てるので**再接続中に覆いが戻り、
+  `giveUpReconnect` が解かないため永久に残る**（この work が消しに来た症状の再現） /
+  対応: 修正済（共通の `refuseIfDisconnected` を送信の入口すべてに置き、
+  `giveUpReconnect` でも待ちを解く。変異注入で確認）
+- [should][conv:-] 猶予 60 秒とクライアントの再試行予算が噛み合っていない（試行ごとの
+  10 秒上限を足した時点で最悪 87.2 秒になり、後ろ 1〜2 段が空振りになる） /
+  対応: 修正済（猶予を 90 秒にし、足し算を両側の定数コメントに書いた。decisions D12）
+- [should][conv:-] 半開き検知の 90 秒が両側に裸のリテラルで二重にあり、実検知の時刻も
+  最大 60 秒ずれる（design の「ほぼ同時」は成り立たない） /
+  対応: 一部修正（ずれの向きは安全側＝クライアントが先。90 秒の猶予がそのずれを覆うことを
+  定数コメントに書いた。**定数の共有は見送り**——web-ui にサーバーの実行時定数を import すると
+  ブラウザ側へ Node 依存を引き込む。retro へ送る）
+- [nit][conv:-] `startReconnect` の `kind === "printer"` は到達不能（プリンターは別の `onClose`） /
+  対応: 修正済（保険であることをコメントに明記）
+- [nit][conv:-] `abortReconnect` が飛行中の試行の `settled` を落とせず、遅れて届く `onClose` が
+  止めたはずのはしごを 1 段書き戻す / 対応: 修正済（打ち切りの手も一緒に持つ）
+- [nit][conv:-] `connected === false` の理由の持ち主が割れており、ホスト終了後に転送も落ちると
+  `sendKey` が嘘の理由を出す / 対応: 修正済（`endedByHost` を足して出し分ける。decisions D13）

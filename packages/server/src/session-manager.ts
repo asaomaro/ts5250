@@ -83,17 +83,26 @@ export type IdleLimit = number | "never";
 export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 /**
- * **転送が落ちたセッションを保持する既定の猶予**（ms。`20260908-session-survives-disconnect` D5）。
+ * **転送が落ちたセッションを保持する既定の猶予**（ms。`20260908-session-survives-disconnect`
+ * D5 / D12）。
  *
  * ブラウザ ↔ サーバーの WebSocket が落ちただけでホストの対話ジョブまで畳むと、画面遷移の
  * 途中状態ごと失われる（実機報告）。この間に繋ぎ直せば同じセッションへ戻れる。
  *
  * **有限であることが要**。ブラウザ経路の既定アイドル上限は `"never"` で、その根拠は
  * 「WS の切断と心拍が孤児を回収する」こと（`orphanSafeIdleTimeoutMs`）——猶予はその前提を
- * 外すので、掃除役に任せず自分で畳む。クライアント側の再試行は累計 31 秒で尽きるので、
- * その倍を取ってある。長くするほど `maxSessions` の枠とホストの装置記述を掴む時間も延びる。
+ * 外すので、掃除役に任せず自分で畳む。
+ *
+ * **値はクライアントの再試行が尽きるまでの壁時計から決める**（web-ui の
+ * `session-controller`）。最悪ケースは
+ * **待ち時間 (1+2+4+8+16) × 1.2 ＝ 37.2 秒 ＋ 試行 5 回 × 上限 10 秒 ＝ 87.2 秒**。
+ * 60 秒だと後ろ 1〜2 段が猶予切れに落ちるだけの空振りになるので、これを覆う 90 秒にしてある
+ * （偶然だがサーバーの心拍の死判定と同値）。**どちらかの定数を動かすなら、この足し算を
+ * 見直すこと**——テストは `session-reconnect-grace.test.ts` が上限側だけを固定している。
+ *
+ * 長くするほど `maxSessions` の枠とホストの装置記述を掴む時間も延びる。
  */
-export const DEFAULT_RECONNECT_GRACE_MS = 60_000;
+export const DEFAULT_RECONNECT_GRACE_MS = 90_000;
 
 /** 常駐プリンターの既定の上限。表示の上限（8）とは別枠（design D3） */
 export const DEFAULT_MAX_RESIDENT_PRINTERS = 4;

@@ -175,6 +175,23 @@ export interface SessionState {
    */
   reconnectFailed?: "retry" | "gone";
   /**
+   * **見に来ただけのタブ**（既存セッションへ `sessionId` で繋いだ）。
+   *
+   * MCP / HLLAPI が開いた画面を後から覗く経路（セッション管理の「開く」）で立つ。
+   * **繋ぎ直しの対象から外すために持つ**——ここを見ないと、瞬断 1 回で「見に来た人」が
+   * 持ち主に昇格し、次にそのタブを閉じたときに**相手の作業ごと畳む**
+   * （`20260908-session-survives-disconnect` decisions D4 が守ると宣言した不変条件）。
+   */
+  attachedOnly?: boolean;
+  /**
+   * **ホスト側のセッションが終わった**（サーバー発の `closed` を受けた）。
+   *
+   * `connected === false` の理由が「転送が落ちた」なのか「ホストが終わった」なのかを
+   * 区別するために持つ。前者は繋ぎ直せば戻るが、後者は待っても戻らない——
+   * **同じ `connected` から逆の案内を出す**ことになるので、状態として分けておく。
+   */
+  endedByHost?: boolean;
+  /**
    * 在席の合図（`activity`）を最後に送った時刻。間引きの基準
    * （`session-controller.ts` の `noteActivity`）。
    *
