@@ -1,0 +1,13 @@
+schema: 11
+slug: session-reconnect-freeze
+current: retro
+approved: [requirements, research, design, tasks, coding, test, review, deliver, retro]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: session-lifecycle.md
+backlogItem: **繋ぎ直しに成功したあと画面が固まる**（20260908-session-lifetime-rules-fold の decisions.md D13）
+harnessRevDelivered: unknown

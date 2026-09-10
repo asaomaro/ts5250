@@ -25,8 +25,11 @@ import {
   type SessionStateInit
 } from "./stores/sessions.js";
 import {
+  acceptsFrame,
+  acceptsFromSession,
   canSendToHost,
   isCurrentAttempt,
+  isSessionClient,
   resumeVerdict,
   type Attempt,
   type Resumability
@@ -203,7 +206,7 @@ function pcCommandNotice(e: PcCommandView): string {
  * **サーバー側の猶予（`DEFAULT_RECONNECT_GRACE_MS` ＝ 90 秒）の内側に収める**。
  * 最悪ケースの壁時計は **(1+2+4+8+16) × 1.2 ＝ 37.2 秒 ＋ 5 × `RESUME_ATTEMPT_TIMEOUT_MS`
  * ＝ 87.2 秒**。猶予が切れたあとに叩いても「そのセッションはもう無い」と言われるだけで、
- * 回線に無駄な負荷を掛ける。**ここを増やすなら猶予も見直すこと**（decisions D12）。
+ * 回線に無駄な負荷を掛ける。**ここを増やすなら猶予も見直すこと**（`20260908-session-survives-disconnect` の `decisions.md` D12）。
  *
  * **倍々にするのは、繋がらない相手を叩き続けないため。** サーバーの再起動では
  * 全タブが同時に落ちるので、間隔を空けないと復帰しかけたサーバーを揃って殴りに行く。
@@ -294,7 +297,8 @@ function abortReconnect(sessionId: string): void {
  * `openPrinterSession` が状態を組み立てる時点で `"not-resumable"` を直に置く。
  */
 function displayResumability(meta: SessionMeta | undefined, attachedToExisting: boolean): Resumability {
-  // **見に来ただけのタブは繋ぎ直さない**（座を引き取らない約束。前 work の D4 / D13）
+  // **見に来ただけのタブは繋ぎ直さない**（座を引き取らない約束。
+  // `20260908-session-survives-disconnect` の D4 / D13）
   if (attachedToExisting) return "not-resumable";
   return meta?.terminal === "3270" ? "not-resumable" : "resumable";
 }
@@ -308,7 +312,7 @@ function displayResumability(meta: SessionMeta | undefined, attachedToExisting: 
  * サーバー側はこの間セッションを猶予として保持している。繋ぎ直せれば
  * **同じホストセッションの続き**から操作できる。
  *
- * **打ちかけの入力（`edits`）は捨てる**（前 work の D11。当初は「残る」と設計していた）。
+ * **打ちかけの入力（`edits`）は捨てる**（`20260908-session-survives-disconnect` の `decisions.md` D11。当初は「残る」と設計していた）。
  * 繋ぎ直しで返るのは留守中にホストが書いた「いまの画面」で、こちらが打っていた画面とは
  * 限らない——残したまま反映すると**別の画面の欄に打鍵が載る**。`updateScreen` が
  * 新画面で `edits` を捨てる既存の規則がそのまま効く。
@@ -423,8 +427,16 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
     {
       onServerMessage(msg: WsServerMessage) {
         if (msg.type === "opened") {
-          // **他の 2 経路と同じガードを置く。** いま到達しないのは「閉じたソケットには
-          // message が配送されない」というブラウザ仕様に依っているだけで、コードからは読めない
+          // **ここだけは `isCurrentAttempt` のまま**（`acceptsFrame` に寄せない）。問いが違う——
+          // あちらは「この口から届いたフレームを受け取ってよいか」、ここは
+          // 「**この試行の成功を採用してよいか**」。寄せると現役の口からの 2 度目の `opened` で
+          // `attempts.delete` と `setClient` が二重に走る（`acceptsFrame` の注記も同じことを言う）。
+          //
+          // **打ち切った試行の `opened` はここまで届きうる**（仕組みは `session-link.ts` の
+          // `acceptsFrame` の注記。以前ここには「閉じたソケットには配送されない」と書いてあったが、
+          // **その根拠は誤りだった**——`20260910-session-reconnect-freeze` の `decisions.md` D12）。
+          // 届いても `isCurrentAttempt` が偽なので弾かれる——**ガードが効いている**のであって、
+          // 配送が来ないのではない
           if (!isCurrentAttempt(attempts.get(sessionId), a)) return;
           a.settled = true;
           if (a.timer !== undefined) clearTimeout(a.timer);
@@ -439,8 +451,9 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
             return;
           }
           client.setSessionId(sessionId);
-          // **差し替えるのは口だけ。** `edits`（打ちかけの入力）には触らない
-          cur.client = client;
+          // **差し替えるのは口だけ。** `edits`（打ちかけの入力）には触らない。
+          // 差し替えは store 経由——`markRaw` の不変条件をここに写さないため（`setClient` の注記）
+          sessionsStore.setClient(sessionId, client);
           sessionsStore.markConnected(sessionId);
           delete cur.notice;
           // 留守中にホストが書いた画面がそのまま返る（サーバーの `attach` が現在の画面を返す）
@@ -477,10 +490,18 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           client.close();
           return;
         }
-        // **打ち切った試行の口からの更新を通さない**（前 work の review ラウンド3）。
-        // とくに `screen` は `updateScreen` が `connected = true` を立てるので、
-        // はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる
-        if (!isCurrentAttempt(attempts.get(sessionId), a)) return;
+        // **受け取ってよい口からの更新だけを通す**（R4 の `acceptsFrame`）。通す口は 2 つ——
+        // **まだ代表の試行**と、**成功して現役になり、いま繋がっているこの口**。
+        //
+        // 打ち切った試行を通さないのは、とくに `screen` が `updateScreen` 経由で
+        // 「繋がっている」に戻すため。はしごが回っている最中に接続中へ戻ると、以後の送信が
+        // 死んだ口へ落ちる（`20260908-session-survives-disconnect` の review ラウンド3）。
+        //
+        // **現役の口を通すのは、ここが代表の試行だけを見ていたから**——`opened` は成功時に
+        // 試行を退役させるので、繋ぎ直しに成功した瞬間から**以後の全フレームが落ちていた**
+        // （`20260908-session-lifetime-rules-fold` の `decisions.md` D13）
+        const held = sessionsStore.get(sessionId);
+        if (!acceptsFrame(attempts.get(sessionId), a, held?.client, client, held?.link)) return;
         applyDisplayMessage(sessionId, client, msg);
       },
       onClose() {
@@ -489,8 +510,16 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           return;
         }
         // 一度は繋がったのに、また切れた。**最初からやり直す**
-        // （差し替え済みの口が自分のときだけ——古い試行の後始末で巻き込まない）
-        if (sessionsStore.get(sessionId)?.client === client) startReconnect(sessionId, label);
+        // （セッションがいま抱えている口が自分のときだけ——古い試行の後始末で巻き込まない）。
+        // **問いは共通ガードの第 2 項と同じ**なので、同じ述語で答える（生の `===` を置かない）。
+        //
+        // **この門は保険で、外しても現行のテストは落ちない**（`20260910-session-reconnect-freeze` の
+        // review ラウンド2 で実測）。畳まれた口の `close` がここへ落ちても、その先の
+        // `startReconnect` は `resumeVerdict` が `running` を返して弾く／セッションが消えていれば
+        // 先頭で早期 return する。**効いている項が別に在る**という意味で
+        // `isCurrentAttempt` の `!a.settled` と同じ性質——テストではなくこの注記が唯一の記録。
+        // `openSession` 側の同じ門（`add` の差し替えで踏める）はテストで固定してある
+        if (isSessionClient(sessionsStore.get(sessionId)?.client, client)) startReconnect(sessionId, label);
       }
     },
     label
@@ -522,7 +551,8 @@ export function retryReconnect(sessionId: string): void {
 }
 
 /**
- * **`opened` 以外の 5250 受信処理**（`sessionId` が未確定のうちにも呼ばれうる）。
+ * **`opened` 以外の 5250 受信処理**。呼び手は 2 つ——`tryResume` の共通ガードと
+ * `applyFromSessionClient` で、**どちらも先に「受け取ってよい口か」を確かめている**。
  *
  * 新規に開いたときと**繋ぎ直したとき**で同じ処理が要る（`20260908-session-survives-disconnect`）。
  * 分岐を 2 か所に写すと、片方だけ直された瞬間に「繋ぎ直したタブでだけ通知が来ない」という
@@ -609,6 +639,21 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
   }
 }
 
+/**
+ * **セッションの口からの更新だけを通してから共用の処理へ渡す**（R4 の `acceptsFromSession`）。
+ *
+ * 初回接続の口には `Attempt` が無いので `tryResume` の共通ガード（`acceptsFrame`）を呼べないが、
+ * **塞ぐ穴は同じ**——1 回目のはしごを駆動するのはこの口で、`SessionState.client` は繋ぎ直しが
+ * 成功するまで差し替わらない。門が無いと、はしごの最中に届いたフレームが `updateScreen` へ落ちて
+ * 「繋がっている」へ戻し、以後の打鍵が非 OPEN のソケットへ黙って捨てられる
+ * （届く仕組みは `session-link.ts` の `acceptsFrame` の注記。`20260910-session-reconnect-freeze` の `decisions.md` D13）。
+ */
+function applyFromSessionClient(sessionId: string, client: WsClient, msg: WsServerMessage): void {
+  const held = sessionsStore.get(sessionId);
+  if (!acceptsFromSession(held?.link, held?.client, client)) return;
+  applyDisplayMessage(sessionId, client, msg);
+}
+
 /** 接続を開き、セッションを stores に登録してワークスペースに追加する */
 export async function openSession(
   open: WsOpen,
@@ -636,8 +681,9 @@ export async function openSession(
                 cursor: msg.screen.cursor,
                 link: { state: "connected" },
                 // **繋ぎ直しの適性は開く時点で決まる**（`session-link.ts`）。
-                // 3270 はサーバー側に共有・再取得の経路が無く（前 work の D3）、
-                // 見に来ただけのタブは座を引き取らない約束なので繋ぎ直せない（D4 / D13）
+                // 3270 はサーバー側に共有・再取得の経路が無く（`20260908-session-survives-disconnect` の D3）、
+                // 見に来ただけのタブは座を引き取らない約束なので繋ぎ直せない
+                // （`20260908-session-survives-disconnect` の D4 / D13）
                 resumability: displayResumability(meta, open.sessionId !== undefined),
                 readOnly: open.readOnly ?? false,
                 // **後から入ったタブでも今の予約状態から始める**（開始の push は聞き逃している）
@@ -671,12 +717,12 @@ export async function openSession(
                 reject(new Error(`${msg.code}: ${msg.message}`));
                 break;
               }
-              applyDisplayMessage(sessionId, client, msg);
+              applyFromSessionClient(sessionId, client, msg);
               break;
             }
             // 開いたあとの受信は共用の処理へ（繋ぎ直しでも同じものを通す）
             default:
-              applyDisplayMessage(sessionId, client, msg);
+              applyFromSessionClient(sessionId, client, msg);
           }
         },
         /**
@@ -695,7 +741,11 @@ export async function openSession(
          * 理由を出す。待ちの解除と切断表示は `startReconnect` が先頭で済ませる。
          */
         onClose() {
-          startReconnect(sessionId, label);
+          // **この口がまだセッションのものである間だけ回し直す**（`tryResume` の `onClose` と同じ問い）。
+          // 同じ id で開き直すと `sessionsStore.add` が口ごと差し替えるので、あとから届く
+          // 古い口の `close` で**健全な口を抱えたままはしごが始まる**（`20260910-session-reconnect-freeze` の
+          // `decisions.md` D14）。門が付いた今それをやると、画面が追従せず固まる側へ倒れる
+          if (isSessionClient(sessionsStore.get(sessionId)?.client, client)) startReconnect(sessionId, label);
         }
       },
       label

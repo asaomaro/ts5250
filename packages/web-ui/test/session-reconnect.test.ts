@@ -57,7 +57,8 @@ import {
   MSG_CONNECTION_LOST,
   MSG_NOT_CONNECTED,
   MSG_NO_RESPONSE,
-  MSG_SESSION_ENDED
+  MSG_SESSION_ENDED,
+  wsErrorNotice
 } from "../src/composables/opMessages.js";
 
 function snap(keyboardLocked = false): ScreenSnapshot {
@@ -432,7 +433,8 @@ describe("転送断からの繋ぎ直し", () => {
   });
 
   /**
-   * **切断より前の通知が居座って、切断の理由が出ないことがあってはならない**（review ラウンド3）。
+   * **切断より前の通知が居座って、切断の理由が出ないことがあってはならない**
+   * （`20260908-session-survives-disconnect` の review ラウンド3）。
    * 守りたいのは「この切断について出した理由」であって、「何か出ていれば残す」ではない。
    */
   it("切断より前の通知は捨てて、切断の理由を出す", async () => {
@@ -448,7 +450,8 @@ describe("転送断からの繋ぎ直し", () => {
   });
 
   /**
-   * **打ち切った試行の口が、生きているセッションを書き換えない**（review ラウンド3）。
+   * **打ち切った試行の口が、生きているセッションを書き換えない**
+   * （`20260908-session-survives-disconnect` の review ラウンド3）。
    * `screen` は `updateScreen` が `connected = true` を立てるので、素通しすると
    * はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる。
    */
@@ -463,6 +466,207 @@ describe("転送断からの繋ぎ直し", () => {
     stale.handlers.onServerMessage({ type: "screen", screen: snap() });
 
     expect(s.connected).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // **繋ぎ直しに成功した口からのフレームは通す**（前 work `20260908-session-lifetime-rules-fold`
+  // の `decisions.md` D13）。
+  //
+  // 上の「打ち切った試行」と**対**になる節。あちらは弾く側、こちらは通す側で、答えるのは
+  // 同じ 1 つの述語。成功時に試行を退役させるので、「この試行が代表か」だけを見ていると
+  // **以後の全フレームが落ちる**——利用者から見ると「再接続したのに画面が更新されず、
+  // 応答待ちの覆いとスピナーが消えない」。
+  // ---------------------------------------------------------------------------
+
+  /** 繋ぎ直しが成功したところまで進める（口は `clients[1]`） */
+  async function reconnected() {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    return s;
+  }
+
+  it("繋ぎ直しに成功した口から届いた画面が反映される", async () => {
+    const s = await reconnected();
+    const later = { ...snap(), cursor: { row: 12, col: 34 } };
+
+    clients[1]!.handlers.onServerMessage({ type: "screen", screen: later });
+
+    expect(s.snapshot).toStrictEqual(later);
+    expect(s.cursor).toEqual({ row: 12, col: 34 });
+  });
+
+  it("繋ぎ直しに成功した口から届いた `key-done` で応答待ちが解ける", async () => {
+    const s = await reconnected();
+    sendKey("s1", "Enter");
+    expect(s.busy).toBe(true);
+
+    clients[1]!.handlers.onServerMessage({ type: "key-done", screen: snap() });
+
+    expect(s.busy).toBe(false);
+  });
+
+  /**
+   * **画面以外も通す。** 予約を落とすと覆いが実態とずれ、PC コマンドを落とすと
+   * 「黙って実行しない」が繋ぎ直しでだけ破れ、`error` を落とすと送信拒否が黙る。
+   */
+  it("繋ぎ直しに成功した口から届いた予約・PC コマンド・ジョブ・エラーも通る", async () => {
+    const s = await reconnected();
+
+    clients[1]!.handlers.onServerMessage({ type: "reserved", by: "macro" });
+    expect(s.reservedBy).toBe("macro");
+
+    clients[1]!.handlers.onServerMessage({
+      type: "pc-command",
+      event: { at: 2, command: "WRKACTJOB", wait: false, hostname: "pc" }
+    });
+    expect(s.pcCommands).toHaveLength(1);
+
+    clients[1]!.handlers.onServerMessage({ type: "jobinfo", job: { name: "WEBEMU02", user: "SUZUKI" } });
+    expect(s.job?.name).toBe("WEBEMU02");
+
+    // **文言リテラルではなく写像関数と突き合わせる**（AGENTS.md「利用者に見えるメッセージ」）。
+    // `toBeDefined()` だと、3 つ前の `pc-command` が立てた通知で緑になってしまう
+    clients[1]!.handlers.onServerMessage({ type: "error", code: "FIELD_TYPE", message: "数字のみ" });
+    expect(s.notice).toBe(wsErrorNotice("FIELD_TYPE", "数字のみ"));
+  });
+
+  it("繋ぎ直しに成功した口から `closed` が届いたら、切断として記録される", async () => {
+    const s = await reconnected();
+
+    clients[1]!.handlers.onServerMessage({ type: "closed", ended: true });
+
+    expect(s.connected).toBe(false);
+  });
+
+  /**
+   * **はしごの最中は、前回成功した口からのフレームも通さない**
+   * （`20260910-session-reconnect-freeze` の review ラウンド1 の must）。
+   *
+   * `SessionState.client` は繋ぎ直しが成功するまで差し替わらないので、はしごが回っている間ずっと
+   * 「セッションが抱えている口」の判定は真のまま。**そこを `connected` の門で塞いでいる**
+   * ——通すと `updateScreen` が「繋がっている」へ戻し、以後の打鍵が非 OPEN のソケットへ落ちて
+   * 黙殺され、待ちだけが残る。
+   *
+   * **配送は絵空事ではない**（仕組みは `session-link.ts` の `acceptsFrame` の注記）。
+   */
+  it("はしごの最中は、前回成功した口から届いた画面で「接続中」に戻らない", async () => {
+    const s = await reconnected();
+    const before = { ...s.cursor };
+    clients[1]!.handlers.onClose?.(); // 半開きの検知 → はしごへ
+    expect(s.connected).toBe(false);
+
+    clients[1]!.handlers.onServerMessage({
+      type: "screen",
+      screen: { ...snap(), cursor: { row: 5, col: 5 } }
+    });
+
+    expect(s.connected).toBe(false);
+    expect(s.cursor).toEqual(before);
+  });
+
+  /**
+   * **初回接続の口も、はしごの最中は通さない**（`20260910-session-reconnect-freeze` の review ラウンド2 の must）。
+   *
+   * **1 回目のはしごを駆動するのは必ずこの口**なので、ここが空いていると
+   * 上の門（繋ぎ直しの口の側）を塞いだ意味が半分無くなる。
+   */
+  it("初回接続の口も、はしごの最中は画面で「接続中」に戻さない", async () => {
+    const s = await open();
+    const before = { ...s.cursor };
+    clients[0]!.handlers.onClose?.();
+    expect(s.connected).toBe(false);
+
+    clients[0]!.handlers.onServerMessage({
+      type: "screen",
+      screen: { ...snap(), cursor: { row: 7, col: 7 } }
+    });
+
+    expect(s.connected).toBe(false);
+    expect(s.cursor).toEqual(before);
+  });
+
+  /**
+   * **`error` の枝も同じ門を通る**（`20260910-session-reconnect-freeze` の review ラウンド2 の must）。
+   * 通す側と落とす側の両方を見る——片方だけだと門を外しても気づけない。
+   */
+  it("初回接続の口の `error` は、繋がっている間は通り、はしごの最中は通らない", async () => {
+    const s = await open();
+
+    clients[0]!.handlers.onServerMessage({ type: "error", code: "FIELD_TYPE", message: "数字のみ" });
+    expect(s.notice).toBe(wsErrorNotice("FIELD_TYPE", "数字のみ"));
+
+    clients[0]!.handlers.onClose?.(); // はしごへ（`startReconnect` が通知を捨てる）
+    expect(s.notice).toBeUndefined();
+
+    clients[0]!.handlers.onServerMessage({ type: "error", code: "FIELD_TYPE", message: "数字のみ" });
+
+    expect(s.notice).toBeUndefined();
+  });
+
+  /**
+   * **畳まれた試行の口が遅れて閉じても、はしごを回し直さない**（`20260910-session-reconnect-freeze` の review ラウンド2）。
+   *
+   * `abortReconnect` は畳むときに `settled` を立てるので、その口の `close` は
+   * 「一度は繋がったのに、また切れた」の枝へ落ちる。
+   *
+   * **効いているのは口の同一性の門ではなく `resumeVerdict` の `running`**（実測: 門だけを
+   * 外してもこのテストは緑のまま）。門のほうは保険として置いてあり、その旨は
+   * `session-controller.ts` の当該箇所に注記がある。ここが固定するのは**振る舞い**——
+   * 畳まれた口の `close` で、走っているはしごが最初から回し直されないこと。
+   */
+  it("畳まれた試行の口が遅れて閉じても、はしごを回し直さない", async () => {
+    await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000); // clients[1] が飛行中
+    retryReconnect("s1"); // 押し直し＝前の試行を畳んで最初から
+    await runAttempt(1_000); // clients[2] が飛行中
+    const n = clients.length;
+
+    clients[1]!.handlers.onClose?.(); // 畳まれた口の close が遅れて届いた
+    await runAttempt(1_000);
+
+    expect(clients).toHaveLength(n);
+  });
+
+  /**
+   * **開き直したあとの、古い口の切断でははしごを始めない**（`20260910-session-reconnect-freeze` の `decisions.md` D14）。
+   *
+   * `sessionsStore.add` は同じ id で口ごと差し替えるので、遅れて届く古い口の `close` を
+   * 素通しすると**健全な口を抱えたままはしごが始まる**。門が付いた今それが起きると、
+   * 画面が追従せずに固まる側へ倒れる。
+   */
+  it("同じ id で開き直したあと、古い口の切断でははしごを始めない", async () => {
+    await open();
+    const p = openSession({ type: "open", host: "h" }, "t");
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    expect(sessionsStore.get("s1")!.connected).toBe(true);
+
+    clients[0]!.handlers.onClose?.(); // 古い口の切断が遅れて届いた
+
+    expect(sessionsStore.get("s1")!.connected).toBe(true);
+    expect(sessionsStore.get("s1")!.reconnect).toBeUndefined();
+  });
+
+  /**
+   * **繋ぎ直しは 2 度目も回る**（`20260910-session-reconnect-freeze` の `decisions.md` D7）。
+   *
+   * `onClose` が「差し替え済みの口が自分か」で見分けるので、差し替えた口が Vue の
+   * プロキシになっていると**成功後は必ず偽**になり、はしごが二度と回らない。
+   * 上のフレームの遮断と同じ根から出た 2 つ目の壊れ方で、こちらは口の同一性そのものを見る。
+   */
+  it("繋ぎ直しに成功したあと再び切れたら、繋ぎ直しのはしごが回る", async () => {
+    const s = await reconnected();
+    expect(s.connected).toBe(true);
+
+    clients[1]!.handlers.onClose?.();
+
+    expect(s.connected).toBe(false);
+    expect(s.reconnect).toEqual({ attempt: 1, max: 5 });
+    await runAttempt(1_000);
+    expect(clients).toHaveLength(3); // 2 度目の試行の口が生まれた
   });
 
   it("繋がっていないあいだは送らず、**転送断だと言う**", async () => {

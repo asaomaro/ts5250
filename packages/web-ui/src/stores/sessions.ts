@@ -363,6 +363,20 @@ export const sessionsStore = reactive({
   },
 
   /**
+   * **口を差し替える**（繋ぎ直しの成功）。無い id では何もしない。
+   *
+   * **`markRaw` は store に閉じる**（生成は `add`・差し替えはここ）。同じ不変条件——外部オブジェクトを
+   * Vue のリアクティブ化から外す——を呼ぶ側にも書くと片方だけ忘れる。**実際に忘れられていた**:
+   * 繋ぎ直しの差し替えが素のまま入るため読み戻すとプロキシになり、**口の同一性で答える判定**
+   * （`session-link.ts` の `isSessionClient`）が**成功後は必ず偽**になり、繋ぎ直しに成功したあと
+   * 再び切れてもはしごが回らなかった（`20260910-session-reconnect-freeze` の `decisions.md` D7）。
+   */
+  setClient(id: string, client: WsClient): void {
+    const s = this.byId.get(id);
+    if (s) s.client = markRaw(client);
+  },
+
+  /**
    * **繋がった**（繋ぎ直しの成功・新画面の到着）。無い id では何もしない。
    */
   markConnected(id: string): void {
@@ -442,10 +456,29 @@ export const sessionsStore = reactive({
     //
     // **旧より広い遷移になっている**——旧は `connected = true` だけで `reconnect` /
     // `reconnectFailed` を残したが、union では `connected` になると理由も消える。
-    // 差が出るのは「はしごが走っている最中に画面が来る」場合だけで、そこは
-    // `session-controller` の `tryResume` が**代表していない試行からの更新を弾く**
-    // （打ち切った試行の `screen` が「接続中」へ戻すのを防ぐ既存のガード）ので到達しない。
-    // 到達しない組合せを型で表現できなくした、という `decisions.md` D10 と同じ性質。
+    // 差が出るのは「はしごが走っている最中に画面が来る」場合だけ。そこを塞ぐのは
+    // `session-controller` の `tryResume` の共通ガード（`session-link.ts` の `acceptsFrame`）で、
+    // **打ち切った試行からの更新は弾かれ続ける**——代表の試行でも、セッションが抱えている口でも
+    // ないため（`s.client` への代入は `add` と `setClient` の 2 か所だけで、`setClient` は
+    // 繋ぎ直しが成功したときにしか呼ばれない）。
+    //
+    // **`acceptsFrame` の第 2 項は `connected` の門を持つ**ので、はしごが回っている間は
+    // セッションの口からのフレームも通らない（`20260910-session-reconnect-freeze` の
+    // `decisions.md` D12）。門が無いと、`SessionState.client` は成功まで差し替わらないため
+    // **はしごの最中ずっと第 2 項が真**になり、死にかけの口からの `screen` がここへ届いて
+    // 「繋がっている」へ戻していた（**配送が実在する仕組み**は `session-link.ts` の
+    // `acceptsFrame` の注記に 1 か所だけ置いてある）。
+    //
+    // **残るのは 1 つだけ**: **代表の試行**（第 1 項）から `opened` より前に、ここへ入る枝
+    // （`screen` と `key-done` の 2 つ）が来る場合。畳み込み前のガード（`pendingResumes` との
+    // 突き合わせ。`20260908-session-lifetime-rules-fold` の `decisions.md` D13 が現物を引く）でも
+    // 同じだったので、本 work で空いた穴ではない。
+    //
+    // **初回接続の口も同じ門を通る**（`applyFromSessionClient`）。以前はここが素通しで、
+    // **1 回目のはしごだけ無防備**だった（`20260910-session-reconnect-freeze` の `decisions.md` D13）。
+    //
+    // 到達しない組合せを型で表現できなくした、という `20260908-session-lifetime-rules-fold` の
+    // `decisions.md` D10 と同じ性質。
     applyLink(s, { to: "connected" });
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
