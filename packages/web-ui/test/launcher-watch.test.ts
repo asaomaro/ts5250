@@ -148,7 +148,8 @@ describe("dtaqwatch の接続", () => {
       snapshot: undefined,
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { close: () => {}, send: () => {} } as unknown as SessionState["client"]
     });

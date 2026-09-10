@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import SessionInfo from "../src/components/SessionInfo.vue";
-import { sessionsStore, type PcCommandView, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type PcCommandView, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 
 /**
  * PC コマンド（STRPCCMD）の表示。
@@ -15,16 +15,17 @@ function addSession(
   pcCommandEnabled = true
 ): string {
   const id = `s-${Math.random().toString(36).slice(2)}`;
-  sessionsStore.add({
+  sessionsStore.add(createSessionState({
     sessionId: id,
     label: "テスト",
     edits: new Map(),
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: {} as never,
     pcCommandEnabled,
     ...(pcCommands !== undefined ? { pcCommands } : {})
-  } as unknown as SessionState);
+  } as unknown as SessionStateInit));
   return id;
 }
 

@@ -62,7 +62,8 @@ function seed(send: (m: unknown) => void): void {
     snapshot: snap(),
     edits: new Map(),
     cursor: { row: 20, col: 7 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send } as unknown as WsClient
   });
@@ -257,7 +258,7 @@ describe("EmulatorPane のシステム要求行", () => {
     await nextTick();
     expect(w.find(".sysreq").exists()).toBe(true);
 
-    sessionsStore.get(SID)!.connected = false;
+    sessionsStore.markLost(SID, "transport");
     await nextTick();
     expect(w.find(".sysreq").exists()).toBe(false);
     w.unmount();

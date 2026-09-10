@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
-import type { SessionState } from "../src/stores/sessions.js";
+import { createSessionState, type SessionState } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
 import { MSG_BY_REASON } from "../src/composables/opMessages.js";
 
@@ -20,16 +20,17 @@ function snap(): ScreenSnapshot {
 
 
 function state(): SessionState {
-  return {
+  return createSessionState({
     sessionId: "s",
     label: "t",
     snapshot: snap(),
     edits: new Map(),
     cursor: { row: 3, col: 5 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: {} as WsClient
-  };
+  });
 }
 
 describe("StatusBar のカーソル位置表示（ACS 相当）", () => {

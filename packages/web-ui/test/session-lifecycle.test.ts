@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState } from "../src/stores/sessions.js";
 import { systemsStore } from "../src/stores/systems.js";
 import { workspaceStore } from "../src/stores/workspace.js";
 
@@ -18,17 +18,18 @@ import { workspaceStore } from "../src/stores/workspace.js";
  * 報告されたが、原因は切断ではなくメニューから 2 本目を開いてしまうことだった。
  */
 function live(sessionId: string, configRef: string): SessionState {
-  return {
+  return createSessionState({
     sessionId,
     label: sessionId,
     configRef,
     snapshot: undefined,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { close: () => {}, send: () => {} } as unknown as SessionState["client"]
-  };
+  });
 }
 
 beforeEach(() => {

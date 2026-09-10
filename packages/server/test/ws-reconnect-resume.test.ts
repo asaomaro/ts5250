@@ -153,7 +153,7 @@ describe("resume: 持ち主として戻る", () => {
   it("resume 無しの attach は従来どおり（見に来ただけ。閉じる責任を持たない）", async () => {
     const mgr = new InjectingManager(() => new ReplayTransport(signon()));
     // **見に来た人しか WS を持っていない状態で確かめる。** 開いた側の接続を残すと
-    // 「他に見ている人が居る」で先に弾かれ、`attached` の区別を素通ししてしまう
+    // 「他に見ている人が居る」で先に弾かれ、「見に来ただけ」（`link.role`）の区別を素通ししてしまう
     const entry = await mgr.open({ host: "h" });
     const viewer = conn(mgr);
     await viewer.c.handle(JSON.stringify({ type: "open", sessionId: entry.id }));
@@ -271,6 +271,37 @@ describe("猶予の対象は 5250 表示セッションだけ（AC8）", () => {
     first.c.onSocketClose();
     expect(mgr.size).toBe(1);
     expect(mgr.isHeld(first.id)).toBe(false);
+    mgr.closeAll();
+  });
+});
+
+/**
+ * **同じ WS 接続を使い回したときの役割**（`20260908-session-lifetime-rules-fold` D9）。
+ *
+ * `close` メッセージは `dispose` するだけで WS を閉じない（`ws-handler.ts` の `case "close"`）。
+ * つまり 1 本の接続が「見に来ただけ」→ 後始末 →「自分で開く」と役割を変えられる。
+ *
+ * **畳み込み前は役割がリセットされなかった**——`dispose` が `sessionId` と `holderToken` は
+ * 戻すのに `attached` を戻さず、一度 viewer になった接続は以後永久に viewer 扱いだった。
+ * その状態で自分のセッションを開くと、閉じる責任を持つ者が居なくなり**孤児になる**。
+ * `link`（id ＋ 役割）を 1 欄に畳んだことで、id と一緒に役割も戻るようになった。
+ */
+describe("同じ接続を使い回したときの役割", () => {
+  it("**viewer として繋いだあと後始末しても、次に自分で開けば持ち主になる**（孤児を残さない）", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    // WS を持たない相手（MCP / HLLAPI）が開いたセッション
+    const shared = (await mgr.open({ host: "h" })).id;
+    const { c } = conn(mgr);
+
+    await c.handle(JSON.stringify({ type: "open", sessionId: shared })); // 見に来ただけ
+    await c.handle(JSON.stringify({ type: "close" })); // 後始末。WS は開いたまま
+    expect(mgr.size, "見に来ただけの接続が相手のセッションを閉じた").toBe(1);
+
+    await c.handle(JSON.stringify({ type: "open", host: "h" })); // 今度は自分で開く＝持ち主
+    expect(mgr.size).toBe(2);
+    await c.handle(JSON.stringify({ type: "close" }));
+    // **役割が viewer のまま残っていると、ここで閉じられず孤児になる**
+    expect(mgr.size, "自分で開いたセッションを閉じられていない（役割が戻っていない）").toBe(1);
     mgr.closeAll();
   });
 });

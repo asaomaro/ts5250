@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import VtPane from "../src/components/VtPane.vue";
 import { vtStore } from "../src/stores/vt.js";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 import type { WsVtFrame } from "@ts5250/server";
 
 /**
@@ -37,17 +37,18 @@ function open(over: Partial<WsVtFrame> = {}, opts: { readOnly?: boolean } = {}) 
     },
     { encoding: "utf-8", ibmI: false, hostEchoes: true }
   );
-  sessionsStore.add({
+  sessionsStore.add(createSessionState({
     sessionId: id,
     label: "vt",
     snapshot: undefined,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: opts.readOnly ?? false,
     client: { send: (m: Record<string, unknown>) => sent.push(m) },
     meta: { terminal: "vt" }
-  } as unknown as SessionState);
+  } as unknown as SessionStateInit));
   return { id, w: mount(VtPane, { props: { sessionId: id, focused: true } }) };
 }
 
@@ -199,8 +200,7 @@ describe("打鍵", () => {
 
   it("切断後は送らない", async () => {
     const { id, w } = open();
-    const s = sessionsStore.get(id);
-    if (s) s.connected = false;
+    sessionsStore.markLost(id, "transport");
     await w.trigger("keydown", { key: "a" });
     expect(sent).toEqual([]);
     w.unmount();
@@ -232,11 +232,12 @@ describe("案内", () => {
       { rows: 2, cols: 10, cursor: { row: 0, col: 0, visible: true }, alternate: false, title: "", styles: [], lines: [] },
       { encoding: "utf-8", ibmI: false, hostEchoes: false }
     );
-    sessionsStore.add({
+    sessionsStore.add(createSessionState({
       sessionId: id, label: "vt", snapshot: undefined, edits: new Map(),
-      cursor: { row: 1, col: 1 }, connected: true, readOnly: false,
+      cursor: { row: 1, col: 1 }, link: { state: "connected" },
+      resumability: "resumable", readOnly: false,
       client: { send: () => undefined }, meta: { terminal: "vt" }
-    } as unknown as SessionState);
+    } as unknown as SessionStateInit));
     const w = mount(VtPane, { props: { sessionId: id, focused: true } });
     expect(w.text()).toContain("エコー");
     w.unmount();

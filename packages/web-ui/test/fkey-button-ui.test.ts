@@ -38,7 +38,8 @@ function seed(snap: ScreenSnapshot, send: (m: unknown) => void = () => {}): void
   sessionsStore.order = [];
   sessionsStore.add({
     sessionId: SID, label: "t", snapshot: snap, edits: new Map(), cursor: snap.cursor,
-    connected: true, readOnly: false, client: { send } as unknown as WsClient,
+    link: { state: "connected" },
+    resumability: "resumable", readOnly: false, client: { send } as unknown as WsClient,
   });
 }
 

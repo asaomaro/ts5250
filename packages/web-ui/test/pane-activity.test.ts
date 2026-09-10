@@ -50,7 +50,8 @@ function seed(): void {
   sessionsStore.order = [];
   sessionsStore.add({
     sessionId: SID, label: "t", snapshot: snap(), edits: new Map(),
-    cursor: { row: 1, col: 1 }, connected: true, readOnly: false,
+    cursor: { row: 1, col: 1 }, link: { state: "connected" },
+ resumability: "resumable", readOnly: false,
     client: { send, setHiddenIndexes: () => {} } as unknown as WsClient
   });
 }

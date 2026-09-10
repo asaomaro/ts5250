@@ -27,7 +27,7 @@ vi.mock("../src/session-controller.js", () => ({
 import ServicesPane from "../src/components/ServicesPane.vue";
 import { servicesStore } from "../src/stores/services.js";
 import { systemsStore } from "../src/stores/systems.js";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 import { workspaceStore } from "../src/stores/workspace.js";
 import { useOpenConfigured } from "../src/composables/openConfigured.js";
 
@@ -124,7 +124,7 @@ describe("サービス一覧から帳票を開く", () => {
 
   it("**既に開いていれば 2 本目を開かず、そのタブへ移る**", async () => {
     await seed();
-    sessionsStore.add({
+    sessionsStore.add(createSessionState({
       sessionId: "prt-1",
       label: "帳票",
       kind: "printer",
@@ -132,11 +132,12 @@ describe("サービス一覧から帳票を開く", () => {
       snapshot: undefined,
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: true,
       reports: [],
       client: {} as SessionState["client"]
-    } as SessionState);
+    } as unknown as SessionStateInit));
     workspaceStore.addSession("prt-1", "srv:sys");
     workspaceStore.addSession("svc:services");
     const w = await mountPane();

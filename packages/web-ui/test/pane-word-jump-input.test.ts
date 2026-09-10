@@ -45,7 +45,8 @@ function seed(fields: Field[], cells: Cell[][], edits = new Map<number, string>(
   sessionsStore.order = [];
   sessionsStore.add({
     sessionId: SID, label: "t", snapshot, edits,
-    cursor: { row: 1, col: 1 }, connected: true, readOnly: false, client: { send: () => {} } as unknown as WsClient
+    cursor: { row: 1, col: 1 }, link: { state: "connected" },
+ resumability: "resumable", readOnly: false, client: { send: () => {} } as unknown as WsClient
   });
 }
 

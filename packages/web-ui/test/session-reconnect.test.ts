@@ -353,7 +353,8 @@ describe("転送断からの繋ぎ直し", () => {
     clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
     await p;
     const s = sessionsStore.get("s1")!;
-    expect(s.attachedOnly).toBe(true);
+    // 旧 `attachedOnly` は `resumability` に畳んだ（`20260908-session-lifetime-rules-fold`）
+    expect(s.resumability).toBe("not-resumable");
 
     clients[0]!.handlers.onClose?.();
 
@@ -390,7 +391,8 @@ describe("転送断からの繋ぎ直し", () => {
   it("`ended` の無い `closed`（サーバーの後始末）では繋ぎ直しを止めない", async () => {
     const s = await open();
     clients[0]!.handlers.onServerMessage({ type: "closed", reason: "heartbeat timeout" });
-    expect(s.endedByHost).toBeFalsy();
+    // 旧 `endedByHost` は `link` の `lost/hostEnded` に畳んだ。**ここは立っていないこと**を見る
+    expect(s.link).toEqual({ state: "lost", cause: "transport" });
 
     clients[0]!.handlers.onClose?.();
 

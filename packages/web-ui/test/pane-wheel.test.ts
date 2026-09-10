@@ -38,7 +38,8 @@ function seed(locked: boolean): ReturnType<typeof vi.fn> {
     snapshot,
     edits: new Map(),
     cursor: { row: 3, col: 5 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send } as unknown as WsClient
   });

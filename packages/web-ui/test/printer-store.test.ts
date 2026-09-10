@@ -1,20 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState } from "../src/stores/sessions.js";
 
 function printerState(id: string): SessionState {
-  return {
+  return createSessionState({
     sessionId: id,
     label: id,
     kind: "printer",
     snapshot: undefined,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: true,
     reports: [],
     client: {} as unknown as SessionState["client"],
     meta: { host: "pub400.com", deviceName: "PRT_TEST", ccsid: 1399, sessionType: "printer" }
-  };
+  });
 }
 
 describe("sessionsStore: プリンター未読・メタ", () => {

@@ -1,4 +1,20 @@
 import { randomUUID } from "node:crypto";
+import {
+  beginHold,
+  claimHolder,
+  decideDisposition,
+  decideHoldExpiry,
+  endHold,
+  isHeldAt,
+  lifetimeOf,
+  noHolder,
+  releaseHolder as releaseHolderRule,
+  type ConnRole,
+  type Disposition,
+  type HolderState,
+  type HoldState,
+  type IdleLimit
+} from "./session-lifetime.js";
 import { As400Error } from "@ts5250/base";
 import { CommandConnection, listJobs } from "@ts5250/hostserver";
 import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@ts5250/tn5250";
@@ -66,13 +82,11 @@ export interface OpenOptions extends ConnectOptions {
   idleTimeoutMs?: IdleLimit;
 }
 
-/**
- * アイドルタイムアウトの内部表現。ms、または `"never"`（＝切らない）。
- *
- * **`0` / `null` を「切らない」の印にしない**——未設定・転記漏れと見分けが付かなくなる
- * （spec 方針2）。設定ファイル側は「分」で持ち、`idleTimeoutToMs()` でここへ変換する。
- */
-export type IdleLimit = number | "never";
+// **アイドル上限の型は `session-lifetime.ts` が持つ**（寿命の規則と同じ場所に置く。
+// 「なぜこの形か」もそちらの JSDoc へ移した）。ここは再エクスポートだけ——
+// `packages/server/test/session-idle-timeout.test.ts` がここから型を取っており、
+// 移動でその入口を変えないため（`src` からの輸入は無い）
+export type { IdleLimit } from "./session-lifetime.js";
 
 /**
  * 切断を通知しない入口（MCP）に使うアイドル上限（ms）。
@@ -259,8 +273,8 @@ export interface SessionEntry {
   /** このセッションのアイドルタイムアウト（`OpenOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
   /**
-   * **いまこのセッションを持っている接続**（`claim` が発行する単調増加の番号。
-   * `20260908-session-survives-disconnect` decisions D7）。
+   * **このセッションの持ち主の状態**（`20260908-session-survives-disconnect` の D7 / D10）。
+   * 「いま誰が持っているか」は `claim` が発行する単調増加の番号（`holder.token`）で表す。
    *
    * `viewers`（見ている人の数）とは別軸で、**畳む責任が誰にあるか**を指す。
    * 半開きの回線では「クライアントが先に見切って繋ぎ直す」一方、サーバー側の古いハンドラは
@@ -268,25 +282,26 @@ export interface SessionEntry {
    * 記録しておかないと、**新しい接続が復帰した直後に古いハンドラがそのセッションを閉じる**
    * （`ws-handler.dispose`）。
    *
-   * **`SessionReservation.holder`（予約の持ち主＝表示名）とは別物**なので名前を分けてある。
-   */
-  holderToken?: number;
-  /**
-   * **一度でも持ち主が付いたか**（`claim` が立てる。以後降ろさない）。
+   * **`SessionReservation.holder`（予約の持ち主＝表示名）とは別物**。
    *
-   * 「持ち主が去った」と「そもそも持ち主という概念で管理していない」を区別するために持つ。
-   * 前者だけが孤児回収の対象で、後者（MCP / HLLAPI が開いたセッション）は
-   * **開くときに自分で寿命を決めている**（`orphanSafeIdleTimeoutMs`）ので、
-   * こちらが上限を重ねると「引数なしのマネージャは永続」という既定を黙って壊す。
+   * **持ち主に関する状態はこの 1 欄だけ**（`20260908-session-lifetime-rules-fold`）。
+   * 「いま誰が持っているか」と「一度でも持ち主が付いたか」を独立フラグに分けていた頃は、
+   * 2 つの組み合わせを読む判定が 12〜15 か所に散り、片方だけ直すと隣が壊れた。
+   * 規則は `session-lifetime.ts` にある。
    */
-  hadHolder?: boolean;
+  holder: HolderState;
   /**
-   * **繋ぎ直しを待っている期限**（epoch ms）。転送が落ちたときだけ入る（D5）。
+   * **繋ぎ直しを待っている状態**（転送が落ちたときだけ。前 work の D5 / D12）。
+   *
    * 期限は下の `holdTimer` が畳むが、**`sweepIdle` も保険として刈る**
    * ——タイマーを取り逃した場合に、掴んだままのセッションが残らないようにする。
+   * 期限とタイマーの有無がずれないよう、**判定に使うのはこの欄だけ**にしてある。
    */
-  heldUntil?: number;
-  /** 猶予を畳むタイマー。`unref` 済み（プロセスを引き止めない） */
+  hold: HoldState;
+  /**
+   * 猶予を畳むタイマー。`unref` 済み（プロセスを引き止めない）。
+   * **判定には使わない**（`hold` が唯一の真実）——ここは後始末のための持ち物。
+   */
   holdTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -441,10 +456,8 @@ export interface PrinterEntry {
   onOutputStatus?: (s: SpoolOutputStatus) => void;
   /** このセッションのアイドルタイムアウト（`OpenPrinterOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
-  /** いまこのセッションを持っている接続（表示セッションの `holderToken` と同じ意味） */
-  holderToken?: number;
-  /** 一度でも持ち主が付いたか（表示セッションの `hadHolder` と同じ意味） */
-  hadHolder?: boolean;
+  /** 持ち主の状態（表示セッションの `holder` と同じ意味。規則は `session-lifetime.ts`） */
+  holder: HolderState;
   /**
    * **常駐**（サービス型）。WS が切れても切らず、アイドル掃除でも消さない。
    *
@@ -713,6 +726,8 @@ export class SessionManager {
       origin: opts.origin ?? "direct",
       // **見ている人はまだ居ない。** ws-handler が繋いだ時点で足す
       viewers: 0,
+      holder: noHolder(),
+      hold: endHold(),
       ...(opts.target !== undefined ? { target: opts.target } : {}),
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
@@ -903,6 +918,7 @@ export class SessionManager {
       connectedAt: new Date(this.now()).toISOString(),
       lastActivity: this.now(),
       ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
+      holder: noHolder(),
       reports: [],
       receivedTotal: 0,
       delivered: 0,
@@ -1345,10 +1361,7 @@ export class SessionManager {
     // `sessionId` にはプリンターの id も入る（`onOpenPrinter`）ので、片方だけ見ると
     // **プリンターが永久に「持ち主なし」**になり、切断しても閉じなくなる
     const entry = this.sessions.get(id) ?? this.printers.get(id);
-    if (entry) {
-      entry.holderToken = token;
-      entry.hadHolder = true;
-    }
+    if (entry) entry.holder = claimHolder(token);
     return token;
   }
 
@@ -1365,16 +1378,16 @@ export class SessionManager {
    * アイドル上限 `"never"` のまま残る（T4 の点検で指摘）。
    */
   releaseHolder(id: string, token: number | undefined): boolean {
-    if (token === undefined) return false;
     const entry = this.sessions.get(id) ?? this.printers.get(id);
-    if (entry?.holderToken !== token) return false;
-    delete entry.holderToken;
-    return true;
+    if (!entry) return false;
+    const { holder, wasHolder } = releaseHolderRule(entry.holder, token);
+    entry.holder = holder;
+    return wasHolder;
   }
 
   /** いま持ち主が居るか。**居ないなら、去ろうとしている接続が最後の 1 人** */
   hasHolder(id: string): boolean {
-    return (this.sessions.get(id) ?? this.printers.get(id))?.holderToken !== undefined;
+    return (this.sessions.get(id) ?? this.printers.get(id))?.holder.held === true;
   }
 
   /**
@@ -1395,11 +1408,11 @@ export class SessionManager {
   holdForReconnect(id: string): boolean {
     if (this.reconnectGraceMs <= 0) return false;
     const entry = this.sessions.get(id);
-    if (!entry || entry.heldUntil !== undefined) return false;
-    entry.heldUntil = this.now() + this.reconnectGraceMs;
+    if (!entry || entry.hold.holding) return false;
+    entry.hold = beginHold(this.now() + this.reconnectGraceMs);
     const timer = setTimeout(() => {
       // **自分が張った猶予かを実体で確かめる**（`setReservation` が `entry.reservation === r` で
-      // 同じ競合を閉じているのと同じ手）。`heldUntil` の有無だけを見ると、
+      // 同じ競合を閉じているのと同じ手）。`hold.holding` だけを見ると、
       // 一度解除されてから張り直された**別の猶予**を期限前に畳んでしまう
       const cur = this.sessions.get(id);
       if (cur?.holdTimer === timer) this.reapHold(id);
@@ -1418,14 +1431,14 @@ export class SessionManager {
    * 相手が去ったからといって見に来た人の作業を殺さない、という同じ原則。
    *
    * その場合は猶予だけ解いて**普通のセッションに戻す**。以後の寿命は従来どおり
-   * `dispose` の 3 判断とアイドル掃除が決める。
+   * 後始末の処分（`disposition`）とアイドル掃除が決める。
    */
   private reapHold(id: string): void {
     const entry = this.sessions.get(id);
-    if (entry && this.hasViewer(id)) {
-      // **猶予を解くだけでよい。** 持ち主が戻らなかったセッションは「持ち主の居ない
-      // セッション」になるが、その寿命は `idleLimitOf` が**規則として**孤児回収の上限に
-      // 落とす（設定値そのものは書き換えない。review ラウンド3）
+    // **規則は `decideHoldExpiry`。** ここは結論を実行するだけ。
+    // 猶予を解いた場合、そのセッションは「持ち主の居ないセッション」になるが、
+    // 寿命は `lifetimeOf` が規則として孤児回収の上限に落とす（設定値は書き換えない）
+    if (entry && decideHoldExpiry(this.hasViewer(id)) === "cancelHold") {
       this.cancelHold(id);
       return;
     }
@@ -1438,17 +1451,62 @@ export class SessionManager {
     if (!entry) return;
     if (entry.holdTimer) clearTimeout(entry.holdTimer);
     delete entry.holdTimer;
-    delete entry.heldUntil;
+    entry.hold = endHold();
   }
 
   /**
    * 繋ぎ直しを待っている最中か（診断とテスト用）。
-   * **期限切れは false**——`reservationOf` と同じく、読み手が毎回 `heldUntil` を
+   * **期限切れは false**——`reservationOf` と同じく、読み手が毎回 `hold.until` を
    * 見比べなくて済むようにする（刈るのはタイマーと `sweepIdle`）。
    */
   isHeld(id: string): boolean {
-    const until = this.sessions.get(id)?.heldUntil;
-    return until !== undefined && until > this.now();
+    const hold = this.sessions.get(id)?.hold;
+    return hold !== undefined && isHeldAt(hold, this.now());
+  }
+
+  /**
+   * **接続が去るときの処分を決め、実行する**（R1 / R2 の唯一の口。
+   * `20260908-session-lifetime-rules-fold`）。
+   *
+   * 呼び出し側（`ws-handler.dispose`）は**結果を見て分岐しない**——座を返す・猶予に入れる・
+   * 閉じる、はすべてこの中で起きる。判断そのものは `decideDisposition`（純粋）に置いてあり、
+   * ここは入力を集めて結論を実行するだけ。戻り値はテストが「なぜその結論か」を
+   * assert するためのもの。
+   *
+   * **事前条件: 呼ぶ前に自分の購読をすべて外し終えていること。** `hasViewer` が
+   * 「自分以外」を意味するのはそのためで、順序を崩すと自分を数えてしまう。
+   *
+   * **座は判断より前に無条件で返す。** 中で返すと、他に見ている人が居る経路で返し損ねて
+   * 孤児になる（前 work の D7 → D10 がこの順序で塞いだ）。
+   */
+  disposition(id: string, ctx: { readonly role: ConnRole; readonly transportLost: boolean }): Disposition {
+    const entry = this.sessions.get(id) ?? this.printers.get(id);
+    let wasHolder = false;
+    if (entry) {
+      const r = releaseHolderRule(entry.holder, ctx.role.kind === "owner" ? ctx.role.token : undefined);
+      entry.holder = r.holder;
+      wasHolder = r.wasHolder;
+    }
+    // 猶予は表示セッション専用（プリンターには常駐という別の仕組みがある）
+    const display = this.sessions.get(id);
+    const d = decideDisposition({
+      role: ctx.role,
+      transportLost: ctx.transportLost,
+      wasHolder,
+      // **既にある答えを使う**。同じ式を書くと R1 の判定が 2 か所になる
+      // （`decisions.md` D19。`cross` 点検が検出した——走査は同ファイル内の写しを見られない）
+      hasHolder: this.hasHolder(id),
+      hasOtherViewer: this.hasViewer(id),
+      resident: this.isResident(id),
+      holdable: this.reconnectGraceMs > 0 && display !== undefined,
+      hold: display?.hold ?? endHold(),
+      now: this.now()
+    });
+    // **既に猶予中なら期限を延ばさない**（`already`）——延ばすと、繋ぎ直せないまま
+    // 切断を繰り返すクライアントが枠と装置記述を無期限に掴める
+    if (d.act === "hold" && !d.already) this.holdForReconnect(id);
+    if (d.act === "close") void this.close(id).catch(() => undefined);
+    return d;
   }
 
   /** 見ている人が増えた（ws-handler が呼ぶ） */
@@ -1668,9 +1726,7 @@ export class SessionManager {
     // 一度も持ち主が付いていないもの（MCP / HLLAPI が開いた分）は開くときに自分で
     // 寿命を決めており、ここで上限を重ねると「引数なしのマネージャは永続」という
     // 既定を黙って壊す（実際に既存テストが落ちた）
-    if (entry.hadHolder !== true || entry.holderToken !== undefined) return configured;
-    if (configured === "never") return ORPHAN_IDLE_TIMEOUT_MS;
-    return Math.min(configured, ORPHAN_IDLE_TIMEOUT_MS);
+    return lifetimeOf(entry.holder, configured, ORPHAN_IDLE_TIMEOUT_MS);
   }
 
   private sweepIdle(): void {
@@ -1683,8 +1739,8 @@ export class SessionManager {
       // **猶予切れも刈る。** タイマー（`holdForReconnect`）が本筋だが、取り逃すと
       // 掴んだままのセッションが残る——アイドル上限が既定 `"never"` なので、
       // ここで拾わないと二度と回収されない
-      if (entry.heldUntil !== undefined) {
-        // **猶予中の寿命を決めるのは `heldUntil` ひとつ**（decisions D5 / D12）。
+      if (entry.hold.holding) {
+        // **猶予中の寿命を決めるのは `hold` ひとつ**（前 work の D5 / D12）。
         //
         // `expired()` が見る `lastActivity` は**切断後は誰も進めない**（進めるのは
         // `touch` ＝ WS からの合図）。アイドル上限を有限に設定した環境（例 1 分）だと、
@@ -1692,7 +1748,10 @@ export class SessionManager {
         //
         // 期限が来たときの畳み方は**タイマー側と同じ `reapHold` に通す**——
         // 経路によって結論が変わると、どちらが本当か読めなくなる
-        if (entry.heldUntil <= now) this.reapHold(id);
+        // **期限切れかは規則に問う**（`isHeldAt`）。ここで `until <= now` と書くと
+        // 「猶予中か」の判定が 2 か所になる（`decisions.md` D19）——この枝は `holding` が真なので
+        // `!isHeldAt` は `until <= now` と同値
+        if (!isHeldAt(entry.hold, now)) this.reapHold(id);
         continue;
       }
       const limit = this.idleLimitOf(entry);

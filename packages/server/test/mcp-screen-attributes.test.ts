@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { noHolder, endHold } from "../src/session-lifetime.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildMcpServer } from "../src/mcp-server.js";
@@ -68,8 +69,13 @@ async function getScreen(include?: string[]): Promise<ToolResult> {
   const entry = {
     id: SID,
     session: { snapshot: () => snapshot() } as unknown as Session5250,
-    readOnly: false, host: "h", origin: "test",
-    connectedAt: new Date(0).toISOString(), lastActivity: 0
+    readOnly: false, host: "h", origin: "test", viewers: 0,
+    connectedAt: new Date(0).toISOString(), lastActivity: 0,
+    // 寿命の判定が読む 2 欄（`20260908-session-lifetime-rules-fold`）。**必須**なので
+    // 落とすと `sweepIdle` / `disposition` が触った瞬間に `undefined.holding` で落ちる
+    // ——test は型検査の対象外（`tsconfig.json` の `include` は `["src"]`）なので、
+    // ここが抜けても**実行時にしか分からない**
+    holder: noHolder(), hold: endHold()
   } satisfies SessionEntry;
   (sessions as unknown as { sessions: Map<string, SessionEntry> }).sessions.set(SID, entry);
 

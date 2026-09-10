@@ -6,7 +6,7 @@ import type { PublicMacro } from "@ts5250/server";
 import type { WsClient } from "../src/ws-client.js";
 import StatusBar from "../src/components/StatusBar.vue";
 import MacroMenu from "../src/components/MacroMenu.vue";
-import { sessionsStore, type MacroRuntime, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type MacroRuntime, type SessionState, createSessionState } from "../src/stores/sessions.js";
 import { macrosStore } from "../src/stores/macros.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
@@ -41,17 +41,18 @@ function snapshot(): ScreenSnapshot {
 }
 
 function makeSession(macro?: MacroRuntime): SessionState {
-  const s: SessionState = {
+  const s: SessionState = createSessionState({
     sessionId: SID,
     label: "t",
     snapshot: snapshot(),
     edits: new Map(),
     cursor: { row: 5, col: 25 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send: vi.fn() } as unknown as WsClient,
     ...(macro ? { macro } : {})
-  };
+  });
   sessionsStore.byId.clear();
   sessionsStore.order = [];
   sessionsStore.add(s);

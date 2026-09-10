@@ -170,7 +170,8 @@ describe("送信が拒否された理由の通知（画面に出るところま�
       snapshot: snapOf([]),
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send: () => {} } as unknown as WsClient
     });
