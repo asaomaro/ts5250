@@ -71,3 +71,5 @@ events:
   - { ts: 2026-09-10T11:28:14Z, phase: review, event: approved, metrics: { must: 2, should: 4, nit: 3, ac_total: 10, ac_covered: 10, tasks_no_ac: 0, tasks_ac_none: 0 } }
   - { ts: 2026-09-10T11:28:40Z, phase: deliver, event: start }
   - { ts: 2026-09-10T11:29:55Z, phase: deliver, event: approved, metrics: { files_changed: 6, insertions: 537, deletions: 42 } }
+  - { ts: 2026-09-10T12:11:09Z, phase: retro, event: start }
+  - { ts: 2026-09-10T12:13:45Z, phase: retro, event: approved }

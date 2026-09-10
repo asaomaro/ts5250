@@ -1,7 +1,7 @@
 schema: 11
 slug: session-reconnect-freeze
-current: deliver
-approved: [requirements, research, design, tasks, coding, test, review, deliver]
+current: retro
+approved: [requirements, research, design, tasks, coding, test, review, deliver, retro]
 mode: autonomous
 profile: full
 humanGates: []
