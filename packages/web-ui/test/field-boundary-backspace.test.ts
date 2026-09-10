@@ -108,7 +108,8 @@ describe("EmulatorPane: 前の入力欄の末尾へ移る", () => {
     sessionsStore.order = [];
     sessionsStore.add({
       sessionId: SID, label: "t", snapshot: snapOf(fields), edits: new Map(),
-      cursor: { row: 5, col: 10 }, connected: true, readOnly: false,
+      cursor: { row: 5, col: 10 }, link: { state: "connected" },
+ resumability: "resumable", readOnly: false,
       client: { send: () => {} } as unknown as WsClient
     });
   }

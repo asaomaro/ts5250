@@ -61,7 +61,8 @@ beforeEach(() => {
   sent.length = 0;
   sessionsStore.add({
     sessionId: SID, label: "t", snapshot: snap(), edits: new Map(), cursor: { row: TROW, col: COL },
-    connected: true, readOnly: false,
+    link: { state: "connected" },
+    resumability: "resumable", readOnly: false,
     client: { send(m: unknown) { sent.push(m); } } as unknown as WsClient
   });
 });

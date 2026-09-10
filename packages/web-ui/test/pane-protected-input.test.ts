@@ -58,7 +58,8 @@ function seed(fields: Field[], cursor: { row: number; col: number }): void {
     snapshot: snap(fields, cursor),
     edits: new Map(),
     cursor,
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send: () => {} } as unknown as WsClient
   });

@@ -4,7 +4,7 @@ import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
 import DesignMenu from "../src/components/DesignMenu.vue";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
-import type { SessionState } from "../src/stores/sessions.js";
+import { createSessionState, type SessionState } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
 
 /**
@@ -40,17 +40,18 @@ function mark(text: string): string {
 }
 
 function state(): SessionState {
-  return {
+  return createSessionState({
     sessionId: "s",
     label: "t",
     snapshot: { sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 },
       keyboardLocked: false, cells: [], fields: [] } as unknown as ScreenSnapshot,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: {} as WsClient
-  };
+  });
 }
 
 describe("三角の印", () => {

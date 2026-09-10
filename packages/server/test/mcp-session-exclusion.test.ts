@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { noHolder, endHold } from "../src/session-lifetime.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildMcpServer } from "../src/mcp-server.js";
@@ -70,6 +71,9 @@ async function setup(opts: { viewers?: number; owner?: string; user?: AuthUser }
     viewers: 0,
     connectedAt: new Date(0).toISOString(),
     lastActivity: 0,
+    // 寿命の判定が読む 2 欄（必須。test は型検査されないので落としても実行時にしか出ない）
+    holder: noHolder(),
+    hold: endHold(),
     ...(opts.owner !== undefined ? { owner: opts.owner } : {})
   } satisfies SessionEntry;
   (mgr as unknown as { sessions: Map<string, SessionEntry> }).sessions.set(SID, entry);
@@ -175,7 +179,8 @@ describe("MCP の排他", () => {
       id: SID,
       session: { snapshot: () => snapshot(), disconnect: () => undefined } as unknown as Session5250,
       readOnly: false, host: "h", origin: "test", viewers: 1,
-      connectedAt: new Date(0).toISOString(), lastActivity: 0
+      connectedAt: new Date(0).toISOString(), lastActivity: 0,
+      holder: noHolder(), hold: endHold()
     } satisfies SessionEntry;
     (mgr as unknown as { sessions: Map<string, SessionEntry> }).sessions.set(SID, entry);
 

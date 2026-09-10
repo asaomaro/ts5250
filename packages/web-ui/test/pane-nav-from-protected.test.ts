@@ -55,7 +55,8 @@ function seed(fields: Field[]): void {
     snapshot: snap(fields),
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send: () => {} } as unknown as WsClient
   });
@@ -130,7 +131,8 @@ describe("入力可能な欄が 1 つも無い画面", () => {
       snapshot: snap([f], { row: 8, col: 20 }),
       edits: new Map(),
       cursor: { row: 8, col: 20 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send: () => {} } as unknown as WsClient
     });

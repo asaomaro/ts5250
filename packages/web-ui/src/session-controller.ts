@@ -21,8 +21,16 @@ import {
   type PcCommandView,
   type SessionState,
   type SessionMeta,
-  type SpoolReportView
+  type SpoolReportView,
+  type SessionStateInit
 } from "./stores/sessions.js";
+import {
+  canSendToHost,
+  isCurrentAttempt,
+  resumeVerdict,
+  type Attempt,
+  type Resumability
+} from "./session-link.js";
 import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
@@ -141,15 +149,17 @@ function inputInhibited(s: SessionState): boolean {
  * （待っても戻らない）。同じ `connected === false` から逆の案内を出さないため。
  */
 function refuseIfDisconnected(s: SessionState): boolean {
-  if (s.connected) return false;
+  const verdict = canSendToHost(s.link);
+  if (verdict.ok) return false;
   // **既に出ている切断の理由を上書きしない。** 繋ぎ直しを諦めた理由・猶予切れ・
-  // 対象外の経路の案内は、どれも**この汎用文より具体的**（review ラウンド2）。
+  // 対象外の経路の案内は、どれも**この汎用文より具体的**（前 work の review ラウンド2）。
   // 打鍵 1 回で「サーバーと繋がっていないため送信できません」＝**待てば戻る含み**に
   // すり替わると、ラウンド1 で潰した嘘がここで復活する。
   // 切断中は通知が消えない（送信の手前で戻るので `delete s.notice` を通らない）ので、
   // 埋まっていれば残す
   if (s.notice === undefined) {
-    s.notice = s.endedByHost ? MSG_SESSION_ENDED : MSG_NOT_CONNECTED;
+    // **文言への写像はここ**（規則は理由の区分だけを返す。`session-link.ts` の注記）
+    s.notice = verdict.reason === "hostEnded" ? MSG_SESSION_ENDED : MSG_NOT_CONNECTED;
   }
   return true;
 }
@@ -220,46 +230,73 @@ function withJitter(ms: number): number {
  */
 const RESUME_ATTEMPT_TIMEOUT_MS = 10_000;
 
-/** 繋ぎ直し待ちのタイマー。セッションを閉じたら畳む（`setBusy` と同じ扱い） */
-const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * **いまの繋ぎ直しの試行**（セッションごとに高々 1 つ。規則は `session-link.ts`）。
+ *
+ * 畳み込み前は「待ちタイマー」と「飛行中の口」を**別の Map** に分けていたが、
+ * 同じ試行の 2 つの相でしかない（`20260908-session-lifetime-rules-fold`）。
+ * 分けていたせいで「待ちだけ畳んで飛行中が残る」が作れ、
+ * 「この試行はまだ有効か」を答える判定が **5 系統**に散っていた（research.md F4）。
+ * **この Map が畳むのはそのうち 3 つ**（`settled` / `pendingResumes` / `reconnectTimers`）で、
+ * 残り 2 つの行き先は `session-link.ts` の `Attempt` に記してある。
+ *
+ * 掴んでおく理由は 2 つ。**利用者がタブを閉じたあとに `opened` が返ると、サーバー側では
+ * `cancelHold` と `claim` が済んでいる**（＝閉じたはずのセッションが持ち主不在で生き残る）ので、
+ * こちらからも畳む必要がある。もう 1 つは、**打ち切ったあとに遅れて `onClose` が来ても
+ * 「次の間隔へ」を走らせない**ため——`settled` がその印。
+ */
+const attempts = new Map<string, Attempt>();
 
 /**
- * **いま飛んでいる繋ぎ直しの試行**。
+ * この試行が張っているタイマーを畳む（成功・打ち切り・利用者が閉じた、のいずれでも）。
  *
- * 待ちタイマーを畳むだけでは足りない——発火済みの試行は自分の `WsClient` を持って
- * 走っており、**利用者がタブを閉じたあとに `opened` が返ると、サーバー側では
- * `cancelHold` と `claim` が済んでいる**（＝閉じたはずのセッションが持ち主不在で生き残る）。
- * 掴んでおいて、閉じるときにこちらからも畳む。
- *
- * **口だけでなく打ち切りの手も持つ。** `close()` するだけだと、遅れて届く `onClose` が
- * 「次の間隔へ」を走らせ、**止めたはずのはしごが 1 段書き戻る**。
+ * **待ちと飛行中で対象が変わる**——`Attempt.timer` は待ち中なら「次の間隔まで」、
+ * 飛行中なら「黙り込みの打ち切り」で、同時には持たない（`session-link.ts` の `Attempt`）。
+ * 畳み込み前は前者だけがこの関数の担当で、後者は試行ローカルの `deadline` を
+ * `cancel()` が畳んでいた。枠が 1 つになったので**どちらの相でも畳める**が、
+ * **いま呼ぶのは `abortReconnect` だけ**——成功・失敗の各経路は代表を降ろす
+ * （`attempts` から外す）のと同じブロックで自分のタイマーも畳むので、ここを通らない。
  */
-const pendingResumes = new Map<string, { client: WsClient; cancel: () => void }>();
-
-/** 繋ぎ直しの待ちを畳む（成功・打ち切り・利用者が閉じた、のいずれでも） */
 function clearReconnectTimer(sessionId: string): void {
-  const t = reconnectTimers.get(sessionId);
-  if (t !== undefined) {
-    clearTimeout(t);
-    reconnectTimers.delete(sessionId);
+  const a = attempts.get(sessionId);
+  if (a?.timer !== undefined) {
+    clearTimeout(a.timer);
+    a.timer = undefined;
   }
 }
 
 /** 待ちも飛行中の口も畳む（利用者が閉じた・別経路でやり直す） */
 function abortReconnect(sessionId: string): void {
   clearReconnectTimer(sessionId);
-  const inflight = pendingResumes.get(sessionId);
-  if (inflight) {
-    pendingResumes.delete(sessionId);
-    inflight.cancel(); // 遅れて届く `onClose` で next() が走らないようにしてから閉じる
+  const a = attempts.get(sessionId);
+  if (a?.client !== undefined) {
+    const inflight = a.client;
+    attempts.delete(sessionId);
+    a.settled = true; // 遅れて届く `onClose` で next() が走らないようにしてから閉じる
     // **座を引き取っていたら返す。** サーバーは `open { resume }` を受けた時点で
     // `cancelHold` と `claim` を済ませているので、黙って口を閉じると
     // **利用者が閉じたはずのセッションが猶予ぶん生き残る**。`close` は
     // まだ開いていなければ捨てられ、開いていれば `dispose` が畳む——どちらの順でも正しい
-    // （review ラウンド2。`opened` 側のガードだけでは、配送済みの `opened` を取りこぼす）
-    inflight.client.send({ type: "close" });
-    inflight.client.close();
+    // （前 work の review ラウンド2。`opened` 側のガードだけでは、配送済みの `opened` を取りこぼす）
+    inflight.send({ type: "close" });
+    inflight.close();
+  } else {
+    attempts.delete(sessionId);
   }
+}
+
+/**
+ * **表示セッションの繋ぎ直しの適性**（開く時点で決まる。以後変わらない）。
+ *
+ * 畳み込み前は `startReconnect` の門1 が「プリンターか・3270 か・見に来ただけか」を
+ * 毎回組み立てていた。3 つとも**開いたときに決まる性質**なので `resumability` に載せる。
+ * **ここが答えるのはうち 2 つ**——プリンターは表示セッションを開かないので、
+ * `openPrinterSession` が状態を組み立てる時点で `"not-resumable"` を直に置く。
+ */
+function displayResumability(meta: SessionMeta | undefined, attachedToExisting: boolean): Resumability {
+  // **見に来ただけのタブは繋ぎ直さない**（座を引き取らない約束。前 work の D4 / D13）
+  if (attachedToExisting) return "not-resumable";
+  return meta?.terminal === "3270" ? "not-resumable" : "resumable";
 }
 
 /**
@@ -269,8 +306,12 @@ function abortReconnect(sessionId: string): void {
  * `closeSession` が先に store から消しているので、ここで見つからずに戻る。
  *
  * サーバー側はこの間セッションを猶予として保持している。繋ぎ直せれば
- * **同じホストセッションの続き**から操作できる（打ちかけの入力も残る——
- * 差し替えるのは `client` だけで `edits` には触らない）。
+ * **同じホストセッションの続き**から操作できる。
+ *
+ * **打ちかけの入力（`edits`）は捨てる**（前 work の D11。当初は「残る」と設計していた）。
+ * 繋ぎ直しで返るのは留守中にホストが書いた「いまの画面」で、こちらが打っていた画面とは
+ * 限らない——残したまま反映すると**別の画面の欄に打鍵が載る**。`updateScreen` が
+ * 新画面で `edits` を捨てる既存の規則がそのまま効く。
  */
 function startReconnect(sessionId: string, label: string): void {
   const s = sessionsStore.get(sessionId);
@@ -279,40 +320,32 @@ function startReconnect(sessionId: string, label: string): void {
   // 下の門で戻る場合（対象外・諦め済み・走行中）も応答待ちは解けていなければならない
   // ——ここを門の内側に置いていた頃は、対象外の経路でスピナーが残った
   setBusy(sessionId, false);
-  s.connected = false;
-  // **切断より前の通知は捨てる**（review ラウンド3）。`refuseIfDisconnected` は
+  sessionsStore.markLost(sessionId, "transport");
+  // **切断より前の通知は捨てる**（前 work の review ラウンド3）。`refuseIfDisconnected` は
   // 「この切断について出した理由」を守るが、条件が「何か出ていれば」なので、
   // 直前の `MSG_NO_RESPONSE` 等が居座ると**切断の理由が一度も出ない**
   delete s.notice;
-  // **猶予保持の対象は 5250 表示セッションだけ**（`decisions.md` D3）。
-  // 3270 は 5250 と同じ `openSession` で開かれるので `kind` が付かず、素通しすると
-  // `resume` がサーバーの 5250 専用 `attach` に流れて必ず失敗する（「再接続中」を
-  // 見せた末に生のエラー文が出る）。VT とプリンターは開く関数から別で、
-  // それぞれ自前の `onClose` に載っているのでここへは来ない（`kind` は保険）
-  // **繋ぎ直さない枝は、どれも黙って戻らない**（review ラウンド2）。
-  //
-  // 何も言わないと、次の打鍵で出るのは「サーバーと繋がっていないため送信できません」
-  // ＝**待てば戻る含み**の嘘になる。ここに当たるのはどれも**開き直す以外に手が無い**枝:
-  //   - 3270 … サーバー側でもその場でホストセッションが閉じる（対象外。D3）
-  //   - 見に来ただけのタブ … 座を引き取らない約束なので繋ぎ直せない（D4 / D13）
-  //   - プリンター … 自分の `onClose` で同じことをしている（保険でここにも書く）
-  if (s.kind === "printer" || s.meta?.terminal === "3270" || s.attachedOnly) {
-    s.notice = MSG_CONNECTION_LOST;
+  // **繋ぎ直してよいかは規則が答える**（`session-link.ts` の `resumeVerdict`）。
+  // 畳み込み前はここに 4 つの門が並んでおり、1 つ直すと隣が壊れた
+  const v = resumeVerdict(s.link, s.resumability);
+  if (v.resume) {
+    abortReconnect(sessionId); // 取り残しがあれば畳んでから始める
+    scheduleReconnect(sessionId, label, 0);
     return;
   }
-  // **ホストが終わっているなら繋ぎ直さない。** 戻る先が無いうえ、はしごを回すと
-  // 「サーバーと繋がっていません」という嘘の理由を出すことになる
-  if (s.endedByHost) return;
-  // **もう無いと言われたセッションには行かない。** 5 段のはしごを丸ごと回し直しても
-  // 同じ理由で断られるだけ（`giveUpReconnect` の `"gone"`）
-  if (s.reconnectFailed === "gone") return;
-  // **走っているかはセッションの状態で見る**（モジュールの Map ではなく）。
-  // Map は id をまたいで残りうるが、`reconnect` はセッションと一緒に生まれて消える
-  // ——`activitySentAt` を state に置いたのと同じ理由
-  if (s.reconnect !== undefined) return;
-  abortReconnect(sessionId); // 取り残しがあれば畳んでから始める
-  delete s.reconnectFailed;
-  scheduleReconnect(sessionId, label, 0);
+  // **繋ぎ直さない枝のうち、通知を出すのは「対象外の端末・見に来ただけ」だけ**
+  // （前 work の review ラウンド2）。ここは開き直す以外に手が無いので、待てば戻る含みの汎用文を
+  // 出すと嘘になる——だから汎用文ではなく「接続が切れました」を出す。
+  //
+  // **残り（ホストが終わった／もう無いと言われた／既に走っている）は黙る。**
+  // ホストが終わった場合は次の打鍵で `refuseIfDisconnected` が固有の理由を出す
+  // （`canSendToHost` が写像を持つのは `hostEnded` だけ）。**もう無いと言われた場合は違う**
+  // ——`giveUpReconnect` が書いた具体的な文言がそのまま残っているので、ここで
+  // 汎用文に塗り替えないことが要る。走行中は表示を触ると再接続中の案内が消える。
+  //
+  // **理由は規則から受け取る**（`v.why`）。`s.resumability` を読み直すと門1 の写しが
+  // ここに出る——requirements AC1 が禁じる形（本 work の review ラウンド1 の must）
+  if (v.why === "notResumable") s.notice = MSG_CONNECTION_LOST;
 }
 
 /** 次の試行を予約する。回数が尽きたら手動の繋ぎ直しに委ねる */
@@ -325,12 +358,20 @@ function scheduleReconnect(sessionId: string, label: string, index: number): voi
     giveUpReconnect(sessionId, MSG_RECONNECT_GAVE_UP, "retry");
     return;
   }
-  s.reconnect = { attempt: index + 1, max: RECONNECT_DELAYS_MS.length };
-  const timer = setTimeout(() => {
-    reconnectTimers.delete(sessionId);
-    tryResume(sessionId, label, index);
+  sessionsStore.beginReconnect(sessionId, index + 1, RECONNECT_DELAYS_MS.length);
+  // **試行はここで生まれる**（待ちの相）。発火したら同じ試行が飛行中の相へ移る。
+  // **既存エントリを畳まずに上書きする**——「セッションごとに高々 1 つ」を壊しうる唯一の場所。
+  // 呼び手は 2 つで、`startReconnect` は**直前の行の `abortReconnect`** が代表を降ろしている。
+  // `next()` は代表のときしか降ろさない（`attempts.get(id) === a` のときだけ delete）が、
+  // **代表でない生きた試行は作れない**——代表を差し替えるのはこの `set` だけで、
+  // それは必ず「直前に代表を降ろした」経路からしか走らないため、帰納的に到達しない。
+  // 畳み込み前の `reconnectTimers.set` も同じ形
+  const a: Attempt = { index, client: undefined, timer: undefined, settled: false };
+  attempts.set(sessionId, a);
+  a.timer = setTimeout(() => {
+    a.timer = undefined;
+    tryResume(sessionId, label, a);
   }, withJitter(delay));
-  reconnectTimers.set(sessionId, timer);
 }
 
 /**
@@ -346,27 +387,30 @@ function giveUpReconnect(sessionId: string, notice: string, reason: "retry" | "g
   // **諦めた先でも応答待ちを残さない。** 解いているのが `startReconnect` の先頭だけだと、
   // 諦めるまでの間に何かが `setBusy(true)` を立てるとスピナーが永久に残る
   setBusy(sessionId, false);
-  delete s.reconnect;
-  s.reconnectFailed = reason;
-  s.connected = false;
+  // 諦めの理由は確定扱い——以後の転送断（`transport`）では上書きされない（`nextLink`）
+  sessionsStore.markLost(sessionId, reason === "retry" ? "gaveUp" : "gone");
   s.notice = notice;
 }
 
 /** 1 回ぶんの繋ぎ直し。成功すれば `client` を差し替え、失敗すれば次の間隔へ回す */
-function tryResume(sessionId: string, label: string, index: number): void {
+function tryResume(sessionId: string, label: string, a: Attempt): void {
+  // **この枝だけ `attempts` にエントリを残す**（畳み込み前はタイマー発火時に
+  // `reconnectTimers.delete` を先に打っていたので両方空になった）。到達しない——
+  // `sessionsStore.remove` の呼び手は `closeSession` だけで、その手前の `abortReconnect` が
+  // タイマーごと外すため、この `setTimeout` はそもそも発火しない
   if (!sessionsStore.get(sessionId)) return;
   // **この試行の後始末は 1 度だけ。** `connect()` の失敗と `onClose` は両方来うる
-  let settled = false;
   const next = (): void => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(deadline);
-    if (pendingResumes.get(sessionId)?.client === client) pendingResumes.delete(sessionId);
-    scheduleReconnect(sessionId, label, index + 1);
+    if (a.settled) return;
+    a.settled = true;
+    if (a.timer !== undefined) clearTimeout(a.timer);
+    a.timer = undefined;
+    if (attempts.get(sessionId) === a) attempts.delete(sessionId);
+    scheduleReconnect(sessionId, label, a.index + 1);
   };
   // **黙り込んだ試行を捨てる**（`RESUME_ATTEMPT_TIMEOUT_MS` の注記）
-  const deadline = setTimeout(() => {
-    if (settled) return;
+  a.timer = setTimeout(() => {
+    if (a.settled) return;
     client.close();
     // **`close()` だけでは足りない。** `connect()` が pending のまま（CONNECTING の
     // ソケット）だと `close` イベントが飛ぶかはブラウザ実装依存で、`onClose` も
@@ -381,10 +425,11 @@ function tryResume(sessionId: string, label: string, index: number): void {
         if (msg.type === "opened") {
           // **他の 2 経路と同じガードを置く。** いま到達しないのは「閉じたソケットには
           // message が配送されない」というブラウザ仕様に依っているだけで、コードからは読めない
-          if (settled || pendingResumes.get(sessionId)?.client !== client) return;
-          settled = true;
-          clearTimeout(deadline);
-          pendingResumes.delete(sessionId);
+          if (!isCurrentAttempt(attempts.get(sessionId), a)) return;
+          a.settled = true;
+          if (a.timer !== undefined) clearTimeout(a.timer);
+          a.timer = undefined;
+          attempts.delete(sessionId);
           const cur = sessionsStore.get(sessionId);
           if (!cur) {
             // **利用者が先にタブを閉じていた。** サーバー側はもう `cancelHold` と `claim` を
@@ -396,11 +441,8 @@ function tryResume(sessionId: string, label: string, index: number): void {
           client.setSessionId(sessionId);
           // **差し替えるのは口だけ。** `edits`（打ちかけの入力）には触らない
           cur.client = client;
-          cur.connected = true;
-          delete cur.reconnect;
-          delete cur.reconnectFailed;
+          sessionsStore.markConnected(sessionId);
           delete cur.notice;
-          clearReconnectTimer(sessionId);
           // 留守中にホストが書いた画面がそのまま返る（サーバーの `attach` が現在の画面を返す）
           sessionsStore.updateScreen(sessionId, msg.screen);
           client.setHiddenIndexes(hiddenIndexes(msg.screen));
@@ -424,24 +466,25 @@ function tryResume(sessionId: string, label: string, index: number): void {
           setBusy(sessionId, false);
           return;
         }
-        if (msg.type === "error" && !settled) {
+        if (msg.type === "error" && !a.settled) {
           // **繋がったが引き取れなかった**（猶予切れ・他人のもの）。時間が経っても
           // 回復しないので再試行しない。理由はサーバーのものをそのまま見せる
-          settled = true;
-          clearTimeout(deadline);
-          pendingResumes.delete(sessionId);
+          a.settled = true;
+          if (a.timer !== undefined) clearTimeout(a.timer);
+          a.timer = undefined;
+          attempts.delete(sessionId);
           giveUpReconnect(sessionId, wsErrorNotice(msg.code, msg.message), "gone");
           client.close();
           return;
         }
-        // **打ち切った試行の口からの更新を通さない**（review ラウンド3）。
+        // **打ち切った試行の口からの更新を通さない**（前 work の review ラウンド3）。
         // とくに `screen` は `updateScreen` が `connected = true` を立てるので、
         // はしごが回っている最中に「接続中」へ戻り、以後の送信が死んだ口へ落ちる
-        if (pendingResumes.get(sessionId)?.client !== client) return;
+        if (!isCurrentAttempt(attempts.get(sessionId), a)) return;
         applyDisplayMessage(sessionId, client, msg);
       },
       onClose() {
-        if (!settled) {
+        if (!a.settled) {
           next(); // この試行が失敗した。次の間隔へ
           return;
         }
@@ -452,14 +495,9 @@ function tryResume(sessionId: string, label: string, index: number): void {
     },
     label
   );
-  pendingResumes.set(sessionId, {
-    client,
-    // **止めたら止まる**——打ち切ったあとに遅れて `onClose` が来ても何もしない
-    cancel: () => {
-      settled = true;
-      clearTimeout(deadline);
-    }
-  });
+  // 待ちの相から飛行中の相へ。**止めたら止まる**——打ち切りは `settled` が印で、
+  // 遅れて `onClose` が来ても `next()` は走らない（`cancel` の閉包を持たなくてよくなった）
+  a.client = client;
   client
     .connect()
     .then(() => client.send({ type: "open", sessionId, resume: true }))
@@ -476,11 +514,10 @@ export function retryReconnect(sessionId: string): void {
   const s = sessionsStore.get(sessionId);
   if (!s) return;
   abortReconnect(sessionId);
-  // **走行中の印を先に落とす。** 落とさずに `startReconnect` へ入ると
+  // **走行中の印と諦めの印を先に落とす。** 落とさずに `startReconnect` へ入ると
   // 「既に走っている」で弾かれ、**タイマーは畳んだのに印だけ残る**＝二度と動かない
-  // （ボタン連打やキーリピートで踏める）
-  delete s.reconnect;
-  delete s.reconnectFailed;
+  // （ボタン連打やキーリピートで踏める）。`gone` を素通りできるのも同じ理由
+  sessionsStore.requestRetry(sessionId);
   startReconnect(sessionId, s.label);
 }
 
@@ -548,14 +585,13 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
     case "closed": {
       const s = sessionsStore.get(sessionId);
       if (s) {
-        s.connected = false;
-        // **切断より前の通知は捨てる**（`startReconnect` と同じ理由。review ラウンド3）
-        delete s.notice;
-        // **ホストが本当に終わったときだけ覚える**（`WsClosed.ended`）。
+        // **ホストが本当に終わったときだけそう記録する**（`WsClosed.ended`）。
         // サーバーは**心拍の死判定で猶予を張ったあとにも** `closed` を送るので、
-        // 無条件に立てると「保持されているのに二度と繋ぎ直さない」うえ、
+        // 無条件に `hostEnded` にすると「保持されているのに二度と繋ぎ直さない」うえ、
         // 次の打鍵で「セッションは終了しています」と**嘘の理由**を出す
-        if (msg.ended === true) s.endedByHost = true;
+        sessionsStore.markLost(sessionId, msg.ended === true ? "hostEnded" : "transport");
+        // **切断より前の通知は捨てる**（`startReconnect` と同じ理由。前 work の review ラウンド3）
+        delete s.notice;
       }
       setBusy(sessionId, false);
       break;
@@ -592,13 +628,17 @@ export async function openSession(
               sessionId = msg.sessionId;
               // ログの絞り込みに使うため、実 ID が決まった時点で伝える
               client.setSessionId(sessionId);
-              const state: SessionState = {
+              const state: SessionStateInit = {
                 sessionId,
                 label,
                 snapshot: msg.screen,
                 edits: new Map(),
                 cursor: msg.screen.cursor,
-                connected: true,
+                link: { state: "connected" },
+                // **繋ぎ直しの適性は開く時点で決まる**（`session-link.ts`）。
+                // 3270 はサーバー側に共有・再取得の経路が無く（前 work の D3）、
+                // 見に来ただけのタブは座を引き取らない約束なので繋ぎ直せない（D4 / D13）
+                resumability: displayResumability(meta, open.sessionId !== undefined),
                 readOnly: open.readOnly ?? false,
                 // **後から入ったタブでも今の予約状態から始める**（開始の push は聞き逃している）
                 ...(msg.reservedBy !== undefined ? { reservedBy: msg.reservedBy } : {}),
@@ -608,8 +648,6 @@ export async function openSession(
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
                 pcCommandEnabled: msg.pcCommand,
-                // **繋いだだけか、自分で開いたか**（decisions D4）。前者は繋ぎ直さない
-                ...(open.sessionId !== undefined ? { attachedOnly: true } : {}),
                 // **留守中に実行された分から始める。** `pc-command` の push は
                 // 繋いでいる間しか届かないので、閉じている間の実行は
                 // ここで受け取らないと**誰にも知らされないまま消える**
@@ -707,7 +745,9 @@ export async function openVtSession(
                 snapshot: undefined,
                 edits: new Map(),
                 cursor: { row: 1, col: 1 },
-                connected: true,
+                link: { state: "connected" },
+                // VT は繋ぎ直さない（画面を共有する経路がそもそも無い。前 work の対象外）
+                resumability: "not-resumable",
                 readOnly: open.readOnly ?? false,
                 client,
                 pcCommandEnabled: false,
@@ -715,7 +755,7 @@ export async function openVtSession(
                 ...(meta ? { meta } : {}),
                 ...(configRef !== undefined ? { configRef } : {}),
                 ...(systemRef !== undefined ? { systemRef } : {})
-              } as SessionState);
+              });
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);
               break;
@@ -733,8 +773,13 @@ export async function openVtSession(
               break;
             }
             case "closed": {
-              const s = sessionsStore.get(sessionId);
-              if (s) s.connected = false;
+              // **理由まで記録するのは畳み込みで増えた分**（旧 VT 経路は `connected = false` だけで
+              // `endedByHost` を立てなかった）。`hostEnded` を読むのは `canSendToHost` /
+              // `resumeVerdict` / `nextLink` の 3 つだが、**VT はどれにも届かない**——
+              // `resumability` が `not-resumable` なので `resumeVerdict` は理由を見る前に落ち、
+              // 送信は `VtPane.vue` が `client.send` を直に呼んで `refuseIfDisconnected` を通らない。
+              // だから**現状は同値**。将来 VT に送信ガードを付けたときに正しい理由が出るよう揃えておく
+              sessionsStore.markLost(sessionId, msg.ended === true ? "hostEnded" : "transport");
               // **理由をそのまま渡す。** サーバーは「何を確かめればよいか」まで添えてくる
               // （画面が届かないまま閉じた IBM i など）。捨てると利用者は真っ白な画面と
               // 「切断されました」の 5 文字だけを見ることになる
@@ -760,7 +805,7 @@ export async function openVtSession(
         onClose() {
           const s = sessionsStore.get(sessionId);
           if (!s) return; // 利用者が閉じた（store から消えている）
-          s.connected = false;
+          sessionsStore.markLost(sessionId, "transport");
           const known = vtStore.get(sessionId)?.closeReason;
           vtStore.setConnected(sessionId, false, known ?? MSG_VT_CONNECTION_LOST);
         }
@@ -810,14 +855,16 @@ export async function openPrinterSession(
               sessionId = msg.sessionId;
               // ログの絞り込みに使うため、実 ID が決まった時点で伝える
               client.setSessionId(sessionId);
-              const state: SessionState = {
+              const state: SessionStateInit = {
                 sessionId,
                 label,
                 kind: "printer",
                 snapshot: undefined,
                 edits: new Map(),
                 cursor: { row: 1, col: 1 },
-                connected: true,
+                link: { state: "connected" },
+                // プリンターは自前の `onClose` を持つ（繋ぎ直しのはしごには乗らない）
+                resumability: "not-resumable",
                 readOnly: true,
                 client,
                 // **閉じている間に届いた帳票を捨てない**（`20260802-printer-report-history`）。
@@ -902,8 +949,11 @@ export async function openPrinterSession(
               break;
             }
             case "closed": {
-              const s = sessionsStore.get(sessionId);
-              if (s) s.connected = false;
+              // 理由まで記録するのは畳み込みで増えた分。**プリンターにも送信経路はある**
+              // （`setPrinterOutput` / `startPrinter` / `stopPrinter`）が、いずれも `client.send` を
+              // 直に呼んで `refuseIfDisconnected` を通らない——VT と同じ理由で現状は同値
+              // （`resumability` も `not-resumable` なので `resumeVerdict` にも届かない）
+              sessionsStore.markLost(sessionId, msg.ended === true ? "hostEnded" : "transport");
               break;
             }
             case "error":
@@ -929,7 +979,7 @@ export async function openPrinterSession(
         onClose() {
           const s = sessionsStore.get(sessionId);
           if (!s) return; // 利用者が閉じた（store から消えている）
-          s.connected = false;
+          sessionsStore.markLost(sessionId, "transport");
           s.notice = MSG_CONNECTION_LOST;
         }
       },

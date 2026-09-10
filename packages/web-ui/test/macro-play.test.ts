@@ -406,7 +406,7 @@ describe("マクロ再生: 異常時は停止する（D9）", () => {
   it("切断中は再生を始めない", async () => {
     await open();
     macrosStore.macros = [macro([step()])];
-    sessionsStore.get("s1")!.connected = false;
+    sessionsStore.markLost("s1", "transport");
 
     play("s1", "m-1");
     await tick();

@@ -1,4 +1,11 @@
 import { reactive, markRaw } from "vue";
+import {
+  nextLink,
+  type LinkEvent,
+  type LostCause,
+  type Resumability,
+  type SessionLink
+} from "../session-link.js";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
 import type { ServiceState } from "@ts5250/server";
 import type { WsClient } from "../ws-client.js";
@@ -118,7 +125,22 @@ export interface SessionState {
   /** ローカル編集差分（fieldIndex → value）。AID 送信時に載せる */
   edits: Map<number, string>;
   cursor: { row: number; col: number };
-  connected: boolean;
+  /**
+   * **サーバーとの結びつき**（`20260908-session-lifetime-rules-fold`。規則は `session-link.ts`）。
+   *
+   * 畳み込み前は `connected` / `reconnect` / `reconnectFailed` / `endedByHost` の 4 つを
+   * 12 箇所から個別に書いていた。**書き込みは下の遷移関数だけ**にしてある。
+   */
+  link: SessionLink;
+  /** 繋ぎ直しの適性。**開いた時点で決まり、以後変わらない**（旧 kind / meta.terminal / attachedOnly） */
+  resumability: Resumability;
+  /**
+   * サーバーと繋がっているか。**`link` からの導出**（読み取り専用）。
+   *
+   * 表示側の読み手（`StatusBar` / `App` / `EmulatorPane` ほか）を変えずに済むよう
+   * 同じ名前で残してある。**代入は型で塞がる**——書くなら遷移関数を通すこと。
+   */
+  readonly connected: boolean;
   readOnly: boolean;
   /**
    * 予約（HLLAPI の `Reserve`）している主体の表示名。**予約中は入力を止める。**
@@ -156,10 +178,10 @@ export interface SessionState {
    *
    * `attempt` は**いま何回目か**（1 始まり）、`max` は試行の総数
    * （`session-controller` の再接続間隔表の長さ）。OIA に「再接続中 (2/5)」と直に出す。
-   * **立てるのも消すのも `session-controller` の再接続ループ**——成功・打ち切りのどちらでも
-   * `delete` する（`exactOptionalPropertyTypes` 下なので `undefined` 代入では消えない）。
+   * **`link` からの導出**——`link.state === "reconnecting"` のときだけ値を返す。
+   * 誰も直接は書かない（型で塞がっている）。
    */
-  reconnect?: { attempt: number; max: number };
+  readonly reconnect?: { attempt: number; max: number };
   /**
    * **繋ぎ直しを諦めた理由**（design「2. 復帰」）。
    *
@@ -171,26 +193,13 @@ export interface SessionState {
    * **真偽値ではなく理由で持つ。** 「諦めた」と「まだ試していない」を区別できないと、
    * 諦めたはずのセッションに対して再試行のはしごを丸ごと回し直せてしまう。
    *
-   * 消すのは `reconnect` と同じく再接続ループ（手動で押し直したとき・復帰したとき）。
+   * **`link` からの導出**——`lost` の理由が `gaveUp` なら `"retry"`、`gone` なら `"gone"`、
+   * それ以外は未設定。誰も直接は書かない（型で塞がっている）。
    */
-  reconnectFailed?: "retry" | "gone";
-  /**
-   * **見に来ただけのタブ**（既存セッションへ `sessionId` で繋いだ）。
-   *
-   * MCP / HLLAPI が開いた画面を後から覗く経路（セッション管理の「開く」）で立つ。
-   * **繋ぎ直しの対象から外すために持つ**——ここを見ないと、瞬断 1 回で「見に来た人」が
-   * 持ち主に昇格し、次にそのタブを閉じたときに**相手の作業ごと畳む**
-   * （`20260908-session-survives-disconnect` decisions D4 が守ると宣言した不変条件）。
-   */
-  attachedOnly?: boolean;
-  /**
-   * **ホスト側のセッションが終わった**（サーバー発の `closed` を受けた）。
-   *
-   * `connected === false` の理由が「転送が落ちた」なのか「ホストが終わった」なのかを
-   * 区別するために持つ。前者は繋ぎ直せば戻るが、後者は待っても戻らない——
-   * **同じ `connected` から逆の案内を出す**ことになるので、状態として分けておく。
-   */
-  endedByHost?: boolean;
+  readonly reconnectFailed?: "retry" | "gone";
+  // 旧 `attachedOnly`（見に来ただけのタブ）は `resumability` へ、
+  // 旧 `endedByHost`（ホスト側が終わった）は `link` の `lost/hostEnded` へ畳んだ。
+  // どちらも読み手は繋ぎ直しの門と送信可否だけで、表示側には無かった。
   /**
    * 在席の合図（`activity`）を最後に送った時刻。間引きの基準
    * （`session-controller.ts` の `noteActivity`）。
@@ -261,19 +270,133 @@ export interface SessionState {
   outputStatuses?: Record<string, SpoolOutputStatusView>;
 }
 
+/**
+ * **構築時に渡す分**（導出の 3 つを除いたもの）。`sessionsStore.add()` が受け取る。
+ *
+ * `connected` / `reconnect` / `reconnectFailed` は `link` から生やすので、
+ * **呼び出し側が値を持たない**（持てないようにしてある）。
+ */
+export type SessionStateInit = Omit<SessionState, "connected" | "reconnect" | "reconnectFailed">;
+
+/**
+ * **導出つきの `SessionState` を作る。** `sessionsStore.add()` を通さずに
+ * 状態を組み立てたい場合（主にテスト）の入口。
+ *
+ * 直接オブジェクトリテラルで `connected` を書くと、`link` と食い違った値を持てて
+ * しまう——**導出は 1 か所から生やす**ためにここを通す。
+ */
+export function createSessionState(init: SessionStateInit): SessionState {
+  return defineDerivedLink(init);
+}
+
+/**
+ * `link` からの導出 3 つをアクセサとして生やす。
+ *
+ * **読み取り専用にするのが要点**——畳み込み前は 9 箇所が `connected` へ直接書いており
+ * （4 フィールド全部の書き込みを数えると 12 箇所）、「どこで切断が記録されたか」を追うのに
+ * 全箇所を読む必要があった。getter にすると**代入が型で塞がる**ので、書き込みは
+ * 下の遷移関数だけになる。web-ui はテストまで型検査される
+ * （`vue-tsc -b tsconfig.json tsconfig.test.json`）ので、この防壁はテストにも効く。
+ */
+function defineDerivedLink(init: SessionStateInit): SessionState {
+  // **二度掛けても壊れない。** `createSessionState()` で組んだものを `add()` に渡す経路が
+  // あるので、既に生えていれば何もしない（`configurable: true` なので再定義自体は通るが、
+  // 通す意味が無いうえ「1 度だけ生やす」が読み手に伝わらない）
+  if (Object.getOwnPropertyDescriptor(init, "connected")?.get !== undefined) return init as SessionState;
+  return Object.defineProperties(init, {
+    connected: {
+      enumerable: true,
+      configurable: true,
+      get(this: SessionStateInit) {
+        return this.link.state === "connected";
+      }
+    },
+    reconnect: {
+      enumerable: true,
+      configurable: true,
+      get(this: SessionStateInit) {
+        return this.link.state === "reconnecting"
+          ? { attempt: this.link.attempt, max: this.link.max }
+          : undefined;
+      }
+    },
+    reconnectFailed: {
+      enumerable: true,
+      configurable: true,
+      get(this: SessionStateInit) {
+        if (this.link.state !== "lost") return undefined;
+        if (this.link.cause === "gaveUp") return "retry";
+        return this.link.cause === "gone" ? "gone" : undefined;
+      }
+    }
+  }) as SessionState;
+}
+
+/** 遷移を 1 か所に通す。**`link` へ直接代入しない**（規則は `nextLink`） */
+function applyLink(s: SessionState, ev: LinkEvent): void {
+  s.link = nextLink(s.link, ev);
+}
+
 export const sessionsStore = reactive({
   byId: new Map<string, SessionState>(),
   order: [] as string[],
 
-  add(state: SessionState): void {
+  /**
+   * セッションを登録する。**導出の 3 つ（`connected` / `reconnect` / `reconnectFailed`）は
+   * ここで `link` からのアクセサとして生やす**ので、呼び出し側は渡さない。
+   *
+   * **渡されたオブジェクトをそのまま使う**（新しく作り直さない）——呼び出し側が
+   * 参照を握ったまま `notice` などを書く経路があるため
+   * （`busy` は `setBusy` が `get()` 経由で書くので該当しない）。
+   */
+  add(init: SessionStateInit): SessionState {
+    const state = defineDerivedLink(init);
     // client は Vue のリアクティブ化から除外（外部オブジェクト）
     state.client = markRaw(state.client);
     this.byId.set(state.sessionId, state);
     if (!this.order.includes(state.sessionId)) this.order.push(state.sessionId);
+    return state;
   },
 
   get(id: string): SessionState | undefined {
     return this.byId.get(id);
+  },
+
+  /**
+   * **繋がった**（繋ぎ直しの成功・新画面の到着）。無い id では何もしない。
+   */
+  markConnected(id: string): void {
+    const s = this.byId.get(id);
+    if (s) applyLink(s, { to: "connected" });
+  },
+
+  /**
+   * **切断として記録する。** 確定した理由（`hostEnded` / `gone` / `gaveUp`）と
+   * 走っている繋ぎ直しは `transport` では上書きしない（規則は `nextLink`）。
+   */
+  markLost(id: string, cause: LostCause): void {
+    const s = this.byId.get(id);
+    if (s) applyLink(s, { to: "lost", cause });
+  },
+
+  /**
+   * **繋ぎ直しを始める / 次の段へ進む。**
+   *
+   * 諦めの印（`gaveUp` / `gone`）を解く経路は 2 つ——ここと `requestRetry`（利用者が押した）。
+   * `markConnected` も理由を消すが、あれは「繋がった」ので当然。
+   */
+  beginReconnect(id: string, attempt: number, max: number): void {
+    const s = this.byId.get(id);
+    if (s) applyLink(s, { to: "reconnecting", attempt, max });
+  },
+
+  /**
+   * **利用者が「繋ぎ直す」を押した。** 諦めの印を解くが、まだ走り始めてはいない
+   * （現行 `retryReconnect` が門の前に打つ 2 つの `delete` に対応）。
+   */
+  requestRetry(id: string): void {
+    const s = this.byId.get(id);
+    if (s) applyLink(s, { to: "retryRequested" });
   },
 
   /** そのシステムで接続中のセッション数（システムカードに出す） */
@@ -315,7 +438,15 @@ export const sessionsStore = reactive({
     if (!s) return;
     s.snapshot = snapshot;
     s.cursor = snapshot.cursor;
-    s.connected = true;
+    // **新画面が来た＝繋がっている。** 遷移は `nextLink` に通す（`link` を直に書かない）。
+    //
+    // **旧より広い遷移になっている**——旧は `connected = true` だけで `reconnect` /
+    // `reconnectFailed` を残したが、union では `connected` になると理由も消える。
+    // 差が出るのは「はしごが走っている最中に画面が来る」場合だけで、そこは
+    // `session-controller` の `tryResume` が**代表していない試行からの更新を弾く**
+    // （打ち切った試行の `screen` が「接続中」へ戻すのを防ぐ既存のガード）ので到達しない。
+    // 到達しない組合せを型で表現できなくした、という `decisions.md` D10 と同じ性質。
+    applyLink(s, { to: "connected" });
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
   },

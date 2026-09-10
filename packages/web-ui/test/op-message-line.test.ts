@@ -67,7 +67,8 @@ function seed(s: ScreenSnapshot): void {
     snapshot: s,
     edits: new Map(),
     cursor: s.cursor,
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send: () => {} } as unknown as WsClient
   });

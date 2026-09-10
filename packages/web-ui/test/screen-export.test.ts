@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { downloadScreenHtml } from "../src/screenExport.js";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 import { viewSettings } from "../src/stores/viewSettings.js";
 import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
 
@@ -39,12 +39,13 @@ function snapshotWith(cells0: Cell[]): ScreenSnapshot {
 function addSession(snapshot: ScreenSnapshot | undefined, ccsid?: number): void {
   sessionsStore.byId.clear();
   sessionsStore.order = [];
-  sessionsStore.add({
+  sessionsStore.add(createSessionState({
     sessionId: SID, label: "DEV1", kind: "display", snapshot,
-    edits: new Map(), cursor: { row: 1, col: 1 }, connected: true, readOnly: false,
+    edits: new Map(), cursor: { row: 1, col: 1 }, link: { state: "connected" },
+ resumability: "resumable", readOnly: false,
     ccsid, meta: { host: "192.0.2.1" },
     client: {} as SessionState["client"]
-  } as SessionState);
+  } as unknown as SessionStateInit));
 }
 
 let written = "";

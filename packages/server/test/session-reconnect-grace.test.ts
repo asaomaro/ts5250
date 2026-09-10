@@ -52,7 +52,7 @@ describe("猶予保持（holdForReconnect）", () => {
     expect(mgr.holdForReconnect(entry.id)).toBe(true);
     t += DEFAULT_RECONNECT_GRACE_MS - 1;
     expect(mgr.holdForReconnect(entry.id)).toBe(false); // 2 回目は入らない
-    // **返り値だけでは足りない。** `heldUntil` を黙って上書きしていても false は返せるので、
+    // **返り値だけでは足りない。** `hold（旧 heldUntil）` を黙って上書きしていても false は返せるので、
     // **元の期限で**刈られることまで見る（そうでないと、切断を繰り返す相手が無期限に掴める）
     t += 2;
     sweep(mgr);

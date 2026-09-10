@@ -274,7 +274,8 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
       snapshot: snapOf(fields),
       edits: new Map(),
       cursor: { row: 5, col: 10 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       // **在席の合図（`activity`）は数えない。** 打鍵のたびに WS へ流れるが、これは
       // サーバーのアイドル判定用でホストへは行かない（`20260729-session-lifetime-timeout`）。

@@ -1,26 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import PrinterPane from "../src/components/PrinterPane.vue";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 
 const SID = "p1";
 
 function addPrinterSession(over: Partial<SessionState> = {}): string {
   sessionsStore.byId.clear();
   sessionsStore.order = [];
-  sessionsStore.add({
+  sessionsStore.add(createSessionState({
     sessionId: SID,
     label: "prt",
     kind: "printer",
     snapshot: undefined,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: true,
     reports: [],
     client: {} as SessionState["client"],
     ...over
-  } as SessionState);
+  } as unknown as SessionStateInit));
   return SID;
 }
 

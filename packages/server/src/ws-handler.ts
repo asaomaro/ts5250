@@ -9,6 +9,7 @@ import {
   type StoredReport,
   type PcCommandEvent
 } from "./session-manager.js";
+import type { ConnRole } from "./session-lifetime.js";
 import type { WatchRegistry } from "./watch-registry.js";
 import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
@@ -116,7 +117,24 @@ function emptyVtFrame(rows: number, cols: number): WsVtFrame {
 }
 
 export class WsConnection {
-  private sessionId: string | undefined;
+  /**
+   * **この接続が結びついている 5250 表示セッション / プリンター**（id と役割）。
+   *
+   * id・「見に来ただけか」・持ち主の印を独立フィールドに持っていた頃は、3 つの整合を
+   * 呼び出し側が保つ必要があり、後始末の判断が `ws-handler` と `SessionManager` に
+   * またがって散った（`20260908-session-lifetime-rules-fold`）。**1 欄に畳むと、
+   * 「id はあるが役割が無い」という状態が型で作れなくなる。**
+   *
+   * 役割の意味と、それが後始末の処分をどう決めるかは `session-lifetime.ts`。
+   */
+  private link: { readonly id: string; readonly role: ConnRole } | undefined;
+  /**
+   * 5250 表示セッション / プリンターの id。**`link` からの導出**（読み取り専用）。
+   * 書き換えは `link` を通す——片方だけ更新される形を作らないため。
+   */
+  private get sessionId(): string | undefined {
+    return this.link?.id;
+  }
   /**
    * **3270 セッションの id**。`sessionId`（5250）とは別枠にしてある——
    * 同じ枠に入れると、5250 専用の経路（予約・watch・PC コマンド）が
@@ -133,24 +151,8 @@ export class WsConnection {
   /** VT の差分を作る器。**接続 1 本につき 1 つ**（前回送った内容を覚えている） */
   private vtFrames: VtFrameBuilder | undefined;
   private detachScreen: (() => void) | undefined;
-  /**
-   * **このタブが開いたのではなく、既にあるセッションへ繋いだ**か。
-   *
-   * 切断時にセッションを閉じてよいかの判断に使う。**繋いだだけのタブは閉じない**
-   * ——閉じると、開いた人や MCP の作業をこちらの都合で殺すことになる。
-   */
-  private attached = false;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
-  /**
-   * **このセッションの持ち主としての印**
-   * （`SessionManager.claim`。`20260908-session-survives-disconnect` decisions D7）。
-   *
-   * 後始末（`dispose`）の前に「まだ自分が持ち主か」を確かめるために持つ。半開きの回線では
-   * クライアントが先に見切って繋ぎ直すので、**古いこのハンドラが後から後始末に入ったとき、
-   * 既に別の接続が引き取っている**ことがある。印が無いと、そこで復帰済みのセッションを閉じる。
-   */
-  private holderToken: number | undefined;
   /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
   private detachWatch: (() => void) | undefined;
   /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
@@ -494,8 +496,8 @@ export class WsConnection {
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.open(opts);
-      this.sessionId = entry.id;
-      this.holderToken = this.deps.sessions.claim(entry.id);
+      // 自分で開いた＝持ち主（去るときに畳む責任を持つ）
+      this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
       this.subscribeSession(entry);
       this.send({
@@ -781,8 +783,7 @@ export class WsConnection {
       }
       if (this.user) opts.owner = this.user.username;
       const entry = await this.deps.sessions.openPrinter(opts);
-      this.sessionId = entry.id;
-      this.holderToken = this.deps.sessions.claim(entry.id);
+      this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
       const onReport = (r: StoredReport): void =>
         this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) });
@@ -905,15 +906,15 @@ export class WsConnection {
    */
   private attach(sessionId: string, opts?: { resume?: boolean }): void {
     const entry = this.deps.sessions.get(sessionId, this.user); // 無ければ／他人のものなら例外
-    this.sessionId = entry.id;
     if (opts?.resume === true) {
       // **持ち主として戻る**（`20260908-session-survives-disconnect` decisions D4）。
-      // `attached` を立てない＝去るときにこの接続がセッションを畳む。猶予も解く
+      // 役割は `owner`＝去るときにこの接続がセッションを畳む。猶予も解く
       // ——ここで解かないと、繋ぎ直した直後に元の期限で足元から閉じられる
       this.deps.sessions.cancelHold(entry.id);
-      this.holderToken = this.deps.sessions.claim(entry.id);
+      this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
     } else {
-      this.attached = true;
+      // **見に来ただけ。** 畳む責任を持たない（MCP が開いた画面を覗く使い方を壊さない）
+      this.link = { id: entry.id, role: { kind: "viewer" } };
     }
     this.startHeartbeat();
     this.subscribeSession(entry);
@@ -1107,46 +1108,23 @@ export class WsConnection {
       this.deps.tn3270?.close(this.session3270);
       this.session3270 = undefined;
     }
-    if (this.sessionId) {
-      // **常駐プリンターは切らない。** 監視と同じで、購読を外すだけ——
-      // 「設定が仕事をする」サービス型なので、タブを閉じたら帳票が来なくなるのは
-      // 利用者の期待に反する（design D1）。フック（onReport / onOutputWarn /
-      // onOutputStatus）は上で外しているが、**記録はエントリ側に溜まり続ける**ので、
-      // 開き直したときに閉じている間のぶんを読める
-      // **繋いだだけのタブはセッションを閉じない。** 開いた人や MCP がまだ使っている
-      // ——見に来た人が去っただけで相手の作業を殺してはいけない。
+    if (this.link) {
+      // フック（onReport / onOutputWarn / onOutputStatus）は上で外しているが、
+      // **記録はエントリ側に溜まり続ける**ので、開き直したときに閉じている間のぶんを読める
+      // （常駐プリンターを切らない理由は `session-lifetime.ts` の `decideDisposition` へ移した）。
       //
-      // 自分が開いたタブでも、**他に見ている人が残っていれば閉じない**
-      // （後から繋いだタブが残っているのに画面が消える、を避ける）
-      // **座は無条件に返す**（閉じるかどうかとは別）。この接続はもう居ないのだから、
-      // 持ち主のままにしておくと、**残った接続が「持ち主が居る」と読んで誰も閉じなくなる**。
-      // 3 判断の内側で返していた頃は、他に見ている人が居る経路で返し損ねて孤児になった
-      // （`20260908-session-survives-disconnect` decisions D7 / D10）
-      const wasHolder = this.deps.sessions.releaseHolder(this.sessionId, this.holderToken);
-      const otherViewers = this.deps.sessions.hasViewer(this.sessionId);
-      if (!this.attached && !otherViewers && !this.deps.sessions.isResident(this.sessionId)) {
-        // 半開きでは、クライアントが先に見切って繋ぎ直したあとに古いこのハンドラが
-        // （心拍の死判定で）ここへ来る。そのまま閉じると**復帰済みのセッションを殺す**。
-        // かといって「交代済みなら何もしない」だけでは、**新しい持ち主が先に去った場合に
-        // 誰も閉じない**。だから見るのは 2 つ——自分が持ち主だったかと、いま持ち主が居るか。
-        const abandoned = !this.deps.sessions.hasHolder(this.sessionId);
-        if (!wasHolder && !abandoned) {
-          // 交代済みで、相手がまだ居る。閉じも猶予もしない
-        } else if (opts?.transportLost === true) {
-          // **回線が落ちただけなら少し待つ。** ホストの対話ジョブは画面遷移の途中状態を
-          // 持つので、掛け直せるなら掛け直させる（`20260908-session-survives-disconnect` decisions D5）。
-          // `holdForReconnect` の `false` は「閉じてよい」ではない——既に猶予中の場合も
-          // 含むので、`isHeld` と併せて見る
-          const held = this.deps.sessions.holdForReconnect(this.sessionId);
-          if (!held && !this.deps.sessions.isHeld(this.sessionId)) {
-            void this.deps.sessions.close(this.sessionId).catch(() => {});
-          }
-        } else {
-          void this.deps.sessions.close(this.sessionId).catch(() => {});
-        }
-      }
-      this.sessionId = undefined;
-      this.holderToken = undefined;
+      // **後始末の処分は `SessionManager.disposition` が決めて実行する**
+      // （`20260908-session-lifetime-rules-fold`）。座を返す・猶予に入れる・閉じる、の
+      // どれになるかは規則（`session-lifetime.ts`）が答えるので、ここに分岐は置かない
+      // ——散らすと、1 つの規則を直したときに隣の写しが別の結論を返し続ける。
+      //
+      // **購読はすべて上で外し終えている**のが呼び出しの前提（`hasViewer` が
+      // 「自分以外」を意味するのはそのため）
+      this.deps.sessions.disposition(this.link.id, {
+        role: this.link.role,
+        transportLost: opts?.transportLost === true
+      });
+      this.link = undefined;
     }
     // **`ended` は付けない。** ここはこの WS 接続の後始末で、セッションは猶予として
     // 生きていることも、他のタブが見ていることもある（`WsClosed.ended` の注記）

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
-import type { SessionState } from "../src/stores/sessions.js";
+import { createSessionState, type SessionStateInit, type SessionState } from "../src/stores/sessions.js";
 
 /**
  * OIA の入力可否表示。
@@ -35,17 +35,18 @@ function snap(over: Partial<ScreenSnapshot> = {}, fields: Field[] = []): ScreenS
 }
 
 function state(over: Partial<SessionState> = {}, sn = snap()): SessionState {
-  return {
+  return createSessionState({
     sessionId: "s",
     label: "s",
     snapshot: sn,
     edits: new Map(),
     cursor: sn.cursor,
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: {} as never,
     ...over
-  } as SessionState;
+  } as unknown as SessionStateInit);
 }
 
 const editable: Field = {
@@ -83,7 +84,7 @@ describe("入力可否の表示", () => {
   });
 
   it("切断中は切断", () => {
-    expect(textOf(state({ connected: false }, snap({}, [editable])))).toContain("切断");
+    expect(textOf(state({ link: { state: "lost", cause: "transport" } }, snap({}, [editable])))).toContain("切断");
   });
 });
 

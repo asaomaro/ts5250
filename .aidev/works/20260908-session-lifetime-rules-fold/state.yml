@@ -1,0 +1,12 @@
+schema: 11
+slug: session-lifetime-rules-fold
+current: retro
+approved: [requirements, research, design, architecture, tasks, coding, test, review, deliver, retro]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: session-lifecycle.md
+harnessRevDelivered: unknown

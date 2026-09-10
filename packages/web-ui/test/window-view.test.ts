@@ -122,7 +122,8 @@ describe("桁と操作を壊さない（FR-5/FR-6）", () => {
     sessionsStore.order = [];
     sessionsStore.add({
       sessionId: SID, label: "t", snapshot: snapOf(CHAR_WINDOW), edits: new Map(), cursor: { row: 1, col: 1 },
-      connected: true, readOnly: false, client: { send() {} } as unknown as WsClient,
+      link: { state: "connected" },
+      resumability: "resumable", readOnly: false, client: { send() {} } as unknown as WsClient,
     });
     viewSettings.set("windowFrame", "outline");
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });

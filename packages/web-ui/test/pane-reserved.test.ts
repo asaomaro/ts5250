@@ -65,7 +65,8 @@ describe("EmulatorPane: 予約中は入力を止める", () => {
       snapshot: snapOf(),
       edits: new Map(),
       cursor: { row: 5, col: 10 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       ...(reservedBy !== undefined ? { reservedBy } : {}),
       client: { send: (m: unknown) => sent.push(m) } as unknown as WsClient

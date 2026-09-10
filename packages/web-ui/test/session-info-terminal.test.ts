@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import SessionInfo from "../src/components/SessionInfo.vue";
-import { sessionsStore, type SessionState, type SessionMeta } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, type SessionMeta, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 
 /**
  * 開いているセッションの「種別」。
@@ -17,16 +17,17 @@ afterEach(() => {
 
 function paneFor(meta: SessionMeta, kind?: "printer") {
   const id = `s-${ids.length}-${meta.terminal ?? "none"}-${kind ?? "display"}`;
-  sessionsStore.add({
+  sessionsStore.add(createSessionState({
     sessionId: id,
     label: "テスト",
     edits: new Map(),
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: {} as never,
     meta,
     ...(kind !== undefined ? { kind } : {})
-  } as unknown as SessionState);
+  } as unknown as SessionStateInit));
   ids.push(id);
   return mount(SessionInfo, { props: { sessionId: id } });
 }

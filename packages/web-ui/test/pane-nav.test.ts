@@ -45,7 +45,8 @@ function seed(fields: Field[]): void {
     snapshot: snap(fields),
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { send: () => {} } as unknown as WsClient
   });
@@ -151,7 +152,8 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
       snapshot: snap(fields),
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send } as unknown as WsClient
     });
@@ -447,7 +449,8 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
       snapshot: snap([dbcs]),
       edits: new Map([[1, "あいう"]]),
       cursor: { row: 5, col: 10 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send: () => {} } as unknown as WsClient
     });
@@ -584,7 +587,8 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
       snapshot: s,
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send } as unknown as WsClient
     });
@@ -614,7 +618,8 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
       snapshot: s,
       edits: new Map(),
       cursor: { row: 1, col: 1 },
-      connected: true,
+      link: { state: "connected" },
+      resumability: "resumable",
       readOnly: false,
       client: { send: () => {} } as unknown as WsClient
     });

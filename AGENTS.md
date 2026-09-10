@@ -110,6 +110,18 @@
 
 ---
 
+## 条項（aidev）
+
+`aidev` の retro/insights が起こした**検証中の規約**。本体の規約と違い、効果が確認できるまでは
+ここに置き、確認できたら本文をこのファイルへ移す（`protocol-conventions.md`）。
+
+<!-- aidev:conventions -->
+- コードコメントに出所（D 番号・`file:line`・数値・他 work への参照）を書くとき → `.aidev/conventions/comment-provenance.md`
+- サーバー／クライアントなど**対になる資産**を作る・片方に指摘を直すとき → `.aidev/conventions/paired-artifact-sync.md`
+<!-- /aidev:conventions -->
+
+---
+
 ## UI デザインガイド（web-ui）
 
 web-ui の見た目・振る舞いの規約は **[docs/UI-DESIGN.md](docs/UI-DESIGN.md)** にまとめている。

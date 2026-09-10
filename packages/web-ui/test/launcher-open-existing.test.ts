@@ -4,7 +4,7 @@ import type { PublicSession, PublicSystem } from "@ts5250/server";
 import LauncherPane from "../src/components/LauncherPane.vue";
 import ConfigCard from "../src/components/ConfigCard.vue";
 import { systemsStore } from "../src/stores/systems.js";
-import { sessionsStore, type SessionState } from "../src/stores/sessions.js";
+import { sessionsStore, type SessionState, createSessionState } from "../src/stores/sessions.js";
 import { workspaceStore } from "../src/stores/workspace.js";
 import { authStore } from "../src/stores/auth.js";
 
@@ -43,18 +43,19 @@ function stubFetch(): void {
 
 /** 生きているセッション（WebSocket は使わないのでダミー） */
 function liveSession(configRef: string, deviceName?: string): SessionState {
-  return {
+  return createSessionState({
     sessionId: "sess-1",
     label: "jp1",
     configRef,
     snapshot: undefined,
     edits: new Map(),
     cursor: { row: 1, col: 1 },
-    connected: true,
+    link: { state: "connected" },
+    resumability: "resumable",
     readOnly: false,
     client: { close: () => {}, send: () => {} } as unknown as SessionState["client"],
     ...(deviceName !== undefined ? { meta: { deviceName } } : {})
-  };
+  });
 }
 
 beforeEach(() => {
@@ -159,7 +160,7 @@ describe("システムカードの接続数", () => {
     sessionsStore.add({
       ...liveSession(SESSION.ref, "WEBEMU01"),
       systemRef: SYSTEM.ref,
-      connected: false
+      link: { state: "lost", cause: "transport" }
     });
     const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM } });
     expect(w.text()).not.toContain("接続 ");
