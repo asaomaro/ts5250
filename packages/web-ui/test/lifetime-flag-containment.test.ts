@@ -95,6 +95,56 @@ describe("セッション寿命の判定は 1 か所に閉じている（クラ�
   });
 
   /**
+   * **口どうしの同一性は述語に問う。**「セッションがいま抱えている口か」は
+   * `session-link.ts` の `isSessionClient` が答えるので、呼び出し側が `=== client` と
+   * 直に書いてよい理由は無い。
+   *
+   * **注記だけでは守れない。** 畳み込みでこの判定に名前が付かなかったあいだ、
+   * 生の比較が呼び出し側に散り、**必要な場所では書き漏らされていた**
+   * （`20260910-session-reconnect-freeze` の `decisions.md` D7・`session-link.ts` の
+   * `isSessionClient` の注記）。ここが増えたら、また名前の無い判定が生えている。
+   *
+   * **`undefined` との比較は数えない**——あれは「口が在るか」（`abortReconnect` の飛行中判定）で、
+   * 口どうしを比べる問いではない。
+   */
+  it("口どうしの生比較（`.client === 口`）は src のどこにも無い", () => {
+    // **見るのは `.client` が左に来る形だけ**（`client === cur.client` や、別名に束縛してからの
+    // 比較は素通りする）。ここは網羅ではなく**再発しやすい形の禁止**
+    // **先読みで `undefined` を外さない。** `\s*` が 0 文字に戻れるので
+    // `!== undefined` でも先読みが通ってしまう（実測）。取り出してから外す
+    const offenders = sources().flatMap(({ name, text }) => {
+      const raw = [...code(text).matchAll(/\.client\s*[!=]==\s*([A-Za-z_$][\w$]*)/g)];
+      return raw.some((m) => m[1] !== "undefined") ? [name] : [];
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * **セッションの口への代入も 1 か所に閉じる。** 兄弟の `.link =` と同じ形。
+   *
+   * ここが守るのは `markRaw`（外部オブジェクトを Vue のリアクティブ化から外す）を通ること。
+   * 通らない代入が 1 つ生えると、口の同一性で答える判定が**静かに必ず偽**になる
+   * （`20260910-session-reconnect-freeze` の `decisions.md` D7・D8）。
+   * `.client ===` の側は上で禁じたが、**代入の側が空いていた**（同 work の cross 点検）。
+   *
+   * **`a.client = …` は数えない**——あれは `Attempt`（試行の口）で、`session-controller.ts` の
+   * module スコープの Map に載る非リアクティブな値。セッションの口ではない。
+   *
+   * **接頭辞は「識別子 1 つ」に限らない。** `sessionsStore.get(id)!.client = client` が
+   * **D7 のバグを最も自然に再導入する形**で、`.client` の直前が `!` になる
+   * （`20260910-session-reconnect-freeze` の review ラウンド1 の nit）。
+   */
+  it("セッションの口への代入は stores/sessions.ts の中だけ", () => {
+    const offenders = sources()
+      .filter(({ name }) => name !== "stores/sessions.ts")
+      .flatMap(({ name, text }) => {
+        const hits = [...code(text).matchAll(/([^\s;{}()]*)\.client\s*=(?!=)/g)];
+        return hits.some((m) => m[1] !== "a") ? [name] : [];
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  /**
    * **`settled` は「畳んで消えたもの」ではなく「畳んだ先に閉じ込めたもの」。**
    *
    * design「AC2 の詳細」は 5 つとも「0 件」で縛ると書いているが、これだけは `Attempt` の欄

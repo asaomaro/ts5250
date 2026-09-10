@@ -27,8 +27,9 @@ import type { WsClient } from "./ws-client.js";
  * 3 つを門で並べていた。**どれも「開いたときに決まる性質」**なので 1 つに畳んである。
  *
  * `not-resumable` になるのは 3 通り: プリンター（自前の `onClose` を持つ）/
- * 3270（サーバー側に共有・再取得の経路が無い。前 work の D3）/
- * **見に来ただけのタブ**（座を引き取らない約束なので繋ぎ直せない。前 work の D4 / D13）。
+ * 3270（サーバー側に共有・再取得の経路が無い。`20260908-session-survives-disconnect` の D3）/
+ * **見に来ただけのタブ**（座を引き取らない約束なので繋ぎ直せない。
+ * `20260908-session-survives-disconnect` の D4 / D13）。
  */
 export type Resumability = "resumable" | "not-resumable";
 
@@ -90,7 +91,8 @@ export type LinkEvent =
  * 「繋がっているのにホスト終了の印が残る」組合せが型の上で作れたが、union では作れない
  * ——`connected` / `reconnecting` へ遷移すると理由は消える。**この組合せは到達しない**
  * （ホスト終了ではサーバーがエントリごと削除するので、以後 `opened` も `screen` も来ない）ため
- * 振る舞いは変わらないが、**到達しない状態を型で排除した**という差はある（`decisions.md` D10）。
+ * 振る舞いは変わらないが、**到達しない状態を型で排除した**という差はある
+ * （`20260908-session-lifetime-rules-fold` の `decisions.md` D10）。
  */
 export function nextLink(prev: SessionLink, ev: LinkEvent): SessionLink {
   if (ev.to === "connected") return { state: "connected" };
@@ -165,21 +167,23 @@ export function canSendToHost(link: SessionLink): { ok: true } | { ok: false; re
  * 畳み込み前は「この試行はまだ有効か」を **5 系統**で見ていた——試行ローカルの `settled`、
  * `pendingResumes` との突き合わせ、`reconnectTimers` の Map、`s.reconnect` の有無、
  * そして差し替え済みの口かどうか。**どれを畳んでも他が単独では守れない**状態だった
- * （`research.md` F4）。**このうち 3 つ**（`settled` / `pendingResumes` / `reconnectTimers`）が
+ * （`20260908-session-lifetime-rules-fold` の `research.md` F4）。**このうち 3 つ**（`settled` / `pendingResumes` / `reconnectTimers`）が
  * ここに畳まれ、**`s.reconnect` は `SessionLink` の `reconnecting`** が代表する——
  * つまり「走っているか」は R3 の状態、「どの試行が代表か」は R4 の状態として分かれる。
  *
- * **5 つ目（`sessionsStore.get(id)?.client === client`）は畳まない**——あれは
- * 「この試行が有効か」ではなく「**この口がいま現役か**」を問うており、成功した試行が
- * 退役したあとの `onClose`（繋ぎ直しを回し直す唯一の経路）を区別できなくなる。
+ * **5 つ目（差し替え済みの口かどうか）はこの型に畳まない**——あれは「この試行が有効か」ではなく
+ * 「**セッションがいま抱えている口か**」を問うており、成功した試行が退役したあとの `onClose`
+ * ——**切れたことを機に自動で回し直す唯一の経路**（`startReconnect` の呼び手は他に
+ * `openSession` の `onClose` と、利用者が押し直す `retryReconnect` の 2 つ）——を
+ * 区別できなくなる。**捨てたのではなく、隣に置いた**
+ * ——`isSessionClient` がそれで、両方が要る場所には合成の `acceptsFrame` が答える。
  *
- * **その 5 つ目が必要なのに欠けている場所がある**（`decisions.md` D13）。
- * `session-controller.ts` のメッセージ共通ガードは `isCurrentAttempt` だけを見るので、
- * **繋ぎ直しに成功した直後から全フレームが落ちる**（成功時に試行を退役させるため、
- * 以後この判定は必ず偽になる）。利用者から見ると「再接続したのに画面が固まり、
- * 応答待ちの覆いが消えない」。**畳み込み前から同じ**（旧 `pendingResumes` の突き合わせも
- * 同じ効果）なので本 work では直さない——直すと「振る舞いを変えていない」ことを
- * テストで示せなくなる（requirements の非機能要件）。backlog へ起票済み。
+ * **その 5 つ目が必要なのに欠けている場所があった**（`20260908-session-lifetime-rules-fold` の
+ * `decisions.md` D13）。`session-controller.ts` のメッセージ共通ガードが `isCurrentAttempt` だけを
+ * 見ていたため、**繋ぎ直しに成功した直後から全フレームが落ちていた**（成功時に試行を退役させるため、
+ * 以後この判定は必ず偽になる）。利用者から見ると「再接続したのに画面が固まり、応答待ちの覆いが
+ * 消えない」。畳み込みの work は「振る舞いを変えない」制約のため直さず backlog へ起票し、
+ * **`20260910-session-reconnect-freeze` が `acceptsFrame` として塞いだ**。
  */
 export interface Attempt {
   /** 待ち時間の表の何段目か */
@@ -207,11 +211,81 @@ export interface Attempt {
  * `opened` や `screen` が届くこともある。**代表でない試行の結果は捨てる**
  * ——とくに `screen` は `updateScreen` 経由で「繋がっている」に戻してしまう。
  *
- * **2 項のうち効いているのは第 1 項だけ**（`decisions.md` D17）。`settled` を立てる 4 経路は
+ * **2 項のうち効いているのは第 1 項だけ**（`20260908-session-lifetime-rules-fold` の `decisions.md` D17）。`settled` を立てる 4 経路は
  * いずれも同じ同期ブロックで `attempts` から当該試行を外すので、`current === a && a.settled`
  * は到達しない。`!a.settled` は**外し忘れたときに効く保険**として残している——
  * 片方だけ壊しても表は落ちないので、テストではなくこの注記が唯一の記録。
  */
 export function isCurrentAttempt(current: Attempt | undefined, a: Attempt): boolean {
   return current === a && !a.settled;
+}
+
+/**
+ * **セッションがいま抱えている口か**（R4 の 5 つ目）。
+ *
+ * **繋がっているかではない。** `SessionState.client` は切れても差し替わるまで残るので、
+ * **切れたばかりの口でも真を返しうる**——繋がりの真実を持つのは `SessionLink` のほう。
+ * ここが答えるのは「この口がセッションの現在の口か」だけ。
+ *
+ * **参照の同一性で答えるので、store が口を `markRaw` していることに乗っている**
+ * （`stores/sessions.ts` の `add` / `setClient`）。外れると Vue が読み戻しでプロキシに包み、
+ * ここは**必ず偽**になって静かに壊れる（`20260910-session-reconnect-freeze` の
+ * `decisions.md` D7 が実測）。このモジュールは Vue を知らないので `toRaw` は置けない
+ * ——前提はこの注記にしか残せない。
+ *
+ * 畳み込み（`20260908-session-lifetime-rules-fold`）で R4 に入らなかった 1 つがこれで
+ * （上の `Attempt` と下の `acceptsFrame` の注記）、名前が無いまま呼び出し側に
+ * `=== client` と書かれていた。
+ */
+export function isSessionClient(live: WsClient | undefined, from: WsClient): boolean {
+  return live === from;
+}
+
+/**
+ * **この口から届いたフレームを受け取ってよいか**（R4 の合成）。
+ *
+ * 繋ぎ直しの口には 2 つの相がある——**まだ試行中**（代表の試行なら受け取る）と、
+ * **成功して現役になった後**（セッションの口なら受け取る）。成功時に試行を退役させるので、
+ * 前者だけを見ていると**成功した瞬間から以後の全フレームが落ちる**
+ * （`20260908-session-lifetime-rules-fold` の `decisions.md` D13。同 work は
+ * 「振る舞いを変えない」制約を負っていたため直さず起票した）。
+ *
+ * **選言をここに置くのが要。** 呼び出し側で `||` を書くと、独立した述語を呼ぶ側で組み立てる形
+ * ——畳み込み前に判定が散った原因そのもの（このファイル冒頭の「なぜ別ファイルなのか」）——に戻る。
+ *
+ * **`opened` の枝では使わない。** あちらが問うのは「この試行の成功を採用してよいか」で、
+ * 現役の口から 2 度目の `opened` が来たときに成功処理を二重に走らせてはならない。
+ *
+ * **第 2 項に `connected` の門が要る**（`20260910-session-reconnect-freeze` の review ラウンド1 の must）。`SessionState.client` は
+ * 繋ぎ直しが成功するまで差し替わらないので、**はしごが回っている間ずっと第 2 項が真**になる。
+ * そこへ死にかけの口からフレームが通ると `updateScreen` が「繋がっている」へ戻し、以後の送信が
+ * 非 OPEN のソケットへ落ちて黙殺される（待ちだけが残る）。**配送は実在する**——
+ * `ws-client.ts` の見張りは `ws.close()` のあと保険のタイマーで `onClose` を撃つので、
+ * その時点でソケットはまだ CLOSING で、`message` の受け口に `readyState` の検査は無い。
+ */
+export function acceptsFrame(
+  current: Attempt | undefined,
+  a: Attempt,
+  live: WsClient | undefined,
+  from: WsClient,
+  link: SessionLink | undefined
+): boolean {
+  return isCurrentAttempt(current, a) || acceptsFromSession(link, live, from);
+}
+
+/**
+ * **繋がっているセッションの口から届いたフレームか**（`acceptsFrame` の第 2 項）。
+ *
+ * **試行を持たない口はこちらだけを問う。** 初回接続の口には `Attempt` が無いので
+ * `acceptsFrame` を呼べないが、**塞ぐべき穴は同じ**——1 回目のはしごを駆動するのは必ずその口で、
+ * `SessionState.client` は成功まで差し替わらないから、はしごの最中も「セッションの口」の判定は
+ * 真のまま。門が無いと死にかけの口からの `screen` / `key-done` が `updateScreen` に届いて
+ * 「繋がっている」へ戻す（`20260910-session-reconnect-freeze` の review ラウンド2 の must）。
+ */
+export function acceptsFromSession(
+  link: SessionLink | undefined,
+  live: WsClient | undefined,
+  from: WsClient
+): boolean {
+  return link?.state === "connected" && isSessionClient(live, from);
 }
