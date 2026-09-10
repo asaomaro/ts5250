@@ -81,7 +81,7 @@
       サーバーが同じ `entry.id` を返して `add` が差し替える）。
       **本 work の門はこの 2 つを通らないので、悪化はしていない**（VT・プリンターは
       `updateScreen` / `markConnected` を呼ばず、`not-resumable` ではしごも回らない）。
-- [ ] **ホスト終了がはしごの最中に届くと取りこぼす**（`20260910-session-reconnect-freeze` の
+- [x] **ホスト終了がはしごの最中に届くと取りこぼす**（`20260910-session-reconnect-freeze` の
       review ラウンド3 ＋ デバッグ D1）。**2 つを 1 つの直しとして入れること**——片方だけでは無効。
       1. `closed` は表示の更新ではなく**寿命の信号**なので、共通の門の `link.state === "connected"` の
          要求から外す（口の同一性は残す＝`acceptsFrame` から `connected` の要求だけを外した述語）。
@@ -98,6 +98,18 @@
       書けないため、本 work では両方とも入れず対で起票した。
       再現の順序: `onClose()`（見張りの保険で CLOSING のまま）→ 同じ口へ `closed{ended:true}`。
       既存の順序（`closed` → `onClose`）は `session-reconnect.test.ts` が固定済みで影響なし。
+      **消し込み: `20260910-session-closed-ladder-interrupt`。** 述語
+      `packages/web-ui/src/session-link.ts:289` `acceptsLifetimeSignal`（`isCurrentAttempt ||
+      isSessionClient`）で 1 を実現し、`packages/web-ui/src/session-controller.ts:644`
+      `case "closed"` に `abortReconnect(sessionId)` を足して 2 を実現した。
+      **この起票が予告していた退行がそのとおり起きた**——当初は `closed`（`ended` 不問）を丸ごと
+      門から外したため、はしごを使い切ったあとに**同じ口**から届く transport 起因の
+      `closed{ended:false}` が緩めた門を通り、確定済みの `MSG_RECONNECT_GAVE_UP` を消した
+      （`nextLink` は `link` の上書きを防ぐが `delete s.notice` は無条件だったため）。
+      組み込みレビュー（review ラウンド2）が実測で捕まえ、条件を `msg.ended === true` に
+      狭めて解消（`decisions.md` D6）。**実測**: テスト 5685 → 5697（+12 件、0 failed / 41 skipped）。
+      変異で 3 件の赤化を確認。**残した穴 2 つ**（VT・プリンターの `onClose`／`openSession` の
+      Promise settle）は前 work から引き継いだまま未解消。**実機は未検証。**
 - [ ] `openSession` の Promise が settle しないまま残る経路がある
       （`20260910-session-reconnect-freeze` の review ラウンド3）。`opened` / `error` のどちらも
       届かずにソケットが閉じると（プロキシの 1006、upgrade 後にフレーム無しで閉じるサーバー等）、
