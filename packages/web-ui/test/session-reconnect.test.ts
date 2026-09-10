@@ -188,6 +188,33 @@ describe("転送断からの繋ぎ直し", () => {
     expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
   });
 
+  /**
+   * **確定済みの諦めの文言を、あとから届く transport 起因の `closed` で消さない**
+   * （`20260910-session-closed-ladder-interrupt` の review ラウンド2。組み込みレビュー由来）。
+   *
+   * `nextLink` は `link`（`lost/gaveUp`）を transport 原因の遷移で上書きしないが、
+   * `case "closed"` の `delete s.notice` はそれを見ずに無条件で走っていた。
+   * `held.client` は諦めたあとも変わらない（成功した繋ぎ直しが一度も無いため）ので、
+   * その同じ口から遅れて届く `closed{ended:false}`（心拍の死判定・サーバーの後始末）が
+   * 通ってしまい、`MSG_RECONNECT_GAVE_UP` を黙って消していた。
+   */
+  it("諦めたあと、同じ口から遅れて届いた transport 原因の `closed` で諦めの文言が消えない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000]) {
+      await runAttempt(ms);
+      clients[clients.length - 1]!.handlers.onClose?.();
+    }
+    expect(s.reconnectFailed).toBe("retry");
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP);
+
+    clients[0]!.handlers.onServerMessage({ type: "closed", reason: "heartbeat timeout" });
+
+    expect(s.link).toEqual({ state: "lost", cause: "gaveUp" }); // nextLink は上書きしない
+    expect(s.reconnectFailed).toBe("retry");
+    expect(s.notice).toBe(MSG_RECONNECT_GAVE_UP); // **消えてはいけない**
+  });
+
   it("手動の繋ぎ直しは、はしごを最初から回し直す", async () => {
     const s = await open();
     clients[0]!.handlers.onClose?.();
@@ -468,6 +495,25 @@ describe("転送断からの繋ぎ直し", () => {
     expect(s.connected).toBe(false);
   });
 
+  /**
+   * **打ち切った試行からの `closed` も、`screen` と同じように弾く**（`20260910-session-closed-ladder-interrupt` の AC6）。
+   *
+   * `closed` を `connected` の門から外しても、口の同一性が合わなければ通さない——
+   * 「寿命の信号だから何でも通す」わけではなく、**誰の口かは引き続き見る**。
+   */
+  it("打ち切った試行から遅れて届いた `closed` でも、はしごを乱さない", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    const stale = clients[1]!;
+    stale.handlers.onClose?.(); // この試行は失敗＝打ち切り（次の試行が代表になる）
+
+    stale.handlers.onServerMessage({ type: "closed", ended: true });
+
+    // 打ち切られた口からの `closed` は弾かれるので、はしごは乱れず走り続ける
+    expect(s.link).toEqual({ state: "reconnecting", attempt: 2, max: 5 });
+  });
+
   // ---------------------------------------------------------------------------
   // **繋ぎ直しに成功した口からのフレームは通す**（前 work `20260908-session-lifetime-rules-fold`
   // の `decisions.md` D13）。
@@ -567,6 +613,30 @@ describe("転送断からの繋ぎ直し", () => {
   });
 
   /**
+   * **はしごの最中でも、前回成功した口から届いた `closed{ended:true}` は通す**
+   * （`20260910-session-closed-ladder-interrupt` の AC1・AC2・AC3。D-a の経路）。
+   *
+   * `closed` は表示の更新ではなく寿命の信号なので、`screen` とは扱いが逆——
+   * `connected` の門を持たず、口の同一性だけで通る。通った先で `hostEnded` が確定したら、
+   * 走り出していたはしご（待機タイマー）も畳む。**修正前はここで落ちる**（characterization）。
+   */
+  it("はしごの最中でも、前回成功した口から届いた `closed` でホスト終了と分かり、はしごが止まる", async () => {
+    const s = await reconnected();
+    clients[1]!.handlers.onClose?.(); // 半開きの検知 → はしごへ
+    expect(s.link).toEqual({ state: "reconnecting", attempt: 1, max: 5 });
+    const before = clients.length;
+
+    clients[1]!.handlers.onServerMessage({ type: "closed", ended: true });
+
+    expect(s.link).toEqual({ state: "lost", cause: "hostEnded" }); // AC1
+    sendKey("s1", "Enter");
+    expect(s.notice).toBe(MSG_SESSION_ENDED); // AC2
+
+    await runAttempt(60_000); // 待機タイマーが生きていれば、ここで新しい口が生まれてしまう
+    expect(clients).toHaveLength(before); // AC3: 新しい試行は作られない
+  });
+
+  /**
    * **初回接続の口も、はしごの最中は通さない**（`20260910-session-reconnect-freeze` の review ラウンド2 の must）。
    *
    * **1 回目のはしごを駆動するのは必ずこの口**なので、ここが空いていると
@@ -588,6 +658,26 @@ describe("転送断からの繋ぎ直し", () => {
   });
 
   /**
+   * **初回接続の口が死にかけていても、はしごの最中に届いた `closed{ended:true}` は通す**
+   * （`20260910-session-closed-ladder-interrupt` の AC1・AC2・AC3。D-b の経路——1 回目のはしごを駆動するのは必ずこの口）。
+   */
+  it("初回接続の口でも、はしごの最中に届いた `closed` でホスト終了と分かり、はしごが止まる", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    expect(s.link).toEqual({ state: "reconnecting", attempt: 1, max: 5 });
+    const before = clients.length;
+
+    clients[0]!.handlers.onServerMessage({ type: "closed", ended: true });
+
+    expect(s.link).toEqual({ state: "lost", cause: "hostEnded" }); // AC1
+    sendKey("s1", "Enter");
+    expect(s.notice).toBe(MSG_SESSION_ENDED); // AC2
+
+    await runAttempt(60_000);
+    expect(clients).toHaveLength(before); // AC3: 新しい試行は作られない
+  });
+
+  /**
    * **`error` の枝も同じ門を通る**（`20260910-session-reconnect-freeze` の review ラウンド2 の must）。
    * 通す側と落とす側の両方を見る——片方だけだと門を外しても気づけない。
    */
@@ -603,6 +693,30 @@ describe("転送断からの繋ぎ直し", () => {
     clients[0]!.handlers.onServerMessage({ type: "error", code: "FIELD_TYPE", message: "数字のみ" });
 
     expect(s.notice).toBeUndefined();
+  });
+
+  /**
+   * **飛行中の代表の試行自身の口に `closed{ended:true}` が届いても、安全に畳める**
+   * （`20260910-session-closed-ladder-interrupt` の review ラウンド2。組み込みレビューが指摘した再入経路の確認）。
+   *
+   * `acceptsLifetimeSignal` の第 1 項（`isCurrentAttempt`）で通り、
+   * その場で `abortReconnect` がこの口自身に `close` を送って畳む——`onServerMessage` の
+   * 処理中に自分自身を閉じる形になるが、クラッシュせず、以後はしごも回らない。
+   */
+  it("飛行中の代表の試行自身の口から届いた closed でも安全にはしごを畳む", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000); // clients[1] が飛行中（代表の試行、まだ opened していない）
+    const before = clients.length;
+
+    clients[1]!.handlers.onServerMessage({ type: "closed", ended: true });
+
+    expect(s.link).toEqual({ state: "lost", cause: "hostEnded" });
+    expect(clients[1]!.send).toHaveBeenCalledWith({ type: "close" });
+    expect(clients[1]!.close).toHaveBeenCalled();
+
+    await runAttempt(60_000);
+    expect(clients).toHaveLength(before); // 新しい試行は作られない
   });
 
   /**

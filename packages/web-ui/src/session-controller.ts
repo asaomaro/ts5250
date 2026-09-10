@@ -27,6 +27,7 @@ import {
 import {
   acceptsFrame,
   acceptsFromSession,
+  acceptsLifetimeSignal,
   canSendToHost,
   isCurrentAttempt,
   isSessionClient,
@@ -501,6 +502,19 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
         // 試行を退役させるので、繋ぎ直しに成功した瞬間から**以後の全フレームが落ちていた**
         // （`20260908-session-lifetime-rules-fold` の `decisions.md` D13）
         const held = sessionsStore.get(sessionId);
+        // **`closed{ended:true}` だけ別扱い。** ホスト終了の確定はここでしか運ばれないので、
+        // `connected` の要求を持たない `acceptsLifetimeSignal` で通す——はしごが走っている間でも、
+        // 口の同一性さえ合えば `case "closed"` まで届く（`20260910-session-closed-ladder-interrupt`
+        // の design D-a）。**`ended` が無い `closed`（transport 起因）はここに入れない**——
+        // `nextLink` は `link` の上書きを防ぐが、`case "closed"` の `delete s.notice` は
+        // 無条件なので、確定済みの理由（諦めの文言等）を同じ口からの遅延メッセージで
+        // 消してしまう（`20260910-session-closed-ladder-interrupt` の review ラウンド2 の
+        // must）。他の種別は 1 行も変えない
+        if (msg.type === "closed" && msg.ended === true) {
+          if (!acceptsLifetimeSignal(attempts.get(sessionId), a, held?.client, client)) return;
+          applyDisplayMessage(sessionId, client, msg);
+          return;
+        }
         if (!acceptsFrame(attempts.get(sessionId), a, held?.client, client, held?.link)) return;
         applyDisplayMessage(sessionId, client, msg);
       },
@@ -624,6 +638,11 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
         delete s.notice;
       }
       setBusy(sessionId, false);
+      // **coding で追加**: hostEnded が確定したら、走っているはしごを畳む
+      // （`20260910-session-closed-ladder-interrupt` の design.md D-c）。
+      // `transport` 原因では呼ばない——`nextLink` がその遷移で `reconnecting` を上書きしないので
+      // 畳む理由が無く、変更を `closed{ended:true}` の意味に閉じるため
+      if (msg.ended === true) abortReconnect(sessionId);
       break;
     }
     case "error": {
@@ -650,6 +669,14 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
  */
 function applyFromSessionClient(sessionId: string, client: WsClient, msg: WsServerMessage): void {
   const held = sessionsStore.get(sessionId);
+  // **`closed{ended:true}` はここも別扱い**（`tryResume` 側と対。D-a の注記を参照——
+  // `20260910-session-closed-ladder-interrupt` の design D-b）。
+  // 試行を持たないのでここは `isSessionClient` を直接呼ぶ
+  if (msg.type === "closed" && msg.ended === true) {
+    if (!isSessionClient(held?.client, client)) return;
+    applyDisplayMessage(sessionId, client, msg);
+    return;
+  }
   if (!acceptsFromSession(held?.link, held?.client, client)) return;
   applyDisplayMessage(sessionId, client, msg);
 }

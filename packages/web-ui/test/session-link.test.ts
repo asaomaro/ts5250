@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   acceptsFrame,
   acceptsFromSession,
+  acceptsLifetimeSignal,
   isCurrentAttempt,
   isSessionClient,
   type Attempt,
@@ -80,5 +81,30 @@ describe("R4: この口から届いたフレームを受け取ってよいか", 
   it("口を持たないセッションでは第 2 項は偽（`undefined` は口ではない）", () => {
     const only = sock();
     expect(isSessionClient(undefined, only)).toBe(false);
+  });
+
+  /**
+   * **`acceptsLifetimeSignal`（`20260910-session-closed-ladder-interrupt`）は `acceptsFrame` から `connected` の要求だけ
+   * 外した合成。**ここも選言で、片方だけでは足りない**——第 1 項だけだと打ち切った試行の
+   * 直後（成功する前）の `closed` が拾えず、第 2 項だけだと飛行中の代表の試行自身の口から
+   * 届く `closed`（`opened` を待たずに `closed` が先に来る経路）が拾えない。
+   *
+   * **経路のテスト（`session-reconnect.test.ts`）が叩けるのは第 2 項の側だけ**で、
+   * 第 1 項単体を通す組合せは無い（本 work の cross 点検が実測——第 1 項を丸ごと落としても
+   * 回帰は緑のまま）。`acceptsFrame` と同じ欠落の再発だったので、ここで固定する。
+   */
+  it("acceptsLifetimeSignal: 代表の試行自身の口からの closed は第 1 項だけで通る", () => {
+    const a = attempt(sock());
+    expect(acceptsLifetimeSignal(a, a, sock(), a.client!)).toBe(true);
+  });
+
+  it("acceptsLifetimeSignal: 第 1 項が偽でも、セッションの口なら第 2 項で通る（connected 不問）", () => {
+    const a = attempt(sock(), true);
+    expect(acceptsLifetimeSignal(undefined, a, a.client!, a.client!)).toBe(true);
+  });
+
+  it("acceptsLifetimeSignal: どちらでもない口は弾く", () => {
+    const a = attempt(sock(), true);
+    expect(acceptsLifetimeSignal(undefined, a, sock(), a.client!)).toBe(false);
   });
 });
