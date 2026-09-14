@@ -1,5 +1,18 @@
 # 仕様: SEU の PageUp/PageDown で境界ページに到達したときカーソル位置を保持する
 
+> **【本設計の中核（Rule1/Rule2）は撤去済み】** 以下に記述する「PageUp/PageDown 境界で
+> ホストの IC/MC より送信前のカーソル位置を優先する」専用ロジック（Rule1/Rule2、
+> `lastSentAid`、画面内容の完全一致比較ヘルパー）は、deliver（PR #395）後に入手できた
+> ACS（IBM i Access Client Solutions）の実体（`acsbundle.jar`）のコア実装
+> （`DS5250`/`PS5250`）をデコンパイルして確認したところ、相当する専用ロジックが
+> 見当たらなかったため、利用者の指示により**撤去した**（`decisions.md` D6, D7、
+> `requirements.md` AC1/AC2/AC8 の取消し、`tasks.md` T8）。以下の記述は**設計判断の経緯・
+> 検討過程の記録として残す**（同じ発想を再度検討する際の参照）。実装は既存の2分岐
+> （`!cursorSet` → 先頭入力欄／`cursorAddr === cursorBefore && cursorIsUnenterable()` →
+> 先頭入力欄）のみに戻っている。この work で最終的に残る設計は、調査の過程で見つかった
+> 独立したバグの修正（`sendAid()` の `opts.cursor` を `buf.cursorAddr` に同期する。AC9、
+> `decisions.md` D5）のみ——「受け入れ基準との対応」の AC9 節を参照。
+
 ## 概要
 
 `Session5250` に「直前に送信した AID キー」を保持する小さな状態を追加し、PageUp/PageDown の
@@ -197,21 +210,26 @@ if (result.readRequested && isPageKey && cursorBeforeWasEnterable && (screenUnch
 
 ## 受け入れ基準との対応
 
-- AC1: PageDown を繰り返し最終ページに到達しても、カーソル位置が維持される。
-  → Rule 1（境界の1つ手前、着地先が入力不可）と Rule 2（真の境界、画面無変化）の
+- ~~AC1: PageDown を繰り返し最終ページに到達しても、カーソル位置が維持される。~~
+  **撤去（`decisions.md` D7）**: 下記 Rule1/Rule2 は ACS のコアに相当するロジックが
+  見当たらなかったため撤去した。目標は `.aidev/backlog/acs-parity.md` へ引き継ぐ。
+  ~~→ Rule 1（境界の1つ手前、着地先が入力不可）と Rule 2（真の境界、画面無変化）の
   組み合わせで、最終ページ到達までの全遷移でカーソルが送信前の位置に固定される。
   入力: `research.md` F4 の実機トレース結果（8/9 → 8/9 が7回、8/9→4/9 の遷移で Rule1、
-  4/9→2/9 相当の遷移で Rule2 が救う）。
-- AC2: PageUp を繰り返し先頭ページに到達しても、カーソル位置が維持される。
-  → 先頭境界は現状でもホストが自然に維持している（`research.md` F5）ため回帰しないが、
+  4/9→2/9 相当の遷移で Rule2 が救う）。~~
+- ~~AC2: PageUp を繰り返し先頭ページに到達しても、カーソル位置が維持される。~~
+  **撤去（同上）**。
+  ~~→ 先頭境界は現状でもホストが自然に維持している（`research.md` F5）ため回帰しないが、
   Rule 2（画面無変化）が同じ条件で対称に効くため、他のダミーソース・実データで
   先頭境界に同種の1手前状態（Rule1相当）が存在した場合も同じ仕組みで救われる。
-  入力: `research.md` F5。
+  入力: `research.md` F5。~~
 - AC3: 途中ページへの PageUp/PageDown（境界でない）で、カーソル位置維持の既存の
   正しい挙動に回帰がない。
-  → 非境界遷移では `screenUnchanged` も `movedToDeadZone` も成立しない
-  （画面は変化し、ホストの IC は入力可能な欄を指す）ため、新ルールは発火せず、
-  ホストの IC がそのまま適用される（現状と同じ）。入力: `research.md` F4（#1〜#8）。
+  → Rule1/Rule2 撤去後は、そもそも新ルールという発火し得るものが存在しない
+  （`tasks.md` T8）。非境界遷移は元から存在する2分岐（`session.ts:613-634`）の対象外
+  ——ホストの IC がそのまま適用される、変更前と同じ経路を通る。入力: `research.md` F4
+  （#1〜#8。境界に至るまでの非境界遷移で cursorSet=true・IC が入力可能な欄を指すことを
+  実機で確認済み）。
 - AC4: 境界ページ到達時のホスト応答（IC/MC の有無）を実機トレースで確認し、記録が残っている。
   → `research.md`（本 work の research 工程）で充足済み。
 - AC5: F1ヘルプ表示時・27x132セッション切替時のカーソル既定移動に回帰がない。
@@ -231,12 +249,29 @@ if (result.readRequested && isPageKey && cursorBeforeWasEnterable && (screenUnch
   → 走査検索は `Enter` で実行される（`research.md` 冒頭、診断スクリプトの `searchTo()`）ため
   `isPageKey` は false。新ルールと無関係。入力: `research.md`、
   `packages/web-ui/test/screen-grid-cursor-restore.test.ts` の既存前提。
-- AC8: 境界ページでのカーソル維持を検証する自動テストが追加されている。
-  → 実機無しで検証可能な設計にした（`applyDataStream` に手作りの WTD バイト列を渡す
+- ~~AC8: 境界ページでのカーソル維持を検証する自動テストが追加されている。~~
+  **撤去（`decisions.md` D7）**: AC1/AC2 と同じ理由。検証対象の Rule1/Rule2 が
+  撤去されたため、それを検証していたテスト（`cursor-page-boundary.test.ts`）も削除した。
+  ~~→ 実機無しで検証可能な設計にした（`applyDataStream` に手作りの WTD バイト列を渡す
   既存パターン。`cursor-default.test.ts` / `cursor-stale-on-protected.test.ts` と同様、
   「1画面目 WTD（IC あり、本文行にカーソル）→ PageDown 送信 → 2画面目 WTD
   （IC が別の入力不可な位置、または1画面目と同一内容の WTD）」という合成データで
   `Session5250` レベルの統合テストを書ける。tasks でテストケースを具体化する。
   入力: `packages/tn5250/test/cursor-default.test.ts` /
   `packages/tn5250/test/cursor-stale-on-protected.test.ts`（既存の合成 WTD テストパターン）、
-  本設計「対象範囲」に追記した新規テストファイル。
+  本設計「対象範囲」に追記した新規テストファイル。~~
+- AC9（追加、`decisions.md` D5）: `sendAid()` の `cursor` オプションが `buf.cursorAddr` に
+  正しく同期される。
+  → `Session5250.sendAid(key, opts)` で `opts.cursor` が渡された時点、かつそれが
+  `Number.isInteger` を満たし画面範囲内（`1 <= row <= this.buf.rows`,
+  `1 <= col <= this.buf.cols`）であることを確認したうえで、`this.buf.cursorAddr` を
+  `this.buf.addrOf(opts.cursor.row, opts.cursor.col)` へ同期する。範囲外・非整数の値は
+  例外を投げずに黙って無視する（`addrOf` の範囲チェックは非数値に対して例外を投げないため
+  ——`row1 < 1 || row1 > rows` 等の比較は `NaN` に対して常に `false` になり、事前検証が
+  無いと `cursorAddr` が `NaN` になり得る。タスク単位の独立点検の `must` 指摘で発見）。
+  Attn/SysReq は対象外（`sendAid` 内の他の除外条件と同じ理由）。
+  入力: `decisions.md` D5（根本原因の分析）、
+  `packages/tn5250/src/protocol/read-response.ts:240,366`（`opts.cursor` が送信レコードの
+  値のみを上書きし `buf.cursorAddr` を更新しない既存の実装）、
+  `packages/tn5250/test/sendaid-cursor-sync.test.ts`（回帰テスト。`DeferredTransport` で
+  `sendAid` 呼び出し直後・応答到着前の内部状態を検証する）。

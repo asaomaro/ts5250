@@ -830,33 +830,6 @@ export class ScreenBuffer {
     if (first !== undefined) this.cursorAddr = first.startAddr;
   }
 
-  /**
-   * @internal --- 呼び出しは Session5250 からのみを想定する (TS に package-private が無いため
-   * public にしているだけで、対外 API ではない)。
-   *
-   * 画面内容 (セルの文字・属性) を軽量に比較するための文字列表現。
-   * PageUp/PageDown の送信前後でこれが完全一致すれば「実質何も進んでいない」とみなす
-   * (境界ページでのカーソル位置保持。design: .aidev/works/20260914-seu-page-cursor-hold)。
-   * フィールド定義・カーソル位置は含まない --- 見た目のセル内容だけを見る。
-   *
-   * 各セルの前に区切り (NUL, U+0000) を必ず1つ置く --- dbcs-tail は char が空文字になり得るため
-   * (DBCS 桁位置維持で使われる)、区切りが無いと可変長・0長のトークンが混在して衝突しうる
-   * (例: 通常文字セルの直後に空文字セルが続く並びと、逆順の並びが同じ文字列になる)。
-   * 区切りには表示文字として実在しない制御文字を使う --- 半角スペースは実際に char セルの
-   * 値になり得るため、区切りに使うと同じ穴を再現してしまう。
-   */
-  cellsSignature(): string {
-    const SEP = "\u0000";
-    let s = "";
-    for (const c of this.cells) {
-      s += SEP;
-      if (c === null) s += ".";
-      else if (c.type === "attr") s += `A${c.byte}`;
-      else s += `C${c.char}`;
-    }
-    return s;
-  }
-
   /** いまのカーソルが保護欄（または欄の外）にあり、入力できる欄がどこかにあるか */
   cursorIsUnenterable(): boolean {
     const inField = this.fields.find(

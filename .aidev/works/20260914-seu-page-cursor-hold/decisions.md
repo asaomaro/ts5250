@@ -1,5 +1,42 @@
 # 判断記録
 
+## D7: Rule1/Rule2（PageUp/PageDown 境界でのカーソル位置保持の専用ロジック）を撤去する
+
+- 背景: D6 の ACS コアデコンパイル調査で、`DS5250`/`PS5250` には「PageUp/PageDown 境界で
+  ホストの IC より送信前のカーソル位置を優先する」という当プロジェクトの Rule1/Rule2 に
+  相当する専用ロジックが見当たらなかった。利用者から「専用ロジックが ACS になかったので
+  あれば削除してください」との明示的な指示があった。
+- 判断: `design.md`「振る舞いの詳細」で定義した Rule1/Rule2 本体（`session.ts` の新分岐）、
+  それを支える `lastSentAid`（直前送信 AID キーの追跡）、`ScreenBuffer.cellsSignature()`
+  （画面内容の軽量比較）を**すべて撤去する**。既存の2分岐
+  （`!cursorSet` → 先頭入力欄／`cursorAddr === cursorBefore && cursorIsUnenterable()` →
+  先頭入力欄＝`PR#387`）は無改変のまま維持し、ホストの IC/MC を常に信用する元の設計へ戻す。
+  一方、D5 で見つけた**独立したバグ**（`sendAid()` の `opts.cursor` が `buf.cursorAddr` に
+  同期されていなかったこと）の修正は、Rule1/Rule2 の有無に関係なく正しい状態を保つための
+  一般的な修正なので**維持する**（既存の `PR#387` 分岐も同じ `cursorBefore` を参照するため、
+  これが古いままだと `PR#387` 側の判定も不正確になりうる）。
+- 理由 / 代替案:
+  - 当プロジェクトの目的は「実機とのプロトコル互換」であり、ACS が採用していない独自
+    ヒューリスティックを実装として持ち続けると、ACS には無い癖を持つクライアントになる
+    （今回のように、ACS を参照できる状況になって初めて判明する類の負債）。
+  - 撤去せずに残す代替案（「実機トレースで境界ページのカーソル飛びを確認済みなので、
+    ACS のコアに無くても UI 描画層で何かしているかもしれず、独自ロジックにも一定の妥当性が
+    ある」という主張）もあり得たが、**確証の無い独自解釈より、確証が取れるまでホストの
+    指示に忠実な既存設計へ戻す**方を利用者が選んだ。
+- 影響:
+  - `requirements.md` の AC1/AC2/AC8 を取り消し、目標を `.aidev/backlog/acs-parity.md` へ
+    引き継ぐ（ACS の UI 描画層調査・実機同時比較を経てから再挑戦する）。
+  - この work で最終的に着地するのは、D5 の `sendAid` cursorAddr 同期修正のみ
+    （`requirements.md` AC9 として追加）。
+  - `packages/tn5250/test/cursor-page-boundary.test.ts`（Rule1/Rule2 専用テスト）・
+    `packages/tn5250/test/cells-signature.test.ts`（`cellsSignature()` 専用テスト）を削除し、
+    D5 の回帰テスト（クリック後 PageUp/PageDown、不正な cursor 値のガード）だけを
+    `packages/tn5250/test/sendaid-cursor-sync.test.ts` として独立させた。
+  - 利用者からの別件報告（DSPFMT のフィールド下線/罫線表示の不安定化、接続関連の
+    待ち時間不安定化）は、この work とは無関係な別の不具合と判断し、それぞれ
+    `.aidev/backlog/acs-parity.md`・`.aidev/backlog/session-lifecycle.md` へ新規項目として
+    起票した（この work では扱わない）。
+
 ## D5: deliver（PR #395 マージ）後、利用者から「改善していない」と報告——`cursorBefore` が
 `buf.cursorAddr` を直接参照していたための取りこぼしを修正
 
