@@ -104,3 +104,4 @@
       `sessionId` が `""` のままなので `onClose` の門が閉じ、`connect()` は既に解決済みなので
       `notifyClosed` の `rejectConnect` も no-op。**開いている最中のスピナーが永久に残る**。
       その枝で reject するか、エラー付きで resolve すれば閉じる。本 work とは独立の既存欠陥。
+- [ ] 最近の接続状態維持・再接続対応（session-reconnect-freeze / session-closed-ladder-interrupt 系）以降、今までスムーズだった操作で待たされるタイミングが出るなど不安定化しているとの報告（利用者、20260915）。再現条件・原因未特定。どの変更が影響しているか、直近のreconnect関連workから疑って切り分ける必要がある。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md）

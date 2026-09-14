@@ -74,11 +74,16 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
       成立すれば `this.buf.cursorAddr = cursorBefore` とする。既存の2分岐はコードを変更しない。
       対象: `packages/tn5250/src/session/session.ts:613-634` / 根拠: design.md「振る舞いの詳細」
       依存: T1, T2
-      AC: AC1, AC2, AC3
+      AC: なし
+      （撤去済み。当初は AC1, AC2, AC3 だったが、AC1/AC2 は `decisions.md` D7 により撤去済み。
+      AC3 は本タスクの実装が無くても——ホストの IC/MC をそのまま信用する元の2分岐に
+      戻したことで——満たされる）
       実施結果（coding 中に追加した条件。design.md「coding 中に判明した追加条件」参照）:
       Rule1・Rule2 共通で `cursorBeforeWasEnterable`（送信前カーソルが入力可能だったか）
       も条件に加えた。無いと Rule2 単独でも `PR#387`（AC6）と重なりうる欠陥があったため
       （タスク単位の独立点検の must 指摘）。
+      **T8（`decisions.md` D7）でこの分岐自体を撤去した**——ACS のコア実装
+      （`DS5250`/`PS5250`）に相当する専用ロジックが見当たらなかったため。
 - [x] T4: `packages/tn5250/test/` と `packages/web-ui/test/` を `PageUp`/`PageDown` で
       横断検索し、T3 の新しい分岐が影響しうる既存テストが他に無いか確認する
       （リスク/留意点 参照）。そのうえで、既存の回帰シナリオ（F1ヘルプ/27x132切替の
@@ -99,9 +104,43 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
       対象: `packages/tn5250/test/`（新規ファイル、または `cursor-default.test.ts` への追加。
             ファイル名は coding 時に決定） / 根拠: design.md「受け入れ基準との対応」AC1, AC2, AC3, AC8
       依存: T3, T4
-      AC: AC1, AC2, AC3, AC8
+      AC: なし
+      （撤去済み。当初は AC1, AC2, AC3, AC8 だったが、AC1/AC2/AC8 は `decisions.md` D7 により
+      撤去済み。AC3 は本タスクが追加したテストが無くても既存の2分岐で満たされる）
+      **T8（`decisions.md` D7）でこのタスクが追加したテストファイル
+      （`cursor-page-boundary.test.ts`）自体を削除した**（Rule1/Rule2 撤去に伴い検証対象が
+      消滅したため）。
 - [x] T6: AC4（境界ページ到達時のホスト応答を実機トレースで確認し記録が残っている）は
       `research.md` で既に充足済みであることを確認する。coding での新規作業は発生しない。
       対象: `.aidev/works/20260914-seu-page-cursor-hold/research.md` / 根拠: research.md F1-F6
       依存: なし
       AC: AC4
+- [x] T7（deliver 後、利用者報告を受けて追加）: `sendAid()` が `opts.cursor` を受け取った時点で
+      `buf.cursorAddr` をそれに同期する。web-ui のクリックでカーソルを移してから
+      PageUp/PageDown した場合、`cursorBefore`（`buf.cursorAddr`）が古い位置のままで
+      新分岐が無関係な位置へ復元してしまう回帰を直す（`decisions.md` D5）。
+      対象: `packages/tn5250/src/session/session.ts:339-361`（`sendAid()`） / 根拠: decisions.md D5, research.md「実装時の注意」
+      依存: なし
+      AC: AC9
+      （当初は AC1, AC2 の回帰修正として着手したが、AC1/AC2 は `decisions.md` D7 により
+      撤去済み。本タスクの成果そのものが新設された AC9 の定義になった）
+- [x] T8（Rule1/Rule2 撤去、`decisions.md` D7）: T3 が追加した新分岐（Rule1/Rule2）・T1 の
+      `lastSentAid`・T2 の `cellsSignature()` を撤去し、既存の2分岐（`!cursorSet` → 先頭入力欄／
+      `cursorAddr === cursorBefore && cursorIsUnenterable()` → 先頭入力欄）のみの元の設計へ戻す。
+      ACS（`acsbundle.jar`）のコア実装（`DS5250`/`PS5250`）をデコンパイルして確認したところ、
+      ホストの IC/MC より送信前のカーソル位置を優先する専用ロジックに相当するものが
+      見当たらなかったため（利用者の明示的な指示）。T5 が追加したテストファイル
+      （`cursor-page-boundary.test.ts`）と T2 のテスト（`cells-signature.test.ts`）を削除し、
+      T7（AC9）の回帰テストのみを `sendaid-cursor-sync.test.ts` として独立させる。
+      対象: `packages/tn5250/src/session/session.ts:341-346,532-664`（削除対象の分岐一式）,
+            `packages/tn5250/src/screen/buffer.ts`（`cellsSignature()` の削除）,
+            `packages/tn5250/test/cursor-page-boundary.test.ts`（削除）,
+            `packages/tn5250/test/cells-signature.test.ts`（削除）,
+            `packages/tn5250/test/sendaid-cursor-sync.test.ts`（新規） / 根拠: decisions.md D6, D7
+      依存: T3, T5, T7
+      AC: AC3
+      （本タスクの撤去そのものが新たな AC を満たすわけではないが、AC3——途中ページでの
+      既存の正しい挙動に回帰が無いこと——は、Rule1/Rule2 という新ルールを一切持たない
+      元の2分岐に戻すことで保たれる。design.md「受け入れ基準との対応」AC3 参照。
+      あわせて AC1/AC2/AC8 を `requirements.md` から取り消し
+      `.aidev/backlog/acs-parity.md` へ引き継ぐ前提作業でもある）

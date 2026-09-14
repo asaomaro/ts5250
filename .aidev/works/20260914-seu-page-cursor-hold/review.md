@@ -33,6 +33,39 @@
   `npx eslint .` / `npm run build` / `npm test`（CI と同一コマンド）で
   リポジトリ全体を通してから deliver するべきだった。次回以降の review 手順に活かす。
 
+## タスク点検: T7（deliver 後の追加修正）
+
+2件の指摘があった。
+- (must) `try/catch` は `addrOf` の範囲チェックが `row`/`col` が非数値（`NaN`/`undefined`等）
+  のとき比較が常に false になって例外を投げずに通過することを防げず、`cursorAddr` が
+  `NaN` になり得た。自前で `Number.isInteger` と範囲を検証してから代入するよう修正
+  （`try/catch` は撤去）。WS の `key`/`gui-submit` メッセージの `cursor` はランタイム
+  検証されていないため、不正な値がそのまま届きうる。
+  回帰テストは `ReplayTransport` では検出できなかった（`send()` が同期的に応答まで
+  配送してしまうため、応答の IC が破損を上書きしてしまう）。応答を明示的に止めておける
+  `DeferredTransport` を新設し、`sendAid` 呼び出し直後・応答到着前の一瞬
+  （web-ui の楽観的更新を想定）を検証することで、ガード無しでは失敗し
+  ガードありでは成功することを確認した。
+  — 根拠: `packages/tn5250/src/session/session.ts:353-378`,
+  `packages/tn5250/src/screen/buffer.ts:476-481`(`addrOf`),
+  `packages/tn5250/test/cursor-page-boundary.test.ts`（`DeferredTransport`）
+- (should) `decisions.md` D5「影響」が実際のテストカバレッジより強い主張
+  （「全ての呼び出し経路に影響する一般的な修正」「他のシナリオへの悪影響は無いことを
+  確認済み」）をしていた。検証したのは PageDown 境界のケースのみで、非ページキー×
+  `opts.cursor` の組み合わせ（`PR#387` 分岐との相互作用等）を直接検証するテストは
+  無いことを踏まえ、D5 の記述を実際の検証範囲に合わせて修正した。
+
+## review ラウンド2（T7 の要件適合・価値適合）
+
+2件の指摘があった。
+- (should) T7 の回帰テストが既定引数で PageDown のみを検証しており、利用者が実際に
+  報告した操作（PageUp）を直接検証するケースが無かった。修正自体はキー種別に
+  依存しない対称な実装（web-ui も `EmulatorPane.vue` でキー種別を問わず
+  `cursor.value` を渡す）だが、報告された不具合そのものへの決着として PageUp 版の
+  ケースを追加した。
+- (nit) `test-result.md` が T7 の新規2ケースを AC 番号に明示的に紐づけていなかった。
+  AC1/AC2/AC8 への対応を明記するよう修正した。
+
 ## タスク横断点検（coding 手順5.5、cross）
 
 4件の指摘があった。
@@ -61,6 +94,29 @@
   反映しておらず、AC6 の回帰しない根拠が古い記述のままだった。design.md の疑似コード・
   AC6 節を実装に合わせて更新し、「coding 中に判明した追加条件」として経緯を明記した。
   tasks.md T3 にも同様の実施結果を追記した。
+
+## review ラウンド3（Rule1/Rule2 撤去、`decisions.md` D7）
+
+利用者から「専用ロジックが ACS に無かったのであれば削除してください」との明示的な指示を
+受けた撤去作業。T8 のタスク単位の独立点検（正確性・規約適合）は上記「タスク点検ログ」参照
+（nit 1件、修正済み）。ここでは taskcheck がカバーしない2観点（要件適合・価値適合）のみを
+別コンテキストで点検した。指摘 0 件（`CHECK: ok`）。
+
+- **要件適合**: `aidev coverage --strict` が gap=0（AC3, AC4, AC5, AC6, AC7, AC9 の6件全てで
+  design/tasks 双方 yes）。`requirements.md` から取り消した AC1/AC2/AC8 は、取り消しの根拠
+  （`decisions.md` D7）が明記され、目標が `.aidev/backlog/acs-parity.md` へ引き継がれている
+  ことを確認（`aidev-30-tasks`「この work では扱わない」パターンに合致）。
+- **価値適合**: `requirements.md`「目的 / ゴール」（ACS と同様の見た目の挙動を実現する）に
+  照らすと、この撤去は**当初のゴール（境界でのカーソル維持）そのものを取り下げる**結果に
+  なる——ACS のコアに無い独自ロジックを持つことのほうが、長期的な保守性・ACS 整合という
+  より上位の価値（利用者の「全体的に ACS を手本に」という要望）を損なうと利用者自身が
+  明示的に判断したため、これは**意図した後退であり見落としではない**（`decisions.md` D7
+  「理由 / 代替案」）。この点は PR 本文で明確に伝える必要がある——「不具合を修正した PR」
+  ではなく「独自ヒューリスティックを撤去し、副産物として見つかった別のバグだけを直した
+  PR」であることが分かる書き方にする（deliver 工程で対応）。
+- **既存3シナリオへの回帰確認**: F1ヘルプ/27x132切替（AC5）、保護欄退避 `PR#387`（AC6）、
+  SEU 走査検索（AC7）は、Rule1/Rule2 撤去によりコードが変更前の状態に戻っているため
+  「壊れようがない」——念のため既存テストの green を`test-result.md`で確認済み。
 
 ## タスク点検ログ（coding 工程内・「3.3」(b)）
 
@@ -114,3 +170,11 @@
   Attn/SysReq 除外の裏返しとして無関係なレコードに `isPageKey` が誤って true 判定
   されうる点の2件が残った。`maxTaskCheckRounds` の上限に達したため、
   この場では直さず `decisions.md` D4 に経緯を記録し、判断を 60 review に委ねる。
+- T8（Rule1/Rule2 撤去、`decisions.md` D7）: (nit) `sendaid-cursor-sync.test.ts` の
+  `// @ts-expect-error 不正な値（非整数）を意図的に渡す` が実態と食い違っていた
+  （`NaN` は TS 上 `number` 型なので型エラーにならず、この directive は何も抑制していない
+  ——tn5250 の `tsconfig.json` はそもそも test を型検査対象にしないため実害は無いが、
+  コメントの主張が誤り）。T7 で導入されコメントごと T8 で新ファイルへそのまま
+  引き継がれたもの。directive を削除し、「型ではなくランタイムの未検証値を模している」
+  意図が伝わるコメントに置き換えた。
+  — 根拠: `packages/tn5250/test/sendaid-cursor-sync.test.ts:186`
