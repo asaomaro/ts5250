@@ -350,7 +350,34 @@ export class Session5250 extends Emitter<SessionEvents> {
     // （PageUp/PageDown とは無関係な）レコードに対しても isPageKey が "PageDown"/
     // "PageUp" のまま誤って true 判定されうる。実機トレースでは未観測で、
     // この work のスコープでは対応しない（AID とレコードの 1:1 対応付けが要る大きな変更）。
-    if (key !== "Attn" && key !== "SysReq") this.lastSentAid = key;
+    if (key !== "Attn" && key !== "SysReq") {
+      this.lastSentAid = key;
+      // **`opts.cursor` は「利用者が今どこにカーソルを置いたか」の最新の申告**（web-ui の
+      // クリック等）。これまで `buf.cursorAddr` には反映しておらず（送信レコードの値を
+      // 一時的に上書きするだけ、という元々の契約——`research.md` F7）、次に届く応答の
+      // カーソル確定ロジック（`handleRecord` の `cursorBefore`）が**古い**位置のまま
+      // 比較してしまっていた。research.md「実装時の注意」で未解決のまま残していた懸念が、
+      // 実機で「クリックで別の欄へ移してから PageUp/PageDown すると無関係な位置へ戻る」
+      // という回帰として顕在化した（この work の deliver 後に報告。decisions.md D5）。
+      // **範囲チェックは `addrOf` に任せない**——`row`/`col` が `undefined` や非数値だと
+      // `addrOf` 内の比較（`row1 < 1` 等）が常に false になって例外を投げずに通過し、
+      // `cursorAddr` が `NaN` になって以後のカーソル追跡がホストの次の IC/MC まで壊れたまま
+      // 残る（タスク点検で指摘。WS の `key`/`gui-submit` メッセージの `cursor` は
+      // ランタイム検証されておらず、MCP 経由の zod 検証と違い不正な値がそのまま届きうる）。
+      // ここで自前に整数・範囲を検証し、不正な値は黙って無視する
+      // （`buildFieldResponse` 側も検証せずそのまま送るのと同じ扱いにする）。
+      if (
+        opts.cursor &&
+        Number.isInteger(opts.cursor.row) &&
+        Number.isInteger(opts.cursor.col) &&
+        opts.cursor.row >= 1 &&
+        opts.cursor.row <= this.buf.rows &&
+        opts.cursor.col >= 1 &&
+        opts.cursor.col <= this.buf.cols
+      ) {
+        this.buf.cursorAddr = this.buf.addrOf(opts.cursor.row, opts.cursor.col);
+      }
+    }
     if (key === "Attn" || key === "SysReq") {
       // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
       // （ATNPGM が既に前面のとき等。実機で 2 回目の Attn に受信ゼロを確認）。

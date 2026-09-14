@@ -33,6 +33,39 @@
   `npx eslint .` / `npm run build` / `npm test`（CI と同一コマンド）で
   リポジトリ全体を通してから deliver するべきだった。次回以降の review 手順に活かす。
 
+## タスク点検: T7（deliver 後の追加修正）
+
+2件の指摘があった。
+- (must) `try/catch` は `addrOf` の範囲チェックが `row`/`col` が非数値（`NaN`/`undefined`等）
+  のとき比較が常に false になって例外を投げずに通過することを防げず、`cursorAddr` が
+  `NaN` になり得た。自前で `Number.isInteger` と範囲を検証してから代入するよう修正
+  （`try/catch` は撤去）。WS の `key`/`gui-submit` メッセージの `cursor` はランタイム
+  検証されていないため、不正な値がそのまま届きうる。
+  回帰テストは `ReplayTransport` では検出できなかった（`send()` が同期的に応答まで
+  配送してしまうため、応答の IC が破損を上書きしてしまう）。応答を明示的に止めておける
+  `DeferredTransport` を新設し、`sendAid` 呼び出し直後・応答到着前の一瞬
+  （web-ui の楽観的更新を想定）を検証することで、ガード無しでは失敗し
+  ガードありでは成功することを確認した。
+  — 根拠: `packages/tn5250/src/session/session.ts:353-378`,
+  `packages/tn5250/src/screen/buffer.ts:476-481`(`addrOf`),
+  `packages/tn5250/test/cursor-page-boundary.test.ts`（`DeferredTransport`）
+- (should) `decisions.md` D5「影響」が実際のテストカバレッジより強い主張
+  （「全ての呼び出し経路に影響する一般的な修正」「他のシナリオへの悪影響は無いことを
+  確認済み」）をしていた。検証したのは PageDown 境界のケースのみで、非ページキー×
+  `opts.cursor` の組み合わせ（`PR#387` 分岐との相互作用等）を直接検証するテストは
+  無いことを踏まえ、D5 の記述を実際の検証範囲に合わせて修正した。
+
+## review ラウンド2（T7 の要件適合・価値適合）
+
+2件の指摘があった。
+- (should) T7 の回帰テストが既定引数で PageDown のみを検証しており、利用者が実際に
+  報告した操作（PageUp）を直接検証するケースが無かった。修正自体はキー種別に
+  依存しない対称な実装（web-ui も `EmulatorPane.vue` でキー種別を問わず
+  `cursor.value` を渡す）だが、報告された不具合そのものへの決着として PageUp 版の
+  ケースを追加した。
+- (nit) `test-result.md` が T7 の新規2ケースを AC 番号に明示的に紐づけていなかった。
+  AC1/AC2/AC8 への対応を明記するよう修正した。
+
 ## タスク横断点検（coding 手順5.5、cross）
 
 4件の指摘があった。

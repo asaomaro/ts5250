@@ -105,3 +105,10 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
       対象: `.aidev/works/20260914-seu-page-cursor-hold/research.md` / 根拠: research.md F1-F6
       依存: なし
       AC: AC4
+- [x] T7（deliver 後、利用者報告を受けて追加）: `sendAid()` が `opts.cursor` を受け取った時点で
+      `buf.cursorAddr` をそれに同期する。web-ui のクリックでカーソルを移してから
+      PageUp/PageDown した場合、`cursorBefore`（`buf.cursorAddr`）が古い位置のままで
+      新分岐が無関係な位置へ復元してしまう回帰を直す（`decisions.md` D5）。
+      対象: `packages/tn5250/src/session/session.ts:339-361`（`sendAid()`） / 根拠: decisions.md D5, research.md「実装時の注意」
+      依存: なし
+      AC: AC1, AC2
