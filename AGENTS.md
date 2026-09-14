@@ -118,6 +118,7 @@
 <!-- aidev:conventions -->
 - コードコメントに出所（D 番号・`file:line`・数値・他 work への参照）を書くとき → `.aidev/conventions/comment-provenance.md`
 - サーバー／クライアントなど**対になる資産**を作る・片方に指摘を直すとき → `.aidev/conventions/paired-artifact-sync.md`
+- 新しい合成述語（`||`・`&&` で判定を組み合わせる真偽関数）を追加・変更するとき → `.aidev/conventions/compound-predicate-coverage.md`
 <!-- /aidev:conventions -->
 
 ---

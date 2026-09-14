@@ -1,7 +1,7 @@
 schema: 11
 slug: session-closed-ladder-interrupt
-current: deliver
-approved: [requirements, design, tasks, coding, test, review, deliver]
+current: retro
+approved: [requirements, design, tasks, coding, test, review, deliver, retro]
 mode: autonomous
 profile: full
 humanGates: []
