@@ -39,3 +39,5 @@ events:
   - { ts: 2026-09-14T13:55:06Z, phase: test, event: approved, metrics: { passed: 599, failed: 0 } }
   - { ts: 2026-09-14T13:55:46Z, phase: review, event: start, metrics: { marks: 0 } }
   - { ts: 2026-09-14T14:05:58Z, phase: review, event: approved, metrics: { must: 1, should: 0, nit: 0, ac_total: 8, ac_covered: 8, tasks_no_ac: 0, tasks_ac_none: 2 } }
+  - { ts: 2026-09-14T14:06:46Z, phase: deliver, event: start }
+  - { ts: 2026-09-14T14:07:55Z, phase: deliver, event: approved, metrics: { files_changed: 8, insertions: 775, deletions: 1 } }
