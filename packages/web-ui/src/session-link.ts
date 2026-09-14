@@ -274,6 +274,28 @@ export function acceptsFrame(
 }
 
 /**
+ * **寿命の信号（`closed`）を受け取ってよいか**（`acceptsFrame` から `connected` の要求だけを
+ * 外した形）。
+ *
+ * `closed` は表示の更新ではなく寿命の信号なので、はしごが走っている間
+ * （`link.state !== "connected"`）でも、口の同一性さえ合えば通す。通った先で
+ * `hostEnded` が確定したら、はしごを畳むのは呼び出し側の役割（`20260910-session-closed-ladder-interrupt` の
+ * `decisions.md` D1）——ここは「受け取ってよいか」だけを答える。
+ *
+ * **試行を持たない初回接続の口はこの関数を呼ばない**——`isCurrentAttempt` の項が無い分、
+ * `isSessionClient` 単体を直接呼ぶ。**`acceptsFrame` から `isCurrentAttempt` の項を除いたものが
+ * `acceptsFromSession` である**のと同じ縮約（design.md「インターフェース / データ構造」）。
+ */
+export function acceptsLifetimeSignal(
+  current: Attempt | undefined,
+  a: Attempt,
+  live: WsClient | undefined,
+  from: WsClient
+): boolean {
+  return isCurrentAttempt(current, a) || isSessionClient(live, from);
+}
+
+/**
  * **繋がっているセッションの口から届いたフレームか**（`acceptsFrame` の第 2 項）。
  *
  * **試行を持たない口はこちらだけを問う。** 初回接続の口には `Attempt` が無いので

@@ -1,0 +1,13 @@
+schema: 11
+slug: session-closed-ladder-interrupt
+current: retro
+approved: [requirements, design, tasks, coding, test, review, deliver, retro]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: session-lifecycle.md
+backlogItem: **ホスト終了がはしごの最中に届くと取りこぼす**（20260910-session-reconnect-freeze の review ラウンド3 ＋ デバッグ D1）
+harnessRevDelivered: unknown
