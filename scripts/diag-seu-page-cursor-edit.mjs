@@ -121,7 +121,7 @@ log("\n########## ケースD: 編集モード、本文行カーソルから Page
 // === ケースE: 編集モード、本文行カーソルから PageUp（非境界→境界） ===
 log("\n########## ケースE: 編集モード、本文行カーソルから PageUp（非境界→境界） ##########");
 {
-  const d0 = await openEdit();
+  await openEdit();
   for (let i = 0; i < 6; i++) {
     await drain(() => session.sendAid("PageDown", { timeoutMs: 15000 }), `E-助走PageDown #${i}`);
   }

@@ -15,6 +15,24 @@
   （`CHECK: ok`）。coding 工程のタスク単位・横断点検で既に正確性・規約適合は
   深く見ているため、この点検はそれらが見なかった2観点に絞って行った。
 
+## review ラウンド2（deliver 後、CI で発覚）
+
+- [must] deliver で PR #395 を作成後、CI（`offline` ジョブ、`npm run lint`）が失敗した。
+  `scripts/diag-seu-page-cursor-edit.mjs:124` の `const d0 = await openEdit();` が
+  未使用変数（`@typescript-eslint/no-unused-vars`）。review ラウンド1で
+  `npx eslint` を打った対象が `session.ts`/`buffer.ts`/新規テスト2ファイルに
+  限られており、research 工程で先に作った実機診断スクリプト4点を含めていなかった
+  ため見落とした。修正（`await openEdit();` に変更、戻り値は元々未使用）のうえ、
+  `npx eslint .`（リポジトリ全体）・`npm run build`・`npm test`
+  （CI と同じコマンド、全ワークスペース）を実行し直し、全て green であることを
+  確認した（tn5250: 594、web-ui: 2035、server: 1416+3skip、tn3270: 254+38skip、
+  vt: 202、gen-tables: 10、hostserver-check: 0 件、いずれも failed 0）。
+  — 根拠: CI run https://github.com/asaomaro/ts5250/actions/runs/34853725393
+  （job: offline）、`scripts/diag-seu-page-cursor-edit.mjs:124`
+- **教訓**: 差分に含めた新規ファイルの lint/build/test は、対象を絞らず
+  `npx eslint .` / `npm run build` / `npm test`（CI と同一コマンド）で
+  リポジトリ全体を通してから deliver するべきだった。次回以降の review 手順に活かす。
+
 ## タスク横断点検（coding 手順5.5、cross）
 
 4件の指摘があった。
