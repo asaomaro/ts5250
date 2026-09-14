@@ -5,3 +5,7 @@ events:
   - { ts: 2026-09-14T11:55:01Z, phase: requirements, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 3, doc_check_mode: delegated } }
   - { ts: 2026-09-14T11:55:35Z, phase: research, event: start }
   - { ts: 2026-09-14T12:14:57Z, phase: research, event: approved }
+  - { ts: 2026-09-14T12:16:19Z, phase: design, event: start }
+  - { ts: 2026-09-14T12:22:16Z, phase: design, event: doccheck, metrics: { stage: start, phase: design, mode: delegated, size: 16358 } }
+  - { ts: 2026-09-14T12:28:33Z, phase: design, event: doccheck, metrics: { stage: report, phase: design, findings: 4 } }
+  - { ts: 2026-09-14T12:29:06Z, phase: design, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 4, doc_check_mode: delegated } }
