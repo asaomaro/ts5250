@@ -345,6 +345,11 @@ export class Session5250 extends Emitter<SessionEvents> {
     // **Attn/SysReq は除外する**——フラグレコードは施錠中でも別経路で割り込めるため、
     // PageUp/PageDown の応答待ち中に Attn/SysReq を挟むと、後で届く本来の応答に対して
     // isPageKey が誤って false になり、境界のカーソル位置保持が静かに効かなくなる。
+    // **既知の残存リスク（`decisions.md` D4(2)）**: 逆に、この除外のせいで
+    // PageUp/PageDown の応答待ち中に Attn/SysReq を挟むと、その直後に届く
+    // （PageUp/PageDown とは無関係な）レコードに対しても isPageKey が "PageDown"/
+    // "PageUp" のまま誤って true 判定されうる。実機トレースでは未観測で、
+    // この work のスコープでは対応しない（AID とレコードの 1:1 対応付けが要る大きな変更）。
     if (key !== "Attn" && key !== "SysReq") this.lastSentAid = key;
     if (key === "Attn" || key === "SysReq") {
       // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
@@ -664,6 +669,12 @@ export class Session5250 extends Emitter<SessionEvents> {
          *     カーソルも動かない（`cursorAddr === cursorBefore`）ケースで2つ目の分岐と
          *     構造的に重なり、常にこちらが先に評価されて退避を握りつぶしてしまう
          *     （AC6 の回帰。タスク点検で指摘）。
+         *
+         * **既知の残存リスク（`decisions.md` D4(1)）**: `cellsSignature()` は FFW（保護ビット）
+         * を比較に含まないため、送信前は入力可能だった欄が、送信後に**表示は変えずに**
+         * 保護化される（＝ FFW だけ変わる）ケースでは、Rule2 が「無変化」と誤判定し、
+         * 今まさに保護化された `cursorBefore` へカーソルを固定してしまいうる。
+         * 実機トレースでは未観測（`research.md`）で、この work のスコープでは対応しない。
          */
         this.buf.cursorAddr = cursorBefore;
       } else if (result.readRequested && !result.cursorSet) {

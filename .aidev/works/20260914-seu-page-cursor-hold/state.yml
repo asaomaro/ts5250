@@ -1,7 +1,7 @@
 schema: 11
 slug: seu-page-cursor-hold
-current: tasks
-approved: [requirements, research, design, tasks]
+current: coding
+approved: [requirements, research, design, tasks, coding]
 mode: autonomous
 profile: full
 humanGates: []

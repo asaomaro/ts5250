@@ -126,10 +126,13 @@ this.lastSentAid = key;
 ```ts
 const cursorBefore = this.buf.cursorAddr; // 既存: 送信前のカーソルアドレス
 const screenBefore = /* PageUp/PageDown のときだけ、送信前の画面内容を軽量比較用に保持 */;
+const isPageKey = this.lastSentAid === "PageUp" || this.lastSentAid === "PageDown";
+// 送信**前**の時点でカーソルが入力可能な欄にあったか（cursorIsUnenterable は
+// applyDataStream 適用前＝フィールド更新前の状態を見る）。
+const cursorBeforeWasEnterable = isPageKey ? !this.buf.cursorIsUnenterable() : false;
 
 const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
 
-const isPageKey = this.lastSentAid === "PageUp" || this.lastSentAid === "PageDown";
 const screenUnchanged = isPageKey && screenBefore !== undefined && screenBefore === /* 適用後の画面内容 */;
 const movedToDeadZone =
   isPageKey &&
@@ -137,7 +140,7 @@ const movedToDeadZone =
   this.buf.cursorAddr !== cursorBefore &&
   this.buf.cursorIsUnenterable();
 
-if (result.readRequested && isPageKey && (screenUnchanged || movedToDeadZone)) {
+if (result.readRequested && isPageKey && cursorBeforeWasEnterable && (screenUnchanged || movedToDeadZone)) {
   // PageUp/PageDown が実質何も進めなかった（境界）ときは、ホストの指定より
   // 直前のカーソル位置を優先する。
   this.buf.cursorAddr = cursorBefore;
@@ -147,6 +150,17 @@ if (result.readRequested && isPageKey && (screenUnchanged || movedToDeadZone)) {
   this.buf.cursorToFirstInputField();
 }
 ```
+
+> **coding 中に判明した追加条件（`cursorBeforeWasEnterable`）**: design 時点の当初案は
+> `screenUnchanged`（Rule2）に移動有無の除外を付けておらず、**送信前から既に保護欄／
+> 欄外にいた状態で画面完全一致・カーソル不動**というケースで、下の2つ目の分岐
+> （保護欄からの退避 `PR#387`）と常に重なりうる欠陥があった（タスク単位の独立点検の
+> `must` 指摘で発見。`decisions.md` の記録は無いが、`review.md`「タスク点検ログ」T3 に
+> 経緯が残る）。修正として、`screenUnchanged`・`movedToDeadZone` のどちらの経路でも
+> 共通して「送信前のカーソル位置がそもそも入力可能だったか」を追加条件にした
+> （保つべき「良い」位置が無ければ、この分岐ではなく既存の保護欄退避に判定を譲る）。
+> 実装・回帰テストは `packages/tn5250/src/session/session.ts` と
+> `packages/tn5250/test/cursor-page-boundary.test.ts`（「AC6 回帰」ケース）を参照。
 
 - `screenBefore` の取得・比較は **`isPageKey` のときだけ**行う（他の全 AID キーでは
   従来通り一切の追加コストを掛けない）。
@@ -205,10 +219,14 @@ if (result.readRequested && isPageKey && (screenUnchanged || movedToDeadZone)) {
   false になるため、新ルールと排他。入力: `research.md`（`cursor-default.test.ts` の
   既存前提）、`aidev-00-start` 事前調査（導入コミット `7af76ae5`）。
 - AC6: 保護欄に取り残されたカーソルを先頭入力欄へ寄せる挙動（`PR#387`）に回帰がない。
-  → 「振る舞いの詳細」で述べた通り `cursorAddr !== cursorBefore` を Rule 1 の条件に
-  含めることで、`PR#387` が対象とする「動いていない・入力不可」ケースとは
-  構造的に重ならない（新ルールは「動いた場合」だけを見る）。入力:
-  `packages/tn5250/src/session/session.ts:617-634` のコメント・条件式。
+  → 「振る舞いの詳細」の2点で担保する。(1) Rule1（`movedToDeadZone`）は
+  `cursorAddr !== cursorBefore` を条件に含み、`PR#387` が対象とする「動いていない・
+  入力不可」ケースとは重ならない。(2) Rule1・Rule2 共通の `cursorBeforeWasEnterable`
+  （coding 中に追加。上記「coding 中に判明した追加条件」参照）が、「送信前から既に
+  保護欄／欄外にいた」ケースを新ルールの対象から外し、`PR#387` に判定を譲る——
+  これが無いと Rule2（`screenUnchanged`）単独でも `PR#387` と重なりうる欠陥があった。
+  入力: `packages/tn5250/src/session/session.ts:635-672` のコメント・条件式、
+  `packages/tn5250/test/cursor-page-boundary.test.ts`「AC6 回帰」ケース。
 - AC7: SEU 走査検索でカーソルが `SEU==>` へ飛ばない既存の挙動に回帰がない。
   → 走査検索は `Enter` で実行される（`research.md` 冒頭、診断スクリプトの `searchTo()`）ため
   `isPageKey` は false。新ルールと無関係。入力: `research.md`、

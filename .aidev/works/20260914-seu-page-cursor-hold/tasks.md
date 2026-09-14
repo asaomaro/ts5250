@@ -75,7 +75,11 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
       対象: `packages/tn5250/src/session/session.ts:613-634` / 根拠: design.md「振る舞いの詳細」
       依存: T1, T2
       AC: AC1, AC2, AC3
-- [ ] T4: `packages/tn5250/test/` と `packages/web-ui/test/` を `PageUp`/`PageDown` で
+      実施結果（coding 中に追加した条件。design.md「coding 中に判明した追加条件」参照）:
+      Rule1・Rule2 共通で `cursorBeforeWasEnterable`（送信前カーソルが入力可能だったか）
+      も条件に加えた。無いと Rule2 単独でも `PR#387`（AC6）と重なりうる欠陥があったため
+      （タスク単位の独立点検の must 指摘）。
+- [x] T4: `packages/tn5250/test/` と `packages/web-ui/test/` を `PageUp`/`PageDown` で
       横断検索し、T3 の新しい分岐が影響しうる既存テストが他に無いか確認する
       （リスク/留意点 参照）。そのうえで、既存の回帰シナリオ（F1ヘルプ/27x132切替の
       カーソル既定移動、保護欄からの退避 `PR#387`、SEU 走査検索でのカーソル復元）に対する
@@ -87,7 +91,7 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
             （横断検索は `packages/tn5250/test/`, `packages/web-ui/test/` 全体） / 根拠: design.md「受け入れ基準との対応」AC5-7
       依存: T3
       AC: AC5, AC6, AC7
-- [ ] T5: PageUp/PageDown で境界ページ（先頭/最終）に到達したときカーソル位置が維持される
+- [x] T5: PageUp/PageDown で境界ページ（先頭/最終）に到達したときカーソル位置が維持される
       ことを検証する新規テストを追加する（Rule1 相当・Rule2 相当それぞれの合成 WTD ケース。
       AC1=PageDownで最終ページ、AC2=PageUpで先頭ページ。このテスト自体がAC8を満たす）。
       あわせて、途中ページ（非境界）遷移で新しい分岐が発火せず、既存の維持動作に
@@ -96,7 +100,7 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
             ファイル名は coding 時に決定） / 根拠: design.md「受け入れ基準との対応」AC1, AC2, AC3, AC8
       依存: T3, T4
       AC: AC1, AC2, AC3, AC8
-- [ ] T6: AC4（境界ページ到達時のホスト応答を実機トレースで確認し記録が残っている）は
+- [x] T6: AC4（境界ページ到達時のホスト応答を実機トレースで確認し記録が残っている）は
       `research.md` で既に充足済みであることを確認する。coding での新規作業は発生しない。
       対象: `.aidev/works/20260914-seu-page-cursor-hold/research.md` / 根拠: research.md F1-F6
       依存: なし
