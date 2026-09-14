@@ -53,13 +53,13 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
 
 ## タスク
 
-- [ ] T1: `Session5250` に直前送信 AID キーを保持する非公開フィールド `lastSentAid` を追加し、
+- [x] T1: `Session5250` に直前送信 AID キーを保持する非公開フィールド `lastSentAid` を追加し、
       `sendAid()` 内でレコード送信時に更新する。
       対象: `packages/tn5250/src/session/session.ts:130`（フィールド宣言付近）,
             `packages/tn5250/src/session/session.ts:322-386`（`sendAid()`） / 根拠: design.md「インターフェース / データ構造」
       依存: なし
       AC: なし
-- [ ] T2: 画面内容が2時点間で完全に一致するかを軽量に判定するヘルパーを追加する
+- [x] T2: 画面内容が2時点間で完全に一致するかを軽量に判定するヘルパーを追加する
       （`isPageKey` のときだけ呼ばれる想定。新しい公開 API は増やさない）。
       対象: `packages/tn5250/src/session/session.ts`（private ヘルパーとして追加が第一候補）、
             または `packages/tn5250/src/screen/buffer.ts:834-841` 付近（`cursorIsUnenterable()` の
@@ -67,7 +67,7 @@ T6 は依存が無く、いつ着手してもよい（実質は確認のみ）�
             / 根拠: design.md「対象範囲」「振る舞いの詳細」
       依存: なし
       AC: なし
-- [ ] T3: `handleRecord()` のカーソル確定ロジック（既存の613-616, 617-634分岐）の手前に、
+- [x] T3: `handleRecord()` のカーソル確定ロジック（既存の613-616, 617-634分岐）の手前に、
       `lastSentAid` が PageUp/PageDown のときだけ効く新しい分岐を追加する。
       Rule1（`result.cursorSet` かつ `cursorAddr !== cursorBefore` かつ
       `cursorIsUnenterable()`）または Rule2（画面内容が送信前後で完全一致）のいずれかが

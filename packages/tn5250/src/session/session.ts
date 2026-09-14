@@ -154,6 +154,11 @@ export class Session5250 extends Emitter<SessionEvents> {
   private pendingAid:
     | { resolve: (r: SendAidResult) => void; timer?: ReturnType<typeof setTimeout> }
     | undefined;
+  /**
+   * 直前に送信した AID キー。PageUp/PageDown の応答だけを特別扱いする判定に使う
+   * （境界ページでのカーソル位置保持。design: `.aidev/works/20260914-seu-page-cursor-hold`）。
+   */
+  private lastSentAid: AidKey | undefined;
 
   private constructor(opts: ConnectOptions) {
     super();
@@ -334,6 +339,13 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (key === "Attn" || key === "SysReq") this.assertNotClosed();
     else this.assertReady();
     const record = this.buildAidRecord(key, opts.cursor, opts.sysReqText);
+    // buildAidRecord が例外を投げなかった＝これから実際に送る、という時点で更新する
+    // （例: SysReq 以外への sysReqText 指定は PROTOCOL_ERROR で投げるが、その場合は
+    // 何も送信されないので lastSentAid を更新してはならない）。
+    // **Attn/SysReq は除外する**——フラグレコードは施錠中でも別経路で割り込めるため、
+    // PageUp/PageDown の応答待ち中に Attn/SysReq を挟むと、後で届く本来の応答に対して
+    // isPageKey が誤って false になり、境界のカーソル位置保持が静かに効かなくなる。
+    if (key !== "Attn" && key !== "SysReq") this.lastSentAid = key;
     if (key === "Attn" || key === "SysReq") {
       // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
       // （ATNPGM が既に前面のとき等。実機で 2 回目の Attn に受信ゼロを確認）。
@@ -532,6 +544,16 @@ export class Session5250 extends Emitter<SessionEvents> {
     let unlocked = false;
     // このレコードを当てる**前**のカーソル。ホストがカーソルを動かしたかを見るのに使う
     const cursorBefore = this.buf.cursorAddr;
+    // PageUp/PageDown 応答だけを特別扱いする（境界ページでのカーソル位置保持）。
+    // 画面内容の比較は isPageKey のときだけ行い、他の全 AID キーでは追加コストを掛けない。
+    const isPageKey = this.lastSentAid === "PageUp" || this.lastSentAid === "PageDown";
+    const screenBefore = isPageKey ? this.buf.cellsSignature() : undefined;
+    // 送信**前**の時点でカーソルが入力可能な欄にあったか（フィールド更新前に見る）。
+    // **保つ値が無いなら保たない**——これが false（既に保護欄／欄外）なら、下の
+    // 「保護欄からの退避」分岐（PR#387）に判定を譲る。そうしないと、既に入力不可な位置に
+    // 留まっている状態から境界へ至ったとき、この新分岐が先に評価されて退避を握りつぶす
+    // （タスク点検で指摘。両分岐とも `cursorSet` の有無を問わない構造的な重なりのため）。
+    const cursorBeforeWasEnterable = isPageKey ? !this.buf.cursorIsUnenterable() : false;
     try {
       const parsed = parseRecord(record);
       // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
@@ -610,7 +632,41 @@ export class Session5250 extends Emitter<SessionEvents> {
       // Read の無いレコード（画面だけ描くもの）では触らない——同じ画面構築が
       // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
-      if (result.readRequested && !result.cursorSet) {
+      if (
+        result.readRequested &&
+        isPageKey &&
+        cursorBeforeWasEnterable &&
+        (screenBefore === this.buf.cellsSignature() ||
+          (result.cursorSet && this.buf.cursorAddr !== cursorBefore && this.buf.cursorIsUnenterable()))
+      ) {
+        /**
+         * **PageUp/PageDown が実質何も進めなかった（境界ページ）ときは、ホストの IC/MC より
+         * 送信直前のカーソル位置を優先する。**
+         *
+         * 実機トレースで、SEU は境界ページでもカーソル位置を**明示的に** IC/MC で指定してくる
+         * ことを確認済み（`cursorSet` は常に true——`.aidev/works/20260914-seu-page-cursor-hold`
+         * `research.md` F1〜F6）。したがって「IC/MC が無い」ことを前提にする直後の分岐
+         * （1つ目、`!result.cursorSet`）だけでは、この不具合は直せない
+         * （2つ目の分岐＝保護欄からの退避 `PR#387` は `cursorSet` の有無を問わないので当てはまらない）。
+         * ここで見ているのは2つの実機実測パターン:
+         *   - 画面内容が送信前後で完全一致（真の境界。それ以上ページが無い）
+         *   - カーソルが送信前と異なる位置へ移動し、かつ移動先が入力不可
+         *     （境界の1つ手前。本文行の入力欄が画面から消えた）
+         *
+         * **2つの条件がいずれも肝**:
+         *   - `cursorAddr !== cursorBefore`（1つ目のパターン側）。これが無いと、
+         *     「動いておらず、かつ入力不可」（下の2つ目の分岐＝保護欄からの退避）にも
+         *     重なって発火してしまい、その退避（先頭入力欄へ寄せる）を握りつぶしてしまう。
+         *   - `cursorBeforeWasEnterable`（両パターンに共通）。送信**前**の時点で既に
+         *     保護欄／欄外にいた（例: SEU の走査検索で見つけた保護欄の中）場合は、
+         *     保つべき「良い」位置がそもそも無いので、この分岐ではなく下の2つ目の分岐
+         *     （保護欄からの退避）に判定を譲る。これが無いと、画面が完全一致かつ
+         *     カーソルも動かない（`cursorAddr === cursorBefore`）ケースで2つ目の分岐と
+         *     構造的に重なり、常にこちらが先に評価されて退避を握りつぶしてしまう
+         *     （AC6 の回帰。タスク点検で指摘）。
+         */
+        this.buf.cursorAddr = cursorBefore;
+      } else if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
         // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
         this.buf.cursorToFirstInputField();
