@@ -1,0 +1,13 @@
+schema: 11
+slug: dspfmt-field-underline-instability
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: DSPFMT でフィールドのオプション入力欄の下線が消えたり、罫線のみ表示されることがある（利用者報告、20260915）。再現条件・原因未特定。ACS の該当描画ロジックとの突き合わせが有効な可能性が高い（acs-parityの主題そのもの）。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md）
+harnessRevDelivered: unknown

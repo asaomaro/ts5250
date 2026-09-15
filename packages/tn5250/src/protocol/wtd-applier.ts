@@ -480,6 +480,28 @@ function applyWtd(
         applyWdsf(r, buf, codec, addr, warn);
         break;
       }
+      case ORDER.WEA: {
+        // Write Extended Attribute。オーダー本体は属性タイプ・属性値の2バイト
+        // （tn5250j `tnvt.java` の `case 18`、GNU tn5250 `session.c`
+        // `tn5250_session_write_extended_attribute()` の2つの独立した参照実装で確認済み。
+        // `.aidev/works/20260914-dspfmt-field-underline-instability` research.md F7）。
+        //
+        // **意味的な効果（拡張属性の実際の見た目への反映）は実装しない**——上記の
+        // 2つの参照実装もどちらも実装を見送っており、IBM の正式仕様書での確認も
+        // 取れていないため、憶測で実装すると誤った見た目を作り込むリスクがある。
+        //
+        // **ここが本質: `default:` 節（未知オーダー）に落とさないこと。** WEA の
+        // バイト数（2）は既知なので、正確に2バイトだけ消費して次のオーダーへ進める。
+        // `default:` 節に落ちると、次の ESC＋既知コマンドが見つかるまで読み飛ばす
+        // 復旧処理が働き、WEA より後ろの同じ WTD 内の全オーダー
+        // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
+        const attrType = r.u8();
+        const attrValue = r.u8();
+        warn(
+          `WEA order (type=0x${attrType.toString(16)}, value=0x${attrValue.toString(16)}) received — not applied`
+        );
+        break;
+      }
       case ORDER.UNKNOWN_1C:
         // 表示は "*" 1 文字（桁を 1 つ占有）。詳細は ORDER.UNKNOWN_1C の doc コメント参照。
         //

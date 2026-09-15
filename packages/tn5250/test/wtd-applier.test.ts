@@ -234,6 +234,40 @@ describe("applyDataStream — 合成データ", () => {
   });
 
   /**
+   * **WEA（Write Extended Attribute, 0x12）は正しく2バイトだけ読み飛ばし、
+   * 同じ WTD 内の後続オーダーを失わない。**
+   *
+   * 修正前は `ORDER.WEA` に専用の `case` が無く、直前のテスト（未知オーダー）と同じ
+   * `default:` 節に落ちていた。その節は「次の ESC＋既知コマンドまで読み飛ばす」という
+   * 復旧処理のため、WEA より後ろの**同じ WTD 内**にあるオーダー（このテストでは
+   * SBA・SF・データ）は、次の ESC が現れるまで丸ごと失われていた。WEA のオーダー本体は
+   * 2バイトと既知（tn5250j・GNU tn5250 の2つの参照実装で確認済み。research.md F7）なので、
+   * 専用の `case` で正確にその2バイトだけを消費すれば、この取りこぼしは起きない。
+   * `.aidev/works/20260914-dspfmt-field-underline-instability` decisions.md D1。
+   */
+  it("WEA は属性タイプ・属性値の2バイトを消費するだけで、同じ WTD 内の後続オーダーを失わない", () => {
+    const ffw = FFW.ID_VALUE;
+    const { warns, buf, result } = apply([
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08, // CC2 unlock
+      ORDER.WEA, 0x01, 0xc1, // WEA: 属性タイプ 0x01, 属性値 0xC1（意味的な効果は無い）
+      ORDER.SBA, 3, 10,
+      ORDER.SF, (ffw >> 8) & 0xff, ffw & 0xff, 0x24, 0x00, 0x05, // attr=0x24(underline), len=5
+      ...e("INI"),
+      ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00
+    ]);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("WEA");
+    expect(warns[0]).toContain("0x1"); // type=0x01 が16進で出ている
+    // WEA の**後ろ**にある SF・データが正しく適用される（修正前は失われていた部分）
+    const snap = buf.snapshot("t", false);
+    expect(snap.fields[0]).toMatchObject({ row: 3, col: 11, length: 5, value: "INI" });
+    expect(snap.cells[2]?.[10]).toMatchObject({ char: "I", underline: true });
+    // 同じレコード内にある WRITE_TO_DISPLAY の CC2・READ も失われない
+    expect(result.unlockKeyboard).toBe(true);
+    expect(result.readRequested).toBe(true);
+  });
+
+  /**
    * **0x1C は "*" 1 文字を表示する（正体未確認・実機表示との突き合わせで確定）。**
    *
    * 実機の標準システム画面「スプール・ファイルの表示」（DSPSPLF 系）のトレースで観測。
