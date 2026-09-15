@@ -336,11 +336,22 @@ export class Session5250 extends Emitter<SessionEvents> {
     const record = this.buildAidRecord(key, opts.cursor, opts.sysReqText);
     // **`opts.cursor` は「利用者が今どこにカーソルを置いたか」の最新の申告**（web-ui の
     // クリック等）。これまで `buf.cursorAddr` には反映しておらず（送信レコードの値を
-    // 一時的に上書きするだけ、という元々の契約——`research.md` F7）、次に届く応答の
-    // カーソル確定ロジック（`handleRecord` の `cursorBefore`）が**古い**位置のまま
-    // 比較してしまっていた。「クリックで別の欄へ移してから PageUp/PageDown すると
-    // 無関係な位置へ戻る」という回帰として実機で顕在化したため同期する
-    // （`.aidev/works/20260914-seu-page-cursor-hold` decisions.md D5）。
+    // 一時的に上書きするだけ、という元々の契約——`research.md` F7）。
+    //
+    // **同期が無いと、ホストの応答を実際には処理していないまま返す `this.snapshot()`
+    // が古い位置を示してしまう**——(1) Attn/SysReq はここで即座に返す（下記参照）、
+    // (2) `sendAndWait()` のタイムアウト分岐（どの AID キーでも起こりうる）も応答を
+    // 処理せずに `this.snapshot()` を返す（`sendAndWait()` 参照）。どちらも
+    // `handleRecord()` を経由しないため、この同期を欠くと `buf.cursorAddr` が
+    // 送信前のまま（利用者の最新のクリックを反映しない）になる。
+    //
+    // **（`.aidev/works/20260915-pr387-acs-premise-unverified` での訂正）**:
+    // 当初この同期は `.aidev/works/20260914-seu-page-cursor-hold` decisions.md D5
+    // で、`handleRecord` 内の「送信前と比較して動いたか」を判定する分岐
+    // （`PR#387` 分岐）のための同期として導入されていた。その分岐は本 work で
+    // 撤去したため D5 が挙げていた理由は無くなったが、上記 (1)(2) という
+    // 独立の理由（D5 の記述には無く、本 work で改めて確認した）で同期自体は
+    // 引き続き必要。
     // **範囲チェックは `addrOf` に任せない**——`row`/`col` が `undefined` や非数値だと
     // `addrOf` 内の比較（`row1 < 1` 等）が常に false になって例外を投げずに通過し、
     // `cursorAddr` が `NaN` になって以後のカーソル追跡がホストの次の IC/MC まで壊れたまま
@@ -555,11 +566,6 @@ export class Session5250 extends Emitter<SessionEvents> {
       }
     }
     let unlocked = false;
-    // このレコードを当てる**前**のカーソル。ホストがカーソルを動かしたかを見るのに使う
-    const cursorBefore = this.buf.cursorAddr;
-    // このレコードを当てる**前**、その桁は入力可能だったか（`PR#387` 分岐が使う。
-    // `applyDataStream` より前に読む——読んだ後だと新しい画面の欄定義に上書きされてしまう）。
-    const cursorBeforeWasEnterable = this.buf.isEnterableAt(cursorBefore);
     try {
       const parsed = parseRecord(record);
       // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
@@ -640,39 +646,28 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
       if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
-        // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
-        this.buf.cursorToFirstInputField();
-      } else if (
-        result.readRequested &&
-        cursorBeforeWasEnterable &&
-        this.buf.cursorAddr === cursorBefore &&
-        this.buf.cursorIsUnenterable()
-      ) {
-        /**
-         * **送信前は入力可能だった桁が、このレコードで保護欄に変わり、かつカーソルが
-         * 1桁も動いていない**なら、最初の入力欄へ寄せる（ACS と同じ）。
-         *
-         * 「上で入力 → Enter → 上がプロテクトされ、下が展開する」画面で踏む。アプリは
-         * カーソルを動かしておらず、ホストが送ってくるのは**operator が居た桁のまま**＝
-         * いまは保護欄。そこに置くと打っても操作員エラーになり、利用者は Tab を押すまで
-         * 入力できない（利用者の報告。ACS は下の入力欄へ入る）。
-         *
-         * **「送信前は入力可能だった」を条件にするのが肝**（`cursorBeforeWasEnterable`。
-         * `.aidev/works/20260915-pdm-protected-cursor-pageup` decisions.md D5）。
-         * 「動いていない」だけを条件にすると、SEU の PageUp/PageDown でも保護欄
-         * （本文の表示領域。もともと入力できない）を指す IC をホストが送り直してくる
-         * ケースまで拾ってしまい、カーソルがヘッダーの入力欄へ強制移動する不具合になる
-         * （`decisions.md` D4〜D5）。SEU のその位置は SF で定義された欄ではあるが、
-         * **送信前からずっと保護（BYPASS）のまま**——今回のレコードで新たに保護化された
-         * わけではない。「もともと保護されていた欄を指し直された」のか「入力可能だった欄が
-         * いま保護化された」のかで区別すれば、AID キーの種別（PageUp/PageDown か否か）を
-         * 見る必要が無い——ホストが**わざと**保護欄を指す画面（SEU の走査検索——見つかった
-         * 桁にカーソルを置く）も、動いた場合はこの分岐に入らないので区別できる。
-         * 実機で並べて測ると、両者はここで分かれる:
-         *   展開画面（Enter） … 3/12（送信前は入力可）→ 3/12（動かない）・いま保護欄 → 寄せる
-         *   SEU PageUp/PageDown … 10/10（送信前から保護欄）→ 10/10（動かない）・保護欄のまま → 寄せない
-         *   SEU 走査検索（Enter） … 2/9 → 11/53（動く）・保護欄の中 → 寄せない（動いたため対象外）
-         */
+        // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる。
+        //
+        // **これ以外の上書きはしない**——ホストが IC/MC で指定した位置は、それが
+        // 保護欄であってもそのまま尊重する。ACS のデコンパイル済みコア
+        // （`DS5250.preprocessWCC2()`）のカーソル決定はこの「IC/MC の有無」だけで
+        // 完結しており（GUI 選択ウィジェット専用の狭い例外を除く）、「動いていない・
+        // いま保護化された→先頭入力欄へ寄せる」という上書き（旧 `PR#387` 分岐）に
+        // 相当するロジックは存在しない
+        // （`.aidev/works/20260915-pr387-acs-premise-unverified` research.md F3）。
+        //
+        // **旧 `PR#387` 分岐（コミット `c82e2b34`）はここに存在した**が撤去した。
+        // 「ACS は下の入力欄にカーソルを入れる」という前提は、実際に ACS を
+        // 動かして検証された記録が無く（PR #387 の検証資材は全てこのプロジェクト
+        // 自身のクライアントが対象で、実際の ACS には一度も接続していない）、
+        // PR 本文の確認チェックリストも未チェックのまま残っていた
+        // （`.aidev/works/20260915-pr387-acs-premise-unverified` research.md
+        // F1・F2）。この撤去により、「上で入力 → Enter →
+        // 上がプロテクトされ、下が展開する」画面で、カーソルが保護化された欄に
+        // 留まり Tab を押すまで入力できない、という `PR#387` 以前の挙動に戻る
+        // ——ACS コアの確認済み挙動に合わせるための意図的な変更であり、単純な
+        // 退行ではない（ただし ACS が実際にこの場面でどう見えるかは今回も
+        // 確認できていない。`decisions.md` D2 参照）。
         this.buf.cursorToFirstInputField();
       }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";

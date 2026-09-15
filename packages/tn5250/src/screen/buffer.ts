@@ -830,28 +830,14 @@ export class ScreenBuffer {
     if (first !== undefined) this.cursorAddr = first.startAddr;
   }
 
-  /** いまのカーソルが保護欄（または欄の外）にあり、入力できる欄がどこかにあるか */
-  cursorIsUnenterable(): boolean {
-    const inField = this.fields.find(
-      (f) => this.cursorAddr >= f.startAddr && this.cursorAddr < f.startAddr + f.length
-    );
-    const enterable = this.orderedFields().some((f) => (f.ffw & FFW.BYPASS) === 0);
-    if (!enterable) return false;
-    return inField === undefined || (inField.ffw & FFW.BYPASS) !== 0;
-  }
-
-  /**
-   * 指定アドレスが、SF で定義された入力可能（非バイパス）な欄の中か。
-   *
-   * `cursorIsUnenterable()` と違い、「画面のどこかに入力欄があるか」は前提にしない
-   * （任意の1点だけを answer する汎用の判定）。`session.ts` の `PR#387` 分岐が
-   * 「このWTDを当てる**前**、この位置は入力可能だったか」を判定するのに使う
-   * （`.aidev/works/20260915-pdm-protected-cursor-pageup` decisions.md D5）。
-   */
-  isEnterableAt(addr: number): boolean {
-    const f = this.fields.find((f) => addr >= f.startAddr && addr < f.startAddr + f.length);
-    return f !== undefined && (f.ffw & FFW.BYPASS) === 0;
-  }
+  // **`cursorIsUnenterable()`／`isEnterableAt()` はここにあった**が撤去した
+  // （`.aidev/works/20260915-pr387-acs-premise-unverified`）。どちらも
+  // `session.ts` の旧 `PR#387` 分岐（「動いていない・いま保護化された」を検知
+  // して先頭入力欄へ上書きする判定）専用のヘルパーで、その分岐自体を撤去した
+  // ため呼び出し元が無くなった。撤去の理由は `decisions.md` D2 参照
+  // ——ACS のデコンパイル済みコアにこの上書きに相当するロジックが見当たらず、
+  // かつ「ACS がそう動く」という前提自体、実際に ACS を動かして検証された
+  // 記録が無かったため。
 
   fieldByIndex(index1: number): InternalField {
     const f = this.orderedFields()[index1 - 1];
