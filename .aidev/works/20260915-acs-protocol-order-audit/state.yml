@@ -1,0 +1,13 @@
+schema: 11
+slug: acs-protocol-order-audit
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 当プロジェクト全体でACSの実装と突き合わせるべき挙動の棚卸し（利用者から「全体的にACSを手本に見直しを図ってください」との要望、20260915）。スコープが大きいため、まず対象範囲の絞り込み（優先度の高い画面・操作から）を requirements として起こすところから始める。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md）
+harnessRevDelivered: unknown

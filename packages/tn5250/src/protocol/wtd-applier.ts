@@ -489,6 +489,12 @@ function applyWtd(
         // 再解釈してしまい、"*" のはずが文字化けする（利用者報告で発覚）。
         buf.setChar(addr++, "*");
         break;
+      case ORDER.UNKNOWN_1E:
+        // ORDER.UNKNOWN_1C（0x1C）と対称的な扱い。表示は ";" 1 文字（桁を 1 つ占有）。
+        // 詳細は ORDER.UNKNOWN_1E の doc コメント参照。rawByte を渡さない理由も同じ
+        // （カタカナ表示モードでの再解釈・文字化けを防ぐ）。
+        buf.setChar(addr++, ";");
+        break;
       default:
         warn(`unknown order 0x${b.toString(16)} — skipping to next command`);
         // **オーダーの長さは分からないが、レコード全体を捨てない。**
