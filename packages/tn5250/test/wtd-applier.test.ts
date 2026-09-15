@@ -112,6 +112,42 @@ describe("applyDataStream — 合成データ", () => {
     expect(snap.cells[2]?.[10]).toMatchObject({ char: "I", underline: true });
   });
 
+  /**
+   * **`ORDER.UNKNOWN_1E`（0x1E）は ";" 1 文字を表示し、後続の表示データ・オーダーを
+   * 取りこぼさない。** `ORDER.UNKNOWN_1C`（0x1C→"*"）と対の関係——
+   * `20260915-acs-protocol-order-audit` で発見: ACS のデコンパイル済みコア
+   * （`PS5250.addChar()`）は、表示データとして書き込む際にバイト値 30（0x1E）を
+   * 固定で文字 `;` へ置換する。修正前は `ORDER.UNKNOWN_1E` に専用の `case` が無く、
+   * `ORDER.WEA`（0x12）と同じ構造の欠陥——`default:`（未知オーダー扱い）に落ち、
+   * 次の ESC＋既知コマンドが見つかるまで、それより後ろの同一 WTD 内の表示データ・
+   * オーダー（このテストでは "B"・SBA・SF・"INI"）が丸ごと失われていた。
+   *
+   * **rawByte は付けない**（`ORDER.UNKNOWN_1C` と同じ理由——0x1E はオーダー自身の
+   * 識別バイトであって受信した文字バイトではないので、rawByte を持たせると
+   * カタカナ表示モードが半角カナに再解釈して化ける）。
+   */
+  it("ORDER.UNKNOWN_1E は ';' 1 文字を表示し、後続の表示データ・オーダーを取りこぼさない", () => {
+    const ffw = FFW.ID_VALUE;
+    const { warns, buf } = apply([
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 1, 1, ...e("A"),
+      ORDER.UNKNOWN_1E,
+      ...e("B"),
+      ORDER.SBA, 3, 10,
+      ORDER.SF, (ffw >> 8) & 0xff, ffw & 0xff, 0x24, 0x00, 0x05, // attr=0x24(underline), len=5
+      ...e("INI")
+    ]);
+    expect(warns).toEqual([]);
+    expect(rowText(buf, 1)).toContain("A;B");
+    const cell = buf.snapshot("t", false).cells[0]?.[1];
+    expect(cell?.rawByte).toBeUndefined(); // カタカナ表示モードで再解釈されない
+    // ORDER.UNKNOWN_1E の**後ろ**にある SF・データが正しく適用される
+    // （修正前は default: 節に落ちて失われていた部分）
+    const snap = buf.snapshot("t", false);
+    expect(snap.fields[0]).toMatchObject({ row: 3, col: 11, length: 5, value: "INI" });
+    expect(snap.cells[2]?.[10]).toMatchObject({ char: "I", underline: true });
+  });
+
   it("IC がカーソルを設定する", () => {
     const { buf } = apply([
       ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
@@ -268,7 +304,7 @@ describe("applyDataStream — 合成データ", () => {
   });
 
   /**
-   * **0x1C は "*" 1 文字を表示する（正体未確認・実機表示との突き合わせで確定）。**
+   * **0x1C は "*" 1 文字を表示する。**
    *
    * 実機の標準システム画面「スプール・ファイルの表示」（DSPSPLF 系）のトレースで観測。
    * 桁末尾で打ち切られた DBCS 見出しフィールドの直後・サブファイル明細データの直前に
@@ -277,6 +313,10 @@ describe("applyDataStream — 合成データ", () => {
    * 当初は 0 引数の読み飛ばし（no-op）として直したが、ACS の実際の表示（"仕*"）と
    * 突き合わせたところ "*" が 1 文字欠けていた（利用者のスクリーンショット比較で発覚）。
    * "*" は 1 桁占有するので、続く表示データは 1 桁分後ろにずれて正しい位置に来る。
+   *
+   * **正体は `20260915-acs-protocol-order-audit` で確定済み**（`ORDER.UNKNOWN_1C` の
+   * doc コメント参照）——「オーダー」ではなく、ACS の `PS5250.addChar()` が表示データ
+   * 書き込み時に行う固定の文字置換（0x1C→`*`、対の 0x1E→`;` は `ORDER.UNKNOWN_1E`）。
    *
    * **rawByte は付けない。** 0x1C はオーダー自身の識別バイトであって受信した文字バイトでは
    * ないので、rawByte として持たせるとカタカナ表示モードが半角カナに再解釈して化ける。
@@ -434,12 +474,20 @@ describe("表せない文字（0x1F）", () => {
     expect(hit[0]).toContain("CCSID");
   });
 
-  /** 未知オーダーからの復帰も、**直後が既知コマンドの ESC** だけを信じる */
+  /**
+   * 未知オーダーからの復帰も、**直後が既知コマンドの ESC** だけを信じる。
+   *
+   * **トリガーに 0x1E ではなく 0x16 を使う**——`20260915-acs-protocol-order-audit`
+   * で 0x1E に専用の `case`（`ORDER.UNKNOWN_1E`）を追加したため、0x1E はもはや
+   * 「未知オーダー」の例にならない（この `default:` 節の復旧処理自体を検証する
+   * ものであり、特定のバイト値の意味は無関係。0x16 は「0x15(WDSF)〜0x1D(SF) の
+   * 間の未使用番地」として他のテストでも使用実績がある）。
+   */
   it("未知オーダーの後、SBA のパラメータを ESC と読み違えない", () => {
     const buf = new ScreenBuffer(24, 80);
     const rec = Uint8Array.from([
       0x04, 0x11, 0x00, 0x00,
-      0x1e, // 未知オーダー
+      0x16, // 未知オーダー
       0x11, 0x04, 0x05, // SBA(4,5) — 0x04 が続く
       0x20, 0xc1,
       0x04, 0x52, 0x00, 0x00 // ESC READ MDT FIELDS
