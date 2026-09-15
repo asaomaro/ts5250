@@ -36,10 +36,14 @@ describe("validateFieldContent — 数値型", () => {
     expect(() => validateFieldContent("12    ", numField, sbcs)).not.toThrow();
     expect(() => validateFieldContent("    12 ", numField, sbcs)).not.toThrow();
   });
-  it("埋め込みの空白は従来どおり FIELD_TYPE で拒否", () => {
-    expect(() => validateFieldContent("1 2", numField, sbcs)).toThrow(
-      expect.objectContaining({ code: "FIELD_TYPE" })
-    );
+  // **（`.aidev/works/20260915-acs-field-validation-audit` での訂正）**:
+  // ACS のデコンパイル済みコア（`Field5250.checkNumericOnlyChar()`）は数値専用欄で
+  // 埋め込みの空白も許容しており、それに合わせて許可する形へ変更した
+  // （research.md F2）。`SHIFT_DIGITS_ONLY` は対象外（ACS の
+  // `checkDigitsOnlyChar()` は空白を許容しない。research.md F3。下の
+  // 「digits-only でも前後の空白は許可・埋め込みは拒否」テスト参照）。
+  it("埋め込みの空白も許可（ACS の checkNumericOnlyChar() と一致させた）", () => {
+    expect(() => validateFieldContent("1 2", numField, sbcs)).not.toThrow();
   });
   it("digits-only でも前後の空白は許可・埋め込みは拒否", () => {
     const digits = field(FFW.ID_VALUE | FFW.SHIFT_DIGITS_ONLY);

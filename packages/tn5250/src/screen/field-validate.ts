@@ -39,12 +39,20 @@ export function validateFieldContent(
     shift === FFW.SHIFT_DIGITS_ONLY ||
     shift === FFW.SHIFT_SIGNED_NUMERIC;
   if (numericOnly) {
-    const allowed = shift === FFW.SHIFT_DIGITS_ONLY ? /^[0-9]*$/ : /^[0-9.,+-]*$/;
+    // **数値専用（`SHIFT_NUMERIC_ONLY`/`SHIFT_SIGNED_NUMERIC`）は埋め込みの空白も許容する**
+    // ——ACS のデコンパイル済みコア（`Field5250.checkNumericOnlyChar()`）が
+    // 数字・空白・カンマ・ハイフン・ピリオド・プラスを位置を問わず許容しており、
+    // それに合わせた（`.aidev/works/20260915-acs-field-validation-audit`
+    // research.md F2）。**`SHIFT_DIGITS_ONLY` は対象外**——ACS の
+    // `checkDigitsOnlyChar()` は数字以外（空白を含む）を拒否するため、従来どおり
+    // 埋め込みの空白も拒否する（同 research.md F3、decisions.md D4）。
+    const allowed = shift === FFW.SHIFT_DIGITS_ONLY ? /^[0-9]*$/ : /^[0-9 .,+-]*$/;
     // **前後の空白は桁合わせの padding として通す。** FFW の ADJUST（右寄せ・空白埋め）と
     // signed-num の既定右寄せは端末側で値の左に空白を作るため、ここで弾くと
-    // 自分で整形した値を自分で送れなくなる。埋め込みの空白（"1 2"）は trim で消えないので
-    // 従来どおり FIELD_TYPE で拒否される——**ただし現在値に空白が含まれる欄は除く**
-    // （`EDTWRD` が桁区切りに空白を使うことがあり、それはホストが書いた文字なので通す）。
+    // 自分で整形した値を自分で送れなくなる。`SHIFT_DIGITS_ONLY` の埋め込みの空白
+    // （"1 2"）は trim で消えないので従来どおり FIELD_TYPE で拒否される
+    // ——**ただし現在値に空白が含まれる欄は除く**（`EDTWRD` が桁区切りに空白を
+    // 使うことがあり、それはホストが書いた文字なので通す）。
     if (!allowed.test(checked.trim())) {
       throw new As400Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
     }
