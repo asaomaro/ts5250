@@ -1,0 +1,11 @@
+schema: 11
+slug: acs-field-validation-audit
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+harnessRevDelivered: unknown
