@@ -34,3 +34,18 @@ events:
   - { ts: 2026-09-15T04:58:18Z, phase: review, event: approved, metrics: { must: 0, should: 1, nit: 1, ac_total: 5, ac_covered: 5, tasks_no_ac: 0, tasks_ac_none: 1 } }
   - { ts: 2026-09-15T04:58:23Z, phase: deliver, event: start }
   - { ts: 2026-09-15T04:59:43Z, phase: deliver, event: approved, metrics: { files_changed: 3, insertions: 265, deletions: 2 } }
+  - { ts: 2026-09-15T06:34:40Z, phase: coding, event: start }
+  - { ts: 2026-09-15T06:38:43Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T6, mode: delegated } }
+  - { ts: 2026-09-15T06:38:43Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T7, mode: delegated } }
+  - { ts: 2026-09-15T06:40:23Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T6, findings: 0 } }
+  - { ts: 2026-09-15T06:44:17Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T7, findings: 1 } }
+  - { ts: 2026-09-15T06:44:24Z, phase: coding, event: taskcheck, metrics: { stage: start, task: cross, mode: delegated } }
+  - { ts: 2026-09-15T06:49:58Z, phase: coding, event: approved, metrics: { tasks_done: 7, unplanned_lookups: 0, task_checks: 5, task_check_findings: 2, task_check_mode: delegated } }
+  - { ts: 2026-09-15T06:50:04Z, phase: test, event: start, metrics: { marks: 2 } }
+  - { ts: 2026-09-15T06:50:04Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
+  - { ts: 2026-09-15T06:51:31Z, phase: test, event: approved, metrics: { passed: 3093, failed: 0 } }
+  - { ts: 2026-09-15T06:51:37Z, phase: review, event: start, metrics: { marks: 4 } }
+  - { ts: 2026-09-15T06:58:26Z, phase: review, event: approved, metrics: { must: 1, should: 1, nit: 1, ac_total: 5, ac_covered: 5, tasks_no_ac: 0, tasks_ac_none: 1 } }
+  - { ts: 2026-09-15T06:58:32Z, phase: deliver, event: start }
+  - { ts: 2026-09-15T06:59:16Z, phase: deliver, event: approved, metrics: { files_changed: 4, insertions: 287, deletions: 12 } }
+  - { ts: 2026-09-15T06:59:40Z, phase: coding, event: taskcheck, metrics: { stage: report, task: cross, findings: 1 } }

@@ -840,6 +840,19 @@ export class ScreenBuffer {
     return inField === undefined || (inField.ffw & FFW.BYPASS) !== 0;
   }
 
+  /**
+   * 指定アドレスが、SF で定義された入力可能（非バイパス）な欄の中か。
+   *
+   * `cursorIsUnenterable()` と違い、「画面のどこかに入力欄があるか」は前提にしない
+   * （任意の1点だけを answer する汎用の判定）。`session.ts` の `PR#387` 分岐が
+   * 「このWTDを当てる**前**、この位置は入力可能だったか」を判定するのに使う
+   * （`.aidev/works/20260915-pdm-protected-cursor-pageup` decisions.md D5）。
+   */
+  isEnterableAt(addr: number): boolean {
+    const f = this.fields.find((f) => addr >= f.startAddr && addr < f.startAddr + f.length);
+    return f !== undefined && (f.ffw & FFW.BYPASS) === 0;
+  }
+
   fieldByIndex(index1: number): InternalField {
     const f = this.orderedFields()[index1 - 1];
     if (!f) throw new As400Error("FIELD_NOT_FOUND", `field #${index1} not found`);

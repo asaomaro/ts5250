@@ -10,6 +10,16 @@
 `research.md` で既に充足済みのため、coding では新規作業を発生させない（T5）。
 分割は行わない（変更が1ファイルへの小規模な追加のため）。
 
+**（T1〜T5 は deliver 後の PR レビュー継続で置き換えられた。以下は当時の記録として残す。
+最新の実装方針は T6・T7、および `decisions.md` D5 を参照。）** deliver 後（PR #399
+未マージ）に利用者から「AID キー種別ではなくホストの申告に従うだけで良いのでは」との
+指摘があり、実機・ACS デコンパイル済みコアで再検証した結果、`isPageKey`（T1・T2 で
+実装した AID キー種別による判定）は真の判別軸ではなく、**`cursorBeforeWasEnterable`
+（このレコードを当てる前、その桁は入力可能だったか）**が正しい判別軸だったと判明した
+（`research.md` F7、`decisions.md` D5）。T6 で `lastSentAid`/`isPageKey` を撤去して
+`cursorBeforeWasEnterable` へ置き換え、T7 で回帰テストを新しい判別軸に合わせて
+書き直す（AID キー種別では判定していないことを直接示すテストを追加）。
+
 ## 作業順序と依存関係
 
 下の `依存:` に従う。T1 が起点。T2 は T1 に依存。T3（新規テスト追加）・T4（既存テスト実行）
@@ -78,3 +88,25 @@
       対象: `.aidev/works/20260915-pdm-protected-cursor-pageup/research.md` / 根拠: research.md F1-F5
       依存: なし
       AC: AC3, AC4
+- [x] T6: `lastSentAid`／`isPageKey`（AID キー種別による判定）を撤去し、
+      `cursorBeforeWasEnterable`（このレコードを当てる前、その桁は入力可能だった
+      か）による判定へ置き換える。`ScreenBuffer` に `isEnterableAt(addr)` を新設し、
+      `PR#387` 分岐にだけ `cursorBeforeWasEnterable` を追加する。`!result.cursorSet`
+      分岐は無条件のまま（`isPageKey` 除外を撤去し元の形へ戻す）。
+      対象: `packages/tn5250/src/screen/buffer.ts`（`isEnterableAt` 新設）,
+            `packages/tn5250/src/session/session.ts`（`lastSentAid` 撤去、
+            `cursorBefore` 捕捉箇所、`handleRecord()` の2分岐） / 根拠: design.md
+            「インターフェース / データ構造」, decisions.md D5
+      依存: なし
+      AC: AC1
+- [x] T7: 回帰テストを `cursorBeforeWasEnterable` の実際の形に合わせて書き直す。
+      SEU 側は「SF定義はあるが送信前からずっと保護」の合成 WTD へ修正し（旧: 欄に
+      属さない想定は実機計測で不正確と判明。`research.md` F7）、**AID キー種別では
+      判定していないことを直接示す新規テスト**（送信前は入力可能だった欄が保護化
+      されるシナリオで、PageDown を送っても正しく寄せられることを確認）を追加する。
+      修正前（T1〜T2 のみ、`isPageKey` 判定）のコードに対してこの新規テストが実際に
+      失敗すること（discrimination）を `git stash` で確認済み。
+      対象: `packages/tn5250/test/cursor-stale-on-protected.test.ts` / 根拠: design.md
+            「受け入れ基準との対応」AC1, decisions.md D5
+      依存: T6
+      AC: AC1, AC2

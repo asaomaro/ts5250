@@ -59,10 +59,14 @@ function secondScreen(ic?: { row: number; col: number }): Uint8Array {
 }
 
 /**
- * 1 画面目を出し、Enter を送って 2 画面目を受けたあとのカーソルを返す。
- * `tx` の印を挟むのは、`ReplayTransport` が**こちらが送るまで次の rx を流さない**ため。
+ * 1 画面目を出し、指定した AID キー（既定 Enter）を送って 2 画面目を受けたあとの
+ * カーソルを返す。`tx` の印を挟むのは、`ReplayTransport` が**こちらが送るまで次の rx を
+ * 流さない**ため。
  */
-async function play(second: Uint8Array): Promise<{ row: number; col: number }> {
+async function play(
+  second: Uint8Array,
+  aid: "Enter" | "PageUp" | "PageDown" = "Enter"
+): Promise<{ row: number; col: number }> {
   const transport = new ReplayTransport([
     rx(firstScreen()),
     { ts: "t", dir: "tx", masked: true, len: 0 },
@@ -71,7 +75,7 @@ async function play(second: Uint8Array): Promise<{ row: number; col: number }> {
   const session = await Session5250.connect({ transport, id: "t" });
   // 1 画面目でカーソルが上の欄に付いていること（前提）
   expect(session.snapshot().cursor).toEqual({ row: 3, col: 12 });
-  await session.sendAid("Enter", { timeoutMs: 2000 });
+  await session.sendAid(aid, { timeoutMs: 2000 });
   return session.snapshot().cursor;
 }
 
@@ -96,52 +100,59 @@ describe("カーソルが保護欄に取り残されたら最初の入力欄へ�
 });
 
 /**
- * **PageUp/PageDown で保護欄にカーソルがあるときは、上記の「先頭入力欄へ寄せる」
- * 既定動作（`PR#387` 分岐）を発火させない。**
+ * **「動いていない・保護欄」の判定条件は、AID キー種別ではなく「送信前は入力可能
+ * だったか」（`cursorBeforeWasEnterable`）で決める。**
  *
  * SEU でカーソルを保護欄（本文の表示領域。入力欄でも `SEU==>` でもない）に置いた状態で
  * PageUp/PageDown すると、カーソルがヘッダーの入力可能エリアへ強制移動する不具合が
  * 利用者から報告された。実機トレースで、カーソルがあった論理行が新しいページに
  * もう見えない場合、**ホストは IC/MC を明示的に送ってくるが、送信前と同じ物理位置
  * （保護欄）を指す**——`cursorSet=true` かつ `cursorAddr === cursorBefore` かつ
- * `cursorIsUnenterable()` という、まさに `PR#387` 分岐の発火条件そのものだった
- * （`.aidev/works/20260915-pdm-protected-cursor-pageup` research.md F2〜F4。
- * 当初は `!cursorSet` 分岐が原因と誤って診断したが、`cursorToFirstInputField()` を
- * 呼ぶ2つの分岐を区別せずに計装していたための誤り——直接ログでどちらの分岐かを
- * 確認して訂正した、`decisions.md` D4 参照）。利用者の実機観測では、ACS はこの場合
- * カーソル位置を変えない。
+ * `cursorIsUnenterable()` という、上の describe と同じ `PR#387` 分岐の発火条件に
+ * 一致してしまい、誤って先頭入力欄へ強制移動していた
+ * （`.aidev/works/20260915-pdm-protected-cursor-pageup` research.md F2〜F4）。
  *
- * **上記の describe の各テスト（Enter で確定）とは対照的**——同じ「動いていない・保護欄」
- * という入力でも、PageUp/PageDown のときだけ寄せない（`decisions.md` D2, D3）。
- * `!result.cursorSet` 分岐にも同じ `isPageKey` 除外を掛けているが（実機では
- * `cursorSet=false` になるケースを観測できなかったため、この分岐の直接の回帰テストは
- * 無い——万一ホストが IC/MC を省略する場面があっても同じ扱いになる、という設計上の
- * 対称性の担保に留まる）。
+ * **当初は「直前に送信した AID キーが PageUp/PageDown か」で判定していたが
+ * （`decisions.md` D2〜D4）、利用者の指摘（「ホストが位置を送ってくるなら、キー種別に
+ * 関係なくホストに従えば良いのでは。ACS にキー判定の特殊対応があるのか」）を受けて
+ * 実機で再検証したところ、ACS のデコンパイル済みコアにキー種別による分岐は無く
+ * （`.aidev/works/20260914-seu-page-cursor-hold` decisions.md D6）、より正確な判定条件が
+ * 見つかった（`decisions.md` D5）。**
+ *
+ * 実機で両シナリオの「送信前の桁」を直接調べると、SF定義された欄の**保護状態そのもの**が
+ * 違う:
+ *   展開画面（Enter） … 3/12 は送信前は**入力可能**な欄。このレコードで保護化される
+ *   SEU PageUp/PageDown … 10/10 は送信前から**ずっと保護**（SF定義はあるが常にBYPASS）
+ * `cursorBeforeWasEnterable`（このレコードを当てる**前**、その桁は入力可能だったか）を
+ * 条件に加えると、AID キー種別を一切見ずに両方を正しく判別できる——PageUp/PageDown でも、
+ * もし本当に「送信前は入力可能だった欄がこの応答で保護化された」なら**引き続き寄せる**
+ * （下の3つ目（最後）のテストで確認）。
  */
-describe("PageUp/PageDown では保護欄でのカーソル位置保持を優先する", () => {
-  /** 保護欄1桁（(5,20)、どの欄にも属さない）と、入力欄1つ（(3,12)〜、寄せ先になりうる） */
-  function protectedScreen(ic: { row: number; col: number }): Uint8Array {
+describe("動いていない保護欄への既定動作は「送信前に入力可能だったか」で決まる", () => {
+  /** SF定義された保護欄1桁（(5,20)）と、入力欄1つ（(3,12)〜、寄せ先になりうる）。
+   *  SEU の本文表示領域と同じ形——**SF はあるが、送信前からずっと BYPASS**。 */
+  function alwaysProtectedScreen(): Uint8Array {
     const w = new ByteWriter();
     w.u8(ESC).u8(COMMAND.CLEAR_UNIT);
     w.u8(ESC).u8(COMMAND.WRITE_TO_DISPLAY).u8(0x00).u8(0x18);
     w.u8(ORDER.SBA).u8(3).u8(11);
     w.u8(ORDER.SF).u16(FFW.ID_VALUE).u8(0x20).u16(6); // 入力欄 → (3,12)〜(3,17)
-    w.u8(ORDER.IC).u8(ic.row).u8(ic.col);
+    w.u8(ORDER.SBA).u8(5).u8(19);
+    w.u8(ORDER.SF).u16(FFW.ID_VALUE | FFW.BYPASS).u8(0x20).u16(1); // 保護欄 → (5,20)。常にBYPASS
+    w.u8(ORDER.IC).u8(5).u8(20);
     w.u8(ESC).u8(COMMAND.READ_MDT_FIELDS).u8(0x00).u8(0x00);
     return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
   }
 
   /**
-   * 1画面目（IC で保護欄 (5,20) を指す）→ PageUp/PageDown（**ホストが同じ (5,20) へ
-   * IC で明示的に指し直す**2画面目。実機で観測した通りの形。`cursorSet=true` かつ
-   * 動いていない＋保護欄という `PR#387` 分岐の発火条件を満たす）を送ったあとの
-   * カーソルを返す。
+   * 1画面目・2画面目とも**同じ**「常に保護」画面を送る（SEU が同じ書式でページを
+   * 再描画するのと同じ形。ホストは毎回 (5,20) へ IC で明示的に指し直す）。
    */
   async function playPage(dir: "PageUp" | "PageDown"): Promise<{ row: number; col: number }> {
     const transport = new ReplayTransport([
-      rx(protectedScreen({ row: 5, col: 20 })),
+      rx(alwaysProtectedScreen()),
       { ts: "t", dir: "tx", masked: true, len: 0 },
-      rx(protectedScreen({ row: 5, col: 20 })) // ホストが同じ保護欄を明示的に指し直す
+      rx(alwaysProtectedScreen())
     ]);
     const session = await Session5250.connect({ transport, id: "t" });
     expect(session.snapshot().cursor).toEqual({ row: 5, col: 20 }); // 前提: 保護欄にいる
@@ -149,11 +160,27 @@ describe("PageUp/PageDown では保護欄でのカーソル位置保持を優先
     return session.snapshot().cursor;
   }
 
-  it("PageDown でホストが同じ保護欄を指し直しても、カーソル位置を維持する", async () => {
+  it("PageDown でホストが同じ『送信前からずっと保護』の欄を指し直しても、カーソル位置を維持する", async () => {
     expect(await playPage("PageDown")).toEqual({ row: 5, col: 20 });
   });
 
   it("PageUp でも対称に働く", async () => {
     expect(await playPage("PageUp")).toEqual({ row: 5, col: 20 });
+  });
+
+  /**
+   * **AID キー種別では判定していないことの確認。** 上の2テストと違い、こちらは
+   * 「送信前は入力可能だった欄が、この応答で本当に保護化される」という
+   * `firstScreen()`/`secondScreen()`（上の describe と同じ、Enter用の展開画面）を使う。
+   * **`secondScreen({row:3,col:12})` で、ホストが同じ（もう保護化された）位置へ
+   * IC を明示的に指し直す形にする**——`cursorSet=true` かつ動いていない、という
+   * `PR#387` 分岐そのものを PageDown 経由で発火させる（`ic` を省略すると
+   * `cursorSet=false` になり `!result.cursorSet` 分岐（元々無条件）を通ってしまい、
+   * `PR#387` 分岐の `cursorBeforeWasEnterable` を検証したことにならない）。
+   * PageDown を送っても、キー種別に関係なく寄せられることを示す
+   * （もし旧実装のように AID キーだけで判定していたら、これは寄らずに失敗する）。
+   */
+  it("送信前に入力可能だった欄が保護化された場合は、PageDown でも寄せる（キー種別では判定しない）", async () => {
+    expect(await play(secondScreen({ row: 3, col: 12 }), "PageDown")).toEqual({ row: 10, col: 12 });
   });
 });

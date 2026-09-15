@@ -154,18 +154,6 @@ export class Session5250 extends Emitter<SessionEvents> {
   private pendingAid:
     | { resolve: (r: SendAidResult) => void; timer?: ReturnType<typeof setTimeout> }
     | undefined;
-  /**
-   * 直前に送信した AID キー。PageUp/PageDown の応答だけを特別扱いする判定に使う
-   * （保護欄でのカーソル位置保持。design: `.aidev/works/20260915-pdm-protected-cursor-pageup`）。
-   *
-   * `.aidev/works/20260914-seu-page-cursor-hold` で一度同名のフィールドを実装した後、
-   * 別の目的（Rule1/Rule2、境界ページでの画面内容比較を伴う複雑な仕組み）が ACS の
-   * コアに見当たらず撤去した経緯がある（decisions.md D7）。今回の用途は
-   * `!cursorSet`／`PR#387` の既定動作を AID キー種別で分けるだけの、より単純な
-   * ものであり、撤去した決定とは矛盾しない
-   * （`.aidev/works/20260915-pdm-protected-cursor-pageup` decisions.md D2）。
-   */
-  private lastSentAid: AidKey | undefined;
 
   private constructor(opts: ConnectOptions) {
     super();
@@ -371,18 +359,6 @@ export class Session5250 extends Emitter<SessionEvents> {
     ) {
       this.buf.cursorAddr = this.buf.addrOf(opts.cursor.row, opts.cursor.col);
     }
-    // buildAidRecord が例外を投げなかった＝これから実際に送る、という時点で更新する
-    // （例: SysReq 以外への sysReqText 指定は PROTOCOL_ERROR で投げるが、その場合は
-    // 何も送信されないので lastSentAid を更新してはならない）。
-    // **Attn/SysReq は除外する**——フラグレコードは施錠中でも別経路で割り込めるため、
-    // PageUp/PageDown の応答待ち中に Attn/SysReq を挟んでも lastSentAid を上書きしない。
-    // **既知の残存リスク**: この除外の裏返しとして、PageUp/PageDown の応答待ち中に
-    // Attn/SysReq を挟むと、lastSentAid が "PageUp"/"PageDown" のまま残り、その直後に届く
-    // （PageUp/PageDown とは無関係な）レコードに対しても isPageKey が誤って **true のまま**
-    // 判定されうる（本来なら先頭入力欄へ寄せられるべき場面で、寄せられなくなる）。
-    // 実機トレースでは未観測で、この work のスコープでは対応しない
-    // （`.aidev/works/20260915-pdm-protected-cursor-pageup` design.md「エラー処理 / 異常系」参照）。
-    if (key !== "Attn" && key !== "SysReq") this.lastSentAid = key;
     if (key === "Attn" || key === "SysReq") {
       // **フラグレコードは応答を待たない。** ホストが黙って無視するのが正常にあり得る
       // （ATNPGM が既に前面のとき等。実機で 2 回目の Attn に受信ゼロを確認）。
@@ -581,6 +557,9 @@ export class Session5250 extends Emitter<SessionEvents> {
     let unlocked = false;
     // このレコードを当てる**前**のカーソル。ホストがカーソルを動かしたかを見るのに使う
     const cursorBefore = this.buf.cursorAddr;
+    // このレコードを当てる**前**、その桁は入力可能だったか（`PR#387` 分岐が使う。
+    // `applyDataStream` より前に読む——読んだ後だと新しい画面の欄定義に上書きされてしまう）。
+    const cursorBeforeWasEnterable = this.buf.isEnterableAt(cursorBefore);
     try {
       const parsed = parseRecord(record);
       // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
@@ -659,47 +638,40 @@ export class Session5250 extends Emitter<SessionEvents> {
       // Read の無いレコード（画面だけ描くもの）では触らない——同じ画面構築が
       // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
-      // **PageUp/PageDown の応答だけは、下の2分岐（先頭入力欄へ寄せる既定動作）を
-      // どちらも抑止する。** 保護欄にカーソルを置いたまま PageUp/PageDown すると、
-      // カーソルがあった論理行が新しいページにもう見えない場合、ホストは IC/MC を
-      // 省略せず、**送信前と同じ物理位置（保護欄）を指す IC を明示的に送ってくる**
-      // （実機トレースで確認。`.aidev/works/20260915-pdm-protected-cursor-pageup`
-      // research.md F2・F4）——これが下の `PR#387` 分岐（`cursorSet=true` かつ
-      // 動いていない＋保護欄）の発火条件にそのまま一致し、従来はここで先頭入力欄へ
-      // 強制移動していた。ACS はこの場合カーソル位置を変えない（利用者の実機観測）。
-      // `!cursorSet`（ホストが IC/MC を一切送らない）になるケースはこの work の実機
-      // トレースでは観測できなかったが、同じ「動いていない」という前提を共有するため
-      // 対称性のため同じ除外を加える。
-      //
-      // **2分岐両方に必要**（`decisions.md` D3）。`!cursorSet` 分岐だけを抑止しても、
-      // 「動いていない」を条件の一部にする `PR#387` 分岐（下の else if）が同じ入力
-      // （保護欄・動いていない）に対して代わりに発火してしまい、抑止が効かない。
-      const isPageKey = this.lastSentAid === "PageUp" || this.lastSentAid === "PageDown";
-      if (result.readRequested && !result.cursorSet && !isPageKey) {
+      if (result.readRequested && !result.cursorSet) {
         // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
         // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる
         this.buf.cursorToFirstInputField();
       } else if (
         result.readRequested &&
-        !isPageKey &&
+        cursorBeforeWasEnterable &&
         this.buf.cursorAddr === cursorBefore &&
         this.buf.cursorIsUnenterable()
       ) {
         /**
-         * **画面が変わったのにカーソルが 1 桁も動かず、そこが入力できない桁**なら、
-         * 最初の入力欄へ寄せる（ACS と同じ）。
+         * **送信前は入力可能だった桁が、このレコードで保護欄に変わり、かつカーソルが
+         * 1桁も動いていない**なら、最初の入力欄へ寄せる（ACS と同じ）。
          *
          * 「上で入力 → Enter → 上がプロテクトされ、下が展開する」画面で踏む。アプリは
          * カーソルを動かしておらず、ホストが送ってくるのは**operator が居た桁のまま**＝
          * いまは保護欄。そこに置くと打っても操作員エラーになり、利用者は Tab を押すまで
          * 入力できない（利用者の報告。ACS は下の入力欄へ入る）。
          *
-         * **「動いていない」を条件にするのが肝。** ホストが**わざと**保護欄を指す画面が
-         * あり（SEU の走査検索——見つかった桁にカーソルを置く）、そちらは寄せてはいけない
-         * （寄せると `SEU==>` へ飛んで、どこが見つかったのか分からなくなる。過去の指摘）。
+         * **「送信前は入力可能だった」を条件にするのが肝**（`cursorBeforeWasEnterable`。
+         * `.aidev/works/20260915-pdm-protected-cursor-pageup` decisions.md D5）。
+         * 「動いていない」だけを条件にすると、SEU の PageUp/PageDown でも保護欄
+         * （本文の表示領域。もともと入力できない）を指す IC をホストが送り直してくる
+         * ケースまで拾ってしまい、カーソルがヘッダーの入力欄へ強制移動する不具合になる
+         * （`decisions.md` D4〜D5）。SEU のその位置は SF で定義された欄ではあるが、
+         * **送信前からずっと保護（BYPASS）のまま**——今回のレコードで新たに保護化された
+         * わけではない。「もともと保護されていた欄を指し直された」のか「入力可能だった欄が
+         * いま保護化された」のかで区別すれば、AID キーの種別（PageUp/PageDown か否か）を
+         * 見る必要が無い——ホストが**わざと**保護欄を指す画面（SEU の走査検索——見つかった
+         * 桁にカーソルを置く）も、動いた場合はこの分岐に入らないので区別できる。
          * 実機で並べて測ると、両者はここで分かれる:
-         *   展開画面 … 3/12 → 3/12（動かない）・保護欄の中
-         *   SEU 走査 … 2/9 → 11/53（動く）・保護欄の中
+         *   展開画面（Enter） … 3/12（送信前は入力可）→ 3/12（動かない）・いま保護欄 → 寄せる
+         *   SEU PageUp/PageDown … 10/10（送信前から保護欄）→ 10/10（動かない）・保護欄のまま → 寄せない
+         *   SEU 走査検索（Enter） … 2/9 → 11/53（動く）・保護欄の中 → 寄せない（動いたため対象外）
          */
         this.buf.cursorToFirstInputField();
       }

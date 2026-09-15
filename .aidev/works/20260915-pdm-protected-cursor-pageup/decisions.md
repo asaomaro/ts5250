@@ -109,3 +109,73 @@ D7（`20260914-seu-page-cursor-hold`）とは別の目的で再導入する
     書き直した（実機で観測した実際の形に合わせるため）。
   - `requirements.md`「背景」の当初仮説（`PR#387` が原因）は、実は**正しかった**
     ため、取り消し線は付けない。
+
+## D5: `isPageKey`（AID キー種別）を撤去し、`cursorBeforeWasEnterable`
+（「このレコードを当てる前、その桁は入力可能だったか」）で判定し直す
+
+- 背景: deliver 後（PR #399 未マージ）、利用者から次の指摘があった：「ホストが位置を
+  送ってくるなら PageUp/PageDown などは関係なく、ホストにただ従えば良いだけなのでは？
+  ACS の jar にそのようなキー判定をして特殊対応があったのか」。この指摘を実機・
+  デコンパイル済み ACS コアの両方で検証した。
+  1. **ACS のデコンパイル済みコアに AID キー種別による分岐は無い**
+     （`.aidev/works/20260914-seu-page-cursor-hold` decisions.md D6 で既に確認済み。
+     `DS5250.preprocessWCC2()` は「IC 無し→最初の入力欄」「IC あり→その位置」
+     「MC あれば MC 優先」のみで、キー種別は見ていない）。
+  2. **代替案「欄の有無で判定する」（SEU の保護位置は SF 定義された欄に属さない、と
+     いう当初の理解に基づく仮説）を実機で直接検証したところ、誤りだったと判明した**。
+     `packages/tn5250/test/cursor-stale-on-protected.test.ts` を書いた際の想定
+     （`research.md`（旧版）F1「どの欄にも属さない」）は、実機の `dump()` が
+     **入力可能な欄だけを表示していた**ことによる誤解で、実際には SEU の保護表示領域
+     （10/10）も **SF で定義された欄**（`r10c9(71)`、FFW=0x6000＝ID_VALUE|BYPASS）
+     に属している。`CURSORCL3`（`PR#387` の元シナリオ）の CODE 欄（FFW=0x6020＝
+     ID_VALUE|BYPASS|MONOCASE）も同じく「SF 定義された欄・BYPASS」であり、
+     両者はこの軸では区別できない（実機で直接計測して確認。詳細は `research.md` F7）。
+     両者の FFW の唯一の差は `MONOCASE` ビット（CURSORCL3 側にのみ立つ）だが、
+     これは入力文字の大文字変換に関する属性でカーソル判定とは無関係と判断し、
+     判別条件には含めない（元々 CODE 欄が英数字専用フィールドとして定義されていた
+     ことの副産物に過ぎないと見られる）。
+  3. **真の判別軸は「このレコードを当てる前、その桁は入力可能だったか」
+     （`cursorBeforeWasEnterable`）だった**。`CURSORCL3` の CODE 欄は送信前
+     （1画面目）は FFW.BYPASS 無し（入力可能）で、Enter の応答（2画面目）で
+     BYPASS が付く——**入力可能→保護へ遷移した**。SEU の保護位置は送信前
+     （PageUp/PageDown 前の画面）から**ずっと** FFW.BYPASS 付き——遷移が無い。
+     実機で両方を計測し、この軸で正しく分かれることを確認した（`research.md` F7）。
+  4. `.aidev/works/20260914-seu-page-cursor-hold` で一度実装した `cursorBeforeWasEnterable`
+     （Rule1/Rule2 共通のガードとして）と**同名・同趣旨**だが、あちらは境界ページでの
+     画面内容比較（`cellsSignature`）を伴う Rule1/Rule2 全体のガードの一部として使われ、
+     Rule1/Rule2 自体が ACS コアに専用ロジックが見当たらず撤去された（同 decisions.md D6/D7）。
+     今回は Rule1/Rule2 のような画面内容比較を一切伴わず、**`PR#387` 分岐**
+     （このレコード1件だけで完結する、`cursorBefore`／`cursorAddr` の前後比較）**に
+     直接組み込むだけ**——撤去された「境界ページの画面内容比較」という複雑さを
+     持ち込まない。
+- 判断: `lastSentAid`（と `isPageKey`）を完全に撤去し、`PR#387` 分岐の条件を
+  `cursorAddr === cursorBefore && cursorBeforeWasEnterable && cursorIsUnenterable()`
+  に変更する。`cursorBeforeWasEnterable` は `applyDataStream` を呼ぶ**前**に
+  `this.buf.isEnterableAt(cursorBefore)`（新設）で計算する。`!cursorSet` 分岐は
+  `isPageKey` 除外を撤去し、元の無条件形へ戻す（ACS コアの確認済み挙動＝
+  「IC 無し→常に最初の入力欄」と一致させる。D6 参照）。
+- 理由 / 代替案:
+  - AID キー種別による判定（旧 D2〜D4）は、たまたま実機で観測した2つのシナリオ
+    （Enter→遷移あり、PageUp/PageDown→遷移なし）を正しく分けられていたが、
+    **本当の原因（遷移の有無）ではなく相関にすぎなかった**——たとえば PageUp/PageDown
+    で本当に「入力可能だった欄がこの応答で保護化される」場面が別のアプリであれば、
+    旧実装は誤ってカーソルを保護欄に留めてしまう（`decisions.md`（旧版）が認めていた
+    「PageUp/PageDown 以外のロールキーは対象外」という限定も、この意味で本質的な
+    限定ではなく、たまたま検証できなかっただけだったと分かる）。
+  - `cursorBeforeWasEnterable` はキー種別を一切見ないため、この限定が自然に無くなる
+    （どんな AID キーでも、遷移の有無で正しく判定される）。
+  - `lastSentAid` の追跡・Attn/SysReq 除外・その裏返しの誤判定という既知の残存リスク
+    （旧 design.md「エラー処理 / 異常系」）も、`lastSentAid` 自体を撤去したことで
+    まるごと解消する。
+- 影響:
+  - `packages/tn5250/src/screen/buffer.ts` に `isEnterableAt(addr): boolean` を追加。
+  - `packages/tn5250/src/session/session.ts` から `lastSentAid` フィールド・
+    `sendAid()` の更新ロジック・`isPageKey` を削除し、`cursorBeforeWasEnterable`
+    （`applyDataStream` 呼び出し前に計算）へ置き換えた。
+  - `packages/tn5250/test/cursor-stale-on-protected.test.ts` の PageUp/PageDown
+    用 describe を書き直した：(a) SEU と同じ「SF定義はあるが送信前からずっと保護」の
+    合成 WTD へ修正（旧: 欄に属さない想定は不正確だった）、(b) **AID キー種別では
+    判定していないことを直接示す新規テスト**（送信前は入力可能だった欄が保護化される
+    シナリオで、PageDown を送っても正しく寄せられることを確認）を追加した。
+  - `research.md` に F7（実機での欄構造の直接計測、`cursorBeforeWasEnterable` の
+    確認）を追加し、F1 の「どの欄にも属さない」という不正確な記述を訂正した。
