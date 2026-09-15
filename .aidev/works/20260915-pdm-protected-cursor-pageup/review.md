@@ -80,16 +80,21 @@ PR #399（deliver 済み、未マージ）に対する利用者からの指摘�
 
 - [must][conv:-] 「ホストが位置を送ってくるなら pagedown,pageup などは関係なく、ホストに
   ただ従えば良いだけなのでは？ acsのjarにそのようなキー判定をして特殊対応があったので
-  しょうか？」 / 対応: 実機・ACS デコンパイル済みコアの両方で検証した結果、指摘は
-  部分的に正しかった——(1) ACS のコアに AID キー種別による分岐は無い
-  （既に `.aidev/works/20260914-seu-page-cursor-hold` decisions.md D6 で確認済み）。
-  (2)「ホストに常に従う」は言い過ぎで、`PR#387` の元シナリオ（Enter確定後の保護化）
-  では ACS 自身も先頭入力欄へ寄せる（ホストの明示的な IC には従わない）ことが
-  実機で確認済み——ただし判定条件は AID キー種別ではなく「送信前は入力可能だったか」
-  （`cursorBeforeWasEnterable`）だったと判明した。`isPageKey`（AID キー種別）は
-  たまたま検証した2ケースの相関を拾っていただけで、真の判別軸ではなかった。
-  `lastSentAid`/`isPageKey` を撤去し `cursorBeforeWasEnterable` へ全面置き換えた
-  （T6・T7、`decisions.md` D5、`research.md` F7）。src: ユーザーの発言（本セッション）。
+  しょうか？」 / 対応: 実機（このプロジェクト自身のクライアント）とデコンパイル済み
+  ACS コアの両方で検証した結果、指摘は部分的に正しかった——(1) ACS のコアに AID
+  キー種別による分岐は無い（既に `.aidev/works/20260914-seu-page-cursor-hold`
+  decisions.md D6 で確認済み。これはデコンパイル済みソースコードの読解によるもの）。
+  (2)「ホストに常に従う」も言い過ぎ——ただし「`PR#387` の元シナリオで ACS 自身が
+  先頭入力欄へ寄せる」という行動そのものは、今回 ACS を実際に動かして再確認した
+  ものではなく、`PR#387`（コミット `c82e2b34`）の commit message にある利用者の
+  過去の観測を前提として引き継いでいる（この開発環境には ACS 実機が無く実機同時
+  比較ができないため。`research.md` F7「出所の注記」参照）。この行動を所与として、
+  それを再現するための判定条件が AID キー種別ではなく「送信前は入力可能だったか」
+  （`cursorBeforeWasEnterable`）だったと実機（このプロジェクトのクライアントの
+  フィールド構造の計測）で判明した。`isPageKey`（AID キー種別）は、たまたま検証した
+  2ケースの相関を拾っていただけで、真の判別軸ではなかった。`lastSentAid`/`isPageKey`
+  を撤去し `cursorBeforeWasEnterable` へ全面置き換えた（T6・T7、`decisions.md` D5、
+  `research.md` F7）。src: ユーザーの発言（本セッション）。
 
 ## レビュー指摘（ラウンド2、D5 再設計後）
 
@@ -104,3 +109,20 @@ PR #399（deliver 済み、未マージ）に対する利用者からの指摘�
   — 対応: `research.md` に F8（`cursorBeforeWasEnterable` 実装後のコードでの
   `diag-seu-protected-cursor-pageup.mjs`・`diag-cursor-after-expand.mjs` 両方の
   実機再実行結果）を追記し、`test-result.md` AC1 の引用を F6・F7 → F8 に訂正した。
+
+## PR レビュー（人間・追加）
+
+- [must][conv:-] 「acsの実機確認済とはこちらの報告がソースですか？」 / 対応:
+  正しい指摘。「CURSORCL3 のシナリオで ACS 自身が下の入力欄へカーソルを入れる」
+  「SEU で ACS はカーソル位置を変えない」という**ACSの行動そのもの**は、この work
+  （および前の 20260914 work）で実際に ACS を動かして観測したものではなく、
+  `PR#387`（コミット `c82e2b34`）の commit message・`requirements.md`「背景」に
+  ある利用者自身の過去の報告・観測が一次情報源だった。この開発環境には ACS 実機が
+  無く実機同時比較ができないこと自体は `.aidev/works/20260914-seu-page-cursor-hold`
+  decisions.md D6 に既に明記されていたが、その後の記述（`research.md`「実機で
+  ACSも寄せる/変えない」等）がこの区別を曖昧にしていた。今回の work で実際に
+  実機確認したのは (a) このプロジェクト自身のクライアントのフィールド構造・
+  カーソル位置、(b) ACS のデコンパイル済みコアにキー種別による分岐が無いこと、の
+  2点のみ。`research.md` F7「出所の注記」・`decisions.md` D5・`review.md`
+  （上の「PR レビュー（人間）」節）の該当箇所を訂正し、出所を明示した。
+  src: ユーザーの発言（本セッション）。

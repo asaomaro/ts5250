@@ -49,3 +49,6 @@ events:
   - { ts: 2026-09-15T06:58:32Z, phase: deliver, event: start }
   - { ts: 2026-09-15T06:59:16Z, phase: deliver, event: approved, metrics: { files_changed: 4, insertions: 287, deletions: 12 } }
   - { ts: 2026-09-15T06:59:40Z, phase: coding, event: taskcheck, metrics: { stage: report, task: cross, findings: 1 } }
+  - { ts: 2026-09-15T09:26:58Z, phase: review, event: approved, metrics: { must: 2, should: 1, nit: 1, ac_total: 5, ac_covered: 5, tasks_no_ac: 0, tasks_ac_none: 1, amend: yes } }
+  - { ts: 2026-09-15T09:27:04Z, phase: deliver, event: start }
+  - { ts: 2026-09-15T09:27:11Z, phase: deliver, event: approved, metrics: { files_changed: 4, insertions: 287, deletions: 12 } }

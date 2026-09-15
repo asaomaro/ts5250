@@ -140,6 +140,13 @@ D7（`20260914-seu-page-cursor-hold`）とは別の目的で再導入する
      BYPASS が付く——**入力可能→保護へ遷移した**。SEU の保護位置は送信前
      （PageUp/PageDown 前の画面）から**ずっと** FFW.BYPASS 付き——遷移が無い。
      実機で両方を計測し、この軸で正しく分かれることを確認した（`research.md` F7）。
+     **注記**: ここで「実機で確認した」のはこのプロジェクト自身のクライアントの
+     フィールド構造であり、ACS 自身の挙動ではない（ACS は本環境に無く実機同時比較
+     不可。`.aidev/works/20260914-seu-page-cursor-hold` decisions.md D6）。
+     「CURSORCL3 で ACS が下の欄へ寄せる」「SEU で ACS はカーソルを変えない」という
+     行動そのものの一次情報源は、それぞれ `PR#387`（コミット `c82e2b34`）の
+     commit message と `requirements.md`「背景」——いずれも利用者の報告・観測に
+     基づく（`research.md` F7 の「出所の注記」参照）。
   4. `.aidev/works/20260914-seu-page-cursor-hold` で一度実装した `cursorBeforeWasEnterable`
      （Rule1/Rule2 共通のガードとして）と**同名・同趣旨**だが、あちらは境界ページでの
      画面内容比較（`cellsSignature`）を伴う Rule1/Rule2 全体のガードの一部として使われ、
