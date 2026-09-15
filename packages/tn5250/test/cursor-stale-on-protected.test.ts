@@ -8,16 +8,23 @@ import { ESC, COMMAND, ORDER, OPCODE, FFW } from "../src/protocol/constants.js";
 import { IAC, CMD } from "../src/telnet/constants.js";
 
 /**
- * **画面が変わったのにカーソルが動かず、そこが入力できない桁なら、最初の入力欄へ寄せる。**
+ * **ホストが IC/MC で指定したカーソル位置は、それが保護欄であってもそのまま尊重する。**
  *
- * 「上で入力 → Enter → 上がプロテクトされ、下が展開する」画面で踏む。アプリはカーソルを
- * 動かしておらず、ホストが送るのは operator が居た桁のまま＝いまは保護欄。ACS は下の
- * 入力欄にカーソルを入れるが、こちらは保護欄に置いたままで、Tab を押すまで打てなかった
- * （利用者の報告。実機 ASAOLIB/CURSORCL3 で再現し、`scripts/diag-ic-on-protected.mjs` で計測）。
+ * かつて（コミット `c82e2b34`、PR #387）は「画面が変わったのにカーソルが動かず、
+ * そこが入力できない桁」なら最初の入力欄へ寄せる、という上書きがあった
+ * （「上で入力 → Enter → 上がプロテクトされ、下が展開する」画面で、カーソルが保護欄に
+ * 残り Tab を押すまで打てなかった、という利用者報告への対応）。この上書きは
+ * `.aidev/works/20260915-pr387-acs-premise-unverified` で撤去した——
+ * 「ACS は下の入力欄にカーソルを入れる」という前提は、実際に ACS を動かして
+ * 検証された記録が無く（PR #387 の検証資材は全てこのプロジェクト自身のクライアント
+ * が対象）、PR 本文の確認チェックリストも未チェックのまま残っており、かつ ACS の
+ * デコンパイル済みコア（`DS5250.preprocessWCC2()`）にもこの上書きに相当するロジックは
+ * 存在しなかった（`research.md` F1〜F3）。
  *
- * **「動いていない」を条件にするのが肝。** ホストが**わざと**保護欄を指す画面があり
- * （SEU の走査検索は見つかった桁にカーソルを置く）、そちらを寄せると「どこが見つかったか
- * 分からない」に戻る。実機で並べると 展開画面 3/12→3/12（動かない）／SEU 2/9→11/53（動く）。
+ * **IC/MC が無い場合のみ、最初の入力欄へ寄せる**（5250 の既定動作、`!cursorSet` 分岐。
+ * ACS コアの `WTD_IC_addr == -1` → `setDefaultInsertCursor()` と一致する、確認済みの
+ * 挙動——この分岐は変更していない）。IC/MC がある場合は、動いていようが動いていまいが、
+ * 指している桁が保護欄だろうが、その指定にそのまま従う。
  */
 function rx(record: Uint8Array): TraceEntry {
   const framed: number[] = [];
@@ -43,7 +50,7 @@ function firstScreen(): Uint8Array {
 
 /**
  * 2 画面目。上の欄は保護（BYPASS）になり、下に入力欄が出る。
- * `ic` を渡すとその桁を指す（渡さなければカーソルは 1 画面目のまま＝動かない）。
+ * `ic` を渡すとその桁を指す（渡さなければ IC 無し＝`cursorSet=false`）。
  */
 function secondScreen(ic?: { row: number; col: number }): Uint8Array {
   const w = new ByteWriter();
@@ -75,17 +82,18 @@ async function play(second: Uint8Array): Promise<{ row: number; col: number }> {
   return session.snapshot().cursor;
 }
 
-describe("カーソルが保護欄に取り残されたら最初の入力欄へ寄せる", () => {
-  it("カーソルが動かず保護欄なら、展開した下の入力欄へ寄せる", async () => {
-    // IC 無し＝カーソルは 1 画面目のまま（3,12）。そこは保護になっている
+describe("IC/MC の指定には保護欄でもそのまま従う（旧 PR#387 分岐は撤去済み）", () => {
+  it("IC/MC が無ければ最初の入力欄へ寄せる（`!cursorSet` 分岐、変更なし）", async () => {
+    // IC 無し＝cursorSet=false。この分岐は撤去していないので従来通り寄せる
     expect(await play(secondScreen())).toEqual({ row: 10, col: 12 });
   });
 
-  it("ホストが同じ桁を**わざと**指しても寄せる（動いていないので同じ扱い）", async () => {
-    expect(await play(secondScreen({ row: 3, col: 12 }))).toEqual({ row: 10, col: 12 });
+  it("ホストが同じ桁を指しても、動いていなくてもその位置をそのまま尊重する（寄せない）", async () => {
+    // 送信前と同じ (3,12) を IC で明示的に指す＝cursorSet=true・動いていない。
+    // 旧 PR#387 分岐なら寄せていたが、撤去したためそのまま (3,12) に留まる
+    expect(await play(secondScreen({ row: 3, col: 12 }))).toEqual({ row: 3, col: 12 });
   });
 
-  /** **動かした指定は尊重する**（SEU の走査検索。寄せると見つかった桁が分からなくなる） */
   it("ホストがカーソルを動かして保護欄を指したら、そこに置いたまま", async () => {
     expect(await play(secondScreen({ row: 3, col: 15 }))).toEqual({ row: 3, col: 15 });
   });

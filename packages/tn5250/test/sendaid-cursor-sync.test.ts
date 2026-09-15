@@ -21,9 +21,29 @@ import { IAC, CMD } from "../src/telnet/constants.js";
  *
  * 一方、撤去とは別に見つかった**独立したバグ**——`opts.cursor` が `buf.cursorAddr` に
  * 反映されず、クリックで別の欄へ移してから（別の AID を挟まずに）次のキーを送ると
- * `cursorBefore`（`handleRecord` が参照する「送信前のカーソル位置」）が古いままになる
- * ——は Rule1/Rule2 の有無に関係なく正しい状態であるべきなので、修正は維持する
- * （既存の保護欄退避分岐 `PR#387` も同じ `cursorBefore` を参照するため）。
+ * `cursorBefore`（当時 `handleRecord` が参照していた「送信前のカーソル位置」）が
+ * 古いままになる——は Rule1/Rule2 の有無に関係なく正しい状態であるべきなので、
+ * 修正は維持する。
+ *
+ * **（`.aidev/works/20260915-pr387-acs-premise-unverified` での訂正）**:
+ * 上記の `cursorBefore`、および当時これを参照していた保護欄退避分岐（`PR#387`）は、
+ * その後この work で撤去した——「ACS は下の入力欄にカーソルを入れる」という前提が
+ * 未検証だったと判明したため（`decisions.md` D2）。
+ *
+ * **`buf.cursorAddr` を同期する修正自体は引き続き必要だが、理由が入れ替わった**
+ * ——`PR#387` 分岐が無くなった今、この同期が効くのは「ホストの応答を実際には
+ * 処理しないまま `this.snapshot()` を返す経路」（Attn/SysReq の即時 return、
+ * `sendAndWait()` のタイムアウト分岐）だけになった（`session.ts` の `sendAid()`
+ * コメント参照）。
+ *
+ * **下の「実機で報告された回帰（PageDown/PageUp）」の2テストは、この新しい理由を
+ * 検証していない**——どちらも2画面目に明示的な IC（`screenFieldBFocused()`）が
+ * あり、`applyDataStream` がそれをそのまま `cursorAddr` へ上書きするため、この
+ * 同期処理を無効化しても2テストとも green のまま（review 工程で実測確認済み）。
+ * 元々このバグを再現した実機ケースの回帰確認として引き続き値はあるが、
+ * discrimination（この work の変更後に効いている理由）としては
+ * 「不正な cursor オプション」テストと、新設した「Attn は応答を待たず
+ * `opts.cursor` を即座に反映する」テストが担う。
  */
 function frame(record: Uint8Array): Uint8Array {
   const framed: number[] = [];
@@ -138,10 +158,14 @@ describe("sendAid の cursor オプションで buf.cursorAddr を同期する",
     // （research.md F7: opts.cursor は送信レコードの値を一時的に上書きするだけ）。
     // その状態で PageDown を送る。ホストは通常どおり IC で FIELD_B を指す応答を返すが、
     // 修正前は次の応答処理で `cursorBefore = this.buf.cursorAddr` が古い FIELD_A を指して
-    // いたため、他のロジック（例えば保護欄退避 `PR#387`）が誤った基準点から判断しうる
-    // 状態だった。ここでは素直にホストの IC（FIELD_B）が適用されることを確認する——
-    // 修正の主眼は「`buf.cursorAddr` が常に最新のクライアント申告位置を反映する」ことで、
-    // カーソル自体の最終的な行き先はホストの IC がそのまま決める。
+    // いたため、他のロジック（例えば当時の保護欄退避分岐 `PR#387`——その後
+    // `.aidev/works/20260915-pr387-acs-premise-unverified` で撤去済み）が誤った基準点
+    // から判断しうる状態だった。
+    //
+    // **この分岐は撤去済みのため、このテスト自体はもう discrimination になっていない**
+    // ——ホストの明示的な IC（FIELD_B）が `applyDataStream` でそのまま適用されるだけで、
+    // この同期処理の有無は結果を左右しない（ファイル冒頭の docblock 参照）。実機で
+    // 踏んだ回帰の記録として残す。
     expect(
       await playWithCursorOverride(
         screen1WithFieldB(),
@@ -197,5 +221,26 @@ describe("sendAid の cursor オプションで buf.cursorAddr を同期する",
     // 保留していた応答を届けて後始末する
     transport.deliver(frame(screen1WithFieldB()));
     await pending;
+  });
+
+  it("Attn は応答を待たず、直後の snapshot に opts.cursor をそのまま反映する", async () => {
+    // **`PR#387` 分岐撤去後、この同期処理が実際に効く2つの経路のうちの1つ**
+    // （もう1つは `sendAndWait()` のタイムアウト分岐。`session.ts` の `sendAid()`
+    // コメント参照）。Attn はホストの応答を待たずに `this.snapshot()` を
+    // 即座に返す——`DeferredTransport` で応答を意図的に止め、Attn の返り値
+    // （`sendAid` の戻り値そのもの。応答未着でも解決される）が `opts.cursor` を
+    // 反映していることを確認する。
+    const initial = frame(screen1WithFieldB());
+    const transport = new DeferredTransport(initial);
+    const session = await Session5250.connect({ transport, id: "t" });
+    // 1画面目の IC は FIELD_A(5,11)。ここで FIELD_B(8,11) へクリックしたことにする
+    const result = await session.sendAid("Attn", {
+      timeoutMs: 2000,
+      cursor: { row: FIELD_B.row, col: FIELD_B.col + 1 }
+    });
+    // Attn は応答を待たないため、DeferredTransport が応答を一切届けなくても解決される
+    expect(result.timedOut).toBe(false);
+    expect(result.screen.cursor).toEqual({ row: FIELD_B.row, col: FIELD_B.col + 1 });
+    expect(session.snapshot().cursor).toEqual({ row: FIELD_B.row, col: FIELD_B.col + 1 });
   });
 });
