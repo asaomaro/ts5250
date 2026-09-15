@@ -1,0 +1,13 @@
+schema: 11
+slug: pdm-protected-cursor-pageup
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: SEU の PageUp/PageDown で境界ページに到達したときカーソル位置を維持する、という当初のAC1/AC2/AC8の目標（20260914-seu-page-cursor-hold で撤去済み）。ACS のコア（DS5250/PS5250）には専用ロジックが見当たらなかったため、UI描画層の調査や実機同時比較（tap-proxy.mjs等）で「ACSが実際にどう見せているか」を先に確定してから再挑戦する。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md）
+harnessRevDelivered: unknown

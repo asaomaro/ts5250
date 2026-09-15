@@ -94,3 +94,66 @@ describe("カーソルが保護欄に取り残されたら最初の入力欄へ�
     expect(await play(secondScreen({ row: 10, col: 12 }))).toEqual({ row: 10, col: 12 });
   });
 });
+
+/**
+ * **PageUp/PageDown で保護欄にカーソルがあるときは、上記の「先頭入力欄へ寄せる」
+ * 既定動作（`PR#387` 分岐）を発火させない。**
+ *
+ * SEU でカーソルを保護欄（本文の表示領域。入力欄でも `SEU==>` でもない）に置いた状態で
+ * PageUp/PageDown すると、カーソルがヘッダーの入力可能エリアへ強制移動する不具合が
+ * 利用者から報告された。実機トレースで、カーソルがあった論理行が新しいページに
+ * もう見えない場合、**ホストは IC/MC を明示的に送ってくるが、送信前と同じ物理位置
+ * （保護欄）を指す**——`cursorSet=true` かつ `cursorAddr === cursorBefore` かつ
+ * `cursorIsUnenterable()` という、まさに `PR#387` 分岐の発火条件そのものだった
+ * （`.aidev/works/20260915-pdm-protected-cursor-pageup` research.md F2〜F4。
+ * 当初は `!cursorSet` 分岐が原因と誤って診断したが、`cursorToFirstInputField()` を
+ * 呼ぶ2つの分岐を区別せずに計装していたための誤り——直接ログでどちらの分岐かを
+ * 確認して訂正した、`decisions.md` D4 参照）。利用者の実機観測では、ACS はこの場合
+ * カーソル位置を変えない。
+ *
+ * **上記の describe の各テスト（Enter で確定）とは対照的**——同じ「動いていない・保護欄」
+ * という入力でも、PageUp/PageDown のときだけ寄せない（`decisions.md` D2, D3）。
+ * `!result.cursorSet` 分岐にも同じ `isPageKey` 除外を掛けているが（実機では
+ * `cursorSet=false` になるケースを観測できなかったため、この分岐の直接の回帰テストは
+ * 無い——万一ホストが IC/MC を省略する場面があっても同じ扱いになる、という設計上の
+ * 対称性の担保に留まる）。
+ */
+describe("PageUp/PageDown では保護欄でのカーソル位置保持を優先する", () => {
+  /** 保護欄1桁（(5,20)、どの欄にも属さない）と、入力欄1つ（(3,12)〜、寄せ先になりうる） */
+  function protectedScreen(ic: { row: number; col: number }): Uint8Array {
+    const w = new ByteWriter();
+    w.u8(ESC).u8(COMMAND.CLEAR_UNIT);
+    w.u8(ESC).u8(COMMAND.WRITE_TO_DISPLAY).u8(0x00).u8(0x18);
+    w.u8(ORDER.SBA).u8(3).u8(11);
+    w.u8(ORDER.SF).u16(FFW.ID_VALUE).u8(0x20).u16(6); // 入力欄 → (3,12)〜(3,17)
+    w.u8(ORDER.IC).u8(ic.row).u8(ic.col);
+    w.u8(ESC).u8(COMMAND.READ_MDT_FIELDS).u8(0x00).u8(0x00);
+    return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
+  }
+
+  /**
+   * 1画面目（IC で保護欄 (5,20) を指す）→ PageUp/PageDown（**ホストが同じ (5,20) へ
+   * IC で明示的に指し直す**2画面目。実機で観測した通りの形。`cursorSet=true` かつ
+   * 動いていない＋保護欄という `PR#387` 分岐の発火条件を満たす）を送ったあとの
+   * カーソルを返す。
+   */
+  async function playPage(dir: "PageUp" | "PageDown"): Promise<{ row: number; col: number }> {
+    const transport = new ReplayTransport([
+      rx(protectedScreen({ row: 5, col: 20 })),
+      { ts: "t", dir: "tx", masked: true, len: 0 },
+      rx(protectedScreen({ row: 5, col: 20 })) // ホストが同じ保護欄を明示的に指し直す
+    ]);
+    const session = await Session5250.connect({ transport, id: "t" });
+    expect(session.snapshot().cursor).toEqual({ row: 5, col: 20 }); // 前提: 保護欄にいる
+    await session.sendAid(dir, { timeoutMs: 2000 });
+    return session.snapshot().cursor;
+  }
+
+  it("PageDown でホストが同じ保護欄を指し直しても、カーソル位置を維持する", async () => {
+    expect(await playPage("PageDown")).toEqual({ row: 5, col: 20 });
+  });
+
+  it("PageUp でも対称に働く", async () => {
+    expect(await playPage("PageUp")).toEqual({ row: 5, col: 20 });
+  });
+});
