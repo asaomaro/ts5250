@@ -1,0 +1,13 @@
+schema: 11
+slug: dspfmt-reconnect-blank-redraw
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: DSPFMT そのものの再現・原因特定は未達のまま
+harnessRevDelivered: unknown

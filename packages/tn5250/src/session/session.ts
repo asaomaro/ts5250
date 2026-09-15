@@ -565,7 +565,17 @@ export class Session5250 extends Emitter<SessionEvents> {
         return;
       }
     }
-    let unlocked = false;
+    // **「入力を待っているか」＝Read が実際に要求されたか、で判定する。**
+    // `result.unlockKeyboard`（WCC の CC2_UNLOCK ビット）だけでは判定できない——1回の
+    // AID キー送信に対する応答が複数レコードに分かれ、かつ先行レコードが「Read を伴わない
+    // Write to Display で先にキーボードだけ解放する」構成になっていることがある
+    // （実機確認: `.aidev/works/20260915-dspfmt-reconnect-blank-redraw` research.md F3。
+    // DSPFMT の応答は3レコードに分かれ、1・2番目は unlockKeyboard のみ、3番目だけが
+    // readRequested を伴う）。旧実装はここを `unlockKeyboard` で判定していたため、
+    // 骨格だけの1番目のレコードで `pendingAid`/`this.state` を確定させてしまい、
+    // `sendAid()` の解決値（`key-done` の中身）がデータの埋まっていない画面のまま
+    // 固まっていた（同 research.md F1'。フレッシュな接続・コア層単体で100%決定的に再現）。
+    let readSolicited = false;
     try {
       const parsed = parseRecord(record);
       // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
@@ -671,7 +681,7 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.buf.cursorToFirstInputField();
       }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
-      if (result.unlockKeyboard) unlocked = true;
+      if (result.readRequested) readSolicited = true;
     } catch (err) {
       // 解析エラーでセッションは落とさない（spec: 回復不能時のみ切断）。hex 先頭をログへ
       const head = [...record.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -679,14 +689,20 @@ export class Session5250 extends Emitter<SessionEvents> {
       return;
     }
 
-    if (unlocked) {
+    // **`this.state`/`onceReady` も `pendingAid` と同じ条件に揃える**（旧実装は
+    // `unlockKeyboard` 単独で "ready" にしていた）。`assertReady()`（`sendAid()`）が
+    // 見るのはこの `this.state` で、揃えないと「骨格レコードだけの途中」でも次の AID
+    // キーを送れてしまう——`ws-handler.ts` の WS メッセージは直列化されない
+    // （`onKey()` 呼び出しは互いに独立、`app.ts` の `void handle`）ため、この窓は
+    // 実際に踏みうる（design.md「設計方針」）。
+    if (readSolicited) {
       this.state = "ready";
       this.onceReady?.();
       this.onceReady = undefined;
     }
     const snap = this.snapshot();
     this.emit("screen", snap);
-    if (unlocked && this.pendingAid) {
+    if (readSolicited && this.pendingAid) {
       const p = this.pendingAid;
       this.pendingAid = undefined;
       clearTimeout(p.timer);
