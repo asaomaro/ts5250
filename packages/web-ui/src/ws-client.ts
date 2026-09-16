@@ -218,6 +218,10 @@ export class WsClient {
   }
 
   private log(dir: "tx" | "rx" | "event", kind: string, summary: string, detail?: unknown, rt?: number, err?: boolean): void {
+    // 記録が無効なら何もしない。呼び出し元（send/onMessage）は summarize/maskOutgoing を
+    // 先に計算済みだが、それ自体は軽い（fields 配列程度）——重いのは detail に載る
+    // screen スナップショットを reactive 配列へ積むところなので、ここで確実に止める
+    if (!logStore.enabled) return;
     logStore.add({
       ts: now(),
       sessionId: this.realSessionId ?? this.sessionLabel,

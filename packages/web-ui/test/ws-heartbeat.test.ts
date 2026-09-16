@@ -59,9 +59,11 @@ describe("WsClient のハートビート", () => {
       }
     };
     logStore.clear();
+    logStore.enabled = true; // 既定は無効（性能対策）。ログ内容そのものを検証するテストなので有効化する
   });
   afterEach(() => {
     (globalThis as unknown as { WebSocket: unknown }).WebSocket = original;
+    logStore.enabled = false;
     vi.restoreAllMocks();
   });
 
