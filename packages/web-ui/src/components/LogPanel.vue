@@ -76,6 +76,14 @@ watch(
   <div v-if="open" class="logpanel">
     <div class="head">
       <span class="tools">
+        <button
+          class="lbtn rec"
+          :class="{ on: logStore.enabled }"
+          :title="logStore.enabled ? 'クリックで記録を止める' : 'クリックでこの時点からの送受信を記録する（既定は無効）'"
+          @click="logStore.enabled = !logStore.enabled"
+        >
+          {{ logStore.enabled ? "● 記録中" : "記録 OFF" }}
+        </button>
         <button v-for="f in (['all', 'tx', 'rx', 'error'] as const)" :key="f" class="lbtn" :class="{ on: filter === f }" @click="filter = f">
           {{ f === "all" ? "全て" : f === "tx" ? "送信" : f === "rx" ? "受信" : "エラー" }}
         </button>
@@ -85,6 +93,10 @@ watch(
       </span>
     </div>
     <div ref="bodyEl" class="body">
+      <p v-if="!logStore.enabled && shown.length === 0" class="hint">
+        ログ記録は既定で無効です。画面全体を都度書き写すコストがあるため、常時オンにはしていません。
+        上の「記録 OFF」ボタンで有効にすると、その時点からの送受信を記録します。
+      </p>
       <template v-for="e in shown" :key="e.id">
         <div class="lg" :class="{ err: e.error }" @click="expanded = expanded === e.id ? undefined : e.id">
           <span class="t">{{ Math.round(e.ts) }}</span>
@@ -170,6 +182,17 @@ watch(
 .lbtn.on {
   color: var(--t-green);
   border-color: var(--t-green);
+}
+.lbtn.rec.on {
+  color: var(--t-red);
+  border-color: var(--t-red);
+}
+.hint {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
 }
 .body {
   /* 親（.logpanel）が高さを決めるので、ここで上限を持たない。

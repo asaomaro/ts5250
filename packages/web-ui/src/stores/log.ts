@@ -23,6 +23,14 @@ let seq = 0;
 
 export const logStore = reactive({
   entries: [] as LogEntry[],
+  /**
+   * 記録の有効/無効。**既定は無効。**
+   *
+   * ログ1件ごとに `screen`（最大27x132=3564セル）を丸ごと reactive 配列へ積むことになり、
+   * 既定でオンだと操作の都度その reactivity 化コストがかかって操作そのものを妨げる。
+   * 利用者がログパネルで明示的に有効化するまでは記録しない。
+   */
+  enabled: false,
 
   add(e: Omit<LogEntry, "id">): void {
     this.entries.push({ ...e, id: ++seq });

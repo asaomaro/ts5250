@@ -1067,6 +1067,19 @@ export class ScreenBuffer {
       if (f.continued === "first" || f.continued === "middle") continue;
       fieldEnds.add(f.startAddr + f.length);
     }
+    // **開いている窓の右端も打ち切り位置に加える。** 窓の中身（ヘルプ等の表示専用テキスト）は
+    // 入力欄ではないので `fields` に載らず、上の境界だけでは守れない。窓の中で属性が閉じられずに
+    // 行末へ達すると、アドレス順の一続きスキャンがそのまま窓の外（同じ行の右側・次行の左側＝
+    // 背面の SEU ソース行）まで下線・色を引きずってしまう（利用者報告: F4 窓の上に F1 ヘルプ窓を
+    // 開くと、窓の外のソース行に無いはずの下線が出る）。`blankWindowArea` と同じ矩形（枠を含む）
+    // の行ごとに、右端の 1 桁先を打ち切り位置にする。
+    for (const w of this.guiWindows) {
+      const rowEnd = Math.min(this.rows, w.row + w.height + 1);
+      const colEnd = Math.min(this.cols, w.col + w.width + 4);
+      for (let row = Math.max(1, w.row); row <= rowEnd; row++) {
+        fieldEnds.add((row - 1) * this.cols + colEnd);
+      }
+    }
     let attr = DEFAULT_ATTR;
     for (let r = 0; r < this.rows; r++) {
       const rowCells: Cell[] = [];

@@ -44,9 +44,11 @@ describe("WsClient の切断通知", () => {
       }
     };
     logStore.clear();
+    logStore.enabled = true; // 既定は無効（性能対策）。ログ内容そのものを検証するテストなので有効化する
   });
   afterEach(() => {
     (globalThis as unknown as { WebSocket: unknown }).WebSocket = original;
+    logStore.enabled = false;
   });
 
   it("閉じたら onClose を呼ぶ", async () => {

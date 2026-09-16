@@ -1881,6 +1881,11 @@ const renderTick = ref(0);
 const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
+/**
+ * 保護欄への mousedown で押下セルを先読みしておく（onInputMousedown → onInputFocus）。
+ * FocusEvent は座標を持たないため、直前の mousedown の座標をここで橋渡しする。
+ */
+let pendingProtectedClick: { row: number; col: number } | undefined;
 let composeStart = 0; // IME 合成を開始した欄内桁（compositionend で上書き開始位置に使う）
 let composePrefixLen = 0; // 合成中の <input> に残した prefix の文字数（確定分の切り出し起点）
 // 合成開始時に選択を削除したか。削除したなら確定文字は「挿入」で跡を埋める（上書きだと後続まで食う）
@@ -2777,10 +2782,34 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   // その他はペイン keymap へ委譲（preventDefault しない）
 }
 
+/**
+ * 保護欄への mousedown（focus に先立つ）で押下セルを先読みする。
+ *
+ * 保護欄の input は readonly で編集対象ではなく、focus はこの mousedown 経由でしか起きない
+ * （reconcileFocus は保護欄に el.focus() しない。Tab 等の欄間移動も editableFields() が
+ * 保護欄を除外するため通らない）。この前提のもとで onInputFocus が「フォーカス時は欄先頭へ」を
+ * 保護欄には適用せず、ここで拾った押下桁へ直接置けるようにする。
+ */
+function onInputMousedown(f: Field, ev: MouseEvent): void {
+  if (!f.protected) return;
+  pendingProtectedClick = cellAt(ev);
+}
+
 function onInputFocus(f: Field, ev: FocusEvent, sliceIdx = 0): void {
   const el = ev.target as HTMLInputElement;
   // オプション選択肢の開閉はフォーカスにだけ従属させる（キーは 1 つも購読しない）
   focusedField.value = f;
+  if (f.protected) {
+    // **欄先頭へ一度置いてからクリックで上書き、という下の SBCS 経路の 2 段構えを保護欄では踏まない。**
+    // reconcileFocus が保護欄では focus 直後に blur するため、実ブラウザでも「一瞬欄先頭が見えてから
+    // 押下桁へ移る」ちらつきが視認できてしまう（利用者報告、20260916）。押下桁が分かっているなら
+    // 最初からその桁を emit する。
+    const cell = pendingProtectedClick;
+    pendingProtectedClick = undefined;
+    const pos = cell ? roundToDbcsLead(cell, props.snapshot.cells) : { row: f.row, col: f.col };
+    emit("cursor", pos.row, pos.col);
+    return;
+  }
   // sync がスライス間で focus を移したときは何もしない。ここで beginEdit すると props
   // （emit 前で古い）から編集モデルを作り直して直前の打鍵が消え、caret も先頭へ戻る。
   // 値・キャレットの確定は呼び出し元の sync が続けて行う。
@@ -2904,6 +2933,19 @@ function onInputCut(f: Field, ev: ClipboardEvent): void {
 /** 入力欄クリック: 押下桁（native キャレット）を論理カーソルへ反映（AID 位置の正確化） */
 function onInputClick(f: Field, ev: MouseEvent): void {
   const el = ev.target as HTMLInputElement;
+  if (f.protected) {
+    // 保護欄（SEU のソース行など）は onInputFocus → reconcileFocus が同じ focus イベント内で
+    // 即座に blur するため、ブラウザがまだクリック座標をネイティブキャレット（selectionStart）へ
+    // 反映し終えておらず、下の el.selectionStart 頼みの経路では常に 0（先頭桁）を拾ってしまう。
+    // ACS のデコンパイル調査（com.ibm.eNetwork.beans.HOD.MouseMgr.mouseDown、
+    // aPS.SetCursorPos(row, col)）でも保護/非保護を区別せずクリック桁へ直接カーソルを置いており、
+    // 欄外の非入力セル（onGridClick）と同じくピクセル座標からセルを求める。
+    const cell = cellAt(ev);
+    if (!cell) return;
+    const pos = roundToDbcsLead(cell, props.snapshot.cells);
+    emit("cursor", pos.row, pos.col);
+    return;
+  }
   if (isDbcsEdit(f)) {
     if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
     edit = edit!;
@@ -3981,6 +4023,7 @@ onBeforeUnmount(() => {
             :data-field-index="seg.field!.index"
             :data-field="fieldId(seg.field!)"
             :data-slice="seg.slice ?? 0"
+            @mousedown="onInputMousedown(seg.field!, $event as MouseEvent)"
             @focus="onInputFocus(seg.field!, $event, seg.slice ?? 0)"
             @blur="onInputBlur(seg.field!, $event as FocusEvent)"
             @copy="onInputCopy(seg.field!, $event as ClipboardEvent)"
