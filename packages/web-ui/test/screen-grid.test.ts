@@ -146,6 +146,62 @@ describe("ScreenGrid", () => {
     expect(w.emitted("cursor")?.[0]).toEqual([6, 10]);
   });
 
+  /**
+   * 保護欄（SEU のソース行など）クリックで押下桁へカーソルが置かれる（利用者報告、20260916）。
+   * 親（EmulatorPane の reconcileFocus）は保護欄では focus を留めずすぐ blur するため、
+   * ネイティブのクリック→キャレット反映（el.selectionStart）を当てにできない
+   * （実ブラウザでも間に合わない。jsdom では常に 0 のまま）。ACS のデコンパイル調査
+   * （com.ibm.eNetwork.beans.HOD.MouseMgr.mouseDown → aPS.SetCursorPos(row,col)）でも
+   * 保護/非保護を区別せずクリック桁へ直接カーソルを置いており、それに合わせてピクセル座標
+   * （cellAt）から直接算出するよう修正した。
+   */
+  it("保護欄クリックは el.selectionStart ではなくクリック座標で桁を決める", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: true, hidden: false, numeric: false, mdt: false, value: "SRCLINE" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick(); // fit() のフォント確定を反映
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
+    const input = w.find("input.grid-input");
+    // el.selectionStart はクリック座標を反映していない（jsdom は末尾のまま）——それでも
+    // 欄の 6 桁目（col=15）をクリックしたとおりに反映できることを確認する
+    await input.trigger("click", { clientX: xOf(15), clientY: yOf(6) });
+    expect(w.emitted("cursor")?.at(-1)).toEqual([6, 15]);
+    w.unmount();
+  });
+
+  /**
+   * 保護欄クリックの focus 時点で、一瞬でも欄先頭へちらつかない（利用者報告、20260916）。
+   * mousedown（focus に先立つ）で押下セルを先読みしておき、onInputFocus はそれを使って
+   * 最初から押下桁を emit する——「focus で欄先頭→click で押下桁に上書き」という
+   * 2 段階を踏まない。
+   */
+  it("保護欄クリックは focus の時点から押下桁を emit する（欄先頭へのちらつきなし）", async () => {
+    const fields: Field[] = [
+      { index: 1, row: 6, col: 10, length: 8, protected: true, hidden: false, numeric: false, mdt: false, value: "SRCLINE" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map(), focused: true }, attachTo: document.body });
+    await nextTick();
+    const grid = w.find(".grid");
+    const fontPx = parseFloat((grid.element as HTMLElement).style.fontSize) || 6;
+    const charW = fontPx * 0.6;
+    const lineH = fontPx * 1.25;
+    const xOf = (c: number) => (c - 1) * charW + GRID_PAD_X + charW * 0.5;
+    const yOf = (r: number) => (r - 1) * lineH + GRID_PAD_Y + lineH * 0.5;
+    const input = w.find("input.grid-input");
+    // 実ブラウザの順序どおり mousedown → focus（click はまだ）
+    await input.trigger("mousedown", { clientX: xOf(15), clientY: yOf(6) });
+    await input.trigger("focus");
+    // 最初の（かつ唯一の）emit がすでに押下桁——[6,10]（欄先頭）を経由しない
+    expect(w.emitted("cursor")).toEqual([[6, 15]]);
+    w.unmount();
+  });
+
   it("幅広フィールドの input 幅は行残り桁にクランプされる", () => {
     const fields: Field[] = [
       // col=75, length=20 → 行残りは 80-74=6 桁にクランプ
