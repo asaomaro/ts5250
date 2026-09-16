@@ -143,9 +143,13 @@ function fieldEndAttrAddrs(buf: ScreenBuffer): ReadonlySet<number> {
   for (const f of fields) {
     for (let i = 0; i < f.length; i++) fieldData.add(f.startAddr + i);
   }
+  // 候補は「今生きているフィールドの終端」＋「SOH 等で消える前から引き継いだ終端」
+  // （`retainedFieldEnds` 参照）。後者を含めないと、窓を重ねる過程で SOH がフィールドテーブルを
+  // 消した直後にこの応答を組むとき、消えたフィールドの終端へ閉じ属性を送れない。
+  const candidates = new Set<number>(buf.retainedFieldEnds());
+  for (const f of fields) candidates.add(f.startAddr + f.length);
   const ends = new Set<number>();
-  for (const f of fields) {
-    const addr = f.startAddr + f.length;
+  for (const addr of candidates) {
     if (addr >= buf.size || fieldData.has(addr)) continue;
     if (buf.cellAt(addr) !== null) continue; // ホストが書いた桁は上書きしない
     ends.add(addr);

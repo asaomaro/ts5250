@@ -788,6 +788,21 @@ export class ScreenBuffer {
   }
 
   /**
+   * SOH 等でフォーマットテーブルが消える前から引き継いだフィールド終端（read-only）。
+   *
+   * `snapshot()` の属性打ち切りが使うのと同じ集合を、READ SCREEN / READ SCREEN EXTENDED
+   * の応答（`save-screen.ts` の `fieldEndAttrAddrs`）にも渡すためのアクセサ。**生きている
+   * `fields` だけを見ていると、窓を重ねる過程で SOH がフィールドを消した直後にホストが
+   * READ SCREEN を要求してきたとき、消えたフィールドの終端に閉じ属性を含められない**
+   * ——応答を受け取ったホストがそれをそのまま「現在の画面」として描き直すため、下線・色が
+   * 本来の欄を越えて伸びたまま**ホスト側のデータとして焼き込まれてしまう**（利用者報告:
+   * SEU で F4 窓を開いた状態で F1 ヘルプ窓を開くと、窓の外の背面に下線が漏れる）。
+   */
+  retainedFieldEnds(): ReadonlySet<number> {
+    return this.retainedEnds;
+  }
+
+  /**
    * **継続入力フィールドの区間の並び**（先頭 → 最終）を、その並びに属する任意の区間から得る。
    * 単独欄（`continued === undefined`）を渡したら自分 1 つだけを返す。
    *
