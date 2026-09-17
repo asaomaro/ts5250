@@ -980,6 +980,7 @@ function onWheel(ev: WheelEvent): void {
     :data-buttons="view.buttons"
     :data-window-frame="view.windowFrame"
     :data-window-backdrop="view.windowBackdrop"
+    :data-pointer="view.pointer"
     :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
@@ -1012,6 +1013,12 @@ function onWheel(ev: WheelEvent): void {
         :window-backdrop="view.windowBackdrop"
         :opt-hints="view.optHints"
         :dt-picker="view.dtPicker"
+        :cursor-shape="view.cursorShape"
+        :cursor-blink="view.cursorBlink"
+        :rule-line="view.ruleLine"
+        :rule-follow="view.ruleFollow"
+        :rule-style="view.ruleStyle"
+        :col-sep="view.colSep"
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
@@ -1195,6 +1202,11 @@ function onWheel(ev: WheelEvent): void {
 }
 .busy-overlay.loading {
   background: color-mix(in srgb, var(--crt) 55%, transparent);
+}
+/* ポインター＝十字線（ACS「カーソル > ポインター」）。覆いの下の画面と同じ形にする
+   （上の注記と同じ理由——覆いが出た瞬間にポインターが変わると、それ自体が変化として見える） */
+.pane[data-pointer="crosshair"] .busy-overlay {
+  cursor: crosshair;
 }
 .spinner {
   width: 34px;

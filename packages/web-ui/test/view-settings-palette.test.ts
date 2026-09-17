@@ -207,7 +207,9 @@ describe("デザイン候補の見本", () => {
    */
   const ROWS = (() => {
     const out: { label: string; items: typeof VIEW_ITEMS }[] = [];
-    for (const it of VIEW_ITEMS) {
+    // **セグメントで並べる項目（カーソル・罫線）は見本を持たない**——違いが「Ab」の見本では
+    // 伝わらない単純な選択肢なので、パレットではなく小行のセグメントで出す（下の describe）
+    for (const it of VIEW_ITEMS.filter((i) => !i.segment)) {
       if (it.group) {
         const head = out.find((r) => r.items[0]!.group === it.group);
         if (head) head.items.push(it);
@@ -256,5 +258,112 @@ describe("デザイン候補の見本", () => {
     // **CSS 全文を expect に渡さない**（落ちたときに数十 KB が出て読めなくなる）。
     const missing = ROWS.flatMap((r) => r.items).filter((i) => !has(i.key)).map((i) => i.key);
     expect(missing, "見本の規則が 1 つも無い設定").toEqual([]);
+  });
+});
+
+/**
+ * **ACS の「表示」設定（カーソル・罫線）は、開くとセグメントの小行で並ぶ。**
+ * 名前は ACS の設定画面と同じ短い語（形状・明滅・ポインター／罫線・カーソルに従う・スタイル）。
+ */
+describe("ACS の表示設定（カーソル・罫線）", () => {
+  async function expand(w: Awaited<ReturnType<typeof openMenu>>, label: string) {
+    const r = w.findAll(".vsm-row").find((x) => x.find(".vsm-toggle").exists() && x.text().startsWith(label))!;
+    await r.find(".vsm-toggle").trigger("click");
+    await nextTick();
+  }
+  const subRows = (w: Awaited<ReturnType<typeof openMenu>>) => w.findAll(".vsm-sub");
+
+  it("「カーソル」を開くと 形状・明滅・ポインター がセグメントで並ぶ（見本パレットは出さない）", async () => {
+    const w = await openMenu();
+    await expand(w, "カーソル");
+    expect(subRows(w).map((r) => r.find(".vsm-label").text())).toEqual(["形状", "明滅", "ポインター"]);
+    expect(w.find(".vsm-palette").exists()).toBe(false);
+    expect(subRows(w)[0]!.findAll(".seg button").map((b) => b.text())).toEqual(["ブロック", "下線"]);
+    w.unmount();
+  });
+
+  it("「罫線」を開くと 罫線・カーソルに従う・スタイル が並ぶ", async () => {
+    const w = await openMenu();
+    await expand(w, "罫線");
+    expect(subRows(w).map((r) => r.find(".vsm-label").text())).toEqual(["罫線", "カーソルに従う", "スタイル"]);
+    expect(subRows(w)[2]!.findAll(".seg button").map((b) => b.text())).toEqual(["十字線", "水平", "垂直"]);
+    w.unmount();
+  });
+
+  it("選ぶと即反映し、既定の値に印が付く", async () => {
+    const w = await openMenu();
+    await expand(w, "罫線");
+    const btn = (rowIdx: number, name: string) =>
+      subRows(w)[rowIdx]!.findAll(".seg button").find((b) => b.text() === name)!;
+    expect(btn(0, "OFF").classes()).toContain("on"); // 既定は OFF（ACS と同じ）
+    await btn(0, "ON").trigger("click");
+    await btn(2, "垂直").trigger("click");
+    await nextTick();
+    expect(viewSettings.settings.ruleLine).toBe(true);
+    expect(viewSettings.settings.ruleStyle).toBe("vertical");
+    expect(btn(2, "垂直").classes()).toContain("on");
+    w.unmount();
+  });
+
+  it("このセッションだけの指定もでき、個別指定の印が付く", async () => {
+    const w = await openMenu();
+    await w.findAll(".seg button").find((b) => b.text() === "このセッション")!.trigger("click");
+    await expand(w, "カーソル");
+    await subRows(w)[0]!.findAll(".seg button").find((b) => b.text() === "下線")!.trigger("click");
+    await nextTick();
+    expect(viewSettings.settings.cursorShape).toBe("block"); // 全体の既定は変えない
+    expect(viewSettings.effective("s1").cursorShape).toBe("underline");
+    expect(subRows(w)[0]!.find(".vsm-mark").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("キー設定の順送りでは、グループの見出しが無くても分かる長い名前を使う", () => {
+    const labels = Object.fromEntries(VIEW_ITEMS.map((i) => [i.key, i.label]));
+    expect(labels["cursorShape"]).toBe("カーソルの形状");
+    expect(labels["ruleLine"]).toBe("罫線の表示");
+    expect(viewSettings.cycle("ruleLine")).toEqual({ label: "罫線の表示", valueLabel: "ON" });
+    expect(viewSettings.settings.ruleLine).toBe(true);
+  });
+});
+
+describe("桁区切り（ACS「桁区切り文字」）", () => {
+  it("ドット・線・オフの 3 択で、既定はドット（ACS の既定）", async () => {
+    const w = await openMenu();
+    const r = row(w, "桁区切り");
+    expect(r.findAll(".seg button").map((b) => b.text())).toEqual(["ドット", "線", "オフ"]);
+    expect(viewSettings.settings.colSep).toBe("dot");
+    await r.findAll(".seg button")[2]!.trigger("click");
+    expect(viewSettings.settings.colSep).toBe("off");
+    w.unmount();
+  });
+});
+
+describe("ACS の表示設定の既定", () => {
+  it("カーソルはブロック・明滅あり（これまでの見え方）、ポインター標準、罫線 OFF・従う・十字線", () => {
+    expect(viewSettings.settings).toMatchObject({
+      cursorShape: "block",
+      cursorBlink: true,
+      pointer: "default",
+      ruleLine: false,
+      ruleFollow: true,
+      ruleStyle: "crosshair",
+      colSep: "dot"
+    });
+  });
+
+  it("以前の保存値（新しい項目を持たない）を読んでも既定で埋まる", () => {
+    localStorage.setItem("as400.view.settings", JSON.stringify({ controls: "box" }));
+    initViewSettings();
+    expect(viewSettings.settings.controls).toBe("box");
+    expect(viewSettings.settings.cursorShape).toBe("block");
+    expect(viewSettings.settings.colSep).toBe("dot");
+  });
+
+  it("保存して読み直しても値を保つ", () => {
+    viewSettings.set("cursorShape", "underline");
+    viewSettings.set("ruleFollow", false);
+    initViewSettings();
+    expect(viewSettings.settings.cursorShape).toBe("underline");
+    expect(viewSettings.settings.ruleFollow).toBe(false);
   });
 });

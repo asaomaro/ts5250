@@ -32,10 +32,10 @@ import type {
   GuiGridLine,
   GuiSelectionField,
   GuiWindow,
-  ScreenColor,
   ScreenSnapshot
 } from "./screen/types.js";
 import { GRID_COLOR, GRID_LINE_STYLE } from "./protocol/wdsf-parser.js";
+import { columnSeparatorRuns, type ColumnSeparatorStyle } from "./screen/column-separator.js";
 // **サブパスから取る**（`browser.ts` の注記）。変換表は純粋だが重く、
 // 入口ごと引き込むとブラウザ向けの束が太る。
 import { katakanaChar, latinChar } from "@ts5250/ebcdic/katakana";
@@ -88,7 +88,24 @@ export interface ScreenHtmlStyle {
    * web-ui は画面と同じ字で開くために渡す。
    */
   font?: string;
+
+  /**
+   * 桁区切り（DSPATR(CS)）の見せ方（既定 `dot`＝ACS の既定）。web-ui は画面と同じ絵にするために渡す。
+   * ページ内の切り替えは持たない——SO/SI と違って「制御桁の正体を確かめる」用途が無く、
+   * 描いた状態がそのまま画面の見え方の記録になるため。
+   */
+  columnSeparator?: ColumnSeparatorStyle;
+
+  /**
+   * 暗色（既定の見え方）の端末配色（既定 `classic`）。web-ui の「外観 > 5250 端末」と同じ 2 種:
+   * `classic`＝ACS の標準色、`soft`＝淡いフォスファ調（以前の既定）。
+   * ページ内の明暗の切り替え（ペーパー調）はどちらでも同じ。
+   */
+  palette?: TerminalPalette;
 }
+
+/** 端末の配色（web-ui の `t5250` / `t5250-soft` に対応） */
+export type TerminalPalette = "classic" | "soft";
 
 /**
  * 表示コード切替の指定。
@@ -169,23 +186,15 @@ function esc(s: string): string {
  * ------------------------------------------------------------------ */
 
 /**
- * **桁区切り（CS）は黄・青緑では「書き手の意図」の印にならない。**
- *
- * 5250 の属性バイト表（SC30-3533）には黄・青緑を「修飾なし」で表す値が無く、
- * `COLOR(YLW)` を単体で指定しただけでも桁区切りビット付きの値になる。属性バイトからは
- * `DSPATR(CS)` を本当に頼んだのか区別できないので、この 2 色では出さない
- * （web-ui の `hasRealColsep` と同じ規則）。
+ * セルの属性を class にする。**桁区切り（CS）はここに載せない**——桁ごとの点・線は
+ * 文字のランではなく重ねる要素として描く（`colsepHtml`）。ランに線を付けると
+ * 連なりの頭に 1 本しか出ず、桁の区切りにならない。
  */
-function hasRealColsep(color: ScreenColor, columnSeparator: boolean): boolean {
-  return columnSeparator && color !== "yellow" && color !== "turquoise";
-}
-
 function cellClass(c: Cell): string {
   let cls = `c-${c.color}`;
   if (c.underline) cls += " a-u";
   if (c.reverse) cls += " a-r";
   if (c.blink) cls += " a-b";
-  if (hasRealColsep(c.color, c.columnSeparator)) cls += " a-cs";
   return cls;
 }
 
@@ -377,6 +386,24 @@ function cursorHtml(snap: ScreenSnapshot): string {
 }
 
 /**
+ * 桁区切り（DSPATR(CS)）。連なりごとに 1 要素を置き、**桁の境目ごと**（頭の左端＋各桁の右端）に
+ * 1px の印を繰り返し模様で描く。点は境目の下端から 2px 上に 3px、線は行の高さいっぱい
+ * （ACS `ScreenText` の描画位置。web-ui の `.colsep` と同じ寸法）。
+ *
+ * 1 桁 1 要素にしないのは、履歴ページで画面数ぶん要素が膨らむため（全面が桁区切りの
+ * 27x132 なら 1 画面で 3,000 超）。模様は小数 px の桁幅で線がわずかに滲むが、記録用途には足りる。
+ */
+function colsepHtml(snap: ScreenSnapshot, style: ColumnSeparatorStyle): string {
+  if (style === "off") return "";
+  return columnSeparatorRuns(snap.cells)
+    .map((r) => {
+      const top = style === "dot" ? `calc(${Y(r.row)} - 4px)` : Y(r.row - 1);
+      return `<div class="cs cs-${style}" style="left:${X(r.col - 1)};top:${top};width:calc(${r.len}ch + 1px)"></div>`;
+    })
+    .join("");
+}
+
+/**
  * 入力欄の下線。**値は書かない**——セルから既に描かれており、`fields[].value` を使うと
  * 非表示欄（パスワード）の中身を HTML に載せる経路を作ってしまう。
  */
@@ -526,7 +553,12 @@ function guiHtml(gui: GuiConstructs | undefined): string {
  * **1 画面ぶんのマークアップ。単票も履歴もここを通る。**
  * 分けると 1 枚で見たときと履歴で見たときの絵が食い違い、証拠として使えなくなる。
  */
-function screenFigure(snap: ScreenSnapshot, caption: string, alt: SbcsReading | undefined): string {
+function screenFigure(
+  snap: ScreenSnapshot,
+  caption: string,
+  alt: SbcsReading | undefined,
+  colsep: ColumnSeparatorStyle
+): string {
   const rows = snap.cells.map((r) => `<div class="ln">${renderRow(r, alt)}</div>`).join("");
   const oia = [
     `<span>行/列 <b>${String(snap.cursor.row).padStart(2, "0")}/${String(snap.cursor.col).padStart(3, "0")}</b></span>`,
@@ -539,6 +571,7 @@ function screenFigure(snap: ScreenSnapshot, caption: string, alt: SbcsReading | 
     (caption ? `<figcaption>${caption}</figcaption>` : "") +
     `<div class="crt"><div class="grid" style="width:${snap.cols}ch">` +
     rows +
+    colsepHtml(snap, colsep) +
     cursorHtml(snap) +
     fieldsHtml(snap) +
     guiHtml(snap.gui) +
@@ -643,6 +676,10 @@ color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
  * 端末の配色。`web-ui/src/styles.css` の実値を焼き込む（外部 CSS を参照しないため）。
  * 既定はダーク、`#t`（テーマのチェックボックス）を入れるとペーパー調。
  *
+ * **ダークは 2 種**（web-ui の「5250 端末 クラシック / ソフト」）。`:root` がクラシック
+ * （ACS の標準色）で、ソフトは `.page` に `pal-soft` を付けて差し替える。ペーパー調の規則
+ * （`#t:checked ~ .page`、詳細度 1-1-1）は `.pal-soft`（0-1-0）に勝つので、明暗の切り替えは両方に効く。
+ *
  * **明色の変数は `:root` ではなく `.page` に置く。** チェックボックスから `:root` は辿れない
  * （CSS は先祖へ遡れない）が、**後ろの兄弟**なら `~` で辿れるので、本文をまるごと `.page` に
  * 入れてそこへ被せる。`body` は `:root` のダークのままなので、地色は `.page` が自分で塗る
@@ -650,10 +687,13 @@ color:color-mix(in srgb,var(--crt) 65%,var(--cell))}
  */
 const STYLE = `
 :root{--bg:#0b0f0d;--fg:#c9d6cd;--card:#111815;--line:#22302a;--muted:#8ba396;
---crt:#050d09;--crt-bezel:#0c1710;--crt-line:#16281d;
---t-green:#3ddc84;--t-white:#e8f0e8;--t-red:#ff6161;--t-turquoise:#4dd8d8;
---t-yellow:#e8d44d;--t-pink:#ff8ad8;--t-blue:#6ea8ff;--t-glow:0 0 1px;
+--crt:#000000;--crt-bezel:#111111;--crt-line:#2a2a2a;
+--t-green:#00ff00;--t-white:#ffffff;--t-red:#ff0000;--t-turquoise:#00ffff;
+--t-yellow:#ffff00;--t-pink:#ff00ff;--t-blue:#7890f0;--t-glow:0 0 1px;
 --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"BIZ UDGothic","MS Gothic",monospace}
+.pal-soft{--crt:#050d09;--crt-bezel:#0c1710;--crt-line:#16281d;
+--t-green:#3ddc84;--t-white:#e8f0e8;--t-red:#ff6161;--t-turquoise:#4dd8d8;
+--t-yellow:#e8d44d;--t-pink:#ff8ad8;--t-blue:#6ea8ff}
 #t:checked ~ .page{--bg:#f4f6f2;--fg:#1f2937;--card:#fff;--line:#d3d9cf;--muted:#5b6b61;
 --crt:#f7f8f4;--crt-bezel:#eceee8;--crt-line:#d3d9cf;
 --t-green:#1a7f37;--t-white:#1f2937;--t-red:#c62828;--t-turquoise:#007c8a;
@@ -706,8 +746,8 @@ font-size:15px;line-height:1.25;white-space:pre}
 .a-r{background:var(--cell);color:var(--crt)}
 /* SO/SI マークの既定は**隠す**。見せるのは #s1/#s2:checked（TOGGLE_CSS）。
    **隠すのは字の色だけ。** visibility:hidden は箱ごと消えるので、背景色の付いた桁
-   （反転）では**背景まで消えていた**（利用者の報告）。桁区切りの罫線も同じ理由で消える。
-   反転・下線・桁区切りは**制御桁そのものの見た目**であって印の一部ではないから、
+   （反転）では**背景まで消えていた**（利用者の報告）。
+   反転・下線は**制御桁そのものの見た目**であって印の一部ではないから、
    印を出していないときも残す——web-ui がそこに空白 1 桁を描くのと同じ絵になる。
    下線は色に連動する（text-decoration-color の既定は currentColor）ので、隠している間は
    桁の色で引き直す。display:none は桁が詰まるので、どの状態でも使えない。
@@ -716,11 +756,13 @@ font-size:15px;line-height:1.25;white-space:pre}
 .a-so{color:transparent;text-decoration-color:var(--cell,currentColor);
 user-select:none;-webkit-user-select:none}
 .ln span{display:inline-block;height:1.25em;vertical-align:top}
-.a-cs{border-left:1px solid var(--cell)}
+/* 桁区切り（colsepHtml）。色は ACS の既定（白）に合わせて --t-white（明色テーマでは濃い字色） */
+.cs{height:3px;background:repeating-linear-gradient(to right,var(--t-white) 0 1px,transparent 1px 1ch)}
+.cs-line{height:calc(1.25em - 1px)}
 .a-b{animation:bl 1s step-end infinite}
 @keyframes bl{50%{opacity:.25}}
 @media (prefers-reduced-motion:reduce){.a-b{animation:none}}
-.cur,.fld,.gl,.gwin,.gwt,.gsel,.gsb{position:absolute;pointer-events:none}
+.cur,.fld,.cs,.gl,.gwin,.gwt,.gsel,.gsb{position:absolute;pointer-events:none}
 /* 幅は要素側の style が決める（全角の上では 2ch）。ここは既定 */
 .cur{width:1ch;height:1.25em;background:var(--t-white);opacity:.55}
 .fld{height:1.25em;border-bottom:1px dotted var(--crt-line)}
@@ -793,6 +835,8 @@ interface Toggles {
   sbcs: SbcsToggle | undefined;
   /** 開いたときのフォント（`EVIDENCE_FONTS` の位置） */
   fontIdx: number;
+  /** 暗色の端末配色 */
+  palette: TerminalPalette;
 }
 
 /**
@@ -823,7 +867,7 @@ function page(title: string, bodyHtml: string, js: string, tg: Toggles): string 
           (tg.sbcs.initial ?? tg.sbcs.host) !== tg.sbcs.host ? " checked" : ""
         }>`
       : "") +
-    `<div class="page">` +
+    `<div class="page${tg.palette === "soft" ? " pal-soft" : ""}">` +
     bodyHtml +
     `</div>` +
     (js ? `<script>${js}</script>` : "") +
@@ -910,10 +954,12 @@ export function renderScreenHtml(
     sosi: hasShiftCells(snap),
     sosiView: style.shiftMarks ?? "none",
     sbcs: alt !== undefined && hasSbcsAlt(snap, alt) ? style.sbcs : undefined,
-    fontIdx: evidenceFontIndex(style.font)
+    fontIdx: evidenceFontIndex(style.font),
+    palette: style.palette ?? "classic"
   };
   // 単票は切り替えを CSS で作ったので **`<script>` を出さない**
-  return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, "", alt), "", tg);
+  const colsep = style.columnSeparator ?? "dot";
+  return page(title, header(title, tg) + metaHtml(meta) + screenFigure(snap, "", alt, colsep), "", tg);
 }
 
 /**
@@ -935,11 +981,13 @@ export function renderScreenHistoryHtml(
     sosiView: style.shiftMarks ?? "none",
     sbcs:
       alt !== undefined && entries.some((e) => hasSbcsAlt(e.screen, alt)) ? style.sbcs : undefined,
-    fontIdx: evidenceFontIndex(style.font)
+    fontIdx: evidenceFontIndex(style.font),
+    palette: style.palette ?? "classic"
   };
   if (entries.length === 0) {
     return page(title, header(title, tg) + metaHtml(meta) + `<p>記録された画面がありません。</p>`, "", tg);
   }
+  const colsep = style.columnSeparator ?? "dot";
   const label = (e: ScreenHistoryEntry, i: number): string =>
     `${i + 1}${e.key ? ` ${e.key}` : ""}`;
   const buttons = entries.map((e, i) => `<button type="button">${esc(label(e, i))}</button>`).join("");
@@ -949,7 +997,7 @@ export function renderScreenHistoryHtml(
       if (e.key) parts.push(`送信キー: ${e.key}`);
       if (e.capturedAt) parts.push(e.capturedAt);
       if (e.note) parts.push(e.note);
-      return screenFigure(e.screen, esc(parts.join("　·　")), alt);
+      return screenFigure(e.screen, esc(parts.join("　·　")), alt, colsep);
     })
     .join("");
   const nav =

@@ -16,7 +16,8 @@ const { mode, setMode } = useTheme();
 const MENU_ID = "design";
 const open = computed(() => openHeaderMenu.value === MENU_ID);
 const current = computed(() => SKIN_META.find((s) => s.id === skin.value) ?? SKIN_META[0]!);
-const isTerminal = computed(() => skin.value === "t5250");
+// 表示モードが効くのは端末の配色（クラシック・ソフト）だけ。Web スキンは自前の明暗で固定
+const isTerminal = computed(() => current.value.group === "term");
 const terms = SKIN_META.filter((s) => s.group === "term");
 const webs = SKIN_META.filter((s) => s.group === "web");
 const THEMES: { m: ThemeMode; label: string }[] = [

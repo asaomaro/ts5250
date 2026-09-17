@@ -1,16 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import type { ScreenSnapshot, Cell } from "@ts5250/tn5250";
+import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
- * **DSPATR(CS)（桁区切り）を画面に出す。**
+ * **DSPATR(CS)（桁区切り）を ACS と同じく桁ごとに描く。**
  *
- * core（`screen/attributes.ts`）は属性バイト 0x30–0x33 等から `columnSeparator` を
- * 正しく解析してセルに持っていたが、描画側（`cellClass`）が underline / reverse / blink だけを
- * CSS クラス化し、**`columnSeparator` を完全に素通ししていた**。
- * そのため DDS(DSPF) が `DSPATR(CS)` で描いた区切り線が Web UI に一切出なかった
- * （実機環境からの調査報告 dspf-report (1)）。
+ * 経緯:
+ *   1. core は `columnSeparator` を解析していたが、描画側が素通ししていた（dspf-report (1)）
+ *   2. 文字ランに `border-left` を付けて出すようにした——が、**連なりの頭に 1 本出るだけ**で
+ *      桁の区切りにならず、黄字の欄の頭に「意図しない縦棒」として見えた（利用者報告）。
+ *      その対処で黄・青緑を除外していた
+ *   3. ACS の実装（`ScreenText`）を読むと、桁区切りは**各桁の境目**に描き、既定は**点**。
+ *      黄・青緑（0x30–0x37）も対象で、下線付きの入力欄に桁ごとの点が並ぶ
+ *      （利用者の記憶「入力可能エリアに 1 桁ずつ下線に . が付いて桁が分かる」）。
+ *      ACS に合わせる（利用者の判断）
  */
 function cell(char: string, extra: Partial<Cell> = {}): Cell {
   return {
@@ -19,10 +23,10 @@ function cell(char: string, extra: Partial<Cell> = {}): Cell {
   } as Cell;
 }
 
-function snapWith(cells: Cell[][]): ScreenSnapshot {
+function snapWith(cells: Cell[][], fields: Field[] = []): ScreenSnapshot {
   return {
     sessionId: "s", rows: 24, cols: 80, cursor: { row: 1, col: 1 },
-    keyboardLocked: false, cells, fields: []
+    keyboardLocked: false, cells, fields
   } as ScreenSnapshot;
 }
 
@@ -36,49 +40,84 @@ function blank(): Cell[][] {
   return rows;
 }
 
+/** 4 行目の 11〜13 桁を桁区切りにした画面 */
+function withRun(extra: Partial<Cell> = {}): Cell[][] {
+  const cells = blank();
+  for (const c of [10, 11, 12]) cells[3]![c] = cell("A", { columnSeparator: true, ...extra });
+  return cells;
+}
+
+const styles = (w: ReturnType<typeof mount>) => w.findAll(".colsep").map((d) => d.attributes("style") ?? "");
+
 describe("DSPATR(CS) 桁区切りの描画", () => {
-  it("columnSeparator のセルに a-colsep が付く", () => {
-    const cells = blank();
-    cells[3]![10] = cell("A", { columnSeparator: true });
-    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
-    expect(w.html()).toContain("a-colsep");
+  it("連なりの頭の左端と各桁の右端に 1 本ずつ（3 桁なら 4 本）、既定は点", () => {
+    const w = mount(ScreenGrid, { props: { snapshot: snapWith(withRun()), edits: new Map(), focused: true } });
+    const ticks = w.findAll(".colsep");
+    expect(ticks).toHaveLength(4);
+    expect(ticks.every((t) => t.classes().includes("colsep-dot"))).toBe(true);
+    // 11 桁目の左端＝10ch から 13 桁目の右端＝13ch まで
+    expect(styles(w).map((s) => /left: ([\d.]+)ch/.exec(s)?.[1])).toEqual(["10", "11", "12", "13"]);
+    // 点は行の下端（4 行目の下端＝5em）から 4px 上に置く
+    expect(styles(w)[0]).toContain("calc(5em - 4px)");
+    w.unmount();
   });
 
-  it("columnSeparator の無い画面には a-colsep が出ない", () => {
+  it("線は行の上端から引く", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapWith(withRun()), edits: new Map(), focused: true, colSep: "line" }
+    });
+    expect(w.findAll(".colsep.colsep-line")).toHaveLength(4);
+    expect(styles(w)[0]).toContain("top: 3.75em");
+    w.unmount();
+  });
+
+  it("オフなら描かない", () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snapWith(withRun()), edits: new Map(), focused: true, colSep: "off" }
+    });
+    expect(w.find(".colsep").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("桁区切りの無い画面には描かない", () => {
     const w = mount(ScreenGrid, { props: { snapshot: snapWith(blank()), edits: new Map(), focused: true } });
-    expect(w.html()).not.toContain("a-colsep");
+    expect(w.find(".colsep").exists()).toBe(false);
+    w.unmount();
   });
 
-  it("他の属性と併用できる（下線・反転と同じランに載る）", () => {
-    const cells = blank();
-    cells[3]![10] = cell("A", { columnSeparator: true, underline: true, color: "red" });
-    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
-    const span = w.findAll("span.grid-span").find((s) => s.classes().includes("a-colsep"));
-    expect(span).toBeDefined();
-    expect(span!.classes()).toContain("a-underline");
-    expect(span!.classes()).toContain("c-red");
+  it("黄・青緑でも描く（ACS は 0x30–0x37 すべてに点を打つ）", () => {
+    for (const color of ["yellow", "turquoise"] as const) {
+      const w = mount(ScreenGrid, {
+        props: { snapshot: snapWith(withRun({ color })), edits: new Map(), focused: true }
+      });
+      expect(w.findAll(".colsep"), color).toHaveLength(4);
+      w.unmount();
+    }
+  });
+
+  it("入力欄の上にも描く（下線の入力欄に桁ごとの点が並ぶ）", () => {
+    const cells = withRun({ underline: true, color: "turquoise" });
+    const fields: Field[] = [
+      { index: 1, row: 4, col: 11, length: 3, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    ];
+    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells, fields), edits: new Map(), focused: true } });
+    expect(w.find("input.grid-input").exists()).toBe(true);
+    expect(w.findAll(".colsep")).toHaveLength(4);
+    w.unmount();
   });
 
   /**
-   * **黄・青緑は桁区切りビットを落とす。**
-   *
-   * 5250 の属性バイト表（SC30-3533）には黄・青緑を「修飾なし」で表す値が無く、
-   * `COLOR(YLW)` を単体で指定しただけでも桁区切りビット付きの値にコンパイルされる
-   * （属性バイトだけでは DSPATR(CS) を本当に頼んだのか区別できない）。窓の見出し・枠
-   * では既にこれを踏まえて桁区切りを出さないようにしていたが、通常のフィールドには
-   * 適用しておらず、黄字の欄の頭に意図しない縦棒が出ていた（利用者報告で判明）。
+   * **文字ランに線を付けない。** 付けると連なりの頭に 1 本だけ出る描き方に戻るうえ、
+   * border の 1px ぶん以降の桁が右へずれる。ランは色・下線など文字の属性だけで切る。
    */
-  it("黄地のセルには columnSeparator が立っていても a-colsep を出さない", () => {
-    const cells = blank();
-    cells[3]![10] = cell("A", { columnSeparator: true, color: "yellow" });
+  it("文字ランと入力欄には桁区切りの class を付けない（ランも桁区切りで割らない）", () => {
+    const cells = withRun({ underline: true, color: "red" });
+    cells[3]![13] = cell("B", { underline: true, color: "red" }); // 桁区切りだけ違う隣の桁
     const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
     expect(w.html()).not.toContain("a-colsep");
-  });
-
-  it("青緑地のセルには columnSeparator が立っていても a-colsep を出さない", () => {
-    const cells = blank();
-    cells[3]![10] = cell("A", { columnSeparator: true, color: "turquoise" });
-    const w = mount(ScreenGrid, { props: { snapshot: snapWith(cells), edits: new Map(), focused: true } });
-    expect(w.html()).not.toContain("a-colsep");
+    const run = w.findAll("span.grid-span").find((s) => s.text() === "AAAB");
+    expect(run, "桁区切りの有無でランが割れている").toBeDefined();
+    expect(run!.classes()).toEqual(expect.arrayContaining(["c-red", "a-underline"]));
+    w.unmount();
   });
 });

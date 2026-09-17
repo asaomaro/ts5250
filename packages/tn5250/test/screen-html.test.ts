@@ -187,18 +187,50 @@ describe("renderScreenHtml — 表示属性", () => {
   });
 
   /**
-   * 属性バイト表に黄・青緑の「修飾なし」が無いため、CS ビットは意図の印にならない。
-   * **判定は class 属性で行う**——CSS 定義（`.a-cs{…}`）は常に出るので、
+   * **桁区切りは連なりごとの重ね要素で、桁の境目ごとに描く**（ACS と同じ。web-ui と同じ位置）。
+   * 以前は文字ランの頭に `border-left` を 1 本引くだけで、黄・青緑は出していなかった。
+   * **判定は要素（`class="cs …"`）で行う**——CSS 定義（`.cs{…}`）は常に出るので、
    * 文書全体の部分一致で見ると必ず当たってしまい、テストが意味を失う。
    */
-  it("桁区切りは出るが、黄・青緑では出さない", () => {
-    const green = snapWith((c) => (c[0]![0] = cell("A", { columnSeparator: true })));
-    expect(renderScreenHtml(green)).toContain('class="c-green a-cs"');
-    for (const color of ["yellow", "turquoise"] as const) {
-      const snap = snapWith((c) => (c[0]![0] = cell("A", { columnSeparator: true, color })));
-      expect(renderScreenHtml(snap)).toContain(`class="c-${color}"`);
-      expect(renderScreenHtml(snap)).not.toContain(`class="c-${color} a-cs"`);
-    }
+  describe("桁区切り（DSPATR(CS)）", () => {
+    const withRun = (color: "green" | "yellow" | "turquoise" = "green") =>
+      snapWith((c) => {
+        c[2]![4] = cell("A", { columnSeparator: true, color });
+        c[2]![5] = cell("B", { columnSeparator: true, color });
+        c[2]![6] = cell("C", { columnSeparator: true, color });
+      });
+
+    it("既定は点。連なり 1 つに 1 要素で、頭の左端から最後の桁の右端まで（len 桁 + 1px）", () => {
+      const html = renderScreenHtml(withRun());
+      expect(html).toContain(
+        '<div class="cs cs-dot" style="left:4ch;top:calc(3.75em - 4px);width:calc(3ch + 1px)"></div>'
+      );
+    });
+
+    it("線は行の上端から描く", () => {
+      const html = renderScreenHtml(withRun(), {}, { columnSeparator: "line" });
+      expect(html).toContain('<div class="cs cs-line" style="left:4ch;top:2.5em;width:calc(3ch + 1px)"></div>');
+    });
+
+    it("オフなら描かない", () => {
+      expect(renderScreenHtml(withRun(), {}, { columnSeparator: "off" })).not.toContain('<div class="cs ');
+    });
+
+    it("黄・青緑でも描く（ACS は 0x30–0x37 すべてに点を打つ）", () => {
+      for (const color of ["yellow", "turquoise"] as const) {
+        expect(renderScreenHtml(withRun(color))).toContain('<div class="cs cs-dot"');
+      }
+    });
+
+    it("文字ランには桁区切りの class を付けない（頭に 1 本だけ出る描き方に戻さない）", () => {
+      const html = renderScreenHtml(withRun());
+      expect(html).toContain('class="c-green">');
+      expect(html).not.toMatch(/class="[^"]*a-cs/);
+    });
+
+    it("桁区切りの無い画面には要素を出さない", () => {
+      expect(renderScreenHtml(snapWith())).not.toContain('<div class="cs ');
+    });
   });
 
   /**
@@ -712,5 +744,40 @@ describe("renderScreenHistoryHtml — 描画経路を二重に持たない", () 
     const html = renderScreenHistoryHtml([{ screen: snapA }]);
     expect(html).not.toMatch(/https?:/);
     expect(html).not.toMatch(/\ssrc=/);
+  });
+});
+
+/**
+ * **暗色の端末配色は 2 種**（web-ui の「外観 > 5250 端末 クラシック / ソフト」と同じ）。
+ * クラシックは ACS の標準色（地色 黒・緑 #00ff00・青 rgb(120,144,240) …）。
+ * 値そのものが web-ui と一致することは web-ui 側の `terminal-palette.test.ts` が突き合わせる。
+ */
+describe("端末の配色", () => {
+  const rootVars = (html: string) => /:root\{([^}]*)\}/.exec(html)?.[1] ?? "";
+
+  it("既定はクラシック（ACS の標準色）", () => {
+    const html = renderScreenHtml(snapWith());
+    expect(rootVars(html)).toContain("--crt:#000000");
+    expect(rootVars(html)).toContain("--t-green:#00ff00");
+    expect(rootVars(html)).toContain("--t-blue:#7890f0");
+    expect(html).toContain('<div class="page">');
+  });
+
+  it("ソフトは .page に pal-soft を付けて差し替える", () => {
+    const html = renderScreenHtml(snapWith(), {}, { palette: "soft" });
+    expect(html).toContain('<div class="page pal-soft">');
+    const soft = /\.pal-soft\{([^}]*)\}/.exec(html)?.[1] ?? "";
+    expect(soft).toContain("--crt:#050d09");
+    expect(soft).toContain("--t-green:#3ddc84");
+  });
+
+  it("ペーパー調の切り替えはソフトにも勝つ（詳細度で .pal-soft を上回る規則のまま）", () => {
+    const html = renderScreenHtml(snapWith(), {}, { palette: "soft" });
+    expect(html).toMatch(/#t:checked ~ \.page\{[^}]*--crt:#f7f8f4/);
+  });
+
+  it("履歴ページにも効く", () => {
+    const html = renderScreenHistoryHtml([{ screen: snapWith() }], {}, { palette: "soft" });
+    expect(html).toContain('<div class="page pal-soft">');
   });
 });

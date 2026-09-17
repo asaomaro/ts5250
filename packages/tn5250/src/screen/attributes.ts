@@ -34,6 +34,12 @@ function a(
 /**
  * 属性バイト 0x20–0x3F のデコード表（SC30-3533 の表示属性。SEU 等の行内カラー切替の実体）。
  * インデックス = 属性バイト - 0x20。
+ *
+ * **桁区切り（CS）は 0x30–0x37 と 0x3F に立てる**——ACS（`PS5250.setAttributeToPlanes`）の表と同じ。
+ * カラー表示では CS ビット（0x10）が青緑・黄を作るのに使われるが、ACS はこの 9 値すべてで
+ * 桁区切りの印（拡張フィールド面の 0x10）も立て、画面に点（既定）を打つ。以前は 0x30–0x33 だけに
+ * 立てていたため、下線付きの青緑・黄の入力欄（0x34/0x36）に ACS の「桁ごとの点」が出なかった。
+ * 0x38–0x3E（桃・青）は同じく CS ビットを含むが、ACS は立てない（青・桃の色を作るだけ）。
  */
 const ATTR_TABLE: readonly AttrProps[] = [
   /* 0x20 */ a(G),
@@ -56,10 +62,10 @@ const ATTR_TABLE: readonly AttrProps[] = [
   /* 0x31 */ a(T, { columnSeparator: true, reverse: true }),
   /* 0x32 */ a(Y, { columnSeparator: true }),
   /* 0x33 */ a(Y, { columnSeparator: true, reverse: true }),
-  /* 0x34 */ a(T, { underline: true }),
-  /* 0x35 */ a(T, { underline: true, reverse: true }),
-  /* 0x36 */ a(Y, { underline: true }),
-  /* 0x37 */ a(Y, { nonDisplay: true }),
+  /* 0x34 */ a(T, { columnSeparator: true, underline: true }),
+  /* 0x35 */ a(T, { columnSeparator: true, underline: true, reverse: true }),
+  /* 0x36 */ a(Y, { columnSeparator: true, underline: true }),
+  /* 0x37 */ a(Y, { columnSeparator: true, nonDisplay: true }),
   /* 0x38 */ a(P),
   /* 0x39 */ a(P, { reverse: true }),
   /* 0x3A */ a(B),
@@ -67,7 +73,7 @@ const ATTR_TABLE: readonly AttrProps[] = [
   /* 0x3C */ a(P, { underline: true }),
   /* 0x3D */ a(P, { underline: true, reverse: true }),
   /* 0x3E */ a(B, { underline: true }),
-  /* 0x3F */ a(B, { nonDisplay: true })
+  /* 0x3F */ a(B, { columnSeparator: true, nonDisplay: true })
 ];
 
 /** 既定属性（画面クリア直後・属性バイト前の領域）= 0x20 通常緑 */

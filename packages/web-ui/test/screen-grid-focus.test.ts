@@ -1,14 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
- * セル選択（オーバーレイ）と native キャレットの二重表示を防ぐ。
+ * **入力欄にフォーカスがあるとき、カーソルは native キャレットの桁に描く。**
  *
  * 画面遷移直後、ホストが報告するカーソルは (1,1) のまま入力欄へ初期フォーカスが入ることがある
- * （STRPDM のようにコマンド入力欄へ飛ぶ画面）。カーソル位置だけで判定していたため、
- * 左上にセル選択が出たままになっていた。
+ * （STRPDM のようにコマンド入力欄へ飛ぶ画面）。カーソル位置だけで描くと左上にカーソルが残る。
+ * 以前は「入力欄の中は native キャレット、外は重ね要素」で二重表示を避けていたが、
+ * ACS の表示設定（形状・明滅）を入力欄の中にも効かせるため、**重ね要素 1 本で描き、
+ * 位置だけ native キャレットから取る**形にした（native キャレットは透明）。
  */
 function cell(char: string): Cell {
   return {
@@ -42,30 +45,59 @@ const FIELDS: Field[] = [
   { index: 1, row: 20, col: 8, length: 20, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
 ];
 
-describe("セル選択と入力欄のフォーカスは二重に出さない", () => {
-  it("カーソルが非入力セルでも、入力欄にフォーカスがあればセル選択を出さない", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: snap(FIELDS), edits: new Map(), focused: true } });
-    // 初期状態: カーソル (1,1) は非入力セルなのでオーバーレイが出る
-    expect(w.find(".cursor").exists()).toBe(true);
+describe("入力欄にフォーカスがあるときのカーソル位置", () => {
+  const cursorStyle = (w: ReturnType<typeof mount>) => w.find(".cursor").attributes("style") ?? "";
 
-    // 入力欄へフォーカスが入った（画面遷移直後の初期フォーカス相当）
-    await w.find("input.grid-input").trigger("focusin");
-    expect(w.find(".cursor").exists()).toBe(false);
+  it("カーソルが非入力セルでも、入力欄にフォーカスがあれば入力欄のキャレットの桁に描く", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(FIELDS), edits: new Map(), focused: false },
+      attachTo: document.body
+    });
+    // 初期状態: カーソル (1,1)
+    expect(cursorStyle(w)).toContain("left: 0ch");
+
+    // 入力欄へフォーカスが入った（画面遷移直後の初期フォーカス相当）→ 欄の先頭 (20,8)
+    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    await nextTick();
+    expect(w.findAll(".cursor")).toHaveLength(1); // 左上に残らない（二重に出さない）
+    expect(cursorStyle(w)).toContain("left: 7ch");
+    expect(cursorStyle(w)).toContain("top: 23.75em");
     w.unmount();
   });
 
-  it("入力欄からフォーカスが外れればセル選択に戻る", async () => {
-    const w = mount(ScreenGrid, { props: { snapshot: snap(FIELDS), edits: new Map(), focused: true } });
+  it("キャレットが動けば（selectionchange）カーソルも動く", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(FIELDS), edits: new Map(), focused: false },
+      attachTo: document.body
+    });
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    el.focus();
+    await nextTick();
+    // 通知（emit cursor）を伴わないキャレット移動（前の欄の末尾へ戻る経路など）
+    el.setSelectionRange(5, 5);
+    document.dispatchEvent(new Event("selectionchange"));
+    await nextTick();
+    expect(cursorStyle(w)).toContain("left: 12ch"); // 8 桁目 + 5
+    w.unmount();
+  });
+
+  it("入力欄からフォーカスが外れれば有効カーソルの桁に戻る", async () => {
+    const w = mount(ScreenGrid, {
+      props: { snapshot: snap(FIELDS), edits: new Map(), focused: false },
+      attachTo: document.body
+    });
     const input = w.find("input.grid-input");
-    await input.trigger("focusin");
-    expect(w.find(".cursor").exists()).toBe(false);
+    (input.element as HTMLInputElement).focus();
+    await nextTick();
+    expect(cursorStyle(w)).toContain("left: 7ch");
 
-    await input.trigger("focusout", { relatedTarget: null });
-    expect(w.find(".cursor").exists()).toBe(true);
+    (input.element as HTMLInputElement).blur();
+    await nextTick();
+    expect(cursorStyle(w)).toContain("left: 0ch");
     w.unmount();
   });
 
-  it("入力欄が無い画面ではセル選択が出る（従来どおり）", () => {
+  it("入力欄が無い画面でもカーソルが出る（従来どおり）", () => {
     const w = mount(ScreenGrid, { props: { snapshot: snap([]), edits: new Map(), focused: true } });
     expect(w.find(".cursor").exists()).toBe(true);
     w.unmount();

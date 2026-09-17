@@ -79,17 +79,25 @@
    */
   --chrome-row-h: 28px;
 
-  /* 端末（ダーク＝フォスファ・既定） */
-  --crt: #050d09;
-  --crt-bezel: #0c1710;
-  --crt-line: #16281d;
-  --t-green: #3ddc84;
-  --t-white: #e8f0e8;
-  --t-red: #ff6161;
-  --t-turquoise: #4dd8d8;
-  --t-yellow: #e8d44d;
-  --t-pink: #ff8ad8;
-  --t-blue: #6ea8ff;
+  /*
+   * 端末（ダーク・既定＝「5250 端末 クラシック」）。**ACS の標準色そのもの**。
+   *
+   * 値は ACS の `ColorRemapModel5250` の既定（Java の `Color.green` / `white` / `red` / `cyan` /
+   * `yellow` / `magenta`、青だけは `CUSTOMBLUE` = rgb(120,144,240)、地色 `Color.black`）で、
+   * 利用者の ACS 実画面の画素とも一致する。以前の既定（淡いフォスファ調）は
+   * 「5250 端末 ソフト」として下の `[data-skin="t5250-soft"]` に残してある。
+   * 枠・OIA の面は地色に合わせて**色味の無い**暗灰にする（ACS の画面に緑の色味は無い）。
+   */
+  --crt: #000000;
+  --crt-bezel: #111111;
+  --crt-line: #2a2a2a;
+  --t-green: #00ff00;
+  --t-white: #ffffff;
+  --t-red: #ff0000;
+  --t-turquoise: #00ffff;
+  --t-yellow: #ffff00;
+  --t-pink: #ff00ff;
+  --t-blue: #7890f0;
   /* CRT のにじみ。3px は文字がぼやけて読みにくいので抑えめにする */
   --t-glow: 0 0 1px;
 
@@ -152,7 +160,35 @@
   --tg-8: #a4b0bd;
 }
 
-/* 端末の通常モード（ペーパー調・暗色 7 色・グローなし） */
+/*
+ * 「5250 端末 ソフト」のダーク（以前の既定＝淡いフォスファ調）。
+ * **ダークのときだけ**差し替える——通常モードはクラシックと同じペーパー調（下の規則）を使う。
+ * ACS には通常（明るい地）の配色が無いので、クラシックとソフトで分ける対象が無い。
+ */
+:root[data-skin="t5250-soft"]:not([data-theme="light"]) {
+  --crt: #050d09;
+  --crt-bezel: #0c1710;
+  --crt-line: #16281d;
+  --t-green: #3ddc84;
+  --t-white: #e8f0e8;
+  --t-red: #ff6161;
+  --t-turquoise: #4dd8d8;
+  --t-yellow: #e8d44d;
+  --t-pink: #ff8ad8;
+  --t-blue: #6ea8ff;
+}
+
+/*
+ * **下線の濃さ**（文字色に対する割合。`.a-underline` / 入力欄の下線が `var(--t-underline, 55%)` で読む）。
+ * クラシックのダークだけ ACS と同じ**文字色そのまま**にする（`ScreenText` は前景色で線を引く）。
+ * それ以外（ソフト・通常モード・Web スキン）は値を持たず、以前の見え方（55%）のまま。
+ * `:root` に置かないのは、Web スキンも `:root` の値を継いでしまうため。
+ */
+:root:not([data-skin]):not([data-theme="light"]) {
+  --t-underline: 100%;
+}
+
+/* 端末の通常モード（ペーパー調・暗色 7 色・グローなし）。クラシック・ソフト共通 */
 :root[data-theme="light"] {
   --crt: #f7f8f4;
   --crt-bezel: #eceee8;
@@ -232,7 +268,9 @@ body {
  * の二重の理由で `/` の下線だけ浮いて見える（利用者のスクリーンショット報告）。
  * ACS は 1 本の連続した線に見えるので、入力欄と同じ `border-bottom` に揃える。
  */
-.a-underline { border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent); }
+/* 濃さは端末の配色が決める（`--t-underline`。クラシックのダーク＝ACS と同じ文字色そのまま、
+   それ以外は値を持たず 55%＝以前の見え方）。 */
+.a-underline { border-bottom: 1px solid color-mix(in srgb, currentColor var(--t-underline, 55%), transparent); }
 /* 反転(背景色): 背景をセル色、文字を CRT 地色にして前景/背景を入れ替える
    （旧実装は background:currentColor で文字色＝背景色になり文字が見えなかった）。 */
 /* --cell-bg は input 側（.grid-input）が背景を受け取るための橋渡し。
@@ -273,9 +311,6 @@ body {
 .a-shift.a-shift-strong { color: color-mix(in srgb, var(--cell, currentColor) 65%, var(--crt)); }
 .a-reverse .a-shift.a-shift-strong,
 .a-reverse.a-shift.a-shift-strong { color: color-mix(in srgb, var(--crt) 65%, var(--cell)); }
-/* DSPATR(CS)＝桁区切り。5250 は「その桁の左側に縦線」を描く（ACS と同じ）。
-   文字色に追従させるため currentColor を使う（反転中も前景色で線が出る）。 */
-.a-colsep { border-left: 1px solid currentColor; }
 /* **表せない文字**（ホストが 0x1F で潰してきた桁）。文字色で塗り潰す——ACS と同じ見せ方。
    **字を入れずに背景で描く**のが要点で、█ 等を入れると和文フォントで全角になり桁がずれる
    （実測で 1.5〜2 倍）。反転（.a-reverse）が掛かっている桁でも読めるよう色は --cell に従う */
@@ -412,7 +447,8 @@ button:disabled:hover {
 
 /* =====================================================================
  * 画面スキン（見た目テーマ）: data-skin でクローム＋端末パレットを差し替える。
- * グリッド配置・DOM は不変。5250 端末（data-skin 無し）は既定＝useTheme に従う。
+ * グリッド配置・DOM は不変。5250 端末（クラシック＝data-skin 無し／ソフト＝t5250-soft）は
+ * useTheme に従う（ソフトはダークの端末色だけを上の規則で差し替える）。
  * OIA/F キーは背景＝端末(--crt/--crt-bezel)・文字＝クローム(--muted) の混在のため、
  * 各スキンはクロームと端末の明暗を揃える（可読性の担保）。
  * ===================================================================== */
