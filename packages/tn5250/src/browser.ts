@@ -41,6 +41,12 @@ export {
   rawSentinel
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
+/** 桁区切り（DSPATR(CS)）の連なり。画面と保存 HTML が同じ位置に区切りを引くために共有する */
+export {
+  columnSeparatorRuns,
+  type ColumnSeparatorRun,
+  type ColumnSeparatorStyle
+} from "./screen/column-separator.js";
 /**
  * 欄の識別子（行・桁から作る純関数）。web-ui が欄ごとの `key` に使う。
  *
@@ -68,6 +74,7 @@ export {
   renderScreenHistoryHtml,
   type ScreenHtmlMeta,
   type ScreenHtmlStyle,
+  type TerminalPalette,
   type ShiftMarkView,
   type SbcsToggle,
   type SbcsReading,

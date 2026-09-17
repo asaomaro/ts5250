@@ -125,9 +125,15 @@ export {
   renderScreenHistoryHtml,
   type ScreenHtmlMeta,
   type ScreenHtmlStyle,
+  type TerminalPalette,
   type ShiftMarkView,
   type SbcsToggle,
   type SbcsReading,
   type ScreenHistoryEntry
 } from "./screen-html.js";
+export {
+  columnSeparatorRuns,
+  type ColumnSeparatorRun,
+  type ColumnSeparatorStyle
+} from "./screen/column-separator.js";
 

@@ -3,12 +3,18 @@ import { ref } from "vue";
 /**
  * 画面スキン（見た目テーマ）の状態管理。**グリッド配置・DOM は変えず**、CSS トークン
  * （クローム＋端末パレット）を `data-skin` で差し替えるだけ。useTheme（data-theme）とは独立で、
- * - 5250 端末（t5250）… data-skin を外し、既定トークン＝useTheme の表示モードに従う
+ * - 5250 端末（`group: "term"`）… 表示モード（通常/ダーク/システム）に従う
+ *   - クラシック（t5250）… data-skin を外す＝既定トークン。**ダークは ACS の標準色**
+ *   - ソフト（t5250-soft）… data-skin を付け、**ダークだけ**淡いフォスファ調に差し替える
+ *     （以前の既定。通常モードはクラシックと同じペーパー調）
  * - Web アプリ風スキン … data-skin を付け、そのスキンのトークンで固定（表示モードに依存しない）
  * （コントロール表現＝画面内入力欄の見せ方は「画面設定」= viewSettings 側で per-pane 管理。）
+ *
+ * **`t5250` の id は「クラシック」のまま使う**（利用者の判断で、クラシックの中身を ACS の色へ
+ * 差し替えた）。保存値が `t5250` の人は ACS の色で開く。以前の淡い色はソフトを選べば戻る。
  */
 export type Skin =
-  | "t5250" | "notion" | "slack" | "linear" | "stripe" | "github"
+  | "t5250" | "t5250-soft" | "notion" | "slack" | "linear" | "stripe" | "github"
   | "vercel" | "discord" | "material" | "figma" | "apple";
 
 export interface SkinMeta {
@@ -21,7 +27,9 @@ export interface SkinMeta {
 
 /** メニュー表示順・スウォッチ色 */
 export const SKIN_META: readonly SkinMeta[] = [
-  { id: "t5250", name: "5250 端末", tag: "クラシック", swatch: "#178a48", group: "term" },
+  // 見本は「地色に文字色」。2 つの違いは色の濃さなので、塗り 1 色では見分けが付かない
+  { id: "t5250", name: "5250 端末", tag: "クラシック", swatch: "linear-gradient(135deg,#000000 50%,#00ff00 50%)", group: "term" },
+  { id: "t5250-soft", name: "5250 端末", tag: "ソフト", swatch: "linear-gradient(135deg,#050d09 50%,#3ddc84 50%)", group: "term" },
   { id: "notion", name: "Notion", tag: "ミニマル文書", swatch: "#37352f", group: "web" },
   { id: "slack", name: "Slack", tag: "オーバジン", swatch: "#4a154b", group: "web" },
   { id: "linear", name: "Linear", tag: "ダーク", swatch: "#5e6ad2", group: "web" },

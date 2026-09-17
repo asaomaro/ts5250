@@ -26,6 +26,7 @@ import { renderScreenHtml, type SbcsReading } from "@ts5250/tn5250/browser";
 import { sessionsStore } from "./stores/sessions.js";
 import { viewSettings, resolveSbcsView } from "./stores/viewSettings.js";
 import { isKatakanaCcsid } from "./hostCodePages.js";
+import { useSkin } from "./composables/useSkin.js";
 
 /** ファイル名に使えない文字を落とす（`host-spools.ts` の `safeFileName` と同じ考え方） */
 function safeFileName(name: string): string {
@@ -90,7 +91,11 @@ export function downloadScreenHtml(sessionId: string, now = new Date()): string 
     sbcs: { host: hostReading, initial: sbcsView === "host" ? hostReading : sbcsView },
     // 画面と同じ字で開く。**候補に無い名前なら標準へ落ちる**（環境で選んだフォントは
     // 読み手の機械に無いことがあるので、配布 HTML は自前の候補しか指名しない）
-    font: view.font
+    font: view.font,
+    // 桁区切りは画面と同じ描き方で書き出す（ページ内の切り替えは持たない）
+    columnSeparator: view.colSep,
+    // 暗色の端末配色は「外観 > 5250 端末」に合わせる。Web スキンは HTML に写せないのでクラシック
+    palette: useSkin().skin.value === "t5250-soft" ? "soft" : "classic"
   });
 
   const stamp = localStamp(now);

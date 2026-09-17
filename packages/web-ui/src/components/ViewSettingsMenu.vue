@@ -290,22 +290,43 @@ onBeforeUnmount(() => {
              複数の設定を持つ行（ウィンドウ設定）はセクションで区切る -->
         <template v-if="isExpanded(r.id)">
           <template v-for="it in r.items" :key="String(it.key)">
-            <div v-if="r.items.length > 1" class="vsm-section">{{ it.label }}</div>
-            <div class="vsm-palette" role="listbox" :aria-label="`${it.label}のデザイン`">
-              <button
-                v-for="o in it.opts"
-                :key="String(o.value)"
-                class="pal-item"
-                role="option"
-                :aria-selected="isSel(it.key, o.value)"
-                :class="{ on: isSel(it.key, o.value) }"
-                :title="isDefault(it.key, o.value) ? '全体の既定（選ぶと既定に追従します）' : undefined"
-                @click="pickFromPalette(it.key, o.value)"
-              >
-                <span class="pal-prev" :data-kind="it.key" :data-style="String(o.value)">Ab</span>
-                <span class="pal-name">{{ o.label }}<span v-if="isDefault(it.key, o.value)" class="vsm-def">·</span></span>
-              </button>
+            <!-- 見本の要らない単純な選択肢（カーソル・罫線）はセグメントの小行で並べる。
+                 名前は ACS の設定画面と同じ短い語（グループの見出しが付くので繰り返さない） -->
+            <div v-if="it.segment" class="vsm-row vsm-sub">
+              <span class="vsm-label">
+                {{ it.shortLabel ?? it.label }}
+                <span v-if="overridden(it.key)" class="vsm-mark" title="このセッションで個別指定">●</span>
+              </span>
+              <div class="seg" role="group" :aria-label="it.label">
+                <button
+                  v-for="o in it.opts"
+                  :key="String(o.value)"
+                  :class="{ on: isSel(it.key, o.value) }"
+                  :title="isDefault(it.key, o.value) ? '全体の既定（選ぶと既定に追従します）' : undefined"
+                  @click="setVal(it.key, o.value)"
+                >
+                  {{ o.label }}<span v-if="isDefault(it.key, o.value)" class="vsm-def">·</span>
+                </button>
+              </div>
             </div>
+            <template v-else>
+              <div v-if="r.items.length > 1" class="vsm-section">{{ it.label }}</div>
+              <div class="vsm-palette" role="listbox" :aria-label="`${it.label}のデザイン`">
+                <button
+                  v-for="o in it.opts"
+                  :key="String(o.value)"
+                  class="pal-item"
+                  role="option"
+                  :aria-selected="isSel(it.key, o.value)"
+                  :class="{ on: isSel(it.key, o.value) }"
+                  :title="isDefault(it.key, o.value) ? '全体の既定（選ぶと既定に追従します）' : undefined"
+                  @click="pickFromPalette(it.key, o.value)"
+                >
+                  <span class="pal-prev" :data-kind="it.key" :data-style="String(o.value)">Ab</span>
+                  <span class="pal-name">{{ o.label }}<span v-if="isDefault(it.key, o.value)" class="vsm-def">·</span></span>
+                </button>
+              </div>
+            </template>
           </template>
         </template>
       </template>
@@ -480,6 +501,10 @@ onBeforeUnmount(() => {
 .vsm-toggle.on {
   color: var(--accent);
   border-color: var(--accent);
+}
+/* 開いたグループの中の小行（カーソル・罫線）。親の行と見分けられるよう少し字下げする */
+.vsm-sub {
+  padding-left: 12px;
 }
 /* 1 行に複数の設定を持つとき（ウィンドウ設定）の区切り見出し */
 .vsm-section {

@@ -1,11 +1,13 @@
 import { reactive } from "vue";
+import type { ColumnSeparatorStyle } from "@ts5250/tn5250/browser";
 import type { ScreenFontId } from "../composables/screenFonts.js";
 
 /**
  * エミュレーター「画面表示」設定。**単一の設定を保存**（localStorage）し、全画面に適用する。
  * メニューで変えた値はそのまま記憶され、新しい画面・再読み込み後も維持される。
  * 対象: SO/SI 表示・表示コード（カナ⇄英）・リンク化・コントロール表現（画面内入力欄の見せ方）・
- *       配色（端末色⇄意味色）・画面の質感（CRT⇄フラット）・フォント。
+ *       配色（端末色⇄意味色）・画面の質感（CRT⇄フラット）・フォント・
+ *       ACS の表示設定（カーソル・罫線・桁区切り）。
  */
 /** 入力欄の見せ方（画面設定「入力項目設定」）。すべて桁を動かさない手段だけで作る（spec D8）。 */
 export type ControlStyle =
@@ -73,6 +75,28 @@ export type DtPickerStyle = "none" | "panel" | "outline" | "crt";
 
 export type ButtonStyle =
   | "none" | "underline" | "filled" | "box" | "pill" | "ghost" | "raised" | "link";
+
+/*
+ * ---- ACS の「表示」設定（編集 > 設定 > 外観 > 表示）から取り込んだ項目 ----
+ * 値と既定は ACS の実装（`DisplayUI` / `ScreenText`）とヘルプ（display_setup.html）で確かめた。
+ * 既定だけは ACS と違うものがある（各型の注記）。
+ */
+/**
+ * テキスト・カーソルの形（ACS「カーソル > 形状」）。`block`＝塗りつぶし、`underline`＝下線。
+ * どちらも文字を反転させて重ねる（ACS は XOR で描く）。挿入モード中は形に依らず下半分になる
+ * （ACS `ScreenText.setInsert`）。
+ *
+ * **既定は `block`**（ACS の既定は下線）。これまでの ts5250 の見え方がブロックなので変えない。
+ */
+export type CursorShape = "block" | "underline";
+/** マウスポインター（ACS「カーソル > ポインター」）。`crosshair`＝画面の上で十字線にする */
+export type PointerStyle = "default" | "crosshair";
+/**
+ * 罫線の形（ACS「罫線 > スタイル」）。カーソルの行の下端に横線、桁の左端に縦線を引く。
+ * `crosshair`＝両方（ACS の既定）／`horizontal`＝横線だけ／`vertical`＝縦線だけ。
+ */
+export type RuleLineStyle = "crosshair" | "horizontal" | "vertical";
+export type { ColumnSeparatorStyle };
 export interface ViewSettings {
   /** SO/SI マークの見せ方（非表示／薄目／濃目） */
   sosi: SosiView;
@@ -100,6 +124,29 @@ export interface ViewSettings {
   dtPicker: DtPickerStyle;
   /** 画面グリッドのフォント（screenFonts.ts の id）。いずれも和欧 1:2 の一体フォント。 */
   font: ScreenFontId;
+  /** テキスト・カーソルの形（ACS「カーソル > 形状」） */
+  cursorShape: CursorShape;
+  /**
+   * カーソルを明滅させるか（ACS「明滅カーソルが可能」）。
+   * **既定は ON**（ACS の既定は OFF）。これまでの ts5250 が明滅していたので変えない。
+   */
+  cursorBlink: boolean;
+  /** 画面の上でのマウスポインター（ACS「カーソル > ポインター」） */
+  pointer: PointerStyle;
+  /** 罫線を出すか（ACS「罫線 > 罫線」。既定 OFF） */
+  ruleLine: boolean;
+  /**
+   * 罫線がカーソルに従うか（ACS「罫線 > カーソルに従う」。既定 はい）。
+   * いいえ＝**出した時点のカーソル位置に固定**し、はいに戻すまで動かない。
+   */
+  ruleFollow: boolean;
+  /** 罫線の形（ACS「罫線 > スタイル」。既定 十字線） */
+  ruleStyle: RuleLineStyle;
+  /**
+   * 桁区切り（DSPATR(CS)）の見せ方（ACS「表示 > 桁区切り文字」。既定 ドット）。
+   * ドットは入力欄の下線に桁ごとの点が並び、何桁目かが読める。
+   */
+  colSep: ColumnSeparatorStyle;
 }
 export type ViewKey = keyof ViewSettings;
 type Key = ViewKey;
@@ -124,6 +171,17 @@ export interface ViewItemDef {
    *  デザイン候補を並べる（選択肢が多く、常時出すとメニューが縦に伸びるため）。
    *  キー設定の順送りは畳んでいても opts 全体を一巡する。 */
   expandable?: boolean;
+  /**
+   * 開いたときに**見本パレットではなくセグメント**で並べる（グループ内の項目に付ける）。
+   * カーソルや罫線のように、見本の「Ab」では違いが伝わらない単純な選択肢のため。
+   */
+  segment?: boolean;
+  /**
+   * グループの中で出す短い名前（ACS の設定画面と同じ語）。グループの見出しが付くので
+   * 「罫線の」「カーソルの」を繰り返さない。**キー設定などグループの外では `label` を使う**
+   * ——そこでは見出しが無く、「形状」だけでは何の設定か分からない。
+   */
+  shortLabel?: string;
 }
 export const VIEW_ITEMS: ViewItemDef[] = [
   {
@@ -234,6 +292,83 @@ export const VIEW_ITEMS: ViewItemDef[] = [
   },
   { key: "colorMode", label: "配色", opts: [{ value: "literal", label: "端末色" }, { value: "semantic", label: "意味色" }] },
   { key: "surface", label: "画面の質感", opts: [{ value: "flat", label: "フラット" }, { value: "crt", label: "CRT" }] },
+  // ---- ACS の「表示」設定。並びと語は ACS の設定画面（カーソル → 罫線 → 表示）に合わせる ----
+  {
+    key: "cursorShape",
+    label: "カーソルの形状",
+    shortLabel: "形状",
+    group: "cursor",
+    groupLabel: "カーソル",
+    expandable: true,
+    segment: true,
+    opts: [
+      { value: "block", label: "ブロック" },
+      { value: "underline", label: "下線" },
+    ],
+  },
+  {
+    key: "cursorBlink",
+    label: "カーソルの明滅",
+    shortLabel: "明滅",
+    group: "cursor",
+    expandable: true,
+    segment: true,
+    opts: [{ value: true, label: "ON" }, { value: false, label: "OFF" }],
+  },
+  {
+    key: "pointer",
+    label: "マウスポインター",
+    shortLabel: "ポインター",
+    group: "cursor",
+    expandable: true,
+    segment: true,
+    opts: [
+      { value: "default", label: "標準" },
+      { value: "crosshair", label: "十字線" },
+    ],
+  },
+  {
+    key: "ruleLine",
+    label: "罫線の表示",
+    shortLabel: "罫線",
+    group: "rule",
+    groupLabel: "罫線",
+    expandable: true,
+    segment: true,
+    // ACS の「罫線」キー（[rule]）に当たるのは、この項目のキー設定（順送り）
+    opts: [{ value: false, label: "OFF" }, { value: true, label: "ON" }],
+  },
+  {
+    key: "ruleFollow",
+    label: "罫線がカーソルに従う",
+    shortLabel: "カーソルに従う",
+    group: "rule",
+    expandable: true,
+    segment: true,
+    opts: [{ value: true, label: "はい" }, { value: false, label: "いいえ" }],
+  },
+  {
+    key: "ruleStyle",
+    label: "罫線のスタイル",
+    shortLabel: "スタイル",
+    group: "rule",
+    expandable: true,
+    segment: true,
+    opts: [
+      { value: "crosshair", label: "十字線" },
+      { value: "horizontal", label: "水平" },
+      { value: "vertical", label: "垂直" },
+    ],
+  },
+  {
+    key: "colSep",
+    label: "桁区切り",
+    opts: [
+      { value: "dot", label: "ドット" },
+      { value: "line", label: "線" },
+      { value: "off", label: "オフ" },
+    ],
+  },
 ];
 
 /** 項目定義を引く（不明キーは undefined）。 */
@@ -256,6 +391,13 @@ const FALLBACK: ViewSettings = {
   windowFrame: "none",
   windowBackdrop: "none",
   font: "system",
+  cursorShape: "block", // これまでの見え方（ACS の既定は下線）
+  cursorBlink: true, // これまでの見え方（ACS の既定は OFF）
+  pointer: "default",
+  ruleLine: false,
+  ruleFollow: true,
+  ruleStyle: "crosshair",
+  colSep: "dot", // ACS の既定
 };
 
 /**

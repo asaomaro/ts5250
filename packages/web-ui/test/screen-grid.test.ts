@@ -951,19 +951,23 @@ describe("ScreenGrid", () => {
     w.unmount();
   });
 
-  it("矩形選択中は欄上でもキャレットをオーバーレイで描く（入力欄は blur 済みで native キャレットが居ない）", async () => {
+  it("矩形選択中は欄上でも選択の始点にカーソルを描く（入力欄のキャレット位置は見ない）", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, {
-      props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, cursor: { row: 6, col: 12 } }
+      props: { snapshot: makeSnap(fields), edits: new Map(), focused: false, cursor: { row: 6, col: 12 } },
+      attachTo: document.body
     });
-    expect(w.find(".cursor").exists()).toBe(false); // 通常は field モード＝native キャレットが担う
+    // 入力欄にフォーカス＝カーソルは native キャレット（欄の先頭 col=10 → 9ch）の桁
+    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    await nextTick();
+    expect(w.find(".cursor").attributes("style")).toContain("left: 9ch");
     w.vm.setBlockSelection({ r1: 6, c1: 12, r2: 8, c2: 20 });
     await nextTick();
-    // 選択中は blur されるため、隠したままだとカーソルが完全に見えなくなる
-    expect(w.find(".cursor").exists()).toBe(true);
-    expect(w.find(".cursor").attributes("style")).toContain("11ch"); // col=12 → 11ch（始点のまま）
+    // 選択中は入力欄を blur する前提なので、キャレットではなく始点（有効カーソル）に置く（ACS）
+    expect(w.findAll(".cursor")).toHaveLength(1);
+    expect(w.find(".cursor").attributes("style")).toContain("left: 11ch"); // col=12 → 11ch（始点のまま）
     w.unmount();
   });
 
@@ -1438,15 +1442,16 @@ describe("ScreenGrid", () => {
     expect(cursor.attributes("style")).toContain("6.25em");
   });
 
-  it("有効カーソルが編集可欄上なら field モードでオーバーレイを隠す", () => {
+  it("有効カーソルが編集可欄上でも同じカーソルを描く（入力欄の中も ACS の形状・明滅に従う）", () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
     ];
     const w = mount(ScreenGrid, {
       props: { snapshot: makeSnap(fields), edits: new Map(), focused: true, cursor: { row: 6, col: 12 } }
     });
-    // (6,12) は欄内（col10..17）→ native キャレットが担うのでオーバーレイ非表示
-    expect(w.find(".cursor").exists()).toBe(false);
+    // (6,12) は欄内（col10..17）。以前は native キャレットに任せて隠していた
+    expect(w.find(".cursor").exists()).toBe(true);
+    expect(w.find(".cursor").attributes("style")).toContain("left: 11ch");
   });
 
   it("保護欄上の有効カーソルは free モードでオーバーレイ表示（field ではない）", () => {

@@ -42,8 +42,19 @@ import {
   type WindowRect,
   type OptionSpan
 } from "../composables/fkeyLegend.js";
-import { GRID_COLOR } from "@ts5250/tn5250/browser";
-import type { ButtonStyle, WindowFrame, WindowBackdrop, SbcsView, OptHintStyle, DtPickerStyle, ShiftMarkTone } from "../stores/viewSettings.js";
+import { GRID_COLOR, columnSeparatorRuns } from "@ts5250/tn5250/browser";
+import type {
+  ButtonStyle,
+  WindowFrame,
+  WindowBackdrop,
+  SbcsView,
+  OptHintStyle,
+  DtPickerStyle,
+  ShiftMarkTone,
+  CursorShape,
+  RuleLineStyle,
+  ColumnSeparatorStyle
+} from "../stores/viewSettings.js";
 import DateTimePicker from "./DateTimePicker.vue";
 import {
   detectDateTimeFields,
@@ -127,10 +138,25 @@ const props = withDefaults(
     optHints?: OptHintStyle;
     /** EDTMSK 分割欄の日付・時刻ピッカーの見せ方（既定 none。同上） */
     dtPicker?: DtPickerStyle;
+    /** テキスト・カーソルの形（ACS「カーソル > 形状」。既定 block） */
+    cursorShape?: CursorShape;
+    /** フォーカス中にカーソルを明滅させる（ACS「明滅カーソルが可能」。既定 true） */
+    cursorBlink?: boolean;
+    /** 罫線を出す（ACS「罫線」。既定 false） */
+    ruleLine?: boolean;
+    /** 罫線がカーソルに従う（既定 true）。false は出した時点の位置に固定する */
+    ruleFollow?: boolean;
+    /** 罫線の形（既定 crosshair） */
+    ruleStyle?: RuleLineStyle;
+    /** 桁区切り（DSPATR(CS)）の見せ方（ACS「桁区切り文字」。既定 dot） */
+    colSep?: ColumnSeparatorStyle;
   }>(),
   {
     linkify: true, buttons: "none", windowFrame: "none", windowBackdrop: "none",
-    optHints: "none", dtPicker: "none", sbcsView: "host", shiftMarkTone: "dim"
+    optHints: "none", dtPicker: "none", sbcsView: "host", shiftMarkTone: "dim",
+    // cursorBlink / ruleFollow も Boolean prop なので、未指定が false にならないよう明示する
+    cursorShape: "block", cursorBlink: true, ruleLine: false, ruleFollow: true,
+    ruleStyle: "crosshair", colSep: "dot"
   }
 );
 const emit = defineEmits<{
@@ -197,8 +223,31 @@ function inputChar(ch: string, field: Field): string {
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
 const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
 
+// ---------------------------------------------------------------------------
+// テキスト・カーソル（ACS「表示 > カーソル」）
+//
+// **カーソルは入力欄の中でも外でも、同じ重ね要素（`.cursor`）で描く。** ACS はどこでも
+// 同じカーソル（ブロック／下線、XOR で文字を反転）を出す。以前は入力欄の中だけブラウザの
+// 縦棒キャレットに任せていたため、形も明滅も設定できず、欄の出入りで見た目が変わっていた。
+// native キャレットは透明にして残す（IME の変換窓の位置決めと、選択範囲の起点に要る）。
+// IME の変換中だけは入力中の字にかぶるので、重ね要素を隠して native キャレットを見せる。
+//
+// 位置の真実は 2 つある（冒頭の「カーソル／編集モデルの協調」を参照）:
+//   - 入力欄にフォーカスがある → **native キャレット**（打鍵が入る場所そのもの）
+//   - それ以外                  → 有効カーソル（`effCursor`＝親が持つ論理カーソル）
+// 入力欄の中でも `effCursor` を使わないのは、キャレットを動かして論理カーソルを
+// 通知しない経路（前の欄の末尾へ戻る `onFieldPrev` 等）で、カーソルだけ別の桁に残るため。
+// ---------------------------------------------------------------------------
+
+/** カーソルが覆う桁（1 始まり）と桁数（全角の上では 2） */
+interface CursorCell {
+  row: number;
+  col: number;
+  cols: number;
+}
+
 /**
- * **ブロックカーソルが覆う範囲**（桁と桁数）。
+ * **セル上のカーソルが覆う範囲**（桁と桁数）。
  *
  * **全角の上では 2 桁ぶんを覆う**——ACS は DBCS 1 文字ぜんぶにカーソルが当たる。
  * 1 桁だけ塗ると「文字の左半分にカーソルが載っている」ように見え、**カーソルが
@@ -206,30 +255,18 @@ const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
  * tail に載ったときは lead から覆う（同じ 1 文字なので見え方を変えない）。
  * 対を失った全角（孤児 lead / 孤児 tail）は表示自体が 1 桁なので 1 桁のまま。
  */
-const cursorBox = computed(() => {
+const cursorBox = computed<CursorCell>(() => {
   const { row, col } = effCursor.value;
   const cells = props.snapshot.cells[row - 1];
   const here = cells?.[col - 1];
-  if (cells && here?.kind === "dbcs-lead" && hasTail(cells, col - 1)) return { col, cols: 2 };
-  if (cells && here?.kind === "dbcs-tail" && hasLead(cells, col - 1)) return { col: col - 1, cols: 2 };
-  return { col, cols: 1 };
-});
-// カーソルが編集可能フィールド上か（field モード）。true なら native キャレットが担うのでオーバーレイは隠す。
-// 矩形選択中は入力欄を blur しているので native キャレットが居らず、位置が欄上でもオーバーレイに担わせる
-// （さもないとカーソルが欄の中にある間キャレットが消える。ACS は始点にカーソルを残す）。
-const cursorOnEditable = computed(() => {
-  if (rectSel.value) return false;
-  // **実際に入力欄へフォーカスがあるならそちらが担う**。
-  // 画面遷移直後、ホストが報告するカーソルは (1,1) のまま入力欄に初期フォーカスが入ることがあり
-  // （STRPDM など、コマンド入力欄へ飛ぶ画面）、位置だけで判定すると左上にセル選択が残る。
-  if (inputFocused.value) return true;
-  const f = fieldAt(effCursor.value.row, effCursor.value.col, props.snapshot.fields, props.snapshot.cols, props.snapshot.rows);
-  return f !== undefined && !f.protected;
+  if (cells && here?.kind === "dbcs-lead" && hasTail(cells, col - 1)) return { row, col, cols: 2 };
+  if (cells && here?.kind === "dbcs-tail" && hasLead(cells, col - 1)) return { row, col: col - 1, cols: 2 };
+  return { row, col, cols: 1 };
 });
 
 /**
  * この画面の入力欄がフォーカスを持っているか。
- * native キャレットとセル選択の二重表示を防ぐためだけに使う。
+ * カーソルの位置を native キャレットから取るかどうかの切り替えに使う。
  */
 const inputFocused = ref(false);
 function onGridFocusIn(ev: FocusEvent): void {
@@ -241,6 +278,60 @@ function onGridFocusOut(ev: FocusEvent): void {
   if (to?.classList.contains("grid-input")) return;
   inputFocused.value = false;
 }
+
+/**
+ * native キャレットの移動を拾うためのティック。キャレットは DOM の状態で反応しないので、
+ * `selectionchange`（クリック・矢印・`setSelectionRange` のどれでも来る）で増やして引き直させる。
+ */
+const caretTick = ref(0);
+function onSelectionChange(): void {
+  if (inputFocused.value) caretTick.value++;
+}
+
+/**
+ * フォーカス中の入力欄で、native キャレットが指す桁。入力欄にフォーカスが無ければ null。
+ *
+ * 桁の出し方は、打鍵後に論理カーソルを通知する `sync` / `syncDbcs` と同じにする
+ * （同じ式でないと、打つたびにカーソルが通知位置と描画位置の間で揺れる）。
+ * 保護欄（readonly）は対象外——フォーカスは一瞬で外され、位置は `effCursor` が持つ。
+ */
+function nativeCaretCell(): CursorCell | null {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLInputElement) || el.readOnly || !el.classList.contains("grid-input")) return null;
+  if (!gridEl.value?.contains(el)) return null;
+  const f = props.snapshot.fields.find((x) => x.index === Number(el.dataset["fieldIndex"]));
+  if (!f) return null;
+  // 範囲選択中は動かしている側の端（Shift+矢印で伸ばしている先）に置く
+  const at = el.selectionDirection === "backward" ? el.selectionStart : el.selectionEnd;
+  if (at === null) return null;
+  if (isDbcsEdit(f)) {
+    const lay = dbcsLayoutOf(f);
+    const col = Math.min(lay.columnsBefore(globalCaret(rangeOfInput(f, el, lay), at)), visLen(f) - 1);
+    const s = slicesOf(f)[sliceIndexOf(f, col)]!;
+    // 全角の上では 2 桁を覆う（セル側の `cursorBox` と同じ規則）。入力中の字はセルに無いので値から見る
+    const ch = el.value.codePointAt(at);
+    const cols = ch !== undefined && isFullWidth(String.fromCodePoint(ch)) ? 2 : 1;
+    return { row: s.row, col: s.col + (col - s.offset), cols };
+  }
+  const pos = posOfOffset(f, Math.min(sliceOffsetOf(f, el) + at, visLen(f)), props.snapshot.cols, props.snapshot.rows);
+  return { row: pos.row, col: pos.col, cols: 1 };
+}
+
+/**
+ * カーソルを描く桁。矩形選択中は入力欄を blur しているので、常に `effCursor`（選択の始点）。
+ *
+ * `caretTick` / `effCursor` / `inputFocused` / 画面の変化で引き直す。DOM を読むのは描画時なので、
+ * 同じ処理の中でフォーカスとキャレットを続けて動かしても（`onFieldPrev`）最後の位置が描かれる。
+ */
+const cursorCell = computed<CursorCell>(() => {
+  void caretTick.value;
+  const box = cursorBox.value;
+  if (!inputFocused.value || rectSel.value) return box;
+  return nativeCaretCell() ?? box;
+});
+
+/** カーソルを出すか。IME の変換中は native キャレットに任せる（入力中の字にかぶるため） */
+const cursorShown = computed(() => !composing.value);
 
 interface GuiChoiceLike {
   index: number;
@@ -576,7 +667,7 @@ function hostTitle(w: GuiWindow): { text: string; style: Record<string, string>;
   return {
     text: t.text,
     style: { left: w.col + off + "ch", top: (row - 1) * 1.25 + "em" },
-    cls: `win-title ${decorAttrClass(t.cba)}`
+    cls: `win-title ${attrByteClass(t.cba)}`
   };
 }
 
@@ -859,28 +950,18 @@ function onFkeyClick(key: AidKey): void {
 }
 
 /**
- * **桁区切り（CS）ビットは黄・青緑では「書き手の意図」の印にならない。**
+ * cell の属性を CSS class 文字列にする。
  *
- * 5250 の属性バイト表（SC30-3533）には黄・青緑を「修飾なし」で表す値が無く、
- * `COLOR(YLW)` を単体で指定しただけでも桁区切りビット付きの値（0x32 等）に
- * コンパイルされる（属性バイトだけを見ても DSPATR(CS) を本当に頼んだのか区別できない）。
- * 窓の見出し・枠（decorAttrClass）は既にこれを踏まえて桁区切りを出さないようにしていたが、
- * 通常のフィールドには適用しておらず、黄字の欄の頭に意図しない縦棒が出ていた
- * （利用者からのスクリーンショット報告で判明）。
+ * **桁区切り（DSPATR(CS)）はここに載せない。** 桁ごとの点・線は文字のランではなく
+ * 重ねる要素（`colsepTicks`）で描く。以前はランに `border-left` を付けていたため、
+ * 連なりの頭に縦線が 1 本出るだけで桁の区切りにならず（黄字の欄の頭の「意図しない縦棒」の報告）、
+ * border のぶん以降の桁も 1px ずつずれていた。
  */
-function hasRealColsep(color: string, columnSeparator: boolean): boolean {
-  return columnSeparator && color !== "yellow" && color !== "turquoise";
-}
-
-/** cell の属性を CSS class 文字列にする */
 function cellClass(c: Cell): string {
   const cls = [`c-${c.color}`];
   if (c.underline) cls.push("a-underline");
   if (c.reverse) cls.push("a-reverse");
   if (c.blink) cls.push("a-blink");
-  // DSPATR(CS)＝桁区切り。core は解析してセルに持っていたが、描画側が**素通ししていた**ため
-  // DSPF の区切り線が画面に一切出ていなかった（dspf-report (1)）。
-  if (hasRealColsep(c.color, c.columnSeparator)) cls.push("a-colsep");
   // **ホストが「表せない」と言ってきた桁は塗り潰す**（ACS と同じ見せ方）。
   // 空白のままだと「ヘルプが虫食い」としか見えず、文字が落ちたことが分からない
   if (c.kind === "unmappable") cls.push("a-unmappable");
@@ -906,27 +987,15 @@ function inputColorBands(
   return bands;
 }
 
-/** 属性バイト（decodeAttribute の結果）を CSS class 文字列にする（cellClass と同じ体裁） */
-function attrByteClass(byte: number): string {
-  const a = decodeAttribute(byte);
-  const cls = [`c-${a.color}`];
-  if (a.underline) cls.push("a-underline");
-  if (a.reverse) cls.push("a-reverse");
-  if (a.blink) cls.push("a-blink");
-  if (hasRealColsep(a.color, a.columnSeparator)) cls.push("a-colsep"); // cellClass と同じ体裁（片方だけ落とさない）
-  return cls.join(" ");
-}
-
 /**
- * 窓の枠・見出しに使う属性クラス。**桁区切り（CS）だけは落とす。**
+ * 属性バイト（decodeAttribute の結果）を CSS class 文字列にする（cellClass と同じ体裁）。
  *
- * 5250 の属性表では黄と青緑に桁区切りビット抜きの割り当てが無い（黄 = 0x32 は
- * 「黄＋桁区切り」）。そのため `WDWTITLE((*COLOR YLW))` のように色だけ指定した
- * 見出しにも縦棒が付いてしまう——DDS の書き手が頼んでいない印になる。
- * ACS も枠・見出しに桁区切りは出さない（画素で確認）。
- * 桁区切りは「欄の桁を仕切る」印なので、飾りの枠には持ち込まない。
+ * 窓の枠・見出し（WDWBORDER / WDWTITLE の色）にも使う。**そこに桁区切りは出ない**——
+ * 桁区切りは class ではなくセル（`snapshot.cells`）から重ねて描くので、セルに書かれない
+ * 窓の飾りには付きようがない。ACS も窓の部品では桁区切りの印を落としている
+ * （`PS5250.setAttributeToPlanes(…, true)`）。黄の見出し（0x32＝黄＋桁区切り）でも同じ。
  */
-function decorAttrClass(byte: number): string {
+function attrByteClass(byte: number): string {
   const a = decodeAttribute(byte);
   const cls = [`c-${a.color}`];
   if (a.underline) cls.push("a-underline");
@@ -3678,6 +3747,62 @@ watch(
   () => nextTick(fit)
 );
 
+// ---------------------------------------------------------------------------
+// 罫線（ACS「表示 > 罫線」）
+//
+// カーソルの行の**下端**に横線、桁の**左端**に縦線を、画面の端から端まで引く
+// （ACS `ScreenText.paintRule`: y＝行の最下画素、x＝桁の左端）。ACS と同じく
+// **フォーカスが外れても消さない**（カーソルと違う点。ヘルプに明記）。
+// ---------------------------------------------------------------------------
+
+/**
+ * 「カーソルに従う＝いいえ」のときの固定位置。ACS `ScreenText.setFollowCursor` と同じ規則:
+ *   - 従う → 固定を解く（次に「いいえ」にした時点の位置で固め直す）
+ *   - 従わない → **罫線を出した時点**のカーソル位置で固める。出し直しても位置は保つ
+ *     （ACS は固定位置を設定に残し、罫線キーでの出し入れでは動かさない）
+ */
+const ruleAnchor = ref<{ row: number; col: number } | null>(null);
+watch(
+  () => [props.ruleLine, props.ruleFollow] as const,
+  ([on, follow]) => {
+    if (follow) ruleAnchor.value = null;
+    else if (on && !ruleAnchor.value) ruleAnchor.value = { row: cursorCell.value.row, col: cursorCell.value.col };
+  },
+  { immediate: true }
+);
+/** 罫線を引く桁。固定位置は画面が縮んでも（27x132 → 24x80）画面の中に収める */
+const ruleCell = computed(() => {
+  const a = props.ruleFollow ? null : ruleAnchor.value;
+  if (!a) return cursorCell.value;
+  return { row: Math.min(a.row, props.snapshot.rows), col: Math.min(a.col, props.snapshot.cols) };
+});
+
+// ---------------------------------------------------------------------------
+// 桁区切り（DSPATR(CS)。ACS「表示 > 桁区切り文字」）
+//
+// 連なり（tn5250 の `columnSeparatorRuns`。保存 HTML と共有）ごとに、頭の左端と各桁の右端へ
+// 1px の印を置く。**1 桁 1 要素**にするのは、要素の位置ならブラウザが画素へ揃えるため
+// ——繰り返し模様にすると小数 px の桁幅で線が 2 画素に滲み、点が薄くぼやける。
+// ---------------------------------------------------------------------------
+const colsepTicks = computed<{ key: string; row: number; x: number }[]>(() => {
+  if (props.colSep === "off") return [];
+  const out: { key: string; row: number; x: number }[] = [];
+  for (const r of columnSeparatorRuns(props.snapshot.cells)) {
+    // 連なり同士は必ず 1 桁以上離れているので、境目の位置は重ならない（key が一意）
+    for (let k = 0; k <= r.len; k++) out.push({ key: `${r.row}:${r.col + k}`, row: r.row, x: r.col - 1 + k });
+  }
+  return out;
+});
+/**
+ * 印の縦位置。点は境目の下端から 2px 上に 3px、線は行の高さいっぱい
+ * （ACS `ScreenText` の描画位置。保存 HTML の `.cs` と同じ寸法）。
+ */
+function colsepStyle(t: { row: number; x: number }): Record<string, string> {
+  return props.colSep === "dot"
+    ? { left: t.x + "ch", top: `calc(${t.row * 1.25}em - 4px)` }
+    : { left: t.x + "ch", top: (t.row - 1) * 1.25 + "em" };
+}
+
 onMounted(() => {
   const host = gridEl.value?.parentElement;
   if (typeof ResizeObserver !== "undefined" && host) {
@@ -3685,6 +3810,8 @@ onMounted(() => {
     ro.observe(host);
   }
   fit();
+  // native キャレットの移動（クリック・矢印・setSelectionRange）でカーソルを描き直す
+  document.addEventListener("selectionchange", onSelectionChange);
   // 初期表示（接続直後の画面）でもフォーカス中ペインはカーソル欄へ
   if (props.focused && !props.snapshot.keyboardLocked) nextTick(() => focusCursorField());
 });
@@ -3769,6 +3896,7 @@ watch(
 );
 onBeforeUnmount(() => {
   ro?.disconnect();
+  document.removeEventListener("selectionchange", onSelectionChange);
   clearRectSel();
   window.removeEventListener("mousemove", onGridDragMove);
   window.removeEventListener("mouseup", onGridDragUp);
@@ -3785,6 +3913,7 @@ onBeforeUnmount(() => {
       '--grid-pad-y': GRID_PAD_Y + 'px'
     }"
     :data-focused="focused"
+    :data-composing="composing"
     :data-opt-hints="optHints"
     :data-dt-picker="dtPicker"
     @click="onGridClick"
@@ -3806,14 +3935,43 @@ onBeforeUnmount(() => {
     <span ref="rulerEl" class="cell-ruler" aria-hidden="true">0000000000</span>
     <!-- 矩形（ブロック）選択のハイライト -->
     <div v-if="rectSel" class="rect-sel" :style="rectStyle" aria-hidden="true"></div>
+    <!-- 桁区切り（DSPATR(CS)）。文字の上に重ねるだけで桁は動かさない -->
     <div
-      v-if="!cursorOnEditable"
+      v-for="t in colsepTicks"
+      :key="'cs' + t.key"
+      class="colsep"
+      :class="'colsep-' + colSep"
+      :style="colsepStyle(t)"
+      aria-hidden="true"
+    ></div>
+    <!-- 罫線（ACS）。フォーカスに関係なく出す -->
+    <template v-if="ruleLine">
+      <div
+        v-if="ruleStyle !== 'horizontal'"
+        class="rule rule-v"
+        :style="{ left: ruleCell.col - 1 + 'ch', height: snapshot.rows * 1.25 + 'em' }"
+        aria-hidden="true"
+      ></div>
+      <div
+        v-if="ruleStyle !== 'vertical'"
+        class="rule rule-h"
+        :style="{ top: ruleCell.row * 1.25 + 'em', width: snapshot.cols + 'ch' }"
+        aria-hidden="true"
+      ></div>
+    </template>
+    <!--
+      テキスト・カーソル。**key に位置を入れる**——動くたびに要素を作り直して明滅を頭から
+      やり直させ、移動直後は必ず見えている状態にする（ACS も移動のたびに描き直す）。
+    -->
+    <div
+      v-if="cursorShown"
+      :key="cursorCell.row + ':' + cursorCell.col"
       class="cursor"
-      :class="{ live: focused }"
+      :class="['shape-' + cursorShape, { live: focused && cursorBlink, ins: insertMode }]"
       :style="{
-        left: (cursorBox.col - 1) + 'ch',
-        top: (effCursor.row - 1) * 1.25 + 'em',
-        width: cursorBox.cols + 'ch'
+        left: (cursorCell.col - 1) + 'ch',
+        top: (cursorCell.row - 1) * 1.25 + 'em',
+        width: cursorCell.cols + 'ch'
       }"
       aria-hidden="true"
     ></div>
@@ -3941,7 +4099,7 @@ onBeforeUnmount(() => {
           v-for="(ln, i) in hostBorderRows(w)"
           :key="'wb' + w.id + '-' + i"
           class="gui-window-border"
-          :class="decorAttrClass(w.border!.cba)"
+          :class="attrByteClass(w.border!.cba)"
           :style="ln.style"
           aria-hidden="true"
         >{{ ln.text }}</div>
@@ -4140,19 +4298,98 @@ onBeforeUnmount(() => {
  * 「唯一の定義」が崩れ、同じ食い違いの種になる。代わりにオーバーレイが `.grid` の
  * 子であることを `grid-overlay-offset.test.ts` が固定する。
  */
-/* ホストのカーソル位置を示すブロックカーソル */
+/*
+ * テキスト・カーソル（ACS「表示 > カーソル」）。
+ *
+ * **白を difference で重ねて、下の字と地色を反転させる。** ACS は白の XOR で描く
+ * （`ScreenText.paintCursor`: setColor(white) + setXORMode(背景色)）。黒地では
+ * difference と XOR は同じ結果になり、緑の下線はカーソルの中だけ桃色に見える（ACS の実画面と同じ）。
+ * 明色テーマでは暗いブロックになる——どちらのテーマでも「反転」として読める。
+ *
+ * 形は**塗る範囲だけ**で変える（箱は常に 1 桁ぶん）。箱の寸法を変えないので、位置の計算が
+ * 形によって分かれない:
+ *   - ブロック … 全面
+ *   - 下線     … 下端 2px（ACS: cursorHeight = ascent + descent - 2）
+ *   - 挿入中   … 下半分（ACS `setInsert` → cursorHeight = 行高 / 2。形に依らない）
+ */
 .cursor {
   position: absolute;
   margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
-  /* 幅は inline style（cursorBox）が決める——全角の上では 2 桁ぶん。
+  /* 幅は inline style（cursorCell）が決める——全角の上では 2 桁ぶん。
      ここは全角セルが取れないときの既定 */
   width: 1ch;
   height: 1.25em;
-  background: color-mix(in srgb, var(--t-green) 45%, transparent);
+  background: #fff;
+  mix-blend-mode: difference;
   pointer-events: none;
   /* 矩形選択（z-index:3）より上。カーソルは選択の始点＝必ず矩形の角に載るため、
      下に置くとハイライトに沈んで「始点にカーソルが見える」という ACS の挙動が崩れる */
   z-index: 4;
+}
+.cursor.shape-underline {
+  background: linear-gradient(to top, #fff 2px, transparent 2px);
+}
+.cursor.ins {
+  background: linear-gradient(to top, #fff 50%, transparent 50%);
+}
+/*
+ * **native キャレットは透明にする**——カーソルは上の重ね要素が描く。消さずに透明にするのは、
+ * IME の変換窓の位置決めと選択範囲の起点に要るから。変換中だけは重ね要素を隠すので
+ * （入力中の字にかぶる）、代わりに native キャレットを見せる。
+ */
+.grid-input {
+  caret-color: transparent;
+}
+.grid[data-composing="true"] .grid-input:not([readonly]) {
+  caret-color: currentColor;
+}
+/*
+ * 罫線（ACS「表示 > 罫線」）。色は ACS の既定（緑 `cRC`）。縦線は桁の左端、横線は行の下端の
+ * 最後の 1 画素（`translateY(-1px)`。ACS `paintRule`: y = 行の上端 + 行高 - 1）。
+ * カーソル（z-index:4）より下に置き、交点ではカーソルの反転が線にも掛かるようにする。
+ */
+.rule {
+  position: absolute;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  background: var(--t-green);
+  pointer-events: none;
+  z-index: 2;
+}
+.rule-v {
+  top: 0;
+  width: 1px;
+}
+.rule-h {
+  left: 0;
+  height: 1px;
+  transform: translateY(-1px);
+}
+/*
+ * 桁区切り（DSPATR(CS)）。1 桁の境目に 1px。色は ACS の既定（白 `cCS`）＝端末の白
+ * （明色テーマでは濃い字色になる）。点と線の寸法は保存 HTML（tn5250 `screen-html.ts` の `.cs`）と同じ。
+ */
+.colsep {
+  position: absolute;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  width: 1px;
+  background: var(--t-white);
+  pointer-events: none;
+  z-index: 1;
+}
+.colsep-dot {
+  height: 3px;
+}
+.colsep-line {
+  height: calc(1.25em - 1px);
+}
+/*
+ * ポインター＝十字線（ACS「カーソル > ポインター」。ACS は画面の上に入ったときだけ十字にする）。
+ * `cursor` は継承するので文字のランは `.grid` の指定に従う。入力欄はブラウザが I ビームを
+ * 付けるので明示する。押せる部品（凡例ボタン・選択肢）は自分の `pointer` を保つ。
+ */
+.pane[data-pointer="crosshair"] .grid,
+.pane[data-pointer="crosshair"] .grid-input {
+  cursor: crosshair;
 }
 /* 矩形（ブロック）選択のハイライト */
 .rect-sel {
@@ -4163,11 +4400,12 @@ onBeforeUnmount(() => {
   pointer-events: none;
   z-index: 3;
 }
+/* 明滅（ACS「明滅カーソルが可能」）。ACS の明滅スレッドと同じ 0.5 秒ごとの点滅で、消える間は完全に消す */
 .cursor.live {
-  animation: cursorBlink 1.1s steps(1) infinite;
+  animation: cursorBlink 1s steps(1) infinite;
 }
 @keyframes cursorBlink {
-  50% { opacity: 0.2; }
+  50% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cursor.live { animation: none; }
@@ -4493,7 +4731,6 @@ onBeforeUnmount(() => {
    */
   background: var(--cell-bg, transparent);
   vertical-align: baseline;
-  caret-color: currentColor;
 }
 .grid-input:focus {
   outline: none;
@@ -4516,7 +4753,7 @@ onBeforeUnmount(() => {
    1 桁の枠が浮き出る。 */
 .grid-input.a-underline {
   text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor var(--t-underline, 55%), transparent);
 }
 
 /* ==== コントロール表現（画面設定・セッションごと）====

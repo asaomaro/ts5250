@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { downloadScreenHtml } from "../src/screenExport.js";
 import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
 import { viewSettings } from "../src/stores/viewSettings.js";
+import { useSkin } from "../src/composables/useSkin.js";
 import type { Cell, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
@@ -81,6 +82,7 @@ beforeEach(() => {
   // 表示設定は全画面共通の保存値。テスト間で持ち越さないよう既定へ戻す
   viewSettings.set("kana", "auto");
   viewSettings.set("sosi", "none");
+  viewSettings.set("colSep", "dot");
 });
 
 afterEach(() => {
@@ -224,5 +226,59 @@ describe("画面を HTML で保存", () => {
     downloadScreenHtml(SID);
     expect(written).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
     expect(written).toContain('for="s2">SO/SI <span class="tv sosi">薄目</span></label>');
+  });
+});
+
+/**
+ * **桁区切りも画面と同じ描き方で書き出す**（ACS「桁区切り文字」＝ドット／線／オフ）。
+ * ページ内の切り替えは持たないので、書き出した時点の設定がそのまま残る。
+ */
+describe("桁区切りの書き出し", () => {
+  const withColsep = () => snapshotWith([cell("A", { columnSeparator: true, color: "turquoise" })]);
+
+  it("既定（ドット）なら点で書き出す", () => {
+    addSession(withColsep());
+    downloadScreenHtml(SID);
+    expect(written).toContain('<div class="cs cs-dot"');
+  });
+
+  it("このセッションで「線」にしていれば線で書き出す", () => {
+    addSession(withColsep());
+    viewSettings.setOverride(SID, "colSep", "line");
+    try {
+      downloadScreenHtml(SID);
+      expect(written).toContain('<div class="cs cs-line"');
+    } finally {
+      viewSettings.clearAll(SID);
+    }
+  });
+
+  it("オフなら書き出さない", () => {
+    addSession(withColsep());
+    viewSettings.set("colSep", "off");
+    downloadScreenHtml(SID);
+    expect(written).not.toContain('<div class="cs ');
+  });
+});
+
+/** **暗色の端末配色は「外観 > 5250 端末」に合わせる**（クラシック＝ACS の標準色／ソフト＝以前の淡い色） */
+describe("端末の配色の書き出し", () => {
+  it("クラシック（既定）ならそのまま、ソフトなら pal-soft で書き出す", () => {
+    addSession(snapshotWith([cell("A")]));
+    const { setSkin } = useSkin();
+    try {
+      setSkin("t5250");
+      downloadScreenHtml(SID);
+      expect(written).toContain('<div class="page">');
+      setSkin("t5250-soft");
+      downloadScreenHtml(SID);
+      expect(written).toContain('<div class="page pal-soft">');
+      // Web スキンは HTML に写せないのでクラシックで出す
+      setSkin("github");
+      downloadScreenHtml(SID);
+      expect(written).toContain('<div class="page">');
+    } finally {
+      setSkin("t5250");
+    }
   });
 });
