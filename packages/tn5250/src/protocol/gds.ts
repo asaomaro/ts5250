@@ -55,8 +55,20 @@ export function parseRecord(record: Uint8Array): ParsedRecord {
 }
 
 /**
+ * **クライアント発レコードのフラグ 2 バイト目**。
+ *
+ * ACS はクライアント → ホストの全レコードでこれを立てる（`DS5250.sendAll` / `processReadScreen` /
+ * `processReadScreenEA` / `processSaveScreen` のいずれもヘッダ生成で 0x80）。
+ * 以前は READ SCREEN EXTENDED(0x64) の応答と Query Reply だけに付けていた——
+ * 0x64 で立てないと実機からヘルプ画面が返ってこなかったのが分かった時に、そこだけ直したため。
+ * ACS に合わせて**クライアント発は全部立てる**。
+ */
+export const CLIENT_FLAG2 = 0x80;
+
+/**
  * クライアント → ホストのレコードを GDS ヘッダ付きで構築する。
- * flag2 はフラグ 2 バイト目。ACS 実機はクライアント発のレコードで常に 0x80 を立てている。
+ * flag2 はフラグ 2 バイト目。ACS 実機はクライアント発のレコードで常に 0x80 を立てている
+ * （`CLIENT_FLAG2`）。
  */
 export function buildRecord(
   opcode: number,

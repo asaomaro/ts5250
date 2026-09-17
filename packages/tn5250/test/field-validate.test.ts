@@ -3,11 +3,12 @@ import { validateFieldContent } from "../src/screen/field-validate.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { FFW } from "../src/protocol/constants.js";
 import type { InternalField } from "../src/screen/buffer.js";
+import type { DbcsFieldType } from "../src/screen/types.js";
 
 const sbcs = codecForCcsid(37);
 const dbcs = codecForCcsid(1399);
 
-function field(ffw: number, dbcsType?: "pure" | "open" | "either"): InternalField {
+function field(ffw: number, dbcsType?: DbcsFieldType): InternalField {
   return { startAddr: 0, length: 20, ffw, attrByte: 0x24, mdt: false, ...(dbcsType ? { dbcsType } : {}) };
 }
 
@@ -69,12 +70,26 @@ describe("validateFieldContent — コードページ許容文字", () => {
 });
 
 describe("validateFieldContent — DBCS 種別", () => {
-  it("pure（J 型）は DBCS のみ許可、SBCS を拒否", () => {
+  // **only（0x8200）が J 型。** 以前は 0x8200 を "pure" と呼んでいたので、4 値化で
+  // J 型の全角専用検査が外れないことをここで固定する
+  it("only（J 型・FCW 0x8200）は DBCS のみ許可、SBCS を拒否", () => {
+    const only = field(FFW.ID_VALUE, "only");
+    expect(() => validateFieldContent("日本語", only, dbcs)).not.toThrow();
+    expect(() => validateFieldContent("日A", only, dbcs)).toThrow(
+      expect.objectContaining({ code: "FIELD_TYPE" })
+    );
+  });
+  it("pure（FCW 0x8220）も DBCS のみ許可、SBCS を拒否", () => {
     const pure = field(FFW.ID_VALUE, "pure");
     expect(() => validateFieldContent("日本語", pure, dbcs)).not.toThrow();
     expect(() => validateFieldContent("日A", pure, dbcs)).toThrow(
       expect.objectContaining({ code: "FIELD_TYPE" })
     );
+  });
+  it("either（E 型）は SBCS だけ・DBCS だけのどちらも許可", () => {
+    const either = field(FFW.ID_VALUE, "either");
+    expect(() => validateFieldContent("ABC", either, dbcs)).not.toThrow();
+    expect(() => validateFieldContent("日本", either, dbcs)).not.toThrow();
   });
   it("open（O 型）は SBCS/DBCS 混在を許可", () => {
     const open = field(FFW.ID_VALUE, "open");

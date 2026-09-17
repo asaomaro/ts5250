@@ -1,7 +1,8 @@
 import { ByteWriter } from "./bytes.js";
-import { buildRecord } from "./gds.js";
+import { buildRecord, CLIENT_FLAG2 } from "./gds.js";
 import { COMMAND, ESC, OPCODE, ORDER } from "./constants.js";
 import { SO, SI, type Codec } from "@ts5250/ebcdic";
+import type { DbcsFieldType } from "../screen/types.js";
 import type { ScreenBuffer } from "../screen/buffer.js";
 
 /**
@@ -24,7 +25,7 @@ export function buildSaveScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
   const w = new ByteWriter();
   w.u8(ESC).u8(COMMAND.RESTORE_SCREEN);
   writeScreenAsWtd(w, buf, codec);
-  return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array());
+  return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array(), {}, CLIENT_FLAG2);
 }
 
 /** 現在の画面を再現する WTD ストリームを書き出す（SAVE SCREEN / SAVE PARTIAL SCREEN 共通） */
@@ -114,7 +115,7 @@ export function buildReadScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8A
   const ends = fieldEndAttrAddrs(buf);
   // 画面全域をスキャン。DBCS の lead は 2 バイト書き tail は 0 バイト（桁数は保たれる）。
   for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec, 0x40, ends);
-  return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
+  return buildRecord(OPCODE.PUT_GET, w.toUint8Array(), {}, CLIENT_FLAG2);
 }
 
 /** READ SCREEN EXTENDED の行区切り（ACS 実機の応答を実測して判明） */
@@ -183,11 +184,13 @@ export function buildReadScreenExtendedResponse(buf: ScreenBuffer, codec: Codec)
     while (end > 0 && bytes[end - 1] === 0x00) end--; // 行末の未書き込み桁は送らない
     w.bytes(bytes.subarray(0, end)).u8(ROW_DELIMITER);
   }
-  return buildRecord(OPCODE.READ_SCREEN, w.toUint8Array(), {}, 0x80);
+  return buildRecord(OPCODE.READ_SCREEN, w.toUint8Array(), {}, CLIENT_FLAG2);
 }
 
-function fcwFor(kind: "pure" | "open" | "either"): number {
-  if (kind === "pure") return 0x8200;
+/** DBCS 種別 → FCW（ACS `Field5250` の定数と同じ対応。`applySf` の振り分けの逆） */
+function fcwFor(kind: DbcsFieldType): number {
+  if (kind === "only") return 0x8200;
+  if (kind === "pure") return 0x8220;
   if (kind === "either") return 0x8240;
   return 0x8280;
 }

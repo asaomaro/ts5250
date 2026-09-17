@@ -143,11 +143,11 @@ describe("ScreenBuffer フィールド", () => {
     expect(b.orderedFields()[0]?.length).toBe(8);
   });
 
-  it("DBCS FCW（0x8200/0x8240/0x8280）を dbcsType に解釈する", () => {
+  it("addField の dbcsType を snapshot にそのまま出す（FCW からの振り分けは fcw-dbcs-self-check.test.ts）", () => {
     const b = new ScreenBuffer();
     b.setAttr(b.addrOf(1, 1), 0x24);
-    b.addField(b.addrOf(1, 2), 20, FFW.ID_VALUE, 0x24, "pure");
-    expect(b.snapshot("t", false).fields[0]?.dbcsType).toBe("pure");
+    b.addField(b.addrOf(1, 2), 20, FFW.ID_VALUE, 0x24, "only");
+    expect(b.snapshot("t", false).fields[0]?.dbcsType).toBe("only");
   });
 
   it("clearUnit で全部リセットされる", () => {

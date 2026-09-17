@@ -130,6 +130,7 @@ export type {
   WsCloseReq,
   WsOpened,
   WsScreen,
+  WsAlarm,
   WsJobInfoRes,
   WsError,
   WsClosed,
