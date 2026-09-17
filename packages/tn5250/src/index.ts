@@ -21,6 +21,7 @@ export {
 } from "@ts5250/base";
 
 // 画面モデル（共有型。server / web-ui が import する）
+export { selfCheckDigitOk } from "./screen/field-validate.js";
 export type {
   ScreenSnapshot,
   WriteExtent,
@@ -28,6 +29,8 @@ export type {
   Field,
   FieldAdjust,
   ContinuedPart,
+  DbcsFieldType,
+  SelfCheckKind,
   ScreenColor,
   CellKind,
   GuiConstructs,

@@ -26,8 +26,15 @@
 判断した——ACS の実際の見た目の挙動と完全に一致する保証はしていない
 
 - 背景: `requirements.md`「非機能要件」「未確定事項」、`design.md`「エラー処理 /
-  異常系」の通り、この開発環境には ACS 実機が無く、実際に ACS を動かして
-  CURSORCL3 のシナリオでどう見えるかを確認する手段が無い。
+  異常系」の通り、~~この開発環境には ACS 実機が無く、実際に ACS を動かして
+  CURSORCL3 のシナリオでどう見えるかを確認する手段が無い。~~
+  **訂正（2026-09-17）**: 「ACS が無い」は誤り。ACS の jar（`acshod2.jar`）も、それを
+  そのまま使って実機を操作する 5250-operator MCP も手元にあり、中継タップ
+  （`scripts/tap-proxy.mjs`）で送信バイトの比較もできる。以後の ACS 準拠化
+  （PA0100J のカーソル・YB0140R の窓）はこの方法で実測と突き合わせた。
+  **ACS の挙動はコードの読みだけで決めず、必ず実測と突き合わせる。**
+  ただし CURSORCL3 のシナリオそのものは、この訂正の時点でも実測していない。
+  同じ誤りは `requirements.md` / `research.md` / `test-result.md` の「ACS が無い」にも及ぶ。
 - 判断: `PR#387` の分岐を撤去し、ACS のデコンパイル済みコア
   （`DS5250.preprocessWCC2()`、`.aidev/works/20260915-pr387-acs-premise-unverified`
   research.md F3）が確認上そうする（IC/MC の指定にそのまま従う）という事実に

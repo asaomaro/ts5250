@@ -1,10 +1,10 @@
 import type { Field } from "@ts5250/tn5250";
-import { isRawSentinel } from "@ts5250/tn5250/browser";
+import { isDbcsOnly, isRawSentinel } from "@ts5250/tn5250/browser";
 import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
 
 /**
  * 文字がフィールドの型で受理されるか（web 入力時の拒否。core の validateFieldContent と整合）。
- * 数値型は数字・符号・小数点、A 型（SBCS）は非全角、J 型（pure DBCS）は全角のみ。
+ * 数値型は数字・符号・小数点、A 型（SBCS）は非全角、J 型（`only`）・`pure` は全角のみ。
  * コードページ許容文字の厳密判定は core（送信時）で行い、ここは型ベースの一次フィルタ。
  */
 export function acceptsChar(field: Field, ch: string): boolean {
@@ -35,7 +35,8 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
   if (field.keyboardInhibited) return "kbd-inhibited";
 
   // DBCS 種別
-  if (field.dbcsType === "pure" && !isWide) return "dbcs-required"; // J 型: 全角のみ
+  // J 型（0x8200＝`only`）と `pure`（0x8220）は全角のみ。判定は core と共有（`isDbcsOnly`）
+  if (isDbcsOnly(field.dbcsType) && !isWide) return "dbcs-required";
   if (field.dbcsType === undefined && isWide) return "alphanumeric"; // SBCS(A/数値)に全角不可
   // open/either は SBCS/DBCS 両方許可（追加制限なし）
 

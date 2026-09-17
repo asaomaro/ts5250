@@ -3,6 +3,7 @@ import { FFW } from "../protocol/constants.js";
 import { isRawSentinel } from "./attr-sentinel.js";
 import type { Codec } from "@ts5250/ebcdic";
 import type { InternalField } from "./buffer.js";
+import type { DbcsFieldType } from "./types.js";
 
 /**
  * フィールド入力値の内容検証（FFW シフト種別・DBCS 種別・コードページ許容文字）。
@@ -68,11 +69,13 @@ export function validateFieldContent(
     throw new As400Error("FIELD_TYPE", `alphabetic-only field rejects: ${JSON.stringify(value)}`);
   }
 
-  // DBCS 種別（pure=DBCS のみ / open=SBCS+DBCS / either=どちらか）
-  if (field.dbcsType === "pure") {
+  // DBCS 種別（only / pure=DBCS のみ / open=SBCS+DBCS / either=どちらか）。
+  // **`only`（0x8200・DDS の J 型）も DBCS のみ。** 以前は 0x8200 を "pure" と呼んでいたので
+  // "pure" だけを見ていた——4 値化（`DbcsFieldType`）で J 型が "only" になったため、両方を拾う
+  if (isDbcsOnly(field.dbcsType)) {
     for (const ch of typed) {
       if (!isDbcsChar(ch, codec)) {
-        throw new As400Error("FIELD_TYPE", `DBCS-only (pure) field rejects SBCS char: ${JSON.stringify(ch)}`);
+        throw new As400Error("FIELD_TYPE", `DBCS-only (${field.dbcsType}) field rejects SBCS char: ${JSON.stringify(ch)}`);
       }
     }
   }
@@ -90,9 +93,68 @@ export function validateFieldContent(
   }
 }
 
+/**
+ * **DBCS しか入らない欄か**（`only`＝0x8200 の J 型 / `pure`＝0x8220）。
+ * `open` / `either` は SBCS も通す。web-ui の打鍵時検査（`fieldValidate.ts`）も同じ判定を使う。
+ */
+export function isDbcsOnly(dbcsType: DbcsFieldType | undefined): boolean {
+  return dbcsType === "only" || dbcsType === "pure";
+}
+
 /** その文字が現在のコードページで DBCS（2 バイト）として表現されるか */
 function isDbcsChar(ch: string, codec: Codec): boolean {
   if (!codec.encodeDbcsChar) return false;
   const cp = ch.codePointAt(0);
   return cp !== undefined && codec.encodeDbcsChar(cp) !== undefined;
+}
+
+/**
+ * **自己点検欄の検算**（DDS の `CHECK(M10)` / `CHECK(M11)`。FCW 0xB1A0 / 0xB140）。
+ *
+ * ACS `Field5250.checkModulusField()` / `modulusCheck()` をそのまま写した:
+ * - **末尾 1 桁がチェック・ディジット**。残りを右から重み付けして合計する
+ * - `mod10`: 重みは右端から 1,2 の交互。2 倍した桁が 10 以上なら 9 を引く（Luhn と同じ）
+ * - `mod11`: 重みは右端から 2,3,4,5,6,7 の繰り返し（7 の次は 2 へ戻る）
+ * - 合計 % 法 が 0 ならチェック・ディジットも 0 のとき合格、
+ *   0 でなければ「余り + チェック・ディジット == 法」のとき合格
+ * - **全桁が 0（または空）なら検査しない**（ACS も全桁を OR して下位 4 ビットが 0 なら素通し）
+ *
+ * 桁の値は ACS と同じく**文字コードの下位 4 ビット**で取る（EBCDIC の `F0`〜`F9` でも
+ * ASCII の `30`〜`39` でも同じ値になる）。9 を超えたものは 0 として数える。
+ *
+ * **ホストはこれを検証しない。** 端末が止めなければ誤入力がそのまま通る
+ * （`MANDATORY_ENTER` / `MANDATORY_FILL` と同じ性質）。
+ */
+export function selfCheckDigitOk(value: string, kind: "mod10" | "mod11"): boolean {
+  const digits = value.trim();
+  if (digits.length < 2) return true; // 検算する余地が無い（ACS も長さ 1 以下では検査しない）
+  const nibble = (ch: string): number => {
+    const d = ch.charCodeAt(0) & 0x0f;
+    return d > 9 ? 0 : d;
+  };
+  const checkDigit = nibble(digits[digits.length - 1]!);
+  const body = digits.slice(0, -1);
+  const modulus = kind === "mod10" ? 10 : 11;
+  let sum = 0;
+  let weight = 1;
+  let orAll = digits[digits.length - 1]!.charCodeAt(0);
+  for (let i = body.length - 1; i >= 0; i--) {
+    orAll |= body.charCodeAt(i);
+    const d = nibble(body[i]!);
+    if (kind === "mod10") {
+      if (weight === 1) {
+        weight = 2;
+        if (d > 4) sum -= 9;
+      } else {
+        weight = 1;
+      }
+    } else {
+      weight = weight === 7 ? 2 : weight + 1;
+    }
+    sum += weight * d;
+  }
+  if ((orAll & 0x0f) === 0) return true; // 全桁 0 / 空欄は検査しない
+  const rem = sum % modulus;
+  if (rem === 0) return checkDigit === 0;
+  return rem + checkDigit === modulus;
 }

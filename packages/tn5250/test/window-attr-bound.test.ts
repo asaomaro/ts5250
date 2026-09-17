@@ -50,6 +50,27 @@ describe("窓の中の属性境界（ACS 準拠）", () => {
     expect(row10[20]!.underline).toBe(false);
   });
 
+  /**
+   * **左端も打ち切る。** 窓を開くと `blankWindowArea` が矩形のセルを消すので、背面の欄の
+   * 閉じ属性が窓の中にあると一緒に消え、窓の左側で始まった属性が窓の中を突き抜ける
+   * （実機 YB0140R の窓を PDM 一覧の上で PageUp すると、OPT 欄の下線が窓の全幅に伸びた。
+   * ACS は 2〜3 桁のまま。RESTORE SCREEN の書き戻しでは `retainedEnds` も残らない）。
+   */
+  it("窓の左側で始まった下線の閉じ属性が窓に消されても、窓の中へ伸びない", () => {
+    const buf = new ScreenBuffer();
+    buf.setAttr(buf.addrOf(7, 5), 0x24); // 背面の欄の下線（窓の左側で始まる）
+    buf.setChar(buf.addrOf(7, 6), "1");
+    buf.setAttr(buf.addrOf(7, 12), 0x20); // 閉じ属性（窓の矩形の中＝窓を開くと消える）
+    buf.addWindow(parsed, WIN_ROW, WIN_COL);
+    buf.setChar(buf.addrOf(7, 20), "W"); // 窓の中身（属性を伴わない表示専用テキスト）
+    const row = buf.snapshot("t", false).cells[6]!; // row7 = index6
+    expect(row[5]!.underline).toBe(true); // 窓の左側（背面の欄）は下線のまま
+    expect(row[8]!.underline).toBe(true);
+    expect(row[9]!.underline).toBe(false); // 窓の左端（col10）から打ち切る
+    expect(row[19]!.underline).toBe(false); // 'W'
+    expect(row[34]!.underline).toBe(false);
+  });
+
   it("窓が無ければ従来どおり行をまたいで下線が続く（回帰させない）", () => {
     const buf = new ScreenBuffer();
     buf.setAttr(buf.addrOf(1, 78), 0x24); // 1 行目の末尾近くで下線を開始（閉じ属性なし）

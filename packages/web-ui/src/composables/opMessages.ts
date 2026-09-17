@@ -216,6 +216,8 @@ export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用でき
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
 /** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";
+/** 自己点検欄（CHECK(M10)/CHECK(M11)）の検査桁が合わない。ACS も同じ場面で送信を止める */
+export const MSG_SELF_CHECK = "この項目の検査数字が正しくありません";
 
 /**
  * **このタブのシステムが設定から消えた**（`20260802-tabs-own-system`）。

@@ -1,5 +1,5 @@
 import { OPCODE } from "./constants.js";
-import { buildRecord } from "./gds.js";
+import { buildRecord, CLIENT_FLAG2 } from "./gds.js";
 
 /** 端末タイプ名（IBM-3179-2 等）から device type と model を取り出す */
 function typeAndModel(terminalType: string): { type: string; model: string } {
@@ -37,7 +37,11 @@ function toEbcdic(ch: string): number {
  * 当方の旧申告だと PDM の F1 ヘルプが CLEAR UNIT ALTERNATE（27x132）経路に落ち、
  * 24x80 用に組まれた背景が 132 桁に流し込まれてレイアウトが崩れた。
  */
-export function buildQueryReply(terminalType = "IBM-3179-2", enhanced = false): Uint8Array {
+export function buildQueryReply(
+  terminalType = "IBM-3179-2",
+  enhanced = false,
+  screenSize: "24x80" | "27x132" = "24x80"
+): Uint8Array {
   void enhanced; // ACS 実機と同じ申告に統一する（拡張は常に広告する。t[53]/t[54] 参照）
   const { type, model } = typeAndModel(terminalType);
   const t = new Uint8Array(71);
@@ -73,12 +77,19 @@ export function buildQueryReply(terminalType = "IBM-3179-2", enhanced = false): 
   t[44] = 0x01; // 最大入力フィールド数 = 500
   t[45] = 0xf4;
   t[49] = 0x7b; // controller/display capability
-  t[50] = 0x31; // bit0-3=0011: 24x80 と 27x132 の両対応
+  // **画面サイズの申告は、実際に使うサイズに合わせる（ACS と同じ）。**
+  // ACS を中継タップで採ったところ、同じ端末タイプ（IBM-5555-C01）のまま
+  // **psSize=2（24x80）では 0x11、psSize=5（27x132）では 0x31** を送っていた
+  // （`work/acs-tap/` の実測）。常に 0x31 を送ると「27x132 も出せる」と申告することになり、
+  // 24x80 のセッションへホストが 27x132 の書式（CLEAR UNIT ALTERNATE 等）を送ってくる余地を
+  // 自分で作る（`wtd-applier.ts` に「24x80 端末で CLEAR UNIT ALTERNATE」の警告があるのは
+  // その現れ）。
+  t[50] = screenSize === "27x132" ? 0x31 : 0x11;
   t[52] = 0x40;
   t[53] = 0x0f; // 拡張 5250（FCW & WDSF 等）
   t[54] = 0xc8; // 拡張ユーザーインターフェース
   t[61] = 0x01;
   t[62] = 0x01;
   // opcode は PUT_GET(0x03)・フラグ 2 バイト目 0x80。ACS 実機はこれで返す。
-  return buildRecord(OPCODE.PUT_GET, t, {}, 0x80);
+  return buildRecord(OPCODE.PUT_GET, t, {}, CLIENT_FLAG2);
 }

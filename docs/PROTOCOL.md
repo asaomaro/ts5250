@@ -80,7 +80,10 @@ LL(2)  type(2)=12A0  reserved(2)=0000  varHdrLen(1)  flag1(1)  flag2(1)  opcode(
 
 - `LL` = レコード全体のバイト長（LL 自身を含む）。
 - `varHdrLen` = 可変ヘッダ長（自身を含む）。基本 **04**（flag1+flag2+opcode の 3 バイト＋自身）。`04` 超は拡張ヘッダとして読み飛ばす。
-- `flag1` ビット: `ERR=80 ATN=40 SRQ=04 TRQ=02 HLP=01`（RFC 1205 / tn5250 record.h 一致）。`flag2` は未使用（00）。
+- `flag1` ビット: `ERR=80 ATN=40 SRQ=04 TRQ=02 HLP=01`（RFC 1205 / tn5250 record.h 一致）。
+- `flag2`: ホスト発では見ない。**クライアント発は `80` を立てる**（`CLIENT_FLAG2`。ACS が AID 応答・
+  READ SCREEN・SAVE SCREEN 応答・Query Reply のすべてで立てることを中継タップで実測）。
+  例外は Attn / SysReq のフラグレコードと Cancel Invite への返事で、実機で確かめてある `00` のまま。
 - `opcode`（ホスト→クライアントの指標。全 opcode でデータは処理する）:
 
 | opcode | 名称 | | opcode | 名称 |
@@ -227,8 +230,12 @@ green/white/red/turquoise/yellow/pink/blue）:
 SHIFT 値（0700 マスク）: `0000`=英数, `0100`=英字専用, `0200`=数字シフト, `0300`=数字専用,
 `0400`=カタカナ, `0500`=数字桁専用, `0600`=I/O, `0700`=符号付数字。
 
-**FCW（Field Control Word）**（上位 2 ビット `10`）: DBCS 種別を解釈。`8200`=pure（表意文字専用）、
-`8240`=either、`8280`/`82C0`=open。他は読み飛ばし（保持のみ）。
+**FCW（Field Control Word）**（上位 2 ビット `10`）: DBCS 種別を解釈。ACS（`Field5250` の定数）と同じく
+**値の完全一致**で 4 種に振り分ける: `8200`=only（表意文字専用・DDS の J）、`8220`=pure、`8240`=either、
+`8280`=open。`82C0` など上記以外は ACS も種別として扱わないので無視する（以前は `8200` を pure と呼び、
+`82C0` を open に含めていた）。only / pure は DBCS しか受け付けない。
+自己点検欄（DDS の `CHECK(M11)` / `CHECK(M10)`）は `B140` / `B1A0` で、末尾 1 桁を検査桁として
+AID 送信前に検算する（`selfCheckDigitOk`。ホストは検証しない）。他は読み飛ばし（保持のみ）。
 
 ### 4.5 PC Organizer（`STRPCO` / `STRPCCMD`）
 
@@ -291,7 +298,7 @@ GUI 構造体（§5.3）は WSF ではなく WTD オーダー **15(WDSF)** で�
 | 40-43 | 00 61 50 00 | シリアル |
 | 44,45 | FF FF | 最大入力フィールド数 |
 | 46-48 | 00 00 00 | |
-| 49,50 | 23 31 | controller/display capability |
+| 49,50 | 7B 11（27x132 セッション: 7B 31） | controller/display capability。50 は**実際に使う画面サイズ**を申告する（ACS と同じ。常に 31 だと 24x80 端末へ 27x132 の書式を招く） |
 | 51,52 | 00 00 | 予約 |
 | 53 | **00**（enh: **02**） | 拡張 5250 FCW & WDSF（bit6） |
 | 54 | **00**（enh: **80**） | 拡張 UI サポートレベル 2（bit0） |

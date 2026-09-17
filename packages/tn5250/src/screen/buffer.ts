@@ -19,6 +19,8 @@ import type {
   Cell,
   CellKind,
   ContinuedPart,
+  DbcsFieldType,
+  SelfCheckKind,
   Field,
   FieldAdjust,
   GuiConstructs,
@@ -82,7 +84,9 @@ export interface InternalField {
   attrByte: number;
   mdt: boolean;
   /** DBCS フィールド種別（FCW 由来。undefined = SBCS） */
-  dbcsType?: "pure" | "open" | "either";
+  dbcsType?: DbcsFieldType;
+  /** 自己点検欄の検査方式（FCW 0xB140/0xB1A0 由来。undefined = 検査なし） */
+  selfCheck?: SelfCheckKind;
   /** 継続入力フィールドの区間の役割（FCW 0x8601/0x8603/0x8602 由来。undefined = 単独欄） */
   continued?: ContinuedPart;
   /** カーソル送り先の欄番号（FCW 0x88nn 由来。undefined = 画面順どおり） */
@@ -141,6 +145,11 @@ export class ScreenBuffer {
   private fields: InternalField[] = [];
   cursorAddr = 0;
   systemMessage: string | undefined;
+  /**
+   * SOH が申告したメッセージ行の行番号（1 基点）。既定 24 は ACS `DS5250` の初期値と同じ。
+   * `systemMessage` をいつ捨てるかの判定に使う（`clearSystemMessageIfTouched`）
+   */
+  private msgLineRow = 24;
   /** 拡張 5250 GUI 構造体（WDSF 由来）。id は生成順の連番 */
   private guiSelections: GuiSelectionField[] = [];
   private guiWindows: GuiWindow[] = [];
@@ -191,6 +200,7 @@ export class ScreenBuffer {
     const p = this.pending;
     const r = Math.floor(addr / this.cols);
     const c = addr % this.cols;
+    this.clearSystemMessageIfTouched(r, r);
     p.cells++;
     if (r < p.r1) p.r1 = r;
     if (r > p.r2) p.r2 = r;
@@ -222,6 +232,7 @@ export class ScreenBuffer {
     const p = this.pending;
     const r1 = Math.floor(from / this.cols);
     const r2 = Math.floor(to / this.cols);
+    this.clearSystemMessageIfTouched(r1, r2);
     const [c1, c2] = r1 === r2 ? [from % this.cols, to % this.cols] : [0, this.cols - 1];
     p.cells += to - from + 1;
     if (r1 < p.r1) p.r1 = r1;
@@ -650,6 +661,29 @@ export class ScreenBuffer {
     const b = Array.from(body);
     this.aidNoDataMask =
       b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
+    // **本体 4 バイト目はメッセージ行の行番号**（ACS `DS5250` の SOH 分岐が
+    // `data[i+5]`＝本体 4 バイト目を、1〜画面行数 の範囲でだけ `SOH_msgline_num` に採るのと同じ）。
+    // `systemMessage` の寿命判定に使う（`clearSystemMessageIfTouched`）
+    const msgRow = b[3];
+    if (msgRow !== undefined && msgRow > 0 && msgRow <= this.rows) this.msgLineRow = msgRow;
+  }
+
+  /**
+   * **メッセージ行へ書き込んだらシステム・メッセージは消える。**
+   *
+   * ACS は WRITE ERROR CODE の本文を**メッセージ行のセルそのもの**へ書く
+   * （`DS5250.processWriteErrorCode` が `SOH_msgline_num` の行を書く）ので、後続の画面が
+   * その行を書き替えれば自然に消える。こちらは本文を画面に描かず `systemMessage` として
+   * 別に持つ設計なので、同じ寿命になるようここで明示的に捨てる。
+   *
+   * これが無いと、PA0100R で PageUp が「前ページはありません。」を出したあと F12 で前画面へ
+   * 戻っても、ホストがメッセージ行を消去（`EA`）しているのにメッセージが残り続ける
+   * （利用者報告。ACS では残らない）。
+   */
+  private clearSystemMessageIfTouched(rowFrom: number, rowTo: number): void {
+    if (this.systemMessage === undefined) return;
+    const row = this.msgLineRow - 1; // 0 基点
+    if (rowFrom <= row && row <= rowTo) this.systemMessage = undefined;
   }
 
   /**
@@ -756,9 +790,10 @@ export class ScreenBuffer {
     length: number,
     ffw: number,
     attrByte: number,
-    dbcsType?: "pure" | "open" | "either",
+    dbcsType?: DbcsFieldType,
     continued?: ContinuedPart,
-    cursorProgression?: number
+    cursorProgression?: number,
+    selfCheck?: SelfCheckKind
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -778,7 +813,8 @@ export class ScreenBuffer {
       mdt: (ffw & FFW.MDT) !== 0,
       ...(dbcsType !== undefined ? { dbcsType } : {}),
       ...(continued !== undefined ? { continued } : {}),
-      ...(cursorProgression !== undefined ? { cursorProgression } : {})
+      ...(cursorProgression !== undefined ? { cursorProgression } : {}),
+      ...(selfCheck !== undefined ? { selfCheck } : {})
     });
   }
 
@@ -1088,11 +1124,24 @@ export class ScreenBuffer {
     // 背面の SEU ソース行）まで下線・色を引きずってしまう（利用者報告: F4 窓の上に F1 ヘルプ窓を
     // 開くと、窓の外のソース行に無いはずの下線が出る）。`blankWindowArea` と同じ矩形（枠を含む）
     // の行ごとに、右端の 1 桁先を打ち切り位置にする。
+    //
+    // **左端も同じく打ち切る（外側の属性を窓の中へ持ち込ませない）。** 窓を開くときに
+    // `blankWindowArea` が矩形のセルを消すので、背面の欄の**閉じ属性**が窓の左端に
+    // かかっていると一緒に消える。そのまま走査すると、窓の左側に残った欄の属性
+    // （PDM の OPT 欄の下線）が窓の中を突き抜けて右端まで伸びる。
+    //
+    // 通常は `retainedEnds`（SOH で消えた欄の終端の引き継ぎ）が打ち切ってくれるが、
+    // **RESTORE SCREEN で画面イメージを書き戻す経路ではそれも消える**——書き戻しは
+    // ただの文字列で欄定義を伴わないため、引き継いだ終端が上書きで捨てられる。
+    // 実機 YB0140R の窓を PDM 一覧の上で PageUp すると、この経路に入って
+    // 下線が窓の全幅に伸びた（証跡 `work/yb0140r-window/`。ACS は 2-3 桁のまま）。
     for (const w of this.guiWindows) {
       const rowEnd = Math.min(this.rows, w.row + w.height + 1);
+      const colStart = Math.max(1, w.col);
       const colEnd = Math.min(this.cols, w.col + w.width + 4);
       for (let row = Math.max(1, w.row); row <= rowEnd; row++) {
         fieldEnds.add((row - 1) * this.cols + colEnd);
+        fieldEnds.add((row - 1) * this.cols + (colStart - 1));
       }
     }
     let attr = DEFAULT_ATTR;
@@ -1187,6 +1236,8 @@ export class ScreenBuffer {
       if (f.continued !== undefined) field.continued = f.continued;
       // カーソル送り（FLDCSRPRG）。移動を組み立てるのは UI 側
       if (f.cursorProgression !== undefined) field.cursorProgression = f.cursorProgression;
+      // 自己点検欄（CHECK(M10)/CHECK(M11)）。検算して送信を止めるのは UI 側（ACS も送信時に検査）
+      if (f.selfCheck !== undefined) field.selfCheck = f.selfCheck;
       return field;
     });
 

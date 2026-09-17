@@ -27,6 +27,16 @@ import { macroSecretRefSchema } from "./macro-types.js";
 
 const wsLog = childLog({ component: "ws-handler" });
 
+/**
+ * 施錠されたままの画面（＝ホスト応答の途中）を押し出すまでの待ち。
+ *
+ * 実機 YB0140R の窓で PageUp すると、1 回の AID に対して 4 レコードが **40ms の間に
+ * 12〜15ms 間隔**で届く（`scripts/verify-browser-yb0140r-window.mjs` で実測）。
+ * この待ちがそれを十分またぐので、途中経過は最新 1 枚にまとまる。
+ * 一方、鍵盤が開いた画面は待たずに出すので、**操作の体感は遅くならない**。
+ */
+const SCREEN_COALESCE_MS = 50;
+
 export interface WsHandlerDeps {
   sessions: SessionManager;
   /**
@@ -856,9 +866,48 @@ export class WsConnection {
    * ——**片方に足し忘れると、attach したタブだけ通知が来ない**という壊れ方をする。
    */
   private subscribeSession(entry: SessionEntry): void {
-    // ホスト発の画面更新を push
-    const onScreen = (screen: ScreenSnapshot): void => this.send({ type: "screen", screen });
+    // ホスト発の画面更新を push。
+    //
+    // **応答の途中経過は出さない（ACS と同じ見え方にする）。** 1 回の AID に対してホストは
+    // 複数のレコードを返すことがあり、窓を持つ画面では
+    // 「RESTORE SCREEN（窓が消えた背面）→ 小さな WTD → SAVE SCREEN → 窓を作り直し」
+    // と続く（実機 YB0140R で実測。4 レコードが 40ms の間に 12〜15ms 間隔で届く）。
+    // 1 レコードごとに push すると途中の「窓が消えた画面」が 1 フレーム描かれ、
+    // 利用者にはちらつきとして見える。
+    //
+    // ACS は受信経路で画面更新イベントを出さない——`DS5250` は受け取ったレコードを
+    // 共有の PS（`PS5250`）へ次々に当てるだけで、描画側はその時点の PS を読んで描く。
+    // 途中の状態は次のレコードに上書きされ、描かれないまま消える
+    // （`ECLPS.endOfRecord()` の画面イベント発火は AID **送信**側の経路。加えて
+    // `DS5250$AvoidThrashingWTD` という描画間引きの仕組みまで持っている）。
+    // ここで同じことをする: **鍵盤が開いた画面（＝ホストが入力待ちになった＝操作員に
+    // 渡った画面）は即座に、途中の施錠されたままの画面は一拍おいて最新だけを** 出す。
+    let pendingScreen: ScreenSnapshot | undefined;
+    let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushScreen = (): void => {
+      if (coalesceTimer !== undefined) {
+        clearTimeout(coalesceTimer);
+        coalesceTimer = undefined;
+      }
+      if (pendingScreen === undefined) return;
+      const screen = pendingScreen;
+      pendingScreen = undefined;
+      this.send({ type: "screen", screen });
+    };
+    const onScreen = (screen: ScreenSnapshot): void => {
+      pendingScreen = screen;
+      // 施錠されたままの画面は「まだ応答の途中」。**それでも必ず出す**——時間の掛かる
+      // 処理の途中経過（「処理中です」等）を握り潰さないため、一拍だけ待って最新を出す
+      if (screen.keyboardLocked) {
+        if (coalesceTimer === undefined) coalesceTimer = setTimeout(flushScreen, SCREEN_COALESCE_MS);
+        return;
+      }
+      flushScreen();
+    };
     entry.session.on("screen", onScreen);
+    // **警報は間引かずそのまま流す**（画面を変えないレコードでも来る。ACS も描画と独立に鳴らす）
+    const onAlarm = (): void => this.send({ type: "alarm" });
+    entry.session.on("alarm", onAlarm);
     entry.session.on("closed", (reason: string) => {
       // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
       // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
@@ -880,6 +929,8 @@ export class WsConnection {
     this.deps.sessions.addViewer(entry.id);
     this.detachScreen = () => {
       entry.session.off("screen", onScreen);
+      entry.session.off("alarm", onAlarm);
+      if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
       offPc();
       offRes();
       this.deps.sessions.removeViewer(entry.id);

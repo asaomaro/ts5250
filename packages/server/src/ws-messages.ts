@@ -291,6 +291,16 @@ export interface WsScreen {
   screen: ScreenSnapshot;
 }
 /**
+ * **ホストが警報を鳴らせと言ってきた**（WTD の CC2 ビット 0x04。DDS の `SFLMSG` 等で鳴る）。
+ *
+ * **画面と別のメッセージにしている**——警報は画面を変えないレコードでも来るうえ、
+ * 同じ画面で続けて 2 回鳴ることもあり、`screen` に相乗りさせると取りこぼす。
+ * ACS は `PS5250.ringBell()` で端末のベルを鳴らす。
+ */
+export interface WsAlarm {
+  type: "alarm";
+}
+/**
  * 予約（HLLAPI の `Reserve`）の状態が変わった。
  *
  * **画面と別のメッセージにしている**——予約は画面を変えずに始まり・終わるので、
@@ -578,6 +588,7 @@ export type WsServerMessage =
   | WsPing
   | WsOpened
   | WsScreen
+  | WsAlarm
   | WsReserved
   | WsJobInfoRes
   | WsError

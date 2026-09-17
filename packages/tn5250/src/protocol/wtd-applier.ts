@@ -1,7 +1,7 @@
 import { As400Error } from "@ts5250/base";
 import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
-import type { ContinuedPart, WriteExtent } from "../screen/types.js";
+import type { ContinuedPart, DbcsFieldType, SelfCheckKind, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
 import {
@@ -45,7 +45,12 @@ export interface ApplyResult {
   readMdtImmediateAltRequested: boolean;
   /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
   readScreenExtendedRequested: boolean;
-  /** このレコード中で IC/MC によりカーソル位置が明示された */
+  /**
+   * **最後に評価された WRITE TO DISPLAY が、カーソル位置を明示した**。
+   * ACS（`DS5250.preprocessWCC2`）と同じく、判定は WTD ごとに行われ、後の WTD が前の
+   * WTD の指定を上書きする——偽なら「ホストは位置を指していない」なので、呼び出し側が
+   * 既定動作（先頭入力欄へ）を適用する。詳細は `PendingCursorOrder`。
+   */
   cursorSet: boolean;
   /**
    * PC Organizer（`STRPCCMD`）のコマンドを受けた。呼び出し側が実行し、実行キーを返す
@@ -76,6 +81,27 @@ const PCO_ATTR = 0x27;
 /** 標識照合＋コマンド本文の読み取りに覗く最大バイト数 */
 
 export type WarnFn = (message: string) => void;
+
+/**
+ * IC/MC が指したカーソル位置の**保留値**（ACS の `DS5250.WTD_IC_addr` / `WTD_MC_addr` 相当）。
+ *
+ * **IC は「見つけた瞬間にカーソルを動かす」ものではない。** ACS は IC/MC をこの保留値に
+ * 溜め、WRITE TO DISPLAY 1 つを処理し終えた時点（`preprocessWCC2`）で初めて
+ * `ps.setCursorPosition()` する。そして**保留値は SOH（フォーマットテーブルの開始）で
+ * 捨てられる**——`processWriteToDisplay` の SOH 分岐が `processClearFMT()` を呼び、
+ * その中で `WTD_IC_addr = -1; WTD_MC_addr = -1` に戻す（CLEAR UNIT /
+ * CLEAR FORMAT TABLE も同じ経路）。
+ *
+ * この差が実画面に出る。PA0100R（出荷予測売上係数入力）は 1 レコードの中で
+ * 「年月度ヘッダを描く WTD（CSRLOC により毎回 `IC(2,10)`）」→「明細を描く WTD（SOH あり・
+ * IC なし）」と続けて送ってくる。レコード全体で「最後に見た IC」を採ると、明細側の WTD が
+ * 位置を指していないのに、既に保護化された年月度 (2,10) が最終位置になってしまう
+ * （利用者報告の不具合。`work/pa0100j-cursor/` の証跡）。SOH で捨てれば、明細側の WTD は
+ * 「指定なし」となり、ACS と同じく先頭入力欄 (3,23) へ落ちる。
+ */
+interface PendingCursorOrder {
+  addr: number | undefined;
+}
 
 /**
  * 1 レコード分のデータストリーム（ESC+コマンド列）を ScreenBuffer に適用する。
@@ -113,7 +139,21 @@ export function applyDataStream(
   // 何も書かずに終わったレコードでは、buffer 側が前回の確定値を残す（窓を描くレコードと
   // 入力を待つだけのレコードが分かれて届いても窓が消えないようにするため）。
   buf.beginRecord();
+  const cursorOrder: PendingCursorOrder = { addr: undefined };
+  const cursorBeforeRecord = buf.cursorAddr;
+  /** このレコードに WRITE ERROR CODE（0x21 / 0x22）が含まれていた */
+  let errorCodeWritten = false;
   const finish = (): ApplyResult => {
+    if (errorCodeWritten) {
+      // **エラー通知のレコードでは、カーソルを操作員が置いた位置から動かさない。**
+      // ACS 実測（`work/pa0100j-cursor/` の証跡）: 明細 r3c23／r5c23 から PageUp すると
+      // 「前ページはありません。」が出るが、カーソルはどちらもその場に留まる。同じ応答には
+      // 明細を描き直す WTD（IC なし）とメッセージ行の IC(2,10) が入っているので、通常の
+      // 規則をそのまま当てると先頭入力欄や年月度へ飛んでしまう——エラーで打鍵位置を
+      // 奪われるのは、打ち直す操作員にとって実害が大きい。
+      buf.cursorAddr = cursorBeforeRecord;
+      result.cursorSet = true;
+    }
     result.lastWrite = buf.lastWrite;
     return result;
   };
@@ -128,6 +168,7 @@ export function applyDataStream(
     switch (cmd) {
       case COMMAND.CLEAR_UNIT:
         buf.clearUnit();
+        cursorOrder.addr = undefined;
         break;
       case COMMAND.CLEAR_UNIT_ALTERNATE: {
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
@@ -141,16 +182,23 @@ export function applyDataStream(
         if (!buf.clearUnitAlternate()) {
           warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing at current size (grid lines kept)");
         }
+        cursorOrder.addr = undefined;
         break;
       }
       case COMMAND.CLEAR_FORMAT_TABLE:
         buf.clearFormatTable();
+        // フォーマットテーブルを捨てるときは保留中の IC/MC も捨てる（ACS `processClearFMT`）
+        cursorOrder.addr = undefined;
         break;
       case COMMAND.SAVE_SCREEN:
         // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く。
         // **加えてホストへ画面を送り返す必要がある**（呼び出し側が応答レコードを送る）。
         // 返信しないとホストは待ち続ける——SEU の F1 でヘルプが返らなかった原因。
         buf.saveScreen();
+        // **退避のときにエラー表示は解除する**（ACS `DS5250.processSaveScreen` の冒頭が
+        // `isErrorMode()` なら `clearErrorMode()` する）。窓の SAVE/RESTORE 往復で
+        // メッセージ行を書き替えない画面でも、メッセージが残らないようにするため
+        buf.systemMessage = undefined;
         result.saveScreenRequested = true;
         break;
       case COMMAND.RESTORE_SCREEN:
@@ -163,6 +211,7 @@ export function applyDataStream(
         // パラメータは応答へそのまま写す（意味を解釈しない。ホストにとっては保管物）。
         const params = r.bytes(5);
         buf.saveScreen();
+        buf.systemMessage = undefined; // 0x02 と同じ経路（ACS も同じメソッドで解除する）
         result.savePartialScreen = params;
         break;
       }
@@ -235,10 +284,11 @@ export function applyDataStream(
         result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY:
-        applyWtd(r, buf, codec, result, warn);
+        applyWtd(r, buf, codec, result, warn, cursorOrder);
         break;
       case COMMAND.WRITE_ERROR_CODE:
         applyWriteErrorCode(r, buf, codec);
+        errorCodeWritten = true;
         break;
       case COMMAND.WRITE_ERROR_CODE_WINDOW:
         // 窓が開いている間のエラーはこちら。メッセージ行の開始桁・終了桁（2 バイト）を
@@ -246,6 +296,7 @@ export function applyDataStream(
         // 描画は 0x21 と同じ扱い（systemMessage）で、窓の中への描き込みまではしない。
         r.skip(2);
         applyWriteErrorCode(r, buf, codec);
+        errorCodeWritten = true;
         break;
       case COMMAND.WRITE_STRUCTURED_FIELD:
         if (applyStructuredField(r, warn)) result.queryRequested = true;
@@ -321,10 +372,24 @@ function applyWtd(
   buf: ScreenBuffer,
   codec: Codec,
   result: ApplyResult,
-  warn: WarnFn
+  warn: WarnFn,
+  cursorOrder: PendingCursorOrder
 ): void {
   applyCc(r.u8(), buf, result);
   applyCc2(r.u8(), result);
+
+  /**
+   * この WTD の終わりでカーソル位置を確定する（ACS `preprocessWCC2`）。
+   * 保留値が無ければ `cursorSet` を**倒す**——前の WTD が指した位置を引き継がせない。
+   */
+  const settleCursor = (): void => {
+    if (cursorOrder.addr !== undefined) {
+      buf.cursorAddr = cursorOrder.addr;
+      result.cursorSet = true;
+    } else {
+      result.cursorSet = false;
+    }
+  };
 
   let addr = 0; // WTD 開始時のバッファアドレスは SBA で設定される（未設定時は先頭）
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
@@ -339,6 +404,7 @@ function applyWtd(
     if (b === ESC) {
       // 次のコマンドへ。**抜ける前に知らせる**——ここが WTD の正常な終わりなので、
       // 関数末尾だけに置くと（ほぼ毎回ここで返るため）警告が出ない
+      settleCursor();
       warnUnmappable(unmappable, warn);
       return;
     }
@@ -416,9 +482,10 @@ function applyWtd(
         break;
       case ORDER.IC:
       case ORDER.MC:
-        // 01 では IC/MC とも「カーソル位置の設定」として扱う（IC_ULOCK の厳密な扱いは必要時に拡張）
-        buf.cursorAddr = buf.addrOf(r.u8(), r.u8());
-        result.cursorSet = true;
+        // 01 では IC/MC とも「カーソル位置の設定」として扱う（IC_ULOCK の厳密な扱いは必要時に拡張）。
+        // **ここでは動かさず保留する**——確定は WTD の終わり（`settleCursor`）。理由は
+        // `PendingCursorOrder` を参照
+        cursorOrder.addr = buf.addrOf(r.u8(), r.u8());
         break;
       case ORDER.RA: {
         const target = buf.addrOf(r.u8(), r.u8());
@@ -462,6 +529,11 @@ function applyWtd(
         const body = r.bytes(len);
         buf.setHeaderData(body);
         buf.clearFormatTable();
+        // **フォーマットテーブルを作り直すので、保留中の IC/MC も捨てる**
+        // （ACS `processWriteToDisplay` の SOH 分岐 → `processClearFMT()` →
+        // `WTD_IC_addr = -1`）。これが無いと、前の WTD が指した位置が
+        // 「新しい画面に対する指定」として残ってしまう（`PendingCursorOrder` 参照）
+        cursorOrder.addr = undefined;
         break;
       }
       case ORDER.TD: {
@@ -533,10 +605,12 @@ function applyWtd(
           if (r.peek() === ESC && r.remaining >= 2 && isKnownCommand(r.peekAt(1))) break;
           r.u8();
         }
+        settleCursor();
         warnUnmappable(unmappable, warn);
         return;
     }
   }
+  settleCursor();
   warnUnmappable(unmappable, warn);
 }
 
@@ -630,14 +704,26 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     throw new As400Error("PROTOCOL_ERROR", `invalid FFW 0x${ffw.toString(16)}`);
   }
   // FCW（上位 2 ビットが 10）: DBCS 種別等を解釈（SC30-3533 / tn5250 の ideographic FCW）
-  let dbcsType: "pure" | "open" | "either" | undefined;
+  let dbcsType: DbcsFieldType | undefined;
+  let selfCheck: SelfCheckKind | undefined;
   let continued: ContinuedPart | undefined;
   let cursorProgression: number | undefined;
   while (r.remaining >= 2 && (r.peek() & 0xc0) === 0x80) {
     const fcw = r.u16();
-    if (fcw === 0x8200) dbcsType = "pure"; // ideographic-only
-    else if (fcw === 0x8240) dbcsType = "either"; // ideographic-either
-    else if (fcw === 0x8280 || fcw === 0x82c0) dbcsType = "open"; // ideographic-open
+    // **DBCS の 4 種は ACS の定数とちょうど一致させる**（`Field5250` の
+    // `FCW_DBCS_ONLY=0x8200` / `FCW_DBCS_PURE=0x8220` / `FCW_DBCS_EITHER=0x8240` /
+    // `FCW_DBCS_OPEN=0x8280`。値の完全一致で振り分ける lookupswitch で、
+    // **それ以外（0x82c0 等）は ACS も無視する**）。
+    // 以前は 0x8200 を "pure" と取り違え、本来の "pure"（0x8220）を取りこぼしていた
+    if (fcw === 0x8200) dbcsType = "only";
+    else if (fcw === 0x8220) dbcsType = "pure";
+    else if (fcw === 0x8240) dbcsType = "either";
+    else if (fcw === 0x8280) dbcsType = "open";
+    // **自己点検欄（SELF CHECK）**。ACS `Field5250` の
+    // `FCW_SELF_CHECK_MODULUS_11=0xB140` / `FCW_SELF_CHECK_MODULUS_10=0xB1A0`。
+    // 末尾 1 桁がチェック・ディジットで、送信前に検算する（`selfCheckDigitOk`）
+    else if (fcw === 0xb140) selfCheck = "mod11";
+    else if (fcw === 0xb1a0) selfCheck = "mod10";
     // **継続入力フィールド（CONTINUED_ENTRY = 0x86）**。ホストが DDS の `EDTMSK` 等で
     // 1 つの入力欄を編集文字（`/` など）で分割したとき、区間ごとの SF にこの FCW が付く。
     // 下位バイト 1=先頭 / 3=中間 / 2=最終（GNU tn5250 `session.c` の StartOfField、
@@ -666,7 +752,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   const length = r.u16();
   buf.setAttr(addr, attr);
   const fieldStart = addr + 1;
-  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression);
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck);
   return fieldStart;
 }
 

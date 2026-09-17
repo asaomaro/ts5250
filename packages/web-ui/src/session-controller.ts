@@ -38,7 +38,8 @@ import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
 import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
-import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL } from "./composables/opMessages.js";
+import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "./composables/opMessages.js";
+import { beep } from "./beep.js";
 
 /** `/ws` の URL（組み立ては `ws-client.ts` に 1 か所。監視コンソールも同じものを使う） */
 const WS_URL = wsUrl;
@@ -567,6 +568,11 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
     // 予約は画面を変えずに始まり・終わるため
     case "reserved": {
       sessionsStore.setReserved(sessionId, msg.by);
+      break;
+    }
+    // ホストの警報（CC2 0x04）。**画面と別に届く**——画面が変わらないレコードでも鳴るため
+    case "alarm": {
+      beep();
       break;
     }
     case "screen": {
@@ -1139,7 +1145,12 @@ export function sendKey(
   if (key === "Enter" && s.snapshot) {
     const hit = findMandatoryViolation(s.snapshot.fields, s.edits);
     if (hit) {
-      s.notice = hit.reason === "mandatory-enter" ? MSG_MANDATORY_ENTER : MSG_MANDATORY_FILL;
+      s.notice =
+        hit.reason === "mandatory-enter"
+          ? MSG_MANDATORY_ENTER
+          : hit.reason === "self-check"
+            ? MSG_SELF_CHECK
+            : MSG_MANDATORY_FILL;
       return hit;
     }
   }

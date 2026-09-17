@@ -13,6 +13,9 @@ describe("buildQueryReply", () => {
    * ACS 実機（IBM i 日本語機・IBM-5555-C01）が返す Query Reply の本体 71 バイト。
    * 中継プロキシで実測したもので、当方はこれとバイト一致させる。
    * 申告が違うとホストがヘルプ／ウィンドウの描画経路を変える（PDM の F1 が 27x132 に落ちる）。
+   *
+   * **これは 27x132（ACS の psSize=5）の申告。** 中継タップで両サイズを採ると、違いは
+   * 50 バイト目（画面能力）だけで、24x80（psSize=2）では `0x11` になる（`work/acs-tap/`）。
    */
   const ACS_5555_C01 = [
     0x00, 0x00, 0x88, 0x00, 0x44, 0xd9, 0x70, 0x80, 0x05, 0x00, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00,
@@ -22,11 +25,19 @@ describe("buildQueryReply", () => {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
   ];
 
-  it("IBM-5555-C01 で ACS 実機とバイト一致する（opcode PUT_GET・flag2 0x80）", () => {
-    const rec = buildQueryReply("IBM-5555-C01");
+  it("IBM-5555-C01・27x132 で ACS 実機とバイト一致する（opcode PUT_GET・flag2 0x80）", () => {
+    const rec = buildQueryReply("IBM-5555-C01", false, "27x132");
     expect(rec[9]).toBe(OPCODE.PUT_GET);
     expect(rec[8]).toBe(0x80); // フラグ 2 バイト目
     expect([...parseRecord(rec).data]).toEqual(ACS_5555_C01);
+  });
+
+  it("IBM-5555-C01・24x80 では画面能力だけが 0x11 になる（ACS psSize=2 の実測）", () => {
+    const rec = buildQueryReply("IBM-5555-C01", false, "24x80");
+    const expected = [...ACS_5555_C01];
+    expected[50] = 0x11;
+    expect(rec[8]).toBe(0x80);
+    expect([...parseRecord(rec).data]).toEqual(expected);
   });
 
   it("device type / model を 4 桁 + **3 桁** で載せる", () => {
@@ -40,11 +51,14 @@ describe("buildQueryReply", () => {
     expect([...d.slice(34, 37)]).toEqual([0xf0, 0xf0, 0xf2]);
   });
 
-  it("拡張 5250 と 24x80/27x132 両対応を常に広告する", () => {
+  it("拡張 5250 は常に広告し、画面サイズは**使うサイズだけ**を申告する", () => {
+    // 既定は 24x80。常に 0x31（27x132 も可）と申告すると、24x80 のセッションへ
+    // ホストが CLEAR UNIT ALTERNATE 等の 27x132 の書式を送ってくる余地を作る
     const d = parseRecord(buildQueryReply("IBM-3179-2", false)).data;
-    expect(d[50]).toBe(0x31); // bit0-3=0011: 両サイズ対応
+    expect(d[50]).toBe(0x11);
     expect(d[53]).toBe(0x0f); // 拡張 5250（FCW & WDSF 等）
     expect(d[54]).toBe(0xc8); // 拡張ユーザーインターフェース
+    expect(parseRecord(buildQueryReply("IBM-3477-FC", true, "27x132")).data[50]).toBe(0x31);
   });
 });
 

@@ -44,6 +44,20 @@ export type FieldAdjust = "right-zero" | "right-blank" | "mandatory-fill";
  */
 export type ContinuedPart = "first" | "middle" | "last";
 
+/**
+ * DBCS 欄の種別。FCW の値と 1 対 1 で、ACS `Field5250` の定数と同じ振り分け。
+ * `only`=0x8200 / `pure`=0x8220 / `either`=0x8240 / `open`=0x8280。
+ * **これ以外の値は ACS も種別として扱わない**（振り分けは値の完全一致）。
+ */
+export type DbcsFieldType = "only" | "pure" | "either" | "open";
+
+/**
+ * 自己点検欄（DDS の `CHECK(M10)` / `CHECK(M11)`）の検査方式。
+ * FCW は ACS `Field5250` の `FCW_SELF_CHECK_MODULUS_11`=0xB140 /
+ * `FCW_SELF_CHECK_MODULUS_10`=0xB1A0。欄の**末尾 1 桁がチェック・ディジット**。
+ */
+export type SelfCheckKind = "mod10" | "mod11";
+
 export interface Field {
   /** snapshot 時点の連番（1 始まり・画面順） */
   index: number;
@@ -120,7 +134,13 @@ export interface Field {
    * 実機で `DUP` を書いた欄が `0x5020` になることを実測済み。
    */
   dupEnable?: boolean;
-  dbcsType?: "pure" | "open" | "either";
+  dbcsType?: DbcsFieldType;
+  /**
+   * 自己点検欄（`CHECK(M10)` / `CHECK(M11)`）。**末尾 1 桁がチェック・ディジット**で、
+   * ACS は AID 送信時に検算して合わなければ送信を止める（`Field5250.checkModulusField`）。
+   * 当方も送信前に同じ検算をする（`selfCheckDigitOk`）。
+   */
+  selfCheck?: SelfCheckKind;
   /**
    * **ホストは DBCS 種別を申告していないのに、中身に SO/SI 入りの DBCS データが載っている欄。**
    *

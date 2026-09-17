@@ -115,6 +115,12 @@ export interface SendAidResult {
 interface SessionEvents extends Record<string, unknown[]> {
   screen: [ScreenSnapshot];
   closed: [string];
+  /**
+   * **ホストが警報を鳴らせと言ってきた**（WTD の CC2 ビット 0x04）。
+   * ACS は `ps.ringBell()` で端末のベルを鳴らす。以前は `ApplyResult.alarm` を立てるだけで
+   * 読み手がどこにも無く、**実機が鳴らす場面で当方だけ無反応**だった。
+   */
+  alarm: [];
 }
 
 /** セッション ID の連番（id 未指定時のフォールバック） */
@@ -130,6 +136,8 @@ export class Session5250 extends Emitter<SessionEvents> {
   private readonly buf: ScreenBuffer;
   private readonly codec: Codec;
   private readonly terminalType: string;
+  /** 申告する画面サイズ。Query Reply の画面能力バイトに反映する（ACS と同じ） */
+  private readonly screenSize: "24x80" | "27x132";
   private readonly enhanced: boolean;
   private telnet!: TelnetLayer;
   private readonly warn: (message: string) => void;
@@ -166,7 +174,8 @@ export class Session5250 extends Emitter<SessionEvents> {
     // ときだけ許可する）。ホストは 27x132 対応端末にだけ CLEAR UNIT ALTERNATE を送ってくる。
     const allowAlternate = opts.screenSize === "27x132";
     this.buf = new ScreenBuffer(allowAlternate ? { alternate: "27x132" } : {});
-    this.terminalType = terminalTypeFor(opts.ccsid ?? 37, opts.screenSize ?? "24x80");
+    this.screenSize = opts.screenSize ?? "24x80";
+    this.terminalType = terminalTypeFor(opts.ccsid ?? 37, this.screenSize);
     this.enhanced = opts.enhanced ?? false;
   }
 
@@ -611,7 +620,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       }
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
-        this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced));
+        this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
         return;
       }
       if (result.readScreenExtendedRequested) {
@@ -655,31 +664,25 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
       if (result.readRequested && !result.cursorSet) {
-        // IC/MC が無ければカーソルは最初の入力フィールドへ（5250 の既定動作）。
-        // 原点に残すと AID レコードで報告するカーソル位置が実機とずれる。
+        // **ホストが位置を指していなければ先頭入力フィールドへ**（5250 の既定動作）。
+        // ACS の `DS5250.preprocessWCC2()` が `WTD_IC_addr == -1` のときに呼ぶ
+        // `PS5250.setDefaultInsertCursor()`（フォーマットテーブルを先頭から走査して
+        // 最初の非 BYPASS 欄を採る）と同じ処理。原点に残すと AID レコードで報告する
+        // カーソル位置が実機とずれる。
         //
-        // **これ以外の上書きはしない**——ホストが IC/MC で指定した位置は、それが
-        // 保護欄であってもそのまま尊重する。ACS のデコンパイル済みコア
-        // （`DS5250.preprocessWCC2()`）のカーソル決定はこの「IC/MC の有無」だけで
-        // 完結しており（GUI 選択ウィジェット専用の狭い例外を除く）、「動いていない・
-        // いま保護化された→先頭入力欄へ寄せる」という上書き（旧 `PR#387` 分岐）に
-        // 相当するロジックは存在しない
-        // （`.aidev/works/20260915-pr387-acs-premise-unverified` research.md F3）。
+        // **`result.cursorSet` は「最後の WTD が指したか」**（レコード全体で最後に見た
+        // IC ではない）。この区別が無いと、PA0100R のように 1 レコードへ
+        // 「ヘッダ WTD（IC あり）→ 明細 WTD（SOH あり・IC なし）」と積んでくる画面で、
+        // 既に保護化されたヘッダ欄にカーソルが取り残される（`PendingCursorOrder` 参照）。
         //
-        // **旧 `PR#387` 分岐（コミット `c82e2b34`）はここに存在した**が撤去した。
-        // 「ACS は下の入力欄にカーソルを入れる」という前提は、実際に ACS を
-        // 動かして検証された記録が無く（PR #387 の検証資材は全てこのプロジェクト
-        // 自身のクライアントが対象で、実際の ACS には一度も接続していない）、
-        // PR 本文の確認チェックリストも未チェックのまま残っていた
-        // （`.aidev/works/20260915-pr387-acs-premise-unverified` research.md
-        // F1・F2）。この撤去により、「上で入力 → Enter →
-        // 上がプロテクトされ、下が展開する」画面で、カーソルが保護化された欄に
-        // 留まり Tab を押すまで入力できない、という `PR#387` 以前の挙動に戻る
-        // ——ACS コアの確認済み挙動に合わせるための意図的な変更であり、単純な
-        // 退行ではない（ただし ACS が実際にこの場面でどう見えるかは今回も
-        // 確認できていない。`decisions.md` D2 参照）。
+        // ここ以外の上書きはしない——ホストが IC/MC で指した位置は、それが保護欄でも
+        // そのまま尊重する（実機 ACS も入力欄が 1 つも無い画面でカーソルをその場に残す。
+        // 証跡 `work/pa0100j-cursor/`）。
         this.buf.cursorToFirstInputField();
       }
+      // 警報は画面更新と別に出す（画面が変わらないレコードでも鳴らすため。ACS も
+      // `processWCC2` の中で `ringBell()` を呼ぶだけで、描画とは独立している）
+      if (result.alarm) this.emit("alarm");
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
       if (result.readRequested) readSolicited = true;
     } catch (err) {

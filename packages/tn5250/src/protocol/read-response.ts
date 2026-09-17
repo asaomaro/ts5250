@@ -2,7 +2,7 @@ import type { Codec } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
 import { ORDER, OPCODE, FFW, AID } from "./constants.js";
-import { buildRecord, type RecordHeaderFlags } from "./gds.js";
+import { buildRecord, CLIENT_FLAG2, type RecordHeaderFlags } from "./gds.js";
 import { isRawSentinel, rawSentinel, sentinelByte } from "../screen/attr-sentinel.js";
 import type { InternalField } from "../screen/buffer.js";
 
@@ -255,7 +255,7 @@ function buildFlatFieldResponse(
     w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
     for (let i = bytes.length; i < width; i++) w.u8(0x40);
   }
-  return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array()), substituted };
+  return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array(), {}, CLIENT_FLAG2), substituted };
 }
 
 /** 平坦形式で 1 欄が占めるバイト数。符号付き数値だけは**符号桁を送らない**ぶん 1 短い */
@@ -378,7 +378,7 @@ function buildFieldResponse(
     substituted += writeValue(w, value, codec);
   }
 
-  return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array()), substituted };
+  return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array(), {}, CLIENT_FLAG2), substituted };
 }
 
 /**
@@ -390,6 +390,9 @@ function buildFieldResponse(
  * `writeGDS(4, 0, ebcdic(str))`＝flag1 に SRQ・opcode NO-OP・データに文字列、という同じ形）。
  */
 export function buildFlagRecord(flags: Partial<RecordHeaderFlags>, data?: Uint8Array): Uint8Array {
+  // **ここは `CLIENT_FLAG2` を立てない。** Attn / SysReq は非常口で、フラグ 0 で通ることを
+  // 実機で採取して確かめてある（下のテストのバイト列）。ACS がこの経路でも 0x80 を立てるかは
+  // 未確認——確かめずに非常口を変えない
   return buildRecord(OPCODE.NOOP, data ?? new Uint8Array(0), flags);
 }
 
@@ -402,5 +405,6 @@ export function buildFlagRecord(flags: Partial<RecordHeaderFlags>, data?: Uint8A
  * tn5250j `tnvt#cancelInvite` の `writeGDS(0, 10, null)` と同じバイト列。
  */
 export function buildCancelInviteAck(): Uint8Array {
+  // Attn / SysReq の成立に必要な返事。上と同じ理由でフラグ 0 のまま（実機で確認済み）
   return buildRecord(OPCODE.CANCEL_INVITE, new Uint8Array(0));
 }

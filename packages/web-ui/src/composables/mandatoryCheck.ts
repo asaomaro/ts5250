@@ -1,4 +1,6 @@
 import type { Field } from "@ts5250/tn5250";
+// browser サブパスから取る（root は node:net/node:tls を巻き込むため不可）
+import { selfCheckDigitOk } from "@ts5250/tn5250/browser";
 import { dbcsByteLength } from "./fieldValidate.js";
 
 /**
@@ -12,7 +14,7 @@ import { dbcsByteLength } from "./fieldValidate.js";
  * `ScreenGrid.vue` ではなくここに置くのは、判定が純関数で単体テストできるため
  * （コンポーネントに埋めると「空振りしていないか」を確かめる手段が無くなる）。
  */
-export type MandatoryViolation = "mandatory-enter" | "mandatory-fill";
+export type MandatoryViolation = "mandatory-enter" | "mandatory-fill" | "self-check";
 
 export interface MandatoryFinding {
   field: Field;
@@ -41,6 +43,11 @@ export function findMandatoryViolation(
     const filled = value.trim().length > 0;
 
     if (f.mandatoryEnter && !filled) return { field: f, reason: "mandatory-enter" };
+
+    // 自己点検欄（CHECK(M10)/CHECK(M11)）。ACS も AID 送信時に検算して止める
+    if (f.selfCheck !== undefined && filled && !selfCheckDigitOk(value, f.selfCheck)) {
+      return { field: f, reason: "self-check" };
+    }
 
     // MANDATORY_FILL は「全部埋める」か「全部空」のどちらか（DDS の CHECK(MF) の定義）。
     // **部分入力だけを弾く**——空を弾くのは MANDATORY_ENTER の役目で、別の指定。
