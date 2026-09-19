@@ -69,7 +69,7 @@
       **これは D17 の消し込みではない**——組合せ表（`session-lifetime-matrix.ts`）には 1 行も足しておらず、
       `lifetimeOf` はサーバー側で同 work の対象外。表の軸は `Terminal × Disconnect × Role` で
       R4 の軸を持たないため、足すには表の作り直しが要る。
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: `lifetimeOf` の側は対応不要（解決済み: 回帰テストが覆っている）** —
+      **判定（`20260919-backlog-acs-triage`・PR #406）: `lifetimeOf` の側は対応不要（解決済み: 回帰テストが覆っている）** —
       組合せ表には無いが、回帰テストが覆っている。門を丸ごと壊すと `session-reconnect-grace.test.ts` の 3 件が落ちる。
       次の部分変異も、grace（と idle-timeout）の 1〜2 件が検出する。
       - `holder.held` 条件の削除
@@ -88,7 +88,7 @@
 - [x] 実機（`.env.verify`）で瞬断からの復帰を確認する（`20260908-session-survives-disconnect`
       の「未検証の穴」）。**`20260908-session-lifetime-rules-fold` も単体テストと型のみで実機は通していない**
       ので、この項目はそのまま残る。
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（解決済み）** — 実機・実ブラウザで実測した。
+      **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（解決済み）** — 実機・実ブラウザで実測した。
       構成: HEAD の server / web-ui、Chromium の headless、ブラウザとサーバーの間に TCP 中継。
       - S1: 3 秒の断（RST＋拒否）。戻してから **1,117ms** で同じ画面に復帰し、F3 がホストに通った（同じジョブ）。
       - S2: `DLYJOB DLY(6)` の応答待ちの最中に 3 秒の断。戻してから **2,933ms** で最新の画面に復帰し、応答待ちも解けた。
@@ -140,7 +140,7 @@
       書けないため、本 work では両方とも入れず対で起票した。
       再現の順序: `onClose()`（見張りの保険で CLOSING のまま）→ 同じ口へ `closed{ended:true}`。
       既存の順序（`closed` → `onClose`）は `session-reconnect.test.ts` が固定済みで影響なし。
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（差異なし・実害なし: 実ブラウザでは起きない）** —
+      **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（差異なし・実害なし: 実ブラウザでは起きない）** —
       ロジック上の穴は実在し、一時テストで再現した。
       しかし「`onClose` → 同じ口から `closed`」の順序は、実ブラウザでは起きない。
       WHATWG WebSockets Standard は、ready state が OPEN でなければ message イベントを発火しないと定めている。
@@ -148,7 +148,7 @@
       PR #394 の 3 件目（試行中の口から `opened` の前に `closed`）も起きない。
       サーバーの `attach`（`ws-handler.ts:958-`）が、購読と `opened` の送信を同じ同期ブロックで行うため。
       はしごの最中にホストが終わった場合は、次の試行で `error` が返り、`giveUpReconnect("gone")` で止まる（既存の経路）。
-      修正の PR #394（`feature/session-closed-ladder-interrupt`、2026-09-10）は `20260919-backlog-acs-triage` の deliver で理由を添えて閉じる（`20260919-backlog-acs-triage` decisions D7）。（research F1-6）
+      修正の PR #394（`feature/session-closed-ladder-interrupt`、2026-09-10）は、この判定の根拠を添えて閉じた（2026-09-20・`20260919-backlog-acs-triage` decisions D7）。（research F1-6）
 - [ ] `openSession` の Promise が settle しないまま残る経路がある
       （`20260910-session-reconnect-freeze` の review ラウンド3）。`opened` / `error` のどちらも
       届かずにソケットが閉じると（プロキシの 1006、upgrade 後にフレーム無しで閉じるサーバー等）、
@@ -164,7 +164,7 @@
       ホストへの接続とサインオンにかかる数秒の窓で踏める。
       手当て: 3 関数とも `onClose` で、`sessionId === ""` なら reject する。（research F1-7）
 - [x] 最近の接続状態維持・再接続対応（session-reconnect-freeze / session-closed-ladder-interrupt 系）以降、今までスムーズだった操作で待たされるタイミングが出るなど不安定化しているとの報告（利用者、20260915）。再現条件・原因未特定。どの変更が影響しているか、直近のreconnect関連workから疑って切り分ける必要がある。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md）
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（解決済み: 切り分けは済み、候補を 4 つ起票した。確定は下の項目）** —
+      **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（解決済み: 切り分けは済み、候補を 4 つ起票した。確定は下の項目）** —
       **平常時の往復は健全**。実機・実ブラウザで、ページ内の時計で 30 回の打鍵（`1` と F3 の 15 往復）を測った。
       - 打鍵 → `screen`: 38〜76ms
       - 打鍵 → 描画と覆いの解除: 72〜137ms

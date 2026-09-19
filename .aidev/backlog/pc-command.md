@@ -76,7 +76,7 @@ Windows ビルドでの実行）。~~ → **2026-08-23 に Windows 実機で両�
   - 再訪するとき最初に測るもの: `ComSpec` の指す先 / `cmd.exe` の版 /
     `HKCU|HKLM\Software\Microsoft\Command Processor` の `AutoRun` /
     親プロセスがジョブに入っているか / `app.exe` の置き場（`NET USE` した UNC 共有か）
-  - **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（実害なし・回避策あり）** — 利用者への実害は、回避策で消えている。
+  - **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（実害なし・回避策あり）** — 利用者への実害は、回避策で消えている。
     - 回避策 `stripCallBeforeStart` は、許可判定の後・実行の直前に適用している（`packages/server/src/pc-command.ts:198` / `:223`）。
     - Windows 実機での回帰テストがある（`packages/server/test/pc-command-windows.test.ts`）。
     - 別の Windows 11 では 40 ケースとも再現しなかった（`20260823-pccmd-windows-verify`）。

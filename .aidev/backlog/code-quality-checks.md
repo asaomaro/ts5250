@@ -17,7 +17,7 @@ kind: standing
       既存の走査テストと同じ形で書ける。先に在庫を直すか、ベースラインで許すかの判断が要る。
       新規の発生は 09-08 が最後。review では 09-10 に 1 件（修正済み）。（research F1-9）
 - [x] sharedFiles を .aidev/config.yml に宣言する。aidev doctor が「20 コミット中 9 回触られているのに未宣言」として 4 件挙げている（~~packages/web-ui/src/session-controller.ts 9/20、packages/web-ui/test/session-reconnect.test.ts 8/20、packages/server/src/session-manager.ts 6/20、packages/server/test/session-reconnect-grace.test.ts 5/20~~）。~~宣言すると coding のタスク点検の発火条件「共有モジュール・公開 API に触れたタスク」が機械判定になる（aidev-40-coding 手順5）。~~いまは人が思い出す形なので、20260908-session-lifetime-rules-fold では T10 の点検を 1 つ打ち漏らし、cross 点検が拾うまで気づかなかった（出典: .aidev/works/20260908-session-lifetime-rules-fold/retro.md）
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（差異なし・実害なし: 前提が崩れた）** — 3 つの前提が現状と合わない。
+      **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（差異なし・実害なし: 前提が崩れた）** — 3 つの前提が現状と合わない。
       - 常連の集合: 2026-09-19 の `aidev doctor` が未宣言として挙げるのは、`packages/tn5250/src/screen/buffer.ts` と `session/session.ts` の 2 件（5/20）。起票時の 4 ファイルは直近 20 コミットで 0〜1 回まで落ちた（9 日で集合が入れ替わった）。
       - 機械判定: CLI が sharedFiles を読むのは `worktree` と `doctor` だけで、タスク点検の発火には使われない。
       - 打ち漏らしの原因: T10 の打ち漏らしが起きた work は `mode: autonomous` で、もともと全タスクが点検対象だった。当の retro も、原因をハーネス提案 H2（`[x]` と点検記録の集合差の検査）に帰している。
@@ -33,7 +33,7 @@ kind: standing
       さらに、条項 `.aidev/conventions/comment-provenance.md` の規約 3 は `前 work の D10` を正しい例として挙げていて、この起票と矛盾する。
       走査を書く前に、対象の形（相対参照「前 work」「本 work」と `F<n>`）と条項の例を揃える。（research F1-11）
 - [x] 「網羅の主張」を書いた箇所を機械で拾えるか検討する。「〜だけ」「のみ」「すべて」「唯一」「揃った」を含むコメントを一覧に出し、review の観点に載せる（落とすのではなく目印にする）。20260910-session-reconnect-freeze で数え漏らしが 3 回（D10 → D11 → D15）、いずれも独立点検が捕まえ、自分では 1 度も気づけなかった（出典: .aidev/works/20260910-session-reconnect-freeze/retro.md）
-      **判定（`20260919-backlog-acs-triage`・PR #<deliver で追記>）: 対応不要（差異なし・実害なし: 費用に見合わない）** — 一覧にすると件数が多すぎる。
+      **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（差異なし・実害なし: 費用に見合わない）** — 一覧にすると件数が多すぎる。
       網羅語（だけ・のみ・すべて・唯一・揃った）を含むコメント行は、`packages/*/src` のコメント 25,897 行のうち **2,186 行（8.4%）**。346 ファイル中 296 ファイルに出る。
       「呼ぶ・読む・経路」と組み合わせても 162 行ある。
       数え漏らしは 1 つの work の 3 件だけで、多くは decisions.md 側の主張だった。コメントの走査では一部しか覆えない。
