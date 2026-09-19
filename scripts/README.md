@@ -706,6 +706,78 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 > 開いた時刻で押していると、この不等式が両側とも崩れる。
 > 資格情報は `passwordEnv` で env のまま渡し、設定オブジェクトに平文を置かない。
 
+## ACS のコアを直接動かす（ECL プローブ）
+
+`acs-probe.mjs` は、**ACS のコア（HACL/ECL）を GUI 無しで実機に当て、手順どおりに打鍵して ACS 側の画面・カーソル・入力禁止の状態を出す**。
+ACS の jar に入っている `com.ibm.eNetwork.ECL.ECLSession` / `ECLPS` / `ECLOIA` を、自作の Java（`acs-probe/AcsProbe.java`）から呼ぶ。
+当 PJ の挙動を「ACS と同じか」で確かめるときに、利用者に ACS を起動してもらわずに済む（`20260919-backlog-acs-triage`）。
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/attn-restore.txt   # 既定は AS400_*
+node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順> PUB400                         # PUB400_* で
+```
+
+- **取れるのはコアの挙動だけ。** データストリームの処理（`DS5250` / `PS5250`）は ACS そのものが動く。
+  GUI 固有の経路（打鍵が `ECLPS.SendKeys` を通るか、画面の描き方）は取れない。
+- **ACS の jar はコミットしない**（IBM の頒布物。AGENTS.md「ライセンスと出典」）。
+  - 既定の置き場はリポジトリ直下の `IBMiAccess_v1r1/acsbundle.jar`（`.gitignore` 済み）。別の場所なら `ACS_JAR` で指す。
+  - 中の `plugins/emulator/acshod2.jar` は、利用者ごとのキャッシュ（`~/.cache/ts5250-acs-probe/`。所有者を確かめる）にだけ取り出す。元の jar が変わったときだけ取り出し直す。
+- 前提は JDK 17 以上（`jar` と `javac`）。
+- 環境変数
+  - `PROBE_CODEPAGE`（既定: AS400 は 930 / PUB400 は 37。930 の SBCS には英小文字が無いので、大文字小文字を区別する PUB400 では 37）
+  - `PROBE_SCREEN`（`24x80` 既定 / `27x132`）
+  - `PROBE_DEVNAME`（既定は指定せず、ホストに採らせる）
+  - `PROBE_PORT`（既定 23）
+- 出力から `.env` の値（パスワード・ホスト・利用者名）を伏せる。JVM に渡す環境変数は要るものだけ。
+- 終了コード（**0 は手順を最後まで流したときだけ**）: 0 = 最後まで流した / 1 = JVM を起動できない / 2 = 実行前の誤り（環境変数・JDK・jar・コンパイル・手順。手順は命令名・引数の書式・`${LIB}` と `_LIB` の有無を実機に繋ぐ前に確かめる） / 3 = 接続できない・サインオンできない（パスワード欄が残っていたら続きを打たずに止める） / 4 = 途中で止まった（例外・エラー） / 5 = 時間切れ（300 秒）。
+- サインオンで、利用者名は大文字にして書く。パスワードは、英小文字の無いコードページ（930 / 5026 / 290）のときだけ大文字にする。
+- 手順ファイルの文法（1 行 1 命令。`#` はコメント）:
+
+  | 命令 | 意味 |
+  |---|---|
+  | `signon` | サインオン画面の最初の 2 つの入力欄へ、利用者名とパスワードを**欄として直接**書いて Enter（打鍵で送ると、10 文字の利用者名の自動送りや、`[` を含むパスワードのキー名の解釈で化ける） |
+  | `keys <文字列>` | `ECLPS.SendKeys` にそのまま渡す（`[enter]` `[attn]` `[pf12]` `[home]` `[eraseeof]` など）。`${LIB}` は `<接頭辞>_LIB` |
+  | `settle [ms]` | 入力禁止が解けるまで（最長 15 秒）待ち、さらに ms 待つ（既定 800） |
+  | `sleep <ms>` | 待つ |
+  | `setcursor <行>,<桁>` | カーソルを置く |
+  | `dump [ラベル]` | 空でない行・カーソル（行,桁）・入力禁止の状態。DBCS は 1 文字が 2 桁ぶん重複して出る |
+
+- 手順の例:
+  - `attn-restore.txt` — 未送信の打鍵が Attn → F12（SAVE / RESTORE SCREEN の往復）の後に残るか。ACS では残り、当 PJ では消える（`.aidev/backlog/acs-parity.md`）。
+  - `cursorcl3.txt` — 保護された欄へ DSPATR(PC) を向ける画面で、Enter 後のカーソル（ACS も当 PJ も 3 行 12 桁）。
+- 手順の最後で `SIGNOFF` すること。途中で止めると、装置をしばらく掴んだままになる。
+
+## 接続の寿命の実ブラウザ検証（瞬断・半開き）
+
+`verify-browser-reconnect.mjs` は、**ブラウザとサーバーの間に TCP 中継を挟み、瞬断を作って、ホストのセッションが生き残って元の画面に戻るか**を実機で測る。
+単体テストは WebSocket を模して状態遷移を見るだけなので、実際の切れ方と猶予の噛み合わせはここでしか分からない。
+
+事前に `npm run build` と `npm run build -w @ts5250/web-ui`（web-ui の `dist` は root のビルドでは作られない）。
+
+```sh
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-reconnect.mjs            # S1 S2 S3 S4 LAT（約 4 分）
+node --env-file=.env --env-file=.env.verify scripts/verify-browser-reconnect.mjs S4a        # 既知の欠陥の再現
+```
+
+| シナリオ | 切り方 | 確かめること |
+|---|---|---|
+| S1 | 3 秒の断（RST＋拒否） | 同じ画面に戻り、F3 がホストに通る（同じジョブ） |
+| S2 | `DLYJOB DLY(6)` の応答待ちの最中に 3 秒の断 | DLYJOB が終わった後の画面に戻り、応答待ちが解ける |
+| S3 | 40 秒の断（はしご 1+2+4+8+16 秒を使い切る） | 「再接続」ボタン（`.oia .fk.retry`）が出て、押すと戻る |
+| S4 | このソケットで最初の ping を受けてから黙って止める（research F2 の「S4b」） | 約 93 秒（`PING_DEAD_MS`＋保険 3 秒）で再接続中になり、戻る |
+| S4a | 繋ぎ直させた直後、ping を受ける前に黙って止める | 検出できるか。**現状は FAIL が正しい**（見張りが最初の ping まで張られない。`.aidev/backlog/session-lifecycle.md`）。直ったら既定に入れる |
+| LAT | `1` と F3 の 15 往復（打鍵 30 回） | 打鍵 → screen、打鍵 → 描画・覆いの解除の p50 / p90（判定はしない。基準線） |
+
+> ⚠ **時間はページ内の時計で測る。** Playwright の `framesent` / `framereceived` は CDP 経由で約 200ms 遅れて届く。
+> **負荷の高いときの計測も信用しない**——並行してテストを回していた間は p50 465ms と出たが、落ち着いてからは打鍵 → 描画が 72〜137ms だった（`20260919-backlog-acs-triage` decisions D4）。
+
+- 2026-09-19 の実測: S1 は戻してから 1,117ms、S2 は 2,933ms、S3 は断から 29.7 秒でボタン → 押して 1,374ms。
+  S4 は、いまの中継で 93.4 秒で検出 → 802ms で復帰した（直す前の中継でも 93.3 秒 → 632ms で同じ）。S4a は 130 秒たっても検出しなかった（FAIL が正しい）。
+- **中継は、黙って止めている間は片側の閉鎖を反対側へ伝えない。** 伝えると、サーバーの心拍の閉鎖（約 120 秒）がブラウザに届き、本物の半開きでは起きない「検出」になる（`20260919-backlog-acs-triage` decisions D10）。
+- サーバーも中継も 127.0.0.1 だけで待ち受ける（認証オフ・自動サインオンの設定で立てるため）。シナリオ名を打ち間違えると、走らせずに止まる（exit 2）。
+- 装置名は指定しない（ホストに採らせる）。最後に `SIGNOFF` する。
+- サインオン画面は「利用者名とパスワードの入力欄がある」で見分ける。「パスワード」の語だけだと、サインオン情報の画面（F9=パスワードの変更）を取り違える。
+
 ## SQL 画面（SELECT 以外）の検証用資産（実機 / TESTLIB）
 
 | スクリプト | 内容 |
