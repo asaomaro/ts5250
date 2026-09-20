@@ -179,6 +179,7 @@
 - コードコメントに出所（D 番号・`file:line`・数値・他 work への参照）を書くとき → `.aidev/conventions/comment-provenance.md`
 - サーバー／クライアントなど**対になる資産**を作る・片方に指摘を直すとき → `.aidev/conventions/paired-artifact-sync.md`
 - 実測値を記録（research・台帳・PR）に残すとき → `.aidev/conventions/measurement-sanity.md`
+- 回帰テストを足して「固定した」と書くとき → `.aidev/conventions/verify-by-mutation.md`
 <!-- /aidev:conventions -->
 
 ---
