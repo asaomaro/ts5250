@@ -39,3 +39,4 @@ kind: standing
       数え漏らしは 1 つの work の 3 件だけで、多くは decisions.md 側の主張だった。コメントの走査では一部しか覆えない。
       09-14 以降の 7 works の review には、該当する指摘が無い。
       残すなら、review 手順での差分 grep（ハーネス側）になる。直近 8 PR の追加コメントでは 0〜34 行。（research F1-12）
+- [ ] 出典がリポジトリの外にしかない参照を走査で検知する。20260919-backlog-acs-triage で、台帳に「委譲先 D の L1〜L15」「委譲先 E の A1〜A16」と書いて comment-provenance 違反になった（委譲先の報告はリポジトリに残らないので、後から確かめられない）。research.md に無い数値の引用も同じ形。隣の項目（work をまたぐ参照の無修飾）と同じ走査に乗せられる。条項は既にあって守られていないので、追記ではなく層を下げる（protocol.md「12.」）（出典: .aidev/works/20260919-backlog-acs-triage/retro.md）
