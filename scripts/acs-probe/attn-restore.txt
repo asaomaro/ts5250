@@ -1,0 +1,18 @@
+# 未送信の打鍵が、Attn → F12（SAVE SCREEN / RESTORE SCREEN の往復）の後にも残るか（ACS 側）。
+# 当 PJ はこの往復で打鍵と MDT を失う（.aidev/backlog/acs-parity.md「Attn・SysReq・ヘルプから戻ると、打鍵した文字と MDT が消える」）。
+# ACS では WRKACTJOB が残り、カーソルも元の桁へ戻る（20260919-backlog-acs-triage で実測）。
+signon
+# 「サインオン情報」の画面が挟まる実機がある（無ければ空のコマンド行で Enter するだけ）
+keys [enter]
+settle 1200
+dump menu
+keys WRKACTJOB
+dump typed
+keys [attn]
+settle 2500
+dump after-attn
+keys [pf12]
+settle 2000
+dump after-f12
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

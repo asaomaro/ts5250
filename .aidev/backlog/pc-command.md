@@ -67,7 +67,7 @@ Windows ビルドでの実行）。~~ → **2026-08-23 に Windows 実機で両�
     見立ての前提がこの機械には無い
   - 生の測定値は `.aidev/works/20260823-pccmd-windows-verify/research.md`、
     要約は `packages/server/src/pc-command.ts` の `stripCallBeforeStart` docstring
-- [ ] **`CALL START` が消える根本原因の特定（原資料の 1 台でしか再現していない）**
+- [x] **`CALL START` が消える根本原因の特定（原資料の 1 台でしか再現していない）**
   - 回避策（`CALL` を落とす）で実害は消えており、**別の Windows 11 実機では再現しない**
     （上の項目）。残るのは「あの 1 台で何が効いていたか」で、
     **あの環境に届かない限り測れない**
@@ -76,6 +76,12 @@ Windows ビルドでの実行）。~~ → **2026-08-23 に Windows 実機で両�
   - 再訪するとき最初に測るもの: `ComSpec` の指す先 / `cmd.exe` の版 /
     `HKCU|HKLM\Software\Microsoft\Command Processor` の `AutoRun` /
     親プロセスがジョブに入っているか / `app.exe` の置き場（`NET USE` した UNC 共有か）
+  - **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（実害なし・回避策あり）** — 利用者への実害は、回避策で消えている。
+    - 回避策 `stripCallBeforeStart` は、許可判定の後・実行の直前に適用している（`packages/server/src/pc-command.ts:198` / `:223`）。
+    - Windows 実機での回帰テストがある（`packages/server/test/pc-command-windows.test.ts`）。
+    - 別の Windows 11 では 40 ケースとも再現しなかった（`20260823-pccmd-windows-verify`）。
+    根本原因は原資料の 1 台に届かない限り測れず、突き止めても利用者の得るものが無い。
+    再発したときに最初に測るものは、上の一覧と docstring（`pc-command.ts:175-177`）に残してある。（research F1-16）
 - [x] **Windows 実機での回帰確認の自動化** — 2026-08-23 完了（`20260823-pccmd-windows-verify` / PR #357）
   - `packages/server/test/pc-command-windows.test.ts`（`describe.skipIf(!isWin)`）。
     **本番の `runPcCommand` 経路**で「アプリ」を起動し、**シェルが終わったあとも

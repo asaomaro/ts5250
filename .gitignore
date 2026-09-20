@@ -42,3 +42,7 @@ spool-html/
 
 # Rust のビルド成果物
 /crates/**/target/
+
+# IBM i Access Client Solutions（ACS）の頒布物。`scripts/acs-probe.mjs` の既定の置き場。
+# IBM のライセンスの物なのでコミットしない（AGENTS.md「ライセンスと出典」: 原典をリポジトリに取り込まない）
+IBMiAccess_v1r1/

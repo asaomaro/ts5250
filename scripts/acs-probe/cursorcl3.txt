@@ -1,0 +1,16 @@
+# 2 画面目で入力欄を保護し、そこへ DSPATR(PC) を向ける画面で、Enter 後に ACS がカーソルをどこへ置くか。
+# 前提: 検証ライブラリ（AS400_LIB）に CURSORCL3 がある（scripts/build-cursortst.mjs で作る）。
+# ACS も当 PJ も 3 行 12 桁（保護欄の中。ホストの IC/MC に従う）だった（20260919-backlog-acs-triage で実測）。
+signon
+keys [enter]
+settle 1200
+keys CALL ${LIB}/CURSORCL3[enter]
+settle 1500
+dump screen1
+keys ABC123[enter]
+settle 1800
+dump screen2
+keys [pf3]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -30,21 +30,282 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     589件+2035件（web-ui、1件は無関係な環境依存flaky）に回帰無し。（出典:
     `.aidev/works/20260915-dspfmt-reconnect-blank-redraw/research.md`, `decisions.md`,
     `test-result.md`）
-  - [ ] 黄・青緑以外の色での桁区切り(DSPATR(CS))の実際の送信経路（WEA経由か等）は
+  - [x] 黄・青緑以外の色での桁区切り(DSPATR(CS))の実際の送信経路（WEA経由か等）は
     引き続き未確認のまま（`20260914-dspfmt-field-underline-instability` decisions.md D1）。
     実機に RPG コンパイル用のソースファイル（`QRPGLESRC`）が現在ASAOLIBに無く、実行時の
     確認ができなかった（DDSコンパイル自体は全7色で通ることは確認済み、
     `build-colsep-matrix.mjs`）。次はソースファイルの整備可否を利用者に確認するか、
     利用者の実機で直接トレースを取ることから始める。（出典:
     .aidev/works/20260914-dspfmt-field-underline-instability/research.md, decisions.md）
+    **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（差異なし・実害なし）** — 送信経路がどちらでも、表示は ACS と同じになる。
+    - ACS が桁区切りを決めるのは属性バイトだけ（`PS5250.setAttributeToPlanes`）。立つのは 0x30〜0x37 と 0x3F で、
+      当 PJ の `packages/tn5250/src/screen/attributes.ts:61-76` と 1 対 1 で一致する（#405 で揃えた）。
+    - ACS の WEA の処理（`PS5250.writeExtAttribute`）が扱うのは、タイプ 5（DBCS の拡張 NLS 区間。DBCS セッションのみ）だけ。
+      それ以外はセンスコードで拒否するので、**色や桁区切りを WEA で受ける経路は ACS に無い**。
+    - Query Reply は ACS の実測値と一致させてある（`protocol/query-reply.ts`）ので、ホストは両者に同じものを送る。
+    したがって、`QRPGLESRC` の整備も実機での実測も、判定には要らない。
+    WEA タイプ 5 を当 PJ が無視している差は、新規の項目（DS5250 のその他）に入れた。（research F1-13）
 - [x] ~~SEU の PageUp/PageDown で境界ページに到達したときカーソル位置を維持する~~、という当初のAC1/AC2/AC8の目標（20260914-seu-page-cursor-hold で撤去済み）。~~ACS のコア（DS5250/PS5250）には専用ロジックが見当たらなかったため、UI描画層の調査や実機同時比較（tap-proxy.mjs等）で「ACSが実際にどう見せているか」を先に確定してから再挑戦する。~~ ——利用者からの新規報告（保護欄にカーソルを置いたまま PageUp/PageDown するとヘッダーの入力可能エリアへ強制移動する、ACSは変わらない）を受けて再調査した結果（`20260915-pdm-protected-cursor-pageup`）、上記の前提は2点とも誤りだったと判明した。(1) 症状は境界ページに限定されない（実機トレースで非境界ページでも再現、`research.md` F4/F5）。(2) 原因は ACS 側の未知ロジックではなく、**当プロジェクト既存の分岐（PR#387、`cursorAddr === cursorBefore && cursorIsUnenterable()` → 先頭入力欄へ寄せる）が PageUp/PageDown 応答で誤発火していたこと**——ACS の UI層調査は不要だった。~~修正: `lastSentAid`（直前に送信したAIDキー）を再導入し、PageUp/PageDown の応答でのみ既存2分岐（`PR#387`分岐・`!cursorSet`分岐）を除外する（`decisions.md` D2-D4）。~~ ~~訂正（deliver後、利用者指摘を受けた再検証。`decisions.md` D5）: AIDキー種別による判定は、たまたま検証した2ケースの相関にすぎず真の判別軸ではなかった。ACSのデコンパイル済みコアにキー種別による分岐は無く（`20260914-seu-page-cursor-hold` decisions.md D6）、真の判別軸は「このレコードを当てる前、その桁は入力可能だったか」（`cursorBeforeWasEnterable`）だった——`PR#387`分岐にのみこの条件を追加し、`!cursorSet`分岐は無条件（元の形）に戻した。`lastSentAid`は撤去。~~ **再訂正（`20260915-pr387-acs-premise-unverified`）**: `cursorBeforeWasEnterable` 自体も撤去された——`PR#387`分岐そのものが、未検証の前提（「ACSは下の入力欄にカーソルを入れる」）に基づいていたと判明し、分岐ごと撤去したため（下記の新規項目を参照）。結果として、SEU の PageUp/PageDown の症状はこの分岐撤去の副産物として解消された（`cursorBeforeWasEnterable` という条件分岐を経由せず、単純にホストのIC/MC指定に常に従う形になったため）。修正後のビルドで実機（SR-OSAKA/ASAOLIB）の境界・非境界両ケース（SEU）と`PR#387`元シナリオ（CURSORCL3、`PGM=CURSORCL3`）の両方でカーソル位置が正しく判定されることを確認済み（`.aidev/works/20260915-pr387-acs-premise-unverified/research.md` に実機再確認の記録あり）。回帰テスト: `packages/tn5250/test/cursor-stale-on-protected.test.ts`。（出典: `.aidev/works/20260915-pdm-protected-cursor-pageup/research.md`, `decisions.md`、`.aidev/works/20260915-pr387-acs-premise-unverified/research.md`, `decisions.md`）
 - [x] **`PR#387`（コミット `c82e2b34`、保護欄でEnter確定後にカーソルを先頭入力欄へ寄せる、既にmainにマージ済み）の前提が未検証だったと判明し、分岐を撤去した**（`20260915-pr387-acs-premise-unverified`）。利用者から「ホストが位置を送ってくるならキー種別に関係なくホストに従えば良いのでは。ACSのjarにキー判定があるのか」との指摘、続いて「CURSORCL3でACSが下の入力欄へ寄せる、というのはこちらの報告だったか？誤報告かもしれない」との指摘を受けて調査した。判明した事実: (1) `PR#387`（GitHub PR #387）の検証資材は全てこのプロジェクト自身のクライアントが対象で、実際のACSソフトウェアには一度も接続していない。(2) PR本文の確認チェックリスト「報告された実際の画面で、Enter後に下の入力欄へ入ること」が未チェックのまま残っていた。(3) ACSのデコンパイル済みコア（`DS5250.preprocessWCC2()`）の全文を読んだ結果、カーソル位置の決定はIC/MCの有無だけで完結しており（GUI選択ウィジェット専用の狭い例外を除く）、この上書きに相当するロジックは存在しなかった。(4) 利用者自身も「当時ACSと比較した記憶は不確か」と回答。対応: `handleRecord()`から`PR#387`分岐と専用ヘルパー（`buffer.ts`の`isEnterableAt`/`cursorIsUnenterable`）を削除し、ACSコアの確認済み挙動（IC/MCの指定に常に従う）に一致させた。これにより、`PR#387`が元々解決しようとした症状（Enter確定後、保護化された欄にカーソルが取り残されTabを押すまで入力できない）は再び起きる——ACSコアの確認済み挙動に合わせるための意図的な変更であり、単純な退行ではないが、**実機ACSによる直接確認はこの work でも引き続きできていない**（~~この開発環境にACSが無いため~~ ——訂正（2026-09-17）: 誤り。下の子項目の訂正を参照）。もし将来、実機同時比較で「ACSは実際にCURSORCL3で下の欄へ寄せる」ことが確認された場合は、この変更を差し戻し、真の判別軸を実機で確認した上で`PR#387`相当の分岐を再実装する必要がある。（出典: `.aidev/works/20260915-pr387-acs-premise-unverified/research.md`, `decisions.md`）
-  - [ ] **実機ACSによる直接比較が今後も課題として残る**（~~利用者の協力が前提。~~`tap-proxy.mjs`等での実機同時比較）。特にCURSORCL3のシナリオ（Enter確定後の保護化）でACSが実際にどう振る舞うかは、今回も確認できていない。（出典: `.aidev/works/20260915-pr387-acs-premise-unverified/decisions.md` D2）**訂正（2026-09-17）**: 「この開発環境にACSが無い」は誤りで、ACSのjar（`acshod2.jar`）をそのまま使う 5250-operator MCP と `scripts/tap-proxy.mjs` で実測比較できる。実際に PA0100J（Enter 後・PageUp 後のカーソル）と YB0140R（窓の PageUp/PageDown）はこの方法で ACS と突き合わせて是正した（PR #404。IC/MC の WTD 単位確定・SOH での破棄・WEC でのカーソル復元・窓左端の属性打ち切り。`packages/tn5250/src/protocol/wtd-applier.ts` の `PendingCursorOrder`、回帰テスト `packages/tn5250/test/cursor-per-wtd.test.ts`）。**CURSORCL3 のシナリオだけは未実測のまま**なので、この項目は開けておく。
+  - [x] **実機ACSによる直接比較が今後も課題として残る**（~~利用者の協力が前提。~~`tap-proxy.mjs`等での実機同時比較）。特にCURSORCL3のシナリオ（Enter確定後の保護化）でACSが実際にどう振る舞うかは、今回も確認できていない。（出典: `.aidev/works/20260915-pr387-acs-premise-unverified/decisions.md` D2）**訂正（2026-09-17）**: 「この開発環境にACSが無い」は誤りで、ACSのjar（`acshod2.jar`）をそのまま使う 5250-operator MCP と `scripts/tap-proxy.mjs` で実測比較できる。実際に PA0100J（Enter 後・PageUp 後のカーソル）と YB0140R（窓の PageUp/PageDown）はこの方法で ACS と突き合わせて是正した（PR #404。IC/MC の WTD 単位確定・SOH での破棄・WEC でのカーソル復元・窓左端の属性打ち切り。`packages/tn5250/src/protocol/wtd-applier.ts` の `PendingCursorOrder`、回帰テスト `packages/tn5250/test/cursor-per-wtd.test.ts`）。~~**CURSORCL3 のシナリオだけは未実測のまま**なので、この項目は開けておく。~~
+    **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（差異なし・実害なし: 実測で一致）** — CURSORCL3 を ACS と当 PJ の両方で実機に当てた。
+    手順: 検証ライブラリ（`AS400_LIB`）の CURSORCL3 で、1 画面目に `ABC123` を打って Enter を押す。
+    2 画面目では CODE 欄が保護され、DSPATR(PC) も CODE 欄を指す。
+    - ACS（`acshod2.jar` の HACL/ECL を headless で実行。`scripts/acs-probe.mjs`）: カーソルは **3 行 12 桁**（保護欄の中）
+    - 当 PJ（`scripts/diag-ic-on-protected.mjs`）: **3 行 12 桁**
+    ホストの IC/MC に従う点で一致し、PR#387 の分岐を撤去した判断を裏付ける。
+    「ACS を利用者に起動してもらう」必要も無くなった（ECL でコアを直接動かせる）。（research F1-14・F0-2）
 - [x] 当プロジェクト全体でACSの実装と突き合わせるべき挙動の棚卸し（利用者から「全体的にACSを手本に見直しを図ってください」との要望、20260915）のうち、**第1弾（プロトコル仕様そのものの突き合わせ、ACS・実機起動どちらも不要）**を実施した（`20260915-acs-protocol-order-audit`）。ACS のデコンパイル済みコア（`DS5250.processWriteToDisplay()`のオーダーswitch、`PS5250.addChar()`の文字書き込み処理）と `wtd-applier.ts` を突き合わせ、オーダー対応は1:1で一致していることを確認。あわせて `ORDER.UNKNOWN_1C`（0x1C）の対（0x1E）に専用の`case`が無く、遭遇すると同一WTD内の以降の全オーダーが失われる欠陥を発見・修正した（`ORDER.UNKNOWN_1E`追加、`packages/tn5250/test/wtd-applier.test.ts`に回帰テスト追加）。残作業は下記に割る。
-  - [ ] 見た目のヒューリスティックの是非（利用者の実機操作＝ACS起動が必要）、および DSPFMT の再現待ち（利用者の実機ライブラリへの変更判断が必要）は未着手のまま。
+  - [x] 見た目のヒューリスティックの是非~~（利用者の実機操作＝ACS起動が必要）~~、および DSPFMT の再現待ち（利用者の実機ライブラリへの変更判断が必要）は未着手のまま。
     **絞り込みの叩き台（20260915、旧記述を残す）**:
-    2. **[利用者の実機操作が必要] 見た目のヒューリスティックの是非**: ~~SEU の PageUp/PageDown 境界カーソル（本ファイル上の項目）のような~~「ACS のコアには専用ロジックが無いが見た目で挙動が違って見える」ケース。**訂正（`20260915-pdm-protected-cursor-pageup`）**: 上記の例（SEU の PageUp/PageDown 保護欄カーソル）は、実際には ACS 側の未知ロジックではなく当プロジェクト既存の分岐（PR#387）の誤発火が原因だったと判明し、ACS の UI層調査無しで解決済み（本ファイル上の該当項目参照）——このカテゴリの**例としては不適切**だったが、カテゴリ自体（ACS のコアに専用ロジックが無いのに見た目が違って見える、未解決のケース全般）は依然として残りうる。ACS の UI 描画層（コアのデコンパイルでは追えなかった）に踏み込むか、`tap-proxy.mjs` で利用者に ACS を実際に起動してもらい実機と同時比較するかのいずれかが要る——**この work だけでは実行できず、利用者の協力（ACS 起動・実機操作）が前提**。
+    2. **[利用者の実機操作が必要] 見た目のヒューリスティックの是非**: ~~SEU の PageUp/PageDown 境界カーソル（本ファイル上の項目）のような~~「ACS のコアには専用ロジックが無いが見た目で挙動が違って見える」ケース。**訂正（`20260915-pdm-protected-cursor-pageup`）**: 上記の例（SEU の PageUp/PageDown 保護欄カーソル）は、実際には ACS 側の未知ロジックではなく当プロジェクト既存の分岐（PR#387）の誤発火が原因だったと判明し、ACS の UI層調査無しで解決済み（本ファイル上の該当項目参照）——このカテゴリの**例としては不適切**だったが、カテゴリ自体（ACS のコアに専用ロジックが無いのに見た目が違って見える、未解決のケース全般）は依然として残りうる。ACS の UI 描画層（コアのデコンパイルでは追えなかった）に踏み込むか、`tap-proxy.mjs` で利用者に ACS を実際に起動してもらい実機と同時比較するかのいずれかが要る——~~**この work だけでは実行できず、利用者の協力（ACS 起動・実機操作）が前提**。~~
     3. **[利用者の実機ライブラリへの変更判断が必要] DSPFMT の再現待ち**: 本ファイル上の別項目。**訂正（`20260915-dspfmt-reconnect-blank-redraw`）**: 利用者からの新しい再現手順を得て再現・原因特定に成功し、`QRPGLESRC` 整備を待たずに解決した（本ファイル上の該当項目参照）——ただし色符号化（DSPATR(CS)）に関する別のサブ課題は `QRPGLESRC` 整備待ちのまま残っている。
     次に着手する際は `20260915-acs-protocol-order-audit` の decisions.md D1（`ORDER.UNKNOWN_1C`/`UNKNOWN_1E` のアーキテクチャ上の位置づけの見直しは今回scope外とした）も参照。（出典: .aidev/works/20260914-seu-page-cursor-hold/decisions.md, .aidev/works/20260915-acs-protocol-order-audit/decisions.md）
+    **判定（`20260919-backlog-acs-triage`・PR #406）: 対応不要（解決済み: 具体的な対象が残っていない）** —
+    - DSPFMT は #401 で解決済み（`20260915-dspfmt-reconnect-blank-redraw`。8/8 で解消を実測）。
+    - 「見た目のヒューリスティック」には、具体的な未解決の事例が残っていない。
+    - 前提だった「ACS の起動には利用者の協力が要る」は崩れた。ACS のコアは `scripts/acs-probe.mjs`（HACL/ECL）で、利用者の手を借りずに実機へ当てられる。
+    今後の事例は、見つけたものから個別に起票する（`20260919-backlog-acs-triage` で起票した新規の項目を参照）。（research F1-15・F0-2）
 - [x] 当プロジェクト全体でACSの実装と突き合わせるべき挙動の棚卸し（利用者から「全体的にACSを手本に見直しを図ってください」との要望、20260915）のうち、**第2弾（フィールド入力値検証`field-validate.ts`の突き合わせ、ACS・実機起動どちらも不要）**を実施した（`20260915-acs-field-validation-audit`）。ACSのデコンパイル済みコア（`Field5250`の`checkNumericOnlyChar()`・`checkDigitsOnlyChar()`・`checkAlphaOnlyChar()`・`checkKanaShiftChar()`）と`field-validate.ts`を突き合わせ、数値専用欄（`SHIFT_NUMERIC_ONLY`/`SHIFT_SIGNED_NUMERIC`）で埋め込みの空白文字を拒否していた食い違いを発見・修正した（ACSは位置を問わず空白を許容する。正規表現を`/^[0-9.,+-]*$/`→`/^[0-9 .,+-]*$/`に変更、回帰テスト`packages/tn5250/test/field-validate.test.ts`）。数字のみ・英字専用・カタカナシフトの検証は既に一致していることを確認済み。残作業は下記に割る。
   - [x] **自己点検欄（モジュラス10/11、FCW経由で付与される属性）~~が当プロジェクトに未実装~~**（`20260915-acs-field-validation-audit` decisions.md D2）。ACSの`Field5250.checkModulusField()`/`modulusCheck()`が標準的なモジュラス10/11アルゴリズムを実装しているが、当プロジェクトの`wtd-applier.ts`は未知のFCWを安全に読み飛ばすためパース破壊は起きない（feature gapでありbugではない）。実装を見送った理由: (1) 正確なFCW値（~~`0xB0xx`/`0xB1xx`系と推測されるが未確定~~）がデコンパイル結果だけからは一意に確定できず、実機トレースが必要。(2) モジュラス10/11の検証はフィールド全体の最終値に対して行うもので、既存の「打鍵・貼り付けされた差分文字を1文字ずつ検証する」という`validateFieldContent()`の構造とは粒度が異なり、別途フィールド確定時検証を新設する設計が要る。次に着手する際は、実機で自己点検欄付きの画面を作り生バイトを採取して正確なFCW値を確認することから始める——アルゴリズムの詳細は`.aidev/works/20260915-acs-field-validation-audit/research.md` F6に記録済み。（出典: .aidev/works/20260915-acs-field-validation-audit/research.md, decisions.md） **実装済み（2026-09-17・PR #404）**: FCW は ACS `Field5250` の定数（`javap -constants`）で確定した——`FCW_SELF_CHECK_MODULUS_11=0xB140` / `FCW_SELF_CHECK_MODULUS_10=0xB1A0`。`wtd-applier.ts` の `applySf` が `Field.selfCheck`（`mod10`/`mod11`）として載せ、検算は `Field5250.checkModulusField()`/`modulusCheck()` を写した `selfCheckDigitOk`（`packages/tn5250/src/screen/field-validate.ts`）。粒度の問題（上記 (2)）は、差分文字の検証ではなく **AID 送信前の検査**（web-ui `composables/mandatoryCheck.ts`、`MANDATORY_ENTER`/`MANDATORY_FILL` と同じ場所）に置くことで解いた——ACS も送信時に検算する。回帰テスト: `packages/tn5250/test/fcw-dbcs-self-check.test.ts`・`packages/web-ui/test/self-check-field.test.ts`。同時に DBCS の FCW を ACS の 4 値（`0x8200`=only/`0x8220`=pure/`0x8240`=either/`0x8280`=open）へ揃えた。
+
+<!-- 以下 20260919-backlog-acs-triage: ACS のコアのうち未突き合わせだった 3 領域（DS5250 の WTD 以外 / キー入力・編集・AID・施錠 / telnet・プリンター）の差異。
+     深さ: ◎ 実測 / ○ 主エージェントが両側を直読 / ◐ 片側を直読 / △ 委譲先の報告のみ（着手時に両側を再確認）。組の一覧は同 work の acs-comparison.md -->
+- [ ] **Attn・SysReq・ヘルプから戻ると、打鍵した文字と MDT が消える（RESTORE SCREEN で自分の退避イメージを再適用する）**（優先度 高・深さ ◎）。
+  打ったまま送っていない入力は、Attn やヘルプを開いて F12 で戻ると消え、Enter で再送されない（データが黙って失われる）。
+  CA マスクも戻らないので、F12 で欄データを送ってしまう（委譲先のプローブ）。
+  ACS: `DS5250.processSaveScreen` が状態一式を退避データに入れ、0x12 で丸ごと戻す（`Save5250Net` の直列化）。
+  状態一式は、欄・全プレーン・カーソル・施錠・保留中の READ・メッセージ行・CA マスク。
+  当 PJ: `packages/tn5250/src/protocol/wtd-applier.ts:204` の `RESTORE_SCREEN` は、ローカルのスタックから戻したあと `break` する。
+  そのため、同じレコードに続く積荷（自分が送った `ESC 11 …` の WTD）を、次のコマンドとして適用してしまう。
+  積荷を作る `save-screen.ts` の `writeCell` は `rawByte ?? 0x40` なので、打鍵した文字は空白になる。SF は元の FFW を使うので、MDT も落ちる。
+  `save-screen.ts:17-22` の「積荷は読まない」という記述と、実装が食い違っている。
+  再現（実機で ACS と並べて実測）
+  - 操作: メインメニューのコマンド行に `WRKACTJOB` を打ち（送らない）、Attn → F12 と押す。
+  - ホストの応答: Attn には `ESC 02`、F12 には `ESC 12` の後ろに `ESC 11`。
+  - 当 PJ: 戻った後のコマンド行は空欄で、MDT=false。
+  - ACS（`scripts/acs-probe/attn-restore.txt`）: `WRKACTJOB` が残り、カーソルも 20 行 16 桁に戻る。
+  手当ての候補（委譲先 C の案。着手時に再確認）: 復元時は自分の積荷を長さで読み飛ばす／退避に CA マスク・メッセージ行を含める／スタックを名指しで引く。
+  画面イメージ応答の打鍵文字の扱いは、下の【まとめ】DS5250 のその他に入れた。
+  （出典: `20260919-backlog-acs-triage` research N1）
+- [ ] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
+  末尾まで埋まった欄（SEU の行など）や、ホストが右寄せで書いた数値欄を挿入モードで直すと、文字が消えたり値が変わったりして送られる。
+  例: 右寄せの `"   12-"`（−12）の `1` の前に `9` を挿入すると `"   912"` になり、送信は `91` になる。
+  ACS: `PS5250.insertChar` → `reserveRoomForInsert` が、最終桁（符号付き数値は符号桁の手前）から空きを数える。足りなければエラー 0012 を出し、値を変えない。
+  当 PJ: `packages/web-ui/src/composables/fieldEdit.ts:33-36` が splice の後、`chars.length = len` で切り詰める。
+  貼り付けは既に「余地が無ければ何も変えない」規則なので、打鍵とで食い違っている。
+  テスト `field-edit.test.ts:33-40` は、満杯でない欄の挿入しか見ていない。
+  再現: 満杯の欄で挿入モードにして、1 文字打つ。
+  関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み（推測）。（出典: `20260919-backlog-acs-triage` research N2）
+- [ ] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**要判断（方針）**）。
+  Enter の直後に次のコマンドを打ち始めたり、Enter を続けて押したりすると、入力の頭が欠ける（熟練者ほど踏む）。
+  利用者の「待たされる」報告の候補の 1 つ（session-lifecycle.md の「最近の接続状態維持・再接続対応以降…不安定化」の項目）。
+  ACS
+  - `ECLPS.SendKeys` が、施錠中や READ が来ていない間の打鍵を `keyBuffer` に溜め、解錠や READ の到着で再生する。
+  - AID も `pending_aid` として溜め、READ が来たら送る（`DS5250.checkPendingAid`）。
+  - Reset / SysReq / Help / Attn を押すと、溜めた分を捨てる。
+  - 既定は有効（`DISABLE_SESSION_TYPE_AHEAD` の既定は false。`beans/HOD/Session.java:836-842`、設定画面の「キーストロークのバッファリング」は `KeyPanel.java:170`）。
+  - GUI の打鍵がこの経路を通るかは未確認（要実測）。
+  当 PJ
+  - `ScreenGrid.vue` の `onInputKeydown` が、`inhibited` のときに捨てる。
+  - `EmulatorPane.vue:851` が、busy 中は Attn / SysReq 以外を捨てる。
+  - 施錠中の先打ちを禁じたのは PR #388（09-03）。テスト `keyboard-locked-input.test.ts` が現状を固定している。
+  要判断（方針）: 次のどれにするかを決める。
+  - A) ACS と同じく溜めて、解錠時に再生する（Attn / SysReq で捨てる）
+  - B) 捨てるが、捨てたことを操作員メッセージで知らせる
+  - C) 現状のまま
+  下の「READ の無いアンロック」と合わせて設計すること。
+  （出典: `20260919-backlog-acs-triage` research N3・F3-3）
+- [ ] **DBCS プリンターの申告内容が ACS と違う（日本語帳票を push で印刷できるかの分かれ目）**（優先度 高・深さ △・**要実測**）。
+  ACS: `DS5250P.initializeTelnet` は、DBCS で HPT なしのとき、端末タイプを `IBM-5553-B01` にする。
+  NEW-ENVIRON で送るのは、次の 6 つだけ（IBMFONT・KBDTYPE/CODEPAGE/CHARSET・IBMSENDCONFREC は送らない）。
+  - DEVNAME
+  - IBMMSGQNAME=QSYSOPR
+  - IBMMSGQLIB=*LIBL
+  - IBMFORMFEED（値なし）
+  - IBMIGCFEAT=2424J0
+  - IBMTRANSFORM=0
+  当 PJ: 常に `IBM-3812-1`（`packages/tn5250/src/session/terminal-type.ts:44-47`。主エージェントが確認）で、IBMFONT=12・KBDTYPE 等・IBMSENDCONFREC も送る（`printer-session.ts:122-135`）。
+  `docs/HOST-PRINT-TRANSFORM.md` §2 の「5553-B01 → 8925」の試験は、当 PJ の既定の変数も一緒に送った条件だった可能性が高い（ACS と同じ条件ではない）。
+  測り方: 端末タイプ `IBM-5553-B01` と、ACS と同じ 6 変数だけで接続し、次を見る。
+  - 起動応答コード
+  - `DSPDEVD` の TYPE / MODEL / IGCFEAT
+  - IGC 帳票で CPA3303 が出るか
+  **着手時に ACS 側・当 PJ 側の両方を再確認すること**（委譲先の読みのみ）。（出典: `20260919-backlog-acs-triage` research N4）
+- [ ] **WTD の CC1=0xC0（MDT のリセット＋MDT の立った欄の消去）で、欄を消さない**（優先度 中・深さ ○）。
+  入力を消すべき画面で、打った値が残る。
+  ACS: `DS5250.processWCC1` の case 6 は、先に `clearNonbypassFields(true)`（MDT の立った欄を消す）を呼び、その後で `resetMDTFields(true)` を呼ぶ。
+  当 PJ: `packages/tn5250/src/protocol/wtd-applier.ts` の `applyCc` の case 0xc0 は `resetMdtNonBypass()` を先に呼ぶ。そのため、続く `nullNonBypass(true)`（MDT の立った欄だけを消す）の対象が 0 件になる。
+  手当ては、呼ぶ順序の入れ替え。付随の差（継続欄の全区間・DBCS 専用欄の SO/SI 桁）は委譲先 C の報告にある。
+  再現
+  - 単体: CC1=0xC0 の WTD を合成すれば再現する（委譲先 C のプローブで、打った `"ABC"` が残った）。
+  - 実機: 0xC0 を出す DDS（候補は `ERASEINP MDTOFF`）は要実測。
+  （出典: `20260919-backlog-acs-triage` research N5）
+- [ ] **READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす**（優先度 中・深さ ○）。
+  前の WTD の IC や、復元した位置を上書きしてしまう。当たるのは、RESTORE の後や、WRITE と READ が別レコードで来る画面。
+  ACS: `DS5250.processCommand` の READ INPUT / MDT / MDT ALT（66/82/130）は、`pending_read` と CC を保存するだけで、カーソルに触れない。カーソルを決めるのは、WTD の後の `preprocessWCC2` だけ。
+  当 PJ: `packages/tn5250/src/session/session.ts:666` の `if (result.readRequested && !result.cursorSet)` が `cursorToFirstInputField()` を呼ぶ。WTD の無いレコードでは `cursorSet` が偽のままなので、必ず動く。
+  再現: 委譲先 C のプローブで、復元後の READ だけのレコードで、カーソルが (7,12) から (5,10) に移った。実機で出る画面は要確認。
+  （出典: `20260919-backlog-acs-triage` research N6）
+- [ ] **Erase Input が、中身のある全入力欄を消す（ACS は MDT の立った欄だけを消し、カーソルをホーム位置へ移す）**（優先度 中・深さ ○）。
+  ホストが既定値を入れた未変更の欄（プロンプタの `*LIBL` など）まで消え、空白が「変更」として送られる。
+  既定の割り当ては Ctrl+Backspace で、Windows の「前の単語を削除」の癖で押されうる。
+  ACS: `PS5250.processEraseInput` → `clearNonbypassFields(true)`。カーソルは `getHomePos()` へ。
+  当 PJ: `packages/web-ui/src/components/ScreenGrid.vue:2372` の `eraseInputKey` は、中身のある全入力欄に `edit` を出して消し、先頭の入力欄へ移る（README も「すべての入力欄をクリア」と書いている）。
+  再現: F4 のプロンプトで 1 欄だけ打ってから、Erase Input を押す。（出典: `20260919-backlog-acs-triage` research N7）
+- [ ] **挿入モードが画面をまたいで残る（ACS は新しい画面ごとに上書きモードへ戻す）**（優先度 中・深さ ○）。
+  前の画面で挿入モードにしたまま次の画面で打つと、意図せず挿入になる。上の「挿入モードであふれた文字を捨てる」と重なって、末尾が消える。
+  ACS: `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、`processClearFMT`・WEC・書式の開始から呼ぶ。
+  当 PJ: `packages/web-ui/src/components/EmulatorPane.vue:95` の `insertMode` は、利用者の切り替えでしか変わらない。Reset キーも無い。
+  再現: 挿入モードにして Enter を押し、次の画面で打つ。（出典: `20260919-backlog-acs-triage` research N8）
+- [ ] **Shift+Enter で画面を送信する（ACS では Newline＝次の行の入力欄へ移るだけ）**（優先度 中・深さ ○）。
+  サブファイルの入力中に ACS の癖で Shift+Enter を押すと、入力途中のまま送信される。
+  ACS: 既定のキー割り当て `AcsMapFunctions.MAP_5250` が、`S10 = [newline]`（Shift+Enter）と `C17 = [newline]` を持つ。`PS5250.processNewline` はホストへ送らない。
+  当 PJ: `packages/web-ui/src/composables/useKeymap.ts:72-73` は Shift を見ずに Enter の AID を返す。Newline の機能そのものが無い。
+  テスト `keymap.test.ts:17-18` は、Enter → Enter だけを見ている。（出典: `20260919-backlog-acs-triage` research N9）
+- [ ] **起動応答コード 2703 / 2777 / 8936 / 8937 を知らない**（優先度 中・深さ ○）。
+  8936・8937 は自動サインオンの失敗・拒否を表す。当 PJ は自動サインオンを持つので、到達しうる。
+  未知のコードで装置名が無いと、そのレコードを 5250 データとして読んでしまう。その結果、`expected ESC` の警告と `closed during negotiation` だけが残り、本当の理由が消える。
+  ACS: `DS5250.processStartUpConfirmation` が、この 4 つにも個別の状態と文言を持つ。
+  当 PJ: `packages/tn5250/src/telnet/startup-record.ts` の表（2702・8901〜8940・I901〜I906）に、この 4 つが無い。テスト `startup-reject.test.ts:133` が「未知コードで装置名なし＝データ扱い」を固定している。
+  手当て: 表に足すだけで済む。文言の日本語化は下の【まとめ】telnet に入れた。（出典: `20260919-backlog-acs-triage` research N10）
+- [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない**（優先度 中・深さ ◐）。
+  DDS の窓で入力エラーが出ると、ACS は窓の中に出すが、当 PJ は最下行に出す。訂正している間もメッセージが消えない。
+  ACS（委譲先 C の読み）
+  - WEC は、SOH が申告したメッセージ行（MSGLOC）に書く。0x22 は、指定の桁範囲（窓の内側）に属性付きで書く。
+  - エラー状態の間は、文字キーと編集キーを拒否する。
+  - Reset・矢印・AID でエラー状態を抜けると、メッセージ行をエラー前の内容に戻す（`PS5250.saveMsgLinePosition` / `restoreMsgLinePosition`・`keyDown`）。
+  当 PJ（主エージェントが確認）
+  - `packages/tn5250/src/protocol/wtd-applier.ts:293-299` は、0x22 の桁 2 バイトを読み捨て、`systemMessage` として最下行に重ねる。このことはコメントに明記されている。
+  - エラー状態は持たない。
+  要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。メッセージ行の位置と復元は、どちらを選んでも ACS に合わせる。
+  **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
+- [ ] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
+  *NOTIFY の待ち行列にメッセージが届いても（SBMJOB の完了など）、表示が出ない。
+  ACS: CC2 のビット（0x01/0x02）と opcode 0x0B/0x0C で OIA を更新する（委譲先 C）。
+  当 PJ: `packages/tn5250/src/session/session.ts:147/592-593` が opcode だけを `messageWaiting` に保持し、snapshot にも UI にも出していない（主エージェントが確認）。CC2 のビットは見ていない。
+  再現: 自分のメッセージ待ち行列へ SNDMSG する。**ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N12）
+- [ ] **プリンター: 受信した瞬間に印刷完了を返す／CLEAR に応答しない**（優先度 中・深さ ◐）。
+  次のとき、ホストは印刷済みとみなすので、SAVE(*NO) のスプールが消える（印刷の欠落）。
+  - PDF の出力先の権限・容量が足りない
+  - 自動印刷先が止まっている
+  - サーバーが再起動した（帳票はメモリに最大 50 件）
+  印刷中に取消・保留をすると、前のジョブの断片が次の帳票に混ざりうる。
+  ACS（委譲先 E の読み）
+  - 書き終えてから NO_ERROR を返す。印刷先の障害時は応答を保留し、利用者の再試行・取消を待つ（`DS5250P.endOfRecord`・`PSNVT5250P`・`PrintHostData.write`）。
+  - CLEAR には `CLEAR_PROCESSED` を返し、ジョブを閉じる（`DS5250P.processClear`）。
+  当 PJ: `packages/tn5250/src/session/printer-session.ts:183-185` は、opcode 2 なら何もせず return し、それ以外は即座に `PRINT_COMPLETE` を返す（主エージェントが確認）。テスト `printer-session.test.ts:82-84` が即時の応答を固定している。
+  再現: 印刷中に HLDSPLF *IMMED / DLTSPLF / ENDWTR *IMMED を行う。PDF の出力先を書き込み不可にして送る。
+  **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N15）
+- [ ] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
+  抜けるには Attn / SysReq を押すしかない。「アンロック → 秒単位の処理 → READ」の画面では、ACS なら打てる区間が施錠のままになる。
+  当 PJ: `packages/tn5250/src/session/session.ts:701-713` は、`readSolicited` のときだけ `ready` にして `pendingAid` を解決する（#401・`20260915-dspfmt-reconnect-blank-redraw`）。
+  web-ui 経由の送信は `timeoutMs: "never"`（`packages/server/src/ws-handler.ts` の `onKey`）なので、期限による保険も無い。
+  ACS: WCC のアンロックで解錠し（`DS5250.processWCC2` → `endOfRecord`）、解錠中の AID は `pending_aid` に溜めて READ が来たら送る（委譲先 C・D）。
+  測り方: WRITE（LOCK 無し）→ `DLYJOB 10` → EXFMT の画面で、途中に打鍵と AID を試す。実機ではまだ観測していない（DSPFMT は最後が必ず READ だった）。
+  上の「先打ちを捨てる」と合わせて設計すること。（出典: `20260919-backlog-acs-triage` research F3-3 H）
+- [ ] **ホストに切られた後、自動で繋ぎ直さない**（優先度 中・深さ △・**要判断（方針）**）。
+  SIGNOFF ENDCNN(*YES)、QINACTITV による切断、ホスト側の回線断のあと、ACS なら新しいサインオン画面が自動で出る。当 PJ は利用者が開き直す必要がある。
+  ACS: `ECLConnection` の `autoReconnect`（`HODDefaults` で true）で、切断されると 1 回目は即座に、その後は 20 秒おきに繋ぎ直す。利用者が自分で切ったときは繋ぎ直さない（委譲先 E）。
+  当 PJ: 表示セッションは `closed` を受けると破棄する（`packages/server/src/session-manager.ts:746-752`）。ホストへ繋ぎ直すのは常駐プリンターだけ（`:1003-1013`）。
+  ブラウザとサーバーの間の瞬断からの復帰（session-lifecycle.md）とは別の話。
+  要判断（方針）: 次のどれにするかを決める。ACS 製品での既定値も要確認。
+  - A) 自動で繋ぎ直す
+  - B)「繋ぎ直す」ボタンを出す
+  - C) 現状のまま
+  **着手時に両側を再確認すること。**（出典: `20260919-backlog-acs-triage` research N18）
+- [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
+  委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
+  - RB/RZ 欄のフィールド終了（中）
+    - ACS: RB/RZ 欄も Field Exit が必須（`Field5250.isFieldExitRequired`）。
+    - 当 PJ: FER ビットしか見ない（`packages/tn5250/src/screen/buffer.ts:1225`）ので、満杯になると次の欄へ自動で送り、AUTO_ENTER なら Enter を送る。
+  - 欄を出ないまま AID を押したとき（中・**要判断**）
+    - ACS: 右寄せ欄・符号付き数値欄ではエラー 0020 にする（`PS5250.processAIDCode`）。
+    - 当 PJ: 左詰めのまま送る。英数字の CHECK(RZ)/(RB) 欄には左詰めのまま格納される。
+  - Home（中・**要判断**）
+    - ACS: 画面のホーム位置（IC、無ければ先頭の非バイパス欄）へ移る。既にそこにいれば Record Backspace を送る。
+    - 当 PJ: 欄の先頭へ移る（`ScreenGrid.vue:2682`）。
+  - Backtab（中）
+    - ACS: 欄の途中なら、その欄の先頭で止まる。カーソル送り（FCW 0x88）を逆向きにたどる（`FFT5250.previousNonByPassInputFieldPos`）。
+    - 当 PJ: 常に前の停止点へ移る。`EmulatorPane.vue:356-369` の「ACS で確かめられない」という前提は崩れた。
+  - ME/MF の意味とタイミング（中〜低・**要判断**）
+    - ACS: ME を内容ではなく MDT で判定し、画面に変更が無ければ検査しない。CF キーや Roll でも検査する。MF と自己点検は、欄を出るときにも検査する（`PS5250.processAIDCode`・`FFT5250.checkMandatoryFieldCheck`）。
+    - 当 PJ: Enter のときだけ、内容で判定する（`mandatoryCheck.ts`）。Enter のときだけにしたのは、`20260729-ffw-behavior-bits` D1 の意図的な差異。
+  - テンキーの ±（中〜低）
+    - ACS: すべての欄で Field+ / Field− として働く。
+    - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
+  - 低
+    - 欄の先頭での Backspace、End の行き先
+    - Clear / Help / Print / PA で欄データを送る
+    - Field− の可否、数値専用欄での Field−
+    - 符号付き＋RZ の埋め字、右寄せで動かす範囲
+    - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
+    - MONOCASE で ASCII 以外を大文字化しない
+    - 未対応の機能: Reset・Field Mark・PA1〜3・Record Backspace・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
+    - 既定のキー割り当ての違い: 左 Ctrl=Reset、Esc=Attn、Shift+Insert=Dup ほか
+    - `opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）
+  - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
+  （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）
+- [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答の形式ほか）**（優先度 低（画面イメージ応答は中）・深さ △・WEA タイプ 5 だけ ○）。
+  **着手時に両側を再確認すること。**
+  - 画面イメージ応答
+    - READ SCREEN（0x62/0x66/0x6A）で、当 PJ はカーソル 2 バイトを前置し、opcode を PUT_GET にし、NUL を 0x40 にする（`save-screen.ts:111-114`）。
+      ACS（`DS5250.processReadScreen`）は前置なし・opcode は受信したものの写し・NUL はそのまま。
+    - 打鍵した SBCS 文字を 0x40 にする（`save-screen.ts` の `writeCell`。上の RESTORE の項目と同じ根）。
+    - 到達するかは要実測。Query Reply の t[52] が、SBCS でも 0x40 になっている（ACS の SBCS 時とは違う）。
+  - WEA タイプ 5（拡張 NLS 区間）（○）
+    - ACS: DBCS セッションでは適用する（`PS5250.writeExtAttribute`）。
+    - 当 PJ: すべてのタイプを読み飛ばす（`wtd-applier.ts:555-575`）。
+    - 実機のトレースでは未観測。
+  - 細部の差
+    - ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。
+    - CLEAR 系の付随処理: CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。画面サイズが変わっても罫線を残す。
+    - WSF D9/72 に応答しない。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応。
+    - 負応答を返さない。
+    - 0x82/0x83 の欄データで、NUL と符号を加工する。
+  - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
+  （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
+- [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
+  **着手時に両側を再確認すること。**
+  - IBMRSEED の書式（中）
+    - 当 PJ: `ESC 00` の後に、エスケープしない `00` を 7 個送る（`packages/tn5250/src/telnet/telnet.ts:250-253`、主エージェントが確認）。RFC 1572 では空の VAR が 7 個と読まれる。
+    - ACS: 平文モードでは値を付けない（`NVT5250.insertVariable` の case 22）。
+    - PUB400 と実機では通っている。
+  - 装置名（中）
+    - ACS: 置換記号（`*` `%` `=` `+` `&COMPN` など）を展開し、大文字にする（`AutoDeviceName5250`）。
+    - 当 PJ: 書いたとおりに送る。
+    - `deviceNameRetry` は理由を問わずに再試行するので、誤ったパスワードで QMAXSIGN を使い切る恐れがある（推測）。
+  - 1399 の申告（中・要実測）
+    - ACS: KBDTYPE=JPE・CHARSET=32000。
+    - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。
+  - DBCS 24x80 の端末タイプ（中・要実測）
+    - ACS: `IBM-5555-C01`。
+    - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。
+  - 低
+    - 関連プリンター（IBMASSOCPRT）が未対応
+    - 交渉前に届くテキストを出さない
+    - USER とパスワードを正規化しない
+    - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
+    - 起動応答の見分け方と、装置名の復号（ACS は CP037 固定）
+    - バックアップホストが無い
+    - telnet のオプションの状態機械（実害なし）
+    - NEW-ENVIRON の応答方式（実害なし）
+  （出典: `20260919-backlog-acs-triage` research N17・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
+- [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。
+  **着手時に両側を再確認すること。**
+  - 1 バイトの制御（中・安い）
+    - ACS が解釈する LF(0x25)・IR(0x33)・IRS(0x1E)・TRN(0x35)・BS(0x16) などを、当 PJ は印字文字として桁に置く（`packages/scs/src/scs.ts:48-59, 201-212`）。
+    - 0x40 未満の未知の制御を印字しないだけでも効く。
+  - 0x2B オーダーの消費長（中）
+    - ACS: 長さの前置を見て、汎用に読み飛ばす。
+    - 当 PJ: 2BC1/C2/C6 を固定長で読む。2BD1 の SCG や 2BFE（LAC）などを未知として扱い、**帳票の残りを打ち切る**（`scs.ts:249-308`）。
+  - SO/SI の桁（中・要実測）
+    - ACS: 既定では 1 桁の空白として描く。SPCC で切り替わる。日本語の実機は `2B FD 04 03 00 01` を送ってくる。
+    - 当 PJ: 0 桁（`spool-html.ts:141-146`。PUB400 での観察で決めた）。
+  - 低
+    - 重ね打ち（CR だけで行頭へ戻る）
+    - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）
+    - ジョブ終了の判定（ACS はヘッダの byte7=0x08、当 PJ は長さ 17）
+    - 印刷完了応答のバイト 4-5
+    - プリンターの既定値（意図的な差異）
+  （出典: `20260919-backlog-acs-triage` research N16・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
