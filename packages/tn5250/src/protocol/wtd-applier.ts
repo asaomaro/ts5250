@@ -29,8 +29,20 @@ export interface ApplyResult {
   alarm: boolean;
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
-  /** ホストが SAVE SCREEN を送ってきた（画面を送り返す必要がある） */
-  saveScreenRequested: boolean;
+  /**
+   * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
+   * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
+   * 先へ進まない（SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
+   *
+   * **真偽値ではなく一覧なのは、1 レコードに SAVE が 2 回入る形に耐えるため。**
+   * 応答を組むのはレコードを流し終えた後なので、真偽値だと「どの段に積荷を添えるか」が
+   * 分からなくなる（`20260920-restore-screen-parity` の T4 独立点検で実測: 2 段目の RESTORE で
+   * 積荷が適用され、欠陥が無警告で再発した）。`depth` は `ScreenBuffer.saveScreen()` が返した段の番号。
+   *
+   * `params` は SAVE PARTIAL の 5 バイト。**応答には写さない**（ホストは使っていない。
+   * `save-screen.ts` の注記）——記録として持つだけ。
+   */
+  saveRequests: { kind: "full" | "partial"; depth: number; params?: Uint8Array }[];
   /** ホストが READ SCREEN を送ってきた（現在の画面イメージを送り返す必要がある） */
   readScreenRequested: boolean;
   /**
@@ -65,11 +77,24 @@ export interface ApplyResult {
    */
   lastWrite: WriteExtent;
   /**
-   * SAVE PARTIAL SCREEN（ESC 0x03）を受けた。**ホストは応答を待っている**
-   * （opcode は PUT/GET）。付いてきたパラメータ 5 バイトをそのまま渡す
-   * ——応答に写して返すため（`buildSavePartialScreenResponse`）。
+   * このレコードで RESTORE SCREEN / RESTORE PARTIAL SCREEN が**成功した回数**。
+   * 退避スタックが空で復元できなかった回は数えない。
+   *
+   * **本番の分岐には使わない**（復元した入力状態は `restoredReadCommand` で渡す）。
+   * 残してあるのは、テストと障害切り分けで「復元が本当に成立したか」を外から見るため
+   * ——`restoredReadCommand` は積荷を添えた段でしか埋まらないので、これだけでは
+   * 「復元が起きなかった」と「積荷が無かった」を区別できない
+   * （`20260920-restore-screen-parity` review ラウンド 1）。
    */
-  savePartialScreen?: Uint8Array;
+  restoredCount: number;
+  /**
+   * 復元した画面が待っていた READ のコマンドバイト（ACS `Save5250Net.SavePendingRead`）。
+   * このレコードで複数回復元したら**最後のもの**。
+   * **セッション層は `applyDataStream` の直後にこれを反映すること**——後段には早期 return が
+   * 並んでおり、同じレコードに READ SCREEN 等が載っていると届かない
+   * （`20260920-restore-screen-parity` の cross 点検で実測）。
+   */
+  restoredReadCommand?: number;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -126,12 +151,13 @@ export function applyDataStream(
     readRequested: false,
     alarm: false,
     queryRequested: false,
-    saveScreenRequested: false,
+    saveRequests: [],
     readScreenRequested: false,
     readImmediateRequested: false,
     readMdtImmediateAltRequested: false,
     readScreenExtendedRequested: false,
     cursorSet: false,
+    restoredCount: 0,
     lastWrite: { cleared: false, restored: false, cells: 0 }
   };
 
@@ -194,25 +220,26 @@ export function applyDataStream(
         // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く。
         // **加えてホストへ画面を送り返す必要がある**（呼び出し側が応答レコードを送る）。
         // 返信しないとホストは待ち続ける——SEU の F1 でヘルプが返らなかった原因。
-        buf.saveScreen();
+        const fullDepth = buf.saveScreen();
+        result.saveRequests.push({ kind: "full", depth: fullDepth });
         // **退避のときにエラー表示は解除する**（ACS `DS5250.processSaveScreen` の冒頭が
         // `isErrorMode()` なら `clearErrorMode()` する）。窓の SAVE/RESTORE 往復で
         // メッセージ行を書き替えない画面でも、メッセージが残らないようにするため
         buf.systemMessage = undefined;
-        result.saveScreenRequested = true;
         break;
       case COMMAND.RESTORE_SCREEN:
-        if (!buf.restoreScreen()) warn("RESTORE SCREEN with empty save stack");
+        restoreAndSkipPayload(r, buf, result, warn, "RESTORE SCREEN");
         break;
       case COMMAND.SAVE_PARTIAL_SCREEN: {
         // SAVE PARTIAL SCREEN（ESC 0x03）: **パラメータ 5 バイト**（実機の QSH で
-        // `00 00 00 00 00`）。SAVE SCREEN と同じく**ホストは応答を待っている**（opcode PUT/GET）
+        // `00 00 00 00 00`）。SAVE SCREEN と同じく**ホストは応答を待っている**
         // ——返さないと次を送ってこない（QSH が「待機中」で固まっていた原因）。
-        // パラメータは応答へそのまま写す（意味を解釈しない。ホストにとっては保管物）。
+        // **パラメータは応答へ写さない**（ホストは使っていない。`save-screen.ts` の注記）。
+        // 記録として `saveRequests` に持つだけ。
         const params = r.bytes(5);
-        buf.saveScreen();
+        const partialDepth = buf.saveScreen();
+        result.saveRequests.push({ kind: "partial", depth: partialDepth, params });
         buf.systemMessage = undefined; // 0x02 と同じ経路（ACS も同じメソッドで解除する）
-        result.savePartialScreen = params;
         break;
       }
       case COMMAND.RESTORE_PARTIAL_SCREEN:
@@ -225,7 +252,10 @@ export function applyDataStream(
         // `ESC 13 ＋ 写し` を埋め込んでいた**ため——ホストは積荷をそのまま返すので、
         // 自分が付けたものを「ホストのパラメータ」と誤解していた（自作自演。research F4）。
         // 応答からその前置きを外したので、ここも原典どおり読まない。
-        if (!buf.restoreScreen()) warn("RESTORE PARTIAL SCREEN with empty save stack");
+        //
+        // **積荷そのものは読み飛ばす**（`restoreAndSkipPayload`）。長さで測るので、
+        // 積荷が無い・一致しないときは 1 バイトも進まず、原典どおりの振る舞いに落ちる。
+        restoreAndSkipPayload(r, buf, result, warn, "RESTORE PARTIAL SCREEN");
         break;
       case COMMAND.ROLL: {
         // ROLL（ESC 0x23）: `方向＋行数(1) 上端行(1) 下端行(1)`。
@@ -331,6 +361,59 @@ export function applyDataStream(
     }
   }
   return finish();
+}
+
+/**
+ * **RESTORE SCREEN / RESTORE PARTIAL SCREEN: 復元し、ホストが返してきた自分の積荷を読み飛ばす。**
+ *
+ * ホストは SAVE SCREEN 応答として送ったバイト列を**不透明な保管物**として預かり、RESTORE で
+ * そのまま返してくる（ACS も同じ。`DS5250.processRestoreScreen`）。こちらの積荷は
+ * `ESC 0x11`（WTD）で始まる**平文のデータストリーム**なので、読み飛ばさないと
+ * **自分が送った WTD を「次のコマンド」として適用してしまう**——打鍵した文字は
+ * `writeCell` の既定で空白になり、SF は元の FFW を書き戻すので MDT も落ちる
+ * （`20260920-restore-screen-parity` research F5・F10）。
+ *
+ * **「レコードの残りを捨てる」ではなく「送った長さぶん読み飛ばす」**。
+ * ACS は残り全部を消費するが、それは ACS の積荷（zlib・約 2,880 バイト）を前提にした境界で、
+ * **当 PJ の積荷（793 バイト）だと、QSH から F3 で抜ける経路でホストが同じレコードの末尾に
+ * READ MDT を載せてくる**（実機で 2 回再現。Attn→F12 の経路では別レコードだった。
+ * `20260920-restore-screen-parity` research F16）。捨てると施錠が解けなくなる（同 decisions D10）。
+ *
+ * 一致しなければ 1 バイトも進めない——**退行しない側に倒す**。黙って落ちるとホストの振る舞いが
+ * 変わったときに気づけないので警告を出す。
+ */
+function restoreAndSkipPayload(
+  r: ByteReader,
+  buf: ScreenBuffer,
+  result: ApplyResult,
+  warn: WarnFn,
+  label: string
+): void {
+  const { restored, payload, readCommand } = buf.restoreScreen();
+  if (!restored) {
+    warn(`${label} with empty save stack`);
+    return;
+  }
+  result.restoredCount++;
+  if (readCommand !== undefined) result.restoredReadCommand = readCommand;
+  if (payload === undefined || payload.length === 0) {
+    // **黙って落ちない**（この関数の JSDoc の主張どおり）。ここに来るのは
+    // 「SAVE 応答を送ったのに積荷を添え損ねた」＝配線のずれ——ただし
+    // ⚠ **同一レコードに SAVE → RESTORE が載った場合にも必ず出る**（応答を組むのは
+    // レコードを流し終えた後なので、まだ `attachSaveContext` が呼ばれていない）。
+    // その場合はホストも積荷を返しようがないので**無害な空振り**だが、本当のずれと
+    // 区別が付かない（`20260920-restore-screen-parity` review ラウンド 5。実機では未観測）
+    warn(`${label}: no payload recorded for this save — parsing as commands`);
+    return;
+  }
+  // **全バイトで照合する**。先頭だけを見て読み飛ばすと、ホストが積荷を改変していた場合に
+  // 別物を黙って捨てることになる（数百バイトの比較なので費用は問題にならない）
+  const ahead = r.peekUpTo(payload.length);
+  if (ahead.length !== payload.length || !ahead.every((b, i) => b === payload[i])) {
+    warn(`${label}: payload mismatch (expected ${payload.length} bytes) — parsing as commands`);
+    return;
+  }
+  r.skip(payload.length);
 }
 
 /** CC1（上位 3 ビット）: ロックと MDT リセット/フィールド null 化（GNU tn5250 の解釈と一致） */
@@ -472,7 +555,10 @@ function applyWtd(
        * **空白と区別できるようにする**（`setUnmappable`）——区別しないと
        * 「ヘルプが虫食い」としか見えない。ACS も同じ桁を塗り潰しで描く。
        */
-      buf.setUnmappable(addr++);
+      // **元バイトは送信用にだけ持たせる**（`hostByte`。表示には使わない）。
+      // ACS は受信したバイトをそのまま `HostPlane` に入れ、READ SCREEN 応答で返す
+      // （`20260920-restore-screen-parity` research F3・F4）
+      buf.setUnmappable(addr++, UNMAPPABLE);
       unmappable++;
       continue;
     }
@@ -581,13 +667,18 @@ function applyWtd(
         // このオーダー自身の識別バイトなので、rawByte として持たせるとカタカナ表示
         // モード（ScreenGrid.vue の katakanaView）がこれを生バイトとして半角カナに
         // 再解釈してしまい、"*" のはずが文字化けする（利用者報告で発覚）。
-        buf.setChar(addr++, "*");
+        //
+        // **ただし送信（画面イメージ応答・SAVE 応答）には 0x1C を使う**——ACS は
+        // `PS5250.addChar()` が 0x1C をそのまま `HostPlane` に入れ、`getBuffer()` 経由で
+        // 0x1C のまま返す（`20260920-restore-screen-parity` research F3・F4）。
+        // 表示用（rawByte）と送信用（hostByte）を分けて持たせる。
+        buf.setChar(addr++, "*", undefined, ORDER.UNKNOWN_1C);
         break;
       case ORDER.UNKNOWN_1E:
         // ORDER.UNKNOWN_1C（0x1C）と対称的な扱い。表示は ";" 1 文字（桁を 1 つ占有）。
         // 詳細は ORDER.UNKNOWN_1E の doc コメント参照。rawByte を渡さない理由も同じ
-        // （カタカナ表示モードでの再解釈・文字化けを防ぐ）。
-        buf.setChar(addr++, ";");
+        // （カタカナ表示モードでの再解釈・文字化けを防ぐ）。送信には 0x1E を使う（0x1C と同じ理屈）。
+        buf.setChar(addr++, ";", undefined, ORDER.UNKNOWN_1E);
         break;
       default:
         warn(`unknown order 0x${b.toString(16)} — skipping to next command`);

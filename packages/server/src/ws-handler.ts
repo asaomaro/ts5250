@@ -28,6 +28,65 @@ import { macroSecretRefSchema } from "./macro-types.js";
 const wsLog = childLog({ component: "ws-handler" });
 
 /**
+ * **例外を「値を漏らさない形」でログに載せる。**
+ *
+ * 返すのは `code`（`As400Error` のもの）と**スタックのフレームだけ**。
+ * message を外すのは、検証エラーの文言が**打鍵した値をそのまま埋める**ため
+ * （`packages/tn5250/src/screen/field-validate.ts` の `JSON.stringify(value)`）——
+ * その値はマクロ由来の秘密でもありうる（`resolveSecret`）。
+ *
+ * **まず message のぶんを長さで切り落とし、そのうえで `at ` の行だけを残す。**
+ *
+ * この形に辿り着くまでに 3 回間違えた（どちらも**測らずに書いた**のが原因。
+ * `AGENTS.md` 判断の原則 2。`20260920-restore-screen-parity` review ラウンド 2・3・4）:
+ * - ~~`String(e)`~~ → message ごと出る
+ * - ~~`stack` の 1 行目を落とす~~ → **message は複数行になりうる**
+ *   （`resolveField` が投げる `invalid secretRef: ${ZodError.message}` は整形 JSON。実測で 12 行中 3 行）
+ * - ~~`at ` の行だけを残す~~ → **message の行頭が `at ` なら残る**
+ *   （合成した例外で再現した。**いまの経路でそうなる値は確かめていない**——
+ *   `field-validate.ts` は `JSON.stringify(value)` なので打鍵値の改行はエスケープされ行頭を作れず、
+ *   zod の整形 JSON の行頭は `"`/`{`/`[` になる。塞ぐ理由は「実際に漏れた」ではなく
+ *   **行の形で選ぶ方式そのものが保証を持たない**こと）
+ *
+ * **`message` が占める行数ぶんを先頭から落とし、そのうえで `at ` の行だけを残す。**
+ *
+ * ~~`stack` が `<name>: <message>` で始まると見なして長さで切る~~ は**この Node でも外れる**
+ * （実測。同 review ラウンド 5）:
+ * - Node 内部の `ERR_*` は頭が `TypeError [ERR_INVALID_ARG_TYPE]: …` なのに `name` は `"TypeError"`
+ * - `message` が空だと V8 は `": "` を出さない（`"As400Error\n    at …"`）
+ *
+ * どちらも `startsWith` が外れ、**閉じる側に倒すと `at` が丸ごと消える**
+ * ——`setField` / `resolveField` の失敗をいちばん切り分けたい場面で位置が残らない。
+ * 行数で落とせば、上の 2 形と通常・複数行の 4 形すべてでフレームが採れる（実測で確認）。
+ * **message の行数は message からしか作れないので、どんな頭でも値は残らない。**
+ *
+ * フレームは**先頭 3 つまで**。どこで投げたかが分かれば足りるうえ、全部載せると
+ * node_modules まで含む十数行が warn 1 本に付く。
+ *
+ * `AGENTS.md`「セキュリティ / 秘密の扱い」の「ログにも値を出さない」。
+ */
+export function errShape(e: unknown): { code?: string; at?: string } {
+  const code = e instanceof As400Error ? e.code : undefined;
+  const frames =
+    e instanceof Error && typeof e.stack === "string" ? stackFrames(e) : undefined;
+  return { ...(code !== undefined ? { code } : {}), ...(frames ? { at: frames } : {}) };
+}
+
+/** `errShape` の本体。message のぶんを長さで切ってから `at ` の行を 3 つまで拾う */
+function stackFrames(e: Error): string {
+  // **落とすのは message の行数ぶん**（1 行目は `<name>: <message の 1 行目>`）。
+  // `at ` での絞り込みは**そのうえで**掛ける——行の形だけで選ぶと、行頭が `at ` の message が紛れる
+  const messageLines = String(e.message).split("\n").length;
+  return e.stack!
+    .split("\n")
+    .slice(messageLines)
+    .filter((l) => /^\s*at /.test(l))
+    .slice(0, 3)
+    .map((l) => l.trim())
+    .join(" / ");
+}
+
+/**
  * 施錠されたままの画面（＝ホスト応答の途中）を押し出すまでの待ち。
  *
  * 実機 YB0140R の窓で PageUp すると、1 回の AID に対して 4 レコードが **40ms の間に
@@ -1028,19 +1087,68 @@ export class WsConnection {
     const id = this.requireSession();
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
-      // **フラグレコードには欄を書かない。** Attn / SysReq のレコードは画面の MDT を載せない
-      // （`buildAidRecord`）ので、書いても送られない。それどころか `setField` は施錠中に
-      // `KEYBOARD_LOCKED` を投げるので、**逃げ道であるはずの SysReq が、未送信の入力が
-      // 残っているだけで使えなくなる**（画面は打った文字を必ず添えて送ってくる）
+      // **フラグキー（Attn / SysReq）でも欄を書く。ただし施錠されていないときだけ。**
+      //
+      // **そのキー自身のレコードは変わらない**——`buildFlagRecord` は画面の MDT を載せないので、
+      // Attn / SysReq として出るバイト列は 1 バイトも変わらない（ACS も Attn は本体空の
+      // フラグレコード、F12 はカーソル＋AID だけ。`20260920-restore-screen-parity` research F17。
+      // 変更の前後で当 PJ のワイヤも採り、同じであることを確かめた＝同 work の AC11）。
+      // 書くのは**サーバー側の画面バッファに打鍵を移すため**——ACS は打鍵を表示バッファに持ち、
+      // それが SAVE SCREEN の退避に入るので Attn → F12 で戻っても消えない（同 F1・F4、decisions D6）。
+      //
+      // ⚠ **ただし MDT は立つ**（`setFieldValue`）。その後ホストが READ IMMEDIATE(0x72) /
+      // READ MDT IMMEDIATE ALT(0x83) を送ってくると、セッションは利用者の操作を待たずに
+      // 応答を組むので、打ちかけの欄がそこで出る。ACS も打鍵で FFT の MDT が立つので同じはずだが、
+      // **この経路は未確認**——AC11 で測ったのはフラグレコードの前後比較だけで、
+      // 0x72/0x83 が来る場面は出させていない（同 work の cross 点検の指摘。test-result「未検証の穴」）。
+      //
+      // **施錠中に書かないのは、逃げ道を守るため。** `setField` は施錠中に `KEYBOARD_LOCKED` を
+      // 投げるので、書きにいくと**逃げ道であるはずの SysReq が、未送信の入力が残っているだけで
+      // 使えなくなる**（画面は打った文字を必ず添えて送ってくる）。
+      // ⚠ **このとき、施錠より前に打った内容は失われる**（クライアントも施錠中は欄を落とす。
+      // `session-controller.ts` の `isFlagKey` の注記）。打鍵ごとにサーバーへ送る形にしない限り
+      // 残せないので、この work の範囲外とした。
       const flagKey = msg.key === "Attn" || msg.key === "SysReq";
-      if (!flagKey && msg.fields && msg.fields.length > 0) {
-        this.deps.sessions.assertWritable(id, this.user);
+      const fields = msg.fields;
+      if (fields && fields.length > 0 && !(flagKey && entry.session.keyboardLocked)) {
         // **秘密の解決はフィールドを 1 つでも書く前に済ませる**（spec D11）。
         // 途中で失敗して throw すると、それまでに書いた欄だけがホストに残り、
         // 「ユーザー名は入ったがパスワードは空」という中途半端な状態で AID を待つことになる。
-        const values = msg.fields.map((f) => this.resolveField(f));
-        for (const { field, value } of values) {
-          entry.session.setField(typeof field === "number" ? { index: field } : field, value);
+        //
+        // `assertWritable` も**この中**に置く。いまは `assertKeyAllowed` が先に弾くので等価だが、
+        // 外に出すと「読み取り専用でも逃げ道は通す」を入れた瞬間に `READ_ONLY_SESSION` で
+        // Attn / SysReq がホストへ出なくなる（`20260920-restore-screen-parity` review ラウンド 3）
+        const write = (): void => {
+          this.deps.sessions.assertWritable(id, this.user);
+          const values = fields.map((f) => this.resolveField(f));
+          for (const { field, value } of values) {
+            entry.session.setField(typeof field === "number" ? { index: field } : field, value);
+          }
+        };
+        if (flagKey) {
+          // **フラグキーの同期は best-effort。失敗しても送信を止めない。**
+          // 施錠は上で除いてあるが、`setField` は `FIELD_TYPE` / `FIELD_OVERFLOW` /
+          // `FIELD_PROTECTED`・欄が見つからない・秘密の復号でも投げる。止めると
+          // **「打ちかけの値が型に合わない」「ホストが画面を差し替えて欄が消えた」という
+          // まさに逃げたい状況で Attn / SysReq がホストへ出ない**
+          // （`20260920-restore-screen-parity` の cross 点検で発見）。
+          // 書けなくても**ホストへ送るバイト列は失われない**（フラグレコードは欄を運ばない）。
+          // 失うのは「Attn → F12 で戻ったときに打鍵が残るか」だけなので、送信より軽い。
+          try {
+            write();
+          } catch (e) {
+            // **例外そのものは載せない。** `setField` の検証エラーは文言に**打鍵した値を埋める**
+            // （`field-validate.ts` の `JSON.stringify(value)`）ので、`err` を渡すと
+            // **マクロ由来の秘密がサーバーログへ出る**（`AGENTS.md`「秘密の扱い」の
+            // 「ログにも値を出さない」。`20260920-restore-screen-parity` review ラウンド 2 の must）。
+            // `stack` も 1 行目に message を含むので、**フレームだけ**を残す
+            wsLog.warn(
+              { sessionId: id, key: msg.key, ...errShape(e) },
+              "flag key field sync skipped"
+            );
+          }
+        } else {
+          write();
         }
       }
       // 応答画面は session の screen イベントで push される。

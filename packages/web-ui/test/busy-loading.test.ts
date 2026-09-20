@@ -138,15 +138,28 @@ describe("通信中プロテクト・0.5 秒ローディング", () => {
     expect(captured.send).toHaveBeenCalledTimes(1);
   });
 
-  it("フラグキーには欄を載せない（打ちかけの入力を無駄に流さない）", async () => {
+  /**
+   * ~~フラグキーには欄を載せない（打ちかけの入力を無駄に流さない）~~
+   * → **覆した**（`20260920-restore-screen-parity` decisions D6）。
+   *
+   * ACS は打鍵した文字を表示バッファに持ち、それが SAVE SCREEN の退避に入るので
+   * Attn → F12 で戻っても消えない（同 research F1・F4・F11）。当 PJ は打鍵をブラウザだけが
+   * 持っていたので、**退避の時点でサーバーが知らず、戻ると空になっていた**。
+   *
+   * **ホストへ送るバイト列は変わらない**——フラグレコードは欄データを載せない
+   * （ACS の Attn も本体空のフラグレコード。同 research F17）。載せるのは
+   * 「サーバーの画面バッファへ移すため」で、サーバーは**施錠中なら書かない**
+   * （`packages/server/src/ws-handler.ts`。SysReq の逃げ道を守る）。
+   */
+  it("フラグキーにも欄を載せる（サーバー側の退避に打鍵を載せるため）", async () => {
     await open();
     const s = sessionsStore.get("s1")!;
-    s.edits.set(0, "SECRET");
+    s.edits.set(0, "WRKACTJOB");
     captured.send.mockClear();
 
     sendKey("s1", "Attn");
-    expect(captured.send.mock.calls[0]![0]).not.toHaveProperty("fields");
-    // 通常キーは従来どおり載せる（フラグキーだけの扱い）
+    expect(captured.send.mock.calls[0]![0]).toHaveProperty("fields");
+    // 通常キーも従来どおり載せる
     captured.send.mockClear();
     sendKey("s1", "Enter");
     expect(captured.send.mock.calls[0]![0]).toHaveProperty("fields");

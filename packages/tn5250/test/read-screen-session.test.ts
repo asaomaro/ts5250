@@ -32,7 +32,7 @@ function fakeTransport(): { transport: Transport; written: Uint8Array[]; feed: (
 }
 
 describe("READ SCREEN を受けたらホストへ画面イメージを返信する", () => {
-  it("実機が送ってきた 12 バイトに対して PUT_GET の応答レコードを書き出す", async () => {
+  it("実機が送ってきた 12 バイトに対して、**受信 opcode の写し**で応答レコードを書き出す", async () => {
     const { transport, written, feed } = fakeTransport();
     const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 300 }).catch(() => {});
     await new Promise((r) => setTimeout(r, 30));
@@ -43,9 +43,14 @@ describe("READ SCREEN を受けたらホストへ画面イメージを返信す�
 
     const sent = written.slice(before);
     expect(sent.length, "返信を 1 本書き出している").toBeGreaterThan(0);
-    // GDS ヘッダの opcode 位置（10 バイト目）が PUT_GET（読み取り応答）
-    const rec = sent.find((d) => d[9] === OPCODE.PUT_GET);
+    // **opcode は受信したレコードの写し**（上の実機バイト列の 10 バイト目＝0x08）。
+    // ACS も `DS5250.processReadScreen` が `WorkHeader.Opcode` を書く
+    // （`20260920-restore-screen-parity` の実機計測。~~PUT_GET(0x03) 固定~~）
+    const rec = sent.find((d) => d[9] === OPCODE.READ_SCREEN);
     expect(rec, "READ SCREEN の応答（画面イメージ）が含まれる").toBeDefined();
+    // **カーソル位置の前置は無い**——本体は画面サイズちょうど（24×80）。
+    // レコードは GDS ヘッダ 10 バイト ＋ 本体 ＋ telnet の IAC EOR 2 バイト
+    expect(rec!.length - 10 - 2, "本体は 1,920 バイト").toBe(1920);
 
     await p;
   });

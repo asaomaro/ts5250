@@ -18,7 +18,7 @@ import {
 } from "../src/protocol/save-screen.js";
 import { buildQueryReply } from "../src/protocol/query-reply.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
-import { AID, COMMAND, ESC, ORDER } from "../src/protocol/constants.js";
+import { AID, COMMAND, ESC, OPCODE, ORDER } from "../src/protocol/constants.js";
 
 /**
  * **クライアント発のレコードはフラグ 2 バイト目（GDS ヘッダ 9 バイト目）に 0x80 を立てる**（ACS 準拠）。
@@ -58,10 +58,10 @@ describe("クライアント発レコードの flag2", () => {
     ["READ MDT IMMEDIATE ALT 応答", () => buildReadMdtImmediateAltResponse(screen(), codec).record],
     ["READ INPUT FIELDS 応答", () => buildReadInputFieldsResponse(screen(), codec, AID.ENTER).record],
     ["READ IMMEDIATE 応答", () => buildReadImmediateResponse(screen(), codec).record],
-    ["READ SCREEN 応答", () => buildReadScreenResponse(screen(), codec)],
-    ["READ SCREEN EXTENDED 応答", () => buildReadScreenExtendedResponse(screen(), codec)],
-    ["SAVE SCREEN 応答", () => buildSaveScreenResponse(screen(), codec)],
-    ["SAVE PARTIAL SCREEN 応答", () => buildSavePartialScreenResponse(screen(), codec, new Uint8Array(5))],
+    ["READ SCREEN 応答", () => buildReadScreenResponse(screen(), codec, OPCODE.READ_SCREEN)],
+    ["READ SCREEN EXTENDED 応答", () => buildReadScreenExtendedResponse(screen(), codec, OPCODE.READ_SCREEN)],
+    ["SAVE SCREEN 応答", () => buildSaveScreenResponse(screen(), codec, OPCODE.SAVE_SCREEN).record],
+    ["SAVE PARTIAL SCREEN 応答", () => buildSavePartialScreenResponse(screen(), codec, OPCODE.SAVE_SCREEN).record],
     ["Query Reply", () => buildQueryReply("IBM-5555-C01")]
   ])("%s は 0x80", (_name, build) => {
     expect(build()[FLAG2]).toBe(0x80);

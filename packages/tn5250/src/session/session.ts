@@ -592,6 +592,16 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_ON) this.messageWaiting = true;
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_OFF) this.messageWaiting = false;
       const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
+      // **復元した画面が待っていた READ を、ここで戻す**（ACS `Save5250Net.restoreNetNulls` の
+      // `setPendingReadAndAID()` に当たる）。**この位置でなければならない**——下には
+      // `queryRequested` / `readScreen*` / `readImmediate*` / `pcCommand` の早期 return が並んでおり、
+      // 同じレコードに RESTORE とそれらが載ると届かない（`20260920-restore-screen-parity` cross 点検）。
+      // 同じレコードにホストの READ も載っていれば、後段の `result.readCommand` が上書きする
+      // ——ホストが今まさに指示した方が新しいので、その順序でよい。
+      // ⚠ **ただしその上書きは早期 return より後ろにある**ので、RESTORE ＋ READ MDT ＋ READ SCREEN が
+      // 同一レコードに載ると復元値が残る（`20260920-restore-screen-parity` review ラウンド 4）。
+      // 実機でその組み合わせは観測していない——**未確認**
+      if (result.restoredReadCommand !== undefined) this.readCommand = result.restoredReadCommand;
       if (parsed.opcode === OPCODE.CANCEL_INVITE) {
         // **Attn / SysReq を成立させる要**。ホストは Attn/SysReq を受けると invite を取り消し、
         // この返事が来るまで次のデータを送らない（実機で対照実験済み。返さないと
@@ -606,17 +616,29 @@ export class Session5250 extends Emitter<SessionEvents> {
         // ここで return しない: データ部は空なので後続処理は無害で、画面イベントの発火判定を
         // 他の opcode と同じ道に通しておく（Cancel Invite だけ別扱いにする理由が無い）。
       }
-      if (result.saveScreenRequested) {
-        // SAVE SCREEN はホストが応答を待つ要求。返さないとホストは先へ進まない
-        this.telnet.sendRecord(buildSaveScreenResponse(this.buf, this.codec));
-      }
-      if (result.savePartialScreen !== undefined) {
-        // SAVE PARTIAL SCREEN も同じ（opcode は PUT/GET＝「送ったから返せ」）。
-        // **返さないとホストは次を送ってこない**——QSH が「待機中」で固まっていた原因。
-        // パラメータはそのまま写して返す（ホストが自分の指定を識別できるように）
-        this.telnet.sendRecord(
-          buildSavePartialScreenResponse(this.buf, this.codec, result.savePartialScreen)
-        );
+      // **退避 1 回につき応答 1 本**。`saveRequests` は起きた順に並んでいる
+      // （1 レコードに SAVE が 2 回入る形に耐えるため。`20260920-restore-screen-parity` の
+      // T4 独立点検で、頂点に添える実装だと先の段が空のまま残ることを実測した）。
+      for (const req of result.saveRequests) {
+        // SAVE SCREEN / SAVE PARTIAL はホストが応答を待つ要求。返さないとホストは先へ進まない
+        // （SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
+        // **opcode は受信の写し**（ACS `DS5250.processSaveScreen` と同じ。同 research F14）。
+        // パラメータは写して返さない（ホストは使っていない。`save-screen.ts` の注記）
+        const res =
+          req.kind === "partial"
+            ? buildSavePartialScreenResponse(this.buf, this.codec, parsed.opcode)
+            : buildSaveScreenResponse(this.buf, this.codec, parsed.opcode);
+        // **送った本体を、その退避段に預ける**——ホストは RESTORE でこれをそのまま返してくるので、
+        // 復元時に長さで読み飛ばす（同 decisions D2）
+        // **退避の時点の `readCommand` も同じ段へ入れる**（ACS `Save5250Net.SavePendingRead`）。
+        // ⚠ ここで預けるのは**そのレコードを流す前の値**（`result.readCommand` の反映は後段）。
+        // `SAVE → READ` の順なら ACS の逐次処理と一致するが、`READ → SAVE` が同一レコードに
+        // 載ると ACS は新しい方を退避するのに対し、こちらは古い方を預ける。
+        // **実機では未観測**（`20260920-restore-screen-parity` review ラウンド 5）。
+        // セッション側に別のスタックを持つと、早期 return や例外で段数がずれる
+        // （`20260920-restore-screen-parity` の cross 点検で実測）
+        this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
+        this.telnet.sendRecord(res.record);
       }
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
@@ -625,7 +647,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       }
       if (result.readScreenExtendedRequested) {
         // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
-        this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec));
+        this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
         return;
       }
       if (result.readImmediateRequested) {
@@ -647,7 +669,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.readScreenRequested) {
         // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
         // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
-        this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec));
+        this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
         return;
       }
       if (result.pcCommand ?? result.pcCommandEnd) {

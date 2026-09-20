@@ -73,8 +73,42 @@ const UNDISPLAYABLE = "\uFFFD";
 type CharKind = "sbcs" | "so" | "si" | "dbcs-lead" | "dbcs-tail" | "unmappable";
 export type InternalCell =
   | { type: "attr"; byte: number }
-  | { type: "char"; char: string; charKind: CharKind; rawByte?: number }
+  | {
+      type: "char";
+      char: string;
+      charKind: CharKind;
+      rawByte?: number;
+      /**
+       * **ワイヤへ書き戻すときの元バイト。表示には使わない。**
+       *
+       * `rawByte` は表示（カタカナ表示モードの再解釈）にも使われるので、そこへ載せると
+       * 化ける値がある——オーダー 0x1C / 0x1E はその例で、受信した文字バイトではなく
+       * オーダー自身の識別バイトなのに半角カナとして読み直されてしまう
+       * （`wtd-applier.ts` の `ORDER.UNKNOWN_1C` の注記）。
+       *
+       * 一方 ACS は `PS5250.addChar()` が 0x1C をそのまま `HostPlane` に入れ、
+       * READ SCREEN 応答（`DS5250.processReadScreen` が `getBuffer()`＝`HostPlane` を返す）で
+       * **0x1C のまま送る**（`20260920-restore-screen-parity` research F3・F4）。
+       * 表示と送信で要る値が違うので、送信用だけをここに分けて持つ。
+       */
+      hostByte?: number;
+    }
   | null;
+
+/**
+ * `restoreScreen()` の結果。
+ *
+ * `payload` は **SAVE 応答としてこちらが送った本体**（`ESC 0x12` の後ろ）。ホストは RESTORE で
+ * それをそのまま返してくるので、呼び出し側（`wtd-applier`）は**同じバイト列が続いていれば
+ * その長さぶん読み飛ばす**——読み飛ばさないと、自分が送った WTD を「次のコマンド」として
+ * 適用し、打鍵と MDT を潰す（`20260920-restore-screen-parity` decisions D2・research F10）。
+ */
+export interface RestoreResult {
+  restored: boolean;
+  payload?: Uint8Array;
+  /** 退避した画面が待っていた READ のコマンドバイト（ACS `Save5250Net.SavePendingRead`） */
+  readCommand?: number;
+}
 
 export interface InternalField {
   startAddr: number;
@@ -527,6 +561,30 @@ export class ScreenBuffer {
     guiWindows: GuiWindow[];
     guiScrollBars: GuiScrollBar[];
     guiGridLines: GuiGridLine[];
+    /**
+     * **SOH の CA マスクも退避する**（ACS `Save5250Net.SaveSOH_Byte5/6/7`）。
+     * 戻さないと、窓・ヘルプから戻った画面で `CAnn` の申告が消え、**F12 が欄データを送ってしまう**
+     * （`sendsDataForAid()` が「申告なし＝送る」に倒れるため）。
+     */
+    aidNoDataMask: number;
+    /** メッセージ行の行番号（ACS `Save5250Net.SaveSOH_msgline_num`）。 */
+    msgLineRow: number;
+    /**
+     * **退避の時点でセッション層が持っていたもの**（応答を組んだ直後に `attachSaveContext()` が入れる）。
+     *
+     * - `payload`: SAVE 応答として送った本体（`ESC 0x12` の後ろ＝WTD ストリーム）。
+     *   ホストはこれを不透明な保管物として預かり、RESTORE でそのまま返してくる。
+     *   **こちらは積荷を読まずローカルのスタックから戻す**ので、返ってきた積荷を
+     *   「次のコマンド」として解釈しないよう読み飛ばす。その長さがここ（decisions D2・D10）。
+     * - `readCommand`: 退避した画面が待っていた READ のコマンドバイト
+     *   （ACS `Save5250Net.SavePendingRead`）。
+     *
+     * **セッション層の値もこの 1 本のスタックに入れる。** 別に持つとスタックの段数が
+     * 2 か所で管理され、早期 return や例外でずれる
+     * （`20260920-restore-screen-parity` の cross 点検で実測）。
+     * ACS も `Save5250Net` 1 つに画面と入力状態をまとめて入れている（research F1）。
+     */
+    saved: { payload: Uint8Array; readCommand: number } | undefined;
   }[] = [];
 
   /**
@@ -554,14 +612,23 @@ export class ScreenBuffer {
     this.noteClear();
   }
 
-  /** SAVE SCREEN（ESC 0x02）: 現在のバッファを退避（SysReq のシステム要求行オーバーレイ等で使う） */
   /** 指定アドレスのセル（未書き込みは null）。SAVE SCREEN 応答の直列化で使う */
   cellAt(addr: number): InternalCell {
     this.checkAddr(addr);
     return this.cells[addr] ?? null;
   }
 
-  saveScreen(): void {
+  /**
+   * 退避して**その段の深さ**（1 起点）を返す。
+   *
+   * 深さを返すのは、退避の文脈を後から添える `attachSaveContext()` が
+   * **どの段に添えるかを取り違えないため**。退避はコマンドごと（`wtd-applier`）に起こるのに、
+   * 応答を組み立てるのはレコードを流し終えた後（`Session5250.handleRecord`）なので、
+   * 1 レコードに SAVE が 2 回入ると「スタックの頂点」では先の段に添えられない
+   * （`20260920-restore-screen-parity` の T4 独立点検で実測。2 段目の RESTORE で積荷が
+   * 適用され、欠陥が無警告で再発した）。
+   */
+  saveScreen(): number {
     this.savedStack.push({
       rows: this.rows,
       cols: this.cols,
@@ -572,8 +639,36 @@ export class ScreenBuffer {
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
       guiScrollBars: this.guiScrollBars.map((b) => ({ ...b })),
-      guiGridLines: this.guiGridLines.map((g) => ({ ...g }))
+      guiGridLines: this.guiGridLines.map((g) => ({ ...g })),
+      // ACS は `Save5250Net.saveInformation()` で CA マスク（SOH 5〜7 バイト目）と
+      // メッセージ行番号も退避する。同じものを積む（`20260920-restore-screen-parity` research F1）
+      aidNoDataMask: this.aidNoDataMask,
+      msgLineRow: this.msgLineRow,
+      // 応答を組み立てた直後に `attachSaveContext()` が埋める（まだ作られていない）
+      saved: undefined
     });
+    return this.savedStack.length;
+  }
+
+  /**
+   * **`saveScreen()` が返した段に、退避の時点のセッション層の値を添える。**
+   *
+   * 応答を組み立てるのはセッション層（`buildSaveScreenResponse`）なので、`saveScreen()` の時点では
+   * まだ本体が無い。組み立てた直後にここへ渡し、RESTORE でホストが返してきた積荷を
+   * **長さで読み飛ばす**ために使う（`20260920-restore-screen-parity` decisions D2）。
+   *
+   * **段は「頂点」ではなく番号で指す。** 1 レコードに SAVE が 2 回入ると、応答を組むのは
+   * レコードを流し終えた後なので、頂点に添えると先の段が空のまま残る（同 work の T4 独立点検で実測）。
+   * その段が既に復元されて消えていれば何もしない（呼び順に依存させない）。
+   *
+   * ⚠ **`depth` は位置であって同一性ではない。** 1 レコードに SAVE → RESTORE → SAVE が入ると
+   * 同じ深さが別の段を指す。いまは「同じ深さへの最後の attach が勝つ」ので結果は合うが、
+   * 順序に依らない形にするなら単調増加のトークンにする（`20260920-restore-screen-parity` review ラウンド 1）。
+   */
+  attachSaveContext(depth: number, ctx: { payload: Uint8Array; readCommand: number }): void {
+    const entry = this.savedStack[depth - 1];
+    if (entry === undefined) return;
+    entry.saved = ctx;
   }
 
   /**
@@ -617,9 +712,9 @@ export class ScreenBuffer {
   }
 
   /** RESTORE SCREEN（ESC 0x12）: 直近の退避を復元 */
-  restoreScreen(): boolean {
+  restoreScreen(): RestoreResult {
     const saved = this.savedStack.pop();
-    if (!saved) return false;
+    if (!saved) return { restored: false };
     this.rows = saved.rows;
     this.cols = saved.cols;
     this.cells = saved.cells;
@@ -630,12 +725,21 @@ export class ScreenBuffer {
     this.guiWindows = saved.guiWindows;
     this.guiScrollBars = saved.guiScrollBars;
     this.guiGridLines = saved.guiGridLines;
+    // CA マスクとメッセージ行番号も戻す（ACS `Save5250Net.restoreNetNulls`）。
+    // 戻さないと窓・ヘルプから戻った画面で `CAnn` の申告が消える
+    this.aidNoDataMask = saved.aidNoDataMask;
+    this.msgLineRow = saved.msgLineRow;
     // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
     // これで「窓ではない」と自然に判定される。退避が空（上で false 復帰）なら画面は変わらず、
     // 記録もしない
     this.pending.restored = true;
     this.noteWriteRange(0, this.rows * this.cols - 1);
-    return true;
+    return {
+      restored: true,
+      ...(saved.saved !== undefined
+        ? { payload: saved.saved.payload, readCommand: saved.saved.readCommand }
+        : {})
+    };
   }
 
   /**
@@ -687,6 +791,18 @@ export class ScreenBuffer {
   }
 
   /**
+   * **メッセージ行の行番号**（1 起点。SOH のヘッダ本体 4 バイト目。ACS `DS5250.SOH_msgline_num`）。
+   *
+   * 読み取り専用で公開しているのは、**退避・復元の往復を副作用なく検査できるようにするため**。
+   * 以前は「システム・メッセージがどの行で消えるか」を試すプローブで間接的に測っていたが、
+   * 画面を書き換えるうえ呼ぶ順に依存し、**検査が空振りしていた**
+   * （`20260920-restore-screen-parity` review ラウンド 4 の must）。
+   */
+  get messageLineRow(): number {
+    return this.msgLineRow;
+  }
+
+  /**
    * その AID キーで**欄データを送るか**。ホストが申告していないキー（Enter・Help・
    * ロール等）と AID 0（ホスト主導の READ）は常に送る。
    *
@@ -721,15 +837,31 @@ export class ScreenBuffer {
     }
   }
 
-  setChar(addr: number, char: string, rawByte?: number): void {
+  /**
+   * 1 桁に SBCS 文字を置く。
+   *
+   * **任意の 2 つは役割が違う。取り違えても型は通るので注意すること**:
+   * - `rawByte` — **ホストが送ってきた文字バイト**。表示（カタカナ表示モードの読み替え）と
+   *   送信（画面イメージ応答・SAVE 応答）の両方で使う。ホスト発の SBCS にだけ渡す。
+   * - `hostByte` — **送信にだけ使う元バイト**。受信した文字バイトではないもの
+   *   （オーダー 0x1C / 0x1E の識別バイト・`UNMAPPABLE`）に渡す。`InternalCell.hostByte` の注記を参照。
+   */
+  setChar(addr: number, char: string, rawByte?: number, hostByte?: number): void {
     this.checkAddr(addr);
     this.noteWrite(addr);
     this.dropRetainedInRow(addr);
-    this.cells[addr] = { type: "char", char, charKind: "sbcs", ...(rawByte !== undefined ? { rawByte } : {}) };
+    this.cells[addr] = {
+      type: "char",
+      char,
+      charKind: "sbcs",
+      ...(rawByte !== undefined ? { rawByte } : {}),
+      ...(hostByte !== undefined ? { hostByte } : {})
+    };
   }
 
   /**
    * 「このコードページでは表せない」とホストが言ってきた桁を置く。
+   * `hostByte` は**送信にだけ使う元バイト**（表示には使わない。`setChar` の注記を参照）。
    *
    * **文字は空白**（1 桁を占める）。描き分けは種類（`kind`）でするので、
    * 幅の広い記号を入れて桁をずらす心配が無い——画面は `ch` 単位で桁を置いており、
@@ -738,11 +870,21 @@ export class ScreenBuffer {
    * **rawByte は渡さない**（`ORDER.UNKNOWN_1C` と同じ理由）。受信した文字バイトでは
    * ないので、カタカナ表示モードが半角カナへ読み替えてしまう。
    */
-  setUnmappable(addr: number): void {
+  setUnmappable(addr: number, hostByte?: number): void {
     this.checkAddr(addr);
     this.noteWrite(addr);
     this.dropRetainedInRow(addr);
-    this.cells[addr] = { type: "char", char: " ", charKind: "unmappable" };
+    // **`hostByte` はワイヤへ書き戻すときだけ使う**（表示には使わない＝カタカナ表示モードが
+    // 半角カナへ読み替えるのを避ける。`rawByte` を渡さない理由と同じ）。
+    // ACS は `PS5250.addChar()` が受信したバイトをそのまま `HostPlane` に入れ、
+    // READ SCREEN 応答で返す（`20260920-restore-screen-parity` research F3・F4）ので、
+    // 渡さないと**ヘルプ本文の桁が 3 経路すべてで空白に化ける**（同 work の cross 点検）
+    this.cells[addr] = {
+      type: "char",
+      char: " ",
+      charKind: "unmappable",
+      ...(hostByte !== undefined ? { hostByte } : {})
+    };
   }
 
   /** SO/SI 制御桁を配置（見た目は空白・1 桁占有。DBCS 桁位置維持の要） */

@@ -19,7 +19,7 @@ describe("SAVE/RESTORE SCREEN のサイズ往復", () => {
     expect(buf.rows).toBe(24);
     expect(buf.cols).toBe(80);
 
-    expect(buf.restoreScreen()).toBe(true);
+    expect(buf.restoreScreen().restored).toBe(true);
     expect(buf.rows).toBe(27);
     expect(buf.cols).toBe(132);
 

@@ -10,7 +10,11 @@ export default tseslint.config(
       // Electron ランタイム（CommonJS）は TS eslint 対象外
       "electron/**",
       // AI 開発ワークフローの作業状態・研究成果物（プローブ script 等）は lint 対象外
-      ".aidev/**"
+      ".aidev/**",
+      // **ACS の頒布物**（IBM のインストーラ script 等）。`.gitignore` 済みだが、
+      // 置いた人の手元では lint が拾ってしまい `npm run lint` が 25 件のエラーで落ちる。
+      // 他人が書いた頒布物をこちらの規約で裁かない（`20260920-restore-screen-parity` review）
+      "IBMiAccess_v1r1/**"
     ]
   },
   ...tseslint.configs.recommended,

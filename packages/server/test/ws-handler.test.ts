@@ -301,13 +301,13 @@ describe("WsConnection: 応答待ちと逃げ道", () => {
 
   /** open 済みで、Enter を送って**ホストが黙っている**（＝施錠されたまま）状態を作る */
   async function waiting() {
-    const { conn, sent } = setup();
+    const { conn, sent, mgr } = setup();
     await conn.handle(JSON.stringify({ type: "open", host: "h" }));
     sent.length = 0;
     // **await しない**——期限を設けずに待つので、この promise は解決しない
     void conn.handle(JSON.stringify({ type: "key", key: "Enter" }));
     await tick();
-    return { conn, sent };
+    return { conn, sent, mgr };
   }
 
   it("応答が来なければ key-done を返さずに待ち続ける（30 秒で諦めない）", async () => {
@@ -359,6 +359,90 @@ describe("WsConnection: 応答待ちと逃げ道", () => {
     );
     await tick();
     expect(sent.filter((m) => m.type === "error")).toHaveLength(0);
+  });
+
+  /**
+   * **ACS は打鍵した文字を表示バッファに持つ。** だから Attn → F12 で戻っても消えない
+   * （`20260920-restore-screen-parity` research F1・F4・F11）。当 PJ は打鍵をブラウザだけが
+   * 持っていたので、フラグキーでも欄をサーバーへ渡すようにした（decisions D6）。
+   *
+   * **ホストへ送るバイト列は変わらない**——`buildFlagRecord` は欄データを載せない
+   * （ACS の Attn も本体空のフラグレコード。同 research F17）。
+   */
+  it("施錠されていなければ、Attn に添えた欄をサーバーの画面バッファへ書く", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await tick();
+    const entry0 = mgr.list()[0]!;
+    const input = entry0.session.snapshot().fields.find((f) => !f.protected);
+    expect(input, "入力欄のある画面で試す").toBeDefined();
+    sent.length = 0;
+
+    await conn.handle(
+      JSON.stringify({ type: "key", key: "Attn", fields: [{ field: input!.index, value: "Z" }] })
+    );
+    await tick();
+    expect(sent.filter((m) => m.type === "error"), "逃げ道は塞がない").toHaveLength(0);
+
+    // **欄が画面バッファに入っている**＝この後 SAVE SCREEN が来れば退避に載る。
+    // `mdt` が立っていることで「書かれた」と分かる（`setFieldValue` が立てる）
+    const entry = mgr.list()[0]!;
+    const field = entry.session.snapshot().fields.find((f) => f.index === input!.index);
+    expect(field?.mdt, "Attn でも欄が書かれている").toBe(true);
+    mgr.closeAll();
+  });
+
+  it("施錠中の Attn では欄を書かない（逃げ道を守る。書くと KEYBOARD_LOCKED で塞がる）", async () => {
+    const { conn, sent, mgr } = await waiting();
+    const entry = mgr.list()[0]!;
+    const input = entry.session.snapshot().fields.find((f) => !f.protected);
+    expect(input, "入力欄のある画面で試す").toBeDefined();
+    await conn.handle(
+      JSON.stringify({ type: "key", key: "Attn", fields: [{ field: input!.index, value: "Z" }] })
+    );
+    await tick();
+    expect(sent.filter((m) => m.type === "error"), "欄が付いていても通る").toHaveLength(0);
+    // **書かれていないこと**まで見る（error が出ないだけでは、表題の主張が固定されない）
+    const after = entry.session.snapshot().fields.find((f) => f.index === input!.index);
+    expect(after?.mdt, "施錠中は書かない").toBe(false);
+  });
+
+  /**
+   * **書けなくても逃げ道は塞がない。**
+   *
+   * `setField` は施錠だけでなく `FIELD_TYPE` / `FIELD_OVERFLOW` / `FIELD_PROTECTED`・
+   * 欄が見つからない・秘密の復号でも投げる。止めると
+   * **「打ちかけの値が型に合わない」「ホストが画面を差し替えて欄が消えた」という
+   * まさに逃げたい状況で Attn / SysReq がホストへ出ない**
+   * （`20260920-restore-screen-parity` の cross 点検で発見。review ラウンド 2 でテスト化）。
+   */
+  it("欄が見つからなくても Attn は通る（best-effort の同期）", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await tick();
+    sent.length = 0;
+
+    // 実在しない欄番号を添える（`setField` が投げる経路）
+    await conn.handle(
+      JSON.stringify({ type: "key", key: "Attn", fields: [{ field: 9999, value: "Z" }] })
+    );
+    await tick();
+    expect(sent.filter((m) => m.type === "error"), "逃げ道は塞がない").toHaveLength(0);
+    mgr.closeAll();
+  });
+
+  it("**通常キー**では同じ失敗をエラーとして返す（握りつぶさない）", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await tick();
+    sent.length = 0;
+
+    await conn.handle(
+      JSON.stringify({ type: "key", key: "Enter", fields: [{ field: 9999, value: "Z" }] })
+    );
+    await tick();
+    expect(sent.find((m) => m.type === "error"), "通常キーは黙らせない").toBeDefined();
+    mgr.closeAll();
   });
 
   it("応答待ちの最中の通常キーは施錠で断る（逃げ道を広げすぎない）", async () => {
