@@ -169,15 +169,26 @@ function refuseIfDisconnected(s: SessionState): boolean {
 }
 
 /**
- * **施錠中でも送れるキー**（5250 のフラグレコード）。
+ * **施錠中でも送れるキー**（5250 のフラグレコード）。ホストへは**欄データを持たないレコード**
+ * として出る（ACS も同じ。`20260920-restore-screen-parity` research F17 でワイヤを実測した）。
  *
  * Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では応答待ちの
  * 最中にこそ使う（システム要求メニューの「2. 前の要求の終了」）。プロテクトに巻き込むと、
  * **待たされている時だけ逃げ道が消える**。画面は期限を設けずに待つようになったので
  * （`ws-handler.onKey` の `timeoutMs: "never"`）、この口が唯一の出口になる。
  *
- * **欄は載せない**——フラグレコードは MDT を運ばないので送っても届かず、
- * 打ちかけのパスワードを無駄に流すだけになる（サーバー側も書き込みを飛ばす）。
+ * そのぶん扱いが 3 つ違う: 施錠中でも通す（逃げ道）／`busy` に載せない（応答を待たない）／
+ * **欄は「サーバーの画面バッファへ移すため」に載せる**。
+ *
+ * 最後の 1 つは ~~欄は載せない（フラグレコードは MDT を運ばないので送っても届かない）~~
+ * から変えた——**届かないのはそのとおりだが、サーバー側の画面バッファに打鍵が無いと
+ * SAVE SCREEN の退避に載らず、Attn → F12 で戻ったときに消える**。ACS は打鍵を表示バッファ
+ * （`PS5250` の `HostPlane` / `TextPlane`）に持つので消えない（同 research F1・F4、decisions D6）。
+ *
+ * **施錠中は載せない**——サーバーが書かないので送っても捨てられ、打ちかけの値を無駄に流すだけ。
+ * ⚠ このとき、**施錠より前に打った内容は失われる**（`s.edits` には残るが、次にホストの画面が
+ * 来た時点で捨てられる）。施錠中に逃げる場面で打鍵を保つには、打鍵ごとにサーバーへ送る形が要る
+ * ——この work の範囲外（`acs-parity.md` に起票）。
  */
 function isFlagKey(key: AidKey): boolean {
   return key === "Attn" || key === "SysReq";
@@ -1157,8 +1168,21 @@ export function sendKey(
   // **読み替えはしない**（上の注記）。3270 の割り当てはサーバーが決める
   const outKey = key;
   delete s.notice; // 前回の通知は次の操作で消す
-  // フラグキーには欄を載せない（`isFlagKey` の注記）
-  const fields = isFlagKey(key) ? [] : [...s.edits.entries()].map(([field, value]) => ({ field, value }));
+  // **フラグキー（Attn / SysReq）にも欄を載せる。** ホストへ送るレコードには載らない
+  // （`buildFlagRecord` は欄データを持たない）——載せるのは**サーバー側の画面バッファへ
+  // 打鍵を移すため**。ACS は打鍵した文字を表示バッファ（`PS5250` の `HostPlane`/`TextPlane`）に
+  // 持ち、それが SAVE SCREEN の退避に入るので、Attn → F12 で戻っても消えない
+  // （`20260920-restore-screen-parity` research F1・F4・F11、decisions D6）。
+  //
+  // **入力が止まっているときは載せない。** サーバーは施錠中に書かない（SysReq という逃げ道を
+  // 未送信の入力で塞がないため）ので、送っても捨てられるだけ——打ちかけの値を無駄に流すことになる。
+  //
+  // ⚠ **こちらの条件はサーバーより広い**——`inputInhibited` は `busy`（応答待ち）でも真になるが、
+  // サーバーのゲートは `keyboardLocked` だけ。`key-done` が届く前にホストが解錠した画面を
+  // push した窓では、**サーバーは書けるのに欄が届かない**。広い側に倒しているのは
+  // 「打ちかけの値を無駄に流さない」を優先したため（`20260920-restore-screen-parity` review ラウンド 3）。
+  const carryFields = !isFlagKey(key) || !inputInhibited(s);
+  const fields = carryFields ? [...s.edits.entries()].map(([field, value]) => ({ field, value })) : [];
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
   // **記録は送った側のキー**——再生したときに同じことが起きるように
   recordSend(sessionId, outKey, cursor ?? s.cursor, sysReqText);

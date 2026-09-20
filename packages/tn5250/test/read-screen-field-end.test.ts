@@ -6,7 +6,7 @@ import {
   buildReadScreenExtendedResponse
 } from "../src/protocol/save-screen.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
-import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
+import { ESC, COMMAND, OPCODE, ORDER } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(37);
 
@@ -52,7 +52,7 @@ function rows(record: Uint8Array): Uint8Array[] {
 
 describe("画面イメージ応答のフィールド閉じ属性", () => {
   it("READ SCREEN EXTENDED はフィールド終端に通常属性 0x20 を置く", () => {
-    const row3 = rows(buildReadScreenExtendedResponse(pdmLikeScreen(), codec))[2]!;
+    const row3 = rows(buildReadScreenExtendedResponse(pdmLikeScreen(), codec, OPCODE.READ_SCREEN))[2]!;
     // col 21 = 開始属性 0x24、col 22-30 = QRPGLESRC、col 31 = 未書き込み(NUL)、col 32 = 閉じ属性
     expect(row3[20]).toBe(0x24);
     expect(row3[30]).toBe(0x00);
@@ -62,8 +62,9 @@ describe("画面イメージ応答のフィールド閉じ属性", () => {
   });
 
   it("READ SCREEN（0x62）でも同じ位置に閉じ属性が入る", () => {
-    const body = buildReadScreenResponse(pdmLikeScreen(), codec).slice(10);
-    const row3 = body.slice(2 + 2 * 80, 2 + 3 * 80); // カーソル行桁 2 バイトの後、3 行目
+    const body = buildReadScreenResponse(pdmLikeScreen(), codec, OPCODE.READ_SCREEN).slice(10);
+    // **カーソル行桁の前置は無い**（ACS に合わせて外した。`20260920-restore-screen-parity`）
+    const row3 = body.slice(2 * 80, 3 * 80);
     expect(row3[20]).toBe(0x24);
     expect(row3[31]).toBe(0x20);
   });
@@ -78,7 +79,7 @@ describe("画面イメージ応答のフィールド閉じ属性", () => {
       0x00, // (3,31)
       ...codec.encode("X").bytes // (3,32)
     ]);
-    const row3 = rows(buildReadScreenExtendedResponse(buf, codec))[2]!;
+    const row3 = rows(buildReadScreenExtendedResponse(buf, codec, OPCODE.READ_SCREEN))[2]!;
     expect(row3[31]).toBe(codec.encode("X").bytes[0]);
   });
 
@@ -92,7 +93,7 @@ describe("画面イメージ応答のフィールド閉じ属性", () => {
       ORDER.SBA, 5, 5,
       ORDER.SF, 0x40, 0x00, 0x28, 0x00, 0x03
     ]);
-    const row5 = rows(buildReadScreenExtendedResponse(buf, codec))[4]!;
+    const row5 = rows(buildReadScreenExtendedResponse(buf, codec, OPCODE.READ_SCREEN))[4]!;
     expect(row5[4]).toBe(0x28); // 次の欄の開始属性がそのまま残る
   });
 });

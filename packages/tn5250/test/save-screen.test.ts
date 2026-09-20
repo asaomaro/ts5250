@@ -20,18 +20,25 @@ function screenWith(stream: number[]): ScreenBuffer {
   return buf;
 }
 
-/** 応答レコードから GDS ヘッダ（10 バイト）を外し、先頭の ESC RESTORE_SCREEN も外す */
-function restoreStream(record: Uint8Array): Uint8Array {
-  expect(record[9], "opcode は RESTORE_SCREEN").toBe(OPCODE.RESTORE_SCREEN);
+/**
+ * 応答レコードから GDS ヘッダ（10 バイト）を外し、先頭の ESC RESTORE_SCREEN も外す。
+ *
+ * **opcode は受信したレコードの写し**（ACS `DS5250.processSaveScreen` が `WorkHeader.Opcode` を
+ * 書くのと同じ。実機のワイヤでも SAVE SCREEN 要求 0x04 に対して 0x04 を返していた。
+ * `20260920-restore-screen-parity` research F14 / decisions D8）。
+ * ~~以前は `OPCODE.RESTORE_SCREEN`(0x05) 固定だった~~——ホストは受理したが ACS と同じではなかった。
+ */
+function restoreStream(record: Uint8Array, replyOpcode = OPCODE.SAVE_SCREEN): Uint8Array {
+  expect(record[9], "opcode は受信したレコードの写し").toBe(replyOpcode);
   expect(record[10], "ESC で始まる").toBe(ESC);
   expect(record[11], "RESTORE SCREEN コマンド").toBe(COMMAND.RESTORE_SCREEN);
   return record.slice(12);
 }
 
 describe("SAVE SCREEN 応答", () => {
-  it("opcode と先頭コマンドが RESTORE SCREEN になっている", () => {
+  it("opcode は受信の写し・先頭コマンドは RESTORE SCREEN（ACS と同じ）", () => {
     const buf = screenWith([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, 0x11, 1, 1, 0xc1, 0xc2]);
-    const rec = buildSaveScreenResponse(buf, codec);
+    const rec = buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record;
     restoreStream(rec); // 期待は restoreStream 内で検証
   });
 
@@ -43,7 +50,7 @@ describe("SAVE SCREEN 応答", () => {
       0x11, 5, 10, 0x28, 0xe6, 0xd6, 0xd9, 0xd3, 0xc4 // 行5桁10: 別属性 + WORLD
     ]);
     const back = new ScreenBuffer();
-    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec)), back, codec, () => {});
+    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record), back, codec, () => {});
     expect(back.snapshot("s", false).cells).toEqual(buf.snapshot("s", false).cells);
   });
 
@@ -55,7 +62,7 @@ describe("SAVE SCREEN 応答", () => {
       0xc1, 0xc2, 0xc3 // 中身 ABC
     ]);
     const back = new ScreenBuffer();
-    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec)), back, codec, () => {});
+    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record), back, codec, () => {});
 
     const orig = buf.orderedFields();
     const round = back.orderedFields();
@@ -72,7 +79,7 @@ describe("SAVE SCREEN 応答", () => {
   it("空の画面でも壊れない", () => {
     const buf = new ScreenBuffer();
     const back = new ScreenBuffer();
-    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec)), back, codec, () => {});
+    applyDataStream(restoreStream(buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record), back, codec, () => {});
     expect(back.snapshot("s", false).cells).toEqual(buf.snapshot("s", false).cells);
   });
 });

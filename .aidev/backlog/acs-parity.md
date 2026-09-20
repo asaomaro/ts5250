@@ -71,7 +71,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 
 <!-- 以下 20260919-backlog-acs-triage: ACS のコアのうち未突き合わせだった 3 領域（DS5250 の WTD 以外 / キー入力・編集・AID・施錠 / telnet・プリンター）の差異。
      深さ: ◎ 実測 / ○ 主エージェントが両側を直読 / ◐ 片側を直読 / △ 委譲先の報告のみ（着手時に両側を再確認）。組の一覧は同 work の acs-comparison.md -->
-- [ ] **Attn・SysReq・ヘルプから戻ると、打鍵した文字と MDT が消える（RESTORE SCREEN で自分の退避イメージを再適用する）**（優先度 高・深さ ◎）。
+- [x] **Attn・SysReq・ヘルプから戻ると、打鍵した文字と MDT が消える（RESTORE SCREEN で自分の退避イメージを再適用する）**（優先度 高・深さ ◎）。
   打ったまま送っていない入力は、Attn やヘルプを開いて F12 で戻ると消え、Enter で再送されない（データが黙って失われる）。
   CA マスクも戻らないので、F12 で欄データを送ってしまう（委譲先のプローブ）。
   ACS: `DS5250.processSaveScreen` が状態一式を退避データに入れ、0x12 で丸ごと戻す（`Save5250Net` の直列化）。
@@ -88,6 +88,25 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   手当ての候補（委譲先 C の案。着手時に再確認）: 復元時は自分の積荷を長さで読み飛ばす／退避に CA マスク・メッセージ行を含める／スタックを名指しで引く。
   画面イメージ応答の打鍵文字の扱いは、下の【まとめ】DS5250 のその他に入れた。
   （出典: `20260919-backlog-acs-triage` research N1）
+  **完了（`20260920-restore-screen-parity`・PR #407）**——3 つの候補のうち「長さで読み飛ばす」と
+  「退避に CA マスク・メッセージ行を含める」を採った。~~ホストの応答: F12 には `ESC 12` の後ろに `ESC 11`~~
+  は**経路によって違った**——QSH から F3 で抜けると `ESC 12` ＋ 積荷 ＋ **`ESC 52`（READ MDT）が同一レコード**に
+  載る（実機で 2 回再現）ので、「レコードの残りを捨てる」は使えない（`decisions.md` D10）。
+  - 積荷は**送った長さぶん照合して読み飛ばす**（`packages/tn5250/src/protocol/wtd-applier.ts` の
+    `restoreAndSkipPayload`）。退避段に積荷を添える口は `ScreenBuffer.attachSaveContext(depth, …)`
+    ——**段は頂点ではなく番号で指す**（1 レコードに SAVE が 2 回入ると頂点では先の段に添えられない）
+  - 退避に **CA マスク（`aidNoDataMask`）・メッセージ行番号（`msgLineRow`）・保留中の READ** を追加。
+    保留 READ は `ScreenBuffer` の退避段へ入れ、**スタックを 1 本に統合**した（2 か所で持つと
+    早期 return や例外で段数がずれる）。施錠（ACS `SaveKeyboardLocked`）は**対応物が無い**と判定（D12）
+  - 打鍵は**フラグキー（Attn / SysReq）でもサーバーへ渡す**ようになった（施錠中を除く）。
+    ACS が打鍵を表示バッファに持つのと同じ形（`packages/web-ui/src/session-controller.ts` /
+    `packages/server/src/ws-handler.ts`）。**ホストへ送るバイト列は変えていない**
+  - **実機で ACS と一致**: Attn は 10B・flags `0x40`・本体空、**F12 は本体 `14 1a 3c` でバイト単位一致**、
+    SAVE 応答の opcode は **`0x04`（受信の写し。従来は `0x05` 固定）**。
+    復元後は `WRKACTJOB` が残り MDT=true（従来は空欄・MDT=false）
+  - 回帰テスト: `packages/tn5250/test/restore-screen-payload.test.ts`（16 件・新規）/
+    `save-screen-session.test.ts`「1 レコードに SAVE が 2 回」/ `packages/server/test/err-shape.test.ts`（9 件・新規）/
+    `packages/web-ui/test/flag-key-fields.test.ts`（5 件・新規）
 - [ ] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
   末尾まで埋まった欄（SEU の行など）や、ホストが右寄せで書いた数値欄を挿入モードで直すと、文字が消えたり値が変わったりして送られる。
   例: 右寄せの `"   12-"`（−12）の `1` の前に `9` を挿入すると `"   912"` になり、送信は `91` になる。
@@ -246,13 +265,23 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - `opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
   （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）
-- [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答の形式ほか）**（優先度 低（画面イメージ応答は中）・深さ △・WEA タイプ 5 だけ ○）。
+- [x] **【まとめ】DS5250 のその他の差のうち、画面イメージ応答**（優先度 中）
+  **完了（`20260920-restore-screen-parity`・PR #407）**。DSM（`QsnPutInpCmd(0x66)`）で実機に出させ、
+  `scripts/tap-proxy.mjs` 越しに **ACS の応答と突き合わせて**決着させた。
+  - ~~到達するかは要実測~~ → **`0x66` は到達する**（`READ SCREEN TO PRINT`。国勢調査 2 回で
+    `0x62` は 1 件も届かないが、`0x66` / `0x6A` / `0x62` は**同じ `buildReadScreenResponse` を共有**する）
+  - 差は 3 点で、どれも ACS に合わせた: **opcode は受信の写し**（`0x08`。従来は `PUT_GET` 固定）／
+    **カーソル 2 バイトの前置を外す**／**未書き込み桁は `0x00`**（従来は `0x40`）
+  - 打鍵した文字も載るようにした（`writeCell` が `rawByte ?? hostByte ?? encodeSbcs(char)`）。
+    オーダー 0x1C / 0x1E と `UNMAPPABLE` は**受信した元バイト**で返す（表示用の `rawByte` とは別に
+    送信用の `hostByte` を持たせた）。制御文字は属性帯に化けないよう `0x40` に倒す
+  - **実測で ACS と一致**: 1,930 バイト・opcode `0x08`・本体先頭 `3a d4 c1 c9 d5 00 00 00 00 00`。
+    ホストも受理（`rc=1024`）
+  - **未確認**: `0x62` 固有の扱い（ACS は `processReadScreen(false)` で上位バイトの立った桁を
+    8 ビット右へ送る。当 PJ にはそのプレーン表現が無いので**対応物も無い**）／
+    `READ IMMEDIATE`(0x72) と `READ MDT IMMEDIATE ALT`(0x83) の opcode は `PUT_GET` 固定のまま
+- [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
-  - 画面イメージ応答
-    - READ SCREEN（0x62/0x66/0x6A）で、当 PJ はカーソル 2 バイトを前置し、opcode を PUT_GET にし、NUL を 0x40 にする（`save-screen.ts:111-114`）。
-      ACS（`DS5250.processReadScreen`）は前置なし・opcode は受信したものの写し・NUL はそのまま。
-    - 打鍵した SBCS 文字を 0x40 にする（`save-screen.ts` の `writeCell`。上の RESTORE の項目と同じ根）。
-    - 到達するかは要実測。Query Reply の t[52] が、SBCS でも 0x40 になっている（ACS の SBCS 時とは違う）。
   - WEA タイプ 5（拡張 NLS 区間）（○）
     - ACS: DBCS セッションでは適用する（`PS5250.writeExtAttribute`）。
     - 当 PJ: すべてのタイプを読み飛ばす（`wtd-applier.ts:555-575`）。

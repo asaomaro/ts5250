@@ -1,6 +1,6 @@
 import { ByteWriter } from "./bytes.js";
 import { buildRecord, CLIENT_FLAG2 } from "./gds.js";
-import { COMMAND, ESC, OPCODE, ORDER } from "./constants.js";
+import { COMMAND, ESC, ORDER } from "./constants.js";
 import { SO, SI, type Codec } from "@ts5250/ebcdic";
 import type { DbcsFieldType } from "../screen/types.js";
 import type { ScreenBuffer } from "../screen/buffer.js";
@@ -14,18 +14,43 @@ import type { ScreenBuffer } from "../screen/buffer.js";
  * 返信しないとホストは先へ進まない——SEU の F1 でヘルプが 30 秒返らなかったのがこれ。
  *
  * 返すのは `ESC RESTORE_SCREEN` に続けて、現在の画面を再現する WTD ストリーム。
- * opcode は RESTORE_SCREEN（0x05）。
  *
  * **DBCS の再現は不完全**（lead/tail に元のバイト対を保持していないため、
  * エンコードし直せない文字は空白になる）。表示上の実害は無い——こちらの
- * RESTORE SCREEN はホストの積荷を読まず、ローカルの退避スタックから復元するため。
+ * RESTORE SCREEN は**積荷を画面へ適用せず**、ローカルの退避スタックから復元するため。
  * ここで送るバイト列はホストにとって不透明な保管物にすぎない。
+ *
+ * （積荷そのものは**照合のために読む**——返ってきたバイト列がここで送ったものと一致することを
+ * 確かめてから、その長さぶんを読み飛ばす。`wtd-applier.ts` の `restoreAndSkipPayload`）
+ *
+ * **opcode は受信したレコードの写し**（`replyOpcode`）。ACS も
+ * `DS5250.processSaveScreen` が `WorkHeader.Opcode` をそのまま書いており、実機のワイヤでも
+ * SAVE SCREEN 要求（opcode 0x04）に対して **0x04** を返していた
+ * （`20260920-restore-screen-parity` research F14）。以前は `OPCODE.RESTORE_SCREEN`(0x05) 固定で、
+ * ホストは受理していたが**ACS と同じではなかった**（decisions D8 で過去の決定を破棄）。
+ *
+ * `payload` を一緒に返すのは、**ホストが RESTORE でこれをそのまま返してくる**ため
+ * ——`ScreenBuffer.attachSaveContext()` に預け、復元時に読み飛ばす長さとして使う（decisions D2）。
  */
-export function buildSaveScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
+export function buildSaveScreenResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  replyOpcode: number
+): SaveScreenResponse {
+  const p = new ByteWriter();
+  writeScreenAsWtd(p, buf, codec);
+  const payload = p.toUint8Array();
   const w = new ByteWriter();
-  w.u8(ESC).u8(COMMAND.RESTORE_SCREEN);
-  writeScreenAsWtd(w, buf, codec);
-  return buildRecord(OPCODE.RESTORE_SCREEN, w.toUint8Array(), {}, CLIENT_FLAG2);
+  w.u8(ESC).u8(COMMAND.RESTORE_SCREEN).bytes(payload);
+  return { record: buildRecord(replyOpcode, w.toUint8Array(), {}, CLIENT_FLAG2), payload };
+}
+
+/** SAVE SCREEN / SAVE PARTIAL の応答（ホストへ送るレコードと、返ってくる積荷）。 */
+export interface SaveScreenResponse {
+  /** ホストへ送るレコード */
+  record: Uint8Array;
+  /** `ESC 0x12` の**後ろ**＝ホストが RESTORE でそのまま返してくる積荷 */
+  payload: Uint8Array;
 }
 
 /** 現在の画面を再現する WTD ストリームを書き出す（SAVE SCREEN / SAVE PARTIAL SCREEN 共通） */
@@ -69,7 +94,7 @@ function writeScreenAsWtd(w: ByteWriter, buf: ScreenBuffer, codec: Codec): void 
 /**
  * SAVE PARTIAL SCREEN（ESC 0x03）への応答レコードを組み立てる。
  *
- * **これはホストが待っている返信である**（opcode は PUT/GET＝「送ったから返せ」）。
+ * **これはホストが待っている返信である。**
  * 返さないとホストは次を送ってこず、**QSH が「待機中・ホストから応答がない」で固まる**。
  *
  * ## 中身は SAVE SCREEN（0x02）の応答と**同じ**にする
@@ -85,15 +110,22 @@ function writeScreenAsWtd(w: ByteWriter, buf: ScreenBuffer, codec: Codec): void 
  *
  * 先頭の `ESC RESTORE_SCREEN` は**局所の退避を戻す目印**として残す
  * ——長く実機で動いている形で、`0x02` と同じ役割を果たす。
- * `params` は受け取るが**送り返さない**（ホストは使っていない。research F2）。
+ *
+ * **パラメータ 5 バイトは受け取らない。** ホストは使っておらず（`20260730-tn5250-cross-check`
+ * research F2）、写して返すと「自分が付けたものをホストの指定と誤解する」自作自演に戻る。
+ * ~~受け取るが送り返さない~~ という形は「写さない」を注記でしか担保していなかったので、
+ * **引数ごと落として構造で真にした**（`20260920-restore-screen-parity` review ラウンド 2）。
+ * 記録は `ApplyResult.saveRequests[].params` に残る。
+ *
+ * ⚠ **いまは `buildSaveScreenResponse` の完全な別名**（引数も本体も同じ）。残してあるのは
+ * 呼び出し側で「どちらのコマンドに答えているか」が読めるようにするため。
  */
 export function buildSavePartialScreenResponse(
   buf: ScreenBuffer,
   codec: Codec,
-  params: Uint8Array
-): Uint8Array {
-  void params; // 記録として受け取るだけ（原典も値を使っていない）
-  return buildSaveScreenResponse(buf, codec);
+  replyOpcode: number
+): SaveScreenResponse {
+  return buildSaveScreenResponse(buf, codec, replyOpcode);
 }
 
 /**
@@ -104,18 +136,39 @@ export function buildSavePartialScreenResponse(
  * ウィンドウを重ねる）で、ホストが「既にあると仮定している画面」を取得するために送ってくる。
  * 返信しないとホストは先へ進まず、後続のウィンドウ描画を送ってこない。
  *
- * 形式は他の Read 応答と同じ「カーソル行(1) 桁(1)」に続けて、画面全域を先頭位置から
- * 末尾位置まで 1 桁 1 バイトで並べたイメージ（属性桁は属性バイト、文字桁は EBCDIC）。
- * SBA 等のオーダーは付けない（フラットなスキャン）。opcode は PUT_GET（0x03）。
+ * 形式は**画面全域を先頭位置から末尾位置まで 1 桁 1 バイトで並べたイメージだけ**
+ * （属性桁は属性バイト、文字桁は EBCDIC）。SBA 等のオーダーは付けない（フラットなスキャン）。
+ *
+ * **ACS の実測に合わせてある**（`20260920-restore-screen-parity` の実機計測。DSM の
+ * `QsnPutInpCmd(0x66)` でホストに出させ、`scripts/tap-proxy.mjs` で ACS の応答を採った）:
+ *
+ * - **カーソル位置を前置しない**（~~「カーソル行(1) 桁(1)」に続けて~~）。ACS は 1,920 バイト
+ *   ちょうど（24×80）を返す。
+ * - **opcode は受信したレコードの写し**（~~PUT_GET(0x03) 固定~~）。実機は 0x66 を opcode 0x08 で
+ *   送ってきて、ACS は 0x08 で返していた。
+ * - **未書き込み桁は `0x00`**（~~空白 0x40~~）。ACS は `HostPlane` をそのまま返すので、
+ *   何も書かれていない桁は 0x00 のまま（実測では 1,920 バイト中 1,388 が 0x00 だった）。
+ *
+ * ACS 側の実装は `DS5250.processReadScreen()`——`ps.getBuffer()`（＝`HostPlane` の写し）を
+ * 画面サイズぶん 1 バイトずつ書き、ヘッダの opcode に `WorkHeader.Opcode` を置く。
+ *
+ * **実測は 0x66 で採ったが、0x62 にも同じ形が当たる**——ACS のコマンド振り分けは
+ * `case 98:`（0x62）と `case 102:`（0x66）を**同じ `processReadScreen(bl)` へ落とす**
+ * （`bl = (受信コマンド != 98)`）。前置の有無・opcode・未書き込み桁の扱いは `bl` に依らない。
+ * `bl` が分けているのは**上位バイトの立った桁の加工だけ**で、0x62 のときに 8 ビット右へ送り
+ * `0x11→0x13` / `0x10→0x12` / `0x07→0x08` に写す——これは ACS の `HostPlane` に拡張属性を
+ * 畳み込む内部表現の話で、**当 PJ にはその表現が無いので対応物も無い**（未確認ではなく該当なし）。
  */
-export function buildReadScreenResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
+export function buildReadScreenResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  replyOpcode: number
+): Uint8Array {
   const w = new ByteWriter();
-  const cur = buf.rowColOf(buf.cursorAddr);
-  w.u8(cur.row).u8(cur.col);
   const ends = fieldEndAttrAddrs(buf);
   // 画面全域をスキャン。DBCS の lead は 2 バイト書き tail は 0 バイト（桁数は保たれる）。
-  for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec, 0x40, ends);
-  return buildRecord(OPCODE.PUT_GET, w.toUint8Array(), {}, CLIENT_FLAG2);
+  for (let addr = 0; addr < buf.size; addr++) writeCell(w, buf, addr, codec, 0x00, ends);
+  return buildRecord(replyOpcode, w.toUint8Array(), {}, CLIENT_FLAG2);
 }
 
 /** READ SCREEN EXTENDED の行区切り（ACS 実機の応答を実測して判明） */
@@ -168,12 +221,21 @@ function fieldEndAttrAddrs(buf: ScreenBuffer): ReadonlySet<number> {
  * - 1 行ぶんのバイト列を並べ、行末に区切りバイト `0xFF` を置く。これを行数ぶん繰り返す
  * - 行末の **NUL（未書き込み桁）は切り詰める**。行全体が NUL なら長さ 0（区切りだけ）。
  *   ブランク（0x40）は切り詰めない——実測で末尾 0x40 のまま 80 バイト送っている行がある
- * - レコードヘッダは opcode READ_SCREEN(0x08)・フラグ 2 バイト目 0x80
+ * - レコードヘッダは**受信したレコードの opcode の写し**・フラグ 2 バイト目 0x80。
+ *   実測した ACS の応答は 0x08 で、実機が送ってくる 0x64 のレコードも opcode 0x08 だった
+ *   ——**0x62 / 0x66 と同じ規則**（`20260920-restore-screen-parity` research F14・実機計測）。
+ *   ⚠ **当 PJ で写しに変えたのは SAVE / READ SCREEN / READ SCREEN EXTENDED の 3 経路だけ**。
+ *   `buildReadImmediateResponse`(0x72) と `buildReadMdtImmediateAltResponse`(0x83) は
+ *   `PUT_GET` 固定のまま——**実機で測っていないので変えていない**（同 review ラウンド 5）
  *
  * 形式が違うと、ホストは応答の中身を見ずに「適用業務ヘルプ中に機能チェックが起こった」を
  * 返してヘルプを送ってこない（日本語実機で 9 通りの誤った形式を試して確認）。
  */
-export function buildReadScreenExtendedResponse(buf: ScreenBuffer, codec: Codec): Uint8Array {
+export function buildReadScreenExtendedResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  replyOpcode: number
+): Uint8Array {
   const w = new ByteWriter();
   const ends = fieldEndAttrAddrs(buf);
   for (let row = 0; row < buf.rows; row++) {
@@ -184,7 +246,7 @@ export function buildReadScreenExtendedResponse(buf: ScreenBuffer, codec: Codec)
     while (end > 0 && bytes[end - 1] === 0x00) end--; // 行末の未書き込み桁は送らない
     w.bytes(bytes.subarray(0, end)).u8(ROW_DELIMITER);
   }
-  return buildRecord(OPCODE.READ_SCREEN, w.toUint8Array(), {}, CLIENT_FLAG2);
+  return buildRecord(replyOpcode, w.toUint8Array(), {}, CLIENT_FLAG2);
 }
 
 /** DBCS 種別 → FCW（ACS `Field5250` の定数と同じ対応。`applySf` の振り分けの逆） */
@@ -232,6 +294,24 @@ function writeCell(
   }
   if (cell.charKind === "dbcs-tail") return; // lead 側で 2 バイト書いている
   if (cell.charKind === "dbcs-lead") {
+    // **ホストが書いた桁は受信した生バイトをそのまま返す**（SBCS 側と同じ規則）。
+    // `setDbcs()` は lead/tail に元のバイト対を保持しているので、符号化し直さずに戻せる
+    // ——ACS も `HostPlane` をそのまま返す（`20260920-restore-screen-parity` research F3・F4）。
+    // 符号化し直すと、戻せない字が空白 2 桁に化ける（同 work の review ラウンド 1）
+    // `setDbcs()` が `checkAddr(addr + 1)` で守るので lead が最終桁に来ることは無いが、
+    // **ここで例外を投げると応答そのものが組めなくなる**ので境界を確かめてから読む
+    const tail = addr + 1 < buf.size ? buf.cellAt(addr + 1) : null;
+    // **`charKind` まで確かめる**——lead の対が SBCS で上書きされた欄では、その SBCS バイトを
+    // DBCS の trail として送ることになる（`20260920-restore-screen-parity` review ラウンド 2）
+    if (
+      cell.rawByte !== undefined &&
+      tail?.type === "char" &&
+      tail.charKind === "dbcs-tail" &&
+      tail.rawByte !== undefined
+    ) {
+      w.u8(cell.rawByte).u8(tail.rawByte);
+      return;
+    }
     const pair = codec.encodeDbcsChar?.(cell.char.codePointAt(0) ?? 0x20);
     if (pair === undefined) {
       w.u8(0x40).u8(0x40); // 戻せない文字は空白 2 桁（桁位置は保つ）
@@ -240,5 +320,43 @@ function writeCell(
     w.u8((pair >> 8) & 0xff).u8(pair & 0xff);
     return;
   }
-  w.u8(cell.rawByte ?? 0x40);
+  // **ホストが書いた桁は受信した生バイトを、それ以外は文字を符号化して返す。**
+  //
+  // ACS は表示バッファ（`PS5250` の `HostPlane`）に**打鍵した文字も**入れ（`putSBChar`）、
+  // 画面イメージ応答はその `HostPlane` をそのまま返す（`DS5250.processReadScreen` →
+  // `getBuffer()`。`20260920-restore-screen-parity` research F3・F4）。
+  // 当 PJ は以前 `rawByte ?? 0x40` としていたので、**`setFieldValue` で入れた文字
+  // （＝利用者が打った文字）が空白に化けていた**（同 research F10）。
+  //
+  // `hostByte` は表示に使えない元バイト（オーダー 0x1C / 0x1E）。`buffer.ts` の注記を参照。
+  w.u8(cell.rawByte ?? cell.hostByte ?? encodeSbcs(cell.char, codec));
+}
+
+/**
+ * SBCS 1 文字を EBCDIC の 1 バイトへ。表せない文字は空白（桁位置は保つ）。
+ *
+ * **全角は届かない**——`setFieldValue` は DBCS 欄の全角 1 文字を 1 セルに置くので、
+ * ここへ来ると `bytes.length !== 1` で 0x40 に倒れ、桁もずれる。従来の `rawByte ?? 0x40` と
+ * 同じ結果なので退行ではないが、**DBCS 欄に打鍵した全角は画面イメージ応答に載らない**
+ * （`20260920-restore-screen-parity` review ラウンド 1。未確認のまま残す）。
+ */
+function encodeSbcs(char: string, codec: Codec): number {
+  const { bytes, substituted } = codec.encode(char);
+  // **1 バイトに収まらないものは載せない**——SO/SI が付く・DBCS になるなどで桁がずれる。
+  // 置換が起きたもの（`substituted > 0`）も、別の文字を送ることになるので空白にする
+  if (bytes.length !== 1 || substituted > 0) return 0x40;
+  const b = bytes[0] ?? 0x40;
+  // **オーダー帯（< 0x20）と属性帯（0x20–0x3F）は空白に倒す。**
+  //
+  // `validateFieldContent` は制御文字を弾かない（シフト無しの欄は `substituted` しか見ない）ので、
+  // WS/MCP/マクロ経由で C0 制御を書けてしまう。それがそのまま載ると、`writeScreenAsWtd` の
+  // 積荷では**別のオーダー列**に、画面イメージ応答では**属性バイト**（`isAttribute` は 0x20–0x3F）に
+  // 化ける——後者はオーダーより静かに壊れる。
+  //
+  // **実測**（CCSID 37 / 273 / 930 / 939 / 1399。`codecForCcsid` が受ける 10 個のうち 5 つ。
+  // `20260920-restore-screen-parity` review ラウンド 3・4・5）:
+  // C0 制御（U+0000–U+001F）は 5 つとも属性帯へ 11 件落ちる（U+000A→0x25・U+001A→0x3F ほか）。
+  // **表示文字——U+0020 以上から DEL（U+007F）と C1（U+0080–U+009F）を除いた範囲——が
+  // 0x40 未満へ落ちるものは 1 件も無い**ので、この条件で失う文字は無い。
+  return b < 0x40 ? 0x40 : b;
 }

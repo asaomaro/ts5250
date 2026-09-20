@@ -6,7 +6,7 @@ import {
   buildReadScreenExtendedResponse
 } from "../src/protocol/save-screen.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
-import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
+import { ESC, COMMAND, OPCODE, ORDER } from "../src/protocol/constants.js";
 
 const codec = codecForCcsid(37);
 
@@ -57,7 +57,7 @@ describe("画面イメージ応答のフィールド閉じ属性（フォーマ�
   it("フィールドテーブルが消えていても、消える前の終端に閉じ属性を置く（READ SCREEN EXTENDED）", () => {
     const buf = pdmLikeScreenThenClearFormatTable();
     expect(buf.orderedFields()).toHaveLength(0); // 前提: フィールドは本当に消えている
-    const row3 = rows(buildReadScreenExtendedResponse(buf, codec))[2]!;
+    const row3 = rows(buildReadScreenExtendedResponse(buf, codec, OPCODE.READ_SCREEN))[2]!;
     // col 21 = 開始属性 0x24（文字桁ではないのでフィールド消滅後も残る）、col 31 = 閉じ属性
     expect(row3[20]).toBe(0x24);
     expect(row3[31]).toBe(0x20);
@@ -65,8 +65,9 @@ describe("画面イメージ応答のフィールド閉じ属性（フォーマ�
 
   it("フィールドテーブルが消えていても、消える前の終端に閉じ属性を置く（READ SCREEN）", () => {
     const buf = pdmLikeScreenThenClearFormatTable();
-    const body = buildReadScreenResponse(buf, codec).slice(10);
-    const row3 = body.slice(2 + 2 * 80, 2 + 3 * 80); // カーソル行桁 2 バイトの後、3 行目
+    const body = buildReadScreenResponse(buf, codec, OPCODE.READ_SCREEN).slice(10);
+    // **カーソル行桁の前置は無い**（ACS に合わせて外した。`20260920-restore-screen-parity`）
+    const row3 = body.slice(2 * 80, 3 * 80);
     expect(row3[20]).toBe(0x24);
     expect(row3[31]).toBe(0x20);
   });
@@ -81,7 +82,7 @@ describe("画面イメージ応答のフィールド閉じ属性（フォーマ�
       ...codec.encode("X").bytes, // (3,32) ホストが書いた桁
       ESC, COMMAND.CLEAR_FORMAT_TABLE
     ]);
-    const row3 = rows(buildReadScreenExtendedResponse(buf, codec))[2]!;
+    const row3 = rows(buildReadScreenExtendedResponse(buf, codec, OPCODE.READ_SCREEN))[2]!;
     expect(row3[31]).toBe(codec.encode("X").bytes[0]);
   });
 
@@ -96,7 +97,7 @@ describe("画面イメージ応答のフィールド閉じ属性（フォーマ�
       ORDER.SBA, 3, 21,
       ...codec.encode("REWRITTEN").bytes // 同じ行を書き直す（閉じ属性の引き継ぎは捨てられる）
     ]);
-    const row3 = rows(buildReadScreenExtendedResponse(buf, codec))[2]!;
+    const row3 = rows(buildReadScreenExtendedResponse(buf, codec, OPCODE.READ_SCREEN))[2]!;
     expect(row3[31]).not.toBe(0x20); // 書き直された行に古い閉じ属性を持ち込まない
   });
 });

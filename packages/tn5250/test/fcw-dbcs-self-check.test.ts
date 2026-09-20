@@ -5,7 +5,7 @@ import { buildSaveScreenResponse } from "../src/protocol/save-screen.js";
 import { selfCheckDigitOk } from "../src/screen/field-validate.js";
 import { isDbcsOnly } from "../src/browser.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
-import { COMMAND, ESC, ORDER } from "../src/protocol/constants.js";
+import { COMMAND, ESC, OPCODE, ORDER } from "../src/protocol/constants.js";
 
 /**
  * **FCW の DBCS 種別と自己点検欄を ACS（`Field5250` の定数）と同じに解釈する。**
@@ -53,7 +53,7 @@ describe("FCW の DBCS 種別（ACS `Field5250` と同じ 4 種）", () => {
   it("SAVE SCREEN の応答で同じ FCW を書き戻す（往復で種別が変わらない）", () => {
     for (const fcw of [0x8200, 0x8220, 0x8240, 0x8280]) {
       const buf = screenWithFcw(fcw);
-      const rec = buildSaveScreenResponse(buf, codec);
+      const rec = buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record;
       const back = new ScreenBuffer();
       // GDS ヘッダ（10 バイト）と先頭の ESC RESTORE_SCREEN を外して適用し直す
       applyDataStream(rec.slice(12), back, codec, () => {});

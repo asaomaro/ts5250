@@ -33,9 +33,13 @@ function apply(stream: number[]): { buf: ScreenBuffer; result: ReturnType<typeof
 }
 
 describe("SAVE PARTIAL SCREEN を受理する", () => {
-  it("パラメータ 5 バイトをそのまま渡す（応答へ写すため）", () => {
+  it("パラメータ 5 バイトを記録として渡す（応答へは写さない）", () => {
     const { result } = apply([ESC, COMMAND.SAVE_PARTIAL_SCREEN, 0x01, 0x02, 0x03, 0x04, 0x05]);
-    expect(result.savePartialScreen).toEqual(Uint8Array.from([1, 2, 3, 4, 5]));
+    expect(result.saveRequests).toHaveLength(1);
+    expect(result.saveRequests[0]!.kind).toBe("partial");
+    expect(result.saveRequests[0]!.params).toEqual(Uint8Array.from([1, 2, 3, 4, 5]));
+    // 段の番号（`ScreenBuffer.saveScreen()` が返す深さ）も載る——応答の積荷を添える先
+    expect(result.saveRequests[0]!.depth).toBe(1);
   });
 
   it("**捨てない**——同じレコードの後続 WTD が画面に出る", () => {
@@ -54,7 +58,7 @@ describe("SAVE PARTIAL SCREEN を受理する", () => {
     ]);
     expect(warns.filter((w) => w.includes("unknown command"))).toEqual([]);
     expect(buf.snapshot().cells[0]![0]!.char).toBe("A");
-    expect(result.savePartialScreen).toBeDefined();
+    expect(result.saveRequests, "退避の要求は残っている").toHaveLength(1);
   });
 
   it("**後続の READ も生き残る**（キーボードが開かないまま固まらない）", () => {
@@ -70,7 +74,9 @@ describe("SAVE PARTIAL SCREEN を受理する", () => {
 });
 
 describe("応答レコードの形（実機が受理した形）", () => {
-  function respond(params: number[] = [0, 0, 0, 0, 0]) {
+  // **パラメータは渡さない**——ビルダーが受け取らなくなった（「写さない」を構造で真にした。
+  // `20260920-restore-screen-parity` review ラウンド 2）
+  function respond() {
     const buf = new ScreenBuffer();
     applyDataStream(
       Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, 0x11, 0x01, 0x01, 0xc8, 0xc9]),
@@ -78,11 +84,11 @@ describe("応答レコードの形（実機が受理した形）", () => {
       codec,
       () => {}
     );
-    return { record: buildSavePartialScreenResponse(buf, codec, Uint8Array.from(params)), buf };
+    return { record: buildSavePartialScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record, buf };
   }
 
-  it("opcode は RESTORE_SCREEN（ホストが待っている返信）", () => {
-    expect(respond().record[9]).toBe(OPCODE.RESTORE_SCREEN);
+  it("opcode は受信したレコードの写し（ACS と同じ。20260920-restore-screen-parity decisions D8）", () => {
+    expect(respond().record[9]).toBe(OPCODE.SAVE_SCREEN);
   });
 
   /**
@@ -99,17 +105,20 @@ describe("応答レコードの形（実機が受理した形）", () => {
     expect(record[11]).toBe(COMMAND.RESTORE_SCREEN);
   });
 
-  it("**受け取った 5 バイトは送り返さない**（自作自演の 0x13 を作らない）", () => {
-    const { record } = respond([0x11, 0x22, 0x33, 0x44, 0x55]);
-    expect([...record]).not.toContain(0x22);
-    // 目印の直後はすぐ WTD
+  it("**目印の直後はすぐ WTD**（パラメータの写しを挟まない＝自作自演の 0x13 を作らない）", () => {
+    // ~~受け取った 5 バイトは送り返さない~~ → ビルダーは**もう受け取らない**（引数ごと撤去した。
+    // `20260920-restore-screen-parity` review ラウンド 2）ので、「写した値が入っていない」を
+    // 検査しても何も固定しない。固定できるのは**並び**——`ESC 12` の次がすぐ `ESC 11` であること
+    const { record } = respond();
+    expect(record[10]).toBe(ESC);
+    expect(record[11]).toBe(COMMAND.RESTORE_SCREEN);
     expect(record[12]).toBe(ESC);
     expect(record[13]).toBe(COMMAND.WRITE_TO_DISPLAY);
   });
 
   it("SAVE SCREEN の応答と**同じバイト列**になる", () => {
     const { record, buf } = respond();
-    expect([...record]).toEqual([...buildSaveScreenResponse(buf, codec)]);
+    expect([...record]).toEqual([...buildSaveScreenResponse(buf, codec, OPCODE.SAVE_SCREEN).record]);
   });
 
   it("送ったストリームを適用し直すと画面が再現する", () => {
@@ -242,9 +251,12 @@ describe("セッションが応答を送り返す", () => {
     await new Promise((r) => setTimeout(r, 30));
 
     const sent = written.slice(before);
-    // 応答は SAVE SCREEN と同じ形（`ESC 12` ＋ WTD・opcode は RESTORE_SCREEN）
-    const rec = sent.find((d) => d[9] === OPCODE.RESTORE_SCREEN && d[11] === COMMAND.RESTORE_SCREEN);
+    // 応答は SAVE SCREEN と同じ形（`ESC 12` ＋ WTD）。
+    // **opcode は受信したレコードの写し**（上の実機バイト列の 10 バイト目＝SAVE PARTIAL の 0x03）。
+    // ACS も `WorkHeader.Opcode` を書く（`20260920-restore-screen-parity` research F14 / decisions D8）
+    const rec = sent.find((d) => d[11] === COMMAND.RESTORE_SCREEN);
     expect(rec, "画面を返す応答が含まれる").toBeDefined();
+    expect(rec?.[9], "opcode は受信の写し").toBe(SAVE_PARTIAL_RECORD[9]);
     await p;
   });
 });
