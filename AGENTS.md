@@ -180,6 +180,7 @@
 - サーバー／クライアントなど**対になる資産**を作る・片方に指摘を直すとき → `.aidev/conventions/paired-artifact-sync.md`
 - 実測値を記録（research・台帳・PR）に残すとき → `.aidev/conventions/measurement-sanity.md`
 - 回帰テストを足して「固定した」と書くとき → `.aidev/conventions/verify-by-mutation.md`
+- 外から来る入力（ws / REST / MCP / ファイル）を弾くコードにテストを足すとき → `.aidev/conventions/test-input-shape.md`
 <!-- /aidev:conventions -->
 
 ---
