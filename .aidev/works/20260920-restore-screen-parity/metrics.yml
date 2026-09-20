@@ -70,3 +70,4 @@ events:
   - { ts: 2026-09-20T05:03:39Z, phase: review, event: debug, metrics: { stage: skip, sent_backs: 5 } }
   - { ts: 2026-09-20T05:03:54Z, phase: deliver, event: approved, metrics: { files_changed: 22, insertions: 1480, deletions: 137 } }
   - { ts: 2026-09-20T05:19:16Z, phase: retro, event: start }
+  - { ts: 2026-09-20T05:21:53Z, phase: retro, event: approved }
