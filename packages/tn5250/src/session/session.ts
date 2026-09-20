@@ -283,12 +283,20 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 内容検証（型・DBCS 種別・コードページ許容文字）。違反は FIELD_TYPE。
     // **その欄の現在値を渡す**——ホストが書いた編集文字（EDTCDE / EDTWRD の `$` `*` `/` `CR`）を
     // 弾くと、ホスト自身が送ってきた値を送り返せず画面ごと送信できなくなる
-    validateFieldContent(value, field, this.codec, this.buf.fieldValue(field));
+    // **位置を渡す**——`InternalField` は線形アドレスしか持たないので、例外の文言に
+    // 「どの欄か」を入れるには呼び出し側で作るしかない（`20260920-field-error-no-value` research F3）。
+    // 値は文言に入らないので、利用者が直せるのはこの位置だけが頼り
+    const at = this.buf.rowColOf(field.startAddr);
+    validateFieldContent(value, field, this.codec, this.buf.fieldValue(field), at);
     // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）
     if (field.dbcsType !== undefined && this.codec.isDbcs) {
       const bytes = this.codec.encode(value).bytes.length;
       if (bytes > field.length) {
-        throw new As400Error("FIELD_OVERFLOW", `DBCS value ${bytes} bytes exceeds field length ${field.length}`);
+        // 長さを出さない理由は `buffer.ts` の同じ検査と同じ（`20260920-field-error-no-value` FR1）
+        throw new As400Error(
+          "FIELD_OVERFLOW",
+          `field at (${at.row},${at.col}) accepts at most ${field.length} bytes`
+        );
       }
     }
     this.buf.setFieldValue(field, value, field.dbcsType !== undefined);
@@ -314,7 +322,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   submitGuiSelection(fieldId: number, opts: SendAidOptions & { key?: AidKey } = {}): Promise<SendAidResult> {
     this.assertReady();
     const field = this.buf.getSelectionField(fieldId);
-    if (!field) throw new As400Error("PROTOCOL_ERROR", `no GUI selection field id=${fieldId}`);
+    // **id を反射しない**——ws の `gui-submit` から任意の値が届く経路で、
+    // `code` が種別を伝えており指した側は自分が送った id を知っている
+    // （`20260920-field-error-no-value` decisions D3。`ws-handler` 側でも検証している）
+    if (!field) throw new As400Error("FIELD_NOT_FOUND", "no such GUI selection field");
     const chosen = field.choices.find((c) => c.selected && c.aid !== undefined);
     let key: AidKey = opts.key ?? "Enter";
     if (chosen?.aid !== undefined) {
@@ -402,7 +413,8 @@ export class Session5250 extends Emitter<SessionEvents> {
     sysReqText?: string
   ): Uint8Array {
     if (sysReqText !== undefined && key !== "SysReq") {
-      throw new As400Error("PROTOCOL_ERROR", `sysReqText is only valid with SysReq (got ${key})`);
+      // **キー名を反射しない**（`20260920-field-error-no-value` decisions D3。`code` が種別を伝えており、押した側は自分が送った値を知っている）
+      throw new As400Error("PROTOCOL_ERROR", "sysReqText is only valid with SysReq");
     }
     if (key === "SysReq") {
       // システム要求行の文字列をデータに載せる。空文字は「打たずに実行」＝メニュー要求なので
@@ -417,7 +429,10 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (key === "Attn") return buildFlagRecord({ atn: true });
     const aid = aidCodeOf(key);
     if (aid === undefined) {
-      throw new As400Error("PROTOCOL_ERROR", `unsupported AID key: ${key}`);
+      // **キー名を反射しない**——クライアントが送った任意文字列がそのままブラウザへ返る形だった
+      // （`20260920-field-error-no-value` research F2 #22。`code` が種別を伝えており、
+      // どのキーを押したかは押した側が知っている）
+      throw new As400Error("PROTOCOL_ERROR", "unsupported AID key");
     }
     // **待たされている Read の種類で形式が変わる。** `0x42`（READ INPUT FIELDS）だけは
     // SBA 無し・全欄・欄長そのままの平坦形式（`buildReadInputFieldsResponse` の JSDoc）。

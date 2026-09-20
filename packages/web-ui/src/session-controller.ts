@@ -493,7 +493,9 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
         }
         if (msg.type === "error" && !a.settled) {
           // **繋がったが引き取れなかった**（猶予切れ・他人のもの）。時間が経っても
-          // 回復しないので再試行しない。理由はサーバーのものをそのまま見せる
+          // 回復しないので再試行しない。~~理由はサーバーのものをそのまま見せる~~
+          // → **`wsErrorNotice` が code から作る見出しを見せる**
+          // （`20260920-field-error-no-value` decisions D2。サーバーの message は出さない）
           a.settled = true;
           if (a.timer !== undefined) clearTimeout(a.timer);
           a.timer = undefined;

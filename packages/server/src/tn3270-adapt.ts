@@ -3,6 +3,7 @@ import type { ScreenSnapshot, Cell, Field, ScreenColor } from "@ts5250/tn5250";
 import type { Tn3270Session } from "@ts5250/tn3270";
 import type { AidKey as Aid3270 } from "@ts5250/tn3270";
 import type { WsKeyField } from "./ws-messages.js";
+import { parseFieldValue, parseKeyFieldShape } from "./ws-field-ref.js";
 
 /**
  * **3270 セッションを Web の口に合わせる薄い層。**
@@ -126,15 +127,20 @@ export function planKey3270(key: string, isIbmI: boolean): Key3270Plan {
   if (pa) return { kind: "aid", aid: `pa${pa[1]}` as Aid3270 };
   const pf = /^F([1-9]|1[0-9]|2[0-4])$/.exec(key);
   if (pf) return { kind: "functionKey", n: Number(pf[1]) };
-  const only = IBMI_ONLY[key];
+  // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`key` が `constructor` /
+  // `toString` だと継承プロパティ（関数）が返り、`aid` に関数が入ったまま送信へ進む
+  // （`planKey3270("constructor", true)` で再現。`20260920-field-error-no-value` review ラウンド 4）。
+  // `key` は**クライアントが自由に決める**側なので、5250 の `aidCodeOf`（`Map` なので元から安全）と揃える
+  const only = Object.hasOwn(IBMI_ONLY, key) ? IBMI_ONLY[key] : undefined;
   if (only !== undefined) {
     if (isIbmI) return { kind: "aid", aid: only };
-    throw new As400Error(
-      "PROTOCOL_ERROR",
-      `${key} はこのホスト（メインフレーム）の 3270 には割り当てがありません`
-    );
+    // **キー名を反射しない**——`key` は**クライアントが送った任意の文字列**で、
+    // ここへ入れると `ws-handler` の catch からそのまま返る（`20260920-field-error-no-value`
+    // decisions D3。5250 側の `session.ts` の `unsupported AID key` と対）。
+    // どのキーを押したかは**押した側が知っている**ので、種別だけ伝えれば足りる
+    throw new As400Error("PROTOCOL_ERROR", "key has no 3270 assignment on this host");
   }
-  throw new As400Error("PROTOCOL_ERROR", `${key} は 3270 端末では送れません`);
+  throw new As400Error("PROTOCOL_ERROR", "unsupported AID key");
 }
 
 /**
@@ -160,11 +166,15 @@ export function planKey3270(key: string, isIbmI: boolean): Key3270Plan {
 export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[]): void {
   const snap = session.snapshot();
   for (const f of fields) {
-    if (!("value" in f)) {
+    // **形の検査を最初に置く**（`ws-field-ref.ts` の `parseKeyFieldShape` の注記）。
+    // `"value" in f` を先に書くと、要素がプリミティブなとき `in` の素の TypeError に
+    // クライアントの文字列が載る——ラウンド 2 の修正はここで半分しか閉じていなかった
+    const { field: ref, hasValue } = parseKeyFieldShape(f);
+    if (!hasValue) {
       // マクロの秘密は 3270 では受けない（マクロ自体が対象外。spec 6）
       throw new As400Error("PROTOCOL_ERROR", "secretRef is not supported on a 3270 session");
     }
-    const ref = f.field;
+    const value = parseFieldValue((f as { value: unknown }).value);
     // **添字は 1 始まり**（`Field.index` の規約。5250 の口と同じ数え方）。
     // 配列の添字として使うと 1 つずれ、TK4- の入力欄に打ったつもりが
     // **隣の保護欄に当たって `FIELD_PROTECTED`** になる（ブラウザ E2E で踏んだ）
@@ -173,7 +183,9 @@ export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[
         ? snap.fields.find((x) => x.index === ref)
         : snap.fields.find((x) => x.row === ref.row && x.col === ref.col);
     if (target === undefined) {
-      throw new As400Error("FIELD_NOT_FOUND", `no field at ${JSON.stringify(ref)}`);
+      // **指定の中身を反射しない**（`20260920-field-error-no-value` decisions D3・D8）。
+      // 形は上で検証済みなので、ここで出せるのは「その欄が無い」という事実だけ
+      throw new As400Error("FIELD_NOT_FOUND", "no field at the requested position");
     }
     if (target.protected) {
       throw new As400Error("FIELD_PROTECTED", `field at (${target.row},${target.col}) is protected`);
@@ -182,6 +194,6 @@ export function applyFields(session: Tn3270Session, fields: readonly WsKeyField[
     // **先に欄を消す**（上の俯瞰コメント）。順序は固定——`type()` はカーソルを進めるので、
     // 打った後に消すと打った内容ごと消える
     session.eraseEof();
-    session.type(f.value);
+    session.type(value);
   }
 }

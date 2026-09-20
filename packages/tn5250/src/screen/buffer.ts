@@ -1058,9 +1058,15 @@ export class ScreenBuffer {
     // `value.length` で数えると桁数を過大に見積もって FIELD_OVERFLOW になる。
     const chars = [...value];
     if (!skipCharLengthCheck && chars.length > field.length) {
+      // **打鍵した値の長さを出さない**（`20260920-field-error-no-value` FR1「値・その一部・
+      // **その長さ**を含めない」）。この文言は `ws-handler` の catch からブラウザへ返り、
+      // 値はマクロ由来の**復号済みの秘密**でもありうる——長さは秘密そのものではないが、
+      // 秘密について外へ出る情報を増やす理由が無い。
+      // **欄の桁数（`field.length`）はホストが宣言した値**なので出してよい。
+      const { row, col } = this.rowColOf(field.startAddr);
       throw new As400Error(
         "FIELD_OVERFLOW",
-        `value length ${chars.length} exceeds field length ${field.length}`
+        `field at (${row},${col}) accepts at most ${field.length} characters`
       );
     }
     for (let i = 0; i < field.length; i++) {

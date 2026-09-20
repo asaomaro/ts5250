@@ -1632,7 +1632,8 @@ export class SessionManager {
   assertKeyAllowed(id: string, key: AidKey, user?: AuthUser, holder?: string): SessionEntry {
     const entry = this.get(id, user);
     if (entry.readOnly && !READONLY_ALLOWED_KEYS.has(key)) {
-      throw new As400Error("READ_ONLY_SESSION", `key ${key} not allowed on read-only session`);
+      // **キー名を反射しない**（`20260920-field-error-no-value` decisions D3。`code` が種別を伝えており、押した側は自分が送った値を知っている）
+      throw new As400Error("READ_ONLY_SESSION", "key not allowed on read-only session");
     }
     this.assertNotReserved(id, holder);
     return entry;

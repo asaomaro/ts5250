@@ -82,7 +82,10 @@ export class MacroStore {
   /** 所有者チェック込みで 1 件引く。**ws の秘密解決もこれを通る**（`assertOwner` を迂回させない） */
   get(id: string, user: AuthUser | undefined): MacroRecord {
     const m = this.macros.get(id);
-    if (!m) throw new As400Error("SESSION_NOT_FOUND", `macro ${id} not found`);
+    // **id を文言に反射しない**——`macroSecretRefSchema` の `macroId` は `z.string().min(1)` で、
+    // ws の `secretRef` からは**任意の文字列**が届く（`20260920-field-error-no-value` decisions D3。
+    // `code` が種別を伝えており、どのマクロを指したかは指した側が知っている）
+    if (!m) throw new As400Error("SESSION_NOT_FOUND", "macro not found");
     assertOwner(m.owner, user);
     return m;
   }
@@ -176,7 +179,8 @@ export class MacroStore {
     const macro = this.get(ref.macroId, user);
     const step = macro.steps[ref.step];
     if (!step) {
-      throw new As400Error("CONFIG_ERROR", `macro ${ref.macroId}: step ${ref.step} not found`);
+      // 同上。`step` は zod で数値に閉じているので残してよい（反射ではない）
+      throw new As400Error("CONFIG_ERROR", `macro step ${ref.step} not found`);
     }
     const secret = step.secrets?.find((s) => s.field === ref.field);
     if (!secret) {

@@ -52,41 +52,41 @@ describe("現在値にある文字は型検証で弾かない", () => {
 
   it("**現在値に無い文字は従来どおり弾く**（空振り防止の要）", () => {
     // `$` は現在値に無い＝ホストが書いたものではない＝ただの誤入力
-    expect(() => validateFieldContent("12$4", numeric, codec, "1234")).toThrow(/numeric field/);
+    expect(() => validateFieldContent("12$4", numeric, codec, "1234")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts digits only") as unknown as string }));
   });
 
   it("現在値の一部だけ一致していても、無い文字は弾く", () => {
     // `,` は現在値にあるが `%` は無い
-    expect(() => validateFieldContent("1,2%4", numeric, codec, "1,234")).toThrow(/numeric field/);
+    expect(() => validateFieldContent("1,2%4", numeric, codec, "1,234")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts digits only") as unknown as string }));
   });
 
   it("現在値を渡さない呼び出しは従来どおり（回帰）", () => {
     expect(() => validateFieldContent("1,234.56", numeric, codec)).not.toThrow();
-    expect(() => validateFieldContent("12$4", numeric, codec)).toThrow(/numeric field/);
+    expect(() => validateFieldContent("12$4", numeric, codec)).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts digits only") as unknown as string }));
   });
 
   it("digits-only 欄でも同じ規則（現在値にある文字だけ通す）", () => {
     const digits = fieldWith(0x4000 | FFW.SHIFT_DIGITS_ONLY);
     expect(() => validateFieldContent("1.23", digits, codec, "9.99")).not.toThrow();
-    expect(() => validateFieldContent("1.23", digits, codec, "999")).toThrow(/digits only/);
+    expect(() => validateFieldContent("1.23", digits, codec, "999")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts digits only") as unknown as string }));
   });
 
   it("英字専用欄でも同じ規則", () => {
     const alpha = fieldWith(0x4000 | FFW.SHIFT_ALPHA_ONLY);
     expect(() => validateFieldContent("AB1", alpha, codec, "XY1")).not.toThrow();
-    expect(() => validateFieldContent("AB1", alpha, codec, "XYZ")).toThrow(/alphabetic-only/);
+    expect(() => validateFieldContent("AB1", alpha, codec, "XYZ")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts alphabetic characters only") as unknown as string }));
   });
 
   it("**コードページ検証は現在値で緩めない**（別の理由の検証）", () => {
     // SBCS の CCSID 37 は全角を表現できない。現在値に何があっても送れないものは送れない
     const f = fieldWith(0x4000);
-    expect(() => validateFieldContent("あ", f, codec, "あ")).toThrow(/not representable/);
+    expect(() => validateFieldContent("あ", f, codec, "あ")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("cannot hold characters outside CCSID") as unknown as string }));
   });
 
   it("**DBCS 種別の検証も現在値で緩めない**", () => {
     const pure = { ...fieldWith(0x4000), dbcsType: "pure" } as unknown as InternalField;
     const dbcs = codecForCcsid(939);
-    expect(() => validateFieldContent("AB", pure, dbcs, "AB")).toThrow(/DBCS-only/);
+    expect(() => validateFieldContent("AB", pure, dbcs, "AB")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts double-byte characters only") as unknown as string }));
   });
 });
 
@@ -150,6 +150,6 @@ describe("session.setField が現在値を検証へ渡す", () => {
   it("**素の数字欄では従来どおり弾く**（配線が緩めすぎになっていない）", async () => {
     const session = await connect();
     const f = session.snapshot().fields.find((x) => !x.protected && x.length === 4)!;
-    expect(() => session.setField({ index: f.index }, "12$4")).toThrow(/numeric field/);
+    expect(() => session.setField({ index: f.index }, "12$4")).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts digits only") as unknown as string }));
   });
 });

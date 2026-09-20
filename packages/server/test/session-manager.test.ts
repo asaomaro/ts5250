@@ -70,6 +70,27 @@ describe("SessionManager", () => {
     mgr.closeAll();
   });
 
+  /**
+   * **キー名を文言へ反射しない**（`20260920-field-error-no-value` AC9 / decisions D3）。
+   * `key` は ws の `type:"key"` から来る**任意の文字列**で、`ws-handler` の catch は
+   * message をそのままクライアントへ返す。押したキーは押した側が知っているので、
+   * `code`（`READ_ONLY_SESSION`）だけで足りる。
+   */
+  it("**断るときにキー名を反射しない**", async () => {
+    const mgr = new SessionManager();
+    const ro = await openReplay(mgr, true);
+    const marker = "LEAK_MARKER_XYZ";
+    try {
+      mgr.assertKeyAllowed(ro.id, marker as Parameters<typeof mgr.assertKeyAllowed>[1]);
+      throw new Error("例外が投げられていない（この検査は空振りしている）");
+    } catch (e) {
+      expect((e as { code: string }).code).toBe("READ_ONLY_SESSION");
+      expect((e as Error).message).not.toContain(marker);
+      expect((e as Error).message).toBe("key not allowed on read-only session");
+    }
+    mgr.closeAll();
+  });
+
   it("close でセッションが除去される", async () => {
     const mgr = new SessionManager();
     const entry = await openReplay(mgr);

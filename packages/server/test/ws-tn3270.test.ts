@@ -4,8 +4,8 @@ import { SessionManager } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import { Tn3270Manager } from "../src/tn3270-manager.js";
-import { planKey3270, toWireScreen } from "../src/tn3270-adapt.js";
-import type { WsServerMessage } from "../src/ws-messages.js";
+import { applyFields, planKey3270, toWireScreen } from "../src/tn3270-adapt.js";
+import type { WsKeyField, WsServerMessage } from "../src/ws-messages.js";
 import { startMini3270, type Mini3270 } from "../../tn3270/test/harness/mini3270.js";
 
 /**
@@ -304,14 +304,68 @@ describe("3270 → Web の変換", () => {
     expect(planKey3270("Help", true)).toEqual({ kind: "aid", aid: "pf1" });
     expect(planKey3270("Print", true)).toEqual({ kind: "aid", aid: "pf4" });
     for (const k of ["Attn", "SysReq", "Help", "Print"]) {
-      expect(() => planKey3270(k, false), k).toThrow(/メインフレーム/u);
+      expect(() => planKey3270(k, false), k).toThrow(
+        expect.objectContaining({ code: "PROTOCOL_ERROR", message: "key has no 3270 assignment on this host" })
+      );
     }
   });
 
   it("知らないキーは理由を言って断る", () => {
     for (const k of ["F25", "F0", "Roll", ""]) {
-      expect(() => planKey3270(k, true), k).toThrow(/3270 端末では送れません/u);
+      expect(() => planKey3270(k, true), k).toThrow(
+        expect.objectContaining({ code: "PROTOCOL_ERROR", message: "unsupported AID key" })
+      );
     }
+  });
+
+  /**
+   * **クライアントが送った文字列を文言へ反射しない**（`20260920-field-error-no-value` AC9）。
+   * `key` は ws の `type:"key"` から来る**任意の文字列**で、`ws-handler` の catch は
+   * message をそのままクライアントへ返す。5250 側（`session.ts` の `unsupported AID key`）と対。
+   */
+  /**
+   * **欄の指定も 5250 と同じ検証を通す**（`ws-field-ref.ts`）。
+   * 素通しすると `applyFields` の `no field at ${JSON.stringify(ref)}` に
+   * クライアントの値がそのまま載る（`20260920-field-error-no-value` decisions D8）。
+   * 5250 側は `ws-macro-secret.test.ts`——**対で固定する**（条項 `paired-artifact-sync`）。
+   */
+  it("**欄の指定が壊れていても、クライアントの値を文言に反射しない**", () => {
+    const marker = "LEAK_MARKER_XYZ";
+    const session = { snapshot: () => ({ fields: [] }) } as unknown as Parameters<typeof applyFields>[0];
+    // **要素そのものがプリミティブな形も振る**——`{ field, value }` だけを振っていると、
+    // `"value" in f` が `in` の素の TypeError を投げる並びを見逃す（ラウンド 3 で実測）
+    const entries: unknown[] = [
+      { field: marker, value: "x" },
+      { field: { index: marker }, value: "x" },
+      { field: { row: marker, col: 1 }, value: "x" },
+      { field: null, value: "x" },
+      { field: 1, value: { [marker]: 1 } },
+      marker, // 要素そのものが文字列
+      42
+    ];
+    for (const entry of entries) {
+      const label = JSON.stringify(entry);
+      let msg: string | undefined;
+      try {
+        applyFields(session, [entry as WsKeyField]);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      expect(msg, `弾かれていない: ${label}`).toBeDefined();
+      expect(msg!, `反射している: ${label}`).not.toContain(marker);
+      expect(msg!, `素の TypeError が漏れている: ${label}`).not.toContain("in operator");
+    }
+  });
+
+  it("**知らないキーの名前を文言に反射しない**", () => {
+    const marker = "LEAK_MARKER_XYZ";
+    expect(() => planKey3270(marker, true)).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining(marker) as unknown as string })
+    );
+    // IBM i 専用キーをメインフレームで押した経路も同じ
+    expect(() => planKey3270("Attn", false)).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining("Attn") as unknown as string })
+    );
   });
 
   it("**モデル 3 / 4 は入口で断る**（web-ui の型に収まらない）", async () => {
