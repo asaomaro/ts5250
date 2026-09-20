@@ -108,7 +108,7 @@
       対象: 未特定（`KEYDSPF` 相当。`scripts/README.md`「AID キーと欄データ（CA / CF）」）/ 根拠: design「受け入れ基準との対応 AC4」, research F8（`aidNoDataMask`）
       依存: T1, T4
       AC: AC4
-- [ ] T18: **【deliver で消化】** 片付けと点検（実機の DSM 資材・scratchpad の秘密・`git status`・ACS 由来物が入っていないこと）
+- [x] T18: **【deliver で消化】** 片付けと点検（実機の DSM 資材・scratchpad の秘密・`git status`・ACS 由来物が入っていないこと）
       対象: 未特定 / 根拠: requirements「非機能要件」, `AGENTS.md`「セキュリティ」
       依存: T15
       AC: AC9
