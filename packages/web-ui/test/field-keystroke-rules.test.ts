@@ -6,7 +6,13 @@ import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
 import { rejectReason, isSignPosition } from "../src/composables/fieldValidate.js";
-import { MSG_BY_REASON, wsErrorNotice } from "../src/composables/opMessages.js";
+import {
+  MSG_BY_REASON,
+  MSG_UNKNOWN_ERROR,
+  fieldAtLabel,
+  noticeFor,
+  wsErrorNotice
+} from "../src/composables/opMessages.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
@@ -144,15 +150,111 @@ describe("ScreenGrid: 打鍵", () => {
   });
 });
 
+/**
+ * ~~FIELD_TYPE は日本語の要約＋元の文で出す~~ → **元の文は出さない**
+ * （`20260920-field-error-no-value` decisions D2）。
+ *
+ * サーバーの message には**打鍵した値が入りうる**——マクロの秘密を型の合わない欄へ再生すると、
+ * **復号済みの平文がここから画面へ出ていた**（同 research F1）。
+ * `AGENTS.md`「秘密の扱い」の「API/ブラウザには平文も暗号文も返さない」。
+ * 「どの欄か」は**位置**（`field at (行,桁)`）だけを拾って伝える。
+ */
 describe("送信が拒否された理由の通知", () => {
-  it("FIELD_TYPE は日本語の要約＋元の文で出す", () => {
-    const m = wsErrorNotice("FIELD_TYPE", 'numeric field accepts digits only: "1.5"');
-    expect(m).toContain("入力できない文字があるため送信しませんでした");
-    expect(m).toContain('"1.5"');
+  it("FIELD_TYPE は**理由**＋**欄の位置**で出す（値は出さない）", () => {
+    const m = wsErrorNotice("FIELD_TYPE", "field at (20,7) accepts digits only");
+    // 見出しへ畳まず、4 つある理由のうちどれかを出す（FR2 / US1）
+    expect(m).toContain(MSG_BY_REASON.numeric);
+    expect(m).toContain(fieldAtLabel(20, 7));
+    expect(m, "英語の原文は出さない").not.toContain("accepts digits only");
   });
 
-  it("未知のコードでも黙らない", () => {
-    expect(wsErrorNotice("SOMETHING_NEW", "boom")).toContain("boom");
+  /**
+   * **`FIELD_TYPE` は 4 つの理由を 1 つの code で運ぶ。** 見出しだけにすると
+   * 「何をどう直せばよいか」が消えるので、**閉じた語彙**に一致したときだけ理由を日本語にする
+   * （`20260920-field-error-no-value` review の指摘）。
+   */
+  it("4 つの理由がそれぞれ別の日本語になる", () => {
+    const at = "field at (20,7)";
+    expect(wsErrorNotice("FIELD_TYPE", `${at} accepts digits only`)).toContain(MSG_BY_REASON.numeric);
+    expect(wsErrorNotice("FIELD_TYPE", `${at} accepts alphabetic characters only`)).toContain(
+      MSG_BY_REASON["alpha-only"]
+    );
+    expect(wsErrorNotice("FIELD_TYPE", `${at} accepts double-byte characters only`)).toContain(
+      MSG_BY_REASON["dbcs-required"]
+    );
+    const cp = wsErrorNotice("FIELD_TYPE", `${at} cannot hold characters outside CCSID 37`);
+    expect(cp, "CCSID 番号は出さない").not.toContain("37");
+    // 4 つが互いに違う文言になっている（1 つに畳まれていない）
+    const all = [
+      wsErrorNotice("FIELD_TYPE", `${at} accepts digits only`),
+      wsErrorNotice("FIELD_TYPE", `${at} accepts alphabetic characters only`),
+      wsErrorNotice("FIELD_TYPE", `${at} accepts double-byte characters only`),
+      cp
+    ];
+    expect(new Set(all).size).toBe(4);
+  });
+
+  /**
+   * **code を見ずに拾うと、反射の残る経路でクライアントが表示文を選べる**
+   * （`20260920-field-error-no-value` review ラウンド 4 で実測）。
+   * 位置も理由も**欄の検証が作った文言にしか無い**ので、その code のときだけ中身を見る。
+   */
+  it("**欄の検証以外の code では message の中身を見ない**", () => {
+    const crafted = "printer session field at (9,9) accepts digits only not found";
+    for (const code of ["SESSION_NOT_FOUND", "NOT_FOUND", "CONFIG_ERROR", "CONNECT_FAILED"]) {
+      const m = wsErrorNotice(code, crafted);
+      expect(m, `${code} で理由を選ばせている`).not.toContain(MSG_BY_REASON.numeric);
+      expect(m, `${code} で位置を出している`).not.toContain(fieldAtLabel(9, 9));
+    }
+    // 欄の検証の code なら従来どおり拾う
+    expect(wsErrorNotice("FIELD_TYPE", "field at (9,9) accepts digits only")).toContain(
+      MSG_BY_REASON.numeric
+    );
+  });
+
+  it("**知らない文は理由として通さない**（サーバーの文が素通りしない）", () => {
+    // 閉じた語彙に無い＝見出しへ落とす。message がそのまま出る経路を作らない
+    const m = wsErrorNotice("FIELD_TYPE", "field at (20,7) LEAK_MARKER_XYZ を含みます");
+    expect(m).not.toContain("LEAK_MARKER_XYZ");
+    expect(m).toContain(noticeFor("FIELD_TYPE"));
+  });
+
+  it("**値が混ざった message を渡されても、値は画面に出さない**", () => {
+    // core は値を入れなくなったが、ここで拾う対象を位置だけに限ることで二重に守る
+    const m = wsErrorNotice("FIELD_TYPE", 'field at (20,7) rejects: "P@ssw0rd-1234"');
+    expect(m).not.toContain("P@ssw0rd-1234");
+    expect(m).toContain(fieldAtLabel(20, 7));
+  });
+
+  it("位置が無ければ理由だけ（位置は省く）", () => {
+    // `validateFieldContent` を位置なしで呼ぶ経路（ライブラリとしての利用側）
+    expect(wsErrorNotice("FIELD_TYPE", "field accepts digits only")).toBe(MSG_BY_REASON.numeric);
+  });
+
+  it("理由も位置も拾えなければ見出しだけ", () => {
+    expect(wsErrorNotice("FIELD_TYPE", "something we do not recognise")).toBe(
+      noticeFor("FIELD_TYPE")
+    );
+  });
+
+  it("未知のコードでも黙らない（ただしサーバーの文は出さない）", () => {
+    const m = wsErrorNotice("SOMETHING_NEW", "boom");
+    // 文言リテラルではなく**定数を参照する**（`AGENTS.md`「UI デザインガイド」）
+    expect(m).toBe(MSG_UNKNOWN_ERROR);
+    expect(m, "サーバーの文を素通ししない").not.toContain("boom");
+  });
+
+  /**
+   * **オブジェクトの継承プロパティを見出しと取り違えない。**
+   * `NOTICE_BY_ERROR` は素のリテラルなので、素引きだと `constructor` 等で関数が返り
+   * `??` の既定が効かない（`20260920-field-error-no-value` の cross 点検の指摘）。
+   */
+  it("`constructor` のような code でも文字列を返す", () => {
+    for (const code of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const m = wsErrorNotice(code, "boom");
+      expect(typeof m, code).toBe("string");
+      expect(m, code).toBe(MSG_UNKNOWN_ERROR);
+    }
   });
 });
 
@@ -177,11 +279,14 @@ describe("送信が拒否された理由の通知（画面に出るところま�
     });
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true } });
     await nextTick();
-    expect(w.text()).not.toContain("送信しませんでした");
+    expect(w.text()).not.toContain(MSG_BY_REASON.numeric);
 
-    sessionsStore.get(SID)!.notice = wsErrorNotice("FIELD_TYPE", 'numeric field accepts digits only: "1.5"');
+    sessionsStore.get(SID)!.notice = wsErrorNotice("FIELD_TYPE", "field at (20,7) accepts digits only");
     await nextTick();
-    expect(w.find(".opmsg").text()).toContain("入力できない文字があるため送信しませんでした");
+    // 見出しではなく**理由**が出る（FR2 / US1）。空白は描画側が入れるので詰めて見る
+    expect(w.find(".opmsg").text().replace(/\s+/gu, "")).toContain(
+      MSG_BY_REASON.numeric.replace(/\s+/gu, "")
+    );
     w.unmount();
   });
 });

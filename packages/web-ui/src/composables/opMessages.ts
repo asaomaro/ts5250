@@ -1,3 +1,4 @@
+import type { ErrorCode } from "@ts5250/base";
 import type { RejectReason } from "./fieldValidate.js";
 
 /**
@@ -95,8 +96,10 @@ export const MSG_VT_CONNECTION_LOST = "サーバーとの通信が切れまし�
  * OIA に手動の繋ぎ直しが出ているので、それを指す。
  *
  * サーバーが「そのセッションはもう無い」と答えた場合（猶予切れ・他人のもの）は
- * **こちらではなくサーバーの理由をそのまま出す**（`wsErrorNotice`）——
- * 待てば直るのか、待っても無駄なのかは、利用者が知りたいことが違う。
+ * ~~こちらではなくサーバーの理由をそのまま出す~~ → **`wsErrorNotice` が code から作る見出し**
+ * （`20260920-field-error-no-value` decisions D2。サーバーの message は出さなくなった）。
+ * 待てば直るのか、待っても無駄なのかは利用者が知りたいことが違うので、
+ * `SESSION_NOT_FOUND` / `SESSION_CLOSED` の見出しを `NOTICE_BY_ERROR` に持たせて区別を残している。
  */
 export const MSG_RECONNECT_GAVE_UP = "サーバーに繋ぎ直せませんでした（再接続で試し直せます）";
 
@@ -176,12 +179,34 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
  * （実機で数字専用欄に `.` を打ってから Enter を押すと、`FIELD_TYPE` で 1 バイトも
  * 飛ばないまま画面が固まったように見えていた）。
  *
- * 頭に日本語の要約を置き、**元のメッセージも残す**——どの欄のどの値かは元の文にしかない。
+ * ~~頭に日本語の要約を置き、**元のメッセージも残す**——どの欄のどの値かは元の文にしかない。~~
+ * → **サーバーの message は出さない**（`20260920-field-error-no-value` decisions D2）。
+ * その message には**打鍵した値が入りうる**——マクロの秘密を型の合わない欄へ再生すると、
+ * **復号済みの平文がここから画面へ出ていた**（同 research F1。`AGENTS.md`「秘密の扱い」の
+ * 「API/ブラウザには平文も暗号文も返さない」）。
+ *
+ * 「どの欄か」は**サーバーが message に入れた位置**（`field at (20,7)`）だけを拾って添える。
+ * 値は拾わない。
  */
-const NOTICE_BY_ERROR: Record<string, string> = {
+/**
+ * **見出しは code ごとに 1 つ。** message を出さなくしたので（decisions D2）、
+ * **ここに無い code は「エラーが起きました」の一行だけ**になる。
+ * `Partial<Record<…, string>>` で `@ts5250/base` の語彙に結んでおくと、
+ * 綴りの間違いはコンパイルで止まる（review ラウンド 3 の指摘）。
+ * **全 code を埋めることは求めない**——埋めるべきかは「その code が ws で利用者に届くか」で決まる。
+ *
+ * **`INTERNAL_ERROR` は `ErrorCode` に無い**——`ws-handler.ts` が
+ * `err instanceof As400Error ? err.code : "INTERNAL_ERROR"` で**その場で作る**文字列で、
+ * 語彙には登録されていない（この型付けで初めて分かった）。利用者にはこの経路が届くので
+ * 見出しが要る。語彙に入れるかは `@ts5250/base` の話なので、ここでは union に足すだけにする。
+ */
+const NOTICE_BY_ERROR: Partial<Record<ErrorCode | "INTERNAL_ERROR", string>> = {
   // **繋ぎ直しの終わり方として一番普通の 2 つ**（`20260908-session-survives-disconnect`）。
-  // 入れておかないと「エラー: session 3f2a…-… not found」という**生の英語＋UUID** が
-  // 操作員に残る一行になる（`"gone"` では再接続ボタンも出さないので、本当にこれだけ）
+  // 起票当時は「入れておかないと『エラー: session 3f2a…-… not found』という**生の英語＋UUID**が
+  // 操作員に残る」だった。**いまは message を出さないのでそうはならない**（出るのは
+  // 「エラーが起きました」。`20260920-field-error-no-value` decisions D2）——
+  // 見出しが要る理由は変わって、**既定文では「開き直せばよい」と分からない**こと
+  // （`"gone"` では再接続ボタンも出さないので、案内はこの一行だけ）
   SESSION_NOT_FOUND: "セッションは既に終了しています（開き直してください）",
   FORBIDDEN: "このセッションを操作する権限がありません",
   FIELD_TYPE: "入力できない文字があるため送信しませんでした",
@@ -190,12 +215,118 @@ const NOTICE_BY_ERROR: Record<string, string> = {
   FIELD_NOT_FOUND: "指定された欄がありません",
   KEYBOARD_LOCKED: "キーボードがロックされています",
   READ_ONLY_SESSION: "閲覧専用のセッションです",
-  SESSION_RESERVED: "他の使い手が自動操作中です"
+  SESSION_RESERVED: "他の使い手が自動操作中です",
+  // **message を出さなくしたので、見出しの無い code は「エラー」だけになる。**
+  // 素の英語が消えるぶん、ここに無い code は何も手掛かりが残らないので足す
+  // （`20260920-field-error-no-value` decisions D2）
+  // `PROTOCOL_ERROR` は `packages/base/src/errors.ts` では**ホスト側のプロトコル逸脱**
+  // （未知のオーダー・壊れたレコード）で、「利用者が直せる問題に使ってはならない」と定義されている。
+  // ws に届くぶんは送れないキーの拒否が大半だが、**語彙の定義に合わせて原因を断定しない**言い方にする
+  // （`20260920-field-error-no-value` の cross 点検の指摘）
+  PROTOCOL_ERROR: "この操作は受け付けられませんでした",
+  CONFIG_ERROR: "設定に誤りがあるため実行できません",
+  SESSION_CLOSED: "セッションは閉じています（開き直してください）",
+  SESSION_LIMIT: "同時に開けるセッションの上限に達しています",
+  NOT_FOUND: "指定されたものが見つかりません",
+  // **プリンターの開始・停止はその場で接続を張る**ので、接続系の失敗がこの口へ届く
+  // （`session-manager.ts` の `startPrinter`。`20260920-field-error-no-value` review ラウンド 4）。
+  // 見出しが無いと「エラーが起きました」の一行になり、8925（装置が使用中）のように
+  // **code 自体が診断になっている**ものまで潰れる
+  SESSION_REJECTED: "ホストが接続を断りました（装置名が使用中かもしれません）",
+  CONNECT_FAILED: "ホストに接続できませんでした",
+  NEGOTIATION_TIMEOUT: "ホストとの接続手順が完了しませんでした",
+  TLS_CERT_INVALID: "ホストの証明書を確認できませんでした",
+  INTERNAL_ERROR: "サーバー側で想定外の問題が起きました"
 };
 
+/**
+ * その code の見出し。**テストはリテラルではなくこれを参照する**
+ * （`AGENTS.md`「定数は 1 か所へ置き、テストは文言リテラルではなく定数を参照する」）。
+ */
+export const noticeFor = (code: ErrorCode | "INTERNAL_ERROR"): string =>
+  // 同じ表は同じ引き方で引く（`wsErrorNotice` と揃える）
+  Object.hasOwn(NOTICE_BY_ERROR, code) ? NOTICE_BY_ERROR[code]! : MSG_UNKNOWN_ERROR;
+
+/** 見出しの無い code のときに出す。**サーバーの文言は出さない** */
+export const MSG_UNKNOWN_ERROR = "エラーが起きました";
+
+/**
+ * サーバーの message から**欄の位置だけ**を拾う。
+ *
+ * 形は core が `field at (行,桁)` で統一している
+ * （`packages/tn5250/src/screen/field-validate.ts` の `where()` と
+ * `packages/tn5250/src/screen/buffer.ts` の `FIELD_PROTECTED`）。
+ * **値は拾わない**——そもそも message に入らないが、ここで拾う対象を位置だけに限ることで、
+ * 将来また値が混ざっても画面には出ない（`20260920-field-error-no-value` decisions D2）。
+ */
+/** 欄の位置の言い方。**テストはこれを参照する**（`AGENTS.md`「定数は 1 か所へ」） */
+export const fieldAtLabel = (row: number | string, col: number | string): string =>
+  `${row} 行 ${col} 桁の欄`;
+
+function fieldAtOf(message: string): string | undefined {
+  const m = /field at \((\d+),(\d+)\)/.exec(message);
+  return m ? fieldAtLabel(m[1]!, m[2]!) : undefined;
+}
+
+/**
+ * サーバーの message から**弾かれた理由**を拾う。
+ *
+ * `FIELD_TYPE` には 4 つの理由（数字だけ / 英字だけ / 全角だけ / コードページ外）があるのに、
+ * code は 1 つしか無い。見出しだけにすると「入力できない文字があるため送信しませんでした」に
+ * 畳まれ、**何をどう直せばよいかが分からない**（requirements FR2「位置**と**なぜ弾かれたか」、
+ * US1。`20260920-field-error-no-value` review の指摘）。
+ *
+ * **拾うのは閉じた語彙だけ**——`message` を部分文字列として通すのではなく、
+ * **こちらが知っている定型句に一致したときだけ**対応する日本語を返す。
+ * サーバーの文がそのまま画面へ出る経路を作らないので、D2 の「message を出さない」は保たれる。
+ * 定型句は `packages/tn5250/src/screen/field-validate.ts` が作る
+ * （契約は `packages/web-ui/test/field-at-contract.test.ts` が走査で固定している）。
+ */
+/** コードページで表せない文字。**CCSID 番号は出さない**（利用者には意味が無い） */
+export const MSG_OUTSIDE_CCSID = "この項目では使えない文字が含まれています";
+
+const REASON_PHRASES: readonly (readonly [string, string])[] = [
+  ["accepts digits only", MSG_BY_REASON.numeric],
+  ["accepts alphabetic characters only", MSG_BY_REASON["alpha-only"]],
+  ["accepts double-byte characters only", MSG_BY_REASON["dbcs-required"]],
+  // コードページ外は `MSG_BY_REASON` に対応が無い（打鍵時の検査には無い理由）ので個別に持つ
+  ["cannot hold characters outside CCSID", MSG_OUTSIDE_CCSID]
+];
+
+function reasonOf(message: string): string | undefined {
+  return REASON_PHRASES.find(([phrase]) => message.includes(phrase))?.[1];
+}
+
+/**
+ * **message から拾ってよい code**（`20260920-field-error-no-value` review ラウンド 4）。
+ *
+ * 位置も理由も **core の欄検証が作った文言にしか無い**。code を見ずに拾うと、
+ * **反射の残っている経路でクライアントが表示文を選べる**——
+ * `{"type":"printer-stop","sessionId":"field at (9,9) accepts digits only"}` は
+ * `SESSION_NOT_FOUND: printer session field at (9,9) accepts digits only not found` になり、
+ * 画面には「数字項目には数字しか入力できません（9 行 9 桁の欄）」が出ていた（実測）。
+ *
+ * **拾う対象を閉じた語彙に絞るだけでは足りない**（語彙に一致する文字列は client が作れる）。
+ * **どの code のときに拾うか**まで閉じて初めて、出る文言がこちらの決めたものになる。
+ * 反射そのものを塞ぐのが根治だが、**塞ぎ漏れが 1 本でもあると表示が乗っ取られる**ので、
+ * こちら側でも閉じる（二重防御。D2 の精神をこの層にも当てる）。
+ */
+const CODES_WITH_FIELD_DETAIL = new Set(["FIELD_TYPE", "FIELD_OVERFLOW", "FIELD_PROTECTED"]);
+
 export function wsErrorNotice(code: string, message: string): string {
-  const head = NOTICE_BY_ERROR[code];
-  return head ? `${head}（${message}）` : `エラー: ${message}`;
+  // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`code` が `constructor` /
+  // `toString` だと継承プロパティ（関数）が返り `??` が効かない。`code` はサーバー生成なので
+  // 今は届かないが、**戻り値が文字列であること**を型ではなくここで閉じる
+  const head = Object.hasOwn(NOTICE_BY_ERROR, code)
+    ? NOTICE_BY_ERROR[code as ErrorCode | "INTERNAL_ERROR"]!
+    : MSG_UNKNOWN_ERROR;
+  // **欄の検証が作った文言のときだけ中身を見る**（上の `CODES_WITH_FIELD_DETAIL` の注記）
+  if (!CODES_WITH_FIELD_DETAIL.has(code)) return head;
+  // **理由があれば見出しより理由を出す**——「入力できない文字がある」より
+  // 「数字しか入力できません」のほうが、利用者が次に何をすればよいか分かる
+  const body = reasonOf(message) ?? head;
+  const at = fieldAtOf(message);
+  return at ? `${body}（${at}）` : body;
 }
 
 /**

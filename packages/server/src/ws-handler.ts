@@ -24,6 +24,7 @@ import type { VtManager } from "./vt-manager.js";
 import { VtFrameBuilder, type WsVtFrame } from "./vt-wire.js";
 import type { VtKeyName, VtEncoding } from "@ts5250/vt";
 import { macroSecretRefSchema } from "./macro-types.js";
+import { parseFieldId, parseFieldValue, parseKeyFieldShape, parseKeyFields } from "./ws-field-ref.js";
 
 const wsLog = childLog({ component: "ws-handler" });
 
@@ -31,9 +32,13 @@ const wsLog = childLog({ component: "ws-handler" });
  * **例外を「値を漏らさない形」でログに載せる。**
  *
  * 返すのは `code`（`As400Error` のもの）と**スタックのフレームだけ**。
- * message を外すのは、検証エラーの文言が**打鍵した値をそのまま埋める**ため
- * （`packages/tn5250/src/screen/field-validate.ts` の `JSON.stringify(value)`）——
+ * message を外すのは、検証エラーの文言が**打鍵した値をそのまま埋めていた**ため
+ * （`packages/tn5250/src/screen/field-validate.ts` の `JSON.stringify(value)`。
+ * **その埋め込みは `20260920-field-error-no-value` で撤去した**——いまの文言は
+ * `field at (20,7) accepts digits only` のように位置と理由だけ）。
  * その値はマクロ由来の秘密でもありうる（`resolveSecret`）。
+ * **撤去後もここで message を外し続ける**のは、core 側で値を出さないことと
+ * ログに値を出さないことは**別々に保たれるべき**だから（片方が緩んでも漏れない）。
  *
  * **まず message のぶんを長さで切り落とし、そのうえで `at ` の行だけを残す。**
  *
@@ -41,11 +46,13 @@ const wsLog = childLog({ component: "ws-handler" });
  * `AGENTS.md` 判断の原則 2。`20260920-restore-screen-parity` review ラウンド 2・3・4）:
  * - ~~`String(e)`~~ → message ごと出る
  * - ~~`stack` の 1 行目を落とす~~ → **message は複数行になりうる**
- *   （`resolveField` が投げる `invalid secretRef: ${ZodError.message}` は整形 JSON。実測で 12 行中 3 行）
+ *   （当時 `resolveField` が投げていた `invalid secretRef: ${ZodError.message}` は整形 JSON で、実測で 12 行中 3 行。
+ *   **その文言は `20260920-field-error-no-value` で撤去した**が、複数行 message は他にも来うるので防御は残す）
  * - ~~`at ` の行だけを残す~~ → **message の行頭が `at ` なら残る**
  *   （合成した例外で再現した。**いまの経路でそうなる値は確かめていない**——
- *   `field-validate.ts` は `JSON.stringify(value)` なので打鍵値の改行はエスケープされ行頭を作れず、
- *   zod の整形 JSON の行頭は `"`/`{`/`[` になる。塞ぐ理由は「実際に漏れた」ではなく
+ *   当時の `field-validate.ts` は `JSON.stringify(value)` で打鍵値の改行をエスケープしており行頭を作れず、
+ *   zod の整形 JSON の行頭は `"`/`{`/`[` になる。**いまはどちらの文言も値を含まない**。
+ *   塞ぐ理由は「実際に漏れた」ではなく
  *   **行の形で選ぶ方式そのものが保証を持たない**こと）
  *
  * **`message` が占める行数ぶんを先頭から落とし、そのうえで `at ` の行だけを残す。**
@@ -801,7 +808,11 @@ export class WsConnection {
       // 表はここ 1 か所にしか置かない——画面側にも置くと必ずずれる
       const plan = planKey3270(msg.key, entry.session.isIbmI);
       if (msg.cursor) entry.session.setCursor(msg.cursor.row, msg.cursor.col);
-      if (msg.fields && msg.fields.length > 0) applyFields(entry.session, msg.fields);
+      // **容れ物から検証する**（`ws-field-ref.ts` の `parseKeyFields`。5250 の `onKey` と同じ扱い）
+      if (msg.fields !== undefined) {
+        const fields3270 = parseKeyFields(msg.fields);
+        if (fields3270.length > 0) applyFields(entry.session, fields3270 as WsKeyField[]);
+      }
       if (plan.kind === "functionKey") await entry.session.sendFunctionKey(plan.n);
       else entry.session.send(plan.aid);
       this.send({
@@ -1109,7 +1120,9 @@ export class WsConnection {
       // `session-controller.ts` の `isFlagKey` の注記）。打鍵ごとにサーバーへ送る形にしない限り
       // 残せないので、この work の範囲外とした。
       const flagKey = msg.key === "Attn" || msg.key === "SysReq";
-      const fields = msg.fields;
+      // **容れ物から検証する**（3270 の `onKey3270` と同じ扱い。素通しすると
+      // `fields.map is not a function` が素の V8 の文言のままブラウザへ返る）
+      const fields = msg.fields === undefined ? undefined : parseKeyFields(msg.fields);
       if (fields && fields.length > 0 && !(flagKey && entry.session.keyboardLocked)) {
         // **秘密の解決はフィールドを 1 つでも書く前に済ませる**（spec D11）。
         // 途中で失敗して throw すると、それまでに書いた欄だけがホストに残り、
@@ -1120,7 +1133,7 @@ export class WsConnection {
         // Attn / SysReq がホストへ出なくなる（`20260920-restore-screen-parity` review ラウンド 3）
         const write = (): void => {
           this.deps.sessions.assertWritable(id, this.user);
-          const values = fields.map((f) => this.resolveField(f));
+          const values = fields.map((f) => this.resolveField(f as WsKeyField));
           for (const { field, value } of values) {
             entry.session.setField(typeof field === "number" ? { index: field } : field, value);
           }
@@ -1137,10 +1150,11 @@ export class WsConnection {
           try {
             write();
           } catch (e) {
-            // **例外そのものは載せない。** `setField` の検証エラーは文言に**打鍵した値を埋める**
-            // （`field-validate.ts` の `JSON.stringify(value)`）ので、`err` を渡すと
-            // **マクロ由来の秘密がサーバーログへ出る**（`AGENTS.md`「秘密の扱い」の
+            // **例外そのものは載せない。** `setField` の検証エラーはかつて文言に**打鍵した値を埋めており**
+            // （`field-validate.ts` の `JSON.stringify(value)`。`20260920-field-error-no-value` で撤去）、
+            // `err` を渡すと**マクロ由来の秘密がサーバーログへ出て**いた（`AGENTS.md`「秘密の扱い」の
             // 「ログにも値を出さない」。`20260920-restore-screen-parity` review ラウンド 2 の must）。
+            // **撤去後も `errShape` を通す**——ここを通る例外は `setField` だけではない。
             // `stack` も 1 行目に message を含むので、**フレームだけ**を残す
             wsLog.warn(
               { sessionId: id, key: msg.key, ...errShape(e) },
@@ -1187,26 +1201,34 @@ export class WsConnection {
    * ホストには「パスワード欄が空」で届き、サインオン失敗の原因が分からなくなる。
    */
   private resolveField(f: WsKeyField): { field: WsFieldRef; value: string } {
-    if ("value" in f) return { field: f.field, value: f.value };
+    // **形の検査を最初に置く**（`ws-field-ref.ts`。3270 の `applyFields` と同じ並びにする
+    // ——片方だけ順序が違うと、同じ関数を呼んでいても片方だけ穴が残る。ラウンド 3 で実測）
+    const { field, hasValue } = parseKeyFieldShape(f);
+    if (hasValue) return { field, value: parseFieldValue((f as { value: unknown }).value) };
     const store = this.deps.macros;
     if (!store) {
       throw new As400Error("CONFIG_ERROR", "macro store is not configured; cannot replay macro secrets");
     }
     // ws メッセージは JSON.parse したままの生データ。**秘密を守る経路なので形を検証する**——
     // 検証せずに渡すと、壊れた参照が素の TypeError になって JS のエラー文がそのまま client へ返る
-    const ref = macroSecretRefSchema.safeParse(f.secretRef);
+    const ref = macroSecretRefSchema.safeParse((f as { secretRef: unknown }).secretRef);
     if (!ref.success) {
-      throw new As400Error("PROTOCOL_ERROR", `invalid secretRef: ${ref.error.message}`);
+      // **zod の文を出さない**——`unrecognized_keys` に**クライアントが付けたキー名**が入る
+      // （`20260920-field-error-no-value` decisions D3。`code` が種別を伝えており、押した側は自分が送った値を知っている）
+      throw new As400Error("PROTOCOL_ERROR", "invalid secretRef");
     }
-    return { field: f.field, value: store.resolveSecret(ref.data, this.user) };
+    return { field, value: store.resolveSecret(ref.data, this.user) };
   }
 
   private async onGuiSelect(msg: WsClientMessage & { type: "gui-select" }): Promise<void> {
     const id = this.requireSession();
     await withAudit({ op: "ws_gui_select", sessionId: id }, async () => {
       const entry = this.deps.sessions.assertWritable(id, this.user);
-      const ok = entry.session.selectGuiChoice(msg.fieldId, msg.choiceIndex, msg.selected ?? true);
-      if (!ok) throw new As400Error("FIELD_TYPE", `選択できません（fieldId=${msg.fieldId}）`);
+      // **`fieldId` を反射しない**（`20260920-field-error-no-value` decisions D3・D8。
+      // 文言は web-ui が code から作る——サーバーで日本語を組まない）
+      const fieldId = parseFieldId(msg.fieldId);
+      const ok = entry.session.selectGuiChoice(fieldId, msg.choiceIndex, msg.selected ?? true);
+      if (!ok) throw new As400Error("FIELD_NOT_FOUND", "no such GUI selection choice");
       // 更新画面は session の screen イベントで push される
     });
   }
@@ -1218,7 +1240,7 @@ export class WsConnection {
       const opts: { key?: AidKey; cursor?: { row: number; col: number } } = {};
       if (msg.key) opts.key = msg.key as AidKey;
       if (msg.cursor) opts.cursor = msg.cursor;
-      const res = await entry.session.submitGuiSelection(msg.fieldId, opts);
+      const res = await entry.session.submitGuiSelection(parseFieldId(msg.fieldId), opts);
       // **`key` と同じく完了そのものを伝える**（`onKey` の注記と同じ理由）。画面は screen
       // イベントでも届くが、施錠されたままの画面では画面側が待ちを解かないので、
       // これが無いとタイムアウト復帰で待ちが残る（GUI 選択の確定だけが取り残される）。

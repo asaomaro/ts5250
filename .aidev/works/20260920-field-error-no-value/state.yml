@@ -1,0 +1,13 @@
+schema: 11
+slug: field-error-no-value
+current: retro
+approved: [requirements, research, design, tasks, coding, test, review, deliver, retro]
+mode: interactive
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: code-quality-checks.md
+backlogItem: 検証エラーの文言がブラウザへ返る経路を塞ぐ（優先度 高）
+harnessRevDelivered: unknown

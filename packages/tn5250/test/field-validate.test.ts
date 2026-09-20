@@ -96,3 +96,82 @@ describe("validateFieldContent — DBCS 種別", () => {
     expect(() => validateFieldContent("A日B", open, dbcs)).not.toThrow();
   });
 });
+
+/**
+ * **検証エラーの文言に、利用者が打った値を 1 文字も入れない。**
+ *
+ * この文言は `ws-handler` の catch を通って**そのままブラウザへ返る**
+ * （`20260920-field-error-no-value` research F1-b。`sendError(code, err.message, fatal)`）。
+ * 値は**マクロ由来の秘密**でもありうる——`resolveSecret` が復号した平文を欄へ書くので、
+ * 型の合わない欄に当たると**復号済みの秘密が画面に出ていた**（同 research F1-a）。
+ * `AGENTS.md`「秘密の扱い」の「API/ブラウザには平文も暗号文も返さない」。
+ *
+ * ~~`numeric field accepts digits only: "<値>"`~~ のように値を埋める形だったので、
+ * **位置と理由だけ**に変えた。
+ */
+describe("validateFieldContent — 文言に値を入れない", () => {
+  /** 秘密を模した文字列。**どの検証にも引っかかる**ように記号・英字・数字を混ぜる */
+  const SECRET = "P@ssw0rd-1234";
+  const at = { row: 20, col: 7 };
+
+  /** 投げた例外を取り出す（投げなければ検査が空振りするので失敗させる） */
+  function thrown(fn: () => void): { code: string; message: string } {
+    try {
+      fn();
+    } catch (e) {
+      return e as { code: string; message: string };
+    }
+    throw new Error("例外が投げられていない（この検査は空振りしている）");
+  }
+
+  it("数値専用: 値が含まれず、位置と理由が入る", () => {
+    const e = thrown(() =>
+      validateFieldContent(SECRET, field(FFW.ID_VALUE | FFW.SHIFT_NUMERIC_ONLY), sbcs, "", at)
+    );
+    expect(e.code).toBe("FIELD_TYPE");
+    expect(e.message, "値が漏れていない").not.toContain(SECRET);
+    expect(e.message).toBe("field at (20,7) accepts digits only");
+  });
+
+  it("英字専用: 値が含まれず、位置と理由が入る", () => {
+    const e = thrown(() =>
+      validateFieldContent(SECRET, field(FFW.ID_VALUE | FFW.SHIFT_ALPHA_ONLY), sbcs, "", at)
+    );
+    expect(e.message).not.toContain(SECRET);
+    expect(e.message).toBe("field at (20,7) accepts alphabetic characters only");
+  });
+
+  it("DBCS 専用: 値が含まれず、位置と理由が入る", () => {
+    const e = thrown(() =>
+      validateFieldContent(SECRET, field(FFW.ID_VALUE, "only"), dbcs, "", at)
+    );
+    expect(e.message).not.toContain(SECRET);
+    expect(e.message).toBe("field at (20,7) accepts double-byte characters only");
+  });
+
+  it("コードページ外: 値が含まれず、位置と CCSID が入る", () => {
+    // CCSID 37（SBCS 英語）に全角は無い
+    const e = thrown(() => validateFieldContent("秘密", field(FFW.ID_VALUE), sbcs, "", at));
+    expect(e.message).not.toContain("秘密");
+    expect(e.message).toMatch(/^field at \(20,7\) cannot hold characters outside CCSID /);
+  });
+
+  it("**値の記号も長さも入らない**（英数字は文言と重なるので別途 toBe で見る）", () => {
+    const e = thrown(() =>
+      validateFieldContent(SECRET, field(FFW.ID_VALUE | FFW.SHIFT_NUMERIC_ONLY), sbcs, "", at)
+    );
+    for (const ch of new Set([...SECRET])) {
+      // 位置の数字（2/0/7）と理由の英字は文言に在るので、**値に固有の記号**で見る
+      if (/[a-z0-9]/i.test(ch)) continue;
+      expect(e.message, `値の文字 ${JSON.stringify(ch)} が漏れている`).not.toContain(ch);
+    }
+    expect(e.message).not.toContain(String(SECRET.length));
+  });
+
+  it("位置を渡さなければ省く（既存の呼び出しを壊さない）", () => {
+    const e = thrown(() =>
+      validateFieldContent(SECRET, field(FFW.ID_VALUE | FFW.SHIFT_NUMERIC_ONLY), sbcs)
+    );
+    expect(e.message).toBe("field accepts digits only");
+  });
+});

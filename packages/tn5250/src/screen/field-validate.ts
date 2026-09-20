@@ -5,6 +5,28 @@ import type { Codec } from "@ts5250/ebcdic";
 import type { InternalField } from "./buffer.js";
 import type { DbcsFieldType } from "./types.js";
 
+/** 欄の位置（1 起点）。例外の文言に「どの欄か」を入れるためだけに使う */
+export interface FieldAt {
+  row: number;
+  col: number;
+}
+
+/**
+ * **例外の文言で欄を指す言い方。**
+ *
+ * **値そのものは決して入れない。** ここに打鍵した内容を埋めると、その文言が
+ * `ws-handler` の catch を通って**ブラウザへそのまま返る**——マクロの秘密を型の合わない欄へ
+ * 再生すると、**復号済みの平文が画面に出ていた**（`20260920-field-error-no-value` research F1。
+ * `AGENTS.md`「秘密の扱い」の「API/ブラウザには平文も暗号文も返さない」）。
+ *
+ * 書式は `FIELD_PROTECTED` に合わせる（`buffer.ts` の `field at (${row},${col}) is protected`）
+ * ——新しい言い方を作らない。web-ui はここから位置だけを拾って日本語にする
+ * （`packages/web-ui/src/composables/opMessages.ts` の `wsErrorNotice`）。
+ */
+function where(at: FieldAt | undefined): string {
+  return at ? `field at (${at.row},${at.col})` : "field";
+}
+
 /**
  * フィールド入力値の内容検証（FFW シフト種別・DBCS 種別・コードページ許容文字）。
  * 違反は FIELD_TYPE エラー（decisions D4）。長さ検証は呼び出し側で別途行う。
@@ -17,12 +39,17 @@ import type { DbcsFieldType } from "./types.js";
  *   数値欄に `EDTCDE` / `EDTWRD` を書くと `$` `*` `/` `CR` などが**欄の中に入って**来る
  *   （実機で実測。用途 B でも書けて、EDTMSK のような分解は起きない）。
  *   弾いてしまうと**ホスト自身が書いた値を送り返せず、画面ごと送信できなくなる**。
+ * @param at その欄の位置（1 起点の行・桁）。**例外の文言に「どの欄か」を入れるためだけに使う。**
+ *   `InternalField` は線形アドレスしか持たず、変換に要る `cols` もここには無いので、
+ *   呼び出し側（`Session.setField`）が `ScreenBuffer.rowColOf()` で作って渡す。
+ *   **省略してよい**（位置を省いた文言になる。既存の呼び出しを壊さないため）。
  */
 export function validateFieldContent(
   value: string,
   field: InternalField,
   codec: Codec,
-  current = ""
+  current = "",
+  at?: FieldAt
 ): void {
   const shift = field.ffw & FFW.SHIFT_MASK;
   // **センチネル（生バイトを運ぶ印）は利用者が打った文字ではない**ので型検証の対象から外す。
@@ -55,7 +82,7 @@ export function validateFieldContent(
     // ——**ただし現在値に空白が含まれる欄は除く**（`EDTWRD` が桁区切りに空白を
     // 使うことがあり、それはホストが書いた文字なので通す）。
     if (!allowed.test(checked.trim())) {
-      throw new As400Error("FIELD_TYPE", `numeric field accepts digits only: ${JSON.stringify(value)}`);
+      throw new As400Error("FIELD_TYPE", `${where(at)} accepts digits only`);
     }
   }
 
@@ -66,7 +93,7 @@ export function validateFieldContent(
   // という制約であって値そのものの制約ではないので、送信時検証（＝ペースト・マクロ・MCP も通る
   // 経路）で弾くと入力手段ごと塞いでしまう。判定は端末側（web-ui の打鍵時）で行う。
   if (shift === FFW.SHIFT_ALPHA_ONLY && !/^[A-Za-z,.\- ]*$/.test(checked)) {
-    throw new As400Error("FIELD_TYPE", `alphabetic-only field rejects: ${JSON.stringify(value)}`);
+    throw new As400Error("FIELD_TYPE", `${where(at)} accepts alphabetic characters only`);
   }
 
   // DBCS 種別（only / pure=DBCS のみ / open=SBCS+DBCS / either=どちらか）。
@@ -75,7 +102,7 @@ export function validateFieldContent(
   if (isDbcsOnly(field.dbcsType)) {
     for (const ch of typed) {
       if (!isDbcsChar(ch, codec)) {
-        throw new As400Error("FIELD_TYPE", `DBCS-only (${field.dbcsType}) field rejects SBCS char: ${JSON.stringify(ch)}`);
+        throw new As400Error("FIELD_TYPE", `${where(at)} accepts double-byte characters only`);
       }
     }
   }
@@ -88,7 +115,7 @@ export function validateFieldContent(
   if (substituted > 0) {
     throw new As400Error(
       "FIELD_TYPE",
-      `value contains characters not representable in CCSID ${codec.ccsid}`
+      `${where(at)} cannot hold characters outside CCSID ${codec.ccsid}`
     );
   }
 }

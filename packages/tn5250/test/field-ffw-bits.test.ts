@@ -139,11 +139,11 @@ describe("validateFieldContent: 英字専用（alpha-only）", () => {
   });
 
   it("数字は弾く（これが alpha-only の要）", () => {
-    expect(() => validateFieldContent("A1", alphaOnly, codec)).toThrow(/alphabetic-only/);
+    expect(() => validateFieldContent("A1", alphaOnly, codec)).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts alphabetic characters only") as unknown as string }));
   });
 
   it("記号も弾く", () => {
-    expect(() => validateFieldContent("A#", alphaOnly, codec)).toThrow(/alphabetic-only/);
+    expect(() => validateFieldContent("A#", alphaOnly, codec)).toThrow(expect.objectContaining({ code: "FIELD_TYPE", message: expect.stringContaining("accepts alphabetic characters only") as unknown as string }));
   });
 
   it("**キーボード入力不可（0x0600）は core では弾かない**", () => {
