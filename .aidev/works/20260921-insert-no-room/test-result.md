@@ -24,7 +24,13 @@ I-k 出た後は常に 0018: 21 passed (21)
 テストの例の弱さ（I-g）と、実装に足した条件が等価だったこと（I-k）。直した後は I-g も検出（`1 failed | 21 passed (22)`）。
 
 ## 起動確認（smoke）
-- 節目でまとめて回す（web-ui の打鍵経路だけの変更で、起動の配線には触れていない）。
+
+```
+$ aidev smoke
+smoke: /healthz ok, / が Web UI を返した (port 45065)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
 
 ## 未検証の穴
 - 実ブラウザでの打鍵（jsdom のみ）。DBCS 欄の最終桁・継続欄への IME 確定は ACS 側を測っていない（台帳に残した）。
