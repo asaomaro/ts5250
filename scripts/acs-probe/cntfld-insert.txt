@@ -1,0 +1,60 @@
+# **継続入力欄（CNTFLD）で、満杯のとき挿入が segment をまたいで押し出されるか**（ACS 側の実測）。
+#
+# ACS のコア（PS5250）は継続欄で `reserveRoomForContField` へ委譲し、`getContFieldChain` の
+# **全 segment の合計**で空きを見て、シフトを segment 横断で波及させる
+# （`20260920-insert-mode-overflow` research F6。デコンパイル結果の直読）。
+# **コードの読みどおりに実機でもそう見えるか**を確かめる（AGENTS.md 判断の原則 2）。
+#
+# 継続欄は FCW 0x8601/0x8603/0x8602（first/middle/last）で来る（`wtd-applier.ts:830-832`）。
+# CL コマンドの長い文字パラメーターのプロンプトがこれを使うので、実機にオブジェクトを作らずに出せる。
+#
+# **1 回目の観測（2026-09-20）で分かったこと**: SNDMSG の MSG 欄は 5 行目（ラベルの右）と
+# 6 行目にまたがる。108 文字を入れた時点では**まだ余地があり**、6 行目の中ほどへ挿入すると
+# 6 行目の中でそのまま右へずれた（64 → 65 桁）。**満杯ではなかったので、この観点は未達**。
+# そこで 2 回目は (1) 欄を本当に満杯にし、(2) **1 つ目の segment（5 行目）**へ挿入して、
+# あふれが**次の segment（6 行目）へ回るか**を見る。
+#
+# 観点:
+#   1. 欄の容量（何桁で止まるか）
+#   2. 満杯の状態で 5 行目の中ほどに 1 文字挿入したとき、
+#      **5 行目の末尾が 6 行目の先頭へ回る**（＝チェーン横断の押し出し）か、
+#      **何も変わらない**（＝拒否）か
+#   3. 入力禁止（OIA）が立つか＝施錠を伴うか（research F4 は「施錠しない」）
+signon
+# 「サインオン情報」の画面が挟まる実機がある（無ければ空のコマンド行で Enter するだけ）
+keys [enter]
+settle 1200
+
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+dump prompt-empty
+
+# **溢れるまで入れて容量を確かめる。** 末尾を Z 埋めにして、境界の文字を見分けられるようにする
+keys ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJ
+settle 1000
+dump filled-to-capacity
+
+# **1 つ目の segment（5 行目）の中ほど**へ挿入する。
+# チェーン横断の押し出しがあるなら、5 行目の末尾の文字が 6 行目の先頭へ回る
+setcursor 5,45
+keys [insert]
+settle 400
+keys #
+settle 900
+dump insert-in-first-segment
+
+# もう 1 文字。満杯なら採否が割れる
+keys #
+settle 900
+dump insert-again
+
+# 施錠されているか（research F4 は「ACS は error_mode に入らない＝施錠しない」）
+dump check-inhibit
+keys [reset]
+settle 600
+
+# 後始末: プロンプトを捨てて抜ける（オブジェクトは作っていない）
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

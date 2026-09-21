@@ -1,0 +1,62 @@
+# **カーソルが欄の最終桁の上にあるとき、ACS は挿入を拒否するか**（実機）。
+#
+# デコンパイルの読みでは `PS5250.insertChar` が **`cursorSBA == getEndPos()` で即座に拒否**する
+# （`20260920-insert-mode-overflow` research F2）。**まだ空きがあっても拒否する**のが要点で、
+# 「満杯だから拒否」（F9/F10 で実測済み）とは**別の条件**。
+#
+# 当 PJ の `typeChar` は `cursor >= len` でしか早期 return せず（`fieldEdit.ts:31`）、
+# `cursor` は 0..len なので**最終桁の上（`cursor === len-1`）は通る**。
+# つまりここは**差が出る形**——design の「未確定事項 3」。推測で埋めずに実機へ聞く（AGENTS.md 判断の原則 2）。
+#
+# 対象は SNDMSG プロンプトの **TOユーザー・プロファイル**（12,37 から 10 桁 ＝ 12,37〜12,46）。
+# F10 で位置と桁数を確認済み。実機にオブジェクトは作らない。
+#
+# **対照を同じ run に入れる**——最終桁の 1 つ手前（12,45）へ先に挿して「挿入自体は通る」ことを
+# 示してから、最終桁（12,46）で採否が割れるかを見る。対照が無いと、拒否されたとき
+# 「最終桁だから」なのか「別の理由で止まっていた」のかを分けられない。
+#
+# **判定は 24 行目の文言で行う**。`inhibit` の値だけで決めない——F10 の 1 回目は
+# 保護域へ入ったせいで `inhibit=5` になっており、値だけ見ていれば誤った確認になっていた。
+signon
+keys [enter]
+settle 1200
+
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+
+# MSG 欄から Tab で次の入力欄（TOUSR）へ
+keys [tab]
+settle 600
+dump after-tab
+
+# **満杯にしない**——空きを残したまま最終桁の条件だけを見たいので 3 桁だけ入れる
+keys ABC
+settle 800
+dump filled-3
+
+# 対照: 最終桁の 1 つ手前（12,45）へ挿入。空きがあるので通るはず
+setcursor 12,45
+settle 400
+keys [insert]
+settle 400
+keys Y
+settle 900
+dump control-insert-not-last
+
+# 本題: 最終桁（12,46）へ挿入。**空きは残っている**が `cursorSBA == getEndPos()` なら拒否
+setcursor 12,46
+settle 400
+keys Z
+settle 900
+dump insert-at-endpos
+
+# 施錠と文言（**文言で判定する**）
+dump check-inhibit
+
+# 後始末
+keys [reset]
+settle 600
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
