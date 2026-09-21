@@ -26,7 +26,7 @@ import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError } from "../composables/opMessages.js";
-import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
+import { needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
 
@@ -117,7 +117,41 @@ const cursor = computed(() => cursorOverride.value ?? snapshot.value?.cursor ?? 
 
 function onEdit(fieldIndex: number, value: string): void {
   state.value?.edits.set(fieldIndex, value);
+  noteFieldTyped(fieldIndex);
 }
+
+/*
+ * **欄を出るまで AID を送らない欄の付け外し**（ACS のエラー 0020。`20260921-aid-without-field-exit`）。
+ *
+ * ACS は欄ごとに `fieldExitReqFlag` を持つ。**打鍵で下り**（`setMDT`）、**欄を出る操作で立つ**
+ * （Tab・Backtab・Home・Newline・カーソル移動・Field Exit / Field± / Dup）。欄の中の矢印では立たない。
+ * AID の時点で、カーソル下の欄が右寄せ・符号付き数値でフラグが下りていれば送らない（実機で確認。research F2）。
+ * 見るのはカーソル下の 1 欄だけなので、ここでは「いまカーソルがいる欄に打った」ことを 1 つだけ持ち、
+ * **カーソルが欄を出たら外す**。判定は送信の合流点（`sendKey`）が行う。
+ */
+/** 打鍵で値が変わった。カーソルがいるその欄が右寄せ・符号付き数値なら待ちを付ける */
+function noteFieldTyped(fieldIndex: number): void {
+  const st = state.value, snap = snapshot.value;
+  if (!st || !snap) return;
+  const here = fieldAt(cursor.value.row, cursor.value.col, snap.fields, snap.cols, snap.rows);
+  // カーソルのいない欄への書き込み（Erase Input 等）は打鍵ではない
+  if (here?.index !== fieldIndex) return;
+  if (needsFieldExit(here)) st.awaitingFieldExit = fieldIndex;
+  else delete st.awaitingFieldExit;
+}
+/** 欄を出た（Field Exit / Field± / Dup / 満杯の自動送り）。ACS はこれらでフラグを立てる */
+function noteFieldExited(): void {
+  if (state.value) delete state.value.awaitingFieldExit;
+}
+// **カーソルが待ちの欄を出たら外す**。Tab・矢印・クリック・欄頭の Backspace など経路を問わない
+// ——どれもカーソル位置の変化として現れる。欄の中での移動では外さない（ACS も欄の中の矢印では
+// フラグを立てない。実機で右矢印のあとも 0020 だった。research F2 の場合 5）
+watch(cursor, (pos) => {
+  const st = state.value, snap = snapshot.value;
+  if (st?.awaitingFieldExit === undefined || !snap) return;
+  const here = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
+  if (here?.index !== st.awaitingFieldExit) delete st.awaitingFieldExit;
+});
 function onCursor(row: number, col: number): void {
   cursorOverride.value = { row, col };
   reconcileFocus({ row, col });
@@ -214,6 +248,8 @@ function moveCell(dir: Dir): void {
 // 満杯時は欄外へ論理カーソルが出て input が blur 済み（activeElement がペイン）なので、
 // focusByOffset ではなく満杯欄の index から次欄を特定する。
 function onFieldFull(fieldIndex: number): void {
+  // 単独欄で自分へ巡回しても「出た」ことになる（ACS `processFieldPlusMinusAndExit` がフラグを立てる）
+  noteFieldExited();
   // ホストが指定したカーソル送り（FLDCSRPRG）が最優先。無ければ画面順の次へ
   const to = progressionStop(fieldIndex);
   if (to) { focusStop(to); return; }
@@ -537,6 +573,7 @@ function onLocal(action: LocalAction): void {
       // 着地は ScreenGrid がホーム位置（IC で指した欄、無ければ先頭の入力欄）へ置く。
       // ここで先頭の入力欄へ寄せると、その着地を上書きしてしまう（ACS: `getHomePos()`）
       gridRef.value?.eraseInput();
+      noteFieldExited(); // ACS は MDT ごと下ろすので、0020 の対象から外れる
       break;
   }
 }
@@ -569,6 +606,8 @@ function onAid(key: AidKey): void {
  */
 function focusMandatoryViolation(hit: MandatoryFinding | undefined): void {
   if (!hit) return;
+  // 0020 はカーソルを動かさない（ACS は打った位置のまま。実機で確認）——いま居る欄の話なので
+  if (hit.reason === "field-exit-required") return;
   const els = editableInputs();
   const idx = editableFields().findIndex((f) => f.index === hit.field.index);
   if (idx >= 0 && els.length > 0) focusInput(els, idx);
@@ -713,6 +752,20 @@ function exitErrorMode(): void {
 function onNotice(text: string): void {
   showNotice(text);
 }
+/**
+ * **送信の合流点（`sendKey`）が止めた操作員エラーも、エラー状態に入れる。** `sendKey` は
+ * ペインを通らない経路（OIA のボタン等）からも呼ばれるので、通知はセッション状態に載る。
+ * 操作員エラーならローカルの通知へ移す——そうしないと、エラーを抜けてもセッション側の通知が
+ * 残って見え続ける（ACS はエラーを抜けるとメッセージ行を戻す）。
+ */
+watch(
+  () => state.value?.notice,
+  (text) => {
+    if (text === undefined || !isOperatorError(text)) return;
+    showNotice(text);
+    if (state.value) delete state.value.notice;
+  }
+);
 /**
  * StatusBar へ渡す操作員メッセージ。ローカル発（欄の型違反・保護領域への入力）を優先し、
  * 無ければサーバー応答由来（ホスト無応答の通知。`SessionState.notice`）を出す。

@@ -67,6 +67,7 @@ export function isOperatorError(text: string): boolean {
     text === MSG_NO_ROOM ||
     text === MSG_PROTECTED ||
     text === MSG_DUP_DISALLOWED ||
+    text === MSG_FIELD_EXIT_REQUIRED ||
     (Object.values(MSG_BY_REASON) as string[]).includes(text)
   );
 }
@@ -358,6 +359,12 @@ export function wsErrorNotice(code: string, message: string): string {
 export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用できません";
 
 /** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
+/**
+ * ACS のエラー 0020（実機の文言は「このフィールドには実行キーは許されていない。」）。
+ * 右寄せ・符号付き数値の欄に打ったまま、欄を出ずに実行キーを押した（`needsFieldExit`）。
+ * **出方を添える**——ACS は出し方を言わないが、Field Exit を知らない利用者は抜け方が分からない。
+ */
+export const MSG_FIELD_EXIT_REQUIRED = "この項目では実行キーを使用できません（Field Exit か Tab で項目を出てください）";
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
 /** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";

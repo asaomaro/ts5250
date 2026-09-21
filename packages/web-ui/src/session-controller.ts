@@ -38,7 +38,12 @@ import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
 import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
-import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "./composables/opMessages.js";
+import {
+  MSG_MANDATORY_ENTER,
+  MSG_MANDATORY_FILL,
+  MSG_SELF_CHECK,
+  MSG_FIELD_EXIT_REQUIRED
+} from "./composables/opMessages.js";
 import { beep } from "./beep.js";
 
 /** `/ws` の URL（組み立ては `ws-client.ts` に 1 か所。監視コンソールも同じものを使う） */
@@ -1153,6 +1158,18 @@ export function sendKey(
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
   if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
+  // **右寄せ・符号付き数値の欄に打ったまま、欄を出ずに AID は送らない**（ACS のエラー 0020。
+  // `PS5250.processAIDCode`。`20260921-aid-without-field-exit`）。出ずに送ると右寄せされず
+  // 左詰めのままホストへ届く。**Enter に限らない**——F3（CA キー）も Roll も実機の ACS で止まった
+  // （research F2）。原典が外すのは Help と Clear だけ（フラグキーは AID ではない）。
+  // 待ちの有無はペインが付け外しする（カーソルがその欄にいる間だけ付いている）。
+  if (s.awaitingFieldExit !== undefined && !isFlagKey(key) && key !== "Help" && key !== "Clear") {
+    const f = s.snapshot?.fields.find((x) => x.index === s.awaitingFieldExit);
+    if (f) {
+      s.notice = MSG_FIELD_EXIT_REQUIRED;
+      return { field: f, reason: "field-exit-required" };
+    }
+  }
   // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
   // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
   if (key === "Enter" && s.snapshot) {

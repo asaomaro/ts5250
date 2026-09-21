@@ -209,6 +209,13 @@ export interface SessionState {
    */
   activitySentAt?: number;
   /**
+   * **欄を出るまで AID を送らない欄**（fieldIndex。`20260921-aid-without-field-exit`）。
+   * 右寄せ（CHECK(RZ)/(RB)）・符号付き数値の欄に打ったあと、**カーソルがその欄を出るまで**だけ持つ。
+   * ACS の `Field5250.fieldExitReqFlag`（打鍵で下り、Tab・カーソル移動・Field Exit で立つ）に当たる。
+   * 付けるのも外すのもペイン（`EmulatorPane`）、見るのは送信の合流点（`sendKey`）。
+   */
+  awaitingFieldExit?: number;
+  /**
    * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
    */
@@ -442,6 +449,7 @@ export const sessionsStore = reactive({
     if (by !== undefined) {
       s.reservedBy = by;
       s.edits.clear();
+      delete s.awaitingFieldExit; // 打ちかけを捨てたので、欄を出る待ちも無い
     } else {
       delete s.reservedBy;
     }
@@ -482,6 +490,7 @@ export const sessionsStore = reactive({
     applyLink(s, { to: "connected" });
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
+    delete s.awaitingFieldExit; // 打ちかけと一緒に捨てる（ACS も新しい欄は「出た」状態で作る）
   },
 
   /** プリンターセッションに受信スプールを追加する（最初の 1 件は自動選択・未読++） */

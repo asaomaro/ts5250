@@ -78,7 +78,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 | **操作員エラーでキーボードを施錠するか** | **施錠する＋Reset キーを作る**（ACS と同じ）→ **実装済み（`20260921-operator-error-mode`）** | 実機で `inhibit=5` を観測（`20260920-insert-mode-overflow` research F9〜F11）。解除に Reset が要るので一緒に実装する。全操作員エラーに波及する |
 | **施錠中・応答待ち中の先打ち** | **溜めて解錠時に再生する**（Attn/SysReq/Reset/Help で捨てる） | 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD = false`）。PR #388 の「打てるのに Enter が効かない」を入力を失わずに解く |
 | **ホストに切られた後** | **自動で繋ぎ直す**（通常の切断で即座、以後 20 秒おき） | 原典＋実機（ENDCNN 後 3 秒で再接続）。サインオン拒否では止まるので QMAXSIGN の輪にならない |
-| **欄を出ないまま AID** | **操作員エラー 0020 にして送らない** | `PS5250.processAIDCode`。左詰めのまま右寄せ欄へ格納される不整合を防ぐ |
+| **欄を出ないまま AID** | **操作員エラー 0020 にして送らない** → **実装済み（`20260921-aid-without-field-exit`）** | `PS5250.processAIDCode`。左詰めのまま右寄せ欄へ格納される不整合を防ぐ |
 | **ME/MF（必須入力・必須埋め）の判定** | **ACS に合わせる**——ME を MDT で判定し、CF キーや Roll でも検査。MF と自己点検は欄を出るときにも検査 | 利用者の判断。**`20260729-ffw-behavior-bits` D1（Enter のときだけ・内容で判定）を破棄**する。D1 は「CA/CF の区別は端末に届いていない」を前提にしていたが、ACS が区別しているなら届いているはずで、**着手時に原典で確かめる**（D1 が恐れた「必須欄が空の画面から F3 で抜けられない」は、F3 が CA キーなら起きない） |
 | **either 欄の DBCS 状態** | **ACS に合わせる**——either 欄が「いま DBCS 側か」の実行時状態を持ち、DBCS 側なら取り置く | 利用者の判断。**`20260920-insert-mode-overflow` D5（either は取り置かない）を破棄**する。ACS `PS5250.insertChar` は `isEitherFieldDBCSOn()` を見る。PR #409 の着地後に着手する（D5 がそこにあるため） |
 
@@ -303,12 +303,20 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - B)「繋ぎ直す」ボタンを出す
   - C) 現状のまま
   **着手時に両側を再確認すること。**（出典: `20260919-backlog-acs-triage` research N18）
+- [x] **欄を出ないまま AID を押すと、右寄せせずに左詰めで送る**（【まとめ】キー編集の細部から割った。方針決定済み：ACS と同じくエラー）。
+  **完了（`20260921-aid-without-field-exit`・PR #410）**: RZ・RB・符号付き数値の欄に打って欄を出ないまま AID を押すと、送らずに操作員エラーにする
+  （判定は `packages/web-ui/src/session-controller.ts` の `sendKey`、欄の種類は `mandatoryCheck.ts` の `needsFieldExit`、
+  「打ったあとまだ欄を出ていない」の付け外しは `EmulatorPane.vue` の `noteFieldTyped` / `noteFieldExited` とカーソル監視）。
+  実機の ACS で 13 通りを測って合わせた（research F2）——**Enter だけでなく F3（CA キー）・Roll も止まる**、Help・Clear は止めない、
+  Field Exit・Tab で出れば送れる（Tab で出て戻ると左詰めのまま届く）、欄の中の矢印では出たことにならない。
+  テスト `packages/web-ui/test/aid-field-exit-required.test.ts`（20 件・mutation 10 通りすべて検出）。
+  ⚠ 符号付き数値の数字桁を満杯にしたときは、当 PJ が自動送りするので送れてしまう（ACS はエラー）。下の「RB/RZ 欄のフィールド終了」で揃える。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - RB/RZ 欄のフィールド終了（中）
     - ACS: RB/RZ 欄も Field Exit が必須（`Field5250.isFieldExitRequired`）。
     - 当 PJ: FER ビットしか見ない（`packages/tn5250/src/screen/buffer.ts:1225`）ので、満杯になると次の欄へ自動で送り、AUTO_ENTER なら Enter を送る。
-  - 欄を出ないまま AID を押したとき（中・**方針決定済み：ACS と同じくエラー**）
+  - ~~欄を出ないまま AID を押したとき（中・**方針決定済み：ACS と同じくエラー**）~~ → 上の `20260921-aid-without-field-exit` で済んだ
     - **方針（利用者の判断・2026-09-21）: ACS と同じく操作員エラー 0020 にして送らない。**
     - ACS: 右寄せ欄・符号付き数値欄ではエラー 0020 にする（`PS5250.processAIDCode`）。
     - 当 PJ: 左詰めのまま送る。英数字の CHECK(RZ)/(RB) 欄には左詰めのまま格納される。

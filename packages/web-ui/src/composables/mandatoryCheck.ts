@@ -14,7 +14,7 @@ import { dbcsByteLength } from "./fieldValidate.js";
  * `ScreenGrid.vue` ではなくここに置くのは、判定が純関数で単体テストできるため
  * （コンポーネントに埋めると「空振りしていないか」を確かめる手段が無くなる）。
  */
-export type MandatoryViolation = "mandatory-enter" | "mandatory-fill" | "self-check";
+export type MandatoryViolation = "mandatory-enter" | "mandatory-fill" | "self-check" | "field-exit-required";
 
 export interface MandatoryFinding {
   field: Field;
@@ -56,6 +56,18 @@ export function findMandatoryViolation(
     }
   }
   return undefined;
+}
+
+/**
+ * **欄を出ないまま AID を押せない欄か**（ACS のエラー 0020。`20260921-aid-without-field-exit`）。
+ *
+ * ACS `PS5250.processAIDCode` は、カーソル下の欄が**符号付き数値・CHECK(RZ)・CHECK(RB)** で、
+ * 打ったあと欄を出ていなければ送らない。**自動 Enter 欄は除く**（満杯で自分から Enter を送るため）。
+ * 右寄せは端末の仕事なので、出ずに送ると**左詰めのまま**ホストへ届く（実機で `12    `。research F2）。
+ */
+export function needsFieldExit(f: Field): boolean {
+  if (f.autoEnter === true) return false;
+  return f.signedNumeric === true || f.adjust === "right-zero" || f.adjust === "right-blank";
 }
 
 /**
