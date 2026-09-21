@@ -441,6 +441,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   最初の入力欄（継続欄は先頭の区切りだけ。無ければ先頭へ巡回。`nextNonByPassInputFieldPos`）の末尾へ（`packages/web-ui/src/components/EmulatorPane.vue` の `endKey`）。
 - [x] **【まとめ】キー編集のうち欄の先頭の Backspace（SBCS）**（優先度 低）。**完了（`20260921-backspace-field-start`・PR #410）**: ACS と同じく操作員エラー 0005 で
   カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
+- [x] **【まとめ】キー編集のうち Field Exit・Field± の前の検査**（優先度 中）。**完了（`20260921-field-exit-checks`・PR #410）**: ACS `PS5250.processFieldPlusMinusAndExit` と同じく、
+  入力不可（DDS の I）の欄は 0004、ME の欄はカーソルが先頭か MDT が無ければ 0021、MF は先頭以外で部分入力なら欄の先頭へ戻して 0014 で、消去・右寄せ・欄の移動の前に止める
+  （`packages/web-ui/src/composables/mandatoryCheck.ts` の `fieldExitRejection`）。実機の ACS のコアで ME 4 例・入力不可 2 例を測った（`scripts/acs-probe/field-exit-checks.txt`）。
+  テスト `field-exit-checks.test.ts`、mutation 10 通り検出。
 - [x] **【まとめ】キー編集のうち MONOCASE の ASCII 以外の文字・SBCS のセッションの Ambiguous の字**（優先度 中）。**完了（`20260921-monocase-non-ascii`・PR #410）**:
   MONOCASE の欄は 1 バイト文字をすべて大文字に（`µ` と 2 字になる大文字の `ß` は変えない。`ScreenGrid.vue` の `inputChar`）。着手して見つけた
   **SBCS のセッション（37 など）で `é` `ü` `ß` `ø` を打てなかった**欠陥も直した——打鍵の判定とバイト予算が East Asian Width の Ambiguous を全角と見ていた
@@ -472,9 +476,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~欄の先頭での Backspace~~（SBCS は `20260921-backspace-field-start` で ACS と同じ 0005 に。**DBCS の欄は残り**——ACS は原典の手順上 0101（SO の前が属性の桁）、文言と実機は未確認）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
-      Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）
+      ~~Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）~~ → 上の `20260921-field-exit-checks` で済んだ（~~0033・0020~~ は `setErrorCode(33)`・`(20)` の 10 進で、表示は 0021・0014）
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
-    - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
+    - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、~~Field Exit 時の検査~~（上の `20260921-field-exit-checks`）
     - ~~MONOCASE で ASCII 以外を大文字化しない~~ → 上の `20260921-monocase-non-ascii` で済んだ
     - SBCS のセッションでコードページに無い字（37 の `α`・かな等）: ACS は受け付けて送るときに置き換える（`PS5250.inputChar` は SBCS のセッションでは
       可否を見ない）。当 PJ は漢字・かなを打った時点で、それ以外を送信時（core の「CCSID の外の文字」）に弾く（`20260921-monocase-non-ascii` D1）。

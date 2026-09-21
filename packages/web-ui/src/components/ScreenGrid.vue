@@ -65,7 +65,7 @@ import {
   type DateValue,
   type TimeValue
 } from "../composables/dateTimeField.js";
-import { isFieldExitRequired } from "../composables/mandatoryCheck.js";
+import { isFieldExitRequired, fieldExitRejection } from "../composables/mandatoryCheck.js";
 import {
   MSG_PROTECTED,
   MSG_NO_ROOM,
@@ -75,7 +75,9 @@ import {
   MSG_DATE_PICKER,
   MSG_TIME_PICKER,
   MSG_DUP_DISALLOWED,
-  MSG_FIELD_EXIT_KEY_INVALID
+  MSG_FIELD_EXIT_KEY_INVALID,
+  MSG_MANDATORY_ENTER_EXIT,
+  MSG_MANDATORY_FILL
 } from "../composables/opMessages.js";
 import { localEditActionOf, numpadFieldSign, hasKeyBinding } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
@@ -2336,6 +2338,24 @@ function currentEditTarget(): { f: Field; el: HTMLInputElement } | undefined {
 }
 
 /**
+ * **Field Exit・Field± で欄を出る前の検査**（ACS `PS5250.processFieldPlusMinusAndExit`。`mandatoryCheck.ts` の
+ * `fieldExitRejection`）。止めるときは値を変えず、MF だけはカーソルを欄の先頭へ戻す。止めたら true
+ */
+function rejectExit(t: { f: Field; el: HTMLInputElement }): boolean {
+  if (!edit) return false;
+  const why = fieldExitRejection(t.f, props.edits, edit.cursor === 0);
+  if (why === undefined) return false;
+  if (why === "kbd-inhibited") emit("notice", MSG_BY_REASON["kbd-inhibited"]);
+  else if (why === "mandatory-enter") emit("notice", MSG_MANDATORY_ENTER_EXIT);
+  else {
+    edit = { ...edit, cursor: 0 };
+    sync(t.el, t.f);
+    emit("notice", MSG_MANDATORY_FILL);
+  }
+  return true;
+}
+
+/**
  * Field Exit: カーソル以降を消し、FFW の ADJUST どおり右寄せして次の入力欄へ。
  *
  * **DBCS 欄では右寄せしない**（消去と欄移動だけ）。全角は SO/SI と 2 バイトで桁を占めるため、
@@ -2348,6 +2368,7 @@ function fieldExitKey(): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
+  if (rejectExit(t)) return;
   const base = exitedBase(t.f, edit); // 満杯まで打った直後なら最終桁は消さない（ACS `fieldExited`）
   fieldExitedIndex = -1;
   edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(base, t.f);
@@ -2379,6 +2400,7 @@ function fieldSignKey(negative: boolean): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
+  if (rejectExit(t)) return;
   // **Field− は符号付き数値・数値専用（0x0300）の欄でだけ**（ACS `processFieldPlusMinusAndExit` のエラー 0022。
   // 継続欄も不可）。値は変えず欄も出ない（実機の ACS: 英数字欄で `AB` の後に Field− → エラー・値もカーソルもそのまま）。
   // Field+ はどの欄でも Field Exit と同じ（実機: 英数字欄で次の欄へ）。`20260921-numpad-field-sign`

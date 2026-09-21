@@ -69,6 +69,22 @@ export function findFieldViolation(
 }
 
 /**
+ * **Field Exit・Field± で欄を出る前の検査**（ACS `PS5250.processFieldPlusMinusAndExit`。`20260921-field-exit-checks`）。
+ * ACS はこの順に見て、引っかかれば**値を変えずに**止まる（消去・右寄せ・欄の移動をしない）:
+ * 1. 入力不可（DDS の `I`）の欄 → エラー 4（0004）
+ * 2. ME の欄で、カーソルが欄の先頭か MDT が無い → エラー 33（0x21）。**打ってあっても先頭で押せば止まる**
+ * 3. MF の欄で MDT があり、カーソルが先頭でなく、満杯でも空でもない → 欄の先頭へ戻してエラー 20（0x14）。符号付き数値の MF は見ない
+ * （Field− の欄の種類の検査（0x16）は呼び出し側）。実機の ACS のコアで ME・入力不可を測った（`scripts/acs-probe/field-exit-checks.txt`）
+ */
+export type ExitRejection = "kbd-inhibited" | "mandatory-enter" | "mandatory-fill";
+export function fieldExitRejection(f: Field, edits: ReadonlyMap<number, string>, caretAtStart: boolean): ExitRejection | undefined {
+  if (f.keyboardInhibited === true) return "kbd-inhibited";
+  if (f.mandatoryEnter === true && (caretAtStart || !mdtOf(f, edits))) return "mandatory-enter";
+  if (!caretAtStart && f.signedNumeric !== true && mandatoryFillViolated(f, edits)) return "mandatory-fill";
+  return undefined;
+}
+
+/**
  * **ME（必須入力）の違反**（ACS `FFT5250.checkMandatoryFieldCheck`）。画面順で最初のものを返す。
  *
  * - **内容ではなく MDT で判定する**——打ってから消した欄（MDT あり・空）は通る（実機の場合 8）

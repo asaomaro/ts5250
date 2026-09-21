@@ -105,6 +105,7 @@ export function isOperatorError(text: string): boolean {
     text === MSG_FIELD_EXIT_KEY_INVALID ||
     // ME / MF / 自己点検も ACS は `setErrorCode` でエラー状態に入る（`20260921-mandatory-check-acs`）
     text === MSG_MANDATORY_ENTER ||
+    text === MSG_MANDATORY_ENTER_EXIT ||
     text === MSG_MANDATORY_FILL ||
     text === MSG_SELF_CHECK ||
     (Object.values(MSG_BY_REASON) as string[]).includes(text)
@@ -490,6 +491,13 @@ export const MSG_FIELD_EXIT_KEY_INVALID = "この項目は最終桁まで入力�
  * データを入力しなければなりません。」。ACS: "Mandatory field not entered."
  */
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
+
+/**
+ * ME（必須入力）の欄を **Field Exit・Field± で出ようとした**とき。**ACS のエラー 0021**（`PS5250.processFieldPlusMinusAndExit` の
+ * `setErrorCode(33)`＝0x21。AID のときの 0007 とは別）。実機の ACS の文言は「入力必須フィールドにはデータを入力しなければならない。」
+ * （`scripts/acs-probe/field-exit-checks.txt` の E1）。欄の先頭で押したときは、打ってあっても止まる
+ */
+export const MSG_MANDATORY_ENTER_EXIT = "入力が必要な項目です（入力してから、先頭以外の位置で項目を出てください）";
 /**
  * MF（必須埋め）。**ACS のエラー 0014**（`setErrorCode(20)`＝0x14）。~~0022 相当~~（番号の誤り）。
  * 実機の ACS の文言は「全桁入力フィールド。終わりまで入力しなければなりません。」。ACS: "Field must be filled."
