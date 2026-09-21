@@ -117,6 +117,8 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
         <span>ジョブ</span>
         <b class="jobval">{{ jobText }}</b>
       </div>
+      <!-- 表示セッションの起動応答（I902 / I901 など。`20260921-startup-code-status`）。無ければ出さない -->
+      <div class="row" v-if="!isPrinter && state.startupCode"><span>起動</span><b>{{ state.startupCode }}</b></div>
       <!-- プリンター: 起動応答＋受信件数 -->
       <template v-if="isPrinter">
         <div class="row"><span>起動</span><b>{{ state.startupCode ?? "-" }}</b></div>

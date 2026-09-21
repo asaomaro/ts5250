@@ -294,6 +294,11 @@ export interface WsOpened {
    */
   hostReconnect?: { attempt: number };
   /**
+   * **5250 の表示セッションの起動応答のコード**（`I902` / `I901` など。`20260921-startup-code-status`）。起動応答が無ければ載せない。
+   * ACS は繋がるたびに状態行へ「<コード> - セッションを開始しました」の意味の文言を 3 秒出す（`AcsOnly.displayResponseCode`）
+   */
+  startupCode?: string;
+  /**
    * **3270 のときだけ**: 相手が IBM i か（`Session3270.isIbmI`）。汎用機では Attn・SysReq・Help・Print に 3270 の割り当てが無く、
    * 送ると拒否されるので、画面側はその 4 つへのキーの割り当てを何もしない扱いにする（ACS の既定の割り当ての節目の点検の指摘）
    */
@@ -325,6 +330,8 @@ export interface WsHostReconnecting {
 }
 export interface WsHostReconnected {
   type: "host-reconnected";
+  /** 繋ぎ直した接続の起動応答のコード（`WsOpened.startupCode` と同じ。ACS は繋ぎ直しでも開始の文言を出す） */
+  startupCode?: string;
 }
 /**
  * 予約（HLLAPI の `Reserve`）の状態が変わった。

@@ -69,7 +69,7 @@ describe("ホストへの自動再接続（サーバーの配線）", () => {
   it("**繋ぎ直したら知らせ、新しい装置名（ジョブ名）を持ち越さずに送る**", async () => {
     const { mgr, sent, sessionId, emit } = await openSession();
     emit("reconnected", { code: "I902", device: "NEWDEV01", system: "SYS" });
-    expect(sent[0]).toEqual({ type: "host-reconnected" });
+    expect(sent[0]).toEqual({ type: "host-reconnected", startupCode: "I902" });
     expect(sent[1]).toEqual({ type: "jobinfo", job: { name: "NEWDEV01", system: "SYS" } });
     expect(mgr.get(sessionId).job?.name).toBe("NEWDEV01");
     mgr.closeAll();
@@ -112,6 +112,58 @@ describe("ホストへの自動再接続（サーバーの配線）", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(ended, "予約中なのに繋ぎ直しを続けた").toBe(true);
     expect(sent.some((m) => m.type === "closed")).toBe(true);
+    mgr.closeAll();
+  });
+});
+
+/**
+ * **表示セッションの起動応答のコードを画面へ渡す**（`20260921-startup-code-status`）。ACS は繋がるたび（繋ぎ直しも）状態行に
+ * 「<コード> - セッションを開始しました」の意味の文言を 3 秒出す（`AcsOnly.displayResponseCode`）ので、web-ui がそれを出せるようにする
+ */
+describe("起動応答のコード", () => {
+  /** 開いた直後のセッションに起動応答を持たせる（記録済みの実機トレースは起動応答より後から採っている） */
+  class WithStartup extends InjectingManager {
+    override async open(opts: Parameters<SessionManager["open"]>[0]) {
+      const entry = await super.open(opts);
+      (entry.session as unknown as { startupInfo: unknown }).startupInfo = { code: "I902", system: "SYS", device: "DEV1" };
+      return entry;
+    }
+  }
+  it("開いたときの `opened` に載る", async () => {
+    const sent: WsServerMessage[] = [];
+    const mgr = new WithStartup(() => new ReplayTransport(signon()));
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "p", name: "p", host: "h" }], sessions: [] }), new PersonalConfigStore());
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    expect(sent[0]).toMatchObject({ type: "opened", startupCode: "I902" });
+    mgr.closeAll();
+  });
+
+  it("起動応答が無ければ載せない", async () => {
+    const { mgr, sessionId } = await openSession();
+    const sent: WsServerMessage[] = [];
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "p", name: "p", host: "h" }], sessions: [] }), new PersonalConfigStore());
+    const other = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await other.handle(JSON.stringify({ type: "open", sessionId }));
+    expect(sent.find((m) => m.type === "opened")).not.toHaveProperty("startupCode");
+    mgr.closeAll();
+  });
+
+  it("後から入ったタブの `opened` にも載る", async () => {
+    const { mgr, sessionId, session } = await openSession();
+    (session as unknown as { startupInfo: unknown }).startupInfo = { code: "I902", system: "SYS", device: "DEV1" };
+    const sent: WsServerMessage[] = [];
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "p", name: "p", host: "h" }], sessions: [] }), new PersonalConfigStore());
+    const other = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await other.handle(JSON.stringify({ type: "open", sessionId }));
+    expect(sent.find((m) => m.type === "opened")).toMatchObject({ startupCode: "I902" });
+    mgr.closeAll();
+  });
+
+  it("繋ぎ直したら新しい接続のコード（I901）を載せる", async () => {
+    const { mgr, sent, emit } = await openSession();
+    emit("reconnected", { code: "I901", device: "DEV2", system: "SYS" });
+    expect(sent[0]).toEqual({ type: "host-reconnected", startupCode: "I901" });
     mgr.closeAll();
   });
 });

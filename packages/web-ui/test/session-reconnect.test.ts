@@ -58,7 +58,8 @@ import {
   MSG_NOT_CONNECTED,
   MSG_NO_RESPONSE,
   MSG_SESSION_ENDED,
-  wsErrorNotice
+  wsErrorNotice,
+  startupStartedText
 } from "../src/composables/opMessages.js";
 
 function snap(keyboardLocked = false): ScreenSnapshot {
@@ -801,5 +802,38 @@ describe("転送断からの繋ぎ直し", () => {
 
     expect(inflight.send).toHaveBeenCalledWith({ type: "close" });
     expect(inflight.close).toHaveBeenCalled();
+  });
+});
+
+/**
+ * **ブラウザが繋ぎ直した（resume）ときも、起動応答のコードを覚えて開始の文言を出す**（`20260921-startup-code-status`。
+ * サーバーの `opened` に載ってくる。ACS は通信の状態が変わるたびに開始の文言を出す）
+ */
+describe("繋ぎ直した後の起動応答のコード", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    noJitter();
+    clients = [];
+    connectFails = false;
+    sessionsStore.byId.clear();
+    sessionsStore.order = [];
+  });
+  afterEach(() => {
+    if (sessionsStore.get("s1")) closeSession("s1");
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("resume の `opened` の `startupCode` を覚え、開始の文言を出す", async () => {
+    const p = openSession({ type: "open", host: "h" }, "t");
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap(), pcCommand: false, startupCode: "I902" });
+    await vi.advanceTimersByTimeAsync(0);
+    const s = sessionsStore.get("s1")!;
+    expect(s.startupCode).toBe("I902");
+    expect(s.notice).toBe(startupStartedText("I902"));
   });
 });

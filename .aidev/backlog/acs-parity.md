@@ -660,9 +660,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   表示が切れたら（ほかに関連付けた表示が無ければ）プリンターを止め、表示が繋がったらプリンターを起こし、`close5250AssocPrinterWithLastSession` なら
   最後の表示と一緒に閉じる（`AssociatedPrinterSession5250.CommEvent` / `sessionLabelEvent`・`SessionManager.stopAssociatedPrinterSession`）。
   当 PJ はサーバーのセッション管理（`SessionManager.open` / `openPrinter`）をまたぐ。
-- [ ] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。ACS は I901 を成功として扱いつつ通信状態 37 を立て、
-  状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す（`DS5250.processDiagnosticInformation`・`HODStatusBar`）。
-  当 PJ は表示セッションの起動コードを画面へ渡していない（プリンターだけ。`packages/server/src/ws-handler.ts:913`）。関連付けた装置名が存在しないと実機で I901 になる。
+- [x] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。`20260921-startup-code-status`（PR #410）。
+  ~~ACS は I901 を…状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す~~ → ACS が実際に見せるのは I901・I902 とも
+  「<コード> - セッションを開始しました」の意味の文言（`AcsOnly.displayResponseCode`。3 秒で消える）で、`KEY_I901` はすぐ上書きされる（`StatusBar` の時間切れは `clearText`）。
+  当 PJ も表示セッションの `opened`・`host-reconnected` に起動応答のコードを載せ（`packages/server/src/ws-handler.ts` の `startupCodeOf`）、web-ui が
+  開始の文言を 3 秒出す（`packages/web-ui/src/session-controller.ts` の `noteStartup`）。ⓘ にもコード。実機（社内機）で I902・I901 が画面まで届いた。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり

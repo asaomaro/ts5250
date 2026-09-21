@@ -50,7 +50,9 @@ import {
   msgHostReconnecting,
   MSG_MANDATORY_FILL,
   MSG_SELF_CHECK,
-  MSG_FIELD_EXIT_REQUIRED
+  MSG_FIELD_EXIT_REQUIRED,
+  startupStartedText,
+  STARTUP_NOTICE_MS
 } from "./composables/opMessages.js";
 import { beep } from "./beep.js";
 
@@ -503,6 +505,7 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           const missed = cur.pcCommands.at(-1);
           if (missed && missed.at !== lastSeenAt) cur.notice = pcCommandNotice(missed);
           if (msg.job !== undefined) cur.job = msg.job;
+          noteStartup(sessionId, msg.startupCode);
           // **`ccsid` と `readOnly` は上書きしない。** サーバーの `attach` は `ccsid` に
           // 既定（37）を返すだけで、`readOnly` はそもそも載せない——どちらも
           // **開いたときの設定に属する**もので、繋ぎ直しで変わる値ではない
@@ -618,6 +621,8 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       if (!s) break;
       delete s.hostReconnect;
       if (s.notice?.startsWith(msgHostReconnecting(1))) delete s.notice;
+      // ACS は繋ぎ直しでも開始の文言を出す
+      noteStartup(sessionId, msg.startupCode);
       break;
     }
     // ホストの警報（CC2 0x04）。**画面と別に届く**——画面が変わらないレコードでも鳴るため
@@ -700,6 +705,23 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
 }
 
 /**
+ * **表示セッションが繋がった知らせ**（起動応答のコードつき。`20260921-startup-code-status`）。コードを覚え、通知が空いていれば開始の文言を出して
+ * 3 秒で消す（ACS の状態行と同じ）。**間に別の通知（エラー等）が出ていたら消さない**——当 PJ の通知欄は操作員エラーと共用なので
+ */
+function noteStartup(sessionId: string, code: string | undefined): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s || code === undefined) return;
+  s.startupCode = code;
+  if (s.notice !== undefined) return;
+  const text = startupStartedText(code);
+  s.notice = text;
+  setTimeout(() => {
+    const cur = sessionsStore.get(sessionId);
+    if (cur?.notice === text) delete cur.notice;
+  }, STARTUP_NOTICE_MS);
+}
+
+/**
  * **セッションの口からの更新だけを通してから共用の処理へ渡す**（R4 の `acceptsFromSession`）。
  *
  * 初回接続の口には `Attempt` が無いので `tryResume` の共通ガード（`acceptsFrame`）を呼べないが、
@@ -768,6 +790,7 @@ export async function openSession(
               // **黙って実行しない**は繋ぎ直しでも同じ——留守中の分も最後の 1 件を知らせる
               const missed = state.pcCommands?.at(-1);
               if (missed) state.notice = pcCommandNotice(missed);
+              noteStartup(sessionId, msg.startupCode);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);

@@ -598,7 +598,8 @@ export class WsConnection {
           return r ? { reservedBy: r.label } : {};
         })(),
         // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
-        ...(entry.job !== undefined ? { job: entry.job } : {})
+        ...(entry.job !== undefined ? { job: entry.job } : {}),
+        ...startupCodeOf(entry.session)
       });
       // ユーザー・番号は背後で引いている。**待たない**——取れたら足すだけ
       void entry.jobResolved?.then((job) => {
@@ -1007,8 +1008,9 @@ export class WsConnection {
       this.send({ type: "host-reconnecting", attempt: e.attempt, reason: e.reason });
       this.send({ type: "screen", screen: entry.session.snapshot() });
     };
-    const onReconnected = (): void => {
-      this.send({ type: "host-reconnected" });
+    const onReconnected = (startup?: { code: string }): void => {
+      // 起動応答はイベントが運ぶ新しい接続のもの（ACS は繋ぎ直しでも開始の文言を出す。`20260921-startup-code-status`）
+      this.send({ type: "host-reconnected", ...startupCodeOf({ startup: startup ?? entry.session.startup }) });
       // 装置名（＝ジョブ名）は繋ぎ直すと変わりうる。分かっている範囲をすぐ出し、残りは引けたら足す
       if (entry.job !== undefined) this.send({ type: "jobinfo", job: entry.job });
       void entry.jobResolved?.then((job) => {
@@ -1100,7 +1102,8 @@ export class WsConnection {
         const r = this.deps.sessions.reservationOf(entry.id);
         return r ? { reservedBy: r.label } : {};
       })(),
-      ...(entry.job !== undefined ? { job: entry.job } : {})
+      ...(entry.job !== undefined ? { job: entry.job } : {}),
+      ...startupCodeOf(entry.session)
     });
   }
 
@@ -1390,6 +1393,12 @@ function buildDirect(msg: {
   if (msg.user !== undefined) o.user = msg.user;
   if (msg.password !== undefined) o.password = msg.password;
   return o;
+}
+
+/** `opened` / `host-reconnected` に載せる起動応答のコード（`WsOpened.startupCode`。起動応答が無ければ何も載せない） */
+function startupCodeOf(session: { startup?: { code: string } | undefined }): { startupCode?: string } {
+  const code = session.startup?.code;
+  return code ? { startupCode: code } : {};
 }
 
 /** `opened` に載せる「ホストへ繋ぎ直している最中か」（`WsOpened.hostReconnect`） */

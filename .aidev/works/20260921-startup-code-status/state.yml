@@ -1,0 +1,13 @@
+schema: 11
+slug: startup-code-status
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。
+harnessRevDelivered: unknown

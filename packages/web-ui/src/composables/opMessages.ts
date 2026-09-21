@@ -348,6 +348,17 @@ export const STARTUP_CODE_MEANING_JA: Readonly<Record<string, string>> = {
   I904: "接続元のシステムのリリースが合いません"
 };
 
+/**
+ * **表示セッションが繋がったときの知らせ**（`20260921-startup-code-status`）。ACS は繋がるたび（繋ぎ直しも）状態行に起動応答のコードつきの
+ * 開始の文言を 3 秒出して消す（`AcsOnly.displayResponseCode` の `KEY_SESSION_START_SUCCESS`・`StatusBar` の時間切れで `clearText`）。
+ * 意味だけ借りて文言は当 PJ で書いた。I901（仮想装置の機能が元の装置より少ない）も同じ文言——ACS も個別の文言はすぐこれに上書きされる
+ */
+export function startupStartedText(code: string): string {
+  return `セッションを開始しました（起動応答 ${code}）`;
+}
+/** 開始の知らせを出しておく時間（ACS の状態行と同じ 3 秒） */
+export const STARTUP_NOTICE_MS = 3000;
+
 /** 起動応答で断られたときの見出し（コードが読めないときもこれ） */
 export const MSG_SESSION_REJECTED_HEAD = "ホストが接続を断りました";
 
