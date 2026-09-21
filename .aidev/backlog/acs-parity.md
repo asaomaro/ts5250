@@ -467,8 +467,23 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`fieldValidate.ts` の `SessionKind`。CCSID が DBCS でないときだけ。漢字・かなは従来どおり打った時点で弾く）。実機の ACS のコア（PUB400・37。
   `scripts/acs-probe/monocase-non-ascii.txt`）: コマンド行は `aéñøüµß` のまま、利用者名（MONOCASE）は `AÉÑØÜµß`。テスト `field-validate.test.ts`（4 件）・
   `sbcs-session-input.test.ts`（3 件）・`ffw-behavior-bits.test.ts`（4 件）、mutation 12 通りすべて検出。
+- [x] **符号付き＋RZ の欄の埋め字**（下の「キー編集の細部」の「符号付き＋RZ の埋め字」から割った）。**完了（`20260921-signed-rz-fill`）**: ACS `performRightAdjustFill` は符号付き数値なら埋め字を空白にしたうえで、
+  RB なら空白・RZ なら `'0'` に上書きする。実機の ACS のコアで `CHECK(RZ) 6 0` に `12` → Field− は `000012-`、素の `6 0` は `    34-`（既存の実測 `scripts/acs-probe/field-minus-numeric-only.txt` の M1・M2）だったが、
+  当 PJ は tn5250 由来の「signed-num を ADJUST 指定より先に見て空白右寄せ」で `    12-` だった。`applyAdjust`（`packages/web-ui/src/composables/fieldEdit.ts`）で RZ・RB を先に見る形にした
+  （符号桁は動かさない。RZ・RB が無く符号付きなら従来の空白右寄せ）。~~signed-num は ADJUST 指定より優先される~~ の旧テストは破棄（decisions D1）。単体 3 件、mutation 6 通り検出。
+  残り（空きの数え方〔NUL か空白か〕・先頭の空白・DBCS の J・G・E の右寄せ）は下の `[ ]`。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
+  - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: (r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**（当 PJ は J・G で「全角のみ」と拒否。
+    台帳に無かった。IME を切った Space で日常的に起きる）／(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の
+    「位置を持たないので写さない」は当たらない——論理値のまま直せる）／(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）／(h) Ctrl+Delete は ACS では
+    `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）・`¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
+    (j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける／(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
+    (q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
+    **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
+    (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。
+    **(l) 選択を Backspace・Delete で消すときの MDT は決着**: **ACS の Backspace・Delete は選択に触れず `clearRect` に繋がらない**（GUI 層の原典で確認）。矩形選択は当 PJ も同じで、
+    欄内の native 選択の削除だけが当 PJ 独自（ブラウザの慣習）。現状維持（利用者の方針判断）。~~`acs-probe` では測れない~~ は誤り——`clearRect` 自体は `SessionAccessor.clearRect`（public static）で測れる。
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
     - ACS: RB/RZ 欄も Field Exit が必須（`Field5250.isFieldExitRequired`）。
     - 当 PJ: FER ビットしか見ない（`packages/tn5250/src/screen/buffer.ts:1225`）ので、満杯になると次の欄へ自動で送り、AUTO_ENTER なら Enter を送る。
@@ -592,8 +607,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - Field− の最終桁: 当 PJ は表にない字（ホストが入れた英字など）を 0xD0 にするが、ACS は実際のバイトの下位 4 ビットを使う（`A`＝0xC1 は 0xD1）。数値専用欄に英字が入る構成は稀
   - G（`pure`）欄の SO/SI: ACS の G 欄は SO/SI を持たないが、`dbcsViewLayout`（`packages/web-ui/src/composables/fieldValidate.ts`）は全角の並びに常に SO/SI を足す。G 欄の予算・列ビューが 2 桁ずれるはず（**未検証**）
   - O（`open`）欄が全角で始まるとき、SO の桁と最初の字が論理位置で区別できず、Tab の着地を優先して先頭に数える（最初の字を選んだ場合だけ ACS と違う。`scripts/acs-probe/dbcs-field-exit-me.txt`）
-  - 選択を Backspace・Delete で消すときの MDT: ACS のコアの `PS5250.clearRect`（選択の消去）は、空白だけの範囲では `inputChar` を呼ばず MDT を立てない（空白でない字が消えるときは立つ）が、当 PJ は選択の削除でも立てる。
-    キーが `clearRect` に繋がるかは GUI 層で、`acs-probe` では測れない（**未確認**。テストでは固定していない）
+  - ~~選択を Backspace・Delete で消すときの MDT: … キーが `clearRect` に繋がるかは GUI 層で未確認~~ → **決着（R11。GUI 層の原典）**: ACS の Backspace・Delete は選択に触れず `clearRect` に繋がらない。欄内の native 選択の削除は当 PJ 独自（現状維持。上の (l)）
   - Field Exit・Field± を満杯まで打った直後に押したとき、当 PJ は編集を出さない（ACS は `eraseToEOF` を通らない）。字を打った時点で編集は出ているので、値は変わらない（出し直しの回数だけの差）
   - 編集の印（`ScreenGrid.vue` の `mdtKeyed`）は、立てる側と読む側が離れたモジュール変数で渡る。`editAcrossContinued` は `inputForSlice(target, 0)` が無いと `sync` を呼ばずに終わり、
     印が次の同期へ持ち越される（実機の描画では起きにくい）。`sync(el, f, { placed })` の引数で渡す作りの方が安全

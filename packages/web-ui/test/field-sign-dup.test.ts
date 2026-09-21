@@ -31,6 +31,12 @@ describe("Field− / Field+（純ロジック）", () => {
     expect(r.chars.join("")).toBe("    12-");
   });
 
+  it("**符号付き＋RZ は '0' 埋め・符号付き＋RB は空白埋め**（実機の ACS のコア: `CHECK(RZ) 6 0` に `12` → Field− は `000012-`。`20260922-signed-rz-fill`）", () => {
+    expect(fieldSign(state("12     ", 2), { signedNumeric: true, adjust: "right-zero" }, true).chars.join("")).toBe("000012-");
+    expect(fieldSign(state("12     ", 2), { signedNumeric: true, adjust: "right-zero" }, false).chars.join("")).toBe("000012 ");
+    expect(fieldSign(state("12     ", 2), { signedNumeric: true, adjust: "right-blank" }, true).chars.join("")).toBe("    12-");
+  });
+
   it("Field+ は符号桁を空白にする", () => {
     expect(fieldSign(state("12     ", 2), signed, false).chars.join("")).toBe("    12 ");
   });

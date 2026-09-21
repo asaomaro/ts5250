@@ -193,18 +193,21 @@ export function rightAdjust(
 /**
  * FFW の指定どおりに右寄せする。
  *
- * **signed-num を ADJUST 指定より先に見る**のは原典どおり（tn5250 は signed-num の
- * `mand_fill_type` を無条件で `RIGHT_BLANK` へ差し替える。tn5250j も `adj===0` で同じ）。
- * 実機の DDS 数値欄は `6 0` も `6S 0` も signed-num で来るため、この規則が無いと
- * 数値欄で Field Exit が何もしないことになる。
+ * **符号付き数値は符号桁（最終桁）を動かさず、既定の埋め字は空白**——ここまでは tn5250 と同じだが、**RZ・RB の指定はそのあとで埋め字を上書きする**
+ * （ACS `PS5250.performRightAdjustFill`: 符号付き数値なら埋め字を空白・右端を符号桁の 1 つ手前にしたうえで、RB なら空白、RZ なら `'0'` にする）。
+ * 実機の ACS のコアで `CHECK(RZ) 6 0`（符号付き＋RZ）に `12` と打って Field− すると `000012-`、素の `6 0` は `    34-`（`scripts/acs-probe/field-minus-numeric-only.txt`）。
+ * ~~signed-num を ADJUST 指定より先に見る（tn5250 は signed-num の `mand_fill_type` を無条件で `RIGHT_BLANK` へ差し替える）~~ は ACS と違い、
+ * RZ の数値欄が `    12-` になっていた（`20260922-signed-rz-fill`）。実機の DDS 数値欄は `6 0` も `6S 0` も signed-num で来るので、
+ * 調整の指定が無いときの空白右寄せは残る（無いと数値欄で Field Exit が何もしない）。
  *
- * `mandatory-fill`（0x0007）は**右寄せではない**（「全桁を埋めよ」の検証指定）。両参照実装とも
- * 桁を動かさないので、ここでも動かさない。
+ * `mandatory-fill`（0x0007）は**右寄せではない**（「全桁を埋めよ」の検証指定）。両参照実装とも桁を動かさないので、ここでも動かさない
+ * （符号付き数値のときだけ、既定の空白右寄せが掛かる）。
  */
 export function applyAdjust(state: EditState, field: AdjustSpec): EditState {
-  if (field.signedNumeric) return rightAdjust(state, " ", { keepLastPosition: true });
-  if (field.adjust === "right-zero") return rightAdjust(state, "0");
-  if (field.adjust === "right-blank") return rightAdjust(state, " ");
+  const opts = field.signedNumeric ? { keepLastPosition: true } : {};
+  if (field.adjust === "right-zero") return rightAdjust(state, "0", opts);
+  if (field.adjust === "right-blank") return rightAdjust(state, " ", opts);
+  if (field.signedNumeric) return rightAdjust(state, " ", opts);
   return state; // mandatory-fill / 無指定
 }
 

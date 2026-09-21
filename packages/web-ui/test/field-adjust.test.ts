@@ -88,9 +88,18 @@ describe("applyAdjust（FFW 指定 → 右寄せ規則）", () => {
     expect(editValue(applyAdjust(initEdit("12", 7, 2), SIGNED))).toBe("    12 ");
   });
 
-  it("signed-num は ADJUST 指定より優先される（原典どおり無条件で空白右寄せ）", () => {
-    const s = applyAdjust(initEdit("12", 7, 2), { adjust: "right-zero", signedNumeric: true });
-    expect(editValue(s)).toBe("    12 ");
+  /**
+   * **符号付き数値でも、RZ・RB の指定は埋め字を上書きする**（ACS `performRightAdjustFill`。`20260922-signed-rz-fill`）。
+   * ~~signed-num は ADJUST 指定より優先される（tn5250 どおり無条件で空白右寄せ）~~ は ACS と違った——実機の ACS のコアで
+   * `CHECK(RZ) 6 0` に `12` → Field− が `000012-`（`scripts/acs-probe/field-minus-numeric-only.txt` の M1）。符号桁は動かさない。
+   */
+  it("signed-num でも RZ は '0' 埋め・RB は空白埋め。符号桁は動かさない", () => {
+    expect(editValue(applyAdjust(initEdit("12", 7, 2), { adjust: "right-zero", signedNumeric: true }))).toBe("000012 ");
+    expect(editValue(applyAdjust(initEdit("12", 7, 2), { adjust: "right-blank", signedNumeric: true }))).toBe("    12 ");
+  });
+
+  it("signed-num ＋ mandatory-fill は、調整の指定が無いのと同じ（空白右寄せ）", () => {
+    expect(editValue(applyAdjust(initEdit("12", 7, 2), { adjust: "mandatory-fill", signedNumeric: true }))).toBe("    12 ");
   });
 });
 
