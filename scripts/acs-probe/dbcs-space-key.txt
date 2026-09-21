@@ -1,0 +1,128 @@
+# DBCS の欄で Space キーを打つと何が入るか（ACS のコア・社内機・930。`20260922-dbcs-space-key`）。
+# 原典 `PS5250.processCharKeyStroke`: DBCS のセッションで打った字が空白のとき `convertSBCSCharToDBCS` で全角空白（U+3000）にする（対象は J・G・E の DBCS オン）。O は対象外。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `DBCSFE`。`DSCMD_PGM=KEYTST` で `scripts/build-dscmd.mjs` を回す。測った後に消す）:
+#   G (3,10) / O (5,10) / J (7,10) / E (9,10)（いずれも 12 桁）/ (11,10) SBCS 6 桁
+# 見るもの: 各欄で `あ` の次に Space を打ち、その次に `い` を打つ（`あ い`）。dump の TEXT_PLANE で、間が全角空白（U+3000）か、SBCS の空白か、入らないか。
+# **実測（2026-09-22・社内機・ACS のコア・930）**:
+#   G: `あ　い`（Space は全角空白 U+3000。G は SO/SI を持たない）／ J: `SO あ　い SI`（同）／ E: 全角の字の後の Space は全角空白 ／ O: `SO あ SI ␠ SO い SI`（SBCS の空白のまま）
+#   先頭の Space（`keys  あ` のように空白 2 つで先頭に空白を打つ）: G・J は全角空白＋あ、O は SBCS の空白＋あ。
+#   E の状態: 空の欄に `X Y` は `X Y`（SBCS の空白）、空の欄に Space→`X` は ` X`（SBCS）、`あ`→Space→`X` は全角空白のあとで `X` が拒否（inhibit=5）、
+#   `X`→`あ` も拒否——**E は最初の字で SBCS か DBCS かが決まり、混ぜられない**（当 PJ は混ぜられる。別の差）。
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/dbcs-space-key.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/KEYTST PARM('DBCSFE')[enter]
+settle 3000
+dump initial
+
+# --- G（3,10）---
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ い
+settle 300
+dump g-space
+keys [reset]
+settle 300
+
+# --- O（5,10）---
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ い
+settle 300
+dump o-space
+keys [reset]
+settle 300
+
+# --- J（7,10）---
+setcursor 7,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ い
+settle 300
+dump j-space
+keys [reset]
+settle 300
+
+# --- E（9,10）---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ い
+settle 300
+dump e-space
+keys [reset]
+settle 300
+
+# --- E の状態（空の欄・SBCS の字の後・DBCS の後・先頭の Space。`keys` の先頭の空白は 2 つ書くと打てる）---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys X Y
+settle 300
+dump e-sbcs-space
+keys [reset]
+settle 300
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys  X
+settle 300
+dump e-space-first-then-x
+keys [reset]
+settle 300
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ X
+settle 300
+dump e-dbcs-then-sbcs-rejected
+keys [reset]
+settle 300
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys X あ
+settle 300
+dump e-sbcs-then-dbcs-rejected
+keys [reset]
+settle 300
+
+# --- 先頭の Space（G・J・O）---
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 200
+keys  あ
+settle 300
+dump g-space-first
+keys [reset]
+settle 300
+setcursor 7,10
+settle 200
+keys [eraseeof]
+settle 200
+keys  あ
+settle 300
+dump j-space-first
+keys [reset]
+settle 300
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys  あ
+settle 300
+dump o-space-first
+keys [reset]
+settle 300

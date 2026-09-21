@@ -472,14 +472,20 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ は tn5250 由来の「signed-num を ADJUST 指定より先に見て空白右寄せ」で `    12-` だった。`applyAdjust`（`packages/web-ui/src/composables/fieldEdit.ts`）で RZ・RB を先に見る形にした
   （符号桁は動かさない。RZ・RB が無く符号付きなら従来の空白右寄せ）。~~signed-num は ADJUST 指定より優先される~~ の旧テストは破棄（decisions D1）。単体 3 件、mutation 6 通り検出。
   残り（空きの数え方〔NUL か空白か〕・先頭の空白・DBCS の J・G・E の右寄せ）は下の `[ ]`。
+- [x] **J・G・E（DBCS 中）の欄の Space を全角空白にする**（下の「キー編集の細部」の R11 (r)。台帳に無かった差）。**完了（`20260921-dbcs-space-key`）**: ACS `processCharKeyStroke` は
+  DBCS のセッションで打った空白を `convertSBCSCharToDBCS` で全角空白（U+3000）にする。実機の ACS のコア（社内機・930。`scripts/acs-probe/dbcs-space-key.txt`）で測った——G・J は `あ　い`・先頭の Space も全角空白、
+  O は SBCS の空白のまま、E は全角の字の後だけ全角空白（空の欄・SBCS の字の後は SBCS の空白）。当 PJ は J・G の半角 Space を「全角のみ」と拒否していた。
+  `spaceToFullWidth`（`packages/web-ui/src/components/ScreenGrid.vue`）で、打鍵の経路だけ変換した（貼り付け・IME の確定は変えない）。単体 4 件、mutation 7 通り検出。
+  **測定で分かった別の差**: ACS の E は最初の字で SBCS か DBCS かが決まり、混ぜられない（`あ` の後の `X`・`X` の後の `あ` は拒否）。当 PJ の E は混ぜられる（下の `[ ]`）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
-  - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: (r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**（当 PJ は J・G で「全角のみ」と拒否。
+  - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
     台帳に無かった。IME を切った Space で日常的に起きる）／(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）／(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）／(h) Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）・`¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
     (j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける／(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
     (q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
+    **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。
     **(l) 選択を Backspace・Delete で消すときの MDT は決着**: **ACS の Backspace・Delete は選択に触れず `clearRect` に繋がらない**（GUI 層の原典で確認）。矩形選択は当 PJ も同じで、

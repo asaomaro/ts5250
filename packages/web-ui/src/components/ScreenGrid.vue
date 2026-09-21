@@ -2029,6 +2029,18 @@ function takeMdtKeyed(): boolean {
   mdtKeyed = false;
   return placed;
 }
+/**
+ * **J・G・E（DBCS 中）の欄で打った半角の空白は、全角空白（U+3000）にする**（ACS `PS5250.processCharKeyStroke` の `convertSBCSCharToDBCS`。
+ * `20260922-dbcs-space-key`）。O は対象外（SBCS の空白のまま）。E は**欄が DBCS の状態のときだけ**（全角の字が入っているとき）——実機の ACS のコア
+ * （`scripts/acs-probe/dbcs-space-key.txt`）: J・G は空の欄でも先頭の Space が全角空白、E は空の欄・SBCS の字の後の Space は SBCS の空白で、`あ` の後は全角空白。
+ * IME を切った Space で日常的に起きる——当 PJ は J・G で「全角のみ」と拒否していた。**打鍵の経路だけ**（貼り付け・IME の確定は ACS も変換しない）
+ */
+function spaceToFullWidth(f: Field, ch: string): string {
+  if (ch !== " ") return ch;
+  if (f.dbcsType === "only" || f.dbcsType === "pure") return "\u3000";
+  if (f.dbcsType === "either" && edit !== undefined && edit.chars.some((c) => isFullWidth(c))) return "\u3000";
+  return ch;
+}
 /** 修飾キーの単独押下（「出た」状態を下ろさない。ACS に届くキーではない） */
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
 /** 打鍵で埋められる最後の桁（ACS `processCharKeyStroke` の `n4`。符号付き数値は符号桁の手前） */
@@ -3079,7 +3091,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     if (isNumpadSign(ev)) return; // テンキーの − / ＋ はペインの Field− / Field+ へ（SBCS 欄と同じ）
     ev.preventDefault();
-    const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
+    const ch = spaceToFullWidth(f, inputChar(k, f)); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化。J・G・E（DBCS 中）の Space は全角空白
     const why = rejectReason(f, ch, sessionKind.value);
     if (why) {
       emit("notice", MSG_BY_REASON[why]);
