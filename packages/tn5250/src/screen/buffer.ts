@@ -1438,6 +1438,8 @@ export class ScreenBuffer {
     const caKeys: number[] = [];
     for (let n = 1; n <= 24; n++) if (!this.sendsDataForAid(n)) caKeys.push(n);
     if (caKeys.length > 0) snap.caKeys = caKeys;
+    // ホーム位置（ACS `homePos`: IC → 先頭の非バイパス欄 → 0。IC は書式を消すまで持ち越す＝`icAddr`）
+    snap.home = this.rowColOf(this.icAddr ?? this.homeAddr());
     const gui = this.guiSnapshot();
     if (gui) snap.gui = gui;
     snap.lastWrite = { ...this.lastWrite };

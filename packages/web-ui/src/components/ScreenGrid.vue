@@ -11,7 +11,6 @@ import {
   backspace,
   del,
   moveCursor,
-  home,
   end,
   toggleInsert,
   eraseToEnd,
@@ -2783,14 +2782,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     sync(el, f);
     return;
   }
-  if (ev.key === "Home" && plain) {
-    // 欄内はカーソルを先頭へ。ペインのフィールド移動へ伝播させない
-    ev.preventDefault();
-    ev.stopPropagation();
-    edit = home(edit);
-    sync(el, f);
-    return;
-  }
+  // ~~Home: 欄内はカーソルを先頭へ（ペインへ伝播させない）~~ → ACS の Home は欄の先頭ではなく画面のホーム位置へ移り、
+  // 既にそこなら Record Backspace を送る（`PS5250.processHome`）。ペイン（`homeKey`）へ委譲する
+  if (ev.key === "Home" && plain) return;
   if (ev.key === "End" && plain) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -2929,13 +2923,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     syncDbcs(el, f);
     return;
   }
-  if (k === "Home" && plain) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    edit = { ...edit, cursor: 0 };
-    syncDbcs(el, f);
-    return;
-  }
+  if (k === "Home" && plain) return; // ペインの `homeKey` へ委譲（SBCS 欄と同じ。ACS `processHome`）
   if (k === "End" && plain) {
     ev.preventDefault();
     ev.stopPropagation();

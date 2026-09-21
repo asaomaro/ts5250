@@ -83,6 +83,7 @@ const AID_KEYS = [
   "Clear",
   "Help",
   "Print",
+  "RecordBackspace",
   "SysReq",
   "Attn",
 ] as const;

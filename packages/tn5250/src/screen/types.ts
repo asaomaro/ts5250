@@ -361,6 +361,13 @@ export interface ScreenSnapshot {
    * （ACS `DS5250.isSOH_PF` → `PS5250.processAIDCode`。`20260921-mandatory-check-acs`）。
    */
   caKeys?: number[];
+  /**
+   * **ホーム位置**（ACS `PS5250.getHomePos`。`20260921-home-record-backspace`）。IC で指された番地、
+   * 無ければ先頭の非バイパス欄の先頭、欄が無ければ 1 行 1 桁。Home キーの行き先で、**既にそこにいれば
+   * Record Backspace（AID 0xF8）を送る**（`processHome`）。任意にしてあるのは既存の手組み snapshot のため
+   * （不在なら UI は先頭の入力欄に倒す）。
+   */
+  home?: { row: number; col: number };
   /** 拡張 5250 GUI コントロール（存在する場合のみ。空なら省略） */
   gui?: GuiConstructs;
   /**

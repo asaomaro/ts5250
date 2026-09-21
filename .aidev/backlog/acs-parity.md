@@ -406,6 +406,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   来る欄へ（逆引き）、無ければ前の欄・最後の欄へ回り込む。着いた欄は「出た」扱い（0020 にしない）。実機の ACS のコアで 5 例
   （`scripts/acs-probe/backtab-home.txt`: 7,22→7,20・7,20→5,20・3,20→19,20・6,40→5,20・7,26→7,20）。1,1 では DBCS のセッションの
   ACS のコアが例外で止まる（写さない。同 D3）。テスト `packages/web-ui/test/backtab-acs.test.ts`、mutation 4 通り検出（1 通りは等価で撤去）。
+- [x] **【まとめ】キー編集のうち Home・Record Backspace・欄データを載せない AID**（優先度 中）。**完了（`20260921-home-record-backspace`・PR #410）**:
+  Home は画面のホーム位置（スナップショットの `home`＝IC → 先頭の非バイパス欄 → 1 行 1 桁）へ移り、既にそこなら Record Backspace（`AidKey` の
+  `RecordBackspace`＝0xF8）を送る（`EmulatorPane.vue` の `homeKey`）。Clear・Help・Print・Record Backspace は欄データを載せない
+  （`packages/tn5250/src/protocol/read-response.ts` の `NO_DATA_AIDS`）。実機の ACS のコアで 7,22 → 3,20、ホーム位置で施錠（「機能キーは使用できません」）、
+  タップで採った ACS のワイヤ `… 03 14 0a f3`（`ABC` を打って Help。欄データ無し）・`… 03 14 07 f8`。テスト `no-data-aid-home.test.ts`（11 件）・
+  `home-key-acs.test.ts`（7 件）、mutation 7 通り検出（1 通りは等価で分岐ごと撤去）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -415,7 +421,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - **方針（利用者の判断・2026-09-21）: ACS と同じく操作員エラー 0020 にして送らない。**
     - ACS: 右寄せ欄・符号付き数値欄ではエラー 0020 にする（`PS5250.processAIDCode`）。
     - 当 PJ: 左詰めのまま送る。英数字の CHECK(RZ)/(RB) 欄には左詰めのまま格納される。
-  - Home（中・**要判断**）
+  - ~~Home（中・**要判断**）~~ → 上の `20260921-home-record-backspace` で済んだ（方針: ACS に合わせる）
     - ACS: 画面のホーム位置（IC、無ければ先頭の非バイパス欄）へ移る。既にそこにいれば Record Backspace を送る。
     - 当 PJ: 欄の先頭へ移る（`ScreenGrid.vue:2682`）。
   - ~~Backtab（中）~~ → 下の `20260921-backtab-acs` で済んだ
@@ -429,12 +435,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
   - 低
     - 欄の先頭での Backspace、End の行き先
-    - Clear / Help / Print / PA で欄データを送る
+    - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - Field− の可否、数値専用欄での Field−
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
     - MONOCASE で ASCII 以外を大文字化しない
-    - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3・Record Backspace・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
+    - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3（入れるときは欄データを載せない AID の集合 `NO_DATA_AIDS` にも足す）・~~Record Backspace~~（`20260921-home-record-backspace`）・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
     - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、Esc=Attn、Shift+Insert=Dup ほか
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。

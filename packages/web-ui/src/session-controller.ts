@@ -1231,9 +1231,10 @@ export function sendKey(
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
   // **AID の前の検査**（ACS `PS5250.processAIDCode` と同じ順。`20260921-mandatory-check-acs`）:
   //   1) カーソル下の欄の MF  2) 0020（欄を出ずに AID）  3) カーソル下の欄の自己点検  4) ME（CA キーは見ない）
-  // **Enter に限らない**——F キー・Roll でも止まる（実機の ACS で確かめた）。原典が外すのは Help と Clear だけ
-  // （フラグキーは AID ではない）。~~Enter のときだけ検証する（`20260729-ffw-behavior-bits` D1）~~ は破棄した
-  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && s.snapshot) {
+  // **Enter に限らない**——F キー・Roll でも止まる（実機の ACS で確かめた）。原典が外すのは Help・Clear・
+  // Record Backspace だけ（`processAIDCode` の 243・189・248。フラグキーは AID ではない）。
+  // ~~Enter のときだけ検証する（`20260729-ffw-behavior-bits` D1）~~ は破棄した
+  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && key !== "RecordBackspace" && s.snapshot) {
     const hit = checkBeforeAid(s, key, cursor ?? s.cursor);
     if (hit) {
       s.notice = MSG_BY_VIOLATION[hit.reason];

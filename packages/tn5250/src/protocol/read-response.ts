@@ -101,11 +101,21 @@ function functionKeyNumber(aid: number): number | undefined {
 }
 
 /**
+ * **欄データを載せない AID**（ACS `DS5250.sendAid`。`20260921-home-record-backspace`）。
+ * Clear・Help・Print・Record Backspace は**カーソルと AID だけ**を送る——待たされている Read の種類にも、
+ * MDT の立った欄の有無にもよらない（ACS は PA1〜3 も同じ扱いだが、当 PJ は PA キーを送れないので載せない）。
+ * 実機で ACS のワイヤを採った: コマンド行に `ABC` を打って Help → `… 03 14 0a f3` の 13 バイト（欄データ無し）。
+ * ~~以前は他の AID と同じく MDT の欄を載せていた~~（台帳「Clear / Help / Print / PA で欄データを送る」）。
+ */
+export const NO_DATA_AIDS: ReadonlySet<number> = new Set([AID.CLEAR, AID.HELP, AID.PRINT, AID.RECORD_BACKSPACE]);
+
+/**
  * **その AID で欄データを送ってよいか**（SOH の申告。`ScreenBuffer.sendsDataForAid`）。
  * 原典も同じ門番を通す（GNU tn5250 `tn5250_session_send_fields` の
  * `send_data_for_aid_key`、tn5250j `ScreenFields.readFormatTable` の `dataIncluded[]`）。
  */
 function sendsData(buf: ScreenBuffer, aid: number): boolean {
+  if (NO_DATA_AIDS.has(aid)) return false;
   return buf.sendsDataForAid(functionKeyNumber(aid));
 }
 
@@ -311,6 +321,7 @@ export function buildReadInputFieldsResponse(
   aid: number,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
+  // 欄データを載せない AID（`NO_DATA_AIDS`）はここでもカーソルと AID だけ——平坦な応答の門番（`sendsData`）が同じ集合を見る
   return buildFlatFieldResponse(buf, codec, aid, cursor);
 }
 

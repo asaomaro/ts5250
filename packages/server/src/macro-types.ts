@@ -31,6 +31,7 @@ export const aidKeySchema = z.enum([
   "Clear",
   "Help",
   "Print",
+  "RecordBackspace",
   "SysReq",
   "Attn"
 ]);

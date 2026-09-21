@@ -533,6 +533,31 @@ function backtab(): void {
   focusByOffset(-1);
 }
 
+/**
+ * **Home**（ACS `PS5250.processHome`。`20260921-home-record-backspace`）。
+ * - カーソルがホーム位置（IC で指された番地、無ければ先頭の入力欄。`snapshot.home`）に無ければ、そこへ移る。
+ *   欄の中からでも**欄の先頭ではなく画面のホーム位置**へ行く（実機の ACS: ADJPGM の 7,22 → 3,20）。出た欄は「出た」扱い
+ * - **既にホーム位置なら Record Backspace（AID 0xF8）を送る**（実機の ACS のワイヤ: `… 03 14 07 f8`。
+ *   ホストが受けなければ「機能キーは使用できません」が返る）
+ * ~~以前は欄の中なら欄の先頭、欄の外なら先頭の入力欄へ移るだけだった~~
+ */
+function homeKey(): void {
+  const snap = snapshot.value;
+  if (!snap) return;
+  const first = editableFields()[0];
+  const home = snap.home ?? (first ? { row: first.row, col: first.col } : { row: 1, col: 1 });
+  const at = cursor.value;
+  if (at.row === home.row && at.col === home.col) {
+    onAid("RecordBackspace");
+    return;
+  }
+  noteFieldExited(); // ACS は出た欄の `fieldExitReqFlag` を立てる
+  onCursor(home.row, home.col);
+  // DBCS 欄は caret を明示的に置く（頭出しと同じ理由。reconcileFocus はフォーカス中の DBCS 欄の caret を触らない）
+  const land = fieldAt(home.row, home.col, snap.fields, snap.cols, snap.rows);
+  if (land && !land.protected && land.dbcsType) gridRef.value?.setDbcsCaretAtColumn(land.index, home.row, home.col);
+}
+
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
 function focusByOffset(delta: number): void {
   const stops = tabStops();
@@ -644,7 +669,7 @@ function onLocal(action: LocalAction): void {
       break;
     }
     case "home":
-      focusInput(inputs, 0);
+      homeKey();
       break;
     case "end":
       focusInput(inputs, inputs.length - 1);
