@@ -92,7 +92,9 @@ node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/sql.js \
 | `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（Ctrl+Delete）は消すだけで欄を出ない／Erase Input（Ctrl+Backspace）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
 | `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（G02/C01）を掴めているかも見る。**要 `TESTLIB/QDDSSRC`**。 |
 | `verify-printer.mjs` | プリンターセッション検証（core・実機）: `PrinterSession` で待ち受け → 表示セッションから自前スプールをそのプリンター OUTQ へ回し（`CHGJOB OUTQ`＋`DSPLIBL OUTPUT(*PRINT)`）→ ライターの用紙タイプ問い合わせ（`CPA3394`）に `I` で応答 → SCS を受信して "Library List" 帳票を桁揃えで展開できることを確認。**自分のデバイスにのみスプールを回す**ためホストを汚さない。 |
-| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・実機・CCSID 1399）: `TESTLIB` のライブラリテキストを日本語に変えて `DSPLIBL` を印刷 → SCS 中の SO/SI 付き全角を受信し、帳票に日本語が桁揃えで載ることを確認（検証後にテキストを戻す）。**要 TESTLIB**。 |
+| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・PUB400・CCSID 1399）: 5553 の装置が作られ、用紙・位置合わせの問い合わせに答えると帳票が届くことを確認。~~帳票に日本語が桁揃えで載ることを確認~~ → **英語機では日本語は置換される**（申告を ACS と同じ組にしたため。日本語の検証は下の `verify-printer-dbcs-push.mjs`）。**要 TESTLIB**。 |
+| `verify-printer-dbcs-push.mjs` | **日本語の帳票を書き出し経路で受ける**（core・日本語機）: 3812 で作った装置に DBCS の CCSID で繋ぐと 5553 に作り変えられ、IGC 属性の `DSPLIBL` が CPA3303 で止まらずに日本語の帳票として届くことを確認。装置は事前に作って最後に消す（この機は自動構成を許さない。仮想制御装置は `AS400_VRTCTL`）。 |
+| `diag-printer-declare.mjs` | プリンターの**申告の組み合わせ**（ACS の DBCS / SBCS / HPT、当 PJ の旧い組）を素の telnet で実機・PUB400 に当て、起動応答・装置の型・IGC の帳票が届くかを並べる。 |
 
 ```sh
 node --env-file=.env --env-file=.env.verify scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）

@@ -50,6 +50,25 @@ export interface TelnetOptions {
    * `ibmTransform` を "1" にするときは必須——これが無いとホストは変換先を決められない。
    */
   ibmMfrTypMdl?: string | undefined;
+  /**
+   * **DEVNAME の後ろに、この順で送る USERVAR**（`20260921-printer-acs-declaration`）。
+   * プリンターは ACS の組（`NVT5250.userVarPRTSB` ほか）をそのまま並べて渡す——個別の口（ibmFont 等）を
+   * 組み合わせる形では、ACS に無い変数を混ぜたり並びが違ったりする（実機で当 PJ の組だけ 8925・CPA3303 になった）。
+   * `value` を省くと値なし（`IBMFORMFEED`）。`raw` は値を生のバイトで送る（用紙入れの ESC＋0x00）。
+   */
+  userVars?: readonly UserVar[] | undefined;
+  /**
+   * IBMSENDCONFREC=YES を送るか（既定 true）。**プリンターは送らない**——ACS は `startupResponse = false` にする
+   * （`NVT5250.getHostDeviceOptions`）。プリンターの起動応答は申告しなくても届く（実機・PUB400 で I902 を確認）。
+   */
+  sendConfRec?: boolean | undefined;
+}
+
+/** NEW-ENVIRON で送る USERVAR 1 つ（`TelnetOptions.userVars`） */
+export interface UserVar {
+  name: string;
+  value?: string | undefined;
+  raw?: readonly number[] | undefined;
 }
 
 /** クライアントとして有効化に同意する telnet オプション */
@@ -220,6 +239,9 @@ export class TelnetLayer {
       if (this.opts.deviceName !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.opts.deviceName));
       }
+      for (const v of this.opts.userVars ?? []) {
+        payload.push(ENV_USERVAR, ...ascii(v.name), ENV_VALUE, ...(v.raw ?? ascii(v.value ?? "")));
+      }
       // プリンターセッション: フォントと変換モードを申告（無いと 8925 でデバイス作成失敗）
       if (this.opts.ibmFont !== undefined) {
         payload.push(ENV_USERVAR, ...ascii("IBMFONT"), ENV_VALUE, ...ascii(this.opts.ibmFont));
@@ -242,7 +264,9 @@ export class TelnetLayer {
       }
       // IBMSENDCONFREC=YES: ホストが確認レコードを送る作法を申告する（RFC 4777）。
       // ACS 実機が送っており、当方も合わせる（無いとホストの応答経路が変わる）。
-      payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
+      if (this.opts.sendConfRec !== false) {
+        payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
+      }
       if (this.opts.user !== undefined) {
         // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）
         payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii(this.opts.user));

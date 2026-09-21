@@ -1,5 +1,5 @@
 import { Emitter } from "./emitter.js";
-import { As400Error, deviceEnvFor } from "@ts5250/base";
+import { As400Error } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic";
 import { TcpTransport } from "../transport/tcp.js";
 import type { Transport } from "../transport/types.js";
@@ -9,7 +9,7 @@ import {
   startupCodeMeaning,
   STARTUP_SUCCESS_CODES
 } from "../telnet/startup-record.js";
-import { printerTerminalTypeFor } from "./terminal-type.js";
+import { printerDeclaration } from "./terminal-type.js";
 import { ScsDecoder, type LogicalPage } from "@ts5250/scs";
 
 /** 受信した 1 スプール（帳票）。ジョブ完了ごとに 1 件。 */
@@ -64,10 +64,17 @@ const PRINTER_CODE_MEANING: Record<string, string> = {
   8936: "Security failure on session attempt."
 };
 
-/** クライアント→ホストの印刷完了応答（CLIENTO・opcode=PRINT_COMPLETE・空ペイロード） */
-const PRINT_COMPLETE = Uint8Array.from([0x00, 0x0a, 0x12, 0xa0, 0x00, 0x12, 0x04, 0x00, 0x00, 0x01]);
-/** ジョブ完了を示すレコード長（ヘッダのみ・印刷データなし） */
-const JOB_COMPLETE_LEN = 0x11;
+/**
+ * クライアント→ホストの応答（ACS `DS5250P` の `NO_ERROR` / `CLEAR_PROCESSED`。`20260921-printer-acs-declaration`）。
+ * 予約の 2 バイトは **0x0102**（~~0x0012~~ は tn5250 lp5250d 由来で ACS と違った）。IAC EOR は telnet 層が付ける。
+ */
+const NO_ERROR = Uint8Array.from([0x00, 0x0a, 0x12, 0xa0, 0x01, 0x02, 0x04, 0x00, 0x00, 0x01]);
+const CLEAR_PROCESSED = Uint8Array.from([0x00, 0x0a, 0x12, 0xa0, 0x01, 0x02, 0x04, 0x00, 0x00, 0x02]);
+/** 5250 ヘッダの opcode（印刷データ / CLEAR） */
+const OP_PRINT = 1;
+const OP_CLEAR = 2;
+/** ヘッダのフラグ 1（バイト 7）の「ジョブの終わり」 */
+const FLAG_END_OF_JOB = 0x08;
 
 /**
  * TN5250E プリンターセッション。ホストのスプール出力を SCS として受信し、論理ページに展開して
@@ -88,6 +95,12 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
   private started = false;
   private startupCodeValue = "";
   private jobBytes: number[] = [];
+  /**
+   * **いまの応答**（ACS `DS5250.response_string`）。レコードを処理するたびに、決まっていればこれを返す。
+   * ACS は**一度決まった応答を消さない**——データを書くと NO_ERROR、CLEAR で CLEAR_PROCESSED になり、以後の
+   * レコード（ジョブの終わりなど、応答を変えないもの）にも同じものを返す。起動の直後は何も返さない。
+   */
+  private response: Uint8Array | undefined;
   private closed = false;
   private readonly reportList: SpoolReport[] = [];
   private seq = 0;
@@ -119,19 +132,16 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       });
     }
 
-    const ccsid = opts.ccsid ?? 37;
-    const dev = deviceEnvFor(ccsid);
+    // **申告は ACS と同じ組**（端末タイプと USERVAR の並び。`printerDeclaration`）。以前は KBDTYPE / CODEPAGE /
+    // CHARSET・IBMFONT=12・IBMSENDCONFREC を送っていて、DBCS では装置が 3812 にされ日本語の帳票が CPA3303 で止まった
+    const decl = printerDeclaration(opts.ccsid ?? 37, opts.transformTo);
     session.telnet = new TelnetLayer(transport, {
-      terminalType: printerTerminalTypeFor(ccsid),
+      terminalType: decl.terminalType,
       deviceName: opts.deviceName,
       user: opts.user,
       password: opts.password,
-      kbdType: dev?.kbdType,
-      codePage: dev?.codePage,
-      charSet: dev?.charSet,
-      ibmFont: "12",
-      ibmTransform: opts.transformTo === undefined ? "0" : "1",
-      ...(opts.transformTo !== undefined ? { ibmMfrTypMdl: opts.transformTo } : {})
+      userVars: decl.userVars,
+      sendConfRec: false
     });
 
     const ready = new Promise<void>((resolve, reject) => {
@@ -179,16 +189,26 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       this.handleStartup(rec);
       return;
     }
-    // 印刷データ（opcode=1）。受信ごとに print-complete を返してチェーンを進める（CLEAR=2 は無視）
+    // **ACS `DS5250P.processPassthru` と同じ振り分け**（`20260921-printer-acs-declaration` research F5）
     const opcode = rec.length > 9 ? rec[9] : -1;
-    if (opcode === 2) return; // CLEAR: バッファクリア
-    this.telnet.sendRecord(PRINT_COMPLETE);
-    if (rec.length === JOB_COMPLETE_LEN) {
-      this.finishJob();
-      return;
+    if (opcode === OP_CLEAR) {
+      // CLEAR（印刷の取り消し・保留など）: 受けかけのジョブを閉じ、CLEAR_PROCESSED を返す（`processClear` → `sendEOJ`）。
+      // ~~応答しない~~ だとホストは応答を待つ。閉じないと前のジョブの断片が次の帳票に混ざる
+      if (this.jobBytes.length > 0) this.finishJob();
+      this.response = CLEAR_PROCESSED;
+    } else if (opcode === OP_PRINT) {
+      const payload = rec.subarray(6 + (rec[6] ?? 4));
+      // **ジョブの終わりはフラグ 0x08 ＋ 本体が空か 0x00 だけ**（`processScs`）。~~レコード長 17~~ だけを見ていたので、
+      // 本体の無い 16 バイトの終わり（日本語機の 5553 で実測）では帳票が確定しなかった
+      const endOfJob = rec[7] === FLAG_END_OF_JOB && (payload.length === 0 || (payload.length === 1 && payload[0] === 0));
+      if (endOfJob) this.finishJob(); // 応答は変えない（ACS も `sendEOJ` だけ）
+      else if (payload.length > 0) {
+        for (const b of payload) this.jobBytes.push(b);
+        this.response = NO_ERROR; // 書けた（ACS は `PrintHostData.write` が NO_ERROR にする）
+      }
     }
-    const payloadStart = 6 + (rec[6] ?? 4);
-    for (let i = payloadStart; i < rec.length; i++) this.jobBytes.push(rec[i]!);
+    // その他の opcode は何もしない（ACS も処理しない。~~本体を SCS として足す~~）
+    if (this.response) this.telnet.sendRecord(this.response);
   }
 
   private handleStartup(rec: Uint8Array): void {

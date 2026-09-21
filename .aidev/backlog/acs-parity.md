@@ -164,7 +164,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - C) 現状のまま
   下の「READ の無いアンロック」と合わせて設計すること。
   （出典: `20260919-backlog-acs-triage` research N3・F3-3）
-- [ ] **DBCS プリンターの申告内容が ACS と違う（日本語帳票を push で印刷できるかの分かれ目）**（優先度 高・深さ △・**要実測**）。
+- [x] **DBCS プリンターの申告内容が ACS と違う（日本語帳票を push で印刷できるかの分かれ目）**（優先度 高・深さ △・**要実測**）。
+  **完了（`20260921-printer-acs-declaration`・PR #410）**: 申告を ACS の 4 通りの組（DBCS / SBCS × HPT あり / なし）にした
+  （`packages/tn5250/src/session/terminal-type.ts` `printerDeclaration`・`telnet.ts` の `userVars` / `sendConfRec`）。
+  **実測**: 日本語機で 3812 の装置に DBCS で繋ぐと 5553 に作り変えられ、IGC 属性の DSPLIBL が CPA3303 で止まらず帳票として届いた
+  （`scripts/verify-printer-dbcs-push.mjs` pass=5）。旧い組では 5553 の装置も 3812 にされ CPA3303。PUB400 では ACS の組は I902、
+  当 PJ の変数を 5553 に載せると 8925（`docs/HOST-PRINT-TRANSFORM.md` §2 の「5553 は 8925」の原因は変数の組だった）。
+  ⚠ 英語機では日本語が置換される（CODEPAGE / CHARSET を送らないため。ACS と同じバイト。ACS そのものは未測定）。
   ACS: `DS5250P.initializeTelnet` は、DBCS で HPT なしのとき、端末タイプを `IBM-5553-B01` にする。
   NEW-ENVIRON で送るのは、次の 6 つだけ（IBMFONT・KBDTYPE/CODEPAGE/CHARSET・IBMSENDCONFREC は送らない）。
   - DEVNAME
@@ -277,7 +283,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: CC2 のビット（0x01/0x02）と opcode 0x0B/0x0C で OIA を更新する（委譲先 C）。
   当 PJ: `packages/tn5250/src/session/session.ts:147/592-593` が opcode だけを `messageWaiting` に保持し、snapshot にも UI にも出していない（主エージェントが確認）。CC2 のビットは見ていない。
   再現: 自分のメッセージ待ち行列へ SNDMSG する。**ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N12）
-- [ ] **プリンター: 受信した瞬間に印刷完了を返す／CLEAR に応答しない**（優先度 中・深さ ◐）。
+- [x] **プリンター: CLEAR に応答しない**（下の項目から割った）。
+  **完了（`20260921-printer-acs-declaration`・PR #410）**: CLEAR に CLEAR_PROCESSED を返し、受けかけのジョブを閉じる（ACS `processClear` →
+  `sendEOJ`）。応答は ACS と同じく「いまの応答」を持ち越す（`printer-session.ts` `handleRecord`）。実機でもジョブの終わりの直後に CLEAR が来た。
+  あわせて**ジョブの終わりの判定**をフラグ 0x08 ＋ 本体が空か 0x00 にした（5553 では 16 バイトで届き、旧実装の「長さ 17」では帳票が
+  確定しなかった）。応答の予約 2 バイトも ACS の 0x0102 にした。
+- [ ] **プリンター: 受信した瞬間に印刷完了を返す**（優先度 中・深さ ◐）。~~／CLEAR に応答しない~~（上で済んだ）
   次のとき、ホストは印刷済みとみなすので、SAVE(*NO) のスプールが消える（印刷の欠落）。
   - PDF の出力先の権限・容量が足りない
   - 自動印刷先が止まっている
@@ -477,7 +488,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 低
     - 重ね打ち（CR だけで行頭へ戻る）
     - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）
-    - ジョブ終了の判定（ACS はヘッダの byte7=0x08、当 PJ は長さ 17）
-    - 印刷完了応答のバイト 4-5
+    - ~~ジョブ終了の判定（ACS はヘッダの byte7=0x08、当 PJ は長さ 17）~~ → `20260921-printer-acs-declaration` で揃えた
+    - ~~印刷完了応答のバイト 4-5~~ → 同上（0x0102）
     - プリンターの既定値（意図的な差異）
   （出典: `20260919-backlog-acs-triage` research N16・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）

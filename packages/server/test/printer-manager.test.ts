@@ -38,7 +38,9 @@ function data(scs: number[]): number[] {
   const ll = body.length + 2;
   return [(ll >> 8) & 0xff, ll & 0xff, ...body];
 }
-const jobComplete = (): number[] => [0x00, 0x11, 0x12, 0xa0, 0x01, 0x01, 0x04, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0];
+// ジョブの終わり: **フラグ 0x08 ＋ 本体が 0x00 だけ**（実機の形。ACS `DS5250P.processScs` の判定。
+// `20260921-printer-acs-declaration` で「長さ 17」の判定をやめたので、フラグの無い合成レコードは終わりにならない）
+const jobComplete = (): number[] => [0x00, 0x11, 0x12, 0xa0, 0x01, 0x01, 0x0a, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0];
 
 describe("SessionManager プリンター", () => {
   it("openPrinter → 受信スプールを waitSpool で取得できる", async () => {
