@@ -125,6 +125,38 @@ describe("Backtab と「欄を出た」（エラー 0020）", () => {
   });
 });
 
+describe("Backtab で同じ欄の先頭へ戻ったとき、ペインのカーソルも欄の先頭になる（独立点検の指摘）", () => {
+  it("**欄の途中から Backtab → Enter は欄の先頭（7,20）を送る**（7,22 のまま送っていた）", async () => {
+    seed([fld(1, 3), fld(2, 5), fld(3, 7)]);
+    const w = mountPane();
+    await nextTick();
+    const el = inputOf(w, 3);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await nextTick();
+    for (const ch of "AB") el.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+    await nextTick();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+    await nextTick();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await nextTick();
+    const sent = send.mock.calls.map((c) => c[0] as { type: string; cursor?: unknown }).filter((m) => m.type === "key");
+    expect(sent.map((m) => m.cursor)).toEqual([{ row: 7, col: 20 }]);
+  });
+
+  it("ホームの欄の途中から Backtab → Home は Record Backspace を送る（カーソルがホーム位置に居る）", async () => {
+    const fs = [fld(1, 3), fld(2, 5)];
+    seed(fs);
+    sessionsStore.get(SID)!.snapshot = { ...sessionsStore.get(SID)!.snapshot!, home: { row: 3, col: 20 } };
+    const w = mountPane();
+    await nextTick();
+    await backtabFrom(w, 1, 3);
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(sentKeys()).toEqual(["RecordBackspace"]);
+  });
+});
+
 describe("Backtab: 行をまたぐ欄・カーソル送り", () => {
   it("行をまたぐ欄の 2 行目からは欄の先頭（1 行目の先頭）へ", async () => {
     seed([fld(1, 18), { ...fld(2, 20), col: 7, length: 153 }]);

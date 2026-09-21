@@ -87,12 +87,12 @@ describe("IC の無い WTD ではカーソルを最初の入力フィールド�
     expect(buf.rowColOf(buf.cursorAddr)).toEqual({ row: 12, col: 40 });
   });
 
-  it("cursorToFirstInputField は属性桁の次（フィールド先頭）へ置く", () => {
+  // ~~cursorToFirstInputField は属性桁の次（フィールド先頭）へ置く~~ → メソッドごと撤去（src から呼ばれなくなった）。
+  // 既定の位置は `homeAddr()`（WTD の終わりに `placeCursorAfterWtd` が使う）
+  it("既定の位置（homeAddr）は属性桁の次（フィールド先頭）", () => {
     const buf = new ScreenBuffer();
     applyDataStream(screenWithOneField(false), buf, codec);
-    buf.cursorAddr = 0;
-    buf.cursorToFirstInputField();
-    expect(buf.rowColOf(buf.cursorAddr)).toEqual({ row: 5, col: 11 });
+    expect(buf.rowColOf(buf.homeAddr())).toEqual({ row: 5, col: 11 });
   });
 });
 

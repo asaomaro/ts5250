@@ -197,7 +197,8 @@ describe("sendAid の cursor オプションで buf.cursorAddr を同期する",
     //
     // **この破損は応答を待つ前——`sendAid` 呼び出しの同期部分が終わった直後、
     // 応答がまだ届いていない一瞬——にしか観測できない**。応答が届けば、ホストの IC/MC
-    // （または `!cursorSet` 時の `cursorToFirstInputField()`）が必ず有効なアドレスで
+    // （~~または `!cursorSet` 時の `cursorToFirstInputField()`~~ → IC/MC が無ければ WTD の終わりの既定の位置。
+    // `20260921-cursor-per-wtd-acs`）が必ず有効なアドレスで
     // 上書きするため、その後に `snapshot()` を見るテストでは破損を検出できない。
     // **`ReplayTransport` はこの一瞬を作れない**——`send()` が同じ同期区間で次の rx を
     // 配送してしまうため（`advance()` が `dataFn` を直接呼ぶ）、`sendAid` が返った時点で

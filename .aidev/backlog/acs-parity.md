@@ -446,6 +446,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
     - MONOCASE で ASCII 以外を大文字化しない
+    - HLLAPI の `@B`（Backtab）が継続欄・逆向きのカーソル送りを見ない（ペインの `backtab` は見る。`20260921-home-record-backspace` D5）
+    - DBCS 専用欄がホーム位置のときの Home（ACS はホーム位置が SO なら 1 桁先へ置くので、原典の字面では 2 回目も
+      「ホーム位置でない」となり Record Backspace を送らない。当 PJ は 2 回目で送る。**未確認**。節目の独立点検の懸念）
+    - 解錠中に届いた WTD（READ 無し）でもカーソルが IC / ホームへ動く（`20260921-cursor-per-wtd-acs` D2 の未確認と同じ）
     - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3（入れるときは欄データを載せない AID の集合 `NO_DATA_AIDS` にも足す）・~~Record Backspace~~（`20260921-home-record-backspace`）・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
     - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、Esc=Attn、Shift+Insert=Dup ほか
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）

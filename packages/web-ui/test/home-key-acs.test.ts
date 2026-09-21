@@ -139,6 +139,19 @@ describe("Home（ACS `processHome`）", () => {
     expect(sentKeys()).toEqual(["Enter"]);
   });
 
+  it("**3270 のセッションでは Record Backspace を送らない**（先頭の入力欄へ移るだけ。独立点検の指摘）", async () => {
+    seed([fld(1, 3), fld(2, 5)]);
+    sessionsStore.get(SID)!.meta = { terminal: "3270" };
+    const w = mountPane();
+    await nextTick();
+    const el = await focusAt(w, 1, 0);
+    await key(el, "Home");
+    expect(sentKeys()).toEqual([]);
+    const el2 = await focusAt(w, 2, 2);
+    await key(el2, "Home");
+    expect(document.activeElement).toBe(inputOf(w, 1));
+  });
+
   it("ホーム位置の無い手組みの画面は先頭の入力欄をホームとみなす（従来の fallback）", async () => {
     seed([fld(1, 3), fld(2, 5)]);
     const w = mountPane();

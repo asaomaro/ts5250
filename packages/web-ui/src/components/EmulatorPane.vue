@@ -16,6 +16,7 @@ import {
   isEscapeAidEvent,
   localEditActionOf,
   makeKeydownHandler,
+  numpadFieldSign,
   typeAheadKind,
   type LocalAction
 } from "../composables/useKeymap.js";
@@ -121,6 +122,11 @@ const logCount = computed(
 // ユーザーがクリック/フォーカスでカーソルを動かしたときの上書き（未操作ならホスト snapshot.cursor を使う）
 const cursorOverride = ref<{ row: number; col: number } | undefined>();
 const cursor = computed(() => cursorOverride.value ?? snapshot.value?.cursor ?? { row: 1, col: 1 });
+/**
+ * **5250 のセッションか**（3270 も同じペインで描く。`meta.terminal` 未指定は 5250）。
+ * Home の Record Backspace・テンキーの Field± は 5250 だけの操作なので、3270 では従来の動きに留める（節目の独立点検の指摘）
+ */
+const is5250 = computed(() => (state.value?.meta?.terminal ?? "5250") === "5250");
 
 function onEdit(fieldIndex: number, value: string): void {
   state.value?.edits.set(fieldIndex, value);
@@ -520,13 +526,12 @@ function backtab(): void {
   if (f && !f.protected) {
     const first = f.continued !== undefined ? (continuedRunOf(snapshot.value?.fields ?? [], f)[0] ?? f) : f;
     if (first.index !== f.index || gridRef.value?.caretAtFieldStart() !== true) {
-      focusStop(inputForSlice(first.index, 0));
+      focusFieldStart(first);
       return;
     }
     const from = editableFields().find((x) => x.cursorProgression === first.index);
-    const back = from ? inputForSlice(from.index, 0) : undefined;
-    if (back) {
-      focusStop(back);
+    if (from && inputForSlice(from.index, 0)) {
+      focusFieldStart(from);
       return;
     }
   }
@@ -544,6 +549,12 @@ function backtab(): void {
 function homeKey(): void {
   const snap = snapshot.value;
   if (!snap) return;
+  // 3270 には Record Backspace もホーム位置の申告も無い。従来どおり先頭の入力欄へ移るだけ（独立点検の指摘:
+  // 3270 で送るとサーバーが「知らない AID」として断り、エラーの通知が出ていた）
+  if (!is5250.value) {
+    focusInput(editableInputs(), 0);
+    return;
+  }
   const first = editableFields()[0];
   const home = snap.home ?? (first ? { row: first.row, col: first.col } : { row: 1, col: 1 });
   const at = cursor.value;
@@ -556,6 +567,19 @@ function homeKey(): void {
   // DBCS 欄は caret を明示的に置く（頭出しと同じ理由。reconcileFocus はフォーカス中の DBCS 欄の caret を触らない）
   const land = fieldAt(home.row, home.col, snap.fields, snap.cols, snap.rows);
   if (land && !land.protected && land.dbcsType) gridRef.value?.setDbcsCaretAtColumn(land.index, home.row, home.col);
+}
+
+/**
+ * 欄の先頭（スライス 0）へフォーカスし、**ペインのカーソル位置も合わせる**。
+ * 既にフォーカスのある input へ `focus()` しても focus イベントは出ず、ScreenGrid はカーソルを知らせない——
+ * 欄の途中から同じ欄の先頭へ戻る Backtab で、ペインのカーソルが古い桁のまま残り、直後の Enter が
+ * 古い桁を送っていた（独立点検の指摘。ACS は欄の先頭を送る）。focus イベントが出る場合は ScreenGrid が知らせる
+ */
+function focusFieldStart(target: Field): void {
+  const el = inputForSlice(target.index, 0);
+  const already = el !== undefined && document.activeElement === el;
+  focusStop(el);
+  if (already) onCursor(target.row, target.col);
 }
 
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
@@ -817,7 +841,8 @@ const rawKeydown = makeKeydownHandler({
   local: onLocal,
   viewCycle: onViewCycle,
   playMacro: onPlayMacro,
-  isFocused: () => props.focused
+  isFocused: () => props.focused,
+  fieldSignKeys: () => is5250.value
 });
 
 // ---- キーボードによる矩形（ブロック）選択（free モードで Shift+矢印） ----
@@ -1410,6 +1435,21 @@ function onKeydown(ev: KeyboardEvent): void {
   // caret 発の矩形選択中の文字入力・Backspace・Delete は「カーソル位置での通常の入力」。
   // 選択を解除して欄へ戻し、そのキーを欄へ渡す（欄の keydown が型検証・上書き/挿入を行う）。
   // 合成イベントは bubbles:false——欄の @keydown は直接リスナーなので届き、ペインへは戻らない。
+  // テンキーの − / ＋（5250）は文字ではなく Field− / Field+（独立点検の指摘: 下の合成 keydown は `code` を持たず、
+  // 欄から先へも伝わらないので、そこへ流すと文字 `-` が入っていた）。選択を解いて欄へ戻し、`code` 付きで
+  // **欄の input から伝わる**形で送り直す——欄がまず native caret から編集カーソルを取り直し（そうしないと Field− が
+  // 欄の先頭から消す）、文字としては入れずにペインのキーマップへ渡す（そのときはもう選択中ではない）
+  if (selFromCaret && numpadFieldSign(ev, is5250.value)) {
+    ev.preventDefault();
+    restoreCaretFromBlockSel();
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement && !el.readOnly) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ev.key, code: ev.code, bubbles: true, cancelable: true }));
+    } else {
+      rawKeydown(ev);
+    }
+    return;
+  }
   if (selFromCaret && isProtectedEdit(ev)) {
     ev.preventDefault();
     restoreCaretFromBlockSel();
@@ -1485,6 +1525,7 @@ function onWheel(ev: WheelEvent): void {
         :snapshot="snapshot"
         :edits="state!.edits"
         :focused="focused"
+        :field-sign-keys="is5250"
         :busy="busy"
         :message="sysReqOpen ? '' : messageLine"
         :cursor="cursor"

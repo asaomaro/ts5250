@@ -579,6 +579,13 @@ export class ScreenBuffer {
     /** メッセージ行の行番号（ACS `Save5250Net.SaveSOH_msgline_num`）。 */
     msgLineRow: number;
     /**
+     * **IC で指された番地**（ACS `Save5250Net.SaveWTD_IC_addr`。ホーム位置 `SaveHomePos` も同じ値から出る）。
+     * 戻さないと、窓を開いて F12 で戻った画面に**窓の IC が残り**、ホーム位置が窓を指し、後続の IC 無しの WTD で
+     * カーソルが窓の位置へ飛ぶ（節目の独立点検の指摘。`icAddr` をレコードをまたいで持ち越すようにした
+     * `20260921-cursor-per-wtd-acs` との組み合わせで出た）。MC は ACS も退避しない
+     */
+    icAddr: number | undefined;
+    /**
      * **退避の時点でセッション層が持っていたもの**（応答を組んだ直後に `attachSaveContext()` が入れる）。
      *
      * - `payload`: SAVE 応答として送った本体（`ESC 0x12` の後ろ＝WTD ストリーム）。
@@ -653,6 +660,7 @@ export class ScreenBuffer {
       // メッセージ行番号も退避する。同じものを積む（`20260920-restore-screen-parity` research F1）
       aidNoDataMask: this.aidNoDataMask,
       msgLineRow: this.msgLineRow,
+      icAddr: this.icAddr,
       // 応答を組み立てた直後に `attachSaveContext()` が埋める（まだ作られていない）
       saved: undefined
     });
@@ -738,6 +746,7 @@ export class ScreenBuffer {
     // 戻さないと窓・ヘルプから戻った画面で `CAnn` の申告が消える
     this.aidNoDataMask = saved.aidNoDataMask;
     this.msgLineRow = saved.msgLineRow;
+    this.icAddr = saved.icAddr; // ACS `restoreNetNulls` の `WTD_IC_addr`・`homePos`
     // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
     // これで「窓ではない」と自然に判定される。退避が空（上で false 復帰）なら画面は変わらず、
     // 記録もしない
@@ -1019,19 +1028,9 @@ export class ScreenBuffer {
     return run.length > 0 ? run : [field];
   }
 
-  /**
-   * カーソルを最初の入力可能（非 bypass）フィールドの先頭へ置く。
-   *
-   * 5250 では WTD に IC/MC が無い場合、カーソルは最初の入力フィールドに着く。
-   * これを行わないとカーソルが原点（1,1）に残り、**AID レコードで報告する
-   * カーソル位置が実機とずれる**。IBM i のヘルプ（F1）はカーソル位置依存で、
-   * フィールド上でなければ「拡張ヘルプ」経路になり、ホストがウィンドウではなく
-   * 別サイズのヘルプ画面を出そうとする（日本語実機の PDM F1 で確認）。
-   */
-  cursorToFirstInputField(): void {
-    const first = this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0);
-    if (first !== undefined) this.cursorAddr = first.startAddr;
-  }
+  // **`cursorToFirstInputField()` はここにあった**が撤去した（src から呼ばれなくなった）。READ のときに先頭の入力欄へ
+  // 寄せる役は、WTD の終わりに既定の位置（ホーム）へ置く `placeCursorAfterWtd` に移った（`20260921-cursor-per-wtd-acs`）。
+  // 既定の位置は下の `homeAddr()`。
 
   /**
    * **既定の位置（ホーム）**: 最初の非 bypass 欄の先頭。**欄が無ければ 0（1 行 1 桁）**

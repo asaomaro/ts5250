@@ -34,3 +34,16 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - 実ブラウザでの打鍵（jsdom のみ）。DBCS 欄の最終桁・継続欄への IME 確定は ACS 側を測っていない（台帳に残した）。
+
+## ラウンド 2（節目の独立点検の差し戻し後）
+- 節目の全量（2026-09-21・5 件をまとめて）: root の `npm run build` / `npm test` / `npm run lint` / `npm run build -w @ts5250/web-ui` すべて exit 0。
+  base 52・ebcdic 100・hostserver 991・scs 71・server 1456（3 skipped）・tn3270 254（38 skipped）・tn5250 761・vt 202・web-ui 2328・
+  gen-tables 10 passed（計 6,225 passed / 0 failed / 41 skipped）。
+- 点検の指摘の修正を外す mutation（V-1〜V-10 と V-5b の 11 通り）: すべて検出。このラウンドの対象は V-7（IME の選択置換で typeChar）。
+
+### 失敗の証跡（ラウンド 2）
+点検役の再現テスト（リポジトリ外の scratchpad）の出力。修正前の HEAD での観測:
+
+```
+（コードを読んで確認した指摘。実行の証跡なし。修正後のテスト: 選択を置き換える IME 確定で `AXCDE`・0012）
+```

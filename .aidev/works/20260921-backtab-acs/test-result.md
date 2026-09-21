@@ -32,3 +32,16 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - 実ブラウザの Shift+Tab（jsdom のみ）。DBCS 欄の SO の直後での Backtab は論理位置 0 として扱った（ACS の SO の補正と同じ結果になるはずだが測っていない）。
+
+## ラウンド 2（節目の独立点検の差し戻し後）
+- 節目の全量（2026-09-21・5 件をまとめて）: root の `npm run build` / `npm test` / `npm run lint` / `npm run build -w @ts5250/web-ui` すべて exit 0。
+  base 52・ebcdic 100・hostserver 991・scs 71・server 1456（3 skipped）・tn3270 254（38 skipped）・tn5250 761・vt 202・web-ui 2328・
+  gen-tables 10 passed（計 6,225 passed / 0 failed / 41 skipped）。
+- 点検の指摘の修正を外す mutation（V-1〜V-10 と V-5b の 11 通り）: すべて検出。このラウンドの対象は V-2（同じ欄の Backtab でカーソルを知らせない）。
+
+### 失敗の証跡（ラウンド 2）
+点検役の再現テスト（リポジトリ外の scratchpad）の出力。修正前の HEAD での観測:
+
+```
+sent [{"type":"key","key":"Enter","cursor":{"row":7,"col":22}}]   # ACS は 7,20
+```

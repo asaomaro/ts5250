@@ -35,3 +35,16 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - 解錠中に届く WTD（CLEAR も SOH も CC1 の施錠も無いもの）で ACS がカーソルを動かすか（decisions D2）。
+
+## ラウンド 2（節目の独立点検の差し戻し後）
+- 節目の全量（2026-09-21・5 件をまとめて）: root の `npm run build` / `npm test` / `npm run lint` / `npm run build -w @ts5250/web-ui` すべて exit 0。
+  base 52・ebcdic 100・hostserver 991・scs 71・server 1456（3 skipped）・tn3270 254（38 skipped）・tn5250 761・vt 202・web-ui 2328・
+  gen-tables 10 passed（計 6,225 passed / 0 failed / 41 skipped）。
+- 点検の指摘の修正を外す mutation（V-1〜V-10 と V-5b の 11 通り）: すべて検出。このラウンドの対象は V-1（復元で IC を戻さない → 2 件が落ちる）。
+
+### 失敗の証跡（ラウンド 2）
+点検役の再現テスト（リポジトリ外の scratchpad）の出力。修正前の HEAD での観測:
+
+```
+restored home {"row":12,"col":33} / cursor after plain WTD {"row":12,"col":33}   # 主画面の IC は 8,13
+```

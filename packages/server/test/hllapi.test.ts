@@ -274,6 +274,25 @@ describe("キー送信", () => {
     expect(sendAid).toHaveBeenCalledWith("Enter", expect.anything());
   });
 
+  it("**@0（Home）はホーム位置へ移り、そこでもう一度押すと Record Backspace を送る**（ACS `processHome`。`20260921-home-record-backspace`）", async () => {
+    const f = field({ index: 1, row: 1, col: 2, length: 4 });
+    const s = { ...snap({ rows: 2, cols: 10, fields: [f] }), home: { row: 2, col: 3 } };
+    const { deps, sendAid } = await connected({ snapshot: s });
+    expect((await call(deps, HF.SEND_KEY, { data: "@0" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).not.toHaveBeenCalled();
+    // Query Cursor Location はホスト側のカーソルを返すので、手元のカーソルは送った AID のカーソルで見る
+    expect((await call(deps, HF.SEND_KEY, { data: "@0" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("RecordBackspace", expect.objectContaining({ cursor: { row: 2, col: 3 } }));
+  });
+
+  it("ホーム位置を持たない画面（3270）の @0 は先頭の入力欄へ移るだけ（送らない）", async () => {
+    const f = field({ index: 1, row: 1, col: 2, length: 4 });
+    const { deps, sendAid } = await connected({ snapshot: snap({ rows: 2, cols: 10, fields: [f] }) });
+    await call(deps, HF.SEND_KEY, { data: "@0" });
+    await call(deps, HF.SEND_KEY, { data: "@0" });
+    expect(sendAid).not.toHaveBeenCalled();
+  });
+
   it("**写せないキーがあれば何も送らずに rc=20**", async () => {
     const { deps, sendAid } = await connected();
     // `@x` は PA1（5250 に無い）。前に @E があっても**送らない**

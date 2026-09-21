@@ -273,6 +273,26 @@ describe("ScreenGrid: 挿入モードの打鍵", () => {
     w.unmount();
   });
 
+  it("IME 確定で選択を置き換えた後の挿入も余地を数える（入らない字で 0012。黙って消さない。独立点検の指摘）", async () => {
+    const fields = [fld({ index: 1, row: 5, col: 10, length: 5, value: "ABCDE" })];
+    const w = mountGrid(fields);
+    await nextTick();
+    const el = inputs(w)[0]!;
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await nextTick();
+    await press(el, "Insert");
+    el.setSelectionRange(1, 2); // B を選ぶ
+    el.dispatchEvent(new CompositionEvent("compositionstart"));
+    await nextTick();
+    el.value = el.value + "XY"; // 確定した 2 字（prefix の後ろ）
+    el.dispatchEvent(new CompositionEvent("compositionend"));
+    await nextTick();
+    expect(values(w, fields)).toEqual(["AXCDE"]);
+    expect(notices(w)).toContain(MSG_NO_ROOM);
+    w.unmount();
+  });
+
   it("DBCS 欄: 予算を越える挿入は拒否し、エラー 0012 を出す", async () => {
     const fields = [fld({ index: 1, row: 5, col: 10, length: 6, dbcsType: "open", value: "あい" })];
     const w = mountGrid(fields);

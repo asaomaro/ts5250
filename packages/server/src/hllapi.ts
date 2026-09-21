@@ -701,6 +701,13 @@ async function sendKey(
       continue;
     }
     if (stroke.kind === "local") {
+      // **ホーム位置での Home は Record Backspace（AID 0xF8）**（ACS `PS5250.processHome`。`20260921-home-record-backspace`）。
+      // ホーム位置は 5250 のスナップショットだけが持つ（3270 には無いので、そちらは従来どおり移動だけ）
+      if (stroke.action === "home" && snapshot.home !== undefined && conn.cursor === homePos(snapshot)) {
+        const r = await sendAid(deps, entry, conn, "RecordBackspace", user);
+        if (r.rc !== HRC.SUCCESSFUL) return r;
+        continue;
+      }
       moveCursor(snapshot, conn, stroke.action);
       continue;
     }
@@ -713,12 +720,24 @@ async function sendKey(
   return ok();
 }
 
+/** スナップショットのホーム位置（1 起点の PS 位置）。`home` を持つ画面だけで呼ぶ */
+function homePos(snapshot: ScreenSnapshot): number {
+  const h = snapshot.home!;
+  return (h.row - 1) * snapshot.cols + h.col;
+}
+
 /** ローカル操作でカーソルを動かす（ホストへ送らない） */
 function moveCursor(snapshot: ScreenSnapshot, conn: Connection, action: LocalAction): void {
   const size = sizeOf(snapshot);
   const max = psLength(size);
   switch (action) {
     case "home": {
+      // ホーム位置（IC、無ければ先頭の非バイパス欄。ACS `getHomePos`）。~~先頭の入力欄~~ はホーム位置を持たない画面
+      // （3270）の代わり
+      if (snapshot.home !== undefined) {
+        conn.cursor = homePos(snapshot);
+        return;
+      }
       const first = nextInputField(snapshot, 0);
       conn.cursor = first ? (fieldStart(first, size) ?? 1) : 1;
       return;

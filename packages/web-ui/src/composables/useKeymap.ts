@@ -17,8 +17,9 @@ export const LOCAL_EDIT_ACTIONS = [
   "field-exit",
   "erase-eof",
   "erase-input",
-  // **符号付き数値欄で負値を入れる主経路**（実機は数値キーパッドの `-` / `+`）。
-  // 打鍵の `-` / `+` も数値欄ではここへ横流しする（ScreenGrid）。
+  // **符号付き数値欄で負値を入れる主経路**（実機は数値キーパッドの `-` / `+`。`numpadFieldSign`）。
+  // ~~打鍵の `-` / `+` も数値欄ではここへ横流しする（ScreenGrid）~~ → メイン行の `-` `+` は文字
+  // （ACS。`20260921-numpad-field-sign`）
   "field-minus",
   "field-plus",
   // Dup: カーソルから欄末尾までを 0x1C で埋める（FFW の DUP_ENABLE が立つ欄だけ）
@@ -43,16 +44,40 @@ export type LocalAction =
   | "word-down"
   | LocalEditAction;
 
+/**
+ * **テンキーの − / ＋ か**（ACS の既定の割り当て `AcsMapFunctions.MAP_5250` の `B109 = [field-]`・`B107 = [field+]`。
+ * `20260921-numpad-field-sign`）。当てはまれば Field− / Field+、でなければ `undefined`。
+ *
+ * - **5250 のときだけ**（`fieldSignKeys`）。3270 に Field± は無く、テンキーの − は文字（節目の独立点検の指摘）
+ * - 物理キー（`code`）と**文字（`key`）の両方**で見る。IME の変換中は `key` が `"Process"` になるので当たらない
+ *   （変換の途中で欄を出ないため。同じ指摘）
+ * - 修飾なし（`B`）。Shift 付きは割り当てない
+ */
+export function numpadFieldSign(
+  ev: { key: string; code?: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean; isComposing?: boolean },
+  fieldSignKeys: boolean
+): "field-minus" | "field-plus" | undefined {
+  if (!fieldSignKeys || ev.isComposing === true || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return undefined;
+  if (ev.code === "NumpadSubtract" && ev.key === "-") return "field-minus";
+  if (ev.code === "NumpadAdd" && ev.key === "+") return "field-plus";
+  return undefined;
+}
+
 /** キーイベントを AID キー・ローカル操作・null（非対象）に分類する（純関数・テスト可能） */
-export function classifyKey(ev: {
-  key: string;
-  /** 物理キー（`KeyboardEvent.code`）。テンキーの − / ＋ をメイン行と見分けるのに使う */
-  code?: string;
-  shiftKey: boolean;
-  ctrlKey: boolean;
-  altKey: boolean;
-  metaKey: boolean;
-}): { aid?: AidKey; local?: LocalAction } {
+export function classifyKey(
+  ev: {
+    key: string;
+    /** 物理キー（`KeyboardEvent.code`）。テンキーの − / ＋ をメイン行と見分けるのに使う */
+    code?: string;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    altKey: boolean;
+    metaKey: boolean;
+    isComposing?: boolean;
+  },
+  /** テンキーの ± を Field± に振り分けるか（5250 のときだけ true。`numpadFieldSign`） */
+  opts: { fieldSignKeys?: boolean } = {}
+): { aid?: AidKey; local?: LocalAction } {
   // Ctrl+矢印 = 語頭ジャンプ（ACS のカーソル頭出し。入力欄に限らず画面全体で動く）。
   // 左右は前後の語頭へ、上下は内容のある近接行の先頭語（行の頭）へ。
   // 他の修飾つき（Alt+PageUp/Down のタブ切替・Alt+矢印のペイン移動）は App 側の
@@ -64,11 +89,10 @@ export function classifyKey(ev: {
     if (ev.key === "ArrowDown") return { local: "word-down" };
   }
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return {};
-  // **テンキーの − / ＋ は Field− / Field+**（ACS の既定の割り当て `AcsMapFunctions.MAP_5250` の
-  // `B109 = [field-]`・`B107 = [field+]`。メイン行の `-` `+` は文字として欄の型の規則に従う。
-  // `20260921-numpad-field-sign`。~~以前は物理キーを見分けられず、数値欄の `-` `+` をすべて Field± にしていた~~）
-  if (!ev.shiftKey && ev.code === "NumpadSubtract") return { local: "field-minus" };
-  if (!ev.shiftKey && ev.code === "NumpadAdd") return { local: "field-plus" };
+  // **テンキーの − / ＋ は Field− / Field+**（メイン行の `-` `+` は文字として欄の型の規則に従う。
+  // ~~以前は物理キーを見分けられず、数値欄の `-` `+` をすべて Field± にしていた~~）
+  const sign = numpadFieldSign(ev, opts.fieldSignKeys === true);
+  if (sign) return { local: sign };
   const k = ev.key;
 
   // F1–F12（Shift で F13–F24）
@@ -118,6 +142,8 @@ export interface KeymapHandlers {
   playMacro(macroId: string): void;
   /** このペインがフォーカス中か（捕捉はフォーカスペインのみ） */
   isFocused(): boolean;
+  /** テンキーの ± を Field± にするか（5250 のときだけ true。未指定は false＝文字） */
+  fieldSignKeys?(): boolean;
 }
 
 /**
@@ -226,7 +252,7 @@ export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => vo
       else h.sendAid(custom);
       return;
     }
-    const { aid, local } = classifyKey(ev);
+    const { aid, local } = classifyKey(ev, { fieldSignKeys: h.fieldSignKeys?.() === true });
     if (aid) {
       ev.preventDefault();
       h.sendAid(aid);

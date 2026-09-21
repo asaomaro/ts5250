@@ -89,7 +89,8 @@ describe("ホストのカーソル位置を桁まで再現する", () => {
    * どこが見つかったのか分からなくなっていた（利用者の指摘）。ACS は指された桁に置く。
    *
    * 「ホストがカーソルを置かなかった画面」の正規化は protocol 層が済ませている
-   * （`session.ts` の `readRequested && !cursorSet` → `cursorToFirstInputField`）ので、
+   * （~~`session.ts` の `readRequested && !cursorSet` → `cursorToFirstInputField`~~ → WTD の終わりに IC・MC・既定の位置へ置く
+   * `wtd-applier.ts` の `placeCursorAfterWtd`。`20260921-cursor-per-wtd-acs`）ので、
    * ここへ来る「欄の外」はホストがわざと指した場合だけ。
    */
   it("カーソルが入力欄の外なら**寄せずに**その桁へ（欄には focus しない）", async () => {

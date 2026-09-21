@@ -76,7 +76,7 @@ import {
   MSG_DUP_DISALLOWED,
   MSG_FIELD_EXIT_KEY_INVALID
 } from "../composables/opMessages.js";
-import { localEditActionOf } from "../composables/useKeymap.js";
+import { localEditActionOf, numpadFieldSign } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -128,6 +128,11 @@ const props = withDefaults(
     linkify?: boolean;
     /** 通信中（ホスト応答待ち）。入力欄を編集不可にしてプロテクトする */
     busy?: boolean;
+    /**
+     * テンキーの − / ＋ を Field− / Field+ にするか（**5250 のときだけ** true。3270 では文字）。
+     * true なら欄の input はそのキーを文字として入れず、ペインのキーマップへ委ねる（`numpadFieldSign`）
+     */
+    fieldSignKeys?: boolean;
     /**
      * **操作員メッセージ**（`20260802-message-line`）。画面の**最下行に重ねて**出す。
      *
@@ -2348,9 +2353,9 @@ function fieldExitKey(): void {
  * **符号付き数値欄でだけ符号が付く**（それ以外は Field Exit と同じ。`fieldEdit.fieldSign` の
  * コメント参照）。DBCS 欄は Field Exit と同じく右寄せしない。
  */
-/** テンキーの − / ＋（修飾なし）。ACS は Field− / Field+（`B109` / `B107`）で、文字としては入れない */
+/** テンキーの − / ＋（5250・修飾なし・変換中でない）。ACS は Field− / Field+（`B109` / `B107`）で、文字としては入れない */
 function isNumpadSign(ev: KeyboardEvent): boolean {
-  return !ev.shiftKey && (ev.code === "NumpadSubtract" || ev.code === "NumpadAdd");
+  return numpadFieldSign(ev, props.fieldSignKeys === true) !== undefined;
 }
 
 function fieldSignKey(negative: boolean): void {
@@ -2491,8 +2496,9 @@ function focusCursorField(): void {
      * ACS は指された桁にカーソルを置く。
      *
      * 「ホストがカーソルを置かなかった画面」を心配して先頭欄へ寄せていたが、
-     * **その正規化は既に protocol 層で済んでいる**——`session.ts` は
-     * `readRequested && !cursorSet` のときに `cursorToFirstInputField()` を通す。
+     * **その正規化は既に protocol 層で済んでいる**——~~`session.ts` は
+     * `readRequested && !cursorSet` のときに `cursorToFirstInputField()` を通す~~ → WTD の終わりに IC・MC・既定の位置へ置く
+     * （`wtd-applier.ts` の `placeCursorAfterWtd`。`20260921-cursor-per-wtd-acs`）。
      * ここまで来る「欄の外」は、ホストが**わざと**そこを指した場合だけ。
      */
     const active = document.activeElement;
@@ -3560,11 +3566,9 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
     const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
-    const trial = dbcs
-      ? dbcsType(base, ch, f)
-      : e.insertMode && !composeReplacedSelection
-        ? insertChar(e, ch, lastTypeable(f))
-        : typeChar(e, ch);
+    // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が
+    // 通知なしに消えていた。独立点検の指摘）
+    const trial = dbcs ? dbcsType(base, ch, f) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) {
       noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで黙って止める＝従来どおり）
       break;

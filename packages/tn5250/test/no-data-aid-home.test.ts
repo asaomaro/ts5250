@@ -89,3 +89,28 @@ describe("ホーム位置（ACS `PS5250.getHomePos`）", () => {
     expect(buf.snapshot("s", false).home).toEqual({ row: 1, col: 1 });
   });
 });
+
+describe("SAVE / RESTORE SCREEN は IC も退避・復元する（ACS `Save5250Net` の `SaveWTD_IC_addr`・`SaveHomePos`）", () => {
+  // 節目の独立点検の指摘: 窓を開いて F12 で戻ると窓の IC が残り、ホーム位置が窓を指し、
+  // 後続の IC 無しの WTD でカーソルが窓の位置へ飛んでいた
+  const WIN_FIELD = [ORDER.SBA, 12, 30, ORDER.SF, 0x40, 0x00, 0x20, 0x00, 4];
+  function mainThenWindowThenRestore(): ScreenBuffer {
+    const buf = screen([ORDER.IC, 8, 13]);
+    const ap = (b: number[]): void => void applyDataStream(Uint8Array.from(b), buf, codec, () => {});
+    ap([ESC, COMMAND.SAVE_SCREEN]);
+    ap([...WTD, ...SOH, ...WIN_FIELD, ORDER.IC, 12, 33]);
+    expect(buf.snapshot("s", false).home, "前提: 窓ではホーム位置が窓の IC").toEqual({ row: 12, col: 33 });
+    ap([ESC, COMMAND.RESTORE_SCREEN]);
+    return buf;
+  }
+
+  it("戻した画面のホーム位置は主画面の IC", () => {
+    expect(mainThenWindowThenRestore().snapshot("s", false).home).toEqual({ row: 8, col: 13 });
+  });
+
+  it("戻した後の IC 無しの WTD でカーソルは主画面の IC へ（窓の位置へ飛ばない）", () => {
+    const buf = mainThenWindowThenRestore();
+    applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 1, 0xc1]), buf, codec, () => {});
+    expect(buf.snapshot("s", false).cursor).toEqual({ row: 8, col: 13 });
+  });
+});
