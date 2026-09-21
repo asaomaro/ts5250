@@ -206,3 +206,20 @@ describe("応答を止めているプリンター（`20260921-printer-hold-respo
     w2.unmount();
   });
 });
+
+/**
+ * **常駐のプリンターが起動応答で断られたときの理由を日本語で出す**（`20260921-startup-codes-japanese` の節目の点検の指摘。
+ * サーバーは英語の文言（`printer session rejected (8925: …)`）を保存する）。それ以外の理由はそのまま
+ */
+describe("常駐の失敗の理由", () => {
+  it.each([
+    ["printer session rejected (8925: Creation of device failed.)", "ホストが接続を断りました（8925: 装置を作れませんでした）"],
+    ["connect ECONNREFUSED", "connect ECONNREFUSED"]
+  ])("%s", async (error, shown) => {
+    stubFetch(false, { ...PRINTER_ROW, state: "error", error });
+    await servicesStore.refresh();
+    const w = await mountPane();
+    expect(w.find(".reason").text()).toBe(shown);
+    w.unmount();
+  });
+});

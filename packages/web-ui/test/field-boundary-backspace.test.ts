@@ -97,6 +97,21 @@ describe("ScreenGrid: 欄の先頭の Backspace", () => {
     w.unmount();
   });
 
+  // `20260921-backspace-field-start` の節目の点検の指摘を実機の ACS のコアで確かめた（`scripts/acs-probe/backspace-dbcs-field-start.txt`）:
+  // O の欄の先頭・J の欄の SO の後ろ（Tab で着く位置）とも 0005。~~DBCS の欄は前の欄へ移る（0101 は未確認）~~
+  it.each(["open", "only"] as const)("**DBCS の欄（%s）の先頭でも 0005 で、前の欄へ移らない**", async (dbcsType) => {
+    const w = mountGrid([
+      fld({ index: 1, row: 3, col: 10, length: 6 }),
+      fld({ index: 2, row: 5, col: 10, length: 12, dbcsType })
+    ]);
+    await nextTick();
+    await backspaceAt(w, 1, 0);
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("edit"), "値を書き換えてはいけない").toBeUndefined();
+    expect(document.activeElement, "前の欄へ移った").toBe(inputs(w)[1]);
+    w.unmount();
+  });
+
   it("先頭の欄で押しても同じく 0005", async () => {
     const w = mountGrid(SPLIT);
     await nextTick();

@@ -8,6 +8,8 @@
 - 実機（PUB400）: 記号の無い同じ装置名で 2 本目を開いて 8902 で断らせた（`scratchpad/reject-8902.mjs`）——文言は `session rejected (8902: Device not available.)（装置 <名前>）`、
   `startupRejectionText` と同じ正規表現でコード 8902 と装置名が拾えた。
 - 全量は次の節目でまとめて回す。
+- 節目（マイルストーン 8）の独立点検への対応後: 全量 6,403 passed / 0 failed / 41 skipped・lint・build 通過。繋ぎ直しの拒否の通知（`startup-rejection-ja.test.ts`）・サービス画面（`services-pane-open-printer.test.ts`）・8934・
+  tn5250 の表との直接の突き合わせ。mutation 検出。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — 形・プリンター・答え直しの最中の文言・表に無いコード・通知・開く前（表示とプリンター）。

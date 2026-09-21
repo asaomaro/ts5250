@@ -323,6 +323,26 @@ describe("ジョブ識別子の解決", () => {
     mgr.closeAll();
   });
 
+  /**
+   * **ジョブの名前は起動応答のもの（CCSID 37 で読んだ装置名）のまま**、照会からは利用者と番号だけを採る
+   * （`20260921-startup-record-cp037` の節目の点検の懸念: 一覧の名前はジョブの CCSID で読まれ、930 では `$` が `¥` に化けうる）
+   */
+  it("照会の一覧の名前で装置名を上書きしない", async () => {
+    const queried: string[] = [];
+    const mgr = new SessionManager({
+      passwordLevel: async () => 3,
+      lookupJobs: async (_t, filter) => {
+        queried.push(filter.name); // 照会に使った名前＝起動応答の装置名
+        return [{ name: filter.name.replace(/.$/, "¥"), user: "USER", number: "1" }];
+      }
+    });
+    const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
+    await entry.jobResolved;
+    expect(queried).toHaveLength(1);
+    expect(entry.job).toMatchObject({ name: queried[0], user: "USER", number: "1" });
+    mgr.closeAll();
+  });
+
   /** 実機では同じ装置名のジョブが複数返った（別の利用者のもの）。採用してはいけない */
   it("照会が複数件なら採用しない（装置名だけのまま）", async () => {
     const mgr = new SessionManager({

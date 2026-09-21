@@ -491,6 +491,34 @@ int main(int argc, char *argv[]) {
             logHex("reply", dta, (int)bytesRead);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "DBCSBS") == 0) {
+        /*
+         * **DBCS の欄の先頭で Backspace を押したとき**を測る画面（`20260921-backspace-field-start` の節目の点検の指摘）。
+         * ACS `FFT5250.nextNonByPassInputFieldPos` は O（open）の欄では欄の先頭に、J（only）の欄では SO の後ろにカーソルを置く。
+         * そこで Backspace を押したときのエラーを端末の側で見る（ホストは Enter まで待つだけ）。
+         *   (3,10) SBCS 6 桁 / (5,10) O 12 桁（FCW 8280）/ (7,10) J 12 桁（FCW 8200）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x20, 0x00, 0x0C,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 DBCS の欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

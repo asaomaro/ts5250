@@ -3,6 +3,8 @@
 ## 実行したもの
 - web-ui のキー操作・欄の編集に触れる 40 ファイル — 528 passed / 0 failed。型検査（test 込み）通過。
 - 実機（ACS のコア・PUB400）: research F2（2 回）。
+- 節目（マイルストーン 8）の独立点検への対応後: 全量 6,403 passed / 0 failed / 41 skipped・lint・build 通過。DBCS の欄の先頭の Backspace を ACS のコアで実測（社内機・DSM の試験画面 `DBCSBS`。測った後に消した）——O の欄・J の欄とも 0005。
+  `field-boundary-backspace.test.ts` に DBCS の 2 件。mutation（DBCS の先頭で 0005 を出さない）検出。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — 0005・値もフォーカスもそのまま・続けて打てない。

@@ -1,0 +1,35 @@
+# DBCS の欄の先頭で Backspace（ACS のコア・社内機・930。`20260921-backspace-field-start` の節目の点検の指摘）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `DBCSBS`。`scripts/build-dscmd.mjs` で作り、測った後に消す）:
+#   (3,10) SBCS 6 桁 / (5,10) O 12 桁（FCW 8280）/ (7,10) J 12 桁（FCW 8200）。IC は O の欄の先頭。
+# 実測（2026-09-21）: O の欄の先頭（5,10）で Backspace → 「画面の保護域にカーソルがある。」（0005）・カーソルそのまま。
+#   Tab で J の欄へ → 7,11（SO の後ろ）。そこで Backspace → 同じく 0005。~~J の欄は 0101（原典の手順の読み）~~ は実測と違った。
+# 実行: DSCMD_PGM=DBCSBS で build-dscmd.mjs → node ... scripts/acs-probe.mjs scripts/acs-probe/backspace-dbcs-field-start.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DBCSBS PARM('DBCSBS')[enter]
+settle 3000
+dump b0-initial
+keys [backspace]
+settle 500
+dump b1-open-start
+keys [reset]
+settle 300
+keys [tab]
+settle 300
+dump b2-j-after-tab
+keys [backspace]
+settle 500
+dump b3-j-start
+keys [reset]
+settle 300
+setcursor 7,10
+settle 300
+keys [backspace]
+settle 500
+dump b4-j-attr-pos
+keys [reset]
+settle 300
+keys [enter]
+settle 2000
+dump b5-end

@@ -20,7 +20,7 @@ import { servicesStore } from "../stores/services.js";
 import { systemsStore } from "../stores/systems.js";
 import { useOpenConfigured } from "../composables/openConfigured.js";
 import type { PrinterRow, WatchRow } from "@ts5250/server";
-import { MSG_PRINTER_CHIP_HELD, MSG_PRINTER_SERVICE_HELD } from "../composables/opMessages.js";
+import { MSG_PRINTER_CHIP_HELD, MSG_PRINTER_SERVICE_HELD, startupRejectionText } from "../composables/opMessages.js";
 
 /**
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
@@ -131,6 +131,15 @@ const rows = computed<Row[]>(() => [
 /** 待ち受けている（接続を持っている）か。**停止中と再接続中を混ぜない**（意図と障害は別物） */
 const listening = (r: Row): boolean => r.state === "listening" || r.state === "reconnecting";
 
+/**
+ * 常駐の失敗の理由。**起動応答で断られたときは日本語の理由に置き換える**（サーバーは英語の文言を持つ。`20260921-startup-codes-japanese` の
+ * 節目の点検の指摘——ランチャーと通知だけ置き換えていた）。それ以外は従来どおりそのまま（接続先など診断に要る情報を含む）
+ */
+function rowErrorText(error: string | undefined): string {
+  if (error === undefined) return "";
+  return startupRejectionText(error) ?? error;
+}
+
 function stateLabel(r: Row): string {
   if (r.state === "listening") return r.kind === "watch" ? "監視中" : "待ち受け中";
   if (r.state === "reconnecting") return "再接続中";
@@ -229,10 +238,10 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
             </td>
             <td class="k">{{ kindLabel(r) }}</td>
             <td>
-              <span class="state" :class="r.state" :title="r.error ?? ''">{{ stateLabel(r) }}</span>
+              <span class="state" :class="r.state" :title="rowErrorText(r.error)">{{ stateLabel(r) }}</span>
               <!-- **待ち受けていても届かない**ことを出す（止めている間ホストは次を送らない。独立点検の指摘） -->
               <span v-if="r.held" class="lost" :title="MSG_PRINTER_SERVICE_HELD">⚠ {{ MSG_PRINTER_CHIP_HELD }}</span>
-              <span v-if="r.error" class="reason" :title="r.error">{{ r.error }}</span>
+              <span v-if="r.error" class="reason" :title="rowErrorText(r.error)">{{ rowErrorText(r.error) }}</span>
             </td>
             <td class="k">{{ r.autoStart ? "自動" : "手動" }}</td>
             <td class="k">

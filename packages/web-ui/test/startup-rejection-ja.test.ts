@@ -7,6 +7,7 @@ import {
   MSG_SESSION_REJECTED_HEAD,
   noticeFor
 } from "../src/composables/opMessages.js";
+import { knownStartupCodes, STARTUP_SUCCESS_CODES } from "@ts5250/tn5250/browser";
 
 /**
  * **起動応答で断られた理由を日本語で出す**（`20260921-startup-codes-japanese`）。サーバーの文言は英語なので、コードを拾って意味に置き換える。
@@ -47,17 +48,14 @@ describe("startupRejectionText", () => {
   it("コードが読めなければ undefined", () => {
     expect(startupRejectionText("closed during negotiation")).toBeUndefined();
   });
-  it("**日本語の表は、tn5250 の失敗のコードの一覧と同じ**（`packages/tn5250/test/startup-record.test.ts` の `STARTUP_FAILURE_CODES` と同じ並び）", () => {
-    const failureCodes = [
-      "2702", "2703", "2777", "8901", "8902", "8903", "8906", "8907", "8910", "8916", "8917", "8918", "8920", "8921", "8922",
-      "8923", "8925", "8928", "8929", "8930", "8934", "8935", "8936", "8937", "8940", "I904"
-    ];
+  it("**日本語の表は、tn5250 の表の失敗のコードとちょうど同じ**（一覧を手書きで 2 つ持たず、tn5250 の表と直接比べる。節目の点検の指摘）", () => {
+    const failureCodes = knownStartupCodes().filter((c) => !STARTUP_SUCCESS_CODES.has(c));
     expect(Object.keys(STARTUP_CODE_MEANING_JA).sort()).toEqual([...failureCodes].sort());
   });
 });
 
 describe("出し分け", () => {
-  it("**開いたあとのエラー（繋ぎ直しで断られた等）も日本語の理由**", () => {
+  it("**開いたあとのエラー（`error`）も日本語の理由**（自動の繋ぎ直しの拒否は `closed` で届く——下のテスト）", () => {
     expect(wsErrorNotice("SESSION_REJECTED", REJECTED)).toBe(startupRejectionText(REJECTED));
     expect(wsErrorNotice("SESSION_REJECTED", "something else")).toBe(noticeFor("SESSION_REJECTED"));
   });
@@ -70,6 +68,25 @@ describe("出し分け", () => {
     captured.handlers.onServerMessage({ type: "error", code: "SESSION_REJECTED", message: REJECTED });
     await expect(p).rejects.toThrow(startupRejectionText(REJECTED)!);
   });
+  it("**自動の繋ぎ直しがホストに断られて終わったとき（`closed` の理由）も日本語の理由を出す**", async () => {
+    const { sessionsStore } = await import("../src/stores/sessions.js");
+    const p = openSession({ type: "open", host: "h" }, "t");
+    captured.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: { sessionId: "s1", rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false, cells: [], fields: [] } });
+    await p;
+    captured.handlers.onServerMessage({ type: "closed", sessionId: "s1", reason: REJECTED, ended: true });
+    expect(sessionsStore.get("s1")!.notice).toBe(startupRejectionText(REJECTED));
+  });
+
+  it("起動応答でない終わり方は従来どおり（通知を消すだけ）", async () => {
+    const { sessionsStore } = await import("../src/stores/sessions.js");
+    const p = openSession({ type: "open", host: "h" }, "t");
+    captured.handlers.onServerMessage({ type: "opened", sessionId: "s2", screen: { sessionId: "s2", rows: 24, cols: 80, cursor: { row: 1, col: 1 }, keyboardLocked: false, cells: [], fields: [] } });
+    await p;
+    sessionsStore.get("s2")!.notice = "前の通知";
+    captured.handlers.onServerMessage({ type: "closed", sessionId: "s2", reason: "socket closed", ended: true });
+    expect(sessionsStore.get("s2")!.notice).toBeUndefined();
+  });
+
   it("プリンターを開くときも（8925 など）", async () => {
     const msg = "printer session rejected (8925: Creation of device failed.)";
     const p = openPrinterSession({ type: "open", kind: "printer", host: "h" } as never, "p");

@@ -984,7 +984,10 @@ export class SessionManager {
       // **照会の間に繋ぎ直して装置名が替わっていたら捨てる**（`20260921-auto-reconnect`）。前の接続の
       // ジョブで、繋ぎ直した後のジョブ名を上書きしない（独立点検の指摘）
       if (entry.job?.name !== device) return entry.job;
-      entry.job = { ...entry.job, name: only.name, user: only.user, number: only.number };
+      // **名前は起動応答のもの（CCSID 37 で読んだ装置名）のまま**、利用者と番号だけを採る——照会は同じ名前で引いており、
+      // 一覧の名前はジョブの CCSID で読まれるので、930 のジョブでは `$` が `¥` に化けうる（`20260921-startup-record-cp037` の
+      // 節目の点検の懸念）。~~name: only.name~~
+      entry.job = { ...entry.job, name: device, user: only.user, number: only.number };
       return entry.job;
     } catch (err) {
       // ホストサーバーが使えない・権限が無い等。セッションには影響させない

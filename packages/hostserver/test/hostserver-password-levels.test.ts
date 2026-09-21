@@ -69,6 +69,7 @@ describe("要求の暗号化種別は置換値の長さで決まる（jt400 `Sig
       }
     } as unknown as HostConnection;
     await startHostServer(conn, 0xe004, { user: "usera", password: "Secret", passwordLevel: 4 });
+    expect(frames[0]![4], "シード交換のクライアント属性（jt400 `AS400XChgRandSeedDS` と同じ 3）").toBe(3);
     const start = frames[1]!;
     expect(start[20], "暗号化種別").toBe(7);
     expect(new DataView(start.buffer, start.byteOffset).getUint32(22), "置換値の LL（6 + 64）").toBe(70);
@@ -100,6 +101,11 @@ describe("サインオン・サーバーの要求も種別 7（レベル 4）", 
     try {
       const res = await signon({ host: "127.0.0.1", port, user: "usera", password: "Secret", timeoutMs: 3000 });
       expect(res.info.passwordLevel).toBe(4);
+      // 属性交換のデータストリーム・レベルは jt400 `SignonExchangeAttributeReq` と同じ 10（CP 0x1102）
+      const x = got[0]!;
+      const at = x.indexOf(Buffer.from([0x11, 0x02]));
+      expect(at, "CP 0x1102 が無い").toBeGreaterThan(0);
+      expect(x.readUInt16BE(at + 2)).toBe(10);
       const req = got[1]!;
       expect(req[20], "暗号化種別").toBe(7);
       // 置換値の CP（0x1105）の LL は 6 + 64
@@ -107,5 +113,28 @@ describe("サインオン・サーバーの要求も種別 7（レベル 4）", 
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+describe("DDM の SECMEC（jt400 `DDMACCSECRequestDataStream` / `DDMSECCHKRequestDataStream`）", () => {
+  // SECMEC は CP 0x11A2 の値。ACCSEC はレベル 2 以上で 8（SHA）・0/1 で 6（DES）、SECCHK は置換値が 20 / 64 バイトなら 8・8 バイトなら 6
+  const secmecOf = (frame: Uint8Array) => {
+    const b = Buffer.from(frame);
+    const at = b.indexOf(Buffer.from([0x11, 0xa2]));
+    return b.readUInt16BE(at + 2);
+  };
+  it("ACCSEC: レベル 0・1 は 6、2 以上は 8", async () => {
+    const { buildAccsec } = await import("../src/ddm/ddm-connection.js");
+    expect(secmecOf(buildAccsec(C, 0))).toBe(6);
+    expect(secmecOf(buildAccsec(C, 1))).toBe(6);
+    expect(secmecOf(buildAccsec(C, 2))).toBe(8);
+    expect(secmecOf(buildAccsec(C, 4))).toBe(8);
+  });
+  it("SECCHK: DES（8 バイト）は 6、SHA-1（20）・SHA-512（64）は 8", async () => {
+    const { buildSecchk } = await import("../src/ddm/ddm-connection.js");
+    const user = new Uint8Array(10).fill(0x40);
+    expect(secmecOf(buildSecchk(user, new Uint8Array(8)))).toBe(6);
+    expect(secmecOf(buildSecchk(user, new Uint8Array(20)))).toBe(8);
+    expect(secmecOf(buildSecchk(user, new Uint8Array(64)))).toBe(8);
   });
 });

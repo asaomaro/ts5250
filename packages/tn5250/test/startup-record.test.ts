@@ -3,7 +3,6 @@ import {
   parseStartupResponse,
   startupCodeMeaning,
   isKnownStartupCode,
-  knownStartupCodes,
   STARTUP_SUCCESS_CODES
 } from "../src/telnet/startup-record.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
@@ -37,6 +36,12 @@ describe("起動応答レコード", () => {
    * **セッションの CCSID によらず CCSID 37 で読む**（ACS `processStartUpConfirmation` の `new CodePage(37, 2)`。`20260921-startup-record-cp037`）。
    * 930 / 5026 の SBCS（290）では 0x5B が `¥` なので、セッションの codec で読むと `$` を含む装置名が化けていた
    */
+  it("**名前の末尾の NUL も空白と同じく落とす**（ACS `extractNameFromStartUpConfirmationRecord` は末尾の 0x00・0x40 を落とす）", () => {
+    const rec = Uint8Array.from(REAL_RECORD);
+    rec.set([0xc4, 0xe2, 0xd7, 0xf0, 0xf1, 0x00, 0x00, 0x00, 0x00, 0x00], 28); // "DSP01" + NUL
+    expect(parseStartupResponse(rec)?.device).toBe("DSP01");
+  });
+
   it("**`$` を含む装置名は `$` のまま**（930 の codec なら `¥` に化ける）", () => {
     const rec = Uint8Array.from(REAL_RECORD);
     rec.set([0xc4, 0xe2, 0xd7, 0x5b, 0xf0, 0xf1, 0x40, 0x40, 0x40, 0x40], 28); // "DSP$01"
@@ -111,20 +116,7 @@ describe("ACS が個別に扱う 4 コード", () => {
     expect(startupCodeMeaning("2777")).toBe("Damaged device description.");
     expect(startupCodeMeaning("8936")).toBe("Security failure on session attempt.");
     expect(startupCodeMeaning("8937")).toBe("Automatic sign-on rejected.");
-  });
-});
-
-/**
- * **失敗のコードの一覧を固定する**（`20260921-startup-codes-japanese`）。web-ui は同じ一覧の日本語の意味を持つ
- * （`packages/web-ui/src/composables/opMessages.ts` の `STARTUP_CODE_MEANING_JA`。`startup-rejection-ja.test.ts` が同じ一覧で固定）。
- * ここにコードを足したら、日本語の表にも足す——足さないと利用者には「意味の分からない起動応答」と出る
- */
-const STARTUP_FAILURE_CODES = [
-  "2702", "2703", "2777", "8901", "8902", "8903", "8906", "8907", "8910", "8916", "8917", "8918", "8920", "8921", "8922",
-  "8923", "8925", "8928", "8929", "8930", "8934", "8935", "8936", "8937", "8940", "I904"
-];
-describe("失敗のコードの一覧", () => {
-  it("知っているコードから成功を除くと、この一覧（日本語の表と同じ）", () => {
-    expect(knownStartupCodes().filter((c) => !STARTUP_SUCCESS_CODES.has(c)).sort()).toEqual([...STARTUP_FAILURE_CODES].sort());
+    // ~~"Start-up for device failed."~~ → 同じ表の意味（節目の独立点検の指摘）
+    expect(startupCodeMeaning("8934")).toBe("Start-up for S/36 WSF received.");
   });
 });

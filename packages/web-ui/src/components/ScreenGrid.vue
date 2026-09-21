@@ -208,7 +208,6 @@ const emit = defineEmits<{
    * ~~欄の先頭で Backspace を押すと前の入力欄の末尾へ~~——SBCS の欄は ACS と同じく 0005 にした（`20260921-backspace-field-start`）。
    * DBCS の欄だけ未確認で残している
    */
-  (e: "field-prev", fieldIndex: number): void;
   /**
    * Field Exit が必須の欄を**最終桁まで打った**（ACS `fieldExited`）。欄は出ずカーソルも最終桁に留まるが、
    * ACS はこれを「欄を出た」と数えるので、0020 の待ちを外させる（`20260921-field-exit-required-types`）。
@@ -250,6 +249,10 @@ const byteLen = (value: string): number => dbcsByteLength(value, sessionKind.val
 function inputChar(ch: string, field: Field): string {
   // 英小文字の無いコードページ（930/5026）は a〜z だけ（ACS `CodePage.toUpper` も 290 の a〜z だけ）
   if (props.uppercaseInput && ch >= "a" && ch <= "z") return ch.toUpperCase();
+  // **ギリシャ文字の μ はコードページのマイクロ記号 µ に置き換える**（ACS `PS5250.inputChar` の `hasMicroSymbol`。節目の点検の指摘）。
+  // 当 PJ の SBCS だけのセッションの CCSID（37 ほか Latin-1 系）はどれも µ を持つので、SBCS だけのセッションで置き換える。
+  // DBCS のセッションの SBCS 部（290・1027 ほか）は µ を持たないので置き換えない。置き換えた µ は MONOCASE でも大文字にしない（ACS と同じ）
+  if (ch === "\u03bc" && props.sbcsSession === true) ch = "\u00b5";
   if (field.monocase !== true) return ch;
   // **MONOCASE の欄は 1 バイト文字をすべて大文字にする**（ACS `PS5250.processCharKeyStroke` の `Character.toUpperCase`。
   // `20260921-monocase-non-ascii`）。実機（PUB400・ACS のコア）で `aéñøü` → `AÉÑØÜ`。~~対象は半角 ASCII の a-z のみ~~。
@@ -275,7 +278,7 @@ const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
 //   - 入力欄にフォーカスがある → **native キャレット**（打鍵が入る場所そのもの）
 //   - それ以外                  → 有効カーソル（`effCursor`＝親が持つ論理カーソル）
 // 入力欄の中でも `effCursor` を使わないのは、キャレットを動かして論理カーソルを
-// 通知しない経路（前の欄の末尾へ戻る `onFieldPrev` 等）で、カーソルだけ別の桁に残るため。
+// 通知しない経路（~~前の欄の末尾へ戻る `onFieldPrev`~~ は撤去した。ペインが欄を移す経路）で、カーソルだけ別の桁に残るため。
 // ---------------------------------------------------------------------------
 
 /** カーソルが覆う桁（1 始まり）と桁数（全角の上では 2） */
@@ -360,7 +363,7 @@ function nativeCaretCell(): CursorCell | null {
  * カーソルを描く桁。矩形選択中は入力欄を blur しているので、常に `effCursor`（選択の始点）。
  *
  * `caretTick` / `effCursor` / `inputFocused` / 画面の変化で引き直す。DOM を読むのは描画時なので、
- * 同じ処理の中でフォーカスとキャレットを続けて動かしても（`onFieldPrev`）最後の位置が描かれる。
+ * 同じ処理の中でフォーカスとキャレットを続けて動かしても（ペインの欄の移動）最後の位置が描かれる。
  */
 const cursorCell = computed<CursorCell>(() => {
   void caretTick.value;
@@ -2964,11 +2967,11 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       syncDbcs(el, f);
       return;
     }
-    // 欄の先頭では前の欄の末尾へ移る（削除はしない）。~~SBCS 欄と同じく~~——SBCS 欄は ACS と同じ 0005 にした
-    // （`20260921-backspace-field-start`）。DBCS 欄の ACS は原典の手順上 0101（SO の前が属性の桁）で、文言と実機を
-    // 確かめていないので従来のまま（台帳「【まとめ】キー編集の細部」）
+    // **欄の先頭では 0005 で止まる（SBCS 欄と同じ。カーソルも動かさない）**。~~前の欄の末尾へ移る~~・
+    // ~~DBCS 欄の ACS は原典の手順上 0101~~ は実測と違った——ACS のコアで O の欄の先頭と、J の欄の SO の後ろ
+    // （Tab で着く位置＝当 PJ の論理位置 0）で押すと、どちらも 0005 だった（`scripts/acs-probe/backspace-dbcs-field-start.txt`）
     if (edit.cursor === 0) {
-      emit("field-prev", f.index);
+      emit("notice", MSG_PROTECTED);
       return;
     }
     edit = dbcsBackspace(edit, f);

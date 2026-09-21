@@ -26,17 +26,17 @@ import type { HostTlsOptions } from "../transport/host-connection.js";
 import { signon } from "../signon.js";
 import {
   generateClientSeed,
-  passwordSubstituteSha,
   MIN_SHA_PASSWORD_LEVEL,
   SEED_LEN
 } from "../password.js";
-import { passwordUnicode, userIdEbcdic37, userIdUnicode } from "../credentials.js";
+import { hostServerPasswordSubstitute, userIdEbcdic37 } from "../credentials.js";
 import { DEFAULT_PORT } from "../port-mapper.js";
 import {
   DDM_CP,
   DdmReader,
   DdmWriter,
   SECMEC_SHA,
+  SECMEC_DES,
   frame,
   padName10,
   param,
@@ -148,16 +148,9 @@ export class DdmConnection {
       ...(opts.resolvePort !== undefined ? { resolvePort: opts.resolvePort } : {})
     });
     const level = info.info.passwordLevel;
-    // DDM(DRDA) の SECCHK は SHA(SECMEC) 前提で実装している。パスワードレベル 0/1 の DES 経路は
-    // signon/ホストサーバー（command/SQL/IFS 等）では対応済みだが、DDM 独自ハンドシェイクは未対応。
-    // signon が通ったあと SECCHK で分かりにくく失敗するより、ここで明示的に断る。
-    if (level < MIN_SHA_PASSWORD_LEVEL) {
-      throw new As400Error(
-        "HOST_SERVER_UNSUPPORTED",
-        `DDM (データ転送/DRDA) はパスワードレベル ${level}（DES 認証）にまだ対応していません。` +
-          `コマンド/SQL/IFS 等のホストサーバーは対応しています`
-      );
-    }
+    // ~~DDM の SECCHK は SHA 前提で、パスワードレベル 0/1（DES）は断る~~ → ACS に同梱の jt400 と同じく、どのレベルも
+    // サインオンと同じ置換値で認証する（`20260921-hostserver-password-levels` の節目の点検の指摘。jt400 `AS400ImplRemote` の
+    // DDM の経路も `getPassword` を通り、ACCSEC・SECCHK の SECMEC は DES なら 6・SHA なら 8）
 
     const port = opts.port ?? (opts.tls ? DEFAULT_PORT.ddm.tls : DEFAULT_PORT.ddm.plain);
     const transport = await openDdmTransport({
@@ -196,7 +189,7 @@ export class DdmConnection {
 
     // --- ACCSEC（セキュリティ機構の合意 ＋ クライアント乱数） ---
     const clientSeed = generateClientSeed();
-    this.transport.send(buildAccsec(clientSeed));
+    this.transport.send(buildAccsec(clientSeed, passwordLevel));
     const accsecReply = new DdmReader(await this.transport.receive());
     const accsecHdr = readHeader(accsecReply, "ACCSEC");
     accsecReply.skip(2, "ACCSEC LL");
@@ -213,14 +206,10 @@ export class DdmConnection {
     accsecReply.skip(accsecHdr.length - 28, "ACCSEC rest");
 
     // --- SECCHK（認証） ---
-    // 置換値の生成は既存と同一（原典が「Copied from HostServerConnection」と明記）
-    const substitute = await passwordSubstituteSha(
-      userIdUnicode(user),
-      passwordUnicode(password),
-      clientSeed,
-      serverSeed
-    );
-    this.transport.send(buildSecchk(userIdEbcdic37(user), substitute, passwordLevel));
+    // 置換値はホストサーバーのサインオンと同じ（jt400 は DDM でも `getPassword`。~~常に SHA-1・末尾の空白もそのまま~~——
+    // レベル 4 ではサインオンは通るのに DDM は SHA-1 を送り、2/3 で末尾に空白のあるパスワードは DDM だけ落ちた）
+    const substitute = await hostServerPasswordSubstitute(passwordLevel, user, password, clientSeed, serverSeed);
+    this.transport.send(buildSecchk(userIdEbcdic37(user), substitute));
     const secReply = new DdmReader(await this.transport.receive());
     const secHdr = readHeader(secReply, "SECCHK");
     secReply.skip(2, "SECCHK LL");
@@ -586,10 +575,13 @@ function buildExcsat(): Uint8Array {
   return frame(FMT_RQSDSS, 0, body.build());
 }
 
-/** ACCSEC。SECMEC に SHA、SECTKN にクライアント乱数 8 バイト */
-function buildAccsec(clientSeed: Uint8Array): Uint8Array {
+/**
+ * ACCSEC。SECMEC はパスワードレベル 2 以上なら SHA（8）、0/1 なら DES（6）、SECTKN にクライアント乱数 8 バイト
+ * （jt400 `DDMACCSECRequestDataStream` の `useStrongEncryption`＝`passwordLevel >= 2`）
+ */
+export function buildAccsec(clientSeed: Uint8Array, passwordLevel: number): Uint8Array {
   const inner = new DdmWriter();
-  const mec = new DdmWriter().u16(SECMEC_SHA);
+  const mec = new DdmWriter().u16(passwordLevel >= MIN_SHA_PASSWORD_LEVEL ? SECMEC_SHA : SECMEC_DES);
   inner.bytes(param(DDM_CP.SECMEC, mec.build()));
   inner.bytes(param(DDM_CP.SECTKN, clientSeed));
   const body = new DdmWriter().bytes(param(DDM_CP.ACCSEC, inner.build()));
@@ -597,14 +589,11 @@ function buildAccsec(clientSeed: Uint8Array): Uint8Array {
 }
 
 /** SECCHK。USRID は EBCDIC 10 バイト、PASSWORD は置換値 */
-function buildSecchk(
-  userEbcdic: Uint8Array,
-  substitute: Uint8Array,
-  passwordLevel: number
-): Uint8Array {
+export function buildSecchk(userEbcdic: Uint8Array, substitute: Uint8Array): Uint8Array {
   const inner = new DdmWriter();
-  // SHA（置換値 20 バイト）なら 8、DES なら 6。DES 経路は未対応（password.ts が弾く）
-  const mec = new DdmWriter().u16(substitute.length === 20 ? SECMEC_SHA : passwordLevel);
+  // 置換値が SHA-1（20 バイト）か SHA-512（64 バイト）なら 8、DES（8 バイト）なら 6（jt400 `DDMSECCHKRequestDataStream`）。
+  // ~~DES なら SECMEC にパスワードレベルを入れる~~（DES 経路を断っていたので通らなかった）
+  const mec = new DdmWriter().u16(substitute.length === 20 || substitute.length === 64 ? SECMEC_SHA : SECMEC_DES);
   inner.bytes(param(DDM_CP.SECMEC, mec.build()));
   inner.bytes(param(DDM_CP.USRID, userEbcdic.subarray(0, 10)));
   inner.bytes(param(DDM_CP.PASSWORD, substitute));

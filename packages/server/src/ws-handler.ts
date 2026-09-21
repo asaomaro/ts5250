@@ -1088,10 +1088,11 @@ export class WsConnection {
       type: "opened",
       sessionId: entry.id,
       screen: entry.session.snapshot(),
-      // **CCSID は `SessionEntry` が持っていない**（開いたときの設定に属する）。
-      // attach では既定を返す——画面の文字変換は既にセッション側で決まっており、
-      // ここで返す値は web-ui の入力補助（カナ大文字化）にしか使われない
-      ccsid: 37,
+      // **セッションが実際に使っている CCSID を返す**（`20260921-monocase-non-ascii` の節目の点検の指摘）。
+      // ~~既定の 37 を返す——web-ui の入力補助（カナ大文字化）にしか使われない~~ → web-ui は CCSID で
+      // 「SBCS だけのセッションか」を決め、打鍵の幅の判定と欄のバイト予算を切り替える。37 を返すと、930 の画面を
+      // attach で見たタブが全角を 1 バイトと数えて欄の長さを越えて打てた
+      ccsid: entry.session.ccsid,
       pcCommand: entry.pcCommandEnabled,
       ...this.pcCommandBacklog(entry.id),
       ...hostReconnectOf(entry.session),

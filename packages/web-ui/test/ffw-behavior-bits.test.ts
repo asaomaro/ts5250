@@ -213,6 +213,17 @@ describe("ScreenGrid: MONOCASE / FER / AUTO_ENTER", () => {
     w.unmount();
   });
 
+  it("**SBCS のセッションでは ギリシャ文字の μ をマイクロ記号 µ にし、MONOCASE でも大文字にしない**（ACS `hasMicroSymbol`）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10, monocase: true })], false, true);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, "a\u03bc");
+    expect(lastEdit(w)).toBe("A\u00b5");
+    w.unmount();
+  });
+
   it("**SBCS のセッションでは MONOCASE でない欄にも `é` `ü` `ß` を打てる**（幅が Ambiguous でも全角として弾かない）", async () => {
     const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10 })], false, true);
     await nextTick();

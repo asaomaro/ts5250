@@ -23,8 +23,12 @@ const log = childLog({ component: "hostserver-start" });
 
 const REQ_EXCHANGE_SEEDS = 0x7001;
 const REQ_START_SERVER = 0x7002;
-/** クライアント属性。1 = SHA-1 に対応している */
-const CLIENT_ATTR_SHA1 = 1;
+/**
+ * シード交換のクライアント属性。**ACS に同梱の jt400 と同じ 3**（`AS400XChgRandSeedDS` の `data_[4] = 3`）。
+ * ~~1 = SHA-1 に対応している~~ を送っていた。QPWDLVL 4 の機械が SHA-512 の置換値を受けるかをこの値で見ている可能性がある
+ * （`20260921-hostserver-password-levels` の節目の点検の懸念。ビットごとの意味とレベル 4 の実機は**未確認**。レベル 0・3 の実機で通ることは確かめた）
+ */
+const CLIENT_ATTR_SEEDS = 3;
 /** クライアント属性。2 = ジョブ情報を返してほしい */
 const CLIENT_ATTR_RETURN_JOB_INFO = 2;
 
@@ -37,7 +41,7 @@ function buildExchangeSeedsRequest(serverId: number, clientSeed: Uint8Array): Ui
   const out = new Uint8Array(28);
   const v = new DataView(out.buffer);
   v.setUint32(0, 28);
-  v.setUint8(4, CLIENT_ATTR_SHA1);
+  v.setUint8(4, CLIENT_ATTR_SEEDS);
   v.setUint8(5, 0); // サーバー属性
   v.setUint16(6, serverId);
   v.setUint32(8, 0); // CS instance

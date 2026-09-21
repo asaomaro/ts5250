@@ -6,6 +6,7 @@
 - tn5250 のブラウザ入口の走査（`ebcdic-not-reexported` ほか 4 ファイル）92 passed。web-ui の `vue-tsc`（test 込み）・変更したファイルの lint 通過。
 - 実機（PUB400・ACS のコア）: `scripts/acs-probe/monocase-non-ascii.txt`——コマンド行は `aéñøüµß` のまま、利用者名（MONOCASE）は `AÉÑØÜµß`。
 - 全量は次の節目でまとめて回す（PR #410 の方針）。
+- 節目（マイルストーン 8）の独立点検への対応後: 全量 6,403 passed / 0 failed / 41 skipped・lint・build 通過。attach の CCSID（`session-attach.test.ts` の 3 件）・μ の置き換え（`ffw-behavior-bits.test.ts`）。mutation 検出。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — 判定の単体（Ambiguous を通す・漢字かなは弾く・バイト長）とペイン（37 は通す・930 と不明は従来どおり）。

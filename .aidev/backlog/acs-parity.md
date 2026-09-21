@@ -441,6 +441,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   最初の入力欄（継続欄は先頭の区切りだけ。無ければ先頭へ巡回。`nextNonByPassInputFieldPos`）の末尾へ（`packages/web-ui/src/components/EmulatorPane.vue` の `endKey`）。
 - [x] **【まとめ】キー編集のうち欄の先頭の Backspace（SBCS）**（優先度 低）。**完了（`20260921-backspace-field-start`・PR #410）**: ACS と同じく操作員エラー 0005 で
   カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
+  節目の点検の後、**DBCS の欄も 0005**（O の欄の先頭・J の欄の SO の後ろとも。DSM の画面で ACS のコアを実測。`scripts/acs-probe/backspace-dbcs-field-start.txt`）にした。
+  ~~DBCS の欄は原典の手順上 0101~~ は実測と違った。
 - [x] **【まとめ】キー編集のうち Field Exit・Field± の前の検査**（優先度 中）。**完了（`20260921-field-exit-checks`・PR #410）**: ACS `PS5250.processFieldPlusMinusAndExit` と同じく、
   入力不可（DDS の I）の欄は 0004、ME の欄はカーソルが先頭か MDT が無ければ 0021、MF は先頭以外で部分入力なら欄の先頭へ戻して 0014 で、消去・右寄せ・欄の移動の前に止める
   （`packages/web-ui/src/composables/mandatoryCheck.ts` の `fieldExitRejection`）。実機の ACS のコアで ME 4 例・入力不可 2 例を測った（`scripts/acs-probe/field-exit-checks.txt`）。
@@ -473,7 +475,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ACS: すべての欄で Field+ / Field− として働く。
     - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
   - 低
-    - ~~欄の先頭での Backspace~~（SBCS は `20260921-backspace-field-start` で ACS と同じ 0005 に。**DBCS の欄は残り**——ACS は原典の手順上 0101（SO の前が属性の桁）、文言と実機は未確認）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
+    - ~~欄の先頭での Backspace~~（SBCS・DBCS とも `20260921-backspace-field-start` で ACS と同じ 0005 に。~~DBCS の欄は原典の手順上 0101~~ は実測で覆った）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
       ~~Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）~~ → 上の `20260921-field-exit-checks` で済んだ（~~0033・0020~~ は `setErrorCode(33)`・`(20)` の 10 進で、表示は 0021・0014）
@@ -568,7 +570,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ランチャーと通知に「ホストが接続を断りました（8902: 装置が使用中です・装置 X）」の形で出す（`packages/web-ui/src/composables/opMessages.ts` の
   `STARTUP_CODE_MEANING_JA`・`startupRejectionText`。意味は ACS の文言表に基づき、文言は当 PJ で書いた）。以前は英語の文言がそのまま出ていた。
   英語の表の 2703・2777（~~未確認~~）と 8936 を ACS の文言表（`hod_en`）の意味に直した。実機（PUB400）で 8902 を起こし、文言からコードと装置名が拾えることを確認。
-  mutation 8 通り検出（1 通りは等価）。
+  mutation 8 通り検出（1 通りは等価）。節目の点検の後、自動の繋ぎ直しの拒否（`closed` の理由）とサービス画面にも同じ置き換えを通し、8934 を ACS の意味に直した。
+  コードの表は `packages/tn5250/src/telnet/startup-codes.ts` へ移し、web-ui のテストが日本語の表と直接比べる。
 - [x] **【まとめ】telnet のうち起動応答の名前の復号**（優先度 低）。**完了（`20260921-startup-record-cp037`・PR #410）**: 起動応答のシステム名・装置名を
   セッションの CCSID によらず CCSID 37 で読む（ACS `DS5250.processStartUpConfirmation` の `new CodePage(37, 2)`。`packages/tn5250/src/telnet/startup-record.ts`）。
   930 / 5026 では `$` が `¥` に化けていた（装置名はスプール救出の OUTQ にも使う）。単体（`startup-record.test.ts`・`startup-reject.test.ts`）、mutation 検出。実機は未確認。
@@ -577,6 +580,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   2/3 は末尾の空白を落とす（4 は落とさない）——ACS に同梱の jt400 `AS400ImplRemote` と同じ（`packages/hostserver/src/credentials.ts` の
   `hostServerPasswordSubstitute`。レベル 4 の計算は telnet の自動サインオンと共用）。jt400 を Java から呼んだ出力とバイト単位で一致
   （`test/hostserver-password-levels.test.ts`）、mutation 11 通り検出。実機はレベル 0・3 の回帰まで（レベル 4 の機械は無い）。
+  節目の点検の後、**DDM も同じ置換値**にし、ACCSEC・SECCHK の SECMEC を jt400 と同じ（DES は 6・SHA は 8）にした——~~DDM はレベル 0/1 を断る~~のをやめ、
+  社内機（レベル 0）でも DDM の握手が通った。属性交換のデータストリーム・レベル（10）とシード交換のクライアント属性（3）も jt400 の値にした（レベル 4 で効くかは未確認）。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ

@@ -15,7 +15,8 @@ import {
   MSG_SESSION_ENDED,
   MSG_VT_CONNECTION_LOST,
   wsErrorNotice,
-  openErrorText
+  openErrorText,
+  startupRejectionText
 } from "./composables/opMessages.js";
 import {
   sessionsStore,
@@ -677,6 +678,10 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
         sessionsStore.markLost(sessionId, msg.ended === true ? "hostEnded" : "transport");
         // **切断より前の通知は捨てる**（`startReconnect` と同じ理由。前 work の review ラウンド3）
         delete s.notice;
+        // **起動応答で断られて終わったときは、その理由を出す**（自動の繋ぎ直しがホストに断られた等。`20260921-startup-codes-japanese` の
+        // 節目の点検の指摘——理由は `closed` の `reason` にしか載らず、捨てていた。ACS もコードごとの文言を出す）
+        const rejected = startupRejectionText(msg.reason);
+        if (rejected !== undefined) s.notice = rejected;
       }
       setBusy(sessionId, false);
       break;

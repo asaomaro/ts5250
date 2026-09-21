@@ -5,6 +5,9 @@
 - 期待値: ACS に同梱の jt400 を Java から実行（`scratchpad/jth/Jt.java`。jar・出力はリポジトリに入れない）。
 - 実機: PUB400（QPWDLVL 3）・社内機（QPWDLVL 0）でサインオン・サーバーの認証と DB サーバーの開始が通った（`scratchpad/hs-levels.mjs`）。
 - 全量は次の節目でまとめて回す。
+- 節目（マイルストーン 8）の独立点検への対応後: 全量 6,403 passed / 0 failed / 41 skipped・lint・build 通過。実機（PUB400 レベル 3・社内機 レベル 0）でサインオン・DB サーバーの開始・IFS・コマンド・**DDM の握手**が通った
+  （社内機の DDM は以前は断っていた）。jt400 の `DDMACCSECRequestDataStream`・`DDMSECCHKRequestDataStream`・`SignonExchangeAttributeReq`・`AS400XChgRandSeedDS` を CFR で読んで値を合わせた。
+  テスト（SECMEC・属性・データストリーム・レベル）を足し、mutation 4 通り検出。DDM の置換値の共用は単体では落とせない（ネットワークが要る）ので実機の握手で確かめた。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — レベル 4 の 3 例が jt400 と一致、開始要求・サインオン要求（偽のサーバー）とも種別 7・置換値 64 バイト。

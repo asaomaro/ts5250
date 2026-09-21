@@ -62,6 +62,8 @@ export { fieldId } from "./screen/search.js";
 export { isDbcsOnly, selfCheckDigitOk } from "./screen/field-validate.js";
 // SBCS だけのセッション（37 など）か。web-ui の打鍵時の幅の判定と MONOCASE が分かれる（`20260921-monocase-non-ascii`）
 export { isDbcsCcsid } from "./session/terminal-type.js";
+// 起動応答のコードの一覧（web-ui の日本語の表と揃っていることのテスト用。`20260921-startup-codes-japanese`）
+export { knownStartupCodes, STARTUP_SUCCESS_CODES } from "./telnet/startup-codes.js";
 /** グリッド線の色コード表（5250 の属性バイトとは別物。DDS リファレンス GRDATR Table 14） */
 export { GRID_COLOR } from "./protocol/wdsf-parser.js";
 export type { ScreenColor } from "./screen/types.js";

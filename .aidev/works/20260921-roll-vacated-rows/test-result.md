@@ -4,6 +4,7 @@
 - `test/screen-roll.test.ts` 12 passed。tn5250 の型検査。
 - 実機（社内機）: 修正前の当 PJ・ACS のコア（`acs-probe/roll-vacated-{up,down}.txt`）・修正後の当 PJ を同じ試験プログラムで。
   修正後 `scripts/verify-roll.mjs` **pass=4 fail=0**。試験プログラムと IFS のファイルは消した（CHKOBJ で無いことを確認）。
+- 節目（マイルストーン 8）の独立点検への対応（注記の訂正だけ）後: 全量 6,403 passed / 0 failed / 41 skipped・lint・build 通過。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — 単体と実機（上下とも ACS と同じ画面）。

@@ -179,7 +179,9 @@ async function exchangeAttributes(
       reqRep: REQREP.signonExchangeAttributes,
       params: [
         uintParam(CP.version, 1, 4),
-        uintParam(CP.datastreamLevel, 2, 2),
+        // **データストリームのレベルは ACS に同梱の jt400 と同じ 10**（`SignonExchangeAttributeReq`。~~2~~——QPWDLVL 4 の SHA-512 を
+        // 受けるかをこの申告で見ている可能性がある。`20260921-hostserver-password-levels` の節目の点検の懸念。レベル 4 の実機は未確認）
+        uintParam(CP.datastreamLevel, 10, 2),
         { cp: CP.seed, value: clientSeed }
       ]
     })

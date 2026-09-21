@@ -285,8 +285,10 @@ export function applyDataStream(
         // 行数は下位 5 ビット（tn5250 と同じ。tn5250j は `& 0x7f` だが、
         // 32 以上は 24〜27 行の画面を超えるので**実際には差が出ない**）。
         //
-        // ⚠ **実機で ROLL を送ってくる画面は見つかっていない**（11 画面の国勢調査で 0 件。
-        // `20260730-datastream-command-census`）。根拠は原典 2 実装の一致だけである。
+        // ~~⚠ 実機で ROLL を送ってくる画面は見つかっていない。根拠は原典 2 実装の一致だけである~~ → DSM に出させて
+        // 実測し（`scripts/host-src/dscmd.c` の `ROLLUP` / `ROLLDOWN`・`ROLLTESTUP` / `ROLLTESTDOWN`）、ACS `PS5250.processRoll` とも
+        // 突き合わせた（`20260921-roll-vacated-rows`。空いた行は元の内容が残る——`ScreenBuffer.roll`）。
+        // 業務の画面で ROLL を送ってくるものは今も見つかっていない（11 画面の国勢調査で 0 件。`20260730-datastream-command-census`）
         const dir = r.u8();
         const top = r.u8();
         const bottom = r.u8();

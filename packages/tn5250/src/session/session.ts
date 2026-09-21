@@ -634,6 +634,11 @@ export class Session5250 extends Emitter<SessionEvents> {
     return this.startupInfo;
   }
 
+  /** 画面の文字変換に使っている CCSID（attach したタブがセッションの種類——SBCS だけか DBCS か——を知るため。`20260921-monocase-non-ascii`） */
+  get ccsid(): number {
+    return this.codec.ccsid;
+  }
+
   disconnect(): void {
     if (this.state === "closed") return;
     this.userClosed = true; // **自分から切ったときは繋ぎ直さない**（ACS も同じ）

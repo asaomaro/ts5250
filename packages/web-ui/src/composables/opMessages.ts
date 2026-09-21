@@ -293,7 +293,7 @@ const NOTICE_BY_ERROR: Partial<Record<ErrorCode | "INTERNAL_ERROR", string>> = {
   NOT_FOUND: "指定されたものが見つかりません",
   // **プリンターの開始・停止はその場で接続を張る**ので、接続系の失敗がこの口へ届く
   // （`session-manager.ts` の `startPrinter`。`20260920-field-error-no-value` review ラウンド 4）。
-  // 見出しが無いと「エラーが起きました」の一行になり、8925（装置が使用中）のように
+  // 見出しが無いと「エラーが起きました」の一行になり、8925（装置を作れない。~~装置が使用中~~ は 8902）のように
   // **code 自体が診断になっている**ものまで潰れる
   SESSION_REJECTED: "ホストが接続を断りました（装置名が使用中かもしれません）",
   CONNECT_FAILED: "ホストに接続できませんでした",
@@ -339,7 +339,8 @@ export const STARTUP_CODE_MEANING_JA: Readonly<Record<string, string>> = {
   8928: "装置を変更できませんでした",
   8929: "構成変更（オン・オフ）に失敗しました",
   8930: "メッセージ待ち行列がありません",
-  8934: "装置の開始に失敗しました",
+  // ~~装置の開始に失敗しました~~ → ACS の文言表の意味（S/36 のワークステーション機能の開始要求）に直した（節目の独立点検の指摘）
+  8934: "S/36 のワークステーション機能の開始要求を受けました",
   8935: "セッションが拒否されました",
   8936: "セッションの開始でセキュリティーの検査に失敗しました",
   8937: "自動サインオンが拒否されました",
@@ -436,14 +437,15 @@ function reasonOf(message: string): string | undefined {
 const CODES_WITH_FIELD_DETAIL = new Set(["FIELD_TYPE", "FIELD_OVERFLOW", "FIELD_PROTECTED"]);
 
 export function wsErrorNotice(code: string, message: string): string {
-  // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`code` が `constructor` /
-  // `toString` だと継承プロパティ（関数）が返り `??` が効かない。`code` はサーバー生成なので
-  // 今は届かないが、**戻り値が文字列であること**を型ではなくここで閉じる
-  // 起動応答で断られたときは、コードの意味まで出す（繋ぎ直しで断られたときもここを通る）
+  // 起動応答で断られたときは、コードの意味まで出す（開いた後に届く `error`。自動の繋ぎ直しで断られたときは
+  // `closed` の理由で届くので、`session-controller.ts` の `closed` で同じ関数を通す）
   if (code === "SESSION_REJECTED") {
     const text = startupRejectionText(message);
     if (text !== undefined) return text;
   }
+  // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`code` が `constructor` /
+  // `toString` だと継承プロパティ（関数）が返り `??` が効かない。`code` はサーバー生成なので
+  // 今は届かないが、**戻り値が文字列であること**を型ではなくここで閉じる
   const head = Object.hasOwn(NOTICE_BY_ERROR, code)
     ? NOTICE_BY_ERROR[code as ErrorCode | "INTERNAL_ERROR"]!
     : MSG_UNKNOWN_ERROR;
