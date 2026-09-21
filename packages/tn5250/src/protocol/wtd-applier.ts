@@ -918,10 +918,10 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): vo
     else if (b === ORDER.IC || b === ORDER.SBA || b === ORDER.MC) r.skip(2);
     // その他の制御は読み飛ばす
   }
-  const trimmed = msg.trim();
-  if (trimmed !== "") {
-    buf.systemMessage = trimmed;
-    // 届くたびに番号を振る（同じ文言でも新しいエラー。UI はこれでエラー状態に入り直す）
-    buf.systemMessageSeq = nextSystemMessageSeq();
-  }
+  // **本文が空白だけでも載せて番号を振る**——ACS `DS5250.processWriteErrorCode` は本文を読む前に
+  // 無条件で `setErrorMode(true)` とする（独立点検の指摘。空白だけの WEC が実際に届くかは未確認）。
+  // 空なら画面に出る文言は無いが、エラー状態には入る（キーボードは Reset・矢印等まで拒否）
+  buf.systemMessage = msg.trim();
+  // 届くたびに番号を振る（同じ文言でも新しいエラー。UI はこれでエラー状態に入り直す）
+  buf.systemMessageSeq = nextSystemMessageSeq();
 }

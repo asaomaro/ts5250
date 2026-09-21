@@ -5,6 +5,7 @@ import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 
 /**
  * **ホストのエラー（WRITE ERROR CODE）でもエラー状態に入る**（`20260921-host-error-mode`）。
@@ -71,7 +72,6 @@ describe("ホストのエラー（WRITE ERROR CODE）", () => {
     const { w, input, el } = await mountPane();
     await hostError(101);
     expect(opmsg(w)).toBe(norm(MSG));
-    (document.activeElement as HTMLElement).focus();
     el.focus();
     await input.trigger("keydown", { key: "3" });
     await nextTick();
@@ -131,5 +131,164 @@ describe("ホストのエラー（WRITE ERROR CODE）", () => {
     st.snapshot = { ...st.snapshot!, cursor: { row: 7, col: 21 } };
     await nextTick();
     expect(opmsg(w), "隠したメッセージが戻った").toBe("");
+  });
+});
+
+/**
+ * **エラー状態は画面＝セッションに属する**（`SessionState.hostErrorDismissedSeq`。独立点検の指摘）。
+ * ペインに持っていた頃は、タブの切り替え・裏のタブへの WEC・ペインの作り直しで
+ * 「最下行にメッセージが出ているのにエラー状態ではない」になった。
+ */
+describe("ホストのエラーとタブ・ペイン", () => {
+  const SID2 = "he2";
+  function addSecond(): void {
+    const s = { ...snap(), sessionId: SID2 };
+    sessionsStore.add({
+      sessionId: SID2, label: "t2", snapshot: s, edits: new Map(), cursor: s.cursor,
+      link: { state: "connected" }, resumability: "resumable", readOnly: false,
+      client: { send: () => {} } as unknown as WsClient
+    });
+  }
+  /** 今フォーカスのある欄に 1 文字打ち、値が変わったかを返す */
+  async function typeChanges(ch: string): Promise<boolean> {
+    const cur = document.activeElement as HTMLInputElement;
+    const before = cur.value;
+    cur.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+    await nextTick();
+    return cur.value !== before;
+  }
+  async function focusInput(w: ReturnType<typeof mount>): Promise<void> {
+    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    await nextTick();
+  }
+
+  it("**抜けないままタブを切り替えて戻っても、エラー状態のまま**", async () => {
+    addSecond();
+    const { w } = await mountPane();
+    await hostError(201);
+    await w.setProps({ sessionId: SID2 });
+    await nextTick();
+    await w.setProps({ sessionId: SID });
+    await nextTick();
+    await focusInput(w);
+    expect(opmsg(w)).toBe(norm(MSG));
+    expect(await typeChanges("3"), "戻ったら文字が入った").toBe(false);
+  });
+
+  it("**裏のタブに WEC が届いてから切り替えても、エラー状態に入っている**", async () => {
+    addSecond();
+    const { w } = await mountPane();
+    await w.setProps({ sessionId: SID2 });
+    await nextTick();
+    // 裏（SID）に WEC
+    sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 202 }));
+    await nextTick();
+    await w.setProps({ sessionId: SID });
+    await nextTick();
+    await nextTick();
+    await focusInput(w);
+    expect(opmsg(w)).toBe(norm(MSG));
+    expect(await typeChanges("3")).toBe(false);
+  });
+
+  it("**抜けて隠した後にペインを作り直しても、隠したメッセージは戻らない**", async () => {
+    const first = await mountPane();
+    await hostError(203);
+    first.el.focus();
+    await first.input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    first.w.unmount();
+    mounted = mounted.filter((x) => x !== first.w);
+    const { w } = await mountPane();
+    expect(opmsg(w), "作り直したら隠したメッセージが戻った").toBe("");
+    expect(await typeChanges("3"), "隠したのに文字が拒否された").toBe(true);
+  });
+
+  it("**新しい画面（CLEAR UNIT）でメッセージが消えたら、エラー状態も解ける**", async () => {
+    const { w } = await mountPane();
+    await hostError(204);
+    // コアは CLEAR UNIT で systemMessage を捨てる（ACS `processClearUnit` の `clearErrorMode`）
+    sessionsStore.updateScreen(SID, snap({ lastWrite: { cleared: true, restored: false, cells: 10 } }));
+    await nextTick();
+    await nextTick();
+    await focusInput(w);
+    expect(opmsg(w)).toBe("");
+    expect(await typeChanges("7"), "サインオン画面等で最初の打鍵が黙って捨てられた").toBe(true);
+  });
+
+  it("CLEAR UNIT と WEC が同じレコードで来たら、エラー状態に入る（CLEAR UNIT で隠さない）", async () => {
+    const { w } = await mountPane();
+    sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 205, lastWrite: { cleared: true, restored: false, cells: 10 } }));
+    await nextTick();
+    await nextTick();
+    await focusInput(w);
+    expect(opmsg(w)).toBe(norm(MSG));
+    expect(await typeChanges("7")).toBe(false);
+  });
+});
+
+describe("操作員エラーと新しい画面", () => {
+  it("**CLEAR UNIT の画面が届いたら操作員エラーも抜ける**（ACS `processClearUnit`）", async () => {
+    const { w } = await mountPane();
+    // 送信の合流点が止めた操作員エラー（セッション側の通知）をペインが引き取ってエラー状態に入る経路
+    sessionsStore.get(SID)!.notice = MSG_PROTECTED;
+    await nextTick();
+    await nextTick();
+    expect(opmsg(w), "前提: 操作員エラー").toBe(norm(MSG_PROTECTED));
+    sessionsStore.updateScreen(SID, snap({ lastWrite: { cleared: true, restored: false, cells: 10 } }));
+    await nextTick();
+    await nextTick();
+    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    await nextTick();
+    const cur = document.activeElement as HTMLInputElement;
+    cur.dispatchEvent(new KeyboardEvent("keydown", { key: "Q", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(cur.value.trim(), "新しい画面で最初の打鍵が拒否された").toBe("Q");
+  });
+
+  it("CLEAR UNIT でない画面の更新では、操作員エラーのまま", async () => {
+    const { w } = await mountPane();
+    sessionsStore.get(SID)!.notice = MSG_PROTECTED;
+    await nextTick();
+    await nextTick();
+    sessionsStore.updateScreen(SID, snap({ lastWrite: { cleared: false, restored: false, cells: 1 } }));
+    await nextTick();
+    await nextTick();
+    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    await nextTick();
+    const cur = document.activeElement as HTMLInputElement;
+    cur.dispatchEvent(new KeyboardEvent("keydown", { key: "Q", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(cur.value.trim()).toBe("");
+  });
+});
+
+/**
+ * **エラー中はローカル編集キーも拒否する**（ACS `PS5250.keyDown`。実機の ACS でも Field Exit・Erase EOF・
+ * Erase Input・Field±・Dup・Field Mark はどれも欄を変えずエラーのままだった。`scripts/acs-probe/field-exit-full.txt`）
+ */
+describe("エラー中の編集キー", () => {
+  it.each([
+    ["Field Exit（Ctrl+Enter）", { key: "Enter", ctrlKey: true }],
+    ["Erase EOF（Ctrl+Delete）", { key: "Delete", ctrlKey: true }],
+    ["Erase Input（Ctrl+Backspace）", { key: "Backspace", ctrlKey: true }],
+    ["Field−（Ctrl+-）", { key: "-", ctrlKey: true }],
+    ["Dup（Ctrl+D）", { key: "d", ctrlKey: true }]
+  ])("**%s は欄を変えず、エラーのまま**", async (_l, init) => {
+    const { w } = await mountPane();
+    sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 301, fields: [{ ...FIELD, value: "ABCDEF" }] }));
+    await nextTick();
+    await nextTick();
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    el.focus();
+    el.setSelectionRange(2, 2);
+    await nextTick();
+    const before = el.value;
+    el.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+    await nextTick();
+    await nextTick();
+    expect(sessionsStore.get(SID)!.edits.has(1), "エラー中に欄が変わった").toBe(false);
+    expect(el.value).toBe(before);
+    expect(opmsg(w), "エラーを抜けた").toBe(norm(MSG));
   });
 });

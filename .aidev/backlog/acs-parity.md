@@ -369,8 +369,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **RB/RZ 欄（と符号付き数値）を満杯まで打つと、次の欄へ自動送りする（ACS は Field Exit 必須として留まる）**（【まとめ】から割った）。
   **完了（`20260921-field-exit-required-types`・PR #410）**: `isFieldExitRequired`（FER ∨ RZ ∨ RB ∨ 符号付き数値。ACS `Field5250.isFieldExitRequired`）で
   自動送り・自動 Enter・Dup の後の送りを止めた（`packages/web-ui/src/composables/mandatoryCheck.ts`・`ScreenGrid.vue`）。最終桁まで打てば
-  0020 の待ちを外す（ACS の `fieldExited`。実機の場合 10: RZ 満杯で Enter が通る）。符号付きは数字桁を埋めても 0020 のまま（場合 11）。
-  ⚠ 満杯で留まるカーソルの位置は ACS と 1 桁違う（ACS は最終桁、当 PJ は最終桁の後ろの境界）。
+  0020 の待ちを外す（ACS の `fieldExited`。実機の場合 10: RZ 満杯で Enter が通る）。~~符号付きは数字桁を埋めても 0020 のまま（場合 11）。~~
+  （場合 11 は 6S0＝7 桁に 5 桁の読み違い。6 桁打てば送れる）
+  ~~⚠ 満杯で留まるカーソルの位置は ACS と 1 桁違う（ACS は最終桁、当 PJ は最終桁の後ろの境界）。~~
+  **独立点検の後に揃えた**: カーソルは最終桁に留まり、さらに打つと 0018・左矢印は動かない・Backspace の後は 0020・
+  Field Exit は最終桁を消さない。Dup は Field Exit 必須でも次の欄へ（旧「FER 欄は留まる」は ACS と逆だった）。
+  実機の ACS で測った（`scripts/acs-probe/field-exit-full.txt`）。テスト `aid-field-exit-required.test.ts`・`field-sign-dup.test.ts`（mutation 7 通り検出）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ

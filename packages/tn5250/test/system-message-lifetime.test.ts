@@ -119,6 +119,14 @@ describe("WRITE ERROR CODE の通し番号（systemMessageSeq）", () => {
     expect(b.snapshot("s").systemMessageSeq).not.toBe(a.snapshot("s").systemMessageSeq);
   });
 
+  it("**本文が空白だけでも番号を振る**（ACS は本文を読む前に無条件でエラー状態に入る）", () => {
+    const buf = new ScreenBuffer();
+    apply(buf, wec("   "));
+    const snap = buf.snapshot("s");
+    expect(snap.systemMessage).toBe("");
+    expect(snap.systemMessageSeq).toBeDefined();
+  });
+
   it("メッセージが消えたら番号も付かない", () => {
     const buf = withMessage();
     expect(buf.snapshot("s").systemMessageSeq).toBeDefined();

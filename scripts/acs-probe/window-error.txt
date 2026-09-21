@@ -41,5 +41,20 @@ dump w-left
 keys [pf3]
 settle 1500
 
+# --- 全画面・挿入モードのまま WEC を受け、Tab で抜ける（挿入モードが解けるか・Tab で最下行が消えるか） ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('RANGE')[enter]
+settle 2000
+keys [insert]
+settle 300
+dump i-ins-on
+keys 9[enter]
+settle 2000
+dump i-error
+keys [tab]
+settle 600
+dump i-after-tab
+keys [pf3]
+settle 1500
+
 keys [home][eraseeof]SIGNOFF[enter]
 settle 1500

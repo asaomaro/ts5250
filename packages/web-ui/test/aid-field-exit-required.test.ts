@@ -7,7 +7,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import { sendKey } from "../src/session-controller.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
-import { MSG_FIELD_EXIT_REQUIRED } from "../src/composables/opMessages.js";
+import { MSG_FIELD_EXIT_REQUIRED, MSG_FIELD_EXIT_KEY_INVALID } from "../src/composables/opMessages.js";
 
 /**
  * **欄を出ないまま AID を押したとき**（ACS のエラー 0020。`20260921-aid-without-field-exit`）。
@@ -230,17 +230,31 @@ describe("送れる場合", () => {
   it("**RZ 欄を最終桁まで打てば送れる**（欄に留まるが「出た」ことになる。実機 ACS の場合 10）", async () => {
     const { input } = await mountAt(3);
     await type(input, "123456");
+    expect((input.element as HTMLInputElement).selectionStart, "カーソルは最終桁に留まる（ACS 3,25）").toBe(5);
     await input.trigger("keydown", { key: "Enter" });
     await nextTick();
     expect(sentKeys()).toEqual(["Enter"]);
   });
 
-  it("**符号付き数値は数字桁を埋めても 0020**（符号桁に留まる。実機 ACS の場合 11）", async () => {
+  // ~~符号付き数値は数字桁を埋めても 0020（場合 11）~~ は実測の読み違い——場合 11 は 7 桁の 6S0 に 5 桁しか
+  // 打っていなかった。ACS は符号桁の手前（`n4 = endPos - 1`）まで打てば「出た」とする。6S0 に 6 桁打てば
+  // 送れた（`scripts/acs-probe/field-exit-full.txt` の場合 A。カーソルは最終の数字桁 19,25 に留まった）
+  it("**符号付き数値は数字桁をすべて埋めれば送れる**（最終の数字桁に留まる。実機 ACS の場合 A）", async () => {
     const { input } = await mountAt(7);
-    await type(input, "12345");
+    await type(input, "12345"); // 6 桁の欄＝数字 5 桁＋符号桁
+    expect((input.element as HTMLInputElement).selectionStart, "カーソルは最終の数字桁に留まる").toBe(4);
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual(["Enter"]);
+  });
+
+  it("符号付き数値で数字桁が 1 つでも残っていれば 0020", async () => {
+    const { w, input } = await mountAt(7);
+    await type(input, "1234");
     await input.trigger("keydown", { key: "Enter" });
     await nextTick();
     expect(sentKeys()).toEqual([]);
+    expect(opmsg(w)).toBe(ERR);
   });
 
   it("素の欄は打っても送れる", async () => {
@@ -308,5 +322,77 @@ describe("待ちの寿命", () => {
     expect(sentKeys()).toEqual([]);
     expect(opmsg(w)).toBe(ERR);
     expect(sessionsStore.get(SID)!.notice, "セッション側に通知が残ると、エラーを抜けても消えない").toBeUndefined();
+  });
+});
+
+/**
+ * **満杯まで打った後**（ACS `fieldExited`。独立点検の指摘を実機の ACS で確かめた。
+ * `scripts/acs-probe/field-exit-full.txt`・`20260921-field-exit-required-types`）
+ */
+describe("Field Exit が必須の欄を満杯まで打った後", () => {
+  it("**さらに文字を打つとエラー 0018、値は変わらない**（場合 C）", async () => {
+    const { w, input } = await mountAt(3);
+    await type(input, "123456");
+    await input.trigger("keydown", { key: "X" });
+    await nextTick();
+    expect(opmsg(w)).toBe(MSG_FIELD_EXIT_KEY_INVALID.replace(/\s/g, ""));
+    expect((input.element as HTMLInputElement).value.slice(0, 6)).toBe("123456");
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBe("123456");
+  });
+
+  it("**Backspace を押してから Enter は 0020**（前の桁を消す。場合 D: `12346`）", async () => {
+    const { w, input } = await mountAt(3);
+    await type(input, "123456");
+    await input.trigger("keydown", { key: "Backspace" });
+    await nextTick();
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)?.trimEnd(), "ACS と同じくカーソルの前の桁が消える").toBe("12346");
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual([]);
+    expect(opmsg(w)).toBe(ERR);
+  });
+
+  it("**右矢印で境界へ出てから Backspace を押しても 0020**（境界で値が変わっても待ちを付ける）", async () => {
+    const { w, input } = await mountAt(3);
+    await type(input, "123456");
+    await input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    await input.trigger("keydown", { key: "Backspace" });
+    await nextTick();
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual([]);
+    expect(opmsg(w)).toBe(ERR);
+  });
+
+  it("**左矢印はカーソルを動かさず、そのまま Enter は送れる**（場合 E）", async () => {
+    const { input } = await mountAt(3);
+    await type(input, "123456");
+    await input.trigger("keydown", { key: "ArrowLeft" });
+    await nextTick();
+    expect((input.element as HTMLInputElement).selectionStart, "ACS も 3,25 のまま").toBe(5);
+    // 2 回目の左矢印は普通に動く
+    await input.trigger("keydown", { key: "ArrowLeft" });
+    await nextTick();
+    expect((input.element as HTMLInputElement).selectionStart).toBe(4);
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual(["Enter"]);
+  });
+
+  it("**Field Exit は最終桁を消さない**（ACS は `fieldExited` なら `eraseToEOF` しない）", async () => {
+    const { w, input } = await mountAt(3);
+    await type(input, "123456");
+    (w.findComponent(ScreenGrid).vm as unknown as { fieldExit: () => void }).fieldExit();
+    await nextTick();
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBe("123456");
+  });
+
+  it("符号付き数値: 満杯の後の Field− は数字を残して符号だけ付ける", async () => {
+    const { w, input } = await mountAt(7);
+    await type(input, "12345");
+    (w.findComponent(ScreenGrid).vm as unknown as { fieldMinus: () => void }).fieldMinus();
+    await nextTick();
+    expect(sessionsStore.byId.get(SID)!.edits.get(3)).toBe("12345-");
   });
 });

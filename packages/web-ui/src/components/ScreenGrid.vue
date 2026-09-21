@@ -65,7 +65,17 @@ import {
   type TimeValue
 } from "../composables/dateTimeField.js";
 import { isFieldExitRequired } from "../composables/mandatoryCheck.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DATE_PICKER, MSG_TIME_PICKER, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
+import {
+  MSG_PROTECTED,
+  MSG_NO_ROOM,
+  MSG_BY_REASON,
+  MSG_OPT_HINTS,
+  MSG_DATE_PICKER,
+  MSG_TIME_PICKER,
+  MSG_DUP_DISALLOWED,
+  MSG_FIELD_EXIT_KEY_INVALID
+} from "../composables/opMessages.js";
+import { localEditActionOf } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -187,6 +197,11 @@ const emit = defineEmits<{
    * 複数の入力欄へ分解して送る**画面では、これが無いと欄をまたいで戻れない。
    */
   (e: "field-prev", fieldIndex: number): void;
+  /**
+   * Field Exit が必須の欄を**最終桁まで打った**（ACS `fieldExited`）。欄は出ずカーソルも最終桁に留まるが、
+   * ACS はこれを「欄を出た」と数えるので、0020 の待ちを外させる（`20260921-field-exit-required-types`）。
+   */
+  (e: "field-exited", fieldIndex: number): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -1952,6 +1967,34 @@ const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
 /**
+ * **満杯まで打って「欄を出た」状態の欄**（ACS `PS5250.fieldExited`。`20260921-field-exit-required-types`）。
+ *
+ * Field Exit が必須の欄（`isFieldExitRequired`）で**最終桁**（符号付き数値は符号桁の手前）に打つと、ACS は
+ * カーソルを**その桁に留めたまま**このフラグを立てる。立っている間は（実機の ACS で確かめた。
+ * `scripts/acs-probe/field-exit-full.txt`）
+ *  - さらに文字を打つと**エラー 0018**（`setErrorCode(24)`）。値は変わらない（場合 C）
+ *  - 実行キーは 0020 にならず送れる（場合 A・B・E）
+ *  - **左矢印はフラグを下ろすだけでカーソルは動かない**（`processCursorMove` の `1006 && fieldExited`。場合 E）
+ *  - Field Exit・Field± は最終桁を消さない（`processFieldPlusMinusAndExit` が `fieldExited` なら `eraseToEOF` しない）
+ *  - それ以外のキーはフラグを下ろしてから働く（Backspace はカーソルの前の桁を消す＝`12346`。場合 D）
+ * 編集モデルと同じ所で捨てる（欄を移る・画面が替わる・フォーカスが外れる）。
+ */
+let fieldExitedIndex = -1;
+/** 修飾キーの単独押下（「出た」状態を下ろさない。ACS に届くキーではない） */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
+/** 打鍵で埋められる最後の桁（ACS `processCharKeyStroke` の `n4`。符号付き数値は符号桁の手前） */
+function lastTypeable(f: Field): number {
+  return visLen(f) - 1 - (f.signedNumeric === true ? 1 : 0);
+}
+/**
+ * 「出た」状態のまま Field Exit・Field± を処理するときの起点。**最終桁の後ろ**（符号付き数値は符号桁）から
+ * 消すので、打った最終桁は残る（ACS は `fieldExited` なら `eraseToEOF` を飛ばす）。
+ */
+function exitedBase(f: Field, e: EditState): EditState {
+  if (fieldExitedIndex !== f.index) return e;
+  return { ...e, cursor: lastTypeable(f) + 1 };
+}
+/**
  * 保護欄への mousedown で押下セルを先読みしておく（onInputMousedown → onInputFocus）。
  * FocusEvent は座標を持たないため、直前の mousedown の座標をここで橋渡しする。
  */
@@ -1979,6 +2022,7 @@ watch(insertMode, (v) => {
 });
 
 function beginEdit(f: Field, inputEl: HTMLInputElement): void {
+  fieldExitedIndex = -1; // 別の欄へ移った
   if (isDbcsEdit(f)) {
     // 純論理値（SO/SI 無し）＋末尾空白パディング。列ビューは sync で導出、カーソルは論理インデックス。
     // パディングは SBCS 欄と同じ目的: 未入力桁にもカーソルを置けるようにする（5250 は欄内自由）。
@@ -2283,7 +2327,9 @@ function fieldExitKey(): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(edit, t.f);
+  const base = exitedBase(t.f, edit); // 満杯まで打った直後なら最終桁は消さない（ACS `fieldExited`）
+  fieldExitedIndex = -1;
+  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(base, t.f);
   sync(t.el, t.f); // 値が変われば emit("edit") が出る＝MDT が立つ
   // AUTO_ENTER 欄は**次欄へ移らず Enter を送る**（原典は Field Exit / Field± / Dup の
   // すべてで同じ形。GNU tn5250 `display.c:1637`）。FER 欄でも Field Exit なら出られるので、
@@ -2307,7 +2353,9 @@ function fieldSignKey(negative: boolean): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(edit, t.f, negative);
+  const base = exitedBase(t.f, edit); // Field Exit と同じく、満杯まで打った直後なら最終桁は消さない
+  fieldExitedIndex = -1;
+  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(base, t.f, negative);
   sync(t.el, t.f);
   if (t.f.autoEnter) {
     emit("aid", "Enter");
@@ -2332,10 +2380,15 @@ function dupKey(): void {
     emit("notice", MSG_DUP_DISALLOWED);
     return;
   }
+  // 満杯まで打った直後でもカーソルの桁から埋める（ACS `processDupFM` は `fieldExited` を見ない）
+  fieldExitedIndex = -1;
   edit = dupFill(edit, rawSentinel(DUP_BYTE));
   sync(t.el, t.f);
-  // FER 欄は満杯でも欄に留まるのが実機（原典も Dup の後に FER を見る。RZ/RB・符号付き数値も同じ）
-  if (isFieldExitRequired(t.f)) return;
+  // **Field Exit が必須の欄でも次の欄へ移る**（ACS `PS5250.processDupFM` は FER も
+  // `isFieldExitRequired` も見ず、自動 Enter 欄なら Enter、それ以外は次の入力欄へ移す。
+  // 実機の ACS でも CHECK(RZ) DUP の欄で Dup → 次の欄へ・CHECK(ER) DUP の欄で Dup → 送信だった。
+  // `scripts/acs-probe/field-exit-full.txt` の場合 G）。~~FER 欄は満杯でも欄に留まる~~
+  // （GNU tn5250 由来の分岐で、ACS と逆だった。独立点検の指摘）
   if (t.f.autoEnter) {
     emit("aid", "Enter");
     return;
@@ -2371,6 +2424,7 @@ function eraseEofKey(): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
+  fieldExitedIndex = -1; // ACS もカーソルの桁から消す（`fieldExited` を見ない）
   edit = eraseToEnd(edit);
   sync(t.el, t.f);
 }
@@ -2400,6 +2454,7 @@ function eraseInputKey(): void {
   // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
   edit = undefined;
   editFieldIndex = -1;
+  fieldExitedIndex = -1;
   // **着地はホーム位置**（ACS: `getHomePos()`）。ホームは IC オーダー（`setInsertCursor`）で
   // 決まり、無ければ既定（先頭の入力欄）——`focusCursorField` と同じ意味なのでそれを使う。
   // 以前は呼び出し側が**常に先頭の入力欄**へ置いており、IC で別の欄を指す画面でずれていた
@@ -2473,6 +2528,7 @@ watch(
   (snap) => {
     edit = undefined;
     editFieldIndex = -1;
+    fieldExitedIndex = -1;
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -2644,6 +2700,22 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     const logical = Math.min(sliceOffsetOf(f, el) + nativeCaret, visLen(f));
     if (logical !== edit.cursor) edit = { ...edit, cursor: logical };
   }
+  // **満杯まで打った「出た」状態を下ろす**（ACS は文字以外のキーの後で `fieldExited = false`）。
+  // クリック等でキャレットが最終桁から動いていれば、もう「出た」状態ではない。
+  // 文字キーは下で 0018 にする。Field Exit・Field±・Dup・Erase EOF は各処理がこの状態を見るので手前で下ろさない
+  if (fieldExitedIndex === f.index) {
+    const printable = ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    if (edit.cursor !== lastTypeable(f)) fieldExitedIndex = -1;
+    else if (!printable && !MODIFIER_KEYS.has(ev.key) && localEditActionOf(ev) === undefined) {
+      fieldExitedIndex = -1;
+      // **左矢印は状態を下ろすだけでカーソルは動かない**（ACS `processCursorMove`。実機で確認。場合 E）
+      if (ev.key === "ArrowLeft" && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
+  }
 
   // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete / Ctrl+Backspace 等はキー設定で
   // ローカル編集キー（Erase EOF / Erase Input）に割り当てられており、ここで素の Delete /
@@ -2742,6 +2814,11 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (signKeyHack(f, ev.key)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
+    // **満杯まで打った後の文字はエラー 0018**（ACS `setErrorCode(24)`。値は変えない。実機で確認。場合 C）
+    if (fieldExitedIndex === f.index) {
+      emit("notice", MSG_FIELD_EXIT_KEY_INVALID);
+      return;
+    }
     const ch = inputChar(ev.key, f); // MONOCASE 欄／カタカナ系 CCSID は英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {
@@ -2765,6 +2842,18 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       trial = typeChar(edit, ch);
     }
     if (!fitsBytes(trial, f)) return; // バイト予算（SO/SI・DBCS 込み）超過は拒否
+    // **Field Exit が必須の欄の最終桁に打ったら、カーソルはその桁に留めて「出た」状態にする**
+    // （ACS `processCharKeyStroke`: `cursorSBA == n4 && isFieldExitRequired()` で `fieldExited = true`、
+    // カーソルは進めない。実機でも RZ 欄は 3,25・6S0 は 19,25＝最終の数字桁に留まった。場合 A・C）。
+    // 行またぎの継続欄（EDTMSK）は最終区間の判定が要るので従来どおり（自動送りを止めるだけ）
+    const typedAt = trial.cursor - 1;
+    if (isFieldExitRequired(f) && f.continued === undefined && typedAt === lastTypeable(f)) {
+      edit = { ...trial, cursor: typedAt };
+      sync(el, f);
+      fieldExitedIndex = f.index;
+      emit("field-exited", f.index);
+      return;
+    }
     edit = trial;
     sync(el, f);
     advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
@@ -2961,6 +3050,7 @@ function onInputBlur(f: Field, ev: FocusEvent): void {
   if (!syncingFocus) {
     edit = undefined;
     editFieldIndex = -1;
+    fieldExitedIndex = -1;
   }
   el.value = displayText(stripSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。

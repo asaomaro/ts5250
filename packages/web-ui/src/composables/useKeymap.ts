@@ -144,6 +144,26 @@ export function isEscapeAidEvent(ev: {
 }
 
 /**
+ * **このキーがローカル編集キー（Field Exit / Erase EOF / Erase Input / Field± / Dup）に割り当てられているか**。
+ * 割り当てはキー設定にしか無い（`classifyKey` は素のキーを編集キーへ写さない）。
+ *
+ * 使う側は 2 つ——操作員エラーの間に**拒否するキー**の判定（ACS `PS5250.keyDown` はこれらを拒否する）と、
+ * 満杯の欄の「出た」状態（ACS `fieldExited`）を**これらのキーの手前で下ろさない**判定（Field Exit は
+ * その状態を見て最終桁を消さない）。
+ */
+export function localEditActionOf(ev: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+}): LocalEditAction | undefined {
+  const custom = keybindingsStore.resolve(ev);
+  if (custom === undefined || !isLocalBinding(custom)) return undefined;
+  return localActionOf(custom);
+}
+
+/**
  * キーダウンを捕捉し、対象キーは preventDefault してブラウザ既定動作より 5250 操作を優先する
  * （spec: F1 ヘルプ・F5 リロード・PageUp スクロール等を抑止）。フォーカスペインのみ作用。
  */

@@ -71,6 +71,7 @@ export function isOperatorError(text: string): boolean {
     text === MSG_PROTECTED ||
     text === MSG_DUP_DISALLOWED ||
     text === MSG_FIELD_EXIT_REQUIRED ||
+    text === MSG_FIELD_EXIT_KEY_INVALID ||
     // ME / MF / 自己点検も ACS は `setErrorCode` でエラー状態に入る（`20260921-mandatory-check-acs`）
     text === MSG_MANDATORY_ENTER ||
     text === MSG_MANDATORY_FILL ||
@@ -379,6 +380,14 @@ export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用でき
  * **出方を添える**——ACS は出し方を言わないが、Field Exit を知らない利用者は抜け方が分からない。
  */
 export const MSG_FIELD_EXIT_REQUIRED = "この項目では実行キーを使用できません（Field Exit か Tab で項目を出てください）";
+
+/**
+ * ACS のエラー 0018（`PS5250.processCharKeyStroke` の `setErrorCode(24)`＝0x18）。実機の ACS の文言は
+ * 「フィールドを終了するために使用したキーが正しくない。」（`scripts/acs-probe/field-exit-full.txt` の場合 C）。
+ * Field Exit が必須の欄（右寄せ・符号付き数値・FER）を最終桁まで打ち、**そこでさらに文字を打った**。
+ * ACS は欄を出たものとして扱い（`fieldExited`）、次の文字は「欄を出るのに使えないキー」として拒否する。
+ */
+export const MSG_FIELD_EXIT_KEY_INVALID = "この項目は最終桁まで入力されています（Field Exit か Tab で項目を出てください）";
 
 /**
  * ME（必須入力）。**ACS のエラー 0007**（`PS5250.processAIDCode` の `setErrorCode(7)`）。

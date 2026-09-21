@@ -233,13 +233,20 @@ describe("ScreenGrid: Dup キー", () => {
     w.unmount();
   });
 
-  it("FER 欄では Dup のあとも欄に留まる", async () => {
-    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 4, dupEnable: true, fieldExitRequired: true })]);
+  // ~~FER 欄では Dup のあとも欄に留まる~~（GNU tn5250 由来の分岐で、ACS と逆だった）。
+  // ACS `PS5250.processDupFM` は FER も `isFieldExitRequired` も見ない。実機の ACS でも CHECK(RZ) DUP の欄で
+  // Dup → 次の欄へ移った（`scripts/acs-probe/field-exit-full.txt` の場合 G。`20260921-field-exit-required-types`）
+  it.each([
+    ["FER", { fieldExitRequired: true }],
+    ["CHECK(RZ)", { adjust: "right-zero" as const }],
+    ["符号付き数値", { signedNumeric: true, numeric: true }]
+  ])("**%s 欄でも Dup のあとは次の欄へ送る**（ACS は Field Exit 必須を見ない）", async (_l, extra) => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 4, dupEnable: true, ...extra })]);
     await nextTick();
     firstInput(w).focus();
     (w.vm as unknown as { dup: () => void }).dup();
     await nextTick();
-    expect(w.emitted("field-full")).toBeUndefined();
+    expect((w.emitted("field-full") as unknown[][])?.[0]?.[0]).toBe(1);
     w.unmount();
   });
 });

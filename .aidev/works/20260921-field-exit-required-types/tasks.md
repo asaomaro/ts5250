@@ -25,3 +25,15 @@
       対象: `ffw-behavior-bits.test.ts` `aid-field-exit-required.test.ts`
       依存: T2
       AC: AC3
+- [x] T4: 独立点検の指摘を実機の ACS で測る（満杯の後・符号付き・Dup・エラー中の編集キー）。
+      対象: `scripts/acs-probe/field-exit-full.txt` `scripts/build-ulktest.mjs`（DUP の画面）
+      依存: T3
+      AC: AC2, AC4, AC5
+- [x] T5: 最終桁に留めて「出た」状態を持つ。Backspace の経路の待ち。Dup を ACS の形へ。
+      対象: `ScreenGrid.vue` `fieldExitedIndex` `dupKey` `fieldExitKey` `fieldSignKey`、`EmulatorPane.vue` `noteFieldTyped`、`opMessages.ts` `MSG_FIELD_EXIT_KEY_INVALID`
+      依存: T4
+      AC: AC2, AC4, AC5
+- [x] T6: テストの書き換え・追加と mutation。
+      対象: `aid-field-exit-required.test.ts` `field-sign-dup.test.ts`
+      依存: T5
+      AC: AC3

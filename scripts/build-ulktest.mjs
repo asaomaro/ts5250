@@ -6,6 +6,8 @@
 //     RANGE  — SNDRCVF で RANGE(1 5) の欄を読む。範囲外を入れると**システムが WRITE ERROR CODE で返す**
 //     WINDOW — 背景を SNDF し、窓（WINDOW キーワード）の中の RANGE(1 5) の欄を SNDRCVF
 //              ＝ **WRITE ERROR CODE TO WINDOW** を出させる
+//     DUP    — SNDRCVF で DUP 可の CHECK(RZ) 欄・DUP 可の自動 Enter（CHECK(ER)）欄・素の欄を読む
+//              ＝ **右寄せ欄で Dup を押したとき次の欄へ移るか**（ACS `PS5250.processDupFM`）
 //   F3（CA03）で抜ける。
 //
 // **ソースは既存の QDDSSRC に入れる**（新しいソース・ファイルは作らない。`scripts/build-adjtest.mjs` と同じ方式）。
@@ -52,7 +54,12 @@ const DDS = [
   rec("ASK"), kwd("CA03(03)"),
   constant(1, 3, "ULK TEST ASK"), constant(7, 3, "1-5:"), numf("ASKF", 1, 0, "B", 7, 20, "RANGE(1 5)"),
   rec("WINREC"), kwd("CA03(03)"), kwd("WINDOW(6 10 6 40)"),
-  constant(1, 2, "WINDOW TEST 1-5:"), numf("WINF", 1, 0, "B", 3, 2, "RANGE(1 5)")
+  constant(1, 2, "WINDOW TEST 1-5:"), numf("WINF", 1, 0, "B", 3, 2, "RANGE(1 5)"),
+  rec("DUPR"), kwd("CA03(03)"),
+  constant(1, 3, "ULK TEST DUP"),
+  constant(5, 3, "RZ DUP:"), field("DRZ", 6, "A", "B", 5, 20, "CHECK(RZ) DUP"),
+  constant(7, 3, "PLAIN:"), field("DNX", 6, "A", "B", 7, 20),
+  constant(9, 3, "ER DUP:"), field("DER", 6, "A", "B", 9, 20, "CHECK(ER) DUP")
 ];
 const CL = [
   "PGM PARM(&MODE)",
@@ -65,6 +72,9 @@ const CL = [
   "ENDDO",
   "IF COND(&MODE *EQ 'RANGE') THEN(DO)",
   "  SNDRCVF RCDFMT(ASK)",
+  "ENDDO",
+  "IF COND(&MODE *EQ 'DUP') THEN(DO)",
+  "  SNDRCVF RCDFMT(DUPR)",
   "ENDDO",
   "IF COND(&MODE *EQ 'WINDOW') THEN(DO)",
   "  SNDF RCDFMT(SHOW)",

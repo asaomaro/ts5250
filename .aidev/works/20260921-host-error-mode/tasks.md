@@ -29,3 +29,15 @@
       対象: `system-message-lifetime.test.ts` `host-error-mode.test.ts`
       依存: T3
       AC: AC3
+- [x] T5: エラー状態をセッション側へ移す（`SessionState.hostErrorDismissedSeq`）。CLEAR UNIT で操作員エラーを抜ける。
+      対象: `stores/sessions.ts`、`EmulatorPane.vue` `hostErrorActive` `inErrorMode` `exitErrorMode` `watch(snapshot)`
+      依存: T4
+      AC: AC4
+- [x] T6: エラー中の編集キーの拒否・空白だけの WEC。
+      対象: `EmulatorPane.vue` `isEditingKey`、`useKeymap.ts` `localEditActionOf`、`wtd-applier.ts` `applyWriteErrorCode`
+      依存: T4
+      AC: AC5
+- [x] T7: テストと mutation。
+      対象: `host-error-mode.test.ts` `system-message-lifetime.test.ts`
+      依存: T5, T6
+      AC: AC3

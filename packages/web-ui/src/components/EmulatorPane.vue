@@ -12,7 +12,13 @@ import { logStore } from "../stores/log.js";
 import { sessionsStore, type HeldKey } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
-import { isEscapeAidEvent, makeKeydownHandler, typeAheadKind, type LocalAction } from "../composables/useKeymap.js";
+import {
+  isEscapeAidEvent,
+  localEditActionOf,
+  makeKeydownHandler,
+  typeAheadKind,
+  type LocalAction
+} from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, fieldAtCaret, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
 import {
   sendKey,
@@ -134,13 +140,17 @@ function onEdit(fieldIndex: number, value: string): void {
 function noteFieldTyped(fieldIndex: number): void {
   const st = state.value, snap = snapshot.value;
   if (!st || !snap) return;
-  const here = fieldAt(cursor.value.row, cursor.value.col, snap.fields, snap.cols, snap.rows);
+  // **右端の境界も欄の中**（`fieldAtCaret`）。`edit` は `cursor` より先に届くので、ここで見るカーソルは
+  // 動く前の位置——右矢印で境界へ出てから Backspace を押すと、境界で値が変わる。欄の外と数えると
+  // 待ちが付かず、そのまま Enter が左詰めで送られていた（独立点検の指摘。ACS は Backspace の `setMDT` で
+  // `fieldExitReqFlag` を下ろすので 0020。実機でも満杯→Backspace→Enter は 0020。場合 D）
+  const here = fieldAtCaret(cursor.value.row, cursor.value.col, snap.fields, snap.cols, snap.rows);
   // カーソルのいない欄への書き込み（Erase Input 等）は打鍵ではない
   if (here?.index !== fieldIndex) return;
   if (needsFieldExit(here)) st.awaitingFieldExit = fieldIndex;
   else delete st.awaitingFieldExit;
 }
-/** 欄を出た（Field Exit / Field± / Dup / 満杯の自動送り）。ACS はこれらでフラグを立てる */
+/** 欄を出た（Field Exit / Field± / Dup / 満杯の自動送り / 最終桁まで打った）。ACS はこれらでフラグを立てる */
 function noteFieldExited(): void {
   if (state.value) delete state.value.awaitingFieldExit;
 }
@@ -188,10 +198,12 @@ watch(cursor, (pos) => {
     delete st.awaitingFieldExit;
     return;
   }
-  // **キャレットが右端の境界に出たら「出た」ことになる**（`20260921-field-exit-required-types`）。境界へ出るのは
-  //  - 最終桁まで打った: ACS は `fieldExited` を立てる。実機でも RZ 欄を満杯まで打てば Enter が通った（場合 10）
-  //  - 矢印で最終桁の外へ出た: ACS では欄の外のセルへ移る＝欄を出た
-  // のどちらか。符号付き数値は数字桁を埋めても符号桁（欄の中）に留まるので、ここへは来ず 0020 のまま（場合 11）
+  // **キャレットが右端の境界に出たら「出た」ことになる**（`20260921-field-exit-required-types`）。
+  // 矢印で最終桁の外へ出た: ACS では欄の外のセルへ移る＝欄を出た（`processCursorMove` が `1007 && endPos` で立てる）。
+  // ~~最終桁まで打った: 境界へ出る~~ → 最終桁まで打ったときはカーソルは最終桁に留まり、ScreenGrid が
+  // `field-exited` で知らせる（ACS `fieldExited`。実機で RZ は 3,25・6S0 は 19,25 に留まった）。
+  // ~~符号付き数値は数字桁を埋めても 0020 のまま（場合 11）~~ は読み違い——場合 11 は 7 桁の 6S0 に
+  // 5 桁しか打っていなかった。6 桁打てば送れる（実機で確認。`scripts/acs-probe/field-exit-full.txt` の場合 A）
   if (!fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows)) delete st.awaitingFieldExit;
 });
 function onCursor(row: number, col: number): void {
@@ -341,6 +353,14 @@ watch(snapshot, (snap) => {
   // 残ると、前の画面で入れた挿入モードのまま次の画面で打つことになり、
   // 「挿入で欄が満杯のとき弾く」規則と重なって**打てない・意図せず押し出す**が起きる。
   insertMode.value = false;
+  // **CLEAR UNIT で操作員エラーも抜ける**（ACS `DS5250.processClearUnit` が `clearErrorMode()` を呼ぶ）。
+  // 抜けないと、自動の繋ぎ直しや無操作のサインオフでサインオン画面になったあと、最初の打鍵が
+  // メッセージも出ないまま拒否される（独立点検の指摘）。ホストのエラーはコアが `systemMessage` を捨てるので
+  // ここでは要らない。~~SAVE SCREEN~~ はスナップショットに印が無いので見ていない（利用者のキーを経ずに
+  // 操作員エラー中に SAVE が来る経路は、今のところ思い当たらない）
+  // **操作員エラーだけを抜ける**——同じレコードに CLEAR UNIT と WEC が載っていると、`exitErrorMode` は
+  // いま届いたホストのエラーまで隠してしまう
+  if (snap?.lastWrite?.cleared === true && errorMode.value) clearNotice();
   // 入力欄が 1 つも無い画面では ScreenGrid の欄フォーカス（focusCursorField）が早期 return し、
   // どこも focus されずキー操作できない（見た目はカーソルが出る）。ペインを focus して
   // 自由カーソル・F キーを有効にする（クリックで reconcileFocus がペインを focus するのと同じ状態）。
@@ -805,14 +825,11 @@ function clearNotice(): void {
 }
 /** エラー状態を抜ける（挿入モードには触れない。解けるのはエラーに入ったとき＝`showNotice`） */
 function exitErrorMode(): void {
-  if (!errorMode.value) return;
-  clearNotice();
+  if (errorMode.value) clearNotice();
   // **ホストのエラーだったら、メッセージ行を元に戻す**（ACS `clearErrorMode` → `restoreMsgLinePosition`。
   // 実機でも矢印・Tab で抜けると最下行のメッセージが消えた。`20260921-host-error-mode`）
-  if (hostErrorSeq !== undefined) {
-    dismissedHostErrorSeq.value = hostErrorSeq;
-    hostErrorSeq = undefined;
-  }
+  const st = state.value, seq = snapshot.value?.systemMessageSeq;
+  if (hostErrorActive.value && st && seq !== undefined) st.hostErrorDismissedSeq = seq;
 }
 /*
  * **ホストのエラー（WRITE ERROR CODE）でもエラー状態に入る**（`20260921-host-error-mode`）。
@@ -822,19 +839,20 @@ function exitErrorMode(): void {
  * 規則は操作員エラー（上）と同じ。**同じ文言のエラーがもう一度来たら入り直す**——見分けはコアが WEC ごとに振る
  * 通し番号（`systemMessageSeq`）で行う。窓の中のエラーは実機では WTD で来たので、ここは通らない（ACS も同じ）。
  */
-/** いま入っているエラー状態がホストのものなら、その番号（抜けるときにメッセージを隠すため） */
-let hostErrorSeq: number | undefined;
-/** 抜けて隠したホストのエラーの番号（最下行を元に戻す） */
-const dismissedHostErrorSeq = ref<number | undefined>();
-watch(
-  () => snapshot.value?.systemMessageSeq,
-  (seq, old) => {
-    if (seq === undefined || seq === old) return;
-    errorMode.value = true;
-    insertMode.value = false;
-    hostErrorSeq = seq;
-  }
-);
+/**
+ * **ホストのエラーの状態**。ペインでは持たず、スナップショットとセッションの状態から導く
+ * （`SessionState.hostErrorDismissedSeq`。タブの切り替え・ペインの作り直しで食い違わないため。独立点検の指摘）。
+ * 番号があって、抜けて隠した番号と違えばエラー中。**CLEAR UNIT・SAVE SCREEN で抜ける**のは、コアがそこで
+ * `systemMessage` を捨てるから（ACS `processClearUnit` / `processSaveScreen` の `clearErrorMode`）。
+ * 挿入モードは、WEC を載せた画面が届いた時点で `watch(snapshot)` が上書きへ戻している（ACS も WEC で解く）。
+ */
+const hostErrorActive = computed(() => {
+  const snap = snapshot.value;
+  if (!snap || snap.systemMessage === undefined || snap.systemMessageSeq === undefined) return false;
+  return snap.systemMessageSeq !== state.value?.hostErrorDismissedSeq;
+});
+/** エラー状態（操作員エラーはペインの通知から、ホストのエラーはセッションの状態から） */
+const inErrorMode = computed(() => errorMode.value || hostErrorActive.value);
 function onNotice(text: string): void {
   showNotice(text);
 }
@@ -877,7 +895,7 @@ const effectiveNotice = computed(() => notice.value || state.value?.notice || ""
 const hostMessage = computed(() => {
   const snap = snapshot.value;
   if (!snap?.systemMessage) return "";
-  if (snap.systemMessageSeq !== undefined && snap.systemMessageSeq === dismissedHostErrorSeq.value) return "";
+  if (snap.systemMessageSeq !== undefined && snap.systemMessageSeq === state.value?.hostErrorDismissedSeq) return "";
   return snap.systemMessage;
 });
 const messageLine = computed(() => effectiveNotice.value || hostMessage.value);
@@ -1029,9 +1047,17 @@ function noteUserActivity(): void {
   noteActivity(props.sessionId);
 }
 
-/** 欄を書き換えるキーか（エラー中に拒否する側）。**実機で拒否を確かめた 3 種**
- *  （文字・Backspace・Delete。`research.md` F3/F5）。修飾キー付きは対象外（ショートカット） */
+/**
+ * 欄を書き換えるキーか（エラー中に拒否する側）。文字・Backspace・Delete（実機で確認。`20260921-operator-error-mode`
+ * research F3/F5）に加えて、**ローカル編集キー**（Field Exit・Erase EOF・Erase Input・Field±・Dup）も拒否する。
+ * ACS `PS5250.keyDown` はエラー中にこれらを警告音だけで捨て（`ErEOF_Key` / `ErInp_Key` / `EraseField_Key` /
+ * `FldExit_Key` / `FldPlus_Key` / `FldMinus_Key` / `FldMark_Key` / `Dup_Key`）、実機の ACS でもどれも欄を
+ * 変えずエラーのままだった（`scripts/acs-probe/field-exit-full.txt` の場合 F・H）。
+ * ~~未測定のキーは抜ける側に倒す~~（`20260921-operator-error-mode` D2）は、原典と実測で破棄した。
+ * それ以外の修飾キー付きは対象外（ショートカット）
+ */
 function isEditingKey(ev: KeyboardEvent): boolean {
+  if (localEditActionOf(ev) !== undefined) return true;
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
   return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
 }
@@ -1064,7 +1090,7 @@ function onKeydownCapture(ev: KeyboardEvent): void {
   noteUserActivity();
   if (holdTypeAhead(ev)) return;
   leftCtrlAlone = ev.code === "ControlLeft";
-  if (errorMode.value) {
+  if (inErrorMode.value) {
     if (isEditingKey(ev)) {
       // **拒否**: 入力欄へ届かせず（stopPropagation）、文字の挿入も止める（preventDefault）。
       // メッセージは残し、エラーのまま（ACS: 文字・Backspace・Delete は入力されない）
@@ -1422,6 +1448,7 @@ function onWheel(ev: WheelEvent): void {
         @edit="onEdit"
         @cursor="onCursor"
         @field-full="onFieldFull"
+        @field-exited="noteFieldExited"
         @field-prev="onFieldPrev"
         @gui-select="onGuiSelect"
         @gui-submit="onGuiSubmit"

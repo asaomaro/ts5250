@@ -1,0 +1,266 @@
+# **Field Exit 必須の欄を満杯まで打ったあと、ACS はどう振る舞うか**（実機）。独立点検の指摘を実機で確かめる。
+#
+# 原典 `PS5250.processCharKeyStroke`: 最終桁（符号付き数値は符号桁の手前）まで打つと `fieldExited` を立て、
+# カーソルは最終桁に留まる。そこでさらに打つと `setErrorCode(24)`。文字以外のキーの後は `fieldExited` が下りる。
+# Backspace 等で欄が変わると `setMDT` が `fieldExitReqFlag` を下ろすので、そのまま Enter は 0020 になるはず。
+#
+# 画面は ADJPGM（`scripts/build-adjtest.mjs`。3,20=CHECK(RZ) A / 11,20=CHECK(ME) A / 13,20=素の A /
+# 15,20=CHECK(RZ) 6 0 / 19,20=6S0）と ULKPGM の DUP（`scripts/build-ulktest.mjs`。5,20=CHECK(RZ) DUP /
+# 7,20=素の A / 9,20=CHECK(ER) DUP）。Enter の場合は ME 欄を先に埋める。
+# 場合の終わりは Reset → Tab → F3。`exit-*` がメインメニューでなければ次の場合は無効。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- A) 符号付き 6S0 に数字を 6 桁打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 19,20
+settle 300
+keys 123456
+settle 500
+dump a-typed
+keys [enter]
+settle 1500
+dump a-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-a
+
+# --- B) CHECK(RZ) 6 0（数値）に 6 桁打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 15,20
+settle 300
+keys 123456
+settle 500
+dump b-typed
+keys [enter]
+settle 1500
+dump b-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-b
+
+# --- C) CHECK(RZ) A を満杯（6 桁）まで打ち、さらに X ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 3,20
+settle 300
+keys 123456
+settle 500
+dump c-full
+keys X
+settle 800
+dump c-x
+keys [reset]
+settle 500
+dump c-reset
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-c
+
+# --- D) CHECK(RZ) A を満杯まで打ち、Backspace、Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 123456
+settle 500
+keys [backspace]
+settle 500
+dump d-bs
+keys [enter]
+settle 1500
+dump d-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-d
+
+# --- E) CHECK(RZ) A を満杯まで打ち、左矢印、Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 123456
+settle 500
+keys [left]
+settle 500
+dump e-left
+keys [enter]
+settle 1500
+dump e-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-e
+
+# --- F) 操作員エラーの状態で編集キーを押す（素の A 欄を満杯にして挿入で X → 0012） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys ABCDEF
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-fldext
+keys [fldext]
+settle 700
+dump f-after-fldext
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-eraseeof
+keys [eraseeof]
+settle 700
+dump f-after-eraseeof
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-erinp
+keys [erinp]
+settle 700
+dump f-after-erinp
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-erasefld
+keys [erasefld]
+settle 700
+dump f-after-erasefld
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-fieldplus
+keys [field+]
+settle 700
+dump f-after-fieldplus
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-fieldminus
+keys [field-]
+settle 700
+dump f-after-fieldminus
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-f
+
+# --- G) DUP 可の CHECK(RZ) 欄に打って Dup（次の欄へ移るか）、DUP 可の自動 Enter 欄に打って Dup（送るか） ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('DUP')[enter]
+settle 2500
+setcursor 5,20
+settle 300
+keys 12[dup]
+settle 600
+dump g-rz-dup
+setcursor 9,20
+settle 300
+keys 1[dup]
+settle 1500
+dump g-er-dup
+keys [reset]
+settle 500
+keys [pf3]
+settle 1500
+dump exit-g
+
+# --- H) 操作員エラーの状態で Field Mark・Dup（**ECL で [dup] を打つとエラー中は応答が返らず止まった**ので最後に置く） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys ABCDEF
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-fieldmark
+keys [fieldmark]
+settle 700
+dump f-after-fieldmark
+
+keys [reset]
+settle 400
+setcursor 13,22
+settle 300
+keys [insert]
+settle 300
+keys X
+settle 800
+dump f-err-dup
+keys [dup]
+settle 700
+dump f-after-dup

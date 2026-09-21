@@ -8,6 +8,7 @@ import type { WsClient } from "../src/ws-client.js";
 import { rejectReason, isSignPosition } from "../src/composables/fieldValidate.js";
 import {
   MSG_BY_REASON,
+  MSG_FIELD_EXIT_KEY_INVALID,
   MSG_UNKNOWN_ERROR,
   fieldAtLabel,
   noticeFor,
@@ -139,14 +140,29 @@ describe("ScreenGrid: 打鍵", () => {
     expect(r.value).toBe("    12-");
   });
 
-  it("符号付き数値欄: 7 桁目（符号桁）に数字は入らない", async () => {
+  it("符号付き数値欄: 数字桁を埋めた後の 7 桁目は入らず、エラー 0018", async () => {
     const r = await typeInto(
       [fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })],
       "1234567"
     );
     // 画面に見えている桁がそのままホストへ行く（符号桁は空白のまま＝末尾空白は emit で落ちる）
     expect(r.value).toBe("123456");
-    expect(r.notices).toContain(MSG_BY_REASON["sign-position"]);
+    // ~~符号桁の拒否（sign-position）~~ → ACS は最終の数字桁に留まって「出た」状態になり、次の文字は 0018
+    // （`processCharKeyStroke` の `setErrorCode(24)`。実機でも 6S0 に 6 桁打つと 19,25 に留まった。
+    // `20260921-field-exit-required-types` research F4・F5）
+    expect(r.notices).toContain(MSG_FIELD_EXIT_KEY_INVALID);
+  });
+
+  it("符号付き数値欄: 符号桁にカーソルを置いて数字を打つと入らない（理由が出る）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })]);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(6, 6);
+    await type(el, "7");
+    expect(notices(w)).toContain(MSG_BY_REASON["sign-position"]);
+    expect(w.emitted("edit")).toBeUndefined();
+    w.unmount();
   });
 });
 
