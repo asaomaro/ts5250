@@ -92,6 +92,7 @@ const sesForm = reactive<SesFormState>({
   vtEncoding: "utf-8" as "utf-8" | "shift_jis" | "euc-jp",
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
+  associatedPrinter: "",
   rescueAction: "hold" as "hold" | "delete",
   transformTo: "",
   // 既定は「切らない」（`20260802-config-form-polish` で「サーバー既定に従う」を廃止）
@@ -314,6 +315,7 @@ function loadSession(): void {
   sesForm.model3270 = s.model3270 ?? 2;
   sesForm.vtEncoding = s.vtEncoding ?? "utf-8";
   sesForm.deviceName = s.deviceName ?? "";
+  sesForm.associatedPrinter = s.associatedPrinter ?? "";
   sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.transformTo = s.transformTo ?? "";
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
@@ -505,6 +507,15 @@ async function save(): Promise<void> {
         delete form.terminal;
         delete form.model3270;
         delete form.vtEncoding;
+      }
+      // **関連付けプリンターは 5250 の表示だけ**（サーバーは他の種別に書くと 400 にする）。送るかどうかは ACS と同じく
+      // Java の `trim()`（U+0020 以下を落とす）で空かを見て、値は打ったまま送る（ACS は空白も大文字小文字も加工しない。
+      // `20260921-associated-printer`）
+      const assoc = sesForm.associatedPrinter ?? "";
+      if (form.sessionType === "display" && sesForm.terminal === "5250" && ![...assoc].every((c) => c.charCodeAt(0) <= 0x20)) {
+        form.associatedPrinter = assoc;
+      } else {
+        delete form.associatedPrinter;
       }
       // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
       // 外した**ので、画面から保存した定義は必ず自分の値を持つ
@@ -717,6 +728,7 @@ const infoRows = computed(() => {
     });
   }
   if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
+  if (o.associatedPrinter) rows.push({ label: "関連付けプリンター", value: o.associatedPrinter });
   // 待ち受けの始め方。**プリンターと待ち行列で同じ**なので同じ行に出す
   if (o.sessionType !== "display") {
     rows.push({
@@ -957,6 +969,12 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
+          <span class="cap" title="ホストに申告すると、対話ジョブの印刷装置がこのプリンター装置になります（ACS のプリンターの関連付けと同じ）">
+            関連付けプリンター
+          </span>
+          <input v-model="sesForm.associatedPrinter" placeholder="プリンターの装置名" />
+        </label>
         <label v-if="sesForm.sessionType === 'printer'" class="row">
           <span class="cap" title="ホストに印刷データへ変換させると、書式そのままで実プリンターへ流せます。代わりに画面表示と PDF は使えません">
             印刷の経路

@@ -202,6 +202,11 @@ public class AcsProbe {
     // 例: 1399 は `KEY_JAPAN_ENGLISH_EX_EURO`、939 は `KEY_JAPAN_ENGLISH_EX`、930 は `KEY_JAPAN_KATAKANA`、37 は `KEY_US`
     String cpKey = env("PROBE_CODEPAGE_KEY", "");
     if (!cpKey.isEmpty()) p.put("codePageKey", cpKey);
+    // **関連付けプリンター**（既定は指定しない）。ACS の「プリンターの関連付け」で装置名を直接書いたときに
+    // 表示セッションへ入るプロパティ（`AssociatedPrinterSession5250` が `associatedDeviceName` に写す）。
+    // `NVT5250` はこれが空白でなければ NEW-ENVIRON に IBMASSOCPRT を足す（`20260921-associated-printer`）
+    String assoc = env("PROBE_ASSOC_PRINTER", "");
+    if (!assoc.isEmpty()) p.put("associatedDeviceName", assoc);
     String bypass = env("PROBE_BYPASS_SIGNON", "");
     if (!bypass.isEmpty()) {
       p.put("ssoEnabled", "true");

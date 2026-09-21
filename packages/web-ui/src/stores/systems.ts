@@ -57,6 +57,8 @@ export interface SessionConfigForm {
   /** VT の文字符号化（`terminal: "vt"` のみ。既定 utf-8） */
   vtEncoding?: "utf-8" | "shift_jis" | "euc-jp";
   deviceName?: string;
+  /** 5250 の display のみ。関連付けプリンターの装置名（ホストへ IBMASSOCPRT として申告する） */
+  associatedPrinter?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;

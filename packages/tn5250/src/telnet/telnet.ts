@@ -65,6 +65,12 @@ export interface TelnetOptions {
    * （`NVT5250.getHostDeviceOptions`）。プリンターの起動応答は申告しなくても届く（実機・PUB400 で I902 を確認）。
    */
   sendConfRec?: boolean | undefined;
+  /**
+   * **関連付けプリンターの装置名**（表示セッション。`20260921-associated-printer`）。Java の `trim()` で空でなければ、応答の**最後に**
+   * `USERVAR IBMASSOCPRT` として送る——ACS `NVT5250` は変数表の最後（IBMSENDCONFREC の後ろ）に積み、値は空白も大文字小文字も
+   * そのまま書く（実測でも同じ。ホストはジョブの印刷装置をその装置にする。存在しない名前だと起動応答を I901 にして接続は通す）
+   */
+  associatedPrinter?: string | undefined;
 }
 
 /** NEW-ENVIRON で送る USERVAR 1 つ（`TelnetOptions.userVars`） */
@@ -347,6 +353,11 @@ export class TelnetLayer {
             // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
             payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(pw.replace(/ +$/, ""))));
           }
+        }
+        // 関連付けプリンターは最後（`associatedPrinter` の注記）。値は各文字の下位 8 ビットをそのまま（ACS の `(byte)charAt`。ESC も挟まない）
+        const assoc = this.opts.associatedPrinter;
+        if (assoc !== undefined && javaTrim(assoc) !== "") {
+          payload.push(ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...[...assoc].map((c) => c.charCodeAt(0) & 0xff));
         }
         this.sendSb(payload);
       };

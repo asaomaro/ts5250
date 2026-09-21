@@ -286,6 +286,13 @@ const sessionBase = {
    */
   deviceNameRetry: z.boolean().optional(),
   /**
+   * **関連付けプリンターの装置名**（表示の 5250 だけ。`20260921-associated-printer`）。接続時に telnet で IBMASSOCPRT として申告し、
+   * ホストはジョブの印刷装置をその装置にする（ACS の「プリンターの関連付け」で装置名を書く方式。実測）。
+   * **値は検査も大文字化もしない**（ACS もしない。存在しない名前ではホストが起動応答を I901 にして、既定の印刷装置のまま繋ぐ）。
+   * 信頼設定ではない（印刷先を決めて権限を見るのはホスト）ので、サーバー設定・自分の設定のどちらにも書ける
+   */
+  associatedPrinter: z.string().optional(),
+  /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか（printer のみ）。
    * `hold`（既定）＝保留にして残す / `delete`＝削除する。削除は取り消せない。
    */
@@ -337,12 +344,22 @@ const sessionBase = {
 function assertTypeConsistent(
   s: {
     sessionType: SessionType;
+    terminal?: "5250" | "3270" | "vt" | undefined;
+    associatedPrinter?: string | undefined;
     dtaqWatch?: DtaqWatchSpec | undefined;
     msgWatch?: MsgWatchSpec | undefined;
     webhook?: unknown;
   },
   ctx: z.RefinementCtx
 ): void {
+  // 関連付けプリンターは 5250 の表示セッションの申告（IBMASSOCPRT）。ほかに書けても何も起きないので、保存の時点で弾く
+  if (s.associatedPrinter !== undefined && (s.sessionType !== "display" || (s.terminal ?? "5250") !== "5250")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["associatedPrinter"],
+      message: `associatedPrinter は 5250 の display セッションにしか指定できません（sessionType=${s.sessionType}・terminal=${s.terminal ?? "5250"}）`
+    });
+  }
   if (s.sessionType === "msgwatch" && s.msgWatch === undefined) {
     ctx.addIssue({ code: "custom", path: ["msgWatch"], message: "msgwatch セッションには msgWatch が必要です" });
   }
@@ -614,6 +631,8 @@ export interface PublicSession {
   /** 3270 のモデル（既定 2）。2 と 5 のみ */
   model3270?: 2 | 5;
   deviceName?: string;
+  /** 5250 の display のみ。関連付けプリンターの装置名（IBMASSOCPRT。信頼設定ではない） */
+  associatedPrinter?: string;
   /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
   rescueAction?: "hold" | "delete";
   /** printer のみ。ホスト変換の機種（HPT）。指定時は表示・PDF が使えない代わりに本来の印刷になる */

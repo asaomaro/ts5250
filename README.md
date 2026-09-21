@@ -644,7 +644,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | 階層 | 持つもの |
 |---|---|
 | **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報） |
-| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
+| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `associatedPrinter` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
 
 参照は**接頭辞つきのトークン**で、保管場所まで含めて一意に決まります。
 
@@ -772,6 +772,9 @@ WebSocket の `open` メッセージも同じ `system` / `session` / `host` を�
     `model3270`（`2` 既定 / `5`）、`vtEncoding`（`"utf-8"` 既定 / `"shift_jis"` / `"euc-jp"`）、
     `enhanced: true`（拡張 5250 GUI 広告）、`watermark`（画面の透かし →
     [ウォーターマーク](#ウォーターマーク画面に重ねる透かし)）、
+    `associatedPrinter`（**5250 のときだけ**。関連付けプリンターの装置名——ACS の「プリンターの関連付け」で装置名を書く方式と同じく
+    telnet で申告し、ホストは対話ジョブの印刷装置をその装置にします。書いたとおりに送り、検査も大文字化もしません。
+    存在しない名前ではホストが起動応答を I901 にして、既定の印刷装置のまま繋ぎます。3270・VT・プリンターに書くと弾きます）、
     `pcCommand`（PC コマンド実行。**サーバー設定のみ** → [PC コマンド](#pc-コマンドstrpco--strpccmd)）。
   - **`sessionType: "printer"` のときだけ**効くもの: `rescueAction`（`hold` 既定 / `delete`）、
     `transformTo`（HPT の機種。例 `"*HP4"`）、`printer`（自動 PDF / 印刷。**サーバー設定のみ**）。

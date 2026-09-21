@@ -200,6 +200,7 @@ export abstract class ConfigStore {
     if (s.model3270 !== undefined) pub.model3270 = s.model3270;
     if (s.vtEncoding !== undefined) pub.vtEncoding = s.vtEncoding;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
+    if (s.associatedPrinter !== undefined) pub.associatedPrinter = s.associatedPrinter;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;

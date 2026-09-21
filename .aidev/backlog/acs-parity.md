@@ -620,7 +620,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ACS: `IBM-5555-C01`。
     - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。
   - 低
-    - 関連プリンター（IBMASSOCPRT）が未対応
+    - ~~関連プリンター（IBMASSOCPRT）が未対応~~ → 下の `20260921-associated-printer` で装置名を書く方式を済ませた（プリンターセッションを指す方式と I901 の表示は別項目に割った）
     - 交渉前に届くテキストを出さない
     - ~~USER とパスワードを正規化しない~~（`20260921-telnet-signon-vars`: 利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす）。
       節目の点検の指摘で、前後を落とすのを Java の `trim()`（U+0020 以下だけ）に揃え、利用者名 10 文字・パスワード 128 文字を超えるか空なら
@@ -637,6 +637,19 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - telnet のオプションの状態機械（実害なし）
     - NEW-ENVIRON の応答方式（実害なし）
   （出典: `20260919-backlog-acs-triage` research N17・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
+- [x] **関連付けプリンター（IBMASSOCPRT）の装置名を書く方式**（上の【まとめ】telnet から割った）。`20260921-associated-printer`（PR #410）。
+  表示の 5250 の設定 `associatedPrinter` を NEW-ENVIRON の**最後**に `USERVAR IBMASSOCPRT` として送る（`packages/tn5250/src/telnet/telnet.ts:357-361`。
+  ACS `NVT5250` と同じく Java の `trim()` で空なら送らず、値は加工しない）。実機（社内機）で ACS のコアと当 PJ が同じワイヤ・同じ結果——
+  関連付けた装置がジョブの印刷装置になり（I902）、存在しない名前では起動応答が I901 で既定の印刷装置のまま繋がる。
+- [ ] **関連付けプリンター: プリンターセッションを指す方式**（ACS `5250PrinterAssociation`＝true。`20260921-associated-printer` research F4 から割った）。
+  ACS は指したプリンターセッションが同じホストで動いていればその装置名を使い、無ければ起こして装置名が決まるまで待つ
+  （`5250AssocPrinterSessionConnectionTimeout`。既定 5 秒・5〜600 に丸める・0 は待ち続ける。時間切れなら関連付け無しで繋ぐ）。
+  表示が切れたら（ほかに関連付けた表示が無ければ）プリンターを止め、表示が繋がったらプリンターを起こし、`close5250AssocPrinterWithLastSession` なら
+  最後の表示と一緒に閉じる（`AssociatedPrinterSession5250.CommEvent` / `sessionLabelEvent`・`SessionManager.stopAssociatedPrinterSession`）。
+  当 PJ はサーバーのセッション管理（`SessionManager.open` / `openPrinter`）をまたぐ。
+- [ ] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。ACS は I901 を成功として扱いつつ通信状態 37 を立て、
+  状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す（`DS5250.processDiagnosticInformation`・`HODStatusBar`）。
+  当 PJ は表示セッションの起動コードを画面へ渡していない（プリンターだけ。`packages/server/src/ws-handler.ts:913`）。関連付けた装置名が存在しないと実機で I901 になる。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり

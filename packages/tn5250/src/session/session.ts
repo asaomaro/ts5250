@@ -60,6 +60,11 @@ export interface ConnectOptions {
   /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`。5 回まで） */
   deviceNameRetry?: boolean;
   /**
+   * **関連付けプリンターの装置名**（表示セッションだけ。`20260921-associated-printer`）。空白だけなら申告しない。
+   * 申告の位置と値の扱いは `TelnetOptions.associatedPrinter`
+   */
+  associatedPrinter?: string;
+  /**
    * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
    * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
    */
@@ -281,6 +286,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       deviceName: opts.deviceName,
       deviceNameEnv: { ...opts.deviceNameEnv, printer: false },
       deviceNameRetry: opts.deviceNameRetry,
+      associatedPrinter: opts.associatedPrinter,
       passwordSubstitute: opts.passwordSubstitute,
       user: opts.user,
       password: opts.password,

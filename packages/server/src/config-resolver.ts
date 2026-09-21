@@ -197,6 +197,10 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
+      // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
+      if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
+        opts.associatedPrinter = session.associatedPrinter;
+      }
       // 分 → ms の変換はここ 1 か所だけで行う（入口ごとに書くと片方が分のまま流れる）
       const idle = idleTimeoutToMs(session.idleTimeout);
       if (idle !== undefined) opts.idleTimeoutMs = idle;
