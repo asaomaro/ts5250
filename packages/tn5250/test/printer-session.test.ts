@@ -204,3 +204,70 @@ describe("PrinterSession", () => {
     ).rejects.toMatchObject({ code: "SESSION_REJECTED" });
   });
 });
+
+describe("respondAfter: 帳票の出力が終わるまで応答しない（`20260921-printer-hold-response`）", () => {
+  async function openWith(respondAfter: (r: SpoolReport) => Promise<void> | void) {
+    let transport!: FakeTransport;
+    const session = await PrinterSession.connect({
+      respondAfter,
+      transport: new FakeTransport((t) => {
+        transport = t;
+        t.feed(startupRecord(I902));
+      })
+    });
+    return { session, transport };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("**ジョブの終わりの応答は Promise が解決するまで出さない**（データのレコードにはすぐ応答する）", async () => {
+    let release!: () => void;
+    const { transport } = await openWith(() => new Promise<void>((r) => (release = r)));
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR]);
+    release();
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR]);
+  });
+
+  it("拒否されても応答する（止めたままにするかは呼び出し側が決める）", async () => {
+    const { transport } = await openWith(() => Promise.reject(new Error("x")));
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR]);
+  });
+
+  it("**待っている間に届いたレコードは溜めて、応答のあとに順に処理する**", async () => {
+    let release!: () => void;
+    const { transport } = await openWith(() => new Promise<void>((r) => (release = r)));
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    transport.feed(clearRecord()); // 待っている間の CLEAR
+    await tick();
+    expect(replies(transport), "待っている間に CLEAR へ応答した").toEqual([NO_ERROR]);
+    release();
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR, CLEAR_PROCESSED]);
+  });
+
+  it("CLEAR で閉じたジョブも待つ（応答は CLEAR_PROCESSED）", async () => {
+    let release!: () => void;
+    const { transport } = await openWith(() => new Promise<void>((r) => (release = r)));
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(clearRecord());
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR]);
+    release();
+    await tick();
+    expect(replies(transport)).toEqual([NO_ERROR, CLEAR_PROCESSED]);
+  });
+
+  it("待つものを返さなければ（undefined）すぐ応答する", async () => {
+    const { transport } = await openWith(() => undefined);
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR]);
+  });
+});

@@ -94,6 +94,9 @@ node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/sql.js \
 | `verify-printer.mjs` | プリンターセッション検証（core・実機）: `PrinterSession` で待ち受け → 表示セッションから自前スプールをそのプリンター OUTQ へ回し（`CHGJOB OUTQ`＋`DSPLIBL OUTPUT(*PRINT)`）→ ライターの用紙タイプ問い合わせ（`CPA3394`）に `I` で応答 → SCS を受信して "Library List" 帳票を桁揃えで展開できることを確認。**自分のデバイスにのみスプールを回す**ためホストを汚さない。 |
 | `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・PUB400・CCSID 1399）: 5553 の装置が作られ、用紙・位置合わせの問い合わせに答えると帳票が届くことを確認。~~帳票に日本語が桁揃えで載ることを確認~~ → **英語機では日本語は置換される**（申告を ACS と同じ組にしたため。日本語の検証は下の `verify-printer-dbcs-push.mjs`）。**要 TESTLIB**。 |
 | `verify-printer-dbcs-push.mjs` | **日本語の帳票を書き出し経路で受ける**（core・日本語機）: 3812 で作った装置に DBCS の CCSID で繋ぐと 5553 に作り変えられ、IGC 属性の `DSPLIBL` が CPA3303 で止まらずに日本語の帳票として届くことを確認。装置は事前に作って最後に消す（この機は自動構成を許さない。仮想制御装置は `AS400_VRTCTL`）。 |
+| `verify-printer-hold.mjs` | **帳票の応答を止めている間、ホストはスプールを残して待つか**（core・PUB400）: 応答を 30 秒止める間スプールは WTR のまま残り、応答すると消える（SAVE(*NO)）。`PrinterSession` の `respondAfter` で止める。ENDWTR は PUB400 では権限が無く試せない。 |
+| `verify-printer-hold-server.mjs` | **自動出力に失敗したら応答を止め、再試行・取消で応答する**（server・PUB400）: まだ無い保存先で PDF が書けず止まる → スプールは WTR → 保存先を作って再試行で PDF ができスプールが消える → 2 本目は取消で消える。`npm run build` の後に流す。 |
+| `verify-device-env.mjs` | **KBDTYPE / CODEPAGE / CHARSET の申告でサインオンと日本語の往復が通るか**（core）: `[PUB400|AS400] [CCSID]`（既定 1399）。コマンド行に日本語を打って、ホストの「コマンドが見つからない」系のメッセージにそのまま戻るかを見る。ホストに何も作らない。 |
 | `diag-printer-declare.mjs` | プリンターの**申告の組み合わせ**（ACS の DBCS / SBCS / HPT、当 PJ の旧い組）を素の telnet で実機・PUB400 に当て、起動応答・装置の型・IGC の帳票が届くかを並べる。 |
 
 ```sh

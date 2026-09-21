@@ -40,6 +40,10 @@ export interface SpoolOutputStatusView {
   spoolId: string;
   at: number;
   skipped?: boolean;
+  /** 出力に失敗したので、ホストへの応答を止めている（再試行・取消を待つ。`20260921-printer-hold-response`） */
+  held?: boolean;
+  /** 止めていた応答を取消で返した（ホストは印刷済みとみなした） */
+  canceled?: boolean;
   pdf?: { ok: boolean; path?: string; error?: string };
   print?: { ok: boolean; printer?: string; error?: string };
 }

@@ -250,6 +250,8 @@ export type WsClientMessage =
   | WsGuiSelect
   | WsGuiSubmit
   | WsPrinterOutput
+  | WsPrinterOutputRetry
+  | WsPrinterOutputCancel
   | WsActivity
   | WsPong
   | WsWatchSubscribe
@@ -463,6 +465,10 @@ export interface SpoolOutputStatusMsg {
   spoolId: string;
   at: number;
   skipped?: boolean;
+  /** 出力に失敗したので、ホストへの応答を止めている（再試行・取消を待つ） */
+  held?: boolean;
+  /** 止めていた応答を取消で返した */
+  canceled?: boolean;
   pdf?: { ok: boolean; path?: string; error?: string };
   print?: { ok: boolean; printer?: string; error?: string };
 }
@@ -507,6 +513,17 @@ export interface WsPcCommand {
 export interface WsPrinterOutput {
   type: "printer-output";
   enabled: boolean;
+}
+/**
+ * client → server: **出力に失敗して応答を止めている帳票の出力をやり直す**（ACS のプリンター・エラーの「再試行」。
+ * `20260921-printer-hold-response`）。対象は開いているプリンターセッションの止めている 1 件
+ */
+export interface WsPrinterOutputRetry {
+  type: "printer-output-retry";
+}
+/** client → server: **止めている帳票を取り消し、ホストへ応答する**（ACS の「取消」。ホストは印刷済みとみなす） */
+export interface WsPrinterOutputCancel {
+  type: "printer-output-cancel";
 }
 /**
  * ハートビート（server → client）。クライアントは `pong` を返す。

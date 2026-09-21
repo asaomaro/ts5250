@@ -47,6 +47,17 @@ export interface PrinterConnectOptions {
   /** テスト注入（ReplayTransport 等）。指定時は host 不要 */
   transport?: Transport;
   warn?: (message: string) => void;
+  /**
+   * **帳票を確定したとき、ホストへ応答する前に待つもの**（`20260921-printer-hold-response`）。
+   *
+   * ACS は印刷先へ書き終えてから応答し、書けなければ応答を止めて利用者の再試行・取消を待つ
+   * （`PSNVT5250P.sendPrintData` → `processPrinterError`）。応答が来るまでホストの書き出しプログラムは待つので、
+   * 出力に失敗しても**スプールは印刷済みにならない**（SAVE(*NO) でも消えない）。当 PJ の実際の出力（PDF・自動印刷）は
+   * ジョブの終わりにサーバーが行うので、その成否をここで待つ。返した Promise が解決したら応答する（拒否でも応答する）。
+   * 待っている間に届いたレコードは溜めて、応答のあとに順に処理する（ACS も同じスレッドで待つので先へ進まない）。
+   * 指定が無ければ従来どおりすぐ応答する。
+   */
+  respondAfter?: (report: SpoolReport) => Promise<void> | void;
 }
 
 interface PrinterSessionEvents extends Record<string, unknown[]> {
@@ -163,7 +174,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
       });
       session.telnet.onError((e) => session.warn(`transport error: ${e.message}`));
-      session.telnet.onRecord((rec) => session.handleRecord(rec));
+      session.telnet.onRecord((rec) => session.onRecord(rec));
     });
 
     transport.start?.();
@@ -186,6 +197,17 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     this.telnet?.close();
   }
 
+  /** 応答を待たせている間（`respondAfter`）に届いたレコード。応答のあとに順に処理する */
+  private held: Uint8Array[] | undefined;
+
+  private onRecord(rec: Uint8Array): void {
+    if (this.held) {
+      this.held.push(rec);
+      return;
+    }
+    this.handleRecord(rec);
+  }
+
   private handleRecord(rec: Uint8Array): void {
     if (!this.started) {
       this.handleStartup(rec);
@@ -195,12 +217,13 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     // ACS は opcode より先にヘッダのバイト 4（`miscFlags1`）を見て、0x40（終了のレコード）なら何もしない
     // （起動の応答 0x80 / 0x90 は `started` で先に分けている）。どちらでも応答は下で返す
     const opcode = rec.length > 9 ? rec[9] : -1;
+    let finished: SpoolReport | undefined;
     if (rec[4] === MISC_TERMINATION) {
       // 何もしない
     } else if (opcode === OP_CLEAR) {
       // CLEAR（印刷の取り消し・保留など）: 受けかけのジョブを閉じ、CLEAR_PROCESSED を返す（`processClear` → `sendEOJ`）。
       // ~~応答しない~~ だとホストは応答を待つ。閉じないと前のジョブの断片が次の帳票に混ざる
-      if (this.jobBytes.length > 0) this.finishJob();
+      if (this.jobBytes.length > 0) finished = this.finishJob();
       this.response = CLEAR_PROCESSED;
     } else if (opcode === OP_PRINT) {
       const payload = rec.subarray(6 + (rec[6] ?? 4));
@@ -211,7 +234,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       // （`inJob`）でなければ何もしない。閉じると空の帳票ができ、自動 PDF・自動印刷に白紙が出る
       // （データ → 終わり → CLEAR → 終わり、の並びで起きた。独立点検の指摘）
       if (endOfJob) {
-        if (this.jobBytes.length > 0) this.finishJob();
+        if (this.jobBytes.length > 0) finished = this.finishJob();
       }
       else if (payload.length > 0) {
         for (const b of payload) this.jobBytes.push(b);
@@ -219,6 +242,21 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       }
     }
     // その他の opcode は何もしない（ACS も処理しない。~~本体を SCS として足す~~）
+    const gate = finished && this.opts.respondAfter ? this.opts.respondAfter(finished) : undefined;
+    if (gate) {
+      // 帳票の出力が終わるまで応答しない（上の `respondAfter`）。失敗しても最後は応答する——止めたままにするかは
+      // 呼び出し側が決める（再試行・取消を待つなら、その間 Promise を解決しない）
+      this.held = [];
+      const release = (): void => {
+        const queued = this.held ?? [];
+        this.held = undefined;
+        if (this.closed) return;
+        if (this.response) this.telnet.sendRecord(this.response);
+        for (const r of queued) this.onRecord(r);
+      };
+      void Promise.resolve(gate).then(release, release);
+      return;
+    }
     if (this.response) this.telnet.sendRecord(this.response);
   }
 
@@ -237,7 +275,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     }
   }
 
-  private finishJob(): void {
+  private finishJob(): SpoolReport {
     const raw = Uint8Array.from(this.jobBytes);
     this.jobBytes = [];
     // **HPT では中身を解釈しない。** 届いているのは SCS ではなくプリンターの言語なので、
@@ -246,6 +284,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     const report: SpoolReport = { id: `spool-${++this.seq}`, pages, raw };
     this.reportList.push(report);
     this.emit("report", report);
+    return report;
   }
 
   private handleClose(reason: string): void {

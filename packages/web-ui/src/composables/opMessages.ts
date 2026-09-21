@@ -57,6 +57,18 @@ export const MSG_DTP_NEXT_MONTH = "次の月";
  */
 export const MSG_WATCH_CONSUMES = "監視はエントリを取り出して消します。本番のキューには掛けないでください";
 
+/**
+ * **プリンターの出力に失敗して、ホストへの応答を止めている**（`20260921-printer-hold-response`）。
+ * ACS と同じく、利用者が再試行か取消を選ぶまで印刷完了を返さない——その間スプールはホストに残る
+ */
+export const MSG_PRINTER_HELD = "出力に失敗したため、ホストへの印刷完了の応答を止めています（再試行か取消を選んでください）";
+/** 再試行のボタン（失敗した出力だけをやり直し、できたら応答する） */
+export const MSG_PRINTER_RETRY = "再試行";
+/** 取消のボタン（応答を返す。ホストは印刷済みとみなし、SAVE(*NO) のスプールは消える） */
+export const MSG_PRINTER_CANCEL = "取消（印刷済みとして応答）";
+/** 取消した帳票の状態 */
+export const MSG_PRINTER_CANCELED = "取消しました（ホストは印刷済みとみなしました）";
+
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
 

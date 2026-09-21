@@ -303,7 +303,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `sendEOJ`）。応答は ACS と同じく「いまの応答」を持ち越す（`printer-session.ts` `handleRecord`）。実機でもジョブの終わりの直後に CLEAR が来た。
   あわせて**ジョブの終わりの判定**をフラグ 0x08 ＋ 本体が空か 0x00 にした（5553 では 16 バイトで届き、旧実装の「長さ 17」では帳票が
   確定しなかった）。応答の予約 2 バイトも ACS の 0x0102 にした。
-- [ ] **プリンター: 受信した瞬間に印刷完了を返す**（優先度 中・深さ ◐）。~~／CLEAR に応答しない~~（上で済んだ）
+- [x] **プリンター: 受信した瞬間に印刷完了を返す**（優先度 中・深さ ◐）。~~／CLEAR に応答しない~~（上で済んだ）
+  **完了（`20260921-printer-hold-response`・PR #410）**: 自動出力に失敗した帳票は、ACS と同じくジョブの終わりの応答を止め、利用者の再試行・取消を待つ
+  （コア `PrinterSession` の `respondAfter`、サーバー `session-manager.ts` の `outputGate` / `retryPrinterOutput` / `cancelPrinterOutput`、画面は `PrinterPane.vue` のバー）。
+  再試行は失敗した出力だけ。実機（PUB400）: 止めている間スプールは WTR のまま残り、応答すると消える（`scripts/verify-printer-hold.mjs`）。サーバーの経路の全体でも
+  失敗 → 止める → 保存先を作って再試行 → PDF ができスプールが消える、取消で消える（`scripts/verify-printer-hold-server.mjs` pass=8）。mutation 11 通り検出。
+  残り: 止めている間にホストが取り消したとき（ENDWTR *IMMED など。PUB400 では権限が無く未確認）。
   次のとき、ホストは印刷済みとみなすので、SAVE(*NO) のスプールが消える（印刷の欠落）。
   - PDF の出力先の権限・容量が足りない
   - 自動印刷先が止まっている

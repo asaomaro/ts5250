@@ -277,6 +277,10 @@ export class WsConnection {
           return await this.onGuiSubmit(msg);
         case "printer-output":
           return await this.onPrinterOutput(msg);
+        case "printer-output-retry":
+          return await this.onPrinterOutputHeld("retry");
+        case "printer-output-cancel":
+          return await this.onPrinterOutputHeld("cancel");
         case "reserve-break":
           return this.onReserveBreak();
         case "watch-subscribe":
@@ -922,6 +926,18 @@ export class WsConnection {
     await withAudit({ op: "ws_printer_output", sessionId: id }, async () => {
       const entry = this.deps.sessions.setPrinterOutputEnabled(id, msg.enabled, this.user);
       this.send({ type: "printer-output-state", sessionId: id, enabled: entry.outputEnabled });
+    });
+  }
+
+  /**
+   * **止めている帳票の再試行・取消**（`20260921-printer-hold-response`）。権限は自動出力の切り替えと同じ
+   * （`getPrinter` の所有者/admin）。結果は `printer-output-result` の push で画面へ届く
+   */
+  private async onPrinterOutputHeld(action: "retry" | "cancel"): Promise<void> {
+    const id = this.requireSession();
+    await withAudit({ op: action === "retry" ? "ws_printer_output_retry" : "ws_printer_output_cancel", sessionId: id }, async () => {
+      if (action === "retry") this.deps.sessions.retryPrinterOutput(id, this.user);
+      else this.deps.sessions.cancelPrinterOutput(id, this.user);
     });
   }
 

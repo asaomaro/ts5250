@@ -1118,6 +1118,17 @@ export function setPrinterOutput(sessionId: string, enabled: boolean): void {
 }
 
 /**
+ * **出力に失敗して応答を止めている帳票**の再試行・取消（ACS のプリンター・エラーの「再試行」「取消」。
+ * `20260921-printer-hold-response`）。結果は `printer-output-result` で届く
+ */
+export function retryPrinterOutput(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-output-retry" });
+}
+export function cancelPrinterOutput(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-output-cancel" });
+}
+
+/**
  * 待ち受けを開始する（`20260801-service-start-stop`）。
  *
  * **結果は待たない**——成功すれば `printer-state` の `listening` が、
