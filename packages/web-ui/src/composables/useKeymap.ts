@@ -90,6 +90,12 @@ export function classifyKey(
     if (ev.key === "ArrowUp") return { local: "word-up" };
     if (ev.key === "ArrowDown") return { local: "word-down" };
   }
+  // **Alt+←/→ も語頭ジャンプ**（ACS の既定の割り当て `A37 = [backtabword]`・`A39 = [tabword]`。`20260922-word-tab-acs`）。
+  // ブラウザの履歴の戻る／進むは捕捉時に preventDefault で抑える。アプリのショートカットは Alt+Shift 系（`App.vue`）
+  if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
+    if (ev.key === "ArrowLeft") return { local: "word-left" };
+    if (ev.key === "ArrowRight") return { local: "word-right" };
+  }
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return {};
   // **テンキーの − / ＋ は Field− / Field+**（メイン行の `-` `+` は文字として欄の型の規則に従う。
   // ~~以前は物理キーを見分けられず、数値欄の `-` `+` をすべて Field± にしていた~~）
