@@ -438,6 +438,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   テスト `packages/web-ui/test/acs-default-keys.test.ts`（15 件・mutation 9 通りすべて検出）。
 - [x] **【まとめ】キー編集のうち欄の外の End**（優先度 低）。**完了（`20260921-end-outside-field`・PR #410）**: ACS `processEndField` と同じく、カーソルより後で始まる
   最初の入力欄（継続欄は先頭の区切りだけ。無ければ先頭へ巡回。`nextNonByPassInputFieldPos`）の末尾へ（`packages/web-ui/src/components/EmulatorPane.vue` の `endKey`）。
+- [x] **【まとめ】キー編集のうち欄の先頭の Backspace（SBCS）**（優先度 低）。**完了（`20260921-backspace-field-start`・PR #410）**: ACS と同じく操作員エラー 0005 で
+  カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -460,7 +462,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ACS: すべての欄で Field+ / Field− として働く。
     - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
   - 低
-    - 欄の先頭での Backspace、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
+    - ~~欄の先頭での Backspace~~（SBCS は `20260921-backspace-field-start` で ACS と同じ 0005 に。**DBCS の欄は残り**——ACS は原典の手順上 0101（SO の前が属性の桁）、文言と実機は未確認）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
       Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）

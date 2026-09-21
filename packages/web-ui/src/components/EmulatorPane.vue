@@ -321,7 +321,8 @@ function onFieldFull(fieldIndex: number): void {
 }
 
 /**
- * 欄の**先頭**で Backspace が押された（ScreenGrid）。**前の入力欄の末尾**へ移る。
+ * **DBCS の**欄の先頭で Backspace が押された（ScreenGrid）。**前の入力欄の末尾**へ移る。
+ * SBCS の欄は ACS と同じく 0005 にしたので来ない（`20260921-backspace-field-start`。DBCS は未確認のまま）。
  *
  * 実機は欄の先頭の Backspace を「前の欄の末尾へカーソルを移す（削除はしない）」として扱う
  * （GNU tn5250 `display.c` の `kf_backspace`）。EDTMSK のように**ホストが 1 つの項目を

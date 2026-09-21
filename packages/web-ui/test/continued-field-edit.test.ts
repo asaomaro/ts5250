@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 
 /**
  * **EDTMSK で分割された欄は、ACS と同じく「1 つの入力欄」として編集する。**
@@ -113,13 +114,15 @@ describe("EDTMSK 分割欄の Backspace / Delete は区間をまたぐ", () => {
     w.unmount();
   });
 
-  it("並び全体の先頭では削除せず前の欄へ移る（単独欄と同じ）", async () => {
+  // ~~並び全体の先頭では前の欄へ移る~~ → 単独欄と同じく 0005 で動かない（ACS。`20260921-backspace-field-start`）
+  it("並び全体の先頭では削除せず 0005（単独欄と同じ）", async () => {
     const fields = dateFields();
     const w = mountGrid(fields);
     await nextTick();
     await focusAt(w, 0, 0);
     await press(w, inputs(w)[0]!, "Backspace");
-    expect(w.emitted("field-prev")).toBeTruthy();
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("field-prev")).toBeUndefined();
     expect(values(w, fields)).toEqual(["2026", "08", "25"]); // 何も消えない
     w.unmount();
   });

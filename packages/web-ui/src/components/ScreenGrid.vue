@@ -196,11 +196,9 @@ const emit = defineEmits<{
   /** 機能キー凡例のボタンが押された（親が sendKey する。spec B3） */
   (e: "aid", key: AidKey): void;
   /**
-   * 欄の**先頭**で Backspace が押された。`field-full`（次の欄へ）と対になる。
-   *
-   * 実機は欄の先頭で Backspace を押すと**前の入力欄の末尾へカーソルを移す（削除はしない）**
-   * ——GNU tn5250 `display.c` の `kf_backspace`。EDTMSK のように**ホストが 1 つの項目を
-   * 複数の入力欄へ分解して送る**画面では、これが無いと欄をまたいで戻れない。
+   * **DBCS の欄の先頭**で Backspace が押された（前の欄の末尾へ移る。GNU tn5250 `display.c` の `kf_backspace`）。
+   * ~~欄の先頭で Backspace を押すと前の入力欄の末尾へ~~——SBCS の欄は ACS と同じく 0005 にした（`20260921-backspace-field-start`）。
+   * DBCS の欄だけ未確認で残している
    */
   (e: "field-prev", fieldIndex: number): void;
   /**
@@ -2758,18 +2756,19 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     // `editAcrossContinued` のコメント参照）。DBCS は対象外（列ビューが絡み複雑になるため
     // 未対応。EDTMSK 欄は数値専用で実質起きない）。
     if (f.continued !== undefined && !isDbcsEdit(f)) {
-      // 合成バッファの先頭（＝並び全体の先頭区間の桁 0）まで戻っていれば、
-      // 単独欄の「欄の先頭」と同じく前の欄へ移る。
+      // 合成バッファの先頭（＝並び全体の先頭区間の桁 0）まで戻っていれば、単独欄の「欄の先頭」と同じく 0005
       if (continuedOffsetOf(f) + edit.cursor === 0) {
-        emit("field-prev", f.index);
+        emit("notice", MSG_PROTECTED);
         return;
       }
       editAcrossContinued(f, backspace);
       return;
     }
-    // **欄の先頭では削除せず前の欄の末尾へ移る**（原典どおり。`field-prev` のコメント参照）
+    // **欄の先頭の Backspace は操作員エラー 0005 で、カーソルは動かさない**（ACS `PS5250.processBackspace`: 1 桁左＝属性の桁で
+    // 削除を試み、欄の外なので失敗してカーソルを戻す。`20260921-backspace-field-start`）。実機（PUB400・ACS のコア）で 2 つの欄とも
+    // 0005・カーソルそのまま、続けて打った文字も受け付けなかった。~~前の欄の末尾へ移る~~（GNU tn5250 `kf_backspace` の動き）は破棄
     if (edit.cursor === 0) {
-      emit("field-prev", f.index);
+      emit("notice", MSG_PROTECTED);
       return;
     }
     edit = backspace(edit);
@@ -2919,7 +2918,9 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       syncDbcs(el, f);
       return;
     }
-    // SBCS 欄と同じく、欄の先頭では前の欄の末尾へ移る（削除はしない）
+    // 欄の先頭では前の欄の末尾へ移る（削除はしない）。~~SBCS 欄と同じく~~——SBCS 欄は ACS と同じ 0005 にした
+    // （`20260921-backspace-field-start`）。DBCS 欄の ACS は原典の手順上 0101（SO の前が属性の桁）で、文言と実機を
+    // 確かめていないので従来のまま（台帳「【まとめ】キー編集の細部」）
     if (edit.cursor === 0) {
       emit("field-prev", f.index);
       return;
