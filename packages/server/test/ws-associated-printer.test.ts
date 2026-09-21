@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import type { ServerSession } from "../src/config-types.js";
 import type { AuthUser } from "../src/auth.js";
 import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import type { WsServerMessage } from "../src/ws-messages.js";
+import { setAuditSink, type AuditEvent } from "../src/audit.js";
 
 /**
  * **表示を開くときの、関連付けるプリンターセッション**（`associatedPrinterSession`。`20260921-associated-printer-session`。ACS
@@ -110,7 +111,11 @@ describe("表示を開くときの関連付けるプリンター", () => {
 
   it("**待ち時間切れでも表示は開くが、関連付けなしで開く**（ACS: 起こすタイマーのスレッドが時間が来ると関連付けなしの表示を開く）。組は残し、理由を返す", async () => {
     const mgr = new Recording(true);
+    const events: AuditEvent[] = [];
+    setAuditSink((e) => events.push(e));
     const { sent } = await openDisplay(mgr, [prt, disp({ associatedPrinterTimeout: 5 })]);
+    setAuditSink(() => {});
+    expect(events.filter((e) => e.op === "ws_associated_printer"), "時間切れも監査に残る").toMatchObject([{ result: "error", code: "timeout" }]);
     const opened = sent.find((m) => m.type === "opened");
     expect(opened).toBeDefined();
     expect(mgr.displays[0]!.associatedPrinter, "設定の装置名では関連付けない（読み違いの修正）").toBeUndefined();
@@ -395,6 +400,66 @@ describe("関連付けるプリンター: 信頼境界（認証あり）", () =>
     const sent = await openAs(alice, mgr, resolver, "srv:d");
     expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "FORBIDDEN" });
     expect(mgr.printersOpened, "プリンターも開かない").toHaveLength(0);
+    mgr.closeAll();
+  });
+});
+
+/**
+ * **関連付けの準備を監査に残す**（`20260921-assoc-printer-audit`。節目 10 の独立点検 C-N5）。サーバーが利用者に代わってプリンターを起こす副作用は、
+ * 直接開く `ws_open_printer` と同じく証跡に残す。記録は種別・結果・時間だけ（設定名・装置名は載せない。spec D14）
+ */
+describe("関連付けの監査（ws_associated_printer）", () => {
+  const events: AuditEvent[] = [];
+  beforeEach(() => {
+    events.length = 0;
+    setAuditSink((e) => events.push(e));
+  });
+  afterEach(() => {
+    setAuditSink(() => {}); // 後続テストへ漏らさない
+  });
+  const assoc = () => events.filter((e) => e.op === "ws_associated_printer");
+
+  it("**成功は ok を 1 件**。載せるのは op・result・durationMs だけ（設定名・装置名を入れない）", async () => {
+    const mgr = new Recording();
+    await openDisplay(mgr, [prt, disp()]);
+    expect(assoc()).toHaveLength(1);
+    expect(assoc()[0]).toMatchObject({ op: "ws_associated_printer", result: "ok" });
+    expect(Object.keys(assoc()[0]!).sort(), "値を載せない").toEqual(["durationMs", "op", "result"]);
+    mgr.closeAll();
+  });
+
+  it("**使い回しでも 1 件**（開き直さなくても、この表示のための関連付けとして残す）", async () => {
+    const mgr = new Recording();
+    await openDisplay(mgr, [prt, disp()]);
+    await openDisplay(mgr, [prt, disp()]);
+    expect(assoc()).toHaveLength(2);
+    mgr.closeAll();
+  });
+
+  it("**指した設定が使えないときは error と code `invalid`**", async () => {
+    const mgr = new Recording();
+    const notPrinter = { id: "prt", name: "prt", system: "sys", sessionType: "display" } as ServerSession;
+    await openDisplay(mgr, [notPrinter, disp()]);
+    expect(assoc()).toMatchObject([{ result: "error", code: "invalid" }]);
+    mgr.closeAll();
+  });
+
+  it("**プリンターを開けないときは error と code `failed`**", async () => {
+    class FailingRecording extends Recording {
+      override openPrinter(): Promise<never> {
+        return Promise.reject(new Error("boom"));
+      }
+    }
+    const mgr = new FailingRecording();
+    await openDisplay(mgr, [prt, disp()]);
+    expect(assoc()).toMatchObject([{ result: "error", code: "failed" }]);
+    mgr.closeAll();
+  });
+
+  it("**関連付けを指さない表示では記録しない**", async () => {
+    const mgr = new Recording();
+    await openDisplay(mgr, [prt, disp({ associatedPrinterSession: undefined })]);
+    expect(assoc()).toHaveLength(0);
     mgr.closeAll();
   });
 });

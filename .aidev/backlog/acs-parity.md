@@ -692,6 +692,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   節目 10 の独立点検で直した分: 待ち時間切れ・失敗では**関連付けなしで表示を開き**、理由を `opened.associatedPrinterIssue` で知らせる（ACS のタイマーのスレッド
   〔`AssociatedPrinterSession5250`〕の読み。~~時間切れで表示を開かない~~ は読み違いで、decisions D4 で破棄）。REST の保存はプリンターを同じ保存先からしか参照させず
   （`packages/server/src/config-routes.ts` の `stripSource`）、参照されているプリンターの削除・種別の変更は FORBIDDEN（`config-store.ts` の `assertNotAssociated`）。
+- [x] **関連付けで起こしたプリンターを監査に残す**（上の「プリンターセッションを指す方式の残り」から割った。節目 10 の独立点検 C-N5）。**完了（`20260921-assoc-printer-audit`）**: `prepareAssociation` の結果を `ws_associated_printer` として 1 件記録する（成功は `ok`、使えない・開けない・時間切れは `error` と理由を `code` に。
+  `packages/server/src/ws-handler.ts`）。設定名・装置名は載せない（spec D14）。テスト 5 件（時間切れは既存の 5 秒のテストに足した）、mutation 5 通り検出。
 - [ ] **関連付けプリンター（プリンターセッションを指す方式）の残り**（優先度 低・深さ △。上の `[x]` から割った）。**着手時に両側を再確認すること。**
   - **表示の切断→繋ぎ直しの実機と ACS の GUI 状態**: 当 PJ の実機の測定は開く・閉じる・共有まで。切断→繋ぎ直しでのプリンターの止まり方・起き方は測っていない。
     ACS の GUI 層は `acs-probe` で動かせないので原典の読みまで（**未確認**）
@@ -701,7 +703,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     別の表示が閉じてプリンターを止める窓が、表示の接続の間だけある
   - ACS は既存のプリンターセッションの装置名を待たずにすぐ使う。当 PJ は起こして待つ（起動応答の名前を使うので ACS より正確。ただし「ACS と同じ順序」とは言えない）。
     待ちループ（`prepareAssociatedPrinter` の 200 ms おき）は、実運用ではほぼ最初の 1 周で抜ける
-  - 関連付けで起こしたプリンターは `ws_open_printer` の監査に載らない。ACS は開始の知らせを状態行の履歴に残す（当 PJ は ⓘ のコード以外に残らない）。
+  - ~~関連付けで起こしたプリンターは `ws_open_printer` の監査に載らない。~~ → 上の `20260921-assoc-printer-audit` で済んだ。ACS は開始の知らせを状態行の履歴に残す（当 PJ は ⓘ のコード以外に残らない）。
     `associatedPrinter` の値の制御文字は ACS も検査せず送る（当 PJ も同じ。保存時に弾くなら実測してから）
 - [x] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。`20260921-startup-code-status`（PR #410）。
   ~~ACS は I901 を…状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す~~ → ACS が実際に見せるのは I901・I902 とも

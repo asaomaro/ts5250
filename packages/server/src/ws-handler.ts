@@ -16,7 +16,7 @@ import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
-import { withAudit } from "./audit.js";
+import { audit, withAudit } from "./audit.js";
 import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
 import type { MacroStore } from "./macro-store.js";
 import type { Tn3270Manager } from "./tn3270-manager.js";
@@ -905,6 +905,25 @@ export class WsConnection {
     const target = this.resolveTarget(msg);
     const want = target.associatedPrinterSession;
     if (!want) return undefined;
+    // **サーバーが利用者に代わってプリンターを起こす副作用は、直接開く `ws_open_printer` と同じく監査に残す**（表示の `ws_open` に埋もれると、
+    // 誰の操作でプリンターが起き、使えない・開けない・時間切れで関連付けなしになったかを追えない。`20260921-assoc-printer-audit`）。
+    // `withAudit` は例外か MCP のエラー応答でしか `error` にしないので、理由（`issue`）を `code` に載せて直接出す。設定名・装置名は載せない（spec D14）
+    const t0 = Date.now();
+    const result = await this.startAssociatedPrinter(want, opts);
+    audit({
+      op: "ws_associated_printer",
+      result: result.issue === undefined ? "ok" : "error",
+      ...(result.issue !== undefined ? { code: result.issue } : {}),
+      durationMs: Date.now() - t0
+    });
+    return result;
+  }
+
+  /** `prepareAssociation` の本体（指定があるときだけ呼ぶ）。結果の意味は上の JSDoc */
+  private async startAssociatedPrinter(
+    want: NonNullable<ResolvedTarget["associatedPrinterSession"]>,
+    opts: OpenOptions
+  ): Promise<{ printerId?: string; closeWithLast: boolean; issue?: "invalid" | "failed" | "timeout" }> {
     let printerTarget: ResolvedTarget;
     try {
       // プリンターの設定は**表示と同じ道**（`ConfigResolver`）で解決する——認可（サーバー設定は admin だけ等）も同じ
