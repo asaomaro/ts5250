@@ -230,6 +230,12 @@ const macroStop = computed<string | undefined>(() => {
     </span>
     <span v-if="snap">画面 <b>{{ snap.rows }}x{{ snap.cols }}</b></span>
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
+    <!--
+      **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
+      `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
+      ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。以前は受け取っても**どこにも出していなかった**
+    -->
+    <span v-if="snap?.messageWaiting" class="msgwait" title="メッセージ待ち行列にメッセージが届いています" role="status">✉ メッセージあり</span>
     <!-- マクロの状態（ACS のシアンバー相当。spec D10）。幅は固定して隣をずらさない -->
     <span v-if="macro" class="macro" :class="macro.cls" :title="macro.title" role="status">
       {{ macro.label }}
@@ -459,6 +465,10 @@ const macroStop = computed<string | undefined>(() => {
 }
 .lock {
   color: var(--t-yellow);
+}
+/* メッセージ待ち（MW）。配色は CSS 変数に従う（`docs/UI-DESIGN.md`「生色を避ける」） */
+.msgwait {
+  color: var(--t-turquoise); /* 5250 のターコイズ（シアン相当）。定義済みの変数を使う */
 }
 /* クライアント側の操作員メッセージ。ホストのメッセージと取り違えないよう色を変える */
 .notice {

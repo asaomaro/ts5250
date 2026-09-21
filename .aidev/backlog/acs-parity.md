@@ -216,7 +216,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - エラー状態は持たない。
   要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。メッセージ行の位置と復元は、どちらを選んでも ACS に合わせる。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
-- [ ] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
+- [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
+  **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
+  原典で確認——`DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯（両方なら点灯）。ビットの無い WTD では状態を保つ。
+  ⚠ **実機で MW を点けさせていない**（自分のメッセージ待ち行列へ SNDMSG すれば出せる）。
   *NOTIFY の待ち行列にメッセージが届いても（SBMJOB の完了など）、表示が出ない。
   ACS: CC2 のビット（0x01/0x02）と opcode 0x0B/0x0C で OIA を更新する（委譲先 C）。
   当 PJ: `packages/tn5250/src/session/session.ts:147/592-593` が opcode だけを `messageWaiting` に保持し、snapshot にも UI にも出していない（主エージェントが確認）。CC2 のビットは見ていない。

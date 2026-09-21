@@ -106,3 +106,23 @@ describe("StatusBar のキーの並び", () => {
     expect(html.indexOf('class="keypad"')).toBeLessThan(html.indexOf('class="oia"'));
   });
 });
+
+/**
+ * **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
+ * `*NOTIFY` の待ち行列にメッセージが届いたときにホストが点ける。以前は受け取っても
+ * どこにも出していなかった（ACS は OIA に出す）。
+ */
+describe("StatusBar のメッセージ待ち表示", () => {
+  function stateWith(messageWaiting: boolean): SessionState {
+    const st = state();
+    st.snapshot = { ...snap(), ...(messageWaiting ? { messageWaiting: true } : {}) } as ScreenSnapshot;
+    return st;
+  }
+
+  it("点いているときだけ出す", () => {
+    const on = mount(StatusBar, { props: { state: stateWith(true), cursor: { row: 1, col: 1 } } });
+    expect(on.find(".msgwait").exists()).toBe(true);
+    const off = mount(StatusBar, { props: { state: stateWith(false), cursor: { row: 1, col: 1 } } });
+    expect(off.find(".msgwait").exists()).toBe(false);
+  });
+});

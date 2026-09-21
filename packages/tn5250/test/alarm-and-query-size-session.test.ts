@@ -121,3 +121,25 @@ describe("Query Reply はセッションの画面サイズを申告する", () =
     expect(reply![50]).toBe(parseInt(expected, 16));
   });
 });
+
+/**
+ * **メッセージ待ち表示（MW）がセッション経由でスナップショットに載る**
+ * （`20260921-message-waiting-indicator`）。CC2 の解析（`wtd-applier`）と表示（`StatusBar`）の
+ * **間のつなぎ**を固定する——ここが抜けると、ビットを読んでも表示灯は永遠に点かない。
+ */
+describe("メッセージ待ち表示（CC2 0x01 / 0x02）", () => {
+  it("点灯・保持・消灯がスナップショットに反映される", async () => {
+    const transport = new ScriptedTransport(initialScreen());
+    const session = await Session5250.connect({ transport, id: "t" });
+    expect(session.snapshot().messageWaiting, "初期は付与しない").toBeUndefined();
+
+    transport.deliver(wtdOnly(0x01)); // 点灯
+    expect(session.snapshot().messageWaiting).toBe(true);
+
+    transport.deliver(wtdOnly(0x00)); // MW ビットの無い WTD
+    expect(session.snapshot().messageWaiting, "ビットの無い WTD で消してはいけない").toBe(true);
+
+    transport.deliver(wtdOnly(0x02)); // 消灯
+    expect(session.snapshot().messageWaiting, "消灯は省略（付与しない）").toBeUndefined();
+  });
+});

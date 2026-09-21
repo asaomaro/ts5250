@@ -344,6 +344,12 @@ export interface ScreenSnapshot {
   cells: Cell[][];
   fields: Field[];
   systemMessage?: string;
+  /**
+   * **メッセージ待ち表示（MW）が点いている**（`20260921-message-waiting-indicator`）。
+   * `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
+   * ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。**点いているときだけ付与する**（消灯は省略）。
+   */
+  messageWaiting?: boolean;
   /** 拡張 5250 GUI コントロール（存在する場合のみ。空なら省略） */
   gui?: GuiConstructs;
   /**

@@ -192,6 +192,24 @@ describe("applyDataStream — 合成データ", () => {
     expect(setup.buf.mdtFields()).toHaveLength(0);
   });
 
+  /**
+   * **CC2 のメッセージ待ちビット**（`20260921-message-waiting-indicator`）。
+   * ACS `DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯する
+   * （両方立てば点灯が勝つ）。以前はオペコードだけを見て、このビットを見ていなかった。
+   */
+  it("CC2=0x01 でメッセージ待ちが点き、0x02 で消える", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01]).result.messageWaiting).toBe(true);
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x02]).result.messageWaiting).toBe(false);
+  });
+
+  it("CC2 の両方のビットが立てば点灯が勝つ（ACS と同じ評価順）", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x03]).result.messageWaiting).toBe(true);
+  });
+
+  it("MW ビットが無い WTD では触れない（前の状態を消さない）", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00]).result.messageWaiting).toBeUndefined();
+  });
+
   it("READ_MDT_FIELDS で readRequested / unlock が立つ", () => {
     const { result } = apply([ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]);
     expect(result.readRequested).toBe(true);

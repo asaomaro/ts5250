@@ -65,6 +65,11 @@ export interface ApplyResult {
    */
   cursorSet: boolean;
   /**
+   * CC2 がメッセージ待ち表示（MW）を点けた／消した。**触れなかったら `undefined`**
+   * （前の状態を保つ。CC2 のビットが立っていない WTD で消してはいけない）。
+   */
+  messageWaiting?: boolean;
+  /**
    * PC Organizer（`STRPCCMD`）のコマンドを受けた。呼び出し側が実行し、実行キーを返す
    * （`pc-command.ts`。**実行の可否に関わらず実行キーは返す**——返さないとホストが待ち続ける）
    */
@@ -453,6 +458,12 @@ function applyCc(cc1: number, buf: ScreenBuffer, result: ApplyResult): void {
 function applyCc2(cc2: number, result: ApplyResult): void {
   if ((cc2 & CC2_UNLOCK) !== 0) result.unlockKeyboard = true;
   if ((cc2 & CC2_ALARM) !== 0) result.alarm = true;
+  // **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
+  // ACS `DS5250.processWCC2` は `cc2 & 0x02` で消灯（`WCC2_MW_OFF`）、続けて
+  // `cc2 & 0x01` で点灯（`WCC2_MW_ON`）する——**両方立てば点灯が勝つ**ので同じ順で評価する。
+  // 以前はオペコード（MESSAGE_LIGHT_ON/OFF）だけを見て、**CC2 のビットを見ていなかった**
+  if ((cc2 & 0x02) !== 0) result.messageWaiting = false;
+  if ((cc2 & 0x01) !== 0) result.messageWaiting = true;
 }
 
 function applyWtd(

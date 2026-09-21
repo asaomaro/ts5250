@@ -273,7 +273,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   snapshot(): ScreenSnapshot {
-    return this.buf.snapshot(this.id, this.keyboardLocked);
+    const snap = this.buf.snapshot(this.id, this.keyboardLocked);
+    // メッセージ待ち表示は画面バッファではなくセッションの状態なので、ここで重ねる。
+    // **点いているときだけ付与する**（`ScreenSnapshot.messageWaiting` の約束）
+    return this.messageWaiting ? { ...snap, messageWaiting: true } : snap;
   }
 
   /** ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可 */
@@ -720,6 +723,8 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 警報は画面更新と別に出す（画面が変わらないレコードでも鳴らすため。ACS も
       // `processWCC2` の中で `ringBell()` を呼ぶだけで、描画とは独立している）
       if (result.alarm) this.emit("alarm");
+      // CC2 のメッセージ待ちビット（触れなかったら undefined＝前の状態を保つ）
+      if (result.messageWaiting !== undefined) this.messageWaiting = result.messageWaiting;
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
       if (result.readRequested) readSolicited = true;
     } catch (err) {
