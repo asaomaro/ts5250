@@ -13,3 +13,4 @@ events:
   - { ts: 2026-09-21T02:16:45Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 4, ac_covered: 4, tasks_no_ac: 0, tasks_ac_none: 0 } }
   - { ts: 2026-09-21T02:16:45Z, phase: deliver, event: start }
   - { ts: 2026-09-21T02:16:45Z, phase: deliver, event: approved, metrics: { files_changed: 7, insertions: 90, deletions: 2 } }
+  - { ts: 2026-09-21T02:20:48Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
