@@ -107,15 +107,32 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 回帰テスト: `packages/tn5250/test/restore-screen-payload.test.ts`（16 件・新規）/
     `save-screen-session.test.ts`「1 レコードに SAVE が 2 回」/ `packages/server/test/err-shape.test.ts`（9 件・新規）/
     `packages/web-ui/test/flag-key-fields.test.ts`（5 件・新規）
-- [ ] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
+- [x] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
+  **完了（`20260920-insert-mode-overflow`）。**
   末尾まで埋まった欄（SEU の行など）や、ホストが右寄せで書いた数値欄を挿入モードで直すと、文字が消えたり値が変わったりして送られる。
-  例: 右寄せの `"   12-"`（−12）の `1` の前に `9` を挿入すると `"   912"` になり、送信は `91` になる。
-  ACS: `PS5250.insertChar` → `reserveRoomForInsert` が、最終桁（符号付き数値は符号桁の手前）から空きを数える。足りなければエラー 0012 を出し、値を変えない。
+  例: 右寄せの `"   12-"`（−12）の `1` の前に `9` を挿入すると `"   912"` になり、~~送信は `91` になる~~
+  → **実機で確かめた結果、被害はもっと大きかった**——`6S 0` はワイヤ上 6 バイトで最終バイトのゾーンが符号なので、
+  画面の 7 桁 `"    912"` から符号桁が落ちて **ホストは `91` を受け取る**（符号も桁も違う）。
+  修正後は `"    12-"` のまま変わらず、**ホストは `-12` を受け取る**
+  （実機の対照。手順は `scripts/verify-browser-insert-overflow.mjs`。HEAD の版に戻して修正前も測った）。
+  ACS: `PS5250.insertChar` → `reserveRoomForInsert` が、最終桁（符号付き数値は符号桁の手前）から空きを数える。~~足りなければエラー 0012 を出し、値を変えない。~~
+  → **番号以外は実測で裏が取れた**（research F9/F10）——値を 1 桁も変えず `データを挿入する余地がありません。` を出し、`inhibit=5` で施錠する（継続欄・単独欄の両方）。
+  **番号が `0012` かは未確認**（プローブは文言と `InputInhibited()` しか読めない）。
+  **施錠は当 PJ では未実装**（下の別項目へ）。
+  さらに **`cursorSBA == getEndPos()`（最終桁の上）なら空きが残っていても拒否する**ことも実測した（research F11。`scripts/acs-probe/single-field-insert-endpos.txt`）ので、そこも合わせた。
   当 PJ: `packages/web-ui/src/composables/fieldEdit.ts:33-36` が splice の後、`chars.length = len` で切り詰める。
-  貼り付けは既に「余地が無ければ何も変えない」規則なので、打鍵とで食い違っている。
+  → **`trailingRoom` / `reservedTail` を新設し、取り置きは「走査開始位置をずらす」形にした**
+  （引き算にすると符号が最終桁にあるため常に 0 になり、符号付き数値欄への挿入が全滅する。`"1    -"` cursor=1 で 0 対 4）。
+  ~~貼り付けは既に「余地が無ければ何も変えない」規則なので、打鍵とで食い違っている。~~
+  → **実測すると貼り付けは元から弾いていた**（`test-result.md` T1 の B-3/B-4）。食い違っていたのは**取り置きの有無**で、`insertInto` にも足した。
   テスト `field-edit.test.ts:33-40` は、満杯でない欄の挿入しか見ていない。
-  再現: 満杯の欄で挿入モードにして、1 文字打つ。
-  関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み（推測）。（出典: `20260919-backlog-acs-triage` research N2）
+  → 打鍵 / 貼り付け / DBCS 打鍵 / IME の 4 経路を実発火させるテストを追加（`insert-overflow-paths.test.ts`）。
+  **mutation 17 通りで検証**（うち 1 つは意味的に等価で落ちない旨を記録）。
+  関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」
+  → **実測で埋めて `AGENTS.md` を更新した**（チェーン全体の予算で数え、segment をまたいで押し出す。ただし 1 経路の観測）。
+  ~~継続欄で「欄全体の予算」を見ているかを着手時に確かめれば閉じられる見込み（推測）~~
+  → 当 PJ は打鍵がチェーンを歩かないので、**この work は「segment 末尾で黙って切り詰めず弾く」までとし、チェーン横断の押し出しは別項目**にした。
+  （出典: `20260919-backlog-acs-triage` research N2 ／ 完了は `.aidev/works/20260920-insert-mode-overflow/`）
 - [ ] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**要判断（方針）**）。
   Enter の直後に次のコマンドを打ち始めたり、Enter を続けて押したりすると、入力の頭が欠ける（熟練者ほど踏む）。
   利用者の「待たされる」報告の候補の 1 つ（session-lifecycle.md の「最近の接続状態維持・再接続対応以降…不安定化」の項目）。
@@ -338,3 +355,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 印刷完了応答のバイト 4-5
     - プリンターの既定値（意図的な差異）
   （出典: `20260919-backlog-acs-triage` research N16・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
+- [ ] 挿入モードの押し出しを継続欄（CNTFLD）のチェーン全体へ波及させる（優先度 中・深さ ◎＝実測済み）。ACS は reserveRoomForContField がチェーン全体の予算で数え、segment をまたいで押し出す。**実機で確認済み（ただし 1 経路の観測）**（20260920-insert-mode-overflow research F8。SNDMSG の MSG 欄で、5 行目から押し出された H が 6 行目の先頭へ、さらに P が 7 行目へ回った。手順は scripts/acs-probe/cntfld-insert.txt）。**着手時は別経路でもう一度取ること**——条項 measurement-sanity の「1 回の観測で決めない」は未了で、同 work は実装しないため先送りした。当 PJ は Backspace/Delete だけ continuedRunOf を歩き（ScreenGrid.vue:2520 :2552）、打鍵（:2745）は歩かないので segment 末尾で止まる。EditState が 1 欄ぶんである前提の見直し（兄弟欄の値の参照）が要るため、同 work では「黙って切り詰めず弾く」までに留めた（出典: .aidev/works/20260920-insert-mode-overflow/research.md）
+- [ ] 操作員エラーでキーボードを施錠するか（優先度 中・深さ ◎＝実測済み・**要判断（方針）**）。ACS は満杯の欄へ挿入すると inhibit=5 でキーボードを施錠し、24 行目に「データを挿入する余地がありません。」を出す。**継続欄・単独欄の両方で実測**（20260920-insert-mode-overflow research F9/F10。手順は scripts/acs-probe/cntfld-insert-full.txt と single-field-insert-full.txt）。当 PJ は操作員エラーで施錠せず通知だけを出す作りで、変えると型違反・符号桁・Dup など全ての操作員エラーに波及するため同 work では対象外にした。なお同 work の research F4 は「ACS は施錠せずメッセージも出さない」とデコンパイルの読みだけで断定して誤っており（実機で覆った）、施錠の要否も実機で決めること（出典: .aidev/works/20260920-insert-mode-overflow/research.md）
+- [ ] either 欄の「いま DBCS 側か」の実行時状態を持つか決める（優先度 中・深さ ○・要判断（方針））。ACS は insertChar で isEitherFieldDBCSOn() を見て挿入時に桁を取り置くが、当 PJ の欄モデルは DbcsFieldType（types.ts:52）の静的種別しか持たず、対応する実行時状態が無い。20260920-insert-mode-overflow は害の小さい側（either は取り置かない）を既定にして decisions D5 に記録し、insert-overflow-paths.test.ts で固定した。実行時状態を持つべきかは同 work より広い設計問題なので送る。推測で埋めず、まず ACS 実機で either 欄の挙動を測ること（出典: .aidev/works/20260920-insert-mode-overflow/decisions.md）
+- [ ] 選択削除が符号付き数値欄の符号桁を左へずらす（優先度 中・深さ ◐・要実機測定）。deleteSelection は選択を splice して末尾に空白を足すので、符号桁（visLen-1）が選択長ぶん左へ移動する（"123  -" の 123 を選んで X を打つと "X  -" になり符号が欄の途中に残る）。backspace / del も同形（fieldEdit.ts:88-104）。20260920-insert-mode-overflow のレビューで見つかったが、原因も対象も別（選択削除の詰め方）なので同 work では直さなかった。ACS が選択削除でどう詰めるかを実機で測ってから直すこと（出典: .aidev/works/20260920-insert-mode-overflow/review.md）
+- [ ] IME の選択置換で、確定が拒否・取り消されたときに合成開始で消した選択が戻らない（優先度 高・深さ ◎＝再現手順あり・要設計）。HEAD からの既存欠陥で、選択置換の IME 確定が入り切らない／確定文字 0 個（取り消し）だと、onCompositionStart の deleteSelection で消した選択がそのまま確定し 1 文字欠けて送信される（MDT も立つ）。20260920-insert-mode-overflow で戻す仕組みを 3 回作って 3 回壊した（decisions D13/D14/D16）。原因は「合成開始で消し、合成終了で確定する」時間をまたぐ構造で、状態をモジュール変数に置くと、onCompositionStart が inhibited（応答待ち）で早期 return したとき前の合成の控えが残り、次の確定が別の欄の値を書き込んで送信する欠陥まで作った。再現手順: (1) 欄長 10・dbcsType open・値 ABCDEFGH・上書きで A を選択し IME で 全 を確定 → BCDEFGH が確定する（入り切らない）、(2) 挿入モード・値 ABCDE で E を選択し IME で X → 満杯時の扱い、(3) 同じく A を選択して確定文字 0 個（取り消し）→ BCDE が確定、(4) 欄 1 で選択置換の合成 → busy 中に欄 2 で合成開始 → 解除後に確定文字 0 個で確定 → 欄 2 に欄 1 の値が入る（控えを持つ実装で起きた欠陥。持たない現状では起きない）。直すときは状態の寿命（開始・確定・取り消し・blur・欄の属性変化・応答待ち）を design で先に列挙し、ACS 実機で選択置換＋IME の挙動を測ってから作ること。打鍵経路の選択置換の復元は同 work で済んでいる（同期的な構造なので関数内の控えで足りる）（出典: .aidev/works/20260920-insert-mode-overflow/decisions.md）

@@ -1,0 +1,50 @@
+# **単独欄（継続欄でない普通の入力欄）が満杯のとき、ACS は何をするか**（実機）。
+#
+# `cntfld-insert-full.txt` で**継続欄**では
+#   値は 1 桁も変わらない / `データを挿入する余地がありません。` が出る / `inhibit=5`（施錠）
+# と分かった（research F9）。**これが継続欄に固有か、単独欄でも同じか**を確かめる
+# ——条項 `measurement-sanity`「1 回の観測で決めない。別の経路でもう一度取る」。
+#
+# 対象は SNDMSG プロンプトの **TOユーザー・プロファイル**（10 桁の名前欄。継続欄ではない）。
+# 実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+dump prompt-start
+
+# MSG 欄から Tab で次の入力欄（TOUSR）へ移る
+keys [tab]
+settle 600
+dump after-tab
+
+# 10 桁を埋めて満杯にする
+keys ABCDEFGHIJ
+settle 800
+dump filled
+
+# **欄の中ほどへ戻して**挿入モードで 1 文字。満杯なので採否が割れる。
+# **`[left]` は使えない**——10 桁を埋めると自動送りで次の欄（MSG）へ飛ぶので、
+# そこから左へ動くと**保護域**に入り、別の理由（`画面の保護域にカーソルがある。`）で
+# 施錠されてしまう（1 回目の観測がそれだった）。欄の桁を直に指す。
+# TOUSR は 12,37 から 10 桁（`after-tab` の cursor=12,37 で確認）＝ 12,37〜12,46
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump insert-when-full
+
+# 施錠の有無とメッセージ（継続欄では inhibit=5 ＋ 24 行目にメッセージが出た）
+dump check-inhibit
+
+# 後始末
+keys [reset]
+settle 600
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

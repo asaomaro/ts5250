@@ -1,0 +1,46 @@
+# **継続入力欄（CNTFLD）が「チェーン全体で満杯」のとき、挿入を拒否するか**（ACS 側の実測）。
+#
+# `cntfld-insert.txt` で**チェーン横断の押し出し**は確かめた（research F8。
+# 5 行目から押し出された H が 6 行目の先頭へ、6 行目の P が 7 行目へ回った）。
+# ただし**チェーン全体が満杯の状態は作れておらず**、
+# 「全体が満杯なら拒否して何も変えない」（コードの読みでは `n8 < n2 → return false`。F1/F6）は**未観測**。
+# ここを実機で埋める（AGENTS.md 判断の原則 2）。
+#
+# 方針: 欄を**溢れるまで**埋めてから、(1) さらに打っても増えないこと＝満杯を確かめ、
+# (2) **1 つ目の segment の中ほど**へ挿入して、**末尾の文字が落ちるか・何も変わらないか**を見る。
+# 末尾を `Q` で埋めて**容量（512 桁）を超えるまで**入れ、切り捨てられた末尾の位置を境界とする。
+# 挿入後に**末尾の桁が変わるか**で「落としたか・拒否したか」を判定する。
+# （1 回目は 490 桁・2 回目は 496 桁でまだ余地があり、いずれも満杯に届いていなかった）
+signon
+keys [enter]
+settle 1200
+
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+
+# **溢れるまで入れる。** 40 桁ごとに区切りの数字を置いて、境界を読めるようにする
+keys 0001AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA0002BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB0003CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC0004DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD0005EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE0006FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0007GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG0008HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH0009IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII0010JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ0011KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK0012LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+settle 1500
+dump filled-1
+
+# **さらに打っても増えないなら満杯。** 増えるならまだ余地がある（判定の前提を確かめる）
+keys WWWWW
+settle 1000
+dump filled-2-after-extra
+
+# **1 つ目の segment の中ほど**へ挿入。満杯なら ACS は何も変えないはず（F1/F6 の読み）
+setcursor 5,45
+keys [insert]
+settle 400
+keys #
+settle 1000
+dump insert-when-full
+
+# 施錠の有無（F4 は「施錠しない」）
+dump check-inhibit
+
+# 後始末
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

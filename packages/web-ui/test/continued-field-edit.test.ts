@@ -145,3 +145,40 @@ describe("EDTMSK 分割欄の Backspace / Delete は区間をまたぐ", () => {
     w.unmount();
   });
 });
+
+/**
+ * **継続欄でも、満杯の区間へ挿入したとき黙って切り詰めない**
+ * （`20260920-insert-mode-overflow` AC7）。
+ *
+ * ACS は `reserveRoomForContField` でチェーン全体の予算を見て、あふれを**次の区間へ押し出す**
+ * （research F8 で実機確認済み。ただし 1 経路の観測）。当方の打鍵はチェーンを歩かないので、
+ * **この work は「区間の末尾で黙って切り詰めず弾く」まで**とした（design「扱わない」）。
+ * 値が壊れないことが要点で、チェーン横断の押し出しは台帳へ送ってある。
+ */
+describe("継続欄: 満杯の区間へ挿入しても値を変えない", () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  it("AC7 先頭区間が満杯なら、値を変えず `MSG_NO_ROOM` を出す（切り詰めない）", async () => {
+    const { MSG_NO_ROOM } = await import("../src/composables/opMessages.js");
+    const fields = dateFields("2026", "08", "25"); // 先頭は長さ 4 に 4 桁＝満杯
+    const w = mount(ScreenGrid, {
+      props: {
+        snapshot: snapOf(fields), edits: new Map(), focused: true, busy: false,
+        cursor: { row: ROW, col: 24 }, insertMode: true
+      },
+      attachTo: document.body
+    });
+    await nextTick();
+    const el = w.element.querySelector(
+      'input.grid-input:not([readonly])[data-slice="0"]'
+    ) as HTMLInputElement;
+    el.focus();
+    el.setSelectionRange(1, 1); // 区間の途中
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "9", bubbles: true, cancelable: true }));
+    await nextTick();
+    const notices = ((w.emitted("notice") as unknown[][] | undefined) ?? []).map((a) => a[0] as string);
+    expect(notices).toContain(MSG_NO_ROOM);
+    expect(w.emitted("edit")).toBeFalsy(); // **1 桁も書き換えない**（従来は末尾が落ちていた）
+    w.unmount();
+  });
+});

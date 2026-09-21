@@ -5,8 +5,19 @@
  * 長さはフィールド長でクランプ（value は field.length 桁の枠内）。
  */
 export interface EditState {
-  /** 現在値（末尾空白は含みうる。表示・送信時に整形） */
-  chars: string[]; // 長さ = fieldLength（空白パディング）
+  /**
+   * 現在値（末尾空白は含みうる。表示・送信時に整形）。
+   *
+   * **不変条件は「長さ = `fieldLength`」**（`padTo` が空白で埋める）。
+   *
+   * ただし `typeChar` に `need=2`（全角）を渡すと、空白 2 個を捨てて 1 個を入れるので
+   * **長さが 1 減って不変条件が破れる**。`isDbcsEdit` の欄は `dbcsType()` を通って
+   * ここへ来ないので、起きるのは **SBCS 経路に落ちる欄**（`hidden` の DBCS 欄など）だけ。
+   * 狭いが**偶然で守られている**ので明記する（`decisions.md` D9 / D11）。
+   * ※ その場合「バイト数が保たれる」とも言い切れない——`padDbcs` / `dbcsByteLength` の
+   *   数え方は SO/SI 込みで、新しい DBCS ランを作ると +4/−2 になる。実害は `fitsBytes` が止める。
+   */
+  chars: string[];
   /** フィールド内カーソル位置（0..fieldLength-1） */
   cursor: number;
   /** true=挿入モード / false=上書きモード（5250 既定は上書き） */
@@ -25,15 +36,48 @@ export function editValue(state: EditState): string {
   return state.chars.join("");
 }
 
-/** 印字文字を入力する（上書き既定 / 挿入モード）。フィールド長でクランプ */
-export function typeChar(state: EditState, ch: string): EditState {
+/**
+ * 印字文字を入力する（上書き既定 / 挿入モード）。フィールド長でクランプ。
+ *
+ * 挿入モードの採否は ACS `PS5250.insertChar` に合わせる（`decisions.md` D4）:
+ * **カーソルが最終桁の上なら空きの有無に関係なく拒否**し、
+ * 空きが `need` に満たなければ**値を 1 桁も変えない**。
+ *
+ * @param opts.need     この文字が要する桁数（SBCS=1 / 全角=2）。ACS も
+ *                      `reserveRoomForInsert` に同じものを渡す
+ * @param opts.reserved 末尾へ取り置く桁数（`reservedTail`）。**符号桁・DBCS 桁を守る**
+ */
+export function typeChar(
+  state: EditState,
+  ch: string,
+  opts: { need?: number; reserved?: number } = {}
+): EditState {
   const len = state.chars.length;
   if (state.cursor >= len) return state;
   const chars = [...state.chars];
   if (state.insertMode) {
-    // 挿入: カーソル以降を右シフト（末尾は溢れて落ちる）
+    const need = opts.need ?? 1;
+    // ACS は `cursorSBA == getEndPos()` で即座に拒否する。**空きが残っていても拒否する**
+    // ——実機で確認済み（research F11: 最終桁が空白でも弾かれ、1 つ手前は通った）。
+    // 結果として「挿入モードでは最終桁に直接打てない」——手前から押し出して埋める
+    if (state.cursor === len - 1) return state;
+    // 空きが足りなければ**何も変えない**。従来はここで末尾を無条件に切り捨てており、
+    // 符号付き数値欄では**符号桁が落ちて値の符号が反転していた**（実機で観測。test-result.md T1）
+    if (trailingRoom(chars, { cursor: state.cursor, reserved: opts.reserved ?? 0 }) < need) return state;
+    // 挿入: カーソル以降を右シフトし、**末尾の空白を need 個だけ捨てる**。
+    // SBCS（`need=1`）は 1 個捨てて**長さが保たれる**。全角（`need=2`）は 2 個捨てて 1 個入るので
+    // **長さが 1 減る**——この経路の注意は `EditState.chars` の doc に書いた
     chars.splice(state.cursor, 0, ch);
-    chars.length = len; // フィールド長で切り詰め
+    // **捨てるのは「数えたのと同じ位置」から**——末尾ではない。
+    // 取り置き桁は**非空白のことがある**（符号付き数値欄の `-` は最終桁に入る）ので、
+    // 末尾から捨てようとすると 1 桁も捨てられず配列が欄長を超えて伸び、
+    // 後段の `fitsBytes` が落として「空きがあるのに打てない」になる（review ラウンド 1 の must）
+    for (let k = 0; k < need; k++) {
+      // **毎回数え直す**——1 つ捨てるたびに配列が縮むので、位置を使い回すと範囲外へ出る
+      const from = chars.length - 1 - (opts.reserved ?? 0);
+      if (!isBlankCell(chars[from])) break; // 非空白は捨てない（上の検査を通れば起きない）
+      chars.splice(from, 1);
+    }
   } else {
     // 上書き: カーソル位置を置換
     chars[state.cursor] = ch;
@@ -199,14 +243,72 @@ export function dupFill(state: EditState, dupChar: string): EditState {
   return { ...state, chars, cursor: chars.length };
 }
 
-/** paste: 複数文字を現在モードで順に入力（超過は切り詰め） */
-export function paste(state: EditState, text: string): EditState {
+/**
+ * paste: 複数文字を現在モードで順に入力する。
+ *
+ * **挿入モードでは「超過は切り詰め」ではない**——`typeChar` が空き不足なら値を変えずに返し、
+ * 最終桁では拒否する（`20260920-insert-mode-overflow`）。上書きモードは従来どおり桁を消費する。
+ *
+ * **`opts` は `typeChar` へそのまま渡す**。渡さないと取り置き（符号桁・DBCS 桁）が効かず、
+ * この関数だけが不変条件を素通しする口になる——**同じ不変条件の片方だけを直す事故が
+ * この work で 4 回起きている**ので、経路を増やさない。
+ *
+ * ※ 本番の呼び出し元は無い（テストのみ）。撤去の可否は台帳へ送ってある。
+ */
+export function paste(
+  state: EditState,
+  text: string,
+  opts: { need?: number; reserved?: number } = {}
+): EditState {
   let s = state;
   for (const ch of text) {
     if (s.cursor >= s.chars.length) break;
-    s = typeChar(s, ch);
+    s = typeChar(s, ch, opts);
   }
   return s;
+}
+
+/** 空白として扱う文字（`padTo` の半角空白・DBCS の全角空白・未書き込みの NUL） */
+function isBlankCell(ch: string | undefined): boolean {
+  return ch === " " || ch === "　" || ch === "\0";
+}
+
+/**
+ * 挿入のために**末尾へ取り置く空白スロット数**。
+ *
+ * ACS `PS5250.insertChar` は `reserveRoomForInsert` を呼ぶ前に走査開始位置を
+ * `isSignedNumericField()` で 1 桁、DBCS 側（`isDBCSOnlyField()` / either が DBCS 側）で
+ * **全角 1 文字ぶん＝2 桁**ずらす。当方はその「ずらす量」をここに集約する。
+ *
+ * **空白は必ず SBCS（1 バイト）なので、この数は桁数でもバイト数でもある。**
+ * 単位を 1 つに畳んでおかないと、桁をバイト予算から引くといった取り違えが起きる。
+ *
+ * `either` を取り置かない理由は `decisions.md` D5（「いま DBCS 側か」に当たる実行時状態が
+ * 当方のモデルに無く、推測を実装へ埋めないため）。
+ */
+export function reservedTail(opts: { signedNumeric?: boolean; dbcsReserved?: boolean }): number {
+  return (opts.signedNumeric ? 1 : 0) + (opts.dbcsReserved ? 2 : 0);
+}
+
+/**
+ * **末尾から連続する空白**の数（ACS `PS5250.reserveRoomForInsert` と同じ数え方）。
+ * 欄の途中にある空白は数えない——`["A","B"," "," ","C"," "]` の答えは **1**。
+ *
+ * @param cursor   これより手前は数えない（ACS もカーソルの手前で走査を打ち切る）
+ * @param reserved **走査の開始位置を末尾から何桁ずらすか**（`reservedTail` の値）
+ *
+ * ⚠ `reserved` は**開始位置をずらす量**であって、**結果から引く数ではない**。
+ * 符号付き数値欄の符号は**最終桁**にあるので、末尾から数えると必ず 0 で止まる
+ * ——引き算にすると `"1    -"` のような通常の形で空きが 0 と出て、
+ * **符号付き数値欄への挿入が一切できなくなる**（開始位置をずらせば 4）。
+ */
+export function trailingRoom(
+  chars: readonly string[],
+  opts: { cursor: number; reserved?: number }
+): number {
+  let n = 0;
+  for (let i = chars.length - 1 - (opts.reserved ?? 0); i >= opts.cursor && isBlankCell(chars[i]); i--) n++;
+  return n;
 }
 
 function padTo(s: string, len: number): string[] {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // **root ではなく browser 入口から**（root は node:net / node:tls を巻き込む）
-import { fieldId } from "@ts5250/tn5250/browser";
+import { fieldId, isDbcsOnly } from "@ts5250/tn5250/browser";
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import type { ScreenSnapshot, Cell, Field, AidKey, GuiGridLine, GuiWindow } from "@ts5250/tn5250";
 import {
@@ -18,6 +18,7 @@ import {
   fieldSign,
   dupFill,
   DUP_BYTE,
+  reservedTail,
   type EditState
 } from "../composables/fieldEdit.js";
 import {
@@ -1691,6 +1692,63 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
   return dbcsByteLength(trimmed) <= visLen(f);
 }
 
+/**
+ * 欄から「末尾へ取り置く桁」の条件を作る（ACS `PS5250.insertChar` の走査開始位置ずらし）。
+ *
+ * **`either` は取り置かない**——ACS の `isEitherFieldDBCSOn()`（either 欄が*いま* DBCS 側か）に
+ * 当たる実行時状態が当方のモデルに無く、推測を実装へ埋めないため（`decisions.md` D5）。
+ * 取り置かない側に倒すと **2 桁**（全角 1 文字ぶん）多く入りうるが、
+ * 値そのものは別途バイト予算が止める（打鍵は `dbcsType` の `absorbDbcs`、貼り付けは `insertInto`）。
+ * 逆に倒すと SBCS しか入っていない either 欄で **2 桁**損する——害の小さい側を既定にした。
+ */
+function roomOptsOf(f: Field): { signedNumeric?: boolean; dbcsReserved?: boolean } {
+  const opts: { signedNumeric?: boolean; dbcsReserved?: boolean } = {};
+  if (f.signedNumeric) opts.signedNumeric = true;
+  // **判定は core と共有する**（`isDbcsOnly`）。`"only" | "pure"` を書き下すと定義が 2 か所になる
+  if (isDbcsOnly(f.dbcsType)) opts.dbcsReserved = true;
+  return opts;
+}
+
+/** `typeChar` へ渡す挿入の条件。`need` は全角なら 2（ACS も要る桁数を渡す）。 */
+function roomArgsOf(f: Field, ch: string): { need: number; reserved: number } {
+  // 桁数は `displayCols` に閉じてある（素の `isFullWidth` は生センチネルを 2 桁と数える）
+  return { need: displayCols(ch), reserved: reservedTail(roomOptsOf(f)) };
+}
+
+/**
+ * **打鍵・IME 確定を拒否するときの出口**（打鍵 SBCS / 打鍵 DBCS / IME の 3 経路が通る）。
+ *
+ * **拒否の出口はこの関数 1 つ**にする。採否そのものは経路ごとに違う述語で決まる——
+ *  - **SBCS 打鍵 / IME**: `typeChar` の戻り値（拒否時は同一参照）と、バイト予算の `fitsBytes`。
+ *    **選択置換の枝では `typeChar` を通らないので `fitsBytes` だけ**が述語になる。
+ *  - **DBCS 打鍵**: `dbcsType` の戻り値だけ（`absorbDbcs` がバイト予算を見る）。
+ *    この経路は `fitsBytes` を呼ばない。
+ * 事前検査（旧 `canInsert`）を置くと**出口**が 2 つになり、通知や状態の戻しが漏れた——
+ * この work で**同じ不変条件を何度も落とした**ので、呼ぶ側が覚えなくてよい形に寄せた。
+ *
+ * **戻す（`restore`）のは打鍵経路だけ。** 打鍵は削除と拒否が**同じ関数の中**で起きるので、
+ * 関数内の控えで確実に戻せる（mutation で検証済み）。IME は合成開始で削除し確定で拒否する
+ * **時間をまたぐ**構造で、戻す仕組みを 3 回作って 3 回壊した（別欄の値の混入まで起こした）。
+ * そのため IME は `restore: undefined` で通知だけを出し、選択置換の復元は
+ * **design へ差し戻した**（`decisions.md` D16）。
+ *
+ * @param restore        （打鍵のみ）選択を消していたなら、その**消す前の状態**
+ * @param userInsertMode **利用者の実モード**。選択置換で `insertMode: true` に差し替えた
+ *                       作業用の state を渡してはいけない（上書き中に挿入の文言が出る）
+ */
+function rejectInput(
+  f: Field,
+  el: HTMLInputElement,
+  o: { restore: EditState | undefined; userInsertMode: boolean; dbcs: boolean }
+): void {
+  if (o.restore !== undefined) {
+    edit = o.restore;
+    if (o.dbcs) syncDbcs(el, f);
+    else sync(el, f);
+  }
+  if (o.userInsertMode) emit("notice", MSG_NO_ROOM);
+}
+
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
  *  編集済みなら edits の値、未編集の DBCS 欄はセル種別から SO/SI・tail を除いて再構成する
  *  （ホスト値の f.value は SO/SI を空白として含むため、そのまま送ると二重 SO/SI・余分スペースになる）。 */
@@ -2042,8 +2100,19 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
 }
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
-function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
-  const budget = visLen(f);
+function dbcsType(
+  e: EditState,
+  ch: string,
+  f: Field,
+  /** 取り置きを効かせるか。既定は挿入モードのときだけ（選択置換は呼び出し側が false を渡す） */
+  reserve = e.insertMode
+): EditState | undefined {
+  // **符号桁・DBCS 桁は取り置く**（ACS `PS5250.insertChar` と同じ。`decisions.md` D3/D5）。
+  // `reservedTail` は末尾の空白スロット数＝バイト数なので、バイト予算からそのまま引ける。
+  // **挿入モードのときだけ**効かせる——上書きは桁を増やさないので予算を削ってはいけない。
+  // 削ると 5250 の既定である上書きで、埋まった DBCS 欄に 1 文字も打てなくなる
+  // （review ラウンド 1 の must 2）
+  const budget = visLen(f) - (reserve ? reservedTail(roomOptsOf(f)) : 0);
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
@@ -2735,16 +2804,53 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       return;
     }
     let trial: EditState;
-    if (deleteSelection(f, el)) {
-      // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）
+    // **`deleteSelection` は `edit` を破壊的に書き換える。** 下の `fitsBytes` で拒否したときに
+    // 戻せるよう控えを取る——戻さないとモデル（選択が消えた）と DOM（選択が残った表示）がずれ、
+    // 次の打鍵で文字が勝手に消える（review ラウンド 2 の must と同じ形。DBCS 側だけでなく
+    // **この SBCS 側にも同じ穴があった**ので、不変条件を支える項として一緒に塞ぐ）
+    const beforeSelectionDelete = edit;
+    const replacedSelection = deleteSelection(f, el);
+    if (replacedSelection) {
+      // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）。
+      // **取り置きの検査はしない**——利用者は選択部分を置き換えるつもりで、
+      // 挿入用の取り置きで弾くのは筋が違う（検査は選択を消さない側に置く）。
+      // ※ 「消した分の空きが必ずできる」とは**書かない**——SBCS 1 桁を消して全角を入れると
+      //   バイト数は増えうるので、下の `fitsBytes` で落ちることがある
       const chars = [...edit.chars];
       chars.splice(edit.cursor, 0, ch);
       chars.length = visLen(f);
       trial = { ...edit, cursor: edit.cursor + 1, chars };
     } else {
-      trial = typeChar(edit, ch);
+      // **ACS も満杯の挿入では同じ趣旨のメッセージを出す**——実機で
+      // `データを挿入する余地がありません。` を確認した（research F9/F10/F11）。
+      // ACS と違えているのではなく**合わせている**（`decisions.md` D1）。
+      // 文言は同一ではない（ACS は句点あり・「データを」付き。当方は `AGENTS.md` の文体規約）。
+      // 施錠（ACS は `inhibit=5`）までは真似しない——理由は design「設計方針」
+      const args = roomArgsOf(f, ch);
+      // **採否は `typeChar` の戻り値で見る**——拒否すると同じ state を同一参照で返す。
+      // `canInsert` で事前に見る形だと述語が 2 か所になり、`typeChar` 側にだけ拒否条件が増えたとき
+      // **通知を出さず無変化で確定**する（IME 経路で同じ形が 2 つ目の出口になっていた。
+      // review ラウンド 5 の must / ラウンド 6 の nit）。
+      // **ただし「欄末尾に止まっている」（`cursor >= chars.length`）は拒否ではない。**
+      // `typeChar` はそこでも**モードに関係なく**同一参照を返すので、無条件に拒否とみなすと
+      // 上書き中に挿入の文言が出て、`advanceIfFull`（`field-full`）も出なくなる
+      // （review ラウンド 7 の must。`canInsert` を撤去したときに作った退行）。
+      // 末尾は HEAD どおり通して `advanceIfFull` に落とす
+      const t = typeChar(edit, ch, args);
+      if (t === edit && edit.cursor < edit.chars.length) {
+        rejectInput(f, el, { restore: undefined, userInsertMode: edit.insertMode, dbcs: false });
+        return;
+      }
+      trial = t;
     }
-    if (!fitsBytes(trial, f)) return; // バイト予算（SO/SI・DBCS 込み）超過は拒否
+    if (!fitsBytes(trial, f)) {
+      rejectInput(f, el, {
+        restore: replacedSelection ? beforeSelectionDelete : undefined,
+        userInsertMode: beforeSelectionDelete.insertMode, // **利用者の実モード**
+        dbcs: false
+      });
+      return;
+    }
     edit = trial;
     sync(el, f);
     advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
@@ -2838,11 +2944,28 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       emit("notice", MSG_BY_REASON[why]);
       return;
     }
+    // **`deleteSelection` は `edit` を破壊的に書き換える。** 拒否したときに戻せるよう控えを取る
+    const beforeSelectionDelete = edit;
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
-    // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
+    // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする。
+    // **取り置きは掛けない**——利用者は上書きのつもりなので、挿入用の取り置きで弾いてはいけない。
+    // ※ かつてここに「選択を消した分の空きが必ずできる」と書いていたが**これは誤り**——
+    //   SBCS 1 バイトを消して全角を挿すと SO/SI 込みで最大 +4 バイトになり、
+    //   満杯欄では `absorbDbcs` が `undefined` を返しうる（review ラウンド 2 の must）
     const base = replaced ? { ...edit, insertMode: true } : edit;
-    const trial = dbcsType(base, ch, f);
-    if (!trial) return; // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）
+    const trial = dbcsType(base, ch, f, replaced ? false : base.insertMode);
+    if (!trial) {
+      // **ACS も余地が無い挿入では同じ趣旨のメッセージを出す**
+      // （実機で確認。research F9/F10/F11・`decisions.md` D1）。
+      // 述語は `base.insertMode` ではない——`base` は選択置換で `true` に差し替えてあるので、
+      // それを見ると**上書き中の利用者に挿入の文言が出る**（review ラウンド 4 の should）
+      rejectInput(f, el, {
+        restore: replaced ? beforeSelectionDelete : undefined,
+        userInsertMode: beforeSelectionDelete.insertMode,
+        dbcs: true
+      });
+      return; // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）
+    }
     edit = { ...trial, insertMode: edit.insertMode };
     syncDbcs(el, f);
     advanceIfFull(f); // ACS: バイト予算満杯なら次の入力欄へ
@@ -3088,8 +3211,21 @@ function firstRejection(field: Field, text: string): RejectReason | undefined {
  *  挿入で押し出されて消えるだけなので、あふれ判定に数えてはいけない
  *  （10 桁欄の "123" に "123" を挿せる。"123123123" にもう 3 桁は挿せない＝これがエラー）。 */
 function insertInto(field: Field, base: string, offset: number, line: string): string | undefined {
-  const budget = visLen(field);
-  const out = [...base.replace(/\s+$/, "")];
+  // **取り置きは 2 種類あり、扱いが違う**（review ラウンド 1 の must 3）。
+  //  - **符号桁は `base` の最終桁に実在する**（`"1    -"` の `-`）。予算から引くと
+  //    「`out` に残っている符号」と「減らした予算」で**二重に数え**、
+  //    手前に空きがあるのに貼れなくなる。→ **本文から切り離して保全する**
+  //    （ACS が走査開始位置をずらすのと同じ考え方を、文字列の分割で実現する）
+  //  - **DBCS の取り置きは実在しない空きの予約**なので、予算を減らすだけでよい
+  const visible = visLen(field);
+  const opts = roomOptsOf(field);
+  const signCols = opts.signedNumeric ? 1 : 0;
+  const budget = visible - signCols - (opts.dbcsReserved ? 2 : 0);
+
+  const padded = [...base];
+  while (padded.length < visible) padded.push(" ");
+  const tail = signCols ? padded.slice(visible - signCols).join("") : ""; // 符号桁
+  const out = [...padded.slice(0, visible - signCols).join("").replace(/\s+$/, "")];
   while (out.length < offset) out.push(" ");
   let i = offset;
   for (const raw of line) {
@@ -3100,7 +3236,10 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     i++;
   }
   if (dbcsByteLength(out.join("")) > budget) return undefined; // 入り切らない
-  return out.join("").replace(/\s+$/, "");
+  const body = out.join("");
+  if (!signCols) return body.replace(/\s+$/, "");
+  // 符号桁を元の桁へ戻す（本文を欄幅まで空白で埋めてから付ける）
+  return (body.padEnd(visible - signCols, " ") + tail).replace(/\s+$/, "");
 }
 
 /** 行 row の col 桁以降で、最初に書き込める（非保護の）入力欄とその開始桁を返す。
@@ -3344,7 +3483,9 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     for (const raw of [...text]) {
       const ch = inputChar(raw, f);
       if (!acceptsChar(f, ch)) continue;
-      const trial = dbcsType(e, ch, f);
+      // ここは `e` が素のモードなので既定でも同じ値になるが、**明示する**
+      // ——既定に任せた 2 か所が、2 ラウンド続けて別の理由で漏れた（review ラウンド 2）
+      const trial = dbcsType(e, ch, f, e.insertMode);
       if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
       e = trial;
     }
@@ -3362,6 +3503,10 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
  *  欄先頭に出てしまう。合成開始桁より前の実文字を value に残し caret をその末尾へ置くことで、
  *  既入力を見せたまま候補を入力位置に出しつつ、以降の挿入余地（maxlength）を確保する。 */
 function onCompositionStart(f: Field, ev: CompositionEvent): void {
+  // **選択置換のフラグはガードより前で初期化する。** 下の早期 return（`inhibited` 中に
+  // 合成を始めた等）で素通りすると、前の合成のフラグが残り、次の確定が別の欄を
+  // 「選択置換」として扱ってしまう（この work のレビューで見つかった既存の stale）
+  composeReplacedSelection = false;
   if (f.protected || inhibited.value) return;
   // hidden 欄は value が伏せ字（●）で実値ではないため、el.value を読む IME 経路に乗せてはならない
   // （乗せると ● 自体がモデルへ流れ込む）。パスワードに IME は不要なので合成を無効化する。
@@ -3374,6 +3519,9 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
   // 選択があれば削除して置換の起点にする（IME での選択置換）。無ければ native caret を合成開始桁へ。
+  // ※ 確定時に拒否されたとき、ここで消した選択は**戻さない**（HEAD と同じ）。
+  //   合成開始と確定が時間をまたぐため、戻す仕組みをこの work で 3 回作って 3 回壊した
+  //   （別欄の値の混入まで起こした）。**design へ差し戻して台帳へ送った**（`decisions.md` D16）
   composeReplacedSelection = deleteSelection(f, el);
   if (!composeReplacedSelection) {
     const nativeCaret = el.selectionStart;
@@ -3415,6 +3563,8 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを
   // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
   const dbcs = isDbcsEdit(f);
+  let rejected = false;
+  let applied = 0; // 選択置換の 1 文字目かを見るためだけに数える
   let e: EditState = { ...edit, cursor: composeStart };
   for (const raw of [...el.value].slice(composePrefixLen)) {
     const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
@@ -3422,10 +3572,49 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
     const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
-    const trial = dbcs ? dbcsType(base, ch, f) : typeChar(e, ch);
-    if (!trial || !fitsBytes(trial, f)) break; // 桁超過分は切り捨て
+    // **取り置きを渡す**——渡し忘れると、この経路だけ符号桁・DBCS 桁を守れない
+    const args = roomArgsOf(f, ch);
+    // **選択置換の 1 文字目は取り置き・最終桁の検査をしない**——打鍵側（`onInputKeydown` の
+    // 選択置換枝）と同じ判断で、利用者は選択部分を置き換えるつもりなので挿入用の取り置きで弾かない。
+    // 2 文字目以降の扱いは**枝で違う**:
+    //  - SBCS: `typeChar(e, …)` なので**利用者の実モードどおり**（上書き中なら上書き）
+    //  - DBCS: `base` が選択置換の間ずっと `insertMode: true` なので**挿入のまま**
+    //    （`e.insertMode` が効くのは `reserve` だけ）。`decisions.md` D10 の不整合はそのまま
+    const replacingSelection = composeReplacedSelection && applied === 0;
+    let trial: EditState | undefined;
+    if (dbcs) {
+      trial = dbcsType(base, ch, f, replacingSelection ? false : e.insertMode);
+    } else if (replacingSelection) {
+      const chars = [...e.chars];
+      chars.splice(e.cursor, 0, ch);
+      chars.length = visLen(f);
+      trial = { ...e, cursor: e.cursor + 1, chars };
+    } else {
+      // **`typeChar` は拒否すると同じ state をそのまま返す**ので、同一参照なら「余地が無い」。
+      // かつてここに `canInsert` の事前検査を置いていたが、**それが 2 つ目の出口**になり、
+      // `rejected` を立てずに `break` して選択を消したまま確定していた
+      // （review ラウンド 5 の must）。**判定を戻り値 1 本に寄せて出口を 1 つにする**
+      // **欄末尾（`cursor >= chars.length`）は拒否ではない**——打鍵側（`onInputKeydown`）と
+      // 同じ区別を入れる。`typeChar` はそこでもモードに関係なく同一参照を返すので、
+      // 無条件に拒否とみなすと挿入モードで `MSG_NO_ROOM` と `field-full` が同時に出る
+      // （review ラウンド 8 の nit。**同じ不変条件を片側だけ直した形**を残さない）
+      const t = typeChar(e, ch, args);
+      trial = t === e && e.cursor < e.chars.length ? undefined : t;
+    }
+    if (!trial || !fitsBytes(trial, f)) {
+      rejected = true;
+      break;
+    }
     e = { ...trial, insertMode: e.insertMode };
+    applied++;
   }
+  // **拒否したら通知だけ出し、入った分は確定する**（HEAD と同じ「超過分は切り捨て」）。
+  // `screen-grid.test.ts` の「あいう → あい」がこの契約を固定している。
+  // 通知の述語は**利用者の実モード**（`e.insertMode`）——`base` は選択置換で `true` に化ける。
+  // ※ 選択置換で 1 文字も入らなかった場合、合成開始で消した選択は**戻らない**（HEAD と同じ既存欠陥）。
+  //   戻す仕組みは時間をまたぐ状態の寿命管理が要り、この work で 3 回作って 3 回壊したので
+  //   **design へ差し戻した**（`decisions.md` D16・台帳）
+  if (rejected) rejectInput(f, el, { restore: undefined, userInsertMode: e.insertMode, dbcs });
   edit = e;
   editFieldIndex = f.index;
   sync(el, f);

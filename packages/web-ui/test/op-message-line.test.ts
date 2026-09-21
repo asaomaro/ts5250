@@ -35,7 +35,7 @@ function cell(): Cell {
   };
 }
 
-function snap(opts: { systemMessage?: string } = {}): ScreenSnapshot {
+function snap(opts: { systemMessage?: string; fieldValue?: string } = {}): ScreenSnapshot {
   const cells: Cell[][] = [];
   for (let r = 0; r < 24; r++) {
     const row: Cell[] = [];
@@ -44,7 +44,8 @@ function snap(opts: { systemMessage?: string } = {}): ScreenSnapshot {
   }
   // 入力欄を 1 つ置く（欄の無い画面はペインが別の経路を通るため）
   const fields: Field[] = [
-    { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
+    { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false,
+      value: opts.fieldValue ?? "" }
   ];
   return {
     sessionId: SID,
@@ -216,5 +217,50 @@ describe("行の左端", () => {
     const w = mountPane();
     await nextTick();
     expect(w.find(".opmsg").element.textContent).toBe(" ABC");
+  });
+});
+
+/**
+ * **挿入モードで入り切らない打鍵の通知**（`20260920-insert-mode-overflow` AC3 / AC-I1）。
+ *
+ * ACS も余地が無い挿入では 24 行目にメッセージを出す（実機で確認。research F9/F10/F11）ので、
+ * **ACS と違えているのではなく合わせている**（`decisions.md` D1）。
+ * ここで見るのは「出ること」と「**次のキー操作で消えること**」の 2 点。
+ */
+describe("挿入モードで入り切らないときの通知", () => {
+  it("AC3 満杯の欄へ挿入すると操作員メッセージの行に出る", async () => {
+    const { MSG_NO_ROOM } = await import("../src/composables/opMessages.js");
+    seed(snap({ fieldValue: "ABCDEFGH" })); // 欄長 8 に 8 桁＝満杯
+    const w = mountPane();
+    await nextTick();
+    const el = w.element.querySelector("input.grid-input:not([readonly])") as HTMLInputElement;
+    el.focus();
+    el.setSelectionRange(2, 2);
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Insert", bubbles: true, cancelable: true }));
+    await nextTick();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "X", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(line(w)).toBe(MSG_NO_ROOM);
+    w.unmount();
+  });
+
+  it("AC-I1 次のキー操作で消える（状態を持ち越さない）", async () => {
+    const { MSG_NO_ROOM } = await import("../src/composables/opMessages.js");
+    seed(snap({ fieldValue: "ABCDEFGH" }));
+    const w = mountPane();
+    await nextTick();
+    const el = w.element.querySelector("input.grid-input:not([readonly])") as HTMLInputElement;
+    el.focus();
+    el.setSelectionRange(2, 2);
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Insert", bubbles: true, cancelable: true }));
+    await nextTick();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "X", bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(line(w)).toBe(MSG_NO_ROOM);
+    // 次のキー操作（EmulatorPane の capture が消す）
+    await w.find(".pane").trigger("keydown", { key: "ArrowLeft" });
+    await nextTick();
+    expect(line(w)).toBe("");
+    w.unmount();
   });
 });
