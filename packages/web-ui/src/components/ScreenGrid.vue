@@ -3793,38 +3793,77 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
-  // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを
-  // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
+  // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを composeStart から流し込む（型フィルタ・バイト予算）。
+  // 欄に入りきらない余りは、満杯で次の欄へ送るときに**次の欄へ流す**（ACS は確定した字を 1 字ずつの打鍵として処理する）
+  const rest = commitInto(f, el, [...el.value].slice(composePrefixLen), composeStart, composeReplacedSelection);
+  composeReplacedSelection = false;
+  if (rest !== undefined && rest.length > 0) void flowToNextField(f, rest);
+}
+
+/**
+ * **確定した字（`raws`）を欄 `f` の `start` 桁から 1 字ずつ打鍵として流し込む。** 入りきらなかった余りを返す
+ * （挿入で入らなければエラー 0012 を出して `undefined`＝余りは捨てる。満杯でなければ余りは無い）。
+ * 満杯になれば ACS と同じく次の欄へ送る通知（`advanceIfFull`）を出すので、余りがあれば呼び出し側が次の欄へ流す（`flowToNextField`）
+ */
+function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], start: number, replacedSelection: boolean): string[] | undefined {
   const dbcs = isDbcsEdit(f);
-  let e: EditState = { ...edit, cursor: composeStart };
+  let e: EditState = { ...edit!, cursor: start };
   let noRoom = false;
-  for (const raw of [...el.value].slice(composePrefixLen)) {
-    const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
+  let i = 0;
+  for (; i < raws.length; i++) {
+    const ch = inputChar(raws[i]!, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     if (!acceptsChar(f, ch, sessionKind.value)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
-    const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
+    const base = replacedSelection ? { ...e, insertMode: true } : e;
+    // 上書きで欄の末尾に着いていたら、これ以上は入らない（余りを次の欄へ流す）。SBCS の `typeChar` は末尾で同じ状態を返して黙って捨てる
+    if (!dbcs && !e.insertMode && e.cursor >= e.chars.length) break;
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
     // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が
     // 通知なしに消えていた。独立点検の指摘）
-    const trial = dbcs ? dbcsType(base, ch, f, composeReplacedSelection) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
+    const trial = dbcs ? dbcsType(base, ch, f, replacedSelection) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) {
-      noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで黙って止める＝従来どおり）
+      noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで止める。余りは次の欄へ流す）
       break;
     }
     e = { ...trial, insertMode: e.insertMode };
   }
-  const placed = e.chars !== edit.chars; // 1 字でも置けたか（ACS は確定した字を 1 字ずつ打鍵として処理する）
+  const placed = e.chars !== edit!.chars; // 1 字でも置けたか（ACS は確定した字を 1 字ずつ打鍵として処理する）
   edit = e;
   editFieldIndex = f.index;
   mdtKeyed = placed;
   sync(el, f);
   if (noRoom) {
     emit("notice", MSG_NO_ROOM);
-    return;
+    return undefined;
   }
+  const rest = raws.slice(i);
   advanceIfFull(f); // ACS: IME 確定で満杯なら次の入力欄へ
+  return rest;
+}
+
+/**
+ * **IME で確定した字の余りを次の入力欄へ流す。** 満杯で次の欄へ送る（`advanceIfFull` が出した `field-full`）と、ペインが次の欄へフォーカスを移すので、
+ * 移った欄の先頭から続きを打鍵として流し込む。次の欄へ移れなかった（FER・自動 Enter・最後の欄で巡回して同じ欄・保護欄しかない）ときは捨てる
+ * （ACS は自動送りが起きなければ、以降の打鍵が入らない）。1 欄ぶん進むごとに繰り返す
+ */
+async function flowToNextField(from: Field, rest: string[]): Promise<void> {
+  let prev = from;
+  let left = rest;
+  for (let guard = 0; guard < 16 && left.length > 0; guard++) {
+    await nextTick();
+    const el = document.activeElement;
+    if (!(el instanceof HTMLInputElement) || !gridEl.value?.contains(el)) return;
+    const idx = Number(el.dataset["fieldIndex"]);
+    const next = props.snapshot.fields.find((x) => x.index === idx);
+    if (!next || next.protected || next.index === prev.index) return; // 動かなかった
+    if (!edit || editFieldIndex !== next.index) beginEdit(next, el);
+    const more = commitInto(next, el, left, 0, false);
+    if (more === undefined) return;
+    prev = next;
+    left = more;
+  }
 }
 
 // ---- クリックでカーソル位置を算出（非入力セル。入力欄は @focus/@click で扱う） ----
