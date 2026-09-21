@@ -151,7 +151,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - `DSPDEVD` の TYPE / MODEL / IGCFEAT
   - IGC 帳票で CPA3303 が出るか
   **着手時に ACS 側・当 PJ 側の両方を再確認すること**（委譲先の読みのみ）。（出典: `20260919-backlog-acs-triage` research N4）
-- [ ] **WTD の CC1=0xC0（MDT のリセット＋MDT の立った欄の消去）で、欄を消さない**（優先度 中・深さ ○）。
+- [x] **WTD の CC1=0xC0（MDT のリセット＋MDT の立った欄の消去）で、欄を消さない**（優先度 中・深さ ○）。
+  **完了（`20260921-wtd-cc1-c0-order`）**: `applyCc` の `case 0xc0` で**消してから MDT を落とす**順序に直した（`packages/tn5250/src/protocol/wtd-applier.ts`）。
+  原典で確認——`DS5250.processWCC1` は `cc1 >> 5` の tableswitch で分岐し、**case 6** は`clearNonbypassFields(true)` → `resetMDTFields(true)` → `lockKeyboard(8)` の順。
+  ⚠ **実機で 0xC0 を出させてはいない**（候補 DDS `ERASEINP MDTOFF` は未確認）。合成 WTD で固定した。付随の差（継続欄の全区間・DBCS 専用欄の SO/SI 桁）は手付かず。
   入力を消すべき画面で、打った値が残る。
   ACS: `DS5250.processWCC1` の case 6 は、先に `clearNonbypassFields(true)`（MDT の立った欄を消す）を呼び、その後で `resetMDTFields(true)` を呼ぶ。
   当 PJ: `packages/tn5250/src/protocol/wtd-applier.ts` の `applyCc` の case 0xc0 は `resetMdtNonBypass()` を先に呼ぶ。そのため、続く `nullNonBypass(true)`（MDT の立った欄だけを消す）の対象が 0 件になる。
@@ -172,7 +175,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: `PS5250.processEraseInput` → `clearNonbypassFields(true)`。カーソルは `getHomePos()` へ。
   当 PJ: `packages/web-ui/src/components/ScreenGrid.vue:2372` の `eraseInputKey` は、中身のある全入力欄に `edit` を出して消し、先頭の入力欄へ移る（README も「すべての入力欄をクリア」と書いている）。
   再現: F4 のプロンプトで 1 欄だけ打ってから、Erase Input を押す。（出典: `20260919-backlog-acs-triage` research N7）
-- [ ] **挿入モードが画面をまたいで残る（ACS は新しい画面ごとに上書きモードへ戻す）**（優先度 中・深さ ○）。
+- [x] **挿入モードが画面をまたいで残る（ACS は新しい画面ごとに上書きモードへ戻す）**（優先度 中・深さ ○）。
+  **完了（`20260921-insert-mode-per-screen`）**: 既存の `watch(snapshot, …)` に`insertMode.value = false` を足した（`packages/web-ui/src/components/EmulatorPane.vue`。監視は増やしていない）。
+  ⚠ **Reset キーは未実装**（ACS は Reset でも戻す）。キー割り当ての話なので下の【まとめ】キー編集の細部に属する。
   前の画面で挿入モードにしたまま次の画面で打つと、意図せず挿入になる。上の「挿入モードであふれた文字を捨てる」と重なって、末尾が消える。
   ACS: `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、`processClearFMT`・WEC・書式の開始から呼ぶ。
   当 PJ: `packages/web-ui/src/components/EmulatorPane.vue:95` の `insertMode` は、利用者の切り替えでしか変わらない。Reset キーも無い。
@@ -182,7 +187,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: 既定のキー割り当て `AcsMapFunctions.MAP_5250` が、`S10 = [newline]`（Shift+Enter）と `C17 = [newline]` を持つ。`PS5250.processNewline` はホストへ送らない。
   当 PJ: `packages/web-ui/src/composables/useKeymap.ts:72-73` は Shift を見ずに Enter の AID を返す。Newline の機能そのものが無い。
   テスト `keymap.test.ts:17-18` は、Enter → Enter だけを見ている。（出典: `20260919-backlog-acs-triage` research N9）
-- [ ] **起動応答コード 2703 / 2777 / 8936 / 8937 を知らない**（優先度 中・深さ ○）。
+- [x] **起動応答コード 2703 / 2777 / 8936 / 8937 を知らない**（優先度 中・深さ ○）。
+  **完了（`20260921-startup-codes-unknown`）**: `CODE_MEANING` に 4 エントリを足した（`packages/tn5250/src/telnet/startup-record.ts`）。認識はこの表のキーが出所なので、足すだけで直る。
+  原典を `javap -c -constants` で確認——`DS5250.processStartUpConfirmation` の lookupswitch に個別の分岐が実在し、通信状態は **2703→12 / 2777→13 / 8936→33 / 8937→34**。
+  ⚠ **2703 / 2777 の意味は未確認**（ACS の英語文言はメッセージカタログ側で、通信状態→キーを追えていない）。**それらしい英文を創作せず**、文言に「未確認」と書いてある。
   8936・8937 は自動サインオンの失敗・拒否を表す。当 PJ は自動サインオンを持つので、到達しうる。
   未知のコードで装置名が無いと、そのレコードを 5250 データとして読んでしまう。その結果、`expected ESC` の警告と `closed during negotiation` だけが残り、本当の理由が消える。
   ACS: `DS5250.processStartUpConfirmation` が、この 4 つにも個別の状態と文言を持つ。

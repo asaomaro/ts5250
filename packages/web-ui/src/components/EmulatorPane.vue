@@ -255,6 +255,12 @@ function onGuiSubmit(fieldId: number): void {
 // 新しいホスト画面が来たらユーザーのカーソル上書きをリセットする
 watch(snapshot, (snap) => {
   cursorOverride.value = undefined;
+  // **挿入モードも画面ごとに上書きへ戻す**（`20260921-insert-mode-per-screen`）。
+  // ACS は `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、書式の開始・WEC・
+  // `processClearFMT` から呼ぶので、**新しい画面は必ず上書きモードで始まる**。
+  // 残ると、前の画面で入れた挿入モードのまま次の画面で打つことになり、
+  // 「挿入で欄が満杯のとき弾く」規則と重なって**打てない・意図せず押し出す**が起きる。
+  insertMode.value = false;
   // 入力欄が 1 つも無い画面では ScreenGrid の欄フォーカス（focusCursorField）が早期 return し、
   // どこも focus されずキー操作できない（見た目はカーソルが出る）。ペインを focus して
   // 自由カーソル・F キーを有効にする（クリックで reconcileFocus がペインを focus するのと同じ状態）。
