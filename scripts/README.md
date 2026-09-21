@@ -615,6 +615,19 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 解析時は telnet のエスケープを先に解除すること（`IAC EOR` を落とし `IAC IAC` → `0xFF`）。
 **記録にはサインオンのパスワードが平文で残る。解析が済んだら削除すること。**
 
+`relay-5250.mjs` — **5250 の telnet（23）だけを中継して両方向の生バイトを記録する小さな中継**。
+`tap-proxy.mjs` と違い待ち受けポートを自由に選べ（特権ポートが要らない）、ホストサーバーのポートは扱わない。
+ACS のコア（`acs-probe.mjs`）や診断スクリプトを実機との間で測るのに向く（`20260922-g-field-sosi` で G の欄のワイヤを採った）。
+実機のアドレスは `.env` の値を環境変数越しに渡す（画面に出さない）。
+
+```sh
+node --env-file=.env -e 'process.env.TARGET_HOST=process.env.AS400_HOST; process.env.RELAY_PORT="32323"; process.env.RELAY_LOG="./relay.log"; await import("./scripts/relay-5250.mjs")' --input-type=module &
+AS400_HOST=127.0.0.1 PROBE_PORT=32323 node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順ファイル>
+```
+
+記録は 1 行 1 パケット（`C>H <hex>` がクライアント→ホスト、`H>C <hex>` がホスト→クライアント。IAC のエスケープを解く前）。
+**パスワードが平文で残るので、解析したら `shred -u` で消す**。
+
 `research-ifs-dataccsid.mjs` — **IFS の新規ファイルに付く CCSID タグの実測**。
 `dataCcsid` を指定しない／`1208`／`1399`／既存の上書き、の 4 条件を比べる。
 **指定は採用される**が、**既存ファイルのタグは上書きでも変わらない**。
