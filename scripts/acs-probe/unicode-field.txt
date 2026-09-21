@@ -1,0 +1,11 @@
+# Unicode の欄（DDS の G・CCSID(13488)/CCSID(1200)）を、Unicode を申告しない ACS のコアが受けたときの見え方（R11 の M4）。
+# 画面は `scripts/build-unitest.mjs` が作る UNITST（UNIREC）。当 PJ 側は `scripts/diag-unifield.mjs`。
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/unicode-field.txt AS400
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]CALL ${LIB}/UNITST[enter]
+settle 2500
+dump unicode-fields
+keys [enter]
+settle 1500
