@@ -99,8 +99,8 @@ export function buildQueryReply(
  * ヘッダは Query Reply と同じ（PUT_GET・AID 0x88）。中身は ACS と同じ 2 通り:
  * - フラグに 0x40 が立ち、次のバイトが 0 → `D9 72 C0 00` と CCSID 13488・17584・1200（Unicode の申告）
  * - それ以外 → `D9 72 80 00 03 01 04`
- * フラグに 0x80 が立っていれば ACS は応答せず否定応答の理由（センス・コード）を立てる。当 PJ は否定応答を持たないので
- * **応答しない**（`undefined`。台帳「負応答を返さない」）。
+ * フラグに 0x80 が立っていれば ACS は応答せず否定応答（センス・コード 0x10050112）を返す——`wtd-applier.ts` が否定応答にする
+ * （`20260921-negative-responses`。~~当 PJ は否定応答を持たないので応答しない~~）。ここでは `undefined`。
  * 社内機で DSM に出させた ACS のコアの応答とバイト単位で同じ（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）
  */
 export function buildWsfD972Reply(flags: number, next: number): Uint8Array | undefined {

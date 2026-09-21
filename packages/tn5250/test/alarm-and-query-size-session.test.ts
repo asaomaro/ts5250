@@ -165,8 +165,14 @@ describe("WSF D9/72 への応答", () => {
     expect(await replyTo(wsf(0x00))).toEqual(["0000880009d9728000030104"]);
     expect(await replyTo(wsf(0x40, 0x01))).toEqual(["0000880009d9728000030104"]);
   });
-  it("フラグ 0x80 は返さない（ACS は否定応答。当 PJ は持たない）・長さが 6 でなければ返さない（ACS と同じ）", async () => {
-    expect(await replyTo(wsf(0x80))).toEqual([]);
+  it("**フラグ 0x80 は否定応答 0x10050112**（ACS と同じ。`20260921-negative-responses`）・長さが 6 でなければ返さない", async () => {
+    // ヘッダはフラグ 1 に ERR（0x80）・フラグ 2 は 0・オペコード 0（ACS `DS5250.tokenizeData` の否定応答）
+    const transport = new ScriptedTransport(initialScreen());
+    await Session5250.connect({ transport, id: "t" });
+    const before = transport.sent.length;
+    transport.deliver(wsf(0x80));
+    const recs = records(transport.sent.slice(before)).map((r) => Buffer.from(r).toString("hex"));
+    expect(recs).toEqual(["000e12a00000048000001005" + "0112"]);
     expect(await replyTo(buildRecord(OPCODE.NOOP, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x07, 0xd9, 0x72, 0x40, 0x00, 0x00])))).toEqual([]);
   });
 });

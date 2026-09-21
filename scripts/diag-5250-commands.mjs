@@ -8,6 +8,7 @@
 //   READIMM            → READ IMMEDIATE(0x72)
 //   READIMMALT         → READ MDT IMMEDIATE ALT(0x83)  ⚠ 当方は応答しない。**待たされるか**を見る
 //   WSF72 / WSF72N     → WSF クラス D9・種類 72（フラグ 0x40 / 0x00）。ホスト側のログに端末の応答の生バイトが残る（`20260921-wsf-d9-72`）
+//   WSF72X / ROLLBAD   → フラグ 0x80 の WSF D9/72・指定の不正な ROLL。端末の否定応答をホストがどう受けるか（`20260921-negative-responses`）
 //
 // 実行: node --env-file=.env --env-file=.env.verify scripts/diag-5250-commands.mjs [要求...]
 //       既定は ROLLUP ROLLDOWN READIMM

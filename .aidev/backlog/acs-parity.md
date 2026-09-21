@@ -521,6 +521,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **【まとめ】DS5250 のうち ROLL の空いた行**（優先度 低）。**完了（`20260921-roll-vacated-rows`・PR #410）**: 空いた行は旧い内容が残る（ACS `PS5250.processRoll`）。
   社内機で DSM（`QsnRollUp/Down(3,2,20)`）に行番号の画面を送らせ、ACS のコアと当 PJ を比べた——上ロールで 18〜20 行、下ロールで 2〜4 行に元の行が残る
   （`scripts/verify-roll.mjs` pass=4）。不正な指定（行数 ＞ 下端−上端 ほか）は画面を変えない（`packages/tn5250/src/screen/buffer.ts` の `roll`）。負応答は別項目のまま。
+- [x] **【まとめ】DS5250 のうち否定応答**（優先度 中）。**完了（`20260921-negative-responses`・PR #410）**: ACS と同じ形（ERR・センス・コード 4 バイト。
+  `packages/tn5250/src/protocol/gds.ts` の `buildNegativeResponse`）で、ACS と同じ条件のときに返す——コマンドの位置に ESC が無い（0x10050121）・ROLL の指定が不正（0x1005012C）・
+  CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・WSF D9/72 のフラグ 0x80（0x10050112）。未知のコマンドは ACS と同じく 1 バイト読み飛ばして続ける（~~残りを捨てる~~）。
+  社内機で DSM に出させて ACS のコアと比べた: WSF D9/72 の 0x80 は、ACS も当 PJ もホストの `QsnPutInpCmd` が CPFA304 で戻る（**以前の当 PJ は施錠のまま**）、
+  不正な ROLL と未知のコマンドはどちらも rc=0。mutation 7 通り検出。
+- [ ] **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
+  コマンドの長さの不足（0x10050121）で返すものは、当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）とそのまま対応しないので入れていない。
+  条件ごとに ACS と当 PJ の読み方を突き合わせてから入れる（`20260921-negative-responses` D2）。
 - [x] **【まとめ】DS5250 のうち WSF D9/72 への応答**（優先度 中）。**完了（`20260921-wsf-d9-72`・PR #410）**: ACS `DS5250.processWSF` と同じ応答を返す
   （フラグ 0x40・次が 0 は `D9 72 C0 00` と CCSID 13488・17584・1200、それ以外は `D9 72 80 00 03 01 04`。`packages/tn5250/src/protocol/query-reply.ts` の
   `buildWsfD972Reply`）。社内機で DSM（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）に出させたところ、**以前は応答せずホストが待ち続け、施錠されたまま**だった。
@@ -537,7 +545,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
       （0x80xx は再順序付け・0x84xx は透過の欄（ACS `Field5250` の `FCW_RESEQUENCE` / `FCW_TRANSPARENT`）。D9/72 で Unicode を申告するようになったので、
       ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる）。
-    - 負応答を返さない。
+    - ~~負応答を返さない~~（上の `20260921-negative-responses` で主な 4 つを入れた。残りは上の「否定応答の残り」）。
     - 0x82/0x83 の欄データで、NUL と符号を加工する。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）

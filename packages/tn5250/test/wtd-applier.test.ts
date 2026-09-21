@@ -277,14 +277,28 @@ describe("applyDataStream — 合成データ", () => {
     expect(result.unlockKeyboard).toBe(true);
   });
 
-  it("未知コマンドは警告してレコードの残りを打ち切る（例外にしない）", () => {
-    const { warns, buf } = apply([
-      ESC, 0x99, 0x01, 0x02,
-      ESC, COMMAND.CLEAR_UNIT // 到達しない
+  // ~~未知コマンドは警告してレコードの残りを打ち切る~~ → ACS と同じく 1 バイト読み飛ばして続ける（`20260921-negative-responses`。
+  // ACS `DS5250.processCommand` の `default: ++n5`）。次がコマンドの位置で ESC でなければ否定応答（0x10050121）
+  it("**未知コマンドは 1 バイト読み飛ばして続ける**（ACS と同じ。後ろのコマンドを失わない）", () => {
+    const { warns, result } = apply([
+      ESC, 0x99, 0x01,
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08 // 届く（キーボード解放）
     ]);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("0x99");
-    expect(buf.snapshot("t", false)).toBeTruthy();
+    expect(warns.some((w) => w.includes("0x99"))).toBe(true);
+    expect(result.unlockKeyboard, "後ろの WTD を失った").toBe(true);
+    expect(result.senseCode).toBeUndefined();
+  });
+
+  it("**読み飛ばした先が ESC でなければ否定応答 0x10050121**（ACS と同じ。レコードの残りは読まない）", () => {
+    const { result } = apply([ESC, 0x99, 0x01, 0x02, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08]);
+    expect(result.senseCode).toBe(0x10050121);
+    expect(result.unlockKeyboard, "否定応答の後ろを読んだ").toBe(false);
+  });
+
+  it("否定応答: ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）", () => {
+    expect(apply([ESC, COMMAND.ROLL, 0x05, 0x0a, 0x05]).result.senseCode).toBe(0x1005012c);
+    expect(apply([ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x01]).result.senseCode).toBe(0x10030101);
+    expect(apply([ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]).result.senseCode).toBeUndefined();
   });
 
   /**

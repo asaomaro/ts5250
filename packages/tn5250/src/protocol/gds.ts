@@ -87,3 +87,12 @@ export function buildRecord(
   w.u16(ll).u16(GDS_TYPE).u16(0).u8(0x04).u8(flag1).u8(flag2).u8(opcode).bytes(data);
   return w.toUint8Array();
 }
+
+/**
+ * **否定応答**（`20260921-negative-responses`）。ACS `DS5250.tokenizeData` の終わりで送る形と同じ:
+ * ヘッダのフラグ 1 に ERR（0x80）、フラグ 2 は 0、オペコードは 0、データはセンス・コード 4 バイト（`00 0E 12 A0 00 00 04 80 00 00 <センス>`）
+ */
+export function buildNegativeResponse(senseCode: number): Uint8Array {
+  const sense = Uint8Array.from([(senseCode >>> 24) & 0xff, (senseCode >>> 16) & 0xff, (senseCode >>> 8) & 0xff, senseCode & 0xff]);
+  return buildRecord(0x00, sense, { err: true }, 0);
+}

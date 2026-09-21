@@ -30,6 +30,14 @@ export interface ApplyResult {
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
   /**
+   * **否定応答で返すセンス・コード**（`20260921-negative-responses`）。立ったらレコードの残りは読まない（ACS `DS5250.processCommand` は
+   * `sense_code` が立つとループを抜け、`tokenizeData` の終わりで否定応答を送る）。ACS と同じ条件でだけ立てる:
+   * コマンドの位置に ESC が無い（0x10050121）・ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・
+   * WSF D9/72 のフラグに 0x80（0x10050112）。**返さないとホストは入力コマンドを待ち続ける**（社内機で WSF D9/72 の 0x80 を DSM に出させて実測。
+   * ACS では `QsnPutInpCmd` が CPFA304 で戻り、当 PJ ではキーボードが施錠されたままになった）
+   */
+  senseCode?: number;
+  /**
    * ホストが WSF クラス D9・種類 72 を送ってきた（`20260921-wsf-d9-72`）。**応答しないとホストは待ち続ける**
    * （社内機で DSM に出させたところ、応答が無いままキーボードが施錠され続けた）。値は SF の 3 バイト目（フラグ）と 4 バイト目
    */
@@ -207,7 +215,8 @@ export function applyDataStream(
   while (r.remaining > 0) {
     const esc = r.u8();
     if (esc !== ESC) {
-      warn(`expected ESC, got 0x${esc.toString(16)} — discarding rest of record`);
+      warn(`expected ESC, got 0x${esc.toString(16)} — discarding rest of record (negative response 0x10050121)`);
+      result.senseCode = SENSE.COMMAND_EXPECTED;
       break;
     }
     const cmd = r.u8();
@@ -219,7 +228,12 @@ export function applyDataStream(
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
         // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
-        r.u8();
+        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）
+        if (r.u8() !== 0x00) {
+          warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
+          result.senseCode = SENSE.CLEAR_UNIT_ALTERNATE_PARAM;
+          return finish();
+        }
         // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
         // 現在のサイズでクリアするので、`clearUnit()` へは倒さない——**罫線の扱いが違う**
         // （`clearUnit()` 経由だと 24x80 専用画面で罫線が消える。KSN20 / S9R167D の回帰）。
@@ -293,7 +307,12 @@ export function applyDataStream(
         const top = r.u8();
         const bottom = r.u8();
         const lines = dir & 0x1f;
-        buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines);
+        // **指定が不正なら画面を変えずに否定応答**（ACS `processRoll` が -1 を返すと `sense_code = 0x1005012C` でレコードの残りを読まない）
+        if (!buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines)) {
+          warn(`invalid ROLL (top ${top} bottom ${bottom} lines ${lines}) (negative response 0x1005012C)`);
+          result.senseCode = SENSE.ROLL_PARAM;
+          return finish();
+        }
         break;
       }
       // **原典がパラメータ無しとして無視しているコマンド**（tn5250 `session.c`。research F5）。
@@ -349,7 +368,14 @@ export function applyDataStream(
       case COMMAND.WRITE_STRUCTURED_FIELD: {
         const sf = applyStructuredField(r, warn);
         if (sf.query) result.queryRequested = true;
-        if (sf.d972) result.wsfD972 = sf.d972;
+        if (sf.d972) {
+          // フラグに 0x80 が立っていれば ACS は応答せず否定応答（`processWSF` の `sense_code = 0x10050112`）
+          if ((sf.d972.flags & 0x80) !== 0) {
+            result.senseCode = SENSE.WSF_D972_FLAG;
+            return finish();
+          }
+          result.wsfD972 = sf.d972;
+        }
         break;
       }
       case COMMAND.READ_MDT_FIELDS:
@@ -377,8 +403,12 @@ export function applyDataStream(
         result.readScreenExtendedRequested = true;
         break;
       default:
-        warn(`unknown command 0x${cmd.toString(16)} — discarding rest of record`);
-        return finish();
+        // **知らないコマンドは 1 バイト読み飛ばして続ける**（ACS `DS5250.processCommand` の `default: ++n5`。否定応答は返さない——
+        // その次がコマンドでなければ上の「ESC が無い」で否定応答になる）。~~レコードの残りを捨てる~~ と、後ろの READ を失っていた。
+        // 社内機で DSM に未知のコマンド（0xFE）を出させたところ、ACS でも当 PJ でもホストは rc=0 で続いた
+        warn(`unknown command 0x${cmd.toString(16)} — skipping one byte (like ACS)`);
+        if (r.remaining > 0) r.u8();
+        break;
     }
   }
   return finish();
@@ -905,6 +935,14 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
  * WRITE STRUCTURED FIELD（ホスト → クライアント）。5250 QUERY（class 0xD9 / type 0x70）と、クラス D9・種類 72（長さ 6 のとき。
  * ACS `DS5250.processWSF` と同じ条件）を拾う（呼び出し側が応答を送る）。その他の SF は読み飛ばす。
  */
+/** 否定応答のセンス・コード（ACS `DS5250` の `setSenseCode` / `sense_code` の値） */
+const SENSE = {
+  COMMAND_EXPECTED: 0x10050121,
+  ROLL_PARAM: 0x1005012c,
+  CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
+  WSF_D972_FLAG: 0x10050112
+} as const;
+
 function applyStructuredField(r: ByteReader, warn: WarnFn): { query: boolean; d972?: { flags: number; next: number } } {
   let isQuery = false;
   let d972: { flags: number; next: number } | undefined;

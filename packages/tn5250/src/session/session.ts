@@ -1,6 +1,6 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor } from "@ts5250/base";
-import { parseRecord } from "../protocol/gds.js";
+import { parseRecord, buildNegativeResponse } from "../protocol/gds.js";
 import { COMMAND, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
@@ -791,6 +791,10 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
         this.telnet.sendRecord(res.record);
       }
+      // **否定応答**（ACS と同じ条件。`wtd-applier.ts` の `senseCode`）。返さないとホストは入力コマンドを待ち続ける。
+      // ACS は同じレコードの中で先に済んだ応答（Query Reply 等）を処理の途中で送り、否定応答を最後に送る。ここでは退避の応答の後、
+      // Query 等の応答の前に送る——読み手は否定応答の所で止まっているので、同じレコードに両方が載るのは誤りの前に Query があるときだけ（実機では未観測）
+      if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
         this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
@@ -798,9 +802,9 @@ export class Session5250 extends Emitter<SessionEvents> {
       }
       if (result.wsfD972) {
         // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）
+        // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
         const reply = buildWsfD972Reply(result.wsfD972.flags, result.wsfD972.next);
         if (reply) this.telnet.sendRecord(reply);
-        else this.warn(`WSF D9/72 with flag 0x80 is not answered (ACS sends a negative response; not supported)`);
         return;
       }
       if (result.readScreenExtendedRequested) {
