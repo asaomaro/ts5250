@@ -248,6 +248,12 @@ function stripSentinels(s: string): string {
  * 12 バイトの欄に全角 6 字。ワイヤも SO/SI 無し）。バイト予算・列ビューのどちらも SO/SI を数えない（`20260922-g-field-sosi`）
  */
 const noShift = (f: Field | undefined): boolean => f?.dbcsType === "pure";
+/**
+ * **空きを全角空白（U+3000）で持つ欄か**（J＝`only`・G＝`pure`）。ACS の J・G の空きは DBCS 空白（0x4040）で、打った字は 2 桁ずつの桁に入る。
+ * 半角空白を詰めると、離れた空き桁に字を打ったとき途中に半角空白が残り、core の「全角しか入力できない」で送れない（`あ   い`。実機の J で確かめた）。
+ * E・O の空きは半角空白（SBCS が混ざれる）。`20260922-g-field-sosi`
+ */
+const wideFill = (f: Field | undefined): boolean => f?.dbcsType === "only" || f?.dbcsType === "pure";
 /** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト。`f` が G なら SO/SI 無し） */
 const byteLen = (value: string, f?: Field): number => dbcsByteLength(value, sessionKind.value, noShift(f));
 
@@ -1753,11 +1759,11 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
 }
 
 /**
- * 欄の値の末尾の詰め物を落とす。**G は全角空白（U+3000）も詰め物**——G の欄の空きは DBCS 空白 0x4040 で、コアが欄長までその空白で詰めて送るので、
- * 値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ 12 バイト）。落として揃えないと、空きが NUL のホストの G を触っただけで値が変わったことになる
+ * 欄の値の末尾の詰め物を落とす。**J・G は全角空白（U+3000）も詰め物**——空きは DBCS 空白 0x4040 で、G はコアが欄長までその空白で詰めて送り、J はホストが整える
+ * ので、値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ）。落として揃えないと、空きが NUL のホストの欄を触っただけで値が変わったことになる
  */
 function trimPad(f: Field, s: string): string {
-  return noShift(f) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
+  return wideFill(f) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -2123,9 +2129,9 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
 function padDbcs(f: Field, chars: readonly string[]): string[] {
   const budget = visLen(f);
   const out = [...chars];
-  // **純 DBCS の欄（G）の詰め物は全角空白**（ACS の G の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
-  // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（G の欄長は偶数なので通常は来ない）
-  while (byteLen(out.join(""), f) < budget) out.push(noShift(f) && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
+  // **J・G の詰め物は全角空白**（ACS の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
+  // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（欄長は偶数なので通常は来ない）
+  while (byteLen(out.join(""), f) < budget) out.push(wideFill(f) && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
   while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
   return out;

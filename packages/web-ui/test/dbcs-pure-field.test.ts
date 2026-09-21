@@ -192,3 +192,44 @@ describe("MF の満杯判定・J との差", () => {
     expect(notices()).toContain(MSG_NO_ROOM);
   });
 });
+
+describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空きへ打っても半角空白が混ざらない）", () => {
+  /** J の欄（(5,20) から 12 桁＝SO ＋ 5 スロット ＋ SI）。`slots` の字を置き、残りは `fill`（既定は全角空白。`""` なら空きの桁を NUL＝空白のセルにする） */
+  function jSnapshot(slots: string[], fill = "\u3000"): ScreenSnapshot {
+    const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
+    const r = cells[4]!;
+    r[19] = cell(" ", "so");
+    for (let i = 0; i < 5; i++) {
+      const ch = slots[i] ?? fill;
+      if (ch === "") { r[20 + i * 2] = cell(" "); r[21 + i * 2] = cell(" "); continue; }
+      r[20 + i * 2] = cell(ch, "dbcs-lead");
+      r[21 + i * 2] = cell("", "dbcs-tail");
+    }
+    r[30] = cell(" ", "si");
+    const field = { index: 1, row: 5, col: 20, length: 12, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "only" } as Field;
+    return { sessionId: "j1", rows: 24, cols: COLS, cursor: { row: 5, col: 20 }, keyboardLocked: false, cells, fields: [field] } as unknown as ScreenSnapshot;
+  }
+
+  it("**離れた空きの桁へ打つと、前の空きは全角空白**（半角空白の `あ   い` だと core の「全角しか入力できない」で送れなかった。実機の J で確かめた）", async () => {
+    const { key, at, value } = await open(jSnapshot(["あ"]));
+    await at(4); // 4 スロット目（SO の次が 1）
+    await key("い");
+    expect(value()).toBe("あ\u3000\u3000い");
+    expect(value()!.includes(" "), "半角空白が混ざっていない").toBe(false);
+  });
+
+  it("**触っただけでは値が変わらない**（空きが NUL のホストの J でも、詰め物を全角空白にして比べる）", async () => {
+    const { key, edited } = await open(jSnapshot(["あ"], ""));
+    await key("ArrowRight");
+    await key("ArrowRight");
+    await key("ArrowLeft");
+    expect(edited()).toEqual([]);
+  });
+
+  it("末尾の詰め物は値から落ちる（ホストが SO…SI を欄長へ整える。実機で確かめた）", async () => {
+    const { key, at, value } = await open(jSnapshot(["あ", "い"]));
+    await at(1);
+    await key("う");
+    expect(value()).toBe("うい");
+  });
+});

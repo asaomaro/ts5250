@@ -108,7 +108,8 @@ describe("DBCS（J・E）の挿入: 末尾の全角空白は空き", () => {
       await at(1); // SO の次＝最初の全角
       await key("Insert");
       await key("う");
-      expect(value()).toBe("うあい　　");
+      // J は末尾の全角空白が詰め物として値から落ちる（`trimPad`。ホストが SO…SI を整える）。E は全角空白も値のまま
+      expect(value()).toBe(type === "only" ? "うあい" : "うあい　　");
       expect(notices()).toEqual([]);
     });
 
@@ -118,7 +119,7 @@ describe("DBCS（J・E）の挿入: 末尾の全角空白は空き", () => {
       await at(3);
       await key("Insert");
       await key("う");
-      expect(value()).toBe("あいう　　");
+      expect(value()).toBe(type === "only" ? "あいう" : "あいう　　");
     });
 
     it(`${type}: 空きが無い（満杯）なら 0012 で値を変えない`, async () => {
@@ -147,7 +148,7 @@ describe("DBCS（J・E）の挿入: 末尾の全角空白は空き", () => {
     const { key, at, value } = await open(snapshot);
     await at(1);
     await key("う"); // 上書き: 先頭の あ が う に
-    expect(value()).toBe("うい　　　");
+    expect(value()).toBe("うい");
   });
 });
 
@@ -179,7 +180,7 @@ describe("DBCS 欄への貼り付け（挿入モード）も同じ規則", () =>
     await at(1);
     await key("Insert");
     await paste("う");
-    expect(value()).toBe("うあい\u3000\u3000");
+    expect(value()).toBe("うあい");
     expect(notices()).toEqual([]);
   });
 
@@ -198,7 +199,7 @@ describe("DBCS 欄への貼り付け（挿入モード）も同じ規則", () =>
     const { at, paste, value, notices } = await open(snapshot);
     await at(1);
     await paste("う");
-    expect(value()).toBe("うい\u3000\u3000\u3000");
+    expect(value()).toBe("うい");
     expect(notices()).toEqual([]);
   });
 });
