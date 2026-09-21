@@ -57,7 +57,21 @@ const CODE_MEANING: Record<string, string> = {
   8934: "Start-up for device failed.",
   8935: "Session rejected.",
   8940: "Automatic configuration failed or not allowed.",
-  I904: "Source system at incompatible release."
+  I904: "Source system at incompatible release.",
+  // **ACS が個別に扱う 4 つ**（`20260921-startup-codes-unknown`）。
+  // `DS5250.processStartUpConfirmation` の lookupswitch に個別の分岐として実在し、
+  // それぞれ別の通信状態（`ECLSession.SetCommStatus`）へ落ちる——
+  // 2703→12 / 2777→13 / 8936→33 / 8937→34。
+  // **表に無いと起動応答と認識されず 5250 データとして解析され**、
+  // `expected ESC` の警告だけが残って本当の失敗理由が消える（`isKnownStartupCode` はこの表が出所）。
+  //
+  // ⚠ **2703 / 2777 の意味は未確認。** ACS の英語文言はメッセージカタログ側にあり、
+  // 通信状態→キーの対応を追えていない。**それらしい英文を創作しない**
+  // （`AGENTS.md` 判断の原則 2）。意味が分かったらここを直す。
+  2703: "Startup response 2703 (meaning not yet verified against ACS).",
+  2777: "Startup response 2777 (meaning not yet verified against ACS).",
+  8936: "Automatic sign-on failed.",
+  8937: "Automatic sign-on rejected."
 };
 
 export function startupCodeMeaning(code: string): string {

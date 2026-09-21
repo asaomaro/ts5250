@@ -137,6 +137,29 @@ describe("表示セッションの起動応答", () => {
     // 起動応答として扱わないので、5250 として解析される＝従来の経路
     expect(r.warnings.some((w) => w.includes("startup response"))).toBe(false);
   });
+
+  /**
+   * **ACS が個別に扱う 4 つ**（`20260921-startup-codes-unknown`）。
+   *
+   * `DS5250.processStartUpConfirmation` の lookupswitch に個別の分岐があり、
+   * それぞれ別の通信状態へ落ちる（2703→12 / 2777→13 / 8936→33 / 8937→34）。
+   * **表に無いと起動応答と認識されず**、`expected ESC` の警告だけが残って
+   * **自動サインオン失敗の本当の理由が消える**。
+   */
+  for (const code of ["2703", "2777", "8936", "8937"]) {
+    it(`${code} を起動応答として認識し、断られたと分かる（装置名が無くても）`, async () => {
+      const r = await connectWith(startupRecord(code));
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      // 失敗コードは `session rejected <code>` を出す（成功側が `startup response <code>`）
+      expect(
+        r.warnings.some((w) => w.includes(`session rejected ${code}`)),
+        "起動応答として扱われていない＝5250 データに流れ込んでいる"
+      ).toBe(true);
+      // **解析器が壊れたように見える警告が出ない**——この項目が直したかったのはここ
+      expect(r.warnings.some((w) => w.includes("expected ESC"))).toBe(false);
+    });
+  }
 });
 
 /**

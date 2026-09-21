@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseStartupResponse,
   startupCodeMeaning,
+  isKnownStartupCode,
   STARTUP_SUCCESS_CODES
 } from "../src/telnet/startup-record.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
@@ -63,5 +64,42 @@ describe("起動応答レコード", () => {
     expect(STARTUP_SUCCESS_CODES.has("8902")).toBe(false);
     expect(startupCodeMeaning("8902")).toBe("Device not available.");
     expect(startupCodeMeaning("9999")).toBe("unknown startup response");
+  });
+});
+
+/**
+ * **ACS が個別に扱う起動応答**（`20260921-startup-codes-unknown`）。
+ *
+ * `acshod2.jar` の `DS5250.processStartUpConfirmation` を `javap -c -constants` で読むと、
+ * この 4 つが lookupswitch の**個別の分岐**として実在し、それぞれ別の通信状態
+ * （`ECLSession.SetCommStatus`）へ落ちる——2703→12 / 2777→13 / 8936→33 / 8937→34。
+ *
+ * **認識は `CODE_MEANING` のキーが唯一の出所**なので、表に無いと起動応答と見なされず
+ * 5250 データとして解析される。8936 / 8937 は自動サインオンの失敗・拒否で、
+ * 当 PJ は自動サインオンを持つため**到達しうる**。
+ */
+describe("ACS が個別に扱う 4 コード", () => {
+  const codes = ["2703", "2777", "8936", "8937"] as const;
+
+  it("既知として認識する（未知だと 5250 データに流れ込む）", () => {
+    for (const c of codes) expect(isKnownStartupCode(c), c).toBe(true);
+  });
+
+  it("成功ではない（4 つとも失敗）", () => {
+    for (const c of codes) expect(STARTUP_SUCCESS_CODES.has(c), c).toBe(false);
+  });
+
+  it("意味が引ける（未知の既定文言に落ちない）", () => {
+    for (const c of codes) expect(startupCodeMeaning(c), c).not.toBe("unknown startup response");
+  });
+
+  it("**意味が未確認のものは、そう分かる文言にする**（それらしい英文を創作しない）", () => {
+    // ACS の英語文言はメッセージカタログ側で、通信状態→キーの対応を追えていない。
+    // ログを読む人が「当 PJ がまだ掴んでいないコード」と分かる形にしてある
+    expect(startupCodeMeaning("2703")).toContain("not yet verified");
+    expect(startupCodeMeaning("2777")).toContain("not yet verified");
+    // 8936 / 8937 は前 work が ACS を読んで記録した事実なので、意味を書いてある
+    expect(startupCodeMeaning("8936")).toBe("Automatic sign-on failed.");
+    expect(startupCodeMeaning("8937")).toBe("Automatic sign-on rejected.");
   });
 });
