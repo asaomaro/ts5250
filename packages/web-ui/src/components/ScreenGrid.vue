@@ -2111,14 +2111,29 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
 }
 
 /** 予算超過ぶんを末尾の空白パディングで吸収する（全角は SO/SI で最大 4 桁ぶん増えるため）。
- *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。 */
-function absorbDbcs(chars: string[], budget: number, cursor: number): string[] | undefined {
+ *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。
+ *
+ *  **J・G・E は末尾の全角空白（U+3000）も空きに数える**（`wideBlank`。ACS `reserveRoomForInsert` は右端から続く NUL・半角空白・全角空白を空きと数える。
+ *  ホストが 4040 で埋めた欄・全角空白で埋めた欄への挿入が通る。O は数えない——SO/SI の桁で数え始めが止まる。`20260922-dbcs-insert-room`） */
+function absorbDbcs(chars: string[], budget: number, cursor: number, wideBlank = false): string[] | undefined {
   const out = [...chars];
   while (byteLen(out.join("")) > budget) {
-    if (out.length <= cursor || out[out.length - 1] !== " ") return undefined;
+    const last = out[out.length - 1];
+    if (out.length <= cursor || (last !== " " && !(wideBlank && last === "\u3000"))) return undefined;
     out.pop();
   }
   return out;
+}
+
+/**
+ * **挿入モードで、カーソルが欄の最終桁にあるか**（ACS `reserveRoomForInsert`: カーソルが最終桁なら**空白でも即エラー 0012**。J・E は最終桁が SI の桁）。
+ * G はカーソルが 2 桁の前半にしか止まらないので対象外。実機の ACS のコアで J・E（SI の桁）と O（最終のセル）が 0012、1 桁手前は入った
+ * （`scripts/acs-probe/dbcs-insert-room.txt`）。SBCS の欄は `fieldEdit.insertChar` が同じ判定を持つ
+ */
+function atLastColumn(e: EditState, f: Field): boolean {
+  if (f.dbcsType === "pure") return false;
+  const lay = dbcsViewLayout(e.chars.join(""), soMark(), siMark());
+  return lay.columnsBefore(lay.caretOf(e.cursor)) >= visLen(f) - 1;
 }
 
 /**
@@ -2157,8 +2172,10 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
 }
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
-function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
+function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
   const budget = visLen(f);
+  // 選択を置き換える挿入（`replaced`）は、消した跡を埋めるだけなので最終桁の判定を掛けない
+  if (e.insertMode && !replaced && atLastColumn(e, f)) return undefined;
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
@@ -2167,7 +2184,7 @@ function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
     chars[e.cursor] = ch;
     keepByteLength(chars, e.cursor, before, budget); // 上書きで桁を動かさない
   }
-  const fit = absorbDbcs(chars, budget, e.cursor + 1);
+  const fit = absorbDbcs(chars, budget, e.cursor + 1, f.dbcsType === "only" || f.dbcsType === "pure" || f.dbcsType === "either");
   if (!fit) return undefined;
   return { ...e, chars: padDbcs(f, fit), cursor: e.cursor + 1 };
 }
@@ -3100,10 +3117,10 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
     const base = replaced ? { ...edit, insertMode: true } : edit;
-    const trial = dbcsType(base, ch, f);
+    const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
       // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
-      // （`20260921-insert-no-room` D2。「最終桁にカーソルなら空白でも余地なし」は論理値のモデルに無いので写していない）
+      // （`20260921-insert-no-room` D2。最終桁の判定は `atLastColumn`——`20260922-dbcs-insert-room`）
       if (base.insertMode && !replaced) emit("notice", MSG_NO_ROOM);
       return;
     }
@@ -3613,7 +3630,11 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       const ch = inputChar(raw, f);
       if (!acceptsChar(f, ch, sessionKind.value)) continue;
       const trial = dbcsType(e, ch, f);
-      if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
+      if (!trial || !fitsBytes(trial, f)) {
+        // 上書きは入るところまで。挿入は事前の検査（欄全体の余地）を通っても、最終桁の 0012（`atLastColumn`）で止まりうる
+        if (e.insertMode) emit("notice", MSG_NO_ROOM);
+        break;
+      }
       e = trial;
     }
     mdtKeyed = e !== start; // 1 字でも置けたら（ACS の貼り付けは 1 字ずつの打鍵）
@@ -3696,7 +3717,7 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
     // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が
     // 通知なしに消えていた。独立点検の指摘）
-    const trial = dbcs ? dbcsType(base, ch, f) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
+    const trial = dbcs ? dbcsType(base, ch, f, composeReplacedSelection) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) {
       noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで黙って止める＝従来どおり）
       break;

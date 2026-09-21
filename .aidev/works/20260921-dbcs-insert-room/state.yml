@@ -1,0 +1,13 @@
+schema: 11
+slug: dbcs-insert-room
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: - [ ] **挿入モードの余地の残り: DBCS 欄の「最終桁にカーソルなら空白でも余地なし」と、継続欄への IME 確定**（優先度 低・深さ △）。
+harnessRevDelivered: unknown
