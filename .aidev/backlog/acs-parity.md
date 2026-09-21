@@ -488,6 +488,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   平文の自動サインオンで IBMRSEED は値なし（以前は ESC＋8 バイトの 0 で、7 個の 0x00 が空の VAR として読まれていた）、USER は前後の空白を落として大文字、
   IBMSUBSPW は末尾の空白を落とし、値の 0x00〜0x03 は ESC でエスケープ（`packages/tn5250/src/telnet/telnet.ts` の `envValue`）。ACS のコアに平文の自動サインオンを
   させてタップで採ったワイヤと同じ形（プローブに `PROBE_BYPASS_SIGNON`）。`scripts/verify-autosignon.mjs PUB400` で通った。
+- [x] **【まとめ】telnet のうち 1399 の申告**（優先度 中）。**完了（`20260921-device-env-1399`・PR #410）**: `deviceEnvFor(1399)` を ACS と同じ
+  KBDTYPE=JPE・CODEPAGE=1027・CHARSET=32000 にした（`packages/base/src/device-env.ts`。以前は JEB・1172）。ACS のコアに `codePageKey` を渡してタップで採ったワイヤと同じ
+  （939 `JPB/1027/1172`・930（Katakana Extended）`JKB/290/1172`・37 `USB/37/697` も当 PJ と一致）。新しい値で両方の実機の 5250 サインオンと日本語の往復
+  （`scripts/verify-device-env.mjs`）、3270 の接続（両方）、PUB400 の VT が通った。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
@@ -501,9 +505,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ACS: 置換記号（`*` `%` `=` `+` `&COMPN` など）を展開し、大文字にする（`AutoDeviceName5250`）。
     - 当 PJ: 書いたとおりに送る。
     - `deviceNameRetry` は理由を問わずに再試行するので、誤ったパスワードで QMAXSIGN を使い切る恐れがある（推測）。
-  - 1399 の申告（中・要実測）
+  - ~~1399 の申告（中・要実測）~~ → 上の `20260921-device-env-1399` で済んだ
     - ACS: KBDTYPE=JPE・CHARSET=32000。
     - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。
+  - 930 の申告の選択（低・**未確認**）: ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）は 290 として扱われ CHARSET が 332、「Katakana Extended」は 1172（当 PJ と同じ）。
+    利用者の ACS がどちらを選んでいるかは未確認（`20260921-device-env-1399` D2）
   - DBCS 24x80 の端末タイプ（中・要実測）
     - ACS: `IBM-5555-C01`。
     - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。

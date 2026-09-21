@@ -732,6 +732,7 @@ node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順> PUB40
   - `PROBE_PORT`（既定 23）
   - `PROBE_ENPTUI`（既定は指定しない＝ECL の既定 false。`true` で拡張 5250 を申告する。利用者の ACS は有効で動いている——タップで採った Query Reply が有効時の値だった。**無効だとホストは EDTMSK の欄を継続欄に割らずに送る**ので、継続欄を測るときは `true`）
   - `PROBE_BYPASS_SIGNON`（既定は指定しない。`clear` で平文・`encrypted` で代替パスワードの ACS の自動サインオン。パスワードは ACS 自身の `PasswordCipher` で暗号化して渡す。NEW-ENVIRON を `tap-proxy.mjs` で採るときに使う。**採った記録にはパスワード（平文なら素のまま）が入るので、解析したら消す**）
+  - `PROBE_CODEPAGE_KEY`（既定は指定しない。GUI の ACS がセッション設定から入れる `codePageKey`。KBDTYPE は `CodePage.getKbdType` がこのキーで引くので、入れないと空白 3 つになり GUI の ACS の値にならない。1399 は `KEY_JAPAN_ENGLISH_EX_EURO`・939 は `KEY_JAPAN_ENGLISH_EX`・930 は `KEY_JAPAN_KATAKANA`・37 は `KEY_US`）
 - 出力から `.env` の値（パスワード・ホスト・利用者名）を伏せる。JVM に渡す環境変数は要るものだけ。
 - 終了コード（**0 は手順を最後まで流したときだけ**）: 0 = 最後まで流した / 1 = JVM を起動できない / 2 = 実行前の誤り（環境変数・JDK・jar・コンパイル・手順。手順は命令名・引数の書式・`${LIB}` と `_LIB` の有無を実機に繋ぐ前に確かめる） / 3 = 接続できない・サインオンできない（パスワード欄が残っていたら続きを打たずに止める） / 4 = 途中で止まった（例外・エラー） / 5 = 時間切れ（300 秒）。
 - サインオンで、利用者名は大文字にして書く。パスワードは、英小文字の無いコードページ（930 / 5026 / 290）のときだけ大文字にする。

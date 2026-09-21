@@ -72,7 +72,8 @@ describe("deviceEnvFor: CCSID → RFC 2877 デバイス属性", () => {
     expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
     // 939 は ACS 実機の申告に合わせて JPB
     expect(deviceEnvFor(939)).toEqual({ kbdType: "JPB", codePage: 1027, charSet: 1172 });
-    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+    // ~~JEB・1172~~ → ACS と同じ JPE・32000（`20260921-device-env-1399`。値の正は `packages/base/test/device-env.test.ts`）
+    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JPE", codePage: 1027, charSet: 32000 });
   });
 
   it("エイリアス（5026=930 系・5035/931=939 系）も同じ属性", () => {

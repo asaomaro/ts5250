@@ -197,6 +197,11 @@ public class AcsProbe {
     // `NVT5250.getHostDeviceOptions` が読むプロパティで、パスワードは ACS 自身の `PasswordCipher` で暗号化して渡す
     // （製品の外で動くプローブでは `AcsOnly.initBypassSignon` が何もしないので、ここで渡した種別がそのまま効く）。
     // NEW-ENVIRON を `tap-proxy.mjs` で採るときに使う。手順の `signon` は使わない（ホストが画面を飛ばす）
+    // **コードページのキー**（GUI の ACS がセッション設定から入れる `codePageKey`。既定は入れない）。KBDTYPE は
+    // `CodePage.getKbdType(codePageKey)` で引かれるので、入れないと空白 3 つになる（GUI の ACS の値ではない）。
+    // 例: 1399 は `KEY_JAPAN_ENGLISH_EX_EURO`、939 は `KEY_JAPAN_ENGLISH_EX`、930 は `KEY_JAPAN_KATAKANA`、37 は `KEY_US`
+    String cpKey = env("PROBE_CODEPAGE_KEY", "");
+    if (!cpKey.isEmpty()) p.put("codePageKey", cpKey);
     String bypass = env("PROBE_BYPASS_SIGNON", "");
     if (!bypass.isEmpty()) {
       p.put("ssoEnabled", "true");
