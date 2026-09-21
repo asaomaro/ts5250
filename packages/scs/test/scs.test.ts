@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,5 +205,70 @@ describe("SCS: IGC 制御オーダー 0x2BFD", () => {
     ]);
     const pages = new ScsDecoder(939).decode(bytes);
     expect(pages[0]!.lines.join("")).toBe("ABCD");
+  });
+});
+
+/**
+ * **制御の表は ACS と同じ**（`PrintSCS5250` の `scs_proc`。`20260921-scs-controls-acs`）。
+ * 以前は表に無い制御を印字文字として桁に置き、0x03 を EBCDIC の透過として読み、長さの前置を持つ 2B の
+ * オーダーを固定長で読んで、知らないオーダーで帳票の残りを打ち切っていた。
+ */
+describe("SCS: 制御の表（ACS と同じ）", () => {
+  const E = (t: string): number[] => [...t].map((c) => ({ A: 0xc1, B: 0xc2, C: 0xc3, D: 0xc4, X: 0xe7, Y: 0xe8 })[c as "A"]!);
+  const lines = (bytes: number[], ccsid = 37): string[] => new ScsDecoder(ccsid).decode(Uint8Array.from(bytes))[0]?.lines ?? [];
+
+  it("**LF（0x25）は次の行へ、桁はそのまま**", () => {
+    expect(lines([...E("AB"), 0x25, ...E("C")])).toEqual(["AB", "  C"]);
+  });
+  it("IRS（0x1E）は NL と同じく次の行の頭へ", () => {
+    expect(lines([...E("AB"), 0x1e, ...E("C")])).toEqual(["AB", "C"]);
+  });
+  it("BS（0x16）は 1 桁戻る（上書き）", () => {
+    expect(lines([...E("AB"), 0x16, ...E("X")])).toEqual(["AX"]);
+  });
+  it("VT（0x0B）はタブ位置が無いので LF と同じ", () => {
+    expect(lines([...E("A"), 0x0b, ...E("B")])).toEqual(["A", " B"]);
+  });
+  it("**TRN（0x35）は長さ＋本体を文字として置く**（本体の 0x40 未満は制御として読まず空白にする）", () => {
+    expect(lines([0x35, 0x03, 0xe7, 0x0d, 0xe8, ...E("A")])).toEqual(["X YA"]);
+  });
+  it("**ATRN（0x03）は ASCII 透過なので置かずに読み飛ばす**（~~EBCDIC の透過~~）", () => {
+    expect(lines([0x03, 0x03, 0x1b, 0x45, 0x41, ...E("A")])).toEqual(["A"]);
+  });
+  it("**表に無い 0x40 未満は印字しない**（~~文字として桁に置く~~。日本語機では SBCS の状態の SI が「�」になっていた）", () => {
+    expect(lines([0x0f, 0x07, 0x1b, ...E("AB")])).toEqual(["AB"]);
+  });
+  it("RNL（0x06）・RFF（0x3A）は ACS も何もしない（Unsupported）", () => {
+    const pages = new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x06, ...E("B"), 0x3a, ...E("C")]));
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.lines).toEqual(["ABC"]);
+  });
+  it("SA（0x28）は 3 バイト、VCS（0x04）は 2 バイトで読み飛ばす", () => {
+    expect(lines([0x28, 0x41, 0xc2, ...E("A"), 0x04, 0xc1, ...E("B")])).toEqual(["AB"]);
+  });
+  it("GE（0x08）は次のバイトの代わりにグラフィック・エラー文字（`-`）を置く", () => {
+    expect(lines([...E("A"), 0x08, 0xc1, ...E("B")])).toEqual(["A-B"]);
+  });
+  it("Null（0x00 / 0x14 / 0x23 / 0x24）は読み飛ばす", () => {
+    expect(lines([0x00, 0x14, ...E("A"), 0x23, 0x24, ...E("B")])).toEqual(["AB"]);
+  });
+
+  it("**2B D1 06 01（SCG）は長さどおり 8 バイト**（~~6 バイトで読み、GCGID・CPGID を本文として読んでいた~~）", () => {
+    expect(lines([0x2b, 0xd1, 0x06, 0x01, 0x01, 0x28, 0x03, 0x25, ...E("AB")])).toEqual(["AB"]);
+  });
+  it("**2B C1（SHF）は長さの前置どおり**（~~長さが 1 以上なら 1 バイトだけ~~）", () => {
+    expect(lines([0x2b, 0xc1, 0x04, 0x84, 0x00, 0x05, ...E("AB")])).toEqual(["AB"]);
+  });
+  it("2B FE（代替文字）も長さどおり読み飛ばす（~~未知で打ち切り~~）", () => {
+    expect(lines([0x2b, 0xfe, 0x04, 0x00, 0x00, 0x00, ...E("AB")])).toEqual(["AB"]);
+  });
+  it("2B C8（SGEA）は 5 バイト固定", () => {
+    expect(lines([0x2b, 0xc8, 0x03, 0x40, 0x03, ...E("AB")])).toEqual(["AB"]);
+  });
+  it("**表に無い 2B のクラスは 0x2B だけを読み飛ばし、帳票の残りを捨てない**（ACS は未定義の制御として 1 バイト）", () => {
+    const warn = vi.fn();
+    const pages = new ScsDecoder(37, warn).decode(Uint8Array.from([...E("A"), 0x2b, 0x07, ...E("BC")]));
+    expect(pages[0]!.lines).toEqual(["ABC"]);
+    expect(warn).toHaveBeenCalled();
   });
 });

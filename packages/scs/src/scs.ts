@@ -2,13 +2,25 @@ import { codecForCcsid, SO, SI, type Codec } from "@ts5250/ebcdic";
 
 /**
  * SCS（SNA Character String）デコーダ。プリンターセッションでホストから届く印刷データを
- * 論理ページ（等幅グリッド）に展開する。tn5250 lib5250/scs.c の制御セット・バイト消費を移植した。
+ * 論理ページ（等幅グリッド）に展開する。
  *
- * 制御バイト（scs.c scs_main のディスパッチが唯一の真実）:
- *   0x00 NOOP / 0x03 TRANSPARENT(+count+N) / 0x05 HT(stub) / 0x06 RNL / 0x0C FF / 0x0D CR /
- *   0x15 NL / 0x34 PP(+fn+val) / 0x3A RFF / 0x2B 多バイトオーダー / 0xFF 無視。
- *   これ以外のバイトはすべてデータ文字（EBCDIC→Unicode 変換）。SO/SI(0x0E/0x0F) は SBCS では
- *   出現しない前提（DBCS 対応時にシフト処理を追加する）。
+ * **制御の表は ACS に合わせる**（`PrintSCS5250` のコンストラクタの `scs_proc`。`20260921-scs-controls-acs`）。
+ * ~~tn5250 lib5250/scs.c の制御セット~~ は ACS と食い違っていた——0x03 を EBCDIC の透過として読み、
+ * 表に無い制御（LF 0x25・IRS 0x1E・BS 0x16・TRN 0x35 ほか）を**印字文字として桁に置き**、長さの前置を持つ
+ * 0x2B のオーダーを固定長で読んで、知らないオーダーで**帳票の残りを打ち切っていた**。
+ *
+ *   0x40 以上 … 印字文字（EBCDIC→Unicode）。DBCS は SO/SI で切り替え
+ *   0x00 / 0x14 / 0x23 / 0x24 … Null（読み飛ばす）
+ *   0x0D CR … 行頭へ / 0x25 LF … 次の行（桁はそのまま） / 0x15 NL・0x1E IRS … 次の行の頭
+ *   0x0C FF … 改ページ / 0x0B VT … 垂直タブ（タブ位置を持たないので LF と同じ。ACS も停止位置が無ければ LF）
+ *   0x16 BS … 1 桁戻る / 0x05 HT … 水平タブ（スタブ。タブ位置は未対応）
+ *   0x34 PP … 位置決め（3 バイト） / 0x28 SA … 属性（3 バイト。読み飛ばす） / 0x04 VCS … 2 バイト
+ *   0x08 GE … 2 バイト。ACS はグラフィック・エラー文字（既定 0x60＝`-`）を置く
+ *   0x35 TRN … 透過（長さ＋本体。本体は文字として置く） / 0x03 ATRN … ASCII 透過（長さ＋本体。読み飛ばす）
+ *   0x2B … オーダー（下の `skip2b`）
+ *   0x06 RNL / 0x3A RFF / 0x09 SPS / 0x38 SBS / 0x36 NBS / 0x39 IT / 0x33 IR / 0x2F BEL … **ACS も何もしない**（1 バイト）
+ *   それ以外の 0x40 未満 … 未定義の制御として 1 バイト読み飛ばす（印字しない）
+ *   0xFF … 読み飛ばす（tn5250 由来。ACS は印字文字の範囲に入れる。未確認のまま据え置き）
  */
 
 /** 論理ページ（1 ページ分の等幅グリッド）。lines[r] は桁詰めした 1 行。 */
@@ -45,24 +57,37 @@ export interface ShiftMark {
   kind: "so" | "si";
 }
 
-// SCS 単バイト制御（scs.h の定数）
+// SCS 単バイト制御（ACS `PrintSCS5250` の表と同じ割り当て）
 const NOOP = 0x00;
-const TRANSPARENT = 0x03;
+const ATRN = 0x03; // ASCII 透過（~~EBCDIC の透過~~ ではない）
+const VCS = 0x04;
 const HT = 0x05;
-const RNL = 0x06;
+const GE = 0x08;
+const VT = 0x0b;
 const FF = 0x0c;
 const CR = 0x0d;
 const NL = 0x15;
-const PP = 0x34;
-const RFF = 0x3a;
+const BS = 0x16;
+const IRS = 0x1e;
+const LF = 0x25;
+const SA = 0x28;
 const ORDER_2B = 0x2b;
+const PP = 0x34;
+const TRN = 0x35;
 const IGNORE_FF = 0xff;
+/** ACS の表で Null（読み飛ばすだけ） */
+const NULLS = new Set([NOOP, 0x14, 0x23, 0x24]);
+/** グラフィック・エラー文字の既定（ACS `GraphicErrorChar = 96`） */
+const GRAPHIC_ERROR_BYTE = 0x60;
 
 // PP（0x34）の副機能（scs.h）
 const PP_RDPP = 0x4c; // 相対下移動（row += n）
 const PP_AHPP = 0xc0; // 絶対水平（col = n）
 const PP_AVPP = 0xc4; // 絶対垂直（row = n）
 const PP_RRPP = 0xc8; // 相対右移動（col += n）
+
+/** 長さの前置を持つ 0x2B のクラス（ACS の表: SHF・SVF・SLD・フォント選択・D2・STO・IGC・代替文字） */
+const ORDERS_2B = new Set([0xc1, 0xc2, 0xc6, 0xd1, 0xd2, 0xd3, 0xfd, 0xfe]);
 
 const MAX_ROW = 32767; // 暴走データでの過大確保を防ぐ安全上限
 const MAX_COL = 32767;
@@ -180,34 +205,47 @@ export class ScsDecoder {
         }
         // 0x40 未満＝制御。DBCS モードは維持したまま下の switch で処理する
       }
+      if (NULLS.has(b) || b === IGNORE_FF) continue;
       switch (b) {
-        case NOOP:
-        case IGNORE_FF:
-          break;
         case CR:
           col = 1;
           break;
         case NL:
-        case RNL:
+        case IRS:
           row += 1;
           col = 1;
           break;
+        case LF:
+        case VT: // タブ位置を持たないので次の行へ（ACS も停止位置が無ければ LF）
+          row += 1;
+          break;
         case FF:
-        case RFF:
           flushPage();
           row = 1;
           col = 1;
           break;
+        case BS:
+          if (col > 1) col -= 1;
+          break;
         case HT:
-          break; // tn5250 と同じくスタブ（タブ停止は未実装）
-        case TRANSPARENT: {
+          break; // スタブ（水平タブ位置は未対応）
+        case TRN: {
+          // 透過: 長さ＋本体。本体は制御として読まずに文字として置く。**0x40 未満は空白にする**
+          // （ACS `processTransparent` の TPO でない経路。TPO ならプリンターへ生で流すが、等幅の帳票には置けない）
           const count = next();
           if (count < 0) break;
           for (let k = 0; k < count; k++) {
             const rb = next();
             if (rb < 0) break;
-            put(String.fromCodePoint(this.codec.decodeByte(rb)), rb);
+            const shown = rb < 0x40 ? 0x40 : rb;
+            put(String.fromCodePoint(this.codec.decodeByte(shown)), shown);
           }
+          break;
+        }
+        case ATRN: {
+          // ASCII 透過: 長さ＋本体。プリンターへ生で流すためのもので、等幅の帳票には置かない
+          const count = next();
+          for (let k = 0; k < count; k++) if (next() < 0) break;
           break;
         }
         case PP: {
@@ -220,19 +258,27 @@ export class ScsDecoder {
           else if (fn === PP_RDPP) row += val;
           break;
         }
-        case ORDER_2B: {
-          if (!this.skip2b(next)) {
-            this.warn?.("SCS: 未知の 2B オーダーで打ち切り");
-            i = n; // 同期が取れないので安全に終了
-          }
+        case SA:
+          next(); // 属性の種類と値（2 バイト）は等幅の帳票では使わない
+          next();
           break;
-        }
+        case VCS:
+          next();
+          break;
+        case GE:
+          // グラフィック・エスケープ: 次の 1 バイトの代わりにグラフィック・エラー文字を置く（ACS `graphicEscape`）
+          if (next() >= 0) put(String.fromCodePoint(this.codec.decodeByte(GRAPHIC_ERROR_BYTE)), GRAPHIC_ERROR_BYTE);
+          break;
+        case ORDER_2B:
+          this.skip2b(next, () => i, (to) => (i = to));
+          break;
         default:
-          // SBCS モード: SO で DBCS モードへ、それ以外は SBCS 1 バイト
           if (this.isDbcs && b === SO) {
+            // SBCS モード: SO で DBCS モードへ
             dbcsMode = true;
             markShift("so");
-          } else put(String.fromCodePoint(this.codec.decodeByte(b)), b);
+          } else if (b >= 0x40) put(String.fromCodePoint(this.codec.decodeByte(b)), b);
+          // それ以外の 0x40 未満は、ACS も何もしない制御（RNL・RFF ほか）か未定義の制御。印字しない
           break;
       }
     }
@@ -242,68 +288,33 @@ export class ScsDecoder {
   }
 
   /**
-   * 0x2B 多バイトオーダーのバイトを消費する（tn5250 の各ハンドラの読み取り数を移植）。
-   * 幾何・フォントは等幅表示では不要なので値は使わず、**同期のためにバイト数だけ**正しく消費する。
-   * 未知のオーダーは false を返す（呼び出し側が打ち切る）。read は次の 1 バイト（EOF で -1）。
+   * 0x2B のオーダーを読み飛ばす（ACS `PrintSCS5250` の表。`20260921-scs-controls-acs`）。
+   * 幾何・フォントは等幅表示では使わないので、**同期のためにバイト数だけ**正しく消費する。
+   *
+   * - 表にあるクラス（C1 SHF・C2 SVF・C6 SLD・D1 フォント選択・D2 各種・D3 STO・FD IGC・FE 代替文字）は
+   *   **クラスの次の 1 バイトが長さ**で、2B とクラスを含めて「長さ＋2」バイトを読む
+   * - C8（SGEA）は 5 バイト固定
+   * - **表に無いクラスは 0x2B の 1 バイトだけを読み飛ばす**（ACS は未定義の制御として扱い、次のバイトから読み直す）。
+   *   ~~帳票の残りを打ち切る~~ と、知らないオーダーの後ろが全部消えていた
+   *
+   * ~~D1 のサブ 06（SCG）は 2B D1 06 01 の後ろを 2 バイト~~ だと、GCGID・CPGID の 4 バイトを取りこぼして
+   * 同期がずれていた（長さ 06 どおりなら 8 バイト）。`read` は次の 1 バイト（EOF で -1）。
    */
-  private skip2b(read: () => number): boolean {
+  private skip2b(read: () => number, pos: () => number, seek: (to: number) => void): void {
+    const at = pos(); // クラスの位置
     const cls = read();
-    if (cls < 0) return true;
-    switch (cls) {
-      case 0xd2:
-      // **0xFD は DBCS（IGC）制御。** 長さ前置で 0xD2 と同じ構造。
-      // これを知らないと DBCS 帳票の先頭で「未知の 2B オーダー」と判定して打ち切り、
-      // ページが 1 枚も取れなかった（日本語実機のスプールで確認）。
-      case 0xfd: {
-        // 長さ前置（len は自身を含む）。残り len-1 バイトを消費。
-        const len = read();
-        if (len < 0) return true;
-        for (let k = 0; k < len - 1; k++) if (read() < 0) return true;
-        return true;
-      }
-      case 0xd1: {
-        const sub = read();
-        if (sub === 0x03) {
-          read(); // 81(SCGL) / 87(SFFC)
-          read(); // 1 パラメータ
-          return true;
-        }
-        if (sub === 0x06) {
-          read(); // 01
-          read();
-          read(); // SCG: gcgid, cpgid
-          return true;
-        }
-        if (sub === 0x07) {
-          read(); // 05
-          for (let k = 0; k < 5; k++) read(); // SFG: gfid(2)+width(2)+attr(1)
-          return true;
-        }
-        return false; // 未知の D1 サブオーダー
-      }
-      case 0xd3: {
-        read(); // curchar
-        const nc = read(); // nextchar
-        if (nc === 0xf6) {
-          for (let k = 0; k < 4; k++) read(); // STO: charrot(2)+pagerot(2)
-          return true;
-        }
-        return false;
-      }
-      case 0xc8: {
-        for (let k = 0; k < 3; k++) read(); // SGEA
-        return true;
-      }
-      case 0xc1:
-      case 0xc2:
-      case 0xc6: {
-        // SHF / SVF / SLD: len を読み、len>0 なら 1 バイト（tn5250 の実装に合わせる）
-        const len = read();
-        if (len > 0) read();
-        return true;
-      }
-      default:
-        return false; // 未知のクラス
+    if (cls < 0) return;
+    if (cls === 0xc8) {
+      for (let k = 0; k < 3; k++) read(); // SGEA: 2B C8 と 3 バイト
+      return;
     }
+    if (!ORDERS_2B.has(cls)) {
+      this.warn?.(`SCS: 未定義の 2B オーダー 0x${cls.toString(16)}（0x2B だけを読み飛ばす）`);
+      seek(at); // 0x2B だけを捨てて、クラスのバイトから読み直す
+      return;
+    }
+    const len = read(); // 長さ（自身を含み、2B とクラスを含まない）
+    if (len < 0) return;
+    for (let k = 0; k < len - 1; k++) if (read() < 0) return;
   }
 }

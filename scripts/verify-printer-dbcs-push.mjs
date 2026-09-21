@@ -99,6 +99,8 @@ try {
   const text = reports[0]?.pages.flatMap((p) => p.lines).join("\n") ?? "";
   assert(/[぀-ヿ一-鿿]/.test(text), "帳票に日本語（全角）が載っている");
   log(`--- 帳票の先頭 ---\n${text.split("\n").slice(0, 8).join("\n")}`);
+  // 生の SCS を保存する（解析用。**実機の識別子を含むのでリポジトリに入れない**）
+  if (process.env.SAVE_SCS && reports[0]) (await import("node:fs")).writeFileSync(process.env.SAVE_SCS, reports[0].raw);
 } finally {
   prt?.disconnect();
   await sleep(3000);
