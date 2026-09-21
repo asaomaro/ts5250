@@ -1,0 +1,45 @@
+# 数値専用（DDS の数値の欄。シフト Y）の欄で Field−（ACS のコア。`20260921-field-minus-zone-d`）。
+# 原典 `PS5250.processFieldPlusMinusAndExit`: 数値専用の欄で Field− なら、欄の最終桁のホストのバイトのゾーンを D にする（`& 0x0F | 0xD0`）。
+# 画面は ADJPGM（15,20 = CHECK(RZ) 6 0 / 17,20 = 素の 6 0）と FFWPGM（17,22 = シフト M＝数値専用の文字の欄）。既にあるもので、実機にオブジェクトは作らない。
+# 実測（社内機・2026-09-21）: ADJPGM の数値の欄は既定で**符号付き数値**（7 桁目が符号）で、Field− は `000012-` / `    34-`（数値専用の経路ではない）。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+
+# --- M1) CHECK(RZ) 6 0 に 12 と打って Field− ---
+setcursor 15,20
+settle 300
+keys 12[field-]
+settle 500
+dump m1-rz-after-fieldminus
+# --- M2) 素の 6 0 に 34 と打って Field− ---
+setcursor 17,20
+settle 300
+keys 34[field-]
+settle 500
+dump m2-plain-after-fieldminus
+keys [pf3]
+settle 1500
+
+# --- M3) FFWPGM のシフト M（数値専用）に 12 と打って Field− ---
+keys [home][eraseeof]CALL ${LIB}/FFWPGM[enter]
+settle 2500
+setcursor 17,22
+settle 300
+keys 12[field-]
+settle 500
+dump m3-numeric-only-after-fieldminus
+# --- M4) 同じ欄の先頭に 5 だけ打って Field−（最終桁が空のとき） ---
+setcursor 17,22
+settle 300
+keys [eraseeof]5[field-]
+settle 500
+dump m4-numeric-only-short
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

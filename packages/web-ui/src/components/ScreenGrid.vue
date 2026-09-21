@@ -2414,7 +2414,7 @@ function fieldSignKey(negative: boolean): void {
   }
   const base = exitedBase(t.f, edit); // Field Exit と同じく、満杯まで打った直後なら最終桁は消さない
   fieldExitedIndex = -1;
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(base, t.f, negative);
+  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(base, { ...t.f, numericOnly }, negative);
   sync(t.el, t.f);
   if (t.f.autoEnter) {
     emit("aid", "Enter");

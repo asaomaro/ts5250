@@ -4,6 +4,7 @@
  * 印字文字・Backspace・Delete・カーソル移動を 5250 の挙動で計算する。
  * 長さはフィールド長でクランプ（value は field.length 桁の枠内）。
  */
+import { isRawSentinel, rawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
 export interface EditState {
   /** 現在値（末尾空白は含みうる。表示・送信時に整形） */
   chars: string[]; // 長さ = fieldLength（空白パディング）
@@ -139,7 +140,15 @@ export function toggleInsert(state: EditState): EditState {
 export interface AdjustSpec {
   adjust?: "right-zero" | "right-blank" | "mandatory-fill";
   signedNumeric?: boolean;
+  /** 数値専用（FFW シフト 0x0300。DDS の Y・M）。Field− で最終桁のゾーンを D にする（`fieldSign`） */
+  numericOnly?: boolean;
 }
+
+/** 数値専用の欄に入る文字の EBCDIC（ゾーンを D にするのに下位 4 ビットだけ使う。空白・未入力は 0x40 → 0） */
+const NUMERIC_ONLY_EBCDIC: Readonly<Record<string, number>> = {
+  "0": 0xf0, "1": 0xf1, "2": 0xf2, "3": 0xf3, "4": 0xf4, "5": 0xf5, "6": 0xf6, "7": 0xf7, "8": 0xf8, "9": 0xf9,
+  ".": 0x4b, ",": 0x6b, "-": 0x60, "+": 0x4e, " ": 0x40
+};
 
 /** Erase EOF: カーソル位置から欄末尾までを空白にする。カーソルは動かさない */
 export function eraseToEnd(state: EditState): EditState {
@@ -221,7 +230,20 @@ export function fieldExit(state: EditState, field: AdjustSpec): EditState {
  */
 export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean): EditState {
   const s = fieldExit(state, field);
-  if (!field.signedNumeric) return s;
+  if (!field.signedNumeric) {
+    // **数値専用の欄の Field− は、欄の最終桁のバイトのゾーンを D にする**（ACS `PS5250.processFieldPlusMinusAndExit` の
+    // `HostPlane[end] & 0x0F | 0xD0`。`20260921-field-minus-zone-d`）。最終桁が空でも同じ（0x00 / 0x40 → 0xD0）——実機の ACS のコアで
+    // `12` と打って Field− → `12   }`（`scripts/acs-probe/field-minus-numeric-only.txt`）。ホストはゾーン D を負の数として読む。
+    // 生バイトで持つ（`read-response.ts` がそのまま送る）。表示は空白になる（ACS はそのバイトの文字——`}` や `J`〜`R`——を出す）
+    if (negative && field.numericOnly === true && s.chars.length > 0) {
+      const chars = [...s.chars];
+      const last = chars[chars.length - 1]!;
+      const b = isRawSentinel(last) ? sentinelByte(last) : (NUMERIC_ONLY_EBCDIC[last] ?? 0x40);
+      chars[chars.length - 1] = rawSentinel(0xd0 | (b & 0x0f));
+      return { ...s, chars };
+    }
+    return s;
+  }
   const chars = [...s.chars];
   if (chars.length === 0) return s;
   chars[chars.length - 1] = negative ? "-" : " ";

@@ -153,7 +153,10 @@ describe("ペイン: テンキーの − を欄で押す", () => {
     );
     await nextTick();
     await nextTick();
-    expect(sessionsStore.get(SID)!.edits.get(1)).toBe("12");
+    // 文字の `-` は入らない。数値専用の欄なので Field− が最終桁のゾーンを D にする（ACS と同じ。`20260921-field-minus-zone-d`）
+    const v = sessionsStore.get(SID)!.edits.get(1)!;
+    expect(v.slice(0, 5)).toBe("12   ");
+    expect(v.includes("-"), "文字の - が入った").toBe(false);
     expect(document.activeElement).toBe(w.element.querySelector('input.grid-input[data-field-index="2"][data-slice="0"]'));
   });
 

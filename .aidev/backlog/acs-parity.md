@@ -443,6 +443,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
   節目の点検の後、**DBCS の欄も 0005**（O の欄の先頭・J の欄の SO の後ろとも。DSM の画面で ACS のコアを実測。`scripts/acs-probe/backspace-dbcs-field-start.txt`）にした。
   ~~DBCS の欄は原典の手順上 0101~~ は実測と違った。
+- [x] **【まとめ】キー編集のうち数値専用の欄の Field−**（優先度 中）。**完了（`20260921-field-minus-zone-d`・PR #410）**: ACS と同じく欄の最終桁のバイトのゾーンを D にする
+  （空なら 0xD0。`packages/web-ui/src/composables/fieldEdit.ts` の `fieldSign`）。以前は Field Exit と同じで**負の数を送れなかった**。ACS のコアでシフト M の欄を測った
+  （`12` → `12   }`。`scripts/acs-probe/field-minus-numeric-only.txt`）。送信は `F1 F2 40 40 40 D0`（単体）。送る前の表示は空白（ACS はそのバイトの文字）。mutation 4 通り検出。
 - [x] **【まとめ】キー編集のうち Field Exit・Field± の前の検査**（優先度 中）。**完了（`20260921-field-exit-checks`・PR #410）**: ACS `PS5250.processFieldPlusMinusAndExit` と同じく、
   入力不可（DDS の I）の欄は 0004、ME の欄はカーソルが先頭か MDT が無ければ 0021、MF は先頭以外で部分入力なら欄の先頭へ戻して 0014 で、消去・右寄せ・欄の移動の前に止める
   （`packages/web-ui/src/composables/mandatoryCheck.ts` の `fieldExitRejection`）。実機の ACS のコアで ME 4 例・入力不可 2 例を測った（`scripts/acs-probe/field-exit-checks.txt`）。
@@ -477,7 +480,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 低
     - ~~欄の先頭での Backspace~~（SBCS・DBCS とも `20260921-backspace-field-start` で ACS と同じ 0005 に。~~DBCS の欄は原典の手順上 0101~~ は実測で覆った）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
-    - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
+    - ~~Field− の可否~~（`20260921-numpad-field-sign`）、~~数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）~~（上の `20260921-field-minus-zone-d`。表示は残り）、
       ~~Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）~~ → 上の `20260921-field-exit-checks` で済んだ（~~0033・0020~~ は `setErrorCode(33)`・`(20)` の 10 進で、表示は 0021・0014）
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、~~Field Exit 時の検査~~（上の `20260921-field-exit-checks`）

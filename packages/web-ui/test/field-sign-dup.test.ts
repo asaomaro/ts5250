@@ -43,11 +43,22 @@ describe("Field− / Field+（純ロジック）", () => {
     expect(fieldSign(state("123456 ", 2), signed, true).chars.join("")).toBe("    12-");
   });
 
-  it("**符号付きでない欄では符号を置かない**（Field Exit と同じ）", () => {
-    // 実機の数値入力欄はすべて signed-num で、num-only の符号処理は確かめられない。
-    // 確かめられないものを実装しない側へ倒した（decisions）
+  it("**符号付きでも数値専用でもない欄では符号を置かない**（Field Exit と同じ）", () => {
+    // ~~実機の数値入力欄はすべて signed-num で、num-only の符号処理は確かめられない~~ → DDS のシフト M の欄で ACS のコアを測った
+    // （`20260921-field-minus-zone-d`。下の「数値専用の欄」）
     const r = fieldSign(state("12    ", 2), { adjust: "right-zero" }, true);
     expect(r.chars.join("")).toBe("000012");
+  });
+
+  // `20260921-field-minus-zone-d`: ACS `processFieldPlusMinusAndExit` は数値専用の欄の Field− で最終桁のバイトのゾーンを D にする。
+  // 実機の ACS のコア（社内機・FFWPGM のシフト M の欄）: `12` → `12   }`・`5` → `5    }`（最終桁が空でも 0xD0）
+  it("**数値専用の欄の Field− は最終桁のゾーンを D にする**（空なら 0xD0＝`}`、数字なら 0xDn）", () => {
+    const empty = fieldSign(state("12    ", 2), { numericOnly: true }, true);
+    expect(empty.chars.slice(0, 5).join("")).toBe("12   ");
+    expect(isRawSentinel(empty.chars[5]!) && sentinelByte(empty.chars[5]!)).toBe(0xd0);
+    const digit = fieldSign(state("000125", 6), { adjust: "right-zero", numericOnly: true }, true);
+    expect(sentinelByte(digit.chars[5]!)).toBe(0xd5);
+    expect(fieldSign(state("12    ", 2), { numericOnly: true }, false).chars.join(""), "Field+ は変えない").toBe("12    ");
   });
 
   it("指定の無い欄は消去だけ（右寄せも符号も無し）", () => {
@@ -157,6 +168,16 @@ describe("ScreenGrid: Field− / Field+", () => {
     keys.fieldPlus();
     await nextTick();
     expect(lastEdit(w)).toBe("    12"); // 末尾空白は emit 時に落ちる
+    w.unmount();
+  });
+
+  it("**数値専用の欄（シフト M / Y）で Field− → 最終桁が 0xD0 の生バイト**（ACS のコアと同じ）", async () => {
+    const { w, keys } = await typed([fld({ index: 1, row: 5, col: 10, length: 6, numeric: true })], "12");
+    keys.fieldMinus();
+    await nextTick();
+    const v = lastEdit(w)!;
+    expect(v.slice(0, 2)).toBe("12");
+    expect(sentinelByte([...v].at(-1)!)).toBe(0xd0);
     w.unmount();
   });
 
