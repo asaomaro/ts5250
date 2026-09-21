@@ -530,6 +530,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS の J の空きは全角空白（0x4040）で、打った字はその桁に入る。J も G と同じく詰め物を全角空白（`wideFill`）にし、値の末尾の詰め物（全角空白・半角空白）を落とす（`trimPad`。
   ホストが J の SO…SI を欄長へ整えるので、短い形でも同じワイヤ）。空きが NUL のホストの J を触っただけでは編集にならない。E・O は従来どおり（空きは半角空白）。
   `packages/web-ui/src/components/ScreenGrid.vue`。単体 3 件（`dbcs-pure-field.test.ts` の J）と既存の J の挿入の期待値の更新（末尾の全角空白は値に含めない）、mutation 5 通りすべて検出。
+- [x] **IME で確定した字の余りを次の入力欄へ流す**（下の「キー編集の細部」の R11 (q)）。**完了（`20260921-ime-flow`・PR #410）**: ACS は確定した字を 1 字ずつの打鍵として処理する
+  （Java の入力メソッドの確定は KEY_TYPED の連なり。**GUI 層は headless のコアで測れないので未測定**。打鍵の自動送りは実機で測定済み）ので、満杯で次の欄へ送ると余りは次の欄の先頭から入る。
+  当 PJ は余りを捨てていた（`onCompositionEnd` の `break`。SBCS の上書きの末尾は `typeChar` が黙って捨てた）。`commitInto`（入りきらない余りを返す）と `flowToNextField`
+  （`packages/web-ui/src/components/ScreenGrid.vue`）で、**フォーカスが実際に次の欄へ移ったときだけ**次の欄の 0 桁から続ける（最大 16 欄）。Field Exit 必須・自動 Enter・1 欄だけ・挿入の 0012 では流さない。
+  ペイン結合の単体 9 件、mutation 8 通りのうち 5 通り検出（残り 3 つは等価変異）。**未確認**: ACS の GUI 層の IME 確定・実ブラウザの IME。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
@@ -537,7 +542,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
     ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。当 PJ の 930 は 8 字が入る（EX と同じ）。**利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断**——下の「930 の申告の選択」と同じ問い／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
-    (q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
+    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
     **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。
