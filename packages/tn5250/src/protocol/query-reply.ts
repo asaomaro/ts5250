@@ -101,7 +101,9 @@ export function buildQueryReply(
  * - それ以外 → `D9 72 80 00 03 01 04`
  * フラグに 0x80 が立っていれば ACS は応答せず否定応答（センス・コード 0x10050112）を返す——`wtd-applier.ts` が否定応答にする
  * （`20260921-negative-responses`。~~当 PJ は否定応答を持たないので応答しない~~）。ここでは `undefined`。
- * 社内機で DSM に出させた ACS のコアの応答とバイト単位で同じ（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）
+ * 社内機で DSM に出させた ACS のコアの応答と、**ホストが読んだデータ部が**バイト単位で同じ（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）。
+ * ~~バイト単位で同じ~~——レコードの長さは違う: ACS は末尾の `FF EF` まで長さに数える（`DS5250.processWSF` の case 114。22 バイトのレコードで
+ * LL=0x0018）。当 PJ は正しい長さを送り、ホストはどちらも受け付けた（節目の点検の指摘）
  */
 export function buildWsfD972Reply(flags: number, next: number): Uint8Array | undefined {
   if ((flags & 0x80) !== 0) return undefined;

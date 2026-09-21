@@ -127,6 +127,26 @@ export function prevInputField(snapshot: ScreenSnapshot, pos: number): Field | u
 }
 
 /**
+ * **カーソル送り（FCW 0x88nn）の番号が指す欄**（ACS `FFT5250.nextNonByPassInputFieldPos` の `getStandardFieldList().elementAt(n-1)`）。
+ * 番号は**継続欄の 2 区間目以降を数えない**欄の並びでの 1 起点の番号——`index`（全区間を数える）とは、前に継続欄があるとずれる
+ * （`20260921-hllapi-tab-acs` の節目の点検の指摘）。ACS はスクロールバーの欄も数えないが、当 PJ の欄の一覧にスクロールバーは入らない
+ */
+export function progressionTarget(fields: readonly Field[], n: number): Field | undefined {
+  return standardFields(fields)[n - 1];
+}
+
+/** 欄のカーソル送りの番号（`progressionTarget` と同じ並びでの 1 起点。継続欄の 2 区間目以降は並びに無いので undefined） */
+export function progressionNumberOf(fields: readonly Field[], f: Field): number | undefined {
+  const i = standardFields(fields).findIndex((x) => x.index === f.index);
+  return i < 0 ? undefined : i + 1;
+}
+
+/** ACS `FFT5250.getStandardFieldList`（継続欄の 2 区間目以降を除いた、欄の定義順の並び） */
+function standardFields(fields: readonly Field[]): Field[] {
+  return [...fields].filter((f) => f.continued === undefined || f.continued === "first").sort((a, b) => a.index - b.index);
+}
+
+/**
  * **Tab の行き先**（1 起点の位置。ACS `PS5250.processTab` → `FFT5250.nextNonByPassInputFieldPos`。`20260921-hllapi-tab-acs`）。
  * - カーソルの下の欄がカーソル送り（FCW 0x88nn）を持ち、送り先がバイパスでなければそこ
  * - そうでなければ、カーソルより後で始まる最初の入力欄（継続欄は先頭の区間だけ）。無ければ先頭の入力欄へ回り込む
@@ -138,7 +158,7 @@ export function tabPosition(snapshot: ScreenSnapshot, pos: number): number | und
   const here = fieldAtPos(snapshot, pos);
   let to: Field | undefined;
   if (here && !here.protected && here.cursorProgression !== undefined) {
-    const t = snapshot.fields.find((f) => f.index === here.cursorProgression);
+    const t = progressionTarget(snapshot.fields, here.cursorProgression);
     if (t && !t.protected) to = t;
   }
   if (!to) {
@@ -163,8 +183,9 @@ export function backtabPosition(snapshot: ScreenSnapshot, pos: number): number |
   if (cellKindAt(snapshot, q) === "so") q--;
   if (snapshot.fields.some((f) => f.cursorProgression !== undefined)) {
     const here = fieldAtPos(snapshot, q + 1);
-    if (here && fieldStart(here, size) === q + 1) {
-      const from = snapshot.fields.find((f) => !f.protected && f.cursorProgression === here.index);
+    const n = here && fieldStart(here, size) === q + 1 ? progressionNumberOf(snapshot.fields, here) : undefined;
+    if (n !== undefined) {
+      const from = snapshot.fields.find((f) => !f.protected && f.cursorProgression === n);
       if (from) return afterShiftOut(snapshot, from);
     }
   }

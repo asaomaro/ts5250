@@ -35,3 +35,48 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - ACS が返す他のセンス・コード（D2）。ESC が無い・CLEAR UNIT ALTERNATE の引数は実機で出させていない（DSM は ESC を付けて出すので作れない）。
+
+## 節目 9 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,474 passed / 0 failed / 41 skipped
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（1 回目は `ScreenGrid` の `ccsid` の prop 型で落ち、`number | undefined` に直した）
+- mutation（`scratchpad/mut-m9.py` 25 通り＋`mut-m9b.py` 4 通り）— 生き残った 3 通り（DBCS の打鍵・ペースト・IME の MDT）にテストを足して全部 KILLED
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 46429)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）。オペコードごとの読み方・否定応答の順・否定応答の後ろを読まない（ROLL・CUA・WSF 0x80）を `negative-response-order.test.ts`（15 件）で固定
+- 実機（社内機・2026-09-22）: DSM（`WSF72X`→CPFA304・`ROLLBAD`→rc=0・`BADCMD`→rc=0）が以前と同じ。通常の画面（DSPJOB・DSPLIBL・WRKSPLF・DSPMSG・WRKOBJ・プロンプト・GO MAIN・QCMD）を
+  社内機（930）と PUB400（37）で一巡させて、否定応答・読み違いの警告 0 件。試験プログラムは片付けた（DLTPGM・CHKOBJ で無いこと・IFS も削除）
+
+### 失敗の証跡
+点検役の再現（直す前の HEAD。`scratchpad/rv5/tn/neg.test.ts`）:
+
+```
+[order] sent: ["NEG 10050121","0000880044d97080"]
+[op2-lead] sent: ["NEG 10050121"]
+[noop-data] sent: ["NEG 10050121"]
+```
+
+直した後、既存のテストが Query・D9/72 をオペコード NOOP で送っていたので落ちた（ACS は NOOP のデータを読まない）。実機は Query を PUT/GET（0x03）で送る
+（`fixtures/pub400-autosignon-menu.jsonl` の `001112a000000400000304f30005d97000`）ので、テストを PUT/GET に直した:
+
+```
+     × 24x80 → 画面能力 0x11 4ms
+     × 27x132 → 画面能力 0x31 1ms
+     × **フラグ 0x40・次が 0 → Unicode の CCSID を申告**（ACS のコアと同じ 15 バイト） 4ms
+     × **それ以外 → `D9 72 80 00 03 01 04`**（ACS のコアと同じ 12 バイト） 2ms
+     × **フラグ 0x80 は否定応答 0x10050112**（ACS と同じ。`20260921-negative-responses`）・長さが 6 でなければ返さない 2ms
+AssertionError: Query Reply を返している: expected undefined to be defined
+AssertionError: expected [] to deeply equal [ '000088000cd972c00034b044b004b0' ]
+ Test Files  1 failed | 2 passed (3)
+      Tests  5 failed | 47 passed (52)
+```

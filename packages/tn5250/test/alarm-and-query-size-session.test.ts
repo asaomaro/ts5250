@@ -102,8 +102,10 @@ function records(chunks: readonly Uint8Array[]): Uint8Array[] {
 }
 
 describe("Query Reply はセッションの画面サイズを申告する", () => {
+  // 実機は Query を PUT/GET（0x03）で送る（`fixtures/pub400-autosignon-menu.jsonl` の `001112a000000400000304f30005d97000`）。
+  // ~~NOOP~~ は ACS がデータを読まないオペコード（`20260921-negative-responses` の節目の点検の指摘）
   const QUERY = buildRecord(
-    OPCODE.NOOP,
+    OPCODE.PUT_GET,
     Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x05, 0xd9, 0x70, 0x00])
   );
 
@@ -150,7 +152,7 @@ describe("メッセージ待ち表示（CC2 0x01 / 0x02）", () => {
  */
 describe("WSF D9/72 への応答", () => {
   const wsf = (flags: number, next = 0x00, len = 6) =>
-    buildRecord(OPCODE.NOOP, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, len, 0xd9, 0x72, flags, next]));
+    buildRecord(OPCODE.PUT_GET, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, len, 0xd9, 0x72, flags, next]));
   async function replyTo(rec: Uint8Array): Promise<string[]> {
     const transport = new ScriptedTransport(initialScreen());
     await Session5250.connect({ transport, id: "t" });
@@ -173,6 +175,6 @@ describe("WSF D9/72 への応答", () => {
     transport.deliver(wsf(0x80));
     const recs = records(transport.sent.slice(before)).map((r) => Buffer.from(r).toString("hex"));
     expect(recs).toEqual(["000e12a00000048000001005" + "0112"]);
-    expect(await replyTo(buildRecord(OPCODE.NOOP, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x07, 0xd9, 0x72, 0x40, 0x00, 0x00])))).toEqual([]);
+    expect(await replyTo(buildRecord(OPCODE.PUT_GET, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x07, 0xd9, 0x72, 0x40, 0x00, 0x00])))).toEqual([]);
   });
 });

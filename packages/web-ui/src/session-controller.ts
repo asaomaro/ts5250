@@ -1218,7 +1218,7 @@ function checkBeforeAid(
 ): MandatoryFinding | undefined {
   const snap = s.snapshot!;
   const here = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
-  const fill = findFieldViolation(here, s.edits);
+  const fill = findFieldViolation(here, s.edits, snap.fields);
   if (fill?.reason === "mandatory-fill") return fill;
   if (s.awaitingFieldExit !== undefined) {
     const f = snap.fields.find((x) => x.index === s.awaitingFieldExit);

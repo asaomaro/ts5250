@@ -128,3 +128,37 @@ describe("Tab はホストが指定したカーソル送り先へ行く", () => 
     w.unmount();
   });
 });
+
+/**
+ * **番号は継続欄の 2 区間目以降を数えない並びで引く**（ACS `FFT5250.getStandardFieldList`。`20260921-hllapi-tab-acs` の節目の独立点検の指摘。
+ * 以前は `index`＝全区間を数える番号で引いていて、前に継続欄があると行き先がずれた）。
+ * 欄: A（3 行・送り先 3）/ B は継続欄（5 行 first・6 行 last）/ C（7 行）/ D（9 行）。ACS の並び [A, B, C, D] の 3 番は C
+ */
+describe("カーソル送りの番号（前に継続欄があるとき）", () => {
+  beforeEach(() =>
+    seed([field(1, 3, { cursorProgression: 3 }), field(2, 5, { continued: "first" }), field(3, 6, { continued: "last" }), field(4, 7), field(5, 9)])
+  );
+  const byIndex = (w: ReturnType<typeof mount>, index: number) => inputs(w).find((el) => Number(el.dataset["fieldIndex"]) === index);
+
+  it("Tab: A から送り先 3＝C（B の最終区間ではない）", async () => {
+    const w = mountPane();
+    await nextTick();
+    byIndex(w, 1)!.focus();
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Tab" });
+    expect(Number((document.activeElement as HTMLInputElement).dataset["fieldIndex"])).toBe(4);
+    w.unmount();
+  });
+
+  it("Shift+Tab: C の先頭から、C（並びの 3 番）へ送る A へ戻る", async () => {
+    const w = mountPane();
+    await nextTick();
+    const c = byIndex(w, 4)!;
+    c.focus();
+    c.setSelectionRange(0, 0);
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Tab", shiftKey: true });
+    expect(Number((document.activeElement as HTMLInputElement).dataset["fieldIndex"])).toBe(1);
+    w.unmount();
+  });
+});

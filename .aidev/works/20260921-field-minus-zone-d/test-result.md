@@ -31,3 +31,25 @@ smoke: pass (exit 0)
 ## 未検証の穴
 - ホストが受け取った値（負の数として読むか）は実機で見ていない（シフト M の欄を写すプログラムが無い）。送るバイトは ACS と同じ。
 - 送る前の表示（D2）。
+
+## 節目 9 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,474 passed / 0 failed / 41 skipped
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（1 回目は `ScreenGrid` の `ccsid` の prop 型で落ち、`number | undefined` に直した）
+- mutation（`scratchpad/mut-m9.py` 25 通り＋`mut-m9b.py` 4 通り）— 生き残った 3 通り（DBCS の打鍵・ペースト・IME の MDT）にテストを足して全部 KILLED
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 46429)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）。ゾーン D の桁の表示を `zone-digit.test.ts`（変換表との一致・入力欄の表示）で固定
+
+### 失敗の証跡
+このラウンドでは失敗が発生していない（表示の指摘は読んで確かめたもの）。

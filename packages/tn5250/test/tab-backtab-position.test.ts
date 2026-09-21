@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tabPosition, backtabPosition } from "../src/screen/search.js";
+import { tabPosition, backtabPosition, progressionTarget, progressionNumberOf } from "../src/screen/search.js";
 import type { Cell, Field, ScreenSnapshot } from "../src/screen/types.js";
 
 /**
@@ -67,5 +67,33 @@ describe("tabPosition", () => {
   it("入力欄が無ければ undefined", () => {
     expect(tabPosition(snap([f(1, 3, { protected: true })]), pos(1, 1))).toBeUndefined();
     expect(backtabPosition(snap([]), pos(1, 1))).toBeUndefined();
+  });
+});
+
+/**
+ * **カーソル送りの番号は、継続欄の 2 区間目以降を数えない並びで引く**（ACS `FFT5250.getStandardFieldList`。
+ * `20260921-hllapi-tab-acs` の節目の独立点検の指摘。以前は `index`＝全区間を数える番号で引いていた）。
+ * 欄: A(3 行・送り先 3) / B は継続欄（5 行 first・6 行 last）/ C(7 行) / D(9 行)。ACS の並びは [A, B, C, D] なので 3 番は C
+ */
+describe("カーソル送りの番号（継続欄が前にあるとき）", () => {
+  const fields = () => [f(1, 3, { cursorProgression: 3 }), f(2, 5, { continued: "first" }), f(3, 6, { continued: "last" }), f(4, 7), f(5, 9)];
+  it("Tab: 送り先 3 は C（`index` の 3＝B の最終区間ではない）", () => {
+    expect(rc(tabPosition(snap(fields()), pos(3, 21)))).toEqual([7, 20]);
+  });
+  it("Backtab: C の先頭から、C（並びの 3 番）へ送る A へ戻る", () => {
+    expect(rc(backtabPosition(snap(fields()), pos(7, 20)))).toEqual([3, 20]);
+  });
+  it("progressionTarget / progressionNumberOf は並びの番号で引き合う（継続欄の 2 区間目以降は番号を持たない）", () => {
+    const fs = fields();
+    expect(progressionTarget(fs, 3)?.index).toBe(4);
+    expect(progressionNumberOf(fs, fs[3]!)).toBe(3);
+    expect(progressionNumberOf(fs, fs[2]!)).toBeUndefined();
+  });
+});
+
+describe("カーソルの手前が SO（J の欄の最初の字）からの Backtab", () => {
+  it("J 欄の最初の字からは、その欄の先頭ではなく前の欄へ（ACS `processBacktab` の `IsSOChar(n-1)` なら 1 つ戻す）", () => {
+    const s = snap([f(1, 3), f(2, 5, { dbcsType: "only" })], [[5, 20]]);
+    expect(rc(backtabPosition(s, pos(5, 21)))).toEqual([3, 20]);
   });
 });

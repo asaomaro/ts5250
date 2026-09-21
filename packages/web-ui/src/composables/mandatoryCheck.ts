@@ -2,6 +2,7 @@ import type { Field } from "@ts5250/tn5250";
 // browser サブパスから取る（root は node:net/node:tls を巻き込むため不可）
 import { selfCheckDigitOk } from "@ts5250/tn5250/browser";
 import { dbcsByteLength } from "./fieldValidate.js";
+import { continuedRunOf } from "./continuedRun.js";
 
 /**
  * **送信前の必須検証**（FFW の `MANDATORY_ENTER` 0x0008 / `MANDATORY_FILL` 0x0007 と自己点検）。
@@ -25,9 +26,15 @@ export interface MandatoryFinding {
   reason: MandatoryViolation;
 }
 
-/** 欄の MDT（ホストが立てた MDT か、未送信の編集がある。ACS `Field5250.isMDTField` 相当） */
-function mdtOf(f: Field, edits: ReadonlyMap<number, string>): boolean {
-  return f.mdt || edits.has(f.index);
+/**
+ * 欄の MDT（ホストが立てた MDT か、未送信の編集がある。ACS `Field5250.isMDTField` 相当）。
+ * **継続欄は並びのどこかに MDT があれば全区間が MDT**——ACS `PS5250.setMDT` は継続欄の並びの全区間に `setMDT()` する
+ * （`20260921-field-exit-checks` の節目の点検の指摘。区間ごとに見ると、打っていない区間で Field Exit が 0021 になっていた）。
+ * `fields` は画面の全欄（並びを引くため）。渡さなければその欄だけを見る
+ */
+function mdtOf(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Field[] = [f]): boolean {
+  const run = f.continued === undefined ? [f] : continuedRunOf(fields, f);
+  return run.some((x) => x.mdt || edits.has(x.index));
 }
 
 /**
@@ -35,8 +42,8 @@ function mdtOf(f: Field, edits: ReadonlyMap<number, string>): boolean {
  * MF 欄で MDT があり、**満杯でも空でもない**（部分入力）とき。空を弾くのは ME の役目で別の指定。
  * 空の判定は従来どおり空白も空とみなす（ACS はヌルだけを空とみなす。空白だけ打った欄の差は未確認）。
  */
-export function mandatoryFillViolated(f: Field, edits: ReadonlyMap<number, string>): boolean {
-  if (f.adjust !== "mandatory-fill" || !mdtOf(f, edits)) return false;
+export function mandatoryFillViolated(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Field[] = [f]): boolean {
+  if (f.adjust !== "mandatory-fill" || !mdtOf(f, edits, fields)) return false;
   const value = edits.get(f.index) ?? f.value;
   return value.trim().length > 0 && !isFull(f, value);
 }
@@ -60,10 +67,11 @@ export function selfCheckViolated(f: Field, edits: ReadonlyMap<number, string>):
  */
 export function findFieldViolation(
   f: Field | undefined,
-  edits: ReadonlyMap<number, string>
+  edits: ReadonlyMap<number, string>,
+  fields?: readonly Field[]
 ): MandatoryFinding | undefined {
   if (!f || f.protected) return undefined;
-  if (mandatoryFillViolated(f, edits)) return { field: f, reason: "mandatory-fill" };
+  if (mandatoryFillViolated(f, edits, fields ?? [f])) return { field: f, reason: "mandatory-fill" };
   if (selfCheckViolated(f, edits)) return { field: f, reason: "self-check" };
   return undefined;
 }
@@ -77,10 +85,15 @@ export function findFieldViolation(
  * （Field− の欄の種類の検査（0x16）は呼び出し側）。実機の ACS のコアで ME・入力不可を測った（`scripts/acs-probe/field-exit-checks.txt`）
  */
 export type ExitRejection = "kbd-inhibited" | "mandatory-enter" | "mandatory-fill";
-export function fieldExitRejection(f: Field, edits: ReadonlyMap<number, string>, caretAtStart: boolean): ExitRejection | undefined {
+export function fieldExitRejection(
+  f: Field,
+  edits: ReadonlyMap<number, string>,
+  caretAtStart: boolean,
+  fields: readonly Field[] = [f]
+): ExitRejection | undefined {
   if (f.keyboardInhibited === true) return "kbd-inhibited";
-  if (f.mandatoryEnter === true && (caretAtStart || !mdtOf(f, edits))) return "mandatory-enter";
-  if (!caretAtStart && f.signedNumeric !== true && mandatoryFillViolated(f, edits)) return "mandatory-fill";
+  if (f.mandatoryEnter === true && (caretAtStart || !mdtOf(f, edits, fields))) return "mandatory-enter";
+  if (!caretAtStart && f.signedNumeric !== true && mandatoryFillViolated(f, edits, fields)) return "mandatory-fill";
   return undefined;
 }
 
@@ -96,7 +109,7 @@ export function findMandatoryEnterViolation(
   edits: ReadonlyMap<number, string>
 ): MandatoryFinding | undefined {
   if (edits.size === 0 && !fields.some((f) => f.mdt)) return undefined;
-  const hit = fields.find((f) => !f.protected && f.mandatoryEnter === true && !mdtOf(f, edits));
+  const hit = fields.find((f) => !f.protected && f.mandatoryEnter === true && !mdtOf(f, edits, fields));
   return hit ? { field: hit, reason: "mandatory-enter" } : undefined;
 }
 

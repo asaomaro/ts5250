@@ -32,7 +32,7 @@ import {
 import { play } from "../macro-engine.js";
 import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
-import { isDbcsCcsid } from "@ts5250/tn5250/browser";
+import { isDbcsCcsid, progressionTarget, progressionNumberOf } from "@ts5250/tn5250/browser";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "../composables/opMessages.js";
 import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
@@ -195,7 +195,7 @@ watch([cursor, snapshot], ([pos, snap], [oldPos, oldSnap]) => {
   const from = fieldAtCaret(oldPos.row, oldPos.col, snap.fields, snap.cols, snap.rows);
   if (!from) return;
   if (fieldAtCaret(pos.row, pos.col, snap.fields, snap.cols, snap.rows)?.index === from.index) return;
-  const hit = findFieldViolation(from, st.edits);
+  const hit = findFieldViolation(from, st.edits, snap.fields);
   if (!hit) return;
   showNotice(hit.reason === "mandatory-fill" ? MSG_MANDATORY_FILL : MSG_SELF_CHECK);
   focusMandatoryViolation(hit); // 欄の先頭へ
@@ -466,10 +466,12 @@ function currentStopIndex(stops: HTMLElement[]): number {
  * そこへ送る欄へ戻る）。逆引きは `backtab` が持つ（`20260921-backtab-acs`）。
  */
 function progressionStop(fromFieldIndex: number): HTMLElement | undefined {
-  const from = snapshot.value?.fields.find((f) => f.index === fromFieldIndex);
+  const fields = snapshot.value?.fields ?? [];
+  const from = fields.find((f) => f.index === fromFieldIndex);
   const to = from?.cursorProgression;
   if (to === undefined) return undefined;
-  const target = snapshot.value?.fields.find((f) => f.index === to);
+  // 番号は継続欄の 2 区間目以降を数えない並びで引く（ACS `getStandardFieldList`。`index` とは前に継続欄があるとずれる）
+  const target = progressionTarget(fields, to);
   if (!target || target.protected) return undefined;
   return inputForSlice(target.index, 0);
 }
@@ -512,7 +514,8 @@ function backtab(): void {
       focusFieldStart(first);
       return;
     }
-    const from = editableFields().find((x) => x.cursorProgression === first.index);
+    const n = progressionNumberOf(snapshot.value?.fields ?? [], first);
+    const from = n === undefined ? undefined : editableFields().find((x) => x.cursorProgression === n);
     if (from && inputForSlice(from.index, 0)) {
       focusFieldStart(from);
       return;
@@ -1551,6 +1554,7 @@ function onWheel(ev: WheelEvent): void {
         :sbcs-view="sbcsView"
         :uppercase-input="uppercaseInput"
         :sbcs-session="sbcsSession"
+        :ccsid="state?.ccsid"
         :linkify="view.linkify"
         :buttons="view.buttons"
         :window-frame="view.windowFrame"

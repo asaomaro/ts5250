@@ -161,7 +161,8 @@ export interface Field {
   continued?: ContinuedPart;
   /**
    * **カーソル送り**（FCW `0x88nn`。DDS の `FLDCSRPRG`）。この欄を出たとき、
-   * 画面順の次ではなく**この番号の欄**へ移る。番号は `index` と同じ 1 始まりの欄番号。
+   * 画面順の次ではなく**この番号の欄**へ移る。~~番号は `index` と同じ 1 始まりの欄番号~~ → 番号は**継続欄の 2 区間目以降を数えない**
+   * 並びでの 1 始まりの番号（ACS `FFT5250.getStandardFieldList`。前に継続欄が無ければ `index` と同じ）。引くのは `progressionTarget`。
    *
    * ホストが「入力の順序」をアプリの都合で決める仕組みで、無指定なら `undefined`
    * （`dbcsType` / `adjust` と同じ流儀）。実機で `FLDCSRPRG(IN3)` を書いた欄が

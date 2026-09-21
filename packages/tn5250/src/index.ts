@@ -56,6 +56,8 @@ export {
   prevInputField,
   tabPosition,
   backtabPosition,
+  progressionTarget,
+  progressionNumberOf,
   screenText,
   findAllText,
   fieldAfterLabel,

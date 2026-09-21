@@ -536,10 +536,23 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [ ] **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
   コマンドの長さの不足（0x10050121）で返すものは、当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）とそのまま対応しないので入れていない。
   条件ごとに ACS と当 PJ の読み方を突き合わせてから入れる（`20260921-negative-responses` D2）。
+- [ ] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
+  3 つで直ちに return し、レコードの終わりの `processWCC2`（CC2 の解錠・警報・メッセージ灯）と SAVE PARTIAL の応答を飛ばす（次のレコードの頭で `isPrepwcc2` も落ちる）。
+  当 PJ は同じレコードで先に来た WTD の CC2 を効かせ、SAVE PARTIAL の応答も送る。当 PJ はキーボードを READ でも解くので、CC2 だけ落とすと ACS と同じにならない——
+  **DSM で「WTD（CC2 解錠）＋不正な ROLL」を ACS のコアと当 PJ に出させて、解錠・警報の有無を測ってから**直す。
+- [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
+  - WSF の後に ACS は READ の保留を下ろす（`pending_read = 0; setReadPend(false)`）。同じレコードで WSF より前に来た READ を当 PJ は生かしたまま（実機では未観測）。
+  - HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則（SO の +1・欄の途中なら欄の先頭）を当てる。ACS の 3270（`PS3270`）の規則は読み切れていない。
+  - ACS の `processTab` / `processBacktab` は移動の後に MF の検査（`moveCursorWithMandFillCheck`）をし `setFieldExitReqFlag(true)` を立てる。HLLAPI 側はどちらもしない（以前から）。
+  - `FFT5250` の癖（写していない）: `cursorProgressOn` が画面をまたいで残る／継続欄の 2 区間目の先頭からの Backtab で `n4=0`／ENPTUI の選択欄を並びに数える／
+    再順序付けがあるとカーソル送りの欄を FFT に入れない。
+  - ゾーン D の負の数をホストが負として受け取るか（`20260921-field-minus-zone-d`）と、DDS の Y の欄（コンパイルで落ちた）。
+  - 偽の否定応答: 通常の画面（DSPJOB・DSPLIBL・WRKSPLF・DSPMSG・WRKOBJ・プロンプト・GO MAIN・QCMD）を社内機と PUB400 で一巡させて 0 件（2026-09-22）。
+    RESTORE PARTIAL（ACS は 2 バイトの長さを読む）・ESC 0xF4・出力側ヘッダのフラグ 2 の 0x80 は、その画面に出てこないので確かめていない。
 - [x] **【まとめ】DS5250 のうち WSF D9/72 への応答**（優先度 中）。**完了（`20260921-wsf-d9-72`・PR #410）**: ACS `DS5250.processWSF` と同じ応答を返す
   （フラグ 0x40・次が 0 は `D9 72 C0 00` と CCSID 13488・17584・1200、それ以外は `D9 72 80 00 03 01 04`。`packages/tn5250/src/protocol/query-reply.ts` の
   `buildWsfD972Reply`）。社内機で DSM（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）に出させたところ、**以前は応答せずホストが待ち続け、施錠されたまま**だった。
-  ACS のコアと当 PJ でホストが読んだ生バイトが同じ（15 バイト・12 バイト）。フラグ 0x80（ACS は否定応答）は返さない。mutation 4 通り検出。
+  ACS のコアと当 PJ でホストが読んだ生バイトが同じ（15 バイト・12 バイト）。~~フラグ 0x80（ACS は否定応答）は返さない~~ → `20260921-negative-responses` で否定応答を返す。mutation 4 通り検出。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - WEA タイプ 5（拡張 NLS 区間）（○）

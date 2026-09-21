@@ -12,6 +12,9 @@ import {
 } from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
 
+/** WSF への応答の 1 本（`ApplyResult.wsfReplies`） */
+export type WsfReply = { kind: "query" } | { kind: "d972"; flags: number; next: number };
+
 /** データストリーム適用の結果（キーボード状態の遷移は Session が判断する） */
 export interface ApplyResult {
   lockKeyboard: boolean;
@@ -38,10 +41,13 @@ export interface ApplyResult {
    */
   senseCode?: number;
   /**
-   * ホストが WSF クラス D9・種類 72 を送ってきた（`20260921-wsf-d9-72`）。**応答しないとホストは待ち続ける**
-   * （社内機で DSM に出させたところ、応答が無いままキーボードが施錠され続けた）。値は SF の 3 バイト目（フラグ）と 4 バイト目
+   * **WSF への応答（起きた順）**。ACS `DS5250.processWSF` は WSF ごとにその場で応答を送る（`20260921-wsf-d9-72` の節目の点検の指摘。
+   * ~~Query と D9/72 のどちらか 1 本~~——同じレコードに WSF が 2 つあると片方の応答が落ち、D9/72 ならホストが待ち続けた）。
+   * - `query`: クラス D9・種類 70 で、フラグ（SF の 5 バイト目）が 0（ACS は 0 のときだけ応答する）
+   * - `d972`: クラス D9・種類 72・長さ 6（`20260921-wsf-d9-72`。**応答しないとホストは待ち続ける**——社内機で DSM に出させたところ、
+   *   応答が無いままキーボードが施錠され続けた）。値は SF の 5 バイト目（フラグ）と 6 バイト目。フラグ 0x80 は応答せず否定応答
    */
-  wsfD972?: { flags: number; next: number };
+  wsfReplies: WsfReply[];
   /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
@@ -159,8 +165,9 @@ interface RecordCursorState {
 /**
  * 1 レコード分のデータストリーム（ESC+コマンド列）を ScreenBuffer に適用する。
  *
- * 未知のコマンド（ESC 直後の 1 バイト）は警告してレコードの残りを打ち切る
- * （レコード境界で再同期。spec「エラー処理」）。**未知のオーダー（WTD の中の 1 バイト）は
+ * ~~未知のコマンド（ESC 直後の 1 バイト）は警告してレコードの残りを打ち切る
+ * （レコード境界で再同期。spec「エラー処理」）~~ → 未知のコマンドは 1 バイト読み飛ばして続け、コマンドの位置に ESC が無ければ
+ * 否定応答 0x10050121 で打ち切る（ACS `processCommand`。`20260921-negative-responses`）。**未知のオーダー（WTD の中の 1 バイト）は
  * 次の ESC まで読み飛ばして次のコマンドから復帰する**——ここでレコード全部を捨てると、
  * 未知のオーダーより後ろにある WRITE（キーボード解放）や READ ごと失われ、
  * ホストは応答したつもりでもクライアントの鍵盤が開かないまま固まる
@@ -179,6 +186,7 @@ export function applyDataStream(
     readRequested: false,
     alarm: false,
     queryRequested: false,
+    wsfReplies: [],
     saveRequests: [],
     readScreenRequested: false,
     readImmediateRequested: false,
@@ -366,15 +374,23 @@ export function applyDataStream(
         errorCodeWritten = true;
         break;
       case COMMAND.WRITE_STRUCTURED_FIELD: {
-        const sf = applyStructuredField(r, warn);
-        if (sf.query) result.queryRequested = true;
-        if (sf.d972) {
-          // フラグに 0x80 が立っていれば ACS は応答せず否定応答（`processWSF` の `sense_code = 0x10050112`）
-          if ((sf.d972.flags & 0x80) !== 0) {
-            result.senseCode = SENSE.WSF_D972_FLAG;
-            return finish();
-          }
-          result.wsfD972 = sf.d972;
+        // **1 つの WSF で読むのは最初の SF だけ**（ACS `DS5250.processCommand` の ESC 0xF3: SF の長さ `n12` だけ進めて、次は ESC を求める。
+        // `20260921-wsf-d9-72` の節目の点検の指摘）。~~SF を続けて全部読む~~——2 つ目の SF が続けば ACS は「コマンドが無い」（0x10050121）になる
+        if (r.remaining < 4) {
+          // 長さと class・type が読めない（ACS: `n5 + 4 > n2` で 0x10050121）
+          warn("write structured field too short (negative response 0x10050121)");
+          result.senseCode = SENSE.COMMAND_EXPECTED;
+          return finish();
+        }
+        const sf = applyStructuredField(r);
+        if (sf.reply) {
+          result.wsfReplies.push(sf.reply);
+          if (sf.reply.kind === "query") result.queryRequested = true;
+        }
+        if (sf.sense !== undefined) {
+          // D9/72 のフラグに 0x80: ACS は応答せず否定応答（`processWSF` の `sense_code = 0x10050112`）。ループを抜けてレコードの残りは読まない
+          result.senseCode = sf.sense;
+          return finish();
         }
         break;
       }
@@ -931,41 +947,35 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   return fieldStart;
 }
 
-/**
- * WRITE STRUCTURED FIELD（ホスト → クライアント）。5250 QUERY（class 0xD9 / type 0x70）と、クラス D9・種類 72（長さ 6 のとき。
- * ACS `DS5250.processWSF` と同じ条件）を拾う（呼び出し側が応答を送る）。その他の SF は読み飛ばす。
- */
 /** 否定応答のセンス・コード（ACS `DS5250` の `setSenseCode` / `sense_code` の値） */
-const SENSE = {
+export const SENSE = {
   COMMAND_EXPECTED: 0x10050121,
   ROLL_PARAM: 0x1005012c,
   CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
+  /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */
+  UNKNOWN_OPCODE: 0x10030101,
   WSF_D972_FLAG: 0x10050112
 } as const;
 
-function applyStructuredField(r: ByteReader, warn: WarnFn): { query: boolean; d972?: { flags: number; next: number } } {
-  let isQuery = false;
-  let d972: { flags: number; next: number } | undefined;
-  const done = () => (d972 ? { query: isQuery, d972 } : { query: isQuery });
-  while (r.remaining >= 2) {
-    if (r.peek() === ESC) break; // 次のコマンド
-    const len = r.u16();
-    if (len < 2) {
-      warn(`invalid structured field length ${len}`);
-      return done();
-    }
-    const bodyLen = len - 2;
-    if (r.remaining < bodyLen) {
-      warn(`structured field truncated (need ${bodyLen}, have ${r.remaining})`);
-      return done();
-    }
-    const body = r.bytes(bodyLen);
-    // body[0]=class, body[1]=type
-    if (body[0] === 0xd9 && body[1] === 0x70) isQuery = true;
-    // ACS は長さが 6 のときだけ応答する（`n4 != 6` なら何もしない）
-    if (body[0] === 0xd9 && body[1] === 0x72 && len === 6) d972 = { flags: body[2] ?? 0, next: body[3] ?? 0 };
+/**
+ * WRITE STRUCTURED FIELD（ホスト → クライアント）の**最初の SF を 1 つだけ**読む（ACS `DS5250.processWSF`）。5250 QUERY（class 0xD9 /
+ * type 0x70。フラグが 0 のとき）とクラス D9・種類 72（長さ 6 のとき）の応答を返す（送るのは呼び出し側）。その他の SF は読み飛ばす
+ */
+function applyStructuredField(r: ByteReader): { reply?: WsfReply; sense?: number } {
+  // ACS `processWSF` は SF の頭（長さ 2・class・type）を見るだけで、進めるのは呼び出し側（長さ `n12` の分）
+  const len = (r.peekAt(0) << 8) | r.peekAt(1);
+  const sf = r.peekUpTo(len);
+  // 長さの分だけ進める（足りなければレコードの終わりまで。0・1 なら長さの 2 バイトが次の「コマンド」として読まれ、0x10050121 になる＝ACS と同じ）
+  r.skip(Math.min(len, r.remaining));
+  if (sf[2] !== 0xd9) return {};
+  if (sf[3] === 0x70) return sf[4] === 0 ? { reply: { kind: "query" } } : {}; // ACS はフラグが 0 のときだけ応答する
+  if (sf[3] === 0x72 && len === 6) {
+    // ACS は長さが 6 のときだけ見る（`n4 != 6` なら何もしない）
+    const flags = sf[4] ?? 0;
+    if ((flags & 0x80) !== 0) return { sense: SENSE.WSF_D972_FLAG };
+    return { reply: { kind: "d972", flags, next: sf[5] ?? 0 } };
   }
-  return done();
+  return {};
 }
 
 /**

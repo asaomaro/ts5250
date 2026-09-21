@@ -31,3 +31,32 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - この WSF を送ってくる実際の画面・アプリは見つけていない（DSM で出させた）。応答で Unicode を申告した後にホストが何を送ってくるかは未確認（D1）。
+
+## 節目 9 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,474 passed / 0 failed / 41 skipped
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（1 回目は `ScreenGrid` の `ccsid` の prop 型で落ち、`number | undefined` に直した）
+- mutation（`scratchpad/mut-m9.py` 25 通り＋`mut-m9b.py` 4 通り）— 生き残った 3 通り（DBCS の打鍵・ペースト・IME の MDT）にテストを足して全部 KILLED
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 46429)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）。SF 2 つ・WSF 2 つ（Query と D9/72）・D9/72＋READ・短い WSF・Query のフラグを `negative-response-order.test.ts` で固定
+- 実機（社内機・2026-09-22）: DSM の `WSF72` / `WSF72N` でホストが読んだ応答が `000088000cd972c00034b044b004b0` / `0000880009d9728000030104`（ACS のコアと同じ。以前と同じ）
+
+### 失敗の証跡
+点検役の再現（直す前の HEAD。`scratchpad/rv5/tn/neg.test.ts`）:
+
+```
+[2sf-b] sent: ["NEG 10050112"]
+[70+72] sent: ["0000880044d97080"]
+[d972+read] sent: ["000088000cd972c00034b044b004b0"] state: locked locked: true
+```

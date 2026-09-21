@@ -1,7 +1,7 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor } from "@ts5250/base";
 import { parseRecord, buildNegativeResponse } from "../protocol/gds.js";
-import { COMMAND, OPCODE } from "../protocol/constants.js";
+import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
   buildReadInputFieldsResponse,
@@ -18,7 +18,7 @@ import {
   buildReadScreenExtendedResponse
 } from "../protocol/save-screen.js";
 import type { PcCommandRequest } from "../protocol/pc-command.js";
-import { applyDataStream } from "../protocol/wtd-applier.js";
+import { applyDataStream, SENSE } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
 import type { ScreenSnapshot } from "../screen/types.js";
@@ -169,6 +169,30 @@ interface SessionEvents extends Record<string, unknown[]> {
 
 /** セッション ID の連番（id 未指定時のフォールバック） */
 let seq = 0;
+
+/**
+ * **オペコードごとに、どこからをデータストリームとして読むか**（ACS `DS5250.processPassthru`。`20260921-negative-responses` の節目の点検の指摘）。
+ * - NOOP・CANCEL INVITE・メッセージ灯（0x00・0x0A・0x0B・0x0C）: 読まない（空）
+ * - OUTPUT ONLY・RESTORE SCREEN（0x02・0x05）: 最初の 0x04 まで読み飛ばしてから（ACS `while (savebuff[n3] != 4) ++n3`）
+ * - それ以外の ACS が知っているオペコード（0x01〜0x11）: そのまま
+ * - 知らないオペコード: `undefined`（読まずに否定応答 0x10030101）
+ */
+function streamOf(opcode: number, data: Uint8Array): Uint8Array | undefined {
+  switch (opcode) {
+    case OPCODE.NOOP:
+    case OPCODE.CANCEL_INVITE:
+    case OPCODE.MESSAGE_LIGHT_ON:
+    case OPCODE.MESSAGE_LIGHT_OFF:
+      return new Uint8Array(0);
+    case OPCODE.OUTPUT_ONLY:
+    case OPCODE.RESTORE_SCREEN: {
+      const at = data.indexOf(ESC);
+      return at < 0 ? new Uint8Array(0) : data.subarray(at);
+    }
+    default:
+      return opcode <= 0x11 ? data : undefined;
+  }
+}
 
 /**
  * 5250 セッション（design の状態機械: Connecting → Negotiating → Ready ⇄ Locked → Closed）。
@@ -744,11 +768,19 @@ export class Session5250 extends Emitter<SessionEvents> {
     let readSolicited = false;
     try {
       const parsed = parseRecord(record);
-      // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
-      // （tn5250 handle_receive: switch は指標のみ、process_stream は全 opcode で実行）
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_ON) this.messageWaiting = true;
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_OFF) this.messageWaiting = false;
-      const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
+      // **データを読むかはオペコードで決まる**（ACS `DS5250.processPassthru`。`20260921-negative-responses` の節目の点検の指摘）。
+      // ~~全オペコードでデータストリームを処理する（tn5250 `handle_receive`）~~——ACS がデータを読まないオペコードでも「ESC が無い」の
+      // 否定応答を返し、OUTPUT ONLY・RESTORE の先頭のゴミでも否定応答にしていた
+      const data = streamOf(parsed.opcode, parsed.data);
+      if (data === undefined) {
+        // 知らないオペコード: ACS は読まずに否定応答 0x10030101（`processPassthru` の `default`）
+        this.warn(`unknown opcode 0x${parsed.opcode.toString(16)} (negative response 0x10030101)`);
+        this.telnet.sendRecord(buildNegativeResponse(SENSE.UNKNOWN_OPCODE));
+        return;
+      }
+      const result = applyDataStream(data, this.buf, this.codec, this.warn);
       // **復元した画面が待っていた READ を、ここで戻す**（ACS `Save5250Net.restoreNetNulls` の
       // `setPendingReadAndAID()` に当たる）。**この位置でなければならない**——下には
       // `queryRequested` / `readScreen*` / `readImmediate*` / `pcCommand` の早期 return が並んでおり、
@@ -797,25 +829,34 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
         this.telnet.sendRecord(res.record);
       }
-      // **否定応答**（ACS と同じ条件。`wtd-applier.ts` の `senseCode`）。返さないとホストは入力コマンドを待ち続ける。
-      // ACS は同じレコードの中で先に済んだ応答（Query Reply 等）を処理の途中で送り、否定応答を最後に送る。ここでは退避の応答の後、
-      // Query 等の応答の前に送る——読み手は否定応答の所で止まっているので、同じレコードに両方が載るのは誤りの前に Query があるときだけ（実機では未観測）
-      if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
-      if (result.queryRequested) {
-        // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
-        this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
-        return;
+      // **否定応答は最後**（ACS は WSF・READ SCREEN 等の応答を処理の途中で送り、否定応答は `tokenizeData` の終わりで送る。
+      // `20260921-negative-responses` の節目の点検の指摘。~~退避の応答の後、Query 等の応答の前~~）。
+      // 返さないとホストは入力コマンドを待ち続ける（`wtd-applier.ts` の `senseCode`）。下の早期 return はどれもこれを通してから戻る
+      const sendNegative = (): void => {
+        if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
+      };
+      // **WSF の応答は起きた順に全部**（ACS `processWSF` は WSF ごとにその場で送る。~~Query と D9/72 のどちらか 1 本~~）
+      for (const w of result.wsfReplies) {
+        if (w.kind === "query") {
+          // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）
+          this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
+        } else {
+          // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）。
+          // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
+          const reply = buildWsfD972Reply(w.flags, w.next);
+          if (reply) this.telnet.sendRecord(reply);
+        }
       }
-      if (result.wsfD972) {
-        // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）
-        // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
-        const reply = buildWsfD972Reply(result.wsfD972.flags, result.wsfD972.next);
-        if (reply) this.telnet.sendRecord(reply);
+      // **WSF だけのレコードでは画面イベントを出さない**。同じレコードに READ があれば下へ進んで入力待ちに入る
+      // （ACS は WSF の後もレコードの残りを処理する。~~WSF の応答の後は戻る~~ と、D9/72 の後ろの READ が効かず施錠のままだった）
+      if (result.wsfReplies.length > 0 && result.readCommand === undefined) {
+        sendNegative();
         return;
       }
       if (result.readScreenExtendedRequested) {
         // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
         this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
+        sendNegative();
         return;
       }
       if (result.readImmediateRequested) {
@@ -825,6 +866,7 @@ export class Session5250 extends Emitter<SessionEvents> {
         // `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
         const { record } = buildReadImmediateResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
+        sendNegative();
         return;
       }
       if (result.readMdtImmediateAltRequested) {
@@ -832,14 +874,17 @@ export class Session5250 extends Emitter<SessionEvents> {
         // 送るのは **MDT の立った欄だけ**（名前どおり）。返さないとホストが固まる。
         const { record } = buildReadMdtImmediateAltResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
+        sendNegative();
         return;
       }
       if (result.readScreenRequested) {
         // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
         // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
         this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
+        sendNegative();
         return;
       }
+      sendNegative();
       if (result.pcCommand ?? result.pcCommandEnd) {
         // PC Organizer（STRPCCMD）の中間画面は**利用者に見せない**——
         // 画面イベントも pendingAid の解決もせず、ロックのまま実行して実行キーを返す。

@@ -54,7 +54,7 @@ export {
  * `node:net` / `node:tls` を巻き込むので、ブラウザでは実行時に落ちる
  * （`vite dev` でアプリが起動しなくなっていた。AGENTS.md「ブラウザから触る側は狭い入口を使う」）。
  */
-export { fieldId } from "./screen/search.js";
+export { fieldId, progressionTarget, progressionNumberOf } from "./screen/search.js";
 /**
  * 欄の値の型検査の部品。web-ui が打鍵時・AID 送信前に core と同じ判定を使うために出す
  * （`isDbcsOnly`＝全角専用欄か / `selfCheckDigitOk`＝自己点検欄 `CHECK(M10)`/`CHECK(M11)` の検算）。
