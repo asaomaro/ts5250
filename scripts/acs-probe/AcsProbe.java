@@ -44,6 +44,8 @@ public class AcsProbe {
   private static final PrintStream ERR = new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8);
   private static ECLPS ps;
   private static ECLOIA oia;
+  /** 通信状態（`GetCommStatus`）と実際に効いている自動再接続の設定を dump に出すため */
+  private static ECLSession sess;
 
   /** 手順の誤り（未定義の命令・引数の書式・未設定の変数）。流す前に止めるため、実機に繋ぐ前に検査する */
   private static final class StepError extends Exception {
@@ -57,11 +59,29 @@ public class AcsProbe {
     ps.GetScreen(buf, rows * cols, ECLPS.TEXT_PLANE);
     int pos = ps.GetCursorPos();
     OUT.print("=== " + label + " cursor=" + ((pos - 1) / cols + 1) + "," + ((pos - 1) % cols + 1)
-        + " inhibit=" + oia.InputInhibited() + "\n");
+        + " inhibit=" + oia.InputInhibited() + commInfo() + "\n");
     for (int r = 0; r < rows; r++) {
       String line = new String(buf, r * cols, cols);
       if (!line.isBlank()) OUT.print(String.format("%02d|%s", r + 1, line.replaceAll("\\s+$", "")) + "\n");
     }
+  }
+
+  /**
+   * 通信状態と、**実際に効いている** `autoReconnect`（private なのでリフレクションで読む）。
+   * 設定を渡しただけでは効いたか分からない——効いていないのに「再接続しなかった」と読むと
+   * 陰性と取り違える。
+   */
+  private static String commInfo() {
+    if (sess == null) return "";
+    String ar = "?";
+    try {
+      java.lang.reflect.Field f = com.ibm.eNetwork.ECL.ECLConnection.class.getDeclaredField("autoReconnect");
+      f.setAccessible(true);
+      ar = String.valueOf(f.getBoolean(sess));
+    } catch (Exception e) {
+      ar = "読めず(" + e.getClass().getSimpleName() + ")";
+    }
+    return " commStatus=" + sess.GetCommStatus() + " started=" + sess.IsCommStarted() + " autoReconnect=" + ar;
   }
 
   /** 入力禁止が解けるまで（最長 15 秒）待ち、さらに ms 待つ。応答が複数レコードに分かれる画面のため、解けた直後には読まない */
@@ -163,18 +183,33 @@ public class AcsProbe {
     // 装置名は既定では指定しない（ホストに採らせる）。新規の名前は自動構成が効かない実機がある
     String dev = env("PROBE_DEVNAME", "");
     if (!dev.isEmpty()) p.put(ECLSession.SESSION_WORKSTATION_ID, dev);
+    // **自動再接続**（既定は指定しない＝ECL の既定 false）。ECL のコアは `SESSION_AUTORECONNECT`
+    // を既定 false で読むが、ACS の GUI が使う HOD の bean（`HODDefaults`）は true にしている。
+    // 切断後の挙動を ACS の GUI に寄せて測るときだけ `PROBE_AUTORECONNECT=true` を渡す
+    String ar = env("PROBE_AUTORECONNECT", "");
+    if (!ar.isEmpty()) p.put("SESSION_AUTORECONNECT", ar);
 
     // 最後まで流れたときだけ 0 にする（途中で何が起きても、既定は「途中で止まった」）
     int code = 4;
     ECLSession s = null;
     try {
       s = new ECLSession(p);
+      sess = s;
       s.StartCommunication();
       ps = s.GetPS();
       oia = s.GetOIA();
       long end = System.currentTimeMillis() + 20000;
       while (!s.IsCommStarted() && System.currentTimeMillis() < end) Thread.sleep(100);
       // **繋がらないまま手順へ進まない**——空の画面を dump して 0 で終わると、失敗が合格に見える
+      // **自動再接続の実効値は、接続が確立してから立てる。** 接続開始の処理が設定から
+      // 読み直して上書きするので、`StartCommunication` の前に立てても false に戻る
+      // （プロパティ `SESSION_AUTORECONNECT` 経由も、事前のリフレクションも、dump で false と確認）。
+      // ACS の GUI は HOD の bean（`HODDefaults` の autoReconnect=true）で有効にしているので、それに寄せる
+      if ("true".equals(ar) && s.IsCommStarted()) {
+        java.lang.reflect.Field f = com.ibm.eNetwork.ECL.ECLConnection.class.getDeclaredField("autoReconnect");
+        f.setAccessible(true);
+        f.setBoolean(s, true);
+      }
       if (!s.IsCommStarted()) {
         ERR.print("接続できませんでした（20 秒）。ホスト・ポート・ネットワークを確かめてください\n");
         code = 3;

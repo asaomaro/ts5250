@@ -16,6 +16,7 @@
 //   ACS_JAR（既定: リポジトリ直下の `IBMiAccess_v1r1/acsbundle.jar`。`.gitignore` 済み）
 //   PROBE_CODEPAGE（既定: AS400 は 930 / PUB400 は 37） / PROBE_SCREEN（24x80 既定 / 27x132）
 //   PROBE_DEVNAME（既定は指定しない） / PROBE_PORT（既定 23）
+//   PROBE_AUTORECONNECT（既定は指定しない。`true` で自動再接続を有効化——ACS の GUI の既定に寄せて測るとき）
 //
 // 手順ファイルの文法（1 行 1 命令。`#` はコメント）は `scripts/README.md`「ACS のコアを直接動かす」。
 //
@@ -102,7 +103,7 @@ const env = {
   // ロケールは LANG だけでなく LC_ALL / LC_CTYPE でも決まる。落とすと JVM が POSIX になり、ASCII でない
   // パス（手順ファイル・ホームのキャッシュ）が読めなくなる（`20260919-backlog-acs-triage` review ラウンド 2）
   ...pick("PATH", "JAVA_HOME", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE"),
-  ...pick(`${prefix}_USER`, `${prefix}_PASSWORD`, `${prefix}_LIB`, "PROBE_PORT", "PROBE_DEVNAME"),
+  ...pick(`${prefix}_USER`, `${prefix}_PASSWORD`, `${prefix}_LIB`, "PROBE_PORT", "PROBE_DEVNAME", "PROBE_AUTORECONNECT"),
   [`${prefix}_HOST`]: host,
   // 930 の SBCS（290）には英小文字が無い。大文字小文字を区別する PUB400（QPWDLVL 3）では 37 を既定にする
   PROBE_CODEPAGE: process.env.PROBE_CODEPAGE ?? (prefix === "PUB400" ? "37" : "930"),

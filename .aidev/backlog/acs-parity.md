@@ -69,6 +69,22 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] 当プロジェクト全体でACSの実装と突き合わせるべき挙動の棚卸し（利用者から「全体的にACSを手本に見直しを図ってください」との要望、20260915）のうち、**第2弾（フィールド入力値検証`field-validate.ts`の突き合わせ、ACS・実機起動どちらも不要）**を実施した（`20260915-acs-field-validation-audit`）。ACSのデコンパイル済みコア（`Field5250`の`checkNumericOnlyChar()`・`checkDigitsOnlyChar()`・`checkAlphaOnlyChar()`・`checkKanaShiftChar()`）と`field-validate.ts`を突き合わせ、数値専用欄（`SHIFT_NUMERIC_ONLY`/`SHIFT_SIGNED_NUMERIC`）で埋め込みの空白文字を拒否していた食い違いを発見・修正した（ACSは位置を問わず空白を許容する。正規表現を`/^[0-9.,+-]*$/`→`/^[0-9 .,+-]*$/`に変更、回帰テスト`packages/tn5250/test/field-validate.test.ts`）。数字のみ・英字専用・カタカナシフトの検証は既に一致していることを確認済み。残作業は下記に割る。
   - [x] **自己点検欄（モジュラス10/11、FCW経由で付与される属性）~~が当プロジェクトに未実装~~**（`20260915-acs-field-validation-audit` decisions.md D2）。ACSの`Field5250.checkModulusField()`/`modulusCheck()`が標準的なモジュラス10/11アルゴリズムを実装しているが、当プロジェクトの`wtd-applier.ts`は未知のFCWを安全に読み飛ばすためパース破壊は起きない（feature gapでありbugではない）。実装を見送った理由: (1) 正確なFCW値（~~`0xB0xx`/`0xB1xx`系と推測されるが未確定~~）がデコンパイル結果だけからは一意に確定できず、実機トレースが必要。(2) モジュラス10/11の検証はフィールド全体の最終値に対して行うもので、既存の「打鍵・貼り付けされた差分文字を1文字ずつ検証する」という`validateFieldContent()`の構造とは粒度が異なり、別途フィールド確定時検証を新設する設計が要る。次に着手する際は、実機で自己点検欄付きの画面を作り生バイトを採取して正確なFCW値を確認することから始める——アルゴリズムの詳細は`.aidev/works/20260915-acs-field-validation-audit/research.md` F6に記録済み。（出典: .aidev/works/20260915-acs-field-validation-audit/research.md, decisions.md） **実装済み（2026-09-17・PR #404）**: FCW は ACS `Field5250` の定数（`javap -constants`）で確定した——`FCW_SELF_CHECK_MODULUS_11=0xB140` / `FCW_SELF_CHECK_MODULUS_10=0xB1A0`。`wtd-applier.ts` の `applySf` が `Field.selfCheck`（`mod10`/`mod11`）として載せ、検算は `Field5250.checkModulusField()`/`modulusCheck()` を写した `selfCheckDigitOk`（`packages/tn5250/src/screen/field-validate.ts`）。粒度の問題（上記 (2)）は、差分文字の検証ではなく **AID 送信前の検査**（web-ui `composables/mandatoryCheck.ts`、`MANDATORY_ENTER`/`MANDATORY_FILL` と同じ場所）に置くことで解いた——ACS も送信時に検算する。回帰テスト: `packages/tn5250/test/fcw-dbcs-self-check.test.ts`・`packages/web-ui/test/self-check-field.test.ts`。同時に DBCS の FCW を ACS の 4 値（`0x8200`=only/`0x8220`=pure/`0x8240`=either/`0x8280`=open）へ揃えた。
 
+## 方針決定（2026-09-21・利用者の判断）
+
+要判断だった項目の方針。**着手時はこの方針に従う**。判断材料は原典（`javap -c -constants`）と実機で確かめた。
+
+| 論点 | 方針 | 根拠 |
+|---|---|---|
+| **操作員エラーでキーボードを施錠するか** | **施錠する＋Reset キーを作る**（ACS と同じ） | 実機で `inhibit=5` を観測（`20260920-insert-mode-overflow` research F9〜F11）。解除に Reset が要るので一緒に実装する。全操作員エラーに波及する |
+| **施錠中・応答待ち中の先打ち** | **溜めて解錠時に再生する**（Attn/SysReq/Reset/Help で捨てる） | 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD = false`）。PR #388 の「打てるのに Enter が効かない」を入力を失わずに解く |
+| **ホストに切られた後** | **自動で繋ぎ直す**（通常の切断で即座、以後 20 秒おき） | 原典＋実機（ENDCNN 後 3 秒で再接続）。サインオン拒否では止まるので QMAXSIGN の輪にならない |
+| **欄を出ないまま AID** | **操作員エラー 0020 にして送らない** | `PS5250.processAIDCode`。左詰めのまま右寄せ欄へ格納される不整合を防ぐ |
+
+**施錠の 2 種類は別物**——操作員エラーの施錠（Reset で解く・ACS はこの間の打鍵を拒否）と、
+応答待ちの施錠（ホストの解錠で解ける・ACS はこの間の打鍵を溜めて再生）。
+方針を決めた段階では「施錠の方針が先打ちの前提」と書いていたが**言い過ぎだった**。本当の結合は
+「操作員エラーで施錠するなら Reset キーが要る」の 1 点。
+
 <!-- 以下 20260919-backlog-acs-triage: ACS のコアのうち未突き合わせだった 3 領域（DS5250 の WTD 以外 / キー入力・編集・AID・施錠 / telnet・プリンター）の差異。
      深さ: ◎ 実測 / ○ 主エージェントが両側を直読 / ◐ 片側を直読 / △ 委譲先の報告のみ（着手時に両側を再確認）。組の一覧は同 work の acs-comparison.md -->
 - [x] **Attn・SysReq・ヘルプから戻ると、打鍵した文字と MDT が消える（RESTORE SCREEN で自分の退避イメージを再適用する）**（優先度 高・深さ ◎）。
@@ -116,7 +132,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   テスト `field-edit.test.ts:33-40` は、満杯でない欄の挿入しか見ていない。
   再現: 満杯の欄で挿入モードにして、1 文字打つ。
   関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み（推測）。（出典: `20260919-backlog-acs-triage` research N2）
-- [ ] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**要判断（方針）**）。
+- [ ] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
+  **方針（利用者の判断・2026-09-21）: A）ACS と同じく溜めて、解錠時に再生する**（Attn / SysReq / Reset / Help で捨てる）。
+  原典で既定を確認——`beans/HOD/Session` は設定が無ければ `DISABLE_SESSION_TYPE_AHEAD = false`（＝先打ち有効）。
+  PR #388 が施錠中の打鍵を禁じたのは「打てるのに Enter が効かない」壊れた状態を避けるためだった。**溜めて再生すれば、入力を失わずに同じ問題が解ける**（Enter も `pending_aid` として溜まる）。`keyboard-locked-input.test.ts` の固定は方針に合わせて書き換える。
   Enter の直後に次のコマンドを打ち始めたり、Enter を続けて押したりすると、入力の頭が欠ける（熟練者ほど踏む）。
   利用者の「待たされる」報告の候補の 1 つ（session-lifecycle.md の「最近の接続状態維持・再接続対応以降…不安定化」の項目）。
   ACS
@@ -243,7 +262,29 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: WCC のアンロックで解錠し（`DS5250.processWCC2` → `endOfRecord`）、解錠中の AID は `pending_aid` に溜めて READ が来たら送る（委譲先 C・D）。
   測り方: WRITE（LOCK 無し）→ `DLYJOB 10` → EXFMT の画面で、途中に打鍵と AID を試す。実機ではまだ観測していない（DSPFMT は最後が必ず READ だった）。
   上の「先打ちを捨てる」と合わせて設計すること。（出典: `20260919-backlog-acs-triage` research F3-3 H）
-- [ ] **ホストに切られた後、自動で繋ぎ直さない**（優先度 中・深さ △・**要判断（方針）**）。
+- [ ] **ホストに切られた後、自動で繋ぎ直さない**（優先度 中・深さ △・**方針決定済み：ACS と同じく自動で繋ぎ直す**）。
+  **方針（利用者の判断・2026-09-21）: ACS と同じく自動で繋ぎ直す**——通常の切断（状態 2）で即座に、以後 20 秒おき。サインオン拒否（8936/8937）と利用者の切断では繋ぎ直さない。
+  **利用者の指示（2026-09-21）: 判断の前に ACS の実際の挙動を調べる**——とくに、自動サインオンと組んだときパスワード拒否で再試行を繰り返し、QMAXSIGN でプロファイルが無効化されないか。
+  原典で確認済み: HOD の bean 既定は `autoReconnect = true`（`beans/HOD/HODDefaults`）。ACS 製品が上書きするかは未確認。
+  **ECL のコア自体の既定は `SESSION_AUTORECONNECT = false`**（`ECLConnection`）で、ON にしているのは bean の層。
+  **調査結果（2026-09-21・原典＋実機）**:
+  - **再接続する条件**（`ECLConnection.SetCommStatus`）: 通信状態が **2（通常の切断）**のときだけ再接続スレッドを起こす。
+    **1 回目は即座、以後 20 秒おき、回数の上限なし**（`run()` は `Thread.sleep(20000)` して `StartCommunication`）。
+    利用者が自分で切ったときは起こさない。
+  - **自動サインオンの失敗・拒否では再接続しない**: 8936→状態 33 / 8937→状態 34 は、`connectState` を 33/34 にして
+    `StopCommunication` するだけで、再接続の条件 `connectState == 2` を満たさない。
+    → **「パスワード拒否で再試行を繰り返して QMAXSIGN でプロファイルが無効化される」懸念は ACS には当てはまらない**
+    （判断材料で私が書いた懸念は誤りだった）。
+  - **実機で確認**（`scripts/acs-probe/signoff-endcnn-reconnect.txt`・`PROBE_AUTORECONNECT=true`）:
+    `SIGNOFF ENDCNN(*YES)` の直後に `commStatus=2` となり、**3 秒以内に自動で繋ぎ直して新しいサインオン画面**
+    （新しい装置 `QPADEV000B`）が出た。**ENDCNN は再接続の条件（状態 2）に該当する**。
+  - **測定で踏んだ罠（3 つ・いずれも「再接続しない」と誤読しかけた）**:
+    (1) プロパティ `SESSION_AUTORECONNECT` を渡しても実効値は false のまま、
+    (2) 接続前にリフレクションで立てても接続開始の処理が上書き、
+    (3) そもそも `acs-probe.mjs` が環境変数を許可リスト（`pick`）で絞っており Java に届いていなかった。
+    **`dump` に実効値（`autoReconnect=` / `commStatus=`）を出したことで 3 つとも見抜けた**。
+  - **未確認**: 再接続のあと ACS が**自動サインオンを送り直すか**（プローブは画面へ打鍵してサインオンするので測れていない）。
+    ただし送り直して拒否されても状態 33/34 で止まるので、**再試行の輪にはならない**。
   SIGNOFF ENDCNN(*YES)、QINACTITV による切断、ホスト側の回線断のあと、ACS なら新しいサインオン画面が自動で出る。当 PJ は利用者が開き直す必要がある。
   ACS: `ECLConnection` の `autoReconnect`（`HODDefaults` で true）で、切断されると 1 回目は即座に、その後は 20 秒おきに繋ぎ直す。利用者が自分で切ったときは繋ぎ直さない（委譲先 E）。
   当 PJ: 表示セッションは `closed` を受けると破棄する（`packages/server/src/session-manager.ts:746-752`）。ホストへ繋ぎ直すのは常駐プリンターだけ（`:1003-1013`）。
@@ -258,7 +299,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - RB/RZ 欄のフィールド終了（中）
     - ACS: RB/RZ 欄も Field Exit が必須（`Field5250.isFieldExitRequired`）。
     - 当 PJ: FER ビットしか見ない（`packages/tn5250/src/screen/buffer.ts:1225`）ので、満杯になると次の欄へ自動で送り、AUTO_ENTER なら Enter を送る。
-  - 欄を出ないまま AID を押したとき（中・**要判断**）
+  - 欄を出ないまま AID を押したとき（中・**方針決定済み：ACS と同じくエラー**）
+    - **方針（利用者の判断・2026-09-21）: ACS と同じく操作員エラー 0020 にして送らない。**
     - ACS: 右寄せ欄・符号付き数値欄ではエラー 0020 にする（`PS5250.processAIDCode`）。
     - 当 PJ: 左詰めのまま送る。英数字の CHECK(RZ)/(RB) 欄には左詰めのまま格納される。
   - Home（中・**要判断**）
