@@ -9,10 +9,10 @@ import WatermarkOverlay from "./WatermarkOverlay.vue";
 import { viewSettings, resolveSbcsView } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
-import { sessionsStore } from "../stores/sessions.js";
+import { sessionsStore, type HeldKey } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
-import { isEscapeAidEvent, makeKeydownHandler, type LocalAction } from "../composables/useKeymap.js";
+import { isEscapeAidEvent, makeKeydownHandler, typeAheadKind, type LocalAction } from "../composables/useKeymap.js";
 import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
 import {
   sendKey,
@@ -23,6 +23,7 @@ import {
   breakReservation as breakReservationFor
 } from "../session-controller.js";
 import { play } from "../macro-engine.js";
+import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError } from "../composables/opMessages.js";
@@ -658,6 +659,20 @@ watch(
  * `preventDefault` は形を合わせるためのダミー（本物のイベントではないので抑えるものが無い）。
  */
 function onPaletteKey(k: { key: string; ctrlKey?: boolean; altKey?: boolean }): void {
+  // **施錠中は先打ちとして溜める**（キーボードで押したのと同じ扱い。capture を通らないのでここで見る）
+  if (shouldHold()) {
+    const like = { key: k.key, ctrlKey: k.ctrlKey === true, altKey: k.altKey === true, shiftKey: false, metaKey: false };
+    const kind = typeAheadKind(like);
+    if (kind === "hold") {
+      pushTypeAhead({ ...like, code: "" });
+      return;
+    }
+    if (kind === "help") {
+      discardTypeAhead();
+      return;
+    }
+    if (kind === "flag") discardTypeAhead();
+  }
   rawKeydown({
     key: k.key,
     ctrlKey: k.ctrlKey === true,
@@ -958,6 +973,7 @@ let leftCtrlAlone = false;
  */
 function resetKey(): void {
   insertMode.value = false;
+  discardTypeAhead(); // 溜めた先打ちを捨てる（`ECLPS.reset`。実機でも Reset の後は再生されなかった）
   exitErrorMode();
 }
 
@@ -968,6 +984,7 @@ function resetKey(): void {
  */
 function onKeydownCapture(ev: KeyboardEvent): void {
   noteUserActivity();
+  if (holdTypeAhead(ev)) return;
   leftCtrlAlone = ev.code === "ControlLeft";
   if (errorMode.value) {
     if (isEditingKey(ev)) {
@@ -984,6 +1001,142 @@ function onKeydownCapture(ev: KeyboardEvent): void {
   }
   clearNotice();
 }
+/*
+ * **先打ち（type-ahead）**（`20260921-type-ahead`）。
+ *
+ * 応答待ち（`busy`）・ホスト施錠（`keyboardLocked`）の間に打ったキーを捨てずに溜め、**解錠したら
+ * 同じキーとして再生する**。ACS の既定の振る舞い（`ECLPS.SendKeys` の `keyBuffer`・`DISABLE_SESSION_TYPE_AHEAD`
+ * の既定は false）で、実機でも「施錠中の ABC が解錠後のコマンド行に入る」「施錠中の DSPLIBL+Enter が
+ * 解錠後に送られる」「Enter の連打の 2 回目が送られる」を確かめた（research F2）。
+ *
+ * - **溜めるのは capture**（入力欄より先に見る）。溜めたキーは欄にもペインにも届かせない。
+ *   **溜めはセッションごと**（`SessionState.typeAhead`）——ペインはタブの切り替えで使い回される。
+ * - **溜めが残っている間は、生の打鍵も後ろへ積む**。解錠から再生までの隙間や再生の最中に打ったキーが
+ *   溜めを追い越さないため（ACS も `keyBuffer` が空でない間は後ろに積む）。
+ * - **再生は同じ入口を通す**——合成した keydown を、いまフォーカスのある欄（無ければカーソルの位置へ
+ *   戻して）へ投げる。欄の型検査・操作員エラー・キー割り当て・0020 がそのまま効く。
+ * - **1 キーごとに Vue の反映を待つ**（`await nextTick()`）。0020 の待ちを外すカーソル監視・操作員エラーへ
+ *   入る通知の監視・Erase Input の着地はどれも次の tick で走るので、待たずに流すと次のキーが古い状態で
+ *   処理される（独立点検の指摘）。
+ * - **AID を再生して施錠したら止める**（残りは次の解錠で続きから。ACS も `SendKeys` の残りを `keyBuffer` に戻す）。
+ * - **再生するのは、このペインがフォーカスを持つときだけ**。ACS はセッションの窓が前面でなくても流すが、
+ *   当 PJ の欄の編集は DOM のフォーカスに乗っているので、よそのペインに居る間は戻ってくるまで待つ（D7）。
+ * - **捨てる**: Reset・Attn・SysReq・Help（ACS と同じ）、切断・予約開始（ストア）。
+ * - **溜めない**: 自動操作の予約中・マクロ再生中（利用者の打鍵を他人の画面へ流さない）、システム要求行。
+ *   これらは従来どおり捨てる。IME の変換は溜めない（未確認）。Insert はその場で切り替える。
+ */
+/** 溜める上限（暴走した自動入力でメモリを食わないため。ACS の上限は未確認） */
+const TYPE_AHEAD_MAX = 1000;
+/** 施錠中（応答待ち・ホスト施錠）か */
+const holding = computed(() => busy.value || snapshot.value?.keyboardLocked === true);
+/** 再生が走っている間 */
+let replaying = false;
+/** 合成 keydown を配っている最中（その keydown を溜め直さないため） */
+let dispatchingReplay = false;
+function hasQueued(): boolean {
+  return (state.value?.typeAhead?.length ?? 0) > 0;
+}
+function discardTypeAhead(): void {
+  if (state.value) delete state.value.typeAhead;
+}
+/** 溜め・再生をしてよい相手か。予約中・マクロ再生中・システム要求行・切断中はしない */
+function typeAheadAllowed(): boolean {
+  return (
+    reservedBy.value === undefined &&
+    !blocksManualInput(props.sessionId) &&
+    !sysReqOpen.value &&
+    state.value?.connected === true
+  );
+}
+/** いまの打鍵を溜めるか。施錠中に加え、**溜めが残っている間**（再生待ち・再生中）も溜める */
+function shouldHold(): boolean {
+  return !dispatchingReplay && typeAheadAllowed() && (holding.value || hasQueued() || replaying);
+}
+function pushTypeAhead(k: HeldKey): void {
+  const st = state.value;
+  if (!st) return;
+  const q = (st.typeAhead ??= []);
+  if (q.length < TYPE_AHEAD_MAX) q.push(k);
+}
+/** 施錠中の打鍵を溜める（捨てる）。処理し終えたら true（以降の capture 処理をしない） */
+function holdTypeAhead(ev: KeyboardEvent): boolean {
+  if (!shouldHold()) return false;
+  // 端末の打鍵だけ（ペインか画面の入力欄）。ボタン・ピッカー・行の入力には手を出さない
+  const t = ev.target;
+  const onTerminal = t === paneEl.value || (t instanceof HTMLInputElement && t.classList.contains("grid-input"));
+  if (!onTerminal) return false;
+  // **Insert は溜めずにその場で切り替える**（ACS `SendKeys` は `[insert]` を溜めない）。溜めると
+  // 新しい画面で上書きモードへ戻った**後**に効いてしまい、溜めた文字が挿入で入る
+  if (ev.key === "Insert" && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    insertMode.value = !insertMode.value;
+    return true;
+  }
+  switch (typeAheadKind(ev)) {
+    case "flag":
+      discardTypeAhead(); // Attn / SysReq は溜めを捨てて、そのまま通す（応答待ちの逃げ道）
+      return false;
+    case "help":
+      discardTypeAhead();
+      leftCtrlAlone = false; // Ctrl 付きの割り当てでも、離したときに Reset にしない
+      ev.preventDefault();
+      ev.stopPropagation();
+      return true;
+    case "hold":
+      ev.preventDefault();
+      ev.stopPropagation();
+      pushTypeAhead({
+        key: ev.key, code: ev.code,
+        shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey
+      });
+      leftCtrlAlone = false;
+      return true;
+    default:
+      return false;
+  }
+}
+/** いま流してよいか: 解錠・このペインにフォーカス・溜めがある */
+function canReplayNow(): boolean {
+  return !holding.value && props.focused && typeAheadAllowed() && hasQueued();
+}
+/** 流す条件のどれかが変わったら試す。**新しい画面の欄フォーカス（nextTick）の後のタスク**で流す */
+watch(
+  [holding, () => props.focused, () => props.sessionId, () => state.value?.connected, reservedBy],
+  () => {
+    if (!replaying && canReplayNow()) setTimeout(() => void replayTypeAhead(), 0);
+  }
+);
+async function replayTypeAhead(): Promise<void> {
+  if (replaying) return;
+  replaying = true;
+  try {
+    // 途中でタブ（セッション）が替わっても、溜めはセッションごとなので表示中のセッションの分を流すだけ
+    while (canReplayNow()) {
+      const k = state.value!.typeAhead!.shift()!;
+      // 欄にもペインにもフォーカスが無ければ、カーソルの位置へ戻してから流す
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement && paneEl.value?.contains(active))) reconcileFocus(cursor.value);
+      const el = document.activeElement;
+      const target = el instanceof HTMLElement && paneEl.value?.contains(el) ? el : paneEl.value;
+      dispatchingReplay = true;
+      try {
+        target?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: k.key, code: k.code, shiftKey: k.shiftKey, ctrlKey: k.ctrlKey, altKey: k.altKey,
+            metaKey: k.metaKey, bubbles: true, cancelable: true
+          })
+        );
+      } finally {
+        dispatchingReplay = false;
+      }
+      await nextTick();
+    }
+  } finally {
+    replaying = false;
+  }
+}
+
 /** 左 Ctrl を単独で離したら Reset（上の `leftCtrlAlone` 参照） */
 function onKeyupCapture(ev: KeyboardEvent): void {
   if (ev.code === "ControlLeft" && leftCtrlAlone) resetKey();

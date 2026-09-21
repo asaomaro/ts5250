@@ -76,7 +76,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 | 論点 | 方針 | 根拠 |
 |---|---|---|
 | **操作員エラーでキーボードを施錠するか** | **施錠する＋Reset キーを作る**（ACS と同じ）→ **実装済み（`20260921-operator-error-mode`）** | 実機で `inhibit=5` を観測（`20260920-insert-mode-overflow` research F9〜F11）。解除に Reset が要るので一緒に実装する。全操作員エラーに波及する |
-| **施錠中・応答待ち中の先打ち** | **溜めて解錠時に再生する**（Attn/SysReq/Reset/Help で捨てる） | 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD = false`）。PR #388 の「打てるのに Enter が効かない」を入力を失わずに解く |
+| **施錠中・応答待ち中の先打ち** | **溜めて解錠時に再生する**（Attn/SysReq/Reset/Help で捨てる）→ **実装済み（`20260921-type-ahead`）** | 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD = false`）。PR #388 の「打てるのに Enter が効かない」を入力を失わずに解く |
 | **ホストに切られた後** | **自動で繋ぎ直す**（通常の切断で即座、以後 20 秒おき） | 原典＋実機（ENDCNN 後 3 秒で再接続）。サインオン拒否では止まるので QMAXSIGN の輪にならない |
 | **欄を出ないまま AID** | **操作員エラー 0020 にして送らない** → **実装済み（`20260921-aid-without-field-exit`）** | `PS5250.processAIDCode`。左詰めのまま右寄せ欄へ格納される不整合を防ぐ |
 | **ME/MF（必須入力・必須埋め）の判定** | **ACS に合わせる**——ME を MDT で判定し、CF キーや Roll でも検査。MF と自己点検は欄を出るときにも検査 | 利用者の判断。**`20260729-ffw-behavior-bits` D1（Enter のときだけ・内容で判定）を破棄**する。D1 は「CA/CF の区別は端末に届いていない」を前提にしていたが、ACS が区別しているなら届いているはずで、**着手時に原典で確かめる**（D1 が恐れた「必須欄が空の画面から F3 で抜けられない」は、F3 が CA キーなら起きない） |
@@ -134,7 +134,15 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   テスト `field-edit.test.ts:33-40` は、満杯でない欄の挿入しか見ていない。
   再現: 満杯の欄で挿入モードにして、1 文字打つ。
   関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み（推測）。（出典: `20260919-backlog-acs-triage` research N2）
-- [ ] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
+- [x] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
+  **完了（`20260921-type-ahead`・PR #410）**: 施錠中（応答待ち・ホスト施錠）の端末のキーをセッションごとに溜め（`SessionState.typeAhead`）、
+  解錠したら合成 keydown を同じ入口へ投げて打った順に再生する（`packages/web-ui/src/components/EmulatorPane.vue` の先打ちの節、
+  分類は `useKeymap.ts` の `typeAheadKind`）。AID を再生して施錠したら止め、残りは次の解錠で続きから。
+  実機の ACS（ECL の `SendKeys`）で確かめた——施錠中の `ABC` が解錠後のコマンド行へ・`DSPLIBL`+Enter が解錠後に送られる・
+  Reset で溜めが捨てられる（ホストの施錠は解けない）・Enter の連打の 2 回目が送られる（research F2）。
+  GUI の打鍵も同じ `ECLPS.SendKeys` を通ることを原典で辿った（F1）。Insert は溜めずにその場で切り替える（`[insert]` は溜めない）。
+  テスト `packages/web-ui/test/type-ahead.test.ts`（36 件）。節目の独立点検の指摘（タブ切替・非フォーカス・再生中の状態）も直した。
+  ⚠ 当 PJ の都合の差: よそのペインにフォーカスがある間は流さない（ACS は流す。D7）。IME・ペーストは溜めない（ACS 側が未確認）。
   **方針（利用者の判断・2026-09-21）: A）ACS と同じく溜めて、解錠時に再生する**（Attn / SysReq / Reset / Help で捨てる）。
   原典で既定を確認——`beans/HOD/Session` は設定が無ければ `DISABLE_SESSION_TYPE_AHEAD = false`（＝先打ち有効）。
   PR #388 が施錠中の打鍵を禁じたのは「打てるのに Enter が効かない」壊れた状態を避けるためだった。**溜めて再生すれば、入力を失わずに同じ問題が解ける**（Enter も `pending_aid` として溜まる）。`keyboard-locked-input.test.ts` の固定は方針に合わせて書き換える。

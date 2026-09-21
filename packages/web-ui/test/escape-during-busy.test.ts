@@ -121,7 +121,9 @@ describe("応答待ちの最中でも Attn / SysReq で抜けられる", () => {
     w.unmount();
   });
 
-  it("通信中の普通のキーは従来どおりプロテクトする", async () => {
+  // 通信中の普通のキーは**すぐには送らない**。捨てずに先打ちとして溜め、解錠後に送る
+  // （`20260921-type-ahead`。溜めと再生は `type-ahead.test.ts`）
+  it("通信中の普通のキーはすぐには送らない", async () => {
     const send = seed(true);
     const w = mountPane();
     await w.find(".pane").trigger("keydown", { key: "F3" });

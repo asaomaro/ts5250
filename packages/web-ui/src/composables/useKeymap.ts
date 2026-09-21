@@ -147,6 +147,44 @@ export function isEscapeAidEvent(ev: {
  * キーダウンを捕捉し、対象キーは preventDefault してブラウザ既定動作より 5250 操作を優先する
  * （spec: F1 ヘルプ・F5 リロード・PageUp スクロール等を抑止）。フォーカスペインのみ作用。
  */
+/**
+ * **施錠中の打鍵（先打ち）の扱い**（`20260921-type-ahead`）。純関数で分類だけを返す。
+ *
+ * ACS は施錠中・応答待ちの打鍵を溜めて、解錠で再生する（`ECLPS.SendKeys` の `keyBuffer`。
+ * 実機でも文字・AID・Enter の連打が解錠後に効いた）。**Attn / SysReq / Help / Reset で溜めを捨てる**。
+ *  - `hold`: 端末のキー（修飾なしの文字・Enter・Tab・矢印・F キー・編集キー、割り当てた AID・編集キー、Ctrl+矢印）
+ *  - `flag`: Attn / SysReq——溜めを捨てて、**そのまま通す**（応答待ちの逃げ道。`isEscapeAidEvent`）
+ *  - `help`: Help——溜めを捨てる（キー自身は送らない。ACS がこの間に Help を送るかは未確認）
+ *  - `pass`: 端末のキーではない（修飾キー単独・IME・表示切替やマクロの割り当て・Ctrl+C 等のアプリの操作）
+ */
+export type TypeAheadKind = "hold" | "flag" | "help" | "pass";
+export function typeAheadKind(ev: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  isComposing?: boolean;
+}): TypeAheadKind {
+  if (ev.isComposing === true || ev.key === "Process") return "pass"; // IME は溜めない（未確認・decisions）
+  if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta" || ev.key === "CapsLock") {
+    return "pass";
+  }
+  if (isEscapeAidEvent(ev)) return "flag";
+  const custom = keybindingsStore.resolve(ev);
+  if (custom !== undefined) {
+    if (isViewBinding(custom) || isMacroBinding(custom)) return "pass";
+    if (custom === "Help") return "help";
+    return "hold"; // AID・ローカル編集キー
+  }
+  const { aid, local } = classifyKey(ev);
+  if (aid === "Help") return "help";
+  if (aid !== undefined || local !== undefined) return "hold";
+  // 修飾なしの印字文字（Backspace / Delete / Insert 等の名前付きキーも端末のキー）
+  if (!ev.ctrlKey && !ev.altKey && !ev.metaKey) return "hold";
+  return "pass";
+}
+
 export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => void {
   return (ev: KeyboardEvent) => {
     if (!h.isFocused()) return;

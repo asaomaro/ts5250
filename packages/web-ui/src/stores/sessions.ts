@@ -106,6 +106,16 @@ export interface MacroRuntime {
   message?: string;
 }
 
+/** 先打ちで溜めた 1 キー（`SessionState.typeAhead`）。再生で同じ keydown を組み立て直すのに要る分だけ */
+export interface HeldKey {
+  key: string;
+  code: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+}
+
 export interface SessionState {
   sessionId: string;
   label: string;
@@ -215,6 +225,13 @@ export interface SessionState {
    * 付けるのも外すのもペイン（`EmulatorPane`）、見るのは送信の合流点（`sendKey`）。
    */
   awaitingFieldExit?: number;
+  /**
+   * **先打ちの溜め**（`20260921-type-ahead`）。施錠中に打ったキーを、解錠したら打った順に再生する。
+   * **セッションごとに持つ**——ペインはタブの切り替えで別のセッションへ使い回される（`sessionId` だけが
+   * 差し替わる）ので、ペインに持つと別のセッションへ流れる（独立点検の指摘）。
+   * 溜めるのも流すのもペイン（`EmulatorPane`）。捨てるのはペイン（Reset・Attn 等）と、下の遷移（切断・予約）。
+   */
+  typeAhead?: HeldKey[];
   /**
    * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
@@ -342,6 +359,9 @@ function defineDerivedLink(init: SessionStateInit): SessionState {
 /** 遷移を 1 か所に通す。**`link` へ直接代入しない**（規則は `nextLink`） */
 function applyLink(s: SessionState, ev: LinkEvent): void {
   s.link = nextLink(s.link, ev);
+  // **繋がっていない間に溜めた打鍵は捨てる**——繋ぎ直した後で、いつ打ったか分からないキーが
+  // ホストへ流れないように（ACS に対応物は無い。当 PJ の都合）
+  if (s.link.state !== "connected") delete s.typeAhead;
 }
 
 export const sessionsStore = reactive({
@@ -450,6 +470,7 @@ export const sessionsStore = reactive({
       s.reservedBy = by;
       s.edits.clear();
       delete s.awaitingFieldExit; // 打ちかけを捨てたので、欄を出る待ちも無い
+      delete s.typeAhead; // 利用者の打鍵を自動操作の画面へ流さない（`20260921-type-ahead` D5）
     } else {
       delete s.reservedBy;
     }

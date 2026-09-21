@@ -1,0 +1,64 @@
+# **施錠中（応答待ち）の打鍵を ACS のコアはどう扱うか**（実機。先打ち＝type-ahead）。
+#
+# 原典: `ECLPS.SendKeys` は施錠中・READ 待ちの打鍵を `keyBuffer` に溜め、解錠で再生する。
+# `ECLPS.reset`（Reset）は施錠中なら溜めを捨てて解錠する。AID は `DS5250` の `pending_aid`。
+# 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD` 既定 false）。
+# ここで測るのは **ECL の `SendKeys` の経路**。ACS の GUI の打鍵がこの経路を通るかは別問題（未確認）。
+#
+# 施錠は `DLYJOB DLY(3)` の Enter で作る（応答が 3 秒来ない）。**各場合の `lock-*` が inhibit≠0 で
+# なければ、その場合は無効**（施錠を作れていない）。実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+
+# --- 1) 施錠中に文字を打つ → 解錠後にコマンド行へ入るか ---
+keys [home][eraseeof]DLYJOB DLY(3)[enter]
+sleep 400
+dump lock-1
+keys ABC
+sleep 200
+dump lock-1-typed
+settle 6000
+sleep 500
+dump after-1
+keys [home][eraseeof]
+settle 600
+
+# --- 2) 施錠中に文字と AID を打つ → 解錠後に送られるか（DSPLIBL の画面になるか）---
+keys [home][eraseeof]DLYJOB DLY(3)[enter]
+sleep 400
+dump lock-2
+keys DSPLIBL[enter]
+settle 8000
+sleep 1500
+dump after-2
+keys [pf3]
+settle 1500
+dump back-2
+
+# --- 3) 施錠中に文字を打ってから Reset → 溜めは捨てられるか・解錠されるか ---
+keys [home][eraseeof]DLYJOB DLY(3)[enter]
+sleep 400
+dump lock-3
+keys XYZ
+sleep 200
+keys [reset]
+sleep 300
+dump lock-3-after-reset
+settle 6000
+sleep 500
+dump after-3
+keys [home][eraseeof]
+settle 600
+
+# --- 4) 施錠中に Enter を 2 回（連打）→ 2 回目も送られるか ---
+keys [home][eraseeof]DLYJOB DLY(2)[enter]
+sleep 400
+dump lock-4
+keys [enter]
+settle 8000
+sleep 1500
+dump after-4
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
