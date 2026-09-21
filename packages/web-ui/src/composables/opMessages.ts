@@ -71,6 +71,10 @@ export function isOperatorError(text: string): boolean {
     text === MSG_PROTECTED ||
     text === MSG_DUP_DISALLOWED ||
     text === MSG_FIELD_EXIT_REQUIRED ||
+    // ME / MF / 自己点検も ACS は `setErrorCode` でエラー状態に入る（`20260921-mandatory-check-acs`）
+    text === MSG_MANDATORY_ENTER ||
+    text === MSG_MANDATORY_FILL ||
+    text === MSG_SELF_CHECK ||
     (Object.values(MSG_BY_REASON) as string[]).includes(text)
   );
 }
@@ -368,11 +372,18 @@ export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用でき
  */
 export const MSG_FIELD_EXIT_REQUIRED = "この項目では実行キーを使用できません（Field Exit か Tab で項目を出てください）";
 
-/** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
+/**
+ * ME（必須入力）。**ACS のエラー 0007**（`PS5250.processAIDCode` の `setErrorCode(7)`）。
+ * ~~5250 の操作員エラー 0021 相当~~（番号の誤り）。実機の ACS の文言は「入力必須フィールドである。
+ * データを入力しなければなりません。」。ACS: "Mandatory field not entered."
+ */
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
-/** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
+/**
+ * MF（必須埋め）。**ACS のエラー 0014**（`setErrorCode(20)`＝0x14）。~~0022 相当~~（番号の誤り）。
+ * 実機の ACS の文言は「全桁入力フィールド。終わりまで入力しなければなりません。」。ACS: "Field must be filled."
+ */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";
-/** 自己点検欄（CHECK(M10)/CHECK(M11)）の検査桁が合わない。ACS も同じ場面で送信を止める */
+/** 自己点検欄（CHECK(M10)/CHECK(M11)）の検査桁が合わない。**ACS のエラー 0015**（`setErrorCode(21)`＝0x15） */
 export const MSG_SELF_CHECK = "この項目の検査数字が正しくありません";
 
 /**

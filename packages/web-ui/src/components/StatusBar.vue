@@ -93,7 +93,9 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
       ]
 );
 function press(k: AidKey): void {
-  sendKey(props.state.sessionId, k, props.state.cursor);
+  // **ペインのカーソル（利用者が動かした位置）で送る**。`state.cursor` はホストが最後に置いた位置で、
+  // 動かした後に押すと違う位置をホストへ返し、AID の前の検査（カーソル下の欄の MF 等）も別の欄を見る
+  sendKey(props.state.sessionId, k, props.cursor ?? props.state.cursor);
 }
 
 /**

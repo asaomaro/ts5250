@@ -5,7 +5,7 @@ import ScreenGrid from "../src/components/ScreenGrid.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import { rejectReason } from "../src/composables/fieldValidate.js";
-import { findMandatoryViolation } from "../src/composables/mandatoryCheck.js";
+import { findFieldViolation, findMandatoryEnterViolation } from "../src/composables/mandatoryCheck.js";
 import { MSG_BY_REASON, MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL } from "../src/composables/opMessages.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
@@ -87,60 +87,76 @@ describe("打鍵時の型フィルタ（シフト種別）", () => {
   });
 });
 
+/**
+ * **送信前の必須検証**。判定の形は ACS に合わせた（`20260921-mandatory-check-acs`。実機の ACS で 9 通りを測った）:
+ * ME は MDT で・画面が変更済みのときだけ、MF はその欄 1 つ（AID ならカーソル下の欄）を見る。
+ * ~~ME 欄は内容が空なら違反・全欄を画面順に見る（`20260729-ffw-behavior-bits` D1）~~ は破棄した。
+ */
 describe("送信前の必須検証（MANDATORY_ENTER / MANDATORY_FILL）", () => {
   const noEdits = new Map<number, string>();
 
-  it("MANDATORY_ENTER 欄が空なら違反", () => {
+  it("**ME: 画面を変更していれば、MDT の無い ME 欄が違反**", () => {
     const f = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true });
-    expect(findMandatoryViolation([f], noEdits)).toEqual({ field: f, reason: "mandatory-enter" });
+    const other = fld({ index: 2, row: 6, col: 10, length: 6 });
+    expect(findMandatoryEnterViolation([f, other], new Map([[2, "X"]]))).toEqual({ field: f, reason: "mandatory-enter" });
   });
 
-  it("MANDATORY_ENTER 欄に値があれば通る（未送信の編集を優先して見る）", () => {
+  it("**ME: 画面のどこも変更していなければ見ない**（実機の ACS: 未変更の Enter は送れた）", () => {
     const f = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true });
-    expect(findMandatoryViolation([f], new Map([[1, "A"]]))).toBeUndefined();
+    expect(findMandatoryEnterViolation([f], noEdits)).toBeUndefined();
   });
 
-  it("空白だけは「空」扱い", () => {
+  it("**ME: 内容ではなく MDT で見る**——打ってから消した欄（MDT あり・空）は通る（実機の場合 8）", () => {
     const f = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true });
-    expect(findMandatoryViolation([f], new Map([[1, "   "]]))?.reason).toBe("mandatory-enter");
+    expect(findMandatoryEnterViolation([f], new Map([[1, ""]]))).toBeUndefined();
+    expect(findMandatoryEnterViolation([f], new Map([[1, "   "]]))).toBeUndefined();
   });
 
-  it("MANDATORY_FILL は**部分入力だけ**を弾く（空は通す）", () => {
+  it("ME: ホストが MDT を立てた欄は入力済みとみなす。ホストの MDT も「変更済み」に数える", () => {
+    const me = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true, mdt: true });
+    expect(findMandatoryEnterViolation([me], noEdits)).toBeUndefined();
+    const empty = fld({ index: 2, row: 6, col: 10, length: 6, mandatoryEnter: true });
+    const hostMdt = fld({ index: 3, row: 7, col: 10, length: 6, mdt: true });
+    expect(findMandatoryEnterViolation([empty, hostMdt], noEdits)?.field.index).toBe(2);
+  });
+
+  it("ME: 保護欄は見ない。画面順で最初の違反を返す", () => {
+    const prot = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true, protected: true });
+    const a = fld({ index: 2, row: 6, col: 10, length: 6, mandatoryEnter: true });
+    const b = fld({ index: 3, row: 7, col: 10, length: 6, mandatoryEnter: true });
+    expect(findMandatoryEnterViolation([prot, a, b], new Map([[9, "X"]]))?.field.index).toBe(2);
+  });
+
+  it("MF は**部分入力だけ**を弾く（空・満杯は通す）", () => {
     const f = fld({ index: 1, row: 5, col: 10, length: 6, adjust: "mandatory-fill" });
-    expect(findMandatoryViolation([f], noEdits), "空は通る").toBeUndefined();
-    expect(findMandatoryViolation([f], new Map([[1, "12"]]))?.reason).toBe("mandatory-fill");
-    expect(findMandatoryViolation([f], new Map([[1, "123456"]])), "満杯は通る").toBeUndefined();
+    expect(findFieldViolation(f, noEdits), "空は通る").toBeUndefined();
+    expect(findFieldViolation(f, new Map([[1, "12"]]))?.reason).toBe("mandatory-fill");
+    expect(findFieldViolation(f, new Map([[1, "123456"]])), "満杯は通る").toBeUndefined();
   });
 
-  it("MANDATORY_FILL の桁数は**送信バイト長**で見る（DBCS 欄）", () => {
+  it("MF: MDT の無い欄（ホストの値のまま）は見ない", () => {
+    const f = fld({ index: 1, row: 5, col: 10, length: 6, adjust: "mandatory-fill", value: "12" });
+    expect(findFieldViolation(f, noEdits)).toBeUndefined();
+    expect(findFieldViolation({ ...f, mdt: true }, noEdits)?.reason).toBe("mandatory-fill");
+  });
+
+  it("MF の桁数は**送信バイト長**で見る（DBCS 欄）", () => {
     // length=6 は SO(1)+全角2×2(4)+SI(1) のバイト予算。全角 2 文字で満杯
     const f = fld({ index: 1, row: 5, col: 10, length: 6, adjust: "mandatory-fill", dbcsType: "open" });
-    expect(findMandatoryViolation([f], new Map([[1, "あ"]]))?.reason, "全角1つでは足りない").toBe("mandatory-fill");
-    expect(findMandatoryViolation([f], new Map([[1, "あい"]])), "全角2つで満杯").toBeUndefined();
+    expect(findFieldViolation(f, new Map([[1, "あ"]]))?.reason, "全角1つでは足りない").toBe("mandatory-fill");
+    expect(findFieldViolation(f, new Map([[1, "あい"]])), "全角2つで満杯").toBeUndefined();
   });
 
-  it("保護欄は検査しない", () => {
-    const f = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true, protected: true });
-    expect(findMandatoryViolation([f], noEdits)).toBeUndefined();
-  });
-
-  it("**非表示欄で未編集のものは検査しない**（値を持てないので判定できない）", () => {
-    const f = fld({ index: 1, row: 5, col: 10, length: 6, mandatoryEnter: true, hidden: true });
-    expect(findMandatoryViolation([f], noEdits)).toBeUndefined();
-    // 打ってあれば edits から見える
-    expect(findMandatoryViolation([f], new Map([[1, "  "]]))?.reason).toBe("mandatory-enter");
-  });
-
-  it("画面順で最初の違反を返す", () => {
-    const a = fld({ index: 1, row: 5, col: 10, length: 6, adjust: "mandatory-fill" });
-    const b = fld({ index: 2, row: 6, col: 10, length: 6, mandatoryEnter: true });
-    expect(findMandatoryViolation([a, b], new Map([[1, "12"]]))?.field.index).toBe(1);
-    expect(findMandatoryViolation([a, b], new Map([[1, "123456"]]))?.field.index).toBe(2);
+  it("保護欄・欄の外は見ない", () => {
+    const f = fld({ index: 1, row: 5, col: 10, length: 6, adjust: "mandatory-fill", protected: true });
+    expect(findFieldViolation(f, new Map([[1, "12"]]))).toBeUndefined();
+    expect(findFieldViolation(undefined, noEdits)).toBeUndefined();
   });
 
   it("指定の無い欄は空でも通る", () => {
     const f = fld({ index: 1, row: 5, col: 10, length: 6 });
-    expect(findMandatoryViolation([f], noEdits)).toBeUndefined();
+    expect(findFieldViolation(f, noEdits)).toBeUndefined();
+    expect(findMandatoryEnterViolation([f], new Map([[1, ""]]))).toBeUndefined();
   });
 });
 
@@ -259,19 +275,25 @@ describe("ScreenGrid: MONOCASE / FER / AUTO_ENTER", () => {
 // EmulatorPane（送信を止めるかどうか）
 // ---------------------------------------------------------------------------
 
-describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
+/**
+ * **いつ止めるかは ACS に合わせる**（`20260921-mandatory-check-acs`。実機の ACS で 9 通りを測った）。
+ * ~~必須検証は Enter のときだけ（`20260729-ffw-behavior-bits` D1）~~ は破棄した——ACS は全 AID で止め、
+ * **ME だけは CA キー（SOH の申告）で見ない**。D1 が恐れた「必須欄が空の画面から F3 で抜けられない」は、
+ * F3 が CA キーなら起きない（実機: ME が空でも CA03 の F3 で抜けられた）。
+ */
+describe("EmulatorPane: 必須検証（ACS に合わせたタイミング）", () => {
   const SID = "s1";
   let sent: unknown[] = [];
   let mounted: ReturnType<typeof mount>[] = [];
 
-  function seed(fields: Field[]): void {
+  function seed(fields: Field[], caKeys?: number[]): void {
     sent = [];
     sessionsStore.byId.clear();
     sessionsStore.order = [];
     sessionsStore.add({
       sessionId: SID,
       label: "t",
-      snapshot: snapOf(fields),
+      snapshot: { ...snapOf(fields), ...(caKeys ? { caKeys } : {}) },
       edits: new Map(),
       cursor: { row: 5, col: 10 },
       link: { state: "connected" },
@@ -306,38 +328,62 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
     document.body.innerHTML = "";
   });
 
-  it("MANDATORY_ENTER 欄が空だと Enter を送らずメッセージを出す", async () => {
-    seed([fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true })]);
+  /** ME 欄（5 行目）と、画面を「変更済み」にするための素の欄（6 行目） */
+  const ME = () => fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true });
+  const PLAIN = () => fld({ index: 2, row: 6, col: 10, length: 5 });
+
+  it("**ME 欄が空で画面を変更していれば、Enter を送らずメッセージを出す**", async () => {
+    seed([ME(), PLAIN()]);
+    sessionsStore.get(SID)!.edits.set(2, "X");
     const w = mountPane();
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "Enter" });
+    await nextTick();
     expect(sent, "ホストへ送ってしまっている").toEqual([]);
     expect(statusText(w)).toContain(MSG_MANDATORY_ENTER);
   });
 
-  it("MANDATORY_FILL 欄が部分入力だと Enter を送らずメッセージを出す", async () => {
+  it("**画面を変更していなければ ME は見ない**（実機の ACS: 未変更の Enter は送れた）", async () => {
+    seed([ME(), PLAIN()]);
+    const w = mountPane();
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Enter" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("MF 欄が部分入力で、カーソルがその欄にあれば Enter を送らずメッセージを出す", async () => {
     seed([fld({ index: 1, row: 5, col: 10, length: 5, adjust: "mandatory-fill" })]);
     sessionsStore.get(SID)!.edits.set(1, "12");
     const w = mountPane();
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "Enter" });
+    await nextTick();
     expect(sent).toEqual([]);
     expect(statusText(w)).toContain(MSG_MANDATORY_FILL);
   });
 
-  it("**F3 は止めない**（必須欄が空でも画面から出られる）", async () => {
-    // 止めると必須欄が空の画面から抜けられなくなり利用者が詰む。
-    // ホストはこの検証をしないので、こちらが止めれば本当に止まる
-    seed([fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true })]);
+  it("**CA キー（SOH の申告）の F3 は ME を見ない**（必須欄が空でも画面から出られる）", async () => {
+    seed([ME(), PLAIN()], [3, 12]);
+    sessionsStore.get(SID)!.edits.set(2, "X");
     const w = mountPane();
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "F3" });
-    expect(sent, "F3 が送られていない").toHaveLength(1);
+    expect(sent, "CA キーの F3 が送られていない").toHaveLength(1);
     expect(statusText(w)).not.toContain(MSG_MANDATORY_ENTER);
   });
 
+  it.each(["F3", "F6", "PageDown"])("**CA キーでない %s は ME で止める**（Enter に限らない）", async (key) => {
+    seed([ME(), PLAIN()], [12]);
+    sessionsStore.get(SID)!.edits.set(2, "X");
+    const w = mountPane();
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key });
+    expect(sent, `${key} が送られた`).toEqual([]);
+  });
+
   it("条件を満たしていれば Enter は通る", async () => {
-    seed([fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true, value: "ABC" })]);
+    seed([ME(), PLAIN()]);
+    sessionsStore.get(SID)!.edits.set(1, "ABC");
     const w = mountPane();
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "Enter" });
@@ -360,7 +406,8 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
    */
   describe("送信経路が複数あることの回帰（OIA ボタン相当）", () => {
     it("sendKey を直に呼んでも Enter は止まる", async () => {
-      seed([fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true })]);
+      seed([ME(), PLAIN()]);
+      sessionsStore.get(SID)!.edits.set(2, "X");
       const { sendKey } = await import("../src/session-controller.js");
       const hit = sendKey(SID, "Enter", { row: 5, col: 10 });
       expect(sent, "ボタン経由でホストへ抜けている").toEqual([]);
@@ -368,8 +415,9 @@ describe("EmulatorPane: 必須検証は Enter のときだけ", () => {
       expect(sessionsStore.get(SID)!.notice).toBe(MSG_MANDATORY_ENTER);
     });
 
-    it("sendKey を直に呼んだ F3 は止まらない", async () => {
-      seed([fld({ index: 1, row: 5, col: 10, length: 5, mandatoryEnter: true })]);
+    it("sendKey を直に呼んだ CA キーの F3 は止まらない", async () => {
+      seed([ME(), PLAIN()], [3]);
+      sessionsStore.get(SID)!.edits.set(2, "X");
       const { sendKey } = await import("../src/session-controller.js");
       expect(sendKey(SID, "F3", { row: 5, col: 10 })).toBeUndefined();
       expect(sent).toHaveLength(1);

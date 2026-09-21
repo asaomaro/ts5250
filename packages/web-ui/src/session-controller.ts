@@ -37,7 +37,12 @@ import {
 import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
-import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
+import {
+  findFieldViolation,
+  findMandatoryEnterViolation,
+  type MandatoryFinding
+} from "./composables/mandatoryCheck.js";
+import { fieldAt } from "./composables/useCursor.js";
 import {
   MSG_MANDATORY_ENTER,
   MSG_MANDATORY_FILL,
@@ -1143,6 +1148,43 @@ export function stopPrinter(sessionId: string): void {
  */
 
 
+/** 検査で止めたときの操作員メッセージ */
+const MSG_BY_VIOLATION: Record<MandatoryFinding["reason"], string> = {
+  "mandatory-fill": MSG_MANDATORY_FILL,
+  "field-exit-required": MSG_FIELD_EXIT_REQUIRED,
+  "self-check": MSG_SELF_CHECK,
+  "mandatory-enter": MSG_MANDATORY_ENTER
+};
+
+/** その AID キーが SOH で申告された CA キー（欄データを返さない F キー）か */
+function isCaKey(key: AidKey, caKeys: readonly number[] | undefined): boolean {
+  const m = /^F(\d+)$/.exec(key);
+  return m !== null && caKeys !== undefined && caKeys.includes(Number(m[1]));
+}
+
+/**
+ * AID の前の検査（順序は ACS `PS5250.processAIDCode`）。止めるならその違反を返す。
+ * 0020 の待ち（`awaitingFieldExit`）はペインが付け外しする（カーソルがその欄にいる間だけ付いている）。
+ */
+function checkBeforeAid(
+  s: SessionState,
+  key: AidKey,
+  pos: { row: number; col: number }
+): MandatoryFinding | undefined {
+  const snap = s.snapshot!;
+  const here = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
+  const fill = findFieldViolation(here, s.edits);
+  if (fill?.reason === "mandatory-fill") return fill;
+  if (s.awaitingFieldExit !== undefined) {
+    const f = snap.fields.find((x) => x.index === s.awaitingFieldExit);
+    if (f) return { field: f, reason: "field-exit-required" };
+  }
+  if (fill) return fill; // 自己点検
+  // ME は CA キーでは見ない（`DS5250.isSOH_PF`。実機: ME が空でも F3＝CA03 で抜けられた）
+  if (isCaKey(key, snap.caKeys)) return undefined;
+  return findMandatoryEnterViolation(snap.fields, s.edits);
+}
+
 export function sendKey(
   sessionId: string,
   key: AidKey,
@@ -1158,29 +1200,14 @@ export function sendKey(
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
   if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
-  // **右寄せ・符号付き数値の欄に打ったまま、欄を出ずに AID は送らない**（ACS のエラー 0020。
-  // `PS5250.processAIDCode`。`20260921-aid-without-field-exit`）。出ずに送ると右寄せされず
-  // 左詰めのままホストへ届く。**Enter に限らない**——F3（CA キー）も Roll も実機の ACS で止まった
-  // （research F2）。原典が外すのは Help と Clear だけ（フラグキーは AID ではない）。
-  // 待ちの有無はペインが付け外しする（カーソルがその欄にいる間だけ付いている）。
-  if (s.awaitingFieldExit !== undefined && !isFlagKey(key) && key !== "Help" && key !== "Clear") {
-    const f = s.snapshot?.fields.find((x) => x.index === s.awaitingFieldExit);
-    if (f) {
-      s.notice = MSG_FIELD_EXIT_REQUIRED;
-      return { field: f, reason: "field-exit-required" };
-    }
-  }
-  // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
-  // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
-  if (key === "Enter" && s.snapshot) {
-    const hit = findMandatoryViolation(s.snapshot.fields, s.edits);
+  // **AID の前の検査**（ACS `PS5250.processAIDCode` と同じ順。`20260921-mandatory-check-acs`）:
+  //   1) カーソル下の欄の MF  2) 0020（欄を出ずに AID）  3) カーソル下の欄の自己点検  4) ME（CA キーは見ない）
+  // **Enter に限らない**——F キー・Roll でも止まる（実機の ACS で確かめた）。原典が外すのは Help と Clear だけ
+  // （フラグキーは AID ではない）。~~Enter のときだけ検証する（`20260729-ffw-behavior-bits` D1）~~ は破棄した
+  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && s.snapshot) {
+    const hit = checkBeforeAid(s, key, cursor ?? s.cursor);
     if (hit) {
-      s.notice =
-        hit.reason === "mandatory-enter"
-          ? MSG_MANDATORY_ENTER
-          : hit.reason === "self-check"
-            ? MSG_SELF_CHECK
-            : MSG_MANDATORY_FILL;
+      s.notice = MSG_BY_VIOLATION[hit.reason];
       return hit;
     }
   }

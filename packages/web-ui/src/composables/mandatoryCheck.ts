@@ -4,12 +4,16 @@ import { selfCheckDigitOk } from "@ts5250/tn5250/browser";
 import { dbcsByteLength } from "./fieldValidate.js";
 
 /**
- * **送信前の必須検証**（FFW の `MANDATORY_ENTER` 0x0008 / `MANDATORY_FILL` 0x0007）。
+ * **送信前の必須検証**（FFW の `MANDATORY_ENTER` 0x0008 / `MANDATORY_FILL` 0x0007 と自己点検）。
  *
  * ホストはこれを検証しない——実機で `CHECK(ME)` 欄を空・`CHECK(MF)` 欄を部分入力のまま
  * Enter を送ったところ、RPG が値をそのまま受け取った（`scripts/research-ffw.mjs` の実験 A）。
- * 参照実装も AID 送信時の検証を持たない（GNU tn5250 は検証自体が無く、tn5250j は Field Exit の
- * 中だけ）。**端末が止めなければ誰も止めない。**
+ * **端末が止めなければ誰も止めない。**
+ *
+ * **いつ・何で判定するかは ACS に合わせる**（`20260921-mandatory-check-acs`。実機の ACS で 9 通りを測った）:
+ * ME は全 AID（CA キーを除く）で・MDT で・画面が変更済みのときだけ、MF と自己点検はカーソル下の欄だけを
+ * AID のときと欄を出るときに見る。~~Enter のときだけ・全欄を内容で判定する（`20260729-ffw-behavior-bits` D1）~~
+ * は破棄した。
  *
  * `ScreenGrid.vue` ではなくここに置くのは、判定が純関数で単体テストできるため
  * （コンポーネントに埋めると「空振りしていないか」を確かめる手段が無くなる）。
@@ -21,41 +25,63 @@ export interface MandatoryFinding {
   reason: MandatoryViolation;
 }
 
+/** 欄の MDT（ホストが立てた MDT か、未送信の編集がある。ACS `Field5250.isMDTField` 相当） */
+function mdtOf(f: Field, edits: ReadonlyMap<number, string>): boolean {
+  return f.mdt || edits.has(f.index);
+}
+
 /**
- * 画面順で**最初の**違反を返す（無ければ undefined）。
- *
- * @param fields  画面の全フィールド（保護欄は自動で除外する）
- * @param edits   未送信の編集（`fieldIndex → 値`）。打鍵のたびに更新されるので、
- *                snapshot の `value` より新しい。**こちらを優先する**
+ * **MF（必須埋め）の違反か**（ACS `Field5250.checkMandatoryFillField`）。
+ * MF 欄で MDT があり、**満杯でも空でもない**（部分入力）とき。空を弾くのは ME の役目で別の指定。
+ * 空の判定は従来どおり空白も空とみなす（ACS はヌルだけを空とみなす。空白だけ打った欄の差は未確認）。
  */
-export function findMandatoryViolation(
+export function mandatoryFillViolated(f: Field, edits: ReadonlyMap<number, string>): boolean {
+  if (f.adjust !== "mandatory-fill" || !mdtOf(f, edits)) return false;
+  const value = edits.get(f.index) ?? f.value;
+  return value.trim().length > 0 && !isFull(f, value);
+}
+
+/**
+ * **自己点検（CHECK(M10)/CHECK(M11)）の違反か**（ACS `Field5250.checkModulusField`。MDT は見ない）。
+ * **非表示欄で未編集のものは見ない**（snapshot は値を持たないので判定できない。分からないものは弾かない）。
+ */
+export function selfCheckViolated(f: Field, edits: ReadonlyMap<number, string>): boolean {
+  if (f.selfCheck === undefined) return false;
+  const edited = edits.get(f.index);
+  if (f.hidden && edited === undefined) return false;
+  const value = edited ?? f.value;
+  return value.trim().length > 0 && !selfCheckDigitOk(value, f.selfCheck);
+}
+
+/**
+ * **1 つの欄の検査**（MF → 自己点検の順）。AID のときは**カーソル下の欄**に、**欄を出るとき**は出る欄に掛ける
+ * （ACS `PS5250.processAIDCode` / `moveCursorWithMandFillCheck`。実機でも、カーソルの無い欄の部分入力は
+ * Enter で送れ、Tab で出ようとすると止まった。research F2 の場合 6・7）。
+ */
+export function findFieldViolation(
+  f: Field | undefined,
+  edits: ReadonlyMap<number, string>
+): MandatoryFinding | undefined {
+  if (!f || f.protected) return undefined;
+  if (mandatoryFillViolated(f, edits)) return { field: f, reason: "mandatory-fill" };
+  if (selfCheckViolated(f, edits)) return { field: f, reason: "self-check" };
+  return undefined;
+}
+
+/**
+ * **ME（必須入力）の違反**（ACS `FFT5250.checkMandatoryFieldCheck`）。画面順で最初のものを返す。
+ *
+ * - **内容ではなく MDT で判定する**——打ってから消した欄（MDT あり・空）は通る（実機の場合 8）
+ * - **画面のどこも変更していなければ見ない**（ACS の `masterMDT`。実機の場合 1: 未変更の Enter は送れた）
+ * - CA キー（SOH の申告）では呼ばないこと（呼び出し側の `sendKey` が決める）
+ */
+export function findMandatoryEnterViolation(
   fields: readonly Field[],
   edits: ReadonlyMap<number, string>
 ): MandatoryFinding | undefined {
-  for (const f of fields) {
-    if (f.protected) continue;
-    const edited = edits.get(f.index);
-    // **非表示欄（パスワード等）は snapshot が値を持たない**（`value: hidden ? "" : ...`）。
-    // 未編集なら「空」と「打ってあるが見えない」を区別できないので検査しない
-    // （分からないものを弾かない側へ倒す）。
-    if (f.hidden && edited === undefined) continue;
-    const value = edited ?? f.value;
-    const filled = value.trim().length > 0;
-
-    if (f.mandatoryEnter && !filled) return { field: f, reason: "mandatory-enter" };
-
-    // 自己点検欄（CHECK(M10)/CHECK(M11)）。ACS も AID 送信時に検算して止める
-    if (f.selfCheck !== undefined && filled && !selfCheckDigitOk(value, f.selfCheck)) {
-      return { field: f, reason: "self-check" };
-    }
-
-    // MANDATORY_FILL は「全部埋める」か「全部空」のどちらか（DDS の CHECK(MF) の定義）。
-    // **部分入力だけを弾く**——空を弾くのは MANDATORY_ENTER の役目で、別の指定。
-    if (f.adjust === "mandatory-fill" && filled && !isFull(f, value)) {
-      return { field: f, reason: "mandatory-fill" };
-    }
-  }
-  return undefined;
+  if (edits.size === 0 && !fields.some((f) => f.mdt)) return undefined;
+  const hit = fields.find((f) => !f.protected && f.mandatoryEnter === true && !mdtOf(f, edits));
+  return hit ? { field: hit, reason: "mandatory-enter" } : undefined;
 }
 
 /**

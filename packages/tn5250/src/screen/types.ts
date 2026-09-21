@@ -350,6 +350,12 @@ export interface ScreenSnapshot {
    * ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。**点いているときだけ付与する**（消灯は省略）。
    */
   messageWaiting?: boolean;
+  /**
+   * **SOH が「欄データを返さない」と申告した F キーの番号**（1〜24。DDS の `CAnn`＝コマンド・アテンション）。
+   * 申告が無ければ省略。UI は ME（必須入力）の検査をこのキーでは行わない
+   * （ACS `DS5250.isSOH_PF` → `PS5250.processAIDCode`。`20260921-mandatory-check-acs`）。
+   */
+  caKeys?: number[];
   /** 拡張 5250 GUI コントロール（存在する場合のみ。空なら省略） */
   gui?: GuiConstructs;
   /**

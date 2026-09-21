@@ -26,8 +26,8 @@ import { play } from "../macro-engine.js";
 import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
-import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError } from "../composables/opMessages.js";
-import { needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
+import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "../composables/opMessages.js";
+import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
 
@@ -147,6 +147,25 @@ function noteFieldExited(): void {
 // **カーソルが待ちの欄を出たら外す**。Tab・矢印・クリック・欄頭の Backspace など経路を問わない
 // ——どれもカーソル位置の変化として現れる。欄の中での移動では外さない（ACS も欄の中の矢印では
 // フラグを立てない。実機で右矢印のあとも 0020 だった。research F2 の場合 5）
+/**
+ * **欄を出るときの MF・自己点検**（ACS `PS5250.moveCursorWithMandFillCheck`。Tab・Backtab・Home・Newline・
+ * カーソル移動・Field Exit・Dup・マウスでの移動が通る。`20260921-mandatory-check-acs`）。
+ * 出た欄が部分入力の MF か検査桁の合わない自己点検なら、操作員エラーにして**その欄の先頭へ戻す**
+ * （実機の ACS: MF に `AB` と打って Tab → 欄の先頭でエラー。research F2 の場合 6）。
+ * 経路ではなくカーソル位置の変化で見る（0020 の待ちと同じ考え方）。**新しい画面での移動は対象外**
+ * （打ちかけは捨てられている）。
+ */
+watch([cursor, snapshot], ([pos, snap], [oldPos, oldSnap]) => {
+  const st = state.value;
+  if (!st || !snap || snap !== oldSnap || !oldPos) return;
+  const from = fieldAt(oldPos.row, oldPos.col, snap.fields, snap.cols, snap.rows);
+  if (!from) return;
+  if (fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows)?.index === from.index) return;
+  const hit = findFieldViolation(from, st.edits);
+  if (!hit) return;
+  showNotice(hit.reason === "mandatory-fill" ? MSG_MANDATORY_FILL : MSG_SELF_CHECK);
+  focusMandatoryViolation(hit); // 欄の先頭へ
+});
 watch(cursor, (pos) => {
   const st = state.value, snap = snapshot.value;
   if (st?.awaitingFieldExit === undefined || !snap) return;

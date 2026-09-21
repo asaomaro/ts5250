@@ -46,6 +46,13 @@ describe("SOH のマスク（欄データを送らない AID キー）", () => {
     expect(b.sendsDataForAid(24)).toBe(true);
   });
 
+  it("**スナップショットに CA キーの番号が載る**（UI の ME 検査が見る。`20260921-mandatory-check-acs`）", () => {
+    const b = new ScreenBuffer();
+    expect(b.snapshot("s").caKeys, "申告が無ければ省略").toBeUndefined();
+    b.setHeaderData(HEADER_CA03_CA12);
+    expect(b.snapshot("s").caKeys).toEqual([3, 12]);
+  });
+
   it("24 ビットの並びは F24〜F17 / F16〜F9 / F8〜F1（各バイトは LSB が小さい番号）", () => {
     const b = new ScreenBuffer();
     b.setHeaderData([0, 0, 0, 24, 0x01, 0x00, 0x80]); // F17 と F8

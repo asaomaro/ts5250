@@ -1399,6 +1399,10 @@ export class ScreenBuffer {
       fields
     };
     if (this.systemMessage !== undefined) snap.systemMessage = this.systemMessage;
+    // CA キー（SOH の申告）。UI の ME 検査が見る（`sendsDataForAid` と同じビットの並び）
+    const caKeys: number[] = [];
+    for (let n = 1; n <= 24; n++) if (!this.sendsDataForAid(n)) caKeys.push(n);
+    if (caKeys.length > 0) snap.caKeys = caKeys;
     const gui = this.guiSnapshot();
     if (gui) snap.gui = gui;
     snap.lastWrite = { ...this.lastWrite };
