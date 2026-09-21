@@ -66,8 +66,10 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
   2: {
     // ローカル編集キー。ブラウザ既定（単語削除・履歴戻る）は捕捉時に preventDefault で抑える
     "ctrl+Enter": "local:field-exit",
-    "ctrl+Delete": "local:erase-eof",
-    "ctrl+Backspace": "local:erase-input"
+    // ~~"ctrl+Delete": "local:erase-eof"・"ctrl+Backspace": "local:erase-input"~~ → ACS の既定に直した（`20260922-delete-word`）。
+    // ACS の `C127 = [deleteword]`（Ctrl+Delete＝カーソルの語を消す）で、`C8`（Ctrl+Backspace）の割り当ては無い・Erase EOF の既定キーも無い
+    // （`AcsMapFunctions.MAP_5250`）。語を消す習慣で押すと欄の残りや全欄が消えていた。版 2〜4 で保存した人の古い組は下の `CORRECTED_BY_VERSION` が直す
+    "ctrl+Delete": "local:delete-word"
   },
   3: {
     // 符号確定と Dup。実機は数値キーパッドの `-` / `+` / Dup キーだが PC には無いので
@@ -105,12 +107,25 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
  * **既定そのものを誤っていた版の訂正**。その版より前に保存した人の値が**古い既定のまま**なら、新しい既定へ置き換える。
  * 組で持つのは、片方だけ変えた人（入れ替えた・消した）の意図を壊さないため——**組が丸ごと古い既定のときだけ**直す。
  */
-const CORRECTED_BY_VERSION: Record<number, { from: Record<string, BindingTarget>; to: Record<string, BindingTarget> }> = {
-  // Ctrl+F1 / Ctrl+F3 の向き（ACS は Ctrl+F1 = SO/SI 表示・Ctrl+F3 = 表示切替。上の版 1 の注記）
-  4: {
-    from: { "ctrl+F1": "view:kana", "ctrl+F3": "view:sosi" },
-    to: { "ctrl+F1": "view:sosi", "ctrl+F3": "view:kana" }
-  }
+interface Correction {
+  from: Record<string, BindingTarget>;
+  /** `null` は**割り当てを外す**（ACS に既定が無いキー） */
+  to: Record<string, BindingTarget | null>;
+}
+const CORRECTED_BY_VERSION: Record<number, Correction[]> = {
+  4: [
+    // Ctrl+F1 / Ctrl+F3 の向き（ACS は Ctrl+F1 = SO/SI 表示・Ctrl+F3 = 表示切替。上の版 1 の注記）
+    {
+      from: { "ctrl+F1": "view:kana", "ctrl+F3": "view:sosi" },
+      to: { "ctrl+F1": "view:sosi", "ctrl+F3": "view:kana" }
+    }
+  ],
+  // Ctrl+Delete は Delete Word（ACS `C127`）・Ctrl+Backspace は割り当て無し（`C8` 無し）。**キーごとに独立して直す**（片方だけ変えた人の意図を壊さない）。
+  // Erase EOF・Erase Input を Ctrl+Delete・Ctrl+Backspace に割り当てていた古い既定のままの人だけが対象（`20260922-delete-word`）
+  5: [
+    { from: { "ctrl+Delete": "local:erase-eof" }, to: { "ctrl+Delete": "local:delete-word" } },
+    { from: { "ctrl+Backspace": "local:erase-input" }, to: { "ctrl+Backspace": null } }
+  ]
 };
 
 /**
@@ -126,7 +141,7 @@ export const DEFAULT_BINDINGS: Record<string, BindingTarget> = Object.assign(
 const VERSION_KEY = "as400.keybindings.version";
 /** いまの既定バインドの版。**テストが版番号を直書きしないよう公開する**
  *  （直書きすると既定を 1 つ足して版を上げるたびに無関係なテストが落ちる）。 */
-export const BINDINGS_VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number));
+export const BINDINGS_VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number), ...Object.keys(CORRECTED_BY_VERSION).map(Number));
 const VERSION = BINDINGS_VERSION;
 
 function load(): Record<string, BindingTarget> {
@@ -144,8 +159,13 @@ function load(): Record<string, BindingTarget> {
       for (let v = savedVersion + 1; v <= VERSION; v++) Object.assign(added, ADDED_BY_VERSION[v] ?? {});
       const merged = { ...added, ...saved };
       for (let v = savedVersion + 1; v <= VERSION; v++) {
-        const fix = CORRECTED_BY_VERSION[v];
-        if (fix && Object.entries(fix.from).every(([k, t]) => merged[k] === t)) Object.assign(merged, fix.to);
+        for (const fix of CORRECTED_BY_VERSION[v] ?? []) {
+          if (!Object.entries(fix.from).every(([k, t]) => merged[k] === t)) continue;
+          for (const [k, t] of Object.entries(fix.to)) {
+            if (t === null) delete merged[k];
+            else merged[k] = t;
+          }
+        }
       }
       localStorage.setItem(KEY, JSON.stringify(merged));
       localStorage.setItem(VERSION_KEY, String(VERSION));

@@ -499,12 +499,24 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `field-full` の第 3 引数 `leaving`（Field Exit・Field±・Dup）で `EmulatorPane.vue` の `indexAfterLeaving` が行き先を決める（継続欄の 2 区間目以降を飛ばし、無ければ先頭へ巡回。打鍵の満杯の自動送りは ACS も次の区間なので従来どおり）。
   単体 16 件（`continued-field-exit.test.ts`）、mutation 18 通りのうち 16 通り検出（残り 2 つは等価変異: 単独欄の早期 return と、満杯直後の Field Exit の `erases`〔続く区間を持つ区間に「出た」状態は付かない〕）。
   ~~「継続欄の実測は挿入だけ」~~ は解消した。**未確認のまま残したもの**: DBCS の継続欄・CNTFLD の複数行欄（EDTMSK の日付欄だけ測った。原典の規則は同じ）。
+- [x] **Ctrl+Delete を Delete Word にし、Ctrl+Backspace の既定を外す**（下の「キー編集の細部」の R11 (h) の前半）。**完了（`20260921-delete-word`・PR #410）**:
+  ACS の既定の割り当て（`AcsMapFunctions.MAP_5250`）は `C127 = [deleteword]`・`C8`（Ctrl+Backspace）無し・Erase EOF の既定キー無し（Erase Input は `A35`＝Alt+End）。
+  当 PJ は Ctrl+Delete＝Erase EOF・Ctrl+Backspace＝Erase Input を既定にしていて（`20260729-field-adjust-local-edit-keys`。ACS の裏づけ無し）、語を消す習慣で押すと欄の残りや全欄が消えた。
+  実機の ACS のコア（社内機・930。`scripts/acs-probe/delete-word.txt`・`continued-field-erase-exit.txt` の B8）で `[deleteword]` を測った——語頭は語＋続く空白・語の途中はカーソルから語の終わりまで・
+  空白の上と全角は 1 字・記号は語の一部（区切りは空白だけ）・全角の直後の半角は語頭・半角の語は全角で止まる・継続欄は鎖を 1 つの欄として数える。
+  **操作員エラーの間、`[delete]` は拒否されるが `[deleteword]` はエラーを抜けて語を消す**（ACS `keyDown` の拒否の一覧に無い）。
+  `deleteWordLength`・`deleteWord`（`packages/web-ui/src/composables/fieldEdit.ts`）と `deleteWordKey`（`ScreenGrid.vue`）、`local:delete-word`（`useKeymap.ts`・`EmulatorPane.vue`・`KeybindingsPanel.vue`）。
+  既定は Ctrl+Delete＝Delete Word・Ctrl+Backspace＝割り当て無し・Erase EOF＝既定キー無し（`keybindings.ts`）。保存済みの割り当てで古い既定のままの人だけ、`CORRECTED_BY_VERSION[5]`
+  （キーごとに独立した訂正の配列へ作り替え、`null` で割り当てを外せるようにした）で新しい既定へ移す。割り当て無しの修飾付き Backspace・Delete は preventDefault して何もしない
+  （通すとブラウザの語削除が <input> の値だけを書き換える）。単体・結合 33 件＋既定キーのテスト、mutation 22 通り（1 つは `hasKeyBinding` の有無で挙動が変わらない等価変異）検出。
+  ~~`20260729-field-adjust-local-edit-keys` の「Ctrl+Delete＝Erase EOF・Ctrl+Backspace＝Erase Input」~~ を破棄した（ACS の既定と食い違うため。README も直した）。
+  **未確認のまま残したもの**: 欄内の選択があるときの `[deleteword]`（当 PJ は選択に触れない。ACS の Delete 系は選択に触れない）・NUL を空白と数えるか（当 PJ は空白 `" "` だけ）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
     台帳に無かった。IME を切った Space で日常的に起きる）／~~(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の
-    「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) Ctrl+Delete は ACS では
-    `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）・`¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
+    「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
+    `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
     (j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける／(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
     (q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
     **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。

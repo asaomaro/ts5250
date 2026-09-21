@@ -10,6 +10,8 @@ import {
   insertChar,
   backspace,
   del,
+  deleteWord,
+  deleteWordLength,
   moveCursor,
   end,
   continuedEnd,
@@ -28,6 +30,7 @@ import {
   dbcsByteLength,
   dbcsViewLayout,
   columnViewLayout,
+  isWideForDbcs,
   isFullWidth,
   isCertainWideGlyph,
   type DbcsViewLayout,
@@ -2202,6 +2205,14 @@ function dbcsDelete(e: EditState, f: Field): EditState {
   chars.splice(e.cursor, 1);
   return { ...e, chars: padDbcs(f, chars) };
 }
+/** Delete Word（DBCS の欄）: 全角は 1 字ずつ、半角の語は `deleteWordLength` の規則（実機の ACS で `AA あい BB` の各位置を測った） */
+function dbcsDeleteWord(e: EditState, f: Field): EditState {
+  const n = deleteWordLength(e.chars, e.cursor, isWideForDbcs);
+  if (n === 0) return e;
+  const chars = [...e.chars];
+  chars.splice(e.cursor, n);
+  return { ...e, chars: padDbcs(f, chars) };
+}
 function dbcsMove(e: EditState, delta: number): EditState {
   return { ...e, cursor: Math.max(0, Math.min(e.cursor + delta, e.chars.length)) };
 }
@@ -2555,6 +2566,32 @@ function eraseEofKey(): void {
 }
 
 /**
+ * Delete Word（ACS の Ctrl+Delete＝`[deleteword]`。`20260922-delete-word`）: カーソルの語を消して後ろを左へ詰める。**欄は出ず・カーソルも動かさない**。
+ * 範囲は `deleteWordLength`（実機の ACS のコアで測った）。継続欄は区間の並びを 1 つの欄として数える（実機: `1234/56/78` の 1 区間目の 2 桁目で `1   /  /  `）。
+ * MDT は消えるものが無くても立てる（`processDeleteChar` は `setMDT`。Delete と同じ）。欄内の選択は見ない（ACS の Delete 系は選択に触れない）
+ */
+function deleteWordKey(): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  fieldExitedIndex = -1; // 文字以外のキーの後は「出た」状態を下ろす（ACS）
+  mdtKeyed = true;
+  if (t.f.continued !== undefined && !isDbcsEdit(t.f)) {
+    editAcrossContinued(t.f, deleteWord);
+    return;
+  }
+  if (isDbcsEdit(t.f)) {
+    edit = dbcsDeleteWord(edit, t.f);
+    syncDbcs(t.el, t.f);
+    return;
+  }
+  edit = deleteWord(edit);
+  sync(t.el, t.f);
+}
+
+/**
  * Erase Input: 画面上のすべての入力欄をクリアする。
  *
  * **中身のある欄だけ**を対象にする。もともと空の欄まで編集扱いにすると、触っていない欄に
@@ -2870,11 +2907,16 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     }
   }
 
-  // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete / Ctrl+Backspace 等はキー設定で
-  // ローカル編集キー（Erase EOF / Erase Input）に割り当てられており、ここで素の Delete /
-  // Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに全欄が消える）。
+  // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete 等はキー設定でローカル編集キー（Delete Word など）に割り当てられており、
+  // ここで素の Delete / Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに語も消える）。
   // 矢印キーが以前から同じ理由で修飾キーを除外しているのと同じ扱いに揃える。
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  // **割り当ての無い修飾キー付きの Backspace・Delete は何もしない**（ACS の Ctrl+Backspace＝`C8` は割り当て無し。`20260922-delete-word`）。
+  // 通すと、ブラウザの既定（語の削除）が <input> の値だけを書き換えて編集モデルとずれる（以前は Ctrl+Backspace が Erase Input に割り当たっていて止まっていた）
+  if ((ev.key === "Backspace" || ev.key === "Delete") && !plain && !hasKeyBinding(ev)) {
+    ev.preventDefault();
+    return;
+  }
   // 割り当てのあるキー（ACS の既定 Shift+Insert = Dup など）はペインのキーマップへ委ねる
   if (ev.key === "Insert" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
@@ -3067,6 +3109,11 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   const k = ev.key;
   // SBCS 欄と同じ理由で修飾キー付きは欄内編集で消費しない（ローカル編集キーの割り当てと二重に効く）
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  // 割り当ての無い修飾キー付きの Backspace・Delete は何もしない（SBCS 欄と同じ。ブラウザの語削除で <input> の値だけが変わるのを止める）
+  if ((k === "Backspace" || k === "Delete") && !plain && !hasKeyBinding(ev)) {
+    ev.preventDefault();
+    return;
+  }
   if (k === "Backspace" && plain) {
     ev.preventDefault();
     if (deleteSelection(f, el)) {
@@ -4211,6 +4258,7 @@ defineExpose({
   // ローカル編集キー（ホストへ送らない）。ペインの onLocal から呼ぶ
   fieldExit: fieldExitKey,
   eraseEof: eraseEofKey,
+  deleteWord: deleteWordKey,
   eraseInput: eraseInputKey,
   fieldMinus: () => fieldSignKey(true),
   fieldPlus: () => fieldSignKey(false),

@@ -83,6 +83,41 @@ export function del(state: EditState): EditState {
   return { ...state, chars };
 }
 
+/**
+ * **Delete Word（ACS の既定 `C127`＝Ctrl+Delete の `[deleteword]`）が消す長さ**（ACS `PS5250.processDeleteWord` → `getDeleteCharacters`。
+ * 実機の ACS のコアで測った。`scripts/acs-probe/delete-word.txt`。`20260922-delete-word`）:
+ * - カーソルの字が**空白**なら 1 字（空白が続いても 1 字ずつ）。**全角**も 1 字ずつ（数えは全角・SO/SI に当たると止まる）
+ * - 半角の語（空白・全角・欄の終わりまで）の**頭**にいれば、語＋**続く空白**。頭は、直前が空白・全角・欄の先頭のとき
+ *   （全角の直後の半角も頭。実機: `あいAA BB` の最初の `A` で `BB` だけが残る）
+ * - 語の**途中**なら、カーソルから語の終わりまで（続く空白は残す）。記号（`,` など）は語の一部で、空白だけが区切り
+ * 欄の終わりを越えない。カーソルが末尾の後ろなら 0。`isWide` は全角か（DBCS 欄の論理値。既定は全角なし）
+ */
+export function deleteWordLength(
+  chars: readonly string[],
+  cursor: number,
+  isWide: (ch: string) => boolean = () => false
+): number {
+  const c = chars[cursor];
+  if (c === undefined) return 0;
+  if (c === " " || isWide(c)) return 1;
+  const prev = cursor > 0 ? chars[cursor - 1]! : undefined;
+  const atHead = prev === undefined || prev === " " || isWide(prev);
+  let end = cursor;
+  while (end < chars.length && chars[end] !== " " && !isWide(chars[end]!)) end++;
+  if (atHead) while (end < chars.length && chars[end] === " ") end++;
+  return end - cursor;
+}
+
+/** Delete Word（SBCS の欄）: `deleteWordLength` の分を削り、後ろを左へ詰めて欄の長さを保つ（`del` と同じ形）。カーソルは動かさない */
+export function deleteWord(state: EditState): EditState {
+  const n = deleteWordLength(state.chars, state.cursor);
+  if (n === 0) return state;
+  const chars = [...state.chars];
+  chars.splice(state.cursor, n);
+  while (chars.length < state.chars.length) chars.push(" ");
+  return { ...state, chars };
+}
+
 export function moveCursor(state: EditState, delta: number): EditState {
   // 上限は chars.length（末尾＝最終文字の後ろ）まで許可。右端でも末尾に止まれる。
   return { ...state, cursor: clamp(state.cursor + delta, 0, state.chars.length) };

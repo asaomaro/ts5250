@@ -215,8 +215,8 @@ describe("送れる場合", () => {
   it("**Erase Input の後は送れる**（ACS は MDT ごと下ろすので 0020 の対象から外れる）", async () => {
     const { input } = await mountAt(3);
     await type(input, "12");
-    // 既定の割り当て（Ctrl+Backspace）で押す——ペインの onLocal を通す経路が実際の経路
-    await input.trigger("keydown", { key: "Backspace", code: "Backspace", ctrlKey: true });
+    // 既定の割り当て（Alt+End。ACS の `A35 = [erinp]`）で押す——ペインの onLocal を通す経路が実際の経路
+    await input.trigger("keydown", { key: "End", code: "End", altKey: true });
     await nextTick();
     await nextTick();
     expect((input.element as HTMLInputElement).value.trim(), "前提: Erase Input で消えた").toBe("");

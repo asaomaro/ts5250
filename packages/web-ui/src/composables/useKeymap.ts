@@ -17,6 +17,8 @@ export const LOCAL_EDIT_ACTIONS = [
   "field-exit",
   "erase-eof",
   "erase-input",
+  // Delete Word（ACS の既定 Ctrl+Delete＝`[deleteword]`。`20260922-delete-word`）
+  "delete-word",
   // **符号付き数値欄で負値を入れる主経路**（実機は数値キーパッドの `-` / `+`。`numpadFieldSign`）。
   // ~~打鍵の `-` / `+` も数値欄ではここへ横流しする（ScreenGrid）~~ → メイン行の `-` `+` は文字
   // （ACS。`20260921-numpad-field-sign`）
@@ -182,7 +184,7 @@ export function isEscapeAidEvent(ev: {
 }
 
 /**
- * **このキーがローカル編集キー（Field Exit / Erase EOF / Erase Input / Field± / Dup）に割り当てられているか**。
+ * **このキーがローカル編集キー（Field Exit / Erase EOF / Erase Input / Delete Word / Field± / Dup）に割り当てられているか**。
  * 割り当てはキー設定にしか無い（`classifyKey` は素のキーを編集キーへ写さない）。
  *
  * 使う側は 2 つ——操作員エラーの間に**拒否するキー**の判定（ACS `PS5250.keyDown` はこれらを拒否する）と、

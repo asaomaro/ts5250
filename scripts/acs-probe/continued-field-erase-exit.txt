@@ -123,6 +123,22 @@ settle 300
 keys [erinp]
 settle 300
 
+# B8) Ctrl+Delete＝`[deleteword]`（`delete-word.txt`）が継続欄の区間をまたぐか。`12345678` の最初の区間の 2 桁目（23,25）。
+#     鎖を 1 つの語と見てまたぐなら `1 /  /  `（`1` だけ残る）、区間の中だけなら `1   /56/78`（1 区間目の残りだけ）
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,25
+settle 200
+keys [deleteword]
+settle 300
+dump b8-deleteword
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
 keys [pf3]
 settle 1500
 

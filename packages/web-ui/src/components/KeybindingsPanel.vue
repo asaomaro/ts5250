@@ -33,6 +33,7 @@ const LOCAL_EDIT_LABEL: Record<LocalEditAction, string> = {
   "field-exit": "Field Exit（欄の残りを消して右寄せ・次の欄へ）",
   "erase-eof": "Erase EOF（カーソルから欄末尾まで消去）",
   "erase-input": "Erase Input（すべての入力欄をクリア）",
+  "delete-word": "Delete Word（カーソルの語を削除。ACS の Ctrl+Delete）",
   "field-minus": "Field−（数値欄を負の値として確定・次の欄へ）",
   "field-plus": "Field+（数値欄を正の値として確定・次の欄へ）",
   "dup": "Dup（カーソルから欄末尾までを複写文字で埋める）"

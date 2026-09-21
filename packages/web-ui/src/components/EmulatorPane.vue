@@ -758,6 +758,9 @@ function onLocal(action: LocalAction): void {
     case "erase-eof":
       gridRef.value?.eraseEof();
       break;
+    case "delete-word":
+      gridRef.value?.deleteWord();
+      break;
     // 符号確定と Dup。欄の移動は Field Exit と同じく field-full → onFieldFull が担う
     case "field-minus":
       gridRef.value?.fieldMinus();
@@ -1195,7 +1198,11 @@ function noteUserActivity(): void {
  * それ以外の修飾キー付きは対象外（ショートカット）
  */
 function isEditingKey(ev: KeyboardEvent): boolean {
-  if (localEditActionOf(ev) !== undefined) return true;
+  const local = localEditActionOf(ev);
+  // **Delete Word は拒否しない**——エラーを抜けてから語を消す。ACS `PS5250.keyDown` のエラー中の拒否の一覧は Backspace・Erase EOF・Erase Input・
+  // Erase Field・Delete・Field±・Field Exit・Dup・Field Mark と文字だけで、`[deleteword]`（63623）は入っていない。実機の ACS のコアでも、
+  // 先頭の Backspace（0005）の後の `[delete]` は拒否（inhibit=5・値そのまま）、`[deleteword]` は inhibit=0 で語を消した（`scripts/acs-probe/delete-word.txt` の m。`20260922-delete-word`）
+  if (local !== undefined) return local !== "delete-word";
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
   return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
 }

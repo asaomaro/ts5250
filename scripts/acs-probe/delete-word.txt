@@ -1,0 +1,286 @@
+# **Ctrl+Delete＝`[deleteword]`（ACS の既定 `C127`）は何を消すか**（実機の ACS のコア・社内機・930。2026-09-22）。
+#
+# 原典（ACS の既定のキー割り当て `AcsMapFunctions.MAP_5250` は `C127 = [deleteword]`。Ctrl+Backspace＝`C8` の割り当ては無い）。コアの `PS5250.processDeleteWord` →
+# `processDeleteChar(…, true)` → `getDeleteCharacters` が「語」の範囲を数える。当 PJ は Ctrl+Delete を Erase EOF にしていた。
+# **ここの「期待」は原典の読み**（R11 の調査）: カーソルが語頭なら「語＋後続の空白」、語の途中なら「カーソルから語末まで（後続の空白は残す）」、空白の上なら 1 字。
+#
+# 画面はサインオン直後のメニューのコマンド行（20,7 から）。文字は `keys` で打ち、`setcursor` でカーソルを置いて `[deleteword]` を打つ。
+#   node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/delete-word.txt
+signon
+keys [enter]
+settle 1500
+dump menu
+
+# T1 = `AAA BBB CCC`（A: 7-9・空白 10・B: 11-13・空白 14・C: 15-17）
+# a) 語頭（20,11）。期待: `AAA CCC`（`BBB ` を消す）
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,11
+settle 200
+keys [deleteword]
+settle 300
+dump a-word-start
+# b) 語の途中（20,12）。期待: `AAA B CCC`（`BB` を消す。後続の空白は残す）
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,12
+settle 200
+keys [deleteword]
+settle 300
+dump b-mid-word
+# c) 空白の上（20,10）。期待: `AAABBB CCC`（1 字）
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,10
+settle 200
+keys [deleteword]
+settle 300
+dump c-on-space
+# d) 最後の語の頭（20,15）。期待: `AAA BBB `
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,15
+settle 200
+keys [deleteword]
+settle 300
+dump d-last-word
+# e) 最後の 1 字（20,17）。期待: `AAA BBB CC`……ではなく `AAA BBB CC` の後ろが空く。1 字だけ消える
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,17
+settle 200
+keys [deleteword]
+settle 300
+dump e-last-char
+# f) 中身の後ろの空きセル（20,19）。期待: 何も変わらない
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,19
+settle 200
+keys [deleteword]
+settle 300
+dump f-after-end
+# g) 先頭の語（20,7）。期待: `BBB CCC`
+keys [reset]
+keys [home][eraseeof]AAA BBB CCC
+settle 300
+setcursor 20,7
+settle 200
+keys [deleteword]
+settle 300
+dump g-first-word
+# h) 語の後ろが複数の空白: `AAA BBB   CCC`（B: 11-13・空白 14-16・C: 17-19）の語頭（20,11）。期待: `AAA CCC`（空白を全部消す）
+keys [reset]
+keys [home][eraseeof]AAA BBB   CCC
+settle 300
+setcursor 20,11
+settle 200
+keys [deleteword]
+settle 300
+dump h-many-spaces
+# i) 語の後ろが複数の空白で、語の途中（20,12）。期待: `AAA B   CCC`
+keys [reset]
+keys [home][eraseeof]AAA BBB   CCC
+settle 300
+setcursor 20,12
+settle 200
+keys [deleteword]
+settle 300
+dump i-mid-many-spaces
+# j) 記号を含む語: `AB,CD EF`（A 7・B 8・`,` 9・C 10・D 11・空白 12・E 13・F 14）の先頭（20,7）。空白だけが区切りなら `EF`、記号でも切れるなら `,CD EF`
+keys [reset]
+keys [home][eraseeof]AB,CD EF
+settle 300
+setcursor 20,7
+settle 200
+keys [deleteword]
+settle 300
+dump j-punct-start
+# k) 記号の上（20,9）。空白だけが区切りなら `AB EF`（`,CD ` を消す＝語の途中でなく…）。切れるなら記号 1 字
+keys [reset]
+keys [home][eraseeof]AB,CD EF
+settle 300
+setcursor 20,9
+settle 200
+keys [deleteword]
+settle 300
+dump k-punct-mid
+# l) 空白の連続の上（20,10 = 1 つ目・20,11 = 2 つ目）: `AAA  BBB`。期待: どちらも 1 字
+keys [reset]
+keys [home][eraseeof]AAA  BBB
+settle 300
+setcursor 20,10
+settle 200
+keys [deleteword]
+settle 300
+dump l1-first-of-two-spaces
+keys [reset]
+keys [home][eraseeof]AAA  BBB
+settle 300
+setcursor 20,11
+settle 200
+keys [deleteword]
+settle 300
+dump l2-second-of-two-spaces
+
+# m) 操作員エラーの状態（先頭の Backspace＝0005）で `[delete]` と `[deleteword]`。`error-mode-other-keys.txt` は Delete を拒否（エラーのまま）と測っている。`[deleteword]` はどうか
+keys [reset]
+keys [home][eraseeof]AAA BBB
+settle 300
+setcursor 20,7
+settle 200
+keys [backspace]
+settle 300
+dump m0-error
+keys [delete]
+settle 300
+dump m1-delete-in-error
+keys [reset]
+settle 300
+keys [home][eraseeof]AAA BBB
+settle 300
+setcursor 20,7
+settle 200
+keys [backspace]
+settle 300
+dump m2-error
+keys [deleteword]
+settle 300
+dump m3-deleteword-in-error
+keys [deleteword]
+settle 300
+dump m4-deleteword-again
+keys [reset]
+settle 300
+
+keys [reset]
+keys [home][eraseeof]
+settle 300
+
+# ===== D) DBCS の欄（DSM の `DBCSFE`。O＝5,10 の 12 桁。`scripts/host-src/dscmd.c`。`scripts/acs-probe/dbcs-insert-room.txt` と同じ画面）。原典: 全角・SO/SI に当たると数えを止める =====
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/KEYTST PARM('DBCSFE')[enter]
+settle 3000
+dump d0-initial
+# O の欄に `AA あい BB`（A 10・A 11・空白 12・SO 13・あ 14-15・い 16-17・SI 18・空白 19・B 20・B 21）
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AA あい BB[eof]
+settle 300
+dump d1-typed
+# d1) 先頭の語（5,10）。期待: `AA ` を消して `あい BB`
+setcursor 5,10
+settle 200
+keys [deleteword]
+settle 300
+dump d1-first
+# d2) 全角の先頭（5,14）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AA あい BB[eof]
+settle 300
+setcursor 5,14
+settle 200
+keys [deleteword]
+settle 300
+dump d2-dbcs-start
+# d3) 全角の 2 字目（5,16）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AA あい BB[eof]
+settle 300
+setcursor 5,16
+settle 200
+keys [deleteword]
+settle 300
+dump d3-dbcs-second
+# d4) 全角の前の空白（5,12）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AA あい BB[eof]
+settle 300
+setcursor 5,12
+settle 200
+keys [deleteword]
+settle 300
+dump d4-before-dbcs
+# d5) 最後の語（5,20）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AA あい BB[eof]
+settle 300
+setcursor 5,20
+settle 200
+keys [deleteword]
+settle 300
+dump d5-last-word
+# d6) 全角の後ろの半角の語頭（`あいAA BB`。SO 10・あ 11-12・い 13-14・SI 15・A 16）。直前が全角のとき語頭か語の途中か: 語頭なら `BB`、途中なら `あい BB`
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あいAA BB[eof]
+settle 300
+dump d6-typed
+setcursor 5,16
+settle 200
+keys [deleteword]
+settle 300
+dump d6-after-dbcs
+# d7) 半角の語の直後が全角（`AAあい BB`。A 10・A 11・SO 12・あ 13-14・い 15-16・SI 17・空白 18・B 19・B 20）。語頭（5,10）。全角で語が止まるなら `あい BB`（`AA` だけ消える）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AAあい BB[eof]
+settle 300
+dump d7-typed
+setcursor 5,10
+settle 200
+keys [deleteword]
+settle 300
+dump d7-word-before-dbcs
+# d8) 同じ欄の 2 つ目の A（5,11。語の途中）。期待: `Aあい BB`（`A` だけ消える）
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AAあい BB[eof]
+settle 300
+setcursor 5,11
+settle 200
+keys [deleteword]
+settle 300
+dump d8-mid-word-before-dbcs
+keys [reset]
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 300
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

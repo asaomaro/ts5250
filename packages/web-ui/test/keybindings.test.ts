@@ -86,10 +86,14 @@ describe("既定バインド（初期値）", () => {
 });
 
 describe("ローカル編集キー（local:*）", () => {
-  it("既定で Field Exit / Erase EOF / Erase Input が割り当たる", () => {
+  // ~~Ctrl+Delete = Erase EOF・Ctrl+Backspace = Erase Input~~ → ACS の既定に直した（`20260922-delete-word`）。ACS `AcsMapFunctions.MAP_5250` は
+  // `C127 = [deleteword]`・`C8`（Ctrl+Backspace）の割り当て無し・Erase EOF の既定キー無し。Erase Input は `A35`（Alt+End）
+  it("既定で Field Exit（Ctrl+Enter）・Delete Word（Ctrl+Delete）・Erase Input（Alt+End）が割り当たる。Ctrl+Backspace と Erase EOF には無い（ACS と同じ）", () => {
     expect(DEFAULT_BINDINGS["ctrl+Enter"]).toBe("local:field-exit");
-    expect(DEFAULT_BINDINGS["ctrl+Delete"]).toBe("local:erase-eof");
-    expect(DEFAULT_BINDINGS["ctrl+Backspace"]).toBe("local:erase-input");
+    expect(DEFAULT_BINDINGS["ctrl+Delete"]).toBe("local:delete-word");
+    expect(DEFAULT_BINDINGS["alt+End"]).toBe("local:erase-input");
+    expect(DEFAULT_BINDINGS["ctrl+Backspace"], "ACS に C8 の割り当ては無い（語を消す習慣で押すと全欄が消えていた）").toBeUndefined();
+    expect(Object.values(DEFAULT_BINDINGS), "Erase EOF は既定のキーが無い").not.toContain("local:erase-eof");
   });
 
   it("local:* は判別でき、操作名を取り出せる", () => {
@@ -143,5 +147,48 @@ describe("既定バインドの版更新", () => {
     expect(keybindingsStore.bindings["ctrl++"]).toBe("local:field-plus");
     expect(keybindingsStore.bindings["ctrl+d"]).toBe("local:dup");
     expect(keybindingsStore.bindings["ctrl+F1"], "版 1 の既定は復活しない").toBeUndefined();
+  });
+});
+
+describe("既定バインドの訂正（Ctrl+Delete・Ctrl+Backspace。`20260922-delete-word`）", () => {
+  const load = (bindings: Record<string, string>, version: number) => {
+    localStorage.clear();
+    localStorage.setItem("as400.keybindings", JSON.stringify(bindings));
+    localStorage.setItem("as400.keybindings.version", String(version));
+    keybindingsStore.reload();
+  };
+
+  it("**古い既定のまま（版 2〜4）の人は、Ctrl+Delete は Delete Word へ・Ctrl+Backspace は外れる**", () => {
+    for (const v of [2, 3, 4]) {
+      load({ "ctrl+Enter": "local:field-exit", "ctrl+Delete": "local:erase-eof", "ctrl+Backspace": "local:erase-input" }, v);
+      expect(keybindingsStore.bindings["ctrl+Delete"], `版 ${v}`).toBe("local:delete-word");
+      expect(keybindingsStore.bindings["ctrl+Backspace"], `版 ${v}`).toBeUndefined();
+      expect(keybindingsStore.bindings["ctrl+Enter"], `版 ${v}`).toBe("local:field-exit"); // ほかは触らない
+    }
+  });
+
+  it("**キーごとに独立して直す**: Ctrl+Delete を自分で変えた人の値・Ctrl+Backspace を自分で変えた人の値は残る", () => {
+    load({ "ctrl+Delete": "F5", "ctrl+Backspace": "local:erase-input" }, 4);
+    expect(keybindingsStore.bindings["ctrl+Delete"], "自分で割り当てた値は奪わない").toBe("F5");
+    expect(keybindingsStore.bindings["ctrl+Backspace"], "古い既定のままのほうは外れる").toBeUndefined();
+    load({ "ctrl+Delete": "local:erase-eof", "ctrl+Backspace": "F6" }, 4);
+    expect(keybindingsStore.bindings["ctrl+Delete"]).toBe("local:delete-word");
+    expect(keybindingsStore.bindings["ctrl+Backspace"]).toBe("F6");
+  });
+
+  it("**消した人のところへ復活させない**（Ctrl+Delete を外した人に Delete Word を足さない）", () => {
+    load({ "ctrl+Enter": "local:field-exit" }, 4);
+    expect(keybindingsStore.bindings["ctrl+Delete"]).toBeUndefined();
+  });
+
+  it("版 1 の人（Ctrl+Delete の既定が入る前）には、新しい既定の Delete Word が入る", () => {
+    load({ "ctrl+F3": "view:sosi" }, 1);
+    expect(keybindingsStore.bindings["ctrl+Delete"]).toBe("local:delete-word");
+    expect(keybindingsStore.bindings["ctrl+Backspace"]).toBeUndefined();
+  });
+
+  it("Erase EOF を割り当てた人（Ctrl+Delete 以外のキー）は、そのまま使える", () => {
+    load({ "ctrl+e": "local:erase-eof" }, 4);
+    expect(keybindingsStore.bindings["ctrl+e"]).toBe("local:erase-eof");
   });
 });

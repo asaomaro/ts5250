@@ -6,6 +6,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 import { MSG_PROTECTED } from "../src/composables/opMessages.js";
+import { keybindingsStore } from "../src/stores/keybindings.js";
 
 /**
  * **ホストのエラー（WRITE ERROR CODE）でもエラー状態に入る**（`20260921-host-error-mode`）。
@@ -268,13 +269,44 @@ describe("操作員エラーと新しい画面", () => {
  * Erase Input・Field±・Dup・Field Mark はどれも欄を変えずエラーのままだった。`scripts/acs-probe/field-exit-full.txt`）
  */
 describe("エラー中の編集キー", () => {
+  // ~~Erase EOF（Ctrl+Delete）・Erase Input（Ctrl+Backspace）~~ → 既定のキーが ACS と同じに変わった（Erase EOF は既定のキー無し・Erase Input は Alt+End。
+  // `20260922-delete-word`）。Erase EOF は割り当てて確かめる
   it.each([
-    ["Field Exit（Ctrl+Enter）", { key: "Enter", ctrlKey: true }],
-    ["Erase EOF（Ctrl+Delete）", { key: "Delete", ctrlKey: true }],
-    ["Erase Input（Ctrl+Backspace）", { key: "Backspace", ctrlKey: true }],
-    ["Field−（Ctrl+-）", { key: "-", ctrlKey: true }],
-    ["Dup（Ctrl+D）", { key: "d", ctrlKey: true }]
-  ])("**%s は欄を変えず、エラーのまま**", async (_l, init) => {
+    ["Field Exit（Ctrl+Enter）", { key: "Enter", ctrlKey: true }, undefined],
+    ["Erase EOF（割り当てたキー）", { key: "e", ctrlKey: true }, ["ctrl+e", "local:erase-eof"] as const],
+    ["Erase Input（Alt+End）", { key: "End", altKey: true }, undefined],
+    ["Field−（Ctrl+-）", { key: "-", ctrlKey: true }, undefined],
+    ["Dup（Ctrl+D）", { key: "d", ctrlKey: true }, undefined]
+  ])("**%s は欄を変えず、エラーのまま**", async (_l, init, bind) => {
+    if (bind) keybindingsStore.set(bind[0], bind[1]);
+    try {
+      await rejectedInError(init);
+    } finally {
+      if (bind) keybindingsStore.remove(bind[0]);
+    }
+  });
+
+  /**
+   * **Delete Word（Ctrl+Delete）だけは拒否しない**（実機の ACS: 先頭の Backspace の 0005 の後、`[delete]` は拒否・`[deleteword]` はエラーを解いて語を消した。
+   * `scripts/acs-probe/delete-word.txt` の m。ACS `PS5250.keyDown` の拒否の一覧に `[deleteword]` は無い）
+   */
+  it("**Delete Word（Ctrl+Delete）は、エラーを抜けて語を消す**（ACS の拒否の一覧に無い）", async () => {
+    const { w } = await mountPane();
+    sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 301, fields: [{ ...FIELD, value: "ABCDEF" }] }));
+    await nextTick();
+    await nextTick();
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    el.focus();
+    el.setSelectionRange(2, 2);
+    await nextTick();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", ctrlKey: true, bubbles: true, cancelable: true }));
+    await nextTick();
+    await nextTick();
+    expect(sessionsStore.get(SID)!.edits.get(1), "語（カーソルから後ろ）が消えた").toBe("AB");
+    expect(opmsg(w), "エラーを抜けた").not.toBe(norm(MSG));
+  });
+
+  async function rejectedInError(init: KeyboardEventInit): Promise<void> {
     const { w } = await mountPane();
     sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 301, fields: [{ ...FIELD, value: "ABCDEF" }] }));
     await nextTick();
@@ -290,5 +322,5 @@ describe("エラー中の編集キー", () => {
     expect(sessionsStore.get(SID)!.edits.has(1), "エラー中に欄が変わった").toBe(false);
     expect(el.value).toBe(before);
     expect(opmsg(w), "エラーを抜けた").toBe(norm(MSG));
-  });
+  }
 });
