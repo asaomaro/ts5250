@@ -518,6 +518,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `IBM-5555-C01`（`packages/tn5250/src/session/terminal-type.ts`。以前は 24x80 に G02）。ACS のワイヤ（930・1399 の 24x80 と 930 の 27x132）がどれも C01。
   旧い判断（C01 は STRSEU が 27x132）は、当時の Query Reply が常に 27x132 可と申告していたため。いまは C01 でも両方の実機で STRSEU・WRKACTJOB ほかが
   24x80 のままで、色も G02 と同じだった。
+- [x] **【まとめ】telnet のうち装置名**（優先度 中）。**完了（`20260921-device-name-acs`・PR #410）**: ACS と同じく置換記号（`%` `*` `=` `+` `&COMPN` `&USERN`）を
+  展開して大文字で送る（`packages/tn5250/src/telnet/device-name.ts` の `DeviceNameGenerator`）。**使用中（8902）ならホストが同じ接続の中で装置名を聞き直してくる**ので、
+  `=` の番号を進めて答え直す（ACS のコア・タップ・PUB400 で `TSC=` → `TSC0`・8902 → `TSC1`・I902 を実測）。`deviceNameRetry` も同じ経路に載せ、
+  繋ぎ直しの輪（`retryWithNextDeviceName`）を撤去——8902 以外では答え直さないので、誤ったパスワードでサインオンの失敗回数を使い切らない。
+  `&` を含むパターンでは記号以外の文字が落ちる（ACS の字面どおり・実測）。実機 `scripts/verify-device-name.mjs` pass=5。mutation 24 通り検出。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
@@ -527,10 +532,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - **自動サインオンでパスワードを平文で送る**（中・**要実測**）。ACS はパスワードの入力を求める設定（`acsPasswordPrompt` が `3_session` / `4_always`）では
     暗号化（代替パスワード。IBMRSEED にクライアントのシード、IBMSUBSPW に `PasswordSubstitute`）にする（`AcsOnly.initBypassSignon`）。ACS の既定の設定値と、
     利用者の ACS がどちらで送っているかは未確認（`20260921-telnet-signon-vars` research F3。プローブの `PROBE_BYPASS_SIGNON=encrypted` で ACS 側のワイヤは採れる）
-  - 装置名（中）
+  - ~~装置名（中）~~ → 上の `20260921-device-name-acs` で済んだ
     - ACS: 置換記号（`*` `%` `=` `+` `&COMPN` など）を展開し、大文字にする（`AutoDeviceName5250`）。
     - 当 PJ: 書いたとおりに送る。
     - `deviceNameRetry` は理由を問わずに再試行するので、誤ったパスワードで QMAXSIGN を使い切る恐れがある（推測）。
+    - 残り（低・未確認）: ACS の GUI がセッションに付ける名前（`*`）。当 PJ は `A`（`20260921-device-name-acs` D4）
   - ~~1399 の申告（中・要実測）~~ → 上の `20260921-device-env-1399` で済んだ
     - ACS: KBDTYPE=JPE・CHARSET=32000。
     - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。

@@ -295,3 +295,43 @@ describe("respondAfter: 帳票の出力が終わるまで応答しない（`2026
     expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR]);
   });
 });
+
+describe("装置名の答え直し（`20260921-device-name-acs`）", () => {
+  const E8902 = [0xf8, 0xf9, 0xf0, 0xf2];
+  const I902b = [0xc9, 0xf9, 0xf0, 0xf2];
+  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  const devnames = (t: FakeTransport): string[] => {
+    const text = String.fromCharCode(...t.sent.flatMap((d) => [...d]));
+    return [...text.matchAll(/DEVNAME\x01([A-Z0-9=]*)/g)].map((m) => m[1]!);
+  };
+
+  it("**`%` は P、`=` は使用中（8902）なら同じ接続の中で次の番号**で答え直して繋がる", async () => {
+    let transport!: FakeTransport;
+    const session = await PrinterSession.connect({
+      deviceName: "PR%=",
+      transport: new FakeTransport((t) => {
+        transport = t;
+        t.dataIn(SEND);
+        t.feed(startupRecord(E8902));
+        t.dataIn(SEND); // ホストが聞き直す
+        t.feed(startupRecord(I902b));
+      })
+    });
+    expect(devnames(transport)).toEqual(["PRP0", "PRP1"]);
+    expect(session.startupCode).toBe("I902");
+    session.disconnect();
+  });
+
+  it("記号の無い名前は 8902 で断る", async () => {
+    await expect(
+      PrinterSession.connect({
+        deviceName: "PRT1",
+        transport: new FakeTransport((t) => {
+          t.dataIn(SEND);
+          t.feed(startupRecord(E8902));
+          t.dataIn(SEND);
+        })
+      })
+    ).rejects.toMatchObject({ code: "SESSION_REJECTED" });
+  });
+});

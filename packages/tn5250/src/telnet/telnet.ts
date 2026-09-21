@@ -12,12 +12,20 @@ import {
   ENV_VALUE,
   ENV_ESC
 } from "./constants.js";
+import { DeviceNameGenerator, type DeviceNameEnv } from "./device-name.js";
 
 export interface TelnetOptions {
   /** 端末タイプ名（例 IBM-3179-2）。TERMINAL-TYPE IS で回答する */
   terminalType: string;
-  /** RFC 4777 デバイス名（NEW-ENVIRON の USERVAR DEVNAME）。省略時はホスト採番 */
+  /**
+   * RFC 4777 デバイス名（NEW-ENVIRON の USERVAR DEVNAME）。省略時はホスト採番。
+   * **ACS と同じく置換記号を展開し、大文字にして送る**（`device-name.ts`。聞かれるたびに `=` の番号が進む）
+   */
   deviceName?: string | undefined;
+  /** 置換記号の展開に使う外の値（機械名・利用者名・プリンターか） */
+  deviceNameEnv?: DeviceNameEnv | undefined;
+  /** 当 PJ の `deviceNameRetry`: 記号の無い名前でも、使用中なら末尾の数字を繰り上げて答え直す */
+  deviceNameRetry?: boolean | undefined;
   /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定 */
   user?: string | undefined;
   /**
@@ -90,11 +98,31 @@ export class TelnetLayer {
   private sb: number[] = [];
   private recordFn: ((record: Uint8Array) => void) | undefined;
 
+  /** 装置名（聞かれるたびに次を出す。`deviceName` が無ければ無い） */
+  private readonly devNames: DeviceNameGenerator | undefined;
+
   constructor(
     private readonly transport: Transport,
     private readonly opts: TelnetOptions
   ) {
+    this.devNames =
+      opts.deviceName !== undefined
+        ? new DeviceNameGenerator(opts.deviceName, opts.deviceNameEnv, opts.deviceNameRetry === true)
+        : undefined;
     transport.onData((data) => this.feed(data));
+  }
+
+  /** 最後に送った装置名（展開・大文字化の後）。まだ送っていなければ指定のまま */
+  get deviceName(): string | undefined {
+    return this.devNames?.current ?? this.opts.deviceName;
+  }
+
+  /**
+   * 装置が使用中（8902）と言われたとき、**同じ接続の中で別の名前で答え直せるか**。ホストは使用中だと
+   * NEW-ENVIRON SEND で聞き直してくる（実測）ので、そのとき次の名前を送る。答え直せないなら拒否として扱う
+   */
+  canRetryDeviceName(): boolean {
+    return this.devNames?.canRetry() === true;
   }
 
   onRecord(fn: (record: Uint8Array) => void): void {
@@ -225,8 +253,9 @@ export class TelnetLayer {
     } else if (opt === OPT.NEW_ENVIRON && sb[1] === ENV_SEND) {
       // RFC 4777: DEVNAME＋（指定時）自動サインオン変数を回答（未設定なら空 IS）
       const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
-      if (this.opts.deviceName !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.opts.deviceName));
+      if (this.devNames !== undefined) {
+        // 聞かれるたびに次の名前（ACS `NVT5250` も DEVNAME を書くたびに `AutoDeviceName5250` を通す）
+        payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.devNames.next()));
       }
       for (const v of this.opts.userVars ?? []) {
         payload.push(ENV_USERVAR, ...ascii(v.name), ENV_VALUE, ...(v.raw ?? ascii(v.value ?? "")));

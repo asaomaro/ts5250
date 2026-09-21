@@ -18,8 +18,9 @@ const codec = codecForCcsid(37);
  *
  * プリンター（`PrinterSession.handleStartup`）は元からコードで見ていた。**同じ判断へ揃える。**
  *
- * ⚠ 実機では**装置名の重複でこの経路に入らない**——ホストは理由を返さず
- * ソケットを閉じる（`scripts/research-device-busy.mjs`）。よってレコードは合成する。
+ * ~~⚠ 実機では**装置名の重複でこの経路に入らない**——ホストは理由を返さずソケットを閉じる（`scripts/research-device-busy.mjs`）~~
+ * → 実機（PUB400・社内機）とも 8902 を返し、同じ接続の中で NEW-ENVIRON SEND を送り直してきた（`20260921-device-name-acs` の実測）。
+ * レコードは合成する。
  * 形式は実機 PUB400 で捕えた 1 レコード目に合わせてある（`startup-record.test.ts`）。
  */
 const IAC_EOR = [0xff, 0xef];
@@ -194,5 +195,92 @@ describe("交渉中にホストが閉じたとき", () => {
     // IAC DO NEW-ENVIRON（0xff 0xfd 0x27）＝返事を送りたくなるサブネゴシエーション
     expect(() => onData?.(Uint8Array.from([0xff, 0xfd, 0x27]))).not.toThrow();
     expect(await p).toBe("SESSION_CLOSED");
+  });
+});
+
+/**
+ * **装置が使用中（8902）なら、同じ接続の中で次の名前で答え直す**（ACS と同じ。`20260921-device-name-acs`）。
+ * 実測（ACS のコア・PUB400）: `TSC=` → `TSC0`（8902）→ ホストが SEND を送り直す → `TSC1` → I902。
+ */
+describe("装置名の答え直し", () => {
+  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  function capturing(): { transport: Transport; feed: (b: number[]) => void; devnames: () => string[] } {
+    let onData: ((d: Uint8Array) => void) | undefined;
+    const sent: number[] = [];
+    const transport = {
+      onData: (cb: (d: Uint8Array) => void) => {
+        onData = cb;
+      },
+      onClose: () => {},
+      onError: () => {},
+      send: (d: Uint8Array) => void sent.push(...d),
+      close: () => {}
+    } as unknown as Transport;
+    const devnames = (): string[] => {
+      const text = String.fromCharCode(...sent);
+      return [...text.matchAll(/DEVNAME\x01([A-Z0-9=&%*+]*)/g)].map((m) => m[1]!);
+    };
+    return { transport, feed: (b) => onData?.(Uint8Array.from(b)), devnames };
+  }
+  async function run(deviceName: string, opts: { retry?: boolean } = {}) {
+    const { transport, feed, devnames } = capturing();
+    const warnings: string[] = [];
+    const settled = Session5250.connect({
+      id: "t",
+      transport,
+      negotiationTimeoutMs: 400,
+      warn: (m) => warnings.push(m),
+      deviceName,
+      ...(opts.retry ? { deviceNameRetry: true } : {})
+    }).then(
+      (s) => ({ ok: true as const, session: s }),
+      (e: Error & { code?: string }) => ({ ok: false as const, code: e.code, message: e.message })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]);
+    feed(SEND); // ホストが聞き直す
+    return { settled, feed, devnames, warnings };
+  }
+
+  it("**`=` を含む名前は、使用中なら次の番号で答え直し、次の起動応答を待つ**", async () => {
+    const r = await run("DEV=");
+    r.feed([...startupRecord("I902", "S1234567", "DEV1"), ...IAC_EOR]);
+    const out = await r.settled;
+    expect(r.devnames()).toEqual(["DEV0", "DEV1"]);
+    // 画面がまだ来ていないので完了はしない（時間切れ）が、**8902 で断られてはいない**
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("NEGOTIATION_TIMEOUT");
+    expect(r.warnings.some((w) => w.includes("in use (8902)"))).toBe(true);
+    // 2 回目の起動応答も起動応答として受け取った（データとして解析しに行かない）
+    expect(r.warnings.some((w) => w.includes("startup response I902") && w.includes("device=DEV1"))).toBe(true);
+    expect(r.warnings.some((w) => w.includes("expected ESC"))).toBe(false);
+  });
+
+  it("記号の無い名前は従来どおり 8902 で断る（ACS は同じ名前を送り直すだけで繋がらない）", async () => {
+    const r = await run("DEV1");
+    const out = await r.settled;
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("SESSION_REJECTED");
+  });
+
+  it("当 PJ の `deviceNameRetry` は、記号の無い名前でも末尾の数字を繰り上げて答え直す（繋ぎ直さない）", async () => {
+    const r = await run("DEV1", { retry: true });
+    r.feed([...startupRecord("I902", "S1234567", "DEV2"), ...IAC_EOR]);
+    const out = await r.settled;
+    expect(r.devnames()).toEqual(["DEV1", "DEV2"]);
+    if (out.ok) return;
+    expect(out.code).toBe("NEGOTIATION_TIMEOUT");
+  });
+
+  it("**8902 以外の失敗は答え直さない**（誤ったパスワードで何度も試して QMAXSIGN を使い切らない）", async () => {
+    const { transport, feed } = capturing();
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 400, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8906"), ...IAC_EOR]);
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED" });
   });
 });

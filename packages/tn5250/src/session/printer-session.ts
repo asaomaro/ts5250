@@ -25,7 +25,12 @@ export interface PrinterConnectOptions {
   port?: number;
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /** 仮想プリンターデバイス名。省略時はホスト採番（QPADEVxxxx） */
+  /** 装置名。表示セッションと同じく置換記号を展開して大文字で送る（`%` は `P`。`telnet/device-name.ts`） */
   deviceName?: string | undefined;
+  /** 置換記号の展開に使う機械名・利用者名（`&COMPN` / `&USERN`） */
+  deviceNameEnv?: { computerName?: string; userName?: string } | undefined;
+  /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`） */
+  deviceNameRetry?: boolean | undefined;
   user?: string | undefined;
   password?: string | undefined;
   /** SBCS=37/273…。DBCS(1399) は後続対応 */
@@ -161,6 +166,8 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     session.telnet = new TelnetLayer(transport, {
       terminalType: decl.terminalType,
       deviceName: opts.deviceName,
+      deviceNameEnv: { ...opts.deviceNameEnv, printer: true },
+      deviceNameRetry: opts.deviceNameRetry,
       user: opts.user,
       password: opts.password,
       userVars: decl.userVars,
@@ -276,6 +283,12 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     // 解析は表示セッションと共有する（読み位置を 2 か所に書くと片方だけずれる）
     const startup = parseStartupResponse(rec, this.codec);
     const code = startup?.code ?? "";
+    // 装置が使用中（8902）で別の名前で答え直せるなら、次の起動応答を待つ（表示セッションと同じ。ホストが聞き直してくる）
+    if (code === "8902" && this.telnet.canRetryDeviceName()) {
+      this.warn(`device ${this.telnet.deviceName ?? ""} is in use (8902); answering the host with the next name`);
+      this.started = false;
+      return;
+    }
     this.startupCodeValue = code;
     if (STARTUP_SUCCESS_CODES.has(code)) {
       this.emit("status", { startupCode: code, connected: true });

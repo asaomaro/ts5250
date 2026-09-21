@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hostname, userInfo } from "node:os";
 import {
   beginHold,
   claimHolder,
@@ -58,7 +59,8 @@ export interface OpenOptions extends ConnectOptions {
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
   /**
-   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   * 装置名が使用中（8902）のとき、末尾の数字を繰り上げて同じ接続の中で答え直す（~~繋ぎ直して再試行する~~。tn5250 の
+   * `DeviceNameGenerator`。`20260921-device-name-acs`）。
    *
    * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
@@ -132,15 +134,24 @@ export function orphanSafeIdleTimeoutMs(v: IdleLimit | undefined): number {
   return typeof v === "number" ? v : ORPHAN_IDLE_TIMEOUT_MS;
 }
 
-/** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
-export function nextDeviceName(name: string): string | undefined {
-  const m = /^(.*?)(\d+)$/.exec(name);
-  if (!m) return name.length < 10 ? `${name}2` : undefined;
-  const width = m[2]!.length;
-  const next = Number(m[2]) + 1;
-  const digits = String(next).padStart(width, "0");
-  if (digits.length > width) return undefined; // 桁が増えるなら打ち止め（装置名は 10 文字まで）
-  return `${m[1]}${digits}`;
+/**
+ * 装置名の `&COMPN`（機械名）・`&USERN`（利用者名）に入れる値（ACS `AutoDeviceName5250.getClientID` に当たる。
+ * `20260921-device-name-acs`）。ACS は**ACS が動いている機械**の名前（Windows では `CLIENTNAME` を先に見る）と OS の利用者名を使う。
+ * 当 PJ で ACS の役をしているのはこのサーバーなので、機械名はサーバーの名前（最初の `.` まで）。利用者名は、認証が有効なら
+ * **開いた人のアプリの利用者名**（`owner`）、無効ならサーバーの OS の利用者名（1 人で使う＝ACS と同じ）。
+ * ブラウザの機械名はサーバーからは取れない（decisions D3）
+ */
+export function deviceNameEnvFor(owner?: string): { computerName?: string; userName?: string } {
+  const computerName = (process.platform === "win32" ? process.env["CLIENTNAME"] : undefined) ?? hostname().split(".")[0];
+  let userName = owner;
+  if (userName === undefined) {
+    try {
+      userName = userInfo().username;
+    } catch {
+      // 取れない環境（利用者名の無いコンテナ等）。`&USERN` を使う名前は展開できず、拒否として返る
+    }
+  }
+  return { ...(computerName ? { computerName } : {}), ...(userName !== undefined ? { userName } : {}) };
 }
 
 /**
@@ -347,7 +358,8 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
   /**
-   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   * 装置名が使用中（8902）のとき、末尾の数字を繰り上げて同じ接続の中で答え直す（~~繋ぎ直して再試行する~~。tn5250 の
+   * `DeviceNameGenerator`。`20260921-device-name-acs`）。
    *
    * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
@@ -769,23 +781,20 @@ export class SessionManager {
     // PC コマンド（STRPCCMD）。**検出と応答は常に行い、実行だけを設定で絞る**——
     // 応答を返さないとホストは待ち続ける（research D5）。設定が無ければ disabled として記録する
     const pcCommand = (cmd: PcCommandRequest): Promise<void> => this.handlePcCommand(id, cmd, opts.pcCommand);
-    const connect = (deviceName?: string): Promise<Session5250> =>
+    const connect = (): Promise<Session5250> =>
       Session5250.connect({
         ...opts,
-        ...(deviceName !== undefined ? { deviceName } : {}),
+        deviceNameEnv: deviceNameEnvFor(opts.owner),
         id,
         warn: (m) => sessionLog.warn({ sessionId: id }, m),
         onPcCommand: pcCommand,
         traceRecords: traceRecordsEnabled()
       });
-    let session: Session5250;
-    try {
-      session = await connect();
-    } catch (err) {
-      // 装置名の重複はホストが理由を返さずソケットを閉じる。設定で許されていれば名前を繰り上げて再試行
-      if (!opts.deviceNameRetry || opts.deviceName === undefined) throw err;
-      session = await this.retryWithNextDeviceName(opts.deviceName, connect, err);
-    }
+    // ~~装置名の重複はホストが理由を返さずソケットを閉じる。設定で許されていれば名前を繰り上げて繋ぎ直す~~ → ホストは 8902 を返し、
+    // 同じ接続の中で装置名を聞き直してくる（実測）。`deviceNameRetry` の繰り上げも ACS の `=` と同じく、その聞き直しに答える形にした
+    // （telnet の `DeviceNameGenerator`。`20260921-device-name-acs`）。繋ぎ直さないので、**8902 以外の失敗（誤ったパスワード等）で
+    // 何度も繋いで QMAXSIGN を使い切ることが無い**
+    const session = await connect();
     const entry: SessionEntry = {
       id,
       session,
@@ -935,27 +944,6 @@ export class SessionManager {
   }
 
   /** プリンターセッションを開く（TN5250E プリンター）。受信スプールをバッファする。 */
-  /** 装置名を繰り上げながら再試行する（既定 5 回まで）。全滅したら最初のエラーを投げ直す */
-  private async retryWithNextDeviceName(
-    first: string,
-    connect: (deviceName: string) => Promise<Session5250>,
-    original: unknown
-  ): Promise<Session5250> {
-    let name: string | undefined = first;
-    for (let i = 0; i < 5; i++) {
-      name = name === undefined ? undefined : nextDeviceName(name);
-      if (name === undefined) break;
-      try {
-        const s = await connect(name);
-        sessionLog.warn({ deviceName: name }, `装置名 ${first} が使用中のため ${name} で接続した`);
-        return s;
-      } catch {
-        // 次の名前へ
-      }
-    }
-    throw original;
-  }
-
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
     // **同じ定義を二度開いたら、繋ぎ直すのではなく既にあるものへ繋ぐ。**
     //
@@ -1084,6 +1072,7 @@ export class SessionManager {
     const conn: PrinterConn = { closed: false };
     const session = await PrinterSession.connect({
       ...opts,
+      deviceNameEnv: deviceNameEnvFor(entry.owner),
       id: entry.id,
       nextReportSeq: () => ++entry.spoolSeq,
       // **出力が終わるまでホストへ応答しない**（ACS と同じ。上の `heldOutput`）

@@ -280,8 +280,9 @@ const sessionBase = {
   autoStart: autoStartSchema,
   deviceName: z.string().optional(),
   /**
-   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する（既定 false）。
-   * 装置名を固定するのは「その名前で繋ぎたい」意図なので、既定では別名にすり替えない。
+   * 装置名が使用中（8902）のとき、末尾の数字を繰り上げて**同じ接続の中で答え直す**（既定 false。ホストが聞き直してくる）。
+   * 装置名を固定するのは「その名前で繋ぎたい」意図なので、既定では別名にすり替えない。ACS の `=`（衝突を避ける番号）を
+   * 名前に書けば同じことを ACS の書き方でできる（`20260921-device-name-acs`）
    */
   deviceNameRetry: z.boolean().optional(),
   /**

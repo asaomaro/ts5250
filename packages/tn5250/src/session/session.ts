@@ -50,7 +50,15 @@ export interface ConnectOptions {
    */
   spoolCcsid?: number;
   screenSize?: "24x80" | "27x132";
+  /**
+   * 装置名。**ACS と同じく置換記号（`%` `*` `=` `+` `&COMPN` `&USERN`）を展開し、大文字にして送る**
+   * （`telnet/device-name.ts`）。`=` を含めば、使用中のとき同じ接続の中で次の番号で答え直す
+   */
   deviceName?: string;
+  /** 置換記号の展開に使う機械名・利用者名（`&COMPN` / `&USERN`）。このパッケージは Node の API に触れないので呼び出し側が渡す */
+  deviceNameEnv?: { computerName?: string; userName?: string };
+  /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`。5 回まで） */
+  deviceNameRetry?: boolean;
   /** TLS（telnet over SSL。既定ポート 992・証明書検証既定 ON） */
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /** RFC 4777 自動サインオン（decisions.md D3）。user と password を併せて指定する */
@@ -266,6 +274,8 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.telnet = new TelnetLayer(transport, {
       terminalType: this.terminalType,
       deviceName: opts.deviceName,
+      deviceNameEnv: { ...opts.deviceNameEnv, printer: false },
+      deviceNameRetry: opts.deviceNameRetry,
       user: opts.user,
       password: opts.password,
       kbdType: dev?.kbdType,
@@ -298,11 +308,12 @@ export class Session5250 extends Emitter<SessionEvents> {
         clearTimeout(timer);
         if (initial) this.finalClose(reason);
         // **装置名を指定していてネゴシエーション中に切られたら、まず装置名の重複を疑う。**
-        // IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる。生の
+        // ~~IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる~~ → 両方の実機で 8902 を返し、同じ接続の中で
+        // 装置名を聞き直してきた（`20260921-device-name-acs`）。それでも理由なく閉じられたときの手掛かりとして残す。生の
         // 「socket closed」だけだと利用者は原因に辿り着けない（同じ設定で 2 本目を開いた等）。
         const hint =
           opts.deviceName !== undefined
-            ? `（装置名 ${opts.deviceName} が既に使用中の可能性があります）`
+            ? `（装置名 ${this.telnet.deviceName ?? opts.deviceName} が既に使用中の可能性があります）`
             : "";
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
@@ -660,10 +671,19 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 今まで通っていたものを落とさないため。
       if (startup && (isKnownStartupCode(startup.code) || startup.device !== "")) {
         this.startupInfo = startup;
+        // **装置が使用中（8902）で、別の名前で答え直せるなら待つ**（ACS と同じ。`20260921-device-name-acs`）。
+        // ホストは同じ接続の中で NEW-ENVIRON SEND を送り直してくるので、telnet が次の名前（`=` の番号・当 PJ の繰り上げ）で
+        // 答える。次の起動応答をもう一度 1 レコード目として見る。答え直せない名前は従来どおり拒否（ACS は同じ名前を
+        // 送り直すだけで繋がらない——実測）
+        if (startup.code === "8902" && this.telnet.canRetryDeviceName()) {
+          this.warn(`device ${this.telnet.deviceName ?? ""} is in use (8902); answering the host with the next name`);
+          this.firstRecord = true;
+          return;
+        }
         if (isKnownStartupCode(startup.code) && !STARTUP_SUCCESS_CODES.has(startup.code)) {
           const meaning = startupCodeMeaning(startup.code);
-          // 失敗応答に装置名は入らないので、**要求した名前**を添える（利用者が直せる情報にする）
-          const dev = startup.device || this.requestedDevice || "";
+          // 失敗応答に装置名は入らないので、**送った名前**を添える（利用者が直せる情報にする。展開・大文字化の後）
+          const dev = startup.device || this.telnet.deviceName || this.requestedDevice || "";
           const where = dev ? `（装置 ${dev}）` : "";
           this.warn(`session rejected ${startup.code}: ${meaning}`);
           this.onNegotiationError?.(
