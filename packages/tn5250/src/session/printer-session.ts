@@ -308,7 +308,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
   private handleStartup(rec: Uint8Array): void {
     this.started = true;
     // 解析は表示セッションと共有する（読み位置を 2 か所に書くと片方だけずれる）
-    const startup = parseStartupResponse(rec, this.codec);
+    const startup = parseStartupResponse(rec);
     const code = startup?.code ?? "";
     if (startup?.device) this.startupDevice = startup.device;
     // 装置が使用中（8902）で別の名前で答え直せるなら、次の起動応答を待つ（表示セッションと同じ。ホストが聞き直してくる）

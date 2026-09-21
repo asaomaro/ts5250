@@ -316,3 +316,27 @@ describe("装置名の答え直し", () => {
     await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED" });
   });
 });
+
+/**
+ * **930 のセッションでも起動応答の装置名は CCSID 37 で読む**（ACS `processStartUpConfirmation`。`20260921-startup-record-cp037`）。
+ * セッションの codec（290）で読むと `$` が `¥` に化け、スプール救出が見る OUTQ の名前も化けた。
+ */
+describe("起動応答は CCSID 37 で読む", () => {
+  it("**ccsid 930 のセッションでも装置名の `$` は `$`**", async () => {
+    let onData: ((d: Uint8Array) => void) | undefined;
+    const transport = {
+      onData: (cb: (d: Uint8Array) => void) => void (onData = cb),
+      onClose: () => {},
+      onError: () => {},
+      send: () => {},
+      close: () => {}
+    } as unknown as Transport;
+    const warnings: string[] = [];
+    const p = Session5250.connect({ id: "t", transport, ccsid: 930, negotiationTimeoutMs: 200, warn: (m) => warnings.push(m) }).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 20));
+    onData?.(Uint8Array.from([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]));
+    onData?.(Uint8Array.from([...startupRecord("I902", "SYS", "DSP$01"), ...IAC_EOR]));
+    await p;
+    expect(warnings.find((w) => w.includes("startup response I902"))).toContain("device=DSP$01");
+  });
+});

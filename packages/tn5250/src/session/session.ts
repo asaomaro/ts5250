@@ -681,7 +681,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 誤って食べると、そのレコードが画面へ流れず画面が出なくなる
     if (this.firstRecord) {
       this.firstRecord = false;
-      const startup = parseStartupResponse(record, this.codec);
+      const startup = parseStartupResponse(record);
       // **見分けはコードの既知性で行う**（`20260802-device-busy-record`）。
       // 以前は「装置名が入っているか」だけで見ていたが、**失敗の応答には装置名が入らない**
       // ——割り当てられていないのだから当然。取りこぼすとデータストリームとして解析され、

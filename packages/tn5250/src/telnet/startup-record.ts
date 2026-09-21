@@ -18,7 +18,14 @@
  * d8 d7 c1 c4 c5 e5 f0 f0 f1 d7                    ← "QPADEV001P"
  * ```
  */
-import type { Codec } from "@ts5250/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
+
+/**
+ * **起動応答は CCSID 37 で読む**（ACS `DS5250.processStartUpConfirmation` は `new CodePage(37, 2)` で名前を取り出す。
+ * `20260921-startup-record-cp037`）。~~セッションの codec で読む~~——930 / 5026（SBCS は 290）では 0x5B が `¥` になり、
+ * `$` を含む装置名・システム名が化けた（装置名はスプール救出の OUTQ にも使う）
+ */
+const CP037 = codecForCcsid(37);
 
 export interface StartupResponse {
   /** 例 "I902"（成功）/ "8902"（装置が使用中）。意味は `startupCodeMeaning` */
@@ -103,10 +110,8 @@ export function isKnownStartupCode(code: string): boolean {
  * 通常のデータストリームを誤って食べると画面が出なくなるため、形が合わないものは
  * 起動応答として扱わない。読み位置 `(6 + data[6]) + 5` は tn5250 の `printsession.c:222-235` と同じ。
  */
-export function parseStartupResponse(
-  record: Uint8Array,
-  codec: Codec
-): StartupResponse | undefined {
+export function parseStartupResponse(record: Uint8Array): StartupResponse | undefined {
+  const codec = CP037;
   const at = 6 + (record[6] ?? 4);
   if (at + 9 > record.length) return undefined;
   const code = codec.decode(record.subarray(at + 5, at + 9));

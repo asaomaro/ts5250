@@ -13,7 +13,6 @@ import { codecForCcsid } from "@ts5250/ebcdic/codec";
  * **バイト列は実機（PUB400）で捕えたもの**——装置名を指定せず接続したときの 1 レコード目。
  * ここから「実際に割り当てられた装置名」が分かるので、画面に触れずにジョブ名を知れる。
  */
-const codec = codecForCcsid(37);
 
 /** 実機の 1 レコード目（73 バイト）。I902 / PUB400 / QPADEV001P */
 const REAL_RECORD = Uint8Array.from([
@@ -26,11 +25,22 @@ const REAL_RECORD = Uint8Array.from([
 
 describe("起動応答レコード", () => {
   it("実機のレコードから 応答コード・システム名・装置名 を取る", () => {
-    expect(parseStartupResponse(REAL_RECORD, codec)).toEqual({
+    expect(parseStartupResponse(REAL_RECORD)).toEqual({
       code: "I902",
       system: "PUB400",
       device: "QPADEV001P"
     });
+  });
+
+  /**
+   * **セッションの CCSID によらず CCSID 37 で読む**（ACS `processStartUpConfirmation` の `new CodePage(37, 2)`。`20260921-startup-record-cp037`）。
+   * 930 / 5026 の SBCS（290）では 0x5B が `¥` なので、セッションの codec で読むと `$` を含む装置名が化けていた
+   */
+  it("**`$` を含む装置名は `$` のまま**（930 の codec なら `¥` に化ける）", () => {
+    const rec = Uint8Array.from(REAL_RECORD);
+    rec.set([0xc4, 0xe2, 0xd7, 0x5b, 0xf0, 0xf1, 0x40, 0x40, 0x40, 0x40], 28); // "DSP$01"
+    expect(codecForCcsid(930).decode(rec.subarray(28, 34)), "前提: 930 では化ける").toBe("DSP¥01");
+    expect(parseStartupResponse(rec)?.device).toBe("DSP$01");
   });
 
   /**
@@ -43,11 +53,11 @@ describe("起動応答レコード", () => {
       0x00, 0x11, 0x12, 0xa0, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03, 0x04, 0xf3, 0x00, 0x05, 0xd9,
       0x70, 0x00
     ]);
-    expect(parseStartupResponse(data, codec)).toBeUndefined();
+    expect(parseStartupResponse(data)).toBeUndefined();
   });
 
   it("短すぎるレコードは undefined", () => {
-    expect(parseStartupResponse(Uint8Array.from([0x00, 0x04, 0x12, 0xa0]), codec)).toBeUndefined();
+    expect(parseStartupResponse(Uint8Array.from([0x00, 0x04, 0x12, 0xa0]))).toBeUndefined();
   });
 
   /** プリンターは応答コードだけで可否を判断する。短い応答でも壊れないこと */
@@ -56,7 +66,7 @@ describe("起動応答レコード", () => {
       0x00, 0x13, 0x12, 0xa0, 0x90, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0xf8, 0xf9, 0xf0, 0xf2 // "8902"
     ]);
-    expect(parseStartupResponse(short, codec)).toEqual({ code: "8902", system: "", device: "" });
+    expect(parseStartupResponse(short)).toEqual({ code: "8902", system: "", device: "" });
   });
 
   it("成功コードと意味", () => {

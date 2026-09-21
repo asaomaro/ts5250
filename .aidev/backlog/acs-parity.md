@@ -553,6 +553,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **IS を送るまで後続の交渉に答えない**——待つ間に答えるとホストは IS を待たずにサインオン画面を出した（実測）。
 - [x] **【まとめ】telnet のうちパスワード無しの USER**（優先度 低）。**完了（`20260921-user-without-password`・PR #410）**: USER はパスワード付きの
   自動サインオンのときだけ送る（`packages/tn5250/src/telnet/telnet.ts`。ACS `NVT5250.insertUser`）。PUB400 では違いが見えない（実測）。
+- [x] **【まとめ】telnet のうち起動応答の名前の復号**（優先度 低）。**完了（`20260921-startup-record-cp037`・PR #410）**: 起動応答のシステム名・装置名を
+  セッションの CCSID によらず CCSID 37 で読む（ACS `DS5250.processStartUpConfirmation` の `new CodePage(37, 2)`。`packages/tn5250/src/telnet/startup-record.ts`）。
+  930 / 5026 では `$` が `¥` に化けていた（装置名はスプール救出の OUTQ にも使う）。単体（`startup-record.test.ts`・`startup-reject.test.ts`）、mutation 検出。実機は未確認。
 - [x] **【まとめ】telnet のうちホストサーバーの認証の置換値**（優先度 中）。**完了（`20260921-hostserver-password-levels`・PR #410）**:
   サインオン・サーバーと各ホストサーバーの開始で、QPWDLVL 4 を PBKDF2＋SHA-512（64 バイト・暗号化種別 7）、0/1 は数字で始まるパスワードの頭に `Q`、
   2/3 は末尾の空白を落とす（4 は落とさない）——ACS に同梱の jt400 `AS400ImplRemote` と同じ（`packages/hostserver/src/credentials.ts` の
@@ -591,7 +594,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 自動サインオンの変数の順と、ACS が送るが当 PJ が送らないもの（値なしの DEVNAME・KBDTYPE が空白 3 つ（CCSID 37）。同 research F4）。
       ~~利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る~~（`20260921-user-without-password` で揃えた）
     - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
-    - 起動応答の見分け方と、装置名の復号（ACS は CP037 固定）
+    - 起動応答の見分け方（ACS は診断情報の有無で分岐。当 PJ はコードの既知性）、~~装置名の復号（ACS は CP037 固定）~~ → 上の `20260921-startup-record-cp037` で済んだ
     - ~~ホストサーバーのサインオン（`hostserver` の `signon()`）は QPWDLVL 4 を SHA-1 で計算し、数字で始まるパスワード（レベル 0/1）に `Q` を付けない~~
       → 上の `20260921-hostserver-password-levels` で済んだ（原典は ACS に同梱の jt400。サーバーの開始の要求も同じ欠陥があった）
     - バックアップホストが無い
