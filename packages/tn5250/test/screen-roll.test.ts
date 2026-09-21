@@ -7,8 +7,11 @@ import { COMMAND, ESC } from "../src/protocol/constants.js";
 /**
  * ROLL（ESC 0x23）＝表示イメージの行送り。
  *
- * ⚠ **実機では未確認**（11 画面の国勢調査で 1 件も届かなかった。
- * `20260730-datastream-command-census`）。根拠は**原典 2 実装の一致**:
+ * **空いた行は旧い内容が残る**（ACS `PS5250.processRoll`。`20260921-roll-vacated-rows`）。実機（社内機・DSM の `QsnRollUp(3,2,20)` /
+ * `QsnRollDown(3,2,20)`）で ACS のコアは、上ロールで空いた 18〜20 行に元の 18〜20 行を、下ロールで 2〜4 行に元の 2〜4 行を残した。
+ * 当 PJ は空白にしていた（同じ手順で測った）。方向（0x80 落ち＝上）も実機で ACS と当 PJ が一致。
+ *
+ * ~~⚠ **実機では未確認**（11 画面の国勢調査で 1 件も届かなかった）~~ → DSM で出させて確かめた。以前の根拠は**原典 2 実装の一致**:
  *
  * - tn5250 `session.c`: `0x80` が落ちていれば行数を負にし、`dbuffer.c` は負を "Move text up"
  * - tn5250j `Screen5250.rollScreen`: コメント「0 - up / 1 - down」
@@ -36,28 +39,32 @@ const heads = (buf: ScreenBuffer, n = 6): string =>
     .join("");
 
 describe("roll", () => {
-  it("上へ 1 行送る（下端に空行ができる）", () => {
+  // ~~下端に空行ができる~~ → 空いた行は旧い内容が残る（ACS・実測）
+  it("上へ 1 行送る（**空いた下端の行は旧い内容が残る**）", () => {
     const buf = laddered();
     buf.roll(1, 6, 1);
-    expect(heads(buf)).toBe("BCDEF ");
+    expect(heads(buf)).toBe("BCDEFF");
   });
 
-  it("下へ 1 行送る（上端に空行ができる）", () => {
+  it("下へ 1 行送る（**空いた上端の行は旧い内容が残る**）", () => {
     const buf = laddered();
     buf.roll(1, 6, -1);
-    expect(heads(buf)).toBe(" ABCDE");
+    expect(heads(buf)).toBe("AABCDE");
   });
 
   it("範囲を限って送る（範囲の外は動かない）", () => {
     const buf = laddered();
-    buf.roll(2, 4, 1); // B C D → C D 空
-    expect(heads(buf)).toBe("ACD EF");
+    buf.roll(2, 4, 1); // B C D → C D D
+    expect(heads(buf)).toBe("ACDDEF");
   });
 
-  it("複数行の送りもできる", () => {
+  it("複数行の送りもできる（実測と同じ形: 上端〜下端を 3 行上へ、空いた 3 行は元のまま）", () => {
     const buf = laddered();
     buf.roll(1, 6, 2);
-    expect(heads(buf)).toBe("CDEF  ");
+    expect(heads(buf)).toBe("CDEFEF");
+    const down = laddered();
+    down.roll(1, 6, -2);
+    expect(heads(down)).toBe("ABABCD");
   });
 
   it("0 行の指定は何もしない", () => {
@@ -66,17 +73,23 @@ describe("roll", () => {
     expect(heads(buf)).toBe("ABCDEF");
   });
 
-  it("範囲が逆・1 行だけの指定は何もしない", () => {
+  it("範囲が逆・1 行だけ・上端 0・下端が画面の外の指定は何もしない（ACS は不正として扱う）", () => {
     const buf = laddered();
-    buf.roll(4, 2, 1);
-    buf.roll(3, 3, 1);
+    expect(buf.roll(4, 2, 1)).toBe(false);
+    expect(buf.roll(3, 3, 1)).toBe(false);
+    expect(buf.roll(0, 3, 1)).toBe(false);
+    expect(buf.roll(2, 25, 1)).toBe(false);
     expect(heads(buf)).toBe("ABCDEF");
   });
 
-  it("範囲を超える送りは範囲を空にする", () => {
+  // ~~範囲を超える送りは範囲を空にする~~ → ACS は「行数 ＞ 下端−上端」を不正としてセンス・コードを立て、画面を変えない
+  it("**行数が「下端−上端」を超える送りは何もしない**（ACS と同じ条件。ちょうどなら送る）", () => {
     const buf = laddered();
-    buf.roll(1, 3, 5);
-    expect(heads(buf)).toBe("   DEF");
+    expect(buf.roll(1, 3, 5)).toBe(false);
+    expect(buf.roll(1, 3, 3)).toBe(false);
+    expect(heads(buf)).toBe("ABCDEF");
+    expect(buf.roll(1, 3, 2)).toBe(true);
+    expect(heads(buf)).toBe("CBCDEF");
   });
 
   it("**フィールド定義は動かさない**（入力欄の位置がずれないように）", () => {
@@ -106,19 +119,19 @@ describe("ESC 0x23 の解釈", () => {
   it("**上位ビットが落ちていれば上へ**送る（原典 2 実装の一致）", () => {
     const buf = laddered();
     applyDataStream(Uint8Array.from(rollStream(0x01, 1, 6)), buf, codec, () => {});
-    expect(heads(buf)).toBe("BCDEF ");
+    expect(heads(buf)).toBe("BCDEFF");
   });
 
   it("**上位ビットが立っていれば下へ**送る", () => {
     const buf = laddered();
     applyDataStream(Uint8Array.from(rollStream(0x81, 1, 6)), buf, codec, () => {});
-    expect(heads(buf)).toBe(" ABCDE");
+    expect(heads(buf)).toBe("AABCDE");
   });
 
   it("行数は下位 5 ビット", () => {
     const buf = laddered();
     applyDataStream(Uint8Array.from(rollStream(0x02, 1, 6)), buf, codec, () => {});
-    expect(heads(buf)).toBe("CDEF  ");
+    expect(heads(buf)).toBe("CDEFEF");
   });
 
   it("**パラメータ 3 バイトを消費し、後続のコマンドを捨てない**", () => {

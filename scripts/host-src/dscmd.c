@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <qsnapi.h>
 
 static FILE *lg;
@@ -193,6 +194,36 @@ static void putTestScreen(void) {
     logFdbk("QsnPutOutCmd(0x11 試験画面)", rc, fdbk);
 }
 
+/**
+ * **ROLL で空いた行を見るための試験**（`20260921-roll-vacated-rows`）。行 1〜24 に行番号を書いた画面を出し、
+ * 行 2〜20 を 3 行ロールしてから 8 秒待つ（待つ間に端末の画面を採る。プログラムが終わるとホストが画面を描き直す）。
+ * 空いた行（上ロールなら 18〜20、下ロールなら 2〜4）に何が残るかが、ACS と当 PJ で違うかを測る。
+ */
+static void rollTest(int up) {
+    char fdbk[256];
+    char wtd[24 * 12 + 8];
+    int n = 0, r;
+    Q_Bin4 rc;
+    /* ESC WTD CC1 CC2 のうち ESC は QsnPutOutCmd が付けるので、WTD の本体（CC1 CC2 ＋オーダー）だけを渡す */
+    wtd[n++] = 0x00; wtd[n++] = 0x00;
+    for (r = 1; r <= 24; r++) {
+        /* SBA(r,2) "ROW rr"（EBCDIC: R=D9 O=D6 W=E6 空白=40 数字=F0+） */
+        wtd[n++] = 0x11; wtd[n++] = (char)r; wtd[n++] = 0x02;
+        wtd[n++] = (char)0xD9; wtd[n++] = (char)0xD6; wtd[n++] = (char)0xE6; wtd[n++] = 0x40;
+        wtd[n++] = (char)(0xF0 + r / 10); wtd[n++] = (char)(0xF0 + r % 10);
+    }
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x11, (const char *)wtd, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x11 行番号の画面)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = up ? QsnRollUp(3, 2, 20, 0, 0, (Q_Fdbk_T *)fdbk) : QsnRollDown(3, 2, 20, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk(up ? "QsnRollUp(3,2,20)" : "QsnRollDown(3,2,20)", rc, fdbk);
+    sleep(8);
+}
+
 int main(int argc, char *argv[]) {
     char fdbk[256];
     char what[32];
@@ -209,7 +240,9 @@ int main(int argc, char *argv[]) {
     }
     if (lg) { fprintf(lg, "start what=[%s]\n", what); fflush(lg); }
 
-    if (strcmp(what, "ROLLUP") == 0 || strcmp(what, "ROLLDOWN") == 0) {
+    if (strcmp(what, "ROLLTESTUP") == 0 || strcmp(what, "ROLLTESTDOWN") == 0) {
+        rollTest(strcmp(what, "ROLLTESTUP") == 0);
+    } else if (strcmp(what, "ROLLUP") == 0 || strcmp(what, "ROLLDOWN") == 0) {
         /*
          * **引数は (行数, 上端, 下端)。** 最初 (上端, 下端, 行数) の順だと思って
          * `QsnRollUp(2,20,3)` を渡し、`CPFA315 ロール・パラメーターが正しくない` で落ちた。

@@ -494,6 +494,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - **未確認**: `0x62` 固有の扱い（ACS は `processReadScreen(false)` で上位バイトの立った桁を
     8 ビット右へ送る。当 PJ にはそのプレーン表現が無いので**対応物も無い**）／
     `READ IMMEDIATE`(0x72) と `READ MDT IMMEDIATE ALT`(0x83) の opcode は `PUT_GET` 固定のまま
+- [x] **【まとめ】DS5250 のうち ROLL の空いた行**（優先度 低）。**完了（`20260921-roll-vacated-rows`・PR #410）**: 空いた行は旧い内容が残る（ACS `PS5250.processRoll`）。
+  社内機で DSM（`QsnRollUp/Down(3,2,20)`）に行番号の画面を送らせ、ACS のコアと当 PJ を比べた——上ロールで 18〜20 行、下ロールで 2〜4 行に元の行が残る
+  （`scripts/verify-roll.mjs` pass=4）。不正な指定（行数 ＞ 下端−上端 ほか）は画面を変えない（`packages/tn5250/src/screen/buffer.ts` の `roll`）。負応答は別項目のまま。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - WEA タイプ 5（拡張 NLS 区間）（○）
@@ -501,7 +504,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 当 PJ: すべてのタイプを読み飛ばす（`wtd-applier.ts:555-575`）。
     - 実機のトレースでは未観測。
   - 細部の差
-    - ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。
+    - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
     - CLEAR 系の付随処理: CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。画面サイズが変わっても罫線を残す。
     - WSF D9/72 に応答しない。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応。
     - 負応答を返さない。

@@ -691,41 +691,36 @@ export class ScreenBuffer {
   /**
    * ROLL（ESC 0x23）: `top` 行から `bottom` 行までを `lines` 行ぶん送る。
    *
-   * `lines > 0` で**上へ**（画面が上にスクロールし、下端に空行ができる）、
-   * 負なら下へ。行番号は 1 起点で、範囲外・0 行の指定は何もしない。
+   * `lines > 0` で**上へ**（画面が上にスクロールする）、負なら下へ。行番号は 1 起点。
+   *
+   * **空いた行は消さない——旧い内容が残る**（ACS `PS5250.processRoll` は行を写すだけ。`20260921-roll-vacated-rows`）。
+   * 実機（DSM の `QsnRollUp(3,2,20)`）で、ACS のコアは空いた 18〜20 行に元の 18〜20 行を残した（下ロールでも 2〜4 行が残る）。
+   * ~~下端に空行ができる~~——当 PJ は以前ここを空白にしていた。
+   *
+   * **不正な指定は何もしない**（ACS と同じ条件: 上端が 0・下端が画面の外・下端 ≦ 上端・行数 ＞ 下端−上端）。ACS はここで
+   * センス・コードを立ててレコードの処理を打ち切り、負応答を返す——当 PJ は負応答をまだ返さない（台帳「DS5250 のその他の差」）ので、
+   * 画面を変えないところまで合わせた。~~範囲を丸ごと超える送りは全消し~~。
    *
    * **フィールド定義は動かさない**——ROLL は表示イメージの移動で、
    * ホストは送った後に必要なら書き直してくる（動かすと入力欄の位置が実機とずれる）。
+   * @returns 指定が正しく、処理したか
    */
-  roll(top: number, bottom: number, lines: number): void {
-    if (lines === 0) return;
-    const from = Math.max(1, Math.min(top, this.rows));
-    const to = Math.max(1, Math.min(bottom, this.rows));
-    if (to <= from) return;
+  roll(top: number, bottom: number, lines: number): boolean {
     const count = Math.abs(lines);
-    if (count >= to - from + 1) {
-      // 範囲を丸ごと超える送りは全消し（残す行が無い）
-      for (let row = from; row <= to; row++) this.clearRow(row);
-      this.noteWriteRange((from - 1) * this.cols, to * this.cols - 1);
-      return;
+    if (top === 0 || bottom > this.rows || bottom <= top || count > bottom - top) return false;
+    if (count === 0) return true;
+    const src: InternalCell[][] = [];
+    for (let row = top; row <= bottom; row++) src.push(this.cells.slice((row - 1) * this.cols, row * this.cols));
+    const span = bottom - top + 1 - count; // 写す行の数
+    for (let i = 0; i < span; i++) {
+      // 上へ: 上端から順に count 行下の内容を写す / 下へ: count 行下へ、上端からの内容を写す
+      const dst = lines > 0 ? i : i + count;
+      const from = lines > 0 ? i + count : i;
+      const base = (top - 1 + dst) * this.cols;
+      for (let c = 0; c < this.cols; c++) this.cells[base + c] = src[from]![c] ?? null;
     }
-    const rowsInRange: InternalCell[][] = [];
-    for (let row = from; row <= to; row++) {
-      rowsInRange.push(this.cells.slice((row - 1) * this.cols, row * this.cols));
-    }
-    const moved = lines > 0 ? rowsInRange.slice(count) : rowsInRange.slice(0, rowsInRange.length - count);
-    const blanks = Array.from({ length: count }, () => new Array<InternalCell>(this.cols).fill(null));
-    const next = lines > 0 ? [...moved, ...blanks] : [...blanks, ...moved];
-    for (let i = 0; i < next.length; i++) {
-      const target = (from - 1 + i) * this.cols;
-      for (let c = 0; c < this.cols; c++) this.cells[target + c] = next[i]![c] ?? null;
-    }
-    this.noteWriteRange((from - 1) * this.cols, to * this.cols - 1);
-  }
-
-  private clearRow(row: number): void {
-    const base = (row - 1) * this.cols;
-    for (let c = 0; c < this.cols; c++) this.cells[base + c] = null;
+    this.noteWriteRange((top - 1) * this.cols, bottom * this.cols - 1);
+    return true;
   }
 
   /** RESTORE SCREEN（ESC 0x12）: 直近の退避を復元 */

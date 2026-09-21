@@ -1,0 +1,13 @@
+# ROLL で空いた行に何が残るか（ACS のコア。`20260921-roll-vacated-rows`）。
+# 前提: `DSCMD_LIB=<AS400_LIB> DSCMD_PGM=ROLLTST node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs` で試験プログラムを作っておく
+# （行 1〜24 に "ROW nn" を書き、行 2〜20 を 3 行downへロールして 8 秒待つ）。終わったら DLTPGM と IFS の /tmp/rolltst.* を消す。
+# 実測（社内機）: 上ロールで 18〜20 行に ROW 18〜20、下ロールで 2〜4 行に ROW 02〜04 が残る（空白にならない）。
+signon
+keys [enter]
+settle 1500
+keys CALL ${LIB}/ROLLTST PARM('ROLLTESTDOWN')[enter]
+sleep 3000
+dump
+sleep 7000
+keys SIGNOFF[enter]
+settle
