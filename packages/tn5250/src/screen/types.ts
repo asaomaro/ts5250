@@ -345,6 +345,11 @@ export interface ScreenSnapshot {
   fields: Field[];
   systemMessage?: string;
   /**
+   * `systemMessage`（WRITE ERROR CODE）が**届くたびに増える通し番号**（`systemMessage` があるときだけ付く）。
+   * 同じ文言のエラーがもう一度来たことを UI が見分け、エラー状態に入り直すために使う（`20260921-host-error-mode`）。
+   */
+  systemMessageSeq?: number;
+  /**
    * **メッセージ待ち表示（MW）が点いている**（`20260921-message-waiting-indicator`）。
    * `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
    * ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。**点いているときだけ付与する**（消灯は省略）。

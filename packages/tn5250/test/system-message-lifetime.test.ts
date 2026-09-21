@@ -89,3 +89,41 @@ describe("SAVE SCREEN でシステム・メッセージを解除する（ACS `pr
     expect(buf.systemMessage).toBeUndefined();
   });
 });
+
+/**
+ * **WRITE ERROR CODE が届くたびに通し番号を振る**（`20260921-host-error-mode`）。
+ * ACS はホストのエラーのたびにエラー状態に入る（`processWriteErrorCode` → `setErrorMode(true)`）。
+ * 同じ文言のエラーがもう一度来たことを UI が見分けられないと、2 回目でエラー状態に入れない。
+ */
+describe("WRITE ERROR CODE の通し番号（systemMessageSeq）", () => {
+  const wec = (msg: string): number[] => [ESC, COMMAND.WRITE_ERROR_CODE, ...text(msg)];
+
+  it("**同じ文言でも、届くたびに番号が変わる**", () => {
+    const buf = new ScreenBuffer();
+    apply(buf, [...WTD, ORDER.SBA, 1, 1, ...text("TITLE")]);
+    expect(buf.snapshot("s").systemMessageSeq, "メッセージが無ければ付かない").toBeUndefined();
+    apply(buf, wec("RANGE 1-5"));
+    const first = buf.snapshot("s").systemMessageSeq;
+    expect(first).toBeDefined();
+    apply(buf, wec("RANGE 1-5"));
+    const second = buf.snapshot("s").systemMessageSeq;
+    expect(second, "同じ文言の 2 回目で番号が変わらない").not.toBe(first);
+    expect(buf.snapshot("s").systemMessage).toBe("RANGE 1-5");
+  });
+
+  it("**バッファを作り直しても番号は重ならない**（繋ぎ直しで作り直すため）", () => {
+    const a = new ScreenBuffer();
+    apply(a, wec("E1"));
+    const b = new ScreenBuffer();
+    apply(b, wec("E1"));
+    expect(b.snapshot("s").systemMessageSeq).not.toBe(a.snapshot("s").systemMessageSeq);
+  });
+
+  it("メッセージが消えたら番号も付かない", () => {
+    const buf = withMessage();
+    expect(buf.snapshot("s").systemMessageSeq).toBeDefined();
+    buf.clearUnit();
+    expect(buf.snapshot("s").systemMessage).toBeUndefined();
+    expect(buf.snapshot("s").systemMessageSeq).toBeUndefined();
+  });
+});

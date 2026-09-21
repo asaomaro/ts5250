@@ -799,7 +799,34 @@ function clearNotice(): void {
 function exitErrorMode(): void {
   if (!errorMode.value) return;
   clearNotice();
+  // **ホストのエラーだったら、メッセージ行を元に戻す**（ACS `clearErrorMode` → `restoreMsgLinePosition`。
+  // 実機でも矢印・Tab で抜けると最下行のメッセージが消えた。`20260921-host-error-mode`）
+  if (hostErrorSeq !== undefined) {
+    dismissedHostErrorSeq.value = hostErrorSeq;
+    hostErrorSeq = undefined;
+  }
 }
+/*
+ * **ホストのエラー（WRITE ERROR CODE）でもエラー状態に入る**（`20260921-host-error-mode`）。
+ *
+ * ACS は `DS5250.processWriteErrorCode` で `setErrorMode(true)` とし、挿入モードも解く。実機（ULKPGM の
+ * RANGE(1 5) に 9）でも inhibit=5・文字は拒否・挿入モードが解け、矢印・Tab で抜けると最下行のメッセージが消えた。
+ * 規則は操作員エラー（上）と同じ。**同じ文言のエラーがもう一度来たら入り直す**——見分けはコアが WEC ごとに振る
+ * 通し番号（`systemMessageSeq`）で行う。窓の中のエラーは実機では WTD で来たので、ここは通らない（ACS も同じ）。
+ */
+/** いま入っているエラー状態がホストのものなら、その番号（抜けるときにメッセージを隠すため） */
+let hostErrorSeq: number | undefined;
+/** 抜けて隠したホストのエラーの番号（最下行を元に戻す） */
+const dismissedHostErrorSeq = ref<number | undefined>();
+watch(
+  () => snapshot.value?.systemMessageSeq,
+  (seq, old) => {
+    if (seq === undefined || seq === old) return;
+    errorMode.value = true;
+    insertMode.value = false;
+    hostErrorSeq = seq;
+  }
+);
 function onNotice(text: string): void {
   showNotice(text);
 }
@@ -838,7 +865,14 @@ const effectiveNotice = computed(() => notice.value || state.value?.notice || ""
  * **クライアント側が優先**し、無ければホスト側（`systemMessage`。WRITE ERROR CODE 由来）。
  * ACS は**どちらも同じ見た目で同じ行**に出すので、色でも区別しない。
  */
-const messageLine = computed(() => effectiveNotice.value || snapshot.value?.systemMessage || "");
+/** ホストのメッセージ（WRITE ERROR CODE）。エラー状態を抜けて隠したものは出さない（メッセージ行を元に戻す） */
+const hostMessage = computed(() => {
+  const snap = snapshot.value;
+  if (!snap?.systemMessage) return "";
+  if (snap.systemMessageSeq !== undefined && snap.systemMessageSeq === dismissedHostErrorSeq.value) return "";
+  return snap.systemMessage;
+});
+const messageLine = computed(() => effectiveNotice.value || hostMessage.value);
 
 /** ScreenGrid 発の AID。キーボードの F キーと同じ扱いで送る。
  *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。

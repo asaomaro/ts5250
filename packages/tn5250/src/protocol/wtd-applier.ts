@@ -1,6 +1,6 @@
 import { As400Error } from "@ts5250/base";
 import { type Codec, SO, SI } from "@ts5250/ebcdic";
-import type { ScreenBuffer } from "../screen/buffer.js";
+import { nextSystemMessageSeq, type ScreenBuffer } from "../screen/buffer.js";
 import type { ContinuedPart, DbcsFieldType, SelfCheckKind, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
 import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
@@ -919,5 +919,9 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): vo
     // その他の制御は読み飛ばす
   }
   const trimmed = msg.trim();
-  if (trimmed !== "") buf.systemMessage = trimmed;
+  if (trimmed !== "") {
+    buf.systemMessage = trimmed;
+    // 届くたびに番号を振る（同じ文言でも新しいエラー。UI はこれでエラー状態に入り直す）
+    buf.systemMessageSeq = nextSystemMessageSeq();
+  }
 }

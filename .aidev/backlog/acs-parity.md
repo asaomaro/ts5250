@@ -249,7 +249,16 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   「施錠」は Reset だけで解く硬い錠ではなかった（D1）。未測定のキー（Field Exit・Erase EOF・Dup・IME・Ctrl 組み合わせ）は抜ける側に倒した（D2）。
   テスト `packages/web-ui/test/operator-error-mode.test.ts`（18 件・mutation 6 通りすべて検出）。
   ⚠ Reset の「施錠中なら先打ちを捨てて解錠」（`ECLPS.reset`）は先打ちの項目で足す。
-- [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない**（優先度 中・深さ ◐）。
+- [x] **ホストのエラー（WRITE ERROR CODE）でエラー状態に入らない・抜けてもメッセージ行を元に戻さない**（下の項目から割った）。
+  **完了（`20260921-host-error-mode`・PR #410）**: コアが WEC ごとに通し番号（`ScreenSnapshot.systemMessageSeq`）を振り、ブラウザは番号の変化で
+  操作員エラーと同じエラー状態に入る（文字を拒否・挿入モードを解く）。矢印・Tab・AID・Reset・クリックで抜けると、そのメッセージを隠して
+  最下行を元に戻す。**実機**（試験画面 ULKPGM の RANGE(1 5) に 9）で ACS は inhibit=5・文字を拒否・挿入モードを解き、矢印・Tab で抜けると
+  最下行が消えた（`scripts/acs-probe/window-error.txt`・`host-error-mode.txt`）。当 PJ の関係は `packages/web-ui/test/host-error-mode.test.ts`。
+- [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す**（優先度 ~~中~~ 低・深さ ◐）。
+  **実機では差が無かった（2026-09-21・`20260921-host-error-mode` research F2）**: WINDOW キーワードの窓の中の RANGE 欄に範囲外を入れると、
+  ホストは **0x22 ではなく WTD で窓の中（12 行目）に書き**、ACS もエラー状態に入らなかった。当 PJ も窓の中に出している。
+  **0x22 そのものは実機で観測できていない**——来たら当 PJ は従来どおり最下行に出す。0x22 を出す画面が見つかったら着手する。
+  ~~（元の見出し）窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない~~
   DDS の窓で入力エラーが出ると、ACS は窓の中に出すが、当 PJ は最下行に出す。訂正している間もメッセージが消えない。
   ACS（委譲先 C の読み）
   - WEC は、SOH が申告したメッセージ行（MSGLOC）に書く。0x22 は、指定の桁範囲（窓の内側）に属性付きで書く。

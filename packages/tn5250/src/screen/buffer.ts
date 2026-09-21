@@ -180,6 +180,13 @@ export class ScreenBuffer {
   cursorAddr = 0;
   systemMessage: string | undefined;
   /**
+   * **WRITE ERROR CODE が届くたびに増える通し番号**（`systemMessage` と対）。同じ文言のエラーが
+   * もう一度来たことを UI が見分けるため——ACS はホストのエラーのたびにエラー状態に入る
+   * （`DS5250.processWriteErrorCode` → `setErrorMode(true)`。`20260921-host-error-mode`）。
+   * 画面バッファを作り直しても重ならないよう、番号はプロセスで通しにする（`nextSystemMessageSeq`）。
+   */
+  systemMessageSeq: number | undefined;
+  /**
    * SOH が申告したメッセージ行の行番号（1 基点）。既定 24 は ACS `DS5250` の初期値と同じ。
    * `systemMessage` をいつ捨てるかの判定に使う（`clearSystemMessageIfTouched`）
    */
@@ -1398,7 +1405,10 @@ export class ScreenBuffer {
       cells,
       fields
     };
-    if (this.systemMessage !== undefined) snap.systemMessage = this.systemMessage;
+    if (this.systemMessage !== undefined) {
+      snap.systemMessage = this.systemMessage;
+      if (this.systemMessageSeq !== undefined) snap.systemMessageSeq = this.systemMessageSeq;
+    }
     // CA キー（SOH の申告）。UI の ME 検査が見る（`sendsDataForAid` と同じビットの並び）
     const caKeys: number[] = [];
     for (let n = 1; n <= 24; n++) if (!this.sendsDataForAid(n)) caKeys.push(n);
@@ -1457,4 +1467,10 @@ export class ScreenBuffer {
       throw new As400Error("PROTOCOL_ERROR", `buffer address out of range: ${addr}`);
     }
   }
+}
+
+/** WRITE ERROR CODE の通し番号（`ScreenBuffer.systemMessageSeq`）。バッファをまたいで重ならないよう、ここで持つ */
+let systemMessageSeqCounter = 0;
+export function nextSystemMessageSeq(): number {
+  return ++systemMessageSeqCounter;
 }
