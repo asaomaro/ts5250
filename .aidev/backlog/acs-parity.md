@@ -308,18 +308,24 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （コア `PrinterSession` の `respondAfter`、サーバー `session-manager.ts` の `outputGate` / `retryPrinterOutput` / `cancelPrinterOutput`、画面は `PrinterPane.vue` のバー）。
   再試行は失敗した出力だけ。実機（PUB400）: 止めている間スプールは WTR のまま残り、応答すると消える（`scripts/verify-printer-hold.mjs`）。サーバーの経路の全体でも
   失敗 → 止める → 保存先を作って再試行 → PDF ができスプールが消える、取消で消える（`scripts/verify-printer-hold-server.mjs` pass=8）。mutation 11 通り検出。
-  残り: 止めている間にホストが取り消したとき（ENDWTR *IMMED など。PUB400 では権限が無く未確認）。
-  次のとき、ホストは印刷済みとみなすので、SAVE(*NO) のスプールが消える（印刷の欠落）。
-  - PDF の出力先の権限・容量が足りない
-  - 自動印刷先が止まっている
-  - サーバーが再起動した（帳票はメモリに最大 50 件）
-  印刷中に取消・保留をすると、前のジョブの断片が次の帳票に混ざりうる。
+  節目の独立点検の指摘で直した: ホスト変換＋PDF 保存先で帳票ごとに止まる（PDF を作らないのは失敗に数えない）・出力中の切断で閉じた接続の帳票が残る・
+  切断で止めていた帳票を捨てても画面へ知らせない（`dropped`）・自動出力を切っても止めたまま・再試行が止めた時点の設定を使う・再試行 / 取消で成功した PDF の結果が消える・
+  lp が返らないと止まったまま（時間切れ 120 秒）・MCP とサービス画面に出ない（`retry_printer_output` / `cancel_printer_output`・一覧の `held`）・
+  2 タブで開くと通知が片方に行かない（`PrinterListener`）・CLEAR で閉じた帳票も止めていた（ACS は閉じるときの失敗では止めない）・張り直しで帳票 id が重なる。
+  **止めている間に切れたとき**（core で 2 回・server で 1 回。`scripts/verify-printer-hold-drop.mjs`・`verify-printer-hold-server.mjs` pass=14）: スプールは印刷済みにならず RDY に戻る。同じ装置名で繋ぎ直すと、
+  書き出しプログラムの用紙の問い合わせ（MSGW）に答えた後で送り直された（答えなかった回は 60 秒届かず MSGW のまま）。
+  起票時の症状（直した。以前は受け取った瞬間に応答していた）: ~~次のとき、ホストは印刷済みとみなすので、SAVE(*NO) のスプールが消える（印刷の欠落）~~。
+  ~~PDF の出力先の権限・容量が足りない~~・~~自動印刷先が止まっている~~ → 応答を止めて待つ。~~サーバーが再起動した~~ → 止めている間に切れても RDY に戻る（上の実測）。
+  ~~印刷中に取消・保留をすると、前のジョブの断片が次の帳票に混ざりうる~~ → CLEAR でジョブを閉じる（`20260921-printer-acs-declaration`）。
   ACS（委譲先 E の読み）
   - 書き終えてから NO_ERROR を返す。印刷先の障害時は応答を保留し、利用者の再試行・取消を待つ（`DS5250P.endOfRecord`・`PSNVT5250P`・`PrintHostData.write`）。
   - CLEAR には `CLEAR_PROCESSED` を返し、ジョブを閉じる（`DS5250P.processClear`）。
   当 PJ: `packages/tn5250/src/session/printer-session.ts:183-185` は、opcode 2 なら何もせず return し、それ以外は即座に `PRINT_COMPLETE` を返す（主エージェントが確認）。テスト `printer-session.test.ts:82-84` が即時の応答を固定している。
   再現: 印刷中に HLDSPLF *IMMED / DLTSPLF / ENDWTR *IMMED を行う。PDF の出力先を書き込み不可にして送る。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N15）
+- [ ] **プリンター: 応答を止めている間にホストが帳票を取り消したとき**（優先度 低・`20260921-printer-hold-response` の残り）。
+  ENDWTR *IMMED・HLDSPLF *IMMED などで止めている間にホストが取り消したときの動き。PUB400 では書き出しプログラムを止める権限が無く（CPF3330 系）未確認。
+  止めている間に 15 分のアイドルで接続が黙って死ぬか（`measure-printer-idle-drop`）も未確認。
 - [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
   **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
   `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
@@ -536,7 +542,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 低
     - 関連プリンター（IBMASSOCPRT）が未対応
     - 交渉前に届くテキストを出さない
-    - ~~USER とパスワードを正規化しない~~（`20260921-telnet-signon-vars`: 利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす）
+    - ~~USER とパスワードを正規化しない~~（`20260921-telnet-signon-vars`: 利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす）。
+      節目の点検の指摘で、前後を落とすのを Java の `trim()`（U+0020 以下だけ）に揃え、利用者名 10 文字・パスワード 128 文字を超えるか空なら
+      自動サインオンをやめる（USER も送らない）ようにした（`NVT5250` の `ssoType` を 0 に戻す条件）
+    - **パスワード無しでも USER を送る**（当 PJ。`telnet.ts` の `user` だけの指定）。ACS は USER を**パスワード付きの自動サインオンのときだけ**送る
+      （`NVT5250` の `insertUser` は `ssoType` 3・4 のときだけ）。利用者名だけを渡す経路が当 PJ のどこで使われているか（サインオン画面の利用者名の
+      事前入力に使っているか）を確かめてから揃える
     - 自動サインオンの変数の順と、ACS が送るが当 PJ が送らないもの（値なしの DEVNAME・KBDTYPE が空白 3 つ（CCSID 37）。同 research F4）。
       利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る
     - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）

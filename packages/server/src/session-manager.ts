@@ -377,6 +377,30 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
  */
 export type StoredReport = SpoolReport & { receivedAt: number };
 
+/**
+ * **プリンターの画面へ配るもの**（ws-handler がタブごとに 1 つ付け、切断で外す）。
+ * ~~エントリに 1 つずつ持つフック~~ だと、同じ定義を 2 タブで開いたとき後のタブが上書きし、そのタブを閉じると
+ * 先のタブにも何も届かなくなった（独立点検の指摘。止めている帳票の再試行バーが下りなくなる）
+ */
+export interface PrinterListener {
+  /** 待ち受けの状態が変わった */
+  onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
+  /** 出力の警告 */
+  onOutputWarn?: (w: { at: number; message: string }) => void;
+  /**
+   * 帳票を受け取った。**救出した帳票はセッションのイベントに乗らない**——ホストから届いたものではないため。
+   * 配る側（`deliverReport`）から必ずここを叩く
+   */
+  onReport?: (r: StoredReport) => void;
+  /** 自動出力の結果（成功・止めた・取消 ほか） */
+  onOutputStatus?: (s: SpoolOutputStatus) => void;
+}
+
+/** 1 本の接続（張り直すたびに作り直す）。止めている帳票がどの接続のものかを見分ける */
+interface PrinterConn {
+  closed: boolean;
+}
+
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
 export interface PrinterEntry {
   id: string;
@@ -394,8 +418,10 @@ export interface PrinterEntry {
   error?: string;
   /** 開き直すときに使う接続条件（保存しておく） */
   openOpts: OpenPrinterOptions;
-  /** 状態が変わったときに呼ぶ（ws-handler が設定し、切断で解除する） */
-  onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
+  /** 画面へ配る先（タブごと。`PrinterListener`） */
+  listeners: Set<PrinterListener>;
+  /** 帳票の連番（`spool-<n>`）。**接続をまたいで数える**——張り直しで id が重ならないように */
+  spoolSeq: number;
   /**
    * 張り直しの輪が回っているか。**停止でここを落とすと待ち明けに抜ける**
    * （タイマーを持たずに降ろせる）。
@@ -436,16 +462,6 @@ export interface PrinterEntry {
   outputEnabled: boolean;
   /** 直近の出力警告（上限 20 件）。後から画面を開いても直近の失敗が分かるよう保持する */
   outputWarnings: { at: number; message: string }[];
-  /** 警告の push フック（ws-handler が設定し、切断で解除する） */
-  onOutputWarn?: (w: { at: number; message: string }) => void;
-  /**
-   * 帳票の push フック（ws-handler が設定し、切断で解除する）。
-   *
-   * **救出した帳票はセッションのイベントに乗らない**——ホストから届いたものではないため。
-   * ws-handler が `session.on("report")` だけを見ていると救出分が画面に出ないので、
-   * 配る側（`deliverReport`）から必ずこのフックを叩く。
-   */
-  onReport?: (r: StoredReport) => void;
   /** 書き出しできないスプールを拾う見張り（`startRescue`）。切断で止める */
   rescueTimer?: ReturnType<typeof setInterval> | undefined;
   /** 見張りが実行中か。前回が終わる前に次を走らせて二重取得しないための鍵 */
@@ -453,12 +469,17 @@ export interface PrinterEntry {
   /** スプールごとの自動出力の結果（受信順・上限あり）。成功も含めて画面に出す */
   outputStatuses: SpoolOutputStatus[];
   /**
-   * **出力に失敗して応答を止めている帳票**（`held`。同時に 1 つだけ——止めている間ホストは次を送らない）。
-   * `config` は再試行でやり直す出力（失敗した分だけ）。`release` でホストへ応答する
+   * **出力に失敗して応答を止めている帳票**（`held`。接続ごとに 1 つだけ——止めている間ホストは次を送らない）。
+   * `failed` は再試行でやり直す出力（失敗した分だけ。やり直すときは**いまの設定**から組み直す）、`status` は止めた時点の結果、
+   * `release` でホストへ応答する。`conn` はその帳票を受けた接続——切れていたら応答はもう返せない
    */
-  heldOutput?: { report: SpoolReport; config: PrinterOutputConfig; release: () => void };
-  /** 結果の push フック（ws-handler が設定し、切断で解除する） */
-  onOutputStatus?: (s: SpoolOutputStatus) => void;
+  heldOutput?: {
+    report: SpoolReport;
+    failed: { pdf: boolean; print: boolean };
+    status: SpoolOutputStatus;
+    release: () => void;
+    conn: PrinterConn;
+  };
   /** このセッションのアイドルタイムアウト（`OpenPrinterOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
   /** 持ち主の状態（表示セッションの `holder` と同じ意味。規則は `session-lifetime.ts`） */
@@ -500,7 +521,13 @@ export interface SpoolOutputStatus {
   held?: boolean;
   /** 止めていた応答を取消で返した（ホストは印刷済みとみなす） */
   canceled?: boolean;
-  pdf?: { ok: boolean; path?: string; error?: string };
+  /**
+   * 応答を止めている間に**接続が切れた**（停止・切断・張り直し）。応答はもう返せない。
+   * 繋ぎ直したときにホストがどうするかは `DROPPED_NOTE`
+   */
+  dropped?: boolean;
+  /** PDF。`skipped` は作れない設定（ホスト変換の印刷データ）で作らなかった——失敗ではないので止めない */
+  pdf?: { ok: boolean; path?: string; error?: string; skipped?: boolean };
   print?: { ok: boolean; printer?: string; error?: string };
 }
 
@@ -542,20 +569,34 @@ const PRINTER_FATAL_CODES = new Set([
 /** 出力結果の保持上限 */
 const OUTPUT_STATUS_LIMIT = 100;
 
+/** 応答を止める失敗か（作れない設定で作らなかった PDF は失敗に数えない） */
+function outputFailed(s: SpoolOutputStatus): { pdf: boolean; print: boolean } {
+  return { pdf: s.pdf?.ok === false && s.pdf.skipped !== true, print: s.print?.ok === false };
+}
+
+/**
+ * 再試行でやり直す出力（失敗した分だけ。成功した PDF を書き直したり、印刷を二重に出したりしない）。
+ * **いまの設定から組み直す**——止めている間に保存先を直したら、直した先へ書く（独立点検の指摘: 止めた時点の写しを使っていた）
+ */
+function failedOnly(cfg: PrinterOutputConfig, failed: { pdf: boolean; print: boolean }): PrinterOutputConfig {
+  const { autoPdfDir, autoPrint, ...rest } = cfg;
+  return {
+    ...rest,
+    ...(autoPdfDir !== undefined && failed.pdf ? { autoPdfDir } : {}),
+    ...(autoPrint !== undefined && failed.print ? { autoPrint } : {})
+  };
+}
+
+/** 止めた・取消・切断の印を外した結果（次の状態の土台） */
+function settled(s: SpoolOutputStatus): SpoolOutputStatus {
+  const { held: _held, canceled: _canceled, dropped: _dropped, skipped: _skipped, ...rest } = s;
+  return rest;
+}
+
 /**
  * handleReport の結果を UI 表示用のステータスに変換する。
  * **設定がある側だけキーを付ける**（設定なし＝キー省略、失敗＝ok:false）。
  */
-/** 再試行でやり直す出力（失敗した分だけ。成功した PDF を書き直したり、印刷を二重に出したりしない） */
-function failedOnly(cfg: PrinterOutputConfig, s: SpoolOutputStatus): PrinterOutputConfig {
-  const { autoPdfDir, autoPrint, ...rest } = cfg;
-  return {
-    ...rest,
-    ...(autoPdfDir !== undefined && s.pdf?.ok === false ? { autoPdfDir } : {}),
-    ...(autoPrint !== undefined && s.print?.ok === false ? { autoPrint } : {})
-  };
-}
-
 function buildOutputStatus(
   spoolId: string,
   at: number,
@@ -566,7 +607,11 @@ function buildOutputStatus(
   if (cfg.autoPdfDir) {
     s.pdf = r.pdfPath
       ? { ok: true, path: r.pdfPath }
-      : { ok: false, ...(r.pdfError !== undefined ? { error: r.pdfError } : {}) };
+      : {
+          ok: false,
+          ...(r.pdfError !== undefined ? { error: r.pdfError } : {}),
+          ...(r.pdfSkipped === true ? { skipped: true } : {})
+        };
   }
   if (cfg.autoPrint) {
     s.print = r.printed
@@ -965,6 +1010,8 @@ export class SessionManager {
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
       outputWarnings: [],
       outputStatuses: [],
+      listeners: new Set(),
+      spoolSeq: 0,
       resident,
       ...(opts.service !== undefined ? { service: opts.service } : {}),
       ...(opts.ref !== undefined ? { ref: opts.ref } : {}),
@@ -1034,19 +1081,26 @@ export class SessionManager {
    */
   private async connectPrinter(entry: PrinterEntry): Promise<void> {
     const opts = entry.openOpts;
+    const conn: PrinterConn = { closed: false };
     const session = await PrinterSession.connect({
       ...opts,
       id: entry.id,
+      nextReportSeq: () => ++entry.spoolSeq,
       // **出力が終わるまでホストへ応答しない**（ACS と同じ。上の `heldOutput`）
-      respondAfter: (report) => this.outputGate(entry, report)
+      respondAfter: (report, ctx) => this.outputGate(entry, conn, report, ctx.cleared)
     });
     entry.session = session;
     entry.lastActivity = this.now();
     // 出力は応答の待ち（`outputGate`）で走らせる。ここでは受信の記録と配布だけ
     session.on("report", (report) => this.deliverReport(entry, report, { gated: true }));
     session.on("closed", () => {
-      // 止めていた応答はもう返せない（ホストは接続が切れたジョブを印刷済みにしないので、繋ぎ直せば送り直してくる）
-      delete entry.heldOutput;
+      // 止めていた応答はもう返せない。画面の再試行バーも下ろす（`dropped`。独立点検の指摘: 捨てるだけで知らせていなかった）
+      conn.closed = true;
+      const held = entry.heldOutput;
+      if (held?.conn === conn) {
+        delete entry.heldOutput;
+        this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), dropped: true });
+      }
       for (const w of entry.waiters.splice(0)) w(undefined);
       this.stopRescue(entry);
       delete entry.session;
@@ -1138,11 +1192,12 @@ export class SessionManager {
     entry.state = state;
     if (state === "error" && error !== undefined) entry.error = error;
     else delete entry.error;
-    entry.onState?.({
+    const s = {
       state,
       ...(entry.error !== undefined ? { error: entry.error } : {}),
       ...(startupCode !== undefined ? { startupCode } : {})
-    });
+    };
+    for (const l of entry.listeners) l.onState?.(s);
   }
 
   /**
@@ -1167,7 +1222,7 @@ export class SessionManager {
         entry.delivered = Math.max(0, entry.delivered - dropped);
       }
       entry.lastActivity = this.now();
-      entry.onReport?.(report);
+      for (const l of entry.listeners) l.onReport?.(report);
       const waiter = entry.waiters.shift();
       if (waiter) {
         entry.delivered = entry.reports.length;
@@ -1197,21 +1252,33 @@ export class SessionManager {
    * `scripts/verify-printer-hold.mjs`）。以前は受け取った瞬間に応答していたので、PDF の保存先が書けない・
    * 自動印刷先が止まっている・サーバーが再起動した、のどれでも SAVE(*NO) のスプールが失われていた
    */
-  private outputGate(entry: PrinterEntry, report: SpoolReport): Promise<void> | undefined {
+  private outputGate(
+    entry: PrinterEntry,
+    conn: PrinterConn,
+    report: SpoolReport,
+    cleared: boolean
+  ): Promise<void> | undefined {
     if (!entry.output || !entry.outputEnabled) return undefined;
     const cfg = entry.output;
-    return new Promise<void>((release) => void this.runOutputs(entry, report, cfg, release));
+    // **CLEAR で閉じた帳票は止めない**（出力はする）。ACS がエラーで止まるのはデータを書くときだけで、ジョブを閉じるときの失敗は
+    // 記録するだけ（`closePrinterIfRequired`）。CLEAR はホストが途中のジョブを取り消す・保留する合図で、スプールはホストに残る
+    if (cleared) {
+      void this.runOutputs(entry, report, cfg);
+      return undefined;
+    }
+    return new Promise<void>((release) => void this.runOutputs(entry, report, cfg, { release, conn }));
   }
 
   /**
-   * 出力して結果を記録する。`release` があれば（応答を待たせている帳票）、**失敗したら止めたまま**
-   * `heldOutput` に置いて画面へ `held` を出し、成功したら応答する。
+   * 出力して結果を記録する。`gate` があれば（応答を待たせている帳票）、**失敗したら止めたまま**
+   * `heldOutput` に置いて画面へ `held` を出し、成功したら応答する。`gate.prev` は再試行の前の結果——
+   * やり直さなかった側（成功した PDF など）を引き継ぐ（独立点検の指摘: 置き換えていたので「PDF ✓」と保存先が消えた）
    */
   private async runOutputs(
     entry: PrinterEntry,
     report: SpoolReport,
     cfg: PrinterOutputConfig,
-    release?: () => void
+    gate?: { release: () => void; conn: PrinterConn; prev?: SpoolOutputStatus }
   ): Promise<void> {
     let status: SpoolOutputStatus;
     try {
@@ -1227,39 +1294,72 @@ export class SessionManager {
         ...(cfg.autoPrint ? { print: { ok: false, printer: cfg.autoPrint, error: msg } } : {})
       };
     }
-    const failed = status.pdf?.ok === false || status.print?.ok === false;
-    if (failed && release) {
-      entry.heldOutput = { report, config: failedOnly(cfg, status), release };
+    const prev = gate?.prev;
+    if (prev) {
+      const pdf = status.pdf ?? prev.pdf;
+      const print = status.print ?? prev.print;
+      status = { spoolId: status.spoolId, at: status.at, ...(pdf ? { pdf } : {}), ...(print ? { print } : {}) };
+    }
+    const failed = outputFailed(status);
+    if (gate && (failed.pdf || failed.print)) {
+      // 出力している間に接続が切れた（停止・切断・張り直し）。応答はもう返せないので止めない——止めると、閉じた接続の
+      // 応答を持つ帳票が残り、張り直した後の接続の止めている帳票を上書きする（独立点検の指摘）
+      if (gate.conn.closed) {
+        this.noteOutputStatus(entry, { ...status, dropped: true });
+        return;
+      }
+      // 出力している間に自動出力が切られた。切っている間は止めない（`setPrinterOutputEnabled`）
+      if (!entry.outputEnabled) {
+        this.noteOutputStatus(entry, { ...status, skipped: true });
+        gate.release();
+        return;
+      }
+      entry.heldOutput = { report, failed, status, release: gate.release, conn: gate.conn };
       this.noteOutputStatus(entry, { ...status, held: true });
       return;
     }
     this.noteOutputStatus(entry, status);
-    release?.();
+    gate?.release();
   }
 
   /**
-   * **止めている帳票の出力をやり直す**（ACS のプリンター・エラーの「再試行」）。失敗した出力だけをやり直し、
-   * 成功したらホストへ応答する。また失敗したら止めたまま（所有者/admin のみ）
+   * **止めている帳票の出力をやり直す**（ACS のプリンター・エラーの「再試行」）。失敗した出力だけを、**いまの設定で**やり直し、
+   * 成功したらホストへ応答する。また失敗したら止めたまま（所有者/admin のみ）。
+   * 止めている間に設定からその出力が外されていたら、やり直すものが無いので応答する
    */
   retryPrinterOutput(id: string, user?: AuthUser): PrinterEntry {
     const entry = this.getPrinter(id, user);
     const held = entry.heldOutput;
     if (!held) throw new As400Error("NOT_FOUND", "no held printer output");
     delete entry.heldOutput;
-    void this.runOutputs(entry, held.report, held.config, held.release);
+    const cfg = failedOnly(entry.output ?? {}, held.failed);
+    // 外された出力の失敗は引き継がない（引き継ぐと、やり直せないまま止まり続ける）
+    const { pdf, print, ...base } = settled(held.status);
+    const prev: SpoolOutputStatus = {
+      ...base,
+      ...(pdf && (pdf.ok || cfg.autoPdfDir !== undefined) ? { pdf } : {}),
+      ...(print && (print.ok || cfg.autoPrint !== undefined) ? { print } : {})
+    };
+    if (cfg.autoPdfDir === undefined && cfg.autoPrint === undefined) {
+      this.noteOutputStatus(entry, { ...prev, at: this.now() });
+      held.release();
+      return entry;
+    }
+    void this.runOutputs(entry, held.report, cfg, { release: held.release, conn: held.conn, prev });
     return entry;
   }
 
   /**
    * **止めている帳票を取り消す**（ACS の「取消」＝`cancelPrintJob`。応答は NO_ERROR のまま返す）。
-   * ホストは印刷済みとみなすので、SAVE(*NO) のスプールはホストから消える——帳票はサーバーの一覧に残る（所有者/admin のみ）
+   * ホストは印刷済みとみなすので、SAVE(*NO) のスプールはホストから消える——帳票はサーバーの一覧に残る（所有者/admin のみ）。
+   * 成功していた出力（PDF ✓ など）の結果は残す
    */
   cancelPrinterOutput(id: string, user?: AuthUser): PrinterEntry {
     const entry = this.getPrinter(id, user);
     const held = entry.heldOutput;
     if (!held) throw new As400Error("NOT_FOUND", "no held printer output");
     delete entry.heldOutput;
-    this.noteOutputStatus(entry, { spoolId: held.report.id, at: this.now(), canceled: true });
+    this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), canceled: true });
     held.release();
     return entry;
   }
@@ -1332,20 +1432,28 @@ export class SessionManager {
     const w = { at: this.now(), message };
     entry.outputWarnings.push(w);
     if (entry.outputWarnings.length > OUTPUT_WARN_LIMIT) entry.outputWarnings.shift();
-    entry.onOutputWarn?.(w);
+    for (const l of entry.listeners) l.onOutputWarn?.(w);
   }
 
   /** 自動出力の結果を記録して UI へ push する（成功も含めて画面に出すため） */
   private noteOutputStatus(entry: PrinterEntry, status: SpoolOutputStatus): void {
     entry.outputStatuses.push(status);
     if (entry.outputStatuses.length > OUTPUT_STATUS_LIMIT) entry.outputStatuses.shift();
-    entry.onOutputStatus?.(status);
+    for (const l of entry.listeners) l.onOutputStatus?.(status);
   }
 
   /** 自動出力（PDF 保存・自動印刷）の実行時 有効/無効を切り替える（所有者/admin のみ） */
   setPrinterOutputEnabled(id: string, enabled: boolean, user?: AuthUser): PrinterEntry {
     const entry = this.getPrinter(id, user);
     entry.outputEnabled = enabled;
+    // **切ったら止めている帳票も応答する**（切っている間は止めない。README「OFF の間は止めずにすぐ応答」。独立点検の指摘:
+    // 切っても止めたままで、切っている間の再試行は出力まで行っていた）
+    const held = entry.heldOutput;
+    if (!enabled && held) {
+      delete entry.heldOutput;
+      this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), skipped: true });
+      held.release();
+    }
     return entry;
   }
 

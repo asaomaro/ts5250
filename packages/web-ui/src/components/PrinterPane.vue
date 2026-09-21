@@ -3,7 +3,16 @@ import { computed, ref, watch, onMounted } from "vue";
 import ReportText from "./ReportText.vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
 import { setPrinterOutput, startPrinter, stopPrinter, retryPrinterOutput, cancelPrinterOutput } from "../session-controller.js";
-import { MSG_PRINTER_HELD, MSG_PRINTER_RETRY, MSG_PRINTER_CANCEL, MSG_PRINTER_CANCELED } from "../composables/opMessages.js";
+import {
+  MSG_PRINTER_HELD,
+  MSG_PRINTER_RETRY,
+  MSG_PRINTER_CANCEL,
+  MSG_PRINTER_CANCELED,
+  MSG_PRINTER_DROPPED,
+  MSG_PRINTER_CHIP_HELD,
+  MSG_PRINTER_CHIP_CANCELED,
+  MSG_PRINTER_CHIP_DROPPED
+} from "../composables/opMessages.js";
 import { renderSpoolHtml } from "@ts5250/scs/spool-html";
 import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { viewSettings } from "../stores/viewSettings.js";
@@ -104,10 +113,13 @@ function statusChips(spoolId: string): { label: string; cls: string }[] {
   const s = statusOf(spoolId);
   if (!s) return [];
   if (s.skipped) return [{ label: "⏸ スキップ", cls: "skip" }];
-  if (s.canceled) return [{ label: "取消", cls: "skip" }];
   const out: { label: string; cls: string }[] = [];
-  if (s.held) out.push({ label: "応答停止中", cls: "ng" });
-  if (s.pdf) out.push({ label: `PDF ${s.pdf.ok ? "✓" : "✗"}`, cls: s.pdf.ok ? "ok" : "ng" });
+  // 取消・切断でも、成功していた出力（PDF ✓ など）は並べる（独立点検の指摘: 取消だけになり保存先が消えていた）
+  if (s.canceled) out.push({ label: MSG_PRINTER_CHIP_CANCELED, cls: "skip" });
+  if (s.dropped) out.push({ label: MSG_PRINTER_CHIP_DROPPED, cls: "ng" });
+  if (s.held) out.push({ label: MSG_PRINTER_CHIP_HELD, cls: "ng" });
+  if (s.pdf?.skipped) out.push({ label: "PDF —", cls: "skip" });
+  else if (s.pdf) out.push({ label: `PDF ${s.pdf.ok ? "✓" : "✗"}`, cls: s.pdf.ok ? "ok" : "ng" });
   if (s.print) out.push({ label: `印刷 ${s.print.ok ? "✓" : "✗"}`, cls: s.print.ok ? "ok" : "ng" });
   return out;
 }
@@ -117,10 +129,13 @@ const selectedStatusLines = computed<{ text: string; cls: string }[]>(() => {
   const s = r ? statusOf(r.id) : undefined;
   if (!s) return [];
   if (s.skipped) return [{ text: "自動出力オフのためスキップしました", cls: "skip" }];
-  if (s.canceled) return [{ text: MSG_PRINTER_CANCELED, cls: "skip" }];
   const lines: { text: string; cls: string }[] = [];
+  if (s.canceled) lines.push({ text: MSG_PRINTER_CANCELED, cls: "skip" });
+  if (s.dropped) lines.push({ text: MSG_PRINTER_DROPPED, cls: "ng" });
   if (s.held) lines.push({ text: MSG_PRINTER_HELD, cls: "ng" });
-  if (s.pdf) {
+  // 作れない設定で作らなかった PDF は失敗ではない（ホスト変換の印刷データ）
+  if (s.pdf?.skipped) lines.push({ text: `PDF: ${s.pdf.error ?? "作成しません"}`, cls: "skip" });
+  else if (s.pdf) {
     lines.push(
       s.pdf.ok
         ? { text: `PDF 保存: ${s.pdf.path ?? "成功"}`, cls: "ok" }

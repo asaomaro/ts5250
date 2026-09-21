@@ -7,6 +7,7 @@ import {
   type SessionEntry,
   type SessionTarget,
   type StoredReport,
+  type PrinterListener,
   type PcCommandEvent
 } from "./session-manager.js";
 import type { ConnRole } from "./session-lifetime.js";
@@ -873,31 +874,30 @@ export class WsConnection {
       const entry = await this.deps.sessions.openPrinter(opts);
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
-      const onReport = (r: StoredReport): void =>
-        this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) });
-      // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
-      // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
-      entry.onReport = onReport;
-      // **状態の変化を push する**（監視と同じ扱い。「黙って止まらない」ため）
-      entry.onState = (s) =>
-        this.send({
-          type: "printer-state",
-          sessionId: entry.id,
-          state: s.state,
-          ...(s.error !== undefined ? { error: s.error } : {}),
-          ...(s.startupCode !== undefined ? { startupCode: s.startupCode } : {})
-        });
-      this.detachReport = () => {
-        delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
-        delete entry.onReport;
-        delete entry.onOutputStatus;
-        delete entry.onState;
+      // **タブごとに 1 つ付け、切断でそれだけを外す**（`PrinterListener`）。エントリに 1 つずつ持たせていたときは、
+      // 同じ定義を 2 タブで開くと後のタブが上書きし、そのタブを閉じると先のタブにも何も届かなくなった（独立点検の指摘）
+      const listener: PrinterListener = {
+        // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
+        // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
+        onReport: (r) => this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) }),
+        // **状態の変化を push する**（監視と同じ扱い。「黙って止まらない」ため）
+        onState: (st) =>
+          this.send({
+            type: "printer-state",
+            sessionId: entry.id,
+            state: st.state,
+            ...(st.error !== undefined ? { error: st.error } : {}),
+            ...(st.startupCode !== undefined ? { startupCode: st.startupCode } : {})
+          }),
+        // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
+        onOutputWarn: (w) => this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message }),
+        // 自動出力の結果（成功も含む）を UI へ push
+        onOutputStatus: (st) => this.send({ type: "printer-output-result", sessionId: entry.id, status: st })
       };
-      // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
-      entry.onOutputWarn = (w) =>
-        this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message });
-      // 自動出力の結果（成功も含む）を UI へ push
-      entry.onOutputStatus = (s) => this.send({ type: "printer-output-result", sessionId: entry.id, status: s });
+      entry.listeners.add(listener);
+      this.detachReport = () => {
+        entry.listeners.delete(listener); // 切断で外す（リーク防止）。ほかのタブのものは触らない
+      };
       this.send({
         type: "printer-opened",
         sessionId: entry.id,
@@ -1333,7 +1333,7 @@ export class WsConnection {
       this.session3270 = undefined;
     }
     if (this.link) {
-      // フック（onReport / onOutputWarn / onOutputStatus）は上で外しているが、
+      // このタブのリスナー（`PrinterListener`）は上で外しているが、
       // **記録はエントリ側に溜まり続ける**ので、開き直したときに閉じている間のぶんを読める
       // （常駐プリンターを切らない理由は `session-lifetime.ts` の `decideDisposition` へ移した）。
       //

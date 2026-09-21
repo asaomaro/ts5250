@@ -56,8 +56,18 @@ export interface PrinterConnectOptions {
    * ジョブの終わりにサーバーが行うので、その成否をここで待つ。返した Promise が解決したら応答する（拒否でも応答する）。
    * 待っている間に届いたレコードは溜めて、応答のあとに順に処理する（ACS も同じスレッドで待つので先へ進まない）。
    * 指定が無ければ従来どおりすぐ応答する。
+   *
+   * **CLEAR で閉じた帳票（`cleared`）は待たない**（呼ぶが、返り値を待たずに CLEAR_PROCESSED を返す）。ACS がエラーで止まるのは
+   * データを書くとき（`sendPrintData`）だけで、ジョブを閉じるときの失敗（`closePrinterIfRequired`）は記録するだけ。
+   * CLEAR はホストが途中のジョブを取り消す・保留する合図で、スプールはホストに残る——止めても守るものが無い
    */
-  respondAfter?: (report: SpoolReport) => Promise<void> | void;
+  respondAfter?: (report: SpoolReport, ctx: { cleared: boolean }) => Promise<void> | void;
+  /**
+   * 帳票の連番を採る（`SpoolReport.id` の `spool-<n>`）。無ければ接続ごとに 1 から。
+   * **張り直す側が渡す**——接続ごとに 1 から振ると、張り直した後の帳票が前の接続の帳票と同じ id になり、
+   * id ごとに持つ出力の結果（server の `outputStatuses`）が取り違えられる
+   */
+  nextReportSeq?: () => number;
 }
 
 interface PrinterSessionEvents extends Record<string, unknown[]> {
@@ -242,8 +252,9 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       }
     }
     // その他の opcode は何もしない（ACS も処理しない。~~本体を SCS として足す~~）
-    const gate = finished && this.opts.respondAfter ? this.opts.respondAfter(finished) : undefined;
-    if (gate) {
+    const cleared = opcode === OP_CLEAR;
+    const gate = finished && this.opts.respondAfter ? this.opts.respondAfter(finished, { cleared }) : undefined;
+    if (gate && !cleared) {
       // 帳票の出力が終わるまで応答しない（上の `respondAfter`）。失敗しても最後は応答する——止めたままにするかは
       // 呼び出し側が決める（再試行・取消を待つなら、その間 Promise を解決しない）
       this.held = [];
@@ -281,7 +292,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     // **HPT では中身を解釈しない。** 届いているのは SCS ではなくプリンターの言語なので、
     // SCS として読むと意味のないページが並ぶ。印刷にはそのまま流すので raw だけで足りる。
     const pages = this.transformed ? [] : this.decoder.decode(raw);
-    const report: SpoolReport = { id: `spool-${++this.seq}`, pages, raw };
+    const report: SpoolReport = { id: `spool-${this.opts.nextReportSeq?.() ?? ++this.seq}`, pages, raw };
     this.reportList.push(report);
     this.emit("report", report);
     return report;

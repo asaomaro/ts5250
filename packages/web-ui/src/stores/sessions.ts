@@ -44,7 +44,10 @@ export interface SpoolOutputStatusView {
   held?: boolean;
   /** 止めていた応答を取消で返した（ホストは印刷済みとみなした） */
   canceled?: boolean;
-  pdf?: { ok: boolean; path?: string; error?: string };
+  /** 応答を止めている間に接続が切れた（応答はもう返せない） */
+  dropped?: boolean;
+  /** `skipped` は作れない設定（ホスト変換の印刷データ）で作らなかった（失敗ではない） */
+  pdf?: { ok: boolean; path?: string; error?: string; skipped?: boolean };
   print?: { ok: boolean; printer?: string; error?: string };
 }
 

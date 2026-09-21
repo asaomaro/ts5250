@@ -2,7 +2,16 @@ import { describe, it, expect, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import PrinterPane from "../src/components/PrinterPane.vue";
 import { sessionsStore, type SessionState, createSessionState, type SessionStateInit } from "../src/stores/sessions.js";
-import { MSG_PRINTER_HELD, MSG_PRINTER_RETRY, MSG_PRINTER_CANCEL, MSG_PRINTER_CANCELED } from "../src/composables/opMessages.js";
+import {
+  MSG_PRINTER_HELD,
+  MSG_PRINTER_RETRY,
+  MSG_PRINTER_CANCEL,
+  MSG_PRINTER_CANCELED,
+  MSG_PRINTER_DROPPED,
+  MSG_PRINTER_CHIP_HELD,
+  MSG_PRINTER_CHIP_CANCELED,
+  MSG_PRINTER_CHIP_DROPPED
+} from "../src/composables/opMessages.js";
 
 /**
  * **出力に失敗して応答を止めている帳票**の表示と、再試行・取消（ACS のプリンター・エラー。`20260921-printer-hold-response`）。
@@ -32,7 +41,7 @@ describe("PrinterPane: 応答を止めている帳票", () => {
     const w = mount(PrinterPane, { props: { sessionId: SID } });
     expect(w.find(".held-bar").exists()).toBe(true);
     expect(w.text()).toContain(MSG_PRINTER_HELD);
-    expect(w.text()).toContain("応答停止中");
+    expect(w.text()).toContain(MSG_PRINTER_CHIP_HELD);
     const [retry, cancel] = w.findAll(".held-btn");
     expect(retry!.text()).toBe(MSG_PRINTER_RETRY);
     expect(cancel!.text()).toBe(MSG_PRINTER_CANCEL);
@@ -42,12 +51,36 @@ describe("PrinterPane: 応答を止めている帳票", () => {
     w.unmount();
   });
 
-  it("止めていなければバーを出さない。取消した帳票は「取消」と出す", () => {
-    addPrinterSession({ outputStatuses: { r1: { spoolId: "r1", at: Date.now(), canceled: true } } });
+  it("止めていなければバーを出さない。取消した帳票は「取消」と出し、成功していた PDF の結果も残す", () => {
+    addPrinterSession({
+      outputStatuses: { r1: { spoolId: "r1", at: Date.now(), canceled: true, pdf: { ok: true, path: "/out/r1.pdf" } } }
+    });
     const w = mount(PrinterPane, { props: { sessionId: SID } });
     expect(w.find(".held-bar").exists()).toBe(false);
-    expect(w.text()).toContain("取消");
+    expect(w.text()).toContain(MSG_PRINTER_CHIP_CANCELED);
     expect(w.text()).toContain(MSG_PRINTER_CANCELED);
+    expect(w.text(), "取消で PDF ✓ と保存先が消えた").toContain("PDF ✓");
+    expect(w.text()).toContain("/out/r1.pdf");
+    w.unmount();
+  });
+
+  it("**止めている間に切れた帳票はバーを下ろし、切断で未応答と出す**", () => {
+    addPrinterSession({ outputStatuses: { r1: { spoolId: "r1", at: Date.now(), dropped: true, pdf: { ok: false } } } });
+    const w = mount(PrinterPane, { props: { sessionId: SID } });
+    expect(w.find(".held-bar").exists()).toBe(false);
+    expect(w.text()).toContain(MSG_PRINTER_CHIP_DROPPED);
+    expect(w.text()).toContain(MSG_PRINTER_DROPPED);
+    w.unmount();
+  });
+
+  it("ホスト変換で作らなかった PDF は失敗（✗）と出さない", () => {
+    addPrinterSession({
+      outputStatuses: { r1: { spoolId: "r1", at: Date.now(), pdf: { ok: false, skipped: true, error: "PDF にできません" } } }
+    });
+    const w = mount(PrinterPane, { props: { sessionId: SID } });
+    expect(w.text()).toContain("PDF —");
+    expect(w.text()).not.toContain("PDF ✗");
+    expect(w.text()).not.toContain("PDF 保存に失敗");
     w.unmount();
   });
 });

@@ -92,6 +92,19 @@ describe("GET /api/printers（定義ベース）", () => {
     });
   });
 
+  it("**出力に失敗して応答を止めていれば `held`**（待ち受けていても次が届かないことを一覧で分かるように）", async () => {
+    const app = appWith({
+      defs: [def({ ref: "srv:p1", sessionType: "printer" }), def({ ref: "srv:p2", sessionType: "printer" })],
+      printers: [
+        entry({ id: "e1", ref: "srv:p1", heldOutput: {} as PrinterEntry["heldOutput"] }),
+        entry({ id: "e2", ref: "srv:p2" })
+      ]
+    });
+    const body = await get(app, "/api/printers");
+    expect(body.printers[0]!.held).toBe(true);
+    expect(body.printers[1]!.held).toBeUndefined();
+  });
+
   it("警告は新しい順（溜まった古い失敗より今を先に）", async () => {
     const app = appWith({
       defs: [def({ ref: "srv:p1", sessionType: "printer" })],

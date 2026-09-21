@@ -155,7 +155,7 @@ describe("救出した帳票の配り先", () => {
       outputEnabled: true,
       outputWarnings: [],
       outputStatuses: [],
-      onReport: (r: { id: string }) => pushed.push(r.id)
+      listeners: new Set([{ onReport: (r: { id: string }) => pushed.push(r.id) }])
     };
     const deliver = (mgr as unknown as {
       deliverReport: (e: unknown, r: unknown) => void;

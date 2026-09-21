@@ -31,3 +31,11 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - 装置の型番を見て動きを変えるホストのプログラムでは試していない。27x132 の DBCS は以前から C01（変更なし）。
+
+## ラウンド 2（節目の独立点検の差し戻し後）
+- 文書とスクリプトの期待値の修正だけ（`scripts/verify-screen-size.mjs`・`README.md`・`screenSizes.ts` の注記）。コードの変更は無い。
+  節目の全量（計 6,285 passed / 0 failed / 41 skipped）は `20260921-printer-hold-response` の test-result に記載。
+- `verify-screen-size.mjs` は実機では流していない（`TESTLIB/QDDSSRC` の固定のメンバーを前提にしている。C01 で STRSEU が 24x80 のまま来ることは research F3 で確かめ済み）。
+
+### 失敗の証跡（ラウンド 2）
+このラウンドでは失敗が発生していない（点検役の指摘は、スクリプトの期待値が古いまま＝流せば NG になる、という読みによるもの）。

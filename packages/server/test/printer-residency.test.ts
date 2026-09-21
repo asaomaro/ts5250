@@ -219,7 +219,7 @@ describe("開始と停止", () => {
     const sessions = new SessionManager();
     const seen: string[] = [];
     const entry = await open(sessions, { autoStart: false });
-    entry.onState = (s) => void seen.push(s.state);
+    entry.listeners.add({ onState: (s) => void seen.push(s.state) });
     await sessions.startPrinter(entry.id);
     sessions.stopPrinter(entry.id);
     expect(seen).toEqual(["listening", "stopped"]);

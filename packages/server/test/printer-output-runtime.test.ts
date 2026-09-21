@@ -102,7 +102,7 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     expect(existsSync(missing)).toBe(false);
     const { entry, t } = await openPrinter(missing);
     const pushed: string[] = [];
-    entry.onOutputWarn = (w) => pushed.push(w.message);
+    entry.listeners.add({ onOutputWarn: (w) => pushed.push(w.message) });
     feedSpool(t);
     // **見たいものが来るまで待つ。** `renderSpoolPdf` は CJK フォントが見つからないと
     // 先に警告を 1 本積むので、「警告が 1 本でも来たか」で待つと**フォント警告で待ちが明けて**
@@ -120,7 +120,7 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     const dir = mkdtempSync(join(tmpdir(), "pout-"));
     const { entry, t } = await openPrinter(dir);
     const pushed: unknown[] = [];
-    entry.onOutputStatus = (s) => pushed.push(s);
+    entry.listeners.add({ onOutputStatus: (s) => pushed.push(s) });
     feedSpool(t);
     expect(await waitFor(() => entry.outputStatuses.length > 0)).toBe(true);
     const s = entry.outputStatuses[0]!;

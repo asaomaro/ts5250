@@ -97,6 +97,13 @@ export interface WindowsPrintOptions {
 }
 
 /**
+ * 印刷の子プロセス（`lp`・Windows の PowerShell）を待つ上限。**帳票の応答を待たせている**ので無限には待たない
+ * （`20260921-printer-hold-response` の独立点検の指摘）。lp はキューへ投げるだけですぐ返り、PowerShell も描いてドライバーへ
+ * 渡すまで。普段は数秒で終わる
+ */
+export const PRINT_TIMEOUT_MS = 120_000;
+
+/**
  * PowerShell を起動して印刷する。
  *
  * **`-EncodedCommand` で渡す**——スクリプトを一時ファイルに書くと実行ポリシーに
@@ -117,6 +124,8 @@ export function printOnWindows(
         // **標準出力も繋ぐ。** NUL に捨てると PowerShell が書き込み先を待って止まる
         // ことがある（実測でハングした）。読み捨てるだけでよい
         stdio: ["ignore", "pipe", "pipe"],
+        // 時間切れで止める（帳票の応答を待たせているので。`printer-output.ts` の `PRINT_TIMEOUT_MS`）
+        timeout: PRINT_TIMEOUT_MS,
         env: {
           ...process.env,
           TS5250_PRINTER: opts.printer,
@@ -139,7 +148,13 @@ export function printOnWindows(
       warn(msg);
       resolve({ ok: false, error: msg });
     });
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
+      if (code === null && signal !== null) {
+        const msg = `自動印刷に失敗しました: ${PRINT_TIMEOUT_MS / 1000} 秒で終わらないので止めました`;
+        warn(msg);
+        resolve({ ok: false, error: msg });
+        return;
+      }
       if (code !== 0) {
         const detail = stderr.trim().split("\n")[0] ?? `code ${code}`;
         const msg = `自動印刷に失敗しました: ${detail}`;

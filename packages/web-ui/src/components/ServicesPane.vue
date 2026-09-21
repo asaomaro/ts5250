@@ -20,6 +20,7 @@ import { servicesStore } from "../stores/services.js";
 import { systemsStore } from "../stores/systems.js";
 import { useOpenConfigured } from "../composables/openConfigured.js";
 import type { PrinterRow, WatchRow } from "@ts5250/server";
+import { MSG_PRINTER_CHIP_HELD, MSG_PRINTER_SERVICE_HELD } from "../composables/opMessages.js";
 
 /**
  * `active`: **いま見えているか**（`20260802-keep-pane-state`）。開いたタブは切り替えても
@@ -85,6 +86,8 @@ interface Row {
   hasWebhook?: boolean;
   /** **転送を諦めた件数＝失われたデータの数**。0 でなければ目立たせる */
   undelivered?: number;
+  /** プリンターが出力に失敗して応答を止めている（止めている間は次の帳票が届かない） */
+  held?: boolean;
 }
 
 const rows = computed<Row[]>(() => [
@@ -100,6 +103,7 @@ const rows = computed<Row[]>(() => [
       running: p.id !== undefined,
       hasOutput: p.hasOutput,
       ...(p.stale ? { stale: true } : {}),
+      ...(p.held ? { held: true } : {}),
       detail:
         p.receivedTotal !== undefined
           ? `帳票 ${p.receivedTotal} 件${p.buffered !== undefined && p.buffered < p.receivedTotal ? `（保持 ${p.buffered}）` : ""}`
@@ -226,6 +230,8 @@ const at = (ms: number): string => new Date(ms).toLocaleString("ja-JP", { hour12
             <td class="k">{{ kindLabel(r) }}</td>
             <td>
               <span class="state" :class="r.state" :title="r.error ?? ''">{{ stateLabel(r) }}</span>
+              <!-- **待ち受けていても届かない**ことを出す（止めている間ホストは次を送らない。独立点検の指摘） -->
+              <span v-if="r.held" class="lost" :title="MSG_PRINTER_SERVICE_HELD">⚠ {{ MSG_PRINTER_CHIP_HELD }}</span>
               <span v-if="r.error" class="reason" :title="r.error">{{ r.error }}</span>
             </td>
             <td class="k">{{ r.autoStart ? "自動" : "手動" }}</td>

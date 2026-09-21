@@ -206,10 +206,14 @@ describe("PrinterSession", () => {
 });
 
 describe("respondAfter: 帳票の出力が終わるまで応答しない（`20260921-printer-hold-response`）", () => {
-  async function openWith(respondAfter: (r: SpoolReport) => Promise<void> | void) {
+  async function openWith(
+    respondAfter: (r: SpoolReport, ctx: { cleared: boolean }) => Promise<void> | void,
+    more: { nextReportSeq?: () => number } = {}
+  ) {
     let transport!: FakeTransport;
     const session = await PrinterSession.connect({
       respondAfter,
+      ...more,
       transport: new FakeTransport((t) => {
         transport = t;
         t.feed(startupRecord(I902));
@@ -252,16 +256,36 @@ describe("respondAfter: 帳票の出力が終わるまで応答しない（`2026
     expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR, CLEAR_PROCESSED]);
   });
 
-  it("CLEAR で閉じたジョブも待つ（応答は CLEAR_PROCESSED）", async () => {
-    let release!: () => void;
-    const { transport } = await openWith(() => new Promise<void>((r) => (release = r)));
+  // ~~CLEAR で閉じたジョブも待つ~~ → 待たない（独立点検の指摘）。ACS がエラーで止まるのはデータを書くとき（`sendPrintData`）だけで、
+  // ジョブを閉じるときの失敗（`closePrinterIfRequired`）は記録するだけ。CLEAR ではスプールがホストに残るので、止めても守るものが無い
+  it("**CLEAR で閉じたジョブは待たない**（呼ぶが `cleared: true` を渡し、すぐ CLEAR_PROCESSED を返す）", async () => {
+    const seen: boolean[] = [];
+    const { transport } = await openWith((_r, ctx) => {
+      seen.push(ctx.cleared);
+      return new Promise<void>(() => {}); // 解決しない
+    });
     transport.feed(dataRecord([0xc1]));
     transport.feed(clearRecord());
     await tick();
-    expect(replies(transport)).toEqual([NO_ERROR]);
-    release();
-    await tick();
+    expect(seen).toEqual([true]);
     expect(replies(transport)).toEqual([NO_ERROR, CLEAR_PROCESSED]);
+    // ジョブの終わりで閉じた帳票は `cleared: false` で待つ
+    transport.feed(dataRecord([0xc2]));
+    transport.feed(endOfJob17());
+    await tick();
+    expect(seen).toEqual([true, false]);
+    // 2 本目のデータには NO_ERROR、ジョブの終わりは待っている（解決しないので応答が出ない）
+    expect(replies(transport)).toEqual([NO_ERROR, CLEAR_PROCESSED, NO_ERROR]);
+  });
+
+  it("帳票の連番は `nextReportSeq` があればそれを使う（張り直しで id が重ならないように）", async () => {
+    let n = 41;
+    const { session, transport } = await openWith(() => undefined, { nextReportSeq: () => ++n });
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    transport.feed(dataRecord([0xc2]));
+    transport.feed(endOfJob17());
+    expect(session.reports().map((r) => r.id)).toEqual(["spool-42", "spool-43"]);
   });
 
   it("待つものを返さなければ（undefined）すぐ応答する", async () => {

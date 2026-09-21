@@ -93,6 +93,32 @@ describe("TelnetLayer ネゴシエーション", () => {
     expect(text).toContain("IBMSUBSPW\x01Secret\xff");
   });
 
+  it("**利用者名は Java の `trim()` と同じ**——前後の U+0020 以下（制御文字を含む）だけを落とし、全角空白は残す", () => {
+    const { t } = setupAuto({ user: "\u0001\tmyuser\u0000 ", password: "S" });
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    const text = String.fromCharCode(...t.takeSent());
+    expect(text).toContain("USER\x01MYUSER\x03"); // 次の USERVAR（3）が直後に続く＝前後に何も残っていない
+  });
+
+  it("**ACS と同じく、利用者名が 10 文字・パスワードが 128 文字を超えるか空なら自動サインオンをやめる**（USER も送らない）", () => {
+    for (const [user, password] of [
+      ["ABCDEFGHIJK", "S"],
+      ["U", "x".repeat(129)],
+      ["   ", "S"],
+      ["U", ""]
+    ] as const) {
+      const { t } = setupAuto({ user, password });
+      t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+      const text = String.fromCharCode(...t.takeSent());
+      expect(text, `${user.length}/${password.length}`).not.toContain("USER\x01");
+      expect(text).not.toContain("IBMSUBSPW");
+    }
+    // ちょうど 10 文字・128 文字は送る
+    const { t } = setupAuto({ user: "ABCDEFGHIJ", password: "x".repeat(128) });
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    expect(String.fromCharCode(...t.takeSent())).toContain("IBMSUBSPW");
+  });
+
   it("値の 0x00〜0x03 は ESC でエスケープする（RFC 1572。ACS も同じ）", () => {
     const { t } = setupAuto({ user: "U", password: "a\u0001b" });
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);

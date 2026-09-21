@@ -68,6 +68,18 @@ export const MSG_PRINTER_RETRY = "再試行";
 export const MSG_PRINTER_CANCEL = "取消（印刷済みとして応答）";
 /** 取消した帳票の状態 */
 export const MSG_PRINTER_CANCELED = "取消しました（ホストは印刷済みとみなしました）";
+/**
+ * 応答を止めている間に接続が切れた帳票の状態。ホストはスプールを印刷済みにせず RDY に戻し、繋ぎ直すと送り直す
+ * （PUB400 で 2 回実測。`scripts/verify-printer-hold-drop.mjs`）
+ */
+export const MSG_PRINTER_DROPPED = "応答する前に接続が切れました（ホストは印刷済みにしていません。繋ぎ直すと送り直されます）";
+/** 一覧の行のチップ（止めている・取消・切断で未応答） */
+export const MSG_PRINTER_CHIP_HELD = "応答停止中";
+export const MSG_PRINTER_CHIP_CANCELED = "取消";
+export const MSG_PRINTER_CHIP_DROPPED = "切断で未応答";
+/** サービス画面のチップの説明（止めている間ホストは次を送らないので、待ち受けていても届かない） */
+export const MSG_PRINTER_SERVICE_HELD =
+  "出力に失敗して、ホストへの印刷完了の応答を止めています（止めている間は次の帳票が届きません）。開くと再試行・取消を選べます";
 
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";

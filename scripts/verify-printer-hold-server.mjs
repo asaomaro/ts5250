@@ -3,6 +3,7 @@
 // サーバーの `SessionManager` でプリンターを開く（自動 PDF の保存先は**まだ無いディレクトリ**）→ 帳票を送る →
 // PDF が書けずに応答を止めている間、スプールがホストに残る（WTR）→ 保存先を作って再試行 → PDF ができ、スプールが消える。
 // もう 1 本は取消（応答する＝ホストは印刷済みとみなしスプールが消える。PDF は作られない）。
+// 3 本目は止めている間にプリンターを停止 → スプールは RDY に戻る → 保存先を作って開始し直すと送り直され、PDF ができる。
 //
 // 実行: npm run build && node --env-file=.env --env-file=.env.verify scripts/verify-printer-hold-server.mjs
 //   env: PUB400_USER / PUB400_PASSWORD（任意 PUB400_HOST）
@@ -106,6 +107,24 @@ try {
   await sleep(6000);
   check(entry.outputStatuses[entry.outputStatuses.length - 1]?.canceled === true, "取消した");
   check((await spoolState(s)) === "(無し)", "取消で応答したのでスプールが消えた");
+  // ---- 止めている間に停止 → 開始（節目の点検の指摘。core の実測は `verify-printer-hold-drop.mjs`） ----
+  await cmd(s, "DSPLIBL OUTPUT(*PRINT)");
+  await sleep(2000);
+  for (let i = 0; i < 4 && entry.reports.length < 3; i++) { log(`届く前 ${await spoolState(s, true)}`); await sleep(3000); }
+  check(await waitHeld(entry, 3), "3 本目も応答を止めた");
+  sessions.stopPrinter(entry.id);
+  await sleep(3000);
+  const dropped = entry.outputStatuses[entry.outputStatuses.length - 1];
+  check(dropped?.dropped === true && entry.heldOutput === undefined, "停止で止めていた帳票を手放し、画面へ dropped を出した");
+  check((await spoolState(s)) === "RDY", "止めている間に切れたスプールは印刷済みにならない（RDY）");
+  mkdirSync(pdfDir);
+  const before = entry.reports.length;
+  await sessions.startPrinter(entry.id);
+  for (let i = 0; i < 8 && entry.reports.length === before; i++) { log(`開始後 ${await spoolState(s, true)}`); await sleep(4000); }
+  check(entry.reports.length > before, "開始し直すとホストが送り直した");
+  await sleep(4000);
+  check(entry.outputStatuses[entry.outputStatuses.length - 1]?.pdf?.ok === true, "送り直された帳票の PDF ができた");
+  check((await spoolState(s)) === "(無し)", "応答したのでスプールが消えた");
 } finally {
   log("--- 片付け ---");
   for (let i = 0; i < 3; i++) await cmd(s, "DLTSPLF FILE(QPRTLIBL) JOB(*) SPLNBR(*LAST)");

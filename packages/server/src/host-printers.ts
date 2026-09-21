@@ -81,6 +81,11 @@ export interface PrinterRow extends ServiceRow {
   buffered?: number;
   /** 直近の出力警告（**新しい順**）。溜まった古い失敗より、いま起きていることを先に */
   warnings?: { at: number; message: string }[];
+  /**
+   * **出力に失敗してホストへの応答を止めている**（`20260921-printer-hold-response`）。止めている間ホストは次の帳票を送らないので、
+   * 待ち受けていても届かない——`listening` のまま見せると気づけない（独立点検の指摘）。再試行・取消は開いた画面で選ぶ
+   */
+  held?: boolean;
 }
 
 export interface WatchRow extends ServiceRow {
@@ -137,6 +142,7 @@ export function registerHostPrinterRoutes(app: Hono<{ Variables: AuthVars }>, de
         row.outputEnabled = e.outputEnabled;
         row.receivedTotal = e.receivedTotal;
         row.buffered = e.reports.length;
+        if (e.heldOutput) row.held = true;
         // **理由の文面はパスを含みうる**ので、操作できる相手にだけ
         if (detail) {
           if (e.error !== undefined) row.error = e.error;

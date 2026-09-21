@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import type { SpoolReport } from "@ts5250/tn5250";
 import { renderSpoolPdf, type PdfOptions } from "./pdf.js";
-import { printOnWindows, PAGE_BREAK } from "./print-windows.js";
+import { printOnWindows, PAGE_BREAK, PRINT_TIMEOUT_MS } from "./print-windows.js";
 
 /**
  * プリンターセッションの受信スプールに対するサーバー側処理（PDF 自動蓄積・物理自動印刷）。
@@ -37,6 +37,11 @@ export interface HandleReportResult {
   pdfPath?: string;
   /** PDF 保存に失敗した理由（UI へ出す。warn も従来どおり呼ぶ） */
   pdfError?: string;
+  /**
+   * PDF は**作れない設定なので作らなかった**（ホスト変換の印刷データ。理由は `pdfError`）。失敗ではない——
+   * これを失敗と数えると、ホスト変換と PDF 保存先を両方設定したとき帳票ごとに応答を止め、再試行でも抜けられなかった（独立点検の指摘）
+   */
+  pdfSkipped?: true;
   /** 印刷を投げられたか */
   printed?: boolean;
   /** 送信先プリンター名（autoPrint 設定時） */
@@ -155,6 +160,7 @@ async function printRaw(
 ): Promise<HandleReportResult> {
   if (cfg.autoPdfDir) {
     result.pdfError = "ホスト変換済みの印刷データは PDF にできません（印刷はそのまま流します）";
+    result.pdfSkipped = true;
   }
   if (!cfg.autoPrint) return result;
   if (process.platform === "win32") {
@@ -198,15 +204,20 @@ function lpPrint(
   return new Promise((resolve) => {
     // -o raw を付けないと CUPS がフィルターを掛けてしまい、ホストが作った書式が壊れる
     const args = raw ? ["-d", printer, "-o", "raw", file] : ["-d", printer, file];
-    const proc = spawn("lp", args, { stdio: "ignore" });
+    // **時間切れで止める**（`PRINT_TIMEOUT_MS`）。出力が終わるまでホストへ応答しないので、lp が返らないと帳票の応答が止まったまま
+    // 再試行バーも出ない（独立点検の指摘）。止めた lp は印刷を投げていない前提で、失敗として再試行に回す
+    const proc = spawn("lp", args, { stdio: "ignore", timeout: PRINT_TIMEOUT_MS });
     proc.on("error", (e) => {
       const msg = `自動印刷に失敗（lp が無い可能性）: ${e.message}`;
       warn(msg);
       resolve({ ok: false, error: msg });
     });
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       if (code !== 0) {
-        const msg = `lp が異常終了しました（code ${code}）`;
+        const msg =
+          code === null && signal !== null
+            ? `lp が ${PRINT_TIMEOUT_MS / 1000} 秒で終わらないので止めました`
+            : `lp が異常終了しました（code ${code}）`;
         warn(msg);
         resolve({ ok: false, error: msg });
         return;

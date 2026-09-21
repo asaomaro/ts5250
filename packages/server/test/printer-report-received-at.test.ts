@@ -78,7 +78,7 @@ describe("帳票の受信時刻", () => {
   it("**live の push にも同じ 1 個が渡る**（開き直しだけ直して live を忘れない）", async () => {
     const { sessions, entry } = await open(() => CLOCK);
     const pushed: StoredReport[] = [];
-    entry.onReport = (r) => pushed.push(r);
+    entry.listeners.add({ onReport: (r) => pushed.push(r) });
     deliver(sessions, entry.id, "s1");
     expect(pushed[0]?.receivedAt).toBe(CLOCK);
     // バッファに入ったものと**同一のオブジェクト**——作り直すと片方だけ直る形になる

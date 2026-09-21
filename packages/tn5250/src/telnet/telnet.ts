@@ -246,10 +246,17 @@ export class TelnetLayer {
       if (this.opts.sendConfRec !== false) {
         payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
       }
-      if (this.opts.user !== undefined) {
+      // ACS は利用者名・パスワードが空か長すぎる（10 文字・128 文字を超える）と自動サインオンをやめ、USER もパスワードも
+      // 送らない（`NVT5250` が `ssoType` を 0 に戻す）。長さは Java の `trim()` のあとで見る
+      const user = this.opts.user === undefined ? undefined : javaTrim(this.opts.user);
+      const pw = this.opts.password;
+      const bypassRejected =
+        pw !== undefined && (user === "" || pw === "" || (user ?? "").length > 10 || javaTrim(pw).length > 128);
+      if (user !== undefined && !bypassRejected) {
         // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
-        // 前後の空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化）
-        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(this.opts.user.trim().toUpperCase())));
+        // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
+        // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
+        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(user.toUpperCase())));
         if (this.opts.password !== undefined) {
           // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
           // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
@@ -304,6 +311,15 @@ export class TelnetLayer {
 
 function ascii(s: string): number[] {
   return [...s].map((c) => c.charCodeAt(0));
+}
+
+/** Java の `String.trim()`（前後の U+0020 以下を落とす）。ACS の正規化に合わせる */
+function javaTrim(v: string): string {
+  let a = 0;
+  let b = v.length;
+  while (a < b && v.charCodeAt(a) <= 0x20) a++;
+  while (b > a && v.charCodeAt(b - 1) <= 0x20) b--;
+  return v.slice(a, b);
 }
 
 /**

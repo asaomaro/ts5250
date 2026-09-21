@@ -8,9 +8,10 @@
 // 対照として MAIN メニューは *DS3 のみなので、どの端末でも 24x80 のまま来る。
 //
 // DBCS の端末タイプは RFC 1205 に無く、IBM のドキュメントも 5555 系を一律「24x80 または 27x132」と
-// 書くだけでサイズを型番に紐づけていない（tn5250 は DBCS 未実装で先例にならない）。実機で総当たりして
-// カラーの 2 つ（24x80=G02 / 27x132=C01）を選んだ経緯があるため、色が落ちていないことも併せて見る
-// （B01・G01 を掴むと青/桃/黄が落ちて 4 色になる）。
+// 書くだけでサイズを型番に紐づけていない（tn5250 は DBCS 未実装で先例にならない）。
+// ~~実機で総当たりしてカラーの 2 つ（24x80=G02 / 27x132=C01）を選んだ~~ → ACS と同じく画面サイズによらず C01
+// （`20260921-dbcs-terminal-type`）。画面サイズは Query Reply で申告する（24x80 なら SEU も 80 桁で来る。実機で確認）。
+// 色が落ちていないことも併せて見る（B01・G01 を掴むと青/桃/黄が落ちて 4 色になる）。
 //
 // 実行: node --env-file=.env --env-file=.env.verify scripts/verify-screen-size.mjs
 import { Session5250 } from "@ts5250/tn5250";
@@ -27,7 +28,7 @@ const SEU = "STRSEU SRCFILE(TESTLIB/QDDSSRC) SRCMBR(CLRTDSP) OPTION(5)";
 const CASES = [
   { screenSize: "24x80", ccsid: 37, term: "IBM-3179-2", seuCols: 80 },
   { screenSize: "27x132", ccsid: 37, term: "IBM-3477-FC", seuCols: 132 },
-  { screenSize: "24x80", ccsid: 1399, term: "IBM-5555-G02", seuCols: 80 },
+  { screenSize: "24x80", ccsid: 1399, term: "IBM-5555-C01", seuCols: 80 }, // ~~G02~~（`20260921-dbcs-terminal-type`）
   { screenSize: "27x132", ccsid: 1399, term: "IBM-5555-C01", seuCols: 132 }
 ];
 
