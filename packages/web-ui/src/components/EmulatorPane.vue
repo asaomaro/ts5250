@@ -25,7 +25,7 @@ import {
 import { play } from "../macro-engine.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
-import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError } from "../composables/opMessages.js";
 import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
@@ -544,14 +544,16 @@ function onLocal(action: LocalAction): void {
 /** キー設定で割り当てた表示設定の順送り。切り替わった内容を OIA に通知する（次のキー操作で消える）。 */
 function onViewCycle(key: string): void {
   const r = viewSettings.cycle(key);
-  if (r) notice.value = `${r.label}: ${r.valueLabel}`;
+  if (r) showNotice(`${r.label}: ${r.valueLabel}`); // 情報の通知なのでエラー状態には入らない
 }
 
 // ---- システム要求行（SysReq） ----
 function onAid(key: AidKey): void {
   // ボタン経由（マウス）ではペインの keydown を通らずローカル通知が残る。残したままだと
   // 応答が無かったときのサーバー発の通知（effectiveNotice）を覆い隠すので、ここで消す。
-  notice.value = "";
+  // **AID はエラー状態も抜ける**（ACS `PS5250.processAIDCode` → `clearErrorMode`）
+  exitErrorMode();
+  clearNotice();
   if (key === "SysReq") {
     sysReqOpen.value = true;
     return;
@@ -629,7 +631,7 @@ function onPaletteKey(k: { key: string; ctrlKey?: boolean; altKey?: boolean }): 
 
 /** キー設定で割り当てたマクロを再生する（ホストへは送らない。spec D10） */
 function onPlayMacro(macroId: string): void {
-  notice.value = "";
+  clearNotice();
   play(props.sessionId, macroId);
 }
 
@@ -681,8 +683,35 @@ function restoreCaretFromBlockSel(): void {
  *  入力欄は ScreenGrid が blur 済みなので、reconcileFocus は通さない（通すと欄へ再フォーカスして選択が壊れる）。 */
 /** クライアント側の操作員メッセージ（ACS の OIA 相当）。次のキー操作・画面更新で消える。 */
 const notice = ref("");
-function onNotice(text: string): void {
+/**
+ * **操作員エラーの状態**（ACS の `error_mode`。`20260921-operator-error-mode`）。
+ *
+ * 操作員エラー（型違反・符号桁・満杯の挿入・保護域など）の通知で入り、キーボードを施錠する。
+ * 実機で測った ACS の規則（`research.md` F3/F5）:
+ *  - **欄を書き換えるキーは拒否**（文字・Backspace・Delete）。入力されず、エラーのまま
+ *  - **カーソルを動かすキー・AID・Reset・クリックで抜ける**（矢印・Tab・Home で抜けて、カーソルも動く）
+ *  - **エラーに入った時点で挿入モードが解ける**（抜けるときではない。`research.md` F6 で F4 の読みを訂正）
+ * ACS の「施錠」は Reset だけで解く硬い錠ではない。情報の通知（表示設定の順送り等）では入らない。
+ */
+const errorMode = ref(false);
+/** 通知を出す。操作員エラーならエラー状態に入り、**挿入モードを解く**（ACS の実測。`research.md` F6） */
+function showNotice(text: string): void {
   notice.value = text;
+  errorMode.value = isOperatorError(text);
+  if (errorMode.value) insertMode.value = false;
+}
+/** 通知を消す（エラー状態も解く。挿入モードには触れない） */
+function clearNotice(): void {
+  notice.value = "";
+  errorMode.value = false;
+}
+/** エラー状態を抜ける（挿入モードには触れない。解けるのはエラーに入ったとき＝`showNotice`） */
+function exitErrorMode(): void {
+  if (!errorMode.value) return;
+  clearNotice();
+}
+function onNotice(text: string): void {
+  showNotice(text);
 }
 /**
  * StatusBar へ渡す操作員メッセージ。ローカル発（欄の型違反・保護領域への入力）を優先し、
@@ -845,12 +874,64 @@ function noteUserActivity(): void {
   noteActivity(props.sessionId);
 }
 
-/** 次のキー操作でメッセージを消す（ACS 相当。キーボードはロックしない）。
- *  capture で拾うこと: 入力欄は Home/End/矢印などで stopPropagation するため、bubble の
- *  onKeydown では欄内のキーを取りこぼす（メッセージが出るのはまさに欄内なので消えなくなる）。 */
-function onKeydownCapture(): void {
-  notice.value = "";
+/** 欄を書き換えるキーか（エラー中に拒否する側）。**実機で拒否を確かめた 3 種**
+ *  （文字・Backspace・Delete。`research.md` F3/F5）。修飾キー付きは対象外（ショートカット） */
+function isEditingKey(ev: KeyboardEvent): boolean {
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
+  return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
+}
+/** 修飾キー単独の押下か（エラー状態を抜けない。Reset の左 Ctrl もここに当たる） */
+function isModifierOnly(ev: KeyboardEvent): boolean {
+  return ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta" || ev.key === "CapsLock";
+}
+/**
+ * **Reset は「左 Ctrl を単独で押して離す」**（ACS の既定割り当て。`20260921-operator-error-mode`）。
+ * 素直に Ctrl の押下へ割り当てると **Ctrl+C のたびに Reset が走る**ので、左 Ctrl を押してから
+ * **ほかのキーを挟まずに離したとき**だけ Reset とする。挟んだら（Ctrl+C 等）取り消す。
+ */
+let leftCtrlAlone = false;
+/**
+ * Reset キーの働き。**エラーでなくても挿入モードを解く**（ACS `ECLPS.reset` が常に解く。実機でも確認。
+ * `research.md` F6）。そのうえでエラー状態を抜ける（`PS5250.processReset` → `clearErrorMode`）。
+ */
+function resetKey(): void {
+  insertMode.value = false;
+  exitErrorMode();
+}
+
+/**
+ * 打鍵の捕捉。**操作員エラー中は ACS の規則で打鍵を振り分け**、それ以外は次のキーで通知を消す。
+ * capture で拾うこと: 入力欄は Home/End/矢印などで stopPropagation するため、bubble の
+ * onKeydown では欄内のキーを取りこぼす（メッセージが出るのはまさに欄内なので消えなくなる）。
+ */
+function onKeydownCapture(ev: KeyboardEvent): void {
   noteUserActivity();
+  leftCtrlAlone = ev.code === "ControlLeft";
+  if (errorMode.value) {
+    if (isEditingKey(ev)) {
+      // **拒否**: 入力欄へ届かせず（stopPropagation）、文字の挿入も止める（preventDefault）。
+      // メッセージは残し、エラーのまま（ACS: 文字・Backspace・Delete は入力されない）
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    if (isModifierOnly(ev)) return; // Shift 等の単独押下では抜けない
+    // カーソルを動かすキー・AID 等: **抜けてから本来の働きをさせる**（矢印ならカーソルも動く）
+    exitErrorMode();
+    return;
+  }
+  clearNotice();
+}
+/** 左 Ctrl を単独で離したら Reset（上の `leftCtrlAlone` 参照） */
+function onKeyupCapture(ev: KeyboardEvent): void {
+  if (ev.code === "ControlLeft" && leftCtrlAlone) resetKey();
+  leftCtrlAlone = false;
+}
+/** クリックでもエラー状態を抜ける（ACS `PS5250.canClearErrorModeViaMouseClick`） */
+function onPointerdownCapture(): void {
+  noteUserActivity();
+  leftCtrlAlone = false; // Ctrl+クリックの後に Ctrl を離しても Reset にしない
+  exitErrorMode();
 }
 function onKeydown(ev: KeyboardEvent): void {
   // システム要求行が開いている間は 5250 のキー処理を止める。**入力欄は .pane の子なので
@@ -956,7 +1037,7 @@ function onKeydown(ev: KeyboardEvent): void {
     if (el instanceof HTMLInputElement && !el.readOnly) {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: ev.key, cancelable: true }));
     } else {
-      notice.value = MSG_PROTECTED; // カーソルが欄上に無いなら従来どおり操作員メッセージ
+      showNotice(MSG_PROTECTED); // カーソルが欄上に無いなら操作員エラー（エラー状態に入る）
     }
     return;
   }
@@ -964,7 +1045,7 @@ function onKeydown(ev: KeyboardEvent): void {
   // 操作員メッセージを出す。入力欄にフォーカスがあるときは ScreenGrid が出す。
   if (!editableFocused() && isProtectedEdit(ev)) {
     ev.preventDefault();
-    notice.value = MSG_PROTECTED;
+    showNotice(MSG_PROTECTED);
     return;
   }
   rawKeydown(ev);
@@ -1004,7 +1085,8 @@ function onWheel(ev: WheelEvent): void {
     :style="screenMonoStyle"
     tabindex="0"
     @keydown.capture="onKeydownCapture"
-    @pointerdown.capture="noteUserActivity"
+    @keyup.capture="onKeyupCapture"
+    @pointerdown.capture="onPointerdownCapture"
     @keydown="onKeydown"
     @paste="onPanePaste"
     @copy="onPaneCopy"

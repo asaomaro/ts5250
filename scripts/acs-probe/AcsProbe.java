@@ -52,14 +52,14 @@ public class AcsProbe {
     StepError(String m) { super(m); }
   }
 
-  /** 空でない行・カーソル（1 始まりの行,桁）・入力禁止の状態を出す。DBCS は 1 文字が 2 桁ぶん重複して出る（TEXT_PLANE の仕様） */
+  /** 空でない行・カーソル（1 始まりの行,桁）・入力禁止・挿入モードの状態を出す。DBCS は 1 文字が 2 桁ぶん重複して出る（TEXT_PLANE の仕様） */
   private static void dump(String label) throws Exception {
     int rows = ps.GetSizeRows(), cols = ps.GetSizeCols();
     char[] buf = new char[rows * cols + 1];
     ps.GetScreen(buf, rows * cols, ECLPS.TEXT_PLANE);
     int pos = ps.GetCursorPos();
     OUT.print("=== " + label + " cursor=" + ((pos - 1) / cols + 1) + "," + ((pos - 1) % cols + 1)
-        + " inhibit=" + oia.InputInhibited() + commInfo() + "\n");
+        + " inhibit=" + oia.InputInhibited() + " insert=" + oia.IsInsertMode() + commInfo() + "\n");
     for (int r = 0; r < rows; r++) {
       String line = new String(buf, r * cols, cols);
       if (!line.isBlank()) OUT.print(String.format("%02d|%s", r + 1, line.replaceAll("\\s+$", "")) + "\n");

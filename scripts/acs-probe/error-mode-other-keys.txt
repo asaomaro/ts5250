@@ -1,0 +1,63 @@
+# **操作員エラーの状態で、Tab・Backspace・Home・Delete はどう振る舞うか**（実機）。
+# `error-mode-exit-keys.txt` で矢印・Reset（抜ける）と文字キー（拒否）は確かめた。
+# ここでは残りの編集・移動キーを確かめる。**各試行の前が inhibit=5 でなければ無効**。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+keys [tab]
+settle 600
+keys ABCDEFGHIJ
+settle 800
+
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-tab
+keys [tab]
+settle 700
+dump after-tab
+
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-backspace
+keys [backspace]
+settle 700
+dump after-backspace
+
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-home
+keys [home]
+settle 700
+dump after-home
+
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-delete
+keys [delete]
+settle 700
+dump after-delete
+
+keys [reset]
+settle 600
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

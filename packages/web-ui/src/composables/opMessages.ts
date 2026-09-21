@@ -58,6 +58,20 @@ export const MSG_WATCH_CONSUMES = "監視はエントリを取り出して消し
 export const MSG_NO_ROOM = "挿入する余地がありません";
 
 /**
+ * **操作員エラーか**（`20260921-operator-error-mode`）。ACS はこれらで `error_mode` に入り、
+ * キーボードを施錠する（`PS5250.setErrorCode` → `ECLOIA.InputInhibited() == 5`）。
+ * 情報の通知（表示設定の順送り・日付の選択など）は**施錠しない**ので含めない。
+ */
+export function isOperatorError(text: string): boolean {
+  return (
+    text === MSG_NO_ROOM ||
+    text === MSG_PROTECTED ||
+    text === MSG_DUP_DISALLOWED ||
+    (Object.values(MSG_BY_REASON) as string[]).includes(text)
+  );
+}
+
+/**
  * ホストが応答しないまま待ち時間が尽きたときの通知。
  *
  * Attn / SysReq は**ホストが黙って無視することが正常にあり得る**（ATNPGM が既に前面のとき等）。

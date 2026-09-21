@@ -75,7 +75,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 
 | 論点 | 方針 | 根拠 |
 |---|---|---|
-| **操作員エラーでキーボードを施錠するか** | **施錠する＋Reset キーを作る**（ACS と同じ） | 実機で `inhibit=5` を観測（`20260920-insert-mode-overflow` research F9〜F11）。解除に Reset が要るので一緒に実装する。全操作員エラーに波及する |
+| **操作員エラーでキーボードを施錠するか** | **施錠する＋Reset キーを作る**（ACS と同じ）→ **実装済み（`20260921-operator-error-mode`）** | 実機で `inhibit=5` を観測（`20260920-insert-mode-overflow` research F9〜F11）。解除に Reset が要るので一緒に実装する。全操作員エラーに波及する |
 | **施錠中・応答待ち中の先打ち** | **溜めて解錠時に再生する**（Attn/SysReq/Reset/Help で捨てる） | 既定は先打ち有効（`DISABLE_SESSION_TYPE_AHEAD = false`）。PR #388 の「打てるのに Enter が効かない」を入力を失わずに解く |
 | **ホストに切られた後** | **自動で繋ぎ直す**（通常の切断で即座、以後 20 秒おき） | 原典＋実機（ENDCNN 後 3 秒で再接続）。サインオン拒否では止まるので QMAXSIGN の輪にならない |
 | **欄を出ないまま AID** | **操作員エラー 0020 にして送らない** | `PS5250.processAIDCode`。左詰めのまま右寄せ欄へ格納される不整合を防ぐ |
@@ -204,7 +204,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   再現: F4 のプロンプトで 1 欄だけ打ってから、Erase Input を押す。（出典: `20260919-backlog-acs-triage` research N7）
 - [x] **挿入モードが画面をまたいで残る（ACS は新しい画面ごとに上書きモードへ戻す）**（優先度 中・深さ ○）。
   **完了（`20260921-insert-mode-per-screen`）**: 既存の `watch(snapshot, …)` に`insertMode.value = false` を足した（`packages/web-ui/src/components/EmulatorPane.vue`。監視は増やしていない）。
-  ⚠ **Reset キーは未実装**（ACS は Reset でも戻す）。キー割り当ての話なので下の【まとめ】キー編集の細部に属する。
+  ~~⚠ **Reset キーは未実装**（ACS は Reset でも戻す）。~~ **Reset は `20260921-operator-error-mode` で実装**（左 Ctrl 単独。エラーでなくても挿入モードを解く＝ACS `ECLPS.reset`・実機で確認）。
   前の画面で挿入モードにしたまま次の画面で打つと、意図せず挿入になる。上の「挿入モードであふれた文字を捨てる」と重なって、末尾が消える。
   ACS: `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、`processClearFMT`・WEC・書式の開始から呼ぶ。
   当 PJ: `packages/web-ui/src/components/EmulatorPane.vue:95` の `insertMode` は、利用者の切り替えでしか変わらない。Reset キーも無い。
@@ -226,6 +226,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: `DS5250.processStartUpConfirmation` が、この 4 つにも個別の状態と文言を持つ。
   当 PJ: `packages/tn5250/src/telnet/startup-record.ts` の表（2702・8901〜8940・I901〜I906）に、この 4 つが無い。テスト `startup-reject.test.ts:133` が「未知コードで装置名なし＝データ扱い」を固定している。
   手当て: 表に足すだけで済む。文言の日本語化は下の【まとめ】telnet に入れた。（出典: `20260919-backlog-acs-triage` research N10）
+- [x] **操作員エラーでもキーボードを施錠しない・Reset キーが無い**（方針決定済み：施錠する＋Reset キーを作る）。
+  **完了（`20260921-operator-error-mode`・PR #410）**: web-ui にエラー状態を持たせた（`packages/web-ui/src/components/EmulatorPane.vue` の `errorMode` / `onKeydownCapture`、判定は `opMessages.ts` の `isOperatorError`）。
+  規則は実機の ACS に合わせた（research F3・F5・F6）——**文字・Backspace・Delete は拒否**、**矢印・Tab・Home・AID・Reset・クリックで抜ける**、
+  **エラーに入った時点で挿入モードが解ける**、**Reset（左 Ctrl 単独）はエラーでなくても挿入モードを解く**。
+  「施錠」は Reset だけで解く硬い錠ではなかった（D1）。未測定のキー（Field Exit・Erase EOF・Dup・IME・Ctrl 組み合わせ）は抜ける側に倒した（D2）。
+  テスト `packages/web-ui/test/operator-error-mode.test.ts`（18 件・mutation 6 通りすべて検出）。
+  ⚠ Reset の「施錠中なら先打ちを捨てて解錠」（`ECLPS.reset`）は先打ちの項目で足す。
 - [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない**（優先度 中・深さ ◐）。
   DDS の窓で入力エラーが出ると、ACS は窓の中に出すが、当 PJ は最下行に出す。訂正している間もメッセージが消えない。
   ACS（委譲先 C の読み）
@@ -234,8 +241,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - Reset・矢印・AID でエラー状態を抜けると、メッセージ行をエラー前の内容に戻す（`PS5250.saveMsgLinePosition` / `restoreMsgLinePosition`・`keyDown`）。
   当 PJ（主エージェントが確認）
   - `packages/tn5250/src/protocol/wtd-applier.ts:293-299` は、0x22 の桁 2 バイトを読み捨て、`systemMessage` として最下行に重ねる。このことはコメントに明記されている。
-  - エラー状態は持たない。
-  要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。メッセージ行の位置と復元は、どちらを選んでも ACS に合わせる。
+  - ~~エラー状態は持たない。~~（`20260921-operator-error-mode` で持った）
+  ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）と、抜けたときの復元。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
@@ -324,8 +331,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
     - MONOCASE で ASCII 以外を大文字化しない
-    - 未対応の機能: Reset・Field Mark・PA1〜3・Record Backspace・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
-    - 既定のキー割り当ての違い: 左 Ctrl=Reset、Esc=Attn、Shift+Insert=Dup ほか
+    - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3・Record Backspace・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
+    - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、Esc=Attn、Shift+Insert=Dup ほか
     - `opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
   （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）

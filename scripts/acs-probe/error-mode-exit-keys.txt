@@ -1,0 +1,77 @@
+# **操作員エラーの状態（inhibit=5）を、どのキーで抜けるか**（実機）。
+#
+# 原典（`PS5250.keyDown`）では、内部キーコード 1004〜1007 の分岐がエラー状態を抜けて
+# メッセージ行を戻す（`restoreMsgLinePosition` / `ECLOIA.clearDoNotEnter`）。
+# 台帳は「Reset・矢印・AID で抜ける」とするが、**1004〜1007 がどのキーかは定数から取れなかった**。
+# 推測で「矢印」と決めずに、実機で押して入力禁止が解けるかを見る。
+#
+# エラーの起こし方は research F10 と同じ（単独欄 TOUSR を満杯にして挿入）。実機にオブジェクトは作らない。
+#
+# ⚠ **挿入モードはエラーに入った時点で解ける**（`error-mode-insert-timing.txt` で確かめた。
+#   1 回目の観測では「抜けると解ける」と読み違えていた）。各試行の前に [insert] を押し直す。
+# **`err-before-*` が inhibit=5 になっていなければ、その試行は無効**（エラー状態を作れていない）。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+keys [tab]
+settle 600
+keys ABCDEFGHIJ
+settle 800
+
+# --- 1) 矢印（右）で抜けるか ---
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-right
+keys [right]
+settle 700
+dump after-right
+
+# --- 2) 矢印（下）で抜けるか ---
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-down
+keys [down]
+settle 700
+dump after-down
+
+# --- 3) Reset で抜けるか（対照: 確実に抜けるはず）---
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-reset
+keys [reset]
+settle 700
+dump after-reset
+
+# --- 4) エラー中の文字キーは拒否されるか ---
+setcursor 12,40
+settle 400
+keys [insert]
+settle 400
+keys X
+settle 900
+dump err-before-char
+keys Q
+settle 700
+dump after-char-in-error
+
+# 後始末
+keys [reset]
+settle 600
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
