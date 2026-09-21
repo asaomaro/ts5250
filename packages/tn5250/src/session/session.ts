@@ -10,7 +10,7 @@ import {
   buildFlagRecord,
   buildCancelInviteAck
 } from "../protocol/read-response.js";
-import { buildQueryReply } from "../protocol/query-reply.js";
+import { buildQueryReply, buildWsfD972Reply } from "../protocol/query-reply.js";
 import {
   buildSaveScreenResponse,
   buildSavePartialScreenResponse,
@@ -789,6 +789,13 @@ export class Session5250 extends Emitter<SessionEvents> {
       if (result.queryRequested) {
         // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
         this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
+        return;
+      }
+      if (result.wsfD972) {
+        // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）
+        const reply = buildWsfD972Reply(result.wsfD972.flags, result.wsfD972.next);
+        if (reply) this.telnet.sendRecord(reply);
+        else this.warn(`WSF D9/72 with flag 0x80 is not answered (ACS sends a negative response; not supported)`);
         return;
       }
       if (result.readScreenExtendedRequested) {

@@ -515,6 +515,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **【まとめ】DS5250 のうち ROLL の空いた行**（優先度 低）。**完了（`20260921-roll-vacated-rows`・PR #410）**: 空いた行は旧い内容が残る（ACS `PS5250.processRoll`）。
   社内機で DSM（`QsnRollUp/Down(3,2,20)`）に行番号の画面を送らせ、ACS のコアと当 PJ を比べた——上ロールで 18〜20 行、下ロールで 2〜4 行に元の行が残る
   （`scripts/verify-roll.mjs` pass=4）。不正な指定（行数 ＞ 下端−上端 ほか）は画面を変えない（`packages/tn5250/src/screen/buffer.ts` の `roll`）。負応答は別項目のまま。
+- [x] **【まとめ】DS5250 のうち WSF D9/72 への応答**（優先度 中）。**完了（`20260921-wsf-d9-72`・PR #410）**: ACS `DS5250.processWSF` と同じ応答を返す
+  （フラグ 0x40・次が 0 は `D9 72 C0 00` と CCSID 13488・17584・1200、それ以外は `D9 72 80 00 03 01 04`。`packages/tn5250/src/protocol/query-reply.ts` の
+  `buildWsfD972Reply`）。社内機で DSM（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）に出させたところ、**以前は応答せずホストが待ち続け、施錠されたまま**だった。
+  ACS のコアと当 PJ でホストが読んだ生バイトが同じ（15 バイト・12 バイト）。フラグ 0x80（ACS は否定応答）は返さない。mutation 4 通り検出。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - WEA タイプ 5（拡張 NLS 区間）（○）
@@ -524,7 +528,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 細部の差
     - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
     - CLEAR 系の付随処理: CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。画面サイズが変わっても罫線を残す。
-    - WSF D9/72 に応答しない。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応。
+    - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
+      （D9/72 で Unicode を申告するようになったので、ホストが Unicode の欄を送ってくる余地がある——FCW 0x84xx の扱いを確かめる）。
     - 負応答を返さない。
     - 0x82/0x83 の欄データで、NUL と符号を加工する。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。

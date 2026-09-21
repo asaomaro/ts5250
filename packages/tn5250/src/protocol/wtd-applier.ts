@@ -30,6 +30,11 @@ export interface ApplyResult {
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
   /**
+   * ホストが WSF クラス D9・種類 72 を送ってきた（`20260921-wsf-d9-72`）。**応答しないとホストは待ち続ける**
+   * （社内機で DSM に出させたところ、応答が無いままキーボードが施錠され続けた）。値は SF の 3 バイト目（フラグ）と 4 バイト目
+   */
+  wsfD972?: { flags: number; next: number };
+  /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
    * 先へ進まない（SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
@@ -339,9 +344,12 @@ export function applyDataStream(
         applyWriteErrorCode(r, buf, codec);
         errorCodeWritten = true;
         break;
-      case COMMAND.WRITE_STRUCTURED_FIELD:
-        if (applyStructuredField(r, warn)) result.queryRequested = true;
+      case COMMAND.WRITE_STRUCTURED_FIELD: {
+        const sf = applyStructuredField(r, warn);
+        if (sf.query) result.queryRequested = true;
+        if (sf.d972) result.wsfD972 = sf.d972;
         break;
+      }
       case COMMAND.READ_MDT_FIELDS:
       case COMMAND.READ_MDT_FIELDS_ALT:
       case COMMAND.READ_INPUT_FIELDS: {
@@ -892,28 +900,32 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
 }
 
 /**
- * WRITE STRUCTURED FIELD（ホスト → クライアント）。5250 QUERY（class 0xD9 / type 0x70）を検出したら
- * true を返す（呼び出し側が Query Reply を送る）。その他の SF は読み飛ばす（subtask 04 で拡張）。
+ * WRITE STRUCTURED FIELD（ホスト → クライアント）。5250 QUERY（class 0xD9 / type 0x70）と、クラス D9・種類 72（長さ 6 のとき。
+ * ACS `DS5250.processWSF` と同じ条件）を拾う（呼び出し側が応答を送る）。その他の SF は読み飛ばす。
  */
-function applyStructuredField(r: ByteReader, warn: WarnFn): boolean {
+function applyStructuredField(r: ByteReader, warn: WarnFn): { query: boolean; d972?: { flags: number; next: number } } {
   let isQuery = false;
+  let d972: { flags: number; next: number } | undefined;
+  const done = () => (d972 ? { query: isQuery, d972 } : { query: isQuery });
   while (r.remaining >= 2) {
     if (r.peek() === ESC) break; // 次のコマンド
     const len = r.u16();
     if (len < 2) {
       warn(`invalid structured field length ${len}`);
-      return isQuery;
+      return done();
     }
     const bodyLen = len - 2;
     if (r.remaining < bodyLen) {
       warn(`structured field truncated (need ${bodyLen}, have ${r.remaining})`);
-      return isQuery;
+      return done();
     }
     const body = r.bytes(bodyLen);
     // body[0]=class, body[1]=type
     if (body[0] === 0xd9 && body[1] === 0x70) isQuery = true;
+    // ACS は長さが 6 のときだけ応答する（`n4 != 6` なら何もしない）
+    if (body[0] === 0xd9 && body[1] === 0x72 && len === 6) d972 = { flags: body[2] ?? 0, next: body[3] ?? 0 };
   }
-  return isQuery;
+  return done();
 }
 
 /**

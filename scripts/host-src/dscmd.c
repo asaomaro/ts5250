@@ -463,6 +463,34 @@ int main(int argc, char *argv[]) {
             if (lg) { fprintf(lg, "bytesRead=%d\n", (int)bytesRead); fflush(lg); }
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "WSF72") == 0 || strcmp(what, "WSF72N") == 0) {
+        /*
+         * **WSF クラス D9・種類 72 を出し、端末の応答を生で残す**（台帳「WSF D9/72 に応答しない」。`20260921-wsf-d9-72`）。
+         * ACS `DS5250.processWSF` は種類 72（長さ 6）に、フラグの 0x40 が立ち次のバイトが 0 なら `D9 72 C0 00` と 3 つの CCSID、
+         * それ以外は `D9 72 80 00 03 01 04` を返す（0x80 が立っていれば返さず否定応答の理由を立てる）。
+         * WSF はホストが端末の応答を待つ入力コマンドなので `QsnPutInpCmd` で出す。`WSF72` はフラグ 0x40、`WSF72N` は 0x00
+         */
+        static const char wsf72[] = { 0x00, 0x06, (char)0xD9, 0x72, 0x40, 0x00 };
+        static const char wsf72n[] = { 0x00, 0x06, (char)0xD9, 0x72, 0x00, 0x00 };
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtInpBuf", (Q_Bin4)buf, fdbk);
+        if (buf != 0) {
+            char *dta = 0;
+            Q_Bin4 rlen = -1;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutInpCmd(0xF3, strcmp(what, "WSF72") == 0 ? wsf72 : wsf72n, 6, &bytesRead,
+                              buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutInpCmd(0xF3 WSF D9/72)", rc, fdbk);
+            if (lg) { fprintf(lg, "bytesRead=%d\n", (int)bytesRead); fflush(lg); }
+            inzFdbk(fdbk, sizeof(fdbk));
+            QsnRtvReadLen(buf, &rlen, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnRtvReadLen", rlen, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            dta = QsnRtvDta(buf, (char **)0, (Q_Fdbk_T *)fdbk);
+            logHex("reply", dta, (int)bytesRead);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

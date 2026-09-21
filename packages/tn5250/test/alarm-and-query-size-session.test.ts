@@ -143,3 +143,30 @@ describe("メッセージ待ち表示（CC2 0x01 / 0x02）", () => {
     expect(session.snapshot().messageWaiting, "消灯は省略（付与しない）").toBeUndefined();
   });
 });
+
+/**
+ * **WSF クラス D9・種類 72 に ACS と同じ応答を返す**（`20260921-wsf-d9-72`）。社内機で DSM（`QsnPutInpCmd(0xF3, …)`）に出させたところ、
+ * 以前は応答せずホストが待ち続け、キーボードが施錠されたままになった。期待値は同じ手順で ACS のコアが返したもの（ホスト側で読んだ生バイト）。
+ */
+describe("WSF D9/72 への応答", () => {
+  const wsf = (flags: number, next = 0x00, len = 6) =>
+    buildRecord(OPCODE.NOOP, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, len, 0xd9, 0x72, flags, next]));
+  async function replyTo(rec: Uint8Array): Promise<string[]> {
+    const transport = new ScriptedTransport(initialScreen());
+    await Session5250.connect({ transport, id: "t" });
+    const before = transport.sent.length;
+    transport.deliver(rec);
+    return records(transport.sent.slice(before)).map((r) => Buffer.from(parseRecord(r).data).toString("hex"));
+  }
+  it("**フラグ 0x40・次が 0 → Unicode の CCSID を申告**（ACS のコアと同じ 15 バイト）", async () => {
+    expect(await replyTo(wsf(0x40))).toEqual(["000088000cd972c00034b044b004b0"]);
+  });
+  it("**それ以外 → `D9 72 80 00 03 01 04`**（ACS のコアと同じ 12 バイト）", async () => {
+    expect(await replyTo(wsf(0x00))).toEqual(["0000880009d9728000030104"]);
+    expect(await replyTo(wsf(0x40, 0x01))).toEqual(["0000880009d9728000030104"]);
+  });
+  it("フラグ 0x80 は返さない（ACS は否定応答。当 PJ は持たない）・長さが 6 でなければ返さない（ACS と同じ）", async () => {
+    expect(await replyTo(wsf(0x80))).toEqual([]);
+    expect(await replyTo(buildRecord(OPCODE.NOOP, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x07, 0xd9, 0x72, 0x40, 0x00, 0x00])))).toEqual([]);
+  });
+});
