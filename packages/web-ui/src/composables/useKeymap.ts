@@ -31,6 +31,8 @@ export type LocalAction =
   | "end"
   | "tab"
   | "shift-tab"
+  // Newline: 次の行の先頭から見て最初の入力欄へ移る（**ホストへは送らない**）
+  | "newline"
   | "left"
   | "right"
   | "up"
@@ -70,7 +72,11 @@ export function classifyKey(ev: {
   }
   switch (k) {
     case "Enter":
-      return { aid: "Enter" };
+      // **Shift+Enter は送信ではなく Newline**（`20260921-shift-enter-newline`）。
+      // ACS の既定割り当て `AcsMapFunctions.MAP_5250` が `S10 = [newline]` を持ち、
+      // `PS5250.processNewline` はホストへ送らない。以前は Shift を見ずに Enter を送っており、
+      // サブファイルの入力中に ACS の癖で Shift+Enter を押すと**入力途中のまま送信**されていた
+      return ev.shiftKey ? { local: "newline" } : { aid: "Enter" };
     case "PageUp":
       return { aid: "PageUp" };
     case "PageDown":

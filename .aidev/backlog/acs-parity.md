@@ -163,13 +163,19 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 単体: CC1=0xC0 の WTD を合成すれば再現する（委譲先 C のプローブで、打った `"ABC"` が残った）。
   - 実機: 0xC0 を出す DDS（候補は `ERASEINP MDTOFF`）は要実測。
   （出典: `20260919-backlog-acs-triage` research N5）
-- [ ] **READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす**（優先度 中・深さ ○）。
+- [ ] **READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす**（優先度 中・深さ ○・**要実機測定**）。
+  **`20260921` のバッチで着手を見送った**。原典を読むと、ACS が既定位置を置くのは`DS5250.preprocessWCC2`（WTD の処理の中）で、条件に `WCC2_unlock_pending`・施錠状態・`kbd_state_chg` が絡む。
+  単純に「WTD が無ければ動かさない」にすると、**WRITE と READ が別レコードで来る画面で既定位置が一度も置かれなくなる**（当方は既定位置を `readRequested` のときだけ置いており、ACS は WTD ごとに置く）。**判定の単位そのものが違う**ので、推測で直すと多くの画面のカーソル位置を壊しうる。
+  着手時は、分割レコードの画面（RESTORE 後・WRITE と READ が別レコード）を**実機で**測ってから、`readRequested` で括るのをやめて WTD ごとに判定する形へ寄せること。
   前の WTD の IC や、復元した位置を上書きしてしまう。当たるのは、RESTORE の後や、WRITE と READ が別レコードで来る画面。
   ACS: `DS5250.processCommand` の READ INPUT / MDT / MDT ALT（66/82/130）は、`pending_read` と CC を保存するだけで、カーソルに触れない。カーソルを決めるのは、WTD の後の `preprocessWCC2` だけ。
   当 PJ: `packages/tn5250/src/session/session.ts:666` の `if (result.readRequested && !result.cursorSet)` が `cursorToFirstInputField()` を呼ぶ。WTD の無いレコードでは `cursorSet` が偽のままなので、必ず動く。
   再現: 委譲先 C のプローブで、復元後の READ だけのレコードで、カーソルが (7,12) から (5,10) に移った。実機で出る画面は要確認。
   （出典: `20260919-backlog-acs-triage` research N6）
-- [ ] **Erase Input が、中身のある全入力欄を消す（ACS は MDT の立った欄だけを消し、カーソルをホーム位置へ移す）**（優先度 中・深さ ○）。
+- [x] **Erase Input が、中身のある全入力欄を消す（ACS は MDT の立った欄だけを消し、カーソルをホーム位置へ移す）**（優先度 中・深さ ○）。
+  **完了（`20260921-erase-input-mdt-only`）**: 消すのを**MDT の立った欄だけ**にした（ホストが立てた `f.mdt` か、利用者の `edits`）。着地は `focusCursorField`（IC で指した位置、無ければ先頭の入力欄）へ寄せた（`packages/web-ui/src/components/ScreenGrid.vue` `eraseInputKey`）。
+  原典で確認——`PS5250.processEraseInput` は `clearNonbypassFields(true)`、着地は `getHomePos()`。`homePos` は `setInsertCursor`（IC）で決まり、無ければ `setDefaultInsertCursor`。
+  ⚠ 着地位置は単体で固定していない（IC で別の欄を指す画面でのみ差が出る）。
   ホストが既定値を入れた未変更の欄（プロンプタの `*LIBL` など）まで消え、空白が「変更」として送られる。
   既定の割り当ては Ctrl+Backspace で、Windows の「前の単語を削除」の癖で押されうる。
   ACS: `PS5250.processEraseInput` → `clearNonbypassFields(true)`。カーソルは `getHomePos()` へ。
@@ -182,7 +188,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS: `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、`processClearFMT`・WEC・書式の開始から呼ぶ。
   当 PJ: `packages/web-ui/src/components/EmulatorPane.vue:95` の `insertMode` は、利用者の切り替えでしか変わらない。Reset キーも無い。
   再現: 挿入モードにして Enter を押し、次の画面で打つ。（出典: `20260919-backlog-acs-triage` research N8）
-- [ ] **Shift+Enter で画面を送信する（ACS では Newline＝次の行の入力欄へ移るだけ）**（優先度 中・深さ ○）。
+- [x] **Shift+Enter で画面を送信する（ACS では Newline＝次の行の入力欄へ移るだけ）**（優先度 中・深さ ○）。
+  **完了（`20260921-shift-enter-newline`）**: Shift+Enter を局所操作 `newline` にし、送信しない形にした（`packages/web-ui/src/composables/useKeymap.ts`・`EmulatorPane.vue`）。次の行で始まる最初の入力欄へ移り、無ければ先頭へ巡回する。
+  原典で確認——`PS5250.processNewline` は次の行の先頭を起点に `FFT5250.nextNonByPassInputFieldPos`。
+  ⚠ 未対応の差: 次の行の先頭が行またぎ欄の中に当たる場合（ACS はその欄の中へ置く）／Ctrl 側の `C17 = [newline]`（キーを特定していないので推測で割り当てない）。
   サブファイルの入力中に ACS の癖で Shift+Enter を押すと、入力途中のまま送信される。
   ACS: 既定のキー割り当て `AcsMapFunctions.MAP_5250` が、`S10 = [newline]`（Shift+Enter）と `C17 = [newline]` を持つ。`PS5250.processNewline` はホストへ送らない。
   当 PJ: `packages/web-ui/src/composables/useKeymap.ts:72-73` は Shift を見ずに Enter の AID を返す。Newline の機能そのものが無い。

@@ -14,6 +14,18 @@ describe("classifyKey", () => {
     expect(classifyKey({ ...base, key: "F12", shiftKey: true })).toEqual({ aid: "F24" });
   });
 
+  /**
+   * **Shift+Enter は送信ではなく Newline**（`20260921-shift-enter-newline`）。
+   * ACS の既定割り当て `AcsMapFunctions.MAP_5250` が `S10 = [newline]` を持ち、
+   * `PS5250.processNewline` はホストへ送らない。以前は Shift を見ずに Enter を送っており、
+   * サブファイルの入力中に押すと入力途中のまま送信されていた。
+   */
+  it("Shift+Enter は Newline（AID を送らない）", () => {
+    const r = classifyKey({ ...base, key: "Enter", shiftKey: true });
+    expect(r.aid, "Shift+Enter でホストへ送ってはいけない").toBeUndefined();
+    expect(r.local).toBe("newline");
+  });
+
   it("Enter / PageUp / PageDown を AID にマップする", () => {
     expect(classifyKey({ ...base, key: "Enter" }).aid).toBe("Enter");
     expect(classifyKey({ ...base, key: "PageUp" }).aid).toBe("PageUp");
