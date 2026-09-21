@@ -478,6 +478,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       残りは当 PJ に機能が無いキー（`AcsMapFunctions.MAP_5250`）: `A19 = [test]`（Test Request）・`S36 = [fieldmark]`・`C36 = [rule]`・`C33 = [jump]`・
       `A37` / `A39` / `C35` / `C34`（単語単位の Backtab / Tab）・`C127 = [deleteword]`・`C122 = [altcsr]`・`S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`。
       **Ctrl+矢印も違う**——ACS は `C37` 〜 `C40 = [moveleft]` 〜 `[movedown]`（選択範囲を動かす）、当 PJ は語頭への頭出し（`useKeymap.ts` の `word-*`）
+      **Ctrl+Delete・Ctrl+Backspace も ACS と食い違う既定**（節目の独立点検の指摘。`AcsMapFunctions.MAP_5250` で確認）——当 PJ は
+      Ctrl+Delete=Erase EOF・Ctrl+Backspace=Erase Input（`packages/web-ui/src/stores/keybindings.ts` の v1）。ACS は `C127 = [deleteword]`
+      （語の削除。当 PJ の Erase EOF は欄の残りを全部消すので、より壊す側）で、`C8` の割り当ては無い。Erase EOF にも Erase Input 以外の
+      既定キーは無い（`[eraseeof]` は MAP_5250 に無く、Erase Input は `A35 = [erinp]`＝Alt+End。これは揃えた）。
+      外すなら利用者の割り当ての移行（`CORRECTED_BY_VERSION`）が要る——Erase EOF の既定キーが無くなる
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
   （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）

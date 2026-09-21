@@ -293,6 +293,11 @@ export interface WsOpened {
    * 留守中に繋ぎ直せたことを知る手段がこれしか無い。
    */
   hostReconnect?: { attempt: number };
+  /**
+   * **3270 のときだけ**: 相手が IBM i か（`Session3270.isIbmI`）。汎用機では Attn・SysReq・Help・Print に 3270 の割り当てが無く、
+   * 送ると拒否されるので、画面側はその 4 つへのキーの割り当てを何もしない扱いにする（ACS の既定の割り当ての節目の点検の指摘）
+   */
+  ibmI?: boolean;
 }
 export interface WsScreen {
   type: "screen";

@@ -270,6 +270,8 @@ export interface SessionState {
    * 「実行しない理由」を利用者に示すために持つ（`WsOpened.pcCommand`）。
    */
   pcCommandEnabled?: boolean;
+  /** 3270 のときだけ: 相手が IBM i か（汎用機では Attn・SysReq・Help・Print を送れない。`WsOpened.ibmI`） */
+  ibmI3270?: boolean;
   /** PC コマンドの実行履歴（受信順・上限はサーバー側で 20 件） */
   pcCommands?: PcCommandView[];
   // ---- プリンターセッション（kind==="printer"）----

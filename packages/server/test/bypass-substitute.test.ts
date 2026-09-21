@@ -16,10 +16,22 @@ vi.mock("@ts5250/hostserver", async (orig) => ({
     return { passwordLevel: l };
   },
   bypassSignonSubstitute: async (level: number, user: string, password: string) => {
+    if (password === "TOO-LONG-PW") throw new Error("password longer than 10 characters for password level 0/1");
     calls.push({ level, user, password });
     return new Uint8Array(level >= 2 ? 20 : 8);
   }
 }));
+const warns: string[] = [];
+vi.mock("../src/log.js", async (orig) => {
+  const real = await orig<typeof import("../src/log.js")>();
+  return {
+    ...real,
+    childLog: (b: Record<string, unknown>) => {
+      const l = real.childLog(b);
+      return new Proxy(l, { get: (t, k) => (k === "warn" ? (_o: unknown, m: string) => void warns.push(m) : Reflect.get(t, k)) });
+    }
+  };
+});
 const { bypassSubstituteFor, SessionManager } = await import("../src/session-manager.js");
 import type { Transport } from "@ts5250/tn5250";
 
@@ -53,6 +65,15 @@ describe("bypassSubstituteFor", () => {
     const r = await f(seed);
     expect(calls[0]!.level).toBe(0);
     expect(r.substitute).toHaveLength(8);
+  });
+
+  it("**計算できなければ警告を残して失敗を返す**（黙って捨てるとサインオン画面が出る理由が追えない）。値はログに出さない", async () => {
+    warns.splice(0);
+    levels.push(0);
+    const f = bypassSubstituteFor({ host: "h", user: "u", password: "TOO-LONG-PW" })!;
+    await expect(f(seed)).rejects.toThrow(/longer than 10/);
+    expect(warns.some((m) => m.includes("substitute password not computed") && m.includes("longer than 10"))).toBe(true);
+    expect(warns.join("\n")).not.toContain("TOO-LONG-PW");
   });
 
   it("クライアントのシードは毎回違う（乱数）", async () => {

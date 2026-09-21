@@ -2,6 +2,8 @@
 
 ## 実行したもの
 - web-ui のキー・カーソルに触れる 45 ファイル — 561 passed / 0 failed。型検査（`vue-tsc --noEmit`・test 込み）通過。
+- 節目（マイルストーン 7）の独立点検への対応後: 全量 6,349 passed / 0 failed / 41 skipped（1 回目は既存のプリンターのテスト 1 件が並列の負荷で時間切れ。証跡は `20260921-device-name-acs` の test-result.md）・lint・build（vue-tsc 含む）通過。mutation 24 通り（`scratchpad/mut-m7.py`）と当て直し 2 通りをすべて検出。
+- 施錠中の欄の外の End が再帰しないこと（`pane-nav.test.ts`）・継続欄の着地・保護欄の上の End（`end-key-acs.test.ts`）は単体。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — カーソルより後の最初の欄・巡回・継続欄の先頭の区切りだけ。
@@ -20,6 +22,8 @@ $ npx vitest run test/pane-nav.test.ts   # 実装を変えた直後
 SURVIVED 継続欄の区切りも数える :: 35 passed (35)
 ```
 
+このラウンドでは失敗が発生していない。
+
 ## 起動確認（smoke）
 
 ```
@@ -32,3 +36,4 @@ smoke: pass (exit 0)
 
 ## 未検証の穴
 - ACS のコアで欄の外の End を測っていない（D2）。実ブラウザ。
+- 保護（バイパス）欄の上の End を ACS のコアで測っていない（DSPATR(PR) の入力欄を持つ画面を用意できていない。原典と単体まで）。

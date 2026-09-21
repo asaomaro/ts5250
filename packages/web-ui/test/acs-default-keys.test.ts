@@ -100,6 +100,7 @@ describe("キーハンドラー", () => {
     const { h, run } = handler();
     run(ev({ key: "Escape", isComposing: true }));
     run(ev({ key: "Process" }));
+    run(ev({ key: "Escape", keyCode: 229 })); // Safari の確定・取り消しの後の Esc
     expect(h.sendAid).not.toHaveBeenCalled();
     expect(h.local).not.toHaveBeenCalled();
   });

@@ -165,8 +165,15 @@ export function bypassSubstituteFor(
   const trimmedPassword = password.replace(/ +$/, "");
   return async (serverSeed) => {
     const clientSeed = crypto.getRandomValues(new Uint8Array(8));
-    const substitute = await bypassSignonSubstitute(await level, normalizedUser, trimmedPassword, clientSeed, serverSeed);
-    return { clientSeed, substitute };
+    try {
+      const substitute = await bypassSignonSubstitute(await level, normalizedUser, trimmedPassword, clientSeed, serverSeed);
+      return { clientSeed, substitute };
+    } catch (e) {
+      // **黙って捨てない**: 作れなければサインオン画面が出るだけで、利用者には理由が見えない（ACS も例外を記録する。節目の点検の指摘）。
+      // 例外文は長さ・文字位置だけで値を含まない
+      sessionLog.warn({ host }, `auto sign-on substitute password not computed (${e instanceof Error ? e.message : String(e)})`);
+      throw e;
+    }
   };
 }
 
@@ -1418,7 +1425,10 @@ export class SessionManager {
     // **前のタイマーを必ず落としてから張る。** 上書きするだけだと古い間隔が回り続け、
     // 張り直すたびに救出が二重・三重に走る（張り直しを入れて届きやすくなった経路）
     this.stopRescue(entry);
-    const outputQueue = opts.deviceName;
+    // **実際に繋がった装置名**（置換記号の展開・大文字化・使用中での答え直しの後。節目の点検の指摘: 設定の値を見ていたので、
+    // `PRT%=` なら存在しない OUTQ を、`deviceNameRetry` で PRT02 に繋がったら**使用中の別装置 PRT01 の OUTQ** を見て、そのスプールを
+    // 保留・削除してこのプリンターに配っていた）
+    const outputQueue = entry.session?.deviceName ?? opts.deviceName;
     if (!outputQueue || opts.host === undefined || opts.user === undefined) return;
     const connect: ConnectOptions = {
       host: opts.host,

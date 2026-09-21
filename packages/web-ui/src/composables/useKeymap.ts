@@ -144,6 +144,11 @@ export interface KeymapHandlers {
   isFocused(): boolean;
   /** テンキーの ± を Field± にするか（5250 のときだけ true。未指定は false＝文字） */
   fieldSignKeys?(): boolean;
+  /**
+   * そのセッションが送れる AID か（未指定は送れる）。**汎用機の 3270 は Attn・SysReq・Help・Print を送れない**ので、
+   * それへのキーの割り当て（ACS の既定の Esc＝Attn ほか）は何もしない——送るたびにエラーにしない（節目の点検の指摘）
+   */
+  canSendAid?(key: AidKey): boolean;
 }
 
 /**
@@ -154,9 +159,9 @@ export interface KeymapHandlers {
  * 施錠中でも通すようにしてある（`session.sendAid` / `ws-handler.onKey`）のに、画面側の門で
  * 止まっていた（`20260726-attn-sysreq-cancel-invite` の方針 5 の積み残し）。
  *
- * **既定の割り当ては無い**（`classifyKey` は Attn / SysReq を返さない）ので、実質はキー設定で
- * 割り当てた人だけが通る道になる。それでも `classifyKey` まで見るのは、既定が付いた日に
- * ここだけ古くならないようにするため。
+ * ~~**既定の割り当ては無い**~~ → ACS と同じ既定（Esc＝Attn・Shift+Esc＝SysReq）が付いた（`20260921-acs-default-keys`）。
+ * `classifyKey` は Attn / SysReq を返さないので、割り当て（既定を含む）経由の道になる。`classifyKey` まで見るのは、
+ * 素のキーに割り当てが付いた日にここだけ古くならないようにするため。
  */
 export function isEscapeAidEvent(ev: {
   key: string;
@@ -249,12 +254,16 @@ export function hasKeyBinding(ev: { key: string; shiftKey: boolean; ctrlKey: boo
 export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => void {
   return (ev: KeyboardEvent) => {
     if (!h.isFocused()) return;
-    // **IME の変換中のキーは拾わない**（変換を取り消す Esc が Attn に、変換中のテンキーが Field± になる）
-    if (ev.isComposing || ev.key === "Process") return;
+    // **IME の変換中のキーは拾わない**（変換を取り消す Esc が Attn に、変換中のテンキーが Field± になる）。
+    // Safari は確定・取り消しのキーを compositionend の後に isComposing=false・keyCode 229 で送ってくることがあるので 229 も見る
+    // （節目の点検の懸念。実ブラウザでは未確認）
+    if (ev.isComposing || ev.key === "Process" || ev.keyCode === 229) return;
     // カスタムキーバインドを既定より優先。`view:*`（表示設定の順送り）・`macro:*`（マクロ再生）・
     // `local:*`（ローカル編集キー）は**ホストへ送らない**ローカル処理。
     const custom = keybindingsStore.resolve(ev);
     if (custom) {
+      // 送れない AID への割り当ては何もしない（ブラウザの既定も止めない。割り当てが無かったときと同じ）
+      if (!isViewBinding(custom) && !isMacroBinding(custom) && !isLocalBinding(custom) && h.canSendAid?.(custom) === false) return;
       ev.preventDefault();
       if (isViewBinding(custom)) h.viewCycle(viewKeyOf(custom));
       else if (isMacroBinding(custom)) h.playMacro(macroIdOf(custom));

@@ -12,6 +12,7 @@ import {
   del,
   moveCursor,
   end,
+  continuedEnd,
   toggleInsert,
   eraseToEnd,
   fieldExit,
@@ -2797,7 +2798,14 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (ev.key === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
-    edit = end(edit);
+    // 継続欄は区切りの鎖全体から探す（ACS `getEndPositionOfContField`。節目の点検の指摘: 区切り 1 つの中だけを見ていた）
+    if (f.continued !== undefined && !isDbcsEdit(f)) {
+      const lens = continuedRunOf(f).map((x) => visLen(x));
+      editAcrossContinued(f, (st) => ({ ...st, cursor: continuedEnd(st.chars, lens) }), true);
+      return;
+    }
+    // 行をまたぐ欄は今の行（この input の区切り）の先頭を下限にする
+    edit = end(edit, sliceOffsetOf(f, el));
     sync(el, f);
     return;
   }

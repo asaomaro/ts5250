@@ -5,6 +5,8 @@
   欄の編集に触れる 39 ファイル（End の変更のあと）— 508 passed / 0 failed。
   型検査（`vue-tsc --noEmit`。`tsconfig.json` と `tsconfig.test.json`）通過。lint（変更したファイル）通過。
 - 実機: なし（ACS の GUI のキー割り当ては、GUI を使わない ACS のコアでは測れない。原典の表を正とした）
+- 節目（マイルストーン 7）の独立点検への対応後: 全量 6,349 passed / 0 failed / 41 skipped（1 回目は既存のプリンターのテスト 1 件が並列の負荷で時間切れ。証跡は `20260921-device-name-acs` の test-result.md）・lint・build（vue-tsc 含む）通過。mutation 24 通り（`scratchpad/mut-m7.py`）と当て直し 2 通りをすべて検出。
+- 実機（社内機・ACS のコア）: `scripts/acs-probe/end-row-bound.txt`——行をまたぐコマンド行の 2 行目で End → 21,1（前の行へ戻らない）、1 行目の途中・2 行目の後ろで End → 21,3。当 PJ の `end(state, from)` と一致。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — `DEFAULT_BINDINGS` の中身、End に割り当てが無いこと、キーハンドラーが Attn・SysReq・Clear・Print（`Pause` / `Cancel`）・Help を送ること。
@@ -32,6 +34,12 @@ SURVIVED DBCS End 委譲 :: 34 passed (34)
 SURVIVED DBCS Insert 委譲 :: 34 passed (34)
 ```
 
+```
+$ python3 mut-m7.py   # 節目の対応の 1 回目
+SURVIVED ibmI を写さない :: 2 passed (2)
+```
+3270 の `opened` の `ibmI` を状態へ写す所にテストが無かった（ペインのテストは状態を直接作っていた）。`test/ibmi-3270-opened.test.ts` を足して検出。
+
 ## 起動確認（smoke）
 
 ```
@@ -48,3 +56,5 @@ smoke: pass (exit 0)
 ## 未検証の穴
 - 実ブラウザ・実キーボード（jsdom の KeyboardEvent で確かめた）。Ctrl+Pause がどちらの `key` で届くか（D4）、Shift+Insert の貼り付けがブラウザで止まるか。
 - ACS の GUI で選択中に Esc を押したときに選択が残るか（D3）。
+- 継続欄の End は ACS のコアで測っていない（継続欄の画面を用意できていない。原典 `getEndPositionOfContField` と単体まで）。
+- Safari の IME（keyCode 229）は実ブラウザで試していない。汎用機の 3270 の実機は無い（`tn3270-adapt.ts` の拒否と単体まで）。

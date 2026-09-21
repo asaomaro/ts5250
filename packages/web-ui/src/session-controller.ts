@@ -750,6 +750,7 @@ export async function openSession(
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
                 pcCommandEnabled: msg.pcCommand,
+                ...(msg.ibmI !== undefined ? { ibmI3270: msg.ibmI } : {}),
                 // **留守中に実行された分から始める。** `pc-command` の push は
                 // 繋いでいる間しか届かないので、閉じている間の実行は
                 // ここで受け取らないと**誰にも知らされないまま消える**

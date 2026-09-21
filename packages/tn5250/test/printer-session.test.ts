@@ -322,6 +322,19 @@ describe("装置名の答え直し（`20260921-device-name-acs`）", () => {
     session.disconnect();
   });
 
+  it("**答え直したのにホストが聞き直してこなければ、8902 の理由を残して断る**（時間切れにしない）", async () => {
+    await expect(
+      PrinterSession.connect({
+        deviceName: "PR%=",
+        negotiationTimeoutMs: 200,
+        transport: new FakeTransport((t) => {
+          t.dataIn(SEND);
+          t.feed(startupRecord(E8902)); // この後ホストは何も言わない
+        })
+      })
+    ).rejects.toMatchObject({ code: "SESSION_REJECTED", message: expect.stringMatching(/8902.*PRP0.*did not ask/) });
+  });
+
   it("記号の無い名前は 8902 で断る", async () => {
     await expect(
       PrinterSession.connect({

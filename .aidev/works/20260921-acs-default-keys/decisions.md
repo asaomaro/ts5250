@@ -20,3 +20,10 @@
 ## D4: Ctrl+Pause は `Pause` と `Cancel` の両方に割り当てる
 
 - ブラウザは Ctrl+Pause を `Cancel`（Ctrl+Break）として報告することがある。どちらで届くかは**未確認**（実ブラウザ・実キーボードで確かめていない）。
+
+## D5: 節目の独立点検で End の読み（research F4）と 3270 への効き方を改めた（マイルストーン 7）
+
+- End: ~~無ければ欄の先頭~~ → 探す下限はカーソルの行の先頭（ACS のコアで実測して一致。`scripts/acs-probe/end-row-bound.txt`）。継続欄は鎖全体。
+- 3270: 新しい既定（Esc=Attn・Alt+F1=Help・Ctrl+Pause=Print・Shift+Esc=SysReq）が汎用機の 3270 で毎回エラーになった。ACS は 3270 でも本物の Attn を送るが、
+  当 PJ の 3270 は IBM i でしか割り当てを持たない（`tn3270-adapt.ts`）。汎用機ではこれらのキーを送らずに素通しする（以前の「何も起きない」に戻す）。
+  代替案: 3270 では既定を外す——IBM i の 3270 で ACS と揃わなくなる。

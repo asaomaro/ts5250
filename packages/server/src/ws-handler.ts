@@ -654,7 +654,8 @@ export class WsConnection {
         sessionId: entry.id,
         screen: toWireScreen(entry.session, entry.id),
         ccsid: ccsid ?? 37,
-        pcCommand: false
+        pcCommand: false,
+        ibmI: entry.session.isIbmI
       });
     });
   }
@@ -845,6 +846,8 @@ export class WsConnection {
         if (co.port !== undefined) opts.port = co.port;
         if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
         if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
+        // 常駐の経路（`{...t.connect}`）では渡っていたのに、ここだけ落ちていた（節目の点検の指摘）
+        if (co.deviceNameRetry !== undefined) opts.deviceNameRetry = co.deviceNameRetry;
         if (co.tls !== undefined) opts.tls = co.tls;
         if (co.user !== undefined) opts.user = co.user;
         if (co.password !== undefined) opts.password = co.password;

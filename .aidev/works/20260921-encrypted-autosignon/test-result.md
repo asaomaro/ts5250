@@ -8,6 +8,8 @@
 - 実機: `scripts/verify-autosignon.mjs PUB400`（暗号化・QPWDLVL 3）**3 回 OK**（修正の前の 1 回は NG——下の証跡）、社内機（QPWDLVL 0・`*FRCSIGNON`）は
   平文のときと同じくサインオン画面（自動サインオンそのものを受けない機）。ACS のコア（タップ）: research F4。
 - 計算の突き合わせ（実物）: タップで採ったホストのシードと当 PJ の IS から、同じ入力で ACS の `PasswordSubstitute` を呼び、**EQUAL**（値は出していない）。
+- 節目（マイルストーン 7）の独立点検への対応後: 全量 6,349 passed / 0 failed / 41 skipped（1 回目は既存のプリンターのテスト 1 件が並列の負荷で時間切れ。証跡は `20260921-device-name-acs` の test-result.md）・lint・build（vue-tsc 含む）通過。mutation 24 通り（`scratchpad/mut-m7.py`）と当て直し 2 通りをすべて検出。
+- 実機（PUB400）: 代替パスワードを作れなかったとき（IBMRSEED に自分のシード・IBMSUBSPW は値なし）を `scratchpad/empty-subspw.mjs` で送らせた——起動応答 `0004`（コード表に無い）のあとサインオン画面（CPF の文言なし）。前後に成功のサインオン（`verify-autosignon.mjs PUB400 clear`）で数え直した。
 
 ## 受け入れ基準ごとの判定
 - AC1: pass — レベル 0〜4 の ACS の出力と一致、実物の入力でも一致。
@@ -32,6 +34,8 @@ $ npx vitest run   # server。QPWDLVL の差し替え口を入れる前
 ```
 記録のホストの SEND にシードがあり暗号化の経路に入って、架空のホストのサインオン・サーバーへの問い合わせを待っていた。問い合わせに 5 秒の上限と差し替え口を付けた。
 
+このラウンドでは失敗が発生していない。
+
 ## 起動確認（smoke）
 
 ```
@@ -46,3 +50,5 @@ smoke: pass (exit 0)
 - QPWDLVL 4 の実機（手元は 0 と 3。ACS の出力との一致まで）。社内機（0）は `*FRCSIGNON` のため DES の代替パスワードがホストに受け入れられるところは見られない
   （DES の計算そのものはホストサーバーのサインオンで実機に通っている）。
 - サインオン・サーバーに届かない環境（レベル 0 として計算する＝ACS と同じ。レベル 2 以上のホストでは自動サインオンが通らない）。
+- 値の無い IBMSUBSPW をホストがサインオンの失敗回数に数えるかは未確認。
+- 起動応答 `0004` の意味。ACS の文言表（`acshod2.jar` の `com/ibm/eNetwork/msgs/hod_ja` の `KEY_5250_CONNECTION_ERR_*`）にも 0004 は無く、ACS はコードをそのまま状態行に出す（`AcsOnly`）。

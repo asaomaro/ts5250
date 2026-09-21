@@ -684,3 +684,28 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     w.unmount();
   });
 });
+
+describe("欄の外の End（節目の点検の指摘）", () => {
+  it("**施錠中でも繰り返さない**（合成した End がペインへ戻らない）", async () => {
+    seed([field(1, 5), field(2, 6)]);
+    const st = sessionsStore.byId.get(SID)!;
+    st.snapshot = { ...st.snapshot!, cursor: { row: 1, col: 1 }, keyboardLocked: true };
+    (st as unknown as { macro: unknown }).macro = { mode: "playing", steps: [], index: 0 };
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    let ends = 0;
+    const orig = HTMLInputElement.prototype.dispatchEvent;
+    HTMLInputElement.prototype.dispatchEvent = function (ev: Event) {
+      if ((ev as KeyboardEvent).key === "End") ends++;
+      if (ends > 5) throw new Error("End が繰り返された");
+      return orig.call(this, ev);
+    };
+    try {
+      await w.find(".pane").trigger("keydown", { key: "End" });
+    } finally {
+      HTMLInputElement.prototype.dispatchEvent = orig;
+    }
+    expect(ends).toBeLessThanOrEqual(1);
+    w.unmount();
+  });
+});

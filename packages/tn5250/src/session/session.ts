@@ -292,8 +292,14 @@ export class Session5250 extends Emitter<SessionEvents> {
     const ready = new Promise<void>((resolve, reject) => {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
+        // 8902 で次の名前を待っていたなら、その理由を残す（一般的な「時間切れ」に負けさせない。節目の点検の懸念）
+        reject(
+          this.retriedRejection !== undefined
+            ? new As400Error("SESSION_REJECTED", `${this.retriedRejection}; the host did not ask for another name within ${timeoutMs}ms`)
+            : new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`)
+        );
+        // **先に reject する**（close が同期で onClose を呼び、そちらの文言で先に決まってしまうため）
         this.telnet.close();
-        reject(new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`));
       }, timeoutMs);
       const onFirstReady = () => {
         clearTimeout(timer);
@@ -321,6 +327,10 @@ export class Session5250 extends Emitter<SessionEvents> {
           opts.deviceName !== undefined
             ? `（装置名 ${this.telnet.deviceName ?? opts.deviceName} が既に使用中の可能性があります）`
             : "";
+        if (this.retriedRejection !== undefined) {
+          reject(new As400Error("SESSION_REJECTED", `${this.retriedRejection}; closed while answering with another name: ${reason}`));
+          return;
+        }
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
       this.telnet.onError((err) => this.warn(`transport error: ${err.message}`));
@@ -343,6 +353,11 @@ export class Session5250 extends Emitter<SessionEvents> {
   private onNegotiationError: ((e: As400Error) => void) | undefined;
   /** 要求した装置名。失敗の起動応答には装置名が入らないので、文言に添えるために持つ */
   private requestedDevice: string | undefined;
+  /**
+   * 8902（使用中）を受けて次の名前で答え直している最中なら、その拒否の文言。ホストが聞き直してこないまま時間切れ・切断に
+   * なったとき、**理由（8902）を失わない**ために持つ（`20260921-device-name-acs`）
+   */
+  private retriedRejection: string | undefined;
 
   get currentState(): SessionState {
     return this.state;
@@ -683,9 +698,11 @@ export class Session5250 extends Emitter<SessionEvents> {
         // 送り直すだけで繋がらない——実測）
         if (startup.code === "8902" && this.telnet.canRetryDeviceName()) {
           this.warn(`device ${this.telnet.deviceName ?? ""} is in use (8902); answering the host with the next name`);
+          this.retriedRejection = `session rejected (8902: ${startupCodeMeaning("8902")})（装置 ${this.telnet.deviceName ?? ""}）`;
           this.firstRecord = true;
           return;
         }
+        this.retriedRejection = undefined; // 聞き直しに答えた名前の起動応答が来た（以後の時間切れは 8902 のせいではない）
         if (isKnownStartupCode(startup.code) && !STARTUP_SUCCESS_CODES.has(startup.code)) {
           const meaning = startupCodeMeaning(startup.code);
           // 失敗応答に装置名は入らないので、**送った名前**を添える（利用者が直せる情報にする。展開・大文字化の後）

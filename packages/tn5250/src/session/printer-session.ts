@@ -183,8 +183,14 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     const ready = new Promise<void>((resolve, reject) => {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
+        // 8902 で次の名前を待っていたなら、その理由を残す（表示セッションと同じ）
+        reject(
+          session.retriedRejection !== undefined
+            ? new As400Error("SESSION_REJECTED", `${session.retriedRejection}; the host did not ask for another name within ${timeoutMs}ms`)
+            : new As400Error("NEGOTIATION_TIMEOUT", `no startup response within ${timeoutMs}ms`)
+        );
+        // **先に reject する**（close が同期で onClose を呼び、そちらの文言で先に決まってしまうため）
         session.telnet.close();
-        reject(new As400Error("NEGOTIATION_TIMEOUT", `no startup response within ${timeoutMs}ms`));
       }, timeoutMs);
       session.onStartup = (err) => {
         clearTimeout(timer);
@@ -194,7 +200,11 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       session.telnet.onClose((reason) => {
         clearTimeout(timer);
         session.handleClose(reason);
-        reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`));
+        reject(
+          session.retriedRejection !== undefined
+            ? new As400Error("SESSION_REJECTED", `${session.retriedRejection}; closed while answering with another name: ${reason}`)
+            : new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}`)
+        );
       });
       session.telnet.onError((e) => session.warn(`transport error: ${e.message}`));
       session.telnet.onRecord((rec) => session.onRecord(rec));
@@ -211,6 +221,17 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
   get startupCode(): string {
     return this.startupCodeValue;
   }
+
+  /**
+   * **ホストが実際に割り当てた装置名**（起動応答の装置名。無ければ送った名前）。置換記号の展開・大文字化・使用中での答え直しの後の名前で、
+   * 設定の値とは違いうる（`20260921-device-name-acs`）。装置名＝OUTQ を使う側（スプールの救出）はこれを見る
+   */
+  get deviceName(): string | undefined {
+    return this.startupDevice || this.telnet?.deviceName;
+  }
+  private startupDevice = "";
+  /** 8902 を受けて次の名前で答え直している最中の拒否の文言（時間切れ・切断で理由を失わないため。表示セッションと同じ） */
+  private retriedRejection: string | undefined;
 
   reports(): readonly SpoolReport[] {
     return this.reportList;
@@ -289,12 +310,15 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
     // 解析は表示セッションと共有する（読み位置を 2 か所に書くと片方だけずれる）
     const startup = parseStartupResponse(rec, this.codec);
     const code = startup?.code ?? "";
+    if (startup?.device) this.startupDevice = startup.device;
     // 装置が使用中（8902）で別の名前で答え直せるなら、次の起動応答を待つ（表示セッションと同じ。ホストが聞き直してくる）
     if (code === "8902" && this.telnet.canRetryDeviceName()) {
       this.warn(`device ${this.telnet.deviceName ?? ""} is in use (8902); answering the host with the next name`);
+      this.retriedRejection = `printer session rejected (8902: ${PRINTER_CODE_MEANING["8902"] ?? startupCodeMeaning("8902")})（装置 ${this.telnet.deviceName ?? ""}）`;
       this.started = false;
       return;
     }
+    this.retriedRejection = undefined; // 聞き直しに答えた名前の起動応答が来た
     this.startupCodeValue = code;
     if (STARTUP_SUCCESS_CODES.has(code)) {
       this.emit("status", { startupCode: code, connected: true });

@@ -275,6 +275,38 @@ describe("装置名の答え直し", () => {
     expect(out.code).toBe("NEGOTIATION_TIMEOUT");
   });
 
+  it("**答え直したのにホストが聞き直してこなければ、8902 の理由を残して断る**（一般的な時間切れにしない。節目の点検の懸念）", async () => {
+    const { transport, feed } = capturing();
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 200, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]); // この後ホストは何も言わない
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED", message: expect.stringMatching(/8902.*DEV0.*did not ask/) });
+  });
+
+  it("時間切れのときは接続を閉じる（理由を先に決めてから閉じる）", async () => {
+    const { transport, feed } = capturing();
+    let closed = 0;
+    (transport as unknown as { close: () => void }).close = () => void closed++;
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 100, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    await expect(p).rejects.toMatchObject({ code: "NEGOTIATION_TIMEOUT" });
+    expect(closed).toBeGreaterThan(0);
+  });
+
+  it("答え直しの途中で切られても 8902 の理由を残す", async () => {
+    let onClose: ((r: string) => void) | undefined;
+    const { transport, feed } = capturing();
+    (transport as unknown as { onClose: (cb: (r: string) => void) => void }).onClose = (cb) => void (onClose = cb);
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 400, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]);
+    onClose?.("socket closed");
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED", message: expect.stringMatching(/8902.*socket closed/) });
+  });
+
   it("**8902 以外の失敗は答え直さない**（誤ったパスワードで何度も試して QMAXSIGN を使い切らない）", async () => {
     const { transport, feed } = capturing();
     const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 400, deviceName: "DEV=" });

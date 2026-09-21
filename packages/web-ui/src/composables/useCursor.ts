@@ -209,3 +209,31 @@ export function roundToDbcsLead(pos: Pos, cells: readonly Cell[][]): Pos {
   if (cell?.kind === "dbcs-tail" && pos.col > 1) return { row: pos.row, col: pos.col - 1 };
   return pos;
 }
+
+/**
+ * **保護（バイパス）欄の上で押した End の行き先**。入力欄の End は ScreenGrid が持つが、保護欄には input が無い。
+ *
+ * ACS `PS5250.processEndField` は保護欄も `FFT5250.getField` で拾い、その欄の `Field5250.getEndPosition` へ置く:
+ * 欄の終わりから**カーソルの行の先頭**（欄の先頭より前なら欄の先頭）まで遡って空白・NUL でない最初の桁を探し、
+ * 欄の最後の桁ならそこ、それ以外はその次の桁。見つからなければ探した下限。DBCS は SI の上なら 1 つ進め
+ * （欄の最後の桁・行末を除く）、全角の後半なら前半へ戻す。
+ * 空白かどうかはセルの表示で見る——非表示（`nonDisplay`）の欄は中身が見えないので空に見える（ACS はホストのバイトを見る）
+ */
+export function endInProtectedField(field: Field, cursorRow: number, cells: readonly Cell[][], cols: number): Pos {
+  const start = (field.row - 1) * cols + (field.col - 1);
+  const end = start + field.length - 1;
+  const lower = Math.min(Math.max((cursorRow - 1) * cols, start), end);
+  const cellAt = (o: number): Cell | undefined => cells[Math.floor(o / cols)]?.[o % cols];
+  let to = lower;
+  for (let o = end; o >= lower; o--) {
+    const c = cellAt(o);
+    // SO/SI はホストのバイトでは 0x0E/0x0F で空白ではない（表示は " "）
+    if (!c || (c.kind !== "so" && c.kind !== "si" && (c.char === " " || c.char === "\0"))) continue;
+    to = o === end ? o : o + 1;
+    break;
+  }
+  const c = cellAt(to);
+  if (c?.kind === "si" && to !== end && to % cols !== cols - 1) to++;
+  else if (c?.kind === "dbcs-tail") to--;
+  return { row: Math.floor(to / cols) + 1, col: (to % cols) + 1 };
+}

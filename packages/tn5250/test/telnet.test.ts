@@ -105,7 +105,8 @@ describe("TelnetLayer ネゴシエーション", () => {
       ["ABCDEFGHIJK", "S"],
       ["U", "x".repeat(129)],
       ["   ", "S"],
-      ["U", ""]
+      ["U", ""],
+      ["U", "   "] // 空白だけのパスワードも空（ACS は末尾の空白を落としてから見る）
     ] as const) {
       const { t } = setupAuto({ user, password });
       t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
@@ -174,13 +175,16 @@ describe("TelnetLayer ネゴシエーション", () => {
       expect(tt).toBeGreaterThan(env);
     });
 
-    it("シードが無い・計算に失敗したら**パスワードの変数を送らない**（平文にも落とさない。ACS も書かない）", async () => {
+    // ~~パスワードの変数を送らない（ACS も書かない）~~ → ACS は IBMRSEED に自分のシード、IBMSUBSPW を値の無いまま送る（節目の点検の指摘）
+    it("シードが無い・計算に失敗したら**IBMSUBSPW は値の無いまま**（平文には落とさない。ACS と同じ）", async () => {
       const t1 = setupEnc(async () => ({ clientSeed: new Uint8Array(8), substitute: new Uint8Array(20) }));
       t1.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
       await flush();
       const a = String.fromCharCode(...t1.takeSent());
       expect(a).toContain("USER\x01U");
-      expect(a).not.toContain("IBMSUBSPW");
+      expect(a).toMatch(/IBMSUBSPW\x01(\xff\xf0|$)/); // 値が無い（IAC SE が続く）
+      expect(a).toMatch(/IBMRSEED\x01./);
+      expect(a).not.toContain("pw");
       const t2 = setupEnc(async () => {
         throw new Error("x");
       });
@@ -188,7 +192,8 @@ describe("TelnetLayer ネゴシエーション", () => {
       await flush();
       const b = String.fromCharCode(...t2.takeSent());
       expect(b).toContain("USER\x01U");
-      expect(b).not.toContain("IBMSUBSPW");
+      expect(b).toMatch(/IBMSUBSPW\x01(\xff\xf0|$)/);
+      expect(b).not.toContain("pw");
     });
   });
 

@@ -96,11 +96,30 @@ export function home(state: EditState): EditState {
  * ~~満杯欄なら末尾（len）に到達する~~ → ACS `Field5250.getEndPosition`（`PS5250.processEndField` が使う）は
  * 欄の終わりから非空白を探し、見つけた桁が最後の桁ならそこを、そうでなければ次の桁を返す（`20260921-acs-default-keys`）
  */
-export function end(state: EditState): EditState {
+export function end(state: EditState, from = 0): EditState {
+  // `from` は探す下限（行をまたぐ欄の 2 行目以降では**今の行の先頭**。ACS `processEndField` がカーソルの行の先頭を下限に渡す）。
+  // 下限から後ろに入力が無ければ下限に置く（ACS `getEndPosition` の `return n`。節目の点検の指摘: 欄全体を探して前の行へ戻っていた）
   const last = state.chars.length - 1;
   let i = last;
-  while (i >= 0 && state.chars[i] === " ") i--;
+  while (i >= from && state.chars[i] === " ") i--;
+  if (i < from) return { ...state, cursor: clamp(from, 0, state.chars.length) };
   return { ...state, cursor: clamp(i === last ? last : i + 1, 0, state.chars.length) };
+}
+
+/**
+ * **継続欄（区切りの鎖）の End の行き先**（合成バッファの位置）。ACS `FFT5250.getEndPositionOfContField`: 最後の区切りから遡り、
+ * 入力のある最初の区切りの中で「入力の直後。区切りの最後の桁まで埋まっていればその桁」。どの区切りにも入力が無ければ先頭の区切りの先頭
+ */
+export function continuedEnd(chars: readonly string[], lens: readonly number[]): number {
+  let off = lens.reduce((a, b) => a + b, 0);
+  for (let k = lens.length - 1; k >= 0; k--) {
+    off -= lens[k]!;
+    const last = off + lens[k]! - 1;
+    let i = last;
+    while (i >= off && chars[i] === " ") i--;
+    if (i >= off) return i === last ? last : i + 1;
+  }
+  return 0;
 }
 
 export function toggleInsert(state: EditState): EditState {

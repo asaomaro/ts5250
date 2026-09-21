@@ -307,14 +307,19 @@ export class TelnetLayer {
         payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
       }
       // ACS は利用者名・パスワードが空か長すぎる（10 文字・128 文字を超える）と自動サインオンをやめ、USER もパスワードも
-      // 送らない（`NVT5250` が `ssoType` を 0 に戻す）。長さは Java の `trim()` のあとで見る
+      // 送らない（`NVT5250` が `ssoType` を 0 に戻す）。長さは Java の `trim()` のあとで見る。パスワードは**末尾の空白を落としてから**
+      // 空かを見る（空白だけのパスワードも空。節目の点検の指摘）
       const user = this.opts.user === undefined ? undefined : javaTrim(this.opts.user);
       const pw = this.opts.password;
       const bypassRejected =
-        pw !== undefined && (user === "" || pw === "" || (user ?? "").length > 10 || javaTrim(pw).length > 128);
+        pw !== undefined && (user === "" || pw.replace(/ +$/, "") === "" || (user ?? "").length > 10 || javaTrim(pw).length > 128);
       /**
-       * 利用者名とパスワードの変数を足して送る。`auth` は代替パスワード（暗号化）——`undefined` なら平文、`null` なら
-       * 作れなかったのでパスワードの変数を送らない（ACS も代替パスワードの計算が例外なら IBMSUBSPW を書かない）
+       * 利用者名とパスワードの変数を足して送る。`auth` は代替パスワード（暗号化）——`undefined` なら平文、`null` なら作れなかった。
+       * ~~作れなければパスワードの変数を送らない（ACS も IBMSUBSPW を書かない）~~ → 原典と違った（節目の点検の指摘）: ACS は変数の頭
+       * （`03 名前 01`）を値より先に書くので、作れなくても IBMRSEED に自分のシード、IBMSUBSPW は**値の無いまま**送る
+       * （`NVT5250.insertVariable`）。PUB400（QPWDLVL 3・QRMTSIGN *VERIFY）は起動応答のコードを `0004`（コード表に無い）にして
+       * サインオン画面を出した（実測。CPF の文言は出ない）。ACS はコード表に無いコードを状態行に出すだけで続ける（`AcsOnly`）。
+       * サインオンの失敗回数に数えるかは未確認
        */
       const finish = (auth?: { clientSeed: Uint8Array; substitute: Uint8Array } | null): void => {
         // **USER はパスワード付きの自動サインオンのときだけ送る**（ACS `NVT5250.insertUser` は `ssoType` 3・4 のときだけ。
@@ -330,6 +335,9 @@ export class TelnetLayer {
             // telnet の層で二重にする。`20260921-encrypted-autosignon`）
             payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...auth.clientSeed]));
             payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue([...auth.substitute]));
+          } else if (pw !== undefined && auth === null) {
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...crypto.getRandomValues(new Uint8Array(8))]));
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE);
           } else if (pw !== undefined && auth === undefined) {
             // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
             // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
@@ -349,7 +357,7 @@ export class TelnetLayer {
       if (makeSubstitute !== undefined && user !== undefined && !bypassRejected && pw !== undefined) {
         const serverSeed = serverSeedOf(sb);
         if (serverSeed === undefined) {
-          finish(null); // シードが無ければ作れない（ACS も例外で IBMSUBSPW を書かない）
+          finish(null); // シードが無ければ作れない（ACS は例外になり、値の無い IBMSUBSPW を送る。`finish` の注記）
           return;
         }
         this.paused = true;

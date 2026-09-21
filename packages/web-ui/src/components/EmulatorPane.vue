@@ -20,7 +20,7 @@ import {
   typeAheadKind,
   type LocalAction
 } from "../composables/useKeymap.js";
-import { moveCursor, fieldAt, fieldAtCaret, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
+import { moveCursor, fieldAt, fieldAtCaret, caretInField, roundToDbcsLead, nextWordStart, endInProtectedField, type Dir, type CursorBounds } from "../composables/useCursor.js";
 import {
   sendKey,
   selectGuiChoice,
@@ -127,6 +127,8 @@ const cursor = computed(() => cursorOverride.value ?? snapshot.value?.cursor ?? 
  * Home の Record Backspace・テンキーの Field± は 5250 だけの操作なので、3270 では従来の動きに留める（節目の独立点検の指摘）
  */
 const is5250 = computed(() => (state.value?.meta?.terminal ?? "5250") === "5250");
+/** IBM i の 3270 でだけ割り当てのあるキー（サーバーの `tn3270-adapt.ts` の `IBMI_ONLY` と同じ集合） */
+const IBMI_ONLY_3270: ReadonlySet<string> = new Set(["Attn", "SysReq", "Help", "Print"]);
 
 function onEdit(fieldIndex: number, value: string): void {
   state.value?.edits.set(fieldIndex, value);
@@ -585,12 +587,21 @@ function endKey(inputs: HTMLInputElement[]): void {
     focusInput(inputs, inputs.length - 1);
     return;
   }
+  // 保護（バイパス）欄の上なら、その欄の中の末尾へ（ACS `FFT5250.getField` は保護欄も返す。節目の点検の指摘）
+  const here = fieldAt(cursor.value.row, cursor.value.col, snap.fields, snap.cols, snap.rows);
+  if (here?.protected) {
+    const to = endInProtectedField(here, cursor.value.row, snap.cells, snap.cols);
+    onCursor(to.row, to.col);
+    return;
+  }
   const heads = editableFields().filter((f) => f.continued === undefined || f.continued === "first");
   if (heads.length === 0) return;
   const at = (cursor.value.row - 1) * snap.cols + (cursor.value.col - 1);
   const target = heads.find((f) => (f.row - 1) * snap.cols + (f.col - 1) > at) ?? heads[0]!;
   focusFieldStart(target);
-  inputForSlice(target.index, 0)?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+  // **伝えない（bubbles: false）**——欄の input の直接のリスナー（ScreenGrid）だけが受ける。伝えると、欄が処理しない状態
+  // （施錠中など）で End がペインへ戻り、また `endKey` が走って無限に繰り返した（節目の点検の指摘）
+  inputForSlice(target.index, 0)?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: false, cancelable: true }));
 }
 
 /**
@@ -866,7 +877,9 @@ const rawKeydown = makeKeydownHandler({
   viewCycle: onViewCycle,
   playMacro: onPlayMacro,
   isFocused: () => props.focused,
-  fieldSignKeys: () => is5250.value
+  fieldSignKeys: () => is5250.value,
+  // 汎用機の 3270 は Attn・SysReq・Help・Print を送れない（サーバーの `planKey3270` が拒否する）
+  canSendAid: (key) => !(state.value?.meta?.terminal === "3270" && state.value?.ibmI3270 === false && IBMI_ONLY_3270.has(key))
 });
 
 // ---- キーボードによる矩形（ブロック）選択（free モードで Shift+矢印） ----
