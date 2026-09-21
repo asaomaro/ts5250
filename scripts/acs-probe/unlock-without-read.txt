@@ -1,0 +1,38 @@
+# **アンロックだけで READ の無い区間に、ACS は打鍵と AID をどう扱うか**（実機）。
+#
+# `scripts/build-ulktest.mjs` の ULKPGM（UNLOCK）: SNDF（出力だけ・LOCK 無し）→ DLYJOB 10 秒 → SNDRCVF。
+# 原典: WCC のアンロックで解錠し、解錠中の AID は `pending_aid` に溜めて READ が来たら送る（`DS5250`）。
+# A) 区間中に文字を打つ → 画面に入るか（解錠されているか）
+# B) 区間中に Enter → READ が来たところで送られるか（SNDRCVF がすぐ返り、プログラムが終わるか）
+signon
+keys [enter]
+settle 1200
+
+# --- A) 文字 ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('UNLOCK')[enter]
+sleep 2000
+dump a-window
+keys ABC
+sleep 500
+dump a-typed
+sleep 11000
+dump a-after-read
+keys [pf3]
+settle 1500
+dump a-exit
+
+# --- B) Enter ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('UNLOCK')[enter]
+sleep 2000
+dump b-window
+keys [enter]
+sleep 500
+dump b-enter
+sleep 11000
+dump b-after-read
+keys [pf3]
+settle 1500
+dump b-exit
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

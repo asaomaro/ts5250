@@ -201,6 +201,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ: `packages/tn5250/src/session/session.ts:666` の `if (result.readRequested && !result.cursorSet)` が `cursorToFirstInputField()` を呼ぶ。WTD の無いレコードでは `cursorSet` が偽のままなので、必ず動く。
   再現: 委譲先 C のプローブで、復元後の READ だけのレコードで、カーソルが (7,12) から (5,10) に移った。実機で出る画面は要確認。
   （出典: `20260919-backlog-acs-triage` research N6）
+  **実機で測った（2026-09-21・`20260921-auto-reconnect` の節目の合間に）**:
+  - **現実の画面では差が出なかった**: WRKOBJ の一覧でコマンド行（21,7）から QSH を起動し F3 で戻る（出口は
+    `RESTORE SCREEN`＋`READ MDT` の 1 レコード。WTD 無し）——**ACS も当 PJ も 21,7 のまま**
+    （`scripts/acs-probe/read-only-cursor.txt`・`scripts/verify-read-only-cursor.mjs`）。一覧の既定位置（8,2）へは動かない。
+    当 PJ は復元でカーソルを置いた扱いになり、既定位置へ動かさない。
+  - **差が出うるのは「WTD（IC が先頭以外）と READ が別レコード」の画面**だが、実機で作れていない——DSM（`DSCMD`）は
+    出力を 1 レコードにまとめて送った（CLEAR UNIT と WTD が 907 バイトの 1 レコード）。
+  - 残り: 別レコードで来る画面を実機で見つけるか作る（DSM 以外。RPG の `WRITE` と `READ` を別に出す等）。見つかるまでは直さない。
 - [x] **Erase Input が、中身のある全入力欄を消す（ACS は MDT の立った欄だけを消し、カーソルをホーム位置へ移す）**（優先度 中・深さ ○）。
   **完了（`20260921-erase-input-mdt-only`）**: 消すのを**MDT の立った欄だけ**にした（ホストが立てた `f.mdt` か、利用者の `edits`）。着地は `focusCursorField`（IC で指した位置、無ければ先頭の入力欄）へ寄せた（`packages/web-ui/src/components/ScreenGrid.vue` `eraseInputKey`）。
   原典で確認——`PS5250.processEraseInput` は `clearNonbypassFields(true)`、着地は `getHomePos()`。`homePos` は `setInsertCursor`（IC）で決まり、無ければ `setDefaultInsertCursor`。
@@ -272,8 +280,19 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ: `packages/tn5250/src/session/printer-session.ts:183-185` は、opcode 2 なら何もせず return し、それ以外は即座に `PRINT_COMPLETE` を返す（主エージェントが確認）。テスト `printer-session.test.ts:82-84` が即時の応答を固定している。
   再現: 印刷中に HLDSPLF *IMMED / DLTSPLF / ENDWTR *IMMED を行う。PDF の出力先を書き込み不可にして送る。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N15）
-- [ ] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
-  抜けるには Attn / SysReq を押すしかない。「アンロック → 秒単位の処理 → READ」の画面では、ACS なら打てる区間が施錠のままになる。
+- [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
+  **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
+  `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
+  - **ACS**（`scripts/acs-probe/unlock-without-read.txt`）: 区間中は解錠を示す（inhibit=0）が、**打った文字は画面に入れずに溜め**、
+    READ が来てから再生した（数字欄へ `ABC` が入ってエラー）。**Enter も READ の後に送った**（`ECLPS.SendKeys` は READ 待ちでない間も溜める）。
+  - **当 PJ**（`scripts/verify-unlock-without-read.mjs`）: 区間中は施錠を示し、AID の応答待ちは READ が来た 10 秒後に解けた。
+    ブラウザは `20260921-type-ahead`（先打ち）で区間中の打鍵を溜め、解錠後に同じ順で再生する——**打鍵の結果は ACS と同じ**。
+  - ~~「ACS なら打てる区間が施錠のままになる」~~ は誤り（ACS も画面には打たせない）。~~抜けるには Attn / SysReq を押すしかない~~ は
+    先打ちで解消した（待てば溜めた打鍵ごと進む）。
+  - **残る差は OIA の表示だけ**（ACS は解錠、当 PJ は施錠）。当 PJ で解錠を示すと、ブラウザが打鍵を溜めずに画面の欄へ入れてしまい、
+    かえって ACS と食い違うので、揃えない。
+  - 試験画面は測定後に消す（`--clean`）。
+  ~~抜けるには Attn / SysReq を押すしかない。「アンロック → 秒単位の処理 → READ」の画面では、ACS なら打てる区間が施錠のままになる。~~
   当 PJ: `packages/tn5250/src/session/session.ts:701-713` は、`readSolicited` のときだけ `ready` にして `pendingAid` を解決する（#401・`20260915-dspfmt-reconnect-blank-redraw`）。
   web-ui 経由の送信は `timeoutMs: "never"`（`packages/server/src/ws-handler.ts` の `onKey`）なので、期限による保険も無い。
   ACS: WCC のアンロックで解錠し（`DS5250.processWCC2` → `endOfRecord`）、解錠中の AID は `pending_aid` に溜めて READ が来たら送る（委譲先 C・D）。
