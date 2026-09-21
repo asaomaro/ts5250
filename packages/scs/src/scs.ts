@@ -139,12 +139,24 @@ export class ScsDecoder {
       }
       while (line.length < c) line.push(" ");
     };
+    /**
+     * その桁に**すでに字がある**か（継続桁の空文字列も、全角の字の一部なので占有）。**空白は下の字を消さない**ために使う。
+     */
+    const occupied = (r: number, c: number): boolean => {
+      const v = grid[r - 1]?.[c - 1];
+      return v !== undefined && v !== " ";
+    };
     const put = (ch: string, rawByte?: number): void => {
       if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
       cellAt(col);
-      grid[row - 1]![col - 1] = ch;
-      // 生バイトは SBCS の桁にだけ残す（読み直せるのはこれだけ）
-      (rawGrid[row - 1] ??= [])[col - 1] = rawByte;
+      // **空白（0x40）は下の字を消さない**——ACS の JPS は 1 字ずつ `drawString` するだけで何も消さず、空白は「空白のグリフを 1 桁ぶん描く」だけ。
+      // CR で戻って同じ行へ重ね書きするとき、2 度目の空白は下の字の上を通り過ぎるだけ（`ABCDEF` CR `␠␠␠XY` は `ABCXYF`）。
+      // `20260922-scs-blank-overprint`。書かないので、生バイトも下の字のまま残る。位置と `maxCol` は従来どおり進める
+      if (!(ch === " " && occupied(row, col))) {
+        grid[row - 1]![col - 1] = ch;
+        // 生バイトは SBCS の桁にだけ残す（読み直せるのはこれだけ）
+        (rawGrid[row - 1] ??= [])[col - 1] = rawByte;
+      }
       if (row > maxRow) maxRow = row;
       if (col > maxCol) maxCol = col;
       col += 1;
@@ -153,8 +165,11 @@ export class ScsDecoder {
     const putWide = (ch: string): void => {
       if (row < 1 || col < 1 || row > MAX_ROW || col + 1 > MAX_COL) return;
       cellAt(col + 1);
-      grid[row - 1]![col - 1] = ch;
-      grid[row - 1]![col] = ""; // 継続桁
+      // 全角空白も同じ（下の字を消さない）。下が半角 1 字だけでも、2 桁のどちらかに字があれば書かない
+      if (!(ch === "\u3000" && (occupied(row, col) || occupied(row, col + 1)))) {
+        grid[row - 1]![col - 1] = ch;
+        grid[row - 1]![col] = ""; // 継続桁
+      }
       if (row > maxRow) maxRow = row;
       if (col + 1 > maxCol) maxCol = col + 1;
       col += 2;

@@ -785,6 +785,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   冗長な SO・SBCS の状態の SI も毎回進める。印は占める桁の中に描く（`ShiftMark.width`）。
   日本語機の DSPLIBL は `2B FD 04 03 00 01`＝1 を送り、PUB400 の帳票は送らない（＝既定の 1）。`20260728-scs-dbcs-column-align` D1
   （桁を占めない）は破棄。DBCS の行は ACS と同じく 1 桁右から描かれる。mutation 6 通り検出。
+- [x] **SCS の空白は下の字を消さない**（下の「SCS の解釈の差」の「重ね打ち」から割った）。**完了（`20260921-scs-blank-overprint`）**: ACS の JPS（Windows の既定の経路）は 1 字ずつ描くだけで何も消さず、
+  空白（0x40）も「空白を描く」だけ。R11 の調査で本物の `PrintSCS5250JPS` を headless で動かして当 PJ の `ScsDecoder` と桁単位で突き合わせ、`ABCDEF` CR `␠␠␠XY` は ACS が A B C を残し（`ABCXYF`）、
+  当 PJ は空白で消していた（`␠␠␠XYF`）と確かめた。`put`・`putWide`（`packages/scs/src/scs.ts`）で、空白（全角空白も）は書き込み先に字があれば書かず位置だけ進める。
+  実採取 3 件は新旧で不変。単体 7 件、mutation 8 通り検出。
 - [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。
   **着手時に両側を再確認すること。**
   - ~~1 バイトの制御（中・安い）~~ → 上の `20260921-scs-controls-acs` で済んだ
@@ -792,9 +796,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     （表に無いクラスは 0x2B の 1 バイトだけ。原典 `proc_undefcode`）
   - ~~SO/SI の桁（中・要実測）~~ → 上の `20260921-scs-sosi-columns` で済んだ
   - 低
-    - 重ね打ち（CR だけで行頭へ戻る）
-    - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）
+    - 重ね打ち（CR だけで行頭へ戻る）: 空白は済（上の `20260921-scs-blank-overprint`）。**非空白×非空白（下線・二度打ち・合成文字）は残り**（R11）: ACS の JPS は下線・強調を重ね打ちだけで出す
+      （BS・UBS・SA の下線・BUS/EUS・BOS/EOS は何も描かない）ので、`ABC` CR `___` は両方が残る。当 PJ は後の字だけ。構造の側を直す案: `LogicalPage` に重ね層（`overstrikes`）を `shifts` と並走で足し、
+      `spool-html.ts`・`ReportText.vue`・`pdf.ts` で描く（`print-windows.ts` は未対応になる）。**実帳票（重ね打ちを含むもの）を 1 件採ってから着手する**
+    - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）: R11 で決着——**JPS は SHM・SVM・STAB を未実装**（ログだけ）、SHF/SVF の余白とタブは空処理、SPPS・SLD・SCD・SFG は用紙の向き・縮尺・字幅・行送りという物理量だけを変え、
+      **文字のグリッド（桁・行・改ページ）には効かない**。実採取 3 件を本物の JPS と桁単位で突き合わせて一致（A は 355 桁・C は 215 桁で不一致 0。B は SIT が無いために ACS が全角を詰める 8 桁だけ違い、SIT を足すと 330 桁で 0）→ **実装しない**。
+      **グリッドに効く例外は 2 つ**（別項目）: SSLD（`2B D2 04 15`）が行の途中に来ると ACS は先に CR+LF してから適用する（当 PJ は読み飛ばし）／SFSS（`2B FD .. 02`）の倍幅（0x20）は 1 字の進みを 2 倍にする（当 PJ は無視）。
+    - **台帳に無かった差**（R11 の合成・コード読み）: **空ページ**——ACS は FF ごとにページを作る（FF FF で空白の 1 枚）。当 PJ は空ページを出さない（`scs.ts` の `flushPage`。決定の記録なし）／
+      **最後の FF が無いジョブ**——ACS の JPS は最後の FF より後を印刷しない（コードと headless で確認）。当 PJ は出す。**ACS が情報を捨てている例なので合わせない候補**（実機の ACS の紙では未確認）／
+      **DGL（罫線）**——ACS は線を描く・当 PJ は無視（実帳票の頻度は未確認）／SIT の無い DBCS の詰め方。
     - ~~ジョブ終了の判定（ACS はヘッダの byte7=0x08、当 PJ は長さ 17）~~ → `20260921-printer-acs-declaration` で揃えた
     - ~~印刷完了応答のバイト 4-5~~ → 同上（0x0102）
-    - プリンターの既定値（意図的な差異）
+    - プリンターの既定値（意図的な差異）: R11 で整理——ACS の 5250 プリンターの既定は HPT あり（`hostPrintTransform=true`・IBMFONT=11）、HPT を外すと Windows は JPS。IBMFONT ほかの申告は 2026-09-21 に
+      揃え済み。**残る差は「HPT を既定にしない（SCS を受ける）」だけで、変更不要**（意図的。理由は下の決定記録へ）。~~IBMFONT=11 ほか~~
   （出典: `20260919-backlog-acs-triage` research N16・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）

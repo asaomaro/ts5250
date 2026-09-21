@@ -133,6 +133,63 @@ describe("ScsDecoder", () => {
     const scs = Uint8Array.from([...codec.encode("ABCDEFGH").bytes, 0x0d, ...codec.encode("日").bytes]);
     expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe("A日DEFGH");
   });
+  /**
+   * **空白は下の字を消さない**（ACS の JPS は 1 字ずつ描くだけで何も消さない。`20260922-scs-blank-overprint`）。期待値は本物の JPS を headless で動かした記録
+   * （調査 R11 の合成ベクタ。`ABCDEF` CR `␠␠␠XY` は A B C が残り D・E に X・Y が重なる）
+   */
+  it("**CR で戻った重ね書きの空白は、下の字を消さない**（`ABCDEF` CR `␠␠␠XY` → `ABCXYF`）", () => {
+    const c = codecForCcsid(37);
+    const scs = Uint8Array.from([...c.encode("ABCDEF").bytes, 0x0d, ...c.encode("   XY").bytes]);
+    expect(new ScsDecoder(37).decode(scs)[0]!.lines[0]).toBe("ABCXYF");
+  });
+
+  it("非空白の字の重ね書きは今までどおり後の字が残る（両方を残す重ね層は未対応。台帳）", () => {
+    const c = codecForCcsid(37);
+    const scs = Uint8Array.from([...c.encode("ABCDEF").bytes, 0x0d, ...c.encode("XY").bytes]);
+    expect(new ScsDecoder(37).decode(scs)[0]!.lines[0]).toBe("XYCDEF");
+  });
+
+  it("空白だけを重ねても下の字は残る。生バイトも下の字のまま", () => {
+    const c = codecForCcsid(37);
+    const scs = Uint8Array.from([...c.encode("ABC").bytes, 0x0d, ...c.encode("   ").bytes]);
+    const page = new ScsDecoder(37).decode(scs)[0]!;
+    expect(page.lines[0]).toBe("ABC");
+    expect(page.raw?.[0]?.slice(0, 3)).toEqual([0xc1, 0xc2, 0xc3]);
+  });
+
+  it("**全角の字の 2 桁目（継続桁）に半角の空白が来ても、全角の字を壊さない**", () => {
+    const c = codecForCcsid(1399);
+    const spcc0 = [0x2b, 0xfd, 0x04, 0x03, 0x00, 0x00];
+    // 日 CR ␠␠ X: 1 桁目・2 桁目の空白はどちらも下の字（日）の上を通り過ぎ、X は 3 桁目
+    const scs = Uint8Array.from([...spcc0, ...c.encode("日").bytes, 0x0d, ...c.encode("  X").bytes]);
+    expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe("日X");
+  });
+
+  it("行末の空白の桁も、ページの桁数（`cols`）に数える（従来どおり）", () => {
+    const c = codecForCcsid(37);
+    const page = new ScsDecoder(37).decode(c.encode("AB   ").bytes)[0]!;
+    expect(page.cols).toBe(5);
+    expect(page.lines[0]).toBe("AB");
+  });
+
+  it("何も無い桁への空白は今までどおり（字と字の間の空白・行末の空白の桁）", () => {
+    const c = codecForCcsid(37);
+    expect(new ScsDecoder(37).decode(c.encode("A  B").bytes)[0]!.lines[0]).toBe("A  B");
+  });
+
+  it("**全角空白も下の字を消さない**（全角の字の上・半角 2 字の上・半角 1 字が半分にかかる形）。何も無い桁なら書く", () => {
+    const c = codecForCcsid(1399);
+    const wideBlank = c.encode("\u3000").bytes; // SO 4040 SI
+    const spcc0 = [0x2b, 0xfd, 0x04, 0x03, 0x00, 0x00]; // SO・SI を 0 桁にして、全角空白を 1 桁目から置く
+    const over = (under: string): string =>
+      new ScsDecoder(1399).decode(Uint8Array.from([...spcc0, ...c.encode(under).bytes, 0x0d, ...wideBlank, ...c.encode("X").bytes]))[0]!.lines[0]!;
+    // 後ろに X を置く（行末の空白は帳票では切り落とされ、全角空白も含まれるため）
+    expect(over("日"), "全角の字の上").toBe("日X");
+    expect(over("AB"), "半角 2 字の上").toBe("ABX");
+    expect(over(" A"), "半角 1 字が 2 桁目にかかる").toBe(" AX");
+    expect(over("  "), "空白だけの桁には書く").toBe("\u3000X");
+  });
+
   it("SPCC は同じデコーダーのジョブをまたいで残る（ACS は印刷のセッションで 1 回だけ初期化）", () => {
     const codec = codecForCcsid(1399);
     const d = new ScsDecoder(1399);
