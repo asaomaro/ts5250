@@ -570,6 +570,29 @@ function homeKey(): void {
 }
 
 /**
+ * **欄の外で押した End**（欄の中の End は ScreenGrid が欄の末尾へ置く）。
+ *
+ * ~~最後の入力欄の先頭へ~~ → ACS `PS5250.processEndField`: 欄の外なら `FFT5250.nextNonByPassInputFieldPos`——**カーソルより後で始まる
+ * 最初の入力欄**（継続欄は先頭の区切りだけ。無ければ先頭の入力欄へ巡回）へ行き、その欄の末尾（入力の直後。最後の桁まで埋まっていれば最後の桁）に置く
+ * （`20260921-end-outside-field`）。末尾の求め方（DBCS・行をまたぐ欄）は ScreenGrid が持つので、着いた欄の input に End を渡す。
+ * 3270 は従来どおり最後の入力欄へ（ACS の 3270 の End は別の処理）
+ */
+function endKey(inputs: HTMLInputElement[]): void {
+  const snap = snapshot.value;
+  if (!snap) return;
+  if (!is5250.value) {
+    focusInput(inputs, inputs.length - 1);
+    return;
+  }
+  const heads = editableFields().filter((f) => f.continued === undefined || f.continued === "first");
+  if (heads.length === 0) return;
+  const at = (cursor.value.row - 1) * snap.cols + (cursor.value.col - 1);
+  const target = heads.find((f) => (f.row - 1) * snap.cols + (f.col - 1) > at) ?? heads[0]!;
+  focusFieldStart(target);
+  inputForSlice(target.index, 0)?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+}
+
+/**
  * 欄の先頭（スライス 0）へフォーカスし、**ペインのカーソル位置も合わせる**。
  * 既にフォーカスのある input へ `focus()` しても focus イベントは出ず、ScreenGrid はカーソルを知らせない——
  * 欄の途中から同じ欄の先頭へ戻る Backtab で、ペインのカーソルが古い桁のまま残り、直後の Enter が
@@ -696,7 +719,7 @@ function onLocal(action: LocalAction): void {
       homeKey();
       break;
     case "end":
-      focusInput(inputs, inputs.length - 1);
+      endKey(inputs);
       break;
     // ローカル編集キー（ホストへ送らない）。値の編集は ScreenGrid、欄の移動はここ、の分担。
     case "field-exit":
