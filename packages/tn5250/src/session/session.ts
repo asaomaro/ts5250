@@ -159,6 +159,7 @@ let seq = 0;
 export class Session5250 extends Emitter<SessionEvents> {
   readonly id: string;
   private state: SessionState = "connecting";
+
   /** 繋ぎ直すたびに作り直す（前の接続の書式・退避画面を持ち越さない） */
   private buf: ScreenBuffer;
   /** 接続の設定（自動再接続で同じ設定のまま繋ぎ直すために持つ） */
@@ -787,23 +788,10 @@ export class Session5250 extends Emitter<SessionEvents> {
       // Read の無いレコード（画面だけ描くもの）では触らない——同じ画面構築が
       // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
-      if (result.readRequested && !result.cursorSet) {
-        // **ホストが位置を指していなければ先頭入力フィールドへ**（5250 の既定動作）。
-        // ACS の `DS5250.preprocessWCC2()` が `WTD_IC_addr == -1` のときに呼ぶ
-        // `PS5250.setDefaultInsertCursor()`（フォーマットテーブルを先頭から走査して
-        // 最初の非 BYPASS 欄を採る）と同じ処理。原点に残すと AID レコードで報告する
-        // カーソル位置が実機とずれる。
-        //
-        // **`result.cursorSet` は「最後の WTD が指したか」**（レコード全体で最後に見た
-        // IC ではない）。この区別が無いと、PA0100R のように 1 レコードへ
-        // 「ヘッダ WTD（IC あり）→ 明細 WTD（SOH あり・IC なし）」と積んでくる画面で、
-        // 既に保護化されたヘッダ欄にカーソルが取り残される（`PendingCursorOrder` 参照）。
-        //
-        // ここ以外の上書きはしない——ホストが IC/MC で指した位置は、それが保護欄でも
-        // そのまま尊重する（実機 ACS も入力欄が 1 つも無い画面でカーソルをその場に残す。
-        // 証跡 `work/pa0100j-cursor/`）。
-        this.buf.cursorToFirstInputField();
-      }
+      // ~~READ のときに（そのレコードで位置が指されていなければ）先頭の入力欄へ置く~~——既定位置は
+      // WTD の終わりで置く（ACS `preprocessWCC2`。`wtd-applier.ts` の `placeCursorAfterWtd`）。READ は位置に触れない。
+      // ここで置いていたので、WTD（IC あり）と READ が別のレコードで来る画面で IC が先頭の入力欄へ上書きされていた
+      // （実機で確認。`scripts/verify-read-split-record.mjs`。`20260921-cursor-per-wtd-acs`）
       // 警報は画面更新と別に出す（画面が変わらないレコードでも鳴らすため。ACS も
       // `processWCC2` の中で `ringBell()` を呼ぶだけで、描画とは独立している）
       if (result.alarm) this.emit("alarm");

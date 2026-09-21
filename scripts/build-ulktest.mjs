@@ -6,6 +6,8 @@
 //     RANGE  — SNDRCVF で RANGE(1 5) の欄を読む。範囲外を入れると**システムが WRITE ERROR CODE で返す**
 //     WINDOW — 背景を SNDF し、窓（WINDOW キーワード）の中の RANGE(1 5) の欄を SNDRCVF
 //              ＝ **WRITE ERROR CODE TO WINDOW** を出させる
+//     SPLIT  — SNDF（2 つ目の欄に DSPATR(PC)＝IC）と RCVF を**別のレコード**で送る（WTD と READ が分かれる画面）
+//     SPLITN — 同じ形で IC なし（既定のカーソル位置を見る）
 //     DUP    — SNDRCVF で DUP 可の CHECK(RZ) 欄・DUP 可の自動 Enter（CHECK(ER)）欄・素の欄を読む
 //              ＝ **右寄せ欄で Dup を押したとき次の欄へ移るか**（ACS `PS5250.processDupFM`）
 //   F3（CA03）で抜ける。
@@ -55,6 +57,14 @@ const DDS = [
   constant(1, 3, "ULK TEST ASK"), constant(7, 3, "1-5:"), numf("ASKF", 1, 0, "B", 7, 20, "RANGE(1 5)"),
   rec("WINREC"), kwd("CA03(03)"), kwd("WINDOW(6 10 6 40)"),
   constant(1, 2, "WINDOW TEST 1-5:"), numf("WINF", 1, 0, "B", 3, 2, "RANGE(1 5)"),
+  rec("SPLR"), kwd("CA03(03)"),
+  constant(1, 3, "ULK TEST SPLIT"),
+  constant(5, 3, "FIRST:"), field("SPA", 6, "A", "B", 5, 20),
+  constant(7, 3, "SECOND:"), field("SPB", 6, "A", "B", 7, 20, "DSPATR(PC)"),
+  rec("SPLN"), kwd("CA03(03)"),
+  constant(1, 3, "ULK TEST SPLIT NOPC"),
+  constant(5, 3, "FIRST:"), field("SNA", 6, "A", "B", 5, 20),
+  constant(7, 3, "SECOND:"), field("SNB", 6, "A", "B", 7, 20),
   rec("DUPR"), kwd("CA03(03)"),
   constant(1, 3, "ULK TEST DUP"),
   constant(5, 3, "RZ DUP:"), field("DRZ", 6, "A", "B", 5, 20, "CHECK(RZ) DUP"),
@@ -72,6 +82,14 @@ const CL = [
   "ENDDO",
   "IF COND(&MODE *EQ 'RANGE') THEN(DO)",
   "  SNDRCVF RCDFMT(ASK)",
+  "ENDDO",
+  "IF COND(&MODE *EQ 'SPLIT') THEN(DO)",
+  "  SNDF RCDFMT(SPLR)",
+  "  RCVF RCDFMT(SPLR)",
+  "ENDDO",
+  "IF COND(&MODE *EQ 'SPLITN') THEN(DO)",
+  "  SNDF RCDFMT(SPLN)",
+  "  RCVF RCDFMT(SPLN)",
   "ENDDO",
   "IF COND(&MODE *EQ 'DUP') THEN(DO)",
   "  SNDRCVF RCDFMT(DUPR)",

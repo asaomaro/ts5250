@@ -58,10 +58,9 @@ export interface ApplyResult {
   /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
   readScreenExtendedRequested: boolean;
   /**
-   * **最後に評価された WRITE TO DISPLAY が、カーソル位置を明示した**。
-   * ACS（`DS5250.preprocessWCC2`）と同じく、判定は WTD ごとに行われ、後の WTD が前の
-   * WTD の指定を上書きする——偽なら「ホストは位置を指していない」なので、呼び出し側が
-   * 既定動作（先頭入力欄へ）を適用する。詳細は `PendingCursorOrder`。
+   * **このレコードがカーソルを置いた**（WTD の終わりの `placeCursorAfterWtd`・RESTORE・エラーのレコード）。
+   * ~~偽なら呼び出し側が既定動作（先頭入力欄へ）を適用する~~——既定位置も WTD の終わりで置く
+   * （ACS `preprocessWCC2`。`20260921-cursor-per-wtd-acs`）。READ では触れない。
    */
   cursorSet: boolean;
   /**
@@ -104,6 +103,8 @@ export interface ApplyResult {
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
 const CC2_UNLOCK = 0x08;
+/** CC2: キーボードを解錠してもカーソルを動かさない（ACS `preprocessWCC2` の 0x40） */
+const CC2_NO_CURSOR_MOVE = 0x40;
 const CC2_ALARM = 0x04;
 
 /** PC Organizer 標識の先頭バイト（非表示属性）。ここを見てから 11 バイトを照合する */
@@ -113,7 +114,10 @@ const PCO_ATTR = 0x27;
 export type WarnFn = (message: string) => void;
 
 /**
- * IC/MC が指したカーソル位置の**保留値**（ACS の `DS5250.WTD_IC_addr` / `WTD_MC_addr` 相当）。
+ * IC/MC が指したカーソル位置の**保留値**（ACS の `DS5250.WTD_IC_addr` / `WTD_MC_addr` 相当。
+ * いまは `ScreenBuffer.icAddr` / `mcAddr` が持つ——**レコードをまたいで持ち越す**。
+ * ~~1 レコードの中だけで持つ~~ と、IC を送った WTD の後に別のレコードで IC の無い WTD が来たとき
+ * ACS（IC に置く）と食い違う。`20260921-cursor-per-wtd-acs`）。
  *
  * **IC は「見つけた瞬間にカーソルを動かす」ものではない。** ACS は IC/MC をこの保留値に
  * 溜め、WRITE TO DISPLAY 1 つを処理し終えた時点（`preprocessWCC2`）で初めて
@@ -129,8 +133,14 @@ export type WarnFn = (message: string) => void;
  * （利用者報告の不具合。`work/pa0100j-cursor/` の証跡）。SOH で捨てれば、明細側の WTD は
  * 「指定なし」となり、ACS と同じく先頭入力欄 (3,23) へ落ちる。
  */
-interface PendingCursorOrder {
-  addr: number | undefined;
+/**
+ * **1 レコードの中のカーソルの決め方の状態**（ACS `DS5250.processCommand` がレコードの頭で戻す
+ * `kbd_state_chg` と `pendingCCbyte2`。`20260921-cursor-per-wtd-acs`）。IC / MC の番地そのものは
+ * レコードをまたいで持ち越すので、バッファ（`ScreenBuffer.icAddr` / `mcAddr`）が持つ。
+ */
+interface RecordCursorState {
+  /** CC2 の持ち越し（ACS `pendingCCbyte2`）。0x40＝カーソルを動かさない */
+  pendingCc2: number;
 }
 
 /**
@@ -170,7 +180,7 @@ export function applyDataStream(
   // 何も書かずに終わったレコードでは、buffer 側が前回の確定値を残す（窓を描くレコードと
   // 入力を待つだけのレコードが分かれて届いても窓が消えないようにするため）。
   buf.beginRecord();
-  const cursorOrder: PendingCursorOrder = { addr: undefined };
+  const cursorState: RecordCursorState = { pendingCc2: 0 };
   const cursorBeforeRecord = buf.cursorAddr;
   /** このレコードに WRITE ERROR CODE（0x21 / 0x22）が含まれていた */
   let errorCodeWritten = false;
@@ -198,8 +208,7 @@ export function applyDataStream(
     const cmd = r.u8();
     switch (cmd) {
       case COMMAND.CLEAR_UNIT:
-        buf.clearUnit();
-        cursorOrder.addr = undefined;
+        buf.clearUnit(); // IC / MC も捨てる（ACS `processClearFMT`）
         break;
       case COMMAND.CLEAR_UNIT_ALTERNATE: {
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
@@ -213,13 +222,10 @@ export function applyDataStream(
         if (!buf.clearUnitAlternate()) {
           warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing at current size (grid lines kept)");
         }
-        cursorOrder.addr = undefined;
         break;
       }
       case COMMAND.CLEAR_FORMAT_TABLE:
-        buf.clearFormatTable();
-        // フォーマットテーブルを捨てるときは保留中の IC/MC も捨てる（ACS `processClearFMT`）
-        cursorOrder.addr = undefined;
+        buf.clearFormatTable(); // 保留中の IC/MC も捨てる（ACS `processClearFMT`）
         break;
       case COMMAND.SAVE_SCREEN:
         // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く。
@@ -319,7 +325,7 @@ export function applyDataStream(
         result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY:
-        applyWtd(r, buf, codec, result, warn, cursorOrder);
+        applyWtd(r, buf, codec, result, warn, cursorState);
         break;
       case COMMAND.WRITE_ERROR_CODE:
         applyWriteErrorCode(r, buf, codec);
@@ -466,29 +472,49 @@ function applyCc2(cc2: number, result: ApplyResult): void {
   if ((cc2 & 0x01) !== 0) result.messageWaiting = true;
 }
 
+/**
+ * **WTD の終わりでカーソルを置く**（ACS `DS5250.preprocessWCC2`。`20260921-cursor-per-wtd-acs`）。
+ *
+ * - CC2 の 0x40（カーソルを動かさない）を持ち越し（最後の WTD の指定が勝つ）、**動かしてよければ IC の番地、
+ *   無ければホーム**（最初の非 bypass 欄。欄が無ければ 1 行 1 桁）へ置く。MC があれば MC
+ * - 動かさない指定でも MC だけは効く
+ * - **READ ではカーソルに触れない**（ACS の READ INPUT / MDT / MDT ALT は `pending_read` を覚えるだけ）。
+ *   ~~READ のときに（そのレコードで IC が無ければ）先頭の入力欄へ置く~~ だと、WTD と READ が別のレコードで
+ *   来る画面（CL の SNDF → RCVF など）で、WTD の IC が READ で先頭の入力欄へ上書きされていた（実機で確認。
+ *   `scripts/acs-probe/read-split-record.txt`: ACS は IC の 7,20、当 PJ は 5,20）
+ *
+ * ⚠ **原典にある「解錠中に来て、キーボードの状態を変えない WTD には 0x40 を足す」は入れていない**
+ * （`kbd_state_chg` と `ps.isKeyboardLocked()` の組み合わせ）。DSPFMT は「CC2 で解錠する出力だけの
+ * レコード」の後に「CLEAR も SOH も CC1 の施錠も無い WTD（IC 7,4）＋READ」を送り、原典を素直に読むと
+ * 3 つ目では動かないはずだが、**実機の ACS は 7,4 に置いた**（中継で採った ACS 側のレコードも同じ形）。
+ * ACS がキーボードを開く時機の読みが確かめられていないので、実測と合わない条件は入れない（decisions D2）。
+ */
+function placeCursorAfterWtd(buf: ScreenBuffer, cc2: number, result: ApplyResult, st: RecordCursorState): void {
+  st.pendingCc2 |= cc2 & 0x4f;
+  if ((cc2 & CC2_NO_CURSOR_MOVE) === 0) st.pendingCc2 &= ~CC2_NO_CURSOR_MOVE;
+  if ((st.pendingCc2 & CC2_NO_CURSOR_MOVE) === 0) {
+    buf.cursorAddr = buf.mcAddr ?? buf.icAddr ?? buf.homeAddr();
+    result.cursorSet = true;
+  } else if (buf.mcAddr !== undefined) {
+    buf.cursorAddr = buf.mcAddr;
+    result.cursorSet = true;
+  }
+}
+
 function applyWtd(
   r: ByteReader,
   buf: ScreenBuffer,
   codec: Codec,
   result: ApplyResult,
   warn: WarnFn,
-  cursorOrder: PendingCursorOrder
+  cursorState: RecordCursorState
 ): void {
   applyCc(r.u8(), buf, result);
-  applyCc2(r.u8(), result);
+  const cc2 = r.u8();
+  applyCc2(cc2, result);
 
-  /**
-   * この WTD の終わりでカーソル位置を確定する（ACS `preprocessWCC2`）。
-   * 保留値が無ければ `cursorSet` を**倒す**——前の WTD が指した位置を引き継がせない。
-   */
-  const settleCursor = (): void => {
-    if (cursorOrder.addr !== undefined) {
-      buf.cursorAddr = cursorOrder.addr;
-      result.cursorSet = true;
-    } else {
-      result.cursorSet = false;
-    }
-  };
+  /** この WTD の終わりでカーソル位置を決める（ACS `preprocessWCC2`。`placeCursorAfterWtd`） */
+  const settleCursor = (): void => placeCursorAfterWtd(buf, cc2, result, cursorState);
 
   let addr = 0; // WTD 開始時のバッファアドレスは SBA で設定される（未設定時は先頭）
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
@@ -583,11 +609,14 @@ function applyWtd(
         addr = buf.addrOf(r.u8(), r.u8());
         break;
       case ORDER.IC:
+        // **ここでは動かさず覚える**——確定は WTD の終わり（`placeCursorAfterWtd`）。IC は MC を捨てる
+        // （ACS `processWriteToDisplay` の 0x13: `WTD_MC_addr = -1`）。番地はレコードをまたいで持ち越す
+        buf.icAddr = buf.addrOf(r.u8(), r.u8());
+        buf.mcAddr = undefined;
+        break;
       case ORDER.MC:
-        // 01 では IC/MC とも「カーソル位置の設定」として扱う（IC_ULOCK の厳密な扱いは必要時に拡張）。
-        // **ここでは動かさず保留する**——確定は WTD の終わり（`settleCursor`）。理由は
-        // `PendingCursorOrder` を参照
-        cursorOrder.addr = buf.addrOf(r.u8(), r.u8());
+        // MC は「動かさない」指定のときでも効く（ACS `preprocessWCC2` の else 枝）
+        buf.mcAddr = buf.addrOf(r.u8(), r.u8());
         break;
       case ORDER.RA: {
         const target = buf.addrOf(r.u8(), r.u8());
@@ -630,12 +659,11 @@ function applyWtd(
         const len = r.u8();
         const body = r.bytes(len);
         buf.setHeaderData(body);
-        buf.clearFormatTable();
         // **フォーマットテーブルを作り直すので、保留中の IC/MC も捨てる**
         // （ACS `processWriteToDisplay` の SOH 分岐 → `processClearFMT()` →
         // `WTD_IC_addr = -1`）。これが無いと、前の WTD が指した位置が
-        // 「新しい画面に対する指定」として残ってしまう（`PendingCursorOrder` 参照）
-        cursorOrder.addr = undefined;
+        // 「新しい画面に対する指定」として残ってしまう（PA0100R。`placeCursorAfterWtd` 参照）
+        buf.clearFormatTable();
         break;
       }
       case ORDER.TD: {

@@ -310,6 +310,7 @@ export class ScreenBuffer {
     this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
+    this.dropCursorOrders();
   }
 
   /** GUI 構造体をすべて除去（REM_ALL_GUI_CONSTRUCTS 専用コマンド時） */
@@ -515,6 +516,7 @@ export class ScreenBuffer {
   clearUnitAlternate(): boolean {
     // **窓・選択フィールド・スクロールバーは閉じる。罫線は残す**（上のコメント）
     this.closeWindowsAndSelections();
+    this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
       this.noteClear();
@@ -830,6 +832,7 @@ export class ScreenBuffer {
   clearFormatTable(): void {
     for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
+    this.dropCursorOrders();
   }
 
   /**
@@ -1028,6 +1031,28 @@ export class ScreenBuffer {
   cursorToFirstInputField(): void {
     const first = this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0);
     if (first !== undefined) this.cursorAddr = first.startAddr;
+  }
+
+  /**
+   * **既定の位置（ホーム）**: 最初の非 bypass 欄の先頭。**欄が無ければ 0（1 行 1 桁）**
+   * （ACS `PS5250.setDefaultInsertCursor` → `homePos`。`20260921-cursor-per-wtd-acs`）。
+   */
+  homeAddr(): number {
+    return this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0)?.startAddr ?? 0;
+  }
+
+  /**
+   * **WTD の IC / MC で指された番地**（ACS `DS5250.WTD_IC_addr` / `WTD_MC_addr`。`20260921-cursor-per-wtd-acs`）。
+   * **レコードをまたいで持ち越し、書式を消すときだけ捨てる**（CLEAR UNIT・CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE・
+   * SOH＝ACS `processClearFMT`）。IC は MC を捨てる。どこへ置くかは WTD の終わりに決める（`wtd-applier.ts` の
+   * `placeCursorAfterWtd`）。
+   */
+  icAddr: number | undefined;
+  mcAddr: number | undefined;
+  /** 書式を消したので IC / MC も捨てる（ACS `processClearFMT` の `WTD_IC_addr = -1; WTD_MC_addr = -1`） */
+  private dropCursorOrders(): void {
+    this.icAddr = undefined;
+    this.mcAddr = undefined;
   }
 
   // **`cursorIsUnenterable()`／`isEnterableAt()` はここにあった**が撤去した

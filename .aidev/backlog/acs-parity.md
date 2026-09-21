@@ -198,7 +198,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 単体: CC1=0xC0 の WTD を合成すれば再現する（委譲先 C のプローブで、打った `"ABC"` が残った）。
   - 実機: 0xC0 を出す DDS（候補は `ERASEINP MDTOFF`）は要実測。
   （出典: `20260919-backlog-acs-triage` research N5）
-- [ ] **READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす**（優先度 中・深さ ○・**要実機測定**）。
+- [x] **READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす**（優先度 中・深さ ○・**要実機測定**）。
+  **完了（`20260921-cursor-per-wtd-acs`・PR #410）**: 分かれたレコードの画面を CL の SNDF → RCVF で作って測った（`scripts/build-ulktest.mjs` の SPLIT）。
+  ACS は IC の 7,20、当 PJ は READ で先頭の入力欄 5,20 へ動かしていた。既定位置を WTD の終わりで置き（ACS `preprocessWCC2`）、READ では触れず、
+  IC / MC の番地は書式を消すまで持ち越すようにした（`wtd-applier.ts` `placeCursorAfterWtd`・`buffer.ts` `icAddr`）。実機の 9 画面すべてで ACS と一致
+  （`scripts/verify-cursor-screens.mjs`・`scripts/acs-probe/cursor-screens.txt`）。mutation 7 通り検出。
+  ⚠ 原典の「解錠中に来てキーボードの状態を変えない WTD は動かさない」は、DSPFMT の実測（ACS は 7,4）と合わず入れていない（未確認）。
   **`20260921` のバッチで着手を見送った**。原典を読むと、ACS が既定位置を置くのは`DS5250.preprocessWCC2`（WTD の処理の中）で、条件に `WCC2_unlock_pending`・施錠状態・`kbd_state_chg` が絡む。
   単純に「WTD が無ければ動かさない」にすると、**WRITE と READ が別レコードで来る画面で既定位置が一度も置かれなくなる**（当方は既定位置を `readRequested` のときだけ置いており、ACS は WTD ごとに置く）。**判定の単位そのものが違う**ので、推測で直すと多くの画面のカーソル位置を壊しうる。
   着手時は、分割レコードの画面（RESTORE 後・WRITE と READ が別レコード）を**実機で**測ってから、`readRequested` で括るのをやめて WTD ごとに判定する形へ寄せること。
