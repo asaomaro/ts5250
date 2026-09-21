@@ -100,6 +100,12 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
     "ctrl+Pause": "Print",
     "ctrl+Cancel": "Print",
     "alt+F1": "Help" // A112
+  },
+  5: {
+    // ACS の既定の割り当てのうち、当 PJ に機能があって既定のキーだけが無かったもの（`AcsMapFunctions.MAP_5250`。`20260922-default-keys-rule-cursor`）。
+    // `C36 = [rule]`（Ctrl+Home＝罫線の表示）・`C122 = [altcsr]`（Ctrl+F11＝カーソルの形の切り替え）
+    "ctrl+Home": "view:ruleLine",
+    "ctrl+F11": "view:cursorShape"
   }
 };
 

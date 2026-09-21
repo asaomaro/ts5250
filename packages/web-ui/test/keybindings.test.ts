@@ -4,6 +4,7 @@ import {
   comboOf,
   DEFAULT_BINDINGS,
   isLocalBinding,
+  isViewBinding,
   localActionOf, BINDINGS_VERSION } from "../src/stores/keybindings.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { vi } from "vitest";
@@ -190,5 +191,35 @@ describe("既定バインドの訂正（Ctrl+Delete・Ctrl+Backspace。`20260922
   it("Erase EOF を割り当てた人（Ctrl+Delete 以外のキー）は、そのまま使える", () => {
     load({ "ctrl+e": "local:erase-eof" }, 4);
     expect(keybindingsStore.bindings["ctrl+e"]).toBe("local:erase-eof");
+  });
+});
+
+describe("ACS の既定の追加（版 5: Ctrl+Home＝罫線・Ctrl+F11＝カーソルの形。`20260922-default-keys-rule-cursor`）", () => {
+  it("既定に入り、順送りの割り当て（view:*）として解決される", () => {
+    expect(DEFAULT_BINDINGS["ctrl+Home"]).toBe("view:ruleLine");
+    expect(DEFAULT_BINDINGS["ctrl+F11"]).toBe("view:cursorShape");
+    expect(isViewBinding("view:ruleLine")).toBe(true);
+  });
+
+  it("**版 4 の保存値には追加分だけを足す**（既にそのキーを別用途に割り当てた人・消した既定は触らない）", () => {
+    localStorage.clear();
+    localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+F11": "F11", "ctrl+Enter": "local:field-exit" }));
+    localStorage.setItem("as400.keybindings.version", "4");
+    keybindingsStore.reload();
+    expect(keybindingsStore.bindings["ctrl+Home"], "空いているキーには既定が入る").toBe("view:ruleLine");
+    expect(keybindingsStore.bindings["ctrl+F11"], "使用中のキーは保存値が優先").toBe("F11");
+    expect(keybindingsStore.bindings["ctrl+Backspace"], "版 5 の訂正（Ctrl+Backspace は割り当て無し）とは別").toBeUndefined();
+  });
+
+  it("キー入力で表示設定の順送りが呼ばれ、ホストへは送らない", () => {
+    const viewCycle = vi.fn();
+    const sendAid = vi.fn();
+    const h = makeKeydownHandler({ sendAid, local: vi.fn(), viewCycle, playMacro: vi.fn(), isFocused: () => true });
+    localStorage.clear();
+    keybindingsStore.reload();
+    h({ key: "Home", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
+    h({ key: "F11", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
+    expect(viewCycle.mock.calls.map((c) => c[0])).toEqual(["ruleLine", "cursorShape"]);
+    expect(sendAid).not.toHaveBeenCalled();
   });
 });
