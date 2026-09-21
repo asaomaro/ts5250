@@ -227,6 +227,22 @@ describe("送れる場合", () => {
     expect(sentKeys()).toEqual(["Enter"]);
   });
 
+  it("**RZ 欄を最終桁まで打てば送れる**（欄に留まるが「出た」ことになる。実機 ACS の場合 10）", async () => {
+    const { input } = await mountAt(3);
+    await type(input, "123456");
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual(["Enter"]);
+  });
+
+  it("**符号付き数値は数字桁を埋めても 0020**（符号桁に留まる。実機 ACS の場合 11）", async () => {
+    const { input } = await mountAt(7);
+    await type(input, "12345");
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(sentKeys()).toEqual([]);
+  });
+
   it("素の欄は打っても送れる", async () => {
     const { input } = await mountAt(5);
     await type(input, "12");

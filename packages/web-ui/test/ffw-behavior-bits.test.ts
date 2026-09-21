@@ -235,6 +235,27 @@ describe("ScreenGrid: MONOCASE / FER / AUTO_ENTER", () => {
     w.unmount();
   });
 
+  /**
+   * **右寄せ（RZ/RB）と符号付き数値も Field Exit 必須**（ACS `Field5250.isFieldExitRequired`。
+   * `20260921-field-exit-required-types`）。実機の ACS でも RZ 欄を満杯まで打つと欄に留まった。
+   * 自動 Enter も送らない（FER の枝では自動 Enter を見ない）。
+   */
+  it.each([
+    ["CHECK(RZ)", { adjust: "right-zero" as const }, "123"],
+    ["CHECK(RB)", { adjust: "right-blank" as const }, "123"],
+    ["CHECK(RZ)＋自動 Enter", { adjust: "right-zero" as const, autoEnter: true }, "123"]
+  ])("%s は満杯でも field-full を出さない（自動送り・自動 Enter をしない）", async (_l, extra, text) => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 3, ...extra })]);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, text);
+    expect(w.emitted("field-full"), "自動送りした").toBeUndefined();
+    expect(w.emitted("aid"), "自動 Enter を送った").toBeUndefined();
+    w.unmount();
+  });
+
   it("FER でない欄は従来どおり満杯で field-full を出す", async () => {
     const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 3 })]);
     await nextTick();

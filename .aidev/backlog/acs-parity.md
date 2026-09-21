@@ -357,7 +357,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   実機の ACS で 13 通りを測って合わせた（research F2）——**Enter だけでなく F3（CA キー）・Roll も止まる**、Help・Clear は止めない、
   Field Exit・Tab で出れば送れる（Tab で出て戻ると左詰めのまま届く）、欄の中の矢印では出たことにならない。
   テスト `packages/web-ui/test/aid-field-exit-required.test.ts`（20 件・mutation 10 通りすべて検出）。
-  ⚠ 符号付き数値の数字桁を満杯にしたときは、当 PJ が自動送りするので送れてしまう（ACS はエラー）。下の「RB/RZ 欄のフィールド終了」で揃える。
+  ~~⚠ 符号付き数値の数字桁を満杯にしたときは、当 PJ が自動送りするので送れてしまう（ACS はエラー）。下の「RB/RZ 欄のフィールド終了」で揃える。~~
+  → 誤り（確かめずに書いた）。当 PJ は符号桁に留まり、ACS と同じく 0020 になる（`20260921-field-exit-required-types` で確かめた）。
 - [x] **ME/MF・自己点検の判定の時機と条件が ACS と違う**（【まとめ】キー編集の細部から割った。方針決定済み：ACS に合わせる）。
   **完了（`20260921-mandatory-check-acs`・PR #410）**: 実機の ACS（ADJPGM）で 9 通りを測って合わせた——ME は**全 AID で**・**MDT で**・
   **画面が変更済みのときだけ**、**CA キー（SOH の申告）では見ない**。MF と自己点検は**カーソル下の欄**を AID のときと**欄を出るとき**に見て、
@@ -365,9 +366,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `session-controller.ts` の `checkBeforeAid`（ACS `processAIDCode` の順）、欄を出るときはペインのカーソル監視、CA キーはコアの
   `ScreenSnapshot.caKeys`。旧決定 `20260729-ffw-behavior-bits` D1 は取り消し線で残して破棄した。エラー番号の注記も 0007 / 0014 / 0015 に直した。
   テスト `mandatory-check-acs.test.ts` ほか（mutation 9 通りすべて検出）。
+- [x] **RB/RZ 欄（と符号付き数値）を満杯まで打つと、次の欄へ自動送りする（ACS は Field Exit 必須として留まる）**（【まとめ】から割った）。
+  **完了（`20260921-field-exit-required-types`・PR #410）**: `isFieldExitRequired`（FER ∨ RZ ∨ RB ∨ 符号付き数値。ACS `Field5250.isFieldExitRequired`）で
+  自動送り・自動 Enter・Dup の後の送りを止めた（`packages/web-ui/src/composables/mandatoryCheck.ts`・`ScreenGrid.vue`）。最終桁まで打てば
+  0020 の待ちを外す（ACS の `fieldExited`。実機の場合 10: RZ 満杯で Enter が通る）。符号付きは数字桁を埋めても 0020 のまま（場合 11）。
+  ⚠ 満杯で留まるカーソルの位置は ACS と 1 桁違う（ACS は最終桁、当 PJ は最終桁の後ろの境界）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
-  - RB/RZ 欄のフィールド終了（中）
+  - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
     - ACS: RB/RZ 欄も Field Exit が必須（`Field5250.isFieldExitRequired`）。
     - 当 PJ: FER ビットしか見ない（`packages/tn5250/src/screen/buffer.ts:1225`）ので、満杯になると次の欄へ自動で送り、AUTO_ENTER なら Enter を送る。
   - ~~欄を出ないまま AID を押したとき（中・**方針決定済み：ACS と同じくエラー**）~~ → 上の `20260921-aid-without-field-exit` で済んだ

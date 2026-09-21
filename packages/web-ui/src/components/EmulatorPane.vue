@@ -184,7 +184,15 @@ watch(cursor, (pos) => {
   if (st?.awaitingFieldExit === undefined || !snap) return;
   // 右端の境界も欄の中（満杯の FER 欄で止まっただけでは出たことにしない）
   const here = fieldAtCaret(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
-  if (here?.index !== st.awaitingFieldExit) delete st.awaitingFieldExit;
+  if (here?.index !== st.awaitingFieldExit) {
+    delete st.awaitingFieldExit;
+    return;
+  }
+  // **キャレットが右端の境界に出たら「出た」ことになる**（`20260921-field-exit-required-types`）。境界へ出るのは
+  //  - 最終桁まで打った: ACS は `fieldExited` を立てる。実機でも RZ 欄を満杯まで打てば Enter が通った（場合 10）
+  //  - 矢印で最終桁の外へ出た: ACS では欄の外のセルへ移る＝欄を出た
+  // のどちらか。符号付き数値は数字桁を埋めても符号桁（欄の中）に留まるので、ここへは来ず 0020 のまま（場合 11）
+  if (!fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows)) delete st.awaitingFieldExit;
 });
 function onCursor(row: number, col: number): void {
   cursorOverride.value = { row, col };

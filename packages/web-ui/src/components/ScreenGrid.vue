@@ -64,6 +64,7 @@ import {
   type DateValue,
   type TimeValue
 } from "../composables/dateTimeField.js";
+import { isFieldExitRequired } from "../composables/mandatoryCheck.js";
 import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DATE_PICKER, MSG_TIME_PICKER, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
@@ -2242,7 +2243,9 @@ function advanceIfFull(f: Field): void {
   // 満杯の欄に以降の打鍵が入らないので、自動送りを止めるだけで実機と同じ操作感になる
   // （Field Exit か Tab で出る）。FER と AUTO_ENTER が同時なら FER が勝つ——原典も
   // FER の枝の中では auto-enter を見ない。
-  if (f.fieldExitRequired) return;
+  // **FER ビットに限らない**——ACS は右寄せ（RZ/RB）と符号付き数値も Field Exit 必須として扱う
+  // （`Field5250.isFieldExitRequired`。`20260921-field-exit-required-types`）
+  if (isFieldExitRequired(f)) return;
   if (f.autoEnter) {
     emit("aid", "Enter"); // AUTO_ENTER（FFW 0x0080）: 次欄へ送る代わりに Enter を自動送信
     return;
@@ -2331,8 +2334,8 @@ function dupKey(): void {
   }
   edit = dupFill(edit, rawSentinel(DUP_BYTE));
   sync(t.el, t.f);
-  // FER 欄は満杯でも欄に留まるのが実機（原典も Dup の後に FER を見る）
-  if (t.f.fieldExitRequired) return;
+  // FER 欄は満杯でも欄に留まるのが実機（原典も Dup の後に FER を見る。RZ/RB・符号付き数値も同じ）
+  if (isFieldExitRequired(t.f)) return;
   if (t.f.autoEnter) {
     emit("aid", "Enter");
     return;

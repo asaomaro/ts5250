@@ -97,6 +97,22 @@ export function needsFieldExit(f: Field): boolean {
 }
 
 /**
+ * **Field Exit が必須の欄か**（ACS `Field5250.isFieldExitRequired`。`20260921-field-exit-required-types`）。
+ *
+ * FFW の FER ビットだけでなく、**右寄せ（CHECK(RZ)/(RB)）と符号付き数値**も Field Exit 必須として扱う。
+ * 満杯になっても次の欄へ自動送りせず（自動 Enter もしない）、欄に留まる。実機の ACS でも、RZ 欄を満杯まで
+ * 打つとカーソルは欄の最終桁に留まった（`20260921-aid-without-field-exit` research F2 の場合 10）。
+ */
+export function isFieldExitRequired(f: Field): boolean {
+  return (
+    f.fieldExitRequired === true ||
+    f.adjust === "right-zero" ||
+    f.adjust === "right-blank" ||
+    f.signedNumeric === true
+  );
+}
+
+/**
  * 欄が全桁埋まっているか。
  *
  * `f.length` は**送信バイト予算**（DBCS は SO/SI と 2 バイトを含む）なので、
