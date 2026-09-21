@@ -83,13 +83,20 @@ describe("fieldEdit — カーソル移動", () => {
     expect(s.cursor).toBe(5); // クランプ
   });
 
-  it("満杯欄でも末尾へ移動して Backspace で最終文字を削除できる", () => {
+  // ~~満杯欄は End で末尾（len）へ移り、Backspace で最終文字を消す~~ → ACS の End は最後の桁（その文字の上）に置く
+  // （`Field5250.getEndPosition`。`20260921-acs-default-keys`）。末尾（len）へは矢印で行ける（上のテスト）
+  it("満杯欄の End は最後の桁（ACS）。そこで Delete すると最終文字が消える", () => {
     let s = initEdit("ABCDE", 5, 0); // フルケタ
     s = end(s);
-    expect(s.cursor).toBe(5); // End で末尾へ
-    s = backspace(s);
-    expect(editValue(s)).toBe("ABCD "); // 最終文字 E を削除
+    expect(s.cursor).toBe(4); // 最後の桁（E の上）
+    s = del(s);
+    expect(editValue(s)).toBe("ABCD ");
     expect(s.cursor).toBe(4);
+  });
+
+  it("End: 空の欄は先頭、最後の桁だけが空白なら入力の次（＝最後の桁）", () => {
+    expect(end(initEdit("     ", 5, 3)).cursor).toBe(0);
+    expect(end(initEdit("ABCD ", 5, 0)).cursor).toBe(4);
   });
 
   it("末尾（len）での Delete は無操作（削除対象が無い）", () => {

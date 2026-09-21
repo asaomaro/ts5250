@@ -131,7 +131,7 @@ describe("CRT の滲みは画面の文字すべてに掛かる", () => {
 });
 
 describe("既定バインドが実際のキー操作で効く", () => {
-  it("Ctrl+F1 でカナ英、Ctrl+F3 で SO/SI が切り替わり通知が出る", async () => {
+  it("Ctrl+F3 で表示コード、Ctrl+F1 で SO/SI が切り替わり通知が出る（ACS の既定 `C114 = [altview]`・`C112 = [dspsosi]`）", async () => {
     localStorage.clear();
     keybindingsStore.reload(); // 初回起動相当（既定バインドが入る）
     const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
@@ -139,30 +139,30 @@ describe("既定バインドが実際のキー操作で効く", () => {
 
     // 表示コードは 3 値（自動→カナ→英→自動）。既定はホストの表のまま＝自動
     expect(viewSettings.settings.kana).toBe("auto");
-    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.kana).toBe("kana");
     expect(w.find(".opmsg").text()).toBe("表示コード :  カナ");
-    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
+    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.kana).toBe("latin");
     expect(w.find(".opmsg").text()).toBe("表示コード :  英");
 
     expect(viewSettings.settings.sosi).toBe("none"); // 初期値=非表示
-    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.sosi).toBe("dim");
     // この操作自体が SO/SI 表示を ON にするので、**通知そのものにも印が付く**
     expect(w.find(".opmsg").text()).toBe("SO/SI {表示}: {薄目}");
 
     // 3 値なので、次は「濃目」（印は出たまま・色だけ変わる）
-    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.sosi).toBe("strong");
     expect(w.find(".opmsg").text()).toBe("SO/SI {表示}: {濃目}");
 
     // 一巡して非表示へ戻る（印が消えるので通知からも `{ }` が消える）
-    await w.find(".pane").trigger("keydown", { key: "F3", ctrlKey: true });
+    await w.find(".pane").trigger("keydown", { key: "F1", ctrlKey: true });
     await nextTick();
     expect(viewSettings.settings.sosi).toBe("none");
     expect(w.find(".opmsg").text()).toBe("SO/SI  表示 :  非表示");

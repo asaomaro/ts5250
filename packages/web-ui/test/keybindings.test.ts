@@ -41,11 +41,12 @@ describe("useKeymap — カスタムバインド優先", () => {
 });
 
 describe("既定バインド（初期値）", () => {
-  it("初回は Ctrl+F1=カナ英・Ctrl+F3=SO/SI が設定済み", () => {
+  // ~~Ctrl+F1=カナ英・Ctrl+F3=SO/SI~~ → ACS と同じ向き（`20260921-acs-default-keys`）
+  it("初回は Ctrl+F1=SO/SI・Ctrl+F3=表示コードが設定済み", () => {
     localStorage.clear();
     keybindingsStore.reload(); // 保存値なし = 初回起動
-    expect(keybindingsStore.bindings["ctrl+F1"]).toBe("view:kana");
-    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:sosi");
+    expect(keybindingsStore.bindings["ctrl+F1"]).toBe("view:sosi");
+    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:kana");
   });
 
   it("Ctrl+F1 / Ctrl+F3 のコンボ表記が実際のキーイベントと一致する", () => {
@@ -53,8 +54,8 @@ describe("既定バインド（初期値）", () => {
     expect(comboOf({ key: "F1", ctrlKey: true, shiftKey: false, altKey: false })).toBe("ctrl+F1");
     expect(comboOf({ key: "F3", ctrlKey: true, shiftKey: false, altKey: false })).toBe("ctrl+F3");
     keybindingsStore.reset();
-    expect(keybindingsStore.resolve({ key: "F1", ctrlKey: true, shiftKey: false, altKey: false })).toBe("view:kana");
-    expect(keybindingsStore.resolve({ key: "F3", ctrlKey: true, shiftKey: false, altKey: false })).toBe("view:sosi");
+    expect(keybindingsStore.resolve({ key: "F1", ctrlKey: true, shiftKey: false, altKey: false })).toBe("view:sosi");
+    expect(keybindingsStore.resolve({ key: "F3", ctrlKey: true, shiftKey: false, altKey: false })).toBe("view:kana");
   });
 
   it("リセットすると初期値へ戻る（空にならない）", () => {
@@ -71,7 +72,7 @@ describe("既定バインド（初期値）", () => {
     keybindingsStore.remove("ctrl+F1");
     keybindingsStore.reload(); // 次回起動相当
     expect(keybindingsStore.bindings["ctrl+F1"]).toBeUndefined(); // 消えたまま
-    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:sosi");
+    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:kana");
   });
 
   it("既定バインド導入前の保存値には一度だけ混ぜる（既存の割り当ては奪わない）", () => {
@@ -79,7 +80,7 @@ describe("既定バインド（初期値）", () => {
     localStorage.setItem("as400.keybindings", JSON.stringify({ "ctrl+F1": "F5", "ctrl+j": "F4" }));
     keybindingsStore.reload();
     expect(keybindingsStore.bindings["ctrl+F1"]).toBe("F5"); // 使用中のキーは保存値が優先
-    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:sosi"); // 空いている方は既定が入る
+    expect(keybindingsStore.bindings["ctrl+F3"]).toBe("view:kana"); // 空いている方は既定が入る
     expect(keybindingsStore.bindings["ctrl+j"]).toBe("F4");
   });
 });

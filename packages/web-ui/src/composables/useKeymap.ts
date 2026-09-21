@@ -238,9 +238,19 @@ export function typeAheadKind(ev: {
   return "pass";
 }
 
+/**
+ * **利用者の割り当て（既定を含む）があるキーか**。欄の input が自分で処理するキー（End・Insert）でも、
+ * 割り当てがあればペインのキーマップへ委ねる（ACS の既定 Shift+Insert = Dup や、利用者が End に付けた割り当てを効かせるため）
+ */
+export function hasKeyBinding(ev: { key: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+  return keybindingsStore.resolve(ev) !== undefined;
+}
+
 export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => void {
   return (ev: KeyboardEvent) => {
     if (!h.isFocused()) return;
+    // **IME の変換中のキーは拾わない**（変換を取り消す Esc が Attn に、変換中のテンキーが Field± になる）
+    if (ev.isComposing || ev.key === "Process") return;
     // カスタムキーバインドを既定より優先。`view:*`（表示設定の順送り）・`macro:*`（マクロ再生）・
     // `local:*`（ローカル編集キー）は**ホストへ送らない**ローカル処理。
     const custom = keybindingsStore.resolve(ev);

@@ -76,7 +76,7 @@ import {
   MSG_DUP_DISALLOWED,
   MSG_FIELD_EXIT_KEY_INVALID
 } from "../composables/opMessages.js";
-import { localEditActionOf, numpadFieldSign } from "../composables/useKeymap.js";
+import { localEditActionOf, numpadFieldSign, hasKeyBinding } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -2740,7 +2740,8 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに全欄が消える）。
   // 矢印キーが以前から同じ理由で修飾キーを除外しているのと同じ扱いに揃える。
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-  if (ev.key === "Insert" && plain) {
+  // 割り当てのあるキー（ACS の既定 Shift+Insert = Dup など）はペインのキーマップへ委ねる
+  if (ev.key === "Insert" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     edit = toggleInsert(edit);
     insertMode.value = edit.insertMode;
@@ -2792,7 +2793,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // ~~Home: 欄内はカーソルを先頭へ（ペインへ伝播させない）~~ → ACS の Home は欄の先頭ではなく画面のホーム位置へ移り、
   // 既にそこなら Record Backspace を送る（`PS5250.processHome`）。ペイン（`homeKey`）へ委譲する
   if (ev.key === "Home" && plain) return;
-  if (ev.key === "End" && plain) {
+  // 割り当てが無ければ欄の末尾へ（ACS の既定 `B35 = [eof]` ＝ `PS5250.processEndField`）。利用者が End に
+  // 別の操作（Erase EOF 等）を割り当てていれば、ペインのキーマップへ委ねる
+  if (ev.key === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = end(edit);
@@ -2932,7 +2935,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     return;
   }
   if (k === "Home" && plain) return; // ペインの `homeKey` へ委譲（SBCS 欄と同じ。ACS `processHome`）
-  if (k === "End" && plain) {
+  if (k === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = end(edit); // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）
@@ -2957,7 +2960,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     }
     return;
   }
-  if (k === "Insert") {
+  if (k === "Insert" && !hasKeyBinding(ev)) {
     ev.preventDefault();
     edit = toggleInsert(edit);
     insertMode.value = edit.insertMode;

@@ -422,6 +422,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   Field− は符号付き数値・数値専用の欄でだけ（他と継続欄はエラー 0022＝`MSG_FIELD_MINUS_INVALID`）。符号付き数値欄は数字だけ（`fieldValidate.ts`）。
   `signKeyHack` は撤去（同 D1）。実機の ACS のコア（`scripts/acs-probe/field-minus-keys.txt`）: 英数字欄の Field− はエラーで値もカーソルもそのまま・
   Field+ は次の欄・6S0 の `12-` は `-` でエラー・Field− は `    12-`。テスト `numpad-field-sign.test.ts`（8 件）ほか、mutation 9 通り検出。
+- [x] **【まとめ】キー編集のうち既定のキー割り当て・欄の中の End の行き先**（優先度 低）。**完了（`20260921-acs-default-keys`・PR #410）**:
+  `packages/web-ui/src/stores/keybindings.ts` の版 4——Esc = Attn・Shift+Esc = SysReq・Alt+End = Erase Input・Shift+Insert = Dup・Pause = Clear・
+  Ctrl+Pause = Print・Alt+F1 = Help（原典 `AcsMapFunctions.MAP_5250`。ACS では `DefaultKeyboardRemap.getMapFile` がこの表を使う）。
+  **Ctrl+F1 / Ctrl+F3 の既定が ACS と逆だった**（ACS は `C112 = [dspsosi]`・`C114 = [altview]`）ので直し、古い既定の組のまま保存していた人だけ入れ替える
+  （`CORRECTED_BY_VERSION`）。欄の input が処理する Insert・End は、割り当てがあればペインへ委ねる（`hasKeyBinding`）。IME の変換中のキーは割り当てで拾わない。
+  **End は Erase EOF ではない**——`B35 = [eof]` は `PS5250.processEndField`（欄の末尾へ移る）で、`[eraseeof]` とは別のキー値（1001 と 63739）。
+  欄の中の End は `Field5250.getEndPosition` と同じく、最後の桁まで埋まっていれば最後の桁に置く（`fieldEdit.ts` の `end`。以前は末尾の次）。
+  テスト `packages/web-ui/test/acs-default-keys.test.ts`（15 件・mutation 9 通りすべて検出）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -444,7 +452,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ACS: すべての欄で Field+ / Field− として働く。
     - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
   - 低
-    - 欄の先頭での Backspace、End の行き先
+    - 欄の先頭での Backspace、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。**欄の外の End** は残り（ACS は `nextNonByPassInputFieldPos` で次の入力欄へ移り、その欄の末尾へ。当 PJ は最後の入力欄の先頭へ。`EmulatorPane.vue` の `case "end"`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
       Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）
@@ -456,7 +464,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       「ホーム位置でない」となり Record Backspace を送らない。当 PJ は 2 回目で送る。**未確認**。節目の独立点検の懸念）
     - 解錠中に届いた WTD（READ 無し）でもカーソルが IC / ホームへ動く（`20260921-cursor-per-wtd-acs` D2 の未確認と同じ）
     - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3（入れるときは欄データを載せない AID の集合 `NO_DATA_AIDS` にも足す）・~~Record Backspace~~（`20260921-home-record-backspace`）・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
-    - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、Esc=Attn、Shift+Insert=Dup ほか
+    - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、~~Esc=Attn、Shift+Insert=Dup ほか~~ → 既存の機能に当たるものは `20260921-acs-default-keys` で揃えた。
+      残りは当 PJ に機能が無いキー（`AcsMapFunctions.MAP_5250`）: `A19 = [test]`（Test Request）・`S36 = [fieldmark]`・`C36 = [rule]`・`C33 = [jump]`・
+      `A37` / `A39` / `C35` / `C34`（単語単位の Backtab / Tab）・`C127 = [deleteword]`・`C122 = [altcsr]`・`S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`。
+      **Ctrl+矢印も違う**——ACS は `C37` 〜 `C40 = [moveleft]` 〜 `[movedown]`（選択範囲を動かす）、当 PJ は語頭への頭出し（`useKeymap.ts` の `word-*`）
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
   （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）

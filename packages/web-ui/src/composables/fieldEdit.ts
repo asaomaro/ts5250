@@ -91,11 +91,16 @@ export function home(state: EditState): EditState {
   return { ...state, cursor: 0 };
 }
 
-/** End: 末尾の非空白の次（入力継続位置）へ。満杯欄なら末尾（len）に到達する。 */
+/**
+ * End: 末尾の非空白の次（入力継続位置）へ。**最後の桁まで埋まっていれば最後の桁**（その文字の上）。
+ * ~~満杯欄なら末尾（len）に到達する~~ → ACS `Field5250.getEndPosition`（`PS5250.processEndField` が使う）は
+ * 欄の終わりから非空白を探し、見つけた桁が最後の桁ならそこを、そうでなければ次の桁を返す（`20260921-acs-default-keys`）
+ */
 export function end(state: EditState): EditState {
-  let i = state.chars.length - 1;
+  const last = state.chars.length - 1;
+  let i = last;
   while (i >= 0 && state.chars[i] === " ") i--;
-  return { ...state, cursor: clamp(i + 1, 0, state.chars.length) };
+  return { ...state, cursor: clamp(i === last ? last : i + 1, 0, state.chars.length) };
 }
 
 export function toggleInsert(state: EditState): EditState {
