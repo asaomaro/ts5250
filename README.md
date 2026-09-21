@@ -28,7 +28,7 @@ IBM i（AS400）の **5250 画面**を、**MCP サーバー**（AI エージェ�
 - **端末は 3 種類**——**5250**（IBM i）／**3270**（メインフレーム。IBM i の 3270 も可。基本 TN3270 ＋
   基本 TN3270E = RFC 2355 §9）／**VT / xterm**（PASE・AIX・Linux。UTF-8 / Shift_JIS / EUC-JP）。
   セッション設定の `terminal` で選びます（→ [端末の種類](#端末の種類5250--3270--vt)）
-- RFC 4777 **NEW-ENVIRON 自動サインオン**（バインド時認証。PUB400 で確認済み）
+- RFC 4777 **NEW-ENVIRON 自動サインオン**（バインド時認証。ACS と同じく**パスワードは代替パスワードで送る**。PUB400 で確認済み）
 - telnet ネゴシエーション（BINARY / EOR / TERMINAL-TYPE / NEW-ENVIRON）、**TLS**（既定ポート 992・証明書検証既定 ON）
 - **画面サイズ**を接続ごとに 24x80 / 27x132 から選択（端末タイプで申告し、ホストが対応画面を
   CLEAR UNIT ALTERNATE でワイド送信。SBCS / DBCS とも PUB400 実機で確認済み → [画面サイズ](#画面サイズ24x80--27x132)）
@@ -632,8 +632,9 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
   デバイス作成に認証が要るホストでプリンターを開く場合も、`system` / `session` を指定します
   （`user` / `password` は受け付けません）。
 - `host` を直接指定した接続は**既定で平文 telnet(23)** です。TLS で繋ぐには `tls: true`（ポート省略時 992）を
-  指定してください。自動サインオンのパスワードは RFC 4777 の `IBMSUBSPW`＝**平文**で流れるため、
-  システム側でも `tls` を有効にすることを推奨します。
+  指定してください。~~自動サインオンのパスワードは RFC 4777 の `IBMSUBSPW`＝**平文**で流れるため~~ → 自動サインオンのパスワードは
+  ACS と同じく**代替パスワード（暗号化）**で送ります（QPWDLVL はサインオン・サーバーに聞きます。聞けなければ 0 として計算——ACS と同じ）。
+  画面の中身は平文 telnet では暗号化されないので、システム側でも `tls` を有効にすることを推奨します。
 
 ### セッションの開き方（system / session / host 直指定）
 

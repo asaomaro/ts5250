@@ -17,7 +17,7 @@ import {
   type IdleLimit
 } from "./session-lifetime.js";
 import { As400Error } from "@ts5250/base";
-import { CommandConnection, listJobs } from "@ts5250/hostserver";
+import { CommandConnection, listJobs, querySignonInfo, bypassSignonSubstitute } from "@ts5250/hostserver";
 import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
@@ -132,6 +132,42 @@ export const DEFAULT_MAX_RESIDENT_PRINTERS = 4;
  */
 export function orphanSafeIdleTimeoutMs(v: IdleLimit | undefined): number {
   return typeof v === "number" ? v : ORPHAN_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * **自動サインオンの代替パスワードの関数**（ACS と同じく平文で送らない。`20260921-encrypted-autosignon`）。
+ *
+ * ACS は自動サインオンを使うとき常に暗号化する（`AcsOnly.initBypassSignon` の `ssoBypassSignonEncrypted`）。計算は QPWDLVL で
+ * 分かれ、その値はサインオン・サーバーに聞く（ACS `SignonServer.getPasswordLevel`。認証はしないので失敗回数を使わない）。
+ * **聞けなければ 0**（ACS も 0 にして DES で計算する）。聞くのは作ったときに 1 回だけ（接続の前）。
+ * 利用者名は telnet の USER と同じ正規化（Java の `trim()`＋大文字）、パスワードは末尾の空白を落とす（ACS `NVT5250`）
+ */
+export function bypassSubstituteFor(
+  opts: {
+    host?: string | undefined;
+    tls?: ConnectOptions["tls"];
+    user?: string | undefined;
+    password?: string | undefined;
+  },
+  queryLevel: PasswordLevelQuery = passwordLevelViaSignonServer
+): ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined {
+  const { host, user, password } = opts;
+  if (host === undefined || user === undefined || password === undefined) return undefined;
+  // **接続の前に聞き始める**。ホストがシードを渡してきてから聞くと IS が遅れ、ホストは待たずにサインオン画面を出した（実測）
+  const level = queryLevel({ host, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }).then(
+    (l) => l,
+    (e: unknown) => {
+      sessionLog.warn({ host }, `password level unknown (signon server: ${e instanceof Error ? e.message : String(e)}); using 0 like ACS`);
+      return 0;
+    }
+  );
+  const normalizedUser = user.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").toUpperCase();
+  const trimmedPassword = password.replace(/ +$/, "");
+  return async (serverSeed) => {
+    const clientSeed = crypto.getRandomValues(new Uint8Array(8));
+    const substitute = await bypassSignonSubstitute(await level, normalizedUser, trimmedPassword, clientSeed, serverSeed);
+    return { clientSeed, substitute };
+  };
 }
 
 /**
@@ -678,7 +714,22 @@ export interface SessionManagerOptions {
    * 実機なしでは一切テストできない（host-ifs の `connect` と同じ考え方）。
    */
   lookupJobs?: LookupJobs;
+  /**
+   * QPWDLVL を聞く（自動サインオンの代替パスワード用。`bypassSubstituteFor`）。既定はサインオン・サーバーの交換属性。
+   * **テストの差し替え口**——実機なしで自動サインオンの経路を通すと、架空のホストへの問い合わせを待ってしまう
+   */
+  passwordLevel?: PasswordLevelQuery;
 }
+
+/** QPWDLVL を聞く（認証しない）。`bypassSubstituteFor` が使う */
+export type PasswordLevelQuery = (target: { host: string; tls?: ConnectOptions["tls"] }) => Promise<number>;
+
+/**
+ * サインオン・サーバーの交換属性で QPWDLVL を聞く。**5 秒で打ち切る**——接続の前に聞き始めるが、ホストがシードを渡してきた後は
+ * これを待って IS を返すので、サインオン・サーバーが黙っていると交渉ごと止まる（聞けなければ 0。ACS と同じ）
+ */
+const passwordLevelViaSignonServer: PasswordLevelQuery = async (target) =>
+  (await querySignonInfo({ host: target.host, timeoutMs: 5_000, ...(target.tls !== undefined ? { tls: target.tls } : {}) })).passwordLevel;
 
 /** 装置名とユーザーで対話ジョブを引く。返すのは一致したジョブ（0 件・複数件もありうる） */
 export type LookupJobs = (
@@ -721,6 +772,7 @@ export class SessionManager {
   /** 張り直しの待ち。**テストで即時にする**（実待ちを入れるとテストが分単位になる） */
   private readonly delay: (ms: number) => Promise<void>;
   private readonly lookupJobs: LookupJobs;
+  private readonly passwordLevel: PasswordLevelQuery;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** 保持者トークンの発番。**単調増加**なので、後から取った者が常に新しい */
   private holderSeq = 0;
@@ -735,6 +787,7 @@ export class SessionManager {
     this.now = opts.now ?? (() => Date.now());
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
+    this.passwordLevel = opts.passwordLevel ?? passwordLevelViaSignonServer;
   }
 
   /** アイドルセッションの定期掃除を開始（サーバー起動時に呼ぶ）。テストでは呼ばなくてよい */
@@ -785,6 +838,7 @@ export class SessionManager {
       Session5250.connect({
         ...opts,
         deviceNameEnv: deviceNameEnvFor(opts.owner),
+        passwordSubstitute: bypassSubstituteFor(opts, this.passwordLevel),
         id,
         warn: (m) => sessionLog.warn({ sessionId: id }, m),
         onPcCommand: pcCommand,
@@ -1073,6 +1127,7 @@ export class SessionManager {
     const session = await PrinterSession.connect({
       ...opts,
       deviceNameEnv: deviceNameEnvFor(entry.owner),
+      passwordSubstitute: bypassSubstituteFor(opts, this.passwordLevel),
       id: entry.id,
       nextReportSeq: () => ++entry.spoolSeq,
       // **出力が終わるまでホストへ応答しない**（ACS と同じ。上の `heldOutput`）

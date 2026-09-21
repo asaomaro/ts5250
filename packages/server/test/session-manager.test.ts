@@ -278,6 +278,8 @@ describe("ジョブ識別子の解決", () => {
     // 照会ごとに解き口を持つ（2 回目の照会で 1 回目の解き口を上書きしない）。**照会した装置名を返す**
     const answers: (() => void)[] = [];
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async (_t, filter) => {
         await new Promise<void>((r) => answers.push(r));
         return [{ name: filter.name, user: "USER", number: filter.name === "NEWDEV01" ? "2" : "1" }];
@@ -301,6 +303,8 @@ describe("ジョブ識別子の解決", () => {
   it("照会が 1 件なら ユーザー・番号 を足す", async () => {
     const seen: unknown[] = [];
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async (target, filter) => {
         seen.push({ target: target.host, filter });
         return [{ name: "QPADEV001P", user: "USER", number: "337228" }];
@@ -322,6 +326,8 @@ describe("ジョブ識別子の解決", () => {
   /** 実機では同じ装置名のジョブが複数返った（別の利用者のもの）。採用してはいけない */
   it("照会が複数件なら採用しない（装置名だけのまま）", async () => {
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => [
         { name: "QPADEV001P", user: "USER", number: "337228" },
         { name: "QPADEV001P", user: "OTHER", number: "300886" }
@@ -334,7 +340,7 @@ describe("ジョブ識別子の解決", () => {
   });
 
   it("照会が 0 件でも壊れない", async () => {
-    const mgr = new SessionManager({ lookupJobs: async () => [] });
+    const mgr = new SessionManager({ lookupJobs: async () => [], passwordLevel: async () => 3 });
     const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
     await entry.jobResolved;
     expect(entry.job).toEqual({ name: "QPADEV001P", system: "PUB400" });
@@ -344,6 +350,8 @@ describe("ジョブ識別子の解決", () => {
   /** ホストサーバーが使えない環境でも、セッションは成立していること */
   it("照会が失敗しても例外を投げず、セッションは生きている", async () => {
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         throw new Error("no host server");
       }
@@ -357,6 +365,8 @@ describe("ジョブ識別子の解決", () => {
   it("資格情報が無ければ照会しない", async () => {
     let called = 0;
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         called++;
         return [{ name: "QPADEV0001", user: "USER", number: "1" }];
@@ -371,6 +381,8 @@ describe("ジョブ識別子の解決", () => {
   it("起動応答が無ければ照会しない（装置名が分からない）", async () => {
     let called = 0;
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         called++;
         return [];

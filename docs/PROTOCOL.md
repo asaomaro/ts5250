@@ -64,14 +64,20 @@ IBM の Virtual Terminal API マニュアルは 5555 系を一律「24x80 また
 NEW-ENVIRON 定数: `IS=0 SEND=1 VAR=0 VALUE=1 ESC=2 USERVAR=3`。
 ホストの `IAC SB 39 SEND ... IAC SE` に対し、`IAC SB 39 IS <payload> IAC SE` を返す。payload は以下を連結（**文字列は ASCII**）:
 
-1. デバイス名（任意）: `USERVAR "DEVNAME" VALUE <devname-ascii>`
-2. 自動サインオン（user/password 指定時。RFC 4777 / tn5250j 準拠）:
-   - `VAR "USER" VALUE <user-ascii>`
-   - `USERVAR "IBMRSEED" VALUE ESC 00 00 00 00 00 00 00 00`  ← **8 バイトのゼロシード＝非暗号化を示す**
-   - `USERVAR "IBMSUBSPW" VALUE <password-ascii>`  ← ゼロシードなので**平文パスワード**
+1. デバイス名（任意）: `USERVAR "DEVNAME" VALUE <devname-ascii>`（ACS と同じく置換記号を展開して大文字。`telnet/device-name.ts`）
+2. 自動サインオン（user/password 指定時。RFC 4777）。**ACS と同じく暗号化する**（`20260921-encrypted-autosignon`）:
+   - ホストの SEND は `USERVAR "IBMRSEED" <サーバーのシード 8 バイト>`（名前の直後に値の印なしで 8 バイト。実測）
+   - `VAR "USER" VALUE <user-ascii>`（Java の `trim()`＋大文字）
+   - `USERVAR "IBMRSEED" VALUE <クライアントのシード 8 バイト>`
+   - `USERVAR "IBMSUBSPW" VALUE <代替パスワード>`（QPWDLVL 0/1 は DES 8 バイト・2/3 は SHA-1 20 バイト・4 は SHA-512 64 バイト。
+     `@ts5250/hostserver` の `bypassSignonSubstitute`。QPWDLVL はサインオン・サーバーに聞き、聞けなければ 0＝ACS と同じ）
+   - 値の 0x00〜0x03 は ESC、0xFF は IAC の二重化
+   - **IS を返すまで後続の交渉に答えない**（計算を待つ間に端末タイプ・BINARY・EOR へ答えると、ホストは IS を待たずにサインオン画面を出した）
+   - ~~`USERVAR "IBMRSEED" VALUE ESC 00 00 00 00 00 00 00 00` ← 8 バイトのゼロシード＝非暗号化~~ → 平文で送るとき（代替パスワードの関数を
+     渡さないコアの利用）は `IBMRSEED` を値なし・`IBMSUBSPW` に平文（`20260921-telnet-signon-vars`。ACS の平文の形）
 
 > user のみ指定（password 省略）なら IBMRSEED/IBMSUBSPW は送らない。DEVNAME のみ／空 IS も可。
-> この方式で PUB400（IBM i 7.5）はバインド時に認証し、signon 画面を経ずメニューへ到達する（decisions 01/D3）。
+> PUB400（IBM i 7.5・QPWDLVL 3）はバインド時に認証し、signon 画面を経ずメニューへ到達する（暗号化・平文とも。`scripts/verify-autosignon.mjs`）。
 
 ---
 

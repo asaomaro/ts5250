@@ -59,6 +59,11 @@ export interface ConnectOptions {
   deviceNameEnv?: { computerName?: string; userName?: string };
   /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`。5 回まで） */
   deviceNameRetry?: boolean;
+  /**
+   * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
+   * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
+   */
+  passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
   /** TLS（telnet over SSL。既定ポート 992・証明書検証既定 ON） */
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /** RFC 4777 自動サインオン（decisions.md D3）。user と password を併せて指定する */
@@ -276,6 +281,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       deviceName: opts.deviceName,
       deviceNameEnv: { ...opts.deviceNameEnv, printer: false },
       deviceNameRetry: opts.deviceNameRetry,
+      passwordSubstitute: opts.passwordSubstitute,
       user: opts.user,
       password: opts.password,
       kbdType: dev?.kbdType,

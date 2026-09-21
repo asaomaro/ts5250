@@ -523,13 +523,19 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `=` の番号を進めて答え直す（ACS のコア・タップ・PUB400 で `TSC=` → `TSC0`・8902 → `TSC1`・I902 を実測）。`deviceNameRetry` も同じ経路に載せ、
   繋ぎ直しの輪（`retryWithNextDeviceName`）を撤去——8902 以外では答え直さないので、誤ったパスワードでサインオンの失敗回数を使い切らない。
   `&` を含むパターンでは記号以外の文字が落ちる（ACS の字面どおり・実測）。実機 `scripts/verify-device-name.mjs` pass=5。mutation 24 通り検出。
+- [x] **【まとめ】telnet のうち自動サインオンのパスワードの送り方**（優先度 中）。**完了（`20260921-encrypted-autosignon`・PR #410）**: ACS と同じく
+  代替パスワードで送る（製品の ACS に平文の自動サインオンの設定は無い。`AcsOnly.initBypassSignon`）。ホストの SEND の `IBMRSEED` の後ろの 8 バイトで
+  `@ts5250/hostserver` の `bypassSignonSubstitute`（QPWDLVL 0/1 は DES・2/3 は SHA-1・4 は PBKDF2＋SHA-512）を作り、IBMRSEED に自分のシード・IBMSUBSPW に代替パスワード。
+  QPWDLVL はサインオン・サーバーに聞く（認証しない `querySignonInfo`。聞けなければ 0＝ACS と同じ）。計算は ACS の `PasswordSubstitute` を Java から呼んだ出力と
+  レベル 0〜4 でバイト単位に一致。PUB400（QPWDLVL 3）で自動サインオンが通った（`scripts/verify-autosignon.mjs`）。
+  **IS を送るまで後続の交渉に答えない**——待つ間に答えるとホストは IS を待たずにサインオン画面を出した（実測）。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
     - 当 PJ: `ESC 00` の後に、エスケープしない `00` を 7 個送る（`packages/tn5250/src/telnet/telnet.ts:250-253`、主エージェントが確認）。RFC 1572 では空の VAR が 7 個と読まれる。
     - ACS: 平文モードでは値を付けない（`NVT5250.insertVariable` の case 22）。
     - PUB400 と実機では通っている。~~（実機は QRMTSIGN が `*FRCSIGNON` で、自動サインオンそのものを受けない。同 D2）~~
-  - **自動サインオンでパスワードを平文で送る**（中・**要実測**）。ACS はパスワードの入力を求める設定（`acsPasswordPrompt` が `3_session` / `4_always`）では
+  - ~~**自動サインオンでパスワードを平文で送る**（中・**要実測**）~~ → 上の `20260921-encrypted-autosignon` で済んだ。ACS はパスワードの入力を求める設定（`acsPasswordPrompt` が `3_session` / `4_always`）では
     暗号化（代替パスワード。IBMRSEED にクライアントのシード、IBMSUBSPW に `PasswordSubstitute`）にする（`AcsOnly.initBypassSignon`）。ACS の既定の設定値と、
     利用者の ACS がどちらで送っているかは未確認（`20260921-telnet-signon-vars` research F3。プローブの `PROBE_BYPASS_SIGNON=encrypted` で ACS 側のワイヤは採れる）
   - ~~装置名（中）~~ → 上の `20260921-device-name-acs` で済んだ
@@ -558,6 +564,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る
     - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
     - 起動応答の見分け方と、装置名の復号（ACS は CP037 固定）
+    - ホストサーバーのサインオン（`hostserver` の `signon()`）は QPWDLVL 4 を SHA-1 で計算し、数字で始まるパスワード（レベル 0/1）に `Q` を付けない。
+      ACS の `PasswordSubstitute` は 4 が PBKDF2＋SHA-512、0/1 は頭に `Q`（`20260921-encrypted-autosignon` で見つけた。telnet 側は揃えた）
     - バックアップホストが無い
     - telnet のオプションの状態機械（実害なし）
     - NEW-ENVIRON の応答方式（実害なし）

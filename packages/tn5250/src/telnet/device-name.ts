@@ -49,7 +49,7 @@ export function hasDeviceNameSymbols(pattern: string): boolean {
 
 /** ACS と同じ大文字化（トルコ語の `İ` は `I` に寄せる） */
 export function upperDeviceName(name: string): string {
-  return name.toUpperCase().replace(/İ/g, "I");
+  return name.toUpperCase().replace(/\u0130/g, "I");
 }
 
 /** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す（当 PJ の `deviceNameRetry`。ACS には無い） */

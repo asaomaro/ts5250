@@ -26,6 +26,12 @@ export interface TelnetOptions {
   deviceNameEnv?: DeviceNameEnv | undefined;
   /** 当 PJ の `deviceNameRetry`: 記号の無い名前でも、使用中なら末尾の数字を繰り上げて答え直す */
   deviceNameRetry?: boolean | undefined;
+  /**
+   * **自動サインオンの代替パスワードを作る**（ホストの SEND のサーバーのシードを受け取り、自分のシードと代替パスワードを返す）。
+   * 渡せば ACS と同じく暗号化して送る。無ければ従来どおり平文。計算（QPWDLVL ごとの DES・SHA）は呼び出し側が持つ
+   * （server が `@ts5250/hostserver` の `bypassSignonSubstitute` で作る）
+   */
+  passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
   /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定 */
   user?: string | undefined;
   /**
@@ -163,8 +169,33 @@ export class TelnetLayer {
     this.transport.send(out);
   }
 
+  /**
+   * **非同期の返事（暗号化した自動サインオンの IS）を作っている間は、後続の受信を溜めて処理しない**。
+   * 平文なら SEND を受けた直後に IS を返し、それから端末タイプ・BINARY・EOR の交渉に答える。代替パスワードの計算を待つ間に
+   * 後続へ答えてしまうと IS が交渉の後に届き、ホストは IS を待たずにサインオン画面を出した（PUB400 で実測。`20260921-encrypted-autosignon`）
+   */
+  private paused = false;
+  private stash: number[] = [];
+
+  private resume(): void {
+    this.paused = false;
+    const rest = Uint8Array.from(this.stash);
+    this.stash = [];
+    if (rest.length > 0) this.feed(rest);
+  }
+
   private feed(data: Uint8Array): void {
-    for (const b of data) {
+    if (this.paused) {
+      for (const b of data) this.stash.push(b);
+      return;
+    }
+    for (let i = 0; i < data.length; i++) {
+      const b = data[i]!;
+      if (this.paused) {
+        // 直前の SB で非同期の返事に入った。残りは返事を送ってから処理する
+        for (let k = i; k < data.length; k++) this.stash.push(data[k]!);
+        return;
+      }
       switch (this.state) {
         case ParseState.Data:
           if (b === IAC) this.state = ParseState.Iac;
@@ -281,22 +312,53 @@ export class TelnetLayer {
       const pw = this.opts.password;
       const bypassRejected =
         pw !== undefined && (user === "" || pw === "" || (user ?? "").length > 10 || javaTrim(pw).length > 128);
-      if (user !== undefined && !bypassRejected) {
-        // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
-        // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
-        // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
-        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(user.toUpperCase())));
-        if (this.opts.password !== undefined) {
-          // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
-          // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
-          // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は
-          // RFC 1572 では空の VAR として読まれていた（台帳「【まとめ】telnet」）
-          payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE);
-          // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
-          payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(this.opts.password.replace(/ +$/, ""))));
+      /**
+       * 利用者名とパスワードの変数を足して送る。`auth` は代替パスワード（暗号化）——`undefined` なら平文、`null` なら
+       * 作れなかったのでパスワードの変数を送らない（ACS も代替パスワードの計算が例外なら IBMSUBSPW を書かない）
+       */
+      const finish = (auth?: { clientSeed: Uint8Array; substitute: Uint8Array } | null): void => {
+        if (user !== undefined && !bypassRejected) {
+          // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
+          // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
+          // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
+          payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(user.toUpperCase())));
+          if (pw !== undefined && auth) {
+            // **暗号化**: IBMRSEED に自分のシード、IBMSUBSPW に代替パスワード（ACS と同じ。値の 0x00〜0x03 は ESC で、0xFF は
+            // telnet の層で二重にする。`20260921-encrypted-autosignon`）
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...auth.clientSeed]));
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue([...auth.substitute]));
+          } else if (pw !== undefined && auth === undefined) {
+            // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
+            // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
+            // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は
+            // RFC 1572 では空の VAR として読まれていた（台帳「【まとめ】telnet」）
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE);
+            // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(pw.replace(/ +$/, ""))));
+          }
         }
+        this.sendSb(payload);
+      };
+      // **代替パスワードで送れるなら暗号化する**（ACS は自動サインオンでパスワードを平文で送らない。`AcsOnly.initBypassSignon` は
+      // 常に `ssoBypassSignonEncrypted`）。サーバーのシードはホストの SEND の `USERVAR IBMRSEED` の後ろの 8 バイト
+      // （ACS `NVT5250` も値の印を挟まずに 8 バイトを読む）。計算は呼び出し側が渡す（この層は暗号に触れない）
+      const makeSubstitute = this.opts.passwordSubstitute;
+      if (makeSubstitute !== undefined && user !== undefined && !bypassRejected && pw !== undefined) {
+        const serverSeed = serverSeedOf(sb);
+        if (serverSeed === undefined) {
+          finish(null); // シードが無ければ作れない（ACS も例外で IBMSUBSPW を書かない）
+          return;
+        }
+        this.paused = true;
+        makeSubstitute(serverSeed)
+          .then(
+            (auth) => finish(auth),
+            () => finish(null)
+          )
+          .finally(() => this.resume());
+        return;
       }
-      this.sendSb(payload);
+      finish();
     }
     // その他のサブネゴシエーションは無視
   }
@@ -340,6 +402,20 @@ export class TelnetLayer {
 
 function ascii(s: string): number[] {
   return [...s].map((c) => c.charCodeAt(0));
+}
+
+/**
+ * ホストの NEW-ENVIRON SEND（`sb` は OPT から）に `USERVAR IBMRSEED` とその後ろの 8 バイト（サーバーのシード）があれば返す。
+ * RFC 1572 の SEND は名前だけだが、IBM i は名前の直後に値の印を挟まずシードを置く（ACS `NVT5250` も同じ読み方。実測でも同じ形）
+ */
+function serverSeedOf(sb: Uint8Array): Uint8Array | undefined {
+  const name = [...ascii("IBMRSEED")];
+  for (let i = 2; i + 1 + name.length + 8 <= sb.length; i++) {
+    if (sb[i] !== ENV_USERVAR) continue;
+    if (!name.every((b, k) => sb[i + 1 + k] === b)) continue;
+    return sb.slice(i + 1 + name.length, i + 1 + name.length + 8);
+  }
+  return undefined;
 }
 
 /** Java の `String.trim()`（前後の U+0020 以下を落とす）。ACS の正規化に合わせる */

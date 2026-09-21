@@ -119,6 +119,79 @@ describe("TelnetLayer ネゴシエーション", () => {
     expect(String.fromCharCode(...t.takeSent())).toContain("IBMSUBSPW");
   });
 
+  /**
+   * **暗号化した自動サインオン**（ACS と同じく平文で送らない。`20260921-encrypted-autosignon`）。
+   * 実測（ACS のコア・PUB400・QPWDLVL 3）: ホストの SEND は `USERVAR IBMRSEED <シード 8 バイト>`、ACS の IS は IBMRSEED に自分のシード、
+   * IBMSUBSPW に 20 バイトの代替パスワードを入れ、サインオン画面を飛ばしてメニューまで進んだ。
+   */
+  describe("暗号化した自動サインオン", () => {
+    const serverSeed = [0x01, 0x02, 0xff, 0x10, 0x20, 0x30, 0x40, 0x50];
+    // SEND: USERVAR IBMRSEED <seed>（0xFF は telnet の層で二重） VAR USERVAR
+    const sendWithSeed = [IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, ENV_USERVAR, ...ascii("IBMRSEED"), 0x01, 0x02, 0xff, 0xff, 0x10, 0x20, 0x30, 0x40, 0x50, 0, ENV_USERVAR, IAC, CMD.SE];
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    function setupEnc(sub: (seed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) {
+      const t = new FakeTransport();
+      new TelnetLayer(t, { terminalType: "IBM-3179-2", user: "u", password: "pw", passwordSubstitute: sub });
+      return t;
+    }
+
+    it("**ホストのシードで代替パスワードを作り、IBMRSEED に自分のシード・IBMSUBSPW に代替パスワード**（平文は送らない）", async () => {
+      const seen: number[][] = [];
+      const t = setupEnc(async (seed) => {
+        seen.push([...seed]);
+        return { clientSeed: Uint8Array.from([9, 8, 7, 6, 5, 4, 3, 0]), substitute: Uint8Array.from([0xaa, 0x01, 0xff, 0xbb]) };
+      });
+      t.feed(...sendWithSeed);
+      await flush();
+      expect(seen).toEqual([serverSeed]);
+      const sent = t.takeSent();
+      const text = String.fromCharCode(...sent);
+      expect(text).toContain("USER\x01U");
+      // 値の 0x00〜0x03 は ESC（2）、0xFF は IAC の二重化
+      expect(text).toContain("IBMRSEED\x01\x09\x08\x07\x06\x05\x04\x02\x03\x02\x00");
+      expect(text).toContain("IBMSUBSPW\x01\xaa\x02\x01\xff\xff\xbb");
+      expect(text).not.toContain("pw");
+    });
+
+    it("**IS を送るまで後続の交渉に答えない**（平文のときと同じ順序。IS が交渉の後に届くとホストはサインオン画面を出した——実測）", async () => {
+      let release!: () => void;
+      const t = setupEnc(
+        () =>
+          new Promise((r) => {
+            release = () => r({ clientSeed: new Uint8Array(8), substitute: new Uint8Array(20) });
+          })
+      );
+      // 実機と同じく、NEW-ENVIRON SEND と TERMINAL-TYPE SEND が続けて届く
+      t.feed(...sendWithSeed, IAC, CMD.SB, OPT.TERMINAL_TYPE, TT_SEND, IAC, CMD.SE);
+      await flush();
+      expect(t.takeSent(), "IS より先に端末タイプへ答えた").toEqual([]);
+      release();
+      await flush();
+      const sent = t.takeSent();
+      const env = String.fromCharCode(...sent).indexOf("IBMSUBSPW");
+      const tt = String.fromCharCode(...sent).indexOf("IBM-3179-2");
+      expect(env).toBeGreaterThan(-1);
+      expect(tt).toBeGreaterThan(env);
+    });
+
+    it("シードが無い・計算に失敗したら**パスワードの変数を送らない**（平文にも落とさない。ACS も書かない）", async () => {
+      const t1 = setupEnc(async () => ({ clientSeed: new Uint8Array(8), substitute: new Uint8Array(20) }));
+      t1.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+      await flush();
+      const a = String.fromCharCode(...t1.takeSent());
+      expect(a).toContain("USER\x01U");
+      expect(a).not.toContain("IBMSUBSPW");
+      const t2 = setupEnc(async () => {
+        throw new Error("x");
+      });
+      t2.feed(...sendWithSeed);
+      await flush();
+      const b = String.fromCharCode(...t2.takeSent());
+      expect(b).toContain("USER\x01U");
+      expect(b).not.toContain("IBMSUBSPW");
+    });
+  });
+
   it("値の 0x00〜0x03 は ESC でエスケープする（RFC 1572。ACS も同じ）", () => {
     const { t } = setupAuto({ user: "U", password: "a\u0001b" });
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);

@@ -147,6 +147,28 @@ export async function signon(opts: SignonOptions): Promise<SignonResult> {
   }
 }
 
+/**
+ * **認証せずにサーバーの情報（パスワード・レベル ほか）だけを聞く**（ACS `SignonServer.connect` → `getPasswordLevel` に当たる）。
+ * telnet の自動サインオンの代替パスワードの計算に QPWDLVL が要る（`bypass-signon.ts`）。交換属性だけで閉じるので、
+ * 誤ったパスワードでもサインオンの失敗回数を使わない。
+ */
+export async function querySignonInfo(opts: Omit<SignonOptions, "user" | "password">): Promise<HostServerInfo> {
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  const port = await decidePort({ ...opts, user: "", password: "" }, timeoutMs);
+  const conn = await openHostConnection({
+    host: opts.host,
+    port,
+    ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+    timeoutMs
+  });
+  try {
+    const { serverSeed: _s, clientSeed: _c, ...info } = await exchangeAttributes(conn);
+    return info;
+  } finally {
+    conn.close();
+  }
+}
+
 async function decidePort(opts: SignonOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {

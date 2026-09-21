@@ -208,6 +208,10 @@ public class AcsProbe {
       p.put("ssoType", bypass.equals("encrypted") ? "ssoBypassSignonEncrypted" : "ssoBypassSignonClearText");
       p.put("ssoBypassSignonUserid", env(prefix + "_USER", ""));
       p.put("ssoBypassSignonPassword", com.ibm.eNetwork.HOD.common.PasswordCipher.encrypt(env(prefix + "_PASSWORD", "")));
+      // 暗号化（代替パスワード）の計算に使うパスワード・レベル。製品の ACS はサインオン・サーバーに聞いて入れる
+      // （`AcsOnly.initBypassSignon`）が、製品の外のプローブでは入らないので渡す（`PROBE_PASSWORD_LEVEL`。既定は入れない）
+      String pwLevel = env("PROBE_PASSWORD_LEVEL", "");
+      if (!pwLevel.isEmpty()) p.put("ssoBypassSignonPasswordLevel", pwLevel);
     }
 
     // 最後まで流れたときだけ 0 にする（途中で何が起きても、既定は「途中で止まった」）

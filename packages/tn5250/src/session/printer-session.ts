@@ -31,6 +31,11 @@ export interface PrinterConnectOptions {
   deviceNameEnv?: { computerName?: string; userName?: string } | undefined;
   /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`） */
   deviceNameRetry?: boolean | undefined;
+  /**
+   * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
+   * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
+   */
+  passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
   user?: string | undefined;
   password?: string | undefined;
   /** SBCS=37/273…。DBCS(1399) は後続対応 */
@@ -168,6 +173,7 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       deviceName: opts.deviceName,
       deviceNameEnv: { ...opts.deviceNameEnv, printer: true },
       deviceNameRetry: opts.deviceNameRetry,
+      passwordSubstitute: opts.passwordSubstitute,
       user: opts.user,
       password: opts.password,
       userVars: decl.userVars,
