@@ -46,6 +46,8 @@ export type LocalAction =
 /** キーイベントを AID キー・ローカル操作・null（非対象）に分類する（純関数・テスト可能） */
 export function classifyKey(ev: {
   key: string;
+  /** 物理キー（`KeyboardEvent.code`）。テンキーの − / ＋ をメイン行と見分けるのに使う */
+  code?: string;
   shiftKey: boolean;
   ctrlKey: boolean;
   altKey: boolean;
@@ -62,6 +64,11 @@ export function classifyKey(ev: {
     if (ev.key === "ArrowDown") return { local: "word-down" };
   }
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return {};
+  // **テンキーの − / ＋ は Field− / Field+**（ACS の既定の割り当て `AcsMapFunctions.MAP_5250` の
+  // `B109 = [field-]`・`B107 = [field+]`。メイン行の `-` `+` は文字として欄の型の規則に従う。
+  // `20260921-numpad-field-sign`。~~以前は物理キーを見分けられず、数値欄の `-` `+` をすべて Field± にしていた~~）
+  if (!ev.shiftKey && ev.code === "NumpadSubtract") return { local: "field-minus" };
+  if (!ev.shiftKey && ev.code === "NumpadAdd") return { local: "field-plus" };
   const k = ev.key;
 
   // F1–F12（Shift で F13–F24）

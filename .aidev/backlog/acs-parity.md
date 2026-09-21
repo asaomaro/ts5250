@@ -412,6 +412,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`packages/tn5250/src/protocol/read-response.ts` の `NO_DATA_AIDS`）。実機の ACS のコアで 7,22 → 3,20、ホーム位置で施錠（「機能キーは使用できません」）、
   タップで採った ACS のワイヤ `… 03 14 0a f3`（`ABC` を打って Help。欄データ無し）・`… 03 14 07 f8`。テスト `no-data-aid-home.test.ts`（11 件）・
   `home-key-acs.test.ts`（7 件）、mutation 7 通り検出（1 通りは等価で分岐ごと撤去）。
+- [x] **【まとめ】キー編集のうちテンキーの ±・Field− の可否・符号付き数値欄の文字**（優先度 中〜低）。**完了（`20260921-numpad-field-sign`・PR #410）**:
+  テンキーの − / ＋（`KeyboardEvent.code`）はどの欄でも Field− / Field+（`useKeymap.ts` の `classifyKey`。ACS `B109` / `B107`）、メイン行の `-` `+` は文字。
+  Field− は符号付き数値・数値専用の欄でだけ（他と継続欄はエラー 0022＝`MSG_FIELD_MINUS_INVALID`）。符号付き数値欄は数字だけ（`fieldValidate.ts`）。
+  `signKeyHack` は撤去（同 D1）。実機の ACS のコア（`scripts/acs-probe/field-minus-keys.txt`）: 英数字欄の Field− はエラーで値もカーソルもそのまま・
+  Field+ は次の欄・6S0 の `12-` は `-` でエラー・Field− は `    12-`。テスト `numpad-field-sign.test.ts`（8 件）ほか、mutation 9 通り検出。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -430,13 +435,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~ME/MF の意味とタイミング（中〜低・**要判断**）~~ → 上の `20260921-mandatory-check-acs` で済んだ
     - ACS: ME を内容ではなく MDT で判定し、画面に変更が無ければ検査しない。CF キーや Roll でも検査する。MF と自己点検は、欄を出るときにも検査する（`PS5250.processAIDCode`・`FFT5250.checkMandatoryFieldCheck`）。
     - 当 PJ: Enter のときだけ、内容で判定する（`mandatoryCheck.ts`）。Enter のときだけにしたのは、`20260729-ffw-behavior-bits` D1 の意図的な差異。
-  - テンキーの ±（中〜低）
+  - ~~テンキーの ±（中〜低）~~ → 上の `20260921-numpad-field-sign` で済んだ
     - ACS: すべての欄で Field+ / Field− として働く。
     - 当 PJ: 数値欄でだけ働く（`signKeyHack`）。キー割り当てで、テンキーの − とメイン行の - を区別できない（`keybindings.ts:174`）。
   - 低
     - 欄の先頭での Backspace、End の行き先
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
-    - Field− の可否、数値専用欄での Field−
+    - ~~Field− の可否~~（`20260921-numpad-field-sign`）、数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）、
+      Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
     - MONOCASE で ASCII 以外を大文字化しない

@@ -68,6 +68,7 @@ import { isFieldExitRequired } from "../composables/mandatoryCheck.js";
 import {
   MSG_PROTECTED,
   MSG_NO_ROOM,
+  MSG_FIELD_MINUS_INVALID,
   MSG_BY_REASON,
   MSG_OPT_HINTS,
   MSG_DATE_PICKER,
@@ -2347,10 +2348,23 @@ function fieldExitKey(): void {
  * **符号付き数値欄でだけ符号が付く**（それ以外は Field Exit と同じ。`fieldEdit.fieldSign` の
  * コメント参照）。DBCS 欄は Field Exit と同じく右寄せしない。
  */
+/** テンキーの − / ＋（修飾なし）。ACS は Field− / Field+（`B109` / `B107`）で、文字としては入れない */
+function isNumpadSign(ev: KeyboardEvent): boolean {
+  return !ev.shiftKey && (ev.code === "NumpadSubtract" || ev.code === "NumpadAdd");
+}
+
 function fieldSignKey(negative: boolean): void {
   const t = currentEditTarget();
   if (!t || !edit) {
     emit("notice", MSG_PROTECTED);
+    return;
+  }
+  // **Field− は符号付き数値・数値専用（0x0300）の欄でだけ**（ACS `processFieldPlusMinusAndExit` のエラー 0022。
+  // 継続欄も不可）。値は変えず欄も出ない（実機の ACS: 英数字欄で `AB` の後に Field− → エラー・値もカーソルもそのまま）。
+  // Field+ はどの欄でも Field Exit と同じ（実機: 英数字欄で次の欄へ）。`20260921-numpad-field-sign`
+  const numericOnly = t.f.numeric && t.f.digitsOnly !== true && t.f.signedNumeric !== true;
+  if (negative && ((t.f.signedNumeric !== true && !numericOnly) || t.f.continued !== undefined)) {
+    emit("notice", MSG_FIELD_MINUS_INVALID);
     return;
   }
   const base = exitedBase(t.f, edit); // Field Exit と同じく、満杯まで打った直後なら最終桁は消さない
@@ -2396,26 +2410,13 @@ function dupKey(): void {
   emit("field-full", t.f.index);
 }
 
-/**
- * **数値欄で `-` / `+` を打ったら文字として入れず Field− / Field+ を走らせる**（原典の
- * `sign_key_hack`。GNU tn5250 `display.c:927-940`）。処理したら true。
- *
- * これが無いと `-12` と打てて**そのまま送れてしまう**が、ホストは先頭の符号を無視して
- * `12` を受け取る——**利用者は負値を入れたつもりで正値を送る**（実機で実測）。
- * 打った通りに送れないなら打たせない、という方に倒す。
- *
- * ペースト・マクロ・MCP はこの経路を通らない（打鍵だけの規則）。
+/*
+ * ~~**数値欄で `-` / `+` を打ったら文字として入れず Field− / Field+ を走らせる**（原典の `sign_key_hack`。
+ * GNU tn5250 `display.c:927-940`）~~ → 撤去した（`20260921-numpad-field-sign`）。ACS はメイン行の `-` `+` を文字として扱い、
+ * 符号付き数値欄では数字以外としてエラーにする（`checkSBCSField`。実機の ACS でも `12-` の `-` でエラー）。Field− / Field+ は
+ * テンキーの − / ＋（`classifyKey`）と Ctrl+− / Ctrl++ で押す。`-12` と打てて正値が送られる問題（旧い理由）は、`-` が
+ * 符号付き数値欄に入らないことで同じく防がれる。
  */
-function signKeyHack(f: Field, key: string): boolean {
-  // **数字専用欄は対象外。** ここを `f.numeric`（シフト 3/5/7 すべて）にしていると、
-  // 数字しか入らない欄で `-` を打ち間違えただけで**カーソル以降が消えて次欄へ飛ぶ**
-  // （実機 `ASAOLIB/AUDPGM` の `DGT` 欄で `1234` → `12` になるのを確認）。
-  // 参照実装も num-only と signed-num だけを対象にしている（GNU tn5250 `display.c`）。
-  if (f.digitsOnly === true) return false;
-  if (!f.numeric || (key !== "-" && key !== "+")) return false;
-  fieldSignKey(key === "-");
-  return true;
-}
 
 /** Erase EOF: カーソルから欄末尾まで消す。**欄は出ず・カーソルも動かさず・右寄せもしない**。 */
 function eraseEofKey(): void {
@@ -2818,8 +2819,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+    // テンキーの − / ＋ は文字ではなく Field− / Field+（ペインの `classifyKey` が拾う。既定動作もそこで止める）
+    if (isNumpadSign(ev)) return;
     ev.preventDefault();
-    if (signKeyHack(f, ev.key)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
     // **満杯まで打った後の文字はエラー 0018**（ACS `setErrorCode(24)`。値は変えない。実機で確認。場合 C）。
     // ACS が見るのは「最終桁にカーソル＋出た」。挿入で「出た」ときはカーソルが 1 桁進んでいるので、上の入口で
     // 状態が下り、そこでの文字は下の余地の判定で 0012 になる（`PS5250.processCharKeyStroke` の挿入の枝）
@@ -2851,8 +2853,8 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       }
       trial = t;
     } else if (isSignPosition(f, edit.cursor, visLen(f))) {
-      // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。`-` / `+` は上の
-      // `signKeyHack` で Field− / Field+ として拾われるので、ここへは来ない。
+      // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。符号付き数値欄は数字しか通らない
+      // （`rejectReason`）ので、ここへ来るのは数字。符号は Field− / Field+ で付ける。
       emit("notice", MSG_BY_REASON["sign-position"]);
       return;
     } else if (deleteSelection(f, el)) {
@@ -2957,8 +2959,8 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   }
   // 印字可能な 1 文字（修飾なし）: 型・バイト予算検証してから上書き（Insert 時は挿入）
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+    if (isNumpadSign(ev)) return; // テンキーの − / ＋ はペインの Field− / Field+ へ（SBCS 欄と同じ）
     ev.preventDefault();
-    if (signKeyHack(f, k)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
     const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     const why = rejectReason(f, ch);
     if (why) {

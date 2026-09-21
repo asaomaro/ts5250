@@ -61,6 +61,12 @@ export const MSG_WATCH_CONSUMES = "監視はエントリを取り出して消し
 export const MSG_NO_ROOM = "挿入する余地がありません";
 
 /**
+ * ACS のエラー 0022（`PS5250.processFieldPlusMinusAndExit`）: Field− は符号付き数値・数値専用の欄でしか使えない
+ * （継続欄も不可）。値は変えず、欄も出ない（実機の ACS で確認。`20260921-numpad-field-sign`）
+ */
+export const MSG_FIELD_MINUS_INVALID = "この項目では Field− キーは使用できません";
+
+/**
  * **操作員エラーか**（`20260921-operator-error-mode`）。ACS はこれらで `error_mode` に入り、
  * キーボードを施錠する（`PS5250.setErrorCode` → `ECLOIA.InputInhibited() == 5`）。
  * 情報の通知（表示設定の順送り・日付の選択など）は**施錠しない**ので含めない。
@@ -68,6 +74,7 @@ export const MSG_NO_ROOM = "挿入する余地がありません";
 export function isOperatorError(text: string): boolean {
   return (
     text === MSG_NO_ROOM ||
+    text === MSG_FIELD_MINUS_INVALID ||
     text === MSG_PROTECTED ||
     text === MSG_DUP_DISALLOWED ||
     text === MSG_FIELD_EXIT_REQUIRED ||

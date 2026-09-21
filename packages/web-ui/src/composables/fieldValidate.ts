@@ -50,7 +50,12 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
   // 参照実装も digits-only は数字のみ（GNU tn5250 `field.c` / tn5250j `Screen5250.java`）。
   if (field.digitsOnly && !/[0-9]/.test(ch)) return "numeric";
 
-  // 数値型（数字・, . - + と空白を許可）
+  // **符号付き数値（0x0700）も数字しか受け付けない**（ACS `PS5250.checkSBCSField`: 数字以外はエラー 0016。
+  // 実機の ACS でもメイン行の `-` と `.` はエラーだった）。符号は Field− / Field+ で付ける。
+  // ~~`-` / `+` は `signKeyHack` が Field± に置き換えるのでここへ来ない~~（`20260921-numpad-field-sign` で撤去）
+  if (field.signedNumeric && !/[0-9]/.test(ch)) return "numeric";
+
+  // 数値専用（0x0300）は数字・, . - + と空白を許可（ACS `Field5250.checkNumericOnlyChar` と同じ集合）
   if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return "numeric";
 
   // **カタカナ（0x0400）は入力制限ではない**ので何もしない（参照実装 2 つとも素通し）。

@@ -58,9 +58,17 @@ describe("数字専用欄（digitsOnly）は数字しか受け付けない", () 
     for (const ch of ["0", "5", "9"]) expect(rejectReason(digits, ch)).toBeUndefined();
   });
 
-  it("数字専用でない数値欄では従来どおり `.` `-` を受ける（signed-num の欄）", () => {
-    const num = fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true });
+  // ~~数字専用でない数値欄では従来どおり `.` `-` を受ける（signed-num の欄）~~ → ACS は符号付き数値欄を数字だけにする
+  // （`PS5250.checkSBCSField` のエラー 0016。実機の ACS で `-` と `.` がエラー。`20260921-numpad-field-sign`）
+  it("数値専用（0x0300）の欄は `.` `,` `+` `-` 空白を受ける（ACS `checkNumericOnlyChar` と同じ集合）", () => {
+    const num = fld({ index: 1, row: 5, col: 10, length: 6, numeric: true });
     for (const ch of [".", ",", "+", "-", " "]) expect(rejectReason(num, ch)).toBeUndefined();
+  });
+
+  it("**符号付き数値（0x0700）の欄は数字だけ**（`.` `,` `+` `-` 空白は理由つきで拒否）", () => {
+    const signed = fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true });
+    for (const ch of [".", ",", "+", "-", " "]) expect(rejectReason(signed, ch)).toBe("numeric");
+    expect(rejectReason(signed, "7")).toBeUndefined();
   });
 });
 
@@ -132,12 +140,15 @@ describe("ScreenGrid: 打鍵", () => {
     expect(r.notices).toContain(MSG_BY_REASON["numeric"]);
   });
 
-  it("符号付き数値欄では従来どおり `-` が Field− になる（退行防止）", async () => {
+  // ~~符号付き数値欄では従来どおり `-` が Field− になる（退行防止）~~ → ACS はメイン行の `-` を文字として扱い、
+  // 符号付き数値欄ではエラーにする（実機の ACS: `12-` → `12` のままエラー。`20260921-numpad-field-sign`）
+  it("符号付き数値欄のメイン行の `-` はエラー（値は `12` のまま。Field− はテンキー）", async () => {
     const r = await typeInto(
       [fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })],
       "12-"
     );
-    expect(r.value).toBe("    12-");
+    expect(r.value).toBe("12");
+    expect(r.notices).toContain(MSG_BY_REASON["numeric"]);
   });
 
   it("符号付き数値欄: 数字桁を埋めた後の 7 桁目は入らず、エラー 0018", async () => {

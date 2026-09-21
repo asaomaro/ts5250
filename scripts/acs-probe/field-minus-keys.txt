@@ -1,0 +1,67 @@
+# **Field− / Field+ とメイン行の `-` を、欄の型ごとに ACS がどう扱うか**（実機）。台帳「【まとめ】キー編集」のテンキーの ±・Field− の可否。
+#
+# 原典: `AcsMapFunctions.MAP_5250` はテンキーの −（B109）を `[field-]`、＋（B107）を `[field+]` に割り当てる（メイン行の `-` は文字）。
+# `PS5250.processFieldPlusMinusAndExit`: Field− は符号付き数値・数値専用以外の欄（と継続欄）でエラー 0022。Field+ はどの欄でも Field Exit と同じ。
+# `checkSBCSField`: 符号付き数値は数字しか受けない（`-` などはエラー 0016）。
+#
+# 画面は ADJPGM（`scripts/build-adjtest.mjs`）: 13,20 = 素の英数字 A(6) / 19,20 = 符号付き 6S0（数字 6 桁＋符号桁）。
+signon
+keys [enter]
+settle 1500
+keys ADDLIBLE ${LIB}[enter]
+settle 1500
+keys CALL ${LIB}/ADJPGM[enter]
+settle 2500
+dump start
+
+# --- F1) 英数字欄で Field− → エラー 0022（値は変えない・欄を出ない）のはず ---
+setcursor 13,20
+settle 200
+keys AB
+settle 300
+keys [field-]
+settle 300
+dump f1
+keys [reset]
+settle 300
+
+# --- F2) 英数字欄で Field+ → Field Exit と同じく次の欄へ ---
+setcursor 13,22
+settle 200
+keys [field+]
+settle 300
+dump f2
+
+# --- F3) 符号付き数値欄でメイン行の `-` → エラー（数字しか受けない）のはず ---
+setcursor 19,20
+settle 200
+keys 12-
+settle 300
+dump f3
+keys [reset]
+settle 300
+
+# --- F4) 符号付き数値欄で Field−（テンキーの −）→ 右寄せして符号桁に `-` ---
+setcursor 19,22
+settle 200
+keys [field-]
+settle 300
+dump f4
+
+# --- F5) 符号付き数値欄で `.` → エラーのはず（空白は手順の書式で送れないので測らない） ---
+setcursor 19,20
+settle 200
+keys [eraseeof].
+settle 300
+dump f5
+keys [reset]
+settle 300
+setcursor 19,20
+settle 200
+keys [fldext]
+settle 300
+keys [pf3]
+settle 1500
+dump exit
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
