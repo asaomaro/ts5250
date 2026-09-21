@@ -16,20 +16,8 @@ import { As400Error } from "@ts5250/base";
 import { childLog } from "@ts5250/base";
 import type { HostConnection } from "./transport/host-connection.js";
 import { CP, HEADER_LEN, findParam, parseReply } from "./datastream.js";
-import {
-  userIdEbcdic37,
-  userIdUnicode,
-  passwordUnicode,
-  passwordEbcdic37,
-  decodeJobName
-} from "./credentials.js";
-import {
-  generateClientSeed,
-  passwordSubstituteSha,
-  passwordSubstituteDes,
-  MIN_SHA_PASSWORD_LEVEL,
-  SEED_LEN
-} from "./password.js";
+import { userIdEbcdic37, hostServerPasswordSubstitute, decodeJobName } from "./credentials.js";
+import { generateClientSeed, encryptionTypeOf, SEED_LEN } from "./password.js";
 
 const log = childLog({ component: "hostserver-start" });
 
@@ -39,8 +27,6 @@ const REQ_START_SERVER = 0x7002;
 const CLIENT_ATTR_SHA1 = 1;
 /** クライアント属性。2 = ジョブ情報を返してほしい */
 const CLIENT_ATTR_RETURN_JOB_INFO = 2;
-const ENCRYPTION_TYPE_DES = 1;
-const ENCRYPTION_TYPE_SHA = 3;
 
 /**
  * `0x7001` 要求。
@@ -79,7 +65,7 @@ function buildStartServerRequest(
   v.setUint32(12, 0);
   v.setUint16(16, 2); // template 長（暗号化種別 + 応答要否）
   v.setUint16(18, REQ_START_SERVER);
-  v.setUint8(20, substitute.length === 8 ? ENCRYPTION_TYPE_DES : ENCRYPTION_TYPE_SHA);
+  v.setUint8(20, encryptionTypeOf(substitute));
   v.setUint8(21, 1); // 応答を返す
   let pos = 22;
   v.setUint32(pos, 6 + substitute.length);
@@ -150,21 +136,9 @@ export async function startHostServer(
   const serverSeed = seedReply.subarray(seedAt, seedAt + SEED_LEN);
 
   // --- 0x7002 サーバー開始（認証） ---
-  // レベル 0/1 は DES（8 バイト）、レベル >= 2 は SHA（20 バイト）。要求の暗号化種別は長さで切り替わる
-  const substitute =
-    opts.passwordLevel < MIN_SHA_PASSWORD_LEVEL
-      ? passwordSubstituteDes(
-          userIdEbcdic37(opts.user),
-          passwordEbcdic37(opts.password),
-          clientSeed,
-          serverSeed
-        )
-      : await passwordSubstituteSha(
-          userIdUnicode(opts.user),
-          passwordUnicode(opts.password),
-          clientSeed,
-          serverSeed
-        );
+  // レベル 0/1 は DES（8 バイト）、2 / 3 は SHA-1（20 バイト）、4 は SHA-512（64 バイト）。要求の暗号化種別は長さで切り替わる。
+  // 計算はサインオン・サーバーと共用（`hostServerPasswordSubstitute`。ACS に同梱の jt400 と同じ分岐）
+  const substitute = await hostServerPasswordSubstitute(opts.passwordLevel, opts.user, opts.password, clientSeed, serverSeed);
   const startReply = await conn.request(
     // レベル 2 以上でも、要求に載せるユーザー ID は CCSID 37（signon と同じ）
     buildStartServerRequest(serverId, userIdEbcdic37(opts.user), substitute)

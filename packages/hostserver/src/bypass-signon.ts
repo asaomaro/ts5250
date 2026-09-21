@@ -11,7 +11,7 @@
  * （`bypass-signon.test.ts`）。DES・SHA-1 の本体はホストサーバーのサインオンと共用する（`password.ts`）。
  */
 import { As400Error } from "@ts5250/base";
-import { passwordSubstituteDes, passwordSubstituteSha, SEED_LEN } from "./password.js";
+import { passwordSubstituteDes, passwordSubstituteSha, passwordSubstituteSha512, MIN_SHA512_PASSWORD_LEVEL, SEED_LEN } from "./password.js";
 
 /** ACS `SignonConverter.stringToByteArray` の表（CCSID 37。各国の置き換え文字は # $ @ に寄る）。これ以外の文字はエラー */
 const SIGNON_EBCDIC: Readonly<Record<string, number>> = (() => {
@@ -60,7 +60,6 @@ function utf16be(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-const SEQUENCE = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 1]);
 
 /**
  * 自動サインオンの代替パスワードを作る。`user` は大文字・前後の空白を落とした利用者名（telnet の USER と同じもの）。
@@ -76,18 +75,8 @@ export async function bypassSignonSubstitute(
   if (clientSeed.length !== SEED_LEN || serverSeed.length !== SEED_LEN) {
     throw new As400Error("PROTOCOL_ERROR", `seeds must be ${SEED_LEN} bytes`);
   }
-  if (passwordLevel >= 4) {
-    // 鍵の塩: 利用者名 10 文字（空白詰め）＋パスワードの末尾 4 文字（足りなければ空白詰め）を UTF-16BE にして SHA-256
-    const user10 = `${user}          `.slice(0, 10);
-    const tail = password.slice(Math.max(password.length - 4, 0)).padEnd(4, " ");
-    const salt = new Uint8Array(await crypto.subtle.digest("SHA-256", utf16be(user10 + tail)));
-    const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-    const key = new Uint8Array(
-      await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-512", salt, iterations: 10022 }, baseKey, 512)
-    );
-    const joined: Uint8Array<ArrayBuffer> = new Uint8Array([...key, ...serverSeed, ...clientSeed, ...utf16be(user10), ...SEQUENCE]);
-    return new Uint8Array(await crypto.subtle.digest("SHA-512", joined));
-  }
+  // レベル 4 はホストサーバーのサインオンと同じ手順（`password.ts`。手順を 2 か所に書かない）
+  if (passwordLevel >= MIN_SHA512_PASSWORD_LEVEL) return passwordSubstituteSha512(user, password, clientSeed, serverSeed);
   const userEbcdic = signonEbcdic(user);
   if (passwordLevel >= 2) {
     if (password.startsWith("*")) throw new As400Error("CONFIG_ERROR", "password must not start with '*'");

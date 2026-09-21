@@ -4,8 +4,10 @@
  * 平文パスワードは送らず、サーバー seed とクライアント seed を混ぜたハッシュを送る
  * （チャレンジ・レスポンス）。アルゴリズムはシステムのパスワードレベル（QPWDLVL）で分かれる。
  *
- * - レベル >= 2: SHA-1 を 2 回（`passwordSubstituteSha`）
+ * - レベル 4: PBKDF2-HMAC-SHA512 の鍵から SHA-512（`passwordSubstituteSha512`。64 バイト）
+ * - レベル 2 / 3: SHA-1 を 2 回（`passwordSubstituteSha`）
  * - レベル 0/1: DES ベース（`passwordSubstituteDes`。IBM i の QPWDLVL 0/1 の実機で使う）
+ * ~~レベル >= 2 は SHA-1~~ → レベル 4 は別の計算（ACS に同梱の jt400 `AS400ImplRemote`。`20260921-hostserver-password-levels`）
  *
  * 参照: JTOpen(jtopenlite) の EncryptPassword（encryptPasswordSHA / encryptPasswordDES）に対応する
  *       （コードの移植ではなく、アルゴリズム手順に基づく実装）。DES 経路は参照実装との
@@ -16,6 +18,16 @@ import { desEncryptBlock } from "./des.js";
 
 /** SHA 経路を使う最小パスワードレベル。これ未満は DES 経路 */
 export const MIN_SHA_PASSWORD_LEVEL = 2;
+/** SHA-512 経路（PBKDF2）を使う最小パスワードレベル */
+export const MIN_SHA512_PASSWORD_LEVEL = 4;
+
+/**
+ * 要求のテンプレートに載せる暗号化種別。**置換値の長さで決まる**（jt400 `SignonInfoReq` / `AS400StrSvrDS`:
+ * 8 バイトは 1、20 バイトは 3、それ以外（64 バイト）は 7）
+ */
+export function encryptionTypeOf(substitute: Uint8Array): number {
+  return substitute.length === 8 ? 1 : substitute.length === 20 ? 3 : 7;
+}
 /** seed の長さ */
 export const SEED_LEN = 8;
 
@@ -68,6 +80,41 @@ export async function passwordSubstituteSha(
 
   const token = await sha1(userIdUnicode, passwordUtf16be);
   return sha1(token, serverSeed, clientSeed, userIdUnicode, SEQUENCE);
+}
+
+/**
+ * **SHA-512 経路（パスワードレベル 4）の置換値**（64 バイト）。ホストサーバーのサインオン（jt400 `AS400ImplRemote` の
+ * `generatePwdTokenForPasswordLevel4` / `generateSha512Substitute`）と telnet の自動サインオン（ACS `PasswordSubstitute`）で同じ手順:
+ * 鍵の塩は「利用者名 10 文字（空白詰め）＋パスワードの末尾 4 文字（足りなければ空白詰め）」の UTF-16BE の SHA-256、
+ * 鍵は PBKDF2-HMAC-SHA512（10022 回・512 ビット。パスワードは UTF-8）、置換値は SHA-512(鍵・サーバー seed・クライアント seed・
+ * 利用者名 10 文字の UTF-16BE・シーケンス)。**パスワードは落とさない**（レベル 2 / 3 と違い末尾の空白もそのまま）
+ *
+ * @param user 大文字の利用者名（10 文字まで）
+ */
+export async function passwordSubstituteSha512(
+  user: string,
+  password: string,
+  clientSeed: Uint8Array,
+  serverSeed: Uint8Array
+): Promise<Uint8Array> {
+  assertSeed(clientSeed, "client");
+  assertSeed(serverSeed, "server");
+  const user10 = `${user}          `.slice(0, 10);
+  const tail = password.slice(Math.max(password.length - 4, 0)).padEnd(4, " ");
+  const salt = new Uint8Array(await crypto.subtle.digest("SHA-256", utf16be(user10 + tail)));
+  const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const key = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-512", salt, iterations: 10022 }, baseKey, 512));
+  const joined: Uint8Array<ArrayBuffer> = new Uint8Array([...key, ...serverSeed, ...clientSeed, ...utf16be(user10), ...SEQUENCE]);
+  return new Uint8Array(await crypto.subtle.digest("SHA-512", joined));
+}
+
+function utf16be(s: string): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(s.length * 2);
+  for (let i = 0; i < s.length; i++) {
+    out[i * 2] = s.charCodeAt(i) >> 8;
+    out[i * 2 + 1] = s.charCodeAt(i) & 0xff;
+  }
+  return out;
 }
 
 /**

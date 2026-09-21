@@ -553,6 +553,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **IS を送るまで後続の交渉に答えない**——待つ間に答えるとホストは IS を待たずにサインオン画面を出した（実測）。
 - [x] **【まとめ】telnet のうちパスワード無しの USER**（優先度 低）。**完了（`20260921-user-without-password`・PR #410）**: USER はパスワード付きの
   自動サインオンのときだけ送る（`packages/tn5250/src/telnet/telnet.ts`。ACS `NVT5250.insertUser`）。PUB400 では違いが見えない（実測）。
+- [x] **【まとめ】telnet のうちホストサーバーの認証の置換値**（優先度 中）。**完了（`20260921-hostserver-password-levels`・PR #410）**:
+  サインオン・サーバーと各ホストサーバーの開始で、QPWDLVL 4 を PBKDF2＋SHA-512（64 バイト・暗号化種別 7）、0/1 は数字で始まるパスワードの頭に `Q`、
+  2/3 は末尾の空白を落とす（4 は落とさない）——ACS に同梱の jt400 `AS400ImplRemote` と同じ（`packages/hostserver/src/credentials.ts` の
+  `hostServerPasswordSubstitute`。レベル 4 の計算は telnet の自動サインオンと共用）。jt400 を Java から呼んだ出力とバイト単位で一致
+  （`test/hostserver-password-levels.test.ts`）、mutation 11 通り検出。実機はレベル 0・3 の回帰まで（レベル 4 の機械は無い）。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
@@ -587,8 +592,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       ~~利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る~~（`20260921-user-without-password` で揃えた）
     - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
     - 起動応答の見分け方と、装置名の復号（ACS は CP037 固定）
-    - ホストサーバーのサインオン（`hostserver` の `signon()`）は QPWDLVL 4 を SHA-1 で計算し、数字で始まるパスワード（レベル 0/1）に `Q` を付けない。
-      ACS の `PasswordSubstitute` は 4 が PBKDF2＋SHA-512、0/1 は頭に `Q`（`20260921-encrypted-autosignon` で見つけた。telnet 側は揃えた）
+    - ~~ホストサーバーのサインオン（`hostserver` の `signon()`）は QPWDLVL 4 を SHA-1 で計算し、数字で始まるパスワード（レベル 0/1）に `Q` を付けない~~
+      → 上の `20260921-hostserver-password-levels` で済んだ（原典は ACS に同梱の jt400。サーバーの開始の要求も同じ欠陥があった）
     - バックアップホストが無い
     - telnet のオプションの状態機械（実害なし）
     - NEW-ENVIRON の応答方式（実害なし）
