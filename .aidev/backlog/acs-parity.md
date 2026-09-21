@@ -484,12 +484,19 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 0x82/0x83 の欄データで、NUL と符号を加工する。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
+- [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:
+  平文の自動サインオンで IBMRSEED は値なし（以前は ESC＋8 バイトの 0 で、7 個の 0x00 が空の VAR として読まれていた）、USER は前後の空白を落として大文字、
+  IBMSUBSPW は末尾の空白を落とし、値の 0x00〜0x03 は ESC でエスケープ（`packages/tn5250/src/telnet/telnet.ts` の `envValue`）。ACS のコアに平文の自動サインオンを
+  させてタップで採ったワイヤと同じ形（プローブに `PROBE_BYPASS_SIGNON`）。`scripts/verify-autosignon.mjs PUB400` で通った。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
-  - IBMRSEED の書式（中）
+  - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
     - 当 PJ: `ESC 00` の後に、エスケープしない `00` を 7 個送る（`packages/tn5250/src/telnet/telnet.ts:250-253`、主エージェントが確認）。RFC 1572 では空の VAR が 7 個と読まれる。
     - ACS: 平文モードでは値を付けない（`NVT5250.insertVariable` の case 22）。
-    - PUB400 と実機では通っている。
+    - PUB400 と実機では通っている。~~（実機は QRMTSIGN が `*FRCSIGNON` で、自動サインオンそのものを受けない。同 D2）~~
+  - **自動サインオンでパスワードを平文で送る**（中・**要実測**）。ACS はパスワードの入力を求める設定（`acsPasswordPrompt` が `3_session` / `4_always`）では
+    暗号化（代替パスワード。IBMRSEED にクライアントのシード、IBMSUBSPW に `PasswordSubstitute`）にする（`AcsOnly.initBypassSignon`）。ACS の既定の設定値と、
+    利用者の ACS がどちらで送っているかは未確認（`20260921-telnet-signon-vars` research F3。プローブの `PROBE_BYPASS_SIGNON=encrypted` で ACS 側のワイヤは採れる）
   - 装置名（中）
     - ACS: 置換記号（`*` `%` `=` `+` `&COMPN` など）を展開し、大文字にする（`AutoDeviceName5250`）。
     - 当 PJ: 書いたとおりに送る。
@@ -503,7 +510,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 低
     - 関連プリンター（IBMASSOCPRT）が未対応
     - 交渉前に届くテキストを出さない
-    - USER とパスワードを正規化しない
+    - ~~USER とパスワードを正規化しない~~（`20260921-telnet-signon-vars`: 利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす）
+    - 自動サインオンの変数の順と、ACS が送るが当 PJ が送らないもの（値なしの DEVNAME・KBDTYPE が空白 3 つ（CCSID 37）。同 research F4）。
+      利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る
     - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
     - 起動応答の見分け方と、装置名の復号（ACS は CP037 固定）
     - バックアップホストが無い

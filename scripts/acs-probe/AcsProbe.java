@@ -193,6 +193,17 @@ public class AcsProbe {
     // 無効だとホストは EDTMSK の欄を継続欄に割らずに送るので、継続欄を測るときは `PROBE_ENPTUI=true` を渡す
     String enptui = env("PROBE_ENPTUI", "");
     if (!enptui.isEmpty()) p.put(ECLSession.SESSION_ENPTUI, enptui);
+    // **ACS の自動サインオン（Bypass Signon）**（既定は使わない）。`clear` で平文、`encrypted` で代替パスワード。
+    // `NVT5250.getHostDeviceOptions` が読むプロパティで、パスワードは ACS 自身の `PasswordCipher` で暗号化して渡す
+    // （製品の外で動くプローブでは `AcsOnly.initBypassSignon` が何もしないので、ここで渡した種別がそのまま効く）。
+    // NEW-ENVIRON を `tap-proxy.mjs` で採るときに使う。手順の `signon` は使わない（ホストが画面を飛ばす）
+    String bypass = env("PROBE_BYPASS_SIGNON", "");
+    if (!bypass.isEmpty()) {
+      p.put("ssoEnabled", "true");
+      p.put("ssoType", bypass.equals("encrypted") ? "ssoBypassSignonEncrypted" : "ssoBypassSignonClearText");
+      p.put("ssoBypassSignonUserid", env(prefix + "_USER", ""));
+      p.put("ssoBypassSignonPassword", com.ibm.eNetwork.HOD.common.PasswordCipher.encrypt(env(prefix + "_PASSWORD", "")));
+    }
 
     // 最後まで流れたときだけ 0 にする（途中で何が起きても、既定は「途中で止まった」）
     int code = 4;

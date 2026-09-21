@@ -247,13 +247,17 @@ export class TelnetLayer {
         payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
       }
       if (this.opts.user !== undefined) {
-        // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）
-        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii(this.opts.user));
+        // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
+        // 前後の空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化）
+        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(this.opts.user.trim().toUpperCase())));
         if (this.opts.password !== undefined) {
-          // IBMRSEED = ESC + 8 バイトのゼロシード（非暗号化を示す）
-          payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ENV_ESC, 0, 0, 0, 0, 0, 0, 0, 0);
-          // IBMSUBSPW = ゼロシードのため平文パスワード
-          payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii(this.opts.password));
+          // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
+          // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
+          // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は
+          // RFC 1572 では空の VAR として読まれていた（台帳「【まとめ】telnet」）
+          payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE);
+          // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
+          payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(this.opts.password.replace(/ +$/, ""))));
         }
       }
       this.sendSb(payload);
@@ -300,4 +304,18 @@ export class TelnetLayer {
 
 function ascii(s: string): number[] {
   return [...s].map((c) => c.charCodeAt(0));
+}
+
+/**
+ * NEW-ENVIRON の値のエスケープ（RFC 1572）: 0x00〜0x03（VAR / VALUE / ESC / USERVAR）の前に ESC を置く。
+ * 置かないと値の途中で変数が終わったと読まれる。ACS も利用者名・パスワードの値をこうして書く
+ * （IAC の二重化は `sendSb` がまとめて行う）
+ */
+function envValue(bytes: number[]): number[] {
+  const out: number[] = [];
+  for (const b of bytes) {
+    if (b <= 0x03) out.push(ENV_ESC);
+    out.push(b);
+  }
+  return out;
 }

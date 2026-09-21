@@ -67,19 +67,38 @@ describe("TelnetLayer ネゴシエーション", () => {
     ]);
   });
 
-  it("RFC 4777 自動サインオン: USER + IBMRSEED(ゼロシード) + IBMSUBSPW(平文)", () => {
+  // ~~IBMRSEED(ゼロシード)~~ → ACS と同じく平文では値なし（`20260921-telnet-signon-vars`。以前は ESC＋8 バイトの 0 で、
+  // エスケープされない 7 個の 0x00 が空の VAR として読まれていた）
+  it("RFC 4777 自動サインオン: USER + IBMRSEED(値なし) + IBMSUBSPW(平文)", () => {
     const { t } = setupAuto({ deviceName: "WEBEMU01", user: "MYUSER", password: "SECRET" });
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
-    const ENV_VAR = 0, ENV_ESC = 2;
+    const ENV_VAR = 0;
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
-      ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ENV_ESC, 0, 0, 0, 0, 0, 0, 0, 0,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE,
       ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii("SECRET"),
       IAC, CMD.SE
     ]);
+  });
+
+  it("利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす（ACS と同じ正規化）", () => {
+    const { t } = setupAuto({ user: " myuser ", password: "Secret  " });
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    const sent = t.takeSent();
+    const text = String.fromCharCode(...sent);
+    expect(text).toContain("USER\x01MYUSER");
+    expect(text).toContain("IBMSUBSPW\x01Secret\xff");
+  });
+
+  it("値の 0x00〜0x03 は ESC でエスケープする（RFC 1572。ACS も同じ）", () => {
+    const { t } = setupAuto({ user: "U", password: "a\u0001b" });
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    const sent = t.takeSent();
+    const at = sent.indexOf(0x61);
+    expect(sent.slice(at, at + 4)).toEqual([0x61, 2, 1, 0x62]);
   });
 
   it("password 未指定（user のみ）なら IBMRSEED/IBMSUBSPW は送らない", () => {
