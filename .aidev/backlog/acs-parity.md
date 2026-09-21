@@ -529,7 +529,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
     - CLEAR 系の付随処理: CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。画面サイズが変わっても罫線を残す。
     - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
-      （D9/72 で Unicode を申告するようになったので、ホストが Unicode の欄を送ってくる余地がある——FCW 0x84xx の扱いを確かめる）。
+      （0x80xx は再順序付け・0x84xx は透過の欄（ACS `Field5250` の `FCW_RESEQUENCE` / `FCW_TRANSPARENT`）。D9/72 で Unicode を申告するようになったので、
+      ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる）。
     - 負応答を返さない。
     - 0x82/0x83 の欄データで、NUL と符号を加工する。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
