@@ -984,6 +984,15 @@ export class ScreenBuffer {
     });
   }
 
+  /**
+   * その番地が**純 DBCS の欄（G。FCW 0x8220）の中**か。G の欄のデータは **SO/SI 無しの 2 バイト組**で届く（実機の DDS の G 型で確かめた。
+   * ホストは欄の前後を WEA 0x12 0x05 0x81／0x80 で挟む。ACS は SF の受理で欄の全桁を DBCS の対として印付ける〔`addFieldToFFT`〕ので、
+   * 欄の中に置かれたバイトは組で読まれる）。`20260922-g-field-sosi`
+   */
+  isPureDbcsAt(addr: number): boolean {
+    return this.fields.some((f) => f.dbcsType === "pure" && addr >= f.startAddr && addr < f.startAddr + f.length);
+  }
+
   /** 画面順のフィールド一覧（1 始まり index はこの順） */
   orderedFields(): readonly InternalField[] {
     return [...this.fields].sort((a, b) => a.startAddr - b.startAddr);

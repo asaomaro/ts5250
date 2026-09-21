@@ -80,10 +80,17 @@ export function rejectReason(field: Field, ch: string, session?: SessionKind): R
  * SBCS=1 バイト。DBCS 連続ランは SO(0x0E)+2×N+SI(0x0F)＝SO/SI を 1 ペア共有。
  * フィールド長（`field.length`）は SO/SI・DBCS 2 バイトを含むバイト予算なので、
  * 桁数上限の判定はこの見積り長で行う（JS 文字数では DBCS を過小評価してしまう）。
+ * `noShift` は SO/SI を持たない欄（純 DBCS の G）。
  */
-export function dbcsByteLength(value: string, session?: SessionKind): number {
+export function dbcsByteLength(value: string, session?: SessionKind, noShift = false): number {
   // SBCS だけのセッションは SO/SI も 2 バイトの字も無い——1 字 1 バイト（打鍵で漢字・かなは弾いてある。`rejectReason`）
   if (session?.sbcsOnly === true) return [...value].length;
+  // **純 DBCS の欄（G）は SO/SI を持たない**（全桁が 2 バイトの組。実機の ACS のワイヤ: 12 バイトの欄に 6 字が SO/SI 無しで入る。`20260922-g-field-sosi`）
+  if (noShift) {
+    let n = 0;
+    for (const ch of value) n += !isRawSentinel(ch) && isWideForDbcs(ch) ? 2 : 1;
+    return n;
+  }
   let bytes = 0;
   let inDbcs = false;
   for (const ch of value) {

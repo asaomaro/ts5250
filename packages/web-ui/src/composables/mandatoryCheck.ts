@@ -150,5 +150,5 @@ export function isFieldExitRequired(f: Field): boolean {
  */
 function isFull(f: Field, value: string): boolean {
   const v = value.replace(/ +$/, "");
-  return (f.dbcsType ? dbcsByteLength(v) : v.length) >= f.length;
+  return (f.dbcsType ? dbcsByteLength(v, undefined, f.dbcsType === "pure") : v.length) >= f.length;
 }

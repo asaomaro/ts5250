@@ -575,6 +575,11 @@ function applyWtd(
   let addr = 0; // WTD 開始時のバッファアドレスは SBA で設定される（未設定時は先頭）
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
   /**
+   * **WEA 0x12 0x05 0x81 … 0x12 0x05 0x80 の間は、SO/SI 無しの DBCS（2 バイト組）**（ACS `PS5250.writeExtAttribute` の `isInExtNLSSegment`）。
+   * 純 DBCS の欄（G）のデータをホストはこの形で送ってくる（実機の DDS の G 型で確かめた。`20260922-g-field-sosi`）。
+   */
+  let nlsSegment = false;
+  /**
    * 「表せない文字」の数。**1 度だけまとめて知らせる**——1 画面に 500 個以上出る
    * （実測）ので 1 バイトずつ警告するとログが埋まる。
    */
@@ -625,7 +630,8 @@ function applyWtd(
       dbcsMode = false; // 属性桁で DBCS 連続は切れる
       continue;
     }
-    if (dbcsMode && codec.decodeDbcsPair && b >= 0x40) {
+    // SO/SI の間・WEA5 の区間・**純 DBCS の欄（G）の中**は 2 バイト組で読む（G の欄は SO/SI 無しで組だけが並ぶ）
+    if ((dbcsMode || nlsSegment || buf.isPureDbcsAt(addr)) && codec.decodeDbcsPair && b >= 0x40) {
       // DBCS 2 バイトを lead/tail の 2 桁に配置
       const b2 = r.u8();
       buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)), b, b2);
@@ -766,6 +772,12 @@ function applyWtd(
         // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
         const attrType = r.u8();
         const attrValue = r.u8();
+        // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり・0x00 は印を外す。
+        // 区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260922-g-field-sosi`）
+        if (attrType === 0x05 && codec.decodeDbcsPair && (attrValue === 0x81 || attrValue === 0x80 || attrValue === 0x00)) {
+          nlsSegment = attrValue === 0x81;
+          break;
+        }
         warn(
           `WEA order (type=0x${attrType.toString(16)}, value=0x${attrValue.toString(16)}) received — not applied`
         );

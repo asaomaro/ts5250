@@ -243,8 +243,13 @@ const sessionKind = computed(() => ({ sbcsOnly: props.sbcsSession === true }));
 function stripSentinels(s: string): string {
   return showSentinels(s, props.ccsid);
 }
-/** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト） */
-const byteLen = (value: string): number => dbcsByteLength(value, sessionKind.value);
+/**
+ * **SO/SI を欄の桁に持たない欄か**（純 DBCS の G）。ACS の G は欄の全桁が 2 バイトの組で、SO/SI の桁が無い（実機の DDS の G 型で確かめた。
+ * 12 バイトの欄に全角 6 字。ワイヤも SO/SI 無し）。バイト予算・列ビューのどちらも SO/SI を数えない（`20260922-g-field-sosi`）
+ */
+const noShift = (f: Field | undefined): boolean => f?.dbcsType === "pure";
+/** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト。`f` が G なら SO/SI 無し） */
+const byteLen = (value: string, f?: Field): number => dbcsByteLength(value, sessionKind.value, noShift(f));
 
 /**
  * 入力 1 文字を格納する形へ直す。
@@ -1743,8 +1748,16 @@ function sliceIndexOf(f: Field, offset: number): number {
 /** 編集後の値が欄のバイト予算（SO/SI・DBCS 2 バイト込み）に収まるか。
  *  収まらない入力は拒否/切り捨てる（送信時の FIELD_OVERFLOW を入力段で防ぐ）。 */
 function fitsBytes(candidate: EditState, f: Field): boolean {
-  const trimmed = editValue(candidate).replace(/ +$/, "");
-  return byteLen(trimmed) <= visLen(f);
+  const trimmed = trimPad(f, editValue(candidate));
+  return byteLen(trimmed, f) <= visLen(f);
+}
+
+/**
+ * 欄の値の末尾の詰め物を落とす。**G は全角空白（U+3000）も詰め物**——G の欄の空きは DBCS 空白 0x4040 で、コアが欄長までその空白で詰めて送るので、
+ * 値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ 12 バイト）。落として揃えないと、空きが NUL のホストの G を触っただけで値が変わったことになる
+ */
+function trimPad(f: Field, s: string): string {
+  return noShift(f) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -1778,7 +1791,7 @@ function logicalFromCells(f: Field): string {
       // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
-  return s.replace(/ +$/, ""); // 末尾パディング空白を除去
+  return trimPad(f, s); // 末尾パディング空白を除去（G は全角空白も）
 }
 
 /** 休止・未編集 DBCS 欄の列ビューを**セルから忠実に**組む（表示専用）。
@@ -1826,10 +1839,12 @@ function inputValue(f: Field): string {
 
 // SO/SI の表示マーク。showShiftMarks（ACS Ctrl+F 相当）が ON なら { } 、既定は空白。
 // displayChar（ホスト由来 SO/SI セル）と一致させる。
-function soMark(): string {
+function soMark(f?: Field): string {
+  if (noShift(f)) return ""; // G は SO/SI の桁が無い
   return props.showShiftMarks ? "{" : " ";
 }
-function siMark(): string {
+function siMark(f?: Field): string {
+  if (noShift(f)) return "";
   return props.showShiftMarks ? "}" : " ";
 }
 
@@ -1898,7 +1913,7 @@ function recodeViewActive(f: Field): boolean {
   if (props.sbcsView === "host") return false;
   if (props.edits.get(f.index) !== undefined) return false;
   if (editFieldIndex === f.index && edit) {
-    return editValue(edit).replace(/ +$/, "") === baselineValue(f);
+    return trimPad(f, editValue(edit)) === baselineValue(f);
   }
   return true; // 休止 or 未フォーカスの未編集欄
 }
@@ -1978,8 +1993,8 @@ function dbcsRestLayout(f: Field, marks?: ShiftMarkStyle): DbcsViewLayout {
   }
   return dbcsViewLayout(
     padDbcs(f, [...logicalValue(f)]).join(""),
-    marks?.so ?? soMark(),
-    marks?.si ?? siMark()
+    noShift(f) ? "" : (marks?.so ?? soMark()),
+    noShift(f) ? "" : (marks?.si ?? siMark())
   );
 }
 
@@ -2108,9 +2123,11 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
 function padDbcs(f: Field, chars: readonly string[]): string[] {
   const budget = visLen(f);
   const out = [...chars];
-  while (byteLen(out.join("")) < budget) out.push(" ");
+  // **純 DBCS の欄（G）の詰め物は全角空白**（ACS の G の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
+  // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（G の欄長は偶数なので通常は来ない）
+  while (byteLen(out.join(""), f) < budget) out.push(noShift(f) && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
-  while (out.length > 0 && byteLen(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
   return out;
 }
 
@@ -2119,9 +2136,9 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
  *
  *  **J・G・E は末尾の全角空白（U+3000）も空きに数える**（`wideBlank`。ACS `reserveRoomForInsert` は右端から続く NUL・半角空白・全角空白を空きと数える。
  *  ホストが 4040 で埋めた欄・全角空白で埋めた欄への挿入が通る。O は数えない——SO/SI の桁で数え始めが止まる。`20260922-dbcs-insert-room`） */
-function absorbDbcs(chars: string[], budget: number, cursor: number, wideBlank = false): string[] | undefined {
+function absorbDbcs(chars: string[], budget: number, cursor: number, wideBlank = false, f?: Field): string[] | undefined {
   const out = [...chars];
-  while (byteLen(out.join("")) > budget) {
+  while (byteLen(out.join(""), f) > budget) {
     const last = out[out.length - 1];
     if (out.length <= cursor || (last !== " " && !(wideBlank && last === "\u3000"))) return undefined;
     out.pop();
@@ -2156,16 +2173,16 @@ function atLastColumn(e: EditState, f: Field): boolean {
  * そのときは先に後続を 1 文字食ってから足す（上の `{１} {う}` はこの経路で決まる）。
  * 打鍵（`dbcsType`）とペースト（`overwriteInto`）で同じ規則を使う。
  */
-function keepByteLength(chars: string[], at: number, before: number, budget: number): void {
+function keepByteLength(chars: string[], at: number, before: number, budget: number, f?: Field): void {
   const next = at + 1;
   // 1 回で「食う」か「足す」のどちらかが進むので、最大でも欄の桁数ぶんで収束する
   for (let guard = chars.length + budget; guard > 0; guard--) {
-    const len = byteLen(chars.join(""));
+    const len = byteLen(chars.join(""), f);
     if (len === before) return;
     if (len < before) {
       const trial = [...chars];
       trial.splice(next, 0, " ");
-      if (byteLen(trial.join("")) <= before) {
+      if (byteLen(trial.join(""), f) <= before) {
         chars.splice(next, 0, " ");
         continue;
       }
@@ -2184,11 +2201,11 @@ function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditSta
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
   } else {
-    const before = byteLen(chars.join(""));
+    const before = byteLen(chars.join(""), f);
     chars[e.cursor] = ch;
-    keepByteLength(chars, e.cursor, before, budget); // 上書きで桁を動かさない
+    keepByteLength(chars, e.cursor, before, budget, f); // 上書きで桁を動かさない
   }
-  const fit = absorbDbcs(chars, budget, e.cursor + 1, f.dbcsType === "only" || f.dbcsType === "pure" || f.dbcsType === "either");
+  const fit = absorbDbcs(chars, budget, e.cursor + 1, f.dbcsType === "only" || f.dbcsType === "pure" || f.dbcsType === "either", f);
   if (!fit) return undefined;
   return { ...e, chars: padDbcs(f, fit), cursor: e.cursor + 1 };
 }
@@ -2238,7 +2255,7 @@ let syncingFocus = false;
 function dbcsLayoutOf(f: Field): ReturnType<typeof dbcsViewLayout> {
   const value =
     edit && editFieldIndex === f.index ? editValue(edit) : padDbcs(f, [...logicalValue(f)]).join("");
-  return dbcsViewLayout(value, soMark(), siMark());
+  return dbcsViewLayout(value, soMark(f), siMark(f));
 }
 
 /** DBCS 欄で、その <input> が担当するスライスの範囲（native caret ⇔ 欄全体の view 座標の変換用）。 */
@@ -2285,7 +2302,7 @@ function writeSlices(f: Field, full: string): void {
 function baselineValue(f: Field): string {
   const edited = props.edits.get(f.index);
   if (edited !== undefined) return edited;
-  return (f.dbcsType ? logicalFromCells(f) : f.value).replace(/ +$/, "");
+  return trimPad(f, f.dbcsType ? logicalFromCells(f) : f.value);
 }
 
 function sync(inputEl: HTMLInputElement, f: Field): void {
@@ -2326,7 +2343,7 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
   // 表示はパディング込みの列ビュー（未入力桁にもカーソルを置けるようにするため）。
   // 送信値（emit）は末尾パディングを除いた純論理値。
-  const logical = editValue(edit).replace(/ +$/, "");
+  const logical = trimPad(f, editValue(edit));
   const lay = dbcsLayoutOf(f);
   const caret = lay.caretOf(edit.cursor); // 欄全体の列ビュー index
   const col = Math.min(lay.columnsBefore(caret), visLen(f) - 1); // 欄先頭からの表示桁
@@ -3310,7 +3327,7 @@ function dbcsSelection(f: Field, el: HTMLInputElement): { text: string; ls: numb
   const start = globalCaret(r, el.selectionStart ?? 0);
   const end = globalCaret(r, el.selectionEnd ?? 0);
   if (start >= end) return undefined;
-  const logical = (edit && editFieldIndex === f.index ? editValue(edit) : logicalValue(f)).replace(/ +$/, "");
+  const logical = trimPad(f, edit && editFieldIndex === f.index ? editValue(edit) : logicalValue(f));
   const { caretOf } = lay;
   let text = "";
   let ls = -1;
@@ -3411,12 +3428,12 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
     while (out.length < i) out.push(" ");
     // 打鍵と同じ規則で上書きする: 桁数が変わったぶんは直後で調整し、後続の桁を動かさない
     // （全角の上に半角を貼ると 2 桁が 1 桁になり、その先の文字まで左へ詰まっていた）
-    const before = byteLen(out.join(""));
+    const before = byteLen(out.join(""), field);
     out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
-    if (i < out.length - 1) keepByteLength(out, i, before, budget);
+    if (i < out.length - 1) keepByteLength(out, i, before, budget, field);
     i++;
   }
-  while (out.length > 0 && byteLen(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join(""), field) > budget) out.pop();
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3450,7 +3467,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
-  if (byteLen(out.join("")) > budget) return undefined; // 入り切らない
+  if (byteLen(out.join(""), field) > budget) return undefined; // 入り切らない
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3615,7 +3632,7 @@ function pasteFrom(
         // （貼り付けで全角の並びが変わり得るため、貼る前のレイアウトでは桁が合わない）。
         // 変換せずに桁をそのまま入れると、カーソルが貼り付けた文字列の末尾側へ流れる。
         const chars = padDbcs(f, [...val]);
-        const lay = dbcsViewLayout(chars.join(""), soMark(), siMark());
+        const lay = dbcsViewLayout(chars.join(""), soMark(f), siMark(f));
         edit = {
           chars,
           cursor: lay.logicalAfter(lay.viewAtColumn(startOffset)),
@@ -3944,7 +3961,7 @@ function copyViewOf(f: Field): string {
     const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
     const view = resting || recodeViewActive(f)
       ? restViewFromCells(f, () => SHIFT_MARK)
-      : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), SHIFT_MARK, SHIFT_MARK).view;
+      : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), noShift(f) ? "" : SHIFT_MARK, noShift(f) ? "" : SHIFT_MARK).view;
     return displayText(view); // 外字は残す（センチネルは DBCS 欄の値には入らない）
   }
   return displayText(stripSentinels(inputValue(f)));
