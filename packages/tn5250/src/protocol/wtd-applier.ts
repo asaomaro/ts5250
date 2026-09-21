@@ -435,8 +435,13 @@ function applyCc(cc1: number, buf: ScreenBuffer, result: ApplyResult): void {
       buf.nullNonBypass(false);
       break;
     case 0xc0:
-      buf.resetMdtNonBypass();
+      // **消してから MDT を落とす。順序が逆だと 1 欄も消えない**
+      // （`nullNonBypass(true)` は MDT の立った欄だけを対象にするので、
+      //  先に MDT を落とすと対象が 0 件になる）。
+      // ACS `DS5250.processWCC1` の該当分岐も `clearNonbypassFields(true)` →
+      // `resetMDTFields(true)` の順（`20260921-wtd-cc1-c0-order` で原典を確認）。
       buf.nullNonBypass(true);
+      buf.resetMdtNonBypass();
       break;
     case 0xe0:
       buf.resetMdt();

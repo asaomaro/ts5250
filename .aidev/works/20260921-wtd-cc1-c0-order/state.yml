@@ -1,0 +1,12 @@
+schema: 11
+slug: wtd-cc1-c0-order
+current: deliver
+approved: [requirements, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+harnessRevDelivered: unknown

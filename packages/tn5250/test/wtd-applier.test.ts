@@ -168,6 +168,30 @@ describe("applyDataStream — 合成データ", () => {
     expect(setup.buf.mdtFields()).toHaveLength(0);
   });
 
+  /**
+   * **CC1=0xC0 は「MDT の立った欄を消す」＋「MDT を落とす」**（`20260921-wtd-cc1-c0-order`）。
+   *
+   * 順序が逆だと**1 欄も消えない**——`nullNonBypass(true)` は MDT の立った欄だけを対象にするので、
+   * 先に MDT を落とすと対象が 0 件になる。入力を消すべき画面で打った値が残る。
+   * ACS `DS5250.processWCC1` の該当分岐も `clearNonbypassFields(true)` → `resetMDTFields(true)` の順。
+   */
+  it("CC1=0xC0 は MDT の立った欄を消してから MDT を落とす", () => {
+    const setup = apply([
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 1, 1,
+      ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x03
+    ]);
+    setup.buf.setFieldValue(setup.buf.fieldByIndex(1), "AB");
+    expect(setup.buf.mdtFields()).toHaveLength(1);
+
+    apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0xc0, 0x00], setup.buf);
+
+    // **値が消えている**（順序が逆だと "AB" が残る）
+    expect(setup.buf.snapshot("t", false).fields[0]?.value.trim()).toBe("");
+    // MDT も落ちている
+    expect(setup.buf.mdtFields()).toHaveLength(0);
+  });
+
   it("READ_MDT_FIELDS で readRequested / unlock が立つ", () => {
     const { result } = apply([ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]);
     expect(result.readRequested).toBe(true);
