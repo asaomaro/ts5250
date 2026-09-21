@@ -166,15 +166,14 @@ describe("renderSpoolHtml — 見え方の切り替え", () => {
   });
 
   /**
-   * **SO/SI の印は桁を占めない。** 文字の流れに挟むと印を出した行だけ右へずれる。
-   * 実採取の帳票（PUB400 の Library List）では DBCS の行も他の行と同じ 39 桁目から
-   * 始まっており、**ホストは SO/SI が桁を占めない前提で桁を組んでいる**——
-   * 桁を与えるとその行だけ食い違う。だから桁の境目に重ねて描く。
+   * **SO/SI の印は幅を持たせずに重ねる。** 桁は復号器が確保している——ACS と同じく SO・SI は既定で 1 桁ずつ空白を占める
+   * （`20260921-scs-sosi-columns`）ので、印はその空白の桁の左端に重ねる。印の有無で桁は動かない。
+   * ~~ホストは SO/SI が桁を占めない前提で桁を組んでいる~~ は ACS の描き方と違った（`20260728-scs-dbcs-column-align` D1 を破棄）。
    */
-  it("SO/SI の印を桁の境目に重ねて置く（幅を持たせない）", () => {
+  it("SO/SI の印を SO/SI の桁に重ねて置く（幅を持たせない）", () => {
     const html = renderSpoolHtml([dbcsPage()]);
-    expect(html).toContain('<span class="so" style="left:2ch">{</span>');
-    expect(html).toContain('<span class="so" style="left:8ch">}</span>');
+    expect(html).toContain('<span class="so" style="left:2ch">{</span>'); // AB の次＝SO の桁
+    expect(html).toContain('<span class="so" style="left:9ch">}</span>'); // SO(1)＋日本語(6) の次＝SI の桁
     expect(html).toContain(".so{display:none;position:absolute"); // 既定は非表示・重ねて置く
     expect(html).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
   });

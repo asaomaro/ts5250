@@ -479,14 +479,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   表に無い 0x40 未満は印字しない（日本語機の帳票の先頭の「�」＝SBCS の状態の SI が消えた）、0x03 は ASCII 透過として読み飛ばす、
   LF・IRS・BS・VT・TRN・SA・VCS・GE を ACS のバイト数で読む、RNL・RFF は ACS と同じく何もしない、2B は長さ＋2（SGEA は 5）、
   表に無いクラスは 0x2B だけを読み飛ばす（~~打ち切り~~）。PUB400 の実採取の帳票 2 件は新旧で 1 桁も変わらない。mutation 10 通り検出。
+- [x] **SCS の SO/SI の桁**（下の【まとめ】から割った。**要実測** → 日本語機の帳票が送る値で決着）。
+  **完了（`20260921-scs-sosi-columns`・PR #410）**: ACS と同じく SO・SI を既定で 1 桁ずつ空白として描き、ホストの SPCC（`2B FD .. 03`）で
+  0 / 1 / 2 に切り替える（`packages/scs/src/scs.ts`。ACS `PrintSCS5250DB.shiftOut` / `shiftIn` / `setPresentationControlCharacter`）。
+  日本語機の DSPLIBL は `2B FD 04 03 00 01`＝1 を送り、PUB400 の帳票は送らない（＝既定の 1）。`20260728-scs-dbcs-column-align` D1
+  （桁を占めない）は破棄。DBCS の行は ACS と同じく 1 桁右から描かれる。mutation 6 通り検出。
 - [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。
   **着手時に両側を再確認すること。**
   - ~~1 バイトの制御（中・安い）~~ → 上の `20260921-scs-controls-acs` で済んだ
   - ~~0x2B オーダーの消費長（中）~~ → 同上。~~ACS: 長さの前置を見て、汎用に読み飛ばす。~~ は表にあるクラスについてだけ正しい
     （表に無いクラスは 0x2B の 1 バイトだけ。原典 `proc_undefcode`）
-  - SO/SI の桁（中・要実測）
-    - ACS: 既定では 1 桁の空白として描く。SPCC で切り替わる。日本語の実機は `2B FD 04 03 00 01` を送ってくる。
-    - 当 PJ: 0 桁（`spool-html.ts:141-146`。PUB400 での観察で決めた）。
+  - ~~SO/SI の桁（中・要実測）~~ → 上の `20260921-scs-sosi-columns` で済んだ
   - 低
     - 重ね打ち（CR だけで行頭へ戻る）
     - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）

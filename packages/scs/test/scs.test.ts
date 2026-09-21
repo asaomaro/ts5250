@@ -36,8 +36,9 @@ describe("ScsDecoder", () => {
     const text = pages.map((p) => p.lines.join("\n")).join("\n");
     expect(pages.length).toBeGreaterThanOrEqual(1);
     expect(text).toMatch(/Library List/);
-    // MYLIB 行のテキスト説明に日本語（CHGLIB で設定）が桁揃えで載る
-    expect(text).toMatch(/MYLIB {7}CUR {20}日本語テスト/);
+    // MYLIB 行のテキスト説明に日本語（CHGLIB で設定）が載る。**SO が 1 桁の空白を占める**ので、説明欄の頭（38 桁目）の
+    // 次から始まる（ACS `PrintSCS5250DB.shiftOut` の既定。~~`{20}` で 38 桁目から＝SO は桁を占めない~~。`20260921-scs-sosi-columns`）
+    expect(text).toMatch(/MYLIB {7}CUR {21}日本語テスト/);
     // 英数の行は従来どおり
     expect(text).toMatch(/QSYS {8}SYS {20}System Library/);
   });
@@ -48,9 +49,10 @@ describe("ScsDecoder", () => {
     const scs = codec.encode("AB日本語CD").bytes;
     const pages = new ScsDecoder(1399).decode(scs);
     expect(pages).toHaveLength(1);
-    expect(pages[0]!.lines[0]).toBe("AB日本語CD");
-    // 全角は 2 桁を占める（後半桁は継続の空文字列）。AB(2)＋日本語(6)＋CD(2)=10 桁
-    expect(pages[0]!.cols).toBe(10);
+    // SO・SI は既定で 1 桁ずつ空白を占める（ACS）
+    expect(pages[0]!.lines[0]).toBe("AB 日本語 CD");
+    // 全角は 2 桁を占める（後半桁は継続の空文字列）。AB(2)＋SO(1)＋日本語(6)＋SI(1)＋CD(2)=12 桁
+    expect(pages[0]!.cols).toBe(12);
   });
 
   /**
@@ -75,27 +77,49 @@ describe("ScsDecoder", () => {
     const pages = new ScsDecoder(1399).decode(codec.encode("A日B").bytes);
     const raw = pages[0]!.raw!;
     expect(raw[0]![0]).toBe(0xc1); // A
-    expect(raw[0]![1]).toBeUndefined(); // 日（前半）
-    expect(raw[0]![2]).toBeUndefined(); // 日（継続桁）
-    expect(raw[0]![3]).toBe(0xc2); // B
+    expect(raw[0]![1]).toBeUndefined(); // SO の桁
+    expect(raw[0]![2]).toBeUndefined(); // 日（前半）
+    expect(raw[0]![3]).toBeUndefined(); // 日（継続桁）
+    expect(raw[0]![4]).toBeUndefined(); // SI の桁
+    expect(raw[0]![5]).toBe(0xc2); // B
   });
 
   /**
-   * **SO/SI の位置を残す。** SO/SI 自身は桁を占めない（この復号器は昔からシフトで桁を
-   * 進めない）ので、`col` は**その直後に来る桁**を指す。印をどう描くかは描く側の判断で、
-   * ここでは位置だけを渡す。
+   * **SO/SI は既定で 1 桁ずつ空白を占める**（ACS `PrintSCS5250DB` の `spccBehavior` 既定 1。`20260921-scs-sosi-columns`）。
+   * ~~SO/SI 自身は桁を占めない~~ は `20260728-scs-dbcs-column-align` D1 の決定で、ACS の描き方と違った。
+   * `col` は SO/SI が占める桁を指す。
    */
-  it("SO/SI の位置を残す（桁は占めない）", () => {
+  it("SO/SI の位置を残す（既定では 1 桁ずつ占める）", () => {
     const codec = codecForCcsid(1399);
     const pages = new ScsDecoder(1399).decode(codec.encode("A日B").bytes);
     const p = pages[0]!;
     expect(p.shifts![0]).toEqual([
-      { col: 2, kind: "so" }, // A の次＝全角の始まり
-      { col: 4, kind: "si" }  // 全角 2 桁のあと
+      { col: 2, kind: "so" }, // A の次＝SO の桁
+      { col: 5, kind: "si" }  // 全角 2 桁のあと＝SI の桁
     ]);
-    // **桁は動いていない**（lines も cols もこれまでどおり）
-    expect(p.lines[0]).toBe("A日B");
-    expect(p.cols).toBe(4);
+    expect(p.lines[0]).toBe("A 日 B");
+    expect(p.cols).toBe(6);
+  });
+
+  /** ホストの SPCC（`2B FD len 03 値`）で描き方が切り替わる（ACS `setPresentationControlCharacter`） */
+  it.each([
+    ["00 00＝占めない", [0x00, 0x00], "A日B"],
+    ["00 01＝1 桁ずつ（日本語機が送ってくる値）", [0x00, 0x01], "A 日 B"],
+    ["00 02＝SO は占めず SI が 2 桁", [0x00, 0x02], "A日  B"],
+    ["範囲外（00 03）は既定の 1 桁ずつ", [0x00, 0x03], "A 日 B"]
+  ])("SPCC %s", (_l, value, expected) => {
+    const codec = codecForCcsid(1399);
+    const scs = Uint8Array.from([0x2b, 0xfd, 0x04, 0x03, ...value, ...codec.encode("A日B").bytes]);
+    expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe(expected);
+  });
+
+  it("SPCC の長さが 2 なら値なしで 1 桁ずつ、2・4 以外の長さは受けない（切り替えない）", () => {
+    const codec = codecForCcsid(1399);
+    const none = [0x2b, 0xfd, 0x04, 0x03, 0x00, 0x00];
+    const len2 = Uint8Array.from([...none, 0x2b, 0xfd, 0x02, 0x03, ...codec.encode("A日B").bytes]);
+    expect(new ScsDecoder(1399).decode(len2)[0]!.lines[0]).toBe("A 日 B");
+    const len3 = Uint8Array.from([...none, 0x2b, 0xfd, 0x03, 0x03, 0x01, ...codec.encode("A日B").bytes]);
+    expect(new ScsDecoder(1399).decode(len3)[0]!.lines[0], "長さ 3 は受けないので 00 00 のまま").toBe("A日B");
   });
 
   it("DBCS 全角の直後に SBCS が続いても桁がずれない（NL 跨ぎ）", () => {
@@ -103,7 +127,7 @@ describe("ScsDecoder", () => {
     const line1 = codec.encode("名前").bytes; // 全角2文字=4桁
     const scs = Uint8Array.from([...line1, 0x15, ...codec.encode("X").bytes]); // NL(0x15) で次行に X
     const pages = new ScsDecoder(1399).decode(scs);
-    expect(pages[0]!.lines[0]).toBe("名前");
+    expect(pages[0]!.lines[0]).toBe(" 名前"); // SO の 1 桁
     expect(pages[0]!.lines[1]).toBe("X");
   });
 });
@@ -131,19 +155,19 @@ describe("ScsDecoder — SI を閉じないまま制御コードが来る帳票"
 
   it("NL が改行として効き、前後の全角が化けない", () => {
     const pages = dec([SO, ...KI, NL, ...NOU, SI, FF]);
-    expect(pages[0]!.lines).toEqual(["機", "能"]);
+    expect(pages[0]!.lines).toEqual([" 機", "能"]); // 先頭の空白は SO の桁（ACS の既定）
   });
 
   it("FF が改ページとして効く", () => {
     const pages = dec([SO, ...KI, FF, ...NOU, SI, FF]);
     expect(pages).toHaveLength(2);
-    expect(pages[0]!.lines[0]).toBe("機");
+    expect(pages[0]!.lines[0]).toBe(" 機");
     expect(pages[1]!.lines[0]).toBe("能");
   });
 
   it("SI を閉じた通常の形は従来どおり（退行防止）", () => {
     const pages = dec([SO, ...KI, SI, NL, SO, ...NOU, SI, FF]);
-    expect(pages[0]!.lines).toEqual(["機", "能"]);
+    expect(pages[0]!.lines).toEqual([" 機", " 能"]);
   });
 
   it("奇数バイトの DBCS ランでも U+FFFD が延々と続かない", () => {
@@ -156,8 +180,8 @@ describe("ScsDecoder — SI を閉じないまま制御コードが来る帳票"
 
   it("全角空白（0x4040）は行中で 2 桁の U+3000 のまま（退行防止）", () => {
     const pages = dec([SO, ...KI, ...ZENSP, ...NOU, SI, FF]);
-    expect(pages[0]!.lines[0]).toBe("機\u3000能");
-    expect(pages[0]!.cols).toBe(6); // 機(2) + 全角空白(2) + 能(2)
+    expect(pages[0]!.lines[0]).toBe(" 機\u3000能");
+    expect(pages[0]!.cols).toBe(8); // SO(1) + 機(2) + 全角空白(2) + 能(2) + SI(1)
   });
 });
 

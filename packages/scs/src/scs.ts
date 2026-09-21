@@ -41,18 +41,21 @@ export interface LogicalPage {
    */
   raw?: (number | undefined)[][];
   /**
-   * SO/SI が現れた位置。`col` は**その直後に来る桁**（1 起点）で、SO/SI 自身は桁を占めない
-   * （この復号器は昔からシフトで桁を進めない。`lines` の桁位置はそのまま）。
+   * SO/SI が現れた位置（1 起点）。**SO/SI が桁を占めるときはその桁**、占めないときは直後に来る桁。
    *
-   * **SO/SI 表示のために持つ。** 印をどう描くか——桁を 1 つ使うのか、`lines` の桁を
-   * 動かさずに見せるのか——は描く側の判断なので、ここでは位置だけを渡す。
+   * **SO/SI は ACS と同じく既定で 1 桁ずつ空白として占める**（`PrintSCS5250DB.shiftOut` / `shiftIn`。
+   * `20260921-scs-sosi-columns`）。ホストが `2B FD .. 03`（SPCC）で「占めない」「SI だけ 2 桁」に切り替えられる。
+   * ~~SO/SI 自身は桁を占めない（この復号器は昔からシフトで桁を進めない）~~——PUB400 の帳票で桁が揃って見えることを
+   * 根拠にした決定（`20260728-scs-dbcs-column-align` D1）で、ACS の描き方と違った。
+   *
+   * **SO/SI 表示のために持つ。** 印をどう描くかは描く側の判断なので、ここでは位置だけを渡す。
    */
   shifts?: ShiftMark[][];
 }
 
 /** SO/SI の位置（`LogicalPage.shifts`） */
 export interface ShiftMark {
-  /** その直後に来る桁（1 起点） */
+  /** SO/SI が占める桁（占めないときは直後に来る桁。1 起点） */
   col: number;
   kind: "so" | "si";
 }
@@ -117,6 +120,12 @@ export class ScsDecoder {
     let maxRow = 0;
     let maxCol = 0;
     let dbcsMode = false; // SO/SI シフト状態（DBCS コーデックのみ）
+    // **SO/SI の描き方**（ACS `spccBehavior`。既定 1）: 0 = 桁を占めない / 1 = SO・SI とも 1 桁の空白 /
+    // 2 = SO は占めず SI が 2 桁。ホストが `2B FD .. 03` で切り替える（日本語機の帳票は `2B FD 04 03 00 01`＝1 を送ってきた）
+    let spcc = 1;
+    const shiftCells = (n: number): void => {
+      for (let k = 0; k < n; k++) put(" ");
+    };
 
     const cellAt = (c: number): void => {
       // grid[row-1] を c 桁まで空白で伸ばす
@@ -192,6 +201,7 @@ export class ScsDecoder {
         if (b === SI) {
           dbcsMode = false;
           markShift("si");
+          shiftCells(spcc === 0 ? 0 : spcc); // SI は 1 桁（spcc=1）か 2 桁（spcc=2）
           continue;
         }
         if (b === SO) {
@@ -270,13 +280,14 @@ export class ScsDecoder {
           if (next() >= 0) put(String.fromCodePoint(this.codec.decodeByte(GRAPHIC_ERROR_BYTE)), GRAPHIC_ERROR_BYTE);
           break;
         case ORDER_2B:
-          this.skip2b(next, () => i, (to) => (i = to));
+          this.skip2b(next, () => i, (to) => (i = to), (v) => (spcc = v));
           break;
         default:
           if (this.isDbcs && b === SO) {
-            // SBCS モード: SO で DBCS モードへ
+            // SBCS モード: SO で DBCS モードへ。既定では SO も 1 桁の空白（spcc=1）
             dbcsMode = true;
             markShift("so");
+            shiftCells(spcc === 1 ? 1 : 0);
           } else if (b >= 0x40) put(String.fromCodePoint(this.codec.decodeByte(b)), b);
           // それ以外の 0x40 未満は、ACS も何もしない制御（RNL・RFF ほか）か未定義の制御。印字しない
           break;
@@ -300,7 +311,7 @@ export class ScsDecoder {
    * ~~D1 のサブ 06（SCG）は 2B D1 06 01 の後ろを 2 バイト~~ だと、GCGID・CPGID の 4 バイトを取りこぼして
    * 同期がずれていた（長さ 06 どおりなら 8 バイト）。`read` は次の 1 バイト（EOF で -1）。
    */
-  private skip2b(read: () => number, pos: () => number, seek: (to: number) => void): void {
+  private skip2b(read: () => number, pos: () => number, seek: (to: number) => void, setSpcc: (v: number) => void): void {
     const at = pos(); // クラスの位置
     const cls = read();
     if (cls < 0) return;
@@ -315,6 +326,26 @@ export class ScsDecoder {
     }
     const len = read(); // 長さ（自身を含み、2B とクラスを含まない）
     if (len < 0) return;
+    if (cls === 0xfd && len >= 2) {
+      // **2B FD .. 03 は SO/SI の描き方（SPCC）**（ACS `PrintSCS5250DB.setPresentationControlCharacter`）。
+      // 長さは 2 か 4 だけを受け、4 なら続く 2 バイトが値（2 を超えたら既定の 1）、2 なら値なしで 1。
+      // それ以外の長さは受けない（ACS はパラメーター・エラーにして変えない）
+      const sub = read();
+      if (sub < 0) return;
+      if (sub === 0x03 && (len === 2 || len === 4)) {
+        let v = 1;
+        if (len === 4) {
+          const hi = read(), lo = read();
+          if (hi < 0 || lo < 0) return;
+          v = (hi << 8) | lo;
+          if (v > 2) v = 1;
+        }
+        setSpcc(v);
+        return;
+      }
+      for (let k = 0; k < len - 2; k++) if (read() < 0) return;
+      return;
+    }
     for (let k = 0; k < len - 1; k++) if (read() < 0) return;
   }
 }
