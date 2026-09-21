@@ -440,6 +440,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   最初の入力欄（継続欄は先頭の区切りだけ。無ければ先頭へ巡回。`nextNonByPassInputFieldPos`）の末尾へ（`packages/web-ui/src/components/EmulatorPane.vue` の `endKey`）。
 - [x] **【まとめ】キー編集のうち欄の先頭の Backspace（SBCS）**（優先度 低）。**完了（`20260921-backspace-field-start`・PR #410）**: ACS と同じく操作員エラー 0005 で
   カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
+- [x] **【まとめ】キー編集のうち MONOCASE の ASCII 以外の文字・SBCS のセッションの Ambiguous の字**（優先度 中）。**完了（`20260921-monocase-non-ascii`・PR #410）**:
+  MONOCASE の欄は 1 バイト文字をすべて大文字に（`µ` と 2 字になる大文字の `ß` は変えない。`ScreenGrid.vue` の `inputChar`）。着手して見つけた
+  **SBCS のセッション（37 など）で `é` `ü` `ß` `ø` を打てなかった**欠陥も直した——打鍵の判定とバイト予算が East Asian Width の Ambiguous を全角と見ていた
+  （`fieldValidate.ts` の `SessionKind`。CCSID が DBCS でないときだけ。漢字・かなは従来どおり打った時点で弾く）。実機の ACS のコア（PUB400・37。
+  `scripts/acs-probe/monocase-non-ascii.txt`）: コマンド行は `aéñøüµß` のまま、利用者名（MONOCASE）は `AÉÑØÜµß`。テスト `field-validate.test.ts`（4 件）・
+  `sbcs-session-input.test.ts`（3 件）・`ffw-behavior-bits.test.ts`（4 件）、mutation 12 通りすべて検出。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -468,7 +474,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、Field Exit 時の検査
-    - MONOCASE で ASCII 以外を大文字化しない
+    - ~~MONOCASE で ASCII 以外を大文字化しない~~ → 上の `20260921-monocase-non-ascii` で済んだ
+    - SBCS のセッションでコードページに無い字（37 の `α`・かな等）: ACS は受け付けて送るときに置き換える（`PS5250.inputChar` は SBCS のセッションでは
+      可否を見ない）。当 PJ は漢字・かなを打った時点で、それ以外を送信時（core の「CCSID の外の文字」）に弾く（`20260921-monocase-non-ascii` D1）。
+      ACS が置き換えに使うバイトは未確認。あわせて Greek の `μ` をコードページの `µ` へ置き換える（`hasMicroSymbol`）のも未対応
+    - DBCS のセッションで文字の可否（`codepage.isValidChar`）に外れた字: ACS はエラー 39、当 PJ は「半角文字しか入力できません」など型の理由で弾く
     - HLLAPI の `@B`（Backtab）が継続欄・逆向きのカーソル送りを見ない（ペインの `backtab` は見る。`20260921-home-record-backspace` D5）
     - DBCS 専用欄がホーム位置のときの Home（ACS はホーム位置が SO なら 1 桁先へ置くので、原典の字面では 2 回目も
       「ホーム位置でない」となり Record Backspace を送らない。当 PJ は 2 回目で送る。**未確認**。節目の独立点検の懸念）

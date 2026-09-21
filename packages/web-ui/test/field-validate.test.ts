@@ -225,3 +225,24 @@ describe("列ビューとセンチネル", () => {
     expect(columnView("AB設計CD", "{", "}")).toBe("AB{設計}CD");
   });
 });
+
+/**
+ * **SBCS だけのセッション（37 など）**（`20260921-monocase-non-ascii`）。ACS `PS5250.inputChar` は DBCS のセッションでなければ幅を見ない。
+ * 実機の ACS のコア（PUB400・37）でコマンド行に `aéñøüµß` がそのまま入った（`scripts/acs-probe/monocase-non-ascii.txt`）。
+ */
+describe("SBCS だけのセッション", () => {
+  const sbcs = { sbcsOnly: true };
+  it("**East Asian Width の Ambiguous（é ü ß ø ±）を全角として弾かない**", () => {
+    for (const ch of ["é", "ü", "ß", "ø", "±"]) expect(acceptsChar(fld({}), ch, sbcs), ch).toBe(true);
+  });
+  it("DBCS のセッション（既定）では従来どおり全角として弾く（DBCS の表から Ambiguous の字が出てくるため）", () => {
+    for (const ch of ["é", "ü", "ß", "ø"]) expect(acceptsChar(fld({}), ch), ch).toBe(false);
+  });
+  it("漢字・かな・全角英数は SBCS のセッションでも弾く（コードページに無く送れない）", () => {
+    for (const ch of ["漢", "あ", "Ａ"]) expect(acceptsChar(fld({}), ch, sbcs), ch).toBe(false);
+  });
+  it("**バイト長は 1 字 1 バイト**（SO/SI も 2 バイトの字も無い）", () => {
+    expect(dbcsByteLength("aéüßø", sbcs)).toBe(5);
+    expect(dbcsByteLength("aéüßø")).toBe(11); // DBCS のセッションでは a + SO + 2×4 + SI
+  });
+});

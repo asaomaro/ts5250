@@ -146,6 +146,11 @@ const props = withDefaults(
     cursor?: { row: number; col: number };
     /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
     uppercaseInput?: boolean;
+    /**
+     * **SBCS だけのセッション**（37 など。DBCS の CCSID でない）。打鍵時の幅の判定（`rejectReason`）と MONOCASE の大文字化が
+     * 分かれる（`20260921-monocase-non-ascii`）。省略時は DBCS のセッションと同じ扱い
+     */
+    sbcsSession?: boolean;
     /** 「押せるもの」の見せ方。none は機能キー凡例をボタン化しない（spec D5） */
     buttons?: ButtonStyle;
     /** ウィンドウそのもの（枠・面）の見せ方。none は枠を描かない */
@@ -221,9 +226,13 @@ const gui = computed(() => props.snapshot.gui);
  * そもそも応答を待たない（`key-done` が即返る）ので、施錠を見ないと守りが無い。
  */
 const inhibited = computed(() => props.busy === true || props.snapshot.keyboardLocked);
+/** 打鍵・貼り付けの受け付けの判定に渡すセッションの種類（`fieldValidate.ts` の `SessionKind`） */
+const sessionKind = computed(() => ({ sbcsOnly: props.sbcsSession === true }));
+/** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト） */
+const byteLen = (value: string): number => dbcsByteLength(value, sessionKind.value);
 
 /**
- * 入力 1 文字を格納する形へ直す。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。
+ * 入力 1 文字を格納する形へ直す。
  *
  * 大文字化する理由は**2 つあり、どちらか一方でも真なら大文字化する**。同じ結果でも根拠が別なので、
  * 片方を他方の代用にしてはいけない（片方を消すともう片方の画面が壊れる）。
@@ -237,8 +246,15 @@ const inhibited = computed(() => props.busy === true || props.snapshot.keyboardL
  * 逆に `CHECK(LC)` 付きの欄では**小文字がそのまま残る**のが正しい。
  */
 function inputChar(ch: string, field: Field): string {
-  const upper = props.uppercaseInput || field.monocase === true;
-  return upper && ch >= "a" && ch <= "z" ? ch.toUpperCase() : ch;
+  // 英小文字の無いコードページ（930/5026）は a〜z だけ（ACS `CodePage.toUpper` も 290 の a〜z だけ）
+  if (props.uppercaseInput && ch >= "a" && ch <= "z") return ch.toUpperCase();
+  if (field.monocase !== true) return ch;
+  // **MONOCASE の欄は 1 バイト文字をすべて大文字にする**（ACS `PS5250.processCharKeyStroke` の `Character.toUpperCase`。
+  // `20260921-monocase-non-ascii`）。実機（PUB400・ACS のコア）で `aéñøü` → `AÉÑØÜ`。~~対象は半角 ASCII の a-z のみ~~。
+  // ACS と同じく `µ` は変えず、2 バイト文字（全角）は対象外、大文字が 1 文字にならないもの（`ß`）はそのまま（Java の char 単位の大文字化）
+  if (ch === "\u00b5" || (props.sbcsSession !== true && isFullWidth(ch))) return ch;
+  const up = ch.toUpperCase();
+  return up.length === 1 ? up : ch;
 }
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
@@ -1709,7 +1725,7 @@ function sliceIndexOf(f: Field, offset: number): number {
  *  収まらない入力は拒否/切り捨てる（送信時の FIELD_OVERFLOW を入力段で防ぐ）。 */
 function fitsBytes(candidate: EditState, f: Field): boolean {
   const trimmed = editValue(candidate).replace(/ +$/, "");
-  return dbcsByteLength(trimmed) <= visLen(f);
+  return byteLen(trimmed) <= visLen(f);
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -2048,9 +2064,9 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
 function padDbcs(f: Field, chars: readonly string[]): string[] {
   const budget = visLen(f);
   const out = [...chars];
-  while (dbcsByteLength(out.join("")) < budget) out.push(" ");
+  while (byteLen(out.join("")) < budget) out.push(" ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
-  while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join("")) > budget) out.pop();
   return out;
 }
 
@@ -2058,7 +2074,7 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
  *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。 */
 function absorbDbcs(chars: string[], budget: number, cursor: number): string[] | undefined {
   const out = [...chars];
-  while (dbcsByteLength(out.join("")) > budget) {
+  while (byteLen(out.join("")) > budget) {
     if (out.length <= cursor || out[out.length - 1] !== " ") return undefined;
     out.pop();
   }
@@ -2085,12 +2101,12 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
   const next = at + 1;
   // 1 回で「食う」か「足す」のどちらかが進むので、最大でも欄の桁数ぶんで収束する
   for (let guard = chars.length + budget; guard > 0; guard--) {
-    const len = dbcsByteLength(chars.join(""));
+    const len = byteLen(chars.join(""));
     if (len === before) return;
     if (len < before) {
       const trial = [...chars];
       trial.splice(next, 0, " ");
-      if (dbcsByteLength(trial.join("")) <= before) {
+      if (byteLen(trial.join("")) <= before) {
         chars.splice(next, 0, " ");
         continue;
       }
@@ -2107,7 +2123,7 @@ function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
   } else {
-    const before = dbcsByteLength(chars.join(""));
+    const before = byteLen(chars.join(""));
     chars[e.cursor] = ch;
     keepByteLength(chars, e.cursor, before, budget); // 上書きで桁を動かさない
   }
@@ -2846,7 +2862,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       return;
     }
     const ch = inputChar(ev.key, f); // MONOCASE 欄／カタカナ系 CCSID は英小文字を大文字化
-    const why = rejectReason(f, ch);
+    const why = rejectReason(f, ch, sessionKind.value);
     if (why) {
       emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
       return;
@@ -2980,7 +2996,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     if (isNumpadSign(ev)) return; // テンキーの − / ＋ はペインの Field− / Field+ へ（SBCS 欄と同じ）
     ev.preventDefault();
     const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    const why = rejectReason(f, ch);
+    const why = rejectReason(f, ch, sessionKind.value);
     if (why) {
       emit("notice", MSG_BY_REASON[why]);
       return;
@@ -3201,7 +3217,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    if (!acceptsChar(field, ch)) {
+    if (!acceptsChar(field, ch, sessionKind.value)) {
       // **弾いた文字も桁を消費する（捨てて詰めない）。** ACS は入力不可文字の桁を
       // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
       // 数値欄 "123" に "3A5" を貼ると "353"（正: "325"）になる。
@@ -3213,12 +3229,12 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
     while (out.length < i) out.push(" ");
     // 打鍵と同じ規則で上書きする: 桁数が変わったぶんは直後で調整し、後続の桁を動かさない
     // （全角の上に半角を貼ると 2 桁が 1 桁になり、その先の文字まで左へ詰まっていた）
-    const before = dbcsByteLength(out.join(""));
+    const before = byteLen(out.join(""));
     out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
     if (i < out.length - 1) keepByteLength(out, i, before, budget);
     i++;
   }
-  while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join("")) > budget) out.pop();
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3228,7 +3244,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 function firstRejection(field: Field, text: string): RejectReason | undefined {
   for (const raw of text) {
     if (raw === "\n" || raw === "\r") continue;
-    const why = rejectReason(field, inputChar(raw, field));
+    const why = rejectReason(field, inputChar(raw, field), sessionKind.value);
     if (why) return why;
   }
   return undefined;
@@ -3252,7 +3268,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
-  if (dbcsByteLength(out.join("")) > budget) return undefined; // 入り切らない
+  if (byteLen(out.join("")) > budget) return undefined; // 入り切らない
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3353,7 +3369,7 @@ function pasteFrom(
         // （`overwriteInto` の「型違反も桁を消費する」は独立した欄どうしの話で、こちらとは別）。
         if (t.field.continued !== undefined) {
           let chars = [...rest]; // コードポイント単位（サロゲート対を割らない）
-          while (chars.length > 0 && !acceptsChar(t.field, chars[0]!)) chars = chars.slice(1);
+          while (chars.length > 0 && !acceptsChar(t.field, chars[0]!, sessionKind.value)) chars = chars.slice(1);
           rest = chars.join("");
           if (rest.length === 0) break;
         }
@@ -3496,7 +3512,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     }
     for (const raw of [...text]) {
       const ch = inputChar(raw, f);
-      if (!acceptsChar(f, ch)) continue;
+      if (!acceptsChar(f, ch, sessionKind.value)) continue;
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
       e = trial;
@@ -3572,7 +3588,7 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   let noRoom = false;
   for (const raw of [...el.value].slice(composePrefixLen)) {
     const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    if (!acceptsChar(f, ch)) continue;
+    if (!acceptsChar(f, ch, sessionKind.value)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
     const base = composeReplacedSelection ? { ...e, insertMode: true } : e;

@@ -1,0 +1,17 @@
+# MONOCASE の欄で ASCII 以外の 1 バイト文字をどう扱うか（ACS のコア・PUB400・CCSID 37）。`20260921-monocase-non-ascii`。
+# 原典 `PS5250.inputChar`: DBCS のセッションでなければ幅も文字の可否も見ずに置き（`putSBChar`）、MONOCASE の欄なら
+# `Character.toUpperCase`（`µ` だけ除く。DBCS の文字も除くが、SBCS のセッションには DBCS の文字が無い）。
+# 画面はサインオン後のコマンド行（CHECK(LC)＝MONOCASE でない）と、SIGNOFF の後のサインオン画面の利用者名（MONOCASE）。
+# 実行: PROBE_BYPASS_SIGNON=encrypted PROBE_PASSWORD_LEVEL=3 node ... scripts/acs-probe.mjs scripts/acs-probe/monocase-non-ascii.txt PUB400
+# **`signon` の手順は使わない**——PUB400 では欄へ書く `signon` が 3 回とも失敗した（原因は追っていない。失敗はサインオンの
+# 失敗回数に数えられるので、その都度成功のサインオンで数え直した）。自動サインオン（ACS の NEW-ENVIRON）なら通る。
+settle 2500
+keys [home][eraseeof]aéñøüµß
+settle 300
+dump cmdline
+keys [home][eraseeof]SIGNOFF[enter]
+settle 2500
+dump after-signoff
+keys aéñøüµß
+settle 300
+dump user

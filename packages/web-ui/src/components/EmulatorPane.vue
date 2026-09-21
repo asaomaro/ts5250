@@ -32,6 +32,7 @@ import {
 import { play } from "../macro-engine.js";
 import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
+import { isDbcsCcsid } from "@ts5250/tn5250/browser";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "../composables/opMessages.js";
 import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
@@ -94,6 +95,8 @@ const breakReservation = (): void => breakReservationFor(props.sessionId);
 const loading = computed(() => state.value?.loading ?? false);
 // カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
 const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
+// SBCS だけのセッションか（CCSID が分かっているときだけ。分からなければ従来どおり DBCS と同じ扱い）
+const sbcsSession = computed(() => state.value?.ccsid !== undefined && !isDbcsCcsid(state.value.ccsid));
 /**
  * 画面に渡す実効の表示コード。**ホストの SBCS 表を知っているのはここだけ**なので、
  * 保存値（自動/カナ/英）との突き合わせも親で済ませ、ScreenGrid には結果だけ渡す。
@@ -1570,6 +1573,7 @@ function onWheel(ev: WheelEvent): void {
         :shift-mark-tone="view.sosi === 'strong' ? 'strong' : 'dim'"
         :sbcs-view="sbcsView"
         :uppercase-input="uppercaseInput"
+        :sbcs-session="sbcsSession"
         :linkify="view.linkify"
         :buttons="view.buttons"
         :window-frame="view.windowFrame"

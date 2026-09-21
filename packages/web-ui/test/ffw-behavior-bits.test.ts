@@ -167,10 +167,10 @@ describe("送信前の必須検証（MANDATORY_ENTER / MANDATORY_FILL）", () =>
 describe("ScreenGrid: MONOCASE / FER / AUTO_ENTER", () => {
   beforeEach(() => document.body.replaceChildren());
 
-  function mountGrid(fields: Field[], uppercaseInput = false) {
+  function mountGrid(fields: Field[], uppercaseInput = false, sbcsSession?: boolean) {
     return mount(ScreenGrid, {
       props: { snapshot: snapOf(fields), edits: new Map(), focused: true, busy: false,
-        cursor: { row: 5, col: 10 }, uppercaseInput },
+        cursor: { row: 5, col: 10 }, uppercaseInput, ...(sbcsSession !== undefined ? { sbcsSession } : {}) },
       attachTo: document.body
     });
   }
@@ -197,6 +197,52 @@ describe("ScreenGrid: MONOCASE / FER / AUTO_ENTER", () => {
     el.setSelectionRange(0, 0);
     await type(el, "abc");
     expect(lastEdit(w)).toBe("ABC");
+    w.unmount();
+  });
+
+  // `20260921-monocase-non-ascii`: 実機（PUB400・ACS のコア・`scripts/acs-probe/monocase-non-ascii.txt`）で、MONOCASE の利用者名の欄は
+  // `aéñøüµß` → `AÉÑØÜµß`、MONOCASE でないコマンド行はそのまま（ACS `PS5250.inputChar` の `Character.toUpperCase`。`µ` だけ除く）
+  it("**SBCS のセッションの MONOCASE 欄では ASCII 以外の 1 バイト文字も大文字になる**（`µ`・`ß` は変えない。ACS と同じ）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10, monocase: true })], false, true);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, "aéñøüµßα");
+    expect(lastEdit(w)).toBe("AÉÑØÜµßΑ");
+    w.unmount();
+  });
+
+  it("**SBCS のセッションでは MONOCASE でない欄にも `é` `ü` `ß` を打てる**（幅が Ambiguous でも全角として弾かない）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10 })], false, true);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, "aéüßø");
+    expect(lastEdit(w)).toBe("aéüßø");
+    w.unmount();
+  });
+
+  it("SBCS のセッションでも漢字・かなは打った時点で弾く（コードページに無く送れない）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10 })], false, true);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, "a漢");
+    expect(lastEdit(w)).toBe("a");
+    w.unmount();
+  });
+
+  it("DBCS のセッション（既定）では Ambiguous の字は全角のまま——SBCS の欄では弾き、MONOCASE でも大文字にしない", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 10, monocase: true })]);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(0, 0);
+    await type(el, "añé");
+    expect(lastEdit(w)).toBe("AÑ");
     w.unmount();
   });
 

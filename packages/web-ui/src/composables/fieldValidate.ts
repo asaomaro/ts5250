@@ -7,8 +7,18 @@ import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
  * 数値型は数字・符号・小数点、A 型（SBCS）は非全角、J 型（`only`）・`pure` は全角のみ。
  * コードページ許容文字の厳密判定は core（送信時）で行い、ここは型ベースの一次フィルタ。
  */
-export function acceptsChar(field: Field, ch: string): boolean {
-  return rejectReason(field, ch) === undefined;
+export function acceptsChar(field: Field, ch: string, session?: SessionKind): boolean {
+  return rejectReason(field, ch, session) === undefined;
+}
+
+/**
+ * セッションの種類。**SBCS だけのセッション（37 など）には DBCS の文字が無い**ので、East Asian Width の Ambiguous
+ * （`é` `ü` `ß` `ø` ほか）を全角と見なして弾かない（ACS `PS5250.inputChar` は DBCS のセッションでなければ幅も文字の可否も見ずに置く。
+ * `20260921-monocase-non-ascii`。実機の ACS のコアで `aéñøüµß` がコマンド行にそのまま入った）。
+ * 省略時は DBCS のセッションと同じ扱い（Ambiguous も全角。DBCS の表から Ambiguous の字が出てくるため）
+ */
+export interface SessionKind {
+  sbcsOnly?: boolean;
 }
 
 /**
@@ -24,9 +34,12 @@ export type RejectReason =
   | "kbd-inhibited" // キーボード入力不可(I)項目
   | "sign-position"; // 符号付き数値欄の符号桁（最終桁）へ数字を打とうとした
 
-export function rejectReason(field: Field, ch: string): RejectReason | undefined {
+export function rejectReason(field: Field, ch: string, session?: SessionKind): RejectReason | undefined {
   if (ch.length === 0) return "alphanumeric";
-  const isWide = isFullWidth(ch);
+  // SBCS だけのセッションで弾くのは**どのフォントでも 2 桁の字**（漢字・かな・全角英数）だけ。コードページに無いので送れない
+  // （core の送信時検証が「CCSID の外の文字」で弾く）——打った時点で知らせる。~~Ambiguous も全角~~ は DBCS のセッションだけ。
+  // ACS は SBCS のセッションでは何も弾かず、送るときに置き換える（当 PJ の送信時の拒否との差は台帳）
+  const isWide = session?.sbcsOnly === true ? isCertainWideGlyph(ch) : isFullWidth(ch);
 
   // **キーボード入力不可（DDS 35 桁の `I`）が最優先。** 文字の種類に関わらず打鍵を受け付けない
   // （磁気ストライプ読み取り装置等のための欄）。GNU tn5250 は `DATA_DISALLOWED` で拒否し、
@@ -68,7 +81,9 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
  * フィールド長（`field.length`）は SO/SI・DBCS 2 バイトを含むバイト予算なので、
  * 桁数上限の判定はこの見積り長で行う（JS 文字数では DBCS を過小評価してしまう）。
  */
-export function dbcsByteLength(value: string): number {
+export function dbcsByteLength(value: string, session?: SessionKind): number {
+  // SBCS だけのセッションは SO/SI も 2 バイトの字も無い——1 字 1 バイト（打鍵で漢字・かなは弾いてある。`rejectReason`）
+  if (session?.sbcsOnly === true) return [...value].length;
   let bytes = 0;
   let inDbcs = false;
   for (const ch of value) {
