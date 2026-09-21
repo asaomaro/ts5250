@@ -4024,8 +4024,21 @@ function pasteAt(row: number, col: number, text: string): void {
   pasteFrom({ row, col }, text);
 }
 
+/**
+ * **編集中の欄で、キャレットがその欄（行またぎ欄は全スライス）の先頭にあるか**。編集中でなければ `undefined`。
+ * ペインの Backtab が「欄の途中ならその欄の先頭で止まる」を決めるのに使う（ACS `processBacktab`）。
+ * 継続欄の 2 区間目以降はペインが先に並びの先頭区間へ寄せるので、ここは区間の中だけを見ればよい。
+ * keydown はまず欄の input に届き、ここで native caret から論理位置を取り直してからペインへ委譲されるので、
+ * 見る値はその打鍵の時点のもの。DBCS 欄も論理位置で見る（SO の直後＝先頭。ACS は SO の手前へ 1 つ戻してから探す）
+ */
+function caretAtFieldStart(): boolean | undefined {
+  if (!edit || editFieldIndex < 0) return undefined;
+  return edit.cursor === 0;
+}
+
 defineExpose({
   setBlockSelection,
+  caretAtFieldStart,
   clearBlockSelection: clearRectSel,
   setDbcsCaretAtColumn,
   pasteAt,

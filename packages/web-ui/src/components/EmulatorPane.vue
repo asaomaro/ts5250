@@ -443,7 +443,8 @@ function fieldOfStop(el: HTMLElement): Field | undefined {
 /**
  * いまフォーカスがある停止点の位置。**分割欄の中間・最終区間に居るときは、その並びの
  * 先頭区間を現在地とみなす**（停止点から外してあるので素の `indexOf` では見つからない）。
- * こうすると Tab は並びの次の欄へ、Shift+Tab は並びの前の欄へ——単独欄と同じ動きになる。
+ * こうすると Tab は並びの次の欄へ、~~Shift+Tab は並びの前の欄へ~~——単独欄と同じ動きになる。
+ * （Shift+Tab は、中間・最終区間からは並びの先頭区間へ戻る。ACS の Backtab。`backtab` が先に処理する）
  */
 function currentStopIndex(stops: HTMLElement[]): number {
   const active = document.activeElement as HTMLElement | null;
@@ -469,9 +470,11 @@ function currentStopIndex(stops: HTMLElement[]): number {
  * `tn5250_display_interactive_addch`、tn5250j `ScreenFields.gotoFieldNext`）。
  * 送り先が無い・保護欄なら**画面順どおりに倒す**（原典も見つからなければ `sf.next` へ落ちる）。
  *
- * ⚠ **Shift+Tab（逆方向）には効かせない。** tn5250j は逆引き（自分を指している欄を探す）まで
+ * ~~⚠ **Shift+Tab（逆方向）には効かせない。** tn5250j は逆引き（自分を指している欄を探す）まで
  * するが GNU tn5250 は前方だけで、**どちらが実機と同じかを確かめる手段が無い**（ACS 不可）。
- * 確かめられないほうは実装しない側へ倒す（`fieldSign` の num-only と同じ判断）。
+ * 確かめられないほうは実装しない側へ倒す（`fieldSign` の num-only と同じ判断）。~~
+ * → ACS は逆向きにも辿る（`FFT5250.previousNonByPassInputFieldPos`。欄の先頭で Backtab すると、
+ * そこへ送る欄へ戻る）。逆引きは `backtab` が持つ（`20260921-backtab-acs`）。
  */
 function progressionStop(fromFieldIndex: number): HTMLElement | undefined {
   const from = snapshot.value?.fields.find((f) => f.index === fromFieldIndex);
@@ -499,6 +502,35 @@ function stopPos(el: HTMLElement): { row: number; col: number } | undefined {
   const row = Number(el.dataset["row"]);
   const col = Number(el.dataset["col"]);
   return Number.isFinite(row) && Number.isFinite(col) ? { row, col } : undefined;
+}
+
+/**
+ * **Backtab**（ACS `PS5250.processBacktab` → `FFT5250.previousNonByPassInputFieldPos(カーソル−1)`。
+ * `20260921-backtab-acs`）。行き先は「カーソルの 1 つ手前以前で始まる最後の入力欄の先頭」:
+ * - **欄の途中ならその欄の先頭で止まる**（実機の ACS: 7,22 → 7,20。欄の直後の桁 7,26 からも 7,20）
+ * - 継続欄は並び全体で 1 つの欄（2 区間目以降はどこからでも先頭の区間の先頭へ。ACS は先頭以外の区間を飛ばす）
+ * - 欄の先頭なら前の欄。**そこへカーソル送り（FCW 0x88）で来る欄があれば、そちらへ**（ACS は逆向きにも辿る）
+ * - 前に無ければ最後の欄へ回り込む。欄の外（自由カーソル）からは `focusByOffset` の位置での探索が同じ規則
+ * ~~以前は常に前の停止点へ移り、カーソル送りの逆引きは「ACS で確かめられない」として入れていなかった~~
+ * （原典と実機で確かめた。`scripts/acs-probe/backtab-home.txt`）
+ */
+function backtab(): void {
+  const active = document.activeElement;
+  const f = active instanceof HTMLInputElement ? fieldOfStop(active) : undefined;
+  if (f && !f.protected) {
+    const first = f.continued !== undefined ? (continuedRunOf(snapshot.value?.fields ?? [], f)[0] ?? f) : f;
+    if (first.index !== f.index || gridRef.value?.caretAtFieldStart() !== true) {
+      focusStop(inputForSlice(first.index, 0));
+      return;
+    }
+    const from = editableFields().find((x) => x.cursorProgression === first.index);
+    const back = from ? inputForSlice(from.index, 0) : undefined;
+    if (back) {
+      focusStop(back);
+      return;
+    }
+  }
+  focusByOffset(-1);
 }
 
 /** 順次移動（Tab / Shift+Tab / 欄外での左右）。末尾↔先頭でラップ */
@@ -556,7 +588,9 @@ function onLocal(action: LocalAction): void {
       focusByOffset(1);
       break;
     case "shift-tab":
-      focusByOffset(-1);
+      backtab();
+      // ACS は Backtab で着いた欄の `fieldExitReqFlag` を立てる（欄の途中から同じ欄の先頭へ戻っても 0020 にならない）
+      noteFieldExited();
       break;
     case "newline": {
       // **次の行の先頭から見て最初の入力欄へ移る。ホストへは送らない**

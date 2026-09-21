@@ -1,0 +1,89 @@
+# **Backtab と Home で ACS のカーソルはどこへ行くか**（実機）。台帳「【まとめ】キー編集の細部が ACS と違う」の Backtab・Home。
+#
+# 原典 `PS5250.processBacktab` → `FFT5250.previousNonByPassInputFieldPos(カーソル−1)`: カーソルの 1 つ手前以前で始まる
+# 最後の入力欄の先頭へ（欄の途中ならその欄の先頭で止まる）。見つからなければ最後の入力欄へ回り込む。
+# `processHome`: ホーム位置（IC、無ければ先頭の非バイパス欄）へ。**既にそこなら Record Backspace（AID 0xF8）を送る**。
+#
+# 画面は ADJPGM（`scripts/build-adjtest.mjs`。3,20 から 2 行おきに 19,20 まで 9 つの入力欄。各 6 桁〜7 桁。IC なし）。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+dump start
+
+# --- B1) 欄の途中（7,22）で Backtab → その欄の先頭（7,20）のはず ---
+setcursor 7,22
+settle 200
+keys [backtab]
+settle 300
+dump b1
+
+# --- B2) 欄の先頭（7,20）で Backtab → 前の欄の先頭（5,20） ---
+keys [backtab]
+settle 300
+dump b2
+
+# --- B3) 先頭の欄の先頭（3,20）で Backtab → 最後の欄（19,20）へ回り込む ---
+setcursor 3,20
+settle 200
+keys [backtab]
+settle 300
+dump b3
+
+# --- B4) 欄の外（6,40）で Backtab → その手前で始まる欄の先頭（5,20） ---
+setcursor 6,40
+settle 200
+keys [backtab]
+settle 300
+dump b4
+
+# --- B5) 最初の欄より前（1,1）で Backtab → 最後の欄（19,20）へ回り込むはずだが、**DBCS のセッションでは ACS のコアが
+#     例外で止まる**（`processBacktab` が位置 −1 の SO を調べる: `ArrayIndexOutOfBoundsException: Index -1`。
+#     2026-09-21 に 930 で実測）。手順が止まるので流さない。SBCS のセッションなら例外にならず最後の欄へ回り込む（原典）
+
+# --- B6) 欄の最終桁の直後の桁（7,26。欄は 7,20〜7,25）で Backtab → 7,20 ---
+setcursor 7,26
+settle 200
+keys [backtab]
+settle 300
+dump b6
+
+# --- H1) 欄の途中（7,22）で Home → ホーム位置（先頭の入力欄 3,20） ---
+setcursor 7,22
+settle 200
+keys [home]
+settle 300
+dump h1
+
+# --- H2) ホーム位置で Home → Record Backspace を送る（ホストの応答を見る） ---
+keys [home]
+settle 1500
+dump h2
+keys [reset]
+settle 300
+dump h2-reset
+
+# --- H3) 欄の外（1,1）で Home → ホーム位置 ---
+setcursor 1,1
+settle 200
+keys [home]
+settle 300
+dump h3
+keys [pf3]
+settle 1500
+dump exit
+
+# --- H4) メインメニュー（IC なし・コマンド行だけ）でホーム位置の Home ---
+keys [home]
+settle 300
+dump h4-before
+keys [home]
+settle 1500
+dump h4
+keys [reset]
+settle 300
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

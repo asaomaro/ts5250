@@ -401,6 +401,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **独立点検の後に揃えた**: カーソルは最終桁に留まり、さらに打つと 0018・左矢印は動かない・Backspace の後は 0020・
   Field Exit は最終桁を消さない。Dup は Field Exit 必須でも次の欄へ（旧「FER 欄は留まる」は ACS と逆だった）。
   実機の ACS で測った（`scripts/acs-probe/field-exit-full.txt`）。テスト `aid-field-exit-required.test.ts`・`field-sign-dup.test.ts`（mutation 7 通り検出）。
+- [x] **【まとめ】キー編集のうち Backtab**（優先度 中）。**完了（`20260921-backtab-acs`・PR #410）**: `EmulatorPane.vue` の `backtab()`。
+  欄の途中（境界を含む）ならその欄の先頭、継続欄の 2 区間目以降・行またぎ欄の 2 行目以降からは欄の先頭、欄の先頭ではそこへカーソル送りで
+  来る欄へ（逆引き）、無ければ前の欄・最後の欄へ回り込む。着いた欄は「出た」扱い（0020 にしない）。実機の ACS のコアで 5 例
+  （`scripts/acs-probe/backtab-home.txt`: 7,22→7,20・7,20→5,20・3,20→19,20・6,40→5,20・7,26→7,20）。1,1 では DBCS のセッションの
+  ACS のコアが例外で止まる（写さない。同 D3）。テスト `packages/web-ui/test/backtab-acs.test.ts`、mutation 4 通り検出（1 通りは等価で撤去）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - ~~RB/RZ 欄のフィールド終了（中）~~ → 上の `20260921-field-exit-required-types` で済んだ
@@ -413,7 +418,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - Home（中・**要判断**）
     - ACS: 画面のホーム位置（IC、無ければ先頭の非バイパス欄）へ移る。既にそこにいれば Record Backspace を送る。
     - 当 PJ: 欄の先頭へ移る（`ScreenGrid.vue:2682`）。
-  - Backtab（中）
+  - ~~Backtab（中）~~ → 下の `20260921-backtab-acs` で済んだ
     - ACS: 欄の途中なら、その欄の先頭で止まる。カーソル送り（FCW 0x88）を逆向きにたどる（`FFT5250.previousNonByPassInputFieldPos`）。
     - 当 PJ: 常に前の停止点へ移る。`EmulatorPane.vue:356-369` の「ACS で確かめられない」という前提は崩れた。
   - ~~ME/MF の意味とタイミング（中〜低・**要判断**）~~ → 上の `20260921-mandatory-check-acs` で済んだ

@@ -14,8 +14,10 @@ import type { WsClient } from "../src/ws-client.js";
  * `IN2` へ行っていた）。参照実装 2 つとも Tab と満杯・Field Exit の自動送りで見る
  * （GNU tn5250 `tn5250_display_set_cursor_next_field`、tn5250j `ScreenFields.gotoFieldNext`）。
  *
- * **Shift+Tab には効かせない**——tn5250j は逆引きもするが GNU tn5250 はしない。
- * どちらが実機と同じか確かめる手段が無いので、実装しない側へ倒した。
+ * ~~**Shift+Tab には効かせない**——tn5250j は逆引きもするが GNU tn5250 はしない。
+ * どちらが実機と同じか確かめる手段が無いので、実装しない側へ倒した。~~
+ * → ACS は欄の先頭での Backtab で逆にも辿る（`FFT5250.previousNonByPassInputFieldPos`。
+ * `20260921-backtab-acs`。逆引きのテストは `backtab-acs.test.ts`）。
  */
 const SID = "s1";
 
@@ -76,7 +78,7 @@ describe("Tab はホストが指定したカーソル送り先へ行く", () => 
     w.unmount();
   });
 
-  it("Shift+Tab は指定を見ない（画面順の前へ）", async () => {
+  it("Shift+Tab: 送り先の指定を持つ欄の先頭からは、そこへ送る欄が無ければ画面順の前へ（IN1 は誰からも送られない）", async () => {
     const w = mountPane();
     await nextTick();
     const els = inputs(w);

@@ -101,13 +101,15 @@ describe("EDTMSK 分割欄の Tab 移動", () => {
     w.unmount();
   });
 
-  it("最終区間から Shift+Tab すると並びの前の欄へ", async () => {
+  // ~~最終区間から Shift+Tab すると並びの前の欄へ~~ → ACS は並びの**先頭区間**へ戻る
+  // （`previousNonByPassInputFieldPos` は先頭以外の区間を飛ばし、並びの先頭で止まる。`20260921-backtab-acs`）
+  it("最終区間から Shift+Tab すると並びの先頭区間へ（ACS の Backtab）", async () => {
     const w = mountPane();
     await nextTick();
     inputByIndex(w, 4).focus();
     await nextTick();
     await w.find(".pane").trigger("keydown", { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(inputByIndex(w, 1));
+    expect(document.activeElement).toBe(inputByIndex(w, 2));
     w.unmount();
   });
 
