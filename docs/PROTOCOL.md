@@ -76,7 +76,7 @@ NEW-ENVIRON 定数: `IS=0 SEND=1 VAR=0 VALUE=1 ESC=2 USERVAR=3`。
    - ~~`USERVAR "IBMRSEED" VALUE ESC 00 00 00 00 00 00 00 00` ← 8 バイトのゼロシード＝非暗号化~~ → 平文で送るとき（代替パスワードの関数を
      渡さないコアの利用）は `IBMRSEED` を値なし・`IBMSUBSPW` に平文（`20260921-telnet-signon-vars`。ACS の平文の形）
 
-> user のみ指定（password 省略）なら IBMRSEED/IBMSUBSPW は送らない。DEVNAME のみ／空 IS も可。
+> user のみ指定（password 省略）なら ~~IBMRSEED/IBMSUBSPW は送らない~~ **USER も送らない**（ACS と同じ。`20260921-user-without-password`）。DEVNAME のみ／空 IS も可。
 > PUB400（IBM i 7.5・QPWDLVL 3）はバインド時に認証し、signon 画面を経ずメニューへ到達する（暗号化・平文とも。`scripts/verify-autosignon.mjs`）。
 
 ---

@@ -200,14 +200,14 @@ describe("TelnetLayer ネゴシエーション", () => {
     expect(sent.slice(at, at + 4)).toEqual([0x61, 2, 1, 0x62]);
   });
 
-  it("password 未指定（user のみ）なら IBMRSEED/IBMSUBSPW は送らない", () => {
+  // ~~password 未指定（user のみ）なら USER だけ送る~~ → ACS と同じく USER も送らない（`NVT5250.insertUser` は自動サインオンのときだけ。
+  // `20260921-user-without-password`）
+  it("password 未指定（user のみ）なら USER も IBMRSEED/IBMSUBSPW も送らない", () => {
     const { t } = setupAuto({ user: "MYUSER" });
     t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
-    const ENV_VAR = 0;
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
-      ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
       IAC, CMD.SE
     ]);
   });

@@ -32,7 +32,7 @@ export interface TelnetOptions {
    * （server が `@ts5250/hostserver` の `bypassSignonSubstitute` で作る）
    */
   passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
-  /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定 */
+  /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定（**password が無ければ送らない**。ACS と同じ） */
   user?: string | undefined;
   /**
    * RFC 4777 自動サインオン: パスワード。user と併せて指定すると NEW-ENVIRON で
@@ -317,7 +317,10 @@ export class TelnetLayer {
        * 作れなかったのでパスワードの変数を送らない（ACS も代替パスワードの計算が例外なら IBMSUBSPW を書かない）
        */
       const finish = (auth?: { clientSeed: Uint8Array; substitute: Uint8Array } | null): void => {
-        if (user !== undefined && !bypassRejected) {
+        // **USER はパスワード付きの自動サインオンのときだけ送る**（ACS `NVT5250.insertUser` は `ssoType` 3・4 のときだけ。
+        // `20260921-user-without-password`）。~~利用者名だけでも USER を送る~~——PUB400 では送っても送らなくてもサインオン画面で、
+        // 利用者名も入らなかった（実測）
+        if (user !== undefined && pw !== undefined && !bypassRejected) {
           // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
           // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
           // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
