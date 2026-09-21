@@ -36,7 +36,8 @@ import { Emitter } from "./emitter.js";
 import { aidCodeOf, aidKeyForCode, type AidKey } from "./aid-keys.js";
 import { terminalTypeFor } from "./terminal-type.js";
 
-export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "closed";
+/** `reconnecting`: ホストに切られて自動で繋ぎ直している間（`ConnectOptions.autoReconnect`） */
+export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "reconnecting" | "closed";
 
 export interface ConnectOptions {
   host?: string;
@@ -80,6 +81,27 @@ export interface ConnectOptions {
    * 画面の中身が warn 経由でログに出るため、常用しないこと。
    */
   traceRecords?: boolean;
+  /**
+   * **ホストに切られたら自動で繋ぎ直す**（ACS `ECLConnection` の自動再接続。`20260921-auto-reconnect`）。
+   *
+   * 確立した後にホストから切られたとき（ACS の通信状態 2＝通常の切断。`SIGNOFF ENDCNN(*YES)`・
+   * 無操作の切断・回線断）だけ、**1 回目は即座に、以後 `reconnectIntervalMs` おきに上限なく**試す
+   * （`ECLConnection.run()` は `Thread.sleep(20000)` して `StartCommunication`）。
+   * **`disconnect()` で自分から切ったとき**と、**ホストが起動応答で拒否したとき**（自動サインオンの失敗・拒否など。
+   * ACS の状態 33/34 は再接続の条件に当たらない）は繋ぎ直さない——パスワードの誤りで試し続けて
+   * プロファイルを無効化させる輪にならない。
+   *
+   * **既定は false**。ACS も ECL のコアは既定 false（`SESSION_AUTORECONNECT`）で、画面の層（HOD の bean。
+   * 既定 true）が ON にしている。自動操作の接続では、知らないうちに別の画面へ変わらないよう OFF のままにする。
+   */
+  autoReconnect?: boolean;
+  /** 自動再接続の 2 回目以降の間隔（既定 20000＝ACS の値） */
+  reconnectIntervalMs?: number;
+  /**
+   * 接続のたびに Transport を作る（自動再接続の試験・注入用）。指定が無ければ `transport` を最初の 1 回だけ使い、
+   * それも無ければ TCP で繋ぐ。
+   */
+  transportFactory?: () => Promise<Transport>;
 }
 
 export interface SendAidOptions {
@@ -115,6 +137,10 @@ export interface SendAidResult {
 interface SessionEvents extends Record<string, unknown[]> {
   screen: [ScreenSnapshot];
   closed: [string];
+  /** **自動で繋ぎ直そうとしている**（`attempt` は 1 から。`reason` は切られた理由） */
+  reconnecting: [{ attempt: number; reason: string }];
+  /** 繋ぎ直せた（新しい起動応答。装置名が変わることがある）。**新しい画面の `screen` はこれより先に届く** */
+  reconnected: [StartupResponse | undefined];
   /**
    * **ホストが警報を鳴らせと言ってきた**（WTD の CC2 ビット 0x04）。
    * ACS は `ps.ringBell()` で端末のベルを鳴らす。以前は `ApplyResult.alarm` を立てるだけで
@@ -133,7 +159,24 @@ let seq = 0;
 export class Session5250 extends Emitter<SessionEvents> {
   readonly id: string;
   private state: SessionState = "connecting";
-  private readonly buf: ScreenBuffer;
+  /** 繋ぎ直すたびに作り直す（前の接続の書式・退避画面を持ち越さない） */
+  private buf: ScreenBuffer;
+  /** 接続の設定（自動再接続で同じ設定のまま繋ぎ直すために持つ） */
+  private readonly opts: ConnectOptions;
+  /** `disconnect()` で自分から切った（自動再接続しない） */
+  private userClosed = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * **接続の世代**（張り直すたびに増やす）。前の接続のために始めた非同期の処理（PC コマンドの完了応答）を、
+   * 張り直した後の接続へ送らないため（独立点検の指摘: 新しいジョブのサインオン画面へ前のジョブ宛の Enter が飛ぶ）。
+   */
+  private connGen = 0;
+  /**
+   * 新しい接続の最初のレコードで画面を作り直す。**試行の開始では作り直さない**——交渉中に切られた試行のあと、
+   * 空の画面が送られて白くなるため（D3「前の画面は新しい接続の最初のレコードまで残す」）。
+   */
+  private freshBufferPending = false;
   private readonly codec: Codec;
   private readonly terminalType: string;
   /** 申告する画面サイズ。Query Reply の画面能力バイトに反映する（ACS と同じ） */
@@ -165,6 +208,7 @@ export class Session5250 extends Emitter<SessionEvents> {
 
   private constructor(opts: ConnectOptions) {
     super();
+    this.opts = opts;
     this.id = opts.id ?? `sess-${++seq}`;
     this.codec = codecForCcsid(opts.ccsid ?? 37);
     this.warn = opts.warn ?? (() => {});
@@ -172,35 +216,54 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.onPcCommand = opts.onPcCommand;
     // 代替バッファの許可は、端末タイプでホストに申告した内容と一致させる（27x132 と申告した
     // ときだけ許可する）。ホストは 27x132 対応端末にだけ CLEAR UNIT ALTERNATE を送ってくる。
-    const allowAlternate = opts.screenSize === "27x132";
-    this.buf = new ScreenBuffer(allowAlternate ? { alternate: "27x132" } : {});
+    this.buf = Session5250.newBuffer(opts);
     this.screenSize = opts.screenSize ?? "24x80";
     this.terminalType = terminalTypeFor(opts.ccsid ?? 37, this.screenSize);
     this.enhanced = opts.enhanced ?? false;
   }
 
+  /** 画面バッファを作る。代替バッファ（27x132）は申告した画面サイズのときだけ許す */
+  private static newBuffer(opts: ConnectOptions): ScreenBuffer {
+    return new ScreenBuffer(opts.screenSize === "27x132" ? { alternate: "27x132" } : {});
+  }
+
   static async connect(opts: ConnectOptions): Promise<Session5250> {
     const session = new Session5250(opts);
-    let transport: Transport;
-    if (opts.transport) {
-      transport = opts.transport;
-    } else {
-      if (opts.host === undefined) {
-        throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
-      }
-      transport = await TcpTransport.connect({
-        host: opts.host,
-        port: opts.port ?? (opts.tls ? 992 : 23), // TLS 既定 992・平文 23
-        ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.tls !== undefined ? { tls: opts.tls } : {})
-      });
-    }
+    const transport = opts.transportFactory
+      ? await opts.transportFactory()
+      : (opts.transport ?? (await session.openTcp()));
+    await session.establish(transport, true);
+    return session;
+  }
 
-    session.state = "negotiating";
+  /** TCP で繋ぐ（`host` が要る） */
+  private async openTcp(): Promise<Transport> {
+    const opts = this.opts;
+    if (opts.host === undefined) {
+      throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
+    }
+    return TcpTransport.connect({
+      host: opts.host,
+      port: opts.port ?? (opts.tls ? 992 : 23), // TLS 既定 992・平文 23
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
+      ...(opts.tls !== undefined ? { tls: opts.tls } : {})
+    });
+  }
+
+  /**
+   * telnet の交渉から初回の画面までを済ませる（最初の接続と自動再接続で共通）。
+   * `initial` のときだけ、交渉中に切られたら `closed` を出す（繋ぎ直しの途中の失敗は、繋ぎ直しの輪が扱う）。
+   */
+  private async establish(transport: Transport, initial: boolean): Promise<void> {
+    const opts = this.opts;
+    // **繋ぎ直しの交渉中は `reconnecting` のまま**にする。`negotiating` にすると `assertNotClosed` の門を素通りして、
+    // 交渉途中の接続へ Attn 等が流れる（独立点検の指摘）。画面が来れば `handleRecord` が `ready` にする
+    if (initial) this.state = "negotiating";
+    this.connGen++;
     // RFC 2877 KBDTYPE/CODEPAGE/CHARSET を申告し、ホストにデバイス⇄ジョブ CCSID の変換をさせる
     const dev = deviceEnvFor(opts.ccsid ?? 37);
-    session.telnet = new TelnetLayer(transport, {
-      terminalType: session.terminalType,
+    this.telnet = new TelnetLayer(transport, {
+      terminalType: this.terminalType,
       deviceName: opts.deviceName,
       user: opts.user,
       password: opts.password,
@@ -212,27 +275,27 @@ export class Session5250 extends Emitter<SessionEvents> {
     const ready = new Promise<void>((resolve, reject) => {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
-        session.telnet.close();
+        this.telnet.close();
         reject(new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`));
       }, timeoutMs);
       const onFirstReady = () => {
         clearTimeout(timer);
         resolve();
       };
-      session.onceReady = onFirstReady;
-      session.requestedDevice = opts.deviceName;
+      this.onceReady = onFirstReady;
+      this.requestedDevice = opts.deviceName;
       // **ホストが理由を返してきたら、それを接続の失敗にする**（`onClose` より先に届く）
-      session.onNegotiationError = (e) => {
+      this.onNegotiationError = (e) => {
         clearTimeout(timer);
         // **先に reject する。** `close()` は `onClose` を同期で呼び、そこが
         // `SESSION_CLOSED closed during negotiation` で先に settle してしまう
         // ——せっかく分かった理由（`8902` 等）が一般的な文言に負ける（実機で踏んだ）
         reject(e);
-        session.telnet.close();
+        this.telnet.close();
       };
-      session.telnet.onClose((reason) => {
+      this.telnet.onClose((reason) => {
         clearTimeout(timer);
-        session.handleClose(reason);
+        if (initial) this.finalClose(reason);
         // **装置名を指定していてネゴシエーション中に切られたら、まず装置名の重複を疑う。**
         // IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる。生の
         // 「socket closed」だけだと利用者は原因に辿り着けない（同じ設定で 2 本目を開いた等）。
@@ -242,16 +305,15 @@ export class Session5250 extends Emitter<SessionEvents> {
             : "";
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
-      session.telnet.onError((err) => session.warn(`transport error: ${err.message}`));
-      session.telnet.onRecord((rec) => session.handleRecord(rec));
+      this.telnet.onError((err) => this.warn(`transport error: ${err.message}`));
+      this.telnet.onRecord((rec) => this.handleRecord(rec));
     });
 
     transport.start?.();
     await ready;
 
     // 接続完了後は onClose を通常処理に差し替える
-    session.telnet.onClose((reason) => session.handleClose(reason));
-    return session;
+    this.telnet.onClose((reason) => this.handleClose(reason));
   }
 
   private onceReady: (() => void) | undefined;
@@ -266,6 +328,14 @@ export class Session5250 extends Emitter<SessionEvents> {
 
   get currentState(): SessionState {
     return this.state;
+  }
+
+  /**
+   * **自動で繋ぎ直している間だけ**、何回目かを返す（交渉中も含む）。ブラウザが開き直した・後から入ったときに
+   * 「繋ぎ直し中」を知らせるため——経過の通知（`reconnecting`）は購読している間にしか届かない（独立点検の指摘）。
+   */
+  get reconnecting(): { attempt: number } | undefined {
+    return this.state === "reconnecting" ? { attempt: Math.max(1, this.reconnectAttempt) } : undefined;
   }
 
   get keyboardLocked(): boolean {
@@ -533,11 +603,21 @@ export class Session5250 extends Emitter<SessionEvents> {
 
   disconnect(): void {
     if (this.state === "closed") return;
+    this.userClosed = true; // **自分から切ったときは繋ぎ直さない**（ACS も同じ）
+    if (this.state === "reconnecting") {
+      // 次の試行を待っている（または TCP を張っている）最中。交渉中なら下の close が輪を抜けさせる
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+      this.finalClose("disconnected");
+      return;
+    }
     this.telnet.close();
   }
 
   private assertNotClosed(): void {
     if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
+    // 繋ぎ直している間は送り先が無い（Attn / SysReq も。古い接続は閉じている）
+    if (this.state === "reconnecting") throw new As400Error("KEYBOARD_LOCKED", "reconnecting to the host");
   }
 
   private assertReady(): void {
@@ -554,6 +634,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private handleRecord(record: Uint8Array): void {
+    if (this.freshBufferPending) {
+      this.freshBufferPending = false;
+      this.buf = Session5250.newBuffer(this.opts);
+    }
     if (this.traceRecords) {
       const hex = [...record].map((b) => b.toString(16).padStart(2, "0")).join(" ");
       this.warn(`rx record (${record.length} bytes): ${hex}`);
@@ -763,6 +847,7 @@ export class Session5250 extends Emitter<SessionEvents> {
    * （research D5）。実行係のタイムアウトは呼び出し側（server）が持つ。
    */
   private async runPcCommand(cmd: PcCommandRequest | undefined): Promise<void> {
+    const gen = this.connGen;
     try {
       if (cmd && this.onPcCommand) {
         const running = Promise.resolve(this.onPcCommand(cmd));
@@ -773,22 +858,102 @@ export class Session5250 extends Emitter<SessionEvents> {
     } catch (err) {
       this.warn(`PC command failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (this.state === "closed") return;
+    // 終わった・繋ぎ直している・**張り直した後**なら返さない（前のジョブ宛の応答を新しい接続へ流さない）
+    if (this.state === "closed" || this.state === "reconnecting" || gen !== this.connGen) return;
     const aid = aidCodeOf("Enter");
     if (aid === undefined) return;
     const { record } = buildReadMdtResponse(this.buf, this.codec, aid);
-    this.telnet.sendRecord(record);
+    try {
+      this.telnet.sendRecord(record);
+    } catch (err) {
+      // 送る直前に切れた。投げると呼び出し元（`void this.runPcCommand`）の未処理の rejection になりプロセスが落ちる
+      this.warn(`PC command reply not sent: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
+  /** 確立した後に切られた。自動再接続が有効で自分から切ったのでなければ繋ぎ直す */
   private handleClose(reason: string): void {
+    if (this.state === "closed" || this.state === "reconnecting") return;
+    if (this.opts.autoReconnect === true && !this.userClosed) {
+      this.settlePendingAid();
+      this.state = "reconnecting";
+      this.reconnectAttempt = 0;
+      this.scheduleReconnect(0, reason); // **1 回目は即座に**（ACS）
+      return;
+    }
+    this.finalClose(reason);
+  }
+
+  /** 終わる。応答待ちの AID は時間切れとして返す */
+  private finalClose(reason: string): void {
     if (this.state === "closed") return;
     this.state = "closed";
-    if (this.pendingAid) {
-      const p = this.pendingAid;
-      this.pendingAid = undefined;
-      clearTimeout(p.timer);
-      p.resolve({ screen: this.snapshot(), timedOut: true });
-    }
+    this.settlePendingAid();
     this.emit("closed", reason);
+  }
+
+  private settlePendingAid(): void {
+    if (!this.pendingAid) return;
+    const p = this.pendingAid;
+    this.pendingAid = undefined;
+    clearTimeout(p.timer);
+    p.resolve({ screen: this.snapshot(), timedOut: true });
+  }
+
+  private scheduleReconnect(delayMs: number, reason: string): void {
+    this.reconnectTimer = setTimeout(() => void this.tryReconnect(reason), delayMs);
+  }
+
+  /**
+   * 1 回繋ぎ直してみる。失敗したら次を予約する（上限なし）。**ホストが起動応答で拒否したら諦める**
+   * （ACS: 状態 33/34 は再接続の条件に当たらない。自動サインオンの誤りで試し続けないため）。
+   */
+  private async tryReconnect(reason: string): Promise<void> {
+    this.reconnectTimer = undefined;
+    if (this.userClosed || this.state !== "reconnecting") return;
+    const attempt = ++this.reconnectAttempt;
+    this.emitSafely(() => this.emit("reconnecting", { attempt, reason }));
+    let established = false;
+    try {
+      const transport = this.opts.transportFactory ? await this.opts.transportFactory() : await this.openTcp();
+      if (this.userClosed) {
+        transport.close(); // 繋いでいる間に切られた
+        return;
+      }
+      // **前の接続の状態を持ち越さない**。画面・書式・退避画面は新しい接続のホストが描き直す
+      // （画面そのものは最初のレコードで作り直す。`freshBufferPending`）
+      this.freshBufferPending = true;
+      this.firstRecord = true;
+      this.startupInfo = undefined;
+      this.readCommand = COMMAND.READ_MDT_FIELDS;
+      this.messageWaiting = false;
+      await this.establish(transport, false);
+      established = true;
+    } catch (e) {
+      if (this.userClosed) {
+        this.finalClose("disconnected");
+        return;
+      }
+      if (e instanceof As400Error && e.code === "SESSION_REJECTED") {
+        this.finalClose(e.message);
+        return;
+      }
+      this.warn(`reconnect attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
+      this.state = "reconnecting";
+      this.scheduleReconnect(this.opts.reconnectIntervalMs ?? 20_000, reason);
+    }
+    if (!established) return;
+    this.reconnectAttempt = 0;
+    // **try の外で知らせる**——購読者が投げても、確立した接続を「失敗」と取り違えて 2 本目を張らない
+    this.emitSafely(() => this.emit("reconnected", this.startupInfo));
+  }
+
+  /** 購読者の例外で繋ぎ直しの輪を止めない（タイマーの中から呼ばれ、投げると未処理の rejection になる） */
+  private emitSafely(fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      this.warn(`reconnect listener failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }

@@ -752,6 +752,18 @@ export class SessionManager {
     });
     // 残り（ユーザー・番号）はコマンドサーバーで引く。**接続を待たせない**
     entry.jobResolved = this.resolveJob(entry, opts);
+    // **繋ぎ直したら装置名（＝ジョブ名）が変わりうる**（自動再接続。`20260921-auto-reconnect`）。
+    // 前の接続のジョブ情報を持ち越さない
+    session.on("reconnected", (st) => {
+      if (st?.device) entry.job = { name: st.device, ...(st.system ? { system: st.system } : {}) };
+      else delete entry.job;
+      entry.jobResolved = this.resolveJob(entry, opts);
+    });
+    // **自動操作が予約している間にホストに切られたら、繋ぎ直さずに終える**（D1 と同じ理由）。
+    // 繋ぎ直すと、予約している自動操作が新しいサインオン画面へ打ち続けうる（独立点検の指摘）
+    session.on("reconnecting", () => {
+      if (this.reservationOf(id) !== undefined) session.disconnect();
+    });
     return entry;
   }
 
@@ -831,6 +843,9 @@ export class SessionManager {
       }
       // セッションが既に閉じていれば捨てる
       if (!this.sessions.has(entry.id)) return undefined;
+      // **照会の間に繋ぎ直して装置名が替わっていたら捨てる**（`20260921-auto-reconnect`）。前の接続の
+      // ジョブで、繋ぎ直した後のジョブ名を上書きしない（独立点検の指摘）
+      if (entry.job?.name !== device) return entry.job;
       entry.job = { ...entry.job, name: only.name, user: only.user, number: only.number };
       return entry.job;
     } catch (err) {

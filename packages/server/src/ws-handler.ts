@@ -571,6 +571,9 @@ export class WsConnection {
       }
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
+      // **ブラウザの端末はホストに切られたら自動で繋ぎ直す**（ACS と同じ。`20260921-auto-reconnect`）。
+      // ACS も ECL のコアは既定 OFF で、画面の層（HOD の bean）が ON にする。MCP の自動操作は OFF のまま
+      opts.autoReconnect = true;
       const entry = await this.deps.sessions.open(opts);
       // 自分で開いた＝持ち主（去るときに畳む責任を持つ）
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
@@ -583,6 +586,7 @@ export class WsConnection {
         ccsid: opts.ccsid ?? 37,
         pcCommand: entry.pcCommandEnabled,
         ...this.pcCommandBacklog(entry.id),
+        ...hostReconnectOf(entry.session),
         // **後から入ったタブにも今の予約状態を伝える**（開始の push を聞き逃していても揃う）
         ...(() => {
           const r = this.deps.sessions.reservationOf(entry.id);
@@ -978,12 +982,29 @@ export class WsConnection {
     // **警報は間引かずそのまま流す**（画面を変えないレコードでも来る。ACS も描画と独立に鳴らす）
     const onAlarm = (): void => this.send({ type: "alarm" });
     entry.session.on("alarm", onAlarm);
-    entry.session.on("closed", (reason: string) => {
-      // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
-      // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+    // **ホストに切られて自動で繋ぎ直している**（`20260921-auto-reconnect`）。施錠した画面も送る
+    // ——送らないと、ブラウザは切られる前の解錠された画面のまま打てると思い込む
+    const onReconnecting = (e: { attempt: number; reason: string }): void => {
+      this.send({ type: "host-reconnecting", attempt: e.attempt, reason: e.reason });
+      this.send({ type: "screen", screen: entry.session.snapshot() });
+    };
+    const onReconnected = (): void => {
+      this.send({ type: "host-reconnected" });
+      // 装置名（＝ジョブ名）は繋ぎ直すと変わりうる。分かっている範囲をすぐ出し、残りは引けたら足す
+      if (entry.job !== undefined) this.send({ type: "jobinfo", job: entry.job });
+      void entry.jobResolved?.then((job) => {
+        if (job?.user !== undefined && this.sessionId === entry.id) this.send({ type: "jobinfo", job });
+      });
+    };
+    entry.session.on("reconnecting", onReconnecting);
+    entry.session.on("reconnected", onReconnected);
+    // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
+    // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+    const onClosed = (reason: string): void => {
       this.send({ type: "closed", reason, ended: true });
       this.detachScreen?.();
-    });
+    };
+    entry.session.on("closed", onClosed);
     // PC コマンド（STRPCCMD）の実行状況を push。切断で購読を外す（リーク防止）。
     // **自分の分だけ外れる**——同じセッションを別のタブも見ていることがある
     const offPc = this.deps.sessions.subscribePcCommand(entry.id, (event) =>
@@ -1000,6 +1021,11 @@ export class WsConnection {
     this.detachScreen = () => {
       entry.session.off("screen", onScreen);
       entry.session.off("alarm", onAlarm);
+      entry.session.off("reconnecting", onReconnecting);
+      entry.session.off("reconnected", onReconnected);
+      // **`closed` も外す**。ホストに切られても終わらなくなった（繋ぎ直す）ぶん、外し忘れると
+      // resume・attach のたびに購読が溜まる期間が延びる（独立点検の指摘。変更前からの外し忘れ）
+      entry.session.off("closed", onClosed);
       if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
       offPc();
       offRes();
@@ -1049,6 +1075,7 @@ export class WsConnection {
       ccsid: 37,
       pcCommand: entry.pcCommandEnabled,
       ...this.pcCommandBacklog(entry.id),
+      ...hostReconnectOf(entry.session),
       ...(() => {
         const r = this.deps.sessions.reservationOf(entry.id);
         return r ? { reservedBy: r.label } : {};
@@ -1343,4 +1370,10 @@ function buildDirect(msg: {
   if (msg.user !== undefined) o.user = msg.user;
   if (msg.password !== undefined) o.password = msg.password;
   return o;
+}
+
+/** `opened` に載せる「ホストへ繋ぎ直している最中か」（`WsOpened.hostReconnect`） */
+function hostReconnectOf(session: { reconnecting?: { attempt: number } | undefined }): { hostReconnect?: { attempt: number } } {
+  const r = session.reconnecting;
+  return r ? { hostReconnect: r } : {};
 }

@@ -1081,7 +1081,9 @@ function typeAheadAllowed(): boolean {
     reservedBy.value === undefined &&
     !blocksManualInput(props.sessionId) &&
     !sysReqOpen.value &&
-    state.value?.connected === true
+    state.value?.connected === true &&
+    // ホストへ繋ぎ直している間は溜めない（送り先が無い。ACS も通信が準備できていない間の打鍵は捨てる）
+    state.value?.hostReconnect === undefined
   );
 }
 /** いまの打鍵を溜めるか。施錠中に加え、**溜めが残っている間**（再生待ち・再生中）も溜める */

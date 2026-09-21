@@ -233,6 +233,12 @@ export interface SessionState {
    */
   typeAhead?: HeldKey[];
   /**
+   * **ホストに切られて、サーバーが自動で繋ぎ直している**（`20260921-auto-reconnect`）。`attempt` は 1 から。
+   * ブラウザ ↔ サーバーの繋ぎ直し（`link`）とは別の話——こちらはサーバー ↔ ホスト。
+   * この間は打てない（送り先が無い。ACS も通信が準備できていない間の打鍵は捨てる）。
+   */
+  hostReconnect?: { attempt: number };
+  /**
    * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
    */

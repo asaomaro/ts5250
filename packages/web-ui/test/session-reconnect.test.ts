@@ -279,6 +279,31 @@ describe("転送断からの繋ぎ直し", () => {
     expect(s.cursor).toEqual({ row: 7, col: 9 });
   });
 
+  /**
+   * **ホストへの繋ぎ直しの状態も上書きする**（`20260921-auto-reconnect`。独立点検の指摘）。
+   * 留守中にホストへ繋ぎ直せていたら `host-reconnected` は届いていない——`hostReconnect` が残ると、
+   * 以後の送信が黙って捨てられ、タブを開き直すしかなくなる。
+   */
+  it("**留守中にホストへ繋ぎ直せていたら、「繋ぎ直し中」を消して送れるようにする**", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "host-reconnecting", attempt: 2, reason: "x" });
+    expect(s.hostReconnect, "前提").toEqual({ attempt: 2 });
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap(), pcCommand: false });
+    expect(s.hostReconnect, "繋ぎ直し中が残った").toBeUndefined();
+  });
+
+  it("繋ぎ直しの途中に戻ったら、「繋ぎ直し中」を取り込む", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({
+      type: "opened", sessionId: "s1", screen: snap(true), pcCommand: false, hostReconnect: { attempt: 3 }
+    });
+    expect(s.hostReconnect).toEqual({ attempt: 3 });
+  });
+
   it("繋ぎ直しの `opened` から予約状態も取り込む（覆いが実態とずれない）", async () => {
     const s = await open();
     clients[0]!.handlers.onClose?.();

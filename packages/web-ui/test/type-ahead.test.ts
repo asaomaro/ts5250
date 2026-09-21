@@ -373,4 +373,16 @@ describe("独立点検の指摘（セッション・フォーカス・再生中�
     await press("Z");
     expect(b.value.trim(), "A のエラーで B の打鍵が拒否された").toBe("Z");
   });
+
+  it("**ホストへ繋ぎ直している間の打鍵は溜めない**（送り先が無い。ACS も捨てる）", async () => {
+    const { el } = await mountPane();
+    st().hostReconnect = { attempt: 1 };
+    st().snapshot = snap(true);
+    await nextTick();
+    await typeText("AB");
+    delete st().hostReconnect;
+    st().snapshot = snap(false);
+    await settle();
+    expect(el.value.trim(), "繋ぎ直し中の打鍵が再生された").toBe("");
+  });
 });

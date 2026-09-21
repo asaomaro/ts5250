@@ -45,6 +45,7 @@ import {
 import { fieldAt } from "./composables/useCursor.js";
 import {
   MSG_MANDATORY_ENTER,
+  msgHostReconnecting,
   MSG_MANDATORY_FILL,
   MSG_SELF_CHECK,
   MSG_FIELD_EXIT_REQUIRED
@@ -487,6 +488,12 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           // 「黙って実行しない」が繋ぎ直しでだけ破れる
           sessionsStore.setReserved(sessionId, msg.reservedBy);
           cur.pcCommandEnabled = msg.pcCommand;
+          // **ホストへの繋ぎ直しの状態も上書きする**（`20260921-auto-reconnect`）。留守中に繋ぎ直せていたら
+          // `host-reconnected` は届いていない——残すと以後の送信が黙って捨てられる（独立点検の指摘）
+          if (msg.hostReconnect) {
+            cur.hostReconnect = msg.hostReconnect;
+            cur.notice = msgHostReconnecting(msg.hostReconnect.attempt);
+          } else delete cur.hostReconnect;
           // **通知は「留守中に増えた分」だけ。** `opened` に載るのはサーバー側の履歴全体なので、
           // 最後の 1 件をそのまま知らせると**切断前に一度見せたものを毎回出し直す**
           const lastSeenAt = cur.pcCommands?.at(-1)?.at;
@@ -591,6 +598,24 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
     // 予約は画面を変えずに始まり・終わるため
     case "reserved": {
       sessionsStore.setReserved(sessionId, msg.by);
+      break;
+    }
+    // **ホストに切られて、サーバーが自動で繋ぎ直している**（`20260921-auto-reconnect`）。
+    // 溜めた先打ちは捨てる（送り先が無い間に打ったキーを、繋ぎ直した新しい画面へ流さない）
+    case "host-reconnecting": {
+      const s = sessionsStore.get(sessionId);
+      if (!s) break;
+      s.hostReconnect = { attempt: msg.attempt };
+      s.notice = msgHostReconnecting(msg.attempt);
+      delete s.typeAhead;
+      setBusy(sessionId, false);
+      break;
+    }
+    case "host-reconnected": {
+      const s = sessionsStore.get(sessionId);
+      if (!s) break;
+      delete s.hostReconnect;
+      if (s.notice?.startsWith(msgHostReconnecting(1))) delete s.notice;
       break;
     }
     // ホストの警報（CC2 0x04）。**画面と別に届く**——画面が変わらないレコードでも鳴るため
@@ -717,6 +742,8 @@ export async function openSession(
                 readOnly: open.readOnly ?? false,
                 // **後から入ったタブでも今の予約状態から始める**（開始の push は聞き逃している）
                 ...(msg.reservedBy !== undefined ? { reservedBy: msg.reservedBy } : {}),
+                // 後から入ったタブが、繋ぎ直しの途中に開いた（経過の通知は聞き逃している）
+                ...(msg.hostReconnect ? { hostReconnect: msg.hostReconnect, notice: msgHostReconnecting(msg.hostReconnect.attempt) } : {}),
                 ccsid: msg.ccsid,
                 client,
                 ...(meta ? { meta } : {}),
@@ -1197,6 +1224,8 @@ export function sendKey(
   // 捨てるので、そのまま通すと「押したのに何も起きない」になる。フラグキー（Attn / SysReq）も
   // 同じ——送り先が無いのだから逃げ道にならない
   if (refuseIfDisconnected(s)) return;
+  // **ホストへ繋ぎ直している間は送らない**（フラグキーも。送り先が無い——サーバーの core が断る）
+  if (s.hostReconnect !== undefined) return;
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
   if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）

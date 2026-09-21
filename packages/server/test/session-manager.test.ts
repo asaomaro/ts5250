@@ -296,6 +296,30 @@ describe("ジョブ識別子の解決", () => {
     mgr.closeAll();
   });
 
+  it("**照会の間に繋ぎ直して装置名が替わったら、古い照会の結果で上書きしない**（`20260921-auto-reconnect`）", async () => {
+    // 照会ごとに解き口を持つ（2 回目の照会で 1 回目の解き口を上書きしない）。**照会した装置名を返す**
+    const answers: (() => void)[] = [];
+    const mgr = new SessionManager({
+      lookupJobs: async (_t, filter) => {
+        await new Promise<void>((r) => answers.push(r));
+        return [{ name: filter.name, user: "USER", number: filter.name === "NEWDEV01" ? "2" : "1" }];
+      }
+    });
+    const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
+    // 照会の途中で繋ぎ直して、新しい装置名になった（イベントを直に起こす）
+    (entry.session as unknown as { emit(e: string, ...a: unknown[]): void }).emit("reconnected", {
+      code: "I902", device: "NEWDEV01", system: "PUB400"
+    });
+    answers[0]!(); // **前の接続の照会**が後から返る
+    await new Promise((r) => setTimeout(r, 0));
+    expect(entry.job?.name, "前の接続の照会結果で上書きした").toBe("NEWDEV01");
+    expect(entry.job?.number, "前のジョブの番号が付いた").toBeUndefined();
+    answers[1]!(); // 繋ぎ直した後の照会は採る
+    await new Promise((r) => setTimeout(r, 0));
+    expect(entry.job).toMatchObject({ name: "NEWDEV01", number: "2" });
+    mgr.closeAll();
+  });
+
   it("照会が 1 件なら ユーザー・番号 を足す", async () => {
     const seen: unknown[] = [];
     const mgr = new SessionManager({

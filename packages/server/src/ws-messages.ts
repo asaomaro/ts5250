@@ -285,6 +285,12 @@ export interface WsOpened {
    * **実行されたのに誰にも知らされなかった**。繋ぎ直しで渡して、後から追えるようにする。
    */
   pcCommands?: PcCommandEvent[];
+  /**
+   * **ホストへ自動で繋ぎ直している最中なら、その回数**（`20260921-auto-reconnect`）。無ければ繋がっている。
+   * ブラウザは開き直し・後から入ったときにこれで上書きする——`host-reconnected` は購読している間にしか届かないので、
+   * 留守中に繋ぎ直せたことを知る手段がこれしか無い。
+   */
+  hostReconnect?: { attempt: number };
 }
 export interface WsScreen {
   type: "screen";
@@ -299,6 +305,19 @@ export interface WsScreen {
  */
 export interface WsAlarm {
   type: "alarm";
+}
+/**
+ * **ホストに切られて、自動で繋ぎ直している**（`20260921-auto-reconnect`）。`attempt` は 1 から。
+ * 繋ぎ直している間は打てない（送り先が無い）。繋ぎ直せたら `host-reconnected` のあと新しい画面が `screen` で届く。
+ * 諦めたら（起動応答での拒否・自分からの切断）いつもどおり `closed`（`ended: true`）。
+ */
+export interface WsHostReconnecting {
+  type: "host-reconnecting";
+  attempt: number;
+  reason: string;
+}
+export interface WsHostReconnected {
+  type: "host-reconnected";
 }
 /**
  * 予約（HLLAPI の `Reserve`）の状態が変わった。
@@ -589,6 +608,8 @@ export type WsServerMessage =
   | WsOpened
   | WsScreen
   | WsAlarm
+  | WsHostReconnecting
+  | WsHostReconnected
   | WsReserved
   | WsJobInfoRes
   | WsError

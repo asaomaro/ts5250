@@ -146,6 +146,14 @@ export const MSG_NOT_CONNECTED = "サーバーと繋がっていないため送�
  */
 export const MSG_SESSION_ENDED = "セッションは終了しています（開き直してください）";
 
+/**
+ * **ホストに切られて、自動で繋ぎ直している**ときの通知（`20260921-auto-reconnect`）。
+ * ACS と同じく 1 回目は即座に、以後 20 秒おきに試す。繋ぎ直せたら新しいサインオン画面が出る。
+ * `MSG_SESSION_ENDED` と違い、**待てば戻る**ことを伝える。
+ */
+export const msgHostReconnecting = (attempt: number): string =>
+  attempt <= 1 ? "ホストとの接続が切れたため繋ぎ直しています" : `ホストとの接続が切れたため繋ぎ直しています（${attempt} 回目）`;
+
 /*
  * **応答待ちが長引いたことは、こちらからは言わない**（`session-controller` の `setBusy`）。
  *

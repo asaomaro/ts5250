@@ -227,7 +227,9 @@ describe("`closed` の意味を取り違えさせない（review ラウンド1�
   it("ホスト側が終わったときは `ended: true` を立てる", async () => {
     const mgr = new InjectingManager(() => new ReplayTransport(signon()));
     const first = await openNew(mgr);
-    // ホスト側の接続が終わった（transport が閉じた）
+    // セッションが**繋ぎ直さずに**終わった（`closed`）。ブラウザから開いたセッションはホストに切られると
+    // 繋ぎ直す（`20260921-auto-reconnect`）ので、ここで見ているのは「最終的に終わったとき」の `ended`——
+    // 繋ぎ直しを諦めた（起動応答で拒否）・自分から切った場合と同じ `closed` の経路
     mgr.get(first.id).session.disconnect();
     await new Promise((r) => setTimeout(r, 20));
     expect(first.sent.find((m) => m.type === "closed")).toMatchObject({ ended: true });
