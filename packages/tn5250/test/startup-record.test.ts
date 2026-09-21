@@ -3,6 +3,7 @@ import {
   parseStartupResponse,
   startupCodeMeaning,
   isKnownStartupCode,
+  knownStartupCodes,
   STARTUP_SUCCESS_CODES
 } from "../src/telnet/startup-record.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
@@ -103,13 +104,27 @@ describe("ACS が個別に扱う 4 コード", () => {
     for (const c of codes) expect(startupCodeMeaning(c), c).not.toBe("unknown startup response");
   });
 
-  it("**意味が未確認のものは、そう分かる文言にする**（それらしい英文を創作しない）", () => {
-    // ACS の英語文言はメッセージカタログ側で、通信状態→キーの対応を追えていない。
-    // ログを読む人が「当 PJ がまだ掴んでいないコード」と分かる形にしてある
-    expect(startupCodeMeaning("2703")).toContain("not yet verified");
-    expect(startupCodeMeaning("2777")).toContain("not yet verified");
-    // 8936 / 8937 は前 work が ACS を読んで記録した事実なので、意味を書いてある
-    expect(startupCodeMeaning("8936")).toBe("Automatic sign-on failed.");
+  // ~~意味が未確認のものは、そう分かる文言にする~~ → ACS の文言表（`hod_en` の `KEY_5250_CONNECTION_ERR_*`）で意味が分かった
+  // （`20260921-startup-codes-japanese`）。8936 も同じ表の意味に直した（以前は「自動サインオンの失敗」と書いていた）
+  it("**意味は ACS の文言表と同じ**", () => {
+    expect(startupCodeMeaning("2703")).toBe("Controller description not found.");
+    expect(startupCodeMeaning("2777")).toBe("Damaged device description.");
+    expect(startupCodeMeaning("8936")).toBe("Security failure on session attempt.");
     expect(startupCodeMeaning("8937")).toBe("Automatic sign-on rejected.");
+  });
+});
+
+/**
+ * **失敗のコードの一覧を固定する**（`20260921-startup-codes-japanese`）。web-ui は同じ一覧の日本語の意味を持つ
+ * （`packages/web-ui/src/composables/opMessages.ts` の `STARTUP_CODE_MEANING_JA`。`startup-rejection-ja.test.ts` が同じ一覧で固定）。
+ * ここにコードを足したら、日本語の表にも足す——足さないと利用者には「意味の分からない起動応答」と出る
+ */
+const STARTUP_FAILURE_CODES = [
+  "2702", "2703", "2777", "8901", "8902", "8903", "8906", "8907", "8910", "8916", "8917", "8918", "8920", "8921", "8922",
+  "8923", "8925", "8928", "8929", "8930", "8934", "8935", "8936", "8937", "8940", "I904"
+];
+describe("失敗のコードの一覧", () => {
+  it("知っているコードから成功を除くと、この一覧（日本語の表と同じ）", () => {
+    expect(knownStartupCodes().filter((c) => !STARTUP_SUCCESS_CODES.has(c)).sort()).toEqual([...STARTUP_FAILURE_CODES].sort());
   });
 });

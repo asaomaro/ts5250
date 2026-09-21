@@ -91,8 +91,8 @@ interface PrinterSessionEvents extends Record<string, unknown[]> {
  * 8925 はプリンターでだけ出やすい（IBMFONT/IBMTRANSFORM の申告漏れ）ので、ここで上書きする。
  */
 const PRINTER_CODE_MEANING: Record<string, string> = {
-  8925: "Creation of device failed (IBMFONT/IBMTRANSFORM 欠落や権限不足の可能性).",
-  8936: "Security failure on session attempt."
+  8925: "Creation of device failed (IBMFONT/IBMTRANSFORM 欠落や権限不足の可能性)."
+  // ~~8936~~ は共通の表（`startup-record.ts`）が同じ意味になったので外した（`20260921-startup-codes-japanese`）
 };
 
 /**

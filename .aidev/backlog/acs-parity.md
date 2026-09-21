@@ -257,7 +257,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **起動応答コード 2703 / 2777 / 8936 / 8937 を知らない**（優先度 中・深さ ○）。
   **完了（`20260921-startup-codes-unknown`）**: `CODE_MEANING` に 4 エントリを足した（`packages/tn5250/src/telnet/startup-record.ts`）。認識はこの表のキーが出所なので、足すだけで直る。
   原典を `javap -c -constants` で確認——`DS5250.processStartUpConfirmation` の lookupswitch に個別の分岐が実在し、通信状態は **2703→12 / 2777→13 / 8936→33 / 8937→34**。
-  ⚠ **2703 / 2777 の意味は未確認**（ACS の英語文言はメッセージカタログ側で、通信状態→キーを追えていない）。**それらしい英文を創作せず**、文言に「未確認」と書いてある。
+  ~~⚠ **2703 / 2777 の意味は未確認**（ACS の英語文言はメッセージカタログ側で、通信状態→キーを追えていない）。**それらしい英文を創作せず**、文言に「未確認」と書いてある。~~
+  → ACS の文言表（`hod_en` の `KEY_5250_CONNECTION_ERR_2703` / `_2777`）で分かった（`20260921-startup-codes-japanese`）。
   8936・8937 は自動サインオンの失敗・拒否を表す。当 PJ は自動サインオンを持つので、到達しうる。
   未知のコードで装置名が無いと、そのレコードを 5250 データとして読んでしまう。その結果、`expected ESC` の警告と `closed during negotiation` だけが残り、本当の理由が消える。
   ACS: `DS5250.processStartUpConfirmation` が、この 4 つにも個別の状態と文言を持つ。
@@ -553,6 +554,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **IS を送るまで後続の交渉に答えない**——待つ間に答えるとホストは IS を待たずにサインオン画面を出した（実測）。
 - [x] **【まとめ】telnet のうちパスワード無しの USER**（優先度 低）。**完了（`20260921-user-without-password`・PR #410）**: USER はパスワード付きの
   自動サインオンのときだけ送る（`packages/tn5250/src/telnet/telnet.ts`。ACS `NVT5250.insertUser`）。PUB400 では違いが見えない（実測）。
+- [x] **【まとめ】telnet のうち拒否理由の日本語**（優先度 低）。**完了（`20260921-startup-codes-japanese`・PR #410）**: 起動応答で断られたとき、
+  ランチャーと通知に「ホストが接続を断りました（8902: 装置が使用中です・装置 X）」の形で出す（`packages/web-ui/src/composables/opMessages.ts` の
+  `STARTUP_CODE_MEANING_JA`・`startupRejectionText`。意味は ACS の文言表に基づき、文言は当 PJ で書いた）。以前は英語の文言がそのまま出ていた。
+  英語の表の 2703・2777（~~未確認~~）と 8936 を ACS の文言表（`hod_en`）の意味に直した。実機（PUB400）で 8902 を起こし、文言からコードと装置名が拾えることを確認。
+  mutation 8 通り検出（1 通りは等価）。
 - [x] **【まとめ】telnet のうち起動応答の名前の復号**（優先度 低）。**完了（`20260921-startup-record-cp037`・PR #410）**: 起動応答のシステム名・装置名を
   セッションの CCSID によらず CCSID 37 で読む（ACS `DS5250.processStartUpConfirmation` の `new CodePage(37, 2)`。`packages/tn5250/src/telnet/startup-record.ts`）。
   930 / 5026 では `$` が `¥` に化けていた（装置名はスプール救出の OUTQ にも使う）。単体（`startup-record.test.ts`・`startup-reject.test.ts`）、mutation 検出。実機は未確認。
@@ -593,7 +599,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       当 PJ で利用者名だけが telnet まで届くのは WS の直接指定だけで、PUB400 では送っても送らなくてもサインオン画面・利用者名の欄は空だった）
     - 自動サインオンの変数の順と、ACS が送るが当 PJ が送らないもの（値なしの DEVNAME・KBDTYPE が空白 3 つ（CCSID 37）。同 research F4）。
       ~~利用者名だけ（パスワード無し）のとき、ACS は USER を送らない（自動サインオンに両方が要る）が当 PJ は送る~~（`20260921-user-without-password` で揃えた）
-    - 拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）
+    - ~~拒否理由を英語で出す（AGENTS.md の「利用者に見える文言は日本語」にも触れる）~~ → 上の `20260921-startup-codes-japanese` で済んだ
     - 起動応答の見分け方（ACS は診断情報の有無で分岐。当 PJ はコードの既知性）、~~装置名の復号（ACS は CP037 固定）~~ → 上の `20260921-startup-record-cp037` で済んだ
     - ~~ホストサーバーのサインオン（`hostserver` の `signon()`）は QPWDLVL 4 を SHA-1 で計算し、数字で始まるパスワード（レベル 0/1）に `Q` を付けない~~
       → 上の `20260921-hostserver-password-levels` で済んだ（原典は ACS に同梱の jt400。サーバーの開始の要求も同じ欠陥があった）

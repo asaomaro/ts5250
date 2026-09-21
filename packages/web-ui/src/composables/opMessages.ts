@@ -313,6 +313,65 @@ export const noticeFor = (code: ErrorCode | "INTERNAL_ERROR"): string =>
 export const MSG_UNKNOWN_ERROR = "エラーが起きました";
 
 /**
+ * **起動応答で断られた理由**（`20260921-startup-codes-japanese`）。サーバーの文言は英語（`session rejected (8902: Device not available.)（装置 X）`）
+ * なので、コードを拾って日本語の意味に置き換える。ACS もコードごとの文言（`KEY_5250_CONNECTION_ERR_<コード>`）を出す。
+ * 意味は ACS の文言表と RFC 4777 の一覧に基づき、**文言は当 PJ で書いた**（ACS の日本語をそのまま写さない）
+ */
+export const STARTUP_CODE_MEANING_JA: Readonly<Record<string, string>> = {
+  2702: "装置記述が見つかりません",
+  2703: "制御装置記述が見つかりません",
+  2777: "装置記述が壊れています",
+  8901: "装置がオンに構成変更されていません",
+  8902: "装置が使用中です",
+  8903: "この装置はセッションに使えません",
+  8906: "セッションを開始できませんでした",
+  8907: "セッションで障害が起きました",
+  8910: "制御装置がセッションに使えません",
+  8916: "一致する装置が見つかりません",
+  8917: "オブジェクトへの権限がありません",
+  8918: "ジョブが取り消されました",
+  8920: "オブジェクトの一部が壊れています",
+  8921: "通信エラーが起きました",
+  8922: "否定応答を受け取りました",
+  8923: "起動レコードの形が正しくありません",
+  8925: "装置を作れませんでした",
+  8928: "装置を変更できませんでした",
+  8929: "構成変更（オン・オフ）に失敗しました",
+  8930: "メッセージ待ち行列がありません",
+  8934: "装置の開始に失敗しました",
+  8935: "セッションが拒否されました",
+  8936: "セッションの開始でセキュリティーの検査に失敗しました",
+  8937: "自動サインオンが拒否されました",
+  8940: "自動構成に失敗したか、許可されていません",
+  I904: "接続元のシステムのリリースが合いません"
+};
+
+/** 起動応答で断られたときの見出し（コードが読めないときもこれ） */
+export const MSG_SESSION_REJECTED_HEAD = "ホストが接続を断りました";
+
+/**
+ * 起動応答で断られたサーバーの文言から、日本語の理由を作る（`（8902: 装置が使用中です・装置 DSP01）` の形）。
+ * コードが読めなければ undefined（呼び出し側が汎用の見出しに落とす）
+ */
+export function startupRejectionText(message: string): string | undefined {
+  const m = /rejected \(([A-Z0-9]\d{3}):/.exec(message);
+  if (!m) return undefined;
+  const code = m[1]!;
+  const meaning = Object.hasOwn(STARTUP_CODE_MEANING_JA, code) ? STARTUP_CODE_MEANING_JA[code] : "意味の分からない起動応答です";
+  const device = /（装置 ([^）]+)）/.exec(message)?.[1];
+  return `${MSG_SESSION_REJECTED_HEAD}（${code}: ${meaning}${device ? `・装置 ${device}` : ""}）`;
+}
+
+/**
+ * **開く前に失敗したときの文言**（ランチャーに出す）。起動応答で断られたときだけ日本語の理由に置き換え、
+ * それ以外は従来どおり code と文言をそのまま出す（接続先・ポートなど診断に要る情報が入っているため）
+ */
+export function openErrorText(code: string, message: string): string {
+  if (code === "SESSION_REJECTED") return startupRejectionText(message) ?? `${noticeFor("SESSION_REJECTED")}（${message}）`;
+  return `${code}: ${message}`;
+}
+
+/**
  * サーバーの message から**欄の位置だけ**を拾う。
  *
  * 形は core が `field at (行,桁)` で統一している
@@ -379,6 +438,11 @@ export function wsErrorNotice(code: string, message: string): string {
   // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`code` が `constructor` /
   // `toString` だと継承プロパティ（関数）が返り `??` が効かない。`code` はサーバー生成なので
   // 今は届かないが、**戻り値が文字列であること**を型ではなくここで閉じる
+  // 起動応答で断られたときは、コードの意味まで出す（繋ぎ直しで断られたときもここを通る）
+  if (code === "SESSION_REJECTED") {
+    const text = startupRejectionText(message);
+    if (text !== undefined) return text;
+  }
   const head = Object.hasOwn(NOTICE_BY_ERROR, code)
     ? NOTICE_BY_ERROR[code as ErrorCode | "INTERNAL_ERROR"]!
     : MSG_UNKNOWN_ERROR;

@@ -72,12 +72,12 @@ const CODE_MEANING: Record<string, string> = {
   // **表に無いと起動応答と認識されず 5250 データとして解析され**、
   // `expected ESC` の警告だけが残って本当の失敗理由が消える（`isKnownStartupCode` はこの表が出所）。
   //
-  // ⚠ **2703 / 2777 の意味は未確認。** ACS の英語文言はメッセージカタログ側にあり、
-  // 通信状態→キーの対応を追えていない。**それらしい英文を創作しない**
-  // （`AGENTS.md` 判断の原則 2）。意味が分かったらここを直す。
-  2703: "Startup response 2703 (meaning not yet verified against ACS).",
-  2777: "Startup response 2777 (meaning not yet verified against ACS).",
-  8936: "Automatic sign-on failed.",
+  // ~~⚠ 2703 / 2777 の意味は未確認~~ → ACS の文言表（`acshod2.jar` の `com/ibm/eNetwork/msgs/hod_en` の
+  // `KEY_5250_CONNECTION_ERR_2703` / `_2777`）で分かった（`20260921-startup-codes-japanese`）。RFC 4777 の一覧とも同じ意味。
+  // ~~8936 は "Automatic sign-on failed."~~ → 同じ表では「セッションの試行でのセキュリティーの失敗」（プリンター側の表と揃った）
+  2703: "Controller description not found.",
+  2777: "Damaged device description.",
+  8936: "Security failure on session attempt.",
   8937: "Automatic sign-on rejected."
 };
 
@@ -101,6 +101,11 @@ export function startupCodeMeaning(code: string): string {
  */
 export function isKnownStartupCode(code: string): boolean {
   return code in CODE_MEANING;
+}
+
+/** 知っている起動応答のコード（web-ui の日本語の表 `STARTUP_CODE_MEANING_JA` と揃っていることをテストで固定する） */
+export function knownStartupCodes(): string[] {
+  return Object.keys(CODE_MEANING);
 }
 
 /**

@@ -14,7 +14,8 @@ import {
   MSG_RECONNECT_GAVE_UP,
   MSG_SESSION_ENDED,
   MSG_VT_CONNECTION_LOST,
-  wsErrorNotice
+  wsErrorNotice,
+  openErrorText
 } from "./composables/opMessages.js";
 import {
   sessionsStore,
@@ -771,7 +772,7 @@ export async function openSession(
             case "error": {
               if (!sessionId) {
                 setBusy(sessionId, false);
-                reject(new Error(`${msg.code}: ${msg.message}`));
+                reject(new Error(openErrorText(msg.code, msg.message)));
                 break;
               }
               applyFromSessionClient(sessionId, client, msg);
@@ -894,7 +895,7 @@ export async function openVtSession(
               break;
             }
             case "error":
-              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              if (!sessionId) reject(new Error(openErrorText(msg.code, msg.message)));
               break;
           }
         },
@@ -1064,7 +1065,7 @@ export async function openPrinterSession(
               break;
             }
             case "error":
-              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              if (!sessionId) reject(new Error(openErrorText(msg.code, msg.message)));
               break;
           }
         },
