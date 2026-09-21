@@ -129,7 +129,6 @@ export interface WsHandlerDeps {
   vt?: VtManager;
 }
 
-/** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
 /**
  * **解決結果（保存済みのプリンターの設定）から、プリンターを開く材料を作る**（`onOpenPrinter` と関連付けるプリンター
  * `SessionManager.linkAssociatedPrinter` の前の起動が同じ道を通る——2 か所に手写しすると信頼設定〔PDF 出力先・自動印刷・常駐〕の扱いが
@@ -160,6 +159,7 @@ export function printerOptsFrom(t: ResolvedTarget): Parameters<SessionManager["o
   return opts;
 }
 
+/** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
 function hasRef(msg: { system?: string; session?: string }): boolean {
   return Boolean(msg.system ?? msg.session);
 }
@@ -260,6 +260,8 @@ export class WsConnection {
   private detachScreen: (() => void) | undefined;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  /** 後始末（`dispose`）に入ったか。開く途中で切れた接続が、誰も持たないセッションを作らないための印 */
+  private disposed = false;
   /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
   private detachWatch: (() => void) | undefined;
   /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
@@ -590,6 +592,8 @@ export class WsConnection {
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     if (msg.terminal === "3270") return this.onOpen3270(msg);
     if (msg.terminal === "vt") return this.onOpenVt(msg);
+    // この open のための印。前の `close` メッセージの後始末（`dispose`）が立てた印を引きずらない
+    this.disposed = false;
     await withAudit({ op: "ws_open" }, async () => {
       // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
       if (msg.sessionId !== undefined) return this.attach(msg.sessionId, { resume: msg.resume === true });
@@ -612,7 +616,25 @@ export class WsConnection {
       // **関連付けるプリンターセッション**（設定で指したときだけ。ACS の画面の層の機能なので MCP・HLLAPI から開く表示には効かせない。
       // `20260921-associated-printer-session`）。プリンターを起こして装置名を待ち、その装置名で関連付けて表示を開く
       const assoc = hasRef(msg) ? await this.prepareAssociation(msg, opts) : undefined;
-      const entry = await this.deps.sessions.open(opts);
+      // 準備（プリンターの起動・装置名待ち）の間に接続が切れていたら、表示は作らない（数秒〜数分の窓。誰も持たない表示が残る）。
+      // 起こしたプリンターは、表示を閉じたときと同じ処置で片付ける（`20260921-associated-printer-session` の節目 10 の独立点検 C-S4）
+      if (this.disposed) {
+        if (assoc?.printerId !== undefined) this.deps.sessions.abortAssociatedPrinter(assoc.printerId, assoc.closeWithLast);
+        return;
+      }
+      let entry: Awaited<ReturnType<SessionManager["open"]>>;
+      try {
+        entry = await this.deps.sessions.open(opts);
+      } catch (e) {
+        // 表示を開けなかった（ホストに届かない・サインオンの拒否・装置使用中・上限）。起こしたプリンターを止める（ACS は表示が切れればプリンターを止める。C-S3）
+        if (assoc?.printerId !== undefined) this.deps.sessions.abortAssociatedPrinter(assoc.printerId, assoc.closeWithLast);
+        throw e;
+      }
+      // **開く待ちの間に切れていたら、誰も持たないので閉じる**（`opened` を送っても受け取る側が居ない。以前からある窓）
+      if (this.disposed) {
+        await this.deps.sessions.close(entry.id).catch(() => undefined);
+        return;
+      }
       if (assoc?.printerId !== undefined) this.deps.sessions.linkAssociatedPrinter(entry.id, assoc.printerId, assoc.closeWithLast);
       // 自分で開いた＝持ち主（去るときに畳む責任を持つ）
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
@@ -633,7 +655,9 @@ export class WsConnection {
         })(),
         // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
         ...(entry.job !== undefined ? { job: entry.job } : {}),
-        ...startupCodeOf(entry.session)
+        ...startupCodeOf(entry.session),
+        // 関連付けるプリンターが使えず関連付けなしで開いたとき、その理由（利用者へ知らせる。ACS はポップアップで知らせる）
+        ...(assoc?.issue !== undefined ? { associatedPrinterIssue: assoc.issue } : {})
       });
       // ユーザー・番号は背後で引いている。**待たない**——取れたら足すだけ
       void entry.jobResolved?.then((job) => {
@@ -871,12 +895,13 @@ export class WsConnection {
 
   /**
    * 表示を開く前の**関連付けるプリンターの準備**。装置名が分かれば `opts.associatedPrinter` に入れる（IBMASSOCPRT）。
-   * 指した設定が使えない・プリンターを開けないときは、**関連付けなしで開く**（ACS `KEY_5250_ASSOC_INVALID_PROFILE`）。理由は記録に残す
+   * 使えないときは**関連付けなしで開き**、その理由を返す（`opened.associatedPrinterIssue`。ACS はポップアップで知らせる）:
+   * `invalid`＝指した設定が使えない（無い・プリンターでない・権限が無い）／`failed`＝プリンターを開始できなかった／`timeout`＝装置名が決まる前に待ち時間が切れた
    */
   private async prepareAssociation(
     msg: WsClientMessage & { type: "open" },
     opts: OpenOptions
-  ): Promise<{ printerId?: string; closeWithLast: boolean } | undefined> {
+  ): Promise<{ printerId?: string; closeWithLast: boolean; issue?: "invalid" | "failed" | "timeout" } | undefined> {
     const target = this.resolveTarget(msg);
     const want = target.associatedPrinterSession;
     if (!want) return undefined;
@@ -886,15 +911,18 @@ export class WsConnection {
       printerTarget = this.deps.resolver.resolve({ session: want.ref }, this.user, (m) => wsLog.warn(m));
     } catch (e) {
       wsLog.warn({ session: want.ref, err: String(e) }, "associated printer session not usable; opening without association");
-      return undefined;
+      return { closeWithLast: want.closeWithLast, issue: "invalid" };
     }
-    if (printerTarget.session?.sessionType !== "printer") return undefined;
+    if (printerTarget.session?.sessionType !== "printer") return { closeWithLast: want.closeWithLast, issue: "invalid" };
     const r = await this.deps.sessions.prepareAssociatedPrinter(
       want.ref,
       this.user?.username,
       () =>
         this.deps.sessions.openPrinter({
           ...printerOptsFrom(printerTarget),
+          // **指したプリンターは必ず起こす**（ACS `SessionManager.startAssociatedPrinterSession`）。「自動で待ち受け開始 ☐」の定義でも、
+          // 初回の表示で起こされず装置名が決まらないままにならない（2 本目の表示は既存の停止中を起こすので、初回だけ違う穴になっていた。C-S8）
+          autoStart: true,
           origin: `associated:${want.ref}`,
           ref: want.ref,
           ...(this.user ? { owner: this.user.username } : {})
@@ -903,10 +931,10 @@ export class WsConnection {
     );
     if ("error" in r) {
       wsLog.warn({ session: want.ref, err: r.error }, "associated printer session could not be opened; opening without association");
-      return undefined;
+      return { closeWithLast: want.closeWithLast, issue: "failed" };
     }
     if (r.deviceName !== undefined) opts.associatedPrinter = r.deviceName;
-    return { printerId: r.printerId, closeWithLast: want.closeWithLast };
+    return { printerId: r.printerId, closeWithLast: want.closeWithLast, ...(r.issue !== undefined ? { issue: r.issue } : {}) };
   }
 
   private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
@@ -1370,6 +1398,8 @@ export class WsConnection {
   }
 
   private dispose(reason: string, opts?: { transportLost?: boolean }): void {
+    // 後始末に入った印。`onOpen` が非同期の待ち（関連付けるプリンターの起動・接続）の後に見て、誰も持たないセッションを作らない
+    this.disposed = true;
     this.stopHeartbeat();
     // **監視は止めない。** 購読を外すだけ——監視はレジストリが所有しており、
     // ブラウザを閉じても続くことが要件（research F1）

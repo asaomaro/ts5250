@@ -9,3 +9,9 @@
 - 正確性: 値を加工しない・空白だけなら送らない・位置は最後、の 3 点を原典と実測の両方で確かめた。0xFF になる文字の IAC 二重化まで検査した。
 - 規約適合: 実機の識別子は `.env.verify` から採り、記録は伏字（`<PRTDEV>`）。タップの記録は解析後に削除した。ACS の文言は写していない。
 - 指摘なし。
+
+## ラウンド 2（節目 10 の独立点検。`scratchpad/review-milestone10.md`）
+- [nit] packages/tn5250/src/telnet/telnet.ts:359 補助面の文字で IBMASSOCPRT が 1 バイト少ない（`[...assoc]` はコードポイント単位。ACS の Java `charAt` は UTF-16 の単位で、サロゲート 2 つ＝2 バイト） / 対応: UTF-16 の単位ごとにした。テスト `associated-printer.test.ts`
+
+## ラウンド 3（通過）
+- 節目 10 の指摘（nit 1）を直した。ACS `NVT5250` の変数 19 と一致（最後・Java の `trim()`・下位 8 ビット・加工しない）は点検役が原典で確かめた。指摘なし。

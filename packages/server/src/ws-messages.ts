@@ -299,6 +299,12 @@ export interface WsOpened {
    */
   startupCode?: string;
   /**
+   * **関連付けるプリンターが使えず、関連付けなしで開いたとき**の理由（`20260921-associated-printer-session`。ACS はポップアップで知らせる）。
+   * `invalid`＝指した設定が使えない（無い・プリンターでない・権限が無い）／`failed`＝プリンターを開始できなかった／
+   * `timeout`＝装置名が決まる前に待ち時間が切れた（ACS は時間切れなら関連付けなしで開く）。指していない・関連付けられたときは載せない
+   */
+  associatedPrinterIssue?: "invalid" | "failed" | "timeout";
+  /**
    * **3270 のときだけ**: 相手が IBM i か（`Session3270.isIbmI`）。汎用機では Attn・SysReq・Help・Print に 3270 の割り当てが無く、
    * 送ると拒否されるので、画面側はその 4 つへのキーの割り当てを何もしない扱いにする（ACS の既定の割り当ての節目の点検の指摘）
    */

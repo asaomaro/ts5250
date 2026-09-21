@@ -1,0 +1,50 @@
+# 自己点検欄（CHECK(M10)）で、Field Exit は検査桁を見るか（ACS のコア・社内機。`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。
+# 原典: `processFieldPlusMinusAndExit` は `checkModulusField` を呼ばない。呼ぶのは `moveCursorWithMandFillCheck`（Tab など）と `processAIDCode`（AID のときのカーソル下の欄）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `SELFCHK`。(3,10) 自己点検欄 FCW B1A0 6 桁 / (5,10) 素の欄）。測った後に消す。
+# 検査桁の合わない値 12340・合う値 12344（Mod10・**5 桁**）。`inhibit=5` は操作員エラー。
+# **6 桁は打たない**: 欄（6 桁）が満杯になり、自動の次欄送りが `moveCursorWithMandFillCheck` を通って検査桁エラーになる（最初の測定は 6 桁で、Field Exit でなく自動送りを測っていた）。
+# **実測（2026-09-22・社内機・ACS のコア）**: 5 桁の合わない値 12340 は、Field Exit では次の欄（5,10）へ進み（`inhibit=0`・エラー無し）、Tab では
+#   「検査数字エラー」（`inhibit=5`・カーソルは欄へ戻る）。合う値 12344 の Field Exit は通る。~~6 桁で測った最初の結果（Field Exit でも検査数字エラー）~~ は
+#   欄が満杯になって自動送りが検査を通った交絡だった。→ ACS の Field Exit は自己点検を見ない。当 PJ は Field Exit・Field± の後だけ出た後の検査を掛けない
+#   （`EmulatorPane.vue` の `onFieldFull` の `viaFieldExit`）。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/SELFCHK PARM('SELFCHK')[enter]
+settle 3000
+dump a0-initial
+
+# --- 1) 合わない値（5 桁）を打って Field Exit ---
+keys 12340
+settle 300
+keys [fldext]
+settle 500
+dump s1-bad-fieldexit
+keys [reset]
+settle 300
+
+# --- 2) 同じ値のまま欄へ戻って Tab で出る ---
+setcursor 3,10
+settle 300
+keys [eraseeof]12340
+settle 300
+keys [tab]
+settle 500
+dump s2-bad-tab
+keys [reset]
+settle 300
+
+# --- 3) 合う値を打って Field Exit（基準） ---
+setcursor 3,10
+settle 300
+keys [eraseeof]12344
+settle 300
+keys [fldext]
+settle 500
+dump s3-good-fieldexit
+keys [reset]
+settle 300
+keys [enter]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

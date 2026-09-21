@@ -521,6 +521,62 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnReadMDT", rc, fdbk);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "DBCSFE") == 0) {
+        /*
+         * **DBCS の欄の種類ごとに、Field Exit の「欄の先頭」と ME を測る画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S1）。
+         * ACS `PS5250.processFieldPlusMinusAndExit` は ME の欄で「カーソルが欄の先頭（`cursorSBA == startPos`）か MDT が無い」ときエラー 0021 にする。
+         * 欄の先頭の桁が型ごとに違うかを、ACS のコアで Tab の着地と Field Exit の結果から見る。FFW 4008＝ME。
+         *   (3,10) G（FCW 8220）12 桁 / (5,10) O（FCW 8280）12 桁 / (7,10) J（FCW 8200）12 桁 / (9,10) E（FCW 8240）12 桁 / (11,10) SBCS 6 桁（ME）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x08, 0x82, 0x20, 0x20, 0x00, 0x0C,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x08, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x08, 0x82, 0x00, 0x20, 0x00, 0x0C,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x08, 0x82, 0x40, 0x20, 0x00, 0x0C,
+            0x11, 0x0B, 0x09, 0x1D, 0x40, 0x08, 0x20, 0x00, 0x06,
+            0x13, 0x03, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 DBCS の欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "SELFCHK") == 0) {
+        /*
+         * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。
+         * ACS `processFieldPlusMinusAndExit` は `checkModulusField` を呼ばない（呼ぶのは `moveCursorWithMandFillCheck`〔Tab など〕と `processAIDCode`）。
+         *   (3,10) 自己点検欄（FCW B1A0）6 桁 / (5,10) 素の欄 6 桁
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0xB1, 0xA0, 0x20, 0x00, 0x06,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x03, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 自己点検欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "ROLLBAD") == 0) {
         /*
          * **指定の不正な ROLL を出す**（下端 ≤ 上端。`20260921-negative-responses`）。ACS `processRoll` は -1 を返し、否定応答（0x1005012C）を返す。

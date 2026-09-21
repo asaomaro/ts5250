@@ -55,3 +55,28 @@ smoke: pass (exit 0)
 [tab-prog] ours: [6,20] ACS(standard list #3 = C): [7,20]
 [backtab-prog] ours: [5,20] ACS: [3,20]
 ```
+
+## 節目 10 の対応（ラウンド 4 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/partA-mut.py` の P1〜P8）— 8 通りとも落ちた（`tab-backtab-position.test.ts` に 3 区間の並びと保護欄の送り先のテストを足した）
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）
+
+### 失敗の証跡
+このラウンドは doc と台帳の変更が中心で、失敗したテストは無い（点検役の変異 P1〜P8 は、直した後のコードに対して 8 通りとも落ちた）。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- Backtab の癖（継続欄の 2 区間目の先頭）は写していない（台帳）。3270 の `@T`/`@B` は 5250 の規則を当てたまま（台帳）

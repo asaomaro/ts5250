@@ -48,3 +48,31 @@ smoke: pass (exit 0)
 ## 未検証の穴（skip / 環境不足）
 - 実ブラウザでの見え方（通知欄に 3 秒出て消える）は jsdom まで。
 - ACS の GUI の状態行そのものは測れない（ECL のコアに GUI は無い）。原典（`AcsOnly.displayResponseCode`・`StatusBar`）まで。
+
+## 節目 10 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/mut-c10.py` の C-S6 の 5 通り）— 5 通りとも落ちた（旧 `mut-sc.py`・`mut-sc2.py` の分と合わせて開く・繋ぎ直し・後から入る経路を固定）
+
+### 受け入れ基準の再確認
+- AC1〜AC5: pass（全量）
+
+### 失敗の証跡
+直す前の点検役の再現: I906 で開いたセッションに「セッションを開始しました（起動応答 I906）」と出る。ブラウザの繋ぎ直しでも出る。
+
+直した後の mutation（C-S6 の 5 通り）はすぐ落ちた（生き残りは無く、失敗の記録は無い）。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- I906 などの成功扱いを ACS がどう扱うかは実機で測っていない（台帳）
+- 状態行の履歴（ACS）は写していない（台帳）

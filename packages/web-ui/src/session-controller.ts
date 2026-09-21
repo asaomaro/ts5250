@@ -52,7 +52,8 @@ import {
   MSG_SELF_CHECK,
   MSG_FIELD_EXIT_REQUIRED,
   startupStartedText,
-  STARTUP_NOTICE_MS
+  STARTUP_NOTICE_MS,
+  MSG_ASSOC_PRINTER_ISSUE
 } from "./composables/opMessages.js";
 import { beep } from "./beep.js";
 
@@ -505,7 +506,7 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           const missed = cur.pcCommands.at(-1);
           if (missed && missed.at !== lastSeenAt) cur.notice = pcCommandNotice(missed);
           if (msg.job !== undefined) cur.job = msg.job;
-          noteStartup(sessionId, msg.startupCode);
+          noteStartup(sessionId, msg.startupCode, false); // ブラウザの繋ぎ直し・後から入るタブ（ホストへは繋ぎ直していない）
           // **`ccsid` と `readOnly` は上書きしない。** サーバーの `attach` は `ccsid` に
           // 既定（37）を返すだけで、`readOnly` はそもそも載せない——どちらも
           // **開いたときの設定に属する**もので、繋ぎ直しで変わる値ではない
@@ -621,8 +622,8 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       if (!s) break;
       delete s.hostReconnect;
       if (s.notice?.startsWith(msgHostReconnecting(1))) delete s.notice;
-      // ACS は繋ぎ直しでも開始の文言を出す
-      noteStartup(sessionId, msg.startupCode);
+      // ACS は繋ぎ直しでも開始の文言を出す（ホストへ繋ぎ直せたとき）
+      noteStartup(sessionId, msg.startupCode, true);
       break;
     }
     // ホストの警報（CC2 0x04）。**画面と別に届く**——画面が変わらないレコードでも鳴るため
@@ -705,14 +706,18 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
 }
 
 /**
- * **表示セッションが繋がった知らせ**（起動応答のコードつき。`20260921-startup-code-status`）。コードを覚え、通知が空いていれば開始の文言を出して
- * 3 秒で消す（ACS の状態行と同じ）。**間に別の通知（エラー等）が出ていたら消さない**——当 PJ の通知欄は操作員エラーと共用なので
+ * **表示セッションが繋がった知らせ**（起動応答のコードつき。`20260921-startup-code-status`）。コードを覚え、`announce` なら通知が空いていれば
+ * 文言を出して 3 秒で消す（ACS の状態行と同じ）。**間に別の通知（エラー等）が出ていたら消さない**——当 PJ の通知欄は操作員エラーと共用なので。
+ *
+ * **知らせるのは「ホストへ繋がった」ときだけ**（`announce`: 自分で開いた・ホストが切れて繋ぎ直せた）。ブラウザの繋ぎ直し（`tryResume`）や
+ * 後から入るタブの `opened` は、ホストへは繋ぎ直していないので「開始しました」と出すのは事実と違う（ACS が出すのは通信の状態が変わったとき。
+ * 節目 10 の独立点検 C-S6）。コード（ⓘ に出す）は覚える
  */
-function noteStartup(sessionId: string, code: string | undefined): void {
+function noteStartup(sessionId: string, code: string | undefined, announce: boolean): void {
   const s = sessionsStore.get(sessionId);
   if (!s || code === undefined) return;
   s.startupCode = code;
-  if (s.notice !== undefined) return;
+  if (!announce || s.notice !== undefined) return;
   const text = startupStartedText(code);
   s.notice = text;
   setTimeout(() => {
@@ -790,7 +795,9 @@ export async function openSession(
               // **黙って実行しない**は繋ぎ直しでも同じ——留守中の分も最後の 1 件を知らせる
               const missed = state.pcCommands?.at(-1);
               if (missed) state.notice = pcCommandNotice(missed);
-              noteStartup(sessionId, msg.startupCode);
+              // 関連付けるプリンターが使えず関連付けなしで開いたときは、その理由を知らせる（開始の知らせより優先。3 秒で消さない）
+              if (msg.associatedPrinterIssue !== undefined) state.notice = MSG_ASSOC_PRINTER_ISSUE[msg.associatedPrinterIssue];
+              noteStartup(sessionId, msg.startupCode, true);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);

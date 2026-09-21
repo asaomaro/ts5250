@@ -236,6 +236,15 @@ export class ScreenBuffer {
     return pendingHasContent(this.pending) ? extentOf(this.pending) : this.committedWrite;
   }
 
+  /**
+   * **いま適用中のレコードが、画面を書いた（クリア・復元を含む）か。**`lastWrite` と違い、何も書かなかったレコードでは前回の確定値ではなく
+   * `false` を返す（応答だけのレコード——WSF・READ SCREEN 系——が画面イベントを出すかの判定用。
+   * `20260921-negative-responses` の節目 10 の独立点検 A-S1 の関連）。純粋な読み取り
+   */
+  get wroteInThisRecord(): boolean {
+    return pendingHasContent(this.pending);
+  }
+
   /** 線形アドレス 1 セルを書き込み範囲へ含める */
   private noteWrite(addr: number): void {
     const p = this.pending;

@@ -97,3 +97,22 @@ describe("カーソルの手前が SO（J の欄の最初の字）からの Back
     expect(rc(backtabPosition(s, pos(5, 21)))).toEqual([3, 20]);
   });
 });
+
+describe("カーソル送りの送り先（節目 10 の独立点検で生き残った変異）", () => {
+  it("**送り先が保護欄なら行かず、画面順の次へ倒す**（ACS `isByPassField`）", () => {
+    const fields = [f(1, 3, { cursorProgression: 2 }), f(2, 5, { protected: true }), f(3, 7)];
+    expect(rc(tabPosition(snap(fields), pos(3, 21)))).toEqual([7, 20]);
+  });
+  it("3 区間の継続欄（first・middle・last）は先頭の区間だけが並びに入る", () => {
+    const fields = [
+      f(1, 3, { cursorProgression: 2 }),
+      f(2, 5, { continued: "first" }),
+      f(3, 6, { continued: "middle" }),
+      f(4, 7, { continued: "last" }),
+      f(5, 9)
+    ];
+    // 標準の並びは [1, 2(first), 5] → 2 番は継続欄の先頭（5 行）。middle・last を数えていたら 2 番は 3（6 行）になる
+    expect(rc(tabPosition(snap(fields), pos(3, 21)))).toEqual([5, 20]);
+    expect(progressionNumberOf(fields as never, fields[4]!)).toBe(3);
+  });
+});

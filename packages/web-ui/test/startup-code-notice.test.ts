@@ -31,7 +31,7 @@ vi.mock("../src/ws-client.js", () => ({
 
 import { openSession, closeSession } from "../src/session-controller.js";
 import { sessionsStore } from "../src/stores/sessions.js";
-import { startupStartedText, STARTUP_NOTICE_MS, isOperatorError, msgHostReconnecting } from "../src/composables/opMessages.js";
+import { startupStartedText, STARTUP_NOTICE_MS, isOperatorError, msgHostReconnecting, MSG_ASSOC_PRINTER_ISSUE } from "../src/composables/opMessages.js";
 import SessionInfo from "../src/components/SessionInfo.vue";
 
 const snap = (): ScreenSnapshot =>
@@ -69,6 +69,33 @@ describe("開始の知らせ", () => {
     const s = await open({ startupCode: "I901" });
     expect(s.notice).toBe(startupStartedText("I901"));
     expect(startupStartedText("I901")).toContain("I901");
+  });
+
+  it("**I901・I902 以外のコードは「応答コード: …」**（ACS `KEY_RESPONSE_CODE`。I906 は自動サインオンが許されずサインオン画面が続くので「開始しました」は事実と違う）", async () => {
+    expect(startupStartedText("I906")).toBe("応答コード: I906");
+    expect(startupStartedText("I906")).not.toContain("開始");
+    const s = await open({ startupCode: "I906" });
+    expect(s.notice).toBe("応答コード: I906");
+    expect(s.startupCode).toBe("I906");
+  });
+
+  it("**関連付けるプリンターが使えず関連付けなしで開いたら、その理由を出す**（3 秒で消さない。開始の知らせより優先）", async () => {
+    for (const issue of ["invalid", "failed", "timeout"] as const) {
+      sessionsStore.byId.clear();
+      sessionsStore.order = [];
+      clients = [];
+      const s = await open({ startupCode: "I902", associatedPrinterIssue: issue });
+      expect(s.notice, issue).toBe(MSG_ASSOC_PRINTER_ISSUE[issue]);
+      vi.advanceTimersByTime(STARTUP_NOTICE_MS * 5);
+      expect(sessionsStore.get("s1")!.notice, `${issue}: 消えない`).toBe(MSG_ASSOC_PRINTER_ISSUE[issue]);
+      closeSession("s1");
+    }
+  });
+
+  it("理由の文言は 3 種類とも違い、「5250端末」でなく「開きました」で終わる自然な日本語（です・ます調）", () => {
+    const all = Object.values(MSG_ASSOC_PRINTER_ISSUE);
+    expect(new Set(all).size).toBe(3);
+    for (const m of all) expect(m.endsWith("開きました")).toBe(true);
   });
 
   it("エラー状態に入る文言ではない", () => {

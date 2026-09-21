@@ -219,14 +219,13 @@ export function fieldExit(state: EditState, field: AdjustSpec): EditState {
 /**
  * Field− / Field+: Field Exit と同じ整形をしたうえで、**符号桁（最終桁）に符号を確定する**。
  *
- * 対象は**符号付き数値欄だけ**。5250 の符号付き数値欄はワイヤ上 `桁数 + 1` バイトで、
- * 最終桁が符号桁（空白 = 正 / `-` = 負）。送信時に core が符号桁を落として
+ * **符号付き数値欄**は、ワイヤ上 `桁数 + 1` バイトで最終桁が符号桁（空白 = 正 / `-` = 負）。送信時に core が符号桁を落として
  * 最終桁のゾーンを 0xD にする（`read-response.ts`）。
  *
- * **符号付き数値でない欄では Field Exit と同じ**にする。原典（GNU tn5250 `display.c`）は
- * num-only 欄で最終バイトのゾーンを直接 0xD にするが、**実機の数値入力欄はすべて
- * signed-num** で（実機実測）num-only の符号処理を確かめられない。
- * 確かめられないものは実装しない側へ倒す（原典にも `field_minus_in_char` という同じ逃げ道がある）。
+ * ~~符号付き数値でない欄では Field Exit と同じにする（実機の数値入力欄はすべて signed-num で num-only の符号処理を確かめられない。
+ * 確かめられないものは実装しない側へ倒す）~~ → **数値専用（0x0300）の欄の Field− は、最終桁のバイトのゾーンを D にする**
+ * （下のコメント。`20260921-field-minus-zone-d`。実機の ACS のコアで測った）。それ以外の欄（英数字など）の Field− はエラー 0022（呼び出し側）で、
+ * Field+ は Field Exit と同じ。
  */
 export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean): EditState {
   const s = fieldExit(state, field);
@@ -234,7 +233,9 @@ export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean
     // **数値専用の欄の Field− は、欄の最終桁のバイトのゾーンを D にする**（ACS `PS5250.processFieldPlusMinusAndExit` の
     // `HostPlane[end] & 0x0F | 0xD0`。`20260921-field-minus-zone-d`）。最終桁が空でも同じ（0x00 / 0x40 → 0xD0）——実機の ACS のコアで
     // `12` と打って Field− → `12   }`（`scripts/acs-probe/field-minus-numeric-only.txt`）。ホストはゾーン D を負の数として読む。
-    // 生バイトで持つ（`read-response.ts` がそのまま送る）。表示は空白になる（ACS はそのバイトの文字——`}` や `J`〜`R`——を出す）
+    // 生バイトで持つ（`read-response.ts` がそのまま送る）。~~表示は空白になる~~ → 表示はそのバイトの文字（`}`・`J`〜`R`。CCSID 273 の 0xD0 は `ü`）で、
+    // `composables/zoneDigit.ts` が入力欄の値のセンチネルを字にする（ACS もそうする。`20260921-field-minus-zone-d` の節目 10 の独立点検 B-N3 で
+    // 表に無い字〔ホストが入れた英字など〕は下位 4 ビットを使わず 0x40 扱いになる差が残る——数値専用欄に英字が入る構成は稀で、台帳へ）
     if (negative && field.numericOnly === true && s.chars.length > 0) {
       const chars = [...s.chars];
       const last = chars[chars.length - 1]!;

@@ -1,0 +1,227 @@
+# DBCS の欄の種類ごとの「欄の先頭」と Field Exit の ME（ACS のコア・社内機・930。`20260921-field-exit-checks` の節目 10 の独立点検 B-S1）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `DBCSFE`。`scripts/build-dscmd.mjs` で作り、測った後に消す）:
+#   (3,10) G / (5,10) O / (7,10) J / (9,10) E（いずれも 12 桁・FFW 4008＝ME。FCW 8220 / 8280 / 8200 / 8240）/ (11,10) SBCS 6 桁（ME）。IC は G の欄の先頭。
+# 原典 `PS5250.processFieldPlusMinusAndExit`: ME の欄でカーソルが欄の先頭（`cursorSBA == startPos`）か MDT が無いとエラー 0021（`inhibit=5` で見える）。
+# 見るのは (a) Tab で各型の欄へ入ったときのカーソルの桁、(b) 各型で「消して（MDT を立て）全角を打ち直し、カーソルを置いて Field Exit」した結果。
+# **各ケースは欄を消してから打ち直す**（Field Exit が成功すると欄が消え、状態が次のケースへ持ち越されるため）。`setcursor` の後の位置も見る（ECL が SO の桁を動かすことがある）。
+# **実測（2026-09-22・社内機・ACS のコア。`inhibit=5` が 0021 で拒否）**:
+#   G（8220）: 全角の最初の字（3,10）で拒否。3,11 は全角の後半なので ECL がカーソルを 3,10 へ戻す → 「最初の字＝先頭」。
+#   O（8280）: SBCS の `A` は 5,10 で拒否・5,11 で通過。全角始まりは SO の桁（5,10）で拒否・最初の字（5,11）で通過。Tab の着地は 5,10（SO の桁）。
+#   J（8200）: `setcursor 7,10` は ECL が 7,11 へ動かす（SO の桁には止まれない）。7,11 は通過 → 「最初の字は先頭ではない」。Tab の着地は 7,11。
+#   E（8240）: 全角始まりは 9,10 が 9,11 へ動かされ通過。SBCS の `A` は 9,10 で拒否・9,11 で通過。Tab の着地は 9,10。
+#   → 当 PJ の `atStart`（J は常に先頭でない・E は全角始まりのときだけ・G・O は論理位置 0）と一致。O の全角始まりは SO の桁と最初の字が
+#     論理位置で区別できず、Tab の着地を優先して先頭に数える（最初の字を選んだ場合だけ ACS と違う）。
+# 実行: DSCMD_PGM=DBCSFE で build-dscmd.mjs → node ... scripts/acs-probe.mjs scripts/acs-probe/dbcs-field-exit-me.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DBCSFE PARM('DBCSFE')[enter]
+settle 3000
+dump a0-initial
+keys [tab]
+settle 300
+dump a1-o-after-tab
+keys [tab]
+settle 300
+dump a2-j-after-tab
+keys [tab]
+settle 300
+dump a3-e-after-tab
+keys [reset]
+settle 300
+
+# --- g-dbcs-at10: 3 行の欄を消して「あ」を打ち、10 桁から Field Exit ---
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 3,10
+settle 300
+dump g-dbcs-at10-pre
+keys [fldext]
+settle 500
+dump g-dbcs-at10-post
+keys [reset]
+settle 300
+
+# --- g-dbcs-at11: 3 行の欄を消して「あ」を打ち、11 桁から Field Exit ---
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 3,11
+settle 300
+dump g-dbcs-at11-pre
+keys [fldext]
+settle 500
+dump g-dbcs-at11-post
+keys [reset]
+settle 300
+
+# --- o-dbcs-at10: 5 行の欄を消して「あ」を打ち、10 桁から Field Exit ---
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 5,10
+settle 300
+dump o-dbcs-at10-pre
+keys [fldext]
+settle 500
+dump o-dbcs-at10-post
+keys [reset]
+settle 300
+
+# --- o-dbcs-at11: 5 行の欄を消して「あ」を打ち、11 桁から Field Exit ---
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 5,11
+settle 300
+dump o-dbcs-at11-pre
+keys [fldext]
+settle 500
+dump o-dbcs-at11-post
+keys [reset]
+settle 300
+
+# --- o-sbcs-at10: 5 行の欄を消して「A」を打ち、10 桁から Field Exit ---
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys A
+settle 300
+setcursor 5,10
+settle 300
+dump o-sbcs-at10-pre
+keys [fldext]
+settle 500
+dump o-sbcs-at10-post
+keys [reset]
+settle 300
+
+# --- o-sbcs-at11: 5 行の欄を消して「A」を打ち、11 桁から Field Exit ---
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys A
+settle 300
+setcursor 5,11
+settle 300
+dump o-sbcs-at11-pre
+keys [fldext]
+settle 500
+dump o-sbcs-at11-post
+keys [reset]
+settle 300
+
+# --- j-dbcs-at10: 7 行の欄を消して「あ」を打ち、10 桁から Field Exit ---
+setcursor 7,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 7,10
+settle 300
+dump j-dbcs-at10-pre
+keys [fldext]
+settle 500
+dump j-dbcs-at10-post
+keys [reset]
+settle 300
+
+# --- j-dbcs-at11: 7 行の欄を消して「あ」を打ち、11 桁から Field Exit ---
+setcursor 7,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 7,11
+settle 300
+dump j-dbcs-at11-pre
+keys [fldext]
+settle 500
+dump j-dbcs-at11-post
+keys [reset]
+settle 300
+
+# --- e-dbcs-at10: 9 行の欄を消して「あ」を打ち、10 桁から Field Exit ---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 9,10
+settle 300
+dump e-dbcs-at10-pre
+keys [fldext]
+settle 500
+dump e-dbcs-at10-post
+keys [reset]
+settle 300
+
+# --- e-dbcs-at11: 9 行の欄を消して「あ」を打ち、11 桁から Field Exit ---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あ
+settle 300
+setcursor 9,11
+settle 300
+dump e-dbcs-at11-pre
+keys [fldext]
+settle 500
+dump e-dbcs-at11-post
+keys [reset]
+settle 300
+
+# --- e-sbcs-at10: 9 行の欄を消して「A」を打ち、10 桁から Field Exit ---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys A
+settle 300
+setcursor 9,10
+settle 300
+dump e-sbcs-at10-pre
+keys [fldext]
+settle 500
+dump e-sbcs-at10-post
+keys [reset]
+settle 300
+
+# --- e-sbcs-at11: 9 行の欄を消して「A」を打ち、11 桁から Field Exit ---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys A
+settle 300
+setcursor 9,11
+settle 300
+dump e-sbcs-at11-pre
+keys [fldext]
+settle 500
+dump e-sbcs-at11-post
+keys [reset]
+settle 300
+
+keys [enter]
+settle 2000
+dump z-end

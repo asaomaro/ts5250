@@ -15,3 +15,7 @@
 - 背景: SF を全部読み、応答も Query と D9/72 のどちらか 1 本だったので、同じレコードの 2 つ目の WSF の応答が落ち、D9/72 の後ろの READ も効かなかった。
 - 決定: ACS `processCommand` の ESC 0xF3 と同じく最初の SF の長さだけ進め、応答は `wsfReplies` に積んで順に送る。WSF だけのレコードでなければ READ まで処理する。
 - 写していないもの: ACS は WSF の後に READ の保留を下ろす（`pending_read = 0`）。同じレコードで WSF より前に来た READ の扱いは実機で見ていないので変えていない（台帳へ）。
+
+## D4: design.md の `wsfD972` を `wsfReplies` に同期した（節目 10 の独立点検 A-S3）
+- 背景: D3 で「応答は起きた順に全部送る」に改め、`ApplyResult` が `wsfReplies`（起きた順の一覧）になったが、design.md は `wsfD972` のままだった。
+- 決定: design.md の該当行を取り消し線で残して事実に直した。4 バイトで終わる SF（N4）は実在しない形なので台帳へ。

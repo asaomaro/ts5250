@@ -60,3 +60,32 @@ smoke: pass (exit 0)
 [70+72] sent: ["0000880044d97080"]
 [d972+read] sent: ["000088000cd972c00034b044b004b0"] state: locked locked: true
 ```
+
+## 節目 10 の対応（ラウンド 4 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/partA-mut.py` の WSF の分岐 A1〜A11）— 11 通りとも落ちた
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）。この回は design.md の記述の同期だけ
+
+### 失敗の証跡
+このラウンドではコードを変えていない。点検役の再現（直す前の HEAD。`scratchpad/rv10/partA-edge.test.ts`）:
+
+```
+[00 04 D9 70] HEAD: 応答なし（applyStructuredField の sf[4] が undefined）  ACS: 範囲外を 0 と読んで Query に応答
+```
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- 4 バイトで終わる WSF は実在しない形（未確認）。台帳へ

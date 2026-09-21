@@ -446,14 +446,21 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **【まとめ】キー編集のうち HLLAPI の Tab・Backtab**（優先度 低）。**完了（`20260921-hllapi-tab-acs`・PR #410）**: HLLAPI の `@T` / `@B` を ACS の
   `nextNonByPassInputFieldPos` / `previousNonByPassInputFieldPos` と同じ行き先にした（`packages/tn5250/src/screen/search.ts` の `tabPosition` / `backtabPosition`）。
   以前は欄の途中からの Backtab が 1 つ前の欄へ飛び、カーソル送り・継続欄・SO を見ていなかった。単体 11 件・HLLAPI 2 件、mutation 7 通り検出。
-  ペインは別の実装のまま（既に ACS と同じ。純関数へ寄せるのは別の作業。D1）。
+  ペインは別の実装のまま（~~既に ACS と同じ~~ → 節目 10 の独立点検で、ACS の癖〔継続欄の 2 区間目の先頭からの Backtab で番号 0 を探す〕を写していないと分かった。
+  下の「節目 10 の独立点検で確かめられなかった懸念」。純関数へ寄せるのは別の作業。D1）。
 - [x] **【まとめ】キー編集のうち数値専用の欄の Field−**（優先度 中）。**完了（`20260921-field-minus-zone-d`・PR #410）**: ACS と同じく欄の最終桁のバイトのゾーンを D にする
   （空なら 0xD0。`packages/web-ui/src/composables/fieldEdit.ts` の `fieldSign`）。以前は Field Exit と同じで**負の数を送れなかった**。ACS のコアでシフト M の欄を測った
-  （`12` → `12   }`。`scripts/acs-probe/field-minus-numeric-only.txt`）。送信は `F1 F2 40 40 40 D0`（単体）。送る前の表示は空白（ACS はそのバイトの文字）。mutation 4 通り検出。
+  （`12` → `12   }`。`scripts/acs-probe/field-minus-numeric-only.txt`）。送信は `F1 F2 40 40 40 D0`（単体）。~~送る前の表示は空白（ACS はそのバイトの文字）~~ → 節目 10 の独立点検で直した: 表示も ACS と同じくそのバイトの字（`}`・`J`〜`R`。`composables/zoneDigit.ts`）。mutation 4 通り検出。
 - [x] **【まとめ】キー編集のうち Field Exit・Field± の前の検査**（優先度 中）。**完了（`20260921-field-exit-checks`・PR #410）**: ACS `PS5250.processFieldPlusMinusAndExit` と同じく、
   入力不可（DDS の I）の欄は 0004、ME の欄はカーソルが先頭か MDT が無ければ 0021、MF は先頭以外で部分入力なら欄の先頭へ戻して 0014 で、消去・右寄せ・欄の移動の前に止める
   （`packages/web-ui/src/composables/mandatoryCheck.ts` の `fieldExitRejection`）。実機の ACS のコアで ME 4 例・入力不可 2 例を測った（`scripts/acs-probe/field-exit-checks.txt`）。
   テスト `field-exit-checks.test.ts`、mutation 10 通り検出。
+  節目 9・10 の独立点検で直した分（実機の ACS のコアで測ってから）: 「欄の先頭」は欄の型で決まる（J は SO が先頭・E は全角で始まるときだけ・G と O は論理位置 0。
+  `scripts/acs-probe/dbcs-field-exit-me.txt`）、字を置く編集は値が変わらなくても MDT を立て（打鍵・DBCS・IME・貼り付け〔SBCS の主経路を含む〕。~~ペースト~~ は最初 DBCS の単一行だけだった）、
+  Erase EOF・Delete・Backspace も立てる（`scripts/acs-probe/erase-eof-mdt.txt`）、継続欄は並びのどこかに MDT があれば全区間を MDT、
+  **Field Exit・Field± は出た後の MF・自己点検を掛けない**（検査桁の合わない自己点検欄でも Field Exit は通り、Tab は検査数字エラー。`scripts/acs-probe/selfcheck-field-exit.txt`）。
+  ~~Field Exit も欄を出た後の検査（MF・自己点検）を通る~~ は誤りだった（`20260921-mandatory-check-acs` research F1 の呼び出し元の一覧が `processFieldPlusMinusAndExit` を含めていた）。
+  テスト `field-exit-checks-mdt.test.ts`・`field-exit-checks-wiring.test.ts`。
 - [x] **【まとめ】キー編集のうち MONOCASE の ASCII 以外の文字・SBCS のセッションの Ambiguous の字**（優先度 中）。**完了（`20260921-monocase-non-ascii`・PR #410）**:
   MONOCASE の欄は 1 バイト文字をすべて大文字に（`µ` と 2 字になる大文字の `ß` は変えない。`ScreenGrid.vue` の `inputChar`）。着手して見つけた
   **SBCS のセッション（37 など）で `é` `ü` `ß` `ø` を打てなかった**欠陥も直した——打鍵の判定とバイト予算が East Asian Width の Ambiguous を全角と見ていた
@@ -484,7 +491,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 低
     - ~~欄の先頭での Backspace~~（SBCS・DBCS とも `20260921-backspace-field-start` で ACS と同じ 0005 に。~~DBCS の欄は原典の手順上 0101~~ は実測で覆った）、~~End の行き先~~ → 欄の中は `20260921-acs-default-keys` で済んだ。~~**欄の外の End** は残り~~ → `20260921-end-outside-field` で済んだ（カーソルより後で始まる最初の入力欄の末尾へ。`EmulatorPane.vue` の `endKey`）
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
-    - ~~Field− の可否~~（`20260921-numpad-field-sign`）、~~数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）~~（上の `20260921-field-minus-zone-d`。表示は残り）、
+    - ~~Field− の可否~~（`20260921-numpad-field-sign`）、~~数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）~~（上の `20260921-field-minus-zone-d`。~~表示は残り~~ → 表示も字で見せるようにした〔`composables/zoneDigit.ts`〕）、
       ~~Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）~~ → 上の `20260921-field-exit-checks` で済んだ（~~0033・0020~~ は `setErrorCode(33)`・`(20)` の 10 進で、表示は 0021・0014）
     - 符号付き＋RZ の埋め字、右寄せで動かす範囲
     - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、~~Field Exit 時の検査~~（上の `20260921-field-exit-checks`）
@@ -549,6 +556,27 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ゾーン D の負の数をホストが負として受け取るか（`20260921-field-minus-zone-d`）と、DDS の Y の欄（コンパイルで落ちた）。
   - 偽の否定応答: 通常の画面（DSPJOB・DSPLIBL・WRKSPLF・DSPMSG・WRKOBJ・プロンプト・GO MAIN・QCMD）を社内機と PUB400 で一巡させて 0 件（2026-09-22）。
     RESTORE PARTIAL（ACS は 2 バイトの長さを読む）・ESC 0xF4・出力側ヘッダのフラグ 2 の 0x80 は、その画面に出てこないので確かめていない。
+- [ ] **節目 10 の独立点検で確かめられなかった懸念・残した差**（優先度 低・未確認。`20260921-negative-responses`・`20260921-field-exit-checks`・`20260921-field-minus-zone-d` ほか）。
+  - `processPassthru` のオペコード固有の動作: ACS は opcode 1・3（フラグ 1 の 0x10/0x08 から READ の保留を決める）・opcode 9（保留 9）・opcode 6/7（受信と同時に READ の応答を返す）を持つ。
+    当 PJ は 6/7 の空レコードに何も返さない。IBM i がオペコード 6/7/9 で入力待ちや即時読みを要求することがあるかは**未確認**（DSM の `QsnReadImm` が出すのはコマンド側の ESC 0x72）
+  - 末尾の ESC 1 バイトだけのレコード: 当 PJ は例外を握りつぶして応答も画面イベントも無い。ACS は範囲外を 0 と読み、未知のコマンドとして続ける（`processCommand` の `default`）。
+    SF が 4 バイトで終わる WSF（`00 04 D9 70`）も同じ理屈で ACS は Query に応答する。どちらも実在しない形（未確認）
+  - **応答をコマンド順に送らない**（`packages/tn5250/src/session/session.ts`）: ACS は各コマンドの応答をその場で送る（`[WSF Query][SAVE SCREEN]` は Query → SAVE、`[READ SCREEN][WSF Query]` は画面 → Query。
+    応答の中身もその時点の画面）。当 PJ はレコードを最後まで適用してから、SAVE → WSF → READ SCREEN EXTENDED → READ IMMEDIATE → READ MDT IMMEDIATE ALT → READ SCREEN の**固定順**で送る（応答の中身は適用後の画面）。
+    落ちる応答は無くなった（節目 10・A-S1）が、混ざる形は実機で観測していない（**未確認**）。「当 PJ の構造では」で済ませず直すなら、`applyDataStream` がコマンドの位置で応答を作る（呼び出し側から受け取るコールバック）作りに変える。
+    SAVE PARTIAL の応答は ACS では `processCommand` の終わり
+  - ヘッダのフラグ 2 の 0x80（`tokenizeData`）: ACS はデータの先頭 1 バイトを長さとして読み飛ばす。当 PJ の `parseRecord`（`gds.ts`）は見ない。実機でフラグ 2 の 0x80 を立てた記録があるかは**未確認**
+  - 上の「CC2 と SAVE PARTIAL の応答」の項の「3 つで直ちに return」は 3 つに限らない: WSF の長さ不足・WTD/READ/ROLL/WEC の長さ不足も ACS は return してレコード終わりの処理を飛ばす
+  - カーソル送りの番号: ACS は `n <= size()`（全区間の数）で検査して標準の並びを引くので、区間の多い画面では範囲外になりうる（当 PJ は undefined）。`standardFields` は画面順（ACS は定義順。
+    昇順に定義される限り同じ。昇順でない定義の画面は**未確認**）。ペインの Backtab も、継続欄の 2 区間目の先頭からの癖（ACS は番号 0 を探す）を写していない
+  - Field− の最終桁: 当 PJ は表にない字（ホストが入れた英字など）を 0xD0 にするが、ACS は実際のバイトの下位 4 ビットを使う（`A`＝0xC1 は 0xD1）。数値専用欄に英字が入る構成は稀
+  - G（`pure`）欄の SO/SI: ACS の G 欄は SO/SI を持たないが、`dbcsViewLayout`（`packages/web-ui/src/composables/fieldValidate.ts`）は全角の並びに常に SO/SI を足す。G 欄の予算・列ビューが 2 桁ずれるはず（**未検証**）
+  - O（`open`）欄が全角で始まるとき、SO の桁と最初の字が論理位置で区別できず、Tab の着地を優先して先頭に数える（最初の字を選んだ場合だけ ACS と違う。`scripts/acs-probe/dbcs-field-exit-me.txt`）
+  - 選択を Backspace・Delete で消すときの MDT: ACS のコアの `PS5250.clearRect`（選択の消去）は、空白だけの範囲では `inputChar` を呼ばず MDT を立てない（空白でない字が消えるときは立つ）が、当 PJ は選択の削除でも立てる。
+    キーが `clearRect` に繋がるかは GUI 層で、`acs-probe` では測れない（**未確認**。テストでは固定していない）
+  - Field Exit・Field± を満杯まで打った直後に押したとき、当 PJ は編集を出さない（ACS は `eraseToEOF` を通らない）。字を打った時点で編集は出ているので、値は変わらない（出し直しの回数だけの差）
+  - 編集の印（`ScreenGrid.vue` の `mdtKeyed`）は、立てる側と読む側が離れたモジュール変数で渡る。`editAcrossContinued` は `inputForSlice(target, 0)` が無いと `sync` を呼ばずに終わり、
+    印が次の同期へ持ち越される（実機の描画では起きにくい）。`sync(el, f, { placed })` の引数で渡す作りの方が安全
 - [x] **【まとめ】DS5250 のうち WSF D9/72 への応答**（優先度 中）。**完了（`20260921-wsf-d9-72`・PR #410）**: ACS `DS5250.processWSF` と同じ応答を返す
   （フラグ 0x40・次が 0 は `D9 72 C0 00` と CCSID 13488・17584・1200、それ以外は `D9 72 80 00 03 01 04`。`packages/tn5250/src/protocol/query-reply.ts` の
   `buildWsfD972Reply`）。社内機で DSM（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）に出させたところ、**以前は応答せずホストが待ち続け、施錠されたまま**だった。
@@ -661,11 +689,30 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   待ち時間は ACS と同じ丸め（既定 5・1〜4 は 5・600 超は 600・0 は待ち続ける）。**常駐のプリンター（サービス ✅）は止めも閉じもしない**（ACS に無い概念。decisions D2）。
   実機（社内機）で、指したプリンターの装置がジョブの印刷装置になり、表示を閉じるとプリンターが止まる／「一緒に閉じる」で消える／2 本の表示で共有して最後を閉じて止まる、を確かめた。
   MCP・HLLAPI から開く表示には効かせない（ACS の画面の層の機能。decisions D1）。
+  節目 10 の独立点検で直した分: 待ち時間切れ・失敗では**関連付けなしで表示を開き**、理由を `opened.associatedPrinterIssue` で知らせる（ACS のタイマーのスレッド
+  〔`AssociatedPrinterSession5250`〕の読み。~~時間切れで表示を開かない~~ は読み違いで、decisions D4 で破棄）。REST の保存はプリンターを同じ保存先からしか参照させず
+  （`packages/server/src/config-routes.ts` の `stripSource`）、参照されているプリンターの削除・種別の変更は FORBIDDEN（`config-store.ts` の `assertNotAssociated`）。
+- [ ] **関連付けプリンター（プリンターセッションを指す方式）の残り**（優先度 低・深さ △。上の `[x]` から割った）。**着手時に両側を再確認すること。**
+  - **表示の切断→繋ぎ直しの実機と ACS の GUI 状態**: 当 PJ の実機の測定は開く・閉じる・共有まで。切断→繋ぎ直しでのプリンターの止まり方・起き方は測っていない。
+    ACS の GUI 層は `acs-probe` で動かせないので原典の読みまで（**未確認**）
+  - 「一緒に閉じる」の数え方: ACS `SessionManager.stopAssociatedPrinterSession` は開いている全セッション（繋ぎ直し中も）を数えるが、`sessionLabelEvent` 側は状態 4・5 だけ数える
+    （ACS の 2 経路が食い違う。どちらが効くかは**未確認**）。当 PJ は繋がっているものだけ（`associated-printer.ts` の `otherDisplayAssociated`）
+  - 状態 4（繋がり始め）でプリンターを起こす規則が無い: ACS は表示の状態 4（起動応答の前）で起こす。当 PJ は接続の確立後の `reconnected`。準備の後・関連付けの前に
+    別の表示が閉じてプリンターを止める窓が、表示の接続の間だけある
+  - ACS は既存のプリンターセッションの装置名を待たずにすぐ使う。当 PJ は起こして待つ（起動応答の名前を使うので ACS より正確。ただし「ACS と同じ順序」とは言えない）。
+    待ちループ（`prepareAssociatedPrinter` の 200 ms おき）は、実運用ではほぼ最初の 1 周で抜ける
+  - 関連付けで起こしたプリンターは `ws_open_printer` の監査に載らない。ACS は開始の知らせを状態行の履歴に残す（当 PJ は ⓘ のコード以外に残らない）。
+    `associatedPrinter` の値の制御文字は ACS も検査せず送る（当 PJ も同じ。保存時に弾くなら実測してから）
 - [x] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。`20260921-startup-code-status`（PR #410）。
   ~~ACS は I901 を…状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す~~ → ACS が実際に見せるのは I901・I902 とも
   「<コード> - セッションを開始しました」の意味の文言（`AcsOnly.displayResponseCode`。3 秒で消える）で、`KEY_I901` はすぐ上書きされる（`StatusBar` の時間切れは `clearText`）。
   当 PJ も表示セッションの `opened`・`host-reconnected` に起動応答のコードを載せ（`packages/server/src/ws-handler.ts` の `startupCodeOf`）、web-ui が
   開始の文言を 3 秒出す（`packages/web-ui/src/session-controller.ts` の `noteStartup`）。ⓘ にもコード。実機（社内機）で I902・I901 が画面まで届いた。
+  節目 10 の独立点検で直した分: I901・I902 以外のコードは「応答コード: <コード>」（`AcsOnly.displayResponseCode` の else 側。`composables/opMessages.ts` の `startupStartedText`）、
+  ブラウザの繋ぎ直し・後から入るタブの `opened` では出さない（ホストへ繋ぎ直していないため）。
+- [ ] **起動応答 I901・I902 以外のコードの扱い**（優先度 低・深さ △。上の `[x]` から割った）。ACS の `DS5250.processStartUpConfirmation` は、I901・I902 と
+  表に無いコードでは開始の処理（装置名の設定・状態 7・5）に進まない。当 PJ は I906（自動サインオンを要求したが許されない。サインオン画面が続く）と、装置名が空でない
+  表に無いコードを成功扱いで開く（`packages/tn5250/src/telnet/startup-codes.ts` の `STARTUP_SUCCESS_CODES`・`session.ts`）。ACS が I906 でどう振る舞うかは実機で測っていない（**未確認**）。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり

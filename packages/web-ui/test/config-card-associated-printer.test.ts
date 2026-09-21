@@ -143,6 +143,20 @@ describe("関連付けるプリンターセッション", () => {
     expect(body).toMatchObject({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 0, closeAssociatedPrinterWithLastSession: true });
   });
 
+  it("**待ち時間の欄を空・数字でない・負にして保存すると、既定（5 秒）に直す**（ACS と同じ。空欄が「待ち続ける（0）」に化けない）。0 は明示したときだけ", async () => {
+    for (const v of ["", "abc", "-3"]) {
+      const w = await openEdit(session({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 30 } as Partial<PublicSession>));
+      const timeout = w.findAll("label.row").find((l) => l.text().includes("待ち時間"))!.find("input");
+      await timeout.setValue(v);
+      const body = await save(w);
+      expect(body, JSON.stringify(v)).not.toHaveProperty("associatedPrinterTimeout"); // 既定（5）は送らない
+      calls.length = 0;
+    }
+    const w0 = await openEdit(session({ associatedPrinterSession: "own:p-1" } as Partial<PublicSession>));
+    await w0.findAll("label.row").find((l) => l.text().includes("待ち時間"))!.find("input").setValue("0");
+    expect((await save(w0)).associatedPrinterTimeout).toBe(0);
+  });
+
   it("既存の値が開き、編集しなくても保存で消えない", async () => {
     const w = await openEdit(session({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 30 } as Partial<PublicSession>));
     expect((sessionSelect(w)!.element as HTMLSelectElement).value).toBe("own:p-1");

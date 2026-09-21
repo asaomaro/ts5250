@@ -170,7 +170,8 @@ function noteFieldExited(): void {
 // フラグを立てない。実機で右矢印のあとも 0020 だった。research F2 の場合 5）
 /**
  * **欄を出るときの MF・自己点検**（ACS `PS5250.moveCursorWithMandFillCheck`。Tab・Backtab・Home・Newline・
- * カーソル移動・Field Exit・Dup・マウスでの移動が通る。`20260921-mandatory-check-acs`）。
+ * カーソル移動・Dup・満杯の自動送り・マウスでの移動が通る。`20260921-mandatory-check-acs`）。~~Field Exit も通る~~ は実機と食い違っていた——
+ * ACS の Field Exit・Field± は MF を出る前に自分で見るだけで、この検査も自己点検も呼ばない〔`onFieldFull` の注記。`20260921-field-exit-checks` の節目 10 の独立点検 B-S5〕。
  * 出た欄が部分入力の MF か検査桁の合わない自己点検なら、操作員エラーにして**その欄の先頭へ戻す**
  * （実機の ACS: MF に `AB` と打って Tab → 欄の先頭でエラー。research F2 の場合 6）。
  * 経路ではなくカーソル位置の変化で見る（0020 の待ちと同じ考え方）。**新しい画面での移動は対象外**
@@ -182,16 +183,30 @@ function noteFieldExited(): void {
  * （独立点検の指摘。ACS も戻す移動を `moveCursorWithMandFillCheck` に通さない）。
  * カーソルの変化は次の tick の監視で届くので、その tick が終わるまで黙らせる。
  */
-let leaveCheckMuted = false;
+let leaveCheckMutes = 0;
 function muteLeaveCheck(): void {
-  leaveCheckMuted = true;
+  leaveCheckMutes++;
   void nextTick(() => {
-    leaveCheckMuted = false;
+    leaveCheckMutes--;
+  });
+}
+/**
+ * キー操作の中で動かすカーソル用の mute。Vue の `nextTick` は、フラッシュが**まだ予約されていなければ**その場の微タスクとして走り、
+ * 後から予約される監視のフラッシュより先に解ける。通常のキー操作ではカーソルの同期（`sync` の `emit("cursor")`）が先にフラッシュを予約するので
+ * 1 段でも足りるが、カーソルが変わらない同期の後はその保証が無い——2 段にして、どちらでも監視のフラッシュが済むまで黙らせる（保険。テストでは
+ * 1 段との差は出ない）。数えて重ねる（別の mute が先に解いても他方は残る。これもテストでは区別できない）
+ */
+function muteLeaveCheckThroughKeyMove(): void {
+  leaveCheckMutes++;
+  void nextTick(() => {
+    void nextTick(() => {
+      leaveCheckMutes--;
+    });
   });
 }
 watch([cursor, snapshot], ([pos, snap], [oldPos, oldSnap]) => {
   const st = state.value;
-  if (leaveCheckMuted || !st || !snap || snap !== oldSnap || !oldPos) return;
+  if (leaveCheckMutes > 0 || !st || !snap || snap !== oldSnap || !oldPos) return;
   const from = fieldAtCaret(oldPos.row, oldPos.col, snap.fields, snap.cols, snap.rows);
   if (!from) return;
   if (fieldAtCaret(pos.row, pos.col, snap.fields, snap.cols, snap.rows)?.index === from.index) return;
@@ -312,9 +327,14 @@ function moveCell(dir: Dir): void {
 // ACS の自動送り: 欄が満杯になったら次の入力欄へフォーカスを進める。
 // 満杯時は欄外へ論理カーソルが出て input が blur 済み（activeElement がペイン）なので、
 // focusByOffset ではなく満杯欄の index から次欄を特定する。
-function onFieldFull(fieldIndex: number): void {
+function onFieldFull(fieldIndex: number, viaFieldExit = false): void {
   // 単独欄で自分へ巡回しても「出た」ことになる（ACS `processFieldPlusMinusAndExit` がフラグを立てる）
   noteFieldExited();
+  // **Field Exit・Field± で出るときは、出た後の MF・自己点検を掛けない**——ACS `processFieldPlusMinusAndExit` は MF を出る前に自分で見る
+  // （`fieldExitRejection`）だけで、`moveCursorWithMandFillCheck` も `checkModulusField` も呼ばない（javap で確認。検査桁の合わない自己点検欄でも
+  // Field Exit は次の欄へ進む）。出た後の検査を掛けると、消去・右寄せの後の値で MF を見直して止め、自己点検も止めていた
+  // （`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。Dup・満杯の自動送りは従来どおり掛ける
+  if (viaFieldExit) muteLeaveCheckThroughKeyMove();
   // ホストが指定したカーソル送り（FLDCSRPRG）が最優先。無ければ画面順の次へ
   const to = progressionStop(fieldIndex);
   if (to) { focusStop(to); return; }

@@ -174,6 +174,94 @@ describe("関連付けたプリンターの連動", () => {
     mgr.closeAll();
   });
 
+  it("**起動応答が期限までに来なければ、理由 `timeout` を返し、関連付けなしで開かせる**（使い回すプリンターの待ちが期限を越えたとき）", async () => {
+    const mgr = new SessionManager();
+    const entry = await mgr.openPrinter({ transport: new PrinterTransport(), ref: "srv:p" });
+    (entry.session as unknown as { startupCodeValue: string }).startupCodeValue = ""; // 起動応答が来ていない
+    const r = await mgr.prepareAssociatedPrinter("srv:p", undefined, async () => entry, 300);
+    expect(r).toMatchObject({ printerId: entry.id, deviceName: undefined, issue: "timeout" });
+    mgr.closeAll();
+  });
+
+  it("**待っている間にプリンターが止まった・失敗したら、理由 `failed` を返す**（期限まで待たずに戻る）", async () => {
+    const mgr = new SessionManager();
+    const entry = await mgr.openPrinter({ transport: new PrinterTransport(), ref: "srv:p" });
+    (entry.session as unknown as { startupCodeValue: string }).startupCodeValue = "";
+    setTimeout(() => ((entry as unknown as { state: string }).state = "error"), 100);
+    const t0 = Date.now();
+    const r = await mgr.prepareAssociatedPrinter("srv:p", undefined, async () => entry, 5000);
+    expect(r).toMatchObject({ printerId: entry.id, deviceName: undefined, issue: "failed" });
+    expect(Date.now() - t0, "期限（5 秒）まで待たない").toBeLessThan(2000);
+    mgr.closeAll();
+  });
+
+  it("**アイドルの掃除は、表示が関連付けているプリンターを消さない**（消すと表示は繋がったままプリンターの実体が消え、印刷がホストに溜まり続ける）", async () => {
+    let now = 1_000_000;
+    const mgr = new SessionManager({ now: () => now });
+    const printer = await mgr.openPrinter({ transport: new PrinterTransport(), idleTimeoutMs: 1000 });
+    const d = await mgr.open({ transport: new ReplayTransport(signon()) });
+    mgr.linkAssociatedPrinter(d.id, printer.id, false);
+    now += 5000;
+    (mgr as unknown as { sweepIdle(): void }).sweepIdle();
+    expect(mgr.getPrinter(printer.id).id, "掃除されない").toBe(printer.id);
+    // 表示が去れば、通常どおり掃除される（組が残らない）
+    await mgr.close(d.id);
+    now += 5000;
+    (mgr as unknown as { sweepIdle(): void }).sweepIdle();
+    expect(() => mgr.getPrinter(printer.id)).toThrow(expect.objectContaining({ code: "SESSION_NOT_FOUND" }));
+    mgr.closeAll();
+  });
+
+  it("**接続中のプリンターに、もう 1 本の開始が来ても二重に張らない**（`starting` に相乗りする）", async () => {
+    const mgr = new SessionManager();
+    let starts = 0;
+    class CountingTransport extends PrinterTransport {
+      override start(): void {
+        starts++;
+        setTimeout(() => super.start(), 100);
+      }
+    }
+    const opening = mgr.openPrinter({ transport: new CountingTransport(), ref: "srv:p" });
+    await new Promise((r) => setTimeout(r, 10)); // 接続中（state はまだ stopped）
+    const entry = [...mgr.listPrinters()][0]!;
+    expect(entry.state).toBe("stopped");
+    await Promise.all([mgr.startPrinter(entry.id), mgr.startPrinter(entry.id), opening]);
+    expect(starts, "接続は 1 回").toBe(1);
+    expect(entry.state).toBe("listening");
+    expect(entry.starting, "終わったら印を外す").toBeUndefined();
+    mgr.closeAll();
+  });
+
+  it("**開始が失敗しても印を外す**（次の開始がもう一度試せる）", async () => {
+    const mgr = new SessionManager();
+    class FailingTransport extends PrinterTransport {
+      override start(): void {
+        throw new Error("boom");
+      }
+    }
+    await mgr.openPrinter({ transport: new FailingTransport(), autoStart: false }).then(async (entry) => {
+      await expect(mgr.startPrinter(entry.id)).rejects.toThrow();
+      expect(entry.starting).toBeUndefined();
+      expect(entry.state).toBe("error");
+    });
+    mgr.closeAll();
+  });
+
+  it("**組にする前に表示を開けなかったとき（abort）も、ほかの表示が使っていれば止めない・使っていなければ止める・一緒に閉じるなら閉じる**", async () => {
+    const { mgr, printer, open } = await setup();
+    const other = await open(); // 別の表示が使っている
+    mgr.abortAssociatedPrinter(printer.id, true);
+    expect(printer.state, "ほかの表示が使っている").toBe("listening");
+    await mgr.close(other.id); // 最後の表示が去った → 止まる
+    expect(printer.state).toBe("stopped");
+    await mgr.startPrinter(printer.id);
+    mgr.abortAssociatedPrinter(printer.id, false);
+    expect(printer.state, "使う表示が無い").toBe("stopped");
+    mgr.abortAssociatedPrinter(printer.id, true);
+    expect(() => mgr.getPrinter(printer.id), "一緒に閉じる").toThrow(expect.objectContaining({ code: "SESSION_NOT_FOUND" }));
+    mgr.closeAll();
+  });
+
   it("存在しない表示は SESSION_NOT_FOUND", async () => {
     const { mgr, printer } = await setup();
     expect(() => mgr.linkAssociatedPrinter("nope", printer.id, false)).toThrow(expect.objectContaining({ code: "SESSION_NOT_FOUND" }));

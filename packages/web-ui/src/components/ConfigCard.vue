@@ -533,7 +533,10 @@ async function save(): Promise<void> {
       if (assocOk && sesForm.associatedPrinterSession) {
         form.associatedPrinterSession = sesForm.associatedPrinterSession;
         delete form.associatedPrinter;
-        const t = Number(sesForm.associatedPrinterTimeout ?? 5);
+        // **空・数字でない・負の値は既定（5 秒）に直す**（ACS `DataPanel5250ConAssocPrinter.propertyChange` は空・不正・負を 5 にする）。
+        // `Number("")` は 0＝「待ち続ける」になり、空欄が無限に待つ設定に化けていた（節目 10 の独立点検 C-S7）。0 は明示したときだけ
+        const raw = sesForm.associatedPrinterTimeout as unknown;
+        const t = raw === "" || raw === null || raw === undefined ? 5 : Number(raw);
         if (Number.isInteger(t) && t >= 0 && t !== 5) form.associatedPrinterTimeout = t;
         else delete form.associatedPrinterTimeout;
         if (sesForm.closeAssociatedPrinterWithLastSession) form.closeAssociatedPrinterWithLastSession = true;
@@ -1010,7 +1013,7 @@ const infoRows = computed(() => {
         <!-- ACS のもう 1 つの方式: プリンターセッションの設定を指す（開くとそのプリンターを起こして装置名を待ち、表示に合わせて止める・起こす）。
              同じ保存先のプリンターの設定だけ（サーバーも同じファイルの中だけを許す）。装置名の方式とは排他 -->
         <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
-          <span class="cap" title="開くとそのプリンターを起こして装置名を待ち、その装置で関連付けます。表示が切れたらプリンターを止め、繋がったら起こします">
+          <span class="cap" title="開くとそのプリンターを起こして装置名を待ち、その装置で関連付けます。5250端末が切れたらプリンターを止め、繋がったら起こします">
             関連付けるプリンターセッション
           </span>
           <select v-model="sesForm.associatedPrinterSession" :disabled="!!(sesForm.associatedPrinter ?? '').trim()">
@@ -1024,7 +1027,7 @@ const infoRows = computed(() => {
             <input v-model.number="sesForm.associatedPrinterTimeout" type="number" min="0" max="600" />
           </label>
           <label class="row">
-            <span class="cap" title="最後の表示を閉じたとき、そのプリンターのセッションも閉じます（ほかの表示が使っていれば閉じません。常駐のプリンターは閉じません）">
+            <span class="cap" title="最後の5250端末を閉じたとき、そのプリンターのセッションも閉じます（ほかの5250端末が使っていれば閉じません。常駐のプリンターは閉じません）">
               一緒に閉じる
             </span>
             <input v-model="sesForm.closeAssociatedPrinterWithLastSession" type="checkbox" />

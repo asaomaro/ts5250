@@ -9,8 +9,12 @@
 - F1（原典 `AssociatedPrinterSession5250` のコンストラクタ）: 待ち時間は `5250AssocPrinterSessionConnectionTimeout`（無ければ 5）。設定画面は負・1〜4 を 5、600 超を 600 に丸め、
   0 は待ち続ける（`DataPanel5250ConAssocPrinter.propertyChange`・コンストラクタの `l < 5 → 5`・`l > 600 → 600`・`connectionTimeout != 0` のときだけ時限）。
 - F2（同）: 同じホストで動いている同じ名前のプリンターセッションがあれば、その `getWorkstationID()` をすぐ使う（起こさない。表示が繋がったときに起こす＝F5）。
-  無ければ `SessionManager.startAssociatedPrinterSession(名前)` で起こし、`isWorkstationIDReady()` になるまで 200 ms おきに待つ。時間切れなら記録だけして抜け、
-  `getWorkstationID()`（**起動応答で決まる前は設定の値のまま**。`ECLConnection.GetWorkstationID` は `SESSION_WORKSTATION_ID` をそのまま返し、起動応答で `SetWorkstationID` される）で関連付ける。
+  無ければ `SessionManager.startAssociatedPrinterSession(名前)` で起こし、`isWorkstationIDReady()` になるまで 200 ms おきに待つ。~~時間切れなら記録だけして抜け、
+  `getWorkstationID()`（起動応答で決まる前は設定の値のまま）で関連付ける。~~ → **原典の読み違いだった**（節目 10 の独立点検 C-S1。自分でも読み直して確認）:
+  コンストラクタは冒頭（プリンターを起こす前）で `startTheTimer()` を呼び、`connectionTimeout`（生の秒。丸めない）だけ待つスレッドを起こす（`run`）。
+  そのスレッドは時間が来ても表示が始まっていなければ `createAndRunTerminal()` で**関連付けなしの表示を開く**（`Icon5250.start` が表示の開始前に `associatedDeviceName` を消してある）。
+  待ちループの後の `createTerminal()`（`associatedDeviceName` を入れる唯一の場所）は、表示が既に始まっていると何もしない（`tSession` が入っていて `reconnectTerminal` が偽）。
+  したがって**時間切れなら関連付けなしで開く**。プリンターとの組（連動）は残る——装置名が後で決まれば `pWorkstationID` でその相手を探し続ける。
   設定が見つからなければ注意（`KEY_5250_ASSOC_INVALID_PROFILE`）を出して**関連付けなしで**表示を開く。`getWorkstationID()` が null なら注意（`KEY_NO_ASSOC_PRINTER`）を出して表示を開かない。
 - F3（同 `createTerminal`）: 装置名を表示の `associatedDeviceName` に入れて表示を開く（IBMASSOCPRT。`20260921-associated-printer`）。
 - F4（同 `CommEvent`）: 表示の通信状態 2（切れた）で、**ほかに同じ装置名へ関連付けた表示が同じホストで繋がっていなければ**プリンターの通信を止める（`isOtherDisplayAssociated`）。

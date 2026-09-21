@@ -80,3 +80,47 @@ AssertionError: expected [] to deeply equal [ '000088000cd972c00034b044b004b0' ]
  Test Files  1 failed | 2 passed (3)
       Tests  5 failed | 47 passed (52)
 ```
+
+## 節目 10 の対応（ラウンド 4 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/partA-mut.py` を直した後のコードへ当て直し）— 32 通りが落ち、生き残り 0。1 通り（W1: WSF だけの早期 return）は、直した後にコードが無くなった
+- mutation（`scratchpad/mut-a10b.py`。応答連鎖の分岐）— 9 通り。初回に 3 通り生き残ったのでテストを 2 件足し、9 通りとも落ちた
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）。応答連鎖（WSF ＋ READ 系の全組み合わせ・応答だけのレコードの画面イベント）を `negative-response-order.test.ts` で固定
+
+### 失敗の証跡
+点検役の再現（直す前の HEAD。`scratchpad/rv10/partA-order.test.ts`）:
+
+```
+[WSF Query][READ SCREEN]       HEAD: ["Query 応答"]                     ACS: Query 応答 → 画面応答
+[READ SCREEN][WSF Query]       HEAD: ["Query 応答"]                     ACS: 画面応答 → Query 応答
+[WSF Query][READ IMMEDIATE]    HEAD: ["Query 応答"]                     ACS: Query 応答 → 即時読み応答
+[READ SCREEN][READ IMMEDIATE]  HEAD: ["READ IMMEDIATE の応答だけ"]        ACS: 両方
+```
+
+直した後の mutation の 1 回目（`scratchpad/mut-a10b.py`。3 ファイルの集合）で生き残ったもの。tn5250 の全量に当てても 2 通りが残った:
+
+```
+SURVIVED A-S1 READ SCREEN EXTENDED の応答を送らない :: 53 passed (53)
+SURVIVED A-S1 READ MDT IMMEDIATE ALT の応答を送らない :: 53 passed (53)
+SURVIVED A-S1 READ IMMEDIATE で responded を立てない :: 53 passed (53)
+（tn5250 全量: READ SCREEN EXTENDED は 1 failed | 862 passed で落ち、残る 2 通りは 863 passed (863) のまま）
+```
+足したテスト: 「READ MDT IMMEDIATE ALT・READ SCREEN EXTENDED も WSF の応答と一緒に返す」「READ 系だけのレコードは応答を 1 本返し、画面イベントを出さない」。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- コマンド順で応答を送る作りにしていない（固定順）。混ざるレコードを実機で出せるかは未確認（DSM は 1 コマンドずつ）
+- `processPassthru` のオペコード 1・3・6・7・9 の固有の動作は未実装（台帳）

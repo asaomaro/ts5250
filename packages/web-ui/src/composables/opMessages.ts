@@ -350,14 +350,29 @@ export const STARTUP_CODE_MEANING_JA: Readonly<Record<string, string>> = {
 
 /**
  * **表示セッションが繋がったときの知らせ**（`20260921-startup-code-status`）。ACS は繋がるたび（繋ぎ直しも）状態行に起動応答のコードつきの
- * 開始の文言を 3 秒出して消す（`AcsOnly.displayResponseCode` の `KEY_SESSION_START_SUCCESS`・`StatusBar` の時間切れで `clearText`）。
- * 意味だけ借りて文言は当 PJ で書いた。I901（仮想装置の機能が元の装置より少ない）も同じ文言——ACS も個別の文言はすぐこれに上書きされる
+ * 文言を 3 秒出して消す（`AcsOnly.displayResponseCode`・`StatusBar` の時間切れで `clearText`）。意味だけ借りて文言は当 PJ で書いた:
+ * - **I901・I902**: 「<コード> - セッションを開始しました」の意味（`KEY_SESSION_START_SUCCESS`）。I901（仮想装置の機能が元の装置より少ない）も同じ文言——
+ *   ACS も個別の文言はすぐこれに上書きされる
+ * - **それ以外**（成功扱いの I906 や表に無いコード）: 「応答コード: <コード>」（`KEY_RESPONSE_CODE`。ACS の文言表に意味があればその意味、無ければコードそのもの）。
+ *   ~~どのコードも「開始しました」~~ は I906（自動サインオンを求めたが許されない。サインオン画面が続く）で事実と違った（節目 10 の独立点検 C-S6）
  */
 export function startupStartedText(code: string): string {
-  return `セッションを開始しました（起動応答 ${code}）`;
+  if (code === "I901" || code === "I902") return `セッションを開始しました（起動応答 ${code}）`;
+  return `応答コード: ${code}`;
 }
 /** 開始の知らせを出しておく時間（ACS の状態行と同じ 3 秒） */
 export const STARTUP_NOTICE_MS = 3000;
+
+/**
+ * **関連付けるプリンターが使えず、関連付けなしで開いたとき**の知らせ（`20260921-associated-printer-session`。サーバーの `opened.associatedPrinterIssue`）。
+ * ACS も指した設定が使えないときはポップアップで知らせてから関連付けなしで開く（`KEY_5250_ASSOC_INVALID_PROFILE`）。文言は当 PJ で書いた。
+ * 開始の知らせと違って 3 秒で消さない（次の操作までは残す。利用者が気づけないと、印刷が別の装置へ出続ける）
+ */
+export const MSG_ASSOC_PRINTER_ISSUE: Readonly<Record<"invalid" | "failed" | "timeout", string>> = {
+  invalid: "関連付けるプリンターセッションが使えないため、関連付けなしで開きました",
+  failed: "関連付けるプリンターセッションを開始できなかったため、関連付けなしで開きました",
+  timeout: "関連付けるプリンターの装置名が待ち時間内に決まらなかったため、関連付けなしで開きました"
+};
 
 /** 起動応答で断られたときの見出し（コードが読めないときもこれ） */
 export const MSG_SESSION_REJECTED_HEAD = "ホストが接続を断りました";

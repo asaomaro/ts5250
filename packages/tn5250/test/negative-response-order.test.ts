@@ -181,3 +181,116 @@ describe("否定応答の後ろのコマンドは読まない", () => {
     expect(r.readRequested, "後ろの READ が効いていない").toBe(false);
   });
 });
+
+/**
+ * **WSF の応答と、同じレコードの READ SCREEN 系の応答は全部送る**（`20260921-negative-responses` の節目 10 の独立点検 A-S1。
+ * 以前は WSF の応答だけで戻る・READ SCREEN 系は 1 つだけ送って戻るので、片方が落ちてホストが待ち続けた）。
+ * 並びは SAVE → WSF → READ SCREEN EXTENDED → READ IMMEDIATE → READ MDT IMMEDIATE ALT → READ SCREEN で固定（コマンド順は追わない）。
+ * 否定応答は最後。応答だけのレコードは画面イベントを出さないが、**同じレコードで画面を書いていたら出す**
+ */
+describe("応答が複数あるレコード", () => {
+  const QUERY_SF = [ESC, WSF, 0x00, 0x05, 0xd9, 0x70, 0x00];
+  const READ_SCREEN = [ESC, COMMAND.READ_SCREEN];
+  const READ_IMM = [ESC, COMMAND.READ_IMMEDIATE];
+  const kinds = async (data: number[]) => (await run(data)).sent.map((x) => (x.startsWith("NEG") ? x : x === QUERY_REPLY ? "query" : x.slice(0, 6)));
+
+  it("**WSF の Query と READ SCREEN の両方に応答する**（以前は Query だけで、画面の応答が落ちた）", async () => {
+    const k = await kinds([...QUERY_SF, ...READ_SCREEN]);
+    expect(k[0]).toBe("query");
+    expect(k.length).toBe(2);
+    expect(k[1]).not.toBe("query");
+  });
+
+  it("**READ SCREEN と READ IMMEDIATE も片方に絞らない**（以前は READ IMMEDIATE だけ送った）", async () => {
+    expect((await run([...READ_SCREEN, ...READ_IMM])).sent).toHaveLength(2);
+  });
+
+  it("**READ MDT IMMEDIATE ALT・READ SCREEN EXTENDED も WSF の応答と一緒に返す**（片方に絞らない）", async () => {
+    for (const cmd of [[ESC, COMMAND.READ_IMMEDIATE_ALT], [ESC, COMMAND.READ_SCREEN_EXTENDED]]) {
+      const k = await kinds([...QUERY_SF, ...cmd]);
+      expect(k, `cmd ${cmd[1]!.toString(16)}`).toHaveLength(2);
+      expect(k[0]).toBe("query");
+      expect(k[1]).not.toBe("query");
+    }
+  });
+
+  it("**READ 系だけのレコードは応答を 1 本返し、画面イベントを出さない**（READ IMMEDIATE・READ MDT IMMEDIATE ALT・READ SCREEN EXTENDED）", async () => {
+    for (const cmd of [READ_IMM, [ESC, COMMAND.READ_IMMEDIATE_ALT], [ESC, COMMAND.READ_SCREEN_EXTENDED]]) {
+      const r = await run(cmd);
+      expect(r.sent, `cmd ${cmd[1]!.toString(16)}`).toHaveLength(1);
+      expect(r.screens, `cmd ${cmd[1]!.toString(16)}`).toEqual([]);
+    }
+  });
+
+  it("否定応答は応答の最後（WSF ＋ READ SCREEN ＋ ゴミ）", async () => {
+    const k = await kinds([...QUERY_SF, ...READ_SCREEN, 0x99]);
+    expect(k.at(-1)).toBe("NEG 10050121");
+    expect(k.length).toBe(3);
+  });
+
+  it("**READ 系の応答の後ろでも否定応答を送る**（READ SCREEN・READ IMMEDIATE・READ SCREEN EXTENDED の各経路）", async () => {
+    for (const cmd of [READ_SCREEN, READ_IMM, [ESC, COMMAND.READ_SCREEN_EXTENDED]]) {
+      const k = await kinds([...cmd, 0x99]);
+      expect(k.at(-1), `cmd ${cmd[1]!.toString(16)}`).toBe("NEG 10050121");
+    }
+  });
+
+  it("**応答だけのレコードは画面イベントを出さないが、同じレコードで画面を書いていたら出す**（WTD ＋ WSF）", async () => {
+    const wtd = [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 1, 1, 0xc1];
+    const withWrite = await run([...wtd, ...QUERY_SF]);
+    expect(withWrite.session.snapshot().cells[0]![0]!.char, "画面は書かれる").toBe("A");
+    expect(withWrite.screens.length, "書いたので画面イベントを出す").toBe(1);
+    expect((await run(QUERY_SF)).screens, "応答だけなら出さない").toEqual([]);
+    expect((await run(READ_SCREEN)).screens, "READ SCREEN だけでも出さない").toEqual([]);
+  });
+});
+
+/**
+ * **オペコードと WSF の境界**（節目 10 の独立点検 A-S2 で、選んだ変異の外に生き残った箇所を固定する）
+ */
+describe("オペコードごとの読み方の境界", () => {
+  const WTD_A = [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 1, 1, 0xc1];
+  const first = (r: Awaited<ReturnType<typeof run>>) => r.session.snapshot().cells[0]![0]!.char;
+
+  it("CANCEL INVITE のデータは読まない（ESC でなくても否定応答にしない。応答は 12 バイトの確認だけ）", async () => {
+    const r = await run([0x99, 0x01], OPCODE.CANCEL_INVITE);
+    expect(r.sent.every((x) => !x.startsWith("NEG"))).toBe(true);
+  });
+
+  it("メッセージ灯 OFF のデータも読まない", async () => {
+    const r = await run(WTD_A, OPCODE.MESSAGE_LIGHT_OFF);
+    expect(first(r)).toBe(" ");
+    expect(r.sent).toEqual([]);
+  });
+
+  it("RESTORE SCREEN も最初の ESC まで読み飛ばす（先頭のゴミで否定応答にしない・後ろの WTD は効く）", async () => {
+    const r = await run([0x00, 0x11, ...WTD_A], OPCODE.RESTORE_SCREEN);
+    expect(r.sent).toEqual([]);
+    expect(first(r)).toBe("A");
+  });
+
+  it("OUTPUT ONLY・RESTORE で ESC が 1 つも無ければ何も読まない（否定応答にしない）", async () => {
+    for (const op of [OPCODE.OUTPUT_ONLY, OPCODE.RESTORE_SCREEN]) {
+      expect((await run([0x00, 0x11, 0x22], op)).sent, `opcode ${op}`).toEqual([]);
+    }
+  });
+
+  it("**知らないオペコードの境界**: 0x11 までは読む・0x12 からは否定応答（0x10・0x11 は ACS が知っている）", async () => {
+    for (const op of [0x0d, 0x10, 0x11]) expect((await run(WTD_A, op)).sent.some((x) => x.startsWith("NEG")), `0x${op.toString(16)}`).toBe(false);
+    for (const op of [0x12, 0x1f, 0x20]) expect((await run(WTD_A, op)).sent, `0x${op.toString(16)}`).toEqual(["NEG 10030101"]);
+  });
+
+  it("知らないオペコードでは画面イベントを出さない（読まずに戻る）", async () => {
+    expect((await run(WTD_A, 0x20)).screens).toEqual([]);
+  });
+
+  it("**WSF の SF は D9 クラスだけを見る**（type 0x70 でも class が違えば Query に応答しない）", async () => {
+    expect((await run([ESC, WSF, 0x00, 0x05, 0xd8, 0x70, 0x00])).sent).toEqual([]);
+    expect((await run([ESC, WSF, 0x00, 0x06, 0xd8, 0x72, 0x40, 0x00])).sent).toEqual([]);
+  });
+
+  it("**WSF の最短は 4 バイト**: 4 バイトあれば読む（長さ・class・type）、3 バイトなら否定応答", async () => {
+    expect((await run([ESC, WSF, 0x00, 0x04, 0xd8, 0x70])).sent, "4 バイト（class が違う SF）は何もしない").toEqual([]);
+    expect((await run([ESC, WSF, 0x00, 0x04, 0xd8])).sent, "3 バイトは足りない").toEqual(["NEG 10050121"]);
+  });
+});

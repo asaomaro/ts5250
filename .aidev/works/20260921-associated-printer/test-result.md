@@ -55,3 +55,28 @@ smoke: pass (exit 0)
 - 全量テスト・lint・build（vue-tsc）・独立点検は節目でまとめて回す（利用者の方針）。
 - ブラウザで設定カードから保存して実機に繋ぐ経路は通していない（ws の表示セッションは解決結果を `{...target.connect}` で渡す——`packages/server/src/ws-handler.ts:570`）。
 - プリンターセッションを指す関連付け・I901 の表示は対象外（台帳へ割った。decisions D2）。
+
+## 節目 10 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/mut-c10.py`）— コードポイント単位に戻す 1 通りが落ちた
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）
+
+### 失敗の証跡
+このラウンドの失敗は mutation の確認だけ: コードポイント単位に戻す変異は 1 failed | 6 passed (7) で落ちる（足したテストが固定）。直す前の点検役の再現は `"P😀"` が当 PJ `[80,61]`・ACS `[80,61,0]`。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- 補助面の文字を実機で送ってはいない（ACS のコードの読みと単体まで）

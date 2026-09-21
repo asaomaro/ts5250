@@ -141,7 +141,11 @@ export function progressionNumberOf(fields: readonly Field[], f: Field): number 
   return i < 0 ? undefined : i + 1;
 }
 
-/** ACS `FFT5250.getStandardFieldList`（継続欄の 2 区間目以降を除いた、欄の定義順の並び） */
+/**
+ * ACS `FFT5250.getStandardFieldList`（継続欄の 2 区間目以降を除いた並び）。**画面順（`index` 順）**で並べる——ACS の FFT は定義順だが、
+ * ホストが昇順に定義する限り同じ（昇順でない定義を送る画面は**未確認**。ACS は `checkNewField` で後ろの位置の欄が既にあると新しい欄を足さない）。
+ * `20260921-hllapi-tab-acs` の節目 10 の独立点検 N5
+ */
 function standardFields(fields: readonly Field[]): Field[] {
   return [...fields].filter((f) => f.continued === undefined || f.continued === "first").sort((a, b) => a.index - b.index);
 }

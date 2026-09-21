@@ -55,6 +55,11 @@ describe("関連付けプリンター（IBMASSOCPRT）", () => {
     expect(String.fromCharCode(...respond({ associatedPrinter: "P\u01ff" }))).toContain("IBMASSOCPRT\x01P\xff\xff\xff\xf0");
   });
 
+  it("**補助面の文字は UTF-16 の単位ごと**（Java の `charAt`。サロゲート 2 つ＝2 バイト。コードポイント単位だと 1 バイト少ない）", () => {
+    // U+1F600 = D83D DE00 → 下位 8 ビット 0x3D 0x00
+    expect(String.fromCharCode(...respond({ associatedPrinter: "P\u{1F600}" }))).toContain("IBMASSOCPRT\x01P\x3d\x00\xff\xf0");
+  });
+
   it("**空・空白だけ・制御文字だけなら送らず、応答は関連付け無しと 1 バイトも変わらない**", () => {
     const none = respond({ deviceName: "DSP01" });
     for (const v of ["", "   ", "\t\x01"]) {

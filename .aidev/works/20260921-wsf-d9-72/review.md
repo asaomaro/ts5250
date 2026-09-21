@@ -10,3 +10,9 @@
 
 ## ラウンド 3（通過）
 - ラウンド 2 を直し、SF 2 つ・WSF 2 つ・D9/72＋READ・短い WSF をテストで固定した。社内機の DSM で WSF72・WSF72N の応答をホストが ACS と同じに読んだ。指摘なし。
+
+## ラウンド 4（節目 10 の独立点検。`scratchpad/review-milestone10.md`）
+- [nit] SF が 4 バイトで終わる WSF（`00 04 D9 70`）は、ACS が範囲外を 0 と読んで Query に応答するのに、当 PJ は応答しない（`applyStructuredField` の `sf[4]` が undefined）/ 対応: 実在しない形（未確認）として台帳へ。同じ点検の記録の同期漏れのうち、この work の design.md（`ApplyResult.wsfD972` → `wsfReplies`）は取り消し線つきで直した（件数は `20260921-negative-responses` に数えた）
+
+## ラウンド 5（通過）
+- 節目 10 の指摘（nit 1）を台帳に残し、design.md の古い記述を直した。コードの変更は無い。指摘なし。

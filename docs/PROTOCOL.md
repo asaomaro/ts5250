@@ -95,7 +95,9 @@ LL(2)  type(2)=12A0  reserved(2)=0000  varHdrLen(1)  flag1(1)  flag2(1)  opcode(
 - `flag2`: ホスト発では見ない。**クライアント発は `80` を立てる**（`CLIENT_FLAG2`。ACS が AID 応答・
   READ SCREEN・SAVE SCREEN 応答・Query Reply のすべてで立てることを中継タップで実測）。
   例外は Attn / SysReq のフラグレコードと Cancel Invite への返事で、実機で確かめてある `00` のまま。
-- `opcode`（ホスト→クライアントの指標。全 opcode でデータは処理する）:
+- `opcode`（ホスト→クライアント。**データを読むかはオペコードで決まる**——ACS `DS5250.processPassthru`。NOOP・CANCEL INVITE・メッセージ灯（00・0A・0B・0C）は読まない、
+  OUTPUT ONLY・RESTORE SCREEN（02・05）は最初の ESC まで読み飛ばす、知らないオペコード（11 を超えるもの）は読まずに否定応答 `10030101`。
+  ~~全 opcode でデータは処理する（tn5250 `handle_receive`）~~ は `20260921-negative-responses` の節目 10 の独立点検で事実でなくなった）:
 
 | opcode | 名称 | | opcode | 名称 |
 |---|---|---|---|---|

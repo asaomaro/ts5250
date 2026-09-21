@@ -69,3 +69,54 @@ smoke: pass (exit 0)
 - 実ブラウザで設定カードから保存して開く経路は jsdom まで（サーバーの ws まで実機で通した）。
 - 表示がホストに切られて繋ぎ直す経路の実機は測っていない（連動は `SessionManager` のテストと、同じ `reconnecting` / `reconnected` イベントの購読まで。イベント自体は `20260921-auto-reconnect` で実機確認済み）。
 - ACS の GUI の状態（プリンターのウィンドウの表示・タブ）は写していない。
+
+## 節目 10 の対応（ラウンド 2 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/mut-trust.py`）— 13 通りとも落ちた（持ち主・認可・削除・種別変更・準備中の切断・相乗り・掃除・時間切れ）
+- mutation（`scratchpad/mut-c10b.py` 8 通り）— 理由の返却。初回に 3 通り生き残ったのでテストを 3 件足し、8 通りとも落ちた
+- mutation（`scratchpad/mut-c10c.py` 4 通り）— REST の参照変換（POST・PUT）。初回に 1 通り生き残ったのでテストを足して落ちた
+- mutation（`scratchpad/mut-c10d.py` 6 通り）— 切断後の後始末・組を解くときの数え・接続中の印。初回に 2 通り生き残ったのでテストを 2 件足し、6 通りとも落ちた
+- mutation（`scratchpad/mut-c10e.py` 5 通り）— 設定ストアの参照検査の入口。5 通りとも落ちた（探りの 1 通りは数えない）
+- mutation（`scratchpad/mut-c10.py`）— 待ち時間の空欄 1 通りが落ちた
+
+### 受け入れ基準の再確認
+- AC1〜AC7: pass（全量）。REST の往復（POST → GET → PUT）・参照されているプリンターの保護・信頼境界の 3 パターンを `config-routes-associated-printer.test.ts`（11 件）で固定
+
+### 失敗の証跡
+点検役の再現（直す前の HEAD。`scratchpad/rv10/route-roundtrip.test.ts`・`p4-route2.test.ts`・`p4-route3.test.ts`）:
+
+```
+POST /api/sessions-config  associatedPrinterSession: "srv:prt"  → 404  session d references missing printer session srv:prt
+id（"prt"）なら 201、返る値は "srv:prt"、それを PUT → 404
+DELETE（指されているプリンター）→ 200・ファイルに参照が残る・ServerConfigStore.fromFile が CONFIG_ERROR を投げる
+PUT で printer → display → 200・再読込が CONFIG_ERROR
+```
+
+直した後の mutation の 1 回目（`scratchpad/mut-c10b.py`・`mut-c10c.py`・`mut-c10d.py`）で生き残ったもの:
+
+```
+SURVIVED C-S5 開けなかったときに理由を付けない :: 52 passed (52)
+SURVIVED C-S1 起動失敗に理由を付けない :: 52 passed (52)
+SURVIVED C-S1 時間切れに理由を付けない :: 52 passed (52)
+SURVIVED C-M1 文字列でない値を通さない（検査に届かず落ちる） :: 27 passed (27)
+SURVIVED この open の前に disposed を戻さない :: 56 passed (56)
+SURVIVED 開く待ちの間に切れても表示を閉じない :: 56 passed (56)
+```
+足したテストで 6 通りとも落ちた。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- 実機のプリンターへは今回は当てていない（前回の実機確認〔指した装置がジョブの印刷装置になる・表示に合わせて止まる・共有〕のまま）
+- 表示の切断→繋ぎ直しでのプリンターの止まり方・起き方の実機、ACS の GUI 状態は測っていない（台帳）
+- 「一緒に閉じる」の数え方・状態 4 で起こす規則は原典の読みまで（台帳）

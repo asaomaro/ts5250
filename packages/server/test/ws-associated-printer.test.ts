@@ -7,6 +7,7 @@ import { SessionManager, type OpenOptions, type OpenPrinterOptions } from "../sr
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { ServerSession } from "../src/config-types.js";
+import type { AuthUser } from "../src/auth.js";
 import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import type { WsServerMessage } from "../src/ws-messages.js";
 
@@ -107,13 +108,31 @@ describe("表示を開くときの関連付けるプリンター", () => {
     mgr.closeAll();
   });
 
-  it("**待ち時間切れでも表示は開く**（プリンターの設定の装置名で関連付ける。ACS は設定の値のまま）", async () => {
+  it("**待ち時間切れでも表示は開くが、関連付けなしで開く**（ACS: 起こすタイマーのスレッドが時間が来ると関連付けなしの表示を開く）。組は残し、理由を返す", async () => {
     const mgr = new Recording(true);
     const { sent } = await openDisplay(mgr, [prt, disp({ associatedPrinterTimeout: 5 })]);
-    expect(sent.some((m) => m.type === "opened")).toBe(true);
-    expect(mgr.displays[0]!.associatedPrinter).toBe("SETNAME");
+    const opened = sent.find((m) => m.type === "opened");
+    expect(opened).toBeDefined();
+    expect(mgr.displays[0]!.associatedPrinter, "設定の装置名では関連付けない（読み違いの修正）").toBeUndefined();
+    expect(opened).toMatchObject({ associatedPrinterIssue: "timeout" });
+    // 組は残る（ACS も装置名が決まればその相手を探し続ける）
+    expect([...mgr.list()][0]!.associatedPrinter).toBeDefined();
     mgr.closeAll();
   }, 15000);
+
+  it("**プリンターを開けなかったら、関連付けなしで表示を開き、理由 `failed` を返す**（組も作らない）", async () => {
+    class FailingRecording extends Recording {
+      override openPrinter(): Promise<never> {
+        return Promise.reject(new Error("boom"));
+      }
+    }
+    const mgr = new FailingRecording();
+    const { sent } = await openDisplay(mgr, [prt, disp()]);
+    expect(sent.find((m) => m.type === "opened")).toMatchObject({ associatedPrinterIssue: "failed" });
+    expect(mgr.displays[0]!.associatedPrinter).toBeUndefined();
+    expect([...mgr.list()][0]!.associatedPrinter, "組を作らない").toBeUndefined();
+    mgr.closeAll();
+  });
 
   it("**装置名が決まるのを待つ**（起動応答が遅れて来ても、設定の値ではなく起動応答の名前で関連付ける）", async () => {
     const mgr = new SlowRecording();
@@ -130,7 +149,7 @@ describe("表示を開くときの関連付けるプリンター", () => {
     const sent: WsServerMessage[] = [];
     const conn = new WsConnection({ sessions: mgr, resolver: new ConfigResolver(store, new PersonalConfigStore()) }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
     await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
-    expect(sent.some((m) => m.type === "opened")).toBe(true);
+    expect(sent.find((m) => m.type === "opened")).toMatchObject({ associatedPrinterIssue: "invalid" });
     expect(mgr.printersOpened).toHaveLength(0);
     expect(mgr.displays[0]!.associatedPrinter).toBeUndefined();
     mgr.closeAll();
@@ -142,9 +161,10 @@ describe("表示を開くときの関連付けるプリンター", () => {
     const store = new ServerConfigStore({ systems: [{ id: "sys", name: "sys", host: "h" }], sessions: [prt, disp()] });
     const sent: WsServerMessage[] = [];
     const conn = new WsConnection({ sessions: mgr, resolver: new ConfigResolver(store, new PersonalConfigStore()) }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
-    store.removeSession("prt", undefined);
+    // 保存の検査（指されているプリンターは消せない）をすり抜けた状態＝手で書き換えたファイルを作る
+    (store as unknown as { sessions: Map<string, unknown> }).sessions.delete("prt");
     await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
-    expect(sent.some((m) => m.type === "opened")).toBe(true);
+    expect(sent.find((m) => m.type === "opened")).toMatchObject({ associatedPrinterIssue: "invalid" });
     expect(mgr.printersOpened).toHaveLength(0);
     expect(mgr.displays[0]!.associatedPrinter).toBeUndefined();
     mgr.closeAll();
@@ -160,11 +180,221 @@ describe("表示を開くときの関連付けるプリンター", () => {
     mgr.closeAll();
   });
 
+  it("**同時に開いても、プリンターへの接続は 1 本だけ**（2 本目は 1 本目の起動に相乗りする。以前は二重に張った）", async () => {
+    const mgr = new SlowRecording();
+    const results = await Promise.all([openDisplay(mgr, [prt, disp({ associatedPrinterTimeout: 20 })]), openDisplay(mgr, [prt, disp({ associatedPrinterTimeout: 20 })])]);
+    expect(results.every((r) => r.sent.some((m) => m.type === "opened"))).toBe(true);
+    expect(mgr.printersOpened, "プリンターを開いたのは 1 回").toHaveLength(1);
+    expect([...mgr.listPrinters()]).toHaveLength(1);
+    expect(mgr.displays.map((d) => d.associatedPrinter)).toEqual(["PRTA", "PRTA"]);
+    mgr.closeAll();
+  });
+
+  it("**表示を開けなかったら、起こしたプリンターを止める**（「一緒に閉じる」なら閉じる。以前は残った）", async () => {
+    for (const close of [false, true]) {
+      const mgr = new Recording();
+      const fail = new Error("host unreachable");
+      mgr.open = (async () => {
+        throw fail;
+      }) as never;
+      const { sent } = await openDisplay(mgr, [prt, disp(close ? { closeAssociatedPrinterWithLastSession: true } : {})]).catch((e) => ({ sent: [{ type: "error", message: String(e) }] as WsServerMessage[] }));
+      void sent;
+      const printers = [...mgr.listPrinters()];
+      if (close) expect(printers, "一緒に閉じる").toHaveLength(0);
+      else expect(printers[0]?.state, "止める").toBe("stopped");
+      mgr.closeAll();
+    }
+  });
+
+  it("**準備の待ち中にブラウザが切れたら、表示を作らず、起こしたプリンターも片付ける**（以前は誰も持たない表示が残った）", async () => {
+    const mgr = new SlowRecording();
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "sys", name: "sys", host: "h" }], sessions: [prt, disp({ associatedPrinterTimeout: 20 })] }), new PersonalConfigStore());
+    const sent: WsServerMessage[] = [];
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    const opening = conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    await new Promise((r) => setTimeout(r, 100)); // プリンターの起動（400 ms）の途中
+    conn.onSocketClose();
+    await opening;
+    expect([...mgr.list()], "表示は作られない").toHaveLength(0);
+    expect(sent.some((m) => m.type === "opened"), "opened を送らない").toBe(false);
+    expect([...mgr.listPrinters()][0]?.state, "プリンターは止まる").toBe("stopped");
+    mgr.closeAll();
+  });
+
+  it("**開く待ち（ホストへの接続）の間にブラウザが切れたら、表示を閉じる**（`opened` を送っても受け取る側が居ない。以前からある窓）", async () => {
+    class SlowOpen extends Recording {
+      override async open(opts: OpenOptions) {
+        this.displays.push(opts);
+        await new Promise((r) => setTimeout(r, 200)); // 接続の待ち
+        return SessionManager.prototype.open.call(this, { ...opts, transport: new ReplayTransport(signon()) });
+      }
+    }
+    const mgr = new SlowOpen();
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "sys", name: "sys", host: "h" }], sessions: [prt, disp()] }), new PersonalConfigStore());
+    const sent: WsServerMessage[] = [];
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    const opening = conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    await new Promise((r) => setTimeout(r, 100)); // 表示の接続の途中（プリンターの準備は済んでいる）
+    conn.onSocketClose();
+    await opening;
+    await new Promise((r) => setTimeout(r, 50));
+    expect([...mgr.list()], "誰も持たない表示を残さない").toHaveLength(0);
+    expect(sent.some((m) => m.type === "opened"), "opened を送らない").toBe(false);
+    mgr.closeAll();
+  });
+
+  it("**1 つの接続で、閉じてから開き直せる**（`close` の後始末の印を次の `open` に引きずらない）", async () => {
+    const mgr = new Recording();
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [{ id: "sys", name: "sys", host: "h" }], sessions: [prt, disp()] }), new PersonalConfigStore());
+    const sent: WsServerMessage[] = [];
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    await conn.handle(JSON.stringify({ type: "close" }));
+    sent.length = 0;
+    await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    expect(sent.some((m) => m.type === "opened"), "開き直せる").toBe(true);
+    expect([...mgr.list()].length, "表示が 1 本").toBe(1);
+    mgr.closeAll();
+  });
+
+  it("**「自動で待ち受け開始 ☐」のプリンターも、指せば起こす**（初回だけ起こされず装置名が決まらない穴を塞ぐ）", async () => {
+    const mgr = new Recording();
+    await openDisplay(mgr, [{ ...prt, autoStart: false } as ServerSession, disp()]);
+    expect([...mgr.listPrinters()][0]?.state).toBe("listening");
+    expect(mgr.displays[0]!.associatedPrinter).toBe("PRTA");
+    mgr.closeAll();
+  });
+
   it("関連付けの指定が無い表示は、プリンターに触らない", async () => {
     const mgr = new Recording();
     await openDisplay(mgr, [prt, disp({ associatedPrinterSession: undefined })]);
     expect(mgr.printersOpened).toHaveLength(0);
     expect(mgr.displays[0]!.associatedPrinter).toBeUndefined();
+    mgr.closeAll();
+  });
+});
+
+/**
+ * **信頼境界**（AGENTS.md「追加時のチェックリスト」。認証オフ / admin / 一般ユーザーの 3 パターン。`20260921-associated-printer-session` の節目 10 の
+ * 独立点検 C-S9）。実行時の経路——プリンターの設定を解決するときの利用者・使い回しの持ち主の一致・プリンターを開くときの持ち主——を、
+ * 認証ありで通して固定する（以前は認証を通すテストが 1 本も無く、この 3 か所の認可を外しても全テストが緑だった）
+ */
+describe("関連付けるプリンター: 信頼境界（認証あり）", () => {
+  const alice: AuthUser = { username: "alice", role: "user" };
+  const bob: AuthUser = { username: "bob", role: "user" };
+  const root: AuthUser = { username: "root", role: "admin" };
+  const PERSONAL = (owner: string, sessions: unknown[]) =>
+    new PersonalConfigStore({ systems: [{ id: "s-1", name: "sys", host: "h", owner }], sessions: sessions as never }, undefined);
+  const openAs = async (user: AuthUser | undefined, mgr: Recording, resolver: ConfigResolver, session: string) => {
+    const sent: WsServerMessage[] = [];
+    const c = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} }, user);
+    await c.handle(JSON.stringify({ type: "open", session }));
+    return sent;
+  };
+
+  it("**一般ユーザーは自分のプリンターを起こせ、そのプリンターは持ち主（自分）で開かれる**", async () => {
+    const mgr = new Recording();
+    const resolver = new ConfigResolver(
+      new ServerConfigStore({ systems: [], sessions: [] }),
+      PERSONAL("alice", [
+        { id: "p", name: "p", system: "s-1", sessionType: "printer", owner: "alice", deviceName: "SETNAME" },
+        { id: "d", name: "d", system: "s-1", sessionType: "display", owner: "alice", associatedPrinterSession: "p" }
+      ])
+    );
+    const sent = await openAs(alice, mgr, resolver, "own:d");
+    expect(sent.find((m) => m.type === "opened")).toBeDefined();
+    expect(mgr.printersOpened[0]).toMatchObject({ owner: "alice", ref: "own:p" });
+    expect(mgr.displays[0]!.associatedPrinter).toBe("PRTA");
+    mgr.closeAll();
+  });
+
+  it("**他人のプリンターを指す手書きのファイルでも、関連付けなしで開き、他人のプリンターは開かない**（`resolve` に利用者を渡す）", async () => {
+    const mgr = new Recording();
+    const resolver = new ConfigResolver(
+      new ServerConfigStore({ systems: [], sessions: [] }),
+      PERSONAL("alice", [
+        { id: "bp", name: "bp", system: "s-1", sessionType: "printer", owner: "bob" },
+        { id: "d", name: "d", system: "s-1", sessionType: "display", owner: "alice", associatedPrinterSession: "bp" }
+      ])
+    );
+    const sent = await openAs(alice, mgr, resolver, "own:d");
+    expect(sent.find((m) => m.type === "opened")).toMatchObject({ associatedPrinterIssue: "invalid" });
+    expect(mgr.printersOpened, "他人のプリンターを開かない").toHaveLength(0);
+    mgr.closeAll();
+  });
+
+  it("**同じ設定の参照でも、持ち主が違えば使い回さない**（別の利用者のプリンターを掴まない）", async () => {
+    const mgr = new Recording();
+    const store = () =>
+      new PersonalConfigStore(
+        {
+          systems: [{ id: "s-1", name: "sys", host: "h", owner: "alice" }, { id: "s-2", name: "sys", host: "h", owner: "bob" }],
+          sessions: [
+            { id: "p", name: "p", system: "s-1", sessionType: "printer", owner: "alice" },
+            { id: "d", name: "d", system: "s-1", sessionType: "display", owner: "alice", associatedPrinterSession: "p" }
+          ] as never
+        },
+        undefined
+      );
+    const resolver = new ConfigResolver(new ServerConfigStore({ systems: [], sessions: [] }), store());
+    await openAs(alice, mgr, resolver, "own:d");
+    // 同じ ref のプリンターを bob が持っていると装う（alice のエントリは alice の持ち物）
+    const printers = [...mgr.listPrinters()];
+    expect(printers).toHaveLength(1);
+    expect(printers[0]!.owner).toBe("alice");
+    // bob が同じ参照の表示を開いても、alice のプリンターは使い回されない（自分のものを探す＝無いので新しく開こうとする）
+    const before = mgr.printersOpened.length;
+    const bobResolver = new ConfigResolver(
+      new ServerConfigStore({ systems: [], sessions: [] }),
+      new PersonalConfigStore(
+        {
+          systems: [{ id: "s-2", name: "sys", host: "h", owner: "bob" }],
+          sessions: [
+            { id: "p", name: "p", system: "s-2", sessionType: "printer", owner: "bob" },
+            { id: "d", name: "d", system: "s-2", sessionType: "display", owner: "bob", associatedPrinterSession: "p" }
+          ] as never
+        },
+        undefined
+      )
+    );
+    await openAs(bob, mgr, bobResolver, "own:d");
+    expect(mgr.printersOpened.length, "bob は自分のプリンターを新しく開く").toBe(before + 1);
+    expect([...mgr.listPrinters()].map((p) => p.owner).sort()).toEqual(["alice", "bob"]);
+    mgr.closeAll();
+  });
+
+  it("**サーバー設定のプリンターは、admin と認証オフでは直接開くときと同じ設定（出力）で開く**", async () => {
+    const out = { autoPdfDir: "/var/spool/pdf" };
+    for (const user of [root, undefined]) {
+      const mgr = new Recording();
+      const resolver = new ConfigResolver(
+        new ServerConfigStore({
+          systems: [{ id: "sys", name: "sys", host: "h" }],
+          sessions: [
+            { id: "prt", name: "prt", system: "sys", sessionType: "printer", printer: out } as ServerSession,
+            disp()
+          ]
+        }),
+        new PersonalConfigStore()
+      );
+      await openAs(user, mgr, resolver, "srv:d");
+      expect(mgr.printersOpened[0], user ? "admin" : "認証オフ").toMatchObject({ output: expect.objectContaining({ autoPdfDir: "/var/spool/pdf" }) });
+      mgr.closeAll();
+    }
+  });
+
+  it("**一般ユーザーは、サーバー設定のプリンターを指す表示を開けない**（サーバー設定は admin 専用。プリンターの出力設定も使えない）", async () => {
+    const mgr = new Recording();
+    const resolver = new ConfigResolver(
+      new ServerConfigStore({
+        systems: [{ id: "sys", name: "sys", host: "h" }],
+        sessions: [{ id: "prt", name: "prt", system: "sys", sessionType: "printer", printer: { autoPdfDir: "/var/spool/pdf" } } as ServerSession, disp()]
+      }),
+      new PersonalConfigStore()
+    );
+    const sent = await openAs(alice, mgr, resolver, "srv:d");
+    expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "FORBIDDEN" });
+    expect(mgr.printersOpened, "プリンターも開かない").toHaveLength(0);
     mgr.closeAll();
   });
 });

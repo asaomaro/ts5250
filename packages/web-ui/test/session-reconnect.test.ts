@@ -824,7 +824,7 @@ describe("繋ぎ直した後の起動応答のコード", () => {
     vi.useRealTimers();
   });
 
-  it("resume の `opened` の `startupCode` を覚え、開始の文言を出す", async () => {
+  it("**ブラウザの繋ぎ直し（resume）の `opened` は `startupCode` を覚えるだけで、開始の文言は出さない**（ホストへは繋ぎ直していない。ACS が出すのは通信の状態が変わったとき）", async () => {
     const p = openSession({ type: "open", host: "h" }, "t");
     clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
     await p;
@@ -834,6 +834,6 @@ describe("繋ぎ直した後の起動応答のコード", () => {
     await vi.advanceTimersByTimeAsync(0);
     const s = sessionsStore.get("s1")!;
     expect(s.startupCode).toBe("I902");
-    expect(s.notice).toBe(startupStartedText("I902"));
+    expect(s.notice, "開始の文言を出さない").not.toBe(startupStartedText("I902"));
   });
 });

@@ -16,6 +16,9 @@
 - `PS5250.moveCursorWithMandFillCheck`: 出る欄の MF・自己点検を見て、違反ならエラー・欄頭へ。
   呼び出し元は `processTab` / `processBacktab` / `processHome` / `processNewline` / `processCursorMove` /
   `processFieldPlusMinusAndExit` / `processDupFM` / `canCursorMoveByMouse` ほか。
+  ~~`processFieldPlusMinusAndExit` も呼ぶ~~ → **呼ばない**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5。javap と実機の ACS のコアで確認。
+  Field Exit・Field± は MF を出る前に自分で検査するだけで、`checkModulusField` も呼ばない。検査桁の合わない自己点検欄でも Field Exit は通る。
+  `scripts/acs-probe/selfcheck-field-exit.txt`）。当時は呼び出し元の一覧を読みだけで書いた（実機で確かめていなかった）。
 
 ### F2: 実機（`scripts/acs-probe/mandatory-me-mf.txt`。ADJPGM）
 各場合の終わりに Reset → Tab → F3 で抜け、`exit-*` がメインメニューであることを確かめた（9 場合とも成立）。

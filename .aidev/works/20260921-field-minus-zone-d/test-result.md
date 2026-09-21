@@ -53,3 +53,28 @@ smoke: pass (exit 0)
 
 ### 失敗の証跡
 このラウンドでは失敗が発生していない（表示の指摘は読んで確かめたもの）。
+
+## 節目 10 の対応（ラウンド 4 の指摘を直した回）
+
+### 実行したもの
+- `npm test`（全量）— 6,619 passed / 0 failed / 41 skipped（10 ワークスペース）
+- `npm run lint` — exit 0 / `npm run build`（web-ui の `vue-tsc` を含む）— exit 0（途中の 1 回は `field-exit-checks-wiring.test.ts` の型で落ち、`NonNullable<Field["dbcsType"]>` に直した）
+- mutation（`scratchpad/mut-wu10.py`）— ccsid の配線 2 通り（ペインが渡さない・ScreenGrid が使わない）とも落ちた
+
+### 受け入れ基準の再確認
+- AC1〜AC3: pass（全量）
+
+### 失敗の証跡
+このラウンドは注記と台帳の変更だけで、失敗したテストは無い。点検役の再現（`scratchpad/rv10/webui-zd.test.ts`）は、ゾーン D の字の表示が 10 の CCSID で ACS の変換表と一致することを確かめたもの（失敗なし）。
+
+### 起動確認（smoke）
+
+```
+$ node launcher/smoke.mjs
+smoke: /healthz ok, / が Web UI を返した (port 45959)
+smoke: {"status":"ok","sessions":0}
+smoke: pass (exit 0)
+```
+
+### 未検証の穴
+- 表にない字を最終桁に持つ数値専用欄の Field− は ACS と違う（台帳）

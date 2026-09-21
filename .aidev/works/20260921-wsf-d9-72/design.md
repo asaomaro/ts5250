@@ -1,7 +1,7 @@
 # 仕様: WSF D9/72 への応答
 
 ## 設計方針
-- `applyStructuredField` が D9/72（長さ 6）を拾ってフラグと次のバイトを返し、`ApplyResult.wsfD972` に載せる。
+- `applyStructuredField` が**最初の SF だけ**を読み（長さの分だけ進める）、Query（フラグ 0）・D9/72（長さ 6）の応答を `ApplyResult.wsfReplies`（起きた順の一覧）に積む。~~`ApplyResult.wsfD972` に載せる~~（decisions D3）。
 - `query-reply.ts` の `buildWsfD972Reply(flags, next)` が ACS と同じ 2 通りを Query Reply と同じヘッダで組む（0x80 は `undefined`）。
 - セッションは Query と同じ場所で応答を送る。0x80 のときは警告だけ（否定応答は未対応）。
 

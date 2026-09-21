@@ -77,11 +77,14 @@ describe("セッション寿命の判定は 1 か所に閉じている", () => {
    * **`disposition()` を通さない 2 本目の判定**が生まれる——それが前身の失敗そのもの。
    */
   it("状態の欄（holder / hold / resident）は定義と規則の外で読まれない", () => {
-    // **内側は 2 つ**——状態を持つ `session-manager.ts` と、それを引数で受けて答える
-    // `session-lifetime.ts`（規則の定義そのもの）。design「AC2 の詳細」は `session-manager.ts`
+    // **内側は 3 つ**——状態を持つ `session-manager.ts` と、それを引数で受けて答える
+    // `session-lifetime.ts`（規則の定義そのもの）・`associated-printer.ts`（関連付けたプリンターを止めるか閉じるかの判断。
+    // `20260921-associated-printer-session`）。design「AC2 の詳細」は `session-manager.ts`
     // だけを挙げるが、規則を別ファイルに切り出したのは architecture A1 の決定で、
     // そこが「このファイル以外に出ない」で素直に書けることを裏づけにしている。
-    const inside = new Set(["session-manager.ts", "session-lifetime.ts"]);
+    // `associated-printer.ts` は**エントリを持たず**、`session-manager.ts` が詰めた引数（`AssociatedPrinterState`）だけを読む純関数で、
+    // `session-lifetime.ts` と同じ位置づけ——寿命の判定そのものではなく、表示に連動するプリンターの停止・破棄の判断（常駐は触らない）。
+    const inside = new Set(["session-manager.ts", "session-lifetime.ts", "associated-printer.ts"]);
     // **`viewers` は対象外**（`decisions.md` D14）——`session-routes.ts` が管理画面向けの
     // 応答に載せており、それは寿命の判定ではなく報告。数えるのは**判定に使う状態**だけ。
     //

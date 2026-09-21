@@ -847,17 +847,16 @@ export class Session5250 extends Emitter<SessionEvents> {
           if (reply) this.telnet.sendRecord(reply);
         }
       }
-      // **WSF だけのレコードでは画面イベントを出さない**。同じレコードに READ があれば下へ進んで入力待ちに入る
-      // （ACS は WSF の後もレコードの残りを処理する。~~WSF の応答の後は戻る~~ と、D9/72 の後ろの READ が効かず施錠のままだった）
-      if (result.wsfReplies.length > 0 && result.readCommand === undefined) {
-        sendNegative();
-        return;
-      }
+      // **他の応答も、続けて全部送る**（`20260921-negative-responses` の節目 10 の独立点検 A-S1。~~READ SCREEN 系は 1 つだけ送って戻る~~ と、
+      // WSF の応答と同じレコードの画面読みの応答や、`READ SCREEN`＋`READ IMMEDIATE` の片方が落ち、ホストが待ち続けた）。ACS は各コマンドの
+      // 応答をその場で送る。当 PJ はレコードを最後まで適用してから送るので**コマンド順は追わず、この並びで固定**する
+      // （SAVE → WSF → READ SCREEN EXTENDED → READ IMMEDIATE → READ MDT IMMEDIATE ALT → READ SCREEN）。同じレコードにこれらが混ざる形は
+      // 実機で観測していない（**未確認**）
+      let responded = result.wsfReplies.length > 0;
       if (result.readScreenExtendedRequested) {
         // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
         this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
-        sendNegative();
-        return;
+        responded = true;
       }
       if (result.readImmediateRequested) {
         // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。
@@ -866,25 +865,28 @@ export class Session5250 extends Emitter<SessionEvents> {
         // `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
         const { record } = buildReadImmediateResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
-        sendNegative();
-        return;
+        responded = true;
       }
       if (result.readMdtImmediateAltRequested) {
         // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、
         // 送るのは **MDT の立った欄だけ**（名前どおり）。返さないとホストが固まる。
         const { record } = buildReadMdtImmediateAltResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
-        sendNegative();
-        return;
+        responded = true;
       }
       if (result.readScreenRequested) {
         // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
-        // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
         this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
-        sendNegative();
-        return;
+        responded = true;
       }
+      // **否定応答は応答の最後**（ACS は `tokenizeData` の終わりで送る）。下の早期の戻りもすべてこれを通す
       sendNegative();
+      // 応答だけのレコードは画面イベントを出さず、入力待ちにも入らない（画面は変えない。ホストは続けて何かを送ってくる）。
+      // ただし**同じレコードで画面を書いていたら**（WTD ＋ WSF・READ SCREEN 等）イベントは出す——出さないと書いた画面が UI に届かない
+      // （節目 10 の独立点検 A-S1 の関連）。同じレコードに READ があれば下へ進んで入力待ちに入る
+      // （ACS は WSF の後もレコードの残りを処理する。~~WSF の応答の後は戻る~~ と、D9/72 の後ろの READ が効かず施錠のままだった）
+      const drew = this.buf.wroteInThisRecord;
+      if (responded && result.readCommand === undefined && !drew) return;
       if (result.pcCommand ?? result.pcCommandEnd) {
         // PC Organizer（STRPCCMD）の中間画面は**利用者に見せない**——
         // 画面イベントも pendingAid の解決もせず、ロックのまま実行して実行キーを返す。

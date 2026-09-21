@@ -472,6 +472,12 @@ interface PrinterConn {
 export interface PrinterEntry {
   id: string;
   /**
+   * **接続を張っている最中**の結果（`startPrinter` が立てる）。接続中の `state` は `stopped` のままなので、これが無いと 2 本目の呼び出し
+   * （同じプリンターを使う表示を同時に開く・二重クリック）が二重に接続を張り、装置名が排他のホストに断られる
+   * （`20260921-associated-printer-session` の節目 10 の独立点検 C-S2）。2 本目はこの結果に相乗りする
+   */
+  starting?: Promise<PrinterEntry>;
+  /**
    * ホストへの接続。**待ち受けていないときは無い**（`state === "stopped"` / `"error"`）。
    *
    * 「エントリがある＝接続がある」ではなくなった（`20260801-service-start-stop`）——
@@ -1123,19 +1129,29 @@ export class SessionManager {
   async startPrinter(id: string, user?: AuthUser): Promise<PrinterEntry> {
     const entry = this.getPrinter(id, user);
     if (entry.state === "listening" || entry.state === "reconnecting") return entry;
+    // **接続を張っている最中なら、その結果に相乗りする**（二重に張らない。`PrinterEntry.starting`）
+    if (entry.starting) return entry.starting;
     // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
     delete entry.stale;
     if (!entry.resident && this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
+    const run = (async (): Promise<PrinterEntry> => {
+      try {
+        await this.connectPrinter(entry);
+      } catch (e) {
+        // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
+        this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+      return entry;
+    })();
+    entry.starting = run;
     try {
-      await this.connectPrinter(entry);
-    } catch (e) {
-      // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
-      this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
-      throw e;
+      return await run;
+    } finally {
+      if (entry.starting === run) delete entry.starting;
     }
-    return entry;
   }
 
   /**
@@ -1960,38 +1976,44 @@ export class SessionManager {
    * **関連付けるプリンターを起こし、装置名が決まるのを待つ**（表示を開く前。ACS `AssociatedPrinterSession5250` のコンストラクタ。
    * `20260921-associated-printer-session`）。
    *
-   * - 同じ持ち主・同じ設定（`ref`）で開いているプリンターがあればそれを使う（止まっていれば起こす。ACS は同じホストの同じ名前のセッションを使い回す）。無ければ `open` で開く
-   * - 待つのは起動応答で装置名が決まるまで（`timeoutMs` まで。無ければ待ち続ける）。時間切れ・起動の失敗でも**表示は開く**——
-   *   その場合は装置名を「起動応答の名前 → 設定で送った名前 → 無し」の順で採る（ACS は時間切れで `getWorkstationID()`＝設定の値のまま関連付ける）
-   * - 戻り値: `printerId`（連動に使う）と `deviceName`（`undefined` なら関連付けなしで表示を開く）
+   * - 同じ持ち主・同じ設定（`ref`）で開いているプリンターがあればそれを使う（止まっていれば起こす。接続中なら**その結果に相乗りする**＝二重に張らない）。無ければ `open` で開く
+   * - 待つのは起動応答で装置名が決まるまで、**開く・起こすの待ちも合わせて 1 つの期限**（`timeoutMs`。無ければ待ち続ける）
+   * - **時間切れなら関連付けなしで表示を開く**（ACS はコンストラクタの冒頭で起こすタイマーのスレッドが、時間が来ても表示が始まっていなければ
+   *   関連付けなしの表示を開く——`run` → `createAndRunTerminal`。`Icon5250.start` が表示の開始前に `associatedDeviceName` を消してある）。
+   *   ~~時間切れでもプリンターの設定の装置名で関連付ける~~ は原典の読み違いだった（節目 10 の独立点検 C-S1）。プリンターとの組（連動）は残す——
+   *   ACS も `pWorkstationID` が決まればその相手を探し続ける
+   * - 戻り値: `printerId`（連動に使う）と `deviceName`（`undefined` なら関連付けなしで表示を開く）・`issue`（利用者へ知らせる理由）。
+   *   プリンターを開けなかったときは `error`（組も作らない）
    */
   async prepareAssociatedPrinter(
     ref: string | undefined,
     owner: string | undefined,
     open: () => Promise<PrinterEntry>,
     timeoutMs: number | undefined
-  ): Promise<{ printerId: string; deviceName: string | undefined } | { error: string }> {
-    let entry: PrinterEntry | undefined;
-    if (ref !== undefined) entry = [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner);
-    // **プリンターの接続は起動応答が来るまで戻らない**（`PrinterSession.connect` が最大 15 秒待つ）ので、開く・起こすのにも同じ待ち時間を掛ける。
-    // 時間切れでもプリンターの起動は続く（表示は先へ進み、装置名は設定の値で関連付ける）。開く側が失敗すれば例外を記録して関連付けなしにする
+  ): Promise<{ printerId: string; deviceName: string | undefined; issue?: "timeout" | "failed" } | { error: string }> {
+    const deadline = timeoutMs === undefined ? Infinity : this.now() + timeoutMs;
+    const find = (): PrinterEntry | undefined =>
+      ref !== undefined ? [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner) : undefined;
+    let entry = find();
     const starting: Promise<PrinterEntry> = entry
       ? holdsConnection(entry.state)
         ? Promise.resolve(entry)
         : this.startPrinter(entry.id)
       : open();
+    // **プリンターの接続は起動応答が来るまで戻らない**（`PrinterSession.connect` が最大 15 秒待つ）ので、開く・起こすにも同じ期限を掛ける。
+    // 時間切れでもプリンターの起動は続く（後で装置名が決まる）ので、失敗は記録だけして先へ進む
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const timedOut = new Promise<"timeout">((resolve) => {
-        if (timeoutMs !== undefined) timer = setTimeout(() => resolve("timeout"), timeoutMs);
+        if (deadline !== Infinity) timer = setTimeout(() => resolve("timeout"), Math.max(0, deadline - this.now()));
       });
       const first = await Promise.race([starting, timedOut]);
       if (first === "timeout") {
-        // 待ち時間切れ。開いた（ことになる）エントリを後から拾って関連付けに使う（起動は続いている）
         void starting.catch((e: unknown) => sessionLog.warn({ ref, err: String(e) }, "associated printer failed to start after timeout"));
-        entry = ref !== undefined ? [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner) : entry;
-        if (!entry) return { error: `printer session did not start within ${timeoutMs} ms` };
-      } else entry = first;
+        entry = find() ?? entry;
+        return entry ? { printerId: entry.id, deviceName: undefined, issue: "timeout" } : { error: `printer session did not start within ${timeoutMs} ms` };
+      }
+      entry = first;
     } catch (e) {
       // 開けなかった（上限・起動の失敗）。関連付けなしで表示を開く
       return { error: e instanceof Error ? e.message : String(e) };
@@ -1999,17 +2021,31 @@ export class SessionManager {
       if (timer) clearTimeout(timer);
     }
     const id = entry.id;
-    // 起動応答が来たか（`startupCode` が空でない）。装置名は起動応答の名前（`deviceName`。無ければ送った名前）
+    // 起動応答が来たか（`startupCode` が空でない）。装置名は起動応答の名前（`deviceName`）。開く・起こすが戻った時点で通常は届いている——
+    // ここで待つのは、使い回すプリンターが起動中（別の呼び出しが張っている最中）のまれな場合だけ
     const started = (): boolean => (this.printers.get(id)?.session?.startupCode ?? "") !== "";
-    // 待つ: 起動応答が来るまで 200 ms おき（ACS と同じ）。`timeoutMs` が無ければ待ち続ける（0 秒の指定）
-    const deadline = timeoutMs === undefined ? Infinity : this.now() + timeoutMs;
     while (!started() && this.now() < deadline) {
       const cur = this.printers.get(id);
-      if (!cur || cur.state === "error" || cur.state === "stopped") break; // 起動に失敗した・止められた
+      if (!cur || cur.state === "error" || cur.state === "stopped") return { printerId: id, deviceName: undefined, issue: "failed" }; // 起動に失敗した・止められた
       await new Promise((r) => setTimeout(r, 200));
     }
-    const p = this.printers.get(id);
-    return { printerId: id, deviceName: p?.session?.deviceName || p?.openOpts.deviceName || undefined };
+    if (!started()) return { printerId: id, deviceName: undefined, issue: "timeout" };
+    return { printerId: id, deviceName: this.printers.get(id)?.session?.deviceName || undefined };
+  }
+
+  /** そのプリンターへ関連付けた表示が（繋ぎ直し中も含めて）1 本でも残っているか */
+  private linkedDisplayExists(printerId: string): boolean {
+    for (const e of this.sessions.values()) if (e.associatedPrinter?.printerId === printerId) return true;
+    return false;
+  }
+
+  /**
+   * **表示を開けなかったときの、起こしたプリンターの片付け**（`prepareAssociatedPrinter` の後・組にする前の失敗。ACS は表示が INACTIVE になれば
+   * プリンターを止める。`20260921-associated-printer-session` の節目 10 の独立点検 C-S3）。表示を閉じたときと同じ処置
+   * （ほかに使う表示が無ければ止める・「一緒に閉じる」なら閉じる）
+   */
+  abortAssociatedPrinter(printerId: string, closeWithLast: boolean): void {
+    this.releaseLink("", { printerId, closeWithLast });
   }
 
   /** 表示の一覧をほかの表示の判断に渡す形にする（自分を除く） */
@@ -2039,13 +2075,18 @@ export class SessionManager {
     const link = entry.associatedPrinter;
     if (!link) return;
     delete entry.associatedPrinter; // 以後の遅れたイベントに反応しない
+    this.releaseLink(entry.id, link);
+  }
+
+  /** 組を解く処置の本体。`displayId` は解く表示（無ければ空。ほかの表示の数えから除く相手が無い） */
+  private releaseLink(displayId: string, link: { printerId: string; closeWithLast: boolean }): void {
     const p = this.printers.get(link.printerId);
     if (!p) return;
-    const use = otherDisplayAssociated(link.printerId, this.othersAssociated(entry.id));
+    const use = otherDisplayAssociated(link.printerId, this.othersAssociated(displayId));
     if (shouldClosePrinter({ resident: p.resident, running: holdsConnection(p.state) }, link.closeWithLast, use)) {
       void this.close(link.printerId).catch(() => undefined);
     } else {
-      this.applyPrinterLoss(entry.id, link.printerId);
+      this.applyPrinterLoss(displayId, link.printerId);
     }
   }
 
@@ -2185,6 +2226,10 @@ export class SessionManager {
       // **常駐は掃除しない。** 何も届かない状態が正常なので、
       // アイドルを「使われていない」の合図にできない（design D1 / watch-registry と同じ理屈）
       if (entry.resident) continue;
+      // **表示が関連付けているプリンターは掃除しない**（`20260921-associated-printer-session` の節目 10 の独立点検 C-S10）。関連付けたプリンターは
+      // ほとんど何も届かないのが本来の姿で、アイドルを「使われていない」の合図にできない。刈ると表示が繋がっているのにプリンターの実体が消え、
+      // 組は起こす相手を失って、印刷はホストの出力待ち行列に溜まり続ける（利用者にはどこにも出ない）
+      if (this.linkedDisplayExists(id)) continue;
       if (expired(entry)) {
         entry.session?.disconnect();
         this.printers.delete(id);

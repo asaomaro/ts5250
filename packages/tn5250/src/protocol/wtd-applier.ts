@@ -35,7 +35,7 @@ export interface ApplyResult {
   /**
    * **否定応答で返すセンス・コード**（`20260921-negative-responses`）。立ったらレコードの残りは読まない（ACS `DS5250.processCommand` は
    * `sense_code` が立つとループを抜け、`tokenizeData` の終わりで否定応答を送る）。ACS と同じ条件でだけ立てる:
-   * コマンドの位置に ESC が無い（0x10050121）・ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・
+   * コマンドの位置に ESC が無い（0x10050121。WSF の長さが 0・1 のときも、長さの 2 バイトが次のコマンドとして読まれてここへ来る）・ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・
    * WSF D9/72 のフラグに 0x80（0x10050112）。**返さないとホストは入力コマンドを待ち続ける**（社内機で WSF D9/72 の 0x80 を DSM に出させて実測。
    * ACS では `QsnPutInpCmd` が CPFA304 で戻り、当 PJ ではキーボードが施錠されたままになった）
    */

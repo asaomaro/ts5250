@@ -357,7 +357,11 @@ export class TelnetLayer {
         // 関連付けプリンターは最後（`associatedPrinter` の注記）。値は各文字の下位 8 ビットをそのまま（ACS の `(byte)charAt`。ESC も挟まない）
         const assoc = this.opts.associatedPrinter;
         if (assoc !== undefined && javaTrim(assoc) !== "") {
-          payload.push(ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...[...assoc].map((c) => c.charCodeAt(0) & 0xff));
+          // **UTF-16 の単位ごと**（Java の `charAt`。補助面の文字はサロゲート 2 つ＝2 バイト。`[...assoc]` のコードポイント単位では 1 バイト少ない。
+          // `20260921-associated-printer` の節目 10 の独立点検 C-N1）
+          const bytes: number[] = [];
+          for (let i = 0; i < assoc.length; i++) bytes.push(assoc.charCodeAt(i) & 0xff);
+          payload.push(ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...bytes);
         }
         this.sendSb(payload);
       };
