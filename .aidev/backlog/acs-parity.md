@@ -125,7 +125,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 回帰テスト: `packages/tn5250/test/restore-screen-payload.test.ts`（16 件・新規）/
     `save-screen-session.test.ts`「1 レコードに SAVE が 2 回」/ `packages/server/test/err-shape.test.ts`（9 件・新規）/
     `packages/web-ui/test/flag-key-fields.test.ts`（5 件・新規）
-- [ ] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
+- [x] **挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる。符号付き数値欄では値が化ける**（優先度 高・深さ ○）。
+  **完了（`20260921-insert-no-room`・PR #410）**: 余地の判定を純関数 `insertChar`（`packages/web-ui/src/composables/fieldEdit.ts`）に集め、
+  打鍵・IME 確定・継続欄から呼ぶ。余地が無ければ `MSG_NO_ROOM`（操作員エラー 0012）で値を変えない。`typeChar` の挿入も切り詰めない。
+  **実機の ACS のコアで 2 回ずつ測った**（`scripts/acs-probe/insert-no-room.txt`）: 最終桁にカーソルなら空白でもエラー・途中の空白は数えない・
+  行をまたぐ欄は欄全体で押し出す（21 行へ 1 字ずれた）・符号付きは符号桁の手前までで数え符号桁は動かない。
+  継続欄（`insert-no-room-continued.txt`。**`PROBE_ENPTUI=true` でないとホストが欄を割らない**）も全区間を 1 つの欄として
+  （`1234/56/7.` の先頭に 9 → `9123/45/67`）。原典の `reserveRoomForContField` の字面（区間ごとに `--endPos`）とは食い違い、実測に従った（decisions D1）。
+  テスト `packages/web-ui/test/insert-no-room.test.ts`（22 件）、mutation 14 通りすべて検出。
   末尾まで埋まった欄（SEU の行など）や、ホストが右寄せで書いた数値欄を挿入モードで直すと、文字が消えたり値が変わったりして送られる。
   例: 右寄せの `"   12-"`（−12）の `1` の前に `9` を挿入すると `"   912"` になり、送信は `91` になる。
   ACS: `PS5250.insertChar` → `reserveRoomForInsert` が、最終桁（符号付き数値は符号桁の手前）から空きを数える。足りなければエラー 0012 を出し、値を変えない。
@@ -133,7 +140,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   貼り付けは既に「余地が無ければ何も変えない」規則なので、打鍵とで食い違っている。
   テスト `field-edit.test.ts:33-40` は、満杯でない欄の挿入しか見ていない。
   再現: 満杯の欄で挿入モードにして、1 文字打つ。
-  関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み（推測）。（出典: `20260919-backlog-acs-triage` research N2）
+  関係: AGENTS.md の残課題「挿入モードで 1 行が帯の幅を越えたときの ACS 挙動が未確認」。`reserveRoomForInsert` は欄の最終桁から数えるので、継続欄（複数行の欄）で「欄全体の予算」を見ているかを、着手時に確かめれば閉じられる見込み~~（推測）~~ → 実測で ACS も欄全体（上の I3）。残課題も閉じた。（出典: `20260919-backlog-acs-triage` research N2）
+- [ ] **挿入モードの余地の残り: DBCS 欄の「最終桁にカーソルなら空白でも余地なし」と、継続欄への IME 確定**（優先度 低・深さ △）。
+  `20260921-insert-no-room` で本題（値が化ける・黙って消える）は閉じた。DBCS 欄は論理値＋バイト予算のモデルで最終桁という位置を持たないので、
+  予算を越えたら拒否＋0012 までに留めた（同 D2）。継続欄への IME 確定は区間の中で数える（同 D3。打鍵は全区間）。どちらも ACS 側は未測定。
 - [x] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
   **完了（`20260921-type-ahead`・PR #410）**: 施錠中（応答待ち・ホスト施錠）の端末のキーをセッションごとに溜め（`SessionState.typeAhead`）、
   解錠したら合成 keydown を同じ入口へ投げて打った順に再生する（`packages/web-ui/src/components/EmulatorPane.vue` の先打ちの節、

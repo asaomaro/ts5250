@@ -29,17 +29,38 @@ export function editValue(state: EditState): string {
 export function typeChar(state: EditState, ch: string): EditState {
   const len = state.chars.length;
   if (state.cursor >= len) return state;
-  const chars = [...state.chars];
   if (state.insertMode) {
-    // 挿入: カーソル以降を右シフト（末尾は溢れて落ちる）
-    chars.splice(state.cursor, 0, ch);
-    chars.length = len; // フィールド長で切り詰め
-  } else {
-    // 上書き: カーソル位置を置換
-    chars[state.cursor] = ch;
+    // 挿入は余地を数える（~~末尾は溢れて落ちる~~——黙って字が消えた。`insertChar`）。余地が無ければ値を変えない
+    return insertChar(state, ch, len - 1) ?? state;
   }
+  const chars = [...state.chars];
+  chars[state.cursor] = ch; // 上書き: カーソル位置を置換
   // カーソルは末尾（len）まで進む。cursor===len は「満杯」で以降の入力はブロックされる（field-exit 必要）
   return { ...state, chars, cursor: Math.min(state.cursor + 1, len) };
+}
+
+/** 余地を数えるときの空白（NUL も空き。ACS `reserveRoomForInsert` は NUL・空白・全角空白を数える） */
+const isBlank = (c: string | undefined): boolean => c === " " || c === "\u0000" || c === "\u3000";
+
+/**
+ * **挿入モードで 1 文字入れる**（ACS `PS5250.insertChar` → `reserveRoomForInsert`。`20260921-insert-no-room`）。
+ *
+ * 余地が無ければ `undefined`（呼び出し側がエラー 0012 を出し、値を変えない）。余地の数え方は ACS と同じ:
+ * - カーソルが欄の**最終桁**（`chars.length - 1`）以上なら、その桁が空白でも余地なし
+ * - そうでなければ `lastTypeable`（符号付き数値は符号桁の手前）からカーソルまで、**末尾に続く空白**だけを数える。
+ *   途中の空白は数えない（実機: 途中に空白があっても末尾が埋まっていればエラー。research F3 の I4）
+ *
+ * 余地があればカーソル位置へ入れ、`lastTypeable` の空白を 1 つ落とす——**それより後ろ（符号桁）は動かない**。
+ * 以前は splice のあと欄の長さで切り詰めており、末尾の字が黙って消え、符号付き数値欄では符号桁まで押し出して値が化けた。
+ */
+export function insertChar(state: EditState, ch: string, lastTypeable: number): EditState | undefined {
+  const { chars, cursor } = state;
+  if (cursor >= chars.length - 1 || cursor > lastTypeable) return undefined;
+  if (!isBlank(chars[lastTypeable])) return undefined;
+  const next = [...chars];
+  next.splice(cursor, 0, ch);
+  next.splice(lastTypeable + 1, 1); // 押し出された末尾の空白（符号桁はこの後ろなので動かない）
+  return { ...state, chars: next, cursor: cursor + 1 };
 }
 
 /** 5250 流バックスペース: カーソルを左へ、その位置以降を左詰め（破壊的） */

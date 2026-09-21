@@ -7,6 +7,7 @@ import {
   initEdit,
   editValue,
   typeChar,
+  insertChar,
   backspace,
   del,
   moveCursor,
@@ -2617,13 +2618,21 @@ function commitFieldValueDirect(x: Field, val: string): void {
 }
 
 /**
- * 継続入力フィールドの区間をまたいで Backspace/Delete を適用する。
+ * 継続入力フィールドの区間をまたいで Backspace/Delete／挿入を適用する。
  *
- * f の区間を含む並び全体をつないだ「合成バッファ」へ fieldEdit の純関数（backspace/del）を
+ * f の区間を含む並び全体をつないだ「合成バッファ」へ fieldEdit の純関数（backspace/del/insertChar）を
  * そのまま適用し、結果を区間ごとの長さで割り戻す。カーソルが着地した区間へ編集モデルと
  * フォーカスを移し、それ以外の区間は直接コミットする。
+ *
+ * `apply` が `undefined` を返したら（挿入の余地が無い）**何も変えずに false**。
+ * `preferNext` は挿入用: 区間の終わりに着いたら次の区間の先頭へ置く（ACS の挿入の枝は区間の最終桁で
+ * `getNextContFieldSegment` の先頭へ移る。Backspace/Delete は従来どおり手前の区間の末尾に留まる）。
  */
-function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void {
+function editAcrossContinued(
+  f: Field,
+  apply: (s: EditState) => EditState | undefined,
+  preferNext = false
+): boolean {
   const cur = edit!;
   const run = continuedRunOf(f);
   const lens = run.map((x) => visLen(x));
@@ -2638,10 +2647,12 @@ function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void
   const at = run.findIndex((x) => x.index === f.index);
   const merged = run.flatMap((x, k) => (k === at ? cur.chars : padChars([...logicalValue(x)], lens[k]!)));
   const result = apply({ chars: merged, cursor: offsets[at]! + cur.cursor, insertMode: cur.insertMode });
+  if (!result) return false;
 
   let targetIdx = run.length - 1;
   for (let k = 0; k < run.length; k++) {
-    if (result.cursor <= offsets[k]! + lens[k]!) {
+    const end = offsets[k]! + lens[k]!;
+    if (preferNext ? result.cursor < end : result.cursor <= end) {
       targetIdx = k;
       break;
     }
@@ -2660,6 +2671,7 @@ function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void
   editFieldIndex = target.index;
   const targetEl = inputForSlice(target, 0);
   if (targetEl) sync(targetEl, target);
+  return true;
 }
 
 /** input の keydown 制御。印字文字は上書き/挿入、編集キーは 5250 挙動、AID/移動キーはペインへ委譲 */
@@ -2814,7 +2826,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (signKeyHack(f, ev.key)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
-    // **満杯まで打った後の文字はエラー 0018**（ACS `setErrorCode(24)`。値は変えない。実機で確認。場合 C）
+    // **満杯まで打った後の文字はエラー 0018**（ACS `setErrorCode(24)`。値は変えない。実機で確認。場合 C）。
+    // ACS が見るのは「最終桁にカーソル＋出た」。挿入で「出た」ときはカーソルが 1 桁進んでいるので、上の入口で
+    // 状態が下り、そこでの文字は下の余地の判定で 0012 になる（`PS5250.processCharKeyStroke` の挿入の枝）
     if (fieldExitedIndex === f.index) {
       emit("notice", MSG_FIELD_EXIT_KEY_INVALID);
       return;
@@ -2825,14 +2839,29 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
       return;
     }
-    // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。`-` / `+` は上の
-    // `signKeyHack` で Field− / Field+ として拾われるので、ここへは来ない。
-    if (isSignPosition(f, edit.cursor, visLen(f))) {
-      emit("notice", MSG_BY_REASON["sign-position"]);
+    // **挿入モードは余地を数え、無ければエラー 0012 で値を変えない**（ACS `reserveRoomForInsert`。
+    // `20260921-insert-no-room`。以前は末尾を黙って切り捨て、符号付き数値欄では符号桁まで押し出して値が化けた）。
+    // 型の検査の後・符号桁の検査の前（符号桁は欄の最終桁なので ACS は 0012）。選択の置換は下の従来の経路
+    const inserting = edit.insertMode && (el.selectionStart ?? 0) === (el.selectionEnd ?? 0);
+    if (inserting && f.continued !== undefined) {
+      // 継続欄は全区間を 1 つの欄として数え・押し出す（実機の ACS。research F5）
+      if (!editAcrossContinued(f, (s) => insertChar(s, ch, s.chars.length - 1), true)) emit("notice", MSG_NO_ROOM);
       return;
     }
     let trial: EditState;
-    if (deleteSelection(f, el)) {
+    if (inserting) {
+      const t = insertChar(edit, ch, lastTypeable(f));
+      if (!t) {
+        emit("notice", MSG_NO_ROOM);
+        return;
+      }
+      trial = t;
+    } else if (isSignPosition(f, edit.cursor, visLen(f))) {
+      // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。`-` / `+` は上の
+      // `signKeyHack` で Field− / Field+ として拾われるので、ここへは来ない。
+      emit("notice", MSG_BY_REASON["sign-position"]);
+      return;
+    } else if (deleteSelection(f, el)) {
       // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）
       const chars = [...edit.chars];
       chars.splice(edit.cursor, 0, ch);
@@ -2846,9 +2875,10 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     // （ACS `processCharKeyStroke`: `cursorSBA == n4 && isFieldExitRequired()` で `fieldExited = true`、
     // カーソルは進めない。実機でも RZ 欄は 3,25・6S0 は 19,25＝最終の数字桁に留まった。場合 A・C）。
     // 行またぎの継続欄（EDTMSK）は最終区間の判定が要るので従来どおり（自動送りを止めるだけ）
+    // 挿入のときは「出た」を立ててもカーソルは 1 桁進む（ACS の挿入の枝は `fieldExited` の後も `++cursorSBA`）
     const typedAt = trial.cursor - 1;
     if (isFieldExitRequired(f) && f.continued === undefined && typedAt === lastTypeable(f)) {
-      edit = { ...trial, cursor: typedAt };
+      edit = inserting ? trial : { ...trial, cursor: typedAt };
       sync(el, f);
       fieldExitedIndex = f.index;
       emit("field-exited", f.index);
@@ -2951,7 +2981,12 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
     const base = replaced ? { ...edit, insertMode: true } : edit;
     const trial = dbcsType(base, ch, f);
-    if (!trial) return; // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）
+    if (!trial) {
+      // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
+      // （`20260921-insert-no-room` D2。「最終桁にカーソルなら空白でも余地なし」は論理値のモデルに無いので写していない）
+      if (base.insertMode && !replaced) emit("notice", MSG_NO_ROOM);
+      return;
+    }
     edit = { ...trial, insertMode: edit.insertMode };
     syncDbcs(el, f);
     advanceIfFull(f); // ACS: バイト予算満杯なら次の入力欄へ
@@ -3526,19 +3561,33 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
   const dbcs = isDbcsEdit(f);
   let e: EditState = { ...edit, cursor: composeStart };
+  let noRoom = false;
   for (const raw of [...el.value].slice(composePrefixLen)) {
     const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     if (!acceptsChar(f, ch)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
     const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
-    const trial = dbcs ? dbcsType(base, ch, f) : typeChar(e, ch);
-    if (!trial || !fitsBytes(trial, f)) break; // 桁超過分は切り捨て
+    // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
+    // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
+    const trial = dbcs
+      ? dbcsType(base, ch, f)
+      : e.insertMode && !composeReplacedSelection
+        ? insertChar(e, ch, lastTypeable(f))
+        : typeChar(e, ch);
+    if (!trial || !fitsBytes(trial, f)) {
+      noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで黙って止める＝従来どおり）
+      break;
+    }
     e = { ...trial, insertMode: e.insertMode };
   }
   edit = e;
   editFieldIndex = f.index;
   sync(el, f);
+  if (noRoom) {
+    emit("notice", MSG_NO_ROOM);
+    return;
+  }
   advanceIfFull(f); // ACS: IME 確定で満杯なら次の入力欄へ
 }
 

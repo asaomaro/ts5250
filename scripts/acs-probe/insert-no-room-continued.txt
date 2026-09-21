@@ -1,0 +1,149 @@
+# **継続欄（EDTMSK で割られた欄）に挿入モードで打ったとき、ACS はどう押し出すか**（実機）。
+#
+# 原典 `PS5250.reserveRoomForContField` は、区間ごとに**最終桁の 1 つ手前**から空白を数え・ずらす
+# （`--endPos`）。`Field5250.endPos` は最終桁を含む（開始＋長さ−1）ので、字面どおりなら区間の最終桁は
+# 数えられず、ずらすときに字が重複・消失しうる。読みだけでは決められないので打たせて見る。
+#
+# 画面は DTMPGM（`scripts/build-dttest.mjs`）の D8U（23,24。`EDTWRD('0   /  /  ')` + `EDTMSK` + 色・下線＝
+# 4 桁 / 2 桁 / 2 桁の 3 区間）。区間の間は保護された `/`。
+#
+# **`PROBE_ENPTUI=true` で流す**（拡張 5250 を申告しないと、ホストは欄を割らずに 1 つの 10 桁の欄として送る——
+# 区切りの `/` も値として上書きできてしまい、継続欄を測れない。利用者の ACS は拡張を申告している）。
+#   PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/insert-no-room-continued.txt
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DTMPGM[enter]
+settle 2500
+dump screen
+
+# --- C1) 1234567（最終区間の先頭まで）→ 先頭に挿入 ---
+setcursor 23,24
+settle 200
+keys 1234567
+settle 300
+dump c1-typed
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c1
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C2) 123456（第 2 区間まで満杯）→ 先頭に挿入 ---
+setcursor 23,24
+settle 200
+keys 123456
+settle 300
+dump c2-typed
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c2
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C3) 1234（第 1 区間だけ満杯）→ 先頭に挿入 ---
+setcursor 23,24
+settle 200
+keys 1234
+settle 300
+dump c3-typed
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c3
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C4) 12（第 1 区間の途中まで）→ 先頭に挿入 ---
+setcursor 23,24
+settle 200
+keys 12
+settle 300
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c4
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C5) 12345678（満杯）→ 先頭に挿入 ---
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+dump c5-typed
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c5
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C6) 1234567 で最終区間の最終桁だけが空き → 先頭に挿入（区間の最終桁も数えるなら押し出す） ---
+setcursor 23,24
+settle 200
+keys 1234567
+settle 300
+setcursor 23,33
+settle 200
+keys [eraseeof]
+settle 300
+dump c6-typed
+setcursor 23,24
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c6
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# --- C7) 空の欄の最終区間の最終桁（空白）に挿入 → 欄の最終桁なので余地なし（のはず） ---
+setcursor 23,33
+settle 200
+keys [insert]
+settle 200
+keys 9
+settle 300
+dump c7
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+keys [pf3]
+settle 1500
+dump exit
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -188,6 +188,11 @@ public class AcsProbe {
     // 切断後の挙動を ACS の GUI に寄せて測るときだけ `PROBE_AUTORECONNECT=true` を渡す
     String ar = env("PROBE_AUTORECONNECT", "");
     if (!ar.isEmpty()) p.put("SESSION_AUTORECONNECT", ar);
+    // **拡張 5250（ENPTUI）**（既定は指定しない＝ECL・HOD の既定 false）。利用者の ACS は有効で動いている
+    // ——タップで採った Query Reply が `DS5250` の `bENPTUI` 真の値（0x0F・0xC8）だった（`query-reply.ts`）。
+    // 無効だとホストは EDTMSK の欄を継続欄に割らずに送るので、継続欄を測るときは `PROBE_ENPTUI=true` を渡す
+    String enptui = env("PROBE_ENPTUI", "");
+    if (!enptui.isEmpty()) p.put(ECLSession.SESSION_ENPTUI, enptui);
 
     // 最後まで流れたときだけ 0 にする（途中で何が起きても、既定は「途中で止まった」）
     int code = 4;

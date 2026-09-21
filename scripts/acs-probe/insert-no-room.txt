@@ -1,0 +1,126 @@
+# **挿入モードで欄に余地が無いとき、ACS はどう振る舞うか**（実機）。台帳「挿入モードで欄が満杯のとき、あふれた末尾の文字を黙って捨てる」。
+#
+# 原典 `PS5250.insertChar` → `reserveRoomForInsert`: カーソルが欄の最終桁なら余地なし。そうでなければ
+# 最終桁（符号付き数値は符号桁の手前）からカーソルまで、**末尾に続く空白**だけを数え、足りなければ余地なし。
+# 余地なしは `setErrorCode` の 0x12（0012）で、値は変えない。行またぎの欄は位置が連続なので欄全体で数えるはず。
+#
+# 画面はメインメニューのコマンド行（20,7 から 153 桁＝21,79 まで。行をまたぐ素の英数字欄）と、
+# ADJPGM（`scripts/build-adjtest.mjs`。19,20 = 符号付き 6S0 で、数字 6 桁＋符号桁の 7 桁）。
+signon
+keys [enter]
+settle 1500
+dump menu
+
+# --- I1) 途中まで入った欄の先頭に挿入（末尾に空きがある）→ 押し出す ---
+keys [home][eraseeof]ABC
+settle 300
+keys [home][insert]X
+settle 300
+dump i1
+keys [reset]
+settle 300
+dump i1-reset
+
+# --- I2) 空の欄の最終桁（空白）に挿入 → 最終桁なので余地なし（のはず） ---
+keys [home][eraseeof]
+settle 300
+setcursor 21,79
+settle 200
+keys [insert]
+settle 200
+dump i2-before
+keys Y
+settle 300
+dump i2
+keys [reset]
+settle 300
+dump i2-reset
+
+# --- I3) 行をまたいで押し出す: 20 行を埋め、21 行 1 桁に 1 字。先頭に挿入 → 21 行へ 1 字ずれる（はず） ---
+keys [home][eraseeof]BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBC
+settle 300
+setcursor 20,7
+settle 200
+keys [insert]
+settle 200
+dump i3-before
+keys Z
+settle 300
+dump i3
+keys [reset]
+settle 300
+
+# --- I4) 途中に空白があっても末尾が埋まっている → 余地なし（末尾の空白だけを数える） ---
+keys [home][eraseeof]DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+settle 300
+setcursor 20,7
+settle 200
+keys [insert]
+settle 200
+dump i4-before
+keys Q
+settle 300
+dump i4
+keys [reset]
+settle 300
+
+# --- I5) 満杯の欄の途中に挿入 → 余地なし ---
+keys [home][eraseeof]FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+settle 300
+setcursor 20,10
+settle 200
+keys [insert]
+settle 200
+dump i5-before
+keys Q
+settle 300
+dump i5
+keys [reset]
+settle 300
+keys [home][eraseeof]
+settle 300
+
+# --- I6) 符号付き 6S0: 右寄せ（Field−）の後、先頭の空白に挿入 → 数字桁の末尾が埋まっているので余地なし ---
+keys ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 19,20
+settle 200
+keys 12[field-]
+settle 400
+dump i6-exited
+setcursor 19,20
+settle 200
+keys [insert]
+settle 200
+dump i6-before
+keys 9
+settle 300
+dump i6
+keys [reset]
+settle 300
+
+# --- I7) 符号付き 6S0: 左詰めの 2 桁の先頭に挿入 → 空きがあるので押し出す（符号桁は動かない） ---
+setcursor 19,20
+settle 200
+keys [eraseeof]12
+settle 300
+setcursor 19,20
+settle 200
+keys [insert]
+settle 200
+dump i7-before
+keys 9
+settle 300
+dump i7
+keys [reset]
+settle 300
+# 符号付き欄を変えたまま F3 を押すと 0020 で止まる（欄を出ないままの実行キー）ので、Field Exit で出てから
+keys [fldext]
+settle 300
+keys [pf3]
+settle 1500
+dump exit
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
