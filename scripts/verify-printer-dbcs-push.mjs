@@ -109,6 +109,7 @@ try {
   await cmd(s, `VRYCFG CFGOBJ(${DEV}) CFGTYPE(*DEV) STATUS(*OFF)`);
   await sleep(2000);
   await cmd(s, `DLTDEVD DEVD(${DEV})`);
+  await cmd(s, `CLROUTQ OUTQ(QUSRSYS/${DEV})`);
   await cmd(s, `DLTOUTQ OUTQ(QUSRSYS/${DEV})`);
   await cmd(s, `CHKOBJ OBJ(${DEV}) OBJTYPE(*DEVD)`);
   await cmd(s, "SIGNOFF");

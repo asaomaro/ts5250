@@ -4,23 +4,24 @@ import { codecForCcsid, SO, SI, type Codec } from "@ts5250/ebcdic";
  * SCS（SNA Character String）デコーダ。プリンターセッションでホストから届く印刷データを
  * 論理ページ（等幅グリッド）に展開する。
  *
- * **制御の表は ACS に合わせる**（`PrintSCS5250` のコンストラクタの `scs_proc`。`20260921-scs-controls-acs`）。
- * ~~tn5250 lib5250/scs.c の制御セット~~ は ACS と食い違っていた——0x03 を EBCDIC の透過として読み、
- * 表に無い制御（LF 0x25・IRS 0x1E・BS 0x16・TRN 0x35 ほか）を**印字文字として桁に置き**、長さの前置を持つ
- * 0x2B のオーダーを固定長で読んで、知らないオーダーで**帳票の残りを打ち切っていた**。
+ * **制御の表は ACS の Java 印刷（JPS）経路に合わせる**（`PrintSCS5250JPS` の `scs_proc`。`20260921-scs-controls-acs`）。
+ * ACS は HPT を使わないとき、**既定で JPS 経路**で SCS を読む（`PD5250.getPrintHostDataIndex`: `jpsUse` の既定 true・
+ * Windows では `usePDT` の既定 false）。~~PDT 経路（`PrintSCS5250` / `PrintSCS5250DB`）~~ に合わせた最初の版は、
+ * GE・BS・TRN・HT・SGEA・2B CA / D4 の扱いが既定の経路と違った（独立点検の指摘）。
+ * ~~tn5250 lib5250/scs.c の制御セット~~ はさらに違い、表に無い制御を印字文字として桁に置き、0x03 を EBCDIC の透過として
+ * 読み、知らない 2B のオーダーで帳票の残りを打ち切っていた。
  *
  *   0x40 以上 … 印字文字（EBCDIC→Unicode）。DBCS は SO/SI で切り替え
- *   0x00 / 0x14 / 0x23 / 0x24 … Null（読み飛ばす）
- *   0x0D CR … 行頭へ / 0x25 LF … 次の行（桁はそのまま） / 0x15 NL・0x1E IRS … 次の行の頭
- *   0x0C FF … 改ページ / 0x0B VT … 垂直タブ（タブ位置を持たないので LF と同じ。ACS も停止位置が無ければ LF）
- *   0x16 BS … 1 桁戻る / 0x05 HT … 水平タブ（スタブ。タブ位置は未対応）
- *   0x34 PP … 位置決め（3 バイト） / 0x28 SA … 属性（3 バイト。読み飛ばす） / 0x04 VCS … 2 バイト
- *   0x08 GE … 2 バイト。ACS はグラフィック・エラー文字（既定 0x60＝`-`）を置く
- *   0x35 TRN … 透過（長さ＋本体。本体は文字として置く） / 0x03 ATRN … ASCII 透過（長さ＋本体。読み飛ばす）
+ *   0x0D CR … 行頭へ / 0x25 LF・0x0B VT … 次の行（桁はそのまま。JPS の VT は LF） / 0x15 NL・0x1E IRS … 次の行の頭
+ *   0x0C FF … 改ページ / 0x05 HT … 1 桁の空白（JPS の HT は空白 1 つ）
+ *   0x0E SO / 0x0F SI … DBCS の切り替え。**空白を書かずに位置を進める**（SPCC。`spcc` の注記）
+ *   0x34 PP … 位置決め（3 バイト） / 0x28 SA … 属性（3 バイト。読み飛ばす） / 0x04 VCS … 2 バイト（JPS は何もしない）
+ *   0x08 GE … 2 バイト（JPS は何も置かない） / 0x16 BS … 何もしない（JPS）
+ *   0x35 TRN … 透過（長さ＋本体。本体は 1 バイトごとに 0x40 なら空白、ほかは `-`。代替文字は未対応）
+ *   0x03 ATRN … ASCII 透過（長さ＋本体。プリンターへ生で流すもので、帳票には置かない）
  *   0x2B … オーダー（下の `skip2b`）
- *   0x06 RNL / 0x3A RFF / 0x09 SPS / 0x38 SBS / 0x36 NBS / 0x39 IT / 0x33 IR / 0x2F BEL … **ACS も何もしない**（1 バイト）
- *   それ以外の 0x40 未満 … 未定義の制御として 1 バイト読み飛ばす（印字しない）
- *   0xFF … 読み飛ばす（tn5250 由来。ACS は印字文字の範囲に入れる。未確認のまま据え置き）
+ *   上に無い 0x40 未満（Null・RNL・RFF・BEL・IR・NBS・SBS・SPS・IT・RPT・ENP・INP・UBS・WUS・SW・SUB ほか）… 1 バイト読み飛ばす
+ *   0xFF … 読み飛ばす（tn5250 由来。JPS は印字文字の範囲に入れる。未確認のまま据え置き）
  */
 
 /** 論理ページ（1 ページ分の等幅グリッド）。lines[r] は桁詰めした 1 行。 */
@@ -41,7 +42,7 @@ export interface LogicalPage {
    */
   raw?: (number | undefined)[][];
   /**
-   * SO/SI が現れた位置（1 起点）。**SO/SI が桁を占めるときはその桁**、占めないときは直後に来る桁。
+   * SO/SI が現れた位置（1 起点）と、占める桁の数（`ShiftMark.width`）。**占めるときはその桁の頭**、占めないときは直後に来る桁。
    *
    * **SO/SI は ACS と同じく既定で 1 桁ずつ空白として占める**（`PrintSCS5250DB.shiftOut` / `shiftIn`。
    * `20260921-scs-sosi-columns`）。ホストが `2B FD .. 03`（SPCC）で「占めない」「SI だけ 2 桁」に切り替えられる。
@@ -55,8 +56,10 @@ export interface LogicalPage {
 
 /** SO/SI の位置（`LogicalPage.shifts`） */
 export interface ShiftMark {
-  /** SO/SI が占める桁（占めないときは直後に来る桁。1 起点） */
+  /** SO/SI が占める桁の頭（占めないときは直後に来る桁。1 起点） */
   col: number;
+  /** SO/SI が占める桁の数（SPCC により 0 / 1 / 2）。印を桁の中に描くか、境目に描くかの判断に使う */
+  width: number;
   kind: "so" | "si";
 }
 
@@ -80,8 +83,7 @@ const TRN = 0x35;
 const IGNORE_FF = 0xff;
 /** ACS の表で Null（読み飛ばすだけ） */
 const NULLS = new Set([NOOP, 0x14, 0x23, 0x24]);
-/** グラフィック・エラー文字の既定（ACS `GraphicErrorChar = 96`） */
-const GRAPHIC_ERROR_BYTE = 0x60;
+
 
 // PP（0x34）の副機能（scs.h）
 const PP_RDPP = 0x4c; // 相対下移動（row += n）
@@ -89,8 +91,8 @@ const PP_AHPP = 0xc0; // 絶対水平（col = n）
 const PP_AVPP = 0xc4; // 絶対垂直（row = n）
 const PP_RRPP = 0xc8; // 相対右移動（col += n）
 
-/** 長さの前置を持つ 0x2B のクラス（ACS の表: SHF・SVF・SLD・フォント選択・D2・STO・IGC・代替文字） */
-const ORDERS_2B = new Set([0xc1, 0xc2, 0xc6, 0xd1, 0xd2, 0xd3, 0xfd, 0xfe]);
+/** 長さの前置を持つ 0x2B のクラス（ACS JPS の表: SHF・SVF・SLD・SGEA・EPMP・D1・D2・D3・下線と重ね打ち・IGC・代替文字） */
+const ORDERS_2B = new Set([0xc1, 0xc2, 0xc6, 0xc8, 0xca, 0xd1, 0xd2, 0xd3, 0xd4, 0xfd, 0xfe]);
 
 const MAX_ROW = 32767; // 暴走データでの過大確保を防ぐ安全上限
 const MAX_COL = 32767;
@@ -99,6 +101,14 @@ export class ScsDecoder {
   private readonly codec: Codec;
   private readonly isDbcs: boolean;
 
+  /**
+   * **SO/SI の描き方**（ACS `m_spccBehavior`。既定 1）: 0 = 桁を占めない / 1 = SO・SI とも 1 桁 /
+   * 2 = SO は占めず SI が 2 桁（負の値は SO が 0・SI が 1）。ホストが `2B FD .. 03` で切り替える
+   * （日本語機の帳票は `2B FD 04 03 00 01`＝1 を送ってきた）。**ジョブをまたいで残す**——ACS は印刷の
+   * セッションごとに 1 回だけ初期化する（プリンターセッションは 1 つのデコーダーで全ジョブを読む）。
+   */
+  private spcc = 1;
+
   constructor(ccsid: number, private readonly warn?: (msg: string) => void) {
     this.codec = codecForCcsid(ccsid);
     this.isDbcs = this.codec.isDbcs;
@@ -106,8 +116,7 @@ export class ScsDecoder {
 
   /**
    * 1 ジョブ分の SCS バイト列を論理ページ列にデコードする。ジョブ境界（Job Complete）は
-   * 呼び出し側（PrinterSession）が切って渡す。未知のオーダーに当たったら安全に打ち切り、
-   * それまでのページを返す（帳票は読める範囲で描く）。
+   * 呼び出し側（PrinterSession）が切って渡す。知らない 2B のオーダーは 0x2B だけ読み飛ばして続ける。
    */
   decode(scs: Uint8Array): LogicalPage[] {
     const pages: LogicalPage[] = [];
@@ -120,12 +129,6 @@ export class ScsDecoder {
     let maxRow = 0;
     let maxCol = 0;
     let dbcsMode = false; // SO/SI シフト状態（DBCS コーデックのみ）
-    // **SO/SI の描き方**（ACS `spccBehavior`。既定 1）: 0 = 桁を占めない / 1 = SO・SI とも 1 桁の空白 /
-    // 2 = SO は占めず SI が 2 桁。ホストが `2B FD .. 03` で切り替える（日本語機の帳票は `2B FD 04 03 00 01`＝1 を送ってきた）
-    let spcc = 1;
-    const shiftCells = (n: number): void => {
-      for (let k = 0; k < n; k++) put(" ");
-    };
 
     const cellAt = (c: number): void => {
       // grid[row-1] を c 桁まで空白で伸ばす
@@ -156,11 +159,17 @@ export class ScsDecoder {
       if (col + 1 > maxCol) maxCol = col + 1;
       col += 2;
     };
-    /** いまの桁の直前に SO/SI があった、と記録する（SO/SI 自身は桁を占めない） */
-    const markShift = (kind: "so" | "si"): void => {
-      if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
-      (shiftGrid[row - 1] ??= []).push({ col, kind });
+    /**
+     * SO/SI を記録し、**空白を書かずに位置を `width` 桁進める**（ACS `JPSShiftOut` / `JPSShiftIn` は `setX` で
+     * 進めるだけ）。書かないので、CR で戻った重ね打ちの行で下の字を消さず、SO/SI だけのページも作らない。
+     */
+    const shift = (kind: "so" | "si", width: number): void => {
+      if (row >= 1 && col >= 1 && row <= MAX_ROW && col <= MAX_COL) (shiftGrid[row - 1] ??= []).push({ col, kind, width });
+      col += width;
     };
+    /** SO・SI の桁数（ACS `JPSShiftOut(spcc == 1)` / `JPSShiftIn(spcc != 0, spcc == 2)`） */
+    const soWidth = (): number => (this.spcc === 1 ? 1 : 0);
+    const siWidth = (): number => (this.spcc === 0 ? 0 : this.spcc === 2 ? 2 : 1);
 
     const flushPage = (): void => {
       if (maxRow === 0 && maxCol === 0) return; // 空ページは出さない
@@ -188,7 +197,7 @@ export class ScsDecoder {
     while (i < n) {
       const b = scs[i++]!;
       // DBCS モード中はバイトを 2 個ずつ全角として消費する（制御コード値と衝突しないよう switch より前で処理）。
-      // SI で SBCS へ戻る。SO は冗長として読み飛ばす。
+      // SI で SBCS へ戻る。**冗長な SO も毎回位置を進める**（ACS の JPS は状態に関わらず SO/SI を処理する）。
       //
       // **0x40 未満は全角の先行バイトにしない**（`wtd-applier` の `applyWtd` と同じ判定）。
       // SCS の制御はすべて 0x40 未満（NOOP 0x00 / TRANSPARENT 0x03 / HT 0x05 / RNL 0x06 /
@@ -200,12 +209,12 @@ export class ScsDecoder {
       if (this.isDbcs && dbcsMode) {
         if (b === SI) {
           dbcsMode = false;
-          markShift("si");
-          shiftCells(spcc === 0 ? 0 : spcc); // SI は 1 桁（spcc=1）か 2 桁（spcc=2）
+          shift("si", siWidth());
           continue;
         }
         if (b === SO) {
-          continue; /* 冗長 SO */
+          shift("so", soWidth()); // 冗長な SO（~~読み飛ばす~~。ACS は毎回進める）
+          continue;
         }
         if (b >= 0x40) {
           const b2 = next();
@@ -226,7 +235,7 @@ export class ScsDecoder {
           col = 1;
           break;
         case LF:
-        case VT: // タブ位置を持たないので次の行へ（ACS も停止位置が無ければ LF）
+        case VT: // JPS の VT は LF（`JPSVerticalTab extends JPSLineFeed`）
           row += 1;
           break;
         case FF:
@@ -235,20 +244,20 @@ export class ScsDecoder {
           col = 1;
           break;
         case BS:
-          if (col > 1) col -= 1;
-          break;
+          break; // JPS の `processBackSpace` は何もしない（~~1 桁戻る~~ は PDT 経路）
         case HT:
-          break; // スタブ（水平タブ位置は未対応）
+          col += 1; // JPS の HT は空白 1 つ（`JPSHorizontalTab extends JPSSpace`。タブ位置は見ない）
+          break;
         case TRN: {
-          // 透過: 長さ＋本体。本体は制御として読まずに文字として置く。**0x40 未満は空白にする**
-          // （ACS `processTransparent` の TPO でない経路。TPO ならプリンターへ生で流すが、等幅の帳票には置けない）
+          // 透過: 長さ＋本体。本体は 1 バイトごとに **0x40 なら空白、ほかは `-`**（JPS `processTransparent`。
+          // 代替文字を読み込んでいればその字だが、2B FE は未対応）。~~文字として置く~~ は PDT の TPO でない経路の近似だった
           const count = next();
           if (count < 0) break;
           for (let k = 0; k < count; k++) {
             const rb = next();
             if (rb < 0) break;
-            const shown = rb < 0x40 ? 0x40 : rb;
-            put(String.fromCodePoint(this.codec.decodeByte(shown)), shown);
+            if (rb === 0x40) col += 1;
+            else put("-");
           }
           break;
         }
@@ -273,21 +282,22 @@ export class ScsDecoder {
           next();
           break;
         case VCS:
-          next();
+          next(); // JPS は何もしない（チャネルの番号を読むだけ）
           break;
         case GE:
-          // グラフィック・エスケープ: 次の 1 バイトの代わりにグラフィック・エラー文字を置く（ACS `graphicEscape`）
-          if (next() >= 0) put(String.fromCodePoint(this.codec.decodeByte(GRAPHIC_ERROR_BYTE)), GRAPHIC_ERROR_BYTE);
+          next(); // JPS は何も置かない（~~グラフィック・エラー文字 `-`~~ は PDT 経路）
           break;
         case ORDER_2B:
-          this.skip2b(next, () => i, (to) => (i = to), (v) => (spcc = v));
+          this.skip2b(next, () => i, (to) => (i = to), (v) => (this.spcc = v));
           break;
         default:
           if (this.isDbcs && b === SO) {
-            // SBCS モード: SO で DBCS モードへ。既定では SO も 1 桁の空白（spcc=1）
+            // SBCS モード: SO で DBCS モードへ（既定では 1 桁進める）
             dbcsMode = true;
-            markShift("so");
-            shiftCells(spcc === 1 ? 1 : 0);
+            shift("so", soWidth());
+          } else if (this.isDbcs && b === SI) {
+            // **SBCS の状態で来た SI も位置を進める**（ACS の JPS は状態を見ない。日本語機の DSPLIBL の先頭にある）
+            shift("si", siWidth());
           } else if (b >= 0x40) put(String.fromCodePoint(this.codec.decodeByte(b)), b);
           // それ以外の 0x40 未満は、ACS も何もしない制御（RNL・RFF ほか）か未定義の制御。印字しない
           break;
@@ -299,26 +309,21 @@ export class ScsDecoder {
   }
 
   /**
-   * 0x2B のオーダーを読み飛ばす（ACS `PrintSCS5250` の表。`20260921-scs-controls-acs`）。
+   * 0x2B のオーダーを読み飛ばす（ACS `PrintSCS5250JPS` の表。`20260921-scs-controls-acs`）。
    * 幾何・フォントは等幅表示では使わないので、**同期のためにバイト数だけ**正しく消費する。
    *
-   * - 表にあるクラス（C1 SHF・C2 SVF・C6 SLD・D1 フォント選択・D2 各種・D3 STO・FD IGC・FE 代替文字）は
-   *   **クラスの次の 1 バイトが長さ**で、2B とクラスを含めて「長さ＋2」バイトを読む
-   * - C8（SGEA）は 5 バイト固定
+   * - 表にあるクラス（C1 SHF・C2 SVF・C6 SLD・C8 SGEA・CA EPMP・D1・D2・D3・D4 下線と重ね打ち・FD・FE）は
+   *   **クラスの次の 1 バイトが長さ**で、2B とクラスを含めて「長さ＋2」バイトを読む。~~C8 は 5 バイト固定~~・
+   *   ~~CA / D4 は表に無い~~ は PDT 経路の表だった
    * - **表に無いクラスは 0x2B の 1 バイトだけを読み飛ばす**（ACS は未定義の制御として扱い、次のバイトから読み直す）。
    *   ~~帳票の残りを打ち切る~~ と、知らないオーダーの後ろが全部消えていた
    *
-   * ~~D1 のサブ 06（SCG）は 2B D1 06 01 の後ろを 2 バイト~~ だと、GCGID・CPGID の 4 バイトを取りこぼして
-   * 同期がずれていた（長さ 06 どおりなら 8 バイト）。`read` は次の 1 バイト（EOF で -1）。
+   * `2B FD .. 03` は SO/SI の描き方（SPCC）で、`setSpcc` へ渡す。`read` は次の 1 バイト（EOF で -1）。
    */
   private skip2b(read: () => number, pos: () => number, seek: (to: number) => void, setSpcc: (v: number) => void): void {
     const at = pos(); // クラスの位置
     const cls = read();
     if (cls < 0) return;
-    if (cls === 0xc8) {
-      for (let k = 0; k < 3; k++) read(); // SGEA: 2B C8 と 3 バイト
-      return;
-    }
     if (!ORDERS_2B.has(cls)) {
       this.warn?.(`SCS: 未定義の 2B オーダー 0x${cls.toString(16)}（0x2B だけを読み飛ばす）`);
       seek(at); // 0x2B だけを捨てて、クラスのバイトから読み直す
@@ -326,10 +331,11 @@ export class ScsDecoder {
     }
     const len = read(); // 長さ（自身を含み、2B とクラスを含まない）
     if (len < 0) return;
+    // 長さ 0 のとき ACS は 2 バイトだけ進めて長さのバイトを次の制御（Null）として読むが、結果は同じなので 3 バイト読む
     if (cls === 0xfd && len >= 2) {
-      // **2B FD .. 03 は SO/SI の描き方（SPCC）**（ACS `PrintSCS5250DB.setPresentationControlCharacter`）。
-      // 長さは 2 か 4 だけを受け、4 なら続く 2 バイトが値（2 を超えたら既定の 1）、2 なら値なしで 1。
-      // それ以外の長さは受けない（ACS はパラメーター・エラーにして変えない）
+      // **2B FD .. 03 は SO/SI の描き方（SPCC）**（ACS `processSetPresentationControlCharacter`）。
+      // 長さは 2 か 4 だけを受け、4 なら続く 2 バイトを**符号付き**で値とし（2 を超えたら既定の 1）、2 なら値なしで 1。
+      // それ以外の長さは受けない（ACS は変えない）
       const sub = read();
       if (sub < 0) return;
       if (sub === 0x03 && (len === 2 || len === 4)) {
@@ -337,7 +343,7 @@ export class ScsDecoder {
         if (len === 4) {
           const hi = read(), lo = read();
           if (hi < 0 || lo < 0) return;
-          v = (hi << 8) | lo;
+          v = ((hi << 8) | lo) << 16 >> 16; // ACS の `makeWord` は short
           if (v > 2) v = 1;
         }
         setSpcc(v);

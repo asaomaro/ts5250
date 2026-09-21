@@ -17,3 +17,15 @@
 
 ## 実装アンカー
 - A1: `packages/scs/src/scs.ts` の `decode` の振り分けと `skip2b`
+
+## 独立点検の後の訂正（2026-09-21）
+
+- F5（原典 `PD5250.getPrintHostDataIndex`）: ACS の SCS の読み方は 1 つではない——HPT なら変換済み、`jpsUse`（既定 true）なら
+  **Java 印刷（JPS）経路 `PrintSCS5250JPS`**、そうでなければ PDT 経路（`PrintSCS5250` / DBCS は `PrintSCS5250DB`）。`usePDT` の既定は
+  Windows で false・それ以外で true（`HODDefaults`）。利用者の ACS は Windows なので、**HPT を外した 5250 プリンターの既定は JPS**。
+  ~~F1・F2 は ACS の読み方~~ は PDT 経路についての事実で、既定の経路ではなかった（独立点検の指摘）。
+- F6（原典 `PrintSCS5250JPS`）: 表は PDT と違う。0x0A RPT・0x14 ENP・0x1A UBS・0x23 WUS・0x24 INP・0x2A SW・0x3F SUB は 1 バイト読むだけ、
+  0x0E / 0x0F は**状態に関わらず** SO / SI、2B は C1・C2・C6・**C8**・**CA**・D1・D2・D3・**D4**・FD・FE を「長さ＋2」で読み、表に無いクラスは
+  1 バイト（PDT と同じ）。働き: BS は何もしない、GE は何も置かない、VCS は何もしない、HT は空白 1 つ（`JPSHorizontalTab extends JPSSpace`）、
+  VT は LF、TRN の本体は 1 バイトごとに 0x40 なら空白・ほかは `-`（代替文字を読み込んでいればその字）、SO / SI は空白を書かずに位置を進める
+  （`JPSShiftOut` / `JPSShiftIn` の `setX`）。SA の `28 43 F8` / `28 43 00` による DBCS の切り替えは PDT の DB だけにあり、JPS には無い。

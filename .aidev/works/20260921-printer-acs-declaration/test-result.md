@@ -47,3 +47,16 @@ smoke: pass (exit 0)
 - ACS そのものを PUB400 に当てたときに日本語が置換されるか（送るバイト列は ACS と同じ）。
 - 印刷先の失敗で応答を保留する（D3。別の work）。
 - 帳票の先頭の 1 文字が「�」になる（SCS の 1 バイトの制御を印字文字として置いている。台帳の「【まとめ】SCS の解釈の差」）。
+
+## ラウンド 2（節目の独立点検の差し戻し後）
+- 節目の全量（2026-09-21・14〜17 をまとめて）: root の `npm run build` / `npm test` / `npm run lint` /
+  `npm run build -w @ts5250/web-ui` すべて exit 0。
+  base 52・ebcdic 100・hostserver 991・scs 71・server 1454（3 skipped）・tn3270 254（38 skipped）・
+  tn5250 748・vt 202・web-ui 2270・gen-tables 10 passed（計 6,152 passed / 0 failed / 41 skipped）。
+- 1 回目の全量は web-ui の型検査（`vue-tsc -b`）で落ちた——`ShiftMark.width` を必須にしたのに、
+  web-ui の `test/` にある手書きの印（2 ファイル）が `width` を持っていなかった（AGENTS.md「root の build は web-ui を検査していない」の実例）。
+- mutation（R-a〜R-p のうち 15 通り。R-j は欠番）: すべて検出。このラウンドの対象は R-k（データの無いジョブの終わりで閉じる）・R-l（終了のレコードを振り分けない）。
+
+### 失敗の証跡（ラウンド 2）
+
+- このラウンドでは、この work の実装の失敗は発生していない（上の型検査の失敗は `20260921-scs-sosi-columns` のもの）。

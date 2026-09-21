@@ -149,7 +149,9 @@ function renderLine(
  * ここで字の大きさを変えないこと（変えると位置がずれる）。
  */
 function markHtml(m: ShiftMark): string {
-  return `<span class="so" style="left:${m.col - 1}ch">${m.kind === "so" ? "{" : "}"}</span>`;
+  // 桁を占める SO/SI はその桁の中に描く（`margin-left:0`・幅は占める桁ぶん）。占めないときは境目に中心を置く（CSS の既定）
+  const inCell = m.width > 0 ? `;margin-left:0;width:${m.width}ch` : "";
+  return `<span class="so" style="left:${m.col - 1}ch${inCell}">${m.kind === "so" ? "{" : "}"}</span>`;
 }
 
 /** 1 ページ。桁数は `cols`（等幅の箱の幅）で固定する */

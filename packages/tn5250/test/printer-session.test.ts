@@ -135,6 +135,33 @@ describe("PrinterSession", () => {
     expect(replies(transport).at(-1)).toEqual(NO_ERROR);
   });
 
+  it("**データの無いジョブの終わりでは帳票を出さない**（ACS `sendEOJ` は印刷中でなければ何もしない）", async () => {
+    const { transport, reports } = await open();
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob16());
+    transport.feed(clearRecord());
+    transport.feed(endOfJob16()); // 空のジョブの終わり
+    expect(reports, "空の帳票が出た（自動 PDF・自動印刷に白紙）").toHaveLength(1);
+  });
+
+  it("フラグ 0x08 でも本体が 0x00 以外の 1 バイトなら、ジョブの終わりではない", async () => {
+    const { transport, reports } = await open();
+    transport.feed(rec(0x08, 1, [0xc1]));
+    expect(reports).toHaveLength(0);
+    transport.feed(endOfJob16());
+    expect(reports[0]!.pages[0]!.lines[0]).toBe("A");
+  });
+
+  it("終了のレコード（ヘッダのバイト 4 が 0x40）は振り分けない（ACS `processPassthru`）", async () => {
+    const { transport, reports } = await open();
+    const term = rec(0x10, 1, [0xc1]);
+    term[4] = 0x40;
+    transport.feed(term);
+    transport.feed(dataRecord([0xc2]));
+    transport.feed(endOfJob16());
+    expect(reports[0]!.pages[0]!.lines[0]).toBe("B");
+  });
+
   it("起動の直後は、データを書くまで応答しない（ACS の `response_string` は空で始まる）", async () => {
     const { transport } = await open();
     transport.feed(endOfJob16());

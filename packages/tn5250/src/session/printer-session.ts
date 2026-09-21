@@ -75,6 +75,8 @@ const OP_PRINT = 1;
 const OP_CLEAR = 2;
 /** ヘッダのフラグ 1（バイト 7）の「ジョブの終わり」 */
 const FLAG_END_OF_JOB = 0x08;
+/** ヘッダのバイト 4（ACS `miscFlags1`）の「終了のレコード」 */
+const MISC_TERMINATION = 0x40;
 
 /**
  * TN5250E プリンターセッション。ホストのスプール出力を SCS として受信し、論理ページに展開して
@@ -189,9 +191,13 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       this.handleStartup(rec);
       return;
     }
-    // **ACS `DS5250P.processPassthru` と同じ振り分け**（`20260921-printer-acs-declaration` research F5）
+    // **ACS `DS5250P.processPassthru` と同じ振り分け**（`20260921-printer-acs-declaration` research F5）。
+    // ACS は opcode より先にヘッダのバイト 4（`miscFlags1`）を見て、0x40（終了のレコード）なら何もしない
+    // （起動の応答 0x80 / 0x90 は `started` で先に分けている）。どちらでも応答は下で返す
     const opcode = rec.length > 9 ? rec[9] : -1;
-    if (opcode === OP_CLEAR) {
+    if (rec[4] === MISC_TERMINATION) {
+      // 何もしない
+    } else if (opcode === OP_CLEAR) {
       // CLEAR（印刷の取り消し・保留など）: 受けかけのジョブを閉じ、CLEAR_PROCESSED を返す（`processClear` → `sendEOJ`）。
       // ~~応答しない~~ だとホストは応答を待つ。閉じないと前のジョブの断片が次の帳票に混ざる
       if (this.jobBytes.length > 0) this.finishJob();
@@ -201,7 +207,12 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
       // **ジョブの終わりはフラグ 0x08 ＋ 本体が空か 0x00 だけ**（`processScs`）。~~レコード長 17~~ だけを見ていたので、
       // 本体の無い 16 バイトの終わり（日本語機の 5553 で実測）では帳票が確定しなかった
       const endOfJob = rec[7] === FLAG_END_OF_JOB && (payload.length === 0 || (payload.length === 1 && payload[0] === 0));
-      if (endOfJob) this.finishJob(); // 応答は変えない（ACS も `sendEOJ` だけ）
+      // 応答は変えない（ACS も `sendEOJ` だけ）。**データの無いジョブは閉じない**——ACS の `sendEOJ` は印刷中
+      // （`inJob`）でなければ何もしない。閉じると空の帳票ができ、自動 PDF・自動印刷に白紙が出る
+      // （データ → 終わり → CLEAR → 終わり、の並びで起きた。独立点検の指摘）
+      if (endOfJob) {
+        if (this.jobBytes.length > 0) this.finishJob();
+      }
       else if (payload.length > 0) {
         for (const b of payload) this.jobBytes.push(b);
         this.response = NO_ERROR; // 書けた（ACS は `PrintHostData.write` が NO_ERROR にする）

@@ -94,8 +94,8 @@ describe("ScsDecoder", () => {
     const pages = new ScsDecoder(1399).decode(codec.encode("A日B").bytes);
     const p = pages[0]!;
     expect(p.shifts![0]).toEqual([
-      { col: 2, kind: "so" }, // A の次＝SO の桁
-      { col: 5, kind: "si" }  // 全角 2 桁のあと＝SI の桁
+      { col: 2, kind: "so", width: 1 }, // A の次＝SO の桁
+      { col: 5, kind: "si", width: 1 }  // 全角 2 桁のあと＝SI の桁
     ]);
     expect(p.lines[0]).toBe("A 日 B");
     expect(p.cols).toBe(6);
@@ -111,6 +111,38 @@ describe("ScsDecoder", () => {
     const codec = codecForCcsid(1399);
     const scs = Uint8Array.from([0x2b, 0xfd, 0x04, 0x03, ...value, ...codec.encode("A日B").bytes]);
     expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe(expected);
+  });
+
+  /** ACS の JPS は SO/SI を状態に関わらず毎回処理し、**空白を書かずに位置を進める**（独立点検の指摘） */
+  it("**冗長な SO も毎回 1 桁進める**（~~読み飛ばす~~）", () => {
+    const codec = codecForCcsid(1399);
+    const hi = codec.encode("日").bytes; // SO 日 SI
+    const scs = Uint8Array.from([hi[0]!, hi[1]!, hi[2]!, hi[0]!, hi[1]!, hi[2]!, hi[3]!, 0xc2]); // SO 日 SO 日 SI B
+    expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe(" 日 日 B");
+  });
+  it("**SBCS の状態で来た SI も 1 桁進める**（日本語機の DSPLIBL の先頭にある形）", () => {
+    expect(new ScsDecoder(1399).decode(Uint8Array.from([0x0f, 0xc1]))[0]!.lines[0]).toBe(" A");
+  });
+  it("**FF の後に SI だけが来ても空のページを作らない**（SO/SI は書かずに位置を進めるだけ）", () => {
+    const codec = codecForCcsid(1399);
+    const scs = Uint8Array.from([...codec.encode("A日").bytes.slice(0, -1), 0x0c, 0x0f]); // A SO 日 FF SI
+    expect(new ScsDecoder(1399).decode(scs)).toHaveLength(1);
+  });
+  it("**CR で戻った重ね打ちの行で、SO/SI が下の字を消さない**", () => {
+    const codec = codecForCcsid(1399);
+    const scs = Uint8Array.from([...codec.encode("ABCDEFGH").bytes, 0x0d, ...codec.encode("日").bytes]);
+    expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe("A日DEFGH");
+  });
+  it("SPCC は同じデコーダーのジョブをまたいで残る（ACS は印刷のセッションで 1 回だけ初期化）", () => {
+    const codec = codecForCcsid(1399);
+    const d = new ScsDecoder(1399);
+    d.decode(Uint8Array.from([0x2b, 0xfd, 0x04, 0x03, 0x00, 0x00, 0xc1]));
+    expect(d.decode(codec.encode("A日B").bytes)[0]!.lines[0]).toBe("A日B");
+  });
+  it("SPCC の負の値は SO が 0 桁・SI が 1 桁（ACS は符号付きで読む）", () => {
+    const codec = codecForCcsid(1399);
+    const scs = Uint8Array.from([0x2b, 0xfd, 0x04, 0x03, 0xff, 0xff, ...codec.encode("A日B").bytes]);
+    expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe("A日 B");
   });
 
   it("SPCC の長さが 2 なら値なしで 1 桁ずつ、2・4 以外の長さは受けない（切り替えない）", () => {
@@ -181,7 +213,8 @@ describe("ScsDecoder — SI を閉じないまま制御コードが来る帳票"
   it("全角空白（0x4040）は行中で 2 桁の U+3000 のまま（退行防止）", () => {
     const pages = dec([SO, ...KI, ...ZENSP, ...NOU, SI, FF]);
     expect(pages[0]!.lines[0]).toBe(" 機\u3000能");
-    expect(pages[0]!.cols).toBe(8); // SO(1) + 機(2) + 全角空白(2) + 能(2) + SI(1)
+    // SO(1) + 機(2) + 全角空白(2) + 能(2)。SI は位置を進めるだけで書かないので、後ろに字が無ければ桁に数えない
+    expect(pages[0]!.cols).toBe(7);
   });
 });
 
@@ -247,14 +280,17 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
   it("IRS（0x1E）は NL と同じく次の行の頭へ", () => {
     expect(lines([...E("AB"), 0x1e, ...E("C")])).toEqual(["AB", "C"]);
   });
-  it("BS（0x16）は 1 桁戻る（上書き）", () => {
-    expect(lines([...E("AB"), 0x16, ...E("X")])).toEqual(["AX"]);
+  it("BS（0x16）は何もしない（JPS。~~1 桁戻って上書き~~ は PDT 経路）", () => {
+    expect(lines([...E("AB"), 0x16, ...E("X")])).toEqual(["ABX"]);
+  });
+  it("HT（0x05）は 1 桁の空白（JPS の `JPSHorizontalTab` は空白 1 つ）", () => {
+    expect(lines([...E("A"), 0x05, ...E("B")])).toEqual(["A B"]);
   });
   it("VT（0x0B）はタブ位置が無いので LF と同じ", () => {
     expect(lines([...E("A"), 0x0b, ...E("B")])).toEqual(["A", " B"]);
   });
-  it("**TRN（0x35）は長さ＋本体を文字として置く**（本体の 0x40 未満は制御として読まず空白にする）", () => {
-    expect(lines([0x35, 0x03, 0xe7, 0x0d, 0xe8, ...E("A")])).toEqual(["X YA"]);
+  it("**TRN（0x35）は長さ＋本体。本体は 1 バイトごとに 0x40 なら空白、ほかは `-`**（JPS `processTransparent`）", () => {
+    expect(lines([0x35, 0x04, 0xe7, 0x40, 0x0d, 0xe8, ...E("A")])).toEqual(["- --A"]);
   });
   it("**ATRN（0x03）は ASCII 透過なので置かずに読み飛ばす**（~~EBCDIC の透過~~）", () => {
     expect(lines([0x03, 0x03, 0x1b, 0x45, 0x41, ...E("A")])).toEqual(["A"]);
@@ -270,8 +306,8 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
   it("SA（0x28）は 3 バイト、VCS（0x04）は 2 バイトで読み飛ばす", () => {
     expect(lines([0x28, 0x41, 0xc2, ...E("A"), 0x04, 0xc1, ...E("B")])).toEqual(["AB"]);
   });
-  it("GE（0x08）は次のバイトの代わりにグラフィック・エラー文字（`-`）を置く", () => {
-    expect(lines([...E("A"), 0x08, 0xc1, ...E("B")])).toEqual(["A-B"]);
+  it("GE（0x08）は 2 バイト読んで何も置かない（JPS。~~グラフィック・エラー文字 `-`~~ は PDT 経路）", () => {
+    expect(lines([...E("A"), 0x08, 0xc1, ...E("B")])).toEqual(["AB"]);
   });
   it("Null（0x00 / 0x14 / 0x23 / 0x24）は読み飛ばす", () => {
     expect(lines([0x00, 0x14, ...E("A"), 0x23, 0x24, ...E("B")])).toEqual(["AB"]);
@@ -286,13 +322,23 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
   it("2B FE（代替文字）も長さどおり読み飛ばす（~~未知で打ち切り~~）", () => {
     expect(lines([0x2b, 0xfe, 0x04, 0x00, 0x00, 0x00, ...E("AB")])).toEqual(["AB"]);
   });
-  it("2B C8（SGEA）は 5 バイト固定", () => {
-    expect(lines([0x2b, 0xc8, 0x03, 0x40, 0x03, ...E("AB")])).toEqual(["AB"]);
+  it("2B C8（SGEA）も長さの前置どおり（JPS。~~5 バイト固定~~ は PDT 経路）", () => {
+    // 長さ 5 の本体の後ろ 2 バイトを印字文字にしておく（5 バイト固定で読むと「AB」が本文に出る）
+    expect(lines([0x2b, 0xc8, 0x05, 0x40, 0x03, 0xc1, 0xc2, ...E("XY")])).toEqual(["XY"]);
+  });
+  it("2B CA（EPMP）・2B D4（下線・重ね打ち）も長さの前置どおり（~~0x2B だけ捨てて本文が崩れる~~）", () => {
+    expect(lines([...E("A"), 0x2b, 0xd4, 0x03, 0x0a, 0x01, ...E("BC")])).toEqual(["ABC"]);
+    expect(lines([...E("A"), 0x2b, 0xca, 0x03, 0x01, 0x02, ...E("BC")])).toEqual(["ABC"]);
+  });
+  it("2B の長さが 0 でも続きを読める（ACS は 2 バイト進めて長さの 0x00 を Null として読む。結果は同じ）", () => {
+    expect(lines([0x2b, 0xc1, 0x00, ...E("AB")])).toEqual(["AB"]);
   });
   it("**表に無い 2B のクラスは 0x2B だけを読み飛ばし、帳票の残りを捨てない**（ACS は未定義の制御として 1 バイト）", () => {
     const warn = vi.fn();
     const pages = new ScsDecoder(37, warn).decode(Uint8Array.from([...E("A"), 0x2b, 0x07, ...E("BC")]));
     expect(pages[0]!.lines).toEqual(["ABC"]);
     expect(warn).toHaveBeenCalled();
+    // クラスのバイトが印字文字なら、それは文字として読み直される（2B だけを捨てたことが見える）
+    expect(lines([...E("A"), 0x2b, 0xc3, ...E("B")])).toEqual(["ACB"]);
   });
 });

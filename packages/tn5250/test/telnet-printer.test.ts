@@ -22,26 +22,24 @@ class CaptureTransport implements Transport {
 
 const asciiOf = (bytes: number[]): string => String.fromCharCode(...bytes);
 
-describe("TelnetLayer プリンター NEW-ENVIRON", () => {
-  it("NEW-ENVIRON SEND に対し IBMFONT / IBMTRANSFORM を USERVAR で返す", () => {
+describe("TelnetLayer の NEW-ENVIRON", () => {
+  it("userVars を DEVNAME の後ろにこの順で返す（値なし・生のバイトも）", () => {
     const t = new CaptureTransport();
     new TelnetLayer(t, {
       terminalType: "IBM-3812-1",
       deviceName: "PRT1",
-      ibmFont: "12",
-      ibmTransform: "0"
+      userVars: [{ name: "IBMFORMFEED" }, { name: "IBMPPRSRC1", raw: [0x02, 0x00] }, { name: "IBMTRANSFORM", value: "0" }],
+      sendConfRec: false
     });
     // IAC SB NEW_ENVIRON(39) SEND(1) IAC SE
     t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
-    const reply = t.sent.at(-1)!;
-    const text = asciiOf(reply);
-    expect(text).toContain("IBMFONT");
-    expect(text).toContain("IBMTRANSFORM");
-    expect(text).toContain("DEVNAME");
-    expect(text).toContain("PRT1");
+    const text = asciiOf(t.sent.at(-1)!);
+    expect(text.indexOf("DEVNAME")).toBeLessThan(text.indexOf("IBMFORMFEED"));
+    expect(text.indexOf("IBMFORMFEED")).toBeLessThan(text.indexOf("IBMPPRSRC1"));
+    expect(text).not.toContain("IBMSENDCONFREC");
   });
 
-  it("プリンター指定が無ければ IBMFONT/IBMTRANSFORM を送らない（表示セッションを汚さない）", () => {
+  it("プリンターの変数を渡さなければ送らない（表示セッションを汚さない）", () => {
     const t = new CaptureTransport();
     new TelnetLayer(t, { terminalType: "IBM-3179-2" });
     t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);

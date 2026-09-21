@@ -480,13 +480,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - NEW-ENVIRON の応答方式（実害なし）
   （出典: `20260919-backlog-acs-triage` research N17・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
-  **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS `PrintSCS5250` の `scs_proc` にした（`packages/scs/src/scs.ts`）。
+  **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
+  （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり
+  合わせ直した（Windows の ACS は HPT を外すと `jpsUse` 既定 true・`usePDT` 既定 false で JPS）。
   表に無い 0x40 未満は印字しない（日本語機の帳票の先頭の「�」＝SBCS の状態の SI が消えた）、0x03 は ASCII 透過として読み飛ばす、
-  LF・IRS・BS・VT・TRN・SA・VCS・GE を ACS のバイト数で読む、RNL・RFF は ACS と同じく何もしない、2B は長さ＋2（SGEA は 5）、
-  表に無いクラスは 0x2B だけを読み飛ばす（~~打ち切り~~）。PUB400 の実採取の帳票 2 件は新旧で 1 桁も変わらない。mutation 10 通り検出。
+  LF・IRS・VT は改行、HT は 1 桁、BS・GE・VCS は何もしない、TRN の本体は `-`、RNL・RFF は何もしない、2B は表のクラス（SGEA・EPMP・下線と重ね打ちを含む）を
+  長さ＋2、表に無いクラスは 0x2B だけを読み飛ばす（~~打ち切り~~）。PUB400 の実採取の帳票 2 件は新旧で 1 桁も変わらない。mutation 検出。
+  ⚠ PDT 経路（Linux の ACS の既定など）とは BS・GE・VCS・TRN・SA の DBCS 切り替えが違う。
 - [x] **SCS の SO/SI の桁**（下の【まとめ】から割った。**要実測** → 日本語機の帳票が送る値で決着）。
-  **完了（`20260921-scs-sosi-columns`・PR #410）**: ACS と同じく SO・SI を既定で 1 桁ずつ空白として描き、ホストの SPCC（`2B FD .. 03`）で
-  0 / 1 / 2 に切り替える（`packages/scs/src/scs.ts`。ACS `PrintSCS5250DB.shiftOut` / `shiftIn` / `setPresentationControlCharacter`）。
+  **完了（`20260921-scs-sosi-columns`・PR #410）**: ACS と同じく SO・SI を既定で 1 桁ずつ空け（**空白を書かずに位置を進める**。JPS の
+  `JPSShiftOut` / `JPSShiftIn`）、ホストの SPCC（`2B FD .. 03`。符号付き・ジョブをまたいで残る）で 0 / 1 / 2 に切り替える（`packages/scs/src/scs.ts`）。
+  冗長な SO・SBCS の状態の SI も毎回進める。印は占める桁の中に描く（`ShiftMark.width`）。
   日本語機の DSPLIBL は `2B FD 04 03 00 01`＝1 を送り、PUB400 の帳票は送らない（＝既定の 1）。`20260728-scs-dbcs-column-align` D1
   （桁を占めない）は破棄。DBCS の行は ACS と同じく 1 桁右から描かれる。mutation 6 通り検出。
 - [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。

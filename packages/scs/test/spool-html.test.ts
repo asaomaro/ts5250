@@ -172,8 +172,9 @@ describe("renderSpoolHtml — 見え方の切り替え", () => {
    */
   it("SO/SI の印を SO/SI の桁に重ねて置く（幅を持たせない）", () => {
     const html = renderSpoolHtml([dbcsPage()]);
-    expect(html).toContain('<span class="so" style="left:2ch">{</span>'); // AB の次＝SO の桁
-    expect(html).toContain('<span class="so" style="left:9ch">}</span>'); // SO(1)＋日本語(6) の次＝SI の桁
+    // 占める桁の中に描く（`margin-left:0`）。~~境目に中心~~ だと B や最後の全角の右半分に重なった（独立点検の指摘）
+    expect(html).toContain('<span class="so" style="left:2ch;margin-left:0;width:1ch">{</span>'); // AB の次＝SO の桁
+    expect(html).toContain('<span class="so" style="left:9ch;margin-left:0;width:1ch">}</span>'); // SO(1)＋日本語(6) の次＝SI の桁
     expect(html).toContain(".so{display:none;position:absolute"); // 既定は非表示・重ねて置く
     expect(html).toContain('<input class="tg" type="radio" name="s" id="s0" checked>');
   });
