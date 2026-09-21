@@ -33,7 +33,6 @@ import {
   isInputField,
   nextInputField,
   posToRowCol,
-  prevInputField,
   psBytes,
   psLength,
   psSearch,
@@ -41,6 +40,7 @@ import {
   rowColToPos
 } from "./hllapi-ps.js";
 import { decodeCp932, encodeCp932 } from "./hllapi-cp932.js";
+import { tabPosition, backtabPosition } from "@ts5250/tn5250";
 
 /** 短縮名 1 文字（`A`〜`Z`） */
 type PsName = string;
@@ -743,13 +743,18 @@ function moveCursor(snapshot: ScreenSnapshot, conn: Connection, action: LocalAct
       return;
     }
     case "tab": {
-      const f = nextInputField(snapshot, conn.cursor);
-      if (f) conn.cursor = fieldStart(f, size) ?? conn.cursor;
+      // ACS と同じ行き先（カーソル送り・継続欄・DBCS の SO。`tabPosition`）。入力欄が無ければ画面のホーム位置（ACS `processTab`）
+      // ~~次の入力欄の先頭~~（`20260921-hllapi-tab-acs`。ペインの Tab と同じ規則にそろえた）
+      const to = tabPosition(snapshot, conn.cursor);
+      if (to !== undefined) conn.cursor = to;
+      else if (snapshot.home !== undefined) conn.cursor = homePos(snapshot);
       return;
     }
     case "backtab": {
-      const f = prevInputField(snapshot, conn.cursor);
-      if (f) conn.cursor = fieldStart(f, size) ?? conn.cursor;
+      // ACS と同じ行き先（欄の途中ならその欄の先頭・カーソル送りの逆引き・継続欄。`backtabPosition`）。
+      // ~~前の入力欄の先頭~~——欄の途中から押すと 1 つ前の欄へ飛んでいた（ペインは `20260921-backtab-acs` で直してあった）
+      const to = backtabPosition(snapshot, conn.cursor);
+      if (to !== undefined) conn.cursor = to;
       return;
     }
     case "left":

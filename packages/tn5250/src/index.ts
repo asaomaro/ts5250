@@ -54,6 +54,8 @@ export {
   isInputField,
   nextInputField,
   prevInputField,
+  tabPosition,
+  backtabPosition,
   screenText,
   findAllText,
   fieldAfterLabel,

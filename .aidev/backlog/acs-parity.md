@@ -443,6 +443,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   カーソルは動かない（以前は GNU tn5250 に倣い前の欄の末尾へ移っていた）。ACS のコアで 2 つの欄とも実測（`scripts/acs-probe/backspace-field-start.txt`）。
   節目の点検の後、**DBCS の欄も 0005**（O の欄の先頭・J の欄の SO の後ろとも。DSM の画面で ACS のコアを実測。`scripts/acs-probe/backspace-dbcs-field-start.txt`）にした。
   ~~DBCS の欄は原典の手順上 0101~~ は実測と違った。
+- [x] **【まとめ】キー編集のうち HLLAPI の Tab・Backtab**（優先度 低）。**完了（`20260921-hllapi-tab-acs`・PR #410）**: HLLAPI の `@T` / `@B` を ACS の
+  `nextNonByPassInputFieldPos` / `previousNonByPassInputFieldPos` と同じ行き先にした（`packages/tn5250/src/screen/search.ts` の `tabPosition` / `backtabPosition`）。
+  以前は欄の途中からの Backtab が 1 つ前の欄へ飛び、カーソル送り・継続欄・SO を見ていなかった。単体 11 件・HLLAPI 2 件、mutation 7 通り検出。
+  ペインは別の実装のまま（既に ACS と同じ。純関数へ寄せるのは別の作業。D1）。
 - [x] **【まとめ】キー編集のうち数値専用の欄の Field−**（優先度 中）。**完了（`20260921-field-minus-zone-d`・PR #410）**: ACS と同じく欄の最終桁のバイトのゾーンを D にする
   （空なら 0xD0。`packages/web-ui/src/composables/fieldEdit.ts` の `fieldSign`）。以前は Field Exit と同じで**負の数を送れなかった**。ACS のコアでシフト M の欄を測った
   （`12` → `12   }`。`scripts/acs-probe/field-minus-numeric-only.txt`）。送信は `F1 F2 40 40 40 D0`（単体）。送る前の表示は空白（ACS はそのバイトの文字）。mutation 4 通り検出。
@@ -489,7 +493,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       可否を見ない）。当 PJ は漢字・かなを打った時点で、それ以外を送信時（core の「CCSID の外の文字」）に弾く（`20260921-monocase-non-ascii` D1）。
       ACS が置き換えに使うバイトは未確認。あわせて Greek の `μ` をコードページの `µ` へ置き換える（`hasMicroSymbol`）のも未対応
     - DBCS のセッションで文字の可否（`codepage.isValidChar`）に外れた字: ACS はエラー 39、当 PJ は「半角文字しか入力できません」など型の理由で弾く
-    - HLLAPI の `@B`（Backtab）が継続欄・逆向きのカーソル送りを見ない（ペインの `backtab` は見る。`20260921-home-record-backspace` D5）
+    - ~~HLLAPI の `@B`（Backtab）が継続欄・逆向きのカーソル送りを見ない（ペインの `backtab` は見る。`20260921-home-record-backspace` D5）~~ → 上の `20260921-hllapi-tab-acs`
     - DBCS 専用欄がホーム位置のときの Home（ACS はホーム位置が SO なら 1 桁先へ置くので、原典の字面では 2 回目も
       「ホーム位置でない」となり Record Backspace を送らない。当 PJ は 2 回目で送る。**未確認**。節目の独立点検の懸念）
     - 解錠中に届いた WTD（READ 無し）でもカーソルが IC / ホームへ動く（`20260921-cursor-per-wtd-acs` D2 の未確認と同じ）
