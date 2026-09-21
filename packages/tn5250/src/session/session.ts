@@ -605,7 +605,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       // **WRITE ERROR CODE（0x21/0x22）のメッセージは画面セルに入らない。**
       // ホストは専用のコマンドでエラー行へ出すので `systemMessage` に載る（`get_screen` の
       // `=== Message ===`）。ここでセルしか見ないと、**エラーを待てない**——実機で
-      // `ASAOLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
+      // `TESTLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
       // 「小数部分の使用法が正しくないか，…」が `systemMessage` にだけ現れ、
       // 24 行目のセルは空のままだった（2026-08-25）。
       return snap.systemMessage !== undefined && snap.systemMessage.includes(opts.until.text);

@@ -24,7 +24,7 @@
   `cursorBeforeWasEnterable=false` の合成 WTD）で、カーソル位置 `{row:5,col:20}` が
   維持されることを確認。修正前のコードでは `{row:3,col:12}`（先頭入力欄）へ強制移動
   することを discrimination 確認済み。**D5 の再設計後（`cursorBeforeWasEnterable` を
-  実装した最終コード）に対して、実機（SR-OSAKA/ASAOLIB）で
+  実装した最終コード）に対して、実機（AS400/TESTLIB）で
   `scripts/diag-seu-protected-cursor-pageup.mjs`（境界・非境界の3ケース）と
   `scripts/diag-cursor-after-expand.mjs`（`PR#387` 元シナリオ＝CURSORCL3）の両方を
   再実行し、いずれも正しい結果（SEU側は維持、CURSORCL3側は寄せる）になることを
@@ -72,7 +72,7 @@ smoke: pass (exit 0)
 
 - **（review 工程で解消済み）** 当初この節には「修正版コードでの実機再確認は未実施」と
   記載していたが、review 工程の指摘（`review.md`「レビュー指摘」）を受けて実機
-  （SR-OSAKA/ASAOLIB）で `scripts/diag-seu-protected-cursor-pageup.mjs` を修正後のビルドに
+  （AS400/TESTLIB）で `scripts/diag-seu-protected-cursor-pageup.mjs` を修正後のビルドに
   対して再実行し、利用者の再現手順そのもので症状が解消したことを確認した
   （`research.md` F6）。したがってこの項目はもう「未検証の穴」ではない。
 - **（D5 の再設計で解消済み）** 旧版では「`!result.cursorSet` 分岐への `isPageKey` 適用は

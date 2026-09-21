@@ -15,7 +15,7 @@ import { AID, ORDER, FFW, COMMAND, ESC } from "../src/protocol/constants.js";
  *
  * 【実機で分かった不具合】SOH を読み捨てていたため、`CA12(12)` の画面で打鍵してから F12 を
  * 押すと**欄データを送ってしまい、ホストのプログラムが値を受け取った**
- * （実機 IBM i 7.3・`ASAOLIB/KEYPGM`。`HOST RECEIVED` に打った値が出た）。
+ * （実機 IBM i 7.3・`TESTLIB/KEYPGM`。`HOST RECEIVED` に打った値が出た）。
  * 「F12 で取り消したのに反映される」型の事故になる。
  *
  * 実機で採った SOH: `len=7 本体=[00 00 00 18 00 08 04]`（`CA03`/`CA12`/`CF06` の画面）
@@ -23,7 +23,7 @@ import { AID, ORDER, FFW, COMMAND, ESC } from "../src/protocol/constants.js";
  */
 
 const codec = codecForCcsid(37);
-/** 実機（`ASAOLIB/KEYDSPF`）で採ったヘッダ本体。CA03 と CA12 が立つ */
+/** 実機（`TESTLIB/KEYDSPF`）で採ったヘッダ本体。CA03 と CA12 が立つ */
 const HEADER_CA03_CA12 = [0x00, 0x00, 0x00, 0x18, 0x00, 0x08, 0x04];
 
 function makeBuffer(): ScreenBuffer {

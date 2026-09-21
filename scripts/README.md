@@ -1317,7 +1317,7 @@ node --env-file=.env --env-file=.env.verify scripts/build-msgloop.mjs
 node --env-file=.env --env-file=.env.verify scripts/verify-browser-msgloop-loading.mjs
 ```
 
-### 実測（2026-09-07・SR-OSAKA / AS01・16/16 OK）
+### 実測（2026-09-07・AS400 / DEV1・16/16 OK）
 
 | | MSGLOOP（`SNDMSG`） | STSLOOP（状況メッセージ） |
 |---|---|---|
@@ -1359,7 +1359,7 @@ ws が施錠中でもフラグキーを通すことは `verify-aid-no-timeout.mj
 node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during-wait.mjs
 ```
 
-実測（2026-09-07・`CALL ASAOLIB/STSLOOP` の待ち中）:
+実測（2026-09-07・`CALL TESTLIB/STSLOOP` の待ち中）:
 
 | 経路 | 結果 |
 |---|---|
@@ -1388,7 +1388,7 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during
 `build-msgloop.mjs` が作る `MSGWTST` がその状態を作る。
 
 ```sh
-CALL ASAOLIB/MSGWTST          ← 画面はここで固まる（スピナーが出たまま）
+CALL TESTLIB/MSGWTST          ← 画面はここで固まる（スピナーが出たまま）
 ```
 
 `<AS400_LIB>/INQMSGQ`（この検証用に作る自前の待ち行列）にメッセージが来るまで

@@ -13,7 +13,7 @@
 import { Session5250 } from "@ts5250/tn5250";
 
 const host = process.env.AS400_HOST, user = process.env.AS400_USER, password = process.env.AS400_PASSWORD;
-const LIB = process.env.AS400_LIB ?? "ASAOLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 if (!host || !user || !password) { process.stderr.write("AS400_* が要ります\n"); process.exit(2); }
 
 const log = (s) => process.stdout.write(s + "\n");

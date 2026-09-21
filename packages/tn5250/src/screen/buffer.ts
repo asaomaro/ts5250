@@ -765,7 +765,7 @@ export class ScreenBuffer {
    * ビットの並び（GNU tn5250 `send_data_for_aid_key`、tn5250j `dataIncluded[]` が一致）:
    * ヘッダ本体の 5〜7 バイト目が **F24〜F17 / F16〜F9 / F8〜F1**、各バイトは LSB が小さい番号。
    *
-   * 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `CA03`/`CA12`/`CF06`）で採った値:
+   * 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `CA03`/`CA12`/`CF06`）で採った値:
    * `SOH len=7 本体=[00 00 00 18 00 08 04]` → **F3 と F12 だけが立つ**（CF06 は立たない）。
    */
   private aidNoDataMask = 0;
@@ -1144,7 +1144,7 @@ export class ScreenBuffer {
     // 載ってくることがある（char 欄にバイトを置くだけのプログラム）。申告で門番していたため、
     // その欄は 1 文字ずつの復号値になり、**送信時に codec が SO/SI を付け直して 2 バイト増える**
     // ——欄長が固定なので末尾が落ち、ホストには別の値が届いていた
-    // （実機 `ASAOLIB/UDCPGM` の `IN2` で確認: 打鍵せず送り返すだけで `DIFF`）。
+    // （実機 `TESTLIB/UDCPGM` の `IN2` で確認: 打鍵せず送り返すだけで `DIFF`）。
     if (this.hasDbcsStructure(field)) {
       return this.dbcsRawFieldValue(field);
     }

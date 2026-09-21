@@ -17,8 +17,8 @@
 // 資格情報は環境変数からのみ受け取る（引数はプロセス一覧に見える）。
 //   node --env-file=.env --env-file=.env.verify scripts/build-audpgm.mjs
 // 実機での使い方:
-//   ADDLIBLE ASAOLIB
-//   CALL ASAOLIB/AUDPGM     （F3 で終了）
+//   ADDLIBLE TESTLIB
+//   CALL TESTLIB/AUDPGM     （F3 で終了）
 import { CommandConnection } from "@ts5250/hostserver";
 
 const LIB = process.env.AS400_LIB ?? "TESTLIB";

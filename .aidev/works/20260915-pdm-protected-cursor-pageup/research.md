@@ -12,7 +12,7 @@
 ## 判明した事実
 
 - F1: **利用者の再現手順は実機で完全に再現した**（`scripts/diag-seu-protected-cursor-pageup.mjs`、
-  SR-OSAKA/ASAOLIB、`STRSEU SRCFILE(ASAOLIB/QCLSRC) SRCMBR(PAGECURS) OPTION(5)` で browse）。
+  AS400/TESTLIB、`STRSEU SRCFILE(TESTLIB/QCLSRC) SRCMBR(PAGECURS) OPTION(5)` で browse）。
   10桁10行目（保護欄。行番号ゲートウェイ欄でも SEU==> 欄でもない、ソース本文の表示領域）へ
   カーソルを置いた状態で PageUp/PageDown すると、カーソルが SEU==>（先頭の入力可能欄、
   `#1 r2c9(60)`）へ強制移動する（Q1: 再現した）。
@@ -124,7 +124,7 @@
 ## F6: 修正後コードでの実機再確認（review 工程で実施）
 
 design/tasks/coding を経て `isPageKey` 除外を実装した**修正後のビルド**に対し、
-`scripts/diag-seu-protected-cursor-pageup.mjs` を実機（SR-OSAKA/ASAOLIB）で再実行し、
+`scripts/diag-seu-protected-cursor-pageup.mjs` を実機（AS400/TESTLIB）で再実行し、
 利用者の再現手順そのもの（10桁10行目の保護欄から PageUp/PageDown）で症状が解消したことを
 確認した。F4 の3ケースと同一条件で、`cursorToFirstInputField()` の呼び出し有無を直接計装して
 判定（F3 の教訓どおり、生バイト検索ではなく分岐の直接計装で確認）:
@@ -195,7 +195,7 @@ D5 で `cursorBeforeWasEnterable` へ全面置き換えた**後**のコードに
 実行はしていたものの記録が漏れていた（review 工程の指摘で発覚）。ここに記録する。
 
 - **SEU（`scripts/diag-seu-protected-cursor-pageup.mjs`、F4/F6 と同じ3ケース）**:
-  実機（SR-OSAKA/ASAOLIB）で `cursorBeforeWasEnterable` 実装のビルドに対して再実行し、
+  実機（AS400/TESTLIB）で `cursorBeforeWasEnterable` 実装のビルドに対して再実行し、
   F6 と同一の結果（ケース1・2は 10/10 のまま維持、ケース3は 19/10 へ正当に移動、
   いずれも `cursorToFirstInputField()` は呼ばれず）を得た。
 - **CURSORCL3（`scripts/diag-cursor-after-expand.mjs`、`PR#387` 元シナリオ）**:

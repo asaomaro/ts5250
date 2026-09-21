@@ -11,7 +11,7 @@
  *     QsnReadMDTImmAlt          → READ MDT IMMEDIATE ALT(0x83)
  *     QsnPutOutCmd(cmd,…)       → 任意の出力コマンド（CLEAR UNIT ALTERNATE(0x20) 等）
  *
- * 呼び出し: CALL ASAOLIB/DSCMD PARM('ROLLUP')
+ * 呼び出し: CALL TESTLIB/DSCMD PARM('ROLLUP')
  *
  * 経過は IFS のログへ書く。画面へ printf すると DSM と混ざるうえ、落ちたときに何も残らない。
  *

@@ -46,7 +46,7 @@ D5 で追加、`PR#387` 分岐が無くなると区別する力を失う）を�
 - T4: 既存の関連テスト（`cursor-default.test.ts`、
   `screen-grid-cursor-restore.test.ts`）を実行し、T1・T2 の変更後も green の
   ままであることを確認する。
-- test 工程で、実機（SR-OSAKA/ASAOLIB）に対して `scripts/diag-cursor-after-expand.mjs`
+- test 工程で、実機（AS400/TESTLIB）に対して `scripts/diag-cursor-after-expand.mjs`
   （CURSORCL3）・`scripts/diag-seu-protected-cursor-pageup.mjs`（SEU）を再実行し、
   分岐削除後の実際の挙動を確認する（AC3 の一部。coding では行わず test 工程で
   実施——`design.md`「受け入れ基準との対応」AC3 参照）。

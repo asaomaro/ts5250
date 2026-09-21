@@ -2,7 +2,7 @@
 
 ## 調査の問い
 
-- Q1: 利用者が報告した「DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*)」実行時の「罫線のみ表示→Enter
+- Q1: 利用者が報告した「DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*)」実行時の「罫線のみ表示→Enter
   で正常化」は、`@ts5250/tn5250` のプロトコル解析コアで再現するか。
 - Q2: コアで再現しない場合、`packages/server`（ws-handler）・`packages/web-ui` のどちらの層で
   再現するか。
@@ -13,7 +13,7 @@
 
 - F1: **`Session5250.snapshot()`（ライブのバッファ状態を都度読む API）を毎回ポーリングする
   診断（`scripts/diag-dspfmt-reconnect-blank.mjs`、本 work で作成、web-ui/server 層を
-  経由しない）では、`DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*)` を6回実行して6回とも
+  経由しない）では、`DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*)` を6回実行して6回とも
   正常に見えた（実行ログ: 本 research 実施時の標準出力）。**この結果は誤誘導だった**
   ——F1'（下記）の通り、`session.snapshot()` はいつ呼んでも常に最新のバッファ状態を
   返すため、3つのレコードが届き終わった後にポーリングすれば正しい内容しか観測できない。
@@ -22,7 +22,7 @@
   結論づけた——`doccheck requirements` ラウンド1の指摘で発覚し訂正）。
 - F1': **`sendAid()` が返す Promise の解決値（`res.screen`）を直接調べる診断
   （本 research で追加実行、`Session5250` 直結・web-ui/server 層を経由しない）では、
-  `DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*)` に対する `sendAid("Enter")` の解決値が
+  `DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*)` に対する `sendAid("Enter")` の解決値が
   **8回中8回、罫線のみの画面（バグそのもの）だった**——同じ瞬間の `session.snapshot()`
   （ライブ）は8回とも正常。**これはコア層（`packages/tn5250`）だけで100%決定的に
   再現する欠陥であり、web-ui・server 層は一切関与しない。** F4 で特定した原因

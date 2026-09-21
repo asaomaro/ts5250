@@ -15,7 +15,7 @@ const codec = codecForCcsid(37);
  * ホストは 1 つの数値欄を**複数の入力区間に分解**し、区間の間の編集文字を保護された静的文字として送る。
  * 区間には FCW `0x86xx` が付く（下位 1=先頭 / 3=中間 / 2=最終）。
  *
- * 【実機で採った SF オーダーの生バイト】実機 / IBM i 7.3・`ASAOLIB/MSKTST`（`ADDLIBLE` 後 `CALL ASAOLIB/MSKCL`）
+ * 【実機で採った SF オーダーの生バイト】実機 / IBM i 7.3・`TESTLIB/MSKTST`（`ADDLIBLE` 後 `CALL TESTLIB/MSKCL`）
  *
  * ```
  * A6Y  EDTCDE(Y) + EDTMSK('  &  &  ')             → 2+2+2 の 3 区間

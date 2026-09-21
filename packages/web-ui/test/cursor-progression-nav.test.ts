@@ -10,7 +10,7 @@ import type { WsClient } from "../src/ws-client.js";
  * **カーソル送り（DDS の `FLDCSRPRG`。FCW `0x88nn`）。**
  *
  * ホストが「この欄を出たら画面順の次ではなく nn 番の欄へ」と指定してくる。読み飛ばしていたので
- * **Tab の行き先が実機と違っていた**（実機 `ASAOLIB/KEYPGM`: `IN1` は `FLDCSRPRG(IN3)` なのに
+ * **Tab の行き先が実機と違っていた**（実機 `TESTLIB/KEYPGM`: `IN1` は `FLDCSRPRG(IN3)` なのに
  * `IN2` へ行っていた）。参照実装 2 つとも Tab と満杯・Field Exit の自動送りで見る
  * （GNU tn5250 `tn5250_display_set_cursor_next_field`、tn5250j `ScreenFields.gotoFieldNext`）。
  *

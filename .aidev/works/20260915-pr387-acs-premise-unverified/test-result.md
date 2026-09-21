@@ -32,7 +32,7 @@
 - AC3（既存の関連テストに回帰が無いこと）: pass — `cursor-default.test.ts`
   （1つ目の describe ブロック、無変更のまま3テスト green）・
   `screen-grid-cursor-restore.test.ts`（無変更のまま5テスト green）を確認。
-  加えて、実機（SR-OSAKA/ASAOLIB）で `scripts/diag-seu-protected-cursor-pageup.mjs`
+  加えて、実機（AS400/TESTLIB）で `scripts/diag-seu-protected-cursor-pageup.mjs`
   （SEU、3ケース）を再実行し、`PR#387` 分岐削除後も境界・非境界どちらのケースでも
   カーソル位置が正しく判定される（維持すべきケース1・2は維持、ホストが正当に
   動かすケース3は動く）ことを確認した。

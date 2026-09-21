@@ -17,7 +17,7 @@ import {
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
- * **打鍵の型規則（実機 `ASAOLIB/AUDPGM` で確かめた 3 件）。**
+ * **打鍵の型規則（実機 `TESTLIB/AUDPGM` で確かめた 3 件）。**
  *
  * ① 数字専用欄（FFW シフト 5）に `.` `,` `+` `-` 空白が**打ててしまい**、Enter で
  *    core の送信時検証が `FIELD_TYPE` を投げて**1 バイトも飛ばない**——しかも画面には

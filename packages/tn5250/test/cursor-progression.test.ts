@@ -11,7 +11,7 @@ import { ORDER, COMMAND, ESC, FFW } from "../src/protocol/constants.js";
  * Tab の行き先が実機と違っていた。参照実装 2 つとも下位バイトをそのまま欄番号として持つ
  * （GNU tn5250 `nextfieldprogressionid`、tn5250j `ScreenField` の `cursorProg = fcw2`）。
  *
- * 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った SF:
+ * 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った SF:
  * `#1 ffw=0x4020 len=5 fcws=[0x8803]` / `#2` `#3` は FCW 無し。
  */
 

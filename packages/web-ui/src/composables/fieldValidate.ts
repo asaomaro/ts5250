@@ -59,7 +59,7 @@ export function rejectReason(field: Field, ch: string, session?: SessionKind): R
   // **数字専用（FFW シフト 5 / DDS 35 桁の `D`）は本当に数字しか受け付けない。**
   // ここを `numeric` 一括にしていると `.` `,` `+` `-` 空白が打ててしまい、**打てるのに送れない**
   // ——core の `validateFieldContent` は数字のみに制限しているので、Enter で `FIELD_TYPE` になり
-  // ホストへ 1 バイトも飛ばない（実機 `ASAOLIB/AUDPGM` の `DGT` 欄で再現）。
+  // ホストへ 1 バイトも飛ばない（実機 `TESTLIB/AUDPGM` の `DGT` 欄で再現）。
   // 参照実装も digits-only は数字のみ（GNU tn5250 `field.c` / tn5250j `Screen5250.java`）。
   if (field.digitsOnly && !/[0-9]/.test(ch)) return "numeric";
 
@@ -343,7 +343,7 @@ export { isFullWidth, isCertainWideGlyph };
  * 5250 の符号付き数値欄はワイヤ上 `桁数 + 1` バイトで、最終桁は符号（空白 = 正 / `-` = 負）。
  * 送信時に core が符号桁を落とすため（`read-response.ts` の `signedNumericValue`）、
  * ここを数字で埋められると**画面に見えている桁がホストへ届かない**——
- * 実機 `ASAOLIB/AUDPGM` の `SGN`（`6S 0`・欄長 7）で `1234567` と打って
+ * 実機 `TESTLIB/AUDPGM` の `SGN`（`6S 0`・欄長 7）で `1234567` と打って
  * ホスト側が `123456` を受け取ることを確認した。
  *
  * 符号は `-` / `+` キー（Field− / Field+）で入れる——そちらは打鍵経路の手前で拾う。

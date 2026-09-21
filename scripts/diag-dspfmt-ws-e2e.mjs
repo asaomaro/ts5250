@@ -15,7 +15,7 @@ import { createServer } from "node:net";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.AS400_HOST, user = process.env.AS400_USER, password = process.env.AS400_PASSWORD;
-const LIB = process.env.AS400_LIB ?? "ASAOLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const ITERS = Number(process.argv[2] ?? 6);
 if (!host || !user || !password) { process.stderr.write("AS400_* が要ります\n"); process.exit(2); }
 

@@ -907,7 +907,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     // ⚠ **`0x8680` はワードラップで別物**——継続と誤認すると送信で欄を勝手に畳んでしまう。
     // 値が完全一致するものだけを拾う（マスク判定にしない）。
     //
-    // 実機（IBM i 7.3・`ASAOLIB/MSKTST`）で採った生バイト:
+    // 実機（IBM i 7.3・`TESTLIB/MSKTST`）で採った生バイト:
     //   `1d 43 00 86 01 24 00 02` … (3,23) len=2 先頭
     //   `1d 43 00 86 03 24 00 02` … (3,26) len=2 中間
     //   `1d 43 00 86 02 24 00 02` … (3,29) len=2 最終
@@ -920,7 +920,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     // 参照実装 2 つとも下位バイトをそのまま持つ（GNU tn5250 `session.c` の
     // `nextfieldprogressionid`、tn5250j `ScreenField.setFCWs` の `cursorProg = fcw2`）。
     //
-    // 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
+    // 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
     else if ((fcw & 0xff00) === 0x8800) cursorProgression = fcw & 0x00ff;
   }
   const attr = r.u8();

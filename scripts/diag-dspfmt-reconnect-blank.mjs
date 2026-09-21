@@ -1,4 +1,4 @@
-// DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*) を実行した直後、初回表示が罫線のみになり
+// DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*) を実行した直後、初回表示が罫線のみになり
 // Enter で正常化する不具合の実機調査（20260915利用者報告、スクリーンショット添付）。
 // .aidev/works/20260915-dspfmt-reconnect-blank-redraw/requirements.md
 //
@@ -31,7 +31,7 @@
 import { Session5250 } from "@ts5250/tn5250";
 
 const host = process.env.AS400_HOST, user = process.env.AS400_USER, password = process.env.AS400_PASSWORD;
-const LIB = process.env.AS400_LIB ?? "ASAOLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const ITERS = Number(process.argv[2] ?? 6);
 if (!host || !user || !password) { process.stderr.write("AS400_* が要ります\n"); process.exit(2); }
 

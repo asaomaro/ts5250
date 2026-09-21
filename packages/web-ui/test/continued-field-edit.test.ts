@@ -10,7 +10,7 @@ import { MSG_PROTECTED } from "../src/composables/opMessages.js";
  *
  * ホストは EDTMSK で割った数値欄を、区切り文字（`/`）を挟んだ**複数の別々の欄**として送る
  * （`Field.continued` = first/middle/last）。区間ごとに独立した input として扱うと
- * **Backspace / Delete が区切りの前後で止まる**——実機（`ASAOLIB/DTMPGM` の `D8U`）で
+ * **Backspace / Delete が区切りの前後で止まる**——実機（`TESTLIB/DTMPGM` の `D8U`）で
  * `2026/08/25` の末尾から Backspace を 3 回押しても `2026/08/` までしか消えず、
  * 先頭で Delete を押しても最初の区間しか詰まらなかった。
  *
