@@ -3,7 +3,7 @@ import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import { nextSystemMessageSeq, type ScreenBuffer } from "../screen/buffer.js";
 import type { ContinuedPart, DbcsFieldType, SelfCheckKind, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
-import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
+import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isControlData, controlDataText } from "./constants.js";
 import {
   detectPcoMarker,
   readPcCommand,
@@ -660,6 +660,17 @@ function applyWtd(
       unmappable++;
       continue;
     }
+    if (isControlData(b)) {
+      /**
+       * **オーダーでない制御バイトは表示データ**（ACS `processWriteToDisplay` のオーダーは SOH・RA・EA・TD・SBA・WEA・IC・MC・WDSF・SF の 10 個だけで、
+       * それ以外の ESC 以外のバイトは全部 1 続きの文字列として書く）。0x05〜0x0D・0x16〜0x1B が該当する。
+       * ~~未知のオーダーとして次の ESC まで読み飛ばす~~ は誤りだった——同じ WTD の後ろの SBA・SF・IC を失い、同じ族の 0x1C・0x1F が実機で届いていた。
+       * 実機の ACS のコア（`scripts/acs-probe/wtd-control-bytes.txt`）は、各バイトを 1 桁の空白として置き（0x07 だけ DEL）、後ろのオーダーをすべて処理した。
+       * `20260922-wtd-control-bytes`。元のバイトは送信用にだけ持つ（`hostByte`。画面イメージ・SAVE の応答で返す。ACS は `HostPlane` に受信バイトを入れる）
+       */
+      buf.setChar(addr++, controlDataText(b), undefined, b);
+      continue;
+    }
     switch (b) {
       case ORDER.SBA:
         addr = buf.addrOf(r.u8(), r.u8());
@@ -780,25 +791,6 @@ function applyWtd(
         // （カタカナ表示モードでの再解釈・文字化けを防ぐ）。送信には 0x1E を使う（0x1C と同じ理屈）。
         buf.setChar(addr++, ";", undefined, ORDER.UNKNOWN_1E);
         break;
-      default:
-        warn(`unknown order 0x${b.toString(16)} — skipping to next command`);
-        // **オーダーの長さは分からないが、レコード全体を捨てない。**
-        // 次のコマンドまで読み飛ばして復帰する。捨ててしまうと、後続の WRITE
-        // （キーボード解放の CC2 等）や READ が丸ごと失われ、ホストは送ったつもりでも
-        // クライアントの鍵盤が開かず「応答待ちのまま固まる」。
-        //
-        // **`0x04` を見つけただけでは ESC と決めない。** `0x04` はオーダーの
-        // パラメータにも現れる——実測した PUB400 のヘルプ画面では `11 04 05`
-        // （SBA 行 4 桁 5）の行バイトを ESC と読み違え、続く `05` を未知コマンドと見なして
-        // **末尾の READ MDT FIELDS ごと捨てていた**。直後が既知のコマンドである
-        // ものだけを ESC と認めれば、この取り違えは起きない。
-        while (r.remaining > 0) {
-          if (r.peek() === ESC && r.remaining >= 2 && isKnownCommand(r.peekAt(1))) break;
-          r.u8();
-        }
-        settleCursor();
-        warnUnmappable(unmappable, warn);
-        return;
     }
   }
   settleCursor();

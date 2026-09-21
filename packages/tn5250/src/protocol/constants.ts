@@ -152,10 +152,21 @@ export const ORDER = {
  */
 export const UNMAPPABLE = 0x1f;
 
-/** コマンドとして既知のバイトか（未知オーダーからの復帰で ESC を見極めるのに使う） */
-const COMMAND_BYTES: ReadonlySet<number> = new Set(Object.values(COMMAND));
-export function isKnownCommand(b: number): boolean {
-  return COMMAND_BYTES.has(b);
+/**
+ * **WTD のデータの中で、オーダーでも属性でもなく、表示データとして置かれる制御バイト**（0x05〜0x0D・0x16〜0x1B）。
+ * ACS `DS5250.processWriteToDisplay` はオーダー 10 個と ESC 以外を全部データとして書く（`20260922-wtd-control-bytes`。実機の ACS のコアで測った）。
+ * SO/SI（0x0E・0x0F）・0x1C・0x1E・0x1F・NUL は別の扱いで先に処理される
+ */
+export function isControlData(b: number): boolean {
+  return (b >= 0x05 && b <= 0x0d) || (b >= 0x16 && b <= 0x1b);
+}
+
+/**
+ * 制御バイトを表示データとして置くときの文字。実機の ACS のコアの表示面（`TEXT_PLANE`）は、0x07 だけが DEL（U+007F）、
+ * ほかの 0x05〜0x0D・0x16〜0x1B は空白だった（`scripts/acs-probe/wtd-control-bytes.txt`）。GUI が何を描くかは未確認
+ */
+export function controlDataText(b: number): string {
+  return b === 0x07 ? "\u007f" : " ";
 }
 
 /** AID コード（キーボード → ホスト） */

@@ -577,6 +577,63 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnReadMDT", rc, fdbk);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "CTLBYTES") == 0) {
+        /*
+         * **WTD のデータの中に制御バイトを入れる**（R11 の M2）。ACS `processWriteToDisplay` のオーダーは 10 個だけで、それ以外（ESC 以外）は表示データとして書く。
+         * 当 PJ は 0x1F と 0x00 以外の制御バイトを「未知のオーダー」として次の ESC まで捨てる。後ろの SBA・SF・IC が生きるかを見る。
+         *   (3,3) A<05>B<06>C<07>D<08>E<09> / (4,3) F<0A>G<0B>H<0C>I<0D>J / (5,3) K<16>L<17>M<18>N<19>O<1A>P<1B>Q / (6,3) R<1F>S<00>T
+         *   (8,3) "UVW"（SBA の後ろ）/ (10,9) 入力欄 6 桁（SF の後ろ）/ IC (10,10)
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x03, 0xC1, 0x05, 0xC2, 0x06, 0xC3, 0x07, 0xC4, 0x08, 0xC5, 0x09,
+            0x11, 0x04, 0x03, 0xC6, 0x0A, 0xC7, 0x0B, 0xC8, 0x0C, 0xC9, 0x0D, 0xD1,
+            0x11, 0x05, 0x03, 0xD2, 0x16, 0xD3, 0x17, 0xD4, 0x18, 0xD5, 0x19, 0xD6, 0x1A, 0xD7, 0x1B, 0xD8,
+            0x11, 0x06, 0x03, 0xD9, 0x1F, 0xE2, 0x00, 0xE3,
+            0x11, 0x08, 0x03, 0xE4, 0xE5, 0xE6,
+            0x11, 0x0A, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x0A, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 制御バイト入りの WTD)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "SBA10") == 0) {
+        /*
+         * **SBA の行 1・桁 0 から始まる欄**（R11 の M3）。ACS `processWriteToDisplay` は、行 1・桁 0 の SBA のあとにデータ（または SF）が続くなら
+         * 番地 -1 として受理する（欄の属性が 1 行 1 桁の直前にある画面のための状態を持つ）。当 PJ は範囲外として例外で捨てる。
+         *   SBA(1,0) SF(入力欄 8 桁・属性 0x24) / (3,3) "ABC" / IC (1,1)
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x01, 0x00, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x08,
+            0x11, 0x03, 0x03, 0xC1, 0xC2, 0xC3,
+            0x13, 0x01, 0x01
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 SBA(1,0) の WTD)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "ROLLBAD") == 0) {
         /*
          * **指定の不正な ROLL を出す**（下端 ≤ 上端。`20260921-negative-responses`）。ACS `processRoll` は -1 を返し、否定応答（0x1005012C）を返す。

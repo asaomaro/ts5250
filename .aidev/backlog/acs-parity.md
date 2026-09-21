@@ -540,14 +540,34 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・WSF D9/72 のフラグ 0x80（0x10050112）。未知のコマンドは ACS と同じく 1 バイト読み飛ばして続ける（~~残りを捨てる~~）。
   社内機で DSM に出させて ACS のコアと比べた: WSF D9/72 の 0x80 は、ACS も当 PJ もホストの `QsnPutInpCmd` が CPFA304 で戻る（**以前の当 PJ は施錠のまま**）、
   不正な ROLL と未知のコマンドはどちらも rc=0。mutation 7 通り検出。
+- [x] **WTD のデータの中の制御バイト（0x05〜0x0D・0x16〜0x1B）を表示データにする**（下の「否定応答の残り」の調査〔R11〕から割った）。
+  **完了（`20260921-wtd-control-bytes`）**: ACS `processWriteToDisplay` はオーダー 10 個と ESC 以外を全部データとして書く。実機の ACS のコア（DSM で出させた WTD。
+  `scripts/acs-probe/wtd-control-bytes.txt`）は各バイトを 1 桁の空白（0x07 だけ DEL）として置き、後ろの SBA・SF・IC を全部処理した。当 PJ は「未知のオーダー」として
+  次の ESC まで読み飛ばし、同じ WTD の後ろを失っていた（`unknown order` の警告）。`isControlData`（`packages/tn5250/src/protocol/constants.ts`）で表示データにした。
+  ~~`20260915-acs-protocol-order-audit` の「`default:` 節の設計そのものは対象外」~~ は破棄（decisions D1）。単体 4 件、mutation 11 通り検出、実機で ACS のコアと同じ画面になった。
 - [ ] **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
   コマンドの長さの不足（0x10050121）で返すものは、当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）とそのまま対応しないので入れていない。
   条件ごとに ACS と当 PJ の読み方を突き合わせてから入れる（`20260921-negative-responses` D2）。
+  **調査（R11・2026-09-22）で分かったこと**: ACS の `DS5250` が `sense_code` を立てる箇所は 44、センスは 12 種と WDSF 系。当 PJ が入れたのは 5 条件だけ。
+  **当 PJ の読み手の誤りは、短いレコード・SBA の範囲外・RA/EA の後戻り・切れた SF・長さ 0 の入力欄・末尾の ESC 1 バイトで例外になり、`handleRecord` の catch が
+  レコードごと黙って捨てる**——先に来た READ・CC2・画面イベント・否定応答が全部消え、鍵盤は施錠のまま（実機なしで dist を動かして確認）。ACS はセンスを送り、
+  WTD の中の誤りなら尾部（CC2）も走らせる。~~当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）~~ は「未知のオーダー」だけの話で、上の制御バイトで無くなった。
+  **受理側の差**（否定応答より先に揃える）: **SBA の行 1・桁 0**——ACS は受理して番地 -1 として続け（DSM で確認）、当 PJ は範囲外の例外でレコードごと捨てる。ただし DDS では
+  1 行 1 桁に欄も定数も置けない（コンパイルが落ちる。1 行 2 桁なら通り、窓の中の 1,1 も通る）ので、ホストの表示装置ファイルは出さない形（`20260921-wtd-control-bytes` D3）。
+  **実装順の案**: 例外→否定応答（短い 0x10050121・位置 0x10050122・後戻り 0x10050123 から。`applyWtd` を try/catch でくるみ、`settleCursor()` を通してから `senseCode` を立てる。
+  **偽の否定応答の危険**が生じるので、受理側を先に揃える）→ EA・WEA・SOH・SF の検査。実在しない形（ホストの不具合や手書きの WTD だけ）は台帳に残す。
+  ~~`20260921-negative-responses` D2 の「一対一でない」~~ は R11 の表（条件・センス・立てた後）で解消した。測り方 M1〜M6 は R11 の報告（scratchpad）。
 - [ ] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
   3 つで直ちに return し、レコードの終わりの `processWCC2`（CC2 の解錠・警報・メッセージ灯）と SAVE PARTIAL の応答を飛ばす（次のレコードの頭で `isPrepwcc2` も落ちる）。
   当 PJ は同じレコードで先に来た WTD の CC2 を効かせ、SAVE PARTIAL の応答も送る。当 PJ はキーボードを READ でも解くので、CC2 だけ落とすと ACS と同じにならない——
   **DSM で「WTD（CC2 解錠）＋不正な ROLL」を ACS のコアと当 PJ に出させて、解錠・警報の有無を測ってから**直す。
+  **R11 の調査で訂正**: 直 return は「ESC が無い・CUA の引数・ROLL の指定」の 3 つでなく **8 か所**、WTD の中の誤りと WSF D9/72 は尾部が走る。**当 PJ は CC2 の解錠ビットでは解錠しない**
+  （解錠は READ が来たときだけ。`session.ts`）ので、~~CC2 だけ落とすと ACS と同じにならない~~ は成り立たず、落ちる差は警報・メッセージ待ち・READ による解錠・SAVE PARTIAL の応答だけ。
+  測ってから決める（`EARLYROLL` などを DSM で出させる案。ACS のプローブは `setAcsPackage(true)` を呼ばないので、SF の属性検査 0x10050130 は製品の ACS でしか採れない）。
 - [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
+  - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
+    ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／
+    **昇順でない SF は ACS が欄に入れない**（`FFT5250.checkNewField` は既存の欄より前の番地なら新しい欄を作らない。台帳の「昇順でない定義の画面は未確認」の答え）。
   - WSF の後に ACS は READ の保留を下ろす（`pending_read = 0; setReadPend(false)`）。同じレコードで WSF より前に来た READ を当 PJ は生かしたまま（実機では未観測）。
   - HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則（SO の +1・欄の途中なら欄の先頭）を当てる。ACS の 3270（`PS3270`）の規則は読み切れていない。
   - ACS の `processTab` / `processBacktab` は移動の後に MF の検査（`moveCursorWithMandFillCheck`）をし `setFieldExitReqFlag(true)` を立てる。HLLAPI 側はどちらもしない（以前から）。
@@ -581,20 +601,36 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （フラグ 0x40・次が 0 は `D9 72 C0 00` と CCSID 13488・17584・1200、それ以外は `D9 72 80 00 03 01 04`。`packages/tn5250/src/protocol/query-reply.ts` の
   `buildWsfD972Reply`）。社内機で DSM（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）に出させたところ、**以前は応答せずホストが待ち続け、施錠されたまま**だった。
   ACS のコアと当 PJ でホストが読んだ生バイトが同じ（15 バイト・12 バイト）。~~フラグ 0x80（ACS は否定応答）は返さない~~ → `20260921-negative-responses` で否定応答を返す。mutation 4 通り検出。
+- [x] **Unicode の欄（DDS の `CCSID` キーワード）は、Unicode を申告しないクライアントには届かない**（下の「DS5250 のその他の差」の FCW 0x90xx〜0x93xx・WDSF 0x54 から割った。コード変更なし）。
+  **実機で決着（2026-09-22・社内機。`20260921-unicode-field-measure`）**: DDS に G 型・`CCSID(13488)` / `CCSID(1200)` の欄を置く（A 型に CCSID を付けると DDS のコンパイルが落ちる）と、
+  Unicode を申告しない当 PJ にも ACS のコア（既定）にも、ホストは**EBCDIC 混在の DBCS open の欄（FCW 0x8280）として送った**——データは UCS-2 でなくジョブの CCSID（930）の SO/SI つきで、
+  FCW 0x90xx も WDSF 0x54 も来ない。当 PJ の画面は `AB あい` と正しく出た（ACS のコアも同じ）。D9/72 は ACS も設定に関係なく無条件に応答し、Unicode の欄を受ける条件は
+  Query Reply の申告（ACS の既定 OFF・当 PJ も未申告）。**当 PJ が Unicode を申告しない限り実装は要らない**（申告するなら FCW の読み・WDSF 0x54・READ 応答・web-ui の編集・Query Reply の宣言が要る。
+  設計案は R11 の報告）。`scripts/build-unitest.mjs`・`scripts/diag-unifield.mjs`・`scripts/acs-probe/unicode-field.txt`（試験オブジェクトは片付けた）。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - WEA タイプ 5（拡張 NLS 区間）（○）
     - ACS: DBCS セッションでは適用する（`PS5250.writeExtAttribute`）。
     - 当 PJ: すべてのタイプを読み飛ばす（`wtd-applier.ts:555-575`）。
     - 実機のトレースでは未観測。
+    - **R11 の調査（2026-09-22）**: ACS は NLS 面に 0x81/0x80 の印を打ち、印の間を SO/SI 無しの 2 バイト文字（全角）として扱う。SBCS のセッションでは否定応答 0x1005012D。
+      当 PJ の実測: `42C1 42C2` が `｡A｡B` に化ける。**同じ仕組みを ACS は G 欄（FCW 0x8220）にも使う**ので、G 欄のデータが SO/SI 無しで届くなら今すぐ起きる
+      （当 PJ の G 欄は SO/SI 無しだと化ける。ホストが G 欄に SO/SI を付けるかは未確認）。頻度は未確認——DBCS の画面の警告を集計してから決める。
   - 細部の差
     - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
-    - CLEAR 系の付随処理: CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。画面サイズが変わっても罫線を残す。
+    - CLEAR 系の付随処理: ~~CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。~~ → R11 の調査（2026-09-22）: ACS は CU・CUA・CFT・SOH が共通の書式初期化を通り、
+      キーボード・保留 READ・CA マスク・メッセージ行・ENPTUI 構造体・グリッド面を戻す。当 PJ は **CU では CA マスクを既に捨てている**（上の書き方は誤り）が、CUA・CFT では捨てず、
+      `msgLineRow` はどれでも戻さない。ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる（実測）。**CUA の CA マスクを捨てない過去の判断は実測の裏が無く、ACS 原典と逆**——
+      DSM で CUA を出させて ACS のコアと当 PJ を比べて決める。差の多くは直後の SOH が上書きするので見えにくい。画面サイズが変わっても罫線を残す差も残る。
     - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
       （0x80xx は再順序付け・0x84xx は透過の欄（ACS `Field5250` の `FCW_RESEQUENCE` / `FCW_TRANSPARENT`）。D9/72 で Unicode を申告するようになったので、
-      ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる）。
+      ~~ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる~~ → **申告しないクライアントには届かない**（実機で確認。下の `[x]`）。
+      R11: WDSF 0x52＝窓のカーソル制限の解除、0x54＝欄へのデータ書き込み（EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）、0x55＝マウスボタン→AID の定義。どれも応答は無い（誤りのときだけ否定応答）。
+      当 PJ は警告して無視（SF の長さは正しく飛ばす）。リポジトリ内の実機の記録に 0 件。FCW 0x80xx・0x84xx は READ 応答の欄の並び・書式にしか効かず、Tab・表示・打鍵には効かない（実例 0 件）。）。
     - ~~負応答を返さない~~（上の `20260921-negative-responses` で主な 4 つを入れた。残りは上の「否定応答の残り」）。
-    - 0x82/0x83 の欄データで、NUL と符号を加工する。
+    - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → R11 の調査: **ACS は 0x82/0x83（ALT）では NUL も符号も加工しない**（加工するのは 0x52 と 0x42/0x72）。
+      当 PJ は ALT も 0x52 と同じに加工する（上の書き方は逆だった）。ACS は末尾の NUL だけ落とし、実空白は送る（当 PJ は落とす）。ホストが ALT を使う画面（DSM の `QsnReadMDTAlt` 系）だけの差。
+      未測定（DSM で測ってから。実装は小さい）。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
 - [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:
