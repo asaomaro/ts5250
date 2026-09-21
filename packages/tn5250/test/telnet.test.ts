@@ -183,7 +183,7 @@ describe("TelnetLayer ネゴシエーション", () => {
       const a = String.fromCharCode(...t1.takeSent());
       expect(a).toContain("USER\x01U");
       expect(a).toMatch(/IBMSUBSPW\x01(\xff\xf0|$)/); // 値が無い（IAC SE が続く）
-      expect(a).toMatch(/IBMRSEED\x01./);
+      expect(a).toMatch(/IBMRSEED\x01[\s\S]/); // 自分のシード（乱数。先頭が 0x0A・0x0D のこともあるので `.` では取りこぼす）
       expect(a).not.toContain("pw");
       const t2 = setupEnc(async () => {
         throw new Error("x");
