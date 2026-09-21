@@ -1,0 +1,13 @@
+schema: 11
+slug: dbcs-terminal-type
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 【まとめ】telnet・自動サインオン・装置名の差（DBCS 24x80 の端末タイプ）
+harnessRevDelivered: unknown

@@ -492,6 +492,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   KBDTYPE=JPE・CODEPAGE=1027・CHARSET=32000 にした（`packages/base/src/device-env.ts`。以前は JEB・1172）。ACS のコアに `codePageKey` を渡してタップで採ったワイヤと同じ
   （939 `JPB/1027/1172`・930（Katakana Extended）`JKB/290/1172`・37 `USB/37/697` も当 PJ と一致）。新しい値で両方の実機の 5250 サインオンと日本語の往復
   （`scripts/verify-device-env.mjs`）、3270 の接続（両方）、PUB400 の VT が通った。
+- [x] **【まとめ】telnet のうち DBCS 24x80 の端末タイプ**（優先度 中）。**完了（`20260921-dbcs-terminal-type`・PR #410）**: DBCS は画面サイズによらず
+  `IBM-5555-C01`（`packages/tn5250/src/session/terminal-type.ts`。以前は 24x80 に G02）。ACS のワイヤ（930・1399 の 24x80 と 930 の 27x132）がどれも C01。
+  旧い判断（C01 は STRSEU が 27x132）は、当時の Query Reply が常に 27x132 可と申告していたため。いまは C01 でも両方の実機で STRSEU・WRKACTJOB ほかが
+  24x80 のままで、色も G02 と同じだった。
 - [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
@@ -510,7 +514,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。
   - 930 の申告の選択（低・**未確認**）: ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）は 290 として扱われ CHARSET が 332、「Katakana Extended」は 1172（当 PJ と同じ）。
     利用者の ACS がどちらを選んでいるかは未確認（`20260921-device-env-1399` D2）
-  - DBCS 24x80 の端末タイプ（中・要実測）
+  - ~~DBCS 24x80 の端末タイプ（中・要実測）~~ → 上の `20260921-dbcs-terminal-type` で済んだ
     - ACS: `IBM-5555-C01`。
     - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。
   - 低

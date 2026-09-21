@@ -5,27 +5,20 @@ import { ENV_ESC } from "../telnet/constants.js";
  * 端末タイプ名の決定。
  *
  * SBCS 24x80 = IBM-3179-2、SBCS 27x132 = IBM-3477-FC（RFC 1205 の一覧どおり）。
- * DBCS 24x80 = IBM-5555-G02、DBCS 27x132 = IBM-5555-C01。
+ * **DBCS は画面サイズによらず IBM-5555-C01**（ACS と同じ。`20260921-dbcs-terminal-type`）。
+ * ACS のコアに 930・1399 の 24x80 と 930 の 27x132 で当ててタップで採ったところ、どれも `IBM-5555-C01` を名乗った。
+ * 画面サイズは Query Reply（`query-reply.ts` の t[50]。24x80 は 0x11・27x132 は 0x31）で申告する。
  *
- * DBCS 側は RFC 1205 に載っておらず、IBM のドキュメントも 5555 系を一律
- * 「24x80 または 27x132」と書くだけでサイズを型番に紐づけていない（tn5250 は DBCS 自体が
- * 未実装で先例にならない）。そのため PUB400 実機で総当たりして決めた:
- *
- *   IBM-5555-B01  モノクロ  24x80    …… 色が落ちる（青/桃/黄が出ない）
- *   IBM-5555-C01  カラー    27x132
- *   IBM-5555-G01  モノクロ  24x80    …… 同上
- *   IBM-5555-G02  カラー    24x80
- *   IBM-5555-A01 / D01 / E01 / F01   …… ホストが交渉を拒否（telnet の名前ではない）
- *
- * 当エミュレーターはカラー表示なので、カラーの 2 つ（24x80=G02 / 27x132=C01）を使う。
- * G02 は定義上「グラフィックス表示」だが、グラフィックス非対応は Query Reply（t[53]=0）で
- * 別途申告しており、実機でも表示は正常。
+ * ~~DBCS 24x80 = IBM-5555-G02~~——PUB400 の総当たりで「C01 は 27x132（STRSEU がワイドで来る）」と見て G02 を採っていたが、
+ * それは当時の Query Reply が**常に 27x132 可（0x31）**と申告していたため。いまの申告なら C01 でも STRSEU は 24x80 で来る
+ * （両方の実機で確かめた）。当時の総当たりの記録（B01・G01 はモノクロで色が落ちる、A01 ほかはホストが断る）は
+ * `docs/PROTOCOL.md` §2.1 に残す。
  */
 const DBCS_CCSIDS = new Set([930, 939, 1399, 931, 5035, 5026]);
 
 export function terminalTypeFor(ccsid: number, screenSize: "24x80" | "27x132"): string {
   const dbcs = DBCS_CCSIDS.has(ccsid);
-  if (dbcs) return screenSize === "27x132" ? "IBM-5555-C01" : "IBM-5555-G02";
+  if (dbcs) return "IBM-5555-C01";
   return screenSize === "27x132" ? "IBM-3477-FC" : "IBM-3179-2";
 }
 
