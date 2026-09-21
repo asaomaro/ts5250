@@ -7,6 +7,9 @@
   挿入／キーマップ／在席／SysReq／表示切替／マクロ系）と本 work のテスト、計 16 ファイル — 226 passed / 0 failed
 - **全量（`npm test`）・lint・build は節目でまとめて回す**（利用者の指示。バッチの ①〜③ の後）
 
+- **ラウンド 3（節目の独立点検の後）**: `operator-error-mode.test.ts` 21 件・`type-ahead.test.ts` 36 件を含む関係 59 ファイル
+  933 passed / 0 failed。全量は節目でまとめて（下の「節目の全量」）
+
 ## 受け入れ基準ごとの判定
 - AC1: pass — エラー中の文字・Backspace・Delete で欄の値が変わらず、メッセージが残る。
 - AC2: pass — 右・左矢印・Tab・Home・クリックで抜け、その後の文字が入る。挿入モードが「上書き」に戻る。
@@ -32,6 +35,17 @@ AssertionError: expected '表示 :  切替' to be '表示: 切替' // Object.is 
 - 1 件目: `c` の打鍵そのものが「抜ける」側のキーなので、Reset の取り消しを観測できない。
   挟むキーを Shift（修飾キー単独は抜けない）に替えた。
 - 2 件目: 最下行はセル描画で全角の間に空白が入る。空白を除いて比べた。
+
+### ラウンド 3（独立点検の指摘の再現）
+直す前に再現テストを書いて落ちることを確かめた:
+
+```
+     × **Reset のあと同じ欄で打つと上書きになる**（表示だけでなく打鍵も。独立点検の指摘） 112ms
+     × **エラーで挿入が解けたあと、同じ欄で抜けて打つと上書きになる**（research F6 の実測の筋書き） 372ms
+AssertionError: Reset の後なのに挿入で入った: expected 'ZAB' to be 'ZB' // Object.is equality
+AssertionError: 抜けたら挿入モードが復活した: expected '挿入' to be '上書き' // Object.is equality
+      Tests  2 failed | 18 passed (20)
+```
 
 ## 起動確認（smoke）
 

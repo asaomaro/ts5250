@@ -1968,6 +1968,15 @@ function isDbcsEdit(f: Field): boolean {
   return (!!f.dbcsType || !!f.dbcsContent) && !f.hidden;
 }
 
+/**
+ * **親が挿入モードを変えたら、編集中の状態にも写す。** 編集中の欄は `beginEdit` で挿入モードを
+ * 写し取り、`sync` のたびにそれを書き戻す。写さないと、ペインが下ろした挿入モード（Reset・
+ * 操作員エラー・新しい画面。`20260921-operator-error-mode`）が同じ欄で次に打った瞬間に復活する。
+ */
+watch(insertMode, (v) => {
+  if (edit && edit.insertMode !== v) edit = { ...edit, insertMode: v };
+});
+
 function beginEdit(f: Field, inputEl: HTMLInputElement): void {
   if (isDbcsEdit(f)) {
     // 純論理値（SO/SI 無し）＋末尾空白パディング。列ビューは sync で導出、カーソルは論理インデックス。

@@ -174,6 +174,23 @@ describe("Reset（左 Ctrl を単独で押して離す）", () => {
     expect(w.find(".mode").text(), "Reset で挿入モードが解けていない").toBe("上書き");
   });
 
+  it("**Reset のあと同じ欄で打つと上書きになる**（表示だけでなく打鍵も。独立点検の指摘）", async () => {
+    const { w, input } = await mountInField();
+    await input.trigger("keydown", { key: "A" });
+    await input.trigger("keydown", { key: "B" });
+    await input.trigger("keydown", { key: "Home" });
+    await input.trigger("keydown", { key: "Insert" });
+    await nextTick();
+    expect(w.find(".mode").text(), "前提: 挿入モード").toBe("挿入");
+    await input.trigger("keydown", { key: "Control", code: "ControlLeft", ctrlKey: true });
+    await input.trigger("keyup", { key: "Control", code: "ControlLeft" });
+    await nextTick();
+    await input.trigger("keydown", { key: "Z" });
+    await nextTick();
+    expect(value(input), "Reset の後なのに挿入で入った").toBe("ZB");
+    expect(w.find(".mode").text(), "打鍵で挿入モードが復活した").toBe("上書き");
+  });
+
   it("右 Ctrl は Reset ではない", async () => {
     const { w, input } = await mountInField();
     await enterError(input, w);
@@ -202,6 +219,22 @@ describe("そのほかの抜け方", () => {
     expect(w.find(".mode").text(), "エラーに入っても挿入モードのまま").toBe("上書き");
   });
 
+  it("**エラーで挿入が解けたあと、同じ欄で抜けて打つと上書きになる**（research F6 の実測の筋書き）", async () => {
+    const { w, input } = await mountInField();
+    await input.trigger("keydown", { key: "A" });
+    await input.trigger("keydown", { key: "B" });
+    await input.trigger("keydown", { key: "Home" });
+    await input.trigger("keydown", { key: "Insert" });
+    await nextTick();
+    await enterError(input, w);
+    await input.trigger("keydown", { key: "ArrowRight" }); // 同じ欄の中で抜ける
+    await nextTick();
+    expect(w.find(".mode").text(), "抜けたら挿入モードが復活した").toBe("上書き");
+    await input.trigger("keydown", { key: "Z" });
+    await nextTick();
+    expect(value(input), "挿入で入った").toBe("AZ");
+  });
+
   it("情報の通知では挿入モードを解かない", async () => {
     const { w, input } = await mountInField();
     await input.trigger("keydown", { key: "Insert" });
@@ -209,6 +242,14 @@ describe("そのほかの抜け方", () => {
     w.findComponent({ name: "ScreenGrid" }).vm.$emit("notice", "表示切替");
     await nextTick();
     expect(w.find(".mode").text()).toBe("挿入");
+  });
+
+  it("**ホイール（PageUp/Down）でも抜ける**（ACS は Roll も AID として `clearErrorMode` する）", async () => {
+    const { w, input } = await mountInField();
+    await enterError(input, w);
+    await w.find(".pane").trigger("wheel", { deltaY: 100 });
+    await nextTick();
+    expect(opmsg(w), "ホイールで送ったのにエラーが残った").toBe("");
   });
 
   it("エラーでない通知（情報）は次のキーで消えるだけで、文字は入る", async () => {

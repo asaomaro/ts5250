@@ -10,9 +10,12 @@ import type { RejectReason } from "./fieldValidate.js";
  * 対応する ACS 原文は各定数の脇に残す（挙動を突き合わせるときの手がかり）。
  * 文体は `MSG_NO_RESPONSE` に合わせ、です・ます調・句点なしで揃える。
  *
- * **ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を
+ * ~~**ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を
  * 受け付けないが、本実装は受け付ける（不便なためユーザー判断）。クリア契機も
- * ACS の「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。
+ * ACS の「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。~~
+ * → **ACS に揃えた**（利用者の判断・2026-09-21。`20260921-operator-error-mode`）。操作員エラー
+ * （`isOperatorError`）では文字・Backspace・Delete を拒否し、カーソル移動・AID・Reset・クリックで
+ * 抜ける（実機で測った規則）。情報の通知だけは従来どおり次のキーで消える。
  *
  * ScreenGrid（欄内）と EmulatorPane（欄外＝保護領域）の両方から使うため、
  * 定数はここに 1 か所だけ置く。**新しい操作員メッセージもここへ足す**——
@@ -358,13 +361,14 @@ export function wsErrorNotice(code: string, message: string): string {
  */
 export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用できません";
 
-/** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
 /**
  * ACS のエラー 0020（実機の文言は「このフィールドには実行キーは許されていない。」）。
  * 右寄せ・符号付き数値の欄に打ったまま、欄を出ずに実行キーを押した（`needsFieldExit`）。
  * **出方を添える**——ACS は出し方を言わないが、Field Exit を知らない利用者は抜け方が分からない。
  */
 export const MSG_FIELD_EXIT_REQUIRED = "この項目では実行キーを使用できません（Field Exit か Tab で項目を出てください）";
+
+/** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
 /** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";

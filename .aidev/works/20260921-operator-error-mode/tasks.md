@@ -35,3 +35,7 @@
       対象: `packages/web-ui/test/operator-error-mode.test.ts`
       依存: T3, T5
       AC: AC4
+- [x] T6: 節目の独立点検の指摘を直す（挿入モードを編集中の状態へ写す・ホイールを AID の入口へ・タブ切替で持ち越さない・古い決定の注記）。
+      対象: `ScreenGrid.vue` `watch(insertMode)`、`EmulatorPane.vue` `onWheel` と `sessionId` の監視、`opMessages.ts` 冒頭
+      依存: T4
+      AC: AC2, AC3

@@ -752,6 +752,15 @@ function exitErrorMode(): void {
 function onNotice(text: string): void {
   showNotice(text);
 }
+// **同じペインでタブ（セッション）を切り替えたら、前のセッションのエラー状態と通知を持ち越さない**。
+// ペインのインスタンスは使い回され、`sessionId` だけが差し替わる（独立点検の指摘）
+watch(
+  () => props.sessionId,
+  () => {
+    clearNotice();
+    leftCtrlAlone = false;
+  }
+);
 /**
  * **送信の合流点（`sendKey`）が止めた操作員エラーも、エラー状態に入れる。** `sendKey` は
  * ペインを通らない経路（OIA のボタン等）からも呼ばれるので、通知はセッション状態に載る。
@@ -1119,7 +1128,10 @@ function onWheel(ev: WheelEvent): void {
   if (now < wheelCooldownUntil) return;
   wheelCooldownUntil = now + 120;
   emit("focus");
-  sendKey(props.sessionId, ev.deltaY > 0 ? "PageDown" : "PageUp", cursor.value);
+  // **キーの AID と同じ入口（`onAid`）を通す**——エラー状態を抜けるため（ACS は Roll も
+  // `processAIDCode` を通り `clearErrorMode` する）。直に `sendKey` すると、前の画面の
+  // 操作員エラーが次の画面まで残り、最初の打鍵が拒否される（独立点検の指摘）
+  onAid(ev.deltaY > 0 ? "PageDown" : "PageUp");
 }
 </script>
 
