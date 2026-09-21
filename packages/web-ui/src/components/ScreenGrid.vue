@@ -2376,14 +2376,22 @@ function eraseInputKey(): void {
     return;
   }
   for (const f of editable) {
-    if (logicalValue(f).replace(/ +$/, "") === "") continue;
+    // **消すのは MDT の立った欄だけ**（`20260921-erase-input-mdt-only`）。
+    // ACS `PS5250.processEraseInput` は `clearNonbypassFields(true)`（MDT の立った欄のみ）を呼ぶ。
+    // 以前は「中身のある全欄」を消しており、ホストが既定値を入れた**未変更の欄**
+    // （プロンプタの `*LIBL` など）まで消えて、空白が「変更」として送られていた。
+    // MDT は、ホストが立てたもの（`f.mdt`）か、利用者が打ったもの（`edits`）のどちらか
+    if (!f.mdt && !props.edits.has(f.index)) continue;
     emit("edit", f.index, "");
     writeSlices(f, " ".repeat(visLen(f)));
   }
   // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
-  // フォーカスの移動は呼び出し側（EmulatorPane）が先頭の入力欄へ行う。
   edit = undefined;
   editFieldIndex = -1;
+  // **着地はホーム位置**（ACS: `getHomePos()`）。ホームは IC オーダー（`setInsertCursor`）で
+  // 決まり、無ければ既定（先頭の入力欄）——`focusCursorField` と同じ意味なのでそれを使う。
+  // 以前は呼び出し側が**常に先頭の入力欄**へ置いており、IC で別の欄を指す画面でずれていた
+  nextTick(() => focusCursorField());
 }
 
 /** 画面のホストカーソル位置にある入力欄へフォーカスを当てる（無ければ先頭の入力欄）。

@@ -458,6 +458,20 @@ function onLocal(action: LocalAction): void {
     case "shift-tab":
       focusByOffset(-1);
       break;
+    case "newline": {
+      // **次の行の先頭から見て最初の入力欄へ移る。ホストへは送らない**
+      // （`20260921-shift-enter-newline`）。ACS `PS5250.processNewline` は次の行の先頭位置を
+      // 起点に `FFT5250.nextNonByPassInputFieldPos` で次の入力欄を探す。
+      // 下に入力欄が無ければ先頭へ巡回する（ACS もループで回り込む）。
+      // ※ 次の行の先頭が「前の行から続く行またぎ欄の中」に当たる場合、ACS はその欄の中へ
+      //   置くが、ここでは次の行で始まる欄だけを見る（行またぎ欄は開始行で判定）。未対応の差として残す
+      const fields = editableFields();
+      if (fields.length === 0) break;
+      const row = cursor.value.row;
+      const i = fields.findIndex((f) => f.row > row);
+      focusInput(inputs, i < 0 ? 0 : i);
+      break;
+    }
     case "left":
     case "right":
     case "up":
@@ -520,9 +534,9 @@ function onLocal(action: LocalAction): void {
       gridRef.value?.dup();
       break;
     case "erase-input":
+      // 着地は ScreenGrid がホーム位置（IC で指した欄、無ければ先頭の入力欄）へ置く。
+      // ここで先頭の入力欄へ寄せると、その着地を上書きしてしまう（ACS: `getHomePos()`）
       gridRef.value?.eraseInput();
-      // 全欄クリア後は先頭の入力欄へ（実機の Erase Input と同じ着地）
-      focusInput(inputs, 0);
       break;
   }
 }
