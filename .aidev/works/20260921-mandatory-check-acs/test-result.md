@@ -6,6 +6,8 @@
 - 本 work で書き換え・追加したテスト: `ffw-behavior-bits.test.ts`・`self-check-field.test.ts`・
   `mandatory-check-acs.test.ts`（11 件）・`aid-data-mask.test.ts`（CA キーのスナップショット 1 件）
 
+- **ラウンド 2（独立点検の後）**: `mandatory-check-acs.test.ts` 14 件（指摘の再現 3 件・ステータスバーの欄移動を足した）
+
 ## 受け入れ基準ごとの判定
 - AC1: pass — 未変更の画面では ME を見ない・変更済みなら Enter / CF の F キー / PageDown で止める・CA キーの F3 は通す・
   打ってから消した ME 欄（MDT あり・空）は通る。
@@ -18,6 +20,18 @@
 
 ## 失敗の証跡
 このラウンドでは失敗が発生していない（旧テストは方針に合わせて先に書き換えた。書き換えた内容は D1 の破棄として `decisions.md` に記録）。
+
+### ラウンド 2（独立点検の指摘の再現）
+直す前に再現テストを書いて落ちることを確かめた:
+
+```
+     × **違反のある欄が隣り合っても、戻す移動を「欄を出た」と数えない**（往復し続けない） 72ms
+     × **新しい画面が来たとき、前のカーソル位置にある新しい画面の欄を検査しない** 68ms
+     × **FER の欄を満杯まで打った瞬間は「欄を出た」ではない**（右端の境界） 45ms
+AssertionError: 新しい画面の欄を「出た」と検査した: expected 'この項目はすべての桁を埋めてください' to be '' // Object.is equality
+AssertionError: 満杯にしただけでエラーにした: expected 'この項目の検査数字が正しくありません' to be '' // Object.is equality
+      Tests  3 failed | 11 passed (14)
+```
 
 ## 起動確認（smoke）
 

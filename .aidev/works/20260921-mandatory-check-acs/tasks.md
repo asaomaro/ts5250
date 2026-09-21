@@ -34,3 +34,7 @@
       対象: `ffw-behavior-bits.test.ts` `self-check-field.test.ts` `mandatory-check-acs.test.ts` `aid-data-mask.test.ts`
       依存: T4
       AC: AC4
+- [x] T6: 節目の独立点検の指摘を直す（戻す移動・新しい画面の着地は検査しない・欄の右端の境界・ステータスバーの欄移動）。
+      対象: `EmulatorPane.vue` `muteLeaveCheck`、`useCursor.ts` `fieldAtCaret`、`StatusBar.vue` `press`
+      依存: T5
+      AC: AC2, AC3

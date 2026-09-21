@@ -168,6 +168,24 @@ export function fieldAt(
 }
 
 /**
+ * **キャレットの位置が属する欄**。`fieldAt` に加えて、**欄の右端の境界**（最終文字の直後。満杯の FER 欄で
+ * キャレットが止まる所）もその欄に数える。境界は独立したセルを持たず `fieldAt` では欄の外になるので、
+ * 「欄を出たか」の判定に `fieldAt` を使うと、満杯まで打っただけで出たことになる（独立点検の指摘）。
+ */
+export function fieldAtCaret(
+  row: number,
+  col: number,
+  fields: readonly Field[],
+  cols: number,
+  rows: number
+): Field | undefined {
+  const hit = fieldAt(row, col, fields, cols, rows);
+  if (hit || col <= 1) return hit;
+  // 直前の桁が欄の最終桁なら、その欄の右端の境界
+  return fields.find((f) => offsetOfPos(f, row, col - 1, cols, rows) === fieldSpan(f, cols, rows) - 1);
+}
+
+/**
  * フィールド先頭からの桁オフセット（＝入力欄のキャレット位置）。
  * 折返し先の行では前行までの桁数が加算される。フィールド外は 0〜span にクランプ。
  */

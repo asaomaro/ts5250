@@ -13,7 +13,7 @@ import { sessionsStore, type HeldKey } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
 import { isEscapeAidEvent, makeKeydownHandler, typeAheadKind, type LocalAction } from "../composables/useKeymap.js";
-import { moveCursor, fieldAt, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
+import { moveCursor, fieldAt, fieldAtCaret, caretInField, roundToDbcsLead, nextWordStart, type Dir, type CursorBounds } from "../composables/useCursor.js";
 import {
   sendKey,
   selectGuiChoice,
@@ -155,12 +155,25 @@ function noteFieldExited(): void {
  * 経路ではなくカーソル位置の変化で見る（0020 の待ちと同じ考え方）。**新しい画面での移動は対象外**
  * （打ちかけは捨てられている）。
  */
+/**
+ * **こちらから動かしたカーソルは「欄を出た」と数えない**（違反の欄へ戻す移動・新しい画面の着地）。
+ * 数えると、違反のある欄が 2 つあるとき戻す移動が次の検査を呼び、2 つの欄の間で往復し続ける
+ * （独立点検の指摘。ACS も戻す移動を `moveCursorWithMandFillCheck` に通さない）。
+ * カーソルの変化は次の tick の監視で届くので、その tick が終わるまで黙らせる。
+ */
+let leaveCheckMuted = false;
+function muteLeaveCheck(): void {
+  leaveCheckMuted = true;
+  void nextTick(() => {
+    leaveCheckMuted = false;
+  });
+}
 watch([cursor, snapshot], ([pos, snap], [oldPos, oldSnap]) => {
   const st = state.value;
-  if (!st || !snap || snap !== oldSnap || !oldPos) return;
-  const from = fieldAt(oldPos.row, oldPos.col, snap.fields, snap.cols, snap.rows);
+  if (leaveCheckMuted || !st || !snap || snap !== oldSnap || !oldPos) return;
+  const from = fieldAtCaret(oldPos.row, oldPos.col, snap.fields, snap.cols, snap.rows);
   if (!from) return;
-  if (fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows)?.index === from.index) return;
+  if (fieldAtCaret(pos.row, pos.col, snap.fields, snap.cols, snap.rows)?.index === from.index) return;
   const hit = findFieldViolation(from, st.edits);
   if (!hit) return;
   showNotice(hit.reason === "mandatory-fill" ? MSG_MANDATORY_FILL : MSG_SELF_CHECK);
@@ -169,7 +182,8 @@ watch([cursor, snapshot], ([pos, snap], [oldPos, oldSnap]) => {
 watch(cursor, (pos) => {
   const st = state.value, snap = snapshot.value;
   if (st?.awaitingFieldExit === undefined || !snap) return;
-  const here = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
+  // 右端の境界も欄の中（満杯の FER 欄で止まっただけでは出たことにしない）
+  const here = fieldAtCaret(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
   if (here?.index !== st.awaitingFieldExit) delete st.awaitingFieldExit;
 });
 function onCursor(row: number, col: number): void {
@@ -310,6 +324,8 @@ function onGuiSubmit(fieldId: number): void {
 }
 // 新しいホスト画面が来たらユーザーのカーソル上書きをリセットする
 watch(snapshot, (snap) => {
+  // 新しい画面の着地（カーソルの上書きを外す）も「欄を出た」ではない
+  muteLeaveCheck();
   cursorOverride.value = undefined;
   // **挿入モードも画面ごとに上書きへ戻す**（`20260921-insert-mode-per-screen`）。
   // ACS は `DS5250.initKeyboard`（`resetInsertMode` を呼ぶ）を、書式の開始・WEC・
@@ -626,6 +642,7 @@ function onAid(key: AidKey): void {
  */
 function focusMandatoryViolation(hit: MandatoryFinding | undefined): void {
   if (!hit) return;
+  muteLeaveCheck(); // 戻す移動は「欄を出た」ではない
   // 0020 はカーソルを動かさない（ACS は打った位置のまま。実機で確認）——いま居る欄の話なので
   if (hit.reason === "field-exit-required") return;
   const els = editableInputs();
@@ -1411,6 +1428,7 @@ function onWheel(ev: WheelEvent): void {
       @toggle-log="logOpen = !logOpen"
       @sysreq="onAid('SysReq')"
       @combo="onPaletteKey"
+      @violation="focusMandatoryViolation"
       @reconnect="retryReconnect(sessionId)"
     />
   </div>

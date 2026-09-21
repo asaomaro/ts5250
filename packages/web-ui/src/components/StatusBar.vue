@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import type { AidKey } from "@ts5250/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   (e: "combo", ev: { key: string; ctrlKey?: boolean; altKey?: boolean }): void;
   /** 手動の繋ぎ直し（自動の再試行が尽きたとき） */
   (e: "reconnect"): void;
+  /** 送信前の検査で止めた（ペインがその欄へカーソルを移す。キーボードの AID と同じ振る舞いにするため） */
+  (e: "violation", hit: MandatoryFinding): void;
 }>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
@@ -95,7 +98,8 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
 function press(k: AidKey): void {
   // **ペインのカーソル（利用者が動かした位置）で送る**。`state.cursor` はホストが最後に置いた位置で、
   // 動かした後に押すと違う位置をホストへ返し、AID の前の検査（カーソル下の欄の MF 等）も別の欄を見る
-  sendKey(props.state.sessionId, k, props.cursor ?? props.state.cursor);
+  const hit = sendKey(props.state.sessionId, k, props.cursor ?? props.state.cursor);
+  if (hit) emit("violation", hit);
 }
 
 /**

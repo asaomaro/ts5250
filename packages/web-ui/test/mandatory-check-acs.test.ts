@@ -153,6 +153,50 @@ describe("欄を出るときの MF・自己点検", () => {
   });
 });
 
+describe("独立点検の指摘（欄を出るときの検査）", () => {
+  it("**違反のある欄が隣り合っても、戻す移動を「欄を出た」と数えない**（往復し続けない）", async () => {
+    // MF 欄 A（5 行目）と自己点検欄 B（11 行目）の両方を違反にしておき、A から B へ移る
+    seed({ row: 5, col: 20 });
+    sessionsStore.get(SID)!.edits.set(1, "AB"); // A: MF の部分入力
+    sessionsStore.get(SID)!.edits.set(4, "1234"); // B: 検査桁が合わない
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    mounted.push(w);
+    await nextTick();
+    const inputs = w.findAll("input.grid-input");
+    const a = inputs[0]!.element as HTMLInputElement;
+    a.focus();
+    await nextTick();
+    (inputs[3]!.element as HTMLInputElement).focus(); // B へ（クリック相当）
+    for (let i = 0; i < 10; i++) await nextTick();
+    expect(document.activeElement, "A へ戻っていない").toBe(a);
+    expect(opmsg(w)).toBe(norm(MSG_MANDATORY_FILL));
+  });
+
+  it("**新しい画面が来たとき、前のカーソル位置にある新しい画面の欄を検査しない**", async () => {
+    const { w } = await mountAt(1, { row: 7, col: 20 });
+    await typeText("X");
+    // 新しい画面: 前のカーソル位置（7,20）に、ホストが MDT を立てた部分入力の MF 欄がある
+    const next = snap({ row: 5, col: 20 });
+    next.fields = next.fields.map((f) => (f.index === 2 ? { ...f, adjust: "mandatory-fill", mdt: true, value: "AB" } : f));
+    sessionsStore.updateScreen(SID, next);
+    for (let i = 0; i < 6; i++) await nextTick();
+    expect(opmsg(w), "新しい画面の欄を「出た」と検査した").toBe("");
+  });
+
+  it("**FER の欄を満杯まで打った瞬間は「欄を出た」ではない**（右端の境界）", async () => {
+    seed({ row: 11, col: 20 });
+    const s = sessionsStore.get(SID)!;
+    s.snapshot = { ...s.snapshot!, fields: s.snapshot!.fields.map((f) => (f.index === 4 ? { ...f, fieldExitRequired: true } : f)) };
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    mounted.push(w);
+    await nextTick();
+    (w.findAll("input.grid-input")[3]!.element as HTMLInputElement).focus();
+    await nextTick();
+    await typeText("123456"); // 検査桁の合わない 6 桁で満杯（FER なので自動送りしない）
+    expect(opmsg(w), "満杯にしただけでエラーにした").toBe("");
+  });
+});
+
 describe("AID の前の検査とエラー状態", () => {
   it("**ME で止めたらエラー状態に入り、ME 欄へ移る**", async () => {
     const { inputs } = await mountAt(1, { row: 7, col: 20 });
@@ -174,6 +218,10 @@ describe("AID の前の検査とエラー状態", () => {
     await nextTick();
     expect(keysSent(), "ホストのカーソル位置で検査して送った").toEqual([]);
     expect(opmsg(w)).toBe(norm(MSG_MANDATORY_FILL));
+    // キーボードの AID と同じく、止めた欄の先頭へ移る（ACS の場合 5）
+    const mf = w.findAll("input.grid-input")[0]!.element as HTMLInputElement;
+    expect(document.activeElement).toBe(mf);
+    expect(mf.selectionStart).toBe(0);
   });
 
   it("ME / MF / 自己点検のメッセージは操作員エラー（ACS は `setErrorCode` でエラー状態に入る）", () => {
