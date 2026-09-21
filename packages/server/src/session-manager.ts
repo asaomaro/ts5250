@@ -29,6 +29,13 @@ import {
 } from "./pc-command.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { holdsConnection, type ServiceState } from "./service-state.js";
+import {
+  onDisplayLost,
+  onDisplayConnected,
+  otherDisplayAssociated,
+  shouldClosePrinter,
+  type AssociatedDisplay
+} from "./associated-printer.js";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -299,6 +306,11 @@ export interface SessionEntry {
   owner?: string;
   /** ジョブ識別子。接続直後に装置名だけ入り、引けたら user/number が足される */
   job?: SessionJob;
+  /**
+   * **関連付けたプリンターセッション**（`20260921-associated-printer-session`。`linkAssociatedPrinter` が付ける）。表示の切断・繋ぎ直し・終了で
+   * そのプリンターを止める・起こす・閉じる（ACS `AssociatedPrinterSession5250`）。`closeWithLast` は最後の表示と一緒にプリンターも閉じる指定
+   */
+  associatedPrinter?: { printerId: string; closeWithLast: boolean };
   /** PC コマンド（STRPCCMD）の実行が有効か。UI の出し分けに使う */
   pcCommandEnabled: boolean;
   /** PC コマンドの実行履歴（新しい順ではなく受信順。上限 `PC_COMMAND_HISTORY`） */
@@ -887,6 +899,8 @@ export class SessionManager {
       const cur = this.sessions.get(id);
       if (cur?.holdTimer) clearTimeout(cur.holdTimer);
       this.sessions.delete(id);
+      // ホストが終わらせた・繋ぎ直しを諦めたときも、関連付けたプリンターを止める（`close` を通らない経路）
+      if (cur) this.releaseAssociatedPrinter(cur);
     });
     // 残り（ユーザー・番号）はコマンドサーバーで引く。**接続を待たせない**
     entry.jobResolved = this.resolveJob(entry, opts);
@@ -1916,16 +1930,139 @@ export class SessionManager {
     return entry;
   }
 
+  /**
+   * **表示と関連付けたプリンターを組にする**（`20260921-associated-printer-session`。ACS `AssociatedPrinterSession5250`）。
+   * 表示がホストに切られたら（ほかに同じプリンターへ関連付けた表示が繋がっていなければ）プリンターを止め、繋ぎ直せたら起こす。
+   * 閉じたとき（`close`）の処置は `releaseAssociatedPrinter`。**常駐のプリンターは止めも閉じもしない**（`associated-printer.ts`）
+   */
+  linkAssociatedPrinter(displayId: string, printerId: string, closeWithLast: boolean): void {
+    const entry = this.sessions.get(displayId);
+    if (!entry) throw new As400Error("SESSION_NOT_FOUND", `session ${displayId} not found`);
+    entry.associatedPrinter = { printerId, closeWithLast };
+    // 切れたら（繋ぎ直しに入った）止め、繋ぎ直せたら起こす。**自分が組のままのときだけ**（閉じたあとの遅れたイベントに反応しない）
+    entry.session.on("reconnecting", () => {
+      if (this.sessions.get(displayId)?.associatedPrinter?.printerId !== printerId) return;
+      this.applyPrinterLoss(displayId, printerId);
+    });
+    entry.session.on("reconnected", () => {
+      if (this.sessions.get(displayId)?.associatedPrinter?.printerId !== printerId) return;
+      const p = this.printers.get(printerId);
+      if (!p) return;
+      if (onDisplayConnected({ resident: p.resident, running: holdsConnection(p.state) }) === "start") {
+        void this.startPrinter(printerId).catch((e: unknown) =>
+          sessionLog.warn({ sessionId: displayId, printerId, err: String(e) }, "associated printer restart failed")
+        );
+      }
+    });
+  }
+
+  /**
+   * **関連付けるプリンターを起こし、装置名が決まるのを待つ**（表示を開く前。ACS `AssociatedPrinterSession5250` のコンストラクタ。
+   * `20260921-associated-printer-session`）。
+   *
+   * - 同じ持ち主・同じ設定（`ref`）で開いているプリンターがあればそれを使う（止まっていれば起こす。ACS は同じホストの同じ名前のセッションを使い回す）。無ければ `open` で開く
+   * - 待つのは起動応答で装置名が決まるまで（`timeoutMs` まで。無ければ待ち続ける）。時間切れ・起動の失敗でも**表示は開く**——
+   *   その場合は装置名を「起動応答の名前 → 設定で送った名前 → 無し」の順で採る（ACS は時間切れで `getWorkstationID()`＝設定の値のまま関連付ける）
+   * - 戻り値: `printerId`（連動に使う）と `deviceName`（`undefined` なら関連付けなしで表示を開く）
+   */
+  async prepareAssociatedPrinter(
+    ref: string | undefined,
+    owner: string | undefined,
+    open: () => Promise<PrinterEntry>,
+    timeoutMs: number | undefined
+  ): Promise<{ printerId: string; deviceName: string | undefined } | { error: string }> {
+    let entry: PrinterEntry | undefined;
+    if (ref !== undefined) entry = [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner);
+    // **プリンターの接続は起動応答が来るまで戻らない**（`PrinterSession.connect` が最大 15 秒待つ）ので、開く・起こすのにも同じ待ち時間を掛ける。
+    // 時間切れでもプリンターの起動は続く（表示は先へ進み、装置名は設定の値で関連付ける）。開く側が失敗すれば例外を記録して関連付けなしにする
+    const starting: Promise<PrinterEntry> = entry
+      ? holdsConnection(entry.state)
+        ? Promise.resolve(entry)
+        : this.startPrinter(entry.id)
+      : open();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = new Promise<"timeout">((resolve) => {
+        if (timeoutMs !== undefined) timer = setTimeout(() => resolve("timeout"), timeoutMs);
+      });
+      const first = await Promise.race([starting, timedOut]);
+      if (first === "timeout") {
+        // 待ち時間切れ。開いた（ことになる）エントリを後から拾って関連付けに使う（起動は続いている）
+        void starting.catch((e: unknown) => sessionLog.warn({ ref, err: String(e) }, "associated printer failed to start after timeout"));
+        entry = ref !== undefined ? [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner) : entry;
+        if (!entry) return { error: `printer session did not start within ${timeoutMs} ms` };
+      } else entry = first;
+    } catch (e) {
+      // 開けなかった（上限・起動の失敗）。関連付けなしで表示を開く
+      return { error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    const id = entry.id;
+    // 起動応答が来たか（`startupCode` が空でない）。装置名は起動応答の名前（`deviceName`。無ければ送った名前）
+    const started = (): boolean => (this.printers.get(id)?.session?.startupCode ?? "") !== "";
+    // 待つ: 起動応答が来るまで 200 ms おき（ACS と同じ）。`timeoutMs` が無ければ待ち続ける（0 秒の指定）
+    const deadline = timeoutMs === undefined ? Infinity : this.now() + timeoutMs;
+    while (!started() && this.now() < deadline) {
+      const cur = this.printers.get(id);
+      if (!cur || cur.state === "error" || cur.state === "stopped") break; // 起動に失敗した・止められた
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const p = this.printers.get(id);
+    return { printerId: id, deviceName: p?.session?.deviceName || p?.openOpts.deviceName || undefined };
+  }
+
+  /** 表示の一覧をほかの表示の判断に渡す形にする（自分を除く） */
+  private othersAssociated(displayId: string): AssociatedDisplay[] {
+    return [...this.sessions.values()]
+      .filter((e) => e.id !== displayId)
+      // 閉じた表示は `closed` で `this.sessions` から外れるので、ここに残っているのは閉じていない。繋ぎ直し中だけ「繋がっていない」に数える
+      .map((e) => ({ printerId: e.associatedPrinter?.printerId, connected: e.session.reconnecting === undefined }));
+  }
+
+  /** 表示が切れた: ほかに使う表示が無ければプリンターを止める（常駐・止まっているものは触らない） */
+  private applyPrinterLoss(displayId: string, printerId: string): void {
+    const p = this.printers.get(printerId);
+    if (!p) return;
+    const use = otherDisplayAssociated(printerId, this.othersAssociated(displayId));
+    if (onDisplayLost({ resident: p.resident, running: holdsConnection(p.state) }, use) === "stop") {
+      try {
+        this.stopPrinter(printerId);
+      } catch (e) {
+        sessionLog.warn({ sessionId: displayId, printerId, err: String(e) }, "associated printer stop failed");
+      }
+    }
+  }
+
+  /** 表示を閉じるときの、関連付けたプリンターの処置（止める・指定があれば閉じる） */
+  private releaseAssociatedPrinter(entry: SessionEntry): void {
+    const link = entry.associatedPrinter;
+    if (!link) return;
+    delete entry.associatedPrinter; // 以後の遅れたイベントに反応しない
+    const p = this.printers.get(link.printerId);
+    if (!p) return;
+    const use = otherDisplayAssociated(link.printerId, this.othersAssociated(entry.id));
+    if (shouldClosePrinter({ resident: p.resident, running: holdsConnection(p.state) }, link.closeWithLast, use)) {
+      void this.close(link.printerId).catch(() => undefined);
+    } else {
+      this.applyPrinterLoss(entry.id, link.printerId);
+    }
+  }
+
   async close(id: string, user?: AuthUser): Promise<void> {
     const entry = this.sessions.get(id);
     if (entry) {
       assertOwner(entry.owner, user);
+      // 関連付けたプリンターを止める・閉じる（ACS の表示を閉じたときの処置）。**自分をマップから消す前**に
+      // 呼ぶと自分を「ほかの表示」に数えるので、消した後に呼ぶ
+      const owned = entry;
       // **猶予のタイマーも落とす。** マップから消してもタイマーは生き残るので、
       // 残すと閉じ済みの id に対して空振りのコールバックが後から走る
       if (entry.holdTimer) clearTimeout(entry.holdTimer);
       entry.recorder?.stop(); // 購読を残したままセッションを捨てるとリークする
       entry.session.disconnect();
       this.sessions.delete(id);
+      this.releaseAssociatedPrinter(owned);
       return;
     }
     const printer = this.printers.get(id);

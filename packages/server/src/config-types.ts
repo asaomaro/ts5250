@@ -293,6 +293,18 @@ const sessionBase = {
    */
   associatedPrinter: z.string().optional(),
   /**
+   * **関連付けるプリンターセッションの設定**（同じファイルのプリンターの設定の id。表示の 5250 だけ。`20260921-associated-printer-session`）。
+   * ACS の「プリンターの関連付け」でプリンターセッションを指す方式——表示を開くとそのプリンターを起こして装置名を待ち、その装置名で関連付ける。
+   * 表示に合わせてプリンターを止める・起こす・閉じる（`SessionManager.linkAssociatedPrinter`）。**`associatedPrinter`（装置名を書く方式）とは排他**
+   */
+  associatedPrinterSession: z.string().min(1).optional(),
+  /**
+   * 関連付けるプリンターの装置名を待つ時間（**秒**。既定 5。0 は待ち続ける）。1〜4 は 5、600 を超えれば 600 として扱う（ACS の設定画面と同じ丸め）
+   */
+  associatedPrinterTimeout: z.number().int().min(0).optional(),
+  /** 最後の表示と一緒に関連付けたプリンターのセッションも閉じる（既定 false。ACS `close5250AssocPrinterWithLastSession`） */
+  closeAssociatedPrinterWithLastSession: z.boolean().optional(),
+  /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか（printer のみ）。
    * `hold`（既定）＝保留にして残す / `delete`＝削除する。削除は取り消せない。
    */
@@ -346,6 +358,9 @@ function assertTypeConsistent(
     sessionType: SessionType;
     terminal?: "5250" | "3270" | "vt" | undefined;
     associatedPrinter?: string | undefined;
+    associatedPrinterSession?: string | undefined;
+    associatedPrinterTimeout?: number | undefined;
+    closeAssociatedPrinterWithLastSession?: boolean | undefined;
     dtaqWatch?: DtaqWatchSpec | undefined;
     msgWatch?: MsgWatchSpec | undefined;
     webhook?: unknown;
@@ -359,6 +374,23 @@ function assertTypeConsistent(
       path: ["associatedPrinter"],
       message: `associatedPrinter は 5250 の display セッションにしか指定できません（sessionType=${s.sessionType}・terminal=${s.terminal ?? "5250"}）`
     });
+  }
+  if (s.associatedPrinterSession !== undefined && (s.sessionType !== "display" || (s.terminal ?? "5250") !== "5250")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["associatedPrinterSession"],
+      message: `associatedPrinterSession は 5250 の display セッションにしか指定できません（sessionType=${s.sessionType}・terminal=${s.terminal ?? "5250"}）`
+    });
+  }
+  // 方式は 1 つ（ACS も「プリンターセッション」か「装置名」かを選ぶ）
+  if (s.associatedPrinter !== undefined && s.associatedPrinterSession !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["associatedPrinterSession"], message: "associatedPrinter と associatedPrinterSession は同時に指定できません" });
+  }
+  // 待ち時間・一緒に閉じるは、プリンターセッションを指したときだけ意味を持つ
+  for (const k of ["associatedPrinterTimeout", "closeAssociatedPrinterWithLastSession"] as const) {
+    if (s[k] !== undefined && s.associatedPrinterSession === undefined) {
+      ctx.addIssue({ code: "custom", path: [k], message: `${k} は associatedPrinterSession を指定したときだけ指定できます` });
+    }
   }
   if (s.sessionType === "msgwatch" && s.msgWatch === undefined) {
     ctx.addIssue({ code: "custom", path: ["msgWatch"], message: "msgwatch セッションには msgWatch が必要です" });
@@ -633,6 +665,12 @@ export interface PublicSession {
   deviceName?: string;
   /** 5250 の display のみ。関連付けプリンターの装置名（IBMASSOCPRT。信頼設定ではない） */
   associatedPrinter?: string;
+  /** 5250 の display のみ。関連付けるプリンターセッションの設定（同じファイルのプリンターの**参照**。`srv:` / `own:`） */
+  associatedPrinterSession?: string;
+  /** 関連付けるプリンターの装置名を待つ秒数（0＝待ち続ける） */
+  associatedPrinterTimeout?: number;
+  /** 最後の表示と一緒にプリンターも閉じる */
+  closeAssociatedPrinterWithLastSession?: boolean;
   /** printer のみ。書き出しできないスプールを取得したあとの扱い（既定 hold） */
   rescueAction?: "hold" | "delete";
   /** printer のみ。ホスト変換の機種（HPT）。指定時は表示・PDF が使えない代わりに本来の印刷になる */

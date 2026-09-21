@@ -105,3 +105,82 @@ describe("関連付けプリンター", () => {
     expect(await save(w)).not.toHaveProperty("associatedPrinter");
   });
 });
+
+/**
+ * **関連付けるプリンターセッション**（`20260921-associated-printer-session`）。ACS のもう 1 つの方式——同じ保存先のプリンターの設定を指し、
+ * 装置名の方式とは排他。待ち時間・一緒に閉じるは、プリンターセッションを選んだときだけ出て送る（既定は送らない）
+ */
+describe("関連付けるプリンターセッション", () => {
+  const PRT = { ref: "own:p-1", name: "私のプリンター", system: OWN_SYSTEM.ref, sessionType: "printer" } as PublicSession;
+  const OTHER_SRV = { ref: "srv:p-9", name: "共有プリンター", system: "srv:sys", sessionType: "printer" } as PublicSession;
+  beforeEach(() => {
+    systemsStore.sessions = [PRT, OTHER_SRV];
+  });
+  const sessionSelect = (w: VueWrapper) => w.findAll("label.row").find((l) => l.text().includes("関連付けるプリンターセッション"))?.find("select");
+
+  it("**同じ保存先のプリンターだけを選択肢に出す**（自分の設定に共有のプリンターは出さない）", async () => {
+    const w = await openEdit(session());
+    const opts = sessionSelect(w)!.findAll("option").map((o) => o.text());
+    expect(opts).toContain("私のプリンター");
+    expect(opts).not.toContain("共有プリンター");
+    w.unmount();
+  });
+
+  it("選ぶと保存の body に参照が入り、**装置名は送らない**（方式は 1 つ）。待ち時間・一緒に閉じるは既定なら送らない", async () => {
+    const w = await openEdit(session({ associatedPrinter: "OLDPRT" } as Partial<PublicSession>));
+    await assocInput(w)!.setValue(""); // 装置名を書いている間は選べない（排他）ので、先に消す
+    await sessionSelect(w)!.setValue("own:p-1");
+    const body = await save(w);
+    expect(body.associatedPrinterSession).toBe("own:p-1");
+    expect(body).not.toHaveProperty("associatedPrinter");
+    expect(body).not.toHaveProperty("associatedPrinterTimeout");
+    expect(body).not.toHaveProperty("closeAssociatedPrinterWithLastSession");
+  });
+
+  it("待ち時間（既定以外）と一緒に閉じるを送る。0 は「待ち続ける」で送る", async () => {
+    const w = await openEdit(session({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 0, closeAssociatedPrinterWithLastSession: true } as Partial<PublicSession>));
+    const body = await save(w);
+    expect(body).toMatchObject({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 0, closeAssociatedPrinterWithLastSession: true });
+  });
+
+  it("既存の値が開き、編集しなくても保存で消えない", async () => {
+    const w = await openEdit(session({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 30 } as Partial<PublicSession>));
+    expect((sessionSelect(w)!.element as HTMLSelectElement).value).toBe("own:p-1");
+    expect((await save(w)).associatedPrinterTimeout).toBe(30);
+  });
+
+  it("**プリンターセッションを選んでいる間は装置名の欄を使えず、装置名を書いている間は選べない**（排他）", async () => {
+    const w = await openEdit(session({ associatedPrinterSession: "own:p-1" } as Partial<PublicSession>));
+    expect(assocInput(w)!.attributes("disabled")).toBeDefined();
+    w.unmount();
+    const w2 = await openEdit(session({ associatedPrinter: "PRT01" }));
+    expect(sessionSelect(w2)!.attributes("disabled")).toBeDefined();
+    w2.unmount();
+  });
+
+  it("「指定しない」に戻すと 3 項目とも送らない", async () => {
+    const w = await openEdit(session({ associatedPrinterSession: "own:p-1", associatedPrinterTimeout: 30, closeAssociatedPrinterWithLastSession: true } as Partial<PublicSession>));
+    await sessionSelect(w)!.setValue("");
+    const body = await save(w);
+    for (const k of ["associatedPrinterSession", "associatedPrinterTimeout", "closeAssociatedPrinterWithLastSession"]) expect(body).not.toHaveProperty(k);
+  });
+
+  it("5250 の表示以外（プリンター・3270）には欄を出さない・送らない", async () => {
+    for (const over of [{ sessionType: "printer" as const }, { terminal: "3270" as const }]) {
+      const w = await openEdit(session(over));
+      expect(sessionSelect(w), JSON.stringify(over)).toBeUndefined();
+      w.unmount();
+    }
+    const w = await openEdit(session({ associatedPrinterSession: "own:p-1" } as Partial<PublicSession>));
+    await w.findAll("select").find((s) => s.text().includes("3270"))!.setValue("3270");
+    expect(await save(w)).not.toHaveProperty("associatedPrinterSession");
+  });
+
+  it("詳細（ⓘ）に**設定の名前**で出す", async () => {
+    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ associatedPrinterSession: "own:p-1" } as Partial<PublicSession>) } });
+    await w.find("button.info").trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("関連付けるプリンターセッション私のプリンター");
+    w.unmount();
+  });
+});

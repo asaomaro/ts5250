@@ -654,12 +654,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   表示の 5250 の設定 `associatedPrinter` を NEW-ENVIRON の**最後**に `USERVAR IBMASSOCPRT` として送る（`packages/tn5250/src/telnet/telnet.ts:357-361`。
   ACS `NVT5250` と同じく Java の `trim()` で空なら送らず、値は加工しない）。実機（社内機）で ACS のコアと当 PJ が同じワイヤ・同じ結果——
   関連付けた装置がジョブの印刷装置になり（I902）、存在しない名前では起動応答が I901 で既定の印刷装置のまま繋がる。
-- [ ] **関連付けプリンター: プリンターセッションを指す方式**（ACS `5250PrinterAssociation`＝true。`20260921-associated-printer` research F4 から割った）。
-  ACS は指したプリンターセッションが同じホストで動いていればその装置名を使い、無ければ起こして装置名が決まるまで待つ
-  （`5250AssocPrinterSessionConnectionTimeout`。既定 5 秒・5〜600 に丸める・0 は待ち続ける。時間切れなら関連付け無しで繋ぐ）。
-  表示が切れたら（ほかに関連付けた表示が無ければ）プリンターを止め、表示が繋がったらプリンターを起こし、`close5250AssocPrinterWithLastSession` なら
-  最後の表示と一緒に閉じる（`AssociatedPrinterSession5250.CommEvent` / `sessionLabelEvent`・`SessionManager.stopAssociatedPrinterSession`）。
-  当 PJ はサーバーのセッション管理（`SessionManager.open` / `openPrinter`）をまたぐ。
+- [x] **関連付けプリンター: プリンターセッションを指す方式**（ACS `5250PrinterAssociation`＝true。`20260921-associated-printer` research F4 から割った）。
+  `20260921-associated-printer-session`（PR #410）。設定 `associatedPrinterSession`（同じファイルのプリンターの設定・待ち秒・一緒に閉じる）を足し、ブラウザから表示を開くとき
+  プリンターを使い回すか開いて起こし、装置名を待ってから IBMASSOCPRT で関連付ける（`packages/server/src/ws-handler.ts` の `prepareAssociation`・`session-manager.ts` の
+  `prepareAssociatedPrinter`）。表示の切断で（ほかの表示が使っていなければ）プリンターを止め、繋ぎ直しで起こし、閉じたら止め・指定があれば閉じる（`associated-printer.ts`）。
+  待ち時間は ACS と同じ丸め（既定 5・1〜4 は 5・600 超は 600・0 は待ち続ける）。**常駐のプリンター（サービス ✅）は止めも閉じもしない**（ACS に無い概念。decisions D2）。
+  実機（社内機）で、指したプリンターの装置がジョブの印刷装置になり、表示を閉じるとプリンターが止まる／「一緒に閉じる」で消える／2 本の表示で共有して最後を閉じて止まる、を確かめた。
+  MCP・HLLAPI から開く表示には効かせない（ACS の画面の層の機能。decisions D1）。
 - [x] **起動応答 I901 を表示セッションで知らせる**（`20260921-associated-printer` research F7 から割った）。`20260921-startup-code-status`（PR #410）。
   ~~ACS は I901 を…状態行に「仮想装置の機能が元の装置より少ない」の意味の文言（`KEY_I901`）を出す~~ → ACS が実際に見せるのは I901・I902 とも
   「<コード> - セッションを開始しました」の意味の文言（`AcsOnly.displayResponseCode`。3 秒で消える）で、`KEY_I901` はすぐ上書きされる（`StatusBar` の時間切れは `clearText`）。

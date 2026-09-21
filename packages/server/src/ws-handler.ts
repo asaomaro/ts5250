@@ -130,6 +130,36 @@ export interface WsHandlerDeps {
 }
 
 /** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
+/**
+ * **解決結果（保存済みのプリンターの設定）から、プリンターを開く材料を作る**（`onOpenPrinter` と関連付けるプリンター
+ * `SessionManager.linkAssociatedPrinter` の前の起動が同じ道を通る——2 か所に手写しすると信頼設定〔PDF 出力先・自動印刷・常駐〕の扱いが
+ * 片方だけ食い違う。`20260921-associated-printer-session`）。
+ *
+ * ⚠ **転記漏れに注意**: キーごとの手写しなので、足し忘れると「表示セッションだけ設定が効く」状態になる（表示側は `{...target.connect}`）
+ */
+export function printerOptsFrom(t: ResolvedTarget): Parameters<SessionManager["openPrinter"]>[0] {
+  const opts: Parameters<SessionManager["openPrinter"]>[0] = {};
+  const co = t.connect;
+  if (co.host !== undefined) opts.host = co.host;
+  if (co.port !== undefined) opts.port = co.port;
+  if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
+  if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
+  // 常駐の経路（`{...t.connect}`）では渡っていたのに、ここだけ落ちていた（節目の点検の指摘）
+  if (co.deviceNameRetry !== undefined) opts.deviceNameRetry = co.deviceNameRetry;
+  if (co.tls !== undefined) opts.tls = co.tls;
+  if (co.user !== undefined) opts.user = co.user;
+  if (co.password !== undefined) opts.password = co.password;
+  if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
+  if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
+  if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
+  if (t.printerOutput) opts.output = t.printerOutput;
+  // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
+  if (t.service) opts.service = true;
+  // 開いた直後に待ち受けるか（定義由来。既定は開始する）
+  if (!t.autoStart) opts.autoStart = false;
+  return opts;
+}
+
 function hasRef(msg: { system?: string; session?: string }): boolean {
   return Boolean(msg.system ?? msg.session);
 }
@@ -579,7 +609,11 @@ export class WsConnection {
       // **ブラウザの端末はホストに切られたら自動で繋ぎ直す**（ACS と同じ。`20260921-auto-reconnect`）。
       // ACS も ECL のコアは既定 OFF で、画面の層（HOD の bean）が ON にする。MCP の自動操作は OFF のまま
       opts.autoReconnect = true;
+      // **関連付けるプリンターセッション**（設定で指したときだけ。ACS の画面の層の機能なので MCP・HLLAPI から開く表示には効かせない。
+      // `20260921-associated-printer-session`）。プリンターを起こして装置名を待ち、その装置名で関連付けて表示を開く
+      const assoc = hasRef(msg) ? await this.prepareAssociation(msg, opts) : undefined;
       const entry = await this.deps.sessions.open(opts);
+      if (assoc?.printerId !== undefined) this.deps.sessions.linkAssociatedPrinter(entry.id, assoc.printerId, assoc.closeWithLast);
       // 自分で開いた＝持ち主（去るときに畳む責任を持つ）
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
@@ -835,6 +869,46 @@ export class WsConnection {
     });
   }
 
+  /**
+   * 表示を開く前の**関連付けるプリンターの準備**。装置名が分かれば `opts.associatedPrinter` に入れる（IBMASSOCPRT）。
+   * 指した設定が使えない・プリンターを開けないときは、**関連付けなしで開く**（ACS `KEY_5250_ASSOC_INVALID_PROFILE`）。理由は記録に残す
+   */
+  private async prepareAssociation(
+    msg: WsClientMessage & { type: "open" },
+    opts: OpenOptions
+  ): Promise<{ printerId?: string; closeWithLast: boolean } | undefined> {
+    const target = this.resolveTarget(msg);
+    const want = target.associatedPrinterSession;
+    if (!want) return undefined;
+    let printerTarget: ResolvedTarget;
+    try {
+      // プリンターの設定は**表示と同じ道**（`ConfigResolver`）で解決する——認可（サーバー設定は admin だけ等）も同じ
+      printerTarget = this.deps.resolver.resolve({ session: want.ref }, this.user, (m) => wsLog.warn(m));
+    } catch (e) {
+      wsLog.warn({ session: want.ref, err: String(e) }, "associated printer session not usable; opening without association");
+      return undefined;
+    }
+    if (printerTarget.session?.sessionType !== "printer") return undefined;
+    const r = await this.deps.sessions.prepareAssociatedPrinter(
+      want.ref,
+      this.user?.username,
+      () =>
+        this.deps.sessions.openPrinter({
+          ...printerOptsFrom(printerTarget),
+          origin: `associated:${want.ref}`,
+          ref: want.ref,
+          ...(this.user ? { owner: this.user.username } : {})
+        }),
+      want.timeoutMs
+    );
+    if ("error" in r) {
+      wsLog.warn({ session: want.ref, err: r.error }, "associated printer session could not be opened; opening without association");
+      return undefined;
+    }
+    if (r.deviceName !== undefined) opts.associatedPrinter = r.deviceName;
+    return { printerId: r.printerId, closeWithLast: want.closeWithLast };
+  }
+
   private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
     await withAudit({ op: "ws_open_printer" }, async () => {
       const opts: Parameters<SessionManager["openPrinter"]>[0] = { origin: originOf(msg) };
@@ -842,28 +916,10 @@ export class WsConnection {
         // 保存済み設定由来。printer 出力を供給するかは ConfigResolver が判定済み
         // （サーバー設定のセッションのときだけ返る＝信頼境界の 5 層目）
         const t = this.resolveTarget(msg);
-        const co = t.connect;
-        if (co.host !== undefined) opts.host = co.host;
-        if (co.port !== undefined) opts.port = co.port;
-        if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
-        if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
-        // 常駐の経路（`{...t.connect}`）では渡っていたのに、ここだけ落ちていた（節目の点検の指摘）
-        if (co.deviceNameRetry !== undefined) opts.deviceNameRetry = co.deviceNameRetry;
-        if (co.tls !== undefined) opts.tls = co.tls;
-        if (co.user !== undefined) opts.user = co.user;
-        if (co.password !== undefined) opts.password = co.password;
-        if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
-        if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
-        // **転記漏れに注意**: ここはキーごとの手写しなので、足し忘れると
-        // 「表示セッションだけ設定が効く」状態になる（display 側は `{...target.connect}`）
-        if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
-        if (t.printerOutput) opts.output = t.printerOutput;
-        // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
-        if (t.service) opts.service = true;
+        // 解決結果からプリンターを開く材料を作る組み立ては 1 か所（`printerOptsFrom`。関連付けるプリンターも同じ道を通す）
+        Object.assign(opts, printerOptsFrom(t));
         // **開き直したときに既存へ繋ぐ鍵。** 直接接続には無い
         if (msg.session !== undefined) opts.ref = msg.session;
-        // 開いた直後に待ち受けるか（定義由来。既定は開始する）
-        if (!t.autoStart) opts.autoStart = false;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
         if (msg.host !== undefined) opts.host = msg.host;

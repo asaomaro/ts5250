@@ -83,6 +83,20 @@ export abstract class ConfigStore {
           `session ${s.name} references missing system ${s.system}`
         );
       }
+      this.assertAssociatedPrinter(s, "CONFIG_ERROR");
+    }
+  }
+
+  /**
+   * **関連付けるプリンターセッションの参照の検査**（`20260921-associated-printer-session`）。`system` と同じく**同じファイルの中だけ**を指し、
+   * 指した先はプリンターで、個人設定なら**同じ持ち主**のもの（他人のプリンターを起こさせない）
+   */
+  private assertAssociatedPrinter(s: AnySession, code: "CONFIG_ERROR" | "SESSION_NOT_FOUND"): void {
+    const id = s.associatedPrinterSession;
+    if (id === undefined) return;
+    const p = this.sessions.get(id);
+    if (!p || p.sessionType !== "printer" || this.ownerOf(p) !== this.ownerOf(s)) {
+      throw new As400Error(code, `session ${s.name} references missing printer session ${id}`);
     }
   }
 
@@ -201,6 +215,10 @@ export abstract class ConfigStore {
     if (s.vtEncoding !== undefined) pub.vtEncoding = s.vtEncoding;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
     if (s.associatedPrinter !== undefined) pub.associatedPrinter = s.associatedPrinter;
+    // 関連付けるプリンターセッションは**参照**で返す（`system` と同じく、利用者が選び直せる形）
+    if (s.associatedPrinterSession !== undefined) pub.associatedPrinterSession = makeRef(this.source, s.associatedPrinterSession);
+    if (s.associatedPrinterTimeout !== undefined) pub.associatedPrinterTimeout = s.associatedPrinterTimeout;
+    if (s.closeAssociatedPrinterWithLastSession !== undefined) pub.closeAssociatedPrinterWithLastSession = s.closeAssociatedPrinterWithLastSession;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;
@@ -304,6 +322,7 @@ export abstract class ConfigStore {
     this.assertAccess(this.ownerOf(s), user);
     // 参照先はこのファイル内にしか存在しえない（スコープ規定）
     this.getSystem(s.system);
+    this.assertAssociatedPrinter(s, "SESSION_NOT_FOUND");
     if (this.sessions.has(s.id)) {
       throw new As400Error("FORBIDDEN", `session ${s.id} already exists`);
     }
@@ -319,6 +338,7 @@ export abstract class ConfigStore {
     const owner = this.ownerOf(existing);
     if (owner !== undefined) (s as PersonalSession).owner = owner;
     this.getSystem(s.system);
+    this.assertAssociatedPrinter(s, "SESSION_NOT_FOUND");
     this.sessions.set(id, s);
     return this.publicSession(s);
   }

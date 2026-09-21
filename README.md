@@ -644,7 +644,7 @@ node packages/server/dist/main.js --http 3400 --web-root packages/web-ui/dist --
 | 階層 | 持つもの |
 |---|---|
 | **システム** | `host` / `port` / `tls` / `ccsid`（既定）/ `signon`（資格情報） |
-| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `associatedPrinter` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
+| **セッション設定** | `system`（親システムの参照）/ `sessionType`（`display` / `printer` / `dtaqwatch` / `msgwatch`）/ `terminal`（`5250` / `3270` / `vt`）/ `deviceName` / `deviceNameRetry` / `associatedPrinter` / `associatedPrinterSession` / `associatedPrinterTimeout` / `closeAssociatedPrinterWithLastSession` / `screenSize` / `model3270` / `vtEncoding` / `ccsid`（上書き）/ `enhanced` / `watermark` / `autoStart` / `idleTimeout` / `rescueAction` / `transformTo` / `dtaqWatch` / `msgWatch` / `printer`・`pcCommand`・`webhook`（サーバー設定のみ） |
 
 参照は**接頭辞つきのトークン**で、保管場所まで含めて一意に決まります。
 
@@ -775,6 +775,13 @@ WebSocket の `open` メッセージも同じ `system` / `session` / `host` を�
     `associatedPrinter`（**5250 のときだけ**。関連付けプリンターの装置名——ACS の「プリンターの関連付け」で装置名を書く方式と同じく
     telnet で申告し、ホストは対話ジョブの印刷装置をその装置にします。書いたとおりに送り、検査も大文字化もしません。
     存在しない名前ではホストが起動応答を I901 にして、既定の印刷装置のまま繋ぎます。3270・VT・プリンターに書くと弾きます）、
+    `associatedPrinterSession`（**もう 1 つの方式**——同じファイルのプリンターの設定の id を指します。ブラウザから開くとそのプリンターを
+    使い回すか開いて起こし、装置名が決まるのを待ってから、その装置名で関連付けて表示を開きます。ACS の「プリンターセッションで関連付ける」と同じ順序です。
+    表示がホストに切られたら（ほかに同じプリンターへ関連付けた表示が繋がっていなければ）プリンターを止め、繋ぎ直したら起こし、閉じたら止めます。
+    `associatedPrinterTimeout`（待つ**秒**。既定 5・0 は待ち続ける・1〜4 は 5、600 超は 600 として扱う）と
+    `closeAssociatedPrinterWithLastSession`（最後の表示と一緒にプリンターも閉じる。既定 false）はこれを指したときだけ書けます。
+    **`associatedPrinter` とは同時に書けません。常駐（サービス ✅）のプリンターは止めも閉じもしません**。
+    MCP・HLLAPI から開く表示には効きません（ACS の画面の層の機能）。待ち時間が切れても表示は開き、プリンターの設定の装置名で関連付けます）、
     `pcCommand`（PC コマンド実行。**サーバー設定のみ** → [PC コマンド](#pc-コマンドstrpco--strpccmd)）。
   - **`sessionType: "printer"` のときだけ**効くもの: `rescueAction`（`hold` 既定 / `delete`）、
     `transformTo`（HPT の機種。例 `"*HP4"`）、`printer`（自動 PDF / 印刷。**サーバー設定のみ**）。
