@@ -490,11 +490,20 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   O は SBCS の空白のまま、E は全角の字の後だけ全角空白（空の欄・SBCS の字の後は SBCS の空白）。当 PJ は J・G の半角 Space を「全角のみ」と拒否していた。
   `spaceToFullWidth`（`packages/web-ui/src/components/ScreenGrid.vue`）で、打鍵の経路だけ変換した（貼り付け・IME の確定は変えない）。単体 4 件、mutation 7 通り検出。
   **測定で分かった別の差**: ACS の E は最初の字で SBCS か DBCS かが決まり、混ぜられない（`あ` の後の `X`・`X` の後の `あ` は拒否）。当 PJ の E は混ぜられる（下の `[ ]`）。
+- [x] **継続欄（EDTMSK・CNTFLD）の Erase EOF・Field Exit・Field±・Dup が続く区間まで届き、欄を出る行き先が鎖の後ろ**（下の「キー編集の細部」の R11 (b)）。
+  **完了（`20260921-continued-field-exit`・PR #410）**: 実機の ACS のコア（社内機・930・拡張 5250 を申告。`scripts/acs-probe/continued-field-erase-exit.txt`）で確定してから実装した。
+  日付欄（4/2/2 の 3 区間）の最初の区間の 2 桁目の Erase EOF・Field Exit は `1234/56/78` を `1   /  /  `（続く区間は全桁消える）、2 区間目の途中は `1234/5 /  `。
+  Field Exit の後のカーソルは、1・2・最後のどの区間からでも鎖の後ろ（画面の途中の鎖なら次の欄 21,24・最後の欄なら最初の入力欄 3,24）で、次の区間ではない。
+  DUP 可の継続欄（`scripts/build-ulktest.mjs` の CDUP を足した）の Dup は、カーソルの区間はカーソルから・続く区間は全桁が Dup 文字（0x1C）で、カーソルは鎖の後ろの欄。
+  当 PJ は現在の区間だけを消し・埋め、行き先は次の区間だった。`fillFollowingSegments`（`packages/web-ui/src/components/ScreenGrid.vue`）で続く区間を直接コミットし、
+  `field-full` の第 3 引数 `leaving`（Field Exit・Field±・Dup）で `EmulatorPane.vue` の `indexAfterLeaving` が行き先を決める（継続欄の 2 区間目以降を飛ばし、無ければ先頭へ巡回。打鍵の満杯の自動送りは ACS も次の区間なので従来どおり）。
+  単体 16 件（`continued-field-exit.test.ts`）、mutation 18 通りのうち 16 通り検出（残り 2 つは等価変異: 単独欄の早期 return と、満杯直後の Field Exit の `erases`〔続く区間を持つ区間に「出た」状態は付かない〕）。
+  ~~「継続欄の実測は挿入だけ」~~ は解消した。**未確認のまま残したもの**: DBCS の継続欄・CNTFLD の複数行欄（EDTMSK の日付欄だけ測った。原典の規則は同じ）。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
     台帳に無かった。IME を切った Space で日常的に起きる）／~~(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の
-    「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）／(h) Ctrl+Delete は ACS では
+    「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）・`¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・Ctrl+Home（罫線）・Ctrl+F11（カーソル形）／
     (j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける／(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
     (q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。

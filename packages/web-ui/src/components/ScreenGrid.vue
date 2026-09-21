@@ -193,8 +193,9 @@ const emit = defineEmits<{
   (e: "gui-submit", fieldId: number): void;
   /** 欄が最大桁まで埋まった（ACS の自動送り＝次の入力欄へ）。満杯になった欄の index を渡す
    *  （満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、index で次欄を特定する） */
-  /** 欄が満杯・Field Exit・Field±・Dup で次の欄へ送る。`viaFieldExit` は Field Exit / Field± の経路（出た後の検査を掛けない。ペインの `onFieldFull`） */
-  (e: "field-full", fieldIndex: number, viaFieldExit?: boolean): void;
+  /** 欄が満杯・Field Exit・Field±・Dup で次の欄へ送る。`viaFieldExit` は Field Exit / Field± の経路（出た後の検査を掛けない。ペインの `onFieldFull`）。
+   *  `leaving` は**欄を出る操作**（Field Exit・Field±・Dup）——行き先は継続欄の鎖の後ろ（打鍵の満杯は次の区間） */
+  (e: "field-full", fieldIndex: number, viaFieldExit?: boolean, leaving?: boolean): void;
   /** 矩形（ブロック）選択が解除された（親のキーボード選択アンカーもリセットさせる） */
   (e: "selection-cleared"): void;
   /** マウスドラッグで矩形（ブロック）選択が始まった。押下したセル＝始点を渡す。
@@ -2440,9 +2441,11 @@ function fieldExitKey(): void {
   if (rejectExit(t)) return;
   const base = exitedBase(t.f, edit); // 満杯まで打った直後なら最終桁は消さない（ACS `fieldExited`）
   // 満杯まで打った直後（`fieldExited`）は ACS が `eraseToEOF` を通らない＝MDT も立てない。それ以外は消す（消えるものが無くても）ので MDT
-  mdtKeyed = fieldExitedIndex !== t.f.index;
+  const erases = fieldExitedIndex !== t.f.index;
+  mdtKeyed = erases;
   fieldExitedIndex = -1;
   edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(base, t.f);
+  if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（ACS `eraseToEOF_Work`）。右寄せはカーソルの区間だけ（上の `fieldExit`）
   sync(t.el, t.f); // 値が変わるか、消す操作をしたら emit("edit") が出る＝MDT が立つ
   // AUTO_ENTER 欄は**次欄へ移らず Enter を送る**（原典は Field Exit / Field± / Dup の
   // すべてで同じ形。GNU tn5250 `display.c:1637`）。FER 欄でも Field Exit なら出られるので、
@@ -2451,7 +2454,7 @@ function fieldExitKey(): void {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index, true); // 次の入力欄へ（自動送りと同じ経路。Field Exit 経由の印つき）
+  emit("field-full", t.f.index, true, true); // 次の入力欄へ（Field Exit 経由の印つき。継続欄は鎖の後ろへ）
 }
 
 /**
@@ -2483,15 +2486,17 @@ function fieldSignKey(negative: boolean): void {
     return;
   }
   const base = exitedBase(t.f, edit); // Field Exit と同じく、満杯まで打った直後なら最終桁は消さない
-  mdtKeyed = fieldExitedIndex !== t.f.index; // Field Exit と同じ（`fieldExited` のときは `eraseToEOF` を通らない）
+  const erases = fieldExitedIndex !== t.f.index; // Field Exit と同じ（`fieldExited` のときは `eraseToEOF` を通らない）
+  mdtKeyed = erases;
   fieldExitedIndex = -1;
   edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(base, { ...t.f, numericOnly }, negative);
+  if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（Field+。Field− は継続欄では上で拒否する）
   sync(t.el, t.f);
   if (t.f.autoEnter) {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index, true);
+  emit("field-full", t.f.index, true, true);
 }
 
 /**
@@ -2513,6 +2518,7 @@ function dupKey(): void {
   // 満杯まで打った直後でもカーソルの桁から埋める（ACS `processDupFM` は `fieldExited` を見ない）
   fieldExitedIndex = -1;
   edit = dupFill(edit, rawSentinel(DUP_BYTE));
+  fillFollowingSegments(t.f, rawSentinel(DUP_BYTE)); // 継続欄は続く区間の全桁も Dup 文字（ACS `processDupFM`）
   sync(t.el, t.f);
   // **Field Exit が必須の欄でも次の欄へ移る**（ACS `PS5250.processDupFM` は FER も
   // `isFieldExitRequired` も見ず、自動 Enter 欄なら Enter、それ以外は次の入力欄へ移す。
@@ -2523,7 +2529,7 @@ function dupKey(): void {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index);
+  emit("field-full", t.f.index, false, true); // 出た後の検査は掛ける（従来どおり）。行き先は継続欄の鎖の後ろ
 }
 
 /*
@@ -2543,6 +2549,7 @@ function eraseEofKey(): void {
   }
   fieldExitedIndex = -1; // ACS もカーソルの桁から消す（`fieldExited` を見ない）
   edit = eraseToEnd(edit);
+  fillFollowingSegments(t.f, " "); // 継続欄は続く区間も全桁消える（ACS `eraseToEOF_Work`）
   mdtKeyed = true; // 消えるものが無くても MDT（`eraseToEOF` は `setMDT` 付き）
   sync(t.el, t.f);
 }
@@ -2733,6 +2740,20 @@ function commitFieldValueDirect(x: Field, val: string): void {
   if (trimmed !== baselineValue(x)) emit("edit", x.index, trimmed);
   const elx = inputForSlice(x, 0);
   if (elx) elx.value = displayText(stripSentinels(val));
+}
+
+/**
+ * **継続欄で、カーソルの区間より後ろの区間を全桁 `fill` で埋める**（ACS `PS5250.eraseToEOF_Work`・`processDupFM`。空白は NUL、Dup は 0x1C）。
+ * カーソルの区間は呼び出し側が従来どおり「カーソルから区間の終わりまで」を埋める。実機の ACS のコアで、日付欄（4/2/2 の 3 区間）の
+ * 最初の区間の途中の Erase EOF・Field Exit が続く区間まで消し、Dup が続く区間を 0x1C で埋めた
+ * （`scripts/acs-probe/continued-field-erase-exit.txt`。`20260922-continued-field-exit`）。継続欄でない欄は何もしない。
+ * MDT は鎖のどこかに立てば全区間に立つ（`mdtOf`）ので、ここでは編集を出すだけ
+ */
+function fillFollowingSegments(f: Field, fill: string): void {
+  if (f.continued === undefined) return;
+  const run = continuedRunOf(f);
+  const at = run.findIndex((x) => x.index === f.index);
+  for (const x of run.slice(at + 1)) commitFieldValueDirect(x, fill.repeat(visLen(x)));
 }
 
 /**

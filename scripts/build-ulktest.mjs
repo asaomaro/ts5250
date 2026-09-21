@@ -10,6 +10,9 @@
 //     SPLITN — 同じ形で IC なし（既定のカーソル位置を見る）
 //     DUP    — SNDRCVF で DUP 可の CHECK(RZ) 欄・DUP 可の自動 Enter（CHECK(ER)）欄・素の欄を読む
 //              ＝ **右寄せ欄で Dup を押したとき次の欄へ移るか**（ACS `PS5250.processDupFM`）
+//     CDUP   — SNDRCVF で **DUP 可の継続欄**（EDTWRD＋EDTMSK の 8 桁日付＝4/2/2 の 3 区間）と、その後ろの素の欄を読む
+//              ＝ **継続欄で Dup を押したとき、続く区間まで埋めるか・欄を出た後のカーソルはどこか**（ACS `PS5250.processDupFM`。
+//              `PROBE_ENPTUI=true` で流す。拡張 5250 を申告しないとホストは欄を割らない）
 //   F3（CA03）で抜ける。
 //
 // **ソースは既存の QDDSSRC に入れる**（新しいソース・ファイルは作らない。`scripts/build-adjtest.mjs` と同じ方式）。
@@ -69,7 +72,11 @@ const DDS = [
   constant(1, 3, "ULK TEST DUP"),
   constant(5, 3, "RZ DUP:"), field("DRZ", 6, "A", "B", 5, 20, "CHECK(RZ) DUP"),
   constant(7, 3, "PLAIN:"), field("DNX", 6, "A", "B", 7, 20),
-  constant(9, 3, "ER DUP:"), field("DER", 6, "A", "B", 9, 20, "CHECK(ER) DUP")
+  constant(9, 3, "ER DUP:"), field("DER", 6, "A", "B", 9, 20, "CHECK(ER) DUP"),
+  rec("CDUR"), kwd("CA03(03)"),
+  constant(1, 3, "ULK TEST CDUP"),
+  constant(5, 3, "MSK DUP:"), numf("CDA", 8, 0, "B", 5, 24, "EDTWRD('0   /  /  ')"), kwd("EDTMSK('    &  &  ')"), kwd("DUP"),
+  constant(9, 3, "PLAIN:"), field("CDN", 6, "A", "B", 9, 24)
 ];
 const CL = [
   "PGM PARM(&MODE)",
@@ -93,6 +100,9 @@ const CL = [
   "ENDDO",
   "IF COND(&MODE *EQ 'DUP') THEN(DO)",
   "  SNDRCVF RCDFMT(DUPR)",
+  "ENDDO",
+  "IF COND(&MODE *EQ 'CDUP') THEN(DO)",
+  "  SNDRCVF RCDFMT(CDUR)",
   "ENDDO",
   "IF COND(&MODE *EQ 'WINDOW') THEN(DO)",
   "  SNDF RCDFMT(SHOW)",

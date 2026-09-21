@@ -327,7 +327,7 @@ function moveCell(dir: Dir): void {
 // ACS の自動送り: 欄が満杯になったら次の入力欄へフォーカスを進める。
 // 満杯時は欄外へ論理カーソルが出て input が blur 済み（activeElement がペイン）なので、
 // focusByOffset ではなく満杯欄の index から次欄を特定する。
-function onFieldFull(fieldIndex: number, viaFieldExit = false): void {
+function onFieldFull(fieldIndex: number, viaFieldExit = false, leaving = false): void {
   // 単独欄で自分へ巡回しても「出た」ことになる（ACS `processFieldPlusMinusAndExit` がフラグを立てる）
   noteFieldExited();
   // **Field Exit・Field± で出るときは、出た後の MF・自己点検を掛けない**——ACS `processFieldPlusMinusAndExit` は MF を出る前に自分で見る
@@ -342,7 +342,21 @@ function onFieldFull(fieldIndex: number, viaFieldExit = false): void {
   const els = editableInputs();
   const cur = flds.findIndex((f) => f.index === fieldIndex);
   if (cur < 0 || els.length === 0) return;
-  focusInput(els, (cur + 1) % els.length);
+  focusInput(els, leaving ? indexAfterLeaving(flds, cur) : (cur + 1) % els.length);
+}
+
+/**
+ * **欄を出る操作（Field Exit・Field±・Dup）の行き先**（ACS `FFT5250.nextNonByPassInputFieldPos`）: カーソルより後ろの入力欄のうち、
+ * **継続欄の 2 区間目以降を飛ばして**最初のもの。無ければ画面の最初の入力欄へ巡回する。鎖の途中の区間から出ても行き先は次の区間ではなく鎖の後ろ
+ * （実機の ACS のコアで、日付欄の 1・2 区間目・最後の区間から Field Exit して行き先が次の欄・巡回だった。`scripts/acs-probe/continued-field-erase-exit.txt`）。
+ * 打鍵で満杯になったときの自動送りは、ACS も次の区間へ進むので従来どおり（`(cur + 1)`）
+ */
+function indexAfterLeaving(flds: readonly { continued?: string }[], cur: number): number {
+  for (let j = cur + 1; j < flds.length; j++) {
+    const c = flds[j]!.continued;
+    if (c !== "middle" && c !== "last") return j;
+  }
+  return 0;
 }
 
 function onGuiSelect(fieldId: number, choiceIndex: number, selected: boolean): void {
