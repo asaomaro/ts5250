@@ -1,6 +1,8 @@
 /**
- * 930/5026（Katakana 系）だけが持つ「カタカナのキー配列」の UI 往復（`20260922-katakana-variant-setting`）。
- * ACS 自身が「ホスト・コード・ページ」の設定で利用者ごとに選ばせる軸なので、当 PJ も選ばせる。
+ * ACS の「ホスト・コード・ページ」一覧と同じ 1 本の選択肢の UI 往復
+ * （`20260922-katakana-variant-setting`・`20260922-katakana-selector-merge`）。
+ * 930 の Katakana / Katakana Extended は独立した設定項目に分けず、CCSID の選択肢そのものに
+ * 2 エントリとして吸収されている（ACS の接続設定画面と同じ形）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
@@ -44,8 +46,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function katakanaSelect(w: ReturnType<typeof mount>) {
-  return w.findAll("select").find((s) => s.text().includes("Katakana Extended"));
+/** 「拡張カタカナ」の選択肢を持つ ── ホストコードページの選択（システム/セッションどちらも 1 本だけ） */
+function codePageSelect(w: ReturnType<typeof mount>) {
+  return w.findAll("select").find((s) => s.text().includes("拡張カタカナ"))!;
 }
 
 async function openEdit(w: ReturnType<typeof mount>): Promise<void> {
@@ -68,71 +71,76 @@ async function save(w: ReturnType<typeof mount>, url: string): Promise<Record<st
 }
 
 describe("システム設定", () => {
-  it("**CCSID が 930/5026 のときだけ選択肢が出る**", async () => {
-    const w930 = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM_930 } });
-    await openEdit(w930);
-    expect(katakanaSelect(w930), "930 では出る").toBeDefined();
-    w930.unmount();
-
-    const w37 = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM_37 } });
-    await openEdit(w37);
-    expect(katakanaSelect(w37), "37 では出ない").toBeUndefined();
-    w37.unmount();
+  it("**930 は Katakana／Katakana Extended の 2 エントリを持つ選択肢が常に出る**（独立した項目には分けない）", async () => {
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM_930 } });
+    await openEdit(w);
+    expect(codePageSelect(w).text()).toContain("日本語（カタカナ）");
+    expect(codePageSelect(w).text()).toContain("日本（拡張カタカナ）");
+    w.unmount();
   });
 
-  it("既存の値がフォームに開き、選び直して保存できる", async () => {
+  it("既存の \"katakana\" 選択がフォームに開き、選び直すと ccsid・katakanaVariant が両方更新される", async () => {
     const w = mount(ConfigCard, { props: { kind: "system" as const, system: { ...SYSTEM_930, katakanaVariant: "katakana" } } });
     await openEdit(w);
-    const sel = katakanaSelect(w)!;
-    expect((sel.element as HTMLSelectElement).value).toBe("katakana");
-    await sel.setValue("katakana-ex");
+    const sel = codePageSelect(w);
+    expect((sel.element as HTMLSelectElement).value).toBe("930-katakana");
+    await sel.setValue("930-katakana-ex");
     const body = await save(w, "/api/systems/");
+    expect(body.ccsid).toBe(930);
     expect(body.katakanaVariant).toBe("katakana-ex");
     w.unmount();
   });
 
-  it("未設定（既定）のまま保存すると katakanaVariant を送らない", async () => {
+  it("**未指定（既定）は \"930 — 日本（拡張カタカナ）\" として開く**が、選び直さなければ katakanaVariant は送らない", async () => {
     const w = mount(ConfigCard, { props: { kind: "system" as const, system: SYSTEM_930 } });
     await openEdit(w);
+    const sel = codePageSelect(w);
+    expect((sel.element as HTMLSelectElement).value).toBe("930-katakana-ex");
     const body = await save(w, "/api/systems/");
+    expect("katakanaVariant" in body).toBe(false);
+    w.unmount();
+  });
+
+  it("930 系から 37 に選び直すと katakanaVariant が外れる", async () => {
+    const w = mount(ConfigCard, { props: { kind: "system" as const, system: { ...SYSTEM_930, katakanaVariant: "katakana" } } });
+    await openEdit(w);
+    await codePageSelect(w).setValue("37");
+    const body = await save(w, "/api/systems/");
+    expect(body.ccsid).toBe(37);
     expect("katakanaVariant" in body).toBe(false);
     w.unmount();
   });
 });
 
 describe("セッション設定", () => {
-  it("**セッションの CCSID 未指定でも、親システムが 930/5026 なら選択肢が出る**", async () => {
+  it("**「システムの既定」を選ぶと ccsid・katakanaVariant のどちらも送らない**（システムの値を上書きしない）", async () => {
+    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ ccsid: 930, katakanaVariant: "katakana" }) } });
+    await openEdit(w);
+    const sel = codePageSelect(w);
+    expect((sel.element as HTMLSelectElement).value).toBe("930-katakana");
+    await sel.setValue("inherit");
+    const body = await save(w, "/api/sessions-config/");
+    expect("ccsid" in body).toBe(false);
+    expect("katakanaVariant" in body).toBe(false);
+    w.unmount();
+  });
+
+  it("ccsid 未指定（親のみ 930）は「システムの既定」として開く", async () => {
     const w = mount(ConfigCard, { props: { kind: "session" as const, session: session() } }); // ccsid 未指定・親は 930
     await openEdit(w);
-    expect(katakanaSelect(w)).toBeDefined();
+    expect((codePageSelect(w).element as HTMLSelectElement).value).toBe("inherit");
     w.unmount();
   });
 
-  it("セッション側で CCSID を 37 に上書きすると選択肢が消える", async () => {
-    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ ccsid: 37 }) } });
+  it("既存の \"katakana-ex\" 選択がフォームに開き、選び直して保存できる", async () => {
+    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ ccsid: 930, katakanaVariant: "katakana-ex" }) } });
     await openEdit(w);
-    expect(katakanaSelect(w)).toBeUndefined();
-    w.unmount();
-  });
-
-  it("既存の値がフォームに開き、選び直して保存できる", async () => {
-    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ katakanaVariant: "katakana-ex" }) } });
-    await openEdit(w);
-    const sel = katakanaSelect(w)!;
-    expect((sel.element as HTMLSelectElement).value).toBe("katakana-ex");
-    await sel.setValue("katakana");
+    const sel = codePageSelect(w);
+    expect((sel.element as HTMLSelectElement).value).toBe("930-katakana-ex");
+    await sel.setValue("930-katakana");
     const body = await save(w, "/api/sessions-config/");
+    expect(body.ccsid).toBe(930);
     expect(body.katakanaVariant).toBe("katakana");
-    w.unmount();
-  });
-
-  it("**「システムの既定」を選ぶと katakanaVariant を送らない**（システムの値を上書きしない）", async () => {
-    const w = mount(ConfigCard, { props: { kind: "session" as const, session: session({ katakanaVariant: "katakana" }) } });
-    await openEdit(w);
-    const sel = katakanaSelect(w)!;
-    await sel.setValue(undefined as unknown as string);
-    const body = await save(w, "/api/sessions-config/");
-    expect("katakanaVariant" in body).toBe(false);
     w.unmount();
   });
 });

@@ -44,7 +44,7 @@ export interface ConnectOptions {
   host?: string;
   port?: number;
   ccsid?: number; // 既定 37。930/939/1399（＋エイリアス）で DBCS
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`@ts5250/base` の `KatakanaVariant` 参照 */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`@ts5250/base` の `KatakanaVariant` 参照。5026 は対象外——`20260922-katakana-selector-merge` D1） */
   katakanaVariant?: KatakanaVariant;
   /**
    * スプール（SCS）のデコードに使う CCSID。既定 273。上の `ccsid` を流用**しない**——
@@ -674,7 +674,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     return this.codec.ccsid;
   }
 
-  /** 930/5026 のキーボード配列の選択（サーバーが「開いた」通知へ載せるため。`20260922-katakana-variant-setting`） */
+  /** 930 のキーボード配列の選択（サーバーが「開いた」通知へ載せるため。`20260922-katakana-variant-setting`。5026 は対象外） */
   get katakanaVariant(): KatakanaVariant | undefined {
     return this.opts.katakanaVariant;
   }

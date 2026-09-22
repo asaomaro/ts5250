@@ -201,7 +201,9 @@ export class ConfigResolver {
     // CCSID はセッション側の上書きを優先する
     const ccsid = session?.ccsid ?? system.ccsid;
     if (ccsid !== undefined) opts.ccsid = ccsid;
-    // 930/5026 のキーボード配列も同じ形で解決する（`20260922-katakana-variant-setting`）
+    // 930 のキーボード配列も同じ形で解決する（`20260922-katakana-variant-setting`。5026 は対象外——
+    // `20260922-katakana-selector-merge` D1。ここでは ccsid を見ずに値をそのまま通すが、
+    // 実際に効くのは 930 のときだけ＝`deviceEnvFor`（base）・`EmulatorPane.vue` 側の絞り込み）
     const katakanaVariant = session?.katakanaVariant ?? system.katakanaVariant;
     if (katakanaVariant !== undefined) opts.katakanaVariant = katakanaVariant;
     // スプール用 CCSID は**システムだけが持つ**（pull 型はセッションに紐づかない。spec 方針2）。

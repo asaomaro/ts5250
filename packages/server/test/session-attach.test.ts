@@ -234,7 +234,7 @@ describe("attach の CCSID", () => {
 });
 
 /**
- * **`katakanaVariant`（930/5026 のキーボード配列）も新規オープン・attach の両方で返す**
+ * **`katakanaVariant`（930 のキーボード配列。`20260922-katakana-selector-merge` D1）も新規オープン・attach の両方で返す**
  * （`20260922-katakana-variant-setting`）。ブラウザ直指定（`host`+`ccsid`+`katakanaVariant`）の経路
  * （`buildDirect`）で通ることも同時に確かめる。
  */

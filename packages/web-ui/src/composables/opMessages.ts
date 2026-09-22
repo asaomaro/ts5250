@@ -234,7 +234,7 @@ export const MSG_BY_REASON: Record<RejectReason, string> = {
   "kbd-inhibited": "この項目はキーボードから入力できません",
   // ACS: "Only a sign is allowed in this position."（符号付き数値欄の最終桁＝符号桁）
   "sign-position": "符号桁には数字を入力できません（符号は - / + キーで入れます）",
-  // ACS: "Key not defined, invalid selection."（930/5026「Katakana」＝290 だけが弾く 8 記号）
+  // ACS: "Key not defined, invalid selection."（930「Katakana」＝290 だけが弾く 8 記号。5026 は対象外）
   "katakana-invalid": "このキーは定義されていないため入力できません"
 };
 

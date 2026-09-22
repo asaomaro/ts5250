@@ -30,10 +30,13 @@ export interface DeviceEnv {
 }
 
 /**
- * **930/5026（日本語カタカナ）だけが持つ、キーボード配列の選択**（`20260922-katakana-variant-setting`）。
+ * **930（日本語カタカナ）だけが持つ、ACS の「ホスト・コード・ページ」一覧そのものの選択**
+ * （`20260922-katakana-variant-setting`・`20260922-katakana-selector-merge`）。
  *
- * ACS はこれを「ホスト・コード・ページ」の設定画面で**利用者ごとに選ばせる**（利用者提示の
- * スクリーンショットで確認）。「どちらが正しいか」を当 PJ が決め打ちできる軸ではない。
+ * ACS の接続設定画面では、930 は 1 エントリではなく**2 エントリ**として並ぶ
+ * （`CodePage.codePagesMap32705250`: `KEY_JAPAN_KATAKANA` と `KEY_JAPAN_KATAKANA_EX` が
+ * どちらも CCSID "930" を指す）。web-ui もこれに倣い、ホストコードページの選択肢として
+ * 930 を 2 エントリで出す（独立した設定項目には分けない。`hostCodePages.ts` 参照）。
  *
  * - `"katakana"` ＝ ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）。290 として扱われ CHARSET 332。
  *   実機の ACS のコアで確認（`scripts/acs-probe/ccsid290-invalid-chars.txt`）: 半角英小文字を
@@ -42,9 +45,13 @@ export interface DeviceEnv {
  * - `"katakana-ex"` ＝ ACS の「Katakana Extended」（`KEY_JAPAN_KATAKANA_EX`）。CHARSET 1172。
  *   小文字のまま・8 字とも入力できる
  *
- * 未指定（`undefined`）は当 PJ の**現状の折衷**（CHARSET 1172＝Extended 寄り・入力は大文字化する
- * ＝Katakana 寄り・8 字は拒否しない＝Extended 寄り）のまま変えない——既存の利用者の挙動を変えない
- * ための既定（`20260922-katakana-variant-setting` requirements AC4）。
+ * **5026 は対象外**（`20260922-katakana-selector-merge` D1）: ACS の接続設定画面の一覧にも、
+ * `CodePage` クラス全体の文字列定数にも "5026" は一度も現れない——ACS は 5026 の存在自体を
+ * 知らない。930 と対で扱っていたのは実機の裏づけがないまま広げた判断だった。
+ *
+ * 未指定（`undefined`）は `"katakana-ex"` と同じに倒す（`20260922-katakana-selector-merge` D2）:
+ * ACS の一覧に「未選択」という中間状態は無く、930 を選ぶ時点で必ずどちらか一方になる。
+ * 旧版（CHARSET 1172 ＋大文字強制、という折衷）は廃止した——強制されていた大文字化だけが外れる。
  */
 export type KatakanaVariant = "katakana" | "katakana-ex";
 
@@ -53,7 +60,7 @@ const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   [273, { kbdType: "AGB", codePage: 273, charSet: 697 }],
   // 日本語 DBCS は SBCS 部を申告する（930/5026=カタカナ 290、939/5035/931/1399=英小文字 1027）
   // CHARSET 1172 は「Katakana Extended」の既定値（KatakanaVariant のコメント参照）。
-  // "katakana" を選んだときだけ deviceEnvFor が 332 に差し替える
+  // 930 に "katakana" を選んだときだけ deviceEnvFor が 332 に差し替える（5026 は対象外）
   [930, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   [5026, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   // 939 の KBDTYPE は ACS 実機の申告に合わせて JPB（従来 JEB）。930 は ACS の「Katakana Extended」
@@ -67,18 +74,20 @@ const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   [1399, { kbdType: "JPE", codePage: 1027, charSet: 32000 }]
 ]);
 
-/** 930/5026 の「Katakana」だけが申告する CHARSET（ACS の `getHostCodePage_CharSet`。290 扱い）。 */
+/** 930 の「Katakana」だけが申告する CHARSET（ACS の `getHostCodePage_CharSet`。290 扱い）。 */
 const KATAKANA_CHARSET = 332;
 
 /**
  * CCSID に対応するデバイス属性（未知の CCSID は `undefined`＝申告しない）。
  *
- * `katakanaVariant` は 930/5026 のときだけ意味を持つ（`"katakana"` なら CHARSET を 332 に
- * 差し替える）。それ以外の CCSID・`undefined`・`"katakana-ex"` は無視して既定の表のまま返す。
+ * `katakanaVariant` は **930 のときだけ**意味を持つ（`"katakana"` なら CHARSET を 332 に
+ * 差し替える）。5026 は対象外（`KatakanaVariant` の doc コメント参照）。930 以外の CCSID・
+ * `undefined`・`"katakana-ex"` は無視して既定の表のまま返す（既定の表自体が Extended 相当の
+ * CHARSET 1172 なので、`undefined` は `"katakana-ex"` と同じ結果になる）。
  */
 export function deviceEnvFor(ccsid: number, katakanaVariant?: KatakanaVariant): DeviceEnv | undefined {
   const dev = DEVICE_ENV.get(ccsid);
-  if (dev && (ccsid === 930 || ccsid === 5026) && katakanaVariant === "katakana") {
+  if (dev && ccsid === 930 && katakanaVariant === "katakana") {
     return { ...dev, charSet: KATAKANA_CHARSET };
   }
   return dev;

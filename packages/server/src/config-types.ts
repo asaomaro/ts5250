@@ -203,8 +203,8 @@ export const systemSchema = z
     /** 既定 CCSID。セッション設定が上書きできる */
     ccsid: z.number().int().optional(),
     /**
-     * 930/5026（Katakana 系）だけが持つキーボード配列の選択。セッション設定が上書きできる
-     * （`20260922-katakana-variant-setting`）。`ccsid` が 930/5026 でなければ無視する
+     * 930（Katakana 系）だけが持つキーボード配列の選択。セッション設定が上書きできる
+     * （`20260922-katakana-variant-setting`・`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外）
      */
     katakanaVariant: z.enum(["katakana", "katakana-ex"]).optional(),
     /**
@@ -327,7 +327,7 @@ const sessionBase = {
   /** システムの既定 CCSID を上書きする */
   ccsid: z.number().int().optional(),
   /**
-   * 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する
+   * 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外）
    * （`20260922-katakana-variant-setting`）。未指定はシステムの既定を継ぐ
    */
   katakanaVariant: z.enum(["katakana", "katakana-ex"]).optional(),
@@ -609,7 +609,7 @@ export interface PublicSystem {
   port?: number;
   tls?: boolean;
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外） */
   katakanaVariant?: "katakana" | "katakana-ex";
   /** スプール（SCS）用 CCSID。5250 画面用の `ccsid` とは別（spec 方針2） */
   spoolCcsid?: number;
@@ -689,7 +689,7 @@ export interface PublicSession {
   transformTo?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外） */
   katakanaVariant?: "katakana" | "katakana-ex";
   enhanced?: boolean;
   /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */

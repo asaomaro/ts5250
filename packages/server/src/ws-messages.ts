@@ -61,8 +61,8 @@ export interface WsOpen {
   host?: string;
   port?: number;
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。ブラウザ直指定（`system`/`session` 未指定）用。
-   *  `20260922-katakana-variant-setting` */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge` D1。5026 は対象外）。
+   *  ブラウザ直指定（`system`/`session` 未指定）用。`20260922-katakana-variant-setting` */
   katakanaVariant?: "katakana" | "katakana-ex";
   /** 画面サイズ。27x132 は端末タイプで申告し、ホストが対応画面でのみ使う（既定 24x80） */
   screenSize?: "24x80" | "27x132";
@@ -274,8 +274,8 @@ export interface WsOpened {
   screen: ScreenSnapshot;
   /** セッションの実効ホストコードページ（CCSID）。既定 37 */
   ccsid: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ意味を持たない。
-   *  `20260922-katakana-variant-setting` */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge` D1。5026 は対象外）。
+   *  `ccsid` が 930 でなければ意味を持たない。`20260922-katakana-variant-setting` */
   katakanaVariant?: "katakana" | "katakana-ex";
   /** ジョブ識別子。接続直後は装置名（＝ジョブ名）だけのことがある */
   job?: SessionJob;

@@ -248,10 +248,11 @@ describe("SBCS だけのセッション", () => {
 });
 
 /**
- * **930/5026「Katakana」（290）だけが弾く 8 記号**（`20260922-katakana-variant-setting`）。
+ * **930「Katakana」（290）だけが弾く 8 記号**（`20260922-katakana-variant-setting`・
+ * `20260922-katakana-selector-merge`。5026 は対象外——ACS はこの CCSID を知らない）。
  * 実機の ACS のコアで確認（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。
  */
-describe("930/5026 の katakanaRestricted", () => {
+describe("930 の katakanaRestricted", () => {
   const restricted = { katakanaRestricted: true };
 
   it("8 記号（`[ ] ^ ` { } ~ ¢`）を弾く。理由は katakana-invalid", () => {

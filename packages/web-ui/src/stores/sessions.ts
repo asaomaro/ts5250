@@ -24,7 +24,7 @@ export interface SessionMeta {
   port?: number;
   tls?: boolean;
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ意味を持たない */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ意味を持たない（5026 は対象外） */
   katakanaVariant?: "katakana" | "katakana-ex";
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
@@ -175,9 +175,9 @@ export interface SessionState {
    * ユーザーと番号はサーバーが背後で引けたときに遅れて届く（画面には触れない）
    */
   job?: { name: string; system?: string; user?: string; number?: string };
-  /** セッションの実効ホストコードページ（CCSID）。930/5026 は入力時に英小文字を大文字化する */
+  /** セッションの実効ホストコードページ（CCSID）。930 は katakanaVariant が "katakana" のとき入力時に英小文字を大文字化する */
   ccsid?: number;
-  /** 930/5026 のキーボード配列の選択。`ccsid` が 930/5026 でなければ意味を持たない。
+  /** 930 のキーボード配列の選択（`20260922-katakana-selector-merge`。5026 は対象外）。`ccsid` が 930 でなければ意味を持たない。
    *  `20260922-katakana-variant-setting` */
   katakanaVariant?: "katakana" | "katakana-ex";
   /** ホスト応答待ち（通信中）。入力をプロテクトする */

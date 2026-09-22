@@ -93,17 +93,15 @@ const busy = computed(() => state.value?.busy ?? false);
 const inputBlocked = computed(() => busy.value || reservedBy.value !== undefined);
 const breakReservation = (): void => breakReservationFor(props.sessionId);
 const loading = computed(() => state.value?.loading ?? false);
-// カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する。
-// **`katakanaVariant === "katakana-ex"` を明示したときだけ**大文字化しない（`20260922-katakana-variant-setting`）。
-// 未指定は現状どおり大文字化する（既存利用者の挙動を変えない）
-const uppercaseInput = computed(
-  () => isKatakanaCcsid(state.value?.ccsid) && state.value?.katakanaVariant !== "katakana-ex"
-);
-// **930/5026「Katakana」（290）を明示したときだけ**コードページに無い 8 記号を拒否する
-// （`20260922-katakana-variant-setting`）。未指定・`"katakana-ex"` は拒否しない（現状維持）
+// ACS の「930 — 日本語（カタカナ）」（290 扱い・CHARSET 332）を選んでいるときだけ、
+// 実機同様に英小文字を大文字化し、コードページに無い 8 記号を拒否する
+// （`20260922-katakana-variant-setting`・`20260922-katakana-selector-merge`）。
+// 未指定・`"katakana-ex"`・930 以外は「930 — 日本（拡張カタカナ）」と同じ（現状どおり）。
+// 5026 は対象外——ACS はこの CCSID の存在自体を知らない（`hostCodePages.ts` 参照）。
 const katakanaRestricted = computed(
-  () => isKatakanaCcsid(state.value?.ccsid) && state.value?.katakanaVariant === "katakana"
+  () => state.value?.ccsid === 930 && state.value?.katakanaVariant === "katakana"
 );
+const uppercaseInput = katakanaRestricted;
 // SBCS だけのセッションか（CCSID が分かっているときだけ。分からなければ従来どおり DBCS と同じ扱い）
 const sbcsSession = computed(() => state.value?.ccsid !== undefined && !isDbcsCcsid(state.value.ccsid));
 /**
