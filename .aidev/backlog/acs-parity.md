@@ -790,18 +790,43 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~1399 の申告（中・要実測）~~ → 上の `20260921-device-env-1399` で済んだ
     - ACS: KBDTYPE=JPE・CHARSET=32000。
     - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。
-  - ~~930 の申告の選択（低・未確認・人に確かめる要判断）~~ → **完了（`20260922-katakana-variant-setting`）**。
-    「どちらが正しいか」を当 PJ が決め打ちする問題ではないと利用者が指摘——ACS 自身がホスト・コード・ページの
-    設定で利用者ごとに選ばせる軸だった（利用者提示のスクリーンショットで確認）。当 PJ も system/session 設定の
-    階層（`ccsid` と同じ並び）に `katakanaVariant`（`"katakana"` | `"katakana-ex"` | 未設定）を追加し、
-    選んだ側に応じて CHARSET の申告（332/1172）・入力の可否（大文字化・8 記号の可否）を切り替えるようにした
-    （`packages/base/src/device-env.ts`・`packages/web-ui/src/components/ConfigCard.vue` 他）。
-    未指定は現状の折衷（大文字化する・8 記号は許可・CHARSET 1172）のまま変えない（既存利用者の挙動を変えない）。
+  - ~~930 の申告の選択（低・未確認・人に確かめる要判断）~~ → **完了（`20260922-katakana-variant-setting`・
+    `20260922-katakana-selector-merge`）**。「どちらが正しいか」を当 PJ が決め打ちする問題ではないと
+    利用者が指摘——ACS 自身がホスト・コード・ページの設定で利用者ごとに選ばせる軸だった（利用者提示の
+    スクリーンショットで確認）。~~当 PJ も system/session 設定の階層（`ccsid` と同じ並び）に
+    `katakanaVariant`（`"katakana"` | `"katakana-ex"` | 未設定）を追加し~~ → **`20260922-katakana-selector-merge`
+    で UI をさらに ACS に合わせた**: ACS の接続設定画面自体が 930 を独立設定ではなく**一覧の 2 エントリ**
+    （`KEY_JAPAN_KATAKANA`／`KEY_JAPAN_KATAKANA_EX`。どちらも申告 CCSID は "930"）として持つと分かった
+    （デコンパイル済み `CodePage.codePagesMap32705250` で確認）ため、「カタカナのキー配列」という独立行を
+    廃止し、ホストコードページの選択肢そのものに 930 を 2 エントリで出す形に変えた
+    （`packages/web-ui/src/hostCodePages.ts` の `HOST_CODE_PAGE_OPTIONS`・`ConfigCard.vue`）。
+    選んだ側に応じて CHARSET の申告（332/1172）・入力の可否（大文字化・8 記号の可否）を切り替える
+    （`packages/base/src/device-env.ts`）。
+    ~~未指定は現状の折衷（大文字化する・8 記号は許可・CHARSET 1172）のまま変えない（既存利用者の挙動を
+    変えない）~~ → **`20260922-katakana-selector-merge` D2 で廃止**: ACS の一覧に「未選択」という中間状態は
+    無く、930 を選ぶ時点で必ずどちらかになるため、未指定は Katakana Extended 側（CHARSET 1172・大文字強制
+    なし・8 記号許可）に寄せた。CHARSET は変わらず、強制されていた大文字化だけが外れる。
     実測は既存のまま（`scripts/acs-probe/ccsid290-invalid-chars.txt`。2026-09-22）: Katakana（290）は英小文字を
     大文字にし `[ ] ^ ` { } ~ ¢` の 8 字をエラーにする。Katakana Extended は小文字のまま・8 字も入る。
-    5026 に同じ選択が実在するかの検証・プリンターセッションへの適用は対象外（プリンターは KBDTYPE/CODEPAGE/
+    ~~5026 に同じ選択が実在するかの検証は対象外~~ → **`20260922-katakana-selector-merge` D1 で確定**:
+    ACS の接続設定画面の一覧にも `CodePage` クラス全体の文字列定数にも "5026" は一度も現れず、ACS は
+    この CCSID の存在自体を知らない。930 と対で扱っていたのは実機の裏づけがないまま広げた判断だったため、
+    `deviceEnvFor`・`EmulatorPane.vue` の katakanaVariant 適用を 930 だけに絞った（5026 は
+    `codecForCcsid` のバイト配置エイリアスとしては残る。SBCS のカナ字形判定 `isKatakanaCcsid` は
+    別軸なので変えていない）。プリンターセッションへの適用は対象外（プリンターは KBDTYPE/CODEPAGE/
     CHARSET を申告しない設計〔`packages/tn5250/src/session/printer-session.ts`〕なので、この設定を持たせても
-    読み手が無い。decisions D1）。
+    読み手が無い。`20260922-katakana-variant-setting` decisions D1）。
+    **副産物（`20260922-katakana-variant-setting-fix-host-code-pages`〔PR #413〕）**:
+    `HOST_CODE_PAGES`（system/session の CCSID 選択肢）自体が 5026・5035 を「930/939 のエイリアス」
+    として載せていたのも同じ調査で誤りと判明し除去した（ACS の接続設定画面は日本語で 930・939・1399
+    しか選ばせない）。スプール CCSID（`SPOOL_CODE_PAGES`）は ACS の接続設定画面と無関係な当 PJ 独自の
+    欄なので 5026・5035 を残した（実機で `serverCcsid=5035` の申告を確認済み。
+    `.aidev/backlog/hostserver.md` `20260718-hostserver-spool`・PR #247）。
+    **未確認のまま**: 1399 にも Latin Unicode 拡張／JIS2004 版の 2 エントリがあるが、ACS のコンバータ
+    クラス（`ByteToCharCp1399`/`ByteToCharCp1399JIS2004`・`CharToByteCp1399`/`CharToByteCp1399JIS2004`）
+    を実機の JVM で実行し EBCDIC↔Unicode の全コードポイントを突き合わせたところ**両者は完全に同一**
+    （差はフォントファイル `jpn1399.fnt`/`jpnjis2004.fnt` の字形だけ）だったため、当 PJ 側は対応不要と
+    判断した（当 PJ はフォントを持たずブラウザの字体に任せるため、選ばせる実体が無い）。
   - ~~DBCS 24x80 の端末タイプ（中・要実測）~~ → 上の `20260921-dbcs-terminal-type` で済んだ
     - ACS: `IBM-5555-C01`。
     - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。

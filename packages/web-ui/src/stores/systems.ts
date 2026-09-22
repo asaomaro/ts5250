@@ -31,7 +31,7 @@ export interface SystemForm {
   port?: number;
   tls?: boolean;
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外） */
   katakanaVariant?: "katakana" | "katakana-ex";
   /** スプール（SCS）用 CCSID。5250 画面用の ccsid とは別物（spec 方針2） */
   spoolCcsid?: number;
@@ -69,7 +69,7 @@ export interface SessionConfigForm {
   closeAssociatedPrinterWithLastSession?: boolean;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
-  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  /** 930（Katakana 系）だけが持つキーボード配列の選択（`20260922-katakana-selector-merge`）。`ccsid` が 930 でなければ無視する（5026 は対象外） */
   katakanaVariant?: "katakana" | "katakana-ex";
   enhanced?: boolean;
   /**

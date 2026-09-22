@@ -21,7 +21,8 @@ export function acceptsChar(field: Field, ch: string, session?: SessionKind): bo
 export interface SessionKind {
   sbcsOnly?: boolean;
   /**
-   * 930/5026 の「Katakana」（290）を選んでいるセッションか（`20260922-katakana-variant-setting`）。
+   * 930 の「Katakana」（290）を選んでいるセッションか（`20260922-katakana-variant-setting`・
+   * `20260922-katakana-selector-merge`。5026 は対象外）。
    * 真のときだけ `isKatakana290InvalidChar` の 8 記号を弾く。既定・`"katakana-ex"` は弾かない
    */
   katakanaRestricted?: boolean;
@@ -39,7 +40,7 @@ export type RejectReason =
   | "alpha-only" // 英字専用(X)項目に英字以外
   | "kbd-inhibited" // キーボード入力不可(I)項目
   | "sign-position" // 符号付き数値欄の符号桁（最終桁）へ数字を打とうとした
-  | "katakana-invalid"; // 930/5026「Katakana」（290）のセッションで、290 に無い記号を打とうとした
+  | "katakana-invalid"; // 930「Katakana」（290）のセッションで、290 に無い記号を打とうとした
 
 export function rejectReason(field: Field, ch: string, session?: SessionKind): RejectReason | undefined {
   if (ch.length === 0) return "alphanumeric";
@@ -54,7 +55,8 @@ export function rejectReason(field: Field, ch: string, session?: SessionKind): R
   // ペースト・マクロ・MCP は core の送信時検証を通る（そちらでは弾かない）。
   if (field.keyboardInhibited) return "kbd-inhibited";
 
-  // **930/5026「Katakana」（290）だけが持つ、コードページに無い 8 記号の拒否**（`20260922-katakana-variant-setting`）。
+  // **930「Katakana」（290）だけが持つ、コードページに無い 8 記号の拒否**（`20260922-katakana-variant-setting`。
+  // 5026 は対象外——`20260922-katakana-selector-merge` D1）。
   // 原典 `CodePage.isValidChar` はフィールド型を見ずに文字そのものを弾く（DBCS 系の打鍵経路で一律）ので、
   // 型別の判定より先に見る。欄の型に関わらずこの 8 記号自体はどの型の判定にも該当しないので結果は変わらない
   if (session?.katakanaRestricted === true && isKatakana290InvalidChar(ch)) return "katakana-invalid";

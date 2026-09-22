@@ -4,8 +4,9 @@ import { FakeTransport } from "./helpers/fake-transport.js";
 import { IAC, CMD, OPT, ENV_SEND, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
 
 /**
- * **930/5026 の `katakanaVariant` が、実際に申告する CHARSET を切り替えるか**（`20260922-katakana-variant-setting`）。
- * `deviceEnvFor` 自体は `packages/base/test/device-env.test.ts` で固定済み。ここは `Session5250.establish`
+ * **930 の `katakanaVariant` が、実際に申告する CHARSET を切り替えるか**（`20260922-katakana-variant-setting`。
+ * 5026 は対象外——`20260922-katakana-selector-merge` D1）。`deviceEnvFor` 自体は
+ * `packages/base/test/device-env.test.ts` で固定済み。ここは `Session5250.establish`
  * が `opts.katakanaVariant` を実際に `deviceEnvFor` へ渡し、`TelnetLayer` の申告まで届くこと（配線）を見る。
  */
 function ascii(s: string): number[] {

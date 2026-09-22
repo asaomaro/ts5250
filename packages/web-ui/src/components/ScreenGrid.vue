@@ -149,11 +149,17 @@ const props = withDefaults(
     message?: string;
     /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
     cursor?: { row: number; col: number };
-    /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
+    /**
+     * 930「Katakana」（290）を選んだセッションか（`EmulatorPane.vue` の `uppercaseInput` 参照。
+     * 930 の SBCS 自体は英小文字を持たないが、この prop が真になるのは選んだときだけ——
+     * 未選択・"katakana-ex" は実機同様そのまま通す。`20260922-katakana-selector-merge` D2）。
+     * 真のとき実機（ACS）同様、半角英小文字を入力時に大文字化する
+     */
     uppercaseInput?: boolean;
     /**
-     * 930/5026「Katakana」（290）を選んだセッションか。真のときだけコードページに無い 8 記号
-     * （`[ ] ^ ` { } ~ ¢`）を拒否する（`20260922-katakana-variant-setting`）
+     * 930「Katakana」（290）を選んだセッションか。真のときだけコードページに無い 8 記号
+     * （`[ ] ^ ` { } ~ ¢`）を拒否する（`20260922-katakana-variant-setting`・
+     * `20260922-katakana-selector-merge`。5026 は対象外——ACS はこの CCSID を知らない）
      */
     katakanaRestricted?: boolean;
     /**
@@ -273,13 +279,13 @@ const byteLen = (value: string, f?: Field): number => dbcsByteLength(value, sess
  * | 規則 | 理由 | 範囲 |
  * |---|---|---|
  * | `field.monocase`（FFW 0x0020） | **ホストがこの欄を大文字化しろと言っている** | その欄だけ |
- * | `uppercaseInput`（CCSID 930/5026） | **コードページに英小文字が無い**。大文字化しないと core の「マップ不能文字」検証で送信できなくなる | 全欄 |
+ * | `uppercaseInput`（930「Katakana」選択時） | **コードページに英小文字が無い**。大文字化しないと core の「マップ不能文字」検証で送信できなくなる | 全欄 |
  *
  * MONOCASE は実機では既定で立つ（DDS の文字欄は `CHECK(LC)` を書かない限り載る。実機で実測）。
  * 逆に `CHECK(LC)` 付きの欄では**小文字がそのまま残る**のが正しい。
  */
 function inputChar(ch: string, field: Field): string {
-  // 英小文字の無いコードページ（930/5026）は a〜z だけ（ACS `CodePage.toUpper` も 290 の a〜z だけ）
+  // 英小文字の無いコードページ（930 の SBCS）は a〜z だけ（ACS `CodePage.toUpper` も 290 の a〜z だけ）
   if (props.uppercaseInput && ch >= "a" && ch <= "z") return ch.toUpperCase();
   // **ギリシャ文字の μ はコードページのマイクロ記号 µ に置き換える**（ACS `PS5250.inputChar` の `hasMicroSymbol`。節目の点検の指摘）。
   // 当 PJ の SBCS だけのセッションの CCSID（37 ほか Latin-1 系）はどれも µ を持つので、SBCS だけのセッションで置き換える。

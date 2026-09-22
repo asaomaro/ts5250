@@ -123,7 +123,7 @@ describe("信頼境界: 個人設定に printer を入れられない（1 層目
   });
 
   /**
-   * **`katakanaVariant`（930/5026 だけが持つキー配列の選択）が、形の違う入力を弾くか**
+   * **`katakanaVariant`（930 だけが持つキー配列の選択。`20260922-katakana-selector-merge` D1）が、形の違う入力を弾くか**
    * （`20260922-katakana-variant-setting`。`.aidev/conventions/test-input-shape.md`）。
    * 値だけでなく型・容れ物を振る——スカラーの enum なので「配列風オブジェクト」までは無いが、
    * 想定外の型（数値・真偽値・配列・オブジェクト・null）と、正しい型で中身が不正な値を両方振る。

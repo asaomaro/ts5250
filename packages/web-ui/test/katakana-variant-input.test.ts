@@ -8,11 +8,12 @@ import type { WsClient } from "../src/ws-client.js";
 import { isOperatorError } from "../src/composables/opMessages.js";
 
 /**
- * **930/5026 の `katakanaVariant` が、実際の打鍵の挙動（大文字化・8 記号の拒否）を切り替えるか**
- * （`20260922-katakana-variant-setting`）。`EmulatorPane` の `uppercaseInput`/`katakanaRestricted`
- * computed（`state.ccsid`/`state.katakanaVariant` から導く）を、実際に文字を打って確かめる。
- * 単体の式は `field-validate.test.ts`（`katakanaRestricted`）・`device-env.test.ts`（CHARSET）で
- * 固定済みなので、ここは**配線**（セッション状態 → EmulatorPane → ScreenGrid）だけを見る。
+ * **930 の `katakanaVariant` が、実際の打鍵の挙動（大文字化・8 記号の拒否）を切り替えるか**
+ * （`20260922-katakana-variant-setting`・`20260922-katakana-selector-merge`）。`EmulatorPane` の
+ * `uppercaseInput`/`katakanaRestricted` computed（`state.ccsid`/`state.katakanaVariant` から導く）を、
+ * 実際に文字を打って確かめる。単体の式は `field-validate.test.ts`（`katakanaRestricted`）・
+ * `device-env.test.ts`（CHARSET）で固定済みなので、ここは**配線**（セッション状態 → EmulatorPane →
+ * ScreenGrid）だけを見る。5026 は対象外（ACS がこの CCSID の存在を知らないため。`hostCodePages.ts`）。
  */
 const COLS = 80;
 const cell = (char = " ", kind: Cell["kind"] = "sbcs"): Cell =>
@@ -65,14 +66,14 @@ async function type(input: HTMLInputElement, key: string): Promise<void> {
 const value = () => sessionsStore.byId.get("w1")!.edits.get(1);
 const opmsgText = (w: ReturnType<typeof mount>) => (w.find(".opmsg").exists() ? w.find(".opmsg").text().replace(/\s/g, "") : "");
 
-describe("930/5026 katakanaVariant の配線", () => {
-  it("**未指定は現状どおり**: 小文字は大文字化され、8 記号は入る", async () => {
+describe("930 katakanaVariant の配線", () => {
+  it("**未指定は \"katakana-ex\" と同じ**: 小文字はそのまま、8 記号も入る（20260922-katakana-selector-merge D2）", async () => {
     seed(930, undefined);
     const { input } = await pane();
     await type(input, "a");
-    expect(value()).toBe("A");
+    expect(value()).toBe("a");
     await type(input, "[");
-    expect(value()).toBe("A[");
+    expect(value()).toBe("a[");
   });
 
   it('**"katakana-ex"**: 小文字はそのまま、8 記号も入る', async () => {
@@ -110,10 +111,12 @@ describe("930/5026 katakanaVariant の配線", () => {
     expect(value()).toBe("a[");
   });
 
-  it("5026 も 930 と同じ扱い", async () => {
+  it("**5026 は対象外**: katakanaVariant を渡していても無視する（ACS はこの CCSID を知らない）", async () => {
     seed(5026, "katakana");
     const { input } = await pane();
     await type(input, "a");
-    expect(value()).toBe("A");
+    expect(value()).toBe("a");
+    await type(input, "[");
+    expect(value()).toBe("a[");
   });
 });

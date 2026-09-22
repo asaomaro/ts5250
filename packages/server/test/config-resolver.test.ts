@@ -192,7 +192,7 @@ describe("解決: CCSID の優先順位", () => {
 });
 
 /**
- * **930/5026 の katakanaVariant も `ccsid` と同じ優先順位で解決する**（`20260922-katakana-variant-setting`）。
+ * **930 の katakanaVariant も `ccsid` と同じ優先順位で解決する**（`20260922-katakana-variant-setting`）。
  */
 describe("解決: katakanaVariant の優先順位", () => {
   it("セッションの上書きがシステムの既定に勝つ", () => {

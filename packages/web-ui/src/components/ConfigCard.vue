@@ -13,11 +13,12 @@ import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
 import {
-  HOST_CODE_PAGES,
+  HOST_CODE_PAGE_OPTIONS,
   SPOOL_CODE_PAGES,
   DEFAULT_CCSID,
   DEFAULT_SPOOL_CCSID,
-  isKatakanaCcsid
+  hostCodePageOptionId,
+  hostCodePageOptionOf
 } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
@@ -279,14 +280,36 @@ const isServer = computed(() => {
 const canEdit = computed(() => !isServer.value || systemsStore.editable);
 
 /**
- * セッションフォームの実効 CCSID（`sesForm.ccsid` の上書きが無ければ、フォームで選んだ親システムの
- * CCSID を継ぐ）。930/5026（Katakana 系）の「カタカナのキー配列」の行を出すかどうかに使う
- * （`20260922-katakana-variant-setting`）——`v-if="isKatakanaCcsid(sesForm.ccsid)"` だけだと、
- * セッション側が上書きしていない（システムの既定に従う）のに親が 930 の場合に行が出ない
+ * ホストコードページの選択（`sysForm.ccsid` + `sysForm.katakanaVariant` の組）を、
+ * ACS の接続設定画面と同じ**1 本の一覧**として見せる／書き戻す（`20260922-katakana-selector-merge`）。
+ * 930 の Katakana / Katakana Extended は独立した設定項目に分けない——ACS 自身が
+ * 「ホスト・コード・ページ」一覧の中の 2 エントリとして持つ軸だから（`hostCodePages.ts` 参照）。
  */
-const sesEffectiveCcsid = computed(
-  () => sesForm.ccsid ?? systemsStore.systems.find((x) => x.ref === sesForm.system)?.ccsid
-);
+const sysCodePageId = computed<string>({
+  get: () => hostCodePageOptionId(sysForm.ccsid, sysForm.katakanaVariant) ?? "37",
+  set: (id: string) => {
+    const opt = hostCodePageOptionOf(id);
+    if (!opt) return;
+    sysForm.ccsid = opt.ccsid;
+    sysForm.katakanaVariant = opt.katakanaVariant;
+  }
+});
+
+/** セッション版の `sysCodePageId`。`"inherit"` は「システムの既定」——ccsid・katakanaVariant を両方とも未設定に戻す。 */
+const sesCodePageId = computed<string>({
+  get: () => (sesForm.ccsid === undefined ? "inherit" : (hostCodePageOptionId(sesForm.ccsid, sesForm.katakanaVariant) ?? "inherit")),
+  set: (id: string) => {
+    if (id === "inherit") {
+      sesForm.ccsid = undefined;
+      sesForm.katakanaVariant = undefined;
+      return;
+    }
+    const opt = hostCodePageOptionOf(id);
+    if (!opt) return;
+    sesForm.ccsid = opt.ccsid;
+    sesForm.katakanaVariant = opt.katakanaVariant;
+  }
+});
 
 /** printer 出力（信頼設定）を編集できるか。**サーバー設定のプリンターセッションかつ編集権限があるときだけ** */
 const canEditPrinter = computed(
@@ -912,24 +935,12 @@ const infoRows = computed(() => {
           ><span class="cap">TLS</span><input v-model="sysForm.tls" type="checkbox" />
           <span class="hint">証明書を検証して接続</span></label
         >
+        <!-- ACS の「ホスト・コード・ページ」一覧と同じ 1 本の選択肢（`20260922-katakana-selector-merge`）。
+             930 の Katakana / Katakana Extended も、ここのエントリとして並ぶ（独立した項目には分けない） -->
         <label class="row">
           <span class="cap">既定 CCSID</span>
-          <select v-model.number="sysForm.ccsid">
-            <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
-          </select>
-        </label>
-        <!--
-          930/5026（Katakana 系）のときだけ意味を持つ設定（`20260922-katakana-variant-setting`）。
-          ACS 自身が「ホスト・コード・ページ」の設定で利用者ごとに選ばせる軸なので、当 PJ も選ばせる
-          （930/5026 以外では選択肢が無意味なので隠す。AGENTS.md UI ガイド「環境の検出結果で選択肢を塞がない」
-          とは別の理由——検出の失陥ではなく、CCSID 次第で本当に意味を持たない）
-        -->
-        <label v-if="isKatakanaCcsid(sysForm.ccsid)" class="row">
-          <span class="cap">カタカナのキー配列</span>
-          <select v-model="sysForm.katakanaVariant">
-            <option :value="undefined">既定（従来どおり。大文字化する・記号 8 種は入力可）</option>
-            <option value="katakana">Katakana（290 相当。大文字化する・記号 8 種は入力不可）</option>
-            <option value="katakana-ex">Katakana Extended（小文字可・記号 8 種も入力可）</option>
+          <select v-model="sysCodePageId">
+            <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
           </select>
           <span class="hint">利用者の ACS の「ホスト・コード・ページ」の選択に合わせてください</span>
         </label>
@@ -1172,20 +1183,13 @@ const infoRows = computed(() => {
             <option :value="5">5（27x132）</option>
           </select>
         </label>
+        <!-- システム設定と同じ、ACS の「ホスト・コード・ページ」一覧に倣った 1 本の選択肢
+             （`20260922-katakana-selector-merge`）。930 の Katakana / Katakana Extended もここのエントリ -->
         <label class="row">
           <span class="cap">CCSID</span>
-          <select v-model.number="sesForm.ccsid">
-            <option :value="undefined">システムの既定</option>
-            <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
-          </select>
-        </label>
-        <!-- 930/5026（Katakana 系）のときだけ意味を持つ（`20260922-katakana-variant-setting`）。システム設定と同じ理由 -->
-        <label v-if="isKatakanaCcsid(sesEffectiveCcsid)" class="row">
-          <span class="cap">カタカナのキー配列</span>
-          <select v-model="sesForm.katakanaVariant">
-            <option :value="undefined">システムの既定</option>
-            <option value="katakana">Katakana（290 相当。大文字化する・記号 8 種は入力不可）</option>
-            <option value="katakana-ex">Katakana Extended（小文字可・記号 8 種も入力可）</option>
+          <select v-model="sesCodePageId">
+            <option value="inherit">システムの既定</option>
+            <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
           </select>
         </label>
         <!--

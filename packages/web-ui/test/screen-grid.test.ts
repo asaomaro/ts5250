@@ -245,7 +245,7 @@ describe("ScreenGrid", () => {
     expect(emits.at(-1)).toEqual([1, "ABC"]);
   });
 
-  it("uppercaseInput（930/5026）: 半角英小文字を入力すると大文字化する", async () => {
+  it("uppercaseInput（930「Katakana」選択時）: 半角英小文字を入力すると大文字化する", async () => {
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "" }
     ];
