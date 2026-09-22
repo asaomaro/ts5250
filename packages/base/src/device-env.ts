@@ -29,10 +29,31 @@ export interface DeviceEnv {
   charSet: number;
 }
 
+/**
+ * **930/5026（日本語カタカナ）だけが持つ、キーボード配列の選択**（`20260922-katakana-variant-setting`）。
+ *
+ * ACS はこれを「ホスト・コード・ページ」の設定画面で**利用者ごとに選ばせる**（利用者提示の
+ * スクリーンショットで確認）。「どちらが正しいか」を当 PJ が決め打ちできる軸ではない。
+ *
+ * - `"katakana"` ＝ ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）。290 として扱われ CHARSET 332。
+ *   実機の ACS のコアで確認（`scripts/acs-probe/ccsid290-invalid-chars.txt`）: 半角英小文字を
+ *   大文字化し、`[ ] ^ ` { } ~ ¢` の 8 字をエラーにする（原典 `CodePage.isValidChar` が
+ *   `icodepage == 290` のときだけこの 8 字を偽にする）
+ * - `"katakana-ex"` ＝ ACS の「Katakana Extended」（`KEY_JAPAN_KATAKANA_EX`）。CHARSET 1172。
+ *   小文字のまま・8 字とも入力できる
+ *
+ * 未指定（`undefined`）は当 PJ の**現状の折衷**（CHARSET 1172＝Extended 寄り・入力は大文字化する
+ * ＝Katakana 寄り・8 字は拒否しない＝Extended 寄り）のまま変えない——既存の利用者の挙動を変えない
+ * ための既定（`20260922-katakana-variant-setting` requirements AC4）。
+ */
+export type KatakanaVariant = "katakana" | "katakana-ex";
+
 const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   [37, { kbdType: "USB", codePage: 37, charSet: 697 }],
   [273, { kbdType: "AGB", codePage: 273, charSet: 697 }],
   // 日本語 DBCS は SBCS 部を申告する（930/5026=カタカナ 290、939/5035/931/1399=英小文字 1027）
+  // CHARSET 1172 は「Katakana Extended」の既定値（KatakanaVariant のコメント参照）。
+  // "katakana" を選んだときだけ deviceEnvFor が 332 に差し替える
   [930, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   [5026, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   // 939 の KBDTYPE は ACS 実機の申告に合わせて JPB（従来 JEB）。930 は ACS の「Katakana Extended」
@@ -46,7 +67,19 @@ const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   [1399, { kbdType: "JPE", codePage: 1027, charSet: 32000 }]
 ]);
 
-/** CCSID に対応するデバイス属性（未知の CCSID は `undefined`＝申告しない）。 */
-export function deviceEnvFor(ccsid: number): DeviceEnv | undefined {
-  return DEVICE_ENV.get(ccsid);
+/** 930/5026 の「Katakana」だけが申告する CHARSET（ACS の `getHostCodePage_CharSet`。290 扱い）。 */
+const KATAKANA_CHARSET = 332;
+
+/**
+ * CCSID に対応するデバイス属性（未知の CCSID は `undefined`＝申告しない）。
+ *
+ * `katakanaVariant` は 930/5026 のときだけ意味を持つ（`"katakana"` なら CHARSET を 332 に
+ * 差し替える）。それ以外の CCSID・`undefined`・`"katakana-ex"` は無視して既定の表のまま返す。
+ */
+export function deviceEnvFor(ccsid: number, katakanaVariant?: KatakanaVariant): DeviceEnv | undefined {
+  const dev = DEVICE_ENV.get(ccsid);
+  if (dev && (ccsid === 930 || ccsid === 5026) && katakanaVariant === "katakana") {
+    return { ...dev, charSet: KATAKANA_CHARSET };
+  }
+  return dev;
 }

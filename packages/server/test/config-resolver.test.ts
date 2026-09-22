@@ -27,6 +27,7 @@ function build(opts: { badPassword?: boolean; noCrypto?: boolean } = {}) {
           host: "pub400.com",
           tls: true,
           ccsid: 939,
+          katakanaVariant: "katakana-ex",
           signon: { user: "USER", passwordEnc: enc }
         },
         { id: "bare", name: "bare", host: "bare.example", tls: false }
@@ -51,6 +52,25 @@ function build(opts: { badPassword?: boolean; noCrypto?: boolean } = {}) {
           enhanced: true
         },
         {
+          id: "pub400-kana",
+          name: "pub400-kana",
+          system: "pub400.com",
+          sessionType: "display",
+          deviceName: "WEBEMUKN",
+          screenSize: "24x80",
+          ccsid: 930,
+          katakanaVariant: "katakana"
+        },
+        {
+          id: "pub400-kana-unset",
+          name: "pub400-kana-unset",
+          system: "pub400.com",
+          sessionType: "display",
+          deviceName: "WEBEMUKU",
+          screenSize: "24x80",
+          ccsid: 930
+        },
+        {
           id: "pub400-prt",
           name: "pub400-prt",
           system: "pub400.com",
@@ -58,6 +78,13 @@ function build(opts: { badPassword?: boolean; noCrypto?: boolean } = {}) {
           deviceName: "PRT_TEST",
           screenSize: "24x80",
           printer: { autoPdfDir: "/var/spool/out", pdfFontPath: "/f.ttf" }
+        },
+        {
+          id: "bare-plain",
+          name: "bare-plain",
+          system: "bare",
+          sessionType: "display",
+          deviceName: "WEBEMUBP"
         }
       ]
     },
@@ -161,6 +188,29 @@ describe("解決: CCSID の優先順位", () => {
     const { warn } = collector();
     const out = build().resolve({ session: "srv:pub400" }, admin, warn);
     expect(out.connect.ccsid).toBe(939);
+  });
+});
+
+/**
+ * **930/5026 の katakanaVariant も `ccsid` と同じ優先順位で解決する**（`20260922-katakana-variant-setting`）。
+ */
+describe("解決: katakanaVariant の優先順位", () => {
+  it("セッションの上書きがシステムの既定に勝つ", () => {
+    const { warn } = collector();
+    const out = build().resolve({ session: "srv:pub400-kana" }, admin, warn);
+    expect(out.connect.katakanaVariant).toBe("katakana");
+  });
+
+  it("セッションに指定が無ければシステムの既定を使う", () => {
+    const { warn } = collector();
+    const out = build().resolve({ session: "srv:pub400-kana-unset" }, admin, warn);
+    expect(out.connect.katakanaVariant).toBe("katakana-ex");
+  });
+
+  it("システムにも無ければ未設定のまま（現状維持。勝手に既定へ寄せない）", () => {
+    const { warn } = collector();
+    const out = build().resolve({ session: "srv:bare-plain" }, admin, warn);
+    expect(out.connect.katakanaVariant).toBeUndefined();
   });
 });
 

@@ -122,6 +122,29 @@ describe("信頼境界: 個人設定に printer を入れられない（1 層目
     ).toThrow();
   });
 
+  /**
+   * **`katakanaVariant`（930/5026 だけが持つキー配列の選択）が、形の違う入力を弾くか**
+   * （`20260922-katakana-variant-setting`。`.aidev/conventions/test-input-shape.md`）。
+   * 値だけでなく型・容れ物を振る——スカラーの enum なので「配列風オブジェクト」までは無いが、
+   * 想定外の型（数値・真偽値・配列・オブジェクト・null）と、正しい型で中身が不正な値を両方振る。
+   */
+  describe("katakanaVariant の不正な形を弾く", () => {
+    const shapes: unknown[] = ["bogus", "", 1, true, null, [], {}, ["katakana"]];
+    it.each(shapes)("addSystem: %j は弾く", (bad) => {
+      expect(() => store.addSystem({ name: "s", host: "h", ccsid: 930, katakanaVariant: bad }, alice)).toThrow();
+    });
+    it("addSystem: 正しい値（katakana）は通る", () => {
+      expect(() =>
+        store.addSystem({ name: "s", host: "h", ccsid: 930, katakanaVariant: "katakana" }, alice)
+      ).not.toThrow();
+    });
+    it.each(shapes)("addSession: %j は弾く", (bad) => {
+      expect(() =>
+        store.addSession({ name: "c", system: "s-1", sessionType: "display", katakanaVariant: bad }, alice)
+      ).toThrow();
+    });
+  });
+
   it("printer を含まなければ通る", () => {
     const s = store.addSession({ name: "p", system: "s-1", sessionType: "printer" }, alice);
     expect(s.name).toBe("p");

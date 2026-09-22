@@ -35,4 +35,33 @@ describe("RFC 2877 のデバイス属性", () => {
     expect(deviceEnvFor(1234)).toBeUndefined();
     expect(deviceEnvFor(1208)).toBeUndefined();
   });
+
+  /**
+   * **930/5026 の Katakana / Katakana Extended**（`20260922-katakana-variant-setting`）。
+   * ACS 自身が利用者に選ばせる軸なので、既定（未指定）は変えない（AC4）。
+   */
+  describe("930/5026 の Katakana 変種", () => {
+    it("**未指定は現状どおり CHARSET 1172**（Katakana Extended 寄り。既存利用者の挙動を変えない）", () => {
+      expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
+      expect(deviceEnvFor(5026)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
+    });
+
+    it("**\"katakana-ex\" も未指定と同じ**（CHARSET 1172）", () => {
+      expect(deviceEnvFor(930, "katakana-ex")).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
+    });
+
+    it("**\"katakana\" は CHARSET 332 に差し替える**（KBDTYPE・CODEPAGE は変わらない）", () => {
+      expect(deviceEnvFor(930, "katakana")).toEqual({ kbdType: "JKB", codePage: 290, charSet: 332 });
+      expect(deviceEnvFor(5026, "katakana")).toEqual({ kbdType: "JKB", codePage: 290, charSet: 332 });
+    });
+
+    it("**930/5026 以外は \"katakana\" を渡しても無視する**", () => {
+      expect(deviceEnvFor(939, "katakana")).toEqual({ kbdType: "JPB", codePage: 1027, charSet: 1172 });
+      expect(deviceEnvFor(1399, "katakana")).toEqual({ kbdType: "JPE", codePage: 1027, charSet: 32000 });
+    });
+
+    it("知らない CCSID に \"katakana\" を渡しても undefined のまま", () => {
+      expect(deviceEnvFor(1234, "katakana")).toBeUndefined();
+    });
+  });
 });

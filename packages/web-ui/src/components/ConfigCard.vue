@@ -12,7 +12,7 @@ import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores
 import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
-import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID } from "../hostCodePages.js";
+import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
 
@@ -81,6 +81,7 @@ const sysForm = reactive<SysFormState>({
   host: "",
   tls: true,
   ccsid: DEFAULT_CCSID,
+  katakanaVariant: undefined,
   spoolCcsid: DEFAULT_SPOOL_CCSID
 });
 const sesForm = reactive<SesFormState>({
@@ -91,6 +92,7 @@ const sesForm = reactive<SesFormState>({
   model3270: 2 as 2 | 5,
   vtEncoding: "utf-8" as "utf-8" | "shift_jis" | "euc-jp",
   screenSize: DEFAULT_SCREEN_SIZE,
+  katakanaVariant: undefined,
   deviceName: "",
   associatedPrinter: "",
   associatedPrinterSession: "",
@@ -270,6 +272,16 @@ const isServer = computed(() => {
  */
 const canEdit = computed(() => !isServer.value || systemsStore.editable);
 
+/**
+ * セッションフォームの実効 CCSID（`sesForm.ccsid` の上書きが無ければ、フォームで選んだ親システムの
+ * CCSID を継ぐ）。930/5026（Katakana 系）の「カタカナのキー配列」の行を出すかどうかに使う
+ * （`20260922-katakana-variant-setting`）——`v-if="isKatakanaCcsid(sesForm.ccsid)"` だけだと、
+ * セッション側が上書きしていない（システムの既定に従う）のに親が 930 の場合に行が出ない
+ */
+const sesEffectiveCcsid = computed(
+  () => sesForm.ccsid ?? systemsStore.systems.find((x) => x.ref === sesForm.system)?.ccsid
+);
+
 /** printer 出力（信頼設定）を編集できるか。**サーバー設定のプリンターセッションかつ編集権限があるときだけ** */
 const canEditPrinter = computed(
   () => props.kind === "session" && isServer.value && systemsStore.editable && sesForm.sessionType === "printer"
@@ -301,6 +313,7 @@ function loadSystem(): void {
   sysForm.port = s.port;
   sysForm.tls = s.tls ?? false;
   sysForm.ccsid = s.ccsid ?? DEFAULT_CCSID;
+  sysForm.katakanaVariant = s.katakanaVariant;
   sysForm.spoolCcsid = s.spoolCcsid ?? DEFAULT_SPOOL_CCSID;
   sysForm.color = s.color; // 未設定のまま＝自動（ref から割り当てる）
   sysForm.autoSignon = s.autoSignon;
@@ -335,6 +348,7 @@ function loadSession(): void {
   sesForm.transformTo = s.transformTo ?? "";
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
   sesForm.ccsid = s.ccsid;
+  sesForm.katakanaVariant = s.katakanaVariant;
   sesForm.enhanced = s.enhanced;
   // **「サーバー既定に従う」は選べなくした**（`20260802-config-form-polish`）。
   // 未設定の定義（手書きの profiles.json など）は「切らない」として開く
@@ -898,6 +912,21 @@ const infoRows = computed(() => {
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
         </label>
+        <!--
+          930/5026（Katakana 系）のときだけ意味を持つ設定（`20260922-katakana-variant-setting`）。
+          ACS 自身が「ホスト・コード・ページ」の設定で利用者ごとに選ばせる軸なので、当 PJ も選ばせる
+          （930/5026 以外では選択肢が無意味なので隠す。AGENTS.md UI ガイド「環境の検出結果で選択肢を塞がない」
+          とは別の理由——検出の失陥ではなく、CCSID 次第で本当に意味を持たない）
+        -->
+        <label v-if="isKatakanaCcsid(sysForm.ccsid)" class="row">
+          <span class="cap">カタカナのキー配列</span>
+          <select v-model="sysForm.katakanaVariant">
+            <option :value="undefined">既定（従来どおり。大文字化する・記号 8 種は入力可）</option>
+            <option value="katakana">Katakana（290 相当。大文字化する・記号 8 種は入力不可）</option>
+            <option value="katakana-ex">Katakana Extended（小文字可・記号 8 種も入力可）</option>
+          </select>
+          <span class="hint">利用者の ACS の「ホスト・コード・ページ」の選択に合わせてください</span>
+        </label>
         <label class="row">
           <span class="cap">スプール CCSID</span>
           <select v-model.number="sysForm.spoolCcsid">
@@ -1142,6 +1171,15 @@ const infoRows = computed(() => {
           <select v-model.number="sesForm.ccsid">
             <option :value="undefined">システムの既定</option>
             <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+          </select>
+        </label>
+        <!-- 930/5026（Katakana 系）のときだけ意味を持つ（`20260922-katakana-variant-setting`）。システム設定と同じ理由 -->
+        <label v-if="isKatakanaCcsid(sesEffectiveCcsid)" class="row">
+          <span class="cap">カタカナのキー配列</span>
+          <select v-model="sesForm.katakanaVariant">
+            <option :value="undefined">システムの既定</option>
+            <option value="katakana">Katakana（290 相当。大文字化する・記号 8 種は入力不可）</option>
+            <option value="katakana-ex">Katakana Extended（小文字可・記号 8 種も入力可）</option>
           </select>
         </label>
         <!--

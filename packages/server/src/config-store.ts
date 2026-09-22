@@ -194,6 +194,7 @@ export abstract class ConfigStore {
     if (s.port !== undefined) pub.port = s.port;
     if (s.tls !== undefined) pub.tls = s.tls;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
+    if (s.katakanaVariant !== undefined) pub.katakanaVariant = s.katakanaVariant;
     if (s.spoolCcsid !== undefined) pub.spoolCcsid = s.spoolCcsid;
     // **色は資格情報ではない。** 見分けの手段なので、そのシステムが見える人には見せる
     if (s.color !== undefined) pub.color = s.color;
@@ -224,6 +225,7 @@ export abstract class ConfigStore {
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;
     if (s.ccsid !== undefined) pub.ccsid = s.ccsid;
+    if (s.katakanaVariant !== undefined) pub.katakanaVariant = s.katakanaVariant;
     if (s.enhanced !== undefined) pub.enhanced = s.enhanced;
     if (s.idleTimeout !== undefined) pub.idleTimeout = s.idleTimeout;
     // 信頼設定ではないので値ごと返す（編集フォームが空から始まると保存で消える）

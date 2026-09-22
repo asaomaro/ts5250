@@ -152,6 +152,11 @@ const props = withDefaults(
     /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
     uppercaseInput?: boolean;
     /**
+     * 930/5026「Katakana」（290）を選んだセッションか。真のときだけコードページに無い 8 記号
+     * （`[ ] ^ ` { } ~ ¢`）を拒否する（`20260922-katakana-variant-setting`）
+     */
+    katakanaRestricted?: boolean;
+    /**
      * **SBCS だけのセッション**（37 など。DBCS の CCSID でない）。打鍵時の幅の判定（`rejectReason`）と MONOCASE の大文字化が
      * 分かれる（`20260921-monocase-non-ascii`）。省略時は DBCS のセッションと同じ扱い
      */
@@ -234,7 +239,10 @@ const gui = computed(() => props.snapshot.gui);
  */
 const inhibited = computed(() => props.busy === true || props.snapshot.keyboardLocked);
 /** 打鍵・貼り付けの受け付けの判定に渡すセッションの種類（`fieldValidate.ts` の `SessionKind`） */
-const sessionKind = computed(() => ({ sbcsOnly: props.sbcsSession === true }));
+const sessionKind = computed(() => ({
+  sbcsOnly: props.sbcsSession === true,
+  katakanaRestricted: props.katakanaRestricted === true
+}));
 /**
  * 入力欄に出す値のセンチネルを字にする。**ゾーン D の桁（Field−）は字、それ以外は空白**（ACS は Field− の桁を `}`・`J`〜`R` で見せる。
  * `composables/zoneDigit.ts`）。~~`@ts5250/tn5250/browser` の `stripSentinels`（全部空白）~~

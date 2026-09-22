@@ -232,3 +232,38 @@ describe("attach の CCSID", () => {
     mgr.closeAll();
   });
 });
+
+/**
+ * **`katakanaVariant`（930/5026 のキーボード配列）も新規オープン・attach の両方で返す**
+ * （`20260922-katakana-variant-setting`）。ブラウザ直指定（`host`+`ccsid`+`katakanaVariant`）の経路
+ * （`buildDirect`）で通ることも同時に確かめる。
+ */
+describe("katakanaVariant", () => {
+  it("新規オープンの opened に、指定した katakanaVariant がそのまま載る", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const { c, sent } = conn(mgr);
+    await c.handle(JSON.stringify({ type: "open", host: "h", ccsid: 930, katakanaVariant: "katakana" }));
+    expect(sent[0]).toMatchObject({ type: "opened", ccsid: 930, katakanaVariant: "katakana" });
+    mgr.closeAll();
+  });
+
+  it("attach でも同じ katakanaVariant を返す", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const { c, sent } = conn(mgr);
+    await c.handle(JSON.stringify({ type: "open", host: "h", ccsid: 930, katakanaVariant: "katakana-ex" }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    const viewer = conn(mgr);
+    await viewer.c.handle(JSON.stringify({ type: "open", sessionId: id }));
+    expect(viewer.sent[0]).toMatchObject({ type: "opened", sessionId: id, katakanaVariant: "katakana-ex" });
+    mgr.closeAll();
+  });
+
+  it("未指定なら opened にキーごと出ない（値の無い false と区別する）", async () => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const { c, sent } = conn(mgr);
+    await c.handle(JSON.stringify({ type: "open", host: "h", ccsid: 930 }));
+    expect(sent[0]).toMatchObject({ type: "opened", ccsid: 930 });
+    expect("katakanaVariant" in (sent[0] as object)).toBe(false);
+    mgr.closeAll();
+  });
+});

@@ -203,6 +203,11 @@ export const systemSchema = z
     /** 既定 CCSID。セッション設定が上書きできる */
     ccsid: z.number().int().optional(),
     /**
+     * 930/5026（Katakana 系）だけが持つキーボード配列の選択。セッション設定が上書きできる
+     * （`20260922-katakana-variant-setting`）。`ccsid` が 930/5026 でなければ無視する
+     */
+    katakanaVariant: z.enum(["katakana", "katakana-ex"]).optional(),
+    /**
      * スプール（SCS）のデコードに使う CCSID。既定 273。
      *
      * 上の `ccsid` とは**別物**——あちらは 5250 画面の文字変換用で、経路によって扱いが違う
@@ -321,6 +326,11 @@ const sessionBase = {
   screenSize: screenSizeSchema.optional(),
   /** システムの既定 CCSID を上書きする */
   ccsid: z.number().int().optional(),
+  /**
+   * 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する
+   * （`20260922-katakana-variant-setting`）。未指定はシステムの既定を継ぐ
+   */
+  katakanaVariant: z.enum(["katakana", "katakana-ex"]).optional(),
   /** display のみ意味を持つ */
   enhanced: z.boolean().optional(),
   /** display のみ意味を持つ。画面に重ねる透かし（表示だけの設定） */
@@ -599,6 +609,8 @@ export interface PublicSystem {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  katakanaVariant?: "katakana" | "katakana-ex";
   /** スプール（SCS）用 CCSID。5250 画面用の `ccsid` とは別（spec 方針2） */
   spoolCcsid?: number;
   /** システムカラー（パレット番号 1〜8）。未設定は画面側が ref から自動で割り当てる */
@@ -677,6 +689,8 @@ export interface PublicSession {
   transformTo?: string;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  katakanaVariant?: "katakana" | "katakana-ex";
   enhanced?: boolean;
   /** display のみ。画面に重ねる透かし（描くのはブラウザ。信頼設定ではない） */
   watermark?: Watermark;
