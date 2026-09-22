@@ -93,8 +93,17 @@ const busy = computed(() => state.value?.busy ?? false);
 const inputBlocked = computed(() => busy.value || reservedBy.value !== undefined);
 const breakReservation = (): void => breakReservationFor(props.sessionId);
 const loading = computed(() => state.value?.loading ?? false);
-// カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する
-const uppercaseInput = computed(() => isKatakanaCcsid(state.value?.ccsid));
+// カタカナ系ホストコードページ（930/5026）は実機同様に英小文字を入力時に大文字化する。
+// **`katakanaVariant === "katakana-ex"` を明示したときだけ**大文字化しない（`20260922-katakana-variant-setting`）。
+// 未指定は現状どおり大文字化する（既存利用者の挙動を変えない）
+const uppercaseInput = computed(
+  () => isKatakanaCcsid(state.value?.ccsid) && state.value?.katakanaVariant !== "katakana-ex"
+);
+// **930/5026「Katakana」（290）を明示したときだけ**コードページに無い 8 記号を拒否する
+// （`20260922-katakana-variant-setting`）。未指定・`"katakana-ex"` は拒否しない（現状維持）
+const katakanaRestricted = computed(
+  () => isKatakanaCcsid(state.value?.ccsid) && state.value?.katakanaVariant === "katakana"
+);
 // SBCS だけのセッションか（CCSID が分かっているときだけ。分からなければ従来どおり DBCS と同じ扱い）
 const sbcsSession = computed(() => state.value?.ccsid !== undefined && !isDbcsCcsid(state.value.ccsid));
 /**
@@ -1595,6 +1604,7 @@ function onWheel(ev: WheelEvent): void {
         :shift-mark-tone="view.sosi === 'strong' ? 'strong' : 'dim'"
         :sbcs-view="sbcsView"
         :uppercase-input="uppercaseInput"
+        :katakana-restricted="katakanaRestricted"
         :sbcs-session="sbcsSession"
         :ccsid="state?.ccsid"
         :linkify="view.linkify"

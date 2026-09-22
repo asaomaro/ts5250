@@ -24,6 +24,8 @@ export interface SessionMeta {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ意味を持たない */
+  katakanaVariant?: "katakana" | "katakana-ex";
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   sessionType?: "display" | "printer";
@@ -175,6 +177,9 @@ export interface SessionState {
   job?: { name: string; system?: string; user?: string; number?: string };
   /** セッションの実効ホストコードページ（CCSID）。930/5026 は入力時に英小文字を大文字化する */
   ccsid?: number;
+  /** 930/5026 のキーボード配列の選択。`ccsid` が 930/5026 でなければ意味を持たない。
+   *  `20260922-katakana-variant-setting` */
+  katakanaVariant?: "katakana" | "katakana-ex";
   /** ホスト応答待ち（通信中）。入力をプロテクトする */
   busy?: boolean;
   /** ローディング表示（通信が 0.5 秒以上かかったとき） */

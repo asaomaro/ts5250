@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout } from "../src/composables/fieldValidate.js";
+import { acceptsChar, dbcsByteLength, columnView, dbcsViewLayout, rejectReason } from "../src/composables/fieldValidate.js";
 import type { Field } from "@ts5250/tn5250";
 import { attrSentinel, rawSentinel } from "@ts5250/tn5250/browser";
 
@@ -244,5 +244,38 @@ describe("SBCS だけのセッション", () => {
   it("**バイト長は 1 字 1 バイト**（SO/SI も 2 バイトの字も無い）", () => {
     expect(dbcsByteLength("aéüßø", sbcs)).toBe(5);
     expect(dbcsByteLength("aéüßø")).toBe(11); // DBCS のセッションでは a + SO + 2×4 + SI
+  });
+});
+
+/**
+ * **930/5026「Katakana」（290）だけが弾く 8 記号**（`20260922-katakana-variant-setting`）。
+ * 実機の ACS のコアで確認（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。
+ */
+describe("930/5026 の katakanaRestricted", () => {
+  const restricted = { katakanaRestricted: true };
+
+  it("8 記号（`[ ] ^ ` { } ~ ¢`）を弾く。理由は katakana-invalid", () => {
+    for (const ch of ["[", "]", "^", "`", "{", "}", "~", "¢"]) {
+      expect(acceptsChar(fld({}), ch, restricted), ch).toBe(false);
+      expect(rejectReason(fld({}), ch, restricted), ch).toBe("katakana-invalid");
+    }
+  });
+
+  it("katakanaRestricted が偽（既定・katakana-ex）なら同じ 8 記号を弾かない", () => {
+    for (const ch of ["[", "]", "^", "`", "{", "}", "~", "¢"]) {
+      expect(acceptsChar(fld({}), ch), ch).toBe(true);
+      expect(acceptsChar(fld({}), ch, { katakanaRestricted: false }), ch).toBe(true);
+    }
+  });
+
+  it("8 記号以外は katakanaRestricted でも通常どおり（型の判定に従う）", () => {
+    expect(acceptsChar(fld({}), "A", restricted)).toBe(true);
+    expect(acceptsChar(fld({ numeric: true }), "1", restricted)).toBe(true);
+    expect(acceptsChar(fld({}), "日", restricted)).toBe(false); // A 型は元々全角不可
+  });
+
+  it("キーボード入力不可（I）は katakanaRestricted より先に見る（従来どおり kbd-inhibited）", () => {
+    const f = fld({ keyboardInhibited: true });
+    expect(rejectReason(f, "[", restricted)).toBe("kbd-inhibited");
   });
 });

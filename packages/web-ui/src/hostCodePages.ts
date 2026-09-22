@@ -29,7 +29,9 @@ export const DEFAULT_SPOOL_CCSID = 273;
 export const HOST_CODE_PAGES: readonly HostCodePage[] = [
   { ccsid: 37, label: "037 — 英語（アメリカ／カナダ）" },
   { ccsid: 273, label: "273 — ドイツ語／オーストリア" },
-  { ccsid: 930, label: "930 — 日本語（カタカナ拡張）", katakana: true },
+  // ~~「カタカナ拡張」~~ → 変種（Katakana / Katakana Extended）は別の設定（キー配列）で選ぶので
+  // ここでは付けない（`20260922-katakana-variant-setting`）
+  { ccsid: 930, label: "930 — 日本語（カタカナ）", katakana: true },
   { ccsid: 939, label: "939 — 日本語（英小文字拡張）" },
   { ccsid: 1399, label: "1399 — 日本語（拡張漢字・Latin）" },
   { ccsid: 5026, label: "5026 — 日本語（カタカナ）", katakana: true },

@@ -51,3 +51,18 @@ export function latinChar(byte: number): string {
 export function isKatakanaCcsid(ccsid: number | undefined): boolean {
   return ccsid === 930 || ccsid === 5026;
 }
+
+/**
+ * ACS の「Katakana」（290。`20260922-katakana-variant-setting`）だけが打鍵を拒否する 8 字。
+ *
+ * 原典 `CodePage.isValidChar` は `icodepage == 290` のときだけこの 8 字を偽にする
+ * （`inputChar`・`insertChar` の DBCS 分岐がエラー 0x27 にする）。実機の ACS のコアで確認
+ * （`scripts/acs-probe/ccsid290-invalid-chars.txt`）: Katakana はこの 8 字とも入力できず
+ * （inhibit=5・「キーが定義されていないので正しくない」）、Katakana Extended は制限が無い。
+ * 呼び出し側（web-ui）が `katakanaVariant === "katakana"` のときだけ使う——930/5026 かどうか・
+ * どちらの変種かの判定はここでは行わない（それは `isKatakanaCcsid` と呼び出し側の責務）。
+ */
+const KATAKANA_290_INVALID = new Set(["[", "]", "^", "`", "{", "}", "~", "¢"]);
+export function isKatakana290InvalidChar(ch: string): boolean {
+  return KATAKANA_290_INVALID.has(ch);
+}

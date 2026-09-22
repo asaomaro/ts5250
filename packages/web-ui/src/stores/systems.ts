@@ -31,6 +31,8 @@ export interface SystemForm {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  katakanaVariant?: "katakana" | "katakana-ex";
   /** スプール（SCS）用 CCSID。5250 画面用の ccsid とは別物（spec 方針2） */
   spoolCcsid?: number;
   /** システムカラー（パレット番号 1〜8）。未設定なら ref から自動で割り当てる */
@@ -67,6 +69,8 @@ export interface SessionConfigForm {
   closeAssociatedPrinterWithLastSession?: boolean;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`ccsid` が 930/5026 でなければ無視する */
+  katakanaVariant?: "katakana" | "katakana-ex";
   enhanced?: boolean;
   /**
    * display のみ。画面に重ねる透かし（表示だけの設定。ホストへは送らない）。

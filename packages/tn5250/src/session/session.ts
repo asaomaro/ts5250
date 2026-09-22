@@ -1,5 +1,5 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
-import { As400Error, deviceEnvFor } from "@ts5250/base";
+import { As400Error, deviceEnvFor, type KatakanaVariant } from "@ts5250/base";
 import { parseRecord, buildNegativeResponse } from "../protocol/gds.js";
 import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
 import {
@@ -44,6 +44,8 @@ export interface ConnectOptions {
   host?: string;
   port?: number;
   ccsid?: number; // 既定 37。930/939/1399（＋エイリアス）で DBCS
+  /** 930/5026（Katakana 系）だけが持つキーボード配列の選択。`@ts5250/base` の `KatakanaVariant` 参照 */
+  katakanaVariant?: KatakanaVariant;
   /**
    * スプール（SCS）のデコードに使う CCSID。既定 273。上の `ccsid` を流用**しない**——
    * あちらは 5250 画面の文字変換用で、経路によって扱いが違う（spec 方針2）。
@@ -305,7 +307,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (initial) this.state = "negotiating";
     this.connGen++;
     // RFC 2877 KBDTYPE/CODEPAGE/CHARSET を申告し、ホストにデバイス⇄ジョブ CCSID の変換をさせる
-    const dev = deviceEnvFor(opts.ccsid ?? 37);
+    const dev = deviceEnvFor(opts.ccsid ?? 37, opts.katakanaVariant);
     this.telnet = new TelnetLayer(transport, {
       terminalType: this.terminalType,
       deviceName: opts.deviceName,
@@ -670,6 +672,11 @@ export class Session5250 extends Emitter<SessionEvents> {
   /** 画面の文字変換に使っている CCSID（attach したタブがセッションの種類——SBCS だけか DBCS か——を知るため。`20260921-monocase-non-ascii`） */
   get ccsid(): number {
     return this.codec.ccsid;
+  }
+
+  /** 930/5026 のキーボード配列の選択（サーバーが「開いた」通知へ載せるため。`20260922-katakana-variant-setting`） */
+  get katakanaVariant(): KatakanaVariant | undefined {
+    return this.opts.katakanaVariant;
   }
 
   disconnect(): void {

@@ -1,0 +1,11 @@
+schema: 11
+slug: katakana-variant-setting
+current: deliver
+approved: [requirements, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+harnessRevDelivered: unknown

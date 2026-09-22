@@ -561,7 +561,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     台帳に無かった。IME を切った Space で日常的に起きる）／~~(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・~~Ctrl+Home（罫線）・Ctrl+F11（カーソル形）~~ → 上の `20260921-default-keys-rule-cursor` で済んだ／
-    ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。当 PJ の 930 は 8 字が入る（EX と同じ）。**利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断**——下の「930 の申告の選択」と同じ問い／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
+    ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。~~利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断~~ → 下の「930 の申告の選択」で `20260922-katakana-variant-setting` により選べるようにした（決め打ちではなく設定に）／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
     ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
     **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
@@ -790,11 +790,18 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~1399 の申告（中・要実測）~~ → 上の `20260921-device-env-1399` で済んだ
     - ACS: KBDTYPE=JPE・CHARSET=32000。
     - 当 PJ: JEB・1172（`packages/base/src/device-env.ts:42`）。
-  - 930 の申告の選択（低・**未確認・人に確かめる要判断**）: ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）は 290 として扱われ CHARSET が 332、「Katakana Extended」は 1172（当 PJ と同じ）。
-    利用者の ACS がどちらを選んでいるかは未確認（`20260921-device-env-1399` D2）。
-    **2026-09-22 の測定で、この選択が入力にも効くと分かった**（`scripts/acs-probe/ccsid290-invalid-chars.txt`。ACS のコア・社内機）: Katakana（290）は英小文字を大文字にし、`[ ] ^ ` { } ~ ¢` の 8 字を
-    エラーにする。Katakana Extended（930・キー無しも同じ）は小文字のまま・8 字も入る。当 PJ の 930 は**両者の折衷**——全欄を大文字化する（290 と同じ向き。930 のジョブは小文字のコマンドを
-    「正しくない文字」と返すので実用上は要る）が、8 字は入る（Extended と同じ）。どちらの選択が利用者の ACS かで、大文字化を外す（Extended）か 8 字を拒否する（Katakana）かが決まる。5026 は未測定
+  - ~~930 の申告の選択（低・未確認・人に確かめる要判断）~~ → **完了（`20260922-katakana-variant-setting`）**。
+    「どちらが正しいか」を当 PJ が決め打ちする問題ではないと利用者が指摘——ACS 自身がホスト・コード・ページの
+    設定で利用者ごとに選ばせる軸だった（利用者提示のスクリーンショットで確認）。当 PJ も system/session 設定の
+    階層（`ccsid` と同じ並び）に `katakanaVariant`（`"katakana"` | `"katakana-ex"` | 未設定）を追加し、
+    選んだ側に応じて CHARSET の申告（332/1172）・入力の可否（大文字化・8 記号の可否）を切り替えるようにした
+    （`packages/base/src/device-env.ts`・`packages/web-ui/src/components/ConfigCard.vue` 他）。
+    未指定は現状の折衷（大文字化する・8 記号は許可・CHARSET 1172）のまま変えない（既存利用者の挙動を変えない）。
+    実測は既存のまま（`scripts/acs-probe/ccsid290-invalid-chars.txt`。2026-09-22）: Katakana（290）は英小文字を
+    大文字にし `[ ] ^ ` { } ~ ¢` の 8 字をエラーにする。Katakana Extended は小文字のまま・8 字も入る。
+    5026 に同じ選択が実在するかの検証・プリンターセッションへの適用は対象外（プリンターは KBDTYPE/CODEPAGE/
+    CHARSET を申告しない設計〔`packages/tn5250/src/session/printer-session.ts`〕なので、この設定を持たせても
+    読み手が無い。decisions D1）。
   - ~~DBCS 24x80 の端末タイプ（中・要実測）~~ → 上の `20260921-dbcs-terminal-type` で済んだ
     - ACS: `IBM-5555-C01`。
     - 当 PJ: `IBM-5555-G02`（`terminal-type.ts:25`。PUB400 での総当たりで採用した）。

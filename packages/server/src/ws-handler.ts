@@ -645,6 +645,7 @@ export class WsConnection {
         sessionId: entry.id,
         screen: entry.session.snapshot(),
         ccsid: opts.ccsid ?? 37,
+        ...(opts.katakanaVariant !== undefined ? { katakanaVariant: opts.katakanaVariant } : {}),
         pcCommand: entry.pcCommandEnabled,
         ...this.pcCommandBacklog(entry.id),
         ...hostReconnectOf(entry.session),
@@ -1201,6 +1202,7 @@ export class WsConnection {
       // 「SBCS だけのセッションか」を決め、打鍵の幅の判定と欄のバイト予算を切り替える。37 を返すと、930 の画面を
       // attach で見たタブが全角を 1 バイトと数えて欄の長さを越えて打てた
       ccsid: entry.session.ccsid,
+      ...(entry.session.katakanaVariant !== undefined ? { katakanaVariant: entry.session.katakanaVariant } : {}),
       pcCommand: entry.pcCommandEnabled,
       ...this.pcCommandBacklog(entry.id),
       ...hostReconnectOf(entry.session),
@@ -1483,6 +1485,7 @@ function buildDirect(msg: {
   host?: string;
   port?: number;
   ccsid?: number;
+  katakanaVariant?: "katakana" | "katakana-ex";
   screenSize?: "24x80" | "27x132";
   deviceName?: string;
   enhanced?: boolean;
@@ -1494,6 +1497,7 @@ function buildDirect(msg: {
   const o: OpenOptions = { host: msg.host, origin: "direct" };
   if (msg.port !== undefined) o.port = msg.port;
   if (msg.ccsid !== undefined) o.ccsid = msg.ccsid;
+  if (msg.katakanaVariant !== undefined) o.katakanaVariant = msg.katakanaVariant;
   if (msg.screenSize !== undefined) o.screenSize = msg.screenSize;
   if (msg.deviceName !== undefined) o.deviceName = msg.deviceName;
   if (msg.enhanced !== undefined) o.enhanced = msg.enhanced;

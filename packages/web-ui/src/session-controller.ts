@@ -778,6 +778,7 @@ export async function openSession(
                 // 後から入ったタブが、繋ぎ直しの途中に開いた（経過の通知は聞き逃している）
                 ...(msg.hostReconnect ? { hostReconnect: msg.hostReconnect, notice: msgHostReconnecting(msg.hostReconnect.attempt) } : {}),
                 ccsid: msg.ccsid,
+                ...(msg.katakanaVariant !== undefined ? { katakanaVariant: msg.katakanaVariant } : {}),
                 client,
                 ...(meta ? { meta } : {}),
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
