@@ -12,7 +12,13 @@ import { systemsStore, type SessionConfigForm, type SystemForm } from "../stores
 import { sessionsStore } from "../stores/sessions.js";
 import InfoPopover from "./InfoPopover.vue";
 import { MSG_WATCH_CONSUMES } from "../composables/opMessages.js";
-import { HOST_CODE_PAGES, DEFAULT_CCSID, DEFAULT_SPOOL_CCSID, isKatakanaCcsid } from "../hostCodePages.js";
+import {
+  HOST_CODE_PAGES,
+  SPOOL_CODE_PAGES,
+  DEFAULT_CCSID,
+  DEFAULT_SPOOL_CCSID,
+  isKatakanaCcsid
+} from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
 
@@ -930,7 +936,7 @@ const infoRows = computed(() => {
         <label class="row">
           <span class="cap">スプール CCSID</span>
           <select v-model.number="sysForm.spoolCcsid">
-            <option v-for="p in HOST_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+            <option v-for="p in SPOOL_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
           </select>
           <span class="hint">スプールの SCS 用。上の 5250 画面用とは別</span>
         </label>
