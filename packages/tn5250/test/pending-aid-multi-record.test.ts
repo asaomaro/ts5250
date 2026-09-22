@@ -12,7 +12,7 @@ import { IAC, CMD } from "../src/telnet/constants.js";
  * Read が要求された最終レコードまで解決を待つ**ことの回帰テスト。
  *
  * 経緯: `.aidev/works/20260915-dspfmt-reconnect-blank-redraw`。利用者から
- * 「DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*) を実行すると、初回表示が罫線のみになり、
+ * 「DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*) を実行すると、初回表示が罫線のみになり、
  * Enter を押すと正常化する」という報告を受けた。実機トレースの結果、DSPFMT の応答は
  * 3レコードに分かれ、1・2番目は `unlockKeyboard=true, readRequested=false`（骨格だけの
  * Write to Display）、3番目だけが `readRequested=true`（実データ・カーソル位置を含む）

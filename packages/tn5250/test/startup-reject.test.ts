@@ -18,8 +18,9 @@ const codec = codecForCcsid(37);
  *
  * プリンター（`PrinterSession.handleStartup`）は元からコードで見ていた。**同じ判断へ揃える。**
  *
- * ⚠ 実機では**装置名の重複でこの経路に入らない**——ホストは理由を返さず
- * ソケットを閉じる（`scripts/research-device-busy.mjs`）。よってレコードは合成する。
+ * ~~⚠ 実機では**装置名の重複でこの経路に入らない**——ホストは理由を返さずソケットを閉じる（`scripts/research-device-busy.mjs`）~~
+ * → 実機（PUB400・社内機）とも 8902 を返し、同じ接続の中で NEW-ENVIRON SEND を送り直してきた（`20260921-device-name-acs` の実測）。
+ * レコードは合成する。
  * 形式は実機 PUB400 で捕えた 1 レコード目に合わせてある（`startup-record.test.ts`）。
  */
 const IAC_EOR = [0xff, 0xef];
@@ -137,6 +138,29 @@ describe("表示セッションの起動応答", () => {
     // 起動応答として扱わないので、5250 として解析される＝従来の経路
     expect(r.warnings.some((w) => w.includes("startup response"))).toBe(false);
   });
+
+  /**
+   * **ACS が個別に扱う 4 つ**（`20260921-startup-codes-unknown`）。
+   *
+   * `DS5250.processStartUpConfirmation` の lookupswitch に個別の分岐があり、
+   * それぞれ別の通信状態へ落ちる（2703→12 / 2777→13 / 8936→33 / 8937→34）。
+   * **表に無いと起動応答と認識されず**、`expected ESC` の警告だけが残って
+   * **自動サインオン失敗の本当の理由が消える**。
+   */
+  for (const code of ["2703", "2777", "8936", "8937"]) {
+    it(`${code} を起動応答として認識し、断られたと分かる（装置名が無くても）`, async () => {
+      const r = await connectWith(startupRecord(code));
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      // 失敗コードは `session rejected <code>` を出す（成功側が `startup response <code>`）
+      expect(
+        r.warnings.some((w) => w.includes(`session rejected ${code}`)),
+        "起動応答として扱われていない＝5250 データに流れ込んでいる"
+      ).toBe(true);
+      // **解析器が壊れたように見える警告が出ない**——この項目が直したかったのはここ
+      expect(r.warnings.some((w) => w.includes("expected ESC"))).toBe(false);
+    });
+  }
 });
 
 /**
@@ -171,5 +195,148 @@ describe("交渉中にホストが閉じたとき", () => {
     // IAC DO NEW-ENVIRON（0xff 0xfd 0x27）＝返事を送りたくなるサブネゴシエーション
     expect(() => onData?.(Uint8Array.from([0xff, 0xfd, 0x27]))).not.toThrow();
     expect(await p).toBe("SESSION_CLOSED");
+  });
+});
+
+/**
+ * **装置が使用中（8902）なら、同じ接続の中で次の名前で答え直す**（ACS と同じ。`20260921-device-name-acs`）。
+ * 実測（ACS のコア・PUB400）: `TSC=` → `TSC0`（8902）→ ホストが SEND を送り直す → `TSC1` → I902。
+ */
+describe("装置名の答え直し", () => {
+  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  function capturing(): { transport: Transport; feed: (b: number[]) => void; devnames: () => string[] } {
+    let onData: ((d: Uint8Array) => void) | undefined;
+    const sent: number[] = [];
+    const transport = {
+      onData: (cb: (d: Uint8Array) => void) => {
+        onData = cb;
+      },
+      onClose: () => {},
+      onError: () => {},
+      send: (d: Uint8Array) => void sent.push(...d),
+      close: () => {}
+    } as unknown as Transport;
+    const devnames = (): string[] => {
+      const text = String.fromCharCode(...sent);
+      return [...text.matchAll(/DEVNAME\x01([A-Z0-9=&%*+]*)/g)].map((m) => m[1]!);
+    };
+    return { transport, feed: (b) => onData?.(Uint8Array.from(b)), devnames };
+  }
+  async function run(deviceName: string, opts: { retry?: boolean } = {}) {
+    const { transport, feed, devnames } = capturing();
+    const warnings: string[] = [];
+    const settled = Session5250.connect({
+      id: "t",
+      transport,
+      negotiationTimeoutMs: 400,
+      warn: (m) => warnings.push(m),
+      deviceName,
+      ...(opts.retry ? { deviceNameRetry: true } : {})
+    }).then(
+      (s) => ({ ok: true as const, session: s }),
+      (e: Error & { code?: string }) => ({ ok: false as const, code: e.code, message: e.message })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]);
+    feed(SEND); // ホストが聞き直す
+    return { settled, feed, devnames, warnings };
+  }
+
+  it("**`=` を含む名前は、使用中なら次の番号で答え直し、次の起動応答を待つ**", async () => {
+    const r = await run("DEV=");
+    r.feed([...startupRecord("I902", "S1234567", "DEV1"), ...IAC_EOR]);
+    const out = await r.settled;
+    expect(r.devnames()).toEqual(["DEV0", "DEV1"]);
+    // 画面がまだ来ていないので完了はしない（時間切れ）が、**8902 で断られてはいない**
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("NEGOTIATION_TIMEOUT");
+    expect(r.warnings.some((w) => w.includes("in use (8902)"))).toBe(true);
+    // 2 回目の起動応答も起動応答として受け取った（データとして解析しに行かない）
+    expect(r.warnings.some((w) => w.includes("startup response I902") && w.includes("device=DEV1"))).toBe(true);
+    expect(r.warnings.some((w) => w.includes("expected ESC"))).toBe(false);
+  });
+
+  it("記号の無い名前は従来どおり 8902 で断る（ACS は同じ名前を送り直すだけで繋がらない）", async () => {
+    const r = await run("DEV1");
+    const out = await r.settled;
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("SESSION_REJECTED");
+  });
+
+  it("当 PJ の `deviceNameRetry` は、記号の無い名前でも末尾の数字を繰り上げて答え直す（繋ぎ直さない）", async () => {
+    const r = await run("DEV1", { retry: true });
+    r.feed([...startupRecord("I902", "S1234567", "DEV2"), ...IAC_EOR]);
+    const out = await r.settled;
+    expect(r.devnames()).toEqual(["DEV1", "DEV2"]);
+    if (out.ok) return;
+    expect(out.code).toBe("NEGOTIATION_TIMEOUT");
+  });
+
+  it("**答え直したのにホストが聞き直してこなければ、8902 の理由を残して断る**（一般的な時間切れにしない。節目の点検の懸念）", async () => {
+    const { transport, feed } = capturing();
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 200, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]); // この後ホストは何も言わない
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED", message: expect.stringMatching(/8902.*DEV0.*did not ask/) });
+  });
+
+  it("時間切れのときは接続を閉じる（理由を先に決めてから閉じる）", async () => {
+    const { transport, feed } = capturing();
+    let closed = 0;
+    (transport as unknown as { close: () => void }).close = () => void closed++;
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 100, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    await expect(p).rejects.toMatchObject({ code: "NEGOTIATION_TIMEOUT" });
+    expect(closed).toBeGreaterThan(0);
+  });
+
+  it("答え直しの途中で切られても 8902 の理由を残す", async () => {
+    let onClose: ((r: string) => void) | undefined;
+    const { transport, feed } = capturing();
+    (transport as unknown as { onClose: (cb: (r: string) => void) => void }).onClose = (cb) => void (onClose = cb);
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 400, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8902"), ...IAC_EOR]);
+    onClose?.("socket closed");
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED", message: expect.stringMatching(/8902.*socket closed/) });
+  });
+
+  it("**8902 以外の失敗は答え直さない**（誤ったパスワードで何度も試して QMAXSIGN を使い切らない）", async () => {
+    const { transport, feed } = capturing();
+    const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 400, deviceName: "DEV=" });
+    await new Promise((r) => setTimeout(r, 20));
+    feed(SEND);
+    feed([...startupRecord("8906"), ...IAC_EOR]);
+    await expect(p).rejects.toMatchObject({ code: "SESSION_REJECTED" });
+  });
+});
+
+/**
+ * **930 のセッションでも起動応答の装置名は CCSID 37 で読む**（ACS `processStartUpConfirmation`。`20260921-startup-record-cp037`）。
+ * セッションの codec（290）で読むと `$` が `¥` に化け、スプール救出が見る OUTQ の名前も化けた。
+ */
+describe("起動応答は CCSID 37 で読む", () => {
+  it("**ccsid 930 のセッションでも装置名の `$` は `$`**", async () => {
+    let onData: ((d: Uint8Array) => void) | undefined;
+    const transport = {
+      onData: (cb: (d: Uint8Array) => void) => void (onData = cb),
+      onClose: () => {},
+      onError: () => {},
+      send: () => {},
+      close: () => {}
+    } as unknown as Transport;
+    const warnings: string[] = [];
+    const p = Session5250.connect({ id: "t", transport, ccsid: 930, negotiationTimeoutMs: 200, warn: (m) => warnings.push(m) }).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 20));
+    onData?.(Uint8Array.from([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]));
+    onData?.(Uint8Array.from([...startupRecord("I902", "SYS", "DSP$01"), ...IAC_EOR]));
+    await p;
+    expect(warnings.find((w) => w.includes("startup response I902"))).toContain("device=DSP$01");
   });
 });

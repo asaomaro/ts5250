@@ -3,7 +3,8 @@ import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
-import { ESC, COMMAND, ORDER, FFW } from "../src/protocol/constants.js";
+import { ESC, COMMAND, ORDER, FFW, isControlData } from "../src/protocol/constants.js";
+import { buildReadScreenResponse } from "../src/protocol/save-screen.js";
 import { firstRecordFromFixture } from "./gds.test.js";
 
 const codec = codecForCcsid(37);
@@ -168,6 +169,48 @@ describe("applyDataStream — 合成データ", () => {
     expect(setup.buf.mdtFields()).toHaveLength(0);
   });
 
+  /**
+   * **CC1=0xC0 は「MDT の立った欄を消す」＋「MDT を落とす」**（`20260921-wtd-cc1-c0-order`）。
+   *
+   * 順序が逆だと**1 欄も消えない**——`nullNonBypass(true)` は MDT の立った欄だけを対象にするので、
+   * 先に MDT を落とすと対象が 0 件になる。入力を消すべき画面で打った値が残る。
+   * ACS `DS5250.processWCC1` の該当分岐も `clearNonbypassFields(true)` → `resetMDTFields(true)` の順。
+   */
+  it("CC1=0xC0 は MDT の立った欄を消してから MDT を落とす", () => {
+    const setup = apply([
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 1, 1,
+      ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x03
+    ]);
+    setup.buf.setFieldValue(setup.buf.fieldByIndex(1), "AB");
+    expect(setup.buf.mdtFields()).toHaveLength(1);
+
+    apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0xc0, 0x00], setup.buf);
+
+    // **値が消えている**（順序が逆だと "AB" が残る）
+    expect(setup.buf.snapshot("t", false).fields[0]?.value.trim()).toBe("");
+    // MDT も落ちている
+    expect(setup.buf.mdtFields()).toHaveLength(0);
+  });
+
+  /**
+   * **CC2 のメッセージ待ちビット**（`20260921-message-waiting-indicator`）。
+   * ACS `DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯する
+   * （両方立てば点灯が勝つ）。以前はオペコードだけを見て、このビットを見ていなかった。
+   */
+  it("CC2=0x01 でメッセージ待ちが点き、0x02 で消える", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01]).result.messageWaiting).toBe(true);
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x02]).result.messageWaiting).toBe(false);
+  });
+
+  it("CC2 の両方のビットが立てば点灯が勝つ（ACS と同じ評価順）", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x03]).result.messageWaiting).toBe(true);
+  });
+
+  it("MW ビットが無い WTD では触れない（前の状態を消さない）", () => {
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00]).result.messageWaiting).toBeUndefined();
+  });
+
   it("READ_MDT_FIELDS で readRequested / unlock が立つ", () => {
     const { result } = apply([ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]);
     expect(result.readRequested).toBe(true);
@@ -235,38 +278,84 @@ describe("applyDataStream — 合成データ", () => {
     expect(result.unlockKeyboard).toBe(true);
   });
 
-  it("未知コマンドは警告してレコードの残りを打ち切る（例外にしない）", () => {
-    const { warns, buf } = apply([
-      ESC, 0x99, 0x01, 0x02,
-      ESC, COMMAND.CLEAR_UNIT // 到達しない
+  // ~~未知コマンドは警告してレコードの残りを打ち切る~~ → ACS と同じく 1 バイト読み飛ばして続ける（`20260921-negative-responses`。
+  // ACS `DS5250.processCommand` の `default: ++n5`）。次がコマンドの位置で ESC でなければ否定応答（0x10050121）
+  it("**未知コマンドは 1 バイト読み飛ばして続ける**（ACS と同じ。後ろのコマンドを失わない）", () => {
+    const { warns, result } = apply([
+      ESC, 0x99, 0x01,
+      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08 // 届く（キーボード解放）
     ]);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("0x99");
-    expect(buf.snapshot("t", false)).toBeTruthy();
+    expect(warns.some((w) => w.includes("0x99"))).toBe(true);
+    expect(result.unlockKeyboard, "後ろの WTD を失った").toBe(true);
+    expect(result.senseCode).toBeUndefined();
+  });
+
+  it("**読み飛ばした先が ESC でなければ否定応答 0x10050121**（ACS と同じ。レコードの残りは読まない）", () => {
+    const { result } = apply([ESC, 0x99, 0x01, 0x02, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08]);
+    expect(result.senseCode).toBe(0x10050121);
+    expect(result.unlockKeyboard, "否定応答の後ろを読んだ").toBe(false);
+  });
+
+  it("否定応答: ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）", () => {
+    expect(apply([ESC, COMMAND.ROLL, 0x05, 0x0a, 0x05]).result.senseCode).toBe(0x1005012c);
+    expect(apply([ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x01]).result.senseCode).toBe(0x10030101);
+    expect(apply([ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]).result.senseCode).toBeUndefined();
   });
 
   /**
-   * **未知オーダーは警告するが、レコード全体は打ち切らない（次の ESC まで読み飛ばす）。**
+   * **オーダーでない制御バイト（0x05〜0x0D・0x16〜0x1B）は表示データ**（ACS `processWriteToDisplay`。`20260921-wtd-control-bytes`）。
    *
-   * 実機で正体不明のオーダー（0x1C 等）に当たった直後の WRITE（キーボード解放）・READ が
-   * 丸ごと失われ、ホストは応答したつもりでもクライアントの鍵盤が開かず
-   * 「応答待ちのまま固まる」不具合として利用者から報告された。ESC(0x04) は表示データにも
-   * 他のオーダーにも現れないので、次の ESC まで読み飛ばして次のコマンドから復帰できる。
+   * ~~未知オーダーは警告して次の ESC まで読み飛ばす~~ は誤りだった。ACS のオーダーは 10 個だけで、ESC 以外の残りは全部データとして書く。
+   * 読み飛ばすと、同じ WTD の後ろの SBA・SF・IC を失う（同じ族の 0x1C・0x1F が実機で届いていた）。実機の ACS のコアで測った
+   * （`scripts/acs-probe/wtd-control-bytes.txt`）: 各バイトは 1 桁の空白（0x07 だけ DEL）になり、後ろのオーダーはすべて処理された。
    */
-  it("未知オーダーは警告するが次の ESC から復帰する（レコード全体は打ち切らない）", () => {
-    const { warns, buf, result } = apply([
-      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
-      0x16, // 0x15(WDSF)〜0x1D(SF) の間の未使用番地。まだ未対応のオーダー
-      ...e("X"), // 読み飛ばされ、画面には出ない
-      ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08, // CC2 unlock
-      ORDER.SBA, 1, 1, ...e("HELLO"),
-      ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00
-    ]);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("0x16");
-    expect(rowText(buf, 1)).toContain("HELLO"); // 未知オーダー後続のコマンドも適用される
-    expect(result.unlockKeyboard).toBe(true); // キーボード解放が失われない
-    expect(result.readRequested).toBe(true);
+  const CONTROL_DATA = [0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b];
+
+  it("**制御バイトは 1 桁の表示データ**で、後ろの SBA・SF・IC・READ を失わない（警告も出さない）", () => {
+    for (const c of CONTROL_DATA) {
+      const { warns, buf, result } = apply([
+        ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08,
+        ORDER.SBA, 3, 3, ...e("A"), c, ...e("B"),
+        ORDER.SBA, 5, 3, ...e("HELLO"),
+        ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x20, 0x00, 0x06,
+        ORDER.IC, 7, 10,
+        ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00
+      ]);
+      const hex = `0x${c.toString(16)}`;
+      expect(warns, hex).toEqual([]);
+      const cells = buf.snapshot("t", false).cells;
+      expect(cells[2]![2]!.char, `${hex} の前`).toBe("A");
+      expect(cells[2]![3]!.char, `${hex} は 1 桁を占める`).toBe(c === 0x07 ? "\u007f" : " ");
+      expect(cells[2]![4]!.char, `${hex} の後ろの字の桁`).toBe("B");
+      expect(rowText(buf, 5), `${hex} の後ろの SBA`).toContain("HELLO");
+      expect(buf.snapshot("t", false).fields, `${hex} の後ろの SF`).toHaveLength(1);
+      expect(result.readRequested, `${hex} の後ろの READ`).toBe(true);
+      expect(result.unlockKeyboard).toBe(true);
+    }
+  });
+
+  it("`isControlData` は 0x05〜0x0D・0x16〜0x1B だけ（0x00〜0xFF を全部当てる。SO/SI・0x1C〜0x1F・属性・文字は別の扱い）", () => {
+    const got = Array.from({ length: 256 }, (_, b) => b).filter((b) => isControlData(b));
+    expect(got).toEqual(CONTROL_DATA);
+  });
+
+  it("制御バイトの範囲の境界: 0x04（ESC）・0x0E/0x0F（SO/SI）・0x1C・0x1D（SF）・0x1E・0x1F は別の扱いのまま", () => {
+    // 0x04 は次のコマンド、0x0E/0x0F は DBCS の切り替え、0x1D は SF（オーダー）。制御バイトの表示データにはならない
+    for (const c of [0x04, 0x0e, 0x0f, 0x1d]) expect(CONTROL_DATA).not.toContain(c);
+    const { buf } = apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 1, 1, 0x1c, 0x1e, 0x1f]);
+    const cells = buf.snapshot("t", false).cells[0]!;
+    expect(cells[0]!.char).toBe("*"); // 0x1C は「*」
+    expect(cells[1]!.char).toBe(";"); // 0x1E は「;」
+    expect(cells[2]!.kind).toBe("unmappable"); // 0x1F は表せない文字
+  });
+
+  it("**元のバイトは送信用に持つ**（画面イメージの応答で返る。ACS は `HostPlane` に受信バイトを入れる）", () => {
+    const { buf } = apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 1, 1, ...e("A"), 0x07, ...e("B"), 0x1a]);
+    const cells = buf.snapshot("t", false).cells[0]!;
+    expect(cells[1]!.char).toBe("\u007f");
+    const res = parseRecord(buildReadScreenResponse(buf, codec, 0x03)).data;
+    const at = [...res].findIndex((_, i) => res[i] === 0xc1 && res[i + 1] === 0x07 && res[i + 2] === 0xc2 && res[i + 3] === 0x1a);
+    expect(at, "画面イメージに元のバイトが並ぶ").toBeGreaterThanOrEqual(0);
   });
 
   /**
@@ -475,19 +564,17 @@ describe("表せない文字（0x1F）", () => {
   });
 
   /**
-   * 未知オーダーからの復帰も、**直後が既知コマンドの ESC** だけを信じる。
+   * 制御バイトの後の SBA のパラメータ（`11 04 05`＝行 4 桁 5）の `04` を ESC と読み違えない。
    *
-   * **トリガーに 0x1E ではなく 0x16 を使う**——`20260915-acs-protocol-order-audit`
-   * で 0x1E に専用の `case`（`ORDER.UNKNOWN_1E`）を追加したため、0x1E はもはや
-   * 「未知オーダー」の例にならない（この `default:` 節の復旧処理自体を検証する
-   * ものであり、特定のバイト値の意味は無関係。0x16 は「0x15(WDSF)〜0x1D(SF) の
-   * 間の未使用番地」として他のテストでも使用実績がある）。
+   * ~~未知オーダーからの復帰は直後が既知コマンドの ESC だけを信じる~~ という復旧処理は、制御バイトを表示データにした
+   * （`20260921-wtd-control-bytes`）ので不要になった。それでも実測した PUB400 のヘルプ画面の取り違え（`04` を ESC と読んで
+   * 末尾の READ MDT FIELDS ごと捨てる）を再発させないため、テストは残す。
    */
-  it("未知オーダーの後、SBA のパラメータを ESC と読み違えない", () => {
+  it("制御バイトの後、SBA のパラメータを ESC と読み違えない", () => {
     const buf = new ScreenBuffer(24, 80);
     const rec = Uint8Array.from([
       0x04, 0x11, 0x00, 0x00,
-      0x16, // 未知オーダー
+      0x16, // 表示データの制御バイト
       0x11, 0x04, 0x05, // SBA(4,5) — 0x04 が続く
       0x20, 0xc1,
       0x04, 0x52, 0x00, 0x00 // ESC READ MDT FIELDS

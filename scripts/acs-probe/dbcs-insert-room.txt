@@ -1,0 +1,299 @@
+# **DBCS の欄（J・G・O・E）で、挿入モードのとき ACS は余地をどう数えるか**（実機の ACS のコア・社内機・930 で 2026-09-22 に通しで測定済み。`20260922-dbcs-insert-room`）。
+# 台帳「挿入モードの余地の残り: DBCS 欄の『最終桁にカーソルなら空白でも余地なし』と、継続欄への IME 確定」の前半を測る。
+#
+# 原典 `PS5250.insertChar` は、打つ字の種類とカーソルのセルの種類（半角 / SO / SI / 全角の前半）で表 {前進, 必要桁, 操作列} を引き、
+# `reserveRoomForInsert` が「欄の最終桁にカーソルなら即 0012」「そうでなければ**末尾から**カーソルまで、NUL・半角空白・全角空白（U+3000）が続く桁数を数え、
+# SO/SI の桁で止まる。J・E（全角側）は末尾の SI の 1 桁手前から数える」で判定する（原典の読みを手元で書き起こして予測を立てた）。
+# 各節の「予測」は原典の読み。**測定の結果**（すべて予測どおり）:
+#   A1・A2: 成功（`う あ い □ □`・`あ い う □ □`）/ A3: 成功 / B1: J の SI の桁は inhibit=5（0012）/ B2: O の最終のセルは 0012 / B3: 1 桁手前は成功 /
+#   C1: 成功 / C2: 0012 / C3・C4: 0012（**当 PJ は成功する。差が残る**）/ C5: 成功（X は A の直後。空の SO/SI が残るかは dump に SO/SI の桁が出ないので**未確認**）/ D1: 空白が全角空白になる / E1: 0012 / E2: 欄が作り替わる /
+#   F1: O の末尾が全角空白の満杯欄は 0012（全角空白を空きに数えない）/ G1: 成功（G も全角空白を空きに数える）
+#
+# 画面は DSM の `DBCSFE`（`scripts/host-src/dscmd.c`。G=(3,10) / O=(5,10) / J=(7,10) / E=(9,10)、いずれも 12 桁・FFW 4008＝ME）を**そのまま**使う。
+# 中身は手順の打鍵で作る（新しい画面は要らない）。ME は打鍵と挿入に関係しない。作り方: `DSCMD_PGM=DBCSFE` で scripts/build-dscmd.mjs（測った後に消す）。
+#   J: 桁 10 = SO / 桁 11〜20 = 5 スロット（1 スロット 2 桁）/ 桁 21 = SI（`setcursor 7,10` は ECL が 7,11 へ動かす。SI の桁 7,21 には置ける）
+#   G: 桁 10〜21 = 6 スロット（SO/SI 無し）  O・E: 桁 = セル
+# 全角空白（U+3000）を打つには `keys` の行の**末尾を非空白にする**（`AcsProbe` は行を strip し、Java の strip は U+3000 も削る）ので、`[eof]` で止める。
+# 半角空白 1 字を打つには、`keys` の後ろに空白を 2 つ書き、続けて別の字を置く（`keys  あ` = 空白 + あ）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/dbcs-insert-room.txt AS400
+# 見る値: dump の `insert=true`（挿入モードになっているか）・`inhibit=5`（操作員エラー＝余地なし等）・カーソル・行の中身（SO/SI は文字面で確かめる）。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/KEYTST PARM('DBCSFE')[enter]
+settle 3000
+dump a0-initial
+
+# ===== A) J（全角専用）: 全角空白（4040）で埋めた欄への挿入。当 PJ は（変更前）0012 で拒否した（U+3000 を空きと見ない）。ACS は空きに数える =====
+# A1) あ い □ □ □（5 スロットを埋める）→ 先頭に挿入モードで う。予測: 成功して う あ い □ □（桁 11〜20）。inhibit=0
+setcursor 7,11
+settle 200
+keys あい　　　[eof]
+settle 300
+dump a1-typed
+setcursor 7,11
+settle 200
+keys [insert]
+settle 200
+keys う
+settle 300
+dump a1-insert
+keys [reset]
+settle 300
+dump a1-reset
+
+# A2) 全角空白の直前（3 スロット目の先頭 7,15）に挿入。予測: 成功して あ い う □ □
+setcursor 7,11
+settle 200
+keys [eraseeof]
+settle 200
+keys あい　　　[eof]
+settle 300
+setcursor 7,15
+settle 200
+keys [insert]
+settle 200
+keys う
+settle 300
+dump a2-insert
+keys [reset]
+settle 300
+
+# A3) 対照: 何も送られない（NUL）欄。あ い だけ → 先頭に挿入。予測: 成功して う あ い
+setcursor 7,11
+settle 200
+keys [eraseeof]
+settle 200
+keys あい[eof]
+settle 300
+setcursor 7,11
+settle 200
+keys [insert]
+settle 200
+keys う
+settle 300
+dump a3-insert
+keys [reset]
+settle 300
+
+# ===== B) 最終桁: カーソルが欄の最終桁なら、空白でも 0012（SBCS の欄は実測済み。DBCS の欄もこの節で測った）。当 PJ は（変更前）受け付けた =====
+# B1) J: あ い を入れ、SI の桁（7,21）にカーソル。空きスロットがあっても予測は 0012
+setcursor 7,11
+settle 200
+keys [eraseeof]
+settle 200
+keys あい[eof]
+settle 300
+setcursor 7,21
+settle 200
+keys [insert]
+settle 200
+keys う
+settle 300
+dump b1-j-si
+keys [reset]
+settle 300
+
+# B2) O: 11 桁（ABCDEFGHIJK）を入れて最終桁（5,21）に半角 X。予測: 0012
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys ABCDEFGHIJK[eof]
+settle 300
+setcursor 5,21
+settle 200
+keys [insert]
+settle 200
+keys X
+settle 300
+dump b2-o-last
+keys [reset]
+settle 300
+
+# B3) 対照: 1 つ手前（5,20）に X。予測: 成功して ABCDEFGHIJXK
+setcursor 5,20
+settle 200
+keys [insert]
+settle 200
+keys X
+settle 300
+dump b3-o-before-last
+keys [reset]
+settle 300
+
+# ===== C) SO/SI を含む「必要桁」（半角の中に全角 = SO+2+SI で 4 桁。全角の run の中の半角 = SI+字+SO で 3 桁） =====
+# C1) O: ABCDEFGH（8 桁）+ 空き 4 桁。5,18 に全角 あ。予測: 成功（4 桁ちょうど）
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys ABCDEFGH[eof]
+settle 300
+setcursor 5,18
+settle 200
+keys [insert]
+settle 200
+keys あ
+settle 300
+dump c1-o-4free
+keys [reset]
+settle 300
+
+# C2) O: ABCDEFGHI + 空き 3 桁。5,19 に全角 あ。予測: 0012（4 桁要る）。当 PJ も拒否する（対照）
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys ABCDEFGHI[eof]
+settle 300
+setcursor 5,19
+settle 200
+keys [insert]
+settle 200
+keys あ
+settle 300
+dump c2-o-3free
+keys [reset]
+settle 300
+
+# C3) O: A あいう B（10 桁）+ 空き 2 桁。SI の直後の B の桁（5,19）に全角 え。
+#     予測: ACS は 0012（B の桁は半角なので別の run になり 4 桁要る）。当 PJ は run を継ぐので 2 桁で足り、成功する見込み
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AあいうB[eof]
+settle 300
+dump c3-typed
+setcursor 5,19
+settle 200
+keys [insert]
+settle 200
+keys え
+settle 300
+dump c3-insert
+keys [reset]
+settle 300
+
+# C4) 同じ欄。最初の全角（5,12）に半角 X。予測: 0012（SO SI X SO で 3 桁要る。空きは 2 桁）。当 PJ は 1 桁で足り、成功する見込み
+setcursor 5,12
+settle 200
+keys [insert]
+settle 200
+keys X
+settle 300
+dump c4-insert
+keys [reset]
+settle 300
+
+# C5) O: A あい B（8 桁）+ 空き 4 桁。最初の全角（5,12）に半角 X。予測: 成功。ただし ACS は「A SO SI X SO あい SI B」（空の SO/SI が X の前に残る）。
+#     dump の行で、A と X の間に SO/SI の 2 桁があるか（当 PJ は「A X あい B」）
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys AあいB[eof]
+settle 300
+setcursor 5,12
+settle 200
+keys [insert]
+settle 200
+keys X
+settle 300
+dump c5-insert
+keys [reset]
+settle 300
+
+# ===== D) 半角空白を全角専用欄に打つ（挿入に限らない。原典 `convertSBCSCharToDBCS`: J・G・E（全角側）では U+3000 に置き換わる）。当 PJ は「全角専用」と拒否する =====
+# D1) J: 空白 + あ。予測: あ が 7,13 に出る（空白が全角空白 2 桁になった）。7,11 なら空白は捨てられた
+setcursor 7,11
+settle 200
+keys [eraseeof]
+settle 200
+keys  あ
+settle 300
+dump d1-j-space
+keys [reset]
+settle 300
+setcursor 7,11
+settle 200
+keys [eraseeof]
+settle 300
+
+# ===== E) E（either）: 全角側と半角側を混ぜられるか。当 PJ は混ぜられる（ACS は片側だけ・切り替えで欄が消える） =====
+# E1) 半角側に ABC → 途中（9,11）に全角 あ。予測: 0061 のエラー（欄の先頭でだけ全角へ切り替わる）
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+keys ABC[eof]
+settle 300
+setcursor 9,11
+settle 200
+keys あ
+settle 300
+dump e1-e-mid
+keys [reset]
+settle 300
+# E2) 先頭（9,10）に全角 あ。予測: 欄が全角側に作り替わり ABC は消える（あ だけ）
+setcursor 9,10
+settle 200
+keys あ
+settle 300
+dump e2-e-start
+keys [reset]
+settle 300
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 300
+
+# ===== F) O: 末尾が全角空白（U+3000）の欄。O は SO/SI の桁で数え始めが止まるので、全角空白を空きに数えない（J・G・E は数える＝A・G）。当 PJ もそうする =====
+# F1) ABCDEFGH + 全角空白（8 + SO 1 + 2 + SI 1 = 12 桁で満杯）の先頭に挿入モードで X。予測: 0012（全角空白を空きと数えれば成功するはず）
+setcursor 5,10
+settle 200
+keys [eraseeof]
+settle 200
+keys ABCDEFGH　[eof]
+settle 300
+dump f1-typed
+setcursor 5,10
+settle 200
+keys [insert]
+settle 200
+keys X
+settle 300
+dump f1-insert
+keys [reset]
+settle 300
+
+# ===== G) G（全角のみ・SO/SI 無し。6 スロット）: 全角空白で埋めた欄への挿入。当 PJ は（変更前）0012（U+3000 を空きと見ない）。変更後も G の桁数の別の差（台帳の「G 欄の SO/SI」）で、欄の終わり近くは入らない =====
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 200
+keys あい　　　　[eof]
+settle 300
+dump g1-typed
+setcursor 3,10
+settle 200
+keys [insert]
+settle 200
+keys う
+settle 300
+dump g1-insert
+keys [reset]
+settle 300
+
+setcursor 3,10
+settle 200
+keys [eraseeof]
+settle 300
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

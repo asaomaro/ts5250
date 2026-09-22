@@ -11,6 +11,10 @@ import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
  * 時間の掛かる CALL では、ホストが施錠したまま画面を 1 枚書いてきた時点で `busy` が解け、
  * **打てるのに Enter が効かない**（core の `assertReady` が `KEYBOARD_LOCKED` を投げる）
  * 状態になっていた。3270 は応答を待たない設計なので、施錠を見ないとそもそも守りが無い。
+ *
+ * **施錠中の打鍵は捨てずにペインが溜める**（先打ち。`20260921-type-ahead`・`type-ahead.test.ts`）。
+ * ペインは capture で溜めるので、施錠中のキーはここ（ScreenGrid）まで届かない。ここで固定するのは
+ * **届いてしまっても欄を書き換えない**という安全網のほう（溜めの経路を外れた打鍵が欄を壊さないため）。
  */
 
 const COLS = 80;

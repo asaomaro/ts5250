@@ -298,7 +298,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const source = sourceOf(raw);
       assertWritable(source, c);
       // 3 層目 → 4 層目の順。落としてから検証しないと、破棄される設定で 400 を返してしまう
-      const body = dropByKind(stripSource(raw));
+      const body = dropByKind(stripSource(raw, source));
       const pc = validatePcCommand(body);
       if (pc.error) return c.json({ error: pc.error }, 400);
       const wh = validateWebhook(body);
@@ -323,7 +323,7 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
       const { source, id } = refOf(c.req.param("ref"));
       assertWritable(source, c);
       const raw = await c.req.json().catch(() => ({}));
-      const body = dropByKind(stripSource(raw));
+      const body = dropByKind(stripSource(raw, source));
       const pc = validatePcCommand(body);
       if (pc.error) return c.json({ error: pc.error }, 400);
       const wh = validateWebhook(body);
@@ -363,14 +363,25 @@ export function registerConfigRoutes(app: Hono<{ Variables: AuthVars }>, deps: C
   });
 }
 
-/** `source` は経路の選択に使うだけで、レコードには残さない */
-function stripSource(raw: unknown): unknown {
+/**
+ * `source` は経路の選択に使うだけで、レコードには残さない。
+ *
+ * セッションの `system` と `associatedPrinterSession` は**参照文字列**（`srv:x`）で届く（一覧が返すのも参照。編集は一覧の値を持ち帰る）。
+ * 保存形は id なので接頭辞を外す。**`associatedPrinterSession` は保存先が同じときだけ外す**——別の保存先の参照（自分の設定から `srv:` を指す等）を
+ * 素の id に直すと、同じ id の別のセッションに化けうる。外さずに渡せばストアが「無い」として弾く（`20260921-associated-printer-session` の
+ * 節目 10 の独立点検 C-M1。以前は `system` しか直さず、UI の送る参照が 404 になって保存できなかった）
+ */
+function stripSource(raw: unknown, source: ConfigSource): unknown {
   if (!raw || typeof raw !== "object") return raw;
-  const { source: _ignored, system: sysRef, ...rest } = raw as Record<string, unknown>;
-  // セッションの `system` は参照文字列（`srv:x`）で届く。保存形は id なので接頭辞を外す
+  const { source: _ignored, system: sysRef, associatedPrinterSession: prtRef, ...rest } = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...rest };
   if (typeof sysRef === "string") {
     const parsed = parseRef(sysRef);
-    return { ...rest, system: parsed ? parsed.id : sysRef };
-  }
-  return rest;
+    out.system = parsed ? parsed.id : sysRef;
+  } else if (sysRef !== undefined) out.system = sysRef;
+  if (typeof prtRef === "string") {
+    const parsed = parseRef(prtRef);
+    out.associatedPrinterSession = parsed && parsed.source === source ? parsed.id : prtRef;
+  } else if (prtRef !== undefined) out.associatedPrinterSession = prtRef;
+  return out;
 }

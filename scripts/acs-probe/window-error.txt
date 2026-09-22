@@ -1,0 +1,60 @@
+# **ホストの妥当性検査エラー（WRITE ERROR CODE / TO WINDOW）で ACS はどう振る舞うか**（実機）。
+#
+# `scripts/build-ulktest.mjs` の ULKPGM:
+#   RANGE  — 全画面の RANGE(1 5) 欄に 9 を入れて Enter → システムが WRITE ERROR CODE で返す見込み
+#   WINDOW — 窓（WINDOW キーワード）の中の RANGE(1 5) 欄に 9 → WRITE ERROR CODE TO WINDOW の見込み
+# 原典 `DS5250.processWriteErrorCode` はエラー状態に入り（`setErrorMode(true)`）、メッセージ行へ書く。
+# 見るもの: メッセージがどこ（どの行・窓の中か）に出るか、inhibit、文字を打ったとき、右矢印で抜けたときの最下行。
+signon
+keys [enter]
+settle 1200
+
+# --- 全画面 ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('RANGE')[enter]
+settle 2000
+dump r-screen
+keys 9[enter]
+settle 2000
+dump r-error
+keys 3
+settle 600
+dump r-char
+keys [left]
+settle 600
+dump r-left
+keys [pf3]
+settle 1500
+
+# --- 窓 ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('WINDOW')[enter]
+settle 2000
+dump w-screen
+keys 9[enter]
+settle 2000
+dump w-error
+keys 3
+settle 600
+dump w-char
+keys [left]
+settle 600
+dump w-left
+keys [pf3]
+settle 1500
+
+# --- 全画面・挿入モードのまま WEC を受け、Tab で抜ける（挿入モードが解けるか・Tab で最下行が消えるか） ---
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('RANGE')[enter]
+settle 2000
+keys [insert]
+settle 300
+dump i-ins-on
+keys 9[enter]
+settle 2000
+dump i-error
+keys [tab]
+settle 600
+dump i-after-tab
+keys [pf3]
+settle 1500
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

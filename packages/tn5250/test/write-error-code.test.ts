@@ -21,7 +21,7 @@ import { IAC, CMD } from "../src/telnet/constants.js";
  *
  * ## 実機で採った材料（実機 / IBM i 7.3）
  *
- * `ASAOLIB/DTMPGM` の 8 桁日付欄 `D8W`（`EDTWRD('    /  /  ')`・EDTMSK なし）へ
+ * `TESTLIB/DTMPGM` の 8 桁日付欄 `D8W`（`EDTWRD('    /  /  ')`・EDTMSK なし）へ
  * 10 桁ぶんの数字を送って桁あふれを起こすと、ホストは 0x21 を返す:
  *
  * ```

@@ -37,7 +37,9 @@ const data = (scs: number[]): number[] => {
   const body = [0x12, 0xa0, 0x01, 0x01, 0x04, 0x00, 0x00, 0x01, ...scs];
   return [0x00, body.length + 2, ...body];
 };
-const jobComplete = (): number[] => [0x00, 0x11, 0x12, 0xa0, 0x01, 0x01, 0x04, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0];
+// ジョブの終わり: **フラグ 0x08 ＋ 本体が 0x00 だけ**（実機の形。ACS `DS5250P.processScs` の判定。
+// `20260921-printer-acs-declaration` で「長さ 17」の判定をやめたので、フラグの無い合成レコードは終わりにならない）
+const jobComplete = (): number[] => [0x00, 0x11, 0x12, 0xa0, 0x01, 0x01, 0x0a, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0];
 
 /** 出力設定付きでプリンターセッションを開く */
 async function openPrinter(autoPdfDir: string): Promise<{ sessions: SessionManager; entry: PrinterEntry; t: FakeTransport }> {
@@ -100,7 +102,7 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     expect(existsSync(missing)).toBe(false);
     const { entry, t } = await openPrinter(missing);
     const pushed: string[] = [];
-    entry.onOutputWarn = (w) => pushed.push(w.message);
+    entry.listeners.add({ onOutputWarn: (w) => pushed.push(w.message) });
     feedSpool(t);
     // **見たいものが来るまで待つ。** `renderSpoolPdf` は CJK フォントが見つからないと
     // 先に警告を 1 本積むので、「警告が 1 本でも来たか」で待つと**フォント警告で待ちが明けて**
@@ -118,7 +120,7 @@ describe("プリンター自動出力: 実行時 ON/OFF と警告", () => {
     const dir = mkdtempSync(join(tmpdir(), "pout-"));
     const { entry, t } = await openPrinter(dir);
     const pushed: unknown[] = [];
-    entry.onOutputStatus = (s) => pushed.push(s);
+    entry.listeners.add({ onOutputStatus: (s) => pushed.push(s) });
     feedSpool(t);
     expect(await waitFor(() => entry.outputStatuses.length > 0)).toBe(true);
     const s = entry.outputStatuses[0]!;

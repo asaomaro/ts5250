@@ -89,10 +89,18 @@ node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/sql.js \
 | `verify-browser-render.mjs` | 描画回帰（実ブラウザ）: 反転(背景色)セルの文字色≠背景色（文字が見える）／DBCS 全角の縦位置が同行テキストと揃う、を計算スタイル・幾何で検証。 |
 | `verify-browser-select.mjs` | 矩形選択回帰（実ブラウザ）: カーソルが選択の始点に置かれ、マウス／キーボードで広げても動かない（ACS 相当）／ダブルクリックで語を選択（入力欄上の native 語選択を畳んで blur できるか）／カーソルが選択ハイライトより上に描かれる（jsdom は scoped CSS を解決しないため）。 |
 | `verify-browser-paste.mjs` | 複数行ペースト回帰（実ブラウザ・12 項目）: `STRSQL` の SQL 入力エリア（独立した入力欄が縦に並ぶ）へ矩形の形のまま落ちる／書いた範囲だけ上書きし後ろの既存文字を残す（`123456` へ `789` → `789456`）／行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる／帯の幅で折り返しあふれは次の帯行の同じ桁へ／挿入モードは後続を右へずらし入り切らねば「挿入する余地がありません」で何も書かない／ペースト後もカーソルが動かない。**SQL は実行しない**（Enter を押さない）ためホストは変更しない。 |
-| `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（Ctrl+Delete）は消すだけで欄を出ない／Erase Input（Ctrl+Backspace）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
-| `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（G02/C01）を掴めているかも見る。**要 `TESTLIB/QDDSSRC`**。 |
+| `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（既定のキーは無いので `Alt+Delete` を起動時に割り当てる）は消すだけで欄を出ない／Erase Input（`Alt+End`。既定）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
+| `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（~~G02/~~C01）を掴めているかも見る。**要 `TESTLIB/QDDSSRC`**。 |
 | `verify-printer.mjs` | プリンターセッション検証（core・実機）: `PrinterSession` で待ち受け → 表示セッションから自前スプールをそのプリンター OUTQ へ回し（`CHGJOB OUTQ`＋`DSPLIBL OUTPUT(*PRINT)`）→ ライターの用紙タイプ問い合わせ（`CPA3394`）に `I` で応答 → SCS を受信して "Library List" 帳票を桁揃えで展開できることを確認。**自分のデバイスにのみスプールを回す**ためホストを汚さない。 |
-| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・実機・CCSID 1399）: `TESTLIB` のライブラリテキストを日本語に変えて `DSPLIBL` を印刷 → SCS 中の SO/SI 付き全角を受信し、帳票に日本語が桁揃えで載ることを確認（検証後にテキストを戻す）。**要 TESTLIB**。 |
+| `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・PUB400・CCSID 1399）: 5553 の装置が作られ、用紙・位置合わせの問い合わせに答えると帳票が届くことを確認。~~帳票に日本語が桁揃えで載ることを確認~~ → **英語機では日本語は置換される**（申告を ACS と同じ組にしたため。日本語の検証は下の `verify-printer-dbcs-push.mjs`）。**要 TESTLIB**。 |
+| `verify-printer-dbcs-push.mjs` | **日本語の帳票を書き出し経路で受ける**（core・日本語機）: 3812 で作った装置に DBCS の CCSID で繋ぐと 5553 に作り変えられ、IGC 属性の `DSPLIBL` が CPA3303 で止まらずに日本語の帳票として届くことを確認。装置は事前に作って最後に消す（この機は自動構成を許さない。仮想制御装置は `AS400_VRTCTL`）。 |
+| `verify-printer-hold.mjs` | **帳票の応答を止めている間、ホストはスプールを残して待つか**（core・PUB400）: 応答を 30 秒止める間スプールは WTR のまま残り、応答すると消える（SAVE(*NO)）。`PrinterSession` の `respondAfter` で止める。ENDWTR は PUB400 では権限が無く試せない。 |
+| `verify-roll.mjs` | **ROLL で空いた行に旧い内容が残るか**（core・社内機）: DSM の試験プログラム（`build-dscmd.mjs` を `DSCMD_PGM=ROLLTST` で。`dscmd.c` の ROLLTEST）に行番号の画面を出させて 3 行ロール → 空いた行に元の行が残る（ACS と同じ）。ACS 側は `acs-probe/roll-vacated-{up,down}.txt`。終わったら DLTPGM と IFS の `/tmp/rolltst.*` を消す。 |
+| `verify-device-name.mjs` | **装置名を ACS と同じく展開・大文字化し、使用中なら同じ接続の中で次の名前で答え直す**（core・PUB400）: 小文字 → 大文字の装置・`<名>0` を掴んだまま `<名>=` → `<名>1`・記号の無い名前は 8902 で断る・`deviceNameRetry` は繰り上げて繋がる・プリンターの `%=`。`npm run build -w @ts5250/tn5250` の後に流す。 |
+| `verify-printer-hold-drop.mjs` | **帳票の応答を止めている間に接続が切れたら、ホストはスプールをどうするか**（core・PUB400）: 止めている間 WTR → 切断すると RDY に戻る（印刷済みにならない）→ 同じ装置名で繋ぎ直すと、書き出しプログラムの用紙の問い合わせ（MSGW）に答えた後で送り直される。 |
+| `verify-printer-hold-server.mjs` | **自動出力に失敗したら応答を止め、再試行・取消で応答する**（server・PUB400）: まだ無い保存先で PDF が書けず止まる → スプールは WTR → 保存先を作って再試行で PDF ができスプールが消える → 2 本目は取消で消える → 3 本目は止めている間に停止するとスプールが RDY に戻り、開始し直すと送り直されて PDF ができる。`npm run build` の後に流す。 |
+| `verify-device-env.mjs` | **KBDTYPE / CODEPAGE / CHARSET の申告でサインオンと日本語の往復が通るか**（core）: `[PUB400|AS400] [CCSID]`（既定 1399）。コマンド行に日本語を打って、ホストの「コマンドが見つからない」系のメッセージにそのまま戻るかを見る。ホストに何も作らない。 |
+| `diag-printer-declare.mjs` | プリンターの**申告の組み合わせ**（ACS の DBCS / SBCS / HPT、当 PJ の旧い組）を素の telnet で実機・PUB400 に当て、起動応答・装置の型・IGC の帳票が届くかを並べる。 |
 
 ```sh
 node --env-file=.env --env-file=.env.verify scripts/build-attrtest.mjs      # 初回/再作成（既存なら不要）
@@ -607,6 +615,19 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 解析時は telnet のエスケープを先に解除すること（`IAC EOR` を落とし `IAC IAC` → `0xFF`）。
 **記録にはサインオンのパスワードが平文で残る。解析が済んだら削除すること。**
 
+`relay-5250.mjs` — **5250 の telnet（23）だけを中継して両方向の生バイトを記録する小さな中継**。
+`tap-proxy.mjs` と違い待ち受けポートを自由に選べ（特権ポートが要らない）、ホストサーバーのポートは扱わない。
+ACS のコア（`acs-probe.mjs`）や診断スクリプトを実機との間で測るのに向く（`20260921-g-field-sosi` で G の欄のワイヤを採った）。
+実機のアドレスは `.env` の値を環境変数越しに渡す（画面に出さない）。
+
+```sh
+node --env-file=.env -e 'process.env.TARGET_HOST=process.env.AS400_HOST; process.env.RELAY_PORT="32323"; process.env.RELAY_LOG="./relay.log"; await import("./scripts/relay-5250.mjs")' --input-type=module &
+AS400_HOST=127.0.0.1 PROBE_PORT=32323 node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順ファイル>
+```
+
+記録は 1 行 1 パケット（`C>H <hex>` がクライアント→ホスト、`H>C <hex>` がホスト→クライアント。IAC のエスケープを解く前）。
+**パスワードが平文で残るので、解析したら `shred -u` で消す**（記録は本人だけが読める権限〔0600〕で作る。`RELAY_LOG` は `*.log` にすると `.gitignore` の除外に合う）。
+
 `research-ifs-dataccsid.mjs` — **IFS の新規ファイルに付く CCSID タグの実測**。
 `dataCcsid` を指定しない／`1208`／`1399`／既存の上書き、の 4 条件を比べる。
 **指定は採用される**が、**既存ファイルのタグは上書きでも変わらない**。
@@ -728,6 +749,11 @@ node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順> PUB40
   - `PROBE_SCREEN`（`24x80` 既定 / `27x132`）
   - `PROBE_DEVNAME`（既定は指定せず、ホストに採らせる）
   - `PROBE_PORT`（既定 23）
+  - `PROBE_ENPTUI`（既定は指定しない＝ECL の既定 false。`true` で拡張 5250 を申告する。利用者の ACS は有効で動いている——タップで採った Query Reply が有効時の値だった。**無効だとホストは EDTMSK の欄を継続欄に割らずに送る**ので、継続欄を測るときは `true`）
+  - `PROBE_BYPASS_SIGNON`（既定は指定しない。`clear` で平文・`encrypted` で代替パスワードの ACS の自動サインオン。パスワードは ACS 自身の `PasswordCipher` で暗号化して渡す。NEW-ENVIRON を `tap-proxy.mjs` で採るときに使う。**採った記録にはパスワード（平文なら素のまま）が入るので、解析したら消す**）
+  - `PROBE_PASSWORD_LEVEL`（既定は指定しない。`PROBE_BYPASS_SIGNON=encrypted` の代替パスワードの計算に使う QPWDLVL。製品の ACS はサインオン・サーバーに聞くが、製品の外のプローブでは入らないので渡す。PUB400 は 3）
+  - `PROBE_ASSOC_PRINTER`（既定は指定しない。関連付けプリンターの装置名。ACS が「プリンターの関連付け」で装置名を書いたときに入れるプロパティ `associatedDeviceName` に渡し、ACS は NEW-ENVIRON の最後に IBMASSOCPRT を足す。**`.env.verify` の値を渡すときは `--env-file` 経由で読む**——行末のコメントまで拾うと、ACS はそれもそのまま送る）
+  - `PROBE_CODEPAGE_KEY`（既定は指定しない。GUI の ACS がセッション設定から入れる `codePageKey`。KBDTYPE は `CodePage.getKbdType` がこのキーで引くので、入れないと空白 3 つになり GUI の ACS の値にならない。1399 は `KEY_JAPAN_ENGLISH_EX_EURO`・939 は `KEY_JAPAN_ENGLISH_EX`・930 は `KEY_JAPAN_KATAKANA`・37 は `KEY_US`）
 - 出力から `.env` の値（パスワード・ホスト・利用者名）を伏せる。JVM に渡す環境変数は要るものだけ。
 - 終了コード（**0 は手順を最後まで流したときだけ**）: 0 = 最後まで流した / 1 = JVM を起動できない / 2 = 実行前の誤り（環境変数・JDK・jar・コンパイル・手順。手順は命令名・引数の書式・`${LIB}` と `_LIB` の有無を実機に繋ぐ前に確かめる） / 3 = 接続できない・サインオンできない（パスワード欄が残っていたら続きを打たずに止める） / 4 = 途中で止まった（例外・エラー） / 5 = 時間切れ（300 秒）。
 - サインオンで、利用者名は大文字にして書く。パスワードは、英小文字の無いコードページ（930 / 5026 / 290）のときだけ大文字にする。
@@ -1304,7 +1330,7 @@ node --env-file=.env --env-file=.env.verify scripts/build-msgloop.mjs
 node --env-file=.env --env-file=.env.verify scripts/verify-browser-msgloop-loading.mjs
 ```
 
-### 実測（2026-09-07・SR-OSAKA / AS01・16/16 OK）
+### 実測（2026-09-07・AS400 / DEV1・16/16 OK）
 
 | | MSGLOOP（`SNDMSG`） | STSLOOP（状況メッセージ） |
 |---|---|---|
@@ -1346,7 +1372,7 @@ ws が施錠中でもフラグキーを通すことは `verify-aid-no-timeout.mj
 node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during-wait.mjs
 ```
 
-実測（2026-09-07・`CALL ASAOLIB/STSLOOP` の待ち中）:
+実測（2026-09-07・`CALL TESTLIB/STSLOOP` の待ち中）:
 
 | 経路 | 結果 |
 |---|---|
@@ -1375,7 +1401,7 @@ node --env-file=.env --env-file=.env.verify scripts/verify-browser-escape-during
 `build-msgloop.mjs` が作る `MSGWTST` がその状態を作る。
 
 ```sh
-CALL ASAOLIB/MSGWTST          ← 画面はここで固まる（スピナーが出たまま）
+CALL TESTLIB/MSGWTST          ← 画面はここで固まる（スピナーが出たまま）
 ```
 
 `<AS400_LIB>/INQMSGQ`（この検証用に作る自前の待ち行列）にメッセージが来るまで

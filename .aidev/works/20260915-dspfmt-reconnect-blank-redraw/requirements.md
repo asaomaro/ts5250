@@ -4,7 +4,7 @@
 
 ## 背景 / 課題
 
-利用者から「DSPFMT FILE(ASAOLIB/COMPLIST) OUTPUT(*) を実行すると、初回表示が罫線のみになり、
+利用者から「DSPFMT FILE(TESTLIB/COMPLIST) OUTPUT(*) を実行すると、初回表示が罫線のみになり、
 その後 Enter を1回押下すると正常に表示される」という不具合報告（20260915、スクリーンショット添付）
 を受けた。追加のヒアリングで次の情報を得た:
 
@@ -16,7 +16,7 @@
 `.aidev/backlog/acs-parity.md` の既存項目（`20260914-dspfmt-field-underline-instability`）で
 同じ症状の再現・原因特定を試みたが、その work では実機トレース（WRKOBJPDM の Opt 欄 + F1ヘルプ窓
 開閉 + PageDown）で再現できず、代わりに見つかった別の確実な欠陥（WEA オーダー未実装）を修正して
-終えていた。本 work は、利用者から得られた新しい具体的な再現手順（`DSPFMT FILE(ASAOLIB/COMPLIST)
+終えていた。本 work は、利用者から得られた新しい具体的な再現手順（`DSPFMT FILE(TESTLIB/COMPLIST)
 OUTPUT(*)` を直接コマンド入力）を使って再挑戦する。
 
 ## 予備調査で判明した事実（本 work 開始前、requirements 起票時点で確認済み）

@@ -14,6 +14,18 @@ describe("classifyKey", () => {
     expect(classifyKey({ ...base, key: "F12", shiftKey: true })).toEqual({ aid: "F24" });
   });
 
+  /**
+   * **Shift+Enter は送信ではなく Newline**（`20260921-shift-enter-newline`）。
+   * ACS の既定割り当て `AcsMapFunctions.MAP_5250` が `S10 = [newline]` を持ち、
+   * `PS5250.processNewline` はホストへ送らない。以前は Shift を見ずに Enter を送っており、
+   * サブファイルの入力中に押すと入力途中のまま送信されていた。
+   */
+  it("Shift+Enter は Newline（AID を送らない）", () => {
+    const r = classifyKey({ ...base, key: "Enter", shiftKey: true });
+    expect(r.aid, "Shift+Enter でホストへ送ってはいけない").toBeUndefined();
+    expect(r.local).toBe("newline");
+  });
+
   it("Enter / PageUp / PageDown を AID にマップする", () => {
     expect(classifyKey({ ...base, key: "Enter" }).aid).toBe("Enter");
     expect(classifyKey({ ...base, key: "PageUp" }).aid).toBe("PageUp");
@@ -38,11 +50,20 @@ describe("classifyKey", () => {
     expect(classifyKey({ ...base, key: "ArrowDown", ctrlKey: true })).toEqual({ local: "word-down" });
   });
 
-  it("タブ切替(Alt+PageUp/Down)・ペイン移動(Alt+矢印)は App 側担当のため対象外", () => {
+  // ~~Alt+←/→ は対象外~~ → ACS の既定 `A37 = [backtabword]`・`A39 = [tabword]`（`20260921-word-tab-acs`）。アプリのショートカットは Alt+Shift 系
+  it("**Alt+←/→ は語頭ジャンプ**（ACS の `[backtabword]`・`[tabword]`）。Alt+↑/↓ は別の用途（ドロップダウン）のまま", () => {
+    expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true })).toEqual({ local: "word-left" });
+    expect(classifyKey({ ...base, key: "ArrowRight", altKey: true })).toEqual({ local: "word-right" });
+    expect(classifyKey({ ...base, key: "ArrowUp", altKey: true })).toEqual({});
+    expect(classifyKey({ ...base, key: "ArrowDown", altKey: true })).toEqual({});
+    // Alt+Shift+矢印はアプリのペイン移動・Ctrl+Alt+矢印は割り当てない
+    expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true, shiftKey: true })).toEqual({});
+    expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true, ctrlKey: true })).toEqual({});
+  });
+
+  it("タブ切替(Alt+PageUp/Down)は App 側担当のため対象外", () => {
     expect(classifyKey({ ...base, key: "PageDown", altKey: true })).toEqual({});
     expect(classifyKey({ ...base, key: "PageUp", altKey: true })).toEqual({});
-    expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true })).toEqual({});
-    expect(classifyKey({ ...base, key: "ArrowDown", altKey: true })).toEqual({});
     // Ctrl+Shift+← は語頭ジャンプにしない（純粋な Ctrl+矢印のみ）
     expect(classifyKey({ ...base, key: "ArrowLeft", ctrlKey: true, shiftKey: true })).toEqual({});
   });

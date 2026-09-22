@@ -250,6 +250,8 @@ export type WsClientMessage =
   | WsGuiSelect
   | WsGuiSubmit
   | WsPrinterOutput
+  | WsPrinterOutputRetry
+  | WsPrinterOutputCancel
   | WsActivity
   | WsPong
   | WsWatchSubscribe
@@ -285,6 +287,28 @@ export interface WsOpened {
    * **実行されたのに誰にも知らされなかった**。繋ぎ直しで渡して、後から追えるようにする。
    */
   pcCommands?: PcCommandEvent[];
+  /**
+   * **ホストへ自動で繋ぎ直している最中なら、その回数**（`20260921-auto-reconnect`）。無ければ繋がっている。
+   * ブラウザは開き直し・後から入ったときにこれで上書きする——`host-reconnected` は購読している間にしか届かないので、
+   * 留守中に繋ぎ直せたことを知る手段がこれしか無い。
+   */
+  hostReconnect?: { attempt: number };
+  /**
+   * **5250 の表示セッションの起動応答のコード**（`I902` / `I901` など。`20260921-startup-code-status`）。起動応答が無ければ載せない。
+   * ACS は繋がるたびに状態行へ「<コード> - セッションを開始しました」の意味の文言を 3 秒出す（`AcsOnly.displayResponseCode`）
+   */
+  startupCode?: string;
+  /**
+   * **関連付けるプリンターが使えず、関連付けなしで開いたとき**の理由（`20260921-associated-printer-session`。ACS はポップアップで知らせる）。
+   * `invalid`＝指した設定が使えない（無い・プリンターでない・権限が無い）／`failed`＝プリンターを開始できなかった／
+   * `timeout`＝装置名が決まる前に待ち時間が切れた（ACS は時間切れなら関連付けなしで開く）。指していない・関連付けられたときは載せない
+   */
+  associatedPrinterIssue?: "invalid" | "failed" | "timeout";
+  /**
+   * **3270 のときだけ**: 相手が IBM i か（`Session3270.isIbmI`）。汎用機では Attn・SysReq・Help・Print に 3270 の割り当てが無く、
+   * 送ると拒否されるので、画面側はその 4 つへのキーの割り当てを何もしない扱いにする（ACS の既定の割り当ての節目の点検の指摘）
+   */
+  ibmI?: boolean;
 }
 export interface WsScreen {
   type: "screen";
@@ -299,6 +323,21 @@ export interface WsScreen {
  */
 export interface WsAlarm {
   type: "alarm";
+}
+/**
+ * **ホストに切られて、自動で繋ぎ直している**（`20260921-auto-reconnect`）。`attempt` は 1 から。
+ * 繋ぎ直している間は打てない（送り先が無い）。繋ぎ直せたら `host-reconnected` のあと新しい画面が `screen` で届く。
+ * 諦めたら（起動応答での拒否・自分からの切断）いつもどおり `closed`（`ended: true`）。
+ */
+export interface WsHostReconnecting {
+  type: "host-reconnecting";
+  attempt: number;
+  reason: string;
+}
+export interface WsHostReconnected {
+  type: "host-reconnected";
+  /** 繋ぎ直した接続の起動応答のコード（`WsOpened.startupCode` と同じ。ACS は繋ぎ直しでも開始の文言を出す） */
+  startupCode?: string;
 }
 /**
  * 予約（HLLAPI の `Reserve`）の状態が変わった。
@@ -444,7 +483,14 @@ export interface SpoolOutputStatusMsg {
   spoolId: string;
   at: number;
   skipped?: boolean;
-  pdf?: { ok: boolean; path?: string; error?: string };
+  /** 出力に失敗したので、ホストへの応答を止めている（再試行・取消を待つ） */
+  held?: boolean;
+  /** 止めていた応答を取消で返した */
+  canceled?: boolean;
+  /** 応答を止めている間に接続が切れた（応答はもう返せない） */
+  dropped?: boolean;
+  /** `skipped` は作れない設定（ホスト変換の印刷データ）で作らなかった（失敗ではない） */
+  pdf?: { ok: boolean; path?: string; error?: string; skipped?: boolean };
   print?: { ok: boolean; printer?: string; error?: string };
 }
 /** 受信スプールの自動出力結果（PDF 作成・印刷の成否）を通知する */
@@ -488,6 +534,17 @@ export interface WsPcCommand {
 export interface WsPrinterOutput {
   type: "printer-output";
   enabled: boolean;
+}
+/**
+ * client → server: **出力に失敗して応答を止めている帳票の出力をやり直す**（ACS のプリンター・エラーの「再試行」。
+ * `20260921-printer-hold-response`）。対象は開いているプリンターセッションの止めている 1 件
+ */
+export interface WsPrinterOutputRetry {
+  type: "printer-output-retry";
+}
+/** client → server: **止めている帳票を取り消し、ホストへ応答する**（ACS の「取消」。ホストは印刷済みとみなす） */
+export interface WsPrinterOutputCancel {
+  type: "printer-output-cancel";
 }
 /**
  * ハートビート（server → client）。クライアントは `pong` を返す。
@@ -589,6 +646,8 @@ export type WsServerMessage =
   | WsOpened
   | WsScreen
   | WsAlarm
+  | WsHostReconnecting
+  | WsHostReconnected
   | WsReserved
   | WsJobInfoRes
   | WsError

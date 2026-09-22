@@ -187,7 +187,7 @@ export const VIEW_ITEMS: ViewItemDef[] = [
   {
     key: "sosi",
     label: "SO/SI 表示",
-    // 順送り（ctrl+F3）は 非表示 → 薄目 → 濃目 の順に回る。既定を先頭に置くのは他の項目と同じ。
+    // 順送り（ctrl+F1。~~ctrl+F3~~ は ACS の既定に合わせて入れ替えた）は 非表示 → 薄目 → 濃目 の順に回る。既定を先頭に置くのは他の項目と同じ。
     opts: [
       { value: "none", label: "非表示" },
       { value: "dim", label: "薄目" },

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Field } from "@ts5250/tn5250";
-import { findMandatoryViolation } from "../src/composables/mandatoryCheck.js";
+import { findFieldViolation } from "../src/composables/mandatoryCheck.js";
 import { rejectReason } from "../src/composables/fieldValidate.js";
 import { MSG_BY_REASON, MSG_SELF_CHECK } from "../src/composables/opMessages.js";
 
@@ -20,40 +20,40 @@ function fld(o: Partial<Field>): Field {
 }
 const noEdits = new Map<number, string>();
 
-describe("送信前の自己点検（findMandatoryViolation）", () => {
+/**
+ * 検査はその欄 1 つ（AID ならカーソル下の欄、欄を出るならその欄）に掛ける（ACS `processAIDCode` /
+ * `moveCursorWithMandFillCheck`。`20260921-mandatory-check-acs`）。MF が先、自己点検が後。
+ */
+describe("送信前の自己点検（findFieldViolation）", () => {
   it("mod10 の検査桁が合わなければ self-check で止める", () => {
     const f = fld({ selfCheck: "mod10" });
-    expect(findMandatoryViolation([f], new Map([[1, "1234"]]))).toEqual({ field: f, reason: "self-check" });
-    expect(findMandatoryViolation([f], new Map([[1, "1230"]]))).toBeUndefined();
+    expect(findFieldViolation(f, new Map([[1, "1234"]]))).toEqual({ field: f, reason: "self-check" });
+    expect(findFieldViolation(f, new Map([[1, "1230"]]))).toBeUndefined();
   });
 
   it("mod11 の検査桁が合わなければ self-check で止める", () => {
     const f = fld({ selfCheck: "mod11" });
-    expect(findMandatoryViolation([f], new Map([[1, "1235"]]))?.reason).toBe("self-check");
-    expect(findMandatoryViolation([f], new Map([[1, "1236"]]))).toBeUndefined();
+    expect(findFieldViolation(f, new Map([[1, "1235"]]))?.reason).toBe("self-check");
+    expect(findFieldViolation(f, new Map([[1, "1236"]]))).toBeUndefined();
   });
 
-  it("未編集なら snapshot の値で検算する", () => {
+  it("未編集なら snapshot の値で検算する（ACS も MDT は見ない）", () => {
     const f = fld({ selfCheck: "mod10", value: "1234" });
-    expect(findMandatoryViolation([f], noEdits)?.reason).toBe("self-check");
+    expect(findFieldViolation(f, noEdits)?.reason).toBe("self-check");
   });
 
-  it("空欄は検算しない（空を弾くのは MANDATORY_ENTER の役目）", () => {
-    expect(findMandatoryViolation([fld({ selfCheck: "mod10" })], noEdits)).toBeUndefined();
-    const both = fld({ selfCheck: "mod10", mandatoryEnter: true });
-    expect(findMandatoryViolation([both], noEdits)?.reason).toBe("mandatory-enter");
+  it("空欄は検算しない", () => {
+    expect(findFieldViolation(fld({ selfCheck: "mod10" }), noEdits)).toBeUndefined();
   });
 
   it("保護欄は検算しない", () => {
     const f = fld({ selfCheck: "mod10", value: "1234", protected: true });
-    expect(findMandatoryViolation([f], noEdits)).toBeUndefined();
+    expect(findFieldViolation(f, noEdits)).toBeUndefined();
   });
 
-  it("画面順で最初の違反を返す（自己点検と桁埋めが混ざっても）", () => {
-    const a = fld({ index: 1, selfCheck: "mod11" });
-    const b = fld({ index: 2, row: 6, adjust: "mandatory-fill" });
-    expect(findMandatoryViolation([a, b], new Map([[1, "1235"], [2, "12"]]))?.field.index).toBe(1);
-    expect(findMandatoryViolation([a, b], new Map([[1, "1236"], [2, "12"]]))?.reason).toBe("mandatory-fill");
+  it("MF と自己点検が両方なら MF が先（ACS の順）", () => {
+    const f = fld({ selfCheck: "mod11", adjust: "mandatory-fill" });
+    expect(findFieldViolation(f, new Map([[1, "1235"]]))?.reason).toBe("mandatory-fill");
   });
 
   it("止めたときの操作員メッセージがある", () => {

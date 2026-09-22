@@ -92,12 +92,54 @@ class PrinterTransport implements Transport {
 }
 
 /** transport を差し込む Manager（`ws-reconnect-resume.test.ts` と同じ） */
+/**
+ * ホストが接続を閉じられる `ReplayTransport`。**ホスト側の終了を実際の経路で起こす**ため——
+ * `session.disconnect()` で模すと「自分から切った」扱いになり、自動再接続（`20260921-auto-reconnect`）を
+ * 素通りしたまま表が緑になる（独立点検の指摘）。
+ */
+class HostClosable implements Transport {
+  private readonly inner = new ReplayTransport(signon());
+  private closeFn: ((reason: string) => void) | undefined;
+  start(): void {
+    this.inner.start();
+  }
+  send(d: Uint8Array): void {
+    this.inner.send(d);
+  }
+  close(): void {
+    this.inner.close();
+  }
+  onData(fn: (d: Uint8Array) => void): void {
+    this.inner.onData(fn);
+  }
+  onClose(fn: (reason: string) => void): void {
+    this.closeFn = fn;
+    this.inner.onClose(fn);
+  }
+  onError(fn: (e: Error) => void): void {
+    this.inner.onError(fn);
+  }
+  hostClose(reason = "closed by host"): void {
+    this.closeFn?.(reason);
+  }
+}
+
 class InjectingManager extends SessionManager {
+  /** 作った接続（先頭が最初の接続。繋ぎ直すと後ろに足される） */
+  readonly transports: HostClosable[] = [];
   constructor(opts?: ConstructorParameters<typeof SessionManager>[0]) {
     super(opts);
   }
   override open(opts: Parameters<SessionManager["open"]>[0]) {
-    return super.open({ ...opts, transport: new ReplayTransport(signon()) });
+    // **接続のたびに作る**（`transportFactory`）。繋ぎ直しで本物の TCP へ出ていかないため
+    return super.open({
+      ...opts,
+      transportFactory: async () => {
+        const t = new HostClosable();
+        this.transports.push(t);
+        return t;
+      }
+    });
   }
   override openPrinter(opts: OpenPrinterOptions) {
     return super.openPrinter({ ...opts, transport: new PrinterTransport() });
@@ -254,10 +296,11 @@ async function buildDisplay(c: ServerCase): Promise<Situation> {
     sent: subject.sent,
     trigger: async () => {
       if (c.disconnect !== "hostEnded") return leave(c, subject, clock);
-      // ホスト側の終了。**`dispose` を通らない別経路**なので、transport を終端させて
-      // セッションの `closed` を発火させる（`SessionManager.open` の購読がエントリを消す）
-      mgr.get(id).session.disconnect();
-      await waitFor(() => !exists());
+      // ホスト側の終了。**`dispose` を通らない別経路**なので、**ホスト側から transport を閉じる**。
+      // ブラウザから開いたセッションは繋ぎ直し（`host-reconnected` まで待つ）、MCP が開いたものは
+      // `closed` でエントリが消える
+      mgr.transports[0]!.hostClose();
+      await waitFor(() => !exists() || subject.sent.some((m) => m.type === "host-reconnected"));
     },
     exists,
     held: () => mgr.isHeld(id),
@@ -484,6 +527,12 @@ function expectOutcome(c: ServerCase, s: Situation, sentBefore: number): void {
       if (c.terminal === "printer") {
         expect(s.printerState(), "待ち受けが降りている（keep は何も起きないこと）").toBe("listening");
       }
+      return;
+    case "hostReconnect":
+      expect(s.exists(), "繋ぎ直すはずがエントリが消えた").toBe(true);
+      expect(s.held(), "猶予に入れてはいけない").toBe(false);
+      expect(s.sent.some((m) => m.type === "host-reconnecting"), "繋ぎ直しの経過が届いていない").toBe(true);
+      expect(ended(), "繋ぎ直すのに closed{ended:true} を送った").toBe(false);
       return;
     case "entryRemoved":
       expect(s.exists(), "エントリが残っている").toBe(false);

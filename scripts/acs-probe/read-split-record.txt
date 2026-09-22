@@ -1,0 +1,26 @@
+# **WTD と READ が別のレコードで来る画面で、ACS はカーソルをどこに置くか**（実機）。
+#
+# 台帳「READ だけのレコード（WTD 無し）でも、カーソルを先頭の入力欄へ動かす」の残り——`read-only-cursor.txt`（QSH の出口）
+# では差が出ず、WTD と READ が別のレコードで来る画面が作れていなかった。CL の SNDF と RCVF を分けると作れる
+# （`scripts/build-ulktest.mjs` の SPLIT / SPLITN。表示装置ファイルは DFRWRT(*NO) なので SNDF がすぐ出る）。
+#   SPLIT     — 2 つ目の欄（7,20）に DSPATR(PC)＝IC。WTD が IC で 7,20 を指し、READ が別に来る
+#   SPLITN — IC なし。既定位置（先頭の入力欄 5,20）
+# 原典: カーソルを決めるのは WTD の後の `preprocessWCC2` だけで、READ（66/82/130）は `pending_read` を覚えるだけ。
+# 当 PJ は READ のときに（そのレコードでカーソルが置かれていなければ）先頭の入力欄へ動かす。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('SPLIT')[enter]
+settle 2500
+dump split
+keys [pf3]
+settle 1500
+dump exit-split
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('SPLITN')[enter]
+settle 2500
+dump splitnopc
+keys [pf3]
+settle 1500
+dump exit-splitnopc
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

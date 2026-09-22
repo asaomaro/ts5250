@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hostname, userInfo } from "node:os";
 import {
   beginHold,
   claimHolder,
@@ -16,7 +17,7 @@ import {
   type IdleLimit
 } from "./session-lifetime.js";
 import { As400Error } from "@ts5250/base";
-import { CommandConnection, listJobs } from "@ts5250/hostserver";
+import { CommandConnection, listJobs, querySignonInfo, bypassSignonSubstitute } from "@ts5250/hostserver";
 import { Session5250, PrinterSession, type ConnectOptions, type AidKey, type PcCommandRequest, type PrinterConnectOptions, type SpoolReport } from "@ts5250/tn5250";
 import { childLog } from "./log.js";
 import { rescueStuckSpools, type RescueAction } from "./spool-rescue.js";
@@ -28,6 +29,13 @@ import {
 } from "./pc-command.js";
 import { handleReport, type PrinterOutputConfig, type HandleReportResult } from "./printer-output.js";
 import { holdsConnection, type ServiceState } from "./service-state.js";
+import {
+  onDisplayLost,
+  onDisplayConnected,
+  otherDisplayAssociated,
+  shouldClosePrinter,
+  type AssociatedDisplay
+} from "./associated-printer.js";
 import { ScreenRecorder } from "./screen-recorder.js";
 import { assertOwner, type AuthUser } from "./auth.js";
 
@@ -58,7 +66,8 @@ export interface OpenOptions extends ConnectOptions {
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
   /**
-   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   * 装置名が使用中（8902）のとき、末尾の数字を繰り上げて同じ接続の中で答え直す（~~繋ぎ直して再試行する~~。tn5250 の
+   * `DeviceNameGenerator`。`20260921-device-name-acs`）。
    *
    * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
@@ -132,15 +141,67 @@ export function orphanSafeIdleTimeoutMs(v: IdleLimit | undefined): number {
   return typeof v === "number" ? v : ORPHAN_IDLE_TIMEOUT_MS;
 }
 
-/** 装置名の末尾数字を繰り上げる（WEBEMU01 → WEBEMU02）。数字が無ければ 2 を足す */
-export function nextDeviceName(name: string): string | undefined {
-  const m = /^(.*?)(\d+)$/.exec(name);
-  if (!m) return name.length < 10 ? `${name}2` : undefined;
-  const width = m[2]!.length;
-  const next = Number(m[2]) + 1;
-  const digits = String(next).padStart(width, "0");
-  if (digits.length > width) return undefined; // 桁が増えるなら打ち止め（装置名は 10 文字まで）
-  return `${m[1]}${digits}`;
+/**
+ * **自動サインオンの代替パスワードの関数**（ACS と同じく平文で送らない。`20260921-encrypted-autosignon`）。
+ *
+ * ACS は自動サインオンを使うとき常に暗号化する（`AcsOnly.initBypassSignon` の `ssoBypassSignonEncrypted`）。計算は QPWDLVL で
+ * 分かれ、その値はサインオン・サーバーに聞く（ACS `SignonServer.getPasswordLevel`。認証はしないので失敗回数を使わない）。
+ * **聞けなければ 0**（ACS も 0 にして DES で計算する）。聞くのは作ったときに 1 回だけ（接続の前）。
+ * 利用者名は telnet の USER と同じ正規化（Java の `trim()`＋大文字）、パスワードは末尾の空白を落とす（ACS `NVT5250`）
+ */
+export function bypassSubstituteFor(
+  opts: {
+    host?: string | undefined;
+    tls?: ConnectOptions["tls"];
+    user?: string | undefined;
+    password?: string | undefined;
+  },
+  queryLevel: PasswordLevelQuery = passwordLevelViaSignonServer
+): ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined {
+  const { host, user, password } = opts;
+  if (host === undefined || user === undefined || password === undefined) return undefined;
+  // **接続の前に聞き始める**。ホストがシードを渡してきてから聞くと IS が遅れ、ホストは待たずにサインオン画面を出した（実測）
+  const level = queryLevel({ host, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }).then(
+    (l) => l,
+    (e: unknown) => {
+      sessionLog.warn({ host }, `password level unknown (signon server: ${e instanceof Error ? e.message : String(e)}); using 0 like ACS`);
+      return 0;
+    }
+  );
+  const normalizedUser = user.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "").toUpperCase();
+  const trimmedPassword = password.replace(/ +$/, "");
+  return async (serverSeed) => {
+    const clientSeed = crypto.getRandomValues(new Uint8Array(8));
+    try {
+      const substitute = await bypassSignonSubstitute(await level, normalizedUser, trimmedPassword, clientSeed, serverSeed);
+      return { clientSeed, substitute };
+    } catch (e) {
+      // **黙って捨てない**: 作れなければサインオン画面が出るだけで、利用者には理由が見えない（ACS も例外を記録する。節目の点検の指摘）。
+      // 例外文は長さ・文字位置だけで値を含まない
+      sessionLog.warn({ host }, `auto sign-on substitute password not computed (${e instanceof Error ? e.message : String(e)})`);
+      throw e;
+    }
+  };
+}
+
+/**
+ * 装置名の `&COMPN`（機械名）・`&USERN`（利用者名）に入れる値（ACS `AutoDeviceName5250.getClientID` に当たる。
+ * `20260921-device-name-acs`）。ACS は**ACS が動いている機械**の名前（Windows では `CLIENTNAME` を先に見る）と OS の利用者名を使う。
+ * 当 PJ で ACS の役をしているのはこのサーバーなので、機械名はサーバーの名前（最初の `.` まで）。利用者名は、認証が有効なら
+ * **開いた人のアプリの利用者名**（`owner`）、無効ならサーバーの OS の利用者名（1 人で使う＝ACS と同じ）。
+ * ブラウザの機械名はサーバーからは取れない（decisions D3）
+ */
+export function deviceNameEnvFor(owner?: string): { computerName?: string; userName?: string } {
+  const computerName = (process.platform === "win32" ? process.env["CLIENTNAME"] : undefined) ?? hostname().split(".")[0];
+  let userName = owner;
+  if (userName === undefined) {
+    try {
+      userName = userInfo().username;
+    } catch {
+      // 取れない環境（利用者名の無いコンテナ等）。`&USERN` を使う名前は展開できず、拒否として返る
+    }
+  }
+  return { ...(computerName ? { computerName } : {}), ...(userName !== undefined ? { userName } : {}) };
 }
 
 /**
@@ -245,6 +306,11 @@ export interface SessionEntry {
   owner?: string;
   /** ジョブ識別子。接続直後に装置名だけ入り、引けたら user/number が足される */
   job?: SessionJob;
+  /**
+   * **関連付けたプリンターセッション**（`20260921-associated-printer-session`。`linkAssociatedPrinter` が付ける）。表示の切断・繋ぎ直し・終了で
+   * そのプリンターを止める・起こす・閉じる（ACS `AssociatedPrinterSession5250`）。`closeWithLast` は最後の表示と一緒にプリンターも閉じる指定
+   */
+  associatedPrinter?: { printerId: string; closeWithLast: boolean };
   /** PC コマンド（STRPCCMD）の実行が有効か。UI の出し分けに使う */
   pcCommandEnabled: boolean;
   /** PC コマンドの実行履歴（新しい順ではなく受信順。上限 `PC_COMMAND_HISTORY`） */
@@ -347,7 +413,8 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
   /** 所有者（認証ユーザー名）。認証時に per-user 分離で使う */
   owner?: string;
   /**
-   * 装置名が使用中でホストに拒否されたとき、末尾の数字を繰り上げて再試行する。
+   * 装置名が使用中（8902）のとき、末尾の数字を繰り上げて同じ接続の中で答え直す（~~繋ぎ直して再試行する~~。tn5250 の
+   * `DeviceNameGenerator`。`20260921-device-name-acs`）。
    *
    * **既定 off。** 装置名を固定するのは「その名前で繋ぎたい」意図なので、黙って別名に
    * すり替えるのは裏切りになる。名前にこだわらないが確実に繋ぎたい運用のための任意設定。
@@ -377,9 +444,39 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
  */
 export type StoredReport = SpoolReport & { receivedAt: number };
 
+/**
+ * **プリンターの画面へ配るもの**（ws-handler がタブごとに 1 つ付け、切断で外す）。
+ * ~~エントリに 1 つずつ持つフック~~ だと、同じ定義を 2 タブで開いたとき後のタブが上書きし、そのタブを閉じると
+ * 先のタブにも何も届かなくなった（独立点検の指摘。止めている帳票の再試行バーが下りなくなる）
+ */
+export interface PrinterListener {
+  /** 待ち受けの状態が変わった */
+  onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
+  /** 出力の警告 */
+  onOutputWarn?: (w: { at: number; message: string }) => void;
+  /**
+   * 帳票を受け取った。**救出した帳票はセッションのイベントに乗らない**——ホストから届いたものではないため。
+   * 配る側（`deliverReport`）から必ずここを叩く
+   */
+  onReport?: (r: StoredReport) => void;
+  /** 自動出力の結果（成功・止めた・取消 ほか） */
+  onOutputStatus?: (s: SpoolOutputStatus) => void;
+}
+
+/** 1 本の接続（張り直すたびに作り直す）。止めている帳票がどの接続のものかを見分ける */
+interface PrinterConn {
+  closed: boolean;
+}
+
 /** プリンターセッションの保持単位（受信スプールをバッファし、wait_spool の待機を解決する） */
 export interface PrinterEntry {
   id: string;
+  /**
+   * **接続を張っている最中**の結果（`startPrinter` が立てる）。接続中の `state` は `stopped` のままなので、これが無いと 2 本目の呼び出し
+   * （同じプリンターを使う表示を同時に開く・二重クリック）が二重に接続を張り、装置名が排他のホストに断られる
+   * （`20260921-associated-printer-session` の節目 10 の独立点検 C-S2）。2 本目はこの結果に相乗りする
+   */
+  starting?: Promise<PrinterEntry>;
   /**
    * ホストへの接続。**待ち受けていないときは無い**（`state === "stopped"` / `"error"`）。
    *
@@ -394,8 +491,10 @@ export interface PrinterEntry {
   error?: string;
   /** 開き直すときに使う接続条件（保存しておく） */
   openOpts: OpenPrinterOptions;
-  /** 状態が変わったときに呼ぶ（ws-handler が設定し、切断で解除する） */
-  onState?: (s: { state: ServiceState; error?: string; startupCode?: string }) => void;
+  /** 画面へ配る先（タブごと。`PrinterListener`） */
+  listeners: Set<PrinterListener>;
+  /** 帳票の連番（`spool-<n>`）。**接続をまたいで数える**——張り直しで id が重ならないように */
+  spoolSeq: number;
   /**
    * 張り直しの輪が回っているか。**停止でここを落とすと待ち明けに抜ける**
    * （タイマーを持たずに降ろせる）。
@@ -436,24 +535,24 @@ export interface PrinterEntry {
   outputEnabled: boolean;
   /** 直近の出力警告（上限 20 件）。後から画面を開いても直近の失敗が分かるよう保持する */
   outputWarnings: { at: number; message: string }[];
-  /** 警告の push フック（ws-handler が設定し、切断で解除する） */
-  onOutputWarn?: (w: { at: number; message: string }) => void;
-  /**
-   * 帳票の push フック（ws-handler が設定し、切断で解除する）。
-   *
-   * **救出した帳票はセッションのイベントに乗らない**——ホストから届いたものではないため。
-   * ws-handler が `session.on("report")` だけを見ていると救出分が画面に出ないので、
-   * 配る側（`deliverReport`）から必ずこのフックを叩く。
-   */
-  onReport?: (r: StoredReport) => void;
   /** 書き出しできないスプールを拾う見張り（`startRescue`）。切断で止める */
   rescueTimer?: ReturnType<typeof setInterval> | undefined;
   /** 見張りが実行中か。前回が終わる前に次を走らせて二重取得しないための鍵 */
   rescueBusy?: boolean;
   /** スプールごとの自動出力の結果（受信順・上限あり）。成功も含めて画面に出す */
   outputStatuses: SpoolOutputStatus[];
-  /** 結果の push フック（ws-handler が設定し、切断で解除する） */
-  onOutputStatus?: (s: SpoolOutputStatus) => void;
+  /**
+   * **出力に失敗して応答を止めている帳票**（`held`。接続ごとに 1 つだけ——止めている間ホストは次を送らない）。
+   * `failed` は再試行でやり直す出力（失敗した分だけ。やり直すときは**いまの設定**から組み直す）、`status` は止めた時点の結果、
+   * `release` でホストへ応答する。`conn` はその帳票を受けた接続——切れていたら応答はもう返せない
+   */
+  heldOutput?: {
+    report: SpoolReport;
+    failed: { pdf: boolean; print: boolean };
+    status: SpoolOutputStatus;
+    release: () => void;
+    conn: PrinterConn;
+  };
   /** このセッションのアイドルタイムアウト（`OpenPrinterOptions` 由来）。無ければマネージャ既定 */
   idleTimeoutMs?: IdleLimit;
   /** 持ち主の状態（表示セッションの `holder` と同じ意味。規則は `session-lifetime.ts`） */
@@ -487,7 +586,21 @@ export interface SpoolOutputStatus {
   at: number;
   /** 自動出力が無効（トグル OFF）でスキップした */
   skipped?: boolean;
-  pdf?: { ok: boolean; path?: string; error?: string };
+  /**
+   * **出力に失敗したので、ホストへの応答を止めている**（`20260921-printer-hold-response`）。
+   * ACS と同じく利用者の再試行・取消を待つ（`PSNVT5250P.processPrinterError`）。応答が来るまで書き出しプログラムは待ち、
+   * スプールは印刷済みにならない（SAVE(*NO) でも消えない。実機で確認）
+   */
+  held?: boolean;
+  /** 止めていた応答を取消で返した（ホストは印刷済みとみなす） */
+  canceled?: boolean;
+  /**
+   * 応答を止めている間に**接続が切れた**（停止・切断・張り直し）。応答はもう返せない。
+   * 繋ぎ直したときにホストがどうするかは `DROPPED_NOTE`
+   */
+  dropped?: boolean;
+  /** PDF。`skipped` は作れない設定（ホスト変換の印刷データ）で作らなかった——失敗ではないので止めない */
+  pdf?: { ok: boolean; path?: string; error?: string; skipped?: boolean };
   print?: { ok: boolean; printer?: string; error?: string };
 }
 
@@ -529,6 +642,30 @@ const PRINTER_FATAL_CODES = new Set([
 /** 出力結果の保持上限 */
 const OUTPUT_STATUS_LIMIT = 100;
 
+/** 応答を止める失敗か（作れない設定で作らなかった PDF は失敗に数えない） */
+function outputFailed(s: SpoolOutputStatus): { pdf: boolean; print: boolean } {
+  return { pdf: s.pdf?.ok === false && s.pdf.skipped !== true, print: s.print?.ok === false };
+}
+
+/**
+ * 再試行でやり直す出力（失敗した分だけ。成功した PDF を書き直したり、印刷を二重に出したりしない）。
+ * **いまの設定から組み直す**——止めている間に保存先を直したら、直した先へ書く（独立点検の指摘: 止めた時点の写しを使っていた）
+ */
+function failedOnly(cfg: PrinterOutputConfig, failed: { pdf: boolean; print: boolean }): PrinterOutputConfig {
+  const { autoPdfDir, autoPrint, ...rest } = cfg;
+  return {
+    ...rest,
+    ...(autoPdfDir !== undefined && failed.pdf ? { autoPdfDir } : {}),
+    ...(autoPrint !== undefined && failed.print ? { autoPrint } : {})
+  };
+}
+
+/** 止めた・取消・切断の印を外した結果（次の状態の土台） */
+function settled(s: SpoolOutputStatus): SpoolOutputStatus {
+  const { held: _held, canceled: _canceled, dropped: _dropped, skipped: _skipped, ...rest } = s;
+  return rest;
+}
+
 /**
  * handleReport の結果を UI 表示用のステータスに変換する。
  * **設定がある側だけキーを付ける**（設定なし＝キー省略、失敗＝ok:false）。
@@ -543,7 +680,11 @@ function buildOutputStatus(
   if (cfg.autoPdfDir) {
     s.pdf = r.pdfPath
       ? { ok: true, path: r.pdfPath }
-      : { ok: false, ...(r.pdfError !== undefined ? { error: r.pdfError } : {}) };
+      : {
+          ok: false,
+          ...(r.pdfError !== undefined ? { error: r.pdfError } : {}),
+          ...(r.pdfSkipped === true ? { skipped: true } : {})
+        };
   }
   if (cfg.autoPrint) {
     s.print = r.printed
@@ -598,7 +739,22 @@ export interface SessionManagerOptions {
    * 実機なしでは一切テストできない（host-ifs の `connect` と同じ考え方）。
    */
   lookupJobs?: LookupJobs;
+  /**
+   * QPWDLVL を聞く（自動サインオンの代替パスワード用。`bypassSubstituteFor`）。既定はサインオン・サーバーの交換属性。
+   * **テストの差し替え口**——実機なしで自動サインオンの経路を通すと、架空のホストへの問い合わせを待ってしまう
+   */
+  passwordLevel?: PasswordLevelQuery;
 }
+
+/** QPWDLVL を聞く（認証しない）。`bypassSubstituteFor` が使う */
+export type PasswordLevelQuery = (target: { host: string; tls?: ConnectOptions["tls"] }) => Promise<number>;
+
+/**
+ * サインオン・サーバーの交換属性で QPWDLVL を聞く。**5 秒で打ち切る**——接続の前に聞き始めるが、ホストがシードを渡してきた後は
+ * これを待って IS を返すので、サインオン・サーバーが黙っていると交渉ごと止まる（聞けなければ 0。ACS と同じ）
+ */
+const passwordLevelViaSignonServer: PasswordLevelQuery = async (target) =>
+  (await querySignonInfo({ host: target.host, timeoutMs: 5_000, ...(target.tls !== undefined ? { tls: target.tls } : {}) })).passwordLevel;
 
 /** 装置名とユーザーで対話ジョブを引く。返すのは一致したジョブ（0 件・複数件もありうる） */
 export type LookupJobs = (
@@ -641,6 +797,7 @@ export class SessionManager {
   /** 張り直しの待ち。**テストで即時にする**（実待ちを入れるとテストが分単位になる） */
   private readonly delay: (ms: number) => Promise<void>;
   private readonly lookupJobs: LookupJobs;
+  private readonly passwordLevel: PasswordLevelQuery;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   /** 保持者トークンの発番。**単調増加**なので、後から取った者が常に新しい */
   private holderSeq = 0;
@@ -655,6 +812,7 @@ export class SessionManager {
     this.now = opts.now ?? (() => Date.now());
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.lookupJobs = opts.lookupJobs ?? lookupJobsViaCommandServer;
+    this.passwordLevel = opts.passwordLevel ?? passwordLevelViaSignonServer;
   }
 
   /** アイドルセッションの定期掃除を開始（サーバー起動時に呼ぶ）。テストでは呼ばなくてよい */
@@ -701,23 +859,21 @@ export class SessionManager {
     // PC コマンド（STRPCCMD）。**検出と応答は常に行い、実行だけを設定で絞る**——
     // 応答を返さないとホストは待ち続ける（research D5）。設定が無ければ disabled として記録する
     const pcCommand = (cmd: PcCommandRequest): Promise<void> => this.handlePcCommand(id, cmd, opts.pcCommand);
-    const connect = (deviceName?: string): Promise<Session5250> =>
+    const connect = (): Promise<Session5250> =>
       Session5250.connect({
         ...opts,
-        ...(deviceName !== undefined ? { deviceName } : {}),
+        deviceNameEnv: deviceNameEnvFor(opts.owner),
+        passwordSubstitute: bypassSubstituteFor(opts, this.passwordLevel),
         id,
         warn: (m) => sessionLog.warn({ sessionId: id }, m),
         onPcCommand: pcCommand,
         traceRecords: traceRecordsEnabled()
       });
-    let session: Session5250;
-    try {
-      session = await connect();
-    } catch (err) {
-      // 装置名の重複はホストが理由を返さずソケットを閉じる。設定で許されていれば名前を繰り上げて再試行
-      if (!opts.deviceNameRetry || opts.deviceName === undefined) throw err;
-      session = await this.retryWithNextDeviceName(opts.deviceName, connect, err);
-    }
+    // ~~装置名の重複はホストが理由を返さずソケットを閉じる。設定で許されていれば名前を繰り上げて繋ぎ直す~~ → ホストは 8902 を返し、
+    // 同じ接続の中で装置名を聞き直してくる（実測）。`deviceNameRetry` の繰り上げも ACS の `=` と同じく、その聞き直しに答える形にした
+    // （telnet の `DeviceNameGenerator`。`20260921-device-name-acs`）。繋ぎ直さないので、**8902 以外の失敗（誤ったパスワード等）で
+    // 何度も繋いで QMAXSIGN を使い切ることが無い**
+    const session = await connect();
     const entry: SessionEntry = {
       id,
       session,
@@ -749,9 +905,23 @@ export class SessionManager {
       const cur = this.sessions.get(id);
       if (cur?.holdTimer) clearTimeout(cur.holdTimer);
       this.sessions.delete(id);
+      // ホストが終わらせた・繋ぎ直しを諦めたときも、関連付けたプリンターを止める（`close` を通らない経路）
+      if (cur) this.releaseAssociatedPrinter(cur);
     });
     // 残り（ユーザー・番号）はコマンドサーバーで引く。**接続を待たせない**
     entry.jobResolved = this.resolveJob(entry, opts);
+    // **繋ぎ直したら装置名（＝ジョブ名）が変わりうる**（自動再接続。`20260921-auto-reconnect`）。
+    // 前の接続のジョブ情報を持ち越さない
+    session.on("reconnected", (st) => {
+      if (st?.device) entry.job = { name: st.device, ...(st.system ? { system: st.system } : {}) };
+      else delete entry.job;
+      entry.jobResolved = this.resolveJob(entry, opts);
+    });
+    // **自動操作が予約している間にホストに切られたら、繋ぎ直さずに終える**（D1 と同じ理由）。
+    // 繋ぎ直すと、予約している自動操作が新しいサインオン画面へ打ち続けうる（独立点検の指摘）
+    session.on("reconnecting", () => {
+      if (this.reservationOf(id) !== undefined) session.disconnect();
+    });
     return entry;
   }
 
@@ -831,7 +1001,13 @@ export class SessionManager {
       }
       // セッションが既に閉じていれば捨てる
       if (!this.sessions.has(entry.id)) return undefined;
-      entry.job = { ...entry.job, name: only.name, user: only.user, number: only.number };
+      // **照会の間に繋ぎ直して装置名が替わっていたら捨てる**（`20260921-auto-reconnect`）。前の接続の
+      // ジョブで、繋ぎ直した後のジョブ名を上書きしない（独立点検の指摘）
+      if (entry.job?.name !== device) return entry.job;
+      // **名前は起動応答のもの（CCSID 37 で読んだ装置名）のまま**、利用者と番号だけを採る——照会は同じ名前で引いており、
+      // 一覧の名前はジョブの CCSID で読まれるので、930 のジョブでは `$` が `¥` に化けうる（`20260921-startup-record-cp037` の
+      // 節目の点検の懸念）。~~name: only.name~~
+      entry.job = { ...entry.job, name: device, user: only.user, number: only.number };
       return entry.job;
     } catch (err) {
       // ホストサーバーが使えない・権限が無い等。セッションには影響させない
@@ -852,27 +1028,6 @@ export class SessionManager {
   }
 
   /** プリンターセッションを開く（TN5250E プリンター）。受信スプールをバッファする。 */
-  /** 装置名を繰り上げながら再試行する（既定 5 回まで）。全滅したら最初のエラーを投げ直す */
-  private async retryWithNextDeviceName(
-    first: string,
-    connect: (deviceName: string) => Promise<Session5250>,
-    original: unknown
-  ): Promise<Session5250> {
-    let name: string | undefined = first;
-    for (let i = 0; i < 5; i++) {
-      name = name === undefined ? undefined : nextDeviceName(name);
-      if (name === undefined) break;
-      try {
-        const s = await connect(name);
-        sessionLog.warn({ deviceName: name }, `装置名 ${first} が使用中のため ${name} で接続した`);
-        return s;
-      } catch {
-        // 次の名前へ
-      }
-    }
-    throw original;
-  }
-
   async openPrinter(opts: OpenPrinterOptions): Promise<PrinterEntry> {
     // **同じ定義を二度開いたら、繋ぎ直すのではなく既にあるものへ繋ぐ。**
     //
@@ -927,6 +1082,8 @@ export class SessionManager {
       outputEnabled: true, // 既定は有効（設定があれば従来どおり自動出力）
       outputWarnings: [],
       outputStatuses: [],
+      listeners: new Set(),
+      spoolSeq: 0,
       resident,
       ...(opts.service !== undefined ? { service: opts.service } : {}),
       ...(opts.ref !== undefined ? { ref: opts.ref } : {}),
@@ -972,19 +1129,29 @@ export class SessionManager {
   async startPrinter(id: string, user?: AuthUser): Promise<PrinterEntry> {
     const entry = this.getPrinter(id, user);
     if (entry.state === "listening" || entry.state === "reconnecting") return entry;
+    // **接続を張っている最中なら、その結果に相乗りする**（二重に張らない。`PrinterEntry.starting`）
+    if (entry.starting) return entry.starting;
     // ここから張る接続は**差し替え済みの材料**を使う。もう「効いていない」ではない
     delete entry.stale;
     if (!entry.resident && this.size >= this.maxSessions) {
       throw new As400Error("SESSION_LIMIT", `session limit reached (${this.maxSessions})`);
     }
+    const run = (async (): Promise<PrinterEntry> => {
+      try {
+        await this.connectPrinter(entry);
+      } catch (e) {
+        // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
+        this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+      return entry;
+    })();
+    entry.starting = run;
     try {
-      await this.connectPrinter(entry);
-    } catch (e) {
-      // **開始の失敗は状態に残す。** 例外だけだと、画面を開いていない間の失敗が消える
-      this.setPrinterState(entry, "error", e instanceof Error ? e.message : String(e));
-      throw e;
+      return await run;
+    } finally {
+      if (entry.starting === run) delete entry.starting;
     }
-    return entry;
   }
 
   /**
@@ -996,11 +1163,28 @@ export class SessionManager {
    */
   private async connectPrinter(entry: PrinterEntry): Promise<void> {
     const opts = entry.openOpts;
-    const session = await PrinterSession.connect({ ...opts, id: entry.id });
+    const conn: PrinterConn = { closed: false };
+    const session = await PrinterSession.connect({
+      ...opts,
+      deviceNameEnv: deviceNameEnvFor(entry.owner),
+      passwordSubstitute: bypassSubstituteFor(opts, this.passwordLevel),
+      id: entry.id,
+      nextReportSeq: () => ++entry.spoolSeq,
+      // **出力が終わるまでホストへ応答しない**（ACS と同じ。上の `heldOutput`）
+      respondAfter: (report, ctx) => this.outputGate(entry, conn, report, ctx.cleared)
+    });
     entry.session = session;
     entry.lastActivity = this.now();
-    session.on("report", (report) => this.deliverReport(entry, report));
+    // 出力は応答の待ち（`outputGate`）で走らせる。ここでは受信の記録と配布だけ
+    session.on("report", (report) => this.deliverReport(entry, report, { gated: true }));
     session.on("closed", () => {
+      // 止めていた応答はもう返せない。画面の再試行バーも下ろす（`dropped`。独立点検の指摘: 捨てるだけで知らせていなかった）
+      conn.closed = true;
+      const held = entry.heldOutput;
+      if (held?.conn === conn) {
+        delete entry.heldOutput;
+        this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), dropped: true });
+      }
       for (const w of entry.waiters.splice(0)) w(undefined);
       this.stopRescue(entry);
       delete entry.session;
@@ -1092,18 +1276,19 @@ export class SessionManager {
     entry.state = state;
     if (state === "error" && error !== undefined) entry.error = error;
     else delete entry.error;
-    entry.onState?.({
+    const s = {
       state,
       ...(entry.error !== undefined ? { error: entry.error } : {}),
       ...(startupCode !== undefined ? { startupCode } : {})
-    });
+    };
+    for (const l of entry.listeners) l.onState?.(s);
   }
 
   /**
    * 受信した帳票を配る（push でも救出でも同じ道を通す）。
    * ここを 1 本にしておかないと、救出した帳票だけ自動出力（PDF/印刷）から漏れる。
    */
-  private deliverReport(entry: PrinterEntry, incoming: SpoolReport): void {
+  private deliverReport(entry: PrinterEntry, incoming: SpoolReport, opts: { gated?: boolean } = {}): void {
     {
       // **受信時刻はここでしか刻まない。** 配る道が 1 本なので、ここで刻めば
       // push・待機者・自動出力・バッファのすべてが**同じ 1 個**を見る。
@@ -1121,35 +1306,146 @@ export class SessionManager {
         entry.delivered = Math.max(0, entry.delivered - dropped);
       }
       entry.lastActivity = this.now();
-      entry.onReport?.(report);
+      for (const l of entry.listeners) l.onReport?.(report);
       const waiter = entry.waiters.shift();
       if (waiter) {
         entry.delivered = entry.reports.length;
         waiter(report);
       }
       // サーバー側出力（PDF 自動蓄積・自動印刷）。設定があり実行時に有効なときだけ。
-      // 失敗しても受信は妨げず、警告はログ＋履歴＋UI push に流す（entry 参照なのでトグルが即時効く）
+      // 失敗しても受信は妨げず、警告はログ＋履歴＋UI push に流す（entry 参照なのでトグルが即時効く）。
+      // **telnet で届いた帳票（`gated`）は応答の待ち（`outputGate`）が出力する**——ここで走らせると二重になる。
+      // 救出（ホストサーバーで拾った帳票）はホストへの応答が無いので、従来どおりここで出力する
       if (entry.output) {
         if (entry.outputEnabled) {
-          const cfg = entry.output;
-          void handleReport(report, cfg, (m) => this.noteOutputWarn(entry, m))
-            .then((r) => this.noteOutputStatus(entry, buildOutputStatus(report.id, this.now(), cfg, r)))
-            .catch((e) => {
-              const msg = `printer output failed: ${e instanceof Error ? e.message : String(e)}`;
-              this.noteOutputWarn(entry, msg);
-              this.noteOutputStatus(entry, {
-                spoolId: report.id,
-                at: this.now(),
-                ...(cfg.autoPdfDir ? { pdf: { ok: false, error: msg } } : {}),
-                ...(cfg.autoPrint ? { print: { ok: false, printer: cfg.autoPrint, error: msg } } : {})
-              });
-            });
+          if (!opts.gated) void this.runOutputs(entry, report, entry.output);
         } else {
           // 自動出力オフ中の受信は「スキップ」として記録する（何も起きていないことを画面で示す）
           this.noteOutputStatus(entry, { spoolId: report.id, at: this.now(), skipped: true });
         }
       }
     }
+  }
+
+  /**
+   * **帳票の応答の待ち**（`PrinterSession` の `respondAfter`。`20260921-printer-hold-response`）。
+   *
+   * 自動出力が無い・切ってあるなら待たない（すぐ応答する——出力先が無いのは「書けた」のと同じ）。
+   * あれば出力し、**失敗したら応答を止めて利用者の再試行・取消を待つ**（ACS `PSNVT5250P.processPrinterError`）。
+   * 応答が来るまでホストの書き出しプログラムは待ち、スプールは印刷済みにならない（PUB400 で実測。
+   * `scripts/verify-printer-hold.mjs`）。以前は受け取った瞬間に応答していたので、PDF の保存先が書けない・
+   * 自動印刷先が止まっている・サーバーが再起動した、のどれでも SAVE(*NO) のスプールが失われていた
+   */
+  private outputGate(
+    entry: PrinterEntry,
+    conn: PrinterConn,
+    report: SpoolReport,
+    cleared: boolean
+  ): Promise<void> | undefined {
+    if (!entry.output || !entry.outputEnabled) return undefined;
+    const cfg = entry.output;
+    // **CLEAR で閉じた帳票は止めない**（出力はする）。ACS がエラーで止まるのはデータを書くときだけで、ジョブを閉じるときの失敗は
+    // 記録するだけ（`closePrinterIfRequired`）。CLEAR はホストが途中のジョブを取り消す・保留する合図で、スプールはホストに残る
+    if (cleared) {
+      void this.runOutputs(entry, report, cfg);
+      return undefined;
+    }
+    return new Promise<void>((release) => void this.runOutputs(entry, report, cfg, { release, conn }));
+  }
+
+  /**
+   * 出力して結果を記録する。`gate` があれば（応答を待たせている帳票）、**失敗したら止めたまま**
+   * `heldOutput` に置いて画面へ `held` を出し、成功したら応答する。`gate.prev` は再試行の前の結果——
+   * やり直さなかった側（成功した PDF など）を引き継ぐ（独立点検の指摘: 置き換えていたので「PDF ✓」と保存先が消えた）
+   */
+  private async runOutputs(
+    entry: PrinterEntry,
+    report: SpoolReport,
+    cfg: PrinterOutputConfig,
+    gate?: { release: () => void; conn: PrinterConn; prev?: SpoolOutputStatus }
+  ): Promise<void> {
+    let status: SpoolOutputStatus;
+    try {
+      const r = await handleReport(report, cfg, (m) => this.noteOutputWarn(entry, m));
+      status = buildOutputStatus(report.id, this.now(), cfg, r);
+    } catch (e) {
+      const msg = `printer output failed: ${e instanceof Error ? e.message : String(e)}`;
+      this.noteOutputWarn(entry, msg);
+      status = {
+        spoolId: report.id,
+        at: this.now(),
+        ...(cfg.autoPdfDir ? { pdf: { ok: false, error: msg } } : {}),
+        ...(cfg.autoPrint ? { print: { ok: false, printer: cfg.autoPrint, error: msg } } : {})
+      };
+    }
+    const prev = gate?.prev;
+    if (prev) {
+      const pdf = status.pdf ?? prev.pdf;
+      const print = status.print ?? prev.print;
+      status = { spoolId: status.spoolId, at: status.at, ...(pdf ? { pdf } : {}), ...(print ? { print } : {}) };
+    }
+    const failed = outputFailed(status);
+    if (gate && (failed.pdf || failed.print)) {
+      // 出力している間に接続が切れた（停止・切断・張り直し）。応答はもう返せないので止めない——止めると、閉じた接続の
+      // 応答を持つ帳票が残り、張り直した後の接続の止めている帳票を上書きする（独立点検の指摘）
+      if (gate.conn.closed) {
+        this.noteOutputStatus(entry, { ...status, dropped: true });
+        return;
+      }
+      // 出力している間に自動出力が切られた。切っている間は止めない（`setPrinterOutputEnabled`）
+      if (!entry.outputEnabled) {
+        this.noteOutputStatus(entry, { ...status, skipped: true });
+        gate.release();
+        return;
+      }
+      entry.heldOutput = { report, failed, status, release: gate.release, conn: gate.conn };
+      this.noteOutputStatus(entry, { ...status, held: true });
+      return;
+    }
+    this.noteOutputStatus(entry, status);
+    gate?.release();
+  }
+
+  /**
+   * **止めている帳票の出力をやり直す**（ACS のプリンター・エラーの「再試行」）。失敗した出力だけを、**いまの設定で**やり直し、
+   * 成功したらホストへ応答する。また失敗したら止めたまま（所有者/admin のみ）。
+   * 止めている間に設定からその出力が外されていたら、やり直すものが無いので応答する
+   */
+  retryPrinterOutput(id: string, user?: AuthUser): PrinterEntry {
+    const entry = this.getPrinter(id, user);
+    const held = entry.heldOutput;
+    if (!held) throw new As400Error("NOT_FOUND", "no held printer output");
+    delete entry.heldOutput;
+    const cfg = failedOnly(entry.output ?? {}, held.failed);
+    // 外された出力の失敗は引き継がない（引き継ぐと、やり直せないまま止まり続ける）
+    const { pdf, print, ...base } = settled(held.status);
+    const prev: SpoolOutputStatus = {
+      ...base,
+      ...(pdf && (pdf.ok || cfg.autoPdfDir !== undefined) ? { pdf } : {}),
+      ...(print && (print.ok || cfg.autoPrint !== undefined) ? { print } : {})
+    };
+    if (cfg.autoPdfDir === undefined && cfg.autoPrint === undefined) {
+      this.noteOutputStatus(entry, { ...prev, at: this.now() });
+      held.release();
+      return entry;
+    }
+    void this.runOutputs(entry, held.report, cfg, { release: held.release, conn: held.conn, prev });
+    return entry;
+  }
+
+  /**
+   * **止めている帳票を取り消す**（ACS の「取消」＝`cancelPrintJob`。応答は NO_ERROR のまま返す）。
+   * ホストは印刷済みとみなすので、SAVE(*NO) のスプールはホストから消える——帳票はサーバーの一覧に残る（所有者/admin のみ）。
+   * 成功していた出力（PDF ✓ など）の結果は残す
+   */
+  cancelPrinterOutput(id: string, user?: AuthUser): PrinterEntry {
+    const entry = this.getPrinter(id, user);
+    const held = entry.heldOutput;
+    if (!held) throw new As400Error("NOT_FOUND", "no held printer output");
+    delete entry.heldOutput;
+    this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), canceled: true });
+    held.release();
+    return entry;
   }
 
   /**
@@ -1162,7 +1458,10 @@ export class SessionManager {
     // **前のタイマーを必ず落としてから張る。** 上書きするだけだと古い間隔が回り続け、
     // 張り直すたびに救出が二重・三重に走る（張り直しを入れて届きやすくなった経路）
     this.stopRescue(entry);
-    const outputQueue = opts.deviceName;
+    // **実際に繋がった装置名**（置換記号の展開・大文字化・使用中での答え直しの後。節目の点検の指摘: 設定の値を見ていたので、
+    // `PRT%=` なら存在しない OUTQ を、`deviceNameRetry` で PRT02 に繋がったら**使用中の別装置 PRT01 の OUTQ** を見て、そのスプールを
+    // 保留・削除してこのプリンターに配っていた）
+    const outputQueue = entry.session?.deviceName ?? opts.deviceName;
     if (!outputQueue || opts.host === undefined || opts.user === undefined) return;
     const connect: ConnectOptions = {
       host: opts.host,
@@ -1220,20 +1519,28 @@ export class SessionManager {
     const w = { at: this.now(), message };
     entry.outputWarnings.push(w);
     if (entry.outputWarnings.length > OUTPUT_WARN_LIMIT) entry.outputWarnings.shift();
-    entry.onOutputWarn?.(w);
+    for (const l of entry.listeners) l.onOutputWarn?.(w);
   }
 
   /** 自動出力の結果を記録して UI へ push する（成功も含めて画面に出すため） */
   private noteOutputStatus(entry: PrinterEntry, status: SpoolOutputStatus): void {
     entry.outputStatuses.push(status);
     if (entry.outputStatuses.length > OUTPUT_STATUS_LIMIT) entry.outputStatuses.shift();
-    entry.onOutputStatus?.(status);
+    for (const l of entry.listeners) l.onOutputStatus?.(status);
   }
 
   /** 自動出力（PDF 保存・自動印刷）の実行時 有効/無効を切り替える（所有者/admin のみ） */
   setPrinterOutputEnabled(id: string, enabled: boolean, user?: AuthUser): PrinterEntry {
     const entry = this.getPrinter(id, user);
     entry.outputEnabled = enabled;
+    // **切ったら止めている帳票も応答する**（切っている間は止めない。README「OFF の間は止めずにすぐ応答」。独立点検の指摘:
+    // 切っても止めたままで、切っている間の再試行は出力まで行っていた）
+    const held = entry.heldOutput;
+    if (!enabled && held) {
+      delete entry.heldOutput;
+      this.noteOutputStatus(entry, { ...settled(held.status), at: this.now(), skipped: true });
+      held.release();
+    }
     return entry;
   }
 
@@ -1639,16 +1946,164 @@ export class SessionManager {
     return entry;
   }
 
+  /**
+   * **表示と関連付けたプリンターを組にする**（`20260921-associated-printer-session`。ACS `AssociatedPrinterSession5250`）。
+   * 表示がホストに切られたら（ほかに同じプリンターへ関連付けた表示が繋がっていなければ）プリンターを止め、繋ぎ直せたら起こす。
+   * 閉じたとき（`close`）の処置は `releaseAssociatedPrinter`。**常駐のプリンターは止めも閉じもしない**（`associated-printer.ts`）
+   */
+  linkAssociatedPrinter(displayId: string, printerId: string, closeWithLast: boolean): void {
+    const entry = this.sessions.get(displayId);
+    if (!entry) throw new As400Error("SESSION_NOT_FOUND", `session ${displayId} not found`);
+    entry.associatedPrinter = { printerId, closeWithLast };
+    // 切れたら（繋ぎ直しに入った）止め、繋ぎ直せたら起こす。**自分が組のままのときだけ**（閉じたあとの遅れたイベントに反応しない）
+    entry.session.on("reconnecting", () => {
+      if (this.sessions.get(displayId)?.associatedPrinter?.printerId !== printerId) return;
+      this.applyPrinterLoss(displayId, printerId);
+    });
+    entry.session.on("reconnected", () => {
+      if (this.sessions.get(displayId)?.associatedPrinter?.printerId !== printerId) return;
+      const p = this.printers.get(printerId);
+      if (!p) return;
+      if (onDisplayConnected({ resident: p.resident, running: holdsConnection(p.state) }) === "start") {
+        void this.startPrinter(printerId).catch((e: unknown) =>
+          sessionLog.warn({ sessionId: displayId, printerId, err: String(e) }, "associated printer restart failed")
+        );
+      }
+    });
+  }
+
+  /**
+   * **関連付けるプリンターを起こし、装置名が決まるのを待つ**（表示を開く前。ACS `AssociatedPrinterSession5250` のコンストラクタ。
+   * `20260921-associated-printer-session`）。
+   *
+   * - 同じ持ち主・同じ設定（`ref`）で開いているプリンターがあればそれを使う（止まっていれば起こす。接続中なら**その結果に相乗りする**＝二重に張らない）。無ければ `open` で開く
+   * - 待つのは起動応答で装置名が決まるまで、**開く・起こすの待ちも合わせて 1 つの期限**（`timeoutMs`。無ければ待ち続ける）
+   * - **時間切れなら関連付けなしで表示を開く**（ACS はコンストラクタの冒頭で起こすタイマーのスレッドが、時間が来ても表示が始まっていなければ
+   *   関連付けなしの表示を開く——`run` → `createAndRunTerminal`。`Icon5250.start` が表示の開始前に `associatedDeviceName` を消してある）。
+   *   ~~時間切れでもプリンターの設定の装置名で関連付ける~~ は原典の読み違いだった（節目 10 の独立点検 C-S1）。プリンターとの組（連動）は残す——
+   *   ACS も `pWorkstationID` が決まればその相手を探し続ける
+   * - 戻り値: `printerId`（連動に使う）と `deviceName`（`undefined` なら関連付けなしで表示を開く）・`issue`（利用者へ知らせる理由）。
+   *   プリンターを開けなかったときは `error`（組も作らない）
+   */
+  async prepareAssociatedPrinter(
+    ref: string | undefined,
+    owner: string | undefined,
+    open: () => Promise<PrinterEntry>,
+    timeoutMs: number | undefined
+  ): Promise<{ printerId: string; deviceName: string | undefined; issue?: "timeout" | "failed" } | { error: string }> {
+    const deadline = timeoutMs === undefined ? Infinity : this.now() + timeoutMs;
+    const find = (): PrinterEntry | undefined =>
+      ref !== undefined ? [...this.printers.values()].find((e) => e.ref === ref && e.owner === owner) : undefined;
+    let entry = find();
+    const starting: Promise<PrinterEntry> = entry
+      ? holdsConnection(entry.state)
+        ? Promise.resolve(entry)
+        : this.startPrinter(entry.id)
+      : open();
+    // **プリンターの接続は起動応答が来るまで戻らない**（`PrinterSession.connect` が最大 15 秒待つ）ので、開く・起こすにも同じ期限を掛ける。
+    // 時間切れでもプリンターの起動は続く（後で装置名が決まる）ので、失敗は記録だけして先へ進む
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = new Promise<"timeout">((resolve) => {
+        if (deadline !== Infinity) timer = setTimeout(() => resolve("timeout"), Math.max(0, deadline - this.now()));
+      });
+      const first = await Promise.race([starting, timedOut]);
+      if (first === "timeout") {
+        void starting.catch((e: unknown) => sessionLog.warn({ ref, err: String(e) }, "associated printer failed to start after timeout"));
+        entry = find() ?? entry;
+        return entry ? { printerId: entry.id, deviceName: undefined, issue: "timeout" } : { error: `printer session did not start within ${timeoutMs} ms` };
+      }
+      entry = first;
+    } catch (e) {
+      // 開けなかった（上限・起動の失敗）。関連付けなしで表示を開く
+      return { error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    const id = entry.id;
+    // 起動応答が来たか（`startupCode` が空でない）。装置名は起動応答の名前（`deviceName`）。開く・起こすが戻った時点で通常は届いている——
+    // ここで待つのは、使い回すプリンターが起動中（別の呼び出しが張っている最中）のまれな場合だけ
+    const started = (): boolean => (this.printers.get(id)?.session?.startupCode ?? "") !== "";
+    while (!started() && this.now() < deadline) {
+      const cur = this.printers.get(id);
+      if (!cur || cur.state === "error" || cur.state === "stopped") return { printerId: id, deviceName: undefined, issue: "failed" }; // 起動に失敗した・止められた
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (!started()) return { printerId: id, deviceName: undefined, issue: "timeout" };
+    return { printerId: id, deviceName: this.printers.get(id)?.session?.deviceName || undefined };
+  }
+
+  /** そのプリンターへ関連付けた表示が（繋ぎ直し中も含めて）1 本でも残っているか */
+  private linkedDisplayExists(printerId: string): boolean {
+    for (const e of this.sessions.values()) if (e.associatedPrinter?.printerId === printerId) return true;
+    return false;
+  }
+
+  /**
+   * **表示を開けなかったときの、起こしたプリンターの片付け**（`prepareAssociatedPrinter` の後・組にする前の失敗。ACS は表示が INACTIVE になれば
+   * プリンターを止める。`20260921-associated-printer-session` の節目 10 の独立点検 C-S3）。表示を閉じたときと同じ処置
+   * （ほかに使う表示が無ければ止める・「一緒に閉じる」なら閉じる）
+   */
+  abortAssociatedPrinter(printerId: string, closeWithLast: boolean): void {
+    this.releaseLink("", { printerId, closeWithLast });
+  }
+
+  /** 表示の一覧をほかの表示の判断に渡す形にする（自分を除く） */
+  private othersAssociated(displayId: string): AssociatedDisplay[] {
+    return [...this.sessions.values()]
+      .filter((e) => e.id !== displayId)
+      // 閉じた表示は `closed` で `this.sessions` から外れるので、ここに残っているのは閉じていない。繋ぎ直し中だけ「繋がっていない」に数える
+      .map((e) => ({ printerId: e.associatedPrinter?.printerId, connected: e.session.reconnecting === undefined }));
+  }
+
+  /** 表示が切れた: ほかに使う表示が無ければプリンターを止める（常駐・止まっているものは触らない） */
+  private applyPrinterLoss(displayId: string, printerId: string): void {
+    const p = this.printers.get(printerId);
+    if (!p) return;
+    const use = otherDisplayAssociated(printerId, this.othersAssociated(displayId));
+    if (onDisplayLost({ resident: p.resident, running: holdsConnection(p.state) }, use) === "stop") {
+      try {
+        this.stopPrinter(printerId);
+      } catch (e) {
+        sessionLog.warn({ sessionId: displayId, printerId, err: String(e) }, "associated printer stop failed");
+      }
+    }
+  }
+
+  /** 表示を閉じるときの、関連付けたプリンターの処置（止める・指定があれば閉じる） */
+  private releaseAssociatedPrinter(entry: SessionEntry): void {
+    const link = entry.associatedPrinter;
+    if (!link) return;
+    delete entry.associatedPrinter; // 以後の遅れたイベントに反応しない
+    this.releaseLink(entry.id, link);
+  }
+
+  /** 組を解く処置の本体。`displayId` は解く表示（無ければ空。ほかの表示の数えから除く相手が無い） */
+  private releaseLink(displayId: string, link: { printerId: string; closeWithLast: boolean }): void {
+    const p = this.printers.get(link.printerId);
+    if (!p) return;
+    const use = otherDisplayAssociated(link.printerId, this.othersAssociated(displayId));
+    if (shouldClosePrinter({ resident: p.resident, running: holdsConnection(p.state) }, link.closeWithLast, use)) {
+      void this.close(link.printerId).catch(() => undefined);
+    } else {
+      this.applyPrinterLoss(displayId, link.printerId);
+    }
+  }
+
   async close(id: string, user?: AuthUser): Promise<void> {
     const entry = this.sessions.get(id);
     if (entry) {
       assertOwner(entry.owner, user);
+      // 関連付けたプリンターを止める・閉じる（ACS の表示を閉じたときの処置）。**自分をマップから消す前**に
+      // 呼ぶと自分を「ほかの表示」に数えるので、消した後に呼ぶ
+      const owned = entry;
       // **猶予のタイマーも落とす。** マップから消してもタイマーは生き残るので、
       // 残すと閉じ済みの id に対して空振りのコールバックが後から走る
       if (entry.holdTimer) clearTimeout(entry.holdTimer);
       entry.recorder?.stop(); // 購読を残したままセッションを捨てるとリークする
       entry.session.disconnect();
       this.sessions.delete(id);
+      this.releaseAssociatedPrinter(owned);
       return;
     }
     const printer = this.printers.get(id);
@@ -1771,6 +2226,10 @@ export class SessionManager {
       // **常駐は掃除しない。** 何も届かない状態が正常なので、
       // アイドルを「使われていない」の合図にできない（design D1 / watch-registry と同じ理屈）
       if (entry.resident) continue;
+      // **表示が関連付けているプリンターは掃除しない**（`20260921-associated-printer-session` の節目 10 の独立点検 C-S10）。関連付けたプリンターは
+      // ほとんど何も届かないのが本来の姿で、アイドルを「使われていない」の合図にできない。刈ると表示が繋がっているのにプリンターの実体が消え、
+      // 組は起こす相手を失って、印刷はホストの出力待ち行列に溜まり続ける（利用者にはどこにも出ない）
+      if (this.linkedDisplayExists(id)) continue;
       if (expired(entry)) {
         entry.session?.disconnect();
         this.printers.delete(id);

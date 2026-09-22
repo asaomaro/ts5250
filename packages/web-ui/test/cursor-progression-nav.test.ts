@@ -10,12 +10,14 @@ import type { WsClient } from "../src/ws-client.js";
  * **カーソル送り（DDS の `FLDCSRPRG`。FCW `0x88nn`）。**
  *
  * ホストが「この欄を出たら画面順の次ではなく nn 番の欄へ」と指定してくる。読み飛ばしていたので
- * **Tab の行き先が実機と違っていた**（実機 `ASAOLIB/KEYPGM`: `IN1` は `FLDCSRPRG(IN3)` なのに
+ * **Tab の行き先が実機と違っていた**（実機 `TESTLIB/KEYPGM`: `IN1` は `FLDCSRPRG(IN3)` なのに
  * `IN2` へ行っていた）。参照実装 2 つとも Tab と満杯・Field Exit の自動送りで見る
  * （GNU tn5250 `tn5250_display_set_cursor_next_field`、tn5250j `ScreenFields.gotoFieldNext`）。
  *
- * **Shift+Tab には効かせない**——tn5250j は逆引きもするが GNU tn5250 はしない。
- * どちらが実機と同じか確かめる手段が無いので、実装しない側へ倒した。
+ * ~~**Shift+Tab には効かせない**——tn5250j は逆引きもするが GNU tn5250 はしない。
+ * どちらが実機と同じか確かめる手段が無いので、実装しない側へ倒した。~~
+ * → ACS は欄の先頭での Backtab で逆にも辿る（`FFT5250.previousNonByPassInputFieldPos`。
+ * `20260921-backtab-acs`。逆引きのテストは `backtab-acs.test.ts`）。
  */
 const SID = "s1";
 
@@ -76,7 +78,7 @@ describe("Tab はホストが指定したカーソル送り先へ行く", () => 
     w.unmount();
   });
 
-  it("Shift+Tab は指定を見ない（画面順の前へ）", async () => {
+  it("Shift+Tab: 送り先の指定を持つ欄の先頭からは、そこへ送る欄が無ければ画面順の前へ（IN1 は誰からも送られない）", async () => {
     const w = mountPane();
     await nextTick();
     const els = inputs(w);
@@ -123,6 +125,40 @@ describe("Tab はホストが指定したカーソル送り先へ行く", () => 
       await nextTick();
     }
     expect(document.activeElement, "満杯の自動送りが指定を見ていない").toBe(els[2]);
+    w.unmount();
+  });
+});
+
+/**
+ * **番号は継続欄の 2 区間目以降を数えない並びで引く**（ACS `FFT5250.getStandardFieldList`。`20260921-hllapi-tab-acs` の節目の独立点検の指摘。
+ * 以前は `index`＝全区間を数える番号で引いていて、前に継続欄があると行き先がずれた）。
+ * 欄: A（3 行・送り先 3）/ B は継続欄（5 行 first・6 行 last）/ C（7 行）/ D（9 行）。ACS の並び [A, B, C, D] の 3 番は C
+ */
+describe("カーソル送りの番号（前に継続欄があるとき）", () => {
+  beforeEach(() =>
+    seed([field(1, 3, { cursorProgression: 3 }), field(2, 5, { continued: "first" }), field(3, 6, { continued: "last" }), field(4, 7), field(5, 9)])
+  );
+  const byIndex = (w: ReturnType<typeof mount>, index: number) => inputs(w).find((el) => Number(el.dataset["fieldIndex"]) === index);
+
+  it("Tab: A から送り先 3＝C（B の最終区間ではない）", async () => {
+    const w = mountPane();
+    await nextTick();
+    byIndex(w, 1)!.focus();
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Tab" });
+    expect(Number((document.activeElement as HTMLInputElement).dataset["fieldIndex"])).toBe(4);
+    w.unmount();
+  });
+
+  it("Shift+Tab: C の先頭から、C（並びの 3 番）へ送る A へ戻る", async () => {
+    const w = mountPane();
+    await nextTick();
+    const c = byIndex(w, 4)!;
+    c.focus();
+    c.setSelectionRange(0, 0);
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Tab", shiftKey: true });
+    expect(Number((document.activeElement as HTMLInputElement).dataset["fieldIndex"])).toBe(1);
     w.unmount();
   });
 });

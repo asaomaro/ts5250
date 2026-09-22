@@ -1,0 +1,15 @@
+# 決定記録
+
+## D1: 語頭の規則と画面の端の巻き戻りを ACS の実測に合わせる
+- 測定（2026-09-22・社内機・ACS のコア・930。`scripts/acs-probe/tabword.txt`）: メニュー（日本語）で `[tabword]` を繰り返すと、全角は 1 字ごと（36・38・40…）・SI の直後の半角も止まる。
+  画面の端: 右下から前へ進むと (1,2)、左上から後ろへ戻ると (24,32)（巻き戻る）。
+- 決定: `isHead`（全角は 1 字ごと・画面の先頭・直前の位置〔行をまたぐ〕が空白）と、全桁ぶんを端で巻き戻るループ（ACS `is1stCharacter`・`get1stCharPosition`）。
+  ~~語 = 非空白桁の連なり・各行の 1 桁目を常に語頭・端で停止~~ は破棄（`pane-word-jump-input.test.ts` の「DBCS の語の中では止まらず」も ACS の 1 字ごとへ更新）。
+- 行頭が語頭になるのは前の行の最終桁が空白のときだけ。この画面では文字が行末まで続く行を測れなかった（原典の読み。単体で固定）。
+
+## D2: Alt+←/→ を割り当てる。Ctrl+End・Ctrl+PgDn は割り当てない
+- ACS の `A37 = [backtabword]`・`A39 = [tabword]`。当 PJ の Ctrl+←/→（既存）は残し、Alt+←/→（単独）を同じ操作にした。Alt+Shift+矢印はアプリのペイン移動・Ctrl+Alt+矢印は割り当てない。
+- `C35`（Ctrl+End）・`C34`（Ctrl+PgDn）は、Ctrl+PgDn がブラウザのタブ切替と衝突し、対の意味も非対称なので入れない。
+
+## D3: 測っていないもの（未確認）
+- ~~文字が行末から次の行へ続く画面の行頭~~ → 節目 11 の独立点検（B-N9）で原典を読んで確認した: `ECLPS.getPreviousPosition`（引数 `n-1`、0 なら画面末尾）は行をまたぐので、当 PJ の実装と同じ手順。DBCS の後ろに SI の無い半角（純 DBCS の欄の直後）の語頭は**未確認のまま**——`is1stCharacter` は `IsSIChar(prev)` か `isDisplayedAsSpace(prev)` だけを見るので、後半桁の `TextPlane` の値が NUL か空白かに依る（実測していない）。Alt+←/→ が実ブラウザで戻る/進むに奪われないか（keydown の preventDefault で止める）。

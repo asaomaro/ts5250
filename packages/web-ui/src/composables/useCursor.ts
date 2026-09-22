@@ -1,3 +1,4 @@
+import { isFullWidth } from "@ts5250/base";
 import type { Cell, Field } from "@ts5250/tn5250";
 import { fieldSpan, offsetOfPos } from "./fieldSlices.js";
 
@@ -70,23 +71,22 @@ export function moveCursor(
 }
 
 /**
- * pos の方向 dir にある「語頭」桁へ移動する（ACS の Ctrl+矢印 頭出し）。
- * 語 = 非空白桁の連なり。入力欄・保護テキストを問わず、表示文字だけで判定する
- * （例: `TEXT1  ␣  TEXT2` の空白にカーソルがあるとき Ctrl+→ で TEXT2 の先頭 T へ）。
- * 語頭 = 非空白かつ「行頭 or 左隣が空白」の桁。
- * - left/right: 読み順（行→桁、行をまたぐ）で前後の語頭へ。
- * - up/down: **同じ列位置のまま**、上/下方向で最も近い非空白桁へ（空白列はスキップ）。
- *   例: `ABCDEFG`/`HIJ LMN`/`OPQxSTU` の x(3行4列)で Ctrl+↑ → 空白の 2 行 4 列を飛ばし 1 行 4 列 D へ。
- * 見つからなければ pos を返す（画面端で停止）。
+ * pos の方向 dir にある「語頭」桁へ移動する（ACS の Alt+←/→ = `[backtabword]`／`[tabword]`。当 PJ は Ctrl+←/→ にも割り当てる。入力欄・保護テキストを問わず、表示文字だけで判定する）。
+ *
+ * **left/right は ACS の `ECLPS.get1stCharPosition`・`is1stCharacter` と同じ**（実機の ACS のコアで測った。`scripts/acs-probe/tabword.txt`。`20260921-word-tab-acs`）:
+ * - **語頭** = 空白でない桁のうち、(a) **全角の字は 1 字ごと**（連なっていても各字が停止点。全角空白も）、(b) 画面の先頭の桁、(c) **直前の位置（行をまたぐ。行頭なら前の行の最終桁）が空白**の桁
+ *   （SO/SI も空白と見るので、SI の直後の半角は語頭）。全角の後半桁は語頭でない
+ * - **画面の端で巻き戻る**（右下から `[tabword]` は先頭側の最初の語頭へ、左上から `[backtabword]` は末尾側の最後の語頭へ）。語が 1 つも無ければ pos を返す
+ * - ~~語 = 非空白桁の連なり・各行の 1 桁目を常に語頭・画面の端で停止~~ は ACS と違っていた（全角の連なりが 1 語に数えられて飛ばされ、前の行の末尾まで文字が続く行頭が語頭に数えられ、端で止まった）
+ * - up/down（当 PJ 独自）: **同じ列位置のまま**、上/下方向で最も近い非空白桁へ（空白列はスキップ）。
+ *   例: `ABCDEFG`/`HIJ LMN`/`OPQxSTU` の x(3行4列)で Ctrl+↑ → 空白の 2 行 4 列を飛ばし 1 行 4 列 D へ。端で停止。
  *
  * **セルではなく桁アクセサを取る**のは `wordRangeAt` と同じ理由——入力欄の桁は
  * **未送信の入力値**を持ちうる（cells はホストが描いた内容しか持たない）。セルで判定すると、
  * 欄に打った文字が語として見えず飛び越される（`X   あ Y` の あ を打った直後に Ctrl+→ すると
  * あ を飛ばして Y へ行っていた）。
  *
- * charAt(row, col) の約束: `" "` = 空白（SO/SI 含む）、`""` = 全角の後半桁（＝語の続き）、他 = 文字。
- * `""` を空白と見なすと DBCS の語の中で 1 文字ずつ止まってしまうので、**空白ではないが語頭でもない**
- * として扱う。
+ * charAt(row, col) の約束: `" "` = 空白（SO/SI 含む）、`""` = 全角の後半桁（語頭でも空白でもない）、他 = 文字。
  */
 export function nextWordStart(
   charAt: (row: number, col: number) => string,
@@ -96,25 +96,24 @@ export function nextWordStart(
   cols: number
 ): Pos {
   const isBlank = (r: number, c: number): boolean => charAt(r, c) === " ";
-  const isWordStart = (r: number, c: number): boolean => {
-    const ch = charAt(r, c);
-    if (ch === " " || ch === "") return false;
-    return c === 1 || isBlank(r, c - 1);
-  };
   if (dir === "left" || dir === "right") {
+    const size = rows * cols;
     const at = (i: number): Pos => ({ row: Math.floor(i / cols) + 1, col: (i % cols) + 1 });
     const idx = (pos.row - 1) * cols + (pos.col - 1);
-    const max = rows * cols;
-    if (dir === "right") {
-      for (let i = idx + 1; i < max; i++) {
-        const p = at(i);
-        if (isWordStart(p.row, p.col)) return p;
-      }
-    } else {
-      for (let i = idx - 1; i >= 0; i--) {
-        const p = at(i);
-        if (isWordStart(p.row, p.col)) return p;
-      }
+    /** ACS `is1stCharacter` */
+    const isHead = (i: number): boolean => {
+      const { row: r, col: c } = at(i);
+      const ch = charAt(r, c);
+      if (ch === " " || ch === "") return false; // 空白・SO/SI・全角の後半桁
+      if (isFullWidth(ch)) return true; // 全角は 1 字ごとが語頭
+      if (i === 0) return true; // 画面の先頭
+      const prev = at(i - 1); // 直前の位置（行をまたぐ）
+      return isBlank(prev.row, prev.col);
+    };
+    // 画面の全桁ぶんまで、端で巻き戻りながらたどる（ACS `get1stCharPosition`。最後の 1 歩は pos 自身）
+    for (let step = 1; step <= size; step++) {
+      const i = dir === "right" ? (idx + step) % size : (((idx - step) % size) + size) % size;
+      if (isHead(i)) return at(i);
     }
     return pos;
   }
@@ -132,7 +131,7 @@ export function nextWordStart(
 
 /**
  * col を含む「語」の桁範囲（1 始まり・両端含む）。空白桁なら undefined（ダブルクリック選択用）。
- * 語 = 非空白桁の連なり（nextWordStart と同じ定義）。行はまたがない。
+ * 語 = 非空白桁の連なり（**ダブルクリック選択の定義**。`nextWordStart` の語頭は ACS の `[tabword]` の規則で別——全角は 1 字ごと・行をまたぐ）。行はまたがない。
  *
  * セルではなく桁アクセサを取るのは、入力欄の桁が「未送信の入力値」を持ちうるため
  * （cells はホストが描いた内容しか持たない）。コピーと同じ文字で語を切るために、
@@ -168,6 +167,24 @@ export function fieldAt(
 }
 
 /**
+ * **キャレットの位置が属する欄**。`fieldAt` に加えて、**欄の右端の境界**（最終文字の直後。満杯の FER 欄で
+ * キャレットが止まる所）もその欄に数える。境界は独立したセルを持たず `fieldAt` では欄の外になるので、
+ * 「欄を出たか」の判定に `fieldAt` を使うと、満杯まで打っただけで出たことになる（独立点検の指摘）。
+ */
+export function fieldAtCaret(
+  row: number,
+  col: number,
+  fields: readonly Field[],
+  cols: number,
+  rows: number
+): Field | undefined {
+  const hit = fieldAt(row, col, fields, cols, rows);
+  if (hit || col <= 1) return hit;
+  // 直前の桁が欄の最終桁なら、その欄の右端の境界
+  return fields.find((f) => offsetOfPos(f, row, col - 1, cols, rows) === fieldSpan(f, cols, rows) - 1);
+}
+
+/**
  * フィールド先頭からの桁オフセット（＝入力欄のキャレット位置）。
  * 折返し先の行では前行までの桁数が加算される。フィールド外は 0〜span にクランプ。
  */
@@ -190,4 +207,32 @@ export function roundToDbcsLead(pos: Pos, cells: readonly Cell[][]): Pos {
   const cell = cells[pos.row - 1]?.[pos.col - 1];
   if (cell?.kind === "dbcs-tail" && pos.col > 1) return { row: pos.row, col: pos.col - 1 };
   return pos;
+}
+
+/**
+ * **保護（バイパス）欄の上で押した End の行き先**。入力欄の End は ScreenGrid が持つが、保護欄には input が無い。
+ *
+ * ACS `PS5250.processEndField` は保護欄も `FFT5250.getField` で拾い、その欄の `Field5250.getEndPosition` へ置く:
+ * 欄の終わりから**カーソルの行の先頭**（欄の先頭より前なら欄の先頭）まで遡って空白・NUL でない最初の桁を探し、
+ * 欄の最後の桁ならそこ、それ以外はその次の桁。見つからなければ探した下限。DBCS は SI の上なら 1 つ進め
+ * （欄の最後の桁・行末を除く）、全角の後半なら前半へ戻す。
+ * 空白かどうかはセルの表示で見る——非表示（`nonDisplay`）の欄は中身が見えないので空に見える（ACS はホストのバイトを見る）
+ */
+export function endInProtectedField(field: Field, cursorRow: number, cells: readonly Cell[][], cols: number): Pos {
+  const start = (field.row - 1) * cols + (field.col - 1);
+  const end = start + field.length - 1;
+  const lower = Math.min(Math.max((cursorRow - 1) * cols, start), end);
+  const cellAt = (o: number): Cell | undefined => cells[Math.floor(o / cols)]?.[o % cols];
+  let to = lower;
+  for (let o = end; o >= lower; o--) {
+    const c = cellAt(o);
+    // SO/SI はホストのバイトでは 0x0E/0x0F で空白ではない（表示は " "）
+    if (!c || (c.kind !== "so" && c.kind !== "si" && (c.char === " " || c.char === "\0"))) continue;
+    to = o === end ? o : o + 1;
+    break;
+  }
+  const c = cellAt(to);
+  if (c?.kind === "si" && to !== end && to % cols !== cols - 1) to++;
+  else if (c?.kind === "dbcs-tail") to--;
+  return { row: Math.floor(to / cols) + 1, col: (to % cols) + 1 };
 }

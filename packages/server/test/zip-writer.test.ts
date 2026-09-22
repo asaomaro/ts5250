@@ -132,12 +132,16 @@ describe("外部の unzip が受け付けること", () => {
     expect(readNamesWithPython(zip)).toEqual([]);
   });
 
-  it.skipIf(!HAS_UNZIP)("大きめのデータでも往復する", () => {
+  // **外部の unzip を呼ぶので時間上限を明示する**。全量を並列で流すと負荷で 5 秒（既定）を超えた（2026-09-21 に 2 回。単独では 1.4 秒）。
+  // 30 万要素の `toEqual` も重いので、バイト列の比較は `Buffer.compare` で行う（差があれば位置を出す）
+  it.skipIf(!HAS_UNZIP)("大きめのデータでも往復する", { timeout: 30_000 }, () => {
     const big = new Uint8Array(300_000);
     for (let i = 0; i < big.length; i++) big[i] = i & 0xff;
     const zip = writeZip([{ path: "big.bin", data: big }]);
     execFileSync("unzip", ["-q", zip, "-d", dir as string]);
-    expect(new Uint8Array(readFileSync(join(dir as string, "big.bin")))).toEqual(big);
+    const got = readFileSync(join(dir as string, "big.bin"));
+    expect(got.length).toBe(big.length);
+    expect(Buffer.compare(got, Buffer.from(big)), `最初の差: ${got.findIndex((b, i) => b !== big[i])}`).toBe(0);
   });
 });
 

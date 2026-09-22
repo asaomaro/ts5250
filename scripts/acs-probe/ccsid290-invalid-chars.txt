@@ -1,0 +1,68 @@
+# **CCSID 290（日本語カタカナ）のセッションだけ、`[ ] ^ ` { } ~ ¢` の 8 字がエラー 0027 になるか**（実機の ACS のコア・社内機。2026-09-22）。
+#
+# 原典 `CodePage.isValidChar` は `icodepage == 290` のときだけ、この 8 字を偽にする（`inputChar`・`insertChar` の DBCS 分岐がエラー 39＝0x27 にする）。
+# 290 になるのは `codePageKey == KEY_JAPAN_KATAKANA` のときだけで、`KEY_JAPAN_KATAKANA_EX`（930 のまま）ではこの制限が無い（原典の読み）。
+# 当 PJ の 930 のセッションは後者にあたる（`packages/base/src/device-env.ts` の KBDTYPE=JKB / CODEPAGE=290 は ACS の「Japanese Katakana」と同じ申告だが、字の可否は 930 の扱い）。
+#
+# **測定の結果（社内機・ACS のコア。930 の申告のうち何を選ぶかで別物）**:
+#   - 既定（`PROBE_CODEPAGE=930`・キー無し）と `KEY_JAPAN_KATAKANA_EX`: `a` は小文字のまま。8 字はすべて入る（inhibit=0）。939・1399 も同じ
+#   - `KEY_JAPAN_KATAKANA`（290）: `a` は `A` に大文字化される。8 字はすべて inhibit=5 で入らない（メッセージ「キーが定義されていないので正しくない」）
+#   - 補足（ワイヤ）: 既定の 930 で小文字の `a` をコマンド行から送ると、ホスト（930 のジョブ）は「ストリング 'a' に正しくない文字が入っている」と返した（小文字のまま送ると実機が受けない）。
+#     当 PJ の 930 は全欄を大文字化する（`uppercaseInput`）ので、この向きは ACS の 290 と同じ。8 字は当 PJ は入る（ACS の 930〔EX〕と同じ・290 とは違う）。
+#     利用者の ACS がどちらの選択か（`20260921-device-env-1399` D2）が未確認なので、当 PJ は変えていない（台帳「930 の申告の選択」）。5026 は PUB400・この機のどちらでもサインオンできず未測定
+#
+# 2 回流して比べる（コマンド行に 1 字ずつ打ち、`dump` の入力欄と `inhibit` を見る。**文字は打ち終えたら `[reset]` で解く**）:
+#   node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/ccsid290-invalid-chars.txt                                  # 既定（930）
+#   PROBE_CODEPAGE_KEY=KEY_JAPAN_KATAKANA node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/ccsid290-invalid-chars.txt  # 290
+# `[` と `]` の字面は `keys` では `[[` と `]]` と書く（`[` が鍵名の始まりのため）。
+signon
+keys [enter]
+settle 1500
+dump menu
+keys [home][eraseeof]a
+settle 300
+dump k-a
+keys [[
+settle 300
+dump k-open-bracket
+keys [reset]
+settle 300
+keys ]]
+settle 300
+dump k-close-bracket
+keys [reset]
+settle 300
+keys ^
+settle 300
+dump k-caret
+keys [reset]
+settle 300
+keys `
+settle 300
+dump k-backtick
+keys [reset]
+settle 300
+keys {
+settle 300
+dump k-open-brace
+keys [reset]
+settle 300
+keys }
+settle 300
+dump k-close-brace
+keys [reset]
+settle 300
+keys ~
+settle 300
+dump k-tilde
+keys [reset]
+settle 300
+keys ¢
+settle 300
+dump k-cent
+keys [reset]
+settle 300
+keys [home][eraseeof]
+settle 300
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

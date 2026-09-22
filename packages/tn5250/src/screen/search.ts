@@ -126,6 +126,102 @@ export function prevInputField(snapshot: ScreenSnapshot, pos: number): Field | u
   return (before.length > 0 ? before[before.length - 1] : inputs[inputs.length - 1])?.f;
 }
 
+/**
+ * **カーソル送り（FCW 0x88nn）の番号が指す欄**（ACS `FFT5250.nextNonByPassInputFieldPos` の `getStandardFieldList().elementAt(n-1)`）。
+ * 番号は**継続欄の 2 区間目以降を数えない**欄の並びでの 1 起点の番号——`index`（全区間を数える）とは、前に継続欄があるとずれる
+ * （`20260921-hllapi-tab-acs` の節目の点検の指摘）。ACS はスクロールバーの欄も数えないが、当 PJ の欄の一覧にスクロールバーは入らない
+ */
+export function progressionTarget(fields: readonly Field[], n: number): Field | undefined {
+  return standardFields(fields)[n - 1];
+}
+
+/** 欄のカーソル送りの番号（`progressionTarget` と同じ並びでの 1 起点。継続欄の 2 区間目以降は並びに無いので undefined） */
+export function progressionNumberOf(fields: readonly Field[], f: Field): number | undefined {
+  const i = standardFields(fields).findIndex((x) => x.index === f.index);
+  return i < 0 ? undefined : i + 1;
+}
+
+/**
+ * ACS `FFT5250.getStandardFieldList`（継続欄の 2 区間目以降を除いた並び）。**画面順（`index` 順）**で並べる——ACS の FFT は定義順だが、
+ * ホストが昇順に定義する限り同じ（昇順でない定義を送る画面は**未確認**。ACS は `checkNewField` で後ろの位置の欄が既にあると新しい欄を足さない）。
+ * `20260921-hllapi-tab-acs` の節目 10 の独立点検 N5
+ */
+function standardFields(fields: readonly Field[]): Field[] {
+  return [...fields].filter((f) => f.continued === undefined || f.continued === "first").sort((a, b) => a.index - b.index);
+}
+
+/**
+ * **Tab の行き先**（1 起点の位置。ACS `PS5250.processTab` → `FFT5250.nextNonByPassInputFieldPos`。`20260921-hllapi-tab-acs`）。
+ * - カーソルの下の欄がカーソル送り（FCW 0x88nn）を持ち、送り先がバイパスでなければそこ
+ * - そうでなければ、カーソルより後で始まる最初の入力欄（継続欄は先頭の区間だけ）。無ければ先頭の入力欄へ回り込む
+ * - DBCS の欄で先頭が SO なら 1 桁進める（O の欄を除く）
+ * 入力欄が無ければ `undefined`（ACS は画面のホーム位置へ）
+ */
+export function tabPosition(snapshot: ScreenSnapshot, pos: number): number | undefined {
+  const size = sizeOf(snapshot);
+  const here = fieldAtPos(snapshot, pos);
+  let to: Field | undefined;
+  if (here && !here.protected && here.cursorProgression !== undefined) {
+    const t = progressionTarget(snapshot.fields, here.cursorProgression);
+    if (t && !t.protected) to = t;
+  }
+  if (!to) {
+    const all = [...snapshot.fields].sort((a, b) => (fieldStart(a, size) ?? 0) - (fieldStart(b, size) ?? 0));
+    to =
+      all.find((f) => !f.protected && (fieldStart(f, size) ?? 0) > pos && (f.continued === undefined || f.continued === "first")) ??
+      all.find((f) => !f.protected);
+  }
+  return to ? afterShiftOut(snapshot, to) : undefined;
+}
+
+/**
+ * **Backtab の行き先**（1 起点の位置。ACS `PS5250.processBacktab` → `FFT5250.previousNonByPassInputFieldPos(カーソル−1)`）。
+ * - カーソルの 1 つ手前以前で始まる最後の入力欄（継続欄は先頭の区間だけ）＝欄の途中ならその欄の先頭。無ければ最後の入力欄へ回り込む
+ * - 欄の先頭にいて、そこへカーソル送りで来る欄があれば、そちら（ACS はカーソル送りを逆にも辿る）
+ * - カーソルの手前が SO なら、その SO の手前から探す。着いた欄の先頭が SO なら 1 桁進める（O の欄を除く）
+ * 入力欄が無ければ `undefined`（ACS はカーソルを動かさない）
+ */
+export function backtabPosition(snapshot: ScreenSnapshot, pos: number): number | undefined {
+  const size = sizeOf(snapshot);
+  let q = pos - 1;
+  if (cellKindAt(snapshot, q) === "so") q--;
+  if (snapshot.fields.some((f) => f.cursorProgression !== undefined)) {
+    const here = fieldAtPos(snapshot, q + 1);
+    const n = here && fieldStart(here, size) === q + 1 ? progressionNumberOf(snapshot.fields, here) : undefined;
+    if (n !== undefined) {
+      const from = snapshot.fields.find((f) => !f.protected && f.cursorProgression === n);
+      if (from) return afterShiftOut(snapshot, from);
+    }
+  }
+  const all = [...snapshot.fields]
+    .filter((f) => !f.protected && (f.continued === undefined || f.continued === "first"))
+    .sort((a, b) => (fieldStart(a, size) ?? 0) - (fieldStart(b, size) ?? 0));
+  const before = all.filter((f) => (fieldStart(f, size) ?? 0) <= q);
+  const to = before.length > 0 ? before[before.length - 1] : all[all.length - 1];
+  return to ? afterShiftOut(snapshot, to) : undefined;
+}
+
+/** 位置（1 起点）を含む欄（保護欄も含む。ACS `FFT5250.getField`） */
+function fieldAtPos(snapshot: ScreenSnapshot, pos: number): Field | undefined {
+  const size = sizeOf(snapshot);
+  return snapshot.fields.find((f) => {
+    const start = fieldStart(f, size);
+    return start !== undefined && pos >= start && pos < start + f.length;
+  });
+}
+
+function cellKindAt(snapshot: ScreenSnapshot, pos: number): string | undefined {
+  if (pos < 1) return undefined;
+  return snapshot.cells[Math.floor((pos - 1) / snapshot.cols)]?.[(pos - 1) % snapshot.cols]?.kind;
+}
+
+/** 欄の先頭。先頭が SO なら 1 桁進める（O の欄を除く。ACS `IsSOChar(n) && !isDBCSOpenField()`） */
+function afterShiftOut(snapshot: ScreenSnapshot, f: Field): number | undefined {
+  const start = fieldStart(f, sizeOf(snapshot));
+  if (start === undefined) return undefined;
+  return cellKindAt(snapshot, start) === "so" && f.dbcsType !== "open" ? start + 1 : start;
+}
+
 // ---- 文字列で探す ----
 
 /**

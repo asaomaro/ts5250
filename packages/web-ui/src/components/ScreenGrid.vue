@@ -7,11 +7,14 @@ import {
   initEdit,
   editValue,
   typeChar,
+  insertChar,
   backspace,
   del,
+  deleteWord,
+  deleteWordLength,
   moveCursor,
-  home,
   end,
+  continuedEnd,
   toggleInsert,
   eraseToEnd,
   fieldExit,
@@ -27,6 +30,7 @@ import {
   dbcsByteLength,
   dbcsViewLayout,
   columnViewLayout,
+  isWideForDbcs,
   isFullWidth,
   isCertainWideGlyph,
   type DbcsViewLayout,
@@ -64,7 +68,21 @@ import {
   type DateValue,
   type TimeValue
 } from "../composables/dateTimeField.js";
-import { MSG_PROTECTED, MSG_NO_ROOM, MSG_BY_REASON, MSG_OPT_HINTS, MSG_DATE_PICKER, MSG_TIME_PICKER, MSG_DUP_DISALLOWED } from "../composables/opMessages.js";
+import { isFieldExitRequired, fieldExitRejection } from "../composables/mandatoryCheck.js";
+import {
+  MSG_PROTECTED,
+  MSG_NO_ROOM,
+  MSG_FIELD_MINUS_INVALID,
+  MSG_BY_REASON,
+  MSG_OPT_HINTS,
+  MSG_DATE_PICKER,
+  MSG_TIME_PICKER,
+  MSG_DUP_DISALLOWED,
+  MSG_FIELD_EXIT_KEY_INVALID,
+  MSG_MANDATORY_ENTER_EXIT,
+  MSG_MANDATORY_FILL
+} from "../composables/opMessages.js";
+import { localEditActionOf, numpadFieldSign, hasKeyBinding } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -88,9 +106,9 @@ import {
   attrSentinelByte,
   attrSentinel,
   rawSentinel,
-  stripSentinels,
   decodeAttribute
 } from "@ts5250/tn5250/browser";
+import { showSentinels } from "../composables/zoneDigit.js";
 
 // linkify は既定 ON。Vue は未指定の Boolean prop を false にキャストするため withDefaults で true を明示する
 const props = withDefaults(
@@ -117,6 +135,11 @@ const props = withDefaults(
     /** 通信中（ホスト応答待ち）。入力欄を編集不可にしてプロテクトする */
     busy?: boolean;
     /**
+     * テンキーの − / ＋ を Field− / Field+ にするか（**5250 のときだけ** true。3270 では文字）。
+     * true なら欄の input はそのキーを文字として入れず、ペインのキーマップへ委ねる（`numpadFieldSign`）
+     */
+    fieldSignKeys?: boolean;
+    /**
      * **操作員メッセージ**（`20260802-message-line`）。画面の**最下行に重ねて**出す。
      *
      * ここで描くのは、ACS が**画面の 1 行として**出しているから——外側に置くと
@@ -128,6 +151,13 @@ const props = withDefaults(
     cursor?: { row: number; col: number };
     /** カタカナ系ホストコードページ（930/5026）。実機（ACS）同様、半角英小文字を入力時に大文字化する */
     uppercaseInput?: boolean;
+    /**
+     * **SBCS だけのセッション**（37 など。DBCS の CCSID でない）。打鍵時の幅の判定（`rejectReason`）と MONOCASE の大文字化が
+     * 分かれる（`20260921-monocase-non-ascii`）。省略時は DBCS のセッションと同じ扱い
+     */
+    sbcsSession?: boolean;
+    /** セッションの CCSID（Field− のゾーン D の桁を字で見せるため。`composables/zoneDigit.ts`） */
+    ccsid?: number | undefined;
     /** 「押せるもの」の見せ方。none は機能キー凡例をボタン化しない（spec D5） */
     buttons?: ButtonStyle;
     /** ウィンドウそのもの（枠・面）の見せ方。none は枠を描かない */
@@ -164,9 +194,10 @@ const emit = defineEmits<{
   (e: "cursor", row: number, col: number): void;
   (e: "gui-select", fieldId: number, choiceIndex: number, selected: boolean): void;
   (e: "gui-submit", fieldId: number): void;
-  /** 欄が最大桁まで埋まった（ACS の自動送り＝次の入力欄へ）。満杯になった欄の index を渡す
-   *  （満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、index で次欄を特定する） */
-  (e: "field-full", fieldIndex: number): void;
+  /** 欄が満杯・Field Exit・Field±・Dup で次の欄へ送る（満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、
+   *  index で次欄を特定する）。`viaFieldExit` は Field Exit / Field± の経路（出た後の検査を掛けない。ペインの `onFieldFull`）。
+   *  `leaving` は**欄を出る操作**（Field Exit・Field±・Dup）——行き先は継続欄の鎖の後ろ（打鍵の満杯は次の区間） */
+  (e: "field-full", fieldIndex: number, viaFieldExit?: boolean, leaving?: boolean): void;
   /** 矩形（ブロック）選択が解除された（親のキーボード選択アンカーもリセットさせる） */
   (e: "selection-cleared"): void;
   /** マウスドラッグで矩形（ブロック）選択が始まった。押下したセル＝始点を渡す。
@@ -179,13 +210,15 @@ const emit = defineEmits<{
   /** 機能キー凡例のボタンが押された（親が sendKey する。spec B3） */
   (e: "aid", key: AidKey): void;
   /**
-   * 欄の**先頭**で Backspace が押された。`field-full`（次の欄へ）と対になる。
-   *
-   * 実機は欄の先頭で Backspace を押すと**前の入力欄の末尾へカーソルを移す（削除はしない）**
-   * ——GNU tn5250 `display.c` の `kf_backspace`。EDTMSK のように**ホストが 1 つの項目を
-   * 複数の入力欄へ分解して送る**画面では、これが無いと欄をまたいで戻れない。
+   * **DBCS の欄の先頭**で Backspace が押された（前の欄の末尾へ移る。GNU tn5250 `display.c` の `kf_backspace`）。
+   * ~~欄の先頭で Backspace を押すと前の入力欄の末尾へ~~——SBCS の欄は ACS と同じく 0005 にした（`20260921-backspace-field-start`）。
+   * DBCS の欄だけ未確認で残している
    */
-  (e: "field-prev", fieldIndex: number): void;
+  /**
+   * Field Exit が必須の欄を**最終桁まで打った**（ACS `fieldExited`）。欄は出ずカーソルも最終桁に留まるが、
+   * ACS はこれを「欄を出た」と数えるので、0020 の待ちを外させる（`20260921-field-exit-required-types`）。
+   */
+  (e: "field-exited", fieldIndex: number): void;
 }>();
 
 const gui = computed(() => props.snapshot.gui);
@@ -200,9 +233,31 @@ const gui = computed(() => props.snapshot.gui);
  * そもそも応答を待たない（`key-done` が即返る）ので、施錠を見ないと守りが無い。
  */
 const inhibited = computed(() => props.busy === true || props.snapshot.keyboardLocked);
+/** 打鍵・貼り付けの受け付けの判定に渡すセッションの種類（`fieldValidate.ts` の `SessionKind`） */
+const sessionKind = computed(() => ({ sbcsOnly: props.sbcsSession === true }));
+/**
+ * 入力欄に出す値のセンチネルを字にする。**ゾーン D の桁（Field−）は字、それ以外は空白**（ACS は Field− の桁を `}`・`J`〜`R` で見せる。
+ * `composables/zoneDigit.ts`）。~~`@ts5250/tn5250/browser` の `stripSentinels`（全部空白）~~
+ */
+function stripSentinels(s: string): string {
+  return showSentinels(s, props.ccsid);
+}
+/**
+ * **SO/SI を欄の桁に持たない欄か**（純 DBCS の G）。ACS の G は欄の全桁が 2 バイトの組で、SO/SI の桁が無い（実機の DDS の G 型で確かめた。
+ * 12 バイトの欄に全角 6 字。ワイヤも SO/SI 無し）。バイト予算・列ビューのどちらも SO/SI を数えない（`20260921-g-field-sosi`）
+ */
+const noShift = (f: Field | undefined): boolean => f?.dbcsType === "pure";
+/**
+ * **空きを全角空白（U+3000）で持つ欄か**（J＝`only`・G＝`pure`）。ACS の J・G の空きは DBCS 空白（0x4040）で、打った字は 2 桁ずつの桁に入る。
+ * 半角空白を詰めると、離れた空き桁に字を打ったとき途中に半角空白が残り、core の「全角しか入力できない」で送れない（`あ   い`。実機の J で確かめた）。
+ * E・O の空きは半角空白（SBCS が混ざれる）。`20260921-g-field-sosi`
+ */
+const wideFill = (f: Field | undefined): boolean => f?.dbcsType === "only" || f?.dbcsType === "pure";
+/** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト。`f` が G なら SO/SI 無し） */
+const byteLen = (value: string, f?: Field): number => dbcsByteLength(value, sessionKind.value, noShift(f));
 
 /**
- * 入力 1 文字を格納する形へ直す。対象は半角 ASCII の a-z のみ（全角・カナ・記号には影響しない）。
+ * 入力 1 文字を格納する形へ直す。
  *
  * 大文字化する理由は**2 つあり、どちらか一方でも真なら大文字化する**。同じ結果でも根拠が別なので、
  * 片方を他方の代用にしてはいけない（片方を消すともう片方の画面が壊れる）。
@@ -216,8 +271,19 @@ const inhibited = computed(() => props.busy === true || props.snapshot.keyboardL
  * 逆に `CHECK(LC)` 付きの欄では**小文字がそのまま残る**のが正しい。
  */
 function inputChar(ch: string, field: Field): string {
-  const upper = props.uppercaseInput || field.monocase === true;
-  return upper && ch >= "a" && ch <= "z" ? ch.toUpperCase() : ch;
+  // 英小文字の無いコードページ（930/5026）は a〜z だけ（ACS `CodePage.toUpper` も 290 の a〜z だけ）
+  if (props.uppercaseInput && ch >= "a" && ch <= "z") return ch.toUpperCase();
+  // **ギリシャ文字の μ はコードページのマイクロ記号 µ に置き換える**（ACS `PS5250.inputChar` の `hasMicroSymbol`。節目の点検の指摘）。
+  // 当 PJ の SBCS だけのセッションの CCSID（37 ほか Latin-1 系）はどれも µ を持つので、SBCS だけのセッションで置き換える。
+  // DBCS のセッションの SBCS 部（290・1027 ほか）は µ を持たないので置き換えない。置き換えた µ は MONOCASE でも大文字にしない（ACS と同じ）
+  if (ch === "\u03bc" && props.sbcsSession === true) ch = "\u00b5";
+  if (field.monocase !== true) return ch;
+  // **MONOCASE の欄は 1 バイト文字をすべて大文字にする**（ACS `PS5250.processCharKeyStroke` の `Character.toUpperCase`。
+  // `20260921-monocase-non-ascii`）。実機（PUB400・ACS のコア）で `aéñøü` → `AÉÑØÜ`。~~対象は半角 ASCII の a-z のみ~~。
+  // ACS と同じく `µ` は変えず、2 バイト文字（全角）は対象外、大文字が 1 文字にならないもの（`ß`）はそのまま（Java の char 単位の大文字化）
+  if (ch === "\u00b5" || (props.sbcsSession !== true && isFullWidth(ch))) return ch;
+  const up = ch.toUpperCase();
+  return up.length === 1 ? up : ch;
 }
 
 // 有効カーソル（未指定時は snapshot.cursor にフォールバック）
@@ -236,7 +302,7 @@ const effCursor = computed(() => props.cursor ?? props.snapshot.cursor);
 //   - 入力欄にフォーカスがある → **native キャレット**（打鍵が入る場所そのもの）
 //   - それ以外                  → 有効カーソル（`effCursor`＝親が持つ論理カーソル）
 // 入力欄の中でも `effCursor` を使わないのは、キャレットを動かして論理カーソルを
-// 通知しない経路（前の欄の末尾へ戻る `onFieldPrev` 等）で、カーソルだけ別の桁に残るため。
+// 通知しない経路（~~前の欄の末尾へ戻る `onFieldPrev`~~ は撤去した。ペインが欄を移す経路）で、カーソルだけ別の桁に残るため。
 // ---------------------------------------------------------------------------
 
 /** カーソルが覆う桁（1 始まり）と桁数（全角の上では 2） */
@@ -321,7 +387,7 @@ function nativeCaretCell(): CursorCell | null {
  * カーソルを描く桁。矩形選択中は入力欄を blur しているので、常に `effCursor`（選択の始点）。
  *
  * `caretTick` / `effCursor` / `inputFocused` / 画面の変化で引き直す。DOM を読むのは描画時なので、
- * 同じ処理の中でフォーカスとキャレットを続けて動かしても（`onFieldPrev`）最後の位置が描かれる。
+ * 同じ処理の中でフォーカスとキャレットを続けて動かしても（ペインの欄の移動）最後の位置が描かれる。
  */
 const cursorCell = computed<CursorCell>(() => {
   void caretTick.value;
@@ -1687,8 +1753,16 @@ function sliceIndexOf(f: Field, offset: number): number {
 /** 編集後の値が欄のバイト予算（SO/SI・DBCS 2 バイト込み）に収まるか。
  *  収まらない入力は拒否/切り捨てる（送信時の FIELD_OVERFLOW を入力段で防ぐ）。 */
 function fitsBytes(candidate: EditState, f: Field): boolean {
-  const trimmed = editValue(candidate).replace(/ +$/, "");
-  return dbcsByteLength(trimmed) <= visLen(f);
+  const trimmed = trimPad(f, editValue(candidate));
+  return byteLen(trimmed, f) <= visLen(f);
+}
+
+/**
+ * 欄の値の末尾の詰め物を落とす。**J・G は全角空白（U+3000）も詰め物**——空きは DBCS 空白 0x4040 で、G はコアが欄長までその空白で詰めて送り、J はホストが整える
+ * ので、値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ）。落として揃えないと、空きが NUL のホストの欄を触っただけで値が変わったことになる
+ */
+function trimPad(f: Field, s: string): string {
+  return wideFill(f) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -1722,7 +1796,7 @@ function logicalFromCells(f: Field): string {
       // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
-  return s.replace(/ +$/, ""); // 末尾パディング空白を除去
+  return trimPad(f, s); // 末尾パディング空白を除去（G は全角空白も）
 }
 
 /** 休止・未編集 DBCS 欄の列ビューを**セルから忠実に**組む（表示専用）。
@@ -1770,10 +1844,12 @@ function inputValue(f: Field): string {
 
 // SO/SI の表示マーク。showShiftMarks（ACS Ctrl+F 相当）が ON なら { } 、既定は空白。
 // displayChar（ホスト由来 SO/SI セル）と一致させる。
-function soMark(): string {
+function soMark(f?: Field): string {
+  if (noShift(f)) return ""; // G は SO/SI の桁が無い
   return props.showShiftMarks ? "{" : " ";
 }
-function siMark(): string {
+function siMark(f?: Field): string {
+  if (noShift(f)) return "";
   return props.showShiftMarks ? "}" : " ";
 }
 
@@ -1842,7 +1918,7 @@ function recodeViewActive(f: Field): boolean {
   if (props.sbcsView === "host") return false;
   if (props.edits.get(f.index) !== undefined) return false;
   if (editFieldIndex === f.index && edit) {
-    return editValue(edit).replace(/ +$/, "") === baselineValue(f);
+    return trimPad(f, editValue(edit)) === baselineValue(f);
   }
   return true; // 休止 or 未フォーカスの未編集欄
 }
@@ -1922,8 +1998,8 @@ function dbcsRestLayout(f: Field, marks?: ShiftMarkStyle): DbcsViewLayout {
   }
   return dbcsViewLayout(
     padDbcs(f, [...logicalValue(f)]).join(""),
-    marks?.so ?? soMark(),
-    marks?.si ?? siMark()
+    noShift(f) ? "" : (marks?.so ?? soMark()),
+    noShift(f) ? "" : (marks?.si ?? siMark())
   );
 }
 
@@ -1951,6 +2027,59 @@ const insertMode = defineModel<boolean>("insertMode", { default: false });
 let edit: EditState | undefined;
 let editFieldIndex = -1;
 /**
+ * **満杯まで打って「欄を出た」状態の欄**（ACS `PS5250.fieldExited`。`20260921-field-exit-required-types`）。
+ *
+ * Field Exit が必須の欄（`isFieldExitRequired`）で**最終桁**（符号付き数値は符号桁の手前）に打つと、ACS は
+ * カーソルを**その桁に留めたまま**このフラグを立てる。立っている間は（実機の ACS で確かめた。
+ * `scripts/acs-probe/field-exit-full.txt`）
+ *  - さらに文字を打つと**エラー 0018**（`setErrorCode(24)`）。値は変わらない（場合 C）
+ *  - 実行キーは 0020 にならず送れる（場合 A・B・E）
+ *  - **左矢印はフラグを下ろすだけでカーソルは動かない**（`processCursorMove` の `1006 && fieldExited`。場合 E）
+ *  - Field Exit・Field± は最終桁を消さない（`processFieldPlusMinusAndExit` が `fieldExited` なら `eraseToEOF` しない）
+ *  - それ以外のキーはフラグを下ろしてから働く（Backspace はカーソルの前の桁を消す＝`12346`。場合 D）
+ * 編集モデルと同じ所で捨てる（欄を移る・画面が替わる・フォーカスが外れる）。
+ */
+let fieldExitedIndex = -1;
+/**
+ * **MDT を立てる編集キーを打った**（字を置く〔打鍵・ペースト・IME の確定〕・Backspace・Delete・Erase EOF・Field Exit / Field± の消去）。
+ * `sync` / `syncDbcs` が読んで下ろし、**値がホストの値と同じでも**編集を出す——ACS `PS5250` は `inputChar` / `insertChar` /
+ * `processDeleteChar` / `eraseToEOF`（Field Exit も通る）のどれでも、値が変わったかを見ずに `setMDT` する
+ * （`20260921-field-exit-checks` の節目の点検の指摘。同じ字を打ち直した ME 欄の Field Exit が 0021 になり、右寄せ欄の 0020 の待ちも付かなかった。
+ * 節目 10 の独立点検 B-S3 で字を置く以外の編集キーにも広げた）。カーソルの移動だけでは立てない（MDT にしない）
+ */
+let mdtKeyed = false;
+function takeMdtKeyed(): boolean {
+  const placed = mdtKeyed;
+  mdtKeyed = false;
+  return placed;
+}
+/**
+ * **J・G・E（DBCS 中）の欄で打った半角の空白は、全角空白（U+3000）にする**（ACS `PS5250.processCharKeyStroke` の `convertSBCSCharToDBCS`。
+ * `20260921-dbcs-space-key`）。O は対象外（SBCS の空白のまま）。E は**欄が DBCS の状態のときだけ**（全角の字が入っているとき）——実機の ACS のコア
+ * （`scripts/acs-probe/dbcs-space-key.txt`）: J・G は空の欄でも先頭の Space が全角空白、E は空の欄・SBCS の字の後の Space は SBCS の空白で、`あ` の後は全角空白。
+ * IME を切った Space で日常的に起きる——当 PJ は J・G で「全角のみ」と拒否していた。**打鍵の経路だけ**（貼り付け・IME の確定は ACS も変換しない）
+ */
+function spaceToFullWidth(f: Field, ch: string): string {
+  if (ch !== " ") return ch;
+  if (f.dbcsType === "only" || f.dbcsType === "pure") return "\u3000";
+  if (f.dbcsType === "either" && edit !== undefined && edit.chars.some((c) => isFullWidth(c))) return "\u3000";
+  return ch;
+}
+/** 修飾キーの単独押下（「出た」状態を下ろさない。ACS に届くキーではない） */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
+/** 打鍵で埋められる最後の桁（ACS `processCharKeyStroke` の `n4`。符号付き数値は符号桁の手前） */
+function lastTypeable(f: Field): number {
+  return visLen(f) - 1 - (f.signedNumeric === true ? 1 : 0);
+}
+/**
+ * 「出た」状態のまま Field Exit・Field± を処理するときの起点。**最終桁の後ろ**（符号付き数値は符号桁）から
+ * 消すので、打った最終桁は残る（ACS は `fieldExited` なら `eraseToEOF` を飛ばす）。
+ */
+function exitedBase(f: Field, e: EditState): EditState {
+  if (fieldExitedIndex !== f.index) return e;
+  return { ...e, cursor: lastTypeable(f) + 1 };
+}
+/**
  * 保護欄への mousedown で押下セルを先読みしておく（onInputMousedown → onInputFocus）。
  * FocusEvent は座標を持たないため、直前の mousedown の座標をここで橋渡しする。
  */
@@ -1968,7 +2097,17 @@ function isDbcsEdit(f: Field): boolean {
   return (!!f.dbcsType || !!f.dbcsContent) && !f.hidden;
 }
 
+/**
+ * **親が挿入モードを変えたら、編集中の状態にも写す。** 編集中の欄は `beginEdit` で挿入モードを
+ * 写し取り、`sync` のたびにそれを書き戻す。写さないと、ペインが下ろした挿入モード（Reset・
+ * 操作員エラー・新しい画面。`20260921-operator-error-mode`）が同じ欄で次に打った瞬間に復活する。
+ */
+watch(insertMode, (v) => {
+  if (edit && edit.insertMode !== v) edit = { ...edit, insertMode: v };
+});
+
 function beginEdit(f: Field, inputEl: HTMLInputElement): void {
+  fieldExitedIndex = -1; // 別の欄へ移った
   if (isDbcsEdit(f)) {
     // 純論理値（SO/SI 無し）＋末尾空白パディング。列ビューは sync で導出、カーソルは論理インデックス。
     // パディングは SBCS 欄と同じ目的: 未入力桁にもカーソルを置けるようにする（5250 は欄内自由）。
@@ -1989,21 +2128,48 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
 function padDbcs(f: Field, chars: readonly string[]): string[] {
   const budget = visLen(f);
   const out = [...chars];
-  while (dbcsByteLength(out.join("")) < budget) out.push(" ");
+  // **J・G の詰め物は全角空白**（ACS の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
+  // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（欄長は偶数なので通常は来ない）
+  while (byteLen(out.join(""), f) < budget) out.push(wideFill(f) && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
-  while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
   return out;
 }
 
+/**
+ * **DBCS の欄の「カーソル以降を消す」**（Erase EOF・Field Exit・Field±）。消したあとも**バイト予算いっぱいまで詰め物で埋め直す**——
+ * 消した字を半角空白 1 つずつに替えるだけだと、(1) J・G では空きが半角空白になり、右へ動いて打った字の前に半角が残って
+ * core が「全角しか入力できない」で拒否する（`padDbcs` の J・G の詰め物は全角空白）。(2) 全角 1 字が 1 バイトの空白に替わるので、
+ * 予算に対して `chars` が短くなり、欄の後ろの桁へカーソルが届かなくなる（E・O でも同じ）。独立点検 B-S2
+ */
+function eraseToEndDbcs(f: Field, state: EditState): EditState {
+  return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
+}
+
 /** 予算超過ぶんを末尾の空白パディングで吸収する（全角は SO/SI で最大 4 桁ぶん増えるため）。
- *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。 */
-function absorbDbcs(chars: string[], budget: number, cursor: number): string[] | undefined {
+ *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。
+ *
+ *  **J・G・E は末尾の全角空白（U+3000）も空きに数える**（`wideBlank`。ACS `reserveRoomForInsert` は右端から続く NUL・半角空白・全角空白を空きと数える。
+ *  ホストが 4040 で埋めた欄・全角空白で埋めた欄への挿入が通る。O は数えない——SO/SI の桁で数え始めが止まる。`20260921-dbcs-insert-room`） */
+function absorbDbcs(chars: string[], budget: number, cursor: number, wideBlank = false, f?: Field): string[] | undefined {
   const out = [...chars];
-  while (dbcsByteLength(out.join("")) > budget) {
-    if (out.length <= cursor || out[out.length - 1] !== " ") return undefined;
+  while (byteLen(out.join(""), f) > budget) {
+    const last = out[out.length - 1];
+    if (out.length <= cursor || (last !== " " && !(wideBlank && last === "\u3000"))) return undefined;
     out.pop();
   }
   return out;
+}
+
+/**
+ * **挿入モードで、カーソルが欄の最終桁にあるか**（ACS `reserveRoomForInsert`: カーソルが最終桁なら**空白でも即エラー 0012**。J・E は最終桁が SI の桁）。
+ * G はカーソルが 2 桁の前半にしか止まらないので対象外。実機の ACS のコアで J・E（SI の桁）と O（最終のセル）が 0012、1 桁手前は入った
+ * （`scripts/acs-probe/dbcs-insert-room.txt`）。SBCS の欄は `fieldEdit.insertChar` が同じ判定を持つ
+ */
+function atLastColumn(e: EditState, f: Field): boolean {
+  if (f.dbcsType === "pure") return false;
+  const lay = dbcsViewLayout(e.chars.join(""), soMark(), siMark());
+  return lay.columnsBefore(lay.caretOf(e.cursor)) >= visLen(f) - 1;
 }
 
 /**
@@ -2022,16 +2188,16 @@ function absorbDbcs(chars: string[], budget: number, cursor: number): string[] |
  * そのときは先に後続を 1 文字食ってから足す（上の `{１} {う}` はこの経路で決まる）。
  * 打鍵（`dbcsType`）とペースト（`overwriteInto`）で同じ規則を使う。
  */
-function keepByteLength(chars: string[], at: number, before: number, budget: number): void {
+function keepByteLength(chars: string[], at: number, before: number, budget: number, f?: Field): void {
   const next = at + 1;
   // 1 回で「食う」か「足す」のどちらかが進むので、最大でも欄の桁数ぶんで収束する
   for (let guard = chars.length + budget; guard > 0; guard--) {
-    const len = dbcsByteLength(chars.join(""));
+    const len = byteLen(chars.join(""), f);
     if (len === before) return;
     if (len < before) {
       const trial = [...chars];
       trial.splice(next, 0, " ");
-      if (dbcsByteLength(trial.join("")) <= before) {
+      if (byteLen(trial.join(""), f) <= before) {
         chars.splice(next, 0, " ");
         continue;
       }
@@ -2042,17 +2208,19 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
 }
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
-function dbcsType(e: EditState, ch: string, f: Field): EditState | undefined {
+function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
   const budget = visLen(f);
+  // 選択を置き換える挿入（`replaced`）は、消した跡を埋めるだけなので最終桁の判定を掛けない
+  if (e.insertMode && !replaced && atLastColumn(e, f)) return undefined;
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
   } else {
-    const before = dbcsByteLength(chars.join(""));
+    const before = byteLen(chars.join(""), f);
     chars[e.cursor] = ch;
-    keepByteLength(chars, e.cursor, before, budget); // 上書きで桁を動かさない
+    keepByteLength(chars, e.cursor, before, budget, f); // 上書きで桁を動かさない
   }
-  const fit = absorbDbcs(chars, budget, e.cursor + 1);
+  const fit = absorbDbcs(chars, budget, e.cursor + 1, f.dbcsType === "only" || f.dbcsType === "pure" || f.dbcsType === "either", f);
   if (!fit) return undefined;
   return { ...e, chars: padDbcs(f, fit), cursor: e.cursor + 1 };
 }
@@ -2067,6 +2235,14 @@ function dbcsDelete(e: EditState, f: Field): EditState {
   if (e.cursor >= e.chars.length) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor, 1);
+  return { ...e, chars: padDbcs(f, chars) };
+}
+/** Delete Word（DBCS の欄）: 全角は 1 字ずつ、半角の語は `deleteWordLength` の規則（実機の ACS で `AA あい BB` の各位置を測った） */
+function dbcsDeleteWord(e: EditState, f: Field): EditState {
+  const n = deleteWordLength(e.chars, e.cursor, isWideForDbcs);
+  if (n === 0) return e;
+  const chars = [...e.chars];
+  chars.splice(e.cursor, n);
   return { ...e, chars: padDbcs(f, chars) };
 }
 function dbcsMove(e: EditState, delta: number): EditState {
@@ -2094,7 +2270,7 @@ let syncingFocus = false;
 function dbcsLayoutOf(f: Field): ReturnType<typeof dbcsViewLayout> {
   const value =
     edit && editFieldIndex === f.index ? editValue(edit) : padDbcs(f, [...logicalValue(f)]).join("");
-  return dbcsViewLayout(value, soMark(), siMark());
+  return dbcsViewLayout(value, soMark(f), siMark(f));
 }
 
 /** DBCS 欄で、その <input> が担当するスライスの範囲（native caret ⇔ 欄全体の view 座標の変換用）。 */
@@ -2141,7 +2317,7 @@ function writeSlices(f: Field, full: string): void {
 function baselineValue(f: Field): string {
   const edited = props.edits.get(f.index);
   if (edited !== undefined) return edited;
-  return (f.dbcsType ? logicalFromCells(f) : f.value).replace(/ +$/, "");
+  return trimPad(f, f.dbcsType ? logicalFromCells(f) : f.value);
 }
 
 function sync(inputEl: HTMLInputElement, f: Field): void {
@@ -2168,8 +2344,9 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
   const c = Math.min(edit.cursor - slice.offset, target.value.length);
   target.setSelectionRange(c, c);
   insertMode.value = edit.insertMode;
-  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
-  if (trimmed !== baselineValue(f)) emit("edit", f.index, trimmed);
+  // **値が変わったか、字を置いたときに編集を発火**（カーソル移動だけでは MDT にしない・バグ1。字を置けば同じ値でも MDT＝`mdtKeyed`）
+  const placed = takeMdtKeyed(); // 先に下ろす（値が変わった回でも印を次の同期へ持ち越さない）
+  if (trimmed !== baselineValue(f) || placed) emit("edit", f.index, trimmed);
   // 欄内のキャレット移動・入力で論理カーソルも追従させる（AID 送信位置・オーバーレイ整合）。
   // 末尾（cursor===visLen）は欄の右端境界を指し、reconcileFocus がそれを「欄の末尾」として欄内に留める。
   const pos = posOfOffset(f, Math.min(edit.cursor, visLen(f)), props.snapshot.cols, props.snapshot.rows);
@@ -2181,7 +2358,7 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
   // 表示はパディング込みの列ビュー（未入力桁にもカーソルを置けるようにするため）。
   // 送信値（emit）は末尾パディングを除いた純論理値。
-  const logical = editValue(edit).replace(/ +$/, "");
+  const logical = trimPad(f, editValue(edit));
   const lay = dbcsLayoutOf(f);
   const caret = lay.caretOf(edit.cursor); // 欄全体の列ビュー index
   const col = Math.min(lay.columnsBefore(caret), visLen(f) - 1); // 欄先頭からの表示桁
@@ -2207,8 +2384,9 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
   insertMode.value = edit.insertMode;
-  // **値が変わったときだけ編集を発火**（カーソル移動だけでは MDT にしない・バグ1）
-  if (logical !== baselineValue(f)) emit("edit", f.index, logical);
+  // **値が変わったか、字を置いたときに編集を発火**（カーソル移動だけでは MDT にしない・バグ1。字を置けば同じ値でも MDT＝`mdtKeyed`）
+  const placed = takeMdtKeyed(); // 先に下ろす（値が変わった回でも印を次の同期へ持ち越さない）
+  if (logical !== baselineValue(f) || placed) emit("edit", f.index, logical);
   // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
   emit("cursor", s.row, s.col + (col - s.offset));
 }
@@ -2233,7 +2411,9 @@ function advanceIfFull(f: Field): void {
   // 満杯の欄に以降の打鍵が入らないので、自動送りを止めるだけで実機と同じ操作感になる
   // （Field Exit か Tab で出る）。FER と AUTO_ENTER が同時なら FER が勝つ——原典も
   // FER の枝の中では auto-enter を見ない。
-  if (f.fieldExitRequired) return;
+  // **FER ビットに限らない**——ACS は右寄せ（RZ/RB）と符号付き数値も Field Exit 必須として扱う
+  // （`Field5250.isFieldExitRequired`。`20260921-field-exit-required-types`）
+  if (isFieldExitRequired(f)) return;
   if (f.autoEnter) {
     emit("aid", "Enter"); // AUTO_ENTER（FFW 0x0080）: 次欄へ送る代わりに Enter を自動送信
     return;
@@ -2259,6 +2439,36 @@ function currentEditTarget(): { f: Field; el: HTMLInputElement } | undefined {
 }
 
 /**
+ * **Field Exit・Field± で欄を出る前の検査**（ACS `PS5250.processFieldPlusMinusAndExit`。`mandatoryCheck.ts` の
+ * `fieldExitRejection`）。止めるときは値を変えず、MF だけはカーソルを欄の先頭へ戻す。止めたら true
+ */
+function rejectExit(t: { f: Field; el: HTMLInputElement }): boolean {
+  if (!edit) return false;
+  // 「欄の先頭」は ACS の `cursorSBA == startPos`。**SO が欄の先頭にあるのは型で決まる**（ACS `FFT5250` の欄の初期化）:
+  //  - **J（`only`）**は欄の作成時に `startPos` へ SO を置く——**空でも SO がある**。Tab で入ったときのカーソルは `startPos+1`（実測）なので、
+  //    論理位置 0 は先頭ではない
+  //  - **E（`either`）**は SO を置かない。中身が全角で始まるときだけ SO が先頭にある（列ビューが SO で始まるか）
+  //  - **G（`pure`）・O（`open`）**は SO を持たない／Tab は SO を飛ばさない（`nextNonByPassInputFieldPos` の `!isDBCSOpenField()`）ので、
+  //    最初の字（O は SO の桁）が先頭のまま
+  // ~~中身が全角で始まるなら先頭ではない（列ビューの位置で決める）~~ は J の規則を全 DBCS 欄へ広げて G・O・空の J で外れた
+  // （`20260921-field-exit-checks` の節目 10 の独立点検 B-S1。G・O は節目 9 の修正の前は合っていた回帰）。SO の桁にキャレットは止まらない
+  // （`dbcsViewLayout`）ので、O の欄の「SO の次の桁」は先頭と区別できない（Tab の着地を優先して先頭に数える）
+  const soFirst =
+    t.f.dbcsType === "only" || (t.f.dbcsType === "either" && isDbcsEdit(t.f) && dbcsLayoutOf(t.f).caretOf(0) === 1);
+  const atStart = soFirst ? false : edit.cursor === 0;
+  const why = fieldExitRejection(t.f, props.edits, atStart, props.snapshot.fields);
+  if (why === undefined) return false;
+  if (why === "kbd-inhibited") emit("notice", MSG_BY_REASON["kbd-inhibited"]);
+  else if (why === "mandatory-enter") emit("notice", MSG_MANDATORY_ENTER_EXIT);
+  else {
+    edit = { ...edit, cursor: 0 };
+    sync(t.el, t.f);
+    emit("notice", MSG_MANDATORY_FILL);
+  }
+  return true;
+}
+
+/**
  * Field Exit: カーソル以降を消し、FFW の ADJUST どおり右寄せして次の入力欄へ。
  *
  * **DBCS 欄では右寄せしない**（消去と欄移動だけ）。全角は SO/SI と 2 バイトで桁を占めるため、
@@ -2271,8 +2481,15 @@ function fieldExitKey(): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(edit, t.f);
-  sync(t.el, t.f); // 値が変われば emit("edit") が出る＝MDT が立つ
+  if (rejectExit(t)) return;
+  const base = exitedBase(t.f, edit); // 満杯まで打った直後なら最終桁は消さない（ACS `fieldExited`）
+  // 満杯まで打った直後（`fieldExited`）は ACS が `eraseToEOF` を通らない＝MDT も立てない。それ以外は消す（消えるものが無くても）ので MDT
+  const erases = fieldExitedIndex !== t.f.index;
+  mdtKeyed = erases;
+  fieldExitedIndex = -1;
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : fieldExit(base, t.f);
+  if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（ACS `eraseToEOF_Work`）。右寄せはカーソルの区間だけ（上の `fieldExit`）
+  sync(t.el, t.f); // 値が変わるか、消す操作をしたら emit("edit") が出る＝MDT が立つ
   // AUTO_ENTER 欄は**次欄へ移らず Enter を送る**（原典は Field Exit / Field± / Dup の
   // すべてで同じ形。GNU tn5250 `display.c:1637`）。FER 欄でも Field Exit なら出られるので、
   // ここは advanceIfFull と違って FER を見ない。
@@ -2280,28 +2497,49 @@ function fieldExitKey(): void {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index); // 次の入力欄へ（自動送りと同じ経路）
+  emit("field-full", t.f.index, true, true); // 次の入力欄へ（Field Exit 経由の印つき。継続欄は鎖の後ろへ）
 }
 
 /**
  * Field− / Field+: Field Exit と同じ整形をしてから**符号桁に符号を確定**し、次の欄へ。
  *
- * **符号付き数値欄でだけ符号が付く**（それ以外は Field Exit と同じ。`fieldEdit.fieldSign` の
- * コメント参照）。DBCS 欄は Field Exit と同じく右寄せしない。
+ * **Field− は符号付き数値・数値専用の欄でだけ効く**（それ以外の欄・継続欄はエラー 0022 で値もカーソルも変えない）。
+ * Field+ はどの欄でも Field Exit と同じ。~~符号付き数値欄でだけ符号が付く（それ以外は Field Exit と同じ）~~
+ * は ACS と違っていた（`20260921-numpad-field-sign`・`fieldEdit.fieldSign` のコメント参照）。
+ * DBCS 欄は Field Exit と同じく右寄せしない。
  */
+/** テンキーの − / ＋（5250・修飾なし・変換中でない）。ACS は Field− / Field+（`B109` / `B107`）で、文字としては入れない */
+function isNumpadSign(ev: KeyboardEvent): boolean {
+  return numpadFieldSign(ev, props.fieldSignKeys === true) !== undefined;
+}
+
 function fieldSignKey(negative: boolean): void {
   const t = currentEditTarget();
   if (!t || !edit) {
     emit("notice", MSG_PROTECTED);
     return;
   }
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(edit, t.f, negative);
+  if (rejectExit(t)) return;
+  // **Field− は符号付き数値・数値専用（0x0300）の欄でだけ**（ACS `processFieldPlusMinusAndExit` のエラー 0022。
+  // 継続欄も不可）。値は変えず欄も出ない（実機の ACS: 英数字欄で `AB` の後に Field− → エラー・値もカーソルもそのまま）。
+  // Field+ はどの欄でも Field Exit と同じ（実機: 英数字欄で次の欄へ）。`20260921-numpad-field-sign`
+  const numericOnly = t.f.numeric && t.f.digitsOnly !== true && t.f.signedNumeric !== true;
+  if (negative && ((t.f.signedNumeric !== true && !numericOnly) || t.f.continued !== undefined)) {
+    emit("notice", MSG_FIELD_MINUS_INVALID);
+    return;
+  }
+  const base = exitedBase(t.f, edit); // Field Exit と同じく、満杯まで打った直後なら最終桁は消さない
+  const erases = fieldExitedIndex !== t.f.index; // Field Exit と同じ（`fieldExited` のときは `eraseToEOF` を通らない）
+  mdtKeyed = erases;
+  fieldExitedIndex = -1;
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : fieldSign(base, { ...t.f, numericOnly }, negative);
+  if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（Field+。Field− は継続欄では上で拒否する）
   sync(t.el, t.f);
   if (t.f.autoEnter) {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index);
+  emit("field-full", t.f.index, true, true);
 }
 
 /**
@@ -2320,37 +2558,30 @@ function dupKey(): void {
     emit("notice", MSG_DUP_DISALLOWED);
     return;
   }
+  // 満杯まで打った直後でもカーソルの桁から埋める（ACS `processDupFM` は `fieldExited` を見ない）
+  fieldExitedIndex = -1;
   edit = dupFill(edit, rawSentinel(DUP_BYTE));
+  fillFollowingSegments(t.f, rawSentinel(DUP_BYTE)); // 継続欄は続く区間の全桁も Dup 文字（ACS `processDupFM`）
   sync(t.el, t.f);
-  // FER 欄は満杯でも欄に留まるのが実機（原典も Dup の後に FER を見る）
-  if (t.f.fieldExitRequired) return;
+  // **Field Exit が必須の欄でも次の欄へ移る**（ACS `PS5250.processDupFM` は FER も
+  // `isFieldExitRequired` も見ず、自動 Enter 欄なら Enter、それ以外は次の入力欄へ移す。
+  // 実機の ACS でも CHECK(RZ) DUP の欄で Dup → 次の欄へ・CHECK(ER) DUP の欄で Dup → 送信だった。
+  // `scripts/acs-probe/field-exit-full.txt` の場合 G）。~~FER 欄は満杯でも欄に留まる~~
+  // （GNU tn5250 由来の分岐で、ACS と逆だった。独立点検の指摘）
   if (t.f.autoEnter) {
     emit("aid", "Enter");
     return;
   }
-  emit("field-full", t.f.index);
+  emit("field-full", t.f.index, false, true); // 出た後の検査は掛ける（従来どおり）。行き先は継続欄の鎖の後ろ
 }
 
-/**
- * **数値欄で `-` / `+` を打ったら文字として入れず Field− / Field+ を走らせる**（原典の
- * `sign_key_hack`。GNU tn5250 `display.c:927-940`）。処理したら true。
- *
- * これが無いと `-12` と打てて**そのまま送れてしまう**が、ホストは先頭の符号を無視して
- * `12` を受け取る——**利用者は負値を入れたつもりで正値を送る**（実機で実測）。
- * 打った通りに送れないなら打たせない、という方に倒す。
- *
- * ペースト・マクロ・MCP はこの経路を通らない（打鍵だけの規則）。
+/*
+ * ~~**数値欄で `-` / `+` を打ったら文字として入れず Field− / Field+ を走らせる**（原典の `sign_key_hack`。
+ * GNU tn5250 `display.c:927-940`）~~ → 撤去した（`20260921-numpad-field-sign`）。ACS はメイン行の `-` `+` を文字として扱い、
+ * 符号付き数値欄では数字以外としてエラーにする（`checkSBCSField`。実機の ACS でも `12-` の `-` でエラー）。Field− / Field+ は
+ * テンキーの − / ＋（`classifyKey`）と Ctrl+− / Ctrl++ で押す。`-12` と打てて正値が送られる問題（旧い理由）は、`-` が
+ * 符号付き数値欄に入らないことで同じく防がれる。
  */
-function signKeyHack(f: Field, key: string): boolean {
-  // **数字専用欄は対象外。** ここを `f.numeric`（シフト 3/5/7 すべて）にしていると、
-  // 数字しか入らない欄で `-` を打ち間違えただけで**カーソル以降が消えて次欄へ飛ぶ**
-  // （実機 `ASAOLIB/AUDPGM` の `DGT` 欄で `1234` → `12` になるのを確認）。
-  // 参照実装も num-only と signed-num だけを対象にしている（GNU tn5250 `display.c`）。
-  if (f.digitsOnly === true) return false;
-  if (!f.numeric || (key !== "-" && key !== "+")) return false;
-  fieldSignKey(key === "-");
-  return true;
-}
 
 /** Erase EOF: カーソルから欄末尾まで消す。**欄は出ず・カーソルも動かさず・右寄せもしない**。 */
 function eraseEofKey(): void {
@@ -2359,7 +2590,36 @@ function eraseEofKey(): void {
     emit("notice", MSG_PROTECTED);
     return;
   }
-  edit = eraseToEnd(edit);
+  fieldExitedIndex = -1; // ACS もカーソルの桁から消す（`fieldExited` を見ない）
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : eraseToEnd(edit);
+  fillFollowingSegments(t.f, " "); // 継続欄は続く区間も全桁消える（ACS `eraseToEOF_Work`）
+  mdtKeyed = true; // 消えるものが無くても MDT（`eraseToEOF` は `setMDT` 付き）
+  sync(t.el, t.f);
+}
+
+/**
+ * Delete Word（ACS の Ctrl+Delete＝`[deleteword]`。`20260921-delete-word`）: カーソルの語を消して後ろを左へ詰める。**欄は出ず・カーソルも動かさない**。
+ * 範囲は `deleteWordLength`（実機の ACS のコアで測った）。継続欄は区間の並びを 1 つの欄として数える（実機: `1234/56/78` の 1 区間目の 2 桁目で `1   /  /  `）。
+ * MDT は消えるものが無くても立てる（`processDeleteChar` は `setMDT`。Delete と同じ）。欄内の選択は見ない（ACS の Delete 系は選択に触れない）
+ */
+function deleteWordKey(): void {
+  const t = currentEditTarget();
+  if (!t || !edit) {
+    emit("notice", MSG_PROTECTED);
+    return;
+  }
+  fieldExitedIndex = -1; // 文字以外のキーの後は「出た」状態を下ろす（ACS）
+  mdtKeyed = true;
+  if (t.f.continued !== undefined && !isDbcsEdit(t.f)) {
+    editAcrossContinued(t.f, deleteWord);
+    return;
+  }
+  if (isDbcsEdit(t.f)) {
+    edit = dbcsDeleteWord(edit, t.f);
+    syncDbcs(t.el, t.f);
+    return;
+  }
+  edit = deleteWord(edit);
   sync(t.el, t.f);
 }
 
@@ -2376,14 +2636,23 @@ function eraseInputKey(): void {
     return;
   }
   for (const f of editable) {
-    if (logicalValue(f).replace(/ +$/, "") === "") continue;
+    // **消すのは MDT の立った欄だけ**（`20260921-erase-input-mdt-only`）。
+    // ACS `PS5250.processEraseInput` は `clearNonbypassFields(true)`（MDT の立った欄のみ）を呼ぶ。
+    // 以前は「中身のある全欄」を消しており、ホストが既定値を入れた**未変更の欄**
+    // （プロンプタの `*LIBL` など）まで消えて、空白が「変更」として送られていた。
+    // MDT は、ホストが立てたもの（`f.mdt`）か、利用者が打ったもの（`edits`）のどちらか
+    if (!f.mdt && !props.edits.has(f.index)) continue;
     emit("edit", f.index, "");
     writeSlices(f, " ".repeat(visLen(f)));
   }
   // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
-  // フォーカスの移動は呼び出し側（EmulatorPane）が先頭の入力欄へ行う。
   edit = undefined;
   editFieldIndex = -1;
+  fieldExitedIndex = -1;
+  // **着地はホーム位置**（ACS: `getHomePos()`）。ホームは IC オーダー（`setInsertCursor`）で
+  // 決まり、無ければ既定（先頭の入力欄）——`focusCursorField` と同じ意味なのでそれを使う。
+  // 以前は呼び出し側が**常に先頭の入力欄**へ置いており、IC で別の欄を指す画面でずれていた
+  nextTick(() => focusCursorField());
 }
 
 /** 画面のホストカーソル位置にある入力欄へフォーカスを当てる（無ければ先頭の入力欄）。
@@ -2415,8 +2684,9 @@ function focusCursorField(): void {
      * ACS は指された桁にカーソルを置く。
      *
      * 「ホストがカーソルを置かなかった画面」を心配して先頭欄へ寄せていたが、
-     * **その正規化は既に protocol 層で済んでいる**——`session.ts` は
-     * `readRequested && !cursorSet` のときに `cursorToFirstInputField()` を通す。
+     * **その正規化は既に protocol 層で済んでいる**——~~`session.ts` は
+     * `readRequested && !cursorSet` のときに `cursorToFirstInputField()` を通す~~ → WTD の終わりに IC・MC・既定の位置へ置く
+     * （`wtd-applier.ts` の `placeCursorAfterWtd`。`20260921-cursor-per-wtd-acs`）。
      * ここまで来る「欄の外」は、ホストが**わざと**そこを指した場合だけ。
      */
     const active = document.activeElement;
@@ -2453,6 +2723,7 @@ watch(
   (snap) => {
     edit = undefined;
     editFieldIndex = -1;
+    fieldExitedIndex = -1;
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -2541,13 +2812,35 @@ function commitFieldValueDirect(x: Field, val: string): void {
 }
 
 /**
- * 継続入力フィールドの区間をまたいで Backspace/Delete を適用する。
+ * **継続欄で、カーソルの区間より後ろの区間を全桁 `fill` で埋める**（ACS `PS5250.eraseToEOF_Work`・`processDupFM`。空白は NUL、Dup は 0x1C）。
+ * カーソルの区間は呼び出し側が従来どおり「カーソルから区間の終わりまで」を埋める。実機の ACS のコアで、日付欄（4/2/2 の 3 区間）の
+ * 最初の区間の途中の Erase EOF・Field Exit が続く区間まで消し、Dup が続く区間を 0x1C で埋めた
+ * （`scripts/acs-probe/continued-field-erase-exit.txt`。`20260921-continued-field-exit`）。継続欄でない欄は何もしない。
+ * MDT は鎖のどこかに立てば全区間に立つ（`mdtOf`）ので、ここでは編集を出すだけ
+ */
+function fillFollowingSegments(f: Field, fill: string): void {
+  if (f.continued === undefined) return;
+  const run = continuedRunOf(f);
+  const at = run.findIndex((x) => x.index === f.index);
+  for (const x of run.slice(at + 1)) commitFieldValueDirect(x, fill.repeat(visLen(x)));
+}
+
+/**
+ * 継続入力フィールドの区間をまたいで Backspace/Delete／挿入を適用する。
  *
- * f の区間を含む並び全体をつないだ「合成バッファ」へ fieldEdit の純関数（backspace/del）を
+ * f の区間を含む並び全体をつないだ「合成バッファ」へ fieldEdit の純関数（backspace/del/insertChar）を
  * そのまま適用し、結果を区間ごとの長さで割り戻す。カーソルが着地した区間へ編集モデルと
  * フォーカスを移し、それ以外の区間は直接コミットする。
+ *
+ * `apply` が `undefined` を返したら（挿入の余地が無い）**何も変えずに false**。
+ * `preferNext` は挿入用: 区間の終わりに着いたら次の区間の先頭へ置く（ACS の挿入の枝は区間の最終桁で
+ * `getNextContFieldSegment` の先頭へ移る。Backspace/Delete は従来どおり手前の区間の末尾に留まる）。
  */
-function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void {
+function editAcrossContinued(
+  f: Field,
+  apply: (s: EditState) => EditState | undefined,
+  preferNext = false
+): boolean {
   const cur = edit!;
   const run = continuedRunOf(f);
   const lens = run.map((x) => visLen(x));
@@ -2562,10 +2855,12 @@ function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void
   const at = run.findIndex((x) => x.index === f.index);
   const merged = run.flatMap((x, k) => (k === at ? cur.chars : padChars([...logicalValue(x)], lens[k]!)));
   const result = apply({ chars: merged, cursor: offsets[at]! + cur.cursor, insertMode: cur.insertMode });
+  if (!result) return false;
 
   let targetIdx = run.length - 1;
   for (let k = 0; k < run.length; k++) {
-    if (result.cursor <= offsets[k]! + lens[k]!) {
+    const end = offsets[k]! + lens[k]!;
+    if (preferNext ? result.cursor < end : result.cursor <= end) {
       targetIdx = k;
       break;
     }
@@ -2583,7 +2878,10 @@ function editAcrossContinued(f: Field, apply: (s: EditState) => EditState): void
   };
   editFieldIndex = target.index;
   const targetEl = inputForSlice(target, 0);
+  // 同期しなかったときは印を下ろす（次の別の同期へ持ち越して、触っていない欄に MDT を立てない。節目 10 の独立点検 B-N4）
   if (targetEl) sync(targetEl, target);
+  else void takeMdtKeyed();
+  return true;
 }
 
 /** input の keydown 制御。印字文字は上書き/挿入、編集キーは 5250 挙動、AID/移動キーはペインへ委譲 */
@@ -2624,13 +2922,35 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     const logical = Math.min(sliceOffsetOf(f, el) + nativeCaret, visLen(f));
     if (logical !== edit.cursor) edit = { ...edit, cursor: logical };
   }
+  // **満杯まで打った「出た」状態を下ろす**（ACS は文字以外のキーの後で `fieldExited = false`）。
+  // クリック等でキャレットが最終桁から動いていれば、もう「出た」状態ではない。
+  // 文字キーは下で 0018 にする。Field Exit・Field±・Dup・Erase EOF は各処理がこの状態を見るので手前で下ろさない
+  if (fieldExitedIndex === f.index) {
+    const printable = ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    if (edit.cursor !== lastTypeable(f)) fieldExitedIndex = -1;
+    else if (!printable && !MODIFIER_KEYS.has(ev.key) && localEditActionOf(ev) === undefined) {
+      fieldExitedIndex = -1;
+      // **左矢印は状態を下ろすだけでカーソルは動かない**（ACS `processCursorMove`。実機で確認。場合 E）
+      if (ev.key === "ArrowLeft" && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
+  }
 
-  // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete / Ctrl+Backspace 等はキー設定で
-  // ローカル編集キー（Erase EOF / Erase Input）に割り当てられており、ここで素の Delete /
-  // Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに全欄が消える）。
+  // **修飾キー付きは欄内編集で消費しない。** Ctrl+Delete 等はキー設定でローカル編集キー（Delete Word など）に割り当てられており、
+  // ここで素の Delete / Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに語も消える）。
   // 矢印キーが以前から同じ理由で修飾キーを除外しているのと同じ扱いに揃える。
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-  if (ev.key === "Insert" && plain) {
+  // **割り当ての無い修飾キー付きの Backspace・Delete は何もしない**（ACS の Ctrl+Backspace＝`C8` は割り当て無し。`20260921-delete-word`）。
+  // 通すと、ブラウザの既定（語の削除）が <input> の値だけを書き換えて編集モデルとずれる（以前は Ctrl+Backspace が Erase Input に割り当たっていて止まっていた）
+  if ((ev.key === "Backspace" || ev.key === "Delete") && !plain && !hasKeyBinding(ev)) {
+    ev.preventDefault();
+    return;
+  }
+  // 割り当てのあるキー（ACS の既定 Shift+Insert = Dup など）はペインのキーマップへ委ねる
+  if (ev.key === "Insert" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     edit = toggleInsert(edit);
     insertMode.value = edit.insertMode;
@@ -2640,6 +2960,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     ev.preventDefault();
     // 選択があればその削除が優先（先頭にキャレットがあっても選択は消す）
     if (deleteSelection(f, el)) {
+      mdtKeyed = true;
       sync(el, f);
       return;
     }
@@ -2647,21 +2968,24 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
     // `editAcrossContinued` のコメント参照）。DBCS は対象外（列ビューが絡み複雑になるため
     // 未対応。EDTMSK 欄は数値専用で実質起きない）。
     if (f.continued !== undefined && !isDbcsEdit(f)) {
-      // 合成バッファの先頭（＝並び全体の先頭区間の桁 0）まで戻っていれば、
-      // 単独欄の「欄の先頭」と同じく前の欄へ移る。
+      // 合成バッファの先頭（＝並び全体の先頭区間の桁 0）まで戻っていれば、単独欄の「欄の先頭」と同じく 0005
       if (continuedOffsetOf(f) + edit.cursor === 0) {
-        emit("field-prev", f.index);
+        emit("notice", MSG_PROTECTED);
         return;
       }
+      mdtKeyed = true; // 必ず適用される（`editAcrossContinued` が false を返すのは、挿入の余地が無いときだけ）
       editAcrossContinued(f, backspace);
       return;
     }
-    // **欄の先頭では削除せず前の欄の末尾へ移る**（原典どおり。`field-prev` のコメント参照）
+    // **欄の先頭の Backspace は操作員エラー 0005 で、カーソルは動かさない**（ACS `PS5250.processBackspace`: 1 桁左＝属性の桁で
+    // 削除を試み、欄の外なので失敗してカーソルを戻す。`20260921-backspace-field-start`）。実機（PUB400・ACS のコア）で 2 つの欄とも
+    // 0005・カーソルそのまま、続けて打った文字も受け付けなかった。~~前の欄の末尾へ移る~~（GNU tn5250 `kf_backspace` の動き）は破棄
     if (edit.cursor === 0) {
-      emit("field-prev", f.index);
+      emit("notice", MSG_PROTECTED);
       return;
     }
     edit = backspace(edit);
+    mdtKeyed = true; // 消えるものが無くても MDT（ACS `processDeleteChar` は `setMDT`）
     sync(el, f);
     return;
   }
@@ -2671,26 +2995,32 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       // 継続入力フィールドは区間をまたいで詰め直す（Backspace と同じ理由）。
       // 合成バッファの末尾では `del()` が無変化を返すだけなので、境界の事前判定は要らない。
       if (f.continued !== undefined && !isDbcsEdit(f)) {
+        mdtKeyed = true; // Backspace と同じ（必ず適用される）
         editAcrossContinued(f, del);
         return;
       }
       edit = del(edit);
     }
+    mdtKeyed = true;
     sync(el, f);
     return;
   }
-  if (ev.key === "Home" && plain) {
-    // 欄内はカーソルを先頭へ。ペインのフィールド移動へ伝播させない
+  // ~~Home: 欄内はカーソルを先頭へ（ペインへ伝播させない）~~ → ACS の Home は欄の先頭ではなく画面のホーム位置へ移り、
+  // 既にそこなら Record Backspace を送る（`PS5250.processHome`）。ペイン（`homeKey`）へ委譲する
+  if (ev.key === "Home" && plain) return;
+  // 割り当てが無ければ欄の末尾へ（ACS の既定 `B35 = [eof]` ＝ `PS5250.processEndField`）。利用者が End に
+  // 別の操作（Erase EOF 等）を割り当てていれば、ペインのキーマップへ委ねる
+  if (ev.key === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
-    edit = home(edit);
-    sync(el, f);
-    return;
-  }
-  if (ev.key === "End" && plain) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    edit = end(edit);
+    // 継続欄は区切りの鎖全体から探す（ACS `getEndPositionOfContField`。節目の点検の指摘: 区切り 1 つの中だけを見ていた）
+    if (f.continued !== undefined && !isDbcsEdit(f)) {
+      const lens = continuedRunOf(f).map((x) => visLen(x));
+      editAcrossContinued(f, (st) => ({ ...st, cursor: continuedEnd(st.chars, lens) }), true);
+      return;
+    }
+    // 行をまたぐ欄は今の行（この input の区切り）の先頭を下限にする
+    edit = end(edit, sliceOffsetOf(f, el));
     sync(el, f);
     return;
   }
@@ -2720,22 +3050,49 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   }
   // 印字可能な 1 文字（修飾なし）: 型・コードページ検証してから上書き/挿入
   if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+    // テンキーの − / ＋ は文字ではなく Field− / Field+（ペインの `classifyKey` が拾う。既定動作もそこで止める）
+    if (isNumpadSign(ev)) return;
     ev.preventDefault();
-    if (signKeyHack(f, ev.key)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
+    // **満杯まで打った後の文字はエラー 0018**（ACS `setErrorCode(24)`。値は変えない。実機で確認。場合 C）。
+    // ACS が見るのは「最終桁にカーソル＋出た」。挿入で「出た」ときはカーソルが 1 桁進んでいるので、上の入口で
+    // 状態が下り、そこでの文字は下の余地の判定で 0012 になる（`PS5250.processCharKeyStroke` の挿入の枝）
+    if (fieldExitedIndex === f.index) {
+      emit("notice", MSG_FIELD_EXIT_KEY_INVALID);
+      return;
+    }
     const ch = inputChar(ev.key, f); // MONOCASE 欄／カタカナ系 CCSID は英小文字を大文字化
-    const why = rejectReason(f, ch);
+    const why = rejectReason(f, ch, sessionKind.value);
     if (why) {
       emit("notice", MSG_BY_REASON[why]); // 型違反は理由を示して拒否（ACS 準拠）
       return;
     }
-    // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。`-` / `+` は上の
-    // `signKeyHack` で Field− / Field+ として拾われるので、ここへは来ない。
-    if (isSignPosition(f, edit.cursor, visLen(f))) {
-      emit("notice", MSG_BY_REASON["sign-position"]);
+    // **挿入モードは余地を数え、無ければエラー 0012 で値を変えない**（ACS `reserveRoomForInsert`。
+    // `20260921-insert-no-room`。以前は末尾を黙って切り捨て、符号付き数値欄では符号桁まで押し出して値が化けた）。
+    // 型の検査の後・符号桁の検査の前（符号桁は欄の最終桁なので ACS は 0012）。選択の置換は下の従来の経路
+    const inserting = edit.insertMode && (el.selectionStart ?? 0) === (el.selectionEnd ?? 0);
+    if (inserting && f.continued !== undefined) {
+      // 継続欄は全区間を 1 つの欄として数え・押し出す（実機の ACS。research F5）
+      mdtKeyed = true; // 置けなければ下で編集を出さずに終わるので、残った印は次の `sync` の前に下ろす
+      if (!editAcrossContinued(f, (s) => insertChar(s, ch, s.chars.length - 1), true)) {
+        mdtKeyed = false;
+        emit("notice", MSG_NO_ROOM);
+      }
       return;
     }
     let trial: EditState;
-    if (deleteSelection(f, el)) {
+    if (inserting) {
+      const t = insertChar(edit, ch, lastTypeable(f));
+      if (!t) {
+        emit("notice", MSG_NO_ROOM);
+        return;
+      }
+      trial = t;
+    } else if (isSignPosition(f, edit.cursor, visLen(f))) {
+      // **符号桁は打鍵で埋めない**（打てても送られない桁を作らない）。符号付き数値欄は数字しか通らない
+      // （`rejectReason`）ので、ここへ来るのは数字。符号は Field− / Field+ で付ける。
+      emit("notice", MSG_BY_REASON["sign-position"]);
+      return;
+    } else if (deleteSelection(f, el)) {
       // 選択を置換: 削除位置へ挿入（欄長維持・末尾溢れ切り捨て）
       const chars = [...edit.chars];
       chars.splice(edit.cursor, 0, ch);
@@ -2745,7 +3102,22 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       trial = typeChar(edit, ch);
     }
     if (!fitsBytes(trial, f)) return; // バイト予算（SO/SI・DBCS 込み）超過は拒否
+    // **Field Exit が必須の欄の最終桁に打ったら、カーソルはその桁に留めて「出た」状態にする**
+    // （ACS `processCharKeyStroke`: `cursorSBA == n4 && isFieldExitRequired()` で `fieldExited = true`、
+    // カーソルは進めない。実機でも RZ 欄は 3,25・6S0 は 19,25＝最終の数字桁に留まった。場合 A・C）。
+    // 行またぎの継続欄（EDTMSK）は最終区間の判定が要るので従来どおり（自動送りを止めるだけ）
+    // 挿入のときは「出た」を立ててもカーソルは 1 桁進む（ACS の挿入の枝は `fieldExited` の後も `++cursorSBA`）
+    const typedAt = trial.cursor - 1;
+    if (isFieldExitRequired(f) && f.continued === undefined && typedAt === lastTypeable(f)) {
+      edit = inserting ? trial : { ...trial, cursor: typedAt };
+      mdtKeyed = true;
+      sync(el, f);
+      fieldExitedIndex = f.index;
+      emit("field-exited", f.index);
+      return;
+    }
     edit = trial;
+    mdtKeyed = true;
     sync(el, f);
     advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
     return;
@@ -2769,35 +3141,39 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   const k = ev.key;
   // SBCS 欄と同じ理由で修飾キー付きは欄内編集で消費しない（ローカル編集キーの割り当てと二重に効く）
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  // 割り当ての無い修飾キー付きの Backspace・Delete は何もしない（SBCS 欄と同じ。ブラウザの語削除で <input> の値だけが変わるのを止める）
+  if ((k === "Backspace" || k === "Delete") && !plain && !hasKeyBinding(ev)) {
+    ev.preventDefault();
+    return;
+  }
   if (k === "Backspace" && plain) {
     ev.preventDefault();
     if (deleteSelection(f, el)) {
+      mdtKeyed = true;
       syncDbcs(el, f);
       return;
     }
-    // SBCS 欄と同じく、欄の先頭では前の欄の末尾へ移る（削除はしない）
+    // **欄の先頭では 0005 で止まる（SBCS 欄と同じ。カーソルも動かさない）**。~~前の欄の末尾へ移る~~・
+    // ~~DBCS 欄の ACS は原典の手順上 0101~~ は実測と違った——ACS のコアで O の欄の先頭と、J の欄の SO の後ろ
+    // （Tab で着く位置＝当 PJ の論理位置 0）で押すと、どちらも 0005 だった（`scripts/acs-probe/backspace-dbcs-field-start.txt`）
     if (edit.cursor === 0) {
-      emit("field-prev", f.index);
+      emit("notice", MSG_PROTECTED);
       return;
     }
     edit = dbcsBackspace(edit, f);
+    mdtKeyed = true;
     syncDbcs(el, f);
     return;
   }
   if (k === "Delete" && plain) {
     ev.preventDefault();
     if (!deleteSelection(f, el)) edit = dbcsDelete(edit, f);
+    mdtKeyed = true;
     syncDbcs(el, f);
     return;
   }
-  if (k === "Home" && plain) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    edit = { ...edit, cursor: 0 };
-    syncDbcs(el, f);
-    return;
-  }
-  if (k === "End" && plain) {
+  if (k === "Home" && plain) return; // ペインの `homeKey` へ委譲（SBCS 欄と同じ。ACS `processHome`）
+  if (k === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
     edit = end(edit); // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）
@@ -2822,7 +3198,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     }
     return;
   }
-  if (k === "Insert") {
+  if (k === "Insert" && !hasKeyBinding(ev)) {
     ev.preventDefault();
     edit = toggleInsert(edit);
     insertMode.value = edit.insertMode;
@@ -2830,10 +3206,10 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   }
   // 印字可能な 1 文字（修飾なし）: 型・バイト予算検証してから上書き（Insert 時は挿入）
   if (k.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+    if (isNumpadSign(ev)) return; // テンキーの − / ＋ はペインの Field− / Field+ へ（SBCS 欄と同じ）
     ev.preventDefault();
-    if (signKeyHack(f, k)) return; // 数値欄の `-` / `+` は Field− / Field+ へ
-    const ch = inputChar(k, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    const why = rejectReason(f, ch);
+    const ch = spaceToFullWidth(f, inputChar(k, f)); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化。J・G・E（DBCS 中）の Space は全角空白
+    const why = rejectReason(f, ch, sessionKind.value);
     if (why) {
       emit("notice", MSG_BY_REASON[why]);
       return;
@@ -2841,9 +3217,15 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
     const base = replaced ? { ...edit, insertMode: true } : edit;
-    const trial = dbcsType(base, ch, f);
-    if (!trial) return; // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）
+    const trial = dbcsType(base, ch, f, replaced);
+    if (!trial) {
+      // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
+      // （`20260921-insert-no-room` D2。最終桁の判定は `atLastColumn`——`20260921-dbcs-insert-room`）
+      if (base.insertMode && !replaced) emit("notice", MSG_NO_ROOM);
+      return;
+    }
     edit = { ...trial, insertMode: edit.insertMode };
+    mdtKeyed = true;
     syncDbcs(el, f);
     advanceIfFull(f); // ACS: バイト予算満杯なら次の入力欄へ
     return;
@@ -2941,6 +3323,7 @@ function onInputBlur(f: Field, ev: FocusEvent): void {
   if (!syncingFocus) {
     edit = undefined;
     editFieldIndex = -1;
+    fieldExitedIndex = -1;
   }
   el.value = displayText(stripSentinels(sliceValue(f, Number(el.dataset["slice"] ?? 0))));
   // フォーカスが外れたので、色付きオーバーレイを編集値で描き直す（元の値に戻さない）。
@@ -2959,7 +3342,7 @@ function dbcsSelection(f: Field, el: HTMLInputElement): { text: string; ls: numb
   const start = globalCaret(r, el.selectionStart ?? 0);
   const end = globalCaret(r, el.selectionEnd ?? 0);
   if (start >= end) return undefined;
-  const logical = (edit && editFieldIndex === f.index ? editValue(edit) : logicalValue(f)).replace(/ +$/, "");
+  const logical = trimPad(f, edit && editFieldIndex === f.index ? editValue(edit) : logicalValue(f));
   const { caretOf } = lay;
   let text = "";
   let ls = -1;
@@ -3048,7 +3431,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    if (!acceptsChar(field, ch)) {
+    if (!acceptsChar(field, ch, sessionKind.value)) {
       // **弾いた文字も桁を消費する（捨てて詰めない）。** ACS は入力不可文字の桁を
       // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
       // 数値欄 "123" に "3A5" を貼ると "353"（正: "325"）になる。
@@ -3060,12 +3443,12 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
     while (out.length < i) out.push(" ");
     // 打鍵と同じ規則で上書きする: 桁数が変わったぶんは直後で調整し、後続の桁を動かさない
     // （全角の上に半角を貼ると 2 桁が 1 桁になり、その先の文字まで左へ詰まっていた）
-    const before = dbcsByteLength(out.join(""));
+    const before = byteLen(out.join(""), field);
     out[i] = ch; // 上書き（後ろの既存文字はそのまま残る）
-    if (i < out.length - 1) keepByteLength(out, i, before, budget);
+    if (i < out.length - 1) keepByteLength(out, i, before, budget, field);
     i++;
   }
-  while (out.length > 0 && dbcsByteLength(out.join("")) > budget) out.pop();
+  while (out.length > 0 && byteLen(out.join(""), field) > budget) out.pop();
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3075,7 +3458,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 function firstRejection(field: Field, text: string): RejectReason | undefined {
   for (const raw of text) {
     if (raw === "\n" || raw === "\r") continue;
-    const why = rejectReason(field, inputChar(raw, field));
+    const why = rejectReason(field, inputChar(raw, field), sessionKind.value);
     if (why) return why;
   }
   return undefined;
@@ -3099,7 +3482,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
-  if (dbcsByteLength(out.join("")) > budget) return undefined; // 入り切らない
+  if (byteLen(out.join(""), field) > budget) return undefined; // 入り切らない
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -3200,7 +3583,7 @@ function pasteFrom(
         // （`overwriteInto` の「型違反も桁を消費する」は独立した欄どうしの話で、こちらとは別）。
         if (t.field.continued !== undefined) {
           let chars = [...rest]; // コードポイント単位（サロゲート対を割らない）
-          while (chars.length > 0 && !acceptsChar(t.field, chars[0]!)) chars = chars.slice(1);
+          while (chars.length > 0 && !acceptsChar(t.field, chars[0]!, sessionKind.value)) chars = chars.slice(1);
           rest = chars.join("");
           if (rest.length === 0) break;
         }
@@ -3264,7 +3647,7 @@ function pasteFrom(
         // （貼り付けで全角の並びが変わり得るため、貼る前のレイアウトでは桁が合わない）。
         // 変換せずに桁をそのまま入れると、カーソルが貼り付けた文字列の末尾側へ流れる。
         const chars = padDbcs(f, [...val]);
-        const lay = dbcsViewLayout(chars.join(""), soMark(), siMark());
+        const lay = dbcsViewLayout(chars.join(""), soMark(f), siMark(f));
         edit = {
           chars,
           cursor: lay.logicalAfter(lay.viewAtColumn(startOffset)),
@@ -3274,6 +3657,7 @@ function pasteFrom(
         edit = { ...initEdit(val, visLen(f), startOffset), insertMode: insertMode.value };
       }
       editFieldIndex = f.index;
+      mdtKeyed = true; // 貼った字は 1 字ずつの打鍵（ACS `pasteRect`）。同じ値でも MDT（SBCS 欄・複数行の主経路。節目 10 の独立点検 B-S2）
       sync(el, f);
     } else {
       emit("edit", field.index, val);
@@ -3329,6 +3713,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       edit = { ...edit!, cursor: lay.logicalOf(globalCaret(rangeOfInput(f, el, lay), vc)) };
     }
     let e: EditState = edit!;
+    const start = e;
     const at = e.cursor;
     if (e.insertMode) {
       const why = firstRejection(f, text);
@@ -3343,11 +3728,16 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     }
     for (const raw of [...text]) {
       const ch = inputChar(raw, f);
-      if (!acceptsChar(f, ch)) continue;
+      if (!acceptsChar(f, ch, sessionKind.value)) continue;
       const trial = dbcsType(e, ch, f);
-      if (!trial || !fitsBytes(trial, f)) break; // 上書きは入るところまで
+      if (!trial || !fitsBytes(trial, f)) {
+        // 上書きは入るところまで。挿入は事前の検査（欄全体の余地）を通っても、最終桁の 0012（`atLastColumn`）で止まりうる
+        if (e.insertMode) emit("notice", MSG_NO_ROOM);
+        break;
+      }
       e = trial;
     }
+    mdtKeyed = e !== start; // 1 字でも置けたら（ACS の貼り付けは 1 字ずつの打鍵）
     edit = { ...e, cursor: at }; // ペーストではカーソルを動かさない（ACS）
     sync(el, f);
     return;
@@ -3412,24 +3802,81 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
-  // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを
-  // composeStart から流し込む（型フィルタ・バイト予算クランプ）。超過分は切り捨てる。
+  // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを composeStart から流し込む（型フィルタ・バイト予算）。
+  // 欄に入りきらない余りは、満杯で次の欄へ送るときに**次の欄へ流す**（ACS は確定した字を 1 字ずつの打鍵として処理する）
+  const rest = commitInto(f, el, [...el.value].slice(composePrefixLen), composeStart, composeReplacedSelection);
+  composeReplacedSelection = false;
+  if (rest !== undefined && rest.length > 0) void flowToNextField(f, rest);
+}
+
+/**
+ * **確定した字（`raws`）を欄 `f` の `start` 桁から 1 字ずつ打鍵として流し込む。** 入りきらなかった余りを返す
+ * （挿入で入らなければエラー 0012 を出して `undefined`＝余りは捨てる。満杯でなければ余りは無い）。
+ * 満杯になれば ACS と同じく次の欄へ送る通知（`advanceIfFull`）を出すので、余りがあれば呼び出し側が次の欄へ流す（`flowToNextField`）
+ */
+function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], start: number, replacedSelection: boolean): string[] | undefined {
   const dbcs = isDbcsEdit(f);
-  let e: EditState = { ...edit, cursor: composeStart };
-  for (const raw of [...el.value].slice(composePrefixLen)) {
-    const ch = inputChar(raw, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    if (!acceptsChar(f, ch)) continue;
+  let e: EditState = { ...edit!, cursor: start };
+  let noRoom = false;
+  let i = 0;
+  for (; i < raws.length; i++) {
+    // 上書きで欄の末尾に着いていたら、これ以上は入らない（余りを次の欄へ流す）。SBCS の `typeChar` は末尾で同じ状態を返して黙って捨てる。
+    // **型の検査より先に見る**——ACS は 1 字ずつの打鍵で、欄が満杯になった時点でカーソルは次の欄へ移っており、続く字は**次の欄の型**で検査される。
+    // 検査の後に置くと、満杯の欄が受けない字（数値欄へ `12AB` の `A` など）が `continue` で捨てられ、次の欄が受けられても届かない（独立点検 B-S1）。
+    // DBCS も同じ条件（`advanceIfFull` の満杯判定と同じ。DBCS の `chars` も欄の長さまで空白で詰めてあり、予算が尽きれば `absorbDbcs` が空白を削って短くなる）
+    // DBCS で選択を置き換えた回だけは除く（跡を埋める挿入なので、`chars` の末尾に着いても満杯とは限らない）
+    if (!e.insertMode && (!dbcs || !replacedSelection) && e.cursor >= e.chars.length) break;
+    const ch = inputChar(raws[i]!, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
+    if (!acceptsChar(f, ch, sessionKind.value)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
-    const base = composeReplacedSelection ? { ...e, insertMode: true } : e;
-    const trial = dbcs ? dbcsType(base, ch, f) : typeChar(e, ch);
-    if (!trial || !fitsBytes(trial, f)) break; // 桁超過分は切り捨て
+    const base = replacedSelection ? { ...e, insertMode: true } : e;
+    // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
+    // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
+    // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が
+    // 通知なしに消えていた。独立点検の指摘）
+    const trial = dbcs ? dbcsType(base, ch, f, replacedSelection) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
+    if (!trial || !fitsBytes(trial, f)) {
+      noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで止める。余りは次の欄へ流す）
+      break;
+    }
     e = { ...trial, insertMode: e.insertMode };
   }
+  const placed = e.chars !== edit!.chars; // 1 字でも置けたか（ACS は確定した字を 1 字ずつ打鍵として処理する）
   edit = e;
   editFieldIndex = f.index;
+  mdtKeyed = placed;
   sync(el, f);
+  if (noRoom) {
+    emit("notice", MSG_NO_ROOM);
+    return undefined;
+  }
+  const rest = raws.slice(i);
   advanceIfFull(f); // ACS: IME 確定で満杯なら次の入力欄へ
+  return rest;
+}
+
+/**
+ * **IME で確定した字の余りを次の入力欄へ流す。** 満杯で次の欄へ送る（`advanceIfFull` が出した `field-full`）と、ペインが次の欄へフォーカスを移すので、
+ * 移った欄の先頭から続きを打鍵として流し込む。次の欄へ移れなかった（FER・自動 Enter・最後の欄で巡回して同じ欄・保護欄しかない）ときは捨てる
+ * （ACS は自動送りが起きなければ、以降の打鍵が入らない）。1 欄ぶん進むごとに繰り返す
+ */
+async function flowToNextField(from: Field, rest: string[]): Promise<void> {
+  let prev = from;
+  let left = rest;
+  for (let guard = 0; guard < 16 && left.length > 0; guard++) {
+    await nextTick();
+    const el = document.activeElement;
+    if (!(el instanceof HTMLInputElement) || !gridEl.value?.contains(el)) return;
+    const idx = Number(el.dataset["fieldIndex"]);
+    const next = props.snapshot.fields.find((x) => x.index === idx);
+    if (!next || next.protected || next.index === prev.index) return; // 動かなかった
+    if (!edit || editFieldIndex !== next.index) beginEdit(next, el);
+    const more = commitInto(next, el, left, 0, false);
+    if (more === undefined) return;
+    prev = next;
+    left = more;
+  }
 }
 
 // ---- クリックでカーソル位置を算出（非入力セル。入力欄は @focus/@click で扱う） ----
@@ -3572,7 +4019,7 @@ function copyViewOf(f: Field): string {
     const resting = editFieldIndex !== f.index && props.edits.get(f.index) === undefined;
     const view = resting || recodeViewActive(f)
       ? restViewFromCells(f, () => SHIFT_MARK)
-      : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), SHIFT_MARK, SHIFT_MARK).view;
+      : dbcsViewLayout(padDbcs(f, [...logicalValue(f)]).join(""), noShift(f) ? "" : SHIFT_MARK, noShift(f) ? "" : SHIFT_MARK).view;
     return displayText(view); // 外字は残す（センチネルは DBCS 欄の値には入らない）
   }
   return displayText(stripSentinels(inputValue(f)));
@@ -3865,14 +4312,28 @@ function pasteAt(row: number, col: number, text: string): void {
   pasteFrom({ row, col }, text);
 }
 
+/**
+ * **編集中の欄で、キャレットがその欄（行またぎ欄は全スライス）の先頭にあるか**。編集中でなければ `undefined`。
+ * ペインの Backtab が「欄の途中ならその欄の先頭で止まる」を決めるのに使う（ACS `processBacktab`）。
+ * 継続欄の 2 区間目以降はペインが先に並びの先頭区間へ寄せるので、ここは区間の中だけを見ればよい。
+ * keydown はまず欄の input に届き、ここで native caret から論理位置を取り直してからペインへ委譲されるので、
+ * 見る値はその打鍵の時点のもの。DBCS 欄も論理位置で見る（SO の直後＝先頭。ACS は SO の手前へ 1 つ戻してから探す）
+ */
+function caretAtFieldStart(): boolean | undefined {
+  if (!edit || editFieldIndex < 0) return undefined;
+  return edit.cursor === 0;
+}
+
 defineExpose({
   setBlockSelection,
+  caretAtFieldStart,
   clearBlockSelection: clearRectSel,
   setDbcsCaretAtColumn,
   pasteAt,
   // ローカル編集キー（ホストへ送らない）。ペインの onLocal から呼ぶ
   fieldExit: fieldExitKey,
   eraseEof: eraseEofKey,
+  deleteWord: deleteWordKey,
   eraseInput: eraseInputKey,
   fieldMinus: () => fieldSignKey(true),
   fieldPlus: () => fieldSignKey(false),

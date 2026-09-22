@@ -93,3 +93,23 @@ export function buildQueryReply(
   // opcode は PUT_GET(0x03)・フラグ 2 バイト目 0x80。ACS 実機はこれで返す。
   return buildRecord(OPCODE.PUT_GET, t, {}, CLIENT_FLAG2);
 }
+
+/**
+ * **WSF クラス D9・種類 72 への応答**（ACS `DS5250.processWSF` の case 114。`20260921-wsf-d9-72`）。
+ * ヘッダは Query Reply と同じ（PUT_GET・AID 0x88）。中身は ACS と同じ 2 通り:
+ * - フラグに 0x40 が立ち、次のバイトが 0 → `D9 72 C0 00` と CCSID 13488・17584・1200（Unicode の申告）
+ * - それ以外 → `D9 72 80 00 03 01 04`
+ * フラグに 0x80 が立っていれば ACS は応答せず否定応答（センス・コード 0x10050112）を返す——`wtd-applier.ts` が否定応答にする
+ * （`20260921-negative-responses`。~~当 PJ は否定応答を持たないので応答しない~~）。ここでは `undefined`。
+ * 社内機で DSM に出させた ACS のコアの応答と、**ホストが読んだデータ部が**バイト単位で同じ（`scripts/host-src/dscmd.c` の `WSF72` / `WSF72N`）。
+ * ~~バイト単位で同じ~~——レコードの長さは違う: ACS は末尾の `FF EF` まで長さに数える（`DS5250.processWSF` の case 114。22 バイトのレコードで
+ * LL=0x0018）。当 PJ は正しい長さを送り、ホストはどちらも受け付けた（節目の点検の指摘）
+ */
+export function buildWsfD972Reply(flags: number, next: number): Uint8Array | undefined {
+  if ((flags & 0x80) !== 0) return undefined;
+  const sf =
+    (flags & 0x40) !== 0 && next === 0
+      ? [0x00, 0x0c, 0xd9, 0x72, 0xc0, 0x00, 0x34, 0xb0, 0x44, 0xb0, 0x04, 0xb0]
+      : [0x00, 0x09, 0xd9, 0x72, 0x80, 0x00, 0x03, 0x01, 0x04];
+  return buildRecord(OPCODE.PUT_GET, Uint8Array.from([0x00, 0x00, 0x88, ...sf]), {}, CLIENT_FLAG2);
+}

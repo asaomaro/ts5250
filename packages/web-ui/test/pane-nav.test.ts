@@ -111,15 +111,61 @@ describe("EmulatorPane フィールド移動（Tab / 矢印）", () => {
     w.unmount();
   });
 
-  it("Home/End で最初/最後の入力欄へ（欄外＝ペインにフォーカス時）", async () => {
+  // ~~End で最後の入力欄へ~~ → ACS `PS5250.processEndField`: 欄の外の End は**カーソルより後で始まる最初の入力欄**（無ければ先頭へ巡回）の
+  // 末尾へ（`20260921-end-outside-field`）。Home はホーム位置（`20260921-home-record-backspace`）
+  /** 画面のカーソルを欄の外に置いてから開く（開いたときの自動フォーカスが欄へ移さないように） */
+  async function mountAt(row: number, col: number) {
+    const st = sessionsStore.byId.get(SID)!;
+    st.snapshot = { ...st.snapshot!, cursor: { row, col } };
     const w = mountPane();
-    await nextTick(); // マウント時の自動フォーカスを先に確定させる
+    await nextTick();
+    return w;
+  }
+
+  it("欄の外の End はカーソルより後の最初の入力欄へ（無ければ先頭へ巡回）", async () => {
+    let w = await mountAt(6, 1); // 行 6 の欄（10 桁目）より前の欄の外
+    await w.find(".pane").trigger("keydown", { key: "End" });
+    expect(document.activeElement, "行 6 の欄へ行かない").toBe(inputs(w)[1]);
+    w.unmount();
+    w = await mountAt(20, 1); // どの欄よりも後
+    await w.find(".pane").trigger("keydown", { key: "End" });
+    expect(document.activeElement, "先頭へ巡回しない").toBe(inputs(w)[0]);
+    w.unmount();
+  });
+
+  it("継続欄は先頭の区切りだけを行き先にする（途中・最後の区切りへは行かない。ACS も同じ）", async () => {
+    seed([
+      { ...field(1, 5), continued: "first" },
+      { ...field(2, 7), continued: "last" }
+    ]);
+    const w = await mountAt(6, 1); // 最後の区切り（行 7）より前、先頭の区切り（行 5）より後
+    await w.find(".pane").trigger("keydown", { key: "End" });
+    // 行 7 の区切りは行き先にならない → 先頭へ巡回して継続欄の先頭の区切り
+    expect(document.activeElement).toBe(inputs(w)[0]);
+    w.unmount();
+  });
+
+  it("Home は先頭の入力欄へ（欄外＝ペインにフォーカス時）", async () => {
+    const w = mountPane();
+    await nextTick();
     const els = inputs(w);
     (w.find(".pane").element as HTMLElement).focus();
-    await w.find(".pane").trigger("keydown", { key: "End" });
-    expect(document.activeElement).toBe(els[2]);
     await w.find(".pane").trigger("keydown", { key: "Home" });
     expect(document.activeElement).toBe(els[0]);
+    w.unmount();
+  });
+
+  it("欄の外の End は着いた欄の**末尾**に置く（入力の直後。最後の桁まで埋まっていれば最後の桁）", async () => {
+    seed([{ ...field(1, 5), value: "AB" }, { ...field(2, 8), value: "CDEFG" }]);
+    let w = await mountAt(1, 1);
+    await w.find(".pane").trigger("keydown", { key: "End" });
+    expect(document.activeElement).toBe(inputs(w)[0]);
+    expect(inputs(w)[0]!.selectionStart, "入力の直後").toBe(2);
+    w.unmount();
+    w = await mountAt(6, 1);
+    await w.find(".pane").trigger("keydown", { key: "End" });
+    expect(document.activeElement).toBe(inputs(w)[1]);
+    expect(inputs(w)[1]!.selectionStart, "埋まっていれば最後の桁").toBe(4);
     w.unmount();
   });
 
@@ -635,6 +681,31 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     await w.find(".pane").trigger("keydown", { key: "ArrowLeft", ctrlKey: true });
     await nextTick();
     expect(w.find(".cursor").attributes("style")).toContain("left: 0ch");
+    w.unmount();
+  });
+});
+
+describe("欄の外の End（節目の点検の指摘）", () => {
+  it("**施錠中でも繰り返さない**（合成した End がペインへ戻らない）", async () => {
+    seed([field(1, 5), field(2, 6)]);
+    const st = sessionsStore.byId.get(SID)!;
+    st.snapshot = { ...st.snapshot!, cursor: { row: 1, col: 1 }, keyboardLocked: true };
+    (st as unknown as { macro: unknown }).macro = { mode: "playing", steps: [], index: 0 };
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    let ends = 0;
+    const orig = HTMLInputElement.prototype.dispatchEvent;
+    HTMLInputElement.prototype.dispatchEvent = function (ev: Event) {
+      if ((ev as KeyboardEvent).key === "End") ends++;
+      if (ends > 5) throw new Error("End が繰り返された");
+      return orig.call(this, ev);
+    };
+    try {
+      await w.find(".pane").trigger("keydown", { key: "End" });
+    } finally {
+      HTMLInputElement.prototype.dispatchEvent = orig;
+    }
+    expect(ends).toBeLessThanOrEqual(1);
     w.unmount();
   });
 });

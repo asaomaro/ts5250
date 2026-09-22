@@ -10,7 +10,7 @@ import { FFW } from "../src/protocol/constants.js";
  * 属性バイトを置くまで、色は前の区間から引き継がれるのが正しい（ACS と実機がそう見せる）。
  *
  * 属性の打ち切り（`fieldEnds`）に区間の終端を含めていたため、**区切り文字だけ既定色（緑）に
- * 戻り、下線も切れて**いた（実機 `ASAOLIB/DTMPGM` の `D8U`＝`COLOR(WHT)`＋`DSPATR(UL)` で
+ * 戻り、下線も切れて**いた（実機 `TESTLIB/DTMPGM` の `D8U`＝`COLOR(WHT)`＋`DSPATR(UL)` で
  * 実測: 区切りの色が `rgb(26,127,55)`＝緑、下線なし。利用者のスクリーンショット報告と同じ形）。
  */
 

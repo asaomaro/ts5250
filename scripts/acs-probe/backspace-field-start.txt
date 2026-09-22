@@ -1,0 +1,10 @@
+# 欄の先頭で Backspace（ACS のコア。`20260921-backspace-field-start`）。PUB400 のサインオン画面（サインオンしない）。
+# 実測: 2 つ目の欄（パスワード）の先頭で Backspace → cursor そのまま・inhibit=5（0005）、続けて打った AB も受け付けない。
+# 1 つ目の欄の先頭でも同じ（Reset の後、1 文字打ってからの Backspace は普通に消えて戻る）。
+settle 1500
+keys [tab]
+dump
+keys [backspace]
+dump
+keys AB
+dump

@@ -200,7 +200,7 @@ try {
   check("全桁充填のメッセージが出る", (await statusText()).includes("すべての桁"), await statusText());
 
   // --- F3 は止めない（必須欄が空でも画面から出られる） ---
-  await page.keyboard.press("Control+Backspace"); // Erase Input で全欄を空へ（ME を空に戻す）
+  await page.keyboard.press("Alt+End"); // Erase Input（既定）で全欄を空へ（ME を空に戻す。Ctrl+Backspace は何もしない）
   await sleep(400);
   check("前提: Erase Input で必須欄が空になった", (await valueOf(4)).trim() === "");
   await page.keyboard.press("F3");

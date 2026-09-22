@@ -1,0 +1,38 @@
+events:
+  - { ts: 2026-09-21T06:49:11Z, phase: requirements, event: start }
+  - { ts: 2026-09-21T06:49:11Z, phase: requirements, event: doccheck, metrics: { stage: start, phase: requirements, mode: same_session, size: 2214 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: requirements, event: doccheck, metrics: { stage: report, phase: requirements, findings: 0 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: research, event: start }
+  - { ts: 2026-09-21T06:49:12Z, phase: design, event: start }
+  - { ts: 2026-09-21T06:49:12Z, phase: design, event: doccheck, metrics: { stage: start, phase: design, mode: same_session, size: 979 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: design, event: doccheck, metrics: { stage: report, phase: design, findings: 0 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: tasks, event: start }
+  - { ts: 2026-09-21T06:49:12Z, phase: tasks, event: doccheck, metrics: { stage: start, phase: tasks, mode: same_session, size: 595 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: tasks, event: doccheck, metrics: { stage: report, phase: tasks, findings: 0 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: requirements, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session, ac_total: 3, ac_covered: 3, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: research, event: approved }
+  - { ts: 2026-09-21T06:49:12Z, phase: design, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session } }
+  - { ts: 2026-09-21T06:49:12Z, phase: tasks, event: approved, metrics: { tasks_planned: 3, tasks_anchored: 3, doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session, ac_total: 3, ac_covered: 3, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-21T06:49:12Z, phase: coding, event: start }
+  - { ts: 2026-09-21T06:49:12Z, phase: coding, event: approved, metrics: { tasks_done: 3, unplanned_lookups: 0, task_checks: 0 } }
+  - { ts: 2026-09-21T06:49:31Z, phase: test, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-21T06:49:31Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
+  - { ts: 2026-09-21T06:49:31Z, phase: test, event: approved, metrics: { passed: 57, failed: 0 } }
+  - { ts: 2026-09-21T06:49:31Z, phase: review, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-21T06:49:31Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 3, ac_covered: 3, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-21T06:49:37Z, phase: deliver, event: start }
+  - { ts: 2026-09-21T06:49:37Z, phase: deliver, event: approved, metrics: { files_changed: 3, insertions: 210, deletions: 87 } }
+  - { ts: 2026-09-21T06:49:48Z, phase: deliver, event: approved, metrics: { files_changed: 3, insertions: 166, deletions: 88, amend: yes } }
+  - { ts: 2026-09-21T07:39:05Z, phase: review, event: sent_back }
+  - { ts: 2026-09-21T07:39:05Z, phase: deliver, event: sent_back, metrics: { by: unapprove } }
+  - { ts: 2026-09-21T07:39:05Z, phase: review, event: sent_back, metrics: { by: unapprove } }
+  - { ts: 2026-09-21T07:39:06Z, phase: test, event: sent_back, metrics: { by: unapprove } }
+  - { ts: 2026-09-21T07:39:06Z, phase: coding, event: sent_back, metrics: { by: unapprove } }
+  - { ts: 2026-09-21T07:39:06Z, phase: coding, event: start }
+  - { ts: 2026-09-21T07:39:06Z, phase: coding, event: approved, metrics: { tasks_done: 3, unplanned_lookups: 0, task_checks: 0 } }
+  - { ts: 2026-09-21T07:39:06Z, phase: test, event: start, metrics: { marks: 4 } }
+  - { ts: 2026-09-21T07:39:06Z, phase: test, event: approved, metrics: { passed: 71, failed: 0 } }
+  - { ts: 2026-09-21T07:39:06Z, phase: review, event: start, metrics: { marks: 6 } }
+  - { ts: 2026-09-21T07:39:06Z, phase: review, event: approved, metrics: { must: 0, should: 6, nit: 2, ac_total: 3, ac_covered: 3, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-21T07:39:06Z, phase: deliver, event: start }
+  - { ts: 2026-09-21T07:39:06Z, phase: deliver, event: approved, metrics: { files_changed: 3, insertions: 294, deletions: 164 } }

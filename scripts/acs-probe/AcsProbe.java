@@ -44,24 +44,44 @@ public class AcsProbe {
   private static final PrintStream ERR = new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8);
   private static ECLPS ps;
   private static ECLOIA oia;
+  /** 通信状態（`GetCommStatus`）と実際に効いている自動再接続の設定を dump に出すため */
+  private static ECLSession sess;
 
   /** 手順の誤り（未定義の命令・引数の書式・未設定の変数）。流す前に止めるため、実機に繋ぐ前に検査する */
   private static final class StepError extends Exception {
     StepError(String m) { super(m); }
   }
 
-  /** 空でない行・カーソル（1 始まりの行,桁）・入力禁止の状態を出す。DBCS は 1 文字が 2 桁ぶん重複して出る（TEXT_PLANE の仕様） */
+  /** 空でない行・カーソル（1 始まりの行,桁）・入力禁止・挿入モードの状態を出す。DBCS は 1 文字が 2 桁ぶん重複して出る（TEXT_PLANE の仕様） */
   private static void dump(String label) throws Exception {
     int rows = ps.GetSizeRows(), cols = ps.GetSizeCols();
     char[] buf = new char[rows * cols + 1];
     ps.GetScreen(buf, rows * cols, ECLPS.TEXT_PLANE);
     int pos = ps.GetCursorPos();
     OUT.print("=== " + label + " cursor=" + ((pos - 1) / cols + 1) + "," + ((pos - 1) % cols + 1)
-        + " inhibit=" + oia.InputInhibited() + "\n");
+        + " inhibit=" + oia.InputInhibited() + " insert=" + oia.IsInsertMode() + commInfo() + "\n");
     for (int r = 0; r < rows; r++) {
       String line = new String(buf, r * cols, cols);
       if (!line.isBlank()) OUT.print(String.format("%02d|%s", r + 1, line.replaceAll("\\s+$", "")) + "\n");
     }
+  }
+
+  /**
+   * 通信状態と、**実際に効いている** `autoReconnect`（private なのでリフレクションで読む）。
+   * 設定を渡しただけでは効いたか分からない——効いていないのに「再接続しなかった」と読むと
+   * 陰性と取り違える。
+   */
+  private static String commInfo() {
+    if (sess == null) return "";
+    String ar = "?";
+    try {
+      java.lang.reflect.Field f = com.ibm.eNetwork.ECL.ECLConnection.class.getDeclaredField("autoReconnect");
+      f.setAccessible(true);
+      ar = String.valueOf(f.getBoolean(sess));
+    } catch (Exception e) {
+      ar = "読めず(" + e.getClass().getSimpleName() + ")";
+    }
+    return " commStatus=" + sess.GetCommStatus() + " started=" + sess.IsCommStarted() + " autoReconnect=" + ar;
   }
 
   /** 入力禁止が解けるまで（最長 15 秒）待ち、さらに ms 待つ。応答が複数レコードに分かれる画面のため、解けた直後には読まない */
@@ -163,18 +183,63 @@ public class AcsProbe {
     // 装置名は既定では指定しない（ホストに採らせる）。新規の名前は自動構成が効かない実機がある
     String dev = env("PROBE_DEVNAME", "");
     if (!dev.isEmpty()) p.put(ECLSession.SESSION_WORKSTATION_ID, dev);
+    // **自動再接続**（既定は指定しない＝ECL の既定 false）。ECL のコアは `SESSION_AUTORECONNECT`
+    // を既定 false で読むが、ACS の GUI が使う HOD の bean（`HODDefaults`）は true にしている。
+    // 切断後の挙動を ACS の GUI に寄せて測るときだけ `PROBE_AUTORECONNECT=true` を渡す
+    String ar = env("PROBE_AUTORECONNECT", "");
+    if (!ar.isEmpty()) p.put("SESSION_AUTORECONNECT", ar);
+    // **拡張 5250（ENPTUI）**（既定は指定しない＝ECL・HOD の既定 false）。利用者の ACS は有効で動いている
+    // ——タップで採った Query Reply が `DS5250` の `bENPTUI` 真の値（0x0F・0xC8）だった（`query-reply.ts`）。
+    // 無効だとホストは EDTMSK の欄を継続欄に割らずに送るので、継続欄を測るときは `PROBE_ENPTUI=true` を渡す
+    String enptui = env("PROBE_ENPTUI", "");
+    if (!enptui.isEmpty()) p.put(ECLSession.SESSION_ENPTUI, enptui);
+    // **ACS の自動サインオン（Bypass Signon）**（既定は使わない）。`clear` で平文、`encrypted` で代替パスワード。
+    // `NVT5250.getHostDeviceOptions` が読むプロパティで、パスワードは ACS 自身の `PasswordCipher` で暗号化して渡す
+    // （製品の外で動くプローブでは `AcsOnly.initBypassSignon` が何もしないので、ここで渡した種別がそのまま効く）。
+    // NEW-ENVIRON を `tap-proxy.mjs` で採るときに使う。手順の `signon` は使わない（ホストが画面を飛ばす）
+    // **コードページのキー**（GUI の ACS がセッション設定から入れる `codePageKey`。既定は入れない）。KBDTYPE は
+    // `CodePage.getKbdType(codePageKey)` で引かれるので、入れないと空白 3 つになる（GUI の ACS の値ではない）。
+    // 例: 1399 は `KEY_JAPAN_ENGLISH_EX_EURO`、939 は `KEY_JAPAN_ENGLISH_EX`、930 は `KEY_JAPAN_KATAKANA`、37 は `KEY_US`
+    String cpKey = env("PROBE_CODEPAGE_KEY", "");
+    if (!cpKey.isEmpty()) p.put("codePageKey", cpKey);
+    // **関連付けプリンター**（既定は指定しない）。ACS の「プリンターの関連付け」で装置名を直接書いたときに
+    // 表示セッションへ入るプロパティ（`AssociatedPrinterSession5250` が `associatedDeviceName` に写す）。
+    // `NVT5250` はこれが空白でなければ NEW-ENVIRON に IBMASSOCPRT を足す（`20260921-associated-printer`）
+    String assoc = env("PROBE_ASSOC_PRINTER", "");
+    if (!assoc.isEmpty()) p.put("associatedDeviceName", assoc);
+    String bypass = env("PROBE_BYPASS_SIGNON", "");
+    if (!bypass.isEmpty()) {
+      p.put("ssoEnabled", "true");
+      p.put("ssoType", bypass.equals("encrypted") ? "ssoBypassSignonEncrypted" : "ssoBypassSignonClearText");
+      p.put("ssoBypassSignonUserid", env(prefix + "_USER", ""));
+      p.put("ssoBypassSignonPassword", com.ibm.eNetwork.HOD.common.PasswordCipher.encrypt(env(prefix + "_PASSWORD", "")));
+      // 暗号化（代替パスワード）の計算に使うパスワード・レベル。製品の ACS はサインオン・サーバーに聞いて入れる
+      // （`AcsOnly.initBypassSignon`）が、製品の外のプローブでは入らないので渡す（`PROBE_PASSWORD_LEVEL`。既定は入れない）
+      String pwLevel = env("PROBE_PASSWORD_LEVEL", "");
+      if (!pwLevel.isEmpty()) p.put("ssoBypassSignonPasswordLevel", pwLevel);
+    }
 
     // 最後まで流れたときだけ 0 にする（途中で何が起きても、既定は「途中で止まった」）
     int code = 4;
     ECLSession s = null;
     try {
       s = new ECLSession(p);
+      sess = s;
       s.StartCommunication();
       ps = s.GetPS();
       oia = s.GetOIA();
       long end = System.currentTimeMillis() + 20000;
       while (!s.IsCommStarted() && System.currentTimeMillis() < end) Thread.sleep(100);
       // **繋がらないまま手順へ進まない**——空の画面を dump して 0 で終わると、失敗が合格に見える
+      // **自動再接続の実効値は、接続が確立してから立てる。** 接続開始の処理が設定から
+      // 読み直して上書きするので、`StartCommunication` の前に立てても false に戻る
+      // （プロパティ `SESSION_AUTORECONNECT` 経由も、事前のリフレクションも、dump で false と確認）。
+      // ACS の GUI は HOD の bean（`HODDefaults` の autoReconnect=true）で有効にしているので、それに寄せる
+      if ("true".equals(ar) && s.IsCommStarted()) {
+        java.lang.reflect.Field f = com.ibm.eNetwork.ECL.ECLConnection.class.getDeclaredField("autoReconnect");
+        f.setAccessible(true);
+        f.setBoolean(s, true);
+      }
       if (!s.IsCommStarted()) {
         ERR.print("接続できませんでした（20 秒）。ホスト・ポート・ネットワークを確かめてください\n");
         code = 3;

@@ -279,7 +279,7 @@ try {
   // ---- 接続（システムを選ぶ → セッションを接続）----
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector(".launcher", { timeout: 20000 });
-  // **名前は前方一致で拾わない。** `AS01` は `AS013270` / `AS01VT` にも含まれるので、
+  // **名前は前方一致で拾わない。** `DEV1` は `DEV13270` / `DEV1VT` にも含まれるので、
   // カード見出しの**テキストノードだけ**（アイコンと種別チップを除いた本体）と突き合わせる
   const clickCard = (name, label) =>
     page.evaluate(

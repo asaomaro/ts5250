@@ -3,13 +3,14 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 
 /**
  * **EDTMSK で分割された欄は、ACS と同じく「1 つの入力欄」として編集する。**
  *
  * ホストは EDTMSK で割った数値欄を、区切り文字（`/`）を挟んだ**複数の別々の欄**として送る
  * （`Field.continued` = first/middle/last）。区間ごとに独立した input として扱うと
- * **Backspace / Delete が区切りの前後で止まる**——実機（`ASAOLIB/DTMPGM` の `D8U`）で
+ * **Backspace / Delete が区切りの前後で止まる**——実機（`TESTLIB/DTMPGM` の `D8U`）で
  * `2026/08/25` の末尾から Backspace を 3 回押しても `2026/08/` までしか消えず、
  * 先頭で Delete を押しても最初の区間しか詰まらなかった。
  *
@@ -113,13 +114,15 @@ describe("EDTMSK 分割欄の Backspace / Delete は区間をまたぐ", () => {
     w.unmount();
   });
 
-  it("並び全体の先頭では削除せず前の欄へ移る（単独欄と同じ）", async () => {
+  // ~~並び全体の先頭では前の欄へ移る~~ → 単独欄と同じく 0005 で動かない（ACS。`20260921-backspace-field-start`）
+  it("並び全体の先頭では削除せず 0005（単独欄と同じ）", async () => {
     const fields = dateFields();
     const w = mountGrid(fields);
     await nextTick();
     await focusAt(w, 0, 0);
     await press(w, inputs(w)[0]!, "Backspace");
-    expect(w.emitted("field-prev")).toBeTruthy();
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("field-prev")).toBeUndefined();
     expect(values(w, fields)).toEqual(["2026", "08", "25"]); // 何も消えない
     w.unmount();
   });

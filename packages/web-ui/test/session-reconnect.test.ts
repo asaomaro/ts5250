@@ -58,7 +58,8 @@ import {
   MSG_NOT_CONNECTED,
   MSG_NO_RESPONSE,
   MSG_SESSION_ENDED,
-  wsErrorNotice
+  wsErrorNotice,
+  startupStartedText
 } from "../src/composables/opMessages.js";
 
 function snap(keyboardLocked = false): ScreenSnapshot {
@@ -277,6 +278,31 @@ describe("転送断からの繋ぎ直し", () => {
     // reactive でラップされるので同一性ではなく値で見る
     expect(s.snapshot).toStrictEqual(later);
     expect(s.cursor).toEqual({ row: 7, col: 9 });
+  });
+
+  /**
+   * **ホストへの繋ぎ直しの状態も上書きする**（`20260921-auto-reconnect`。独立点検の指摘）。
+   * 留守中にホストへ繋ぎ直せていたら `host-reconnected` は届いていない——`hostReconnect` が残ると、
+   * 以後の送信が黙って捨てられ、タブを開き直すしかなくなる。
+   */
+  it("**留守中にホストへ繋ぎ直せていたら、「繋ぎ直し中」を消して送れるようにする**", async () => {
+    const s = await open();
+    clients[0]!.handlers.onServerMessage({ type: "host-reconnecting", attempt: 2, reason: "x" });
+    expect(s.hostReconnect, "前提").toEqual({ attempt: 2 });
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap(), pcCommand: false });
+    expect(s.hostReconnect, "繋ぎ直し中が残った").toBeUndefined();
+  });
+
+  it("繋ぎ直しの途中に戻ったら、「繋ぎ直し中」を取り込む", async () => {
+    const s = await open();
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({
+      type: "opened", sessionId: "s1", screen: snap(true), pcCommand: false, hostReconnect: { attempt: 3 }
+    });
+    expect(s.hostReconnect).toEqual({ attempt: 3 });
   });
 
   it("繋ぎ直しの `opened` から予約状態も取り込む（覆いが実態とずれない）", async () => {
@@ -776,5 +802,38 @@ describe("転送断からの繋ぎ直し", () => {
 
     expect(inflight.send).toHaveBeenCalledWith({ type: "close" });
     expect(inflight.close).toHaveBeenCalled();
+  });
+});
+
+/**
+ * **ブラウザが繋ぎ直した（resume）ときも、起動応答のコードを覚えて開始の文言を出す**（`20260921-startup-code-status`。
+ * サーバーの `opened` に載ってくる。ACS は通信の状態が変わるたびに開始の文言を出す）
+ */
+describe("繋ぎ直した後の起動応答のコード", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    noJitter();
+    clients = [];
+    connectFails = false;
+    sessionsStore.byId.clear();
+    sessionsStore.order = [];
+  });
+  afterEach(() => {
+    if (sessionsStore.get("s1")) closeSession("s1");
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("**ブラウザの繋ぎ直し（resume）の `opened` は `startupCode` を覚えるだけで、開始の文言は出さない**（ホストへは繋ぎ直していない。ACS が出すのは通信の状態が変わったとき）", async () => {
+    const p = openSession({ type: "open", host: "h" }, "t");
+    clients[0]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap() });
+    await p;
+    clients[0]!.handlers.onClose?.();
+    await runAttempt(1_000);
+    clients[1]!.handlers.onServerMessage({ type: "opened", sessionId: "s1", screen: snap(), pcCommand: false, startupCode: "I902" });
+    await vi.advanceTimersByTimeAsync(0);
+    const s = sessionsStore.get("s1")!;
+    expect(s.startupCode).toBe("I902");
+    expect(s.notice, "開始の文言を出さない").not.toBe(startupStartedText("I902"));
   });
 });

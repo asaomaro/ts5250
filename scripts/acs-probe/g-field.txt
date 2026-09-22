@@ -1,0 +1,41 @@
+# **本物の DDS の G 型（純 DBCS）・J 型・E 型・O 型を ACS のコアで表示し、打った内容がどんなワイヤで返るか**（実機。2026-09-22。`20260922-g-field-sosi`）。
+#
+# 画面は GTST（`scripts/build-gtest.mjs` が作る。GTDSPF の GREC。G＝(3,20)・J＝(5,20)・E＝(7,20)・O＝(9,20)。いずれも 12 バイト＝12 桁）。
+# 初期値: G=あいう＋全角空白 3・J=SO あいう 全角空白 2 SI・E=`ABC`・O=`AA あい BB`（`scripts/host-src/gtst.c`）。
+#
+# **ワイヤは中継越しに採る**（ACS のコアを `AS400_HOST=127.0.0.1 PROBE_PORT=<port>` で中継へ向ける。中継は両方向の生バイトを記録するだけの小さな TCP 中継。
+# 記録にはパスワードが平文で残るので、解析したら消す）。**測定の結果**:
+#   - 受信（ホスト → クライアント）: G の欄のデータは SF の後ろに置かれず、`SBA(3,19) 24 WEA(05 81) 44 81 44 82 44 83 40 40 40 40 40 40 WEA(05 80)` の形で、
+#     **SO/SI 無しの生の DBCS**を WEA タイプ 5 の 0x81（始まり）／0x80（終わり）で挟んで届く。J は SF の直後に `0e … 0f`（SO/SI を含む欄長いっぱい）。E・O は SBCS ＋ NUL 埋め
+#   - ACS の表示: G は `あいう□□□`（6 スロット。SO/SI の桁は無い）。打鍵 `かきく` で先頭 3 スロットを上書き。J は SO の次から
+#   - 送信（クライアント → ホスト）: G は **`11 03 14 44 86 44 87 44 88 40 40 40 40 40 40`**（SBA ＋ SO/SI 無しの 12 バイト。残りは DBCS 空白 0x4040）。
+#     J は **`11 05 14 0e 44 86 44 87 44 88 40 40 40 40 0f`**（SO … SI が欄長いっぱいで、SI が最終バイト）
+#   - 補足: 当 PJ の J は字の直後に SI を置く短い形（`0e 44 86 44 87 44 88 0f`）で送るが、ホストの受け取りは ACS の J と同じ `0e … 40 40 40 40 0f` に正規化された（ホストが J の欄を整える）。
+#     G は正規化されない（SO/SI の 0x0e／0x0f が欄のデータとして入る）ので、当 PJ の旧実装は G を壊していた
+#
+#   node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/g-field.txt
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/GTST[enter]
+settle 3000
+dump g0-initial
+setcursor 3,20
+settle 200
+keys かきく[eof]
+settle 300
+dump g1-typed
+setcursor 5,21
+settle 200
+keys [eraseeof]
+settle 200
+keys かきく[eof]
+settle 300
+dump g2-j-typed
+keys [enter]
+settle 2500
+dump g3-after-enter
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

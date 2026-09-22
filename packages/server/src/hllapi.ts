@@ -33,7 +33,6 @@ import {
   isInputField,
   nextInputField,
   posToRowCol,
-  prevInputField,
   psBytes,
   psLength,
   psSearch,
@@ -41,6 +40,7 @@ import {
   rowColToPos
 } from "./hllapi-ps.js";
 import { decodeCp932, encodeCp932 } from "./hllapi-cp932.js";
+import { tabPosition, backtabPosition } from "@ts5250/tn5250";
 
 /** 短縮名 1 文字（`A`〜`Z`） */
 type PsName = string;
@@ -701,6 +701,13 @@ async function sendKey(
       continue;
     }
     if (stroke.kind === "local") {
+      // **ホーム位置での Home は Record Backspace（AID 0xF8）**（ACS `PS5250.processHome`。`20260921-home-record-backspace`）。
+      // ホーム位置は 5250 のスナップショットだけが持つ（3270 には無いので、そちらは従来どおり移動だけ）
+      if (stroke.action === "home" && snapshot.home !== undefined && conn.cursor === homePos(snapshot)) {
+        const r = await sendAid(deps, entry, conn, "RecordBackspace", user);
+        if (r.rc !== HRC.SUCCESSFUL) return r;
+        continue;
+      }
       moveCursor(snapshot, conn, stroke.action);
       continue;
     }
@@ -713,24 +720,41 @@ async function sendKey(
   return ok();
 }
 
+/** スナップショットのホーム位置（1 起点の PS 位置）。`home` を持つ画面だけで呼ぶ */
+function homePos(snapshot: ScreenSnapshot): number {
+  const h = snapshot.home!;
+  return (h.row - 1) * snapshot.cols + h.col;
+}
+
 /** ローカル操作でカーソルを動かす（ホストへ送らない） */
 function moveCursor(snapshot: ScreenSnapshot, conn: Connection, action: LocalAction): void {
   const size = sizeOf(snapshot);
   const max = psLength(size);
   switch (action) {
     case "home": {
+      // ホーム位置（IC、無ければ先頭の非バイパス欄。ACS `getHomePos`）。~~先頭の入力欄~~ はホーム位置を持たない画面
+      // （3270）の代わり
+      if (snapshot.home !== undefined) {
+        conn.cursor = homePos(snapshot);
+        return;
+      }
       const first = nextInputField(snapshot, 0);
       conn.cursor = first ? (fieldStart(first, size) ?? 1) : 1;
       return;
     }
     case "tab": {
-      const f = nextInputField(snapshot, conn.cursor);
-      if (f) conn.cursor = fieldStart(f, size) ?? conn.cursor;
+      // ACS と同じ行き先（カーソル送り・継続欄・DBCS の SO。`tabPosition`）。入力欄が無ければ画面のホーム位置（ACS `processTab`）
+      // ~~次の入力欄の先頭~~（`20260921-hllapi-tab-acs`。ペインの Tab と同じ規則にそろえた）
+      const to = tabPosition(snapshot, conn.cursor);
+      if (to !== undefined) conn.cursor = to;
+      else if (snapshot.home !== undefined) conn.cursor = homePos(snapshot);
       return;
     }
     case "backtab": {
-      const f = prevInputField(snapshot, conn.cursor);
-      if (f) conn.cursor = fieldStart(f, size) ?? conn.cursor;
+      // ACS と同じ行き先（欄の途中ならその欄の先頭・カーソル送りの逆引き・継続欄。`backtabPosition`）。
+      // ~~前の入力欄の先頭~~——欄の途中から押すと 1 つ前の欄へ飛んでいた（ペインは `20260921-backtab-acs` で直してあった）
+      const to = backtabPosition(snapshot, conn.cursor);
+      if (to !== undefined) conn.cursor = to;
       return;
     }
     case "left":

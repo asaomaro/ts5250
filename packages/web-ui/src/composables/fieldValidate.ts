@@ -7,8 +7,18 @@ import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
  * 数値型は数字・符号・小数点、A 型（SBCS）は非全角、J 型（`only`）・`pure` は全角のみ。
  * コードページ許容文字の厳密判定は core（送信時）で行い、ここは型ベースの一次フィルタ。
  */
-export function acceptsChar(field: Field, ch: string): boolean {
-  return rejectReason(field, ch) === undefined;
+export function acceptsChar(field: Field, ch: string, session?: SessionKind): boolean {
+  return rejectReason(field, ch, session) === undefined;
+}
+
+/**
+ * セッションの種類。**SBCS だけのセッション（37 など）には DBCS の文字が無い**ので、East Asian Width の Ambiguous
+ * （`é` `ü` `ß` `ø` ほか）を全角と見なして弾かない（ACS `PS5250.inputChar` は DBCS のセッションでなければ幅も文字の可否も見ずに置く。
+ * `20260921-monocase-non-ascii`。実機の ACS のコアで `aéñøüµß` がコマンド行にそのまま入った）。
+ * 省略時は DBCS のセッションと同じ扱い（Ambiguous も全角。DBCS の表から Ambiguous の字が出てくるため）
+ */
+export interface SessionKind {
+  sbcsOnly?: boolean;
 }
 
 /**
@@ -24,9 +34,12 @@ export type RejectReason =
   | "kbd-inhibited" // キーボード入力不可(I)項目
   | "sign-position"; // 符号付き数値欄の符号桁（最終桁）へ数字を打とうとした
 
-export function rejectReason(field: Field, ch: string): RejectReason | undefined {
+export function rejectReason(field: Field, ch: string, session?: SessionKind): RejectReason | undefined {
   if (ch.length === 0) return "alphanumeric";
-  const isWide = isFullWidth(ch);
+  // SBCS だけのセッションで弾くのは**どのフォントでも 2 桁の字**（漢字・かな・全角英数）だけ。コードページに無いので送れない
+  // （core の送信時検証が「CCSID の外の文字」で弾く）——打った時点で知らせる。~~Ambiguous も全角~~ は DBCS のセッションだけ。
+  // ACS は SBCS のセッションでは何も弾かず、送るときに置き換える（当 PJ の送信時の拒否との差は台帳）
+  const isWide = session?.sbcsOnly === true ? isCertainWideGlyph(ch) : isFullWidth(ch);
 
   // **キーボード入力不可（DDS 35 桁の `I`）が最優先。** 文字の種類に関わらず打鍵を受け付けない
   // （磁気ストライプ読み取り装置等のための欄）。GNU tn5250 は `DATA_DISALLOWED` で拒否し、
@@ -46,11 +59,16 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
   // **数字専用（FFW シフト 5 / DDS 35 桁の `D`）は本当に数字しか受け付けない。**
   // ここを `numeric` 一括にしていると `.` `,` `+` `-` 空白が打ててしまい、**打てるのに送れない**
   // ——core の `validateFieldContent` は数字のみに制限しているので、Enter で `FIELD_TYPE` になり
-  // ホストへ 1 バイトも飛ばない（実機 `ASAOLIB/AUDPGM` の `DGT` 欄で再現）。
+  // ホストへ 1 バイトも飛ばない（実機 `TESTLIB/AUDPGM` の `DGT` 欄で再現）。
   // 参照実装も digits-only は数字のみ（GNU tn5250 `field.c` / tn5250j `Screen5250.java`）。
   if (field.digitsOnly && !/[0-9]/.test(ch)) return "numeric";
 
-  // 数値型（数字・, . - + と空白を許可）
+  // **符号付き数値（0x0700）も数字しか受け付けない**（ACS `PS5250.checkSBCSField`: 数字以外はエラー 0016。
+  // 実機の ACS でもメイン行の `-` と `.` はエラーだった）。符号は Field− / Field+ で付ける。
+  // ~~`-` / `+` は `signKeyHack` が Field± に置き換えるのでここへ来ない~~（`20260921-numpad-field-sign` で撤去）
+  if (field.signedNumeric && !/[0-9]/.test(ch)) return "numeric";
+
+  // 数値専用（0x0300）は数字・, . - + と空白を許可（ACS `Field5250.checkNumericOnlyChar` と同じ集合）
   if (field.numeric && !/[0-9.,+\-\s]/.test(ch)) return "numeric";
 
   // **カタカナ（0x0400）は入力制限ではない**ので何もしない（参照実装 2 つとも素通し）。
@@ -62,8 +80,17 @@ export function rejectReason(field: Field, ch: string): RejectReason | undefined
  * SBCS=1 バイト。DBCS 連続ランは SO(0x0E)+2×N+SI(0x0F)＝SO/SI を 1 ペア共有。
  * フィールド長（`field.length`）は SO/SI・DBCS 2 バイトを含むバイト予算なので、
  * 桁数上限の判定はこの見積り長で行う（JS 文字数では DBCS を過小評価してしまう）。
+ * `noShift` は SO/SI を持たない欄（純 DBCS の G）。
  */
-export function dbcsByteLength(value: string): number {
+export function dbcsByteLength(value: string, session?: SessionKind, noShift = false): number {
+  // SBCS だけのセッションは SO/SI も 2 バイトの字も無い——1 字 1 バイト（打鍵で漢字・かなは弾いてある。`rejectReason`）
+  if (session?.sbcsOnly === true) return [...value].length;
+  // **純 DBCS の欄（G）は SO/SI を持たない**（全桁が 2 バイトの組。実機の ACS のワイヤ: 12 バイトの欄に 6 字が SO/SI 無しで入る。`20260921-g-field-sosi`）
+  if (noShift) {
+    let n = 0;
+    for (const ch of value) n += !isRawSentinel(ch) && isWideForDbcs(ch) ? 2 : 1;
+    return n;
+  }
   let bytes = 0;
   let inDbcs = false;
   for (const ch of value) {
@@ -323,7 +350,7 @@ export { isFullWidth, isCertainWideGlyph };
  * 5250 の符号付き数値欄はワイヤ上 `桁数 + 1` バイトで、最終桁は符号（空白 = 正 / `-` = 負）。
  * 送信時に core が符号桁を落とすため（`read-response.ts` の `signedNumericValue`）、
  * ここを数字で埋められると**画面に見えている桁がホストへ届かない**——
- * 実機 `ASAOLIB/AUDPGM` の `SGN`（`6S 0`・欄長 7）で `1234567` と打って
+ * 実機 `TESTLIB/AUDPGM` の `SGN`（`6S 0`・欄長 7）で `1234567` と打って
  * ホスト側が `123456` を受け取ることを確認した。
  *
  * 符号は `-` / `+` キー（Field− / Field+）で入れる——そちらは打鍵経路の手前で拾う。

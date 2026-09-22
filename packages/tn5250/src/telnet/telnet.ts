@@ -12,13 +12,27 @@ import {
   ENV_VALUE,
   ENV_ESC
 } from "./constants.js";
+import { DeviceNameGenerator, type DeviceNameEnv } from "./device-name.js";
 
 export interface TelnetOptions {
   /** 端末タイプ名（例 IBM-3179-2）。TERMINAL-TYPE IS で回答する */
   terminalType: string;
-  /** RFC 4777 デバイス名（NEW-ENVIRON の USERVAR DEVNAME）。省略時はホスト採番 */
+  /**
+   * RFC 4777 デバイス名（NEW-ENVIRON の USERVAR DEVNAME）。省略時はホスト採番。
+   * **ACS と同じく置換記号を展開し、大文字にして送る**（`device-name.ts`。聞かれるたびに `=` の番号が進む）
+   */
   deviceName?: string | undefined;
-  /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定 */
+  /** 置換記号の展開に使う外の値（機械名・利用者名・プリンターか） */
+  deviceNameEnv?: DeviceNameEnv | undefined;
+  /** 当 PJ の `deviceNameRetry`: 記号の無い名前でも、使用中なら末尾の数字を繰り上げて答え直す */
+  deviceNameRetry?: boolean | undefined;
+  /**
+   * **自動サインオンの代替パスワードを作る**（ホストの SEND のサーバーのシードを受け取り、自分のシードと代替パスワードを返す）。
+   * 渡せば ACS と同じく暗号化して送る。無ければ従来どおり平文。計算（QPWDLVL ごとの DES・SHA）は呼び出し側が持つ
+   * （server が `@ts5250/hostserver` の `bypassSignonSubstitute` で作る）
+   */
+  passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
+  /** RFC 4777 自動サインオン: ユーザープロファイル（USER 変数）。password と併せて指定（**password が無ければ送らない**。ACS と同じ） */
   user?: string | undefined;
   /**
    * RFC 4777 自動サインオン: パスワード。user と併せて指定すると NEW-ENVIRON で
@@ -36,20 +50,34 @@ export interface TelnetOptions {
   kbdType?: string | undefined;
   codePage?: number | undefined;
   charSet?: number | undefined;
+  // ~~プリンター用の個別の口（ibmFont / ibmTransform / ibmMfrTypMdl）~~ は撤去した——プリンターは ACS の組を
+  // `userVars` で並べて渡す（`20260921-printer-acs-declaration`）。~~IBMFONT/IBMTRANSFORM を送らないと 8925~~ は、
+  // 一緒に送っていた KBDTYPE ほかの組が原因だった（PUB400 で ACS の組は I902）
   /**
-   * プリンターセッション用の NEW-ENVIRON USERVAR（RFC 4777 / tn5250 lp5250d 準拠）。
-   * ibmFont はプリンターのフォント（既定 "12"）、ibmTransform は "0"=ホストが SCS を送る／
-   * "1"=Host Print Transform 済みデータを送る。
-   * 実機（PUB400）では IBMFONT/IBMTRANSFORM を送らないと仮想プリンターデバイスの作成が
-   * CPF「Creation of device failed」(応答コード 8925) で失敗する（実機プローブで確認）。
+   * **DEVNAME の後ろに、この順で送る USERVAR**（`20260921-printer-acs-declaration`）。
+   * プリンターは ACS の組（`NVT5250.userVarPRTSB` ほか）をそのまま並べて渡す——個別の口（ibmFont 等）を
+   * 組み合わせる形では、ACS に無い変数を混ぜたり並びが違ったりする（実機で当 PJ の組だけ 8925・CPA3303 になった）。
+   * `value` を省くと値なし（`IBMFORMFEED`）。`raw` は値を生のバイトで送る（用紙入れの ESC＋0x00）。
    */
-  ibmFont?: string | undefined;
-  ibmTransform?: string | undefined;
+  userVars?: readonly UserVar[] | undefined;
   /**
-   * HPT の変換先プリンター機種（RFC 4777 の USERVAR IBMMFRTYPMDL）。
-   * `ibmTransform` を "1" にするときは必須——これが無いとホストは変換先を決められない。
+   * IBMSENDCONFREC=YES を送るか（既定 true）。**プリンターは送らない**——ACS は `startupResponse = false` にする
+   * （`NVT5250.getHostDeviceOptions`）。プリンターの起動応答は申告しなくても届く（実機・PUB400 で I902 を確認）。
    */
-  ibmMfrTypMdl?: string | undefined;
+  sendConfRec?: boolean | undefined;
+  /**
+   * **関連付けプリンターの装置名**（表示セッション。`20260921-associated-printer`）。Java の `trim()` で空でなければ、応答の**最後に**
+   * `USERVAR IBMASSOCPRT` として送る——ACS `NVT5250` は変数表の最後（IBMSENDCONFREC の後ろ）に積み、値は空白も大文字小文字も
+   * そのまま書く（実測でも同じ。ホストはジョブの印刷装置をその装置にする。存在しない名前だと起動応答を I901 にして接続は通す）
+   */
+  associatedPrinter?: string | undefined;
+}
+
+/** NEW-ENVIRON で送る USERVAR 1 つ（`TelnetOptions.userVars`） */
+export interface UserVar {
+  name: string;
+  value?: string | undefined;
+  raw?: readonly number[] | undefined;
 }
 
 /** クライアントとして有効化に同意する telnet オプション */
@@ -82,11 +110,31 @@ export class TelnetLayer {
   private sb: number[] = [];
   private recordFn: ((record: Uint8Array) => void) | undefined;
 
+  /** 装置名（聞かれるたびに次を出す。`deviceName` が無ければ無い） */
+  private readonly devNames: DeviceNameGenerator | undefined;
+
   constructor(
     private readonly transport: Transport,
     private readonly opts: TelnetOptions
   ) {
+    this.devNames =
+      opts.deviceName !== undefined
+        ? new DeviceNameGenerator(opts.deviceName, opts.deviceNameEnv, opts.deviceNameRetry === true)
+        : undefined;
     transport.onData((data) => this.feed(data));
+  }
+
+  /** 最後に送った装置名（展開・大文字化の後）。まだ送っていなければ指定のまま */
+  get deviceName(): string | undefined {
+    return this.devNames?.current ?? this.opts.deviceName;
+  }
+
+  /**
+   * 装置が使用中（8902）と言われたとき、**同じ接続の中で別の名前で答え直せるか**。ホストは使用中だと
+   * NEW-ENVIRON SEND で聞き直してくる（実測）ので、そのとき次の名前を送る。答え直せないなら拒否として扱う
+   */
+  canRetryDeviceName(): boolean {
+    return this.devNames?.canRetry() === true;
   }
 
   onRecord(fn: (record: Uint8Array) => void): void {
@@ -127,8 +175,33 @@ export class TelnetLayer {
     this.transport.send(out);
   }
 
+  /**
+   * **非同期の返事（暗号化した自動サインオンの IS）を作っている間は、後続の受信を溜めて処理しない**。
+   * 平文なら SEND を受けた直後に IS を返し、それから端末タイプ・BINARY・EOR の交渉に答える。代替パスワードの計算を待つ間に
+   * 後続へ答えてしまうと IS が交渉の後に届き、ホストは IS を待たずにサインオン画面を出した（PUB400 で実測。`20260921-encrypted-autosignon`）
+   */
+  private paused = false;
+  private stash: number[] = [];
+
+  private resume(): void {
+    this.paused = false;
+    const rest = Uint8Array.from(this.stash);
+    this.stash = [];
+    if (rest.length > 0) this.feed(rest);
+  }
+
   private feed(data: Uint8Array): void {
-    for (const b of data) {
+    if (this.paused) {
+      for (const b of data) this.stash.push(b);
+      return;
+    }
+    for (let i = 0; i < data.length; i++) {
+      const b = data[i]!;
+      if (this.paused) {
+        // 直前の SB で非同期の返事に入った。残りは返事を送ってから処理する
+        for (let k = i; k < data.length; k++) this.stash.push(data[k]!);
+        return;
+      }
       switch (this.state) {
         case ParseState.Data:
           if (b === IAC) this.state = ParseState.Iac;
@@ -217,18 +290,12 @@ export class TelnetLayer {
     } else if (opt === OPT.NEW_ENVIRON && sb[1] === ENV_SEND) {
       // RFC 4777: DEVNAME＋（指定時）自動サインオン変数を回答（未設定なら空 IS）
       const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
-      if (this.opts.deviceName !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.opts.deviceName));
+      if (this.devNames !== undefined) {
+        // 聞かれるたびに次の名前（ACS `NVT5250` も DEVNAME を書くたびに `AutoDeviceName5250` を通す）
+        payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.devNames.next()));
       }
-      // プリンターセッション: フォントと変換モードを申告（無いと 8925 でデバイス作成失敗）
-      if (this.opts.ibmFont !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("IBMFONT"), ENV_VALUE, ...ascii(this.opts.ibmFont));
-      }
-      if (this.opts.ibmTransform !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("IBMTRANSFORM"), ENV_VALUE, ...ascii(this.opts.ibmTransform));
-      }
-      if (this.opts.ibmMfrTypMdl !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("IBMMFRTYPMDL"), ENV_VALUE, ...ascii(this.opts.ibmMfrTypMdl));
+      for (const v of this.opts.userVars ?? []) {
+        payload.push(ENV_USERVAR, ...ascii(v.name), ENV_VALUE, ...(v.raw ?? ascii(v.value ?? "")));
       }
       // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる
       if (this.opts.kbdType !== undefined) {
@@ -242,18 +309,82 @@ export class TelnetLayer {
       }
       // IBMSENDCONFREC=YES: ホストが確認レコードを送る作法を申告する（RFC 4777）。
       // ACS 実機が送っており、当方も合わせる（無いとホストの応答経路が変わる）。
-      payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
-      if (this.opts.user !== undefined) {
-        // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）
-        payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii(this.opts.user));
-        if (this.opts.password !== undefined) {
-          // IBMRSEED = ESC + 8 バイトのゼロシード（非暗号化を示す）
-          payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ENV_ESC, 0, 0, 0, 0, 0, 0, 0, 0);
-          // IBMSUBSPW = ゼロシードのため平文パスワード
-          payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii(this.opts.password));
-        }
+      if (this.opts.sendConfRec !== false) {
+        payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
       }
-      this.sendSb(payload);
+      // ACS は利用者名・パスワードが空か長すぎる（10 文字・128 文字を超える）と自動サインオンをやめ、USER もパスワードも
+      // 送らない（`NVT5250` が `ssoType` を 0 に戻す）。長さは Java の `trim()` のあとで見る。パスワードは**末尾の空白を落としてから**
+      // 空かを見る（空白だけのパスワードも空。節目の点検の指摘）
+      const user = this.opts.user === undefined ? undefined : javaTrim(this.opts.user);
+      const pw = this.opts.password;
+      const bypassRejected =
+        pw !== undefined && (user === "" || pw.replace(/ +$/, "") === "" || (user ?? "").length > 10 || javaTrim(pw).length > 128);
+      /**
+       * 利用者名とパスワードの変数を足して送る。`auth` は代替パスワード（暗号化）——`undefined` なら平文、`null` なら作れなかった。
+       * ~~作れなければパスワードの変数を送らない（ACS も IBMSUBSPW を書かない）~~ → 原典と違った（節目の点検の指摘）: ACS は変数の頭
+       * （`03 名前 01`）を値より先に書くので、作れなくても IBMRSEED に自分のシード、IBMSUBSPW は**値の無いまま**送る
+       * （`NVT5250.insertVariable`）。PUB400（QPWDLVL 3・QRMTSIGN *VERIFY）は起動応答のコードを `0004`（コード表に無い）にして
+       * サインオン画面を出した（実測。CPF の文言は出ない）。ACS はコード表に無いコードを状態行に出すだけで続ける（`AcsOnly`）。
+       * サインオンの失敗回数に数えるかは未確認
+       */
+      const finish = (auth?: { clientSeed: Uint8Array; substitute: Uint8Array } | null): void => {
+        // **USER はパスワード付きの自動サインオンのときだけ送る**（ACS `NVT5250.insertUser` は `ssoType` 3・4 のときだけ。
+        // `20260921-user-without-password`）。~~利用者名だけでも USER を送る~~——PUB400 では送っても送らなくてもサインオン画面で、
+        // 利用者名も入らなかった（実測）
+        if (user !== undefined && pw !== undefined && !bypassRejected) {
+          // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
+          // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
+          // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
+          payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(user.toUpperCase())));
+          if (pw !== undefined && auth) {
+            // **暗号化**: IBMRSEED に自分のシード、IBMSUBSPW に代替パスワード（ACS と同じ。値の 0x00〜0x03 は ESC で、0xFF は
+            // telnet の層で二重にする。`20260921-encrypted-autosignon`）
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...auth.clientSeed]));
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue([...auth.substitute]));
+          } else if (pw !== undefined && auth === null) {
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...crypto.getRandomValues(new Uint8Array(8))]));
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE);
+          } else if (pw !== undefined && auth === undefined) {
+            // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
+            // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
+            // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は
+            // RFC 1572 では空の VAR として読まれていた（台帳「【まとめ】telnet」）
+            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE);
+            // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
+            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(pw.replace(/ +$/, ""))));
+          }
+        }
+        // 関連付けプリンターは最後（`associatedPrinter` の注記）。値は各文字の下位 8 ビットをそのまま（ACS の `(byte)charAt`。ESC も挟まない）
+        const assoc = this.opts.associatedPrinter;
+        if (assoc !== undefined && javaTrim(assoc) !== "") {
+          // **UTF-16 の単位ごと**（Java の `charAt`。補助面の文字はサロゲート 2 つ＝2 バイト。`[...assoc]` のコードポイント単位では 1 バイト少ない。
+          // `20260921-associated-printer` の節目 10 の独立点検 C-N1）
+          const bytes: number[] = [];
+          for (let i = 0; i < assoc.length; i++) bytes.push(assoc.charCodeAt(i) & 0xff);
+          payload.push(ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...bytes);
+        }
+        this.sendSb(payload);
+      };
+      // **代替パスワードで送れるなら暗号化する**（ACS は自動サインオンでパスワードを平文で送らない。`AcsOnly.initBypassSignon` は
+      // 常に `ssoBypassSignonEncrypted`）。サーバーのシードはホストの SEND の `USERVAR IBMRSEED` の後ろの 8 バイト
+      // （ACS `NVT5250` も値の印を挟まずに 8 バイトを読む）。計算は呼び出し側が渡す（この層は暗号に触れない）
+      const makeSubstitute = this.opts.passwordSubstitute;
+      if (makeSubstitute !== undefined && user !== undefined && !bypassRejected && pw !== undefined) {
+        const serverSeed = serverSeedOf(sb);
+        if (serverSeed === undefined) {
+          finish(null); // シードが無ければ作れない（ACS は例外になり、値の無い IBMSUBSPW を送る。`finish` の注記）
+          return;
+        }
+        this.paused = true;
+        makeSubstitute(serverSeed)
+          .then(
+            (auth) => finish(auth),
+            () => finish(null)
+          )
+          .finally(() => this.resume());
+        return;
+      }
+      finish();
     }
     // その他のサブネゴシエーションは無視
   }
@@ -297,4 +428,41 @@ export class TelnetLayer {
 
 function ascii(s: string): number[] {
   return [...s].map((c) => c.charCodeAt(0));
+}
+
+/**
+ * ホストの NEW-ENVIRON SEND（`sb` は OPT から）に `USERVAR IBMRSEED` とその後ろの 8 バイト（サーバーのシード）があれば返す。
+ * RFC 1572 の SEND は名前だけだが、IBM i は名前の直後に値の印を挟まずシードを置く（ACS `NVT5250` も同じ読み方。実測でも同じ形）
+ */
+function serverSeedOf(sb: Uint8Array): Uint8Array | undefined {
+  const name = [...ascii("IBMRSEED")];
+  for (let i = 2; i + 1 + name.length + 8 <= sb.length; i++) {
+    if (sb[i] !== ENV_USERVAR) continue;
+    if (!name.every((b, k) => sb[i + 1 + k] === b)) continue;
+    return sb.slice(i + 1 + name.length, i + 1 + name.length + 8);
+  }
+  return undefined;
+}
+
+/** Java の `String.trim()`（前後の U+0020 以下を落とす）。ACS の正規化に合わせる */
+function javaTrim(v: string): string {
+  let a = 0;
+  let b = v.length;
+  while (a < b && v.charCodeAt(a) <= 0x20) a++;
+  while (b > a && v.charCodeAt(b - 1) <= 0x20) b--;
+  return v.slice(a, b);
+}
+
+/**
+ * NEW-ENVIRON の値のエスケープ（RFC 1572）: 0x00〜0x03（VAR / VALUE / ESC / USERVAR）の前に ESC を置く。
+ * 置かないと値の途中で変数が終わったと読まれる。ACS も利用者名・パスワードの値をこうして書く
+ * （IAC の二重化は `sendSb` がまとめて行う）
+ */
+function envValue(bytes: number[]): number[] {
+  const out: number[] = [];
+  for (const b of bytes) {
+    if (b <= 0x03) out.push(ENV_ESC);
+    out.push(b);
+  }
+  return out;
 }

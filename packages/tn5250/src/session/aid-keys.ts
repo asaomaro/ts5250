@@ -9,6 +9,8 @@ export type AidKey =
   | "Clear"
   | "Help"
   | "Print"
+  /** Record Backspace（AID 0xF8）。ACS はホーム位置で Home を押すと送る（`PS5250.processHome`） */
+  | "RecordBackspace"
   | "SysReq"
   | "Attn";
 
@@ -18,7 +20,8 @@ const map = new Map<string, number>([
   ["PageDown", AID.PAGE_DOWN],
   ["Clear", AID.CLEAR],
   ["Help", AID.HELP],
-  ["Print", AID.PRINT]
+  ["Print", AID.PRINT],
+  ["RecordBackspace", AID.RECORD_BACKSPACE]
 ]);
 for (let i = 1; i <= 12; i++) map.set(`F${i}`, AID.F1 + (i - 1));
 for (let i = 13; i <= 24; i++) map.set(`F${i}`, AID.F13 + (i - 13));

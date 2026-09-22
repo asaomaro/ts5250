@@ -1,0 +1,12 @@
+schema: 11
+slug: aid-without-field-exit
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+harnessRevDelivered: unknown

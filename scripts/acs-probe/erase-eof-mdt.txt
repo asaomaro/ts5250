@@ -1,0 +1,71 @@
+# Erase EOF・Delete・Backspace は、値が変わらなくても MDT を立てるか（ACS のコア・社内機。`20260921-field-exit-checks` の節目 10 の独立点検 B-S3）。
+# 原典: `PS5250.eraseToEOF`（→ `eraseToEOF_Work(n, true)` が `setMDT`）・`processDeleteChar`（成功で `setMDT`）。
+# 見方: ME の欄（MDT なし）で、値の変わらない編集キー（空の欄の Erase EOF・欄の空白の桁の Delete・Backspace）のあと、欄の先頭でない位置で Field Exit する。
+#   MDT が立てば通る（次の欄へ）・立たなければ 0021（`inhibit=5`）。
+# 画面は ADJPGM（11,20 = CHECK(ME) A）。実機にオブジェクトは作らない。
+# **実測（2026-09-22・社内機・ACS のコア）**: 基準（何もせず 2 桁目で Field Exit）は `inhibit=5`（0021）。空の欄の 2 桁目で Erase EOF → Field Exit・
+#   Delete → Field Exit・Backspace（カーソルが 11,21 へ戻る）→ Field Exit はいずれも通った（次の欄 13,20 へ）。
+#   → 値が変わらなくても、編集キーが効けば MDT が立つ。当 PJ は `ScreenGrid.vue` の `mdtKeyed` で同じにした。
+# 最後の `keys [signoff]` はこのプローブの語彙に無く rc=4 で止まる（測定は済んでいる。次に使うときは外すか、手順で SIGNOFF を打つ）。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- 1) 基準: 何もせず 2 桁目で Field Exit → 0021（MDT なし） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,21
+settle 300
+keys [fldext]
+settle 500
+dump base-nomdt
+keys [reset]
+settle 300
+
+# --- 2) 空の欄の 2 桁目で Erase EOF（消えるものは無い）→ 同じ位置で Field Exit ---
+setcursor 11,21
+settle 300
+keys [eraseeof]
+settle 300
+keys [fldext]
+settle 500
+dump eraseeof-then-fieldexit
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+
+# --- 3) 新しく開き直して、空の欄の 2 桁目で Delete → Field Exit ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,21
+settle 300
+keys [delete]
+settle 300
+keys [fldext]
+settle 500
+dump delete-then-fieldexit
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+
+# --- 4) 新しく開き直して、空の欄の 2 桁目で Backspace → Field Exit（Backspace は 1 桁戻るので、戻った位置が先頭でなければ通るはず） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,22
+settle 300
+keys [backspace]
+settle 300
+dump backspace-after
+keys [fldext]
+settle 500
+dump backspace-then-fieldexit
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

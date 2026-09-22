@@ -16,6 +16,7 @@
 // signon サーバー（認証）
 export {
   signon,
+  querySignonInfo,
   SignonError,
   type SignonOptions,
   type SignonResult,
@@ -30,6 +31,7 @@ export {
   DEFAULT_PORT,
   PORT_MAPPER_PORT
 } from "./port-mapper.js";
+export { bypassSignonSubstitute } from "./bypass-signon.js";
 export {
   classifySignonReturnCode,
   describeSignonFailure,

@@ -214,3 +214,21 @@ describe("購読の解除", () => {
     mgr.closeAll();
   });
 });
+
+/**
+ * **attach でもセッションが実際に使っている CCSID を返す**（`20260921-monocase-non-ascii` の節目の点検の指摘）。
+ * web-ui は CCSID で「SBCS だけのセッションか」を決め、打鍵の幅の判定と欄のバイト予算を切り替える。
+ * ~~attach では既定の 37 を返す~~——930 の画面を attach で見たタブが、全角を 1 バイトと数えて欄の長さを越えて打てた
+ */
+describe("attach の CCSID", () => {
+  it.each([930, 37, 1399])("開いたときの CCSID %i をそのまま返す", async (ccsid) => {
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const { c, sent } = conn(mgr);
+    await c.handle(JSON.stringify({ type: "open", host: "h", ccsid }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    const viewer = conn(mgr);
+    await viewer.c.handle(JSON.stringify({ type: "open", sessionId: id }));
+    expect(viewer.sent[0]).toMatchObject({ type: "opened", sessionId: id, ccsid });
+    mgr.closeAll();
+  });
+});

@@ -14,6 +14,7 @@ import {
   orphanSafeIdleTimeoutMs,
   SessionManager,
   type OpenOptions,
+  type PrinterEntry,
 } from "./session-manager.js";
 import type { ConfigResolver } from "./config-resolver.js";
 import type { PublicSession, PublicSystem } from "./config-types.js";
@@ -36,6 +37,19 @@ import { ScreenRecorder } from "./screen-recorder.js";
 import { withAudit } from "./audit.js";
 
 const mcpLog = childLog({ component: "mcp-tools" });
+
+/** 出力に失敗して応答を止めている帳票（`PrinterEntry.heldOutput`）。理由は最初の失敗の文面 */
+const HELD_SCHEMA = z.object({ spoolId: z.string(), error: z.string() });
+function heldOf(entry: PrinterEntry): { spoolId: string; error: string } | undefined {
+  const h = entry.heldOutput;
+  if (!h) return undefined;
+  const st = h.status;
+  const error =
+    (st.pdf?.ok === false && st.pdf.skipped !== true ? st.pdf.error : undefined) ??
+    (st.print?.ok === false ? st.print.error : undefined) ??
+    "出力に失敗";
+  return { spoolId: h.report.id, error };
+}
 
 export interface ToolDeps {
   sessions: SessionManager;
@@ -83,6 +97,7 @@ const AID_KEYS = [
   "Clear",
   "Help",
   "Print",
+  "RecordBackspace",
   "SysReq",
   "Attn",
 ] as const;
@@ -756,7 +771,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       description:
         "プリンターセッションで次のスプール（ジョブ完了 1 件）を待って取得する。既に届いていれば即返す。" +
-        "timeoutMs 内に来なければ received=false。pages はページごとの等幅テキスト、text は全体。",
+        "timeoutMs 内に来なければ received=false。pages はページごとの等幅テキスト、text は全体。" +
+        "出力（PDF 保存・自動印刷）に失敗してホストへの応答を止めている帳票があると、ホストは次を送らない——" +
+        "そのときは held に帳票と理由が入る（retry_printer_output / cancel_printer_output で再試行・取消）。",
       inputSchema: {
         sessionId: z.string(),
         timeoutMs: z.number().int().optional(),
@@ -766,6 +783,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         spoolId: z.string().optional(),
         pages: z.array(z.string()).optional(),
         text: z.string().optional(),
+        held: HELD_SCHEMA.optional(),
       },
     },
     async ({ sessionId, timeoutMs }) =>
@@ -778,11 +796,19 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             user,
           );
           if (!report) {
+            // **止めている帳票があれば理由を添える**（無いと「理由なく時間切れ」が続く。独立点検の指摘）
+            const held = heldOf(sessions.getPrinter(sessionId, user));
             return {
               content: [
-                { type: "text" as const, text: "no spool received (timeout)" },
+                {
+                  type: "text" as const,
+                  text: held
+                    ? `no spool received (timeout). ${held.spoolId} の出力に失敗してホストへの応答を止めています（${held.error}）。` +
+                      "retry_printer_output で再試行、cancel_printer_output で取消（印刷済みとして応答）"
+                    : "no spool received (timeout)",
+                },
               ],
-              structuredContent: { received: false },
+              structuredContent: { received: false, ...(held ? { held } : {}) },
             };
           }
           const pages = report.pages.map((p) => p.lines.join("\n"));
@@ -810,6 +836,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       inputSchema: { sessionId: z.string() },
       outputSchema: {
         spools: z.array(z.object({ spoolId: z.string(), pages: z.number() })),
+        held: HELD_SCHEMA.optional(),
       },
     },
     async ({ sessionId }) =>
@@ -820,17 +847,66 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             spoolId: r.id,
             pages: r.pages.length,
           }));
+          const held = heldOf(entry);
           return {
             content: [
-              { type: "text" as const, text: `${spools.length} spool(s)` },
+              {
+                type: "text" as const,
+                text:
+                  `${spools.length} spool(s)` +
+                  (held ? `。${held.spoolId} の出力に失敗してホストへの応答を止めています（${held.error}）` : ""),
+              },
             ],
-            structuredContent: { spools },
+            structuredContent: { spools, ...(held ? { held } : {}) },
           };
         } catch (err) {
           return errorResult(err);
         }
       }),
   );
+
+  // **止めている帳票の再試行・取消**（`20260921-printer-hold-response` の独立点検の指摘: MCP から開いたプリンターは
+  // 画面から開き直せない＝ここに無いと抜ける手段が無かった）。権限は画面と同じ（`getPrinter` の所有者/admin）
+  for (const action of ["retry", "cancel"] as const) {
+    const name = action === "retry" ? "retry_printer_output" : "cancel_printer_output";
+    server.registerTool(
+      name,
+      {
+        description:
+          action === "retry"
+            ? "プリンターセッションで、出力（PDF 保存・自動印刷）に失敗してホストへの応答を止めている帳票の出力をやり直す" +
+              "（ACS のプリンター・エラーの「再試行」）。失敗した出力だけを、いまの設定でやり直し、成功したら印刷完了を返す。" +
+              "また失敗したら止めたまま。止めている帳票は wait_spool / list_spools の held で分かる。"
+            : "プリンターセッションで、出力に失敗してホストへの応答を止めている帳票を取り消す（ACS の「取消」）。" +
+              "印刷完了を返すので、ホストは印刷済みとみなし SAVE(*NO) のスプールはホストから消える（帳票はサーバーの一覧に残る）。",
+        inputSchema: { sessionId: z.string() },
+        outputSchema: { spoolId: z.string() },
+      },
+      async ({ sessionId }) =>
+        withAudit({ op: name, sessionId }, async () => {
+          try {
+            const held = heldOf(sessions.getPrinter(sessionId, user));
+            if (action === "retry") sessions.retryPrinterOutput(sessionId, user);
+            else sessions.cancelPrinterOutput(sessionId, user);
+            const spoolId = held?.spoolId ?? "";
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text:
+                    action === "retry"
+                      ? `${spoolId} の出力をやり直しています（結果は list_spools の held で分かる）`
+                      : `${spoolId} を取り消しました（印刷済みとして応答）`,
+                },
+              ],
+              structuredContent: { spoolId },
+            };
+          } catch (err) {
+            return errorResult(err);
+          }
+        }),
+    );
+  }
 
   server.registerTool(
     "get_spool",

@@ -14,7 +14,7 @@
 
 - F1: **「DSPFMT」という名称の実体はこのリポジトリ内に存在しない**（`grep -ri dspfmt` で
   本件の起票記録以外にヒットしない）。IBM i の標準コマンドでもない。利用者の実機環境
-  （AS400_SYSTEM=SR-OSAKA）に既存の画面/プログラム名と推測されるが、この work から
+  （AS400_SYSTEM=AS400）に既存の画面/プログラム名と推測されるが、この work から
   直接アクセスする手段は無い。
 - F2: 表示属性のデコード表は `packages/tn5250/src/screen/attributes.ts` の `ATTR_TABLE`
   （属性バイト 0x20-0x3F、32エントリ、`decodeAttribute()`）。この32エントリには
@@ -38,20 +38,20 @@
   タイミングで正しく引き継がれない不具合が実機で発見・修正されている
   （`ce3eca64`「WRKOBJPDM で Attn 窓を開くと背面の下線が右へ伸びて次行に回り込む」、
   `b98ceae9`「引き継いだ表示境界はホストがその行を書き直したら捨てる」）。
-- F5: **実機トレース（`scripts/diag-dspfmt-underline.mjs`、SR-OSAKA/ASAOLIB）で
+- F5: **実機トレース（`scripts/diag-dspfmt-underline.mjs`、AS400/TESTLIB）で
   WRKOBJPDM の Opt 欄（緑・下線）に対し、F1 ヘルプ窓の開閉・PageDown を行ったが、
   属性セルの変化は 0 件だった**（消えた属性セル 0 件・新たに現れた属性セル 0 件）。
   この1回の試行では F4 の系統の不具合は再現しなかった（実行ログ: 本 research 実施時の
   標準出力。再現条件が今回のシナリオでは満たされなかったか、そもそも別要因の可能性）。
   なお `unknown order` 警告（WEA を含む）は本トレース中に一度も出なかった
   （WRKOBJPDM・F1ヘルプ窓は WEA を使っていない）。
-- F6: **DDS コンパイル（`CRTDSPF`、`scripts/build-colsep-matrix.mjs`、実機 ASAOLIB）で
+- F6: **DDS コンパイル（`CRTDSPF`、`scripts/build-colsep-matrix.mjs`、実機 TESTLIB）で
   `COLOR(RED) DSPATR(CS)` 等、F2 で「32エントリに存在しない」と分かった組み合わせを
   全7色×{無印,UL,CS} で試したところ、コンパイルエラーにならず正常に作成された**
-  （`ASAOLIB/CSMDSPF` として作成成功、事後に削除済み）。つまり **DDS コンパイラは
+  （`TESTLIB/CSMDSPF` として作成成功、事後に削除済み）。つまり **DDS コンパイラは
   このような「基本属性バイト表には無い」組み合わせを拒否しない**——実行時に実際にどの
   バイト列で送られるかが未確認のまま残った（表示確認用の RPG プログラムのコンパイルが、
-  `ASAOLIB` に `QRPGLESRC` ソース物理ファイルが現在存在しないため実行できなかった。
+  `TESTLIB` に `QRPGLESRC` ソース物理ファイルが現在存在しないため実行できなかった。
   過去に `FFWPGM` 等はこのファイル経由でコンパイルされた形跡があるが〔`WRKOBJPDM` の
   一覧に *PGM オブジェクトとして現存〕、ソースは既に整理されたと見られる。本 work の
   スコープでソースファイルを新規作成することはしなかった——利用者の実機ライブラリに

@@ -40,7 +40,14 @@ export interface SpoolOutputStatusView {
   spoolId: string;
   at: number;
   skipped?: boolean;
-  pdf?: { ok: boolean; path?: string; error?: string };
+  /** 出力に失敗したので、ホストへの応答を止めている（再試行・取消を待つ。`20260921-printer-hold-response`） */
+  held?: boolean;
+  /** 止めていた応答を取消で返した（ホストは印刷済みとみなした） */
+  canceled?: boolean;
+  /** 応答を止めている間に接続が切れた（応答はもう返せない） */
+  dropped?: boolean;
+  /** `skipped` は作れない設定（ホスト変換の印刷データ）で作らなかった（失敗ではない） */
+  pdf?: { ok: boolean; path?: string; error?: string; skipped?: boolean };
   print?: { ok: boolean; printer?: string; error?: string };
 }
 
@@ -104,6 +111,16 @@ export interface MacroRuntime {
   stopReason?: MacroStopReason;
   /** 停止・警告の付随メッセージ（OIA に出す） */
   message?: string;
+}
+
+/** 先打ちで溜めた 1 キー（`SessionState.typeAhead`）。再生で同じ keydown を組み立て直すのに要る分だけ */
+export interface HeldKey {
+  key: string;
+  code: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
 }
 
 export interface SessionState {
@@ -209,6 +226,35 @@ export interface SessionState {
    */
   activitySentAt?: number;
   /**
+   * **欄を出るまで AID を送らない欄**（fieldIndex。`20260921-aid-without-field-exit`）。
+   * 右寄せ（CHECK(RZ)/(RB)）・符号付き数値の欄に打ったあと、**カーソルがその欄を出るまで**だけ持つ。
+   * ACS の `Field5250.fieldExitReqFlag`（打鍵で下り、Tab・カーソル移動・Field Exit で立つ）に当たる。
+   * 付けるのも外すのもペイン（`EmulatorPane`）、見るのは送信の合流点（`sendKey`）。
+   */
+  awaitingFieldExit?: number;
+  /**
+   * **エラー状態を抜けて隠したホストのエラーの番号**（`ScreenSnapshot.systemMessageSeq`。`20260921-host-error-mode`）。
+   *
+   * ホストのエラー（WRITE ERROR CODE）の状態は**画面＝セッションに属する**（ACS もセッションの窓ごとに
+   * `error_mode` を持つ）。ペインに持つと、タブを切り替えて戻る・裏のタブに WEC が届いてから切り替える・
+   * ペインを作り直す、のどれでも「最下行にメッセージが出ているのにエラー状態ではない」になった
+   * （独立点検の指摘）。状態は「番号があり、ここに記録した番号と違う」から導く。
+   */
+  hostErrorDismissedSeq?: number;
+  /**
+   * **先打ちの溜め**（`20260921-type-ahead`）。施錠中に打ったキーを、解錠したら打った順に再生する。
+   * **セッションごとに持つ**——ペインはタブの切り替えで別のセッションへ使い回される（`sessionId` だけが
+   * 差し替わる）ので、ペインに持つと別のセッションへ流れる（独立点検の指摘）。
+   * 溜めるのも流すのもペイン（`EmulatorPane`）。捨てるのはペイン（Reset・Attn 等）と、下の遷移（切断・予約）。
+   */
+  typeAhead?: HeldKey[];
+  /**
+   * **ホストに切られて、サーバーが自動で繋ぎ直している**（`20260921-auto-reconnect`）。`attempt` は 1 から。
+   * ブラウザ ↔ サーバーの繋ぎ直し（`link`）とは別の話——こちらはサーバー ↔ ホスト。
+   * この間は打てない（送り先が無い。ACS も通信が準備できていない間の打鍵は捨てる）。
+   */
+  hostReconnect?: { attempt: number };
+  /**
    * サーバー応答由来の操作員メッセージ（ホスト無応答の通知等）。
    * ScreenGrid/EmulatorPane が出すローカル通知とは出所が違うのでここに持ち、次の送信で消す。
    */
@@ -224,6 +270,8 @@ export interface SessionState {
    * 「実行しない理由」を利用者に示すために持つ（`WsOpened.pcCommand`）。
    */
   pcCommandEnabled?: boolean;
+  /** 3270 のときだけ: 相手が IBM i か（汎用機では Attn・SysReq・Help・Print を送れない。`WsOpened.ibmI`） */
+  ibmI3270?: boolean;
   /** PC コマンドの実行履歴（受信順・上限はサーバー側で 20 件） */
   pcCommands?: PcCommandView[];
   // ---- プリンターセッション（kind==="printer"）----
@@ -335,6 +383,9 @@ function defineDerivedLink(init: SessionStateInit): SessionState {
 /** 遷移を 1 か所に通す。**`link` へ直接代入しない**（規則は `nextLink`） */
 function applyLink(s: SessionState, ev: LinkEvent): void {
   s.link = nextLink(s.link, ev);
+  // **繋がっていない間に溜めた打鍵は捨てる**——繋ぎ直した後で、いつ打ったか分からないキーが
+  // ホストへ流れないように（ACS に対応物は無い。当 PJ の都合）
+  if (s.link.state !== "connected") delete s.typeAhead;
 }
 
 export const sessionsStore = reactive({
@@ -442,6 +493,8 @@ export const sessionsStore = reactive({
     if (by !== undefined) {
       s.reservedBy = by;
       s.edits.clear();
+      delete s.awaitingFieldExit; // 打ちかけを捨てたので、欄を出る待ちも無い
+      delete s.typeAhead; // 利用者の打鍵を自動操作の画面へ流さない（`20260921-type-ahead` D5）
     } else {
       delete s.reservedBy;
     }
@@ -482,6 +535,7 @@ export const sessionsStore = reactive({
     applyLink(s, { to: "connected" });
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
+    delete s.awaitingFieldExit; // 打ちかけと一緒に捨てる（ACS も新しい欄は「出た」状態で作る）
   },
 
   /** プリンターセッションに受信スプールを追加する（最初の 1 件は自動選択・未読++） */

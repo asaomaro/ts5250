@@ -1,9 +1,9 @@
 import { As400Error } from "@ts5250/base";
 import { type Codec, SO, SI } from "@ts5250/ebcdic";
-import type { ScreenBuffer } from "../screen/buffer.js";
+import { nextSystemMessageSeq, type ScreenBuffer } from "../screen/buffer.js";
 import type { ContinuedPart, DbcsFieldType, SelfCheckKind, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
-import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isKnownCommand } from "./constants.js";
+import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isControlData, controlDataText } from "./constants.js";
 import {
   detectPcoMarker,
   readPcCommand,
@@ -11,6 +11,9 @@ import {
   type PcCommandRequest
 } from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
+
+/** WSF への応答の 1 本（`ApplyResult.wsfReplies`） */
+export type WsfReply = { kind: "query" } | { kind: "d972"; flags: number; next: number };
 
 /** データストリーム適用の結果（キーボード状態の遷移は Session が判断する） */
 export interface ApplyResult {
@@ -29,6 +32,22 @@ export interface ApplyResult {
   alarm: boolean;
   /** ホストが 5250 QUERY を送ってきた（Query Reply を返す必要がある） */
   queryRequested: boolean;
+  /**
+   * **否定応答で返すセンス・コード**（`20260921-negative-responses`）。立ったらレコードの残りは読まない（ACS `DS5250.processCommand` は
+   * `sense_code` が立つとループを抜け、`tokenizeData` の終わりで否定応答を送る）。ACS と同じ条件でだけ立てる:
+   * コマンドの位置に ESC が無い（0x10050121。WSF の長さが 0・1 のときも、長さの 2 バイトが次のコマンドとして読まれてここへ来る）・ROLL の指定が不正（0x1005012C）・CLEAR UNIT ALTERNATE の引数が 0 でない（0x10030101）・
+   * WSF D9/72 のフラグに 0x80（0x10050112）。**返さないとホストは入力コマンドを待ち続ける**（社内機で WSF D9/72 の 0x80 を DSM に出させて実測。
+   * ACS では `QsnPutInpCmd` が CPFA304 で戻り、当 PJ ではキーボードが施錠されたままになった）
+   */
+  senseCode?: number;
+  /**
+   * **WSF への応答（起きた順）**。ACS `DS5250.processWSF` は WSF ごとにその場で応答を送る（`20260921-wsf-d9-72` の節目の点検の指摘。
+   * ~~Query と D9/72 のどちらか 1 本~~——同じレコードに WSF が 2 つあると片方の応答が落ち、D9/72 ならホストが待ち続けた）。
+   * - `query`: クラス D9・種類 70 で、フラグ（SF の 5 バイト目）が 0（ACS は 0 のときだけ応答する）
+   * - `d972`: クラス D9・種類 72・長さ 6（`20260921-wsf-d9-72`。**応答しないとホストは待ち続ける**——社内機で DSM に出させたところ、
+   *   応答が無いままキーボードが施錠され続けた）。値は SF の 5 バイト目（フラグ）と 6 バイト目。フラグ 0x80 は応答せず否定応答
+   */
+  wsfReplies: WsfReply[];
   /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
@@ -58,12 +77,16 @@ export interface ApplyResult {
   /** ホストが READ SCREEN EXTENDED を送ってきた（0x62 とは応答形式が異なる） */
   readScreenExtendedRequested: boolean;
   /**
-   * **最後に評価された WRITE TO DISPLAY が、カーソル位置を明示した**。
-   * ACS（`DS5250.preprocessWCC2`）と同じく、判定は WTD ごとに行われ、後の WTD が前の
-   * WTD の指定を上書きする——偽なら「ホストは位置を指していない」なので、呼び出し側が
-   * 既定動作（先頭入力欄へ）を適用する。詳細は `PendingCursorOrder`。
+   * **このレコードがカーソルを置いた**（WTD の終わりの `placeCursorAfterWtd`・RESTORE・エラーのレコード）。
+   * ~~偽なら呼び出し側が既定動作（先頭入力欄へ）を適用する~~——既定位置も WTD の終わりで置く
+   * （ACS `preprocessWCC2`。`20260921-cursor-per-wtd-acs`）。READ では触れない。
    */
   cursorSet: boolean;
+  /**
+   * CC2 がメッセージ待ち表示（MW）を点けた／消した。**触れなかったら `undefined`**
+   * （前の状態を保つ。CC2 のビットが立っていない WTD で消してはいけない）。
+   */
+  messageWaiting?: boolean;
   /**
    * PC Organizer（`STRPCCMD`）のコマンドを受けた。呼び出し側が実行し、実行キーを返す
    * （`pc-command.ts`。**実行の可否に関わらず実行キーは返す**——返さないとホストが待ち続ける）
@@ -99,6 +122,8 @@ export interface ApplyResult {
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
 const CC2_UNLOCK = 0x08;
+/** CC2: キーボードを解錠してもカーソルを動かさない（ACS `preprocessWCC2` の 0x40） */
+const CC2_NO_CURSOR_MOVE = 0x40;
 const CC2_ALARM = 0x04;
 
 /** PC Organizer 標識の先頭バイト（非表示属性）。ここを見てから 11 バイトを照合する */
@@ -108,7 +133,10 @@ const PCO_ATTR = 0x27;
 export type WarnFn = (message: string) => void;
 
 /**
- * IC/MC が指したカーソル位置の**保留値**（ACS の `DS5250.WTD_IC_addr` / `WTD_MC_addr` 相当）。
+ * IC/MC が指したカーソル位置の**保留値**（ACS の `DS5250.WTD_IC_addr` / `WTD_MC_addr` 相当。
+ * いまは `ScreenBuffer.icAddr` / `mcAddr` が持つ——**レコードをまたいで持ち越す**。
+ * ~~1 レコードの中だけで持つ~~ と、IC を送った WTD の後に別のレコードで IC の無い WTD が来たとき
+ * ACS（IC に置く）と食い違う。`20260921-cursor-per-wtd-acs`）。
  *
  * **IC は「見つけた瞬間にカーソルを動かす」ものではない。** ACS は IC/MC をこの保留値に
  * 溜め、WRITE TO DISPLAY 1 つを処理し終えた時点（`preprocessWCC2`）で初めて
@@ -124,15 +152,22 @@ export type WarnFn = (message: string) => void;
  * （利用者報告の不具合。`work/pa0100j-cursor/` の証跡）。SOH で捨てれば、明細側の WTD は
  * 「指定なし」となり、ACS と同じく先頭入力欄 (3,23) へ落ちる。
  */
-interface PendingCursorOrder {
-  addr: number | undefined;
+/**
+ * **1 レコードの中のカーソルの決め方の状態**（ACS `DS5250.processCommand` がレコードの頭で戻す
+ * `kbd_state_chg` と `pendingCCbyte2`。`20260921-cursor-per-wtd-acs`）。IC / MC の番地そのものは
+ * レコードをまたいで持ち越すので、バッファ（`ScreenBuffer.icAddr` / `mcAddr`）が持つ。
+ */
+interface RecordCursorState {
+  /** CC2 の持ち越し（ACS `pendingCCbyte2`）。0x40＝カーソルを動かさない */
+  pendingCc2: number;
 }
 
 /**
  * 1 レコード分のデータストリーム（ESC+コマンド列）を ScreenBuffer に適用する。
  *
- * 未知のコマンド（ESC 直後の 1 バイト）は警告してレコードの残りを打ち切る
- * （レコード境界で再同期。spec「エラー処理」）。**未知のオーダー（WTD の中の 1 バイト）は
+ * ~~未知のコマンド（ESC 直後の 1 バイト）は警告してレコードの残りを打ち切る
+ * （レコード境界で再同期。spec「エラー処理」）~~ → 未知のコマンドは 1 バイト読み飛ばして続け、コマンドの位置に ESC が無ければ
+ * 否定応答 0x10050121 で打ち切る（ACS `processCommand`。`20260921-negative-responses`）。**未知のオーダー（WTD の中の 1 バイト）は
  * 次の ESC まで読み飛ばして次のコマンドから復帰する**——ここでレコード全部を捨てると、
  * 未知のオーダーより後ろにある WRITE（キーボード解放）や READ ごと失われ、
  * ホストは応答したつもりでもクライアントの鍵盤が開かないまま固まる
@@ -151,6 +186,7 @@ export function applyDataStream(
     readRequested: false,
     alarm: false,
     queryRequested: false,
+    wsfReplies: [],
     saveRequests: [],
     readScreenRequested: false,
     readImmediateRequested: false,
@@ -165,7 +201,7 @@ export function applyDataStream(
   // 何も書かずに終わったレコードでは、buffer 側が前回の確定値を残す（窓を描くレコードと
   // 入力を待つだけのレコードが分かれて届いても窓が消えないようにするため）。
   buf.beginRecord();
-  const cursorOrder: PendingCursorOrder = { addr: undefined };
+  const cursorState: RecordCursorState = { pendingCc2: 0 };
   const cursorBeforeRecord = buf.cursorAddr;
   /** このレコードに WRITE ERROR CODE（0x21 / 0x22）が含まれていた */
   let errorCodeWritten = false;
@@ -187,20 +223,25 @@ export function applyDataStream(
   while (r.remaining > 0) {
     const esc = r.u8();
     if (esc !== ESC) {
-      warn(`expected ESC, got 0x${esc.toString(16)} — discarding rest of record`);
+      warn(`expected ESC, got 0x${esc.toString(16)} — discarding rest of record (negative response 0x10050121)`);
+      result.senseCode = SENSE.COMMAND_EXPECTED;
       break;
     }
     const cmd = r.u8();
     switch (cmd) {
       case COMMAND.CLEAR_UNIT:
-        buf.clearUnit();
-        cursorOrder.addr = undefined;
+        buf.clearUnit(); // IC / MC も捨てる（ACS `processClearFMT`）
         break;
       case COMMAND.CLEAR_UNIT_ALTERNATE: {
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
         // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
-        r.u8();
+        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）
+        if (r.u8() !== 0x00) {
+          warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
+          result.senseCode = SENSE.CLEAR_UNIT_ALTERNATE_PARAM;
+          return finish();
+        }
         // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
         // 現在のサイズでクリアするので、`clearUnit()` へは倒さない——**罫線の扱いが違う**
         // （`clearUnit()` 経由だと 24x80 専用画面で罫線が消える。KSN20 / S9R167D の回帰）。
@@ -208,13 +249,10 @@ export function applyDataStream(
         if (!buf.clearUnitAlternate()) {
           warn("CLEAR UNIT ALTERNATE on 24x80 terminal — clearing at current size (grid lines kept)");
         }
-        cursorOrder.addr = undefined;
         break;
       }
       case COMMAND.CLEAR_FORMAT_TABLE:
-        buf.clearFormatTable();
-        // フォーマットテーブルを捨てるときは保留中の IC/MC も捨てる（ACS `processClearFMT`）
-        cursorOrder.addr = undefined;
+        buf.clearFormatTable(); // 保留中の IC/MC も捨てる（ACS `processClearFMT`）
         break;
       case COMMAND.SAVE_SCREEN:
         // SAVE SCREEN（ESC 0x02）: 現バッファを退避。後続の WTD がオーバーレイを描く。
@@ -269,13 +307,20 @@ export function applyDataStream(
         // 行数は下位 5 ビット（tn5250 と同じ。tn5250j は `& 0x7f` だが、
         // 32 以上は 24〜27 行の画面を超えるので**実際には差が出ない**）。
         //
-        // ⚠ **実機で ROLL を送ってくる画面は見つかっていない**（11 画面の国勢調査で 0 件。
-        // `20260730-datastream-command-census`）。根拠は原典 2 実装の一致だけである。
+        // ~~⚠ 実機で ROLL を送ってくる画面は見つかっていない。根拠は原典 2 実装の一致だけである~~ → DSM に出させて
+        // 実測し（`scripts/host-src/dscmd.c` の `ROLLUP` / `ROLLDOWN`・`ROLLTESTUP` / `ROLLTESTDOWN`）、ACS `PS5250.processRoll` とも
+        // 突き合わせた（`20260921-roll-vacated-rows`。空いた行は元の内容が残る——`ScreenBuffer.roll`）。
+        // 業務の画面で ROLL を送ってくるものは今も見つかっていない（11 画面の国勢調査で 0 件。`20260730-datastream-command-census`）
         const dir = r.u8();
         const top = r.u8();
         const bottom = r.u8();
         const lines = dir & 0x1f;
-        buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines);
+        // **指定が不正なら画面を変えずに否定応答**（ACS `processRoll` が -1 を返すと `sense_code = 0x1005012C` でレコードの残りを読まない）
+        if (!buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines)) {
+          warn(`invalid ROLL (top ${top} bottom ${bottom} lines ${lines}) (negative response 0x1005012C)`);
+          result.senseCode = SENSE.ROLL_PARAM;
+          return finish();
+        }
         break;
       }
       // **原典がパラメータ無しとして無視しているコマンド**（tn5250 `session.c`。research F5）。
@@ -314,7 +359,7 @@ export function applyDataStream(
         result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY:
-        applyWtd(r, buf, codec, result, warn, cursorOrder);
+        applyWtd(r, buf, codec, result, warn, cursorState);
         break;
       case COMMAND.WRITE_ERROR_CODE:
         applyWriteErrorCode(r, buf, codec);
@@ -328,9 +373,27 @@ export function applyDataStream(
         applyWriteErrorCode(r, buf, codec);
         errorCodeWritten = true;
         break;
-      case COMMAND.WRITE_STRUCTURED_FIELD:
-        if (applyStructuredField(r, warn)) result.queryRequested = true;
+      case COMMAND.WRITE_STRUCTURED_FIELD: {
+        // **1 つの WSF で読むのは最初の SF だけ**（ACS `DS5250.processCommand` の ESC 0xF3: SF の長さ `n12` だけ進めて、次は ESC を求める。
+        // `20260921-wsf-d9-72` の節目の点検の指摘）。~~SF を続けて全部読む~~——2 つ目の SF が続けば ACS は「コマンドが無い」（0x10050121）になる
+        if (r.remaining < 4) {
+          // 長さと class・type が読めない（ACS: `n5 + 4 > n2` で 0x10050121）
+          warn("write structured field too short (negative response 0x10050121)");
+          result.senseCode = SENSE.COMMAND_EXPECTED;
+          return finish();
+        }
+        const sf = applyStructuredField(r);
+        if (sf.reply) {
+          result.wsfReplies.push(sf.reply);
+          if (sf.reply.kind === "query") result.queryRequested = true;
+        }
+        if (sf.sense !== undefined) {
+          // D9/72 のフラグに 0x80: ACS は応答せず否定応答（`processWSF` の `sense_code = 0x10050112`）。ループを抜けてレコードの残りは読まない
+          result.senseCode = sf.sense;
+          return finish();
+        }
         break;
+      }
       case COMMAND.READ_MDT_FIELDS:
       case COMMAND.READ_MDT_FIELDS_ALT:
       case COMMAND.READ_INPUT_FIELDS: {
@@ -356,8 +419,12 @@ export function applyDataStream(
         result.readScreenExtendedRequested = true;
         break;
       default:
-        warn(`unknown command 0x${cmd.toString(16)} — discarding rest of record`);
-        return finish();
+        // **知らないコマンドは 1 バイト読み飛ばして続ける**（ACS `DS5250.processCommand` の `default: ++n5`。否定応答は返さない——
+        // その次がコマンドでなければ上の「ESC が無い」で否定応答になる）。~~レコードの残りを捨てる~~ と、後ろの READ を失っていた。
+        // 社内機で DSM に未知のコマンド（0xFE）を出させたところ、ACS でも当 PJ でもホストは rc=0 で続いた
+        warn(`unknown command 0x${cmd.toString(16)} — skipping one byte (like ACS)`);
+        if (r.remaining > 0) r.u8();
+        break;
     }
   }
   return finish();
@@ -435,8 +502,13 @@ function applyCc(cc1: number, buf: ScreenBuffer, result: ApplyResult): void {
       buf.nullNonBypass(false);
       break;
     case 0xc0:
-      buf.resetMdtNonBypass();
+      // **消してから MDT を落とす。順序が逆だと 1 欄も消えない**
+      // （`nullNonBypass(true)` は MDT の立った欄だけを対象にするので、
+      //  先に MDT を落とすと対象が 0 件になる）。
+      // ACS `DS5250.processWCC1` の該当分岐も `clearNonbypassFields(true)` →
+      // `resetMDTFields(true)` の順（`20260921-wtd-cc1-c0-order` で原典を確認）。
       buf.nullNonBypass(true);
+      buf.resetMdtNonBypass();
       break;
     case 0xe0:
       buf.resetMdt();
@@ -448,6 +520,41 @@ function applyCc(cc1: number, buf: ScreenBuffer, result: ApplyResult): void {
 function applyCc2(cc2: number, result: ApplyResult): void {
   if ((cc2 & CC2_UNLOCK) !== 0) result.unlockKeyboard = true;
   if ((cc2 & CC2_ALARM) !== 0) result.alarm = true;
+  // **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
+  // ACS `DS5250.processWCC2` は `cc2 & 0x02` で消灯（`WCC2_MW_OFF`）、続けて
+  // `cc2 & 0x01` で点灯（`WCC2_MW_ON`）する——**両方立てば点灯が勝つ**ので同じ順で評価する。
+  // 以前はオペコード（MESSAGE_LIGHT_ON/OFF）だけを見て、**CC2 のビットを見ていなかった**
+  if ((cc2 & 0x02) !== 0) result.messageWaiting = false;
+  if ((cc2 & 0x01) !== 0) result.messageWaiting = true;
+}
+
+/**
+ * **WTD の終わりでカーソルを置く**（ACS `DS5250.preprocessWCC2`。`20260921-cursor-per-wtd-acs`）。
+ *
+ * - CC2 の 0x40（カーソルを動かさない）を持ち越し（最後の WTD の指定が勝つ）、**動かしてよければ IC の番地、
+ *   無ければホーム**（最初の非 bypass 欄。欄が無ければ 1 行 1 桁）へ置く。MC があれば MC
+ * - 動かさない指定でも MC だけは効く
+ * - **READ ではカーソルに触れない**（ACS の READ INPUT / MDT / MDT ALT は `pending_read` を覚えるだけ）。
+ *   ~~READ のときに（そのレコードで IC が無ければ）先頭の入力欄へ置く~~ だと、WTD と READ が別のレコードで
+ *   来る画面（CL の SNDF → RCVF など）で、WTD の IC が READ で先頭の入力欄へ上書きされていた（実機で確認。
+ *   `scripts/acs-probe/read-split-record.txt`: ACS は IC の 7,20、当 PJ は 5,20）
+ *
+ * ⚠ **原典にある「解錠中に来て、キーボードの状態を変えない WTD には 0x40 を足す」は入れていない**
+ * （`kbd_state_chg` と `ps.isKeyboardLocked()` の組み合わせ）。DSPFMT は「CC2 で解錠する出力だけの
+ * レコード」の後に「CLEAR も SOH も CC1 の施錠も無い WTD（IC 7,4）＋READ」を送り、原典を素直に読むと
+ * 3 つ目では動かないはずだが、**実機の ACS は 7,4 に置いた**（中継で採った ACS 側のレコードも同じ形）。
+ * ACS がキーボードを開く時機の読みが確かめられていないので、実測と合わない条件は入れない（decisions D2）。
+ */
+function placeCursorAfterWtd(buf: ScreenBuffer, cc2: number, result: ApplyResult, st: RecordCursorState): void {
+  st.pendingCc2 |= cc2 & 0x4f;
+  if ((cc2 & CC2_NO_CURSOR_MOVE) === 0) st.pendingCc2 &= ~CC2_NO_CURSOR_MOVE;
+  if ((st.pendingCc2 & CC2_NO_CURSOR_MOVE) === 0) {
+    buf.cursorAddr = buf.mcAddr ?? buf.icAddr ?? buf.homeAddr();
+    result.cursorSet = true;
+  } else if (buf.mcAddr !== undefined) {
+    buf.cursorAddr = buf.mcAddr;
+    result.cursorSet = true;
+  }
 }
 
 function applyWtd(
@@ -456,26 +563,22 @@ function applyWtd(
   codec: Codec,
   result: ApplyResult,
   warn: WarnFn,
-  cursorOrder: PendingCursorOrder
+  cursorState: RecordCursorState
 ): void {
   applyCc(r.u8(), buf, result);
-  applyCc2(r.u8(), result);
+  const cc2 = r.u8();
+  applyCc2(cc2, result);
 
-  /**
-   * この WTD の終わりでカーソル位置を確定する（ACS `preprocessWCC2`）。
-   * 保留値が無ければ `cursorSet` を**倒す**——前の WTD が指した位置を引き継がせない。
-   */
-  const settleCursor = (): void => {
-    if (cursorOrder.addr !== undefined) {
-      buf.cursorAddr = cursorOrder.addr;
-      result.cursorSet = true;
-    } else {
-      result.cursorSet = false;
-    }
-  };
+  /** この WTD の終わりでカーソル位置を決める（ACS `preprocessWCC2`。`placeCursorAfterWtd`） */
+  const settleCursor = (): void => placeCursorAfterWtd(buf, cc2, result, cursorState);
 
   let addr = 0; // WTD 開始時のバッファアドレスは SBA で設定される（未設定時は先頭）
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
+  /**
+   * **WEA 0x12 0x05 0x81 … 0x12 0x05 0x80 の間は、SO/SI 無しの DBCS（2 バイト組）**（ACS `PS5250.writeExtAttribute` の `isInExtNLSSegment`）。
+   * 純 DBCS の欄（G）のデータをホストはこの形で送ってくる（実機の DDS の G 型で確かめた。`20260921-g-field-sosi`）。
+   */
+  let nlsSegment = false;
   /**
    * 「表せない文字」の数。**1 度だけまとめて知らせる**——1 画面に 500 個以上出る
    * （実測）ので 1 バイトずつ警告するとログが埋まる。
@@ -527,7 +630,11 @@ function applyWtd(
       dbcsMode = false; // 属性桁で DBCS 連続は切れる
       continue;
     }
-    if (dbcsMode && codec.decodeDbcsPair && b >= 0x40) {
+    // SO/SI の間・WEA5 の区間・**純 DBCS の欄（G）の中**は 2 バイト組で読む（G の欄は SO/SI 無しで組だけが並ぶ）。
+    // **2 バイト目が 0x40 以上のときだけ組にする**（DBCS の 2 バイト目は 0x40 以上）。奇数バイトのまま次のオーダー（WEA・SBA・SF）が来ても、
+    // 組の 2 バイト目に食わない——ACS の `processWriteToDisplay` はオーダー 10 個と ESC の手前までを 1 続きの文字列として書くので起きない。
+    // 食うと偽の否定応答（0x10050121）を返し、レコードの残り（後ろの READ まで）を失う（`20260921-g-field-sosi` の独立点検 A-S2）
+    if (b >= 0x40 && codec.decodeDbcsPair && r.remaining >= 1 && r.peek() >= 0x40 && (dbcsMode || nlsSegment || buf.isPureDbcsAt(addr))) {
       // DBCS 2 バイトを lead/tail の 2 桁に配置
       const b2 = r.u8();
       buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)), b, b2);
@@ -562,16 +669,30 @@ function applyWtd(
       unmappable++;
       continue;
     }
+    if (isControlData(b)) {
+      /**
+       * **オーダーでない制御バイトは表示データ**（ACS `processWriteToDisplay` のオーダーは SOH・RA・EA・TD・SBA・WEA・IC・MC・WDSF・SF の 10 個だけで、
+       * それ以外の ESC 以外のバイトは全部 1 続きの文字列として書く）。0x05〜0x0D・0x16〜0x1B が該当する。
+       * ~~未知のオーダーとして次の ESC まで読み飛ばす~~ は誤りだった——同じ WTD の後ろの SBA・SF・IC を失い、同じ族の 0x1C・0x1F が実機で届いていた。
+       * 実機の ACS のコア（`scripts/acs-probe/wtd-control-bytes.txt`）は、各バイトを 1 桁の空白として置き（0x07 だけ DEL）、後ろのオーダーをすべて処理した。
+       * `20260921-wtd-control-bytes`。元のバイトは送信用にだけ持つ（`hostByte`。画面イメージ・SAVE の応答で返す。ACS は `HostPlane` に受信バイトを入れる）
+       */
+      buf.setChar(addr++, controlDataText(b), undefined, b);
+      continue;
+    }
     switch (b) {
       case ORDER.SBA:
         addr = buf.addrOf(r.u8(), r.u8());
         break;
       case ORDER.IC:
+        // **ここでは動かさず覚える**——確定は WTD の終わり（`placeCursorAfterWtd`）。IC は MC を捨てる
+        // （ACS `processWriteToDisplay` の 0x13: `WTD_MC_addr = -1`）。番地はレコードをまたいで持ち越す
+        buf.icAddr = buf.addrOf(r.u8(), r.u8());
+        buf.mcAddr = undefined;
+        break;
       case ORDER.MC:
-        // 01 では IC/MC とも「カーソル位置の設定」として扱う（IC_ULOCK の厳密な扱いは必要時に拡張）。
-        // **ここでは動かさず保留する**——確定は WTD の終わり（`settleCursor`）。理由は
-        // `PendingCursorOrder` を参照
-        cursorOrder.addr = buf.addrOf(r.u8(), r.u8());
+        // MC は「動かさない」指定のときでも効く（ACS `preprocessWCC2` の else 枝）
+        buf.mcAddr = buf.addrOf(r.u8(), r.u8());
         break;
       case ORDER.RA: {
         const target = buf.addrOf(r.u8(), r.u8());
@@ -614,12 +735,11 @@ function applyWtd(
         const len = r.u8();
         const body = r.bytes(len);
         buf.setHeaderData(body);
-        buf.clearFormatTable();
         // **フォーマットテーブルを作り直すので、保留中の IC/MC も捨てる**
         // （ACS `processWriteToDisplay` の SOH 分岐 → `processClearFMT()` →
         // `WTD_IC_addr = -1`）。これが無いと、前の WTD が指した位置が
-        // 「新しい画面に対する指定」として残ってしまう（`PendingCursorOrder` 参照）
-        cursorOrder.addr = undefined;
+        // 「新しい画面に対する指定」として残ってしまう（PA0100R。`placeCursorAfterWtd` 参照）
+        buf.clearFormatTable();
         break;
       }
       case ORDER.TD: {
@@ -655,6 +775,13 @@ function applyWtd(
         // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
         const attrType = r.u8();
         const attrValue = r.u8();
+        // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり。
+        // **0x00 は区間の旗を変えない**（ACS の `case 0` は現在位置の印を外すだけで `isInExtNLSSegment` に触れない。~~0x00 で区間を終える~~ は原典・実測の裏づけの無い推測だった。
+        // 独立点検 A-S3）。区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260921-g-field-sosi`）
+        if (attrType === 0x05 && codec.decodeDbcsPair && (attrValue === 0x81 || attrValue === 0x80 || attrValue === 0x00)) {
+          if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
+          break;
+        }
         warn(
           `WEA order (type=0x${attrType.toString(16)}, value=0x${attrValue.toString(16)}) received — not applied`
         );
@@ -680,25 +807,6 @@ function applyWtd(
         // （カタカナ表示モードでの再解釈・文字化けを防ぐ）。送信には 0x1E を使う（0x1C と同じ理屈）。
         buf.setChar(addr++, ";", undefined, ORDER.UNKNOWN_1E);
         break;
-      default:
-        warn(`unknown order 0x${b.toString(16)} — skipping to next command`);
-        // **オーダーの長さは分からないが、レコード全体を捨てない。**
-        // 次のコマンドまで読み飛ばして復帰する。捨ててしまうと、後続の WRITE
-        // （キーボード解放の CC2 等）や READ が丸ごと失われ、ホストは送ったつもりでも
-        // クライアントの鍵盤が開かず「応答待ちのまま固まる」。
-        //
-        // **`0x04` を見つけただけでは ESC と決めない。** `0x04` はオーダーの
-        // パラメータにも現れる——実測した PUB400 のヘルプ画面では `11 04 05`
-        // （SBA 行 4 桁 5）の行バイトを ESC と読み違え、続く `05` を未知コマンドと見なして
-        // **末尾の READ MDT FIELDS ごと捨てていた**。直後が既知のコマンドである
-        // ものだけを ESC と認めれば、この取り違えは起きない。
-        while (r.remaining > 0) {
-          if (r.peek() === ESC && r.remaining >= 2 && isKnownCommand(r.peekAt(1))) break;
-          r.u8();
-        }
-        settleCursor();
-        warnUnmappable(unmappable, warn);
-        return;
     }
   }
   settleCursor();
@@ -823,7 +931,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     // ⚠ **`0x8680` はワードラップで別物**——継続と誤認すると送信で欄を勝手に畳んでしまう。
     // 値が完全一致するものだけを拾う（マスク判定にしない）。
     //
-    // 実機（IBM i 7.3・`ASAOLIB/MSKTST`）で採った生バイト:
+    // 実機（IBM i 7.3・`TESTLIB/MSKTST`）で採った生バイト:
     //   `1d 43 00 86 01 24 00 02` … (3,23) len=2 先頭
     //   `1d 43 00 86 03 24 00 02` … (3,26) len=2 中間
     //   `1d 43 00 86 02 24 00 02` … (3,29) len=2 最終
@@ -836,7 +944,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     // 参照実装 2 つとも下位バイトをそのまま持つ（GNU tn5250 `session.c` の
     // `nextfieldprogressionid`、tn5250j `ScreenField.setFCWs` の `cursorProg = fcw2`）。
     //
-    // 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
+    // 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
     else if ((fcw & 0xff00) === 0x8800) cursorProgression = fcw & 0x00ff;
   }
   const attr = r.u8();
@@ -847,29 +955,35 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   return fieldStart;
 }
 
+/** 否定応答のセンス・コード（ACS `DS5250` の `setSenseCode` / `sense_code` の値） */
+export const SENSE = {
+  COMMAND_EXPECTED: 0x10050121,
+  ROLL_PARAM: 0x1005012c,
+  CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
+  /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */
+  UNKNOWN_OPCODE: 0x10030101,
+  WSF_D972_FLAG: 0x10050112
+} as const;
+
 /**
- * WRITE STRUCTURED FIELD（ホスト → クライアント）。5250 QUERY（class 0xD9 / type 0x70）を検出したら
- * true を返す（呼び出し側が Query Reply を送る）。その他の SF は読み飛ばす（subtask 04 で拡張）。
+ * WRITE STRUCTURED FIELD（ホスト → クライアント）の**最初の SF を 1 つだけ**読む（ACS `DS5250.processWSF`）。5250 QUERY（class 0xD9 /
+ * type 0x70。フラグが 0 のとき）とクラス D9・種類 72（長さ 6 のとき）の応答を返す（送るのは呼び出し側）。その他の SF は読み飛ばす
  */
-function applyStructuredField(r: ByteReader, warn: WarnFn): boolean {
-  let isQuery = false;
-  while (r.remaining >= 2) {
-    if (r.peek() === ESC) break; // 次のコマンド
-    const len = r.u16();
-    if (len < 2) {
-      warn(`invalid structured field length ${len}`);
-      return isQuery;
-    }
-    const bodyLen = len - 2;
-    if (r.remaining < bodyLen) {
-      warn(`structured field truncated (need ${bodyLen}, have ${r.remaining})`);
-      return isQuery;
-    }
-    const body = r.bytes(bodyLen);
-    // body[0]=class, body[1]=type
-    if (body[0] === 0xd9 && body[1] === 0x70) isQuery = true;
+function applyStructuredField(r: ByteReader): { reply?: WsfReply; sense?: number } {
+  // ACS `processWSF` は SF の頭（長さ 2・class・type）を見るだけで、進めるのは呼び出し側（長さ `n12` の分）
+  const len = (r.peekAt(0) << 8) | r.peekAt(1);
+  const sf = r.peekUpTo(len);
+  // 長さの分だけ進める（足りなければレコードの終わりまで。0・1 なら長さの 2 バイトが次の「コマンド」として読まれ、0x10050121 になる＝ACS と同じ）
+  r.skip(Math.min(len, r.remaining));
+  if (sf[2] !== 0xd9) return {};
+  if (sf[3] === 0x70) return sf[4] === 0 ? { reply: { kind: "query" } } : {}; // ACS はフラグが 0 のときだけ応答する
+  if (sf[3] === 0x72 && len === 6) {
+    // ACS は長さが 6 のときだけ見る（`n4 != 6` なら何もしない）
+    const flags = sf[4] ?? 0;
+    if ((flags & 0x80) !== 0) return { sense: SENSE.WSF_D972_FLAG };
+    return { reply: { kind: "d972", flags, next: sf[5] ?? 0 } };
   }
-  return isQuery;
+  return {};
 }
 
 /**
@@ -902,6 +1016,10 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): vo
     else if (b === ORDER.IC || b === ORDER.SBA || b === ORDER.MC) r.skip(2);
     // その他の制御は読み飛ばす
   }
-  const trimmed = msg.trim();
-  if (trimmed !== "") buf.systemMessage = trimmed;
+  // **本文が空白だけでも載せて番号を振る**——ACS `DS5250.processWriteErrorCode` は本文を読む前に
+  // 無条件で `setErrorMode(true)` とする（独立点検の指摘。空白だけの WEC が実際に届くかは未確認）。
+  // 空なら画面に出る文言は無いが、エラー状態には入る（キーボードは Reset・矢印等まで拒否）
+  buf.systemMessage = msg.trim();
+  // 届くたびに番号を振る（同じ文言でも新しいエラー。UI はこれでエラー状態に入り直す）
+  buf.systemMessageSeq = nextSystemMessageSeq();
 }

@@ -1,0 +1,212 @@
+# **ME（必須入力）・MF（必須埋め）を ACS はいつ・何で判定するか**（実機）。
+#
+# 原典: `PS5250.processAIDCode` は AID の前に
+#  1) カーソル下の欄が MF・MDT あり・満杯でも空でもない → 欄頭へ、エラー 20（0x14）
+#  4) ME 欄のうち MDT の無いものがあり、**画面のどこかが変更済み（masterMDT）** → その欄へ、エラー 7。
+#     ただし SOH で申告された F キー（CA キー）なら ME は見ない（`DS5250.isSOH_PF`）
+# `FFT5250.checkMandatoryFieldCheck`。Tab 等で欄を出るときの MF の検査は `moveCursorWithMandFillCheck`。
+# 当 PJ は Enter のときだけ・内容で判定している（`20260729-ffw-behavior-bits` D1）。推測で揃えず、ここで測る。
+#
+# 画面は ADJPGM（7,20=CHECK(MF) A 6 桁 / 11,20=CHECK(ME) A / 13,20=素の A）。F3 は CA03。
+# 送れたかは `->` の右の写しで見る。各場合の終わりは Reset → Tab → F3 で抜け、`exit-*` がメインメニューで
+# なければ次の場合は無効（`aid-without-field-exit.txt` の 1 回目の教訓）。実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- 1) 何も打たずに Enter（ME 欄は空） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys [enter]
+settle 1500
+dump m1-enter
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-1
+
+# --- 2) 素の欄に打って Enter（ME 欄は空） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys X
+settle 400
+keys [enter]
+settle 1500
+dump m2-enter
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-2
+
+# --- 3) 素の欄に打って F3（CA キー。ME 欄は空） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys X
+settle 400
+keys [pf3]
+settle 1500
+dump m3-f3
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-3
+
+# --- 4) 素の欄に打って PageDown（ME 欄は空） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 13,20
+settle 300
+keys X
+settle 400
+keys [pagedn]
+settle 1500
+dump m4-roll
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-4
+
+# --- 5) ME を埋め、MF 欄に途中まで打って（カーソルは MF 欄）Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 7,20
+settle 300
+keys AB
+settle 400
+dump m5-typed
+keys [enter]
+settle 1500
+dump m5-enter
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-5
+
+# --- 6) MF 欄に途中まで打って Tab で出る ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,20
+settle 300
+keys AB
+settle 400
+keys [tab]
+settle 800
+dump m6-tab
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-6
+
+# --- 7) ME を埋め、MF 欄に途中まで打ち、カーソルを素の欄へ移して Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 7,20
+settle 300
+keys AB
+settle 400
+setcursor 13,20
+settle 300
+keys [enter]
+settle 1500
+dump m7-enter
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-7
+
+# --- 8) ME 欄に打ってから消し（MDT は立つ・中身は空）、Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 300
+keys [backspace]
+settle 400
+dump m8-typed
+keys [enter]
+settle 1500
+dump m8-enter
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-8
+
+# --- 9) MF 欄に途中まで打って（カーソルは MF 欄）F3 ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,20
+settle 300
+keys AB
+settle 400
+keys [pf3]
+settle 1500
+dump m9-f3
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-9
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

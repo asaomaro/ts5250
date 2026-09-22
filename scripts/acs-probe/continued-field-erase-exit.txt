@@ -1,0 +1,178 @@
+# **継続欄（EDTMSK で割られた欄）で Erase EOF・Field Exit を打ったとき、ACS は続く区間まで消すか・欄を出た後のカーソルはどこか**（実機。2026-09-22）。
+#
+# 原典（ACS のコアの読み）: `PS5250.processEraseEOF` → `eraseToEOF_Work` は、カーソルの区間はカーソルから区間の終わりまで、**続く区間は全桁を** NUL にする。
+# Field Exit・Field± も同じ消去を先に通る。欄を出る行き先は `FFT5250.nextNonByPassInputFieldPos` で、**継続欄の 2 区間目以降を飛ばす**ので、鎖の途中から出ても行き先は鎖の**後ろ**。
+# 当 PJ は（変更前）カーソルの区間だけを消し、行き先は次の区間だった。**ここの「期待」は原典の読み。測定の結果は各節の dump で確かめる**。
+#
+# 画面は DTMPGM（`scripts/build-dttest.mjs`）の D8U（23,24。`EDTWRD('0   /  /  ')` + `EDTMSK('    &  &  ')` + 色・下線＝4 桁 / 2 桁 / 2 桁の 3 区間。区間の間は保護された `/`）。
+# **`PROBE_ENPTUI=true` で流す**（拡張 5250 を申告しないと、ホストは欄を割らずに 1 つの 10 桁の欄として送る。`insert-no-room-continued.txt` と同じ）。
+#   PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/continued-field-erase-exit.txt
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DTMPGM[enter]
+settle 2500
+dump screen
+
+# B1) 12345678（3 区間を満杯）→ 最初の区間の 2 桁目（23,25）で Erase EOF。期待: 1 区間目は 1 桁だけ残り、2・3 区間目は空
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+dump b1-typed
+setcursor 23,25
+settle 200
+keys [eraseeof]
+settle 300
+dump b1
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B1b) 2 区間目の途中（23,30）で Erase EOF。期待: 1 区間目はそのまま・2 区間目は 1 桁だけ残り・3 区間目は空
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,30
+settle 200
+keys [eraseeof]
+settle 300
+dump b1b
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B2) 同じ入力 → 最初の区間の 2 桁目で Field Exit。期待: 消去は B1 と同じ・カーソルは鎖の後ろの欄（この画面では画面の最初の入力欄へ巡回）
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,25
+settle 200
+keys [fldext]
+settle 500
+dump b2
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B4) 2 区間目の途中（23,30）で Field Exit。期待: 2 区間目の残りと 3 区間目が消え、カーソルは鎖の後ろ
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,30
+settle 200
+keys [fldext]
+settle 500
+dump b4
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B5) 最後の区間（23,32）で Field Exit。期待: 消去はその区間の分だけ・カーソルは鎖の後ろ
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,32
+settle 200
+keys [fldext]
+settle 500
+dump b5
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B6) 画面の途中にある継続欄（D8M。20,24。次は D8B 21,24）の最初の区間で Field Exit。期待: 鎖の後ろ＝D8B の先頭（21,24）。次の区間（20,29）ではない
+setcursor 20,24
+settle 200
+keys 12345678
+settle 300
+dump b6-typed
+setcursor 20,25
+settle 200
+keys [fldext]
+settle 500
+dump b6
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B7) 同じ欄の 2 区間目で Field Exit。期待: 同じ（21,24）
+setcursor 20,24
+settle 200
+keys 12345678
+settle 300
+setcursor 20,30
+settle 200
+keys [fldext]
+settle 500
+dump b7
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+# B8) Ctrl+Delete＝`[deleteword]`（`delete-word.txt`）が継続欄の区間をまたぐか。`12345678` の最初の区間の 2 桁目（23,25）。
+#     鎖を 1 つの語と見てまたぐなら `1 /  /  `（`1` だけ残る）、区間の中だけなら `1   /56/78`（1 区間目の残りだけ）
+setcursor 23,24
+settle 200
+keys 12345678
+settle 300
+setcursor 23,25
+settle 200
+keys [deleteword]
+settle 300
+dump b8-deleteword
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+
+keys [pf3]
+settle 1500
+
+# ===== B3) Dup（DUP 可の継続欄。ULKPGM の CDUP＝5,24 の 8 桁日付と、その後ろの素の欄 9,24。`scripts/build-ulktest.mjs`）。期待: 続く区間まで 0x1C で埋め、鎖の後ろ（9,24）へ =====
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('CDUP')[enter]
+settle 2500
+dump cdup-screen
+setcursor 5,24
+settle 200
+keys 12345678
+settle 300
+dump b3-typed
+setcursor 5,25
+settle 200
+keys [dup]
+settle 500
+dump b3-dup1
+keys [reset]
+settle 300
+keys [erinp]
+settle 300
+# B3b) 2 区間目の途中（5,30）で Dup。期待: 1 区間目はそのまま・2 区間目の残り以降を 0x1C
+setcursor 5,24
+settle 200
+keys 12345678
+settle 300
+setcursor 5,30
+settle 200
+keys [dup]
+settle 500
+dump b3-dup2
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

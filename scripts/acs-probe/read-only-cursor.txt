@@ -1,0 +1,31 @@
+# **READ だけのレコード（WTD 無し）で ACS はカーソルを動かすか**（実機）。
+#
+# QSH を F3 で抜けると、ホストは `RESTORE SCREEN`＋`READ MDT` を 1 つのレコードで送る（WTD は無い。
+# `20260920-restore-screen-parity` research F9b）。当 PJ は READ のときに既定位置（先頭の入力欄）を置くので、
+# 復元したカーソルが先頭の入力欄へ動く。ACS は READ でカーソルに触れない（原典 `DS5250.processCommand`）
+# と読めるが、推測で決めずに測る。
+#
+# 入力欄が複数ある一覧（WRKOBJ。行ごとのオプション欄＋下のコマンド行）で、**コマンド行**から QSH を起動し、
+# F3 で戻ったときのカーソルを見る（起動前にカーソルをコマンド行 21,7 へ置く。一覧の既定位置は 8,2 の
+# オプション欄なので、戻ったとき先頭の入力欄へ動けば 8,2、動かなければコマンド行に残る）。実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]WRKOBJ OBJ(QSYS/QCMD*) OBJTYPE(*PGM)[enter]
+settle 2500
+dump list
+setcursor 21,7
+settle 300
+keys QSH
+settle 400
+dump list-typed
+keys [enter]
+settle 3000
+dump in-qsh
+keys [pf3]
+settle 3000
+dump back-from-qsh
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

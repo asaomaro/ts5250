@@ -164,7 +164,9 @@ describe("入力欄の中の Ctrl+矢印（頭出し）", () => {
     w.unmount();
   });
 
-  it("DBCS の語の中では止まらず、次の語の頭まで飛ぶ", async () => {
+  // ~~DBCS の語の中では止まらず、次の語の頭まで飛ぶ~~ → **全角の字は 1 字ごとが停止点**（ACS `is1stCharacter`。実機のメニューは全角 1 字ごとに止まった。
+  // `scripts/acs-probe/tabword.txt`。`20260921-word-tab-acs`）。SO/SI で区切られた別の連なりは、SI の後ろの 1 字目が次の停止点
+  it("**全角は 1 字ごとに止まる**（`あい` の い で止まり、次の Ctrl+→ で `うえ` の う へ）", async () => {
     const cells = blank();
     const row = cells[4]!;
     row[9] = cell(" ", { kind: "so" });
@@ -190,7 +192,10 @@ describe("入力欄の中の Ctrl+矢印（頭出し）", () => {
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", ctrlKey: true, bubbles: true, cancelable: true }));
     await nextTick();
 
-    // 'い'（語の途中）ではなく次の語 "うえ" の頭へ
+    // 全角は 1 字ごとが語頭（ACS）。あ の次は い
+    expect(el.value[el.selectionStart ?? -1]).toBe("い");
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", ctrlKey: true, bubbles: true, cancelable: true }));
+    await nextTick();
     expect(el.value[el.selectionStart ?? -1]).toBe("う");
     w.unmount();
   });

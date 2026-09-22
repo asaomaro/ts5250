@@ -1,0 +1,315 @@
+# **欄を出ないまま AID を押したとき、ACS は送らずに操作員エラー（0020）にするか**（実機）。
+#
+# 原典 `PS5250.processAIDCode`: カーソル下の欄が 符号付き数値／CHECK(RZ)／CHECK(RB) で、
+# MDT が立ち、`fieldExitReqFlag` が下りていて（打鍵で下り、Tab・カーソル移動・Field Exit で立つ）、
+# `fieldExited` でなく、自動 Enter 欄でもなければ `setErrorCode(32)`（＝0x20）で送らない。
+# 条件が込み入っているので、推測で決めずに場合分けして実機で押す。
+#
+# 画面は ADJPGM（`scripts/build-adjtest.mjs`。3,20=CHECK(RZ) A / 5,20=CHECK(RB) A /
+# 11,20=CHECK(ME) A / 13,20=素の A / 15,20=CHECK(RZ) 6 0（初期値 000000）/ 19,20=6S0）。
+# 送れたかは `->` の右の写し（`[`/`]` は CCSID で化けて見える）と、エラー（inhibit=5）で見る。
+#
+# ⚠ **1 回目の取り方は無効だった**: CHECK(ME) 欄が空だと Enter が ME エラーで止まり、
+#   場合の終わりの F3 が 0020 で弾かれて次の CALL が欄へ打ち込まれ、以降が全部持ち越しで汚れた。
+#   → Enter の場合は **先に ME 欄を埋める**。場合の終わりは **Reset → Tab（欄を出る）→ F3** とし、
+#   **`exit-*` の dump がメインメニューでなければ、次の場合は無効**。実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- 1) RZ(A) に打って、そのまま Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12
+settle 500
+dump c1-typed
+keys [enter]
+settle 1500
+dump c1-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-1
+
+# --- 2) RZ(A) に打って F3（CA キー） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 3,20
+settle 300
+keys 12
+settle 500
+keys [pf3]
+settle 1500
+dump c2-f3
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-2
+
+# --- 3) RZ(A) に打って Field Exit、その後 Enter（対照: 送れるはず） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12[fldext]
+settle 500
+keys [enter]
+settle 1500
+dump c3-fldext-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-3
+
+# --- 4) RZ(A) に打って Tab で出て Backtab で戻り Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12[tab][backtab]
+settle 500
+dump c4-back
+keys [enter]
+settle 1500
+dump c4-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-4
+
+# --- 5) RZ(A) に打って、欄の中で右矢印、Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12[right]
+settle 500
+keys [enter]
+settle 1500
+dump c5-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-5
+
+# --- 6) 符号付き 6S0 に打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 19,20
+settle 300
+keys 12
+settle 500
+dump c6-typed
+keys [enter]
+settle 1500
+dump c6-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-6
+
+# --- 7) RB(A) に打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 5,20
+settle 300
+keys 12
+settle 500
+keys [enter]
+settle 1500
+dump c7-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-7
+
+# --- 8) 素の A に打って Enter（対照: 送れるはず） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 13,20
+settle 300
+keys 12
+settle 500
+keys [enter]
+settle 1500
+dump c8-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-8
+
+# --- 9) RZ(A) に打ち、カーソルを別の欄（素の A）へ移して Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12
+settle 500
+setcursor 13,20
+settle 300
+keys [enter]
+settle 1500
+dump c9-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-9
+
+# --- 10) RZ(A) を満杯（6 桁）まで打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 123456
+settle 500
+dump c10-typed
+keys [enter]
+settle 1500
+dump c10-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-10
+
+# --- 11) 符号付き 6S0 の数字桁を満杯（5 桁）まで打って Enter ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 19,20
+settle 300
+keys 12345
+settle 500
+dump c11-typed
+keys [enter]
+settle 1500
+dump c11-enter
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-11
+
+# --- 12) RZ(A) に打って PageDown（Roll） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12
+settle 500
+keys [pagedn]
+settle 1500
+dump c12-roll
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-12
+
+# --- 13) RZ(A) に打って Help ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys M
+settle 400
+setcursor 3,20
+settle 300
+keys 12
+settle 500
+keys [help]
+settle 2000
+dump c13-help
+keys [pf12]
+settle 1500
+dump c13-after-help
+keys [reset]
+settle 500
+keys [tab]
+settle 400
+keys [pf3]
+settle 1500
+dump exit-13
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

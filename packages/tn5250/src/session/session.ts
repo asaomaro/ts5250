@@ -1,16 +1,17 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor } from "@ts5250/base";
-import { parseRecord } from "../protocol/gds.js";
-import { COMMAND, OPCODE } from "../protocol/constants.js";
+import { parseRecord, buildNegativeResponse } from "../protocol/gds.js";
+import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
   buildReadInputFieldsResponse,
   buildReadImmediateResponse,
   buildReadMdtImmediateAltResponse,
   buildFlagRecord,
-  buildCancelInviteAck
+  buildCancelInviteAck,
+  encodedFieldLength
 } from "../protocol/read-response.js";
-import { buildQueryReply } from "../protocol/query-reply.js";
+import { buildQueryReply, buildWsfD972Reply } from "../protocol/query-reply.js";
 import {
   buildSaveScreenResponse,
   buildSavePartialScreenResponse,
@@ -18,7 +19,7 @@ import {
   buildReadScreenExtendedResponse
 } from "../protocol/save-screen.js";
 import type { PcCommandRequest } from "../protocol/pc-command.js";
-import { applyDataStream } from "../protocol/wtd-applier.js";
+import { applyDataStream, SENSE } from "../protocol/wtd-applier.js";
 import { ScreenBuffer, type InternalField } from "../screen/buffer.js";
 import { validateFieldContent } from "../screen/field-validate.js";
 import type { ScreenSnapshot } from "../screen/types.js";
@@ -36,7 +37,8 @@ import { Emitter } from "./emitter.js";
 import { aidCodeOf, aidKeyForCode, type AidKey } from "./aid-keys.js";
 import { terminalTypeFor } from "./terminal-type.js";
 
-export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "closed";
+/** `reconnecting`: ホストに切られて自動で繋ぎ直している間（`ConnectOptions.autoReconnect`） */
+export type SessionState = "connecting" | "negotiating" | "ready" | "locked" | "reconnecting" | "closed";
 
 export interface ConnectOptions {
   host?: string;
@@ -49,7 +51,25 @@ export interface ConnectOptions {
    */
   spoolCcsid?: number;
   screenSize?: "24x80" | "27x132";
+  /**
+   * 装置名。**ACS と同じく置換記号（`%` `*` `=` `+` `&COMPN` `&USERN`）を展開し、大文字にして送る**
+   * （`telnet/device-name.ts`）。`=` を含めば、使用中のとき同じ接続の中で次の番号で答え直す
+   */
   deviceName?: string;
+  /** 置換記号の展開に使う機械名・利用者名（`&COMPN` / `&USERN`）。このパッケージは Node の API に触れないので呼び出し側が渡す */
+  deviceNameEnv?: { computerName?: string; userName?: string };
+  /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`。5 回まで） */
+  deviceNameRetry?: boolean;
+  /**
+   * **関連付けプリンターの装置名**（表示セッションだけ。`20260921-associated-printer`）。空白だけなら申告しない。
+   * 申告の位置と値の扱いは `TelnetOptions.associatedPrinter`
+   */
+  associatedPrinter?: string;
+  /**
+   * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
+   * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
+   */
+  passwordSubstitute?: ((serverSeed: Uint8Array) => Promise<{ clientSeed: Uint8Array; substitute: Uint8Array }>) | undefined;
   /** TLS（telnet over SSL。既定ポート 992・証明書検証既定 ON） */
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /** RFC 4777 自動サインオン（decisions.md D3）。user と password を併せて指定する */
@@ -80,6 +100,27 @@ export interface ConnectOptions {
    * 画面の中身が warn 経由でログに出るため、常用しないこと。
    */
   traceRecords?: boolean;
+  /**
+   * **ホストに切られたら自動で繋ぎ直す**（ACS `ECLConnection` の自動再接続。`20260921-auto-reconnect`）。
+   *
+   * 確立した後にホストから切られたとき（ACS の通信状態 2＝通常の切断。`SIGNOFF ENDCNN(*YES)`・
+   * 無操作の切断・回線断）だけ、**1 回目は即座に、以後 `reconnectIntervalMs` おきに上限なく**試す
+   * （`ECLConnection.run()` は `Thread.sleep(20000)` して `StartCommunication`）。
+   * **`disconnect()` で自分から切ったとき**と、**ホストが起動応答で拒否したとき**（自動サインオンの失敗・拒否など。
+   * ACS の状態 33/34 は再接続の条件に当たらない）は繋ぎ直さない——パスワードの誤りで試し続けて
+   * プロファイルを無効化させる輪にならない。
+   *
+   * **既定は false**。ACS も ECL のコアは既定 false（`SESSION_AUTORECONNECT`）で、画面の層（HOD の bean。
+   * 既定 true）が ON にしている。自動操作の接続では、知らないうちに別の画面へ変わらないよう OFF のままにする。
+   */
+  autoReconnect?: boolean;
+  /** 自動再接続の 2 回目以降の間隔（既定 20000＝ACS の値） */
+  reconnectIntervalMs?: number;
+  /**
+   * 接続のたびに Transport を作る（自動再接続の試験・注入用）。指定が無ければ `transport` を最初の 1 回だけ使い、
+   * それも無ければ TCP で繋ぐ。
+   */
+  transportFactory?: () => Promise<Transport>;
 }
 
 export interface SendAidOptions {
@@ -115,6 +156,10 @@ export interface SendAidResult {
 interface SessionEvents extends Record<string, unknown[]> {
   screen: [ScreenSnapshot];
   closed: [string];
+  /** **自動で繋ぎ直そうとしている**（`attempt` は 1 から。`reason` は切られた理由） */
+  reconnecting: [{ attempt: number; reason: string }];
+  /** 繋ぎ直せた（新しい起動応答。装置名が変わることがある）。**新しい画面の `screen` はこれより先に届く** */
+  reconnected: [StartupResponse | undefined];
   /**
    * **ホストが警報を鳴らせと言ってきた**（WTD の CC2 ビット 0x04）。
    * ACS は `ps.ringBell()` で端末のベルを鳴らす。以前は `ApplyResult.alarm` を立てるだけで
@@ -127,13 +172,55 @@ interface SessionEvents extends Record<string, unknown[]> {
 let seq = 0;
 
 /**
+ * **オペコードごとに、どこからをデータストリームとして読むか**（ACS `DS5250.processPassthru`。`20260921-negative-responses` の節目の点検の指摘）。
+ * - NOOP・CANCEL INVITE・メッセージ灯（0x00・0x0A・0x0B・0x0C）: 読まない（空）
+ * - OUTPUT ONLY・RESTORE SCREEN（0x02・0x05）: 最初の 0x04 まで読み飛ばしてから（ACS `while (savebuff[n3] != 4) ++n3`）
+ * - それ以外の ACS が知っているオペコード（0x01〜0x11）: そのまま
+ * - 知らないオペコード: `undefined`（読まずに否定応答 0x10030101）
+ */
+function streamOf(opcode: number, data: Uint8Array): Uint8Array | undefined {
+  switch (opcode) {
+    case OPCODE.NOOP:
+    case OPCODE.CANCEL_INVITE:
+    case OPCODE.MESSAGE_LIGHT_ON:
+    case OPCODE.MESSAGE_LIGHT_OFF:
+      return new Uint8Array(0);
+    case OPCODE.OUTPUT_ONLY:
+    case OPCODE.RESTORE_SCREEN: {
+      const at = data.indexOf(ESC);
+      return at < 0 ? new Uint8Array(0) : data.subarray(at);
+    }
+    default:
+      return opcode <= 0x11 ? data : undefined;
+  }
+}
+
+/**
  * 5250 セッション（design の状態機械: Connecting → Negotiating → Ready ⇄ Locked → Closed）。
  * Locked 中もホスト発 WTD は画面に適用し続ける（複数レコードで画面が組まれるケース）。
  */
 export class Session5250 extends Emitter<SessionEvents> {
   readonly id: string;
   private state: SessionState = "connecting";
-  private readonly buf: ScreenBuffer;
+
+  /** 繋ぎ直すたびに作り直す（前の接続の書式・退避画面を持ち越さない） */
+  private buf: ScreenBuffer;
+  /** 接続の設定（自動再接続で同じ設定のまま繋ぎ直すために持つ） */
+  private readonly opts: ConnectOptions;
+  /** `disconnect()` で自分から切った（自動再接続しない） */
+  private userClosed = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * **接続の世代**（張り直すたびに増やす）。前の接続のために始めた非同期の処理（PC コマンドの完了応答）を、
+   * 張り直した後の接続へ送らないため（独立点検の指摘: 新しいジョブのサインオン画面へ前のジョブ宛の Enter が飛ぶ）。
+   */
+  private connGen = 0;
+  /**
+   * 新しい接続の最初のレコードで画面を作り直す。**試行の開始では作り直さない**——交渉中に切られた試行のあと、
+   * 空の画面が送られて白くなるため（D3「前の画面は新しい接続の最初のレコードまで残す」）。
+   */
+  private freshBufferPending = false;
   private readonly codec: Codec;
   private readonly terminalType: string;
   /** 申告する画面サイズ。Query Reply の画面能力バイトに反映する（ACS と同じ） */
@@ -165,6 +252,7 @@ export class Session5250 extends Emitter<SessionEvents> {
 
   private constructor(opts: ConnectOptions) {
     super();
+    this.opts = opts;
     this.id = opts.id ?? `sess-${++seq}`;
     this.codec = codecForCcsid(opts.ccsid ?? 37);
     this.warn = opts.warn ?? (() => {});
@@ -172,36 +260,59 @@ export class Session5250 extends Emitter<SessionEvents> {
     this.onPcCommand = opts.onPcCommand;
     // 代替バッファの許可は、端末タイプでホストに申告した内容と一致させる（27x132 と申告した
     // ときだけ許可する）。ホストは 27x132 対応端末にだけ CLEAR UNIT ALTERNATE を送ってくる。
-    const allowAlternate = opts.screenSize === "27x132";
-    this.buf = new ScreenBuffer(allowAlternate ? { alternate: "27x132" } : {});
+    this.buf = Session5250.newBuffer(opts);
     this.screenSize = opts.screenSize ?? "24x80";
     this.terminalType = terminalTypeFor(opts.ccsid ?? 37, this.screenSize);
     this.enhanced = opts.enhanced ?? false;
   }
 
+  /** 画面バッファを作る。代替バッファ（27x132）は申告した画面サイズのときだけ許す */
+  private static newBuffer(opts: ConnectOptions): ScreenBuffer {
+    return new ScreenBuffer(opts.screenSize === "27x132" ? { alternate: "27x132" } : {});
+  }
+
   static async connect(opts: ConnectOptions): Promise<Session5250> {
     const session = new Session5250(opts);
-    let transport: Transport;
-    if (opts.transport) {
-      transport = opts.transport;
-    } else {
-      if (opts.host === undefined) {
-        throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
-      }
-      transport = await TcpTransport.connect({
-        host: opts.host,
-        port: opts.port ?? (opts.tls ? 992 : 23), // TLS 既定 992・平文 23
-        ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.tls !== undefined ? { tls: opts.tls } : {})
-      });
-    }
+    const transport = opts.transportFactory
+      ? await opts.transportFactory()
+      : (opts.transport ?? (await session.openTcp()));
+    await session.establish(transport, true);
+    return session;
+  }
 
-    session.state = "negotiating";
+  /** TCP で繋ぐ（`host` が要る） */
+  private async openTcp(): Promise<Transport> {
+    const opts = this.opts;
+    if (opts.host === undefined) {
+      throw new As400Error("CONNECT_FAILED", "host is required (or inject transport)");
+    }
+    return TcpTransport.connect({
+      host: opts.host,
+      port: opts.port ?? (opts.tls ? 992 : 23), // TLS 既定 992・平文 23
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
+      ...(opts.tls !== undefined ? { tls: opts.tls } : {})
+    });
+  }
+
+  /**
+   * telnet の交渉から初回の画面までを済ませる（最初の接続と自動再接続で共通）。
+   * `initial` のときだけ、交渉中に切られたら `closed` を出す（繋ぎ直しの途中の失敗は、繋ぎ直しの輪が扱う）。
+   */
+  private async establish(transport: Transport, initial: boolean): Promise<void> {
+    const opts = this.opts;
+    // **繋ぎ直しの交渉中は `reconnecting` のまま**にする。`negotiating` にすると `assertNotClosed` の門を素通りして、
+    // 交渉途中の接続へ Attn 等が流れる（独立点検の指摘）。画面が来れば `handleRecord` が `ready` にする
+    if (initial) this.state = "negotiating";
+    this.connGen++;
     // RFC 2877 KBDTYPE/CODEPAGE/CHARSET を申告し、ホストにデバイス⇄ジョブ CCSID の変換をさせる
     const dev = deviceEnvFor(opts.ccsid ?? 37);
-    session.telnet = new TelnetLayer(transport, {
-      terminalType: session.terminalType,
+    this.telnet = new TelnetLayer(transport, {
+      terminalType: this.terminalType,
       deviceName: opts.deviceName,
+      deviceNameEnv: { ...opts.deviceNameEnv, printer: false },
+      deviceNameRetry: opts.deviceNameRetry,
+      associatedPrinter: opts.associatedPrinter,
+      passwordSubstitute: opts.passwordSubstitute,
       user: opts.user,
       password: opts.password,
       kbdType: dev?.kbdType,
@@ -212,46 +323,56 @@ export class Session5250 extends Emitter<SessionEvents> {
     const ready = new Promise<void>((resolve, reject) => {
       const timeoutMs = opts.negotiationTimeoutMs ?? 15_000;
       const timer = setTimeout(() => {
-        session.telnet.close();
-        reject(new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`));
+        // 8902 で次の名前を待っていたなら、その理由を残す（一般的な「時間切れ」に負けさせない。節目の点検の懸念）
+        reject(
+          this.retriedRejection !== undefined
+            ? new As400Error("SESSION_REJECTED", `${this.retriedRejection}; the host did not ask for another name within ${timeoutMs}ms`)
+            : new As400Error("NEGOTIATION_TIMEOUT", `no screen within ${timeoutMs}ms`)
+        );
+        // **先に reject する**（close が同期で onClose を呼び、そちらの文言で先に決まってしまうため）
+        this.telnet.close();
       }, timeoutMs);
       const onFirstReady = () => {
         clearTimeout(timer);
         resolve();
       };
-      session.onceReady = onFirstReady;
-      session.requestedDevice = opts.deviceName;
+      this.onceReady = onFirstReady;
+      this.requestedDevice = opts.deviceName;
       // **ホストが理由を返してきたら、それを接続の失敗にする**（`onClose` より先に届く）
-      session.onNegotiationError = (e) => {
+      this.onNegotiationError = (e) => {
         clearTimeout(timer);
         // **先に reject する。** `close()` は `onClose` を同期で呼び、そこが
         // `SESSION_CLOSED closed during negotiation` で先に settle してしまう
         // ——せっかく分かった理由（`8902` 等）が一般的な文言に負ける（実機で踏んだ）
         reject(e);
-        session.telnet.close();
+        this.telnet.close();
       };
-      session.telnet.onClose((reason) => {
+      this.telnet.onClose((reason) => {
         clearTimeout(timer);
-        session.handleClose(reason);
+        if (initial) this.finalClose(reason);
         // **装置名を指定していてネゴシエーション中に切られたら、まず装置名の重複を疑う。**
-        // IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる。生の
+        // ~~IBM i は要求された装置が既に使用中だと、理由を返さずソケットを閉じる~~ → 両方の実機で 8902 を返し、同じ接続の中で
+        // 装置名を聞き直してきた（`20260921-device-name-acs`）。それでも理由なく閉じられたときの手掛かりとして残す。生の
         // 「socket closed」だけだと利用者は原因に辿り着けない（同じ設定で 2 本目を開いた等）。
         const hint =
           opts.deviceName !== undefined
-            ? `（装置名 ${opts.deviceName} が既に使用中の可能性があります）`
+            ? `（装置名 ${this.telnet.deviceName ?? opts.deviceName} が既に使用中の可能性があります）`
             : "";
+        if (this.retriedRejection !== undefined) {
+          reject(new As400Error("SESSION_REJECTED", `${this.retriedRejection}; closed while answering with another name: ${reason}`));
+          return;
+        }
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
-      session.telnet.onError((err) => session.warn(`transport error: ${err.message}`));
-      session.telnet.onRecord((rec) => session.handleRecord(rec));
+      this.telnet.onError((err) => this.warn(`transport error: ${err.message}`));
+      this.telnet.onRecord((rec) => this.handleRecord(rec));
     });
 
     transport.start?.();
     await ready;
 
     // 接続完了後は onClose を通常処理に差し替える
-    session.telnet.onClose((reason) => session.handleClose(reason));
-    return session;
+    this.telnet.onClose((reason) => this.handleClose(reason));
   }
 
   private onceReady: (() => void) | undefined;
@@ -263,9 +384,22 @@ export class Session5250 extends Emitter<SessionEvents> {
   private onNegotiationError: ((e: As400Error) => void) | undefined;
   /** 要求した装置名。失敗の起動応答には装置名が入らないので、文言に添えるために持つ */
   private requestedDevice: string | undefined;
+  /**
+   * 8902（使用中）を受けて次の名前で答え直している最中なら、その拒否の文言。ホストが聞き直してこないまま時間切れ・切断に
+   * なったとき、**理由（8902）を失わない**ために持つ（`20260921-device-name-acs`）
+   */
+  private retriedRejection: string | undefined;
 
   get currentState(): SessionState {
     return this.state;
+  }
+
+  /**
+   * **自動で繋ぎ直している間だけ**、何回目かを返す（交渉中も含む）。ブラウザが開き直した・後から入ったときに
+   * 「繋ぎ直し中」を知らせるため——経過の通知（`reconnecting`）は購読している間にしか届かない（独立点検の指摘）。
+   */
+  get reconnecting(): { attempt: number } | undefined {
+    return this.state === "reconnecting" ? { attempt: Math.max(1, this.reconnectAttempt) } : undefined;
   }
 
   get keyboardLocked(): boolean {
@@ -273,7 +407,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   snapshot(): ScreenSnapshot {
-    return this.buf.snapshot(this.id, this.keyboardLocked);
+    const snap = this.buf.snapshot(this.id, this.keyboardLocked);
+    // メッセージ待ち表示は画面バッファではなくセッションの状態なので、ここで重ねる。
+    // **点いているときだけ付与する**（`ScreenSnapshot.messageWaiting` の約束）
+    return this.messageWaiting ? { ...snap, messageWaiting: true } : snap;
   }
 
   /** ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可 */
@@ -288,9 +425,11 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 値は文言に入らないので、利用者が直せるのはこの位置だけが頼り
     const at = this.buf.rowColOf(field.startAddr);
     validateFieldContent(value, field, this.codec, this.buf.fieldValue(field), at);
-    // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）
+    // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）。
+    // **純 DBCS の欄（G）は SO/SI を数えない**——送信（`buildFieldResponse`）と同じ数え方（`encodedFieldLength`）。
+    // 数えると全角 6 字（12 バイト）が入る欄に 6 字を置けず、ブラウザの Enter・MCP・HLLAPI・マクロが FIELD_OVERFLOW になる（独立点検 A-M1）
     if (field.dbcsType !== undefined && this.codec.isDbcs) {
-      const bytes = this.codec.encode(value).bytes.length;
+      const bytes = encodedFieldLength(value, this.codec, field.dbcsType === "pure");
       if (bytes > field.length) {
         // 長さを出さない理由は `buffer.ts` の同じ検査と同じ（`20260920-field-error-no-value` FR1）
         throw new As400Error(
@@ -493,7 +632,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       // **WRITE ERROR CODE（0x21/0x22）のメッセージは画面セルに入らない。**
       // ホストは専用のコマンドでエラー行へ出すので `systemMessage` に載る（`get_screen` の
       // `=== Message ===`）。ここでセルしか見ないと、**エラーを待てない**——実機で
-      // `ASAOLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
+      // `TESTLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
       // 「小数部分の使用法が正しくないか，…」が `systemMessage` にだけ現れ、
       // 24 行目のセルは空のままだった（2026-08-25）。
       return snap.systemMessage !== undefined && snap.systemMessage.includes(opts.until.text);
@@ -528,13 +667,28 @@ export class Session5250 extends Emitter<SessionEvents> {
     return this.startupInfo;
   }
 
+  /** 画面の文字変換に使っている CCSID（attach したタブがセッションの種類——SBCS だけか DBCS か——を知るため。`20260921-monocase-non-ascii`） */
+  get ccsid(): number {
+    return this.codec.ccsid;
+  }
+
   disconnect(): void {
     if (this.state === "closed") return;
+    this.userClosed = true; // **自分から切ったときは繋ぎ直さない**（ACS も同じ）
+    if (this.state === "reconnecting") {
+      // 次の試行を待っている（または TCP を張っている）最中。交渉中なら下の close が輪を抜けさせる
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+      this.finalClose("disconnected");
+      return;
+    }
     this.telnet.close();
   }
 
   private assertNotClosed(): void {
     if (this.state === "closed") throw new As400Error("SESSION_CLOSED", "session is closed");
+    // 繋ぎ直している間は送り先が無い（Attn / SysReq も。古い接続は閉じている）
+    if (this.state === "reconnecting") throw new As400Error("KEYBOARD_LOCKED", "reconnecting to the host");
   }
 
   private assertReady(): void {
@@ -551,6 +705,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private handleRecord(record: Uint8Array): void {
+    if (this.freshBufferPending) {
+      this.freshBufferPending = false;
+      this.buf = Session5250.newBuffer(this.opts);
+    }
     if (this.traceRecords) {
       const hex = [...record].map((b) => b.toString(16).padStart(2, "0")).join(" ");
       this.warn(`rx record (${record.length} bytes): ${hex}`);
@@ -561,7 +719,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 誤って食べると、そのレコードが画面へ流れず画面が出なくなる
     if (this.firstRecord) {
       this.firstRecord = false;
-      const startup = parseStartupResponse(record, this.codec);
+      const startup = parseStartupResponse(record);
       // **見分けはコードの既知性で行う**（`20260802-device-busy-record`）。
       // 以前は「装置名が入っているか」だけで見ていたが、**失敗の応答には装置名が入らない**
       // ——割り当てられていないのだから当然。取りこぼすとデータストリームとして解析され、
@@ -572,10 +730,21 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 今まで通っていたものを落とさないため。
       if (startup && (isKnownStartupCode(startup.code) || startup.device !== "")) {
         this.startupInfo = startup;
+        // **装置が使用中（8902）で、別の名前で答え直せるなら待つ**（ACS と同じ。`20260921-device-name-acs`）。
+        // ホストは同じ接続の中で NEW-ENVIRON SEND を送り直してくるので、telnet が次の名前（`=` の番号・当 PJ の繰り上げ）で
+        // 答える。次の起動応答をもう一度 1 レコード目として見る。答え直せない名前は従来どおり拒否（ACS は同じ名前を
+        // 送り直すだけで繋がらない——実測）
+        if (startup.code === "8902" && this.telnet.canRetryDeviceName()) {
+          this.warn(`device ${this.telnet.deviceName ?? ""} is in use (8902); answering the host with the next name`);
+          this.retriedRejection = `session rejected (8902: ${startupCodeMeaning("8902")})（装置 ${this.telnet.deviceName ?? ""}）`;
+          this.firstRecord = true;
+          return;
+        }
+        this.retriedRejection = undefined; // 聞き直しに答えた名前の起動応答が来た（以後の時間切れは 8902 のせいではない）
         if (isKnownStartupCode(startup.code) && !STARTUP_SUCCESS_CODES.has(startup.code)) {
           const meaning = startupCodeMeaning(startup.code);
-          // 失敗応答に装置名は入らないので、**要求した名前**を添える（利用者が直せる情報にする）
-          const dev = startup.device || this.requestedDevice || "";
+          // 失敗応答に装置名は入らないので、**送った名前**を添える（利用者が直せる情報にする。展開・大文字化の後）
+          const dev = startup.device || this.telnet.deviceName || this.requestedDevice || "";
           const where = dev ? `（装置 ${dev}）` : "";
           this.warn(`session rejected ${startup.code}: ${meaning}`);
           this.onNegotiationError?.(
@@ -602,11 +771,19 @@ export class Session5250 extends Emitter<SessionEvents> {
     let readSolicited = false;
     try {
       const parsed = parseRecord(record);
-      // opcode は情報用（メッセージ表示灯等）。データストリームは全 opcode で処理する
-      // （tn5250 handle_receive: switch は指標のみ、process_stream は全 opcode で実行）
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_ON) this.messageWaiting = true;
       if (parsed.opcode === OPCODE.MESSAGE_LIGHT_OFF) this.messageWaiting = false;
-      const result = applyDataStream(parsed.data, this.buf, this.codec, this.warn);
+      // **データを読むかはオペコードで決まる**（ACS `DS5250.processPassthru`。`20260921-negative-responses` の節目の点検の指摘）。
+      // ~~全オペコードでデータストリームを処理する（tn5250 `handle_receive`）~~——ACS がデータを読まないオペコードでも「ESC が無い」の
+      // 否定応答を返し、OUTPUT ONLY・RESTORE の先頭のゴミでも否定応答にしていた
+      const data = streamOf(parsed.opcode, parsed.data);
+      if (data === undefined) {
+        // 知らないオペコード: ACS は読まずに否定応答 0x10030101（`processPassthru` の `default`）
+        this.warn(`unknown opcode 0x${parsed.opcode.toString(16)} (negative response 0x10030101)`);
+        this.telnet.sendRecord(buildNegativeResponse(SENSE.UNKNOWN_OPCODE));
+        return;
+      }
+      const result = applyDataStream(data, this.buf, this.codec, this.warn);
       // **復元した画面が待っていた READ を、ここで戻す**（ACS `Save5250Net.restoreNetNulls` の
       // `setPendingReadAndAID()` に当たる）。**この位置でなければならない**——下には
       // `queryRequested` / `readScreen*` / `readImmediate*` / `pcCommand` の早期 return が並んでおり、
@@ -655,15 +832,34 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
         this.telnet.sendRecord(res.record);
       }
-      if (result.queryRequested) {
-        // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）。画面イベントは出さない
-        this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
-        return;
+      // **否定応答は最後**（ACS は WSF・READ SCREEN 等の応答を処理の途中で送り、否定応答は `tokenizeData` の終わりで送る。
+      // `20260921-negative-responses` の節目の点検の指摘。~~退避の応答の後、Query 等の応答の前~~）。
+      // 返さないとホストは入力コマンドを待ち続ける（`wtd-applier.ts` の `senseCode`）。下の早期 return はどれもこれを通してから戻る
+      const sendNegative = (): void => {
+        if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
+      };
+      // **WSF の応答は起きた順に全部**（ACS `processWSF` は WSF ごとにその場で送る。~~Query と D9/72 のどちらか 1 本~~）
+      for (const w of result.wsfReplies) {
+        if (w.kind === "query") {
+          // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）
+          this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
+        } else {
+          // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）。
+          // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
+          const reply = buildWsfD972Reply(w.flags, w.next);
+          if (reply) this.telnet.sendRecord(reply);
+        }
       }
+      // **他の応答も、続けて全部送る**（`20260921-negative-responses` の節目 10 の独立点検 A-S1。~~READ SCREEN 系は 1 つだけ送って戻る~~ と、
+      // WSF の応答と同じレコードの画面読みの応答や、`READ SCREEN`＋`READ IMMEDIATE` の片方が落ち、ホストが待ち続けた）。ACS は各コマンドの
+      // 応答をその場で送る。当 PJ はレコードを最後まで適用してから送るので**コマンド順は追わず、この並びで固定**する
+      // （SAVE → WSF → READ SCREEN EXTENDED → READ IMMEDIATE → READ MDT IMMEDIATE ALT → READ SCREEN）。同じレコードにこれらが混ざる形は
+      // 実機で観測していない（**未確認**）
+      let responded = result.wsfReplies.length > 0;
       if (result.readScreenExtendedRequested) {
         // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
         this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
-        return;
+        responded = true;
       }
       if (result.readImmediateRequested) {
         // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。
@@ -672,21 +868,28 @@ export class Session5250 extends Emitter<SessionEvents> {
         // `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
         const { record } = buildReadImmediateResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
-        return;
+        responded = true;
       }
       if (result.readMdtImmediateAltRequested) {
         // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、
         // 送るのは **MDT の立った欄だけ**（名前どおり）。返さないとホストが固まる。
         const { record } = buildReadMdtImmediateAltResponse(this.buf, this.codec);
         this.telnet.sendRecord(record);
-        return;
+        responded = true;
       }
       if (result.readScreenRequested) {
         // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
-        // これ自体は画面を変えないのでイベントは出さない。ホストは続けてウィンドウを描いてくる。
         this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
-        return;
+        responded = true;
       }
+      // **否定応答は応答の最後**（ACS は `tokenizeData` の終わりで送る）。下の早期の戻りもすべてこれを通す
+      sendNegative();
+      // 応答だけのレコードは画面イベントを出さず、入力待ちにも入らない（画面は変えない。ホストは続けて何かを送ってくる）。
+      // ただし**同じレコードで画面を書いていたら**（WTD ＋ WSF・READ SCREEN 等）イベントは出す——出さないと書いた画面が UI に届かない
+      // （節目 10 の独立点検 A-S1 の関連）。同じレコードに READ があれば下へ進んで入力待ちに入る
+      // （ACS は WSF の後もレコードの残りを処理する。~~WSF の応答の後は戻る~~ と、D9/72 の後ろの READ が効かず施錠のままだった）
+      const drew = this.buf.wroteInThisRecord;
+      if (responded && result.readCommand === undefined && !drew) return;
       if (result.pcCommand ?? result.pcCommandEnd) {
         // PC Organizer（STRPCCMD）の中間画面は**利用者に見せない**——
         // 画面イベントも pendingAid の解決もせず、ロックのまま実行して実行キーを返す。
@@ -700,26 +903,15 @@ export class Session5250 extends Emitter<SessionEvents> {
       // Read の無いレコード（画面だけ描くもの）では触らない——同じ画面構築が
       // 複数レコードに分かれて届くため、上書きすると形式を取り違える。
       if (result.readCommand !== undefined) this.readCommand = result.readCommand;
-      if (result.readRequested && !result.cursorSet) {
-        // **ホストが位置を指していなければ先頭入力フィールドへ**（5250 の既定動作）。
-        // ACS の `DS5250.preprocessWCC2()` が `WTD_IC_addr == -1` のときに呼ぶ
-        // `PS5250.setDefaultInsertCursor()`（フォーマットテーブルを先頭から走査して
-        // 最初の非 BYPASS 欄を採る）と同じ処理。原点に残すと AID レコードで報告する
-        // カーソル位置が実機とずれる。
-        //
-        // **`result.cursorSet` は「最後の WTD が指したか」**（レコード全体で最後に見た
-        // IC ではない）。この区別が無いと、PA0100R のように 1 レコードへ
-        // 「ヘッダ WTD（IC あり）→ 明細 WTD（SOH あり・IC なし）」と積んでくる画面で、
-        // 既に保護化されたヘッダ欄にカーソルが取り残される（`PendingCursorOrder` 参照）。
-        //
-        // ここ以外の上書きはしない——ホストが IC/MC で指した位置は、それが保護欄でも
-        // そのまま尊重する（実機 ACS も入力欄が 1 つも無い画面でカーソルをその場に残す。
-        // 証跡 `work/pa0100j-cursor/`）。
-        this.buf.cursorToFirstInputField();
-      }
+      // ~~READ のときに（そのレコードで位置が指されていなければ）先頭の入力欄へ置く~~——既定位置は
+      // WTD の終わりで置く（ACS `preprocessWCC2`。`wtd-applier.ts` の `placeCursorAfterWtd`）。READ は位置に触れない。
+      // ここで置いていたので、WTD（IC あり）と READ が別のレコードで来る画面で IC が先頭の入力欄へ上書きされていた
+      // （実機で確認。`scripts/verify-read-split-record.mjs`。`20260921-cursor-per-wtd-acs`）
       // 警報は画面更新と別に出す（画面が変わらないレコードでも鳴らすため。ACS も
       // `processWCC2` の中で `ringBell()` を呼ぶだけで、描画とは独立している）
       if (result.alarm) this.emit("alarm");
+      // CC2 のメッセージ待ちビット（触れなかったら undefined＝前の状態を保つ）
+      if (result.messageWaiting !== undefined) this.messageWaiting = result.messageWaiting;
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
       if (result.readRequested) readSolicited = true;
     } catch (err) {
@@ -758,6 +950,7 @@ export class Session5250 extends Emitter<SessionEvents> {
    * （research D5）。実行係のタイムアウトは呼び出し側（server）が持つ。
    */
   private async runPcCommand(cmd: PcCommandRequest | undefined): Promise<void> {
+    const gen = this.connGen;
     try {
       if (cmd && this.onPcCommand) {
         const running = Promise.resolve(this.onPcCommand(cmd));
@@ -768,22 +961,102 @@ export class Session5250 extends Emitter<SessionEvents> {
     } catch (err) {
       this.warn(`PC command failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (this.state === "closed") return;
+    // 終わった・繋ぎ直している・**張り直した後**なら返さない（前のジョブ宛の応答を新しい接続へ流さない）
+    if (this.state === "closed" || this.state === "reconnecting" || gen !== this.connGen) return;
     const aid = aidCodeOf("Enter");
     if (aid === undefined) return;
     const { record } = buildReadMdtResponse(this.buf, this.codec, aid);
-    this.telnet.sendRecord(record);
+    try {
+      this.telnet.sendRecord(record);
+    } catch (err) {
+      // 送る直前に切れた。投げると呼び出し元（`void this.runPcCommand`）の未処理の rejection になりプロセスが落ちる
+      this.warn(`PC command reply not sent: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
+  /** 確立した後に切られた。自動再接続が有効で自分から切ったのでなければ繋ぎ直す */
   private handleClose(reason: string): void {
+    if (this.state === "closed" || this.state === "reconnecting") return;
+    if (this.opts.autoReconnect === true && !this.userClosed) {
+      this.settlePendingAid();
+      this.state = "reconnecting";
+      this.reconnectAttempt = 0;
+      this.scheduleReconnect(0, reason); // **1 回目は即座に**（ACS）
+      return;
+    }
+    this.finalClose(reason);
+  }
+
+  /** 終わる。応答待ちの AID は時間切れとして返す */
+  private finalClose(reason: string): void {
     if (this.state === "closed") return;
     this.state = "closed";
-    if (this.pendingAid) {
-      const p = this.pendingAid;
-      this.pendingAid = undefined;
-      clearTimeout(p.timer);
-      p.resolve({ screen: this.snapshot(), timedOut: true });
-    }
+    this.settlePendingAid();
     this.emit("closed", reason);
+  }
+
+  private settlePendingAid(): void {
+    if (!this.pendingAid) return;
+    const p = this.pendingAid;
+    this.pendingAid = undefined;
+    clearTimeout(p.timer);
+    p.resolve({ screen: this.snapshot(), timedOut: true });
+  }
+
+  private scheduleReconnect(delayMs: number, reason: string): void {
+    this.reconnectTimer = setTimeout(() => void this.tryReconnect(reason), delayMs);
+  }
+
+  /**
+   * 1 回繋ぎ直してみる。失敗したら次を予約する（上限なし）。**ホストが起動応答で拒否したら諦める**
+   * （ACS: 状態 33/34 は再接続の条件に当たらない。自動サインオンの誤りで試し続けないため）。
+   */
+  private async tryReconnect(reason: string): Promise<void> {
+    this.reconnectTimer = undefined;
+    if (this.userClosed || this.state !== "reconnecting") return;
+    const attempt = ++this.reconnectAttempt;
+    this.emitSafely(() => this.emit("reconnecting", { attempt, reason }));
+    let established = false;
+    try {
+      const transport = this.opts.transportFactory ? await this.opts.transportFactory() : await this.openTcp();
+      if (this.userClosed) {
+        transport.close(); // 繋いでいる間に切られた
+        return;
+      }
+      // **前の接続の状態を持ち越さない**。画面・書式・退避画面は新しい接続のホストが描き直す
+      // （画面そのものは最初のレコードで作り直す。`freshBufferPending`）
+      this.freshBufferPending = true;
+      this.firstRecord = true;
+      this.startupInfo = undefined;
+      this.readCommand = COMMAND.READ_MDT_FIELDS;
+      this.messageWaiting = false;
+      await this.establish(transport, false);
+      established = true;
+    } catch (e) {
+      if (this.userClosed) {
+        this.finalClose("disconnected");
+        return;
+      }
+      if (e instanceof As400Error && e.code === "SESSION_REJECTED") {
+        this.finalClose(e.message);
+        return;
+      }
+      this.warn(`reconnect attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
+      this.state = "reconnecting";
+      this.scheduleReconnect(this.opts.reconnectIntervalMs ?? 20_000, reason);
+    }
+    if (!established) return;
+    this.reconnectAttempt = 0;
+    // **try の外で知らせる**——購読者が投げても、確立した接続を「失敗」と取り違えて 2 本目を張らない
+    this.emitSafely(() => this.emit("reconnected", this.startupInfo));
+  }
+
+  /** 購読者の例外で繋ぎ直しの輪を止めない（タイマーの中から呼ばれ、投げると未処理の rejection になる） */
+  private emitSafely(fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      this.warn(`reconnect listener failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }

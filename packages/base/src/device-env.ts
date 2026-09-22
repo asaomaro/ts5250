@@ -35,11 +35,15 @@ const DEVICE_ENV: ReadonlyMap<number, DeviceEnv> = new Map([
   // 日本語 DBCS は SBCS 部を申告する（930/5026=カタカナ 290、939/5035/931/1399=英小文字 1027）
   [930, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
   [5026, { kbdType: "JKB", codePage: 290, charSet: 1172 }],
-  // 939 の KBDTYPE は ACS 実機の申告に合わせて JPB（従来 JEB）
+  // 939 の KBDTYPE は ACS 実機の申告に合わせて JPB（従来 JEB）。930 は ACS の「Katakana Extended」
+  // （`KEY_JAPAN_KATAKANA_EX`）と同じ。ACS の「Katakana」（`KEY_JAPAN_KATAKANA`）は 290 として扱われ CHARSET が 332 になる
   [939, { kbdType: "JPB", codePage: 1027, charSet: 1172 }],
   [5035, { kbdType: "JEB", codePage: 1027, charSet: 1172 }],
   [931, { kbdType: "JEB", codePage: 1027, charSet: 1172 }],
-  [1399, { kbdType: "JEB", codePage: 1027, charSet: 1172 }]
+  // **1399 は ACS と同じく JPE・1027・32000**（`20260921-device-env-1399`。ACS `CodePage.getKbdType` の
+  // `KEY_JAPAN_ENGLISH_EX_EURO` → JPE、`getHostCodePage_CharSet` の GCSGID 65535 を `NVT5250` が 32000 に置き換える。
+  // ACS のコアに当ててワイヤでも確かめた）。~~JEB・1172~~
+  [1399, { kbdType: "JPE", codePage: 1027, charSet: 32000 }]
 ]);
 
 /** CCSID に対応するデバイス属性（未知の CCSID は `undefined`＝申告しない）。 */

@@ -17,6 +17,13 @@
  */
 import { As400Error } from "@ts5250/base";
 import { codecForCcsid } from "@ts5250/ebcdic";
+import {
+  MIN_SHA_PASSWORD_LEVEL,
+  MIN_SHA512_PASSWORD_LEVEL,
+  passwordSubstituteDes,
+  passwordSubstituteSha,
+  passwordSubstituteSha512
+} from "./password.js";
 
 /** ユーザー ID の最大長（IBM i のプロファイル名） */
 export const MAX_USER_LEN = 10;
@@ -139,4 +146,30 @@ export function decodeJobName(value: Uint8Array | undefined): string | undefined
   if (!value || value.length <= 4) return undefined;
   const name = codec37.decode(value.subarray(4)).trimEnd();
   return name.length > 0 ? name : undefined;
+}
+
+/**
+ * **ホストサーバーの認証（サインオン・各サーバーの開始）の置換値**。ACS に同梱の jt400 `AS400ImplRemote` と同じ分岐
+ * （`20260921-hostserver-password-levels`。~~レベル 2 以上は一律 SHA-1・数字始まりもそのまま~~）:
+ * - 0 / 1: **数字で始まるパスワードは頭に `Q`**（`Character.isDigit`）。10 文字まで。大文字の CCSID 37 で DES
+ * - 2 / 3: 空と `*` で始まるものは不可。末尾の U+0000・U+0020・U+3000 を落として SHA-1
+ * - 4: 空と `*` で始まるものは不可。**落とさずに** PBKDF2＋SHA-512（64 バイト。要求の暗号化種別は 7）
+ */
+export async function hostServerPasswordSubstitute(
+  passwordLevel: number,
+  user: string,
+  password: string,
+  clientSeed: Uint8Array,
+  serverSeed: Uint8Array
+): Promise<Uint8Array> {
+  if (passwordLevel < MIN_SHA_PASSWORD_LEVEL) {
+    const pw = /^\p{Nd}/u.test(password) ? `Q${password}` : password;
+    return passwordSubstituteDes(userIdEbcdic37(user), passwordEbcdic37(pw), clientSeed, serverSeed);
+  }
+  if (password.length === 0) throw new As400Error("CONFIG_ERROR", "password is empty");
+  if (password.startsWith("*")) throw new As400Error("CONFIG_ERROR", "password must not start with '*'");
+  if (passwordLevel < MIN_SHA512_PASSWORD_LEVEL) {
+    return passwordSubstituteSha(userIdUnicode(user), passwordUnicode(password.replace(/[\u0000 \u3000]+$/, "")), clientSeed, serverSeed);
+  }
+  return passwordSubstituteSha512(user.toUpperCase(), password, clientSeed, serverSeed);
 }

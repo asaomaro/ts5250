@@ -33,7 +33,11 @@ telnet 定数: `IAC=FF`、`SE=F0 SB=FA WILL=FB WONT=FC DO=FD DONT=FE EOR=EF`。
 | | 24x80 | 27x132 |
 |---|---|---|
 | SBCS（CCSID 37 等） | `IBM-3179-2` | `IBM-3477-FC` |
-| DBCS（CCSID 930/939/1399） | `IBM-5555-G02` | `IBM-5555-C01` |
+| DBCS（CCSID 930/939/1399） | `IBM-5555-C01`（~~`IBM-5555-G02`~~） | `IBM-5555-C01` |
+
+**DBCS は ACS と同じく画面サイズによらず `IBM-5555-C01`**（`20260921-dbcs-terminal-type`。ACS のコアに当ててタップで採った）。
+画面サイズは Query Reply の t[50]（24x80 は 0x11・27x132 は 0x31）で申告し、C01 でも 24x80 の申告なら STRSEU は 24x80 で来る
+（両方の実機で確認）。下の総当たりで C01 が 27x132 だったのは、当時の Query Reply が常に 0x31 を申告していたため。
 
 SBCS は RFC 1205 の一覧どおり。**DBCS 側は RFC 1205 に無い**（同 RFC は 5555 系を 24x80 としか書かない）。
 IBM の Virtual Terminal API マニュアルは 5555 系を一律「24x80 または 27x132」とし、サイズを型番に
@@ -48,8 +52,9 @@ IBM の Virtual Terminal API マニュアルは 5555 系を一律「24x80 また
 | `IBM-5555-G02` | カラー（7 色） | 24x80 |
 | `IBM-5555-A01` / `D01` / `E01` / `F01` | — | ホストが交渉を拒否（telnet の名前ではない） |
 
-カラー端末はこの 2 つ（`G02` / `C01`）だけなので、カラー表示の実装はこれを使う。
-`G02` は定義上「グラフィックス表示」だが、グラフィックス非対応は Query Reply（§ 5 の t[53]=0）で別途申告する。
+カラー端末はこの 2 つ（`G02` / `C01`）だけ。~~カラー表示の実装はこれを使う~~ → いまは ACS と同じく `C01` だけを使う。
+~~`G02` は定義上「グラフィックス表示」だが、グラフィックス非対応は Query Reply（§ 5 の t[53]=0）で別途申告する。~~
+（上表の「実機のワイド画面」は、当時の Query Reply が常に 27x132 可と申告していたときの観測）
 
 なお端末タイプは**接続時にしか申告できない**ため、セッション中に画面サイズを変えることはできない。
 また、代替（27x132）バッファを許可するのは 27x132 を申告したときだけにすること（申告と受理を一致させる）。
@@ -59,14 +64,20 @@ IBM の Virtual Terminal API マニュアルは 5555 系を一律「24x80 また
 NEW-ENVIRON 定数: `IS=0 SEND=1 VAR=0 VALUE=1 ESC=2 USERVAR=3`。
 ホストの `IAC SB 39 SEND ... IAC SE` に対し、`IAC SB 39 IS <payload> IAC SE` を返す。payload は以下を連結（**文字列は ASCII**）:
 
-1. デバイス名（任意）: `USERVAR "DEVNAME" VALUE <devname-ascii>`
-2. 自動サインオン（user/password 指定時。RFC 4777 / tn5250j 準拠）:
-   - `VAR "USER" VALUE <user-ascii>`
-   - `USERVAR "IBMRSEED" VALUE ESC 00 00 00 00 00 00 00 00`  ← **8 バイトのゼロシード＝非暗号化を示す**
-   - `USERVAR "IBMSUBSPW" VALUE <password-ascii>`  ← ゼロシードなので**平文パスワード**
+1. デバイス名（任意）: `USERVAR "DEVNAME" VALUE <devname-ascii>`（ACS と同じく置換記号を展開して大文字。`telnet/device-name.ts`）
+2. 自動サインオン（user/password 指定時。RFC 4777）。**ACS と同じく暗号化する**（`20260921-encrypted-autosignon`）:
+   - ホストの SEND は `USERVAR "IBMRSEED" <サーバーのシード 8 バイト>`（名前の直後に値の印なしで 8 バイト。実測）
+   - `VAR "USER" VALUE <user-ascii>`（Java の `trim()`＋大文字）
+   - `USERVAR "IBMRSEED" VALUE <クライアントのシード 8 バイト>`
+   - `USERVAR "IBMSUBSPW" VALUE <代替パスワード>`（QPWDLVL 0/1 は DES 8 バイト・2/3 は SHA-1 20 バイト・4 は SHA-512 64 バイト。
+     `@ts5250/hostserver` の `bypassSignonSubstitute`。QPWDLVL はサインオン・サーバーに聞き、聞けなければ 0＝ACS と同じ）
+   - 値の 0x00〜0x03 は ESC、0xFF は IAC の二重化
+   - **IS を返すまで後続の交渉に答えない**（計算を待つ間に端末タイプ・BINARY・EOR へ答えると、ホストは IS を待たずにサインオン画面を出した）
+   - ~~`USERVAR "IBMRSEED" VALUE ESC 00 00 00 00 00 00 00 00` ← 8 バイトのゼロシード＝非暗号化~~ → 平文で送るとき（代替パスワードの関数を
+     渡さないコアの利用）は `IBMRSEED` を値なし・`IBMSUBSPW` に平文（`20260921-telnet-signon-vars`。ACS の平文の形）
 
-> user のみ指定（password 省略）なら IBMRSEED/IBMSUBSPW は送らない。DEVNAME のみ／空 IS も可。
-> この方式で PUB400（IBM i 7.5）はバインド時に認証し、signon 画面を経ずメニューへ到達する（decisions 01/D3）。
+> user のみ指定（password 省略）なら ~~IBMRSEED/IBMSUBSPW は送らない~~ **USER も送らない**（ACS と同じ。`20260921-user-without-password`）。DEVNAME のみ／空 IS も可。
+> PUB400（IBM i 7.5・QPWDLVL 3）はバインド時に認証し、signon 画面を経ずメニューへ到達する（暗号化・平文とも。`scripts/verify-autosignon.mjs`）。
 
 ---
 
@@ -84,7 +95,9 @@ LL(2)  type(2)=12A0  reserved(2)=0000  varHdrLen(1)  flag1(1)  flag2(1)  opcode(
 - `flag2`: ホスト発では見ない。**クライアント発は `80` を立てる**（`CLIENT_FLAG2`。ACS が AID 応答・
   READ SCREEN・SAVE SCREEN 応答・Query Reply のすべてで立てることを中継タップで実測）。
   例外は Attn / SysReq のフラグレコードと Cancel Invite への返事で、実機で確かめてある `00` のまま。
-- `opcode`（ホスト→クライアントの指標。全 opcode でデータは処理する）:
+- `opcode`（ホスト→クライアント。**データを読むかはオペコードで決まる**——ACS `DS5250.processPassthru`。NOOP・CANCEL INVITE・メッセージ灯（00・0A・0B・0C）は読まない、
+  OUTPUT ONLY・RESTORE SCREEN（02・05）は最初の ESC まで読み飛ばす、知らないオペコード（11 を超えるもの）は読まずに否定応答 `10030101`。
+  ~~全 opcode でデータは処理する（tn5250 `handle_receive`）~~ は `20260921-negative-responses` の節目 10 の独立点検で事実でなくなった）:
 
 | opcode | 名称 | | opcode | 名称 |
 |---|---|---|---|---|
@@ -473,7 +486,7 @@ Attn は常にデータ無し。**SysReq はシステム要求行に打たれた
 
 **WRITE ERROR CODE（`21` / `22`）のメッセージは `systemMessage` に入れ、画面セルには書かない。**
 参照実装 2 つは画面バッファのエラー行へ直接書くが、**外から見える結果は変わらない**ので合わせていない
-（2026-08-25 に実機で確認）。実機で `ASAOLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
+（2026-08-25 に実機で確認）。実機で `TESTLIB/DTMPGM` の 8 桁日付欄に桁あふれを起こすと
 
 ```
 受信 04 21 13 12 18 22 0e 45 5d 46 cc …

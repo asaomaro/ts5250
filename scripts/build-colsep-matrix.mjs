@@ -10,7 +10,7 @@
 // 実行: node --env-file=.env --env-file=.env.verify scripts/build-colsep-matrix.mjs
 import { Session5250 } from "@ts5250/tn5250";
 
-const LIB = process.env.AS400_LIB ?? "ASAOLIB";
+const LIB = process.env.AS400_LIB ?? "TESTLIB";
 const DDSF = "QDDSSRC", RPGF = "QRPGLESRC";
 const log = (s) => process.stderr.write(s + "\n");
 

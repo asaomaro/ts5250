@@ -60,7 +60,7 @@
   踏まえ、deliver 前に実機で再確認すべき — 根拠: `test-result.md`「受け入れ基準ごとの判定」
   AC1節・「未検証の穴」節、`requirements.md` AC1
   — 対応: `scripts/diag-seu-protected-cursor-pageup.mjs` を修正後のビルドに対して実機
-  （SR-OSAKA/ASAOLIB）で再実行し、利用者の再現手順（10桁10行目・PageUp/PageDown）で
+  （AS400/TESTLIB）で再実行し、利用者の再現手順（10桁10行目・PageUp/PageDown）で
   症状が解消したことを直接確認した（`research.md` F6）。`test-result.md`・「未検証の穴」を
   更新し、この項目を解消済みとして記録した。
 - [nit] `design.md`「振る舞いの詳細」の「`buffer.ts` の `resize()` 以外に `cursorAddr` を

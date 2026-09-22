@@ -7,11 +7,11 @@ describe("terminalTypeFor", () => {
   it("SBCS/DBCS × 24x80/27x132 の端末タイプを返す", () => {
     expect(terminalTypeFor(37, "24x80")).toBe("IBM-3179-2");
     expect(terminalTypeFor(37, "27x132")).toBe("IBM-3477-FC");
-    // DBCS はカラーの 2 つを使う（PUB400 実機で確認: G02=カラー24x80 / C01=カラー27x132。
-    // B01・G01 はモノクロで色が落ちる）。詳細は terminal-type.ts の解説を参照。
-    expect(terminalTypeFor(1399, "24x80")).toBe("IBM-5555-G02");
+    // ~~DBCS はカラーの 2 つを使う（G02=カラー24x80 / C01=カラー27x132）~~ → ACS と同じく DBCS は画面サイズによらず C01
+    // （`20260921-dbcs-terminal-type`。画面サイズは Query Reply で申告する。詳細は terminal-type.ts の解説）
+    expect(terminalTypeFor(1399, "24x80")).toBe("IBM-5555-C01");
     expect(terminalTypeFor(1399, "27x132")).toBe("IBM-5555-C01");
-    expect(terminalTypeFor(930, "24x80")).toBe("IBM-5555-G02");
+    expect(terminalTypeFor(930, "24x80")).toBe("IBM-5555-C01");
   });
 
   it("DBCS でもモノクロ端末（B01/G01）は選ばない＝色が落ちない", () => {
@@ -72,7 +72,8 @@ describe("deviceEnvFor: CCSID → RFC 2877 デバイス属性", () => {
     expect(deviceEnvFor(930)).toEqual({ kbdType: "JKB", codePage: 290, charSet: 1172 });
     // 939 は ACS 実機の申告に合わせて JPB
     expect(deviceEnvFor(939)).toEqual({ kbdType: "JPB", codePage: 1027, charSet: 1172 });
-    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
+    // ~~JEB・1172~~ → ACS と同じ JPE・32000（`20260921-device-env-1399`。値の正は `packages/base/test/device-env.test.ts`）
+    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JPE", codePage: 1027, charSet: 32000 });
   });
 
   it("エイリアス（5026=930 系・5035/931=939 系）も同じ属性", () => {

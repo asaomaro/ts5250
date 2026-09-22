@@ -7,6 +7,9 @@
 //   ROLLUP / ROLLDOWN  → ROLL(0x23)      … 方向ビットと引数の並びを実測する
 //   READIMM            → READ IMMEDIATE(0x72)
 //   READIMMALT         → READ MDT IMMEDIATE ALT(0x83)  ⚠ 当方は応答しない。**待たされるか**を見る
+//   WSF72 / WSF72N     → WSF クラス D9・種類 72（フラグ 0x40 / 0x00）。ホスト側のログに端末の応答の生バイトが残る（`20260921-wsf-d9-72`）
+//   WSF72X / ROLLBAD   → フラグ 0x80 の WSF D9/72・指定の不正な ROLL。端末の否定応答をホストがどう受けるか（`20260921-negative-responses`）
+//   CTLBYTES / SBA10   → WTD のデータの中の制御バイト・SBA の行 1 桁 0（R11 の M2・M3。`DIAG_SCREEN=1` で当 PJ の画面・カーソル・欄も出す）
 //
 // 実行: node --env-file=.env --env-file=.env.verify scripts/diag-5250-commands.mjs [要求...]
 //       既定は ROLLUP ROLLDOWN READIMM
@@ -31,7 +34,7 @@ const inbound = [];
 const outbound = [];
 const session = await Session5250.connect({
   host, port: 23, ccsid: 5035, screenSize: "24x80",
-  warn: (m) => { if (/ROLL|IMMEDIATE|unknown command/i.test(m)) out(`  [warn] ${m}`); },
+  warn: (m) => { if (/ROLL|IMMEDIATE|unknown (command|order)|address|parse error|WDSF|FCW|invalid/i.test(m)) out(`  [warn] ${m}`); },
   traceRecords: true
 });
 const telnet = session.telnet;
@@ -88,6 +91,13 @@ for (const req of REQUESTS) {
   for (const rec of outbound) {
     const b = rec instanceof Uint8Array ? rec : new Uint8Array(rec);
     out(`  送信 ${String(b.length).padStart(4)}B  opcode=0x${(b[9] ?? 0).toString(16)}  ${hex(b.subarray(10, Math.min(20, b.length)))}`);
+  }
+  if (process.env.DIAG_SCREEN === "1") {
+    const sn = session.snapshot();
+    out("  --- 画面（当 PJ の見え方）---");
+    sn.cells.forEach((row, i) => { const t = row.map((c) => c.char).join("").replace(/ +$/u, ""); if (t.trim()) out(`  ${String(i + 1).padStart(2)}| ${t}`); });
+    out(`  カーソル (${sn.cursor?.row},${sn.cursor?.col}) 施錠=${sn.keyboardLocked}`);
+    for (const f of sn.fields) out(`  欄 #${f.index} (${f.row},${f.col}) len=${f.length} prot=${f.protected}`);
   }
   out("  --- ホスト側 ---");
   out((await readLog()).split("\n").filter((l) => l.trim()).map((l) => "  " + l).join("\n"));

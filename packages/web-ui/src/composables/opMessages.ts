@@ -10,9 +10,12 @@ import type { RejectReason } from "./fieldValidate.js";
  * 対応する ACS 原文は各定数の脇に残す（挙動を突き合わせるときの手がかり）。
  * 文体は `MSG_NO_RESPONSE` に合わせ、です・ます調・句点なしで揃える。
  *
- * **ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を
+ * ~~**ACS とあえて揃えていない点**: ACS はメッセージがクリアされるまで文字入力を
  * 受け付けないが、本実装は受け付ける（不便なためユーザー判断）。クリア契機も
- * ACS の「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。
+ * ACS の「ホスト通信 or カーソルキー移動」ではなく任意のキー操作とする。~~
+ * → **ACS に揃えた**（利用者の判断・2026-09-21。`20260921-operator-error-mode`）。操作員エラー
+ * （`isOperatorError`）では文字・Backspace・Delete を拒否し、カーソル移動・AID・Reset・クリックで
+ * 抜ける（実機で測った規則）。情報の通知だけは従来どおり次のキーで消える。
  *
  * ScreenGrid（欄内）と EmulatorPane（欄外＝保護領域）の両方から使うため、
  * 定数はここに 1 か所だけ置く。**新しい操作員メッセージもここへ足す**——
@@ -54,8 +57,60 @@ export const MSG_DTP_NEXT_MONTH = "次の月";
  */
 export const MSG_WATCH_CONSUMES = "監視はエントリを取り出して消します。本番のキューには掛けないでください";
 
+/**
+ * **プリンターの出力に失敗して、ホストへの応答を止めている**（`20260921-printer-hold-response`）。
+ * ACS と同じく、利用者が再試行か取消を選ぶまで印刷完了を返さない——その間スプールはホストに残る
+ */
+export const MSG_PRINTER_HELD = "出力に失敗したため、ホストへの印刷完了の応答を止めています（再試行か取消を選んでください）";
+/** 再試行のボタン（失敗した出力だけをやり直し、できたら応答する） */
+export const MSG_PRINTER_RETRY = "再試行";
+/** 取消のボタン（応答を返す。ホストは印刷済みとみなし、SAVE(*NO) のスプールは消える） */
+export const MSG_PRINTER_CANCEL = "取消（印刷済みとして応答）";
+/** 取消した帳票の状態 */
+export const MSG_PRINTER_CANCELED = "取消しました（ホストは印刷済みとみなしました）";
+/**
+ * 応答を止めている間に接続が切れた帳票の状態。ホストはスプールを印刷済みにせず RDY に戻し、繋ぎ直すと送り直す
+ * （PUB400 で 2 回実測。`scripts/verify-printer-hold-drop.mjs`）
+ */
+export const MSG_PRINTER_DROPPED = "応答する前に接続が切れました（ホストは印刷済みにしていません。繋ぎ直すと送り直されます）";
+/** 一覧の行のチップ（止めている・取消・切断で未応答） */
+export const MSG_PRINTER_CHIP_HELD = "応答停止中";
+export const MSG_PRINTER_CHIP_CANCELED = "取消";
+export const MSG_PRINTER_CHIP_DROPPED = "切断で未応答";
+/** サービス画面のチップの説明（止めている間ホストは次を送らないので、待ち受けていても届かない） */
+export const MSG_PRINTER_SERVICE_HELD =
+  "出力に失敗して、ホストへの印刷完了の応答を止めています（止めている間は次の帳票が届きません）。開くと再試行・取消を選べます";
+
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
+
+/**
+ * ACS のエラー 0022（`PS5250.processFieldPlusMinusAndExit`）: Field− は符号付き数値・数値専用の欄でしか使えない
+ * （継続欄も不可）。値は変えず、欄も出ない（実機の ACS で確認。`20260921-numpad-field-sign`）
+ */
+export const MSG_FIELD_MINUS_INVALID = "この項目では Field− キーは使用できません";
+
+/**
+ * **操作員エラーか**（`20260921-operator-error-mode`）。ACS はこれらで `error_mode` に入り、
+ * キーボードを施錠する（`PS5250.setErrorCode` → `ECLOIA.InputInhibited() == 5`）。
+ * 情報の通知（表示設定の順送り・日付の選択など）は**施錠しない**ので含めない。
+ */
+export function isOperatorError(text: string): boolean {
+  return (
+    text === MSG_NO_ROOM ||
+    text === MSG_FIELD_MINUS_INVALID ||
+    text === MSG_PROTECTED ||
+    text === MSG_DUP_DISALLOWED ||
+    text === MSG_FIELD_EXIT_REQUIRED ||
+    text === MSG_FIELD_EXIT_KEY_INVALID ||
+    // ME / MF / 自己点検も ACS は `setErrorCode` でエラー状態に入る（`20260921-mandatory-check-acs`）
+    text === MSG_MANDATORY_ENTER ||
+    text === MSG_MANDATORY_ENTER_EXIT ||
+    text === MSG_MANDATORY_FILL ||
+    text === MSG_SELF_CHECK ||
+    (Object.values(MSG_BY_REASON) as string[]).includes(text)
+  );
+}
 
 /**
  * ホストが応答しないまま待ち時間が尽きたときの通知。
@@ -123,6 +178,14 @@ export const MSG_NOT_CONNECTED = "サーバーと繋がっていないため送�
  * 待っても戻らない（開き直すしかない）。
  */
 export const MSG_SESSION_ENDED = "セッションは終了しています（開き直してください）";
+
+/**
+ * **ホストに切られて、自動で繋ぎ直している**ときの通知（`20260921-auto-reconnect`）。
+ * ACS と同じく 1 回目は即座に、以後 20 秒おきに試す。繋ぎ直せたら新しいサインオン画面が出る。
+ * `MSG_SESSION_ENDED` と違い、**待てば戻る**ことを伝える。
+ */
+export const msgHostReconnecting = (attempt: number): string =>
+  attempt <= 1 ? "ホストとの接続が切れたため繋ぎ直しています" : `ホストとの接続が切れたため繋ぎ直しています（${attempt} 回目）`;
 
 /*
  * **応答待ちが長引いたことは、こちらからは言わない**（`session-controller` の `setBusy`）。
@@ -230,7 +293,7 @@ const NOTICE_BY_ERROR: Partial<Record<ErrorCode | "INTERNAL_ERROR", string>> = {
   NOT_FOUND: "指定されたものが見つかりません",
   // **プリンターの開始・停止はその場で接続を張る**ので、接続系の失敗がこの口へ届く
   // （`session-manager.ts` の `startPrinter`。`20260920-field-error-no-value` review ラウンド 4）。
-  // 見出しが無いと「エラーが起きました」の一行になり、8925（装置が使用中）のように
+  // 見出しが無いと「エラーが起きました」の一行になり、8925（装置を作れない。~~装置が使用中~~ は 8902）のように
   // **code 自体が診断になっている**ものまで潰れる
   SESSION_REJECTED: "ホストが接続を断りました（装置名が使用中かもしれません）",
   CONNECT_FAILED: "ホストに接続できませんでした",
@@ -249,6 +312,92 @@ export const noticeFor = (code: ErrorCode | "INTERNAL_ERROR"): string =>
 
 /** 見出しの無い code のときに出す。**サーバーの文言は出さない** */
 export const MSG_UNKNOWN_ERROR = "エラーが起きました";
+
+/**
+ * **起動応答で断られた理由**（`20260921-startup-codes-japanese`）。サーバーの文言は英語（`session rejected (8902: Device not available.)（装置 X）`）
+ * なので、コードを拾って日本語の意味に置き換える。ACS もコードごとの文言（`KEY_5250_CONNECTION_ERR_<コード>`）を出す。
+ * 意味は ACS の文言表と RFC 4777 の一覧に基づき、**文言は当 PJ で書いた**（ACS の日本語をそのまま写さない）
+ */
+export const STARTUP_CODE_MEANING_JA: Readonly<Record<string, string>> = {
+  2702: "装置記述が見つかりません",
+  2703: "制御装置記述が見つかりません",
+  2777: "装置記述が壊れています",
+  8901: "装置がオンに構成変更されていません",
+  8902: "装置が使用中です",
+  8903: "この装置はセッションに使えません",
+  8906: "セッションを開始できませんでした",
+  8907: "セッションで障害が起きました",
+  8910: "制御装置がセッションに使えません",
+  8916: "一致する装置が見つかりません",
+  8917: "オブジェクトへの権限がありません",
+  8918: "ジョブが取り消されました",
+  8920: "オブジェクトの一部が壊れています",
+  8921: "通信エラーが起きました",
+  8922: "否定応答を受け取りました",
+  8923: "起動レコードの形が正しくありません",
+  8925: "装置を作れませんでした",
+  8928: "装置を変更できませんでした",
+  8929: "構成変更（オン・オフ）に失敗しました",
+  8930: "メッセージ待ち行列がありません",
+  // ~~装置の開始に失敗しました~~ → ACS の文言表の意味（S/36 のワークステーション機能の開始要求）に直した（節目の独立点検の指摘）
+  8934: "S/36 のワークステーション機能の開始要求を受けました",
+  8935: "セッションが拒否されました",
+  8936: "セッションの開始でセキュリティーの検査に失敗しました",
+  8937: "自動サインオンが拒否されました",
+  8940: "自動構成に失敗したか、許可されていません",
+  I904: "接続元のシステムのリリースが合いません"
+};
+
+/**
+ * **表示セッションが繋がったときの知らせ**（`20260921-startup-code-status`）。ACS は繋がるたび（繋ぎ直しも）状態行に起動応答のコードつきの
+ * 文言を 3 秒出して消す（`AcsOnly.displayResponseCode`・`StatusBar` の時間切れで `clearText`）。意味だけ借りて文言は当 PJ で書いた:
+ * - **I901・I902**: 「<コード> - セッションを開始しました」の意味（`KEY_SESSION_START_SUCCESS`）。I901（仮想装置の機能が元の装置より少ない）も同じ文言——
+ *   ACS も個別の文言はすぐこれに上書きされる
+ * - **それ以外**（成功扱いの I906 や表に無いコード）: 「応答コード: <コード>」（`KEY_RESPONSE_CODE`。ACS の文言表に意味があればその意味、無ければコードそのもの）。
+ *   ~~どのコードも「開始しました」~~ は I906（自動サインオンを求めたが許されない。サインオン画面が続く）で事実と違った（節目 10 の独立点検 C-S6）
+ */
+export function startupStartedText(code: string): string {
+  if (code === "I901" || code === "I902") return `セッションを開始しました（起動応答 ${code}）`;
+  return `応答コード: ${code}`;
+}
+/** 開始の知らせを出しておく時間（ACS の状態行と同じ 3 秒） */
+export const STARTUP_NOTICE_MS = 3000;
+
+/**
+ * **関連付けるプリンターが使えず、関連付けなしで開いたとき**の知らせ（`20260921-associated-printer-session`。サーバーの `opened.associatedPrinterIssue`）。
+ * ACS も指した設定が使えないときはポップアップで知らせてから関連付けなしで開く（`KEY_5250_ASSOC_INVALID_PROFILE`）。文言は当 PJ で書いた。
+ * 開始の知らせと違って 3 秒で消さない（次の操作までは残す。利用者が気づけないと、印刷が別の装置へ出続ける）
+ */
+export const MSG_ASSOC_PRINTER_ISSUE: Readonly<Record<"invalid" | "failed" | "timeout", string>> = {
+  invalid: "関連付けるプリンターセッションが使えないため、関連付けなしで開きました",
+  failed: "関連付けるプリンターセッションを開始できなかったため、関連付けなしで開きました",
+  timeout: "関連付けるプリンターの装置名が待ち時間内に決まらなかったため、関連付けなしで開きました"
+};
+
+/** 起動応答で断られたときの見出し（コードが読めないときもこれ） */
+export const MSG_SESSION_REJECTED_HEAD = "ホストが接続を断りました";
+
+/**
+ * 起動応答で断られたサーバーの文言から、日本語の理由を作る（`（8902: 装置が使用中です・装置 DSP01）` の形）。
+ * コードが読めなければ undefined（呼び出し側が汎用の見出しに落とす）
+ */
+export function startupRejectionText(message: string): string | undefined {
+  const m = /rejected \(([A-Z0-9]\d{3}):/.exec(message);
+  if (!m) return undefined;
+  const code = m[1]!;
+  const meaning = Object.hasOwn(STARTUP_CODE_MEANING_JA, code) ? STARTUP_CODE_MEANING_JA[code] : "意味の分からない起動応答です";
+  const device = /（装置 ([^）]+)）/.exec(message)?.[1];
+  return `${MSG_SESSION_REJECTED_HEAD}（${code}: ${meaning}${device ? `・装置 ${device}` : ""}）`;
+}
+
+/**
+ * **開く前に失敗したときの文言**（ランチャーに出す）。起動応答で断られたときだけ日本語の理由に置き換え、
+ * それ以外は従来どおり code と文言をそのまま出す（接続先・ポートなど診断に要る情報が入っているため）
+ */
+export function openErrorText(code: string, message: string): string {
+  if (code === "SESSION_REJECTED") return startupRejectionText(message) ?? `${noticeFor("SESSION_REJECTED")}（${message}）`;
+  return `${code}: ${message}`;
+}
 
 /**
  * サーバーの message から**欄の位置だけ**を拾う。
@@ -314,6 +463,12 @@ function reasonOf(message: string): string | undefined {
 const CODES_WITH_FIELD_DETAIL = new Set(["FIELD_TYPE", "FIELD_OVERFLOW", "FIELD_PROTECTED"]);
 
 export function wsErrorNotice(code: string, message: string): string {
+  // 起動応答で断られたときは、コードの意味まで出す（開いた後に届く `error`。自動の繋ぎ直しで断られたときは
+  // `closed` の理由で届くので、`session-controller.ts` の `closed` で同じ関数を通す）
+  if (code === "SESSION_REJECTED") {
+    const text = startupRejectionText(message);
+    if (text !== undefined) return text;
+  }
   // **`Object.hasOwn` で引く**——素のオブジェクトリテラルなので、`code` が `constructor` /
   // `toString` だと継承プロパティ（関数）が返り `??` が効かない。`code` はサーバー生成なので
   // 今は届かないが、**戻り値が文字列であること**を型ではなくここで閉じる
@@ -343,11 +498,40 @@ export function wsErrorNotice(code: string, message: string): string {
  */
 export const MSG_DUP_DISALLOWED = "この項目では複写キーを使用できません";
 
-/** 5250 の操作員エラー 0021 相当。ACS: "Mandatory field not entered." */
+/**
+ * ACS のエラー 0020（実機の文言は「このフィールドには実行キーは許されていない。」）。
+ * 右寄せ・符号付き数値の欄に打ったまま、欄を出ずに実行キーを押した（`needsFieldExit`）。
+ * **出方を添える**——ACS は出し方を言わないが、Field Exit を知らない利用者は抜け方が分からない。
+ */
+export const MSG_FIELD_EXIT_REQUIRED = "この項目では実行キーを使用できません（Field Exit か Tab で項目を出てください）";
+
+/**
+ * ACS のエラー 0018（`PS5250.processCharKeyStroke` の `setErrorCode(24)`＝0x18）。実機の ACS の文言は
+ * 「フィールドを終了するために使用したキーが正しくない。」（`scripts/acs-probe/field-exit-full.txt` の場合 C）。
+ * Field Exit が必須の欄（右寄せ・符号付き数値・FER）を最終桁まで打ち、**そこでさらに文字を打った**。
+ * ACS は欄を出たものとして扱い（`fieldExited`）、次の文字は「欄を出るのに使えないキー」として拒否する。
+ */
+export const MSG_FIELD_EXIT_KEY_INVALID = "この項目は最終桁まで入力されています（Field Exit か Tab で項目を出てください）";
+
+/**
+ * ME（必須入力）。**ACS のエラー 0007**（`PS5250.processAIDCode` の `setErrorCode(7)`）。
+ * ~~5250 の操作員エラー 0021 相当~~（番号の誤り）。実機の ACS の文言は「入力必須フィールドである。
+ * データを入力しなければなりません。」。ACS: "Mandatory field not entered."
+ */
 export const MSG_MANDATORY_ENTER = "入力が必要な項目が入力されていません";
-/** 5250 の操作員エラー 0022 相当。ACS: "Field must be filled." */
+
+/**
+ * ME（必須入力）の欄を **Field Exit・Field± で出ようとした**とき。**ACS のエラー 0021**（`PS5250.processFieldPlusMinusAndExit` の
+ * `setErrorCode(33)`＝0x21。AID のときの 0007 とは別）。実機の ACS の文言は「入力必須フィールドにはデータを入力しなければならない。」
+ * （`scripts/acs-probe/field-exit-checks.txt` の E1）。欄の先頭で押したときは、打ってあっても止まる
+ */
+export const MSG_MANDATORY_ENTER_EXIT = "入力が必要な項目です（入力してから、先頭以外の位置で項目を出てください）";
+/**
+ * MF（必須埋め）。**ACS のエラー 0014**（`setErrorCode(20)`＝0x14）。~~0022 相当~~（番号の誤り）。
+ * 実機の ACS の文言は「全桁入力フィールド。終わりまで入力しなければなりません。」。ACS: "Field must be filled."
+ */
 export const MSG_MANDATORY_FILL = "この項目はすべての桁を埋めてください";
-/** 自己点検欄（CHECK(M10)/CHECK(M11)）の検査桁が合わない。ACS も同じ場面で送信を止める */
+/** 自己点検欄（CHECK(M10)/CHECK(M11)）の検査桁が合わない。**ACS のエラー 0015**（`setErrorCode(21)`＝0x15） */
 export const MSG_SELF_CHECK = "この項目の検査数字が正しくありません";
 
 /**

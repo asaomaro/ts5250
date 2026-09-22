@@ -1,0 +1,35 @@
+# 行をまたぐ欄の 2 行目以降で押した End（ACS のコア。`20260921-acs-default-keys` の節目の独立点検の指摘）。
+# 原典 `PS5250.processEndField` はカーソルの行の先頭を探す下限にして `Field5250.getEndPosition` を呼ぶ——今の行より前は探さず、
+# 無ければ今の行の先頭に置く。画面はメインメニューのコマンド行（20,7 から 153 桁＝21,79 まで）。
+# 実測（社内機・2026-09-21）: E1 → 21,1（前の行へ戻らない）、E2 → 21,3、E3 → 21,3。当 PJ の `end(state, from)` と一致。
+signon
+keys [enter]
+settle 1500
+dump menu
+
+# --- E1) 入力は 1 行目の ABC だけ。2 行目（21,5）で End → 21,1（前の行の C の後ろ＝20,10 へは戻らない、はず） ---
+keys [home][eraseeof]ABC
+settle 300
+setcursor 21,5
+settle 200
+keys [eof]
+settle 300
+dump e1
+
+# --- E2) 2 行目にも入力（XY）。1 行目の途中（20,10）で End → 欄全体の末尾の直後＝21,3（はず） ---
+keys [home][eraseeof]AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXY
+settle 300
+setcursor 20,10
+settle 200
+keys [eof]
+settle 300
+dump e2
+
+# --- E3) 同じ入力で 2 行目の後ろ（21,40）で End → 21,3（はず） ---
+setcursor 21,40
+settle 200
+keys [eof]
+settle 300
+dump e3
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

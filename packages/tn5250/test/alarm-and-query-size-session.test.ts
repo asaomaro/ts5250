@@ -102,8 +102,10 @@ function records(chunks: readonly Uint8Array[]): Uint8Array[] {
 }
 
 describe("Query Reply はセッションの画面サイズを申告する", () => {
+  // 実機は Query を PUT/GET（0x03）で送る（`fixtures/pub400-autosignon-menu.jsonl` の `001112a000000400000304f30005d97000`）。
+  // ~~NOOP~~ は ACS がデータを読まないオペコード（`20260921-negative-responses` の節目の点検の指摘）
   const QUERY = buildRecord(
-    OPCODE.NOOP,
+    OPCODE.PUT_GET,
     Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x05, 0xd9, 0x70, 0x00])
   );
 
@@ -119,5 +121,60 @@ describe("Query Reply はセッションの画面サイズを申告する", () =
     const reply = replies.find((d) => d[5] === 0xd9 && d[6] === 0x70);
     expect(reply, "Query Reply を返している").toBeDefined();
     expect(reply![50]).toBe(parseInt(expected, 16));
+  });
+});
+
+/**
+ * **メッセージ待ち表示（MW）がセッション経由でスナップショットに載る**
+ * （`20260921-message-waiting-indicator`）。CC2 の解析（`wtd-applier`）と表示（`StatusBar`）の
+ * **間のつなぎ**を固定する——ここが抜けると、ビットを読んでも表示灯は永遠に点かない。
+ */
+describe("メッセージ待ち表示（CC2 0x01 / 0x02）", () => {
+  it("点灯・保持・消灯がスナップショットに反映される", async () => {
+    const transport = new ScriptedTransport(initialScreen());
+    const session = await Session5250.connect({ transport, id: "t" });
+    expect(session.snapshot().messageWaiting, "初期は付与しない").toBeUndefined();
+
+    transport.deliver(wtdOnly(0x01)); // 点灯
+    expect(session.snapshot().messageWaiting).toBe(true);
+
+    transport.deliver(wtdOnly(0x00)); // MW ビットの無い WTD
+    expect(session.snapshot().messageWaiting, "ビットの無い WTD で消してはいけない").toBe(true);
+
+    transport.deliver(wtdOnly(0x02)); // 消灯
+    expect(session.snapshot().messageWaiting, "消灯は省略（付与しない）").toBeUndefined();
+  });
+});
+
+/**
+ * **WSF クラス D9・種類 72 に ACS と同じ応答を返す**（`20260921-wsf-d9-72`）。社内機で DSM（`QsnPutInpCmd(0xF3, …)`）に出させたところ、
+ * 以前は応答せずホストが待ち続け、キーボードが施錠されたままになった。期待値は同じ手順で ACS のコアが返したもの（ホスト側で読んだ生バイト）。
+ */
+describe("WSF D9/72 への応答", () => {
+  const wsf = (flags: number, next = 0x00, len = 6) =>
+    buildRecord(OPCODE.PUT_GET, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, len, 0xd9, 0x72, flags, next]));
+  async function replyTo(rec: Uint8Array): Promise<string[]> {
+    const transport = new ScriptedTransport(initialScreen());
+    await Session5250.connect({ transport, id: "t" });
+    const before = transport.sent.length;
+    transport.deliver(rec);
+    return records(transport.sent.slice(before)).map((r) => Buffer.from(parseRecord(r).data).toString("hex"));
+  }
+  it("**フラグ 0x40・次が 0 → Unicode の CCSID を申告**（ACS のコアと同じ 15 バイト）", async () => {
+    expect(await replyTo(wsf(0x40))).toEqual(["000088000cd972c00034b044b004b0"]);
+  });
+  it("**それ以外 → `D9 72 80 00 03 01 04`**（ACS のコアと同じ 12 バイト）", async () => {
+    expect(await replyTo(wsf(0x00))).toEqual(["0000880009d9728000030104"]);
+    expect(await replyTo(wsf(0x40, 0x01))).toEqual(["0000880009d9728000030104"]);
+  });
+  it("**フラグ 0x80 は否定応答 0x10050112**（ACS と同じ。`20260921-negative-responses`）・長さが 6 でなければ返さない", async () => {
+    // ヘッダはフラグ 1 に ERR（0x80）・フラグ 2 は 0・オペコード 0（ACS `DS5250.tokenizeData` の否定応答）
+    const transport = new ScriptedTransport(initialScreen());
+    await Session5250.connect({ transport, id: "t" });
+    const before = transport.sent.length;
+    transport.deliver(wsf(0x80));
+    const recs = records(transport.sent.slice(before)).map((r) => Buffer.from(r).toString("hex"));
+    expect(recs).toEqual(["000e12a00000048000001005" + "0112"]);
+    expect(await replyTo(buildRecord(OPCODE.PUT_GET, Uint8Array.from([ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x07, 0xd9, 0x72, 0x40, 0x00, 0x00])))).toEqual([]);
   });
 });

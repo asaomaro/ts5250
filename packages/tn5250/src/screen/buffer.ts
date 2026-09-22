@@ -180,6 +180,13 @@ export class ScreenBuffer {
   cursorAddr = 0;
   systemMessage: string | undefined;
   /**
+   * **WRITE ERROR CODE が届くたびに増える通し番号**（`systemMessage` と対）。同じ文言のエラーが
+   * もう一度来たことを UI が見分けるため——ACS はホストのエラーのたびにエラー状態に入る
+   * （`DS5250.processWriteErrorCode` → `setErrorMode(true)`。`20260921-host-error-mode`）。
+   * 画面バッファを作り直しても重ならないよう、番号はプロセスで通しにする（`nextSystemMessageSeq`）。
+   */
+  systemMessageSeq: number | undefined;
+  /**
    * SOH が申告したメッセージ行の行番号（1 基点）。既定 24 は ACS `DS5250` の初期値と同じ。
    * `systemMessage` をいつ捨てるかの判定に使う（`clearSystemMessageIfTouched`）
    */
@@ -227,6 +234,15 @@ export class ScreenBuffer {
    */
   get lastWrite(): WriteExtent {
     return pendingHasContent(this.pending) ? extentOf(this.pending) : this.committedWrite;
+  }
+
+  /**
+   * **いま適用中のレコードが、画面を書いた（クリア・復元を含む）か。**`lastWrite` と違い、何も書かなかったレコードでは前回の確定値ではなく
+   * `false` を返す（応答だけのレコード——WSF・READ SCREEN 系——が画面イベントを出すかの判定用。
+   * `20260921-negative-responses` の節目 10 の独立点検 A-S1 の関連）。純粋な読み取り
+   */
+  get wroteInThisRecord(): boolean {
+    return pendingHasContent(this.pending);
   }
 
   /** 線形アドレス 1 セルを書き込み範囲へ含める */
@@ -303,6 +319,7 @@ export class ScreenBuffer {
     this.retainedEnds.clear(); // 画面の中身ごと消えるので引き継ぎも捨てる
     this.cursorAddr = 0;
     this.systemMessage = undefined;
+    this.dropCursorOrders();
   }
 
   /** GUI 構造体をすべて除去（REM_ALL_GUI_CONSTRUCTS 専用コマンド時） */
@@ -508,6 +525,7 @@ export class ScreenBuffer {
   clearUnitAlternate(): boolean {
     // **窓・選択フィールド・スクロールバーは閉じる。罫線は残す**（上のコメント）
     this.closeWindowsAndSelections();
+    this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
       this.noteClear();
@@ -569,6 +587,13 @@ export class ScreenBuffer {
     aidNoDataMask: number;
     /** メッセージ行の行番号（ACS `Save5250Net.SaveSOH_msgline_num`）。 */
     msgLineRow: number;
+    /**
+     * **IC で指された番地**（ACS `Save5250Net.SaveWTD_IC_addr`。ホーム位置 `SaveHomePos` も同じ値から出る）。
+     * 戻さないと、窓を開いて F12 で戻った画面に**窓の IC が残り**、ホーム位置が窓を指し、後続の IC 無しの WTD で
+     * カーソルが窓の位置へ飛ぶ（節目の独立点検の指摘。`icAddr` をレコードをまたいで持ち越すようにした
+     * `20260921-cursor-per-wtd-acs` との組み合わせで出た）。MC は ACS も退避しない
+     */
+    icAddr: number | undefined;
     /**
      * **退避の時点でセッション層が持っていたもの**（応答を組んだ直後に `attachSaveContext()` が入れる）。
      *
@@ -644,6 +669,7 @@ export class ScreenBuffer {
       // メッセージ行番号も退避する。同じものを積む（`20260920-restore-screen-parity` research F1）
       aidNoDataMask: this.aidNoDataMask,
       msgLineRow: this.msgLineRow,
+      icAddr: this.icAddr,
       // 応答を組み立てた直後に `attachSaveContext()` が埋める（まだ作られていない）
       saved: undefined
     });
@@ -674,41 +700,37 @@ export class ScreenBuffer {
   /**
    * ROLL（ESC 0x23）: `top` 行から `bottom` 行までを `lines` 行ぶん送る。
    *
-   * `lines > 0` で**上へ**（画面が上にスクロールし、下端に空行ができる）、
-   * 負なら下へ。行番号は 1 起点で、範囲外・0 行の指定は何もしない。
+   * `lines > 0` で**上へ**（画面が上にスクロールする）、負なら下へ。行番号は 1 起点。
+   *
+   * **空いた行は消さない——旧い内容が残る**（ACS `PS5250.processRoll` は行を写すだけ。`20260921-roll-vacated-rows`）。
+   * 実機（DSM の `QsnRollUp(3,2,20)`）で、ACS のコアは空いた 18〜20 行に元の 18〜20 行を残した（下ロールでも 2〜4 行が残る）。
+   * ~~下端に空行ができる~~——当 PJ は以前ここを空白にしていた。
+   *
+   * **不正な指定は何もしない**（ACS と同じ条件: 上端が 0・下端が画面の外・下端 ≦ 上端・行数 ＞ 下端−上端）。ACS はここで
+   * センス・コードを立ててレコードの処理を打ち切り、負応答を返す——~~当 PJ は負応答をまだ返さない（台帳「DS5250 のその他の差」）ので、
+   * 画面を変えないところまで合わせた~~ → 否定応答 0x1005012C と打ち切りは `wtd-applier.ts` が行う（`20260921-negative-responses`）。
+   * ~~範囲を丸ごと超える送りは全消し~~。
    *
    * **フィールド定義は動かさない**——ROLL は表示イメージの移動で、
    * ホストは送った後に必要なら書き直してくる（動かすと入力欄の位置が実機とずれる）。
+   * @returns 指定が正しく、処理したか
    */
-  roll(top: number, bottom: number, lines: number): void {
-    if (lines === 0) return;
-    const from = Math.max(1, Math.min(top, this.rows));
-    const to = Math.max(1, Math.min(bottom, this.rows));
-    if (to <= from) return;
+  roll(top: number, bottom: number, lines: number): boolean {
     const count = Math.abs(lines);
-    if (count >= to - from + 1) {
-      // 範囲を丸ごと超える送りは全消し（残す行が無い）
-      for (let row = from; row <= to; row++) this.clearRow(row);
-      this.noteWriteRange((from - 1) * this.cols, to * this.cols - 1);
-      return;
+    if (top === 0 || bottom > this.rows || bottom <= top || count > bottom - top) return false;
+    if (count === 0) return true;
+    const src: InternalCell[][] = [];
+    for (let row = top; row <= bottom; row++) src.push(this.cells.slice((row - 1) * this.cols, row * this.cols));
+    const span = bottom - top + 1 - count; // 写す行の数
+    for (let i = 0; i < span; i++) {
+      // 上へ: 上端から順に count 行下の内容を写す / 下へ: count 行下へ、上端からの内容を写す
+      const dst = lines > 0 ? i : i + count;
+      const from = lines > 0 ? i + count : i;
+      const base = (top - 1 + dst) * this.cols;
+      for (let c = 0; c < this.cols; c++) this.cells[base + c] = src[from]![c] ?? null;
     }
-    const rowsInRange: InternalCell[][] = [];
-    for (let row = from; row <= to; row++) {
-      rowsInRange.push(this.cells.slice((row - 1) * this.cols, row * this.cols));
-    }
-    const moved = lines > 0 ? rowsInRange.slice(count) : rowsInRange.slice(0, rowsInRange.length - count);
-    const blanks = Array.from({ length: count }, () => new Array<InternalCell>(this.cols).fill(null));
-    const next = lines > 0 ? [...moved, ...blanks] : [...blanks, ...moved];
-    for (let i = 0; i < next.length; i++) {
-      const target = (from - 1 + i) * this.cols;
-      for (let c = 0; c < this.cols; c++) this.cells[target + c] = next[i]![c] ?? null;
-    }
-    this.noteWriteRange((from - 1) * this.cols, to * this.cols - 1);
-  }
-
-  private clearRow(row: number): void {
-    const base = (row - 1) * this.cols;
-    for (let c = 0; c < this.cols; c++) this.cells[base + c] = null;
+    this.noteWriteRange((top - 1) * this.cols, bottom * this.cols - 1);
+    return true;
   }
 
   /** RESTORE SCREEN（ESC 0x12）: 直近の退避を復元 */
@@ -729,6 +751,7 @@ export class ScreenBuffer {
     // 戻さないと窓・ヘルプから戻った画面で `CAnn` の申告が消える
     this.aidNoDataMask = saved.aidNoDataMask;
     this.msgLineRow = saved.msgLineRow;
+    this.icAddr = saved.icAddr; // ACS `restoreNetNulls` の `WTD_IC_addr`・`homePos`
     // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
     // これで「窓ではない」と自然に判定される。退避が空（上で false 復帰）なら画面は変わらず、
     // 記録もしない
@@ -752,7 +775,7 @@ export class ScreenBuffer {
    * ビットの並び（GNU tn5250 `send_data_for_aid_key`、tn5250j `dataIncluded[]` が一致）:
    * ヘッダ本体の 5〜7 バイト目が **F24〜F17 / F16〜F9 / F8〜F1**、各バイトは LSB が小さい番号。
    *
-   * 実機（IBM i 7.3・`ASAOLIB/KEYDSPF` の `CA03`/`CA12`/`CF06`）で採った値:
+   * 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `CA03`/`CA12`/`CF06`）で採った値:
    * `SOH len=7 本体=[00 00 00 18 00 08 04]` → **F3 と F12 だけが立つ**（CF06 は立たない）。
    */
   private aidNoDataMask = 0;
@@ -823,6 +846,7 @@ export class ScreenBuffer {
   clearFormatTable(): void {
     for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
+    this.dropCursorOrders();
   }
 
   /**
@@ -960,6 +984,15 @@ export class ScreenBuffer {
     });
   }
 
+  /**
+   * その番地が**純 DBCS の欄（G。FCW 0x8220）の中**か。G の欄のデータは **SO/SI 無しの 2 バイト組**で届く（実機の DDS の G 型で確かめた。
+   * ホストは欄の前後を WEA 0x12 0x05 0x81／0x80 で挟む。ACS は SF の受理で欄の全桁を DBCS の対として印付ける〔`addFieldToFFT`〕ので、
+   * 欄の中に置かれたバイトは組で読まれる）。`20260921-g-field-sosi`
+   */
+  isPureDbcsAt(addr: number): boolean {
+    return this.fields.some((f) => f.dbcsType === "pure" && addr >= f.startAddr && addr < f.startAddr + f.length);
+  }
+
   /** 画面順のフィールド一覧（1 始まり index はこの順） */
   orderedFields(): readonly InternalField[] {
     return [...this.fields].sort((a, b) => a.startAddr - b.startAddr);
@@ -1009,18 +1042,30 @@ export class ScreenBuffer {
     return run.length > 0 ? run : [field];
   }
 
+  // **`cursorToFirstInputField()` はここにあった**が撤去した（src から呼ばれなくなった）。READ のときに先頭の入力欄へ
+  // 寄せる役は、WTD の終わりに既定の位置（ホーム）へ置く `placeCursorAfterWtd` に移った（`20260921-cursor-per-wtd-acs`）。
+  // 既定の位置は下の `homeAddr()`。
+
   /**
-   * カーソルを最初の入力可能（非 bypass）フィールドの先頭へ置く。
-   *
-   * 5250 では WTD に IC/MC が無い場合、カーソルは最初の入力フィールドに着く。
-   * これを行わないとカーソルが原点（1,1）に残り、**AID レコードで報告する
-   * カーソル位置が実機とずれる**。IBM i のヘルプ（F1）はカーソル位置依存で、
-   * フィールド上でなければ「拡張ヘルプ」経路になり、ホストがウィンドウではなく
-   * 別サイズのヘルプ画面を出そうとする（日本語実機の PDM F1 で確認）。
+   * **既定の位置（ホーム）**: 最初の非 bypass 欄の先頭。**欄が無ければ 0（1 行 1 桁）**
+   * （ACS `PS5250.setDefaultInsertCursor` → `homePos`。`20260921-cursor-per-wtd-acs`）。
    */
-  cursorToFirstInputField(): void {
-    const first = this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0);
-    if (first !== undefined) this.cursorAddr = first.startAddr;
+  homeAddr(): number {
+    return this.orderedFields().find((f) => (f.ffw & FFW.BYPASS) === 0)?.startAddr ?? 0;
+  }
+
+  /**
+   * **WTD の IC / MC で指された番地**（ACS `DS5250.WTD_IC_addr` / `WTD_MC_addr`。`20260921-cursor-per-wtd-acs`）。
+   * **レコードをまたいで持ち越し、書式を消すときだけ捨てる**（CLEAR UNIT・CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE・
+   * SOH＝ACS `processClearFMT`）。IC は MC を捨てる。どこへ置くかは WTD の終わりに決める（`wtd-applier.ts` の
+   * `placeCursorAfterWtd`）。
+   */
+  icAddr: number | undefined;
+  mcAddr: number | undefined;
+  /** 書式を消したので IC / MC も捨てる（ACS `processClearFMT` の `WTD_IC_addr = -1; WTD_MC_addr = -1`） */
+  private dropCursorOrders(): void {
+    this.icAddr = undefined;
+    this.mcAddr = undefined;
   }
 
   // **`cursorIsUnenterable()`／`isEnterableAt()` はここにあった**が撤去した
@@ -1118,7 +1163,7 @@ export class ScreenBuffer {
     // 載ってくることがある（char 欄にバイトを置くだけのプログラム）。申告で門番していたため、
     // その欄は 1 文字ずつの復号値になり、**送信時に codec が SO/SI を付け直して 2 バイト増える**
     // ——欄長が固定なので末尾が落ち、ホストには別の値が届いていた
-    // （実機 `ASAOLIB/UDCPGM` の `IN2` で確認: 打鍵せず送り返すだけで `DIFF`）。
+    // （実機 `TESTLIB/UDCPGM` の `IN2` で確認: 打鍵せず送り返すだけで `DIFF`）。
     if (this.hasDbcsStructure(field)) {
       return this.dbcsRawFieldValue(field);
     }
@@ -1398,7 +1443,16 @@ export class ScreenBuffer {
       cells,
       fields
     };
-    if (this.systemMessage !== undefined) snap.systemMessage = this.systemMessage;
+    if (this.systemMessage !== undefined) {
+      snap.systemMessage = this.systemMessage;
+      if (this.systemMessageSeq !== undefined) snap.systemMessageSeq = this.systemMessageSeq;
+    }
+    // CA キー（SOH の申告）。UI の ME 検査が見る（`sendsDataForAid` と同じビットの並び）
+    const caKeys: number[] = [];
+    for (let n = 1; n <= 24; n++) if (!this.sendsDataForAid(n)) caKeys.push(n);
+    if (caKeys.length > 0) snap.caKeys = caKeys;
+    // ホーム位置（ACS `homePos`: IC → 先頭の非バイパス欄 → 0。IC は書式を消すまで持ち越す＝`icAddr`）
+    snap.home = this.rowColOf(this.icAddr ?? this.homeAddr());
     const gui = this.guiSnapshot();
     if (gui) snap.gui = gui;
     snap.lastWrite = { ...this.lastWrite };
@@ -1453,4 +1507,10 @@ export class ScreenBuffer {
       throw new As400Error("PROTOCOL_ERROR", `buffer address out of range: ${addr}`);
     }
   }
+}
+
+/** WRITE ERROR CODE の通し番号（`ScreenBuffer.systemMessageSeq`）。バッファをまたいで重ならないよう、ここで持つ */
+let systemMessageSeqCounter = 0;
+export function nextSystemMessageSeq(): number {
+  return ++systemMessageSeqCounter;
 }

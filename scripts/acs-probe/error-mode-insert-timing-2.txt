@@ -1,0 +1,37 @@
+# `error-mode-insert-timing.txt` の取り直し（条項 `measurement-sanity`）。**別種の操作員エラー**で見る:
+# 満杯の挿入（0012 系）ではなく、**保護領域への入力**（カーソルを見出し行に置いて打つ）。
+# エラーの種類によらず、入った時点で挿入モードが解けるか。あわせて Reset を別の位置でもう一度。
+# **`err-*` が inhibit=5 になっていなければ、その試行は無効**。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+
+# --- 1) 保護領域への入力でエラーに入る ---
+setcursor 1,5
+settle 400
+keys [insert]
+settle 400
+dump prot-ins-before
+keys X
+settle 900
+dump prot-err-entered
+keys [reset]
+settle 700
+dump prot-after-reset
+
+# --- 2) 入力欄の途中で、エラーでないときの Reset ---
+keys [tab]
+settle 600
+keys [insert]
+settle 400
+dump field-ins-no-error
+keys [reset]
+settle 700
+dump field-after-reset
+
+keys [pf12]
+settle 1200
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

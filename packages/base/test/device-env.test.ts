@@ -18,10 +18,15 @@ describe("RFC 2877 のデバイス属性", () => {
     expect(deviceEnvFor(939)).toEqual({ kbdType: "JPB", codePage: 1027, charSet: 1172 });
     expect(deviceEnvFor(5035)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
     expect(deviceEnvFor(931)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
-    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JEB", codePage: 1027, charSet: 1172 });
   });
 
-  it("**939 だけ JPB**（ACS 実機の申告に合わせた。他の英小文字系は JEB）", () => {
+  // ~~1399 は JEB・1172~~ → ACS と同じ JPE・1027・32000（`20260921-device-env-1399`。ACS のコアに
+  // `codePageKey=KEY_JAPAN_ENGLISH_EX_EURO` で当てたワイヤが `KBDTYPE JPE / CODEPAGE 1027 / CHARSET 32000`）
+  it("**1399 は ACS と同じ JPE・1027・32000**（GCSGID 65535 を 32000 に置き換える）", () => {
+    expect(deviceEnvFor(1399)).toEqual({ kbdType: "JPE", codePage: 1027, charSet: 32000 });
+  });
+
+  it("**939 は JPB**（ACS 実機の申告に合わせた。5035 と 931 は JEB。1399 は上の JPE）", () => {
     expect(deviceEnvFor(939)?.kbdType).toBe("JPB");
     expect(deviceEnvFor(5035)?.kbdType).toBe("JEB");
   });

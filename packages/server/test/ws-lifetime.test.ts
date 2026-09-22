@@ -60,11 +60,16 @@ class SpyManager extends SessionManager {
  * 「無操作で切る」を設定したサーバー設定を持つ環境を組む。
  * display / printer の 2 本を同じ値で用意し、**プリンター経路の転記漏れ**を突けるようにする。
  */
-function setup(opts: { idleTimeout?: "never" | number; hb?: { intervalMs?: number; deadMs?: number; now?: () => number } } = {}) {
+function setup(
+  opts: { idleTimeout?: "never" | number; deviceNameRetry?: boolean; hb?: { intervalMs?: number; deadMs?: number; now?: () => number } } = {}
+) {
   const sent: WsServerMessage[] = [];
   let closed = false;
   const mgr = new SpyManager();
-  const idle = opts.idleTimeout !== undefined ? { idleTimeout: opts.idleTimeout } : {};
+  const idle = {
+    ...(opts.idleTimeout !== undefined ? { idleTimeout: opts.idleTimeout } : {}),
+    ...(opts.deviceNameRetry !== undefined ? { deviceNameRetry: opts.deviceNameRetry } : {})
+  };
   const server = new ServerConfigStore({
     systems: [{ id: "sys", name: "sys", host: "h" }],
     sessions: [
@@ -106,6 +111,13 @@ describe("設定の転記: 表示・プリンターの両方に効く", () => {
     const { conn, mgr } = setup({ idleTimeout: 30 });
     await conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
     expect(mgr.printerOpts[0]?.idleTimeoutMs).toBe(30 * 60_000);
+    mgr.closeAll();
+  });
+
+  it("**プリンターの deviceNameRetry も届く**（常駐の経路では渡っていたのに、WS で開いたときだけ落ちていた）", async () => {
+    const { conn, mgr } = setup({ deviceNameRetry: true });
+    await conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    expect(mgr.printerOpts[0]?.deviceNameRetry).toBe(true);
     mgr.closeAll();
   });
 

@@ -1,0 +1,43 @@
+# **ホストのエラーメッセージで ACS はエラー状態に入るか**（実機）。
+#
+# 原典 `DS5250.processWriteErrorCode`（WRITE ERROR CODE）は `PS5250.setErrorMode(true)` を呼び、
+# メッセージ行へ書いてから位置を退避する（`saveMsgLinePosition`）。エラーを抜けると
+# `restoreMsgLinePosition` で戻す。WTD で書かれるメッセージとの違いを測る。
+#  A) コマンド行に存在しないコマンド（メッセージは WTD で書かれる見込み）
+#  B) SNDMSG のプロンプトで宛先に不正な名前（プロンプターの妥当性検査。WRITE ERROR CODE の見込み）
+# それぞれ、メッセージが出た直後の inhibit、文字を打ったとき、右矢印で抜けたときを見る。
+signon
+keys [enter]
+settle 1200
+
+# --- A) コマンド行 ---
+keys [home][eraseeof]NOSUCHCMD9[enter]
+settle 2000
+dump a-after-bad-cmd
+keys X
+settle 600
+dump a-after-char
+keys [reset]
+settle 400
+
+# --- B) プロンプターの妥当性検査 ---
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+dump b-prompt
+keys HELLO[tab]
+settle 400
+keys 1BAD[enter]
+settle 2000
+dump b-after-bad-value
+keys X
+settle 600
+dump b-after-char
+keys [right]
+settle 600
+dump b-after-right
+keys [reset]
+settle 400
+keys [pf12]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

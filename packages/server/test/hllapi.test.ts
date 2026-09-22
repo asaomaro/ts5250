@@ -274,6 +274,42 @@ describe("キー送信", () => {
     expect(sendAid).toHaveBeenCalledWith("Enter", expect.anything());
   });
 
+  it("**@0（Home）はホーム位置へ移り、そこでもう一度押すと Record Backspace を送る**（ACS `processHome`。`20260921-home-record-backspace`）", async () => {
+    const f = field({ index: 1, row: 1, col: 2, length: 4 });
+    const s = { ...snap({ rows: 2, cols: 10, fields: [f] }), home: { row: 2, col: 3 } };
+    const { deps, sendAid } = await connected({ snapshot: s });
+    expect((await call(deps, HF.SEND_KEY, { data: "@0" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).not.toHaveBeenCalled();
+    // Query Cursor Location はホスト側のカーソルを返すので、手元のカーソルは送った AID のカーソルで見る
+    expect((await call(deps, HF.SEND_KEY, { data: "@0" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("RecordBackspace", expect.objectContaining({ cursor: { row: 2, col: 3 } }));
+  });
+
+  // `20260921-hllapi-tab-acs`: @B・@T はペインと同じく ACS の行き先（`tabPosition` / `backtabPosition`）。~~前 / 次の入力欄の先頭~~
+  it("**@B は欄の途中ならその欄の先頭で止まる**（ACS: 7,22 → 7,20。以前は 1 つ前の欄へ——先頭の欄なら最後の欄へ回り込んでいた）", async () => {
+    const fields = [3, 5, 7].map((row, i) => field({ index: i + 1, row, col: 20, length: 6 }));
+    const { deps, sendAid } = await connected({ snapshot: snap({ rows: 24, cols: 80, fields }) });
+    await call(deps, HF.SET_CURSOR, { pos: (3 - 1) * 80 + 22 });
+    expect((await call(deps, HF.SEND_KEY, { data: "@B@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+  });
+
+  it("**@T はカーソル送り（FCW 0x88）に従う**", async () => {
+    const fields = [field({ index: 1, row: 3, col: 20, length: 6, cursorProgression: 3 }), field({ index: 2, row: 5, col: 20, length: 6 }), field({ index: 3, row: 7, col: 20, length: 6 })];
+    const { deps, sendAid } = await connected({ snapshot: snap({ rows: 24, cols: 80, fields }) });
+    await call(deps, HF.SET_CURSOR, { pos: (3 - 1) * 80 + 21 });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 7, col: 20 } }));
+  });
+
+  it("ホーム位置を持たない画面（3270）の @0 は先頭の入力欄へ移るだけ（送らない）", async () => {
+    const f = field({ index: 1, row: 1, col: 2, length: 4 });
+    const { deps, sendAid } = await connected({ snapshot: snap({ rows: 2, cols: 10, fields: [f] }) });
+    await call(deps, HF.SEND_KEY, { data: "@0" });
+    await call(deps, HF.SEND_KEY, { data: "@0" });
+    expect(sendAid).not.toHaveBeenCalled();
+  });
+
   it("**写せないキーがあれば何も送らずに rc=20**", async () => {
     const { deps, sendAid } = await connected();
     // `@x` は PA1（5250 に無い）。前に @E があっても**送らない**

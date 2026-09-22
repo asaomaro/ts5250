@@ -1,0 +1,13 @@
+schema: 11
+slug: backtab-acs
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 【まとめ】キー編集の細部が ACS と違う（Backtab）
+harnessRevDelivered: unknown

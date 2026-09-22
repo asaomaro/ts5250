@@ -18,7 +18,14 @@
  * d8 d7 c1 c4 c5 e5 f0 f0 f1 d7                    ← "QPADEV001P"
  * ```
  */
-import type { Codec } from "@ts5250/ebcdic";
+import { codecForCcsid } from "@ts5250/ebcdic";
+
+/**
+ * **起動応答は CCSID 37 で読む**（ACS `DS5250.processStartUpConfirmation` は `new CodePage(37, 2)` で名前を取り出す。
+ * `20260921-startup-record-cp037`）。~~セッションの codec で読む~~——930 / 5026（SBCS は 290）では 0x5B が `¥` になり、
+ * `$` を含む装置名・システム名が化けた（装置名はスプール救出の OUTQ にも使う）
+ */
+const CP037 = codecForCcsid(37);
 
 export interface StartupResponse {
   /** 例 "I902"（成功）/ "8902"（装置が使用中）。意味は `startupCodeMeaning` */
@@ -29,58 +36,8 @@ export interface StartupResponse {
   device: string;
 }
 
-/** 起動応答コード（tn5250 printsession.c）。成功＝セッション確立、他＝失敗 */
-export const STARTUP_SUCCESS_CODES: ReadonlySet<string> = new Set(["I901", "I902", "I906"]);
-
-const CODE_MEANING: Record<string, string> = {
-  I901: "Virtual device has less function than source device.",
-  I902: "Session successfully started.",
-  I906: "Automatic sign-on requested, but not allowed. A sign-on screen will follow.",
-  2702: "Device description not found.",
-  8901: "Device not varied on.",
-  8902: "Device not available.",
-  8903: "Device not valid for session.",
-  8906: "Session initiation failed.",
-  8907: "Session failure.",
-  8910: "Controller not valid for session.",
-  8916: "No matching device found.",
-  8917: "Not authorized to object.",
-  8918: "Job canceled.",
-  8920: "Object partially damaged.",
-  8921: "Communications error.",
-  8922: "Negative response received.",
-  8923: "Startup record built incorrectly.",
-  8925: "Creation of device failed.",
-  8928: "Change of device failed.",
-  8929: "Vary on or vary off failed.",
-  8930: "Message queue does not exist.",
-  8934: "Start-up for device failed.",
-  8935: "Session rejected.",
-  8940: "Automatic configuration failed or not allowed.",
-  I904: "Source system at incompatible release."
-};
-
-export function startupCodeMeaning(code: string): string {
-  return CODE_MEANING[code] ?? "unknown startup response";
-}
-
-/**
- * **既知の起動応答コードか**（`20260802-device-busy-record`）。
- *
- * 起動応答は成功でも失敗でも返る。**失敗のときは装置名が入らない**
- * ——割り当てられていないのだから当然で、`I902` のような成功応答とは長さが違う。
- *
- * そのため「装置名が入っているか」で起動応答を見分けると、**失敗応答を取りこぼす**。
- * 取りこぼすと 5250 のデータストリームとして解析され、`expected ESC, got 0x…` という
- * **こちらの解析器が壊れたように見える警告**だけが残り、本当の理由（`8902` 等）は消える。
- *
- * 見分けは**コードの既知性**で行う。`CODE_MEANING` を唯一の出所にしてあるので、
- * コードを足せば判定も一緒に付いてくる。形の正規表現（`^[A-Z0-9]\d{3}$`）だけより厳しく、
- * 通常のデータストリームを誤って食べる恐れは**増えない**。
- */
-export function isKnownStartupCode(code: string): boolean {
-  return code in CODE_MEANING;
-}
+// コードの表は `startup-codes.ts`（codec を読み込まない所。ブラウザ入口から一覧を出すため）
+export { STARTUP_SUCCESS_CODES, startupCodeMeaning, isKnownStartupCode, knownStartupCodes } from "./startup-codes.js";
 
 /**
  * 起動応答レコードなら解析する。違えば `undefined`。
@@ -89,10 +46,8 @@ export function isKnownStartupCode(code: string): boolean {
  * 通常のデータストリームを誤って食べると画面が出なくなるため、形が合わないものは
  * 起動応答として扱わない。読み位置 `(6 + data[6]) + 5` は tn5250 の `printsession.c:222-235` と同じ。
  */
-export function parseStartupResponse(
-  record: Uint8Array,
-  codec: Codec
-): StartupResponse | undefined {
+export function parseStartupResponse(record: Uint8Array): StartupResponse | undefined {
+  const codec = CP037;
   const at = 6 + (record[6] ?? 4);
   if (at + 9 > record.length) return undefined;
   const code = codec.decode(record.subarray(at + 5, at + 9));
@@ -103,7 +58,17 @@ export function parseStartupResponse(
   const full = at + 27 <= record.length;
   return {
     code,
-    system: full ? codec.decode(record.subarray(at + 9, at + 17)).trim() : "",
-    device: full ? codec.decode(record.subarray(at + 17, at + 27)).trim() : ""
+    system: full ? nameOf(record.subarray(at + 9, at + 17)) : "",
+    device: full ? nameOf(record.subarray(at + 17, at + 27)) : ""
   };
+}
+
+/**
+ * 名前の欄を読む。**末尾の 0x00 と 0x40 だけを落としてから**復号する（ACS `DS5250.extractNameFromStartUpConfirmationRecord`。
+ * ~~復号してから `trim()`~~——NUL で詰めるホストだと NUL が残り、先頭の空白は逆に落としていた。`20260921-startup-record-cp037` の節目の点検の懸念）
+ */
+function nameOf(bytes: Uint8Array): string {
+  let n = bytes.length;
+  while (n > 0 && (bytes[n - 1] === 0x00 || bytes[n - 1] === 0x40)) n--;
+  return CP037.decode(bytes.subarray(0, n));
 }

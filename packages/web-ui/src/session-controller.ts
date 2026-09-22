@@ -14,7 +14,9 @@ import {
   MSG_RECONNECT_GAVE_UP,
   MSG_SESSION_ENDED,
   MSG_VT_CONNECTION_LOST,
-  wsErrorNotice
+  wsErrorNotice,
+  openErrorText,
+  startupRejectionText
 } from "./composables/opMessages.js";
 import {
   sessionsStore,
@@ -37,8 +39,22 @@ import {
 import { vtStore } from "./stores/vt.js";
 import { workspaceStore } from "./stores/workspace.js";
 import { blocksManualInput, noteUnrecordable, recordSend } from "./macro-record.js";
-import { findMandatoryViolation, type MandatoryFinding } from "./composables/mandatoryCheck.js";
-import { MSG_MANDATORY_ENTER, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "./composables/opMessages.js";
+import {
+  findFieldViolation,
+  findMandatoryEnterViolation,
+  type MandatoryFinding
+} from "./composables/mandatoryCheck.js";
+import { fieldAt } from "./composables/useCursor.js";
+import {
+  MSG_MANDATORY_ENTER,
+  msgHostReconnecting,
+  MSG_MANDATORY_FILL,
+  MSG_SELF_CHECK,
+  MSG_FIELD_EXIT_REQUIRED,
+  startupStartedText,
+  STARTUP_NOTICE_MS,
+  MSG_ASSOC_PRINTER_ISSUE
+} from "./composables/opMessages.js";
 import { beep } from "./beep.js";
 
 /** `/ws` の URL（組み立ては `ws-client.ts` に 1 か所。監視コンソールも同じものを使う） */
@@ -477,6 +493,12 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           // 「黙って実行しない」が繋ぎ直しでだけ破れる
           sessionsStore.setReserved(sessionId, msg.reservedBy);
           cur.pcCommandEnabled = msg.pcCommand;
+          // **ホストへの繋ぎ直しの状態も上書きする**（`20260921-auto-reconnect`）。留守中に繋ぎ直せていたら
+          // `host-reconnected` は届いていない——残すと以後の送信が黙って捨てられる（独立点検の指摘）
+          if (msg.hostReconnect) {
+            cur.hostReconnect = msg.hostReconnect;
+            cur.notice = msgHostReconnecting(msg.hostReconnect.attempt);
+          } else delete cur.hostReconnect;
           // **通知は「留守中に増えた分」だけ。** `opened` に載るのはサーバー側の履歴全体なので、
           // 最後の 1 件をそのまま知らせると**切断前に一度見せたものを毎回出し直す**
           const lastSeenAt = cur.pcCommands?.at(-1)?.at;
@@ -484,6 +506,7 @@ function tryResume(sessionId: string, label: string, a: Attempt): void {
           const missed = cur.pcCommands.at(-1);
           if (missed && missed.at !== lastSeenAt) cur.notice = pcCommandNotice(missed);
           if (msg.job !== undefined) cur.job = msg.job;
+          noteStartup(sessionId, msg.startupCode, false); // ブラウザの繋ぎ直し・後から入るタブ（ホストへは繋ぎ直していない）
           // **`ccsid` と `readOnly` は上書きしない。** サーバーの `attach` は `ccsid` に
           // 既定（37）を返すだけで、`readOnly` はそもそも載せない——どちらも
           // **開いたときの設定に属する**もので、繋ぎ直しで変わる値ではない
@@ -583,6 +606,26 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       sessionsStore.setReserved(sessionId, msg.by);
       break;
     }
+    // **ホストに切られて、サーバーが自動で繋ぎ直している**（`20260921-auto-reconnect`）。
+    // 溜めた先打ちは捨てる（送り先が無い間に打ったキーを、繋ぎ直した新しい画面へ流さない）
+    case "host-reconnecting": {
+      const s = sessionsStore.get(sessionId);
+      if (!s) break;
+      s.hostReconnect = { attempt: msg.attempt };
+      s.notice = msgHostReconnecting(msg.attempt);
+      delete s.typeAhead;
+      setBusy(sessionId, false);
+      break;
+    }
+    case "host-reconnected": {
+      const s = sessionsStore.get(sessionId);
+      if (!s) break;
+      delete s.hostReconnect;
+      if (s.notice?.startsWith(msgHostReconnecting(1))) delete s.notice;
+      // ACS は繋ぎ直しでも開始の文言を出す（ホストへ繋ぎ直せたとき）
+      noteStartup(sessionId, msg.startupCode, true);
+      break;
+    }
     // ホストの警報（CC2 0x04）。**画面と別に届く**——画面が変わらないレコードでも鳴るため
     case "alarm": {
       beep();
@@ -641,6 +684,10 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
         sessionsStore.markLost(sessionId, msg.ended === true ? "hostEnded" : "transport");
         // **切断より前の通知は捨てる**（`startReconnect` と同じ理由。前 work の review ラウンド3）
         delete s.notice;
+        // **起動応答で断られて終わったときは、その理由を出す**（自動の繋ぎ直しがホストに断られた等。`20260921-startup-codes-japanese` の
+        // 節目の点検の指摘——理由は `closed` の `reason` にしか載らず、捨てていた。ACS もコードごとの文言を出す）
+        const rejected = startupRejectionText(msg.reason);
+        if (rejected !== undefined) s.notice = rejected;
       }
       setBusy(sessionId, false);
       break;
@@ -656,6 +703,27 @@ function applyDisplayMessage(sessionId: string, client: WsClient, msg: WsServerM
       break;
     }
   }
+}
+
+/**
+ * **表示セッションが繋がった知らせ**（起動応答のコードつき。`20260921-startup-code-status`）。コードを覚え、`announce` なら通知が空いていれば
+ * 文言を出して 3 秒で消す（ACS の状態行と同じ）。**間に別の通知（エラー等）が出ていたら消さない**——当 PJ の通知欄は操作員エラーと共用なので。
+ *
+ * **知らせるのは「ホストへ繋がった」ときだけ**（`announce`: 自分で開いた・ホストが切れて繋ぎ直せた）。ブラウザの繋ぎ直し（`tryResume`）や
+ * 後から入るタブの `opened` は、ホストへは繋ぎ直していないので「開始しました」と出すのは事実と違う（ACS が出すのは通信の状態が変わったとき。
+ * 節目 10 の独立点検 C-S6）。コード（ⓘ に出す）は覚える
+ */
+function noteStartup(sessionId: string, code: string | undefined, announce: boolean): void {
+  const s = sessionsStore.get(sessionId);
+  if (!s || code === undefined) return;
+  s.startupCode = code;
+  if (!announce || s.notice !== undefined) return;
+  const text = startupStartedText(code);
+  s.notice = text;
+  setTimeout(() => {
+    const cur = sessionsStore.get(sessionId);
+    if (cur?.notice === text) delete cur.notice;
+  }, STARTUP_NOTICE_MS);
 }
 
 /**
@@ -707,12 +775,15 @@ export async function openSession(
                 readOnly: open.readOnly ?? false,
                 // **後から入ったタブでも今の予約状態から始める**（開始の push は聞き逃している）
                 ...(msg.reservedBy !== undefined ? { reservedBy: msg.reservedBy } : {}),
+                // 後から入ったタブが、繋ぎ直しの途中に開いた（経過の通知は聞き逃している）
+                ...(msg.hostReconnect ? { hostReconnect: msg.hostReconnect, notice: msgHostReconnecting(msg.hostReconnect.attempt) } : {}),
                 ccsid: msg.ccsid,
                 client,
                 ...(meta ? { meta } : {}),
                 // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に届く
                 ...(msg.job !== undefined ? { job: msg.job } : {}),
                 pcCommandEnabled: msg.pcCommand,
+                ...(msg.ibmI !== undefined ? { ibmI3270: msg.ibmI } : {}),
                 // **留守中に実行された分から始める。** `pc-command` の push は
                 // 繋いでいる間しか届かないので、閉じている間の実行は
                 // ここで受け取らないと**誰にも知らされないまま消える**
@@ -724,6 +795,9 @@ export async function openSession(
               // **黙って実行しない**は繋ぎ直しでも同じ——留守中の分も最後の 1 件を知らせる
               const missed = state.pcCommands?.at(-1);
               if (missed) state.notice = pcCommandNotice(missed);
+              // 関連付けるプリンターが使えず関連付けなしで開いたときは、その理由を知らせる（開始の知らせより優先。3 秒で消さない）
+              if (msg.associatedPrinterIssue !== undefined) state.notice = MSG_ASSOC_PRINTER_ISSUE[msg.associatedPrinterIssue];
+              noteStartup(sessionId, msg.startupCode, true);
               client.setHiddenIndexes(hiddenIndexes(msg.screen));
               workspaceStore.addSession(sessionId, systemRef);
               resolve(sessionId);
@@ -733,7 +807,7 @@ export async function openSession(
             case "error": {
               if (!sessionId) {
                 setBusy(sessionId, false);
-                reject(new Error(`${msg.code}: ${msg.message}`));
+                reject(new Error(openErrorText(msg.code, msg.message)));
                 break;
               }
               applyFromSessionClient(sessionId, client, msg);
@@ -856,7 +930,7 @@ export async function openVtSession(
               break;
             }
             case "error":
-              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              if (!sessionId) reject(new Error(openErrorText(msg.code, msg.message)));
               break;
           }
         },
@@ -1026,7 +1100,7 @@ export async function openPrinterSession(
               break;
             }
             case "error":
-              if (!sessionId) reject(new Error(`${msg.code}: ${msg.message}`));
+              if (!sessionId) reject(new Error(openErrorText(msg.code, msg.message)));
               break;
           }
         },
@@ -1078,6 +1152,17 @@ export function breakReservation(sessionId: string): void {
 
 export function setPrinterOutput(sessionId: string, enabled: boolean): void {
   sessionsStore.get(sessionId)?.client.send({ type: "printer-output", enabled });
+}
+
+/**
+ * **出力に失敗して応答を止めている帳票**の再試行・取消（ACS のプリンター・エラーの「再試行」「取消」。
+ * `20260921-printer-hold-response`）。結果は `printer-output-result` で届く
+ */
+export function retryPrinterOutput(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-output-retry" });
+}
+export function cancelPrinterOutput(sessionId: string): void {
+  sessionsStore.get(sessionId)?.client.send({ type: "printer-output-cancel" });
 }
 
 /**
@@ -1138,6 +1223,43 @@ export function stopPrinter(sessionId: string): void {
  */
 
 
+/** 検査で止めたときの操作員メッセージ */
+const MSG_BY_VIOLATION: Record<MandatoryFinding["reason"], string> = {
+  "mandatory-fill": MSG_MANDATORY_FILL,
+  "field-exit-required": MSG_FIELD_EXIT_REQUIRED,
+  "self-check": MSG_SELF_CHECK,
+  "mandatory-enter": MSG_MANDATORY_ENTER
+};
+
+/** その AID キーが SOH で申告された CA キー（欄データを返さない F キー）か */
+function isCaKey(key: AidKey, caKeys: readonly number[] | undefined): boolean {
+  const m = /^F(\d+)$/.exec(key);
+  return m !== null && caKeys !== undefined && caKeys.includes(Number(m[1]));
+}
+
+/**
+ * AID の前の検査（順序は ACS `PS5250.processAIDCode`）。止めるならその違反を返す。
+ * 0020 の待ち（`awaitingFieldExit`）はペインが付け外しする（カーソルがその欄にいる間だけ付いている）。
+ */
+function checkBeforeAid(
+  s: SessionState,
+  key: AidKey,
+  pos: { row: number; col: number }
+): MandatoryFinding | undefined {
+  const snap = s.snapshot!;
+  const here = fieldAt(pos.row, pos.col, snap.fields, snap.cols, snap.rows);
+  const fill = findFieldViolation(here, s.edits, snap.fields);
+  if (fill?.reason === "mandatory-fill") return fill;
+  if (s.awaitingFieldExit !== undefined) {
+    const f = snap.fields.find((x) => x.index === s.awaitingFieldExit);
+    if (f) return { field: f, reason: "field-exit-required" };
+  }
+  if (fill) return fill; // 自己点検
+  // ME は CA キーでは見ない（`DS5250.isSOH_PF`。実機: ME が空でも F3＝CA03 で抜けられた）
+  if (isCaKey(key, snap.caKeys)) return undefined;
+  return findMandatoryEnterViolation(snap.fields, s.edits);
+}
+
 export function sendKey(
   sessionId: string,
   key: AidKey,
@@ -1150,20 +1272,20 @@ export function sendKey(
   // 捨てるので、そのまま通すと「押したのに何も起きない」になる。フラグキー（Attn / SysReq）も
   // 同じ——送り先が無いのだから逃げ道にならない
   if (refuseIfDisconnected(s)) return;
+  // **ホストへ繋ぎ直している間は送らない**（フラグキーも。送り先が無い——サーバーの core が断る）
+  if (s.hostReconnect !== undefined) return;
   // 通信中・ホスト施錠中は送らない（プロテクト）。**フラグキーだけは通す**（`isFlagKey`）
   if (inputInhibited(s) && !isFlagKey(key)) return;
   if (blocksManualInput(sessionId)) return; // 再生中の手入力は通さない（spec のエッジケース）
-  // **Enter のときだけ検証する**（decisions D1）。機能キーでも止めると、必須欄が空の画面から
-  // F3 で抜けられなくなる——ホストはこの検証をしないので、こちらが止めれば本当に止まる。
-  if (key === "Enter" && s.snapshot) {
-    const hit = findMandatoryViolation(s.snapshot.fields, s.edits);
+  // **AID の前の検査**（ACS `PS5250.processAIDCode` と同じ順。`20260921-mandatory-check-acs`）:
+  //   1) カーソル下の欄の MF  2) 0020（欄を出ずに AID）  3) カーソル下の欄の自己点検  4) ME（CA キーは見ない）
+  // **Enter に限らない**——F キー・Roll でも止まる（実機の ACS で確かめた）。原典が外すのは Help・Clear・
+  // Record Backspace だけ（`processAIDCode` の 243・189・248。フラグキーは AID ではない）。
+  // ~~Enter のときだけ検証する（`20260729-ffw-behavior-bits` D1）~~ は破棄した
+  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && key !== "RecordBackspace" && s.snapshot) {
+    const hit = checkBeforeAid(s, key, cursor ?? s.cursor);
     if (hit) {
-      s.notice =
-        hit.reason === "mandatory-enter"
-          ? MSG_MANDATORY_ENTER
-          : hit.reason === "self-check"
-            ? MSG_SELF_CHECK
-            : MSG_MANDATORY_FILL;
+      s.notice = MSG_BY_VIOLATION[hit.reason];
       return hit;
     }
   }

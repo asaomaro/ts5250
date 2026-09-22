@@ -77,6 +77,8 @@ describe("WS から 3270 端末を開く", () => {
       expect(opened.sessionId).toBeTruthy();
       expect(opened.screen.rows).toBe(24);
       expect(opened.screen.cols).toBe(80);
+      // 相手が IBM i かを載せる（汎用機では Attn・SysReq・Help・Print への割り当てを画面側が何もしない。`20260921-acs-default-keys`）
+      expect(typeof opened.ibmI).toBe("boolean");
       // 画面は screen イベントで後から届く（open 直後は交渉直後の空画面のこともある）
       expect(await waitFor(() => sent.some((m) => m.type === "screen"))).toBe(true);
       const screen = [...sent].reverse().find((m) => m.type === "screen") as Extract<

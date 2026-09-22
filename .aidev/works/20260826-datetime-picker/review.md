@@ -86,7 +86,7 @@
 
 | ID | 状態 | 確認方法 |
 |---|---|---|
-| **M1** システム名の記載 | **解消** | `grep -rn SR-OSAKA packages/ scripts/ .aidev/works/` が 0 件。残るのは `.aidev/backlog/input-assist.md` のみ（deliver で書き直す対象・AC9） |
+| **M1** システム名の記載 | **解消** | `grep -rn AS400 packages/ scripts/ .aidev/works/` が 0 件。残るのは `.aidev/backlog/input-assist.md` のみ（deliver で書き直す対象・AC9） |
 | **M2** 未送信の編集を見ない | **解消** | E2E で `2019/03/07` を打ってから開き、カレンダーが `2019/03` で開くことを実機確認。単体テストも実行日に依存しない年で固定（以前は今日と偶然一致していた） |
 | **S1** JSDoc の重複 | 解消 | `pasteFrom` のヘッダを 1 つに統合 |
 | **S2** コメントの挿入位置 | 解消 | `Esc` 分岐をブロック選択の説明コメントの手前へ移した |

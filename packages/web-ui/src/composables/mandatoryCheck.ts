@@ -2,19 +2,24 @@ import type { Field } from "@ts5250/tn5250";
 // browser サブパスから取る（root は node:net/node:tls を巻き込むため不可）
 import { selfCheckDigitOk } from "@ts5250/tn5250/browser";
 import { dbcsByteLength } from "./fieldValidate.js";
+import { continuedRunOf } from "./continuedRun.js";
 
 /**
- * **送信前の必須検証**（FFW の `MANDATORY_ENTER` 0x0008 / `MANDATORY_FILL` 0x0007）。
+ * **送信前の必須検証**（FFW の `MANDATORY_ENTER` 0x0008 / `MANDATORY_FILL` 0x0007 と自己点検）。
  *
  * ホストはこれを検証しない——実機で `CHECK(ME)` 欄を空・`CHECK(MF)` 欄を部分入力のまま
  * Enter を送ったところ、RPG が値をそのまま受け取った（`scripts/research-ffw.mjs` の実験 A）。
- * 参照実装も AID 送信時の検証を持たない（GNU tn5250 は検証自体が無く、tn5250j は Field Exit の
- * 中だけ）。**端末が止めなければ誰も止めない。**
+ * **端末が止めなければ誰も止めない。**
+ *
+ * **いつ・何で判定するかは ACS に合わせる**（`20260921-mandatory-check-acs`。実機の ACS で 9 通りを測った）:
+ * ME は全 AID（CA キーを除く）で・MDT で・画面が変更済みのときだけ、MF と自己点検はカーソル下の欄だけを
+ * AID のときと欄を出るときに見る。~~Enter のときだけ・全欄を内容で判定する（`20260729-ffw-behavior-bits` D1）~~
+ * は破棄した。
  *
  * `ScreenGrid.vue` ではなくここに置くのは、判定が純関数で単体テストできるため
  * （コンポーネントに埋めると「空振りしていないか」を確かめる手段が無くなる）。
  */
-export type MandatoryViolation = "mandatory-enter" | "mandatory-fill" | "self-check";
+export type MandatoryViolation = "mandatory-enter" | "mandatory-fill" | "self-check" | "field-exit-required";
 
 export interface MandatoryFinding {
   field: Field;
@@ -22,40 +27,118 @@ export interface MandatoryFinding {
 }
 
 /**
- * 画面順で**最初の**違反を返す（無ければ undefined）。
- *
- * @param fields  画面の全フィールド（保護欄は自動で除外する）
- * @param edits   未送信の編集（`fieldIndex → 値`）。打鍵のたびに更新されるので、
- *                snapshot の `value` より新しい。**こちらを優先する**
+ * 欄の MDT（ホストが立てた MDT か、未送信の編集がある。ACS `Field5250.isMDTField` 相当）。
+ * **継続欄は並びのどこかに MDT があれば全区間が MDT**——ACS `PS5250.setMDT` は継続欄の並びの全区間に `setMDT()` する
+ * （`20260921-field-exit-checks` の節目の点検の指摘。区間ごとに見ると、打っていない区間で Field Exit が 0021 になっていた）。
+ * `fields` は画面の全欄（並びを引くため）。渡さなければその欄だけを見る
  */
-export function findMandatoryViolation(
+function mdtOf(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Field[] = [f]): boolean {
+  const run = f.continued === undefined ? [f] : continuedRunOf(fields, f);
+  return run.some((x) => x.mdt || edits.has(x.index));
+}
+
+/**
+ * **MF（必須埋め）の違反か**（ACS `Field5250.checkMandatoryFillField`）。
+ * MF 欄で MDT があり、**満杯でも空でもない**（部分入力）とき。空を弾くのは ME の役目で別の指定。
+ * 空の判定は従来どおり空白も空とみなす（ACS はヌルだけを空とみなす。空白だけ打った欄の差は未確認）。
+ */
+export function mandatoryFillViolated(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Field[] = [f]): boolean {
+  if (f.adjust !== "mandatory-fill" || !mdtOf(f, edits, fields)) return false;
+  const value = edits.get(f.index) ?? f.value;
+  return value.trim().length > 0 && !isFull(f, value);
+}
+
+/**
+ * **自己点検（CHECK(M10)/CHECK(M11)）の違反か**（ACS `Field5250.checkModulusField`。MDT は見ない）。
+ * **非表示欄で未編集のものは見ない**（snapshot は値を持たないので判定できない。分からないものは弾かない）。
+ */
+export function selfCheckViolated(f: Field, edits: ReadonlyMap<number, string>): boolean {
+  if (f.selfCheck === undefined) return false;
+  const edited = edits.get(f.index);
+  if (f.hidden && edited === undefined) return false;
+  const value = edited ?? f.value;
+  return value.trim().length > 0 && !selfCheckDigitOk(value, f.selfCheck);
+}
+
+/**
+ * **1 つの欄の検査**（MF → 自己点検の順）。AID のときは**カーソル下の欄**に、**欄を出るとき**は出る欄に掛ける
+ * （ACS `PS5250.processAIDCode` / `moveCursorWithMandFillCheck`。実機でも、カーソルの無い欄の部分入力は
+ * Enter で送れ、Tab で出ようとすると止まった。research F2 の場合 6・7）。
+ */
+export function findFieldViolation(
+  f: Field | undefined,
+  edits: ReadonlyMap<number, string>,
+  fields?: readonly Field[]
+): MandatoryFinding | undefined {
+  if (!f || f.protected) return undefined;
+  if (mandatoryFillViolated(f, edits, fields ?? [f])) return { field: f, reason: "mandatory-fill" };
+  if (selfCheckViolated(f, edits)) return { field: f, reason: "self-check" };
+  return undefined;
+}
+
+/**
+ * **Field Exit・Field± で欄を出る前の検査**（ACS `PS5250.processFieldPlusMinusAndExit`。`20260921-field-exit-checks`）。
+ * ACS はこの順に見て、引っかかれば**値を変えずに**止まる（消去・右寄せ・欄の移動をしない）:
+ * 1. 入力不可（DDS の `I`）の欄 → エラー 4（0004）
+ * 2. ME の欄で、カーソルが欄の先頭か MDT が無い → エラー 33（0x21）。**打ってあっても先頭で押せば止まる**
+ * 3. MF の欄で MDT があり、カーソルが先頭でなく、満杯でも空でもない → 欄の先頭へ戻してエラー 20（0x14）。符号付き数値の MF は見ない
+ * （Field− の欄の種類の検査（0x16）は呼び出し側）。実機の ACS のコアで ME・入力不可を測った（`scripts/acs-probe/field-exit-checks.txt`）
+ */
+export type ExitRejection = "kbd-inhibited" | "mandatory-enter" | "mandatory-fill";
+export function fieldExitRejection(
+  f: Field,
+  edits: ReadonlyMap<number, string>,
+  caretAtStart: boolean,
+  fields: readonly Field[] = [f]
+): ExitRejection | undefined {
+  if (f.keyboardInhibited === true) return "kbd-inhibited";
+  if (f.mandatoryEnter === true && (caretAtStart || !mdtOf(f, edits, fields))) return "mandatory-enter";
+  if (!caretAtStart && f.signedNumeric !== true && mandatoryFillViolated(f, edits, fields)) return "mandatory-fill";
+  return undefined;
+}
+
+/**
+ * **ME（必須入力）の違反**（ACS `FFT5250.checkMandatoryFieldCheck`）。画面順で最初のものを返す。
+ *
+ * - **内容ではなく MDT で判定する**——打ってから消した欄（MDT あり・空）は通る（実機の場合 8）
+ * - **画面のどこも変更していなければ見ない**（ACS の `masterMDT`。実機の場合 1: 未変更の Enter は送れた）
+ * - CA キー（SOH の申告）では呼ばないこと（呼び出し側の `sendKey` が決める）
+ */
+export function findMandatoryEnterViolation(
   fields: readonly Field[],
   edits: ReadonlyMap<number, string>
 ): MandatoryFinding | undefined {
-  for (const f of fields) {
-    if (f.protected) continue;
-    const edited = edits.get(f.index);
-    // **非表示欄（パスワード等）は snapshot が値を持たない**（`value: hidden ? "" : ...`）。
-    // 未編集なら「空」と「打ってあるが見えない」を区別できないので検査しない
-    // （分からないものを弾かない側へ倒す）。
-    if (f.hidden && edited === undefined) continue;
-    const value = edited ?? f.value;
-    const filled = value.trim().length > 0;
+  if (edits.size === 0 && !fields.some((f) => f.mdt)) return undefined;
+  const hit = fields.find((f) => !f.protected && f.mandatoryEnter === true && !mdtOf(f, edits, fields));
+  return hit ? { field: hit, reason: "mandatory-enter" } : undefined;
+}
 
-    if (f.mandatoryEnter && !filled) return { field: f, reason: "mandatory-enter" };
+/**
+ * **欄を出ないまま AID を押せない欄か**（ACS のエラー 0020。`20260921-aid-without-field-exit`）。
+ *
+ * ACS `PS5250.processAIDCode` は、カーソル下の欄が**符号付き数値・CHECK(RZ)・CHECK(RB)** で、
+ * 打ったあと欄を出ていなければ送らない。**自動 Enter 欄は除く**（満杯で自分から Enter を送るため）。
+ * 右寄せは端末の仕事なので、出ずに送ると**左詰めのまま**ホストへ届く（実機で `12    `。research F2）。
+ */
+export function needsFieldExit(f: Field): boolean {
+  if (f.autoEnter === true) return false;
+  return f.signedNumeric === true || f.adjust === "right-zero" || f.adjust === "right-blank";
+}
 
-    // 自己点検欄（CHECK(M10)/CHECK(M11)）。ACS も AID 送信時に検算して止める
-    if (f.selfCheck !== undefined && filled && !selfCheckDigitOk(value, f.selfCheck)) {
-      return { field: f, reason: "self-check" };
-    }
-
-    // MANDATORY_FILL は「全部埋める」か「全部空」のどちらか（DDS の CHECK(MF) の定義）。
-    // **部分入力だけを弾く**——空を弾くのは MANDATORY_ENTER の役目で、別の指定。
-    if (f.adjust === "mandatory-fill" && filled && !isFull(f, value)) {
-      return { field: f, reason: "mandatory-fill" };
-    }
-  }
-  return undefined;
+/**
+ * **Field Exit が必須の欄か**（ACS `Field5250.isFieldExitRequired`。`20260921-field-exit-required-types`）。
+ *
+ * FFW の FER ビットだけでなく、**右寄せ（CHECK(RZ)/(RB)）と符号付き数値**も Field Exit 必須として扱う。
+ * 満杯になっても次の欄へ自動送りせず（自動 Enter もしない）、欄に留まる。実機の ACS でも、RZ 欄を満杯まで
+ * 打つとカーソルは欄の最終桁に留まった（`20260921-aid-without-field-exit` research F2 の場合 10）。
+ */
+export function isFieldExitRequired(f: Field): boolean {
+  return (
+    f.fieldExitRequired === true ||
+    f.adjust === "right-zero" ||
+    f.adjust === "right-blank" ||
+    f.signedNumeric === true
+  );
 }
 
 /**
@@ -67,5 +150,5 @@ export function findMandatoryViolation(
  */
 function isFull(f: Field, value: string): boolean {
   const v = value.replace(/ +$/, "");
-  return (f.dbcsType ? dbcsByteLength(v) : v.length) >= f.length;
+  return (f.dbcsType ? dbcsByteLength(v, undefined, f.dbcsType === "pure") : v.length) >= f.length;
 }

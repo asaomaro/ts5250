@@ -21,7 +21,7 @@ defineEmits<{ (e: "close"): void }>();
 const AID_KEYS: AidKey[] = [
   "Enter", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
   "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
-  "PageUp", "PageDown", "Clear", "Help", "Print", "SysReq", "Attn"
+  "PageUp", "PageDown", "Clear", "Help", "Print", "RecordBackspace", "SysReq", "Attn"
 ];
 
 const capturing = ref(false);
@@ -33,6 +33,7 @@ const LOCAL_EDIT_LABEL: Record<LocalEditAction, string> = {
   "field-exit": "Field Exit（欄の残りを消して右寄せ・次の欄へ）",
   "erase-eof": "Erase EOF（カーソルから欄末尾まで消去）",
   "erase-input": "Erase Input（すべての入力欄をクリア）",
+  "delete-word": "Delete Word（カーソルの語を削除。ACS の Ctrl+Delete）",
   "field-minus": "Field−（数値欄を負の値として確定・次の欄へ）",
   "field-plus": "Field+（数値欄を正の値として確定・次の欄へ）",
   "dup": "Dup（カーソルから欄末尾までを複写文字で埋める）"

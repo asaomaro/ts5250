@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import type { MandatoryFinding } from "../composables/mandatoryCheck.js";
 import type { AidKey } from "@ts5250/tn5250";
 import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   (e: "combo", ev: { key: string; ctrlKey?: boolean; altKey?: boolean }): void;
   /** 手動の繋ぎ直し（自動の再試行が尽きたとき） */
   (e: "reconnect"): void;
+  /** 送信前の検査で止めた（ペインがその欄へカーソルを移す。キーボードの AID と同じ振る舞いにするため） */
+  (e: "violation", hit: MandatoryFinding): void;
 }>();
 
 /** 表示するカーソル位置（未指定ならホスト由来へフォールバック） */
@@ -93,7 +96,10 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
       ]
 );
 function press(k: AidKey): void {
-  sendKey(props.state.sessionId, k, props.state.cursor);
+  // **ペインのカーソル（利用者が動かした位置）で送る**。`state.cursor` はホストが最後に置いた位置で、
+  // 動かした後に押すと違う位置をホストへ返し、AID の前の検査（カーソル下の欄の MF 等）も別の欄を見る
+  const hit = sendKey(props.state.sessionId, k, props.cursor ?? props.state.cursor);
+  if (hit) emit("violation", hit);
 }
 
 /**
@@ -230,6 +236,12 @@ const macroStop = computed<string | undefined>(() => {
     </span>
     <span v-if="snap">画面 <b>{{ snap.rows }}x{{ snap.cols }}</b></span>
     <span v-if="snap?.keyboardLocked" class="lock">🔒 応答待ち</span>
+    <!--
+      **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
+      `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
+      ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。以前は受け取っても**どこにも出していなかった**
+    -->
+    <span v-if="snap?.messageWaiting" class="msgwait" title="メッセージ待ち行列にメッセージが届いています" role="status">✉ メッセージあり</span>
     <!-- マクロの状態（ACS のシアンバー相当。spec D10）。幅は固定して隣をずらさない -->
     <span v-if="macro" class="macro" :class="macro.cls" :title="macro.title" role="status">
       {{ macro.label }}
@@ -459,6 +471,10 @@ const macroStop = computed<string | undefined>(() => {
 }
 .lock {
   color: var(--t-yellow);
+}
+/* メッセージ待ち（MW）。配色は CSS 変数に従う（`docs/UI-DESIGN.md`「生色を避ける」） */
+.msgwait {
+  color: var(--t-turquoise); /* 5250 のターコイズ（シアン相当）。定義済みの変数を使う */
 }
 /* クライアント側の操作員メッセージ。ホストのメッセージと取り違えないよう色を変える */
 .notice {

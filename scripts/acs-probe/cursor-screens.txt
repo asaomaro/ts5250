@@ -1,0 +1,49 @@
+# **いくつもの画面で、ACS がカーソルをどこに置くか**（実機）。`scripts/verify-cursor-screens.mjs` と同じ順に出し、
+# 当 PJ の置き方（WTD の終わりで決める。`20260921-cursor-per-wtd-acs`）と並べる。
+# 1 回の観測で決めないため、応答の形が違う画面を並べる（1 レコード・複数レコード・プロンプト・一覧・窓・分かれた READ）。
+signon
+keys [enter]
+settle 1200
+dump main
+keys [home][eraseeof]DSPFMT FILE(${LIB}/COMPLIST) OUTPUT(*)[enter]
+settle 3000
+dump dspfmt
+keys [pf3]
+settle 1500
+keys [pf12]
+settle 1200
+dump after-dspfmt
+keys [home][eraseeof]WRKOBJ OBJ(QSYS/QCMD*) OBJTYPE(*PGM)[enter]
+settle 2500
+dump wrkobj
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SNDMSG[pf4]
+settle 2000
+dump sndmsg-prompt
+keys [pf12]
+settle 1500
+keys [home][eraseeof]WRKSPLF[enter]
+settle 2500
+dump wrksplf
+keys [pf3]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('SPLIT')[enter]
+settle 2500
+dump split
+keys [pf3]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('SPLITN')[enter]
+settle 2500
+dump splitn
+keys [pf3]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/ULKPGM PARM('WINDOW')[enter]
+settle 2500
+dump window
+keys [pf3]
+settle 1500
+keys [home][eraseeof]GO MAIN[enter]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -1,0 +1,73 @@
+# Field Exit・Field± の欄の検査（ACS のコア。`20260921-field-exit-checks`）。
+# 原典 `PS5250.processFieldPlusMinusAndExit`: 欄が無ければ 5、入力不可（DDS の I）なら 4、ME の欄でカーソルが欄の先頭か MDT が無ければ
+# 33（0x21）、MF が満たされなければ欄の先頭へ戻して 20（0x14）、Field− が数値の欄でなければ 22（0x16）。どれも値を変えずに止まる。
+# 画面は ADJPGM（11,20 = CHECK(ME) A）と FFWPGM（15,22 = シフト I。Y の欄はコンパイルで落ちて並びに無い）。どちらも既にあるもので、実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- E1) ME の欄の先頭で Field Exit（何も打たない） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 11,20
+settle 300
+keys [fldext]
+settle 500
+dump e1-me-start
+keys [reset]
+settle 300
+
+# --- E2) ME の欄の 2 桁目で Field Exit（MDT なし・先頭でない） ---
+setcursor 11,21
+settle 300
+keys [fldext]
+settle 500
+dump e2-me-nomdt
+keys [reset]
+settle 300
+
+# --- E3) ME の欄に AB と打って、そのまま Field Exit（MDT あり・先頭でない） ---
+setcursor 11,20
+settle 300
+keys AB
+settle 300
+keys [fldext]
+settle 500
+dump e3-me-typed
+keys [reset]
+settle 300
+
+# --- E4) ME の欄（MDT あり）の先頭へ戻って Field+ ---
+setcursor 11,20
+settle 300
+keys [field+]
+settle 500
+dump e4-me-start-mdt-fieldplus
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+
+# --- E5) 入力不可（シフト I）の欄で Field Exit・Field+ ---
+keys [home][eraseeof]CALL ${LIB}/FFWPGM[enter]
+settle 2500
+setcursor 15,22
+settle 300
+keys [fldext]
+settle 500
+dump e5-io-fieldexit
+keys [reset]
+settle 300
+setcursor 15,22
+settle 300
+keys [field+]
+settle 500
+dump e6-io-fieldplus
+keys [reset]
+settle 300
+keys [pf3]
+settle 1500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

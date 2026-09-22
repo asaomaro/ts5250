@@ -52,11 +52,11 @@ const PRINTER_ROW = {
   buffered: 10
 };
 
-function stubFetch(editable = false): void {
+function stubFetch(editable = false, row: Record<string, unknown> = PRINTER_ROW): void {
   vi.stubGlobal("fetch", (url: string) => {
     const u = String(url);
     if (u === "/api/printers") {
-      return Promise.resolve(new Response(JSON.stringify({ printers: [PRINTER_ROW], editable }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ printers: [row], editable }), { status: 200 }));
     }
     if (u === "/api/watches") {
       return Promise.resolve(new Response(JSON.stringify({ watches: [], editable }), { status: 200 }));
@@ -187,6 +187,39 @@ describe("サービス一覧から帳票を開く", () => {
     await flushPromises();
     expect(useOpenConfigured().error.value).toBe("");
     expect(w.text()).not.toContain("使用中です");
+    w.unmount();
+  });
+});
+
+describe("応答を止めているプリンター（`20260921-printer-hold-response`）", () => {
+  it("**`held` なら ⚠ 応答停止中を出す**（待ち受けていても次の帳票が届かない）", async () => {
+    const { MSG_PRINTER_CHIP_HELD } = await import("../src/composables/opMessages.js");
+    stubFetch(false, { ...PRINTER_ROW, held: true });
+    await servicesStore.refresh();
+    const w = await mountPane();
+    expect(w.text()).toContain(MSG_PRINTER_CHIP_HELD);
+    w.unmount();
+    stubFetch(false);
+    await servicesStore.refresh();
+    const w2 = await mountPane();
+    expect(w2.text()).not.toContain(MSG_PRINTER_CHIP_HELD);
+    w2.unmount();
+  });
+});
+
+/**
+ * **常駐のプリンターが起動応答で断られたときの理由を日本語で出す**（`20260921-startup-codes-japanese` の節目の点検の指摘。
+ * サーバーは英語の文言（`printer session rejected (8925: …)`）を保存する）。それ以外の理由はそのまま
+ */
+describe("常駐の失敗の理由", () => {
+  it.each([
+    ["printer session rejected (8925: Creation of device failed.)", "ホストが接続を断りました（8925: 装置を作れませんでした）"],
+    ["connect ECONNREFUSED", "connect ECONNREFUSED"]
+  ])("%s", async (error, shown) => {
+    stubFetch(false, { ...PRINTER_ROW, state: "error", error });
+    await servicesStore.refresh();
+    const w = await mountPane();
+    expect(w.find(".reason").text()).toBe(shown);
     w.unmount();
   });
 });

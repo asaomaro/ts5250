@@ -1,4 +1,4 @@
-import type { Codec } from "@ts5250/ebcdic";
+import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import type { ScreenBuffer } from "../screen/buffer.js";
 import { ByteWriter } from "./bytes.js";
 import { ORDER, OPCODE, FFW, AID } from "./constants.js";
@@ -101,11 +101,21 @@ function functionKeyNumber(aid: number): number | undefined {
 }
 
 /**
+ * **欄データを載せない AID**（ACS `DS5250.sendAid`。`20260921-home-record-backspace`）。
+ * Clear・Help・Print・Record Backspace は**カーソルと AID だけ**を送る——待たされている Read の種類にも、
+ * MDT の立った欄の有無にもよらない（ACS は PA1〜3 も同じ扱いだが、当 PJ は PA キーを送れないので載せない）。
+ * 実機で ACS のワイヤを採った: コマンド行に `ABC` を打って Help → `… 03 14 0a f3` の 13 バイト（欄データ無し）。
+ * ~~以前は他の AID と同じく MDT の欄を載せていた~~（台帳「Clear / Help / Print / PA で欄データを送る」）。
+ */
+export const NO_DATA_AIDS: ReadonlySet<number> = new Set([AID.CLEAR, AID.HELP, AID.PRINT, AID.RECORD_BACKSPACE]);
+
+/**
  * **その AID で欄データを送ってよいか**（SOH の申告。`ScreenBuffer.sendsDataForAid`）。
  * 原典も同じ門番を通す（GNU tn5250 `tn5250_session_send_fields` の
  * `send_data_for_aid_key`、tn5250j `ScreenFields.readFormatTable` の `dataIncluded[]`）。
  */
 function sendsData(buf: ScreenBuffer, aid: number): boolean {
+  if (NO_DATA_AIDS.has(aid)) return false;
   return buf.sendsDataForAid(functionKeyNumber(aid));
 }
 
@@ -250,7 +260,10 @@ function buildFlatFieldResponse(
     // センチネル（1 文字 1 バイト）が混ざると文字数では桁が合わないため、
     // **バイト数で** 0x40（空白）詰め・切り詰めをする。位置で区切る形式なので長さが命。
     const tmp = new ByteWriter();
-    substituted += writeValue(tmp, flatValue(buf, f, codec), codec);
+    // 純 DBCS の欄は SO/SI 無し（`buildFieldResponse` の注記）。詰め物（打った値は 1 字 1 セルで、残りは半角空白のセル）の落とし方と、
+    // 継続欄の区間ごとの全角空白詰めは `pureValue`（落とさないと `SO 字 SI` の後ろに半角の 0x40 が続く形になり、SO/SI を外せない）
+    const pure = f.dbcsType === "pure";
+    substituted += writeValue(tmp, pure ? pureValue(buf, f, codec) : flatValue(buf, f, codec), codec, pure);
     const bytes = tmp.toUint8Array();
     w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
     for (let i = bytes.length; i < width; i++) w.u8(0x40);
@@ -311,6 +324,7 @@ export function buildReadInputFieldsResponse(
   aid: number,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
+  // 欄データを載せない AID（`NO_DATA_AIDS`）はここでもカーソルと AID だけ——平坦な応答の門番（`sendsData`）が同じ集合を見る
   return buildFlatFieldResponse(buf, codec, aid, cursor);
 }
 
@@ -331,14 +345,21 @@ export function buildReadImmediateResponse(
  * （編集で動いた桁にそのまま書き戻す＝色/バイトが追従）。センチネル以外の連続部分だけを
  * codec でエンコードし、センチネルは 1 バイトそのまま挟む。戻り値は置換された文字数。
  */
-function writeValue(w: ByteWriter, value: string, codec: Codec): number {
+function writeValue(w: ByteWriter, value: string, codec: Codec, noShift = false): number {
   let substituted = 0;
   let run = "";
   const flushRun = (): void => {
     if (run.length > 0) {
       const enc = codec.encode(run);
       substituted += enc.substituted;
-      w.bytes(enc.bytes);
+      // **純 DBCS の欄（G）は SO/SI を付けない**（ACS はこの欄の生の 2 バイト組をそのまま出す）。`encode` は全角の連なりを SO…SI で挟むので外す。
+      // 全角だけの連なりのときだけ（半角が混ざって SO/SI が途中に入るものは触らない＝そもそも G には入らない）
+      const b = enc.bytes;
+      if (noShift && b.length >= 2 && b[0] === SO && b[b.length - 1] === SI && !b.subarray(1, b.length - 1).some((x) => x === SO || x === SI)) {
+        w.bytes(b.subarray(1, b.length - 1));
+      } else {
+        w.bytes(b);
+      }
       run = "";
     }
   };
@@ -352,6 +373,34 @@ function writeValue(w: ByteWriter, value: string, codec: Codec): number {
   }
   flushRun();
   return substituted;
+}
+
+/**
+ * **欄の値を送るときのバイト数**（`writeValue` と同じ符号化）。純 DBCS の欄（G）は SO/SI を数えない。
+ * `Session.setField` の長さ検査と送信（`buildFieldResponse`）が同じ数え方をするための入口（`20260921-g-field-sosi` の独立点検 A-M1）
+ */
+export function encodedFieldLength(value: string, codec: Codec, pure: boolean): number {
+  const w = new ByteWriter();
+  writeValue(w, value, codec, pure);
+  return w.toUint8Array().length;
+}
+
+/**
+ * **純 DBCS の欄（G）の送信値**（継続欄は全区間の連結）。区間ごとに、**末尾の半角空白**（編集で 1 字 1 セルに書いたときの残りの詰め物）を落とし、
+ * 区間の長さ（偶数バイト）まで**全角空白**で詰めてから連結する——落としたまま連結すると、後ろの区間の字が前の区間の空きへ詰まってしまう
+ * （ACS `FFT5250.getFieldContents` は継続欄の全区間の内容を連結する。`20260921-g-field-sosi` の独立点検 A-S1）。
+ * 未編集の区間はホストの原本のバイト（センチネル）で、すでに区間の長さぶんある
+ */
+function pureValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
+  const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  return run
+    .map((seg) => {
+      let s = buf.fieldValue(seg, true).replace(/ +$/, "");
+      const want = seg.length - (seg.length % 2);
+      while (encodedFieldLength(s, codec, true) < want) s += "\u3000";
+      return s;
+    })
+    .join("");
 }
 
 /** 行・桁・AID ＋ 指定された欄の並び。`buildReadMdtResponse` と READ IMMEDIATE で共有する */
@@ -374,8 +423,20 @@ function buildFieldResponse(
     // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル。
     // **符号付き数値欄だけは符号桁を見るため末尾ブランクを残した値**から作る（上の関数）。
     // 継続入力フィールドは全区間を連結した値になる。
-    const value = sendValue(buf, f, codec);
-    substituted += writeValue(w, value, codec);
+    if (f.dbcsType === "pure") {
+      // **純 DBCS の欄（G）は欄長いっぱいの SO/SI 無しの 2 バイト組で送る**（実機の ACS のワイヤ: `かきく` を打った 12 バイトの欄が `44 86 44 87 44 88 40 40 40 40 40 40`。
+      // 残りは DBCS 空白 0x4040）。以前は SO/SI を付けて短く送り、ホストの欄に制御バイトが入って全角が 1 バイトずれた（`20260921-g-field-sosi`）。
+      // 継続欄は全区間の長さの合計（先頭区間の長さで切ると 2 区間目以降のデータが落ちる。独立点検 A-S1）
+      const tmp = new ByteWriter();
+      substituted += writeValue(tmp, pureValue(buf, f, codec), codec, true);
+      const bytes = tmp.toUint8Array();
+      const total = f.continued === undefined ? f.length : buf.continuedRun(f).reduce((n, seg) => n + seg.length, 0);
+      const width = total - (total % 2);
+      w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
+      for (let i = Math.min(bytes.length, width); i < width; i++) w.u8(0x40);
+    } else {
+      substituted += writeValue(w, sendValue(buf, f, codec), codec);
+    }
   }
 
   return { record: buildRecord(OPCODE.PUT_GET, w.toUint8Array(), {}, CLIENT_FLAG2), substituted };

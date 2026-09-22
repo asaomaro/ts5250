@@ -1,0 +1,13 @@
+schema: 11
+slug: printer-hold-response
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: プリンター: 受信した瞬間に印刷完了を返す
+harnessRevDelivered: unknown

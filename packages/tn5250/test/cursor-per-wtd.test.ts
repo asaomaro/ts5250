@@ -43,13 +43,15 @@ function apply(stream: number[], buf = new ScreenBuffer()): { buf: ScreenBuffer;
 const at = (buf: ScreenBuffer): { row: number; col: number } => buf.rowColOf(buf.cursorAddr);
 
 describe("IC/MC は WTD ごとに確定する（applyDataStream）", () => {
-  it("IC 付きのヘッダ WTD の後に「SOH あり・IC なし」の WTD が続くと、ホストは位置を指していない", () => {
-    const { cursorSet } = apply([
+  // ~~ホストは位置を指していない（cursorSet=false で、呼び出し側が先頭入力欄へ寄せる）~~——既定位置も WTD の終わりで置く
+  // （`20260921-cursor-per-wtd-acs`）。見るのは「保護化されたヘッダ (2,10) に残らず、明細の先頭入力欄 (3,23) へ落ちる」こと
+  it("IC 付きのヘッダ WTD の後に「SOH あり・IC なし」の WTD が続くと、IC は捨てられ先頭入力欄へ", () => {
+    const { buf } = apply([
       ...WTD, ...SOH, ...HEADER_FIELD, ...IC(2, 10),
       ...WTD, ...SOH, ...DETAIL_FIELD,
       ...READ
     ]);
-    expect(cursorSet).toBe(false);
+    expect(at(buf)).toEqual({ row: 3, col: 23 });
   });
 
   it("SOH の後に置かれた IC は有効", () => {
@@ -73,21 +75,21 @@ describe("IC/MC は WTD ごとに確定する（applyDataStream）", () => {
   });
 
   it("同じ WTD の中でも、IC の後に SOH が来たら IC は捨てる", () => {
-    const { cursorSet } = apply([...WTD, ...IC(2, 10), ...SOH, ...DETAIL_FIELD, ...READ]);
-    expect(cursorSet).toBe(false);
+    const { buf } = apply([...WTD, ...IC(2, 10), ...SOH, ...DETAIL_FIELD, ...READ]);
+    expect(at(buf)).toEqual({ row: 3, col: 23 });
   });
 
   it.each([
     ["CLEAR UNIT", [ESC, COMMAND.CLEAR_UNIT]],
     ["CLEAR FORMAT TABLE", [ESC, COMMAND.CLEAR_FORMAT_TABLE]]
   ])("%s でも保留値を捨てる", (_name, clear) => {
-    const { cursorSet } = apply([
+    const { buf } = apply([
       ...WTD, ...HEADER_FIELD, ...IC(2, 10),
       ...clear,
       ...WTD, ...DETAIL_FIELD,
       ...READ
     ]);
-    expect(cursorSet).toBe(false);
+    expect(at(buf)).toEqual({ row: 3, col: 23 });
   });
 
   it("MC も IC と同じく保留して WTD の終わりで確定する", () => {

@@ -8,6 +8,7 @@ import type { WsClient } from "../src/ws-client.js";
 import { rejectReason, isSignPosition } from "../src/composables/fieldValidate.js";
 import {
   MSG_BY_REASON,
+  MSG_FIELD_EXIT_KEY_INVALID,
   MSG_UNKNOWN_ERROR,
   fieldAtLabel,
   noticeFor,
@@ -16,7 +17,7 @@ import {
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 
 /**
- * **打鍵の型規則（実機 `ASAOLIB/AUDPGM` で確かめた 3 件）。**
+ * **打鍵の型規則（実機 `TESTLIB/AUDPGM` で確かめた 3 件）。**
  *
  * ① 数字専用欄（FFW シフト 5）に `.` `,` `+` `-` 空白が**打ててしまい**、Enter で
  *    core の送信時検証が `FIELD_TYPE` を投げて**1 バイトも飛ばない**——しかも画面には
@@ -57,9 +58,17 @@ describe("数字専用欄（digitsOnly）は数字しか受け付けない", () 
     for (const ch of ["0", "5", "9"]) expect(rejectReason(digits, ch)).toBeUndefined();
   });
 
-  it("数字専用でない数値欄では従来どおり `.` `-` を受ける（signed-num の欄）", () => {
-    const num = fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true });
+  // ~~数字専用でない数値欄では従来どおり `.` `-` を受ける（signed-num の欄）~~ → ACS は符号付き数値欄を数字だけにする
+  // （`PS5250.checkSBCSField` のエラー 0016。実機の ACS で `-` と `.` がエラー。`20260921-numpad-field-sign`）
+  it("数値専用（0x0300）の欄は `.` `,` `+` `-` 空白を受ける（ACS `checkNumericOnlyChar` と同じ集合）", () => {
+    const num = fld({ index: 1, row: 5, col: 10, length: 6, numeric: true });
     for (const ch of [".", ",", "+", "-", " "]) expect(rejectReason(num, ch)).toBeUndefined();
+  });
+
+  it("**符号付き数値（0x0700）の欄は数字だけ**（`.` `,` `+` `-` 空白は理由つきで拒否）", () => {
+    const signed = fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true });
+    for (const ch of [".", ",", "+", "-", " "]) expect(rejectReason(signed, ch)).toBe("numeric");
+    expect(rejectReason(signed, "7")).toBeUndefined();
   });
 });
 
@@ -131,22 +140,40 @@ describe("ScreenGrid: 打鍵", () => {
     expect(r.notices).toContain(MSG_BY_REASON["numeric"]);
   });
 
-  it("符号付き数値欄では従来どおり `-` が Field− になる（退行防止）", async () => {
+  // ~~符号付き数値欄では従来どおり `-` が Field− になる（退行防止）~~ → ACS はメイン行の `-` を文字として扱い、
+  // 符号付き数値欄ではエラーにする（実機の ACS: `12-` → `12` のままエラー。`20260921-numpad-field-sign`）
+  it("符号付き数値欄のメイン行の `-` はエラー（値は `12` のまま。Field− はテンキー）", async () => {
     const r = await typeInto(
       [fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })],
       "12-"
     );
-    expect(r.value).toBe("    12-");
+    expect(r.value).toBe("12");
+    expect(r.notices).toContain(MSG_BY_REASON["numeric"]);
   });
 
-  it("符号付き数値欄: 7 桁目（符号桁）に数字は入らない", async () => {
+  it("符号付き数値欄: 数字桁を埋めた後の 7 桁目は入らず、エラー 0018", async () => {
     const r = await typeInto(
       [fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })],
       "1234567"
     );
     // 画面に見えている桁がそのままホストへ行く（符号桁は空白のまま＝末尾空白は emit で落ちる）
     expect(r.value).toBe("123456");
-    expect(r.notices).toContain(MSG_BY_REASON["sign-position"]);
+    // ~~符号桁の拒否（sign-position）~~ → ACS は最終の数字桁に留まって「出た」状態になり、次の文字は 0018
+    // （`processCharKeyStroke` の `setErrorCode(24)`。実機でも 6S0 に 6 桁打つと 19,25 に留まった。
+    // `20260921-field-exit-required-types` research F4・F5）
+    expect(r.notices).toContain(MSG_FIELD_EXIT_KEY_INVALID);
+  });
+
+  it("符号付き数値欄: 符号桁にカーソルを置いて数字を打つと入らない（理由が出る）", async () => {
+    const w = mountGrid([fld({ index: 1, row: 5, col: 10, length: 7, numeric: true, signedNumeric: true })]);
+    await nextTick();
+    const el = firstInput(w);
+    el.focus();
+    el.setSelectionRange(6, 6);
+    await type(el, "7");
+    expect(notices(w)).toContain(MSG_BY_REASON["sign-position"]);
+    expect(w.emitted("edit")).toBeUndefined();
+    w.unmount();
   });
 });
 

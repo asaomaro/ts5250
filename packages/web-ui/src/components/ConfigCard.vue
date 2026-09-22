@@ -92,6 +92,10 @@ const sesForm = reactive<SesFormState>({
   vtEncoding: "utf-8" as "utf-8" | "shift_jis" | "euc-jp",
   screenSize: DEFAULT_SCREEN_SIZE,
   deviceName: "",
+  associatedPrinter: "",
+  associatedPrinterSession: "",
+  associatedPrinterTimeout: 5,
+  closeAssociatedPrinterWithLastSession: false,
   rescueAction: "hold" as "hold" | "delete",
   transformTo: "",
   // 既定は「切らない」（`20260802-config-form-polish` で「サーバー既定に従う」を廃止）
@@ -112,6 +116,15 @@ const autoStartOn = computed({
   set: (v: boolean) => {
     sesForm.autoStart = v ? undefined : false;
   }
+});
+
+/**
+ * 関連付けるプリンターセッションの選択肢（**同じ保存先**のプリンターの設定。サーバーは同じファイルの中だけを許す）。
+ * 保存先は編集中の設定の参照の接頭辞（`srv:` / `own:`）で決まる。新規はシステムの参照の接頭辞から
+ */
+const printerSessions = computed(() => {
+  const own = (props.session?.ref ?? sesForm.system ?? "").split(":")[0];
+  return systemsStore.sessions.filter((x) => x.sessionType === "printer" && x.ref.split(":")[0] === own);
 });
 
 /**
@@ -314,6 +327,10 @@ function loadSession(): void {
   sesForm.model3270 = s.model3270 ?? 2;
   sesForm.vtEncoding = s.vtEncoding ?? "utf-8";
   sesForm.deviceName = s.deviceName ?? "";
+  sesForm.associatedPrinter = s.associatedPrinter ?? "";
+  sesForm.associatedPrinterSession = s.associatedPrinterSession ?? "";
+  sesForm.associatedPrinterTimeout = s.associatedPrinterTimeout ?? 5;
+  sesForm.closeAssociatedPrinterWithLastSession = s.closeAssociatedPrinterWithLastSession ?? false;
   sesForm.rescueAction = s.rescueAction ?? "hold";
   sesForm.transformTo = s.transformTo ?? "";
   sesForm.screenSize = s.screenSize ?? DEFAULT_SCREEN_SIZE;
@@ -505,6 +522,31 @@ async function save(): Promise<void> {
         delete form.terminal;
         delete form.model3270;
         delete form.vtEncoding;
+      }
+      // **関連付けプリンターは 5250 の表示だけ**（サーバーは他の種別に書くと 400 にする）。送るかどうかは ACS と同じく
+      // Java の `trim()`（U+0020 以下を落とす）で空かを見て、値は打ったまま送る（ACS は空白も大文字小文字も加工しない。
+      // `20260921-associated-printer`）
+      const assoc = sesForm.associatedPrinter ?? "";
+      const assocOk = form.sessionType === "display" && sesForm.terminal === "5250";
+      // 関連付けは**方式を 1 つ**（サーバーは両方書くと 400）。プリンターセッションを選んだらそちらを優先し、装置名は送らない
+      // （`20260921-associated-printer-session`）。待ち時間・一緒に閉じるは既定なら送らない（設定ファイルに既定値を書き散らさない）
+      if (assocOk && sesForm.associatedPrinterSession) {
+        form.associatedPrinterSession = sesForm.associatedPrinterSession;
+        delete form.associatedPrinter;
+        // **空・数字でない・負の値は既定（5 秒）に直す**（ACS `DataPanel5250ConAssocPrinter.propertyChange` は空・不正・負を 5 にする）。
+        // `Number("")` は 0＝「待ち続ける」になり、空欄が無限に待つ設定に化けていた（節目 10 の独立点検 C-S7）。0 は明示したときだけ
+        const raw = sesForm.associatedPrinterTimeout as unknown;
+        const t = raw === "" || raw === null || raw === undefined ? 5 : Number(raw);
+        if (Number.isInteger(t) && t >= 0 && t !== 5) form.associatedPrinterTimeout = t;
+        else delete form.associatedPrinterTimeout;
+        if (sesForm.closeAssociatedPrinterWithLastSession) form.closeAssociatedPrinterWithLastSession = true;
+        else delete form.closeAssociatedPrinterWithLastSession;
+      } else {
+        delete form.associatedPrinterSession;
+        delete form.associatedPrinterTimeout;
+        delete form.closeAssociatedPrinterWithLastSession;
+        if (assocOk && ![...assoc].every((c) => c.charCodeAt(0) <= 0x20)) form.associatedPrinter = assoc;
+        else delete form.associatedPrinter;
       }
       // `idleTimeout` は常に明示値（「切らない」or 分）。**選択肢から「サーバー既定に従う」を
       // 外した**ので、画面から保存した定義は必ず自分の値を持つ
@@ -717,6 +759,11 @@ const infoRows = computed(() => {
     });
   }
   if (o.deviceName) rows.push({ label: "デバイス名", value: o.deviceName });
+  if (o.associatedPrinter) rows.push({ label: "関連付けプリンター", value: o.associatedPrinter });
+  if (o.associatedPrinterSession) {
+    const p = systemsStore.sessions.find((x) => x.ref === o.associatedPrinterSession);
+    rows.push({ label: "関連付けるプリンターセッション", value: p?.name ?? o.associatedPrinterSession });
+  }
   // 待ち受けの始め方。**プリンターと待ち行列で同じ**なので同じ行に出す
   if (o.sessionType !== "display") {
     rows.push({
@@ -957,6 +1004,35 @@ const infoRows = computed(() => {
           </select>
         </label>
         <label class="row"><span class="cap">装置名</span><input v-model="sesForm.deviceName" /></label>
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
+          <span class="cap" title="ホストに申告すると、対話ジョブの印刷装置がこのプリンター装置になります（ACS のプリンターの関連付けと同じ）">
+            関連付けプリンター
+          </span>
+          <input v-model="sesForm.associatedPrinter" :disabled="!!sesForm.associatedPrinterSession" placeholder="プリンターの装置名" />
+        </label>
+        <!-- ACS のもう 1 つの方式: プリンターセッションの設定を指す（開くとそのプリンターを起こして装置名を待ち、表示に合わせて止める・起こす）。
+             同じ保存先のプリンターの設定だけ（サーバーも同じファイルの中だけを許す）。装置名の方式とは排他 -->
+        <label v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250'" class="row">
+          <span class="cap" title="開くとそのプリンターを起こして装置名を待ち、その装置で関連付けます。5250端末が切れたらプリンターを止め、繋がったら起こします">
+            関連付けるプリンターセッション
+          </span>
+          <select v-model="sesForm.associatedPrinterSession" :disabled="!!(sesForm.associatedPrinter ?? '').trim()">
+            <option value="">指定しない</option>
+            <option v-for="p in printerSessions" :key="p.ref" :value="p.ref">{{ p.name }}</option>
+          </select>
+        </label>
+        <template v-if="sesForm.sessionType === 'display' && sesForm.terminal === '5250' && sesForm.associatedPrinterSession">
+          <label class="row">
+            <span class="cap" title="装置名が決まるのを待つ秒数。0 は待ち続けます（1〜4 は 5 秒、600 を超えれば 600 秒として扱います）">待ち時間（秒）</span>
+            <input v-model.number="sesForm.associatedPrinterTimeout" type="number" min="0" max="600" />
+          </label>
+          <label class="row">
+            <span class="cap" title="最後の5250端末を閉じたとき、そのプリンターのセッションも閉じます（ほかの5250端末が使っていれば閉じません。常駐のプリンターは閉じません）">
+              一緒に閉じる
+            </span>
+            <input v-model="sesForm.closeAssociatedPrinterWithLastSession" type="checkbox" />
+          </label>
+        </template>
         <label v-if="sesForm.sessionType === 'printer'" class="row">
           <span class="cap" title="ホストに印刷データへ変換させると、書式そのままで実プリンターへ流せます。代わりに画面表示と PDF は使えません">
             印刷の経路

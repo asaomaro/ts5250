@@ -138,17 +138,20 @@ function renderLine(
 }
 
 /**
- * SO/SI の印。**桁を占めない**——`position:absolute` で桁の境目に重ね、幅は持たせない。
+ * SO/SI の印。**幅を持たせず重ねる**——`position:absolute` で SO/SI の桁の左端に置く。
  *
- * 文字の流れに挟むと、印を出した行だけ右へずれる。実採取の帳票（PUB400 の Library List）で
- * 確かめたとおり、**SO/SI に桁を与えると DBCS の行だけ 1 桁ずれて他の行と食い違う**
- * ——ホストは SO/SI が桁を占めない前提で桁を組んでいる。だから重ねて描くしかない。
+ * 桁は復号器が確保する——ACS と同じく SO・SI は既定で 1 桁ずつ空白を占める（`ScsDecoder`。
+ * `20260921-scs-sosi-columns`）。印を文字の流れに挟むと、印の有無で桁が動いてしまうので重ねて描く。
+ * ~~SO/SI に桁を与えると DBCS の行だけ 1 桁ずれて他の行と食い違う——ホストは SO/SI が桁を占めない前提で
+ * 桁を組んでいる~~ は ACS の描き方と違った（ACS も DBCS の行は 1 桁右から描く）。
  *
  * `left` は桁の境目（`col - 1` 桁ぶん）。`ch` は**この要素自身のフォント**で解決されるので、
  * ここで字の大きさを変えないこと（変えると位置がずれる）。
  */
 function markHtml(m: ShiftMark): string {
-  return `<span class="so" style="left:${m.col - 1}ch">${m.kind === "so" ? "{" : "}"}</span>`;
+  // 桁を占める SO/SI はその桁の中に描く（`margin-left:0`・幅は占める桁ぶん）。占めないときは境目に中心を置く（CSS の既定）
+  const inCell = m.width > 0 ? `;margin-left:0;width:${m.width}ch` : "";
+  return `<span class="so" style="left:${m.col - 1}ch${inCell}">${m.kind === "so" ? "{" : "}"}</span>`;
 }
 
 /** 1 ページ。桁数は `cols`（等幅の箱の幅）で固定する */

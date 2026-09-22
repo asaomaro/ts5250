@@ -221,10 +221,88 @@ describe("useCursor.nextWordStart", () => {
     expect(nextWordStart(at(cells), { row: 2, col: 4 }, "left", 2, 7)).toEqual({ row: 1, col: 1 });
   });
 
-  it("語が無ければ pos を返す（画面端で停止）", () => {
-    const cells = grid("  ABC  ");
+  // ~~語が無ければ pos を返す（画面端で停止）~~ → 画面の端で**巻き戻る**（実機の ACS のコア。`scripts/acs-probe/tabword.txt` の w1・w2。`20260921-word-tab-acs`）。語が全く無いときだけ pos
+  it("語が全く無ければ pos を返す", () => {
+    const cells = grid("       ");
     expect(nextWordStart(at(cells), { row: 1, col: 5 }, "right", 1, 7)).toEqual({ row: 1, col: 5 });
     expect(nextWordStart(at(cells), { row: 1, col: 2 }, "left", 1, 7)).toEqual({ row: 1, col: 2 });
+  });
+
+  it("**画面の端で巻き戻る**（右下から次の語頭 → 先頭側の最初の語頭。左上から前の語頭 → 末尾側の最後の語頭）", () => {
+    const cells = grid("  ABC  ", "  DE   ");
+    // 実機のメニューでは、右下（24,80）から `[tabword]` が先頭側の語頭（1,2）、左上（1,1）から `[backtabword]` が末尾側の語頭（24,32）だった
+    expect(nextWordStart(at(cells), { row: 2, col: 7 }, "right", 2, 7)).toEqual({ row: 1, col: 3 });
+    expect(nextWordStart(at(cells), { row: 1, col: 1 }, "left", 2, 7)).toEqual({ row: 2, col: 3 });
+    // 語が 1 つだけなら、その語頭から先へ進むと同じ語頭へ戻る（巻き戻り。ACS の最後の 1 歩は pos 自身）
+    const one = grid("  ABC  ");
+    expect(nextWordStart(at(one), { row: 1, col: 3 }, "right", 1, 7)).toEqual({ row: 1, col: 3 });
+    expect(nextWordStart(at(one), { row: 1, col: 5 }, "right", 1, 7)).toEqual({ row: 1, col: 3 });
+  });
+
+  it("**画面の先頭の桁は語頭**（先頭が文字なら、そこへ左から巻き戻れる）", () => {
+    const cells = grid("AB  CD ");
+    expect(nextWordStart(at(cells), { row: 1, col: 1 }, "left", 1, 7)).toEqual({ row: 1, col: 5 }); // 巻き戻って末尾側の CD
+    expect(nextWordStart(at(cells), { row: 1, col: 5 }, "left", 1, 7)).toEqual({ row: 1, col: 1 });
+  });
+
+  it("**行頭は、前の行の最終桁が空白のときだけ語頭**（文字が行末から次の行へ続くなら同じ語。以前は行頭を常に語頭にしていた）", () => {
+    // 1 行目の最終桁が文字（C）→ 2 行目の 1 桁目（D）は語頭でない。E（桁 3）は直前が空白なので語頭
+    const cells = grid("  ABC", "D E  ");
+    expect(nextWordStart(at(cells), { row: 1, col: 3 }, "right", 2, 5)).toEqual({ row: 2, col: 3 });
+    // 1 行目の最終桁が空白 → 2 行目の 1 桁目は語頭
+    const cells2 = grid("  AB ", "D E  ");
+    expect(nextWordStart(at(cells2), { row: 1, col: 3 }, "right", 2, 5)).toEqual({ row: 2, col: 1 });
+  });
+
+  it("**全角の字は 1 字ごとが語頭**（連なっていても各字で止まる。実機のメニューは 36・38・40・42… と 1 字ずつ止まった）", () => {
+    // `AB` SO あ い う SI `CD`: あ・い・う の各字が停止点。SO/SI は空白と同じ扱いで、SI の直後の C も語頭
+    const cells: Cell[][] = [[
+      { ...cell("sbcs"), char: " " }, { ...cell("sbcs"), char: "A" }, { ...cell("sbcs"), char: "B" },
+      { ...cell("so"), char: " " },
+      { ...cell("dbcs-lead"), char: "あ" }, { ...cell("dbcs-tail"), char: "" },
+      { ...cell("dbcs-lead"), char: "い" }, { ...cell("dbcs-tail"), char: "" },
+      { ...cell("dbcs-lead"), char: "う" }, { ...cell("dbcs-tail"), char: "" },
+      { ...cell("si"), char: " " },
+      { ...cell("sbcs"), char: "C" }, { ...cell("sbcs"), char: "D" }, { ...cell("sbcs"), char: " " }
+    ]];
+    const f = at(cells);
+    const cols = 14;
+    const stops: number[] = [];
+    let p = { row: 1, col: 1 };
+    for (let i = 0; i < 6; i++) {
+      p = nextWordStart(f, p, "right", 1, cols);
+      stops.push(p.col);
+    }
+    // A(2) → あ(5) → い(7) → う(9) → C(12)（SI の直後）→ 巻き戻って A(2)
+    expect(stops).toEqual([2, 5, 7, 9, 12, 2]);
+    // 逆向き: C(12) → う(9) → い(7) → あ(5) → A(2)
+    const back: number[] = [];
+    p = { row: 1, col: 13 };
+    for (let i = 0; i < 5; i++) {
+      p = nextWordStart(f, p, "left", 1, cols);
+      back.push(p.col);
+    }
+    expect(back).toEqual([12, 9, 7, 5, 2]);
+  });
+
+  it("**実機の ACS の停止位置と同じ**（サインオン直後のメニューの 1 行目: ` MAIN` の M が 2 桁目・`IBM` が 30 桁目・以降は全角 1 字ごと）", () => {
+    // 実機の測定（`scripts/acs-probe/tabword.txt`）: (1,1) → 2 → 30 → 34 → 36 → 38 → 40 → 42。1 行目を近似した（` MAIN` … `IBM I` SO メ イ ン SI ` ` SO メ ニ ュ ー SI）
+    const line = " MAIN                        IBM I";
+    const cells: Cell[][] = [[
+      ...[...line].map((ch) => ({ ...cell("sbcs"), char: ch })),
+      { ...cell("so"), char: " " }, ...["メ", "イ", "ン"].flatMap((ch) => [{ ...cell("dbcs-lead"), char: ch }, { ...cell("dbcs-tail"), char: "" }]),
+      { ...cell("si"), char: " " }
+    ]];
+    const cols = 80;
+    const f = at(cells);
+    let p = { row: 1, col: 1 };
+    const stops: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      p = nextWordStart(f, p, "right", 1, cols);
+      stops.push(p.col);
+    }
+    // M(2) → I(30) → B は語頭でない → 2 つ目の I(34) → メ(36) → イ(38) → ン(40)
+    expect(stops).toEqual([2, 30, 34, 36, 38, 40]);
   });
 
   it("Ctrl+↑/↓ は同じ列位置で空白をスキップし最も近い非空白セルへ", () => {

@@ -160,3 +160,22 @@ describe("止まった理由の配り直し", () => {
     mgr.closeAll();
   });
 });
+
+describe("同じプリンターを 2 つのタブで開く（`PrinterListener`。`20260921-printer-hold-response` の独立点検の指摘）", () => {
+  it("**両方のタブに届き、後のタブを閉じても先のタブには届き続ける**", async () => {
+    const { mgr, connect } = setup(() => CLOCK);
+    const a = connect();
+    const b = connect();
+    await a.conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    await b.conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    expect(mgr.listPrinters(), "同じ定義は 1 つのエントリに繋がる").toHaveLength(1);
+    deliver(mgr, "s1");
+    expect(a.sent.some((m) => m.type === "report"), "先のタブに届かない（後のタブが上書きした）").toBe(true);
+    expect(b.sent.some((m) => m.type === "report")).toBe(true);
+    b.conn.onSocketClose();
+    deliver(mgr, "s2");
+    const reports = a.sent.filter((m) => m.type === "report") as Extract<WsServerMessage, { type: "report" }>[];
+    expect(reports.map((r) => r.report.id), "後のタブを閉じたら先のタブにも届かなくなった").toEqual(["s1", "s2"]);
+    mgr.closeAll();
+  });
+});

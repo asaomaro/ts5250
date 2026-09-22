@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SessionManager, nextDeviceName, RESERVATION_TTL_MS } from "../src/session-manager.js";
+import { SessionManager, RESERVATION_TTL_MS } from "../src/session-manager.js";
 import { As400Error } from "@ts5250/base";
 import { ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 import { readFileSync } from "node:fs";
@@ -226,30 +226,8 @@ describe("セッションの予約", () => {
   });
 });
 
-/**
- * **装置名の自動リトライ（任意設定）。**
- *
- * IBM i は要求された装置が使用中だと、理由を返さずソケットを閉じる。名前にこだわらない運用の
- * ために、末尾の数字を繰り上げて再試行できるようにしてある。既定 off なのは、装置名を固定する
- * のが「その名前で繋ぎたい」意図だからで、黙って別名にすり替えるのは裏切りになるため。
- */
-describe("nextDeviceName", () => {
-  it("末尾の数字を桁を保って繰り上げる", () => {
-    expect(nextDeviceName("WEBEMU01")).toBe("WEBEMU02");
-    expect(nextDeviceName("WEBEMU09")).toBe("WEBEMU10");
-    expect(nextDeviceName("DEV1")).toBe("DEV2");
-  });
-
-  it("数字が無ければ 2 を足す（10 文字上限を超えるなら打ち止め）", () => {
-    expect(nextDeviceName("WEBEMU")).toBe("WEBEMU2");
-    expect(nextDeviceName("ABCDEFGHIJ")).toBeUndefined();
-  });
-
-  it("桁が増えるなら打ち止め（装置名は 10 文字まで）", () => {
-    expect(nextDeviceName("WEBEMU99")).toBeUndefined();
-    expect(nextDeviceName("DEV9")).toBeUndefined();
-  });
-});
+// 装置名の繰り上げ（`deviceNameRetry`）は tn5250 の `telnet/device-name.ts` へ移した（`20260921-device-name-acs`）。
+// テストは `packages/tn5250/test/device-name.test.ts`
 
 /**
  * ジョブ識別子の解決。**画面に触れずに**（起動応答＋ジョブ一覧で）行う経路。
@@ -296,9 +274,37 @@ describe("ジョブ識別子の解決", () => {
     mgr.closeAll();
   });
 
+  it("**照会の間に繋ぎ直して装置名が替わったら、古い照会の結果で上書きしない**（`20260921-auto-reconnect`）", async () => {
+    // 照会ごとに解き口を持つ（2 回目の照会で 1 回目の解き口を上書きしない）。**照会した装置名を返す**
+    const answers: (() => void)[] = [];
+    const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
+      lookupJobs: async (_t, filter) => {
+        await new Promise<void>((r) => answers.push(r));
+        return [{ name: filter.name, user: "USER", number: filter.name === "NEWDEV01" ? "2" : "1" }];
+      }
+    });
+    const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
+    // 照会の途中で繋ぎ直して、新しい装置名になった（イベントを直に起こす）
+    (entry.session as unknown as { emit(e: string, ...a: unknown[]): void }).emit("reconnected", {
+      code: "I902", device: "NEWDEV01", system: "PUB400"
+    });
+    answers[0]!(); // **前の接続の照会**が後から返る
+    await new Promise((r) => setTimeout(r, 0));
+    expect(entry.job?.name, "前の接続の照会結果で上書きした").toBe("NEWDEV01");
+    expect(entry.job?.number, "前のジョブの番号が付いた").toBeUndefined();
+    answers[1]!(); // 繋ぎ直した後の照会は採る
+    await new Promise((r) => setTimeout(r, 0));
+    expect(entry.job).toMatchObject({ name: "NEWDEV01", number: "2" });
+    mgr.closeAll();
+  });
+
   it("照会が 1 件なら ユーザー・番号 を足す", async () => {
     const seen: unknown[] = [];
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async (target, filter) => {
         seen.push({ target: target.host, filter });
         return [{ name: "QPADEV001P", user: "USER", number: "337228" }];
@@ -317,9 +323,31 @@ describe("ジョブ識別子の解決", () => {
     mgr.closeAll();
   });
 
+  /**
+   * **ジョブの名前は起動応答のもの（CCSID 37 で読んだ装置名）のまま**、照会からは利用者と番号だけを採る
+   * （`20260921-startup-record-cp037` の節目の点検の懸念: 一覧の名前はジョブの CCSID で読まれ、930 では `$` が `¥` に化けうる）
+   */
+  it("照会の一覧の名前で装置名を上書きしない", async () => {
+    const queried: string[] = [];
+    const mgr = new SessionManager({
+      passwordLevel: async () => 3,
+      lookupJobs: async (_t, filter) => {
+        queried.push(filter.name); // 照会に使った名前＝起動応答の装置名
+        return [{ name: filter.name.replace(/.$/, "¥"), user: "USER", number: "1" }];
+      }
+    });
+    const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
+    await entry.jobResolved;
+    expect(queried).toHaveLength(1);
+    expect(entry.job).toMatchObject({ name: queried[0], user: "USER", number: "1" });
+    mgr.closeAll();
+  });
+
   /** 実機では同じ装置名のジョブが複数返った（別の利用者のもの）。採用してはいけない */
   it("照会が複数件なら採用しない（装置名だけのまま）", async () => {
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => [
         { name: "QPADEV001P", user: "USER", number: "337228" },
         { name: "QPADEV001P", user: "OTHER", number: "300886" }
@@ -332,7 +360,7 @@ describe("ジョブ識別子の解決", () => {
   });
 
   it("照会が 0 件でも壊れない", async () => {
-    const mgr = new SessionManager({ lookupJobs: async () => [] });
+    const mgr = new SessionManager({ lookupJobs: async () => [], passwordLevel: async () => 3 });
     const entry = await openWithStartup(mgr, { host: "h", user: "USER", password: "x" });
     await entry.jobResolved;
     expect(entry.job).toEqual({ name: "QPADEV001P", system: "PUB400" });
@@ -342,6 +370,8 @@ describe("ジョブ識別子の解決", () => {
   /** ホストサーバーが使えない環境でも、セッションは成立していること */
   it("照会が失敗しても例外を投げず、セッションは生きている", async () => {
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         throw new Error("no host server");
       }
@@ -355,6 +385,8 @@ describe("ジョブ識別子の解決", () => {
   it("資格情報が無ければ照会しない", async () => {
     let called = 0;
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         called++;
         return [{ name: "QPADEV0001", user: "USER", number: "1" }];
@@ -369,6 +401,8 @@ describe("ジョブ識別子の解決", () => {
   it("起動応答が無ければ照会しない（装置名が分からない）", async () => {
     let called = 0;
     const mgr = new SessionManager({
+      // 自動サインオンの代替パスワード用の QPWDLVL（架空のホストへ聞きに行かない）
+      passwordLevel: async () => 3,
       lookupJobs: async () => {
         called++;
         return [];

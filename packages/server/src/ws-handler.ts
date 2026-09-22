@@ -7,6 +7,7 @@ import {
   type SessionEntry,
   type SessionTarget,
   type StoredReport,
+  type PrinterListener,
   type PcCommandEvent
 } from "./session-manager.js";
 import type { ConnRole } from "./session-lifetime.js";
@@ -15,7 +16,7 @@ import { sessionWatch } from "./config-types.js";
 import { makeWatchSink } from "./webhook-sink.js";
 import type { AuthUser } from "./auth.js";
 import type { ConfigResolver, ResolvedTarget } from "./config-resolver.js";
-import { withAudit } from "./audit.js";
+import { audit, withAudit } from "./audit.js";
 import type { SpoolReportMsg, WsClientMessage, WsFieldRef, WsKeyField, WsServerMessage } from "./ws-messages.js";
 import type { MacroStore } from "./macro-store.js";
 import type { Tn3270Manager } from "./tn3270-manager.js";
@@ -128,6 +129,36 @@ export interface WsHandlerDeps {
   vt?: VtManager;
 }
 
+/**
+ * **解決結果（保存済みのプリンターの設定）から、プリンターを開く材料を作る**（`onOpenPrinter` と関連付けるプリンター
+ * `SessionManager.linkAssociatedPrinter` の前の起動が同じ道を通る——2 か所に手写しすると信頼設定〔PDF 出力先・自動印刷・常駐〕の扱いが
+ * 片方だけ食い違う。`20260921-associated-printer-session`）。
+ *
+ * ⚠ **転記漏れに注意**: キーごとの手写しなので、足し忘れると「表示セッションだけ設定が効く」状態になる（表示側は `{...target.connect}`）
+ */
+export function printerOptsFrom(t: ResolvedTarget): Parameters<SessionManager["openPrinter"]>[0] {
+  const opts: Parameters<SessionManager["openPrinter"]>[0] = {};
+  const co = t.connect;
+  if (co.host !== undefined) opts.host = co.host;
+  if (co.port !== undefined) opts.port = co.port;
+  if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
+  if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
+  // 常駐の経路（`{...t.connect}`）では渡っていたのに、ここだけ落ちていた（節目の点検の指摘）
+  if (co.deviceNameRetry !== undefined) opts.deviceNameRetry = co.deviceNameRetry;
+  if (co.tls !== undefined) opts.tls = co.tls;
+  if (co.user !== undefined) opts.user = co.user;
+  if (co.password !== undefined) opts.password = co.password;
+  if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
+  if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
+  if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
+  if (t.printerOutput) opts.output = t.printerOutput;
+  // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
+  if (t.service) opts.service = true;
+  // 開いた直後に待ち受けるか（定義由来。既定は開始する）
+  if (!t.autoStart) opts.autoStart = false;
+  return opts;
+}
+
 /** 保存済み設定への参照が含まれるか（含まなければブラウザ直指定） */
 function hasRef(msg: { system?: string; session?: string }): boolean {
   return Boolean(msg.system ?? msg.session);
@@ -229,6 +260,8 @@ export class WsConnection {
   private detachScreen: (() => void) | undefined;
   private detachReport: (() => void) | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  /** 後始末（`dispose`）に入ったか。開く途中で切れた接続が、誰も持たないセッションを作らないための印 */
+  private disposed = false;
   /** 監視の購読解除。**購読だけを畳む**（監視そのものは止めない） */
   private detachWatch: (() => void) | undefined;
   /** 最後にクライアントから何かを受け取った時刻。**pong 専用にしない**（下記 `handle`） */
@@ -277,6 +310,10 @@ export class WsConnection {
           return await this.onGuiSubmit(msg);
         case "printer-output":
           return await this.onPrinterOutput(msg);
+        case "printer-output-retry":
+          return await this.onPrinterOutputHeld("retry");
+        case "printer-output-cancel":
+          return await this.onPrinterOutputHeld("cancel");
         case "reserve-break":
           return this.onReserveBreak();
         case "watch-subscribe":
@@ -555,6 +592,8 @@ export class WsConnection {
     if (msg.kind === "printer") return this.onOpenPrinter(msg);
     if (msg.terminal === "3270") return this.onOpen3270(msg);
     if (msg.terminal === "vt") return this.onOpenVt(msg);
+    // この open のための印。前の `close` メッセージの後始末（`dispose`）が立てた印を引きずらない
+    this.disposed = false;
     await withAudit({ op: "ws_open" }, async () => {
       // **既存セッションへ繋ぐ**なら、ここで終わる——新しい接続は作らない
       if (msg.sessionId !== undefined) return this.attach(msg.sessionId, { resume: msg.resume === true });
@@ -571,7 +610,32 @@ export class WsConnection {
       }
       if (msg.readOnly) opts.readOnly = true;
       if (this.user) opts.owner = this.user.username;
-      const entry = await this.deps.sessions.open(opts);
+      // **ブラウザの端末はホストに切られたら自動で繋ぎ直す**（ACS と同じ。`20260921-auto-reconnect`）。
+      // ACS も ECL のコアは既定 OFF で、画面の層（HOD の bean）が ON にする。MCP の自動操作は OFF のまま
+      opts.autoReconnect = true;
+      // **関連付けるプリンターセッション**（設定で指したときだけ。ACS の画面の層の機能なので MCP・HLLAPI から開く表示には効かせない。
+      // `20260921-associated-printer-session`）。プリンターを起こして装置名を待ち、その装置名で関連付けて表示を開く
+      const assoc = hasRef(msg) ? await this.prepareAssociation(msg, opts) : undefined;
+      // 準備（プリンターの起動・装置名待ち）の間に接続が切れていたら、表示は作らない（数秒〜数分の窓。誰も持たない表示が残る）。
+      // 起こしたプリンターは、表示を閉じたときと同じ処置で片付ける（`20260921-associated-printer-session` の節目 10 の独立点検 C-S4）
+      if (this.disposed) {
+        if (assoc?.printerId !== undefined) this.deps.sessions.abortAssociatedPrinter(assoc.printerId, assoc.closeWithLast);
+        return;
+      }
+      let entry: Awaited<ReturnType<SessionManager["open"]>>;
+      try {
+        entry = await this.deps.sessions.open(opts);
+      } catch (e) {
+        // 表示を開けなかった（ホストに届かない・サインオンの拒否・装置使用中・上限）。起こしたプリンターを止める（ACS は表示が切れればプリンターを止める。C-S3）
+        if (assoc?.printerId !== undefined) this.deps.sessions.abortAssociatedPrinter(assoc.printerId, assoc.closeWithLast);
+        throw e;
+      }
+      // **開く待ちの間に切れていたら、誰も持たないので閉じる**（`opened` を送っても受け取る側が居ない。以前からある窓）
+      if (this.disposed) {
+        await this.deps.sessions.close(entry.id).catch(() => undefined);
+        return;
+      }
+      if (assoc?.printerId !== undefined) this.deps.sessions.linkAssociatedPrinter(entry.id, assoc.printerId, assoc.closeWithLast);
       // 自分で開いた＝持ち主（去るときに畳む責任を持つ）
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
@@ -583,13 +647,17 @@ export class WsConnection {
         ccsid: opts.ccsid ?? 37,
         pcCommand: entry.pcCommandEnabled,
         ...this.pcCommandBacklog(entry.id),
+        ...hostReconnectOf(entry.session),
         // **後から入ったタブにも今の予約状態を伝える**（開始の push を聞き逃していても揃う）
         ...(() => {
           const r = this.deps.sessions.reservationOf(entry.id);
           return r ? { reservedBy: r.label } : {};
         })(),
         // 起動応答で分かる範囲（装置名＝ジョブ名）は接続と同時に出せる
-        ...(entry.job !== undefined ? { job: entry.job } : {})
+        ...(entry.job !== undefined ? { job: entry.job } : {}),
+        ...startupCodeOf(entry.session),
+        // 関連付けるプリンターが使えず関連付けなしで開いたとき、その理由（利用者へ知らせる。ACS はポップアップで知らせる）
+        ...(assoc?.issue !== undefined ? { associatedPrinterIssue: assoc.issue } : {})
       });
       // ユーザー・番号は背後で引いている。**待たない**——取れたら足すだけ
       void entry.jobResolved?.then((job) => {
@@ -645,7 +713,8 @@ export class WsConnection {
         sessionId: entry.id,
         screen: toWireScreen(entry.session, entry.id),
         ccsid: ccsid ?? 37,
-        pcCommand: false
+        pcCommand: false,
+        ibmI: entry.session.isIbmI
       });
     });
   }
@@ -824,6 +893,72 @@ export class WsConnection {
     });
   }
 
+  /**
+   * 表示を開く前の**関連付けるプリンターの準備**。装置名が分かれば `opts.associatedPrinter` に入れる（IBMASSOCPRT）。
+   * 使えないときは**関連付けなしで開き**、その理由を返す（`opened.associatedPrinterIssue`。ACS はポップアップで知らせる）:
+   * `invalid`＝指した設定が使えない（無い・プリンターでない・権限が無い）／`failed`＝プリンターを開始できなかった／`timeout`＝装置名が決まる前に待ち時間が切れた
+   */
+  private async prepareAssociation(
+    msg: WsClientMessage & { type: "open" },
+    opts: OpenOptions
+  ): Promise<{ printerId?: string; closeWithLast: boolean; issue?: "invalid" | "failed" | "timeout" } | undefined> {
+    const target = this.resolveTarget(msg);
+    const want = target.associatedPrinterSession;
+    if (!want) return undefined;
+    // **サーバーが利用者に代わってプリンターを起こす副作用は、直接開く `ws_open_printer` と同じく監査に残す**（表示の `ws_open` に埋もれると、
+    // 誰の操作でプリンターが起き、使えない・開けない・時間切れで関連付けなしになったかを追えない。`20260921-assoc-printer-audit`）。
+    // `withAudit` は例外か MCP のエラー応答でしか `error` にしないので、理由（`issue`）を `code` に載せて直接出す。設定名・装置名は載せない（spec D14）。
+    // 起こしたプリンターのセッション ID（実行時に振る UUID。秘密ではない）は載せる——それが無いと「どのプリンターが起きたか」を追えない
+    // （独立点検 A-S8。`ws_open_printer` は `withAudit` が同じ欄に載せる）
+    const t0 = Date.now();
+    const result = await this.startAssociatedPrinter(want, opts);
+    audit({
+      op: "ws_associated_printer",
+      ...(result.printerId !== undefined ? { sessionId: result.printerId } : {}),
+      result: result.issue === undefined ? "ok" : "error",
+      ...(result.issue !== undefined ? { code: result.issue } : {}),
+      durationMs: Date.now() - t0
+    });
+    return result;
+  }
+
+  /** `prepareAssociation` の本体（指定があるときだけ呼ぶ）。結果の意味は上の JSDoc */
+  private async startAssociatedPrinter(
+    want: NonNullable<ResolvedTarget["associatedPrinterSession"]>,
+    opts: OpenOptions
+  ): Promise<{ printerId?: string; closeWithLast: boolean; issue?: "invalid" | "failed" | "timeout" }> {
+    let printerTarget: ResolvedTarget;
+    try {
+      // プリンターの設定は**表示と同じ道**（`ConfigResolver`）で解決する——認可（サーバー設定は admin だけ等）も同じ
+      printerTarget = this.deps.resolver.resolve({ session: want.ref }, this.user, (m) => wsLog.warn(m));
+    } catch (e) {
+      wsLog.warn({ session: want.ref, err: String(e) }, "associated printer session not usable; opening without association");
+      return { closeWithLast: want.closeWithLast, issue: "invalid" };
+    }
+    if (printerTarget.session?.sessionType !== "printer") return { closeWithLast: want.closeWithLast, issue: "invalid" };
+    const r = await this.deps.sessions.prepareAssociatedPrinter(
+      want.ref,
+      this.user?.username,
+      () =>
+        this.deps.sessions.openPrinter({
+          ...printerOptsFrom(printerTarget),
+          // **指したプリンターは必ず起こす**（ACS `SessionManager.startAssociatedPrinterSession`）。「自動で待ち受け開始 ☐」の定義でも、
+          // 初回の表示で起こされず装置名が決まらないままにならない（2 本目の表示は既存の停止中を起こすので、初回だけ違う穴になっていた。C-S8）
+          autoStart: true,
+          origin: `associated:${want.ref}`,
+          ref: want.ref,
+          ...(this.user ? { owner: this.user.username } : {})
+        }),
+      want.timeoutMs
+    );
+    if ("error" in r) {
+      wsLog.warn({ session: want.ref, err: r.error }, "associated printer session could not be opened; opening without association");
+      return { closeWithLast: want.closeWithLast, issue: "failed" };
+    }
+    if (r.deviceName !== undefined) opts.associatedPrinter = r.deviceName;
+    return { printerId: r.printerId, closeWithLast: want.closeWithLast, ...(r.issue !== undefined ? { issue: r.issue } : {}) };
+  }
+
   private async onOpenPrinter(msg: WsClientMessage & { type: "open" }): Promise<void> {
     await withAudit({ op: "ws_open_printer" }, async () => {
       const opts: Parameters<SessionManager["openPrinter"]>[0] = { origin: originOf(msg) };
@@ -831,26 +966,10 @@ export class WsConnection {
         // 保存済み設定由来。printer 出力を供給するかは ConfigResolver が判定済み
         // （サーバー設定のセッションのときだけ返る＝信頼境界の 5 層目）
         const t = this.resolveTarget(msg);
-        const co = t.connect;
-        if (co.host !== undefined) opts.host = co.host;
-        if (co.port !== undefined) opts.port = co.port;
-        if (co.ccsid !== undefined) opts.ccsid = co.ccsid;
-        if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
-        if (co.tls !== undefined) opts.tls = co.tls;
-        if (co.user !== undefined) opts.user = co.user;
-        if (co.password !== undefined) opts.password = co.password;
-        if (co.rescueAction !== undefined) opts.rescueAction = co.rescueAction;
-        if (co.transformTo !== undefined) opts.transformTo = co.transformTo;
-        // **転記漏れに注意**: ここはキーごとの手写しなので、足し忘れると
-        // 「表示セッションだけ設定が効く」状態になる（display 側は `{...target.connect}`）
-        if (co.idleTimeoutMs !== undefined) opts.idleTimeoutMs = co.idleTimeoutMs;
-        if (t.printerOutput) opts.output = t.printerOutput;
-        // **常駐はここで決まる。** 出力設定の有無からは導出しない（design D3）
-        if (t.service) opts.service = true;
+        // 解決結果からプリンターを開く材料を作る組み立ては 1 か所（`printerOptsFrom`。関連付けるプリンターも同じ道を通す）
+        Object.assign(opts, printerOptsFrom(t));
         // **開き直したときに既存へ繋ぐ鍵。** 直接接続には無い
         if (msg.session !== undefined) opts.ref = msg.session;
-        // 開いた直後に待ち受けるか（定義由来。既定は開始する）
-        if (!t.autoStart) opts.autoStart = false;
       } else {
         // 直接接続（ブラウザ指定）: 出力設定は受け付けない（任意パス書込・任意コマンド実行の防止）
         if (msg.host !== undefined) opts.host = msg.host;
@@ -865,31 +984,30 @@ export class WsConnection {
       const entry = await this.deps.sessions.openPrinter(opts);
       this.link = { id: entry.id, role: { kind: "owner", token: this.deps.sessions.claim(entry.id) } };
       this.startHeartbeat();
-      const onReport = (r: StoredReport): void =>
-        this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) });
-      // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
-      // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
-      entry.onReport = onReport;
-      // **状態の変化を push する**（監視と同じ扱い。「黙って止まらない」ため）
-      entry.onState = (s) =>
-        this.send({
-          type: "printer-state",
-          sessionId: entry.id,
-          state: s.state,
-          ...(s.error !== undefined ? { error: s.error } : {}),
-          ...(s.startupCode !== undefined ? { startupCode: s.startupCode } : {})
-        });
-      this.detachReport = () => {
-        delete entry.onOutputWarn; // 切断でフックを解除（リーク防止）
-        delete entry.onReport;
-        delete entry.onOutputStatus;
-        delete entry.onState;
+      // **タブごとに 1 つ付け、切断でそれだけを外す**（`PrinterListener`）。エントリに 1 つずつ持たせていたときは、
+      // 同じ定義を 2 タブで開くと後のタブが上書きし、そのタブを閉じると先のタブにも何も届かなくなった（独立点検の指摘）
+      const listener: PrinterListener = {
+        // **救出した帳票もここへ流す。** ホスト由来の report イベントだけを見ていると、
+        // 書き出しできないスプールを拾った分が画面に出ない（entry 経由で配られるため）。
+        onReport: (r) => this.send({ type: "report", sessionId: entry.id, report: spoolReportMsg(r) }),
+        // **状態の変化を push する**（監視と同じ扱い。「黙って止まらない」ため）
+        onState: (st) =>
+          this.send({
+            type: "printer-state",
+            sessionId: entry.id,
+            state: st.state,
+            ...(st.error !== undefined ? { error: st.error } : {}),
+            ...(st.startupCode !== undefined ? { startupCode: st.startupCode } : {})
+          }),
+        // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
+        onOutputWarn: (w) => this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message }),
+        // 自動出力の結果（成功も含む）を UI へ push
+        onOutputStatus: (st) => this.send({ type: "printer-output-result", sessionId: entry.id, status: st })
       };
-      // 自動出力の失敗を UI へ push（サーバーログ・履歴は session-manager 側で保持）
-      entry.onOutputWarn = (w) =>
-        this.send({ type: "printer-warn", sessionId: entry.id, at: w.at, message: w.message });
-      // 自動出力の結果（成功も含む）を UI へ push
-      entry.onOutputStatus = (s) => this.send({ type: "printer-output-result", sessionId: entry.id, status: s });
+      entry.listeners.add(listener);
+      this.detachReport = () => {
+        entry.listeners.delete(listener); // 切断で外す（リーク防止）。ほかのタブのものは触らない
+      };
       this.send({
         type: "printer-opened",
         sessionId: entry.id,
@@ -918,6 +1036,18 @@ export class WsConnection {
     await withAudit({ op: "ws_printer_output", sessionId: id }, async () => {
       const entry = this.deps.sessions.setPrinterOutputEnabled(id, msg.enabled, this.user);
       this.send({ type: "printer-output-state", sessionId: id, enabled: entry.outputEnabled });
+    });
+  }
+
+  /**
+   * **止めている帳票の再試行・取消**（`20260921-printer-hold-response`）。権限は自動出力の切り替えと同じ
+   * （`getPrinter` の所有者/admin）。結果は `printer-output-result` の push で画面へ届く
+   */
+  private async onPrinterOutputHeld(action: "retry" | "cancel"): Promise<void> {
+    const id = this.requireSession();
+    await withAudit({ op: action === "retry" ? "ws_printer_output_retry" : "ws_printer_output_cancel", sessionId: id }, async () => {
+      if (action === "retry") this.deps.sessions.retryPrinterOutput(id, this.user);
+      else this.deps.sessions.cancelPrinterOutput(id, this.user);
     });
   }
 
@@ -978,12 +1108,30 @@ export class WsConnection {
     // **警報は間引かずそのまま流す**（画面を変えないレコードでも来る。ACS も描画と独立に鳴らす）
     const onAlarm = (): void => this.send({ type: "alarm" });
     entry.session.on("alarm", onAlarm);
-    entry.session.on("closed", (reason: string) => {
-      // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
-      // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+    // **ホストに切られて自動で繋ぎ直している**（`20260921-auto-reconnect`）。施錠した画面も送る
+    // ——送らないと、ブラウザは切られる前の解錠された画面のまま打てると思い込む
+    const onReconnecting = (e: { attempt: number; reason: string }): void => {
+      this.send({ type: "host-reconnecting", attempt: e.attempt, reason: e.reason });
+      this.send({ type: "screen", screen: entry.session.snapshot() });
+    };
+    const onReconnected = (startup?: { code: string }): void => {
+      // 起動応答はイベントが運ぶ新しい接続のもの（ACS は繋ぎ直しでも開始の文言を出す。`20260921-startup-code-status`）
+      this.send({ type: "host-reconnected", ...startupCodeOf({ startup: startup ?? entry.session.startup }) });
+      // 装置名（＝ジョブ名）は繋ぎ直すと変わりうる。分かっている範囲をすぐ出し、残りは引けたら足す
+      if (entry.job !== undefined) this.send({ type: "jobinfo", job: entry.job });
+      void entry.jobResolved?.then((job) => {
+        if (job?.user !== undefined && this.sessionId === entry.id) this.send({ type: "jobinfo", job });
+      });
+    };
+    entry.session.on("reconnecting", onReconnecting);
+    entry.session.on("reconnected", onReconnected);
+    // **ホストが本当に終わった側**。こちらは繋ぎ直しても戻らないので `ended` を立てる
+    // （`dispose` の末尾から送る `closed` とは意味が違う。`WsClosed.ended`）
+    const onClosed = (reason: string): void => {
       this.send({ type: "closed", reason, ended: true });
       this.detachScreen?.();
-    });
+    };
+    entry.session.on("closed", onClosed);
     // PC コマンド（STRPCCMD）の実行状況を push。切断で購読を外す（リーク防止）。
     // **自分の分だけ外れる**——同じセッションを別のタブも見ていることがある
     const offPc = this.deps.sessions.subscribePcCommand(entry.id, (event) =>
@@ -1000,6 +1148,11 @@ export class WsConnection {
     this.detachScreen = () => {
       entry.session.off("screen", onScreen);
       entry.session.off("alarm", onAlarm);
+      entry.session.off("reconnecting", onReconnecting);
+      entry.session.off("reconnected", onReconnected);
+      // **`closed` も外す**。ホストに切られても終わらなくなった（繋ぎ直す）ぶん、外し忘れると
+      // resume・attach のたびに購読が溜まる期間が延びる（独立点検の指摘。変更前からの外し忘れ）
+      entry.session.off("closed", onClosed);
       if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
       offPc();
       offRes();
@@ -1043,17 +1196,20 @@ export class WsConnection {
       type: "opened",
       sessionId: entry.id,
       screen: entry.session.snapshot(),
-      // **CCSID は `SessionEntry` が持っていない**（開いたときの設定に属する）。
-      // attach では既定を返す——画面の文字変換は既にセッション側で決まっており、
-      // ここで返す値は web-ui の入力補助（カナ大文字化）にしか使われない
-      ccsid: 37,
+      // **セッションが実際に使っている CCSID を返す**（`20260921-monocase-non-ascii` の節目の点検の指摘）。
+      // ~~既定の 37 を返す——web-ui の入力補助（カナ大文字化）にしか使われない~~ → web-ui は CCSID で
+      // 「SBCS だけのセッションか」を決め、打鍵の幅の判定と欄のバイト予算を切り替える。37 を返すと、930 の画面を
+      // attach で見たタブが全角を 1 バイトと数えて欄の長さを越えて打てた
+      ccsid: entry.session.ccsid,
       pcCommand: entry.pcCommandEnabled,
       ...this.pcCommandBacklog(entry.id),
+      ...hostReconnectOf(entry.session),
       ...(() => {
         const r = this.deps.sessions.reservationOf(entry.id);
         return r ? { reservedBy: r.label } : {};
       })(),
-      ...(entry.job !== undefined ? { job: entry.job } : {})
+      ...(entry.job !== undefined ? { job: entry.job } : {}),
+      ...startupCodeOf(entry.session)
     });
   }
 
@@ -1264,6 +1420,8 @@ export class WsConnection {
   }
 
   private dispose(reason: string, opts?: { transportLost?: boolean }): void {
+    // 後始末に入った印。`onOpen` が非同期の待ち（関連付けるプリンターの起動・接続）の後に見て、誰も持たないセッションを作らない
+    this.disposed = true;
     this.stopHeartbeat();
     // **監視は止めない。** 購読を外すだけ——監視はレジストリが所有しており、
     // ブラウザを閉じても続くことが要件（research F1）
@@ -1290,7 +1448,7 @@ export class WsConnection {
       this.session3270 = undefined;
     }
     if (this.link) {
-      // フック（onReport / onOutputWarn / onOutputStatus）は上で外しているが、
+      // このタブのリスナー（`PrinterListener`）は上で外しているが、
       // **記録はエントリ側に溜まり続ける**ので、開き直したときに閉じている間のぶんを読める
       // （常駐プリンターを切らない理由は `session-lifetime.ts` の `decideDisposition` へ移した）。
       //
@@ -1343,4 +1501,16 @@ function buildDirect(msg: {
   if (msg.user !== undefined) o.user = msg.user;
   if (msg.password !== undefined) o.password = msg.password;
   return o;
+}
+
+/** `opened` / `host-reconnected` に載せる起動応答のコード（`WsOpened.startupCode`。起動応答が無ければ何も載せない） */
+function startupCodeOf(session: { startup?: { code: string } | undefined }): { startupCode?: string } {
+  const code = session.startup?.code;
+  return code ? { startupCode: code } : {};
+}
+
+/** `opened` に載せる「ホストへ繋ぎ直している最中か」（`WsOpened.hostReconnect`） */
+function hostReconnectOf(session: { reconnecting?: { attempt: number } | undefined }): { hostReconnect?: { attempt: number } } {
+  const r = session.reconnecting;
+  return r ? { hostReconnect: r } : {};
 }

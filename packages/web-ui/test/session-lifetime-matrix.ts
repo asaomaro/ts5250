@@ -49,6 +49,7 @@ export type ServerOutcome =
   | "hold" //           猶予に入れる（既定 90 秒）
   | "keep" //           何もしない（閉じない・猶予にも入れない）
   | "entryRemoved" //   ホスト側の終了でエントリごと消える（`ended: true` を送る）
+  | "hostReconnect" //  ホストに切られて自動で繋ぎ直す。エントリは残り `closed` は出ない（`20260921-auto-reconnect`）
   | "printerError" //   非常駐プリンター: エントリは残り state="error"
   | "printerRetry" //   常駐プリンター: 待ち受けを張り直す
   | "nothing"; //       何も起きない（3270 のホスト終了。通知もエントリ削除も無い）
@@ -137,13 +138,16 @@ export const SERVER_CASES: readonly ServerCase[] = [
   S("5250/hbdead/viewer/noViewer", "5250", "heartbeatDead", "viewer", false, "n/a", "keep", "research Q4 #7"),
   S("5250/hbdead/viewer/viewer", "5250", "heartbeatDead", "viewer", true, "n/a", "keep", "research Q4 #8"),
 
-  // ---- 5250: ホスト側の終了（dispose を通らない。役割・viewer に依らない） ----
-  S("5250/hostEnded/owner/noViewer", "5250", "hostEnded", "owner", false, "n/a", "entryRemoved", "research F9（SessionManager がエントリを削除）"),
-  S("5250/hostEnded/owner/viewer", "5250", "hostEnded", "owner", true, "n/a", "entryRemoved", "research F9"),
-  S("5250/hostEnded/handedPresent/noViewer", "5250", "hostEnded", "handedOverPresent", false, "n/a", "entryRemoved", "research F9"),
-  S("5250/hostEnded/handedPresent/viewer", "5250", "hostEnded", "handedOverPresent", true, "n/a", "entryRemoved", "research F9"),
-  S("5250/hostEnded/handedAbsent/noViewer", "5250", "hostEnded", "handedOverAbsent", false, "n/a", "entryRemoved", "research F9"),
-  S("5250/hostEnded/handedAbsent/viewer", "5250", "hostEnded", "handedOverAbsent", true, "n/a", "entryRemoved", "research F9"),
+  // ---- 5250: ホスト側の終了（dispose を通らない） ----
+  // **ブラウザから開いた端末は繋ぎ直す**（`20260921-auto-reconnect`。ACS と同じ）。エントリは残り `closed` は出ない。
+  // ~~役割・viewer に依らずエントリ削除（research F9）~~ は、自動再接続を入れる前の事実。
+  // 「見に来ただけ（viewer）」の行は **MCP が開いたセッション**（自動再接続なし）を見に来る形なので、エントリ削除のまま
+  S("5250/hostEnded/owner/noViewer", "5250", "hostEnded", "owner", false, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
+  S("5250/hostEnded/owner/viewer", "5250", "hostEnded", "owner", true, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
+  S("5250/hostEnded/handedPresent/noViewer", "5250", "hostEnded", "handedOverPresent", false, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
+  S("5250/hostEnded/handedPresent/viewer", "5250", "hostEnded", "handedOverPresent", true, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
+  S("5250/hostEnded/handedAbsent/noViewer", "5250", "hostEnded", "handedOverAbsent", false, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
+  S("5250/hostEnded/handedAbsent/viewer", "5250", "hostEnded", "handedOverAbsent", true, "n/a", "hostReconnect", "20260921-auto-reconnect（ブラウザから開いた端末）"),
   S("5250/hostEnded/viewer/noViewer", "5250", "hostEnded", "viewer", false, "n/a", "entryRemoved", "research F9"),
   S("5250/hostEnded/viewer/viewer", "5250", "hostEnded", "viewer", true, "n/a", "entryRemoved", "research F9"),
 

@@ -1,0 +1,13 @@
+schema: 11
+slug: assoc-printer-audit
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: **関連付けるプリンター（プリンターセッションを指す方式）の残り**（優先度 低・深さ △。上の `[x]` から割った）。**着手時に両側を再確認すること。**
+harnessRevDelivered: unknown

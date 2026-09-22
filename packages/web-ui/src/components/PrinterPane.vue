@@ -2,7 +2,17 @@
 import { computed, ref, watch, onMounted } from "vue";
 import ReportText from "./ReportText.vue";
 import { sessionsStore, type SpoolReportView } from "../stores/sessions.js";
-import { setPrinterOutput, startPrinter, stopPrinter } from "../session-controller.js";
+import { setPrinterOutput, startPrinter, stopPrinter, retryPrinterOutput, cancelPrinterOutput } from "../session-controller.js";
+import {
+  MSG_PRINTER_HELD,
+  MSG_PRINTER_RETRY,
+  MSG_PRINTER_CANCEL,
+  MSG_PRINTER_CANCELED,
+  MSG_PRINTER_DROPPED,
+  MSG_PRINTER_CHIP_HELD,
+  MSG_PRINTER_CHIP_CANCELED,
+  MSG_PRINTER_CHIP_DROPPED
+} from "../composables/opMessages.js";
 import { renderSpoolHtml } from "@ts5250/scs/spool-html";
 import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { viewSettings } from "../stores/viewSettings.js";
@@ -104,7 +114,12 @@ function statusChips(spoolId: string): { label: string; cls: string }[] {
   if (!s) return [];
   if (s.skipped) return [{ label: "⏸ スキップ", cls: "skip" }];
   const out: { label: string; cls: string }[] = [];
-  if (s.pdf) out.push({ label: `PDF ${s.pdf.ok ? "✓" : "✗"}`, cls: s.pdf.ok ? "ok" : "ng" });
+  // 取消・切断でも、成功していた出力（PDF ✓ など）は並べる（独立点検の指摘: 取消だけになり保存先が消えていた）
+  if (s.canceled) out.push({ label: MSG_PRINTER_CHIP_CANCELED, cls: "skip" });
+  if (s.dropped) out.push({ label: MSG_PRINTER_CHIP_DROPPED, cls: "ng" });
+  if (s.held) out.push({ label: MSG_PRINTER_CHIP_HELD, cls: "ng" });
+  if (s.pdf?.skipped) out.push({ label: "PDF —", cls: "skip" });
+  else if (s.pdf) out.push({ label: `PDF ${s.pdf.ok ? "✓" : "✗"}`, cls: s.pdf.ok ? "ok" : "ng" });
   if (s.print) out.push({ label: `印刷 ${s.print.ok ? "✓" : "✗"}`, cls: s.print.ok ? "ok" : "ng" });
   return out;
 }
@@ -115,7 +130,12 @@ const selectedStatusLines = computed<{ text: string; cls: string }[]>(() => {
   if (!s) return [];
   if (s.skipped) return [{ text: "自動出力オフのためスキップしました", cls: "skip" }];
   const lines: { text: string; cls: string }[] = [];
-  if (s.pdf) {
+  if (s.canceled) lines.push({ text: MSG_PRINTER_CANCELED, cls: "skip" });
+  if (s.dropped) lines.push({ text: MSG_PRINTER_DROPPED, cls: "ng" });
+  if (s.held) lines.push({ text: MSG_PRINTER_HELD, cls: "ng" });
+  // 作れない設定で作らなかった PDF は失敗ではない（ホスト変換の印刷データ）
+  if (s.pdf?.skipped) lines.push({ text: `PDF: ${s.pdf.error ?? "作成しません"}`, cls: "skip" });
+  else if (s.pdf) {
     lines.push(
       s.pdf.ok
         ? { text: `PDF 保存: ${s.pdf.path ?? "成功"}`, cls: "ok" }
@@ -131,6 +151,21 @@ const selectedStatusLines = computed<{ text: string; cls: string }[]>(() => {
   }
   return lines;
 });
+
+/**
+ * **応答を止めている帳票**（出力に失敗した。ACS と同じく再試行・取消を待つ。`20260921-printer-hold-response`）。
+ * サーバーは同時に 1 件しか止めない（止めている間ホストは次を送らない）ので、止めている状態のうち最後のもの
+ */
+const heldStatus = computed(() => {
+  const all = Object.values(session.value?.outputStatuses ?? {});
+  return all.filter((x) => x.held === true).sort((a, b) => b.at - a.at)[0];
+});
+function retryHeld(): void {
+  retryPrinterOutput(props.sessionId);
+}
+function cancelHeld(): void {
+  cancelPrinterOutput(props.sessionId);
+}
 
 /** 自動出力の警告（失敗）。画面上部のバーに出して気づけるようにする */
 const warnings = computed(() => session.value?.printerWarnings ?? []);
@@ -304,6 +339,13 @@ function printReport(): void {
       <button :disabled="!selected" @click="saveText">テキスト保存</button>
       <button :disabled="!selected" @click="downloadPdf">PDF ダウンロード</button>
       <button :disabled="!selected" @click="printReport">印刷</button>
+    </div>
+    <!-- 出力に失敗して応答を止めている帳票。再試行か取消を選ぶまで、ホストはスプールを印刷済みにしない -->
+    <div v-if="heldStatus" class="held-bar" role="alert">
+      <span class="warn-icon">⚠</span>
+      <span class="warn-msg" :title="MSG_PRINTER_HELD">{{ MSG_PRINTER_HELD }}</span>
+      <button class="held-btn" @click="retryHeld">{{ MSG_PRINTER_RETRY }}</button>
+      <button class="held-btn" @click="cancelHeld">{{ MSG_PRINTER_CANCEL }}</button>
     </div>
     <!-- 自動出力の失敗を画面で気づけるようにする（サーバーログだけに埋もれない） -->
     <div v-if="latestWarning" class="warn-bar" role="alert">
@@ -556,6 +598,20 @@ function printReport(): void {
 }
 .st-line.skip {
   color: var(--muted, #888);
+}
+/* 応答を止めている帳票のバー（警告バーと同じ色で、ボタンを持つ） */
+.held-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--t-red, #c62828) 22%, transparent);
+  border-bottom: 1px solid var(--t-red, #c62828);
+  color: var(--ink, #cfc);
+  font-size: 11.5px;
+}
+.held-btn {
+  flex: none;
 }
 /* 自動出力の失敗を示す警告バー */
 .warn-bar {

@@ -17,6 +17,7 @@ import { autoStartOf } from "./service-state.js";
 import { webhookSecret } from "./webhook-sink.js";
 import {
   idleTimeoutToMs,
+  makeRef,
   parseRef,
   sessionPrinter,
   sessionWebhook,
@@ -68,6 +69,12 @@ export interface ResolvedTarget {
    * `secret` は**復号済み**——ここが唯一の解く場所（`resolvePassword` と同じ扱い）
    */
   webhook?: { config: WebhookConfig; secret?: string };
+  /**
+   * **関連付けるプリンターセッション**（表示の 5250 で `associatedPrinterSession` を指したとき。`20260921-associated-printer-session`）。
+   * `ref` はプリンターの設定の参照（`srv:` / `own:`。表示と同じファイルの中）、`timeoutMs` は装置名を待つ時間（**無ければ待ち続ける**。
+   * 設定の秒を ACS と同じ丸め——1〜4 は 5 秒、600 秒超は 600 秒——でここで ms にする）、`closeWithLast` は最後の表示と一緒にプリンターも閉じるか
+   */
+  associatedPrinterSession?: { ref: string; timeoutMs?: number; closeWithLast: boolean };
   source: ConfigSource;
   system: System;
   session?: AnySession;
@@ -153,6 +160,10 @@ export class ConfigResolver {
     const pcCommand =
       source === "server" && session?.sessionType === "display" ? sessionPcCommand(session) : undefined;
     if (pcCommand) out.pcCommand = pcCommand;
+    // 関連付けるプリンターセッション（表示の 5250 だけ）。**信頼設定ではない**が、開くプリンターの材料は
+    // 呼び出し側が**プリンターを直接開くときと同じ組み立て**で作る（信頼設定の扱いが食い違わないように）
+    const assoc = session ? associatedSessionOf(session, source) : undefined;
+    if (assoc) out.associatedPrinterSession = assoc;
     // 転送先も同じ 5 層目。**サーバー設定由来のときだけ受理する**
     const wh = source === "server" && session ? sessionWebhook(session) : undefined;
     if (wh) {
@@ -197,6 +208,10 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
+      // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
+      if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
+        opts.associatedPrinter = session.associatedPrinter;
+      }
       // 分 → ms の変換はここ 1 か所だけで行う（入口ごとに書くと片方が分のまま流れる）
       const idle = idleTimeoutToMs(session.idleTimeout);
       if (idle !== undefined) opts.idleTimeoutMs = idle;
@@ -337,4 +352,21 @@ function toPrinterOutput(session: AnySession): PrinterOutputConfig | undefined {
   if (pr.fontSize !== undefined) pdf.fontSize = pr.fontSize;
   if (Object.keys(pdf).length > 0) cfg.pdf = pdf;
   return cfg;
+}
+
+/**
+ * 設定のプリンターセッションの指定を、解決結果の形にする。待ち時間は ACS と同じ丸め（`DataPanel5250ConAssocPrinter`）:
+ * 未設定は 5 秒、1〜4 は 5 秒、600 超は 600 秒、0 は待ち続ける（`timeoutMs` を付けない）
+ */
+function associatedSessionOf(session: AnySession, source: ConfigSource): ResolvedTarget["associatedPrinterSession"] {
+  if (session.sessionType !== "display" || (session.terminal ?? "5250") !== "5250") return undefined;
+  const id = session.associatedPrinterSession;
+  if (id === undefined) return undefined;
+  const sec = session.associatedPrinterTimeout ?? 5;
+  const out: { ref: string; timeoutMs?: number; closeWithLast: boolean } = {
+    ref: makeRef(source, id),
+    closeWithLast: session.closeAssociatedPrinterWithLastSession === true
+  };
+  if (sec !== 0) out.timeoutMs = Math.min(600, Math.max(5, sec)) * 1000;
+  return out;
 }

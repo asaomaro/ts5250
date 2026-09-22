@@ -92,7 +92,7 @@
 
 ### review 指摘の検証
 
-- **M1**: `git grep SR-OSAKA` が `packages/` `scripts/` `.aidev/works/` で 0 件
+- **M1**: `git grep AS400` が `packages/` `scripts/` `.aidev/works/` で 0 件
   （残るのは `.aidev/backlog/input-assist.md` のみ＝deliver で書き直す対象）。
 - **M2**: E2E で **`2019/03/07`（未送信のローカル編集）を打ってから開き、カレンダーが `2019/03` で開く**
   ことを確認。以前は今日と偶然一致していただけだった。単体テストも実行日に依存しない年で固定。

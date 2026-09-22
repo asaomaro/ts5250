@@ -6,9 +6,15 @@ import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 
 /**
- * **欄の先頭で Backspace を押したら、前の入力欄の末尾へ移る（削除はしない）。**
+ * **欄の先頭で Backspace を押したら、操作員エラー 0005 でカーソルは動かない**（ACS と同じ。`20260921-backspace-field-start`）。
+ *
+ * ACS `PS5250.processBackspace` は 1 桁左（属性の桁）で削除を試み、欄の外なので失敗してカーソルを戻し、0005 にする。
+ * 実機（PUB400・ACS のコア）で 1 つ目・2 つ目の欄の先頭とも、カーソルそのまま・0005・続けて打った文字も受け付けなかった。
+ *
+ * ~~**欄の先頭で Backspace を押したら、前の入力欄の末尾へ移る（削除はしない）。**~~（以下は旧い判断の記録）
  *
  * 実機はそう振る舞う（GNU tn5250 `display.c` の `kf_backspace`——欄の先頭では
  * 前の欄へカーソルを移すだけで、1 文字も消さない）。
@@ -71,11 +77,12 @@ describe("ScreenGrid: 欄の先頭の Backspace", () => {
     return el;
   }
 
-  it("先頭で押すと field-prev が出て、**値は変わらない**", async () => {
+  it("**先頭で押すと 0005（保護された区域）で、値も変わらず前の欄へも移らない**", async () => {
     const w = mountGrid(SPLIT);
     await nextTick();
     await backspaceAt(w, 1, 0);
-    expect(w.emitted("field-prev")).toEqual([[2]]); // 2 番目の欄の index
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("field-prev"), "前の欄へ移った（旧い動き）").toBeUndefined();
     expect(w.emitted("edit"), "値を書き換えてはいけない").toBeUndefined();
     w.unmount();
   });
@@ -90,16 +97,32 @@ describe("ScreenGrid: 欄の先頭の Backspace", () => {
     w.unmount();
   });
 
-  it("先頭の欄で押しても field-prev は出る（呼び出し側が末尾へ回す）", async () => {
+  // `20260921-backspace-field-start` の節目の点検の指摘を実機の ACS のコアで確かめた（`scripts/acs-probe/backspace-dbcs-field-start.txt`）:
+  // O の欄の先頭・J の欄の SO の後ろ（Tab で着く位置）とも 0005。~~DBCS の欄は前の欄へ移る（0101 は未確認）~~
+  it.each(["open", "only"] as const)("**DBCS の欄（%s）の先頭でも 0005 で、前の欄へ移らない**", async (dbcsType) => {
+    const w = mountGrid([
+      fld({ index: 1, row: 3, col: 10, length: 6 }),
+      fld({ index: 2, row: 5, col: 10, length: 12, dbcsType })
+    ]);
+    await nextTick();
+    await backspaceAt(w, 1, 0);
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("edit"), "値を書き換えてはいけない").toBeUndefined();
+    expect(document.activeElement, "前の欄へ移った").toBe(inputs(w)[1]);
+    w.unmount();
+  });
+
+  it("先頭の欄で押しても同じく 0005", async () => {
     const w = mountGrid(SPLIT);
     await nextTick();
     await backspaceAt(w, 0, 0);
-    expect(w.emitted("field-prev")).toEqual([[1]]);
+    expect(w.emitted("notice")?.[0]).toEqual([MSG_PROTECTED]);
+    expect(w.emitted("field-prev")).toBeUndefined();
     w.unmount();
   });
 });
 
-describe("EmulatorPane: 前の入力欄の末尾へ移る", () => {
+describe("EmulatorPane: 欄の先頭の Backspace（~~前の入力欄の末尾へ移る~~ → 0005 で動かない）", () => {
   const SID = "s1";
   let mounted: ReturnType<typeof mount>[] = [];
 
@@ -137,34 +160,33 @@ describe("EmulatorPane: 前の入力欄の末尾へ移る", () => {
     await nextTick();
   }
 
-  it("2 つ目の欄の先頭 → 1 つ目の欄にフォーカスが移り caret が末尾", async () => {
+  it("2 つ目の欄の先頭 → **フォーカスもキャレットもそのまま**、0005 が出る", async () => {
     seed(SPLIT);
     const w = mountPane();
     await nextTick();
     await backspaceAt(w, 1, 0);
     const els = inputs(w);
-    expect(document.activeElement, "前の欄へ移っていない").toBe(els[0]);
-    expect(els[0]!.selectionStart, "caret が末尾に無い").toBe(els[0]!.value.length);
+    expect(document.activeElement, "前の欄へ移った（旧い動き）").toBe(els[1]);
+    expect(els[1]!.selectionStart).toBe(0);
+    expect(w.find(".opmsg").text()).toContain(MSG_PROTECTED);
   });
 
-  it("移ったあと続けて Backspace を押せば、その欄の末尾が消える", async () => {
+  it("**続けて打った文字は受け付けない**（操作員エラー。ACS も同じ——実測）", async () => {
     seed(SPLIT);
     const w = mountPane();
     await nextTick();
     await backspaceAt(w, 1, 0);
-    const els = inputs(w);
-    els[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    inputs(w)[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "9", bubbles: true, cancelable: true }));
     await nextTick();
-    expect(sessionsStore.get(SID)!.edits.get(1)).toBe("12"); // "123" の 3 が消える
+    expect(sessionsStore.get(SID)!.edits.get(2), "エラー中に打てた").toBeUndefined();
   });
 
-  it("先頭の欄では末尾の欄へ回る（onFieldFull と対称）", async () => {
+  it("先頭の欄でも動かない", async () => {
     seed(SPLIT);
     const w = mountPane();
     await nextTick();
     await backspaceAt(w, 0, 0);
-    const els = inputs(w);
-    expect(document.activeElement).toBe(els[els.length - 1]);
+    expect(document.activeElement).toBe(inputs(w)[0]);
   });
 
   it("入力欄が 1 つだけなら自分へ戻る（実害なし）", async () => {

@@ -383,7 +383,7 @@ describe("帳票の画面の表示設定", () => {
         cols: 2,
         lines: ["日"],
         raw: [[]],
-        shifts: [[{ col: 1, kind: "so" }, { col: 3, kind: "si" }]]
+        shifts: [[{ col: 1, kind: "so", width: 0 }, { col: 3, kind: "si", width: 0 }]]
       });
       const off = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
       expect(off.text()).not.toContain("{");
@@ -407,7 +407,7 @@ describe("帳票の画面の表示設定", () => {
         cols: 2,
         lines: ["日"],
         raw: [[]],
-        shifts: [[{ col: 1, kind: "so" }, { col: 3, kind: "si" }]]
+        shifts: [[{ col: 1, kind: "so", width: 0 }, { col: 3, kind: "si", width: 0 }]]
       });
       const off = mount(ReportText, { props: { sessionId: "p1", pages: [withShift()] } });
       const body = (w: ReturnType<typeof mount>): string =>

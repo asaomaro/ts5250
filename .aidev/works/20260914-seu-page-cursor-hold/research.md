@@ -11,7 +11,7 @@
 ## 判明した事実
 
 **実機（`.env.verify` の実機・IBM i 7.3、CCSID 5035）に接続し、80行のダミーソース
-（`ASAOLIB/QCLSRC(PAGECURS)`、`* LINE 0001`〜`* LINE 0080`、`scripts/build-pagecurs.mjs` で作成）
+（`TESTLIB/QCLSRC(PAGECURS)`、`* LINE 0001`〜`* LINE 0080`、`scripts/build-pagecurs.mjs` で作成）
 に対し `STRSEU` の browse（OPTION 5）・edit（OPTION 2）両モードで PageUp/PageDown を送り、
 `Session5250` の `traceRecords: true` で受信レコードの生バイトを採取して IC(0x13)/MC(0x14) の
 有無を直接確認した。**（診断スクリプト: `scripts/diag-seu-page-cursor.mjs`（browse）、
@@ -124,7 +124,7 @@
 
 - A1: 今回の現象を再現するための実機診断スクリプト一式（今後の design/coding/test で
   再利用可能）:
-  - `scripts/build-pagecurs.mjs` — 80行のダミーソース `ASAOLIB/QCLSRC(PAGECURS)` を作る。
+  - `scripts/build-pagecurs.mjs` — 80行のダミーソース `TESTLIB/QCLSRC(PAGECURS)` を作る。
   - `scripts/diag-seu-page-cursor.mjs` — browse(OPTION 5) での境界挙動確認（ケースA/B/C）。
   - `scripts/diag-seu-page-cursor-edit.mjs` — edit(OPTION 2) での境界挙動確認（ケースD/E、
     `sendAid` の `cursor` オプションで本文行にカーソルがある状態を明示的に再現）。

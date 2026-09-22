@@ -161,7 +161,8 @@ export interface Field {
   continued?: ContinuedPart;
   /**
    * **カーソル送り**（FCW `0x88nn`。DDS の `FLDCSRPRG`）。この欄を出たとき、
-   * 画面順の次ではなく**この番号の欄**へ移る。番号は `index` と同じ 1 始まりの欄番号。
+   * 画面順の次ではなく**この番号の欄**へ移る。~~番号は `index` と同じ 1 始まりの欄番号~~ → 番号は**継続欄の 2 区間目以降を数えない**
+   * 並びでの 1 始まりの番号（ACS `FFT5250.getStandardFieldList`。前に継続欄が無ければ `index` と同じ）。引くのは `progressionTarget`。
    *
    * ホストが「入力の順序」をアプリの都合で決める仕組みで、無指定なら `undefined`
    * （`dbcsType` / `adjust` と同じ流儀）。実機で `FLDCSRPRG(IN3)` を書いた欄が
@@ -344,6 +345,30 @@ export interface ScreenSnapshot {
   cells: Cell[][];
   fields: Field[];
   systemMessage?: string;
+  /**
+   * `systemMessage`（WRITE ERROR CODE）が**届くたびに増える通し番号**（`systemMessage` があるときだけ付く）。
+   * 同じ文言のエラーがもう一度来たことを UI が見分け、エラー状態に入り直すために使う（`20260921-host-error-mode`）。
+   */
+  systemMessageSeq?: number;
+  /**
+   * **メッセージ待ち表示（MW）が点いている**（`20260921-message-waiting-indicator`）。
+   * `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
+   * ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。**点いているときだけ付与する**（消灯は省略）。
+   */
+  messageWaiting?: boolean;
+  /**
+   * **SOH が「欄データを返さない」と申告した F キーの番号**（1〜24。DDS の `CAnn`＝コマンド・アテンション）。
+   * 申告が無ければ省略。UI は ME（必須入力）の検査をこのキーでは行わない
+   * （ACS `DS5250.isSOH_PF` → `PS5250.processAIDCode`。`20260921-mandatory-check-acs`）。
+   */
+  caKeys?: number[];
+  /**
+   * **ホーム位置**（ACS `PS5250.getHomePos`。`20260921-home-record-backspace`）。IC で指された番地、
+   * 無ければ先頭の非バイパス欄の先頭、欄が無ければ 1 行 1 桁。Home キーの行き先で、**既にそこにいれば
+   * Record Backspace（AID 0xF8）を送る**（`processHome`）。任意にしてあるのは既存の手組み snapshot のため
+   * （不在なら UI は先頭の入力欄に倒す）。
+   */
+  home?: { row: number; col: number };
   /** 拡張 5250 GUI コントロール（存在する場合のみ。空なら省略） */
   gui?: GuiConstructs;
   /**

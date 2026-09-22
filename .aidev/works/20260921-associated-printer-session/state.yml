@@ -1,0 +1,13 @@
+schema: 11
+slug: associated-printer-session
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: **関連付けプリンター: プリンターセッションを指す方式**（ACS `5250PrinterAssociation`＝true。`20260921-associated-printer` research F4 から割った）。
+harnessRevDelivered: unknown

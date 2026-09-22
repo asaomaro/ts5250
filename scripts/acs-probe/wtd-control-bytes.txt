@@ -1,0 +1,21 @@
+# WTD のデータの中の制御バイトと、SBA の行 1・桁 0 を、ACS のコアが受けたときの見え方（R11 の M2・M3）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `CTLBYTES` / `SBA10`。`DSCMD_PGM=CTLTST` で `scripts/build-dscmd.mjs` を回す。測った後に消す）。
+# 当 PJ 側は `DIAG_SCREEN=1 DSCMD_PGM=CTLTST node scripts/diag-5250-commands.mjs CTLBYTES SBA10`。
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wtd-control-bytes.txt AS400
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]CALL ${LIB}/CTLTST PARM('CTLBYTES')[enter]
+settle 2500
+dump ctlbytes
+keys [reset]
+settle 300
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/CTLTST PARM('SBA10')[enter]
+settle 2500
+dump sba10
+keys [reset]
+settle 300
+keys [enter]
+settle 1500

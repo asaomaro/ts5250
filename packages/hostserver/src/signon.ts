@@ -31,20 +31,8 @@ import {
   SERVER_ID,
   type Reply
 } from "./datastream.js";
-import {
-  userIdEbcdic37,
-  userIdUnicode,
-  passwordUnicode,
-  passwordEbcdic37,
-  decodeJobName
-} from "./credentials.js";
-import {
-  generateClientSeed,
-  passwordSubstituteSha,
-  passwordSubstituteDes,
-  MIN_SHA_PASSWORD_LEVEL,
-  SEED_LEN
-} from "./password.js";
+import { userIdEbcdic37, hostServerPasswordSubstitute, decodeJobName } from "./credentials.js";
+import { generateClientSeed, encryptionTypeOf, SEED_LEN } from "./password.js";
 import {
   classifySignonReturnCode,
   describeSignonFailure,
@@ -60,9 +48,6 @@ const log = childLog({ component: "hostserver-signon" });
 const CLIENT_CCSID = 1200;
 /** CP 0x1128（エラーメッセージ返却）を付ける最小データストリームレベル */
 const ERROR_MESSAGES_MIN_LEVEL = 5;
-/** 置換値が 8 バイトなら DES、それ以外は SHA を表す */
-const ENCRYPTION_TYPE_DES = 1;
-const ENCRYPTION_TYPE_SHA = 3;
 
 export type HostServerTlsOptions = HostTlsOptions;
 
@@ -147,6 +132,28 @@ export async function signon(opts: SignonOptions): Promise<SignonResult> {
   }
 }
 
+/**
+ * **認証せずにサーバーの情報（パスワード・レベル ほか）だけを聞く**（ACS `SignonServer.connect` → `getPasswordLevel` に当たる）。
+ * telnet の自動サインオンの代替パスワードの計算に QPWDLVL が要る（`bypass-signon.ts`）。交換属性だけで閉じるので、
+ * 誤ったパスワードでもサインオンの失敗回数を使わない。
+ */
+export async function querySignonInfo(opts: Omit<SignonOptions, "user" | "password">): Promise<HostServerInfo> {
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  const port = await decidePort({ ...opts, user: "", password: "" }, timeoutMs);
+  const conn = await openHostConnection({
+    host: opts.host,
+    port,
+    ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+    timeoutMs
+  });
+  try {
+    const { serverSeed: _s, clientSeed: _c, ...info } = await exchangeAttributes(conn);
+    return info;
+  } finally {
+    conn.close();
+  }
+}
+
 async function decidePort(opts: SignonOptions, timeoutMs: number): Promise<number> {
   if (opts.port !== undefined) {
     if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
@@ -172,7 +179,9 @@ async function exchangeAttributes(
       reqRep: REQREP.signonExchangeAttributes,
       params: [
         uintParam(CP.version, 1, 4),
-        uintParam(CP.datastreamLevel, 2, 2),
+        // **データストリームのレベルは ACS に同梱の jt400 と同じ 10**（`SignonExchangeAttributeReq`。~~2~~——QPWDLVL 4 の SHA-512 を
+        // 受けるかをこの申告で見ている可能性がある。`20260921-hostserver-password-levels` の節目の点検の懸念。レベル 4 の実機は未確認）
+        uintParam(CP.datastreamLevel, 10, 2),
         { cp: CP.seed, value: clientSeed }
       ]
     })
@@ -216,22 +225,15 @@ async function authenticate(
   opts: SignonOptions,
   info: HostServerInfo & { serverSeed: Uint8Array; clientSeed: Uint8Array }
 ): Promise<SignonResult> {
-  // レベル 0/1 は DES（8 バイト置換）、レベル >= 2 は SHA（20 バイト置換）。
+  // レベル 0/1 は DES（8 バイト）、2 / 3 は SHA-1（20 バイト）、4 は SHA-512（64 バイト）。
   // 要求テンプレートの暗号化種別は substitute の長さで自動的に切り替わる（下）
-  const substitute =
-    info.passwordLevel < MIN_SHA_PASSWORD_LEVEL
-      ? passwordSubstituteDes(
-          userIdEbcdic37(opts.user),
-          passwordEbcdic37(opts.password),
-          info.clientSeed,
-          info.serverSeed
-        )
-      : await passwordSubstituteSha(
-          userIdUnicode(opts.user),
-          passwordUnicode(opts.password),
-          info.clientSeed,
-          info.serverSeed
-        );
+  const substitute = await hostServerPasswordSubstitute(
+    info.passwordLevel,
+    opts.user,
+    opts.password,
+    info.clientSeed,
+    info.serverSeed
+  );
 
   const params = [
     uintParam(CP.clientCcsid, CLIENT_CCSID, 4),
@@ -249,7 +251,7 @@ async function authenticate(
       serverId: SERVER_ID.signon,
       reqRep: REQREP.signonInfo,
       template: Uint8Array.from([
-        substitute.length === 8 ? ENCRYPTION_TYPE_DES : ENCRYPTION_TYPE_SHA
+        encryptionTypeOf(substitute)
       ]),
       params
     })

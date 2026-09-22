@@ -57,6 +57,14 @@ export interface SessionConfigForm {
   /** VT の文字符号化（`terminal: "vt"` のみ。既定 utf-8） */
   vtEncoding?: "utf-8" | "shift_jis" | "euc-jp";
   deviceName?: string;
+  /** 5250 の display のみ。関連付けプリンターの装置名（ホストへ IBMASSOCPRT として申告する） */
+  associatedPrinter?: string;
+  /** 5250 の display のみ。関連付けるプリンターセッションの設定の**参照**（`srv:` / `own:`。同じ保存先のプリンターの設定。装置名の方式とは排他） */
+  associatedPrinterSession?: string;
+  /** 関連付けるプリンターの装置名を待つ秒数（0＝待ち続ける。既定 5） */
+  associatedPrinterTimeout?: number;
+  /** 最後の表示と一緒にプリンターも閉じる */
+  closeAssociatedPrinterWithLastSession?: boolean;
   screenSize?: "24x80" | "27x132";
   ccsid?: number;
   enhanced?: boolean;

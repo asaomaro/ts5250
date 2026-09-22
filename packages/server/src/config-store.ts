@@ -83,6 +83,21 @@ export abstract class ConfigStore {
           `session ${s.name} references missing system ${s.system}`
         );
       }
+      this.assertAssociatedPrinter(s);
+    }
+  }
+
+  /**
+   * **関連付けるプリンターセッションの参照の検査**（`20260921-associated-printer-session`）。`system` と同じく**同じファイルの中だけ**を指し、
+   * 指した先はプリンターで、個人設定なら**同じ持ち主**のもの（他人のプリンターを起こさせない）
+   */
+  private assertAssociatedPrinter(s: AnySession): void {
+    const id = s.associatedPrinterSession;
+    if (id === undefined) return;
+    const p = this.sessions.get(id);
+    if (!p || p.sessionType !== "printer" || this.ownerOf(p) !== this.ownerOf(s)) {
+      // 入力（本文の参照）の誤りなので 400（`CONFIG_ERROR`）。URL の資源が無い 404 とは分ける（要件 AC1）
+      throw new As400Error("CONFIG_ERROR", `session ${s.name} references missing printer session ${id}`);
     }
   }
 
@@ -200,6 +215,11 @@ export abstract class ConfigStore {
     if (s.model3270 !== undefined) pub.model3270 = s.model3270;
     if (s.vtEncoding !== undefined) pub.vtEncoding = s.vtEncoding;
     if (s.deviceName !== undefined) pub.deviceName = s.deviceName;
+    if (s.associatedPrinter !== undefined) pub.associatedPrinter = s.associatedPrinter;
+    // 関連付けるプリンターセッションは**参照**で返す（`system` と同じく、利用者が選び直せる形）
+    if (s.associatedPrinterSession !== undefined) pub.associatedPrinterSession = makeRef(this.source, s.associatedPrinterSession);
+    if (s.associatedPrinterTimeout !== undefined) pub.associatedPrinterTimeout = s.associatedPrinterTimeout;
+    if (s.closeAssociatedPrinterWithLastSession !== undefined) pub.closeAssociatedPrinterWithLastSession = s.closeAssociatedPrinterWithLastSession;
     if (s.rescueAction !== undefined) pub.rescueAction = s.rescueAction;
     if (s.transformTo !== undefined) pub.transformTo = s.transformTo;
     if (s.screenSize !== undefined) pub.screenSize = s.screenSize;
@@ -303,6 +323,7 @@ export abstract class ConfigStore {
     this.assertAccess(this.ownerOf(s), user);
     // 参照先はこのファイル内にしか存在しえない（スコープ規定）
     this.getSystem(s.system);
+    this.assertAssociatedPrinter(s);
     if (this.sessions.has(s.id)) {
       throw new As400Error("FORBIDDEN", `session ${s.id} already exists`);
     }
@@ -318,6 +339,9 @@ export abstract class ConfigStore {
     const owner = this.ownerOf(existing);
     if (owner !== undefined) (s as PersonalSession).owner = owner;
     this.getSystem(s.system);
+    this.assertAssociatedPrinter(s);
+    // プリンターでなくする更新は、指されているままでは通さない（消すのと同じ）
+    if (s.sessionType !== "printer") this.assertNotAssociated(id, existing, "change the type of");
     this.sessions.set(id, s);
     return this.publicSession(s);
   }
@@ -325,7 +349,24 @@ export abstract class ConfigStore {
   removeSession(id: string, user: AuthUser | undefined): void {
     const existing = this.getSession(id);
     this.assertAccess(this.ownerOf(existing), user);
+    this.assertNotAssociated(id, existing, "remove");
     this.sessions.delete(id);
+  }
+
+  /**
+   * **関連付けられているプリンターの設定を消さない・プリンターでなくさない**（`removeSystem` の「子が残っていると参照が壊れる」と同じ考え方。
+   * `20260921-associated-printer-session` の節目 10 の独立点検 C-M2）。消すと、次の起動の `assertIntegrity` が `CONFIG_ERROR` で起動を止める——
+   * サーバー設定のファイルなら全員の、個人設定なら全利用者の起動を、画面の 1 操作で止められた。先に表示側の関連付けを外させる
+   */
+  private assertNotAssociated(id: string, existing: AnySession, action: "remove" | "change the type of"): void {
+    if (existing.sessionType !== "printer") return;
+    const users = [...this.sessions.values()].filter((x) => x.associatedPrinterSession === id);
+    if (users.length > 0) {
+      throw new As400Error(
+        "FORBIDDEN",
+        `printer session ${id} is still associated by ${users.length} session(s); clear their association before you ${action} it`
+      );
+    }
   }
 
   /**

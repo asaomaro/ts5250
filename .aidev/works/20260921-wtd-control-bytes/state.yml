@@ -1,0 +1,13 @@
+schema: 11
+slug: wtd-control-bytes
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
+harnessRevDelivered: unknown

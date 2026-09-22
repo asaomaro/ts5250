@@ -1,0 +1,26 @@
+# **ホストに切られたとき、ACS は自動で繋ぎ直すか**（実機）。
+#
+# 原典（`ECLConnection.SetCommStatus`）では、状態 2（通常の切断）のときだけ再接続スレッドを起こし、
+# 1 回目は即座、以後 20 秒おきに `StartCommunication` を呼ぶ（上限なし）。
+# 自動サインオンの失敗・拒否（8936→33 / 8937→34）では**再接続しない**。
+# ここでは「SIGNOFF ENDCNN(*YES) が状態 2 として扱われ、再接続が起きるか」を確かめる。
+#
+# **パスワードを間違えないので安全**（QMAXSIGN に触れない）。実機にオブジェクトは作らない。
+# 実行時は PROBE_AUTORECONNECT=true を渡す（ACS の GUI が使う HOD の bean の既定に合わせる）。
+#
+# **結果（2026-09-21）**: ENDCNN 直後に commStatus=2 となり、3 秒以内に新しいサインオン画面が出た（再接続した）。
+# ⚠ dump の `autoReconnect=` を必ず見ること。false のまま測ると「再接続しない」と誤読する
+# （プロパティ経由・接続前のリフレクション・環境変数の許可リスト漏れの 3 通りで実際に踏んだ）。
+signon
+keys [enter]
+settle 1200
+dump signed-on
+
+# ホスト側から接続を切らせる
+keys [home][eraseeof]SIGNOFF ENDCNN(*YES)[enter]
+sleep 3000
+dump after-endcnn
+
+# 1 回目は即座に繋ぎ直すはず。念のため 20 秒の間隔も越えて待つ
+sleep 25000
+dump after-wait

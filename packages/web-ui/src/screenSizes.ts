@@ -2,8 +2,9 @@
  * 画面サイズの選択肢。
  *
  * ACS のセッション設定と同様、接続ごとに 24x80 / 27x132 を選ばせる。これは接続時の
- * telnet 端末タイプ交渉に落ちる申告で（core の terminalTypeFor: 27x132 なら SBCS=IBM-3477-FC /
- * DBCS=IBM-5555-B01）、「この端末はどちらを扱えるか」をホストに伝えるだけ。
+ * telnet 端末タイプ交渉と Query Reply に落ちる申告で（tn5250 の terminalTypeFor: 27x132 なら SBCS=IBM-3477-FC。
+ * DBCS は ACS と同じく画面サイズによらず IBM-5555-C01 で、サイズは Query Reply で申告する。~~DBCS=IBM-5555-B01~~）、
+ * 「この端末はどちらを扱えるか」をホストに伝えるだけ。
  *
  * どちらで描くかを決めるのは常にホスト側で、画面ごとに違う。表示ファイルの DSPSIZ に
  * 27x132（*DS4）版があり、かつ端末が 27x132 対応のときだけホストは CLEAR UNIT ALTERNATE で
