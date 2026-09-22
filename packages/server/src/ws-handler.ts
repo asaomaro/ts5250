@@ -907,11 +907,14 @@ export class WsConnection {
     if (!want) return undefined;
     // **サーバーが利用者に代わってプリンターを起こす副作用は、直接開く `ws_open_printer` と同じく監査に残す**（表示の `ws_open` に埋もれると、
     // 誰の操作でプリンターが起き、使えない・開けない・時間切れで関連付けなしになったかを追えない。`20260921-assoc-printer-audit`）。
-    // `withAudit` は例外か MCP のエラー応答でしか `error` にしないので、理由（`issue`）を `code` に載せて直接出す。設定名・装置名は載せない（spec D14）
+    // `withAudit` は例外か MCP のエラー応答でしか `error` にしないので、理由（`issue`）を `code` に載せて直接出す。設定名・装置名は載せない（spec D14）。
+    // 起こしたプリンターのセッション ID（実行時に振る UUID。秘密ではない）は載せる——それが無いと「どのプリンターが起きたか」を追えない
+    // （独立点検 A-S8。`ws_open_printer` は `withAudit` が同じ欄に載せる）
     const t0 = Date.now();
     const result = await this.startAssociatedPrinter(want, opts);
     audit({
       op: "ws_associated_printer",
+      ...(result.printerId !== undefined ? { sessionId: result.printerId } : {}),
       result: result.issue === undefined ? "ok" : "error",
       ...(result.issue !== undefined ? { code: result.issue } : {}),
       durationMs: Date.now() - t0

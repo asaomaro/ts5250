@@ -25,3 +25,14 @@ smoke: pass (exit 0)
 
 ## 未検証の穴（skip / 環境不足）
 - 文字が行末から次の行へ続く画面の行頭（原典の読み）・実ブラウザの Alt+←/→（D3）
+
+## 節目 11 の対応（独立点検 A・B の指摘を直した回）
+
+### 実行したもの
+- `cd packages/web-ui && npx vitest run test/pane-word-jump-input.test.ts test/use-cursor.test.ts test/keymap.test.ts` — 57 passed / 0 failed（コードは変更していないので回帰なし）
+
+### 受け入れ基準の再確認
+- 変更なし。README・コメント・decisions.md の記述を実態に合わせただけ。
+
+### 未検証の穴
+変更なし（DBCS の後ろに SI の無い半角の語頭は引き続き未確認）。

@@ -32,3 +32,17 @@ smoke: pass (exit 0)
 - 実ブラウザの打鍵（jsdom の keydown まで）。ブラウザの語削除の抑止（`preventDefault`）が実ブラウザで効くか
 - 欄内の選択があるときの `[deleteword]`・J・G・E の欄・NUL の扱い（D5）
 - Alt+←/→・`¬ ¢ £` の Alt 入力・Ctrl+Home・Ctrl+F11 は別の差（台帳）
+
+## 節目 11 の対応（独立点検 B の指摘を直した回）
+
+### 実行したもの
+- `cd packages/web-ui && npx vitest run test/keybindings.test.ts test/aid-field-exit-required.test.ts test/delete-word.test.ts` — 87 passed / 0 failed（`latestBindingsVersion` のテスト 2 件、「出た」状態を下ろすテスト 1 件を足した）
+
+### 受け入れ基準の再確認
+- 変更なし。上記 3 件はいずれも既存の受け入れ基準の裏付けを強めるテスト。
+
+### mutation
+`scratchpad/mut-b12.py` の一部（`latestBindingsVersion` を追加のみの最大にする）— 検出（KILLED）。
+
+### 未検証の穴
+変更なし。

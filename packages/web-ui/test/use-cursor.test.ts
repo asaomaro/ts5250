@@ -221,7 +221,7 @@ describe("useCursor.nextWordStart", () => {
     expect(nextWordStart(at(cells), { row: 2, col: 4 }, "left", 2, 7)).toEqual({ row: 1, col: 1 });
   });
 
-  // ~~語が無ければ pos を返す（画面端で停止）~~ → 画面の端で**巻き戻る**（実機の ACS のコア。`scripts/acs-probe/tabword.txt` の w1・w2。`20260922-word-tab-acs`）。語が全く無いときだけ pos
+  // ~~語が無ければ pos を返す（画面端で停止）~~ → 画面の端で**巻き戻る**（実機の ACS のコア。`scripts/acs-probe/tabword.txt` の w1・w2。`20260921-word-tab-acs`）。語が全く無いときだけ pos
   it("語が全く無ければ pos を返す", () => {
     const cells = grid("       ");
     expect(nextWordStart(at(cells), { row: 1, col: 5 }, "right", 1, 7)).toEqual({ row: 1, col: 5 });

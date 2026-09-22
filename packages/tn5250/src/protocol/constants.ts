@@ -154,7 +154,7 @@ export const UNMAPPABLE = 0x1f;
 
 /**
  * **WTD のデータの中で、オーダーでも属性でもなく、表示データとして置かれる制御バイト**（0x05〜0x0D・0x16〜0x1B）。
- * ACS `DS5250.processWriteToDisplay` はオーダー 10 個と ESC 以外を全部データとして書く（`20260922-wtd-control-bytes`。実機の ACS のコアで測った）。
+ * ACS `DS5250.processWriteToDisplay` はオーダー 10 個と ESC 以外を全部データとして書く（`20260921-wtd-control-bytes`。実機の ACS のコアで測った）。
  * SO/SI（0x0E・0x0F）・0x1C・0x1E・0x1F・NUL は別の扱いで先に処理される
  */
 export function isControlData(b: number): boolean {

@@ -5,7 +5,7 @@ import {
   DEFAULT_BINDINGS,
   isLocalBinding,
   isViewBinding,
-  localActionOf, BINDINGS_VERSION } from "../src/stores/keybindings.js";
+  localActionOf, BINDINGS_VERSION, latestBindingsVersion } from "../src/stores/keybindings.js";
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { vi } from "vitest";
 
@@ -87,7 +87,7 @@ describe("既定バインド（初期値）", () => {
 });
 
 describe("ローカル編集キー（local:*）", () => {
-  // ~~Ctrl+Delete = Erase EOF・Ctrl+Backspace = Erase Input~~ → ACS の既定に直した（`20260922-delete-word`）。ACS `AcsMapFunctions.MAP_5250` は
+  // ~~Ctrl+Delete = Erase EOF・Ctrl+Backspace = Erase Input~~ → ACS の既定に直した（`20260921-delete-word`）。ACS `AcsMapFunctions.MAP_5250` は
   // `C127 = [deleteword]`・`C8`（Ctrl+Backspace）の割り当て無し・Erase EOF の既定キー無し。Erase Input は `A35`（Alt+End）
   it("既定で Field Exit（Ctrl+Enter）・Delete Word（Ctrl+Delete）・Erase Input（Alt+End）が割り当たる。Ctrl+Backspace と Erase EOF には無い（ACS と同じ）", () => {
     expect(DEFAULT_BINDINGS["ctrl+Enter"]).toBe("local:field-exit");
@@ -151,7 +151,7 @@ describe("既定バインドの版更新", () => {
   });
 });
 
-describe("既定バインドの訂正（Ctrl+Delete・Ctrl+Backspace。`20260922-delete-word`）", () => {
+describe("既定バインドの訂正（Ctrl+Delete・Ctrl+Backspace。`20260921-delete-word`）", () => {
   const load = (bindings: Record<string, string>, version: number) => {
     localStorage.clear();
     localStorage.setItem("as400.keybindings", JSON.stringify(bindings));
@@ -194,7 +194,7 @@ describe("既定バインドの訂正（Ctrl+Delete・Ctrl+Backspace。`20260922
   });
 });
 
-describe("ACS の既定の追加（版 5: Ctrl+Home＝罫線・Ctrl+F11＝カーソルの形。`20260922-default-keys-rule-cursor`）", () => {
+describe("ACS の既定の追加（版 5: Ctrl+Home＝罫線・Ctrl+F11＝カーソルの形。`20260921-default-keys-rule-cursor`）", () => {
   it("既定に入り、順送りの割り当て（view:*）として解決される", () => {
     expect(DEFAULT_BINDINGS["ctrl+Home"]).toBe("view:ruleLine");
     expect(DEFAULT_BINDINGS["ctrl+F11"]).toBe("view:cursorShape");
@@ -221,5 +221,17 @@ describe("ACS の既定の追加（版 5: Ctrl+Home＝罫線・Ctrl+F11＝カー
     h({ key: "F11", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
     expect(viewCycle.mock.calls.map((c) => c[0])).toEqual(["ruleLine", "cursorShape"]);
     expect(sendAid).not.toHaveBeenCalled();
+  });
+});
+
+describe("既定バインドの最新の版の数え方（独立点検 B-S4）", () => {
+  it("**追加が無く訂正だけの版も数える**（数えないと、その版の訂正が古い既定のままの人へ届かない）", () => {
+    expect(latestBindingsVersion({ 1: {}, 2: {} }, { 3: [] }), "訂正だけの版 3").toBe(3);
+    expect(latestBindingsVersion({ 1: {}, 4: {} }, { 3: [] }), "追加のほうが新しい").toBe(4);
+    expect(latestBindingsVersion({ 1: {}, 2: {} }, {}), "訂正が無い").toBe(2);
+  });
+
+  it("いまの版は追加・訂正の最大（テストが版番号を直書きしない）", () => {
+    expect(BINDINGS_VERSION).toBeGreaterThanOrEqual(5);
   });
 });

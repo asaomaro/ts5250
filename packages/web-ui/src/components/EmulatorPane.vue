@@ -840,9 +840,10 @@ watch(
  * ペインがフォーカスを失ったら行を畳む＝**取り消し扱い**（まだ何も送っていないので副作用は無い）。
  *
  * 畳まないと、行の `@focusout` によるフォーカス保持が**タブ・ペイン切替と喧嘩する**。
- * Alt+PageUp/Down（タブ切替）と Alt+矢印（ペイン移動）はペインではなく App のグローバルハンドラが
+ * Alt+PageUp/Down（タブ切替）と Alt+Shift+矢印（ペイン移動）はペインではなく App のグローバルハンドラが
  * 担うため、行を開いていて `onKeydown` が早期 return していても発火する。そのとき離れたペインの行が
  * フォーカスを引き戻すと、切替先のペインがキーボードを取れなくなる。
+ * （Alt+矢印 単独は `e448749d` で語頭ジャンプに割り当てたので、ペイン移動は Alt+Shift+矢印。上の App.vue 参照）
  */
 watch(
   () => props.focused,
@@ -1201,7 +1202,7 @@ function isEditingKey(ev: KeyboardEvent): boolean {
   const local = localEditActionOf(ev);
   // **Delete Word は拒否しない**——エラーを抜けてから語を消す。ACS `PS5250.keyDown` のエラー中の拒否の一覧は Backspace・Erase EOF・Erase Input・
   // Erase Field・Delete・Field±・Field Exit・Dup・Field Mark と文字だけで、`[deleteword]`（63623）は入っていない。実機の ACS のコアでも、
-  // 先頭の Backspace（0005）の後の `[delete]` は拒否（inhibit=5・値そのまま）、`[deleteword]` は inhibit=0 で語を消した（`scripts/acs-probe/delete-word.txt` の m。`20260922-delete-word`）
+  // 先頭の Backspace（0005）の後の `[delete]` は拒否（inhibit=5・値そのまま）、`[deleteword]` は inhibit=0 で語を消した（`scripts/acs-probe/delete-word.txt` の m。`20260921-delete-word`）
   if (local !== undefined) return local !== "delete-word";
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
   return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";

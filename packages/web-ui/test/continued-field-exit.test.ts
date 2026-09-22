@@ -12,7 +12,7 @@ import type { WsClient } from "../src/ws-client.js";
 /**
  * **継続欄（EDTMSK で割られた欄）の Erase EOF・Field Exit・Field±・Dup は、続く区間まで届く。欄を出る行き先は鎖の後ろ。**
  *
- * 実機の ACS のコア（社内機・日付欄 4/2/2 の 3 区間。`scripts/acs-probe/continued-field-erase-exit.txt`。`20260922-continued-field-exit`）:
+ * 実機の ACS のコア（社内機・日付欄 4/2/2 の 3 区間。`scripts/acs-probe/continued-field-erase-exit.txt`。`20260921-continued-field-exit`）:
  * - 最初の区間の 2 桁目で Erase EOF → `1234/56/78` が `1   /  /  `（続く区間は全桁消える）。2 区間目の途中なら `1234/5 /  `
  * - Field Exit も同じ消去をして、カーソルは**鎖の後ろ**（次の欄。無ければ画面の最初の入力欄）へ移る——次の区間ではない。最後の区間からも同じ
  * - DUP 可の継続欄で Dup → カーソルの区間はカーソルから、続く区間は全桁が Dup 文字（0x1C）になり、カーソルは鎖の後ろの欄へ

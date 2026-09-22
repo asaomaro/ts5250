@@ -85,7 +85,7 @@ export function rejectReason(field: Field, ch: string, session?: SessionKind): R
 export function dbcsByteLength(value: string, session?: SessionKind, noShift = false): number {
   // SBCS だけのセッションは SO/SI も 2 バイトの字も無い——1 字 1 バイト（打鍵で漢字・かなは弾いてある。`rejectReason`）
   if (session?.sbcsOnly === true) return [...value].length;
-  // **純 DBCS の欄（G）は SO/SI を持たない**（全桁が 2 バイトの組。実機の ACS のワイヤ: 12 バイトの欄に 6 字が SO/SI 無しで入る。`20260922-g-field-sosi`）
+  // **純 DBCS の欄（G）は SO/SI を持たない**（全桁が 2 バイトの組。実機の ACS のワイヤ: 12 バイトの欄に 6 字が SO/SI 無しで入る。`20260921-g-field-sosi`）
   if (noShift) {
     let n = 0;
     for (const ch of value) n += !isRawSentinel(ch) && isWideForDbcs(ch) ? 2 : 1;

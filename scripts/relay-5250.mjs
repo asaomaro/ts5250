@@ -1,7 +1,7 @@
 // **5250 の中継（記録用）。ACS のコア（`scripts/acs-probe.mjs`）や当 PJ を実機との間に挟み、両方向の生バイトを記録する。**
 //
 // `tap-proxy.mjs`（IBM ACS の GUI 用。ホストサーバーのポート 449・8470〜8476 も中継する）と違い、**5250 の telnet（23）だけ**を中継する——
-// 待ち受けポートを自由に選べ（特権ポートが要らない）、ACS のコアや診断スクリプトの測定に向く。`20260922-g-field-sosi` で G の欄のワイヤを採るのに使った。
+// 待ち受けポートを自由に選べ（特権ポートが要らない）、ACS のコアや診断スクリプトの測定に向く。`20260921-g-field-sosi` で G の欄のワイヤを採るのに使った。
 //
 // 実行（実機のアドレスは `.env` の値を環境変数越しに渡す。値を画面に出さない）:
 //   TARGET_HOST=<実機> RELAY_PORT=32323 RELAY_LOG=./relay.log node scripts/relay-5250.mjs
@@ -23,7 +23,8 @@ if (!TARGET || !LOG) {
   process.stderr.write("TARGET_HOST と RELAY_LOG が要ります\n");
   process.exit(2);
 }
-const out = fs.createWriteStream(LOG, { flags: "a" });
+// 記録にはパスワードが平文で残るので、**作る権限は本人だけ**（0600。既定の umask だと他の利用者から読める）。`*.log` にすると `.gitignore` の除外に合う
+const out = fs.createWriteStream(LOG, { flags: "a", mode: 0o600 });
 net
   .createServer((c) => {
     const s = net.connect(23, TARGET);

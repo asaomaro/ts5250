@@ -66,7 +66,7 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
   2: {
     // ローカル編集キー。ブラウザ既定（単語削除・履歴戻る）は捕捉時に preventDefault で抑える
     "ctrl+Enter": "local:field-exit",
-    // ~~"ctrl+Delete": "local:erase-eof"・"ctrl+Backspace": "local:erase-input"~~ → ACS の既定に直した（`20260922-delete-word`）。
+    // ~~"ctrl+Delete": "local:erase-eof"・"ctrl+Backspace": "local:erase-input"~~ → ACS の既定に直した（`20260921-delete-word`）。
     // ACS の `C127 = [deleteword]`（Ctrl+Delete＝カーソルの語を消す）で、`C8`（Ctrl+Backspace）の割り当ては無い・Erase EOF の既定キーも無い
     // （`AcsMapFunctions.MAP_5250`）。語を消す習慣で押すと欄の残りや全欄が消えていた。版 2〜4 で保存した人の古い組は下の `CORRECTED_BY_VERSION` が直す
     "ctrl+Delete": "local:delete-word"
@@ -102,7 +102,7 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
     "alt+F1": "Help" // A112
   },
   5: {
-    // ACS の既定の割り当てのうち、当 PJ に機能があって既定のキーだけが無かったもの（`AcsMapFunctions.MAP_5250`。`20260922-default-keys-rule-cursor`）。
+    // ACS の既定の割り当てのうち、当 PJ に機能があって既定のキーだけが無かったもの（`AcsMapFunctions.MAP_5250`。`20260921-default-keys-rule-cursor`）。
     // `C36 = [rule]`（Ctrl+Home＝罫線の表示）・`C122 = [altcsr]`（Ctrl+F11＝カーソルの形の切り替え）
     "ctrl+Home": "view:ruleLine",
     "ctrl+F11": "view:cursorShape"
@@ -127,7 +127,7 @@ const CORRECTED_BY_VERSION: Record<number, Correction[]> = {
     }
   ],
   // Ctrl+Delete は Delete Word（ACS `C127`）・Ctrl+Backspace は割り当て無し（`C8` 無し）。**キーごとに独立して直す**（片方だけ変えた人の意図を壊さない）。
-  // Erase EOF・Erase Input を Ctrl+Delete・Ctrl+Backspace に割り当てていた古い既定のままの人だけが対象（`20260922-delete-word`）
+  // Erase EOF・Erase Input を Ctrl+Delete・Ctrl+Backspace に割り当てていた古い既定のままの人だけが対象（`20260921-delete-word`）
   5: [
     { from: { "ctrl+Delete": "local:erase-eof" }, to: { "ctrl+Delete": "local:delete-word" } },
     { from: { "ctrl+Backspace": "local:erase-input" }, to: { "ctrl+Backspace": null } }
@@ -143,11 +143,19 @@ export const DEFAULT_BINDINGS: Record<string, BindingTarget> = Object.assign(
   ...Object.values(ADDED_BY_VERSION)
 ) as Record<string, BindingTarget>;
 
+/**
+ * 既定バインドの最新の版。**追加が無く、訂正だけの版も数える**（数えないと、その版の訂正が「保存済みの版より後」に入らず、
+ * 古い既定のままの人へ届かない）。テストで固定するために関数にしてある（訂正だけの版が今は無いので、定数のままでは外しても気づけない）
+ */
+export function latestBindingsVersion(added: Record<number, unknown>, corrected: Record<number, unknown>): number {
+  return Math.max(...Object.keys(added).map(Number), ...Object.keys(corrected).map(Number));
+}
+
 // 既定バインドの版。保存済みデータへ「増えた分だけ」混ぜるための印。
 const VERSION_KEY = "as400.keybindings.version";
 /** いまの既定バインドの版。**テストが版番号を直書きしないよう公開する**
  *  （直書きすると既定を 1 つ足して版を上げるたびに無関係なテストが落ちる）。 */
-export const BINDINGS_VERSION = Math.max(...Object.keys(ADDED_BY_VERSION).map(Number), ...Object.keys(CORRECTED_BY_VERSION).map(Number));
+export const BINDINGS_VERSION = latestBindingsVersion(ADDED_BY_VERSION, CORRECTED_BY_VERSION);
 const VERSION = BINDINGS_VERSION;
 
 function load(): Record<string, BindingTarget> {

@@ -11,7 +11,7 @@ import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
 /**
- * **Delete Word（ACS の既定 `C127`＝Ctrl+Delete の `[deleteword]`）。** `20260922-delete-word`。
+ * **Delete Word（ACS の既定 `C127`＝Ctrl+Delete の `[deleteword]`）。** `20260921-delete-word`。
  * 実機の ACS のコアで測った（`scripts/acs-probe/delete-word.txt`。コマンド行と DBCSFE の O 欄。継続欄は `continued-field-erase-exit.txt` の B8）:
  * 語頭なら「語＋続く空白」・語の途中ならカーソルから語の終わりまで・空白の上と全角は 1 字。記号は語の一部。継続欄は鎖を 1 つの欄として数える。
  * 操作員エラー中も拒否せず、エラーを抜けて働く（`[delete]` は拒否）。Ctrl+Backspace には割り当てが無い。

@@ -8,7 +8,8 @@ import {
   buildReadImmediateResponse,
   buildReadMdtImmediateAltResponse,
   buildFlagRecord,
-  buildCancelInviteAck
+  buildCancelInviteAck,
+  encodedFieldLength
 } from "../protocol/read-response.js";
 import { buildQueryReply, buildWsfD972Reply } from "../protocol/query-reply.js";
 import {
@@ -424,9 +425,11 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 値は文言に入らないので、利用者が直せるのはこの位置だけが頼り
     const at = this.buf.rowColOf(field.startAddr);
     validateFieldContent(value, field, this.codec, this.buf.fieldValue(field), at);
-    // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）
+    // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）。
+    // **純 DBCS の欄（G）は SO/SI を数えない**——送信（`buildFieldResponse`）と同じ数え方（`encodedFieldLength`）。
+    // 数えると全角 6 字（12 バイト）が入る欄に 6 字を置けず、ブラウザの Enter・MCP・HLLAPI・マクロが FIELD_OVERFLOW になる（独立点検 A-M1）
     if (field.dbcsType !== undefined && this.codec.isDbcs) {
-      const bytes = this.codec.encode(value).bytes.length;
+      const bytes = encodedFieldLength(value, this.codec, field.dbcsType === "pure");
       if (bytes > field.length) {
         // 長さを出さない理由は `buffer.ts` の同じ検査と同じ（`20260920-field-error-no-value` FR1）
         throw new As400Error(

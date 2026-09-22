@@ -6,7 +6,7 @@ import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
  * **J・G・E（DBCS 中）の欄で打った Space は全角空白（U+3000）になる**（ACS `processCharKeyStroke` の `convertSBCSCharToDBCS`。
- * `20260922-dbcs-space-key`）。実機の ACS のコアで測った（`scripts/acs-probe/dbcs-space-key.txt`。DBCSFE の画面・930）:
+ * `20260921-dbcs-space-key`）。実機の ACS のコアで測った（`scripts/acs-probe/dbcs-space-key.txt`。DBCSFE の画面・930）:
  * G・J は `あ`＋Space＋`い` が `あ　い`（間が全角空白）、先頭の Space も全角空白。O は SBCS の空白のまま。
  * E は空の欄・SBCS の字の後の Space が SBCS の空白で、`あ` の後は全角空白（E は最初の字で SBCS か DBCS かが決まる）
  */

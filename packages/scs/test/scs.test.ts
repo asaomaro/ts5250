@@ -134,7 +134,7 @@ describe("ScsDecoder", () => {
     expect(new ScsDecoder(1399).decode(scs)[0]!.lines[0]).toBe("A日DEFGH");
   });
   /**
-   * **空白は下の字を消さない**（ACS の JPS は 1 字ずつ描くだけで何も消さない。`20260922-scs-blank-overprint`）。期待値は本物の JPS を headless で動かした記録
+   * **空白は下の字を消さない**（ACS の JPS は 1 字ずつ描くだけで何も消さない。`20260921-scs-blank-overprint`）。期待値は本物の JPS を headless で動かした記録
    * （調査 R11 の合成ベクタ。`ABCDEF` CR `␠␠␠XY` は A B C が残り D・E に X・Y が重なる）
    */
   it("**CR で戻った重ね書きの空白は、下の字を消さない**（`ABCDEF` CR `␠␠␠XY` → `ABCXYF`）", () => {
@@ -188,6 +188,14 @@ describe("ScsDecoder", () => {
     expect(over("AB"), "半角 2 字の上").toBe("ABX");
     expect(over(" A"), "半角 1 字が 2 桁目にかかる").toBe(" AX");
     expect(over("  "), "空白だけの桁には書く").toBe("\u3000X");
+  });
+
+  it("行末の**全角空白**の 2 桁も `cols` に数える（下の字を消さないだけで、位置と桁数は進める。独立点検 A-N7）", () => {
+    const c = codecForCcsid(1399);
+    const spcc0 = [0x2b, 0xfd, 0x04, 0x03, 0x00, 0x00]; // SO・SI を 0 桁にする（桁が字の数だけになる）
+    const page = new ScsDecoder(1399).decode(Uint8Array.from([...spcc0, ...c.encode("AB\u3000").bytes]))[0]!;
+    expect(page.cols, "A B と全角空白の 2 桁").toBe(4);
+    expect(page.lines[0], "行末の空白は帳票では切り落とされる").toBe("AB");
   });
 
   it("SPCC は同じデコーダーのジョブをまたいで残る（ACS は印刷のセッションで 1 回だけ初期化）", () => {

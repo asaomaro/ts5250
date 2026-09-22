@@ -484,12 +484,18 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   RB なら空白・RZ なら `'0'` に上書きする。実機の ACS のコアで `CHECK(RZ) 6 0` に `12` → Field− は `000012-`、素の `6 0` は `    34-`（既存の実測 `scripts/acs-probe/field-minus-numeric-only.txt` の M1・M2）だったが、
   当 PJ は tn5250 由来の「signed-num を ADJUST 指定より先に見て空白右寄せ」で `    12-` だった。`applyAdjust`（`packages/web-ui/src/composables/fieldEdit.ts`）で RZ・RB を先に見る形にした
   （符号桁は動かさない。RZ・RB が無く符号付きなら従来の空白右寄せ）。~~signed-num は ADJUST 指定より優先される~~ の旧テストは破棄（decisions D1）。単体 3 件、mutation 6 通り検出。
-  残り（空きの数え方〔NUL か空白か〕・先頭の空白・DBCS の J・G・E の右寄せ）は下の `[ ]`。
+  ~~残り（空きの数え方〔NUL か空白か〕・先頭の空白）は下の `[ ]`~~ → 節目 11 の独立点検（B-S6）で直した:
+  ACS の空きは「欄末尾から続く NUL の数」だけで、打った空白・ホストの空白は内容として一緒に右へ動く（当 PJ は NUL を持たないので、
+  Field Exit が消したばかりのカーソル以降を空きとして数える）。何も打たずに欄の先頭で Field Exit すると全桁が埋め字になる（実機の ACS のコアで測った。
+  `scripts/acs-probe/empty-adjust-field-exit.txt`）。**DBCS（J・G・E）の右寄せは未対応のまま**——現状 DBCS の Field Exit は右寄せを呼ばず、消すだけ。
 - [x] **J・G・E（DBCS 中）の欄の Space を全角空白にする**（下の「キー編集の細部」の R11 (r)。台帳に無かった差）。**完了（`20260921-dbcs-space-key`）**: ACS `processCharKeyStroke` は
   DBCS のセッションで打った空白を `convertSBCSCharToDBCS` で全角空白（U+3000）にする。実機の ACS のコア（社内機・930。`scripts/acs-probe/dbcs-space-key.txt`）で測った——G・J は `あ　い`・先頭の Space も全角空白、
   O は SBCS の空白のまま、E は全角の字の後だけ全角空白（空の欄・SBCS の字の後は SBCS の空白）。当 PJ は J・G の半角 Space を「全角のみ」と拒否していた。
   `spaceToFullWidth`（`packages/web-ui/src/components/ScreenGrid.vue`）で、打鍵の経路だけ変換した（貼り付け・IME の確定は変えない）。単体 4 件、mutation 7 通り検出。
   **測定で分かった別の差**: ACS の E は最初の字で SBCS か DBCS かが決まり、混ぜられない（`あ` の後の `X`・`X` の後の `あ` は拒否）。当 PJ の E は混ぜられる（下の `[ ]`）。
+  **もう一つ（節目 11 の独立点検 B-N7）**: ACS の満杯判定（`Field5250.isFieldFull`）は NUL の有無だけを見るので、打った全角空白（0x4040）も「埋まっている」。
+  当 PJ は SBCS の欄と同じく末尾の空白を送信・満杯判定の両方で空と見なす（`trimPad`／MF の `isFull`）ので、末尾に打った全角空白が「部分入力」に見える
+  （5 スロットの J の 5 スロット目だけに Space を打った場合など）。空きの数え方〔NUL か空白か〕は上の signed-rz-fill の直しで数値・英数字欄は揃えたが、J・G はまだ。
 - [x] **継続欄（EDTMSK・CNTFLD）の Erase EOF・Field Exit・Field±・Dup が続く区間まで届き、欄を出る行き先が鎖の後ろ**（下の「キー編集の細部」の R11 (b)）。
   **完了（`20260921-continued-field-exit`・PR #410）**: 実機の ACS のコア（社内機・930・拡張 5250 を申告。`scripts/acs-probe/continued-field-erase-exit.txt`）で確定してから実装した。
   日付欄（4/2/2 の 3 区間）の最初の区間の 2 桁目の Erase EOF・Field Exit は `1234/56/78` を `1   /  /  `（続く区間は全桁消える）、2 区間目の途中は `1234/5 /  `。
@@ -523,7 +529,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   実機で同じ 12 バイトになることを確かめた（当 PJ の送信 `44 86 44 87 44 88 40 40 40 40 40 40`・ホストの受け取りも ACS と一致）。
   単体（tn5250 14 件・web-ui 14 件。実機の WTD の生バイトをそのまま使った）、mutation 20 通りすべて検出。
   **J の送信は当 PJ の短い形（`0e 44 86 44 87 44 88 0f`）でも、ホストが ACS の J と同じ `0e … 40 40 40 40 0f` に整える**ことを確かめた（G は整えられない）ので、J の送信の形は変えていない。
-  **測っていないもの**: 実際の業務アプリの G の欄の頻度。SBCS のセッションで WEA タイプ 5 が来たときの否定応答（ACS は 0x1005012D。当 PJ は従来どおり警告して読み飛ばす）。SAVE/RESTORE の往復は G の生バイトのまま戻ることまで（`buildReadScreenResponse`）。
+  **測っていないもの**: 実際の業務アプリの G の欄の頻度。SAVE/RESTORE の往復は G の生バイトのまま戻ることまで（`buildReadScreenResponse`）。実機の確認は `かきく`（3 字）だけで、
+  欄いっぱい（6 字）・継続欄・不正な区間（奇数バイト・未閉鎖）は測っていない（単体テストは実機のワイヤをそのまま使うが、その形自体は測っていない組み合わせ）。
+  ~~`Session.setField` は G の 12 バイト（SO/SI 抜き）の長さを検査していなかった~~ → 節目 11 の独立点検（A-M1）で `encodedFieldLength` を使うように直した（G の全角 6 字を渡すと 7 字目で
+  「at most 12 bytes」で拒否する）。継続 G（CNTFLD）は区間の並びを総長で切るように直した（A-S1）。奇数バイト・未閉鎖の区間は次のオーダーを食わないことを確かめた（A-S2）。
+  **WEA タイプ 5 の否定応答は、SBCS のセッションで来たときの 0x1005012D だけでなく**、ACS `writeExtAttribute` は値が 0x81／0x80／0x00 以外なら 0x1005012F（`return 2`）、
+  タイプが 5 以外なら全セッションで 0x1005012D（`return 1`）も返す（原典 `case 18` の分岐）。当 PJ はどちらも未対応（従来どおり警告して読み飛ばす）。
 - [x] **J（DBCS 専用・`only`）欄の空きの桁へ離れて打つと、途中に半角空白が残る**（`20260921-g-field-sosi` の調査で見つかった）。**完了（`20260921-j-wide-fill`・PR #410）**:
   J の欄に `あ` が入っていて、離れた空き桁へ `い` を打つと、編集の値が `あ   い`（半角空白 3）になっていた（`padDbcs` の詰め物が半角空白）。**core は J の欄の半角空白を弾く**
   （`validateFieldContent` の `isDbcsOnly`＝「全角しか入力できない」。実機に繋いだ core で `あ   い` は FIELD_TYPE・`あ　　　い` は通ることを確かめた）ので送信で止まった。
@@ -581,8 +592,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~Clear / Help / Print / PA で欄データを送る~~ → Clear・Help・Print は `20260921-home-record-backspace` で済んだ（PA は下の「未対応の機能」と一緒に）
     - ~~Field− の可否~~（`20260921-numpad-field-sign`）、~~数値専用欄での Field−（最終桁のゾーンを D にする。表示のコード変換が要る。同 D2）~~（上の `20260921-field-minus-zone-d`。~~表示は残り~~ → 表示も字で見せるようにした〔`composables/zoneDigit.ts`〕）、
       ~~Field± の ME（0033）・MF（0020）・入出力欄（0004）の検査（同 D3）~~ → 上の `20260921-field-exit-checks` で済んだ（~~0033・0020~~ は `setErrorCode(33)`・`(20)` の 10 進で、表示は 0021・0014）
-    - 符号付き＋RZ の埋め字、右寄せで動かす範囲
-    - Dup（FER 欄・継続欄）、継続欄での Field Exit / Erase EOF、~~Field Exit 時の検査~~（上の `20260921-field-exit-checks`）
+    - ~~符号付き＋RZ の埋め字~~ → 上の `20260921-signed-rz-fill` で済んだ（ACS `performRightAdjustFill` の読み: 空きは「欄末尾から続く NUL の数」だけで、
+      打った空白・ホストの空白は内容として一緒に右へ動く。実機の ACS のコアで測った。`scripts/acs-probe/empty-adjust-field-exit.txt`）
+    - ~~継続欄での Field Exit / Erase EOF~~ → 上の `20260921-continued-field-exit` で済んだ（Dup も含む）。~~Field Exit 時の検査~~（上の `20260921-field-exit-checks`）
     - ~~MONOCASE で ASCII 以外を大文字化しない~~ → 上の `20260921-monocase-non-ascii` で済んだ
     - SBCS のセッションでコードページに無い字（37 の `α`・かな等）: ACS は受け付けて送るときに置き換える（`PS5250.inputChar` は SBCS のセッションでは
       可否を見ない）。当 PJ は漢字・かなを打った時点で、それ以外を送信時（core の「CCSID の外の文字」）に弾く（`20260921-monocase-non-ascii` D1）。
@@ -594,14 +606,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - 解錠中に届いた WTD（READ 無し）でもカーソルが IC / ホームへ動く（`20260921-cursor-per-wtd-acs` D2 の未確認と同じ）
     - 未対応の機能: ~~Reset~~（`20260921-operator-error-mode` で実装）・Field Mark・PA1〜3（入れるときは欄データを載せない AID の集合 `NO_DATA_AIDS` にも足す）・~~Record Backspace~~（`20260921-home-record-backspace`）・Test Request・Erase Field・SOH の「入力欄だけ移動」・欄の再順序付け
     - 既定のキー割り当ての違い: ~~左 Ctrl=Reset~~（揃えた）、~~Esc=Attn、Shift+Insert=Dup ほか~~ → 既存の機能に当たるものは `20260921-acs-default-keys` で揃えた。
-      残りは当 PJ に機能が無いキー（`AcsMapFunctions.MAP_5250`）: `A19 = [test]`（Test Request）・`S36 = [fieldmark]`・`C36 = [rule]`・`C33 = [jump]`・
-      `A37` / `A39` / `C35` / `C34`（単語単位の Backtab / Tab）・`C127 = [deleteword]`・`C122 = [altcsr]`・`S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`。
+      ~~Ctrl+Delete・Ctrl+Backspace も ACS と食い違う既定（当 PJ は Ctrl+Delete=Erase EOF・Ctrl+Backspace=Erase Input）~~ →
+      `20260921-delete-word` で ACS と同じに直した（Ctrl+Delete=Delete Word〔`C127 = [deleteword]`〕・Ctrl+Backspace は割り当て無し。
+      Erase EOF は既定キーが無くなった〔ACS も無い〕。利用者の割り当ては `CORRECTED_BY_VERSION` で移行する）。
+      ~~`C36 = [rule]`・`C122 = [altcsr]`~~ → `20260921-default-keys-rule-cursor` で Ctrl+Home・Ctrl+F11 に揃えた。
+      ~~`A37`/`A39`（単語単位の Backtab/Tab）~~ → `20260921-word-tab-acs` で Alt+←/→ に揃えた（`C35`/`C34` はブラウザのタブ切替と衝突するため対象外のまま）。
+      残りは当 PJ に機能が無いキー（`AcsMapFunctions.MAP_5250`）: `A19 = [test]`（Test Request）・`S36 = [fieldmark]`・`C33 = [jump]`・
+      `S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`。
       **Ctrl+矢印も違う**——ACS は `C37` 〜 `C40 = [moveleft]` 〜 `[movedown]`（選択範囲を動かす）、当 PJ は語頭への頭出し（`useKeymap.ts` の `word-*`）
-      **Ctrl+Delete・Ctrl+Backspace も ACS と食い違う既定**（節目の独立点検の指摘。`AcsMapFunctions.MAP_5250` で確認）——当 PJ は
-      Ctrl+Delete=Erase EOF・Ctrl+Backspace=Erase Input（`packages/web-ui/src/stores/keybindings.ts` の v1）。ACS は `C127 = [deleteword]`
-      （語の削除。当 PJ の Erase EOF は欄の残りを全部消すので、より壊す側）で、`C8` の割り当ては無い。Erase EOF にも Erase Input 以外の
-      既定キーは無い（`[eraseeof]` は MAP_5250 に無く、Erase Input は `A35 = [erinp]`＝Alt+End。これは揃えた）。
-      外すなら利用者の割り当ての移行（`CORRECTED_BY_VERSION`）が要る——Erase EOF の既定キーが無くなる
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
   （出典: `20260919-backlog-acs-triage` research N13・F5、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 2）

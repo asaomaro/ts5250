@@ -8,7 +8,7 @@ import { mandatoryFillViolated } from "../src/composables/mandatoryCheck.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
- * **純 DBCS の欄（DDS の G 型。FCW 0x8220）は SO/SI の桁を持たない。**（`20260922-g-field-sosi`）
+ * **純 DBCS の欄（DDS の G 型。FCW 0x8220）は SO/SI の桁を持たない。**（`20260921-g-field-sosi`）
  *
  * 実機の DDS の G 型で確かめた: 12 バイトの欄に全角 6 字が SO/SI 無しで入る（ワイヤも SO/SI 無しの 12 バイト。core の
  * `dbcs-pure-field.test.ts`）。当 PJ の編集は G にも SO/SI の 2 桁を数えていたので、6 字目が入らず、列ビューの先頭と末尾に空白の桁が付いた。
@@ -60,7 +60,7 @@ async function open(snapshot: ScreenSnapshot) {
     el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
   };
-  return { el, key, at, value: () => edits.get(1), notices: () => ((w.emitted("notice") as unknown[][] | undefined) ?? []).map((a) => a[0]), edited: () => (w.emitted("edit") as unknown[][] | undefined) ?? [] };
+  return { w, el, key, at, value: () => edits.get(1), notices: () => ((w.emitted("notice") as unknown[][] | undefined) ?? []).map((a) => a[0]), edited: () => (w.emitted("edit") as unknown[][] | undefined) ?? [] };
 }
 
 describe("G の欄は SO/SI を数えない", () => {
@@ -143,7 +143,7 @@ describe("G の欄の詰め物は全角空白（半角空白を途中に残さ�
     expect(edited()).toEqual([]);
   });
 
-  it("Space は全角空白（`20260922-dbcs-space-key`）で、末尾なら値から落ちる", async () => {
+  it("Space は全角空白（`20260921-dbcs-space-key`）で、末尾なら値から落ちる", async () => {
     const { snapshot } = gSnapshot(["あ", "い", "う"]);
     const { key, at, value } = await open(snapshot);
     await at(4);
@@ -193,23 +193,23 @@ describe("MF の満杯判定・J との差", () => {
   });
 });
 
-describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空きへ打っても半角空白が混ざらない）", () => {
-  /** J の欄（(5,20) から 12 桁＝SO ＋ 5 スロット ＋ SI）。`slots` の字を置き、残りは `fill`（既定は全角空白。`""` なら空きの桁を NUL＝空白のセルにする） */
-  function jSnapshot(slots: string[], fill = "\u3000"): ScreenSnapshot {
-    const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
-    const r = cells[4]!;
-    r[19] = cell(" ", "so");
-    for (let i = 0; i < 5; i++) {
-      const ch = slots[i] ?? fill;
-      if (ch === "") { r[20 + i * 2] = cell(" "); r[21 + i * 2] = cell(" "); continue; }
-      r[20 + i * 2] = cell(ch, "dbcs-lead");
-      r[21 + i * 2] = cell("", "dbcs-tail");
-    }
-    r[30] = cell(" ", "si");
-    const field = { index: 1, row: 5, col: 20, length: 12, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "only" } as Field;
-    return { sessionId: "j1", rows: 24, cols: COLS, cursor: { row: 5, col: 20 }, keyboardLocked: false, cells, fields: [field] } as unknown as ScreenSnapshot;
+/** J の欄（(5,20) から 12 桁＝SO ＋ 5 スロット ＋ SI）。`slots` の字を置き、残りは `fill`（既定は全角空白。`""` なら空きの桁を NUL＝空白のセルにする） */
+function jSnapshot(slots: string[], fill = "\u3000"): ScreenSnapshot {
+  const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
+  const r = cells[4]!;
+  r[19] = cell(" ", "so");
+  for (let i = 0; i < 5; i++) {
+    const ch = slots[i] ?? fill;
+    if (ch === "") { r[20 + i * 2] = cell(" "); r[21 + i * 2] = cell(" "); continue; }
+    r[20 + i * 2] = cell(ch, "dbcs-lead");
+    r[21 + i * 2] = cell("", "dbcs-tail");
   }
+  r[30] = cell(" ", "si");
+  const field = { index: 1, row: 5, col: 20, length: 12, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "only" } as Field;
+  return { sessionId: "j1", rows: 24, cols: COLS, cursor: { row: 5, col: 20 }, keyboardLocked: false, cells, fields: [field] } as unknown as ScreenSnapshot;
+}
 
+describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空きへ打っても半角空白が混ざらない）", () => {
   it("**離れた空きの桁へ打つと、前の空きは全角空白**（半角空白の `あ   い` だと core の「全角しか入力できない」で送れなかった。実機の J で確かめた）", async () => {
     const { key, at, value } = await open(jSnapshot(["あ"]));
     await at(4); // 4 スロット目（SO の次が 1）
@@ -231,5 +231,61 @@ describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空�
     await at(1);
     await key("う");
     expect(value()).toBe("うい");
+  });
+});
+
+/**
+ * **J・G（と E・O）の Erase EOF・Field Exit・Field± は、消したあとも詰め物で予算いっぱいまで埋め直す**（独立点検 B-S2）。
+ * 消した字を半角空白に替えるだけだと、(1) J・G では右へ動いて打った字の前に半角空白が残り、core が「全角しか入力できない」で拒否する
+ * （貼り付け・IME・Delete・Backspace は `padDbcs` を通るので起きなかった）。(2) E・O では全角 1 字が 1 バイトの空白になり、予算に対して `chars` が短くなって
+ * 欄の後ろの桁へカーソルが届かなくなる
+ */
+describe("DBCS の欄の Erase EOF・Field Exit・Field± のあと", () => {
+  type Grid = { eraseEof: () => void; fieldExit: () => void; fieldPlus: () => void };
+  /** J（5 スロット。SO の次が 1）と G（6 スロット）。`あいう` が入った欄の 2 スロット目の頭から始める */
+  const kinds = {
+    J: async () => {
+      const { w, key, at, value } = await open(jSnapshot(["あ", "い", "う"]));
+      await at(2);
+      return { grid: w.vm as unknown as Grid, key, value };
+    },
+    G: async () => {
+      const { snapshot } = gSnapshot(["あ", "い", "う"]);
+      const { w, key, at, value } = await open(snapshot);
+      await at(1);
+      return { grid: w.vm as unknown as Grid, key, value };
+    }
+  };
+
+  for (const [kind, start] of Object.entries(kinds)) {
+    for (const op of ["eraseEof", "fieldExit", "fieldPlus"] as const) {
+      it(`**${kind}: ${op} のあと、右へ動いて打っても値に半角空白が混ざらない**（消えた空きは全角空白）`, async () => {
+        const { grid, key, value } = await start();
+        grid[op]();
+        await nextTick();
+        for (let i = 0; i < 3; i++) await key("ArrowRight");
+        await key("か");
+        expect(value()).toBe("あ\u3000\u3000\u3000か");
+        expect(value()!.includes(" "), "半角空白が混ざっていない").toBe(false);
+      });
+    }
+  }
+
+  it("**E（open）: Erase EOF のあとも欄の最後の桁まで打てる**（全角 1 字を半角空白 1 つに替えると `chars` が予算より短くなり、後ろの桁へ届かなかった）", async () => {
+    const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
+    const r = cells[4]!;
+    r[19] = cell(" ", "so");
+    r[20] = cell("あ", "dbcs-lead"); r[21] = cell("", "dbcs-tail");
+    r[22] = cell("い", "dbcs-lead"); r[23] = cell("", "dbcs-tail");
+    r[24] = cell(" ", "si");
+    const field = { index: 1, row: 5, col: 20, length: 10, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "open" } as Field;
+    const snapshot = { sessionId: "e1", rows: 24, cols: COLS, cursor: { row: 5, col: 20 }, keyboardLocked: false, cells, fields: [field] } as unknown as ScreenSnapshot;
+    const { w, key, at, value } = await open(snapshot);
+    await at(1); // 先頭の字の頭（SO の次）
+    (w.vm as unknown as Grid).eraseEof();
+    await nextTick();
+    for (let i = 0; i < 9; i++) await key("ArrowRight");
+    await key("X");
+    expect(value(), "10 バイトの欄の最後の桁（10 桁目）に入る").toBe(" ".repeat(9) + "X");
   });
 });

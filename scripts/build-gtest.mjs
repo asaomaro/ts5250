@@ -1,4 +1,4 @@
-// 実機に **DBCS の 4 種の欄（DDS のデータ型 G・J・E・O）を持つ画面** を出す試験画面を作る（`20260922-g-field-sosi`）。
+// 実機に **DBCS の 4 種の欄（DDS のデータ型 G・J・E・O）を持つ画面** を出す試験画面を作る（`20260921-g-field-sosi`）。
 //
 //   GTDSPF（DDS。レコード GREC）と GTST（ILE C。`scripts/host-src/gtst.c`）。`CALL <LIB>/GTST [PARM('BLANK')]`: GREC を出し、戻った入力の生バイトを IFS のログへ残す。
 //   欄（12 バイト・画面の桁も 12）: FG（G・6 字。純 DBCS＝SO/SI 無し）／FJ（J）／FE（E）／FO（O）。行 3・5・7・9 の 20 桁目。

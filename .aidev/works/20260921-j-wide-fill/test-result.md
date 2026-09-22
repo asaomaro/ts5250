@@ -24,3 +24,20 @@ smoke: pass (exit 0)
 
 ## 未検証の穴（skip / 環境不足）
 - 実ブラウザの打鍵（jsdom まで）。ACS が NUL 空きの J に打つときの前の空きの扱い（D2）
+
+## 節目 11 の対応（独立点検 B の指摘を直した回）
+
+### 実行したもの
+- `cd packages/web-ui && npx vitest run test/dbcs-pure-field.test.ts` — 24 passed / 0 failed（J・G × Erase EOF/Field Exit/Field± の 6 件、E の桁数の確認 1 件を足した）
+
+~~上の「43 ファイル 647 passed」は対象ファイルの一覧が無く再現できない（独立点検 B-N5）~~ → 対象を「G・J 双方に触れるテストファイル」に絞って書き直す:
+`test/dbcs-pure-field.test.ts`・`dbcs-insert-room.test.ts`・`dbcs-space-key.test.ts`・`field-adjust.test.ts`・`continued-field-exit.test.ts`・`ime-flow-next-field.test.ts` の 6 ファイル 116 passed（節目 11 時点）。
+
+### 受け入れ基準の再確認
+- AC1: 追加で「Erase EOF・Field Exit・Field± の後に右へ動いて打っても半角空白が混ざらない」を固定（以前は打鍵・Delete 経路しか固定していなかった）。
+
+### mutation
+`scratchpad/mut-b12.py`（`eraseToEndDbcs` を消した空きを半角空白のままにする・Erase EOF/Field Exit/Field± だけ旧処理に戻す）— 4 通りすべて検出（KILLED）。
+
+### 未検証の穴
+実機での確認は「打鍵で離れた空きへ打つ」経路のみ（`かきく` の 3 字）。Erase EOF の後に右へ動いて打つ経路そのものは実機では測っていない（core の拒否ルールは既存テストで確認済みの箇所を再利用）。

@@ -576,7 +576,7 @@ function applyWtd(
   let dbcsMode = false; // SO..SI 間は DBCS（2 バイト）モード
   /**
    * **WEA 0x12 0x05 0x81 … 0x12 0x05 0x80 の間は、SO/SI 無しの DBCS（2 バイト組）**（ACS `PS5250.writeExtAttribute` の `isInExtNLSSegment`）。
-   * 純 DBCS の欄（G）のデータをホストはこの形で送ってくる（実機の DDS の G 型で確かめた。`20260922-g-field-sosi`）。
+   * 純 DBCS の欄（G）のデータをホストはこの形で送ってくる（実機の DDS の G 型で確かめた。`20260921-g-field-sosi`）。
    */
   let nlsSegment = false;
   /**
@@ -630,8 +630,11 @@ function applyWtd(
       dbcsMode = false; // 属性桁で DBCS 連続は切れる
       continue;
     }
-    // SO/SI の間・WEA5 の区間・**純 DBCS の欄（G）の中**は 2 バイト組で読む（G の欄は SO/SI 無しで組だけが並ぶ）
-    if ((dbcsMode || nlsSegment || buf.isPureDbcsAt(addr)) && codec.decodeDbcsPair && b >= 0x40) {
+    // SO/SI の間・WEA5 の区間・**純 DBCS の欄（G）の中**は 2 バイト組で読む（G の欄は SO/SI 無しで組だけが並ぶ）。
+    // **2 バイト目が 0x40 以上のときだけ組にする**（DBCS の 2 バイト目は 0x40 以上）。奇数バイトのまま次のオーダー（WEA・SBA・SF）が来ても、
+    // 組の 2 バイト目に食わない——ACS の `processWriteToDisplay` はオーダー 10 個と ESC の手前までを 1 続きの文字列として書くので起きない。
+    // 食うと偽の否定応答（0x10050121）を返し、レコードの残り（後ろの READ まで）を失う（`20260921-g-field-sosi` の独立点検 A-S2）
+    if (b >= 0x40 && codec.decodeDbcsPair && r.remaining >= 1 && r.peek() >= 0x40 && (dbcsMode || nlsSegment || buf.isPureDbcsAt(addr))) {
       // DBCS 2 バイトを lead/tail の 2 桁に配置
       const b2 = r.u8();
       buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)), b, b2);
@@ -672,7 +675,7 @@ function applyWtd(
        * それ以外の ESC 以外のバイトは全部 1 続きの文字列として書く）。0x05〜0x0D・0x16〜0x1B が該当する。
        * ~~未知のオーダーとして次の ESC まで読み飛ばす~~ は誤りだった——同じ WTD の後ろの SBA・SF・IC を失い、同じ族の 0x1C・0x1F が実機で届いていた。
        * 実機の ACS のコア（`scripts/acs-probe/wtd-control-bytes.txt`）は、各バイトを 1 桁の空白として置き（0x07 だけ DEL）、後ろのオーダーをすべて処理した。
-       * `20260922-wtd-control-bytes`。元のバイトは送信用にだけ持つ（`hostByte`。画面イメージ・SAVE の応答で返す。ACS は `HostPlane` に受信バイトを入れる）
+       * `20260921-wtd-control-bytes`。元のバイトは送信用にだけ持つ（`hostByte`。画面イメージ・SAVE の応答で返す。ACS は `HostPlane` に受信バイトを入れる）
        */
       buf.setChar(addr++, controlDataText(b), undefined, b);
       continue;
@@ -772,10 +775,11 @@ function applyWtd(
         // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
         const attrType = r.u8();
         const attrValue = r.u8();
-        // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり・0x00 は印を外す。
-        // 区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260922-g-field-sosi`）
+        // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり。
+        // **0x00 は区間の旗を変えない**（ACS の `case 0` は現在位置の印を外すだけで `isInExtNLSSegment` に触れない。~~0x00 で区間を終える~~ は原典・実測の裏づけの無い推測だった。
+        // 独立点検 A-S3）。区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260921-g-field-sosi`）
         if (attrType === 0x05 && codec.decodeDbcsPair && (attrValue === 0x81 || attrValue === 0x80 || attrValue === 0x00)) {
-          nlsSegment = attrValue === 0x81;
+          if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
           break;
         }
         warn(

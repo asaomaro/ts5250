@@ -6,7 +6,7 @@ import { MSG_NO_ROOM } from "../src/composables/opMessages.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
- * **DBCS の欄の挿入モードの余地**（ACS `PS5250.reserveRoomForInsert`。`20260922-dbcs-insert-room`）。実機の ACS のコアで測った
+ * **DBCS の欄の挿入モードの余地**（ACS `PS5250.reserveRoomForInsert`。`20260921-dbcs-insert-room`）。実機の ACS のコアで測った
  * （`scripts/acs-probe/dbcs-insert-room.txt`。DBCSFE の画面・930）:
  * - J・G・E（DBCS）は、末尾の**全角空白（U+3000）を空きに数える**——`あい□□□` の先頭へ `う` を挿入すると `うあい□□`（成功）。当 PJ は 0012 で拒否していた
  * - カーソルが**最終桁**なら空白でも 0012（J・E は SI の桁、O は最終のセル）。1 桁手前は入る

@@ -50,7 +50,7 @@ describe("classifyKey", () => {
     expect(classifyKey({ ...base, key: "ArrowDown", ctrlKey: true })).toEqual({ local: "word-down" });
   });
 
-  // ~~Alt+←/→ は対象外~~ → ACS の既定 `A37 = [backtabword]`・`A39 = [tabword]`（`20260922-word-tab-acs`）。アプリのショートカットは Alt+Shift 系
+  // ~~Alt+←/→ は対象外~~ → ACS の既定 `A37 = [backtabword]`・`A39 = [tabword]`（`20260921-word-tab-acs`）。アプリのショートカットは Alt+Shift 系
   it("**Alt+←/→ は語頭ジャンプ**（ACS の `[backtabword]`・`[tabword]`）。Alt+↑/↓ は別の用途（ドロップダウン）のまま", () => {
     expect(classifyKey({ ...base, key: "ArrowLeft", altKey: true })).toEqual({ local: "word-left" });
     expect(classifyKey({ ...base, key: "ArrowRight", altKey: true })).toEqual({ local: "word-right" });

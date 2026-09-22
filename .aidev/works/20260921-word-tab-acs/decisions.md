@@ -12,4 +12,4 @@
 - `C35`（Ctrl+End）・`C34`（Ctrl+PgDn）は、Ctrl+PgDn がブラウザのタブ切替と衝突し、対の意味も非対称なので入れない。
 
 ## D3: 測っていないもの（未確認）
-- 文字が行末から次の行へ続く画面の行頭（原典の読み）。DBCS の後ろに SI の無い半角（純 DBCS の欄の直後）の語頭。Alt+←/→ が実ブラウザで戻る/進むに奪われないか（keydown の preventDefault で止める）。
+- ~~文字が行末から次の行へ続く画面の行頭~~ → 節目 11 の独立点検（B-N9）で原典を読んで確認した: `ECLPS.getPreviousPosition`（引数 `n-1`、0 なら画面末尾）は行をまたぐので、当 PJ の実装と同じ手順。DBCS の後ろに SI の無い半角（純 DBCS の欄の直後）の語頭は**未確認のまま**——`is1stCharacter` は `IsSIChar(prev)` か `isDisplayedAsSpace(prev)` だけを見るので、後半桁の `TextPlane` の値が NUL か空白かに依る（実測していない）。Alt+←/→ が実ブラウザで戻る/進むに奪われないか（keydown の preventDefault で止める）。

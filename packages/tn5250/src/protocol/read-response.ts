@@ -260,10 +260,10 @@ function buildFlatFieldResponse(
     // センチネル（1 文字 1 バイト）が混ざると文字数では桁が合わないため、
     // **バイト数で** 0x40（空白）詰め・切り詰めをする。位置で区切る形式なので長さが命。
     const tmp = new ByteWriter();
-    // 純 DBCS の欄は SO/SI 無し（`buildFieldResponse` の注記）。**末尾の半角空白は詰め物**（打った値はセルに 1 字ずつ入り、残りは半角空白のセル）なので落とす——
-    // 落とさないと `SO 字 SI` の後ろに半角の 0x40 が続く形になり、SO/SI を外せない。詰めは下の 0x40（DBCS 空白の 2 バイトと同じ）
-    const flat = flatValue(buf, f, codec);
-    substituted += writeValue(tmp, f.dbcsType === "pure" ? flat.replace(/ +$/, "") : flat, codec, f.dbcsType === "pure");
+    // 純 DBCS の欄は SO/SI 無し（`buildFieldResponse` の注記）。詰め物（打った値は 1 字 1 セルで、残りは半角空白のセル）の落とし方と、
+    // 継続欄の区間ごとの全角空白詰めは `pureValue`（落とさないと `SO 字 SI` の後ろに半角の 0x40 が続く形になり、SO/SI を外せない）
+    const pure = f.dbcsType === "pure";
+    substituted += writeValue(tmp, pure ? pureValue(buf, f, codec) : flatValue(buf, f, codec), codec, pure);
     const bytes = tmp.toUint8Array();
     w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
     for (let i = bytes.length; i < width; i++) w.u8(0x40);
@@ -375,6 +375,34 @@ function writeValue(w: ByteWriter, value: string, codec: Codec, noShift = false)
   return substituted;
 }
 
+/**
+ * **欄の値を送るときのバイト数**（`writeValue` と同じ符号化）。純 DBCS の欄（G）は SO/SI を数えない。
+ * `Session.setField` の長さ検査と送信（`buildFieldResponse`）が同じ数え方をするための入口（`20260921-g-field-sosi` の独立点検 A-M1）
+ */
+export function encodedFieldLength(value: string, codec: Codec, pure: boolean): number {
+  const w = new ByteWriter();
+  writeValue(w, value, codec, pure);
+  return w.toUint8Array().length;
+}
+
+/**
+ * **純 DBCS の欄（G）の送信値**（継続欄は全区間の連結）。区間ごとに、**末尾の半角空白**（編集で 1 字 1 セルに書いたときの残りの詰め物）を落とし、
+ * 区間の長さ（偶数バイト）まで**全角空白**で詰めてから連結する——落としたまま連結すると、後ろの区間の字が前の区間の空きへ詰まってしまう
+ * （ACS `FFT5250.getFieldContents` は継続欄の全区間の内容を連結する。`20260921-g-field-sosi` の独立点検 A-S1）。
+ * 未編集の区間はホストの原本のバイト（センチネル）で、すでに区間の長さぶんある
+ */
+function pureValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
+  const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  return run
+    .map((seg) => {
+      let s = buf.fieldValue(seg, true).replace(/ +$/, "");
+      const want = seg.length - (seg.length % 2);
+      while (encodedFieldLength(s, codec, true) < want) s += "\u3000";
+      return s;
+    })
+    .join("");
+}
+
 /** 行・桁・AID ＋ 指定された欄の並び。`buildReadMdtResponse` と READ IMMEDIATE で共有する */
 function buildFieldResponse(
   buf: ScreenBuffer,
@@ -395,18 +423,19 @@ function buildFieldResponse(
     // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル。
     // **符号付き数値欄だけは符号桁を見るため末尾ブランクを残した値**から作る（上の関数）。
     // 継続入力フィールドは全区間を連結した値になる。
-    const value = sendValue(buf, f, codec);
     if (f.dbcsType === "pure") {
       // **純 DBCS の欄（G）は欄長いっぱいの SO/SI 無しの 2 バイト組で送る**（実機の ACS のワイヤ: `かきく` を打った 12 バイトの欄が `44 86 44 87 44 88 40 40 40 40 40 40`。
-      // 残りは DBCS 空白 0x4040）。以前は SO/SI を付けて短く送り、ホストの欄に制御バイトが入って全角が 1 バイトずれた（`20260922-g-field-sosi`）
+      // 残りは DBCS 空白 0x4040）。以前は SO/SI を付けて短く送り、ホストの欄に制御バイトが入って全角が 1 バイトずれた（`20260921-g-field-sosi`）。
+      // 継続欄は全区間の長さの合計（先頭区間の長さで切ると 2 区間目以降のデータが落ちる。独立点検 A-S1）
       const tmp = new ByteWriter();
-      substituted += writeValue(tmp, value, codec, true);
+      substituted += writeValue(tmp, pureValue(buf, f, codec), codec, true);
       const bytes = tmp.toUint8Array();
-      const width = f.length - (f.length % 2);
+      const total = f.continued === undefined ? f.length : buf.continuedRun(f).reduce((n, seg) => n + seg.length, 0);
+      const width = total - (total % 2);
       w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
       for (let i = Math.min(bytes.length, width); i < width; i++) w.u8(0x40);
     } else {
-      substituted += writeValue(w, value, codec);
+      substituted += writeValue(w, sendValue(buf, f, codec), codec);
     }
   }
 

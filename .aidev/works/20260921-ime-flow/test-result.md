@@ -25,3 +25,17 @@ smoke: pass (exit 0)
 
 ## 未検証の穴（skip / 環境不足）
 - ACS の GUI 層の IME 確定・実ブラウザの IME（D2）
+
+## 節目 11 の対応（独立点検 B の指摘を直した回）
+
+### 実行したもの
+- `cd packages/web-ui && npx vitest run test/ime-flow-next-field.test.ts` — 17 passed / 0 failed（型の違う欄の組 6 件・DBCS の上書き 1 件・DBCS の選択置換 1 件を足した）
+
+### 受け入れ基準の再確認
+- AC1〜AC3: 変更なし。追加で「満杯の欄が受けない字でも、次の欄の型で検査して流す」ことを型の違う 4 組（数値→英字・半角→全角・J→open・対照の英字→数値）で固定した。
+
+### mutation
+`scratchpad/mut-b12.py`（満杯判定を型検査の後へ戻す・DBCS を判定から外す・DBCS の選択置換でも判定する）— 3 通りのうち 2 通り検出。残り 1 つ（DBCS の選択置換でも判定する）は最初のテスト（末尾から離れた選択）では生存したが、**欄の最後の字の選択**（跡が欄の末尾に接する）のテストを足すと検出した（`scratchpad/mut-b12b.py`）。
+
+### 未検証の穴
+実ブラウザの IME の compositionend/input の順序は今回も未確認（jsdom まで）。

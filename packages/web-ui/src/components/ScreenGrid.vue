@@ -194,9 +194,8 @@ const emit = defineEmits<{
   (e: "cursor", row: number, col: number): void;
   (e: "gui-select", fieldId: number, choiceIndex: number, selected: boolean): void;
   (e: "gui-submit", fieldId: number): void;
-  /** 欄が最大桁まで埋まった（ACS の自動送り＝次の入力欄へ）。満杯になった欄の index を渡す
-   *  （満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、index で次欄を特定する） */
-  /** 欄が満杯・Field Exit・Field±・Dup で次の欄へ送る。`viaFieldExit` は Field Exit / Field± の経路（出た後の検査を掛けない。ペインの `onFieldFull`）。
+  /** 欄が満杯・Field Exit・Field±・Dup で次の欄へ送る（満杯時は sync が欄外へ論理カーソルを出し input が blur されるため、
+   *  index で次欄を特定する）。`viaFieldExit` は Field Exit / Field± の経路（出た後の検査を掛けない。ペインの `onFieldFull`）。
    *  `leaving` は**欄を出る操作**（Field Exit・Field±・Dup）——行き先は継続欄の鎖の後ろ（打鍵の満杯は次の区間） */
   (e: "field-full", fieldIndex: number, viaFieldExit?: boolean, leaving?: boolean): void;
   /** 矩形（ブロック）選択が解除された（親のキーボード選択アンカーもリセットさせる） */
@@ -245,13 +244,13 @@ function stripSentinels(s: string): string {
 }
 /**
  * **SO/SI を欄の桁に持たない欄か**（純 DBCS の G）。ACS の G は欄の全桁が 2 バイトの組で、SO/SI の桁が無い（実機の DDS の G 型で確かめた。
- * 12 バイトの欄に全角 6 字。ワイヤも SO/SI 無し）。バイト予算・列ビューのどちらも SO/SI を数えない（`20260922-g-field-sosi`）
+ * 12 バイトの欄に全角 6 字。ワイヤも SO/SI 無し）。バイト予算・列ビューのどちらも SO/SI を数えない（`20260921-g-field-sosi`）
  */
 const noShift = (f: Field | undefined): boolean => f?.dbcsType === "pure";
 /**
  * **空きを全角空白（U+3000）で持つ欄か**（J＝`only`・G＝`pure`）。ACS の J・G の空きは DBCS 空白（0x4040）で、打った字は 2 桁ずつの桁に入る。
  * 半角空白を詰めると、離れた空き桁に字を打ったとき途中に半角空白が残り、core の「全角しか入力できない」で送れない（`あ   い`。実機の J で確かめた）。
- * E・O の空きは半角空白（SBCS が混ざれる）。`20260922-g-field-sosi`
+ * E・O の空きは半角空白（SBCS が混ざれる）。`20260921-g-field-sosi`
  */
 const wideFill = (f: Field | undefined): boolean => f?.dbcsType === "only" || f?.dbcsType === "pure";
 /** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト。`f` が G なら SO/SI 無し） */
@@ -2056,7 +2055,7 @@ function takeMdtKeyed(): boolean {
 }
 /**
  * **J・G・E（DBCS 中）の欄で打った半角の空白は、全角空白（U+3000）にする**（ACS `PS5250.processCharKeyStroke` の `convertSBCSCharToDBCS`。
- * `20260922-dbcs-space-key`）。O は対象外（SBCS の空白のまま）。E は**欄が DBCS の状態のときだけ**（全角の字が入っているとき）——実機の ACS のコア
+ * `20260921-dbcs-space-key`）。O は対象外（SBCS の空白のまま）。E は**欄が DBCS の状態のときだけ**（全角の字が入っているとき）——実機の ACS のコア
  * （`scripts/acs-probe/dbcs-space-key.txt`）: J・G は空の欄でも先頭の Space が全角空白、E は空の欄・SBCS の字の後の Space は SBCS の空白で、`あ` の後は全角空白。
  * IME を切った Space で日常的に起きる——当 PJ は J・G で「全角のみ」と拒否していた。**打鍵の経路だけ**（貼り付け・IME の確定は ACS も変換しない）
  */
@@ -2137,11 +2136,21 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
   return out;
 }
 
+/**
+ * **DBCS の欄の「カーソル以降を消す」**（Erase EOF・Field Exit・Field±）。消したあとも**バイト予算いっぱいまで詰め物で埋め直す**——
+ * 消した字を半角空白 1 つずつに替えるだけだと、(1) J・G では空きが半角空白になり、右へ動いて打った字の前に半角が残って
+ * core が「全角しか入力できない」で拒否する（`padDbcs` の J・G の詰め物は全角空白）。(2) 全角 1 字が 1 バイトの空白に替わるので、
+ * 予算に対して `chars` が短くなり、欄の後ろの桁へカーソルが届かなくなる（E・O でも同じ）。独立点検 B-S2
+ */
+function eraseToEndDbcs(f: Field, state: EditState): EditState {
+  return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
+}
+
 /** 予算超過ぶんを末尾の空白パディングで吸収する（全角は SO/SI で最大 4 桁ぶん増えるため）。
  *  カーソルより後ろの空白だけを削り、既入力は守る。削り切れなければ undefined（＝入力を拒否）。
  *
  *  **J・G・E は末尾の全角空白（U+3000）も空きに数える**（`wideBlank`。ACS `reserveRoomForInsert` は右端から続く NUL・半角空白・全角空白を空きと数える。
- *  ホストが 4040 で埋めた欄・全角空白で埋めた欄への挿入が通る。O は数えない——SO/SI の桁で数え始めが止まる。`20260922-dbcs-insert-room`） */
+ *  ホストが 4040 で埋めた欄・全角空白で埋めた欄への挿入が通る。O は数えない——SO/SI の桁で数え始めが止まる。`20260921-dbcs-insert-room`） */
 function absorbDbcs(chars: string[], budget: number, cursor: number, wideBlank = false, f?: Field): string[] | undefined {
   const out = [...chars];
   while (byteLen(out.join(""), f) > budget) {
@@ -2478,7 +2487,7 @@ function fieldExitKey(): void {
   const erases = fieldExitedIndex !== t.f.index;
   mdtKeyed = erases;
   fieldExitedIndex = -1;
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldExit(base, t.f);
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : fieldExit(base, t.f);
   if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（ACS `eraseToEOF_Work`）。右寄せはカーソルの区間だけ（上の `fieldExit`）
   sync(t.el, t.f); // 値が変わるか、消す操作をしたら emit("edit") が出る＝MDT が立つ
   // AUTO_ENTER 欄は**次欄へ移らず Enter を送る**（原典は Field Exit / Field± / Dup の
@@ -2523,7 +2532,7 @@ function fieldSignKey(negative: boolean): void {
   const erases = fieldExitedIndex !== t.f.index; // Field Exit と同じ（`fieldExited` のときは `eraseToEOF` を通らない）
   mdtKeyed = erases;
   fieldExitedIndex = -1;
-  edit = isDbcsEdit(t.f) ? eraseToEnd(edit) : fieldSign(base, { ...t.f, numericOnly }, negative);
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : fieldSign(base, { ...t.f, numericOnly }, negative);
   if (erases) fillFollowingSegments(t.f, " "); // 継続欄は続く区間も消える（Field+。Field− は継続欄では上で拒否する）
   sync(t.el, t.f);
   if (t.f.autoEnter) {
@@ -2582,14 +2591,14 @@ function eraseEofKey(): void {
     return;
   }
   fieldExitedIndex = -1; // ACS もカーソルの桁から消す（`fieldExited` を見ない）
-  edit = eraseToEnd(edit);
+  edit = isDbcsEdit(t.f) ? eraseToEndDbcs(t.f, edit) : eraseToEnd(edit);
   fillFollowingSegments(t.f, " "); // 継続欄は続く区間も全桁消える（ACS `eraseToEOF_Work`）
   mdtKeyed = true; // 消えるものが無くても MDT（`eraseToEOF` は `setMDT` 付き）
   sync(t.el, t.f);
 }
 
 /**
- * Delete Word（ACS の Ctrl+Delete＝`[deleteword]`。`20260922-delete-word`）: カーソルの語を消して後ろを左へ詰める。**欄は出ず・カーソルも動かさない**。
+ * Delete Word（ACS の Ctrl+Delete＝`[deleteword]`。`20260921-delete-word`）: カーソルの語を消して後ろを左へ詰める。**欄は出ず・カーソルも動かさない**。
  * 範囲は `deleteWordLength`（実機の ACS のコアで測った）。継続欄は区間の並びを 1 つの欄として数える（実機: `1234/56/78` の 1 区間目の 2 桁目で `1   /  /  `）。
  * MDT は消えるものが無くても立てる（`processDeleteChar` は `setMDT`。Delete と同じ）。欄内の選択は見ない（ACS の Delete 系は選択に触れない）
  */
@@ -2806,7 +2815,7 @@ function commitFieldValueDirect(x: Field, val: string): void {
  * **継続欄で、カーソルの区間より後ろの区間を全桁 `fill` で埋める**（ACS `PS5250.eraseToEOF_Work`・`processDupFM`。空白は NUL、Dup は 0x1C）。
  * カーソルの区間は呼び出し側が従来どおり「カーソルから区間の終わりまで」を埋める。実機の ACS のコアで、日付欄（4/2/2 の 3 区間）の
  * 最初の区間の途中の Erase EOF・Field Exit が続く区間まで消し、Dup が続く区間を 0x1C で埋めた
- * （`scripts/acs-probe/continued-field-erase-exit.txt`。`20260922-continued-field-exit`）。継続欄でない欄は何もしない。
+ * （`scripts/acs-probe/continued-field-erase-exit.txt`。`20260921-continued-field-exit`）。継続欄でない欄は何もしない。
  * MDT は鎖のどこかに立てば全区間に立つ（`mdtOf`）ので、ここでは編集を出すだけ
  */
 function fillFollowingSegments(f: Field, fill: string): void {
@@ -2934,7 +2943,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // ここで素の Delete / Backspace として処理するとペインの割り当てと**二重に効く**（1 文字消えたうえに語も消える）。
   // 矢印キーが以前から同じ理由で修飾キーを除外しているのと同じ扱いに揃える。
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-  // **割り当ての無い修飾キー付きの Backspace・Delete は何もしない**（ACS の Ctrl+Backspace＝`C8` は割り当て無し。`20260922-delete-word`）。
+  // **割り当ての無い修飾キー付きの Backspace・Delete は何もしない**（ACS の Ctrl+Backspace＝`C8` は割り当て無し。`20260921-delete-word`）。
   // 通すと、ブラウザの既定（語の削除）が <input> の値だけを書き換えて編集モデルとずれる（以前は Ctrl+Backspace が Erase Input に割り当たっていて止まっていた）
   if ((ev.key === "Backspace" || ev.key === "Delete") && !plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
@@ -3211,7 +3220,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
       // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
-      // （`20260921-insert-no-room` D2。最終桁の判定は `atLastColumn`——`20260922-dbcs-insert-room`）
+      // （`20260921-insert-no-room` D2。最終桁の判定は `atLastColumn`——`20260921-dbcs-insert-room`）
       if (base.insertMode && !replaced) emit("notice", MSG_NO_ROOM);
       return;
     }
@@ -3811,13 +3820,17 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
   let noRoom = false;
   let i = 0;
   for (; i < raws.length; i++) {
+    // 上書きで欄の末尾に着いていたら、これ以上は入らない（余りを次の欄へ流す）。SBCS の `typeChar` は末尾で同じ状態を返して黙って捨てる。
+    // **型の検査より先に見る**——ACS は 1 字ずつの打鍵で、欄が満杯になった時点でカーソルは次の欄へ移っており、続く字は**次の欄の型**で検査される。
+    // 検査の後に置くと、満杯の欄が受けない字（数値欄へ `12AB` の `A` など）が `continue` で捨てられ、次の欄が受けられても届かない（独立点検 B-S1）。
+    // DBCS も同じ条件（`advanceIfFull` の満杯判定と同じ。DBCS の `chars` も欄の長さまで空白で詰めてあり、予算が尽きれば `absorbDbcs` が空白を削って短くなる）
+    // DBCS で選択を置き換えた回だけは除く（跡を埋める挿入なので、`chars` の末尾に着いても満杯とは限らない）
+    if (!e.insertMode && (!dbcs || !replacedSelection) && e.cursor >= e.chars.length) break;
     const ch = inputChar(raws[i]!, f); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
     if (!acceptsChar(f, ch, sessionKind.value)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
     const base = replacedSelection ? { ...e, insertMode: true } : e;
-    // 上書きで欄の末尾に着いていたら、これ以上は入らない（余りを次の欄へ流す）。SBCS の `typeChar` は末尾で同じ状態を返して黙って捨てる
-    if (!dbcs && !e.insertMode && e.cursor >= e.chars.length) break;
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
     // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が

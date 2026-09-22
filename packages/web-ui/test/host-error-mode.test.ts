@@ -270,7 +270,7 @@ describe("操作員エラーと新しい画面", () => {
  */
 describe("エラー中の編集キー", () => {
   // ~~Erase EOF（Ctrl+Delete）・Erase Input（Ctrl+Backspace）~~ → 既定のキーが ACS と同じに変わった（Erase EOF は既定のキー無し・Erase Input は Alt+End。
-  // `20260922-delete-word`）。Erase EOF は割り当てて確かめる
+  // `20260921-delete-word`）。Erase EOF は割り当てて確かめる
   it.each([
     ["Field Exit（Ctrl+Enter）", { key: "Enter", ctrlKey: true }, undefined],
     ["Erase EOF（割り当てたキー）", { key: "e", ctrlKey: true }, ["ctrl+e", "local:erase-eof"] as const],

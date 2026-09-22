@@ -85,7 +85,7 @@ export function del(state: EditState): EditState {
 
 /**
  * **Delete Word（ACS の既定 `C127`＝Ctrl+Delete の `[deleteword]`）が消す長さ**（ACS `PS5250.processDeleteWord` → `getDeleteCharacters`。
- * 実機の ACS のコアで測った。`scripts/acs-probe/delete-word.txt`。`20260922-delete-word`）:
+ * 実機の ACS のコアで測った。`scripts/acs-probe/delete-word.txt`。`20260921-delete-word`）:
  * - カーソルの字が**空白**なら 1 字（空白が続いても 1 字ずつ）。**全角**も 1 字ずつ（数えは全角・SO/SI に当たると止まる）
  * - 半角の語（空白・全角・欄の終わりまで）の**頭**にいれば、語＋**続く空白**。頭は、直前が空白・全角・欄の先頭のとき
  *   （全角の直後の半角も頭。実機: `あいAA BB` の最初の `A` で `BB` だけが残る）
@@ -193,15 +193,19 @@ export function eraseToEnd(state: EditState): EditState {
 }
 
 /**
- * 右寄せ。**GNU tn5250 `tn5250_display_shift_right`（lib5250/display.c）の移植**。
+ * 右寄せ（ACS `PS5250.performRightAdjustFill`）。**空きは「欄の末尾から続く NUL の数」だけ**で、それ以外の空白（打った空白・ホストが入れた空白）は
+ * **内容として一緒に右へ動く**。当 PJ は NUL を持たないので、**Field Exit が消したばかりのカーソル以降（符号付き数値は符号桁の手前まで）を空きとして数える**
+ * （呼び出し側が先に `eraseToEnd` する前提）。実機の ACS のコアで確かめた（`scripts/acs-probe/empty-adjust-field-exit.txt`）:
+ *  - 何も打たずに欄の先頭で Field Exit → 全桁が埋め字（`CHECK(RZ)` は `000000`。ホストが受け取った値も `000000`）
+ *  - 空の欄の 5 桁目で → `00    `・2 桁目で → `00000 `（手前の空白は内容として右へ動き、消えた桁数ぶんだけ左が埋め字になる）
+ *  - `1` と空白を 1 つ打って → `00001 `（打った空白は空きとして捨てられず、`1` と一緒に動く）
+ * ~~GNU tn5250 `tn5250_display_shift_right` の移植（先頭の空白を fill に置換・末尾が空白の間 1 桁ずつずらす）~~ は ACS と違い、空の欄では何もせず
+ * （原典に「無限ループになるので」とある。ACS にその分岐は無い）、打った末尾の空白を空きとして捨て、先頭の空白を埋め字へ替えていた
+ * （`20260921-signed-rz-fill` の節目 11 の独立点検 B-S6）
  *
- * 手順は原典どおり: ①先頭から続く空白を `fill` で置換 ②末尾が空白の間、1 桁ずつ右へずらして
- * 先頭に `fill` を置く。これにより
- *  - 末尾が既に非空白なら**1 桁も動かない**（満杯の欄は無変化）
- *  - 全桁が空白なら**何もしない**（原典に「そうしないと無限ループ」とある）
- *  - 語中の空白は保持されたまま一緒に動く（`"1 2  "` → RZ → `"001 2"`）
- *
- * `keepLastPosition` は符号付き数値欄用（最終桁＝符号桁を動かさない）。
+ * 満杯まで打った直後（`exitedBase` がカーソルを最終桁の後ろへ置く）は空きが 0 で、何も動かない（ACS は NUL が無ければ何もしない）。
+ * `keepLastPosition` は符号付き数値欄用（最終桁＝符号桁を動かさず、空きの数にも入れない）。
+ * 未確認: ホストが NUL で埋めた欄（画面消去のあとに欄だけ立てた画面など）は、ACS では手前も空きに数えるが、当 PJ は NUL と空白を区別しない
  */
 export function rightAdjust(
   state: EditState,
@@ -212,14 +216,12 @@ export function rightAdjust(
   const end = chars.length - 1 - (opts.keepLastPosition ? 1 : 0);
   if (end < 0) return state;
 
-  let n = 0;
-  for (; n <= end && chars[n] === " "; n++) chars[n] = fill;
-  if (n > end) return state; // 全桁が空白 = 整形しない（原典の無限ループ回避と同じ判定）
+  const free = end + 1 - Math.min(state.cursor, end + 1);
+  if (free <= 0) return state;
 
-  while (chars[end] === " ") {
-    for (let i = end; i > 0; i--) chars[i] = chars[i - 1]!;
-    chars[0] = fill;
-  }
+  const content = chars.slice(0, end + 1 - free);
+  for (let i = 0; i < free; i++) chars[i] = fill;
+  for (let i = 0; i < content.length; i++) chars[free + i] = content[i]!;
   // 右寄せ後は欄末尾（＝これ以上打てない位置）へ。Field Exit は直後に次の欄へ移るが、
   // 単独で呼んだときにカーソルが語の途中へ取り残されないようにする。
   return { ...state, chars, cursor: chars.length };
@@ -232,7 +234,7 @@ export function rightAdjust(
  * （ACS `PS5250.performRightAdjustFill`: 符号付き数値なら埋め字を空白・右端を符号桁の 1 つ手前にしたうえで、RB なら空白、RZ なら `'0'` にする）。
  * 実機の ACS のコアで `CHECK(RZ) 6 0`（符号付き＋RZ）に `12` と打って Field− すると `000012-`、素の `6 0` は `    34-`（`scripts/acs-probe/field-minus-numeric-only.txt`）。
  * ~~signed-num を ADJUST 指定より先に見る（tn5250 は signed-num の `mand_fill_type` を無条件で `RIGHT_BLANK` へ差し替える）~~ は ACS と違い、
- * RZ の数値欄が `    12-` になっていた（`20260922-signed-rz-fill`）。実機の DDS 数値欄は `6 0` も `6S 0` も signed-num で来るので、
+ * RZ の数値欄が `    12-` になっていた（`20260921-signed-rz-fill`）。実機の DDS 数値欄は `6 0` も `6S 0` も signed-num で来るので、
  * 調整の指定が無いときの空白右寄せは残る（無いと数値欄で Field Exit が何もしない）。
  *
  * `mandatory-fill`（0x0007）は**右寄せではない**（「全桁を埋めよ」の検証指定）。両参照実装とも桁を動かさないので、ここでも動かさない

@@ -25,3 +25,17 @@ smoke: pass (exit 0)
 
 ## 未検証の穴（skip / 環境不足）
 - 実機のホストへは当てていない（監査はサーバーの記録だけで、ホストの挙動に触れない）
+
+## 節目 11 の対応（独立点検 A の指摘を直した回）
+
+### 実行したもの
+- `cd packages/server && npx vitest run test/ws-associated-printer.test.ts test/audit.test.ts` — 30 passed / 0 failed / 0 skipped（`sessionId` の 2 件を足した）
+
+### 受け入れ基準の再確認
+- AC1〜AC4: 変更なし。追加で「成功は `sessionId`（プリンターの id。装置名・設定名ではない）を持つ」「時間がかかったら `durationMs` が実際にかかった分」を固定した。
+
+### mutation
+`scratchpad/mut-audit2.py`（`sessionId` を載せない・`durationMs` を常に 0 にする）— 2 通りとも検出（KILLED）。
+
+### 未検証の穴
+`invalid`（認可拒否・設定が無い・プリンターでない）の理由の細分化と、利用者の記録は今回も対応していない（`AuditEvent` 共通の設計の話として別 work）。

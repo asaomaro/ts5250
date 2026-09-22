@@ -419,12 +419,25 @@ describe("関連付けの監査（ws_associated_printer）", () => {
   });
   const assoc = () => events.filter((e) => e.op === "ws_associated_printer");
 
-  it("**成功は ok を 1 件**。載せるのは op・result・durationMs だけ（設定名・装置名を入れない）", async () => {
+  it("**成功は ok を 1 件**。載せるのは op・sessionId（起こしたプリンター）・result・durationMs だけ（設定名・装置名を入れない）", async () => {
     const mgr = new Recording();
     await openDisplay(mgr, [prt, disp()]);
     expect(assoc()).toHaveLength(1);
     expect(assoc()[0]).toMatchObject({ op: "ws_associated_printer", result: "ok" });
-    expect(Object.keys(assoc()[0]!).sort(), "値を載せない").toEqual(["durationMs", "op", "result"]);
+    expect(Object.keys(assoc()[0]!).sort(), "値を載せない").toEqual(["durationMs", "op", "result", "sessionId"]);
+    // どのプリンターが起きたかを追える（A-S8）。装置名（PRTA）や設定名（prt）そのものではなく、実行時に振る ID
+    const started = [...mgr.listPrinters()][0]!;
+    expect(assoc()[0]!.sessionId).toBe(started.id);
+    expect(assoc()[0]!.sessionId).not.toBe("PRTA");
+    mgr.closeAll();
+  });
+
+  it("**時間は実際にかかった分を載せる**（装置名が決まるまで待った分。常に 0 ではない）", async () => {
+    const mgr = new SlowRecording();
+    await openDisplay(mgr, [prt, disp()]);
+    expect(assoc()).toHaveLength(1);
+    // 起動応答は 400ms 遅れる（`SlowPrinterTransport`）。タイマーの誤差を見込んで 300ms を下限にする
+    expect(assoc()[0]!.durationMs ?? 0).toBeGreaterThanOrEqual(300);
     mgr.closeAll();
   });
 

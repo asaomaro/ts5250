@@ -1,8 +1,9 @@
 // 実ブラウザ（web-ui）で実機へ接続し、**ローカル編集キーと FFW の ADJUST（右寄せ）**を検証する。
 //
 //   Field Exit（Ctrl+Enter）  — 欄の残りを消して FFW どおり右寄せし、次の欄へ
-//   Erase EOF（Ctrl+Delete）  — カーソルから欄末尾まで消去（欄は出ない・右寄せしない）
-//   Erase Input（Ctrl+Backspace）— すべての入力欄をクリア
+//   Erase EOF（Alt+Delete）   — カーソルから欄末尾まで消去（欄は出ない・右寄せしない）。**既定のキーは無い**（ACS の既定にも無く、
+//                               Ctrl+Delete は Delete Word）ので、このスクリプトが起動時に割り当てる
+//   Erase Input（Alt+End）    — すべての入力欄をクリア（既定。Ctrl+Backspace は何もしない）
 //
 // 画面は `scripts/build-adjtest.mjs` が作る TESTLIB/ADJPGM。
 // **最後に Enter を送り、ホストが受け取った値（RPG が `[...]` で返す）まで確かめる**——
@@ -50,6 +51,11 @@ await sleep(600);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 820 } });
 page.on("pageerror", (e) => log("PAGEERR " + e.message));
+// Erase EOF は既定のキーが無いので、割り当てだけを 1 つ保存しておく。**版のキーは書かない**——読み込みは保存済みの版より後の既定を混ぜるので、
+// 版が無ければ全既定（Field Exit＝Ctrl+Enter・Erase Input＝Alt+End など）が入ったうえで、この割り当てが残る（`stores/keybindings.ts` の `load`）
+await page.addInitScript(() => {
+  localStorage.setItem("as400.keybindings", JSON.stringify({ "alt+Delete": "local:erase-eof" }));
+});
 
 const bodyText = () => page.locator("body").innerText();
 const has = async (t) => (await bodyText()).includes(t);
@@ -164,14 +170,14 @@ try {
   await sleep(300);
   check("Field Exit: カーソル以降が消える", (await valueOf(5)).replace(/ +$/, "") === "AB", JSON.stringify(await valueOf(5)));
 
-  // ---- Erase EOF（Ctrl+Delete）: 消すだけ・欄は出ない・右寄せしない ----
+  // ---- Erase EOF（Alt+Delete。起動時に割り当てた）: 消すだけ・欄は出ない・右寄せしない ----
   await typeInto(3, "ABCDEF");
   await page.evaluate(() => {
     const all = [...document.querySelectorAll("input.grid-input:not([readonly])")];
     all[3].focus();
     all[3].setSelectionRange(3, 3);
   });
-  await page.keyboard.press("Control+Delete");
+  await page.keyboard.press("Alt+Delete");
   await sleep(300);
   const afterEof = await valueOf(3);
   check("Erase EOF: カーソル以降だけ消える", afterEof.replace(/ +$/, "") === "ABC", JSON.stringify(afterEof));
@@ -181,8 +187,8 @@ try {
   });
   check("Erase EOF: 欄から出ない", stillHere === 3, `focusIndex=${stillHere}`);
 
-  // ---- Erase Input（Ctrl+Backspace）: 全入力欄をクリア ----
-  await page.keyboard.press("Control+Backspace");
+  // ---- Erase Input（Alt+End。既定）: 全入力欄をクリア ----
+  await page.keyboard.press("Alt+End");
   await sleep(400);
   const allVals = [];
   for (let i = 0; i < n; i++) allVals.push((await valueOf(i)).trim());

@@ -16,7 +16,7 @@
 //   F3（CA03）で抜ける。
 //
 // **ソースは既存の QDDSSRC に入れる**（新しいソース・ファイルは作らない。`scripts/build-adjtest.mjs` と同じ方式）。
-// **測定が済んだら `--clean` で消す**（DLTPGM / DLTF / RMVM / DROP ALIAS）。
+// **測定が済んだら `--clean` で消す**（DLTPGM / DLTF / RMVM と IFS のファイル。別名は通常の実行の中で作って落とす）。
 //
 // 実行: node --env-file=.env --env-file=.env.verify scripts/build-ulktest.mjs [--clean]
 //   AS400_HOST / AS400_USER / AS400_PASSWORD（`.env`）、AS400_LIB（`.env.verify`）。資格情報は出力しない。

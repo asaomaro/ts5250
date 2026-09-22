@@ -17,7 +17,7 @@ export const LOCAL_EDIT_ACTIONS = [
   "field-exit",
   "erase-eof",
   "erase-input",
-  // Delete Word（ACS の既定 Ctrl+Delete＝`[deleteword]`。`20260922-delete-word`）
+  // Delete Word（ACS の既定 Ctrl+Delete＝`[deleteword]`。`20260921-delete-word`）
   "delete-word",
   // **符号付き数値欄で負値を入れる主経路**（実機は数値キーパッドの `-` / `+`。`numpadFieldSign`）。
   // ~~打鍵の `-` / `+` も数値欄ではここへ横流しする（ScreenGrid）~~ → メイン行の `-` `+` は文字
@@ -81,8 +81,9 @@ export function classifyKey(
   opts: { fieldSignKeys?: boolean } = {}
 ): { aid?: AidKey; local?: LocalAction } {
   // Ctrl+矢印 = 語頭ジャンプ（ACS のカーソル頭出し。入力欄に限らず画面全体で動く）。
-  // 左右は前後の語頭へ、上下は内容のある近接行の先頭語（行の頭）へ。
-  // 他の修飾つき（Alt+PageUp/Down のタブ切替・Alt+矢印のペイン移動）は App 側の
+  // 左右は前後の語頭へ、上下は内容のある近接行の先頭語（行の頭）へ。Alt+←→ も同じ語頭ジャンプ
+  // （`e448749d`。ACS Alt+矢印の既定と揃えた）ので下で一緒に見る。
+  // 他の修飾つき（Alt+PageUp/Down のタブ切替・Alt+Shift+矢印のペイン移動）は App 側の
   // グローバルハンドラが担うため、ここでは対象外（{} を返して素通しさせる）。
   if (ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
     if (ev.key === "ArrowLeft") return { local: "word-left" };
@@ -90,7 +91,7 @@ export function classifyKey(
     if (ev.key === "ArrowUp") return { local: "word-up" };
     if (ev.key === "ArrowDown") return { local: "word-down" };
   }
-  // **Alt+←/→ も語頭ジャンプ**（ACS の既定の割り当て `A37 = [backtabword]`・`A39 = [tabword]`。`20260922-word-tab-acs`）。
+  // **Alt+←/→ も語頭ジャンプ**（ACS の既定の割り当て `A37 = [backtabword]`・`A39 = [tabword]`。`20260921-word-tab-acs`）。
   // ブラウザの履歴の戻る／進むは捕捉時に preventDefault で抑える。アプリのショートカットは Alt+Shift 系（`App.vue`）
   if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
     if (ev.key === "ArrowLeft") return { local: "word-left" };

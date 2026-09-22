@@ -89,7 +89,7 @@ node --env-file=.env --env-file=.env.verify tools/hostserver-check/dist/sql.js \
 | `verify-browser-render.mjs` | 描画回帰（実ブラウザ）: 反転(背景色)セルの文字色≠背景色（文字が見える）／DBCS 全角の縦位置が同行テキストと揃う、を計算スタイル・幾何で検証。 |
 | `verify-browser-select.mjs` | 矩形選択回帰（実ブラウザ）: カーソルが選択の始点に置かれ、マウス／キーボードで広げても動かない（ACS 相当）／ダブルクリックで語を選択（入力欄上の native 語選択を畳んで blur できるか）／カーソルが選択ハイライトより上に描かれる（jsdom は scoped CSS を解決しないため）。 |
 | `verify-browser-paste.mjs` | 複数行ペースト回帰（実ブラウザ・12 項目）: `STRSQL` の SQL 入力エリア（独立した入力欄が縦に並ぶ）へ矩形の形のまま落ちる／書いた範囲だけ上書きし後ろの既存文字を残す（`123456` へ `789` → `789456`）／行またぎ欄（コマンド行）でも折返し先の同じ桁へ落ちる／帯の幅で折り返しあふれは次の帯行の同じ桁へ／挿入モードは後続を右へずらし入り切らねば「挿入する余地がありません」で何も書かない／ペースト後もカーソルが動かない。**SQL は実行しない**（Enter を押さない）ためホストは変更しない。 |
-| `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（Ctrl+Delete）は消すだけで欄を出ない／Erase Input（Ctrl+Backspace）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
+| `verify-browser-adjust.mjs` | ローカル編集キーと FFW の ADJUST 回帰（実ブラウザ・実機・15 項目）: Field Exit（Ctrl+Enter）がカーソル以降を消して `CHECK(RZ)`＝ゼロ埋め／`CHECK(RB)`＝空白埋めで右寄せし次の欄へ進む／`CHECK(MF)` は桁を動かさない／符号付き数値欄は指定が無くても空白右寄せし符号桁を残す／Erase EOF（既定のキーは無いので `Alt+Delete` を起動時に割り当てる）は消すだけで欄を出ない／Erase Input（`Alt+End`。既定）で全欄クリア。**最後に Enter を送り、ホストが受け取った値（`[000012]` / `[    12]`）まで確かめる**。**要 `TESTLIB/ADJPGM`**（`build-adjtest.mjs`）。 |
 | `verify-screen-size.mjs` | 画面サイズ検証: 24x80 / 27x132 × SBCS / DBCS の端末タイプと、`STRSEU`（*DS4 を持つ画面）が実際にワイドで来るか。DBCS はカラー端末（~~G02/~~C01）を掴めているかも見る。**要 `TESTLIB/QDDSSRC`**。 |
 | `verify-printer.mjs` | プリンターセッション検証（core・実機）: `PrinterSession` で待ち受け → 表示セッションから自前スプールをそのプリンター OUTQ へ回し（`CHGJOB OUTQ`＋`DSPLIBL OUTPUT(*PRINT)`）→ ライターの用紙タイプ問い合わせ（`CPA3394`）に `I` で応答 → SCS を受信して "Library List" 帳票を桁揃えで展開できることを確認。**自分のデバイスにのみスプールを回す**ためホストを汚さない。 |
 | `verify-printer-dbcs.mjs` | DBCS プリンター検証（core・PUB400・CCSID 1399）: 5553 の装置が作られ、用紙・位置合わせの問い合わせに答えると帳票が届くことを確認。~~帳票に日本語が桁揃えで載ることを確認~~ → **英語機では日本語は置換される**（申告を ACS と同じ組にしたため。日本語の検証は下の `verify-printer-dbcs-push.mjs`）。**要 TESTLIB**。 |
@@ -617,7 +617,7 @@ TARGET=<実機IP> LOG=./tap.log node scripts/tap-proxy.mjs
 
 `relay-5250.mjs` — **5250 の telnet（23）だけを中継して両方向の生バイトを記録する小さな中継**。
 `tap-proxy.mjs` と違い待ち受けポートを自由に選べ（特権ポートが要らない）、ホストサーバーのポートは扱わない。
-ACS のコア（`acs-probe.mjs`）や診断スクリプトを実機との間で測るのに向く（`20260922-g-field-sosi` で G の欄のワイヤを採った）。
+ACS のコア（`acs-probe.mjs`）や診断スクリプトを実機との間で測るのに向く（`20260921-g-field-sosi` で G の欄のワイヤを採った）。
 実機のアドレスは `.env` の値を環境変数越しに渡す（画面に出さない）。
 
 ```sh
@@ -626,7 +626,7 @@ AS400_HOST=127.0.0.1 PROBE_PORT=32323 node --env-file=.env --env-file=.env.verif
 ```
 
 記録は 1 行 1 パケット（`C>H <hex>` がクライアント→ホスト、`H>C <hex>` がホスト→クライアント。IAC のエスケープを解く前）。
-**パスワードが平文で残るので、解析したら `shred -u` で消す**。
+**パスワードが平文で残るので、解析したら `shred -u` で消す**（記録は本人だけが読める権限〔0600〕で作る。`RELAY_LOG` は `*.log` にすると `.gitignore` の除外に合う）。
 
 `research-ifs-dataccsid.mjs` — **IFS の新規ファイルに付く CCSID タグの実測**。
 `dataCcsid` を指定しない／`1208`／`1399`／既存の上書き、の 4 条件を比べる。

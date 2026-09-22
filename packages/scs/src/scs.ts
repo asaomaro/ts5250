@@ -151,7 +151,7 @@ export class ScsDecoder {
       cellAt(col);
       // **空白（0x40）は下の字を消さない**——ACS の JPS は 1 字ずつ `drawString` するだけで何も消さず、空白は「空白のグリフを 1 桁ぶん描く」だけ。
       // CR で戻って同じ行へ重ね書きするとき、2 度目の空白は下の字の上を通り過ぎるだけ（`ABCDEF` CR `␠␠␠XY` は `ABCXYF`）。
-      // `20260922-scs-blank-overprint`。書かないので、生バイトも下の字のまま残る。位置と `maxCol` は従来どおり進める
+      // `20260921-scs-blank-overprint`。書かないので、生バイトも下の字のまま残る。位置と `maxCol` は従来どおり進める
       if (!(ch === " " && occupied(row, col))) {
         grid[row - 1]![col - 1] = ch;
         // 生バイトは SBCS の桁にだけ残す（読み直せるのはこれだけ）

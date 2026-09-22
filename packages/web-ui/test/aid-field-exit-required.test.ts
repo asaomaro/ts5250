@@ -388,6 +388,17 @@ describe("Field Exit が必須の欄を満杯まで打った後", () => {
     expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBe("123456");
   });
 
+  it("**Delete Word は「出た」状態を下ろす**（文字以外のキーの後は `fieldExited = false`。続けて打てる。独立点検 B-S4）", async () => {
+    const { input, w } = await mountAt(3);
+    await type(input, "123456");
+    (w.findComponent(ScreenGrid).vm as unknown as { deleteWord: () => void }).deleteWord();
+    await nextTick();
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)?.trimEnd(), "最終桁の語（`6`）が消える").toBe("12345");
+    await input.trigger("keydown", { key: "X" });
+    await nextTick();
+    expect(sessionsStore.byId.get(SID)!.edits.get(1), "0018 にならず、最終桁へ打てる").toBe("12345X");
+  });
+
   it("符号付き数値: 満杯の後の Field− は数字を残して符号だけ付ける", async () => {
     const { w, input } = await mountAt(7);
     await type(input, "12345");

@@ -73,7 +73,7 @@ export function moveCursor(
 /**
  * pos の方向 dir にある「語頭」桁へ移動する（ACS の Alt+←/→ = `[backtabword]`／`[tabword]`。当 PJ は Ctrl+←/→ にも割り当てる。入力欄・保護テキストを問わず、表示文字だけで判定する）。
  *
- * **left/right は ACS の `ECLPS.get1stCharPosition`・`is1stCharacter` と同じ**（実機の ACS のコアで測った。`scripts/acs-probe/tabword.txt`。`20260922-word-tab-acs`）:
+ * **left/right は ACS の `ECLPS.get1stCharPosition`・`is1stCharacter` と同じ**（実機の ACS のコアで測った。`scripts/acs-probe/tabword.txt`。`20260921-word-tab-acs`）:
  * - **語頭** = 空白でない桁のうち、(a) **全角の字は 1 字ごと**（連なっていても各字が停止点。全角空白も）、(b) 画面の先頭の桁、(c) **直前の位置（行をまたぐ。行頭なら前の行の最終桁）が空白**の桁
  *   （SO/SI も空白と見るので、SI の直後の半角は語頭）。全角の後半桁は語頭でない
  * - **画面の端で巻き戻る**（右下から `[tabword]` は先頭側の最初の語頭へ、左上から `[backtabword]` は末尾側の最後の語頭へ）。語が 1 つも無ければ pos を返す
