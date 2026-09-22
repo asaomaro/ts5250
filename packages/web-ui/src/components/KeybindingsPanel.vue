@@ -208,7 +208,7 @@ function add(): void {
 }
 .add {
   background: var(--accent);
-  color: #fff;
+  color: var(--card);
   border-color: var(--accent);
 }
 select {

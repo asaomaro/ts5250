@@ -212,7 +212,7 @@ const metaRows = computed<{ label: string; value: string }[]>(() => {
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--card);
   cursor: pointer;
   font-size: 11px;
 }

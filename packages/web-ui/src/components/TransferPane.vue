@@ -489,7 +489,7 @@ input[type="text"], input:not([type]) {
   background: var(--bg); color: var(--ink); font-family: var(--mono); font-size: 12px;
 }
 .go { font-size: 12px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 5px;
-  background: var(--accent); color: #fff; cursor: pointer; font-weight: 650; }
+  background: var(--accent); color: var(--card); cursor: pointer; font-weight: 650; }
 .go:disabled { opacity: 0.5; cursor: default; }
 
 /* 方向切替。**このペインの中心的な操作**なので、他の入力より目立たせる */

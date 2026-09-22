@@ -825,7 +825,7 @@ function onStripLeave(ev: DragEvent): void {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent, #3b82f6);
-  color: #fff;
+  color: var(--card);
   font-size: 10px;
   line-height: 15px;
   text-align: center;

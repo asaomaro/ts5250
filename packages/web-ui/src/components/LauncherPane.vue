@@ -406,7 +406,7 @@ const connect = openConfigured.open;
 .btn {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--card);
   border-radius: 6px;
   padding: 4px 12px;
   font: inherit;
