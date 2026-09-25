@@ -420,3 +420,34 @@ coding工程で`cross`のtaskcheckラウンド上限に達しているため、�
   `test-result.md`に明記済み）。
 
 指摘1件（must、review工程で発見しその場で修正・mutation検証済み）。
+
+## ラウンド14（deliver後・利用者の要望「vsixのビルドshとbatを作って」への対応）
+
+`decisions.md` D15。新設は`vscode-extension.sh`/`vscode-extension.bat`（リポジトリ直下）。
+`launcher/preflight.mjs`冒頭コメントも更新。coding工程で`cross`のtaskcheckラウンド
+上限に達しているため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外（利用者からの直接の要望への対応）。
+  被覆に変化なし。
+- **価値適合**: 「言われた通りに新しく書く」前に、既存の`start.sh`/`electron.sh`
+  （＋`.bat`対）を実際に読み、**同じ構造の3本目として乗せる**判断をしている。
+  車輪の再発明をしなかったことで、Node版チェック・ワークスペース依存の鮮度判定・
+  `--build`強制再ビルドという、既に実運用で踏んだ教訓（`start.bat`/`electron.bat`の
+  コメントに残る実例）がそのまま今回にも効く。
+- **正確性**: 実際に2経路（既定の鮮度判定スキップ／`--build`強制）の両方を
+  このセッションで実行し、`vscode-extension/ts5250-vscode-0.1.0.vsix`
+  （3916ファイル・10.41MB）の生成を確認している。単に「書いて終わり」にせず、
+  動くことを実行で確かめてから承認している。
+- **規約適合**: `.bat`は`LC_ALL=C grep -n '[^ -~]'`で非ASCII文字が無いことを確認済み
+  （`start.bat`/`electron.bat`冒頭の既存コメントが明記する制約——cp932コンソールでの
+  多バイト文字誤読を防ぐため）。
+- **保守性**: `launcher/preflight.mjs`冒頭の「4つのランチャー」という古い記述を、
+  呼び出し元が実際に6つになった時点で「6つのランチャー」へ更新している——
+  記述と実体の食い違いを見つけてその場で直しており、放置していない
+  （AGENTS.md「判断の原則」3の精神）。
+- **未検証のまま残る点**: `vscode-extension.bat`はこのLinuxコンテナでcmd.exeが
+  無いため実行確認ができていない。`start.bat`/`electron.bat`の実証済み構造を
+  一字一句に近い形で踏襲することで確からしさを担保しているが、実際のWindows上での
+  動作は利用者による確認が必要（`test-result.md`ラウンド14に明記済み）。
+
+指摘なし（must/should/nit いずれも0件）。

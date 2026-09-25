@@ -697,3 +697,45 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   `vscode-extension/src/protocol.ts`・`vscode-extension/src/ts5250EditorProvider.ts`・
   `vscode-extension/src/webviewHtml.ts`を変更。関連テスト4ファイルを更新。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D15: `.vsix`ビルドスクリプト（`vscode-extension.sh`/`.bat`）を新設
+
+- **背景**: 利用者から「vsixのビルドshとbatを作って」との要望。それまでは
+  `node vscode-extension/scripts/prepare-server.mjs && npx --yes @vscode/vsce package`
+  を手で（かつ事前に`npm run build`/`npm run build -w @ts5250/web-ui`/
+  `vscode-extension`側の`npm install`/`npm run build`も別途手で）打つ必要があった。
+- **既存資産の調査**（推測で書き始めない）: リポジトリ直下に同種のランチャー対
+  `start.sh`/`start.bat`（Webアプリ起動）・`electron.sh`/`electron.bat`
+  （Electronデスクトップ版のインストーラ生成）が既にあり、**どちらも同じ構造**
+  （Node版チェック→ワークスペース依存の鮮度判定→未ビルド/`--build`指定時だけ
+  ビルド→サブプロジェクト固有の依存/生成）を持つ。この構造は`launcher/
+  preflight.mjs`（`--check-node`/`--needs-build`）に集約されており、
+  冒頭コメントに「`start`/`electron`の4つのランチャーから共通で呼ぶ」と明記されていた。
+  **車輪の再発明をせず、この対に3本目として乗せる**のが妥当と判断した。
+- **決定**:
+  1. `vscode-extension.sh`/`vscode-extension.bat`をリポジトリ直下に新設
+     （`electron.sh`/`.bat`と同じ命名規則——対象のサブプロジェクトディレクトリ名）。
+     `electron.sh`/`.bat`の構造をそのまま踏襲し、末尾に拡張機能固有の3手順
+     （`vscode-extension`の依存インストール（存在チェックのみ。既存の`electron/
+     node_modules`チェックと同じ簡潔さ）→ビルド→`prepare-server.mjs`→
+     `vsce package`）を追加した。
+  2. `--build`で強制再ビルド、無指定なら`preflight.mjs --needs-build`で鮮度判定
+     （`start`/`electron`と同じ既定動作。パッケージング用途だからといって
+     「常に非条件でフルビルド」にはせず、既存の判断を再利用した）。
+  3. `.bat`はASCIIのみで書く（cp932コンソールでの多バイト文字誤読を避ける。
+     `start.bat`/`electron.bat`冒頭の既存コメントと同じ理由・同じ制約）。
+  4. `launcher/preflight.mjs`冒頭のdocコメント「`start`/`electronの4つのランチャー`」
+     を「`start`/`electron`/`vscode-extensionの6つのランチャー`」へ更新した
+     ——呼び出し元が増えたのにコメントの数字だけ古いままだと、次にここを読む人が
+     実際の呼び出し元を把握し損なう（記述と実体の食い違いを放置しない。
+     AGENTS.md「判断の原則」3の精神——気づいた食い違いはその場で直す）。
+- **検証**: 実際に`./vscode-extension.sh`（既定・鮮度判定でビルドをスキップする経路）
+  と`./vscode-extension.sh --build`（強制ビルド経路）の両方を実行し、どちらも
+  `vscode-extension/ts5250-vscode-0.1.0.vsix`（3916ファイル・10.41MB）を実際に
+  生成することを確認した。`.bat`は**このLinuxコンテナでは実行できないため
+  未検証**——`electron.bat`/`start.bat`の実証済みの構造を一字一句に近い形で
+  踏襲することで確からしさを担保しているが、実際のWindows上での動作確認は
+  利用者に委ねる（`decisions.md` D8/D14と同種の、環境起因の限界）。
+- **影響**: `vscode-extension.sh`（新規）・`vscode-extension.bat`（新規）・
+  `launcher/preflight.mjs`（コメント更新のみ、ロジック変更なし）を変更。
+  同じPR #414（未マージ）へ追加コミットする。

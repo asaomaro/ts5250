@@ -336,6 +336,10 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
   sandbox>`単体でのBlobダウンロード可否）で実証済みだが、**VSCode WebView自体が
   さらに上位でダウンロードを許可しているかは未確認**。`local-fonts`（D8）と同種の
   「もう1段の許可が必要かもしれない」限界として残す。
+- **D15の`vscode-extension.bat`は、Windows実機での実行確認ができていない**
+  （このLinuxコンテナにはcmd.exeが無い）。`.sh`版は実際に2経路（既定/`--build`）とも
+  `.vsix`生成まで確認済み。`.bat`は構造をproven（`start.bat`/`electron.bat`）から
+  一字一句に近い形で踏襲することで裏付けている。
 
 ## ラウンド12（deliver後・利用者の質問「通常のブラウザ版エミュレータも対応出来ていますか？」への対応）
 
@@ -412,3 +416,25 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
 未達**。`allow-downloads`が無いとBlob URLダウンロードがブロックされることは
 Playwrightの最小再現で実証したが、実際のVSCode拡張ホスト（このコンテナには無い）
 経由でクリック→ダウンロードが動くかまでは確認できていない。
+
+## ラウンド14（deliver後・利用者の要望「vsixのビルドshとbatを作って」への対応）
+
+`decisions.md` D15。新設は`vscode-extension.sh`/`vscode-extension.bat`
+（リポジトリ直下）。既存の`launcher/preflight.mjs`冒頭コメントも更新（呼び出し元の
+数を4→6に）。
+
+- **`vscode-extension.sh`の実行（既定・鮮度判定でビルドをスキップする経路）**:
+  `rm -f vscode-extension/*.vsix && ./vscode-extension.sh` —
+  `vscode-extension/ts5250-vscode-0.1.0.vsix`（3916ファイル・10.41MB）を実際に生成。
+- **`vscode-extension.sh --build`の実行（強制フルビルド経路）**:
+  `rm -f vscode-extension/*.vsix && ./vscode-extension.sh --build` — ライブラリ/server
+  のビルド・web-ui（vue-tsc+vite）のビルド・拡張機能自体のビルド（tsc -b）・
+  `prepare-server.mjs`・`vsce package`の全段が実際に走り、同じく`.vsix`が生成された。
+- `LC_ALL=C grep -n '[^ -~]' vscode-extension.bat` — 非ASCII文字0件（cp932コンソールでの
+  誤読を避けるため必須の制約。`start.bat`/`electron.bat`と同じ）。
+- `aidev smoke` — pass
+
+**`vscode-extension.bat`はこのLinuxコンテナでは実行できないため未検証**。
+`start.bat`/`electron.bat`の実証済みの構造（`if errorlevel`の分岐・`pushd`/`popd`の
+対応・エスケープした括弧）を一字一句に近い形で踏襲することで確からしさを担保しているが、
+実際のWindows上での動作確認は利用者に委ねる（D8/D14と同種の環境起因の限界）。
