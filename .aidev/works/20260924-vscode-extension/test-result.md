@@ -173,6 +173,21 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
 
 このラウンドでは失敗は発生していない。
 
+## ラウンド6（deliver後・利用者の追加要望「テーマ選択ボタンも表示させて」への対応）
+
+`decisions.md` D7。差分は`packages/web-ui/src/EmbedApp.vue`のみ（`DesignMenu`追加）。
+
+- `cd packages/web-ui && npx vue-tsc -b tsconfig.json tsconfig.test.json` — 0 errors
+- `cd packages/web-ui && npx vitest run` — **2669 passed / 0 failed**（206 test files）
+- `npm run build -w @ts5250/web-ui` — 実ビルド成功
+- **実ブラウザでの確認（Playwright）**: `embed.html?app=printer`で「⚙ 表示」「外観」「⚙」の
+  3ボタンが並んで表示されることを確認。「外観」クリックでスキン一覧（5250端末/WEBアプリ）・
+  表示モード（通常/ダーク/システム）を含むポップオーバーが正しく開くことをスクリーンショットで
+  確認した。コンソールエラー・ページエラー0件
+- `aidev smoke` — pass
+
+このラウンドでは失敗は発生していない。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには

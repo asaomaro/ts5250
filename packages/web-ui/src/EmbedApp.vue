@@ -21,6 +21,7 @@ import SqlPane from "./components/SqlPane.vue";
 import IfsPane from "./components/IfsPane.vue";
 import SettingsForm from "./components/SettingsForm.vue";
 import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
+import DesignMenu from "./components/DesignMenu.vue";
 import { embedStore, postToHost } from "./stores/embed.js";
 import { openSession, closeSession } from "./session-controller.js";
 import { makePaneTabId } from "./paneLabels.js";
@@ -138,6 +139,7 @@ function onSave(v: SettingsFormValues): void {
         :session-id="viewMenuTarget.sessionId"
         :keys="viewMenuTarget.keys"
       />
+      <DesignMenu />
       <button class="settings-btn" title="設定" @click="showSettings = true">⚙</button>
     </header>
     <div class="embed-body">

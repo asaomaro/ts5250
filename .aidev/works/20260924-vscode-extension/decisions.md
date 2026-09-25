@@ -287,3 +287,26 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   裏付けている。
 - **影響**: `packages/web-ui/src/EmbedApp.vue`・`packages/web-ui/src/App.vue`・
   `packages/web-ui/src/stores/viewSettings.ts`を変更。同じPR #414（未マージ）へ追加コミットする。
+
+## D7: `EmbedApp.vue`に「外観」（テーマ・スキン選択）ボタンを追加する
+
+- **背景**: D6の直後、利用者から「テーマ選択ボタンも表示させて」との追加要望があった。
+  `App.vue`のコメント（`viewMenuTarget`の直前）に「**テーマ（通常/ダーク）はここに出さない。
+  アプリ全体の『外観』が持っている**」とあり、テーマ切替は`ViewSettingsMenu`（表示。D6で
+  追加済み）ではなく`DesignMenu`（外観。ボタン表記「外観」・title「外観（アプリ全体の
+  見た目）」）が担う、別の既存コンポーネントだと判明した。
+- **決定**: `EmbedApp.vue`のヘッダーへ`DesignMenu`を追加した（`<ViewSettingsMenu>`と
+  `<button class="settings-btn">`の間）。`DesignMenu`は`App.vue`でも`<DesignMenu />`と
+  無props・無条件で呼ばれており（`useSkin`/`useTheme`/`appearance`ストアを内部で直接参照）、
+  `EmbedApp.vue`側にも計算対象を用意する必要が無い——単純な追加。`embed.ts`は既に
+  `initTheme()`/`initSkin()`/`initAppearance()`を呼んでおり（`main.ts`と同じ順序）、
+  `DesignMenu`が要る状態は全て初期化済みだった。
+- **理由・代替案**: 検討の余地なし——`App.vue`に既にある確立済みのコンポーネントを
+  そのまま流用するのが唯一の妥当な選択（独自実装を作らない）。
+- **検証**: 型検査（`vue-tsc`）・`packages/web-ui`全体のテスト（2669件）green。加えて
+  実際にサーバーを起動し実ブラウザ（Playwright）で確認: 「⚙ 表示」「外観」「⚙」の3つが
+  ヘッダーに並んで表示され、「外観」をクリックするとスキン一覧（5250端末/WEBアプリの
+  各スキン）・表示モード（通常/ダーク/システム）を含むポップオーバーが正しく開くことを
+  スクリーンショットで確認した。コンソールエラー0件。
+- **影響**: `packages/web-ui/src/EmbedApp.vue`のみ変更。同じPR #414（未マージ）へ
+  追加コミットする。
