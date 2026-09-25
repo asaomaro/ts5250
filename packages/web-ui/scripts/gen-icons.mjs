@@ -23,6 +23,10 @@ const WEB_OUT = join(HERE, "..", "public");
 // electron-builder の buildResources。`icon.png` を置くだけで全プラットフォームの
 // アイコン（exe / dmg / AppImage）に使われる
 const ELECTRON_OUT = join(HERE, "..", "..", "..", "electron", "build");
+// VSCode拡張機能のアイコン（`vscode-extension/package.json`の`icon`欄が指す）。
+// VS Code Marketplaceの推奨は128×128以上（`vsce package`は指定サイズをそのまま使う。
+// electron-builderのicns生成のような下限制約は無い）
+const VSCODE_OUT = join(HERE, "..", "..", "..", "vscode-extension");
 
 const VB = 64; // viewBox の一辺
 const BG = [0x0f, 0x1a, 0x12]; // 端末の地（--paper のダーク寄り）
@@ -219,5 +223,7 @@ emit(WEB_OUT, "favicon.ico", ico([16, 32, 48].map((size) => ({ size, data: png(r
 emit(WEB_OUT, "apple-touch-icon.png", png(render(180, 4), 180));
 // macOS は 512 未満だと electron-builder が icns を作れない。1024 で出しておく
 emit(ELECTRON_OUT, "icon.png", png(render(1024, 2), 1024));
+// VSCode拡張機能のアイコン（favicon・electronアイコンと同じ絵を使う。利用者の要望）
+emit(VSCODE_OUT, "icon.png", png(render(128, 4), 128));
 
 for (const f of written) process.stderr.write(`generated: ${f}\n`);

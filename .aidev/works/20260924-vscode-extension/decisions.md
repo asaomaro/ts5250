@@ -406,3 +406,37 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
 - **影響**: `packages/web-ui/src/components/ViewSettingsMenu.vue`のみ変更
   （`App.vue`・`EmbedApp.vue`双方に自動反映）。同じPR #414（未マージ）へ
   追加コミットする。
+
+## D10: VSCode拡張機能のアイコンをfavicon/electronアイコンと同じ絵にする
+
+- **背景**: 利用者から「VSCode拡張機能のアイコンにもfaviconやelectronアイコンと
+  同じアイコンを設定してください」との要望があった。
+- **調査**: アイコンの絵は`packages/web-ui/scripts/gen-icons.mjs`が**唯一の定義元**
+  （`ts`のモノグラム＋カーソル下線を図形定義から自前でラスタライズする）で、
+  そこから`favicon.svg`/`favicon.ico`/`apple-touch-icon.png`（`packages/web-ui/public/`）と
+  `electron/build/icon.png`（1024×1024。electron-builderがexe/dmg/AppImage全部に使う）を
+  生成している。スクリプル冒頭のコメントに明記された設計思想:
+  「ブラウザのファビコンとElectronのアプリアイコンは同じ絵なので、出力先が2つでも
+  定義は1つに保つ——バイナリを手で置くと、色を直したときに片方だけ古いまま残り、
+  しかも見比べるまで気づかない」。
+- **決定**: この設計に**素直に第3の出力先として乗る**（新規に絵を作らない・
+  手でコピーしない）。`gen-icons.mjs`へ`VSCODE_OUT`（`vscode-extension/`）を追加し、
+  `emit(VSCODE_OUT, "icon.png", png(render(128, 4), 128))`で128×128のPNGを生成した
+  （VS Code Marketplaceの推奨サイズ「128×128以上」に合わせた——electron-builderの
+  icns生成のような下限制約が無いぶん、電子版の1024より小さくてよい）。
+  `vscode-extension/package.json`へ`"icon": "icon.png"`を追加した。
+- **理由・代替案**: 検討の余地なし——単一の定義元から出す既存の設計に従うのが
+  唯一の妥当な選択。手でPNGを1つ作って置く方法は、この設計思想（「片方だけ古いまま
+  残る」問題を避けるため2出力先を1定義に保った）にそのまま反する。
+- **検証**: `npm run gen:icons`を実際に実行し、新規`vscode-extension/icon.png`
+  （128×128 PNG）が生成されることを確認。**既存の3出力（favicon.svg/ico・
+  apple-touch-icon.png・electron/build/icon.png）はバイト単位で無変更**
+  （`git status`に現れず——生成が決定的であることの裏付け）。`npx @vscode/vsce package`を
+  実際に実行し、`.vsix`内に`icon.png`が含まれること・`extension.vsixmanifest`に
+  `<Icon>`要素として登録されることを確認した。`vscode-extension`のテストは
+  74件中73〜74件green（実プロセスを使う統合テストが全ファイル並行実行下で
+  時折flakeするのは`decisions.md` D2と同種の既知の特性——単体実行では常にgreen。
+  今回の変更（アイコンファイル・`package.json`の`icon`欄）とは無関係）。
+- **影響**: `packages/web-ui/scripts/gen-icons.mjs`・`vscode-extension/package.json`を変更。
+  `vscode-extension/icon.png`を新規追加（他の生成済みアイコンと同じくgit管理下に置く）。
+  同じPR #414（未マージ）へ追加コミットする。

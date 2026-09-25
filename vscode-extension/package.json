@@ -6,6 +6,7 @@
   "publisher": "asaomaro",
   "license": "Apache-2.0",
   "private": true,
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/asaomaro/ts5250.git",

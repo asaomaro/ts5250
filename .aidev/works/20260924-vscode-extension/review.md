@@ -236,3 +236,27 @@ taskcheckラウンド上限に達しているため、独立点検はこのrevie
   2つのポップオーバーの挙動が今後も揃いやすい。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド9（deliver後・利用者の要望「拡張機能アイコンをfavicon/electronと同じに」への対応）
+
+`decisions.md` D10。差分は`gen-icons.mjs`（出力先1つ追加）・`vscode-extension/
+package.json`（`icon`欄）・`vscode-extension/icon.png`（新規生成物）。coding工程で
+`cross`のtaskcheckラウンド上限に達しているため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外。被覆に変化なし。
+- **価値適合**: 利用者の要望に文字どおり対応。**新しい絵を作らず既存の唯一の
+  定義元（`gen-icons.mjs`）へ素直に乗った**——スクリプト冒頭のコメントが明示する
+  設計思想（「バイナリを手で置くと片方だけ古いまま残る」問題）を正しく尊重している。
+- **正確性**: 生成した3つの既存出力（favicon.svg/ico・apple-touch-icon.png・
+  electron/build/icon.png）が**バイト単位で無変更**であることを実際に確認しており、
+  既存の絵に影響していないことを裏付けている。`vsce package`を実行し`.vsix`への
+  実際の反映（`icon.png`同梱・`vsixmanifest`の`<Icon>`要素）まで確認済み。
+- **正確性（テストのflake）**: 全ファイル並行実行下で実プロセス統合テストが
+  時折flakeした事象を、単体実行での確認・変更内容（アイコンファイルのみで
+  プロセス管理コードに触れていない）から**新規のバグではないと判断**し、
+  その判断根拠を`test-result.md`に残している——「flakeを無視した」のではなく
+  「flakeと断定できる根拠を示した」形になっている。
+- **規約適合**: サイズ選定（128px。VS Code Marketplaceの推奨に合わせた）の
+  根拠をコメント・`decisions.md`双方に明記している。
+
+指摘なし（must/should/nit いずれも0件）。

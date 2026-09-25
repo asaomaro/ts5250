@@ -229,6 +229,30 @@ VSCode本体側の制約と判断する。「フォント名を直接入力」�
 
 このラウンドでは失敗は発生していない。
 
+## ラウンド9（deliver後・利用者の要望「拡張機能アイコンをfavicon/electronと同じに」への対応）
+
+`decisions.md` D10。差分は`packages/web-ui/scripts/gen-icons.mjs`（出力先を1つ追加）・
+`vscode-extension/package.json`（`icon`欄）・`vscode-extension/icon.png`（新規生成物）。
+
+- `npm run gen:icons` — 実行成功。新規`vscode-extension/icon.png`（128×128）を生成。
+  **既存3出力はバイト単位で無変更**（`git status`に既存ファイルが現れない＝生成の
+  決定性を裏付け）
+- `cd vscode-extension && npx @vscode/vsce package` — 実行成功。`.vsix`に`icon.png`
+  [1.23 KB]が含まれ、`extension.vsixmanifest`に`<Icon>`要素として登録されることを
+  `unzip`で確認した
+- `cd vscode-extension && npx vitest run` — 単体実行では全ファイルgreen
+  （`serviceManager.integration.test.ts`単体2/2・`serviceManager.multiprocess.
+  integration.test.ts`単体1/1）。**全ファイル並行実行では3回中2回、実プロセス統合
+  テストが時折flakeした**（`serviceManager.integration.test.ts`/
+  `serviceManager.multiprocess.integration.test.ts`。ファイルは回ごとに違う）が、
+  4回目の全体実行では74/74 green。単体実行で常にgreenであること・今回の変更が
+  アイコンファイル/package.jsonのみでプロセス管理コードに触れていないことから、
+  `decisions.md` D2と同種の既知の環境依存flakeと判断した（新規のバグではない）
+- `npx eslint packages/web-ui/scripts/gen-icons.mjs` — 0 errors
+- `aidev smoke` — pass
+
+このラウンドで新規に発生した失敗は無し（既知のflakeのみ。上記に詳細を記録）。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
