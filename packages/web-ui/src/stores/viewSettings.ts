@@ -152,6 +152,13 @@ export type ViewKey = keyof ViewSettings;
 type Key = ViewKey;
 
 /**
+ * 帳票を読む画面（プリンター・スプール）向けに絞った項目。5250 画面専用の項目
+ * （カーソル・窓など）は帳票に無いので出さない（`App.vue`の`ViewSettingsMenu`呼び出しと
+ * `EmbedApp.vue`の両方が使う単一の出どころ。以前は`App.vue`だけが持つローカル定数だった）。
+ */
+export const REPORT_VIEW_KEYS: readonly ViewKey[] = ["sosi", "kana", "linkify", "font"];
+
+/**
  * 設定項目の定義（表示順・選択肢）。**画面設定メニューとキー設定で共有する単一の出どころ**。
  * font はここに含めない（選択肢が環境依存で、順送りに向かないため。メニューのセレクトで扱う）。
  */

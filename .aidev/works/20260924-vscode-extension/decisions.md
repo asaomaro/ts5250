@@ -252,3 +252,38 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   複数集まった場合の参考として、この経緯をここに残す。
 - **PR #414への影響**: 追加のコード変更は無し（D3〜D5のログ改善が、この切り分けを
   可能にした）。
+
+## D6: `EmbedApp.vue`に「⚙ 表示」（画面の見え方の設定）ボタンを追加する
+
+- **背景**: 利用者から「表示関連の設定ボタンを上部に配置してください」という要望があった。
+  調べたところ、`App.vue`（通常のワークスペースUI）には`ViewSettingsMenu`
+  （ボタン表記「⚙ 表示」。title「表示（このペインの見え方）」——SO/SI表示・カナ/表示コード・
+  リンク化・フォント等）が既にあるが、`EmbedApp.vue`（VSCode拡張のWebView）は
+  design.md「設計方針4」の「タブ帯・システム切替・ランチャーは一切持たない」という
+  意図的な最小化のもと、この機能ごと実装されていなかった。利用者が指す「表示関連の
+  設定ボタン」はこの`ViewSettingsMenu`であると判断した。
+- **決定**: `EmbedApp.vue`のヘッダーへ`ViewSettingsMenu`を追加し、既存の接続設定ボタン（⚙）と
+  並べて画面上部に配置した。対象は`App.vue`の`viewMenuTarget`と同じ判断——
+  emulatorは全項目、printer(スプール表示)は帳票向けに絞った`REPORT_VIEW_KEYS`のみ、
+  sql/ifsは対象外（5250画面でも帳票でもないため）。
+- **理由・代替案**:
+  - **`REPORT_VIEW_KEYS`の重複を避けた**: 元は`App.vue`内のローカル定数だったが、
+    `EmbedApp.vue`も同じ値を必要としたため、`stores/viewSettings.ts`（`ViewKey`の定義元）
+    へ`export const REPORT_VIEW_KEYS`として切り出し、両方から共有させた
+    （AGENTS.md「同じ判断を2か所に持つと片方だけ直る事故が起きる」の教訓・
+    `.aidev/conventions/paired-artifact-sync.md`と同じ考え方）。
+  - **sql/ifsには付けない**: `App.vue`の`viewMenuTarget`が元々sql/ifsタブを対象外にしている
+    （5250画面表示・帳票表示のどちらでもないため、SO/SI表示等の項目が意味を持たない）ことと
+    一貫させた。個別の要望が出れば別途検討する。
+- **検証**: 型検査（`vue-tsc`）・`packages/web-ui`全体のテスト（2669件）green を確認。
+  加えて、実際に`packages/server`を起動し`packages/web-ui/dist`（再ビルド済み）を配信して
+  実ブラウザ（Playwright）で`embed.html?app=printer`を開き、
+  (1) 接続前はボタンが出ない、(2) `systemRef`が入ると「⚙ 表示」ボタンが接続設定ボタンの
+  左に並んで表示される、(3) クリックすると`REPORT_VIEW_KEYS`に絞ったポップオーバー
+  （SO/SI表示・表示コード・リンク化・フォント（画面）のみ、5250画面専用項目は出ない）が
+  正しく開く、をスクリーンショットで確認した。emulator側は実機ネットワーク到達性の
+  制約（このセッションの環境からは実機ホストへ接続できなかった）で画面までは確認できな
+  かったが、`viewMenuTarget`の分岐はprinter側と対称な実装であり、型検査・既存テストで
+  裏付けている。
+- **影響**: `packages/web-ui/src/EmbedApp.vue`・`packages/web-ui/src/App.vue`・
+  `packages/web-ui/src/stores/viewSettings.ts`を変更。同じPR #414（未マージ）へ追加コミットする。

@@ -142,3 +142,34 @@ coding工程で`cross`のtaskcheckラウンド上限（2/2）に達していた�
   却下理由付きで記録されており、スコープを広げていない。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド5（deliver後・利用者の要望「表示関連の設定ボタンを上部に」への対応）
+
+`decisions.md` D6。差分は`EmbedApp.vue`（`ViewSettingsMenu`追加）・`App.vue`
+（`REPORT_VIEW_KEYS`を共有定数へ差し替え）・`viewSettings.ts`（export追加）。
+coding工程で`cross`のtaskcheckラウンド上限（2/2、work全体で共通のためD5時点で
+既に到達）に達していたため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外（利用者からの直接の要望への対応）。
+  `aidev coverage`の被覆に変化なし。
+- **価値適合**: 利用者が明示的に要望した「表示関連の設定ボタンを上部に配置」を、
+  既存の`App.vue`にある機能（`ViewSettingsMenu`）と同じ意味・同じ絞り込み方針で
+  埋めており、独自の新規UIを作らず**既存の確立したパターンに揃えた**
+  （`aidev-15-research`「UIの規範」の精神——確立したパターンがあるなら流用する）。
+- **正確性**: `viewMenuTarget`の分岐（emulator＝全項目／printer＝`REPORT_VIEW_KEYS`／
+  sql・ifs＝対象外）は`App.vue`の`viewMenuTarget`と1対1で対応しており、
+  意味のズレが無いことをコードで突き合わせて確認した。実ブラウザでの確認
+  （printer側）でポップオーバーの中身が実際に`REPORT_VIEW_KEYS`どおり
+  （SO/SI表示・表示コード・リンク化・フォントのみ）であることも見ている。
+- **規約適合**: `REPORT_VIEW_KEYS`の重複排除は`[conv:paired-artifact-sync!]`
+  該当（同じ判断を2か所に持っていたのを1箇所へ集約）。コメントで経緯
+  （元は`App.vue`ローカル定数だった）を明記している。
+- **保守性**: `App.vue`側の変更は純粋な参照先の差し替え（振る舞い不変）で、
+  `packages/web-ui`全体のテスト（2669件）で裏付けている。
+- **見送った検証**: emulator側のボタン表示は、このセッションの環境から実機ホストへ
+  ネットワーク到達できずスクリーンショットで確認できなかった（`test-result.md`
+  「未検証の穴」）。printer側（対称な実装）は確認済みで、型検査・既存テストの
+  範囲でemulator側も裏付けている——**「未検証の穴」に明記した**（AGENTS.md
+  「主張が証拠の範囲を超えない」）。
+
+指摘なし（must/should/nit いずれも0件）。

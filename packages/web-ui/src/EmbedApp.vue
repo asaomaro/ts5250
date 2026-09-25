@@ -20,10 +20,12 @@ import SpoolPane from "./components/SpoolPane.vue";
 import SqlPane from "./components/SqlPane.vue";
 import IfsPane from "./components/IfsPane.vue";
 import SettingsForm from "./components/SettingsForm.vue";
+import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import { embedStore, postToHost } from "./stores/embed.js";
 import { openSession, closeSession } from "./session-controller.js";
 import { makePaneTabId } from "./paneLabels.js";
 import type { SessionMeta } from "./stores/sessions.js";
+import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
 import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
 
 const props = defineProps<{ app: EmbedAppKind }>();
@@ -54,6 +56,17 @@ const restTarget = computed(() => {
   const ref = embedStore.connect?.systemRef;
   if (!ref || props.app === "emulator") return undefined;
   return { tabId: makePaneTabId(APP_FEATURES[props.app], ref), system: ref };
+});
+
+/**
+ * `⚙ 表示`（`ViewSettingsMenu`）を出す対象。`App.vue`の`viewMenuTarget`と同じ判断
+ * （emulatorは全項目、printer(スプール表示)は帳票向けに絞った`REPORT_VIEW_KEYS`のみ。
+ * sql/ifsは5250画面でも帳票でもないので出さない）を、この画面の状態から導く
+ */
+const viewMenuTarget = computed<{ sessionId: string; keys?: readonly ViewKey[] } | undefined>(() => {
+  if (props.app === "emulator") return sessionId.value ? { sessionId: sessionId.value } : undefined;
+  if (props.app === "printer" && restTarget.value) return { sessionId: restTarget.value.tabId, keys: REPORT_VIEW_KEYS };
+  return undefined;
 });
 
 watch(
@@ -119,6 +132,12 @@ function onSave(v: SettingsFormValues): void {
 <template>
   <div class="embed-root">
     <header class="embed-header">
+      <ViewSettingsMenu
+        v-if="viewMenuTarget"
+        :key="viewMenuTarget.sessionId"
+        :session-id="viewMenuTarget.sessionId"
+        :keys="viewMenuTarget.keys"
+      />
       <button class="settings-btn" title="設定" @click="showSettings = true">⚙</button>
     </header>
     <div class="embed-body">
@@ -152,7 +171,9 @@ function onSave(v: SettingsFormValues): void {
 }
 .embed-header {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   padding: 4px 8px;
   flex: none;
 }

@@ -149,6 +149,30 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
 診断ログの追加であり、根本原因（なぜ起動成功I902の直後にセッションが切れるか）は
 利用者の次の再検証結果を待つ（`decisions.md` D5）。
 
+## ラウンド5（deliver後・利用者の要望「表示関連の設定ボタンを上部に」への対応）
+
+`decisions.md` D6。差分は`packages/web-ui/src/EmbedApp.vue`（`ViewSettingsMenu`追加）・
+`packages/web-ui/src/App.vue`（`REPORT_VIEW_KEYS`を共有定数へ差し替え）・
+`packages/web-ui/src/stores/viewSettings.ts`（`REPORT_VIEW_KEYS`をexport）。
+
+- `cd packages/web-ui && npx vue-tsc -b tsconfig.json tsconfig.test.json` — 0 errors
+- `cd packages/web-ui && npx vitest run` — **2669 passed / 0 failed**（206 test files。
+  `embed-app.test.ts`の既存8件も引き続きgreen）
+- `npm run build -w @ts5250/web-ui` — 実ビルド成功（`dist/`再生成）
+- **実ブラウザでの確認（Playwright、`--no-sandbox`のheadless Chromium）**: 実際に
+  `packages/server`を起動し、再ビルドした`packages/web-ui/dist`を配信、
+  `http://127.0.0.1:<port>/embed.html?app=printer`を開いて確認した:
+  1. 接続前（`embedStore.connect`が未設定）はヘッダーに接続設定ボタン（⚙）のみで、
+     「⚙ 表示」ボタンは出ない（スクリーンショットで確認）
+  2. `postMessage`で`{type:"connect", payload:{app:"printer", systemRef:"own:..."}}`を
+     送ると、「⚙ 表示」ボタンが接続設定ボタンの左に並んで表示される（スクリーンショットで確認）
+  3. 「⚙ 表示」をクリックするとポップオーバーが開き、`REPORT_VIEW_KEYS`
+     （SO/SI表示・表示コード・リンク化・フォント（画面））だけが出て、5250画面専用の
+     項目（カーソル・窓等）が出ないことを確認した（スクリーンショットで確認）
+  4. コンソールエラー・ページエラーは0件
+
+このラウンドでは失敗は発生していない。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
@@ -157,3 +181,8 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
   WebViewの実際の表示・設定ボタンのフォーカストラップの実地挙動・実際のキー入力は
   未検証のまま残る。別セッション（VSCode拡張の自動テスト環境）が対応中。
 - `vsce publish`（Marketplace公開）は要件で明示的にスコープ外。
+- **D6のemulator側「⚙ 表示」ボタンは画面での確認まで至っていない**。このセッションの
+  実行環境から実機ホストへネットワーク到達できず（`closed during negotiation: socket closed`）、
+  `sessionId`が付いた状態のemulator画面を再現できなかった。printer(スプール表示)側の
+  分岐（対称な実装）はスクリーンショットまで確認済み。emulator側は型検査・既存テストの
+  範囲で裏付けている。
