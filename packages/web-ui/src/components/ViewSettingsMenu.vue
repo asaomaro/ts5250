@@ -408,6 +408,11 @@ onBeforeUnmount(() => {
   top: calc(100% + 6px);
   z-index: 90;
   width: 250px;
+  /* DesignMenu（`.dz-menu`）と同じ上限。項目数が多い・画面の高さが低い（VSCode拡張の
+     WebViewパネル等）と、上限が無ければメニューが画面からはみ出し、ページ全体が
+     縦スクロールしてしまう（利用者の実機報告）。中で閉じたスクロールに留める */
+  max-height: 74vh;
+  overflow-y: auto;
   padding: 8px;
   background: var(--card);
   border: 1px solid var(--line);

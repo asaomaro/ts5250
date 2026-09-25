@@ -211,6 +211,24 @@ iframe側のPermissions Policyの障壁は実測で取り除けたが、フォ�
 VSCode本体側の制約と判断する。「フォント名を直接入力」欄は利用者確認済みで正しく
 機能しており、VSCode拡張ではこちらが正規の使い方になる。
 
+## ラウンド8（deliver後・利用者の指摘「表示ポップオーバーにも内部スクロールを」への対応）
+
+`decisions.md` D9。差分は`packages/web-ui/src/components/ViewSettingsMenu.vue`のみ
+（`.vsm-menu`へ`max-height: 74vh; overflow-y: auto;`）。
+
+- `cd packages/web-ui && npx vitest run` — **2669 passed / 0 failed**（206 test files）
+- `npm run build -w @ts5250/web-ui` — 実ビルド成功
+- **実ブラウザでの確認（Playwright、意図的に低いビューポート700×260px）**:
+  「表示」ポップオーバーを開き、`getComputedStyle`で実測した:
+  - `menuMaxHeight: "192.4px"`（=260pxの74%。意図どおり）
+  - `menuScrollHeight: 268`（内容は上限を超えている＝実際にスクロールが要る状況を再現できている）
+  - `menuOverflowY: "auto"`
+  - `pageScrollable: false`（**ページ全体はスクロール不要**——利用者の要望どおり）
+  スクリーンショットでもポップオーバー自身の枠内で切れていることを確認した
+- `aidev smoke` — pass
+
+このラウンドでは失敗は発生していない。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
