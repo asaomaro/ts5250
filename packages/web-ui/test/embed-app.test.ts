@@ -40,6 +40,18 @@ describe("EmbedApp: app種別ごとのマウント分岐", () => {
     expect(w.findComponent(EmulatorPane).props("sessionId")).toBe("s-embed-1");
   });
 
+  it("emulator: connectがsystemRefを持っていれば、openSession()の第4引数（systemRef）へそのまま渡す（D12。ステータスバーのメッセージ表示用）", async () => {
+    mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400", user: "U", password: "P", systemRef: "own:emu1" };
+    await nextTick();
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1);
+    const call = openSession.mock.calls[0]!;
+    expect(call[3]).toBe("own:emu1"); // systemRef
+    const meta = call[2] as Record<string, unknown>;
+    expect(meta["signonUser"]).toBe("U"); // メッセージ待ち行列の既定値に使う
+  });
+
   it("printer(スプール表示): openSession()は呼ばず、systemRefをそのままSpoolPaneのsystemへ渡す", async () => {
     const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
     embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:abc123" };

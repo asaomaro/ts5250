@@ -273,6 +273,43 @@ VSCode本体側の制約と判断する。「フォント名を直接入力」�
 GitHub issueで安定版であることを確認済み（WebSearchでの裏付け。`decisions.md` D11）。
 利用者の実機での確認を待つ。
 
+## ラウンド11（deliver後・利用者の要望「クリックするとウィンドウでメッセージを表示」への対応）
+
+`decisions.md` D12。差分は`vscode-extension/src/ts5250EditorProvider.ts`・
+`packages/web-ui/src/EmbedApp.vue`・`packages/web-ui/src/components/StatusBar.vue`・
+`packages/web-ui/src/components/MessagePane.vue`（副次的に見つけたbusyガードの二重掛け
+バグの修正）を変更。`packages/web-ui/src/components/MessageQuickView.vue`を新設。
+
+- `cd vscode-extension && npx tsc -b` / `npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **75 passed / 0 failed**（13 test files。
+  新規1件——emulatorのsyncSystem呼び出しを含む）
+- `cd packages/web-ui && npx vue-tsc -b tsconfig.json tsconfig.test.json` — 0 errors
+- `cd packages/web-ui && npx vitest run` — **2683 passed / 0 failed**（208 test files。
+  新規14件——`MessageQuickView`10件・`StatusBar`クリック連動2件・`EmbedApp`の
+  systemRef伝播1件・`MessagePane`の回帰テスト1件）
+- `npx eslint`（vscode-extension・変更したweb-uiファイル） — 0 errors
+- `npm run build -w @ts5250/web-ui` — 実ビルド成功
+- **mutation検証**: `MessageQuickView.vue`・`MessagePane.vue`双方で見つけた
+  「応答しても一覧が読み直されない」バグ（`reply()`が自分の`withBusy`の中から
+  `refresh()`を呼び、`refresh()`自身の`busy`ガードに阻まれる）を、実際に
+  `fetchMessages()`への切り替えを`refresh()`へ戻してテストが落ちることを
+  確認してから直す、という手順で固定した
+- **実機での実プロセス確認**（`.env`/`.env.verify`。SR-OSAKA）:
+  1. `POST /api/systems`で実際にシステムを登録（`syncSystem`と同じ経路） — 成功
+  2. `POST /api/host/messages/send`で自分の待ち行列（`ASAO`）へ実際にメッセージを
+     送信 — 成功（実機側で受理・実行）
+  3. `POST /api/host/messages`（`MessageQuickView.vue`と同じ経路）で実際に
+     読み出せることを確認 — 成功（送ったメッセージがキー付きで返る）
+  4. 実機システム登録は`DELETE /api/systems/:ref`で後始末済み
+- `aidev smoke` — pass
+
+**実ブラウザでのUI一気通貫（クリック→ポップオーバー→実メッセージ表示）は未達**。
+実機のエミュレータ接続（TN5250）を試みたが、既定の装置名（`AS01`）が利用者自身の
+別セッションで使用中で「8902: 装置が使用中です」となり繋がらなかった。利用者の
+実作業を妨げないよう、新規装置名での再試行や奪い合いはしていない。この部分は
+ユニットテスト（`MessageQuickView`のmount→表示→応答→再取得の一連、`StatusBar`の
+クリック連動、`EmbedApp`のsystemRef伝播）の範囲で裏付けている。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
@@ -286,3 +323,9 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
   `sessionId`が付いた状態のemulator画面を再現できなかった。printer(スプール表示)側の
   分岐（対称な実装）はスクリーンショットまで確認済み。emulator側は型検査・既存テストの
   範囲で裏付けている。
+- **D12のメッセージ表示は、実機のTN5250接続（emulator）自体が繋がらず、実ブラウザでの
+  クリック→ポップオーバー→実メッセージ表示の一気通貫は確認できていない**（既定の
+  装置名`AS01`が利用者自身のセッションで使用中だったため。ラウンド11参照）。
+  バックエンド（実機へのメッセージ送信・取得）は実プロセス・実ホストで確認済み。
+  UIの配線（クリックで開く・props伝播・応答後の再取得）はユニットテスト
+  （mutation検証込み）の範囲で裏付けている。

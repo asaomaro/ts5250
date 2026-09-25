@@ -133,7 +133,7 @@ describe("ready → connect", () => {
   });
 });
 
-describe("printer(スプール表示)/sql/ifs: systemRef解決（03-sql-ifs）", () => {
+describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D12）", () => {
   it("emulator以外はsyncSystemを呼び、user/passwordを直接乗せずsystemRefを乗せる", async () => {
     const { panel, syncSystem } = await setup('{"app":"sql","host":"AS400","port":992,"signon":{"user":"U"}}');
     syncSystem.mockResolvedValueOnce("own:xyz");
@@ -163,11 +163,32 @@ describe("printer(スプール表示)/sql/ifs: systemRef解決（03-sql-ifs）",
     expect(lastPostedOfType(panel, "saveError")).toBeUndefined();
   });
 
-  it("emulatorはsyncSystemを呼ばない", async () => {
-    const { panel, syncSystem } = await setup('{"app":"emulator","host":"AS400"}');
+  it("emulatorもsyncSystemを呼ぶが、user/passwordはconnectのpayloadに残したままsystemRefを併せて乗せる（D12: ステータスバーのメッセージ表示等、system参照を要求するREST機能のため）", async () => {
+    const { panel, syncSystem } = await setup('{"app":"emulator","host":"AS400","signon":{"user":"U"}}');
+    syncSystem.mockResolvedValueOnce("own:emu");
     panel.webview.fireMessage({ type: "ready" });
     await flush();
-    expect(syncSystem).not.toHaveBeenCalled();
+
+    expect(syncSystem).toHaveBeenCalledTimes(1);
+    const [, input] = syncSystem.mock.calls[0]!;
+    expect(input).toMatchObject({ host: "AS400", user: "U" });
+
+    const connect = lastPostedOfType(panel, "connect");
+    // **emulatorはuser/passwordを剥離しない**——WsOpen直接指定がこの経路も使うため
+    expect(connect?.payload.user).toBe("U");
+    expect(connect?.payload.systemRef).toBe("own:emu");
+  });
+
+  it("emulatorでsyncSystemが失敗しても、systemRef無しのconnectを送り接続自体は成立する（致命的に倒さない）", async () => {
+    const { panel, syncSystem, log } = await setup('{"app":"emulator","host":"AS400"}');
+    syncSystem.mockRejectedValueOnce(new Error("network down"));
+    panel.webview.fireMessage({ type: "ready" });
+    await flush();
+
+    const connect = lastPostedOfType(panel, "connect");
+    expect(connect?.payload.host).toBe("AS400"); // 接続情報自体は届く
+    expect(connect?.payload.systemRef).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("network down"));
   });
 
   it("実在するpasswordEncがあっても、復号した平文はsyncSystemへだけ渡り、WebViewへのpayloadからは剥離される（taskcheck T2の指摘）", async () => {

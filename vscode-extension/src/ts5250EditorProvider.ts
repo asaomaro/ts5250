@@ -114,20 +114,24 @@ async function sendConnect(
 }
 
 /**
- * `Ts5250File` → `ConnectPayload`（直接接続用のフィールド解決）＋
- * **`app !== "emulator"`のときだけ**`systemRef`の解決（`03-sql-ifs`。
- * design.md「設計方針3」訂正後）を上乗せする。
+ * `Ts5250File` → `ConnectPayload`（直接接続用のフィールド解決）＋`systemRef`の解決
+ * （`syncSystem`でサーバーへ個人設定を登録・同期する。`03-sql-ifs`。design.md
+ * 「設計方針3」訂正後）を**全app種別に**上乗せする。
  *
- * **emulatorとそれ以外で経路が違う**（design.md訂正後）:
- * - emulator: `buildConnectPayload`の`user`/`password`をそのまま使う
- *   （`WsOpen`直接指定。system登録不要）
+ * **emulatorとそれ以外でsystemRefの使いみちが違う**（design.md訂正後・利用者要望で
+ * emulatorにも拡張。`decisions.md` D12）:
+ * - emulator: `buildConnectPayload`の`user`/`password`は**そのまま残す**
+ *   （`WsOpen`直接指定。接続そのものはsystem参照を要らない）。`systemRef`は
+ *   **付加的**——ステータスバーのメッセージ表示等、system参照を要求するREST機能の
+ *   ためだけに使う。無くても接続自体は成立する
  * - printer(スプール表示)/sql/ifs: `user`/`password`は**送らない**
- *   （REST層はsystem参照を要求し、直接指定を受け付けないため）。代わりに
- *   `syncSystem`でサーバーへ個人設定を登録・同期し、`systemRef`を乗せる。
- *   同期に失敗しても`connect`自体は送る（`systemRef`が無いまま——
- *   対象ペインは「設定を待っています」のプレースホルダーのまま止まる。
- *   失敗の詳細は`deps.log`へ残す。design.md「エラー処理/異常系」と同じ
- *   「他のフィールドは尊重し、致命的に倒さない」方針）
+ *   （REST層はsystem参照を要求し、直接指定を受け付けないため）。`systemRef`が
+ *   無いと対象ペインは「設定を待っています」のプレースホルダーのまま止まる
+ *
+ * どちらも同期に失敗しても`connect`自体は送る——`systemRef`が無いまま
+ * （emulatorなら画面は開くがメッセージ表示等は使えない、printer/sql/ifsなら
+ * ペインが開かない）。失敗の詳細は`deps.log`へ残す。design.md「エラー処理/異常系」と
+ * 同じ「他のフィールドは尊重し、致命的に倒さない」方針
  */
 async function resolvePayload(
   file: Ts5250File,
@@ -136,12 +140,12 @@ async function resolvePayload(
   deps: Ts5250EditorProviderDeps
 ): Promise<ConnectPayload> {
   const payload = buildConnectPayload(file, deps.secretCrypto);
-  if (file.app === "emulator") return payload;
-
   const user = payload.user;
   const password = payload.password;
-  delete payload.user;
-  delete payload.password;
+  if (file.app !== "emulator") {
+    delete payload.user;
+    delete payload.password;
+  }
   const input: SystemSyncInput = { documentUri: document.uri.toString(), name: basename(document.fileName), host: payload.host };
   if (file.port !== undefined) input.port = file.port;
   if (file.tls !== undefined) input.tls = file.tls;

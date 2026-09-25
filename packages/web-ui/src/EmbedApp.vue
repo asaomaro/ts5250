@@ -103,7 +103,12 @@ watch(
       const meta: SessionMeta = { host: payload.host };
       if (payload.terminal !== undefined) meta.terminal = payload.terminal;
       if (payload.deviceName !== undefined) meta.deviceName = payload.deviceName;
-      sessionId.value = await openSession(open, "embed", meta);
+      if (payload.user !== undefined) meta.signonUser = payload.user;
+      // **`systemRef`はemulatorでも付加的に乗る**（`decisions.md` D12。拡張ホスト側が
+      // `syncSystem`で登録済み）。無くても接続自体は成立する——`SessionState.systemRef`が
+      // 無いままなら、StatusBarのメッセージ表示ボタンはsystem参照を要求するREST機能を
+      // 使えないだけで、5250画面そのものには影響しない
+      sessionId.value = await openSession(open, "embed", meta, payload.systemRef);
     } catch (e) {
       connectError.value = e instanceof Error ? e.message : String(e);
     } finally {

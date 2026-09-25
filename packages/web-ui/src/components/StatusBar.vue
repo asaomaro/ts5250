@@ -6,6 +6,9 @@ import type { SessionState } from "../stores/sessions.js";
 import { sendKey } from "../session-controller.js";
 import { fieldAt } from "../composables/useCursor.js";
 import { MSG_RECONNECT_RETRY } from "../composables/opMessages.js";
+import MessageQuickView from "./MessageQuickView.vue";
+
+const showMessages = ref(false);
 
 const props = defineProps<{
   state: SessionState;
@@ -239,9 +242,30 @@ const macroStop = computed<string | undefined>(() => {
     <!--
       **メッセージ待ち表示（MW）**（`20260921-message-waiting-indicator`）。
       `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
-      ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。以前は受け取っても**どこにも出していなかった**
+      ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。以前は受け取っても**どこにも出していなかった**。
+
+      **クリックで中身を読める**（`20260924-vscode-extension` D12。利用者要望）。ただし
+      `state.systemRef`（`own:<id>`等）が無いと`/api/host/messages`を呼べない
+      （直接接続で開いたセッション。system参照が無い場面は残る）ので、その場合は
+      押せない通知のまま（従来どおり）にする——隠さない。「届いている」こと自体は
+      有用な情報のため
     -->
-    <span v-if="snap?.messageWaiting" class="msgwait" title="メッセージ待ち行列にメッセージが届いています" role="status">✉ メッセージあり</span>
+    <span v-if="snap?.messageWaiting" class="msgwait-wrap">
+      <button
+        class="msgwait"
+        :disabled="!state.systemRef"
+        :title="state.systemRef ? 'クリックしてメッセージを読む' : 'メッセージ待ち行列にメッセージが届いています'"
+        @click="showMessages = !showMessages"
+      >
+        ✉ メッセージあり
+      </button>
+      <MessageQuickView
+        v-if="showMessages && state.systemRef"
+        :system-ref="state.systemRef"
+        :default-queue="state.meta?.signonUser"
+        @close="showMessages = false"
+      />
+    </span>
     <!-- マクロの状態（ACS のシアンバー相当。spec D10）。幅は固定して隣をずらさない -->
     <span v-if="macro" class="macro" :class="macro.cls" :title="macro.title" role="status">
       {{ macro.label }}
@@ -473,9 +497,23 @@ const macroStop = computed<string | undefined>(() => {
   color: var(--t-yellow);
 }
 /* メッセージ待ち（MW）。配色は CSS 変数に従う（`docs/UI-DESIGN.md`「生色を避ける」） */
-.msgwait {
-  color: var(--t-turquoise); /* 5250 のターコイズ（シアン相当）。定義済みの変数を使う */
+.msgwait-wrap {
+  position: relative; /* MessageQuickView の絶対配置の基準 */
 }
+.msgwait {
+  /* 元は `<span>` だった（情報表示のみ）。クリック可能にしたのでボタンの既定見た目を消す
+     （D12。`state.systemRef` が無ければ `disabled` のまま——従来どおりの通知に留まる） */
+  font: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--t-turquoise); /* 5250 のターコイズ（シアン相当）。定義済みの変数を使う */
+  cursor: pointer;
+}
+.msgwait:disabled {
+  cursor: default;
+}
+
 /* クライアント側の操作員メッセージ。ホストのメッセージと取り違えないよう色を変える */
 .notice {
   color: var(--t-red, #c62828);

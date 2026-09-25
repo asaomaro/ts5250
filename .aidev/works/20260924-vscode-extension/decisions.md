@@ -481,3 +481,79 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   `vscode-extension`のテスト（74件）はmanifestのみの変更のため無関係でgreen。
 - **影響**: `vscode-extension/package.json`のみ変更。同じPR #414（未マージ）へ
   追加コミットする。
+
+## D12: ステータスバーの「✉ メッセージあり」をクリックしてメッセージを読めるようにする
+
+- **背景**: 利用者から「✉ メッセージあり」表示の仕組みを聞かれ（`packages/web-ui/src/
+  components/StatusBar.vue`の`.msgwait`。5250のMessage Waiting light）、続けて
+  「クリックするとウィンドウでメッセージを表示するようにできますか？」と要望があった。
+- **設計上の分岐点（利用者に確認）**: メッセージの本文は5250プロトコルには乗らず、
+  SQL経由（`QSYS2.MESSAGE_QUEUE_INFO`。`/api/host/messages`）で読む必要があると判明。
+  このAPIは登録済みのsystem参照を要求するが、**エミュレータは直接接続**（design.md
+  「設計方針3」。system登録不要）で開けるため、参照が無い場合がある。利用者に
+  「システム登録を自動で行う（printer/sql/ifsと同じsyncSystemをemulatorにも拡張）」か
+  「直接接続では機能を出さない」かを確認し、**前者**を選んだ
+  （接続に張りっぱなしの負荷が増えないことも確認済み——`syncSystem`はローカル設定
+  ファイルへの登録だけでAS/400への接続を伴わず、メッセージ取得自体も`/api/host/
+  messages`が毎回開いて閉じる短命の接続で、セッション数に比例して常駐接続が
+  増えるわけではない）。
+- **決定**:
+  1. **`vscode-extension/src/ts5250EditorProvider.ts`の`resolvePayload`を拡張**——
+     `emulator`でも`syncSystem`を呼び`systemRef`を付加する。ただし`user`/`password`は
+     **削除しない**（`WsOpen`直接指定はそのまま使う。`systemRef`は付加的な用途
+     ——メッセージ表示等system参照を要求するREST機能のためだけ）。
+  2. **`EmbedApp.vue`**: `openSession()`の第4引数へ`payload.systemRef`をそのまま渡す
+     （`SessionState.systemRef`へ乗る既存の仕組みをそのまま使う。サーバー側の変更は
+     不要）。`meta.signonUser`も新たに乗せる（メッセージ待ち行列の既定値に使う——
+     IBM iの慣習で各ユーザーprofileには同名の待ち行列が既定で紐づく）。
+  3. **`StatusBar.vue`**: `.msgwait`を`<span>`から`<button>`へ変更しクリック可能に
+     した。`state.systemRef`が無いときは`disabled`のまま（隠さない——「届いている」
+     こと自体は有用な情報のため。直接接続で開いた本来のWebアプリのセッション等、
+     参照を持たない場面は今も残る）。
+  4. **新設`MessageQuickView.vue`**: `MessagePane.vue`（ランチャーから開くフル機能。
+     読む・応答する・消す・送る）の縮小版——**読む・照会に応答するだけ**に絞った
+     ポップオーバー（消す・送るは持たない。誤操作の芽を増やさない）。
+     `docs/UI-DESIGN.md`「情報ポップオーバー」の構造規約（バックドロップ＋
+     `position:absolute`＋`@click.stop`）と、D9で足した`max-height:74vh;
+     overflow-y:auto`をそのまま踏襲した。ステータスバー（画面下部）が起点なので
+     `bottom: calc(100% + 6px)`で上向きに開く（ヘッダーのポップオーバーとは逆）。
+  5. **`stores/sessions.ts`は変更不要**——`SessionState.systemRef`/`SessionMeta.
+     signonUser`は既存のフィールドで、`openSession()`の引数として既に対応していた
+     （呼び出し側が渡していなかっただけ）。
+  6. **共有コンポーネントなので通常のWebアプリにも自動的に反映される**（利用者からの
+     確認要望への回答どおり。`App.vue`/`EmbedApp.vue`どちらも`StatusBar.vue`を
+     そのまま使う）。
+- **見つけて直した副次的なバグ**: `MessageQuickView.vue`のテストを書く過程で、
+  「応答すると一覧が読み直されない」という不具合を実際に踏んだ——`reply()`が
+  自分の`withBusy`の中から`refresh()`を呼んでおり、`refresh()`自身の
+  `busy.value`ガードが（外側の`withBusy`がまだ立てている）常にtrueを見て
+  短絡し、読み直しが起きなかった。**同じ組み合わせ方を`MessagePane.vue`
+  （`reply`/`remove`/`doSend`の3箇所）も持っており、同じ穴があった**——
+  こちらは既存テストが無く素通りしていた。両方とも「`busy`ガード無しの
+  `fetchMessages()`を切り出し、`refresh()`はガード付きでそれを呼ぶ／
+  `reply`等は自分の`withBusy`の中では素の`fetchMessages()`を直接呼ぶ」形へ
+  直した。**mutationで検証済み**（`fetchMessages()`を`refresh()`へ戻すとテストが
+  実際に落ちることを確認してから戻した）。`MessagePane.vue`には回帰テストが
+  1件も無かったため、この修正を固定する最小のテストを新規に追加した。
+- **検証**:
+  - 型検査（`vue-tsc`）・`packages/web-ui`全体のテスト（2683件）・
+    `vscode-extension`全体のテスト（75件）green。
+  - **実機での実プロセス確認**: `.env`/`.env.verify`（SR-OSAKA）を使い、
+    (1) `POST /api/systems`での実際の登録、(2) `POST /api/host/messages/send`で
+    自分の待ち行列へ実際にメッセージを送信、(3) `POST /api/host/messages`で
+    実際に読み出せること、を実プロセス・実ホストで確認した。
+  - **実ブラウザでのUI一気通貫（クリック→ポップオーバー→実メッセージ表示）は
+    未達**——実機のエミュレータ接続（TN5250）を試みたが、既定の装置名
+    （`AS01`。`profiles.local.json`の確立済み設定）が利用者自身の別セッションで
+    使用中と見られ「8902: 装置が使用中です」で繋がらなかった。利用者の実作業を
+    妨げないよう、これ以上の奪い合い・新規装置名での再試行はしなかった
+    （新規装置名は自動構成が効かないリスクもある。`scripts/README.md`）。
+    この部分は`vue-tsc`＋ユニットテスト（`MessageQuickView`10件・`StatusBar`
+    クリック連動2件・`EmbedApp`のsystemRef伝播1件）の範囲で裏付けている
+    ——「未検証の穴」に明記する。
+- **影響**: `vscode-extension/src/ts5250EditorProvider.ts`・
+  `packages/web-ui/src/EmbedApp.vue`・`packages/web-ui/src/components/
+  StatusBar.vue`・`packages/web-ui/src/components/MessagePane.vue`
+  （副次的なバグ修正）を変更。`packages/web-ui/src/components/
+  MessageQuickView.vue`を新設。関連テストを追加。同じPR #414（未マージ）へ
+  追加コミットする。
