@@ -440,3 +440,44 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
 - **影響**: `packages/web-ui/scripts/gen-icons.mjs`・`vscode-extension/package.json`を変更。
   `vscode-extension/icon.png`を新規追加（他の生成済みアイコンと同じくgit管理下に置く）。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D11: VSCodeのファイル一覧（Explorer）でも`.ts5250`にts5250アイコンを出す
+
+- **背景**: 利用者から「VSCode拡張機能をインストールすると、VSCodeのファイル一覧に、
+  .ts5250ファイルのアイコンをts5250アイコンにすることはできますか？」との追加要望が
+  あった。D10で対応した拡張機能自体のマーケットプレイス上のアイコン（`package.json`の
+  `icon`欄）とは別物——**Explorer（ファイル一覧）での個別ファイルアイコン**は
+  別のVSCode拡張APIが要る。
+- **調査（WebSearchで確認。推測で実装しない）**: VSCodeには`contributes.languages[].icon`
+  （`light`/`dark`のペア）という、この用途にちょうど合う安定版APIがある——
+  「利用者が選んでいるファイルアイコンテーマがその言語専用のアイコンを持っていない
+  場合のフォールバックとして使われる」ため、**利用者にアイコンテーマの切り替えを
+  要求しない**（Microsoft公式ドキュメント・GitHub issue #140047で確認）。
+  API finalization（proposed API解除）は2022年1月のマイルストーン向けで、この拡張の
+  `engines.vscode`（`^1.90.0`。2024年5月リリース）より十分前——互換性の懸念は無い。
+  検討した代替案（`contributes.iconThemes`でアイコンテーマそのものを作る）は、
+  利用者に明示的なテーマ切り替えを要求する重い手段のため却下した——今回の要望
+  （「一覧のアイコンをts5250にしてほしい」）に対して過剰。
+- **決定**: `vscode-extension/package.json`へ`contributes.languages`を新規追加した:
+  ```json
+  { "id": "ts5250", "extensions": [".ts5250"], "icon": { "light": "./icon.png", "dark": "./icon.png" } }
+  ```
+  アイコンはD10で作った`icon.png`（favicon/electronと同じ絵）を**そのまま再利用**した
+  ——新規の絵を作らない・新規ファイルを増やさない。既存の`customEditors`契約
+  （`.ts5250`をカスタムエディタで開く）とは独立した別のVSCode機構なので、
+  どのエディタで開くかには影響しない（`languages`はファイルの「言語」認識と
+  アイコン表示だけを担う）。文法定義（`grammars`）は追加していない——
+  シンタックスハイライトは要望の対象外で、スコープを広げない。
+  `light`/`dark`を同じファイルにしているのは、このアイコンの絵自体が
+  固定の濃い背景を持つデザイン（`gen-icons.mjs`の`BG`定数で塗った角丸矩形）で、
+  テーマに関わらず同じ見た目でよいため（透明背景ではなく、favicon/apple-touch-icon
+  等と同じ「アプリアイコン」然としたデザイン）。
+- **検証**: `package.json`が有効なJSONであること・`npx @vscode/vsce package`が
+  新規の警告なく成功すること・生成された`.vsix`内の`package.json`に
+  `contributes.languages`が意図どおり埋め込まれていること（`unzip`で取り出して
+  確認）を確かめた。**実際のVSCode拡張ホストでExplorer上の表示を目視確認することは
+  できていない**——このコンテナには実行可能なVSCode拡張ホストが無い制約
+  （`02-extension-core`以来一貫）。利用者の実機での確認を待つ。
+  `vscode-extension`のテスト（74件）はmanifestのみの変更のため無関係でgreen。
+- **影響**: `vscode-extension/package.json`のみ変更。同じPR #414（未マージ）へ
+  追加コミットする。

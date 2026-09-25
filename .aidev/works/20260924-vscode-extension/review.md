@@ -260,3 +260,28 @@ package.json`（`icon`欄）・`vscode-extension/icon.png`（新規生成物）�
   根拠をコメント・`decisions.md`双方に明記している。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド10（deliver後・利用者の要望「Explorerの.ts5250アイコンもts5250に」への対応）
+
+`decisions.md` D11。差分は`vscode-extension/package.json`のみ（`contributes.languages`追加）。
+coding工程で`cross`のtaskcheckラウンド上限に達しているため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外。被覆に変化なし。
+- **価値適合**: 利用者の要望に直接対応。D10（マーケットプレイスのアイコン）とは
+  別物（Explorerのファイルアイコン）であることを正しく識別し、正しいAPI
+  （`contributes.languages[].icon`）を選んでいる——`contributes.iconThemes`
+  （テーマそのものを作る重い手段。利用者にテーマ切り替えを要求する）との違いを
+  `decisions.md`に明記し、後者を却下した理由も残している。
+- **正確性**: **推測でAPIを実装していない**——WebSearchで公式ドキュメント・
+  GitHub issueを確認し、(1) このAPIが「利用者のアイコンテーマがフォールバックする
+  ときだけ効く」という正確な効き方、(2) 安定版でありproposed API解除が
+  この拡張の`engines.vscode`より十分前であること、の両方を裏付けてから実装している
+  （AGENTS.md「判断の原則」2に忠実）。
+- **保守性**: 新規の絵・新規ファイルを増やさず、D10で作った`icon.png`をそのまま
+  再利用している。文法定義（`grammars`）は追加せず、要望の範囲（アイコン表示）に
+  スコープを絞っている。
+- **見送った検証**: 実際のVSCode拡張ホストでExplorer上の表示を目視確認することは
+  できていない（このコンテナの制約。一貫して記録済み）。`vsce package`での
+  manifest埋め込みの確認までで裏付けとしている——**「未検証の穴」に明記した**。
+
+指摘なし（must/should/nit いずれも0件）。

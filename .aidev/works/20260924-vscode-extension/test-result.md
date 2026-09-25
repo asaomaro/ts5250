@@ -253,6 +253,26 @@ VSCode本体側の制約と判断する。「フォント名を直接入力」�
 
 このラウンドで新規に発生した失敗は無し（既知のflakeのみ。上記に詳細を記録）。
 
+## ラウンド10（deliver後・利用者の要望「Explorerの.ts5250アイコンもts5250に」への対応）
+
+`decisions.md` D11。差分は`vscode-extension/package.json`のみ（`contributes.languages`追加）。
+
+- `node -e "JSON.parse(...)"` — 有効なJSONであることを確認
+- `cd vscode-extension && npx @vscode/vsce package` — 実行成功。新規警告なし
+- `unzip -p ts5250-vscode-0.1.0.vsix extension/package.json`で`.vsix`内の
+  `package.json`を取り出し、`contributes.languages`が意図どおり
+  （`id: "ts5250"`・`extensions: [".ts5250"]`・`icon.light`/`icon.dark`とも
+  `"./icon.png"`）埋め込まれていることを確認した
+- `cd vscode-extension && npx vitest run` — **74 passed / 0 failed**（13 test files。
+  manifestのみの変更のため無関係）
+- `aidev smoke` — pass
+
+**実際のVSCode拡張ホストでExplorer上のアイコン表示を目視確認することはできていない**
+——このコンテナには実行可能なVSCode拡張ホストが無い（`02-extension-core`以来一貫した
+制約）。`contributes.languages[].icon`のAPI自体はMicrosoft公式ドキュメント・
+GitHub issueで安定版であることを確認済み（WebSearchでの裏付け。`decisions.md` D11）。
+利用者の実機での確認を待つ。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには

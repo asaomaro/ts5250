@@ -26,6 +26,16 @@
         "selector": [{ "filenamePattern": "*.ts5250" }],
         "priority": "default"
       }
+    ],
+    "languages": [
+      {
+        "id": "ts5250",
+        "extensions": [".ts5250"],
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
+      }
     ]
   },
   "scripts": {
