@@ -205,10 +205,11 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
   実際に失敗することを確認してから戻した
 - `aidev smoke` — pass
 
-**この修正だけで利用者の環境（実際のVSCode拡張ホスト）で直るかは未確認**——iframe側の
-Permissions Policyの障壁は実測で取り除いたが、VSCode拡張のWebview自体がより上位で
-この機能を許可しているかどうかは、実際のVSCode拡張ホストが無いこの開発環境では
-確認できない（`decisions.md` D8）。利用者の再検証を待つ。
+**利用者確認済み: この修正だけでは直らなかった**（`decisions.md` D8「結論」）。
+iframe側のPermissions Policyの障壁は実測で取り除けたが、フォント一覧は依然として
+出ない——VSCode拡張のWebview自体がLocal Font Access自体を許可していない、という
+VSCode本体側の制約と判断する。「フォント名を直接入力」欄は利用者確認済みで正しく
+機能しており、VSCode拡張ではこちらが正規の使い方になる。
 
 ## 未検証の穴（skip / 環境不足）
 

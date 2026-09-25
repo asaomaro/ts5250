@@ -349,3 +349,29 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   新規テストは実際にmutationで検証済み（`allow`属性を外すと失敗することを確認してから戻した）。
 - **影響**: `vscode-extension/src/webviewHtml.ts`・`vscode-extension/test/webviewHtml.test.ts`
   を変更。同じPR #414（未マージ）へ追加コミットする。
+
+### D8の結論（利用者確認済み。未確認だった点が確定した）
+
+利用者が`allow="local-fonts"`適用後の`.vsix`で再検証したところ、**フォント一覧は
+依然として出ない**（「フォント名を直接入力」は正しく反映される）ことを確認した。
+ブラウザ単体（通常のワークスペースUI）ではフォント一覧を選べるとの補足も得た。
+
+- **確定した理解**: `webviewHtml.ts`の`<iframe>`側のPermissions Policyの障壁は
+  実測で取り除けている（D8本文の検証）が、**VSCode拡張のWebview自体（`buildShellHtml`が
+  返すHTMLを表示する、より外側のコンテキスト）がLocal Font Access自体をそもそも
+  許可していない**、というのが残る唯一の説明と判断する——`<iframe>`側の許可は
+  必要条件ではあったが十分条件ではなかった。VSCode拡張のWebview APIには、
+  この種の強力なPermissions Policy機能を拡張側から許可へ格上げする手段が無い
+  （`vscode.WebviewOptions`は`enableScripts`/`localResourceRoots`等に限られ、
+  Feature/Permissions Policyの制御は含まない）。
+- **このworkでは対応しない**: VSCode本体側の制約であり、拡張のコードからは
+  解決できない。`document.fonts`（CSS Font Loading API）等の代替手段も、
+  「既に使われているフォント」しか見えず「インストール済みフォントの一覧」の
+  代替にはならないため採用しない。
+- **利用者への案内**: VSCode拡張では「フォント名を直接入力」欄を使うのが
+  正しい使い方——`screenFonts.ts`の設計（一覧を出せないブラウザでも名前で
+  指定できるフォールバック）が、VSCode拡張という新しい利用環境でもそのまま
+  機能しており、機能そのものは失われていない。
+- **`allow="local-fonts"`は残す**: 単体では効果が無かったが、誤った変更ではない
+  （必要条件は満たしている。VSCode側が将来この機能を許可するようになった場合や、
+  他の埋め込み文脈で効く可能性があるため、削除する理由が無い）。
