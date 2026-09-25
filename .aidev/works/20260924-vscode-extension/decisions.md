@@ -102,3 +102,40 @@
     再現条件・却下した代替案を記録として残す。
 - **影響**: `test-result.md`に観測事実を記録。`.aidev/backlog/session-lifecycle.md`に
   follow-up項目を追加（`aidev backlog add`）。deliverのPR本文「既知の制約」にも引き継ぐ。
+
+## D3: deliver後、利用者の実機（Windows）検証で見つかった診断出力の欠陥を同じPRで直す
+
+- **背景**: PR #414 作成後、利用者が実際に`.vsix`をWindows環境へインストールして動作確認したところ、
+  「サーバーが起動しませんでした（port 34000）」というエラーが出た一方、「ts5250」出力パネルには
+  **何も出力されていなかった**。
+- **原因**: `vscode-extension/src/extension.ts`の`acquireService`は、`serviceManager.acquire()`が
+  **成功して初めて**返ってきた`child`のstdout/stderrへ`on("data", ...)`を配線していた。
+  つまり`acquire()`が失敗（`SPAWN_TIMEOUT_MS`＝20秒でhealthzに届かない等）した経路では、
+  子プロセスが起動中に出していたはずの診断出力（エラーメッセージ含む）を**誰も読んでおらず**、
+  OSのパイプバッファの中で失われたまま`acquire()`が例外を投げていた——「なぜ失敗したか」が
+  一番知りたい場面で診断できない状態になっていた。加えて、失敗時に`child`をkillしておらず、
+  healthzに応答しないままどのロックにも載らない孤児プロセスが残るリスクもあった。
+- **決定**: `ServiceManager`に`onChildOutput`（成否が確定する前から呼ばれるコールバック）を
+  追加し、`spawn`直後（healthz待ちの前）にstdout/stderrを配線するよう`acquire()`自身へ移した。
+  失敗（タイムアウト／spawn自体のerrorイベント）した経路では、投げる前に`killByPid`で
+  自分の子を畳むようにした。`extension.ts`側は`ServiceManager`のコンストラクタへ
+  `onChildOutput: (chunk) => output.append(chunk)`を渡すだけになり、成功後にしか配線しない
+  旧経路は削除した。
+- **理由・代替案**:
+  - 検討した代替案: `SPAWN_TIMEOUT_MS`（20秒）を単純に延ばす。却下理由——原因不明のまま
+    数値をいじるのは推測による判断（AGENTS.md「判断の原則」2）。まず診断出力を復元し、
+    実際に何が起きているか（遅いだけか、本当に起動できないか）を利用者の実機で確認する方が先。
+  - 採用理由: 診断出力の欠落は、成否に関わらず起きる構造的な欠陥（配線のタイミングの問題）
+    であり、根本を直すのが筋。孤児プロセス化の防止も同じ`acquire()`の失敗経路に付随する
+    別の欠陥として合わせて直した（別PRに分けるほどの独立性は無い）。
+  - **副次的に見つかった安全上の問題**: `vscode-extension/test/serviceManager.test.ts`の
+    「healthzがタイムアウトし続けたら...」テストが`fakeChild(1)`（pid=1）を使っており、
+    `process.kill`をモックしていなかった。この工程の変更で`acquire()`の失敗経路が
+    新たに`killByPid`を呼ぶようになったため、**このコンテナのPID 1（`/sbin/init`）へ
+    実際にSIGTERMを送りかねない状態**だった。同じ問題は「heartbeatはacquireしていない
+    windowIdでは何もしない」テスト（`release()`経由。こちらは元から`killByPid`を呼ぶ
+    既存コードで、今回の変更とは無関係に以前から存在していた）にもあった。両方とも
+    `process.kill`をモックして直した（実行前に気づき、実際の signal は送っていない）。
+- **影響**: `vscode-extension/src/serviceManager.ts`・`src/extension.ts`・
+  `test/serviceManager.test.ts`・`test/extension.test.ts`を変更。`test-result.md`に
+  再テスト結果を追記。同じPR #414（未マージ）へ追加コミットする。

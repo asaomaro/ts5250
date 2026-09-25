@@ -58,7 +58,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     webRootPath,
     connectionsPath: join(globalStorageDir, "connections.json"),
     secretKeyFilePath: join(globalStorageDir, ".env"),
-    windowId: randomUUID()
+    windowId: randomUUID(),
+    // spawn直後、成否が分かる前から流す（`serviceManager.ts`の`onChildOutput`コメント参照）。
+    // 以前はここ（`acquire()`が返した後）でしか配線しておらず、起動に失敗したときの
+    // 診断出力が失われていた
+    onChildOutput: (chunk) => output.append(chunk)
   });
 
   /**
@@ -73,12 +77,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const acquireService = async (): Promise<{ port: number }> => {
     localCount++;
     try {
+      // 子プロセスのstdout/stderrは`ServiceManager`が`onChildOutput`経由で
+      // spawn直後から流す（成否が分かる前から。失敗時の診断出力を失わないため）
       const result = await serviceManager.acquire();
-      // `child`は自分が新規に起動したときだけ付く（再利用時は無い）
-      if (result.child) {
-        result.child.stdout?.on("data", (buf: Buffer) => output.append(buf.toString("utf8")));
-        result.child.stderr?.on("data", (buf: Buffer) => output.append(buf.toString("utf8")));
-      }
       return { port: result.port };
     } catch (e) {
       // **起動に失敗したら数えたことにしない。** 増やしたまま呼び出し元（Ts5250EditorProvider）が

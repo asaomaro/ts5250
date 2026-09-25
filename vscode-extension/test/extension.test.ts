@@ -98,6 +98,17 @@ describe("activate", () => {
     expect(opts.webRootPath).toBe("/repo/vscode-extension/server-stage/packages/web-ui/dist");
   });
 
+  it("ServiceManagerへonChildOutputを渡し、呼ぶと「ts5250」出力パネルへ流れる", async () => {
+    createOutputChannel.mockClear();
+    await activate(makeContext() as never);
+    const channel = createOutputChannel.mock.results[0]!.value as { append: (s: string) => void };
+    const opts = ServiceManagerCtor.mock.calls[0]![0] as { onChildOutput: (chunk: string) => void };
+
+    opts.onChildOutput("起動中...\n");
+
+    expect(channel.append).toHaveBeenCalledWith("起動中...\n");
+  });
+
   it("ローカル参照カウント: 2回acquireして1回releaseしても、まだ下位のreleaseは呼ばれない", async () => {
     await activate(makeContext() as never);
     const deps = lastCapturedDeps();

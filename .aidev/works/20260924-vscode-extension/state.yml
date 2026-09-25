@@ -1,7 +1,7 @@
 schema: 11
 slug: vscode-extension
 current: deliver
-approved: [requirements, research, design, architecture, tasks, test, review, deliver]
+approved: [requirements, research, design, architecture, tasks, test, review, deliver, coding]
 mode: autonomous
 profile: full
 humanGates: []

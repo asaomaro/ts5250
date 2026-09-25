@@ -62,7 +62,34 @@
   `.aidev/works/20260924-vscode-extension/test-result.md`に実機のシステム名（`.env.verify`で
   読んでよいと明示された非秘密識別子）以外の秘密は含まれないことをgrepで確認済み。
 
-## 結論
+## 結論（ラウンド1）
 
 指摘なし（must/should/nit いずれも0件）。残る唯一の既知の制約
 （VSCode拡張ホストでの実地動作確認）はdeliverのPR本文「既知の制約」に引き継ぐ。
+
+## ラウンド2（deliver後・利用者のWindows実機検証で見つかった診断出力欠陥）
+
+`decisions.md` D3。差分は`serviceManager.ts`（`onChildOutput`をspawn直後から配線・
+失敗経路で子をkill）・`extension.ts`（配線の移設）・関連テスト。
+
+- **要件適合**: この欠陥自体はrequirements/design/ACの対象外（診断出力の欠落という
+  実装上のバグ）。`aidev coverage`の被覆に変化なし（AC追加なし、`AC: なし`扱い）。
+  修正が「利用者が実際に困っていた症状」に直接対応しているかを見た——出力パネルに
+  何も出ないという報告は、まさに`onChildOutput`の配線タイミングのバグで説明が付き、
+  修正後は成否に関わらず出力が流れる。**価値適合は満たしている**。
+- **正確性**: `Promise.race`の負けた側（`spawnError`）が後から解決してもこの変更の
+  範囲では未処理rejectionを生まない（`child.once("error", ...)`は1回限りのlistenerで、
+  raceの外側では誰も観測しないが、これは今回の変更前から存在する構造であり、
+  新規に持ち込んだものではない。範囲外として記録に留める・追わない）。
+- **規約適合**: コメントは「なぜ」（旧経路が失敗時に出力を失っていた理由・Windowsの
+  実機報告が発端であること）を書いており、AGENTS.mdの方針に沿う。`console.*`は
+  使っていない（eslint 0 errors）。
+- **保守性**: `onChildOutput`は`ServiceManagerOptions`の他の注入可能フィールド
+  （`spawnServer`/`checkHealth`/`now`）と同じパターンで追加されており、一貫している。
+- **見つけて直した副次的な問題**: 修正の適用対象であるテストファイル自体に、
+  本物のPID 1へSIGTERMを送りかねない箇所が2箇所（1箇所は今回の変更で新たに
+  危険になったもの、もう1箇所は既存コードの`release()`経路で元から存在したもの）
+  あり、taskcheckの段階で見つけて`process.kill`のモックを追加して直した
+  （`decisions.md` D3）。
+
+指摘なし（must/should/nit いずれも0件）。

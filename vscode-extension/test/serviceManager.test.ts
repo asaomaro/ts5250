@@ -100,16 +100,55 @@ describe("ServiceManager.acquire", () => {
     expect(Object.keys(lock.windows)).toEqual(["win-revive"]); // 古いwin-deadは引き継がれない（新規ロック）
   });
 
-  it("healthzがタイムアウトし続けたら起動失敗として例外を投げる", async () => {
+  it("healthzがタイムアウトし続けたら、子をkillしつつ起動失敗として例外を投げ、途中の出力もonChildOutputへ届く", async () => {
     const lockFilePath = tempLockPath();
     const nowMs = { value: 0 };
+    // **`process.kill`を必ずモックする**——タイムアウト時、この工程の変更で自分が
+    // spawnした（つもりの）子をkillByPidで畳むようになった。`fakeChild`のpidは
+    // テスト用の適当な数値であり、モックしないと本物の`process.kill(pid, "SIGTERM")`が
+    // 飛ぶ（pidの値によっては無関係な実プロセスに当たる。このコンテナでは
+    // 小さいpidほど危険——PID 1はinit）
+    const kill = fakeKill();
+    const child = fakeChild(999999) as EventEmitter & { pid: number; stdout: EventEmitter; stderr: EventEmitter };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    const chunks: string[] = [];
     const sm = new ServiceManager({
       ...baseOptions(lockFilePath, "win-1", nowMs),
-      spawnServer: () => fakeChild(1) as never,
+      spawnServer: () => {
+        // checkHealthの結果が出るより前（spawn直後）に出力を流す——
+        // 「成否が確定する前から読める」ことを確認する
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("starting\n")));
+        return child as never;
+      },
+      checkHealth: async () => false,
+      onChildOutput: (chunk) => chunks.push(chunk)
+    });
+
+    await expect(sm.acquire()).rejects.toThrow();
+
+    expect(kill).toHaveBeenCalledWith(999999, "SIGTERM"); // 孤児化を防ぐため自分の子を畳む
+    expect(chunks.some((c) => c.includes("starting"))).toBe(true); // 失敗時も出力が失われない
+    kill.mockRestore();
+  }, 25_000);
+
+  it("spawn自体が失敗（errorイベント）したら、その旨を投げ子をkillしようとする", async () => {
+    const lockFilePath = tempLockPath();
+    const nowMs = { value: 0 };
+    const kill = fakeKill();
+    const child = fakeChild(777777);
+    const sm = new ServiceManager({
+      ...baseOptions(lockFilePath, "win-1", nowMs),
+      spawnServer: () => {
+        queueMicrotask(() => child.emit("error", new Error("ENOENT")));
+        return child as never;
+      },
       checkHealth: async () => false
     });
-    await expect(sm.acquire()).rejects.toThrow();
-  }, 25_000);
+    await expect(sm.acquire()).rejects.toThrow(/ENOENT/);
+    expect(kill).toHaveBeenCalledWith(777777, "SIGTERM");
+    kill.mockRestore();
+  });
 });
 
 describe("ServiceManager.release", () => {
@@ -195,12 +234,17 @@ describe("ServiceManager: ハートビートと陳腐化", () => {
   it("heartbeatはacquireしていないwindowIdでは何もしない（release後の誤生成を防ぐ）", async () => {
     const lockFilePath = tempLockPath();
     const nowMs = { value: 1_000_000 };
+    // **`release()`は最後の参照が抜けると本物の`process.kill`を呼ぶ**。`fakeChild(1)`の
+    // `1`はテスト用の適当な数値に過ぎないが、モックしないとこのコンテナではPID 1
+    // （init）へ実際にSIGTERMを送りにいく（既存のバグ。この工程で見つけて直した）
+    const kill = fakeKill();
     const spawnServer = () => fakeChild(1) as never;
     const checkHealth = async () => true;
     const sm = new ServiceManager({ ...baseOptions(lockFilePath, "win-1", nowMs), spawnServer, checkHealth });
     await sm.acquire();
     await sm.release();
     expect(existsSync(lockFilePath)).toBe(false);
+    kill.mockRestore();
 
     await sm.heartbeat();
 

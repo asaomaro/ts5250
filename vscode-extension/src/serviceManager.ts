@@ -52,10 +52,20 @@ export interface ServiceManagerOptions {
   checkHealth?: (port: number, timeoutMs: number) => Promise<boolean>;
   /** 注入可能。既定は`Date.now`（ハートビート陳腐化判定のテスト用） */
   now?: () => number;
+  /**
+   * 起動した子プロセスの標準出力/標準エラーを伝える。**成否が確定する前から呼ばれる**
+   * （spawn直後に配線する）。実機（Windows）でサーバーがhealthzに20秒以内に応答できず
+   * `acquire()`が失敗したとき、以前は`extension.ts`側が`acquire()`の**成功後**にしか
+   * stdout/stderrを配線していなかったため、起動中に子プロセスが出していたはずの診断出力
+   * （エラーメッセージ含む）が誰にも読まれないままパイプの内側で失われ、「出力パネルに
+   * 何も出ていない」という診断不能な報告になった。ここで配線を`acquire()`自身に移し、
+   * 失敗時も含めて必ず伝える
+   */
+  onChildOutput?: (chunk: string) => void;
 }
 
 export class ServiceManager {
-  private readonly opts: Required<Pick<ServiceManagerOptions, "spawnServer" | "checkHealth" | "now">> &
+  private readonly opts: Required<Pick<ServiceManagerOptions, "spawnServer" | "checkHealth" | "now" | "onChildOutput">> &
     ServiceManagerOptions;
 
   constructor(options: ServiceManagerOptions) {
@@ -63,7 +73,8 @@ export class ServiceManager {
       ...options,
       spawnServer: options.spawnServer ?? ((port) => defaultSpawnServer(options, port)),
       checkHealth: options.checkHealth ?? defaultCheckHealth,
-      now: options.now ?? (() => Date.now())
+      now: options.now ?? (() => Date.now()),
+      onChildOutput: options.onChildOutput ?? (() => undefined)
     };
   }
 
@@ -72,9 +83,12 @@ export class ServiceManager {
    * 無ければ自分が起動する（design.md「振る舞いの詳細」の調停プロトコル）。
    *
    * **自分が新規に起動したときだけ`child`を返す**（再利用したときは無い）。
-   * `extension.ts`がこれを使って子プロセスのstdout/stderrをOutputChannelへ流す
-   * （design.md「ログ」。taskcheck T7の指摘で追加——以前は`{port}`しか返さず、
-   * ログを流す経路が存在しなかった）
+   * `extension.ts`は`child.stdin`等の操作にこれを使う想定は無く、単に「自分が
+   * 起動したか」の判定に使う。stdout/stderrの配線自体は**`onChildOutput`経由で
+   * `acquire()`自身が成否確定前から行う**（design.md「ログ」。taskcheck T7の指摘で
+   * 追加——以前は`{port}`しか返さず、ログを流す経路が存在しなかった。その後、
+   * 呼び出し元が成功後にしか配線しない構成だと失敗時の診断出力が失われる欠陥が
+   * 実機（Windows）で見つかり、`onChildOutput`へ移した）
    */
   async acquire(): Promise<{ port: number; child?: ChildProcess }> {
     const existing = this.readLock();
@@ -90,6 +104,13 @@ export class ServiceManager {
     }
     const port = await findFreePort(PORT_SEARCH_START);
     const child = this.opts.spawnServer(port);
+    // **spawn直後、成否が分かる前に配線する。** 以前は`acquire()`成功後（呼び出し元＝
+    // `extension.ts`側）でしか配線しておらず、起動が遅い・失敗する実機（Windows。
+    // 初回のアンチウイルススキャン等でnode_modulesへの初回アクセスが遅くなりうる）では、
+    // 診断に一番要る「なぜ失敗したか」の出力がパイプの中で誰にも読まれずに失われていた
+    this.opts.onChildOutput(`起動中: ${this.opts.serverMainPath} --http ${port} ...\n`);
+    child.stdout?.on("data", (buf: Buffer) => this.opts.onChildOutput(buf.toString("utf8")));
+    child.stderr?.on("data", (buf: Buffer) => this.opts.onChildOutput(buf.toString("utf8")));
     // **`spawn`自体が失敗したとき（実行ファイルが無い等）はChildProcessが`error`を発火する。**
     // 誰も聞いていないと拡張ホスト全体を巻き込む未処理例外になる（taskcheck T7のmust指摘）。
     // healthz待ちと競走させ、spawn失敗を`acquire()`の失敗として正しく伝播させる
@@ -100,9 +121,15 @@ export class ServiceManager {
     try {
       ok = await Promise.race([waitUntilHealthy(this.opts.checkHealth, port, SPAWN_TIMEOUT_MS), spawnError]);
     } catch (e) {
+      // **失敗した自分の子は畳んでから投げる。** 畳まないと、healthzに応答しないまま
+      // どのロックにも載らない孤児プロセスとして残り続ける
+      killByPid(child.pid ?? -1);
       throw new Error(`サーバーの起動に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (!ok) throw new Error(`サーバーが起動しませんでした（port ${port}）`);
+    if (!ok) {
+      killByPid(child.pid ?? -1);
+      throw new Error(`サーバーが起動しませんでした（port ${port}）。「ts5250」出力パネルにエラーが出ていないか確認してください`);
+    }
 
     const lock: LockFile = {
       pid: child.pid ?? -1,

@@ -89,6 +89,24 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
   同じ「単一利用者として許容する」設計方針の範囲内）だが、真の相互排他への置き換えは
   今回のwork範囲外として次のworkへ送った（`decisions.md` D2）。
 
+## ラウンド2（deliver後・利用者のWindows実機検証で見つかった診断出力欠陥の修正）
+
+`decisions.md` D3。`ServiceManager.acquire()`が失敗する経路で子プロセスのstdout/stderrが
+一切読まれず、診断に一番要る出力が失われていた欠陥を修正。
+
+- `cd vscode-extension && npx tsc -b` / `npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **72 passed / 0 failed**（13 test files。
+  70→72。`serviceManager.test.ts`のタイムアウト系テストを1本に統合しつつ
+  spawn-error系を1本純増、`extension.test.ts`に`onChildOutput`配線の確認を1本追加）
+- `npx eslint vscode-extension/src vscode-extension/test` — 0 errors
+- `aidev smoke` — pass
+- **副次的な安全確認**: 修正により`acquire()`の失敗経路が新たに`killByPid`（実体は
+  `process.kill`）を呼ぶようになったため、既存テストのうち`process.kill`をモックしていない
+  ものが本物のシグナルを送ってしまわないか、このコンテナで`ps -p 1`によりPID 1
+  （`/sbin/init`）が無事であることを実行前後で確認した（該当テストは全てモックを追加済み）
+
+このラウンドでは失敗は発生していない。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
