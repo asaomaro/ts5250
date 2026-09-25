@@ -364,6 +364,13 @@ export class Session5250 extends Emitter<SessionEvents> {
           reject(new As400Error("SESSION_REJECTED", `${this.retriedRejection}; closed while answering with another name: ${reason}`));
           return;
         }
+        // **理由をログにも残す。** この`As400Error`のmessageはクライアントへ`sendError`で
+        // 届くが、`SESSION_CLOSED`はweb-ui側の`wsErrorNotice`が汎用文言（「セッションは
+        // 閉じています」）に潰して画面には出さない（`CODES_WITH_FIELD_DETAIL`に無いコード）。
+        // サーバー側ログ（VSCode拡張の出力パネル含む）にだけは実際の理由を残しておかないと、
+        // 起動応答（I901/I902）まで成功したのに直後に切れる、という切り分けが利用者側から
+        // 一切できなくなる（実機報告で踏んだ）
+        this.warn(`closed during negotiation: ${reason}${hint}`);
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
       this.telnet.onError((err) => this.warn(`transport error: ${err.message}`));

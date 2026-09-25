@@ -114,3 +114,31 @@
   一貫した書き方）。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド4（deliver後・利用者のWindows実機検証で見つかった診断ログ欠落の修正）
+
+`decisions.md` D5。差分は`packages/tn5250/src/session/session.ts`（`this.warn`の1行追加）・
+`packages/tn5250/test/startup-reject.test.ts`（`fakeTransport`拡張＋テスト1件）。
+coding工程で`cross`のtaskcheckラウンド上限（2/2）に達していたため、独立点検はこのreview工程が
+初めて（`aidev-40-coding`手順5の指示どおり）。
+
+- **要件適合**: AC対象外の診断ログ追加（`AC: なし`扱い）。被覆に変化なし。
+- **価値適合**: 利用者が実際に踏んだ「I902（起動成功）の直後に接続が切れ、理由が
+  どこにも見えない」という状況に直接対応している。
+- **正確性**: `reason`（`telnet.onClose`から渡る文字列）の出所を`packages/tn5250/src/
+  transport/tcp.ts`まで辿り、`"socket closed"`・`"closed by client"`等の固定文言であって
+  資格情報等の機微情報を含まないことを確認した（AGENTS.md「セキュリティ」——ログに
+  秘密を出さない、に抵触しない）。`this.warn`呼び出しは`reject`の**前**に置かれており、
+  例外的な順序の問題（reject後にwarnが呼ばれず記録が欠ける等）は無い。
+- **規約適合**: コメントは「なぜ」（監査ログ・web-ui双方が理由を捨てる経路であること・
+  実機報告の経緯）を書いている。既存の隣接する分岐（8902の聞き直し・起動応答の失敗）は
+  元から`this.warn`を呼んでおり、**今回追加した箇所だけが対称性を欠いていた**という
+  診断も`decisions.md`に残している。
+- **保守性**: `fakeTransport`への`closeWith`追加は既存の`onClose: () => {}`（無視するだけの
+  スタブ）を実際に機能させる形へ拡張しており、他のテストの挙動は変えない
+  （既存テストは`onClose`を一切参照していないため無害な拡張）。`packages/tn5250`
+  全体（894件）を実行しgreenを確認済み。
+- **検討して見送った代替案の扱い**: `audit.ts`・`opMessages.ts`側の変更は`decisions.md`に
+  却下理由付きで記録されており、スコープを広げていない。
+
+指摘なし（must/should/nit いずれも0件）。

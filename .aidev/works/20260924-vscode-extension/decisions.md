@@ -171,3 +171,37 @@
     事前に作ってから同じコマンドを起動すると解消することを確認済み）。
 - **影響**: `vscode-extension/src/extension.ts`・`test/extension.test.ts`を変更。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D5: I902（起動成功）の直後に切れたセッションの理由をログへ残す（`packages/tn5250`）
+
+- **背景**: D4の修正後、利用者（Windows・実機ホストS7857290）の検証で
+  `startup response I902`（起動成功）に続けて`ws_open`が`SESSION_CLOSED`で失敗する事象を確認した。
+  出力パネルにI902は出ていたが、`SESSION_CLOSED`の**具体的な理由**（`closed during negotiation:
+  <reason>`）はどこにも出ていなかった——`packages/server/src/audit.ts`の`withAudit`は
+  コードだけを監査ログへ残しmessageは残さない。`packages/web-ui/src/composables/
+  opMessages.ts`の`wsErrorNotice`は`SESSION_CLOSED`を`CODES_WITH_FIELD_DETAIL`に含めておらず、
+  画面には汎用文言（「セッションは閉じています」）しか出さない。**理由を見る手段が
+  サーバー側のログしか残っておらず、そのログにも出ていなかった**。
+- **原因**: `packages/tn5250/src/session/session.ts`の`establish()`内、`telnet.onClose`ハンドラは
+  `SESSION_CLOSED`のAs400Errorを`reject`するだけで、`this.warn(...)`を呼んでいなかった
+  （同じ関数内の他の分岐——8902の聞き直し・起動応答の失敗コード・成功コードのログ——は
+  いずれも`this.warn`を呼んでいるのに、この分岐だけ抜けていた）。
+- **決定**: `reject`の直前に`this.warn(\`closed during negotiation: ${reason}${hint}\`)`を追加した。
+  `warn`は`session-manager.ts`で`sessionLog.warn({sessionId}, m)`へ配線されており、
+  VSCode拡張の出力パネル（D3の修正で成否確定前から配線済み）にもそのまま届く。
+- **理由・代替案**:
+  - 検討した代替案: `audit.ts`の`withAudit`にエラーmessageも記録する／`wsErrorNotice`で
+    `SESSION_CLOSED`もmessageを出すようにする。却下理由——前者は監査ログの設計方針
+    （個人情報・接続先の詳細を監査ログに積み上げない）に踏み込む判断で、このPRの
+    スコープを超える。後者はweb-ui全体（VSCode拡張専用ではない）のUI文言方針に関わり、
+    同じく単独の判断では踏み込めない。どちらも**別work**の対象として残す。
+  - 採用理由: `this.warn`を配線し忘れていた箇所への1行追加であり、既存の分岐と対称に
+    揃えるだけ。挙動は変えず、ログにだけ情報を足す最小の変更。
+  - **点検の扱い**: `cross`のtaskcheckラウンド上限（2/2）に達したため、この工程での
+    独立点検は行わず、次のreview工程での点検に委ねる（`aidev-40-coding`手順5の指示どおり）。
+- **影響**: `packages/tn5250/src/session/session.ts`（1箇所）・
+  `packages/tn5250/test/startup-reject.test.ts`（`fakeTransport`に`closeWith`を追加・
+  テスト1件追加）を変更。tn5250パッケージ全体のテスト（894件）を実行し green を確認。
+  同じPR #414（未マージ）へ追加コミットする。**利用者の実機ホストへの実接続そのものは
+  未解決**——このログ追加は次回の再現時に理由を見えるようにするための対応で、
+  「なぜ切れるか」自体の根本原因は利用者の再検証結果を待つ。

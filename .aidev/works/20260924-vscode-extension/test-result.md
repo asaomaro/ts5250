@@ -126,6 +126,29 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
 
 このラウンドでは失敗は発生していない。
 
+## ラウンド4（deliver後・利用者のWindows実機検証で見つかった診断ログ欠落の修正）
+
+`decisions.md` D5。差分は`packages/tn5250/src/session/session.ts`（`this.warn`の1行追加）・
+`packages/tn5250/test/startup-reject.test.ts`（`fakeTransport`に`closeWith`を追加、
+「I902の直後に接続が切れたら...」テストを1件追加）。
+
+- `cd packages/tn5250 && npx tsc -b` — 0 errors
+- `cd packages/tn5250 && npx vitest run` — **894 passed / 0 failed**（83 test files。
+  新規1件を含め全green）
+- `cd packages/tn5250 && npx vitest run test/startup-reject.test.ts` — 22 passed（新規テストの
+  単体実行でも確認）
+- `npx tsc -b`（root。`packages/server`が`tn5250`に依存するため再ビルドを確認） — 0 errors
+- `npx eslint packages/tn5250/src packages/tn5250/test` — 0 errors
+- `node vscode-extension/scripts/prepare-server.mjs` → `npx @vscode/vsce package` — 実行成功。
+  生成された`.vsix`内の`server-stage/node_modules/@ts5250/tn5250/dist/session/session.js`に
+  `closed during negotiation`という文字列が含まれることを`grep`で確認し、
+  ビルド成果物に実際に反映されていることを検証した
+- `aidev smoke` — pass
+
+**利用者の実機（S7857290）への接続自体は未解決のまま**。このラウンドは「理由が見えるようにする」
+診断ログの追加であり、根本原因（なぜ起動成功I902の直後にセッションが切れるか）は
+利用者の次の再検証結果を待つ（`decisions.md` D5）。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
