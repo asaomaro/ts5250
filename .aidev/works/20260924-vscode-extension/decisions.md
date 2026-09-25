@@ -139,3 +139,35 @@
 - **影響**: `vscode-extension/src/serviceManager.ts`・`src/extension.ts`・
   `test/serviceManager.test.ts`・`test/extension.test.ts`を変更。`test-result.md`に
   再テスト結果を追記。同じPR #414（未マージ）へ追加コミットする。
+
+## D4: `context.globalStorageUri`のディレクトリを`activate()`の冒頭で作る
+
+- **背景**: D3の修正で出力パネルに診断出力が届くようになった結果、利用者（Windows）の実機から
+  実際のエラーが取れた: `ENOENT: no such file or directory, open '...\globalStorage\
+  asaomaro.ts5250-vscode\.env'`（`packages/server/src/secret-crypto.ts`の`persistKey`が
+  `writeFileSync`する際、親ディレクトリが存在しなかった）。
+- **原因**: VSCodeの`context.globalStorageUri`は**物理的に存在する保証が無い**（初回
+  インストール直後、拡張機能自身がまだ何も書き込んでいない状態ではディレクトリごと
+  存在しない）。`ServiceManager.writeLock()`は自分のロックファイル書き込み前に
+  `mkdirSync(dirname(...), {recursive:true})`していたので無事だったが、**別プロセス**
+  として`spawn`する`packages/server`側（`--secret-key-file`/`--connections`）は
+  親ディレクトリを作らずに書き込もうとしており、`extension.ts`側も`spawn`する前に
+  ディレクトリの存在を保証していなかった。
+- **決定**: `extension.ts`の`activate()`冒頭（`ServiceManager`を構築する前）で
+  `mkdirSync(globalStorageDir, { recursive: true })`を呼び、以降のあらゆる書き込み
+  （ロックファイル・`.env`・`connections.json`・`systemRefs.json`）の前提を一括して
+  満たす。
+- **理由・代替案**:
+  - 検討した代替案: `packages/server`側（`secret-crypto.ts`の`persistKey`・
+    `config-store.ts`の保存経路）を個別に`mkdirSync`対応させる。却下理由——
+    `packages/server`はVSCode拡張だけでなくElectron版・CLI起動でも共有されるコードで、
+    **他の起動経路では既にディレクトリが存在する前提が成立している**
+    （Electronの`userData`パスはOSが用意する）。共有コード側を直すより、
+    「ディレクトリが存在しない」という前提を初めて破っている呼び出し元
+    （VSCode拡張）側で保証する方が影響範囲が小さく、正しい層に置ける。
+  - 採用理由: 実機（Windows）で実際に再現・修正確認した
+    （`node packages/server/dist/main.js`を、親ディレクトリの無いパスへ
+    `--secret-key-file`指定して直接起動し、同じENOENTを再現。ディレクトリを
+    事前に作ってから同じコマンドを起動すると解消することを確認済み）。
+- **影響**: `vscode-extension/src/extension.ts`・`test/extension.test.ts`を変更。
+  同じPR #414（未マージ）へ追加コミットする。

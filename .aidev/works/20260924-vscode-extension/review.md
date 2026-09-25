@@ -93,3 +93,24 @@
   （`decisions.md` D3）。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド3（deliver後・利用者のWindows実機検証で見つかった`globalStorageUri`未作成の修正）
+
+`decisions.md` D4。差分は`extension.ts`（`activate()`冒頭で`mkdirSync`）・関連テスト1件。
+
+- **要件適合**: このAC対象外の実装バグ修正（`AC: なし`扱い）。`aidev coverage`の被覆に
+  変化なし。
+- **価値適合**: 利用者が実際に踏んだ「初回インストール直後に起動できない」という
+  症状に直接対応している。修正は実プロセスでの再現・解消確認を伴う（`test-result.md`
+  ラウンド3）——推測ではなく実機の報告と一致するエラーを再現してから直している。
+- **正確性**: `mkdirSync(dir, {recursive:true})`は既に存在するディレクトリに対しても
+  安全（EEXISTをrecursive指定で吸収する）。複数ウィンドウが同時に`activate()`しても
+  競合しない（Node/OSのmkdir再帰実装が対応）。
+- **規約適合**: コメントは「なぜ」（`globalStorageUri`が物理的に存在する保証が無いこと・
+  実機で踏んだ経緯）を書いている。`console.*`未使用（eslint 0 errors）。
+- **保守性**: `packages/server`側（共有コード）を個別に直す代替案を検討し、
+  影響範囲の小ささを理由に見送ったことを`decisions.md`に残している
+  （`ServiceManager.writeLock()`が既に同種の`mkdirSync`パターンを持っており、
+  一貫した書き方）。
+
+指摘なし（must/should/nit いずれも0件）。

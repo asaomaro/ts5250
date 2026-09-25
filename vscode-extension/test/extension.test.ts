@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * `vi.mock`のファクトリはファイル先頭へホイストされるため、参照する値も
@@ -73,6 +76,23 @@ beforeEach(() => {
 });
 
 describe("activate", () => {
+  it("globalStorageUriのディレクトリが無ければ作ってから起動する（実機Windowsで見つかったENOENT対応）", async () => {
+    // **`mockExtensionContext`の共有パス（/tmp/mock-global-storage）は使わない**——
+    // 他のテストが既に作っている可能性があり、「作られたか」を検証できなくなる
+    const dir = join(tmpdir(), `ts5250-ext-globalstorage-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    expect(existsSync(dir)).toBe(false);
+    const context = mockExtensionContext(dir) as unknown as {
+      extensionUri: { fsPath: string };
+      extensionMode: number;
+    };
+    context.extensionUri = { fsPath: "/repo/vscode-extension" };
+    context.extensionMode = 2;
+
+    await activate(context as never);
+
+    expect(existsSync(dir)).toBe(true);
+  });
+
   it("Ts5250EditorProviderをviewType付きで登録する", async () => {
     await activate(makeContext() as never);
     expect(registerCustomEditorProvider).toHaveBeenCalledWith(

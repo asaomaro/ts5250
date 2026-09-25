@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ServiceManager } from "./serviceManager.js";
 import { ExtensionSecretCrypto } from "./secretCrypto.js";
@@ -45,6 +46,14 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const { serverMainPath, webRootPath } = resolveServerPaths(context);
   const globalStorageDir = context.globalStorageUri.fsPath;
+  // **`globalStorageUri`は物理的に存在する保証が無い**（初回インストール直後は
+  // まだ誰も書き込んでいない）。ここで作らずに済ませていたため、`ServiceManager`の
+  // ロックファイル書き込み自体は`writeLock()`内で`mkdirSync`していて無事だったが、
+  // **別プロセス**として`spawn`する`packages/server`側が`--secret-key-file`
+  // （`.env`）や`--connections`へ書き込む際は親ディレクトリを作らず、実機（Windows）で
+  // `ENOENT: ...\globalStorage\...\.env`という起動失敗を起こした。ここで一括して
+  // 用意しておく（spawnする前に必ず存在させる）
+  mkdirSync(globalStorageDir, { recursive: true });
 
   // **子プロセスのstdout/stderrをここへ流す**（design.md「ログ」）。GUIアプリには
   // stderrを読む人がいないので、起動状況をVSCode側に残す（`electron/main.cjs`の

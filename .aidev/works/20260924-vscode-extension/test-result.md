@@ -107,6 +107,25 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
 
 このラウンドでは失敗は発生していない。
 
+## ラウンド3（deliver後・利用者のWindows実機検証で見つかった`globalStorageUri`未作成の修正）
+
+`decisions.md` D4。ラウンド2の修正で出力パネルに実際のエラーが届いた結果、
+`ENOENT: ...\globalStorage\...\.env`（`context.globalStorageUri`のディレクトリが
+物理的に存在しなかった）と判明。`extension.ts`の`activate()`冒頭で`mkdirSync`するよう修正。
+
+- **実プロセスでの再現・修正確認**: `node packages/server/dist/main.js`を、親ディレクトリの
+  無いパスへ`--secret-key-file`指定して直接起動し、利用者の報告と**一字一句同じ**
+  `ENOENT: no such file or directory, open '.../.env'`（`persistKey`起因）を再現した。
+  ディレクトリを先に`mkdir -p`してから同じコマンドで起動すると、エラー無く起動することを
+  確認した（実プロセス・実ファイルシステムでの検証。推測で直していない）
+- `cd vscode-extension && npx tsc -b` / `npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **73 passed / 0 failed**（13 test files。
+  `activate()`冒頭で`globalStorageUri`のディレクトリを実際に作ることを確認するテストを追加）
+- `npx eslint vscode-extension/src vscode-extension/test` — 0 errors
+- `aidev smoke` — pass
+
+このラウンドでは失敗は発生していない。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには
