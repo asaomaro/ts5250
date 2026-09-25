@@ -102,3 +102,13 @@ events:
   - { ts: 2026-09-25T15:53:43Z, phase: test, event: approved, metrics: { passed: 2758, failed: 0 } }
   - { ts: 2026-09-25T15:53:48Z, phase: review, event: start, metrics: { marks: 0 } }
   - { ts: 2026-09-25T15:54:11Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 14, ac_covered: 14, tasks_no_ac: 0, tasks_ac_none: 10 } }
+  - { ts: 2026-09-25T15:54:22Z, phase: deliver, event: approved, metrics: { files_changed: 57, insertions: 5892, deletions: 18, amend: yes } }
+  - { ts: 2026-09-25T16:30:15Z, phase: coding, event: start }
+  - { ts: 2026-09-25T16:30:51Z, phase: coding, event: approved, metrics: { tasks_done: 1, unplanned_lookups: 0, task_checks: 0 } }
+  - { ts: 2026-09-25T16:30:55Z, phase: test, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-25T16:31:19Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
+  - { ts: 2026-09-25T16:31:22Z, phase: test, event: approved, metrics: { passed: 2687, failed: 0 } }
+  - { ts: 2026-09-25T16:31:25Z, phase: review, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-25T16:33:01Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 14, ac_covered: 14, tasks_no_ac: 0, tasks_ac_none: 10 } }
+  - { ts: 2026-09-25T16:33:08Z, phase: deliver, event: start }
+  - { ts: 2026-09-25T16:33:12Z, phase: deliver, event: approved, metrics: { files_changed: 2, insertions: 65, deletions: 2 } }

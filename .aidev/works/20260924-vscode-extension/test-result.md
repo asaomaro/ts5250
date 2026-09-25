@@ -329,3 +329,38 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
   バックエンド（実機へのメッセージ送信・取得）は実プロセス・実ホストで確認済み。
   UIの配線（クリックで開く・props伝播・応答後の再取得）はユニットテスト
   （mutation検証込み）の範囲で裏付けている。
+  **→ ラウンド12でPUB400を使い実際に確認、解消した（下記）。**
+
+## ラウンド12（deliver後・利用者の質問「通常のブラウザ版エミュレータも対応出来ていますか？」への対応）
+
+`decisions.md` D13。ラウンド11の「未検証の穴」（実ブラウザでのUI一気通貫が未達）を、
+`AS01`（利用者の実作業中のセッション）とは無関係な装置`MARO`（PUB400）を使って実際に
+確認した。差分は`packages/web-ui/src/composables/openConfigured.ts`（1箇所）と、
+新設`packages/web-ui/test/open-configured-signon-user.test.ts`。
+
+- **実ブラウザでのUI一気通貫（Playwright + PUB400/MARO、実際に確認できた）**:
+  1. サーバーを一時起動（`--connections <PUB400/MAROの設定> --auto-secret-key`、
+     `--env-file=.env --env-file=.env.verify`で`PUB400_PASSWORD`を解決）
+  2. ランチャーの「接続」をクリック → 5250画面（IBM i Main Menu）が実際に開いた
+     （WSの`open`フレームで`session: "own:MARO"`を確認）
+  3. ステータスバーに実際に「✉ メッセージあり」が表示された（DOM上`button.msgwait`が存在）
+  4. クリック（`dispatchEvent`）すると`MessageQuickView`のポップオーバーが実際に開き、
+     実メッセージが表示された
+- **利用者からの追加の質問「このメッセージはジョブのMSGQに送信されたものですか？」への
+  実機での裏取り**: `QSYS2.MESSAGE_QUEUE_INFO`を`MARO`（自分の待ち行列）と`QSYSOPR`の
+  両方に直接クエリして比較。
+  - `MARO`: 1件（システムの電源断予告。自分宛て）
+  - `QSYSOPR`: 10件（`JOBMANAGER`/`LONGDM`/`#SYSLOAD`等、自分とは無関係な他ジョブの
+    システムメッセージ。PUB400は共有機のため常時動いている）
+  - ポップオーバーが表示していたのは**QSYSOPRの方**——`openConfigured.ts`の`meta`に
+    `signonUser`が無く、`MessageQuickView.vue`の既定待ち行列フォールバックが常に
+    `QSYSOPR`になっていたことが原因と判明（`decisions.md` D13に詳細）
+- **修正後の検証**:
+  - `cd packages/web-ui && npx vitest run test/open-configured-signon-user.test.ts` —
+    2 passed（新設）
+  - **mutation検証**: `sys?.signonUser`の付加を`git stash`で一時的に外すと1件目が
+    実際に`{host:'h'}`のみでfailすることを確認してから復元した
+  - `cd packages/web-ui && npx vitest run` — **2685 passed / 0 failed**（209 test files）
+  - `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 実ビルド成功
+- 後始末: 検証用の一時サーバープロセス・一時接続設定ファイル・Playwrightスクリプトは
+  全て削除済み（PUB400への実接続以外、リポジトリへの副作用なし）。

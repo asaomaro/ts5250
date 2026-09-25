@@ -122,14 +122,20 @@ async function open(ref: string, force = false): Promise<void> {
           }
         : {})
     };
+    const sys = systemsStore.systems.find((x) => x.ref === s.system);
     const meta = {
       // **そのセッション自身のシステムから引く**（選択中システムではない）。
       // サービス一覧は別システムのプリンターも並べるので、選択中を見ると別の機械の名前が付く
-      host: systemsStore.systems.find((x) => x.ref === s.system)?.host ?? "",
+      host: sys?.host ?? "",
       // **端末の種類は送信側が見る**（3270 は押せるキーが違う）
       ...(s.terminal !== undefined ? { terminal: s.terminal } : {}),
       ...(s.vtEncoding !== undefined ? { vtEncoding: s.vtEncoding } : {}),
-      ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {})
+      ...(s.deviceName !== undefined ? { deviceName: s.deviceName } : {}),
+      // **`MessageQuickView` の既定の待ち行列に使う**（分かるときだけ。`20260924-vscode-extension` D13）。
+      // 無いと defaultQueue が空になり、QSYSOPR という無関係な共有待ち行列にフォールバックしてしまう
+      // ——実機（PUB400）で確認: MW 灯が点いた要因の実メッセージは自分の待ち行列（signonUser 名）に
+      // あり、QSYSOPR には無関係な他ジョブのメッセージしか無かった
+      ...(sys?.signonUser !== undefined ? { signonUser: sys.signonUser } : {})
     };
     if (s.sessionType === "printer") {
       await openPrinterSession(openMsg, s.name, meta, s.system, s.ref);

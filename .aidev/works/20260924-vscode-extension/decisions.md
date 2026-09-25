@@ -557,3 +557,51 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   （副次的なバグ修正）を変更。`packages/web-ui/src/components/
   MessageQuickView.vue`を新設。関連テストを追加。同じPR #414（未マージ）へ
   追加コミットする。
+
+## D13: 通常のブラウザ版でのメッセージクイックビューを実機で確認、`openConfigured.ts`のsignonUser欠落を発見・修正
+
+- **背景**: D12納品後、利用者から「通常のブラウザ版エミュレータも対応出来ていますか？」と
+  質問された。コード上は`packages/web-ui/src/composables/openConfigured.ts`が元から
+  `openSession()`へ`s.system`（`systemRef`）を渡していたため「対応済みのはず」と回答したが、
+  D12の「未検証の穴」（実ブラウザでのUI一気通貫が未達）をそのまま残していたので、
+  PUB400（利用者の実作業中のSR-OSAKA/AS01とは無関係な装置`MARO`）で実際に確かめた。
+- **確認できたこと**: ランチャーから「接続」→ 5250画面が開く → ステータスバーに
+  「✉ メッセージあり」が実際に表示される → クリックすると`MessageQuickView`の
+  ポップオーバーが開き、実メッセージ（`メッセージ（QSYSOPR）`）が表示された。
+  ここまではD12の実装どおり動作した。
+- **利用者からの追加の質問**: 「このメッセージはジョブのMSGQに送信されたものですか？」。
+  推測で答えず、実機のSQL（`QSYS2.MESSAGE_QUEUE_INFO`）を`MARO`（自分の待ち行列）と
+  `QSYSOPR`の両方に対して直接クエリし比較した。
+  - `MARO`（自分の待ち行列）: 1件——`"System is scheduled to be powered off at
+    08:00:00 on 26-09-20." from=QPGMR/QSYSSCD`。MW灯を点けた張本人と考えて矛盾しない、
+    自分宛ての具体的な内容。
+  - `QSYSOPR`: 10件——`JOBMANAGER`/`LONGDM`/`#SYSLOAD`等、**自分とは無関係な他ジョブの
+    システムメッセージ**（PUB400は多人数が共有する公開機で、QSYSOPRは絶えず動いている）。
+  - ポップオーバーが表示していたのは**QSYSOPRの方**——つまり**ジョブ/利用者自身の
+    MSGQではなく、無関係な共有待ち行列を見せていた**。利用者への回答は「いいえ、
+    このケースでは違った」。
+- **根本原因**: `MessageQuickView.vue`の`queue()`は`props.defaultQueue`が空なら
+  `QSYSOPR`へフォールバックする設計（`MessagePane.vue`と同じ既定）。`defaultQueue`は
+  `StatusBar.vue`経由で`state.meta?.signonUser`から来るが、**`openConfigured.ts`の
+  `meta`構築にはそもそも`signonUser`が無かった**——D12で`EmbedApp.vue`（VSCode拡張の
+  直接接続経路）には追加したが、**通常のブラウザ版のランチャー経由接続
+  （`openConfigured.ts`。`LauncherPane.vue`/`ServicesPane.vue`が共通で使う唯一の
+  接続経路）には追加し忘れていた**。
+- **決定**: `packages/web-ui/src/composables/openConfigured.ts`の`meta`に、
+  `systemsStore.systems`から引いた`signonUser`（分かるときだけ）を追加する
+  （`packages/web-ui/src/composables/openConfigured.ts:125-138`）。
+  - `signonUser`は`PublicSystem`の既存フィールドで、個人設定（`own:`）は常に、
+    サーバー設定（`srv:`）はeditor（admin/認証オフ）のときだけサーバーから返る
+    （`packages/server/src/config-resolver.ts:288-291`の`includeSignon`）。
+    一般ユーザーが`srv:`システムを開く場合は今回も`undefined`のままで、
+    その場合は従来どおり`QSYSOPR`へフォールバックする（改善の余地はあるが、
+    ブラウザ側に手掛かりが無い以上これ以上の推測はしない——実装済みの
+    フォールバック自体はD12からの既存仕様）。
+- **検証**: `packages/web-ui/test/open-configured-signon-user.test.ts`を新設
+  （2件）。mutationで検証済み（`sys?.signonUser`の付加を外すと1件目が実際に
+  落ちることを確認してから戻した）。`packages/web-ui`全体のテスト（209ファイル・
+  2685件）green。`npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`）green。
+- **影響**: `packages/web-ui/src/composables/openConfigured.ts`を変更（1箇所）。
+  `LauncherPane.vue`・`ServicesPane.vue`のどちらから開いても同じ経路なので、
+  両方に反映される。VSCode拡張（`EmbedApp.vue`）は既にD12で対応済みで無変更。
+  同じPR #414（未マージ）へ追加コミットする。

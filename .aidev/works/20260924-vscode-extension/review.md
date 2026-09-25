@@ -323,3 +323,48 @@ coding工程で`cross`のtaskcheckラウンド上限に達しているため、�
   「未検証の穴」に正直に書いている。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド12（deliver後・利用者の質問「通常のブラウザ版エミュレータも対応出来ていますか？」への対応）
+
+`decisions.md` D13。差分は`packages/web-ui/src/composables/openConfigured.ts`（1箇所）と
+新設`packages/web-ui/test/open-configured-signon-user.test.ts`。coding工程で`cross`の
+taskcheckラウンド上限に達しているため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外（D12機能の実地確認・利用者の追加質問への対応）。
+  被覆に変化なし。
+- **価値適合**: 「対応できているはず」という**コードの読解だけに基づく回答**を、
+  実際に実機（PUB400）で動かして検証してから利用者へ伝えている。さらに利用者から
+  「このメッセージはジョブのMSGQに送信されたものですか？」と問われた際、
+  推測で「はい」と答えず、`QSYS2.MESSAGE_QUEUE_INFO`を`MARO`（自分の待ち行列）と
+  `QSYSOPR`の両方に直接クエリして中身を比較し、**実際には違っていた**ことを
+  見つけている。AGENTS.md「判断の原則」2.（実機で確定できることは、必ず実機で
+  確定する）に沿った振る舞いで、見つかったギャップをその場で流さず、根本原因を
+  特定して直している。
+- **正確性**: `openConfigured.ts`の`meta`に`signonUser`が欠けていたのは、D12で
+  `EmbedApp.vue`（VSCode拡張の直接接続経路）には対応したが、通常のブラウザ版の
+  唯一の接続経路（`LauncherPane.vue`/`ServicesPane.vue`が共通で使う
+  `openConfigured.ts`）には対応し忘れていた、という**D12自体の実装漏れ**。
+  今回のラウンドはそれを実機で発見し直している。`signonUser`は
+  `systemsStore.systems`から`s.system`のrefで引く既存フィールドで、他の
+  `meta`フィールド（`host`/`terminal`/`vtEncoding`/`deviceName`）と同じ
+  「分かるときだけ付与する」パターンに揃えており、型・既存の呼び出し規約を
+  破っていない。
+- **境界条件**: `srv:`（サーバー設定）システムを一般ユーザーが開く場合は
+  `signonUser`がサーバーから返らない（`config-resolver.ts`の`includeSignon`が
+  editor限定）ため、その場合は従来どおり`QSYSOPR`へフォールバックする。
+  これは今回のスコープでは「直しきれない」ケースとして`decisions.md`に明記して
+  おり、黙って見過ごしていない（ブラウザ側に手掛かりが無い以上、これ以上の
+  推測はしない、という判断も明記されている）。
+- **保守性**: `meta`構築の共通変数`sys`を切り出し、既存の`host`行も同じ変数を
+  使うよう揃えている（重複した`find`呼び出しを1回に減らす副次的な整理）。
+  `printer`/`vt`/`display`の3経路が同じ`meta`オブジェクトを共有する既存構造を
+  変えておらず、影響範囲は`meta`の中身が1フィールド増えるだけに閉じている。
+- **検証**: mutation検証済み（`sys?.signonUser`の付加を外すと新設テストの
+  1件目が実際にfailすることを確認してから復元）。`packages/web-ui`全体の
+  テスト（209ファイル・2685件）green。`vue-tsc`＋`vite build`green。
+  実ブラウザでの一気通貫（PUB400/MARO、Playwright）も確認済み——ラウンド11で
+  「未検証の穴」だった項目をこのラウンドで解消した。
+- **後始末**: 検証に使った一時サーバー・一時接続設定・Playwrightスクリプトは
+  作業終了時に削除済み（リポジトリに残留物なし）。
+
+指摘なし（must/should/nit いずれも0件）。
