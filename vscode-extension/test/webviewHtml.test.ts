@@ -19,12 +19,16 @@ describe("buildShellHtml", () => {
     expect(html).toContain('nonce="abc123"');
   });
 
-  it("iframeがsandbox属性を持つ（allow-scripts/allow-forms/allow-same-origin）", () => {
-    expect(html).toMatch(/<iframe[^>]*sandbox="allow-scripts allow-forms allow-same-origin"/);
+  it("iframeがsandbox属性を持つ（allow-scripts/allow-forms/allow-same-origin/allow-downloads）", () => {
+    expect(html).toMatch(/<iframe[^>]*sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"/);
   });
 
   it("iframeがallow=\"local-fonts\"を持つ（画面フォント選択がPermissions Policyで塞がれないように）", () => {
     expect(html).toMatch(/<iframe[^>]*allow="local-fonts"/);
+  });
+
+  it("iframeのsandboxにallow-downloadsを持つ（⬇HTMLボタンのBlobダウンロードがブロックされないように）", () => {
+    expect(html).toMatch(/<iframe[^>]*sandbox="[^"]*\ballow-downloads\b[^"]*"/);
   });
 
   it("中継スクリプトがiframe→vscode・vscode→iframeの両方向を振り分ける", () => {

@@ -59,7 +59,13 @@ export interface SettingsFormValues {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  katakanaVariant?: "katakana" | "katakana-ex";
+  /** emulatorのみ */
+  terminal?: "5250" | "3270";
+  /** emulatorのみ */
   deviceName?: string;
+  /** emulatorのみ。terminal が 3270 のときは持たない（3270 はモデルで決まる。design.md参照） */
+  screenSize?: "24x80" | "27x132";
   user?: string;
   /** 平文。受け取った側（拡張ホスト）がすぐ暗号化し、保持しない */
   password?: string;

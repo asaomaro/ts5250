@@ -605,3 +605,95 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   `LauncherPane.vue`・`ServicesPane.vue`のどちらから開いても同じ経路なので、
   両方に反映される。VSCode拡張（`EmbedApp.vue`）は既にD12で対応済みで無変更。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D14: VSCode版に「⬇ HTML」ボタンを追加、設定画面を拡充（端末の種類/画面サイズ/CCSID）
+
+- **背景**: 利用者から3点の要望——(1) VSCode版にHTMLダウンロードボタンを追加、
+  (2) 設定画面で設定できる項目を充実させる、(3) CCSIDはドロップダウンから選択させる。
+- **調査で判明した事実**（推測で設計しない。AGENTS.md「判断の原則」2.）:
+  - `App.vue`（通常のブラウザ版）は`⬇ HTML`ボタンを持つが、`EmbedApp.vue`（VSCode拡張）
+    には**そもそも無かった**——単純な機能欠落。
+  - `.ts5250`ファイルのスキーマ（`vscode-extension/src/schema.ts`の`Ts5250File`）は
+    `katakanaVariant`/`terminal`/`screenSize`/`ifsPath`/`sqlInitial`を既に持ち、
+    読み込み側（`buildConnectPayload`）も既に配線済みだったが、**書き込み側
+    （`SettingsForm.vue`・`handleSave`）には一度も繋がれていなかった**——手でJSONを
+    直接編集しない限り使えない項目だった。
+  - `enhanced`（拡張5250 GUI広告）は`packages/tn5250/src/protocol/query-reply.ts:45`で
+    `void enhanced; // ACS実機と同じ申告に統一する（拡張は常に広告する）`と、**プロトコル層で
+    既に無視される値**と判明。UIに出すと「設定しても効かない」項目を足すことになるため、
+    今回のフォーム拡充からは**意図的に除外した**。
+  - `ifsPath`/`sqlInitial`は`ConnectPayload`に値は乗るが、**`IfsPane.vue`/`SqlPane.vue`が
+    そもそも初期パス/初期クエリのpropsを持たない**——値を保存しても何も起きない死んだ項目。
+    これも今回のフォーム拡充からは除外した（非機能なUIを足すのは利用者に誤解を与える）。
+  - CCSIDは自由入力の数値欄ではなく、`ConfigCard.vue`（通常版のシステム/セッション編集）が
+    既に使っている**「ホストコードページ」1本のドロップダウン**（`hostCodePages.ts`の
+    `HOST_CODE_PAGE_OPTIONS`。ACSの接続設定画面の一覧に倣う。930はKatakana/Katakana
+    Extendedの2エントリを持つ）がこのPJの既存の確立パターンだったので、それをそのまま
+    再利用した（CCSIDと`katakanaVariant`を独立した2つの欄に分けない）。
+- **決定**:
+  1. **`EmbedApp.vue`**: ヘッダーに`⬇ HTML`ボタンを追加（`app === 'emulator' &&
+     sessionId`のときだけ）。`screenExport.ts`の`downloadScreenHtml()`をそのまま呼ぶ
+     （サーバーへ往復しない。`App.vue`と同じ実装を再利用、複製しない）。
+  2. **`SettingsForm.vue`**: `app: EmbedAppKind`を必須propに追加。
+     - CCSID欄を`HOST_CODE_PAGE_OPTIONS`の`<select>`へ置き換え（「未指定（既定）」＋
+       ACSの一覧と同じ選択肢）。930の2エントリは`ccsid`と`katakanaVariant`の両方を
+       1回の選択で決める。
+     - `端末の種類`（5250/3270）・`画面サイズ`（24x80/27x132）・`装置名`は
+       `app === 'emulator'`のときだけ表示する（emulatorのみ意味を持つ、という
+       `ConnectPayload`の既存ドキュメント注記に合わせる。以前は`装置名`が全app種別で
+       無条件表示されていたのも合わせて是正した）。
+     - `端末の種類`が`3270`のときは`画面サイズ`欄を出さず、保存時も送らない
+       （3270はモデルで決まる。`.ts5250`はモデル指定を持たないため今回は追加しない
+       ——スコープを広げすぎない）。
+  3. **`embed-protocol.ts`/`protocol.ts`**（手で同期を保つ複製。`paired-artifact-sync`
+     条項）: `SettingsFormValues`に`katakanaVariant`/`terminal`/`screenSize`を追加。
+     **両ファイルへ同一の差分を適用**し、`protocol-sync.test.ts`（型定義部分の一字一句比較）
+     で機械的に固定した。
+  4. **`ts5250EditorProvider.ts`の`handleSave`**: 新しい3フィールドを`.ts5250`へ
+     書き戻す分岐を追加（読み込み側`buildConnectPayload`は既存のまま無変更で足りた）。
+  5. **`webviewHtml.ts`**: `<iframe>`の`sandbox`に`allow-downloads`を追加。
+     **Playwrightで最小再現して確認**——sandbox化された`<iframe>`はこのトークンが
+     無いとBlob URL経由の`<a download>`クリックを黙ってブロックする（Chromiumの仕様。
+     トークン有無でPlaywrightの`download`イベントの発火/非発火を確認した）。`local-fonts`
+     （D8）と同様、**VSCode拡張の`Webview`自体がさらに上位でダウンロードを許可しているかは
+     実際の拡張ホストが無いこの開発環境では確認できていない**。
+- **点検で見つけて直した副次的な問題**:
+  - `SettingsForm.vue`のフォーカストラップ（`onKeydown`）の`querySelectorAll`が
+    `input`/`button`しか拾わず`select`を含んでいなかった。今回`<select>`を複数追加した
+    ため`select`もクエリへ足した。**ただし現在のフィールド順では先頭（ホスト欄）と
+    末尾（保存/キャンセルボタン）がどちらも元から`focusables`に含まれていたため、
+    mutationで確認したところこの追加は現状のDOM順では観測可能な効果を持たない**
+    （host入力が常に先頭、ボタンが常に末尾）——将来フィールド順を入れ替えたときの
+    予防的な正しさとして残すが、「バグを直した」と誇張しない。この事実確認のために
+    書いた専用テストは、mutationで無意味と分かったため削除した。
+- **review工程で見つけて直した問題**: CCSIDドロップダウンで一覧に無い値
+  （5026/5035等）を、他の項目だけ変えて保存しても黙って消してしまう不具合
+  （`codePageId`が"unset"のまま`handleSave`の`else delete next.ccsid`が働くため）。
+  `unrecognizedCcsid`で「一覧には無いが元は指定されていた値」を保持し、選び直されない
+  限り温存するよう修正した。mutationで検証済み（修正を外すと新設テストが実際にfail
+  することを確認してから復元）。詳細は`review.md`ラウンド13。
+- **検証**:
+  - mutation検証: `allow-downloads`を外すと`webviewHtml.test.ts`が実際に2件failすることを
+    確認してから復元（Chromiumのsandbox仕様どおり）。
+  - `vscode-extension`: `tsc -b`＋`tsc -b tsconfig.test.json`（0 errors）・
+    `npx vitest run`（76 passed / 13 files）・`npx eslint`（変更ファイル、0 errors）。
+  - `packages/web-ui`: `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`）green・
+    `npx vitest run`（**2700 passed**／209 files。新規15件——`settings-form.test.ts`10件
+    ＋`embed-app.test.ts`5件）。
+  - **実ブラウザでの一気通貫（Playwright）**: ビルド済み`dist`を一時サーバーで配信し、
+    `embed.html?app=emulator`と`?app=sql`の両方で設定画面を実際に開いてスクリーンショット
+    で確認。emulatorでは端末の種類/画面サイズ/装置名/ホストコードページが揃って表示、
+    sqlでは3項目が正しく隠れることを確認。CCSIDドロップダウンで930拡張カタカナを選択→
+    端末の種類を3270に切替→画面サイズ欄が実際に消えることも確認。ラベル幅が狭く
+    「ホストコードページ」が2行に折り返す表示崩れを実際に見つけ、`8em`→`9.5em`＋
+    `white-space:nowrap`で修正して再確認した。
+  - **HTMLダウンロードボタンの実クリック→実ダウンロードの一気通貫（実際のVSCode拡張
+    ホスト経由）は未検証**——このコンテナに拡張ホストが無いため（既存の制約。
+    `test-result.md`の「未検証の穴」に記載済みパターンと同じ）。`allow-downloads`の
+    必要性自体はPlaywrightでの最小再現で実証済みだが、VSCode WebView自体がこれを
+    上位で許可するかは未確認のまま残す。
+- **影響**: `packages/web-ui/src/EmbedApp.vue`・`packages/web-ui/src/components/
+  SettingsForm.vue`・`packages/web-ui/src/embed-protocol.ts`・
+  `vscode-extension/src/protocol.ts`・`vscode-extension/src/ts5250EditorProvider.ts`・
+  `vscode-extension/src/webviewHtml.ts`を変更。関連テスト4ファイルを更新。
+  同じPR #414（未マージ）へ追加コミットする。

@@ -368,3 +368,55 @@ taskcheckラウンド上限に達しているため、独立点検はこのrevie
   作業終了時に削除済み（リポジトリに残留物なし）。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド13（deliver後・利用者の要望「HTMLダウンロードボタン追加/設定画面の拡充/CCSIDをドロップダウンに」への対応）
+
+`decisions.md` D14。差分は`EmbedApp.vue`・`SettingsForm.vue`・`embed-protocol.ts`・
+`vscode-extension/src/protocol.ts`・`ts5250EditorProvider.ts`・`webviewHtml.ts`。
+coding工程で`cross`のtaskcheckラウンド上限に達しているため、独立点検はこのreview
+工程が担う。
+
+- **要件適合**: requirementsのAC対象外（利用者からの直接の要望3点への対応）。
+  被覆に変化なし。
+- **価値適合**: 3点とも「言われた通りに足す」で終わらせず、まず既存の事実を調べてから
+  実装している——`enhanced`がプロトコル層で既に無視される値だと`query-reply.ts:45`の
+  コメントで確認して設定項目から意図的に除外し、`ifsPath`/`sqlInitial`が
+  `IfsPane`/`SqlPane`側に受け皿を持たない死んだフィールドだと確認して同じく除外した。
+  「動かないのに設定できるように見えるUI」を作らなかった判断が価値に直結している。
+  CCSIDのドロップダウン化も、値を当てずっぽうで列挙せず`ConfigCard.vue`が既に使っている
+  確立パターン（`hostCodePages.ts`のACS準拠一覧）をそのまま再利用しており、
+  当PJの複数箇所でCCSIDの選ばせ方が食い違う事態を避けている。
+- **正確性（review工程で見つけて直した指摘）**:
+  - **[must→fixed] CCSIDドロップダウンが一覧に無い値（5026/5035等）を黙って消す。**
+    `codePageId`が"unset"のまま保存すると`v.ccsid`が付かず、`handleSave`側の
+    `else delete next.ccsid`で**ホストコード欄を一切触っていなくても**既存のccsidが
+    消える。5026/5035はACSの一覧には無いが`hostCodePages.ts`の既存docコメントが明記する
+    とおりSCS/hostserver側では現役の値——手編集や過去の設定で持っている利用者がいれば、
+    無関係な項目（ポート等）を変えて保存しただけでデータを失う。`unrecognizedCcsid`で
+    「一覧には無いが元は指定されていた値」を保持し、選び直されない限り温存するよう修正。
+    mutationで検証済み（修正を外すと新設テストが実際にfailすることを確認してから復元）。
+  - フォーカストラップの`querySelectorAll`に`select`を足した件は、mutationで確認した
+    結果**現在のフィールド順では観測可能な効果を持たない**（`decisions.md` D14に誇張せず
+    記録済み。この事実確認のためだけの専用テストは無意味と分かり削除した）。
+- **セキュリティ**: `⬇ HTML`はサーバーへ往復せず、ブラウザ側に既にあるスナップショットを
+  ローカルでHTML化するだけ（`App.vue`と同じ既存実装の再利用）。新しい外部入出力面は
+  増えていない。`allow-downloads`の追加はsandbox iframeの制約を緩めるが、対象は
+  「同一オリジンのBlob URLダウンロード」1点のみで、`sandbox`の他のトークン
+  （`allow-popups`/`allow-top-navigation`等）には触れていない。
+- **保守性**: `SettingsFormValues`の拡張は`embed-protocol.ts`/`protocol.ts`の両方へ
+  同一の差分を適用し、`protocol-sync.test.ts`（型定義部分の一字一句比較）が機械的に
+  固定している（`paired-artifact-sync`条項どおり）。CCSID選択肢・画面サイズ選択肢は
+  独自定義を追加せず、`hostCodePages.ts`/`screenSizes.ts`の既存カタログをそのまま
+  importして使っており、表の複製が生まれていない。
+- **検証**: mutation検証2件（`allow-downloads`／CCSID保持）。`vscode-extension`:
+  `tsc -b`×2・`vitest run`（76 passed）・eslint 0 errors。`packages/web-ui`:
+  `vue-tsc -b`＋`vite build`green・`vitest run`（2699 passed→修正で18件に1件追加）。
+  実ブラウザ（Playwright、ビルド済みdist）でemulator/sql両方の設定画面を実際に開き、
+  端末の種類/画面サイズ/装置名の出し分け・CCSIDドロップダウンでの930選択・
+  端末3270切替時の画面サイズ欄消失をスクリーンショットで確認。ラベル幅不足による
+  折り返し崩れも実際に見つけて修正した。
+- **未検証のまま残る点**: `⬇ HTML`ボタンの実クリック→実ファイル保存は、実際のVSCode
+  拡張ホストが無いこの開発環境では確認できていない（D8の`local-fonts`と同種の限界。
+  `test-result.md`に明記済み）。
+
+指摘1件（must、review工程で発見しその場で修正・mutation検証済み）。

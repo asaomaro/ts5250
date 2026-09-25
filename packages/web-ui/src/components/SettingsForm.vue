@@ -8,15 +8,30 @@
  * あちらはフォーカストラップを持たない。
  */
 import { nextTick, onMounted, ref } from "vue";
-import type { SettingsFormValues } from "../embed-protocol.js";
+import type { SettingsFormValues, EmbedAppKind } from "../embed-protocol.js";
+import { HOST_CODE_PAGE_OPTIONS, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
+import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE, type ScreenSize } from "../screenSizes.js";
 
-const props = defineProps<{ initial?: SettingsFormValues }>();
+const props = defineProps<{ initial?: SettingsFormValues; app: EmbedAppKind }>();
 const emit = defineEmits<{ (e: "save", v: SettingsFormValues): void; (e: "cancel"): void }>();
 
 const host = ref(props.initial?.host ?? "");
 const port = ref(props.initial?.port !== undefined ? String(props.initial.port) : "");
 const tls = ref(props.initial?.tls ?? true);
-const ccsid = ref(props.initial?.ccsid !== undefined ? String(props.initial.ccsid) : "");
+// **CCSID は自由入力ではなく、ACS の「ホスト・コード・ページ」一覧から選ばせる**
+// （`ConfigCard.vue`の`sysCodePageId`/`sesCodePageId`と同じ1本の選択肢。930はKatakana/
+// Katakana Extendedの2エントリを持つので、CCSID単体ではなくこのidが唯一の選択軸になる）
+const codePageId = ref(hostCodePageOptionId(props.initial?.ccsid, props.initial?.katakanaVariant) ?? "unset");
+// **一覧に無いCCSID（例: 5026/5035。ACSの接続設定画面にも無い値。`hostCodePages.ts`のdoc
+// コメント参照）を手編集で持つファイルを開いたときの保険。** `codePageId`が"unset"のまま
+// 保存すると`v.ccsid`が付かず、`handleSave`側が`else delete next.ccsid`で消してしまう
+// ——ホストコード欄を一切触らず他の項目だけ変えて保存しても値が消えるのは事故なので、
+// 一覧に無いだけで指定自体はあった元の値を、選ばれなかった間はそのまま持ち回す
+const unrecognizedCcsid = codePageId.value === "unset" ? props.initial?.ccsid : undefined;
+// **`terminal`/`screenSize`/`deviceName`はemulatorのみ意味を持つ**（`embed-protocol.ts`の
+// `ConnectPayload`のドキュメント注記どおり）。printer(スプール表示)/sql/ifsではフォーム自体に出さない
+const terminal = ref<"5250" | "3270">(props.initial?.terminal ?? "5250");
+const screenSize = ref<ScreenSize>(props.initial?.screenSize ?? DEFAULT_SCREEN_SIZE);
 const deviceName = ref(props.initial?.deviceName ?? "");
 const user = ref(props.initial?.user ?? "");
 const password = ref("");
@@ -32,8 +47,21 @@ function save(): void {
   const v: SettingsFormValues = { host: host.value };
   if (port.value !== "") v.port = Number(port.value);
   v.tls = tls.value;
-  if (ccsid.value !== "") v.ccsid = Number(ccsid.value);
-  if (deviceName.value !== "") v.deviceName = deviceName.value;
+  if (codePageId.value !== "unset") {
+    const opt = hostCodePageOptionOf(codePageId.value);
+    if (opt) {
+      v.ccsid = opt.ccsid;
+      if (opt.katakanaVariant !== undefined) v.katakanaVariant = opt.katakanaVariant;
+    }
+  } else if (unrecognizedCcsid !== undefined) {
+    v.ccsid = unrecognizedCcsid;
+  }
+  if (props.app === "emulator") {
+    v.terminal = terminal.value;
+    // 3270はモデルでサイズが決まる（`.ts5250`はモデル指定を持たない。design.md参照）ので送らない
+    if (terminal.value !== "3270") v.screenSize = screenSize.value;
+    if (deviceName.value !== "") v.deviceName = deviceName.value;
+  }
   if (user.value !== "") v.user = user.value;
   if (password.value !== "") v.password = password.value;
   emit("save", v);
@@ -57,7 +85,7 @@ function onKeydown(ev: KeyboardEvent): void {
   }
   if (ev.key !== "Tab" || !formEl.value) return;
   const focusables = Array.from(
-    formEl.value.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')
+    formEl.value.querySelectorAll<HTMLElement>('input, select, button, [tabindex]:not([tabindex="-1"])')
   ).filter((el) => !el.hasAttribute("disabled"));
   if (focusables.length === 0) return;
   const first = focusables[0]!;
@@ -88,10 +116,26 @@ function onKeydown(ev: KeyboardEvent): void {
       <input id="sf-tls" v-model="tls" type="checkbox" />
     </div>
     <div class="row">
-      <label for="sf-ccsid">CCSID</label>
-      <input id="sf-ccsid" v-model="ccsid" type="text" inputmode="numeric" placeholder="既定" />
+      <label for="sf-ccsid">ホストコードページ</label>
+      <select id="sf-ccsid" v-model="codePageId">
+        <option value="unset">未指定（既定）</option>
+        <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
+      </select>
     </div>
-    <div class="row">
+    <div v-if="app === 'emulator'" class="row">
+      <label for="sf-terminal">端末の種類</label>
+      <select id="sf-terminal" v-model="terminal">
+        <option value="5250">5250（IBM i）</option>
+        <option value="3270">3270（メインフレーム）</option>
+      </select>
+    </div>
+    <div v-if="app === 'emulator' && terminal !== '3270'" class="row">
+      <label for="sf-screensize">画面サイズ</label>
+      <select id="sf-screensize" v-model="screenSize">
+        <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
+      </select>
+    </div>
+    <div v-if="app === 'emulator'" class="row">
       <label for="sf-device">装置名</label>
       <input id="sf-device" v-model="deviceName" type="text" placeholder="自動" />
     </div>
@@ -126,7 +170,7 @@ function onKeydown(ev: KeyboardEvent): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 280px;
+  min-width: 340px;
   background: var(--crt-bezel, #1a1f1a);
   border: 1px solid var(--crt-line, #333);
   border-radius: 8px;
@@ -139,15 +183,18 @@ function onKeydown(ev: KeyboardEvent): void {
   gap: 8px;
 }
 .row label {
-  width: 6em;
+  width: 9.5em;
   flex: none;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--muted);
+  white-space: nowrap;
 }
 .row input[type="text"],
-.row input[type="password"] {
+.row input[type="password"],
+.row select {
   flex: 1;
+  min-width: 0;
   font-family: var(--mono);
   font-size: 12px;
   padding: 4px 6px;

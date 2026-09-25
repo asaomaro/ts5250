@@ -330,6 +330,12 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
   UIの配線（クリックで開く・props伝播・応答後の再取得）はユニットテスト
   （mutation検証込み）の範囲で裏付けている。
   **→ ラウンド12でPUB400を使い実際に確認、解消した（下記）。**
+- **D14の`⬇ HTML`ボタンは、実際のVSCode拡張ホスト経由でクリック→実ファイル保存まで
+  確認できていない**（VSCode拡張ホストが無いこの開発環境の既存の制約と同じ）。
+  `allow-downloads`sandboxトークンの必要性自体はPlaywrightの最小再現（`<iframe
+  sandbox>`単体でのBlobダウンロード可否）で実証済みだが、**VSCode WebView自体が
+  さらに上位でダウンロードを許可しているかは未確認**。`local-fonts`（D8）と同種の
+  「もう1段の許可が必要かもしれない」限界として残す。
 
 ## ラウンド12（deliver後・利用者の質問「通常のブラウザ版エミュレータも対応出来ていますか？」への対応）
 
@@ -364,3 +370,45 @@ GitHub issueで安定版であることを確認済み（WebSearchでの裏付�
   - `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 実ビルド成功
 - 後始末: 検証用の一時サーバープロセス・一時接続設定ファイル・Playwrightスクリプトは
   全て削除済み（PUB400への実接続以外、リポジトリへの副作用なし）。
+
+## ラウンド13（deliver後・利用者の要望「HTMLダウンロードボタン追加/設定画面の拡充/CCSIDをドロップダウンに」への対応）
+
+`decisions.md` D14。差分は`EmbedApp.vue`・`SettingsForm.vue`・`embed-protocol.ts`・
+`vscode-extension/src/protocol.ts`・`ts5250EditorProvider.ts`・`webviewHtml.ts`。
+
+- `cd vscode-extension && npx tsc -b && npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **76 passed / 0 failed**（13 test files）
+- `npx eslint`（変更したvscode-extensionファイル） — 0 errors
+- `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 実ビルド成功
+- `cd packages/web-ui && npx vitest run` — **2700 passed / 0 failed**（209 test files。
+  新規15件——`settings-form.test.ts`のCCSIDドロップダウン/emulator専用フィールド
+  出し分け/一覧に無いCCSIDの温存のテスト10件、`embed-app.test.ts`の⬇HTMLボタン・
+  SettingsFormへのprops伝播のテスト5件）
+- **mutation検証**:
+  - `webviewHtml.ts`の`allow-downloads`を一時的に外すと、`webviewHtml.test.ts`が
+    実際に2件failすることを確認してから復元した（Chromiumのsandbox仕様どおり、
+    Playwrightの`download`イベントで再現）
+  - **review工程で発見**: CCSIDドロップダウンが一覧に無い値（5026等）を無関係な項目の
+    保存時に黙って消す不具合。`unrecognizedCcsid`での温存を外すと新設テストが
+    実際にfailすることを確認してから復元した（`decisions.md` D14・`review.md`
+    ラウンド13参照）
+  - `SettingsForm.vue`のフォーカストラップの`querySelectorAll`に`select`を足した件は、
+    外した状態でも既存テストが全て通ることを確認した——**現在のフィールド順では
+    観測可能な効果を持たない**（先頭=host入力・末尾=ボタン行は元々`input`/`button`で
+    拾えていたため）。誇張せず、決定記録にもその旨を明記した。この事実確認のために
+    書いた専用テストは、無意味と分かった時点で削除した
+- **実ブラウザでの確認（Playwright、ビルド済みdistを一時サーバーで配信）**:
+  1. `embed.html?app=emulator`で設定画面を開き、端末の種類/画面サイズ/装置名/
+     ホストコードページが揃って表示されることを確認（スクリーンショット）
+  2. `embed.html?app=sql`で同じ3項目（端末の種類/画面サイズ/装置名）が
+     実際に隠れることを確認
+  3. ホストコードページで「930 — 日本（拡張カタカナ）」を選択→端末の種類を
+     3270へ切替→画面サイズの行が実際に消えることを確認
+  4. ラベル幅が狭く「ホストコードページ」が2行に折り返す表示崩れを実際に発見、
+     `8em`→`9.5em`＋`white-space:nowrap`で修正し、1行に収まることを再確認した
+- `aidev smoke` — pass
+
+**HTMLダウンロードボタンの実クリック→実際のファイル保存ダイアログという一気通貫は
+未達**。`allow-downloads`が無いとBlob URLダウンロードがブロックされることは
+Playwrightの最小再現で実証したが、実際のVSCode拡張ホスト（このコンテナには無い）
+経由でクリック→ダウンロードが動くかまでは確認できていない。

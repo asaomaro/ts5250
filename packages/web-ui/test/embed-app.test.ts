@@ -12,11 +12,17 @@ vi.mock("../src/session-controller.js", () => ({
   closeSession: (...a: unknown[]) => closeSession(...a)
 }));
 
+const downloadScreenHtml = vi.fn();
+vi.mock("../src/screenExport.js", () => ({
+  downloadScreenHtml: (...a: unknown[]) => downloadScreenHtml(...a)
+}));
+
 import EmbedApp from "../src/EmbedApp.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import SpoolPane from "../src/components/SpoolPane.vue";
 import SqlPane from "../src/components/SqlPane.vue";
 import IfsPane from "../src/components/IfsPane.vue";
+import SettingsForm from "../src/components/SettingsForm.vue";
 import { embedStore } from "../src/stores/embed.js";
 
 const STUBS = { EmulatorPane: true, SpoolPane: true, SqlPane: true, IfsPane: true, SettingsForm: true };
@@ -24,6 +30,7 @@ const STUBS = { EmulatorPane: true, SpoolPane: true, SqlPane: true, IfsPane: tru
 beforeEach(() => {
   openSession.mockClear();
   closeSession.mockClear();
+  downloadScreenHtml.mockClear();
   embedStore.connect = undefined;
   embedStore.error = undefined;
 });
@@ -125,5 +132,54 @@ describe("EmbedApp: 設定ボタン", () => {
     expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(false);
     await w.get(".settings-btn").trigger("click");
     expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(true);
+  });
+
+  it("SettingsFormへapp（種別）とconnectの拡張フィールド（katakanaVariant/terminal/screenSize）を渡す", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = {
+      app: "emulator",
+      host: "AS400",
+      ccsid: 930,
+      katakanaVariant: "katakana",
+      terminal: "3270",
+      screenSize: "27x132"
+    };
+    await nextTick();
+    await w.get(".settings-btn").trigger("click");
+    const form = w.findComponent(SettingsForm);
+    expect(form.props("app")).toBe("emulator");
+    expect(form.props("initial")).toMatchObject({
+      ccsid: 930,
+      katakanaVariant: "katakana",
+      terminal: "3270",
+      screenSize: "27x132"
+    });
+  });
+});
+
+describe("EmbedApp: ⬇ HTML（画面のHTML保存。利用者の要望）", () => {
+  it("emulatorで接続済みのときだけボタンを出す", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(false);
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(true);
+  });
+
+  it("printer/sql/ifsでは出さない（HTML化できるのは5250/3270画面だけ）", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:p1" };
+    await nextTick();
+    expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(false);
+  });
+
+  it("押すと接続中のsessionIdでdownloadScreenHtml()を呼ぶ", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    await w.get('.embed-header button[title*="HTML"]').trigger("click");
+    expect(downloadScreenHtml).toHaveBeenCalledWith("s-embed-1");
   });
 });

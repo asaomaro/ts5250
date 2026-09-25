@@ -25,6 +25,15 @@
  * コンテキスト）がさらに上位でこの機能を許可しているかは、実際のVSCode拡張ホストが
  * 無いこの開発環境では確認できていない（`decisions.md` D8）。許可されない環境では
  * 従来どおり「フォント名を直接入力」欄で指定する
+ *
+ * **`sandbox`に`allow-downloads`が要る**（`⬇ HTML`ボタン。`decisions.md` D14）。
+ * `EmulatorPane`の画面保存はBlob URLを`<a download>`で叩くだけの素朴な実装
+ * （`screenExport.ts`）で、通常のタブでは動くが、**sandbox化された`<iframe>`では
+ * `allow-downloads`トークンが無いとブラウザがダウンロードそのものを黙ってブロックする**
+ * （Chromiumの仕様。Playwrightで最小再現し、トークン有無でダウンロードイベントの
+ * 発火/非発火を確認して特定した）。`local-fonts`と同様、**VSCode拡張の`Webview`自体が
+ * さらに上位でダウンロードを許可しているかは、実際のVSCode拡張ホストが無いこの開発環境
+ * では確認できていない**
  */
 export interface ShellHtmlOptions {
   /** spawnしたサーバーのポート（loopback限定） */
@@ -58,7 +67,7 @@ export function buildShellHtml(opts: ShellHtmlOptions): string {
 </style>
 </head>
 <body>
-<iframe id="embed" allow="local-fonts" sandbox="allow-scripts allow-forms allow-same-origin" src="${escapeAttr(iframeSrc)}"></iframe>
+<iframe id="embed" allow="local-fonts" sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" src="${escapeAttr(iframeSrc)}"></iframe>
 <script nonce="${opts.nonce}">
   const vscode = acquireVsCodeApi();
   const iframe = document.getElementById("embed");

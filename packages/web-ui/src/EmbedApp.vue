@@ -28,6 +28,7 @@ import { makePaneTabId } from "./paneLabels.js";
 import type { SessionMeta } from "./stores/sessions.js";
 import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
 import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
+import { downloadScreenHtml } from "./screenExport.js";
 
 const props = defineProps<{ app: EmbedAppKind }>();
 
@@ -124,6 +125,9 @@ const settingsInitial = computed<SettingsFormValues>(() => {
   if (c?.port !== undefined) v.port = c.port;
   if (c?.tls !== undefined) v.tls = c.tls;
   if (c?.ccsid !== undefined) v.ccsid = c.ccsid;
+  if (c?.katakanaVariant !== undefined) v.katakanaVariant = c.katakanaVariant;
+  if (c?.terminal !== undefined) v.terminal = c.terminal;
+  if (c?.screenSize !== undefined) v.screenSize = c.screenSize;
   if (c?.deviceName !== undefined) v.deviceName = c.deviceName;
   if (c?.user !== undefined) v.user = c.user;
   return v;
@@ -133,11 +137,31 @@ function onSave(v: SettingsFormValues): void {
   postToHost({ type: "save", payload: v });
   showSettings.value = false;
 }
+
+/**
+ * 今の画面をHTMLで保存する（`App.vue`の`saveScreenHtml`と同じ機能をVSCode拡張側にも出す。
+ * 利用者の要望）。**サーバーへ往復しない**——`downloadScreenHtml`はブラウザ側のスナップショットを
+ * その場でHTML化しBlob URL経由でダウンロードさせる。VSCodeのWebView内でこれを動かすには、
+ * shellの`<iframe>`（`webviewHtml.ts`）に`allow-downloads`のsandboxトークンが要る
+ * （Playwrightで実際に再現して確認済み——無いとダウンロードが黙ってブロックされる）
+ */
+function saveScreenHtml(): void {
+  if (sessionId.value) downloadScreenHtml(sessionId.value);
+}
 </script>
 
 <template>
   <div class="embed-root">
     <header class="embed-header">
+      <!-- 今の画面を自己完結HTMLで保存（`App.vue`の`⬇ HTML`と同じ機能） -->
+      <button
+        v-if="app === 'emulator' && sessionId"
+        class="settings-btn"
+        title="今の画面を HTML で保存する（見えているとおり・単体で開ける）"
+        @click="saveScreenHtml"
+      >
+        ⬇ HTML
+      </button>
       <ViewSettingsMenu
         v-if="viewMenuTarget"
         :key="viewMenuTarget.sessionId"
@@ -163,7 +187,7 @@ function onSave(v: SettingsFormValues): void {
       <p v-else-if="embedStore.error" class="status error">{{ embedStore.error }}</p>
       <p v-else class="status">設定を待っています…</p>
     </div>
-    <SettingsForm v-if="showSettings" :initial="settingsInitial" @save="onSave" @cancel="showSettings = false" />
+    <SettingsForm v-if="showSettings" :initial="settingsInitial" :app="app" @save="onSave" @cancel="showSettings = false" />
   </div>
 </template>
 

@@ -215,6 +215,12 @@ async function handleSave(
   else delete next.tls;
   if (values.ccsid !== undefined) next.ccsid = values.ccsid;
   else delete next.ccsid;
+  if (values.katakanaVariant !== undefined) next.katakanaVariant = values.katakanaVariant;
+  else delete next.katakanaVariant;
+  if (values.terminal !== undefined) next.terminal = values.terminal;
+  else delete next.terminal;
+  if (values.screenSize !== undefined) next.screenSize = values.screenSize;
+  else delete next.screenSize;
   if (values.deviceName !== undefined) next.deviceName = values.deviceName;
   else delete next.deviceName;
   if (values.user !== undefined || values.password !== undefined) {
