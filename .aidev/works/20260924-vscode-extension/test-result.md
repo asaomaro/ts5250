@@ -188,6 +188,28 @@ AC1（複数画面での単一サービス）・AC8（プリンター/SQL/IFS）
 
 このラウンドでは失敗は発生していない。
 
+## ラウンド7（deliver後・利用者の報告「フォントが標準（自動）しか選択できません」への対応）
+
+`decisions.md` D8。差分は`vscode-extension/src/webviewHtml.ts`（`<iframe>`へ
+`allow="local-fonts"`追加）・`vscode-extension/test/webviewHtml.test.ts`（テスト1件追加）。
+
+- `cd vscode-extension && npx tsc -b` / `npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **74 passed / 0 failed**（13 test files）
+- `npx eslint vscode-extension/src vscode-extension/test` — 0 errors
+- **原因の実測特定**: `test/webviewHtml.test.ts`と同じ構造（CSP・sandbox属性付き`<iframe>`）を
+  再現したshell HTMLをPlaywrightで用意し、`allow="local-fonts"`の有無を切り替えて
+  `queryLocalFonts()`を実際に呼んだ。`allow`無しでは
+  `SecurityError: Access to the feature "local-fonts" is disallowed by Permissions Policy`が
+  実際に発生し、`allow`有りでは発生しないことを確認した（scratchpadで作成・実行・削除済み）
+- **mutation検証**: 新規テストを追加した`allow="local-fonts"`を一旦外してテストが
+  実際に失敗することを確認してから戻した
+- `aidev smoke` — pass
+
+**この修正だけで利用者の環境（実際のVSCode拡張ホスト）で直るかは未確認**——iframe側の
+Permissions Policyの障壁は実測で取り除いたが、VSCode拡張のWebview自体がより上位で
+この機能を許可しているかどうかは、実際のVSCode拡張ホストが無いこの開発環境では
+確認できない（`decisions.md` D8）。利用者の再検証を待つ。
+
 ## 未検証の穴（skip / 環境不足）
 
 - **VSCode拡張ホストでの実地動作確認は最後まで未実施**。このコンテナには

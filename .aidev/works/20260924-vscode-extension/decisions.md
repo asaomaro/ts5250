@@ -310,3 +310,42 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   スクリーンショットで確認した。コンソールエラー0件。
 - **影響**: `packages/web-ui/src/EmbedApp.vue`のみ変更。同じPR #414（未マージ）へ
   追加コミットする。
+
+## D8: WebViewの`<iframe>`に`allow="local-fonts"`を足す（画面フォント選択が「標準（自動）」しか出ない）
+
+- **背景**: D6/D7の直後、利用者から「フォントが標準（自動）しか選択できません」との
+  報告があった。`ViewSettingsMenu`の画面フォント選択（`screenFonts.ts`の
+  `listInstalledFonts()`）は`queryLocalFonts()`（Local Font Access API）でインストール済み
+  フォントを列挙するが、失敗時は`null`を返し黙って「フォント名を直接入力」欄へ倒す
+  設計になっている（コメント: 「判定は...Local Font Accessの許可に左右され...外しても
+  桁は崩れない」）。
+- **原因（実測で特定）**: `vscode-extension/src/webviewHtml.ts`の`buildShellHtml`が
+  組み立てる`<iframe>`（`embed.html`を読み込む、`design.md`「設計方針5」）に
+  `allow="local-fonts"`が無かった。Local Font Accessは強力な機能としてPermissions
+  Policyでゲートされており、クロスオリジンiframeへは`allow`属性で明示しないと
+  既定で継承されない。**実際に確かめた**（`test/webviewHtml.test.ts`と同じ構造を
+  再現したshell HTMLをPlaywrightで用意し、`allow`の有無を切り替えて`queryLocalFonts()`を
+  呼んだ）——`allow`無しでは`SecurityError: Access to the feature "local-fonts" is
+  disallowed by Permissions Policy`が実際に発生し、`allow="local-fonts"`を付けると
+  発生しなくなることを確認した。`listInstalledFonts()`はこの`SecurityError`を
+  「非対応」の一種として`catch`し`null`へ倒すため、利用者からは「一覧が一切出ない」
+  としか見えていなかった。
+- **決定**: `<iframe id="embed">`へ`allow="local-fonts"`を追加した。
+- **理由・代替案**:
+  - 検討した代替案: `screenFonts.ts`側でフォント一覧を諦め、常に「直接入力」だけの
+    UIにする。却下理由——原因が明確に`allow`属性の欠落だと実測で特定できており、
+    1行の追加で直る可能性が高いのに、機能そのものを引っ込めるのは筋が違う。
+  - **この修正だけで十分とは断定していない**: VSCode拡張の`Webview`自体
+    （`buildShellHtml`が返すHTMLを表示する、より外側のコンテキスト）が、
+    そもそもこの種の強力な機能を拡張のWebviewへ許可しているかどうかは、
+    **実際のVSCode拡張ホストが無いこの開発環境では確認できない**
+    （`02-extension-core`以来一貫している制約）。AGENTS.md「判断の原則」2に
+    従い、確認できていないことは「未確認」と明記する——直った/直っていないは
+    利用者の実機での再検証を待つ。
+  - **どちらにせよフォールバックは健全**: 許可されなければ従来どおり
+    「フォント名を直接入力」欄で任意のフォント名を指定できる（`onFontNameApply`は
+    `queryLocalFonts`に依存しない別経路）。
+- **検証**: `vscode-extension`のテスト（74件。新規1件を含む）green。
+  新規テストは実際にmutationで検証済み（`allow`属性を外すと失敗することを確認してから戻した）。
+- **影響**: `vscode-extension/src/webviewHtml.ts`・`vscode-extension/test/webviewHtml.test.ts`
+  を変更。同じPR #414（未マージ）へ追加コミットする。

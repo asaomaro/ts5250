@@ -11,6 +11,20 @@
  * shellはメッセージの中身を検査せず、`window`の`message`イベントを送り主
  * （iframe／拡張ホスト）で振り分けて中継するだけ（architecture.md「設計判断」
  * ——「shellは中身を検査せず素通しする」）。
+ *
+ * **`allow="local-fonts"`が要る**（`ViewSettingsMenu`の画面フォント選択。
+ * 利用者の実機報告で発覚）。`queryLocalFonts()`（Local Font Access）は
+ * Permissions Policyでゲートされる強力な機能で、`<iframe>`側に明示の`allow`が
+ * 無いと**クロスオリジンiframeへは既定で継承されない**——付けずに呼ぶと
+ * `SecurityError: Access to the feature "local-fonts" is disallowed by
+ * Permissions Policy`になり、`listInstalledFonts()`（`screenFonts.ts`）が
+ * これを「非対応」として黙って`null`へ倒すため、利用者からは「標準（自動）しか
+ * 選べない」としか見えない（実際に`allow`の有無を切り替えて`SecurityError`の
+ * 発生/非発生を確認して原因を特定した）。**この`allow`だけでは足りない可能性がある**
+ * ——VSCode拡張の`Webview`自体（この`buildShellHtml`が返すHTMLを表示する外側の
+ * コンテキスト）がさらに上位でこの機能を許可しているかは、実際のVSCode拡張ホストが
+ * 無いこの開発環境では確認できていない（`decisions.md` D8）。許可されない環境では
+ * 従来どおり「フォント名を直接入力」欄で指定する
  */
 export interface ShellHtmlOptions {
   /** spawnしたサーバーのポート（loopback限定） */
@@ -44,7 +58,7 @@ export function buildShellHtml(opts: ShellHtmlOptions): string {
 </style>
 </head>
 <body>
-<iframe id="embed" sandbox="allow-scripts allow-forms allow-same-origin" src="${escapeAttr(iframeSrc)}"></iframe>
+<iframe id="embed" allow="local-fonts" sandbox="allow-scripts allow-forms allow-same-origin" src="${escapeAttr(iframeSrc)}"></iframe>
 <script nonce="${opts.nonce}">
   const vscode = acquireVsCodeApi();
   const iframe = document.getElementById("embed");

@@ -23,6 +23,10 @@ describe("buildShellHtml", () => {
     expect(html).toMatch(/<iframe[^>]*sandbox="allow-scripts allow-forms allow-same-origin"/);
   });
 
+  it("iframeがallow=\"local-fonts\"を持つ（画面フォント選択がPermissions Policyで塞がれないように）", () => {
+    expect(html).toMatch(/<iframe[^>]*allow="local-fonts"/);
+  });
+
   it("中継スクリプトがiframe→vscode・vscode→iframeの両方向を振り分ける", () => {
     expect(html).toContain("vscode.postMessage(event.data)");
     expect(html).toContain("iframe.contentWindow.postMessage(event.data");
