@@ -218,3 +218,4 @@
       手当ての候補: プリンターでは「＋新規」は新規にならないので出さない。これで根から塞がる。
       **着手時に両側を再確認すること**（委譲先の読みのみ）。
       （出典: `20260919-backlog-acs-triage` research F1-5）
+- [ ] ServiceManager（vscode-extension）のロックファイル調停プロトコルに、2ウィンドウが同時acquireしたとき『どちらも自分が勝者だと誤認し、両方が生き残る』レアな競合が実プロセス統合testで1回観測された（healthzは200のまま3分以上残存する孤児プロセス）。last-write-wins＋事後再読み取りは真の相互排他ではなく、[A-write,A-read(自分を見る),B-write,B-read(自分を見る)]という順序が理論上あり得る。単体プロセス内の疑似テストでは再現せず、全ファイル並行実行下でのみ1/11程度の頻度で観測（vscode-extension/test/serviceManager.multiprocess.integration.test.ts）。単一利用者のローカルツールとしての実害は限定的（余分なnode プロセスが1つ残る程度）だが、真の排他（advisory file lock等）への置き換えを検討する価値がある。（出典: .aidev/works/20260924-vscode-extension/test-result.md）

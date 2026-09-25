@@ -1,0 +1,22 @@
+// **`module: "CommonJS"`はリポジトリ全体のESM規約（AGENTS.md「コーディング規約」）からの
+// 意図的な逸脱**——VSCode拡張の`main`エントリは2026年9月時点でもネイティブESMを
+// ロードできない（拡張ホストの制約。ソースをESMで書いてもCommonJSへコンパイルするのが
+// 標準的な回避策。WebSearchで確認済み）。他の`packages/*`とは違う唯一のパッケージ
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node", "vscode"],
+    "module": "CommonJS",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true,
+    "declaration": true
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,117 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
+
+const openSession = vi.fn((...args: unknown[]): Promise<string> => {
+  void args;
+  return Promise.resolve("s-embed-1");
+});
+const closeSession = vi.fn();
+vi.mock("../src/session-controller.js", () => ({
+  openSession: (...a: unknown[]) => openSession(...a),
+  closeSession: (...a: unknown[]) => closeSession(...a)
+}));
+
+import EmbedApp from "../src/EmbedApp.vue";
+import EmulatorPane from "../src/components/EmulatorPane.vue";
+import SpoolPane from "../src/components/SpoolPane.vue";
+import SqlPane from "../src/components/SqlPane.vue";
+import IfsPane from "../src/components/IfsPane.vue";
+import { embedStore } from "../src/stores/embed.js";
+
+const STUBS = { EmulatorPane: true, SpoolPane: true, SqlPane: true, IfsPane: true, SettingsForm: true };
+
+beforeEach(() => {
+  openSession.mockClear();
+  closeSession.mockClear();
+  embedStore.connect = undefined;
+  embedStore.error = undefined;
+});
+
+describe("EmbedApp: app種別ごとのマウント分岐", () => {
+  it("emulator: connectを受けたら openSession() を直接呼び、返ったsessionIdでEmulatorPaneを出す", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400", port: 992, user: "U", password: "P" };
+    await nextTick();
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1);
+    const openArg = openSession.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(openArg).toMatchObject({ type: "open", host: "AS400", port: 992, user: "U", password: "P" });
+    expect(w.findComponent(EmulatorPane).props("sessionId")).toBe("s-embed-1");
+  });
+
+  it("printer(スプール表示): openSession()は呼ばず、systemRefをそのままSpoolPaneのsystemへ渡す", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:abc123" };
+    await nextTick();
+    expect(openSession).not.toHaveBeenCalled();
+    const pane = w.findComponent(SpoolPane);
+    expect(pane.props("system")).toBe("own:abc123");
+    expect(pane.props("tabId")).toBe("spool:files@own:abc123");
+  });
+
+  it("sql: systemRefからtabIdを合成してSqlPaneへ渡す", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "sql", host: "AS400", systemRef: "own:xyz" };
+    await nextTick();
+    const pane = w.findComponent(SqlPane);
+    expect(pane.props("tabId")).toBe("sql:query@own:xyz");
+    expect(pane.props("system")).toBe("own:xyz");
+  });
+
+  it("ifs: systemRefからtabIdを合成してIfsPaneへ渡す", async () => {
+    const w = mount(EmbedApp, { props: { app: "ifs" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "ifs", host: "AS400", systemRef: "own:ifs1" };
+    await nextTick();
+    const pane = w.findComponent(IfsPane);
+    expect(pane.props("tabId")).toBe("ifs:files@own:ifs1");
+  });
+
+  it("systemRef未到着の間はプレーンなペインを出さず待機表示のまま", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    await nextTick();
+    expect(w.findComponent(SqlPane).exists()).toBe(false);
+    expect(w.text()).toContain("設定を待っています");
+  });
+});
+
+describe("EmbedApp: 再接続の二重発火防止（taskcheck T6の指摘）", () => {
+  it("openSession()が解決する前に2つ目のconnectが来ても、openSession()は1回しか呼ばれない", async () => {
+    let resolveFirst!: (v: string) => void;
+    openSession.mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)));
+    mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    // 1つ目がまだ解決していない間に2つ目を発火
+    embedStore.connect = { app: "emulator", host: "AS400", port: 992 };
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1); // 2つ目は connecting 中なので無視される
+    resolveFirst("s-first");
+    await nextTick();
+    await nextTick();
+  });
+
+  it("設定保存後の再接続では、前のセッションをcloseSession()してから開き直す", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    expect(w.findComponent(EmulatorPane).props("sessionId")).toBe("s-embed-1");
+    expect(closeSession).not.toHaveBeenCalled();
+    openSession.mockResolvedValueOnce("s-embed-2");
+    embedStore.connect = { app: "emulator", host: "AS400", port: 992 }; // 設定フォーム保存相当
+    await nextTick();
+    await nextTick();
+    expect(closeSession).toHaveBeenCalledWith("s-embed-1");
+    expect(w.findComponent(EmulatorPane).props("sessionId")).toBe("s-embed-2");
+  });
+});
+
+describe("EmbedApp: 設定ボタン", () => {
+  it("押すとSettingsFormが表示される", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(false);
+    await w.get(".settings-btn").trigger("click");
+    expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(true);
+  });
+});

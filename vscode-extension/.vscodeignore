@@ -1,0 +1,14 @@
+.vscodeignore
+.gitignore
+node_modules/**
+test/**
+src/**
+scripts/**
+*.tsbuildinfo
+tsconfig.json
+tsconfig.test.json
+vitest.config.mts
+package-lock.json
+server-stage/package-lock.json
+**/*.map
+dist/**/*.d.ts

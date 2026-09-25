@@ -1,0 +1,13 @@
+schema: 11
+slug: vscode-extension
+current: deliver
+approved: [requirements, research, design, architecture, tasks, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+subtasks: [01-embed-ui, 02-extension-core, 03-sql-ifs, 04-packaging]
+activeSubtask: done
+harnessRevDelivered: unknown
