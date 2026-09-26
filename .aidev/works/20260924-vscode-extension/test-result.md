@@ -731,3 +731,13 @@ Web UIの全体実行は省いた（アイコン差し替えのみ。前ラウ�
 `decisions.md` D27。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。変更前後のSVGを拡大して並べ、
 継ぎ目の隙間が消えたこと・SVGとPNG（1024px）が同じ形であること・32/16pxでも読めることを目視で確かめた。
 Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド27（`TS`を書体の字形に）
+
+`decisions.md` D28。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。見本と生成した全形式を並べて目視。
+生成は5.9秒（1024pxのPNGを含む）。Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド28（ブロックカーソルで`S`を反転表示）
+
+`decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。

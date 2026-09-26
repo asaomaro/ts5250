@@ -35,15 +35,18 @@ describe("アプリのアイコン", () => {
     ]);
     for (const [rel, hash] of Object.entries(stamp.files)) expect(sha256(fromRepo(rel)), rel).toBe(hash);
   });
-  /** 5250端末ソフトなので、マークは既定の端末配色「5250 端末 クラシック」と同じ色（利用者の要望） */
-  it("マークの色は「5250 端末 クラシック」の地色（--crt）と緑（--t-green）", () => {
+  /**
+   * 5250端末ソフトなので、マークは既定の端末配色「5250 端末 クラシック」の色で描く（利用者の要望）。
+   * 地は --crt、ブロックカーソル（■）は --t-green、`T` は --t-pink、■の上の `S` は地の色で抜く（D29）
+   */
+  it("マークの色は「5250 端末 クラシック」の地（--crt）・緑（--t-green）・ピンク（--t-pink）", () => {
     const css = read("src/styles.css");
     const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
     const token = (name: string) => new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`).exec(root)?.[1]?.toLowerCase();
     const svg = read("public/favicon.svg");
-    expect(token("--crt")).toBe("#000000");
-    expect(token("--t-green")).toBe("#00ff00");
-    expect(svg).toContain(`fill="${token("--crt")}"`);
-    expect(svg).toContain(`fill="${token("--t-green")}"`);
+    expect([token("--crt"), token("--t-green"), token("--t-pink")]).toEqual(["#000000", "#00ff00", "#ff00ff"]);
+    // 描く順序も見る: T（ピンク）→ ■（緑）→ S（地の色で抜く）
+    const fills = [...svg.matchAll(/fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
+    expect(fills).toEqual([token("--crt"), token("--t-pink"), token("--t-green"), token("--crt")]);
   });
 });

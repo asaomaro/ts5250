@@ -1,11 +1,11 @@
 {
-  "script": "607a2f7c9eebc7df8af9c460d836fa7ef6bece44f638913e9dbce9631399e8a2",
+  "script": "f89a32e258f4c9604c728577032b53437643e41ba6f81aa5c6f654de9ac03b62",
   "files": {
-    "packages/web-ui/public/favicon.svg": "daea58a907a5ace615fe356e126cb72a1d35035a990d6f1df517894a98747316",
-    "packages/web-ui/public/favicon.ico": "89e9f83972fe27233b9feab11fac76a7b01450c5c1ae1c2f6d1552b4a46252c9",
-    "packages/web-ui/public/apple-touch-icon.png": "a157a24628be14630a45b895345a5da1d0c7d5ad14c424759917bc4c02f08ac3",
-    "electron/build/icon.png": "3ae11b0764f1f35e543948ee92a1d57335d8a63402e346ab6420fffbba39eda8",
-    "electron/build/icon.ico": "8b5e947acd923df1f23a704a854cec3237848316436171cbb7fae2e7c5658b6d",
-    "vscode-extension/icon.png": "95674fd7a7f2c930651ad635509e9154dfce2d117d586c146dc3c4c9fa0af5ec"
+    "packages/web-ui/public/favicon.svg": "cd632578e9f8b12398d85b1ca82d3679cc4c7cba9e56d752522fc763f82adee6",
+    "packages/web-ui/public/favicon.ico": "843e0deb8e08c34a7e467316717ea292592ba05782957f9e90c1d4d2ea3eaf16",
+    "packages/web-ui/public/apple-touch-icon.png": "67b35e39d93b4e1e73adf362fa30725ea59267a7e309b8634ba5604ec975797c",
+    "electron/build/icon.png": "74e98bf7c0f8cd9767b96301d6fa54c67b6420a0dd7d3544df46c3f7eaaa0471",
+    "electron/build/icon.ico": "7f678fb0cfa633d4f5fc2d1bf34f7587b9a6e9417c2134509e28cbfaf91bd830",
+    "vscode-extension/icon.png": "f47935dd76b38ce0d34311d507929ee9b73ef9c0a0f3ecb36b0d4835561f28a4"
   }
 }

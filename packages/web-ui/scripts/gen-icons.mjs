@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * アプリのマーク（モノグラム `TS` ＋カーソル下線）を各形式に生成する。
+ * アプリのマーク（`T` と、ブロックカーソル（■）に反転表示された `S`）を各形式に生成する。
  *
  *   npm run gen:icons          （リポジトリのルートから）
  *   node packages/web-ui/scripts/gen-icons.mjs --check
@@ -11,14 +11,14 @@
  * これと突き合わせて**作り直し忘れ**（定義だけ変えた）と**手で差し替えた出力**を落とす——描き直しは重く、
  * 並列のテスト実行では 1 分を超えて他のテストをタイムアウトさせたので、テストでは描かない
  *
- * **マークの定義はこのファイルだけ**（`SHAPES`）。ブラウザのファビコンと Electron の
+ * **マークの定義はこのファイルだけ**（`GLYPHS` と地・下線）。ブラウザのファビコンと Electron の
  * アプリアイコンは同じ絵なので、**出力先が 2 つでも定義は 1 つに保つ**——バイナリを
  * 手で置くと、色を直したときに片方だけ古いまま残り、しかも見比べるまで気づかない。
  * web-ui から `electron/build/` に書き出しているのはそのため。
  *
  * 外部依存を持たない（画像ライブラリを 1 個のアイコンのために入れない）ので、
- * ラスタライズは自前。図形を「角丸矩形」と「円弧（太さ付き）」の 2 種類に絞ってあり、
- * どちらも点の内外判定が閉じた式で書けるため、スーパーサンプルするだけで済む。
+ * ラスタライズは自前。図形は「角丸矩形」（地・下線）と「輪郭」（字形。直線と 2 次・3 次ベジェ）の 2 種類で、
+ * 輪郭は曲線を細かい折れ線にして、行ごとに交点を求めて非ゼロ規則で塗る。スーパーサンプルで縁をぼかす。
  */
 import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
@@ -44,83 +44,123 @@ const VB = 64; // viewBox の一辺
 // ts5250は5250端末ソフトなので、マークも既定の端末の画面と同じ色にする（利用者の要望）。
 // 以前は「ソフト」寄りの`#0f1a12`/`#3ddc7f`だった。`test/app-icons.test.ts`が`styles.css`との一致を見る
 const BG = [0x00, 0x00, 0x00]; // 端末の地（--crt）
-const FG = [0x00, 0xff, 0x00]; // 端末の緑（--t-green）
-const CURSOR_ALPHA = 0.55;
-const W = 5; // 線幅（T と S で共通）
+const FG = [0x00, 0xff, 0x00]; // 端末の緑（--t-green）。ブロックカーソルの色
+const T_COLOR = [0xff, 0x00, 0xff]; // `T` の色（--t-pink）。利用者が示した図案どおり
 
 const hex = ([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 const BG_RECT = { rect: [0, 0, 64, 64], r: 14 };
 
 /**
- * 字形（大文字の `TS`。利用者の要望で小文字の `ts` から替えた。D26）。
+ * 字形（大文字の `TS`）。**Noto Sans CJK JP Medium の `T` と `S` の輪郭**をそのまま使う（D28）。
  *
- * 2 文字とも字高を揃える（上端 y=11・下端 y=45）。カーソル下線（y=51〜56）との間を 6 空け、
- * 左右の余白（T の左端 8・S の右端 55.5）もほぼ揃えて、下線の中心（x=32）に 2 文字の中心を合わせる。
+ * 経緯: 大文字の `TS`（D26）を矩形と円弧で組んだが、円弧だけの `S` は継ぎ目・傾き・上下の幅を直しても
+ * 「バランスがおかしい」（利用者の指摘）。示された見本の `TS` は普通のサンセリフの字形なので、自作をやめて
+ * 書体の字形を借りた。候補（Noto Regular / Medium / Bold・DejaVu）を見本と並べ、字形と太さが一番近い
+ * Medium を選んだ（16px でも読める）。
  *
- * **`S` を矩形（上下バー＋左右の縦棒）で組まない**。それは数字の 5 と同じ形で、
- * `TS5250` という名前の中では特に「T5」と読み違える（小文字の試作で実際にそう見えた）。
- * 縦に接する 2 円（中心は同じ x）の弧でつなぐと、中央で接線が連続して S になる。
+ * 取り方: fontkit で `font.layout("TS")` の輪郭を取り、キャップハイト 26 に縮めた。配置はカーソルの■に合わせて
+ * 組み直してある（D29）——`T`・間 3・■（`S` の外形＋左右 3）の全体を x=32 に中心合わせし、字の縦の中心を y=32 に置いた。
+ * 座標は viewBox（64）の値で、小数 3 桁に丸めてある。
  *
- * 利用者の指摘で直したこと（D27）:
- * - **上の弧を下より小さくする**（字高 34 = 2r1 + 2r2 + W）。同じ半径の 2 円を 180° 回した形だと、
- *   上半分の方が幅広く見える（書体でも上を小さくするのが普通の補正）。
- * - **端を縦に切る**。円弧の端は半径の向きに斜めに切れ、上下の切り口が平行に並ぶので、
- *   S 全体が傾いて見えた。
- * - **SVG は 1 本の輪郭（塗り）で描く**。2 本の線を中央で突き合わせていたため、
- *   ブラウザの縁のぼかしで継ぎ目に縦の細い隙間が見えた（ラスタは点の内外判定なので隙間は出ない）。
+ * Noto Sans CJK は SIL Open Font License 1.1（© 2014-2021 Adobe）。字形の輪郭を図案に使うのはライセンスの
+ * 範囲（書体ファイルそのものを配るのではない）。
  */
-const S_CX = 45.75;
-const S_R1 = 6.75; // 上の弧の半径（線の中心）
-const S_R2 = 7.75; // 下の弧の半径
-const S_C1 = 11 + W / 2 + S_R1; // 上の円の中心 y
-const S_C2 = S_C1 + S_R1 + S_R2; // 下の円の中心 y（2 円は中央 y = S_C1 + S_R1 で接する）
-const S_CUT1 = S_CX + 4; //   上の端（右上）を切る x。内側の円（半径 S_R1 - W/2）より内で切り、切り口を縦 1 本にする
-const S_CUT2 = S_CX - 4.5; // 下の端（左下）を切る x
-const SHAPES = [
-  // T
-  { rect: [8, 11, 22, W] }, //            横棒
-  { rect: [16.5, 11, W, 34] }, //         縦棒
-  // S（上の弧: 右上の端→上→左→下 / 下の弧: 上→右→下→左下の端）。端は cut で縦に切る
-  { arc: [S_CX, S_C1, S_R1], from: 0, to: 270, cut: { x: S_CUT1, keep: "left", from: 0, to: 90 } },
-  { arc: [S_CX, S_C2, S_R2], from: -180, to: 90, cut: { x: S_CUT2, keep: "right", from: -180, to: -90 } },
-];
+const GLYPHS = {
+  T: "M16.211 45L20.373 45L20.373 22.458L27.994 22.458L27.994 19L8.626 19L8.626 22.458L16.211 22.458Z",
+  S: "M43.237 45.494C48.917 45.494 52.374 42.072 52.374 37.909C52.374 34.099 50.187 32.194 47.082 30.889L43.519 29.372C41.438 28.49 39.357 27.679 39.357 25.421C39.357 23.41 41.05 22.105 43.696 22.105C45.989 22.105 47.824 22.987 49.446 24.433L51.528 21.823C49.623 19.812 46.765 18.542 43.696 18.542C38.722 18.542 35.158 21.611 35.158 25.704C35.158 29.513 37.91 31.454 40.45 32.512L44.048 34.064C46.447 35.122 48.176 35.863 48.176 38.227C48.176 40.414 46.447 41.896 43.343 41.896C40.802 41.896 38.263 40.661 36.393 38.827L33.994 41.649C36.358 44.047 39.674 45.494 43.237 45.494Z",
+};
 
-const CURSOR = { rect: [14, 51, 36, 5], r: 2.5 };
+/**
+ * ブロックカーソル（■）。**エミュレーターはカーソルを文字を反転した■で表す**ので、マークも `S` の上に■を置き、
+ * `S` を地の色で抜く（利用者の要望と図案。D29。以前は下線のカーソルだった）。
+ * `S` の外形に左右 3 の余白を足した幅で、縦は y 14〜50（字の縦の中心 y=32）。角は丸めない（端末のセル）
+ */
+const CURSOR = { rect: [30.994, 14.0, 24.38, 36.0] };
 
-/** viewBox 座標の 1 点が図形の内側か。 */
+/** viewBox 座標の 1 点が角丸矩形の内側か（地・下線）。字形は `glyphEdges` の走査で塗る */
 function inside(px, py, shape) {
-  if (shape.rect) {
-    const [x, y, w, h] = shape.rect;
-    if (px < x || py < y || px >= x + w || py >= y + h) return false;
-    const rad = shape.r ?? 0;
-    if (rad <= 0) return true;
-    const cx = Math.min(Math.max(px, x + rad), x + w - rad);
-    const cy = Math.min(Math.max(py, y + rad), y + h - rad);
-    return (px - cx) ** 2 + (py - cy) ** 2 <= rad * rad;
-  }
-  const [cx, cy, rm] = shape.arc;
-  const dx = px - cx;
-  const dy = py - cy;
-  const d = Math.hypot(dx, dy);
-  if (d < rm - W / 2 || d > rm + W / 2) return false;
-  // 画面座標は y が下向き。反転して数学の角度（反時計回りが正）に合わせる
-  let ang = (Math.atan2(-dy, dx) * 180) / Math.PI;
-  while (ang < shape.from) ang += 360;
-  if (ang > shape.to) return false;
-  const c = shape.cut;
-  if (c && ang >= c.from && ang <= c.to && (c.keep === "left" ? px > c.x : px < c.x)) return false;
-  return true;
+  const [x, y, w, h] = shape.rect;
+  if (px < x || py < y || px >= x + w || py >= y + h) return false;
+  const rad = shape.r ?? 0;
+  if (rad <= 0) return true;
+  const cx = Math.min(Math.max(px, x + rad), x + w - rad);
+  const cy = Math.min(Math.max(py, y + rad), y + h - rad);
+  return (px - cx) ** 2 + (py - cy) ** 2 <= rad * rad;
 }
 
-/** viewBox 座標の 1 点の色（非プリマルチ RGBA）。 */
-function sample(px, py) {
-  if (!inside(px, py, BG_RECT)) return [0, 0, 0, 0];
-  for (const s of SHAPES) if (inside(px, py, s)) return [...FG, 255];
-  if (inside(px, py, CURSOR)) {
-    const a = CURSOR_ALPHA;
-    return [0, 1, 2].map((i) => Math.round(FG[i] * a + BG[i] * (1 - a))).concat(255);
+/**
+ * 輪郭（`M` `L` `Q` `C` `Z`。絶対座標だけ——`GLYPHS` はそう書き出してある）を折れ線の辺に崩す。
+ * 曲線は 24 分割（viewBox で 1 辺 1 前後。1024px でも角は見えない）
+ */
+function pathEdges(d) {
+  const tok = d.match(/[MLQCZ]|-?[\d.]+/g);
+  const edges = [];
+  let i = 0, cmd = "", x = 0, y = 0, sx = 0, sy = 0;
+  const num = () => Number(tok[i++]);
+  const line = (x1, y1) => {
+    if (y1 !== y) edges.push([x, y, x1, y1]);
+    x = x1;
+    y = y1;
+  };
+  const N = 24;
+  while (i < tok.length) {
+    if (/[MLQCZ]/.test(tok[i])) cmd = tok[i++];
+    if (cmd === "M") { x = sx = num(); y = sy = num(); cmd = "L"; }
+    else if (cmd === "L") line(num(), num());
+    else if (cmd === "Q") {
+      const [x0, y0, x1, y1, x2, y2] = [x, y, num(), num(), num(), num()];
+      for (let k = 1; k <= N; k++) {
+        const t = k / N, u = 1 - t;
+        line(u * u * x0 + 2 * u * t * x1 + t * t * x2, u * u * y0 + 2 * u * t * y1 + t * t * y2);
+      }
+    } else if (cmd === "C") {
+      const [x0, y0, x1, y1, x2, y2, x3, y3] = [x, y, num(), num(), num(), num(), num(), num()];
+      for (let k = 1; k <= N; k++) {
+        const t = k / N, u = 1 - t;
+        line(
+          u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+          u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3
+        );
+      }
+    } else if (cmd === "Z") { line(sx, sy); cmd = ""; }
+    else throw new Error(`unsupported path command: ${cmd}`);
   }
+  return edges;
+}
+const T_EDGES = pathEdges(GLYPHS.T);
+const S_EDGES = pathEdges(GLYPHS.S);
+
+/**
+ * 横線 y で字形の内側になる区間（`[x0, x1]` の並び）。**非ゼロ規則**（書体の輪郭の決まり）——
+ * 交点を x で並べ、辺の向き（上向き +1 / 下向き −1）を足して 0 でない間を内側とする
+ */
+function glyphSpans(edges, py) {
+  const hits = [];
+  for (const [x0, y0, x1, y1] of edges) {
+    if ((py < y0) === (py < y1)) continue;
+    hits.push([x0 + ((py - y0) * (x1 - x0)) / (y1 - y0), y1 > y0 ? 1 : -1]);
+  }
+  hits.sort((a, b) => a[0] - b[0]);
+  const spans = [];
+  let wind = 0;
+  for (const [hx, dir] of hits) {
+    const was = wind;
+    wind += dir;
+    if (was === 0 && wind !== 0) spans.push([hx, hx]);
+    else if (was !== 0 && wind === 0) spans[spans.length - 1][1] = hx;
+  }
+  return spans;
+}
+
+const inSpans = (spans, px) => spans.some(([a, b]) => px >= a && px < b);
+
+/** viewBox 座標の 1 点の色（非プリマルチ RGBA）。`t`/`s` はその行の `T`/`S` の区間 */
+function sample(px, py, t, s) {
+  if (!inside(px, py, BG_RECT)) return [0, 0, 0, 0];
+  if (inSpans(t, px)) return [...T_COLOR, 255];
+  // ■の上の `S` は地の色で抜く（反転表示）
+  if (inside(px, py, CURSOR)) return inSpans(s, px) ? [...BG, 255] : [...FG, 255];
   return [...BG, 255];
 }
 
@@ -131,12 +171,16 @@ function render(size, ss = 8) {
   const rows = [];
   for (let y = 0; y < size; y++) {
     const row = Buffer.alloc(size * 4);
+    // 字形の区間はサブ行ごとに 1 回だけ求める（点ごとに全辺を見ると 1024px で遅すぎる）
+    const subY = Array.from({ length: ss }, (_, sy) => (y * ss + sy + 0.5) * step);
+    const tSpans = subY.map((py) => glyphSpans(T_EDGES, py));
+    const sSpans = subY.map((py) => glyphSpans(S_EDGES, py));
     for (let x = 0; x < size; x++) {
       let ar = 0, ag = 0, ab = 0, aa = 0;
       for (let sy = 0; sy < ss; sy++) {
         const py = (y * ss + sy + 0.5) * step;
         for (let sx = 0; sx < ss; sx++) {
-          const [r, g, b, a] = sample((x * ss + sx + 0.5) * step, py);
+          const [r, g, b, a] = sample((x * ss + sx + 0.5) * step, py, tSpans[sy], sSpans[sy]);
           // **プリマルチで積む**。素の RGB を平均すると透明部の黒が混ざり、
           // 角丸の縁に黒い縁取りが出る
           ar += r * a; ag += g * a; ab += b * a; aa += a;
@@ -211,33 +255,6 @@ function ico(images) {
   return Buffer.concat([header, ...entries, ...images.map((i) => i.data)]);
 }
 
-/**
- * `S` の輪郭（塗り）。`SHAPES` の 2 本の弧を、線ではなく 1 本の閉じた輪郭として描く——
- * 2 本の線を突き合わせると継ぎ目に隙間が見える（D27）。
- * 上の弧の外縁（右上の切り口→上→左→下）→ 下の弧の内縁（上→右→下→左下の切り口）→ 切り口 →
- * 下の弧の外縁（戻る）→ 上の弧の内縁（戻る）→ 切り口。上の外縁の下端と下の内縁の上端は同じ点
- * （2 円が接する中央の真下 W/2）なので、途中に線分は要らない
- */
-function sOutline() {
-  const f = (v) => v.toFixed(3);
-  const [top, bot] = SHAPES.filter((s) => s.arc);
-  const [cx, c1, r1] = top.arc;
-  const [, c2, r2] = bot.arc;
-  const o1 = r1 + W / 2, i1 = r1 - W / 2, o2 = r2 + W / 2, i2 = r2 - W / 2;
-  const dy = (r, dx) => Math.sqrt(r * r - dx * dx);
-  const d1 = top.cut.x - cx;
-  const d2 = bot.cut.x - cx;
-  // sweep: 0＝画面上で反時計回り、1＝時計回り。どの弧も 180° を超えるので large=1
-  return [
-    `<path d="M${f(top.cut.x)} ${f(c1 - dy(o1, d1))}`,
-    `A${o1} ${o1} 0 1 0 ${f(cx)} ${f(c1 + o1)}`,
-    `A${i2} ${i2} 0 1 1 ${f(bot.cut.x)} ${f(c2 + dy(i2, d2))}`,
-    `L${f(bot.cut.x)} ${f(c2 + dy(o2, d2))}`,
-    `A${o2} ${o2} 0 1 0 ${f(cx)} ${f(c2 - o2)}`,
-    `A${i1} ${i1} 0 1 1 ${f(top.cut.x)} ${f(c1 - dy(i1, d1))}Z"/>`,
-  ].join("");
-}
-
 function svg() {
   const green = hex(FG);
   const rect = (s, extra = "") => {
@@ -245,12 +262,13 @@ function svg() {
     const rr = s.r ? ` rx="${s.r}"` : "";
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}"${rr}${extra}/>`;
   };
-  const body = SHAPES.filter((s) => s.rect).map((s) => rect(s)).join("") + sOutline();
+  // 字形は書体の輪郭そのまま（非ゼロ規則。SVG の fill-rule の既定と同じ）。■の上に `S` を地の色で重ねる
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" role="img" aria-label="ts5250">`,
     `  ${rect(BG_RECT, ` fill="${hex(BG)}"`)}`,
-    `  <g fill="${green}">${body}</g>`,
-    `  ${rect(CURSOR, ` fill="${green}" opacity="${CURSOR_ALPHA}"`)}`,
+    `  <path d="${GLYPHS.T}" fill="${hex(T_COLOR)}"/>`,
+    `  ${rect(CURSOR, ` fill="${green}"`)}`,
+    `  <path d="${GLYPHS.S}" fill="${hex(BG)}"/>`,
     `</svg>`,
     "",
   ].join("\n");
