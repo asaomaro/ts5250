@@ -686,3 +686,37 @@ new-900x500 {"cardW":868,"vScroll":false,"pageScrollX":false,"cols":3,"focus":"s
 ```
 
 **未検証の穴**: VSCode本体のWebViewでの見え方（テーマ・フォント）は確かめていない。
+
+## ラウンド24（マークをクラシックの配色に）
+
+`decisions.md` D25。
+
+- `test/app-icons.test.ts` — 3 passed（39ms）。mutation 3件killed（生成の定義だけ色を変える→スクリプトのハッシュでfail／
+  VSCodeのアイコンを1バイト書き換える→そのファイル名でfail／`styles.css`の`--t-green`を変える→色の一致でfail）。
+- 1回目は、テストの中で全サイズを描き直していた。全体実行で65秒かかり、無関係のテストがタイムアウトした:
+
+```
+     × 全タブを畳んでもワークスペースに居られ、バッジは全数を出す 30103ms
+     × **裏のタブに WEC が届いてから切り替えても、エラー状態に入っている** 7030ms
+     × コミット済みのアイコンがすべて今の定義から作ったものと一致する（作り直し忘れが無い） 65814ms
+     × Tab で次の入力欄にフォーカスが移る 5809ms
+     × 入力欄フォーカス中でも Shift+矢印はブロック選択になる（欄内テキスト選択ではない） 5159ms
+```
+
+  → ハッシュの突き合わせ（`icons.stamp.json`）に変えた。手で回す`--check`（描き直し）では、定義だけ色を変えると6ファイルすべてstaleになる:
+
+```
+stale: /workspaces/ts5250/packages/web-ui/public/favicon.svg
+stale: /workspaces/ts5250/packages/web-ui/public/favicon.ico
+stale: /workspaces/ts5250/packages/web-ui/public/apple-touch-icon.png
+stale: /workspaces/ts5250/electron/build/icon.png
+stale: /workspaces/ts5250/electron/build/icon.ico
+stale: /workspaces/ts5250/vscode-extension/icon.png
+      Tests  1 failed | 1 passed (2)
+```
+
+- 生成した6ファイルをChromiumで並べて目視（VSCodeのダーク地・白地の両方で、128/32/16px）。
+- **未検証の穴**: Windowsのexeに焼いたアイコン・macOSのicns（electron-builderでのビルドはしていない）。
+- **Web UIの全体実行は省いた**（利用者の判断「アイコン差し替えだけなのでテスト不要」）。途中まで回した分では、
+  無関係のテストがタイムアウトで落ちていた。同じマシンで別プロジェクトのvitestが並走しており、負荷は12コアに対して37だった。
+  今回の変更は画像・生成スクリプト・README・アイコンのテストだけで、落ちたテストが見る処理には触れていない。

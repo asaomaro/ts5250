@@ -3,6 +3,13 @@
  * アプリのマーク（モノグラム `ts` ＋カーソル下線）を各形式に生成する。
  *
  *   npm run gen:icons          （リポジトリのルートから）
+ *   node packages/web-ui/scripts/gen-icons.mjs --check
+ *                              書き出さず、コミット済みのファイルが今の定義と一致するかだけ見る
+ *                              （全サイズを描き直すので十数秒かかる。手で確かめる用）
+ *
+ * 書き出すたびに`icons.stamp.json`（このスクリプトと各出力の sha256）も書く。`test/app-icons.test.ts` は
+ * これと突き合わせて**作り直し忘れ**（定義だけ変えた）と**手で差し替えた出力**を落とす——描き直しは重く、
+ * 並列のテスト実行では 1 分を超えて他のテストをタイムアウトさせたので、テストでは描かない
  *
  * **マークの定義はこのファイルだけ**（`SHAPES`）。ブラウザのファビコンと Electron の
  * アプリアイコンは同じ絵なので、**出力先が 2 つでも定義は 1 つに保つ**——バイナリを
@@ -13,9 +20,10 @@
  * ラスタライズは自前。図形を「角丸矩形」と「円弧（太さ付き）」の 2 種類に絞ってあり、
  * どちらも点の内外判定が閉じた式で書けるため、スーパーサンプルするだけで済む。
  */
+import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -27,10 +35,16 @@ const ELECTRON_OUT = join(HERE, "..", "..", "..", "electron", "build");
 // VS Code Marketplaceの推奨は128×128以上（`vsce package`は指定サイズをそのまま使う。
 // electron-builderのicns生成のような下限制約は無い）
 const VSCODE_OUT = join(HERE, "..", "..", "..", "vscode-extension");
+const REPO = join(HERE, "..", "..", "..");
+const STAMP = join(HERE, "icons.stamp.json");
+const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 
 const VB = 64; // viewBox の一辺
-const BG = [0x0f, 0x1a, 0x12]; // 端末の地（--paper のダーク寄り）
-const FG = [0x3d, 0xdc, 0x7f]; // 端末の緑（--accent のダーク側）
+// **「5250 端末 クラシック」の配色**（`styles.css`の`:root`の`--crt`と`--t-green`。ACSの標準色そのもの）。
+// ts5250は5250端末ソフトなので、マークも既定の端末の画面と同じ色にする（利用者の要望）。
+// 以前は「ソフト」寄りの`#0f1a12`/`#3ddc7f`だった。`test/app-icons.test.ts`が`styles.css`との一致を見る
+const BG = [0x00, 0x00, 0x00]; // 端末の地（--crt）
+const FG = [0x00, 0xff, 0x00]; // 端末の緑（--t-green）
 const CURSOR_ALPHA = 0.55;
 const W = 5; // 線幅（t と s で共通）
 
@@ -210,11 +224,22 @@ function svg() {
   ].join("\n");
 }
 
+const CHECK = process.argv.includes("--check");
 const written = [];
+const stale = [];
+/** 出力（リポジトリ相対・`/`区切り）→ sha256 */
+const hashes = {};
 function emit(dir, name, data) {
+  hashes[relative(REPO, join(dir, name)).split("\\").join("/")] = sha256(Buffer.from(data));
+  const path = join(dir, name);
+  if (CHECK) {
+    const cur = existsSync(path) ? readFileSync(path) : undefined;
+    if (!cur || !cur.equals(Buffer.from(data))) stale.push(path);
+    return;
+  }
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, name), data);
-  written.push(join(dir, name));
+  writeFileSync(path, data);
+  written.push(path);
 }
 
 emit(WEB_OUT, "favicon.svg", svg());
@@ -223,7 +248,18 @@ emit(WEB_OUT, "favicon.ico", ico([16, 32, 48].map((size) => ({ size, data: png(r
 emit(WEB_OUT, "apple-touch-icon.png", png(render(180, 4), 180));
 // macOS は 512 未満だと electron-builder が icns を作れない。1024 で出しておく
 emit(ELECTRON_OUT, "icon.png", png(render(1024, 2), 1024));
+// Windows 用のマルチサイズ ico。electron-builder は icon.ico が無いと icon.png から 256px の 1 枚だけを作り、
+// タスクバー・エクスプローラの 16/32px 表示が縮小でぼける。以前は`electron/scripts/make-icon-ico.ps1`
+// （pwsh・System.Drawing）で別に焼いていたが、**生成の経路が 2 本あると片方だけ古い色で残る**のでここへ寄せた
+emit(ELECTRON_OUT, "icon.ico", ico([16, 24, 32, 48, 64, 128, 256].map((size) => ({ size, data: png(render(size, size >= 128 ? 4 : 8), size) }))));
 // VSCode拡張機能のアイコン（favicon・electronアイコンと同じ絵を使う。利用者の要望）
 emit(VSCODE_OUT, "icon.png", png(render(128, 4), 128));
 
-for (const f of written) process.stderr.write(`generated: ${f}\n`);
+if (CHECK) {
+  for (const f of stale) process.stderr.write(`stale: ${f}\n`);
+  process.exitCode = stale.length > 0 ? 1 : 0;
+} else {
+  const stamp = { script: sha256(readFileSync(fileURLToPath(import.meta.url))), files: hashes };
+  writeFileSync(STAMP, `${JSON.stringify(stamp, null, 2)}\n`);
+  for (const f of [...written, STAMP]) process.stderr.write(`generated: ${f}\n`);
+}

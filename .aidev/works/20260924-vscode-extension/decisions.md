@@ -1045,3 +1045,24 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   束の見出しがあるので、欄の名前は短くした（「透かし大きさ（px）」→「大きさ（px）」等）。透かしの色は選択と色見本を同じ行に置いた。
 - **検証**: web-ui 2766 passed。mutation 5件すべてfail（応答で無条件に「保存しました」・`savedRev`を進めない・カード幅を
   列数から決めない・spool等を1列に戻す・送信時に「保存しています」にしない）。画面はChromiumで測った（test-result）。
+
+## D25: アプリのマークを「5250 端末 クラシック」の配色にし、アイコンの生成経路を1本にする
+
+- **背景**: 利用者の要望「ts5250のロゴのカラーリングを5250端末クラシックの配色に。favicon・Electron・VSCode拡張機能
+  アイコン・ファイルアイコンなど漏れなく」。
+- **決定**: `packages/web-ui/scripts/gen-icons.mjs`の地色・前景色を`styles.css`の`:root`（既定＝クラシック）の
+  `--crt: #000000`・`--t-green: #00ff00`に変えた（以前は`#0f1a12`/`#3ddc7f`）。形は変えない。
+- **出力の洗い出し**（`git ls-files`の画像と参照を全部見た）: `favicon.svg`・`favicon.ico`・`apple-touch-icon.png`
+  （web・embed）、`electron/build/icon.png`（exe/dmg/AppImageと開発時のウィンドウ）、`electron/build/icon.ico`（Windows）、
+  `vscode-extension/icon.png`（拡張のアイコンと`.ts5250`のファイルアイコンの両方が指す）。画面内にマークの複製は無く、
+  `theme-color`やマニフェストも無い。
+- **`icon.ico`だけ生成経路が別だった**——`electron/scripts/make-icon-ico.ps1`（pwsh・System.Drawing）で`icon.png`から
+  焼いていた。pwshが無い環境（このコンテナ）では作り直せず、**色を変えても`icon.ico`だけ古い緑で残る**。
+  `gen-icons.mjs`は既にICOを書けるので、16/24/32/48/64/128/256pxの`icon.ico`もここから出し、ps1は削除した
+  （READMEの手順も`npm run gen:icons`に直した）。
+- **作り直し忘れを落とす**: 生成のたびに`scripts/icons.stamp.json`（スクリプトと6出力のsha256）を書き、
+  `test/app-icons.test.ts`が突き合わせる（定義だけ変えた／出力を手で差し替えた、の両方を落とす）。あわせてマークの色が
+  `styles.css`のクラシックの2色と同じかを見る。**最初はテストの中で全サイズを描き直して比べたが、並列の全体実行で65秒かかり、
+  CPUを奪って無関係のテスト4件をタイムアウトさせた**ので、描き直しは手で回す`--check`に残し、テストはハッシュの比較
+  （39ms）にした。確かめたこと: 変更前のコミット済みファイルは、古い色の定義で`--check`すると`icon.ico`以外すべて
+  バイト一致した（生成は決定的で、`icon.ico`だけ別経路だったことの裏付け）。
