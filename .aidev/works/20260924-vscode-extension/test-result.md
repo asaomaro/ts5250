@@ -741,3 +741,8 @@ Web UIの全体実行は省いた（アイコンのみ）。このラウンド�
 
 `decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
 Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド28（`T`にブロックカーソルを重ねる）
+
+`decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
