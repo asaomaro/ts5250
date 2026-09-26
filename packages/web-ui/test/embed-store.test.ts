@@ -75,12 +75,15 @@ describe("initEmbedBridge", () => {
   });
 
   /** 設定フォームは`loadedRev`を`key`にする（D23）——自分の自動保存の応答（saved）で作り直すと入力中の文字が消える */
-  it("loadedRev は loaded でだけ進み、saved では進まない", () => {
+  it("loadedRev は loaded でだけ進み、saved では進まない（savedは savedRev を進める）", () => {
     const before = embedStore.loadedRev;
+    const savedBefore = embedStore.savedRev;
     window.dispatchEvent(fromParent({ type: "saved", payload: { app: "emulator", host: "h" } }));
     expect(embedStore.loadedRev).toBe(before);
+    expect(embedStore.savedRev).toBe(savedBefore + 1);
     window.dispatchEvent(fromParent({ type: "loaded", payload: { app: "emulator", host: "h" } }));
     expect(embedStore.loadedRev).toBe(before + 1);
+    expect(embedStore.savedRev).toBe(savedBefore + 1);
   });
 
   it("fileInvalid は loaded を捨てる（読めないファイルの設定を出し続けると、入力1つで上書きしてしまう）が、saveError は捨てない", () => {

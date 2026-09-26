@@ -660,3 +660,29 @@ sql 360x600 {"cardLeft":16,"cardW":328,"btnVisible":true,"pageScrollX":false}
 **未検証の穴**: VSCode本体での自動保存（`document.save()`で本当にdirtyが消えるか・元に戻す履歴の粒度）と、
 テキストエディタで同時に開いて書き換えたときの即時反映は、拡張ホストのモックでしか確かめていない
 （このコンテナにVSCodeが無い）。
+
+## ラウンド23（設定の欄を横に並べる・自動保存の状態表示）
+
+`decisions.md` D24。
+
+- `packages/web-ui` — **2766 passed**（211 files）。`vue-tsc -b` green。拡張側は変更なし。
+- mutation 5件すべてkilled。
+- 画面（`vite build`の`embed.html`をChromiumで表示し、`loaded`を流し込んで測った）:
+
+```
+emu-1000x600 {"cardW":948,"vScroll":false,"pageScrollX":false,"cols":3,"focus":null}
+emu-360x640 {"cardW":328,"vScroll":true,"pageScrollX":false,"cols":3,"focus":null}
+prt-900x500 {"cardW":648,"vScroll":false,"pageScrollX":false,"cols":2,"focus":null}
+sql-900x500 {"cardW":648,"vScroll":false,"pageScrollX":false,"cols":2,"focus":null}
+new-900x500 {"cardW":868,"vScroll":false,"pageScrollX":false,"cols":3,"focus":"sf-host"}
+```
+
+  変更前は同じ条件で`sql-900x500`が縦スクロール（1列）だった。360px幅は1列に折り返してカード内でスクロールする（想定どおり）。
+  途中、ホスト欄の`ref`が`v-for`の中で配列になり、ホストが空のファイルでフォーカスが入らなくなったのをテストで検出して直した。
+
+```
+     × 開いた直後、最初の入力欄（ホスト）へフォーカスする 340ms
+      Tests  1 failed | 95 passed (96)
+```
+
+**未検証の穴**: VSCode本体のWebViewでの見え方（テーマ・フォント）は確かめていない。

@@ -33,6 +33,7 @@ import { featureOf } from "./features.js";
 import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
 import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
 import { downloadScreenHtml } from "./screenExport.js";
+import { settingsColumnsOf } from "./settingsLayout.js";
 
 const props = defineProps<{ app: EmbedAppKind }>();
 
@@ -183,8 +184,31 @@ const SAVE_DEBOUNCE_MS = 400;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingSave: SettingsFormValues | undefined;
 
+/**
+ * 自動保存の状態（D24）。保存ボタンが無いので、**保存されたかを画面に出す**——出さないと
+ * 「接続を押したときに保存されるのか」が分からない（利用者の質問）
+ */
+const saveState = ref<"idle" | "pending" | "saving" | "saved">("idle");
+const saveStateLabel = computed(() =>
+  ({ idle: "", pending: "変更を保存します…", saving: "保存しています…", saved: "自動保存しました" })[saveState.value]
+);
+watch(
+  () => embedStore.savedRev,
+  () => {
+    // 応答を待つ間に次の入力が来ていたら（pending）、そちらの表示を残す
+    if (saveState.value === "saving") saveState.value = "saved";
+  }
+);
+watch(
+  () => embedStore.error,
+  (e) => {
+    if (e !== undefined) saveState.value = "idle"; // 失敗はエラー欄が出す
+  }
+);
+
 function onFormChange(v: SettingsFormValues): void {
   draft.value = v;
+  saveState.value = "pending";
   pendingSave = v;
   if (saveTimer !== undefined) clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
@@ -193,16 +217,27 @@ function cancelPendingSave(): void {
   if (saveTimer !== undefined) clearTimeout(saveTimer);
   saveTimer = undefined;
   pendingSave = undefined;
+  if (saveState.value === "pending") saveState.value = "idle";
 }
 function flushSave(): void {
   const v = pendingSave;
   cancelPendingSave();
-  if (v) postToHost({ type: "save", payload: v });
+  if (!v) return;
+  saveState.value = "saving";
+  postToHost({ type: "save", payload: v });
 }
 // タブを閉じる直前の入力も落とさない
 onBeforeUnmount(flushSave);
 window.addEventListener("pagehide", flushSave);
 onBeforeUnmount(() => window.removeEventListener("pagehide", flushSave));
+
+/**
+ * 設定の列数（`SettingsForm`と同じ表`settingsLayout.ts`を読む）。カードの幅はこれで決める——親（`.status.idle`）は
+ * 中身の幅に縮むので%が効かず、固定幅でないとカードも縮む（D22/D23で踏んだ）。狭い画面は`max-width`で縮み、
+ * フォームの`grid`が1列へ折り返す（D24）
+ */
+const settingsColumns = computed(() => settingsColumnsOf(props.app).length);
+const cardWidth = computed(() => `${settingsColumns.value * 300 + 48}px`);
 
 /** 接続先のホストが決まっているか（入力中の値を優先） */
 const hasHost = computed(() => ((draft.value ?? embedStore.loaded)?.host ?? "").trim() !== "");
@@ -323,10 +358,14 @@ function saveScreenHtml(): void {
       <!-- 待機表示: 何の機能か・どこへ繋ぐかを出す（D19）。エラーもここに出す——ボタンと別分岐にすると
            失敗後に押し直せない（D17） -->
       <div v-else class="status idle">
-        <div class="idle-card">
+        <div class="idle-card" :style="{ width: cardWidth }">
           <div class="kind">{{ idleInfo.kind }}</div>
           <p class="desc">{{ idleInfo.desc }}</p>
-          <p v-if="embedStore.loaded?.title" class="file">{{ embedStore.loaded.title }}.ts5250</p>
+          <p v-if="embedStore.loaded?.title" class="file">
+            {{ embedStore.loaded.title }}.ts5250
+            <!-- 保存ボタンは無い——編集は自動で保存される。そのことと結果をここに出す（D24） -->
+            <span class="save-state" role="status">{{ saveStateLabel || "設定は編集すると自動で保存されます" }}</span>
+          </p>
           <!-- ボタンは設定の上——設定済みなら押すだけのことが多く、欄（透かし等）が多いと下はスクロールしないと見えない -->
           <p v-if="idleError" class="error">{{ idleError }}</p>
           <button class="connect-btn" :disabled="!hasHost" :title="hasHost ? '' : 'ホストを入力してください'" @click="requestConnect">{{ openLabel }}</button>
@@ -397,8 +436,7 @@ function saveScreenHtml(): void {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  /* 親（.status.idle）は中身の幅に縮むので%は効かない——幅は固定し、狭い画面では親のmax-widthで縮める */
-  width: 460px;
+  /* 幅は列数から`:style`で与える（`cardWidth`）。狭い画面では親のmax-widthで縮める */
   max-width: 100%;
   box-sizing: border-box;
   padding: 18px 24px;
@@ -417,6 +455,13 @@ function saveScreenHtml(): void {
 .idle-card .file {
   margin: 0;
   font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+}
+.idle-card .save-state {
+  color: var(--muted);
 }
 .idle-card .error {
   margin: 0;
