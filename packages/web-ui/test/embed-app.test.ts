@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 
@@ -31,6 +31,7 @@ beforeEach(() => {
   openSession.mockClear();
   closeSession.mockClear();
   downloadScreenHtml.mockClear();
+  embedStore.loaded = undefined;
   embedStore.connect = undefined;
   embedStore.error = undefined;
 });
@@ -96,11 +97,162 @@ describe("EmbedApp: app種別ごとのマウント分岐", () => {
     expect(pane.props("tabId")).toBe("ifs:files@own:ifs1");
   });
 
-  it("systemRef未到着の間はプレーンなペインを出さず待機表示のまま", async () => {
+  it("systemRef未到着の間はプレーンなペインを出さず、接続ボタンの待機表示のまま", async () => {
     const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
     await nextTick();
     expect(w.findComponent(SqlPane).exists()).toBe(false);
-    expect(w.text()).toContain("設定を待っています");
+    expect(w.find(".connect-btn").exists()).toBe(true);
+  });
+});
+
+/**
+ * **`.ts5250`を開いても即座に接続しない**（利用者の要望「設定だけを変えたい場合にも
+ * 接続されてしまう」への対応。`20260924-vscode-extension` D17）。実際に接続するのは
+ * 利用者が「接続」ボタンを押して`{type:"connect"}`を拡張ホストへ送り、その応答
+ * （`embedStore.connect`）を受け取ってから
+ */
+describe("EmbedApp: 接続は明示的な「接続」ボタンから", () => {
+  function stubParentPostMessage(): ReturnType<typeof vi.fn> {
+    const post = vi.fn();
+    vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage: post } as unknown as Window);
+    return post;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("emulator: loadedが届いてもopenSession()は呼ばれず、接続ボタンにホストが見える", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" }; // readyの応答相当（接続しない）
+    await nextTick();
+    expect(openSession).not.toHaveBeenCalled();
+    expect(w.findComponent(EmulatorPane).exists()).toBe(false);
+    expect(w.text()).toContain("AS400");
+    const btn = w.find(".connect-btn");
+    expect(btn.exists()).toBe(true);
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("ホスト未設定（loadedのhostが空）だと接続ボタンを無効化する", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "" };
+    await nextTick();
+    expect((w.find(".connect-btn").element as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("接続ボタンを押すと、拡張ホストへ {type:'connect'}（payload無し）を送る", async () => {
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await w.get(".connect-btn").trigger("click");
+    expect(post).toHaveBeenCalledWith({ type: "connect" }, "*");
+  });
+
+  it("接続ボタン押下の応答（connectメッセージ）が来て初めてopenSession()が呼ばれる", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" };
+    await nextTick();
+    expect(openSession).not.toHaveBeenCalled();
+    embedStore.connect = { app: "emulator", host: "AS400" }; // 拡張ホストからの応答
+    await nextTick();
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1);
+    expect(w.findComponent(EmulatorPane).exists()).toBe(true);
+  });
+
+  it("printer/sql/ifs: loadedだけではペインを出さず、connectで初めて出す", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "sql", host: "AS400", systemRef: "own:xyz" };
+    await nextTick();
+    expect(w.findComponent(SqlPane).exists()).toBe(false); // loadedだけでは出ない
+    embedStore.connect = { app: "sql", host: "AS400", systemRef: "own:xyz" };
+    await nextTick();
+    expect(w.findComponent(SqlPane).exists()).toBe(true);
+  });
+
+  it("設定を保存しただけ（savedメッセージ）では接続しない", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" };
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    expect(w.findComponent(EmulatorPane).exists()).toBe(true);
+    openSession.mockClear();
+    // saved相当: loadedだけ更新（EmbedAppは直接connectを書き換えないので、initEmbedBridge経由の
+    // 実際の挙動をここではembedStore.loadedの更新のみで模す——connectは変えない）
+    embedStore.loaded = { app: "emulator", host: "AS400", port: 992 };
+    await nextTick();
+    expect(openSession).not.toHaveBeenCalled(); // 再接続されない
+  });
+});
+
+describe("EmbedApp: 切断ボタン", () => {
+  it("接続していないときは出さない", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    await nextTick();
+    expect(w.find(".embed-header button[title='切断する']").exists()).toBe(false);
+  });
+
+  it("emulator接続中は「切断」を出し、押すとcloseSession()して待機表示へ戻る", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    expect(w.findComponent(EmulatorPane).exists()).toBe(true);
+    const disconnectBtn = w.find(".embed-header button[title='切断する']");
+    expect(disconnectBtn.exists()).toBe(true);
+    await disconnectBtn.trigger("click");
+    expect(closeSession).toHaveBeenCalledWith("s-embed-1");
+    expect(w.findComponent(EmulatorPane).exists()).toBe(false);
+    expect(w.find(".connect-btn").exists()).toBe(true); // 待機表示（接続ボタン）へ戻る
+  });
+
+  it("切断のあと、もう一度「接続」の応答が来れば開き直せる", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" };
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    await w.get(".embed-header button[title='切断する']").trigger("click");
+    openSession.mockClear();
+    openSession.mockResolvedValueOnce("s-embed-2");
+    embedStore.connect = { app: "emulator", host: "AS400" }; // 再度の接続ボタン押下への応答
+    await nextTick();
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1);
+    expect(w.findComponent(EmulatorPane).props("sessionId")).toBe("s-embed-2");
+  });
+
+  it("接続に失敗したら、エラーと一緒に「接続」ボタンを出す（押し直せる）", async () => {
+    openSession.mockRejectedValueOnce(new Error("SESSION_CLOSED: 8902 装置が使用中です"));
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "AS400" };
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    await nextTick();
+    expect(w.text()).toContain("8902");
+    const btn = w.find(".connect-btn");
+    expect(btn.exists()).toBe(true);
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("保存エラー（embedStore.error）が出ていても「接続」ボタンは出す", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "sql", host: "AS400" };
+    embedStore.error = "保存に失敗しました。";
+    await nextTick();
+    expect(w.text()).toContain("保存に失敗しました");
+    expect(w.find(".connect-btn").exists()).toBe(true);
+  });
+
+  it("printer/sql/ifsの切断は systemRef（embedStore.connect）を捨ててペインをアンマウントする", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "sql", host: "AS400", systemRef: "own:xyz" };
+    await nextTick();
+    expect(w.findComponent(SqlPane).exists()).toBe(true);
+    await w.get(".embed-header button[title='切断する']").trigger("click");
+    expect(w.findComponent(SqlPane).exists()).toBe(false);
   });
 });
 

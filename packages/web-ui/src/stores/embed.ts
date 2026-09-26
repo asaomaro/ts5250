@@ -16,9 +16,19 @@ import type { ConnectPayload, HostToWebviewMessage, WebviewToHostMessage } from 
  * ネットワーク境界＝loopback限定を信頼の前提とする設計）と同じ前提の上に立つ。
  */
 export const embedStore = reactive<{
+  /**
+   * ファイルの現在値（表示・設定フォームの初期値用）。**接続の合図ではない**——
+   * `ready`/`saved`で更新されるが、これだけでは`EmbedApp.vue`は何も開かない
+   * （`20260924-vscode-extension` D17）。
+   */
+  loaded: ConnectPayload | undefined;
+  /**
+   * 実際に接続する合図。利用者が「接続」ボタンを押し拡張ホストが解決し終えたときだけ
+   * 立つ——`EmbedApp.vue`はこれの変化だけを見て`openSession()`/REST参照の解決を行う。
+   */
   connect: ConnectPayload | undefined;
   error: string | undefined;
-}>({ connect: undefined, error: undefined });
+}>({ loaded: undefined, connect: undefined, error: undefined });
 
 /**
  * 拡張ホストへ送る。**トップレベルで直接開かれた場合（親フレームが無い）は何もしない**——
@@ -51,9 +61,18 @@ export function initEmbedBridge(): void {
     const msg = ev.data as HostToWebviewMessage | undefined;
     if (!msg || typeof msg !== "object" || !("type" in msg)) return;
     switch (msg.type) {
-      case "connect":
+      case "loaded":
       case "saved":
+        // **`connect`には触らない**——ファイルを開いた／保存しただけでは接続しない
+        // （`20260924-vscode-extension` D17）。表示・設定フォームの初期値だけ更新する
         if (!isConnectPayload(msg.payload)) return;
+        embedStore.loaded = msg.payload;
+        embedStore.error = undefined;
+        break;
+      case "connect":
+        // 「接続」ボタン押下に応えて拡張ホストが解決した値——ここで初めて実接続する
+        if (!isConnectPayload(msg.payload)) return;
+        embedStore.loaded = msg.payload;
         embedStore.connect = msg.payload;
         embedStore.error = undefined;
         break;

@@ -482,3 +482,48 @@ Playwrightの最小再現で実証したが、実際のVSCode拡張ホスト（�
 - `aidev smoke` — pass
 - 後始末: 検証用の一時サーバープロセス・一時接続設定ファイル・Playwrightスクリプト・
   一時ディレクトリは全て削除済み（PUB400への実接続以外、リポジトリへの副作用なし）。
+
+## ラウンド16（PR #414マージ後・利用者の要望「開いただけで接続しない／明示的な接続・切断ボタン」への対応）
+
+`decisions.md` D17。ブランチ`feature/vscode-extension-explicit-connect`。
+
+- `cd vscode-extension && npx tsc -b && npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **80 passed / 0 failed**（13 files）。
+  初回の全体実行で`serviceManager.integration.test.ts`の1件が実サーバー起動のタイムアウト（20秒）で
+  failしたが、単独再実行・全体再実行とも成功。実プロセスを起こす既存テストの環境依存の揺れで、
+  本変更（メッセージの配線）はこのテストの経路に触れていない。
+
+```
+ FAIL  test/serviceManager.integration.test.ts > ServiceManager 実プロセス統合 > acquireで実際にサーバーが起動し、healthzに到達し、releaseでプロセスが止まる
+Error: サーバーが起動しませんでした（port 34001）。「ts5250」出力パネルにエラーが出ていないか確認してください
+ Test Files  1 failed | 12 passed (13)
+      Tests  1 failed | 79 passed (80)
+（単独再実行: 2 passed / 全体再実行: 80 passed）
+```
+
+- `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 成功
+- `cd packages/web-ui && npx vitest run` — **2723 passed / 0 failed**（210 files）
+- **mutation検証**: (1) `stores/embed.ts`で`loaded`/`saved`も`connect`を立てる旧挙動に戻す→
+  `embed-store.test.ts`3件fail。(2) `EmbedApp.vue`の`disconnect()`を空にする→切断テスト2件fail。いずれも復元確認済み。
+- **実機（PUB400、Playwright。拡張shellの中継を模した最小shell）**:
+
+```
+1) 開いた直後: sent= [ 'ready' ] server sessions= 0 connectBtn= 1 pane= 0
+2) 接続後: sent= [ 'ready', 'connect' ] server sessions= 1 disconnectBtn= 1
+3) 切断後: server sessions= 0 connectBtn= 1 pane= 0
+```
+
+  「切断」を押さずにタブを閉じた場合（利用者の質問「ファイルを閉じればOKか」の裏取り）:
+
+```
+3) 閉じて2秒後: server sessions= 1
+3) 閉じて30秒後: server sessions= 1
+3) 閉じて60秒後: server sessions= 1
+3) 閉じて95秒後: server sessions= 0
+```
+
+- `aidev smoke` — pass
+- 後始末: 一時サーバー・一時ファイル・Playwrightスクリプトは削除済み。
+
+**未検証の穴**: 実際のVSCode拡張ホスト上での「接続」「切断」ボタンの操作は未確認（既存の環境制約）。
+拡張ホスト↔WebViewの中継は`webviewHtml.ts`のshellと同じ振り分けを模した最小shellで確認した。

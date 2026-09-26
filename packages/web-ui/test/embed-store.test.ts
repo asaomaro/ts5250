@@ -30,21 +30,47 @@ describe("initEmbedBridge", () => {
   const fromParent = (data: unknown) => new MessageEvent("message", { data, source: window });
 
   beforeEach(() => {
+    embedStore.loaded = undefined;
     embedStore.connect = undefined;
     embedStore.error = undefined;
   });
 
-  it("connect メッセージで embedStore.connect を更新する", () => {
+  /**
+   * **`loaded`/`saved`は接続の合図ではない**（`20260924-vscode-extension` D17。
+   * ファイルを開く／保存しただけでは接続しない、という利用者の要望）。
+   * `connect`（「接続」ボタン押下に応えた拡張ホストからの応答）だけが
+   * `embedStore.connect`を立てる。
+   */
+  it("loaded メッセージは embedStore.loaded だけを更新し、connect には触れない", () => {
     const payload = { app: "emulator" as const, host: "h1" };
-    window.dispatchEvent(fromParent({ type: "connect", payload }));
-    expect(embedStore.connect).toEqual(payload);
+    window.dispatchEvent(fromParent({ type: "loaded", payload }));
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.connect).toBeUndefined();
     expect(embedStore.error).toBeUndefined();
   });
 
-  it("saved メッセージも connect と同じ扱い", () => {
+  it("connect メッセージは embedStore.connect と embedStore.loaded の両方を更新する", () => {
+    const payload = { app: "emulator" as const, host: "h1" };
+    window.dispatchEvent(fromParent({ type: "connect", payload }));
+    expect(embedStore.connect).toEqual(payload);
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.error).toBeUndefined();
+  });
+
+  it("saved メッセージは embedStore.loaded だけを更新し、connect には触れない（保存しただけでは接続しない）", () => {
     const payload = { app: "sql" as const, host: "h2", systemRef: "own:1" };
     window.dispatchEvent(fromParent({ type: "saved", payload }));
-    expect(embedStore.connect).toEqual(payload);
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.connect).toBeUndefined();
+  });
+
+  it("saved は既に接続中（connectが立っている）でもconnectを上書きしない", () => {
+    const connected = { app: "sql" as const, host: "h1", systemRef: "own:1" };
+    window.dispatchEvent(fromParent({ type: "connect", payload: connected }));
+    const savedLater = { app: "sql" as const, host: "h2", systemRef: "own:1" };
+    window.dispatchEvent(fromParent({ type: "saved", payload: savedLater }));
+    expect(embedStore.connect).toEqual(connected); // 接続中のセッションはsaveで変わらない
+    expect(embedStore.loaded).toEqual(savedLater); // 表示用の値だけ最新化される
   });
 
   it("saveError/fileInvalid メッセージで embedStore.error を更新する", () => {

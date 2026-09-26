@@ -815,3 +815,47 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   `vscode-extension/src/protocol.ts`・`vscode-extension/src/schema.ts`・
   `vscode-extension/src/ts5250EditorProvider.ts`を変更。関連テストを新設・拡充。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D17: `.ts5250`を開いても自動接続しない——明示的な「接続」「切断」ボタンにする
+
+- **背景**: 利用者から「`.ts5250`ファイルを開くと即座に接続するので、設定だけを変えたい場合にも
+  接続されてしまう。接続は接続ボタンを明示的にクリックするようにする。切断はファイルを閉じればOKか？
+  明示的な切断ボタンを作っても良い」との要望・質問。PR #414（マージ済み）の後続作業のため、
+  新ブランチ`feature/vscode-extension-explicit-connect`で行った。
+- **調査で判明した事実**（推測で答えない）:
+  - 自動接続の発生源は2つあった: (1) WebViewの`ready`に拡張ホストが即`connect`を返していた
+    （`ts5250EditorProvider.ts`）、(2) 設定保存後の`saved`も`embedStore.connect`を書き換えており、
+    `EmbedApp.vue`のwatchが**保存のたびに再接続**していた。さらに(1)(2)とも`syncSystem`
+    （サーバーへの個人設定登録）まで走っていた——「開いただけ」「保存しただけ」でサーバー側の状態が変わっていた。
+  - **「ファイルを閉じれば切断」は即時ではない**。閉じるとWebSocketが明示的な`close`無しに落ち、
+    サーバーは「転送断」として扱い再接続の猶予（`DEFAULT_RECONNECT_GRACE_MS = 90_000`。
+    `packages/server/src/session-manager.ts:128`、判定は`session-lifetime.ts`の`decideDisposition`）の間
+    セッション＝装置を保持する。**PUB400で実測**: 閉じて2/30/60秒後はサーバーのセッション数1、95秒後に0。
+    一方、`closeSession()`（`{type:"close"}`を送る）なら即座に0になる——明示的な切断ボタンには実益がある。
+- **決定**:
+  1. **プロトコル**（`embed-protocol.ts`/`protocol.ts`。手で同期を保つ複製、`protocol-sync.test.ts`で固定）:
+     拡張→WebViewに`loaded`（表示・設定フォーム初期値用、接続しない）を追加。WebView→拡張に
+     `{type:"connect"}`（接続ボタン押下。payload無し）を追加。
+  2. **`ts5250EditorProvider.ts`**: `ready`→`sendLoaded`（`buildDisplayPayload`。**`syncSystem`を呼ばない**）。
+     `connect`要求→従来の`sendConnect`（`resolvePayload`で`syncSystem`まで解決）。`handleSave`も
+     `buildDisplayPayload`で`saved`を返し`syncSystem`を呼ばない（不要になった`localPort`引数を削除）。
+     `buildDisplayPayload`は**emulator以外のuser/passwordを剥離する**——`syncSystem`経路（`resolvePayload`）が
+     担っていた剥離をこちらでも行わないと、平文がWebViewへ漏れる（taskcheck T2の不変条件を維持）。
+  3. **`stores/embed.ts`**: `loaded`フィールドを新設。`loaded`/`saved`は`embedStore.loaded`だけを更新し
+     `connect`に触らない。`connect`だけが`embedStore.connect`（＝実接続の合図）を立てる。
+  4. **`EmbedApp.vue`**: 待機表示にホスト名と「接続」ボタン（ホスト未設定なら無効）。接続中はヘッダーに
+     「切断」ボタン——emulatorは`closeSession()`、printer/sql/ifsは`embedStore.connect`を空にしてペインを
+     アンマウント。設定フォームの初期値は`connect ?? loaded`。
+  5. **接続中に設定を保存しても自動再接続しない**——新しい設定は「切断」→「接続」で反映する
+     （「明示的な操作でだけ接続が変わる」を一貫させる）。
+- **検証**:
+  - mutation 2件: `saved`/`loaded`が`connect`も立てる旧挙動へ戻すと`embed-store.test.ts`3件がfail／
+    `disconnect()`を空にすると`embed-app.test.ts`の切断2件がfail——いずれも確認後に復元。
+  - `vscode-extension` 80 passed（`serviceManager.integration.test.ts`が全体実行時に1回だけ起動タイムアウト、
+    単独再実行・全体再実行とも成功——実プロセスを起こす既存テストの環境依存の揺れで本変更と無関係）。
+    `packages/web-ui` 2723 passed。`vue-tsc`/`tsc -b`/`vite build` green。
+  - **実機（PUB400、Playwright＋shell中継を模した最小shell）**: 開いた直後 送信=`[ready]`・サーバーの
+    セッション数0・接続ボタンあり → 接続 → セッション数1・切断ボタンあり → 切断 → **即座に**セッション数0・
+    接続ボタンに戻る。別途「切断を押さずタブを閉じる」と95秒後まで1のまま（上記）。
+- **影響**: `packages/web-ui/src/{EmbedApp.vue,embed-protocol.ts,stores/embed.ts}`・
+  `vscode-extension/src/{protocol.ts,ts5250EditorProvider.ts}`と関連テスト3ファイル。

@@ -10,6 +10,12 @@
  *
  * `app` はURLクエリ（`embed.html?app=emulator`）で渡す（非秘匿・iframe初期ロード時に必要）。
  * `user`/`password` はURLに乗せず、`ready` ハンドシェイク後の `connect` メッセージでのみ渡す。
+ *
+ * **`ready`は`connect`を自動発火しない**（`20260924-vscode-extension` D17。利用者の要望
+ * 「設定だけを変えたい場合にも接続されてしまう」への対応）。`ready`が受け取るのは
+ * `loaded`（ファイルの現在値。表示・設定フォームの初期値用。**接続はしない**）だけで、
+ * 実際に接続する（`connect`）のは利用者が明示的に「接続」ボタンを押し、WebViewが
+ * `{ type: "connect" }`（payload無し）を送り返したときだけ。
  */
 
 export type EmbedAppKind = "emulator" | "printer" | "sql" | "ifs";
@@ -32,6 +38,9 @@ export interface WatermarkValue {
 
 /** 拡張ホスト → WebView（shellを素通しして embed.html まで届く） */
 export type HostToWebviewMessage =
+  /** ファイルを開いた直後・保存直後。**接続はしない**——表示・設定フォームの初期値用 */
+  | { type: "loaded"; payload: ConnectPayload }
+  /** 「接続」ボタン押下に応えて実際に接続する */
   | { type: "connect"; payload: ConnectPayload }
   | { type: "saved"; payload: ConnectPayload }
   | { type: "saveError"; message: string }
@@ -40,6 +49,8 @@ export type HostToWebviewMessage =
 /** WebView（embed.html） → 拡張ホスト（shellを素通しして拡張ホストまで届く） */
 export type WebviewToHostMessage =
   | { type: "ready" }
+  /** 「接続」ボタン押下。payloadは無い——拡張ホストは既にファイルを持っている */
+  | { type: "connect" }
   | { type: "save"; payload: SettingsFormValues }
   | { type: "openExternal"; url: string };
 

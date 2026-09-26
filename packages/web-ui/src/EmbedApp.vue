@@ -122,8 +122,34 @@ watch(
   { immediate: true }
 );
 
+/**
+ * 「接続」ボタンを出すか。emulatorは`sessionId`、printer/sql/ifsは`restTarget`が
+ * 真になっている＝接続済み（`20260924-vscode-extension` D17）
+ */
+const isActive = computed(() => (props.app === "emulator" ? !!sessionId.value : !!restTarget.value));
+
+/** 「接続」ボタン押下。拡張ホストへ接続要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch */
+function requestConnect(): void {
+  postToHost({ type: "connect" });
+}
+
+/**
+ * 「切断」ボタン押下。emulatorはセッションを閉じ、printer/sql/ifsは`systemRef`を捨てて
+ * ペインをアンマウントする（`embedStore.connect`を空にするだけで`restTarget`が
+ * 自然に`undefined`へ戻る）。**ファイルの内容は変えない**——`embedStore.loaded`は
+ * 触らないので、次に「接続」を押せば同じ設定でまた開ける
+ */
+function disconnect(): void {
+  if (props.app === "emulator" && sessionId.value) {
+    closeSession(sessionId.value);
+    sessionId.value = undefined;
+  }
+  embedStore.connect = undefined;
+  connectError.value = undefined;
+}
+
 const settingsInitial = computed<SettingsFormValues>(() => {
-  const c = embedStore.connect;
+  const c = embedStore.connect ?? embedStore.loaded;
   const v: SettingsFormValues = { host: c?.host ?? "" };
   if (c?.port !== undefined) v.port = c.port;
   if (c?.tls !== undefined) v.tls = c.tls;
@@ -166,6 +192,8 @@ function saveScreenHtml(): void {
       >
         ⬇ HTML
       </button>
+      <!-- 切断（利用者の要望。`20260924-vscode-extension` D17）。接続中だけ出す -->
+      <button v-if="isActive" class="settings-btn" title="切断する" @click="disconnect">切断</button>
       <ViewSettingsMenu
         v-if="viewMenuTarget"
         :key="viewMenuTarget.sessionId"
@@ -179,17 +207,23 @@ function saveScreenHtml(): void {
       <template v-if="app === 'emulator'">
         <EmulatorPane v-if="sessionId" :session-id="sessionId" :focused="true" />
         <p v-else-if="connecting" class="status">接続中…</p>
-        <p v-else-if="connectError" class="status error">{{ connectError }}</p>
-        <p v-else-if="embedStore.error" class="status error">{{ embedStore.error }}</p>
-        <p v-else class="status">設定を待っています…</p>
+        <!-- エラーは待機表示の中に出す——ボタンと別分岐にすると、失敗後に「接続」を押し直せない -->
+        <div v-else class="status idle">
+          <p v-if="connectError || embedStore.error" class="error">{{ connectError ?? embedStore.error }}</p>
+          <p>{{ embedStore.loaded?.host || "「⚙ 設定」でホストを設定してください" }}</p>
+          <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">接続</button>
+        </div>
       </template>
       <template v-else-if="restTarget">
         <SpoolPane v-if="app === 'printer'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <SqlPane v-else-if="app === 'sql'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <IfsPane v-else :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
       </template>
-      <p v-else-if="embedStore.error" class="status error">{{ embedStore.error }}</p>
-      <p v-else class="status">設定を待っています…</p>
+      <div v-else class="status idle">
+        <p v-if="embedStore.error" class="error">{{ embedStore.error }}</p>
+        <p>{{ embedStore.loaded?.host || "「⚙ 設定」でホストを設定してください" }}</p>
+        <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">接続</button>
+      </div>
     </div>
     <SettingsForm v-if="showSettings" :initial="settingsInitial" :app="app" @save="onSave" @cancel="showSettings = false" />
   </div>
@@ -232,7 +266,28 @@ function saveScreenHtml(): void {
   font-size: 13px;
   color: var(--muted);
 }
-.status.error {
+.status .error {
   color: var(--t-red, #e06c6c);
+}
+.status.idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.connect-btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 20px;
+  border-radius: 6px;
+  border: 1px solid var(--t-green, #4caf6a);
+  background: transparent;
+  color: var(--t-green, #4caf6a);
+  cursor: pointer;
+}
+.connect-btn:disabled {
+  border-color: var(--crt-line, #333);
+  color: var(--muted);
+  cursor: default;
 }
 </style>

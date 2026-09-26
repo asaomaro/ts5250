@@ -500,3 +500,28 @@ coding工程で`cross`のtaskcheckラウンド上限に達しているため、�
 バグは、review到達前にこの作業自身の中で発見・修正・検証済みのため、
 review指摘としては数えない——protocol.md「8.」の「タスク点検で潰れた欠陥は
 ラウンド指摘と母集団が違う」と同じ整理）。
+
+## ラウンド16（PR #414マージ後・利用者の要望「開いただけで接続しない／明示的な接続・切断ボタン」への対応）
+
+`decisions.md` D17。coding工程で`cross`のtaskcheckラウンド上限に達しているため、独立点検はこのreview工程が担う。
+
+- **要件適合**: requirementsのAC対象外（利用者の直接の要望）。被覆に変化なし。
+- **価値適合**: 利用者の質問「切断はファイルを閉じればOKか」に**推測で答えず実測した**（閉じると95秒後まで
+  サーバーがセッション＝装置を保持。切断ボタンなら即時解放）。切断ボタンを足す根拠が数値で残っている。
+  自動接続の発生源が`ready`だけでなく**保存後の`saved`にもあった**ことまで突き止めて両方を塞いでいる。
+- **正確性**:
+  - [must][conv:-] `packages/web-ui/src/EmbedApp.vue` 接続失敗（`connectError`）・保存失敗（`embedStore.error`）の
+    ときエラー文だけを別分岐で出し、「接続」ボタンが消えていた——失敗後に押し直す手段が無く、ファイルを
+    開き直すしかなかった（以前は保存のたびの自動再接続がこの穴を隠していた）。 / 対応: エラーを待機表示の
+    中に出し、ボタンと同居させた。回帰テスト2件（接続失敗・保存失敗でもボタンが出る）を追加し、旧レイアウトに
+    戻すとfailすることをmutationで確認。
+  - `buildDisplayPayload`がemulator以外のuser/passwordを剥離している（`syncSystem`経路を通らなくなったぶん
+    ここで剥がさないと平文がWebViewへ漏れる）——taskcheck T2の不変条件を新経路でも維持していることを
+    テスト（`loaded`/`saved`の両方）で確認。
+  - 切断→再接続の往復（`sessionId`が空になった後に次の`connect`で開き直せる）をテストで追加確認。
+- **保守性**: プロトコルの追加は2つの複製へ同一差分で入れ、`protocol-sync.test.ts`で固定
+  （`paired-artifact-sync`）。`parseOrInvalid`で`sendLoaded`/`sendConnect`の重複を1か所にまとめた。
+- **検証**: `vscode-extension` 80 passed・`packages/web-ui` 2726 passed・実機（PUB400）で
+  開く→0／接続→1／切断→即0を確認。
+
+指摘1件（must、この工程で修正・mutation検証済み）。

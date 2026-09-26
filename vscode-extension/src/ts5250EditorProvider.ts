@@ -59,6 +59,11 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
       const msg = raw as WebviewToHostMessage;
       if (!msg || typeof msg !== "object" || !("type" in msg)) return;
       if (msg.type === "ready") {
+        // **接続はしない**——ファイルの現在値を表示・設定フォームの初期値用に送るだけ
+        // （`decisions.md` D17。「接続」ボタンを押すまで実際には繋がない）
+        await sendLoaded(webviewPanel.webview, document, this.deps);
+      } else if (msg.type === "connect") {
+        // 利用者が明示的に「接続」ボタンを押した——ここで初めてsyncSystem等の実接続処理を行う
         await sendConnect(webviewPanel.webview, document, port, this.deps);
       } else if (msg.type === "save") {
         // **形（shape）を見てから渡す。** `postMessage`の中身はWebView側のJSが組み立てた
@@ -69,7 +74,7 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
         if (!isSettingsFormValues(msg.payload)) {
           post(webviewPanel.webview, { type: "saveError", message: "保存内容の形式が不正です。" });
         } else {
-          await handleSave(webviewPanel.webview, document, port, msg.payload, this.deps);
+          await handleSave(webviewPanel.webview, document, msg.payload, this.deps);
         }
       } else if (msg.type === "openExternal") {
         try {
@@ -97,19 +102,40 @@ function isSettingsFormValues(v: unknown): v is SettingsFormValues {
   return typeof v === "object" && v !== null && typeof (v as { host?: unknown }).host === "string";
 }
 
-/** `.ts5250`をパースし、パスワードを復号して`connect`メッセージを送る */
+/**
+ * `.ts5250`をパースする。壊れていれば`fileInvalid`を送って`undefined`を返す
+ * （`sendLoaded`/`sendConnect`で共有する。`decisions.md` D17）
+ */
+function parseOrInvalid(webview: vscode.Webview, document: vscode.TextDocument): Ts5250File | undefined {
+  const parsed = parseTs5250File(document.getText());
+  if (!parsed.ok) {
+    post(webview, { type: "fileInvalid", message: parsed.error });
+    return undefined;
+  }
+  return parsed.file;
+}
+
+/**
+ * ファイルを開いた直後・保存直後に送る**接続しない**表示用ペイロード（`decisions.md` D17）。
+ * `syncSystem`（サーバーへの個人設定登録）を呼ばない——利用者が「接続」ボタンを押すまで、
+ * ファイルを開いただけ／設定を変えただけでは何もサーバー側の状態を変えない
+ */
+async function sendLoaded(webview: vscode.Webview, document: vscode.TextDocument, deps: Ts5250EditorProviderDeps): Promise<void> {
+  const file = parseOrInvalid(webview, document);
+  if (!file) return;
+  post(webview, { type: "loaded", payload: buildDisplayPayload(file, deps.secretCrypto) });
+}
+
+/** 「接続」ボタン押下に応えて、実際にsyncSystem等の解決を行い`connect`を送る */
 async function sendConnect(
   webview: vscode.Webview,
   document: vscode.TextDocument,
   localPort: number,
   deps: Ts5250EditorProviderDeps
 ): Promise<void> {
-  const parsed = parseTs5250File(document.getText());
-  if (!parsed.ok) {
-    post(webview, { type: "fileInvalid", message: parsed.error });
-    return;
-  }
-  const payload = await resolvePayload(parsed.file, document, localPort, deps);
+  const file = parseOrInvalid(webview, document);
+  if (!file) return;
+  const payload = await resolvePayload(file, document, localPort, deps);
   post(webview, { type: "connect", payload });
 }
 
@@ -126,7 +152,7 @@ async function sendConnect(
  *   ためだけに使う。無くても接続自体は成立する
  * - printer(スプール表示)/sql/ifs: `user`/`password`は**送らない**
  *   （REST層はsystem参照を要求し、直接指定を受け付けないため）。`systemRef`が
- *   無いと対象ペインは「設定を待っています」のプレースホルダーのまま止まる
+ *   無いと対象ペインは開かず、「接続」ボタンの待機表示のまま止まる
  *
  * どちらも同期に失敗しても`connect`自体は送る——`systemRef`が無いまま
  * （emulatorなら画面は開くがメッセージ表示等は使えない、printer/sql/ifsなら
@@ -166,7 +192,7 @@ async function resolvePayload(
  *
  * **`passwordEnc`の復号に失敗しても呼び出し全体を失敗にしない**——`password`を省いた
  * ペイロードを返す。理由は2つ:
- * 1. `sendConnect`（ファイルを開いた直後）で失敗にすると、パスワード以外は正しい設定でも
+ * 1. `sendLoaded`/`sendConnect`で失敗にすると、パスワード以外は正しい設定でも
  *    画面が一切開けなくなる（自動サインオンが効かないだけで、手動サインオンの余地は残したい）
  * 2. `handleSave`（設定保存後）で失敗にすると、**`WorkspaceEdit`は既に成功して
  *    ファイルへ書き込み済みなのに、`saveError`（保存に失敗した、という意味の型）を送ることになり
@@ -198,11 +224,30 @@ function buildConnectPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
   return payload;
 }
 
-/** 設定フォームの保存: パスワードを暗号化し、`.ts5250`へ`WorkspaceEdit`で書き戻す */
+/**
+ * `buildConnectPayload`の表示用（`loaded`/`saved`）版。**`syncSystem`を呼ばない**分だけ
+ * `resolvePayload`と違う（`decisions.md` D17）。`user`/`password`の剥離は`resolvePayload`と
+ * 同じ判断（emulator以外はWebViewへ渡さない。REST層はsystem参照を要求し直接指定を
+ * 受け付けないため）——ここで剥離し忘れると、`syncSystem`を経ないぶん平文がそのまま
+ * WebViewへ渡ってしまう
+ */
+function buildDisplayPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): ConnectPayload {
+  const payload = buildConnectPayload(file, crypto);
+  if (file.app !== "emulator") {
+    delete payload.user;
+    delete payload.password;
+  }
+  return payload;
+}
+
+/**
+ * 設定フォームの保存: パスワードを暗号化し、`.ts5250`へ`WorkspaceEdit`で書き戻す。
+ * **`syncSystem`は呼ばない**（`decisions.md` D17）——保存は「接続」ボタンではないため、
+ * 設定を変えただけではサーバー側に何も登録しない
+ */
 async function handleSave(
   webview: vscode.Webview,
   document: vscode.TextDocument,
-  localPort: number,
   values: SettingsFormValues,
   deps: Ts5250EditorProviderDeps
 ): Promise<void> {
@@ -241,7 +286,7 @@ async function handleSave(
     return;
   }
 
-  post(webview, { type: "saved", payload: await resolvePayload(next, document, localPort, deps) });
+  post(webview, { type: "saved", payload: buildDisplayPayload(next, crypto) });
 }
 
 function failureHtml(message: string): string {

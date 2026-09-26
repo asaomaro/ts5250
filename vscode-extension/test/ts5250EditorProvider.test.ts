@@ -92,26 +92,27 @@ describe("resolveCustomTextEditor: 起動", () => {
   });
 });
 
-describe("ready → connect", () => {
-  it("readyを受けたら.ts5250の内容からconnectを送る", async () => {
+describe("ready → loaded（接続はしない。decisions.md D17）", () => {
+  it("readyを受けたら.ts5250の内容からloadedを送る（connectは送らない）", async () => {
     const { panel } = await setup('{"app":"emulator","host":"AS400","port":992}');
     panel.webview.fireMessage({ type: "ready" });
     await flush();
 
-    const connect = lastPostedOfType(panel, "connect");
-    expect(connect?.payload).toMatchObject({ app: "emulator", host: "AS400", port: 992 });
+    const loaded = lastPostedOfType(panel, "loaded");
+    expect(loaded?.payload).toMatchObject({ app: "emulator", host: "AS400", port: 992 });
+    expect(lastPostedOfType(panel, "connect")).toBeUndefined();
   });
 
-  it("passwordEncがあれば復号して平文をconnectへ乗せる", async () => {
+  it("passwordEncがあれば復号して平文をloadedへ乗せる", async () => {
     const { crypto, panel } = await setup("{}"); // 後で書き換える
     const enc = crypto.encrypt("hunter2");
     // 実際のファイル内容を差し替えて再度readyを発火させたいので、setupをやり直す形で検証
     const { panel: panel2 } = await setupWithCrypto(crypto, `{"app":"emulator","host":"H","signon":{"user":"U","passwordEnc":"${enc}"}}`);
     panel2.webview.fireMessage({ type: "ready" });
     await flush();
-    const connect = lastPostedOfType(panel2, "connect");
-    expect(connect?.payload.user).toBe("U");
-    expect(connect?.payload.password).toBe("hunter2");
+    const loaded = lastPostedOfType(panel2, "loaded");
+    expect(loaded?.payload.user).toBe("U");
+    expect(loaded?.payload.password).toBe("hunter2");
     void panel; // 未使用警告よけ（最初のsetupは鍵取得のためだけに使った）
   });
 
@@ -122,22 +123,38 @@ describe("ready → connect", () => {
     expect(lastPostedOfType(panel, "fileInvalid")).toBeDefined();
   });
 
-  it("passwordEncの復号に失敗しても、passwordを省いたconnectを送る（他のフィールドは活かす。saveErrorにはしない）", async () => {
+  it("passwordEncの復号に失敗しても、passwordを省いたloadedを送る（他のフィールドは活かす。saveErrorにはしない）", async () => {
     const { panel } = await setup('{"app":"emulator","host":"H","signon":{"user":"U","passwordEnc":"v1:aa:bb:cc"}}');
     panel.webview.fireMessage({ type: "ready" });
     await flush();
-    const connect = lastPostedOfType(panel, "connect");
-    expect(connect?.payload).toMatchObject({ host: "H", user: "U" });
-    expect(connect?.payload.password).toBeUndefined();
+    const loaded = lastPostedOfType(panel, "loaded");
+    expect(loaded?.payload).toMatchObject({ host: "H", user: "U" });
+    expect(loaded?.payload.password).toBeUndefined();
     expect(lastPostedOfType(panel, "saveError")).toBeUndefined();
+  });
+
+  it("emulator以外はloadedでもuser/passwordを剥離する（syncSystemを経ないぶん、ここで剥がさないと平文が漏れる）", async () => {
+    const { panel } = await setup('{"app":"sql","host":"AS400","signon":{"user":"U","passwordEnc":"v1:aa:bb:cc"}}');
+    panel.webview.fireMessage({ type: "ready" });
+    await flush();
+    const loaded = lastPostedOfType(panel, "loaded");
+    expect(loaded?.payload.user).toBeUndefined();
+    expect(loaded?.payload.password).toBeUndefined();
+  });
+
+  it("readyだけではsyncSystemを呼ばない（ファイルを開いただけでは何もサーバー側に登録しない）", async () => {
+    const { panel, syncSystem } = await setup('{"app":"sql","host":"AS400","signon":{"user":"U"}}');
+    panel.webview.fireMessage({ type: "ready" });
+    await flush();
+    expect(syncSystem).not.toHaveBeenCalled();
   });
 });
 
-describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D12）", () => {
+describe("接続ボタン → connect → systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D12。ボタン化はD17）", () => {
   it("emulator以外はsyncSystemを呼び、user/passwordを直接乗せずsystemRefを乗せる", async () => {
     const { panel, syncSystem } = await setup('{"app":"sql","host":"AS400","port":992,"signon":{"user":"U"}}');
     syncSystem.mockResolvedValueOnce("own:xyz");
-    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
     await flush();
 
     expect(syncSystem).toHaveBeenCalledTimes(1);
@@ -154,7 +171,7 @@ describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D
   it("syncSystemが失敗しても、systemRef無しのconnectを送り、logへ記録する（致命的に倒さない）", async () => {
     const { panel, syncSystem, log } = await setup('{"app":"ifs","host":"AS400"}');
     syncSystem.mockRejectedValueOnce(new Error("network down"));
-    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
     await flush();
 
     const connect = lastPostedOfType(panel, "connect");
@@ -166,7 +183,7 @@ describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D
   it("emulatorもsyncSystemを呼ぶが、user/passwordはconnectのpayloadに残したままsystemRefを併せて乗せる（D12: ステータスバーのメッセージ表示等、system参照を要求するREST機能のため）", async () => {
     const { panel, syncSystem } = await setup('{"app":"emulator","host":"AS400","signon":{"user":"U"}}');
     syncSystem.mockResolvedValueOnce("own:emu");
-    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
     await flush();
 
     expect(syncSystem).toHaveBeenCalledTimes(1);
@@ -182,7 +199,7 @@ describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D
   it("emulatorでsyncSystemが失敗しても、systemRef無しのconnectを送り接続自体は成立する（致命的に倒さない）", async () => {
     const { panel, syncSystem, log } = await setup('{"app":"emulator","host":"AS400"}');
     syncSystem.mockRejectedValueOnce(new Error("network down"));
-    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
     await flush();
 
     const connect = lastPostedOfType(panel, "connect");
@@ -199,7 +216,7 @@ describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D
       `{"app":"sql","host":"AS400","signon":{"user":"U","passwordEnc":"${enc}"}}`
     );
     syncSystem.mockResolvedValueOnce("own:xyz");
-    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
     await flush();
 
     const [, input] = syncSystem.mock.calls[0]!;
@@ -209,6 +226,13 @@ describe("systemRef解決（03-sql-ifs。emulatorへの拡張は`decisions.md` D
     expect(connect?.payload.user).toBeUndefined();
     expect(connect?.payload.password).toBeUndefined();
     expect(JSON.stringify(connect?.payload)).not.toContain("realSecret123");
+  });
+
+  it("appが未指定/JSONが壊れているファイルへの接続要求はfileInvalidを送る", async () => {
+    const { panel } = await setup("{not json");
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(lastPostedOfType(panel, "fileInvalid")).toBeDefined();
   });
 });
 
@@ -261,9 +285,13 @@ describe("save → WorkspaceEdit書き戻し → saved", () => {
     expect(applyEdit).not.toHaveBeenCalled();
   });
 
-  it("app!==emulator（sql）の保存は、暗号化して書き込んだ直後の平文をsyncSystemへ渡し、savedのpayloadからはuser/passwordを剥離する（taskcheck T2の指摘）", async () => {
+  /**
+   * **保存はsyncSystemを呼ばない**（`decisions.md` D17）——設定を変えただけでは
+   * サーバー側に何も登録しない。以前（D12まで）は保存直後にsyncSystemまで解決していたが、
+   * 「接続」ボタンを押すまで実接続しない、という利用者の要望でこの経路から外した
+   */
+  it("app!==emulator（sql）の保存は、暗号化して書き込むがsyncSystemは呼ばず、savedのpayloadからはuser/passwordを剥離する（taskcheck T2の指摘の踏襲。D17でsyncSystemは呼ばれなくなった）", async () => {
     const { panel, syncSystem } = await setup('{"app":"sql","host":"OLD"}');
-    syncSystem.mockResolvedValueOnce("own:xyz");
     panel.webview.fireMessage({
       type: "save",
       payload: { host: "NEW", user: "U", password: "freshSecret" }
@@ -275,16 +303,24 @@ describe("save → WorkspaceEdit書き戻し → saved", () => {
     const written = JSON.parse(edit.replacements[0]!.text) as { signon?: { passwordEnc?: string } };
     expect(written.signon?.passwordEnc?.startsWith("v1:")).toBe(true);
 
-    // syncSystemには今回保存した最新の平文が渡る（古いファイルの値ではない）
-    expect(syncSystem).toHaveBeenCalledTimes(1);
-    const [, input] = syncSystem.mock.calls[0]!;
-    expect(input).toMatchObject({ host: "NEW", user: "U", password: "freshSecret" });
+    // 保存だけではsyncSystemを呼ばない（D17）
+    expect(syncSystem).not.toHaveBeenCalled();
 
-    // WebViewへの`saved`payloadはsystemRefのみで、user/passwordは含まない
+    // WebViewへの`saved`payloadにはsystemRefも付かず（syncSystemを経ないため）、user/passwordも含まない
     const saved = lastPostedOfType(panel, "saved");
-    expect(saved?.payload.systemRef).toBe("own:xyz");
+    expect(saved?.payload.systemRef).toBeUndefined();
     expect(saved?.payload.user).toBeUndefined();
     expect(saved?.payload.password).toBeUndefined();
+  });
+
+  it("emulatorの保存はsyncSystemを呼ばない（D17。接続時のみ呼ぶ）", async () => {
+    const { panel, syncSystem } = await setup('{"app":"emulator","host":"OLD"}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW", user: "U", password: "secret" } });
+    await flush();
+    expect(syncSystem).not.toHaveBeenCalled();
+    const saved = lastPostedOfType(panel, "saved");
+    // emulatorはuser/passwordを剥離しない（WsOpen直接指定のため。既存の仕様のまま）
+    expect(saved?.payload).toMatchObject({ host: "NEW", user: "U", password: "secret" });
   });
 });
 
