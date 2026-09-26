@@ -36,7 +36,7 @@ export interface SessionMeta {
   autoSignon?: boolean;
   signonUser?: string;
   /**
-   * 直接接続（`configRef` を持たないセッション。VSCode拡張の`.ts5250`等）向けの
+   * 直接接続（`configRef` を持たないセッション。VSCode拡張の設定ファイル（`.ts5250emu`等）等）向けの
    * ウォーターマーク。**保存済みセッション設定経由（`configRef` あり）のときはここを見ない**
    * ——そちらは`EmulatorPane.vue`の`watermarkConfig`が`systemsStore.sessions`から直に引く
    * （`20260924-vscode-extension` D16）。

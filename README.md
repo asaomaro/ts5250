@@ -298,7 +298,7 @@ electron.bat --build    :: 強制再ビルドしてから作る
 - **アイコンは `electron/build/icon.ico` を使います。** electron-builder は `icon.ico` が無いと
   `icon.png` から自動変換しますが、その結果は 256×256 の 1 エントリだけになり、タスクバーや
   エクスプローラの 16・32px 表示が縮小のぼけになります。16〜256px を焼いた ico をコミットして
-  あります。アイコンはすべて（ファビコン・Electron の png / ico・VSCode 拡張と `.ts5250` ファイルの
+  あります。アイコンはすべて（ファビコン・Electron の png / ico・VSCode 拡張と設定ファイル（`.ts5250emu` 等）の
   アイコン）`packages/web-ui/scripts/gen-icons.mjs` の 1 つの定義から作ります。絵や色を変えたら
   `npm run gen:icons` で作り直してください（作り直し忘れは `packages/web-ui/test/app-icons.test.ts` が落とします）。
 - **ビルド前に `winCodeSign` キャッシュを整えます（`electron/scripts/seed-wincodesign.mjs`）。**

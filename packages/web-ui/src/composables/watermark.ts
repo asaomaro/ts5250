@@ -82,7 +82,7 @@ export function expandWatermarkText(text: string, vars: WatermarkVars): string {
  * 展開後の文字が空白だけ（`{user}` だけの指定でサインオン前、等）。
  *
  * **`cfg.text` の型を確かめてから使う。** サーバー設定・個人設定経由（`watermarkSchema`）は
- * `text: z.string().min(1)` で保証されるが、**VSCode拡張の`.ts5250`ファイル経由はスキーマ検証を
+ * `text: z.string().min(1)` で保証されるが、**VSCode拡張の設定ファイル（`.ts5250emu`等）ファイル経由はスキーマ検証を
  * 通らない**（`vscode-extension/src/schema.ts`の設計——手編集を許すため「JSONとして読めるか」
  * 以外は検証しない）。`{}` のような手編集の壊れた透かしがそのままここへ届きうるので、
  * `text.replace(...)` を`undefined`/数値等に対して呼んで例外にする前に弾く

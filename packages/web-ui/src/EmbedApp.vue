@@ -5,7 +5,7 @@
  *
  * 既存のワークスペースUI（`App.vue`）のタブ帯・システム切替・ランチャーは一切持たない。
  * `app`（emulator/printer/spool/sql/ifs）に応じて対象ペイン1つだけをマウントする。
- * 接続前の待機画面に`SettingsForm`を置き、編集はその場で`.ts5250`へ自動保存する（`decisions.md` D23。
+ * 接続前の待機画面に`SettingsForm`を置き、「保存」ボタン（または「接続」「開く」）で設定ファイル（`.ts5250emu`等）へ書く（`decisions.md` D23/D33。
  * 以前はヘッダーの⚙からポップアップで開いていた——接続中に設定を変えても反映できないので廃止した）。
  *
  * **接続経路がapp種別で違う**（design.md「設計方針3」。tasks工程での訂正・`decisions.md` D3）:
@@ -14,7 +14,7 @@
  * - spool/sql/ifs: 拡張ホストが個人設定へ登録した`systemRef`
  *   （`own:<id>`）を、そのまま対象ペインの`system` propへ渡す（REST層がsystem参照を要求するため）
  */
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import type { WsOpen } from "@ts5250/server";
 import EmulatorPane from "./components/EmulatorPane.vue";
 import PrinterPane from "./components/PrinterPane.vue";
@@ -31,7 +31,7 @@ import { makePaneTabId } from "./paneLabels.js";
 import { sessionsStore, type SessionMeta } from "./stores/sessions.js";
 import { featureOf } from "./features.js";
 import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
-import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
+import { EMBED_APP_EXTENSIONS, type EmbedAppKind, type SettingsFormValues } from "./embed-protocol.js";
 import { downloadScreenHtml } from "./screenExport.js";
 import { settingsColumnsOf } from "./settingsLayout.js";
 
@@ -158,78 +158,63 @@ const openLabel = computed(() => (isSession.value ? "接続" : "開く"));
 
 /**
  * 「接続」「開く」ボタン押下。拡張ホストへ要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch。
- * **間引き中の保存を先に送る**——拡張ホストはメッセージを順に処理するので、`save`→`connect`の順に届けば
- * 保存し終えたファイルで接続する（D23）
+ * **未保存の変更があれば先に保存を送る**（利用者の指定。D33）——拡張ホストはメッセージを順に処理するので、
+ * `save`→`connect`の順に届けば保存し終えたファイルで接続する（D23）
  */
 function requestConnect(): void {
-  flushSave();
+  save();
   postToHost({ type: "connect" });
 }
 
 /**
  * 設定フォームの入力中の値。**「接続」ボタンの可否と種類の表示はこちらを見る**——`embedStore.loaded`は
- * 保存（間引き）の往復が済むまで古い。ファイルが外で書き換えられたら（`loadedRev`が進む）捨てる
+ * 保存するまで古い。ファイルが外で書き換えられたら（`loadedRev`が進む）捨てる
  */
 const draft = ref<SettingsFormValues | undefined>();
+/** フォームに打ちかけの不正な値（ポート等）がある間は保存も接続もさせない（保存すると値が消える） */
+const draftInvalid = ref(false);
+/**
+ * 保存の状態。**保存は「保存」ボタン（または「接続」「開く」）を押したときだけ**（利用者の指定。D33。
+ * 以前は入力のたびに間引いて自動保存していた——1文字ごとに保存が走るのを嫌われた）
+ */
+const saveState = ref<"clean" | "dirty" | "saving" | "saved">("clean");
+const saveStateLabel = computed(
+  () => ({ clean: "", dirty: "未保存の変更があります", saving: "保存しています…", saved: "保存しました" })[saveState.value]
+);
 watch(
   () => embedStore.loadedRev,
   () => {
-    cancelPendingSave();
     draft.value = undefined;
+    draftInvalid.value = false;
+    saveState.value = "clean";
   }
-);
-
-/** 自動保存の間引き（ms）。1文字ごとにファイルへ書くと、VSCodeの元に戻す履歴が1文字単位になる */
-const SAVE_DEBOUNCE_MS = 400;
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
-let pendingSave: SettingsFormValues | undefined;
-
-/**
- * 自動保存の状態（D24）。保存ボタンが無いので、**保存されたかを画面に出す**——出さないと
- * 「接続を押したときに保存されるのか」が分からない（利用者の質問）
- */
-const saveState = ref<"idle" | "pending" | "saving" | "saved">("idle");
-const saveStateLabel = computed(() =>
-  ({ idle: "", pending: "変更を保存します…", saving: "保存しています…", saved: "自動保存しました" })[saveState.value]
 );
 watch(
   () => embedStore.savedRev,
   () => {
-    // 応答を待つ間に次の入力が来ていたら（pending）、そちらの表示を残す
+    // 応答を待つ間に次の入力が来ていたら（dirty）、そちらの表示を残す
     if (saveState.value === "saving") saveState.value = "saved";
   }
 );
 watch(
   () => embedStore.error,
   (e) => {
-    if (e !== undefined) saveState.value = "idle"; // 失敗はエラー欄が出す
+    if (e !== undefined && saveState.value === "saving") saveState.value = "dirty"; // 失敗はエラー欄が出す。変更は残っている
   }
 );
 
-function onFormChange(v: SettingsFormValues): void {
-  draft.value = v;
-  saveState.value = "pending";
-  pendingSave = v;
-  if (saveTimer !== undefined) clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+/** フォームの値が変わった（`undefined`＝打ちかけの不正な値がある）。ここでは書かない */
+function onFormChange(v: SettingsFormValues | undefined): void {
+  draftInvalid.value = v === undefined;
+  if (v) draft.value = v;
+  saveState.value = "dirty";
 }
-function cancelPendingSave(): void {
-  if (saveTimer !== undefined) clearTimeout(saveTimer);
-  saveTimer = undefined;
-  pendingSave = undefined;
-  if (saveState.value === "pending") saveState.value = "idle";
-}
-function flushSave(): void {
-  const v = pendingSave;
-  cancelPendingSave();
-  if (!v) return;
+/** 未保存の変更をファイルへ書く（拡張ホストの`handleSave`がディスクまで保存する） */
+function save(): void {
+  if (saveState.value !== "dirty" || draftInvalid.value || !draft.value) return;
   saveState.value = "saving";
-  postToHost({ type: "save", payload: v });
+  postToHost({ type: "save", payload: draft.value });
 }
-// タブを閉じる直前の入力も落とさない
-onBeforeUnmount(flushSave);
-window.addEventListener("pagehide", flushSave);
-onBeforeUnmount(() => window.removeEventListener("pagehide", flushSave));
 
 /**
  * 設定の列数（`SettingsForm`と同じ表`settingsLayout.ts`を読む）。カードの幅はこれで決める——親（`.status.idle`）は
@@ -362,15 +347,24 @@ function saveScreenHtml(): void {
           <div class="kind">{{ idleInfo.kind }}</div>
           <p class="desc">{{ idleInfo.desc }}</p>
           <p v-if="embedStore.loaded?.title" class="file">
-            {{ embedStore.loaded.title }}.ts5250
-            <!-- 保存ボタンは無い——編集は自動で保存される。そのことと結果をここに出す（D24） -->
-            <span class="save-state" role="status">{{ saveStateLabel || "設定は編集すると自動で保存されます" }}</span>
+            {{ embedStore.loaded.title }}{{ EMBED_APP_EXTENSIONS[app] }}
+            <span class="save-state" role="status">{{ saveStateLabel }}</span>
           </p>
           <!-- ボタンは設定の上——設定済みなら押すだけのことが多く、欄（透かし等）が多いと下はスクロールしないと見えない -->
           <p v-if="idleError" class="error">{{ idleError }}</p>
-          <button class="connect-btn" :disabled="!hasHost" :title="hasHost ? '' : 'ホストを入力してください'" @click="requestConnect">{{ openLabel }}</button>
-          <!-- 設定はここで編集し、その場で自動保存する（D23）。ファイルが読めないとき（loaded無し）は出さない
-               ——壊れたファイルを入力1つで上書きしないため -->
+          <div class="actions">
+            <!-- 保存は押したときだけ（D33）。「接続」「開く」は未保存の変更を保存してから繋ぐ -->
+            <button class="save-btn" :disabled="saveState !== 'dirty' || draftInvalid" @click="save">保存</button>
+            <button
+              class="connect-btn"
+              :disabled="!hasHost || draftInvalid"
+              :title="draftInvalid ? '入力に誤りがあります' : hasHost ? '' : 'ホストを入力してください'"
+              @click="requestConnect"
+            >
+              {{ openLabel }}
+            </button>
+          </div>
+          <!-- 設定はここで編集する。ファイルが読めないとき（loaded無し）は出さない——壊れたファイルを上書きしないため -->
           <SettingsForm v-if="embedStore.loaded" :key="embedStore.loadedRev" :initial="settingsInitial" :app="app" @change="onFormChange" />
         </div>
       </div>
@@ -506,6 +500,24 @@ function saveScreenHtml(): void {
   overflow-y: auto;
   padding: 12px 16px;
   box-sizing: border-box;
+}
+.idle-card .actions {
+  display: flex;
+  gap: 10px;
+}
+.save-btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 20px;
+  border-radius: 6px;
+  border: 1px solid var(--crt-line, #333);
+  background: transparent;
+  color: var(--fg, #d9e3da);
+  cursor: pointer;
+}
+.save-btn:disabled {
+  color: var(--muted);
+  cursor: default;
 }
 .connect-btn {
   font-family: var(--mono);

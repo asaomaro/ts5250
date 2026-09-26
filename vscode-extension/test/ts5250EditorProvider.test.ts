@@ -42,7 +42,22 @@ vi.mock("vscode", () => {
 import { Ts5250EditorProvider } from "../src/ts5250EditorProvider.js";
 import { ExtensionSecretCrypto } from "../src/secretCrypto.js";
 import { mockSecretStorage, mockTextDocument, mockWebviewPanel } from "./vscode-mock.js";
-import type { HostToWebviewMessage } from "../src/protocol.js";
+import { EMBED_APP_EXTENSIONS, EMBED_APP_KINDS, type EmbedAppKind, type HostToWebviewMessage } from "../src/protocol.js";
+
+/**
+ * テスト用のファイル名。**種別は拡張子で決まる**（D32）ので、テスト本文が書いた`app`から拡張子を選ぶ
+ * （ファイルの`app`キー自体は拡張機能が無視する。読みやすさのためテストでは種別を中身に書いておく）
+ */
+function fileNameFor(fileText: string): string {
+  let app: EmbedAppKind = "emulator";
+  try {
+    const v = (JSON.parse(fileText) as { app?: unknown }).app;
+    if (typeof v === "string" && v in EMBED_APP_EXTENSIONS) app = v as EmbedAppKind;
+  } catch {
+    /* 壊れたJSONのテストは emulator の拡張子で開く */
+  }
+  return `file:///a${EMBED_APP_EXTENSIONS[app]}`;
+}
 
 async function setup(fileText: string) {
   const crypto = await ExtensionSecretCrypto.fromSecretStorage(mockSecretStorage());
@@ -51,7 +66,7 @@ async function setup(fileText: string) {
   const syncSystem = vi.fn(async (_localPort: number, _input: unknown) => "own:mock");
   const log = vi.fn();
   const provider = new Ts5250EditorProvider({ secretCrypto: crypto, acquireService, releaseService, syncSystem, log });
-  const document = mockTextDocument("file:///a.ts5250", fileText);
+  const document = mockTextDocument(fileNameFor(fileText), fileText);
   const panel = mockWebviewPanel();
   await provider.resolveCustomTextEditor(document as never, panel as never, {} as never);
   return { crypto, acquireService, releaseService, syncSystem, log, document, panel };
@@ -93,7 +108,7 @@ describe("resolveCustomTextEditor: 起動", () => {
       syncSystem: vi.fn(async (_localPort: number, _input: unknown) => "own:mock"),
       log: vi.fn()
     });
-    const document = mockTextDocument("file:///a.ts5250", '{"app":"emulator"}');
+    const document = mockTextDocument("file:///a.ts5250emu", "");
     const panel = mockWebviewPanel();
 
     await expect(provider.resolveCustomTextEditor(document as never, panel as never, {} as never)).resolves.toBeUndefined();
@@ -169,7 +184,7 @@ describe("接続ボタン → connect → systemRef解決（03-sql-ifs。emulato
     expect(syncSystem).toHaveBeenCalledTimes(1);
     const [localPort, input] = syncSystem.mock.calls[0]!;
     expect(localPort).toBe(12345);
-    expect(input).toMatchObject({ documentUri: "file:///a.ts5250", host: "AS400", port: 992, user: "U" });
+    expect(input).toMatchObject({ documentUri: "file:///a.ts5250sql", host: "AS400", port: 992, user: "U" });
 
     const connect = lastPostedOfType(panel, "connect");
     expect(connect?.payload.systemRef).toBe("own:xyz");
@@ -357,7 +372,7 @@ async function setupWithCrypto(crypto: ExtensionSecretCrypto, fileText: string) 
   const syncSystem = vi.fn(async (_localPort: number, _input: unknown) => "own:mock");
   const log = vi.fn();
   const provider = new Ts5250EditorProvider({ secretCrypto: crypto, acquireService, releaseService, syncSystem, log });
-  const document = mockTextDocument("file:///a.ts5250", fileText);
+  const document = mockTextDocument(fileNameFor(fileText), fileText);
   const panel = mockWebviewPanel();
   await provider.resolveCustomTextEditor(document as never, panel as never, {} as never);
   return { provider, document, panel, syncSystem, log };
@@ -471,7 +486,49 @@ describe("自動保存・即時反映（D23）", () => {
   it("パネルを閉じたら変更通知の購読をやめる", async () => {
     const { panel } = await setup('{"app":"emulator","host":"OLD"}');
     expect(changeListeners).toHaveLength(1);
-    panel.dispose();
+    panel.fireDispose();
     expect(changeListeners).toHaveLength(0);
+  });
+});
+
+/**
+ * **種別は拡張子で決まり、空のファイルから画面だけで設定できる**（利用者の指摘。`decisions.md` D32）
+ */
+describe("拡張子ごとの種別・空のファイル（D32）", () => {
+  async function open(uri: string, text: string) {
+    const crypto = await ExtensionSecretCrypto.fromSecretStorage(mockSecretStorage());
+    const provider = new Ts5250EditorProvider({
+      secretCrypto: crypto,
+      acquireService: vi.fn(async () => ({ port: 1 })),
+      releaseService: vi.fn(async () => {}),
+      syncSystem: vi.fn(async () => "own:mock"),
+      log: vi.fn()
+    });
+    const document = mockTextDocument(uri, text);
+    const panel = mockWebviewPanel();
+    await provider.resolveCustomTextEditor(document as never, panel as never, {} as never);
+    return { document, panel };
+  }
+
+  it.each(EMBED_APP_KINDS)("空の %s ファイルを開くと、その種別の画面で設定の欄が出せる（fileInvalid にしない）", async (app) => {
+    const { panel } = await open(`file:///w/new${EMBED_APP_EXTENSIONS[app]}`, "");
+    expect(panel.webview.html).toContain(`embed.html?app=${app}`);
+    panel.webview.fireMessage({ type: "ready" });
+    await flush();
+    expect(lastPostedOfType(panel, "fileInvalid")).toBeUndefined();
+    expect(lastPostedOfType(panel, "loaded")?.payload).toMatchObject({ app, host: "", title: "new" });
+  });
+
+  it("空のファイルに保存すると設定だけが書かれ、app は書かない（拡張子が正）", async () => {
+    const { panel } = await open("file:///w/new.ts5250prt", "");
+    panel.webview.fireMessage({ type: "save", payload: { host: "AS400", deviceName: "PRT01" } });
+    await flush();
+    const edit = applyEdit.mock.calls[0]![0] as { replacements: Array<{ text: string }> };
+    expect(JSON.parse(edit.replacements[0]!.text)).toEqual({ host: "AS400", deviceName: "PRT01" });
+  });
+
+  it("中身に別の app が書かれていても、拡張子の種別で開く", async () => {
+    const { panel } = await open("file:///w/x.ts5250spl", '{"app":"emulator","host":"H"}');
+    expect(panel.webview.html).toContain("embed.html?app=spool");
   });
 });
