@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import * as vscode from "vscode";
-import { parseTs5250File, stringifyTs5250File, type Ts5250File } from "./schema.js";
+import { appKindFromFileName, parseTs5250File, stringifyTs5250File, type Ts5250File } from "./schema.js";
 import { buildShellHtml } from "./webviewHtml.js";
 import type { ExtensionSecretCrypto } from "./secretCrypto.js";
 import type { SystemSyncInput } from "./systemSync.js";
-import type { ConnectPayload, HostToWebviewMessage, SettingsFormValues, WebviewToHostMessage } from "./protocol.js";
+import { EMBED_APP_EXTENSIONS, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type SettingsFormValues, type WebviewToHostMessage } from "./protocol.js";
 
 /**
- * `.ts5250`のCustom Text Editor。design.md「振る舞いの詳細」の各シーケンス図を実装する。
+ * 設定ファイル（`.ts5250emu`等。種別は拡張子で決まる。D32）のCustom Text Editor。design.md「振る舞いの詳細」の各シーケンス図を実装する。
  *
  * **ウィンドウ内の参照カウントは知らない**——`acquireService`/`releaseService`を
  * 関数として受け取るだけ（`decisions.md` D1）。実体（ローカルカウント＋
@@ -47,13 +47,8 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
-    const parsed = parseTs5250File(document.getText());
     const nonce = randomBytes(16).toString("hex");
-    webviewPanel.webview.html = buildShellHtml({
-      port,
-      appKind: parsed.ok ? parsed.file.app : "emulator",
-      nonce
-    });
+    webviewPanel.webview.html = buildShellHtml({ port, appKind: appOf(document), nonce });
 
     /**
      * 自分が`handleSave`で書いた内容。`onDidChangeTextDocument`は自分の書き込みでも発火するので、
@@ -141,11 +136,19 @@ function isSettingsFormValues(v: unknown): v is SettingsFormValues {
 }
 
 /**
- * `.ts5250`をパースする。壊れていれば`fileInvalid`を送って`undefined`を返す
+ * 種別は**拡張子から決める**（D32）。`package.json`の`customEditors`が5つの拡張子にしか反応しないので
+ * 通常は必ず決まるが、決まらなければ`emulator`に倒す（画面は開けるようにする）
+ */
+function appOf(document: vscode.TextDocument): EmbedAppKind {
+  return appKindFromFileName(document.fileName) ?? "emulator";
+}
+
+/**
+ * 設定ファイルをパースする。壊れていれば`fileInvalid`を送って`undefined`を返す
  * （`sendLoaded`/`sendConnect`で共有する。`decisions.md` D17）
  */
 function parseOrInvalid(webview: vscode.Webview, document: vscode.TextDocument): Ts5250File | undefined {
-  const parsed = parseTs5250File(document.getText());
+  const parsed = parseTs5250File(document.getText(), appOf(document));
   if (!parsed.ok) {
     post(webview, { type: "fileInvalid", message: parsed.error });
     return undefined;
@@ -166,11 +169,13 @@ async function sendLoaded(webview: vscode.Webview, document: vscode.TextDocument
 
 /**
  * 画面の名前を付ける（`decisions.md` D19）。本来のアプリのタブ名（保存済みセッション設定の名前）に
- * 当たるものが`.ts5250`には無いので、**ファイル名（拡張子なし）**を使う。`syncSystem`が登録する
+ * 当たるものが設定ファイルには無いので、**ファイル名（拡張子なし）**を使う。`syncSystem`が登録する
  * システム名もファイル名なので、呼び名が揃う
  */
 function withTitle(payload: ConnectPayload, document: vscode.TextDocument): ConnectPayload {
-  payload.title = basename(document.fileName).replace(/\.ts5250$/i, "");
+  const name = basename(document.fileName);
+  const ext = EMBED_APP_EXTENSIONS[appOf(document)];
+  payload.title = name.toLowerCase().endsWith(ext) ? name.slice(0, -ext.length) : name;
   return payload;
 }
 
@@ -289,7 +294,7 @@ function buildDisplayPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
 }
 
 /**
- * 設定フォームの保存: パスワードを暗号化し、`.ts5250`へ`WorkspaceEdit`で書き戻し、**ディスクまで保存する**
+ * 設定フォームの保存: パスワードを暗号化し、設定ファイルへ`WorkspaceEdit`で書き戻し、**ディスクまで保存する**
  * （D23。以前は編集中の状態で止まり、利用者が明示的にファイルを保存する必要があった）。
  * **`syncSystem`は呼ばない**（`decisions.md` D17）——保存は「接続」ボタンではないため、
  * 設定を変えただけではサーバー側に何も登録しない。戻り値は書き込んだテキスト（失敗時は`undefined`）
@@ -301,8 +306,9 @@ async function handleSave(
   deps: Ts5250EditorProviderDeps
 ): Promise<string | undefined> {
   const crypto = deps.secretCrypto;
-  const parsed = parseTs5250File(document.getText());
-  const base: Ts5250File = parsed.ok ? parsed.file : { app: "emulator" };
+  const app = appOf(document);
+  const parsed = parseTs5250File(document.getText(), app);
+  const base: Ts5250File = parsed.ok ? parsed.file : { app };
   const next: Ts5250File = { ...base, host: values.host };
   if (values.port !== undefined) next.port = values.port;
   else delete next.port;

@@ -45,13 +45,13 @@ describe("SettingsForm", () => {
     expect(w.emitted("change")).toBeUndefined();
   });
 
-  it("ポートが数字でない・範囲外の間はchangeを出さず、その旨を出す（打ちかけで保存するとポートが消える）", async () => {
+  it("ポートが数字でない・範囲外の間は change を undefined で出し、その旨を出す（呼び出し側が保存・接続を止める）", async () => {
     const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
     await w.get("#sf-port").setValue("99x");
-    expect(w.emitted("change")).toBeUndefined();
+    expect(w.emitted("change")?.at(-1)?.[0]).toBeUndefined();
     expect(w.find(".field-error").exists()).toBe(true);
     await w.get("#sf-port").setValue("70000");
-    expect(w.emitted("change")).toBeUndefined();
+    expect(w.emitted("change")?.at(-1)?.[0]).toBeUndefined();
     await w.get("#sf-port").setValue("992");
     expect(last(w)).toMatchObject({ port: 992 });
     expect(w.find(".field-error").exists()).toBe(false);

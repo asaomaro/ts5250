@@ -751,3 +751,22 @@ Web UIの全体実行は省いた（アイコンのみ）。このラウンド�
 
 `decisions.md` D31。`test/app-icons.test.ts` 4 passed（■と下線の接し方・下線の形の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
 Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド31（種別ごとの拡張子・保存ボタン）
+
+`decisions.md` D32 / D33。
+
+- `vscode-extension` — 103 passed。`tsc --noEmit`・`tsc -b tsconfig.test.json`（mainで落ちていたのをD32で直した）green。
+- `packages/web-ui` — 1回目の全体実行は負荷（load 27）で無関係のテストがタイムアウト、2回目で **2772 passed**（212 files）。`vue-tsc -b` green。
+
+```
+     × **欄の途中からは、その欄の先頭ではなくホーム位置（先頭の入力欄）へ**（7,22 → 3,20） 6663ms
+     × 行を落とさない（100 行すべて描く） 7759ms
+ Test Files  212 passed (212)
+      Tests  2772 passed (2772)
+```
+
+- mutation 9件killed（D33に列挙）。初回の生き残り2件はテストを足して／当てるテストを直してkill。
+- 画面: `vite build`の`embed.html`をChromiumで表示し、空のプリンター設定（`new.ts5250prt`）を流し込んでホストを入力——
+  `{"state":"未保存の変更があります","saveDisabled":false,"connectDisabled":false}`。ファイル名表示は`new.ts5250prt`。
+- **未検証の穴**: VSCode本体で新しい拡張子のファイルが本拡張で開くか（`package.json`の`customEditors`）は、テストで表と突き合わせただけ。

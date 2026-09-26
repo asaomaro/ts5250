@@ -31,6 +31,20 @@ export const EMBED_APP_KINDS = ["emulator", "printer", "spool", "sql", "ifs"] as
 export type EmbedAppKind = (typeof EMBED_APP_KINDS)[number];
 
 /**
+ * **種別ごとのファイル拡張子**（`20260924-vscode-extension` D32）。VSCode拡張は拡張子で種別を決める——
+ * 以前は1つの拡張子（`.ts5250`）の中身の`app`で種別を決めていたが、それだと空のファイルを作って画面だけで
+ * 設定することができなかった（種別を画面で選べない。利用者の指摘）。`vscode-extension/package.json`の
+ * `customEditors`/`languages`はこの表と同じでなければならない（`vscode-extension/test/package-json.test.ts`が突き合わせる）
+ */
+export const EMBED_APP_EXTENSIONS: Record<EmbedAppKind, string> = {
+  emulator: ".ts5250emu",
+  printer: ".ts5250prt",
+  spool: ".ts5250spl",
+  sql: ".ts5250sql",
+  ifs: ".ts5250ifs"
+};
+
+/**
  * ウォーターマーク（画面に重ねる透かし）。`@ts5250/server`の`watermarkSchema`と同じ形だが、
  * **ここでは意図的にインライン定義する**（`@ts5250/server`からimportしない）——
  * `vscode-extension/src/protocol.ts`はこのファイルと手で同期を保つ複製で、

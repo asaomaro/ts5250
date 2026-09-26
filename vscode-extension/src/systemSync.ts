@@ -28,7 +28,7 @@ export interface SystemSyncOptions {
 }
 
 export interface SystemSyncInput {
-  /** `.ts5250`ファイルのURI文字列（対応表のキー） */
+  /** 設定ファイルのURI文字列（対応表のキー） */
   documentUri: string;
   /** サーバー設定の`name`欄（一覧に出るだけで機能には使わない）。ファイル名等 */
   name: string;

@@ -1,7 +1,7 @@
 {
   "name": "ts5250-vscode",
   "displayName": "ts5250",
-  "description": "IBM i (AS/400) 5250 エミュレーター・スプール表示・SQL・IFS を .ts5250 設定ファイルから開く",
+  "description": "IBM i (AS/400) の 5250 エミュレーター・プリンター・スプール・SQL・IFS を設定ファイル（.ts5250emu 等）から開く",
   "version": "0.1.0",
   "publisher": "asaomaro",
   "license": "Apache-2.0",
@@ -23,14 +23,20 @@
       {
         "viewType": "ts5250.editor",
         "displayName": "ts5250",
-        "selector": [{ "filenamePattern": "*.ts5250" }],
+        "selector": [
+          { "filenamePattern": "*.ts5250emu" },
+          { "filenamePattern": "*.ts5250prt" },
+          { "filenamePattern": "*.ts5250spl" },
+          { "filenamePattern": "*.ts5250sql" },
+          { "filenamePattern": "*.ts5250ifs" }
+        ],
         "priority": "default"
       }
     ],
     "languages": [
       {
         "id": "ts5250",
-        "extensions": [".ts5250"],
+        "extensions": [".ts5250emu", ".ts5250prt", ".ts5250spl", ".ts5250sql", ".ts5250ifs"],
         "icon": {
           "light": "./icon.png",
           "dark": "./icon.png"

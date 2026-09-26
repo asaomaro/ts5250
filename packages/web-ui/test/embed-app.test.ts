@@ -30,6 +30,7 @@ import SqlPane from "../src/components/SqlPane.vue";
 import IfsPane from "../src/components/IfsPane.vue";
 import SettingsForm from "../src/components/SettingsForm.vue";
 import { embedStore } from "../src/stores/embed.js";
+import { EMBED_APP_EXTENSIONS } from "../src/embed-protocol.js";
 
 const STUBS = { EmulatorPane: true, PrinterPane: true, SpoolPane: true, SqlPane: true, IfsPane: true, SettingsForm: true };
 
@@ -333,22 +334,84 @@ describe("EmbedApp: 待機画面の設定フォーム（自動保存）", () => 
     expect(w.find(".idle-card .error").text()).toContain("JSON");
   });
 
-  it("編集は間引いて自動保存する（最後の値を1回だけsave）", async () => {
+
+  /** 保存は「保存」ボタンを押したときだけ（利用者の指定。D33。以前は入力のたびに間引いて自動保存していた） */
+  it("入力しただけでは保存しない。「保存」を押すと最後の値を1回だけ save する", async () => {
     vi.useFakeTimers();
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
+    await nextTick();
+    const saveBtn = () => w.get(".save-btn").element as HTMLButtonElement;
+    expect(saveBtn().disabled).toBe(true); // 変更が無ければ押せない
+    const form = w.findComponent(SettingsForm);
+    form.vm.$emit("change", { host: "AS" });
+    form.vm.$emit("change", { host: "AS400" });
+    await nextTick();
+    vi.advanceTimersByTime(5000);
+    expect(post).not.toHaveBeenCalled();
+    expect(w.find(".save-state").text()).toBe("未保存の変更があります");
+    await w.get(".save-btn").trigger("click");
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith({ type: "save", payload: { host: "AS400" } }, "*");
+    expect(w.find(".save-state").text()).toBe("保存しています…");
+    expect(saveBtn().disabled).toBe(true);
+    embedStore.savedRev++;
+    await nextTick();
+    expect(w.find(".save-state").text()).toBe("保存しました");
+  });
+
+  it("保存の応答を待つ間に次の入力があれば「未保存の変更があります」のまま（古い応答で保存済みと出さない）", async () => {
+    stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
+    await nextTick();
+    const form = w.findComponent(SettingsForm);
+    form.vm.$emit("change", { host: "B" });
+    await nextTick();
+    await w.get(".save-btn").trigger("click");
+    form.vm.$emit("change", { host: "BC" });
+    embedStore.savedRev++; // 1回目の応答
+    await nextTick();
+    expect(w.find(".save-state").text()).toBe("未保存の変更があります");
+  });
+
+  it("打ちかけの不正な値がある間（change が undefined）は、保存も接続もできない", async () => {
     const post = stubParentPostMessage();
     const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
     embedStore.loaded = { app: "emulator", host: "A" };
     await nextTick();
-    const form = w.findComponent(SettingsForm);
-    form.vm.$emit("change", { host: "AS" });
-    form.vm.$emit("change", { host: "AS400" });
+    w.findComponent(SettingsForm).vm.$emit("change", undefined);
+    await nextTick();
+    expect((w.get(".save-btn").element as HTMLButtonElement).disabled).toBe(true);
+    expect((w.get(".connect-btn").element as HTMLButtonElement).disabled).toBe(true);
     expect(post).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(400);
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledWith({ type: "save", payload: { host: "AS400" } }, "*");
   });
 
-  it("「接続」は間引き中の保存を先に送ってから送る（保存し終えた設定で繋ぐ）", async () => {
+  it("保存し終えた後の「接続」は保存を送り直さない（未保存の変更がある時だけ保存する）", async () => {
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A" };
+    await nextTick();
+    w.findComponent(SettingsForm).vm.$emit("change", { host: "B" });
+    await nextTick();
+    await w.get(".save-btn").trigger("click");
+    embedStore.savedRev++;
+    await nextTick();
+    await w.get(".connect-btn").trigger("click");
+    expect(post.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(["save", "connect"]);
+  });
+
+  it("未保存の変更が無ければ「接続」は connect だけを送る", async () => {
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A" };
+    await nextTick();
+    await w.get(".connect-btn").trigger("click");
+    expect(post.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(["connect"]);
+  });
+
+  it("「接続」は未保存の変更を先に保存してから送る（保存し終えた設定で繋ぐ）", async () => {
     vi.useFakeTimers();
     const post = stubParentPostMessage();
     const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
@@ -396,40 +459,7 @@ describe("EmbedApp: 待機画面の設定フォーム（自動保存）", () => 
     expect(post).not.toHaveBeenCalled();
   });
 
-  /** 保存ボタンが無いので、保存されたかを画面に出す（利用者の質問「接続を押すと保存されるのか」。D24） */
-  it("保存の状態を出す: 編集直後は「保存します」→送ったら「保存しています」→savedで「自動保存しました」", async () => {
-    vi.useFakeTimers();
-    stubParentPostMessage();
-    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
-    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
-    await nextTick();
-    const state = () => w.find(".save-state").text();
-    expect(state()).toContain("自動で保存されます"); // 何もしていないときは仕組みを説明する
-    w.findComponent(SettingsForm).vm.$emit("change", { host: "B" });
-    await nextTick();
-    expect(state()).toBe("変更を保存します…");
-    vi.advanceTimersByTime(400);
-    await nextTick();
-    expect(state()).toBe("保存しています…");
-    embedStore.savedRev++;
-    await nextTick();
-    expect(state()).toBe("自動保存しました");
-  });
 
-  it("保存の応答を待つ間に次の入力があれば、「保存します」のまま（古い応答で保存済みと出さない）", async () => {
-    vi.useFakeTimers();
-    stubParentPostMessage();
-    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
-    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
-    await nextTick();
-    const form = w.findComponent(SettingsForm);
-    form.vm.$emit("change", { host: "B" });
-    vi.advanceTimersByTime(400);
-    form.vm.$emit("change", { host: "BC" });
-    embedStore.savedRev++; // 1回目の応答
-    await nextTick();
-    expect(w.find(".save-state").text()).toBe("変更を保存します…");
-  });
 
   it.each([
     ["emulator", "948px"],
@@ -497,7 +527,7 @@ describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
     await nextTick();
     expect(w.find(".idle-card .kind").text()).toBe(kind);
     expect(w.find(".idle-card .desc").text().length).toBeGreaterThan(0);
-    expect(w.find(".idle-card .file").text()).toContain("sample-x.ts5250");
+    expect(w.find(".idle-card .file").text()).toContain(`sample-x${EMBED_APP_EXTENSIONS[app]}`); // 拡張子は種別ごと（D32）
     // 接続先は設定フォームの欄として出す（D23。以前は読み取り専用の一覧だった）
     expect(w.findComponent(SettingsForm).props("initial")).toMatchObject({ host: "AS400", port: 992, user: "U" });
     expect(w.find(".connect-btn").text()).toBe(button);

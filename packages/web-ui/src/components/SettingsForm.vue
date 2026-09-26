@@ -3,9 +3,8 @@
  * 接続情報の設定フォーム（`embed.html`専用。design.md「設計方針6」）。
  *
  * **接続前の待機画面にそのまま置く**（`decisions.md` D23。以前はヘッダーの⚙で開くポップアップで、
- * 「保存」ボタンを押しても`.ts5250`は未保存のまま・接続中の画面には反映されなかった）。
- * 保存ボタンは無く、**値が変わるたびに`change`を出す**——ファイルへの書き込み（間引き）は
- * 呼び出し側（`EmbedApp.vue`）が行う。初期値（`initial`）は生成時に1度だけ読む。
+ * 「保存」ボタンを押しても設定ファイルは未保存のまま・接続中の画面には反映されなかった）。
+ * **値が変わるたびに`change`を出す**——ファイルへの書き込みは呼び出し側（`EmbedApp.vue`）が「保存」ボタンで行う（D33）。初期値（`initial`）は生成時に1度だけ読む。
  * 外でファイルが書き換えられたときは、呼び出し側が`key`を変えて作り直す
  */
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
@@ -16,7 +15,8 @@ import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js"
 import { settingsColumnsOf } from "../settingsLayout.js";
 
 const props = defineProps<{ initial?: SettingsFormValues; app: EmbedAppKind }>();
-const emit = defineEmits<{ (e: "change", v: SettingsFormValues): void }>();
+/** `undefined`＝打ちかけの不正な値がある（呼び出し側は保存・接続を止める） */
+const emit = defineEmits<{ (e: "change", v: SettingsFormValues | undefined): void }>();
 
 const host = ref(props.initial?.host ?? "");
 const port = ref(props.initial?.port !== undefined ? String(props.initial.port) : "");
@@ -94,7 +94,7 @@ function build(): SettingsFormValues | undefined {
   }
   if (props.app === "emulator") {
     v.terminal = terminal.value;
-    // 3270はモデルでサイズが決まる（`.ts5250`はモデル指定を持たない。design.md参照）ので送らない
+    // 3270はモデルでサイズが決まる（設定ファイルはモデル指定を持たない。design.md参照）ので送らない
     if (terminal.value !== "3270") v.screenSize = screenSize.value;
     const wm = buildWatermark();
     if (wm) v.watermark = wm;
@@ -106,10 +106,9 @@ function build(): SettingsFormValues | undefined {
 }
 
 // 生成時（初期値の反映）は出さない——開いただけでファイルを書き換えないため
-watch([host, port, tls, codePageId, terminal, screenSize, deviceName, wmForm, user, password], () => {
-  const v = build();
-  if (v) emit("change", v);
-}, { deep: true });
+watch([host, port, tls, codePageId, terminal, screenSize, deviceName, wmForm, user, password], () => emit("change", build()), {
+  deep: true
+});
 
 /** 数値入力を範囲に収める（空欄にするとNaNが入るので、そのときは既定へ戻す。`ConfigCard.vue`と同じ） */
 function clamp(value: number, min: number, max: number, fallback: number): number {
@@ -119,7 +118,7 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
 
 /**
  * `wmForm`を保存値へ畳む。**文字が空なら設定ごと無し**にする——文字の無い透かしは
- * 描きようがなく、既定値だけの残骸を`.ts5250`に残さないため（`ConfigCard.vue`の
+ * 描きようがなく、既定値だけの残骸を設定ファイルに残さないため（`ConfigCard.vue`の
  * `buildWatermark`と同じ判断）。
  */
 function buildWatermark(): WatermarkValue | undefined {

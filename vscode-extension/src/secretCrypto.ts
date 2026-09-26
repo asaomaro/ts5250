@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { SecretStorage } from "vscode";
 
 /**
- * `.ts5250`ファイルの`signon.passwordEnc`を暗号化・復号する（AES-256-GCM）。
+ * 設定ファイル（`.ts5250emu`等）の`signon.passwordEnc`を暗号化・復号する（AES-256-GCM）。
  *
  * `packages/server/src/secret-crypto.ts`の`SecretCrypto`と**同じワイヤ形式**
  * （`v1:iv:tag:ct`）だが**独立実装**——`SecretCrypto`は`@ts5250/server`の公開API
