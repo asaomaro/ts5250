@@ -1,0 +1,24 @@
+// テスト専用のプロジェクト（`packages/web-ui/tsconfig.test.json`と同じ理由）。
+// `tsconfig.json`（本体ビルド）は `include: ["src"]` で test/ を見ないため、
+// test/ 側の型エラーは `tsc -b` だけでは検知できない。ここで src+test をまとめて検査する
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node", "vscode"],
+    // src/ 本体は拡張ホスト向けにCommonJSでコンパイルする（tsconfig.json）が、
+    // テストはVitestのESM実行系を通るため`import.meta.url`等が使える——ここは
+    // 型検査専用（noEmit）なので実際のビルド出力とは無関係にESNextでよい
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo"
+  },
+  "include": ["src", "test"]
+}

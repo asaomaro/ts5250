@@ -9,7 +9,14 @@ export default defineConfig({
       "/ws": { target: "ws://localhost:3400", ws: true }
     }
   },
-  build: { outDir: "dist" },
+  build: {
+    outDir: "dist",
+    // **`embed.html` は VSCode 拡張機能が iframe で開く単一アプリ専用の最小ページ**
+    // （`.aidev/works/20260924-vscode-extension/design.md`「設計方針4」）。`index.html`
+    // （通常のワークスペースUI）と同じビルドに同居させる——サーバーの `--web-root` は
+    // `packages/web-ui/dist` を丸ごと配信するので、既存の配信経路を変えずに済む
+    rollupOptions: { input: { main: "index.html", embed: "embed.html" } }
+  },
   test: {
     environment: "jsdom",
     include: ["test/**/*.test.ts"],

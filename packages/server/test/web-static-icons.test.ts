@@ -25,6 +25,7 @@ function webRoot(): string {
   writeFileSync(join(dir, "favicon.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   writeFileSync(join(dir, "favicon.ico"), Buffer.from("00000100", "hex"));
   writeFileSync(join(dir, "apple-touch-icon.png"), Buffer.from("89504e470d0a1a0a", "hex"));
+  writeFileSync(join(dir, "embed.html"), "<!doctype html><title>ui embed</title>");
   return dir;
 }
 
@@ -57,5 +58,17 @@ describe("アイコンの静的配信", () => {
     const res = await app(webRoot()).request("/some/client/route");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
+  });
+
+  /**
+   * `embed.html`（VSCode拡張機能がiframe表示する単一アプリ専用ページ。
+   * `.aidev/works/20260924-vscode-extension`）も、favicon等と同じ理由で実ファイルを配信する
+   * ——個別配信を書き漏らすとSPAフォールバックに吸われ、`index.html`の中身がそのまま返る。
+   * 実機（起動したサーバーへのcurl）で最初に踏んだ欠陥（`01-embed-ui`のtest工程）
+   */
+  it("embed.html は index.html にすり替わらず実ファイルを返す", async () => {
+    const res = await app(webRoot()).request("/embed.html?app=emulator");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toMatch(/ui embed/);
   });
 });

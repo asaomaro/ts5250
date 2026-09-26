@@ -126,6 +126,18 @@ describe("実効値の組み立て", () => {
     expect(resolveWatermark({ text: "x" })!.color).toBeUndefined();
     expect(resolveWatermark({ text: "x", color: "#112233" })!.color).toBe("#112233");
   });
+
+  /**
+   * **`text`がスキーマ検証を経ずに届く経路がある**（VSCode拡張の`.ts5250`ファイル。
+   * `vscode-extension/src/schema.ts`は「JSONとして読めるか」しか検証しない設計）。
+   * 手編集で壊れた透かし（`text`が無い/文字列でない）が来ても、EmulatorPaneごと
+   * 落とさず「表示しない」に倒す（`20260924-vscode-extension` D16）。
+   */
+  it("textが無い/文字列でない壊れた設定は、例外を投げずに表示しない扱いにする", () => {
+    expect(resolveWatermark({} as never)).toBeUndefined();
+    expect(resolveWatermark({ text: 123 } as never)).toBeUndefined();
+    expect(resolveWatermark({ text: null } as never)).toBeUndefined();
+  });
 });
 
 describe("重ねる要素（WatermarkOverlay）", () => {

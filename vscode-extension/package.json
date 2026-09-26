@@ -1,0 +1,52 @@
+{
+  "name": "ts5250-vscode",
+  "displayName": "ts5250",
+  "description": "IBM i (AS/400) 5250 エミュレーター・スプール表示・SQL・IFS を .ts5250 設定ファイルから開く",
+  "version": "0.1.0",
+  "publisher": "asaomaro",
+  "license": "Apache-2.0",
+  "private": true,
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asaomaro/ts5250.git",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onCustomEditor:ts5250.editor"],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "ts5250.editor",
+        "displayName": "ts5250",
+        "selector": [{ "filenamePattern": "*.ts5250" }],
+        "priority": "default"
+      }
+    ],
+    "languages": [
+      {
+        "id": "ts5250",
+        "extensions": [".ts5250"],
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b tsconfig.test.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

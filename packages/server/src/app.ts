@@ -364,6 +364,14 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
     app.use("/favicon.ico", serveStatic({ root }));
     app.use("/favicon.svg", serveStatic({ root }));
     app.use("/apple-touch-icon.png", serveStatic({ root }));
+    /**
+     * `embed.html`（VSCode拡張機能がiframe表示する単一アプリ専用の最小ページ。
+     * `vite.config.ts`のマルチページ入力）も、favicon等と同じ理由で個別に配信する——
+     * 書き漏らすとSPAフォールバックに吸われて`index.html`（通常のワークスペースUI）が
+     * 返る。実機（起動したサーバーへの実リクエスト）で確認して見つかった
+     * （`.aidev/works/20260924-vscode-extension/01-embed-ui`のtest工程）
+     */
+    app.use("/embed.html", serveStatic({ root }));
     app.get("*", serveStatic({ path: "index.html", root }));
   } else {
     app.get("/", (c) =>

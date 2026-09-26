@@ -54,13 +54,23 @@ async function post(path: string, body: Record<string, unknown>): Promise<Record
 
 const target = () => ({ queue: queue.value.trim(), library: library.value.trim() || undefined });
 
+/**
+ * 取得の中身だけ（`busy`ガード無し）。**`refresh()`と`reply()`/`remove()`/`doSend()`の
+ * 全部から呼ぶ**——後者3つは自分の`withBusy`の中で読み直すため、ここでさらに
+ * `busy.value`を見ると（`refresh()`が持つガード）外側の`withBusy`がまだ`busy`を
+ * 立てたままで**常にfalseへ短絡し、読み直しが起きない**（`20260924-vscode-extension`
+ * D12で新設した`MessageQuickView.vue`のテストで踏んで発覚。同じ組み合わせ方をしていた
+ * ここも合わせて直す）。
+ */
+async function fetchMessages(): Promise<void> {
+  const r = await post("", { ...target(), onlyInquiry: onlyInquiry.value, max: 200 });
+  if (r) messages.value = (r["messages"] as Msg[]) ?? [];
+}
+
 async function refresh(): Promise<void> {
   if (!canRun.value || busy.value) return;
   error.value = "";
-  await withBusy(async () => {
-    const r = await post("", { ...target(), onlyInquiry: onlyInquiry.value, max: 200 });
-    if (r) messages.value = (r["messages"] as Msg[]) ?? [];
-  }).catch((e: unknown) => (error.value = e instanceof Error ? e.message : String(e)));
+  await withBusy(fetchMessages).catch((e: unknown) => (error.value = e instanceof Error ? e.message : String(e)));
 }
 
 async function reply(m: Msg): Promise<void> {
@@ -73,7 +83,7 @@ async function reply(m: Msg): Promise<void> {
     if (r) {
       notice.value = r["success"] === true ? "応答しました" : hostMessage(r);
       delete replies.value[m.key];
-      await refresh();
+      await fetchMessages(); // refresh()ではなく素の再取得（busyガードの二重掛けを避ける）
     }
   }).catch((e: unknown) => (error.value = e instanceof Error ? e.message : String(e)));
 }
@@ -94,7 +104,7 @@ async function remove(m?: Msg): Promise<void> {
     const r = await post("/remove", { ...target(), ...(m ? { key: m.key } : {}) });
     if (r) {
       notice.value = r["success"] === true ? "消しました" : hostMessage(r);
-      await refresh();
+      await fetchMessages();
     }
   }).catch((e: unknown) => (error.value = e instanceof Error ? e.message : String(e)));
 }
@@ -119,7 +129,7 @@ async function doSend(): Promise<void> {
     if (r) {
       notice.value = r["success"] === true ? "送りました" : hostMessage(r);
       send.value.text = "";
-      await refresh();
+      await fetchMessages();
     }
   }).catch((e: unknown) => (error.value = e instanceof Error ? e.message : String(e)));
 }

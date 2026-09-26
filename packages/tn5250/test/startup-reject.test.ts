@@ -41,18 +41,25 @@ function startupRecord(code: string, system?: string, device?: string): number[]
   return rec;
 }
 
-function fakeTransport(): { transport: Transport; feed: (b: number[]) => void } {
+function fakeTransport(): { transport: Transport; feed: (b: number[]) => void; closeWith: (reason: string) => void } {
   let onData: ((d: Uint8Array) => void) | undefined;
+  let onClose: ((reason: string) => void) | undefined;
   const transport = {
     onData: (cb: (d: Uint8Array) => void) => {
       onData = cb;
     },
-    onClose: () => {},
+    onClose: (cb: (reason: string) => void) => {
+      onClose = cb;
+    },
     onError: () => {},
     send: () => {},
     close: () => {}
   } as unknown as Transport;
-  return { transport, feed: (b) => onData?.(Uint8Array.from(b)) };
+  return {
+    transport,
+    feed: (b) => onData?.(Uint8Array.from(b)),
+    closeWith: (reason) => onClose?.(reason)
+  };
 }
 
 /** 1 レコード目として `rec` を流し、`connect` の結末と警告を返す */
@@ -120,6 +127,39 @@ describe("表示セッションの起動応答", () => {
     if (r.ok) return;
     expect(r.code).toBe("NEGOTIATION_TIMEOUT");
     expect(r.warnings.some((w) => w.includes("startup response I902"))).toBe(true);
+  });
+
+  /**
+   * **I902（成功）を受け取った直後に、最初の画面が来る前に接続が切れた**場合。
+   * 実機報告（VSCode拡張の利用者。`.aidev/works/20260924-vscode-extension/decisions.md`）で
+   * 踏んだ——`sendError`で届く理由は`SESSION_CLOSED`だとweb-ui側の汎用文言に潰されて画面には
+   * 出ない（`opMessages.ts`の`wsErrorNotice`）ので、**サーバー側ログ（`warn`）に残るかどうかが
+   * 唯一の切り分け手段**になる。
+   */
+  it("I902の直後に接続が切れたら SESSION_CLOSED で断り、理由をwarnにも残す", async () => {
+    const { transport, feed, closeWith } = fakeTransport();
+    const warnings: string[] = [];
+    const settled = Session5250.connect({
+      id: "t",
+      transport,
+      negotiationTimeoutMs: 400,
+      warn: (m) => warnings.push(m),
+      deviceName: "DEV1"
+    }).then(
+      (s) => ({ ok: true as const, session: s }),
+      (e: Error & { code?: string }) => ({ ok: false as const, code: e.code, message: e.message })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    feed([...startupRecord("I902", "S1234567", "DEV1"), ...IAC_EOR]);
+    await new Promise((r) => setTimeout(r, 10));
+    closeWith("read ECONNRESET");
+    const out = await settled;
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("SESSION_CLOSED");
+    expect(out.message).toContain("read ECONNRESET");
+    expect(warnings.some((w) => w.includes("closed during negotiation") && w.includes("read ECONNRESET"))).toBe(true);
   });
 
   it("未知コード ＋ 装置名あり は従来どおり食べる（今まで通っていたものを落とさない）", async () => {

@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import StatusBar from "../src/components/StatusBar.vue";
+import MessageQuickView from "../src/components/MessageQuickView.vue";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
 import { createSessionState, type SessionState } from "../src/stores/sessions.js";
 import type { WsClient } from "../src/ws-client.js";
@@ -113,8 +114,8 @@ describe("StatusBar のキーの並び", () => {
  * どこにも出していなかった（ACS は OIA に出す）。
  */
 describe("StatusBar のメッセージ待ち表示", () => {
-  function stateWith(messageWaiting: boolean): SessionState {
-    const st = state();
+  function stateWith(messageWaiting: boolean, extra: Partial<SessionState> = {}): SessionState {
+    const st = { ...state(), ...extra };
     st.snapshot = { ...snap(), ...(messageWaiting ? { messageWaiting: true } : {}) } as ScreenSnapshot;
     return st;
   }
@@ -125,4 +126,43 @@ describe("StatusBar のメッセージ待ち表示", () => {
     const off = mount(StatusBar, { props: { state: stateWith(false), cursor: { row: 1, col: 1 } } });
     expect(off.find(".msgwait").exists()).toBe(false);
   });
+
+  /**
+   * **クリックで読める**（`20260924-vscode-extension` D12。利用者要望）。ただし
+   * `systemRef`（`own:<id>`等）が無いと`/api/host/messages`を呼べない
+   * （直接接続で開いたセッション）ので、その場合はボタンを disabled のまま出す
+   * （隠さない——「届いている」こと自体は有用な情報のため）。
+   */
+  it("systemRefが無ければボタンはdisabledのまま（クリックしてもクイックビューは開かない）", async () => {
+    const w = mount(StatusBar, { props: { state: stateWith(true), cursor: { row: 1, col: 1 } } });
+    const btn = w.find("button.msgwait");
+    expect(btn.attributes("disabled")).toBeDefined();
+    await btn.trigger("click");
+    expect(w.findComponent(MessageQuickView).exists()).toBe(false);
+  });
+
+  it("systemRefがあればクリックでMessageQuickViewが開き、systemRef/defaultQueueが渡る", async () => {
+    // MessageQuickViewはmount時に/api/host/messagesを叩く（onMounted(refresh)）ので、
+    // StatusBar側の点検（クリックで開くか・propsが正しく渡るか）とは無関係に応答を用意する
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ messages: [] }) }) as unknown as Response)
+    );
+    const w = mount(StatusBar, {
+      props: {
+        state: stateWith(true, { systemRef: "own:s-1", meta: { signonUser: "ASAO" } }),
+        cursor: { row: 1, col: 1 }
+      }
+    });
+    const btn = w.find("button.msgwait");
+    expect(btn.attributes("disabled")).toBeUndefined();
+    await btn.trigger("click");
+
+    const view = w.findComponent(MessageQuickView);
+    expect(view.exists()).toBe(true);
+    expect(view.props("systemRef")).toBe("own:s-1");
+    expect(view.props("defaultQueue")).toBe("ASAO");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
 });

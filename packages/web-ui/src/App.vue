@@ -16,7 +16,7 @@ import AccountPopover from "./components/AccountPopover.vue";
 import LoginView from "./components/LoginView.vue";
 import { authStore } from "./stores/auth.js";
 import { systemsStore } from "./stores/systems.js";
-import type { ViewSettings } from "./stores/viewSettings.js";
+import { REPORT_VIEW_KEYS, type ViewSettings } from "./stores/viewSettings.js";
 import { isPaneTab } from "./paneLabels.js";
 
 workspaceStore.init();
@@ -81,7 +81,6 @@ const activeSessionId = computed(() => {
  * **テーマ（通常/ダーク）はここに出さない。** アプリ全体の「外観」が持っている
  * ——同じことを 2 か所から変えられるようにすると、どちらが効いているのか分からなくなる。
  */
-const REPORT_VIEW_KEYS: readonly (keyof ViewSettings)[] = ["sosi", "kana", "linkify", "font"];
 const viewMenuTarget = computed<
   { sessionId: string; keys?: readonly (keyof ViewSettings)[] } | undefined
 >(() => {

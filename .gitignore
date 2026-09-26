@@ -31,6 +31,14 @@ macros.json.tmp
 # Electron 配布物の組み立て置き場（electron/scripts/prepare-app.mjs が毎回作り直す）
 electron/app-stage/
 
+# VSCode拡張の配布物の組み立て置き場（vscode-extension/scripts/prepare-server.mjs が毎回作り直す）
+vscode-extension/server-stage/
+# vsce package の生成物
+vscode-extension/*.vsix
+
+# VSCode拡張の動作確認用に利用者が作る接続設定ファイル（host/user 等の実機の固有名詞が入る）
+*.ts5250
+
 # 5250 の操作ログ書き出し（調査用。実機の画面内容が入るのでコミットしない）
 *5250-log*.jsonl
 
