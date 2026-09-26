@@ -49,4 +49,15 @@ describe("アプリのアイコン", () => {
     const fills = [...svg.matchAll(/fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
     expect(fills).toEqual([token("--crt"), token("--t-white"), token("--t-pink"), token("--t-green"), token("--t-green")]);
   });
+
+  /** ■の下端は下線の上端に接する。下線は角を丸めず、半透明にしない（利用者の指定。D31） */
+  it("白の■と下線が接し、下線は角の無い不透明の帯", () => {
+    const rects = [...read("public/favicon.svg").matchAll(/<rect ([^>]*)\/>/g)].map((m) => m[1]!);
+    const attr = (r: string, name: string) => Number(new RegExp(`${name}="([\\d.]+)"`).exec(r)?.[1]);
+    const block = rects.find((r) => r.includes('fill="#ffffff"'))!;
+    const line = rects.find((r) => r.includes('fill="#00ff00"'))!;
+    expect(attr(block, "y") + attr(block, "height")).toBeCloseTo(attr(line, "y"), 6);
+    expect(line).not.toMatch(/rx=|opacity=/);
+    expect(attr(line, "x")).toBeCloseTo(attr(block, "x"), 6); // 下線は■の左端から始まる
+  });
 });
