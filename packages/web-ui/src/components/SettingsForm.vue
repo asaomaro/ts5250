@@ -18,7 +18,10 @@ const emit = defineEmits<{ (e: "save", v: SettingsFormValues): void; (e: "cancel
 
 const host = ref(props.initial?.host ?? "");
 const port = ref(props.initial?.port !== undefined ? String(props.initial.port) : "");
-const tls = ref(props.initial?.tls ?? true);
+// **未指定はTLS無し**——サーバーは`tls === true`のときだけTLSにする（`ws-handler.ts`）。以前は`?? true`で、
+// `tls`を書いていないファイルの設定を開くとTLSにチェックが入り、別の項目だけ変えて保存しても
+// `"tls": true`が書かれて黙ってTLS接続に変わっていた（D19。本来のアプリも既存の編集は`?? false`）
+const tls = ref(props.initial?.tls ?? false);
 // **CCSID は自由入力ではなく、ACS の「ホスト・コード・ページ」一覧から選ばせる**
 // （`ConfigCard.vue`の`sysCodePageId`/`sesCodePageId`と同じ1本の選択肢。930はKatakana/
 // Katakana Extendedの2エントリを持つので、CCSID単体ではなくこのidが唯一の選択軸になる）

@@ -55,6 +55,8 @@ export type WebviewToHostMessage =
 export interface ConnectPayload {
   app: EmbedAppKind;
   host: string;
+  /** 設定ファイル名（拡張子なし）。拡張ホストが付ける。画面の名前（本来のアプリのタブ名に当たる）に使う */
+  title?: string;
   port?: number;
   tls?: boolean;
   ccsid?: number;

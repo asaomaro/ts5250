@@ -123,7 +123,17 @@ function parseOrInvalid(webview: vscode.Webview, document: vscode.TextDocument):
 async function sendLoaded(webview: vscode.Webview, document: vscode.TextDocument, deps: Ts5250EditorProviderDeps): Promise<void> {
   const file = parseOrInvalid(webview, document);
   if (!file) return;
-  post(webview, { type: "loaded", payload: buildDisplayPayload(file, deps.secretCrypto) });
+  post(webview, { type: "loaded", payload: withTitle(buildDisplayPayload(file, deps.secretCrypto), document) });
+}
+
+/**
+ * 画面の名前を付ける（`decisions.md` D19）。本来のアプリのタブ名（保存済みセッション設定の名前）に
+ * 当たるものが`.ts5250`には無いので、**ファイル名（拡張子なし）**を使う。`syncSystem`が登録する
+ * システム名もファイル名なので、呼び名が揃う
+ */
+function withTitle(payload: ConnectPayload, document: vscode.TextDocument): ConnectPayload {
+  payload.title = basename(document.fileName).replace(/\.ts5250$/i, "");
+  return payload;
 }
 
 /** 「接続」ボタン押下に応えて、実際にsyncSystem等の解決を行い`connect`を送る */
@@ -136,7 +146,7 @@ async function sendConnect(
   const file = parseOrInvalid(webview, document);
   if (!file) return;
   const payload = await resolvePayload(file, document, localPort, deps);
-  post(webview, { type: "connect", payload });
+  post(webview, { type: "connect", payload: withTitle(payload, document) });
 }
 
 /**
@@ -286,7 +296,7 @@ async function handleSave(
     return;
   }
 
-  post(webview, { type: "saved", payload: buildDisplayPayload(next, crypto) });
+  post(webview, { type: "saved", payload: withTitle(buildDisplayPayload(next, crypto), document) });
 }
 
 function failureHtml(message: string): string {

@@ -358,3 +358,20 @@ async function setupWithCrypto(crypto: ExtensionSecretCrypto, fileText: string) 
 function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
 }
+
+/**
+ * **画面の名前＝ファイル名（拡張子なし）**を付ける（`decisions.md` D19）。本来のアプリのタブ名
+ * （保存済みセッション設定の名前）に当たるものが`.ts5250`には無いため
+ */
+describe("title（ファイル名）", () => {
+  it("loaded / connect / saved のどれにもファイル名（拡張子なし）が付く", async () => {
+    const { panel } = await setup('{"app":"emulator","host":"AS400"}'); // file:///a.ts5250
+    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    await flush();
+    expect(lastPostedOfType(panel, "loaded")?.payload.title).toBe("a");
+    expect(lastPostedOfType(panel, "connect")?.payload.title).toBe("a");
+    expect(lastPostedOfType(panel, "saved")?.payload.title).toBe("a");
+  });
+});

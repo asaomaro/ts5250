@@ -58,7 +58,19 @@ describe("SettingsForm", () => {
     await w.get("#sf-user").setValue("MYUSER");
     await w.get(".settings-form").trigger("submit");
     const saved = w.emitted("save")?.[0]?.[0];
-    expect(saved).toEqual({ host: "AS400", port: 992, tls: true, user: "MYUSER" });
+    expect(saved).toEqual({ host: "AS400", port: 992, tls: false, user: "MYUSER" });
+  });
+
+  /**
+   * **TLSの未指定はTLS無し**（サーバーは`tls === true`のときだけTLSにする）。以前は未指定だと
+   * チェックが入り、他の項目だけ変えて保存しても`tls: true`が書かれて黙ってTLS接続に変わっていた（D19）
+   */
+  it("initialにtlsが無ければTLSのチェックは外れていて、そのまま保存してもtls:falseのまま", async () => {
+    const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
+    expect((w.get("#sf-tls").element as HTMLInputElement).checked).toBe(false);
+    await w.get("#sf-port").setValue("992");
+    await w.get(".settings-form").trigger("submit");
+    expect(w.emitted("save")?.[0]?.[0]).toMatchObject({ tls: false });
   });
 
   it("初期値（initial）があればフィールドへ反映する", () => {

@@ -22,10 +22,12 @@ import IfsPane from "./components/IfsPane.vue";
 import SettingsForm from "./components/SettingsForm.vue";
 import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import DesignMenu from "./components/DesignMenu.vue";
+import SessionInfo from "./components/SessionInfo.vue";
 import { embedStore, postToHost } from "./stores/embed.js";
 import { openSession, closeSession } from "./session-controller.js";
 import { makePaneTabId } from "./paneLabels.js";
-import type { SessionMeta } from "./stores/sessions.js";
+import { sessionsStore, type SessionMeta } from "./stores/sessions.js";
+import { featureOf } from "./features.js";
 import { REPORT_VIEW_KEYS, type ViewKey } from "./stores/viewSettings.js";
 import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
 import { downloadScreenHtml } from "./screenExport.js";
@@ -101,7 +103,13 @@ watch(
       if (payload.enhanced !== undefined) open.enhanced = payload.enhanced;
       if (payload.user !== undefined) open.user = payload.user;
       if (payload.password !== undefined) open.password = payload.password;
+      // ⓘ（`SessionInfo`）に出す情報。本来のアプリはセッション設定から同じものを載せる（D19）
       const meta: SessionMeta = { host: payload.host };
+      if (payload.port !== undefined) meta.port = payload.port;
+      if (payload.tls !== undefined) meta.tls = payload.tls;
+      if (payload.ccsid !== undefined) meta.ccsid = payload.ccsid;
+      if (payload.screenSize !== undefined) meta.screenSize = payload.screenSize;
+      if (payload.password !== undefined) meta.autoSignon = true;
       if (payload.terminal !== undefined) meta.terminal = payload.terminal;
       if (payload.deviceName !== undefined) meta.deviceName = payload.deviceName;
       if (payload.user !== undefined) meta.signonUser = payload.user;
@@ -112,7 +120,8 @@ watch(
       // `syncSystem`で登録済み）。無くても接続自体は成立する——`SessionState.systemRef`が
       // 無いままなら、StatusBarのメッセージ表示ボタンはsystem参照を要求するREST機能を
       // 使えないだけで、5250画面そのものには影響しない
-      sessionId.value = await openSession(open, "embed", meta, payload.systemRef);
+      // 名前は本来のアプリのタブ名（セッション設定の名前）に当たるもの＝ファイル名（D19）
+      sessionId.value = await openSession(open, payload.title ?? payload.host, meta, payload.systemRef);
     } catch (e) {
       connectError.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -123,30 +132,67 @@ watch(
 );
 
 /**
- * 「接続」ボタンを出すか。emulatorは`sessionId`、printer/sql/ifsは`restTarget`が
- * 真になっている＝接続済み（`20260924-vscode-extension` D17）
+ * **接続を持つのはemulatorだけ**（`decisions.md` D19。サーバーの実装で確かめた）——
+ * スプール・IFSは操作ごとに接続して閉じ、SQLはサーバーのプールが接続を持つ（タブ単位の接続が無い）。
+ * だからemulatorは「接続／切断」、それ以外は「開く」だけ（切断は無い）。「開く」を残すのは、
+ * 開いた瞬間にペインがホストへ一覧を取りに行くため——設定だけ直したいときに取得を走らせない
  */
-const isActive = computed(() => (props.app === "emulator" ? !!sessionId.value : !!restTarget.value));
+const openLabel = computed(() => (props.app === "emulator" ? "接続" : "開く"));
 
-/** 「接続」ボタン押下。拡張ホストへ接続要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch */
+/** 「接続」「開く」ボタン押下。拡張ホストへ要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch */
 function requestConnect(): void {
   postToHost({ type: "connect" });
 }
 
 /**
- * 「切断」ボタン押下。emulatorはセッションを閉じ、printer/sql/ifsは`systemRef`を捨てて
- * ペインをアンマウントする（`embedStore.connect`を空にするだけで`restTarget`が
- * 自然に`undefined`へ戻る）。**ファイルの内容は変えない**——`embedStore.loaded`は
- * 触らないので、次に「接続」を押せば同じ設定でまた開ける
+ * 「切断」ボタン押下（emulatorだけ）。`{type:"close"}`を送ってセッションを閉じる——ファイルを閉じる
+ * だけだとサーバーは再接続の猶予（90秒）の間セッション＝装置を保持する（D17で実測）。
+ * **ファイルの内容は変えない**——`embedStore.loaded`は触らないので、次に「接続」を押せば同じ設定で開ける
  */
 function disconnect(): void {
-  if (props.app === "emulator" && sessionId.value) {
-    closeSession(sessionId.value);
-    sessionId.value = undefined;
-  }
+  if (sessionId.value) closeSession(sessionId.value);
+  sessionId.value = undefined;
+  showInfo.value = false;
   embedStore.connect = undefined;
   connectError.value = undefined;
 }
+
+/** ヘッダー左の名前（本来のアプリのタブ名と同じく、セッションの`label`） */
+const sessionLabel = computed(() => (sessionId.value ? sessionsStore.get(sessionId.value)?.label : undefined));
+/** ヘッダー左のⓘ（本来のアプリのタブと同じ`SessionInfo`を出す） */
+const showInfo = ref(false);
+
+/**
+ * 待機表示に出す「これは何か」（利用者の要望。D19）。ボタンだけだとエミュレータなのか
+ * スプールなのか分からない。種類と一行説明はランチャーのカードと同じ文言（`features.ts`）
+ */
+const idleInfo = computed(() => {
+  const c = embedStore.loaded;
+  let kind: string;
+  let desc: string;
+  if (props.app === "emulator") {
+    const is3270 = c?.terminal === "3270";
+    kind = is3270 ? "3270端末" : "5250端末";
+    desc = is3270 ? "メインフレームの3270画面に接続して操作する。" : "IBM i の5250画面に接続して操作する。";
+  } else {
+    const f = featureOf(APP_FEATURES[props.app]);
+    kind = f?.name ?? props.app;
+    desc = f?.desc ?? "";
+  }
+  const rows: { label: string; value: string }[] = [];
+  if (c?.title) rows.push({ label: "設定", value: c.title });
+  if (c?.host) rows.push({ label: "ホスト", value: `${c.host}${c.port !== undefined ? `:${c.port}` : ""}` });
+  // 未指定はTLS無し（サーバーは`tls === true`のときだけTLSにする）
+  if (c?.host) rows.push({ label: "TLS", value: c.tls === true ? "有効" : "無効" });
+  if (c?.user) rows.push({ label: "ユーザー", value: c.user });
+  if (c?.ccsid !== undefined) rows.push({ label: "CCSID", value: String(c.ccsid) });
+  if (props.app === "emulator" && c?.host) {
+    rows.push({ label: "装置名", value: c.deviceName ?? "自動" });
+    if (c.terminal !== "3270") rows.push({ label: "画面サイズ", value: c.screenSize ?? "24x80" });
+  }
+  return { kind, desc, rows };
+});
+const idleError = computed(() => connectError.value ?? embedStore.error);
 
 const settingsInitial = computed<SettingsFormValues>(() => {
   const c = embedStore.connect ?? embedStore.loaded;
@@ -183,6 +229,14 @@ function saveScreenHtml(): void {
 <template>
   <div class="embed-root">
     <header class="embed-header">
+      <!-- 左: 名前とⓘ（本来のアプリのタブと同じ。D19）。接続中のemulatorだけ——ⓘはセッションの情報なので -->
+      <div v-if="app === 'emulator' && sessionId" class="title-group">
+        <span class="title">{{ sessionLabel }}</span>
+        <span class="info-wrap">
+          <button class="info" title="セッション情報" @click="showInfo = !showInfo">ⓘ</button>
+          <SessionInfo v-if="showInfo" :session-id="sessionId" @close="showInfo = false" />
+        </span>
+      </div>
       <!-- 今の画面を自己完結HTMLで保存（`App.vue`の`⬇ HTML`と同じ機能） -->
       <button
         v-if="app === 'emulator' && sessionId"
@@ -192,8 +246,8 @@ function saveScreenHtml(): void {
       >
         ⬇ HTML
       </button>
-      <!-- 切断（利用者の要望。`20260924-vscode-extension` D17）。接続中だけ出す -->
-      <button v-if="isActive" class="settings-btn" title="切断する" @click="disconnect">切断</button>
+      <!-- 切断（D17）。**emulatorだけ**——他は接続を持たない（D19） -->
+      <button v-if="app === 'emulator' && sessionId" class="settings-btn" title="切断する" @click="disconnect">切断</button>
       <ViewSettingsMenu
         v-if="viewMenuTarget"
         :key="viewMenuTarget.sessionId"
@@ -204,25 +258,29 @@ function saveScreenHtml(): void {
       <button class="settings-btn" title="設定" @click="showSettings = true">⚙</button>
     </header>
     <div class="embed-body">
-      <template v-if="app === 'emulator'">
-        <EmulatorPane v-if="sessionId" :session-id="sessionId" :focused="true" />
-        <p v-else-if="connecting" class="status">接続中…</p>
-        <!-- エラーは待機表示の中に出す——ボタンと別分岐にすると、失敗後に「接続」を押し直せない -->
-        <div v-else class="status idle">
-          <p v-if="connectError || embedStore.error" class="error">{{ connectError ?? embedStore.error }}</p>
-          <p>{{ embedStore.loaded?.host || "「⚙ 設定」でホストを設定してください" }}</p>
-          <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">接続</button>
-        </div>
-      </template>
-      <template v-else-if="restTarget">
+      <EmulatorPane v-if="app === 'emulator' && sessionId" :session-id="sessionId" :focused="true" />
+      <template v-else-if="app !== 'emulator' && restTarget">
         <SpoolPane v-if="app === 'printer'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <SqlPane v-else-if="app === 'sql'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <IfsPane v-else :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
       </template>
+      <p v-else-if="connecting" class="status">接続中…</p>
+      <!-- 待機表示: 何の機能か・どこへ繋ぐかを出す（D19）。エラーもここに出す——ボタンと別分岐にすると
+           失敗後に押し直せない（D17） -->
       <div v-else class="status idle">
-        <p v-if="embedStore.error" class="error">{{ embedStore.error }}</p>
-        <p>{{ embedStore.loaded?.host || "「⚙ 設定」でホストを設定してください" }}</p>
-        <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">接続</button>
+        <div class="idle-card">
+          <div class="kind">{{ idleInfo.kind }}</div>
+          <p class="desc">{{ idleInfo.desc }}</p>
+          <dl v-if="embedStore.loaded?.host" class="rows">
+            <template v-for="r in idleInfo.rows" :key="r.label">
+              <dt>{{ r.label }}</dt>
+              <dd>{{ r.value }}</dd>
+            </template>
+          </dl>
+          <p v-else class="hint">「⚙ 設定」でホストを設定してください</p>
+          <p v-if="idleError" class="error">{{ idleError }}</p>
+          <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">{{ openLabel }}</button>
+        </div>
       </div>
     </div>
     <SettingsForm v-if="showSettings" :initial="settingsInitial" :app="app" @save="onSave" @cancel="showSettings = false" />
@@ -278,6 +336,72 @@ function saveScreenHtml(): void {
 }
 .status .error {
   color: var(--t-red, #e06c6c);
+}
+.idle-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 18px 24px;
+  border: 1px solid var(--crt-line, #333);
+  border-radius: 8px;
+}
+.idle-card .kind {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg, #d9e3da);
+}
+.idle-card .desc {
+  margin: 0;
+  text-align: center;
+}
+.idle-card .rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+}
+.idle-card dt {
+  color: var(--muted);
+}
+.idle-card dd {
+  margin: 0;
+  color: var(--fg, #d9e3da);
+  word-break: break-all;
+}
+.idle-card .hint,
+.idle-card .error {
+  margin: 0;
+}
+/* ヘッダー左の名前とⓘ。右の操作群を押しやる（`margin-right: auto`はこの1つだけ） */
+.title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  min-width: 0;
+}
+.title-group .title {
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.info-wrap {
+  position: relative;
+}
+.info-wrap .info {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+}
+.info-wrap .info:hover {
+  color: var(--fg, #d9e3da);
 }
 .status.idle {
   display: flex;

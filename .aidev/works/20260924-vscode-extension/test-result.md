@@ -551,3 +551,15 @@ IFS境界ドラッグ: [220,380,598] → 左+120 → [340,380,478] → 右−150
 **未検証の穴**: 実際のVSCode上での見え方（縦スクロールバーが消えること）は未確認——headless Chromiumは
 スクロールバーが場所を取らないため、縦スクロールバーは単独では再現できなかった。ページの大きさが窓と
 一致することまでは実測済み。
+
+## ラウンド18（「開く」化・待機表示の情報・ヘッダーの名前とⓘ）
+
+`decisions.md` D19。
+
+- `packages/web-ui` — **2740 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — **81 passed**（13 files）。`protocol-sync.test.ts`（`title`追加後も一字一句一致）含む。
+- mutation: `SettingsForm.vue`のTLS既定を`?? true`へ戻す→2件fail／`sendLoaded`から`withTitle`を外す→1件fail。復元確認済み。
+- 実機（PUB400、Playwright）: emulatorに接続→ヘッダー`sample-emu`＋ⓘ→`SessionInfo`表示。スプールの待機表示（種類「スプール」・説明・設定名・ホスト・TLS無効・ユーザー・「開く」）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 実際のVSCode上での見た目は未確認（既存の環境制約）。

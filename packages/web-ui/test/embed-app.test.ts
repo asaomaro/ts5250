@@ -246,13 +246,15 @@ describe("EmbedApp: 切断ボタン", () => {
     expect(w.find(".connect-btn").exists()).toBe(true);
   });
 
-  it("printer/sql/ifsの切断は systemRef（embedStore.connect）を捨ててペインをアンマウントする", async () => {
-    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
-    embedStore.connect = { app: "sql", host: "AS400", systemRef: "own:xyz" };
-    await nextTick();
-    expect(w.findComponent(SqlPane).exists()).toBe(true);
-    await w.get(".embed-header button[title='切断する']").trigger("click");
-    expect(w.findComponent(SqlPane).exists()).toBe(false);
+  it("printer/sql/ifsには「切断」を出さない（接続を持たないため。D19）", async () => {
+    for (const app of ["printer", "sql", "ifs"] as const) {
+      const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
+      embedStore.connect = { app, host: "AS400", systemRef: "own:xyz" };
+      await nextTick();
+      expect(w.find(".embed-header button[title='切断する']").exists()).toBe(false);
+      w.unmount();
+      embedStore.connect = undefined;
+    }
   });
 });
 
@@ -345,5 +347,65 @@ describe("EmbedApp: ⬇ HTML（画面のHTML保存。利用者の要望）", () 
     await nextTick();
     await w.get('.embed-header button[title*="HTML"]').trigger("click");
     expect(downloadScreenHtml).toHaveBeenCalledWith("s-embed-1");
+  });
+});
+
+/**
+ * **待機表示で何の機能か分かる**・**名前とⓘをヘッダー左に出す**（利用者の要望。D19）
+ */
+describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
+  it.each([
+    ["emulator", "5250端末", "接続"],
+    ["printer", "スプール", "開く"],
+    ["sql", "SQL", "開く"],
+    ["ifs", "IFS", "開く"]
+  ] as const)("%s: 種類「%s」と説明・接続先を出し、ボタンは「%s」", async (app, kind, button) => {
+    const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
+    embedStore.loaded = { app, host: "AS400", port: 992, user: "U", title: "sample-x" };
+    await nextTick();
+    expect(w.find(".idle-card .kind").text()).toBe(kind);
+    expect(w.find(".idle-card .desc").text().length).toBeGreaterThan(0);
+    const rows = w.find(".idle-card .rows").text();
+    expect(rows).toContain("sample-x");
+    expect(rows).toContain("AS400:992");
+    expect(rows).toContain("U");
+    expect(w.find(".connect-btn").text()).toBe(button);
+    w.unmount();
+  });
+
+  it("emulatorの3270設定は「3270端末」と出す", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "MF", terminal: "3270" };
+    await nextTick();
+    expect(w.find(".idle-card .kind").text()).toBe("3270端末");
+  });
+
+  it("TLSの未指定は「無効」と出す（サーバーはtls===trueのときだけTLS）", async () => {
+    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "sql", host: "AS400" };
+    await nextTick();
+    expect(w.find(".idle-card .rows").text()).toContain("無効");
+  });
+
+  it("接続後、ヘッダー左に名前（title）とⓘを出し、ⓘでSessionInfoを開く。openSessionのlabelもtitle", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: { ...STUBS, SessionInfo: true } } });
+    expect(w.find(".title-group").exists()).toBe(false); // 接続前は出さない
+    embedStore.connect = { app: "emulator", host: "AS400", port: 23, tls: false, ccsid: 930, screenSize: "27x132", password: "p", title: "sample" };
+    await nextTick();
+    await nextTick();
+    const call = openSession.mock.calls[0]!;
+    expect(call[1]).toBe("sample"); // label
+    expect(call[2]).toMatchObject({ host: "AS400", port: 23, tls: false, ccsid: 930, screenSize: "27x132", autoSignon: true });
+    expect(w.find(".title-group").exists()).toBe(true);
+    await w.get(".title-group .info").trigger("click");
+    expect(w.findComponent({ name: "SessionInfo" }).exists()).toBe(true);
+  });
+
+  it("titleが無ければopenSessionのlabelはホスト名", async () => {
+    mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400" };
+    await nextTick();
+    await nextTick();
+    expect(openSession.mock.calls[0]![1]).toBe("AS400");
   });
 });
