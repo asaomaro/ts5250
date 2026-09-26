@@ -720,3 +720,34 @@ stale: /workspaces/ts5250/vscode-extension/icon.png
 - **Web UIの全体実行は省いた**（利用者の判断「アイコン差し替えだけなのでテスト不要」）。途中まで回した分では、
   無関係のテストがタイムアウトで落ちていた。同じマシンで別プロジェクトのvitestが並走しており、負荷は12コアに対して37だった。
   今回の変更は画像・生成スクリプト・README・アイコンのテストだけで、落ちたテストが見る処理には触れていない。
+
+## ラウンド25（字形を大文字の`TS`に）
+
+`decisions.md` D26。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。生成した全アイコンをChromiumで目視。
+Web UIの全体実行は省いた（アイコン差し替えのみ。前ラウンドの利用者の判断に従う）。このラウンドでは失敗が発生していない。
+
+## ラウンド26（`S`の継ぎ目・傾き・上半分の幅）
+
+`decisions.md` D27。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。変更前後のSVGを拡大して並べ、
+継ぎ目の隙間が消えたこと・SVGとPNG（1024px）が同じ形であること・32/16pxでも読めることを目視で確かめた。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド27（`TS`を書体の字形に）
+
+`decisions.md` D28。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。見本と生成した全形式を並べて目視。
+生成は5.9秒（1024pxのPNGを含む）。Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド28（ブロックカーソルで`S`を反転表示。D30で破棄）
+
+`decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド29（`T`にブロックカーソルを重ねる）
+
+`decisions.md` D30。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
+
+## ラウンド30（下線の色・形と■との接し方）
+
+`decisions.md` D31。`test/app-icons.test.ts` 4 passed（■と下線の接し方・下線の形の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。

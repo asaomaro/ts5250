@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * アプリのマーク（モノグラム `ts` ＋カーソル下線）を各形式に生成する。
+ * アプリのマーク（ブロックカーソル（■）の上の `T`・`S`・カーソル下線）を各形式に生成する。
  *
  *   npm run gen:icons          （リポジトリのルートから）
  *   node packages/web-ui/scripts/gen-icons.mjs --check
@@ -11,14 +11,14 @@
  * これと突き合わせて**作り直し忘れ**（定義だけ変えた）と**手で差し替えた出力**を落とす——描き直しは重く、
  * 並列のテスト実行では 1 分を超えて他のテストをタイムアウトさせたので、テストでは描かない
  *
- * **マークの定義はこのファイルだけ**（`SHAPES`）。ブラウザのファビコンと Electron の
+ * **マークの定義はこのファイルだけ**（`GLYPHS` と地・下線）。ブラウザのファビコンと Electron の
  * アプリアイコンは同じ絵なので、**出力先が 2 つでも定義は 1 つに保つ**——バイナリを
  * 手で置くと、色を直したときに片方だけ古いまま残り、しかも見比べるまで気づかない。
  * web-ui から `electron/build/` に書き出しているのはそのため。
  *
  * 外部依存を持たない（画像ライブラリを 1 個のアイコンのために入れない）ので、
- * ラスタライズは自前。図形を「角丸矩形」と「円弧（太さ付き）」の 2 種類に絞ってあり、
- * どちらも点の内外判定が閉じた式で書けるため、スーパーサンプルするだけで済む。
+ * ラスタライズは自前。図形は「角丸矩形」（地・下線）と「輪郭」（字形。直線と 2 次・3 次ベジェ）の 2 種類で、
+ * 輪郭は曲線を細かい折れ線にして、行ごとに交点を求めて非ゼロ規則で塗る。スーパーサンプルで縁をぼかす。
  */
 import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
@@ -44,66 +44,131 @@ const VB = 64; // viewBox の一辺
 // ts5250は5250端末ソフトなので、マークも既定の端末の画面と同じ色にする（利用者の要望）。
 // 以前は「ソフト」寄りの`#0f1a12`/`#3ddc7f`だった。`test/app-icons.test.ts`が`styles.css`との一致を見る
 const BG = [0x00, 0x00, 0x00]; // 端末の地（--crt）
-const FG = [0x00, 0xff, 0x00]; // 端末の緑（--t-green）
-const CURSOR_ALPHA = 0.55;
-const W = 5; // 線幅（t と s で共通）
+const FG = [0x00, 0xff, 0x00]; // 端末の緑（--t-green）。`S` と下線（同じ色。利用者の指定）
+const T_COLOR = [0xff, 0x00, 0xff]; // `T` の色（--t-pink）。利用者の指定
+const BLOCK_COLOR = [0xff, 0xff, 0xff]; // ブロックカーソルの色（--t-white）。利用者の指定
 
 const hex = ([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 const BG_RECT = { rect: [0, 0, 64, 64], r: 14 };
 
 /**
- * 字形。
+ * 字形（大文字の `TS`）。**Noto Sans CJK JP Medium の `T` と `S` の輪郭**をそのまま使う（D28）。
  *
- * **`s` を矩形（上下バー＋左右の縦棒）で組まない**。それは数字の 5 と同じ形で、
- * `ts5250` という名前の中では特に「t5」と読み違える（試作で実際にそう見えた）。
- * 接する 2 円（中心間距離 = 2r）の弧でつなぐと、中央で接線が連続して s になる。
+ * 経緯: 大文字の `TS`（D26）を矩形と円弧で組んだが、円弧だけの `S` は継ぎ目・傾き・上下の幅を直しても
+ * 「バランスがおかしい」（利用者の指摘）。示された見本の `TS` は普通のサンセリフの字形なので、自作をやめて
+ * 書体の字形を借りた。候補（Noto Regular / Medium / Bold・DejaVu）を見本と並べ、字形と太さが一番近い
+ * Medium を選んだ（16px でも読める）。
  *
- * `t` の足も同じ半径の 1/4 円弧にして、2 文字の曲率を揃える。
+ * 取り方: fontkit で `font.layout("TS")` の輪郭を取り、キャップハイト 26 に縮めた。配置はカーソルの■に合わせて
+ * 組み直してある（D30/D31）——■（`T` の外形＋左右 3）・間 3・`S` の全体を x=32 に中心合わせし、字の縦の中心を
+ * ■の縦の中心（y=29.5）に置いた。
+ * 座標は viewBox（64）の値で、小数 3 桁に丸めてある。
+ *
+ * Noto Sans CJK は SIL Open Font License 1.1（© 2014-2021 Adobe）。字形の輪郭を図案に使うのはライセンスの
+ * 範囲（書体ファイルそのものを配るのではない）。
  */
-const SHAPES = [
-  // t
-  { rect: [18, 9, W, 28.5] }, //            縦棒（アセンダ〜足の付け根）
-  { rect: [9, 18.5, 22, W] }, //            横棒
-  { arc: [26, 37.5, 5.5], from: 180, to: 270 }, // 足の曲がり
-  { rect: [26, 40.5, 5, W] }, //            足の先
-  // s（上の弧: 右上終端→上→左→下 / 下の弧: 上→右→下→左下終端）
-  { arc: [45.5, 26.5, 5.5], from: 40, to: 270 },
-  { arc: [45.5, 37.5, 5.5], from: -140, to: 90 },
-];
+const GLYPHS = {
+  T: "M19.211 42.5L23.373 42.5L23.373 19.958L30.994 19.958L30.994 16.5L11.626 16.5L11.626 19.958L19.211 19.958Z",
+  S: "M46.237 42.994C51.917 42.994 55.374 39.572 55.374 35.409C55.374 31.599 53.187 29.694 50.082 28.389L46.519 26.872C44.438 25.99 42.357 25.179 42.357 22.921C42.357 20.91 44.05 19.605 46.696 19.605C48.989 19.605 50.824 20.487 52.446 21.933L54.528 19.323C52.623 17.312 49.765 16.042 46.696 16.042C41.722 16.042 38.158 19.111 38.158 23.204C38.158 27.013 40.91 28.954 43.45 30.012L47.048 31.564C49.447 32.622 51.176 33.363 51.176 35.727C51.176 37.914 49.447 39.396 46.343 39.396C43.802 39.396 41.263 38.161 39.393 36.327L36.994 39.149C39.358 41.547 42.674 42.994 46.237 42.994Z",
+};
 
-const CURSOR = { rect: [14, 51, 36, 5], r: 2.5 };
+/**
+ * ブロックカーソル（■）。**エミュレーターはカーソルを■で表す**ので、マークも `T` の上に白の■を置き、
+ * `T` をピンクで描く（利用者の要望と指定。D30）。`T` の外形に左右 3 の余白を足した幅・高さ 36。角は丸めない（端末のセル）。
+ * **■の下端を下線の上端に接する**（利用者の指定。■を伸ばすのではなく配置で合わせる。D31）——■（36）＋下線（5）の
+ * 41 をアイコンの縦の中心 y=32 に置くので、■は y 11.5〜47.5・下線は y 47.5〜52.5
+ */
+const BLOCK = { rect: [8.626, 11.5, 25.368, 36.0] };
+/**
+ * カーソル下線。■と併せて残す（利用者の指定）。`S` と同じ緑で塗り（以前は半透明）、角は丸めず、
+ * 幅は■の左端から `S` の右端まで（■と字の全体の下に敷く。D31）
+ */
+const UNDERLINE = { rect: [8.626, 47.5, 46.744, 5] };
 
-/** viewBox 座標の 1 点が図形の内側か。 */
+/** viewBox 座標の 1 点が角丸矩形の内側か（地・下線）。字形は `glyphEdges` の走査で塗る */
 function inside(px, py, shape) {
-  if (shape.rect) {
-    const [x, y, w, h] = shape.rect;
-    if (px < x || py < y || px >= x + w || py >= y + h) return false;
-    const rad = shape.r ?? 0;
-    if (rad <= 0) return true;
-    const cx = Math.min(Math.max(px, x + rad), x + w - rad);
-    const cy = Math.min(Math.max(py, y + rad), y + h - rad);
-    return (px - cx) ** 2 + (py - cy) ** 2 <= rad * rad;
-  }
-  const [cx, cy, rm] = shape.arc;
-  const dx = px - cx;
-  const dy = py - cy;
-  const d = Math.hypot(dx, dy);
-  if (d < rm - W / 2 || d > rm + W / 2) return false;
-  // 画面座標は y が下向き。反転して数学の角度（反時計回りが正）に合わせる
-  let ang = (Math.atan2(-dy, dx) * 180) / Math.PI;
-  while (ang < shape.from) ang += 360;
-  return ang <= shape.to;
+  const [x, y, w, h] = shape.rect;
+  if (px < x || py < y || px >= x + w || py >= y + h) return false;
+  const rad = shape.r ?? 0;
+  if (rad <= 0) return true;
+  const cx = Math.min(Math.max(px, x + rad), x + w - rad);
+  const cy = Math.min(Math.max(py, y + rad), y + h - rad);
+  return (px - cx) ** 2 + (py - cy) ** 2 <= rad * rad;
 }
 
-/** viewBox 座標の 1 点の色（非プリマルチ RGBA）。 */
-function sample(px, py) {
-  if (!inside(px, py, BG_RECT)) return [0, 0, 0, 0];
-  for (const s of SHAPES) if (inside(px, py, s)) return [...FG, 255];
-  if (inside(px, py, CURSOR)) {
-    const a = CURSOR_ALPHA;
-    return [0, 1, 2].map((i) => Math.round(FG[i] * a + BG[i] * (1 - a))).concat(255);
+/**
+ * 輪郭（`M` `L` `Q` `C` `Z`。絶対座標だけ——`GLYPHS` はそう書き出してある）を折れ線の辺に崩す。
+ * 曲線は 24 分割（viewBox で 1 辺 1 前後。1024px でも角は見えない）
+ */
+function pathEdges(d) {
+  const tok = d.match(/[MLQCZ]|-?[\d.]+/g);
+  const edges = [];
+  let i = 0, cmd = "", x = 0, y = 0, sx = 0, sy = 0;
+  const num = () => Number(tok[i++]);
+  const line = (x1, y1) => {
+    if (y1 !== y) edges.push([x, y, x1, y1]);
+    x = x1;
+    y = y1;
+  };
+  const N = 24;
+  while (i < tok.length) {
+    if (/[MLQCZ]/.test(tok[i])) cmd = tok[i++];
+    if (cmd === "M") { x = sx = num(); y = sy = num(); cmd = "L"; }
+    else if (cmd === "L") line(num(), num());
+    else if (cmd === "Q") {
+      const [x0, y0, x1, y1, x2, y2] = [x, y, num(), num(), num(), num()];
+      for (let k = 1; k <= N; k++) {
+        const t = k / N, u = 1 - t;
+        line(u * u * x0 + 2 * u * t * x1 + t * t * x2, u * u * y0 + 2 * u * t * y1 + t * t * y2);
+      }
+    } else if (cmd === "C") {
+      const [x0, y0, x1, y1, x2, y2, x3, y3] = [x, y, num(), num(), num(), num(), num(), num()];
+      for (let k = 1; k <= N; k++) {
+        const t = k / N, u = 1 - t;
+        line(
+          u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+          u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3
+        );
+      }
+    } else if (cmd === "Z") { line(sx, sy); cmd = ""; }
+    else throw new Error(`unsupported path command: ${cmd}`);
   }
+  return edges;
+}
+const T_EDGES = pathEdges(GLYPHS.T);
+const S_EDGES = pathEdges(GLYPHS.S);
+
+/**
+ * 横線 y で字形の内側になる区間（`[x0, x1]` の並び）。**非ゼロ規則**（書体の輪郭の決まり）——
+ * 交点を x で並べ、辺の向き（上向き +1 / 下向き −1）を足して 0 でない間を内側とする
+ */
+function glyphSpans(edges, py) {
+  const hits = [];
+  for (const [x0, y0, x1, y1] of edges) {
+    if ((py < y0) === (py < y1)) continue;
+    hits.push([x0 + ((py - y0) * (x1 - x0)) / (y1 - y0), y1 > y0 ? 1 : -1]);
+  }
+  hits.sort((a, b) => a[0] - b[0]);
+  const spans = [];
+  let wind = 0;
+  for (const [hx, dir] of hits) {
+    const was = wind;
+    wind += dir;
+    if (was === 0 && wind !== 0) spans.push([hx, hx]);
+    else if (was !== 0 && wind === 0) spans[spans.length - 1][1] = hx;
+  }
+  return spans;
+}
+
+const inSpans = (spans, px) => spans.some(([a, b]) => px >= a && px < b);
+
+/** viewBox 座標の 1 点の色（非プリマルチ RGBA）。`t`/`s` はその行の `T`/`S` の区間 */
+function sample(px, py, t, s) {
+  if (!inside(px, py, BG_RECT)) return [0, 0, 0, 0];
+  if (inSpans(t, px)) return [...T_COLOR, 255];
+  if (inside(px, py, BLOCK)) return [...BLOCK_COLOR, 255];
+  if (inSpans(s, px) || inside(px, py, UNDERLINE)) return [...FG, 255];
   return [...BG, 255];
 }
 
@@ -114,12 +179,16 @@ function render(size, ss = 8) {
   const rows = [];
   for (let y = 0; y < size; y++) {
     const row = Buffer.alloc(size * 4);
+    // 字形の区間はサブ行ごとに 1 回だけ求める（点ごとに全辺を見ると 1024px で遅すぎる）
+    const subY = Array.from({ length: ss }, (_, sy) => (y * ss + sy + 0.5) * step);
+    const tSpans = subY.map((py) => glyphSpans(T_EDGES, py));
+    const sSpans = subY.map((py) => glyphSpans(S_EDGES, py));
     for (let x = 0; x < size; x++) {
       let ar = 0, ag = 0, ab = 0, aa = 0;
       for (let sy = 0; sy < ss; sy++) {
         const py = (y * ss + sy + 0.5) * step;
         for (let sx = 0; sx < ss; sx++) {
-          const [r, g, b, a] = sample((x * ss + sx + 0.5) * step, py);
+          const [r, g, b, a] = sample((x * ss + sx + 0.5) * step, py, tSpans[sy], sSpans[sy]);
           // **プリマルチで積む**。素の RGB を平均すると透明部の黒が混ざり、
           // 角丸の縁に黒い縁取りが出る
           ar += r * a; ag += g * a; ab += b * a; aa += a;
@@ -201,24 +270,14 @@ function svg() {
     const rr = s.r ? ` rx="${s.r}"` : "";
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}"${rr}${extra}/>`;
   };
-  const arc = (s) => {
-    const [cx, cy, rm] = s.arc;
-    const pt = (a) => {
-      const t = (a * Math.PI) / 180;
-      return [cx + rm * Math.cos(t), cy - rm * Math.sin(t)].map((v) => v.toFixed(3));
-    };
-    const [x0, y0] = pt(s.from);
-    const [x1, y1] = pt(s.to);
-    const large = Math.abs(s.to - s.from) > 180 ? 1 : 0;
-    // 角度の増加＝画面上は反時計回り。SVG の sweep-flag は時計回りが 1 なので 0
-    return `<path d="M${x0} ${y0}A${rm} ${rm} 0 ${large} 0 ${x1} ${y1}" fill="none" stroke="${green}" stroke-width="${W}"/>`;
-  };
-  const body = SHAPES.map((s) => (s.rect ? rect(s) : arc(s))).join("");
+  // 字形は書体の輪郭そのまま（非ゼロ規則。SVG の fill-rule の既定と同じ）。■の上に `T` を重ねる
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" role="img" aria-label="ts5250">`,
     `  ${rect(BG_RECT, ` fill="${hex(BG)}"`)}`,
-    `  <g fill="${green}">${body}</g>`,
-    `  ${rect(CURSOR, ` fill="${green}" opacity="${CURSOR_ALPHA}"`)}`,
+    `  ${rect(BLOCK, ` fill="${hex(BLOCK_COLOR)}"`)}`,
+    `  <path d="${GLYPHS.T}" fill="${hex(T_COLOR)}"/>`,
+    `  <path d="${GLYPHS.S}" fill="${green}"/>`,
+    `  ${rect(UNDERLINE, ` fill="${green}"`)}`,
     `</svg>`,
     "",
   ].join("\n");
