@@ -1,10 +1,10 @@
-import type { EmbedAppKind, WatermarkValue } from "./protocol.js";
+import { EMBED_APP_KINDS, type EmbedAppKind, type WatermarkValue } from "./protocol.js";
 
 /**
  * `.ts5250`ファイルの中身の型（design.md「`.ts5250`ファイルスキーマ」）。
  *
  * `ConnectPayload`（`protocol.ts`）とは別の型——ファイル上は`host`も`signon`も
- * **省略できる**（作成直後、利用者が設定ボタンから埋める前の状態を許す）。
+ * **省略できる**（作成直後、利用者が待機画面の設定欄で埋める前の状態を許す）。
  * `ConnectPayload`は`host`が必須（空文字列で代用する）なので、変換は呼び出し側
  * （`ts5250EditorProvider.ts`）が行う。
  */
@@ -29,7 +29,7 @@ export interface Ts5250File {
   };
 }
 
-const APP_KINDS: readonly EmbedAppKind[] = ["emulator", "printer", "sql", "ifs"];
+const APP_KINDS: readonly EmbedAppKind[] = EMBED_APP_KINDS;
 
 export type ParseResult = { ok: true; file: Ts5250File } | { ok: false; error: string };
 

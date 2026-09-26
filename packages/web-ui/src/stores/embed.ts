@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { ConnectPayload, HostToWebviewMessage, WebviewToHostMessage } from "../embed-protocol.js";
+import { EMBED_APP_KINDS, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type WebviewToHostMessage } from "../embed-protocol.js";
 
 /**
  * `embed.html` と、それを iframe 表示する VSCode 拡張機能（`vscode-extension/`）との
@@ -16,9 +16,25 @@ import type { ConnectPayload, HostToWebviewMessage, WebviewToHostMessage } from 
  * ネットワーク境界＝loopback限定を信頼の前提とする設計）と同じ前提の上に立つ。
  */
 export const embedStore = reactive<{
+  /**
+   * ファイルの現在値（表示・設定フォームの初期値用）。**接続の合図ではない**——
+   * `ready`/`saved`で更新されるが、これだけでは`EmbedApp.vue`は何も開かない
+   * （`20260924-vscode-extension` D17）。
+   */
+  loaded: ConnectPayload | undefined;
+  /**
+   * 実際に接続する合図。利用者が「接続」ボタンを押し拡張ホストが解決し終えたときだけ
+   * 立つ——`EmbedApp.vue`はこれの変化だけを見て`openSession()`/REST参照の解決を行う。
+   */
   connect: ConnectPayload | undefined;
   error: string | undefined;
-}>({ connect: undefined, error: undefined });
+  /**
+   * `loaded`（ファイルを開いた・**外で書き換えられた**）を受けた回数。設定フォームはこれを`key`にして
+   * 作り直す。**`saved`では増やさない**——自分の自動保存の応答でフォームを作り直すと、入力中の文字が消える
+   * （`20260924-vscode-extension` D23）
+   */
+  loadedRev: number;
+}>({ loaded: undefined, connect: undefined, error: undefined, loadedRev: 0 });
 
 /**
  * 拡張ホストへ送る。**トップレベルで直接開かれた場合（親フレームが無い）は何もしない**——
@@ -30,7 +46,17 @@ export function postToHost(msg: WebviewToHostMessage): void {
   window.parent.postMessage(msg, "*");
 }
 
-const APP_KINDS = ["emulator", "printer", "sql", "ifs"] as const;
+const APP_KINDS: readonly string[] = EMBED_APP_KINDS;
+
+/**
+ * URLクエリ（`embed.html?app=...`）から種別を読む。**知らない値は`emulator`**。
+ * 許す値は`EMBED_APP_KINDS`（1か所）から取る——以前は`embed.ts`に別の一覧を持っており、
+ * `spool`を足したときにここだけ漏れてスプールが`emulator`扱いになった（D21）
+ */
+export function appKindFromQuery(search: string): EmbedAppKind {
+  const v = new URLSearchParams(search).get("app");
+  return v !== null && APP_KINDS.includes(v) ? (v as EmbedAppKind) : "emulator";
+}
 
 /**
  * `payload`の形を検査する（`type`が合っているだけでは中身の型は保証されない。
@@ -41,7 +67,7 @@ const APP_KINDS = ["emulator", "printer", "sql", "ifs"] as const;
 function isConnectPayload(v: unknown): v is ConnectPayload {
   if (!v || typeof v !== "object") return false;
   const p = v as Record<string, unknown>;
-  return typeof p.host === "string" && APP_KINDS.includes(p.app as (typeof APP_KINDS)[number]);
+  return typeof p.host === "string" && typeof p.app === "string" && APP_KINDS.includes(p.app);
 }
 
 /** メッセージ受信を配線する。`embed.ts` から一度だけ呼ぶ */
@@ -51,9 +77,19 @@ export function initEmbedBridge(): void {
     const msg = ev.data as HostToWebviewMessage | undefined;
     if (!msg || typeof msg !== "object" || !("type" in msg)) return;
     switch (msg.type) {
-      case "connect":
+      case "loaded":
       case "saved":
+        // **`connect`には触らない**——ファイルを開いた／保存しただけでは接続しない
+        // （`20260924-vscode-extension` D17）。表示・設定フォームの初期値だけ更新する
         if (!isConnectPayload(msg.payload)) return;
+        embedStore.loaded = msg.payload;
+        embedStore.error = undefined;
+        if (msg.type === "loaded") embedStore.loadedRev++;
+        break;
+      case "connect":
+        // 「接続」ボタン押下に応えて拡張ホストが解決した値——ここで初めて実接続する
+        if (!isConnectPayload(msg.payload)) return;
+        embedStore.loaded = msg.payload;
         embedStore.connect = msg.payload;
         embedStore.error = undefined;
         break;
@@ -61,6 +97,9 @@ export function initEmbedBridge(): void {
       case "fileInvalid":
         if (typeof msg.message !== "string") return;
         embedStore.error = msg.message;
+        // **読めないファイルの設定を出し続けない**——出していると、入力1つで壊れたファイルを
+        // フォームの値で上書きしてしまう（設定は自動保存。D23）
+        if (msg.type === "fileInvalid") embedStore.loaded = undefined;
         break;
     }
   });

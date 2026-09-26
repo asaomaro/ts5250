@@ -5,8 +5,7 @@ import { initSkin } from "./composables/useSkin.js";
 import { initViewSettings } from "./stores/viewSettings.js";
 import { initAppearance } from "./stores/appearance.js";
 import { systemsStore } from "./stores/systems.js";
-import { initEmbedBridge, postToHost } from "./stores/embed.js";
-import type { EmbedAppKind } from "./embed-protocol.js";
+import { appKindFromQuery, initEmbedBridge, postToHost } from "./stores/embed.js";
 import "./styles.css";
 
 /**
@@ -16,10 +15,6 @@ import "./styles.css";
  * `app`はURLクエリで渡す（非秘匿・iframe初期ロード時に必要。接続情報は`postMessage`で渡す
  * ——`embedStore`参照）。
  */
-function appParam(): EmbedAppKind {
-  const v = new URLSearchParams(location.search).get("app");
-  return v === "printer" || v === "sql" || v === "ifs" ? v : "emulator";
-}
 
 initTheme();
 initSkin();
@@ -28,5 +23,5 @@ initAppearance();
 void systemsStore.refresh();
 initEmbedBridge();
 
-createApp(EmbedApp, { app: appParam() }).mount("#app");
+createApp(EmbedApp, { app: appKindFromQuery(location.search) }).mount("#app");
 postToHost({ type: "ready" });

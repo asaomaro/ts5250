@@ -307,7 +307,7 @@ const split = usePaneSplit({ initial: 220, min: 80, max: 700 });
 const listStyle = computed(() => {
   if (!selected.value) return undefined;
   if (split.maximized.value) return { display: "none" };
-  return { height: `${split.topHeight.value ?? 0}px`, flex: "none" };
+  return { height: `${split.size.value ?? 0}px`, flex: "none" };
 });
 
 onMounted(() => {

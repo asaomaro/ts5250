@@ -2,23 +2,27 @@
 /**
  * 接続情報の設定フォーム（`embed.html`専用。design.md「設計方針6」）。
  *
- * VSCode標準のQuickInputではなく、画面と地続きのフォームにする（利用者の希望）。
- * その代わり、QuickInputなら無料で付いてくるキーボード操作・フォーカス管理
- * （AC-I3/AC-I4）をここで自前実装する——`InfoPopover.vue`のバックドロップ意匠は借りるが、
- * あちらはフォーカストラップを持たない。
+ * **接続前の待機画面にそのまま置く**（`decisions.md` D23。以前はヘッダーの⚙で開くポップアップで、
+ * 「保存」ボタンを押しても`.ts5250`は未保存のまま・接続中の画面には反映されなかった）。
+ * 保存ボタンは無く、**値が変わるたびに`change`を出す**——ファイルへの書き込み（間引き）は
+ * 呼び出し側（`EmbedApp.vue`）が行う。初期値（`initial`）は生成時に1度だけ読む。
+ * 外でファイルが書き換えられたときは、呼び出し側が`key`を変えて作り直す
  */
-import { nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import type { SettingsFormValues, EmbedAppKind, WatermarkValue } from "../embed-protocol.js";
 import { HOST_CODE_PAGE_OPTIONS, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE, type ScreenSize } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
 
 const props = defineProps<{ initial?: SettingsFormValues; app: EmbedAppKind }>();
-const emit = defineEmits<{ (e: "save", v: SettingsFormValues): void; (e: "cancel"): void }>();
+const emit = defineEmits<{ (e: "change", v: SettingsFormValues): void }>();
 
 const host = ref(props.initial?.host ?? "");
 const port = ref(props.initial?.port !== undefined ? String(props.initial.port) : "");
-const tls = ref(props.initial?.tls ?? true);
+// **未指定はTLS無し**——サーバーは`tls === true`のときだけTLSにする（`ws-handler.ts`）。以前は`?? true`で、
+// `tls`を書いていないファイルの設定を開くとTLSにチェックが入り、別の項目だけ変えて保存しても
+// `"tls": true`が書かれて黙ってTLS接続に変わっていた（D19。本来のアプリも既存の編集は`?? false`）
+const tls = ref(props.initial?.tls ?? false);
 // **CCSID は自由入力ではなく、ACS の「ホスト・コード・ページ」一覧から選ばせる**
 // （`ConfigCard.vue`の`sysCodePageId`/`sesCodePageId`と同じ1本の選択肢。930はKatakana/
 // Katakana Extendedの2エントリを持つので、CCSID単体ではなくこのidが唯一の選択軸になる）
@@ -29,8 +33,8 @@ const codePageId = ref(hostCodePageOptionId(props.initial?.ccsid, props.initial?
 // ——ホストコード欄を一切触らず他の項目だけ変えて保存しても値が消えるのは事故なので、
 // 一覧に無いだけで指定自体はあった元の値を、選ばれなかった間はそのまま持ち回す
 const unrecognizedCcsid = codePageId.value === "unset" ? props.initial?.ccsid : undefined;
-// **`terminal`/`screenSize`/`deviceName`はemulatorのみ意味を持つ**（`embed-protocol.ts`の
-// `ConnectPayload`のドキュメント注記どおり）。printer(スプール表示)/sql/ifsではフォーム自体に出さない
+// **`terminal`/`screenSize`はemulatorのみ、`deviceName`はセッション（emulator・printer）のみ意味を持つ**
+// （`embed-protocol.ts`の`ConnectPayload`のドキュメント注記どおり）。spool/sql/ifsではフォーム自体に出さない
 const terminal = ref<"5250" | "3270">(props.initial?.terminal ?? "5250");
 const screenSize = ref<ScreenSize>(props.initial?.screenSize ?? DEFAULT_SCREEN_SIZE);
 const deviceName = ref(props.initial?.deviceName ?? "");
@@ -55,16 +59,25 @@ const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / 
 const user = ref(props.initial?.user ?? "");
 const password = ref("");
 
-const formEl = ref<HTMLFormElement>();
 const firstField = ref<HTMLInputElement>();
 
+// ホストが空（作ったばかりのファイル）のときだけホスト欄へ。設定済みなら「接続」を押すだけのことが多い
 onMounted(() => {
-  void nextTick(() => firstField.value?.focus());
+  if (!host.value) void nextTick(() => firstField.value?.focus());
 });
 
-function save(): void {
-  const v: SettingsFormValues = { host: host.value };
-  if (port.value !== "") v.port = Number(port.value);
+/** ポートは空（既定）か1〜65535の整数。**打ちかけの不正値では保存しない**——保存すると`port`が消える */
+const portInvalid = computed(() => {
+  const t = port.value.trim();
+  if (t === "") return false;
+  return !/^\d+$/.test(t) || Number(t) < 1 || Number(t) > 65535;
+});
+
+/** フォームの値を保存値へ畳む。不正な値があれば`undefined`（保存しない） */
+function build(): SettingsFormValues | undefined {
+  if (portInvalid.value) return undefined;
+  const v: SettingsFormValues = { host: host.value.trim() };
+  if (port.value.trim() !== "") v.port = Number(port.value.trim());
   v.tls = tls.value;
   if (codePageId.value !== "unset") {
     const opt = hostCodePageOptionOf(codePageId.value);
@@ -79,14 +92,20 @@ function save(): void {
     v.terminal = terminal.value;
     // 3270はモデルでサイズが決まる（`.ts5250`はモデル指定を持たない。design.md参照）ので送らない
     if (terminal.value !== "3270") v.screenSize = screenSize.value;
-    if (deviceName.value !== "") v.deviceName = deviceName.value;
     const wm = buildWatermark();
     if (wm) v.watermark = wm;
   }
+  if ((props.app === "emulator" || props.app === "printer") && deviceName.value !== "") v.deviceName = deviceName.value;
   if (user.value !== "") v.user = user.value;
   if (password.value !== "") v.password = password.value;
-  emit("save", v);
+  return v;
 }
+
+// 生成時（初期値の反映）は出さない——開いただけでファイルを書き換えないため
+watch([host, port, tls, codePageId, terminal, screenSize, deviceName, wmForm, user, password], () => {
+  const v = build();
+  if (v) emit("change", v);
+}, { deep: true });
 
 /** 数値入力を範囲に収める（空欄にするとNaNが入るので、そのときは既定へ戻す。`ConfigCard.vue`と同じ） */
 function clamp(value: number, min: number, max: number, fallback: number): number {
@@ -114,50 +133,19 @@ function buildWatermark(): WatermarkValue | undefined {
   return wm;
 }
 
-function cancel(): void {
-  emit("cancel");
-}
-
-/**
- * **フォーカストラップ**（AC-I3）。`Tab`/`Shift+Tab`がフォーム外へ出ないよう、
- * 最後の要素→最初の要素・最初の要素→最後の要素へ手動で回す。`Escape`はキャンセル
- * （AC-I2/AC-I4）。ブラウザ標準のTab順に任せると、フォームの外（背後の画面）へ
- * フォーカスが漏れる。
- */
-function onKeydown(ev: KeyboardEvent): void {
-  if (ev.key === "Escape") {
-    ev.preventDefault();
-    cancel();
-    return;
-  }
-  if (ev.key !== "Tab" || !formEl.value) return;
-  const focusables = Array.from(
-    formEl.value.querySelectorAll<HTMLElement>('input, select, button, [tabindex]:not([tabindex="-1"])')
-  ).filter((el) => !el.hasAttribute("disabled"));
-  if (focusables.length === 0) return;
-  const first = focusables[0]!;
-  const last = focusables[focusables.length - 1]!;
-  if (ev.shiftKey && document.activeElement === first) {
-    ev.preventDefault();
-    last.focus();
-  } else if (!ev.shiftKey && document.activeElement === last) {
-    ev.preventDefault();
-    first.focus();
-  }
-}
 </script>
 
 <template>
-  <div class="backdrop" @click="cancel" @mousedown.stop></div>
-  <form ref="formEl" class="settings-form" @click.stop @mousedown.stop @keydown="onKeydown" @submit.prevent="save">
+  <form class="settings-form" @submit.prevent>
     <div class="row">
       <label for="sf-host">ホスト</label>
       <input id="sf-host" ref="firstField" v-model="host" type="text" required />
     </div>
     <div class="row">
       <label for="sf-port">ポート</label>
-      <input id="sf-port" v-model="port" type="text" inputmode="numeric" placeholder="既定" />
+      <input id="sf-port" v-model="port" type="text" inputmode="numeric" placeholder="既定" :aria-invalid="portInvalid" />
     </div>
+    <p v-if="portInvalid" class="field-error">ポートは 1〜65535 の数字で入力してください</p>
     <div class="row">
       <label for="sf-tls">TLS</label>
       <input id="sf-tls" v-model="tls" type="checkbox" />
@@ -182,9 +170,10 @@ function onKeydown(ev: KeyboardEvent): void {
         <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
       </select>
     </div>
-    <div v-if="app === 'emulator'" class="row">
+    <div v-if="app === 'emulator' || app === 'printer'" class="row">
       <label for="sf-device">装置名</label>
-      <input id="sf-device" v-model="deviceName" type="text" placeholder="自動" />
+      <!-- プリンターは装置名が実質必須（多くのホストはプリンター装置の自動構成を断る。D20） -->
+      <input id="sf-device" v-model="deviceName" type="text" :placeholder="app === 'printer' ? '例: PRT01（プリンター装置名）' : '自動'" />
     </div>
     <!-- ウォーターマーク（画面に重ねる透かし。ACSの透かしと同じ用途——本番機と検証機を
          一目で見分ける）。emulatorのみ。文字を入れて初めて設定になるので、文字を先頭に
@@ -245,35 +234,20 @@ function onKeydown(ev: KeyboardEvent): void {
       <label for="sf-password">パスワード</label>
       <input id="sf-password" v-model="password" type="password" autocomplete="current-password" />
     </div>
-    <div class="actions">
-      <button type="button" @click="cancel">キャンセル</button>
-      <button type="submit">保存</button>
-    </div>
   </form>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: rgba(0, 0, 0, 0.4);
-}
 .settings-form {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 41;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 340px;
-  background: var(--crt-bezel, #1a1f1a);
-  border: 1px solid var(--crt-line, #333);
-  border-radius: 8px;
-  padding: 14px;
-  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.5);
+  width: 100%;
+}
+.field-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--t-red, #e06c6c);
 }
 .row {
   display: flex;
@@ -309,22 +283,6 @@ function onKeydown(ev: KeyboardEvent): void {
   background: var(--input-bg, #0b0f0b);
   border: 1px solid var(--crt-line, #333);
   border-radius: 4px;
-  cursor: pointer;
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 6px;
-}
-.actions button {
-  font-family: var(--mono);
-  font-size: 12px;
-  padding: 4px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--crt-line, #333);
-  background: transparent;
-  color: inherit;
   cursor: pointer;
 }
 </style>

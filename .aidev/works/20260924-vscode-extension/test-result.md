@@ -482,3 +482,181 @@ Playwrightの最小再現で実証したが、実際のVSCode拡張ホスト（�
 - `aidev smoke` — pass
 - 後始末: 検証用の一時サーバープロセス・一時接続設定ファイル・Playwrightスクリプト・
   一時ディレクトリは全て削除済み（PUB400への実接続以外、リポジトリへの副作用なし）。
+
+## ラウンド16（PR #414マージ後・利用者の要望「開いただけで接続しない／明示的な接続・切断ボタン」への対応）
+
+`decisions.md` D17。ブランチ`feature/vscode-extension-explicit-connect`。
+
+- `cd vscode-extension && npx tsc -b && npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **80 passed / 0 failed**（13 files）。
+  初回の全体実行で`serviceManager.integration.test.ts`の1件が実サーバー起動のタイムアウト（20秒）で
+  failしたが、単独再実行・全体再実行とも成功。実プロセスを起こす既存テストの環境依存の揺れで、
+  本変更（メッセージの配線）はこのテストの経路に触れていない。
+
+```
+ FAIL  test/serviceManager.integration.test.ts > ServiceManager 実プロセス統合 > acquireで実際にサーバーが起動し、healthzに到達し、releaseでプロセスが止まる
+Error: サーバーが起動しませんでした（port 34001）。「ts5250」出力パネルにエラーが出ていないか確認してください
+ Test Files  1 failed | 12 passed (13)
+      Tests  1 failed | 79 passed (80)
+（単独再実行: 2 passed / 全体再実行: 80 passed）
+```
+
+- `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 成功
+- `cd packages/web-ui && npx vitest run` — **2723 passed / 0 failed**（210 files）
+- **mutation検証**: (1) `stores/embed.ts`で`loaded`/`saved`も`connect`を立てる旧挙動に戻す→
+  `embed-store.test.ts`3件fail。(2) `EmbedApp.vue`の`disconnect()`を空にする→切断テスト2件fail。いずれも復元確認済み。
+- **実機（PUB400、Playwright。拡張shellの中継を模した最小shell）**:
+
+```
+1) 開いた直後: sent= [ 'ready' ] server sessions= 0 connectBtn= 1 pane= 0
+2) 接続後: sent= [ 'ready', 'connect' ] server sessions= 1 disconnectBtn= 1
+3) 切断後: server sessions= 0 connectBtn= 1 pane= 0
+```
+
+  「切断」を押さずにタブを閉じた場合（利用者の質問「ファイルを閉じればOKか」の裏取り）:
+
+```
+3) 閉じて2秒後: server sessions= 1
+3) 閉じて30秒後: server sessions= 1
+3) 閉じて60秒後: server sessions= 1
+3) 閉じて95秒後: server sessions= 0
+```
+
+- `aidev smoke` — pass
+- 後始末: 一時サーバー・一時ファイル・Playwrightスクリプトは削除済み。
+
+**未検証の穴**: 実際のVSCode拡張ホスト上での「接続」「切断」ボタンの操作は未確認（既存の環境制約）。
+拡張ホスト↔WebViewの中継は`webviewHtml.ts`のshellと同じ振り分けを模した最小shellで確認した。
+
+## ラウンド17（利用者の報告「IFSの右が空く／列をD&Dでリサイズ／SQLにページのスクロールバーが出る」への対応）
+
+`decisions.md` D18。
+
+- 実測（Playwright＋PUB400、1200×700）:
+
+```
+修正前: ifs {"docScroll":[1200,700],"inner":[1200,700],"paneBox":[652,670]}
+修正前: sql {"docScroll":[4420,700],"inner":[1200,700],"paneBox":[4420,670]}
+修正後: ifs {"docScroll":[1200,700],"inner":[1200,700],"paneBox":[1200,670]}
+修正後: sql {"scrollers":["rows-scroll: sw=4230/cw=1006 ..."],"docScroll":[1200,700],"paneBox":[1200,670]}
+修正後(450px高): sql {"docScroll":[1200,450],"inner":[1200,450],"paneBox":[1200,420]}
+IFS境界ドラッグ: [220,380,598] → 左+120 → [340,380,478] → 右−150 → [340,230,628]
+```
+
+- `npx vitest run test/pane-split.test.ts` — 5 passed。mutation（`axis`無視）で3件fail→復元。
+- `packages/web-ui` — **2731 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — 80 passed（無変更。初回1件は既知の統合テストの揺れ、再実行で成功）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 実際のVSCode上での見え方（縦スクロールバーが消えること）は未確認——headless Chromiumは
+スクロールバーが場所を取らないため、縦スクロールバーは単独では再現できなかった。ページの大きさが窓と
+一致することまでは実測済み。
+
+## ラウンド18（「開く」化・待機表示の情報・ヘッダーの名前とⓘ）
+
+`decisions.md` D19。
+
+- `packages/web-ui` — **2740 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — **81 passed**（13 files）。`protocol-sync.test.ts`（`title`追加後も一字一句一致）含む。
+- mutation: `SettingsForm.vue`のTLS既定を`?? true`へ戻す→2件fail／`sendLoaded`から`withTitle`を外す→1件fail。復元確認済み。
+- 実機（PUB400、Playwright）: emulatorに接続→ヘッダー`sample-emu`＋ⓘ→`SessionInfo`表示。スプールの待機表示（種類「スプール」・説明・設定名・ホスト・TLS無効・ユーザー・「開く」）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 実際のVSCode上での見た目は未確認（既存の環境制約）。
+
+## ラウンド19（プリンターセッションの追加・`spool`への改名）
+
+`decisions.md` D20。
+
+- `packages/web-ui` — **2745 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — **82 passed**（13 files）。
+- mutation: `isSessionApp`を`app === "emulator"`だけに戻す→1件fail（プリンターの資格情報）。復元確認済み。
+- 実機（利用者のホスト、装置`PRT_ASAO`）:
+
+```
+1) idle: kind= プリンター button= 接続 sessions= 0
+2) connected: title= sample-printer sessions= 1 disconnectBtn= 1 htmlBtn= 0
+   sent spool: CHGJOB rc= 0 DSPLIBL rc= 0
+3) 受信件数: 0 (60s)
+4) after 切断: sessions= 0 button= 接続
+対照（本来のアプリ・保存済みプリンター設定・同じ装置）: web: 受信= 0 (60s)
+OUTPUT_QUEUE_INFO: {"OUTPUT_QUEUE_NAME":"PRT_ASAO","WRITERS_TO_AUTOSTART":1,"NUMBER_OF_WRITERS":0} / スプールはREADYのまま
+```
+
+- `aidev smoke` — pass
+
+**未検証の穴**: 帳票の受信〜`PrinterPane`での表示。両ホストともプリンターセッション接続でライターが上がらず
+（本来のアプリでも同じ＝環境要因）、受信を観測できなかった。受信後の表示は本来のアプリと同じ`PrinterPane`・
+同じ`openPrinterSession`（報告の受け取りを含む）を使っている。実際のVSCode上での見た目も未確認。
+
+## ラウンド20（スプールが「5250端末」と名乗る不具合・前のビルドのサーバー再利用）
+
+`decisions.md` D21。
+
+- 修正前の再現（5種類のサンプルの`loaded`で待機表示）:
+
+```
+sample-spool.ts5250    app=spool    -> {"kind":"5250端末","rows":"設定 sample-spool ホスト 172.21.10.51 TLS 無効 装置名 自動 画面サイズ 24x80","btn":"接続"}
+```
+
+- 修正後:
+
+```
+sample.ts5250          app=emulator -> {"kind":"5250端末","rows":"設定 sample ホスト 172.21.10.51 TLS 無効 ユーザー ASAO 装置名 自動 画面サイズ 24x80","btn":"接続"}
+sample-spool.ts5250    app=spool    -> {"kind":"スプール","rows":"設定 sample-spool ホスト 172.21.10.51 TLS 無効","btn":"開く"}
+sample-printer.ts5250  app=printer  -> {"kind":"プリンター","rows":"... 装置名 PRT_ASAO","btn":"接続"}
+sample-sql.ts5250      app=sql      -> {"kind":"SQL",...,"btn":"開く"}
+sample-ifs.ts5250      app=ifs      -> {"kind":"IFS",...,"btn":"開く"}
+```
+
+- `packages/web-ui` — **2752 passed**。`vscode-extension` — **84 passed**。`vue-tsc`/`tsc -b` green。
+- mutation 2件（上記D21）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 利用者の環境でemulatorに古い画面が出た原因が「前のビルドのサーバーの再利用」だったかは
+確かめられていない（今のビルドでは再現せず）。塞いだのは確かめられた欠陥（ビルドを見ずに再利用する）である。
+
+## ラウンド21（「接続中…」が左端に出る）
+
+`decisions.md` D22。
+
+```
+before {"left":0,"width":800,"top":307}
+after {"left":368,"width":64,"top":307}
+```
+
+- `test/embed-app.test.ts` green・`vue-tsc -b` green。このラウンドでは失敗が発生していない。
+- **未検証の穴**: jsdomはレイアウトを計算しないので、自動テストでは固定していない（上の実測がChromiumでの確認）。
+
+## ラウンド22（設定を待機画面に置き、自動保存・即時反映する）
+
+`decisions.md` D23。
+
+- `packages/web-ui` — **2758 passed**（211 files）。`vue-tsc -b` green。
+- `vscode-extension` — 89 passed / 1 failed（全体実行）。落ちたのは変更と無関係の
+  `serviceManager.multiprocess.integration.test`（20秒タイムアウト）で、単独実行では2回とも合格:
+
+```
+     × 2つの別プロセスが同時にacquireしても、最終的に1つのサーバーへ収束する 20505ms
+ Test Files  1 failed | 12 passed (13)
+      Tests  1 failed | 89 passed (90)
+$ npx vitest run test/serviceManager.multiprocess.integration.test.ts   # 2回
+      Tests  1 passed (1)
+      Tests  1 passed (1)
+```
+
+- mutation 10件（D23に列挙）すべてkilled。
+- 画面（`vite build`の`embed.html`をChromiumで表示し、`loaded`を流し込んで測った）:
+
+```
+emulator 900x420 {"cardLeft":220,"cardW":460,"btnVisible":true,"pageScrollX":false}
+printer 900x600 {"cardLeft":220,"cardW":460,"btnVisible":true,"pageScrollX":false}
+sql 360x600 {"cardLeft":16,"cardW":328,"btnVisible":true,"pageScrollX":false}
+```
+
+  1回目の表示でボタンが欄の下にあり、透かしの欄があると900×700でも見えない（要スクロール）こと、カードの幅が
+  `min(460px,100%)`の循環で386pxに縮むことを見つけて直した（上が直した後）。
+
+**未検証の穴**: VSCode本体での自動保存（`document.save()`で本当にdirtyが消えるか・元に戻す履歴の粒度）と、
+テキストエディタで同時に開いて書き換えたときの即時反映は、拡張ホストのモックでしか確かめていない
+（このコンテナにVSCodeが無い）。

@@ -815,3 +815,214 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   `vscode-extension/src/protocol.ts`・`vscode-extension/src/schema.ts`・
   `vscode-extension/src/ts5250EditorProvider.ts`を変更。関連テストを新設・拡充。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D17: `.ts5250`を開いても自動接続しない——明示的な「接続」「切断」ボタンにする
+
+- **背景**: 利用者から「`.ts5250`ファイルを開くと即座に接続するので、設定だけを変えたい場合にも
+  接続されてしまう。接続は接続ボタンを明示的にクリックするようにする。切断はファイルを閉じればOKか？
+  明示的な切断ボタンを作っても良い」との要望・質問。PR #414（マージ済み）の後続作業のため、
+  新ブランチ`feature/vscode-extension-explicit-connect`で行った。
+- **調査で判明した事実**（推測で答えない）:
+  - 自動接続の発生源は2つあった: (1) WebViewの`ready`に拡張ホストが即`connect`を返していた
+    （`ts5250EditorProvider.ts`）、(2) 設定保存後の`saved`も`embedStore.connect`を書き換えており、
+    `EmbedApp.vue`のwatchが**保存のたびに再接続**していた。さらに(1)(2)とも`syncSystem`
+    （サーバーへの個人設定登録）まで走っていた——「開いただけ」「保存しただけ」でサーバー側の状態が変わっていた。
+  - **「ファイルを閉じれば切断」は即時ではない**。閉じるとWebSocketが明示的な`close`無しに落ち、
+    サーバーは「転送断」として扱い再接続の猶予（`DEFAULT_RECONNECT_GRACE_MS = 90_000`。
+    `packages/server/src/session-manager.ts:128`、判定は`session-lifetime.ts`の`decideDisposition`）の間
+    セッション＝装置を保持する。**PUB400で実測**: 閉じて2/30/60秒後はサーバーのセッション数1、95秒後に0。
+    一方、`closeSession()`（`{type:"close"}`を送る）なら即座に0になる——明示的な切断ボタンには実益がある。
+- **決定**:
+  1. **プロトコル**（`embed-protocol.ts`/`protocol.ts`。手で同期を保つ複製、`protocol-sync.test.ts`で固定）:
+     拡張→WebViewに`loaded`（表示・設定フォーム初期値用、接続しない）を追加。WebView→拡張に
+     `{type:"connect"}`（接続ボタン押下。payload無し）を追加。
+  2. **`ts5250EditorProvider.ts`**: `ready`→`sendLoaded`（`buildDisplayPayload`。**`syncSystem`を呼ばない**）。
+     `connect`要求→従来の`sendConnect`（`resolvePayload`で`syncSystem`まで解決）。`handleSave`も
+     `buildDisplayPayload`で`saved`を返し`syncSystem`を呼ばない（不要になった`localPort`引数を削除）。
+     `buildDisplayPayload`は**emulator以外のuser/passwordを剥離する**——`syncSystem`経路（`resolvePayload`）が
+     担っていた剥離をこちらでも行わないと、平文がWebViewへ漏れる（taskcheck T2の不変条件を維持）。
+  3. **`stores/embed.ts`**: `loaded`フィールドを新設。`loaded`/`saved`は`embedStore.loaded`だけを更新し
+     `connect`に触らない。`connect`だけが`embedStore.connect`（＝実接続の合図）を立てる。
+  4. **`EmbedApp.vue`**: 待機表示にホスト名と「接続」ボタン（ホスト未設定なら無効）。接続中はヘッダーに
+     「切断」ボタン——emulatorは`closeSession()`、printer/sql/ifsは`embedStore.connect`を空にしてペインを
+     アンマウント。設定フォームの初期値は`connect ?? loaded`。
+  5. **接続中に設定を保存しても自動再接続しない**——新しい設定は「切断」→「接続」で反映する
+     （「明示的な操作でだけ接続が変わる」を一貫させる）。
+- **検証**:
+  - mutation 2件: `saved`/`loaded`が`connect`も立てる旧挙動へ戻すと`embed-store.test.ts`3件がfail／
+    `disconnect()`を空にすると`embed-app.test.ts`の切断2件がfail——いずれも確認後に復元。
+  - `vscode-extension` 80 passed（`serviceManager.integration.test.ts`が全体実行時に1回だけ起動タイムアウト、
+    単独再実行・全体再実行とも成功——実プロセスを起こす既存テストの環境依存の揺れで本変更と無関係）。
+    `packages/web-ui` 2723 passed。`vue-tsc`/`tsc -b`/`vite build` green。
+  - **実機（PUB400、Playwright＋shell中継を模した最小shell）**: 開いた直後 送信=`[ready]`・サーバーの
+    セッション数0・接続ボタンあり → 接続 → セッション数1・切断ボタンあり → 切断 → **即座に**セッション数0・
+    接続ボタンに戻る。別途「切断を押さずタブを閉じる」と95秒後まで1のまま（上記）。
+- **影響**: `packages/web-ui/src/{EmbedApp.vue,embed-protocol.ts,stores/embed.ts}`・
+  `vscode-extension/src/{protocol.ts,ts5250EditorProvider.ts}`と関連テスト3ファイル。
+
+## D18: VSCode版のIFS/SQLが画面幅を使えていない問題を直し、IFSの列境界をドラッグで動かせるようにする
+
+- **背景**: 利用者から「IFSは画面全体を活用できておらず右側が空いている」「フォルダ一覧・ファイル一覧・
+  表示の間をD&Dでリサイズしたい」「SQLは縦スクロールバーと画面全体の横スクロールバーが出る。横に長い
+  結果は結果ビューの横スクロールバーが機能するべき」との報告（スクリーンショット付き）。
+- **原因（実測。PUB400でSQL/IFSペインを実際に開いてPlaywrightで計測）**:
+  `EmbedApp.vue`の`.embed-body`が行方向のflexで、ペイン（子）に`flex:1`も`min-width:0`も無かった。
+  行方向のflexの子は内容幅になる——**IFSは1200px中652px**しか使わず右が空き、**SQLは横に長い結果
+  （`SELECT * FROM QSYS2.SYSTABLES`）でペインが4420pxまで膨らみ**ページ全体が横スクロールしていた
+  （結果グリッド自身の`overflow`が効かない）。本来のアプリは`.pane-slot`（ブロック要素）に載せるので
+  この問題が起きない。縦スクロールバーはheadless Chromiumでは単独に再現できなかった（スクロールバーが
+  場所を取らない）が、ページの横スクロールバーが高さを食うことによる二次的なものと判断——修正後は
+  ページが窓とちょうど同じ大きさになる。
+- **決定**:
+  1. `EmbedApp.vue`: `.embed-body > * { flex: 1 1 auto; min-width: 0; min-height: 0; }`。
+  2. 既存の`usePaneSplit`＋`PaneSplitter`（SQL／スプールの上下の境界）に左右向き（`axis:"x"` /
+     `vertical`）を足し、IFSの「フォルダ一覧｜ファイル一覧｜表示」に2本の境界を置いた（表示は残り幅）。
+     別の部品を作らない——同じ掴み方・同じキー操作（左右キー）にするため。`topHeight`は幅にも使うので
+     `size`へ改名（呼び出し元はSqlPane/SpoolPaneの2か所）。
+  3. IfsPaneは本来のアプリと共用なので、境界ドラッグは本来のアプリのIFSでも使える。
+- **検証**:
+  - 実測（修正前→後、1200×700）: IFSペイン幅 652→1200、SQLペイン幅 4420→1200、ページのscrollWidth
+    4420→1200。修正後SQLの結果グリッド（`.rows-scroll`）は内容4230px/表示1006pxで**自身が**横スクロール。
+    450px高でもページのscrollHeight＝窓の高さ（縦にはみ出さない）。
+  - 実機でIFSの境界をドラッグ: 各列幅 [220,380,598] → 左の境界を+120 → [340,380,478] →
+    右の境界を−150 → [340,230,628]。
+  - 新設`pane-split.test.ts`（5件、`usePaneSplit`/`PaneSplitter`は従来テストが無かった）。mutation:
+    `axis`を無視させると3件fail（キーボードのテストは当初すり抜けたので、キー1回ごとに確かめる形へ直した）。
+  - `packages/web-ui` 2731 passed。`vscode-extension` 80 passed（無変更。実プロセスを起こす統合テストが
+    1回揺れたが再実行で成功——D17と同じ既知の揺れ）。
+
+## D19: 接続を持たない種類は「開く」だけにし、待機表示に「何の機能か」を、emulatorのヘッダー左に名前とⓘを出す
+
+- **背景**: 利用者の質問「スプール等、取得時に接続しており明示的な接続・切断が本来不要なものはあるか」に、
+  サーバーの実装を読んで答えた——**常時の接続を持つのはemulatorだけ**。スプール（`host-spools.ts`）とIFS
+  （`host-ifs.ts`）は操作ごとに接続して`finally`で閉じる。SQLは`db-pool.ts`がサーバー側で接続を温存し
+  （アイドル5分、鍵は資格情報単位でタブ単位ではない）、ページング用のカーソルを`result-set-store.ts`が
+  保持する（アイドル60秒、ペインのアンマウントで解放）。したがってそれらの「切断」は画面を閉じるだけだった。
+  利用者の判断で次の3点を実施:
+  1. emulatorは「接続／切断」のまま、スプール・SQL・IFSは「切断」を無くし「接続」を「開く」に。
+     **「開く」自体は残す**——開いた瞬間にペインがホストへ一覧を取りに行くので、無くすと「設定だけ直したい
+     のに取得が走る」（D17の要望）が再発する。
+  2. 待機表示にボタンだけでなく情報を出す（種類・説明・設定名・ホスト・TLS・ユーザー・CCSID、emulatorは
+     装置名・画面サイズ）。種類と説明はランチャーのカードと同じ文言——`LauncherPane.vue`の`FEATURES`を
+     `src/features.ts`へ切り出して共有した（写すと片方だけ直る）。
+  3. emulatorのヘッダー左に、本来のアプリのタブと同じ「名前＋ⓘ（`SessionInfo`）」を置く。
+- **名前**: 本来のアプリのタブ名はセッション設定の名前だが`.ts5250`には無い。**ファイル名（拡張子なし）**を
+  `ConnectPayload.title`として拡張ホストが`loaded`/`connect`/`saved`に付ける（`syncSystem`が登録する
+  システム名もファイル名なので呼び名が揃う）。これまで`openSession`のlabelは固定の`"embed"`だった。
+  ⓘに出す情報のため、`meta`に`port`/`tls`/`ccsid`/`screenSize`/`autoSignon`（パスワードがあれば）も載せた。
+- **見つけて直した既存の不具合**: 設定フォームのTLSが`props.initial?.tls ?? true`だった。サーバーは
+  `tls === true`のときだけTLSにする（`ws-handler.ts`）ので、`tls`を書いていないファイルを開くとチェックが
+  入り、**別の項目だけ変えて保存しても`"tls": true`が書かれ、黙ってTLS接続に変わっていた**。本来のアプリも
+  既存の編集は`s.tls ?? false`（`ConfigCard.vue:343`）なので`?? false`に揃えた。待機表示も未指定を「無効」と出す。
+- **検証**: `packages/web-ui` 2740 passed・`vscode-extension` 81 passed。mutation: TLS既定を`?? true`に
+  戻す→2件fail、`loaded`から`title`を外す→1件fail（いずれも復元）。実機（PUB400）でemulatorに接続し、
+  ヘッダー左に`sample-emu`とⓘ、ⓘで本来のアプリと同じ情報（種別・ホスト・CCSID・画面・デバイス名・
+  自動サインオン・ジョブ…）が出ることをスクリーンショットで確認。スプールの待機表示もスクリーンショットで確認。
+
+## D20: VSCode拡張にプリンターセッション（`app: "printer"`）を追加し、スプール表示を`app: "spool"`へ改名
+
+- **背景**: 利用者の要望「VSCode拡張機能にプリンターセッションも追加して」。既存の`app: "printer"`は
+  実は**スプール表示**（`SpoolPane`）を指しており、本来のアプリの呼び名（「プリンター」＝プリンターセッション、
+  「スプール」＝既存スプールの一覧）と食い違っていた。利用者の判断（`AskUserQuestion`）で
+  **`printer`をプリンターセッションに、スプール表示を`spool`に改名**した。拡張は未公開なので影響は手元の
+  ファイルだけ——サンプルは`sample-printer.ts5250`→`sample-spool.ts5250`へ改め、新しい
+  `sample-printer.ts5250`（装置名`PRT_ASAO`）を作った。
+- **調査で判明した事実**: サーバーはプリンターの**直接接続**（host/port/ccsid/装置名/TLS/user/password）を
+  受け付ける（`ws-handler.ts`の`onOpenPrinter`）。出力設定（自動PDF・自動印刷）は信頼設定なので直接接続の経路では
+  受け付けない——`.ts5250`のプリンターは帳票を受けて見るだけ。表示は本来のアプリと同じ`openPrinterSession()`＋
+  `PrinterPane`。プリンターは装置を掴むセッションなので**emulatorと同じく「接続／切断」・名前とⓘ**を持つ。
+- **決定**:
+  1. `EmbedAppKind`に`spool`を追加（`printer`の意味を変更）。`schema.ts`/`stores/embed.ts`の許可リストも更新。
+  2. `ts5250EditorProvider.ts`: 資格情報をWebViewへ渡す判定を「emulatorか」から`isSessionApp`（emulator・printer）へ。
+     プリンターも`WsOpen`へuser/passwordを直接渡すため。
+  3. `EmbedApp.vue`: `isSession`で接続／切断・名前とⓘ・待機表示のボタン名（接続／開く）を分岐。printerは
+     `kind:"printer"`で`openPrinterSession()`（emulator専用の端末種別・画面サイズ等は送らない）、`meta.sessionType`
+     を`printer`に。`⚙ 表示`は帳票向け項目（`REPORT_VIEW_KEYS`）をセッションIDで。⬇HTMLはemulatorだけ。
+  4. 待機表示: 種類「プリンター」・説明。装置名が未設定なら「未設定（自動構成をホストが許す場合のみ）」と出す
+     ——多くのホストはプリンター装置の自動構成を断る（`8940`。`scripts/research-msgw.mjs`）。
+  5. 設定フォーム: printerは装置名だけ出す（端末の種類・画面サイズ・透かしは画面のもの）。
+- **検証**:
+  - `packages/web-ui` 2745 passed・`vscode-extension` 82 passed。mutation: `isSessionApp`をemulatorだけに戻す→
+    プリンターの資格情報テストがfail（復元確認済み）。
+  - **実機**（利用者のホスト・PUB400、Playwright＋shell中継を模した最小shell）: 待機表示「プリンター／接続」→
+    接続でサーバーのセッション数1・ヘッダーに`sample-printer`とⓘ・切断ボタン有り・⬇HTML無し→切断で0。
+  - **帳票の受信までは確認できなかった**（未検証の穴）。`CHGJOB OUTQ(装置)`＋`DSPLIBL OUTPUT(*PRINT)`で
+    スプールを作っても両ホストで`READY`のまま、ライター無し（`OUTPUT_QUEUE_INFO`: `NUMBER_OF_WRITERS=0`）。
+    **対照実験として本来のアプリ（保存済みのプリンター設定）でも同じ条件で受信0件**だった——VSCode側の配線ではなく
+    環境（プリンターセッションを繋いでもライターが上がらない。`scripts/README.md`の既知の注意「`STRPRTWTR`が要る」と同じ）。
+    PUB400はライターを常駐させる権限が無い（`CPF3464`。`scripts/research-msgw.mjs`）。セッション中の
+    `STRPRTWTR`は`CPF3310`で通らなかった。作成したテスト用スプール（利用者ホスト3件・PUB400 2件）は削除済み。
+
+## D21: スプールの画面が「5250端末」と名乗る不具合を直し、種別の一覧を1か所にする／前のビルドのサーバーを再利用しない
+
+- **背景**: 利用者の報告「app spoolの接続画面に詳細情報が出るが5250端末になっている」「app emulatorで接続ボタン
+  しか出ず詳細情報が出ない」。
+- **スプールの原因（再現して確定）**: `embed.ts`の`appParam`が独自の種別一覧（`printer`/`sql`/`ifs`）を持ち、
+  D20で`spool`を足したときにここだけ漏れていた。`?app=spool`が`emulator`扱いになり、種類は「5250端末」、
+  中身（`loaded`）はスプールのファイル——という食い違いの画面になった。型検査では捕まらない（三項演算子は
+  正しい種別を返している）。種別の一覧は**4か所に書き写されていた**（型・`schema.ts`・`stores/embed.ts`・`embed.ts`）。
+  → `EMBED_APP_KINDS`（`embed-protocol.ts`/`protocol.ts`。手で同期を保つ複製）を唯一の一覧にし、検証する側は
+  全部これを参照する。`appParam`は`stores/embed.ts`の`appKindFromQuery`へ出してテスト可能にし、
+  `EMBED_APP_KINDS`の全要素で回すテストを置いた（足しても自動で検査対象に入る）。
+- **emulatorの症状は今のビルドでは再現しなかった**: `sample.ts5250`から拡張ホストが作るのと同じ`loaded`で
+  表示すると、種類「5250端末」・設定・ホスト・TLS・ユーザー・装置名・画面サイズが正しく出た。報告の見た目
+  （ホスト名と接続ボタンだけ）は**情報カードを入れる前（D17/D18）のビルドの画面**そのもの。原因として
+  確かめられた事実: `ServiceManager.acquire`は生きている既存サーバーをhealthzだけで再利用し、**どのビルドが
+  起動したかを見ていない**。ロック（`globalStorage/service.json`）は拡張を入れ直しても残り、`.vsix`の版数は
+  0.1.0のまま中身だけ変わるので、前のビルドのサーバーが生きていれば新しい拡張から古い画面が出る。
+  **これが今回の原因だったかは確かめられていない**（利用者の環境のプロセスを見られない）が、起きうる欠陥なので塞いだ。
+  → ロックに`buildId`（同梱の`main.js`と`embed.html`の中身のハッシュ。`embed.html`はViteのハッシュ付き資産名を
+  含むのでWeb UIが変われば必ず変わる）を記録し、違えば古いサーバーを止めて起動し直す（止めないと孤児になる）。
+- **検証**: `packages/web-ui` 2752 passed・`vscode-extension` 84 passed。mutation: `appKindFromQuery`を旧来の
+  手書き一覧へ戻す→`?app=spool`のテストがfail／`buildId`を見ずに再利用する→ビルド違いのテストがfail（いずれも復元）。
+  ServiceManagerの新テストは`process.kill`をモックし大きなダミーpidで行う（D3の教訓——pid 1へのSIGTERM）。
+  5種類のサンプルファイルの待機表示を実画面で確認: emulator=5250端末/printer=プリンター/spool=スプール/
+  sql=SQL/ifs=IFS、それぞれ詳細とボタン（接続/開く）が正しい。
+
+## D22: 「接続中…」を横方向でも中央に置く
+
+- **背景**: 利用者の報告「接続中の表示が、高さは中央だが左端に出る」。
+- **原因**: D18で足した`.embed-body > * { flex: 1 1 auto }`（ペインに幅いっぱいを与える規則）が、ペインではない
+  文言の`<p class="status">`にも掛かっていた。幅いっぱいに伸びるので`margin: auto`の横方向が効かず、文字は左寄せになる
+  （縦は交差軸なので`margin: auto`が効いたまま）。
+- **決定**: `.status`だけ`flex: 0 1 auto`で打ち消す（後に書かれた同じ詳細度の規則が勝つ）。ペイン側の規則は変えない。
+- **検証**: Chromiumで同じCSSを当てて測った（800×600）: 修正前`left 0 / width 800`→修正後`left 368 / width 64`
+  （中心400）。縦位置は変わらない（`top 307`）。待機カード（`.status.idle`）は元から中身の幅で中央にあり、見た目は変わらない。
+
+## D23: 設定は待機画面に置いて編集のたびに自動保存し、ヘッダーの⚙（ポップアップ）を廃止する
+
+- **背景**: 利用者の要望——(1)設定画面で編集したら保存されるようにする（明示的なファイル保存が要った）、
+  (2)保存後に開き直さないと反映されない、(3)接続後の画面からは即時反映が難しいので、ヘッダーの設定呼び出しは
+  廃止して最初の接続画面に設定を置く、(4)ポップアップでの接続情報の編集は廃止する。
+- **(1)の原因**: `handleSave`は`WorkspaceEdit`を当てるだけで、文書は未保存（dirty）のまま残っていた。
+  → `applyEdit`の後に`document.save()`まで行う。失敗は`saveError`（「ファイルへの書き込みに失敗しました」）。
+- **(2)の原因（コードで確かめた事実）**: 設定フォームの初期値は`embedStore.connect ?? embedStore.loaded`で、
+  **接続した後は保存しても`connect`（接続時の値）が優先**されて古い値が出ていた。spool/sql/ifsは切断が無いので
+  `connect`が消えず、ペインも接続時の`systemRef`のまま。加えて、テキストとして直接書き換えても
+  WebViewへ知らせる経路が無かった（`onDidChangeTextDocument`を購読していなかった）。
+  → 初期値は`loaded`（ファイルの現在値）だけを見る。拡張ホストは`onDidChangeTextDocument`で`loaded`を送り直す。
+- **決定（画面）**: 待機画面のカードに「種類・説明・ファイル名・接続/開くボタン・設定の欄」を置く。ボタンは欄の上
+  （欄が多いと下はスクロールしないと見えない。Chromiumで900×420でも見えることを実測）。
+  読み取り専用の一覧（ホスト・TLS等の行）は欄と重複するので外した。ヘッダーの⚙と`SettingsForm`のポップアップ
+  （バックドロップ・フォーカストラップ・Escape・保存/キャンセル）は廃止。spool/sql/ifsには「閉じる」を置き、
+  待機画面（設定）へ戻れるようにした（戻れないと、開いた後に設定を変える手段が無くなる）。
+- **自動保存の設計**:
+  - `SettingsForm`は値が変わるたびに`change`を出し、`EmbedApp`が400msで間引いて`save`を送る
+    （1文字ごとに書くとVSCodeの元に戻す履歴が1文字単位になる）。生成時（初期値の反映）は出さない。
+  - ポートが打ちかけの不正値（数字以外・範囲外）の間は保存しない（保存すると`port`が消える）。
+  - 「接続」は間引き中の保存を先に送る。拡張ホストは**メッセージを1つずつ順に処理する**ようにした——
+    並行に処理すると`save`の`applyEdit`が終わる前に`connect`がファイルを読み、古い設定で繋がる。
+  - 自分の書き込みでも`onDidChangeTextDocument`は来る。そのたびに`loaded`を送るとフォームが作り直されて
+    入力中の文字が消えるので、**書いた内容と同じなら送らない**。比較はキューの中で行う——通知は`applyEdit`の
+    最中に同期的に来るので、その時点では書いた内容の記録がまだ更新されていない（テストで再現してから直した）。
+  - フォームは`loadedRev`（`loaded`を受けた回数。`saved`では進まない）を`key`にし、外で書き換えられたときだけ
+    作り直す。そのとき間引き中だった古い入力は捨てる（書き換えを上書きしない）。
+  - `fileInvalid`で`loaded`を捨て、読めないファイルのときはフォームを出さない——出していると入力1つで
+    壊れたファイルを上書きする（保存は既定の`app: "emulator"`を土台にするので、別種別のファイルでも起きる）。
+- **退けた案**: 接続中にも設定を開けるようにし、保存したら自動で再接続する——利用者が「即時反映は難しいので
+  廃止」と判断済み。接続中の再接続は入力中の画面を失わせるので、明示的な「切断→編集→接続」の方が安全。
+- **検証**: web-ui 2758 passed（211 files）・vscode-extension 90中89 passed（落ちた1件は
+  `serviceManager.multiprocess.integration.test`の20秒タイムアウト。単独で2回とも合格——全体実行の負荷で遅れる既知の揺れ）。
+  mutation 10件すべてfail（キュー無し・`document.save`無し・自己書き込みの比較をキュー外・購読解除無し・接続前の保存送り無し・
+  `saved`でも`loadedRev`を進める・生成時に`change`・`fileInvalid`で`loaded`を残す・外の書き換えで間引きを捨てない・
+  ポート検査無し）。画面は`vite build`したものをChromiumで表示して確認（下記test-result）。

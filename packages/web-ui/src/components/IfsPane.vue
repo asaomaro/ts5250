@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import LoadingBar from "./LoadingBar.vue";
+import PaneSplitter from "./PaneSplitter.vue";
+import { usePaneSplit } from "../composables/usePaneSplit.js";
 import { useDelayedLoading } from "../composables/useDelayedLoading.js";
 import { useIfsTree } from "../composables/useIfsTree.js";
 import { usePreview } from "../composables/usePreview.js";
@@ -46,6 +48,13 @@ import { TEXT_CCSIDS, ccsidLabel } from "@ts5250/ebcdic/catalog";
  * 宛先が食い違う経路ができる。`PanePool` が配る値だけを使う。
  * 設定から消えたときは `undefined`（銘板はプールが出す。ここは操作させないだけでよい）。
  */
+/**
+ * 「フォルダ一覧｜ファイル一覧｜表示」の境界をドラッグで動かす（利用者の要望。
+ * `20260924-vscode-extension` D18）。SQL／スプールの上下の境界と同じ`usePaneSplit`を
+ * 左右向き（`axis: "x"`）で使う。表示は残りの幅を全部使う
+ */
+const treeSplit = usePaneSplit({ initial: 220, min: 120, max: 600, axis: "x" });
+const listSplit = usePaneSplit({ initial: 380, min: 180, max: 1400, axis: "x" });
 const props = defineProps<{ tabId: string; active?: boolean; system?: string }>();
 
 const ROOT = "/";
@@ -836,7 +845,7 @@ void (async () => {
 
     <div class="body" :class="{ dragging }">
       <!-- 左: 階層ツリー。展開されている経路だけを平坦化して並べる -->
-      <nav class="tree" aria-label="フォルダ">
+      <nav class="tree" aria-label="フォルダ" :style="{ width: `${treeSplit.size.value}px` }">
         <div
           v-for="r in treeRows"
           :key="r.path"
@@ -861,13 +870,14 @@ void (async () => {
           </button>
         </div>
       </nav>
+      <PaneSplitter vertical :split="treeSplit" label="フォルダ一覧の幅" />
 
       <!--
         **listbox ではなく list**。行は「開く / プレビューする」というコマンドで、
         フォルダ行には操作ボタン（…）が入る——ARIA の option は操作可能な子孫を持てないため、
         option のままだとボタンが支援技術に伝わらない。選択中は `aria-current` で示す
       -->
-      <ul class="entries" role="list">
+      <ul class="entries" role="list" :style="{ width: `${listSplit.size.value}px` }">
         <!--
           先頭の「上位フォルダへ」。**ルートでは出さない**（押せない行を残さない）。
           フォルダ行と同じ操作（クリック / Enter / Space）で動くが、
@@ -922,6 +932,7 @@ void (async () => {
           （空のフォルダ）
         </li>
       </ul>
+      <PaneSplitter vertical :split="listSplit" label="ファイル一覧の幅" />
 
       <section class="preview">
         <template v-if="preview.state.value">
@@ -1074,11 +1085,13 @@ header {
   cursor: pointer;
   padding: 0 2px;
 }
+/* 幅は`treeSplit`が持つ（境界の罫線は`PaneSplitter`が描くので自前のborderは持たない） */
 .tree {
-  width: 220px;
-  min-width: 140px;
+  /* 縮めることは許す（`flex-shrink: 1`）——狭い窓や大きくドラッグしたあとでも列の合計が
+     ペインをはみ出さず、ページ全体の横スクロールを出さない（D18） */
+  flex: 0 1 auto;
+  min-width: 80px;
   overflow: auto;
-  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
 }
@@ -1126,13 +1139,14 @@ header {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
 }
+/* 幅は`listSplit`が持つ。残りは表示（`.preview`の`flex: 1`）が使う */
 .entries {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 120px;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow: auto;
-  border-right: 1px solid var(--line);
 }
 .entries li {
   display: flex;
@@ -1187,9 +1201,10 @@ header {
   color: var(--muted);
   cursor: default;
 }
+/* 最低限の幅を残す——狭い窓では一覧側（`flex-shrink: 1`）が先に縮み、表示が潰れない（D18） */
 .preview {
   flex: 1;
-  min-width: 0;
+  min-width: 160px;
   padding: 8px;
   overflow: auto;
   display: flex;

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ServiceManager } from "./serviceManager.js";
 import { ExtensionSecretCrypto } from "./secretCrypto.js";
@@ -68,6 +68,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     connectionsPath: join(globalStorageDir, "connections.json"),
     secretKeyFilePath: join(globalStorageDir, ".env"),
     windowId: randomUUID(),
+    ...buildIdOption(serverMainPath, webRootPath),
     // spawn直後、成否が分かる前から流す（`serviceManager.ts`の`onChildOutput`コメント参照）。
     // 以前はここ（`acquire()`が返した後）でしか配線しておらず、起動に失敗したときの
     // 診断出力が失われていた
@@ -120,7 +121,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secretCrypto,
     acquireService,
     releaseService,
-    // プリンター(スプール表示)/sql/ifs用（03-sql-ifs）。ローカルサーバーのportは
+    // スプール/sql/ifs用（03-sql-ifs）。ローカルサーバーのportは
     // 呼び出し側（Ts5250EditorProvider）が`acquireService()`の結果から都度渡す
     syncSystem: (localPort, input) => syncSystem(input, { port: localPort, mappingFilePath: systemRefsPath }),
     log: (message) => output.appendLine(message)
@@ -143,4 +144,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   /* 後片付けは`context.subscriptions`に登録済み（VSCodeが拡張の無効化時に順にdisposeする） */
+}
+
+/**
+ * 同梱サーバー／Web UIのビルドを識別する値（`ServiceManager`の`buildId`。D21）。
+ * **版数ではなく中身から作る**——`.vsix`の版数は据え置きのまま中身だけ変わるため。`embed.html`は
+ * Viteが付けるハッシュ付きの資産名を含むので、Web UIが変われば必ず変わる。読めなければ比べない
+ */
+function buildIdOption(serverMainPath: string, webRootPath: string): { buildId?: string } {
+  try {
+    const h = createHash("sha256");
+    h.update(readFileSync(serverMainPath));
+    h.update(readFileSync(join(webRootPath, "embed.html")));
+    return { buildId: h.digest("hex").slice(0, 16) };
+  } catch {
+    return {};
+  }
 }

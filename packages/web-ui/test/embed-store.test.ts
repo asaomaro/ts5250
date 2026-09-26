@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { embedStore, initEmbedBridge, postToHost } from "../src/stores/embed.js";
+import { appKindFromQuery, embedStore, initEmbedBridge, postToHost } from "../src/stores/embed.js";
+import { EMBED_APP_KINDS } from "../src/embed-protocol.js";
 
 /**
  * `embed.html` ⇄ 拡張ホストの`postMessage`橋渡し
@@ -30,21 +31,64 @@ describe("initEmbedBridge", () => {
   const fromParent = (data: unknown) => new MessageEvent("message", { data, source: window });
 
   beforeEach(() => {
+    embedStore.loaded = undefined;
     embedStore.connect = undefined;
     embedStore.error = undefined;
   });
 
-  it("connect メッセージで embedStore.connect を更新する", () => {
+  /**
+   * **`loaded`/`saved`は接続の合図ではない**（`20260924-vscode-extension` D17。
+   * ファイルを開く／保存しただけでは接続しない、という利用者の要望）。
+   * `connect`（「接続」ボタン押下に応えた拡張ホストからの応答）だけが
+   * `embedStore.connect`を立てる。
+   */
+  it("loaded メッセージは embedStore.loaded だけを更新し、connect には触れない", () => {
     const payload = { app: "emulator" as const, host: "h1" };
-    window.dispatchEvent(fromParent({ type: "connect", payload }));
-    expect(embedStore.connect).toEqual(payload);
+    window.dispatchEvent(fromParent({ type: "loaded", payload }));
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.connect).toBeUndefined();
     expect(embedStore.error).toBeUndefined();
   });
 
-  it("saved メッセージも connect と同じ扱い", () => {
+  it("connect メッセージは embedStore.connect と embedStore.loaded の両方を更新する", () => {
+    const payload = { app: "emulator" as const, host: "h1" };
+    window.dispatchEvent(fromParent({ type: "connect", payload }));
+    expect(embedStore.connect).toEqual(payload);
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.error).toBeUndefined();
+  });
+
+  it("saved メッセージは embedStore.loaded だけを更新し、connect には触れない（保存しただけでは接続しない）", () => {
     const payload = { app: "sql" as const, host: "h2", systemRef: "own:1" };
     window.dispatchEvent(fromParent({ type: "saved", payload }));
-    expect(embedStore.connect).toEqual(payload);
+    expect(embedStore.loaded).toEqual(payload);
+    expect(embedStore.connect).toBeUndefined();
+  });
+
+  it("saved は既に接続中（connectが立っている）でもconnectを上書きしない", () => {
+    const connected = { app: "sql" as const, host: "h1", systemRef: "own:1" };
+    window.dispatchEvent(fromParent({ type: "connect", payload: connected }));
+    const savedLater = { app: "sql" as const, host: "h2", systemRef: "own:1" };
+    window.dispatchEvent(fromParent({ type: "saved", payload: savedLater }));
+    expect(embedStore.connect).toEqual(connected); // 接続中のセッションはsaveで変わらない
+    expect(embedStore.loaded).toEqual(savedLater); // 表示用の値だけ最新化される
+  });
+
+  /** 設定フォームは`loadedRev`を`key`にする（D23）——自分の自動保存の応答（saved）で作り直すと入力中の文字が消える */
+  it("loadedRev は loaded でだけ進み、saved では進まない", () => {
+    const before = embedStore.loadedRev;
+    window.dispatchEvent(fromParent({ type: "saved", payload: { app: "emulator", host: "h" } }));
+    expect(embedStore.loadedRev).toBe(before);
+    window.dispatchEvent(fromParent({ type: "loaded", payload: { app: "emulator", host: "h" } }));
+    expect(embedStore.loadedRev).toBe(before + 1);
+  });
+
+  it("fileInvalid は loaded を捨てる（読めないファイルの設定を出し続けると、入力1つで上書きしてしまう）が、saveError は捨てない", () => {
+    window.dispatchEvent(fromParent({ type: "loaded", payload: { app: "emulator", host: "h" } }));
+    window.dispatchEvent(fromParent({ type: "saveError", message: "競合" }));
+    expect(embedStore.loaded).toBeDefined();
+    window.dispatchEvent(fromParent({ type: "fileInvalid", message: "JSON不正" }));
+    expect(embedStore.loaded).toBeUndefined();
   });
 
   it("saveError/fileInvalid メッセージで embedStore.error を更新する", () => {
@@ -77,5 +121,29 @@ describe("initEmbedBridge", () => {
   it("messageが文字列でない（数値等）saveError/fileInvalidは無視する", () => {
     window.dispatchEvent(fromParent({ type: "saveError", message: 42 }));
     expect(embedStore.error).toBeUndefined();
+  });
+});
+
+/**
+ * URLクエリの種別（D21）。以前は`embed.ts`が独自の一覧を持ち、D20で`spool`を足したときに漏れて
+ * スプールの画面が`emulator`（「5250端末」）として出た。**一覧（`EMBED_APP_KINDS`）の全要素で回す**
+ * ので、種別を足しても自動で検査対象に入る
+ */
+describe("appKindFromQuery", () => {
+  it.each(EMBED_APP_KINDS)("?app=%s はその種別として読む", (kind) => {
+    expect(appKindFromQuery(`?app=${kind}`)).toBe(kind);
+  });
+
+  it("未知の値・未指定は emulator", () => {
+    expect(appKindFromQuery("?app=printer2")).toBe("emulator");
+    expect(appKindFromQuery("")).toBe("emulator");
+  });
+
+  it("spool のメッセージも受け付ける（許可リストが一覧と同じ）", () => {
+    initEmbedBridge();
+    embedStore.loaded = undefined;
+    const payload = { app: "spool" as const, host: "h" };
+    window.dispatchEvent(new MessageEvent("message", { data: { type: "loaded", payload }, source: window }));
+    expect(embedStore.loaded).toEqual(payload);
   });
 });

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
- * プリンター(スプール表示)・SQL・IFS用の個人設定（`own:<id>`）を、spawnしたサーバーの
+ * スプール・SQL・IFS用の個人設定（`own:<id>`）を、spawnしたサーバーの
  * `/api/systems`へ登録・同期する。`vscode`モジュールに依存しない純粋ロジック
  * （`ExtensionSecretCrypto`での復号は呼び出し側が行い、ここには平文を渡すだけ）。
  *
