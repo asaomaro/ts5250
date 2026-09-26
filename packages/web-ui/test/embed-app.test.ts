@@ -123,7 +123,9 @@ describe("EmbedApp: app種別ごとのマウント分岐", () => {
  */
 describe("EmbedApp: 接続は明示的な「接続」ボタンから", () => {
   function stubParentPostMessage(): ReturnType<typeof vi.fn> {
-    const post = vi.fn();
+    // **本物と同じく構造化複製を通す**（D34）。素の`vi.fn()`だと Vue のリアクティブ値（Proxy）もそのまま受け取れてしまい、
+    // 実際のブラウザで`DataCloneError`になる送信を見逃した
+    const post = vi.fn((msg: unknown) => void structuredClone(msg));
     vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage: post } as unknown as Window);
     return post;
   }
@@ -306,7 +308,9 @@ describe("EmbedApp: 再接続の二重発火防止（taskcheck T6の指摘）", 
  */
 describe("EmbedApp: 待機画面の設定フォーム（自動保存）", () => {
   function stubParentPostMessage() {
-    const post = vi.fn();
+    // **本物と同じく構造化複製を通す**（D34）。素の`vi.fn()`だと Vue のリアクティブ値（Proxy）もそのまま受け取れてしまい、
+    // 実際のブラウザで`DataCloneError`になる送信を見逃した
+    const post = vi.fn((msg: unknown) => void structuredClone(msg));
     const fakeParent = { postMessage: post } as unknown as Window;
     vi.spyOn(window, "parent", "get").mockReturnValue(fakeParent);
     return post;

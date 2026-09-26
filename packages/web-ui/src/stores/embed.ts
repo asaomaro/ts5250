@@ -45,7 +45,11 @@ export const embedStore = reactive<{
  */
 export function postToHost(msg: WebviewToHostMessage): void {
   if (window.parent === window) return;
-  window.parent.postMessage(msg, "*");
+  // **素の JSON に写してから送る**（`20260924-vscode-extension` D34）。Vue のリアクティブ値（`ref`/`reactive` の中身＝Proxy）は
+  // `postMessage` の構造化複製ができず `DataCloneError` になる——保存ボタン（D33）で入力中の値を`ref`に持つようにした結果、
+  // 「保存」も「接続」も送れず「保存しています…」のまま止まった（実際の VSCode で再現。jsdom のテストは`postMessage`を
+  // 差し替えるので複製を通らず、気づけなかった）。メッセージは JSON で表せる値だけなので、ここで一律に写せば呼び出し側を問わない
+  window.parent.postMessage(JSON.parse(JSON.stringify(msg)) as WebviewToHostMessage, "*");
 }
 
 const APP_KINDS: readonly string[] = EMBED_APP_KINDS;

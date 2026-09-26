@@ -106,8 +106,12 @@ function build(): SettingsFormValues | undefined {
 }
 
 // 生成時（初期値の反映）は出さない——開いただけでファイルを書き換えないため
+// **`flush: "sync"`**——入力の直後（同じ処理の中）に「接続」が押されても、その時点で呼び出し側が変更を知っているようにする。
+// 既定（描画前にまとめて）だと、入力と押下が同じ処理で起きたとき`change`が押下より後に届き、保存を飛ばして古い設定で繋いだ
+// （実際の VSCode で再現。D34）
 watch([host, port, tls, codePageId, terminal, screenSize, deviceName, wmForm, user, password], () => emit("change", build()), {
-  deep: true
+  deep: true,
+  flush: "sync"
 });
 
 /** 数値入力を範囲に収める（空欄にするとNaNが入るので、そのときは既定へ戻す。`ConfigCard.vue`と同じ） */
