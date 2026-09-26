@@ -737,12 +737,12 @@ Web UIの全体実行は省いた（アイコンのみ）。このラウンド�
 `decisions.md` D28。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。見本と生成した全形式を並べて目視。
 生成は5.9秒（1024pxのPNGを含む）。Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
 
-## ラウンド28（ブロックカーソルで`S`を反転表示）
+## ラウンド28（ブロックカーソルで`S`を反転表示。D30で破棄）
 
 `decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
 Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
 
-## ラウンド28（`T`にブロックカーソルを重ねる）
+## ラウンド29（`T`にブロックカーソルを重ねる）
 
-`decisions.md` D29。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
+`decisions.md` D30。`test/app-icons.test.ts` 3 passed（色と描く順序の検査を追加）・`gen-icons.mjs --check` exit 0。生成した全形式を並べて目視。
 Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
