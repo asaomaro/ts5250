@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { As400Error } from "@ts5250/base";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { upgradeWebSocket } from "@hono/node-server";
@@ -371,8 +371,19 @@ export function buildApp(deps: AppDeps): Hono<{ Variables: AuthVars }> {
      * 返る。実機（起動したサーバーへの実リクエスト）で確認して見つかった
      * （`.aidev/works/20260924-vscode-extension/01-embed-ui`のtest工程）
      */
-    app.use("/embed.html", serveStatic({ root }));
-    app.get("*", serveStatic({ path: "index.html", root }));
+    /**
+     * **入口の HTML（`embed.html`・`index.html`）は毎回問い合わせさせる**（`Cache-Control: no-cache`）。
+     * 付けないとブラウザが最終更新日時から勝手に鮮度を見積もってキャッシュし、**更新後も古いビルドの画面が出続ける**——
+     * VSCode 拡張を入れ直したのに古い JS（ハッシュ付きの別名）を読み続けるのを実際の VSCode で観測した
+     * （`20260924-vscode-extension` D34）。`/assets/*` は名前にハッシュが入るのでキャッシュさせてよい
+     */
+    // `serveStatic`の`onFound`は応答を作った後に呼ばれ、そこで付けたヘッダーは載らない——応答の後から付ける
+    const noCache: MiddlewareHandler = async (c, next) => {
+      await next();
+      if (c.res.ok) c.res.headers.set("Cache-Control", "no-cache");
+    };
+    app.use("/embed.html", noCache, serveStatic({ root }));
+    app.get("*", noCache, serveStatic({ path: "index.html", root }));
   } else {
     app.get("/", (c) =>
       c.html("<!doctype html><title>5250</title><p>Web UI を配信するには --web-root を指定してください。</p>")

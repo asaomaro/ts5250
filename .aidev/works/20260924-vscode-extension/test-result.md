@@ -770,3 +770,28 @@ Web UIの全体実行は省いた（アイコンのみ）。このラウンド�
 - 画面: `vite build`の`embed.html`をChromiumで表示し、空のプリンター設定（`new.ts5250prt`）を流し込んでホストを入力——
   `{"state":"未保存の変更があります","saveDisabled":false,"connectDisabled":false}`。ファイル名表示は`new.ts5250prt`。
 - **未検証の穴**: VSCode本体で新しい拡張子のファイルが本拡張で開くか（`package.json`の`customEditors`）は、テストで表と突き合わせただけ。
+
+## ラウンド32（保存・接続が送れない不具合／入口の HTML のキャッシュ）
+
+`decisions.md` D34。
+
+- 実際の VSCode（1.139、`@vscode/test-electron`＋CDP）で再現してから直した:
+
+```
+after click: 保存しています…
+still after 10s: 保存しています…
+console: ["error: DataCloneError: Failed to execute 'postMessage' on 'Window': #<Object> could not be cloned."]
+```
+
+  修正後:
+
+```
+after click: 保存しています…
+after 1874ms: 保存しました
+{ "host": "E2E-HOST", "tls": false }
+```
+
+- `packages/web-ui` の対象テスト（embed-store / embed-app / settings-form）100 passed。`packages/server` の web-static-icons 10 passed。
+- `packages/server` の全体実行で2件（`app-auth`・`printer-hold-mcp`）が約5〜11秒のタイムアウトで落ちた。単独で回しても同じ——
+  同じマシンで別セッションの負荷テストが動いており（利用者の説明）、判定できなかった。**未検証の穴**として残す（負荷の無いときに再実行が要る）。
+- 利用者の指示で、以降の検証は利用者の環境で行う（vsix を渡した）。

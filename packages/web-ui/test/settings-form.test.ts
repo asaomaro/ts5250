@@ -35,6 +35,15 @@ describe("SettingsForm", () => {
     expect(document.activeElement).not.toBe(w.get("#sf-host").element);
   });
 
+  it("入力した同じ処理の中で change が届く（直後に「接続」を押されても変更を取りこぼさない。D34）", () => {
+    const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
+    const el = w.get("#sf-host").element as HTMLInputElement;
+    el.value = "NOW";
+    el.dispatchEvent(new Event("input"));
+    // await しない——描画を待たずに届いていること
+    expect(last(w)).toMatchObject({ host: "NOW" });
+  });
+
   it("生成しただけ（初期値の反映）ではchangeを出さない——開いただけでファイルを書き換えない", async () => {
     const w = mount(SettingsForm, {
       props: { app: "emulator", initial: { host: "H", port: 23, watermark: { text: "x" } } },

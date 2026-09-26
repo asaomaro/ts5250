@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../src/app.js";
@@ -70,5 +70,26 @@ describe("アイコンの静的配信", () => {
     const res = await app(webRoot()).request("/embed.html?app=emulator");
     expect(res.status).toBe(200);
     expect(await res.text()).toMatch(/ui embed/);
+  });
+});
+
+/**
+ * 入口の HTML は毎回問い合わせさせる（D34）。キャッシュされると、更新後も古いビルドの画面（古い JS）が出続ける——
+ * VSCode 拡張を入れ直したのに直した不具合が再現し続けるのを実際に観測した
+ */
+describe("入口の HTML のキャッシュ", () => {
+  it.each(["/embed.html", "/", "/some/spa/route"])("%s は Cache-Control: no-cache", async (path) => {
+    const res = await app(webRoot()).request(path);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("ハッシュ付きの /assets/* には no-cache を付けない（名前が変わるのでキャッシュしてよい）", async () => {
+    const dir = webRoot();
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "assets", "app-abc123.js"), "console.log(1)");
+    const res = await app(dir).request("/assets/app-abc123.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBeNull();
   });
 });

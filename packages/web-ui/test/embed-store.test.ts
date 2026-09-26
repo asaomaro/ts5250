@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { reactive } from "vue";
 import { appKindFromQuery, embedStore, initEmbedBridge, postToHost } from "../src/stores/embed.js";
 import { EMBED_APP_KINDS } from "../src/embed-protocol.js";
 
@@ -10,6 +11,19 @@ describe("postToHost", () => {
   it("親フレームが無ければ何もしない（トップレベルでブラウザ単体で開いた場合）", () => {
     // jsdom の既定は window.parent === window
     expect(() => postToHost({ type: "ready" })).not.toThrow();
+  });
+
+  /**
+   * **Vue のリアクティブ値を含んでも送れる**（D34）。ブラウザの`postMessage`は構造化複製で、Proxy（`ref`/`reactive`の中身）は
+   * `DataCloneError`になる——保存ボタンで入力中の値を`ref`に持った結果、実際の VSCode で「保存」も「接続」も送れなくなった
+   */
+  it("リアクティブ値（Proxy）を含むメッセージも素の値にして送る", () => {
+    const post = vi.fn((msg: unknown) => void structuredClone(msg));
+    vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage: post } as unknown as Window);
+    const payload = reactive({ host: "AS400", watermark: { text: "検証機" } });
+    expect(() => postToHost({ type: "save", payload })).not.toThrow();
+    expect(post).toHaveBeenCalledWith({ type: "save", payload: { host: "AS400", watermark: { text: "検証機" } } }, "*");
+    vi.restoreAllMocks();
   });
 
   it("親フレームがあれば postMessage する", () => {
