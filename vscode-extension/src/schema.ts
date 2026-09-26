@@ -29,7 +29,7 @@ export interface Ts5250File {
   };
 }
 
-const APP_KINDS: readonly EmbedAppKind[] = ["emulator", "printer", "sql", "ifs"];
+const APP_KINDS: readonly EmbedAppKind[] = ["emulator", "printer", "spool", "sql", "ifs"];
 
 export type ParseResult = { ok: true; file: Ts5250File } | { ok: false; error: string };
 

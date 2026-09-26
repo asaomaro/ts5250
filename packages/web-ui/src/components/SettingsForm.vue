@@ -32,8 +32,8 @@ const codePageId = ref(hostCodePageOptionId(props.initial?.ccsid, props.initial?
 // ——ホストコード欄を一切触らず他の項目だけ変えて保存しても値が消えるのは事故なので、
 // 一覧に無いだけで指定自体はあった元の値を、選ばれなかった間はそのまま持ち回す
 const unrecognizedCcsid = codePageId.value === "unset" ? props.initial?.ccsid : undefined;
-// **`terminal`/`screenSize`/`deviceName`はemulatorのみ意味を持つ**（`embed-protocol.ts`の
-// `ConnectPayload`のドキュメント注記どおり）。printer(スプール表示)/sql/ifsではフォーム自体に出さない
+// **`terminal`/`screenSize`はemulatorのみ、`deviceName`はセッション（emulator・printer）のみ意味を持つ**
+// （`embed-protocol.ts`の`ConnectPayload`のドキュメント注記どおり）。spool/sql/ifsではフォーム自体に出さない
 const terminal = ref<"5250" | "3270">(props.initial?.terminal ?? "5250");
 const screenSize = ref<ScreenSize>(props.initial?.screenSize ?? DEFAULT_SCREEN_SIZE);
 const deviceName = ref(props.initial?.deviceName ?? "");
@@ -82,10 +82,10 @@ function save(): void {
     v.terminal = terminal.value;
     // 3270はモデルでサイズが決まる（`.ts5250`はモデル指定を持たない。design.md参照）ので送らない
     if (terminal.value !== "3270") v.screenSize = screenSize.value;
-    if (deviceName.value !== "") v.deviceName = deviceName.value;
     const wm = buildWatermark();
     if (wm) v.watermark = wm;
   }
+  if ((props.app === "emulator" || props.app === "printer") && deviceName.value !== "") v.deviceName = deviceName.value;
   if (user.value !== "") v.user = user.value;
   if (password.value !== "") v.password = password.value;
   emit("save", v);
@@ -185,9 +185,10 @@ function onKeydown(ev: KeyboardEvent): void {
         <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
       </select>
     </div>
-    <div v-if="app === 'emulator'" class="row">
+    <div v-if="app === 'emulator' || app === 'printer'" class="row">
       <label for="sf-device">装置名</label>
-      <input id="sf-device" v-model="deviceName" type="text" placeholder="自動" />
+      <!-- プリンターは装置名が実質必須（多くのホストはプリンター装置の自動構成を断る。D20） -->
+      <input id="sf-device" v-model="deviceName" type="text" :placeholder="app === 'printer' ? '例: PRT01（プリンター装置名）' : '自動'" />
     </div>
     <!-- ウォーターマーク（画面に重ねる透かし。ACSの透かしと同じ用途——本番機と検証機を
          一目で見分ける）。emulatorのみ。文字を入れて初めて設定になるので、文字を先頭に

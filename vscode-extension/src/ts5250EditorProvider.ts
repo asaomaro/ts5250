@@ -92,6 +92,15 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
+/**
+ * 装置を掴むセッション（emulator・printer）か。**セッションは`WsOpen`へuser/passwordを直接渡して開く**
+ * ので資格情報をWebViewへ渡す。spool/sql/ifsはREST層がsystem参照を要求し直接指定を受け付けないので渡さない
+ * （`decisions.md` D20。以前は「emulatorか」だけで判定していた）
+ */
+function isSessionApp(app: Ts5250File["app"]): boolean {
+  return app === "emulator" || app === "printer";
+}
+
 /** `HostToWebviewMessage`の型ガード無しで送る内部ヘルパー（送信側は型で保証されている） */
 function post(webview: vscode.Webview, msg: HostToWebviewMessage): void {
   void webview.postMessage(msg);
@@ -156,11 +165,11 @@ async function sendConnect(
  *
  * **emulatorとそれ以外でsystemRefの使いみちが違う**（design.md訂正後・利用者要望で
  * emulatorにも拡張。`decisions.md` D12）:
- * - emulator: `buildConnectPayload`の`user`/`password`は**そのまま残す**
+ * - emulator/printer（セッション。D20）: `buildConnectPayload`の`user`/`password`は**そのまま残す**
  *   （`WsOpen`直接指定。接続そのものはsystem参照を要らない）。`systemRef`は
  *   **付加的**——ステータスバーのメッセージ表示等、system参照を要求するREST機能の
  *   ためだけに使う。無くても接続自体は成立する
- * - printer(スプール表示)/sql/ifs: `user`/`password`は**送らない**
+ * - spool/sql/ifs: `user`/`password`は**送らない**
  *   （REST層はsystem参照を要求し、直接指定を受け付けないため）。`systemRef`が
  *   無いと対象ペインは開かず、「接続」ボタンの待機表示のまま止まる
  *
@@ -178,7 +187,7 @@ async function resolvePayload(
   const payload = buildConnectPayload(file, deps.secretCrypto);
   const user = payload.user;
   const password = payload.password;
-  if (file.app !== "emulator") {
+  if (!isSessionApp(file.app)) {
     delete payload.user;
     delete payload.password;
   }
@@ -237,13 +246,13 @@ function buildConnectPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
 /**
  * `buildConnectPayload`の表示用（`loaded`/`saved`）版。**`syncSystem`を呼ばない**分だけ
  * `resolvePayload`と違う（`decisions.md` D17）。`user`/`password`の剥離は`resolvePayload`と
- * 同じ判断（emulator以外はWebViewへ渡さない。REST層はsystem参照を要求し直接指定を
+ * 同じ判断（セッション以外はWebViewへ渡さない。REST層はsystem参照を要求し直接指定を
  * 受け付けないため）——ここで剥離し忘れると、`syncSystem`を経ないぶん平文がそのまま
  * WebViewへ渡ってしまう
  */
 function buildDisplayPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): ConnectPayload {
   const payload = buildConnectPayload(file, crypto);
-  if (file.app !== "emulator") {
+  if (!isSessionApp(file.app)) {
     delete payload.user;
     delete payload.password;
   }

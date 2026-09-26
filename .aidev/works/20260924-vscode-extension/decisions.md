@@ -918,3 +918,37 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
   戻す→2件fail、`loaded`から`title`を外す→1件fail（いずれも復元）。実機（PUB400）でemulatorに接続し、
   ヘッダー左に`sample-emu`とⓘ、ⓘで本来のアプリと同じ情報（種別・ホスト・CCSID・画面・デバイス名・
   自動サインオン・ジョブ…）が出ることをスクリーンショットで確認。スプールの待機表示もスクリーンショットで確認。
+
+## D20: VSCode拡張にプリンターセッション（`app: "printer"`）を追加し、スプール表示を`app: "spool"`へ改名
+
+- **背景**: 利用者の要望「VSCode拡張機能にプリンターセッションも追加して」。既存の`app: "printer"`は
+  実は**スプール表示**（`SpoolPane`）を指しており、本来のアプリの呼び名（「プリンター」＝プリンターセッション、
+  「スプール」＝既存スプールの一覧）と食い違っていた。利用者の判断（`AskUserQuestion`）で
+  **`printer`をプリンターセッションに、スプール表示を`spool`に改名**した。拡張は未公開なので影響は手元の
+  ファイルだけ——サンプルは`sample-printer.ts5250`→`sample-spool.ts5250`へ改め、新しい
+  `sample-printer.ts5250`（装置名`PRT_ASAO`）を作った。
+- **調査で判明した事実**: サーバーはプリンターの**直接接続**（host/port/ccsid/装置名/TLS/user/password）を
+  受け付ける（`ws-handler.ts`の`onOpenPrinter`）。出力設定（自動PDF・自動印刷）は信頼設定なので直接接続の経路では
+  受け付けない——`.ts5250`のプリンターは帳票を受けて見るだけ。表示は本来のアプリと同じ`openPrinterSession()`＋
+  `PrinterPane`。プリンターは装置を掴むセッションなので**emulatorと同じく「接続／切断」・名前とⓘ**を持つ。
+- **決定**:
+  1. `EmbedAppKind`に`spool`を追加（`printer`の意味を変更）。`schema.ts`/`stores/embed.ts`の許可リストも更新。
+  2. `ts5250EditorProvider.ts`: 資格情報をWebViewへ渡す判定を「emulatorか」から`isSessionApp`（emulator・printer）へ。
+     プリンターも`WsOpen`へuser/passwordを直接渡すため。
+  3. `EmbedApp.vue`: `isSession`で接続／切断・名前とⓘ・待機表示のボタン名（接続／開く）を分岐。printerは
+     `kind:"printer"`で`openPrinterSession()`（emulator専用の端末種別・画面サイズ等は送らない）、`meta.sessionType`
+     を`printer`に。`⚙ 表示`は帳票向け項目（`REPORT_VIEW_KEYS`）をセッションIDで。⬇HTMLはemulatorだけ。
+  4. 待機表示: 種類「プリンター」・説明。装置名が未設定なら「未設定（自動構成をホストが許す場合のみ）」と出す
+     ——多くのホストはプリンター装置の自動構成を断る（`8940`。`scripts/research-msgw.mjs`）。
+  5. 設定フォーム: printerは装置名だけ出す（端末の種類・画面サイズ・透かしは画面のもの）。
+- **検証**:
+  - `packages/web-ui` 2745 passed・`vscode-extension` 82 passed。mutation: `isSessionApp`をemulatorだけに戻す→
+    プリンターの資格情報テストがfail（復元確認済み）。
+  - **実機**（利用者のホスト・PUB400、Playwright＋shell中継を模した最小shell）: 待機表示「プリンター／接続」→
+    接続でサーバーのセッション数1・ヘッダーに`sample-printer`とⓘ・切断ボタン有り・⬇HTML無し→切断で0。
+  - **帳票の受信までは確認できなかった**（未検証の穴）。`CHGJOB OUTQ(装置)`＋`DSPLIBL OUTPUT(*PRINT)`で
+    スプールを作っても両ホストで`READY`のまま、ライター無し（`OUTPUT_QUEUE_INFO`: `NUMBER_OF_WRITERS=0`）。
+    **対照実験として本来のアプリ（保存済みのプリンター設定）でも同じ条件で受信0件**だった——VSCode側の配線ではなく
+    環境（プリンターセッションを繋いでもライターが上がらない。`scripts/README.md`の既知の注意「`STRPRTWTR`が要る」と同じ）。
+    PUB400はライターを常駐させる権限が無い（`CPF3464`。`scripts/research-msgw.mjs`）。セッション中の
+    `STRPRTWTR`は`CPF3310`で通らなかった。作成したテスト用スプール（利用者ホスト3件・PUB400 2件）は削除済み。

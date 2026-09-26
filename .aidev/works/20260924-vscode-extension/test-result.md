@@ -563,3 +563,28 @@ IFS境界ドラッグ: [220,380,598] → 左+120 → [340,380,478] → 右−150
 - `aidev smoke` — pass
 
 **未検証の穴**: 実際のVSCode上での見た目は未確認（既存の環境制約）。
+
+## ラウンド19（プリンターセッションの追加・`spool`への改名）
+
+`decisions.md` D20。
+
+- `packages/web-ui` — **2745 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — **82 passed**（13 files）。
+- mutation: `isSessionApp`を`app === "emulator"`だけに戻す→1件fail（プリンターの資格情報）。復元確認済み。
+- 実機（利用者のホスト、装置`PRT_ASAO`）:
+
+```
+1) idle: kind= プリンター button= 接続 sessions= 0
+2) connected: title= sample-printer sessions= 1 disconnectBtn= 1 htmlBtn= 0
+   sent spool: CHGJOB rc= 0 DSPLIBL rc= 0
+3) 受信件数: 0 (60s)
+4) after 切断: sessions= 0 button= 接続
+対照（本来のアプリ・保存済みプリンター設定・同じ装置）: web: 受信= 0 (60s)
+OUTPUT_QUEUE_INFO: {"OUTPUT_QUEUE_NAME":"PRT_ASAO","WRITERS_TO_AUTOSTART":1,"NUMBER_OF_WRITERS":0} / スプールはREADYのまま
+```
+
+- `aidev smoke` — pass
+
+**未検証の穴**: 帳票の受信〜`PrinterPane`での表示。両ホストともプリンターセッション接続でライターが上がらず
+（本来のアプリでも同じ＝環境要因）、受信を観測できなかった。受信後の表示は本来のアプリと同じ`PrinterPane`・
+同じ`openPrinterSession`（報告の受け取りを含む）を使っている。実際のVSCode上での見た目も未確認。

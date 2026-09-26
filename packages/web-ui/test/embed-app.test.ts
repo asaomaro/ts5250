@@ -7,8 +7,13 @@ const openSession = vi.fn((...args: unknown[]): Promise<string> => {
   return Promise.resolve("s-embed-1");
 });
 const closeSession = vi.fn();
+const openPrinterSession = vi.fn((...args: unknown[]): Promise<string> => {
+  void args;
+  return Promise.resolve("p-embed-1");
+});
 vi.mock("../src/session-controller.js", () => ({
   openSession: (...a: unknown[]) => openSession(...a),
+  openPrinterSession: (...a: unknown[]) => openPrinterSession(...a),
   closeSession: (...a: unknown[]) => closeSession(...a)
 }));
 
@@ -19,16 +24,18 @@ vi.mock("../src/screenExport.js", () => ({
 
 import EmbedApp from "../src/EmbedApp.vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
+import PrinterPane from "../src/components/PrinterPane.vue";
 import SpoolPane from "../src/components/SpoolPane.vue";
 import SqlPane from "../src/components/SqlPane.vue";
 import IfsPane from "../src/components/IfsPane.vue";
 import SettingsForm from "../src/components/SettingsForm.vue";
 import { embedStore } from "../src/stores/embed.js";
 
-const STUBS = { EmulatorPane: true, SpoolPane: true, SqlPane: true, IfsPane: true, SettingsForm: true };
+const STUBS = { EmulatorPane: true, PrinterPane: true, SpoolPane: true, SqlPane: true, IfsPane: true, SettingsForm: true };
 
 beforeEach(() => {
   openSession.mockClear();
+  openPrinterSession.mockClear();
   closeSession.mockClear();
   downloadScreenHtml.mockClear();
   embedStore.loaded = undefined;
@@ -70,9 +77,9 @@ describe("EmbedApp: app種別ごとのマウント分岐", () => {
     expect(meta["watermark"]).toEqual({ text: "検証機 {host}" });
   });
 
-  it("printer(スプール表示): openSession()は呼ばず、systemRefをそのままSpoolPaneのsystemへ渡す", async () => {
-    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
-    embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:abc123" };
+  it("spool(スプール表示): openSession()は呼ばず、systemRefをそのままSpoolPaneのsystemへ渡す", async () => {
+    const w = mount(EmbedApp, { props: { app: "spool" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "spool", host: "AS400", systemRef: "own:abc123" };
     await nextTick();
     expect(openSession).not.toHaveBeenCalled();
     const pane = w.findComponent(SpoolPane);
@@ -246,8 +253,8 @@ describe("EmbedApp: 切断ボタン", () => {
     expect(w.find(".connect-btn").exists()).toBe(true);
   });
 
-  it("printer/sql/ifsには「切断」を出さない（接続を持たないため。D19）", async () => {
-    for (const app of ["printer", "sql", "ifs"] as const) {
+  it("spool/sql/ifsには「切断」を出さない（接続を持たないため。D19）", async () => {
+    for (const app of ["spool", "sql", "ifs"] as const) {
       const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
       embedStore.connect = { app, host: "AS400", systemRef: "own:xyz" };
       await nextTick();
@@ -333,9 +340,9 @@ describe("EmbedApp: ⬇ HTML（画面のHTML保存。利用者の要望）", () 
     expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(true);
   });
 
-  it("printer/sql/ifsでは出さない（HTML化できるのは5250/3270画面だけ）", async () => {
-    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
-    embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:p1" };
+  it("spool/sql/ifsでは出さない（HTML化できるのは5250/3270画面だけ）", async () => {
+    const w = mount(EmbedApp, { props: { app: "spool" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "spool", host: "AS400", systemRef: "own:p1" };
     await nextTick();
     expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(false);
   });
@@ -356,7 +363,8 @@ describe("EmbedApp: ⬇ HTML（画面のHTML保存。利用者の要望）", () 
 describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
   it.each([
     ["emulator", "5250端末", "接続"],
-    ["printer", "スプール", "開く"],
+    ["printer", "プリンター", "接続"],
+    ["spool", "スプール", "開く"],
     ["sql", "SQL", "開く"],
     ["ifs", "IFS", "開く"]
   ] as const)("%s: 種類「%s」と説明・接続先を出し、ボタンは「%s」", async (app, kind, button) => {
@@ -407,5 +415,58 @@ describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
     await nextTick();
     await nextTick();
     expect(openSession.mock.calls[0]![1]).toBe("AS400");
+  });
+});
+
+/**
+ * **プリンターセッション**（`app: "printer"`。利用者の要望。D20）。emulatorと同じくセッションなので
+ * 「接続／切断」・名前とⓘを持つ。開くのは`openPrinterSession()`で、表示は`PrinterPane`
+ */
+describe("EmbedApp: プリンターセッション", () => {
+  it("接続の応答でopenPrinterSession()をkind:printerで呼び、emulator専用の項目は送らない", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
+    embedStore.connect = {
+      app: "printer",
+      host: "AS400",
+      port: 23,
+      ccsid: 5035,
+      deviceName: "PRT01",
+      user: "U",
+      password: "P",
+      terminal: "3270",
+      screenSize: "27x132",
+      title: "prt"
+    };
+    await nextTick();
+    await nextTick();
+    expect(openSession).not.toHaveBeenCalled();
+    expect(openPrinterSession).toHaveBeenCalledTimes(1);
+    const [open, label, meta] = openPrinterSession.mock.calls[0]! as [Record<string, unknown>, string, Record<string, unknown>];
+    expect(open).toMatchObject({ type: "open", kind: "printer", host: "AS400", port: 23, ccsid: 5035, deviceName: "PRT01", user: "U", password: "P" });
+    expect(open.terminal).toBeUndefined();
+    expect(open.screenSize).toBeUndefined();
+    expect(label).toBe("prt");
+    expect(meta).toMatchObject({ sessionType: "printer", deviceName: "PRT01" });
+    expect(w.findComponent(PrinterPane).props("sessionId")).toBe("p-embed-1");
+  });
+
+  it("接続中は「切断」・名前とⓘを出し、⬇HTMLは出さない。切断でcloseSession()して待機表示へ戻る", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: { ...STUBS, SessionInfo: true } } });
+    embedStore.connect = { app: "printer", host: "AS400", deviceName: "PRT01", title: "prt" };
+    await nextTick();
+    await nextTick();
+    expect(w.find(".title-group").exists()).toBe(true);
+    expect(w.find(".embed-header button[title*=\"HTML\"]").exists()).toBe(false);
+    await w.get(".embed-header button[title='切断する']").trigger("click");
+    expect(closeSession).toHaveBeenCalledWith("p-embed-1");
+    expect(w.findComponent(PrinterPane).exists()).toBe(false);
+    expect(w.find(".connect-btn").text()).toBe("接続");
+  });
+
+  it("待機表示は装置名が未設定だとその旨を出す（多くのホストはプリンターの自動構成を断る）", async () => {
+    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "printer", host: "AS400" };
+    await nextTick();
+    expect(w.find(".idle-card .rows").text()).toContain("未設定");
   });
 });

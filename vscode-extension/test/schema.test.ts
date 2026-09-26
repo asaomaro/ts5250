@@ -39,8 +39,8 @@ describe("parseTs5250File", () => {
     expect(parseTs5250File('{"app":123}').ok).toBe(false);
   });
 
-  it("printer/sql/ifsのappも受理する（4種）", () => {
-    for (const app of ["emulator", "printer", "sql", "ifs"]) {
+  it("printer/spool/sql/ifsのappも受理する（5種。D20でspoolを追加し、printerはプリンターセッションになった）", () => {
+    for (const app of ["emulator", "printer", "spool", "sql", "ifs"]) {
       expect(parseTs5250File(JSON.stringify({ app })).ok).toBe(true);
     }
   });

@@ -4,18 +4,19 @@
  * design.md`「設計方針4」・architecture.md「コンポーネント/モジュール」。
  *
  * 既存のワークスペースUI（`App.vue`）のタブ帯・システム切替・ランチャーは一切持たない。
- * `app`（emulator/printer/sql/ifs）に応じて対象ペイン1つだけをマウントし、設定ボタンで
+ * `app`（emulator/printer/spool/sql/ifs）に応じて対象ペイン1つだけをマウントし、設定ボタンで
  * `SettingsForm`を開閉する。
  *
  * **接続経路がapp種別で違う**（design.md「設計方針3」。tasks工程での訂正・`decisions.md` D3）:
- * - emulator: `ConnectPayload`の`host`/`port`/`user`/`password`等を直接`openSession()`へ渡す
- *   （`WsOpen`の「ブラウザ直指定」モード。system登録不要）
- * - printer(スプール表示)/sql/ifs: 拡張ホストが個人設定へ登録した`systemRef`
+ * - emulator/printer（セッション）: `ConnectPayload`の`host`/`port`/`user`/`password`等を直接
+ *   `openSession()`/`openPrinterSession()`へ渡す（`WsOpen`の「ブラウザ直指定」モード）
+ * - spool/sql/ifs: 拡張ホストが個人設定へ登録した`systemRef`
  *   （`own:<id>`）を、そのまま対象ペインの`system` propへ渡す（REST層がsystem参照を要求するため）
  */
 import { computed, ref, watch } from "vue";
 import type { WsOpen } from "@ts5250/server";
 import EmulatorPane from "./components/EmulatorPane.vue";
+import PrinterPane from "./components/PrinterPane.vue";
 import SpoolPane from "./components/SpoolPane.vue";
 import SqlPane from "./components/SqlPane.vue";
 import IfsPane from "./components/IfsPane.vue";
@@ -24,7 +25,7 @@ import ViewSettingsMenu from "./components/ViewSettingsMenu.vue";
 import DesignMenu from "./components/DesignMenu.vue";
 import SessionInfo from "./components/SessionInfo.vue";
 import { embedStore, postToHost } from "./stores/embed.js";
-import { openSession, closeSession } from "./session-controller.js";
+import { openSession, openPrinterSession, closeSession } from "./session-controller.js";
 import { makePaneTabId } from "./paneLabels.js";
 import { sessionsStore, type SessionMeta } from "./stores/sessions.js";
 import { featureOf } from "./features.js";
@@ -33,6 +34,12 @@ import type { EmbedAppKind, SettingsFormValues } from "./embed-protocol.js";
 import { downloadScreenHtml } from "./screenExport.js";
 
 const props = defineProps<{ app: EmbedAppKind }>();
+
+/**
+ * 装置を掴むセッション（emulator・printer）か。**接続／切断・ヘッダーの名前とⓘはセッションだけ**
+ * （`decisions.md` D19/D20）。spool/sql/ifsは操作ごとに接続するので「開く」だけ
+ */
+const isSession = computed(() => props.app === "emulator" || props.app === "printer");
 
 const showSettings = ref(false);
 const sessionId = ref<string | undefined>();
@@ -45,31 +52,33 @@ const connectError = ref<string | undefined>();
  * 種別が増えても既存のelse分岐にそのまま落ち、コンパイルエラーにならず気づけない
  * （taskcheck T6の指摘）。ここはRecordのキー網羅チェックに任せる
  */
-const APP_FEATURES: Record<Exclude<EmbedAppKind, "emulator">, string> = {
-  printer: "spool:files",
+const APP_FEATURES: Record<Exclude<EmbedAppKind, "emulator" | "printer">, string> = {
+  spool: "spool:files",
   sql: "sql:query",
   ifs: "ifs:files"
 };
 
 /**
- * printer(スプール表示)/sql/ifs用のタブIDとsystemRef。**両方揃って初めて意味を持つ**ので
+ * spool/sql/ifs用のタブIDとsystemRef。**両方揃って初めて意味を持つ**ので
  * 1つのcomputedにまとめる（`exactOptionalPropertyTypes`下で `system?: string` prop に
  * `string | undefined` を渡さずに済むよう、undefinedならペインごと出さない）
  */
 const restTarget = computed(() => {
   const ref = embedStore.connect?.systemRef;
-  if (!ref || props.app === "emulator") return undefined;
+  if (!ref || props.app === "emulator" || props.app === "printer") return undefined;
   return { tabId: makePaneTabId(APP_FEATURES[props.app], ref), system: ref };
 });
 
 /**
  * `⚙ 表示`（`ViewSettingsMenu`）を出す対象。`App.vue`の`viewMenuTarget`と同じ判断
- * （emulatorは全項目、printer(スプール表示)は帳票向けに絞った`REPORT_VIEW_KEYS`のみ。
+ * （emulatorは全項目、printer/spoolは帳票向けに絞った`REPORT_VIEW_KEYS`のみ。
  * sql/ifsは5250画面でも帳票でもないので出さない）を、この画面の状態から導く
  */
 const viewMenuTarget = computed<{ sessionId: string; keys?: readonly ViewKey[] } | undefined>(() => {
   if (props.app === "emulator") return sessionId.value ? { sessionId: sessionId.value } : undefined;
-  if (props.app === "printer" && restTarget.value) return { sessionId: restTarget.value.tabId, keys: REPORT_VIEW_KEYS };
+  // プリンターセッションはセッションID、スプールはタブIDを鍵にする（`App.vue`と同じ）
+  if (props.app === "printer") return sessionId.value ? { sessionId: sessionId.value, keys: REPORT_VIEW_KEYS } : undefined;
+  if (props.app === "spool" && restTarget.value) return { sessionId: restTarget.value.tabId, keys: REPORT_VIEW_KEYS };
   return undefined;
 });
 
@@ -78,7 +87,7 @@ watch(
   async (payload) => {
     if (!payload) return;
     showSettings.value = false;
-    if (props.app !== "emulator") return; // printer/sql/ifsはsystemRefをpropsへ渡すだけで済む
+    if (!isSession.value) return; // spool/sql/ifsはsystemRefをpropsへ渡すだけで済む
     // **二重発火を防ぐ**（`composables/openConfigured.ts`の`if (connecting.value) return;`と
     // 同じ理由）。`await openSession()`の最中にもう一度`connect`/`saved`が来ると、
     // 後から解決した方が`sessionId`を上書きし、先勝ちのセッションが孤児のまま残る
@@ -92,19 +101,24 @@ watch(
     connecting.value = true;
     connectError.value = undefined;
     try {
-      const open: WsOpen = { type: "open", host: payload.host };
+      const printer = props.app === "printer";
+      // プリンターは`kind:"printer"`で開く。サーバーの直接接続の経路は出力設定（自動PDF・自動印刷）を
+      // 受け付けない（信頼設定。`ws-handler.ts`の`onOpenPrinter`）——.ts5250からは帳票を受けて見るだけ
+      const open: WsOpen = { type: "open", host: payload.host, ...(printer ? { kind: "printer" as const } : {}) };
       if (payload.port !== undefined) open.port = payload.port;
       if (payload.tls !== undefined) open.tls = payload.tls;
       if (payload.ccsid !== undefined) open.ccsid = payload.ccsid;
-      if (payload.katakanaVariant !== undefined) open.katakanaVariant = payload.katakanaVariant;
-      if (payload.terminal !== undefined) open.terminal = payload.terminal;
       if (payload.deviceName !== undefined) open.deviceName = payload.deviceName;
-      if (payload.screenSize !== undefined) open.screenSize = payload.screenSize;
-      if (payload.enhanced !== undefined) open.enhanced = payload.enhanced;
+      if (!printer) {
+        if (payload.katakanaVariant !== undefined) open.katakanaVariant = payload.katakanaVariant;
+        if (payload.terminal !== undefined) open.terminal = payload.terminal;
+        if (payload.screenSize !== undefined) open.screenSize = payload.screenSize;
+        if (payload.enhanced !== undefined) open.enhanced = payload.enhanced;
+      }
       if (payload.user !== undefined) open.user = payload.user;
       if (payload.password !== undefined) open.password = payload.password;
       // ⓘ（`SessionInfo`）に出す情報。本来のアプリはセッション設定から同じものを載せる（D19）
-      const meta: SessionMeta = { host: payload.host };
+      const meta: SessionMeta = { host: payload.host, ...(printer ? { sessionType: "printer" as const } : {}) };
       if (payload.port !== undefined) meta.port = payload.port;
       if (payload.tls !== undefined) meta.tls = payload.tls;
       if (payload.ccsid !== undefined) meta.ccsid = payload.ccsid;
@@ -121,7 +135,10 @@ watch(
       // 無いままなら、StatusBarのメッセージ表示ボタンはsystem参照を要求するREST機能を
       // 使えないだけで、5250画面そのものには影響しない
       // 名前は本来のアプリのタブ名（セッション設定の名前）に当たるもの＝ファイル名（D19）
-      sessionId.value = await openSession(open, payload.title ?? payload.host, meta, payload.systemRef);
+      const label = payload.title ?? payload.host;
+      sessionId.value = printer
+        ? await openPrinterSession(open, label, meta, payload.systemRef)
+        : await openSession(open, label, meta, payload.systemRef);
     } catch (e) {
       connectError.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -132,12 +149,12 @@ watch(
 );
 
 /**
- * **接続を持つのはemulatorだけ**（`decisions.md` D19。サーバーの実装で確かめた）——
+ * **接続を持つのはセッション（emulator・printer）だけ**（`decisions.md` D19/D20。サーバーの実装で確かめた）——
  * スプール・IFSは操作ごとに接続して閉じ、SQLはサーバーのプールが接続を持つ（タブ単位の接続が無い）。
- * だからemulatorは「接続／切断」、それ以外は「開く」だけ（切断は無い）。「開く」を残すのは、
+ * だからセッションは「接続／切断」、それ以外は「開く」だけ（切断は無い）。「開く」を残すのは、
  * 開いた瞬間にペインがホストへ一覧を取りに行くため——設定だけ直したいときに取得を走らせない
  */
-const openLabel = computed(() => (props.app === "emulator" ? "接続" : "開く"));
+const openLabel = computed(() => (isSession.value ? "接続" : "開く"));
 
 /** 「接続」「開く」ボタン押下。拡張ホストへ要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch */
 function requestConnect(): void {
@@ -145,7 +162,7 @@ function requestConnect(): void {
 }
 
 /**
- * 「切断」ボタン押下（emulatorだけ）。`{type:"close"}`を送ってセッションを閉じる——ファイルを閉じる
+ * 「切断」ボタン押下（セッションだけ）。`{type:"close"}`を送ってセッションを閉じる——ファイルを閉じる
  * だけだとサーバーは再接続の猶予（90秒）の間セッション＝装置を保持する（D17で実測）。
  * **ファイルの内容は変えない**——`embedStore.loaded`は触らないので、次に「接続」を押せば同じ設定で開ける
  */
@@ -174,6 +191,9 @@ const idleInfo = computed(() => {
     const is3270 = c?.terminal === "3270";
     kind = is3270 ? "3270端末" : "5250端末";
     desc = is3270 ? "メインフレームの3270画面に接続して操作する。" : "IBM i の5250画面に接続して操作する。";
+  } else if (props.app === "printer") {
+    kind = "プリンター";
+    desc = "ホストのプリンター装置として待ち受け、届いた帳票を表示する。";
   } else {
     const f = featureOf(APP_FEATURES[props.app]);
     kind = f?.name ?? props.app;
@@ -189,6 +209,11 @@ const idleInfo = computed(() => {
   if (props.app === "emulator" && c?.host) {
     rows.push({ label: "装置名", value: c.deviceName ?? "自動" });
     if (c.terminal !== "3270") rows.push({ label: "画面サイズ", value: c.screenSize ?? "24x80" });
+  }
+  // プリンターは装置名が実質必須——多くのホストはプリンター装置の自動構成を断る
+  // （`8940: Automatic configuration failed or not allowed`。`scripts/research-msgw.mjs`の実測）
+  if (props.app === "printer" && c?.host) {
+    rows.push({ label: "装置名", value: c.deviceName ?? "未設定（自動構成をホストが許す場合のみ）" });
   }
   return { kind, desc, rows };
 });
@@ -229,8 +254,8 @@ function saveScreenHtml(): void {
 <template>
   <div class="embed-root">
     <header class="embed-header">
-      <!-- 左: 名前とⓘ（本来のアプリのタブと同じ。D19）。接続中のemulatorだけ——ⓘはセッションの情報なので -->
-      <div v-if="app === 'emulator' && sessionId" class="title-group">
+      <!-- 左: 名前とⓘ（本来のアプリのタブと同じ。D19）。接続中のセッション（emulator・printer）だけ——ⓘはセッションの情報なので -->
+      <div v-if="isSession && sessionId" class="title-group">
         <span class="title">{{ sessionLabel }}</span>
         <span class="info-wrap">
           <button class="info" title="セッション情報" @click="showInfo = !showInfo">ⓘ</button>
@@ -246,8 +271,8 @@ function saveScreenHtml(): void {
       >
         ⬇ HTML
       </button>
-      <!-- 切断（D17）。**emulatorだけ**——他は接続を持たない（D19） -->
-      <button v-if="app === 'emulator' && sessionId" class="settings-btn" title="切断する" @click="disconnect">切断</button>
+      <!-- 切断（D17）。**セッション（emulator・printer）だけ**——他は接続を持たない（D19） -->
+      <button v-if="isSession && sessionId" class="settings-btn" title="切断する" @click="disconnect">切断</button>
       <ViewSettingsMenu
         v-if="viewMenuTarget"
         :key="viewMenuTarget.sessionId"
@@ -259,8 +284,9 @@ function saveScreenHtml(): void {
     </header>
     <div class="embed-body">
       <EmulatorPane v-if="app === 'emulator' && sessionId" :session-id="sessionId" :focused="true" />
-      <template v-else-if="app !== 'emulator' && restTarget">
-        <SpoolPane v-if="app === 'printer'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
+      <PrinterPane v-else-if="app === 'printer' && sessionId" :session-id="sessionId" :focused="true" />
+      <template v-else-if="!isSession && restTarget">
+        <SpoolPane v-if="app === 'spool'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <SqlPane v-else-if="app === 'sql'" :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
         <IfsPane v-else :tab-id="restTarget.tabId" :active="true" :system="restTarget.system" />
       </template>

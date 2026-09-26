@@ -16,7 +16,13 @@
  * トリガーは利用者の明示的な「接続」ボタン——`resolveCustomTextEditor`参照。
  */
 
-export type EmbedAppKind = "emulator" | "printer" | "sql" | "ifs";
+/**
+ * `emulator`/`printer`は**セッション**（装置を掴む接続を持つ。接続／切断がある）。
+ * `spool`/`sql`/`ifs`はREST（操作ごとに接続する。「開く」だけ）。
+ * `printer`はプリンターセッション（本来のアプリの「プリンター」）で、既存スプールの一覧は`spool`
+ * （本来のアプリの「スプール」）——D20でこの呼び名に揃えた（以前は`printer`がスプール表示を指していた）
+ */
+export type EmbedAppKind = "emulator" | "printer" | "spool" | "sql" | "ifs";
 
 /**
  * ウォーターマーク（画面に重ねる透かし）。`@ts5250/server`の`watermarkSchema`と同じ形だが、
@@ -63,7 +69,7 @@ export interface ConnectPayload {
   katakanaVariant?: "katakana" | "katakana-ex";
   /** emulatorのみ */
   terminal?: "5250" | "3270";
-  /** emulatorのみ */
+  /** emulator/printer（セッション）のみ */
   deviceName?: string;
   /** emulatorのみ */
   screenSize?: "24x80" | "27x132";
@@ -75,11 +81,11 @@ export interface ConnectPayload {
   ifsPath?: string;
   /** sqlのみ。初期クエリ */
   sqlInitial?: string;
-  /** emulatorのみ。`WsOpen` へ直接渡す平文（design.md「設計方針3」） */
+  /** emulator/printer（セッション）のみ。`WsOpen` へ直接渡す平文（design.md「設計方針3」） */
   user?: string;
-  /** emulatorのみ */
+  /** emulator/printer（セッション）のみ */
   password?: string;
-  /** printer(スプール表示)/sql/ifsのみ。個人設定への登録が済んだ参照（例 `own:3f2a...`） */
+  /** spool/sql/ifsで必須、セッションでは付加的。個人設定への登録が済んだ参照（例 `own:3f2a...`） */
   systemRef?: string;
 }
 
@@ -91,7 +97,7 @@ export interface SettingsFormValues {
   katakanaVariant?: "katakana" | "katakana-ex";
   /** emulatorのみ */
   terminal?: "5250" | "3270";
-  /** emulatorのみ */
+  /** emulator/printer（セッション）のみ */
   deviceName?: string;
   /** emulatorのみ。terminal が 3270 のときは持たない（3270 はモデルで決まる。design.md参照） */
   screenSize?: "24x80" | "27x132";

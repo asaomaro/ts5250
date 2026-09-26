@@ -40,7 +40,7 @@ export function postToHost(msg: WebviewToHostMessage): void {
   window.parent.postMessage(msg, "*");
 }
 
-const APP_KINDS = ["emulator", "printer", "sql", "ifs"] as const;
+const APP_KINDS = ["emulator", "printer", "spool", "sql", "ifs"] as const;
 
 /**
  * `payload`の形を検査する（`type`が合っているだけでは中身の型は保証されない。

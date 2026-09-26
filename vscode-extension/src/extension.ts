@@ -120,7 +120,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     secretCrypto,
     acquireService,
     releaseService,
-    // プリンター(スプール表示)/sql/ifs用（03-sql-ifs）。ローカルサーバーのportは
+    // スプール/sql/ifs用（03-sql-ifs）。ローカルサーバーのportは
     // 呼び出し側（Ts5250EditorProvider）が`acquireService()`の結果から都度渡す
     syncSystem: (localPort, input) => syncSystem(input, { port: localPort, mappingFilePath: systemRefsPath }),
     log: (message) => output.appendLine(message)

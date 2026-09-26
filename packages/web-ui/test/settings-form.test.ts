@@ -160,7 +160,7 @@ describe("SettingsForm", () => {
       expect(w.find("#sf-wm-text").exists()).toBe(true);
     });
 
-    it.each(["printer", "sql", "ifs"] as const)("%sでは出さない", (app) => {
+    it.each(["spool", "sql", "ifs"] as const)("%sでは出さない", (app) => {
       const w = mount(SettingsForm, { props: { app }, attachTo: document.body });
       expect(w.find("#sf-terminal").exists()).toBe(false);
       expect(w.find("#sf-screensize").exists()).toBe(false);
@@ -186,6 +186,24 @@ describe("SettingsForm", () => {
       await w.get(".settings-form").trigger("submit");
       const saved = w.emitted("save")?.[0]?.[0];
       expect(saved).toMatchObject({ terminal: "5250", screenSize: "24x80" });
+    });
+  });
+
+  /** プリンターセッション（D20）: 装置名だけ出す（端末の種類・画面サイズ・透かしは画面のもの） */
+  describe("printer（プリンターセッション）", () => {
+    it("装置名は出し、端末の種類・画面サイズ・透かしは出さない。保存で装置名が乗る", async () => {
+      const w = mount(SettingsForm, { props: { app: "printer" }, attachTo: document.body });
+      expect(w.find("#sf-device").exists()).toBe(true);
+      expect(w.find("#sf-terminal").exists()).toBe(false);
+      expect(w.find("#sf-screensize").exists()).toBe(false);
+      expect(w.find("#sf-wm-text").exists()).toBe(false);
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-device").setValue("PRT01");
+      await w.get(".settings-form").trigger("submit");
+      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      expect(saved.deviceName).toBe("PRT01");
+      expect(saved.terminal).toBeUndefined();
+      expect(saved.screenSize).toBeUndefined();
     });
   });
 

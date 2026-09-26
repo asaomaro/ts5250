@@ -375,3 +375,27 @@ describe("title（ファイル名）", () => {
     expect(lastPostedOfType(panel, "saved")?.payload.title).toBe("a");
   });
 });
+
+/**
+ * **プリンターセッションはemulatorと同じく資格情報をWebViewへ渡す**（`decisions.md` D20）——
+ * `WsOpen`へuser/passwordを直接渡して開くため。spool/sql/ifsは渡さない（REST層はsystem参照を要求する）
+ */
+describe("printer（プリンターセッション）の資格情報", () => {
+  it("loaded / connect とも user/password を残す（spoolは剥離する）", async () => {
+    const { crypto } = await setup("{}");
+    const enc = crypto.encrypt("prtSecret");
+    const { panel } = await setupWithCrypto(crypto, `{"app":"printer","host":"AS400","deviceName":"PRT01","signon":{"user":"U","passwordEnc":"${enc}"}}`);
+    panel.webview.fireMessage({ type: "ready" });
+    panel.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(lastPostedOfType(panel, "loaded")?.payload).toMatchObject({ app: "printer", user: "U", password: "prtSecret", deviceName: "PRT01" });
+    expect(lastPostedOfType(panel, "connect")?.payload).toMatchObject({ app: "printer", user: "U", password: "prtSecret" });
+
+    const { panel: spool } = await setupWithCrypto(crypto, `{"app":"spool","host":"AS400","signon":{"user":"U","passwordEnc":"${enc}"}}`);
+    spool.webview.fireMessage({ type: "ready" });
+    spool.webview.fireMessage({ type: "connect" });
+    await flush();
+    expect(lastPostedOfType(spool, "loaded")?.payload.password).toBeUndefined();
+    expect(lastPostedOfType(spool, "connect")?.payload.password).toBeUndefined();
+  });
+});
