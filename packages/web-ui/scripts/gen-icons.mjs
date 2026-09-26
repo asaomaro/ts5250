@@ -60,19 +60,30 @@ const BG_RECT = { rect: [0, 0, 64, 64], r: 14 };
  *
  * **`S` を矩形（上下バー＋左右の縦棒）で組まない**。それは数字の 5 と同じ形で、
  * `TS5250` という名前の中では特に「T5」と読み違える（小文字の試作で実際にそう見えた）。
- * 接する 2 円（中心間距離 = 2r）の弧でつなぐと、中央で接線が連続して S になる。
- * 字高 34 = 4r + W なので r = 7.25。
+ * 縦に接する 2 円（中心は同じ x）の弧でつなぐと、中央で接線が連続して S になる。
+ *
+ * 利用者の指摘で直したこと（D27）:
+ * - **上の弧を下より小さくする**（字高 34 = 2r1 + 2r2 + W）。同じ半径の 2 円を 180° 回した形だと、
+ *   上半分の方が幅広く見える（書体でも上を小さくするのが普通の補正）。
+ * - **端を縦に切る**。円弧の端は半径の向きに斜めに切れ、上下の切り口が平行に並ぶので、
+ *   S 全体が傾いて見えた。
+ * - **SVG は 1 本の輪郭（塗り）で描く**。2 本の線を中央で突き合わせていたため、
+ *   ブラウザの縁のぼかしで継ぎ目に縦の細い隙間が見えた（ラスタは点の内外判定なので隙間は出ない）。
  */
-const S_R = 7.25;
 const S_CX = 45.75;
-const S_TOP = 11 + W / 2 + S_R; // 上の円の中心 y
+const S_R1 = 6.75; // 上の弧の半径（線の中心）
+const S_R2 = 7.75; // 下の弧の半径
+const S_C1 = 11 + W / 2 + S_R1; // 上の円の中心 y
+const S_C2 = S_C1 + S_R1 + S_R2; // 下の円の中心 y（2 円は中央 y = S_C1 + S_R1 で接する）
+const S_CUT1 = S_CX + 4; //   上の端（右上）を切る x。内側の円（半径 S_R1 - W/2）より内で切り、切り口を縦 1 本にする
+const S_CUT2 = S_CX - 4.5; // 下の端（左下）を切る x
 const SHAPES = [
   // T
   { rect: [8, 11, 22, W] }, //            横棒
   { rect: [16.5, 11, W, 34] }, //         縦棒
-  // S（上の弧: 右上終端→上→左→下 / 下の弧: 上→右→下→左下終端）
-  { arc: [S_CX, S_TOP, S_R], from: 40, to: 270 },
-  { arc: [S_CX, S_TOP + 2 * S_R, S_R], from: -140, to: 90 },
+  // S（上の弧: 右上の端→上→左→下 / 下の弧: 上→右→下→左下の端）。端は cut で縦に切る
+  { arc: [S_CX, S_C1, S_R1], from: 0, to: 270, cut: { x: S_CUT1, keep: "left", from: 0, to: 90 } },
+  { arc: [S_CX, S_C2, S_R2], from: -180, to: 90, cut: { x: S_CUT2, keep: "right", from: -180, to: -90 } },
 ];
 
 const CURSOR = { rect: [14, 51, 36, 5], r: 2.5 };
@@ -96,7 +107,10 @@ function inside(px, py, shape) {
   // 画面座標は y が下向き。反転して数学の角度（反時計回りが正）に合わせる
   let ang = (Math.atan2(-dy, dx) * 180) / Math.PI;
   while (ang < shape.from) ang += 360;
-  return ang <= shape.to;
+  if (ang > shape.to) return false;
+  const c = shape.cut;
+  if (c && ang >= c.from && ang <= c.to && (c.keep === "left" ? px > c.x : px < c.x)) return false;
+  return true;
 }
 
 /** viewBox 座標の 1 点の色（非プリマルチ RGBA）。 */
@@ -197,6 +211,33 @@ function ico(images) {
   return Buffer.concat([header, ...entries, ...images.map((i) => i.data)]);
 }
 
+/**
+ * `S` の輪郭（塗り）。`SHAPES` の 2 本の弧を、線ではなく 1 本の閉じた輪郭として描く——
+ * 2 本の線を突き合わせると継ぎ目に隙間が見える（D27）。
+ * 上の弧の外縁（右上の切り口→上→左→下）→ 下の弧の内縁（上→右→下→左下の切り口）→ 切り口 →
+ * 下の弧の外縁（戻る）→ 上の弧の内縁（戻る）→ 切り口。上の外縁の下端と下の内縁の上端は同じ点
+ * （2 円が接する中央の真下 W/2）なので、途中に線分は要らない
+ */
+function sOutline() {
+  const f = (v) => v.toFixed(3);
+  const [top, bot] = SHAPES.filter((s) => s.arc);
+  const [cx, c1, r1] = top.arc;
+  const [, c2, r2] = bot.arc;
+  const o1 = r1 + W / 2, i1 = r1 - W / 2, o2 = r2 + W / 2, i2 = r2 - W / 2;
+  const dy = (r, dx) => Math.sqrt(r * r - dx * dx);
+  const d1 = top.cut.x - cx;
+  const d2 = bot.cut.x - cx;
+  // sweep: 0＝画面上で反時計回り、1＝時計回り。どの弧も 180° を超えるので large=1
+  return [
+    `<path d="M${f(top.cut.x)} ${f(c1 - dy(o1, d1))}`,
+    `A${o1} ${o1} 0 1 0 ${f(cx)} ${f(c1 + o1)}`,
+    `A${i2} ${i2} 0 1 1 ${f(bot.cut.x)} ${f(c2 + dy(i2, d2))}`,
+    `L${f(bot.cut.x)} ${f(c2 + dy(o2, d2))}`,
+    `A${o2} ${o2} 0 1 0 ${f(cx)} ${f(c2 - o2)}`,
+    `A${i1} ${i1} 0 1 1 ${f(top.cut.x)} ${f(c1 - dy(i1, d1))}Z"/>`,
+  ].join("");
+}
+
 function svg() {
   const green = hex(FG);
   const rect = (s, extra = "") => {
@@ -204,19 +245,7 @@ function svg() {
     const rr = s.r ? ` rx="${s.r}"` : "";
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}"${rr}${extra}/>`;
   };
-  const arc = (s) => {
-    const [cx, cy, rm] = s.arc;
-    const pt = (a) => {
-      const t = (a * Math.PI) / 180;
-      return [cx + rm * Math.cos(t), cy - rm * Math.sin(t)].map((v) => v.toFixed(3));
-    };
-    const [x0, y0] = pt(s.from);
-    const [x1, y1] = pt(s.to);
-    const large = Math.abs(s.to - s.from) > 180 ? 1 : 0;
-    // 角度の増加＝画面上は反時計回り。SVG の sweep-flag は時計回りが 1 なので 0
-    return `<path d="M${x0} ${y0}A${rm} ${rm} 0 ${large} 0 ${x1} ${y1}" fill="none" stroke="${green}" stroke-width="${W}"/>`;
-  };
-  const body = SHAPES.map((s) => (s.rect ? rect(s) : arc(s))).join("");
+  const body = SHAPES.filter((s) => s.rect).map((s) => rect(s)).join("") + sOutline();
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" role="img" aria-label="ts5250">`,
     `  ${rect(BG_RECT, ` fill="${hex(BG)}"`)}`,

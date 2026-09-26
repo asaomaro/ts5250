@@ -725,3 +725,9 @@ stale: /workspaces/ts5250/vscode-extension/icon.png
 
 `decisions.md` D26。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。生成した全アイコンをChromiumで目視。
 Web UIの全体実行は省いた（アイコン差し替えのみ。前ラウンドの利用者の判断に従う）。このラウンドでは失敗が発生していない。
+
+## ラウンド26（`S`の継ぎ目・傾き・上半分の幅）
+
+`decisions.md` D27。`test/app-icons.test.ts` 3 passed・`gen-icons.mjs --check` exit 0。変更前後のSVGを拡大して並べ、
+継ぎ目の隙間が消えたこと・SVGとPNG（1024px）が同じ形であること・32/16pxでも読めることを目視で確かめた。
+Web UIの全体実行は省いた（アイコンのみ）。このラウンドでは失敗が発生していない。
