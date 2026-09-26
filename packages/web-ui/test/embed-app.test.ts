@@ -41,6 +41,7 @@ beforeEach(() => {
   embedStore.loaded = undefined;
   embedStore.connect = undefined;
   embedStore.error = undefined;
+  embedStore.loadedRev = 0;
 });
 
 describe("EmbedApp: app種別ごとのマウント分岐", () => {
@@ -133,7 +134,7 @@ describe("EmbedApp: 接続は明示的な「接続」ボタンから", () => {
     await nextTick();
     expect(openSession).not.toHaveBeenCalled();
     expect(w.findComponent(EmulatorPane).exists()).toBe(false);
-    expect(w.text()).toContain("AS400");
+    expect(w.findComponent(SettingsForm).props("initial")).toMatchObject({ host: "AS400" });
     const btn = w.find(".connect-btn");
     expect(btn.exists()).toBe(true);
     expect((btn.element as HTMLButtonElement).disabled).toBe(false);
@@ -297,36 +298,112 @@ describe("EmbedApp: 再接続の二重発火防止（taskcheck T6の指摘）", 
   });
 });
 
-describe("EmbedApp: 設定ボタン", () => {
-  it("押すとSettingsFormが表示される", async () => {
-    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
-    expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(false);
-    await w.get(".settings-btn").trigger("click");
-    expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(true);
+/**
+ * **設定は待機画面に置き、編集はその場で自動保存する**（利用者の要望。D23）。ヘッダーの⚙とポップアップは廃止。
+ * 保存は間引く（1文字ごとにファイルを書かない）が、「接続」の前には必ず送る
+ */
+describe("EmbedApp: 待機画面の設定フォーム（自動保存）", () => {
+  function stubParentPostMessage() {
+    const post = vi.fn();
+    const fakeParent = { postMessage: post } as unknown as Window;
+    vi.spyOn(window, "parent", "get").mockReturnValue(fakeParent);
+    return post;
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it("SettingsFormへapp（種別）とconnectの拡張フィールド（katakanaVariant/terminal/screenSize/watermark）を渡す", async () => {
+  it("ヘッダーに⚙（設定ポップアップ）は無く、待機画面にフォームがある。初期値はファイルの現在値（loaded）", async () => {
     const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
-    embedStore.connect = {
-      app: "emulator",
-      host: "AS400",
-      ccsid: 930,
-      katakanaVariant: "katakana",
-      terminal: "3270",
-      screenSize: "27x132",
-      watermark: { text: "検証機" }
-    };
+    embedStore.loaded = { app: "emulator", host: "AS400", ccsid: 930, katakanaVariant: "katakana", terminal: "3270", watermark: { text: "検証機" } };
     await nextTick();
-    await w.get(".settings-btn").trigger("click");
+    expect(w.find(".embed-header button[title='設定']").exists()).toBe(false);
     const form = w.findComponent(SettingsForm);
     expect(form.props("app")).toBe("emulator");
-    expect(form.props("initial")).toMatchObject({
-      ccsid: 930,
-      katakanaVariant: "katakana",
-      terminal: "3270",
-      screenSize: "27x132",
-      watermark: { text: "検証機" }
-    });
+    expect(form.props("initial")).toMatchObject({ host: "AS400", ccsid: 930, katakanaVariant: "katakana", terminal: "3270", watermark: { text: "検証機" } });
+  });
+
+  it("ファイルが読めない（loaded無し）間はフォームを出さない——入力1つで壊れたファイルを上書きしないため", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.error = "JSONとして読めません";
+    await nextTick();
+    expect(w.findComponent(SettingsForm).exists()).toBe(false);
+    expect(w.find(".idle-card .error").text()).toContain("JSON");
+  });
+
+  it("編集は間引いて自動保存する（最後の値を1回だけsave）", async () => {
+    vi.useFakeTimers();
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A" };
+    await nextTick();
+    const form = w.findComponent(SettingsForm);
+    form.vm.$emit("change", { host: "AS" });
+    form.vm.$emit("change", { host: "AS400" });
+    expect(post).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(400);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith({ type: "save", payload: { host: "AS400" } }, "*");
+  });
+
+  it("「接続」は間引き中の保存を先に送ってから送る（保存し終えた設定で繋ぐ）", async () => {
+    vi.useFakeTimers();
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A" };
+    await nextTick();
+    w.findComponent(SettingsForm).vm.$emit("change", { host: "NEW" });
+    await nextTick();
+    await w.get(".connect-btn").trigger("click");
+    expect(post.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(["save", "connect"]);
+    vi.advanceTimersByTime(1000);
+    expect(post).toHaveBeenCalledTimes(2); // 送った分を後から二重に送らない
+  });
+
+  it("入力中の値で「接続」の可否と種類の表示が変わる（保存の往復を待たない）", async () => {
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "" };
+    await nextTick();
+    expect((w.find(".connect-btn").element as HTMLButtonElement).disabled).toBe(true);
+    w.findComponent(SettingsForm).vm.$emit("change", { host: "MF", terminal: "3270" });
+    await nextTick();
+    expect((w.find(".connect-btn").element as HTMLButtonElement).disabled).toBe(false);
+    expect(w.find(".idle-card .kind").text()).toBe("3270端末");
+  });
+
+  it("自分の保存の応答（saved＝loadedRevは進まない）ではフォームを作り直さず、外での書き換え（loaded）では作り直す", async () => {
+    vi.useFakeTimers();
+    const post = stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A" };
+    await nextTick();
+    const form1 = w.findComponent(SettingsForm);
+    form1.vm.$emit("change", { host: "B" });
+    embedStore.loaded = { app: "emulator", host: "B" }; // saved相当
+    await nextTick();
+    expect(w.findComponent(SettingsForm).vm).toBe(form1.vm);
+
+    embedStore.loaded = { app: "emulator", host: "EDITED" };
+    embedStore.loadedRev++; // loaded相当（テキストで直接書き換えられた）
+    await nextTick();
+    const form2 = w.findComponent(SettingsForm);
+    expect(form2.vm).not.toBe(form1.vm);
+    expect(form2.props("initial")).toMatchObject({ host: "EDITED" });
+    // 外で書き換えられたら、間引き中だった古い入力は捨てる（書き換えを上書きしない）
+    vi.advanceTimersByTime(1000);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it.each(["spool", "sql", "ifs"] as const)("%s: 開いたあと「閉じる」で待機画面（設定）へ戻れる", async (app) => {
+    const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
+    embedStore.loaded = { app, host: "AS400" };
+    embedStore.connect = { app, host: "AS400", systemRef: "own:x" };
+    await nextTick();
+    expect(w.findComponent(SettingsForm).exists()).toBe(false);
+    await w.get(".embed-header button[title='閉じて設定に戻る']").trigger("click");
+    expect(embedStore.connect).toBeUndefined();
+    expect(w.findComponent(SettingsForm).exists()).toBe(true);
   });
 });
 
@@ -367,16 +444,15 @@ describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
     ["spool", "スプール", "開く"],
     ["sql", "SQL", "開く"],
     ["ifs", "IFS", "開く"]
-  ] as const)("%s: 種類「%s」と説明・接続先を出し、ボタンは「%s」", async (app, kind, button) => {
+  ] as const)("%s: 種類「%s」と説明・ファイル名・設定欄を出し、ボタンは「%s」", async (app, kind, button) => {
     const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
     embedStore.loaded = { app, host: "AS400", port: 992, user: "U", title: "sample-x" };
     await nextTick();
     expect(w.find(".idle-card .kind").text()).toBe(kind);
     expect(w.find(".idle-card .desc").text().length).toBeGreaterThan(0);
-    const rows = w.find(".idle-card .rows").text();
-    expect(rows).toContain("sample-x");
-    expect(rows).toContain("AS400:992");
-    expect(rows).toContain("U");
+    expect(w.find(".idle-card .file").text()).toBe("sample-x.ts5250");
+    // 接続先は設定フォームの欄として出す（D23。以前は読み取り専用の一覧だった）
+    expect(w.findComponent(SettingsForm).props("initial")).toMatchObject({ host: "AS400", port: 992, user: "U" });
     expect(w.find(".connect-btn").text()).toBe(button);
     w.unmount();
   });
@@ -386,13 +462,6 @@ describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
     embedStore.loaded = { app: "emulator", host: "MF", terminal: "3270" };
     await nextTick();
     expect(w.find(".idle-card .kind").text()).toBe("3270端末");
-  });
-
-  it("TLSの未指定は「無効」と出す（サーバーはtls===trueのときだけTLS）", async () => {
-    const w = mount(EmbedApp, { props: { app: "sql" }, global: { stubs: STUBS } });
-    embedStore.loaded = { app: "sql", host: "AS400" };
-    await nextTick();
-    expect(w.find(".idle-card .rows").text()).toContain("無効");
   });
 
   it("接続後、ヘッダー左に名前（title）とⓘを出し、ⓘでSessionInfoを開く。openSessionのlabelもtitle", async () => {
@@ -461,12 +530,5 @@ describe("EmbedApp: プリンターセッション", () => {
     expect(closeSession).toHaveBeenCalledWith("p-embed-1");
     expect(w.findComponent(PrinterPane).exists()).toBe(false);
     expect(w.find(".connect-btn").text()).toBe("接続");
-  });
-
-  it("待機表示は装置名が未設定だとその旨を出す（多くのホストはプリンターの自動構成を断る）", async () => {
-    const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
-    embedStore.loaded = { app: "printer", host: "AS400" };
-    await nextTick();
-    expect(w.find(".idle-card .rows").text()).toContain("未設定");
   });
 });

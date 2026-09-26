@@ -9,6 +9,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 const applyEdit = vi.fn(async (_edit: unknown) => true);
 const openExternal = vi.fn(async (_uri: unknown) => true);
+/** `workspace.onDidChangeTextDocument`へ登録されたリスナー（テストから発火させる） */
+const changeListeners: Array<(e: { document: { uri: { toString(): string } }; contentChanges: unknown[] }) => void> = [];
 vi.mock("vscode", () => {
   class WorkspaceEdit {
     replacements: Array<{ uri: unknown; range: unknown; text: string }> = [];
@@ -25,7 +27,13 @@ vi.mock("vscode", () => {
   return {
     WorkspaceEdit,
     Range,
-    workspace: { applyEdit: (e: unknown) => applyEdit(e) },
+    workspace: {
+      applyEdit: (e: unknown) => applyEdit(e),
+      onDidChangeTextDocument: (l: (typeof changeListeners)[number]) => {
+        changeListeners.push(l);
+        return { dispose: () => changeListeners.splice(changeListeners.indexOf(l), 1) };
+      }
+    },
     env: { openExternal: (u: unknown) => openExternal(u) },
     Uri: { parse: (s: string) => ({ toString: () => s }) }
   };
@@ -59,6 +67,7 @@ function lastPostedOfType<T extends HostToWebviewMessage["type"]>(
 }
 
 beforeEach(() => {
+  changeListeners.length = 0;
   applyEdit.mockClear();
   applyEdit.mockResolvedValue(true);
   openExternal.mockClear();
@@ -397,5 +406,72 @@ describe("printer（プリンターセッション）の資格情報", () => {
     await flush();
     expect(lastPostedOfType(spool, "loaded")?.payload.password).toBeUndefined();
     expect(lastPostedOfType(spool, "connect")?.payload.password).toBeUndefined();
+  });
+});
+
+/**
+ * 設定の自動保存と即時反映（`decisions.md` D23）。本物の`applyEdit`と同じく、書き込むと文書が変わり、
+ * その最中に`onDidChangeTextDocument`が同期的に来る状態を作る
+ */
+describe("自動保存・即時反映（D23）", () => {
+  type Doc = Awaited<ReturnType<typeof setup>>["document"];
+  /** 本物に寄せたapplyEdit: 少し待ってから文書を書き換え、変更通知を同期的に出す */
+  function realisticApplyEdit(document: Doc): void {
+    applyEdit.mockImplementation(async (edit: unknown) => {
+      await new Promise((r) => setTimeout(r, 5));
+      document.setText((edit as { replacements: Array<{ text: string }> }).replacements[0]!.text);
+      for (const l of [...changeListeners]) l({ document, contentChanges: [{}] });
+      return true;
+    });
+  }
+
+  it("保存するとディスクまで書く（document.save）", async () => {
+    const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    await flush();
+    expect(document.save).toHaveBeenCalledTimes(1);
+    expect(lastPostedOfType(panel, "saved")).toBeDefined();
+  });
+
+  it("ディスクへの書き込みに失敗したらsaveErrorを送る", async () => {
+    const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
+    document.save.mockResolvedValueOnce(false);
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    await flush();
+    expect(lastPostedOfType(panel, "saveError")?.message).toContain("書き込み");
+    expect(lastPostedOfType(panel, "saved")).toBeUndefined();
+  });
+
+  it("saveの直後にconnectが来ても、保存し終えた新しい設定で接続する（メッセージを順に処理する）", async () => {
+    const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
+    realisticApplyEdit(document);
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    panel.webview.fireMessage({ type: "connect" });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastPostedOfType(panel, "connect")?.payload.host).toBe("NEW");
+  });
+
+  it("自分の保存による変更通知ではloadedを送り直さない（入力中のフォームを作り直さない）", async () => {
+    const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
+    realisticApplyEdit(document);
+    panel.webview.fireMessage({ type: "save", payload: { host: "NEW" } });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastPostedOfType(panel, "saved")).toBeDefined();
+    expect(lastPostedOfType(panel, "loaded")).toBeUndefined();
+  });
+
+  it("テキストとして直接書き換えられたら、開き直さなくてもloadedで新しい内容を送る", async () => {
+    const { panel, document } = await setup('{"app":"emulator","host":"OLD"}');
+    document.setText('{"app":"emulator","host":"EDITED"}');
+    for (const l of [...changeListeners]) l({ document, contentChanges: [{}] });
+    await flush();
+    expect(lastPostedOfType(panel, "loaded")?.payload.host).toBe("EDITED");
+  });
+
+  it("パネルを閉じたら変更通知の購読をやめる", async () => {
+    const { panel } = await setup('{"app":"emulator","host":"OLD"}');
+    expect(changeListeners).toHaveLength(1);
+    panel.dispose();
+    expect(changeListeners).toHaveLength(0);
   });
 });

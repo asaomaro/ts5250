@@ -4,8 +4,9 @@
  * design.md`「設計方針4」・architecture.md「コンポーネント/モジュール」。
  *
  * 既存のワークスペースUI（`App.vue`）のタブ帯・システム切替・ランチャーは一切持たない。
- * `app`（emulator/printer/spool/sql/ifs）に応じて対象ペイン1つだけをマウントし、設定ボタンで
- * `SettingsForm`を開閉する。
+ * `app`（emulator/printer/spool/sql/ifs）に応じて対象ペイン1つだけをマウントする。
+ * 接続前の待機画面に`SettingsForm`を置き、編集はその場で`.ts5250`へ自動保存する（`decisions.md` D23。
+ * 以前はヘッダーの⚙からポップアップで開いていた——接続中に設定を変えても反映できないので廃止した）。
  *
  * **接続経路がapp種別で違う**（design.md「設計方針3」。tasks工程での訂正・`decisions.md` D3）:
  * - emulator/printer（セッション）: `ConnectPayload`の`host`/`port`/`user`/`password`等を直接
@@ -13,7 +14,7 @@
  * - spool/sql/ifs: 拡張ホストが個人設定へ登録した`systemRef`
  *   （`own:<id>`）を、そのまま対象ペインの`system` propへ渡す（REST層がsystem参照を要求するため）
  */
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { WsOpen } from "@ts5250/server";
 import EmulatorPane from "./components/EmulatorPane.vue";
 import PrinterPane from "./components/PrinterPane.vue";
@@ -41,7 +42,6 @@ const props = defineProps<{ app: EmbedAppKind }>();
  */
 const isSession = computed(() => props.app === "emulator" || props.app === "printer");
 
-const showSettings = ref(false);
 const sessionId = ref<string | undefined>();
 const connecting = ref(false);
 const connectError = ref<string | undefined>();
@@ -86,14 +86,13 @@ watch(
   () => embedStore.connect,
   async (payload) => {
     if (!payload) return;
-    showSettings.value = false;
     if (!isSession.value) return; // spool/sql/ifsはsystemRefをpropsへ渡すだけで済む
     // **二重発火を防ぐ**（`composables/openConfigured.ts`の`if (connecting.value) return;`と
     // 同じ理由）。`await openSession()`の最中にもう一度`connect`/`saved`が来ると、
     // 後から解決した方が`sessionId`を上書きし、先勝ちのセッションが孤児のまま残る
     // （taskcheck T6の指摘）
     if (connecting.value) return;
-    // **設定ボタンでの再接続時、前のセッションを畳んでから開き直す。** 畳まずに`sessionId`を
+    // **再接続時（connectが再び来たとき）、前のセッションを畳んでから開き直す。** 畳まずに`sessionId`を
     // 上書きすると、サーバー側に古いセッションが孤児として残り続ける
     // （taskcheck cross: `01-embed-ui`の自己点検で発見）
     if (sessionId.value) closeSession(sessionId.value);
@@ -156,13 +155,62 @@ watch(
  */
 const openLabel = computed(() => (isSession.value ? "接続" : "開く"));
 
-/** 「接続」「開く」ボタン押下。拡張ホストへ要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch */
+/**
+ * 「接続」「開く」ボタン押下。拡張ホストへ要求を送るだけ——実際に開くのは`embedStore.connect`の変化を見る上の watch。
+ * **間引き中の保存を先に送る**——拡張ホストはメッセージを順に処理するので、`save`→`connect`の順に届けば
+ * 保存し終えたファイルで接続する（D23）
+ */
 function requestConnect(): void {
+  flushSave();
   postToHost({ type: "connect" });
 }
 
 /**
- * 「切断」ボタン押下（セッションだけ）。`{type:"close"}`を送ってセッションを閉じる——ファイルを閉じる
+ * 設定フォームの入力中の値。**「接続」ボタンの可否と種類の表示はこちらを見る**——`embedStore.loaded`は
+ * 保存（間引き）の往復が済むまで古い。ファイルが外で書き換えられたら（`loadedRev`が進む）捨てる
+ */
+const draft = ref<SettingsFormValues | undefined>();
+watch(
+  () => embedStore.loadedRev,
+  () => {
+    cancelPendingSave();
+    draft.value = undefined;
+  }
+);
+
+/** 自動保存の間引き（ms）。1文字ごとにファイルへ書くと、VSCodeの元に戻す履歴が1文字単位になる */
+const SAVE_DEBOUNCE_MS = 400;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingSave: SettingsFormValues | undefined;
+
+function onFormChange(v: SettingsFormValues): void {
+  draft.value = v;
+  pendingSave = v;
+  if (saveTimer !== undefined) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+}
+function cancelPendingSave(): void {
+  if (saveTimer !== undefined) clearTimeout(saveTimer);
+  saveTimer = undefined;
+  pendingSave = undefined;
+}
+function flushSave(): void {
+  const v = pendingSave;
+  cancelPendingSave();
+  if (v) postToHost({ type: "save", payload: v });
+}
+// タブを閉じる直前の入力も落とさない
+onBeforeUnmount(flushSave);
+window.addEventListener("pagehide", flushSave);
+onBeforeUnmount(() => window.removeEventListener("pagehide", flushSave));
+
+/** 接続先のホストが決まっているか（入力中の値を優先） */
+const hasHost = computed(() => ((draft.value ?? embedStore.loaded)?.host ?? "").trim() !== "");
+
+/**
+ * 「切断」（セッション）／「閉じる」（spool/sql/ifs）ボタン押下。どちらも待機画面（設定）へ戻る。
+ * spool/sql/ifsは接続を持たないが、戻らないと設定を変えられない（D23で設定は待機画面にだけ置いた）。
+ * セッションでは`{type:"close"}`を送ってセッションを閉じる——ファイルを閉じる
  * だけだとサーバーは再接続の猶予（90秒）の間セッション＝装置を保持する（D17で実測）。
  * **ファイルの内容は変えない**——`embedStore.loaded`は触らないので、次に「接続」を押せば同じ設定で開ける
  */
@@ -184,7 +232,7 @@ const showInfo = ref(false);
  * スプールなのか分からない。種類と一行説明はランチャーのカードと同じ文言（`features.ts`）
  */
 const idleInfo = computed(() => {
-  const c = embedStore.loaded;
+  const c = draft.value ?? embedStore.loaded;
   let kind: string;
   let desc: string;
   if (props.app === "emulator") {
@@ -199,28 +247,13 @@ const idleInfo = computed(() => {
     kind = f?.name ?? props.app;
     desc = f?.desc ?? "";
   }
-  const rows: { label: string; value: string }[] = [];
-  if (c?.title) rows.push({ label: "設定", value: c.title });
-  if (c?.host) rows.push({ label: "ホスト", value: `${c.host}${c.port !== undefined ? `:${c.port}` : ""}` });
-  // 未指定はTLS無し（サーバーは`tls === true`のときだけTLSにする）
-  if (c?.host) rows.push({ label: "TLS", value: c.tls === true ? "有効" : "無効" });
-  if (c?.user) rows.push({ label: "ユーザー", value: c.user });
-  if (c?.ccsid !== undefined) rows.push({ label: "CCSID", value: String(c.ccsid) });
-  if (props.app === "emulator" && c?.host) {
-    rows.push({ label: "装置名", value: c.deviceName ?? "自動" });
-    if (c.terminal !== "3270") rows.push({ label: "画面サイズ", value: c.screenSize ?? "24x80" });
-  }
-  // プリンターは装置名が実質必須——多くのホストはプリンター装置の自動構成を断る
-  // （`8940: Automatic configuration failed or not allowed`。`scripts/research-msgw.mjs`の実測）
-  if (props.app === "printer" && c?.host) {
-    rows.push({ label: "装置名", value: c.deviceName ?? "未設定（自動構成をホストが許す場合のみ）" });
-  }
-  return { kind, desc, rows };
+  return { kind, desc };
 });
 const idleError = computed(() => connectError.value ?? embedStore.error);
 
+/** 設定フォームの初期値。**ファイルの現在値だけを見る**（以前は接続時の値を優先しており、保存後も古い値が出た。D23） */
 const settingsInitial = computed<SettingsFormValues>(() => {
-  const c = embedStore.connect ?? embedStore.loaded;
+  const c = embedStore.loaded;
   const v: SettingsFormValues = { host: c?.host ?? "" };
   if (c?.port !== undefined) v.port = c.port;
   if (c?.tls !== undefined) v.tls = c.tls;
@@ -233,11 +266,6 @@ const settingsInitial = computed<SettingsFormValues>(() => {
   if (c?.user !== undefined) v.user = c.user;
   return v;
 });
-
-function onSave(v: SettingsFormValues): void {
-  postToHost({ type: "save", payload: v });
-  showSettings.value = false;
-}
 
 /**
  * 今の画面をHTMLで保存する（`App.vue`の`saveScreenHtml`と同じ機能をVSCode拡張側にも出す。
@@ -271,8 +299,10 @@ function saveScreenHtml(): void {
       >
         ⬇ HTML
       </button>
-      <!-- 切断（D17）。**セッション（emulator・printer）だけ**——他は接続を持たない（D19） -->
+      <!-- 切断（D17）。**セッション（emulator・printer）だけ**——他は接続を持たない（D19）。
+           spool/sql/ifsは「閉じる」で待機画面（設定）へ戻る（D23） -->
       <button v-if="isSession && sessionId" class="settings-btn" title="切断する" @click="disconnect">切断</button>
+      <button v-if="!isSession && restTarget" class="settings-btn" title="閉じて設定に戻る" @click="disconnect">閉じる</button>
       <ViewSettingsMenu
         v-if="viewMenuTarget"
         :key="viewMenuTarget.sessionId"
@@ -280,7 +310,6 @@ function saveScreenHtml(): void {
         :keys="viewMenuTarget.keys"
       />
       <DesignMenu />
-      <button class="settings-btn" title="設定" @click="showSettings = true">⚙</button>
     </header>
     <div class="embed-body">
       <EmulatorPane v-if="app === 'emulator' && sessionId" :session-id="sessionId" :focused="true" />
@@ -297,19 +326,16 @@ function saveScreenHtml(): void {
         <div class="idle-card">
           <div class="kind">{{ idleInfo.kind }}</div>
           <p class="desc">{{ idleInfo.desc }}</p>
-          <dl v-if="embedStore.loaded?.host" class="rows">
-            <template v-for="r in idleInfo.rows" :key="r.label">
-              <dt>{{ r.label }}</dt>
-              <dd>{{ r.value }}</dd>
-            </template>
-          </dl>
-          <p v-else class="hint">「⚙ 設定」でホストを設定してください</p>
+          <p v-if="embedStore.loaded?.title" class="file">{{ embedStore.loaded.title }}.ts5250</p>
+          <!-- ボタンは設定の上——設定済みなら押すだけのことが多く、欄（透かし等）が多いと下はスクロールしないと見えない -->
           <p v-if="idleError" class="error">{{ idleError }}</p>
-          <button class="connect-btn" :disabled="!embedStore.loaded?.host" @click="requestConnect">{{ openLabel }}</button>
+          <button class="connect-btn" :disabled="!hasHost" :title="hasHost ? '' : 'ホストを入力してください'" @click="requestConnect">{{ openLabel }}</button>
+          <!-- 設定はここで編集し、その場で自動保存する（D23）。ファイルが読めないとき（loaded無し）は出さない
+               ——壊れたファイルを入力1つで上書きしないため -->
+          <SettingsForm v-if="embedStore.loaded" :key="embedStore.loadedRev" :initial="settingsInitial" :app="app" @change="onFormChange" />
         </div>
       </div>
     </div>
-    <SettingsForm v-if="showSettings" :initial="settingsInitial" :app="app" @save="onSave" @cancel="showSettings = false" />
   </div>
 </template>
 
@@ -371,7 +397,10 @@ function saveScreenHtml(): void {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  max-width: 420px;
+  /* 親（.status.idle）は中身の幅に縮むので%は効かない——幅は固定し、狭い画面では親のmax-widthで縮める */
+  width: 460px;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 18px 24px;
   border: 1px solid var(--crt-line, #333);
   border-radius: 8px;
@@ -385,21 +414,10 @@ function saveScreenHtml(): void {
   margin: 0;
   text-align: center;
 }
-.idle-card .rows {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 14px;
+.idle-card .file {
   margin: 0;
+  font-size: 12px;
 }
-.idle-card dt {
-  color: var(--muted);
-}
-.idle-card dd {
-  margin: 0;
-  color: var(--fg, #d9e3da);
-  word-break: break-all;
-}
-.idle-card .hint,
 .idle-card .error {
   margin: 0;
 }
@@ -432,11 +450,17 @@ function saveScreenHtml(): void {
 .info-wrap .info:hover {
   color: var(--fg, #d9e3da);
 }
+/* 設定の欄が増えて（透かし等）縦に収まらないときは、待機画面の中でスクロールする（D23） */
 .status.idle {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  max-height: 100%;
+  max-width: 100%;
+  overflow-y: auto;
+  padding: 12px 16px;
+  box-sizing: border-box;
 }
 .connect-btn {
   font-family: var(--mono);

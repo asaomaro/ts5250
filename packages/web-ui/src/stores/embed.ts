@@ -28,7 +28,13 @@ export const embedStore = reactive<{
    */
   connect: ConnectPayload | undefined;
   error: string | undefined;
-}>({ loaded: undefined, connect: undefined, error: undefined });
+  /**
+   * `loaded`（ファイルを開いた・**外で書き換えられた**）を受けた回数。設定フォームはこれを`key`にして
+   * 作り直す。**`saved`では増やさない**——自分の自動保存の応答でフォームを作り直すと、入力中の文字が消える
+   * （`20260924-vscode-extension` D23）
+   */
+  loadedRev: number;
+}>({ loaded: undefined, connect: undefined, error: undefined, loadedRev: 0 });
 
 /**
  * 拡張ホストへ送る。**トップレベルで直接開かれた場合（親フレームが無い）は何もしない**——
@@ -78,6 +84,7 @@ export function initEmbedBridge(): void {
         if (!isConnectPayload(msg.payload)) return;
         embedStore.loaded = msg.payload;
         embedStore.error = undefined;
+        if (msg.type === "loaded") embedStore.loadedRev++;
         break;
       case "connect":
         // 「接続」ボタン押下に応えて拡張ホストが解決した値——ここで初めて実接続する
@@ -90,6 +97,9 @@ export function initEmbedBridge(): void {
       case "fileInvalid":
         if (typeof msg.message !== "string") return;
         embedStore.error = msg.message;
+        // **読めないファイルの設定を出し続けない**——出していると、入力1つで壊れたファイルを
+        // フォームの値で上書きしてしまう（設定は自動保存。D23）
+        if (msg.type === "fileInvalid") embedStore.loaded = undefined;
         break;
     }
   });

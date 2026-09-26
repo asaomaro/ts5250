@@ -55,9 +55,19 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
       nonce
     });
 
-    const sub = webviewPanel.webview.onDidReceiveMessage(async (raw: unknown) => {
-      const msg = raw as WebviewToHostMessage;
-      if (!msg || typeof msg !== "object" || !("type" in msg)) return;
+    /**
+     * 自分が`handleSave`で書いた内容。`onDidChangeTextDocument`は自分の書き込みでも発火するので、
+     * これと同じなら`loaded`を送り直さない——送ると入力中のフォームが作り直され、打っている途中の
+     * 文字が消える（`decisions.md` D23）
+     */
+    let lastWritten: string | undefined;
+    /**
+     * **メッセージを1つずつ順に処理する**（D23）。設定は入力のたびに自動保存されるので、`save`の直後に
+     * `connect`が来る。並行に処理すると、`save`の`applyEdit`が終わる前に`connect`がファイルを読み、
+     * 古い設定で接続してしまう
+     */
+    let queue: Promise<void> = Promise.resolve();
+    const handle = async (msg: WebviewToHostMessage): Promise<void> => {
       if (msg.type === "ready") {
         // **接続はしない**——ファイルの現在値を表示・設定フォームの初期値用に送るだけ
         // （`decisions.md` D17。「接続」ボタンを押すまで実際には繋がない）
@@ -74,7 +84,8 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
         if (!isSettingsFormValues(msg.payload)) {
           post(webviewPanel.webview, { type: "saveError", message: "保存内容の形式が不正です。" });
         } else {
-          await handleSave(webviewPanel.webview, document, msg.payload, this.deps);
+          const written = await handleSave(webviewPanel.webview, document, msg.payload, this.deps);
+          if (written !== undefined) lastWritten = written;
         }
       } else if (msg.type === "openExternal") {
         try {
@@ -83,10 +94,28 @@ export class Ts5250EditorProvider implements vscode.CustomTextEditorProvider {
           /* 不正なURLは黙って無視（画面内リンクの誤クリック程度なので致命ではない） */
         }
       }
+    };
+    const sub = webviewPanel.webview.onDidReceiveMessage((raw: unknown) => {
+      const msg = raw as WebviewToHostMessage;
+      if (!msg || typeof msg !== "object" || !("type" in msg)) return;
+      queue = queue.then(() => handle(msg)).catch((e: unknown) => this.deps.log(`メッセージ処理に失敗: ${String(e)}`));
+    });
+    // **テキストとして直接書き換えられたら、開き直さなくても画面へ反映する**（D23）。
+    // 自分の書き込み（`lastWritten`と同じ内容）は除く。**比較はキューの中で行う**——この通知は
+    // `applyEdit`の最中に同期的に来るので、その時点では`handleSave`がまだ`lastWritten`を更新していない
+    const changeSub = vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.uri.toString() !== document.uri.toString() || e.contentChanges.length === 0) return;
+      queue = queue
+        .then(async () => {
+          if (document.getText() === lastWritten) return;
+          await sendLoaded(webviewPanel.webview, document, this.deps);
+        })
+        .catch(() => {});
     });
 
     webviewPanel.onDidDispose(() => {
       sub.dispose();
+      changeSub.dispose();
       void this.deps.releaseService();
     });
   }
@@ -260,16 +289,17 @@ function buildDisplayPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
 }
 
 /**
- * 設定フォームの保存: パスワードを暗号化し、`.ts5250`へ`WorkspaceEdit`で書き戻す。
+ * 設定フォームの保存: パスワードを暗号化し、`.ts5250`へ`WorkspaceEdit`で書き戻し、**ディスクまで保存する**
+ * （D23。以前は編集中の状態で止まり、利用者が明示的にファイルを保存する必要があった）。
  * **`syncSystem`は呼ばない**（`decisions.md` D17）——保存は「接続」ボタンではないため、
- * 設定を変えただけではサーバー側に何も登録しない
+ * 設定を変えただけではサーバー側に何も登録しない。戻り値は書き込んだテキスト（失敗時は`undefined`）
  */
 async function handleSave(
   webview: vscode.Webview,
   document: vscode.TextDocument,
   values: SettingsFormValues,
   deps: Ts5250EditorProviderDeps
-): Promise<void> {
+): Promise<string | undefined> {
   const crypto = deps.secretCrypto;
   const parsed = parseTs5250File(document.getText());
   const base: Ts5250File = parsed.ok ? parsed.file : { app: "emulator" };
@@ -298,14 +328,20 @@ async function handleSave(
 
   const edit = new vscode.WorkspaceEdit();
   const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
-  edit.replace(document.uri, fullRange, stringifyTs5250File(next));
+  const text = stringifyTs5250File(next);
+  edit.replace(document.uri, fullRange, text);
   const applied = await vscode.workspace.applyEdit(edit);
   if (!applied) {
     post(webview, { type: "saveError", message: "保存に失敗しました。ファイルが他で変更された可能性があります。" });
-    return;
+    return undefined;
+  }
+  if (!(await document.save())) {
+    post(webview, { type: "saveError", message: "ファイルへの書き込みに失敗しました。" });
+    return text;
   }
 
   post(webview, { type: "saved", payload: withTitle(buildDisplayPayload(next, crypto), document) });
+  return text;
 }
 
 function failureHtml(message: string): string {

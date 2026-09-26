@@ -89,8 +89,14 @@ export function mockExtensionContext(globalStorageDir: string): ExtensionContext
 }
 
 export function mockTextDocument(uri: string, text: string) {
+  let current = text;
   return {
-    getText: () => text,
+    getText: () => current,
+    /** テキストエディタ等で書き換えられた状態を作る（`onDidChangeTextDocument`の検証用） */
+    setText: (t: string) => {
+      current = t;
+    },
+    save: vi.fn(async () => true),
     // 実際の位置計算はしない（`handleSave`は戻り値を`Range`へそのまま渡すだけで、
     // 中身（line/character）は見ない）。テスト対象が使う面だけを満たす
     positionAt: (offset: number) => ({ line: 0, character: offset }),

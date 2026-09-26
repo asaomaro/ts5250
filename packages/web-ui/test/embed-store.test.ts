@@ -74,6 +74,23 @@ describe("initEmbedBridge", () => {
     expect(embedStore.loaded).toEqual(savedLater); // 表示用の値だけ最新化される
   });
 
+  /** 設定フォームは`loadedRev`を`key`にする（D23）——自分の自動保存の応答（saved）で作り直すと入力中の文字が消える */
+  it("loadedRev は loaded でだけ進み、saved では進まない", () => {
+    const before = embedStore.loadedRev;
+    window.dispatchEvent(fromParent({ type: "saved", payload: { app: "emulator", host: "h" } }));
+    expect(embedStore.loadedRev).toBe(before);
+    window.dispatchEvent(fromParent({ type: "loaded", payload: { app: "emulator", host: "h" } }));
+    expect(embedStore.loadedRev).toBe(before + 1);
+  });
+
+  it("fileInvalid は loaded を捨てる（読めないファイルの設定を出し続けると、入力1つで上書きしてしまう）が、saveError は捨てない", () => {
+    window.dispatchEvent(fromParent({ type: "loaded", payload: { app: "emulator", host: "h" } }));
+    window.dispatchEvent(fromParent({ type: "saveError", message: "競合" }));
+    expect(embedStore.loaded).toBeDefined();
+    window.dispatchEvent(fromParent({ type: "fileInvalid", message: "JSON不正" }));
+    expect(embedStore.loaded).toBeUndefined();
+  });
+
   it("saveError/fileInvalid メッセージで embedStore.error を更新する", () => {
     window.dispatchEvent(fromParent({ type: "saveError", message: "復号失敗" }));
     expect(embedStore.error).toBe("復号失敗");

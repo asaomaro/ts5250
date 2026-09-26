@@ -2,10 +2,17 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import SettingsForm from "../src/components/SettingsForm.vue";
+import type { SettingsFormValues } from "../src/embed-protocol.js";
+
+/** 最後に出た`change`の値（＝その時点で保存される内容） */
+function last(w: { emitted: (e: string) => unknown[][] | undefined }): SettingsFormValues | undefined {
+  const all = w.emitted("change");
+  return all?.[all.length - 1]?.[0] as SettingsFormValues | undefined;
+}
 
 /**
- * 設定フォームのキーボード操作・フォーカス管理（requirements AC-I2〜AC-I4）。
- * `InfoPopover.vue`にはフォーカストラップが無いため、ここで自前実装した分を検証する。
+ * 待機画面に置く設定フォーム（`20260924-vscode-extension` D23。以前はポップアップで、保存ボタン・
+ * フォーカストラップ・Escapeを持っていた）。**値が変わるたびに`change`を出す**——保存は呼び出し側。
  *
  * `app`は必須propなので、emulator専用フィールド（端末の種類/画面サイズ/装置名）を
  * 意図的に含めたくない汎用テストは`"sql"`を渡す（フィールド数が増えず、既存の
@@ -21,43 +28,42 @@ describe("SettingsForm", () => {
     expect(document.activeElement).toBe(w.get("#sf-host").element);
   });
 
-  it("最後の要素でTabを押すと最初の要素へ回る（フォーカストラップ）", async () => {
-    const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
+  it("ホストが設定済みならフォーカスを奪わない（「接続」を押すだけのことが多い）", async () => {
+    const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
     await nextTick();
-    const save = w.get('button[type="submit"]').element as HTMLButtonElement;
-    save.focus();
-    await w.get(".settings-form").trigger("keydown", { key: "Tab" });
-    expect(document.activeElement).toBe(w.get("#sf-host").element);
-  });
-
-  it("最初の要素でShift+Tabを押すと最後の要素へ回る", async () => {
-    const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
     await nextTick();
-    const host = w.get("#sf-host").element as HTMLInputElement;
-    host.focus();
-    await w.get(".settings-form").trigger("keydown", { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(w.get('button[type="submit"]').element);
+    expect(document.activeElement).not.toBe(w.get("#sf-host").element);
   });
 
-  it("Escapeでcancelを発火する", async () => {
-    const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
-    await w.get(".settings-form").trigger("keydown", { key: "Escape" });
-    expect(w.emitted("cancel")).toHaveLength(1);
+  it("生成しただけ（初期値の反映）ではchangeを出さない——開いただけでファイルを書き換えない", async () => {
+    const w = mount(SettingsForm, {
+      props: { app: "emulator", initial: { host: "H", port: 23, watermark: { text: "x" } } },
+      attachTo: document.body
+    });
+    await nextTick();
+    await nextTick();
+    expect(w.emitted("change")).toBeUndefined();
   });
 
-  it("バックドロップのクリックでもcancelを発火する", async () => {
-    const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
-    await w.get(".backdrop").trigger("click");
-    expect(w.emitted("cancel")).toHaveLength(1);
+  it("ポートが数字でない・範囲外の間はchangeを出さず、その旨を出す（打ちかけで保存するとポートが消える）", async () => {
+    const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
+    await w.get("#sf-port").setValue("99x");
+    expect(w.emitted("change")).toBeUndefined();
+    expect(w.find(".field-error").exists()).toBe(true);
+    await w.get("#sf-port").setValue("70000");
+    expect(w.emitted("change")).toBeUndefined();
+    await w.get("#sf-port").setValue("992");
+    expect(last(w)).toMatchObject({ port: 992 });
+    expect(w.find(".field-error").exists()).toBe(false);
   });
 
-  it("入力して保存すると、入力値でsaveを発火する（空欄は省く）", async () => {
+  it("入力するたびに、入力値でchangeを出す（空欄は省く）", async () => {
     const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
     await w.get("#sf-host").setValue("AS400");
     await w.get("#sf-port").setValue("992");
     await w.get("#sf-user").setValue("MYUSER");
-    await w.get(".settings-form").trigger("submit");
-    const saved = w.emitted("save")?.[0]?.[0];
+    await nextTick();
+    const saved = last(w);
     expect(saved).toEqual({ host: "AS400", port: 992, tls: false, user: "MYUSER" });
   });
 
@@ -69,8 +75,8 @@ describe("SettingsForm", () => {
     const w = mount(SettingsForm, { props: { app: "sql", initial: { host: "H" } }, attachTo: document.body });
     expect((w.get("#sf-tls").element as HTMLInputElement).checked).toBe(false);
     await w.get("#sf-port").setValue("992");
-    await w.get(".settings-form").trigger("submit");
-    expect(w.emitted("save")?.[0]?.[0]).toMatchObject({ tls: false });
+    await nextTick();
+    expect(last(w)).toMatchObject({ tls: false });
   });
 
   it("初期値（initial）があればフィールドへ反映する", () => {
@@ -93,8 +99,8 @@ describe("SettingsForm", () => {
     it("既定は「未指定」で、保存してもccsidを省く", async () => {
       const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
       await w.get("#sf-host").setValue("AS400");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      await nextTick();
+      const saved = last(w) as unknown as Record<string, unknown>;
       expect(saved.ccsid).toBeUndefined();
       expect(saved.katakanaVariant).toBeUndefined();
     });
@@ -103,8 +109,8 @@ describe("SettingsForm", () => {
       const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
       await w.get("#sf-host").setValue("AS400");
       await w.get("#sf-ccsid").setValue("930-katakana-ex");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ ccsid: 930, katakanaVariant: "katakana-ex" });
     });
 
@@ -112,8 +118,8 @@ describe("SettingsForm", () => {
       const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
       await w.get("#sf-host").setValue("AS400");
       await w.get("#sf-ccsid").setValue("939");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      await nextTick();
+      const saved = last(w) as unknown as Record<string, unknown>;
       expect(saved.ccsid).toBe(939);
       expect(saved.katakanaVariant).toBeUndefined();
     });
@@ -139,8 +145,8 @@ describe("SettingsForm", () => {
       });
       expect((w.get("#sf-ccsid").element as HTMLSelectElement).value).toBe("unset");
       await w.get("#sf-port").setValue("992");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ ccsid: 5026, port: 992 });
     });
   });
@@ -174,17 +180,17 @@ describe("SettingsForm", () => {
       await w.get("#sf-terminal").setValue("3270");
       await nextTick();
       expect(w.find("#sf-screensize").exists()).toBe(false);
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ terminal: "3270" });
-      expect((saved as Record<string, unknown>).screenSize).toBeUndefined();
+      expect((saved as unknown as Record<string, unknown>).screenSize).toBeUndefined();
     });
 
     it("emulatorで5250のまま保存すると、terminalとscreenSizeの既定値が乗る", async () => {
       const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
       await w.get("#sf-host").setValue("AS400");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ terminal: "5250", screenSize: "24x80" });
     });
   });
@@ -199,8 +205,8 @@ describe("SettingsForm", () => {
       expect(w.find("#sf-wm-text").exists()).toBe(false);
       await w.get("#sf-host").setValue("AS400");
       await w.get("#sf-device").setValue("PRT01");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      await nextTick();
+      const saved = last(w) as unknown as Record<string, unknown>;
       expect(saved.deviceName).toBe("PRT01");
       expect(saved.terminal).toBeUndefined();
       expect(saved.screenSize).toBeUndefined();
@@ -219,8 +225,8 @@ describe("SettingsForm", () => {
       expect(w.find("#sf-wm-enabled").exists()).toBe(false);
       expect(w.find("#sf-wm-layout").exists()).toBe(false);
       await w.get("#sf-host").setValue("AS400");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      await nextTick();
+      const saved = last(w) as unknown as Record<string, unknown>;
       expect(saved.watermark).toBeUndefined();
     });
 
@@ -231,8 +237,8 @@ describe("SettingsForm", () => {
       await nextTick();
       expect(w.find("#sf-wm-enabled").exists()).toBe(true);
       expect(w.find("#sf-wm-layout").exists()).toBe(true);
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({
         watermark: { text: "検証機 {host}", opacity: 0.12, size: 22, layout: "tile", angle: -30 }
       });
@@ -244,8 +250,8 @@ describe("SettingsForm", () => {
       await w.get("#sf-wm-text").setValue("検証機");
       await nextTick();
       await w.get("#sf-wm-enabled").setValue(false);
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ watermark: { text: "検証機", enabled: false } });
     });
 
@@ -254,16 +260,16 @@ describe("SettingsForm", () => {
       await w.get("#sf-host").setValue("AS400");
       await w.get("#sf-wm-text").setValue("検証機");
       await nextTick();
-      await w.get(".settings-form").trigger("submit");
-      const withoutColor = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      await nextTick();
+      const withoutColor = last(w) as unknown as Record<string, unknown>;
       expect((withoutColor.watermark as Record<string, unknown>).color).toBeUndefined();
 
       await w.get("#sf-wm-usecolor").setValue(true);
       await nextTick();
       expect(w.find("#sf-wm-color").exists()).toBe(true);
       await w.get("#sf-wm-color").setValue("#112233");
-      await w.get(".settings-form").trigger("submit");
-      const withColor = w.emitted("save")?.[1]?.[0];
+      await nextTick();
+      const withColor = last(w);
       expect(withColor).toMatchObject({ watermark: { color: "#112233" } });
     });
 
@@ -295,8 +301,8 @@ describe("SettingsForm", () => {
       await w.get("#sf-wm-opacity").setValue("500");
       await w.get("#sf-wm-size").setValue("9999");
       await w.get("#sf-wm-angle").setValue("999");
-      await w.get(".settings-form").trigger("submit");
-      const saved = w.emitted("save")?.[0]?.[0];
+      await nextTick();
+      const saved = last(w);
       expect(saved).toMatchObject({ watermark: { opacity: 1, size: 200, angle: 90 } });
     });
   });

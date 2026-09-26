@@ -627,3 +627,36 @@ after {"left":368,"width":64,"top":307}
 
 - `test/embed-app.test.ts` green・`vue-tsc -b` green。このラウンドでは失敗が発生していない。
 - **未検証の穴**: jsdomはレイアウトを計算しないので、自動テストでは固定していない（上の実測がChromiumでの確認）。
+
+## ラウンド22（設定を待機画面に置き、自動保存・即時反映する）
+
+`decisions.md` D23。
+
+- `packages/web-ui` — **2758 passed**（211 files）。`vue-tsc -b` green。
+- `vscode-extension` — 89 passed / 1 failed（全体実行）。落ちたのは変更と無関係の
+  `serviceManager.multiprocess.integration.test`（20秒タイムアウト）で、単独実行では2回とも合格:
+
+```
+     × 2つの別プロセスが同時にacquireしても、最終的に1つのサーバーへ収束する 20505ms
+ Test Files  1 failed | 12 passed (13)
+      Tests  1 failed | 89 passed (90)
+$ npx vitest run test/serviceManager.multiprocess.integration.test.ts   # 2回
+      Tests  1 passed (1)
+      Tests  1 passed (1)
+```
+
+- mutation 10件（D23に列挙）すべてkilled。
+- 画面（`vite build`の`embed.html`をChromiumで表示し、`loaded`を流し込んで測った）:
+
+```
+emulator 900x420 {"cardLeft":220,"cardW":460,"btnVisible":true,"pageScrollX":false}
+printer 900x600 {"cardLeft":220,"cardW":460,"btnVisible":true,"pageScrollX":false}
+sql 360x600 {"cardLeft":16,"cardW":328,"btnVisible":true,"pageScrollX":false}
+```
+
+  1回目の表示でボタンが欄の下にあり、透かしの欄があると900×700でも見えない（要スクロール）こと、カードの幅が
+  `min(460px,100%)`の循環で386pxに縮むことを見つけて直した（上が直した後）。
+
+**未検証の穴**: VSCode本体での自動保存（`document.save()`で本当にdirtyが消えるか・元に戻す履歴の粒度）と、
+テキストエディタで同時に開いて書き換えたときの即時反映は、拡張ホストのモックでしか確かめていない
+（このコンテナにVSCodeが無い）。
