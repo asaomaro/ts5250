@@ -77,7 +77,7 @@
       - `ever` 条件の削除
       `error` の側は下に割った。（research F1-2b）
 - [ ] **繋ぎ直し成功後の `error` で健全な接続を諦める経路を、どのテストも判別できない**（上の項目＝`20260908-session-lifetime-rules-fold` decisions D17 から割った）。
-      `packages/web-ui/src/session-controller.ts:483` の `if (msg.type === "error" && !a.settled)` から
+      `packages/web-ui/src/session-controller.ts:517`（~~`:483`~~。2026-09-27 時点）の `if (msg.type === "error" && !a.settled)` から
       `&& !a.settled` を外しても、関連 6 ファイル 87 件は緑のままだった（変異）。
       外すと、繋ぎ直しに成功した後の通常の `error`（例: `FIELD_TYPE`）で `giveUpReconnect(…, "gone")` に入り、
       **健全な接続が lost/gone になり、口が close される**。
@@ -96,7 +96,9 @@
       - S4: 最初の ping の後に半開き。**93.3 秒**で再接続中になり、**632ms** で復帰した。
       ping を受ける前の半開きは検出されない。これは別の欠陥として下に起票した。
       再現: `scripts/verify-browser-reconnect.mjs`。（research F2）
-- [ ] `packages/web-ui/test/tab-visibility.test.ts` が並列実行時に 5 秒タイムアウトで落ちる。
+- [x] `packages/web-ui/test/tab-visibility.test.ts` が並列実行時に 5 秒タイムアウトで落ちる。
+      **済（台帳の照合 2026-09-27 で閉じ忘れを発見）**: `20260921-type-ahead`（コミット `e5bac5cf`・PR #410）で原因（`await import("../src/App.vue")` が単体で 2.9 秒）を特定し、
+      そのテストだけ `{ timeout: 30_000 }`（`packages/web-ui/test/tab-visibility.test.ts:125-128`）。2026-09-27 に load 1.13 で 8/8 合格（9.03s）。
       CI の並列度かこのテストのタイムアウトを見直す（本件とは無関係の既存フレーク）。
       `20260908-session-lifetime-rules-fold` の test 工程でラウンド1 は落ち・ラウンド2 は落ちなかった
       ——タイミング依存であることの傍証。~~単体実行では 8 件とも緑。~~
@@ -180,9 +182,10 @@
 - [ ] **利用者に「待たされた操作」を 1 つ確かめ、上の候補 D / N3 / A / H のどれかに確定する**（上の項目から割った）。
       見分け方:
       - リロードやタブを開き直した直後に開けない・遅い → D
-      - Enter の直後に打った文字が欠ける → N3
+      - ~~Enter の直後に打った文字が欠ける → N3~~（`acs-parity.md` で `20260921-type-ahead` により閉じた）
       - スピナーが長く（最大 90 秒）残って「再接続中」になる → A
-      - 🔒 のまま解けず、Attn / SysReq でしか抜けない → H
+      - ~~🔒 のまま解けず、Attn / SysReq でしか抜けない → H~~（`acs-parity.md` で閉じた）
+      **残る候補は D と A だけ**（2026-09-27 の照合）。
       **判定（`20260919-backlog-acs-triage`）: 対応要・優先度 中**（利用者の確認待ち）
 
 - [ ] **リロード・タブを閉じた後、90 秒は同じ装置名で開けない（`8902 Device not available`）**（優先度 高・深さ ◎）。
@@ -191,7 +194,7 @@
       ACS はウィンドウを閉じると接続も閉じるので、この待ちは起きない。
       当 PJ
       - web-ui には、タブを閉じるときに `close` を送る処理が無い（`pagehide` / `beforeunload` の grep は 0 件）。
-      - サーバーはこれを転送断とみなし、セッションを `DEFAULT_RECONNECT_GRACE_MS`＝90 秒保持する（`packages/server/src/ws-handler.ts` の `onSocketClose` → `transportLost`、`packages/server/src/session-manager.ts:119`）。
+      - サーバーはこれを転送断とみなし、セッションを `DEFAULT_RECONNECT_GRACE_MS`＝90 秒保持する（`packages/server/src/ws-handler.ts` の `onSocketClose` → `transportLost`、`packages/server/src/session-manager.ts:128`。~~`:119`~~）。
       - 表示セッションの `open()`（`session-manager.ts:692`）には、同じ設定のセッションが保持中かを確かめる処理が無い。プリンターの `openPrinter`（`:885-889`）にはある。
       実測（実機）: 同じ装置名の 2 本目は、1 本目が生きている間も、閉じた 0.3 秒後も、`8902 Device not available` で即座に拒否された。
       手当ての候補
@@ -212,9 +215,11 @@
       手当ての候補: 開いた時点で見張りを張る。後方互換を守るなら、「サーバーが ping を送る」ことを `opened` で申告させる。
       （出典: `20260919-backlog-acs-triage` research N19・F2）
 - [ ] **プリンターの「＋新規」で同じ id に差し替わったとき、古い口がリークし、サーバーの購読の解除が新しい接続にまで及びうる**（優先度 低・深さ △）。
-      上の「VT とプリンターの `onClose` の門」と同じ経路（装置名の無い設定で「＋新規」、`LauncherPane.vue:229`）で起きる、別の問題。
+      上の「VT とプリンターの `onClose` の門」と同じ経路（装置名の無い設定で「＋新規」、`LauncherPane.vue:177`。~~`:229`~~）で起きる、別の問題。
       - 差し替えられた古い `WsClient` は、クライアントの誰も close しない（一時テストで `close` が呼ばれないことを確認）。
-      - サーバーの `detachReport`（`packages/server/src/ws-handler.ts:812`）は、エントリの `onReport` / `onState` などを無条件に削除する。古い接続が後から閉じると、新しい接続の帳票や状態の push まで外れる（コード読みのみ・未実証）。
+      - ~~サーバーの `detachReport`（`packages/server/src/ws-handler.ts:812`）は、エントリの `onReport` / `onState` などを無条件に削除する。古い接続が後から閉じると、新しい接続の帳票や状態の push まで外れる~~
+        → **サーバー側は解消済み**（2026-09-27 の照合）: `20260921-printer-hold-response`（`e5bac5cf`・PR #410）で購読が `entry.listeners: Set<PrinterListener>`（`packages/server/src/session-manager.ts:495`）になり、
+        `detachReport` は自分の購読だけ外す（`packages/server/src/ws-handler.ts:1009-1011`）。**残りはクライアント側**（古い `WsClient` のリークと「＋新規」の出し分け。`ConfigCard.vue:885-892`）（コード読みのみ・未実証）。
       手当ての候補: プリンターでは「＋新規」は新規にならないので出さない。これで根から塞がる。
       **着手時に両側を再確認すること**（委譲先の読みのみ）。
       （出典: `20260919-backlog-acs-triage` research F1-5）

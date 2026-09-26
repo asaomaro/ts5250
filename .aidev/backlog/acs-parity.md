@@ -302,7 +302,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ（主エージェントが確認）
   - `packages/tn5250/src/protocol/wtd-applier.ts:293-299` は、0x22 の桁 2 バイトを読み捨て、`systemMessage` として最下行に重ねる。このことはコメントに明記されている。
   - ~~エラー状態は持たない。~~（`20260921-operator-error-mode` で持った）
-  ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）と、抜けたときの復元。
+  ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）~~と、抜けたときの復元~~。**抜けたときの復元は `20260921-host-error-mode`（PR #410）で済んだ**（`EmulatorPane.vue:980-986` の `exitErrorMode`。2026-09-27 の照合で記録漏れを発見）。0x22 を窓の中に出すのは、0x22 を出す画面が実機で見つかるまで保留。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
@@ -598,7 +598,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~MONOCASE で ASCII 以外を大文字化しない~~ → 上の `20260921-monocase-non-ascii` で済んだ
     - SBCS のセッションでコードページに無い字（37 の `α`・かな等）: ACS は受け付けて送るときに置き換える（`PS5250.inputChar` は SBCS のセッションでは
       可否を見ない）。当 PJ は漢字・かなを打った時点で、それ以外を送信時（core の「CCSID の外の文字」）に弾く（`20260921-monocase-non-ascii` D1）。
-      ACS が置き換えに使うバイトは未確認。あわせて Greek の `μ` をコードページの `µ` へ置き換える（`hasMicroSymbol`）のも未対応
+      ACS が置き換えに使うバイトは未確認。~~あわせて Greek の `μ` をコードページの `µ` へ置き換える（`hasMicroSymbol`）のも未対応~~（`20260921-monocase-non-ascii` D5・PR #410 で実装済み。`ScreenGrid.vue:290-293`。2026-09-27 の照合で取り消し）
     - DBCS のセッションで文字の可否（`codepage.isValidChar`）に外れた字: ACS はエラー 39、当 PJ は「半角文字しか入力できません」など型の理由で弾く
     - ~~HLLAPI の `@B`（Backtab）が継続欄・逆向きのカーソル送りを見ない（ペインの `backtab` は見る。`20260921-home-record-backspace` D5）~~ → 上の `20260921-hllapi-tab-acs`
     - DBCS 専用欄がホーム位置のときの Home（ACS はホーム位置が SO なら 1 桁先へ置くので、原典の字面では 2 回目も
@@ -612,7 +612,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       ~~`C36 = [rule]`・`C122 = [altcsr]`~~ → `20260921-default-keys-rule-cursor` で Ctrl+Home・Ctrl+F11 に揃えた。
       ~~`A37`/`A39`（単語単位の Backtab/Tab）~~ → `20260921-word-tab-acs` で Alt+←/→ に揃えた（`C35`/`C34` はブラウザのタブ切替と衝突するため対象外のまま）。
       残りは当 PJ に機能が無いキー（`AcsMapFunctions.MAP_5250`）: `A19 = [test]`（Test Request）・`S36 = [fieldmark]`・`C33 = [jump]`・
-      `S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`。
+      `S127` / `C88 = [cut]`・`C90 = [undo]`・`C17 = [newline]`（Newline の機能は `20260921-shift-enter-newline`・PR #410 で入った〔`useKeymap.ts:115-119`〕。**残りは C17 の割り当てだけ**。2026-09-27 の照合）。
       **Ctrl+矢印も違う**——ACS は `C37` 〜 `C40 = [moveleft]` 〜 `[movedown]`（選択範囲を動かす）、当 PJ は語頭への頭出し（`useKeymap.ts` の `word-*`）
     - ~~`opMessages.ts:215/217` の「0021/0022 相当」の番号の誤り（ACS では、AID 時の ME は 0007、MF は 0014）~~ → 直した（`20260921-mandatory-check-acs`）
   - 裏付けが取れた記録: 930/5026 で全欄を大文字化する（`20260729-ffw-behavior-bits` D2 で「未確認」とされていた）は、`CodePage.toUpper` で裏付けられた。
@@ -785,7 +785,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~装置名（中）~~ → 上の `20260921-device-name-acs` で済んだ
     - ACS: 置換記号（`*` `%` `=` `+` `&COMPN` など）を展開し、大文字にする（`AutoDeviceName5250`）。
     - 当 PJ: 書いたとおりに送る。
-    - `deviceNameRetry` は理由を問わずに再試行するので、誤ったパスワードで QMAXSIGN を使い切る恐れがある（推測）。
+    - ~~`deviceNameRetry` は理由を問わずに再試行するので、誤ったパスワードで QMAXSIGN を使い切る恐れがある（推測）。~~ → `20260921-device-name-acs`（AC3。8902 のときだけ同じ接続の中で答え直す）で解消（`packages/tn5250/src/telnet/device-name.ts:55-68`。2026-09-27 の照合で取り消し）
     - 残り（低・未確認）: ACS の GUI がセッションに付ける名前（`*`）。当 PJ は `A`（`20260921-device-name-acs` D4）
   - ~~1399 の申告（中・要実測）~~ → 上の `20260921-device-env-1399` で済んだ
     - ACS: KBDTYPE=JPE・CHARSET=32000。

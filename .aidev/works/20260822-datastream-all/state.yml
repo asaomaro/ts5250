@@ -1,9 +1,10 @@
 schema: 3
 slug: datastream-all
-current: review
-approved: [requirement, spec, plan, coding, test, review]
+current: deliver
+approved: [requirement, spec, plan, coding, test, review, deliver]
 mode: autonomous
 humanGates: []
 maxSendBacks: 3
 dependsOn: []
 backlog: datastream-commands.md
+harnessRevDelivered: unknown
