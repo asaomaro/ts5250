@@ -34,7 +34,9 @@ export const embedStore = reactive<{
    * （`20260924-vscode-extension` D23）
    */
   loadedRev: number;
-}>({ loaded: undefined, connect: undefined, error: undefined, loadedRev: 0 });
+  /** `saved`（自動保存の完了）を受けた回数。待機画面の「保存しました」表示が見る（D24） */
+  savedRev: number;
+}>({ loaded: undefined, connect: undefined, error: undefined, loadedRev: 0, savedRev: 0 });
 
 /**
  * 拡張ホストへ送る。**トップレベルで直接開かれた場合（親フレームが無い）は何もしない**——
@@ -85,6 +87,7 @@ export function initEmbedBridge(): void {
         embedStore.loaded = msg.payload;
         embedStore.error = undefined;
         if (msg.type === "loaded") embedStore.loadedRev++;
+        else embedStore.savedRev++;
         break;
       case "connect":
         // 「接続」ボタン押下に応えて拡張ホストが解決した値——ここで初めて実接続する

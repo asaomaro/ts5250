@@ -13,6 +13,7 @@ import type { SettingsFormValues, EmbedAppKind, WatermarkValue } from "../embed-
 import { HOST_CODE_PAGE_OPTIONS, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE, type ScreenSize } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
+import { settingsColumnsOf } from "../settingsLayout.js";
 
 const props = defineProps<{ initial?: SettingsFormValues; app: EmbedAppKind }>();
 const emit = defineEmits<{ (e: "change", v: SettingsFormValues): void }>();
@@ -59,11 +60,14 @@ const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / 
 const user = ref(props.initial?.user ?? "");
 const password = ref("");
 
-const firstField = ref<HTMLInputElement>();
+// ホスト欄は`v-for`の中にあり、そこでの`ref`は配列になる——フォームから引く
+const formEl = ref<HTMLFormElement>();
+/** 列ごとの束（`settingsLayout.ts`。カード幅を決める`EmbedApp.vue`と同じ表を読む） */
+const columns = computed(() => settingsColumnsOf(props.app));
 
 // ホストが空（作ったばかりのファイル）のときだけホスト欄へ。設定済みなら「接続」を押すだけのことが多い
 onMounted(() => {
-  if (!host.value) void nextTick(() => firstField.value?.focus());
+  if (!host.value) void nextTick(() => formEl.value?.querySelector<HTMLInputElement>("#sf-host")?.focus());
 });
 
 /** ポートは空（既定）か1〜65535の整数。**打ちかけの不正値では保存しない**——保存すると`port`が消える */
@@ -136,118 +140,159 @@ function buildWatermark(): WatermarkValue | undefined {
 </script>
 
 <template>
-  <form class="settings-form" @submit.prevent>
-    <div class="row">
-      <label for="sf-host">ホスト</label>
-      <input id="sf-host" ref="firstField" v-model="host" type="text" required />
-    </div>
-    <div class="row">
-      <label for="sf-port">ポート</label>
-      <input id="sf-port" v-model="port" type="text" inputmode="numeric" placeholder="既定" :aria-invalid="portInvalid" />
-    </div>
-    <p v-if="portInvalid" class="field-error">ポートは 1〜65535 の数字で入力してください</p>
-    <div class="row">
-      <label for="sf-tls">TLS</label>
-      <input id="sf-tls" v-model="tls" type="checkbox" />
-    </div>
-    <div class="row">
-      <label for="sf-ccsid">ホストコードページ</label>
-      <select id="sf-ccsid" v-model="codePageId">
-        <option value="unset">未指定（既定）</option>
-        <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
-      </select>
-    </div>
-    <div v-if="app === 'emulator'" class="row">
-      <label for="sf-terminal">端末の種類</label>
-      <select id="sf-terminal" v-model="terminal">
-        <option value="5250">5250（IBM i）</option>
-        <option value="3270">3270（メインフレーム）</option>
-      </select>
-    </div>
-    <div v-if="app === 'emulator' && terminal !== '3270'" class="row">
-      <label for="sf-screensize">画面サイズ</label>
-      <select id="sf-screensize" v-model="screenSize">
-        <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
-      </select>
-    </div>
-    <div v-if="app === 'emulator' || app === 'printer'" class="row">
-      <label for="sf-device">装置名</label>
-      <!-- プリンターは装置名が実質必須（多くのホストはプリンター装置の自動構成を断る。D20） -->
-      <input id="sf-device" v-model="deviceName" type="text" :placeholder="app === 'printer' ? '例: PRT01（プリンター装置名）' : '自動'" />
-    </div>
-    <!-- ウォーターマーク（画面に重ねる透かし。ACSの透かしと同じ用途——本番機と検証機を
-         一目で見分ける）。emulatorのみ。文字を入れて初めて設定になるので、文字を先頭に
-         置き、細かい見え方は文字があるときだけ出す（`ConfigCard.vue`と同じ構成） -->
-    <template v-if="app === 'emulator'">
-      <div class="row">
-        <label for="sf-wm-text">透かし文字</label>
-        <input
-          id="sf-wm-text"
-          v-model="wmForm.text"
-          type="text"
-          placeholder="空欄なら表示しません（例: {host}）"
-          :title="`差し込み変数: ${WM_VAR_HINT}`"
-        />
-      </div>
-      <template v-if="wmForm.text.trim()">
-        <div class="row">
-          <label for="sf-wm-enabled">透かし表示</label>
-          <input id="sf-wm-enabled" v-model="wmForm.enabled" type="checkbox" title="文字を残したまま切れます" />
-        </div>
-        <div class="row">
-          <label for="sf-wm-layout">透かし配置</label>
-          <select id="sf-wm-layout" v-model="wmForm.layout">
-            <option value="tile">並べる（画面全体）</option>
-            <option value="center">中央に1つ</option>
-          </select>
-        </div>
-        <div class="row">
-          <label for="sf-wm-opacity">透かし濃さ（%）</label>
-          <input id="sf-wm-opacity" v-model.number="wmForm.opacityPct" type="number" min="2" max="100" step="1" />
-        </div>
-        <div class="row">
-          <label for="sf-wm-size">透かし大きさ（px）</label>
-          <input id="sf-wm-size" v-model.number="wmForm.size" type="number" min="8" max="200" step="1" />
-        </div>
-        <div class="row">
-          <label for="sf-wm-angle">透かし角度（度）</label>
-          <input id="sf-wm-angle" v-model.number="wmForm.angle" type="number" min="-90" max="90" step="5" />
-        </div>
-        <div class="row">
-          <label for="sf-wm-usecolor">透かし色</label>
-          <select id="sf-wm-usecolor" v-model="wmForm.useColor">
-            <option :value="false">画面の文字色に合わせる</option>
-            <option :value="true">指定する</option>
-          </select>
-        </div>
-        <div v-if="wmForm.useColor" class="row">
-          <label for="sf-wm-color">色（選択）</label>
-          <input id="sf-wm-color" v-model="wmForm.color" type="color" aria-label="透かしの色" />
-        </div>
+  <!-- **欄を役割で束ね、束を横に並べる**（D24。縦1列だとemulatorは縦スクロールが出た）。列の幅は
+       `grid`の`auto-fit`で決まり、狭い画面では自然に1列へ折り返す -->
+  <form ref="formEl" class="settings-form" @submit.prevent>
+    <div v-for="(col, i) in columns" :key="i" class="col">
+      <template v-for="g in col" :key="g">
+        <fieldset v-if="g === 'connection'" class="group">
+          <legend>接続先</legend>
+          <div class="row">
+            <label for="sf-host">ホスト</label>
+            <input id="sf-host" v-model="host" type="text" required />
+          </div>
+          <div class="row">
+            <label for="sf-port">ポート</label>
+            <input id="sf-port" v-model="port" type="text" inputmode="numeric" placeholder="既定" :aria-invalid="portInvalid" />
+          </div>
+          <p v-if="portInvalid" class="field-error">ポートは 1〜65535 の数字で入力してください</p>
+          <div class="row">
+            <label for="sf-tls">TLS</label>
+            <input id="sf-tls" v-model="tls" type="checkbox" />
+          </div>
+          <div class="row">
+            <label for="sf-ccsid">コードページ</label>
+            <select id="sf-ccsid" v-model="codePageId" title="ホストコードページ">
+              <option value="unset">未指定（既定）</option>
+              <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
+            </select>
+          </div>
+        </fieldset>
+        <fieldset v-else-if="g === 'signon'" class="group">
+          <legend>サインオン</legend>
+          <div class="row">
+            <label for="sf-user">ユーザー</label>
+            <input id="sf-user" v-model="user" type="text" autocomplete="username" />
+          </div>
+          <div class="row">
+            <label for="sf-password">パスワード</label>
+            <input id="sf-password" v-model="password" type="password" autocomplete="current-password" />
+          </div>
+        </fieldset>
+        <fieldset v-else-if="g === 'device'" class="group">
+          <legend>{{ app === "printer" ? "プリンター装置" : "端末" }}</legend>
+          <div v-if="app === 'emulator'" class="row">
+            <label for="sf-terminal">種類</label>
+            <select id="sf-terminal" v-model="terminal">
+              <option value="5250">5250（IBM i）</option>
+              <option value="3270">3270（メインフレーム）</option>
+            </select>
+          </div>
+          <div v-if="app === 'emulator' && terminal !== '3270'" class="row">
+            <label for="sf-screensize">画面サイズ</label>
+            <select id="sf-screensize" v-model="screenSize">
+              <option v-for="s in SCREEN_SIZES" :key="s.value" :value="s.value">{{ s.label }}</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="sf-device">装置名</label>
+            <!-- プリンターは装置名が実質必須（多くのホストはプリンター装置の自動構成を断る。D20） -->
+            <input id="sf-device" v-model="deviceName" type="text" :placeholder="app === 'printer' ? '例: PRT01' : '自動'" />
+          </div>
+          <p v-if="app === 'printer'" class="field-hint">未設定だと、自動構成をホストが許す場合だけ繋がります</p>
+        </fieldset>
+        <fieldset v-else-if="g === 'watermark'" class="group">
+          <legend>透かし</legend>
+          <div class="row">
+            <label for="sf-wm-text">文字</label>
+            <input
+              id="sf-wm-text"
+              v-model="wmForm.text"
+              type="text"
+              placeholder="空欄なら表示しない（例: {host}）"
+              :title="`差し込み変数: ${WM_VAR_HINT}`"
+            />
+          </div>
+          <template v-if="wmForm.text.trim()">
+            <div class="row">
+              <label for="sf-wm-enabled">表示</label>
+              <input id="sf-wm-enabled" v-model="wmForm.enabled" type="checkbox" title="文字を残したまま切れます" />
+            </div>
+            <div class="row">
+              <label for="sf-wm-layout">配置</label>
+              <select id="sf-wm-layout" v-model="wmForm.layout">
+                <option value="tile">並べる（画面全体）</option>
+                <option value="center">中央に1つ</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="sf-wm-opacity">濃さ（%）</label>
+              <input id="sf-wm-opacity" v-model.number="wmForm.opacityPct" type="number" min="2" max="100" step="1" />
+            </div>
+            <div class="row">
+              <label for="sf-wm-size">大きさ（px）</label>
+              <input id="sf-wm-size" v-model.number="wmForm.size" type="number" min="8" max="200" step="1" />
+            </div>
+            <div class="row">
+              <label for="sf-wm-angle">角度（度）</label>
+              <input id="sf-wm-angle" v-model.number="wmForm.angle" type="number" min="-90" max="90" step="5" />
+            </div>
+            <div class="row">
+              <label for="sf-wm-usecolor">色</label>
+              <select id="sf-wm-usecolor" v-model="wmForm.useColor">
+                <option :value="false">画面の文字色に合わせる</option>
+                <option :value="true">指定する</option>
+              </select>
+              <input v-if="wmForm.useColor" id="sf-wm-color" v-model="wmForm.color" type="color" aria-label="透かしの色" />
+            </div>
+          </template>
+        </fieldset>
       </template>
-    </template>
-    <div class="row">
-      <label for="sf-user">ユーザー</label>
-      <input id="sf-user" v-model="user" type="text" autocomplete="username" />
-    </div>
-    <div class="row">
-      <label for="sf-password">パスワード</label>
-      <input id="sf-password" v-model="password" type="password" autocomplete="current-password" />
     </div>
   </form>
 </template>
 
 <style scoped>
 .settings-form {
+  display: grid;
+  /* 列は最小260px。カードの幅（`EmbedApp.vue`が列数から決める）に収まる数だけ横に並び、狭ければ折り返す */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+  width: 100%;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.group {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 100%;
+  margin: 0;
+  padding: 8px 10px 10px;
+  min-width: 0;
+  border: 1px solid var(--crt-line, #333);
+  border-radius: 6px;
 }
-.field-error {
+.group legend {
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg, #d9e3da);
+}
+.field-error,
+.field-hint {
   margin: 0;
   font-size: 11.5px;
+}
+.field-error {
   color: var(--t-red, #e06c6c);
+}
+.field-hint {
+  color: var(--muted);
 }
 .row {
   display: flex;
@@ -255,7 +300,7 @@ function buildWatermark(): WatermarkValue | undefined {
   gap: 8px;
 }
 .row label {
-  width: 9.5em;
+  width: 7em;
   flex: none;
   font-family: var(--mono);
   font-size: 11.5px;

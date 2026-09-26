@@ -42,6 +42,7 @@ beforeEach(() => {
   embedStore.connect = undefined;
   embedStore.error = undefined;
   embedStore.loadedRev = 0;
+  embedStore.savedRev = 0;
 });
 
 describe("EmbedApp: app種別ごとのマウント分岐", () => {
@@ -395,6 +396,52 @@ describe("EmbedApp: 待機画面の設定フォーム（自動保存）", () => 
     expect(post).not.toHaveBeenCalled();
   });
 
+  /** 保存ボタンが無いので、保存されたかを画面に出す（利用者の質問「接続を押すと保存されるのか」。D24） */
+  it("保存の状態を出す: 編集直後は「保存します」→送ったら「保存しています」→savedで「自動保存しました」", async () => {
+    vi.useFakeTimers();
+    stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
+    await nextTick();
+    const state = () => w.find(".save-state").text();
+    expect(state()).toContain("自動で保存されます"); // 何もしていないときは仕組みを説明する
+    w.findComponent(SettingsForm).vm.$emit("change", { host: "B" });
+    await nextTick();
+    expect(state()).toBe("変更を保存します…");
+    vi.advanceTimersByTime(400);
+    await nextTick();
+    expect(state()).toBe("保存しています…");
+    embedStore.savedRev++;
+    await nextTick();
+    expect(state()).toBe("自動保存しました");
+  });
+
+  it("保存の応答を待つ間に次の入力があれば、「保存します」のまま（古い応答で保存済みと出さない）", async () => {
+    vi.useFakeTimers();
+    stubParentPostMessage();
+    const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.loaded = { app: "emulator", host: "A", title: "f" };
+    await nextTick();
+    const form = w.findComponent(SettingsForm);
+    form.vm.$emit("change", { host: "B" });
+    vi.advanceTimersByTime(400);
+    form.vm.$emit("change", { host: "BC" });
+    embedStore.savedRev++; // 1回目の応答
+    await nextTick();
+    expect(w.find(".save-state").text()).toBe("変更を保存します…");
+  });
+
+  it.each([
+    ["emulator", "948px"],
+    ["printer", "648px"],
+    ["sql", "648px"]
+  ] as const)("%s: カードの幅は設定の列数で決まる（%s）", async (app, width) => {
+    const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
+    embedStore.loaded = { app, host: "A" };
+    await nextTick();
+    expect((w.find(".idle-card").element as HTMLElement).style.width).toBe(width);
+  });
+
   it.each(["spool", "sql", "ifs"] as const)("%s: 開いたあと「閉じる」で待機画面（設定）へ戻れる", async (app) => {
     const w = mount(EmbedApp, { props: { app }, global: { stubs: STUBS } });
     embedStore.loaded = { app, host: "AS400" };
@@ -450,7 +497,7 @@ describe("EmbedApp: 待機表示の情報とヘッダーの名前", () => {
     await nextTick();
     expect(w.find(".idle-card .kind").text()).toBe(kind);
     expect(w.find(".idle-card .desc").text().length).toBeGreaterThan(0);
-    expect(w.find(".idle-card .file").text()).toBe("sample-x.ts5250");
+    expect(w.find(".idle-card .file").text()).toContain("sample-x.ts5250");
     // 接続先は設定フォームの欄として出す（D23。以前は読み取り専用の一覧だった）
     expect(w.findComponent(SettingsForm).props("initial")).toMatchObject({ host: "AS400", port: 992, user: "U" });
     expect(w.find(".connect-btn").text()).toBe(button);

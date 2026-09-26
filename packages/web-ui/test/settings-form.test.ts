@@ -213,6 +213,17 @@ describe("SettingsForm", () => {
     });
   });
 
+  /** 欄を役割で束ねて横に並べる（D24。縦1列だとemulatorで縦スクロールが出た）。列の数は`EmbedApp`のカード幅と対 */
+  it.each([
+    ["emulator", 3, ["接続先", "サインオン", "端末", "透かし"]],
+    ["printer", 2, ["接続先", "サインオン", "プリンター装置"]],
+    ["sql", 2, ["接続先", "サインオン"]]
+  ] as const)("%s: 列は%d、束は%j", (app, cols, legends) => {
+    const w = mount(SettingsForm, { props: { app }, attachTo: document.body });
+    expect(w.findAll(".col")).toHaveLength(cols);
+    expect(w.findAll("legend").map((l) => l.text())).toEqual(legends);
+  });
+
   /**
    * **ウォーターマーク**（画面に重ねる透かし。利用者の要望「splashの設定」——通常版が
    * 既に持つ「エミュレータ背景にホスト名や任意の文字列などを表示する」機能）。
