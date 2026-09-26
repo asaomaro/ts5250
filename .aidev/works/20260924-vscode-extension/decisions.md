@@ -859,3 +859,34 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
     接続ボタンに戻る。別途「切断を押さずタブを閉じる」と95秒後まで1のまま（上記）。
 - **影響**: `packages/web-ui/src/{EmbedApp.vue,embed-protocol.ts,stores/embed.ts}`・
   `vscode-extension/src/{protocol.ts,ts5250EditorProvider.ts}`と関連テスト3ファイル。
+
+## D18: VSCode版のIFS/SQLが画面幅を使えていない問題を直し、IFSの列境界をドラッグで動かせるようにする
+
+- **背景**: 利用者から「IFSは画面全体を活用できておらず右側が空いている」「フォルダ一覧・ファイル一覧・
+  表示の間をD&Dでリサイズしたい」「SQLは縦スクロールバーと画面全体の横スクロールバーが出る。横に長い
+  結果は結果ビューの横スクロールバーが機能するべき」との報告（スクリーンショット付き）。
+- **原因（実測。PUB400でSQL/IFSペインを実際に開いてPlaywrightで計測）**:
+  `EmbedApp.vue`の`.embed-body`が行方向のflexで、ペイン（子）に`flex:1`も`min-width:0`も無かった。
+  行方向のflexの子は内容幅になる——**IFSは1200px中652px**しか使わず右が空き、**SQLは横に長い結果
+  （`SELECT * FROM QSYS2.SYSTABLES`）でペインが4420pxまで膨らみ**ページ全体が横スクロールしていた
+  （結果グリッド自身の`overflow`が効かない）。本来のアプリは`.pane-slot`（ブロック要素）に載せるので
+  この問題が起きない。縦スクロールバーはheadless Chromiumでは単独に再現できなかった（スクロールバーが
+  場所を取らない）が、ページの横スクロールバーが高さを食うことによる二次的なものと判断——修正後は
+  ページが窓とちょうど同じ大きさになる。
+- **決定**:
+  1. `EmbedApp.vue`: `.embed-body > * { flex: 1 1 auto; min-width: 0; min-height: 0; }`。
+  2. 既存の`usePaneSplit`＋`PaneSplitter`（SQL／スプールの上下の境界）に左右向き（`axis:"x"` /
+     `vertical`）を足し、IFSの「フォルダ一覧｜ファイル一覧｜表示」に2本の境界を置いた（表示は残り幅）。
+     別の部品を作らない——同じ掴み方・同じキー操作（左右キー）にするため。`topHeight`は幅にも使うので
+     `size`へ改名（呼び出し元はSqlPane/SpoolPaneの2か所）。
+  3. IfsPaneは本来のアプリと共用なので、境界ドラッグは本来のアプリのIFSでも使える。
+- **検証**:
+  - 実測（修正前→後、1200×700）: IFSペイン幅 652→1200、SQLペイン幅 4420→1200、ページのscrollWidth
+    4420→1200。修正後SQLの結果グリッド（`.rows-scroll`）は内容4230px/表示1006pxで**自身が**横スクロール。
+    450px高でもページのscrollHeight＝窓の高さ（縦にはみ出さない）。
+  - 実機でIFSの境界をドラッグ: 各列幅 [220,380,598] → 左の境界を+120 → [340,380,478] →
+    右の境界を−150 → [340,230,628]。
+  - 新設`pane-split.test.ts`（5件、`usePaneSplit`/`PaneSplitter`は従来テストが無かった）。mutation:
+    `axis`を無視させると3件fail（キーボードのテストは当初すり抜けたので、キー1回ごとに確かめる形へ直した）。
+  - `packages/web-ui` 2731 passed。`vscode-extension` 80 passed（無変更。実プロセスを起こす統合テストが
+    1回揺れたが再実行で成功——D17と同じ既知の揺れ）。

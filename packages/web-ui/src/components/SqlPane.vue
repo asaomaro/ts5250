@@ -962,7 +962,7 @@ function download(): void {
         ref="editor"
         v-model="sql"
         class="editor"
-        :style="{ height: `${split.topHeight.value}px` }"
+        :style="{ height: `${split.size.value}px` }"
         spellcheck="false"
         placeholder="SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 100 ROWS ONLY"
         @keydown="onKeydown"

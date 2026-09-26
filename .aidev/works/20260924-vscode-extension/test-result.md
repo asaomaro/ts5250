@@ -527,3 +527,27 @@ Error: サーバーが起動しませんでした（port 34001）。「ts5250」
 
 **未検証の穴**: 実際のVSCode拡張ホスト上での「接続」「切断」ボタンの操作は未確認（既存の環境制約）。
 拡張ホスト↔WebViewの中継は`webviewHtml.ts`のshellと同じ振り分けを模した最小shellで確認した。
+
+## ラウンド17（利用者の報告「IFSの右が空く／列をD&Dでリサイズ／SQLにページのスクロールバーが出る」への対応）
+
+`decisions.md` D18。
+
+- 実測（Playwright＋PUB400、1200×700）:
+
+```
+修正前: ifs {"docScroll":[1200,700],"inner":[1200,700],"paneBox":[652,670]}
+修正前: sql {"docScroll":[4420,700],"inner":[1200,700],"paneBox":[4420,670]}
+修正後: ifs {"docScroll":[1200,700],"inner":[1200,700],"paneBox":[1200,670]}
+修正後: sql {"scrollers":["rows-scroll: sw=4230/cw=1006 ..."],"docScroll":[1200,700],"paneBox":[1200,670]}
+修正後(450px高): sql {"docScroll":[1200,450],"inner":[1200,450],"paneBox":[1200,420]}
+IFS境界ドラッグ: [220,380,598] → 左+120 → [340,380,478] → 右−150 → [340,230,628]
+```
+
+- `npx vitest run test/pane-split.test.ts` — 5 passed。mutation（`axis`無視）で3件fail→復元。
+- `packages/web-ui` — **2731 passed**（211 files）。`vue-tsc`＋`vite build` green。
+- `vscode-extension` — 80 passed（無変更。初回1件は既知の統合テストの揺れ、再実行で成功）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 実際のVSCode上での見え方（縦スクロールバーが消えること）は未確認——headless Chromiumは
+スクロールバーが場所を取らないため、縦スクロールバーは単独では再現できなかった。ページの大きさが窓と
+一致することまでは実測済み。

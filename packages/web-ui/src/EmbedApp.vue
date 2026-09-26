@@ -260,6 +260,16 @@ function saveScreenHtml(): void {
   min-height: 0;
   display: flex;
 }
+/* **ペインに幅いっぱいを与え、かつ縮められるようにする**（`decisions.md` D18）。
+   行方向のflexの子は内容幅になる——IFSは1200px中652pxしか使わず右が空き、
+   SQLは横に長い結果で4420pxまで膨らんでページ全体が横スクロールしていた（実測）。
+   `min-width: 0`が無いと子の最小幅＝内容幅のままで、結果グリッド自身の横スクロールが効かない。
+   本来のアプリは`.pane-slot`（ブロック要素）に載せるので、この問題が起きない */
+.embed-body > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
 .status {
   margin: auto;
   font-family: var(--mono);
