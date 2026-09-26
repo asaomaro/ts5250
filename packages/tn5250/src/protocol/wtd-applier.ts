@@ -365,14 +365,17 @@ export function applyDataStream(
         applyWriteErrorCode(r, buf, codec);
         errorCodeWritten = true;
         break;
-      case COMMAND.WRITE_ERROR_CODE_WINDOW:
-        // 窓が開いている間のエラーはこちら。メッセージ行の開始桁・終了桁（2 バイト）を
-        // 読み捨ててから本文へ——**捨てないと桁が 1 つずれて先頭が化ける**。
-        // 描画は 0x21 と同じ扱い（systemMessage）で、窓の中への描き込みまではしない。
-        r.skip(2);
-        applyWriteErrorCode(r, buf, codec);
+      case COMMAND.WRITE_ERROR_CODE_WINDOW: {
+        // 窓が開いている間のエラーはこちら。0x21 に**メッセージ行の開始桁・終了桁（2 バイト）**が付いた形。
+        // ACS はこの 2 桁で書く位置と本文の長さを決める（`20260926-window-error-code`。`applyWriteErrorCode` の説明）。
+        // 2 バイトが欠けたレコードは、0x21 と同じ扱いで読める範囲を読む（例外にしない）。
+        // **欠けの判定は残りのバイト数だけで見る**——桁の値が 4（ESC と同じ値）でも桁として読む（独立点検の must）
+        const sc = r.remaining > 0 ? r.u8() : undefined;
+        const ec = sc !== undefined && r.remaining > 0 ? r.u8() : undefined;
+        applyWriteErrorCode(r, buf, codec, sc !== undefined && ec !== undefined ? { start: sc, end: ec } : undefined);
         errorCodeWritten = true;
         break;
+      }
       case COMMAND.WRITE_STRUCTURED_FIELD: {
         // **1 つの WSF で読むのは最初の SF だけ**（ACS `DS5250.processCommand` の ESC 0xF3: SF の長さ `n12` だけ進めて、次は ESC を求める。
         // `20260921-wsf-d9-72` の節目の点検の指摘）。~~SF を続けて全部読む~~——2 つ目の SF が続けば ACS は「コマンドが無い」（0x10050121）になる
@@ -987,17 +990,52 @@ function applyStructuredField(r: ByteReader): { reply?: WsfReply; sense?: number
 }
 
 /**
- * WRITE ERROR CODE: エラー行のメッセージを systemMessage として保持する（表示行への描画は簡略化）。
- * WRITE ERROR CODE TO WINDOW（0x22）も、桁指定の 2 バイトを読み飛ばしたうえでここへ来る。
+ * 0x22 のメッセージを重ねる位置（ACS `DS5250.processWriteErrorCode` の書き始め・終わりの計算。`20260926-window-error-code` research F1）。
+ * 書き始め `s`＝(メッセージ行 − 1)×桁数＋開始桁 − 1。`s`＋桁数が画面の大きさを超えれば最下行の行頭へ戻す（終わりは戻さない）。
+ * 空にする範囲は [s, 行頭＋終了桁 − 1)、本文は `s` から `consumed` 桁（書いた桁。IC・SBA・MC は数えない）——重ねるのはその和（行末まで）
+ */
+function windowErrorArea(buf: ScreenBuffer, win: { start: number; end: number }, consumed: number): { row: number; col: number; width: number } | undefined {
+  const cols = buf.cols;
+  const size = buf.rows * cols;
+  const rowStart = (buf.messageLineRow - 1) * cols;
+  let s = rowStart + win.start - 1;
+  const e = rowStart + win.end - 1;
+  if (s + cols > size) s = size - cols;
+  // 行末で止める（ACS は次の行へ続けて書くが、UI は 1 行の重ね。終了桁が桁数を超える実例は無く、ACS の見え方は未確認）
+  const width = Math.min(Math.max(e, s + consumed) - s, cols - (s % cols));
+  if (width <= 0 || s < 0) return undefined;
+  return { row: Math.floor(s / cols) + 1, col: (s % cols) + 1, width };
+}
+
+/**
+ * WRITE ERROR CODE: エラー行のメッセージを systemMessage として保持する（セルには書かず、UI が重ねて出す）。
+ *
+ * **WRITE ERROR CODE TO WINDOW（0x22）は `win`（開始桁・終了桁）付きで来る**。ACS（`DS5250.processWriteErrorCode`。
+ * `20260926-window-error-code` research F1〜F3。実機の ACS のコアで測定）と同じく:
+ * - 書き始め＝メッセージ行（SOH の申告。既定 24）の開始桁。ただし**書き始め＋桁数が画面の大きさを超えれば最下行の行頭へ戻す**
+ *   （メッセージ行が最下行なら開始桁は捨てられ、桁 1 から書く——実測どおり）
+ * - 本文は**終了桁 − 開始桁 ＋ 1 バイト**まで（属性・SO/SI・DBCS の 2 バイトも 1 バイトずつ数える。先頭が IC なら ＋3）。残りは次の ESC まで読み飛ばす
+ * - 重ねる範囲は「空にする桁（書き始め〜終了桁の手前）」と「本文を書いた桁」の和。位置は `systemMessageArea` に持つ
  *
  * **SO/SI で挟まれた DBCS（漢字）は 2 バイト 1 組で読む。** 1 バイトずつ `decodeByte` に
  * 通すと、DBCS のペアがそれぞれ無関係な SBCS 文字に化ける（メッセージが日本語のとき、
  * 画面下部のエラー行が文字化けする不具合として利用者から報告された）。
  */
-function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): void {
+function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec, win?: { start: number; end: number }): void {
   let msg = "";
   let dbcsMode = false;
-  while (r.remaining > 0 && r.peek() !== ESC) {
+  let limit = Infinity;
+  if (win) {
+    limit = win.end - win.start + 1;
+    if (r.remaining > 0 && r.peek() === ORDER.IC) limit += 3;
+  }
+  const startRemaining = r.remaining;
+  const used = (): number => startRemaining - r.remaining;
+  // 書いた桁の数（重ねる幅に使う）。IC・SBA・MC はセルを書かないので数えない（独立点検の指摘。読んだバイト数で幅を出すと 3 桁広くなる）。
+  // 上限の境界に IC・SBA・MC や DBCS の組がまたがったとき、当 PJ は組を読み切る。ACS の `processWriteToDisplay` が添字の終わりで
+  // 組をどう扱うかは**未確認**（実測は SBCS の本文だけ。`20260926-window-error-code` research F3）
+  let orderBytes = 0;
+  while (r.remaining > 0 && r.peek() !== ESC && used() < limit) {
     const b = r.u8();
     if (b === SO) {
       dbcsMode = true;
@@ -1008,14 +1046,22 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec): vo
       continue;
     }
     if (dbcsMode && codec.decodeDbcsPair && b >= 0x40) {
+      if (r.remaining === 0) break;
       const b2 = r.u8();
       msg += String.fromCharCode(codec.decodeDbcsPair(b, b2));
       continue;
     }
     if (b >= 0x40) msg += String.fromCharCode(codec.decodeByte(b));
-    else if (b === ORDER.IC || b === ORDER.SBA || b === ORDER.MC) r.skip(2);
+    else if (b === ORDER.IC || b === ORDER.SBA || b === ORDER.MC) {
+      r.skip(2);
+      orderBytes += 3;
+    }
     // その他の制御は読み飛ばす
   }
+  // 0x22 は上限を超えた本文を次の ESC まで読み飛ばす（ACS は `bl` のとき ESC まで添字を進める。research F1）
+  const consumed = used() - orderBytes;
+  if (win) while (r.remaining > 0 && r.peek() !== ESC) r.u8();
+  buf.systemMessageArea = win ? windowErrorArea(buf, win, consumed) : undefined;
   // **本文が空白だけでも載せて番号を振る**——ACS `DS5250.processWriteErrorCode` は本文を読む前に
   // 無条件で `setErrorMode(true)` とする（独立点検の指摘。空白だけの WEC が実際に届くかは未確認）。
   // 空なら画面に出る文言は無いが、エラー状態には入る（キーボードは Reset・矢印等まで拒否）

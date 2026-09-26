@@ -186,6 +186,8 @@ export class ScreenBuffer {
    * 画面バッファを作り直しても重ならないよう、番号はプロセスで通しにする（`nextSystemMessageSeq`）。
    */
   systemMessageSeq: number | undefined;
+  /** 0x22 由来のメッセージを重ねる位置（`ScreenSnapshot.systemMessageArea`）。WRITE ERROR CODE が届くたびに上書きする（0x21 は undefined） */
+  systemMessageArea: { row: number; col: number; width: number } | undefined;
   /**
    * SOH が申告したメッセージ行の行番号（1 基点）。既定 24 は ACS `DS5250` の初期値と同じ。
    * `systemMessage` をいつ捨てるかの判定に使う（`clearSystemMessageIfTouched`）
@@ -1446,6 +1448,8 @@ export class ScreenBuffer {
     if (this.systemMessage !== undefined) {
       snap.systemMessage = this.systemMessage;
       if (this.systemMessageSeq !== undefined) snap.systemMessageSeq = this.systemMessageSeq;
+      // 位置は `systemMessage` があるときだけ載せる（消えた後に古い位置を残さない）
+      if (this.systemMessageArea !== undefined) snap.systemMessageArea = { ...this.systemMessageArea };
     }
     // CA キー（SOH の申告）。UI の ME 検査が見る（`sendsDataForAid` と同じビットの並び）
     const caKeys: number[] = [];

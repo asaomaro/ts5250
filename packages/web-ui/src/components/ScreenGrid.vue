@@ -147,6 +147,11 @@ const props = withDefaults(
      * 中に置けば桁も高さも自動で揃う）。
      */
     message?: string;
+    /**
+     * **`message` を重ねる位置**（1 起点。WRITE ERROR CODE TO WINDOW＝0x22 のとき。`20260926-window-error-code`）。
+     * 無ければ最下行の全幅。あれば ACS と同じくその行の `col` から `width` 桁だけを塗って重ねる（地の色で塗るので、本文が短くても範囲は空に見える）
+     */
+    messageArea?: { row: number; col: number; width: number } | undefined;
     /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
     cursor?: { row: number; col: number };
     /**
@@ -4433,10 +4438,17 @@ onBeforeUnmount(() => {
     @focusout="onGridFocusOut"
   >
     <!--
-      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。
+      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。WRITE ERROR CODE TO WINDOW（0x22）で位置（`messageArea`）があれば、
+      ACS と同じくその行・桁・幅にだけ重ねる（`20260926-window-error-code`）。
       `pointer-events: none` で背面のセルの操作を邪魔しない。
     -->
-    <div v-if="message" class="opmsg" role="status"><template
+    <div
+      v-if="message || messageArea"
+      class="opmsg"
+      :class="{ 'opmsg-area': messageArea }"
+      :style="messageArea ? { top: (messageArea.row - 1) * 1.25 + 'em', left: messageArea.col - 1 + 'ch', width: messageArea.width + 'ch', height: '1.25em' } : undefined"
+      role="status"
+    ><template
       v-for="(m, k) in markRuns(shiftedMessage)"
       :key="k"
     ><span v-if="m.shift" :class="shiftClass">{{ m.text }}</span><template
@@ -4774,6 +4786,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+/* 0x22 の位置に重ねる（`.colsep` と同じく内側余白は margin で足し、位置は行・桁の単位で与える。高さは style で 1 行＝1.25em——
+   本文が空でも範囲を塗って下のセルを隠すため。`20260926-window-error-code`） */
+.opmsg.opmsg-area {
+  right: auto;
+  bottom: auto;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  text-overflow: clip;
 }
 .grid {
   position: relative;

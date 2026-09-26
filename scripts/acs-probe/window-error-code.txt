@@ -1,0 +1,57 @@
+# **WRITE ERROR CODE TO WINDOW（0x22）を ACS はどこに出すか**（実機の ACS のコア。`20260926-window-error-code`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の WINERR / WINERRLONG）: 背景（行 2 に BACKGROUND・最下行＝既定のメッセージ行に
+# "MSGLINE ORIGINAL TEXT TO BE RESTORED"）→ CREATE WINDOW（5,10・深さ 5・幅 20）→ 0x22（開始桁 12・終了桁 29・属性 0x22・本文）→ READ MDT で止まる。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/window-error-code.txt AS400
+# 見る値: dump の各行（どの行・どの桁に本文が出たか）・`inhibit`（エラー状態で文字を拒否するか）・Reset の後に元の行が戻るか。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# ===== A) 本文が範囲に収まる（"ERR IN WINDOW" 13 字・範囲 12〜29） =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINERR')[enter]
+settle 3000
+dump a0-after-0x22
+# エラー状態なら文字を拒否する
+keys x
+settle 300
+dump a1-typed-x
+keys [reset]
+settle 500
+dump a2-after-reset
+keys [enter]
+settle 2000
+dump a3-after-enter
+
+# ===== B) 本文が範囲より長い（30 字・範囲 18 桁） =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINERRLONG')[enter]
+settle 3000
+dump b0-after-0x22-long
+keys [reset]
+settle 500
+dump b1-after-reset
+keys [enter]
+settle 2000
+dump b2-after-enter
+
+# ===== C) SOH でメッセージ行を 22 行に申告（最下行でない）。本文は範囲に収まる =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINERR22')[enter]
+settle 3000
+dump c0-after-0x22-row22
+keys [reset]
+settle 500
+dump c1-after-reset
+keys [enter]
+settle 2000
+
+# ===== D) 22 行・本文が範囲より長い =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINERR22LONG')[enter]
+settle 3000
+dump d0-after-0x22-row22-long
+keys [reset]
+settle 500
+keys [enter]
+settle 2000

@@ -1053,6 +1053,17 @@ const hostMessage = computed(() => {
   return snap.systemMessage;
 });
 const messageLine = computed(() => effectiveNotice.value || hostMessage.value);
+/**
+ * **ホストのメッセージを重ねる位置**（WRITE ERROR CODE TO WINDOW＝0x22 のときだけ core が付ける。`20260926-window-error-code`）。
+ * クライアント側の操作員メッセージを出している間は付けない（それは従来どおり最下行）。エラー状態を抜けて隠したものも付けない。
+ * 本文が空でも位置があれば渡す——ACS は範囲を空にするので、空欄として重ねる
+ */
+const messageArea = computed(() => {
+  const snap = snapshot.value;
+  if (effectiveNotice.value || !snap?.systemMessageArea || snap.systemMessage === undefined) return undefined;
+  if (snap.systemMessageSeq !== undefined && snap.systemMessageSeq === state.value?.hostErrorDismissedSeq) return undefined;
+  return snap.systemMessageArea;
+});
 
 /** ScreenGrid 発の AID。キーボードの F キーと同じ扱いで送る。
  *  ボタン側で mousedown を preventDefault しているので、入力欄のフォーカス＝カーソルは動かない。
@@ -1602,6 +1613,7 @@ function onWheel(ev: WheelEvent): void {
         :field-sign-keys="is5250"
         :busy="busy"
         :message="sysReqOpen ? '' : messageLine"
+        :message-area="sysReqOpen ? undefined : messageArea"
         :cursor="cursor"
         :show-shift-marks="view.sosi !== 'none'"
         :shift-mark-tone="view.sosi === 'strong' ? 'strong' : 'dim'"
