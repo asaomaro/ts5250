@@ -224,6 +224,97 @@ static void rollTest(int up) {
     sleep(8);
 }
 
+/**
+ * **WRITE ERROR CODE TO WINDOW(0x22) を出す**（`20260926-window-error-code`）。
+ *
+ * 台帳は「0x22 は実機で観測できていない」で保留していたが、`QsnPutOutCmd` の第 1 引数はコマンドバイトそのものなので、
+ * 窓を開いた画面に 0x22 を当てれば ACS のコア（`acs-probe`）と当 PJ を同じ条件で比べられる。
+ *
+ *   1. 背景（行 2 と最下行＝既定のメッセージ行に目印）を書く
+ *   2. CREATE WINDOW（5,10・深さ 5・幅 20）で窓を出す
+ *   3. `QsnPutOutCmd(0x22, 開始桁 12・終了桁 29・本文)` を撃つ
+ *   4. **READ MDT で止める**（ここで観測。Reset → Enter で抜ける前提）
+ *
+ * `longMsg` のときは本文を桁範囲（18 桁）より長くする（30 字）——ACS が範囲で切るかを見る。
+ * `row22` のときは背景の WTD の先頭に SOH（エラー行＝22）を置く。最下行（既定）だと ACS は開始桁を捨てて行頭から書くので
+ * （書き始め＋桁数が画面の大きさを超えれば行頭へ戻す）、最下行以外で開始桁が効くかを別に見る。
+ * 本文の先頭は属性 0x22（高輝度）。文字は EBCDIC の 16 進で書く（ソースの文字コードに左右されないため）。
+ */
+static void winErrTest(int longMsg, int row22) {
+    char fdbk[256];
+    Q_Bin4 rc;
+    Q_Bin4 bytesRead = 0;
+    Qsn_Inp_Buf_T buf;
+    static const unsigned char bg[] = {
+        0x00, 0x00,
+        0x11, 0x02, 0x02,
+        0xC2, 0xC1, 0xC3, 0xD2, 0xC7, 0xD9, 0xD6, 0xE4, 0xD5, 0xC4,        /* "BACKGROUND" */
+        0x11, 0x18, 0x02,                                                  /* SBA(24,2)＝既定のメッセージ行 */
+        0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5, 0x40, 0xD6, 0xD9, 0xC9, 0xC7, 0xC9, 0xD5, 0xC1, 0xD3,
+        0x40, 0xE3, 0xC5, 0xE7, 0xE3, 0x40, 0xE3, 0xD6, 0x40, 0xC2, 0xC5, 0x40, 0xD9, 0xC5, 0xE2, 0xE3,
+        0xD6, 0xD9, 0xC5, 0xC4                                             /* "MSGLINE ORIGINAL TEXT TO BE RESTORED" */
+    };
+    /* SOH（長さ 4: フラグ・予約・再順序・エラー行＝22）＋ 行 22 の目印 */
+    static const unsigned char bg22[] = {
+        0x00, 0x00,
+        0x01, 0x04, 0x00, 0x00, 0x00, 0x16,
+        0x11, 0x02, 0x02,
+        0xC2, 0xC1, 0xC3, 0xD2, 0xC7, 0xD9, 0xD6, 0xE4, 0xD5, 0xC4,        /* "BACKGROUND" */
+        0x11, 0x16, 0x02,                                                  /* SBA(22,2)＝申告したメッセージ行 */
+        0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5, 0x40, 0xD6, 0xD9, 0xC9, 0xC7, 0xC9, 0xD5, 0xC1, 0xD3,
+        0x40, 0xE3, 0xC5, 0xE7, 0xE3, 0x40, 0xE3, 0xD6, 0x40, 0xC2, 0xC5, 0x40, 0xD9, 0xC5, 0xE2, 0xE3,
+        0xD6, 0xD9, 0xC5, 0xC4
+    };
+    static const unsigned char win[] = {
+        0x00, 0x00,
+        0x11, 0x05, 0x0A,                   /* SBA(5,10) */
+        0x15, 0x00, 0x16,                   /* WDSF LL=22 */
+        0xD9, 0x51,                         /* CREATE WINDOW */
+        0x00, 0x00, 0x00,                   /* flag1 / 予約 2 */
+        0x05, 0x14,                         /* 深さ 5 / 幅 20 */
+        0x05, 0x01, 0x80, 0x38, 0x38,       /* 境界（色だけの短い形） */
+        0x08, 0x10, 0x00, 0x00, 0x00, 0x00, 0xE6, 0xD5  /* 見出し "WN" */
+    };
+    /* 開始桁 12・終了桁 29・属性 0x22・本文 "ERR IN WINDOW" */
+    static const unsigned char err[] = {
+        0x0C, 0x1D, 0x22,
+        0xC5, 0xD9, 0xD9, 0x40, 0xC9, 0xD5, 0x40, 0xE6, 0xC9, 0xD5, 0xC4, 0xD6, 0xE6
+    };
+    /* 開始桁 12・終了桁 29・属性 0x22・本文 "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234"（30 字） */
+    static const unsigned char errLong[] = {
+        0x0C, 0x1D, 0x22,
+        0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9,
+        0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xF1, 0xF2, 0xF3, 0xF4
+    };
+
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    if (row22) rc = QsnPutOutCmd(0x11, (const char *)bg22, (Q_Bin4)sizeof(bg22), 0, 0, (Q_Fdbk_T *)fdbk);
+    else rc = QsnPutOutCmd(0x11, (const char *)bg, (Q_Bin4)sizeof(bg), 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x11 背景)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x11, (const char *)win, (Q_Bin4)sizeof(win), 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x11 CREATE WINDOW)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    if (longMsg) rc = QsnPutOutCmd(0x22, (const char *)errLong, (Q_Bin4)sizeof(errLong), 0, 0, (Q_Fdbk_T *)fdbk);
+    else rc = QsnPutOutCmd(0x22, (const char *)err, (Q_Bin4)sizeof(err), 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x22 WRITE ERROR CODE TO WINDOW)", rc, fdbk);
+
+    inzFdbk(fdbk, sizeof(fdbk));
+    buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnCrtInpBuf", (Q_Bin4)buf, fdbk);
+    if (buf != 0) {
+        tag = "[0x22 後] ";
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnReadMDT", rc, fdbk);
+        tag = "";
+        QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
+    }
+}
+
 int main(int argc, char *argv[]) {
     char fdbk[256];
     char what[32];
@@ -240,7 +331,9 @@ int main(int argc, char *argv[]) {
     }
     if (lg) { fprintf(lg, "start what=[%s]\n", what); fflush(lg); }
 
-    if (strcmp(what, "ROLLTESTUP") == 0 || strcmp(what, "ROLLTESTDOWN") == 0) {
+    if (strcmp(what, "WINERR") == 0 || strcmp(what, "WINERRLONG") == 0 || strcmp(what, "WINERR22") == 0 || strcmp(what, "WINERR22LONG") == 0) {
+        winErrTest(strstr(what, "LONG") != 0, strstr(what, "22") != 0);
+    } else if (strcmp(what, "ROLLTESTUP") == 0 || strcmp(what, "ROLLTESTDOWN") == 0) {
         rollTest(strcmp(what, "ROLLTESTUP") == 0);
     } else if (strcmp(what, "ROLLUP") == 0 || strcmp(what, "ROLLDOWN") == 0) {
         /*

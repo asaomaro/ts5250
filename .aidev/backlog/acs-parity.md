@@ -304,10 +304,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   操作員エラーと同じエラー状態に入る（文字を拒否・挿入モードを解く）。矢印・Tab・AID・Reset・クリックで抜けると、そのメッセージを隠して
   最下行を元に戻す。**実機**（試験画面 ULKPGM の RANGE(1 5) に 9）で ACS は inhibit=5・文字を拒否・挿入モードを解き、矢印・Tab で抜けると
   最下行が消えた（`scripts/acs-probe/window-error.txt`・`host-error-mode.txt`）。当 PJ の関係は `packages/web-ui/test/host-error-mode.test.ts`。
-- [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す**（優先度 ~~中~~ 低・深さ ◐）。
+- [x] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す**（優先度 ~~中~~ 低・深さ ◐）。
+  **完了（`20260926-window-error-code`）**: 0x22 を DSM で出させて（`scripts/host-src/dscmd.c` の WINERR*）実機の ACS のコアと当 PJ に当てた。ACS（原典 `DS5250.processWriteErrorCode`・実測 `scripts/acs-probe/window-error-code.txt`）は
+  メッセージ行（SOH の申告）の開始桁から書くが、**書き始め＋桁数が画面を超えると最下行の行頭へ戻す**（最下行では開始桁が捨てられ桁 1 から）。本文は終了桁 − 開始桁 ＋ 1 バイトで切れる。
+  当 PJ も core が同じ位置（`ScreenSnapshot.systemMessageArea`）と上限を求め、UI がそこへ重ねる（`packages/tn5250/src/protocol/wtd-applier.ts` の `windowErrorArea`・`ScreenGrid.vue` の `.opmsg-area`）。
+  実機で 4 通り（最下行／22 行 × 短い／長い）とも ACS と一致（`scripts/verify-window-error-code.mjs` pass=8。変更前 pass=2）。
+  ~~**0x22 そのものは実機で観測できていない**——来たら当 PJ は従来どおり最下行に出す。0x22 を出す画面が見つかったら着手する。~~ → DSM で出させられるので「見つかるまで保留」は当たらなかった（2026-09-27）。
   **実機では差が無かった（2026-09-21・`20260921-host-error-mode` research F2）**: WINDOW キーワードの窓の中の RANGE 欄に範囲外を入れると、
   ホストは **0x22 ではなく WTD で窓の中（12 行目）に書き**、ACS もエラー状態に入らなかった。当 PJ も窓の中に出している。
-  **0x22 そのものは実機で観測できていない**——来たら当 PJ は従来どおり最下行に出す。0x22 を出す画面が見つかったら着手する。
   ~~（元の見出し）窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない~~
   DDS の窓で入力エラーが出ると、ACS は窓の中に出すが、当 PJ は最下行に出す。訂正している間もメッセージが消えない。
   ACS（委譲先 C の読み）
@@ -319,6 +323,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~エラー状態は持たない。~~（`20260921-operator-error-mode` で持った）
   ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）~~と、抜けたときの復元~~。**抜けたときの復元は `20260921-host-error-mode`（PR #410）で済んだ**（`EmulatorPane.vue:980-986` の `exitErrorMode`。2026-09-27 の照合で記録漏れを発見）。0x22 を窓の中に出すのは、0x22 を出す画面が実機で見つかるまで保留。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
+- [ ] **WRITE ERROR CODE（0x21）のメッセージを、SOH が申告したメッセージ行に出す**（優先度 低・深さ △。`20260926-window-error-code` decisions D2 から割った）。
+  ACS（原典 `DS5250.processWriteErrorCode`）は 0x21 も SOH のメッセージ行（`SOH_msgline_num`）の行頭から 1 行ぶんに書く。当 PJ は常に最下行に重ねる（`ScreenGrid.vue` の `.opmsg`）。
+  0x22 と同じ位置の仕組み（`systemMessageArea`）に行だけを載せれば小さく直せる見込み。**SOH で行を申告する画面を DSM で出させて ACS と当 PJ を測ってから直す**。
+  あわせて未確認: エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方（ACS はセルに書き、抜けるときに戻す。当 PJ は消す／残す。同 D4）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
   原典で確認——`DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯（両方なら点灯）。ビットの無い WTD では状態を保つ。
