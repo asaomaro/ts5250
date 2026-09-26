@@ -354,7 +354,10 @@ function saveScreenHtml(): void {
   min-width: 0;
   min-height: 0;
 }
+/* `flex: 0 1 auto`で上の「幅いっぱい」を打ち消す——ペインではなく文言なので、伸ばすと`margin: auto`の
+   横方向が効かず「接続中…」が左端に寄る（縦だけ中央になる。利用者の報告） */
 .status {
+  flex: 0 1 auto;
   margin: auto;
   font-family: var(--mono);
   font-size: 13px;
