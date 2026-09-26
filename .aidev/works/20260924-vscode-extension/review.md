@@ -451,3 +451,52 @@ coding工程で`cross`のtaskcheckラウンド上限に達しているため、�
   動作は利用者による確認が必要（`test-result.md`ラウンド14に明記済み）。
 
 指摘なし（must/should/nit いずれも0件）。
+
+## ラウンド15（deliver後・利用者の要望「設定にsplashの設定も追加して」への対応）
+
+`decisions.md` D16。差分は`EmulatorPane.vue`・`SettingsForm.vue`・`watermark.ts`
+（クラッシュ修正）・`stores/sessions.ts`・`embed-protocol.ts`・
+`vscode-extension/src/protocol.ts`・`schema.ts`・`ts5250EditorProvider.ts`。
+coding工程で`cross`のtaskcheckラウンド上限に達しているため、独立点検はこのreview
+工程が担う。
+
+- **要件適合**: requirementsのAC対象外（利用者からの直接の要望への対応）。
+  被覆に変化なし。
+- **価値適合**: 「splash」というコードベースに無い言葉を、意味を確認せずには
+  実装しなかった（`AskUserQuestion`で確認）。AGENTS.md「判断の原則」2.
+  （実機で確定できることは、必ず実機で確定する）と同じ態度を仕様理解にも適用しており、
+  誤った機能を作るリスクを実装前に潰している。確認後も「通常版が既に持つ機能」と
+  分かった時点で、独自実装ではなく`ConfigCard.vue`の`wmForm`をそのまま移植する
+  判断をしており、車輪の再発明も避けている。
+- **正確性**: この作業で最も価値があったのは、**実装対象の機能そのものではなく、
+  実装の過程で見つけたクラッシュバグ**（`resolveWatermark()`が`cfg.text`の型を
+  確かめずに`.replace()`を呼んでいた）。`resolveWatermark`のwatermark.ts自体は
+  今回新規に触ったわけではないが、この関数への入力元を初めて「スキーマ検証を経ない
+  ファイル」（`.ts5250`）にまで広げたのが今回の変更であり、**その拡張が既存関数の
+  暗黙の前提（呼び出し元は必ずzod検証済み）を破ることを見抜いて直している**。
+  実際に`resolveWatermark({})`を呼んで`TypeError`を再現してから直しており、
+  「型的にはあり得るが実害は無いだろう」で済ませていない。
+- **境界のスコープ判断**: `ifsPath`/`sqlInitial`をD14で除外した判断（IfsPane/
+  SqlPaneが受け皿を持たない死んだフィールド）と同じ基準で、`enhanced`は今回も
+  設定項目に追加していない——一貫した判断基準を保っている。
+- **保守性**: `WatermarkValue`をembed-protocol.ts/protocol.tsへインライン定義し、
+  `@ts5250/server`の`Watermark`を拡張機能側へimportする経路を作らなかった
+  （アーキテクチャ制約——`vscode-extension`は別npmパッケージ——を尊重）。
+  `wmForm`/`buildWatermark`/`clamp`のロジックは`ConfigCard.vue`と重複するが、
+  **共有可能な置き場が無い**（`ConfigCard.vue`は`PublicSession["watermark"]`
+  （サーバー保存の`SessionConfigForm`）を、`SettingsForm.vue`は`WatermarkValue`
+  （ファイル保存の`.ts5250`）を扱っており、型も保存先も異なるため共有関数への
+  切り出しは無理に一般化するコストの方が高いと判断——`paired-artifact-sync`条項の
+  「共有できないときは対応関係をテストで固定する」に該当し、両者とも独立した
+  テスト（`watermark.test.ts`のConfigCard側・`settings-form.test.ts`の今回追加分）
+  で個別に固定している。
+- **検証**: mutation検証3件（`meta`フォールバック／`meta.watermark`配線／
+  `save()`のbuildWatermark呼び出し）＋クラッシュ修正の検証（再現→修正→
+  mutationで復元確認）。`vscode-extension`・`packages/web-ui`とも全テストgreen
+  （2712 passed）。実ブラウザでの設定画面確認、実機（PUB400）での接続→
+  DOM上の透かし要素・差し込み変数展開の確認まで完了している。
+
+指摘なし（must/should/nit いずれも0件。coding段階の自己点検で見つけたクラッシュ
+バグは、review到達前にこの作業自身の中で発見・修正・検証済みのため、
+review指摘としては数えない——protocol.md「8.」の「タスク点検で潰れた欠陥は
+ラウンド指摘と母集団が違う」と同じ整理）。

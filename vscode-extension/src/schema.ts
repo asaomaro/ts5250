@@ -1,4 +1,4 @@
-import type { EmbedAppKind } from "./protocol.js";
+import type { EmbedAppKind, WatermarkValue } from "./protocol.js";
 
 /**
  * `.ts5250`ファイルの中身の型（design.md「`.ts5250`ファイルスキーマ」）。
@@ -19,6 +19,7 @@ export interface Ts5250File {
   deviceName?: string;
   screenSize?: "24x80" | "27x132";
   enhanced?: boolean;
+  watermark?: WatermarkValue;
   ifsPath?: string;
   sqlInitial?: string;
   signon?: {

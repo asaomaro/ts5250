@@ -105,6 +105,9 @@ watch(
       if (payload.terminal !== undefined) meta.terminal = payload.terminal;
       if (payload.deviceName !== undefined) meta.deviceName = payload.deviceName;
       if (payload.user !== undefined) meta.signonUser = payload.user;
+      // **`configRef`を持たない直接接続向けの持ち回り先**（`EmulatorPane.vue`の
+      // `watermarkConfig`がここへフォールバックする。`decisions.md` D16）
+      if (payload.watermark !== undefined) meta.watermark = payload.watermark;
       // **`systemRef`はemulatorでも付加的に乗る**（`decisions.md` D12。拡張ホスト側が
       // `syncSystem`で登録済み）。無くても接続自体は成立する——`SessionState.systemRef`が
       // 無いままなら、StatusBarのメッセージ表示ボタンはsystem参照を要求するREST機能を
@@ -128,6 +131,7 @@ const settingsInitial = computed<SettingsFormValues>(() => {
   if (c?.katakanaVariant !== undefined) v.katakanaVariant = c.katakanaVariant;
   if (c?.terminal !== undefined) v.terminal = c.terminal;
   if (c?.screenSize !== undefined) v.screenSize = c.screenSize;
+  if (c?.watermark !== undefined) v.watermark = c.watermark;
   if (c?.deviceName !== undefined) v.deviceName = c.deviceName;
   if (c?.user !== undefined) v.user = c.user;
   return v;

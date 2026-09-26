@@ -59,6 +59,16 @@ describe("EmbedApp: app種別ごとのマウント分岐", () => {
     expect(meta["signonUser"]).toBe("U"); // メッセージ待ち行列の既定値に使う
   });
 
+  it("emulator: connectがwatermarkを持っていれば、openSession()のmetaへそのまま渡す（D16。EmulatorPaneのフォールバック先）", async () => {
+    mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
+    embedStore.connect = { app: "emulator", host: "AS400", watermark: { text: "検証機 {host}" } };
+    await nextTick();
+    await nextTick();
+    expect(openSession).toHaveBeenCalledTimes(1);
+    const meta = openSession.mock.calls[0]![2] as Record<string, unknown>;
+    expect(meta["watermark"]).toEqual({ text: "検証機 {host}" });
+  });
+
   it("printer(スプール表示): openSession()は呼ばず、systemRefをそのままSpoolPaneのsystemへ渡す", async () => {
     const w = mount(EmbedApp, { props: { app: "printer" }, global: { stubs: STUBS } });
     embedStore.connect = { app: "printer", host: "AS400", systemRef: "own:abc123" };
@@ -134,7 +144,7 @@ describe("EmbedApp: 設定ボタン", () => {
     expect(w.findComponent({ name: "SettingsForm" }).exists()).toBe(true);
   });
 
-  it("SettingsFormへapp（種別）とconnectの拡張フィールド（katakanaVariant/terminal/screenSize）を渡す", async () => {
+  it("SettingsFormへapp（種別）とconnectの拡張フィールド（katakanaVariant/terminal/screenSize/watermark）を渡す", async () => {
     const w = mount(EmbedApp, { props: { app: "emulator" }, global: { stubs: STUBS } });
     embedStore.connect = {
       app: "emulator",
@@ -142,7 +152,8 @@ describe("EmbedApp: 設定ボタン", () => {
       ccsid: 930,
       katakanaVariant: "katakana",
       terminal: "3270",
-      screenSize: "27x132"
+      screenSize: "27x132",
+      watermark: { text: "検証機" }
     };
     await nextTick();
     await w.get(".settings-btn").trigger("click");
@@ -152,7 +163,8 @@ describe("EmbedApp: 設定ボタン", () => {
       ccsid: 930,
       katakanaVariant: "katakana",
       terminal: "3270",
-      screenSize: "27x132"
+      screenSize: "27x132",
+      watermark: { text: "検証機" }
     });
   });
 });

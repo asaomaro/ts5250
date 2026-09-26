@@ -438,3 +438,47 @@ Playwrightの最小再現で実証したが、実際のVSCode拡張ホスト（�
 `start.bat`/`electron.bat`の実証済みの構造（`if errorlevel`の分岐・`pushd`/`popd`の
 対応・エスケープした括弧）を一字一句に近い形で踏襲することで確からしさを担保しているが、
 実際のWindows上での動作確認は利用者に委ねる（D8/D14と同種の環境起因の限界）。
+
+## ラウンド15（deliver後・利用者の要望「設定にsplashの設定も追加して」への対応）
+
+`decisions.md` D16。「splash」の意味を`AskUserQuestion`で確認したうえで実装
+（ウォーターマーク＝画面に重ねる透かし）。差分は`EmulatorPane.vue`・
+`SettingsForm.vue`・`watermark.ts`（クラッシュ修正）・`stores/sessions.ts`・
+`embed-protocol.ts`・`vscode-extension/src/protocol.ts`・`schema.ts`・
+`ts5250EditorProvider.ts`。
+
+- `cd vscode-extension && npx tsc -b && npx tsc -b tsconfig.test.json` — 0 errors
+- `cd vscode-extension && npx vitest run` — **76 passed / 0 failed**（13 test files）
+- `npx eslint`（変更したvscode-extensionファイル） — 0 errors
+- `npm run build -w @ts5250/web-ui`（`vue-tsc -b`＋`vite build`） — 実ビルド成功
+- `cd packages/web-ui && npx vitest run` — **2712 passed / 0 failed**（210 test files。
+  新規21件——`settings-form.test.ts`9件・`embed-app.test.ts`2件・新設
+  `emulator-pane-watermark.test.ts`4件・`watermark.test.ts`1件のクラッシュ回帰
+  ＋既存テストの拡張分）
+- **mutation検証（3件、いずれも「外す→実際にfailを確認→復元」）**:
+  1. `EmulatorPane.vue`の`watermarkConfig`の`meta`フォールバックを外すと、
+     `emulator-pane-watermark.test.ts`の該当テストが実際にfail
+  2. `EmbedApp.vue`の`meta.watermark = payload.watermark`を外すと、
+     `embed-app.test.ts`の該当テストが実際にfail
+  3. `SettingsForm.vue`の`save()`から`buildWatermark()`の呼び出しを外すと、
+     `settings-form.test.ts`の透かし関連4件が実際にfail
+- **review工程で発見・修正したクラッシュバグの再現手順**（直す前に実際に再現）:
+  `resolveWatermark({})`を直接呼ぶと`TypeError: Cannot read properties of
+  undefined (reading 'replace')`が実際に投げられることを確認——`.ts5250`
+  ファイルは`schema.ts`の設計上バリデーションを経ないため、手編集で
+  `"watermark": {}`のような値を書くと同じ例外で`EmulatorPane`ごと
+  描画不能になりうる。`typeof cfg.text !== "string"`のガードを足すと
+  例外が起きなくなることを確認し、mutationで検証（外すと新設テストが
+  実際に同じ例外でfail）。
+- **実ブラウザでの確認（Playwright、ビルド済みdist）**: `embed.html?app=emulator`
+  の設定画面を開き、透かし文字が空のときは細かい見え方の欄（表示/配置/濃さ/
+  大きさ/角度/色）が出ず、文字を入れると実際に現れることをスクリーンショットで
+  確認した。
+- **実機での一気通貫（Playwright、PUB400。`.env`/`.env.verify`）**: VSCode拡張の
+  shellが行うiframe中継を模した最小shellから、`watermark: { text: "PUB400
+  {host}", layout: "center", size: 40 }`を含むconnectペイロードで実際に接続。
+  `EmulatorPane`内に`.wm`要素が実際に1つ生成され、その`.wm-line`のテキストが
+  差し込み変数展開後の`"PUB400 pub400.com"`になっていることをDOM上で確認した。
+- `aidev smoke` — pass
+- 後始末: 検証用の一時サーバープロセス・一時接続設定ファイル・Playwrightスクリプト・
+  一時ディレクトリは全て削除済み（PUB400への実接続以外、リポジトリへの副作用なし）。

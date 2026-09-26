@@ -140,11 +140,12 @@ describe("SettingsForm", () => {
    * 出すこと自体が誤解を招く
    */
   describe("emulator専用フィールドの出し分け", () => {
-    it("emulatorでは端末の種類・画面サイズ・装置名を出す", () => {
+    it("emulatorでは端末の種類・画面サイズ・装置名・透かし文字を出す", () => {
       const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
       expect(w.find("#sf-terminal").exists()).toBe(true);
       expect(w.find("#sf-screensize").exists()).toBe(true);
       expect(w.find("#sf-device").exists()).toBe(true);
+      expect(w.find("#sf-wm-text").exists()).toBe(true);
     });
 
     it.each(["printer", "sql", "ifs"] as const)("%sでは出さない", (app) => {
@@ -152,6 +153,7 @@ describe("SettingsForm", () => {
       expect(w.find("#sf-terminal").exists()).toBe(false);
       expect(w.find("#sf-screensize").exists()).toBe(false);
       expect(w.find("#sf-device").exists()).toBe(false);
+      expect(w.find("#sf-wm-text").exists()).toBe(false);
     });
 
     it("emulatorで端末の種類を3270にすると、画面サイズの欄が消え、保存してもscreenSizeを省く", async () => {
@@ -172,6 +174,100 @@ describe("SettingsForm", () => {
       await w.get(".settings-form").trigger("submit");
       const saved = w.emitted("save")?.[0]?.[0];
       expect(saved).toMatchObject({ terminal: "5250", screenSize: "24x80" });
+    });
+  });
+
+  /**
+   * **ウォーターマーク**（画面に重ねる透かし。利用者の要望「splashの設定」——通常版が
+   * 既に持つ「エミュレータ背景にホスト名や任意の文字列などを表示する」機能）。
+   * `ConfigCard.vue`の`wmForm`/`loadWatermark`/`buildWatermark`と同じ判断を移植した。
+   * emulator専用（`20260924-vscode-extension` D16）。
+   */
+  describe("透かし（ウォーターマーク）", () => {
+    it("文字が空なら、細かい見え方の欄を出さず、保存してもwatermarkを付けない", async () => {
+      const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
+      expect(w.find("#sf-wm-enabled").exists()).toBe(false);
+      expect(w.find("#sf-wm-layout").exists()).toBe(false);
+      await w.get("#sf-host").setValue("AS400");
+      await w.get(".settings-form").trigger("submit");
+      const saved = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      expect(saved.watermark).toBeUndefined();
+    });
+
+    it("文字を入れると細かい見え方の欄が出て、保存すると既定値込みで乗る", async () => {
+      const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-wm-text").setValue("検証機 {host}");
+      await nextTick();
+      expect(w.find("#sf-wm-enabled").exists()).toBe(true);
+      expect(w.find("#sf-wm-layout").exists()).toBe(true);
+      await w.get(".settings-form").trigger("submit");
+      const saved = w.emitted("save")?.[0]?.[0];
+      expect(saved).toMatchObject({
+        watermark: { text: "検証機 {host}", opacity: 0.12, size: 22, layout: "tile", angle: -30 }
+      });
+    });
+
+    it("表示チェックを外すと、enabled:falseが乗る（文字は残す）", async () => {
+      const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-wm-text").setValue("検証機");
+      await nextTick();
+      await w.get("#sf-wm-enabled").setValue(false);
+      await w.get(".settings-form").trigger("submit");
+      const saved = w.emitted("save")?.[0]?.[0];
+      expect(saved).toMatchObject({ watermark: { text: "検証機", enabled: false } });
+    });
+
+    it("色を「指定する」に切り替えると、colorが乗る（既定は端末の文字色に追従＝color無し）", async () => {
+      const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-wm-text").setValue("検証機");
+      await nextTick();
+      await w.get(".settings-form").trigger("submit");
+      const withoutColor = w.emitted("save")?.[0]?.[0] as Record<string, unknown>;
+      expect((withoutColor.watermark as Record<string, unknown>).color).toBeUndefined();
+
+      await w.get("#sf-wm-usecolor").setValue(true);
+      await nextTick();
+      expect(w.find("#sf-wm-color").exists()).toBe(true);
+      await w.get("#sf-wm-color").setValue("#112233");
+      await w.get(".settings-form").trigger("submit");
+      const withColor = w.emitted("save")?.[1]?.[0];
+      expect(withColor).toMatchObject({ watermark: { color: "#112233" } });
+    });
+
+    it("initialのwatermarkからフォームへ復元する", () => {
+      const w = mount(SettingsForm, {
+        props: {
+          app: "emulator",
+          initial: {
+            host: "H",
+            watermark: { text: "本番", enabled: false, opacity: 0.3, size: 40, layout: "center", angle: 10, color: "#ff0000" }
+          }
+        },
+        attachTo: document.body
+      });
+      expect((w.get("#sf-wm-text").element as HTMLInputElement).value).toBe("本番");
+      expect((w.get("#sf-wm-enabled").element as HTMLInputElement).checked).toBe(false);
+      expect((w.get("#sf-wm-layout").element as HTMLSelectElement).value).toBe("center");
+      expect((w.get("#sf-wm-opacity").element as HTMLInputElement).value).toBe("30");
+      expect((w.get("#sf-wm-size").element as HTMLInputElement).value).toBe("40");
+      expect((w.get("#sf-wm-angle").element as HTMLInputElement).value).toBe("10");
+      expect((w.get("#sf-wm-color").element as HTMLInputElement).value).toBe("#ff0000");
+    });
+
+    it("数値欄を範囲外にして保存すると、範囲内へ丸める", async () => {
+      const w = mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-wm-text").setValue("検証機");
+      await nextTick();
+      await w.get("#sf-wm-opacity").setValue("500");
+      await w.get("#sf-wm-size").setValue("9999");
+      await w.get("#sf-wm-angle").setValue("999");
+      await w.get(".settings-form").trigger("submit");
+      const saved = w.emitted("save")?.[0]?.[0];
+      expect(saved).toMatchObject({ watermark: { opacity: 1, size: 200, angle: 90 } });
     });
   });
 });

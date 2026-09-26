@@ -78,13 +78,21 @@ export function expandWatermarkText(text: string, vars: WatermarkVars): string {
 
 /**
  * 保存値と差し込み変数から実効値を作る。表示しないケースは undefined を返す:
- * 設定が無い / `enabled: false` / 展開後の文字が空白だけ（`{user}` だけの指定でサインオン前、等）。
+ * 設定が無い / `enabled: false` / `text` が文字列でない（下記参照） /
+ * 展開後の文字が空白だけ（`{user}` だけの指定でサインオン前、等）。
+ *
+ * **`cfg.text` の型を確かめてから使う。** サーバー設定・個人設定経由（`watermarkSchema`）は
+ * `text: z.string().min(1)` で保証されるが、**VSCode拡張の`.ts5250`ファイル経由はスキーマ検証を
+ * 通らない**（`vscode-extension/src/schema.ts`の設計——手編集を許すため「JSONとして読めるか」
+ * 以外は検証しない）。`{}` のような手編集の壊れた透かしがそのままここへ届きうるので、
+ * `text.replace(...)` を`undefined`/数値等に対して呼んで例外にする前に弾く
+ * （`20260924-vscode-extension` D16。落ちると`EmulatorPane`ごと描画不能になる）。
  */
 export function resolveWatermark(
   cfg: WatermarkConfig | undefined,
   vars: WatermarkVars = {}
 ): WatermarkView | undefined {
-  if (!cfg || cfg.enabled === false) return undefined;
+  if (!cfg || cfg.enabled === false || typeof cfg.text !== "string") return undefined;
   const text = expandWatermarkText(cfg.text, vars).trim();
   if (!text) return undefined;
   const view: WatermarkView = {

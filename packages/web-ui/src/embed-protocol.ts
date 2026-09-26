@@ -14,6 +14,22 @@
 
 export type EmbedAppKind = "emulator" | "printer" | "sql" | "ifs";
 
+/**
+ * ウォーターマーク（画面に重ねる透かし）。`@ts5250/server`の`watermarkSchema`と同じ形だが、
+ * **ここでは意図的にインライン定義する**（`@ts5250/server`からimportしない）——
+ * `vscode-extension/src/protocol.ts`はこのファイルと手で同期を保つ複製で、
+ * 拡張機能側から`@ts5250/server`をimportする経路が無いため（冒頭コメント参照）。
+ */
+export interface WatermarkValue {
+  text: string;
+  enabled?: boolean;
+  opacity?: number;
+  size?: number;
+  layout?: "tile" | "center";
+  angle?: number;
+  color?: string;
+}
+
 /** 拡張ホスト → WebView（shellを素通しして embed.html まで届く） */
 export type HostToWebviewMessage =
   | { type: "connect"; payload: ConnectPayload }
@@ -42,6 +58,8 @@ export interface ConnectPayload {
   screenSize?: "24x80" | "27x132";
   /** emulatorのみ */
   enhanced?: boolean;
+  /** emulatorのみ。画面に重ねる透かし（表示だけの設定。ホストへは送らない） */
+  watermark?: WatermarkValue;
   /** ifsのみ。初期表示ディレクトリ */
   ifsPath?: string;
   /** sqlのみ。初期クエリ */
@@ -66,6 +84,8 @@ export interface SettingsFormValues {
   deviceName?: string;
   /** emulatorのみ。terminal が 3270 のときは持たない（3270 はモデルで決まる。design.md参照） */
   screenSize?: "24x80" | "27x132";
+  /** emulatorのみ。画面に重ねる透かし（表示だけの設定。ホストへは送らない） */
+  watermark?: WatermarkValue;
   user?: string;
   /** 平文。受け取った側（拡張ホスト）がすぐ暗号化し、保持しない */
   password?: string;

@@ -184,6 +184,7 @@ function buildConnectPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
   if (file.deviceName !== undefined) payload.deviceName = file.deviceName;
   if (file.screenSize !== undefined) payload.screenSize = file.screenSize;
   if (file.enhanced !== undefined) payload.enhanced = file.enhanced;
+  if (file.watermark !== undefined) payload.watermark = file.watermark;
   if (file.ifsPath !== undefined) payload.ifsPath = file.ifsPath;
   if (file.sqlInitial !== undefined) payload.sqlInitial = file.sqlInitial;
   if (file.signon?.user !== undefined) payload.user = file.signon.user;
@@ -221,6 +222,8 @@ async function handleSave(
   else delete next.terminal;
   if (values.screenSize !== undefined) next.screenSize = values.screenSize;
   else delete next.screenSize;
+  if (values.watermark !== undefined) next.watermark = values.watermark;
+  else delete next.watermark;
   if (values.deviceName !== undefined) next.deviceName = values.deviceName;
   else delete next.deviceName;
   if (values.user !== undefined || values.password !== undefined) {

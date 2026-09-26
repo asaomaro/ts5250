@@ -739,3 +739,79 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
 - **影響**: `vscode-extension.sh`（新規）・`vscode-extension.bat`（新規）・
   `launcher/preflight.mjs`（コメント更新のみ、ロジック変更なし）を変更。
   同じPR #414（未マージ）へ追加コミットする。
+
+## D16: 設定画面に「splash」（ウォーターマーク＝画面に重ねる透かし）を追加
+
+- **背景**: 利用者から「設定にsplashの設定も追加して」との要望。コードベースに
+  「splash」という既存の概念が見当たらなかったため、推測で実装せず
+  `AskUserQuestion`で確認した——回答は「エミュレータ背景にホスト名や任意の文字列
+  などを表示する、通常版のエミュレータは既に持っている機能のこと」。これは
+  `packages/server/src/config-types.ts`の`watermarkSchema`（ウォーターマーク。
+  ACSの透かしと同じ用途——本番機と検証機を一目で見分ける）そのものだった。
+- **調査で判明した、この機能特有の難所**（推測で設計しない）:
+  - **保存元がD14までの他フィールドと根本的に違う。** `EmulatorPane.vue`の
+    `watermarkConfig`は`state.configRef`（保存済みセッション設定への参照）から
+    `systemsStore.sessions`を引く——`ConnectPayload`/`SessionMeta`を経由しない。
+    VSCode拡張のemulatorは直接接続（`configRef`を持たない）なので、既存の
+    参照経路では最初から透かしを描けない構造だった。
+  - **`ConfigCard.vue`の`wmForm`は7項目を持つ**（文字/表示/配置/濃さ/大きさ/角度/色）。
+    「splash」という漠然とした要望から機能の輪郭を絞り込むため、通常版の
+    実装をそのまま読んで移植の範囲を決めた（新規に何かを発明しない）。
+- **決定**:
+  1. **`EmulatorPane.vue`の`watermarkConfig`にフォールバックを追加**——
+     `configRef`経由の値が無ければ`state.meta?.watermark`を見る。既存の
+     保存済みセッション設定経由の経路は変えず（`configRef`があれば従来どおりそちら優先）、
+     直接接続だけの新しい経路を**追加**した（`packages/web-ui/src/components/
+     EmulatorPane.vue:65-73`）。
+  2. **`SessionMeta`（`stores/sessions.ts`）に`watermark?: Watermark`を追加**——
+     `configRef`を持たないセッション専用の持ち回り先。
+  3. **`embed-protocol.ts`/`protocol.ts`**（手で同期を保つ複製）: `WatermarkValue`
+     インライン型（`@ts5250/server`の`Watermark`と同じ形だが、拡張機能側が
+     `@ts5250/server`をimportできないため意図的にインライン定義）を新設し、
+     `ConnectPayload`/`SettingsFormValues`へ`watermark?: WatermarkValue`
+     （emulatorのみ）を追加。両ファイルへ同一差分を適用し`protocol-sync.test.ts`
+     （型定義部分の一字一句比較）で機械的に固定した。
+  4. **`schema.ts`（`Ts5250File`）・`ts5250EditorProvider.ts`**（`buildConnectPayload`/
+     `handleSave`）に読み書きを追加——D14で確立した「分かるときだけ付与、
+     無ければ`delete`」パターンをそのまま踏襲。
+  5. **`SettingsForm.vue`**: `ConfigCard.vue`の`wmForm`/`loadWatermark`/`clamp`/
+     `buildWatermark`をそのまま移植（ロジック・既定値・範囲・「文字が空なら
+     設定ごと無し」という判断を含めて同一）。emulatorのみ・文字を入れて初めて
+     細かい見え方の欄を出す、という表示順序も`ConfigCard.vue`と揃えた。
+- **review工程で見つけて直した問題（must）**: `resolveWatermark()`
+  （`composables/watermark.ts`）は`cfg.text`が文字列であることを前提に
+  `.replace()`を呼んでおり、**サーバー設定・個人設定経由（`watermarkSchema`で
+  `text`必須を保証）では届かない壊れた値**を素通しで受け取る前提だった。
+  `.ts5250`ファイル（`vscode-extension/src/schema.ts`）は「JSONとして読めるか」
+  以外を検証しない設計のため、手編集で`"watermark": {}`のような値を書くと
+  `EmulatorPane`ごと例外で描画不能になることを実際に再現して確認した
+  （`resolveWatermark({})`で`TypeError: Cannot read properties of undefined
+  (reading 'replace')`）。`typeof cfg.text !== "string"`を弾く1行を追加して
+  「表示しない」へ安全に倒し、mutationで検証済み（外すと新設テストが実際に
+  同じ例外でfailすることを確認してから復元）。この修正は`watermark.ts`という
+  main appとVSCode拡張の両方が使う共有関数への修正なので、main app側の
+  既存の安全性には影響しない（サーバー側は元々zod検証済みで、この分岐に
+  到達しない）。
+- **検証**:
+  - mutation検証2件（`resolveWatermark`のtext型ガード／`EmulatorPane.vue`の
+    metaフォールバック／`SettingsForm.vue`のsave()配線——実質3件、いずれも
+    「外す→実際にfailを確認→復元」の手順を踏んだ）。
+  - `vscode-extension`: `tsc -b`×2・`vitest run`（76 passed）・eslint 0 errors。
+  - `packages/web-ui`: `vue-tsc -b`＋`vite build`green・`vitest run`
+    （**2712 passed**／210 files。新規21件——`settings-form.test.ts`に9件、
+    `embed-app.test.ts`に2件、新設`emulator-pane-watermark.test.ts`に4件、
+    `watermark.test.ts`に1件のクラッシュ回帰）。
+  - **実ブラウザでの確認（Playwright）**: `embed.html?app=emulator`の設定画面で
+    透かし文字欄・細かい見え方の欄の出し分けをスクリーンショットで確認。
+  - **実機での一気通貫（Playwright、PUB400）**: `.ts5250`相当のconnectペイロード
+    （`watermark: { text: "PUB400 {host}", layout: "center", size: 40 }`）で
+    実際に接続し、`EmulatorPane`内に`.wm`要素が実際に生成され、差し込み変数
+    `{host}`が実際のホスト名（`pub400.com`）へ展開された状態
+    （`"PUB400 pub400.com"`）でDOMに現れることを確認した。
+- **影響**: `packages/web-ui/src/components/EmulatorPane.vue`・
+  `packages/web-ui/src/components/SettingsForm.vue`・
+  `packages/web-ui/src/composables/watermark.ts`（クラッシュ修正）・
+  `packages/web-ui/src/stores/sessions.ts`・`packages/web-ui/src/embed-protocol.ts`・
+  `vscode-extension/src/protocol.ts`・`vscode-extension/src/schema.ts`・
+  `vscode-extension/src/ts5250EditorProvider.ts`を変更。関連テストを新設・拡充。
+  同じPR #414（未マージ）へ追加コミットする。

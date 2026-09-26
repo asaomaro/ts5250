@@ -60,11 +60,16 @@ const snapshot = computed(() => state.value?.snapshot);
  *
  * 設定は**セッション設定を直に引く**（接続時にコピーを持ち回らない）。表示だけの設定なので
  * ホストへ渡す必要がなく、設定を保存した瞬間に開いているセッションへも反映される。
- * 直接指定で開いたセッション（`configRef` なし）は設定が無い＝透かしも出ない。
+ *
+ * **直接指定で開いたセッション（`configRef` なし。VSCode拡張の`.ts5250`等）は
+ * `meta.watermark` へ持ち回る**（`20260924-vscode-extension` D16）。保存済みセッション設定と
+ * 違い、設定を保存し直しても既に開いているセッションへは反映されない
+ * （`meta` は接続時点のコピーのため）——次に開き直したときに反映される。
  */
 const watermarkConfig = computed(() => {
   const cfgRef = state.value?.configRef;
-  return cfgRef ? systemsStore.sessions.find((s) => s.ref === cfgRef)?.watermark : undefined;
+  const fromConfig = cfgRef ? systemsStore.sessions.find((s) => s.ref === cfgRef)?.watermark : undefined;
+  return fromConfig ?? state.value?.meta?.watermark;
 });
 const watermark = computed(() => {
   const s = state.value;

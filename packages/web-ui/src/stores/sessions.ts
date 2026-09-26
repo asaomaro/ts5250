@@ -7,7 +7,7 @@ import {
   type SessionLink
 } from "../session-link.js";
 import type { ScreenSnapshot } from "@ts5250/tn5250";
-import type { ServiceState } from "@ts5250/server";
+import type { ServiceState, Watermark } from "@ts5250/server";
 import type { WsClient } from "../ws-client.js";
 
 /** プリンターセッションが受信した 1 スプール（等幅ページ列） */
@@ -35,6 +35,13 @@ export interface SessionMeta {
   vtEncoding?: string;
   autoSignon?: boolean;
   signonUser?: string;
+  /**
+   * 直接接続（`configRef` を持たないセッション。VSCode拡張の`.ts5250`等）向けの
+   * ウォーターマーク。**保存済みセッション設定経由（`configRef` あり）のときはここを見ない**
+   * ——そちらは`EmulatorPane.vue`の`watermarkConfig`が`systemsStore.sessions`から直に引く
+   * （`20260924-vscode-extension` D16）。
+   */
+  watermark?: Watermark;
 }
 
 /** 1 スプールに対する自動出力の結果（設定が無い側はキーごと省略＝「設定なし」） */
