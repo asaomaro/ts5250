@@ -588,3 +588,30 @@ OUTPUT_QUEUE_INFO: {"OUTPUT_QUEUE_NAME":"PRT_ASAO","WRITERS_TO_AUTOSTART":1,"NUM
 **未検証の穴**: 帳票の受信〜`PrinterPane`での表示。両ホストともプリンターセッション接続でライターが上がらず
 （本来のアプリでも同じ＝環境要因）、受信を観測できなかった。受信後の表示は本来のアプリと同じ`PrinterPane`・
 同じ`openPrinterSession`（報告の受け取りを含む）を使っている。実際のVSCode上での見た目も未確認。
+
+## ラウンド20（スプールが「5250端末」と名乗る不具合・前のビルドのサーバー再利用）
+
+`decisions.md` D21。
+
+- 修正前の再現（5種類のサンプルの`loaded`で待機表示）:
+
+```
+sample-spool.ts5250    app=spool    -> {"kind":"5250端末","rows":"設定 sample-spool ホスト 172.21.10.51 TLS 無効 装置名 自動 画面サイズ 24x80","btn":"接続"}
+```
+
+- 修正後:
+
+```
+sample.ts5250          app=emulator -> {"kind":"5250端末","rows":"設定 sample ホスト 172.21.10.51 TLS 無効 ユーザー ASAO 装置名 自動 画面サイズ 24x80","btn":"接続"}
+sample-spool.ts5250    app=spool    -> {"kind":"スプール","rows":"設定 sample-spool ホスト 172.21.10.51 TLS 無効","btn":"開く"}
+sample-printer.ts5250  app=printer  -> {"kind":"プリンター","rows":"... 装置名 PRT_ASAO","btn":"接続"}
+sample-sql.ts5250      app=sql      -> {"kind":"SQL",...,"btn":"開く"}
+sample-ifs.ts5250      app=ifs      -> {"kind":"IFS",...,"btn":"開く"}
+```
+
+- `packages/web-ui` — **2752 passed**。`vscode-extension` — **84 passed**。`vue-tsc`/`tsc -b` green。
+- mutation 2件（上記D21）。
+- `aidev smoke` — pass
+
+**未検証の穴**: 利用者の環境でemulatorに古い画面が出た原因が「前のビルドのサーバーの再利用」だったかは
+確かめられていない（今のビルドでは再現せず）。塞いだのは確かめられた欠陥（ビルドを見ずに再利用する）である。

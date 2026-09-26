@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { embedStore, initEmbedBridge, postToHost } from "../src/stores/embed.js";
+import { appKindFromQuery, embedStore, initEmbedBridge, postToHost } from "../src/stores/embed.js";
+import { EMBED_APP_KINDS } from "../src/embed-protocol.js";
 
 /**
  * `embed.html` ⇄ 拡張ホストの`postMessage`橋渡し
@@ -103,5 +104,29 @@ describe("initEmbedBridge", () => {
   it("messageが文字列でない（数値等）saveError/fileInvalidは無視する", () => {
     window.dispatchEvent(fromParent({ type: "saveError", message: 42 }));
     expect(embedStore.error).toBeUndefined();
+  });
+});
+
+/**
+ * URLクエリの種別（D21）。以前は`embed.ts`が独自の一覧を持ち、D20で`spool`を足したときに漏れて
+ * スプールの画面が`emulator`（「5250端末」）として出た。**一覧（`EMBED_APP_KINDS`）の全要素で回す**
+ * ので、種別を足しても自動で検査対象に入る
+ */
+describe("appKindFromQuery", () => {
+  it.each(EMBED_APP_KINDS)("?app=%s はその種別として読む", (kind) => {
+    expect(appKindFromQuery(`?app=${kind}`)).toBe(kind);
+  });
+
+  it("未知の値・未指定は emulator", () => {
+    expect(appKindFromQuery("?app=printer2")).toBe("emulator");
+    expect(appKindFromQuery("")).toBe("emulator");
+  });
+
+  it("spool のメッセージも受け付ける（許可リストが一覧と同じ）", () => {
+    initEmbedBridge();
+    embedStore.loaded = undefined;
+    const payload = { app: "spool" as const, host: "h" };
+    window.dispatchEvent(new MessageEvent("message", { data: { type: "loaded", payload }, source: window }));
+    expect(embedStore.loaded).toEqual(payload);
   });
 });

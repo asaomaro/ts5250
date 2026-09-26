@@ -22,6 +22,8 @@ export interface LockFile {
   startedAt: string;
   /** windowId → 最終ハートビート(ISO)。空になったら誰も使っていない */
   windows: Record<string, string>;
+  /** そのサーバーを起動した拡張のビルド（`ServiceManagerOptions.buildId`）。古いロックには無い */
+  buildId?: string;
 }
 
 /** これより古いハートビートは陳腐化とみなす（クラッシュしたウィンドウの参照カウント残留対策） */
@@ -46,6 +48,13 @@ export interface ServiceManagerOptions {
   secretKeyFilePath: string;
   /** このVSCodeウィンドウを識別する値（`extension.ts`が`activate`時に`crypto.randomUUID()`で生成） */
   windowId: string;
+  /**
+   * 同梱サーバー／Web UIのビルドを識別する値（`extension.ts`が同梱物の中身から作る）。
+   * **生きている既存サーバーでもビルドが違えば再利用しない**（D21）——`.vsix`の版数は据え置きのまま
+   * 中身だけ変わるので、ロック（`globalStorage`。拡張を入れ直しても残る）に残った前のビルドの
+   * サーバーへ繋ぐと、新しい拡張から古い画面が出る。未指定なら従来どおり（比べない）
+   */
+  buildId?: string;
   /** 注入可能。既定は実際に`spawn`する（テスト用に差し替える） */
   spawnServer?: (port: number) => ChildProcess;
   /** 注入可能。既定は実際に`/healthz`へfetchする */
@@ -94,13 +103,23 @@ export class ServiceManager {
     const existing = this.readLock();
     if (existing) {
       const alive = await this.opts.checkHealth(existing.port, HEALTH_CHECK_TIMEOUT_MS);
-      if (alive) {
+      const sameBuild = this.opts.buildId === undefined || existing.buildId === this.opts.buildId;
+      if (alive && sameBuild) {
         const windows = pruneStale(existing.windows, this.opts.now());
         windows[this.opts.windowId] = isoNow(this.opts.now());
         this.writeLock({ ...existing, windows });
         return { port: existing.port };
       }
-      // 陳腐化（healthzが応答しない）——自分が新規に起動して上書きする
+      if (alive) {
+        // **別のビルドのサーバーは止めて起動し直す。** 止めずに新しく起こすと、ロックを上書きした時点で
+        // 古い方はどのロックからも参照されない孤児になる。古い方を使っている他のウィンドウは拡張の更新で
+        // どのみち再読み込みが要る（そのままでは拡張ホストのコードも古い）
+        this.opts.onChildOutput(
+          `別のビルドのサーバー（pid ${existing.pid}・${existing.buildId ?? "ビルド不明"}）を止めて起動し直します\n`
+        );
+        killByPid(existing.pid);
+      }
+      // 陳腐化（healthzが応答しない）またはビルド違い——自分が新規に起動して上書きする
     }
     const port = await findFreePort(PORT_SEARCH_START);
     const child = this.opts.spawnServer(port);
@@ -135,7 +154,8 @@ export class ServiceManager {
       pid: child.pid ?? -1,
       port,
       startedAt: isoNow(this.opts.now()),
-      windows: { [this.opts.windowId]: isoNow(this.opts.now()) }
+      windows: { [this.opts.windowId]: isoNow(this.opts.now()) },
+      ...(this.opts.buildId !== undefined ? { buildId: this.opts.buildId } : {})
     };
     this.writeLock(lock);
 

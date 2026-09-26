@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { ConnectPayload, HostToWebviewMessage, WebviewToHostMessage } from "../embed-protocol.js";
+import { EMBED_APP_KINDS, type ConnectPayload, type EmbedAppKind, type HostToWebviewMessage, type WebviewToHostMessage } from "../embed-protocol.js";
 
 /**
  * `embed.html` と、それを iframe 表示する VSCode 拡張機能（`vscode-extension/`）との
@@ -40,7 +40,17 @@ export function postToHost(msg: WebviewToHostMessage): void {
   window.parent.postMessage(msg, "*");
 }
 
-const APP_KINDS = ["emulator", "printer", "spool", "sql", "ifs"] as const;
+const APP_KINDS: readonly string[] = EMBED_APP_KINDS;
+
+/**
+ * URLクエリ（`embed.html?app=...`）から種別を読む。**知らない値は`emulator`**。
+ * 許す値は`EMBED_APP_KINDS`（1か所）から取る——以前は`embed.ts`に別の一覧を持っており、
+ * `spool`を足したときにここだけ漏れてスプールが`emulator`扱いになった（D21）
+ */
+export function appKindFromQuery(search: string): EmbedAppKind {
+  const v = new URLSearchParams(search).get("app");
+  return v !== null && APP_KINDS.includes(v) ? (v as EmbedAppKind) : "emulator";
+}
 
 /**
  * `payload`の形を検査する（`type`が合っているだけでは中身の型は保証されない。
@@ -51,7 +61,7 @@ const APP_KINDS = ["emulator", "printer", "spool", "sql", "ifs"] as const;
 function isConnectPayload(v: unknown): v is ConnectPayload {
   if (!v || typeof v !== "object") return false;
   const p = v as Record<string, unknown>;
-  return typeof p.host === "string" && APP_KINDS.includes(p.app as (typeof APP_KINDS)[number]);
+  return typeof p.host === "string" && typeof p.app === "string" && APP_KINDS.includes(p.app);
 }
 
 /** メッセージ受信を配線する。`embed.ts` から一度だけ呼ぶ */

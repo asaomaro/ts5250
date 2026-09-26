@@ -72,6 +72,63 @@ describe("ServiceManager.acquire", () => {
     expect(result.port).toBe(lock.port);
   });
 
+  /**
+   * **ビルドが違えば生きていても再利用しない**（D21）。`.vsix`の版数は据え置きのまま中身だけ変わるので、
+   * 前のビルドのサーバー（ロックは拡張を入れ直しても残る）へ繋ぐと、新しい拡張から古い画面が出る
+   */
+  it("既存ロックが生きていてもbuildIdが違えば、古いサーバーを止めて自分で起動し直す", async () => {
+    const kill = fakeKill();
+    try {
+      const lockFilePath = tempLockPath();
+      const nowMs = { value: 1_000_000 };
+      const checkHealth = vi.fn(async () => true);
+      const oldSm = new ServiceManager({
+        ...baseOptions(lockFilePath, "win-old", nowMs),
+        buildId: "build-A",
+        spawnServer: vi.fn(() => fakeChild(910001) as never),
+        checkHealth
+      });
+      await oldSm.acquire();
+
+      const output: string[] = [];
+      const spawnNew = vi.fn(() => fakeChild(910002) as never);
+      const newSm = new ServiceManager({
+        ...baseOptions(lockFilePath, "win-new", nowMs),
+        buildId: "build-B",
+        spawnServer: spawnNew,
+        checkHealth,
+        onChildOutput: (c) => output.push(c)
+      });
+      await newSm.acquire();
+
+      expect(kill).toHaveBeenCalledWith(910001, "SIGTERM"); // 古いビルドのサーバーを止める
+      expect(spawnNew).toHaveBeenCalledTimes(1);
+      const lock = JSON.parse(readFileSync(lockFilePath, "utf8")) as LockFile;
+      expect(lock.pid).toBe(910002);
+      expect(lock.buildId).toBe("build-B");
+      expect(output.join("")).toContain("別のビルド");
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
+  it("buildIdが同じなら従来どおり再利用し、何も止めない", async () => {
+    const kill = fakeKill();
+    try {
+      const lockFilePath = tempLockPath();
+      const nowMs = { value: 1_000_000 };
+      const checkHealth = vi.fn(async () => true);
+      const spawnServer = vi.fn(() => fakeChild(910003) as never);
+      await new ServiceManager({ ...baseOptions(lockFilePath, "win-1", nowMs), buildId: "build-A", spawnServer, checkHealth }).acquire();
+      spawnServer.mockClear();
+      await new ServiceManager({ ...baseOptions(lockFilePath, "win-2", nowMs), buildId: "build-A", spawnServer, checkHealth }).acquire();
+      expect(spawnServer).not.toHaveBeenCalled();
+      expect(kill).not.toHaveBeenCalled();
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
   it("既存ロックのポートが死んでいれば自分で起動し直す（陳腐化ロックの上書き）", async () => {
     const lockFilePath = tempLockPath();
     const nowMs = { value: 1_000_000 };

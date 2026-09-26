@@ -22,7 +22,13 @@
  * `printer`はプリンターセッション（本来のアプリの「プリンター」）で、既存スプールの一覧は`spool`
  * （本来のアプリの「スプール」）——D20でこの呼び名に揃えた（以前は`printer`がスプール表示を指していた）
  */
-export type EmbedAppKind = "emulator" | "printer" | "spool" | "sql" | "ifs";
+export const EMBED_APP_KINDS = ["emulator", "printer", "spool", "sql", "ifs"] as const;
+/**
+ * **種別の一覧はここ（`EMBED_APP_KINDS`）1か所だけ**。以前は型・`schema.ts`・`stores/embed.ts`・
+ * `embed.ts`の4か所に書き写しており、D20で`spool`を足したとき`embed.ts`だけ漏れて、スプールの
+ * 画面が「5250端末」と名乗る不具合になった（D21）。検証する側は全部これを参照する
+ */
+export type EmbedAppKind = (typeof EMBED_APP_KINDS)[number];
 
 /**
  * ウォーターマーク（画面に重ねる透かし）。`@ts5250/server`の`watermarkSchema`と同じ形だが、

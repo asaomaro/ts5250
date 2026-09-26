@@ -952,3 +952,29 @@ durationMs=15023）だった。**`"closed by client"`は`packages/tn5250/src/tra
     環境（プリンターセッションを繋いでもライターが上がらない。`scripts/README.md`の既知の注意「`STRPRTWTR`が要る」と同じ）。
     PUB400はライターを常駐させる権限が無い（`CPF3464`。`scripts/research-msgw.mjs`）。セッション中の
     `STRPRTWTR`は`CPF3310`で通らなかった。作成したテスト用スプール（利用者ホスト3件・PUB400 2件）は削除済み。
+
+## D21: スプールの画面が「5250端末」と名乗る不具合を直し、種別の一覧を1か所にする／前のビルドのサーバーを再利用しない
+
+- **背景**: 利用者の報告「app spoolの接続画面に詳細情報が出るが5250端末になっている」「app emulatorで接続ボタン
+  しか出ず詳細情報が出ない」。
+- **スプールの原因（再現して確定）**: `embed.ts`の`appParam`が独自の種別一覧（`printer`/`sql`/`ifs`）を持ち、
+  D20で`spool`を足したときにここだけ漏れていた。`?app=spool`が`emulator`扱いになり、種類は「5250端末」、
+  中身（`loaded`）はスプールのファイル——という食い違いの画面になった。型検査では捕まらない（三項演算子は
+  正しい種別を返している）。種別の一覧は**4か所に書き写されていた**（型・`schema.ts`・`stores/embed.ts`・`embed.ts`）。
+  → `EMBED_APP_KINDS`（`embed-protocol.ts`/`protocol.ts`。手で同期を保つ複製）を唯一の一覧にし、検証する側は
+  全部これを参照する。`appParam`は`stores/embed.ts`の`appKindFromQuery`へ出してテスト可能にし、
+  `EMBED_APP_KINDS`の全要素で回すテストを置いた（足しても自動で検査対象に入る）。
+- **emulatorの症状は今のビルドでは再現しなかった**: `sample.ts5250`から拡張ホストが作るのと同じ`loaded`で
+  表示すると、種類「5250端末」・設定・ホスト・TLS・ユーザー・装置名・画面サイズが正しく出た。報告の見た目
+  （ホスト名と接続ボタンだけ）は**情報カードを入れる前（D17/D18）のビルドの画面**そのもの。原因として
+  確かめられた事実: `ServiceManager.acquire`は生きている既存サーバーをhealthzだけで再利用し、**どのビルドが
+  起動したかを見ていない**。ロック（`globalStorage/service.json`）は拡張を入れ直しても残り、`.vsix`の版数は
+  0.1.0のまま中身だけ変わるので、前のビルドのサーバーが生きていれば新しい拡張から古い画面が出る。
+  **これが今回の原因だったかは確かめられていない**（利用者の環境のプロセスを見られない）が、起きうる欠陥なので塞いだ。
+  → ロックに`buildId`（同梱の`main.js`と`embed.html`の中身のハッシュ。`embed.html`はViteのハッシュ付き資産名を
+  含むのでWeb UIが変われば必ず変わる）を記録し、違えば古いサーバーを止めて起動し直す（止めないと孤児になる）。
+- **検証**: `packages/web-ui` 2752 passed・`vscode-extension` 84 passed。mutation: `appKindFromQuery`を旧来の
+  手書き一覧へ戻す→`?app=spool`のテストがfail／`buildId`を見ずに再利用する→ビルド違いのテストがfail（いずれも復元）。
+  ServiceManagerの新テストは`process.kill`をモックし大きなダミーpidで行う（D3の教訓——pid 1へのSIGTERM）。
+  5種類のサンプルファイルの待機表示を実画面で確認: emulator=5250端末/printer=プリンター/spool=スプール/
+  sql=SQL/ifs=IFS、それぞれ詳細とボタン（接続/開く）が正しい。

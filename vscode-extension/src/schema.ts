@@ -1,4 +1,4 @@
-import type { EmbedAppKind, WatermarkValue } from "./protocol.js";
+import { EMBED_APP_KINDS, type EmbedAppKind, type WatermarkValue } from "./protocol.js";
 
 /**
  * `.ts5250`ファイルの中身の型（design.md「`.ts5250`ファイルスキーマ」）。
@@ -29,7 +29,7 @@ export interface Ts5250File {
   };
 }
 
-const APP_KINDS: readonly EmbedAppKind[] = ["emulator", "printer", "spool", "sql", "ifs"];
+const APP_KINDS: readonly EmbedAppKind[] = EMBED_APP_KINDS;
 
 export type ParseResult = { ok: true; file: Ts5250File } | { ok: false; error: string };
 
