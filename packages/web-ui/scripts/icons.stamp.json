@@ -1,0 +1,11 @@
+{
+  "script": "cae6864f847932c669c193bcd38a3bcbaaaad2bfd3b729f49b415ede4afef953",
+  "files": {
+    "packages/web-ui/public/favicon.svg": "9fa3e875df594a28887b075418d4c3e41a1e108753cfea9ce609da491af48a59",
+    "packages/web-ui/public/favicon.ico": "0a45e3d6d414073eeab393e9ffc813e893c9e87da14887a61bcaf029d5bb3dca",
+    "packages/web-ui/public/apple-touch-icon.png": "cb026b9c3d8fd847eb21f9e29e17e7b6d923f6ba526cc74b2e5ad79bb5561c57",
+    "electron/build/icon.png": "4ea335d2f7adff794cc95c79ed8787a8cea28652e2da6f4059b11609fa666f6d",
+    "electron/build/icon.ico": "193e890797cc3c28200932d778cba7a84dcfcbdee2ad2a76d8f84796f861c394",
+    "vscode-extension/icon.png": "d4322b18b8febdb92d1e0f6072111faf10d2d76ce4f6ced5ab7d6908a279c1ec"
+  }
+}
