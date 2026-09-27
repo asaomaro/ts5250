@@ -1286,37 +1286,50 @@ export class ScreenBuffer {
   /** 未編集 DBCS 欄をセルの生バイトから忠実に復元する（SO/SI の実位置・空・不整合をそのまま保持）。
    *  戻り値のセンチネルは read-response が生バイトで書き出す。末尾ブランクは現行同様に落とす。 */
   private dbcsRawFieldValue(field: InternalField): string {
-    const SO_BYTE = 0x0e;
-    const SI_BYTE = 0x0f;
     // 末尾のブランク桁（空セル・EBCDIC 空白）を落とす。SO/SI・DBCS の構造桁は残す（末尾の { なども保つ）。
     let end = field.length;
     while (end > 0 && this.isTrailingBlankCell(this.cells[field.startAddr + end - 1])) end--;
     let s = "";
-    for (let i = 0; i < end; i++) {
-      const c = this.cells[field.startAddr + i];
-      if (c?.type === "char") {
-        switch (c.charKind) {
-          case "so":
-            s += rawSentinel(SO_BYTE);
-            break;
-          case "si":
-            s += rawSentinel(SI_BYTE);
-            break;
-          case "dbcs-tail":
-            s += c.rawByte !== undefined ? rawSentinel(c.rawByte) : "";
-            break;
-          // dbcs-lead / sbcs: 生バイトがあればそのまま、無ければ文字（フィル空白等）を codec に委ねる
-          default:
-            s += c.rawByte !== undefined ? rawSentinel(c.rawByte) : c.char;
-            break;
-        }
-      } else if (c?.type === "attr") {
-        s += attrSentinel(c.byte);
-      } else {
-        s += " ";
+    for (let i = 0; i < end; i++) s += this.dbcsRawCell(this.cells[field.startAddr + i]) ?? " ";
+    return s;
+  }
+
+  /**
+   * **未編集の DBCS 欄を桁ごとに返す**（READ の応答用。`20260927-read-dbcs-fields`）。1 桁 1 要素で、空のセル（NUL）は `undefined`。
+   * ACS `DS5250.sendAll` は DBCS の欄も末尾の NUL だけを落とし、ホストが書いた実空白は送る——`fieldValue` は末尾の空白を落とすので、
+   * NUL と実空白を区別できるこちらを使う。構造を持たない（編集した・SBCS だけの）欄は `undefined`。
+   * **NUL だけの欄**も原本として返す（全桁 `undefined`）——構造の桁が無くても編集していない。ACS は G・O とも 0 バイトで送る（実機の READDBCS）
+   */
+  dbcsRawCells(field: InternalField): (string | undefined)[] | undefined {
+    if (!this.hasDbcsStructure(field) && !this.allNul(field)) return undefined;
+    const out: (string | undefined)[] = [];
+    for (let i = 0; i < field.length; i++) out.push(this.dbcsRawCell(this.cells[field.startAddr + i]));
+    return out;
+  }
+
+  /** 欄の全桁が空のセル（NUL）か */
+  private allNul(field: InternalField): boolean {
+    for (let i = 0; i < field.length; i++) if (this.cells[field.startAddr + i] != null) return false;
+    return true;
+  }
+
+  /** 未編集の DBCS 欄の 1 桁（センチネルは read-response が生バイトで書き出す）。空のセルは `undefined` */
+  private dbcsRawCell(c: InternalCell | undefined | null): string | undefined {
+    if (c?.type === "char") {
+      switch (c.charKind) {
+        case "so":
+          return rawSentinel(0x0e);
+        case "si":
+          return rawSentinel(0x0f);
+        case "dbcs-tail":
+          return c.rawByte !== undefined ? rawSentinel(c.rawByte) : "";
+        // dbcs-lead / sbcs: 生バイトがあればそのまま、無ければ文字（フィル空白等）を codec に委ねる
+        default:
+          return c.rawByte !== undefined ? rawSentinel(c.rawByte) : c.char;
       }
     }
-    return s;
+    if (c?.type === "attr") return attrSentinel(c.byte);
+    return undefined;
   }
 
   /** 末尾トリム対象の空白桁か（空セル・生バイト無しの空白・EBCDIC 空白 0x40）。構造桁は対象外。 */

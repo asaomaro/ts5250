@@ -1,0 +1,19 @@
+# **DBCS の欄の欄データ（0x83・0x82・0x52）**（実機の ACS のコア。`20260927-read-dbcs-fields`）。DSM の試験プログラム（`scripts/host-src/dscmd.c` の READDBCS）。
+# MDT を立てた DBCS の 7 欄（O・G・J・E。末尾の実空白・末尾の NUL・途中の NUL）を描き、0x83 → 0x82（Enter）→ 0x52（Enter）の順に読む。ACS が送ったバイト列はホスト側のログ（/tmp/dscmd.log の QsnRtvDta）に残る。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/read-dbcs-fields.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READDBCS')[enter]
+sleep 5000
+dump before-82
+keys [enter]
+sleep 3000
+dump before-52
+keys [enter]
+settle 3000
+dump after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

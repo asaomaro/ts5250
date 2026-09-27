@@ -817,9 +817,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ALT（0x82・0x83）はそのまま送る。実機の ACS のコア（DSM の READALT・6 欄）: `AB C`＋実空白 6 は 3 つとも 10 バイト、`A` NUL `B` は 0x52 `c140c2`・ALT `c100c2`、`  012-` は 0x52 `4040f0f1d2`・ALT `4040f0f1f260`、
   `     -` は 0x52 `40404040d0`。当 PJ は 3 つとも末尾の空白を落とし・NUL を空白にし・符号を畳んでいた（`scripts/verify-read-alt.mjs` pass=0 → 3）。
   `packages/tn5250/src/protocol/read-response.ts` の `FieldDataForm`・`sendValue`（桁ごとに `cellAt` で NUL を見る）・`buildReadMdtAltResponse`、セッションは 0x82 で待たされたらそれで返す。
-- [ ] **READ の欄データの残り**（上の `[x]` から割った）: 未編集の DBCS 欄（SO/SI の構造を持つ欄）と G の欄は従来どおり末尾の空白を落とす・0x40 で埋める（ACS は末尾の NUL だけ落とし、ALT は途中の NUL もそのまま）。
+- [x] **READ の欄データの残り**（上の `[x]` から割った）: 未編集の DBCS 欄（SO/SI の構造を持つ欄）と G の欄は従来どおり末尾の空白を落とす・0x40 で埋める（ACS は末尾の NUL だけ落とし、ALT は途中の NUL もそのまま）。
   打鍵で書き換えた欄は値の後ろが NUL になる（ACS はホストが書いた実空白を残す。ホストから見た意味は同じ）。0x42/0x72 の `flatValue` は符号の手前が数字のときだけ畳む（ACS の平坦形式の枝も数字を見ない）。
   PC コマンドの応答（`runPcCommand`）は待たされている READ の種類を見ずに 0x52 の形で返す。
+  **完了（`20260927-read-dbcs-fields`）**: 実機の ACS のコア（DSM の READDBCS・9 欄・3 回）で、DBCS の欄も末尾の NUL だけを落とし実空白は送る（O `SO あ SI`＋実空白 8 は 12 バイト）・途中の NUL は 0x52 で 0x40・ALT で 0x00・
+  G は詰めない（`あ`＋NUL 6 は 2 バイト）・NUL だけの G・O は 0 バイトと測り、当 PJ も同じにした（`packages/tn5250/src/screen/buffer.ts` の `dbcsRawCells`・`read-response.ts` の `rawDbcsSendValue`。
+  `scripts/verify-read-dbcs-fields.mjs` pass=0 → 3）。平坦な形の符号は原典どおり手前の桁を見ずに畳む（0x42 のワイヤは DSM で測れず未確認）。PC コマンドの応答は待たされている READ の形で組む。
+  打鍵で書き換えた欄の後ろ・奇数長の G は対象外（decisions D1・D3）。
 - [x] **CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE で SOH の CA キーの申告を捨てる**（下の【まとめ】の CLEAR 系から割った）。**完了（`20260927-clear-ca-mask`）**:
   ACS は CU・CUA・CFT のどれでも `processClearFMT` → `clearSOHPFKeyTable`。実機の ACS のコア（DSM の CACUA / CACFT / CANONE。2 回）: SOH（F3 を CA）→ CUA / CFT → 新しい入力欄に AB → F3 で
   READ は `07 0c 33 11 07 0a c1 c2`（何も挟まなければ `07 0c 33`）。当 PJ は CU だけ捨てていた（`packages/tn5250/src/screen/buffer.ts` の `clearUnitAlternate`・`clearFormatTable`。

@@ -90,6 +90,23 @@ describe("STRPCCMD を受けたセッション", () => {
     await p;
   });
 
+  it("**待たされている Read の種類で応答を組む**（0x42 なら SBA の無い平坦な形。`20260927-read-dbcs-fields`——以前は常に 0x52 の形）", async () => {
+    const { transport, written, feed } = fakeTransport();
+    const p = Session5250.connect({ id: "t", transport, ccsid: 939, negotiationTimeoutMs: 300 }).catch(() => {});
+    await sleep(30);
+    // 末尾の READ MDT FIELDS（04 52 00 00）を READ INPUT FIELDS（04 42 00 00）に替える
+    const rec = Uint8Array.from(REC_PAUSE_NO);
+    expect(rec[rec.length - 3]).toBe(0x52);
+    rec[rec.length - 3] = 0x42;
+    const before = written.length;
+    feed([...rec, ...IAC_EOR]);
+    await sleep(50);
+    const reply = written.slice(before).find((d) => d[9] === OPCODE.PUT_GET)!;
+    expect(reply[12], "AID").toBe(AID_ENTER);
+    expect(reply[13], "平坦な形は SBA で始まらない").not.toBe(0x11);
+    await p;
+  });
+
   it("実行係が無くても実行キーは返す（返さないとホストが待ち続ける）", async () => {
     const { transport, written, feed } = fakeTransport();
     const p = Session5250.connect({ id: "t", transport, ccsid: 939, negotiationTimeoutMs: 300 }).catch(

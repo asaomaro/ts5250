@@ -99,9 +99,12 @@ function singleByte(ch: string, codec: Codec): number | undefined {
  * （ACS `FFT5250.getFieldContents` が全区間の内容を連結し、`sendAll` が連結した後の末尾だけを見る）。
  *
  * 桁ごとに NUL（空のセル）かどうかを見るので、**1 桁 1 字で返る欄だけ**をこの経路で扱う。未編集の DBCS 欄（SO/SI の構造を持つ）は
- * `fieldValue` がホストの原本のバイト列を返して桁と字が対応しないため、従来どおり末尾の空白を落とす（`trimmedSendValue`）
+ * `rawDbcsSendValue` が桁ごとに組む。継続欄で未編集の区間と編集した区間が混ざるときは下の桁ごとの経路へ来て、未編集の区間の末尾が空白で
+ * `fieldValue` の長さが区間の長さと合わないときだけ、従来どおり末尾の空白を落とす（`trimmedSendValue`。以前からの退避路）
  */
 function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec, form: FieldDataForm): string {
+  const raw = rawDbcsSendValue(buf, f, form);
+  if (raw !== undefined) return raw;
   const run = f.continued === undefined ? [f] : buf.continuedRun(f);
   const chars: string[] = [];
   const nul: boolean[] = [];
@@ -132,7 +135,27 @@ function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec, form: Fiel
 }
 
 /**
- * 送信する欄の値（**末尾の空白を落とす**旧来の形）。未編集の DBCS 欄だけがここへ来る（`sendValue`）。
+ * **未編集の DBCS 欄の送信値**（ホストが書いた原本のまま。`20260927-read-dbcs-fields`）。構造を持たない区間があれば `undefined`。
+ * ACS `DS5250.sendAll` の規則を DBCS の欄にも当てる: 連結した後の**末尾の NUL だけ**を落とし（実空白は送る）、途中の NUL は 0x52 では 0x40、ALT ではそのまま。
+ * 実機の ACS のコア（DSM の READDBCS）: O 欄の `SO あ SI`＋実空白 8 は 12 バイト、＋NUL 8 は 4 バイト、`SO あ SI NUL A` は 0x52 で `…0f 40 c1`・ALT で `…0f 00 c1`、
+ * G 欄の `あ`＋NUL 6 は 2 バイト（0x40 で詰めない）
+ */
+function rawDbcsSendValue(buf: ScreenBuffer, f: InternalField, form: FieldDataForm): string | undefined {
+  const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  const cells: (string | undefined)[] = [];
+  for (const seg of run) {
+    const c = buf.dbcsRawCells(seg);
+    if (c === undefined) return undefined;
+    cells.push(...c);
+  }
+  let n = cells.length;
+  while (n > 0 && cells[n - 1] === undefined) n--;
+  const nul = rawSentinel(form === "alt" ? 0x00 : 0x40);
+  return cells.slice(0, n).map((c) => c ?? nul).join("");
+}
+
+/**
+ * 送信する欄の値（**末尾の空白を落とす**旧来の形）。未編集と編集した区間が混ざる DBCS の継続欄のうち、桁と字が対応しないものだけがここへ来る（`sendValue`）。
  * 継続入力フィールドの先頭区間なら**全区間を連結**した値を返す。
  *
  * 連結の前に区間ごとの末尾空白を落としてはいけない——落とすと `2026` + `1 ` + `31` が
@@ -379,12 +402,11 @@ function flatValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
   const chars = [...full];
   const sign = chars[chars.length - 1] ?? "";
   const digits = chars.slice(0, -1);
-  if (sign === "-") {
-    const last = digits[digits.length - 1] ?? "";
-    if (last >= "0" && last <= "9") {
-      const b = codec.encode(last).bytes[0];
-      if (b !== undefined) digits[digits.length - 1] = rawSentinel(0xd0 | (b & 0x0f));
-    }
+  // 符号の手前の桁は**数字かを見ずに**ゾーンを 0xD にする（ACS `DS5250.sendAll` の平坦な形〔case 66・114〕も 0x52 と同じ文。`20260927-read-dbcs-fields`）。
+  // 0x52 の同じ文は実機で `     -` → `40404040d0` と測った（`20260927-read-alt-raw`）。0x42 のワイヤは DSM で ACS に答えさせられず未確認（decisions D2）
+  if (sign === "-" && digits.length > 0) {
+    const b = singleByte(digits[digits.length - 1]!, codec);
+    if (b !== undefined) digits[digits.length - 1] = rawSentinel(0xd0 | (b & 0x0f));
   }
   return digits.join("");
 }
@@ -498,7 +520,16 @@ function buildFieldResponse(
     w.u8(ORDER.SBA).u8(row).u8(col);
     // 末尾の NUL は落ち、実空白は残る（`FieldDataForm`）。SBCS の埋め込み属性はセンチネル。
     // 継続入力フィールドは全区間を連結した値になる。
-    if (f.dbcsType === "pure") {
+    const rawPure = f.dbcsType === "pure" ? rawDbcsSendValue(buf, f, form) : undefined;
+    if (rawPure !== undefined) {
+      // 未編集の G 欄は原本のまま、末尾の NUL を落として送る（欄長まで詰めない。ACS の実測は上の `rawDbcsSendValue`）。
+      // 奇数長の欄は偶数へ丸める（組を割らない。下の編集した欄と同じ。ACS の奇数長の G は未測定）
+      const tmp = new ByteWriter();
+      substituted += writeValue(tmp, rawPure, codec, true);
+      const bytes = tmp.toUint8Array();
+      const total = f.continued === undefined ? f.length : buf.continuedRun(f).reduce((n, seg) => n + seg.length, 0);
+      w.bytes(bytes.subarray(0, Math.min(bytes.length, total - (total % 2))));
+    } else if (f.dbcsType === "pure") {
       // **純 DBCS の欄（G）は欄長いっぱいの SO/SI 無しの 2 バイト組で送る**（実機の ACS のワイヤ: `かきく` を打った 12 バイトの欄が `44 86 44 87 44 88 40 40 40 40 40 40`。
       // 残りは DBCS 空白 0x4040）。以前は SO/SI を付けて短く送り、ホストの欄に制御バイトが入って全角が 1 バイトずれた（`20260921-g-field-sosi`）。
       // 継続欄は全区間の長さの合計（先頭区間の長さで切ると 2 区間目以降のデータが落ちる。独立点検 A-S1）
