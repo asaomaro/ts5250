@@ -32,6 +32,25 @@ function sba(row: number, col: number): number[] {
   return [ORDER.SBA, row, col];
 }
 
+/** DEFINE SELECTION FIELD の本体（選択肢の fb1 で既定の選択） */
+function selectionBody(fieldType: number, choices: { text: string; fb1: number }[]): number[] {
+  const header = [
+    0x00, 0x00, 0x00, // fb1,fb2,fb3
+    fieldType,
+    0x00, 0x00, 0x00, 0x00, 0x00, // 5 予約
+    0x03, // itemsize
+    0x01, // height
+    choices.length, // items
+    0x00, 0x00, 0x00, 0x00 // padding, separator, selectionchar, cancelaid
+  ];
+  const minors: number[] = [];
+  for (const c of choices) {
+    const content = [c.fb1, 0x00, 0x80, ...e(c.text)]; // fb1, fb2, fb3(GUI), text
+    minors.push(content.length + 2, 0x10, ...content);
+  }
+  return [...header, ...minors];
+}
+
 describe("WDSF GUI — CREATE WINDOW (0x51)", () => {
   it("位置・サイズ・タイトルを解析し snapshot.gui に載せる", () => {
     // fb1=0, 予約2, depth=5, width=20, border(title="HI")
@@ -65,23 +84,6 @@ describe("WDSF GUI — CREATE WINDOW (0x51)", () => {
 });
 
 describe("WDSF GUI — DEFINE SELECTION FIELD (0x50)", () => {
-  function selectionBody(fieldType: number, choices: { text: string; fb1: number }[]): number[] {
-    const header = [
-      0x00, 0x00, 0x00, // fb1,fb2,fb3
-      fieldType,
-      0x00, 0x00, 0x00, 0x00, 0x00, // 5 予約
-      0x03, // itemsize
-      0x01, // height
-      choices.length, // items
-      0x00, 0x00, 0x00, 0x00 // padding, separator, selectionchar, cancelaid
-    ];
-    const minors: number[] = [];
-    for (const c of choices) {
-      const content = [c.fb1, 0x00, 0x80, ...e(c.text)]; // fb1, fb2, fb3(GUI), text
-      minors.push(content.length + 2, 0x10, ...content);
-    }
-    return [...header, ...minors];
-  }
 
   it("単一選択フィールドをラジオとして解析（既定選択を反映）", () => {
     const body = selectionBody(0x11, [
@@ -237,5 +239,30 @@ describe("ScreenBuffer — GUI 選択状態", () => {
     const { buf } = applyGui([...sba(1, 1), ...wdsf(WDSF_TYPE.DEFINE_SELECTION_FIELD, body)]);
     const id = buf.snapshot("t", false).gui!.selectionFields[0]!.id;
     expect(buf.setSelectionChoice(id, 1, true)).toBe(false);
+  });
+});
+
+/**
+ * **CLEAR FORMAT TABLE・SOH での ENPTUI の構造体**（ACS `processClearFMT` → `FFT5250.clearFFT` → `ENPTUI5250.clearENPTUIConstructs`。`20260927-ds5250-clear`）:
+ * CFT は窓・選択欄・スクロール・バーのすべてを捨て、SOH は窓だけ残して選択欄・スクロール・バーを捨てる（`clearFFT(false)`）
+ */
+describe("CFT・SOH での ENPTUI の構造体", () => {
+  const win = () => [...sba(5, 10), ...wdsf(WDSF_TYPE.CREATE_WINDOW, [0x00, 0x00, 0x00, 0x05, 0x14, 0x08, 0x10, 0x00, 0x00, 0x00, 0x00, ...e("HI")])];
+  const sel = () => [...sba(6, 4), ...wdsf(WDSF_TYPE.DEFINE_SELECTION_FIELD, selectionBody(0x11, [{ text: "YES", fb1: 0x40 }, { text: "NO", fb1: 0x00 }]))];
+  const soh = [ORDER.SOH, 0x03, 0x00, 0x00, 0x00];
+  const gui = (buf: ScreenBuffer) => buf.snapshot("t", false).gui;
+
+  it("**SOH の後に同じ選択欄を定義し直しても二重にならない**・窓は残る", () => {
+    const { buf } = applyGui([...win(), ...sel()]);
+    applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ...soh, ...sel()]), buf, codec, () => {});
+    expect(gui(buf)?.selectionFields ?? []).toHaveLength(1);
+    expect(gui(buf)?.windows ?? []).toHaveLength(1);
+  });
+
+  it("**CLEAR FORMAT TABLE は窓も選択欄も捨てる**", () => {
+    const { buf } = applyGui([...win(), ...sel()]);
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_FORMAT_TABLE]), buf, codec, () => {});
+    expect(gui(buf)?.windows ?? []).toHaveLength(0);
+    expect(gui(buf)?.selectionFields ?? []).toHaveLength(0);
   });
 });

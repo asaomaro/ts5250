@@ -849,7 +849,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS は CU・CUA・CFT のどれでも `processClearFMT` → `clearSOHPFKeyTable`。実機の ACS のコア（DSM の CACUA / CACFT / CANONE。2 回）: SOH（F3 を CA）→ CUA / CFT → 新しい入力欄に AB → F3 で
   READ は `07 0c 33 11 07 0a c1 c2`（何も挟まなければ `07 0c 33`）。当 PJ は CU だけ捨てていた（`packages/tn5250/src/screen/buffer.ts` の `clearUnitAlternate`・`clearFormatTable`。
   `scripts/verify-clear-ca-mask.mjs` pass=1 → 3）。
-- [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
+- [x] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
+  **完了（`20260927-ds5250-clear`）**: 残りのうち「ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる」を ACS と同じにした——CFT は窓・選択欄・スクロール・バーをすべて捨て、SOH は窓だけ残す
+  （ACS `processClearFMT` → `FFT5250.clearFFT` → `ENPTUI5250.clearENPTUIConstructs`。`packages/tn5250/src/screen/buffer.ts` の `clearFormatTable`。原典・単体）。
+  罫線・WDSF 0x52/0x54/0x55・FCW 0x80xx/0x84xx は下の `[ ]` に割った。
   **着手時に両側を再確認すること。**
   - ~~WEA タイプ 5（拡張 NLS 区間）（○）~~ → DBCS のセッションは `20260921-g-field-sosi` で済んだ（実機の DDS の G 型がこの形で送ってくる）。~~**残り**: SBCS のセッションで来たときの否定応答（ACS は 0x1005012D。当 PJ は警告して読み飛ばす）~~ → `20260927-wea-sense` で済んだ
     - ACS: DBCS セッションでは適用する（`PS5250.writeExtAttribute`）。
@@ -873,6 +876,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → 下の `[x]`（`20260927-read-alt-raw`）で済んだ。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
+- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x52/0x54/0x55・FCW 0x80xx/0x84xx）**（上の【まとめ】から割った。優先度 低）:
+  **罫線**: ACS `processClearUnit` は `discardGridPlane` で罫線の面を捨てる（原典）が、実機（S9R167D）では同じレコードの CLEAR UNIT の後も ACS が罫線を表示し続けた記録がある（`buffer.ts` の `closeWindowsAndSelections` の注記）——
+  原典と実測が食い違うので、DSM で「罫線 → CLEAR UNIT」「CLEAR UNIT ALTERNATE で画面の大きさを変える」を出させ、ACS の画素で確かめてから決める（`20260927-ds5250-clear` decisions D2）。
+  **WDSF 0x52**（窓のカーソル制限の解除）・**0x54**（欄へのデータ書き込み。EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）・**0x55**（マウス・ボタン → AID）と **FCW 0x80xx**（再順序付け）・**0x84xx**（透過の欄。ACS `sendAll` は 0x10＋2 バイトの長さを前に付けて生で送る）は、
+  リポジトリ内の実機の記録に 0 件——DSM で出させて測るか、実例が出るまで待つ。
 - [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:
   平文の自動サインオンで IBMRSEED は値なし（以前は ESC＋8 バイトの 0 で、7 個の 0x00 が空の VAR として読まれていた）、USER は前後の空白を落として大文字、
   IBMSUBSPW は末尾の空白を落とし、値の 0x00〜0x03 は ESC でエスケープ（`packages/tn5250/src/telnet/telnet.ts` の `envValue`）。ACS のコアに平文の自動サインオンを

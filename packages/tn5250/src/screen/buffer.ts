@@ -895,9 +895,17 @@ export class ScreenBuffer {
    * **表示属性の打ち切り位置は `retainedEnds` へ引き継ぐ**——画面の中身は変わっていないのに
    * 下線が伸びてしまうため（`retainedEnds` のコメント参照）。
    */
-  clearFormatTable(): void {
+  clearFormatTable(kind: "cft" | "soh" = "cft"): void {
     for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
+    // **ENPTUI の構造体も捨てる**（ACS `processClearFMT` → `FFT5250.clearFFT` → `ENPTUI5250.clearENPTUIConstructs`。`20260927-ds5250-clear`）:
+    // CLEAR FORMAT TABLE は窓・選択欄・スクロール・バーのすべて、SOH は**窓だけ残して**選択欄・スクロール・バーを捨てる（`clearFFT(false)`）。
+    // 以前はどちらも残し、CFT の後も窓が残り、SOH の後にホストが同じ選択欄を定義し直すと二重になっていた（台帳の実測）。罫線は触らない（`closeWindowsAndSelections`）
+    if (kind === "cft") this.closeWindowsAndSelections();
+    else {
+      this.guiSelections = [];
+      this.guiScrollBars = [];
+    }
     // SOH の CA キーの申告も捨てる（ACS `processClearFMT` → `clearSOHPFKeyTable`。CFT でも。SOH はこの後で申告し直す）
     this.aidNoDataMask = 0;
     this.cursorInputOnly = false;
