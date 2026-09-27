@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { TelnetLayer } from "../src/telnet/telnet.js";
-import { IAC, CMD, OPT, TT_IS, TT_SEND, ENV_IS, ENV_SEND, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
-import { FakeTransport } from "./helpers/fake-transport.js";
+import { IAC, CMD, OPT, TT_IS, TT_SEND, ENV_IS, ENV_SEND, ENV_VAR, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
+import { FakeTransport, IBMI_ENV_SEND, IBMI_SEED } from "./helpers/fake-transport.js";
 
 function ascii(s: string): number[] {
   return [...s].map((c) => c.charCodeAt(0));
@@ -46,23 +46,65 @@ describe("TelnetLayer ネゴシエーション", () => {
     ]);
   });
 
-  it("NEW-ENVIRON SEND に DEVNAME を USERVAR で応答する", () => {
+  /**
+   * **SEND の順に答える**（ACS `NVT5250`。`20260927-telnet-rest`）: IBM i の `USERVAR IBMRSEED<シード> VAR USERVAR` に、
+   * 自動サインオンでなければ IBMRSEED は名前とシードをそのまま返し（表に無い）、VAR は `VAR` だけ、USERVAR は表の全部
+   */
+  it("NEW-ENVIRON SEND に DEVNAME を USERVAR で応答する（SEND の順）", () => {
     const { t } = setup("WEBEMU01");
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED,
+      ENV_VAR,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);
   });
 
-  it("デバイス名未設定なら NEW-ENVIRON は空 IS", () => {
+  it("**デバイス名未設定でも DEVNAME を値なしで書く**（ACS `insertVariable` の case 0。~~空 IS~~）", () => {
     const { t } = setup();
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED,
+      ENV_VAR,
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE,
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
+      IAC, CMD.SE
+    ]);
+  });
+
+  it("**シードに 0x00〜0x03・0xFF があっても、返しは最初の止まるバイトの手前まで**（ACS の返しの読み取りと同じ。IS に偽の項目を作らない）", () => {
+    const { t } = setup("WEBEMU01");
+    // シード 41 42 00 43 FF 44 03 45（0xFF は telnet の層で二重）
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, 0x01, ENV_USERVAR, ...ascii("IBMRSEED"), 0x41, 0x42, 0x00, 0x43, 0xff, 0xff, 0x44, 0x03, 0x45, ENV_VAR, ENV_USERVAR, IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([
+      IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), 0x41, 0x42,
+      ENV_VAR,
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
+      IAC, CMD.SE
+    ]);
+  });
+
+  it("自動サインオンでも `VAR <USER 以外の名前>` は名前だけ返す（ACS `insertUser` は名前なし・USER のときだけ）", () => {
+    const { t } = setupAuto({ user: "U", password: "P" });
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, 0x01, ENV_VAR, ...ascii("JOB"), ENV_VAR, IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS, ENV_VAR, ...ascii("JOB"), ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("U"), IAC, CMD.SE]);
+  });
+
+  it("**空の SEND には何も答えない**（ACS も変数を 1 つも書かない。IBM i は送らない形）・知らない変数は名前だけ返す", () => {
+    const { t } = setup("WEBEMU01");
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, 0x01, IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS, IAC, CMD.SE]);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, 0x01, ENV_USERVAR, ...ascii("FOO"), ENV_USERVAR, ...ascii("DEVNAME"), IAC, CMD.SE);
+    expect(t.takeSent()).toEqual([
+      IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("FOO"),
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
       IAC, CMD.SE
     ]);
   });
@@ -71,31 +113,32 @@ describe("TelnetLayer ネゴシエーション", () => {
   // エスケープされない 7 個の 0x00 が空の VAR として読まれていた）
   it("RFC 4777 自動サインオン: USER + IBMRSEED(値なし) + IBMSUBSPW(平文)", () => {
     const { t } = setupAuto({ deviceName: "WEBEMU01", user: "MYUSER", password: "SECRET" });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
-    const ENV_VAR = 0;
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
+    // ACS のワイヤ（`20260921-telnet-signon-vars` research F4）と同じ順: IBMRSEED・USER・表の全部（DEVNAME・IBMSUBSPW・IBMRSEED・IBMSENDCONFREC）
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
-      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
-      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
-      ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
       ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE,
+      ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("MYUSER"),
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
       ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii("SECRET"),
+      ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE,
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);
   });
 
   it("利用者名は前後の空白を落として大文字、パスワードは末尾の空白を落とす（ACS と同じ正規化）", () => {
     const { t } = setupAuto({ user: " myuser ", password: "Secret  " });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     const sent = t.takeSent();
     const text = String.fromCharCode(...sent);
     expect(text).toContain("USER\x01MYUSER");
-    expect(text).toContain("IBMSUBSPW\x01Secret\xff");
+    expect(text).toContain("IBMSUBSPW\x01Secret\x03"); // 後ろに表の IBMRSEED（USERVAR）が続く＝末尾の空白は落ちている
   });
 
   it("**利用者名は Java の `trim()` と同じ**——前後の U+0020 以下（制御文字を含む）だけを落とし、全角空白は残す", () => {
     const { t } = setupAuto({ user: "\u0001\tmyuser\u0000 ", password: "S" });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     const text = String.fromCharCode(...t.takeSent());
     expect(text).toContain("USER\x01MYUSER\x03"); // 次の USERVAR（3）が直後に続く＝前後に何も残っていない
   });
@@ -109,14 +152,14 @@ describe("TelnetLayer ネゴシエーション", () => {
       ["U", "   "] // 空白だけのパスワードも空（ACS は末尾の空白を落としてから見る）
     ] as const) {
       const { t } = setupAuto({ user, password });
-      t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+      t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
       const text = String.fromCharCode(...t.takeSent());
       expect(text, `${user.length}/${password.length}`).not.toContain("USER\x01");
       expect(text).not.toContain("IBMSUBSPW");
     }
     // ちょうど 10 文字・128 文字は送る
     const { t } = setupAuto({ user: "ABCDEFGHIJ", password: "x".repeat(128) });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(String.fromCharCode(...t.takeSent())).toContain("IBMSUBSPW");
   });
 
@@ -178,11 +221,11 @@ describe("TelnetLayer ネゴシエーション", () => {
     // ~~パスワードの変数を送らない（ACS も書かない）~~ → ACS は IBMRSEED に自分のシード、IBMSUBSPW を値の無いまま送る（節目の点検の指摘）
     it("シードが無い・計算に失敗したら**IBMSUBSPW は値の無いまま**（平文には落とさない。ACS と同じ）", async () => {
       const t1 = setupEnc(async () => ({ clientSeed: new Uint8Array(8), substitute: new Uint8Array(20) }));
-      t1.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+      t1.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, 0x01, ENV_VAR, ENV_USERVAR, IAC, CMD.SE); // シードの無い SEND（VAR USERVAR だけ）
       await flush();
       const a = String.fromCharCode(...t1.takeSent());
       expect(a).toContain("USER\x01U");
-      expect(a).toMatch(/IBMSUBSPW\x01(\xff\xf0|$)/); // 値が無い（IAC SE が続く）
+      expect(a).toMatch(/IBMSUBSPW\x01\x03/); // 値が無い（表の次の IBMRSEED が続く）
       expect(a).toMatch(/IBMRSEED\x01[\s\S]/); // 自分のシード（乱数。先頭が 0x0A・0x0D のこともあるので `.` では取りこぼす）
       expect(a).not.toContain("pw");
       const t2 = setupEnc(async () => {
@@ -192,14 +235,14 @@ describe("TelnetLayer ネゴシエーション", () => {
       await flush();
       const b = String.fromCharCode(...t2.takeSent());
       expect(b).toContain("USER\x01U");
-      expect(b).toMatch(/IBMSUBSPW\x01(\xff\xf0|$)/);
+      expect(b).toMatch(/IBMSUBSPW\x01\x03/);
       expect(b).not.toContain("pw");
     });
   });
 
   it("値の 0x00〜0x03 は ESC でエスケープする（RFC 1572。ACS も同じ）", () => {
     const { t } = setupAuto({ user: "U", password: "a\u0001b" });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     const sent = t.takeSent();
     const at = sent.indexOf(0x61);
     expect(sent.slice(at, at + 4)).toEqual([0x61, 2, 1, 0x62]);
@@ -209,9 +252,12 @@ describe("TelnetLayer ネゴシエーション", () => {
   // `20260921-user-without-password`）
   it("password 未指定（user のみ）なら USER も IBMRSEED/IBMSUBSPW も送らない", () => {
     const { t } = setupAuto({ user: "MYUSER" });
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED,
+      ENV_VAR,
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE,
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);
@@ -268,9 +314,11 @@ describe("RFC 2877 デバイス属性の申告（KBDTYPE/CODEPAGE/CHARSET）", (
       charSet: 697
     });
     void telnet;
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED,
+      ENV_VAR,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("WEBEMU01"),
       ENV_USERVAR, ...ascii("KBDTYPE"), ENV_VALUE, ...ascii("USB"),
       ENV_USERVAR, ...ascii("CODEPAGE"), ENV_VALUE, ...ascii("37"),
@@ -284,9 +332,12 @@ describe("RFC 2877 デバイス属性の申告（KBDTYPE/CODEPAGE/CHARSET）", (
     const t = new FakeTransport();
     const telnet = new TelnetLayer(t, { terminalType: "IBM-3179-2" });
     void telnet;
-    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+    t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
     expect(t.takeSent()).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED,
+      ENV_VAR,
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE,
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       IAC, CMD.SE
     ]);

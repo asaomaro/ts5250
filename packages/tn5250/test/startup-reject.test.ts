@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { IBMI_ENV_SEND } from "./helpers/fake-transport.js";
 import { Session5250 } from "../src/session/session.js";
 import { isKnownStartupCode } from "../src/telnet/startup-record.js";
 import type { Transport } from "../src/transport/types.js";
@@ -243,7 +244,7 @@ describe("交渉中にホストが閉じたとき", () => {
  * 実測（ACS のコア・PUB400）: `TSC=` → `TSC0`（8902）→ ホストが SEND を送り直す → `TSC1` → I902。
  */
 describe("装置名の答え直し", () => {
-  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  const SEND = [0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0];
   function capturing(): { transport: Transport; feed: (b: number[]) => void; devnames: () => string[] } {
     let onData: ((d: Uint8Array) => void) | undefined;
     const sent: number[] = [];
@@ -374,7 +375,7 @@ describe("起動応答は CCSID 37 で読む", () => {
     const warnings: string[] = [];
     const p = Session5250.connect({ id: "t", transport, ccsid: 930, negotiationTimeoutMs: 200, warn: (m) => warnings.push(m) }).catch(() => undefined);
     await new Promise((r) => setTimeout(r, 20));
-    onData?.(Uint8Array.from([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]));
+    onData?.(Uint8Array.from([0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]));
     onData?.(Uint8Array.from([...startupRecord("I902", "SYS", "DSP$01"), ...IAC_EOR]));
     await p;
     expect(warnings.find((w) => w.includes("startup response I902"))).toContain("device=DSP$01");

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { IBMI_ENV_SEND, IBMI_SEED } from "./helpers/fake-transport.js";
 import { TelnetLayer } from "../src/telnet/telnet.js";
 import { printerDeclaration } from "../src/session/terminal-type.js";
 import type { Transport } from "../src/transport/types.js";
@@ -32,7 +33,7 @@ describe("TelnetLayer の NEW-ENVIRON", () => {
       sendConfRec: false
     });
     // IAC SB NEW_ENVIRON(39) SEND(1) IAC SE
-    t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
+    t.feed([0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]);
     const text = asciiOf(t.sent.at(-1)!);
     expect(text.indexOf("DEVNAME")).toBeLessThan(text.indexOf("IBMFORMFEED"));
     expect(text.indexOf("IBMFORMFEED")).toBeLessThan(text.indexOf("IBMPPRSRC1"));
@@ -42,7 +43,7 @@ describe("TelnetLayer の NEW-ENVIRON", () => {
   it("プリンターの変数を渡さなければ送らない（表示セッションを汚さない）", () => {
     const t = new CaptureTransport();
     new TelnetLayer(t, { terminalType: "IBM-3179-2" });
-    t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
+    t.feed([0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]);
     const text = asciiOf(t.sent.at(-1)!);
     expect(text).not.toContain("IBMFONT");
     expect(text).not.toContain("IBMTRANSFORM");
@@ -62,9 +63,12 @@ describe("プリンターの申告（ACS の組）", () => {
     const d = printerDeclaration(ccsid, transformTo);
     const t = new CaptureTransport();
     new TelnetLayer(t, { terminalType: d.terminalType, deviceName, userVars: d.userVars, sendConfRec: false });
-    t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
+    t.feed([0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]);
     const r = t.sent.at(-1)!;
-    return r.slice(4, -2); // IAC SB 39 0 … IAC SE
+    // SEND の順に答える（`20260927-telnet-rest`）: 先頭は IBMRSEED の名前とシードの返し（表に無い）と `VAR`、その後ろが表の全部
+    const head = [0x03, ...[..."IBMRSEED"].map((c) => c.charCodeAt(0)), ...IBMI_SEED, 0x00];
+    expect(r.slice(4, 4 + head.length)).toEqual(head);
+    return r.slice(4 + head.length, -2); // IAC SB 39 0 … IAC SE
   }
 
   it("**DBCS・HPT なし: IBM-5553-B01 と 6 変数**（KBDTYPE / CODEPAGE / CHARSET / IBMFONT / IBMSENDCONFREC は送らない）", () => {
@@ -119,7 +123,7 @@ describe("プリンターの申告（ACS の組）", () => {
   it("表示セッションは従来どおり IBMSENDCONFREC を送る（sendConfRec の既定は true）", () => {
     const t = new CaptureTransport();
     new TelnetLayer(t, { terminalType: "IBM-3179-2" });
-    t.feed([0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
+    t.feed([0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]);
     expect(asciiOf(t.sent.at(-1)!)).toContain("IBMSENDCONFREC");
   });
 });

@@ -288,30 +288,6 @@ export class TelnetLayer {
       const name = [...this.opts.terminalType].map((c) => c.charCodeAt(0));
       this.sendSb([OPT.TERMINAL_TYPE, TT_IS, ...name]);
     } else if (opt === OPT.NEW_ENVIRON && sb[1] === ENV_SEND) {
-      // RFC 4777: DEVNAME＋（指定時）自動サインオン変数を回答（未設定なら空 IS）
-      const payload: number[] = [OPT.NEW_ENVIRON, ENV_IS];
-      if (this.devNames !== undefined) {
-        // 聞かれるたびに次の名前（ACS `NVT5250` も DEVNAME を書くたびに `AutoDeviceName5250` を通す）
-        payload.push(ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii(this.devNames.next()));
-      }
-      for (const v of this.opts.userVars ?? []) {
-        payload.push(ENV_USERVAR, ...ascii(v.name), ENV_VALUE, ...(v.raw ?? ascii(v.value ?? "")));
-      }
-      // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる
-      if (this.opts.kbdType !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("KBDTYPE"), ENV_VALUE, ...ascii(this.opts.kbdType));
-      }
-      if (this.opts.codePage !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("CODEPAGE"), ENV_VALUE, ...ascii(String(this.opts.codePage)));
-      }
-      if (this.opts.charSet !== undefined) {
-        payload.push(ENV_USERVAR, ...ascii("CHARSET"), ENV_VALUE, ...ascii(String(this.opts.charSet)));
-      }
-      // IBMSENDCONFREC=YES: ホストが確認レコードを送る作法を申告する（RFC 4777）。
-      // ACS 実機が送っており、当方も合わせる（無いとホストの応答経路が変わる）。
-      if (this.opts.sendConfRec !== false) {
-        payload.push(ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"));
-      }
       // ACS は利用者名・パスワードが空か長すぎる（10 文字・128 文字を超える）と自動サインオンをやめ、USER もパスワードも
       // 送らない（`NVT5250` が `ssoType` を 0 に戻す）。長さは Java の `trim()` のあとで見る。パスワードは**末尾の空白を落としてから**
       // 空かを見る（空白だけのパスワードも空。節目の点検の指摘）
@@ -328,42 +304,55 @@ export class TelnetLayer {
        * サインオンの失敗回数に数えるかは未確認
        */
       const finish = (auth?: { clientSeed: Uint8Array; substitute: Uint8Array } | null): void => {
+        // **変数の表**（ACS `NVT5250` の `userVarDSP*` / `userVarPRT*` と、自動サインオン・確認レコード・関連付けプリンターで足す分。この順が「全部」の答えの順）。
+        // 値は `ENV_VALUE` の後ろのバイト（`undefined` は名前と `ENV_VALUE` だけ——ACS は値の無い変数も `03 名前 01` と書く）
+        const table: EnvVar[] = [];
+        // DEVNAME は**名前が無くても書く**（ACS `insertVariable` の case 0。値は空）。聞かれるたびに次の名前（ACS `NVT5250` も DEVNAME を書くたびに `AutoDeviceName5250` を通す）
+        table.push({ name: "DEVNAME", value: () => (this.devNames !== undefined ? ascii(this.devNames.next()) : []) });
+        // RFC 2877: デバイスのコードページを申告し、ホストにジョブ CCSID との変換をさせる（プリンターは申告しない——ACS の `userVarPRT*` にも無い）
+        if (this.opts.kbdType !== undefined) table.push({ name: "KBDTYPE", value: () => ascii(this.opts.kbdType!) });
+        if (this.opts.codePage !== undefined) table.push({ name: "CODEPAGE", value: () => ascii(String(this.opts.codePage)) });
+        if (this.opts.charSet !== undefined) table.push({ name: "CHARSET", value: () => ascii(String(this.opts.charSet)) });
+        for (const v of this.opts.userVars ?? []) table.push({ name: v.name, value: () => (v.raw !== undefined ? [...v.raw] : ascii(v.value ?? "")) });
         // **USER はパスワード付きの自動サインオンのときだけ送る**（ACS `NVT5250.insertUser` は `ssoType` 3・4 のときだけ。
         // `20260921-user-without-password`）。~~利用者名だけでも USER を送る~~——PUB400 では送っても送らなくてもサインオン画面で、
         // 利用者名も入らなかった（実測）
-        if (user !== undefined && pw !== undefined && !bypassRejected) {
-          // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
-          // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
-          // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
-          payload.push(ENV_VAR, ...ascii("USER"), ENV_VALUE, ...envValue(ascii(user.toUpperCase())));
-          if (pw !== undefined && auth) {
+        const sso = user !== undefined && pw !== undefined && !bypassRejected;
+        // USER は well-known 変数（VAR）、他は USERVAR（RFC 4777 / tn5250j に準拠）。
+        // 前後の制御文字・空白を落として大文字にする（ACS `NVT5250` の自動サインオンの利用者名と同じ正規化。
+        // ~~JS の `trim()`~~ は U+3000・U+00A0 も落とし、0x01 などの制御文字は落とさない——Java の `trim()` は U+0020 以下だけ）
+        const userValue = sso ? envValue(ascii(user!.toUpperCase())) : undefined;
+        if (sso) {
+          // 自動サインオンは表の IBMSUBSPW・IBMRSEED（ACS の 21・22）
+          if (auth) {
             // **暗号化**: IBMRSEED に自分のシード、IBMSUBSPW に代替パスワード（ACS と同じ。値の 0x00〜0x03 は ESC で、0xFF は
             // telnet の層で二重にする。`20260921-encrypted-autosignon`）
-            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...auth.clientSeed]));
-            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue([...auth.substitute]));
-          } else if (pw !== undefined && auth === null) {
-            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE, ...envValue([...crypto.getRandomValues(new Uint8Array(8))]));
-            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE);
-          } else if (pw !== undefined && auth === undefined) {
-            // **IBMRSEED は値を付けない**（平文のパスワードの印。ACS `NVT5250.insertVariable` の IBMRSEED は平文の
-            // 自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
-            // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は
-            // RFC 1572 では空の VAR として読まれていた（台帳「【まとめ】telnet」）
-            payload.push(ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE);
-            // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）
-            payload.push(ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...envValue(ascii(pw.replace(/ +$/, ""))));
+            table.push({ name: "IBMSUBSPW", value: () => envValue([...auth.substitute]) });
+            table.push({ name: "IBMRSEED", value: () => envValue([...auth.clientSeed]) });
+          } else if (auth === null) {
+            const seed = [...crypto.getRandomValues(new Uint8Array(8))];
+            table.push({ name: "IBMSUBSPW", value: () => [] });
+            table.push({ name: "IBMRSEED", value: () => envValue(seed) });
+          } else {
+            // IBMSUBSPW = 平文のパスワード。末尾の空白は落とす（ACS も同じ）。**IBMRSEED は値を付けない**（平文のパスワードの印。
+            // ACS `NVT5250.insertVariable` の IBMRSEED は平文の自動サインオンでは名前だけ書いて値を書かない。`20260921-telnet-signon-vars`）。
+            // ~~ESC + 8 バイトのゼロシード~~——エスケープされるのが先頭の 1 バイトだけで、残る 7 個の 0x00 は RFC 1572 では空の VAR として読まれていた
+            table.push({ name: "IBMSUBSPW", value: () => envValue(ascii(pw!.replace(/ +$/, ""))) });
+            table.push({ name: "IBMRSEED", value: () => [] });
           }
         }
-        // 関連付けプリンターは最後（`associatedPrinter` の注記）。値は各文字の下位 8 ビットをそのまま（ACS の `(byte)charAt`。ESC も挟まない）
+        // IBMSENDCONFREC=YES: ホストが確認レコードを送る作法を申告する（RFC 4777。ACS の 20）。プリンターは送らない（`sendConfRec`）
         const assoc = this.opts.associatedPrinter;
-        if (assoc !== undefined && javaTrim(assoc) !== "") {
-          // **UTF-16 の単位ごと**（Java の `charAt`。補助面の文字はサロゲート 2 つ＝2 バイト。`[...assoc]` のコードポイント単位では 1 バイト少ない。
-          // `20260921-associated-printer` の節目 10 の独立点検 C-N1）
+        const assocOn = assoc !== undefined && javaTrim(assoc) !== "";
+        if (this.opts.sendConfRec !== false) table.push({ name: "IBMSENDCONFREC", value: () => ascii("YES") });
+        if (assocOn) {
+          // 関連付けプリンター（ACS の 19。表の最後）。値は各文字の下位 8 ビットをそのまま（ACS の `(byte)charAt`。ESC も挟まない）。
+          // **UTF-16 の単位ごと**（Java の `charAt`。補助面の文字はサロゲート 2 つ＝2 バイト。`20260921-associated-printer` の節目 10 の独立点検 C-N1）
           const bytes: number[] = [];
-          for (let i = 0; i < assoc.length; i++) bytes.push(assoc.charCodeAt(i) & 0xff);
-          payload.push(ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...bytes);
+          for (let i = 0; i < assoc!.length; i++) bytes.push(assoc!.charCodeAt(i) & 0xff);
+          table.push({ name: "IBMASSOCPRT", value: () => bytes });
         }
-        this.sendSb(payload);
+        this.sendSb([OPT.NEW_ENVIRON, ENV_IS, ...answerEnvSend(sb, table, userValue)]);
       };
       // **代替パスワードで送れるなら暗号化する**（ACS は自動サインオンでパスワードを平文で送らない。`AcsOnly.initBypassSignon` は
       // 常に `ssoBypassSignonEncrypted`）。サーバーのシードはホストの SEND の `USERVAR IBMRSEED` の後ろの 8 バイト
@@ -442,6 +431,59 @@ function serverSeedOf(sb: Uint8Array): Uint8Array | undefined {
     return sb.slice(i + 1 + name.length, i + 1 + name.length + 8);
   }
   return undefined;
+}
+
+/** NEW-ENVIRON の表の 1 行（`answerEnvSend`）。値は答えるたびに作る（DEVNAME は聞かれるたびに次の名前） */
+interface EnvVar {
+  name: string;
+  value: () => number[];
+}
+
+/**
+ * **ホストの SEND に、聞かれた順で答える**（ACS `NVT5250` の NEW-ENVIRON の応答。`20260927-telnet-rest`）。`sb` は OPT から。
+ * - `VAR`（名前なし）: 自動サインオンなら `VAR USER <値>`、そうでなければ `VAR` だけ。`VAR USER` も同じ。他の名前は名前だけ返す
+ * - `USERVAR`（名前なし）: 表の全部を表の順で
+ * - `USERVAR <名前>`: 表にあればその変数、無ければ名前だけ返す（値の印を付けない）。`IBMRSEED` はホストのシード 8 バイトが名前の後ろに続く
+ * IBM i の SEND は `USERVAR IBMRSEED<シード> VAR USERVAR` なので、自動サインオンなら答えは `IBMRSEED`・`USER`・表の全部（IBMRSEED が 2 回）、
+ * そうでなければ `IBMRSEED<シードの頭>` の返し・`VAR`・表の全部（IBMRSEED は無い）になる——ACS のワイヤ
+ * （`20260921-telnet-signon-vars` research F4）と同じ順。~~固定の順（DEVNAME・KBDTYPE…・USER・IBMRSEED・IBMSUBSPW）~~ だった。
+ * ⚠ ACS は名前を当てた後もその名前とシードのバイトを 1 バイトずつ読み続け、シードに 0x00・0x03 があるとそこを新しい変数として答える（原典の読み）。
+ * シードは乱数なので答えが壊れるだけの欠陥として写さない（decisions D2）
+ */
+export function answerEnvSend(sb: Uint8Array, table: readonly EnvVar[], user: number[] | undefined): number[] {
+  const out: number[] = [];
+  const isStop = (b: number | undefined) => b === undefined || b === ENV_VAR || b === ENV_USERVAR || b === ENV_VALUE || b === 0xff;
+  let i = 2; // OPT・SEND の後ろ
+  while (i < sb.length) {
+    const kind = sb[i++]!;
+    if (kind !== ENV_VAR && kind !== ENV_USERVAR) continue; // ACS も VAR・USERVAR 以外は読み飛ばす
+    const start = i;
+    while (!isStop(sb[i])) i++;
+    const name = String.fromCharCode(...sb.subarray(start, i));
+    if (kind === ENV_VAR) {
+      out.push(ENV_VAR);
+      if ((name === "" || name === "USER") && user !== undefined) out.push(...ascii("USER"), ENV_VALUE, ...user);
+      else out.push(...ascii(name));
+      continue;
+    }
+    if (name === "") {
+      for (const v of table) out.push(ENV_USERVAR, ...ascii(v.name), ENV_VALUE, ...v.value());
+      continue;
+    }
+    // IBMRSEED はホストのシード（8 バイト）が名前に続く——名前は IBMRSEED まで（ACS も表の名前の長さぶんだけ比べる。
+    // ACS は他の名前も前方一致で比べるが、IBM i の SEND では差が出ないので完全一致にした）
+    const nameEnd = i;
+    const known = name.startsWith("IBMRSEED") ? "IBMRSEED" : name;
+    // シードの中の 0x00〜0x03・0xFF で名前が切れても、8 バイトまとめて読み飛ばす（decisions D2）。
+    // ⚠ シードの無い `USERVAR IBMRSEED` を送るホストがあると後ろの項目まで飛ばす——そういうホストは未確認
+    if (known === "IBMRSEED") i = Math.min(sb.length, start + 8 + 8);
+    const hit = table.find((v) => v.name === known);
+    if (hit) out.push(ENV_USERVAR, ...ascii(hit.name), ENV_VALUE, ...hit.value());
+    // 知らない変数は名前だけ返す（ACS）。**返すのは最初の 0x00・0x01・0x03・0xFF の手前まで**——ACS の返しの読み取りもそこで止まる。
+    // IBMRSEED ならシードの頭（止まるバイトまで）も一緒に返る。止まるバイトを返すと IS の中で VAR・VALUE・USERVAR の印に読まれる（独立点検の指摘）
+    else out.push(ENV_USERVAR, ...sb.subarray(start, nameEnd));
+  }
+  return out;
 }
 
 /** Java の `String.trim()`（前後の U+0020 以下を落とす）。ACS の正規化に合わせる */

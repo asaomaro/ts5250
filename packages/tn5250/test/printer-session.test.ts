@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { IBMI_ENV_SEND } from "./helpers/fake-transport.js";
 import { PrinterSession, type SpoolReport } from "../src/session/printer-session.js";
 import type { Transport } from "../src/transport/types.js";
 
@@ -184,7 +185,7 @@ describe("PrinterSession", () => {
       transport: new FakeTransport((t) => {
         transport = t;
         // 端末タイプの問い合わせ（IAC SB 24 SEND IAC SE）と NEW-ENVIRON の問い合わせ（IAC SB 39 SEND IAC SE）
-        t.dataIn([0xff, 0xfa, 0x18, 0x01, 0xff, 0xf0, 0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0]);
+        t.dataIn([0xff, 0xfa, 0x18, 0x01, 0xff, 0xf0, 0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0]);
         t.feed(startupRecord(I902));
       })
     });
@@ -328,7 +329,7 @@ describe("respondAfter: 帳票の出力が終わるまで応答しない（`2026
 describe("装置名の答え直し（`20260921-device-name-acs`）", () => {
   const E8902 = [0xf8, 0xf9, 0xf0, 0xf2];
   const I902b = [0xc9, 0xf9, 0xf0, 0xf2];
-  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  const SEND = [0xff, 0xfa, 0x27, ...IBMI_ENV_SEND, 0xff, 0xf0];
   const devnames = (t: FakeTransport): string[] => {
     const text = String.fromCharCode(...t.sent.flatMap((d) => [...d]));
     return [...text.matchAll(/DEVNAME\x01([A-Z0-9=]*)/g)].map((m) => m[1]!);
