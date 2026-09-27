@@ -1269,6 +1269,55 @@ int main(int argc, char *argv[]) {
             tag = "";
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "CACUA") == 0 || strcmp(what, "CACFT") == 0 || strcmp(what, "CANONE") == 0) {
+        /*
+         * **SOH の CA キーの申告（欄データを送らない F キー）を CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE が捨てるか**（`20260927-clear-ca-mask`）。
+         * ACS は CU・CUA・CFT のどれも `processClearFMT` → `clearSOHPFKeyTable`。当 PJ は CU だけ捨てる。
+         *   WTD（SOH: F3 を CA・3,2 に "SOH"・5,10 に入力欄）→ CACUA＝0x20（引数 0x00）/ CACFT＝0x50 / CANONE＝何もしない →
+         *   WTD（3,2 に "AFTER"・7,10 に入力欄・IC 7,10。SOH なし）→ READ MDT。端末で AB を打って F3 を押し、READ が欄を受けたかを見る
+         */
+        static const unsigned char w1[] = {
+            0x00, 0x00,
+            0x01, 0x07, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x04,             /* SOH: F3 を CA */
+            0x11, 0x03, 0x02, 0xE2, 0xD6, 0xC8,                                /* "SOH" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A
+        };
+        static const unsigned char w2[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xC1, 0xC6, 0xE3, 0xC5, 0xD9,                    /* "AFTER" */
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x07, 0x0A
+        };
+        static const char cua[] = { 0x00 };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w1, (Q_Bin4)sizeof(w1), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 SOH)", rc, fdbk);
+        if (strcmp(what, "CACUA") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x20, cua, 1, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x20 CUA)", rc, fdbk);
+        } else if (strcmp(what, "CACFT") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x50, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x50 CFT)", rc, fdbk);
+        }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w2, (Q_Bin4)sizeof(w2), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 AFTER)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

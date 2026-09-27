@@ -551,6 +551,8 @@ export class ScreenBuffer {
   clearUnitAlternate(): boolean {
     // **窓・選択フィールド・スクロールバーは閉じる。罫線は残す**（上のコメント）
     this.closeWindowsAndSelections();
+    // SOH の CA キーの申告も捨てる（ACS `processClearFMT`。`clearUnit` の注記）
+    this.aidNoDataMask = 0;
     this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
@@ -658,9 +660,11 @@ export class ScreenBuffer {
     this.closeWindowsAndSelections();
     // **画面を消したら AID の申告も捨てる**（次の画面の SOH が来るまで「申告なし」＝送る側）。
     // 残すと、申告の無い画面で F12 の欄データを黙って落とすことになる。
-    // **CLEAR UNIT ALTERNATE（0x20）では捨てない**——あちらは SFLCTL の再描画のたびに
+    // ~~**CLEAR UNIT ALTERNATE（0x20）では捨てない**——あちらは SFLCTL の再描画のたびに
     // 何度も来る（罫線が消えた不具合と同じ経路）。申告を消すと、その画面の残りの操作で
-    // CA キーが CF キーに戻ってしまう。
+    // CA キーが CF キーに戻ってしまう。~~ → 実測の裏の無い判断だった。ACS は CU・CUA・CFT のどれでも捨てる
+    // （`processClearFMT` → `clearSOHPFKeyTable`）。実機の ACS のコアで、SOH（F3 を CA）の後に CUA か CFT が来ると F3 が欄を送った
+    // （`scripts/acs-probe/clear-ca-mask.txt`。`20260927-clear-ca-mask`）。ホストが画面を作り直すときに SOH を送り直すかは未確認
     this.aidNoDataMask = 0;
     this.resetMsgLineRow();
     this.noteClear();
@@ -879,6 +883,8 @@ export class ScreenBuffer {
   clearFormatTable(): void {
     for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
+    // SOH の CA キーの申告も捨てる（ACS `processClearFMT` → `clearSOHPFKeyTable`。CFT でも。SOH はこの後で申告し直す）
+    this.aidNoDataMask = 0;
     this.dropCursorOrders();
     this.resetMsgLineRow();
   }

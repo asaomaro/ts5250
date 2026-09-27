@@ -804,6 +804,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [ ] **READ の欄データの残り**（上の `[x]` から割った）: 未編集の DBCS 欄（SO/SI の構造を持つ欄）と G の欄は従来どおり末尾の空白を落とす・0x40 で埋める（ACS は末尾の NUL だけ落とし、ALT は途中の NUL もそのまま）。
   打鍵で書き換えた欄は値の後ろが NUL になる（ACS はホストが書いた実空白を残す。ホストから見た意味は同じ）。0x42/0x72 の `flatValue` は符号の手前が数字のときだけ畳む（ACS の平坦形式の枝も数字を見ない）。
   PC コマンドの応答（`runPcCommand`）は待たされている READ の種類を見ずに 0x52 の形で返す。
+- [x] **CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE で SOH の CA キーの申告を捨てる**（下の【まとめ】の CLEAR 系から割った）。**完了（`20260927-clear-ca-mask`）**:
+  ACS は CU・CUA・CFT のどれでも `processClearFMT` → `clearSOHPFKeyTable`。実機の ACS のコア（DSM の CACUA / CACFT / CANONE。2 回）: SOH（F3 を CA）→ CUA / CFT → 新しい入力欄に AB → F3 で
+  READ は `07 0c 33 11 07 0a c1 c2`（何も挟まなければ `07 0c 33`）。当 PJ は CU だけ捨てていた（`packages/tn5250/src/screen/buffer.ts` の `clearUnitAlternate`・`clearFormatTable`。
+  `scripts/verify-clear-ca-mask.mjs` pass=1 → 3）。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - ~~WEA タイプ 5（拡張 NLS 区間）（○）~~ → DBCS のセッションは `20260921-g-field-sosi` で済んだ（実機の DDS の G 型がこの形で送ってくる）。~~**残り**: SBCS のセッションで来たときの否定応答（ACS は 0x1005012D。当 PJ は警告して読み飛ばす）~~ → `20260927-wea-sense` で済んだ
@@ -817,8 +821,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
     - CLEAR 系の付随処理: ~~CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。~~ → R11 の調査（2026-09-22）: ACS は CU・CUA・CFT・SOH が共通の書式初期化を通り、
       キーボード・保留 READ・CA マスク・メッセージ行・ENPTUI 構造体・グリッド面を戻す。当 PJ は **CU では CA マスクを既に捨てている**（上の書き方は誤り）が、CUA・CFT では捨てず、
-      `msgLineRow` はどれでも戻さない。ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる（実測）。**CUA の CA マスクを捨てない過去の判断は実測の裏が無く、ACS 原典と逆**——
-      DSM で CUA を出させて ACS のコアと当 PJ を比べて決める。差の多くは直後の SOH が上書きするので見えにくい。画面サイズが変わっても罫線を残す差も残る。
+      ~~`msgLineRow` はどれでも戻さない~~（`20260926-wec-msgline-row` で戻す）。ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる（実測）。~~**CUA の CA マスクを捨てない過去の判断は実測の裏が無く、ACS 原典と逆**——
+      DSM で CUA を出させて ACS のコアと当 PJ を比べて決める。~~ → 下の `[x]`（`20260927-clear-ca-mask`）で CUA・CFT でも捨てるようにした。差の多くは直後の SOH が上書きするので見えにくい。画面サイズが変わっても罫線を残す差も残る。
     - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
       （0x80xx は再順序付け・0x84xx は透過の欄（ACS `Field5250` の `FCW_RESEQUENCE` / `FCW_TRANSPARENT`）。D9/72 で Unicode を申告するようになったので、
       ~~ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる~~ → **申告しないクライアントには届かない**（実機で確認。下の `[x]`）。
