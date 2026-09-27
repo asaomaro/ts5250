@@ -603,6 +603,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （全角 1 字ごと・先頭の桁・直前の位置〔行をまたぐ〕が空白・全桁ぶん端で巻き戻る）に直し、`classifyKey` に ACS の `A37`・`A39`（Alt+←/→）を足した（Ctrl+←/→ は残す）。
   単体 6 件・キー分類 1 件、旧仕様の期待 2 件を更新、mutation 9 通りのうち 6 通り検出（残り 3 つは等価変異）。**未確認**: 文字が行末から次の行へ続く画面の行頭（原典の読み）。
   ~~語 = 非空白桁の連なり・行頭は常に語頭・端で停止~~ を破棄した。Ctrl+End・Ctrl+PgDn（ACS の `C35`・`C34`）はブラウザのタブ切替と衝突するので入れない。
+- [x] **E（either）欄の半角・全角を ACS と同じく先頭でだけ切り替え、混ぜると拒否する**（【まとめ】キー編集の細部から割った）。**完了（`20260927-either-field-mode`）**:
+  ACS は欄ごとに全角の状態（`Field5250.EitherFieldDBCSOn`）を持ち続け、`PS5250.checkDBCSField` が先頭でだけ切り替える（欄を空にする）。途中で混ぜると 0060（全角の欄に半角）・0061（半角の欄に全角）。
+  状態は欄を消しても残り、ホストが欄の先頭に SO/SI を書くと立ち、同じ位置の SF では残る。実機の ACS のコア（社内機・930。`scripts/acs-probe/either-field-mode.txt` の A〜F）と同じになった:
+  当 PJ はコアの `InternalField.eitherDbcsOn`（`packages/tn5250/src/screen/buffer.ts`）をスナップショットの `Field.eitherDbcsOn` で渡し、web-ui の `eitherDbcsOn`・`eitherModeSwitch`（`ScreenGrid.vue`）が打鍵・IME・Space の全角化・Field Exit の先頭判定で同じ判定を使う。
+  単体 web-ui 12 件・コア 9 件、変異 web-ui 5・コア 6 通りすべて検出。
+- [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: 貼り付けにはこの規則を掛けていない（decisions D2）。「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）。
+  全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる。未測定）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
+  挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
@@ -611,7 +619,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・~~Ctrl+Home（罫線）・Ctrl+F11（カーソル形）~~ → 上の `20260921-default-keys-rule-cursor` で済んだ／
     ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。~~利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断~~ → 下の「930 の申告の選択」で `20260922-katakana-variant-setting` により選べるようにした（決め打ちではなく設定に）／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
     ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
-    **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。
+    ~~**E（either）欄で SBCS と DBCS を混ぜられる差**~~ → 下の `[x]`（`20260927-either-field-mode`）で済んだ。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。
     **(l) 選択を Backspace・Delete で消すときの MDT は決着**: **ACS の Backspace・Delete は選択に触れず `clearRect` に繋がらない**（GUI 層の原典で確認）。矩形選択は当 PJ も同じで、

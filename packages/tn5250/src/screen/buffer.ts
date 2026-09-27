@@ -1,4 +1,4 @@
-import { As400Error } from "@ts5250/base";
+import { As400Error, isFullWidth } from "@ts5250/base";
 import { FFW } from "../protocol/constants.js";
 import { GRID_DEFAULT } from "../protocol/wdsf-parser.js";
 import type {
@@ -110,6 +110,23 @@ export interface RestoreResult {
   readCommand?: number;
 }
 
+/**
+ * **E 欄に書いた値から、全角・半角のどちらの状態になったかを記録する**（`InternalField.eitherDbcsOn`）。
+ * 決めるのは空白でない最初の字（未編集の DBCS 欄の値は SO のセンチネルで始まる）。空白だけなら状態を変えない
+ * ——ACS は欄を空にしても状態を保つので、空の値は「切り替えた」ことを表さない
+ */
+function noteEitherMode(field: InternalField, chars: readonly string[]): void {
+  for (const ch of chars) {
+    if (ch === " ") continue;
+    if (isRawSentinel(ch)) {
+      field.eitherDbcsOn = sentinelByte(ch) === 0x0e;
+      return;
+    }
+    field.eitherDbcsOn = isFullWidth(ch);
+    return;
+  }
+}
+
 export interface InternalField {
   startAddr: number;
   length: number;
@@ -125,6 +142,13 @@ export interface InternalField {
   continued?: ContinuedPart;
   /** カーソル送り先の欄番号（FCW 0x88nn 由来。undefined = 画面順どおり） */
   cursorProgression?: number;
+  /**
+   * **E（either）欄がいま全角（DBCS）の状態か**（ACS `Field5250.EitherFieldDBCSOn`。`20260927-either-field-mode`）。
+   * 欄の中身から毎回求める値ではなく**欄ごとに持ち続ける状態**——ACS は欄を消しても SO/SI を残して DBCS のままにする。
+   * 立つのはホストが欄の先頭に SO/SI を書いたとき（`setShift`）と、全角で始まる値を書いたとき（`setFieldValue`）。
+   * 下りるのは半角で始まる値を書いたときだけ。同じ位置の欄の定義し直し（SF）では残り、CLEAR UNIT で欄の表ごと捨てたときに消える
+   */
+  eitherDbcsOn?: boolean;
 }
 
 /**
@@ -936,6 +960,9 @@ export class ScreenBuffer {
     this.noteWrite(addr);
     this.dropRetainedInRow(addr);
     this.cells[addr] = { type: "char", char: " ", charKind: kind };
+    // ホストが E 欄の先頭に SO/SI を書いたら、その欄は全角の状態になる（ACS `PS5250` の表示データの書き込み）
+    const f = this.fields.find((x) => x.startAddr === addr && x.dbcsType === "either");
+    if (f) f.eitherDbcsOn = true;
   }
 
   /** DBCS 1 文字を lead/tail の 2 桁に配置する。
@@ -984,7 +1011,10 @@ export class ScreenBuffer {
     if (length < 1 || startAddr + length > this.size) {
       throw new As400Error("PROTOCOL_ERROR", `field out of range: start=${startAddr}, len=${length}`);
     }
-    // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）
+    // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）。
+    // ただし **E 欄の全角の状態は引き継ぐ**——ACS `FFT5250.addFieldToFFT` は同じ位置の欄を作り直さず FFW を書き換えて使い回すので
+    // `EitherFieldDBCSOn` が残る（消えるのは CLEAR UNIT で欄の表ごと捨てたとき）。`20260927-either-field-mode` の review
+    const keepEither = dbcsType === "either" && this.fields.some((f) => f.startAddr === startAddr && f.eitherDbcsOn === true);
     this.fields = this.fields.filter((f) => f.startAddr !== startAddr);
     // 新しい欄が占める範囲に掛かる引き継ぎ境界は捨てる（その場所はもう別レイアウト）
     for (const e of this.retainedEnds) {
@@ -999,7 +1029,8 @@ export class ScreenBuffer {
       ...(dbcsType !== undefined ? { dbcsType } : {}),
       ...(continued !== undefined ? { continued } : {}),
       ...(cursorProgression !== undefined ? { cursorProgression } : {}),
-      ...(selfCheck !== undefined ? { selfCheck } : {})
+      ...(selfCheck !== undefined ? { selfCheck } : {}),
+      ...(keepEither ? { eitherDbcsOn: true } : {})
     });
   }
 
@@ -1159,6 +1190,7 @@ export class ScreenBuffer {
     // tn5250 `field.c` tn5250_field_set_mdt と tn5250j `ScreenField.setMDT` も同じ畳み方をする。
     const first = this.continuedRun(field)[0] ?? field;
     first.mdt = true;
+    if (field.dbcsType === "either") noteEitherMode(field, chars);
   }
 
   /**
@@ -1444,6 +1476,7 @@ export class ScreenBuffer {
       if (f.dbcsType !== undefined) field.dbcsType = f.dbcsType;
       // **申告は無いのに中身が DBCS の欄**。値は生バイトで運ぶので、表示はセルから組み立てる
       else if (this.hasDbcsStructure(f)) field.dbcsContent = true;
+      if (f.eitherDbcsOn === true) field.eitherDbcsOn = true;
       // 区間をまたぐカーソル移動・Field Exit を web-ui / MCP が組み立てるために出す
       if (f.continued !== undefined) field.continued = f.continued;
       // カーソル送り（FLDCSRPRG）。移動を組み立てるのは UI 側

@@ -1,0 +1,105 @@
+# **E（either）欄は最初の字で SBCS か DBCS かが決まり、混ぜられない**（実機の ACS のコア・社内機・930。`20260927-either-field-mode`）。
+# 原典 `PS5250`（DBCS オンの E 欄は、SO の直後でだけ半角を受けて欄を SBCS に戻す・それ以外は 0x80000060。DBCS オフの E 欄は、欄の先頭でだけ全角を受けて DBCS にする・それ以外は 0x80000061）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の `DBCSFE`。`DSCMD_PGM=KEYTST` で `scripts/build-dscmd.mjs` を回す。測った後に消す）: E (9,10) 12 桁。
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-field-mode.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/KEYTST PARM('DBCSFE')[enter]
+settle 3000
+
+# --- A: 空の欄の先頭に X、続けて あ（SBCS の欄に全角）---
+setcursor 9,10
+settle 200
+keys [eraseeof]X
+settle 200
+keys あ
+settle 300
+dump a-x-then-a
+keys [reset]
+settle 300
+
+# --- B: 空の欄の途中（9,13）に あ ---
+setcursor 9,10
+settle 200
+keys [eraseeof]
+settle 200
+setcursor 9,13
+settle 200
+keys あ
+settle 300
+dump b-dbcs-mid-empty
+keys [reset]
+settle 300
+
+# --- C: あい の後、SO の直後（9,11）に X ---
+setcursor 9,10
+settle 200
+keys [eraseeof]あい
+settle 300
+setcursor 9,11
+settle 200
+keys X
+settle 300
+dump c-sbcs-after-so
+keys [reset]
+settle 300
+
+# --- D: あい の後、2 字目（9,13）に X ---
+setcursor 9,10
+settle 200
+keys [eraseeof]あい
+settle 300
+setcursor 9,13
+settle 200
+keys X
+settle 300
+dump d-sbcs-mid-dbcs
+keys [reset]
+settle 300
+
+keys [enter]
+settle 2000
+
+# --- 2 回目の呼び出し（欄を新しくする）。E・F はレビューで求められた追加の測定 ---
+keys [home][eraseeof]CALL ${LIB}/KEYTST PARM('DBCSFE')[enter]
+settle 3000
+
+# --- E: AB の後、欄の先頭（9,10）に あ（半角の欄を全角へ切り替える）---
+setcursor 9,10
+settle 200
+keys AB
+settle 300
+setcursor 9,10
+settle 200
+keys あ
+settle 300
+dump e-dbcs-at-start
+keys [reset]
+settle 300
+
+# --- F: 全角の欄（E の続き）を SO の直後から Erase EOF で空にし、途中（9,15）に う（消しても全角のままか）---
+setcursor 9,11
+settle 200
+keys [eraseeof]
+settle 300
+dump f-erased
+setcursor 9,15
+settle 200
+keys う
+settle 300
+dump f-dbcs-mid-after-erase
+keys [reset]
+settle 300
+setcursor 9,15
+settle 200
+keys X
+settle 300
+dump f-sbcs-mid-after-erase
+keys [reset]
+settle 300
+
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
