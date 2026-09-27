@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Session5250 } from "../src/session/session.js";
-import { FakeTransport } from "./helpers/fake-transport.js";
-import { IAC, CMD, OPT, ENV_SEND, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
+import { FakeTransport, IBMI_ENV_SEND } from "./helpers/fake-transport.js";
+import { IAC, CMD, OPT, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
 
 /**
  * **930 の `katakanaVariant` が、実際に申告する CHARSET を切り替えるか**（`20260922-katakana-variant-setting`。
@@ -26,7 +26,7 @@ async function charsetSentFor(katakanaVariant?: "katakana" | "katakana-ex"): Pro
   });
   p.catch(() => {}); // 時間切れで reject する。この테스트では待たない（配線だけを見る）
   await new Promise((r) => setTimeout(r, 10));
-  t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+  t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
   const sent = t.takeSent();
   const label = ascii("CHARSET");
   const at = sent.findIndex((_, i) => label.every((b, j) => sent[i + j] === b));

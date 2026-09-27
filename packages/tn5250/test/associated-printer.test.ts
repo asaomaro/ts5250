@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { TelnetLayer } from "../src/telnet/telnet.js";
 import { Session5250 } from "../src/session/session.js";
 import type { Transport } from "../src/transport/types.js";
-import { IAC, CMD, OPT, ENV_IS, ENV_SEND, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
-import { FakeTransport } from "./helpers/fake-transport.js";
+import { IAC, CMD, OPT, ENV_IS, ENV_USERVAR, ENV_VALUE } from "../src/telnet/constants.js";
+import { FakeTransport, IBMI_ENV_SEND, IBMI_SEED } from "./helpers/fake-transport.js";
 
 /**
  * **関連付けプリンター（IBMASSOCPRT）**（`20260921-associated-printer`）。
@@ -18,7 +18,7 @@ const ENV_VAR = 0;
 function respond(opts: { associatedPrinter?: string; deviceName?: string; user?: string; password?: string }): number[] {
   const t = new FakeTransport();
   new TelnetLayer(t, { terminalType: "IBM-3179-2", ...opts });
-  t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE);
+  t.feed(IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE);
   return t.takeSent();
 }
 
@@ -26,6 +26,8 @@ describe("関連付けプリンター（IBMASSOCPRT）", () => {
   it("**応答の最後に** USERVAR IBMASSOCPRT を足す（IBMSENDCONFREC の後ろ）", () => {
     expect(respond({ deviceName: "DSP01", associatedPrinter: "PRT01" })).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
+      ENV_USERVAR, ...ascii("IBMRSEED"), ...IBMI_SEED, // SEND の順（`20260927-telnet-rest`）: IBMRSEED の返し・VAR・表の全部
+      ENV_VAR,
       ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE, ...ascii("DSP01"),
       ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...ascii("PRT01"),
@@ -36,10 +38,12 @@ describe("関連付けプリンター（IBMASSOCPRT）", () => {
   it("自動サインオンの変数よりも後ろ（ACS の変数表でも IBMSUBSPW・IBMRSEED の後ろ）", () => {
     expect(respond({ user: "U", password: "P", associatedPrinter: "PRT01" })).toEqual([
       IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_IS,
-      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
-      ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("U"),
       ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE,
+      ENV_VAR, ...ascii("USER"), ENV_VALUE, ...ascii("U"),
+      ENV_USERVAR, ...ascii("DEVNAME"), ENV_VALUE,
       ENV_USERVAR, ...ascii("IBMSUBSPW"), ENV_VALUE, ...ascii("P"),
+      ENV_USERVAR, ...ascii("IBMRSEED"), ENV_VALUE,
+      ENV_USERVAR, ...ascii("IBMSENDCONFREC"), ENV_VALUE, ...ascii("YES"),
       ENV_USERVAR, ...ascii("IBMASSOCPRT"), ENV_VALUE, ...ascii("PRT01"),
       IAC, CMD.SE
     ]);
@@ -80,7 +84,7 @@ describe("関連付けプリンター（IBMASSOCPRT）", () => {
     } as unknown as Transport;
     const p = Session5250.connect({ id: "t", transport, negotiationTimeoutMs: 100, associatedPrinter: "PRT01" }).catch(() => undefined);
     await new Promise((r) => setTimeout(r, 20));
-    onData?.(Uint8Array.from([IAC, CMD.SB, OPT.NEW_ENVIRON, ENV_SEND, IAC, CMD.SE]));
+    onData?.(Uint8Array.from([IAC, CMD.SB, OPT.NEW_ENVIRON, ...IBMI_ENV_SEND, IAC, CMD.SE]));
     await p;
     expect(String.fromCharCode(...sent)).toContain("IBMSENDCONFREC\x01YES\x03IBMASSOCPRT\x01PRT01\xff\xf0");
   });

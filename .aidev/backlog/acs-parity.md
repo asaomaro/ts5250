@@ -904,7 +904,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`test/hostserver-password-levels.test.ts`）、mutation 11 通り検出。実機はレベル 0・3 の回帰まで（レベル 4 の機械は無い）。
   節目の点検の後、**DDM も同じ置換値**にし、ACCSEC・SECCHK の SECMEC を jt400 と同じ（DES は 6・SHA は 8）にした——~~DDM はレベル 0/1 を断る~~のをやめ、
   社内機（レベル 0）でも DDM の握手が通った。属性交換のデータストリーム・レベル（10）とシード交換のクライアント属性（3）も jt400 の値にした（レベル 4 で効くかは未確認）。
-- [ ] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
+- [x] **【まとめ】telnet・自動サインオン・装置名の差**（優先度 中〜低・深さ △・IBMRSEED だけ ◐）。
+  **完了（`20260927-telnet-rest`）**: 残りの「自動サインオンの変数の順と、ACS が送るが当 PJ が送らないもの」「NEW-ENVIRON の応答方式」を ACS と同じにした——ホストの SEND の順に答える
+  （`packages/tn5250/src/telnet/telnet.ts` の `answerEnvSend`。名前の無い DEVNAME も書き、知らない変数は名前だけ返す）。PUB400 の tap で ACS のコアと IS の変数の並びが一致（自動サインオンあり・なし）。
+  交渉前のテキスト・バックアップホストは下の `[ ]` に割った。GUI のセッション名（`*`／`A`）・オプションの状態機械・起動応答の見分け方は閉じる: 前者は画面の層の表示名、状態機械は実害の無い差（ACS のワイヤと交渉の結果が同じ）、
+  見分け方は `20260927-startup-code-others` で振る舞いが同じと確かめた。
   **着手時に両側を再確認すること。**
   - ~~IBMRSEED の書式（中）~~ → 上の `20260921-telnet-signon-vars` で済んだ
     - 当 PJ: `ESC 00` の後に、エスケープしない `00` を 7 個送る（`packages/tn5250/src/telnet/telnet.ts:250-253`、主エージェントが確認）。RFC 1572 では空の VAR が 7 個と読まれる。
@@ -979,6 +983,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - telnet のオプションの状態機械（実害なし）
     - NEW-ENVIRON の応答方式（実害なし）
   （出典: `20260919-backlog-acs-triage` research N17・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
+- [ ] **telnet の交渉前のテキスト・バックアップホスト**（上の【まとめ】から割った。どちらも機能の追加）: ACS `NVT.NVT_process_outbound` はバイナリ・EOR を交渉する前に届いたデータを NVT の文字として画面に書く
+  （BS・CR・LF などを処理し、WTD を組んで 5250 の画面へ流す）。IBM i は交渉前にテキストを送らない（tap の記録）ので、測るなら手元に偽のサーバーを立てて ACS のコアと当 PJ を当てる。
+  バックアップホスト（接続できないときに次のホストへ）は当 PJ に無い（設定・接続の両方が要る）。
 - [x] **関連付けプリンター（IBMASSOCPRT）の装置名を書く方式**（上の【まとめ】telnet から割った）。`20260921-associated-printer`（PR #410）。
   表示の 5250 の設定 `associatedPrinter` を NEW-ENVIRON の**最後**に `USERVAR IBMASSOCPRT` として送る（`packages/tn5250/src/telnet/telnet.ts:357-361`。
   ACS `NVT5250` と同じく Java の `trim()` で空なら送らず、値は加工しない）。実機（社内機）で ACS のコアと当 PJ が同じワイヤ・同じ結果——
