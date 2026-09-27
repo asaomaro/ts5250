@@ -921,7 +921,7 @@ function applyWtd(
         // 「新しい画面に対する指定」として残ってしまう（PA0100R。`placeCursorAfterWtd` 参照）
         // **ヘッダより先に消す**——ACS も `processClearFMT` でメッセージ行を最下行へ戻してから申告を採る
         // （逆にすると申告したメッセージ行が消える。`20260926-wec-msgline-row` decisions D5）
-        buf.clearFormatTable();
+        buf.clearFormatTable("soh"); // 窓は残し、選択欄・スクロール・バーは捨てる（ACS `processClearFMT(true, false)`）
         buf.setHeaderData(body);
         break;
       }
