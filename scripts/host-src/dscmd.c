@@ -808,6 +808,49 @@ int main(int argc, char *argv[]) {
         inzFdbk(fdbk, sizeof(fdbk));
         rc = QsnPutOutCmd(0x23, bad, 3, 0, 0, (Q_Fdbk_T *)fdbk);
         logFdbk("QsnPutOutCmd(0x23 不正な ROLL)", rc, fdbk);
+    } else if (strcmp(what, "EARLYROLL") == 0) {
+        /*
+         * **CC2 の効き目が、同じレコードの後ろの否定応答で落ちるか**（`20260927-early-return-cc2`）。
+         * 1 本のレコード（コマンド・バッファを QsnPutBuf で 1 回で出す）に「WTD（CC2＝メッセージ待ちを点ける 0x01）＋ 不正な ROLL」を入れる。
+         * ACS `processCommand` は不正な ROLL で直ちに戻り、レコードの終わりの `processWCC2` を飛ばす（原典）——点くかを ACS のコアと当 PJ で見る。
+         * 前に点いていると区別できないので、先にメッセージ待ちを消す WTD（CC2＝0x02）を出す。
+         * レコードの後は 8 秒待つ（状態を見る間）——否定応答を受けたホストは次の入力を CPFA304・出力を CPFA303 で返すので、READ では止まれない（1 回目の実測）。
+         * 最後にメッセージ待ちを消す WTD を出して片付ける
+         */
+        static const unsigned char wtd[] = { 0x00, 0x01, 0x11, 0x05, 0x02,
+            0xC5, 0xC1, 0xD9, 0xD3, 0xE8, 0x40, 0xD9, 0xD6, 0xD3, 0xD3 };   /* CC1 0 / CC2 01 / SBA 5,2 "EARLY ROLL" */
+        static const char bad[] = { 0x05, 0x0A, 0x05 };
+        static const char off[] = { 0x00, 0x02 };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        inzFdbk(fdbk, sizeof(fdbk));
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }   /* 無いと直接出力になり 1 レコードの前提が崩れる */
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)wtd, sizeof(wtd), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=01 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x23, bad, 3, cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x23 不正な ROLL → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutBuf（1 本のレコード）", rc, fdbk);
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
+        sleep(8);
+        for (k = 0; k < 2; k++) {                                  /* 否定応答の後の出力は CPFA303 で返りうる */
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**
