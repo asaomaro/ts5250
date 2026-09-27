@@ -392,6 +392,39 @@ describe("WsConnection: 応答待ちと逃げ道", () => {
     mgr.closeAll();
   });
 
+  /**
+   * **`eitherDbcsOn` の受け渡し**（`20260927-either-field-so`）: 画面の側が E 欄の状態を添えてきたら
+   * `session.setField` の 3 引数目へそのまま渡す。無ければ**渡さない**（明示 `undefined` と省略は別物——
+   * 呼び出し記録の比較でもオーバーロードの解決でも差が出るため、無いときは 2 引数で呼ぶ）
+   */
+  it("**`eitherDbcsOn` が付いた欄は `setField` の 3 引数目へ渡す**", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await tick();
+    const entry = mgr.list()[0]!;
+    const input = entry.session.snapshot().fields.find((f) => !f.protected)!;
+    const spy = vi.spyOn(entry.session, "setField");
+    sent.length = 0;
+    await conn.handle(JSON.stringify({ type: "key", key: "Attn", fields: [{ field: input.index, value: "", eitherDbcsOn: true }] }));
+    await tick();
+    expect(spy).toHaveBeenCalledWith({ index: input.index }, "", { eitherDbcsOn: true });
+    mgr.closeAll();
+  });
+
+  it("**`eitherDbcsOn` が無ければ 2 引数で呼ぶ**（明示 undefined を送らない）", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    await tick();
+    const entry = mgr.list()[0]!;
+    const input = entry.session.snapshot().fields.find((f) => !f.protected)!;
+    const spy = vi.spyOn(entry.session, "setField");
+    sent.length = 0;
+    await conn.handle(JSON.stringify({ type: "key", key: "Attn", fields: [{ field: input.index, value: "Z" }] }));
+    await tick();
+    expect(spy).toHaveBeenCalledWith({ index: input.index }, "Z");
+    mgr.closeAll();
+  });
+
   it("施錠中の Attn では欄を書かない（逃げ道を守る。書くと KEYBOARD_LOCKED で塞がる）", async () => {
     const { conn, sent, mgr } = await waiting();
     const entry = mgr.list()[0]!;

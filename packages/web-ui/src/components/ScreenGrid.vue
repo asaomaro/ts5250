@@ -208,7 +208,12 @@ const props = withDefaults(
   }
 );
 const emit = defineEmits<{
-  (e: "edit", fieldIndex: number, value: string): void;
+  /**
+   * `eitherMeta` は E（either）欄だけ載る: 画面の側がいま知っている全角・半角の状態
+   * （`eitherDbcsOn` 関数と同じ判定）。空にした欄でもコアが正しい状態を復元できるように渡す
+   * （`20260927-either-field-so`）
+   */
+  (e: "edit", fieldIndex: number, value: string, eitherMeta?: { eitherDbcsOn: boolean }): void;
   (e: "cursor", row: number, col: number): void;
   (e: "gui-select", fieldId: number, choiceIndex: number, selected: boolean): void;
   (e: "gui-submit", fieldId: number): void;
@@ -2270,11 +2275,13 @@ function eitherDbcsOn(f: Field, e: EditState | undefined): boolean {
     if (c === " ") continue;
     return isWideForDbcs(c);
   }
-  if (eitherSwitched !== undefined && eitherSwitched.index === f.index) return eitherSwitched.on;
+  const switched = eitherSwitched.get(f.index);
+  if (switched !== undefined) return switched;
   return f.eitherDbcsOn === true;
 }
 /** この画面の中で E 欄を切り替えた結果（欄を空にしても保つため。新しい画面で捨てる——送った値からコアが引き継ぐ） */
-let eitherSwitched: { index: number; on: boolean } | undefined;
+// **欄ごとに持つ**（~~1 つだけ~~: 別の E 欄で切り替えると前の欄の状態が消え、その状態を送る値に載せるようになってから誤ったバイトを送った。`20260927-either-field-so` の独立点検）
+const eitherSwitched = new Map<number, boolean>();
 
 /**
  * **E（either）欄は最初の字で半角か全角かが決まり、混ぜられない**（ACS `PS5250.checkDBCSField`。`20260927-either-field-mode`）。
@@ -2487,7 +2494,10 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   insertMode.value = edit.insertMode;
   // **値が変わったか、字を置いたときに編集を発火**（カーソル移動だけでは MDT にしない・バグ1。字を置けば同じ値でも MDT＝`mdtKeyed`）
   const placed = takeMdtKeyed(); // 先に下ろす（値が変わった回でも印を次の同期へ持ち越さない）
-  if (logical !== baselineValue(f) || placed) emit("edit", f.index, logical);
+  if (logical !== baselineValue(f) || placed) {
+    // E 欄は画面の側の状態も添える（空にした欄でもコアが状態を復元できるように。`20260927-either-field-so`）
+    emit("edit", f.index, logical, f.dbcsType === "either" ? { eitherDbcsOn: eitherDbcsOn(f, edit) } : undefined);
+  }
   // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
   emit("cursor", s.row, s.col + (col - s.offset));
 }
@@ -2744,7 +2754,8 @@ function eraseInputKey(): void {
     // （プロンプタの `*LIBL` など）まで消えて、空白が「変更」として送られていた。
     // MDT は、ホストが立てたもの（`f.mdt`）か、利用者が打ったもの（`edits`）のどちらか
     if (!f.mdt && !props.edits.has(f.index)) continue;
-    emit("edit", f.index, "");
+    // E 欄は状態も添える——ACS は Erase Input の後も全角の状態の E 欄を `0e` で送る（実機の ACS のコア。`20260927-either-field-so`）
+    emit("edit", f.index, "", f.dbcsType === "either" ? { eitherDbcsOn: eitherDbcsOn(f, undefined) } : undefined);
     writeSlices(f, " ".repeat(visLen(f)));
   }
   // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
@@ -2826,7 +2837,7 @@ watch(
     edit = undefined;
     editFieldIndex = -1;
     fieldExitedIndex = -1;
-    eitherSwitched = undefined;
+    eitherSwitched.clear();
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -3347,7 +3358,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     }
     if (sw === "clear") {
       base = { ...base, chars: [], cursor: 0 };
-      eitherSwitched = { index: f.index, on: isWideForDbcs(ch) };
+      eitherSwitched.set(f.index, isWideForDbcs(ch));
     }
     const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
@@ -3570,7 +3581,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
     const sw = eitherPasteStep(field, eitherMode, i, ch);
     if (sw === "clear") {
       out = [];
-      eitherSwitched = { index: field.index, on: eitherMode.dbcsOn };
+      eitherSwitched.set(field.index, eitherMode.dbcsOn);
     } else if (sw !== undefined) {
       const blank = eitherMode.dbcsOn ? "\u3000" : " ";
       while (out.length <= i) out.push(blank);
@@ -3640,7 +3651,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     // 入力不可文字・E 欄の混ぜる字は呼び出し側（firstRejection）が先に弾く。ここへは来ない。先頭での切り替えは欄を空にしてから
     if (eitherPasteStep(field, eitherMode, i, ch) === "clear") {
       out = [];
-      eitherSwitched = { index: field.index, on: eitherMode.dbcsOn };
+      eitherSwitched.set(field.index, eitherMode.dbcsOn);
     }
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
@@ -3907,7 +3918,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       }
       if (sw === "clear") {
         e = { ...e, chars: [], cursor: 0 };
-        eitherSwitched = { index: f.index, on: eitherMode.dbcsOn };
+        eitherSwitched.set(f.index, eitherMode.dbcsOn);
       }
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) {
@@ -4028,7 +4039,7 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
     }
     if (sw === "clear") {
       base = { ...base, chars: [], cursor: 0 };
-      eitherSwitched = { index: f.index, on: isWideForDbcs(ch) };
+      eitherSwitched.set(f.index, isWideForDbcs(ch));
     }
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）

@@ -1345,8 +1345,12 @@ export class WsConnection {
         const write = (): void => {
           this.deps.sessions.assertWritable(id, this.user);
           const values = fields.map((f) => this.resolveField(f as WsKeyField));
-          for (const { field, value } of values) {
-            entry.session.setField(typeof field === "number" ? { index: field } : field, value);
+          for (const { field, value, eitherDbcsOn } of values) {
+            const target = typeof field === "number" ? { index: field } : field;
+            // **3 引数目は明示的に渡さない**（省略と `undefined` 明示は呼び出し記録では別物——スパイの
+            // 呼び出し比較・将来のオーバーロードの両方で差が出るため、要らないときは付けない）
+            if (eitherDbcsOn !== undefined) entry.session.setField(target, value, { eitherDbcsOn });
+            else entry.session.setField(target, value);
           }
         };
         if (flagKey) {
@@ -1411,11 +1415,17 @@ export class WsConnection {
    * 解決できないときは throw して**キー送信自体を落とす**。空文字で代替すると、
    * ホストには「パスワード欄が空」で届き、サインオン失敗の原因が分からなくなる。
    */
-  private resolveField(f: WsKeyField): { field: WsFieldRef; value: string } {
+  private resolveField(f: WsKeyField): { field: WsFieldRef; value: string; eitherDbcsOn?: boolean } {
     // **形の検査を最初に置く**（`ws-field-ref.ts`。3270 の `applyFields` と同じ並びにする
     // ——片方だけ順序が違うと、同じ関数を呼んでいても片方だけ穴が残る。ラウンド 3 で実測）
     const { field, hasValue } = parseKeyFieldShape(f);
-    if (hasValue) return { field, value: parseFieldValue((f as { value: unknown }).value) };
+    if (hasValue) {
+      const value = parseFieldValue((f as { value: unknown }).value);
+      // **形が違えば無視する**（無視して従来どおり値から推す側へ倒す——`eitherDbcsOn` は値を持たない
+      // 補助情報なので、壊れていてもキー送信自体は止めない）
+      const raw = (f as { eitherDbcsOn?: unknown }).eitherDbcsOn;
+      return { field, value, ...(typeof raw === "boolean" ? { eitherDbcsOn: raw } : {}) };
+    }
     const store = this.deps.macros;
     if (!store) {
       throw new As400Error("CONFIG_ERROR", "macro store is not configured; cannot replay macro secrets");
