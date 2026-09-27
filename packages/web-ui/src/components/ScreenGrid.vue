@@ -84,7 +84,7 @@ import {
   MSG_MANDATORY_ENTER_EXIT,
   MSG_MANDATORY_FILL
 } from "../composables/opMessages.js";
-import { localEditActionOf, numpadFieldSign, hasKeyBinding } from "../composables/useKeymap.js";
+import { localEditActionOf, numpadFieldSign, hasKeyBinding, charBindingOf } from "../composables/useKeymap.js";
 import { fitFont, GRID_PAD_X, GRID_PAD_Y, MIN_FONT_PX, MAX_FONT_PX } from "../composables/fitFont.js";
 import { fieldAt, caretInField, roundToDbcsLead, wordRangeAt } from "../composables/useCursor.js";
 import { continuedRunOf as runOf } from "../composables/continuedRun.js";
@@ -2974,7 +2974,24 @@ function editAcrossContinued(
 }
 
 /** input の keydown 制御。印字文字は上書き/挿入、編集キーは 5250 挙動、AID/移動キーはペインへ委譲 */
+/** 文字の割り当てを投げ直している最中（割り当て同士の循環で止まらなくならないため） */
+let redispatchingChar = false;
 function onInputKeydown(f: Field, ev: KeyboardEvent): void {
+  // **文字の割り当て（ACS の既定の Alt+@ = ¢ など）は、その文字の打鍵として打つ**（`20260927-key-edit-rest`）。
+  // 修飾の無い keydown を同じ欄へ投げ直し、施錠・保護欄・型・挿入・DBCS の検査を普通の打鍵と同じ経路で通す
+  const bound = charBindingOf(ev);
+  if (bound !== undefined && !ev.isComposing && !redispatchingChar) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // ペインへは戻さない（ほかの合成 keydown と同じ bubbles:false）。割り当て同士の循環は 1 段で止める
+    redispatchingChar = true;
+    try {
+      ev.target?.dispatchEvent(new KeyboardEvent("keydown", { key: bound, bubbles: false, cancelable: true }));
+    } finally {
+      redispatchingChar = false;
+    }
+    return;
+  }
   if (inhibited.value) {
     ev.preventDefault(); // 通信中・ホスト施錠中は入力プロテクト
     return;

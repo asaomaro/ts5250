@@ -8,6 +8,7 @@ import { keybindingsStore, DEFAULT_BINDINGS, BINDINGS_VERSION } from "../src/sto
 import { makeKeydownHandler } from "../src/composables/useKeymap.js";
 import { DUP_BYTE } from "../src/composables/fieldEdit.js";
 import { rawSentinel } from "@ts5250/tn5250/browser";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
 
@@ -58,6 +59,10 @@ describe("既定の割り当ての中身", () => {
       Pause: "Clear",
       "ctrl+Pause": "Print",
       "alt+F1": "Help",
+      "alt+@": "char:¢",
+      "alt+\\": "char:¬",
+      "alt+-": "char:£",
+      "alt+Pause": "TestRequest",
       "ctrl+F1": "view:sosi",
       "ctrl+F3": "view:kana"
     });
@@ -123,6 +128,44 @@ describe("欄の中で押したとき（ペイン結合）", () => {
     await key({ key: "Insert", shiftKey: true });
     expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBe(rawSentinel(DUP_BYTE).repeat(6));
     expect(w.find(".mode").text()).toBe("上書き"); // 挿入モードに切り替わっていない
+    w.unmount();
+  });
+
+  /**
+   * **Alt と記号のキーで ¢ ¬ £ を打つ**（ACS `AcsMapFunctions.MAP_5250` の `A512 = ¢`・`A92 = ¬`・`A45 = £`。`20260927-key-edit-rest`）。
+   * 普通の打鍵と同じ経路（上書き・型の検査）で欄に入り、ホストへは何も送らない
+   */
+  it("**Alt+@ は ¢・Alt+\\ は ¬・Alt+- は £ を打つ**（ACS の既定）", async () => {
+    seed([field()]);
+    const w = mountPane();
+    await nextTick();
+    input().focus();
+    input().setSelectionRange(0, 0);
+    await key({ key: "@", altKey: true });
+    await key({ key: "\\", altKey: true });
+    await key({ key: "-", altKey: true });
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBe("¢¬£");
+    expect(sentKeys()).toEqual([]);
+    w.unmount();
+  });
+
+  it("**欄の外で押すと保護域の文字として 0005 の通知**（普通の文字と同じ。黙って捨てない）", async () => {
+    seed([field()]);
+    const w = mountPane();
+    await nextTick();
+    (w.find(".pane").element as HTMLElement).focus();
+    await w.find(".pane").trigger("keydown", { key: "@", altKey: true });
+    expect(w.text()).toContain(MSG_PROTECTED);
+    w.unmount();
+  });
+
+  it("数字だけの欄では普通の打鍵と同じく型の検査で拒む", async () => {
+    seed([field({ numeric: true, digitsOnly: true })]);
+    const w = mountPane();
+    await nextTick();
+    input().focus();
+    await key({ key: "@", altKey: true });
+    expect(sessionsStore.byId.get(SID)!.edits.get(1)).toBeUndefined();
     w.unmount();
   });
 

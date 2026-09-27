@@ -621,7 +621,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   実機の ACS のコア（DSM の UNLOCKWTD / UNLOCKWTDNOIC / UNLOCKWTDCC1）で、解錠中の WTD も IC（無ければ保留の IC）へカーソルを置いた——(f) は差ではなかった（当 PJ も同じ。`scripts/verify-unlocked-wtd-cursor.mjs`）。
   溜めた AID は、ACS が READ のレコードの後に**押したときのカーソル**で送り、CC1 0x20 の WTD でも捨てなかった（`tap-proxy` のワイヤ）。当 PJ は CC1 で捨てて READ に返さず・WTD の後のカーソル（5,10）で送っていた
   （`packages/tn5250/src/session/session.ts` の `deferredAid`。`scripts/verify-wec-only-unlock.mjs` の WECONLY / WECONLYW / WECTWICE が pass）。残り（decisions D2）: 送った後の画面のカーソル・CC1 0x20 以外・明示の IC は未確認。
-- [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
+- [x] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。**完了（`20260927-key-edit-rest`）**: 残りの 4 つを実機の ACS のコアで測って揃え、ほかは閉じた——
+  Alt+@ = ¢・Alt+\ = ¬・Alt+- = £（`AcsMapFunctions.MAP_5250` の `A512`・`A92`・`A45`。~~台帳の「Alt+@ は ¬」~~ は逆）と Alt+Pause = Test Request（`A19`）を既定に・
+  (e) J 欄がホーム位置なら Home は SO の次へ移り Record Backspace を送らない（DSM の JHOME。3 回押して 5,11 のまま）・
+  (g) SOH のフラグ 0x10（CSRINPONLY）で矢印を入力欄へ寄せる（DSM の CSRINP。8 か所が 2 回とも一致）・PA1〜PA3 はカーソルと AID だけ（`07 0c 6c`・`6e`・`6b`）と Test Request（ヘッダのフラグ 0x02。施錠中は送らない）
+  （`packages/web-ui/src/stores/keybindings.ts`・`EmulatorPane.vue`・`composables/csrInputOnly.ts`・`packages/tn5250/src/session/aid-keys.ts`・`session.ts`。`scripts/verify-pa-test-keys.mjs` pass=5）。
+  入れないもの: `C17 = [newline]`（Ctrl 単独。ECL では測れず、Ctrl の組み合わせと衝突する）。未確認: E・O 欄の Home、`char:` を画面で作る口（decisions D1・D2・D4）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
     台帳に無かった。IME を切った Space で日常的に起きる）／~~(p) DBCS 欄の挿入モードの余地（J・G・E の末尾の U+3000 を空きに数えない・最終桁のカーソルで ACS は 0012。`20260921-insert-no-room` D2 の

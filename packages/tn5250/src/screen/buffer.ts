@@ -553,6 +553,7 @@ export class ScreenBuffer {
     this.closeWindowsAndSelections();
     // SOH の CA キーの申告も捨てる（ACS `processClearFMT`。`clearUnit` の注記）
     this.aidNoDataMask = 0;
+    this.cursorInputOnly = false;
     this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
@@ -615,6 +616,7 @@ export class ScreenBuffer {
      * （`sendsDataForAid()` が「申告なし＝送る」に倒れるため）。
      */
     aidNoDataMask: number;
+    cursorInputOnly: boolean;
     /** メッセージ行の行番号（ACS `Save5250Net.SaveSOH_msgline_num`）。 */
     msgLineRow: number;
     /**
@@ -666,6 +668,7 @@ export class ScreenBuffer {
     // （`processClearFMT` → `clearSOHPFKeyTable`）。実機の ACS のコアで、SOH（F3 を CA）の後に CUA か CFT が来ると F3 が欄を送った
     // （`scripts/acs-probe/clear-ca-mask.txt`。`20260927-clear-ca-mask`）。ホストが画面を作り直すときに SOH を送り直すかは未確認
     this.aidNoDataMask = 0;
+    this.cursorInputOnly = false;
     this.resetMsgLineRow();
     this.noteClear();
   }
@@ -701,6 +704,7 @@ export class ScreenBuffer {
       // ACS は `Save5250Net.saveInformation()` で CA マスク（SOH 5〜7 バイト目）と
       // メッセージ行番号も退避する。同じものを積む（`20260920-restore-screen-parity` research F1）
       aidNoDataMask: this.aidNoDataMask,
+      cursorInputOnly: this.cursorInputOnly,
       msgLineRow: this.msgLineRow,
       icAddr: this.icAddr,
       // 応答を組み立てた直後に `attachSaveContext()` が埋める（まだ作られていない）
@@ -783,6 +787,7 @@ export class ScreenBuffer {
     // CA マスクとメッセージ行番号も戻す（ACS `Save5250Net.restoreNetNulls`）。
     // 戻さないと窓・ヘルプから戻った画面で `CAnn` の申告が消える
     this.aidNoDataMask = saved.aidNoDataMask;
+    this.cursorInputOnly = saved.cursorInputOnly;
     this.msgLineRow = saved.msgLineRow;
     this.icAddr = saved.icAddr; // ACS `restoreNetNulls` の `WTD_IC_addr`・`homePos`
     // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
@@ -812,6 +817,11 @@ export class ScreenBuffer {
    * `SOH len=7 本体=[00 00 00 18 00 08 04]` → **F3 と F12 だけが立つ**（CF06 は立たない）。
    */
   private aidNoDataMask = 0;
+  /**
+   * **SOH のフラグ 0x10（DDS の `CSRINPONLY`）: 矢印のカーソルを入力欄だけに動かす**（ACS `FFT5250.setCursorMoveToInput`・`moveCursorToInput`。`20260927-key-edit-rest`）。
+   * 動かすのは画面の側（矢印の行き先を入力欄へ寄せる）。CLEAR 系・CFT・SOH で下ろし（`clearFormatTable`・`clearUnit`・`clearUnitAlternate`）、SOH で読み直す。SAVE / RESTORE で退避・復元する
+   */
+  private cursorInputOnly = false;
 
   /**
    * SOH のヘッダ本体を受け取ってマスクを更新する。**7 バイト未満なら申告なし**（0）。
@@ -821,6 +831,8 @@ export class ScreenBuffer {
     const b = Array.from(body);
     this.aidNoDataMask =
       b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
+    // 本体 1 バイト目のフラグ 0x10＝カーソルを入力欄だけに動かす（ACS の SOH 分岐は長さ 1 以上ならこのバイトを見る）
+    this.cursorInputOnly = b.length >= 1 && (b[0]! & 0x10) !== 0;
     // **本体 4 バイト目はメッセージ行の行番号**（ACS `DS5250` の SOH 分岐が
     // `data[i+5]`＝本体 4 バイト目を、1〜画面行数 の範囲でだけ `SOH_msgline_num` に採るのと同じ）。
     // `systemMessage` の寿命判定（`clearSystemMessageIfTouched`）と WRITE ERROR CODE の位置（`systemMessageArea`）に使う。
@@ -885,6 +897,7 @@ export class ScreenBuffer {
     this.fields = [];
     // SOH の CA キーの申告も捨てる（ACS `processClearFMT` → `clearSOHPFKeyTable`。CFT でも。SOH はこの後で申告し直す）
     this.aidNoDataMask = 0;
+    this.cursorInputOnly = false;
     this.dropCursorOrders();
     this.resetMsgLineRow();
   }
@@ -1508,6 +1521,7 @@ export class ScreenBuffer {
       if (this.systemMessageArea !== undefined) snap.systemMessageArea = { ...this.systemMessageArea };
     }
     // CA キー（SOH の申告）。UI の ME 検査が見る（`sendsDataForAid` と同じビットの並び）
+    if (this.cursorInputOnly) snap.cursorInputOnly = true;
     const caKeys: number[] = [];
     for (let n = 1; n <= 24; n++) if (!this.sendsDataForAid(n)) caKeys.push(n);
     if (caKeys.length > 0) snap.caKeys = caKeys;

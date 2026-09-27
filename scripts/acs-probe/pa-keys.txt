@@ -1,0 +1,21 @@
+# **PA1〜PA3 と Test Request**（実機の ACS のコア。`20260927-key-edit-rest`）。DSM の JHOME（`scripts/host-src/dscmd.c`。J 欄 5,10・SBCS 欄 7,10 → READ MDT）。
+# 7,10 に AB を打って PA1（PARM の後ろの keys を [pa2]・[pa3]・[test] に替えて 1 つずつ）。READ が受けた AID と欄（/tmp/dscmd.log の [READ]）を見る。
+# Test Request はヘッダのフラグ（`tap-proxy.mjs` のワイヤで見る。記録はパスワードを含むので読み終えたら消す）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/pa-keys.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('JHOME')[enter]
+settle 3000
+setcursor 7,10
+keys AB
+sleep 300
+keys [pa1]
+settle 3000
+dump after
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -374,6 +374,11 @@ export interface ScreenSnapshot {
    */
   caKeys?: number[];
   /**
+   * **SOH のフラグ 0x10（DDS の `CSRINPONLY`）が立っている**——矢印で入力欄の外へ出たら、ACS と同じ規則で入力欄へ寄せる
+   * （`FFT5250.moveCursorToInput`。`20260927-key-edit-rest`）。立っているときだけ付与する
+   */
+  cursorInputOnly?: boolean;
+  /**
    * **ホーム位置**（ACS `PS5250.getHomePos`。`20260921-home-record-backspace`）。IC で指された番地、
    * 無ければ先頭の非バイパス欄の先頭、欄が無ければ 1 行 1 桁。Home キーの行き先で、**既にそこにいれば
    * Record Backspace（AID 0xF8）を送る**（`processHome`）。任意にしてあるのは既存の手組み snapshot のため

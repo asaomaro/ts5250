@@ -139,3 +139,38 @@ describe("応答（0x52 / 0x42）でマスクが効く", () => {
     expect(ok).toHaveLength(3 + 5); // 欄長 5 ぶんそのまま
   });
 });
+
+/**
+ * **SOH のフラグ 0x10（DDS の CSRINPONLY）をスナップショットに載せる**（ACS `FFT5250.setCursorMoveToInput`。`20260927-key-edit-rest`）。
+ * CLEAR 系・CFT・SOH で下ろし、SOH で読み直す（ACS の `processClearFMT` と SOH 分岐）
+ */
+describe("SOH の CSRINPONLY", () => {
+  const soh = (flag: number) => [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SOH, 0x07, flag, 0, 0, 0, 0, 0, 0];
+  it("フラグ 0x10 で立ち、0 なら立たない", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from(soh(0x10)), b, codec, () => {});
+    expect(b.snapshot("s", false).cursorInputOnly).toBe(true);
+    applyDataStream(Uint8Array.from(soh(0x00)), b, codec, () => {});
+    expect(b.snapshot("s", false).cursorInputOnly).toBeUndefined();
+  });
+  it.each([
+    ["CLEAR UNIT", [ESC, COMMAND.CLEAR_UNIT]],
+    ["CLEAR UNIT ALTERNATE", [ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]],
+    ["CLEAR FORMAT TABLE", [ESC, COMMAND.CLEAR_FORMAT_TABLE]]
+  ])("%s で下りる", (_n, cmd) => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from(soh(0x10)), b, codec, () => {});
+    applyDataStream(Uint8Array.from(cmd), b, codec, () => {});
+    expect(b.snapshot("s", false).cursorInputOnly).toBeUndefined();
+  });
+
+  it("**SAVE / RESTORE で退避・復元する**（ACS は FFT ごと退避する）", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from(soh(0x10)), b, codec, () => {});
+    b.saveScreen();
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT]), b, codec, () => {});
+    expect(b.snapshot("s", false).cursorInputOnly).toBeUndefined();
+    b.restoreScreen();
+    expect(b.snapshot("s", false).cursorInputOnly).toBe(true);
+  });
+});

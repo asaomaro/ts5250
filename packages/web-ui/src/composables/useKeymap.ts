@@ -6,8 +6,16 @@ import {
   isMacroBinding,
   macroIdOf,
   isLocalBinding,
-  localActionOf
+  localActionOf,
+  isCharBinding,
+  charOf
 } from "../stores/keybindings.js";
+
+/** **このキーに文字の割り当てがあればその文字**（`char:` の割当。欄の打鍵として打つ——`ScreenGrid` の `onInputKeydown`） */
+export function charBindingOf(ev: { key: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): string | undefined {
+  const custom = keybindingsStore.resolve(ev);
+  return custom !== undefined && isCharBinding(custom) ? charOf(custom) : undefined;
+}
 
 /**
  * キー設定から割り当てられる**ローカル編集キー**（5250 の端末内操作。ホストへは送らない）。
@@ -183,7 +191,7 @@ export function isEscapeAidEvent(ev: {
   const custom = keybindingsStore.resolve(ev);
   if (custom !== undefined) {
     // ローカル処理（表示切替・マクロ・編集キー）はホストへ行かないので対象外
-    if (isViewBinding(custom) || isMacroBinding(custom) || isLocalBinding(custom)) return false;
+    if (isViewBinding(custom) || isMacroBinding(custom) || isLocalBinding(custom) || isCharBinding(custom)) return false;
     return isFlag(custom);
   }
   const { aid } = classifyKey(ev);
@@ -271,6 +279,11 @@ export function makeKeydownHandler(h: KeymapHandlers): (ev: KeyboardEvent) => vo
     // `local:*`（ローカル編集キー）は**ホストへ送らない**ローカル処理。
     const custom = keybindingsStore.resolve(ev);
     if (custom) {
+      // 文字の割り当ては欄が打つ（`ScreenGrid`）。欄の外で押されたときは何もしない（ブラウザの既定も止める）
+      if (isCharBinding(custom)) {
+        ev.preventDefault();
+        return;
+      }
       // 送れない AID への割り当ては何もしない（ブラウザの既定も止めない。割り当てが無かったときと同じ）
       if (!isViewBinding(custom) && !isMacroBinding(custom) && !isLocalBinding(custom) && h.canSendAid?.(custom) === false) return;
       ev.preventDefault();

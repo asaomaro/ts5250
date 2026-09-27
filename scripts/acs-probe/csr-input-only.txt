@@ -1,0 +1,38 @@
+# **SOH のフラグ 0x10（DDS の CSRINPONLY）で、矢印のカーソルが入力欄だけに動くか**（実機の ACS のコア。`20260927-key-edit-rest`）。DSM の CSRINP / CSRFREE（対照）。
+# 入力欄 5,10・5,40・9,20（6 桁）・IC 5,10。右 ×6（欄の外へ出る）→ 左 → 下 → 上 → 右 ×2（行の外）と押し、各回の dump のカーソルを見る。**1 モードずつ**（PARM を替える）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/csr-input-only.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CSRINP')[enter]
+settle 3000
+dump start
+keys [right][right][right][right][right]
+settle 300
+dump r5
+keys [right]
+settle 300
+dump r6
+keys [left]
+settle 300
+dump l1
+keys [down]
+settle 300
+dump d1
+keys [up]
+settle 300
+dump u1
+setcursor 9,25
+keys [right]
+settle 300
+dump r-endrow
+setcursor 5,26
+keys [down]
+settle 300
+dump d-mid
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

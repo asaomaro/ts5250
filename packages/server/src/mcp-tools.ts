@@ -98,8 +98,12 @@ const AID_KEYS = [
   "Help",
   "Print",
   "RecordBackspace",
+  "PA1",
+  "PA2",
+  "PA3",
   "SysReq",
   "Attn",
+  "TestRequest",
 ] as const;
 
 // ---- 共通スキーマ ----

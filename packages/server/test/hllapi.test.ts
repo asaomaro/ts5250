@@ -312,8 +312,8 @@ describe("キー送信", () => {
 
   it("**写せないキーがあれば何も送らずに rc=20**", async () => {
     const { deps, sendAid } = await connected();
-    // `@x` は PA1（5250 に無い）。前に @E があっても**送らない**
-    expect((await call(deps, HF.SEND_KEY, { data: "@E@x" })).rc).toBe(HRC.UNDEFINED_COMBINATION);
+    // `@Q` は写せない（~~`@x`＝PA1 は 5250 に無い~~——PA1 は送れるようにした。`20260927-key-edit-rest`）。前に @E があっても**送らない**
+    expect((await call(deps, HF.SEND_KEY, { data: "@E@Q" })).rc).toBe(HRC.UNDEFINED_COMBINATION);
     expect(sendAid).not.toHaveBeenCalled();
   });
 

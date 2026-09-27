@@ -11,8 +11,14 @@ export type AidKey =
   | "Print"
   /** Record Backspace（AID 0xF8）。ACS はホーム位置で Home を押すと送る（`PS5250.processHome`） */
   | "RecordBackspace"
+  /** PA1〜PA3（AID 0x6C・0x6E・0x6B）。ACS は欄データを付けずにカーソルと AID だけを送る（実機の ACS のコア。`20260927-key-edit-rest`） */
+  | "PA1"
+  | "PA2"
+  | "PA3"
   | "SysReq"
-  | "Attn";
+  | "Attn"
+  /** Test Request（ヘッダのフラグ 0x02・オペコード 0・データ無し。ACS `sendAid` の 61。実機の ACS のワイヤ `… 04 02 00 00`） */
+  | "TestRequest";
 
 const map = new Map<string, number>([
   ["Enter", AID.ENTER],
@@ -21,7 +27,10 @@ const map = new Map<string, number>([
   ["Clear", AID.CLEAR],
   ["Help", AID.HELP],
   ["Print", AID.PRINT],
-  ["RecordBackspace", AID.RECORD_BACKSPACE]
+  ["RecordBackspace", AID.RECORD_BACKSPACE],
+  ["PA1", AID.PA1],
+  ["PA2", AID.PA2],
+  ["PA3", AID.PA3]
 ]);
 for (let i = 1; i <= 12; i++) map.set(`F${i}`, AID.F1 + (i - 1));
 for (let i = 13; i <= 24; i++) map.set(`F${i}`, AID.F13 + (i - 13));

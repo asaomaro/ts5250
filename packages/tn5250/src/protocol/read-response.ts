@@ -162,12 +162,12 @@ function functionKeyNumber(aid: number): number | undefined {
 
 /**
  * **欄データを載せない AID**（ACS `DS5250.sendAid`。`20260921-home-record-backspace`）。
- * Clear・Help・Print・Record Backspace は**カーソルと AID だけ**を送る——待たされている Read の種類にも、
- * MDT の立った欄の有無にもよらない（ACS は PA1〜3 も同じ扱いだが、当 PJ は PA キーを送れないので載せない）。
+ * Clear・Help・Print・Record Backspace・PA1〜PA3 は**カーソルと AID だけ**を送る——待たされている Read の種類にも、
+ * MDT の立った欄の有無にもよらない（PA1〜PA3 は実機の ACS のコアでも `07 0c 6c` などの 3 バイト。`20260927-key-edit-rest`）。
  * 実機で ACS のワイヤを採った: コマンド行に `ABC` を打って Help → `… 03 14 0a f3` の 13 バイト（欄データ無し）。
  * ~~以前は他の AID と同じく MDT の欄を載せていた~~（台帳「Clear / Help / Print / PA で欄データを送る」）。
  */
-export const NO_DATA_AIDS: ReadonlySet<number> = new Set([AID.CLEAR, AID.HELP, AID.PRINT, AID.RECORD_BACKSPACE]);
+export const NO_DATA_AIDS: ReadonlySet<number> = new Set([AID.CLEAR, AID.HELP, AID.PRINT, AID.RECORD_BACKSPACE, AID.PA1, AID.PA2, AID.PA3]);
 
 /**
  * **その AID で欄データを送ってよいか**（SOH の申告。`ScreenBuffer.sendsDataForAid`）。

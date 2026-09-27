@@ -10,6 +10,8 @@ import {
   macroIdOf,
   isLocalBinding,
   localActionOf,
+  isCharBinding,
+  charOf,
   type BindingTarget
 } from "../stores/keybindings.js";
 import { LOCAL_EDIT_ACTIONS, type LocalEditAction } from "../composables/useKeymap.js";
@@ -21,7 +23,7 @@ defineEmits<{ (e: "close"): void }>();
 const AID_KEYS: AidKey[] = [
   "Enter", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
   "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
-  "PageUp", "PageDown", "Clear", "Help", "Print", "RecordBackspace", "SysReq", "Attn"
+  "PageUp", "PageDown", "Clear", "Help", "Print", "RecordBackspace", "PA1", "PA2", "PA3", "SysReq", "Attn", "TestRequest"
 ];
 
 const capturing = ref(false);
@@ -47,6 +49,7 @@ function targetLabel(t: string): string {
     return m ? `マクロ: ${m.name}（再生）` : "マクロ: 削除済み";
   }
   if (isLocalBinding(t)) return LOCAL_EDIT_LABEL[localActionOf(t)] ?? t;
+  if (isCharBinding(t)) return `文字「${charOf(t)}」を打つ`;
   if (!isViewBinding(t)) return t;
   const item = viewItem(viewKeyOf(t));
   if (!item) return t;

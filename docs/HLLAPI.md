@@ -262,11 +262,12 @@ f = 12: Call hllapi(f, d, l, r)   ' Release
 | `@E` Enter | `@C` Clear | `@P` Print | `@@` 文字の `@` |
 | `@1`〜`@9` F1〜F9 | `@a`〜`@o` F10〜F24 | `@A@H` SysReq | `@A@Q` Attn |
 | `@T` Tab | `@B` BackTab | `@0` Home | `@U/@V/@L/@Z` カーソル |
+| `@x/@y/@z` PA1〜PA3 | `@A@C` Test Request | | |
 
 ### 写せないキーは `rc=20`
 
-ニーモニックの表は **3270 由来**で、`PA1`〜`PA3`（`@x`/`@y`/`@z`）のように
-**5250 に無いキー**が含まれる。これらは `HRC_UNDEFINED_COMBINATION`(20) で断る。
+ニーモニックの表は **3270 由来**で、**5250 に写せないキー**が含まれる。これらは `HRC_UNDEFINED_COMBINATION`(20) で断る。
+~~`PA1`〜`PA3`（`@x`/`@y`/`@z`）は 5250 に無い~~ → 5250 にも PA1〜PA3（AID 0x6C・0x6E・0x6B）があるので送る。`@A@C`（Test）は Test Request を送る（`20260927-key-edit-rest`）。
 
 **写せないキーが 1 つでも混ざっていたら、何も送らずに断る**——
 一部だけ送ると画面が半端な状態で残り、呼び出し側から復旧できないため。

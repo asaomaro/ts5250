@@ -589,7 +589,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     ) {
       this.buf.cursorAddr = this.buf.addrOf(opts.cursor.row, opts.cursor.col);
     }
-    if (key !== "Attn" && key !== "SysReq" && !this.readOutstanding) {
+    if (key !== "Attn" && key !== "SysReq" && key !== "TestRequest" && !this.readOutstanding) {
       // READ がまだ出ていない（0x21 だけのレコードで施錠が解けた後）: 溜めて、次の READ で送る（`deferredAid`）。待ちの形は送ったときと同じ
       // **カーソルは押したときの位置で送る**（実機の ACS のコア: 同じレコードで READ の前の WTD が 11,2 に書いても〔IC は無く、前の画面の保留 IC は 5,10〕、READ は押したときの 5,12 を受けた。
       // 明示の IC があるレコードは未確認。送った後の画面のカーソルは当 PJ だけ動く——decisions D2
@@ -597,6 +597,9 @@ export class Session5250 extends Emitter<SessionEvents> {
       this.deferredAid = { key, cursor: this.buf.rowColOf(this.buf.cursorAddr), ...(opts.sysReqText !== undefined ? { sysReqText: opts.sysReqText } : {}) };
       return this.waitAid(opts.timeoutMs);
     }
+    // **Test Request はフラグのレコードだが、施錠中は送らず（上の `assertReady`）、送ったら施錠して応答を待つ**（ACS `keyDown` が施錠中に通すのは Attn・SysReq ほかだけ・
+    // `sendAid` は Test でも `lockKeyboard`。溜めた AID〔`pending_aid`〕にもしない——61 は除外。`20260927-key-edit-rest` の独立点検）。ホストは CANCEL INVITE と WEC で応える
+    if (key === "TestRequest") return this.sendAndWait(record, opts.timeoutMs);
     if (key === "Attn" || key === "SysReq") {
       // 溜めた AID は捨てる（Attn の窓の READ に古い Enter を送らないため。ACS がどうするかは未確認——decisions D2）
       this.deferredAid = undefined;
@@ -636,6 +639,8 @@ export class Session5250 extends Emitter<SessionEvents> {
       return buildFlagRecord({ srq: true }, enc.bytes);
     }
     if (key === "Attn") return buildFlagRecord({ atn: true });
+    // Test Request はヘッダのフラグ 0x02 だけ（ACS のワイヤ `00 0a 12 a0 00 00 04 02 00 00`。ホストは CANCEL INVITE を返す）
+    if (key === "TestRequest") return buildFlagRecord({ trq: true });
     const aid = aidCodeOf(key);
     if (aid === undefined) {
       // **キー名を反射しない**——クライアントが送った任意文字列がそのままブラウザへ返る形だった
