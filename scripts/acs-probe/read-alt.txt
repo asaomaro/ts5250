@@ -1,0 +1,19 @@
+# **ALT の読み取り（0x83・0x82）と 0x52 の欄データ**（実機の ACS のコア。`20260927-read-alt-raw`）。DSM の試験プログラム（`scripts/host-src/dscmd.c` の READALT）。
+# MDT を立てた 6 欄（末尾の実空白・途中の NUL・符号付きの負と正・符号の手前が英字と空白）を描き、0x83 → 0x82（Enter）→ 0x52（Enter）の順に読む。ACS が送ったバイト列はホスト側のログ（/tmp/dscmd.log の QsnRtvDta）に残る。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/read-alt.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READALT')[enter]
+sleep 5000
+dump before-82
+keys [enter]
+sleep 3000
+dump before-52
+keys [enter]
+settle 3000
+dump after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

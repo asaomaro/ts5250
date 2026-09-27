@@ -9,6 +9,7 @@
  *     QsnReadInp                → READ INPUT FIELDS(0x42)
  *     QsnReadImm                → READ IMMEDIATE(0x72)
  *     QsnReadMDTImmAlt          → READ MDT IMMEDIATE ALT(0x83)
+ *     QsnReadMDTAlt             → READ MDT ALT(0x82)
  *     QsnPutOutCmd(cmd,…)       → 任意の出力コマンド（CLEAR UNIT ALTERNATE(0x20) 等）
  *
  * 呼び出し: CALL TESTLIB/DSCMD PARM('ROLLUP')
@@ -1154,6 +1155,69 @@ int main(int argc, char *argv[]) {
             rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
             logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
             if (rc == 0) break;
+        }
+    } else if (strcmp(what, "READALT") == 0) {
+        /*
+         * **ALT の読み取り（0x83・0x82）と 0x52 で、欄データの加工がどう違うか**（`20260927-read-alt-raw`）。
+         * MDT を立てた 4 欄を描いてから 0x83 → 0x82（Enter 待ち）→ 0x52（Enter 待ち）の順に読み、ホストが受け取ったバイト列を残す:
+         *   (5,10) 長さ10 "AB C" ＋ 実空白 6 / (7,10) 長さ10 "A" NUL "B" ＋ NUL 7 /
+         *   (9,10) 長さ6 符号付き "  012-" / (11,10) 長さ6 符号付き "   12 " /
+         *   (13,10) 長さ6 符号付き "    A-" / (15,10) 長さ6 符号付き "     -"（符号の手前が数字でないとき。ACS の原典は手前を見ずにゾーンを 0xD にする）
+         * 加工の違い（符号・NUL・末尾の実空白）をどれか 1 つの欄が必ず踏むように選んだ。
+         */
+        static const unsigned char wtd[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xD9, 0xC5, 0xC1, 0xC4, 0xC1, 0xD3, 0xE3,         /* "READALT" */
+            0x11, 0x05, 0x09, 0x1D, 0x48, 0x00, 0x24, 0x00, 0x0A,
+            0xC1, 0xC2, 0x40, 0xC3, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+            0x11, 0x07, 0x09, 0x1D, 0x48, 0x00, 0x24, 0x00, 0x0A,
+            0xC1, 0x00, 0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x09, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0xF0, 0xF1, 0xF2, 0x60,
+            0x11, 0x0B, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0xF1, 0xF2, 0x40,
+            0x11, 0x0D, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0x40, 0xC1, 0x60,
+            0x11, 0x0F, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0x40, 0x40, 0x60,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)wtd, (Q_Bin4)sizeof(wtd), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 試験画面)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(4096, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtInpBuf", (Q_Bin4)buf, fdbk);
+        if (buf != 0) {
+            tag = "[0x83] ";
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDTImmAlt(&bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDTImmAlt", rc, fdbk);
+            logInpBuf(buf);
+
+            tag = "[0x82] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            QsnClrBuf((Q_Handle_T)buf, (Q_Fdbk_T *)fdbk);
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDTAlt", rc, fdbk);
+            logInpBuf(buf);
+
+            tag = "[0x52] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            QsnClrBuf((Q_Handle_T)buf, (Q_Fdbk_T *)fdbk);
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
         }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*

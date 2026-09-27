@@ -190,29 +190,30 @@ describe("セッションは 0x42 で待たされたら平坦形式で返す", (
   }
 
   /** 欄長 6 の入力欄を 1 つ描いて、指定の READ で待たせるレコード */
-  function screenThen(readCmd: number): Uint8Array {
+  function screenThen(readCmd: number, data: readonly number[] = []): Uint8Array {
     const w = new ByteWriter();
     w.u8(ESC).u8(COMMAND.CLEAR_UNIT);
     w.u8(ESC).u8(COMMAND.WRITE_TO_DISPLAY).u8(0x00).u8(0x00);
     w.u8(ORDER.SBA).u8(5).u8(9);
-    w.u8(ORDER.SF).u16(FFW.ID_VALUE).u8(0x20).u16(6); // (5,9) 属性 → (5,10) から 6 桁
+    w.u8(ORDER.SF).u16(FFW.ID_VALUE | (data.length > 0 ? FFW.MDT : 0)).u8(0x20).u16(6); // (5,9) 属性 → (5,10) から 6 桁
+    for (const b of data) w.u8(b); // ホストが書く欄の中身（MDT を立てて送る）
     w.u8(ORDER.IC).u8(5).u8(10);
     w.u8(ESC).u8(readCmd).u8(0x00).u8(0x00);
     return buildRecord(OPCODE.PUT_GET, w.toUint8Array());
   }
 
-  async function run(readCmd: number): Promise<number[]> {
+  async function run(readCmd: number, data: readonly number[] = []): Promise<number[]> {
     const entries: TraceEntry[] = [
       ...parseTraceJsonl(readFileSync(join(here, "fixtures", "pub400-signon.jsonl"), "utf8")),
       { ts: "t", dir: "tx", masked: true, len: 0 },
-      rxRecord(screenThen(readCmd))
+      rxRecord(screenThen(readCmd, data))
     ];
     const transport = new ReplayTransport(entries);
     const session = await Session5250.connect({ transport, id: "read-cmd" });
     // サインオン画面 → 試験画面へ
     await session.sendAid("Enter", { timeoutMs: 500 });
     const f = session.snapshot().fields.find((x) => !x.protected);
-    session.setField({ index: f!.index }, "AB");
+    if (data.length === 0) session.setField({ index: f!.index }, "AB");
     void session.sendAid("Enter", { cursor: { row: 5, col: 10 }, timeoutMs: 30 });
     const sent = transport.sentChunks.at(-1) as Uint8Array;
     const raw = [...sent].slice(0, -2); // 末尾の IAC EOR を外す
@@ -225,9 +226,20 @@ describe("セッションは 0x42 で待たされたら平坦形式で返す", (
     expect(d.slice(3)).toEqual([...codec.encode("AB    ").bytes]);
   });
 
-  it("0x52 → 従来どおり **SBA 付き・末尾を落とす**", async () => {
+  it("0x52 → 従来どおり **SBA 付き・末尾（の NUL）を落とす**", async () => {
     const d = await run(COMMAND.READ_MDT_FIELDS);
     expect(d.slice(0, 3)).toEqual([5, 10, AID.ENTER]);
     expect(d.slice(3)).toEqual([ORDER.SBA, 5, 10, ...codec.encode("AB").bytes]);
+  });
+
+  /** ホストが `A` NUL `B` を書いた欄（`20260927-read-alt-raw`。ACS は 0x52 で途中の NUL を空白に、0x82 ではそのまま送る） */
+  const withNul = [0xc1, 0x00, 0xc2];
+  it("0x82 → **欄データを加工しない**（途中の NUL は 0x00 のまま）", async () => {
+    const d = await run(COMMAND.READ_MDT_FIELDS_ALT, withNul);
+    expect(d.slice(3)).toEqual([ORDER.SBA, 5, 10, 0xc1, 0x00, 0xc2]);
+  });
+  it("0x52 → 途中の NUL は空白（対照）", async () => {
+    const d = await run(COMMAND.READ_MDT_FIELDS, withNul);
+    expect(d.slice(3)).toEqual([ORDER.SBA, 5, 10, 0xc1, 0x40, 0xc2]);
   });
 });

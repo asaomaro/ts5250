@@ -788,6 +788,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   FCW 0x90xx も WDSF 0x54 も来ない。当 PJ の画面は `AB あい` と正しく出た（ACS のコアも同じ）。D9/72 は ACS も設定に関係なく無条件に応答し、Unicode の欄を受ける条件は
   Query Reply の申告（ACS の既定 OFF・当 PJ も未申告）。**当 PJ が Unicode を申告しない限り実装は要らない**（申告するなら FCW の読み・WDSF 0x54・READ 応答・web-ui の編集・Query Reply の宣言が要る。
   設計案は R11 の報告）。`scripts/build-unitest.mjs`・`scripts/diag-unifield.mjs`・`scripts/acs-probe/unicode-field.txt`（試験オブジェクトは片付けた）。
+- [x] **READ の欄データの加工（0x52・0x82・0x83）を ACS と同じにする**（下の【まとめ】から割った）。**完了（`20260927-read-alt-raw`）**:
+  ACS `DS5250.sendAll` は末尾の NUL だけを落とし（実空白は送る）、0x52 は途中の NUL を 0x40 にして符号付き数値を畳み（符号の桁が NUL でないときだけ・手前の桁が数字かは見ない）、
+  ALT（0x82・0x83）はそのまま送る。実機の ACS のコア（DSM の READALT・6 欄）: `AB C`＋実空白 6 は 3 つとも 10 バイト、`A` NUL `B` は 0x52 `c140c2`・ALT `c100c2`、`  012-` は 0x52 `4040f0f1d2`・ALT `4040f0f1f260`、
+  `     -` は 0x52 `40404040d0`。当 PJ は 3 つとも末尾の空白を落とし・NUL を空白にし・符号を畳んでいた（`scripts/verify-read-alt.mjs` pass=0 → 3）。
+  `packages/tn5250/src/protocol/read-response.ts` の `FieldDataForm`・`sendValue`（桁ごとに `cellAt` で NUL を見る）・`buildReadMdtAltResponse`、セッションは 0x82 で待たされたらそれで返す。
+- [ ] **READ の欄データの残り**（上の `[x]` から割った）: 未編集の DBCS 欄（SO/SI の構造を持つ欄）と G の欄は従来どおり末尾の空白を落とす・0x40 で埋める（ACS は末尾の NUL だけ落とし、ALT は途中の NUL もそのまま）。
+  打鍵で書き換えた欄は値の後ろが NUL になる（ACS はホストが書いた実空白を残す。ホストから見た意味は同じ）。0x42/0x72 の `flatValue` は符号の手前が数字のときだけ畳む（ACS の平坦形式の枝も数字を見ない）。
+  PC コマンドの応答（`runPcCommand`）は待たされている READ の種類を見ずに 0x52 の形で返す。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
   - ~~WEA タイプ 5（拡張 NLS 区間）（○）~~ → DBCS のセッションは `20260921-g-field-sosi` で済んだ（実機の DDS の G 型がこの形で送ってくる）。**残り**: SBCS のセッションで来たときの否定応答（ACS は 0x1005012D。当 PJ は警告して読み飛ばす）
@@ -809,9 +817,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       R11: WDSF 0x52＝窓のカーソル制限の解除、0x54＝欄へのデータ書き込み（EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）、0x55＝マウスボタン→AID の定義。どれも応答は無い（誤りのときだけ否定応答）。
       当 PJ は警告して無視（SF の長さは正しく飛ばす）。リポジトリ内の実機の記録に 0 件。FCW 0x80xx・0x84xx は READ 応答の欄の並び・書式にしか効かず、Tab・表示・打鍵には効かない（実例 0 件）。）。
     - ~~負応答を返さない~~（上の `20260921-negative-responses` で主な 4 つを入れた。残りは上の「否定応答の残り」）。
-    - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → R11 の調査: **ACS は 0x82/0x83（ALT）では NUL も符号も加工しない**（加工するのは 0x52 と 0x42/0x72）。
-      当 PJ は ALT も 0x52 と同じに加工する（上の書き方は逆だった）。ACS は末尾の NUL だけ落とし、実空白は送る（当 PJ は落とす）。ホストが ALT を使う画面（DSM の `QsnReadMDTAlt` 系）だけの差。
-      未測定（DSM で測ってから。実装は小さい）。
+    - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → 下の `[x]`（`20260927-read-alt-raw`）で済んだ。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
 - [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:

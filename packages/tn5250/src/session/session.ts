@@ -4,6 +4,7 @@ import { parseRecord, buildNegativeResponse, buildRecord } from "../protocol/gds
 import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
+  buildReadMdtAltResponse,
   buildReadInputFieldsResponse,
   buildReadImmediateResponse,
   buildReadMdtImmediateAltResponse,
@@ -622,10 +623,13 @@ export class Session5250 extends Emitter<SessionEvents> {
     }
     // **待たされている Read の種類で形式が変わる。** `0x42`（READ INPUT FIELDS）だけは
     // SBA 無し・全欄・欄長そのままの平坦形式（`buildReadInputFieldsResponse` の JSDoc）。
+    // `0x82`（READ MDT FIELDS ALT）は形は 0x52 と同じで、欄データを加工しない（`buildReadMdtAltResponse`）
     const build =
       this.readCommand === COMMAND.READ_INPUT_FIELDS
         ? buildReadInputFieldsResponse
-        : buildReadMdtResponse;
+        : this.readCommand === COMMAND.READ_MDT_FIELDS_ALT
+          ? buildReadMdtAltResponse
+          : buildReadMdtResponse;
     const { record, substituted } = build(this.buf, this.codec, aid, cursor);
     if (substituted > 0) this.warn(`${substituted} character(s) substituted on send`);
     return record;

@@ -60,18 +60,26 @@ describe("符号付き数値欄の送信変換", () => {
     expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "    12 ")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2]);
   });
 
-  it("符号桁だけの欄（値なし）は何も送らない", () => {
-    expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "      -")).toEqual([]);
+  it("~~符号桁だけの欄（値なし）は何も送らない~~ → **ACS は手前の桁を見ずにゾーンを 0xD にする**（`20260927-read-alt-raw`）", () => {
+    // ACS `DS5250.sendAll` は符号の桁が `-` なら手前の桁を `(b & 0x0F) | 0xD0` にする。手前が空白なら 0xD0。
+    // 実機の ACS のコアで確かめた: ホストが書いた `     -` は `40 40 40 40 d0`・`    A-` は `40 40 40 40 d1`（`scripts/acs-probe/read-alt.txt` の欄 5・6）
+    // 打った空白は実空白なので落とさない（落とすのは NUL＝空のセルだけ）
+    expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "      -")).toEqual([0x40, 0x40, 0x40, 0x40, 0x40, 0xd0]);
   });
 
-  it("符号桁の手前が数字でなければゾーンを変えない（符号桁は落とす）", () => {
-    // "     A-" → 手前が英字なのでゾーン加工はしない
-    expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "     A-")).toEqual([0x40, 0x40, 0x40, 0x40, 0x40, 0xc1]);
+  it("~~符号桁の手前が数字でなければゾーンを変えない~~ → **手前が英字でもゾーンを 0xD にする**（ACS。符号桁は落とす）", () => {
+    expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "     A-")).toEqual([0x40, 0x40, 0x40, 0x40, 0x40, 0xd1]);
+  });
+
+  it("**符号の桁が NUL（空のセル）なら符号を畳まない**（ACS は末尾の NUL を落とした後で長さが欄の長さのときだけ畳む）", () => {
+    // 値 "    12" は 6 桁。7 桁目（符号の桁）は空のセル＝NUL なので落ちて、残りはそのまま
+    expect(respond(FFW.SHIFT_SIGNED_NUMERIC, "    12")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2]);
   });
 
   it("**符号付きでない数値欄は 1 バイトも変わらない**（回帰）", () => {
-    // numeric-only。符号桁という概念が無いので末尾空白を落とすだけ
-    expect(respond(FFW.SHIFT_NUMERIC_ONLY, "    12 ")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2]);
+    // numeric-only。符号桁という概念が無い。~~末尾空白を落とすだけ~~ → 打った空白（実空白）は送る。落とすのは NUL だけ（ACS）
+    expect(respond(FFW.SHIFT_NUMERIC_ONLY, "    12 ")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2, 0x40]);
+    expect(respond(FFW.SHIFT_NUMERIC_ONLY, "    12")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2]);
     // 末尾が `-` でも触らない（そのまま送る）
     expect(respond(FFW.SHIFT_NUMERIC_ONLY, "    12-")).toEqual([0x40, 0x40, 0x40, 0x40, 0xf1, 0xf2, 0x60]);
   });
