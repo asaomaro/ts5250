@@ -364,9 +364,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ: `packages/tn5250/src/session/printer-session.ts:183-185` は、opcode 2 なら何もせず return し、それ以外は即座に `PRINT_COMPLETE` を返す（主エージェントが確認）。テスト `printer-session.test.ts:82-84` が即時の応答を固定している。
   再現: 印刷中に HLDSPLF *IMMED / DLTSPLF / ENDWTR *IMMED を行う。PDF の出力先を書き込み不可にして送る。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N15）
-- [ ] **プリンター: 応答を止めている間にホストが帳票を取り消したとき**（優先度 低・`20260921-printer-hold-response` の残り）。
-  ENDWTR *IMMED・HLDSPLF *IMMED などで止めている間にホストが取り消したときの動き。PUB400 では書き出しプログラムを止める権限が無く（CPF3330 系）未確認。
-  止めている間に 15 分のアイドルで接続が黙って死ぬか（`measure-printer-idle-drop`）も未確認。
+- [x] **プリンター: 応答を止めている間にホストが帳票を取り消したとき**（優先度 低・`20260921-printer-hold-response` の残り）。
+  **完了（`20260927-printer-hold-cancel`・PR #423）**: 社内機で測った（`scripts/verify-printer-hold-cancel.mjs`。~~PUB400 では権限が無く未確認~~ → 社内機では書き出しプログラムを止められた）。
+  - 止めている間の HLDSPLF *IMMED → スプールは直ちに HELD、ENDWTR *IMMED → READY。ホストは応答を待たずに CLEAR と FF 1 バイト（フラグ 0x18）を送り、解いた後にもう 1 本 CLEAR を送る。**帳票は失われない**。接続も切れない（3 回・2 通りとも同じ）。
+  - 当 PJ は溜めて、解いた後に NO_ERROR・CLEAR_PROCESSED・NO_ERROR・CLEAR_PROCESSED を返す。ACS も印刷先の障害の間はデータ処理を止め（`PSNVT5250P.processPrinterError`）、取消・再試行とも NO_ERROR——同じ。`packages/tn5250/test/printer-session.test.ts` で並びを固定。
+  - ~~止めている間に 15 分のアイドルで接続が黙って死ぬか未確認~~ → **17 分**止めても切れず、解くと印刷済みになった（`HOLD_IDLE_MIN=17`）。
+  - FF だけのジョブは白紙 1 ページの帳票（自動 PDF なら白紙の PDF）になる。ACS の既定の出力（JPS。`PrintSCS5250JPS.processFormFeed`）も白紙 1 ページなので変えない（decisions D2）。
+- [ ] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
+  手段の候補: `com.ibm.eNetwork.ECL.ECLHostPrintSession`（acshod2.jar の公開 API）で ACS のプリンターのコアを GUI 無しで当てる——試していない（`20260927-printer-hold-cancel` D2）。
 - [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
   **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
   `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
