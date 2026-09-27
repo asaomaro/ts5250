@@ -1,0 +1,29 @@
+# **全角の状態のまま空にした E 欄を ACS は何で送るか**（実機の ACS のコア。`20260927-either-field-rest`）。DSM の READDBCS（`scripts/host-src/dscmd.c`）の E 欄（17,10 の `SO あ SI`）を、
+# 0x82 の待ちで SO の直後（17,11）から Erase EOF して Enter、0x52 の待ちで先頭（17,10）に X を打って Enter。ACS が送った値はホスト側のログ（/tmp/dscmd.log の QsnRtvDta）に残る。
+# 結果（2026-09-28）: 0x82 の E 欄は `0e`（SO だけ）、0x52 は `e7`。空にした後のカーソルは 17,11。当 PJ は空の値を送るので何も送らない——画面の側の全角・半角の状態をコアへ渡す作りが要る（台帳の E 欄の残り）
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-empty.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READDBCS')[enter]
+sleep 5000
+dump before
+setcursor 17,11
+settle 300
+keys [eraseeof]
+settle 300
+dump erased
+keys [enter]
+sleep 3000
+dump before-52
+setcursor 17,10
+settle 300
+keys X
+settle 300
+dump typed-x
+keys [enter]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

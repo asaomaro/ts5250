@@ -2293,6 +2293,20 @@ function eitherModeSwitch(e: EditState, ch: string, f: Field): "clear" | "sbcs-i
   return "clear";
 }
 
+/**
+ * **貼り付けの 1 字ずつの E 欄の判定**（`eitherModeSwitch` と同じ規則を、貼り付けの途中で変わる状態で見る）。貼り付けは値を組み立てながら進むので、
+ * 先頭で切り替えた後の状態を手元で持たないと、空白（全角でも半角でもない）が続いたときに元の状態で判定してしまう（独立点検の指摘）。
+ * `mode` は呼び出し側が持ち回る（最初は `eitherDbcsOn`）
+ */
+function eitherPasteStep(f: Field, mode: { dbcsOn: boolean }, cursor: number, ch: string): "clear" | "sbcs-in-dbcs" | "dbcs-in-sbcs" | undefined {
+  if (f.dbcsType !== "either") return undefined;
+  const wide = isWideForDbcs(ch);
+  if (mode.dbcsOn === wide) return undefined;
+  if (cursor !== 0) return mode.dbcsOn ? "sbcs-in-dbcs" : "dbcs-in-sbcs";
+  mode.dbcsOn = wide;
+  return "clear";
+}
+
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
 function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
   const budget = visLen(f);
@@ -3543,12 +3557,27 @@ function onInputClick(f: Field, ev: MouseEvent): void {
  *  （"123456" の先頭へ "789" を貼れば "789456"）。SO/SI 込みバイト予算で切り詰め、末尾空白は落とす。 */
 function overwriteInto(field: Field, base: string, offset: number, line: string): string {
   const budget = visLen(field);
-  const out = [...base];
+  let out = [...base];
+  const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: out } as unknown as EditState) };
   while (out.length < offset) out.push(" "); // 欄が offset に届いていなければ空白で埋める
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
+    // **E 欄の半角・全角の規則も 1 字ずつ掛ける**（ACS `PS5250.pasteRect` は字ごとに `inputChar` → `checkDBCSField` を通す。`20260927-either-field-rest`）。
+    // 上書きでは拒否した字も桁を消費する（下の型違反と同じ。ACS の上書きの貼り付けも誤りの字の位置を進めて続ける——0061 の枝の読みは CFR の出力が崩れていて未確認）。
+    // 先頭で切り替えるなら欄を空にしてから書く。消費した桁の詰め物は今の状態の空白（全角なら全角空白。半角の空白を混ぜると SO/SI が割れる）
+    const sw = eitherPasteStep(field, eitherMode, i, ch);
+    if (sw === "clear") {
+      out = [];
+      eitherSwitched = { index: field.index, on: eitherMode.dbcsOn };
+    } else if (sw !== undefined) {
+      const blank = eitherMode.dbcsOn ? "\u3000" : " ";
+      while (out.length <= i) out.push(blank);
+      if (out[i] === " " || out[i] === "\u3000") out[i] = blank;
+      i++;
+      continue;
+    }
     if (!acceptsChar(field, ch, sessionKind.value)) {
       // **弾いた文字も桁を消費する（捨てて詰めない）。** ACS は入力不可文字の桁を
       // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
@@ -3571,13 +3600,24 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
 }
 
 /** 挿入ペーストで最初に見つかる入力不可文字の理由。無ければ undefined。
- *  **挿入モードは 1 文字でも不可なら一切貼らない**（ACS）。上書きモードは桁を消費するだけで
- *  エラーにしないため、この判定は挿入経路でのみ使う。 */
-function firstRejection(field: Field, text: string): RejectReason | undefined {
+ *  **挿入モードは 1 文字でも不可なら一切貼らない**（`20260719-paste-input-validation` の決め）。上書きモードは桁を消費するだけで
+ *  エラーにしないため、この判定は挿入経路でのみ使う。
+ *  ⚠ ACS の挿入の貼り付け（`PS5250.pasteRect`）は、誤りの字でエラーにしてその場で戻り、**それまでに挿入した字は残す**——当 PJ は何も貼らない（意図した差。
+ *  E 欄の 0060 / 0061 もこの方針に載せた。`20260927-either-field-rest` decisions D2） */
+function firstRejection(field: Field, text: string, base = "", offset = 0): RejectReason | "either-dbcs" | "either-sbcs" | undefined {
+  // E 欄は 1 字ずつ、切り替えた後の状態で規則を見る（ACS `insertChar` → `checkDBCSField`。`20260927-either-field-rest`）
+  const mode = { dbcsOn: eitherDbcsOn(field, { chars: [...base] } as unknown as EditState) };
+  let cursor = offset;
   for (const raw of text) {
     if (raw === "\n" || raw === "\r") continue;
-    const why = rejectReason(field, inputChar(raw, field), sessionKind.value);
+    const ch = inputChar(raw, field);
+    const why = rejectReason(field, ch, sessionKind.value);
     if (why) return why;
+    const sw = eitherPasteStep(field, mode, cursor, ch);
+    if (sw === "sbcs-in-dbcs") return "either-dbcs";
+    if (sw === "dbcs-in-sbcs") return "either-sbcs";
+    if (sw === "clear") cursor = 0;
+    cursor++;
   }
   return undefined;
 }
@@ -3590,13 +3630,18 @@ function firstRejection(field: Field, text: string): RejectReason | undefined {
  *  （10 桁欄の "123" に "123" を挿せる。"123123123" にもう 3 桁は挿せない＝これがエラー）。 */
 function insertInto(field: Field, base: string, offset: number, line: string): string | undefined {
   const budget = visLen(field);
-  const out = [...base.replace(/\s+$/, "")];
+  let out = [...base.replace(/\s+$/, "")];
+  const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: [...base] } as unknown as EditState) };
   while (out.length < offset) out.push(" ");
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
     const ch = inputChar(raw, field); // MONOCASE 欄／カタカナ系 CCSID は半角英小文字を大文字化
-    // 入力不可文字は呼び出し側（firstRejection）が先に弾く。ここへは来ない
+    // 入力不可文字・E 欄の混ぜる字は呼び出し側（firstRejection）が先に弾く。ここへは来ない。先頭での切り替えは欄を空にしてから
+    if (eitherPasteStep(field, eitherMode, i, ch) === "clear") {
+      out = [];
+      eitherSwitched = { index: field.index, on: eitherMode.dbcsOn };
+    }
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
@@ -3737,9 +3782,9 @@ function pasteFrom(
     for (const p of parts) {
       if (useInsert) {
         // 挿入モードは 1 文字でも不可なら**一切貼らない**（ACS）。上書きは桁を消費するだけ
-        const why = firstRejection(field, p.line);
+        const why = firstRejection(field, p.line, val, p.offset);
         if (why) {
-          emit("notice", MSG_BY_REASON[why]);
+          emit("notice", why === "either-dbcs" ? MSG_EITHER_DBCS_MODE : why === "either-sbcs" ? MSG_EITHER_SBCS_MODE : MSG_BY_REASON[why]);
           return;
         }
       }
@@ -3833,10 +3878,11 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     let e: EditState = edit!;
     const start = e;
     const at = e.cursor;
+    const eitherMode = { dbcsOn: eitherDbcsOn(f, e) }; // E 欄の貼り付けの途中の状態（`eitherPasteStep`）
     if (e.insertMode) {
-      const why = firstRejection(f, text);
+      const why = firstRejection(f, text, editValue(e), at);
       if (why) {
-        emit("notice", MSG_BY_REASON[why]);
+        emit("notice", why === "either-dbcs" ? MSG_EITHER_DBCS_MODE : why === "either-sbcs" ? MSG_EITHER_SBCS_MODE : MSG_BY_REASON[why]);
         return;
       }
       if (insertInto(f, editValue(e), at, text) === undefined) {
@@ -3847,6 +3893,22 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     for (const raw of [...text]) {
       const ch = inputChar(raw, f);
       if (!acceptsChar(f, ch, sessionKind.value)) continue;
+      // E 欄の半角・全角（ACS の貼り付けは 1 字ずつ `checkDBCSField` を通る。`20260927-either-field-rest`）。
+      // 混ぜる字は上書きなら桁を消費して飛ばし（挿入は上の事前の検査で止めてある）、先頭での切り替えは欄を空にしてから書く
+      const sw = eitherPasteStep(f, eitherMode, e.cursor, ch);
+      if (sw === "sbcs-in-dbcs" || sw === "dbcs-in-sbcs") {
+        // 値の終わりでも桁は消費する（ACS は位置を進める）。詰め物は今の状態の空白（全角なら全角空白）
+        const blank = eitherMode.dbcsOn ? "\u3000" : " ";
+        const chars = [...e.chars];
+        if (e.cursor >= chars.length) chars.push(blank);
+        else if (chars[e.cursor] === " " || chars[e.cursor] === "\u3000") chars[e.cursor] = blank; // 欄の詰め物（半角の空白）を今の状態の空白に
+        e = { ...e, chars, cursor: e.cursor + 1 };
+        continue;
+      }
+      if (sw === "clear") {
+        e = { ...e, chars: [], cursor: 0 };
+        eitherSwitched = { index: f.index, on: eitherMode.dbcsOn };
+      }
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) {
         // 上書きは入るところまで。挿入は事前の検査（欄全体の余地）を通っても、最終桁の 0012（`atLastColumn`）や
