@@ -734,6 +734,35 @@ int main(int argc, char *argv[]) {
             logHex("reply", dta, (int)bytesRead);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "CONTO") == 0) {
+        /*
+         * **継続欄の O（DBCS open）への挿入の余地・詰め直し**を測る画面（`20260927-cont-o-insert`。ACS `PS5250.processCharWithDBCSOpenContField`）。
+         *   (5,10) O の継続欄の先頭 8 桁 `SO あい SI X`＋空白 / (6,10) 中間 8 桁 `YZ` ＋空白 / (7,10) 最終 8 桁（空）。IC は 5,10。READ MDT で待つ
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x01, 0x24, 0x00, 0x08,
+            0x0E, 0x44, 0x82, 0x44, 0x84, 0x0F, 0xE7, 0x40,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x03, 0x24, 0x00, 0x08,
+            0xE8, 0xE9, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x02, 0x24, 0x00, 0x08,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 継続の O 欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "DBCSBS") == 0) {
         /*
          * **DBCS の欄の先頭で Backspace を押したとき**を測る画面（`20260921-backspace-field-start` の節目の点検の指摘）。

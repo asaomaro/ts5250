@@ -1,0 +1,48 @@
+# **継続欄の O への挿入の余地と詰め直し**（実機の ACS のコア。`20260927-cont-o-insert`）。DSM の CONTO（`scripts/host-src/dscmd.c`）:
+# (5,10) 先頭 8 桁 `SO あい SI X` / (6,10) 中間 8 桁 `YZ` / (7,10) 最終 8 桁（空）。挿入モードで字を入れ、区間をまたいで詰め直す様子を dump で見る。
+# ACS は `PS5250.processCharWithDBCSOpenContField` でカーソルから鎖の終わりまでを組み直し、隣り合う SI・SO を取り除き（`mergeDBCSString`）、区間へ語単位で詰め直す（`checkWordsFitDBCSOpenContField`）。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。PROBE_ENPTUI=true で流す（継続欄を割らせるため）。
+#
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-insert.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTO')[enter]
+settle 3000
+dump start
+# A: あい の後ろ（SI の桁 5,15）に全角 う を挿入
+setcursor 5,15
+settle 200
+keys [insert]う
+settle 400
+dump a-insert-dbcs-after-run
+keys [reset]
+settle 300
+# B: 先頭の X（5,16）の前に全角 え を挿入（並びの直後の半角へ全角）
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+dump b-insert-dbcs-before-sbcs
+keys [reset]
+settle 300
+# C: 中間の Y（6,10）の前に全角 お を挿入（区間の頭）
+setcursor 6,10
+settle 200
+keys [insert]お
+settle 400
+dump c-insert-dbcs-segment-head
+keys [reset]
+settle 300
+# D: 先頭の欄の頭（あ の前・5,11）に半角 Q を挿入
+setcursor 5,11
+settle 200
+keys [insert]Q
+settle 400
+dump d-insert-sbcs-into-run
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
