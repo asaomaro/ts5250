@@ -1,7 +1,7 @@
 # 決定記録
 
 ## D1: 溜めた AID を捨てる時機は ACS の原典と実測に合わせる
-- WEC（`initKeyboard` の `pending_aid = 0`。実測 F4）・CC1 の施錠（`processWCC1`）・繋ぎ直しで捨てる。WEC は READ が出ている印も下ろす（`pending_read = 0`）。同じレコードの後ろの READ で立て直す。
+- WEC（`initKeyboard` の `pending_aid = 0`。実測 F4）・~~CC1 の施錠（`processWCC1`）~~・繋ぎ直しで捨てる。~~CC1~~ は `20260927-unlocked-wtd-cursor` D1 で破棄（ワイヤの実測で ACS は捨てなかった）。WEC は READ が出ている印も下ろす（`pending_read = 0`）。同じレコードの後ろの READ で立て直す。
 
 ## D2: ACS と違うまま残すもの（未確認・未対応）
 - Attn / SysReq で溜めた AID を捨てる——ACS がどうするかは未確認（Attn の窓の READ に古い Enter を送らないための当 PJ の決め。独立点検の指摘）

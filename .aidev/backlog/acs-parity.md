@@ -342,7 +342,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   保留が始まったら ACS の `initKeyboard` と同じく施錠を解き、AID の待ちはエラーの画面で解く。画面の側は抜けたら `dismiss-host-error` を送り（落ちたら次の画面・予約の解除で送り直す）、
   core はキー（Attn・SysReq を含む）・欄を書く前（ws・MCP）・HLLAPI の編集キー以外でも抜ける。実機（DSM の ERRMSGWTD / ERRMSGRST）で抜けた後の画面が ACS の Reset の後と同じ（pass=4）。
 - [x] **READ の無い WRITE ERROR CODE でも施錠を解き、先に押した AID を次の READ で送る**（下の「ホストのエラーの保留の残り」から割った）。**完了（`20260927-wec-only-unlock`）**:
-  ACS は 0x21 で `initKeyboard`（エラー状態なら施錠を解く）し、READ が出ていない間の AID を溜めて次の READ で送る（`pending_aid`・`checkPendingAid`）。後の 0x21・CC1 の施錠で溜めを捨てる。
+  ACS は 0x21 で `initKeyboard`（エラー状態なら施錠を解く）し、READ が出ていない間の AID を溜めて次の READ で送る（`pending_aid`・`checkPendingAid`）。後の 0x21 ~~・CC1 の施錠~~ で溜めを捨てる
+  （CC1 は `20260927-unlocked-wtd-cursor` で撤回——ワイヤの実測で ACS は捨てなかった）。
   実機の ACS のコア（DSM の WECONLY・WECTWICE）: 0x21 の後 Reset → AB → Enter で、10 秒後の READ が F1・AB を受けた／2 回目の 0x21 で Enter は捨てられ、後の F3 が届いた。
   当 PJ は施錠のまま AID を拒んでいた（`packages/tn5250/src/session/session.ts` の `readOutstanding`・`deferredAid`。`scripts/verify-wec-only-unlock.mjs` pass=0 → 3）。
 - [ ] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
@@ -616,6 +617,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: 貼り付けにはこの規則を掛けていない（decisions D2）。「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）。
   全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる。未測定）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
   挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
+- [x] **解錠中に届いた WTD のカーソル（(f)）と、溜めた AID のカーソル・捨てる時機**（下の【まとめ】から割った）。**完了（`20260927-unlocked-wtd-cursor`）**:
+  実機の ACS のコア（DSM の UNLOCKWTD / UNLOCKWTDNOIC / UNLOCKWTDCC1）で、解錠中の WTD も IC（無ければ保留の IC）へカーソルを置いた——(f) は差ではなかった（当 PJ も同じ。`scripts/verify-unlocked-wtd-cursor.mjs`）。
+  溜めた AID は、ACS が READ のレコードの後に**押したときのカーソル**で送り、CC1 0x20 の WTD でも捨てなかった（`tap-proxy` のワイヤ）。当 PJ は CC1 で捨てて READ に返さず・WTD の後のカーソル（5,10）で送っていた
+  （`packages/tn5250/src/session/session.ts` の `deferredAid`。`scripts/verify-wec-only-unlock.mjs` の WECONLY / WECONLYW / WECTWICE が pass）。残り（decisions D2）: 送った後の画面のカーソル・CC1 0x20 以外・明示の IC は未確認。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
@@ -623,7 +628,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・~~Ctrl+Home（罫線）・Ctrl+F11（カーソル形）~~ → 上の `20260921-default-keys-rule-cursor` で済んだ／
     ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。~~利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断~~ → 下の「930 の申告の選択」で `20260922-katakana-variant-setting` により選べるようにした（決め打ちではなく設定に）／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
-    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く（`20260927-wec-only-unlock` の実機でも出た: READ の前の空の WTD〔CC2 0x08〕で ACS はカーソルを 5,12 に残し、当 PJ は IC の 5,10 へ戻す）。
+    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／~~(f) 解錠中に届いた WTD でカーソルが動く（`20260927-wec-only-unlock` の実機でも出た: READ の前の空の WTD〔CC2 0x08〕で ACS はカーソルを 5,12 に残し、当 PJ は IC の 5,10 へ戻す）~~ → 下の `[x]`（`20260927-unlocked-wtd-cursor`）: 差ではなかった（ACS も動かす）。5,12 は溜めた AID の送り方の差で、合わせた。
     ~~**E（either）欄で SBCS と DBCS を混ぜられる差**~~ → 下の `[x]`（`20260927-either-field-mode`）で済んだ。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。

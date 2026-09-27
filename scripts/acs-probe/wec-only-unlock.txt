@@ -1,6 +1,7 @@
 # **READ の無い WRITE ERROR CODE だけのレコードで ACS は施錠を解くか・その間の打鍵と Enter はどうなるか**（実機の ACS のコア。`20260927-wec-only-unlock`）。
 # DSM の試験プログラム（`scripts/host-src/dscmd.c` の WECONLY）: 画面（5,10 に 10 桁の入力欄）→ 0x21 だけ → 10 秒待つ → READ MDT。ホストが READ で受けた AID と欄はログ（/tmp/dscmd.log）の [READ]。
 # 待つ間に: dump（施錠の状態）→ X（エラー状態の打鍵）→ dump → Reset → AB → dump → Enter → dump。
+# WECONLYW（PARM を替える）: READ の前に同じレコードで 11,2 へ書く WTD（DSM がさらに CC1 0x20 の WTD を足す）。溜めた Enter はそれでも送られ、カーソルは押したときの 5,12（`tap-proxy` のワイヤで確かめた。`20260927-unlocked-wtd-cursor`）。
 # 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
 #
 # 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wec-only-unlock.txt AS400

@@ -1229,7 +1229,7 @@ int main(int argc, char *argv[]) {
             tag = "";
             QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
         }
-    } else if (strcmp(what, "WECONLY") == 0 || strcmp(what, "WECTWICE") == 0) {
+    } else if (strcmp(what, "WECONLY") == 0 || strcmp(what, "WECTWICE") == 0 || strcmp(what, "WECONLYW") == 0) {
         /*
          * **READ の無い WRITE ERROR CODE だけのレコード**（`20260927-wec-only-unlock`）。ACS `processWriteErrorCode` → `initKeyboard` はエラー状態なら施錠を解く。
          * 画面（5,10 に 10 桁の入力欄・IC）→ 0x21「WECONLY ERR」だけを撃つ → 10 秒待つ（この間に端末で Reset と打鍵と Enter を試す）→ READ MDT で受けた AID と欄を残す
@@ -1261,9 +1261,19 @@ int main(int argc, char *argv[]) {
         inzFdbk(fdbk, sizeof(fdbk));
         buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
         if (buf != 0) {
+            /* WECONLYW: READ の前に同じレコードで 11,2 へ "NEXT" を書く WTD を置く——溜めた AID が送るカーソルが、書いた位置か押したときの位置かを見る */
+            static const unsigned char wn[] = { 0x00, 0x00, 0x11, 0x0B, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+            Qsn_Cmd_Buf_T rcb = 0;
+            if (strcmp(what, "WECONLYW") == 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rcb = QsnCrtCmdBuf(128, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wn, (Q_Bin4)sizeof(wn), rcb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 NEXT → バッファ)", rc, fdbk);
+            }
             tag = "[READ] ";
             inzFdbk(fdbk, sizeof(fdbk));
-            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, rcb, 0, (Q_Fdbk_T *)fdbk);
             logFdbk("QsnReadMDT", rc, fdbk);
             logInpBuf(buf);
             tag = "";
@@ -1318,6 +1328,52 @@ int main(int argc, char *argv[]) {
             tag = "";
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "UNLOCKWTD") == 0 || strcmp(what, "UNLOCKWTDNOIC") == 0 || strcmp(what, "UNLOCKWTDCC1") == 0) {
+        /*
+         * **解錠中に届いた WTD でカーソルが動くか**（`20260927-unlocked-wtd-cursor`。ACS `preprocessWCC2` の頭の条件）。
+         *   1 本目（出力だけ）: CLEAR UNIT → WTD（CC2 0x08 で解錠・5,10 と 7,10 と 9,2 に入力欄・IC 5,10）
+         *   6 秒待つ（この間に端末でカーソルを 9,2 へ動かす）
+         *   2 本目（1 本のレコード）: WTD（CC1 00・CC2 08。UNLOCKWTD は IC 7,10 / UNLOCKWTDNOIC は IC なし / UNLOCKWTDCC1 は CC1 0x20〔MDT を戻す〕と IC 7,10）＋ READ MDT
+         * READ で送られたカーソルの位置（端末で Enter を押す）と画面のカーソルを見る
+         */
+        static const unsigned char w1[] = {
+            0x00, 0x08,
+            0x11, 0x03, 0x02, 0xE4, 0xD5, 0xD3, 0xD6, 0xC3, 0xD2,             /* "UNLOCK" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x11, 0x09, 0x01, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x05, 0x0A
+        };
+        unsigned char w2[16];
+        int wl = 0;
+        Qsn_Cmd_Buf_T cb;
+        w2[wl++] = strcmp(what, "UNLOCKWTDCC1") == 0 ? 0x20 : 0x00;
+        w2[wl++] = 0x08;
+        w2[wl++] = 0x11; w2[wl++] = 0x0B; w2[wl++] = 0x02; w2[wl++] = 0xD5; w2[wl++] = 0xC5; w2[wl++] = 0xE7; w2[wl++] = 0xE3;  /* 11,2 "NEXT" */
+        if (strcmp(what, "UNLOCKWTDNOIC") != 0) { w2[wl++] = 0x13; w2[wl++] = 0x07; w2[wl++] = 0x0A; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w1, (Q_Bin4)sizeof(w1), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 1 本目)", rc, fdbk);
+        sleep(6);
+        inzFdbk(fdbk, sizeof(fdbk));
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w2, (Q_Bin4)wl, cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 2 本目 → バッファ)", rc, fdbk);
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT（WTD と 1 本のレコード）", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

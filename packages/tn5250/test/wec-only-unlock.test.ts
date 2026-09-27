@@ -82,6 +82,19 @@ describe("READ の無い WRITE ERROR CODE", () => {
     expect((await second).timedOut).toBe(false);
   });
 
+  it("**溜めた AID のカーソルは押したときの位置**（ACS の WECONLYW: `05 0c f1 …`。実測の WTD に IC は無かった——ここで明示の IC を置くのは外挿〔decisions D2〕）", async () => {
+    const { s, feed, lastSent } = await open();
+    void s.sendAid("Enter", { timeoutMs: 1000 });
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_ERROR_CODE, 0x22, ...e("ERR")]));
+    await tick();
+    s.dismissHostError();
+    s.setField({ index: 1 }, "AB");
+    void s.sendAid("Enter", { cursor: { row: 5, col: 12 }, timeoutMs: 1000 }).catch(() => undefined);
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08, ORDER.SBA, 11, 2, ...e("NEXT"), ORDER.IC, 5, 10, ...READ]));
+    await tick();
+    expect(lastSent().slice(0, 3)).toEqual([5, 12, AID.ENTER]);
+  });
+
   it("READ が出ているときは従来どおりすぐ送る（対照）", async () => {
     const { s, written } = await open();
     const n = written.length;
@@ -110,11 +123,12 @@ describe("READ の無い WRITE ERROR CODE", () => {
     expect(s.snapshot().keyboardLocked).toBe(false);
   });
 
-  it("CC1 の施錠も溜めた AID を捨てる（ACS `processWCC1`）", async () => {
-    const { feed, written, n } = await deferredEnter();
+  it("~~CC1 の施錠も溜めた AID を捨てる~~ → **捨てない**（実機の ACS のコアのワイヤ: CC1 0x20 の WTD を含む READ のレコードの後に溜めた Enter を送った）", async () => {
+    const { feed, written, n, lastSent } = await deferredEnter();
     feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x20, 0x00, ...READ]));
     await tick();
-    expect(written.length).toBe(n);
+    expect(written.length).toBe(n + 1);
+    expect(lastSent().slice(0, 3)).toEqual([5, 10, AID.ENTER]);
   });
 
   it("Attn は溜めた AID を捨てる（Attn の窓の READ に古い Enter を送らない。decisions D2）", async () => {

@@ -12,7 +12,7 @@ import { IfsConnection } from "@ts5250/hostserver";
 import { codecForCcsid } from "@ts5250/ebcdic";
 
 const LIB = (process.env.AS400_LIB ?? "TESTLIB").trim().split(/\s+/)[0];
-const MODE = process.argv[2] === "WECTWICE" ? "WECTWICE" : "WECONLY";
+const MODE = ["WECTWICE", "WECONLYW"].includes(process.argv[2]) ? process.argv[2] : "WECONLY";
 const log = (s) => process.stderr.write(`${s}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const inputs = (s) => s.snapshot().fields.filter((f) => !f.protected);
@@ -63,11 +63,10 @@ const text = typeof bytes === "string" ? bytes : codecForCcsid(t?.ccsid ?? 37).d
 ifs.close?.();
 const dta = /\[READ\] QsnRtvDta len=\d+ hex=([0-9a-f]*)/.exec(text)?.[1];
 log(`  ホストの READ が受けた: ${dta}`);
-// AID と欄（先頭 2 バイトのカーソルの後ろ）が ACS と同じか。**カーソルは違う**: ACS は 5,12・当 PJ は 5,10——READ の前の空の WTD（CC2 0x08）で、
-// ACS は解錠中なのでカーソルを動かさず（`preprocessWCC2`）、当 PJ は IC へ戻す（台帳のキー編集の細部の (f)「解錠中に届いた WTD でカーソルが動く」）
+// 溜めた AID は押したときのカーソルで送る（`20260927-unlocked-wtd-cursor`。以前は当 PJ だけ 5,10 になっていた）
 // ⚠ ACS は F3 に欄（AB）を付けなかった（`05 0a 33`。3 回とも）。溜めた Enter を押さずに AB だけ打った場合は ACS も F3 に AB を付けた（`…33 11 05 0a c1 c2`）。
 // 早い Enter の何が欄を落とすのかは原典から読めなかった（未確認。台帳）ので、ここでは AID だけを見る
 if (MODE === "WECTWICE") check(dta?.slice(4, 6) === "33", "2 回目の 0x21 が溜めた Enter を捨て、READ は後で押した F3 を受ける（ACS と同じ AID）");
-else check(dta?.slice(4) === "f111050ac1c2", "後の READ が Enter（F1）・欄 AB を受ける（ACS は `050cf111050ac1c2`。カーソルの 2 バイトは (f) の差）");
+else check(dta === "050cf111050ac1c2", "後の READ が Enter（F1）・欄 AB を受ける（ACS と同じ `050cf111050ac1c2`。カーソルは押したときの位置——WECONLYW は READ の前の WTD が書いても同じ）");
 log(`RESULT: pass=${pass} fail=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

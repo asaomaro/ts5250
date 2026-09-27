@@ -276,10 +276,10 @@ export class Session5250 extends Emitter<SessionEvents> {
   /**
    * **READ が出ていない間に押された AID**（ACS `DS5250.pending_aid`）。ACS は溜めて、次の READ が来たときに**そのときの画面で**送る
    * （`checkPendingAid`）。実機の ACS のコア: 0x21 だけのレコードの後に Reset → `AB` → Enter と打つと、10 秒後の READ MDT が F1・`AB` を受けた。
-   * 待ち（`pendingAid`）が時間切れになっても溜めたままにする（ACS に時間切れは無く、次の READ で送る）。捨てるのは WEC・CC1 の施錠・Attn / SysReq・繋ぎ直し。
+   * 待ち（`pendingAid`）が時間切れになっても溜めたままにする（ACS に時間切れは無く、次の READ で送る）。捨てるのは WEC・Attn / SysReq・繋ぎ直し（CC1 の施錠では捨てない——実測）。
    * ⚠ ACS との未対応の差（decisions D2）: ACS は CANCEL INVITE・WSF でも `pending_read` を下ろし、オペコード（INVITE・PUT/GET）だけで立て、RESTORE で `pending_read`・`pending_aid` を戻す
    */
-  private deferredAid: { key: AidKey; sysReqText?: string } | undefined;
+  private deferredAid: { key: AidKey; sysReqText?: string; cursor: { row: number; col: number } } | undefined;
 
   private constructor(opts: ConnectOptions) {
     super();
@@ -591,7 +591,10 @@ export class Session5250 extends Emitter<SessionEvents> {
     }
     if (key !== "Attn" && key !== "SysReq" && !this.readOutstanding) {
       // READ がまだ出ていない（0x21 だけのレコードで施錠が解けた後）: 溜めて、次の READ で送る（`deferredAid`）。待ちの形は送ったときと同じ
-      this.deferredAid = { key, ...(opts.sysReqText !== undefined ? { sysReqText: opts.sysReqText } : {}) };
+      // **カーソルは押したときの位置で送る**（実機の ACS のコア: 同じレコードで READ の前の WTD が 11,2 に書いても〔IC は無く、前の画面の保留 IC は 5,10〕、READ は押したときの 5,12 を受けた。
+      // 明示の IC があるレコードは未確認。送った後の画面のカーソルは当 PJ だけ動く——decisions D2
+      // `scripts/acs-probe/wec-only-unlock.txt` の WECONLYW。`20260927-unlocked-wtd-cursor`）。欄の値は送るときの画面（`checkPendingAid`）
+      this.deferredAid = { key, cursor: this.buf.rowColOf(this.buf.cursorAddr), ...(opts.sysReqText !== undefined ? { sysReqText: opts.sysReqText } : {}) };
       return this.waitAid(opts.timeoutMs);
     }
     if (key === "Attn" || key === "SysReq") {
@@ -1062,8 +1065,9 @@ export class Session5250 extends Emitter<SessionEvents> {
       this.deferredAid = undefined;
       this.readOutstanding = false;
     }
-    // CC1 の施錠も溜めた AID を捨てる（ACS `processWCC1`）
-    if (result0?.lockKeyboard === true) this.deferredAid = undefined;
+    // ~~CC1 の施錠も溜めた AID を捨てる（ACS `processWCC1`）~~ → **捨てない**。実機の ACS のコアのワイヤ（`20260927-unlocked-wtd-cursor`。DSM の WECONLYW を `tap-proxy` で採った）:
+    // CC1 0x20 の WTD を含む READ のレコードが来た後に、溜めた Enter を `05 0c f1 11 05 0a c1 c2` で送った。原典の `pending_aid = 0` とは合わない——
+    // ACS のこの振る舞いはキーボードの先打ち（押したキーを溜めて解錠で流す）に近い。測ったのは CC1 0x20 だけ（0x40〜0xE0 は未確認。`20260927-unlocked-wtd-cursor` D1）
     if (readSolicited) this.readOutstanding = true;
     // **READ が来たら、溜めていた AID をいまの画面で送る**（ACS `checkPendingAid`）。待ち（`pendingAid`）はその応答で解く
     if (readSolicited && this.deferredAid) {
@@ -1071,7 +1075,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       this.deferredAid = undefined;
       this.readOutstanding = false;
       try {
-        this.telnet.sendRecord(this.buildAidRecord(d.key, undefined, d.sysReqText));
+        this.telnet.sendRecord(this.buildAidRecord(d.key, d.cursor, d.sysReqText));
       } catch (err) {
         // 送る直前に切れた（`runPcCommand` と同じく投げない——受信処理まで上がる）
         this.warn(`deferred AID not sent: ${err instanceof Error ? err.message : String(err)}`);
