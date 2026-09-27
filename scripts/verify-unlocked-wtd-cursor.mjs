@@ -6,8 +6,6 @@
 //
 // 実行: node --env-file=.env --env-file=.env.verify scripts/verify-unlocked-wtd-cursor.mjs [モード…]
 import { Session5250 } from "@ts5250/tn5250";
-import { IfsConnection } from "@ts5250/hostserver";
-import { codecForCcsid } from "@ts5250/ebcdic";
 
 const LIB = (process.env.AS400_LIB ?? "TESTLIB").trim().split(/\s+/)[0];
 const ACS = { UNLOCKWTD: [7, 10], UNLOCKWTDNOIC: [5, 10], UNLOCKWTDCC1: [7, 10] };
