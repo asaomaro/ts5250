@@ -131,6 +131,8 @@ export interface ApplyResult {
    * （`20260920-restore-screen-parity` の cross 点検で実測）。
    */
   restoredReadCommand?: number;
+  /** 復元した画面の退避の時点で READ が出ていたか（`RestoreResult.readOutstanding`） */
+  restoredReadOutstanding?: boolean;
 }
 
 /** CC2 ビット（SC30-3533。GNU tn5250 session.h と一致確認済み） */
@@ -192,7 +194,11 @@ export function applyDataStream(
   codec: Codec,
   warn: WarnFn = () => {},
   /** `holdWtd`: WTD を処理する前に聞く。true なら WTD から後ろを処理せず `heldFrom` を返す（ホストのエラーの保留。`ApplyResult.heldFrom`） */
-  opts: { holdWtd?: () => boolean } = {}
+  opts: {
+    holdWtd?: () => boolean;
+    /** CLEAR UNIT・CLEAR UNIT ALTERNATE・WRITE ERROR CODE の頭で呼ぶ（ACS はここで `clearSysreqMode`＝SysReq の行を閉じる。`20260927-sysreq-line-hold`） */
+    onClearSysReq?: () => void;
+  } = {}
 ): ApplyResult {
   const r = new ByteReader(data);
   const result: ApplyResult = {
@@ -278,6 +284,7 @@ export function applyDataStream(
     const cmd = r.u8();
     switch (cmd) {
       case COMMAND.CLEAR_UNIT:
+        opts.onClearSysReq?.();
         buf.clearUnit(); // IC / MC も捨てる（ACS `processClearFMT`）
         break;
       case COMMAND.CLEAR_UNIT_ALTERNATE: {
@@ -292,6 +299,7 @@ export function applyDataStream(
           warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
           return abortRecord(SENSE.CLEAR_UNIT_ALTERNATE_PARAM);
         }
+        opts.onClearSysReq?.(); // ACS の CUA も `processClearUnit`（`clearSysreqMode`）
         // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
         // 現在のサイズでクリアするので、`clearUnit()` へは倒さない——**罫線の扱いが違う**
         // （`clearUnit()` 経由だと 24x80 専用画面で罫線が消える。KSN20 / S9R167D の回帰）。
@@ -428,6 +436,7 @@ export function applyDataStream(
       case COMMAND.WRITE_ERROR_CODE: {
         const cut = tooShort(1, "write error code"); // 本文が 1 バイトも無い
         if (cut) return cut;
+        opts.onClearSysReq?.(); // ACS `processWriteErrorCode` の頭で `clearSysreqMode`
         applyWriteErrorCode(r, buf, codec);
         errorCodeWritten = true;
         break;
@@ -439,6 +448,7 @@ export function applyDataStream(
         // **欠けの判定は残りのバイト数だけで見る**——桁の値が 4（ESC と同じ値）でも桁として読む（独立点検の must）
         const cut = tooShort(1, "write error code to window");
         if (cut) return cut;
+        opts.onClearSysReq?.();
         const sc = r.remaining > 0 ? r.u8() : undefined;
         const ec = sc !== undefined && r.remaining > 0 ? r.u8() : undefined;
         applyWriteErrorCode(r, buf, codec, sc !== undefined && ec !== undefined ? { start: sc, end: ec } : undefined);
@@ -531,13 +541,14 @@ function restoreAndSkipPayload(
   warn: WarnFn,
   label: string
 ): void {
-  const { restored, payload, readCommand } = buf.restoreScreen();
+  const { restored, payload, readCommand, readOutstanding } = buf.restoreScreen();
   if (!restored) {
     warn(`${label} with empty save stack`);
     return;
   }
   result.restoredCount++;
   if (readCommand !== undefined) result.restoredReadCommand = readCommand;
+  if (readOutstanding !== undefined) result.restoredReadOutstanding = readOutstanding;
   if (payload === undefined || payload.length === 0) {
     // **黙って落ちない**（この関数の JSDoc の主張どおり）。ここに来るのは
     // 「SAVE 応答を送ったのに積荷を添え損ねた」＝配線のずれ——ただし

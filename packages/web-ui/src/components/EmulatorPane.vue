@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { AidKey, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import ScreenGrid from "./ScreenGrid.vue";
 import StatusBar from "./StatusBar.vue";
@@ -35,7 +35,7 @@ import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
 import { isDbcsCcsid, progressionTarget, progressionNumberOf } from "@ts5250/tn5250/browser";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
-import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK } from "../composables/opMessages.js";
+import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK, MSG_SYSREQ_KEY_INVALID } from "../composables/opMessages.js";
 import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
 import { fieldSlices, fieldSpan, posOfOffset } from "../composables/fieldSlices.js";
 import { continuedRunOf, isTabStopField } from "../composables/continuedRun.js";
@@ -823,9 +823,11 @@ function onAid(key: AidKey): void {
   exitErrorMode();
   clearNotice();
   if (key === "SysReq") {
-    sysReqOpen.value = true;
+    openSysReqLine();
     return;
   }
+  // **行を出している間の、実行キー以外の AID は操作員エラー 0006 にして送らない**（ACS `processAIDCode` は行を閉じてエラーにする。ホイールから届く）
+  if (sysReqOpen.value) return onSysReqKeyInvalid();
   focusMandatoryViolation(sendKey(props.sessionId, key, cursor.value));
 }
 
@@ -845,23 +847,67 @@ function focusMandatoryViolation(hit: MandatoryFinding | undefined): void {
   if (idx >= 0 && els.length > 0) focusInput(els, idx);
 }
 
-function onSysReqSubmit(text: string): void {
+/**
+ * **SysReq の行を出す・閉じる**。セッションへも知らせる——ACS は行を出している間ホストの WTD を止める（エラーのメッセージと同じ `checkContention`。
+ * 実機の ACS のコアで確かめた。`20260927-sysreq-line-hold`）。行から SysReq を送るときは閉じる知らせを送らない（セッションが送ってから閉じる。ACS と同じ順）
+ */
+/** セッションが行を開いたと返したか（`snapshot.sysReqLine`。下の watch） */
+let sysReqLineSeen = false;
+function openSysReqLine(): void {
+  if (sysReqOpen.value) return; // 開いていれば何もしない（ACS `processSysReq` も同じ）
+  sysReqOpen.value = true;
+  sysReqLineSeen = false; // 前に開いた行の返事（開いた→閉じた）が遅れて届いても、この行を閉じない
+  state.value?.client?.send({ type: "sysreq-line", open: true });
+}
+function closeSysReqLine(notify: boolean): void {
+  if (!sysReqOpen.value) return;
   sysReqOpen.value = false;
+  if (notify) state.value?.client?.send({ type: "sysreq-line", open: false });
+}
+
+/** 行を出している間に実行キー以外の AID が来た: 行を閉じて操作員エラー 0006（ACS `processAIDCode`）。フッターのボタン（`StatusBar`）からも来る */
+function onSysReqKeyInvalid(): void {
+  closeSysReqLine(true);
+  showNotice(MSG_SYSREQ_KEY_INVALID);
+}
+
+function onSysReqSubmit(text: string): void {
+  closeSysReqLine(false);
   sendKey(props.sessionId, "SysReq", cursor.value, text);
   void nextTick(() => paneEl.value?.focus());
 }
 
 function onSysReqCancel(): void {
-  // 取り消しでは**レコードを 1 本も送らない**（ホストは押されたことすら知らない）
-  sysReqOpen.value = false;
+  // 取り消しでは**レコードを 1 本も送らない**（ホストは押されたことすら知らない）。止めていたホストの出力は流す
+  closeSysReqLine(true);
   void nextTick(() => paneEl.value?.focus());
 }
+
+/**
+ * **ホストが行を閉じたら画面の側も閉じる**（ACS はホストの CLEAR UNIT・CUA・WEC で `clearSysreqMode`。セッションは閉じた画面を返す）。
+ * セッションが開いたと返した後に消えたときだけ閉じる（開いた直後、まだ返事が来ていない間は閉じない）
+ */
+watch(
+  () => snapshot.value?.sysReqLine === true,
+  (on) => {
+    if (on) {
+      sysReqLineSeen = true;
+      return;
+    }
+    if (sysReqOpen.value && sysReqLineSeen) closeSysReqLine(false);
+    sysReqLineSeen = false;
+  }
+);
+// ペインを閉じたら行も閉じる（開いたままだとセッションの側でホストの出力が止まったまま残る）
+onBeforeUnmount(() => closeSysReqLine(true));
 
 // 切断されたら行を畳む（送り先が無い入力欄を残さない）
 watch(
   () => state.value?.connected,
   (connected) => {
-    if (connected === false) sysReqOpen.value = false;
+    // 送り先が無い。セッションの側の行は、サーバーがこの接続を破棄するときに閉じる（`ws-handler` の `sysReqLineOpened`）。
+    // ~~繋ぎ直すとセッションの側も行を忘れる~~ は誤り——セッションはサーバーで生き続ける（独立点検の must）
+    if (connected === false) closeSysReqLine(false);
   }
 );
 
@@ -877,7 +923,7 @@ watch(
 watch(
   () => props.focused,
   (focused) => {
-    if (!focused) sysReqOpen.value = false;
+    if (!focused) closeSysReqLine(true);
   }
 );
 
@@ -1727,7 +1773,9 @@ function onWheel(ev: WheelEvent): void {
       :log-count="logCount"
       :log-open="logOpen"
       @toggle-log="logOpen = !logOpen"
+      :sys-req-open="sysReqOpen"
       @sysreq="onAid('SysReq')"
+      @sysreq-key-invalid="onSysReqKeyInvalid"
       @combo="onPaletteKey"
       @violation="focusMandatoryViolation"
       @reconnect="retryReconnect(sessionId)"

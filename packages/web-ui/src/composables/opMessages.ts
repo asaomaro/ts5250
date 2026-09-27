@@ -99,6 +99,11 @@ export const MSG_EITHER_DBCS_MODE = "この項目は全角で入力中です（�
  * ACS のエラー 0061（同上）: E 欄が半角のとき、全角は項目の先頭でしか打てない（打てば項目を全角に切り替えて空にする）
  */
 export const MSG_EITHER_SBCS_MODE = "この項目は半角で入力中です（全角にするには項目の先頭で打ってください）";
+/**
+ * ACS のエラー 0006: システム要求の行を出している間に、実行キー以外の AID を押した（ACS `PS5250.processAIDCode` は行を閉じてこのエラーにし、送らない。
+ * `20260927-sysreq-line-hold`）
+ */
+export const MSG_SYSREQ_KEY_INVALID = "システム要求の行では実行キーしか使えません";
 
 /**
  * **操作員エラーか**（`20260921-operator-error-mode`）。ACS はこれらで `error_mode` に入り、
@@ -120,6 +125,7 @@ export function isOperatorError(text: string): boolean {
     text === MSG_SELF_CHECK ||
     text === MSG_EITHER_DBCS_MODE ||
     text === MSG_EITHER_SBCS_MODE ||
+    text === MSG_SYSREQ_KEY_INVALID ||
     (Object.values(MSG_BY_REASON) as string[]).includes(text)
   );
 }

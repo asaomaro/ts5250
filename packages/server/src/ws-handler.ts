@@ -334,6 +334,8 @@ export class WsConnection {
           return this.onWatchHistory(msg);
         case "dismiss-host-error":
           return this.onDismissHostError(msg);
+        case "sysreq-line":
+          return this.onSysReqLine(msg);
         case "activity":
           // 在席の合図。**監査にも操作ログにも残さない**——利用者の意図を含まないうえ、
           // 15 秒間隔で流れるので本来の記録を量で押し流す
@@ -385,6 +387,21 @@ export class WsConnection {
     if (this.deps.sessions.reservationOf(id) !== undefined) return;
     entry.session.dismissHostError(msg.seq);
   }
+
+  /** SysReq の行を出した・閉じた（`WsSysReqLine`）。5250 のセッションだけ。自動操作の予約中は触らない */
+  private onSysReqLine(msg: WsClientMessage & { type: "sysreq-line" }): void {
+    if (this.session3270 !== undefined || this.sessionVt !== undefined) return;
+    if (typeof msg.open !== "boolean") return this.sendError("PROTOCOL_ERROR", "sysreq-line needs open", false);
+    const id = this.requireSession();
+    const entry = this.deps.sessions.get(id, this.user);
+    // 予約の間は**開く**だけ受けない（閉じるは受ける——開いたまま取り残さないため。独立点検の must）。
+    // 読み取り専用のセッションも開くを受けない——SysReq を送れない（`READONLY_ALLOWED_KEYS`）ので、開くと止めた出力を流す手段が確定に無い
+    if (msg.open && (entry.readOnly || this.deps.sessions.reservationOf(id) !== undefined)) return;
+    entry.session.setSysReqLine(msg.open);
+    this.sysReqLineOpened = msg.open;
+  }
+  /** この接続が SysReq の行を開いた（接続を破棄するときに閉じる。画面の側が閉じる知らせを送れないまま切れても、コアの保留を残さない） */
+  private sysReqLineOpened = false;
 
   /**
    * 在席の合図を受けて `lastActivity` を進める。**id はこの接続が開いたものだけ**なので
@@ -1266,6 +1283,27 @@ export class WsConnection {
       throw new As400Error("PROTOCOL_ERROR", "VT のセッションでは vt-input を使ってください");
     }
     const id = this.requireSession();
+    try {
+      await this.onKey5250(id, msg);
+    } catch (e) {
+      // **SysReq が送れなかったら、セッションの側の行を閉じる**——画面は送信で行を畳み、閉じる知らせを送らない（セッションが SRQ を送ってから閉じるため）。
+      // 断られる（読み取り専用・予約・閉じた）と誰も閉じず、ホストの出力が止まったまま残る（`20260927-sysreq-line-hold` の独立点検）。閉じるのは冪等
+      if (msg.key === "SysReq") this.closeSysReqLineQuietly(id);
+      throw e;
+    }
+  }
+
+  /** セッションの側の SysReq の行を閉じる（セッションが無ければ何もしない） */
+  private closeSysReqLineQuietly(id: string): void {
+    this.sysReqLineOpened = false;
+    try {
+      (this.deps.sessions.get(id, this.user).session as { setSysReqLine?: (open: boolean) => void }).setSysReqLine?.(false);
+    } catch {
+      // セッションが先に無くなった（閉じる相手がいない）
+    }
+  }
+
+  private async onKey5250(id: string, msg: WsClientMessage & { type: "key" }): Promise<void> {
     await withAudit({ op: "ws_key", sessionId: id, key: msg.key }, async () => {
       const entry = this.deps.sessions.assertKeyAllowed(id, msg.key as AidKey, this.user);
       // **フラグキー（Attn / SysReq）でも欄を書く。ただし施錠されていないときだけ。**
@@ -1439,6 +1477,8 @@ export class WsConnection {
   private dispose(reason: string, opts?: { transportLost?: boolean }): void {
     // 後始末に入った印。`onOpen` が非同期の待ち（関連付けるプリンターの起動・接続）の後に見て、誰も持たないセッションを作らない
     this.disposed = true;
+    // この接続が開いた SysReq の行は閉じる（`sysReqLineOpened`）。セッションが猶予で生き残っても、ホストの出力を止めたままにしない
+    if (this.sysReqLineOpened && this.sessionId !== undefined) this.closeSysReqLineQuietly(this.sessionId);
     this.stopHeartbeat();
     // **監視は止めない。** 購読を外すだけ——監視はレジストリが所有しており、
     // ブラウザを閉じても続くことが要件（research F1）

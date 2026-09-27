@@ -240,6 +240,20 @@ export class Session5250 extends Emitter<SessionEvents> {
    */
   private carriedSavePartial: Uint8Array | undefined;
   private holdingForHostError = false;
+  /**
+   * **SysReq の行を出している**（画面の側が知らせる。`setSysReqLine`）。ACS はエラーのメッセージと同じ仕組み（メッセージ行の退避＝`getMsgLinePos() != -1`）で
+   * ホストの WTD を止める（`checkContention`）。実機の ACS のコア（DSM の LATEWTD・`scripts/acs-probe/sysreq-line-hold.txt`）: 行を出している間に届いた 5 行目の LATE は、
+   * Reset で行を閉じるまで出なかった（`20260927-sysreq-line-hold`）
+   */
+  private sysReqLineOpen = false;
+  /**
+   * **保留が始まったレコードの、それより前の WTD の CC2（警報・メッセージ待ち）**。ACS は `processWCC2` をレコードの終わりで呼ぶので、
+   * `checkContention` で止まっている間は効かず、抜けて残りを処理し終えてから効く（実機の ACS のコア: DSM の HOLDCC2 で、メッセージ待ちは Reset の後に点いた）。
+   * 止めた出力を流し終えたときに当てる（`releaseHeld`）
+   */
+  private heldCc2: { alarm: boolean; messageWaiting?: boolean } | undefined;
+  /** 保留が始まったレコードの残り（組み直して溜めの先頭へ置いたもの）。これを流し終えたときがレコードの終わり＝持ち越した CC2 を当てる時 */
+  private heldRemainder: Uint8Array | undefined;
   private readonly codec: Codec;
   private readonly terminalType: string;
   /** 申告する画面サイズ。Query Reply の画面能力バイトに反映する（ACS と同じ） */
@@ -448,7 +462,9 @@ export class Session5250 extends Emitter<SessionEvents> {
     const snap = this.buf.snapshot(this.id, this.keyboardLocked);
     // メッセージ待ち表示は画面バッファではなくセッションの状態なので、ここで重ねる。
     // **点いているときだけ付与する**（`ScreenSnapshot.messageWaiting` の約束）
-    return this.messageWaiting ? { ...snap, messageWaiting: true } : snap;
+    const withMw = this.messageWaiting ? { ...snap, messageWaiting: true } : snap;
+    // SysReq の行を出している（コアが持つ。ホストの CLEAR UNIT・WEC で閉じたら画面の側も閉じる。`20260927-sysreq-line-hold`）
+    return this.sysReqLineOpen ? { ...withMw, sysReqLine: true } : withMw;
   }
 
   /** ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可 */
@@ -522,12 +538,33 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (seq !== undefined && this.buf.systemMessageSeq !== seq) return false;
     this.buf.systemMessage = undefined;
     this.buf.systemMessageArea = undefined;
+    this.releaseHeld();
+    return true;
+  }
+
+  /**
+   * **SysReq の行を出した・閉じた**（画面の側の知らせ。`sysReqLineOpen`）。出している間はホストの WTD を止め、閉じたら止めた出力を順に流す。
+   * 行から SysReq を送ったときは送った後で閉じる（`sendAid`。ACS もシステム要求を送ってから `clearSysreqMode`）
+   */
+  setSysReqLine(open: boolean): void {
+    if (open) {
+      if (this.sysReqLineOpen) return; // 開いていれば何もしない（ACS `processSysReq` も同じ）
+      this.sysReqLineOpen = true;
+      this.emit("screen", this.snapshot());
+      return;
+    }
+    if (!this.sysReqLineOpen) return;
+    this.sysReqLineOpen = false;
+    this.releaseHeld();
+  }
+
+  /** 止めていたホストの出力を順に流す（エラーのメッセージ・SysReq の行のどちらかがまだ出ていれば、流す途中でまた止まる） */
+  private releaseHeld(): void {
     this.holdingForHostError = false;
     // 閉じたセッションでは流さない（応答を送る先が無い）
     if (this.state === "closed") this.hostHeld = [];
     while (!this.holdingForHostError && this.hostHeld.length > 0) this.handleRecord(this.hostHeld.shift()!, true);
     this.emit("screen", this.snapshot());
-    return true;
   }
 
   /**
@@ -539,6 +576,10 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 止めたホストの出力〔と、その後ろの READ〕が流れてから送る）。Attn / SysReq も抜ける——抜けないと、ホストが返す CANCEL INVITE まで溜まり、
     // その応答が出ずにホストが止まる（独立点検の指摘）。欄の値を書く呼び出し側は、書く前に抜けること（`dismissHostError`。流した画面に書くため）
     this.dismissHostError();
+    // SysReq の行を出したまま別の AID が来たら、行を閉じて止めた出力を流してから送る（MCP・HLLAPI・画面のボタン）。
+    // ⚠ ACS は行の間の Enter 以外の AID を操作員エラー 0006 にして送らない（`processAIDCode`）。画面の側はそうする（`EmulatorPane`）が、
+    // 自動操作を画面の側の行で止めないため、コアは閉じて送る（`20260927-sysreq-line-hold` decisions）
+    if (key !== "SysReq" && this.sysReqLineOpen) this.setSysReqLine(false);
     // **フラグレコードだけは施錠中でも通す。**
     //
     // 5250 の Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では
@@ -613,6 +654,8 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 元の AID の待ち（`pendingAid`）はそのまま生かす。ホストが Attn に応えて画面を返せば、
       // その画面のアンロックで元の待ちが解ける（それが「前の要求を切った」ということ）。
       this.telnet.sendRecord(record);
+      // SysReq を送ったら行を閉じ、止めていた出力を流す（ACS は送ってから `clearSysreqMode`）
+      if (key === "SysReq") this.setSysReqLine(false);
       return Promise.resolve({ screen: this.snapshot(), timedOut: false });
     }
     return this.sendAndWait(record, opts.timeoutMs);
@@ -795,14 +838,18 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private handleRecord(record: Uint8Array, replay = false): void {
+    // 保留が始まったレコードの残りか（その終わりで、持ち越した CC2 を当てる）
+    const isRemainder = replay && record === this.heldRemainder;
     // エラーのメッセージの間に止めた WTD がある間は、後ろのレコードも溜める（ACS はデータ処理のスレッドごと止まる）
     if (this.holdingForHostError && !replay) {
       this.hostHeld.push(record);
       // **溜めすぎたら抜ける**——ACS は受信を止めるので TCP で背圧が掛かるが、当 PJ は受け続けるので際限なく積もりうる。
       // 上限を超えたらエラー状態を抜けて流す（放置されたエラーでホストの出力を失わないため）
       if (this.hostHeld.length > HOST_HELD_LIMIT) {
-        this.warn(`host output held for a host error exceeded ${HOST_HELD_LIMIT} records; leaving the error state`);
-        this.dismissHostError();
+        // エラーのメッセージでも SysReq の行でも抜ける（行だけの保留で `dismissHostError` が何もしないと、溜めが際限なく増える。独立点検の must）
+        this.warn(`host output held for a host error or the system request line exceeded ${HOST_HELD_LIMIT} records; releasing it`);
+        this.sysReqLineOpen = false;
+        if (!this.dismissHostError()) this.releaseHeld();
       }
       return;
     }
@@ -886,13 +933,25 @@ export class Session5250 extends Emitter<SessionEvents> {
         return;
       }
       const result = applyDataStream(data, this.buf, this.codec, this.warn, {
-        holdWtd: () => this.buf.systemMessage !== undefined
+        holdWtd: () => this.buf.systemMessage !== undefined || this.sysReqLineOpen,
+        // CLEAR UNIT・CUA・WEC は SysReq の行を閉じる（ACS `clearSysreqMode`）。その後ろの WTD は行では止めない（エラーなら止める）
+        onClearSysReq: () => {
+          this.sysReqLineOpen = false; // 画面へはこのレコードの画面（`sysReqLine` が消える）で伝わる
+        }
       });
       result0 = result;
       if (result.heldFrom !== undefined) {
         // 止めた WTD から後ろを 1 本のレコードに組み直して溜めの先頭へ（オペコードは同じ。読むのはオペコードとデータだけ）
         this.holdingForHostError = true;
-        this.hostHeld.unshift(buildRecord(parsed.opcode, data.subarray(result.heldFrom)));
+        const remainder = buildRecord(parsed.opcode, data.subarray(result.heldFrom));
+        this.hostHeld.unshift(remainder);
+        // このレコードの保留の前の CC2 を、残りの終わりまで持ち越す（ACS は `processWCC2` をレコードの終わりで呼ぶ）。残りがまた止まったら、前の持ち越しに重ねる
+        const prev = isRemainder ? this.heldCc2 : undefined;
+        this.heldCc2 = {
+          alarm: (prev?.alarm ?? false) || result.alarm === true,
+          ...(result.messageWaiting !== undefined ? { messageWaiting: result.messageWaiting } : prev?.messageWaiting !== undefined ? { messageWaiting: prev.messageWaiting } : {})
+        };
+        this.heldRemainder = remainder;
         // **キーボードの施錠を解き、AID の待ちはエラーの画面で解く**——ACS は WEC の処理（`DS5250.initKeyboard`）で、エラー状態なら
         // 施錠を解く（do-not-enter の表示だけ出す）。解かないと、後ろの READ まで溜まったとき施錠のまま抜けるキーも打てない・
         // AID の待ちが時間切れまで解けない（独立点検の指摘）。次の AID は `sendAid` が抜けて（止めた READ が流れて）から送る
@@ -915,7 +974,12 @@ export class Session5250 extends Emitter<SessionEvents> {
       // ⚠ **ただしその上書きは早期 return より後ろにある**ので、RESTORE ＋ READ MDT ＋ READ SCREEN が
       // 同一レコードに載ると復元値が残る（`20260920-restore-screen-parity` review ラウンド 4）。
       // 実機でその組み合わせは観測していない——**未確認**
-      if (result.restoredReadCommand !== undefined) this.readCommand = result.restoredReadCommand;
+      if (result.restoredReadCommand !== undefined) {
+        this.readCommand = result.restoredReadCommand;
+        // READ が出ている印も**退避した時点の値**に戻す（ACS `setPendingReadAndAID` は退避した `pending_read` を戻す——0 のこともある。`20260927-sysreq-line-hold`）。
+        // ~~無条件に立てる~~ は、AID に応えた後の SAVE（F1 のヘルプなど）で誤る（独立点検の must）。溜めた AID は退避していないので戻さない（未対応）
+        if (result.restoredReadOutstanding !== undefined) this.readOutstanding = result.restoredReadOutstanding;
+      }
       if (parsed.opcode === OPCODE.CANCEL_INVITE) {
         // **Attn / SysReq を成立させる要**。ホストは Attn/SysReq を受けると invite を取り消し、
         // この返事が来るまで次のデータを送らない（実機で対照実験済み。返さないと
@@ -927,6 +991,8 @@ export class Session5250 extends Emitter<SessionEvents> {
         // 必ず書き込みを送ってくるので取り残されない。万一来なくても sendAid のタイムアウトが戻す。
         this.telnet.sendRecord(buildCancelInviteAck());
         if (this.state === "ready") this.state = "locked";
+        // 取り消された READ はもう出ていない（ACS の CANCEL INVITE は `pending_read = 0`。`20260927-sysreq-line-hold`）
+        this.readOutstanding = false;
         // ここで return しない: データ部は空なので後続処理は無害で、画面イベントの発火判定を
         // 他の opcode と同じ道に通しておく（Cancel Invite だけ別扱いにする理由が無い）。
       }
@@ -951,7 +1017,7 @@ export class Session5250 extends Emitter<SessionEvents> {
         // **実機では未観測**（`20260920-restore-screen-parity` review ラウンド 5）。
         // セッション側に別のスタックを持つと、早期 return や例外で段数がずれる
         // （`20260920-restore-screen-parity` の cross 点検で実測）
-        this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
+        this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand, readOutstanding: this.readOutstanding });
         // その場で戻った否定応答のレコードでは、SAVE PARTIAL の応答を次のレコードまで持ち越す（ACS の `bSavePartial`）。
         // 新しい SAVE PARTIAL は置き場を上書きする（ACS の `saveddata`）——持ち越していた古い応答は送らない
         if (req.kind === "partial") {
@@ -1045,9 +1111,21 @@ export class Session5250 extends Emitter<SessionEvents> {
       // （実機で確認。`scripts/verify-read-split-record.mjs`。`20260921-cursor-per-wtd-acs`）
       // 警報は画面更新と別に出す（画面が変わらないレコードでも鳴らすため。ACS も
       // `processWCC2` の中で `ringBell()` を呼ぶだけで、描画とは独立している）
-      if (result.alarm) this.emit("alarm");
-      // CC2 のメッセージ待ちビット（触れなかったら undefined＝前の状態を保つ）
-      if (result.messageWaiting !== undefined) this.messageWaiting = result.messageWaiting;
+      // 保留が始まったレコードの CC2 は上で持ち越した（ここでは当てない）。残りを流し終えたら、持ち越しと残りの CC2 を合わせて当てる——
+      // メッセージ待ちは**後の WTD の指定が勝つ**（ACS の `preprocessWCC2`: 消すだけの WTD は先の「点ける」を落とす。~~レコード全体の OR で点けるが勝つ~~ は誤り）
+      if (result.heldFrom === undefined) {
+        let alarm = result.alarm === true;
+        let mw = result.messageWaiting;
+        if (isRemainder && this.heldCc2 !== undefined) {
+          alarm = alarm || this.heldCc2.alarm;
+          mw = mw ?? this.heldCc2.messageWaiting;
+          this.heldCc2 = undefined;
+          this.heldRemainder = undefined;
+        }
+        if (alarm) this.emit("alarm");
+        // CC2 のメッセージ待ちビット（触れなかったら undefined＝前の状態を保つ）
+        if (mw !== undefined) this.messageWaiting = mw;
+      }
       if (result.lockKeyboard && this.state === "ready") this.state = "locked";
       if (result.readRequested) readSolicited = true;
     } catch (err) {
@@ -1194,6 +1272,9 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 繋ぎ直した先の画面は新しいので、前の接続で溜めたホストの出力は捨てる
       this.hostHeld = [];
       this.holdingForHostError = false;
+      this.sysReqLineOpen = false;
+      this.heldCc2 = undefined;
+      this.heldRemainder = undefined;
       this.readOutstanding = false;
       this.deferredAid = undefined;
       this.carriedSavePartial = undefined; // 繋ぎ直した先へは送らない（当 PJ の決め。ACS が繋ぎ直しで捨てるかは未確認）

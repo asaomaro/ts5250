@@ -501,3 +501,96 @@ describe("WsConnection: dismiss-host-error", () => {
     mgr.closeAll();
   });
 });
+
+/**
+ * **`sysreq-line`**（`20260927-sysreq-line-hold`）: 画面の側が SysReq の行を出した・閉じた。コアはこの間ホストの WTD を止める
+ * （ACS `checkContention`）。外から来る入力なので、形の誤り・予約・後始末を固定する
+ */
+describe("WsConnection: sysreq-line", () => {
+  const open = async () => {
+    const s = setup();
+    await s.conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (s.sent[0] as { sessionId: string }).sessionId;
+    s.sent.length = 0;
+    return { ...s, id, spy: vi.spyOn(s.mgr.get(id).session, "setSysReqLine") };
+  };
+
+  it("開く・閉じるをそのままセッションへ渡す", async () => {
+    const { conn, mgr, spy } = await open();
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: false }));
+    expect(spy.mock.calls).toEqual([[true], [false]]);
+    mgr.closeAll();
+  });
+
+  it("open が真偽値でなければ PROTOCOL_ERROR（呼ばない）", async () => {
+    const { conn, sent, mgr, spy } = await open();
+    for (const v of ["true", 1, null, undefined]) {
+      sent.length = 0;
+      await conn.handle(JSON.stringify({ type: "sysreq-line", open: v }));
+      expect(sent[0]).toMatchObject({ type: "error", code: "PROTOCOL_ERROR" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    mgr.closeAll();
+  });
+
+  it("**予約中は開くを受けず、閉じるは受ける**（自動操作の出力を止めない・開いたまま取り残さない）", async () => {
+    const { conn, mgr, id, spy } = await open();
+    mgr.reserve(id, "auto", "HLLAPI");
+    spy.mockClear(); // reserve 自身が閉じる
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    expect(spy).not.toHaveBeenCalled();
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: false }));
+    expect(spy).toHaveBeenCalledWith(false);
+    mgr.closeAll();
+  });
+
+  it("**予約を取ると行を閉じる**（画面の側の知らせが来ないまま止め続けない）", async () => {
+    const { conn, mgr, id } = await open();
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    expect(mgr.get(id).session.snapshot().sysReqLine).toBe(true);
+    mgr.reserve(id, "auto", "HLLAPI");
+    expect(mgr.get(id).session.snapshot().sysReqLine).toBeUndefined();
+    mgr.closeAll();
+  });
+
+  it("**開いた接続が切れたら閉じる**（セッションが猶予で残っても出力を止めたままにしない）", async () => {
+    const { conn, mgr, id } = await open();
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    conn.onSocketClose();
+    expect(mgr.get(id).session.snapshot().sysReqLine).toBeUndefined();
+    mgr.closeAll();
+  });
+
+  it("開いていない接続が切れても触らない（他の画面が開いた行を閉じない）", async () => {
+    const { conn, mgr, spy } = await open();
+    conn.onSocketClose();
+    expect(spy).not.toHaveBeenCalled();
+    mgr.closeAll();
+  });
+
+  it("**SysReq のキーが断られたら行を閉じる**（画面は送信で行を畳み、閉じる知らせを送らない）", async () => {
+    const { conn, mgr, id } = await open();
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    mgr.reserve(id, "other", "HLLAPI"); // 予約で閉じる……
+    mgr.get(id).session.setSysReqLine(true); // ……前に開いていた状態を作り直す（予約の外で開いた行が残った想定）
+    const spy = vi.spyOn(mgr.get(id).session, "setSysReqLine");
+    await conn.handle(JSON.stringify({ type: "key", key: "SysReq", sysReqText: "" }));
+    expect(spy).toHaveBeenCalledWith(false);
+    expect(mgr.get(id).session.snapshot().sysReqLine).toBeUndefined();
+    mgr.closeAll();
+  });
+
+  it("**読み取り専用のセッションは開くを受けない**（SysReq を送れないので確定で閉じられない）", async () => {
+    const sent: WsServerMessage[] = [];
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const resolver = new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await conn.handle(JSON.stringify({ type: "open", host: "h", readOnly: true }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+    expect(mgr.get(id).session.snapshot().sysReqLine).toBeUndefined();
+    mgr.closeAll();
+  });
+});
+
