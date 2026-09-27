@@ -385,6 +385,81 @@ static void wecTest(int longMsg, int row22) {
     }
 }
 
+/*
+ * **エラー状態のままメッセージ行へ WTD・RESTORE SCREEN が来たときの見え方**（`20260927-error-msgline-wtd`）。
+ * 画面: 5 行 2 桁に BASE・24 行 2 桁に MSGLINE ORIGINAL TEXT TO BE RESTORED → 0x21（ERROR ON MSGLINE）でエラー状態にする。その後:
+ * ERRMSGWTD＝WTD で 24 行 2 桁に NEW LINE24 を書く / ERRMSGRST＝0x21 の前に QsnSavScr で退避し、24 行を CHANGED に替えてから 0x21、その後 QsnRstScr で戻す
+ * （Reset の後に 24 行が CHANGED…なら RESTORE は即時に書かれて Reset の戻しで上書きされた、MSGLINE ORIGINAL…なら RESTORE は Reset の後に処理された）。
+ * 最後に READ MDT で止まる（Reset の前後の見え方を見る）
+ */
+static void errMsgLineTest(int restore) {
+    char fdbk[256];
+    Q_Bin4 rc;
+    Q_Bin4 bytesRead = 0;
+    Qsn_Inp_Buf_T buf;
+    Qsn_Inp_Buf_T saved = 0;
+    unsigned char bg[96];
+    unsigned char err[1 + 16];
+    int n = 0, en = 0, i;
+    static const unsigned char mark[] = {                      /* "MSGLINE ORIGINAL TEXT TO BE RESTORED" */
+        0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5, 0x40, 0xD6, 0xD9, 0xC9, 0xC7, 0xC9, 0xD5, 0xC1, 0xD3,
+        0x40, 0xE3, 0xC5, 0xE7, 0xE3, 0x40, 0xE3, 0xD6, 0x40, 0xC2, 0xC5, 0x40, 0xD9, 0xC5, 0xE2, 0xE3,
+        0xD6, 0xD9, 0xC5, 0xC4
+    };
+    static const unsigned char msg[] = {                       /* "ERROR ON MSGLINE" */
+        0xC5, 0xD9, 0xD9, 0xD6, 0xD9, 0x40, 0xD6, 0xD5, 0x40, 0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5
+    };
+    static const unsigned char neww[] = { 0x00, 0x00, 0x11, 0x18, 0x02, 0xD5, 0xC5, 0xE6, 0x40, 0xD3, 0xC9, 0xD5, 0xC5, 0xF2, 0xF4 };   /* SBA 24,2 "NEW LINE24" */
+    /* 退避の後・0x21 の前に 24 行を替える（RESTORE が即時に書かれたのか、Reset の戻しで上書きされたのかを見分けるため）: SBA 24,2 "CHANGED" */
+    static const unsigned char chg[] = { 0x00, 0x00, 0x11, 0x18, 0x02, 0xC3, 0xC8, 0xC1, 0xD5, 0xC7, 0xC5, 0xC4 };
+
+    bg[n++] = 0x00; bg[n++] = 0x00;
+    bg[n++] = 0x11; bg[n++] = 0x05; bg[n++] = 0x02; bg[n++] = 0xC2; bg[n++] = 0xC1; bg[n++] = 0xE2; bg[n++] = 0xC5;   /* 5,2 BASE */
+    bg[n++] = 0x11; bg[n++] = 0x18; bg[n++] = 0x02;
+    for (i = 0; i < (int)sizeof(mark); i++) bg[n++] = mark[i];
+    err[en++] = 0x22;
+    for (i = 0; i < (int)sizeof(msg); i++) err[en++] = msg[i];
+
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x11, (const char *)bg, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x11 背景)", rc, fdbk);
+    if (restore) {
+        inzFdbk(fdbk, sizeof(fdbk));
+        saved = QsnSavScr((Qsn_Inp_Buf_T *)0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnSavScr（値は入力バッファのハンドル。0 が失敗）", (Q_Bin4)saved, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)chg, sizeof(chg), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 24 行を CHANGED に)", rc, fdbk);
+    }
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)en, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x21 WRITE ERROR CODE)", rc, fdbk);
+    sleep(4);
+    if (restore) {
+        if (saved != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnRstScr(saved, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnRstScr", rc, fdbk);
+            QsnDltBuf(saved, (Q_Fdbk_T *)0);
+        }
+    } else {
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)neww, sizeof(neww), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 24 行に NEW LINE24)", rc, fdbk);
+    }
+    inzFdbk(fdbk, sizeof(fdbk));
+    buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+    if (buf != 0) {
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnReadMDT", rc, fdbk);
+        QsnDltBuf(buf, (Q_Fdbk_T *)0);
+    }
+}
+
 int main(int argc, char *argv[]) {
     char fdbk[256];
     char what[32];
@@ -993,6 +1068,8 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
             if (rc == 0) break;
         }
+    } else if (strcmp(what, "ERRMSGWTD") == 0 || strcmp(what, "ERRMSGRST") == 0) {
+        errMsgLineTest(strcmp(what, "ERRMSGRST") == 0);
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**
