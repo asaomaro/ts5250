@@ -11,3 +11,7 @@
 ## D3: 単体の SEND を IBM i の形に替えた
 
 - 以前の単体は空の SEND（`ENV_SEND` だけ）に全部を答える前提だった。ACS は空の SEND に何も答えず、IBM i はこの形を送らない。実機の形（`USERVAR IBMRSEED<シード> VAR USERVAR`）を `test/helpers/fake-transport.ts` の `IBMI_ENV_SEND` に置き、期待値を ACS の順に書き直した。
+
+## D4: #431 は CI の失敗のままマージした（手順の誤り）
+
+- tn5250 の単体だけを流し、server の単体（自前の telnet の偽のホストを持つ）を流さなかった。CI の待ちを `tail` に通して終了コードを見誤り、`UNSTABLE` のままマージした。直しは次の PR（`20260927-checkpoint-rest`）に載せた。

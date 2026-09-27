@@ -182,7 +182,12 @@ export interface AdjustSpec {
 /** 数値専用の欄に入る文字の EBCDIC（ゾーンを D にするのに下位 4 ビットだけ使う。空白・未入力は 0x40 → 0） */
 const NUMERIC_ONLY_EBCDIC: Readonly<Record<string, number>> = {
   "0": 0xf0, "1": 0xf1, "2": 0xf2, "3": 0xf3, "4": 0xf4, "5": 0xf5, "6": 0xf6, "7": 0xf7, "8": 0xf8, "9": 0xf9,
-  ".": 0x4b, ",": 0x6b, "-": 0x60, "+": 0x4e, " ": 0x40
+  ".": 0x4b, ",": 0x6b, "-": 0x60, "+": 0x4e, " ": 0x40,
+  // **英大文字**（ホストが数値専用の欄に入れた字。Field− は ACS と同じくそのバイトの下位 4 ビットを使う——`A`〔0xC1〕→ 0xD1。`20260927-checkpoint-rest`）。
+  // A〜Z は当 PJ が扱う SBCS の CCSID（37・273・290・1027 ほか）でどれも同じバイト（C1〜C9・D1〜D9・E2〜E9）。英小文字は 290 で違うので載せない（0x40 扱いのまま）
+  ...Object.fromEntries([..."ABCDEFGHI"].map((c, i) => [c, 0xc1 + i])),
+  ...Object.fromEntries([..."JKLMNOPQR"].map((c, i) => [c, 0xd1 + i])),
+  ...Object.fromEntries([..."STUVWXYZ"].map((c, i) => [c, 0xe2 + i]))
 };
 
 /** Erase EOF: カーソル位置から欄末尾までを空白にする。カーソルは動かさない */
@@ -275,7 +280,7 @@ export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean
     // `12` と打って Field− → `12   }`（`scripts/acs-probe/field-minus-numeric-only.txt`）。ホストはゾーン D を負の数として読む。
     // 生バイトで持つ（`read-response.ts` がそのまま送る）。~~表示は空白になる~~ → 表示はそのバイトの文字（`}`・`J`〜`R`。CCSID 273 の 0xD0 は `ü`）で、
     // `composables/zoneDigit.ts` が入力欄の値のセンチネルを字にする（ACS もそうする。`20260921-field-minus-zone-d` の節目 10 の独立点検 B-N3 で
-    // 表に無い字〔ホストが入れた英字など〕は下位 4 ビットを使わず 0x40 扱いになる差が残る——数値専用欄に英字が入る構成は稀で、台帳へ）
+    // ~~表に無い字〔ホストが入れた英字など〕は下位 4 ビットを使わず 0x40 扱い~~ → 英大文字は表に載せた〔`20260927-checkpoint-rest`〕。英小文字などは 0x40 扱いのまま）
     if (negative && field.numericOnly === true && s.chars.length > 0) {
       const chars = [...s.chars];
       const last = chars[chars.length - 1]!;

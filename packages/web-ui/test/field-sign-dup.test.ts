@@ -65,6 +65,13 @@ describe("Field− / Field+（純ロジック）", () => {
     const digit = fieldSign(state("000125", 6), { adjust: "right-zero", numericOnly: true }, true);
     expect(sentinelByte(digit.chars[5]!)).toBe(0xd5);
     expect(fieldSign(state("12    ", 2), { numericOnly: true }, false).chars.join(""), "Field+ は変えない").toBe("12    ");
+    // 英大文字（ホストが入れた字）は、そのバイトの下位 4 ビット（ACS `HostPlane[end] & 0x0F | 0xD0`。`20260927-checkpoint-rest`）: A〔C1〕→ D1、Z〔E9〕→ D9
+    const a = fieldSign(state("1234 A", 6), { numericOnly: true }, true);
+    expect(sentinelByte(a.chars[5]!)).toBe(0xd1);
+    const m = fieldSign(state("1234 M", 6), { numericOnly: true }, true);
+    expect(sentinelByte(m.chars[5]!)).toBe(0xd4); // M〔D4〕
+    const z = fieldSign(state("1234 Z", 6), { numericOnly: true }, true);
+    expect(sentinelByte(z.chars[5]!)).toBe(0xd9);
   });
 
   it("指定の無い欄は消去だけ（右寄せも符号も無し）", () => {

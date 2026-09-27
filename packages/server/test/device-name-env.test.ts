@@ -20,7 +20,8 @@ describe("deviceNameEnvFor", () => {
 });
 
 describe("SessionManager が装置名の展開に値を渡す", () => {
-  const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+  // IBM i の実際の SEND（`USERVAR IBMRSEED<シード> VAR USERVAR`）。当 PJ は ACS と同じく SEND の順に答える（`20260927-telnet-rest`）
+  const SEND = [0xff, 0xfa, 0x27, 0x01, 0x03, ...[..."IBMRSEED"].map((c) => c.charCodeAt(0)), 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x00, 0x03, 0xff, 0xf0];
   function capturing(): { transport: Transport; devnames: () => string[] } {
     let onData: ((d: Uint8Array) => void) | undefined;
     const sent: number[] = [];

@@ -85,7 +85,8 @@ describe("bypassSubstituteFor", () => {
 
 describe("SessionManager が自動サインオンを暗号化して送る", () => {
   // ホストの SEND（USERVAR IBMRSEED <シード 8 バイト>）
-  const SEND = [0xff, 0xfa, 0x27, 0x01, 0x03, ...[..."IBMRSEED"].map((c) => c.charCodeAt(0)), 1, 2, 3, 4, 5, 6, 7, 8, 0xff, 0xf0];
+  // IBM i の実際の SEND（`USERVAR IBMRSEED<シード> VAR USERVAR`）。当 PJ は ACS と同じく SEND の順に答える（`20260927-telnet-rest`）
+  const SEND = [0xff, 0xfa, 0x27, 0x01, 0x03, ...[..."IBMRSEED"].map((c) => c.charCodeAt(0)), 1, 2, 3, 4, 5, 6, 7, 8, 0x00, 0x03, 0xff, 0xf0];
   function capturing(): { transport: Transport; text: () => string } {
     let onData: ((d: Uint8Array) => void) | undefined;
     const sent: number[] = [];

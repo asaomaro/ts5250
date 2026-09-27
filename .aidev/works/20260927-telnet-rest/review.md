@@ -7,3 +7,7 @@
 - [nit][conv:-] JSDoc の答えの並びが自動サインオンのときだけ正しい / 対応: 両方を書いた
 - [nit][conv:-] `answerEnvSend` を export しているが直に使われていない / 対応: 対応しない（純関数の入口として残す。単体は TelnetLayer 経由）
 - [nit][conv:-] ACS は名前を前方一致で比べる / 対応: 注記した
+
+## PR レビュー（CI）
+
+- [must][conv:-] `packages/server/test/{bypass-substitute,rescue-device-name,device-name-env}.test.ts` server の単体が空の SEND（または IBMRSEED だけ）を送っていて、SEND の順に答えるようにした後に落ちた（CI の fail のまま #431 をマージした）/ 対応: IBM i の実際の SEND に替えた（`20260927-checkpoint-rest` の PR で着地）/ src: https://github.com/asaomaro/ts5250/pull/431

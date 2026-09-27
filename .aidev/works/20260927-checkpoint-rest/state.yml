@@ -1,0 +1,13 @@
+schema: 11
+slug: checkpoint-rest
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 節目 10 の独立点検で確かめられなかった懸念・残した差
+harnessRevDelivered: unknown
