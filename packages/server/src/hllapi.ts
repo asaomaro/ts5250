@@ -670,6 +670,9 @@ function searchField(snapshot: ScreenSnapshot, conn: Connection, req: HllapiRequ
 
 // ---- キー送信と待ち ----
 
+/** エラー状態を抜けない編集キー（ACS はエラー中に拒否する） */
+const HLLAPI_EDIT_ACTIONS: ReadonlySet<LocalAction> = new Set<LocalAction>(["eraseEof", "eraseInput", "delete", "backspace"]);
+
 /**
  * Send Key (3)。
  *
@@ -690,9 +693,16 @@ async function sendKey(
   if (hasUnsupported(strokes)) return { rc: HRC.UNDEFINED_COMBINATION };
 
   for (const stroke of strokes) {
+    // **編集キー以外はホストのエラー状態を抜ける**（ACS `PS5250.keyDown`: エラー中の編集キー以外で `clearErrorMode`。@R〔Reset〕・カーソルキー・AID。
+    // 抜けると止めていたホストの出力が流れる——`20260927-host-error-hold`）。文字・消去・後退は抜けない
+    if (stroke.kind !== "text" && !(stroke.kind === "local" && HLLAPI_EDIT_ACTIONS.has(stroke.action)) && "dismissHostError" in entry.session) {
+      entry.session.dismissHostError();
+    }
     const snapshot = entry.session.snapshot();
     if (stroke.kind === "text") {
       if (snapshot.keyboardLocked) return { rc: HRC.FUNCTION_INHIBITED };
+      // **ホストのエラーの間は文字を拒否する**（ACS `PS5250.keyDown` はエラー中の文字キーを入れない。@R などで抜けてから打つ）
+      if (snapshot.systemMessage !== undefined) return { rc: HRC.FUNCTION_INHIBITED };
       const field = fieldAt(snapshot, conn.cursor);
       if (!field || !isInputField(field)) return { rc: HRC.FUNCTION_INHIBITED };
       const r = writeIntoField(deps, entry, snapshot, field, conn.cursor, stroke.text, user);

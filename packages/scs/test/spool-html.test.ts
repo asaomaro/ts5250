@@ -3,6 +3,16 @@ import { renderSpoolHtml } from "../src/spool-html.js";
 import { ScsDecoder, type LogicalPage } from "../src/scs.js";
 import { codecForCcsid } from "@ts5250/ebcdic";
 
+describe("白紙のページ（`20260927-scs-empty-page`）", () => {
+  it("**FF FF の白紙も 1 枚として描き、紙の幅は帳票のいちばん広いページに揃える**", () => {
+    const pages = new ScsDecoder(37).decode(Uint8Array.from([0xc1, 0xc2, 0xc3, 0x0c, 0x0c, 0xc1, 0x0c]));
+    expect(pages.map((p) => p.rows)).toEqual([1, 0, 1]);
+    const html = renderSpoolHtml(pages);
+    expect(html.match(/<figure class="pg"/g)).toHaveLength(3);
+    expect(html.match(/class="sheet" style="width:(\d+)ch"/g)).toEqual(['class="sheet" style="width:3ch"', 'class="sheet" style="width:3ch"', 'class="sheet" style="width:1ch"']);
+  });
+});
+
 /**
  * スプール（帳票）→ 自己完結 HTML。`renderSpoolPdf` の HTML 版。
  *

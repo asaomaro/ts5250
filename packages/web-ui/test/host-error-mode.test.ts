@@ -324,3 +324,79 @@ describe("エラー中の編集キー", () => {
     expect(opmsg(w), "エラーを抜けた").toBe(norm(MSG));
   }
 });
+
+/**
+ * **抜けたことをセッションへ伝える**（`20260927-host-error-hold`）。ACS はエラーのメッセージの間ホストの WTD を止めて待ち、抜けてから流す
+ * （`DS5250.checkContention`）——コアが止めた出力を流すには、画面の側で抜けたことを知らせる必要がある
+ */
+describe("ホストのエラーを抜けたらセッションへ知らせる", () => {
+  it("**矢印で抜けると dismiss-host-error（番号つき）を送る。文字（拒否）では送らない**", async () => {
+    const sent: unknown[] = [];
+    sessionsStore.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const { input, el } = await mountPane();
+    await hostError(201);
+    el.focus();
+    await input.trigger("keydown", { key: "3" });
+    await nextTick();
+    expect(sent.filter((m) => (m as { type: string }).type === "dismiss-host-error")).toEqual([]);
+    await input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    expect(sent).toContainEqual({ type: "dismiss-host-error", seq: 201 });
+  });
+
+  it("操作員エラー（ホストのエラーでない）で抜けても送らない", async () => {
+    const sent: unknown[] = [];
+    sessionsStore.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const { input, el } = await mountPane();
+    el.focus();
+    await input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    expect(sent.filter((m) => (m as { type: string }).type === "dismiss-host-error")).toEqual([]);
+  });
+
+  it("**Reset（左 Ctrl だけ）で抜けても送る**", async () => {
+    const sent: unknown[] = [];
+    sessionsStore.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const { el } = await mountPane();
+    await hostError(202);
+    el.focus();
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", code: "ControlLeft", location: 1, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", code: "ControlLeft", location: 1, bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(sent).toContainEqual({ type: "dismiss-host-error", seq: 202 });
+  });
+
+  it("**抜けたのにセッションにエラーが残っていたら、次の画面で送り直す**（知らせが落ちたとき）", async () => {
+    const sent: unknown[] = [];
+    sessionsStore.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const { input, el } = await mountPane();
+    await hostError(204);
+    el.focus();
+    await input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    const n = sent.filter((m) => (m as { type: string }).type === "dismiss-host-error").length;
+    // 同じエラーが残った画面がもう一度届く（セッションに知らせが届かなかった）
+    sessionsStore.updateScreen(SID, snap({ systemMessage: MSG, systemMessageSeq: 204 }));
+    await nextTick();
+    await nextTick();
+    expect(sent.filter((m) => (m as { type: string }).type === "dismiss-host-error").length).toBeGreaterThan(n);
+  });
+
+  it("**自動操作の予約が解けたら送り直す**（予約中はサーバーが知らせを受けず、解けても画面は届かない）", async () => {
+    const sent: unknown[] = [];
+    sessionsStore.get(SID)!.client = { send: (m: unknown) => sent.push(m) } as unknown as WsClient;
+    const { input, el } = await mountPane();
+    await hostError(205);
+    el.focus();
+    await input.trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
+    sessionsStore.get(SID)!.reservedBy = "mcp";
+    await nextTick();
+    const n = sent.filter((m) => (m as { type: string }).type === "dismiss-host-error").length;
+    delete sessionsStore.get(SID)!.reservedBy;
+    await nextTick();
+    await nextTick();
+    expect(sent.filter((m) => (m as { type: string }).type === "dismiss-host-error").length).toBeGreaterThan(n);
+  });
+});
+

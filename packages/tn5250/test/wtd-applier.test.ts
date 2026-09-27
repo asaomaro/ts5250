@@ -358,8 +358,9 @@ describe("applyDataStream — 合成データ", () => {
   });
 
   /**
-   * **WEA（Write Extended Attribute, 0x12）は正しく2バイトだけ読み飛ばし、
-   * 同じ WTD 内の後続オーダーを失わない。**
+   * ~~**WEA（Write Extended Attribute, 0x12）は正しく2バイトだけ読み飛ばし、
+   * 同じ WTD 内の後続オーダーを失わない。**~~ → **WEA の長さ（2 バイト）は正しく読み、タイプ 5 以外は ACS と同じ否定応答で WTD を打ち切る**
+   * （`20260927-wea-sense`）。下は当時の経緯——未知オーダーの読み飛ばしで後ろを失っていた欠陥は、長さを正しく読むことで今も塞がっている。
    *
    * 修正前は `ORDER.WEA` に専用の `case` が無く、直前のテスト（未知オーダー）と同じ
    * `default:` 節に落ちていた。その節は「次の ESC＋既知コマンドまで読み飛ばす」という
@@ -369,26 +370,36 @@ describe("applyDataStream — 合成データ", () => {
    * 専用の `case` で正確にその2バイトだけを消費すれば、この取りこぼしは起きない。
    * `.aidev/works/20260914-dspfmt-field-underline-instability` decisions.md D1。
    */
-  it("WEA は属性タイプ・属性値の2バイトを消費するだけで、同じ WTD 内の後続オーダーを失わない", () => {
+  it("~~WEA は属性タイプ・属性値の2バイトを消費するだけで、同じ WTD 内の後続オーダーを失わない~~ → **タイプ 5 以外の WEA は否定応答 0x1005012D で WTD を打ち切る**（ACS。`20260927-wea-sense`）", () => {
+    // ACS `writeExtAttribute` はタイプ 5（DBCS の区間）しか受けない。実機の ACS のコアで WEA タイプ 1 は 0x1005012D・後ろの文字は書かれず・CC2 は効いた
+    // （`scripts/acs-probe/wea-sense.txt`）。~~意味的な効果は無いので読み飛ばす~~ は ACS と違った。長さ（2 バイト）を正しく読む点は変わらない
     const ffw = FFW.ID_VALUE;
     const { warns, buf, result } = apply([
       ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x08, // CC2 unlock
-      ORDER.WEA, 0x01, 0xc1, // WEA: 属性タイプ 0x01, 属性値 0xC1（意味的な効果は無い）
+      ORDER.SBA, 2, 2, ...e("AB"),
+      ORDER.WEA, 0x01, 0xc1, // WEA: 属性タイプ 0x01
       ORDER.SBA, 3, 10,
-      ORDER.SF, (ffw >> 8) & 0xff, ffw & 0xff, 0x24, 0x00, 0x05, // attr=0x24(underline), len=5
-      ...e("INI"),
-      ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00
+      ORDER.SF, (ffw >> 8) & 0xff, ffw & 0xff, 0x24, 0x00, 0x05,
+      ...e("INI")
     ]);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("WEA");
-    expect(warns[0]).toContain("0x1"); // type=0x01 が16進で出ている
-    // WEA の**後ろ**にある SF・データが正しく適用される（修正前は失われていた部分）
+    expect(result.senseCode).toBe(0x1005012d);
+    expect(warns.some((w) => w.includes("WEA attribute type 0x1"))).toBe(true);
     const snap = buf.snapshot("t", false);
-    expect(snap.fields[0]).toMatchObject({ row: 3, col: 11, length: 5, value: "INI" });
-    expect(snap.cells[2]?.[10]).toMatchObject({ char: "I", underline: true });
-    // 同じレコード内にある WRITE_TO_DISPLAY の CC2・READ も失われない
-    expect(result.unlockKeyboard).toBe(true);
-    expect(result.readRequested).toBe(true);
+    expect(snap.cells[1]!.slice(1, 3).map((c) => c.char).join("")).toBe("AB"); // 誤りの前は書かれる
+    expect(snap.fields).toEqual([]); // 後ろの SF は届かない
+    expect(result.unlockKeyboard).toBe(true); // CC2 は効く（WTD の尾部は走る）
+  });
+
+  it("**WEA の否定応答の種類**（ACS の検査の順: 画面の外 → タイプ → 値）", () => {
+    const dbcs = codecForCcsid(930);
+    const run = (bytes: number[], cdc = codec) => applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ...bytes]), new ScreenBuffer(), cdc, () => undefined);
+    expect(run([ORDER.WEA, 0x05, 0x81]).senseCode, "SBCS のセッションのタイプ 5").toBe(0x1005012d);
+    expect(run([ORDER.WEA, 0x05, 0x81], dbcs).senseCode, "DBCS のセッションのタイプ 5 は受ける").toBeUndefined();
+    expect(run([ORDER.WEA, 0x05, 0x00], dbcs).senseCode).toBeUndefined();
+    expect(run([ORDER.WEA, 0x05, 0x42], dbcs).senseCode, "タイプ 5 の値が 0x81・0x80・0x00 でない").toBe(0x1005012f);
+    expect(run([ORDER.WEA, 0x03, 0x42], dbcs).senseCode, "DBCS のセッションでもタイプ 5 以外").toBe(0x1005012d);
+    // EA で最後の桁まで消すと位置は画面の外に残る（`20260927-ea-acs`）。そこでの WEA は 0x1005012A（タイプより先に見る）
+    expect(run([ORDER.EA, 24, 80, 0x02, 0x00, ORDER.WEA, 0x01, 0x00], dbcs).senseCode).toBe(0x1005012a);
   });
 
   /**

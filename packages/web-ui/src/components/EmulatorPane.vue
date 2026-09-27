@@ -983,8 +983,27 @@ function exitErrorMode(): void {
   // **ホストのエラーだったら、メッセージ行を元に戻す**（ACS `clearErrorMode` → `restoreMsgLinePosition`。
   // 実機でも矢印・Tab で抜けると最下行のメッセージが消えた。`20260921-host-error-mode`）
   const st = state.value, seq = snapshot.value?.systemMessageSeq;
-  if (hostErrorActive.value && st && seq !== undefined) st.hostErrorDismissedSeq = seq;
+  if (hostErrorActive.value && st && seq !== undefined) {
+    st.hostErrorDismissedSeq = seq;
+    // **セッションにも伝える**——ACS はエラーのメッセージの間ホストの WTD を止めて待ち、抜けてから流す（`checkContention`。
+    // `20260927-host-error-hold`）。伝えないと止めた画面が流れない。AID で抜けるときも、キーより先にこれが届く（同じ WebSocket の順）
+    st.client?.send({ type: "dismiss-host-error", seq });
+  }
 }
+/**
+ * **抜けたのにセッションにまだエラーが残っていたら、もう一度知らせる**（WebSocket の張り直し中・予約中などで知らせが落ちると、
+ * 止めたホストの出力が流れないまま画面の側だけエラーを隠してしまう。独立点検の指摘）。画面が届くたびに見る——セッションは抜けると
+ * メッセージを外した画面を返すので、繰り返しにはならない
+ */
+watch(
+  // 自動操作の予約が解けたときも見る——予約中はサーバーが知らせを受けず、解けても画面は届かない（`reserved` だけ）ため
+  [() => snapshot.value, reservedBy],
+  ([snap]) => {
+    const st = state.value;
+    if (!snap || !st || snap.systemMessage === undefined || snap.systemMessageSeq === undefined) return;
+    if (snap.systemMessageSeq === st.hostErrorDismissedSeq) st.client?.send({ type: "dismiss-host-error", seq: snap.systemMessageSeq });
+  }
+);
 /*
  * **ホストのエラー（WRITE ERROR CODE）でもエラー状態に入る**（`20260921-host-error-mode`）。
  *

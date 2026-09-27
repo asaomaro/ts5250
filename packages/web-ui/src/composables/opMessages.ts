@@ -91,6 +91,16 @@ export const MSG_NO_ROOM = "挿入する余地がありません";
 export const MSG_FIELD_MINUS_INVALID = "この項目では Field− キーは使用できません";
 
 /**
+ * ACS のエラー 0060（`PS5250.checkDBCSField`）: E（either）欄が全角で入力中のとき、半角は SO の直後（項目の先頭）でしか打てない
+ * （打てば項目を半角に切り替えて空にする）。実機の ACS のコアで確認（`20260927-either-field-mode`）
+ */
+export const MSG_EITHER_DBCS_MODE = "この項目は全角で入力中です（半角にするには項目の先頭で打ってください）";
+/**
+ * ACS のエラー 0061（同上）: E 欄が半角のとき、全角は項目の先頭でしか打てない（打てば項目を全角に切り替えて空にする）
+ */
+export const MSG_EITHER_SBCS_MODE = "この項目は半角で入力中です（全角にするには項目の先頭で打ってください）";
+
+/**
  * **操作員エラーか**（`20260921-operator-error-mode`）。ACS はこれらで `error_mode` に入り、
  * キーボードを施錠する（`PS5250.setErrorCode` → `ECLOIA.InputInhibited() == 5`）。
  * 情報の通知（表示設定の順送り・日付の選択など）は**施錠しない**ので含めない。
@@ -108,6 +118,8 @@ export function isOperatorError(text: string): boolean {
     text === MSG_MANDATORY_ENTER_EXIT ||
     text === MSG_MANDATORY_FILL ||
     text === MSG_SELF_CHECK ||
+    text === MSG_EITHER_DBCS_MODE ||
+    text === MSG_EITHER_SBCS_MODE ||
     (Object.values(MSG_BY_REASON) as string[]).includes(text)
   );
 }

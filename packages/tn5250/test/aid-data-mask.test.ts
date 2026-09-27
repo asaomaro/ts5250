@@ -87,6 +87,23 @@ describe("SOH のマスク（欄データを送らない AID キー）", () => {
     b.clearUnit();
     expect(b.sendsDataForAid(12)).toBe(true);
   });
+
+  /**
+   * **CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE でも捨てる**（ACS `processClearFMT` → `clearSOHPFKeyTable`。`20260927-clear-ca-mask`）。
+   * 実機の ACS のコア（`scripts/acs-probe/clear-ca-mask.txt`）: SOH（F3 を CA）の後に CUA か CFT → 新しい入力欄に AB → F3 で READ は `… 33 11 07 0a c1 c2`（欄を送る）。
+   * 何も挟まなければ `… 33`（申告どおり）。~~CUA では捨てない（SFLCTL の再描画で CA キーが CF キーに戻る）~~ は実測の裏の無い判断だった
+   */
+  it.each([
+    ["CLEAR UNIT ALTERNATE", [ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]],
+    ["CLEAR FORMAT TABLE", [ESC, COMMAND.CLEAR_FORMAT_TABLE]]
+  ])("**%s でも申告を捨てる**（ACS。実機の ACS のコアで確かめた）", (_name, cmd) => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SOH, 0x07, ...HEADER_CA03_CA12]), b, codec, () => {});
+    expect(b.sendsDataForAid(3)).toBe(false);
+    applyDataStream(Uint8Array.from(cmd), b, codec, () => {});
+    expect(b.sendsDataForAid(3)).toBe(true);
+    expect(b.sendsDataForAid(12)).toBe(true);
+  });
 });
 
 describe("応答（0x52 / 0x42）でマスクが効く", () => {

@@ -6,6 +6,12 @@ const page = (lines: string[]): LogicalPage => ({ rows: lines.length, cols: Math
 const isPdf = (buf: Buffer): boolean => buf.subarray(0, 5).toString("latin1") === "%PDF-";
 
 describe("renderSpoolPdf", () => {
+  it("**白紙のページ（行 0）も 1 枚として描く**（SCS の FF FF。`20260927-scs-empty-page`）", async () => {
+    const pdf = await renderSpoolPdf([page(["A"]), { rows: 0, cols: 0, lines: [] }, page(["B"])]);
+    expect(isPdf(pdf)).toBe(true);
+    expect(pdf.toString("latin1").match(/\/Type \/Page\b/g)).toHaveLength(3);
+  });
+
   it("SBCS の論理ページを PDF に変換できる（%PDF・非空）", async () => {
     const pdf = await renderSpoolPdf([page(["   Library List", "   QSYS   System Library"])]);
     expect(isPdf(pdf)).toBe(true);

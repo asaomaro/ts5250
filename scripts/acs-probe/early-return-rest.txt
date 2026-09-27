@@ -1,0 +1,18 @@
+# **その場で戻る否定応答の残り**（実機の ACS のコア。`20260927-early-return-rest`）。DSM の試験プログラム（`scripts/host-src/dscmd.c` の READCC2 / CUANOPARM / SPROLL）。
+# READCC2＝READ MDT（CC2＝メッセージ待ち）で止まる / CUANOPARM＝WTD（CC2＝メッセージ待ち）＋引数の無い CLEAR UNIT ALTERNATE / SPROLL＝WTD＋SAVE PARTIAL＋不正な ROLL、8 秒後に WTD＋READ。
+# dump の mw= と 5 行目を見る。否定応答と SAVE PARTIAL の応答の順は `scripts/tap-proxy.mjs` を挟んで採る（記録はパスワードを含むので読み終えたら消す）。1 モードずつ PARM を替えて流す。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/early-return-rest.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READCC2')[enter]
+sleep 6000
+dump in-window
+sleep 7000
+keys [enter]
+settle 2000
+dump after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

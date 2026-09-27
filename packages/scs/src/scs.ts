@@ -186,8 +186,14 @@ export class ScsDecoder {
     const soWidth = (): number => (this.spcc === 1 ? 1 : 0);
     const siWidth = (): number => (this.spcc === 0 ? 0 : this.spcc === 2 ? 2 : 1);
 
-    const flushPage = (): void => {
-      if (maxRow === 0 && maxCol === 0) return; // 空ページは出さない
+    /**
+     * ページを閉じる。**FF は中身が無くてもページを作る**（ACS `PrintSCS5250JPS.processFormFeed` は FF ごとに `JPSPage` を積む——`FF FF` で白紙の 1 枚。
+     * `20260927-scs-empty-page`）。~~空ページは出さない~~ だと、ホストが白紙を挟んだ帳票でページが詰まった。
+     * 帳票の終わり（最後の FF の後ろ）は中身があるときだけ出す——ACS の JPS は最後の FF より後を印刷しない（`close()` は `m_pages` だけを印刷する）が、
+     * 情報を捨てることになるので今は合わせない（`.aidev/backlog/acs-parity.md` の【まとめ】SCS の解釈の差では「合わせない候補」のまま。実機の ACS の紙では未確認）
+     */
+    const flushPage = (keepEmpty = false): void => {
+      if (!keepEmpty && maxRow === 0 && maxCol === 0) return;
       const lines: string[] = [];
       const raw: (number | undefined)[][] = [];
       const shifts: ShiftMark[][] = [];
@@ -254,7 +260,7 @@ export class ScsDecoder {
           row += 1;
           break;
         case FF:
-          flushPage();
+          flushPage(true);
           row = 1;
           col = 1;
           break;
@@ -303,7 +309,13 @@ export class ScsDecoder {
           next(); // JPS は何も置かない（~~グラフィック・エラー文字 `-`~~ は PDT 経路）
           break;
         case ORDER_2B:
-          this.skip2b(next, () => i, (to) => (i = to), (v) => (this.spcc = v));
+          this.skip2b(next, () => i, (to) => (i = to), (v) => (this.spcc = v), () => {
+            // SSLD が行の途中に来たら、先に改行してから行送りを変える（ACS `JPSSingleLineDistance.process`: x が 0 でなければ CR と LF）
+            if (col !== 1) {
+              col = 1;
+              row += 1;
+            }
+          });
           break;
         default:
           if (this.isDbcs && b === SO) {
@@ -334,8 +346,15 @@ export class ScsDecoder {
    *   ~~帳票の残りを打ち切る~~ と、知らないオーダーの後ろが全部消えていた
    *
    * `2B FD .. 03` は SO/SI の描き方（SPCC）で、`setSpcc` へ渡す。`read` は次の 1 バイト（EOF で -1）。
+   * `2B D2 04 15 hh ll` は SSLD（行送りの幅）で、受けたら `onSsld` を呼ぶ（`20260927-scs-ssld-midline`）。
    */
-  private skip2b(read: () => number, pos: () => number, seek: (to: number) => void, setSpcc: (v: number) => void): void {
+  private skip2b(
+    read: () => number,
+    pos: () => number,
+    seek: (to: number) => void,
+    setSpcc: (v: number) => void,
+    onSsld: () => void
+  ): void {
     const at = pos(); // クラスの位置
     const cls = read();
     if (cls < 0) return;
@@ -362,6 +381,22 @@ export class ScsDecoder {
           if (v > 2) v = 1;
         }
         setSpcc(v);
+        return;
+      }
+      for (let k = 0; k < len - 2; k++) if (read() < 0) return;
+      return;
+    }
+    if (cls === 0xd2 && len >= 2) {
+      // **2B D2 04 15 は SSLD**（ACS `processSetSingleLineDistance`）。長さが 4 で、行送りの幅（**符号付き**の 2 バイト）が 1 以上のときだけ受ける。
+      // 行送りの幅そのものは文字のグリッドに効かない（台帳の SCS の書式オーダーの決着）が、**行の途中で受けると先に改行する**
+      // （`JPSSingleLineDistance.process`: x が 0 でなければ CR と LF。~~読み飛ばす~~ と、後ろの字が同じ行に続いた）
+      const sub = read();
+      if (sub < 0) return;
+      if (sub === 0x15 && len === 4) {
+        const hi = read(), lo = read();
+        if (hi < 0 || lo < 0) return;
+        const v = ((hi << 8) | lo) << 16 >> 16; // ACS の `makeWord` は short
+        if (v >= 1) onSsld();
         return;
       }
       for (let k = 0; k < len - 2; k++) if (read() < 0) return;

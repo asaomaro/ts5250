@@ -1,0 +1,21 @@
+# **解錠中に届いた WTD でカーソルが動くか**（実機の ACS のコア。`20260927-unlocked-wtd-cursor`）。DSM の UNLOCKWTD / UNLOCKWTDNOIC / UNLOCKWTDCC1（`scripts/host-src/dscmd.c`）。
+# 1 本目（出力だけ・CC2 で解錠・IC 5,10）→ 6 秒 → 2 本目（WTD＋READ。IC 7,10 / IC なし / CC1 0x20 と IC 7,10）。待つ間にカーソルを 9,2 へ動かす。
+# 2 本目の後のカーソル（dump）と、Enter で READ が受けたカーソル（/tmp/dscmd.log の [READ] QsnRtvReadAdr）を見る。**1 モードずつ**（PARM を替える）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/unlocked-wtd-cursor.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('UNLOCKWTD')[enter]
+sleep 3000
+dump after-first
+setcursor 9,2
+sleep 500
+dump moved
+sleep 6000
+dump after-second
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -1,0 +1,16 @@
+# **SOH の CA キーの申告を CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE が捨てるか**（実機の ACS のコア。`20260927-clear-ca-mask`）。DSM の CACUA / CACFT / CANONE（`scripts/host-src/dscmd.c`）。
+# SOH（F3 を CA）→ CUA / CFT / 何もしない → 新しい入力欄（SOH なし）→ READ MDT。AB を打って F3。READ が欄 AB を受ければ申告は捨てられた（ログ /tmp/dscmd.log の [READ]）。
+# **1 モードずつ**流す（PARM を替える）。作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/clear-ca-mask.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CACUA')[enter]
+settle 3000
+keys AB
+sleep 300
+keys [pf3]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

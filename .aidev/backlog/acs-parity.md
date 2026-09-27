@@ -332,12 +332,23 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方**が~~未確認~~（~~ACS はセルに書き、抜けるときに戻す~~。当 PJ は消す／残す。`20260926-window-error-code` D4。上の項目から割った）。
   **確かめた（`20260927-error-msgline-wtd`・PR #423）**: ACS はエラーのメッセージを出している間 **WTD を保留**し（`DS5250.checkContention`。データ処理のスレッドが止まるので後ろのレコードも並ぶ）、Reset の後に 0x21 の時点のメッセージ行を戻してから処理する。
   RESTORE は保留しないが、Reset の戻しが RESTORE の 24 行を上書きする。当 PJ は WTD でエラーのメッセージとエラー状態を Reset を待たずに終える（Reset の後の中身は同じ）。RESTORE の見え方は同じ。
-- [ ] **エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する**（ACS `DS5250.checkContention`。`20260927-error-msgline-wtd` から割った。優先度 中・深さ ◐）。
+- [x] **エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する**（ACS `DS5250.checkContention`。`20260927-error-msgline-wtd` から割った。優先度 中・深さ ◐）。
   (a) 条件は `ps.getMsgLinePos() != -1`（WEC と SysReq で立つ）。(b) 範囲は WTD（コマンドの頭とオーダーごと）——データ処理が止まるので後ろのレコード（READ など）も並ぶ。
   当 PJ の `clearSystemMessageIfTouched` による即時の消去と、画面の側のエラー状態の早い終わりはこれと食い違う。(c) CLEAR UNIT・SAVE は保留せずエラー状態を解く。RESTORE も保留しない。
   (d) 解く契機: エラー中のキー（BS などの編集系を除く）・カーソル・Reset 系のキー・Help の AID・メッセージ行のクリック・CLEAR UNIT・SAVE SCREEN・SysReq の終わり・エラーヘルプの終わり。
   (e) 要る経路: core の受信の保留と解く API、server の Reset の中継、web-ui の `hostErrorDismissedSeq` を core へ寄せる（エラー状態の置き場を直す）。
   (f) 残りの測定: SysReq 中の WTD、0x22 の WTD の部分が自分を保留しないか（デコンパイルの字面では保留しかねない——`20260926-window-error-code` の実測と突き合わせる）。
+  **エラーの分は完了（`20260927-host-error-hold`・PR）**: core はエラーのメッセージ（`systemMessage`）がある間 WTD から後ろを溜め、抜けたら順に流す（`Session5250.dismissHostError`）。
+  保留が始まったら ACS の `initKeyboard` と同じく施錠を解き、AID の待ちはエラーの画面で解く。画面の側は抜けたら `dismiss-host-error` を送り（落ちたら次の画面・予約の解除で送り直す）、
+  core はキー（Attn・SysReq を含む）・欄を書く前（ws・MCP）・HLLAPI の編集キー以外でも抜ける。実機（DSM の ERRMSGWTD / ERRMSGRST）で抜けた後の画面が ACS の Reset の後と同じ（pass=4）。
+- [x] **READ の無い WRITE ERROR CODE でも施錠を解き、先に押した AID を次の READ で送る**（下の「ホストのエラーの保留の残り」から割った）。**完了（`20260927-wec-only-unlock`）**:
+  ACS は 0x21 で `initKeyboard`（エラー状態なら施錠を解く）し、READ が出ていない間の AID を溜めて次の READ で送る（`pending_aid`・`checkPendingAid`）。後の 0x21 ~~・CC1 の施錠~~ で溜めを捨てる
+  （CC1 は `20260927-unlocked-wtd-cursor` で撤回——ワイヤの実測で ACS は捨てなかった）。
+  実機の ACS のコア（DSM の WECONLY・WECTWICE）: 0x21 の後 Reset → AB → Enter で、10 秒後の READ が F1・AB を受けた／2 回目の 0x21 で Enter は捨てられ、後の F3 が届いた。
+  当 PJ は施錠のまま AID を拒んでいた（`packages/tn5250/src/session/session.ts` の `readOutstanding`・`deferredAid`。`scripts/verify-wec-only-unlock.mjs` pass=0 → 3）。
+- [ ] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
+  ~~保留の無い WEC だけのレコードでも ACS は施錠を解く~~（上の `[x]`）。`20260927-wec-only-unlock` の残り（decisions D2）: CANCEL INVITE・WSF・オペコード・RESTORE での `pending_read` の扱い、
+  溜めた AID の間も ACS は施錠しない、Attn / SysReq で溜めを捨てるかは未確認、早い Enter の後の F3 に ACS は欄を付けない（未確認）。
 - [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
   **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
@@ -379,8 +390,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 当 PJ は溜めて、解いた後に NO_ERROR・CLEAR_PROCESSED・NO_ERROR・CLEAR_PROCESSED を返す。ACS も印刷先の障害の間はデータ処理を止め（`PSNVT5250P.processPrinterError`）、取消・再試行とも NO_ERROR——同じ。`packages/tn5250/test/printer-session.test.ts` で並びを固定。
   - ~~止めている間に 15 分のアイドルで接続が黙って死ぬか未確認~~ → **17 分**止めても切れず、解くと印刷済みになった（`HOLD_IDLE_MIN=17`）。
   - FF だけのジョブは白紙 1 ページの帳票（自動 PDF なら白紙の PDF）になる。ACS の既定の出力（JPS。`PrintSCS5250JPS.processFormFeed`）も白紙 1 ページなので変えない（decisions D2）。
-- [ ] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
+- [x] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
   手段の候補: `com.ibm.eNetwork.ECL.ECLHostPrintSession`（acshod2.jar の公開 API）で ACS のプリンターのコアを GUI 無しで当てる——試していない（`20260927-printer-hold-cancel` D2）。
+  **閉じた（`20260927-ff-report-acs-output`）**: `ECLHostPrintSession` をファイル出力でヘッドレスに動かす試作は、プロパティを揃えると初期化は通ったが `StartCommunication` から戻らず、帳票は書き出しプログラムに渡らなかった——**測る手段が確立できない**。
+  原典の読み（既定の JPS は白紙 1 ページで当 PJ と一致）で `20260927-printer-hold-cancel` D2 を据え置く。次に試すなら GUI のある ACS でファイル出力に設定して同じ取り消しを行う。
 - [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
   **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
   `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
@@ -575,7 +588,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ~~`Session.setField` は G の 12 バイト（SO/SI 抜き）の長さを検査していなかった~~ → 節目 11 の独立点検（A-M1）で `encodedFieldLength` を使うように直した（G の全角 6 字を渡すと 7 字目で
   「at most 12 bytes」で拒否する）。継続 G（CNTFLD）は区間の並びを総長で切るように直した（A-S1）。奇数バイト・未閉鎖の区間は次のオーダーを食わないことを確かめた（A-S2）。
   **WEA タイプ 5 の否定応答は、SBCS のセッションで来たときの 0x1005012D だけでなく**、ACS `writeExtAttribute` は値が 0x81／0x80／0x00 以外なら 0x1005012F（`return 2`）、
-  タイプが 5 以外なら全セッションで 0x1005012D（`return 1`）も返す（原典 `case 18` の分岐）。当 PJ はどちらも未対応（従来どおり警告して読み飛ばす）。
+  タイプが 5 以外なら全セッションで 0x1005012D（`return 1`）も返す（原典 `case 18` の分岐）。~~当 PJ はどちらも未対応（従来どおり警告して読み飛ばす）。~~ → `20260927-wea-sense` で対応した。
 - [x] **J（DBCS 専用・`only`）欄の空きの桁へ離れて打つと、途中に半角空白が残る**（`20260921-g-field-sosi` の調査で見つかった）。**完了（`20260921-j-wide-fill`・PR #410）**:
   J の欄に `あ` が入っていて、離れた空き桁へ `い` を打つと、編集の値が `あ   い`（半角空白 3）になっていた（`padDbcs` の詰め物が半角空白）。**core は J の欄の半角空白を弾く**
   （`validateFieldContent` の `isDbcsOnly`＝「全角しか入力できない」。実機に繋いだ core で `あ   い` は FIELD_TYPE・`あ　　　い` は通ることを確かめた）ので送信で止まった。
@@ -596,6 +609,18 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （全角 1 字ごと・先頭の桁・直前の位置〔行をまたぐ〕が空白・全桁ぶん端で巻き戻る）に直し、`classifyKey` に ACS の `A37`・`A39`（Alt+←/→）を足した（Ctrl+←/→ は残す）。
   単体 6 件・キー分類 1 件、旧仕様の期待 2 件を更新、mutation 9 通りのうち 6 通り検出（残り 3 つは等価変異）。**未確認**: 文字が行末から次の行へ続く画面の行頭（原典の読み）。
   ~~語 = 非空白桁の連なり・行頭は常に語頭・端で停止~~ を破棄した。Ctrl+End・Ctrl+PgDn（ACS の `C35`・`C34`）はブラウザのタブ切替と衝突するので入れない。
+- [x] **E（either）欄の半角・全角を ACS と同じく先頭でだけ切り替え、混ぜると拒否する**（【まとめ】キー編集の細部から割った）。**完了（`20260927-either-field-mode`）**:
+  ACS は欄ごとに全角の状態（`Field5250.EitherFieldDBCSOn`）を持ち続け、`PS5250.checkDBCSField` が先頭でだけ切り替える（欄を空にする）。途中で混ぜると 0060（全角の欄に半角）・0061（半角の欄に全角）。
+  状態は欄を消しても残り、ホストが欄の先頭に SO/SI を書くと立ち、同じ位置の SF では残る。実機の ACS のコア（社内機・930。`scripts/acs-probe/either-field-mode.txt` の A〜F）と同じになった:
+  当 PJ はコアの `InternalField.eitherDbcsOn`（`packages/tn5250/src/screen/buffer.ts`）をスナップショットの `Field.eitherDbcsOn` で渡し、web-ui の `eitherDbcsOn`・`eitherModeSwitch`（`ScreenGrid.vue`）が打鍵・IME・Space の全角化・Field Exit の先頭判定で同じ判定を使う。
+  単体 web-ui 12 件・コア 9 件、変異 web-ui 5・コア 6 通りすべて検出。
+- [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: 貼り付けにはこの規則を掛けていない（decisions D2）。「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）。
+  全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる。未測定）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
+  挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
+- [x] **解錠中に届いた WTD のカーソル（(f)）と、溜めた AID のカーソル・捨てる時機**（下の【まとめ】から割った）。**完了（`20260927-unlocked-wtd-cursor`）**:
+  実機の ACS のコア（DSM の UNLOCKWTD / UNLOCKWTDNOIC / UNLOCKWTDCC1）で、解錠中の WTD も IC（無ければ保留の IC）へカーソルを置いた——(f) は差ではなかった（当 PJ も同じ。`scripts/verify-unlocked-wtd-cursor.mjs`）。
+  溜めた AID は、ACS が READ のレコードの後に**押したときのカーソル**で送り、CC1 0x20 の WTD でも捨てなかった（`tap-proxy` のワイヤ）。当 PJ は CC1 で捨てて READ に返さず・WTD の後のカーソル（5,10）で送っていた
+  （`packages/tn5250/src/session/session.ts` の `deferredAid`。`scripts/verify-wec-only-unlock.mjs` の WECONLY / WECONLYW / WECTWICE が pass）。残り（decisions D2）: 送った後の画面のカーソル・CC1 0x20 以外・明示の IC は未確認。
 - [ ] **【まとめ】キー編集の細部が ACS と違う**（優先度 中〜低・深さ △・一部**要判断（方針）**）。
   委譲先 D が両側を読んで挙げたもの。**着手時に ACS 側・当 PJ 側の両方を再確認すること。**
   - **R11 の調査（2026-09-22。18 項。報告は scratchpad の `key-edit-rest`）**。**実装に値する順**: ~~(r) **J・G・E（DBCS オン）欄の Space は ACS で全角空白 U+3000 になる**~~ → 上の `20260921-dbcs-space-key` で済んだ。~~(元の記述)~~（当 PJ は J・G で「全角のみ」と拒否。
@@ -603,8 +628,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・~~Ctrl+Home（罫線）・Ctrl+F11（カーソル形）~~ → 上の `20260921-default-keys-rule-cursor` で済んだ／
     ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。~~利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断~~ → 下の「930 の申告の選択」で `20260922-katakana-variant-setting` により選べるようにした（決め打ちではなく設定に）／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
-    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
-    **E（either）欄で SBCS と DBCS を混ぜられる差**（`20260921-dbcs-space-key` の測定で判明。ACS は最初の字で状態が決まり、混ぜると拒否する）。
+    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／~~(f) 解錠中に届いた WTD でカーソルが動く（`20260927-wec-only-unlock` の実機でも出た: READ の前の空の WTD〔CC2 0x08〕で ACS はカーソルを 5,12 に残し、当 PJ は IC の 5,10 へ戻す）~~ → 下の `[x]`（`20260927-unlocked-wtd-cursor`）: 差ではなかった（ACS も動かす）。5,12 は溜めた AID の送り方の差で、合わせた。
+    ~~**E（either）欄で SBCS と DBCS を混ぜられる差**~~ → 下の `[x]`（`20260927-either-field-mode`）で済んだ。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。
     **(l) 選択を Backspace・Delete で消すときの MDT は決着**: **ACS の Backspace・Delete は選択に触れず `clearRect` に繋がらない**（GUI 層の原典で確認）。矩形選択は当 PJ も同じで、
@@ -701,9 +726,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **WTD の中のオーダーの誤りは完了（`20260927-wtd-order-sense`・PR #423）**: SBA・IC・MC・RA・EA・SOH・TD・SF・WEA の長さ不足（0x10050121）・画面の外（0x10050122）・RA / EA の後戻り（0x10050123）・
   SOH の長さ（0x1005012B）・EA の長さ（0x1005012D）を ACS の条件どおりに否定応答にし、WTD を打ち切る（CC2 は効く——ACS の尾部は走る）。長さが画面を超える TD は ACS と同じくその場で戻る（CC2 を落とす）。
   DSM（`dscmd.c` の WTDERR*）で 5 通りを出させ、ACS のコアのワイヤのセンス（`tap-proxy.mjs`）と当 PJ（`scripts/verify-wtd-order-sense.mjs` pass=15）が一致。コマンドの長さ不足は `20260927-short-command-sense` で済んだ。
+- [x] **WEA（0x12）の否定応答**（下の「否定応答・受理の残り」と【まとめ】DS5250 のその他の差の WEA タイプ 5 から割った）。**完了（`20260927-wea-sense`）**:
+  ACS `writeExtAttribute` はタイプ 5（DBCS のセッションだけ）しか受けず、画面の外 0x1005012A・タイプ 5 以外と SBCS のセッションのタイプ 5 は 0x1005012D・タイプ 5 の不正な値は 0x1005012F で WTD を打ち切る（CC2 は効く）。
+  実機の ACS のコアのワイヤ（DSM の WTDERRWEA*。社内機 930 と PUB400 37）と当 PJ（`scripts/verify-wtd-order-sense.mjs` の WEA 4 モード pass=16）が一致。以前は警告して読み飛ばし、後ろを描き続けていた（`packages/tn5250/src/protocol/wtd-applier.ts` の `case ORDER.WEA`）。
 - [ ] **否定応答・受理の残り（WTD の中）**（上の【まとめ】から割った。実機で測ってから）:
   SBA の行 1・桁 0（ACS は番地 -1 として受ける。当 PJ は例外）・SF の中身（後ろが 2〜4 バイト・FFW の上位ビット・属性 0x20 未満〔ACS は 0x10050130〕・欄の追加の失敗 0x10050125）・
-  WEA の属性の値（0x1005012D / 0x1005012F / 0x1005012A）・TD が画面の末尾を越える・WDSF の中・
+  ~~WEA の属性の値（0x1005012D / 0x1005012F / 0x1005012A）~~（下の `[x]`）・TD が画面の末尾を越える・WDSF の中・
   文字の並びが画面を越えるときの HostPlane・属性（ACS は手前の桁まで書く見込み。当 PJ は書かない——`20260927-ea-acs` D2）。
   ~~EA の属性タイプ・EA の後の書き始め・文字が画面の末尾を越える~~ → 下の `[x]` に割った。
 - [x] **EA の属性タイプ・書き始めと、画面の終わりをまたぐ書き込み**（上の「否定応答・受理の残り」から割った）。
@@ -724,10 +752,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **完了（`20260927-short-command-sense`・PR #423）**: WTD・READ（0x42/0x52/0x82）の CC、ROLL の 3 バイト、WRITE ERROR CODE（0x21/0x22）の本体が足りないレコードで、ACS と同じく 0x10050121 を返してその場で戻る
   （`wtd-applier.ts` の `tooShort`。以前は読み過ぎの例外でレコードの結果ごと捨て、応答もしなかった）。DSM（`dscmd.c` の SHORT*）で 5 通りを出させ、ACS のコアは先の WTD を書き・メッセージ待ちは点けず・否定応答（ホストの次の出力が CPFA303）、
   当 PJ も直した後に同じ（`scripts/verify-short-command-sense.mjs`）。0x22 の 0 バイトは `20260926-wec-msgline-row` D4 を破棄して否定応答に。
-- [ ] **その場で戻る否定応答の残り**（`20260927-early-return-cc2`・`20260927-short-command-sense` から割った。いずれも実機で測っていない）:
+- [x] **その場で戻る否定応答の残り**（`20260927-early-return-cc2`・`20260927-short-command-sense` から割った。いずれも実機で測っていない）:
   SAVE PARTIAL の後ろで戻ったとき、ACS は SAVE PARTIAL の応答を次のレコードの終わりに持ち越す（`bSavePartial` を先頭で捨てない）——当 PJ は同じレコードで送る。
   CLEAR UNIT ALTERNATE の引数が無いとき ACS は長さの検査を通らず読み進める（`n5 > n2`）——当 PJ は読み過ぎの例外。
   ACS の READ の CC2 は溜めない（`lastReadCCbyte2`）——当 PJ は常に効かせる。SAVE PARTIAL の前の警報は ACS では 2 回鳴る（`pendingCCbyte2` を捨てない）——当 PJ は 1 回。
+  **完了（`20260927-early-return-rest`）**: 実機（DSM の READCC2 / CUANOPARM / SPROLL・ワイヤ）で ACS のコアと当 PJ が一致（`scripts/verify-early-return-rest.mjs` pass=4）。
+  READ の CC1・CC2 は効かせない（CC1 は原典だけ）、引数の無い CLEAR UNIT ALTERNATE は 0 として消す（否定応答にしない）、その場で戻ったレコードの SAVE PARTIAL の応答は否定応答の後・次のレコードで送る（置き場は 1 つ）。
+  SAVE PARTIAL の後ろに WTD が続くとき ACS が前の警報をもう一度鳴らすことには合わせない（D1）。
 - [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
     ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／
@@ -770,9 +801,21 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   FCW 0x90xx も WDSF 0x54 も来ない。当 PJ の画面は `AB あい` と正しく出た（ACS のコアも同じ）。D9/72 は ACS も設定に関係なく無条件に応答し、Unicode の欄を受ける条件は
   Query Reply の申告（ACS の既定 OFF・当 PJ も未申告）。**当 PJ が Unicode を申告しない限り実装は要らない**（申告するなら FCW の読み・WDSF 0x54・READ 応答・web-ui の編集・Query Reply の宣言が要る。
   設計案は R11 の報告）。`scripts/build-unitest.mjs`・`scripts/diag-unifield.mjs`・`scripts/acs-probe/unicode-field.txt`（試験オブジェクトは片付けた）。
+- [x] **READ の欄データの加工（0x52・0x82・0x83）を ACS と同じにする**（下の【まとめ】から割った）。**完了（`20260927-read-alt-raw`）**:
+  ACS `DS5250.sendAll` は末尾の NUL だけを落とし（実空白は送る）、0x52 は途中の NUL を 0x40 にして符号付き数値を畳み（符号の桁が NUL でないときだけ・手前の桁が数字かは見ない）、
+  ALT（0x82・0x83）はそのまま送る。実機の ACS のコア（DSM の READALT・6 欄）: `AB C`＋実空白 6 は 3 つとも 10 バイト、`A` NUL `B` は 0x52 `c140c2`・ALT `c100c2`、`  012-` は 0x52 `4040f0f1d2`・ALT `4040f0f1f260`、
+  `     -` は 0x52 `40404040d0`。当 PJ は 3 つとも末尾の空白を落とし・NUL を空白にし・符号を畳んでいた（`scripts/verify-read-alt.mjs` pass=0 → 3）。
+  `packages/tn5250/src/protocol/read-response.ts` の `FieldDataForm`・`sendValue`（桁ごとに `cellAt` で NUL を見る）・`buildReadMdtAltResponse`、セッションは 0x82 で待たされたらそれで返す。
+- [ ] **READ の欄データの残り**（上の `[x]` から割った）: 未編集の DBCS 欄（SO/SI の構造を持つ欄）と G の欄は従来どおり末尾の空白を落とす・0x40 で埋める（ACS は末尾の NUL だけ落とし、ALT は途中の NUL もそのまま）。
+  打鍵で書き換えた欄は値の後ろが NUL になる（ACS はホストが書いた実空白を残す。ホストから見た意味は同じ）。0x42/0x72 の `flatValue` は符号の手前が数字のときだけ畳む（ACS の平坦形式の枝も数字を見ない）。
+  PC コマンドの応答（`runPcCommand`）は待たされている READ の種類を見ずに 0x52 の形で返す。
+- [x] **CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE で SOH の CA キーの申告を捨てる**（下の【まとめ】の CLEAR 系から割った）。**完了（`20260927-clear-ca-mask`）**:
+  ACS は CU・CUA・CFT のどれでも `processClearFMT` → `clearSOHPFKeyTable`。実機の ACS のコア（DSM の CACUA / CACFT / CANONE。2 回）: SOH（F3 を CA）→ CUA / CFT → 新しい入力欄に AB → F3 で
+  READ は `07 0c 33 11 07 0a c1 c2`（何も挟まなければ `07 0c 33`）。当 PJ は CU だけ捨てていた（`packages/tn5250/src/screen/buffer.ts` の `clearUnitAlternate`・`clearFormatTable`。
+  `scripts/verify-clear-ca-mask.mjs` pass=1 → 3）。
 - [ ] **【まとめ】DS5250 のその他の差（画面イメージ応答を**除く**）**（優先度 低・深さ △・WEA タイプ 5 だけ ○）。
   **着手時に両側を再確認すること。**
-  - ~~WEA タイプ 5（拡張 NLS 区間）（○）~~ → DBCS のセッションは `20260921-g-field-sosi` で済んだ（実機の DDS の G 型がこの形で送ってくる）。**残り**: SBCS のセッションで来たときの否定応答（ACS は 0x1005012D。当 PJ は警告して読み飛ばす）
+  - ~~WEA タイプ 5（拡張 NLS 区間）（○）~~ → DBCS のセッションは `20260921-g-field-sosi` で済んだ（実機の DDS の G 型がこの形で送ってくる）。~~**残り**: SBCS のセッションで来たときの否定応答（ACS は 0x1005012D。当 PJ は警告して読み飛ばす）~~ → `20260927-wea-sense` で済んだ
     - ACS: DBCS セッションでは適用する（`PS5250.writeExtAttribute`）。
     - 当 PJ: ~~すべてのタイプを読み飛ばす（`wtd-applier.ts:555-575`）。~~ → タイプ 5 の 0x81／0x80／0x00 は DBCS のセッションで適用する。それ以外のタイプは従来どおり警告して読み飛ばす。
     - ~~実機のトレースでは未観測。~~ → 実機の DDS の G 型で観測した（`scripts/acs-probe/g-field.txt`）。
@@ -783,17 +826,15 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - ~~ROLL の空いた行: ACS は旧内容を残し、当 PJ は空白にする。~~ → `20260921-roll-vacated-rows` で揃えた（社内機で DSM に ROLL を出させ、ACS のコアと当 PJ を比べた）
     - CLEAR 系の付随処理: ~~CA マスク・メッセージ行・保留中の READ・`msgLineRow` の初期化をしない。~~ → R11 の調査（2026-09-22）: ACS は CU・CUA・CFT・SOH が共通の書式初期化を通り、
       キーボード・保留 READ・CA マスク・メッセージ行・ENPTUI 構造体・グリッド面を戻す。当 PJ は **CU では CA マスクを既に捨てている**（上の書き方は誤り）が、CUA・CFT では捨てず、
-      `msgLineRow` はどれでも戻さない。ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる（実測）。**CUA の CA マスクを捨てない過去の判断は実測の裏が無く、ACS 原典と逆**——
-      DSM で CUA を出させて ACS のコアと当 PJ を比べて決める。差の多くは直後の SOH が上書きするので見えにくい。画面サイズが変わっても罫線を残す差も残る。
+      ~~`msgLineRow` はどれでも戻さない~~（`20260926-wec-msgline-row` で戻す）。ENPTUI 構造体は CFT で窓が残り、SOH で選択欄が二重になる（実測）。~~**CUA の CA マスクを捨てない過去の判断は実測の裏が無く、ACS 原典と逆**——
+      DSM で CUA を出させて ACS のコアと当 PJ を比べて決める。~~ → 下の `[x]`（`20260927-clear-ca-mask`）で CUA・CFT でも捨てるようにした。差の多くは直後の SOH が上書きするので見えにくい。画面サイズが変わっても罫線を残す差も残る。
     - ~~WSF D9/72 に応答しない~~（上の `20260921-wsf-d9-72` で済んだ。フラグ 0x80 の否定応答は下の「負応答」と一緒に）。WDSF 0x52/0x54/0x55、FCW 0x80xx/0x84xx が未対応
       （0x80xx は再順序付け・0x84xx は透過の欄（ACS `Field5250` の `FCW_RESEQUENCE` / `FCW_TRANSPARENT`）。D9/72 で Unicode を申告するようになったので、
       ~~ホストが Unicode の欄（FCW 0x90xx〜0x93xx。当 PJ は読み飛ばす）を送ってくる余地がある——扱いを確かめる~~ → **申告しないクライアントには届かない**（実機で確認。下の `[x]`）。
       R11: WDSF 0x52＝窓のカーソル制限の解除、0x54＝欄へのデータ書き込み（EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）、0x55＝マウスボタン→AID の定義。どれも応答は無い（誤りのときだけ否定応答）。
       当 PJ は警告して無視（SF の長さは正しく飛ばす）。リポジトリ内の実機の記録に 0 件。FCW 0x80xx・0x84xx は READ 応答の欄の並び・書式にしか効かず、Tab・表示・打鍵には効かない（実例 0 件）。）。
     - ~~負応答を返さない~~（上の `20260921-negative-responses` で主な 4 つを入れた。残りは上の「否定応答の残り」）。
-    - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → R11 の調査: **ACS は 0x82/0x83（ALT）では NUL も符号も加工しない**（加工するのは 0x52 と 0x42/0x72）。
-      当 PJ は ALT も 0x52 と同じに加工する（上の書き方は逆だった）。ACS は末尾の NUL だけ落とし、実空白は送る（当 PJ は落とす）。ホストが ALT を使う画面（DSM の `QsnReadMDTAlt` 系）だけの差。
-      未測定（DSM で測ってから。実装は小さい）。
+    - ~~0x82/0x83 の欄データで、NUL と符号を加工する。~~ → 下の `[x]`（`20260927-read-alt-raw`）で済んだ。
   - 注意: CFR の出力は、`DS5250.processWriteErrorCode` の中の `processWriteToDisplay` の呼び出しが欠落している。見た目が不自然な箇所は、`javap -c` で確かめる。
   （出典: `20260919-backlog-acs-triage` research N14・F4 の低、委譲先 C）
 - [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:
@@ -951,8 +992,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   続くサインオン画面は処理する（`processPassthru`）——当 PJ と同じくセッションは続く。装置名は当 PJ だけ採る（ジョブ名の出どころ。`packages/server/src/session-manager.ts` の `entry.job`。decisions D1——**暫定**）。
   経路を `packages/tn5250/test/session.test.ts` の I906・Z123 のテストで固定（変異: I906 を成功の表から外すと落ちる）。ACS のコアの dump に起動応答のコード・装置名・`wsidReady` を足した（`scripts/acs-probe/AcsProbe.java`・`startup-i906.txt`）。
   ~~ACS が I906 でどう振る舞うかは実機で測っていない~~ → 社内機（QRMTSIGN *FRCSIGNON）へ自動サインオンを要求しても ACS のコア・当 PJ ともに **I902**＋サインオン画面で、I906 は出させられなかった。
-- [ ] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
+- [x] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
   あわせて: ACS は応答コードを各バイトの下位 4 ビットの数字で分岐するので、拒否の表の数に当たる未知の文字列を ACS は拒否・当 PJ は装置名があれば開く（実在するかは未確認。同 research F7）。
+  **閉じた（`20260927-i906-realhost`）**: 社内機（QRMTSIGN *FRCSIGNON・QPWDLVL 0）で ACS のコアの自動サインオンを平文・暗号化の両方で試し、どちらも I902＋サインオン画面。
+  出させるにはシステム値の変更か誤った資格情報が要り、共有の実機では行わない——**実機で確かめる手段が無い**。`20260927-startup-code-others` D1（装置名を採る）は暫定のまま据え置く。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり
@@ -971,6 +1014,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   空白（0x40）も「空白を描く」だけ。R11 の調査で本物の `PrintSCS5250JPS` を headless で動かして当 PJ の `ScsDecoder` と桁単位で突き合わせ、`ABCDEF` CR `␠␠␠XY` は ACS が A B C を残し（`ABCXYF`）、
   当 PJ は空白で消していた（`␠␠␠XYF`）と確かめた。`put`・`putWide`（`packages/scs/src/scs.ts`）で、空白（全角空白も）は書き込み先に字があれば書かず位置だけ進める。
   実採取 3 件は新旧で不変。単体 7 件、mutation 8 通り検出。
+- [x] **SCS の SSLD が行の途中に来たら先に改行する**（下の【まとめ】から割った）。**完了（`20260927-scs-ssld-midline`）**: ACS の JPS は受けた SSLD（長さ 4・幅 1 以上）で
+  x が 0 でなければ CR と LF を処理してから行送りを変える（`JPSSingleLineDistance.process`）。当 PJ は読み飛ばして後ろの字を同じ行に続けていた（`packages/scs/src/scs.ts` の `skip2b`）。
+  原典だけ（行の途中に SSLD を置く帳票をホストに作らせる手段が無く、実機では未実測）。
+- [x] **SCS の FF は中身が無くてもページを作る**（下の【まとめ】から割った）。**完了（`20260927-scs-empty-page`）**: ACS の JPS は FF ごとに `JPSPage` を積み（`processFormFeed`）、白紙も 1 枚として印刷する。
+  当 PJ は空ページを出していなかった（`packages/scs/src/scs.ts` の `flushPage`）。HTML の白紙は帳票のいちばん広いページの幅で描く。最後の FF の後ろは従来どおり出す（「合わせない候補」のまま）。原典だけ（ACS の紙とは未突き合わせ）。
 - [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。
   **着手時に両側を再確認すること。**
   - ~~1 バイトの制御（中・安い）~~ → 上の `20260921-scs-controls-acs` で済んだ
@@ -983,8 +1031,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
       `spool-html.ts`・`ReportText.vue`・`pdf.ts` で描く（`print-windows.ts` は未対応になる）。**実帳票（重ね打ちを含むもの）を 1 件採ってから着手する**
     - 書式オーダー（SPPS・SHM・SVM・SCD・SLD・SHT）: R11 で決着——**JPS は SHM・SVM・STAB を未実装**（ログだけ）、SHF/SVF の余白とタブは空処理、SPPS・SLD・SCD・SFG は用紙の向き・縮尺・字幅・行送りという物理量だけを変え、
       **文字のグリッド（桁・行・改ページ）には効かない**。実採取 3 件を本物の JPS と桁単位で突き合わせて一致（A は 355 桁・C は 215 桁で不一致 0。B は SIT が無いために ACS が全角を詰める 8 桁だけ違い、SIT を足すと 330 桁で 0）→ **実装しない**。
-      **グリッドに効く例外は 2 つ**（別項目）: SSLD（`2B D2 04 15`）が行の途中に来ると ACS は先に CR+LF してから適用する（当 PJ は読み飛ばし）／SFSS（`2B FD .. 02`）の倍幅（0x20）は 1 字の進みを 2 倍にする（当 PJ は無視）。
-    - **台帳に無かった差**（R11 の合成・コード読み）: **空ページ**——ACS は FF ごとにページを作る（FF FF で空白の 1 枚）。当 PJ は空ページを出さない（`scs.ts` の `flushPage`。決定の記録なし）／
+      **グリッドに効く例外は 2 つ**（別項目）: ~~SSLD（`2B D2 04 15`）が行の途中に来ると ACS は先に CR+LF してから適用する（当 PJ は読み飛ばし）~~（下の `[x]`）／SFSS（`2B FD .. 02`）の倍幅（0x20）は 1 字の進みを 2 倍にする（当 PJ は無視）。
+    - **台帳に無かった差**（R11 の合成・コード読み）: ~~**空ページ**——ACS は FF ごとにページを作る（FF FF で空白の 1 枚）。当 PJ は空ページを出さない（`scs.ts` の `flushPage`。決定の記録なし）~~（下の `[x]`）／
       **最後の FF が無いジョブ**——ACS の JPS は最後の FF より後を印刷しない（コードと headless で確認）。当 PJ は出す。**ACS が情報を捨てている例なので合わせない候補**（実機の ACS の紙では未確認）／
       **DGL（罫線）**——ACS は線を描く・当 PJ は無視（実帳票の頻度は未確認）／SIT の無い DBCS の詰め方。
     - ~~ジョブ終了の判定（ACS はヘッダの byte7=0x08、当 PJ は長さ 17）~~ → `20260921-printer-acs-declaration` で揃えた

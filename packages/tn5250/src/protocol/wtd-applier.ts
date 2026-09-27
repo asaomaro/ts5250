@@ -49,6 +49,19 @@ export interface ApplyResult {
    */
   wsfReplies: WsfReply[];
   /**
+   * **ホストのエラーのメッセージを出している間に来た WTD の位置**（`data` の中の ESC の添字。`20260927-host-error-hold`）。
+   * ACS は WRITE ERROR CODE のメッセージを出している間、WTD の処理の頭で待ち（`DS5250.checkContention`）、エラー状態を抜けてから処理する。
+   * 立っていれば、ここから後ろ（WTD とその後ろのコマンド）はまだ処理していない——呼び出し側が溜めて、抜けたときに処理する
+   */
+  heldFrom?: number;
+  /** このレコードに WRITE ERROR CODE（0x21 / 0x22）があった（ACS はここで `initKeyboard`＝エラー状態なら施錠を解く。`20260927-wec-only-unlock`） */
+  errorCodeWritten?: true;
+  /**
+   * **その場で戻る否定応答で終わった**（`abortRecord`）。ACS はこのときレコードの終わりの処理を飛ばし、SAVE PARTIAL の応答を
+   * 次のレコードの終わりで送る（`bSavePartial` を先頭で捨てない。`20260927-early-return-rest`。実機のワイヤでも否定応答の後に来た）
+   */
+  earlyReturn?: boolean;
+  /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
    * 先へ進まない（SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
@@ -177,7 +190,9 @@ export function applyDataStream(
   data: Uint8Array,
   buf: ScreenBuffer,
   codec: Codec,
-  warn: WarnFn = () => {}
+  warn: WarnFn = () => {},
+  /** `holdWtd`: WTD を処理する前に聞く。true なら WTD から後ろを処理せず `heldFrom` を返す（ホストのエラーの保留。`ApplyResult.heldFrom`） */
+  opts: { holdWtd?: () => boolean } = {}
 ): ApplyResult {
   const r = new ByteReader(data);
   const result: ApplyResult = {
@@ -216,6 +231,7 @@ export function applyDataStream(
       buf.cursorAddr = cursorBeforeRecord;
       result.cursorSet = true;
     }
+    if (errorCodeWritten) result.errorCodeWritten = true;
     result.lastWrite = buf.lastWrite;
     return result;
   };
@@ -234,6 +250,7 @@ export function applyDataStream(
    */
   const abortRecord = (sense: number): ApplyResult => {
     result.senseCode = sense;
+    result.earlyReturn = true;
     result.alarm = committedCc2.alarm;
     if (committedCc2.messageWaiting === undefined) delete result.messageWaiting;
     else result.messageWaiting = committedCc2.messageWaiting;
@@ -267,8 +284,11 @@ export function applyDataStream(
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
         // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
-        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）
-        if (r.u8() !== 0x00) {
+        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）。
+        // **引数が無い（レコードの終わり）なら 0 として消す**——ACS の長さの検査（`n5 > n2`）はちょうど引数が無い形を通し、実機の ACS のコアでも
+        // 否定応答にせず画面を消した（`20260927-early-return-rest`。ACS はレコードの外を読むが、受信の置き場はレコードごとに 0 で埋める〔`clearSaveBuff`〕ので
+        // 読むのは常に 0。以前の当 PJ は読み過ぎの例外でレコードごと捨てた）
+        if ((r.remaining > 0 ? r.u8() : 0x00) !== 0x00) {
           warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
           return abortRecord(SENSE.CLEAR_UNIT_ALTERNATE_PARAM);
         }
@@ -391,6 +411,11 @@ export function applyDataStream(
         result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY: {
+        // **エラーのメッセージを出している間は WTD を処理しない**（ACS `checkContention`。長さの検査より前——ACS も WTD の頭で待つ）
+        if (opts.holdWtd?.()) {
+          result.heldFrom = r.offset - 2;
+          return finish();
+        }
         const cut = tooShort(2, "write to display"); // CC1・CC2
         if (cut) return cut;
         const out = applyWtd(r, buf, codec, result, warn, cursorState);
@@ -445,8 +470,10 @@ export function applyDataStream(
       case COMMAND.READ_INPUT_FIELDS: {
         const cut = tooShort(2, "read"); // CC1・CC2
         if (cut) return cut;
-        applyCc(r.u8(), buf, result);
-        applyCc2(r.u8(), result);
+        // **READ の CC1・CC2 は効かせない**（ACS は `lastReadCCbyte1/2` に控えるだけ。CC2 は先に AID が溜まっていたときだけ効く——
+        // `checkPendingAid`。当 PJ の先打ちは画面の側なので、その場合は拾えない）。実機の ACS のコアでも、READ MDT の CC2＝メッセージ待ちを
+        // 点けるは点かなかった（`20260927-early-return-rest`）。**CC1 は原典の読みだけで実機では測っていない**。~~CC1 で MDT を戻す・CC2 を効かせる~~
+        r.skip(2);
         result.readRequested = true;
         // **どの Read で待つかを残す。** `0x42` だけ応答の形式が違う
         // （SBA 無し・全欄・欄長そのまま。`buildReadInputFieldsResponse` の JSDoc に実測ごと控えた）
@@ -848,7 +875,7 @@ function applyWtd(
           if (target < addr) return fail(SENSE.ORDER_BACKWARD, `EA target ${target} < current ${addr}`);
           if (type === 0x00 || type === 0xff) buf.eraseRange(addr, target);
           // 値は長さの誤りと同じ 0x1005012D（ACS も同じ値を返す）
-          else if (type !== 0x05 || !codec.decodeDbcsPair) return fail(SENSE.EA_LENGTH, `EA attribute type 0x${type.toString(16)} not supported`);
+          else if (type !== 0x05 || !codec.decodeDbcsPair) return fail(SENSE.ATTRIBUTE_TYPE, `EA attribute type 0x${type.toString(16)} not supported`);
           addr = target + 1;
         }
         eaAtEnd = addr === buf.rows * buf.cols;
@@ -911,28 +938,28 @@ function applyWtd(
         // `tn5250_session_write_extended_attribute()` の2つの独立した参照実装で確認済み。
         // `.aidev/works/20260914-dspfmt-field-underline-instability` research.md F7）。
         //
-        // **意味的な効果（拡張属性の実際の見た目への反映）は実装しない**——上記の
-        // 2つの参照実装もどちらも実装を見送っており、IBM の正式仕様書での確認も
-        // 取れていないため、憶測で実装すると誤った見た目を作り込むリスクがある。
+        // ~~**意味的な効果（拡張属性の実際の見た目への反映）は実装しない**~~ → タイプ 5 は効かせ、それ以外は否定応答で打ち切る（下。ACS `writeExtAttribute`）。
         //
-        // **ここが本質: `default:` 節（未知オーダー）に落とさないこと。** WEA の
-        // バイト数（2）は既知なので、正確に2バイトだけ消費して次のオーダーへ進める。
-        // `default:` 節に落ちると、次の ESC＋既知コマンドが見つかるまで読み飛ばす
-        // 復旧処理が働き、WEA より後ろの同じ WTD 内の全オーダー
-        // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
+        // **`default:` 節（未知オーダー）に落とさないこと。** WEA のバイト数（2）は既知なので正確に 2 バイト読む。
+        // `default:` 節に落ちると、次の ESC＋既知コマンドまで読み飛ばす復旧処理が働き、後ろのオーダーを失う
+        // （~~正確に2バイトだけ消費して次のオーダーへ進める~~——否定応答のときは進まず打ち切る）。
         if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "WEA too short");
         const attrType = r.u8();
         const attrValue = r.u8();
         // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり。
         // **0x00 は区間の旗を変えない**（ACS の `case 0` は現在位置の印を外すだけで `isInExtNLSSegment` に触れない。~~0x00 で区間を終える~~ は原典・実測の裏づけの無い推測だった。
         // 独立点検 A-S3）。区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260921-g-field-sosi`）
-        if (attrType === 0x05 && codec.decodeDbcsPair && (attrValue === 0x81 || attrValue === 0x80 || attrValue === 0x00)) {
-          if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
-          break;
+        // **それ以外は否定応答で WTD を打ち切る**（ACS `writeExtAttribute` の戻り値と `processWriteToDisplay` の `case 18`。`20260927-wea-sense`）。検査の順も ACS と同じ:
+        // 今の位置が画面の外（EA で最後の桁を消した後など）→ 0x1005012A / タイプが 5 でない・SBCS のセッションのタイプ 5 → 0x1005012D / タイプ 5 の値が 0x81・0x80・0x00 でない → 0x1005012F。
+        // ~~警告して読み飛ばす~~（色・桁区切りを WEA で受ける経路は ACS に無い——台帳の DSPFMT の項）
+        if (addr >= buf.rows * buf.cols) return fail(SENSE.WRITE_PAST_END, `WEA at ${addr} past the end of the screen`);
+        if (attrType !== 0x05 || !codec.decodeDbcsPair) {
+          return fail(SENSE.ATTRIBUTE_TYPE, `WEA attribute type 0x${attrType.toString(16)} not supported${attrType === 0x05 ? " in an SBCS session" : ""}`);
         }
-        warn(
-          `WEA order (type=0x${attrType.toString(16)}, value=0x${attrValue.toString(16)}) received — not applied`
-        );
+        if (attrValue !== 0x81 && attrValue !== 0x80 && attrValue !== 0x00) {
+          return fail(SENSE.ATTRIBUTE_VALUE, `WEA type 5 value 0x${attrValue.toString(16)} not supported`);
+        }
+        if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
         break;
       }
       case ORDER.UNKNOWN_1C:
@@ -1119,6 +1146,12 @@ export const SENSE = {
   SOH_LENGTH: 0x1005012b,
   /** EA の長さが 2〜5 でない */
   EA_LENGTH: 0x1005012d,
+  /** 属性タイプが扱えない（ACS `SC_Invalid_AttributeType`。EA のタイプ・WEA のタイプ。`EA_LENGTH` と同じ値——ACS は EA の長さの誤りにも同じセンスを使う） */
+  ATTRIBUTE_TYPE: 0x1005012d,
+  /** 属性の値が扱えない（ACS `SC_Invalid_Attribute`。WEA タイプ 5 の値） */
+  ATTRIBUTE_VALUE: 0x1005012f,
+  /** 書く位置が画面の外（ACS `SC_WritePastDisplayEnd`。WEA） */
+  WRITE_PAST_END: 0x1005012a,
   ROLL_PARAM: 0x1005012c,
   CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
   /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */

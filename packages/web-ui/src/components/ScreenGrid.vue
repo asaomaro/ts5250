@@ -72,6 +72,8 @@ import { isFieldExitRequired, fieldExitRejection } from "../composables/mandator
 import {
   MSG_PROTECTED,
   MSG_NO_ROOM,
+  MSG_EITHER_DBCS_MODE,
+  MSG_EITHER_SBCS_MODE,
   MSG_FIELD_MINUS_INVALID,
   MSG_BY_REASON,
   MSG_OPT_HINTS,
@@ -2081,7 +2083,7 @@ function takeMdtKeyed(): boolean {
 function spaceToFullWidth(f: Field, ch: string): string {
   if (ch !== " ") return ch;
   if (f.dbcsType === "only" || f.dbcsType === "pure") return "\u3000";
-  if (f.dbcsType === "either" && edit !== undefined && edit.chars.some((c) => isFullWidth(c))) return "\u3000";
+  if (f.dbcsType === "either" && eitherDbcsOn(f, edit)) return "\u3000";
   return ch;
 }
 /** 修飾キーの単独押下（「出た」状態を下ろさない。ACS に届くキーではない） */
@@ -2107,6 +2109,8 @@ let composeStart = 0; // IME 合成を開始した欄内桁（compositionend で
 let composePrefixLen = 0; // 合成中の <input> に残した prefix の文字数（確定分の切り出し起点）
 // 合成開始時に選択を削除したか。削除したなら確定文字は「挿入」で跡を埋める（上書きだと後続まで食う）
 let composeReplacedSelection = false;
+// 合成開始時に選択を消す前の編集状態（確定した 1 字目を E 欄の規則で拒否したとき、消した選択を戻すため）
+let composeBeforeSelection: EditState | undefined;
 
 /** DBCS 欄はライブ列ビュー編集（純論理値・非パディング・挿入モード）で扱う。 */
 function isDbcsEdit(f: Field): boolean {
@@ -2254,6 +2258,39 @@ function acsInsertShortOfRoom(e: EditState, ch: string, f: Field): boolean {
   if (need === 0) return false;
   const room = visLen(f) - byteLen(e.chars.join("").replace(/ +$/, ""), f);
   return room < need;
+}
+
+/**
+ * **E 欄がいま全角（DBCS）の状態か。** ACS はこれを欄ごとの状態（`Field5250.EitherFieldDBCSOn`）として持ち、欄を空にしても保つ。
+ * 値に空白でない字があればその字の種類で決まる（切り替えは先頭の字を打ったときにしか起きないので、先頭の字の種類が状態そのもの）。
+ * 空白だけなら、この画面の中で切り替えた状態（`eitherSwitched`）か、コアが持ち続けている状態（`Field.eitherDbcsOn`。ホストの SO と送った値で決まる）
+ */
+function eitherDbcsOn(f: Field, e: EditState | undefined): boolean {
+  for (const c of e?.chars ?? []) {
+    if (c === " ") continue;
+    return isWideForDbcs(c);
+  }
+  if (eitherSwitched !== undefined && eitherSwitched.index === f.index) return eitherSwitched.on;
+  return f.eitherDbcsOn === true;
+}
+/** この画面の中で E 欄を切り替えた結果（欄を空にしても保つため。新しい画面で捨てる——送った値からコアが引き継ぐ） */
+let eitherSwitched: { index: number; on: boolean } | undefined;
+
+/**
+ * **E（either）欄は最初の字で半角か全角かが決まり、混ぜられない**（ACS `PS5250.checkDBCSField`。`20260927-either-field-mode`）。
+ * - 全角で入力中（値が全角で始まる＝ACS の SO が先頭）: 半角は項目の先頭（ACS の SO の直後）でだけ打て、項目を空にして半角に切り替える。それ以外は 0060
+ * - 半角（空を含む）: 全角は項目の先頭でだけ打て、項目を空にして全角に切り替える。それ以外は 0061
+ * 実機の ACS のコア（`scripts/acs-probe/either-field-mode.txt`）: `X` の後の `あ`・空の欄の途中の `あ`・`あい` の途中の `X` は拒否、`あい` の先頭の `X` は欄が `X` だけになった。
+ * 同じ種類の字は従来どおり。`"clear"` は「空にしてから打つ」
+ */
+function eitherModeSwitch(e: EditState, ch: string, f: Field): "clear" | "sbcs-in-dbcs" | "dbcs-in-sbcs" | undefined {
+  if (f.dbcsType !== "either") return undefined;
+  const dbcsOn = eitherDbcsOn(f, e);
+  const wide = isWideForDbcs(ch);
+  if (dbcsOn === wide) return undefined;
+  if (e.cursor !== 0) return dbcsOn ? "sbcs-in-dbcs" : "dbcs-in-sbcs";
+  // 半角の欄で先頭に全角: 値が空なら切り替えるだけ（消すものが無い）
+  return "clear";
 }
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
@@ -2497,14 +2534,15 @@ function rejectExit(t: { f: Field; el: HTMLInputElement }): boolean {
   // 「欄の先頭」は ACS の `cursorSBA == startPos`。**SO が欄の先頭にあるのは型で決まる**（ACS `FFT5250` の欄の初期化）:
   //  - **J（`only`）**は欄の作成時に `startPos` へ SO を置く——**空でも SO がある**。Tab で入ったときのカーソルは `startPos+1`（実測）なので、
   //    論理位置 0 は先頭ではない
-  //  - **E（`either`）**は SO を置かない。中身が全角で始まるときだけ SO が先頭にある（列ビューが SO で始まるか）
+  //  - **E（`either`）**は全角の状態のときだけ SO が先頭にある（ACS は切り替えで SO を置き、消しても残す。`eitherDbcsOn`。
+  //    ~~中身が全角で始まるときだけ（列ビューが SO で始まるか）~~ は空にした全角の欄で外れた。`20260927-either-field-mode`）
   //  - **G（`pure`）・O（`open`）**は SO を持たない／Tab は SO を飛ばさない（`nextNonByPassInputFieldPos` の `!isDBCSOpenField()`）ので、
   //    最初の字（O は SO の桁）が先頭のまま
   // ~~中身が全角で始まるなら先頭ではない（列ビューの位置で決める）~~ は J の規則を全 DBCS 欄へ広げて G・O・空の J で外れた
   // （`20260921-field-exit-checks` の節目 10 の独立点検 B-S1。G・O は節目 9 の修正の前は合っていた回帰）。SO の桁にキャレットは止まらない
   // （`dbcsViewLayout`）ので、O の欄の「SO の次の桁」は先頭と区別できない（Tab の着地を優先して先頭に数える）
   const soFirst =
-    t.f.dbcsType === "only" || (t.f.dbcsType === "either" && isDbcsEdit(t.f) && dbcsLayoutOf(t.f).caretOf(0) === 1);
+    t.f.dbcsType === "only" || (t.f.dbcsType === "either" && isDbcsEdit(t.f) && eitherDbcsOn(t.f, edit));
   const atStart = soFirst ? false : edit.cursor === 0;
   const why = fieldExitRejection(t.f, props.edits, atStart, props.snapshot.fields);
   if (why === undefined) return false;
@@ -2774,6 +2812,7 @@ watch(
     edit = undefined;
     editFieldIndex = -1;
     fieldExitedIndex = -1;
+    eitherSwitched = undefined;
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -3264,9 +3303,21 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       emit("notice", MSG_BY_REASON[why]);
       return;
     }
+    const beforeSelection = edit;
     const replaced = deleteSelection(f, el); // 選択があれば削除（cursor が選択開始へ）→ そこへ挿入で置換
     // 選択置換の直後は「挿入」でないと消した分が埋まらないため一時的に挿入扱いにする
-    const base = replaced ? { ...edit, insertMode: true } : edit;
+    let base = replaced ? { ...edit, insertMode: true } : edit;
+    // E 欄の半角・全角の切り替え（ACS は先頭でだけ切り替え、途中で混ぜると 0060 / 0061）
+    const sw = eitherModeSwitch(base, ch, f);
+    if (sw === "sbcs-in-dbcs" || sw === "dbcs-in-sbcs") {
+      edit = beforeSelection; // 拒否した打鍵は選択も消さない（モデルだけ消えて表示と食い違わないように）
+      emit("notice", sw === "sbcs-in-dbcs" ? MSG_EITHER_DBCS_MODE : MSG_EITHER_SBCS_MODE);
+      return;
+    }
+    if (sw === "clear") {
+      base = { ...base, chars: [], cursor: 0 };
+      eitherSwitched = { index: f.index, on: isWideForDbcs(ch) };
+    }
     const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
       // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
@@ -3816,6 +3867,7 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
   // 選択があれば削除して置換の起点にする（IME での選択置換）。無ければ native caret を合成開始桁へ。
+  composeBeforeSelection = edit;
   composeReplacedSelection = deleteSelection(f, el);
   if (!composeReplacedSelection) {
     const nativeCaret = el.selectionStart;
@@ -3882,7 +3934,23 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
     if (!acceptsChar(f, ch, sessionKind.value)) continue;
     // DBCS も SBCS と同じく上書き既定（Insert 時のみ挿入）。ただし合成開始時に選択を削除して
     // いた場合はその跡を埋めるため挿入にする（上書きだと後続まで食ってしまう）。
-    const base = replacedSelection ? { ...e, insertMode: true } : e;
+    let base = replacedSelection ? { ...e, insertMode: true } : e;
+    // E 欄の半角・全角の切り替え（打鍵と同じ規則。`eitherModeSwitch`）。途中で混ぜる字が来たらエラーで止める
+    const sw = dbcs ? eitherModeSwitch(base, ch, f) : undefined;
+    if (sw === "sbcs-in-dbcs" || sw === "dbcs-in-sbcs") {
+      const placedBefore = e.chars !== edit!.chars; // 手前の字が入っていれば入力の印を立てる
+      // 1 字目で拒否したなら、合成の始めに消した選択も戻す（打鍵の経路と同じ。手前の字が入っていれば選択はもう埋まっている）
+      edit = !placedBefore && replacedSelection && composeBeforeSelection ? composeBeforeSelection : e;
+      editFieldIndex = f.index;
+      mdtKeyed = placedBefore;
+      sync(el, f);
+      emit("notice", sw === "sbcs-in-dbcs" ? MSG_EITHER_DBCS_MODE : MSG_EITHER_SBCS_MODE);
+      return undefined;
+    }
+    if (sw === "clear") {
+      base = { ...base, chars: [], cursor: 0 };
+      eitherSwitched = { index: f.index, on: isWideForDbcs(ch) };
+    }
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
     // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が

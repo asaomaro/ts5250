@@ -363,6 +363,45 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
   it("**表に無い 0x40 未満は印字しない**（~~文字として桁に置く~~。日本語機では SBCS の状態の SI が「�」になっていた）", () => {
     expect(lines([0x0f, 0x07, 0x1b, ...E("AB")])).toEqual(["AB"]);
   });
+  /**
+   * **SSLD（`2B D2 04 15 hh ll`）が行の途中に来たら、先に改行する**（ACS `JPSSingleLineDistance.process`: x が 0 でなければ CR と LF。`20260927-scs-ssld-midline`）。
+   * 行の頭なら改行しない。長さが 4 でない・幅が 1 未満（符号付き）のものは ACS も受けないので改行しない
+   */
+  it("**SSLD が行の途中なら先に CR＋LF**・行の頭なら何もしない", () => {
+    const ssld = [0x2b, 0xd2, 0x04, 0x15, 0x00, 0x18];
+    expect(lines([...E("AB"), ...ssld, ...E("C")])).toEqual(["AB", "C"]);
+    expect(lines([...E("AB"), 0x15, ...ssld, ...E("C")])).toEqual(["AB", "C"]);
+    expect(lines([...ssld, ...E("C")])).toEqual(["C"]);
+  });
+  it("受けない SSLD（幅が 0・負・長さが 4 でない）は改行しない（ACS も受けない）", () => {
+    expect(lines([...E("AB"), 0x2b, 0xd2, 0x04, 0x15, 0x00, 0x00, ...E("C")])).toEqual(["ABC"]);
+    expect(lines([...E("AB"), 0x2b, 0xd2, 0x04, 0x15, 0xff, 0xff, ...E("C")])).toEqual(["ABC"]);
+    expect(lines([...E("AB"), 0x2b, 0xd2, 0x03, 0x15, 0x18, ...E("C")])).toEqual(["ABC"]);
+    // 長さが 1 の D2 は 3 バイトだけ進む（ACS `nextData(2+count)`。副コードを読み足すと 1 バイトずれる）
+    expect(lines([...E("AB"), 0x2b, 0xd2, 0x01, ...E("C")])).toEqual(["ABC"]);
+    // D2 の他の制御（STAB 0x01 など）はバイト数だけ読み飛ばす
+    expect(lines([...E("AB"), 0x2b, 0xd2, 0x04, 0x01, 0x00, 0x05, ...E("C")])).toEqual(["ABC"]);
+  });
+  /**
+   * **FF は中身が無くてもページを作る**（ACS `PrintSCS5250JPS.processFormFeed` は FF ごとに `JPSPage` を積む。`20260927-scs-empty-page`）。
+   * 帳票の終わり（最後の FF の後ろ）は中身があるときだけ——ACS は最後の FF より後を印刷しないが、情報を捨てるので合わせない（台帳）
+   */
+  it("**FF FF は白紙の 1 枚を挟む**（~~空ページは出さない~~）", () => {
+    const pages = new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, 0x0c, ...E("B"), 0x0c]));
+    expect(pages.map((p) => p.lines)).toEqual([["A"], [], ["B"]]);
+  });
+  it("最後の FF の後ろは、中身が無ければページにしない（NUL だけ・何も無い）／中身があれば出す（ACS は捨てるが合わせない）", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, 0x00, 0x00])).map((p) => p.lines)).toEqual([["A"]]);
+    expect(new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, ...E("B")])).map((p) => p.lines)).toEqual([["A"], ["B"]]);
+  });
+  it("先頭の FF も白紙の 1 枚（ACS も中身を見ずに積む）・DBCS モード中の FF も改ページ", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([0x0c, ...E("A")])).map((p) => p.lines)).toEqual([[], ["A"]]);
+    const dbcs = new ScsDecoder(930).decode(Uint8Array.from([0x0e, 0x44, 0x81, 0x0c, 0x44, 0x82, 0x0f]));
+    expect(dbcs).toHaveLength(2);
+  });
+  it("FF だけの帳票は白紙の 1 枚（ACS の JPS と同じ）", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([0x0c])).map((p) => p.lines)).toEqual([[]]);
+  });
   it("RNL（0x06）・RFF（0x3A）は ACS も何もしない（Unsupported）", () => {
     const pages = new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x06, ...E("B"), 0x3a, ...E("C")]));
     expect(pages).toHaveLength(1);

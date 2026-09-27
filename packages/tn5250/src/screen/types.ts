@@ -136,6 +136,11 @@ export interface Field {
   dupEnable?: boolean;
   dbcsType?: DbcsFieldType;
   /**
+   * **E（either）欄がいま全角（DBCS）の状態か**（ACS `Field5250.EitherFieldDBCSOn`）。欄を空にしても保たれる状態で、
+   * 打鍵で半角・全角を切り替えられるのは欄の先頭だけ（`20260927-either-field-mode`）。`dbcsType` と同じく**当てはまるときだけ付ける**
+   */
+  eitherDbcsOn?: boolean;
+  /**
    * 自己点検欄（`CHECK(M10)` / `CHECK(M11)`）。**末尾 1 桁がチェック・ディジット**で、
    * ACS は AID 送信時に検算して合わなければ送信を止める（`Field5250.checkModulusField`）。
    * 当方も送信前に同じ検算をする（`selfCheckDigitOk`）。

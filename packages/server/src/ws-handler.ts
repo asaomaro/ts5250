@@ -332,6 +332,8 @@ export class WsConnection {
           return await this.onPrinterStop(msg);
         case "watch-history":
           return this.onWatchHistory(msg);
+        case "dismiss-host-error":
+          return this.onDismissHostError(msg);
         case "activity":
           // 在席の合図。**監査にも操作ログにも残さない**——利用者の意図を含まないうえ、
           // 15 秒間隔で流れるので本来の記録を量で押し流す
@@ -372,6 +374,16 @@ export class WsConnection {
     // **意図しない切断**。利用者が閉じた（`close` メッセージ）のとは別物として扱う
     // ——こちらだけが繋ぎ直しの猶予に値する（`20260908-session-survives-disconnect` decisions D5）
     this.dispose("websocket closed", { transportLost: true });
+  }
+
+  /** ホストのエラー状態を抜けた（`WsDismissHostError`）。5250 のセッションだけ。自動操作の予約中は触らない */
+  private onDismissHostError(msg: WsClientMessage & { type: "dismiss-host-error" }): void {
+    if (this.session3270 !== undefined || this.sessionVt !== undefined) return;
+    if (typeof msg.seq !== "number") return this.sendError("PROTOCOL_ERROR", "dismiss-host-error needs seq", false);
+    const id = this.requireSession();
+    const entry = this.deps.sessions.get(id, this.user);
+    if (this.deps.sessions.reservationOf(id) !== undefined) return;
+    entry.session.dismissHostError(msg.seq);
   }
 
   /**
@@ -1278,6 +1290,9 @@ export class WsConnection {
       // `session-controller.ts` の `isFlagKey` の注記）。打鍵ごとにサーバーへ送る形にしない限り
       // 残せないので、この work の範囲外とした。
       const flagKey = msg.key === "Attn" || msg.key === "SysReq";
+      // **ホストのエラー状態を抜けてから欄を書く**（止めた出力を流した後の画面に書く。`20260927-host-error-hold`）。
+      // 画面の側は `dismiss-host-error` を先に送るが、届かなかった・古いクライアントでも、書く前に揃える
+      entry.session.dismissHostError();
       // **容れ物から検証する**（3270 の `onKey3270` と同じ扱い。素通しすると
       // `fields.map is not a function` が素の V8 の文言のままブラウザへ返る）
       const fields = msg.fields === undefined ? undefined : parseKeyFields(msg.fields);

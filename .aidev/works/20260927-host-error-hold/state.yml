@@ -1,0 +1,13 @@
+schema: 11
+slug: host-error-hold
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する
+harnessRevDelivered: unknown

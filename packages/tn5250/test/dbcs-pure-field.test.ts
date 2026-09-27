@@ -131,9 +131,10 @@ describe("純 DBCS の欄（G）の受信", () => {
     expect(rowText(buf, 9)).toContain("BB");
   });
 
-  it("**DBCS でないコードページでは従来どおり**（WEA5 は警告して読み飛ばし、組は半角として読む）", () => {
-    const { warns } = applied(GTST_WTD, codecForCcsid(37));
-    expect(warns.some((w) => w.startsWith("WEA order (type=0x5"))).toBe(true);
+  it("**DBCS でないコードページでは WEA5 を否定応答 0x1005012D にする**（ACS。~~警告して読み飛ばし~~。`20260927-wea-sense`・PUB400 の 37 で実測）", () => {
+    const { warns, result } = applied(GTST_WTD, codecForCcsid(37));
+    expect(result.senseCode).toBe(0x1005012d);
+    expect(warns.some((w) => w.includes("WEA attribute type 0x5 not supported in an SBCS session"))).toBe(true);
   });
 });
 

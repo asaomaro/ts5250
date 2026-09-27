@@ -9,6 +9,7 @@
  *     QsnReadInp                → READ INPUT FIELDS(0x42)
  *     QsnReadImm                → READ IMMEDIATE(0x72)
  *     QsnReadMDTImmAlt          → READ MDT IMMEDIATE ALT(0x83)
+ *     QsnReadMDTAlt             → READ MDT ALT(0x82)
  *     QsnPutOutCmd(cmd,…)       → 任意の出力コマンド（CLEAR UNIT ALTERNATE(0x20) 等）
  *
  * 呼び出し: CALL TESTLIB/DSCMD PARM('ROLLUP')
@@ -978,6 +979,7 @@ int main(int argc, char *argv[]) {
          * **WTD の中のオーダーの誤りで ACS は否定応答を返すか・CC2 は効くか**（`20260927-wtd-order-sense`）。
          * 1 本の WTD（CC2＝メッセージ待ちを点ける・5 行 2 桁に WTDERR）の後ろに誤ったオーダーを置く:
          * WTDERRSBA＝SBA の行 30 / WTDERRRA＝RA の後戻り / WTDERRSOH＝SOH の長さ 0 / WTDERREA＝EA の長さ 7 / WTDERRSHORT＝SBA が 1 バイトで終わる。
+         * WTDERRWEA1＝WEA のタイプ 1 / WTDERRWEA5X＝WEA タイプ 5 の値 0x42 / WTDERRWEA5＝WEA タイプ 5 の値 0x00（SBCS のセッションで流す）/ WTDERRWEAEND＝EA で最後の桁まで消した後の WEA。
          * EARLYROLL と同じく先にメッセージ待ちを消し、8 秒待ってからもう一度消す
          */
         static const unsigned char head[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xE6, 0xE3, 0xC4, 0xC5, 0xD9, 0xD9 };   /* CC2 01 / SBA 5,2 "WTDERR" */
@@ -986,6 +988,11 @@ int main(int argc, char *argv[]) {
         static const unsigned char soh[] = { 0x01, 0x00 };                       /* 長さ 0 */
         static const unsigned char ea[] = { 0x03, 0x06, 0x02, 0x07, 0, 0, 0, 0, 0, 0 };   /* 長さ 7 */
         static const unsigned char shrt[] = { 0x11, 0x06 };                      /* SBA の桁が無い */
+        /* WEA（`20260927-wea-sense`）: 後ろに 6 行 2 桁の「NEXT」を置き、否定応答で WTD が打ち切られるか（NEXT が書かれないか）を見る */
+        static const unsigned char wea1[] = { 0x12, 0x01, 0x20, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* タイプ 1 */
+        static const unsigned char wea5x[] = { 0x12, 0x05, 0x42, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* タイプ 5・値 0x42 */
+        static const unsigned char wea5[] = { 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* タイプ 5・値 0x00（SBCS のセッションで流す） */
+        static const unsigned char weaend[] = { 0x03, 0x18, 0x50, 0x02, 0x00, 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 }; /* EA で最後の桁まで消した後 */
         static const char off[] = { 0x00, 0x02 };
         unsigned char rec[64];
         const unsigned char *tail = sba;
@@ -995,6 +1002,10 @@ int main(int argc, char *argv[]) {
         else if (strcmp(what, "WTDERRSOH") == 0) { tail = soh; tl = sizeof(soh); }
         else if (strcmp(what, "WTDERREA") == 0) { tail = ea; tl = sizeof(ea); }
         else if (strcmp(what, "WTDERRSHORT") == 0) { tail = shrt; tl = sizeof(shrt); }
+        else if (strcmp(what, "WTDERRWEA1") == 0) { tail = wea1; tl = sizeof(wea1); }
+        else if (strcmp(what, "WTDERRWEA5X") == 0) { tail = wea5x; tl = sizeof(wea5x); }
+        else if (strcmp(what, "WTDERRWEA5") == 0) { tail = wea5; tl = sizeof(wea5); }
+        else if (strcmp(what, "WTDERRWEAEND") == 0) { tail = weaend; tl = sizeof(weaend); }
         else if (strcmp(what, "WTDERRSBA") != 0) { if (lg) { fprintf(lg, "unknown WTDERR mode\n"); fclose(lg); } return 1; }   /* 取り違えて SBA を流さない */
         memcpy(rec, head, sizeof(head));
         memcpy(rec + sizeof(head), tail, tl);
@@ -1070,6 +1081,299 @@ int main(int argc, char *argv[]) {
         }
     } else if (strcmp(what, "ERRMSGWTD") == 0 || strcmp(what, "ERRMSGRST") == 0) {
         errMsgLineTest(strcmp(what, "ERRMSGRST") == 0);
+    } else if (strcmp(what, "READCC2") == 0 || strcmp(what, "CUANOPARM") == 0 || strcmp(what, "SPROLL") == 0) {
+        /*
+         * **その場で戻る否定応答の残り**（`20260927-early-return-rest`）。先にメッセージ待ちを消してから:
+         * READCC2＝5 行に READCC2 を書き、READ MDT（CC2＝0x01 メッセージ待ちを点ける）で止まる（ACS は READ の CC2 を溜めるだけで効かせない——原典の読み）
+         * CUANOPARM＝1 本のレコードに WTD（CC2＝0x01）＋ 引数の無い CLEAR UNIT ALTERNATE（最後に置く）。8 秒待つ
+         * SPROLL＝1 本のレコードに WTD（5 行に SPROLL）＋ SAVE PARTIAL（引数 5 バイト）＋ 不正な ROLL。8 秒待って WTD、READ MDT
+         *   （ACS は SAVE PARTIAL の応答を、戻ったレコードでは送らず次のレコードの終わりで送る——原典の読み。ワイヤで見る）
+         */
+        static const unsigned char tag1[] = { 0x00, 0x00, 0x11, 0x05, 0x02, 0xD9, 0xC5, 0xC1, 0xC4, 0xC3, 0xC3, 0xF2 };            /* READCC2 */
+        static const unsigned char wtd1[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xC3, 0xE4, 0xC1 };                                  /* CC2 01 / CUA */
+        static const unsigned char wtd2[] = { 0x00, 0x00, 0x11, 0x05, 0x02, 0xE2, 0xD7, 0xD9, 0xD6, 0xD3, 0xD3 };                /* SPROLL */
+        static const unsigned char wtd3[] = { 0x00, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };                            /* 6 行 NEXT */
+        static const char sp[] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
+        static const char bad[] = { 0x05, 0x0A, 0x05 };
+        static const char off[] = { 0x00, 0x02 };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        if (strcmp(what, "READCC2") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)tag1, sizeof(tag1), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 READCC2)", rc, fdbk);
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x01, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT(CC2=01)", rc, fdbk);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        } else {
+            inzFdbk(fdbk, sizeof(fdbk));
+            cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+            if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+            if (strcmp(what, "CUANOPARM") == 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wtd1, sizeof(wtd1), cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 WTD CC2=01 → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x20, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x20 引数なし → バッファ)", rc, fdbk);
+            } else {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wtd2, sizeof(wtd2), cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 SPROLL → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x03, sp, 5, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x03 SAVE PARTIAL → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x23, bad, 3, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x23 不正な ROLL → バッファ)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutBuf（1 本のレコード）", rc, fdbk);
+            QsnDltBuf(cb, (Q_Fdbk_T *)0);
+            sleep(8);
+            if (strcmp(what, "SPROLL") == 0) {
+                for (k = 0; k < 2; k++) {
+                    inzFdbk(fdbk, sizeof(fdbk));
+                    rc = QsnPutOutCmd(0x11, (const char *)wtd3, sizeof(wtd3), 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnPutOutCmd(0x11 6 行 NEXT)", rc, fdbk);
+                    if (rc == 0) break;
+                }
+                buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+                if (buf != 0) {
+                    inzFdbk(fdbk, sizeof(fdbk));
+                    rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnReadMDT", rc, fdbk);
+                    QsnDltBuf(buf, (Q_Fdbk_T *)0);
+                }
+            }
+        }
+        for (k = 0; k < 2; k++) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
+    } else if (strcmp(what, "READALT") == 0) {
+        /*
+         * **ALT の読み取り（0x83・0x82）と 0x52 で、欄データの加工がどう違うか**（`20260927-read-alt-raw`）。
+         * MDT を立てた 4 欄を描いてから 0x83 → 0x82（Enter 待ち）→ 0x52（Enter 待ち）の順に読み、ホストが受け取ったバイト列を残す:
+         *   (5,10) 長さ10 "AB C" ＋ 実空白 6 / (7,10) 長さ10 "A" NUL "B" ＋ NUL 7 /
+         *   (9,10) 長さ6 符号付き "  012-" / (11,10) 長さ6 符号付き "   12 " /
+         *   (13,10) 長さ6 符号付き "    A-" / (15,10) 長さ6 符号付き "     -"（符号の手前が数字でないとき。ACS の原典は手前を見ずにゾーンを 0xD にする）
+         * 加工の違い（符号・NUL・末尾の実空白）をどれか 1 つの欄が必ず踏むように選んだ。
+         */
+        static const unsigned char wtd[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xD9, 0xC5, 0xC1, 0xC4, 0xC1, 0xD3, 0xE3,         /* "READALT" */
+            0x11, 0x05, 0x09, 0x1D, 0x48, 0x00, 0x24, 0x00, 0x0A,
+            0xC1, 0xC2, 0x40, 0xC3, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+            0x11, 0x07, 0x09, 0x1D, 0x48, 0x00, 0x24, 0x00, 0x0A,
+            0xC1, 0x00, 0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x09, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0xF0, 0xF1, 0xF2, 0x60,
+            0x11, 0x0B, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0xF1, 0xF2, 0x40,
+            0x11, 0x0D, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0x40, 0xC1, 0x60,
+            0x11, 0x0F, 0x09, 0x1D, 0x4F, 0x00, 0x24, 0x00, 0x06,
+            0x40, 0x40, 0x40, 0x40, 0x40, 0x60,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)wtd, (Q_Bin4)sizeof(wtd), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 試験画面)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(4096, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtInpBuf", (Q_Bin4)buf, fdbk);
+        if (buf != 0) {
+            tag = "[0x83] ";
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDTImmAlt(&bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDTImmAlt", rc, fdbk);
+            logInpBuf(buf);
+
+            tag = "[0x82] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            QsnClrBuf((Q_Handle_T)buf, (Q_Fdbk_T *)fdbk);
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDTAlt", rc, fdbk);
+            logInpBuf(buf);
+
+            tag = "[0x52] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            QsnClrBuf((Q_Handle_T)buf, (Q_Fdbk_T *)fdbk);
+            bytesRead = 0;
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "WECONLY") == 0 || strcmp(what, "WECTWICE") == 0 || strcmp(what, "WECONLYW") == 0) {
+        /*
+         * **READ の無い WRITE ERROR CODE だけのレコード**（`20260927-wec-only-unlock`）。ACS `processWriteErrorCode` → `initKeyboard` はエラー状態なら施錠を解く。
+         * 画面（5,10 に 10 桁の入力欄・IC）→ 0x21「WECONLY ERR」だけを撃つ → 10 秒待つ（この間に端末で Reset と打鍵と Enter を試す）→ READ MDT で受けた AID と欄を残す
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xE6, 0xC5, 0xC3, 0xD6, 0xD5, 0xD3, 0xE8,                /* "WECONLY" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x05, 0x0A
+        };
+        static const unsigned char err[] = { 0x22, 0xE6, 0xC5, 0xC3, 0xD6, 0xD5, 0xD3, 0xE8, 0x40, 0xC5, 0xD9, 0xD9 };  /* 属性 22 "WECONLY ERR" */
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)sizeof(err), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x21 だけ)", rc, fdbk);
+        sleep(10);
+        if (strcmp(what, "WECTWICE") == 0) {
+            /* WECTWICE: もう一度 0x21 だけを撃ってから 10 秒待つ——先に溜まった AID を 2 回目の 0x21 が捨てるか（ACS `initKeyboard` の `pending_aid = 0`） */
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)sizeof(err), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x21 2 回目)", rc, fdbk);
+            sleep(10);
+        }
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            /* WECONLYW: READ の前に同じレコードで 11,2 へ "NEXT" を書く WTD を置く——溜めた AID が送るカーソルが、書いた位置か押したときの位置かを見る */
+            static const unsigned char wn[] = { 0x00, 0x00, 0x11, 0x0B, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+            Qsn_Cmd_Buf_T rcb = 0;
+            if (strcmp(what, "WECONLYW") == 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rcb = QsnCrtCmdBuf(128, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wn, (Q_Bin4)sizeof(wn), rcb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 NEXT → バッファ)", rc, fdbk);
+            }
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, rcb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "CACUA") == 0 || strcmp(what, "CACFT") == 0 || strcmp(what, "CANONE") == 0) {
+        /*
+         * **SOH の CA キーの申告（欄データを送らない F キー）を CLEAR UNIT ALTERNATE・CLEAR FORMAT TABLE が捨てるか**（`20260927-clear-ca-mask`）。
+         * ACS は CU・CUA・CFT のどれも `processClearFMT` → `clearSOHPFKeyTable`。当 PJ は CU だけ捨てる。
+         *   WTD（SOH: F3 を CA・3,2 に "SOH"・5,10 に入力欄）→ CACUA＝0x20（引数 0x00）/ CACFT＝0x50 / CANONE＝何もしない →
+         *   WTD（3,2 に "AFTER"・7,10 に入力欄・IC 7,10。SOH なし）→ READ MDT。端末で AB を打って F3 を押し、READ が欄を受けたかを見る
+         */
+        static const unsigned char w1[] = {
+            0x00, 0x00,
+            0x01, 0x07, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x04,             /* SOH: F3 を CA */
+            0x11, 0x03, 0x02, 0xE2, 0xD6, 0xC8,                                /* "SOH" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A
+        };
+        static const unsigned char w2[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xC1, 0xC6, 0xE3, 0xC5, 0xD9,                    /* "AFTER" */
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x07, 0x0A
+        };
+        static const char cua[] = { 0x00 };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w1, (Q_Bin4)sizeof(w1), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 SOH)", rc, fdbk);
+        if (strcmp(what, "CACUA") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x20, cua, 1, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x20 CUA)", rc, fdbk);
+        } else if (strcmp(what, "CACFT") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x50, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x50 CFT)", rc, fdbk);
+        }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w2, (Q_Bin4)sizeof(w2), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 AFTER)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "UNLOCKWTD") == 0 || strcmp(what, "UNLOCKWTDNOIC") == 0 || strcmp(what, "UNLOCKWTDCC1") == 0) {
+        /*
+         * **解錠中に届いた WTD でカーソルが動くか**（`20260927-unlocked-wtd-cursor`。ACS `preprocessWCC2` の頭の条件）。
+         *   1 本目（出力だけ）: CLEAR UNIT → WTD（CC2 0x08 で解錠・5,10 と 7,10 と 9,2 に入力欄・IC 5,10）
+         *   6 秒待つ（この間に端末でカーソルを 9,2 へ動かす）
+         *   2 本目（1 本のレコード）: WTD（CC1 00・CC2 08。UNLOCKWTD は IC 7,10 / UNLOCKWTDNOIC は IC なし / UNLOCKWTDCC1 は CC1 0x20〔MDT を戻す〕と IC 7,10）＋ READ MDT
+         * READ で送られたカーソルの位置（端末で Enter を押す）と画面のカーソルを見る
+         */
+        static const unsigned char w1[] = {
+            0x00, 0x08,
+            0x11, 0x03, 0x02, 0xE4, 0xD5, 0xD3, 0xD6, 0xC3, 0xD2,             /* "UNLOCK" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x11, 0x09, 0x01, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x05, 0x0A
+        };
+        unsigned char w2[16];
+        int wl = 0;
+        Qsn_Cmd_Buf_T cb;
+        w2[wl++] = strcmp(what, "UNLOCKWTDCC1") == 0 ? 0x20 : 0x00;
+        w2[wl++] = 0x08;
+        w2[wl++] = 0x11; w2[wl++] = 0x0B; w2[wl++] = 0x02; w2[wl++] = 0xD5; w2[wl++] = 0xC5; w2[wl++] = 0xE7; w2[wl++] = 0xE3;  /* 11,2 "NEXT" */
+        if (strcmp(what, "UNLOCKWTDNOIC") != 0) { w2[wl++] = 0x13; w2[wl++] = 0x07; w2[wl++] = 0x0A; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w1, (Q_Bin4)sizeof(w1), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 1 本目)", rc, fdbk);
+        sleep(6);
+        inzFdbk(fdbk, sizeof(fdbk));
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w2, (Q_Bin4)wl, cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 2 本目 → バッファ)", rc, fdbk);
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT（WTD と 1 本のレコード）", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

@@ -23,6 +23,10 @@ import type { InternalField } from "../screen/buffer.js";
  * - `    12`（6 バイト）は `12` として通る
  *
  * 加工後の最終桁は `rawSentinel` で運ぶ（呼び出し側が生バイト 1 つとして書き出す）。
+ *
+ * ⚠ **0x52 の経路はもうここを通らない**（`20260927-read-alt-raw`）。0x52 は `sendValue` が ACS `DS5250.sendAll` の規則
+ * （手前の桁が数字かを見ない・符号の桁が NUL なら畳まない・末尾の実空白は落とさない）で組む。ここに来るのは `trimmedSendValue`
+ * （未編集の DBCS 欄の退避路）だけで、符号付き数値の欄が DBCS になることは無いので実際には通らない。旧規則（手前が数字のときだけ・末尾の空白を落とす）のまま残してある
  */
 function signedNumericValue(full: string, codec: Codec): string {
   // **符号位置で切る。** センチネルは第 15 面（サロゲート対）なので、コード単位で
@@ -73,13 +77,69 @@ function foldContinued(buf: ScreenBuffer, fields: readonly InternalField[]): Int
 }
 
 /**
- * 送信する欄の値。継続入力フィールドの先頭区間なら**全区間を連結**した値を返す。
+ * **欄データの加工の種類**（ACS `DS5250.sendAll` の枝。`20260927-read-alt-raw`）。
+ * - `"mdt"`（0x52）: 末尾の NUL を落とし、途中の NUL は空白（0x40）にし、符号付き数値の符号を畳む
+ * - `"alt"`（0x82・0x83）: 末尾の NUL を落とすだけ。途中の NUL（0x00）も符号の桁もそのまま送る
+ *
+ * **どちらも末尾の実空白（ホストが書いた 0x40・打った空白）は送る**——落とすのは NUL だけ。
+ * 実機の ACS のコア（`scripts/acs-probe/read-alt.txt`）: 欄 `AB C`＋実空白 6 は 0x52・0x82・0x83 のどれでも 10 バイト、
+ * `A` NUL `B`＋NUL 7 は 0x52 で `c1 40 c2`・ALT で `c1 00 c2`、符号付き `  012-` は 0x52 で `40 40 f0 f1 d2`・ALT で `40 40 f0 f1 f2 60`
+ */
+export type FieldDataForm = "mdt" | "alt";
+
+/** 1 字の EBCDIC 1 バイト（生バイトのセンチネルはそのバイト。1 バイトに符号化できなければ undefined） */
+function singleByte(ch: string, codec: Codec): number | undefined {
+  if (isRawSentinel(ch)) return sentinelByte(ch);
+  const b = codec.encode(ch).bytes;
+  return b.length === 1 ? b[0] : undefined;
+}
+
+/**
+ * 送信する欄の値（`FieldDataForm` の加工をした後）。継続入力フィールドの先頭区間なら**全区間を連結**してから加工する
+ * （ACS `FFT5250.getFieldContents` が全区間の内容を連結し、`sendAll` が連結した後の末尾だけを見る）。
+ *
+ * 桁ごとに NUL（空のセル）かどうかを見るので、**1 桁 1 字で返る欄だけ**をこの経路で扱う。未編集の DBCS 欄（SO/SI の構造を持つ）は
+ * `fieldValue` がホストの原本のバイト列を返して桁と字が対応しないため、従来どおり末尾の空白を落とす（`trimmedSendValue`）
+ */
+function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec, form: FieldDataForm): string {
+  const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  const chars: string[] = [];
+  const nul: boolean[] = [];
+  for (const seg of run) {
+    const v = [...buf.fieldValue(seg, true)];
+    if (v.length !== seg.length) return trimmedSendValue(buf, f, codec);
+    for (let i = 0; i < seg.length; i++) {
+      chars.push(v[i]!);
+      nul.push(buf.cellAt(seg.startAddr + i) === null);
+    }
+  }
+  let n = chars.length;
+  while (n > 0 && nul[n - 1]) n--; // 末尾の NUL だけ落とす（実空白は送る）
+  if (form === "alt") return chars.slice(0, n).map((c, i) => (nul[i] ? rawSentinel(0x00) : c)).join("");
+  // 途中の NUL は空白（`fieldValue` も空のセルを空白で返すので結果は同じ。0x52 では NUL を 0x40 にする、という ACS の規則を書いておく）
+  const out = chars.slice(0, n).map((c, i) => (nul[i] ? " " : c));
+  // 符号付き数値: **符号の桁が NUL でない（末尾を 1 桁も落としていない）ときだけ**畳む（ACS の条件）。
+  // 符号の桁が `-` なら手前の桁のゾーンを 0xD にし、符号の桁は送らない（`signedNumericValue` の注記。ACS は手前が数字かを見ない）
+  // 長さ 1 の符号付き数値の欄の `-` は、ACS では手前の桁の参照が配列の外になって例外になる。当 PJ は何もせず符号の桁だけ落とす
+  if (isSignedNumeric(f) && n === chars.length && n > 0) {
+    if (n >= 2 && singleByte(out[n - 1]!, codec) === 0x60) {
+      const b = singleByte(out[n - 2]!, codec);
+      if (b !== undefined) out[n - 2] = rawSentinel(0xd0 | (b & 0x0f));
+    }
+    out.pop();
+  }
+  return out.join("");
+}
+
+/**
+ * 送信する欄の値（**末尾の空白を落とす**旧来の形）。未編集の DBCS 欄だけがここへ来る（`sendValue`）。
+ * 継続入力フィールドの先頭区間なら**全区間を連結**した値を返す。
  *
  * 連結の前に区間ごとの末尾空白を落としてはいけない——落とすと `2026` + `1 ` + `31` が
  * `2026131` へ詰まり、**桁がずれてホストに届く**。tn5250 も区間ごとに欄長ぶんを
  * そのまま連結し、**連結し終えた最後にだけ**末尾を落とす（`session.c` の「Strip trailing NULs」）。
  */
-function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
+function trimmedSendValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
   if (f.continued === undefined) {
     return isSignedNumeric(f) ? signedNumericValue(buf.fieldValue(f, true), codec) : buf.fieldValue(f);
   }
@@ -131,7 +191,20 @@ export function buildReadMdtResponse(
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
   // **CA キー（SOH で申告されたキー）では欄を 1 つも送らない。** カーソル位置と AID だけを返す。
-  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor);
+  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor, "mdt");
+}
+
+/**
+ * **READ MDT FIELDS ALT（0x82）応答。** 形は 0x52 と同じ（利用者の AID を待ち、MDT の立った欄を SBA ＋ 値で並べる）で、
+ * 違うのは**欄データを加工しない**ことだけ（`FieldDataForm` の `"alt"`。`20260927-read-alt-raw`）
+ */
+export function buildReadMdtAltResponse(
+  buf: ScreenBuffer,
+  codec: Codec,
+  aid: number,
+  cursor?: { row: number; col: number }
+): { record: Uint8Array; substituted: number } {
+  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor, "alt");
 }
 
 /**
@@ -158,8 +231,9 @@ export function buildReadMdtResponse(
  * ## 中身の根拠
  *
  * tn5250j `ScreenFields.readFormatTable` が `CMD_READ_MDT_IMMEDIATE_ALT` を
- * `masterMDT` の門番 ＋ `sf.mdt` の絞り込みで送る。**`buildReadMdtResponse` に AID 0 を
- * 渡したものと同値**（門番は「MDT の立った欄が 0 個なら何も送らない」に畳める）。
+ * `masterMDT` の門番 ＋ `sf.mdt` の絞り込みで送る。欄の選び方は `buildReadMdtResponse` に AID 0 を渡したものと同じ
+ * （門番は「MDT の立った欄が 0 個なら何も送らない」に畳める）。~~`buildReadMdtResponse` に AID 0 を渡したものと同値~~ ——
+ * **欄データの加工は違う**: ALT なので NUL も符号の桁もそのまま送る（`FieldDataForm` の `"alt"`。ACS `DS5250.sendAll` の case 131。`20260927-read-alt-raw`）。
  *
  * tn5250(C) は `0x83` を無視するが、**無視すると固まる**ことが実機で分かった以上、
  * 「2 実装が一致した点だけ」の原則より**実測を採る**。
@@ -169,7 +243,8 @@ export function buildReadMdtImmediateAltResponse(
   codec: Codec,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
-  return buildReadMdtResponse(buf, codec, 0, cursor);
+  // 欄データは加工しない（ALT。`FieldDataForm`）。AID 0 には SOH の申告が無いので門番は常に通る
+  return buildFieldResponse(buf, codec, 0, sendsData(buf, 0) ? buf.mdtFields() : [], cursor, "alt");
 }
 
 /**
@@ -403,13 +478,14 @@ function pureValue(buf: ScreenBuffer, f: InternalField, codec: Codec): string {
     .join("");
 }
 
-/** 行・桁・AID ＋ 指定された欄の並び。`buildReadMdtResponse` と READ IMMEDIATE で共有する */
+/** 行・桁・AID ＋ 指定された欄の並び。0x52・0x82・0x83 で共有する（欄データの加工は `form`） */
 function buildFieldResponse(
   buf: ScreenBuffer,
   codec: Codec,
   aid: number,
   fields: readonly InternalField[],
-  cursor?: { row: number; col: number }
+  cursor: { row: number; col: number } | undefined,
+  form: FieldDataForm
 ): { record: Uint8Array; substituted: number } {
   const w = new ByteWriter();
   const cur = cursor ?? buf.rowColOf(buf.cursorAddr);
@@ -420,8 +496,7 @@ function buildFieldResponse(
   for (const f of foldContinued(buf, fields)) {
     const { row, col } = buf.rowColOf(f.startAddr);
     w.u8(ORDER.SBA).u8(row).u8(col);
-    // 末尾ブランクは落ちる。SBCS の埋め込み属性はセンチネル。
-    // **符号付き数値欄だけは符号桁を見るため末尾ブランクを残した値**から作る（上の関数）。
+    // 末尾の NUL は落ち、実空白は残る（`FieldDataForm`）。SBCS の埋め込み属性はセンチネル。
     // 継続入力フィールドは全区間を連結した値になる。
     if (f.dbcsType === "pure") {
       // **純 DBCS の欄（G）は欄長いっぱいの SO/SI 無しの 2 バイト組で送る**（実機の ACS のワイヤ: `かきく` を打った 12 バイトの欄が `44 86 44 87 44 88 40 40 40 40 40 40`。
@@ -435,7 +510,7 @@ function buildFieldResponse(
       w.bytes(bytes.subarray(0, Math.min(bytes.length, width)));
       for (let i = Math.min(bytes.length, width); i < width; i++) w.u8(0x40);
     } else {
-      substituted += writeValue(w, sendValue(buf, f, codec), codec);
+      substituted += writeValue(w, sendValue(buf, f, codec, form), codec);
     }
   }
 

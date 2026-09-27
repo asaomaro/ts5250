@@ -1,0 +1,13 @@
+schema: 11
+slug: ff-report-acs-output
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: FF だけの帳票（取り消しの後）の ACS の実出力
+harnessRevDelivered: unknown
