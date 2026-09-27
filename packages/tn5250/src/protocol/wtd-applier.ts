@@ -393,7 +393,11 @@ export function applyDataStream(
       case COMMAND.WRITE_TO_DISPLAY: {
         const cut = tooShort(2, "write to display"); // CC1・CC2
         if (cut) return cut;
-        applyWtd(r, buf, codec, result, warn, cursorState);
+        const out = applyWtd(r, buf, codec, result, warn, cursorState);
+        // WTD の中の誤り: 否定応答を立てて打ち切る。レコードの残りは読まないが、CC2 は落とさない（`applyWtd` の `fail`）
+        if (out === "fail") return finish();
+        // 長さが画面を超える TD: ACS は次のバイト（TD）を「ESC が無い」としてその場で戻る——CC2 も落とす
+        if (out === "abort") return abortRecord(SENSE.COMMAND_EXPECTED);
         break;
       }
       case COMMAND.WRITE_ERROR_CODE: {
@@ -608,7 +612,7 @@ function applyWtd(
   result: ApplyResult,
   warn: WarnFn,
   cursorState: RecordCursorState
-): void {
+): "fail" | "abort" | undefined {
   applyCc(r.u8(), buf, result);
   const cc2 = r.u8();
   applyCc2(cc2, result);
@@ -628,6 +632,21 @@ function applyWtd(
    * （実測）ので 1 バイトずつ警告するとログが埋まる。
    */
   let unmappable = 0;
+  /**
+   * **WTD の中のオーダーの誤りは否定応答にして、この WTD を打ち切る**（ACS `processWriteToDisplay`。`20260927-wtd-order-sense`）。
+   * ACS はここで `sense_code` を立てて戻り、コマンドのループは条件で抜けるので**レコードの終わり（CC2）は走る**——その場で戻る否定応答
+   * （`abortRecord`）と違い、CC2 は落とさない。誤りの前に書いた文字・カーソルの確定もそのまま（実機の ACS のコアで 5 通り測った:
+   * `scripts/acs-probe/wtd-order-sense.txt`・`scripts/verify-wtd-order-sense.mjs`）。以前は読み過ぎ・範囲外の例外でレコードの結果ごと捨て、応答もしなかった
+   */
+  const fail = (sense: number, why: string): "fail" => {
+    warn(`${why} (negative response 0x${sense.toString(16)})`);
+    result.senseCode = sense;
+    settleCursor();
+    warnUnmappable(unmappable, warn);
+    return "fail";
+  };
+  /** 行・桁が画面の中か（ACS の `< 1 || > 行数・桁数` の検査） */
+  const inScreen = (row: number, col: number): boolean => row >= 1 && row <= buf.rows && col >= 1 && col <= buf.cols;
 
   while (r.remaining > 0) {
     const b = r.peek();
@@ -725,25 +744,45 @@ function applyWtd(
       continue;
     }
     switch (b) {
-      case ORDER.SBA:
-        addr = buf.addrOf(r.u8(), r.u8());
+      case ORDER.SBA: {
+        if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "SBA too short");
+        const row = r.u8();
+        const col = r.u8();
+        // 行 1・桁 0 は ACS は番地 -1 として受ける（`20260921-wtd-control-bytes` D3。非 DBCS のセッションでは後ろにバイトがあるか次が SF のときだけ——
+        // レコードの終わりなら 0x10050122）——当 PJ は受けられないので従来どおり例外（backlog）
+        if (!inScreen(row, col) && !(row === 1 && col === 0)) return fail(SENSE.ORDER_ADDRESS, `SBA out of range (${row},${col})`);
+        addr = buf.addrOf(row, col);
         break;
+      }
       case ORDER.IC:
         // **ここでは動かさず覚える**——確定は WTD の終わり（`placeCursorAfterWtd`）。IC は MC を捨てる
         // （ACS `processWriteToDisplay` の 0x13: `WTD_MC_addr = -1`）。番地はレコードをまたいで持ち越す
-        buf.icAddr = buf.addrOf(r.u8(), r.u8());
+        {
+          if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "IC too short");
+          const row = r.u8();
+          const col = r.u8();
+          if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `IC out of range (${row},${col})`);
+          buf.icAddr = buf.addrOf(row, col);
+        }
         buf.mcAddr = undefined;
         break;
-      case ORDER.MC:
+      case ORDER.MC: {
         // MC は「動かさない」指定のときでも効く（ACS `preprocessWCC2` の else 枝）
-        buf.mcAddr = buf.addrOf(r.u8(), r.u8());
+        if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "MC too short");
+        const row = r.u8();
+        const col = r.u8();
+        if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `MC out of range (${row},${col})`);
+        buf.mcAddr = buf.addrOf(row, col);
         break;
+      }
       case ORDER.RA: {
-        const target = buf.addrOf(r.u8(), r.u8());
+        if (r.remaining < 3) return fail(SENSE.COMMAND_EXPECTED, "RA too short");
+        const row = r.u8();
+        const col = r.u8();
         const fill = r.u8();
-        if (target < addr) {
-          throw new As400Error("PROTOCOL_ERROR", `RA target ${target} < current ${addr}`);
-        }
+        if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `RA out of range (${row},${col})`);
+        const target = buf.addrOf(row, col);
+        if (target < addr) return fail(SENSE.ORDER_BACKWARD, `RA target ${target} < current ${addr}`);
         for (; addr <= target; addr++) {
           if (fill === 0x00) buf.eraseRange(addr, addr);
           else if (isAttribute(fill)) buf.setAttr(addr, fill);
@@ -752,18 +791,18 @@ function applyWtd(
         break;
       }
       case ORDER.EA: {
-        // EA = 行 桁 length [属性タイプ×(length-1)]（length=2〜5。SC30-3533 / tn5250 erase_to_address）
-        const target = buf.addrOf(r.u8(), r.u8());
+        // EA = 行 桁 length [属性タイプ×(length-1)]（length=2〜5。SC30-3533 / tn5250 erase_to_address）。
+        // 検査の順は ACS と同じ: 長さ不足 → 属性タイプがレコードを越える → 行・桁 → length → 後戻り
+        if (r.remaining < 3) return fail(SENSE.COMMAND_EXPECTED, "EA too short");
+        const row = r.u8();
+        const col = r.u8();
         const len = r.u8();
-        if (len < 2 || len > 5) {
-          warn(`invalid EA length ${len} — discarding rest of record`);
-          r.skip(r.remaining);
-          return;
-        }
+        if (len - 1 > r.remaining) return fail(SENSE.COMMAND_EXPECTED, `EA length ${len} beyond record`);
+        if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `EA out of range (${row},${col})`);
+        if (len < 2 || len > 5) return fail(SENSE.EA_LENGTH, `invalid EA length ${len}`);
         r.skip(len - 1); // 属性タイプバイト群（未対応。全消去として扱う）
-        if (target < addr) {
-          throw new As400Error("PROTOCOL_ERROR", `EA target ${target} < current ${addr}`);
-        }
+        const target = buf.addrOf(row, col);
+        if (target < addr) return fail(SENSE.ORDER_BACKWARD, `EA target ${target} < current ${addr}`);
         // 消去は target を含む（tn5250 erase_region と一致）。再開アドレスは tn5250 に合わせ target
         buf.eraseRange(addr, target);
         addr = target;
@@ -776,7 +815,12 @@ function applyWtd(
         // AID キー**」の申告で（DDS の `CAnn`）、ここを捨てていたため F12 で打鍵した値まで
         // 送っていた——「F12 で取り消したのに反映される」型の事故になる。
         // 並びと意味は `ScreenBuffer.setHeaderData` の JSDoc（実機で採った値つき）。
+        if (r.remaining < 1) return fail(SENSE.COMMAND_EXPECTED, "SOH too short");
         const len = r.u8();
+        // ACS は長さのバイトが無い形・本体が 1 バイトだけ足りない形をレコードの外の値で読み進める（結果が外の値に依存し再現できない）——当 PJ は否定応答にする（独自の決め）
+        if (len > r.remaining) return fail(SENSE.COMMAND_EXPECTED, `SOH length ${len} beyond record`);
+        // **長さが 0 か 8 以上なら否定応答**（ACS は 1〜7 のときだけフォーマットテーブルを作り直す。それ以外は何も変えずに 0x1005012B）
+        if (len === 0 || len >= 8) return fail(SENSE.SOH_LENGTH, `invalid SOH length ${len}`);
         const body = r.bytes(len);
         // **フォーマットテーブルを作り直すので、保留中の IC/MC も捨てる**
         // （ACS `processWriteToDisplay` の SOH 分岐 → `processClearFMT()` →
@@ -789,7 +833,17 @@ function applyWtd(
         break;
       }
       case ORDER.TD: {
+        if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "TD too short");
         const len = r.u16();
+        // **長さが画面の大きさを超える TD は、WTD を否定応答なしに打ち切る**（ACS は WTD の終わりのカーソルの確定だけして TD の位置で戻り、
+        // コマンドのループが TD の 0x10 を「ESC が無い」として 0x10050121 でその場で戻る——CC2 は落ちる。原典の読み。実機では出させていない）
+        if (len > buf.rows * buf.cols) {
+          warn(`TD length ${len} exceeds the screen (negative response 0x10050121)`);
+          settleCursor();
+          warnUnmappable(unmappable, warn);
+          return "abort";
+        }
+        if (len > r.remaining) return fail(SENSE.COMMAND_EXPECTED, `TD length ${len} beyond record`);
         const bytes = r.bytes(len);
         for (const tb of bytes) {
           buf.setChar(addr++, String.fromCharCode(codec.decodeByte(tb)));
@@ -797,6 +851,7 @@ function applyWtd(
         break;
       }
       case ORDER.SF: {
+        if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "SF too short");
         addr = applySf(r, buf, addr);
         break;
       }
@@ -819,6 +874,7 @@ function applyWtd(
         // `default:` 節に落ちると、次の ESC＋既知コマンドが見つかるまで読み飛ばす
         // 復旧処理が働き、WEA より後ろの同じ WTD 内の全オーダー
         // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
+        if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "WEA too short");
         const attrType = r.u8();
         const attrValue = r.u8();
         // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり。
@@ -1004,6 +1060,14 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
 /** 否定応答のセンス・コード（ACS `DS5250` の `setSenseCode` / `sense_code` の値） */
 export const SENSE = {
   COMMAND_EXPECTED: 0x10050121,
+  /** WTD のオーダーの行・桁が画面の外（SBA・IC・MC・RA・EA） */
+  ORDER_ADDRESS: 0x10050122,
+  /** RA・EA の行き先が今の位置より前 */
+  ORDER_BACKWARD: 0x10050123,
+  /** SOH の長さが 0 か 8 以上 */
+  SOH_LENGTH: 0x1005012b,
+  /** EA の長さが 2〜5 でない */
+  EA_LENGTH: 0x1005012d,
   ROLL_PARAM: 0x1005012c,
   CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
   /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */

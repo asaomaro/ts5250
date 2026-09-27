@@ -1,0 +1,20 @@
+# **WTD の中のオーダーの誤りで ACS は否定応答を返すか・同じ WTD の CC2 は効くか**（実機の ACS のコア。`20260927-wtd-order-sense`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の WTDERR*）: 先にメッセージ待ちを消し、1 本の WTD（CC2＝0x01・5 行 2 桁に WTDERR）の後ろに誤ったオーダー、
+# 8 秒待ってからもう一度消す。dump の mw= と 5 行目を見る。否定応答を返したかは DSM のログ（/tmp/dscmd.log）で、最後の出力が CPFA303 になるかで見る。
+# ⚠ 続けて流すと、否定応答の後の 2 本目以降の CALL が効かない（ホスト側の都合）。**1 モードずつ**流す（PARM を WTDERRSBA / WTDERRRA / WTDERRSOH / WTDERREA / WTDERRSHORT に替える）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wtd-order-sense.txt AS400
+signon
+keys [enter]
+settle 1500
+
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WTDERRSBA')[enter]
+sleep 6000
+dump in-window
+sleep 8000
+settle 1000
+dump after
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
