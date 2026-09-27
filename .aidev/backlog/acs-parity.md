@@ -384,8 +384,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - 当 PJ は溜めて、解いた後に NO_ERROR・CLEAR_PROCESSED・NO_ERROR・CLEAR_PROCESSED を返す。ACS も印刷先の障害の間はデータ処理を止め（`PSNVT5250P.processPrinterError`）、取消・再試行とも NO_ERROR——同じ。`packages/tn5250/test/printer-session.test.ts` で並びを固定。
   - ~~止めている間に 15 分のアイドルで接続が黙って死ぬか未確認~~ → **17 分**止めても切れず、解くと印刷済みになった（`HOLD_IDLE_MIN=17`）。
   - FF だけのジョブは白紙 1 ページの帳票（自動 PDF なら白紙の PDF）になる。ACS の既定の出力（JPS。`PrintSCS5250JPS.processFormFeed`）も白紙 1 ページなので変えない（decisions D2）。
-- [ ] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
+- [x] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
   手段の候補: `com.ibm.eNetwork.ECL.ECLHostPrintSession`（acshod2.jar の公開 API）で ACS のプリンターのコアを GUI 無しで当てる——試していない（`20260927-printer-hold-cancel` D2）。
+  **閉じた（`20260927-ff-report-acs-output`）**: `ECLHostPrintSession` をファイル出力でヘッドレスに動かす試作は、プロパティを揃えると初期化は通ったが `StartCommunication` から戻らず、帳票は書き出しプログラムに渡らなかった——**測る手段が確立できない**。
+  原典の読み（既定の JPS は白紙 1 ページで当 PJ と一致）で `20260927-printer-hold-cancel` D2 を据え置く。次に試すなら GUI のある ACS でファイル出力に設定して同じ取り消しを行う。
 - [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
   **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
   `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
