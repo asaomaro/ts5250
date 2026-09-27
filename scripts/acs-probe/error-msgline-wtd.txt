@@ -1,0 +1,20 @@
+# **エラー状態のままメッセージ行へ WTD・RESTORE SCREEN が来たときの ACS の見え方**（実機の ACS のコア。`20260927-error-msgline-wtd`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の ERRMSGWTD / ERRMSGRST）: 24 行に MSGLINE ORIGINAL… → 0x21 でエラー状態 → WTD で 24 行に NEW LINE24（ERRMSGWTD）
+# または 0x21 の前に退避した画面を RESTORE（ERRMSGRST）→ READ MDT。Reset の前後の 24 行目を見る。1 モードずつ PARM を替えて流す。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/error-msgline-wtd.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('ERRMSGWTD')[enter]
+sleep 7000
+dump a0-error
+keys [reset]
+settle 800
+dump a1-after-reset
+keys [enter]
+settle 2000
+dump a2-after-enter
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

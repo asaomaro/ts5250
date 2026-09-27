@@ -1,0 +1,22 @@
+# **長さの足りないコマンドで ACS は否定応答を返して戻るか**（実機の ACS のコア。`20260927-short-command-sense`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の SHORT*）: 先にメッセージ待ちを消し、1 本のレコードに WTD（CC2＝0x01・5 行 2 桁に SHORT）＋長さの足りないコマンド、
+# 8 秒待ってからもう一度消す。dump の mw= と 5 行目を見る（否定応答で戻れば CC2 は効かず mw=false・SHORT は書かれる）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# ⚠ 続けて流すと、否定応答の後の 2 本目以降の CALL が効かない（ホスト側の都合。当 PJ でも同じ）。**1 モードずつ**流す（下の PARM を替える）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/short-command-sense.txt AS400
+signon
+keys [enter]
+settle 1500
+
+# ===== 1 モードだけ（続けて流すと 2 本目以降が効かない）。PARM と dump の名前を SHORTWTD / SHORTREAD / SHORTROLL / SHORTWEC / SHORTWECW に替えて 1 回ずつ流す =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SHORTWTD')[enter]
+sleep 6000
+dump in-window
+sleep 8000
+settle 1000
+dump after
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

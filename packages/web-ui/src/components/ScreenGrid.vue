@@ -147,6 +147,11 @@ const props = withDefaults(
      * 中に置けば桁も高さも自動で揃う）。
      */
     message?: string;
+    /**
+     * **`message` を重ねる位置**（1 起点。WRITE ERROR CODE TO WINDOW＝0x22 のとき。`20260926-window-error-code`）。
+     * 無ければ最下行の全幅。あれば ACS と同じくその行の `col` から `width` 桁だけを塗って重ねる（地の色で塗るので、本文が短くても範囲は空に見える）
+     */
+    messageArea?: { row: number; col: number; width: number } | undefined;
     /** 有効カーソル（override ?? snapshot.cursor）。オーバーレイ位置・field/free 判定に使う */
     cursor?: { row: number; col: number };
     /**
@@ -2221,11 +2226,42 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
   }
 }
 
+/**
+ * **挿入モードの O 欄で、ACS なら SO/SI 込みの必要桁が空きに足りない場合か**（ACS `PS5250.insertChar` の必要桁と
+ * `reserveRoomForInsert` の空きの数え方。`20260926-dbcs-insert-sosi-room`）。
+ *
+ * ACS は打つ字とカーソルの桁の種類で必要桁を決める。当 PJ の数え方（字を入れてから欄に収まるか）と食い違うのは、
+ * 並びの境目の 2 つだけ（同 research F5）:
+ * - (i) 全角の並びの**直後の半角の字**へ全角 → ACS は別の並び（SO・字・SI）で **4 桁**。当 PJ は前の並びに繋げて 2 桁
+ * - (ii) 全角の並びの**最初の全角**へ半角 → ACS は SI・字・SO で **3 桁**（空の SO/SI が残る）。当 PJ は字の 1 桁
+ * それ以外は桁数が一致するので見ない。空きは「末尾の半角空白を除いた値の桁数」から数える（ACS は末尾から空白を数え、
+ * SO/SI・字で止まる——全角空白は並びの中にあるので数えない。`scripts/acs-probe/dbcs-insert-room.txt` の測定 F1＝O 欄の末尾が全角空白の満杯欄は 0012 と同じ）。
+ *
+ * 入ったあとの値は当 PJ の正規化した並びのまま（ACS の別の並び・空の SO/SI は論理値で表せない。同 decisions D2）。
+ * 実機の ACS のコアで C3・C4 が 0012・C5 が入ることを測ってある（`scripts/acs-probe/dbcs-insert-room.txt`）
+ */
+function acsInsertShortOfRoom(e: EditState, ch: string, f: Field): boolean {
+  if (f.dbcsType !== "open" || f.continued !== undefined) return false;
+  const prev = e.chars[e.cursor - 1];
+  const cur = e.chars[e.cursor];
+  if (cur === undefined) return false; // 末尾（全角の後ろなら SI の桁）は当 PJ と同じ桁数
+  const wide = isWideForDbcs(ch);
+  const prevWide = prev !== undefined && isWideForDbcs(prev);
+  const curWide = isWideForDbcs(cur);
+  let need = 0;
+  if (wide && !curWide && prevWide) need = 4; // (i)
+  else if (!wide && curWide && !prevWide) need = 3; // (ii)
+  if (need === 0) return false;
+  const room = visLen(f) - byteLen(e.chars.join("").replace(/ +$/, ""), f);
+  return room < need;
+}
+
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
 function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
   const budget = visLen(f);
   // 選択を置き換える挿入（`replaced`）は、消した跡を埋めるだけなので最終桁の判定を掛けない
   if (e.insertMode && !replaced && atLastColumn(e, f)) return undefined;
+  if (e.insertMode && !replaced && acsInsertShortOfRoom(e, ch, f)) return undefined;
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
@@ -3745,7 +3781,9 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       if (!acceptsChar(f, ch, sessionKind.value)) continue;
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) {
-        // 上書きは入るところまで。挿入は事前の検査（欄全体の余地）を通っても、最終桁の 0012（`atLastColumn`）で止まりうる
+        // 上書きは入るところまで。挿入は事前の検査（欄全体の余地）を通っても、最終桁の 0012（`atLastColumn`）や
+        // O 欄の SO/SI 込みの必要桁（`acsInsertShortOfRoom`）で止まりうる——そこまでの字は入ったまま残る（ACS の 1 字ずつの打鍵と同じ）。
+        // 事前の検査は末尾の全角空白も空きに数える（`\s+$`）が、必要桁の検査は半角空白だけを数える（ACS の数え方。同 work の design）
         if (e.insertMode) emit("notice", MSG_NO_ROOM);
         break;
       }
@@ -3849,7 +3887,9 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）
     // 選択を置き換えた後の挿入も同じ規則（`typeChar` は余地が無いと元の状態を返すので、残りの字が
     // 通知なしに消えていた。独立点検の指摘）
-    const trial = dbcs ? dbcsType(base, ch, f, replacedSelection) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
+    // **置き換えとして扱う（最終桁・必要桁の判定を掛けない）のは 1 字目だけ**——打鍵も置き換えは 1 字で、2 字目からは判定を通る。
+    // 全部の字に渡していたため、選択を IME の複数字で置き換えると打鍵なら 0012 になる字まで入っていた（`20260926-dbcs-insert-sosi-room` の独立点検）
+    const trial = dbcs ? dbcsType(base, ch, f, replacedSelection && i === 0) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) {
       noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで止める。余りは次の欄へ流す）
       break;
@@ -4398,10 +4438,17 @@ onBeforeUnmount(() => {
     @focusout="onGridFocusOut"
   >
     <!--
-      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。
+      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。WRITE ERROR CODE（0x21 / 0x22）の位置（`messageArea`）があれば、
+      ACS と同じくその行・桁・幅にだけ重ねる（0x22: `20260926-window-error-code`。0x21 はメッセージ行の 1 行全体: `20260926-wec-msgline-row`）。
       `pointer-events: none` で背面のセルの操作を邪魔しない。
     -->
-    <div v-if="message" class="opmsg" role="status"><template
+    <div
+      v-if="message || messageArea"
+      class="opmsg"
+      :class="{ 'opmsg-area': messageArea }"
+      :style="messageArea ? { top: (messageArea.row - 1) * 1.25 + 'em', left: messageArea.col - 1 + 'ch', width: messageArea.width + 'ch', height: '1.25em' } : undefined"
+      role="status"
+    ><template
       v-for="(m, k) in markRuns(shiftedMessage)"
       :key="k"
     ><span v-if="m.shift" :class="shiftClass">{{ m.text }}</span><template
@@ -4739,6 +4786,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+/* WRITE ERROR CODE の位置に重ねる（0x22 は指定の桁・0x21 はメッセージ行の 1 行全体。`.colsep` と同じく内側余白は margin で足し、
+   位置は行・桁の単位で与える。高さは style で 1 行＝1.25em——本文が空でも範囲を塗って下のセルを隠すため。
+   **行末で切る（`clip`）**——ACS は 1 行を超えた本文を次の行へ上書きするが、情報を捨てるので合わせない。
+   `20260926-window-error-code`・`20260926-wec-msgline-row` decisions D2） */
+.opmsg.opmsg-area {
+  right: auto;
+  bottom: auto;
+  margin: var(--grid-pad-y) 0 0 var(--grid-pad-x);
+  text-overflow: clip;
 }
 .grid {
   position: relative;

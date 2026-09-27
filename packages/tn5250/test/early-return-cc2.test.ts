@@ -1,0 +1,123 @@
+import { describe, it, expect } from "vitest";
+import { applyDataStream } from "../src/protocol/wtd-applier.js";
+import { ScreenBuffer } from "../src/screen/buffer.js";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
+import { ESC, COMMAND, ORDER } from "../src/protocol/constants.js";
+
+/**
+ * **その場で戻る否定応答では、同じレコードで先に来た CC2（警報・メッセージ待ち）を効かせない**（`20260927-early-return-cc2`）。
+ * ACS `DS5250.processCommand` は ESC が無い・CLEAR UNIT ALTERNATE の引数・ROLL の指定・WSF が短いで直ちに戻り、レコードの終わりの `processWCC2` を飛ばす。
+ * 実機（社内機）で DSM に WTD（CC2＝0x01 メッセージ待ちを点ける）＋不正な ROLL の 1 レコードを出させると、ACS のコアは点けず、当 PJ（直す前）は点けた
+ * （`scripts/acs-probe/early-return-cc2.txt`・`scripts/verify-early-return-cc2.mjs`）。
+ * WSF D9/72 のフラグ 0x80 は ACS も終わりまで走る（`processWSF` が `sense_code` を立ててループの条件で抜ける）ので CC2 は効く
+ */
+const codec = codecForCcsid(37);
+const apply = (stream: number[]) => applyDataStream(Uint8Array.from(stream), new ScreenBuffer(), codec, () => {});
+/** WTD（CC1 0・CC2 は引数）で 5 行 2 桁に "X" */
+const wtd = (cc2: number): number[] => [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, cc2, ORDER.SBA, 5, 2, 0xe7];
+const BAD_ROLL = [ESC, COMMAND.ROLL, 0x05, 0x0a, 0x05];
+
+describe("その場で戻る否定応答は CC2 を落とす", () => {
+  it("**WTD（メッセージ待ちを点ける）＋不正な ROLL: メッセージ待ちは変えない**（実機の ACS と同じ）", () => {
+    const r = apply([...wtd(0x01), ...BAD_ROLL]);
+    expect(r.senseCode).toBe(0x1005012c);
+    expect(r.messageWaiting).toBeUndefined();
+  });
+
+  it("WTD（メッセージ待ちを消す）＋不正な ROLL: 消しもしない", () => {
+    const r = apply([...wtd(0x02), ...BAD_ROLL]);
+    expect(r.messageWaiting).toBeUndefined();
+  });
+
+  it("WTD（警報）＋CLEAR FORMAT TABLE＋ESC の無いバイト: 警報を鳴らさない（パラメータの無いコマンドの後ろに置く——WTD の直後だと本文として読まれる）", () => {
+    const r = apply([...wtd(0x04), ESC, COMMAND.CLEAR_FORMAT_TABLE, 0x99]);
+    expect(r.senseCode).toBe(0x10050121);
+    expect(r.alarm).toBe(false);
+  });
+
+  it("WTD（警報）＋CLEAR UNIT ALTERNATE の引数が 0 でない: 警報を鳴らさない", () => {
+    const r = apply([...wtd(0x04), ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x01]);
+    expect(r.senseCode).toBe(0x10030101);
+    expect(r.alarm).toBe(false);
+  });
+
+  it("WTD（警報）＋短い WSF: 警報を鳴らさない", () => {
+    const r = apply([...wtd(0x04), ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00]);
+    expect(r.senseCode).toBe(0x10050121);
+    expect(r.alarm).toBe(false);
+  });
+
+  it("**WSF D9/72 のフラグ 0x80 では CC2 は効く**（ACS も終わりまで走る）", () => {
+    const r = apply([...wtd(0x05), ESC, COMMAND.WRITE_STRUCTURED_FIELD, 0x00, 0x06, 0xd9, 0x72, 0x80, 0x00]);
+    expect(r.senseCode).toBe(0x10050112);
+    expect(r.alarm).toBe(true);
+    expect(r.messageWaiting).toBe(true);
+  });
+
+  it("**SAVE PARTIAL より前の CC2 は残る**（ACS の SAVE PARTIAL はそれまでの CC2 をその場で効かせる）。後ろの WTD の CC2 は落とす", () => {
+    const r = apply([...wtd(0x01), ESC, COMMAND.SAVE_PARTIAL_SCREEN, 0, 0, 0, 0, 0, ...wtd(0x04), ...BAD_ROLL]);
+    expect(r.senseCode).toBe(0x1005012c);
+    expect(r.messageWaiting).toBe(true);
+    expect(r.alarm).toBe(false);
+  });
+
+  it("SAVE PARTIAL の前で消し、後ろで点けてから戻る: 消えたまま（ACS も SAVE PARTIAL の時点で消え、後ろの点灯は尾部を飛ばす）", () => {
+    const r = apply([...wtd(0x02), ESC, COMMAND.SAVE_PARTIAL_SCREEN, 0, 0, 0, 0, 0, ...wtd(0x01), ...BAD_ROLL]);
+    expect(r.messageWaiting).toBe(false);
+  });
+
+  it("SAVE PARTIAL が 2 つ: 2 つ目の時点の CC2 まで残る", () => {
+    const sp = [ESC, COMMAND.SAVE_PARTIAL_SCREEN, 0, 0, 0, 0, 0];
+    const r = apply([...wtd(0x01), ...sp, ...wtd(0x04), ...sp, ...wtd(0x02), ...BAD_ROLL]);
+    expect(r.messageWaiting).toBe(true);
+    expect(r.alarm).toBe(true);
+  });
+
+  it("否定応答が無ければ CC2 は効く（従来どおり）", () => {
+    const r = apply(wtd(0x05));
+    expect(r.senseCode).toBeUndefined();
+    expect(r.alarm).toBe(true);
+    expect(r.messageWaiting).toBe(true);
+  });
+
+  it("画面への書き込みは残る（ACS も戻る前の WTD は画面に書いている——実機で 5 行目に EARLY ROLL が出た）", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([...wtd(0x01), ...BAD_ROLL]), buf, codec, () => {});
+    expect(buf.snapshot().cells[4]![1]!.char).toBe("X");
+  });
+});
+
+/**
+ * **長さの足りないコマンドは否定応答 0x10050121 でその場で戻る**（`20260927-short-command-sense`）。実機（社内機）で DSM に
+ * WTD（CC2＝メッセージ待ち）＋長さの足りないコマンドの 1 レコードを出させ、ACS のコアは 4 通りとも先の WTD を書き、メッセージ待ちを点けず、否定応答を返した
+ * （`scripts/acs-probe/short-command-sense.txt`・`scripts/verify-short-command-sense.mjs`）。以前は読み過ぎの例外でレコードの結果ごと捨てていた
+ */
+describe("長さの足りないコマンド", () => {
+  for (const [label, tail] of [
+    ["WTD の CC が 1 バイト", [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00]],
+    ["READ MDT（0x52）の CC が 1 バイト", [ESC, COMMAND.READ_MDT_FIELDS, 0x00]],
+    ["READ INPUT（0x42）の CC が 1 バイト", [ESC, COMMAND.READ_INPUT_FIELDS, 0x00]],
+    ["READ MDT ALT（0x82）の CC が 1 バイト", [ESC, COMMAND.READ_MDT_FIELDS_ALT, 0x00]],
+    ["ROLL が 1 バイト", [ESC, COMMAND.ROLL, 0x00]],
+    ["ROLL が 2 バイト", [ESC, COMMAND.ROLL, 0x00, 0x05]],
+    ["WRITE ERROR CODE の本文が無い", [ESC, COMMAND.WRITE_ERROR_CODE]],
+    ["WRITE ERROR CODE TO WINDOW が 0 バイト", [ESC, COMMAND.WRITE_ERROR_CODE_WINDOW]]
+  ] as const) {
+    it(`${label}: 否定応答・先の WTD は書く・CC2 は落とす`, () => {
+      const buf = new ScreenBuffer();
+      const r = applyDataStream(Uint8Array.from([...wtd(0x05), ...tail]), buf, codec, () => {});
+      expect(r.senseCode).toBe(0x10050121);
+      expect(r.messageWaiting).toBeUndefined();
+      expect(r.alarm).toBe(false);
+      expect(buf.snapshot().cells[4]![1]!.char).toBe("X");
+    });
+  }
+
+  it("ちょうど足りていれば否定応答にしない（ROLL 3・WTD / READ 2・WRITE ERROR CODE 1 バイト）", () => {
+    expect(apply([...wtd(0x00), ESC, COMMAND.ROLL, 0x01, 0x02, 0x05]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_ERROR_CODE, 0x22]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_ERROR_CODE_WINDOW, 0x0c]).senseCode).toBeUndefined();
+  });
+});

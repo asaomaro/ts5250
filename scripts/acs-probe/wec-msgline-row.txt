@@ -1,0 +1,41 @@
+# **WRITE ERROR CODE（0x21）を ACS はどの行に出すか**（実機の ACS のコア。`20260926-wec-msgline-row`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の WEC / WEC22 / WEC22LONG）: 背景（メッセージ行に "MSGLINE ORIGINAL TEXT TO BE RESTORED"、
+# WEC22 は先頭の SOH でエラー行＝22 を申告し、23 行に "NEXT ROW TEXT"）→ 0x21（属性 0x22・本文）→ READ MDT で止まる。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wec-msgline-row.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# ===== A) メッセージ行の申告なし（既定 24） =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WEC')[enter]
+settle 3000
+dump a0-after-0x21
+keys [reset]
+settle 500
+dump a1-after-reset
+keys [enter]
+settle 2000
+
+# ===== B) SOH でメッセージ行を 22 に申告 =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WEC22')[enter]
+settle 3000
+dump b0-after-0x21-row22
+keys [reset]
+settle 500
+dump b1-after-reset
+keys [enter]
+settle 2000
+
+# ===== C) 22 行・本文が 1 行より長い（90 字） =====
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WEC22LONG')[enter]
+settle 3000
+dump c0-after-0x21-row22-long
+keys [reset]
+settle 500
+dump c1-after-reset
+keys [enter]
+settle 2000

@@ -3,7 +3,13 @@
  * 表を CCSID 37 の codec を読み込まない所に置き、ブラウザ入口から一覧を出せるようにした——web-ui の日本語の表
  * （`STARTUP_CODE_MEANING_JA`）と揃っていることを、web-ui のテストがこの一覧と直接比べて固定する（手書きの一覧を 2 つ持たない）。
  */
-/** 起動応答コード（tn5250 printsession.c）。成功＝セッション確立、他＝失敗 */
+/**
+ * 起動応答コード（tn5250 printsession.c）。成功＝セッション確立、他＝失敗。
+ * **I906 を成功に入れているのは、セッションを続ける点で ACS と揃うため**: ACS `DS5250.processStartUpConfirmation` は、診断情報つきのレコード（ヘッダの印 0x90。
+ * 実機の起動応答はこれ）なら I901・I902 以外では
+ * 開始の処理（装置名を窓の題名に採る等）をしないが、続く画面（サインオン画面）はそのまま処理する。当 PJ は装置名も採る
+ * ——ホストが知らせた装置名（ジョブ名の出どころ）を捨てないため。装置名の扱いは暫定（`20260927-startup-code-others` decisions D1。I906 の実機での見え方は未確認）
+ */
 export const STARTUP_SUCCESS_CODES: ReadonlySet<string> = new Set(["I901", "I902", "I906"]);
 
 const CODE_MEANING: Record<string, string> = {

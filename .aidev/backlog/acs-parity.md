@@ -150,13 +150,28 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   生き残った 1 つは G の除外（`pure` は最終桁の判定から外す）で、G 欄の桁数の別の差（下の `[ ]`）が直るまで観測できない等価変異。
   ~~`20260921-insert-no-room` D2 の「DBCS 欄は最終桁という位置を持たないので写さない」~~ は当たらなかった（列ビューの位置 `dbcsViewLayout` で判定できる）。
   **未確認のまま残したもの**: 選択を置き換える打鍵が最終桁のとき（ACS の GUI の選択置換。従来どおり入れる）・複数字の貼り付けが最終桁で拒否された後の続き（ACS は 1 字ずつの打鍵と見なす。当 PJ は止まる）。
-- [ ] **挿入モードの余地の残り（DBCS）**（優先度 低・深さ △）。上の `20260921-dbcs-insert-room` の測定で分かった、残る差:
+- [x] **挿入モードの余地の残り（DBCS）**（優先度 低・深さ △）。上の `20260921-dbcs-insert-room` の測定で分かった、残る差:
   (a) **O 欄の中の SO/SI を含む必要桁**: ACS は、半角の run の中に全角を入れると SO+2+SI で 4 桁、全角の run の中へ半角を入れると SI+字+SO で 3 桁の空きを要求する
   （測定 C3・C4: `A あいう B` + 空き 2 桁で SI の直後へ全角・最初の全角へ半角がどちらも 0012）。当 PJ は run を継ぐので 1〜2 桁で足り、成功する。測定 C5（`A あい B` の最初の全角へ半角）は ACS も成功したが、
   空の SO/SI が残るかは dump に SO/SI の桁が出ないので未確認。
   ~~(b) **G 欄**: 当 PJ は G にも SO/SI の 2 桁を数える（12 桁に 14 バイト。R11 (j)）ので、欄の終わり近くの挿入は空きがあっても入らない。ACS の G は SO/SI が無く、最終スロット手前まで入る（測定 G1）。
   G の最終桁の判定の除外はこれが直るまで観測できない。~~ → `20260921-g-field-sosi` で済んだ（G は SO/SI を数えず、挿入で末尾の全角空白を押し出す）。
   (c) **継続欄への IME 確定**の余地: `20260921-insert-no-room` D3 で区間の中で数えるとしたが、ACS 側は未測定。
+  **(a) の判定は済（`20260926-dbcs-insert-sosi-room`）**: ACS の必要桁（原典 `PS5250.insertChar` の表。打つ字 × カーソルの桁の種類）と当 PJ の数え方が食い違う
+  並びの境目の 2 つ（並びの直後の半角の字へ全角＝4 桁・並びの最初の全角へ半角＝SI・字・SO の 3 桁）で、空きが足りなければ 0012 にする
+  （`packages/web-ui/src/components/ScreenGrid.vue` の `acsInsertShortOfRoom`。打鍵・貼り付け・IME の確定の 3 経路とも。テスト `packages/web-ui/test/dbcs-insert-sosi-room.test.ts` 23 件）。
+  C5 の「空の SO/SI が残るか」は原典の操作列で**残る**と確定（`A`・SO・SI・`X`・SO・`あい`…）。あわせて IME の確定で選択を複数字で置き換えると 2 字目以降に最終桁・必要桁の判定が掛からなかったのを直した。
+  残り 2 つは下の兄弟の `[ ]` に割った。
+- [ ] **O 欄の挿入のあとのバイト列が ACS と違う（並びの境目の SO/SI）**（優先度 低・深さ ◐。`20260926-dbcs-insert-sosi-room` decisions D2 から割った）。
+  ACS は並びの直後の半角の字へ全角を入れると**別の並び**（…SI・SO・字・SI…）、並びの最初の全角へ半角を入れると**空の SO/SI**（SO・SI・字・SO…）を作る（原典 `PS5250.insertChar` の操作列）。
+  当 PJ の DBCS 欄の編集の値は論理値で、SO/SI は送信時に codec が付け直す（`packages/tn5250/src/screen/buffer.ts` の `fieldValue`）ので、正規化した 1 つの並びになる。
+  結果、入ったあと当 PJ は ACS より 2 桁多く空きが残り、続けて打つと ACS では 0012 になる挿入が入りうる。ホストへ送るバイト列も違う。
+  直すには DBCS 欄の編集の値に SO/SI の位置を持たせる（センチネル）必要があり、web-ui の全 DBCS 編集操作（Backspace・Delete・Erase EOF・貼り付け・IME）と core の送信に及ぶ。
+  **「構造上できない」で退けたのではない**（AGENTS.md「判断の原則」1）——規模の判断で割った。
+- [ ] **継続欄（O）への挿入の余地の数え方が ACS と違う**（優先度 低・深さ △。`20260926-dbcs-insert-sosi-room` decisions D3 から割った。旧 (c)）。
+  ACS（原典 `PS5250.processCharWithDBCSOpenContField`・`mergeDBCSString`・`checkWordsFitDBCSOpenContField`）は、カーソルから鎖の最後までのバイト列を作り直して字を差し込み、
+  **隣り合う SI・SO を取り除いて並びを繋ぎ直し**、後続の区間へ**語単位で詰め直して**収まるかを見る。当 PJ は区間の中で数える（`20260921-insert-no-room` D3）。
+  **実機の ACS のコアでの測定から始める**（`scripts/acs-probe.mjs`。継続の O 欄を DSM で出させる画面が要る）。
 - [x] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
   **完了（`20260921-type-ahead`・PR #410）**: 施錠中（応答待ち・ホスト施錠）の端末のキーをセッションごとに溜め（`SessionState.typeAhead`）、
   解錠したら合成 keydown を同じ入口へ投げて打った順に再生する（`packages/web-ui/src/components/EmulatorPane.vue` の先打ちの節、
@@ -289,10 +304,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   操作員エラーと同じエラー状態に入る（文字を拒否・挿入モードを解く）。矢印・Tab・AID・Reset・クリックで抜けると、そのメッセージを隠して
   最下行を元に戻す。**実機**（試験画面 ULKPGM の RANGE(1 5) に 9）で ACS は inhibit=5・文字を拒否・挿入モードを解き、矢印・Tab で抜けると
   最下行が消えた（`scripts/acs-probe/window-error.txt`・`host-error-mode.txt`）。当 PJ の関係は `packages/web-ui/test/host-error-mode.test.ts`。
-- [ ] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す**（優先度 ~~中~~ 低・深さ ◐）。
+- [x] **窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す**（優先度 ~~中~~ 低・深さ ◐）。
+  **完了（`20260926-window-error-code`）**: 0x22 を DSM で出させて（`scripts/host-src/dscmd.c` の WINERR*）実機の ACS のコアと当 PJ に当てた。ACS（原典 `DS5250.processWriteErrorCode`・実測 `scripts/acs-probe/window-error-code.txt`）は
+  メッセージ行（SOH の申告）の開始桁から書くが、**書き始め＋桁数が画面を超えると最下行の行頭へ戻す**（最下行では開始桁が捨てられ桁 1 から）。本文は終了桁 − 開始桁 ＋ 1 バイトで切れる。
+  当 PJ も core が同じ位置（`ScreenSnapshot.systemMessageArea`）と上限を求め、UI がそこへ重ねる（`packages/tn5250/src/protocol/wtd-applier.ts` の `windowErrorArea`・`ScreenGrid.vue` の `.opmsg-area`）。
+  実機で 4 通り（最下行／22 行 × 短い／長い）とも ACS と一致（`scripts/verify-window-error-code.mjs` pass=8。変更前 pass=2）。
+  ~~**0x22 そのものは実機で観測できていない**——来たら当 PJ は従来どおり最下行に出す。0x22 を出す画面が見つかったら着手する。~~ → DSM で出させられるので「見つかるまで保留」は当たらなかった（2026-09-27）。
   **実機では差が無かった（2026-09-21・`20260921-host-error-mode` research F2）**: WINDOW キーワードの窓の中の RANGE 欄に範囲外を入れると、
   ホストは **0x22 ではなく WTD で窓の中（12 行目）に書き**、ACS もエラー状態に入らなかった。当 PJ も窓の中に出している。
-  **0x22 そのものは実機で観測できていない**——来たら当 PJ は従来どおり最下行に出す。0x22 を出す画面が見つかったら着手する。
   ~~（元の見出し）窓の中のエラーメッセージ（WRITE ERROR CODE TO WINDOW）を画面の最下行に出す。エラー状態が明けてもメッセージ行を元に戻さない~~
   DDS の窓で入力エラーが出ると、ACS は窓の中に出すが、当 PJ は最下行に出す。訂正している間もメッセージが消えない。
   ACS（委譲先 C の読み）
@@ -304,6 +323,23 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~エラー状態は持たない。~~（`20260921-operator-error-mode` で持った）
   ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）~~と、抜けたときの復元~~。**抜けたときの復元は `20260921-host-error-mode`（PR #410）で済んだ**（`EmulatorPane.vue:980-986` の `exitErrorMode`。2026-09-27 の照合で記録漏れを発見）。0x22 を窓の中に出すのは、0x22 を出す画面が実機で見つかるまで保留。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
+- [x] **WRITE ERROR CODE（0x21）のメッセージを、SOH が申告したメッセージ行に出す**（優先度 低・深さ △。`20260926-window-error-code` decisions D2 から割った）。
+  **完了（`20260926-wec-msgline-row`・PR #423）**: 0x21 にもメッセージ行の 1 行全体の位置（`systemMessageArea`＝`{messageLineRow, 1, cols}`）を付けた（`wtd-applier.ts` `applyWriteErrorCode`）。
+  ACS の実測（`scripts/acs-probe/wec-msgline-row.txt`）: 申告なし→24 行・SOH で 22→22 行、どちらも桁 1 に属性・桁 2 から本文。当 PJ の実機（`scripts/verify-window-error-code.mjs`）は pass=17 fail=0。
+  **ACS との差（残す）**: 1 行を超えた本文（90 字）を ACS は 23 行へ上書きして Reset でも戻さない——情報を捨てるので合わせず、1 行で切る（decisions D2）。
+  あわせて、メッセージ行を**申告が無ければ最下行**にし、CLEAR UNIT / CLEAR UNIT ALTERNATE / CLEAR FORMAT TABLE / SOH の入口で戻すようにした（原典 `DS5250.processClearFMT`。以前は 24 固定で戻さなかった——27×132 と申告の無い画面でずれていた。decisions D5）。
+  寿命は「出した行」で判定する（D6）。27×132 の 0x21 は実機では測っていない（原典の読みだけ）。
+- [x] **エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方**が~~未確認~~（~~ACS はセルに書き、抜けるときに戻す~~。当 PJ は消す／残す。`20260926-window-error-code` D4。上の項目から割った）。
+  **確かめた（`20260927-error-msgline-wtd`・PR #423）**: ACS はエラーのメッセージを出している間 **WTD を保留**し（`DS5250.checkContention`。データ処理のスレッドが止まるので後ろのレコードも並ぶ）、Reset の後に 0x21 の時点のメッセージ行を戻してから処理する。
+  RESTORE は保留しないが、Reset の戻しが RESTORE の 24 行を上書きする。当 PJ は WTD でエラーのメッセージとエラー状態を Reset を待たずに終える（Reset の後の中身は同じ）。RESTORE の見え方は同じ。
+- [ ] **エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する**（ACS `DS5250.checkContention`。`20260927-error-msgline-wtd` から割った。優先度 中・深さ ◐）。
+  (a) 条件は `ps.getMsgLinePos() != -1`（WEC と SysReq で立つ）。(b) 範囲は WTD（コマンドの頭とオーダーごと）——データ処理が止まるので後ろのレコード（READ など）も並ぶ。
+  当 PJ の `clearSystemMessageIfTouched` による即時の消去と、画面の側のエラー状態の早い終わりはこれと食い違う。(c) CLEAR UNIT・SAVE は保留せずエラー状態を解く。RESTORE も保留しない。
+  (d) 解く契機: エラー中のキー（BS などの編集系を除く）・カーソル・Reset 系のキー・Help の AID・メッセージ行のクリック・CLEAR UNIT・SAVE SCREEN・SysReq の終わり・エラーヘルプの終わり。
+  (e) 要る経路: core の受信の保留と解く API、server の Reset の中継、web-ui の `hostErrorDismissedSeq` を core へ寄せる（エラー状態の置き場を直す）。
+  (f) 残りの測定: SysReq 中の WTD、0x22 の WTD の部分が自分を保留しないか（デコンパイルの字面では保留しかねない——`20260926-window-error-code` の実測と突き合わせる）。
+- [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
+  **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
   原典で確認——`DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯（両方なら点灯）。ビットの無い WTD では状態を保つ。
@@ -337,9 +373,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ: `packages/tn5250/src/session/printer-session.ts:183-185` は、opcode 2 なら何もせず return し、それ以外は即座に `PRINT_COMPLETE` を返す（主エージェントが確認）。テスト `printer-session.test.ts:82-84` が即時の応答を固定している。
   再現: 印刷中に HLDSPLF *IMMED / DLTSPLF / ENDWTR *IMMED を行う。PDF の出力先を書き込み不可にして送る。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N15）
-- [ ] **プリンター: 応答を止めている間にホストが帳票を取り消したとき**（優先度 低・`20260921-printer-hold-response` の残り）。
-  ENDWTR *IMMED・HLDSPLF *IMMED などで止めている間にホストが取り消したときの動き。PUB400 では書き出しプログラムを止める権限が無く（CPF3330 系）未確認。
-  止めている間に 15 分のアイドルで接続が黙って死ぬか（`measure-printer-idle-drop`）も未確認。
+- [x] **プリンター: 応答を止めている間にホストが帳票を取り消したとき**（優先度 低・`20260921-printer-hold-response` の残り）。
+  **完了（`20260927-printer-hold-cancel`・PR #423）**: 社内機で測った（`scripts/verify-printer-hold-cancel.mjs`。~~PUB400 では権限が無く未確認~~ → 社内機では書き出しプログラムを止められた）。
+  - 止めている間の HLDSPLF *IMMED → スプールは直ちに HELD、ENDWTR *IMMED → READY。ホストは応答を待たずに CLEAR と FF 1 バイト（フラグ 0x18）を送り、解いた後にもう 1 本 CLEAR を送る。**帳票は失われない**。接続も切れない（3 回・2 通りとも同じ）。
+  - 当 PJ は溜めて、解いた後に NO_ERROR・CLEAR_PROCESSED・NO_ERROR・CLEAR_PROCESSED を返す。ACS も印刷先の障害の間はデータ処理を止め（`PSNVT5250P.processPrinterError`）、取消・再試行とも NO_ERROR——同じ。`packages/tn5250/test/printer-session.test.ts` で並びを固定。
+  - ~~止めている間に 15 分のアイドルで接続が黙って死ぬか未確認~~ → **17 分**止めても切れず、解くと印刷済みになった（`HOLD_IDLE_MIN=17`）。
+  - FF だけのジョブは白紙 1 ページの帳票（自動 PDF なら白紙の PDF）になる。ACS の既定の出力（JPS。`PrintSCS5250JPS.processFormFeed`）も白紙 1 ページなので変えない（decisions D2）。
+- [ ] **FF だけの帳票（取り消しの後）の ACS の実出力**が未実測（原典では既定の JPS は白紙 1 ページで当 PJ と一致、PDT 経路は単独の FF を保留して出さないことがある）。
+  手段の候補: `com.ibm.eNetwork.ECL.ECLHostPrintSession`（acshod2.jar の公開 API）で ACS のプリンターのコアを GUI 無しで当てる——試していない（`20260927-printer-hold-cancel` D2）。
 - [x] **アンロックだけで READ の無い応答が来ると、応答待ちが解けない（#401 以降）**（優先度 低〜中・深さ ◐・**要実測**）。
   **実機で測って決着（2026-09-21・`20260921-type-ahead` の後）**: 試験画面 ULKPGM（`scripts/build-ulktest.mjs`。SNDF＝出力だけ・LOCK 無し・
   `DFRWRT(*NO)` → 10 秒 → SNDRCVF）で ACS と当 PJ を並べた。
@@ -645,7 +686,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `scripts/acs-probe/wtd-control-bytes.txt`）は各バイトを 1 桁の空白（0x07 だけ DEL）として置き、後ろの SBA・SF・IC を全部処理した。当 PJ は「未知のオーダー」として
   次の ESC まで読み飛ばし、同じ WTD の後ろを失っていた（`unknown order` の警告）。`isControlData`（`packages/tn5250/src/protocol/constants.ts`）で表示データにした。
   ~~`20260915-acs-protocol-order-audit` の「`default:` 節の設計そのものは対象外」~~ は破棄（decisions D1）。単体 4 件、mutation 11 通り検出、実機で ACS のコアと同じ画面になった。
-- [ ] **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
+- [x] **【まとめ】DS5250 のうち否定応答の残り**（WTD の中のオーダーの読み手の例外の分）（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
   コマンドの長さの不足（0x10050121）で返すものは、当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）とそのまま対応しないので入れていない。
   条件ごとに ACS と当 PJ の読み方を突き合わせてから入れる（`20260921-negative-responses` D2）。
   **調査（R11・2026-09-22）で分かったこと**: ACS の `DS5250` が `sense_code` を立てる箇所は 44、センスは 12 種と WDSF 系。当 PJ が入れたのは 5 条件だけ。
@@ -657,13 +698,36 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **実装順の案**: 例外→否定応答（短い 0x10050121・位置 0x10050122・後戻り 0x10050123 から。`applyWtd` を try/catch でくるみ、`settleCursor()` を通してから `senseCode` を立てる。
   **偽の否定応答の危険**が生じるので、受理側を先に揃える）→ EA・WEA・SOH・SF の検査。実在しない形（ホストの不具合や手書きの WTD だけ）は台帳に残す。
   ~~`20260921-negative-responses` D2 の「一対一でない」~~ は R11 の表（条件・センス・立てた後）で解消した。測り方 M1〜M6 は R11 の報告（scratchpad）。
-- [ ] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
+  **WTD の中のオーダーの誤りは完了（`20260927-wtd-order-sense`・PR #423）**: SBA・IC・MC・RA・EA・SOH・TD・SF・WEA の長さ不足（0x10050121）・画面の外（0x10050122）・RA / EA の後戻り（0x10050123）・
+  SOH の長さ（0x1005012B）・EA の長さ（0x1005012D）を ACS の条件どおりに否定応答にし、WTD を打ち切る（CC2 は効く——ACS の尾部は走る）。長さが画面を超える TD は ACS と同じくその場で戻る（CC2 を落とす）。
+  DSM（`dscmd.c` の WTDERR*）で 5 通りを出させ、ACS のコアのワイヤのセンス（`tap-proxy.mjs`）と当 PJ（`scripts/verify-wtd-order-sense.mjs` pass=15）が一致。コマンドの長さ不足は `20260927-short-command-sense` で済んだ。
+- [ ] **否定応答・受理の残り（WTD の中）**（上の【まとめ】から割った。実機で測ってから）:
+  SBA の行 1・桁 0（ACS は番地 -1 として受ける。当 PJ は例外）・SF の中身（後ろが 2〜4 バイト・FFW の上位ビット・属性 0x20 未満〔ACS は 0x10050130〕・欄の追加の失敗 0x10050125）・
+  WEA の属性の値（0x1005012D / 0x1005012F / 0x1005012A）・TD が画面の末尾を越える・WDSF の中・
+  文字の並びが画面を越えるときの HostPlane・属性（ACS は手前の桁まで書く見込み。当 PJ は書かない——`20260927-ea-acs` D2）。
+  ~~EA の属性タイプ・EA の後の書き始め・文字が画面の末尾を越える~~ → 下の `[x]` に割った。
+- [x] **EA の属性タイプ・書き始めと、画面の終わりをまたぐ書き込み**（上の「否定応答・受理の残り」から割った）。
+  **完了（`20260927-ea-acs`・PR #423）**: EA は ACS の `eraseToAddress` どおり（書き始めは行き先の次・タイプ 0x00 / 0xFF・DBCS の 0x05・その他は 0x1005012D・長さ 3 以上は 0x10050123）。
+  画面の終わりを越える文字の並びは書かずに 0x10050121（CC2 も落とす）、最後の桁でちょうど終わった次は 1 行 1 桁から（EA の後だけ画面の外のまま）。
+  実機（DSM の EATEST* 7 通り・`scripts/verify-ea-acs.mjs` pass=25）で ACS のコアと一致。直す前は X が 1 桁ずれ、越える並びはレコードごと捨てていた。
+- [x] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
   3 つで直ちに return し、レコードの終わりの `processWCC2`（CC2 の解錠・警報・メッセージ灯）と SAVE PARTIAL の応答を飛ばす（次のレコードの頭で `isPrepwcc2` も落ちる）。
   当 PJ は同じレコードで先に来た WTD の CC2 を効かせ、SAVE PARTIAL の応答も送る。当 PJ はキーボードを READ でも解くので、CC2 だけ落とすと ACS と同じにならない——
   **DSM で「WTD（CC2 解錠）＋不正な ROLL」を ACS のコアと当 PJ に出させて、解錠・警報の有無を測ってから**直す。
   **R11 の調査で訂正**: 直 return は「ESC が無い・CUA の引数・ROLL の指定」の 3 つでなく **8 か所**、WTD の中の誤りと WSF D9/72 は尾部が走る。**当 PJ は CC2 の解錠ビットでは解錠しない**
   （解錠は READ が来たときだけ。`session.ts`）ので、~~CC2 だけ落とすと ACS と同じにならない~~ は成り立たず、落ちる差は警報・メッセージ待ち・READ による解錠・SAVE PARTIAL の応答だけ。
   測ってから決める（`EARLYROLL` などを DSM で出させる案。ACS のプローブは `setAcsPackage(true)` を呼ばないので、SF の属性検査 0x10050130 は製品の ACS でしか採れない）。
+  **CC2 は完了（`20260927-early-return-cc2`・PR #423）**: DSM（`dscmd.c` の EARLYROLL）で WTD（CC2＝メッセージ待ちを点ける）＋不正な ROLL の 1 レコードを出させ、ACS のコアは点けず当 PJ は点けていた
+  （`scripts/acs-probe/early-return-cc2.txt`・`scripts/verify-early-return-cc2.mjs`）。その場で戻る否定応答（ESC が無い・CLEAR UNIT ALTERNATE の引数・ROLL の指定・WSF が短い）では、同じレコードの CC2 の警報・
+  メッセージ待ちを落とす（SAVE PARTIAL より前の CC2 は残す——ACS の SAVE PARTIAL はその場で効かせる。`wtd-applier.ts` の `abortRecord`）。直した後 pass=4。
+- [x] **長さの足りないコマンドの否定応答**（`20260927-early-return-cc2` から割った「その場で戻る否定応答の残り」の一部）。
+  **完了（`20260927-short-command-sense`・PR #423）**: WTD・READ（0x42/0x52/0x82）の CC、ROLL の 3 バイト、WRITE ERROR CODE（0x21/0x22）の本体が足りないレコードで、ACS と同じく 0x10050121 を返してその場で戻る
+  （`wtd-applier.ts` の `tooShort`。以前は読み過ぎの例外でレコードの結果ごと捨て、応答もしなかった）。DSM（`dscmd.c` の SHORT*）で 5 通りを出させ、ACS のコアは先の WTD を書き・メッセージ待ちは点けず・否定応答（ホストの次の出力が CPFA303）、
+  当 PJ も直した後に同じ（`scripts/verify-short-command-sense.mjs`）。0x22 の 0 バイトは `20260926-wec-msgline-row` D4 を破棄して否定応答に。
+- [ ] **その場で戻る否定応答の残り**（`20260927-early-return-cc2`・`20260927-short-command-sense` から割った。いずれも実機で測っていない）:
+  SAVE PARTIAL の後ろで戻ったとき、ACS は SAVE PARTIAL の応答を次のレコードの終わりに持ち越す（`bSavePartial` を先頭で捨てない）——当 PJ は同じレコードで送る。
+  CLEAR UNIT ALTERNATE の引数が無いとき ACS は長さの検査を通らず読み進める（`n5 > n2`）——当 PJ は読み過ぎの例外。
+  ACS の READ の CC2 は溜めない（`lastReadCCbyte2`）——当 PJ は常に効かせる。SAVE PARTIAL の前の警報は ACS では 2 回鳴る（`pendingCCbyte2` を捨てない）——当 PJ は 1 回。
 - [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
     ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／
@@ -882,9 +946,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   開始の文言を 3 秒出す（`packages/web-ui/src/session-controller.ts` の `noteStartup`）。ⓘ にもコード。実機（社内機）で I902・I901 が画面まで届いた。
   節目 10 の独立点検で直した分: I901・I902 以外のコードは「応答コード: <コード>」（`AcsOnly.displayResponseCode` の else 側。`composables/opMessages.ts` の `startupStartedText`）、
   ブラウザの繋ぎ直し・後から入るタブの `opened` では出さない（ホストへ繋ぎ直していないため）。
-- [ ] **起動応答 I901・I902 以外のコードの扱い**（優先度 低・深さ △。上の `[x]` から割った）。ACS の `DS5250.processStartUpConfirmation` は、I901・I902 と
-  表に無いコードでは開始の処理（装置名の設定・状態 7・5）に進まない。当 PJ は I906（自動サインオンを要求したが許されない。サインオン画面が続く）と、装置名が空でない
-  表に無いコードを成功扱いで開く（`packages/tn5250/src/telnet/startup-codes.ts` の `STARTUP_SUCCESS_CODES`・`session.ts`）。ACS が I906 でどう振る舞うかは実機で測っていない（**未確認**）。
+- [x] **起動応答 I901・I902 以外のコードの扱い**（優先度 低・深さ △。上の `[x]` から割った）。
+  **完了（`20260927-startup-code-others`・PR #423）**: 振る舞いは変えない。ACS `DS5250.processStartUpConfirmation` も I906・表に無い数では開始の処理（装置名・状態 7）をしないだけで、
+  続くサインオン画面は処理する（`processPassthru`）——当 PJ と同じくセッションは続く。装置名は当 PJ だけ採る（ジョブ名の出どころ。`packages/server/src/session-manager.ts` の `entry.job`。decisions D1——**暫定**）。
+  経路を `packages/tn5250/test/session.test.ts` の I906・Z123 のテストで固定（変異: I906 を成功の表から外すと落ちる）。ACS のコアの dump に起動応答のコード・装置名・`wsidReady` を足した（`scripts/acs-probe/AcsProbe.java`・`startup-i906.txt`）。
+  ~~ACS が I906 でどう振る舞うかは実機で測っていない~~ → 社内機（QRMTSIGN *FRCSIGNON）へ自動サインオンを要求しても ACS のコア・当 PJ ともに **I902**＋サインオン画面で、I906 は出させられなかった。
+- [ ] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
+  あわせて: ACS は応答コードを各バイトの下位 4 ビットの数字で分岐するので、拒否の表の数に当たる未知の文字列を ACS は拒否・当 PJ は装置名があれば開く（実在するかは未確認。同 research F7）。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり

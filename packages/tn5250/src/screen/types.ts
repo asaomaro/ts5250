@@ -351,6 +351,12 @@ export interface ScreenSnapshot {
    */
   systemMessageSeq?: number;
   /**
+   * **WRITE ERROR CODE（0x21 / 0x22）のメッセージを重ねる位置**（1 起点。`20260926-window-error-code`・`20260926-wec-msgline-row`）。
+   * 0x22: `col` は書き始めの桁（ACS が属性を書く桁）、`width` は重ねる桁数（ACS が空にする桁と本文を書いた桁の和）。
+   * 0x21: メッセージ行（SOH の申告。無ければ最下行）の桁 1 から 1 行全体。無ければ UI は最下行に重ねる
+   */
+  systemMessageArea?: { row: number; col: number; width: number };
+  /**
    * **メッセージ待ち表示（MW）が点いている**（`20260921-message-waiting-indicator`）。
    * `*NOTIFY` の待ち行列にメッセージが届いたとき（SBMJOB の完了など）にホストが点ける。
    * ACS は OIA に出す（`ECLOIA.setMsgWaiting`）。**点いているときだけ付与する**（消灯は省略）。
