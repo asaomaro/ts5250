@@ -80,7 +80,7 @@ describe("WTD の中のオーダーの誤り", () => {
 
   it("ちょうどレコードの終わりに収まる EA・SOH・TD は否定応答にしない。1 バイト足りなければ 0x10050121", () => {
     for (const [ok, short] of [
-      [[ORDER.EA, 6, 2, 0x03, 0x00, 0x01], [ORDER.EA, 6, 2, 0x03, 0x00]],
+      [[ORDER.EA, 6, 2, 0x02, 0x00], [ORDER.EA, 6, 2, 0x02]],
       [[ORDER.SOH, 0x03, 0, 0, 0], [ORDER.SOH, 0x03, 0, 0]],
       [[ORDER.TD, 0x00, 0x02, 0xc1, 0xc2], [ORDER.TD, 0x00, 0x02, 0xc1]]
     ]) {
@@ -103,12 +103,12 @@ describe("WTD の中のオーダーの誤り", () => {
     expect(buf.cursorAddr).toBe(buf.addrOf(7, 3));
   });
 
-  it("正しいオーダーなら否定応答にしない（境界: 24 行 80 桁・RA の同じ位置・EA の長さ 2 と 5・SOH の長さ 1 と 7）", () => {
+  it("正しいオーダーなら否定応答にしない（境界: 24 行 80 桁・RA の同じ位置・EA の長さ 2〔タイプ 0x00 と 0xFF〕・SOH の長さ 1 と 7）", () => {
     for (const order of [
       [ORDER.SBA, 24, 80],
       [ORDER.RA, 5, 4, 0x5c],
       [ORDER.EA, 6, 2, 0x02, 0x00],
-      [ORDER.EA, 6, 2, 0x05, 0x00, 0x01, 0x02, 0x03],
+      [ORDER.EA, 6, 2, 0x02, 0xff],
       [ORDER.SOH, 0x01, 0x00],
       [ORDER.SOH, 0x07, 0, 0, 0, 0, 0, 0, 0]
     ]) {
@@ -120,3 +120,97 @@ describe("WTD の中のオーダーの誤り", () => {
     expect(() => run([ORDER.SBA, 1, 0])).toThrow();
   });
 });
+
+/**
+ * **EA の属性タイプ・書き始め・長さ 3 以上は ACS と同じ**（`20260927-ea-acs`。ACS `PS5250.eraseToAddress`）。実機で DSM に
+ * 「6 行 2 桁に ABCDEFGHIJ → SBA 6,4 → EA〔行き先 6,6〕→ X → 6,20 に END」を出させ、ACS のコアの 6 行目は
+ * 0xFF / 0x00: ` AB   XGHIJ        END`（X は行き先の次）・0x01: ` ABCDEFGHIJ`（0x1005012D）・長さ 3: ` AB   FGHIJ`（0x10050123）だった
+ * （`scripts/acs-probe/ea-acs.txt`・`scripts/verify-ea-acs.mjs`）
+ */
+describe("EA の属性タイプと書き始め（ACS の実測）", () => {
+  const W = [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x05, ORDER.SBA, 6, 2, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xd1, ORDER.SBA, 6, 4];
+  const TAIL = [0xe7, ORDER.SBA, 6, 20, 0xc5, 0xd5, 0xc4];
+  const row6 = (ea: number[], c = codec) => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...W, ...ea, ...TAIL]), buf, c, () => {});
+    return { r, text: buf.snapshot().cells[5]!.map((x) => x.char).join("").replace(/\s+$/, "") };
+  };
+  for (const [label, ea, text, sense] of [
+    ["タイプ 0xFF", [ORDER.EA, 6, 6, 0x02, 0xff], " AB   XGHIJ        END", undefined],
+    ["タイプ 0x00", [ORDER.EA, 6, 6, 0x02, 0x00], " AB   XGHIJ        END", undefined],
+    ["タイプ 0x01", [ORDER.EA, 6, 6, 0x02, 0x01], " ABCDEFGHIJ", 0x1005012d],
+    ["長さ 3（0x00・0xFF）", [ORDER.EA, 6, 6, 0x03, 0x00, 0xff], " AB   FGHIJ", 0x10050123],
+    ["長さ 5（上限。2 つ目で後戻り）", [ORDER.EA, 6, 6, 0x05, 0x00, 0xff, 0x00, 0xff], " AB   FGHIJ", 0x10050123],
+    ["タイプ 0x05（DBCS でないセッション）", [ORDER.EA, 6, 6, 0x02, 0x05], " ABCDEFGHIJ", 0x1005012d]
+  ] as const) {
+    it(`${label}: 6 行目 ${JSON.stringify(text)}${sense ? `・否定応答 0x${sense.toString(16)}` : ""}`, () => {
+      const { r, text: t } = row6([...ea]);
+      expect(t).toBe(text);
+      expect(r.senseCode).toBe(sense);
+    });
+  }
+
+  it("タイプ 0x05 は DBCS のセッションでは受ける（文字は消さず、書き始めは行き先の次）", () => {
+    const { r, text } = row6([ORDER.EA, 6, 6, 0x02, 0x05], codecForCcsid(930));
+    expect(r.senseCode).toBeUndefined();
+    expect(text).toBe(" ABCDEXGHIJ        END");
+  });
+});
+
+/**
+ * **文字の並びが画面の終わりを越えるなら、並びを書かずに 0x10050121 で戻る（CC2 も落とす）**（`20260927-ea-acs`）。実機の ACS のコア:
+ * 24,79 から XYZ → 24 行目は空のまま・0x10050121・メッセージ待ちは点かない。EA 24,80 の後ろの X → EA の消去は効き、X は書かれず 0x10050121
+ */
+describe("画面の終わりを越える文字の並び（ACS の実測）", () => {
+  const WTD = [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x05];
+  const row = (buf: ScreenBuffer, n: number) => buf.snapshot().cells[n - 1]!.map((x) => x.char).join("").replace(/\s+$/, "");
+  it("24,79 から XYZ: 並びを書かず、0x10050121・CC2 を落とす", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 79, 0xe7, 0xe8, 0xe9, ORDER.SBA, 6, 20, 0xc5]), buf, codec, () => {});
+    expect(r.senseCode).toBe(0x10050121);
+    expect(r.alarm).toBe(false);
+    expect(r.messageWaiting).toBeUndefined();
+    expect(row(buf, 24)).toBe("");
+    expect(row(buf, 6)).toBe("");
+  });
+  it("EA 24,80 の後ろの X: 消去は効き、X は書かれず 0x10050121", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 70, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, ORDER.SBA, 24, 75, ORDER.EA, 24, 80, 0x02, 0xff, 0xe7]), buf, codec, () => {});
+    expect(r.senseCode).toBe(0x10050121);
+    expect(r.messageWaiting).toBeUndefined();
+    expect(row(buf, 24).trim()).toBe("01234");
+  });
+  it("ちょうど最後の桁まで収まる並び（24,78 から XYZ）は書く", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 78, 0xe7, 0xe8, 0xe9]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(row(buf, 24).trim()).toBe("XYZ");
+  });
+  it("**最後の桁でちょうど終わった並びの次は 1 行 1 桁から**（ACS は位置を画面の大きさで割った余りに戻す。実機: 24,78 から XYZ → IC → W の W は 1,1）", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 78, 0xe7, 0xe8, 0xe9, ORDER.IC, 6, 2, 0xe6]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(r.messageWaiting).toBe(true);
+    expect(row(buf, 1)).toBe("W");
+    expect(row(buf, 24).trim()).toBe("XYZ");
+  });
+  it("RA が最後の桁で終わった次も 1 行 1 桁から（RA も ACS は同じ書き方）", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 78, ORDER.RA, 24, 80, 0x5c, 0xe6]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(row(buf, 1)).toBe("W");
+  });
+  it("EA 24,80 の後は SBA で置き直せば書ける（画面の外のままは EA だけ）", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 70, ORDER.EA, 24, 80, 0x02, 0xff, ORDER.SBA, 1, 2, 0xe6]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(row(buf, 1)).toBe(" W");
+  });
+  it("EA 24,80 で終わる WTD（後ろに文字が無い）は否定応答にしない（メッセージ行を消す実例の形）", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...WTD, ORDER.SBA, 24, 1, ORDER.EA, 24, 80, 0x02, 0xff, ESC, COMMAND.READ_MDT_FIELDS, 0, 0]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(r.readRequested).toBe(true);
+  });
+});
+

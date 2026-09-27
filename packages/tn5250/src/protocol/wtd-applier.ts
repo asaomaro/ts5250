@@ -396,7 +396,7 @@ export function applyDataStream(
         const out = applyWtd(r, buf, codec, result, warn, cursorState);
         // WTD の中の誤り: 否定応答を立てて打ち切る。レコードの残りは読まないが、CC2 は落とさない（`applyWtd` の `fail`）
         if (out === "fail") return finish();
-        // 長さが画面を超える TD: ACS は次のバイト（TD）を「ESC が無い」としてその場で戻る——CC2 も落とす
+        // 長さが画面を超える TD・画面の終わりを越える文字の並び: ACS は WTD をそこで抜け、次のバイトを「ESC が無い」としてその場で戻る——CC2 も落とす
         if (out === "abort") return abortRecord(SENSE.COMMAND_EXPECTED);
         break;
       }
@@ -645,11 +645,35 @@ function applyWtd(
     warnUnmappable(unmappable, warn);
     return "fail";
   };
+  /**
+   * **文字の並びが画面の終わりを越えるなら、その並びは 1 桁も書かずに打ち切る**（`20260927-ea-acs`）。ACS は ESC とオーダー以外のバイトの並びを 1 つの
+   * 文字列として書き（`processWriteToDisplay` の終わりの `writeString`）、実機の ACS のコアでは、並びが最後の桁を越えると並びの**見える文字**を 1 つも書かず、
+   * 0x10050121 で CC2 も落とした（24,79 から XYZ・EA 24,80 の後ろの X——`scripts/acs-probe/ea-acs.txt` の EATESTOVER / EATESTEND）。
+   * 原典では手前の桁の HostPlane（READ SCREEN・SAVE の応答に出る）と並びの中の属性は書かれている見込み——当 PJ は書かない（未確認の差。decisions D2）。
+   * 以前は画面の外の書き込みの例外でレコードの結果ごと捨てていた。並びの頭で 1 回だけ数える（`runEnd`＝並びが終わる位置の残りバイト数）
+   */
+  let runEnd = Infinity;
+  /**
+   * **EA が位置を画面の大きさにしたか**。ACS の文字の並び・RA・TD（`writeString`）は書いた後の位置を画面の大きさで割った余りにする——最後の桁で
+   * ちょうど終わると次は 1 行 1 桁（実機の ACS のコアで 24,78 から XYZ → IC → W の W は 1,1 に書かれた。EATESTWRAP）。**EA だけは割らずに
+   * 行き先の次のまま**（`eraseToAddress`）なので、その後ろの並びは画面の外になる（EATESTEND）。SBA で位置を置き直せば外れる
+   */
+  let eaAtEnd = false;
+  const runLength = (): number => {
+    let n = 0;
+    while (n < r.remaining) {
+      const x = r.peekAt(n);
+      if (x === ESC || WTD_ORDERS.has(x)) break;
+      n++;
+    }
+    return n;
+  };
   /** 行・桁が画面の中か（ACS の `< 1 || > 行数・桁数` の検査） */
   const inScreen = (row: number, col: number): boolean => row >= 1 && row <= buf.rows && col >= 1 && col <= buf.cols;
 
   while (r.remaining > 0) {
     const b = r.peek();
+    if (addr === buf.rows * buf.cols && !eaAtEnd) addr = 0;
     if (b === ESC) {
       // 次のコマンドへ。**抜ける前に知らせる**——ここが WTD の正常な終わりなので、
       // 関数末尾だけに置くと（ほぼ毎回ここで返るため）警告が出ない
@@ -674,6 +698,17 @@ function applyWtd(
           result.pcCommand = req;
         }
       } else if (kind === "end") result.pcCommandEnd = true;
+    }
+
+    if (!WTD_ORDERS.has(b) && r.remaining <= runEnd) {
+      const n = runLength();
+      runEnd = r.remaining - n;
+      if (addr + n > buf.rows * buf.cols) {
+        warn(`display data (${n} bytes at ${addr}) runs past the end of the screen (negative response 0x10050121)`);
+        settleCursor();
+        warnUnmappable(unmappable, warn);
+        return "abort";
+      }
     }
 
     r.u8();
@@ -752,6 +787,7 @@ function applyWtd(
         // レコードの終わりなら 0x10050122）——当 PJ は受けられないので従来どおり例外（backlog）
         if (!inScreen(row, col) && !(row === 1 && col === 0)) return fail(SENSE.ORDER_ADDRESS, `SBA out of range (${row},${col})`);
         addr = buf.addrOf(row, col);
+        eaAtEnd = false;
         break;
       }
       case ORDER.IC:
@@ -800,12 +836,22 @@ function applyWtd(
         if (len - 1 > r.remaining) return fail(SENSE.COMMAND_EXPECTED, `EA length ${len} beyond record`);
         if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `EA out of range (${row},${col})`);
         if (len < 2 || len > 5) return fail(SENSE.EA_LENGTH, `invalid EA length ${len}`);
-        r.skip(len - 1); // 属性タイプバイト群（未対応。全消去として扱う）
         const target = buf.addrOf(row, col);
-        if (target < addr) return fail(SENSE.ORDER_BACKWARD, `EA target ${target} < current ${addr}`);
-        // 消去は target を含む（tn5250 erase_region と一致）。再開アドレスは tn5250 に合わせ target
-        buf.eraseRange(addr, target);
-        addr = target;
+        // **属性タイプごとに消し、成功すれば行き先の次の番地から書く**（ACS `PS5250.eraseToAddress`。`20260927-ea-acs`。実機の ACS のコアで、
+        // EA の後の文字は行き先の次の桁に書かれた——~~tn5250 に合わせて行き先から~~ は 1 桁ずれていた）。
+        // - 0x00・0xFF: 今の位置から行き先まで（行き先を含む）を消す（DBCS のセッションの 0xFF は ACS では区間の印も消す——当 PJ は持たない）
+        // - 0x05: DBCS のセッションだけ受ける（ACS は DBCS の区間の印だけを消す——当 PJ は区間の印を画面に持たないので消すものは無い）。それ以外のセッションは 0x1005012D
+        // - その他のタイプは 0x1005012D（何も消さない）
+        // - 2 つ目のタイプは、1 つ目で位置が行き先の次へ進んでいるので必ず後戻り（0x10050123）——ACS は長さ 3 以上の EA を事実上受けない（実機の ACS のコアで 0x10050123）
+        for (let t = 0; t < len - 1; t++) {
+          const type = r.u8();
+          if (target < addr) return fail(SENSE.ORDER_BACKWARD, `EA target ${target} < current ${addr}`);
+          if (type === 0x00 || type === 0xff) buf.eraseRange(addr, target);
+          // 値は長さの誤りと同じ 0x1005012D（ACS も同じ値を返す）
+          else if (type !== 0x05 || !codec.decodeDbcsPair) return fail(SENSE.EA_LENGTH, `EA attribute type 0x${type.toString(16)} not supported`);
+          addr = target + 1;
+        }
+        eaAtEnd = addr === buf.rows * buf.cols;
         break;
       }
       case ORDER.SOH: {
@@ -1056,6 +1102,11 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck);
   return fieldStart;
 }
+
+/** WTD の中で文字の並びを区切るオーダー（ACS `processWriteToDisplay` の終わりの文字列の読み取りが止まるバイト。ESC は別に見る） */
+const WTD_ORDERS: ReadonlySet<number> = new Set([
+  ORDER.SOH, ORDER.RA, ORDER.EA, ORDER.WEA, ORDER.TD, ORDER.SBA, ORDER.IC, ORDER.MC, ORDER.WDSF, ORDER.SF
+]);
 
 /** 否定応答のセンス・コード（ACS `DS5250` の `setSenseCode` / `sense_code` の値） */
 export const SENSE = {

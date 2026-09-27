@@ -70,24 +70,23 @@ describe("applyDataStream — 合成データ", () => {
     expect(rowText(buf, 1)).toBe("=====");
   });
 
-  it("EA が length＋属性バイトを消費し、target を含めて消去する", () => {
+  it("EA（タイプ 0xFF）が target を含めて消去し、次の書き始めは target の次（ACS `eraseToAddress`。`20260927-ea-acs`）", () => {
     const first = apply([
       ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
       ORDER.SBA, 1, 1, ...e("ABCDE")
     ]);
-    // EA 行=1 桁=4 length=2（属性 1 バイト続くが length=2 なので属性は 1 バイト）
-    // ここでは length=3（属性タイプ 2 バイト）で、パーサがそれらを正しく読み飛ばすことを検証
+    // ~~length=3（属性タイプ 2 バイト）を読み飛ばす~~ → ACS は 2 つ目のタイプを後戻り（0x10050123）にする（`wtd-order-sense.test.ts`）。ここは length=2
     const { buf, warns } = apply(
       [
         ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
         ORDER.SBA, 1, 2,
-        ORDER.EA, 1, 4, 0x03, 0xff, 0xff, // length=3, 属性タイプ×2
-        ORDER.SBA, 1, 5, ...e("Z") // 属性を読み飛ばせていれば SBA として正しく解釈される
+        ORDER.EA, 1, 4, 0x02, 0xff,
+        ...e("Z") // 書き始めは (1,5)——E を上書きする（~~行き先の (1,4)~~）
       ],
       first.buf
     );
     expect(warns).toEqual([]);
-    // (1,2)〜(1,4) を消去（B C D 消去）、A 残る、E は (1,5) だが Z で上書き
+    // (1,2)〜(1,4) を消去（B C D 消去）、A 残る、Z は (1,5)
     expect(rowText(buf, 1)).toBe("A   Z");
   });
 
