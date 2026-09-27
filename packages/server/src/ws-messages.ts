@@ -129,6 +129,15 @@ export interface WsCloseReq {
 export interface WsActivity {
   type: "activity";
 }
+/**
+ * **ホストのエラー状態を抜けた**（Reset・カーソルキー・クリックなど。`20260927-host-error-hold`）。ACS はエラーのメッセージの間ホストの WTD を
+ * 止めて待つ（`checkContention`）ので、抜けたことをセッションへ伝えて止めた出力を流す。`seq` は抜けたエラーの `systemMessageSeq`
+ * （新しいエラーを取り違えて消さないため）。値を持たない操作なので読み取り専用のセッションでも受ける
+ */
+export interface WsDismissHostError {
+  type: "dismiss-host-error";
+  seq: number;
+}
 /** ハートビートの応答（`ping` への返し）。半開きソケットの検出に使う */
 export interface WsPong {
   type: "pong";
@@ -256,6 +265,7 @@ export type WsClientMessage =
   | WsPrinterOutputRetry
   | WsPrinterOutputCancel
   | WsActivity
+  | WsDismissHostError
   | WsPong
   | WsWatchSubscribe
   | WsWatchStart

@@ -332,12 +332,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方**が~~未確認~~（~~ACS はセルに書き、抜けるときに戻す~~。当 PJ は消す／残す。`20260926-window-error-code` D4。上の項目から割った）。
   **確かめた（`20260927-error-msgline-wtd`・PR #423）**: ACS はエラーのメッセージを出している間 **WTD を保留**し（`DS5250.checkContention`。データ処理のスレッドが止まるので後ろのレコードも並ぶ）、Reset の後に 0x21 の時点のメッセージ行を戻してから処理する。
   RESTORE は保留しないが、Reset の戻しが RESTORE の 24 行を上書きする。当 PJ は WTD でエラーのメッセージとエラー状態を Reset を待たずに終える（Reset の後の中身は同じ）。RESTORE の見え方は同じ。
-- [ ] **エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する**（ACS `DS5250.checkContention`。`20260927-error-msgline-wtd` から割った。優先度 中・深さ ◐）。
+- [x] **エラー（と SysReq）のメッセージを出している間、ホストの WTD を保留する**（ACS `DS5250.checkContention`。`20260927-error-msgline-wtd` から割った。優先度 中・深さ ◐）。
   (a) 条件は `ps.getMsgLinePos() != -1`（WEC と SysReq で立つ）。(b) 範囲は WTD（コマンドの頭とオーダーごと）——データ処理が止まるので後ろのレコード（READ など）も並ぶ。
   当 PJ の `clearSystemMessageIfTouched` による即時の消去と、画面の側のエラー状態の早い終わりはこれと食い違う。(c) CLEAR UNIT・SAVE は保留せずエラー状態を解く。RESTORE も保留しない。
   (d) 解く契機: エラー中のキー（BS などの編集系を除く）・カーソル・Reset 系のキー・Help の AID・メッセージ行のクリック・CLEAR UNIT・SAVE SCREEN・SysReq の終わり・エラーヘルプの終わり。
   (e) 要る経路: core の受信の保留と解く API、server の Reset の中継、web-ui の `hostErrorDismissedSeq` を core へ寄せる（エラー状態の置き場を直す）。
   (f) 残りの測定: SysReq 中の WTD、0x22 の WTD の部分が自分を保留しないか（デコンパイルの字面では保留しかねない——`20260926-window-error-code` の実測と突き合わせる）。
+  **エラーの分は完了（`20260927-host-error-hold`・PR）**: core はエラーのメッセージ（`systemMessage`）がある間 WTD から後ろを溜め、抜けたら順に流す（`Session5250.dismissHostError`）。
+  保留が始まったら ACS の `initKeyboard` と同じく施錠を解き、AID の待ちはエラーの画面で解く。画面の側は抜けたら `dismiss-host-error` を送り（落ちたら次の画面・予約の解除で送り直す）、
+  core はキー（Attn・SysReq を含む）・欄を書く前（ws・MCP）・HLLAPI の編集キー以外でも抜ける。実機（DSM の ERRMSGWTD / ERRMSGRST）で抜けた後の画面が ACS の Reset の後と同じ（pass=4）。
+- [ ] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
+  保留の無い WEC だけのレコードでも ACS は施錠を解く（当 PJ は READ まで施錠のまま）・ACS で AID がいつ応答扱いになるか（`20260927-host-error-hold` D4・D6）。
 - [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
   **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。

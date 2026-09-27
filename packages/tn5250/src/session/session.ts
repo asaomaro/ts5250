@@ -1,6 +1,6 @@
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor, type KatakanaVariant } from "@ts5250/base";
-import { parseRecord, buildNegativeResponse } from "../protocol/gds.js";
+import { parseRecord, buildNegativeResponse, buildRecord } from "../protocol/gds.js";
 import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
 import {
   buildReadMdtResponse,
@@ -201,6 +201,9 @@ function streamOf(opcode: number, data: Uint8Array): Uint8Array | undefined {
  * 5250 セッション（design の状態機械: Connecting → Negotiating → Ready ⇄ Locked → Closed）。
  * Locked 中もホスト発 WTD は画面に適用し続ける（複数レコードで画面が組まれるケース）。
  */
+/** ホストのエラーの間に溜めるレコードの上限（`hostHeld`）。超えたらエラー状態を抜けて流す */
+const HOST_HELD_LIMIT = 500;
+
 export class Session5250 extends Emitter<SessionEvents> {
   readonly id: string;
   private state: SessionState = "connecting";
@@ -223,6 +226,14 @@ export class Session5250 extends Emitter<SessionEvents> {
    * 空の画面が送られて白くなるため（D3「前の画面は新しい接続の最初のレコードまで残す」）。
    */
   private freshBufferPending = false;
+  /**
+   * **ホストのエラーのメッセージを出している間に届いた WTD と、その後ろのレコード**（`20260927-host-error-hold`）。
+   * ACS は WRITE ERROR CODE のメッセージを出している間、WTD の処理の頭でデータ処理を止め（`DS5250.checkContention`）、エラー状態を
+   * 抜けて（Reset・カーソルキー・AID など）から処理する——後ろのレコードも止まった WTD の後に並ぶ。実機の ACS のコアでも、
+   * エラーの間に来た WTD は Reset の後に画面に出た（`20260927-error-msgline-wtd`）。`dismissHostError` で抜けて順に処理する
+   */
+  private hostHeld: Uint8Array[] = [];
+  private holdingForHostError = false;
   private readonly codec: Codec;
   private readonly terminalType: string;
   /** 申告する画面サイズ。Query Reply の画面能力バイトに反映する（ACS と同じ） */
@@ -484,10 +495,32 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   /**
+   * **ホストのエラー状態を抜ける**（ACS `PS5250.clearErrorMode`）。メッセージを外し（ACS はメッセージ行を元に戻す）、エラーの間に止めた
+   * ホストの出力を順に処理する（`hostHeld`）。`seq` を渡せば、そのエラー（`systemMessageSeq`）のときだけ抜ける——画面の側が古い
+   * エラーを抜けたつもりで新しいエラーを消さないため。エラー中でなければ何もしない
+   */
+  dismissHostError(seq?: number): boolean {
+    if (this.buf.systemMessage === undefined) return false;
+    if (seq !== undefined && this.buf.systemMessageSeq !== seq) return false;
+    this.buf.systemMessage = undefined;
+    this.buf.systemMessageArea = undefined;
+    this.holdingForHostError = false;
+    // 閉じたセッションでは流さない（応答を送る先が無い）
+    if (this.state === "closed") this.hostHeld = [];
+    while (!this.holdingForHostError && this.hostHeld.length > 0) this.handleRecord(this.hostHeld.shift()!, true);
+    this.emit("screen", this.snapshot());
+    return true;
+  }
+
+  /**
    * AID キー送信。MDT フィールド＋カーソル位置を送り、キーボードアンロックまで待つ。
    * タイムアウトはエラーにせず timedOut: true で現画面を返す。
    */
   sendAid(key: AidKey, opts: SendAidOptions = {}): Promise<SendAidResult> {
+    // **キーはエラー状態を抜けてから送る**（ACS もエラー中のキー〔編集キー以外〕でまず `clearErrorMode`。MCP など画面を持たない呼び出しでも、
+    // 止めたホストの出力〔と、その後ろの READ〕が流れてから送る）。Attn / SysReq も抜ける——抜けないと、ホストが返す CANCEL INVITE まで溜まり、
+    // その応答が出ずにホストが止まる（独立点検の指摘）。欄の値を書く呼び出し側は、書く前に抜けること（`dismissHostError`。流した画面に書くため）
+    this.dismissHostError();
     // **フラグレコードだけは施錠中でも通す。**
     //
     // 5250 の Attn / SysReq は「固まった要求から抜ける」ための手段そのもので、実機では
@@ -718,7 +751,18 @@ export class Session5250 extends Emitter<SessionEvents> {
       : this.buf.fieldAt(target.row, target.col);
   }
 
-  private handleRecord(record: Uint8Array): void {
+  private handleRecord(record: Uint8Array, replay = false): void {
+    // エラーのメッセージの間に止めた WTD がある間は、後ろのレコードも溜める（ACS はデータ処理のスレッドごと止まる）
+    if (this.holdingForHostError && !replay) {
+      this.hostHeld.push(record);
+      // **溜めすぎたら抜ける**——ACS は受信を止めるので TCP で背圧が掛かるが、当 PJ は受け続けるので際限なく積もりうる。
+      // 上限を超えたらエラー状態を抜けて流す（放置されたエラーでホストの出力を失わないため）
+      if (this.hostHeld.length > HOST_HELD_LIMIT) {
+        this.warn(`host output held for a host error exceeded ${HOST_HELD_LIMIT} records; leaving the error state`);
+        this.dismissHostError();
+      }
+      return;
+    }
     if (this.freshBufferPending) {
       this.freshBufferPending = false;
       this.buf = Session5250.newBuffer(this.opts);
@@ -797,7 +841,26 @@ export class Session5250 extends Emitter<SessionEvents> {
         this.telnet.sendRecord(buildNegativeResponse(SENSE.UNKNOWN_OPCODE));
         return;
       }
-      const result = applyDataStream(data, this.buf, this.codec, this.warn);
+      const result = applyDataStream(data, this.buf, this.codec, this.warn, {
+        holdWtd: () => this.buf.systemMessage !== undefined
+      });
+      if (result.heldFrom !== undefined) {
+        // 止めた WTD から後ろを 1 本のレコードに組み直して溜めの先頭へ（オペコードは同じ。読むのはオペコードとデータだけ）
+        this.holdingForHostError = true;
+        this.hostHeld.unshift(buildRecord(parsed.opcode, data.subarray(result.heldFrom)));
+        // **キーボードの施錠を解き、AID の待ちはエラーの画面で解く**——ACS は WEC の処理（`DS5250.initKeyboard`）で、エラー状態なら
+        // 施錠を解く（do-not-enter の表示だけ出す）。解かないと、後ろの READ まで溜まったとき施錠のまま抜けるキーも打てない・
+        // AID の待ちが時間切れまで解けない（独立点検の指摘）。次の AID は `sendAid` が抜けて（止めた READ が流れて）から送る
+        this.state = "ready";
+        this.onceReady?.();
+        this.onceReady = undefined;
+        if (this.pendingAid) {
+          const p = this.pendingAid;
+          this.pendingAid = undefined;
+          clearTimeout(p.timer);
+          p.resolve({ screen: this.snapshot(), timedOut: false });
+        }
+      }
       // **復元した画面が待っていた READ を、ここで戻す**（ACS `Save5250Net.restoreNetNulls` の
       // `setPendingReadAndAID()` に当たる）。**この位置でなければならない**——下には
       // `queryRequested` / `readScreen*` / `readImmediate*` / `pcCommand` の早期 return が並んでおり、
@@ -1040,6 +1103,9 @@ export class Session5250 extends Emitter<SessionEvents> {
       // **前の接続の状態を持ち越さない**。画面・書式・退避画面は新しい接続のホストが描き直す
       // （画面そのものは最初のレコードで作り直す。`freshBufferPending`）
       this.freshBufferPending = true;
+      // 繋ぎ直した先の画面は新しいので、前の接続で溜めたホストの出力は捨てる
+      this.hostHeld = [];
+      this.holdingForHostError = false;
       this.firstRecord = true;
       this.startupInfo = undefined;
       this.readCommand = COMMAND.READ_MDT_FIELDS;

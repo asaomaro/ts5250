@@ -1272,6 +1272,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               user,
               mcpHolder(user),
             );
+            // ホストのエラー状態を抜けてから欄を書く（止めた出力を流した後の画面に書く。send_key と同じ。`20260927-host-error-hold`）
+            entry.session.dismissHostError();
             for (const f of fields)
               entry.session.setField(fieldTarget(f.field), f.value);
             return screenResult(entry.session.snapshot(), {});
@@ -1331,6 +1333,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               user,
               mcpHolder(user),
             );
+            // ホストのエラー状態を抜けてから欄を書く（止めた出力を流した後の画面に書く。`20260927-host-error-hold`）
+            entry.session.dismissHostError();
             if (fields) {
               sessions.assertWritable(sessionId, user, mcpHolder(user));
               for (const f of fields)
@@ -1489,6 +1493,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
               user,
               mcpHolder(user),
             );
+            entry.session.dismissHostError(); // 欄を書く前に抜ける（上の send_key と同じ）
             if (step.fields)
               for (const f of step.fields)
                 entry.session.setField(fieldTarget(f.field), f.value);

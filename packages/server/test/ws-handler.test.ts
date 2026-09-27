@@ -452,3 +452,52 @@ describe("WsConnection: 応答待ちと逃げ道", () => {
     expect(sent.find((m) => m.type === "error")).toMatchObject({ code: "KEYBOARD_LOCKED" });
   });
 });
+
+/**
+ * **`dismiss-host-error`**（`20260927-host-error-hold`）: 画面の側がホストのエラー状態を抜けたことをセッションへ伝える。
+ * 外から来る入力なので、形の誤り・順序・権限を固定する
+ */
+describe("WsConnection: dismiss-host-error", () => {
+  it("開いたセッションの dismissHostError を番号つきで呼ぶ", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    const spy = vi.spyOn(mgr.get(id).session, "dismissHostError");
+    await conn.handle(JSON.stringify({ type: "dismiss-host-error", seq: 7 }));
+    expect(spy).toHaveBeenCalledWith(7);
+    mgr.closeAll();
+  });
+
+  it("seq が数でなければ PROTOCOL_ERROR（呼ばない）", async () => {
+    const { conn, sent, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    const spy = vi.spyOn(mgr.get(id).session, "dismissHostError");
+    for (const seq of ["7", null, undefined, {}]) {
+      sent.length = 0;
+      await conn.handle(JSON.stringify({ type: "dismiss-host-error", seq }));
+      expect(sent[0]).toMatchObject({ type: "error", code: "PROTOCOL_ERROR" });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    mgr.closeAll();
+  });
+
+  it("open 前は SESSION_NOT_FOUND", async () => {
+    const { conn, sent } = setup();
+    await conn.handle(JSON.stringify({ type: "dismiss-host-error", seq: 1 }));
+    expect(sent[0]).toMatchObject({ type: "error", code: "SESSION_NOT_FOUND" });
+  });
+
+  it("読み取り専用のセッションでも受ける（値を持たない操作）", async () => {
+    const sent: WsServerMessage[] = [];
+    const mgr = new InjectingManager(() => new ReplayTransport(signon()));
+    const resolver = new ConfigResolver(new ServerConfigStore(), new PersonalConfigStore());
+    const conn = new WsConnection({ sessions: mgr, resolver }, { send: (d) => sent.push(JSON.parse(d)), close: () => {} });
+    await conn.handle(JSON.stringify({ type: "open", host: "h", readOnly: true }));
+    const id = (sent[0] as { sessionId: string }).sessionId;
+    const spy = vi.spyOn(mgr.get(id).session, "dismissHostError");
+    await conn.handle(JSON.stringify({ type: "dismiss-host-error", seq: 3 }));
+    expect(spy).toHaveBeenCalledWith(3);
+    mgr.closeAll();
+  });
+});

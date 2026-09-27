@@ -49,6 +49,12 @@ export interface ApplyResult {
    */
   wsfReplies: WsfReply[];
   /**
+   * **ホストのエラーのメッセージを出している間に来た WTD の位置**（`data` の中の ESC の添字。`20260927-host-error-hold`）。
+   * ACS は WRITE ERROR CODE のメッセージを出している間、WTD の処理の頭で待ち（`DS5250.checkContention`）、エラー状態を抜けてから処理する。
+   * 立っていれば、ここから後ろ（WTD とその後ろのコマンド）はまだ処理していない——呼び出し側が溜めて、抜けたときに処理する
+   */
+  heldFrom?: number;
+  /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
    * 先へ進まない（SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
@@ -177,7 +183,9 @@ export function applyDataStream(
   data: Uint8Array,
   buf: ScreenBuffer,
   codec: Codec,
-  warn: WarnFn = () => {}
+  warn: WarnFn = () => {},
+  /** `holdWtd`: WTD を処理する前に聞く。true なら WTD から後ろを処理せず `heldFrom` を返す（ホストのエラーの保留。`ApplyResult.heldFrom`） */
+  opts: { holdWtd?: () => boolean } = {}
 ): ApplyResult {
   const r = new ByteReader(data);
   const result: ApplyResult = {
@@ -391,6 +399,11 @@ export function applyDataStream(
         result.readMdtImmediateAltRequested = true;
         break;
       case COMMAND.WRITE_TO_DISPLAY: {
+        // **エラーのメッセージを出している間は WTD を処理しない**（ACS `checkContention`。長さの検査より前——ACS も WTD の頭で待つ）
+        if (opts.holdWtd?.()) {
+          result.heldFrom = r.offset - 2;
+          return finish();
+        }
         const cut = tooShort(2, "write to display"); // CC1・CC2
         if (cut) return cut;
         const out = applyWtd(r, buf, codec, result, warn, cursorState);
