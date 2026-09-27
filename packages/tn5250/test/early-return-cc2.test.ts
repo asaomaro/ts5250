@@ -86,3 +86,38 @@ describe("その場で戻る否定応答は CC2 を落とす", () => {
     expect(buf.snapshot().cells[4]![1]!.char).toBe("X");
   });
 });
+
+/**
+ * **長さの足りないコマンドは否定応答 0x10050121 でその場で戻る**（`20260927-short-command-sense`）。実機（社内機）で DSM に
+ * WTD（CC2＝メッセージ待ち）＋長さの足りないコマンドの 1 レコードを出させ、ACS のコアは 4 通りとも先の WTD を書き、メッセージ待ちを点けず、否定応答を返した
+ * （`scripts/acs-probe/short-command-sense.txt`・`scripts/verify-short-command-sense.mjs`）。以前は読み過ぎの例外でレコードの結果ごと捨てていた
+ */
+describe("長さの足りないコマンド", () => {
+  for (const [label, tail] of [
+    ["WTD の CC が 1 バイト", [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00]],
+    ["READ MDT（0x52）の CC が 1 バイト", [ESC, COMMAND.READ_MDT_FIELDS, 0x00]],
+    ["READ INPUT（0x42）の CC が 1 バイト", [ESC, COMMAND.READ_INPUT_FIELDS, 0x00]],
+    ["READ MDT ALT（0x82）の CC が 1 バイト", [ESC, COMMAND.READ_MDT_FIELDS_ALT, 0x00]],
+    ["ROLL が 1 バイト", [ESC, COMMAND.ROLL, 0x00]],
+    ["ROLL が 2 バイト", [ESC, COMMAND.ROLL, 0x00, 0x05]],
+    ["WRITE ERROR CODE の本文が無い", [ESC, COMMAND.WRITE_ERROR_CODE]],
+    ["WRITE ERROR CODE TO WINDOW が 0 バイト", [ESC, COMMAND.WRITE_ERROR_CODE_WINDOW]]
+  ] as const) {
+    it(`${label}: 否定応答・先の WTD は書く・CC2 は落とす`, () => {
+      const buf = new ScreenBuffer();
+      const r = applyDataStream(Uint8Array.from([...wtd(0x05), ...tail]), buf, codec, () => {});
+      expect(r.senseCode).toBe(0x10050121);
+      expect(r.messageWaiting).toBeUndefined();
+      expect(r.alarm).toBe(false);
+      expect(buf.snapshot().cells[4]![1]!.char).toBe("X");
+    });
+  }
+
+  it("ちょうど足りていれば否定応答にしない（ROLL 3・WTD / READ 2・WRITE ERROR CODE 1 バイト）", () => {
+    expect(apply([...wtd(0x00), ESC, COMMAND.ROLL, 0x01, 0x02, 0x05]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_ERROR_CODE, 0x22]).senseCode).toBeUndefined();
+    expect(apply([ESC, COMMAND.WRITE_ERROR_CODE_WINDOW, 0x0c]).senseCode).toBeUndefined();
+  });
+});

@@ -240,6 +240,18 @@ export function applyDataStream(
     return finish();
   };
 
+  /**
+   * **長さの足りないコマンドは否定応答 0x10050121 でその場で戻る**（ACS `processCommand` の WTD・READ・ROLL・WRITE ERROR CODE の長さの検査。
+   * `20260927-short-command-sense`）。実測（社内機。DSM に WTD〔CC2＝メッセージ待ち〕＋長さの足りないコマンドの 1 レコード）は WTD・READ MDT（0x52）・ROLL・
+   * 0x21・0x22 の 5 通りで、ACS は先の WTD を書き、メッセージ待ちは点けず、否定応答を返した〔ホストの次の出力が CPFA303〕。READ の 0x42・0x82 は原典（同じ検査）から。
+   * 以前は読み過ぎの例外でレコードの結果ごと捨て、応答もしなかった
+   */
+  const tooShort = (need: number, what: string): ApplyResult | undefined => {
+    if (r.remaining >= need) return undefined;
+    warn(`${what} too short (${r.remaining} of ${need} bytes) (negative response 0x10050121)`);
+    return abortRecord(SENSE.COMMAND_EXPECTED);
+  };
+
   while (r.remaining > 0) {
     const esc = r.u8();
     if (esc !== ESC) {
@@ -315,6 +327,8 @@ export function applyDataStream(
         restoreAndSkipPayload(r, buf, result, warn, "RESTORE PARTIAL SCREEN");
         break;
       case COMMAND.ROLL: {
+        const cut = tooShort(3, "roll"); // 方向＋行数・上端・下端
+        if (cut) return cut;
         // ROLL（ESC 0x23）: `方向＋行数(1) 上端行(1) 下端行(1)`。
         //
         // **方向は上位ビット（0x80）が落ちていれば上へ・立っていれば下へ**。
@@ -376,18 +390,26 @@ export function applyDataStream(
         // 戻ってこなかった**（`scripts/diag-5250-commands.mjs`）。
         result.readMdtImmediateAltRequested = true;
         break;
-      case COMMAND.WRITE_TO_DISPLAY:
+      case COMMAND.WRITE_TO_DISPLAY: {
+        const cut = tooShort(2, "write to display"); // CC1・CC2
+        if (cut) return cut;
         applyWtd(r, buf, codec, result, warn, cursorState);
         break;
-      case COMMAND.WRITE_ERROR_CODE:
+      }
+      case COMMAND.WRITE_ERROR_CODE: {
+        const cut = tooShort(1, "write error code"); // 本文が 1 バイトも無い
+        if (cut) return cut;
         applyWriteErrorCode(r, buf, codec);
         errorCodeWritten = true;
         break;
+      }
       case COMMAND.WRITE_ERROR_CODE_WINDOW: {
         // 窓が開いている間のエラーはこちら。0x21 に**メッセージ行の開始桁・終了桁（2 バイト）**が付いた形。
         // ACS はこの 2 桁で書く位置と本文の長さを決める（`20260926-window-error-code`。`applyWriteErrorCode` の説明）。
-        // 2 バイトが欠けたレコードは、0x21 と同じ扱いで読める範囲を読む（例外にしない）。
+        // 1 バイトも無ければ否定応答（ACS は 0x21 と同じ検査）。桁の 2 バイトの片方だけ欠けたレコードは、0x21 と同じ扱いで読める範囲を読む（例外にしない）。
         // **欠けの判定は残りのバイト数だけで見る**——桁の値が 4（ESC と同じ値）でも桁として読む（独立点検の must）
+        const cut = tooShort(1, "write error code to window");
+        if (cut) return cut;
         const sc = r.remaining > 0 ? r.u8() : undefined;
         const ec = sc !== undefined && r.remaining > 0 ? r.u8() : undefined;
         applyWriteErrorCode(r, buf, codec, sc !== undefined && ec !== undefined ? { start: sc, end: ec } : undefined);
@@ -417,6 +439,8 @@ export function applyDataStream(
       case COMMAND.READ_MDT_FIELDS:
       case COMMAND.READ_MDT_FIELDS_ALT:
       case COMMAND.READ_INPUT_FIELDS: {
+        const cut = tooShort(2, "read"); // CC1・CC2
+        if (cut) return cut;
         applyCc(r.u8(), buf, result);
         applyCc2(r.u8(), result);
         result.readRequested = true;
@@ -1084,7 +1108,8 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec, win
   // 0x22 は上限を超えた本文を次の ESC まで読み飛ばす（ACS は `bl` のとき ESC まで添字を進める。research F1）
   const consumed = used() - orderBytes;
   if (win) while (r.remaining > 0 && r.peek() !== ESC) r.u8();
-  // 桁の欠けた・不正な 0x22（位置が出せない）は 0x21 と同じくメッセージ行の 1 行全体にする（ACS の見え方は未確認。decisions D4）
+  // 桁の片方が欠けた・不正な 0x22（位置が出せない）は 0x21 と同じくメッセージ行の 1 行全体にする（ACS の見え方は未確認。`20260926-wec-msgline-row` D4）。
+  // 0 バイトの 0x22 はここへ来ない（入口で否定応答。`20260927-short-command-sense`）
   buf.systemMessageArea = (win ? windowErrorArea(buf, win, consumed) : undefined) ?? { row: buf.messageLineRow, col: 1, width: buf.cols };
   // **本文が空白だけでも載せて番号を振る**——ACS `DS5250.processWriteErrorCode` は本文を読む前に
   // 無条件で `setErrorMode(true)` とする（独立点検の指摘。空白だけの WEC が実際に届くかは未確認）。

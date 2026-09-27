@@ -851,6 +851,53 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
             if (rc == 0) break;
         }
+    } else if (strncmp(what, "SHORT", 5) == 0) {
+        /*
+         * **長さの足りないコマンドで ACS は否定応答（0x10050121）を返して戻るか**（`20260927-short-command-sense`）。
+         * 1 本のレコードに「WTD（CC2＝メッセージ待ちを点ける・5 行 2 桁に SHORT）＋ 長さの足りないコマンド（最後に置く）」を入れる。
+         * SHORTWTD＝WTD の CC が 1 バイトだけ / SHORTREAD＝READ MDT の CC が 1 バイトだけ / SHORTROLL＝ROLL の 3 バイトのうち 1 バイト /
+         * SHORTWEC＝WRITE ERROR CODE の本体が無い / SHORTWECW＝WRITE ERROR CODE TO WINDOW の桁も本体も無い。EARLYROLL と同じく先にメッセージ待ちを消し、8 秒待ってからもう一度消す
+         */
+        static const unsigned char wtd[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xE2, 0xC8, 0xD6, 0xD9, 0xE3 };   /* CC2 01 / SBA 5,2 "SHORT" */
+        static const char one[] = { 0x00 };
+        static const char off[] = { 0x00, 0x02 };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        Q_Uchar c = 0x11;
+        Q_Bin4 n = 1;
+        if (strcmp(what, "SHORTREAD") == 0) c = 0x52;
+        else if (strcmp(what, "SHORTROLL") == 0) c = 0x23;
+        else if (strcmp(what, "SHORTWEC") == 0) { c = 0x21; n = 0; }
+        else if (strcmp(what, "SHORTWECW") == 0) { c = 0x22; n = 0; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        inzFdbk(fdbk, sizeof(fdbk));
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)wtd, sizeof(wtd), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=01 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(c, n > 0 ? one : (const char *)0, n, cb, 0, (Q_Fdbk_T *)fdbk);
+        if (lg) fprintf(lg, "短いコマンド 0x%02X 長さ %d → ", c, (int)n);
+        logFdbk("QsnPutOutCmd（バッファ）", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutBuf（1 本のレコード）", rc, fdbk);
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
+        sleep(8);
+        for (k = 0; k < 2; k++) {                                  /* 否定応答の後の出力は CPFA303 で返りうる */
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**
