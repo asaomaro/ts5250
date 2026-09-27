@@ -99,6 +99,23 @@ describe("起動応答レコード", () => {
     );
   });
 
+  /**
+   * **I906・表に無いコード（装置名つき）でも、後ろの画面を処理して続け、装置名を採る**（`20260927-startup-code-others`）。
+   * ACS（`DS5250.processStartUpConfirmation`）はこれらで開始の処理をしないが、画面の処理は続く（サインオン画面が出る）。
+   * 装置名を採らない ACS には合わせない——ホストが知らせた装置名を捨てることになる（decisions D1）。
+   * I906 は実機で出させられなかった（QRMTSIGN *FRCSIGNON でも I902）ので、I902 の実物の**応答コードの 4 バイト**だけ差し替える
+   * （オフセット 16＝`6 + record[6] + 5`。`parseStartupResponse` の読み位置と同じ）
+   */
+  for (const [code, bytes] of [["I906", [0xc9, 0xf9, 0xf0, 0xf6]], ["Z123", [0xe9, 0xf1, 0xf2, 0xf3]]] as const) {
+    it(`${code}: サインオン画面を処理して続け、装置名を採る`, async () => {
+      const rec = startupResponseRecord();
+      rec.set(bytes, 16);
+      const { session } = await connectReplay([rxRecord(rec), ...signonEntries()]);
+      expect(session.startup).toEqual({ code, system: "PUB400", device: "QPADEV001P" });
+      expect(session.snapshot().cells[0]?.map((c) => c.char).join("")).toContain("Welcome to PUB400.COM");
+    });
+  }
+
   it("起動応答が来ない接続では undefined（画面はそのまま出る）", async () => {
     const { session } = await connectReplay(signonEntries());
     expect(session.startup).toBeUndefined();

@@ -1,0 +1,15 @@
+# **起動応答 I906（自動サインオンを要求したが許されない）を ACS のコアで出させる試み**（実機の ACS のコア。`20260927-startup-code-others`）。
+# 見込みは QRMTSIGN が *FRCSIGNON の機械で I906 が返ること——**実測では *FRCSIGNON でも I902＋サインオン画面だった**（同 research F5）。
+# I906 が返る条件は未確認。この手順は「どのコードが返り、ACS が装置名を採ったか」（dump の startup= / wsidReady=）を見るためのもの。
+# ACS の自動サインオンで要求する: PROBE_BYPASS_SIGNON=clear。**サインオン画面が続く機械（*FRCSIGNON）専用**——
+# *VERIFY の機械ではホストが画面を飛ばすので、手順の `signon` がメニューの欄へ利用者名とパスワードを書いてしまう。当てない。
+#
+# 実行: PROBE_BYPASS_SIGNON=clear node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/startup-i906.txt AS400
+settle 2000
+dump a0-after-startup
+signon
+keys [enter]
+settle 2000
+dump a1-after-signon
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

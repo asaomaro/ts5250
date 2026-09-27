@@ -909,9 +909,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   開始の文言を 3 秒出す（`packages/web-ui/src/session-controller.ts` の `noteStartup`）。ⓘ にもコード。実機（社内機）で I902・I901 が画面まで届いた。
   節目 10 の独立点検で直した分: I901・I902 以外のコードは「応答コード: <コード>」（`AcsOnly.displayResponseCode` の else 側。`composables/opMessages.ts` の `startupStartedText`）、
   ブラウザの繋ぎ直し・後から入るタブの `opened` では出さない（ホストへ繋ぎ直していないため）。
-- [ ] **起動応答 I901・I902 以外のコードの扱い**（優先度 低・深さ △。上の `[x]` から割った）。ACS の `DS5250.processStartUpConfirmation` は、I901・I902 と
-  表に無いコードでは開始の処理（装置名の設定・状態 7・5）に進まない。当 PJ は I906（自動サインオンを要求したが許されない。サインオン画面が続く）と、装置名が空でない
-  表に無いコードを成功扱いで開く（`packages/tn5250/src/telnet/startup-codes.ts` の `STARTUP_SUCCESS_CODES`・`session.ts`）。ACS が I906 でどう振る舞うかは実機で測っていない（**未確認**）。
+- [x] **起動応答 I901・I902 以外のコードの扱い**（優先度 低・深さ △。上の `[x]` から割った）。
+  **完了（`20260927-startup-code-others`・PR #423）**: 振る舞いは変えない。ACS `DS5250.processStartUpConfirmation` も I906・表に無い数では開始の処理（装置名・状態 7）をしないだけで、
+  続くサインオン画面は処理する（`processPassthru`）——当 PJ と同じくセッションは続く。装置名は当 PJ だけ採る（ジョブ名の出どころ。`packages/server/src/session-manager.ts` の `entry.job`。decisions D1——**暫定**）。
+  経路を `packages/tn5250/test/session.test.ts` の I906・Z123 のテストで固定（変異: I906 を成功の表から外すと落ちる）。ACS のコアの dump に起動応答のコード・装置名・`wsidReady` を足した（`scripts/acs-probe/AcsProbe.java`・`startup-i906.txt`）。
+  ~~ACS が I906 でどう振る舞うかは実機で測っていない~~ → 社内機（QRMTSIGN *FRCSIGNON）へ自動サインオンを要求しても ACS のコア・当 PJ ともに **I902**＋サインオン画面で、I906 は出させられなかった。
+- [ ] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
+  あわせて: ACS は応答コードを各バイトの下位 4 ビットの数字で分岐するので、拒否の表の数に当たる未知の文字列を ACS は拒否・当 PJ は装置名があれば開く（実在するかは未確認。同 research F7）。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり

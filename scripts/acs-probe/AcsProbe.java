@@ -81,7 +81,12 @@ public class AcsProbe {
     } catch (Exception e) {
       ar = "読めず(" + e.getClass().getSimpleName() + ")";
     }
-    return " commStatus=" + sess.GetCommStatus() + " started=" + sess.IsCommStarted() + " autoReconnect=" + ar;
+    // 起動応答のコード（先頭 4 字）・セッションの装置名・`IsWorkstationIDReady`（通信状態 7 で立つ印。診断情報つき＝印 0x90 の起動応答では
+    // I901・I902 のときだけ `SetWorkstationID` と状態 7 が一緒に通る。`20260927-startup-code-others`）。起動応答の残りは見たいものではないので先頭 4 字に絞る
+    String rec = sess.getStartupResponseRecord();
+    String code = rec == null ? "-" : rec.substring(0, Math.min(4, rec.length()));
+    return " commStatus=" + sess.GetCommStatus() + " started=" + sess.IsCommStarted() + " autoReconnect=" + ar
+        + " startup=" + code + " wsid=" + sess.GetWorkstationID() + " wsidReady=" + sess.IsWorkstationIDReady();
   }
 
   /** 入力禁止が解けるまで（最長 15 秒）待ち、さらに ms 待つ。応答が複数レコードに分かれる画面のため、解けた直後には読まない */
