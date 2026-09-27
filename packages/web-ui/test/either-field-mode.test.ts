@@ -53,7 +53,13 @@ async function grid(f: Field) {
     el.dispatchEvent(new CompositionEvent("compositionend"));
     await nextTick();
   };
-  return { el, type, ime, value: () => edits.get(1), notices: () => ((w.emitted("notice") as unknown[][] | undefined) ?? []).map((a) => a[0]) };
+  const paste = async (text: string) => {
+    const ev = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+    ev.clipboardData = { getData: () => text };
+    el.dispatchEvent(ev);
+    await nextTick();
+  };
+  return { el, type, ime, paste, value: () => edits.get(1), notices: () => ((w.emitted("notice") as unknown[][] | undefined) ?? []).map((a) => a[0]) };
 }
 
 
@@ -165,3 +171,74 @@ describe("E 欄の半角・全角", () => {
     expect(b.notices()).toEqual([]);
   });
 });
+
+/**
+ * **貼り付けにも同じ規則**（ACS `PS5250.pasteRect` は 1 字ずつ `inputChar` / `insertChar` → `checkDBCSField` を通る。`20260927-either-paste`）。
+ * 上書きの貼り付けは拒否した字も桁を消費して続け、挿入の貼り付けは 1 字でも拒否なら何も貼らずにエラー（当 PJ の貼り付けの他の拒否と同じ）
+ */
+describe("E 欄の貼り付け", () => {
+  it("**上書き**: 半角の後の全角は飛ばして桁を消費する（`XあB` → `X B`）", async () => {
+    const { paste, value } = await grid(fld("either"));
+    await paste("XあB");
+    expect(value()).toBe("X B");
+  });
+
+  it("**上書き**: 全角の欄の先頭に半角を貼ると、欄を空にして半角に切り替える", async () => {
+    const { type, paste, value } = await grid(fld("either"));
+    await type("あ", "い", "ArrowLeft", "ArrowLeft");
+    await paste("XY");
+    expect(value()).toBe("XY");
+  });
+
+  it("**挿入**: 半角の後に全角を貼ると何も貼らずに 0061", async () => {
+    const { type, paste, value, notices } = await grid(fld("either"));
+    await type("X", "Insert");
+    await paste("あ");
+    expect(value()).toBe("X");
+    expect(notices()).toContain(MSG_EITHER_SBCS_MODE);
+  });
+
+  it("**挿入**: 全角の途中に半角を貼ると何も貼らずに 0060", async () => {
+    const { type, paste, value, notices } = await grid(fld("either"));
+    await type("あ", "い", "ArrowLeft", "Insert");
+    await paste("X");
+    expect(value()).toBe("あい");
+    expect(notices()).toContain(MSG_EITHER_DBCS_MODE);
+  });
+
+  it("**複数行の貼り付け（上書き）**も同じ: `XあB` の行は `X B`", async () => {
+    const { paste, value } = await grid(fld("either"));
+    await paste("XあB\nZ");
+    expect(value()).toBe("X B");
+  });
+
+  it("**複数行の貼り付け（挿入）**: 全角の欄の先頭に半角を貼ると欄を空にして切り替える", async () => {
+    const { type, paste, value, notices } = await grid(fld("either"));
+    await type("あ", "い", "ArrowLeft", "ArrowLeft", "Insert");
+    await paste("XY\nZ");
+    expect(notices()).toEqual([]);
+    expect(value()).toBe("XY");
+  });
+
+  it("**挿入**: 全角の欄の先頭に ` X` を貼ると、空白で切り替えた後の半角として X も受ける（切り替えた状態を持ち回る）", async () => {
+    const { type, paste, value, notices } = await grid(fld("either"));
+    await type("あ", "い", "ArrowLeft", "ArrowLeft", "Insert");
+    await paste(" X");
+    expect(notices()).toEqual([]);
+    expect(value()).toBe(" X");
+  });
+
+  it("**上書き**: 全角の欄で飛ばした桁は全角空白で詰める（半角の空白を混ぜない）", async () => {
+    const { type, paste, value } = await grid(fld("either"));
+    await type("あ");
+    await paste("Xい");
+    expect(value()).toBe("あ\u3000い");
+  });
+
+  it("O 欄は混ぜて貼れる（対象外）", async () => {
+    const { paste, value } = await grid(fld("open"));
+    await paste("Xあ");
+    expect(value()).toBe("Xあ");
+  });
+});
+
