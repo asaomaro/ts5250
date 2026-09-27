@@ -898,6 +898,48 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
             if (rc == 0) break;
         }
+    } else if (strncmp(what, "WTDERR", 6) == 0) {
+        /*
+         * **WTD の中のオーダーの誤りで ACS は否定応答を返すか・CC2 は効くか**（`20260927-wtd-order-sense`）。
+         * 1 本の WTD（CC2＝メッセージ待ちを点ける・5 行 2 桁に WTDERR）の後ろに誤ったオーダーを置く:
+         * WTDERRSBA＝SBA の行 30 / WTDERRRA＝RA の後戻り / WTDERRSOH＝SOH の長さ 0 / WTDERREA＝EA の長さ 7 / WTDERRSHORT＝SBA が 1 バイトで終わる。
+         * EARLYROLL と同じく先にメッセージ待ちを消し、8 秒待ってからもう一度消す
+         */
+        static const unsigned char head[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xE6, 0xE3, 0xC4, 0xC5, 0xD9, 0xD9 };   /* CC2 01 / SBA 5,2 "WTDERR" */
+        static const unsigned char sba[] = { 0x11, 0x1E, 0x02 };                 /* 行 30 */
+        static const unsigned char ra[] = { 0x02, 0x05, 0x02, 0x5C };            /* 5,2 まで（今は 5,8）＝後戻り */
+        static const unsigned char soh[] = { 0x01, 0x00 };                       /* 長さ 0 */
+        static const unsigned char ea[] = { 0x03, 0x06, 0x02, 0x07, 0, 0, 0, 0, 0, 0 };   /* 長さ 7 */
+        static const unsigned char shrt[] = { 0x11, 0x06 };                      /* SBA の桁が無い */
+        static const char off[] = { 0x00, 0x02 };
+        unsigned char rec[64];
+        const unsigned char *tail = sba;
+        int tl = sizeof(sba);
+        int k;
+        if (strcmp(what, "WTDERRRA") == 0) { tail = ra; tl = sizeof(ra); }
+        else if (strcmp(what, "WTDERRSOH") == 0) { tail = soh; tl = sizeof(soh); }
+        else if (strcmp(what, "WTDERREA") == 0) { tail = ea; tl = sizeof(ea); }
+        else if (strcmp(what, "WTDERRSHORT") == 0) { tail = shrt; tl = sizeof(shrt); }
+        else if (strcmp(what, "WTDERRSBA") != 0) { if (lg) { fprintf(lg, "unknown WTDERR mode\n"); fclose(lg); } return 1; }   /* 取り違えて SBA を流さない */
+        memcpy(rec, head, sizeof(head));
+        memcpy(rec + sizeof(head), tail, tl);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)rec, (Q_Bin4)(sizeof(head) + tl), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD＋誤ったオーダー)", rc, fdbk);
+        sleep(8);
+        for (k = 0; k < 2; k++) {                                  /* 否定応答の後の出力は CPFA303 で返りうる */
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

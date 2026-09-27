@@ -330,7 +330,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   あわせて、メッセージ行を**申告が無ければ最下行**にし、CLEAR UNIT / CLEAR UNIT ALTERNATE / CLEAR FORMAT TABLE / SOH の入口で戻すようにした（原典 `DS5250.processClearFMT`。以前は 24 固定で戻さなかった——27×132 と申告の無い画面でずれていた。decisions D5）。
   寿命は「出した行」で判定する（D6）。27×132 の 0x21 は実機では測っていない（原典の読みだけ）。
 - [ ] **エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方**が未確認（ACS はセルに書き、抜けるときに戻す。当 PJ は消す／残す。`20260926-window-error-code` D4。上の項目から割った）。
-- [ ] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、当 PJ は無条件に `clearFormatTable()` する（`wtd-applier.ts` の SOH 分岐。原典 `DS5250` の SOH 分岐 `0 < len < 8`。`20260926-wec-msgline-row` の cross 点検で発見・既存の差）。
+- [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
+  **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
   原典で確認——`DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯（両方なら点灯）。ビットの無い WTD では状態を保つ。
@@ -677,7 +678,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `scripts/acs-probe/wtd-control-bytes.txt`）は各バイトを 1 桁の空白（0x07 だけ DEL）として置き、後ろの SBA・SF・IC を全部処理した。当 PJ は「未知のオーダー」として
   次の ESC まで読み飛ばし、同じ WTD の後ろを失っていた（`unknown order` の警告）。`isControlData`（`packages/tn5250/src/protocol/constants.ts`）で表示データにした。
   ~~`20260915-acs-protocol-order-audit` の「`default:` 節の設計そのものは対象外」~~ は破棄（decisions D1）。単体 4 件、mutation 11 通り検出、実機で ACS のコアと同じ画面になった。
-- [ ] **【まとめ】DS5250 のうち否定応答の残り**（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
+- [x] **【まとめ】DS5250 のうち否定応答の残り**（WTD の中のオーダーの読み手の例外の分）（優先度 低）。ACS が WTD のオーダーの誤り（0x10050122・0x123・0x12A・0x12B・0x12D・0x12F ほか。`DS5250.processWriteToDisplay`）や
   コマンドの長さの不足（0x10050121）で返すものは、当 PJ の読み手の誤りの扱い（警告して次の ESC から復帰）とそのまま対応しないので入れていない。
   条件ごとに ACS と当 PJ の読み方を突き合わせてから入れる（`20260921-negative-responses` D2）。
   **調査（R11・2026-09-22）で分かったこと**: ACS の `DS5250` が `sense_code` を立てる箇所は 44、センスは 12 種と WDSF 系。当 PJ が入れたのは 5 条件だけ。
@@ -689,6 +690,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **実装順の案**: 例外→否定応答（短い 0x10050121・位置 0x10050122・後戻り 0x10050123 から。`applyWtd` を try/catch でくるみ、`settleCursor()` を通してから `senseCode` を立てる。
   **偽の否定応答の危険**が生じるので、受理側を先に揃える）→ EA・WEA・SOH・SF の検査。実在しない形（ホストの不具合や手書きの WTD だけ）は台帳に残す。
   ~~`20260921-negative-responses` D2 の「一対一でない」~~ は R11 の表（条件・センス・立てた後）で解消した。測り方 M1〜M6 は R11 の報告（scratchpad）。
+  **WTD の中のオーダーの誤りは完了（`20260927-wtd-order-sense`・PR #423）**: SBA・IC・MC・RA・EA・SOH・TD・SF・WEA の長さ不足（0x10050121）・画面の外（0x10050122）・RA / EA の後戻り（0x10050123）・
+  SOH の長さ（0x1005012B）・EA の長さ（0x1005012D）を ACS の条件どおりに否定応答にし、WTD を打ち切る（CC2 は効く——ACS の尾部は走る）。長さが画面を超える TD は ACS と同じくその場で戻る（CC2 を落とす）。
+  DSM（`dscmd.c` の WTDERR*）で 5 通りを出させ、ACS のコアのワイヤのセンス（`tap-proxy.mjs`）と当 PJ（`scripts/verify-wtd-order-sense.mjs` pass=15）が一致。コマンドの長さ不足は `20260927-short-command-sense` で済んだ。
+- [ ] **否定応答・受理の残り（WTD の中）**（上の【まとめ】から割った。実機で測ってから）:
+  SBA の行 1・桁 0（ACS は番地 -1 として受ける。当 PJ は例外）・SF の中身（後ろが 2〜4 バイト・FFW の上位ビット・属性 0x20 未満〔ACS は 0x10050130〕・欄の追加の失敗 0x10050125）・
+  WEA の属性の値（0x1005012D / 0x1005012F / 0x1005012A）・文字や TD が画面の末尾を越える（ACS は 0x1005012A）・WDSF の中・EA の属性タイプ（ACS は 0x00・0xFF〔DBCS は 0x05〕以外で 0x1005012D）・
+  **EA の後の書き始め**（ACS は行き先の次の番地、当 PJ は tn5250 に合わせて行き先——既存の差。原則 1 に反するので実機で確かめて直す）。
 - [x] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
   3 つで直ちに return し、レコードの終わりの `processWCC2`（CC2 の解錠・警報・メッセージ灯）と SAVE PARTIAL の応答を飛ばす（次のレコードの頭で `isPrepwcc2` も落ちる）。
   当 PJ は同じレコードで先に来た WTD の CC2 を効かせ、SAVE PARTIAL の応答も送る。当 PJ はキーボードを READ でも解くので、CC2 だけ落とすと ACS と同じにならない——
