@@ -256,6 +256,35 @@ describe("respondAfter: 帳票の出力が終わるまで応答しない（`2026
     expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR, CLEAR_PROCESSED]);
   });
 
+  /**
+   * **止めている間にホストが帳票を取り消したときの実際の並び**（`20260927-printer-hold-cancel`。社内機で HLDSPLF *IMMED・ENDWTR *IMMED とも同じ。
+   * `scripts/verify-printer-hold-cancel.mjs`）: ホストは応答を待たずに CLEAR → フラグ 0x18 の FF 1 バイトを送り（止めている間に届いた）、
+   * 解いた後にもう 1 本 CLEAR が来た（解いた後の応答が 4 本。research F1・F2）。
+   * 溜めて、解いた後に順に応答する（ACS もデータ処理を止めている間は受けたレコードを処理しない——`PSNVT5250P.processPrinterError`）。
+   * 本体が FF なのでジョブの終わりではなくデータ（ACS `DS5250P.processScs` も、フラグがちょうど 0x08 で本体が空か 0x00 だけのときだけ終わりとする）。
+   * 次の CLEAR で FF だけのジョブが閉じられ、白紙 1 ページの帳票になる——ACS の既定の出力（JPS。`PrintSCS5250JPS.processFormFeed`）も白紙 1 ページ
+   * （`20260927-printer-hold-cancel` decisions D2。ACS の実出力の実測は未確認）
+   */
+  it("**止めている間の取り消し（CLEAR・FF・CLEAR）を溜め、解いた後に順に応答する**", async () => {
+    let release!: () => void;
+    const seen: { cleared: boolean; raw: number[] }[] = [];
+    const { transport } = await openWith((r, ctx) => {
+      seen.push({ cleared: ctx.cleared, raw: [...r.raw] });
+      return ctx.cleared ? undefined : new Promise<void>((res) => (release = res));
+    });
+    transport.feed(dataRecord([0xc1]));
+    transport.feed(endOfJob17());
+    transport.feed(clearRecord());
+    transport.feed(rec(0x18, 1, [0x0c]));
+    await tick();
+    expect(replies(transport), "止めている間に応答した").toEqual([NO_ERROR]);
+    release();
+    await tick();
+    transport.feed(clearRecord());
+    expect(replies(transport)).toEqual([NO_ERROR, NO_ERROR, CLEAR_PROCESSED, NO_ERROR, CLEAR_PROCESSED]);
+    expect(seen).toEqual([{ cleared: false, raw: [0xc1] }, { cleared: true, raw: [0x0c] }]);
+  });
+
   // ~~CLEAR で閉じたジョブも待つ~~ → 待たない（独立点検の指摘）。ACS がエラーで止まるのはデータを書くとき（`sendPrintData`）だけで、
   // ジョブを閉じるときの失敗（`closePrinterIfRequired`）は記録するだけ。CLEAR ではスプールがホストに残るので、止めても守るものが無い
   it("**CLEAR で閉じたジョブは待たない**（呼ぶが `cleared: true` を渡し、すぐ CLEAR_PROCESSED を返す）", async () => {
