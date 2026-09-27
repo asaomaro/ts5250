@@ -694,15 +694,18 @@ export class Session5250 extends Emitter<SessionEvents> {
     // **待たされている Read の種類で形式が変わる。** `0x42`（READ INPUT FIELDS）だけは
     // SBA 無し・全欄・欄長そのままの平坦形式（`buildReadInputFieldsResponse` の JSDoc）。
     // `0x82`（READ MDT FIELDS ALT）は形は 0x52 と同じで、欄データを加工しない（`buildReadMdtAltResponse`）
-    const build =
-      this.readCommand === COMMAND.READ_INPUT_FIELDS
-        ? buildReadInputFieldsResponse
-        : this.readCommand === COMMAND.READ_MDT_FIELDS_ALT
-          ? buildReadMdtAltResponse
-          : buildReadMdtResponse;
-    const { record, substituted } = build(this.buf, this.codec, aid, cursor);
+    const { record, substituted } = this.readResponseBuilder()(this.buf, this.codec, aid, cursor);
     if (substituted > 0) this.warn(`${substituted} character(s) substituted on send`);
     return record;
+  }
+
+  /** 待たされている Read の種類に合う応答の組み方（AID の送信と PC コマンドの応答で共有する） */
+  private readResponseBuilder(): typeof buildReadMdtResponse {
+    return this.readCommand === COMMAND.READ_INPUT_FIELDS
+      ? buildReadInputFieldsResponse
+      : this.readCommand === COMMAND.READ_MDT_FIELDS_ALT
+        ? buildReadMdtAltResponse
+        : buildReadMdtResponse;
   }
 
   /**
@@ -1098,6 +1101,8 @@ export class Session5250 extends Emitter<SessionEvents> {
         // ホストはそのあと CLEAR UNIT ＋次画面を送ってくるので、待ちはそこで解ける
         // （tn5250j も strpccmd 中は updateDirty を飛ばす）。**返さないとホストは待ち続ける**。
         this.state = "locked";
+        // 応答の形は待たされている Read で決まる（`readResponseBuilder`）ので、先に憶えてから実行する
+        if (result.readCommand !== undefined) this.readCommand = result.readCommand;
         void this.runPcCommand(result.pcCommand);
         return;
       }
@@ -1207,7 +1212,8 @@ export class Session5250 extends Emitter<SessionEvents> {
     if (this.state === "closed" || this.state === "reconnecting" || gen !== this.connGen) return;
     const aid = aidCodeOf("Enter");
     if (aid === undefined) return;
-    const { record } = buildReadMdtResponse(this.buf, this.codec, aid);
+    // 待たされている Read の種類で組む（AID と同じ。`20260927-read-dbcs-fields`——以前は常に 0x52 の形で、0x42 を待つ画面へ SBA つきで返していた）
+    const { record } = this.readResponseBuilder()(this.buf, this.codec, aid);
     try {
       this.readOutstanding = false;
       this.telnet.sendRecord(record);
