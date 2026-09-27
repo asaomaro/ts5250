@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { applyDataStream } from "../src/protocol/wtd-applier.js";
+import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { FFW } from "../src/protocol/constants.js";
+import { ESC, COMMAND, ORDER, FFW } from "../src/protocol/constants.js";
 import { rawSentinel } from "../src/screen/attr-sentinel.js";
 
 /**
@@ -65,7 +67,12 @@ describe("E 欄の全角の状態", () => {
   it("**同じ位置の欄を定義し直しても（SF）全角の状態は残る**（ACS `FFT5250.addFieldToFFT` は同じ位置の欄を使い回す）", () => {
     const { b, flag } = eField();
     b.setFieldValue(b.fieldByIndex(1), "あ", true);
-    b.addField(b.addrOf(5, 20), 12, FFW.ID_VALUE, 0x24, "either");
+    // SF で同じ位置に定義し直す（`applySf` が `checkNewField` で FFW だけ書き換える。`20260927-wtd-sense-rest`）
+    const r = applyDataStream(
+      Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x40, 0x24, 0x00, 0x0c]),
+      b, codecForCcsid(930), () => {}
+    );
+    expect(r.senseCode).toBeUndefined();
     expect(flag()).toBe(true);
   });
 

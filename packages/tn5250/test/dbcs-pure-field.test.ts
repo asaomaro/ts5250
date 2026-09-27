@@ -284,17 +284,14 @@ describe("純 DBCS の欄の送信の細部（A-S4）", () => {
     expect(data).toContain(hex(codec.encode("あAい").bytes.subarray(0, 8)));
   });
 
-  it("**欄長が奇数なら偶数へ丸める**（11 バイトの G は 10 バイト送る。組を割らない）", () => {
+  it("**欄長が奇数の G は欄に入れない**（ACS `Field5250.checkFieldLength`: G は偶数。SF で 0x10050125。`20260927-wtd-sense-rest`——~~11 バイトの G は 10 バイト送る~~）", () => {
     const bytes = Uint8Array.from([
       ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
       ORDER.SBA, 3, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x20, 0x24, 0x00, 0x0b,
       0x44, 0x81, 0x44, 0x82, 0x44, 0x83, 0x44, 0x84, 0x44, 0x85, 0x40
     ]);
-    const { buf } = applied(bytes);
-    const g = buf.orderedFields()[0]!;
-    g.mdt = true;
-    const data = parseRecord(buildReadMdtResponse(buf, codec, AID.ENTER, { row: 3, col: 20 }).record).data;
-    // カーソル 2 バイト＋AID 1 バイト＋SBA 3 バイトの後ろが 10 バイト
-    expect(data.length - 6).toBe(10);
+    const { buf, result } = applied(bytes);
+    expect(result.senseCode).toBe(0x10050125);
+    expect(buf.orderedFields()).toEqual([]);
   });
 });

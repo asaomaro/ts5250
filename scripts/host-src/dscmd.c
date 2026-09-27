@@ -979,6 +979,8 @@ int main(int argc, char *argv[]) {
          * **WTD の中のオーダーの誤りで ACS は否定応答を返すか・CC2 は効くか**（`20260927-wtd-order-sense`）。
          * 1 本の WTD（CC2＝メッセージ待ちを点ける・5 行 2 桁に WTDERR）の後ろに誤ったオーダーを置く:
          * WTDERRSBA＝SBA の行 30 / WTDERRRA＝RA の後戻り / WTDERRSOH＝SOH の長さ 0 / WTDERREA＝EA の長さ 7 / WTDERRSHORT＝SBA が 1 バイトで終わる。
+         * WTDERRSBA10＝SBA 1,0 の後に入力欄の SF と AB / WTDERRFFWC0＝FFW 0xC000 の SF / WTDERRTDEND＝24,75 から TD 10 バイト / WTDERRCHEND＝24,79 から属性・A・B /
+         * WTDERRFLEN0＝長さ 0 の欄 / WTDERRFLDEND＝24,70 から長さ 20 の欄 / WTDERRJODD＝長さ 5 の J 欄 / WTDERRCONTMID＝先頭の無い継続欄の中間（`20260927-wtd-sense-rest`）。
          * WTDERRWEA1＝WEA のタイプ 1 / WTDERRWEA5X＝WEA タイプ 5 の値 0x42 / WTDERRWEA5＝WEA タイプ 5 の値 0x00（SBCS のセッションで流す）/ WTDERRWEAEND＝EA で最後の桁まで消した後の WEA。
          * EARLYROLL と同じく先にメッセージ待ちを消し、8 秒待ってからもう一度消す
          */
@@ -993,6 +995,16 @@ int main(int argc, char *argv[]) {
         static const unsigned char wea5x[] = { 0x12, 0x05, 0x42, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* タイプ 5・値 0x42 */
         static const unsigned char wea5[] = { 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* タイプ 5・値 0x00（SBCS のセッションで流す） */
         static const unsigned char weaend[] = { 0x03, 0x18, 0x50, 0x02, 0x00, 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 }; /* EA で最後の桁まで消した後 */
+        /* WTD の中の受理の残り（`20260927-wtd-sense-rest`）: どれも後ろに 6 行 2 桁の「NEXT」を置く */
+        static const unsigned char sba10[] = { 0x11, 0x01, 0x00, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x05, 0xC1, 0xC2, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* SBA 1,0 → 入力欄の SF → AB */
+        static const unsigned char ffwc0[] = { 0x11, 0x07, 0x09, 0x1D, 0xC0, 0x00, 0x24, 0x00, 0x05, 0xC1, 0xC2, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* FFW 0xC000 */
+        static const unsigned char tdend[] = { 0x11, 0x18, 0x4B, 0x10, 0x00, 0x0A, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* 24,75 から TD 10 バイト（4 バイトが画面の外） */
+        static const unsigned char chend[] = { 0x11, 0x18, 0x4F, 0x22, 0xC1, 0xC2, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* 24,79 から 属性 0x22・A・B（B が画面の外） */
+        /* 欄の追加の失敗（ACS `FFT5250.addFieldToFFT` が null → 0x10050125）: 長さ 0 / 画面の末尾を越える / J の奇数長 / 先頭の無い継続欄の中間 */
+        static const unsigned char flen0[] = { 0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        static const unsigned char fldend[] = { 0x11, 0x18, 0x45, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x14, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* 24,70 から長さ 20 */
+        static const unsigned char jodd[] = { 0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x24, 0x00, 0x05, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        static const unsigned char contmid[] = { 0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x03, 0x24, 0x00, 0x05, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
         static const char off[] = { 0x00, 0x02 };
         unsigned char rec[64];
         const unsigned char *tail = sba;
@@ -1006,6 +1018,14 @@ int main(int argc, char *argv[]) {
         else if (strcmp(what, "WTDERRWEA5X") == 0) { tail = wea5x; tl = sizeof(wea5x); }
         else if (strcmp(what, "WTDERRWEA5") == 0) { tail = wea5; tl = sizeof(wea5); }
         else if (strcmp(what, "WTDERRWEAEND") == 0) { tail = weaend; tl = sizeof(weaend); }
+        else if (strcmp(what, "WTDERRSBA10") == 0) { tail = sba10; tl = sizeof(sba10); }
+        else if (strcmp(what, "WTDERRFFWC0") == 0) { tail = ffwc0; tl = sizeof(ffwc0); }
+        else if (strcmp(what, "WTDERRTDEND") == 0) { tail = tdend; tl = sizeof(tdend); }
+        else if (strcmp(what, "WTDERRCHEND") == 0) { tail = chend; tl = sizeof(chend); }
+        else if (strcmp(what, "WTDERRFLEN0") == 0) { tail = flen0; tl = sizeof(flen0); }
+        else if (strcmp(what, "WTDERRFLDEND") == 0) { tail = fldend; tl = sizeof(fldend); }
+        else if (strcmp(what, "WTDERRJODD") == 0) { tail = jodd; tl = sizeof(jodd); }
+        else if (strcmp(what, "WTDERRCONTMID") == 0) { tail = contmid; tl = sizeof(contmid); }
         else if (strcmp(what, "WTDERRSBA") != 0) { if (lg) { fprintf(lg, "unknown WTDERR mode\n"); fclose(lg); } return 1; }   /* 取り違えて SBA を流さない */
         memcpy(rec, head, sizeof(head));
         memcpy(rec + sizeof(head), tail, tl);

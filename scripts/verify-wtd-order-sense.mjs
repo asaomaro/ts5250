@@ -13,12 +13,20 @@ const LIB = (process.env.AS400_LIB ?? "TESTLIB").trim().split(/\s+/)[0];
 const SENSE_OF = {
   WTDERRSBA: "10050122", WTDERRRA: "10050123", WTDERRSOH: "1005012b", WTDERREA: "1005012d", WTDERRSHORT: "10050121",
   // WEA（`20260927-wea-sense`。`acs-probe/wea-sense.txt`）: タイプ 1・タイプ 5 の不正な値・EA で最後の桁まで消した後・SBCS のセッションのタイプ 5
-  WTDERRWEA1: "1005012d", WTDERRWEA5X: "1005012f", WTDERRWEAEND: "1005012a", WTDERRWEA5: "1005012d"
+  WTDERRWEA1: "1005012d", WTDERRWEA5X: "1005012f", WTDERRWEAEND: "1005012a", WTDERRWEA5: "1005012d",
+  // 受理の残り（`20260927-wtd-sense-rest`。ACS のコアの画面とワイヤ〔tap〕）: SBA 1,0・FFW 0xC000 は受ける（否定応答なし）、
+  // 画面の末尾を越える TD・文字は 0x10050121 で打ち切る（CC2 も効かない）、欄を入れられない SF は 0x10050125
+  WTDERRSBA10: null, WTDERRFFWC0: null, WTDERRTDEND: "10050121", WTDERRCHEND: "10050121",
+  WTDERRFLEN0: "10050125", WTDERRFLDEND: "10050125", WTDERRJODD: "10050125", WTDERRCONTMID: "10050125"
 };
+/** CC2 まで落とす（レコードを打ち切る）モード——ACS のコアは mw=false・NEXT を書かなかった */
+const ABORT_MODES = new Set(["WTDERRTDEND", "WTDERRCHEND"]);
+/** 後ろの 6 行の NEXT を書かないモード（WTD の打ち切り） */
+const NO_NEXT = (m) => m.startsWith("WTDERRWEA") || ABORT_MODES.has(m) || /^WTDERR(FLEN0|FLDEND|JODD|CONTMID)$/.test(m);
 /** SBCS のセッションで流すモード（社内機は SBCS の装置を自動構成しないので PUB400 の 37 で。`PUB400_*` と `PUB400_LIB` を使う） */
 const SBCS_MODES = new Set(["WTDERRWEA5"]);
 const MODES = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SENSE_OF);
-for (const m of MODES) if (!SENSE_OF[m]) { process.stderr.write(`知らないモード: ${m}（${Object.keys(SENSE_OF).join(" / ")}）\n`); process.exit(2); }
+for (const m of MODES) if (SENSE_OF[m] === undefined) { process.stderr.write(`知らないモード: ${m}（${Object.keys(SENSE_OF).join(" / ")}）\n`); process.exit(2); }
 const log = (s) => process.stderr.write(`${s}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const inputs = (s) => s.snapshot().fields.filter((f) => !f.protected);
@@ -53,15 +61,20 @@ for (const mode of MODES) {
   const snap = s.snapshot();
   const row5 = snap.cells[4].map((c) => c.char).join("").trim();
   // センスは GDS のヘッダーの中（バイト境界）——偶数桁でだけ照合する（奇数桁の一致は偶然）
-  const negative = sent.slice(nS).some((h) => new RegExp(`^(?:..)*?${sense}`).test(h));
-  log(`  窓の中: mw=${snap.messageWaiting === true} row5=${JSON.stringify(row5)} 否定応答 0x${sense}=${negative}`);
+  const anyNegative = sent.slice(nS).some((h) => /^(?:..)*?100501/.test(h));
+  const negative = sense === null ? !anyNegative : sent.slice(nS).some((h) => new RegExp(`^(?:..)*?${sense}`).test(h));
+  const row6 = snap.cells[5].map((c) => c.char).join("").trim();
+  log(`  窓の中: mw=${snap.messageWaiting === true} row5=${JSON.stringify(row5)} row6=${JSON.stringify(row6)} 否定応答 ${sense ?? "なし"}=${negative}`);
   log(`  警告: ${JSON.stringify(warns.slice(nW))}`);
   check(row5.startsWith("WTDERR"), `${mode}: 誤りの前の文字は画面に書かれた`);
-  check(negative, `${mode}: 否定応答 0x${sense} を返した`);
-  check(snap.messageWaiting === true, `${mode}: メッセージ待ちは点く（WTD の中の誤りでも CC2 は効く）`);
-  if (mode.startsWith("WTDERRWEA")) {
-    const row6 = snap.cells[5].map((c) => c.char).join("").trim();
-    check(!row6.includes("NEXT"), `${mode}: WEA の後ろ（6 行の NEXT）は書かれない（WTD の打ち切り。ACS と同じ）`);
+  check(negative, sense === null ? `${mode}: 否定応答を返さない（受ける）` : `${mode}: 否定応答 0x${sense} を返した`);
+  if (ABORT_MODES.has(mode)) check(snap.messageWaiting !== true, `${mode}: レコードを打ち切るので CC2 は効かない（ACS と同じ）`);
+  else check(snap.messageWaiting === true, `${mode}: メッセージ待ちは点く（WTD の中の誤りでも CC2 は効く）`);
+  if (NO_NEXT(mode)) check(!row6.includes("NEXT"), `${mode}: 後ろ（6 行の NEXT）は書かれない（WTD の打ち切り。ACS と同じ）`);
+  else if (sense === null) check(row6.includes("NEXT"), `${mode}: 後ろ（6 行の NEXT）も書く`);
+  if (mode === "WTDERRSBA10") {
+    const row1 = snap.cells[0].map((c) => c.char).join("").trim();
+    check(row1 === "AB" && snap.fields.some((f) => f.row === 1 && f.col === 1), `${mode}: AB は 1 行 1 桁の入力欄に入る（ACS と同じ）`);
   }
   await sleep(9000);
   const c2 = inputs(s).find((f) => f.length >= 50);

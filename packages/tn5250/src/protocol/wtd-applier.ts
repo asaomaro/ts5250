@@ -1,9 +1,8 @@
-import { As400Error } from "@ts5250/base";
 import { type Codec, SO, SI } from "@ts5250/ebcdic";
 import { nextSystemMessageSeq, type ScreenBuffer } from "../screen/buffer.js";
 import type { ContinuedPart, DbcsFieldType, SelfCheckKind, WriteExtent } from "../screen/types.js";
 import { ByteReader } from "./bytes.js";
-import { ESC, COMMAND, ORDER, UNMAPPABLE, isAttribute, isControlData, controlDataText } from "./constants.js";
+import { ESC, COMMAND, ORDER, FFW, UNMAPPABLE, isAttribute, isControlData, controlDataText } from "./constants.js";
 import {
   detectPcoMarker,
   readPcCommand,
@@ -821,9 +820,19 @@ function applyWtd(
         if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "SBA too short");
         const row = r.u8();
         const col = r.u8();
-        // 行 1・桁 0 は ACS は番地 -1 として受ける（`20260921-wtd-control-bytes` D3。非 DBCS のセッションでは後ろにバイトがあるか次が SF のときだけ——
-        // レコードの終わりなら 0x10050122）——当 PJ は受けられないので従来どおり例外（backlog）
-        if (!inScreen(row, col) && !(row === 1 && col === 0)) return fail(SENSE.ORDER_ADDRESS, `SBA out of range (${row},${col})`);
+        // **行 1・桁 0 は番地 -1**（ACS `processWriteToDisplay` の 0x11。後ろにバイトがあるときだけ——レコードの終わりなら SBCS のセッションは 0x10050122、
+        // DBCS のセッションは番地 0）。直後の SF の属性は桁を占めず 1 行 1 桁から効き（ACS `setAttributeToPlanes` の `row1col0*`。`ScreenBuffer.row1col0Attr`）、
+        // 欄は 1 行 1 桁から始まる。実機の ACS のコア〔DSM の WTDERRSBA10〕で `SBA 1,0 → SF → AB` の AB が 1 行 1 桁の入力欄に入り、否定応答も無かった
+        // （`20260927-wtd-sense-rest`。~~受けられないので例外~~ でレコードごと失っていた）。
+        // ⚠ 番地 -1 に SF 以外（文字・RA・EA・TD）が来たときの ACS の振る舞いは**未確認**（ACS は面の -1 を引く）——当 PJ は従来どおり例外で打ち切る（decisions D6）
+        if (row === 1 && col === 0) {
+          if (r.remaining > 0) addr = -1;
+          else if (codec.decodeDbcsPair) addr = 0;
+          else return fail(SENSE.ORDER_ADDRESS, "SBA 1,0 at the end of the record");
+          eaAtEnd = false;
+          break;
+        }
+        if (!inScreen(row, col)) return fail(SENSE.ORDER_ADDRESS, `SBA out of range (${row},${col})`);
         addr = buf.addrOf(row, col);
         eaAtEnd = false;
         break;
@@ -928,6 +937,14 @@ function applyWtd(
           return "abort";
         }
         if (len > r.remaining) return fail(SENSE.COMMAND_EXPECTED, `TD length ${len} beyond record`);
+        // **画面の終わりを越える TD は 1 バイトも書かずに 0x10050121 で打ち切る**（文字の並びと同じ。実機の ACS のコア〔DSM の WTDERRTDEND: 24,75 から 10 バイト〕は
+        // 24 行を空のまま否定応答を返し、後ろの NEXT も CC2 も効かなかった。`20260927-wtd-sense-rest`。~~入る分だけ書いて例外~~ で、レコードごと失い応答もしていなかった）
+        if (addr + len > buf.rows * buf.cols) {
+          warn(`TD data (${len} bytes at ${addr}) runs past the end of the screen (negative response 0x10050121)`);
+          settleCursor();
+          warnUnmappable(unmappable, warn);
+          return "abort";
+        }
         const bytes = r.bytes(len);
         for (const tb of bytes) {
           buf.setChar(addr++, String.fromCharCode(codec.decodeByte(tb)));
@@ -936,7 +953,9 @@ function applyWtd(
       }
       case ORDER.SF: {
         if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "SF too short");
-        addr = applySf(r, buf, addr);
+        const sf = applySf(r, buf, addr);
+        if (typeof sf !== "number") return fail(sf.sense, sf.why);
+        addr = sf;
         break;
       }
       case ORDER.WDSF: {
@@ -1074,26 +1093,86 @@ function applyWdsf(
   }
 }
 
-/** SF オーダー: [FFW(2)] [FCW(2)*] attr(1) length(2)。FFW 省略時は出力専用（フィールド登録なし） */
-function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
+/**
+ * **SF の属性が 0x20〜0x3F か**（ACS `DS5250.isValidStartOfFieldAttribute`。製品の ACS〔`isAcsPackage`〕だけが検査し、外れたら 0x10050130）。
+ * 実機の ACS のコア〔`acs-probe`〕は製品の旗を立てないので測れない——原典どおり（`20260927-wtd-sense-rest` decisions）
+ */
+function invalidSfAttribute(attr: number): { sense: number; why: string } | undefined {
+  return attr < 0x20 || attr > 0x3f ? { sense: SENSE.FIELD_ATTRIBUTE, why: `SF attribute 0x${attr.toString(16)} is not 0x20-0x3F` } : undefined;
+}
+
+/**
+ * **ACS が欄を表に入れないとき**（`FFT5250.addFieldToFFT` が null → `processWriteToDisplay` が 0x10050125 で WTD を打ち切る。`20260927-wtd-sense-rest`）。
+ * 実機の ACS のコア（DSM の WTDERRFLEN0・FLDEND・JODD・CONTMID）で、長さ 0・画面の末尾を越える・長さ 5 の J・先頭の無い継続欄の中間が、どれも 0x10050125
+ * （CC2 は効く・後ろは書かない）だった。規則は原典（`Field5250.checkFieldLength` / `checkFieldValidity`、`FFT5250.isValidContField`）:
+ * - 長さ 0、符号付き数値・J・E・G の長さ 1（O は 1 でもよい）。J・E は 4 以上の偶数、G は偶数、自己点検欄（DBCS でないもの）は 33 以下
+ * - 欄が画面の終わりを越える・表が 600 欄に達している
+ * - 継続欄（FCW 0x86nn の nn が 0x80 以外）: 区間の順（先頭 → 中間… → 最終）が崩れる・nn が 01/02/03 以外、行をまたぐ、MF・自己点検・符号付き数値・右寄せと組む
+ * - ワードラップ（0x8680）: MF・自己点検・符号付き数値・右寄せ・I/O・数字のみ・数値のみ・Dup と組む
+ * 再順序付け（FCW 0x80nn）とカーソル送り（0x88nn）× SOH の再順序付けの組は、当 PJ が再順序付けを持たないので見ない（decisions D7）
+ */
+function fieldAddFailure(
+  buf: ScreenBuffer, start: number, length: number, ffw: number,
+  dbcsType: DbcsFieldType | undefined, selfCheck: SelfCheckKind | undefined, cont: SfContinued
+): string | undefined {
+  const signed = (ffw & FFW.SHIFT_MASK) === FFW.SHIFT_SIGNED_NUMERIC;
+  const shift = ffw & FFW.SHIFT_MASK;
+  const adjust = ffw & FFW.ADJUST_MASK;
+  const rightAdjustOrMf = adjust === FFW.ADJUST_MANDATORY_FILL || adjust === FFW.ADJUST_RIGHT_BLANK || adjust === FFW.ADJUST_RIGHT_ZERO;
+  if (length === 0) return "field length 0";
+  if (length === 1 && (signed || (dbcsType !== undefined && dbcsType !== "open"))) return "field length 1";
+  if ((dbcsType === "only" || dbcsType === "either") && (length < 4 || length % 2 !== 0)) return `DBCS field length ${length}`;
+  if (dbcsType === "pure" && length % 2 !== 0) return `pure DBCS field length ${length}`;
+  if (dbcsType === undefined && selfCheck !== undefined && length > 33) return `self-check field length ${length}`;
+  if (start + length > buf.rows * buf.cols) return `field runs past the end of the screen (start=${start}, len=${length})`;
+  if (buf.fieldCount() >= 600) return "600 fields already";
+  if (cont.segment !== undefined) {
+    if (rightAdjustOrMf || selfCheck !== undefined || signed) return "continued field with MF / self-check / signed numeric / right adjust";
+    if (Math.floor(start / buf.cols) < Math.floor((start + length - 1) / buf.cols)) return "continued field spans rows";
+    const prev = buf.continuedSegment;
+    const n = cont.segment;
+    const ok = (prev === undefined && n === 0x01) || ((prev === "first" || prev === "middle") && (n === 0x02 || n === 0x03));
+    if (!ok) return `continued field segment out of order (${prev ?? "none"} → 0x${n.toString(16)})`;
+  } else if (cont.wrap) {
+    if (rightAdjustOrMf || selfCheck !== undefined || signed || shift === FFW.SHIFT_IO || shift === FFW.SHIFT_NUMERIC_ONLY || shift === FFW.SHIFT_DIGITS_ONLY || (ffw & FFW.DUP_ENABLE) !== 0) {
+      return "word-wrap field with MF / self-check / signed numeric / right adjust / I-O / numeric only / digits only / Dup";
+    }
+  }
+  return undefined;
+}
+
+/** SF の FCW 0x86nn（継続・ワードラップ）の生の値（`fieldAddFailure` が読む） */
+interface SfContinued {
+  /** nn（0x80 以外）。0x01/0x03/0x02 以外も入る——ACS は不正な区間として断る */
+  segment?: number;
+  /** nn が 0x80（ワードラップ） */
+  wrap?: boolean;
+}
+
+/** SF オーダー: [FFW(2)] [FCW(2)*] attr(1) length(2)。FFW 省略時は出力専用（フィールド登録なし）。否定応答にするときはセンスを返す */
+function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sense: number; why: string } {
   const first = r.peek();
-  if (isAttribute(first)) {
+  // **0x40 未満なら FFW 無し**（ACS は `>= 64` で FFW と見る。0x20 未満の属性も属性として読み、製品の ACS は属性の検査で断る）
+  if (first < 0x40) {
     // FFW なし = 出力専用フィールド定義: 属性と長さのみ（フォーマットテーブルに載せない）
     const attr = r.u8();
     r.u16(); // length（表示専用のため未使用）
-    buf.setAttr(addr, attr);
+    const bad = invalidSfAttribute(attr);
+    if (bad) return bad;
+    if (addr >= 0) buf.setAttr(addr, attr);
     return addr + 1;
   }
+  // **0x40 以上なら FFW**（ACS `processWriteToDisplay` の 0x1D は `>= 64` だけを見る。実機の ACS のコア〔DSM の WTDERRFFWC0〕は FFW 0xC000 の欄を入力欄として受けた。
+  // `20260927-wtd-sense-rest`。~~上位 2 ビットが 01 でなければ例外~~ でレコードごと失っていた）
   const ffw = r.u16();
-  if ((ffw & 0xc000) !== 0x4000) {
-    throw new As400Error("PROTOCOL_ERROR", `invalid FFW 0x${ffw.toString(16)}`);
-  }
   // FCW（上位 2 ビットが 10）: DBCS 種別等を解釈（SC30-3533 / tn5250 の ideographic FCW）
   let dbcsType: DbcsFieldType | undefined;
   let selfCheck: SelfCheckKind | undefined;
   let continued: ContinuedPart | undefined;
   let cursorProgression: number | undefined;
-  while (r.remaining >= 2 && (r.peek() & 0xc0) === 0x80) {
+  const cont: SfContinued = {};
+  // FCW は 0x80 以上（ACS も `>= 128` で続ける。属性は 0x20〜0x3F なので取り違えない）
+  while (r.remaining >= 2 && r.peek() >= 0x80) {
     const fcw = r.u16();
     // **DBCS の 4 種は ACS の定数とちょうど一致させる**（`Field5250` の
     // `FCW_DBCS_ONLY=0x8200` / `FCW_DBCS_PURE=0x8220` / `FCW_DBCS_EITHER=0x8240` /
@@ -1124,6 +1203,10 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
     else if (fcw === 0x8601) continued = "first";
     else if (fcw === 0x8603) continued = "middle";
     else if (fcw === 0x8602) continued = "last";
+    if ((fcw & 0xff00) === 0x8600) {
+      if ((fcw & 0xff) === 0x80) cont.wrap = true;
+      else cont.segment = fcw & 0xff;
+    }
     // **カーソル送り（CURSOR_PROGRESSION_ENTRY_FIELD = 0x88nn）**。DDS の `FLDCSRPRG`。
     // 下位バイトが**送り先の欄番号**（1 始まり・画面順）。ホストが入力の順序をアプリの都合で
     // 決める仕組みで、無視すると「Tab で飛ぶ先が実機と違う」ことになる。
@@ -1135,9 +1218,27 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number {
   }
   const attr = r.u8();
   const length = r.u16();
-  buf.setAttr(addr, attr);
+  const bad = invalidSfAttribute(attr);
+  if (bad) return bad;
   const fieldStart = addr + 1;
+  // **ACS `FFT5250.checkNewField`**: 表の順に見て、同じ位置の欄があれば FFW だけを書き換え（長さ・FCW は前のまま）、
+  // その位置より後ろに始まる欄（継続欄の中間・最終を除く）が先に見つかれば、新しい欄は入れない——どちらも検査せず否定応答もしない（属性は置く）。
+  // 後者は昇順でない SF（台帳の節目 9 の「昇順でない SF は ACS が欄に入れない」）
+  const existing = buf.checkNewField(fieldStart);
+  if (existing === undefined) {
+    const failure = fieldAddFailure(buf, fieldStart, length, ffw, dbcsType, selfCheck, cont);
+    if (failure !== undefined) return { sense: SENSE.FIELD_ADD, why: failure };
+  }
+  // 番地 -1（SBA 1,0 の後）の属性は桁を占めず 1 行 1 桁から効く（ACS `setAttributeToPlanes` の `row1col0*`）
+  if (addr >= 0) buf.setAttr(addr, attr);
+  else buf.row1col0Attr = attr;
+  if (existing !== undefined) {
+    if (existing.startAddr === fieldStart) buf.updateFieldFfw(existing, ffw, attr);
+    return fieldStart;
+  }
   buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck);
+  // 継続欄の区間の順を憶える（ACS `FFT5250.contFieldSegment`。最終の区間で戻す。**欄の表を消しても戻さない**——ACS も `clearFFT` で触らない）
+  if (continued !== undefined) buf.continuedSegment = continued === "last" ? undefined : continued;
   return fieldStart;
 }
 
@@ -1167,7 +1268,11 @@ export const SENSE = {
   CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
   /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */
   UNKNOWN_OPCODE: 0x10030101,
-  WSF_D972_FLAG: 0x10050112
+  WSF_D972_FLAG: 0x10050112,
+  /** 欄を表に入れられない（ACS `addFieldToFFT` が null。`fieldAddFailure`） */
+  FIELD_ADD: 0x10050125,
+  /** SF の属性が 0x20〜0x3F でない（製品の ACS の `isValidStartOfFieldAttribute`） */
+  FIELD_ATTRIBUTE: 0x10050130
 } as const;
 
 /**
