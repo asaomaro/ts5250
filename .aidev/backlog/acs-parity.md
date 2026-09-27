@@ -323,10 +323,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ~~エラー状態は持たない。~~（`20260921-operator-error-mode` で持った）
   ~~要判断（方針）: エラー状態の間の文字キーを A) ACS と同じく拒否する／B) 現状どおり通す（`opMessages.ts` に「打鍵を止めない」意図の記録がある）。~~ **エラー状態と拒否は上の `20260921-operator-error-mode` で済んだ（A）**。残りはメッセージ行の位置（窓の中）~~と、抜けたときの復元~~。**抜けたときの復元は `20260921-host-error-mode`（PR #410）で済んだ**（`EmulatorPane.vue:980-986` の `exitErrorMode`。2026-09-27 の照合で記録漏れを発見）。0x22 を窓の中に出すのは、0x22 を出す画面が実機で見つかるまで保留。
   **ACS 側は着手時に再確認すること。**（出典: `20260919-backlog-acs-triage` research N11）
-- [ ] **WRITE ERROR CODE（0x21）のメッセージを、SOH が申告したメッセージ行に出す**（優先度 低・深さ △。`20260926-window-error-code` decisions D2 から割った）。
-  ACS（原典 `DS5250.processWriteErrorCode`）は 0x21 も SOH のメッセージ行（`SOH_msgline_num`）の行頭から 1 行ぶんに書く。当 PJ は常に最下行に重ねる（`ScreenGrid.vue` の `.opmsg`）。
-  0x22 と同じ位置の仕組み（`systemMessageArea`）に行だけを載せれば小さく直せる見込み。**SOH で行を申告する画面を DSM で出させて ACS と当 PJ を測ってから直す**。
-  あわせて未確認: エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方（ACS はセルに書き、抜けるときに戻す。当 PJ は消す／残す。同 D4）。
+- [x] **WRITE ERROR CODE（0x21）のメッセージを、SOH が申告したメッセージ行に出す**（優先度 低・深さ △。`20260926-window-error-code` decisions D2 から割った）。
+  **完了（`20260926-wec-msgline-row`・PR #423）**: 0x21 にもメッセージ行の 1 行全体の位置（`systemMessageArea`＝`{messageLineRow, 1, cols}`）を付けた（`wtd-applier.ts` `applyWriteErrorCode`）。
+  ACS の実測（`scripts/acs-probe/wec-msgline-row.txt`）: 申告なし→24 行・SOH で 22→22 行、どちらも桁 1 に属性・桁 2 から本文。当 PJ の実機（`scripts/verify-window-error-code.mjs`）は pass=17 fail=0。
+  **ACS との差（残す）**: 1 行を超えた本文（90 字）を ACS は 23 行へ上書きして Reset でも戻さない——情報を捨てるので合わせず、1 行で切る（decisions D2）。
+  あわせて、メッセージ行を**申告が無ければ最下行**にし、CLEAR UNIT / CLEAR UNIT ALTERNATE / CLEAR FORMAT TABLE / SOH の入口で戻すようにした（原典 `DS5250.processClearFMT`。以前は 24 固定で戻さなかった——27×132 と申告の無い画面でずれていた。decisions D5）。
+  寿命は「出した行」で判定する（D6）。27×132 の 0x21 は実機では測っていない（原典の読みだけ）。
+- [ ] **エラー状態のままメッセージ行へ WTD が来たとき・RESTORE SCREEN が来たときの ACS の見え方**が未確認（ACS はセルに書き、抜けるときに戻す。当 PJ は消す／残す。`20260926-window-error-code` D4。上の項目から割った）。
+- [ ] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、当 PJ は無条件に `clearFormatTable()` する（`wtd-applier.ts` の SOH 分岐。原典 `DS5250` の SOH 分岐 `0 < len < 8`。`20260926-wec-msgline-row` の cross 点検で発見・既存の差）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
   **完了（`20260921-message-waiting-indicator`）**: CC2 の MW ビットを解析し、セッションの状態からスナップショットへ載せ、ステータスバーに表示灯（`✉ メッセージあり`）を出した（`wtd-applier.ts` `applyCc2`・`session.ts` `snapshot()`・`StatusBar.vue`）。
   原典で確認——`DS5250.processWCC2` は `cc2 & 0x02` で消灯、続けて `cc2 & 0x01` で点灯（両方なら点灯）。ビットの無い WTD では状態を保つ。

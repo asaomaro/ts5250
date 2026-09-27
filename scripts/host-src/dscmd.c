@@ -315,6 +315,76 @@ static void winErrTest(int longMsg, int row22) {
     }
 }
 
+/**
+ * **WRITE ERROR CODE(0x21) をメッセージ行で出す**（`20260926-wec-msgline-row`）。
+ *
+ * ACS は 0x21 も SOH が申告したメッセージ行に書く（`DS5250.processWriteErrorCode`）。当 PJ は最下行に重ねていた。
+ *   1. 背景（`row22` なら先頭に SOH でエラー行＝22 を申告）と、メッセージ行・その下の行に目印を書く
+ *   2. `QsnPutOutCmd(0x21, 属性 0x22・本文)` を撃つ
+ *   3. READ MDT で止める（Reset → Enter で抜ける前提）
+ * `longMsg` のときは本文を 1 行（80 桁）より長くする（90 字）——ACS が次の行へ続けて書くかを見る。
+ */
+static void wecTest(int longMsg, int row22) {
+    char fdbk[256];
+    Q_Bin4 rc;
+    Q_Bin4 bytesRead = 0;
+    Qsn_Inp_Buf_T buf;
+    unsigned char bg[160];
+    int n = 0, i;
+    unsigned char row = row22 ? 0x16 : 0x18;
+    unsigned char err[1 + 90];
+    int en = 0;
+    static const unsigned char mark[] = {                      /* "MSGLINE ORIGINAL TEXT TO BE RESTORED" */
+        0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5, 0x40, 0xD6, 0xD9, 0xC9, 0xC7, 0xC9, 0xD5, 0xC1, 0xD3,
+        0x40, 0xE3, 0xC5, 0xE7, 0xE3, 0x40, 0xE3, 0xD6, 0x40, 0xC2, 0xC5, 0x40, 0xD9, 0xC5, 0xE2, 0xE3,
+        0xD6, 0xD9, 0xC5, 0xC4
+    };
+    static const unsigned char below[] = {                     /* "NEXT ROW TEXT" */
+        0xD5, 0xC5, 0xE7, 0xE3, 0x40, 0xD9, 0xD6, 0xE6, 0x40, 0xE3, 0xC5, 0xE7, 0xE3
+    };
+    static const unsigned char msg[] = {                       /* "ERROR ON MSGLINE" */
+        0xC5, 0xD9, 0xD9, 0xD6, 0xD9, 0x40, 0xD6, 0xD5, 0x40, 0xD4, 0xE2, 0xC7, 0xD3, 0xC9, 0xD5, 0xC5
+    };
+    static const unsigned char alpha[] = {                     /* "ABCDEFGHIJKLMNOPQRSTUVWXYZ" */
+        0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xD1, 0xD2, 0xD3, 0xD4,
+        0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9
+    };
+
+    bg[n++] = 0x00; bg[n++] = 0x00;
+    if (row22) { bg[n++] = 0x01; bg[n++] = 0x04; bg[n++] = 0x00; bg[n++] = 0x00; bg[n++] = 0x00; bg[n++] = 0x16; }
+    bg[n++] = 0x11; bg[n++] = row; bg[n++] = 0x02;
+    for (i = 0; i < (int)sizeof(mark); i++) bg[n++] = mark[i];
+    if (row22) {                                               /* メッセージ行の次の行（23）に目印——長い本文が続けて書くかを見る */
+        bg[n++] = 0x11; bg[n++] = 0x17; bg[n++] = 0x02;
+        for (i = 0; i < (int)sizeof(below); i++) bg[n++] = below[i];
+    }
+    err[en++] = 0x22;
+    if (longMsg) { for (i = 0; i < 90; i++) err[en++] = alpha[i % 26]; }
+    else { for (i = 0; i < (int)sizeof(msg); i++) err[en++] = msg[i]; }
+
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x11, (const char *)bg, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x11 背景)", rc, fdbk);
+    inzFdbk(fdbk, sizeof(fdbk));
+    rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)en, 0, 0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnPutOutCmd(0x21 WRITE ERROR CODE)", rc, fdbk);
+
+    inzFdbk(fdbk, sizeof(fdbk));
+    buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+    logFdbk("QsnCrtInpBuf", (Q_Bin4)buf, fdbk);
+    if (buf != 0) {
+        tag = "[0x21 後] ";
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnReadMDT", rc, fdbk);
+        tag = "";
+        QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
+    }
+}
+
 int main(int argc, char *argv[]) {
     char fdbk[256];
     char what[32];
@@ -331,7 +401,9 @@ int main(int argc, char *argv[]) {
     }
     if (lg) { fprintf(lg, "start what=[%s]\n", what); fflush(lg); }
 
-    if (strcmp(what, "WINERR") == 0 || strcmp(what, "WINERRLONG") == 0 || strcmp(what, "WINERR22") == 0 || strcmp(what, "WINERR22LONG") == 0) {
+    if (strcmp(what, "WEC") == 0 || strcmp(what, "WEC22") == 0 || strcmp(what, "WEC22LONG") == 0) {
+        wecTest(strstr(what, "LONG") != 0, strstr(what, "22") != 0);
+    } else if (strcmp(what, "WINERR") == 0 || strcmp(what, "WINERRLONG") == 0 || strcmp(what, "WINERR22") == 0 || strcmp(what, "WINERR22LONG") == 0) {
         winErrTest(strstr(what, "LONG") != 0, strstr(what, "22") != 0);
     } else if (strcmp(what, "ROLLTESTUP") == 0 || strcmp(what, "ROLLTESTDOWN") == 0) {
         rollTest(strcmp(what, "ROLLTESTUP") == 0);

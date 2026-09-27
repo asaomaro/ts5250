@@ -22,7 +22,7 @@ RESULT: pass=8 fail=0
 - AC2: pass — 0x22 でも通し番号が振られてエラー状態に入る（core）、Reset で消える（web-ui）。既存の 0x21 のテスト（`write-error-code`・`system-message-lifetime`・`host-error-mode`）は全件緑。ACS 側は実測で inhibit=5・`x` を拒否・Reset で元の行に戻る（research F4）。
 - AC3: pass — research F1〜F4（原典のバイトコードと実測）。測定の手順を残した: `scripts/host-src/dscmd.c` の WINERR / WINERRLONG / WINERR22 / WINERR22LONG、`scripts/acs-probe/window-error-code.txt`、`scripts/verify-window-error-code.mjs`。
 - AC4: pass — CLEAR UNIT・SAVE SCREEN・メッセージ行への WTD で本文も位置も消える（core のテスト）。WTD の場合の ACS の見え方は未確認（design・decisions D4）。
-- AC5: pass — 測定の後に `DLTPGM ASAOLIB/DSCMD`（CPC2191。`CHKOBJ` で CPF9801＝無いことを確認）と IFS の `/tmp/dscmd.c`・`/tmp/dscmd.log` を削除した。
+- AC5: pass — 測定の後に `DLTPGM <AS400_LIB>/DSCMD`（CPC2191。`CHKOBJ` で CPF9801＝無いことを確認）と IFS の `/tmp/dscmd.c`・`/tmp/dscmd.log` を削除した。
   build のときに以前の work が残した `DSCMD` があり、`build-dscmd.mjs` が消して作り直した（それも含めて消えた）。ワイヤを採った中継の記録（パスワードを含む）は `shred -u` で消した。
 
 ## 失敗の証跡

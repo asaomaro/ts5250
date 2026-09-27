@@ -186,11 +186,11 @@ export class ScreenBuffer {
    * 画面バッファを作り直しても重ならないよう、番号はプロセスで通しにする（`nextSystemMessageSeq`）。
    */
   systemMessageSeq: number | undefined;
-  /** 0x22 由来のメッセージを重ねる位置（`ScreenSnapshot.systemMessageArea`）。WRITE ERROR CODE が届くたびに上書きする（0x21 は undefined） */
+  /** WRITE ERROR CODE のメッセージを重ねる位置（`ScreenSnapshot.systemMessageArea`）。届くたびに上書きする（0x21 はメッセージ行の 1 行全体） */
   systemMessageArea: { row: number; col: number; width: number } | undefined;
   /**
-   * SOH が申告したメッセージ行の行番号（1 基点）。既定 24 は ACS `DS5250` の初期値と同じ。
-   * `systemMessage` をいつ捨てるかの判定に使う（`clearSystemMessageIfTouched`）
+   * SOH が申告したメッセージ行の行番号（1 基点）。申告が無ければ最下行（ACS `DS5250` は初期値・`processClearFMT` で画面の行数にする。`resetMsgLineRow`）。
+   * `systemMessage` をいつ捨てるかの判定（`clearSystemMessageIfTouched`）と WRITE ERROR CODE の位置（`systemMessageArea`）に使う
    */
   private msgLineRow = 24;
   /** 拡張 5250 GUI 構造体（WDSF 由来）。id は生成順の連番 */
@@ -530,10 +530,12 @@ export class ScreenBuffer {
     this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
+      this.resetMsgLineRow();
       this.noteClear();
       return false;
     }
     this.resize(this.alternate.rows, this.alternate.cols);
+    this.resetMsgLineRow();
     this.noteClear();
     return true;
   }
@@ -636,6 +638,7 @@ export class ScreenBuffer {
     // 何度も来る（罫線が消えた不具合と同じ経路）。申告を消すと、その画面の残りの操作で
     // CA キーが CF キーに戻ってしまう。
     this.aidNoDataMask = 0;
+    this.resetMsgLineRow();
     this.noteClear();
   }
 
@@ -792,7 +795,8 @@ export class ScreenBuffer {
       b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
     // **本体 4 バイト目はメッセージ行の行番号**（ACS `DS5250` の SOH 分岐が
     // `data[i+5]`＝本体 4 バイト目を、1〜画面行数 の範囲でだけ `SOH_msgline_num` に採るのと同じ）。
-    // `systemMessage` の寿命判定に使う（`clearSystemMessageIfTouched`）
+    // `systemMessage` の寿命判定（`clearSystemMessageIfTouched`）と WRITE ERROR CODE の位置（`systemMessageArea`）に使う。
+    // 申告が無い・範囲外なら、SOH が直前に呼ぶ `clearFormatTable` で最下行に戻っている（呼ぶ順に依存する。`20260926-wec-msgline-row` decisions D5）
     const msgRow = b[3];
     if (msgRow !== undefined && msgRow > 0 && msgRow <= this.rows) this.msgLineRow = msgRow;
   }
@@ -811,7 +815,10 @@ export class ScreenBuffer {
    */
   private clearSystemMessageIfTouched(rowFrom: number, rowTo: number): void {
     if (this.systemMessage === undefined) return;
-    const row = this.msgLineRow - 1; // 0 基点
+    // **メッセージを出した行で判定する**（ACS は本文をその行のセルへ書くので、消えるのは書いた行）。
+    // いまの `msgLineRow` で見ると、出した後の SOH・CLEAR FORMAT TABLE で最下行へ戻ったとき、表示している行とずれる
+    // （`20260926-wec-msgline-row` の cross 点検。decisions D6。最下行へ戻すのは D5）
+    const row = (this.systemMessageArea?.row ?? this.msgLineRow) - 1; // 0 基点
     if (rowFrom <= row && row <= rowTo) this.systemMessage = undefined;
   }
 
@@ -849,6 +856,16 @@ export class ScreenBuffer {
     for (const f of this.fields) this.retainedEnds.add(f.startAddr + f.length);
     this.fields = [];
     this.dropCursorOrders();
+    this.resetMsgLineRow();
+  }
+
+  /**
+   * **メッセージ行を最下行に戻す**（ACS `DS5250.processClearFMT` が `SOH_msgline_num` を画面の行数に戻すのと同じ。
+   * CLEAR UNIT / CLEAR UNIT ALTERNATE / CLEAR FORMAT TABLE / SOH の入口で通る。`20260926-wec-msgline-row` decisions D5）。
+   * 以前は 24 で固定し、戻しもしなかった——27×132 では最下行（27）ではなく 24 行に出し、前の画面の SOH の申告も残り続けた
+   */
+  private resetMsgLineRow(): void {
+    this.msgLineRow = this.rows;
   }
 
   /**

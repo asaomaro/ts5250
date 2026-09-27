@@ -94,13 +94,14 @@ describe("0x22 の読み方", () => {
   it("桁の 2 バイトが無いレコードでも例外にしない（0x21 と同じく読める範囲で）", () => {
     const buf = screen();
     expect(() => apply(buf, [ESC, COMMAND.WRITE_ERROR_CODE_WINDOW])).not.toThrow();
-    expect(buf.snapshot().systemMessageArea).toBeUndefined();
+    // 桁が無ければ 0x21 と同じ扱い（メッセージ行の 1 行全体。`20260926-wec-msgline-row` decisions D4）
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
   });
 
   it("開始桁だけあって終了桁が欠けるレコード（1 バイト）でも例外にしない", () => {
     const buf = screen();
     expect(() => apply(buf, [ESC, COMMAND.WRITE_ERROR_CODE_WINDOW, 12])).not.toThrow();
-    expect(buf.snapshot().systemMessageArea).toBeUndefined();
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
   });
 
   it("**上限は SO/SI・DBCS の 2 バイトも 1 バイトずつ数える**（930。開始桁 12・終了桁 18＝7 バイト: 属性＋SO＋あ＋い＋SI で尽きる）", () => {
@@ -112,11 +113,11 @@ describe("0x22 の読み方", () => {
     expect(buf.snapshot().systemMessage).toBe("あい");
   });
 
-  it("開始桁と終了桁が逆転（22 行）: 本文を読まず、重ねる位置も無い", () => {
+  it("開始桁と終了桁が逆転（22 行）: 本文を読まず、位置は 0x21 と同じメッセージ行の 1 行全体（decisions D4）", () => {
     const buf = screen(22);
     apply(buf, wec22(29, 12, [0x22, ...text("ERR")]));
     expect(buf.snapshot().systemMessage).toBe("");
-    expect(buf.snapshot().systemMessageArea).toBeUndefined();
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 22, col: 1, width: 80 });
   });
 
   it("**範囲の外のセルは変わらない**（セルには書かない。重ねるのは UI）", () => {
@@ -138,12 +139,12 @@ describe("エラー状態の入り方・寿命（0x21 と同じ経路）", () =>
     expect(buf.snapshot().systemMessageSeq).not.toBe(s1);
   });
 
-  it("0x21 には位置が付かない（UI は従来どおり最下行）。0x22 の後に 0x21 が来たら位置は消える", () => {
-    const buf = screen();
+  it("0x22 の後に 0x21 が来たら、位置は 0x21 のもの（メッセージ行の 1 行全体）に替わる", () => {
+    const buf = screen(22);
     apply(buf, wec22(12, 29, [0x22, ...text("IN WINDOW")]));
     apply(buf, [ESC, COMMAND.WRITE_ERROR_CODE, 0x22, ...text("FULL LINE")]);
     expect(buf.snapshot().systemMessage).toBe("FULL LINE");
-    expect(buf.snapshot().systemMessageArea).toBeUndefined();
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 22, col: 1, width: 80 });
   });
 
   it("CLEAR UNIT で本文も位置も消える（ACS `processClearUnit`）", () => {
@@ -167,5 +168,84 @@ describe("エラー状態の入り方・寿命（0x21 と同じ経路）", () =>
     apply(buf, wec22(12, 29, [0x22, ...text("ERR")]));
     apply(buf, [...WTD, ORDER.SBA, 22, 2, ...text("NEXT")]);
     expect(buf.snapshot().systemMessageArea).toBeUndefined();
+  });
+});
+
+/**
+ * **WRITE ERROR CODE（0x21）は SOH が申告したメッセージ行に重ねる**（`20260926-wec-msgline-row`）。
+ * 実機の ACS のコア（`scripts/acs-probe/wec-msgline-row.txt`。DSM の `dscmd.c` WEC* で出させた）:
+ * - 申告なし: 24 行の桁 1 に属性・桁 2 から本文（24 行全体が書き換わる）
+ * - SOH で 22 行を申告: 22 行の桁 1 に属性・桁 2 から本文。他の行は変わらない
+ * - 90 字の本文: 22 行に 79 字、ACS は続きを 23 行へ上書きする——情報を捨てるので合わせない（decisions D2。当 PJ は 1 行で切る）
+ */
+describe("0x21 の位置（ACS の実測 3 通り）", () => {
+  const wec21 = (body: number[]): number[] => [ESC, COMMAND.WRITE_ERROR_CODE, ...body];
+
+  it("**申告なし: 24 行の 1 行全体**", () => {
+    const buf = screen();
+    apply(buf, wec21([0x22, ...text("ERR ON MSG LINE")]));
+    expect(buf.snapshot().systemMessage).toBe("ERR ON MSG LINE");
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
+  });
+
+  it("**SOH で 22 行を申告: 22 行の 1 行全体**", () => {
+    const buf = screen(22);
+    apply(buf, wec21([0x22, ...text("ERR ON MSG LINE")]));
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 22, col: 1, width: 80 });
+  });
+
+  it("**90 字の本文は全部残し、重ねる範囲は 22 行の 1 行**（1 行で切るのは UI。23 行のセルにも書かない。decisions D2）", () => {
+    const buf = screen(22);
+    apply(buf, [...WTD, ORDER.SBA, 23, 2, ...text("ROW 23 KEEP")]);
+    const long = "L".repeat(90);
+    apply(buf, wec21([0x22, ...text(long)]));
+    expect(buf.snapshot().systemMessage).toBe(long);
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 22, col: 1, width: 80 });
+    expect(rowText(buf, 23).slice(1, 12)).toBe("ROW 23 KEEP");
+  });
+
+  it("**メッセージ行も含めてセルには書かない**（重ねるのは UI）", () => {
+    const buf = screen(22);
+    const before = rowText(buf, 22);
+    apply(buf, wec21([0x22, ...text("ERR ON MSG LINE")]));
+    expect(rowText(buf, 22)).toBe(before);
+    expect(rowText(buf, 2).slice(1, 11)).toBe("BACKGROUND");
+  });
+
+  it("**27×132 の画面では最下行（27）・幅 132**（ACS `processClearFMT` がメッセージ行を画面の行数に戻す。decisions D5）", () => {
+    const buf = new ScreenBuffer({ alternate: "27x132" });
+    apply(buf, [ESC, COMMAND.CLEAR_UNIT_ALTERNATE, 0x00]);
+    apply(buf, wec21([0x22, ...text("WIDE")]));
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 27, col: 1, width: 132 });
+  });
+
+  it("**CLEAR UNIT でメッセージ行の申告は最下行へ戻る**（前の画面の SOH を持ち越さない。decisions D5）", () => {
+    const buf = screen(22);
+    apply(buf, [ESC, COMMAND.CLEAR_UNIT]);
+    apply(buf, wec21([0x22, ...text("AFTER CLEAR")]));
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
+  });
+
+  it("**CLEAR FORMAT TABLE でも最下行へ戻る**", () => {
+    const buf = screen(22);
+    apply(buf, [ESC, COMMAND.CLEAR_FORMAT_TABLE]);
+    apply(buf, wec21([0x22, ...text("AFTER CLEAR")]));
+    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
+  });
+
+  it("**出した後に SOH（申告なし）でメッセージ行が最下行へ戻っても、消えるのはメッセージを出した 22 行を書いたとき**（ACS は 22 行のセルに書いている）", () => {
+    const buf = screen(22);
+    apply(buf, wec21([0x22, ...text("ON ROW 22")]));
+    apply(buf, [...WTD, ORDER.SOH, 3, 0x00, 0x00, 0x00, ORDER.SBA, 24, 2, ...text("ROW 24")]);
+    expect(buf.snapshot().systemMessage).toBe("ON ROW 22");
+    apply(buf, [...WTD, ORDER.SBA, 22, 2, ...text("NEW ROW 22")]);
+    expect(buf.snapshot().systemMessage).toBeUndefined();
+  });
+
+  it("**SOH の申告は SOH が消すフォーマットテーブルの後に採る**（同じ SOH の申告が残る）。申告の無い SOH は最下行へ戻す", () => {
+    const buf = screen(22);
+    expect(buf.messageLineRow).toBe(22);
+    apply(buf, [...WTD, ORDER.SOH, 3, 0x00, 0x00, 0x00]);
+    expect(buf.messageLineRow).toBe(24);
   });
 });

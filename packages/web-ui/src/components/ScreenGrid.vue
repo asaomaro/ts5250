@@ -4438,8 +4438,8 @@ onBeforeUnmount(() => {
     @focusout="onGridFocusOut"
   >
     <!--
-      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。WRITE ERROR CODE TO WINDOW（0x22）で位置（`messageArea`）があれば、
-      ACS と同じくその行・桁・幅にだけ重ねる（`20260926-window-error-code`）。
+      操作員メッセージ。**画面の最下行に重ねる**（ACS と同じ）。WRITE ERROR CODE（0x21 / 0x22）の位置（`messageArea`）があれば、
+      ACS と同じくその行・桁・幅にだけ重ねる（0x22: `20260926-window-error-code`。0x21 はメッセージ行の 1 行全体: `20260926-wec-msgline-row`）。
       `pointer-events: none` で背面のセルの操作を邪魔しない。
     -->
     <div
@@ -4787,8 +4787,10 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   pointer-events: none;
 }
-/* 0x22 の位置に重ねる（`.colsep` と同じく内側余白は margin で足し、位置は行・桁の単位で与える。高さは style で 1 行＝1.25em——
-   本文が空でも範囲を塗って下のセルを隠すため。`20260926-window-error-code`） */
+/* WRITE ERROR CODE の位置に重ねる（0x22 は指定の桁・0x21 はメッセージ行の 1 行全体。`.colsep` と同じく内側余白は margin で足し、
+   位置は行・桁の単位で与える。高さは style で 1 行＝1.25em——本文が空でも範囲を塗って下のセルを隠すため。
+   **行末で切る（`clip`）**——ACS は 1 行を超えた本文を次の行へ上書きするが、情報を捨てるので合わせない。
+   `20260926-window-error-code`・`20260926-wec-msgline-row` decisions D2） */
 .opmsg.opmsg-area {
   right: auto;
   bottom: auto;

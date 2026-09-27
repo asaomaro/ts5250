@@ -1040,7 +1040,7 @@ watch(
  */
 const effectiveNotice = computed(() => notice.value || state.value?.notice || "");
 /**
- * 画面の最下行に出す操作員メッセージ（ACS と同じ置き方）。
+ * 操作員メッセージ（ACS と同じ置き方）。クライアント側のものは最下行、ホストのものは core が付けた位置（`messageArea`）に出す。
  *
  * **クライアント側が優先**し、無ければホスト側（`systemMessage`。WRITE ERROR CODE 由来）。
  * ACS は**どちらも同じ見た目で同じ行**に出すので、色でも区別しない。
@@ -1054,7 +1054,7 @@ const hostMessage = computed(() => {
 });
 const messageLine = computed(() => effectiveNotice.value || hostMessage.value);
 /**
- * **ホストのメッセージを重ねる位置**（WRITE ERROR CODE TO WINDOW＝0x22 のときだけ core が付ける。`20260926-window-error-code`）。
+ * **ホストのメッセージを重ねる位置**（WRITE ERROR CODE で core が付ける。0x22 は指定の桁・0x21 はメッセージ行の 1 行全体。`20260926-window-error-code`・`20260926-wec-msgline-row`）。
  * クライアント側の操作員メッセージを出している間は付けない（それは従来どおり最下行）。エラー状態を抜けて隠したものも付けない。
  * 本文が空でも位置があれば渡す——ACS は範囲を空にするので、空欄として重ねる
  */
