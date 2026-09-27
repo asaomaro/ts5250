@@ -351,9 +351,9 @@ export interface ScreenSnapshot {
    */
   systemMessageSeq?: number;
   /**
-   * **WRITE ERROR CODE TO WINDOW（0x22）のメッセージを重ねる位置**（1 起点。`systemMessage` が 0x22 由来のときだけ付く。`20260926-window-error-code`）。
-   * `col` は書き始めの桁（ACS が属性を書く桁）、`width` は重ねる桁数（ACS が空にする桁と本文を書いた桁の和）。
-   * 無ければ UI は従来どおり最下行に重ねる（0x21）
+   * **WRITE ERROR CODE（0x21 / 0x22）のメッセージを重ねる位置**（1 起点。`20260926-window-error-code`・`20260926-wec-msgline-row`）。
+   * 0x22: `col` は書き始めの桁（ACS が属性を書く桁）、`width` は重ねる桁数（ACS が空にする桁と本文を書いた桁の和）。
+   * 0x21: メッセージ行（SOH の申告。無ければ最下行）の桁 1 から 1 行全体。無ければ UI は最下行に重ねる
    */
   systemMessageArea?: { row: number; col: number; width: number };
   /**

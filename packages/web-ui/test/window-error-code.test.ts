@@ -8,8 +8,10 @@ import type { WsClient } from "../src/ws-client.js";
 
 /**
  * **WRITE ERROR CODE TO WINDOW（0x22）のメッセージを ACS と同じ行・桁に重ねる**（`20260926-window-error-code`）。
- * core が ACS と同じ規則で位置（`systemMessageArea`）を付け、UI はそこへ `.opmsg` を置く。0x21（位置なし）は従来どおり最下行の全幅。
- * 実機の ACS のコアの結果は `scripts/acs-probe/window-error-code.txt`（22 行・桁 12 から 17 桁／最下行は桁 1 から）。
+ * core が ACS と同じ規則で位置（`systemMessageArea`）を付け、UI はそこへ `.opmsg` を置く。0x21 はメッセージ行の 1 行全体（`20260926-wec-msgline-row`）。
+ * 位置の無い systemMessage（旧いサーバー等）は従来どおり最下行の全幅。
+ * 実機の ACS のコアの結果は `scripts/acs-probe/window-error-code.txt`（0x22: 22 行・桁 12 から 17 桁／最下行は桁 1 から）と
+ * `scripts/acs-probe/wec-msgline-row.txt`（0x21: 申告した行の桁 1 に属性・桁 2 から本文）。
  */
 const SID = "we1";
 function cell(): Cell {
@@ -84,7 +86,7 @@ describe("0x22 の位置に重ねる", () => {
     expect((box(w).element as HTMLElement).style.height).toBe("1.25em");
   });
 
-  it("**0x21（位置なし）は従来どおり最下行の全幅**（`opmsg-area` を付けない）", async () => {
+  it("**位置の無い systemMessage（旧いサーバー等）は従来どおり最下行の全幅**（`opmsg-area` を付けない）", async () => {
     const { w } = await mountPane();
     await host({ systemMessage: "FULL LINE", systemMessageSeq: 304 });
     expect(box(w).exists()).toBe(true);
@@ -111,5 +113,28 @@ describe("0x22 の位置に重ねる", () => {
     await nextTick();
     await nextTick();
     expect(box(w).exists(), "抜けても残った").toBe(false);
+  });
+});
+
+describe("0x21 のメッセージ行に重ねる（`20260926-wec-msgline-row`）", () => {
+  it("**0x21 は SOH が申告したメッセージ行（22 行）の 1 行全体に置く**（桁 1 は属性の空き、本文は桁 2 から。`20260926-wec-msgline-row`）", async () => {
+    const { w } = await mountPane();
+    await host({ systemMessage: "ERR ON MSG LINE", systemMessageSeq: 307, systemMessageArea: { row: 22, col: 1, width: 80 } });
+    const el = box(w);
+    expect(el.classes()).toContain("opmsg-area");
+    const st = (el.element as HTMLElement).style;
+    expect(st.top).toBe(`${21 * 1.25}em`);
+    expect(st.left).toBe("0ch");
+    expect(st.width).toBe("80ch");
+    expect(el.element.textContent).toBe(" ERR ON MSG LINE");
+  });
+
+  it("**90 字の本文も 1 行の範囲（80 桁）に置き、切り捨てで出す**（ACS は続きを次の行へ上書きするが合わせない。decisions D2。jsdom では切れ方そのものは測れない）", async () => {
+    const { w } = await mountPane();
+    await host({ systemMessage: "L".repeat(90), systemMessageSeq: 308, systemMessageArea: { row: 22, col: 1, width: 80 } });
+    const el = box(w);
+    expect(el.classes()).toContain("opmsg-area");
+    expect((el.element as HTMLElement).style.width).toBe("80ch");
+    expect((el.element as HTMLElement).style.height).toBe("1.25em");
   });
 });

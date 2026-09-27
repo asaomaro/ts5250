@@ -1,0 +1,13 @@
+schema: 11
+slug: wec-msgline-row
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: **WRITE ERROR CODE（0x21）のメッセージを、SOH が申告したメッセージ行に出す**（優先度 低・深さ △。`20260926-window-error-code` decisions D2 から割った）。
+harnessRevDelivered: unknown

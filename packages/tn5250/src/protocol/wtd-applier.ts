@@ -737,12 +737,14 @@ function applyWtd(
         // 並びと意味は `ScreenBuffer.setHeaderData` の JSDoc（実機で採った値つき）。
         const len = r.u8();
         const body = r.bytes(len);
-        buf.setHeaderData(body);
         // **フォーマットテーブルを作り直すので、保留中の IC/MC も捨てる**
         // （ACS `processWriteToDisplay` の SOH 分岐 → `processClearFMT()` →
         // `WTD_IC_addr = -1`）。これが無いと、前の WTD が指した位置が
         // 「新しい画面に対する指定」として残ってしまう（PA0100R。`placeCursorAfterWtd` 参照）
+        // **ヘッダより先に消す**——ACS も `processClearFMT` でメッセージ行を最下行へ戻してから申告を採る
+        // （逆にすると申告したメッセージ行が消える。`20260926-wec-msgline-row` decisions D5）
         buf.clearFormatTable();
+        buf.setHeaderData(body);
         break;
       }
       case ORDER.TD: {
@@ -1012,10 +1014,14 @@ function windowErrorArea(buf: ScreenBuffer, win: { start: number; end: number },
  *
  * **WRITE ERROR CODE TO WINDOW（0x22）は `win`（開始桁・終了桁）付きで来る**。ACS（`DS5250.processWriteErrorCode`。
  * `20260926-window-error-code` research F1〜F3。実機の ACS のコアで測定）と同じく:
- * - 書き始め＝メッセージ行（SOH の申告。既定 24）の開始桁。ただし**書き始め＋桁数が画面の大きさを超えれば最下行の行頭へ戻す**
+ * - 書き始め＝メッセージ行（SOH の申告。無ければ最下行）の開始桁。ただし**書き始め＋桁数が画面の大きさを超えれば最下行の行頭へ戻す**
  *   （メッセージ行が最下行なら開始桁は捨てられ、桁 1 から書く——実測どおり）
  * - 本文は**終了桁 − 開始桁 ＋ 1 バイト**まで（属性・SO/SI・DBCS の 2 バイトも 1 バイトずつ数える。先頭が IC なら ＋3）。残りは次の ESC まで読み飛ばす
  * - 重ねる範囲は「空にする桁（書き始め〜終了桁の手前）」と「本文を書いた桁」の和。位置は `systemMessageArea` に持つ
+ *
+ * **WRITE ERROR CODE（0x21）はメッセージ行（SOH の申告。無ければ最下行）の 1 行全体に重ねる**（ACS は桁 1 に属性・桁 2 から本文。
+ * `20260926-wec-msgline-row` research F2）。本文が 1 行より長いと ACS は続きを次の行へ上書きして Reset でも戻さないが、
+ * 情報を捨てるので合わせない——当 PJ は 1 行で切る（同 decisions D2）。
  *
  * **SO/SI で挟まれた DBCS（漢字）は 2 バイト 1 組で読む。** 1 バイトずつ `decodeByte` に
  * 通すと、DBCS のペアがそれぞれ無関係な SBCS 文字に化ける（メッセージが日本語のとき、
@@ -1061,7 +1067,8 @@ function applyWriteErrorCode(r: ByteReader, buf: ScreenBuffer, codec: Codec, win
   // 0x22 は上限を超えた本文を次の ESC まで読み飛ばす（ACS は `bl` のとき ESC まで添字を進める。research F1）
   const consumed = used() - orderBytes;
   if (win) while (r.remaining > 0 && r.peek() !== ESC) r.u8();
-  buf.systemMessageArea = win ? windowErrorArea(buf, win, consumed) : undefined;
+  // 桁の欠けた・不正な 0x22（位置が出せない）は 0x21 と同じくメッセージ行の 1 行全体にする（ACS の見え方は未確認。decisions D4）
+  buf.systemMessageArea = (win ? windowErrorArea(buf, win, consumed) : undefined) ?? { row: buf.messageLineRow, col: 1, width: buf.cols };
   // **本文が空白だけでも載せて番号を振る**——ACS `DS5250.processWriteErrorCode` は本文を読む前に
   // 無条件で `setErrorMode(true)` とする（独立点検の指摘。空白だけの WEC が実際に届くかは未確認）。
   // 空なら画面に出る文言は無いが、エラー状態には入る（キーボードは Reset・矢印等まで拒否）
