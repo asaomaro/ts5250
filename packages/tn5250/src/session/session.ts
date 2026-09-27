@@ -467,8 +467,15 @@ export class Session5250 extends Emitter<SessionEvents> {
     return this.sysReqLineOpen ? { ...withMw, sysReqLine: true } : withMw;
   }
 
-  /** ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可 */
-  setField(target: { index: number } | { row: number; col: number }, value: string): void {
+  /**
+   * ローカル編集のみ（ホスト送信なし）。Ready 時のみ許可。
+   *
+   * `opts.eitherDbcsOn` は **E（either）欄の全角・半角の状態を画面の側から明示する**（`20260927-either-field-so`）。
+   * ACS は欄ごとに状態を持ち続け（`Field5250.EitherFieldDBCSOn`）、空にしても保つ——コアは値からしか
+   * 状態を読めない（空の値では変えない。`noteEitherMode`）ので、画面の側で切り替えが起きた回だけ渡る。
+   * 渡らない呼び出し（MCP・HLLAPI・マクロ）は従来どおり値から推す
+   */
+  setField(target: { index: number } | { row: number; col: number }, value: string, opts?: { eitherDbcsOn?: boolean }): void {
     this.assertReady();
     const field = this.resolveField(target);
     // 内容検証（型・DBCS 種別・コードページ許容文字）。違反は FIELD_TYPE。
@@ -492,7 +499,7 @@ export class Session5250 extends Emitter<SessionEvents> {
         );
       }
     }
-    this.buf.setFieldValue(field, value, field.dbcsType !== undefined);
+    this.buf.setFieldValue(field, value, field.dbcsType !== undefined, opts);
   }
 
   /**

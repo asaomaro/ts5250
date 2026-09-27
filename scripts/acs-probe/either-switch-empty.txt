@@ -1,0 +1,31 @@
+# **E 欄を半角へ切り替えてから空にしたとき ACS は何を送るか**（実機の ACS のコア。`20260927-either-field-so`）。DSM の READDBCS（`scripts/host-src/dscmd.c`）の E 欄（17,10 の `SO あ SI`）を、
+# 0x82 の待ちで SO の直後から Erase EOF（全角のまま空）、0x52 の待ちで先頭に X（半角へ切り替え）→ 先頭から Erase EOF（半角のまま空）。ホスト側のログ（/tmp/dscmd.log の QsnRtvDta）を見る。
+# 結果（2026-09-28）: 0x82 の E 欄は `0e`、0x52 は何も送らない（SBA だけ）。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-switch-empty.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READDBCS')[enter]
+sleep 5000
+setcursor 17,11
+settle 300
+keys [eraseeof]
+settle 300
+dump erased-dbcs
+keys [enter]
+sleep 3000
+setcursor 17,10
+settle 300
+keys X
+settle 300
+setcursor 17,10
+settle 300
+keys [eraseeof]
+settle 300
+dump switched-then-erased
+keys [enter]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

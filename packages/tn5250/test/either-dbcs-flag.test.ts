@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { applyDataStream } from "../src/protocol/wtd-applier.js";
+import { buildReadMdtResponse } from "../src/protocol/read-response.js";
+import { parseRecord } from "../src/protocol/gds.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { ESC, COMMAND, ORDER, FFW } from "../src/protocol/constants.js";
@@ -96,3 +98,66 @@ describe("E 欄の全角の状態", () => {
     expect(f.eitherDbcsOn).toBeUndefined();
   });
 });
+
+/**
+ * **画面の側が明示した状態は、値からの推定より優先する**（`setFieldValue` の `opts.eitherDbcsOn`。`20260927-either-field-so`）。
+ * コアは空の値では状態を変えない（`noteEitherMode`）ため、画面の側で「切り替えてから空にした」という事実を伝えないと、
+ * 前の全角の状態が誤って残る——独立点検で見つかった実例をそのまま固定する
+ */
+describe("空にした E 欄: 画面の側の状態を渡したとき", () => {
+  it("**全角のまま空にした**と伝えると、状態は全角のまま・欄の先頭に SO だけを置く（ACS は `0e` を送る）", () => {
+    const { b, flag } = eField();
+    b.setFieldValue(b.fieldByIndex(1), "あい", true);
+    expect(flag()).toBe(true);
+    b.setFieldValue(b.fieldByIndex(1), "", true, { eitherDbcsOn: true });
+    expect(flag(), "全角のまま").toBe(true);
+    const cell = b.snapshot("s", false).cells[4]![19]!; // (5,20) の先頭桁
+    expect(cell.kind).toBe("so");
+  });
+
+  it("**半角へ切り替えてから空にした**と伝えると、状態は半角に落ちる（レビューで見つかった不具合の再発防止）", () => {
+    const { b, flag } = eField();
+    b.setFieldValue(b.fieldByIndex(1), "あい", true); // 全角の状態にしておく
+    expect(flag()).toBe(true);
+    // 画面の側は「X を打って半角へ切り替え、そのまま消した」と伝える（値は空）
+    b.setFieldValue(b.fieldByIndex(1), "", true, { eitherDbcsOn: false });
+    // スナップショットは true のときだけ載せる（false は undefined と同じ扱い。`snapshot()` の注記）
+    expect(flag(), "半角に落ちる——渡さない場合は真のまま残ってしまう").toBeUndefined();
+    const cell = b.snapshot("s", false).cells[4]![19]!;
+    expect(cell.kind).not.toBe("so");
+  });
+
+  it("状態を渡さない呼び出し（MCP・HLLAPI・マクロ）は従来どおり値から推す——空では変えない", () => {
+    const { b, flag } = eField();
+    b.setFieldValue(b.fieldByIndex(1), "あい", true);
+    expect(flag()).toBe(true);
+    b.setFieldValue(b.fieldByIndex(1), "", true); // opts 無し
+    expect(flag(), "推定は空の値を変えない").toBe(true);
+  });
+
+  it("**空白だけの値でも READ は `0e` だけ**（残りの桁は NUL。空白を残すと `0e 40 40 …` になる）", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x40, 0x24, 0x00, 0x0c]), b, codecForCcsid(930), () => {});
+    b.setFieldValue(b.fieldByIndex(1), "            ", true, { eitherDbcsOn: true });
+    const data = parseRecord(buildReadMdtResponse(b, codecForCcsid(930), 0xf1, { row: 5, col: 20 }).record).data.subarray(3);
+    expect([...data].map((x) => x.toString(16).padStart(2, "0")).join("")).toBe("110514" + "0e");
+  });
+
+  it("**J（DBCS のみ）の欄を空にすると SO と SI を残す**（ACS は Erase Input の後の J 欄を `0e`＋NUL＋`0f` で送る。0x52 では NUL は 0x40）", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x00, 0x24, 0x00, 0x06]), b, codecForCcsid(930), () => {});
+    b.setFieldValue(b.fieldByIndex(1), "", true);
+    const data = parseRecord(buildReadMdtResponse(b, codecForCcsid(930), 0xf1, { row: 5, col: 20 }).record).data.subarray(3);
+    expect([...data].map((x) => x.toString(16).padStart(2, "0")).join("")).toBe("110514" + "0e404040400f");
+  });
+
+  it("継続欄の中間・最終の区間には SO を置かない（SO は欄の頭にだけある。E・J の継続欄は未確認）", () => {
+    const b = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00,
+      ORDER.SBA, 5, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x00, 0x86, 0x01, 0x24, 0x00, 0x06,
+      ORDER.SBA, 6, 19, ORDER.SF, 0x40, 0x00, 0x82, 0x00, 0x86, 0x02, 0x24, 0x00, 0x06]), b, codecForCcsid(930), () => {});
+    b.setFieldValue(b.fieldByIndex(2), "", true);
+    expect(b.snapshot("s", false).cells[5]![19]!.kind).not.toBe("so");
+  });
+});
+

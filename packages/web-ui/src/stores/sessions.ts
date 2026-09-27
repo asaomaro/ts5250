@@ -150,6 +150,12 @@ export interface SessionState {
   snapshot: ScreenSnapshot | undefined;
   /** ローカル編集差分（fieldIndex → value）。AID 送信時に載せる */
   edits: Map<number, string>;
+  /**
+   * **E（either）欄の全角・半角の状態**（`edits` と対になる。画面の側がいま知っている状態を
+   * `edits` と同じライフサイクルで持ち、AID 送信時に core へ渡す。`20260927-either-field-so`）。
+   * `edits` に載っている欄だけが対象——載っていない欄の状態は core が既に知っている
+   */
+  eitherDbcsOn?: Map<number, boolean>;
   cursor: { row: number; col: number };
   /**
    * **サーバーとの結びつき**（`20260908-session-lifetime-rules-fold`。規則は `session-link.ts`）。
@@ -505,6 +511,7 @@ export const sessionsStore = reactive({
     if (by !== undefined) {
       s.reservedBy = by;
       s.edits.clear();
+      delete s.eitherDbcsOn; // edits と同じライフサイクル
       delete s.awaitingFieldExit; // 打ちかけを捨てたので、欄を出る待ちも無い
       delete s.typeAhead; // 利用者の打鍵を自動操作の画面へ流さない（`20260921-type-ahead` D5）
     } else {
@@ -547,6 +554,7 @@ export const sessionsStore = reactive({
     applyLink(s, { to: "connected" });
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
+    delete s.eitherDbcsOn; // edits と同じライフサイクル
     delete s.awaitingFieldExit; // 打ちかけと一緒に捨てる（ACS も新しい欄は「出た」状態で作る）
   },
 

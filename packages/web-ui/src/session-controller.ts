@@ -1308,7 +1308,14 @@ export function sendKey(
   // push した窓では、**サーバーは書けるのに欄が届かない**。広い側に倒しているのは
   // 「打ちかけの値を無駄に流さない」を優先したため（`20260920-restore-screen-parity` review ラウンド 3）。
   const carryFields = !isFlagKey(key) || !inputInhibited(s);
-  const fields = carryFields ? [...s.edits.entries()].map(([field, value]) => ({ field, value })) : [];
+  const fields = carryFields
+    ? [...s.edits.entries()].map(([field, value]) => ({
+        field,
+        value,
+        // E 欄の状態を添える（`onEdit` が `edits` と一緒に積む。`20260927-either-field-so`）
+        ...(s.eitherDbcsOn?.has(field) ? { eitherDbcsOn: s.eitherDbcsOn.get(field)! } : {})
+      }))
+    : [];
   // 送信**前**に記録する（送信後だと edits が新画面で消えていることがある）
   // **記録は送った側のキー**——再生したときに同じことが起きるように
   recordSend(sessionId, outKey, cursor ?? s.cursor, sysReqText);

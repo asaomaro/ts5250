@@ -98,7 +98,17 @@ export type WsFieldRef = number | { row: number; col: number };
  * ホストへ書く直前に値へ差し替える（`ws-handler.onKey`）。
  */
 export type WsKeyField =
-  | { field: WsFieldRef; value: string }
+  | {
+      field: WsFieldRef;
+      value: string;
+      /**
+       * **E（either）欄の全角・半角の状態**（画面の側が知っている最新の状態。`20260927-either-field-so`）。
+       * ACS は欄ごとに DBCS 状態を持ち続け（`Field5250.EitherFieldDBCSOn`）、空にしても保つ——コアは
+       * 打鍵の値からしか状態を読めない（空の値では変えない）ので、**画面の側で切り替えが起きた回だけ**
+       * この形で伝える（それ以外の呼び出し元は付けない＝従来どおり値から推す）。
+       */
+      eitherDbcsOn?: boolean;
+    }
   | { field: WsFieldRef; secretRef: MacroSecretRef };
 
 export interface WsKey {

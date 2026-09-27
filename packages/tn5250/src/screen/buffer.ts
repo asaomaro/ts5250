@@ -1210,7 +1210,7 @@ export class ScreenBuffer {
    * フィールド値のローカル編集（spec: protected/長さは同期エラー）。
    * skipCharLengthCheck=true（DBCS フィールド）は文字数チェックを省く（呼び出し側がバイト長で検証済み）。
    */
-  setFieldValue(field: InternalField, value: string, skipCharLengthCheck = false): void {
+  setFieldValue(field: InternalField, value: string, skipCharLengthCheck = false, opts?: { eitherDbcsOn?: boolean }): void {
     if ((field.ffw & FFW.BYPASS) !== 0) {
       const { row, col } = this.rowColOf(field.startAddr);
       throw new As400Error("FIELD_PROTECTED", `field at (${row},${col}) is protected`);
@@ -1256,7 +1256,32 @@ export class ScreenBuffer {
     // tn5250 `field.c` tn5250_field_set_mdt と tn5250j `ScreenField.setMDT` も同じ畳み方をする。
     const first = this.continuedRun(field)[0] ?? field;
     first.mdt = true;
-    if (field.dbcsType === "either") noteEitherMode(field, chars);
+    const blank = chars.every((c) => c === " ");
+    // 継続欄の中間・最終の区間には置かない（SO は欄の頭にだけある。E・J の継続欄は未確認）
+    const head = field.continued === undefined || field.continued === "first";
+    if (field.dbcsType === "either") {
+      if (opts?.eitherDbcsOn !== undefined) {
+        // **画面の側が明示した状態を使う**（値からは推せない空の値でも正しく決まる。`20260927-either-field-so`）
+        field.eitherDbcsOn = opts.eitherDbcsOn;
+        // 全角の状態のまま空にした欄は、先頭に SO だけを残す——ACS は READ で `0e` の 1 バイトを送る
+        // （実機の ACS のコア。Erase EOF でも Erase Input でも。`scripts/acs-probe/either-empty.txt`・`either-switch-empty.txt`）。
+        // 残りの桁は NUL（空白を残すと `0e 40 40 …` になる）
+        if (opts.eitherDbcsOn && blank && head) this.placeEmptyShift(field, false);
+      } else {
+        // 画面の側から状態が来ない呼び出し（MCP・HLLAPI・マクロ）は従来どおり値から推す
+        noteEitherMode(field, chars);
+      }
+    } else if (field.dbcsType === "only" && blank && head) {
+      // **J（DBCS のみ）の欄は空にしても SO と SI を残す**——ACS は Erase Input の後の J 欄を `0e` ＋ NUL ＋ `0f` で送る（ALT の読み。実機の ACS のコア）
+      this.placeEmptyShift(field, true);
+    }
+  }
+
+  /** 空にした DBCS の欄の構造: 先頭に SO（`withSi` なら末尾に SI）、間は NUL（`setFieldValue`） */
+  private placeEmptyShift(field: InternalField, withSi: boolean): void {
+    for (let i = 0; i < field.length; i++) this.cells[field.startAddr + i] = null;
+    this.cells[field.startAddr] = { type: "char", char: " ", charKind: "so" };
+    if (withSi && field.length >= 2) this.cells[field.startAddr + field.length - 1] = { type: "char", char: " ", charKind: "si" };
   }
 
   /**

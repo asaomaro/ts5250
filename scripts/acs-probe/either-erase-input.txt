@@ -1,0 +1,19 @@
+# **Erase Input の後の DBCS の欄を ACS は何で送るか**（実機の ACS のコア。`20260927-either-field-so`）。DSM の READDBCS（`scripts/host-src/dscmd.c`。9 欄とも MDT あり）で、0x82 の待ちで Erase Input（`[erinp]`）→ Enter。
+# 結果（2026-09-28。ホスト側のログの QsnRtvDta）: O・G の欄は何も送らない、J 欄（15,10）は `0e`＋NUL 10＋`0f`、全角の状態の E 欄（17,10）は `0e`。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-erase-input.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READDBCS')[enter]
+sleep 5000
+keys [erinp]
+settle 500
+dump erased-input
+keys [enter]
+sleep 3000
+keys [enter]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

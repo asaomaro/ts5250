@@ -146,8 +146,13 @@ const is5250 = computed(() => (state.value?.meta?.terminal ?? "5250") === "5250"
 /** IBM i の 3270 でだけ割り当てのあるキー（サーバーの `tn3270-adapt.ts` の `IBMI_ONLY` と同じ集合） */
 const IBMI_ONLY_3270: ReadonlySet<string> = new Set(["Attn", "SysReq", "Help", "Print"]);
 
-function onEdit(fieldIndex: number, value: string): void {
-  state.value?.edits.set(fieldIndex, value);
+function onEdit(fieldIndex: number, value: string, eitherMeta?: { eitherDbcsOn: boolean }): void {
+  const s = state.value;
+  if (!s) return;
+  s.edits.set(fieldIndex, value);
+  // E 欄の状態（`eitherMeta`。`20260927-either-field-so`）を持ち回り、AID 送信時に core へ渡す
+  if (eitherMeta) (s.eitherDbcsOn ??= new Map()).set(fieldIndex, eitherMeta.eitherDbcsOn);
+  else s.eitherDbcsOn?.delete(fieldIndex);
   noteFieldTyped(fieldIndex);
 }
 

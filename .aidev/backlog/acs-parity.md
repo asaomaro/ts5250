@@ -628,11 +628,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **E 欄の貼り付け**（下の「E 欄の残り」から割った）。**完了（`20260927-either-field-rest`）**: ACS `PS5250.pasteRect` は字ごとに `inputChar` / `insertChar` → `checkDBCSField` を通すので、
   貼り付けにも打鍵と同じ規則を掛けた（`packages/web-ui/src/components/ScreenGrid.vue` の `eitherPasteStep`。上書きは混ぜる字を飛ばして桁を消費し、挿入は 0060 / 0061 で何も貼らない——
   ACS はそれまでの字を残すが当 PJ の挿入の貼り付けの方針に合わせた。decisions D2）。単体 7 件・変異 6 通り検出。原典の読み（貼り付けは `acs-probe` で流せない）。
-- [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: ~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）。
+- [x] **空にした E 欄の全角・半角の状態**（下の「E 欄の残り」から割った）。**完了（`20260927-either-field-so`）**: 画面の側が E 欄の状態を送る値に添え（ws の `fields[].eitherDbcsOn`）、
+  コアはそれで状態を決め、全角のまま空なら先頭に SO を置く（`packages/tn5250/src/screen/buffer.ts` の `setFieldValue`・`placeEmptyShift`）。ACS のコア（2 経路・Erase Input も）で
+  全角のまま空の E 欄は `0e`・半角へ切り替えて空の E 欄は何も送らない・空の J 欄は `0e`＋NUL＋`0f` と測り、当 PJ も同じ（`scripts/verify-either-empty.mjs` pass=3）。画面の `eitherSwitched` を欄ごとにした。
+- [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: ~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。~~「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）~~（上の `[x]`）。
   全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
   挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
   **実測（`20260927-either-field-rest`・`scripts/acs-probe/either-empty.txt`）**: ACS は全角の状態の E 欄を SO の直後から Erase EOF すると **`0e`（SO だけ）を送り**、カーソルは SO の次の桁（17,11）。
-  当 PJ は空の値で何も送らない。コアの状態だけで SO を置く実装は、画面で半角に切り替えた後に空にした場面を壊すので取り下げた——画面の側の状態を送る値に載せる作り（web-ui・server・core）が要る（同 work decisions D1）。
+  ~~当 PJ は空の値で何も送らない~~（上の `[x]` で直した）。
 - [x] **解錠中に届いた WTD のカーソル（(f)）と、溜めた AID のカーソル・捨てる時機**（下の【まとめ】から割った）。**完了（`20260927-unlocked-wtd-cursor`）**:
   実機の ACS のコア（DSM の UNLOCKWTD / UNLOCKWTDNOIC / UNLOCKWTDCC1）で、解錠中の WTD も IC（無ければ保留の IC）へカーソルを置いた——(f) は差ではなかった（当 PJ も同じ。`scripts/verify-unlocked-wtd-cursor.mjs`）。
   溜めた AID は、ACS が READ のレコードの後に**押したときのカーソル**で送り、CC1 0x20 の WTD でも捨てなかった（`tap-proxy` のワイヤ）。当 PJ は CC1 で捨てて READ に返さず・WTD の後のカーソル（5,10）で送っていた
