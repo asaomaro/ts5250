@@ -763,7 +763,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`packages/tn5250/src/protocol/wtd-applier.ts` の SBA・TD・`applySf`・`fieldAddFailure`、`buffer.ts` の `checkNewField`・`row1col0Attr`。`scripts/verify-wtd-order-sense.mjs` の 8 モード pass=33、直す前は SBA10・FFWC0・TDEND で例外）。
   属性の 0x10050130・同じ位置の SF は FFW だけ書き換える・昇順でない SF は入れない（`checkNewField`）は原典。ACS は画面の末尾を越えた後、後続の全レコードに 0x10050121 を返し続けた（写さない。decisions D2）。
   番地 -1 に SF 以外・再順序付けの組・FFW の無い SF の検査は未確認／見ない（decisions D6・D7）。
-- [ ] **WDSF の中の否定応答**（上から割った）: ACS `processWSFOrder`（窓・選択欄・スクロール・バー・罫線の中身の検査と否定応答）。当 PJ の `applyWdsf` は警告して読み飛ばす。**実機で測ってから**
+- [x] **WDSF の頭の検査の否定応答**（下の行から割った）。**完了（`20260927-wdsf-sense`）**: ACS `ENPTUI5250.processWSFOrder` と同じく、残りが 4 バイトに足りない → 0x10050121・LL < 4 → 0x10050110・
+  クラスが 0xD9 でない・知らない型 → 0x10050111 で WTD を打ち切る（`packages/tn5250/src/protocol/wtd-applier.ts` の `applyWdsf`）。実機の ACS のコア（ENPTUI 有効・tap）と
+  `scripts/verify-wtd-order-sense.mjs` の WDSF 3 モードが一致（pass=12）、通常の画面の一巡で否定応答 0 件。ENPTUI 無効の ACS は WDSF を読み飛ばす（当 PJ は常に申告する）。
+- [ ] **WDSF の中の否定応答**（上から割った。~~頭の検査~~ は上の `[x]`。残りは構造体ごとの中身の検査——中身の無い 0x55 は ACS で 0x10050110）: ACS `processWSFOrder`（窓・選択欄・スクロール・バー・罫線の中身の検査と否定応答）。当 PJ の `applyWdsf` は警告して読み飛ばす。**実機で測ってから**
 - [x] **EA の属性タイプ・書き始めと、画面の終わりをまたぐ書き込み**（上の「否定応答・受理の残り」から割った）。
   **完了（`20260927-ea-acs`・PR #423）**: EA は ACS の `eraseToAddress` どおり（書き始めは行き先の次・タイプ 0x00 / 0xFF・DBCS の 0x05・その他は 0x1005012D・長さ 3 以上は 0x10050123）。
   画面の終わりを越える文字の並びは書かずに 0x10050121（CC2 も落とす）、最後の桁でちょうど終わった次は 1 行 1 桁から（EA の後だけ画面の外のまま）。

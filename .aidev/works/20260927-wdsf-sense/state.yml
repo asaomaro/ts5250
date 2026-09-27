@@ -1,0 +1,13 @@
+schema: 11
+slug: wdsf-sense
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: WDSF の中の否定応答
+harnessRevDelivered: unknown
