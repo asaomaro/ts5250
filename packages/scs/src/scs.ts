@@ -128,6 +128,12 @@ export class ScsDecoder {
     let col = 1;
     let maxRow = 0;
     let maxCol = 0;
+    /**
+     * **字の幅の倍率**（SFSS `2B FD .. 02` の横。ACS の JPS は字・空白・HT・透過の字の進みを `getCharAdvance() × getWidthScale()` にする。
+     * `JPSPrintableCharacters.process`。`20260927-scs-sfss`）。倍（0x20）なら 1 字で 2 桁進む。SO/SI の桁は倍にしない（`JPSShiftIn` は倍率を見ない）。
+     * 半分（0x08）は 1 桁に 2 字が入り桁の格子で表せないので、倍率 1 のまま扱う（台帳に残す）。ジョブごとに戻す（ACS の `JPSState` はジョブの印刷ごとに作る——未確認）
+     */
+    let widthScale = 1;
     let dbcsMode = false; // SO/SI シフト状態（DBCS コーデックのみ）
 
     const cellAt = (c: number): void => {
@@ -159,7 +165,7 @@ export class ScsDecoder {
       }
       if (row > maxRow) maxRow = row;
       if (col > maxCol) maxCol = col;
-      col += 1;
+      col += widthScale; // 倍幅なら 2 桁（次の桁は空けたまま。`widthScale`）
     };
     // 全角グリフ（2 桁を占める）。後半桁は継続（空文字列）にして join で桁を保つ
     const putWide = (ch: string): void => {
@@ -172,7 +178,7 @@ export class ScsDecoder {
       }
       if (row > maxRow) maxRow = row;
       if (col + 1 > maxCol) maxCol = col + 1;
-      col += 2;
+      col += 2 * widthScale;
     };
     /**
      * SO/SI を記録し、**空白を書かずに位置を `width` 桁進める**（ACS `JPSShiftOut` / `JPSShiftIn` は `setX` で
@@ -267,7 +273,7 @@ export class ScsDecoder {
         case BS:
           break; // JPS の `processBackSpace` は何もしない（~~1 桁戻る~~ は PDT 経路）
         case HT:
-          col += 1; // JPS の HT は空白 1 つ（`JPSHorizontalTab extends JPSSpace`。タブ位置は見ない）
+          col += widthScale; // JPS の HT は空白 1 つ（`JPSHorizontalTab extends JPSSpace`。タブ位置は見ない。倍幅なら 2 桁）
           break;
         case TRN: {
           // 透過: 長さ＋本体。本体は 1 バイトごとに **0x40 なら空白、ほかは `-`**（JPS `processTransparent`。
@@ -277,7 +283,7 @@ export class ScsDecoder {
           for (let k = 0; k < count; k++) {
             const rb = next();
             if (rb < 0) break;
-            if (rb === 0x40) col += 1;
+            if (rb === 0x40) col += widthScale; // JPS の `JPSSpace`（倍幅なら 2 桁）
             else put("-");
           }
           break;
@@ -315,6 +321,10 @@ export class ScsDecoder {
               col = 1;
               row += 1;
             }
+          }, (h) => {
+            // SFSS の横の倍率（ACS `JPSFontSizeScaling.mapScalingFactor`: 0x20 は 2 倍・0x08 は半分・それ以外は 1）
+            if (h === 0x08) this.warn?.("SCS: SFSS の半分の幅は桁の格子で表せないので 1 倍として扱う");
+            widthScale = h === 0x20 ? 2 : 1;
           });
           break;
         default:
@@ -353,7 +363,8 @@ export class ScsDecoder {
     pos: () => number,
     seek: (to: number) => void,
     setSpcc: (v: number) => void,
-    onSsld: () => void
+    onSsld: () => void,
+    onSfss: (horizontal: number) => void
   ): void {
     const at = pos(); // クラスの位置
     const cls = read();
@@ -372,6 +383,22 @@ export class ScsDecoder {
       // それ以外の長さは受けない（ACS は変えない）
       const sub = read();
       if (sub < 0) return;
+      if (sub === 0x02 && len >= 2 && len <= 4) {
+        // **2B FD .. 02 は SFSS（字の大きさの倍率）**（ACS `processSetFontSizeScaling`。`20260927-scs-sfss`）: 長さ 2〜4 だけを受け、横の倍率は +4 のバイト（縦は +5。桁の格子に効かないので読み飛ばす）。
+        // 長さ 2 のとき ACS は命令の外の次のバイトを横として読む（進めない）——同じく覗くだけにする
+        if (len === 2) {
+          const here = pos();
+          const h = read();
+          seek(here);
+          if (h >= 0) onSfss(h);
+          return;
+        }
+        const h = read();
+        if (h < 0) return;
+        onSfss(h);
+        for (let k = 0; k < len - 3; k++) if (read() < 0) return;
+        return;
+      }
       if (sub === 0x03 && (len === 2 || len === 4)) {
         let v = 1;
         if (len === 4) {
