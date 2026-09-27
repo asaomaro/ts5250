@@ -382,6 +382,26 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
     // D2 の他の制御（STAB 0x01 など）はバイト数だけ読み飛ばす
     expect(lines([...E("AB"), 0x2b, 0xd2, 0x04, 0x01, 0x00, 0x05, ...E("C")])).toEqual(["ABC"]);
   });
+  /**
+   * **FF は中身が無くてもページを作る**（ACS `PrintSCS5250JPS.processFormFeed` は FF ごとに `JPSPage` を積む。`20260927-scs-empty-page`）。
+   * 帳票の終わり（最後の FF の後ろ）は中身があるときだけ——ACS は最後の FF より後を印刷しないが、情報を捨てるので合わせない（台帳）
+   */
+  it("**FF FF は白紙の 1 枚を挟む**（~~空ページは出さない~~）", () => {
+    const pages = new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, 0x0c, ...E("B"), 0x0c]));
+    expect(pages.map((p) => p.lines)).toEqual([["A"], [], ["B"]]);
+  });
+  it("最後の FF の後ろは、中身が無ければページにしない（NUL だけ・何も無い）／中身があれば出す（ACS は捨てるが合わせない）", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, 0x00, 0x00])).map((p) => p.lines)).toEqual([["A"]]);
+    expect(new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x0c, ...E("B")])).map((p) => p.lines)).toEqual([["A"], ["B"]]);
+  });
+  it("先頭の FF も白紙の 1 枚（ACS も中身を見ずに積む）・DBCS モード中の FF も改ページ", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([0x0c, ...E("A")])).map((p) => p.lines)).toEqual([[], ["A"]]);
+    const dbcs = new ScsDecoder(930).decode(Uint8Array.from([0x0e, 0x44, 0x81, 0x0c, 0x44, 0x82, 0x0f]));
+    expect(dbcs).toHaveLength(2);
+  });
+  it("FF だけの帳票は白紙の 1 枚（ACS の JPS と同じ）", () => {
+    expect(new ScsDecoder(37).decode(Uint8Array.from([0x0c])).map((p) => p.lines)).toEqual([[]]);
+  });
   it("RNL（0x06）・RFF（0x3A）は ACS も何もしない（Unsupported）", () => {
     const pages = new ScsDecoder(37).decode(Uint8Array.from([...E("A"), 0x06, ...E("B"), 0x3a, ...E("C")]));
     expect(pages).toHaveLength(1);

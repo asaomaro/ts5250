@@ -186,8 +186,14 @@ export class ScsDecoder {
     const soWidth = (): number => (this.spcc === 1 ? 1 : 0);
     const siWidth = (): number => (this.spcc === 0 ? 0 : this.spcc === 2 ? 2 : 1);
 
-    const flushPage = (): void => {
-      if (maxRow === 0 && maxCol === 0) return; // 空ページは出さない
+    /**
+     * ページを閉じる。**FF は中身が無くてもページを作る**（ACS `PrintSCS5250JPS.processFormFeed` は FF ごとに `JPSPage` を積む——`FF FF` で白紙の 1 枚。
+     * `20260927-scs-empty-page`）。~~空ページは出さない~~ だと、ホストが白紙を挟んだ帳票でページが詰まった。
+     * 帳票の終わり（最後の FF の後ろ）は中身があるときだけ出す——ACS の JPS は最後の FF より後を印刷しない（`close()` は `m_pages` だけを印刷する）が、
+     * 情報を捨てることになるので今は合わせない（`.aidev/backlog/acs-parity.md` の【まとめ】SCS の解釈の差では「合わせない候補」のまま。実機の ACS の紙では未確認）
+     */
+    const flushPage = (keepEmpty = false): void => {
+      if (!keepEmpty && maxRow === 0 && maxCol === 0) return;
       const lines: string[] = [];
       const raw: (number | undefined)[][] = [];
       const shifts: ShiftMark[][] = [];
@@ -254,7 +260,7 @@ export class ScsDecoder {
           row += 1;
           break;
         case FF:
-          flushPage();
+          flushPage(true);
           row = 1;
           col = 1;
           break;

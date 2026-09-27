@@ -155,6 +155,15 @@ function markHtml(m: ShiftMark): string {
 }
 
 /** 1 ページ。桁数は `cols`（等幅の箱の幅）で固定する */
+/**
+ * **白紙のページ（FF だけで区切られたページ）は帳票のいちばん広いページと同じ紙の幅で描く**（ACS の JPS はジョブ共通の用紙で白紙を 1 枚出す。
+ * `20260927-scs-empty-page`）。そのままだと幅 0 桁の小さな箱になる。見出しは「0 行 × その桁」になる
+ */
+function blankLike(p: LogicalPage, list: readonly LogicalPage[]): LogicalPage {
+  const cols = Math.max(0, ...list.map((x) => x.cols));
+  return { ...p, cols, rows: 0 };
+}
+
 function pageFigure(
   p: LogicalPage,
   index: number,
@@ -406,7 +415,7 @@ export function renderSpoolHtml(
     `<div class="nav">` +
     list.map((_, i) => `<label class="btn jump" for="pg${i}">${i + 1}</label>`).join("") +
     `</div>` +
-    list.map((p, i) => pageFigure(p, i, list.length, showSbcs ? alt : undefined)).join("");
+    list.map((p, i) => pageFigure(p.rows === 0 ? blankLike(p, list) : p, i, list.length, showSbcs ? alt : undefined)).join("");
   return (
     `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
