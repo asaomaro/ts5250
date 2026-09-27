@@ -1,0 +1,20 @@
+# **WEA（0x12）の否定応答**（実機の ACS のコア。`20260927-wea-sense`）。DSM の試験プログラム（`scripts/host-src/dscmd.c` の WTDERRWEA*）:
+# 先にメッセージ待ちを消し、1 本の WTD（CC2＝0x01・5 行 2 桁に WTDERR）の後ろに WEA ＋ 6 行 2 桁の NEXT、8 秒待って消す。
+# 否定応答なら NEXT は書かれず（WTD の打ち切り）、メッセージ待ちは点く（CC2 は効く）。センスは `scripts/tap-proxy.mjs` を挟んで C>S の行で見る（記録はパスワードを含むので読み終えたら消す）。
+# **1 モードずつ**流す（PARM を WTDERRWEA1 / WTDERRWEA5X / WTDERRWEA5 / WTDERRWEAEND に替える）。WTDERRWEA5 は `PROBE_CODEPAGE=37`（SBCS）と 930（対照）の 2 通り。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wea-sense.txt AS400
+signon
+keys [enter]
+settle 1500
+
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WTDERRWEA1')[enter]
+sleep 6000
+dump in-window
+sleep 8000
+settle 1000
+dump after
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -872,7 +872,7 @@ function applyWtd(
           if (target < addr) return fail(SENSE.ORDER_BACKWARD, `EA target ${target} < current ${addr}`);
           if (type === 0x00 || type === 0xff) buf.eraseRange(addr, target);
           // 値は長さの誤りと同じ 0x1005012D（ACS も同じ値を返す）
-          else if (type !== 0x05 || !codec.decodeDbcsPair) return fail(SENSE.EA_LENGTH, `EA attribute type 0x${type.toString(16)} not supported`);
+          else if (type !== 0x05 || !codec.decodeDbcsPair) return fail(SENSE.ATTRIBUTE_TYPE, `EA attribute type 0x${type.toString(16)} not supported`);
           addr = target + 1;
         }
         eaAtEnd = addr === buf.rows * buf.cols;
@@ -935,28 +935,28 @@ function applyWtd(
         // `tn5250_session_write_extended_attribute()` の2つの独立した参照実装で確認済み。
         // `.aidev/works/20260914-dspfmt-field-underline-instability` research.md F7）。
         //
-        // **意味的な効果（拡張属性の実際の見た目への反映）は実装しない**——上記の
-        // 2つの参照実装もどちらも実装を見送っており、IBM の正式仕様書での確認も
-        // 取れていないため、憶測で実装すると誤った見た目を作り込むリスクがある。
+        // ~~**意味的な効果（拡張属性の実際の見た目への反映）は実装しない**~~ → タイプ 5 は効かせ、それ以外は否定応答で打ち切る（下。ACS `writeExtAttribute`）。
         //
-        // **ここが本質: `default:` 節（未知オーダー）に落とさないこと。** WEA の
-        // バイト数（2）は既知なので、正確に2バイトだけ消費して次のオーダーへ進める。
-        // `default:` 節に落ちると、次の ESC＋既知コマンドが見つかるまで読み飛ばす
-        // 復旧処理が働き、WEA より後ろの同じ WTD 内の全オーダー
-        // （フィールド定義・属性設定を含む）が丸ごと失われてしまう。
+        // **`default:` 節（未知オーダー）に落とさないこと。** WEA のバイト数（2）は既知なので正確に 2 バイト読む。
+        // `default:` 節に落ちると、次の ESC＋既知コマンドまで読み飛ばす復旧処理が働き、後ろのオーダーを失う
+        // （~~正確に2バイトだけ消費して次のオーダーへ進める~~——否定応答のときは進まず打ち切る）。
         if (r.remaining < 2) return fail(SENSE.COMMAND_EXPECTED, "WEA too short");
         const attrType = r.u8();
         const attrValue = r.u8();
         // **タイプ 5（DBCS の区間）だけは効かせる**（ACS `writeExtAttribute`。DBCS のセッションだけ）: 0x81 で区間の始まり・0x80 で終わり。
         // **0x00 は区間の旗を変えない**（ACS の `case 0` は現在位置の印を外すだけで `isInExtNLSSegment` に触れない。~~0x00 で区間を終える~~ は原典・実測の裏づけの無い推測だった。
         // 独立点検 A-S3）。区間の中のバイトは SO/SI 無しの 2 バイト組（純 DBCS の欄 G）。~~未対応~~ だったので G の欄が半角の文字化けになっていた（`20260921-g-field-sosi`）
-        if (attrType === 0x05 && codec.decodeDbcsPair && (attrValue === 0x81 || attrValue === 0x80 || attrValue === 0x00)) {
-          if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
-          break;
+        // **それ以外は否定応答で WTD を打ち切る**（ACS `writeExtAttribute` の戻り値と `processWriteToDisplay` の `case 18`。`20260927-wea-sense`）。検査の順も ACS と同じ:
+        // 今の位置が画面の外（EA で最後の桁を消した後など）→ 0x1005012A / タイプが 5 でない・SBCS のセッションのタイプ 5 → 0x1005012D / タイプ 5 の値が 0x81・0x80・0x00 でない → 0x1005012F。
+        // ~~警告して読み飛ばす~~（色・桁区切りを WEA で受ける経路は ACS に無い——台帳の DSPFMT の項）
+        if (addr >= buf.rows * buf.cols) return fail(SENSE.WRITE_PAST_END, `WEA at ${addr} past the end of the screen`);
+        if (attrType !== 0x05 || !codec.decodeDbcsPair) {
+          return fail(SENSE.ATTRIBUTE_TYPE, `WEA attribute type 0x${attrType.toString(16)} not supported${attrType === 0x05 ? " in an SBCS session" : ""}`);
         }
-        warn(
-          `WEA order (type=0x${attrType.toString(16)}, value=0x${attrValue.toString(16)}) received — not applied`
-        );
+        if (attrValue !== 0x81 && attrValue !== 0x80 && attrValue !== 0x00) {
+          return fail(SENSE.ATTRIBUTE_VALUE, `WEA type 5 value 0x${attrValue.toString(16)} not supported`);
+        }
+        if (attrValue !== 0x00) nlsSegment = attrValue === 0x81;
         break;
       }
       case ORDER.UNKNOWN_1C:
@@ -1143,6 +1143,12 @@ export const SENSE = {
   SOH_LENGTH: 0x1005012b,
   /** EA の長さが 2〜5 でない */
   EA_LENGTH: 0x1005012d,
+  /** 属性タイプが扱えない（ACS `SC_Invalid_AttributeType`。EA のタイプ・WEA のタイプ。`EA_LENGTH` と同じ値——ACS は EA の長さの誤りにも同じセンスを使う） */
+  ATTRIBUTE_TYPE: 0x1005012d,
+  /** 属性の値が扱えない（ACS `SC_Invalid_Attribute`。WEA タイプ 5 の値） */
+  ATTRIBUTE_VALUE: 0x1005012f,
+  /** 書く位置が画面の外（ACS `SC_WritePastDisplayEnd`。WEA） */
+  WRITE_PAST_END: 0x1005012a,
   ROLL_PARAM: 0x1005012c,
   CLEAR_UNIT_ALTERNATE_PARAM: 0x10030101,
   /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */

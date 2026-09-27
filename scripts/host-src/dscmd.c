@@ -979,6 +979,7 @@ int main(int argc, char *argv[]) {
          * **WTD の中のオーダーの誤りで ACS は否定応答を返すか・CC2 は効くか**（`20260927-wtd-order-sense`）。
          * 1 本の WTD（CC2＝メッセージ待ちを点ける・5 行 2 桁に WTDERR）の後ろに誤ったオーダーを置く:
          * WTDERRSBA＝SBA の行 30 / WTDERRRA＝RA の後戻り / WTDERRSOH＝SOH の長さ 0 / WTDERREA＝EA の長さ 7 / WTDERRSHORT＝SBA が 1 バイトで終わる。
+         * WTDERRWEA1＝WEA のタイプ 1 / WTDERRWEA5X＝WEA タイプ 5 の値 0x42 / WTDERRWEA5＝WEA タイプ 5 の値 0x00（SBCS のセッションで流す）/ WTDERRWEAEND＝EA で最後の桁まで消した後の WEA。
          * EARLYROLL と同じく先にメッセージ待ちを消し、8 秒待ってからもう一度消す
          */
         static const unsigned char head[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xE6, 0xE3, 0xC4, 0xC5, 0xD9, 0xD9 };   /* CC2 01 / SBA 5,2 "WTDERR" */
@@ -987,6 +988,11 @@ int main(int argc, char *argv[]) {
         static const unsigned char soh[] = { 0x01, 0x00 };                       /* 長さ 0 */
         static const unsigned char ea[] = { 0x03, 0x06, 0x02, 0x07, 0, 0, 0, 0, 0, 0 };   /* 長さ 7 */
         static const unsigned char shrt[] = { 0x11, 0x06 };                      /* SBA の桁が無い */
+        /* WEA（`20260927-wea-sense`）: 後ろに 6 行 2 桁の「NEXT」を置き、否定応答で WTD が打ち切られるか（NEXT が書かれないか）を見る */
+        static const unsigned char wea1[] = { 0x12, 0x01, 0x20, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* タイプ 1 */
+        static const unsigned char wea5x[] = { 0x12, 0x05, 0x42, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };  /* タイプ 5・値 0x42 */
+        static const unsigned char wea5[] = { 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* タイプ 5・値 0x00（SBCS のセッションで流す） */
+        static const unsigned char weaend[] = { 0x03, 0x18, 0x50, 0x02, 0x00, 0x12, 0x05, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 }; /* EA で最後の桁まで消した後 */
         static const char off[] = { 0x00, 0x02 };
         unsigned char rec[64];
         const unsigned char *tail = sba;
@@ -996,6 +1002,10 @@ int main(int argc, char *argv[]) {
         else if (strcmp(what, "WTDERRSOH") == 0) { tail = soh; tl = sizeof(soh); }
         else if (strcmp(what, "WTDERREA") == 0) { tail = ea; tl = sizeof(ea); }
         else if (strcmp(what, "WTDERRSHORT") == 0) { tail = shrt; tl = sizeof(shrt); }
+        else if (strcmp(what, "WTDERRWEA1") == 0) { tail = wea1; tl = sizeof(wea1); }
+        else if (strcmp(what, "WTDERRWEA5X") == 0) { tail = wea5x; tl = sizeof(wea5x); }
+        else if (strcmp(what, "WTDERRWEA5") == 0) { tail = wea5; tl = sizeof(wea5); }
+        else if (strcmp(what, "WTDERRWEAEND") == 0) { tail = weaend; tl = sizeof(weaend); }
         else if (strcmp(what, "WTDERRSBA") != 0) { if (lg) { fprintf(lg, "unknown WTDERR mode\n"); fclose(lg); } return 1; }   /* 取り違えて SBA を流さない */
         memcpy(rec, head, sizeof(head));
         memcpy(rec + sizeof(head), tail, tl);

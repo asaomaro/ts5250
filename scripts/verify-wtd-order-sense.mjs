@@ -10,7 +10,13 @@ import { Session5250 } from "@ts5250/tn5250";
 
 const LIB = (process.env.AS400_LIB ?? "TESTLIB").trim().split(/\s+/)[0];
 /** モードと、ACS が返したセンス（ワイヤで確かめた値。research F2） */
-const SENSE_OF = { WTDERRSBA: "10050122", WTDERRRA: "10050123", WTDERRSOH: "1005012b", WTDERREA: "1005012d", WTDERRSHORT: "10050121" };
+const SENSE_OF = {
+  WTDERRSBA: "10050122", WTDERRRA: "10050123", WTDERRSOH: "1005012b", WTDERREA: "1005012d", WTDERRSHORT: "10050121",
+  // WEA（`20260927-wea-sense`。`acs-probe/wea-sense.txt`）: タイプ 1・タイプ 5 の不正な値・EA で最後の桁まで消した後・SBCS のセッションのタイプ 5
+  WTDERRWEA1: "1005012d", WTDERRWEA5X: "1005012f", WTDERRWEAEND: "1005012a", WTDERRWEA5: "1005012d"
+};
+/** SBCS のセッションで流すモード（社内機は SBCS の装置を自動構成しないので PUB400 の 37 で。`PUB400_*` と `PUB400_LIB` を使う） */
+const SBCS_MODES = new Set(["WTDERRWEA5"]);
 const MODES = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SENSE_OF);
 for (const m of MODES) if (!SENSE_OF[m]) { process.stderr.write(`知らないモード: ${m}（${Object.keys(SENSE_OF).join(" / ")}）\n`); process.exit(2); }
 const log = (s) => process.stderr.write(`${s}\n`);
@@ -24,20 +30,23 @@ const check = (c, m) => { if (c) { pass++; log(`  PASS ${m}`); } else { fail++; 
 for (const mode of MODES) {
   const sense = SENSE_OF[mode];
   log(`### ${mode}`);
-  const s = await Session5250.connect({ host: process.env.AS400_HOST, ccsid: 930, warn: (w) => warns.push(w) });
+  const sbcs = SBCS_MODES.has(mode);
+  const P = sbcs ? "PUB400" : "AS400";
+  const s = await Session5250.connect({ host: sbcs ? process.env.PUB400_HOST ?? "pub400.com" : process.env.AS400_HOST, ccsid: sbcs ? 37 : 930, warn: (w) => warns.push(w) });
   // 返したレコードを控える（否定応答のセンスを照合する）
   const sent = [];
   const origSend = s.telnet.sendRecord.bind(s.telnet); // private だが測定のためだけ
   s.telnet.sendRecord = (rec) => { sent.push(Array.from(rec, (b) => b.toString(16).padStart(2, "0")).join("")); origSend(rec); };
   await sleep(1000);
   const [u, p] = inputs(s);
-  s.setField({ index: u.index }, process.env.AS400_USER);
-  s.setField({ index: p.index }, process.env.AS400_PASSWORD);
+  s.setField({ index: u.index }, process.env[`${P}_USER`]);
+  s.setField({ index: p.index }, process.env[`${P}_PASSWORD`]);
   await s.sendAid("Enter", { cursor: { row: u.row, col: u.col }, timeoutMs: 15000 });
   for (let i = 0; i < 4; i++) { await sleep(800); if (inputs(s).some((f) => f.length >= 50)) break; await s.sendAid("Enter", { timeoutMs: 10000 }).catch(() => {}); }
   const cmd = inputs(s).find((f) => f.length >= 50);
   if (!cmd) { check(false, `${mode}: コマンド行が出ない（サインオンに失敗）`); s.disconnect(); continue; }
-  s.setField({ index: cmd.index }, `CALL ${LIB}/DSCMD PARM('${mode}')`);
+  const lib = sbcs ? (process.env.PUB400_LIB ?? "TESTLIB").trim().split(/\s+/)[0] : LIB;
+  s.setField({ index: cmd.index }, `CALL ${lib}/DSCMD PARM('${mode}')`);
   const nW = warns.length, nS = sent.length;
   void s.sendAid("Enter", { cursor: { row: cmd.row, col: cmd.col }, timeoutMs: 20000 }).catch(() => {});
   await sleep(6000);
@@ -50,6 +59,10 @@ for (const mode of MODES) {
   check(row5.startsWith("WTDERR"), `${mode}: 誤りの前の文字は画面に書かれた`);
   check(negative, `${mode}: 否定応答 0x${sense} を返した`);
   check(snap.messageWaiting === true, `${mode}: メッセージ待ちは点く（WTD の中の誤りでも CC2 は効く）`);
+  if (mode.startsWith("WTDERRWEA")) {
+    const row6 = snap.cells[5].map((c) => c.char).join("").trim();
+    check(!row6.includes("NEXT"), `${mode}: WEA の後ろ（6 行の NEXT）は書かれない（WTD の打ち切り。ACS と同じ）`);
+  }
   await sleep(9000);
   const c2 = inputs(s).find((f) => f.length >= 50);
   if (c2) { s.setField({ index: c2.index }, "SIGNOFF"); await s.sendAid("Enter", { cursor: { row: c2.row, col: c2.col }, timeoutMs: 10000 }).catch(() => {}); }
