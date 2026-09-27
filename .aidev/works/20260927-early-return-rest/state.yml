@@ -1,0 +1,13 @@
+schema: 11
+slug: early-return-rest
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: その場で戻る否定応答の残り
+harnessRevDelivered: unknown

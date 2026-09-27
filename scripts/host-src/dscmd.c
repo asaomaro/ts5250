@@ -1070,6 +1070,91 @@ int main(int argc, char *argv[]) {
         }
     } else if (strcmp(what, "ERRMSGWTD") == 0 || strcmp(what, "ERRMSGRST") == 0) {
         errMsgLineTest(strcmp(what, "ERRMSGRST") == 0);
+    } else if (strcmp(what, "READCC2") == 0 || strcmp(what, "CUANOPARM") == 0 || strcmp(what, "SPROLL") == 0) {
+        /*
+         * **その場で戻る否定応答の残り**（`20260927-early-return-rest`）。先にメッセージ待ちを消してから:
+         * READCC2＝5 行に READCC2 を書き、READ MDT（CC2＝0x01 メッセージ待ちを点ける）で止まる（ACS は READ の CC2 を溜めるだけで効かせない——原典の読み）
+         * CUANOPARM＝1 本のレコードに WTD（CC2＝0x01）＋ 引数の無い CLEAR UNIT ALTERNATE（最後に置く）。8 秒待つ
+         * SPROLL＝1 本のレコードに WTD（5 行に SPROLL）＋ SAVE PARTIAL（引数 5 バイト）＋ 不正な ROLL。8 秒待って WTD、READ MDT
+         *   （ACS は SAVE PARTIAL の応答を、戻ったレコードでは送らず次のレコードの終わりで送る——原典の読み。ワイヤで見る）
+         */
+        static const unsigned char tag1[] = { 0x00, 0x00, 0x11, 0x05, 0x02, 0xD9, 0xC5, 0xC1, 0xC4, 0xC3, 0xC3, 0xF2 };            /* READCC2 */
+        static const unsigned char wtd1[] = { 0x00, 0x01, 0x11, 0x05, 0x02, 0xC3, 0xE4, 0xC1 };                                  /* CC2 01 / CUA */
+        static const unsigned char wtd2[] = { 0x00, 0x00, 0x11, 0x05, 0x02, 0xE2, 0xD7, 0xD9, 0xD6, 0xD3, 0xD3 };                /* SPROLL */
+        static const unsigned char wtd3[] = { 0x00, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };                            /* 6 行 NEXT */
+        static const char sp[] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
+        static const char bad[] = { 0x05, 0x0A, 0x05 };
+        static const char off[] = { 0x00, 0x02 };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        if (strcmp(what, "READCC2") == 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)tag1, sizeof(tag1), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 READCC2)", rc, fdbk);
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x01, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT(CC2=01)", rc, fdbk);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        } else {
+            inzFdbk(fdbk, sizeof(fdbk));
+            cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+            if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+            if (strcmp(what, "CUANOPARM") == 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wtd1, sizeof(wtd1), cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 WTD CC2=01 → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x20, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x20 引数なし → バッファ)", rc, fdbk);
+            } else {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)wtd2, sizeof(wtd2), cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 SPROLL → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x03, sp, 5, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x03 SAVE PARTIAL → バッファ)", rc, fdbk);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x23, bad, 3, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x23 不正な ROLL → バッファ)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutBuf（1 本のレコード）", rc, fdbk);
+            QsnDltBuf(cb, (Q_Fdbk_T *)0);
+            sleep(8);
+            if (strcmp(what, "SPROLL") == 0) {
+                for (k = 0; k < 2; k++) {
+                    inzFdbk(fdbk, sizeof(fdbk));
+                    rc = QsnPutOutCmd(0x11, (const char *)wtd3, sizeof(wtd3), 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnPutOutCmd(0x11 6 行 NEXT)", rc, fdbk);
+                    if (rc == 0) break;
+                }
+                buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+                if (buf != 0) {
+                    inzFdbk(fdbk, sizeof(fdbk));
+                    rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnReadMDT", rc, fdbk);
+                    QsnDltBuf(buf, (Q_Fdbk_T *)0);
+                }
+            }
+        }
+        for (k = 0; k < 2; k++) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

@@ -233,6 +233,11 @@ export class Session5250 extends Emitter<SessionEvents> {
    * エラーの間に来た WTD は Reset の後に画面に出た（`20260927-error-msgline-wtd`）。`dismissHostError` で抜けて順に処理する
    */
   private hostHeld: Uint8Array[] = [];
+  /**
+   * **その場で戻った否定応答のレコードの SAVE PARTIAL の応答**。ACS は次のレコードの終わりで送る（`20260927-early-return-rest`）。
+   * ACS の退避データは 1 つの置き場（`saveddata`）で、新しい SAVE PARTIAL が来れば上書きされ、送るのは 1 本だけ——同じく 1 つだけ持つ
+   */
+  private carriedSavePartial: Uint8Array | undefined;
   private holdingForHostError = false;
   private readonly codec: Codec;
   private readonly terminalType: string;
@@ -907,12 +912,26 @@ export class Session5250 extends Emitter<SessionEvents> {
         // セッション側に別のスタックを持つと、早期 return や例外で段数がずれる
         // （`20260920-restore-screen-parity` の cross 点検で実測）
         this.buf.attachSaveContext(req.depth, { payload: res.payload, readCommand: this.readCommand });
-        this.telnet.sendRecord(res.record);
+        // その場で戻った否定応答のレコードでは、SAVE PARTIAL の応答を次のレコードまで持ち越す（ACS の `bSavePartial`）。
+        // 新しい SAVE PARTIAL は置き場を上書きする（ACS の `saveddata`）——持ち越していた古い応答は送らない
+        if (req.kind === "partial") {
+          if (result.earlyReturn) this.carriedSavePartial = res.record;
+          else {
+            this.carriedSavePartial = undefined;
+            this.telnet.sendRecord(res.record);
+          }
+        } else this.telnet.sendRecord(res.record);
       }
       // **否定応答は最後**（ACS は WSF・READ SCREEN 等の応答を処理の途中で送り、否定応答は `tokenizeData` の終わりで送る。
       // `20260921-negative-responses` の節目の点検の指摘。~~退避の応答の後、Query 等の応答の前~~）。
       // 返さないとホストは入力コマンドを待ち続ける（`wtd-applier.ts` の `senseCode`）。下の早期 return はどれもこれを通してから戻る
       const sendNegative = (): void => {
+        // 前のレコードから持ち越した SAVE PARTIAL の応答（このレコードも、その場で戻ったならさらに持ち越す——ACS の尾部が走らないため）
+        // コマンドを読まないレコード（NOOP・CANCEL INVITE・メッセージ灯）では送らない（ACS はそれらで `processCommand` を通らない）
+        if (!result.earlyReturn && this.carriedSavePartial !== undefined && data.length > 0) {
+          this.telnet.sendRecord(this.carriedSavePartial);
+          this.carriedSavePartial = undefined;
+        }
         if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
       };
       // **WSF の応答は起きた順に全部**（ACS `processWSF` は WSF ごとにその場で送る。~~Query と D9/72 のどちらか 1 本~~）
@@ -1106,6 +1125,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       // 繋ぎ直した先の画面は新しいので、前の接続で溜めたホストの出力は捨てる
       this.hostHeld = [];
       this.holdingForHostError = false;
+      this.carriedSavePartial = undefined; // 繋ぎ直した先へは送らない（当 PJ の決め。ACS が繋ぎ直しで捨てるかは未確認）
       this.firstRecord = true;
       this.startupInfo = undefined;
       this.readCommand = COMMAND.READ_MDT_FIELDS;

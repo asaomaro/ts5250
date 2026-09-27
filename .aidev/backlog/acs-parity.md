@@ -729,10 +729,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **完了（`20260927-short-command-sense`・PR #423）**: WTD・READ（0x42/0x52/0x82）の CC、ROLL の 3 バイト、WRITE ERROR CODE（0x21/0x22）の本体が足りないレコードで、ACS と同じく 0x10050121 を返してその場で戻る
   （`wtd-applier.ts` の `tooShort`。以前は読み過ぎの例外でレコードの結果ごと捨て、応答もしなかった）。DSM（`dscmd.c` の SHORT*）で 5 通りを出させ、ACS のコアは先の WTD を書き・メッセージ待ちは点けず・否定応答（ホストの次の出力が CPFA303）、
   当 PJ も直した後に同じ（`scripts/verify-short-command-sense.mjs`）。0x22 の 0 バイトは `20260926-wec-msgline-row` D4 を破棄して否定応答に。
-- [ ] **その場で戻る否定応答の残り**（`20260927-early-return-cc2`・`20260927-short-command-sense` から割った。いずれも実機で測っていない）:
+- [x] **その場で戻る否定応答の残り**（`20260927-early-return-cc2`・`20260927-short-command-sense` から割った。いずれも実機で測っていない）:
   SAVE PARTIAL の後ろで戻ったとき、ACS は SAVE PARTIAL の応答を次のレコードの終わりに持ち越す（`bSavePartial` を先頭で捨てない）——当 PJ は同じレコードで送る。
   CLEAR UNIT ALTERNATE の引数が無いとき ACS は長さの検査を通らず読み進める（`n5 > n2`）——当 PJ は読み過ぎの例外。
   ACS の READ の CC2 は溜めない（`lastReadCCbyte2`）——当 PJ は常に効かせる。SAVE PARTIAL の前の警報は ACS では 2 回鳴る（`pendingCCbyte2` を捨てない）——当 PJ は 1 回。
+  **完了（`20260927-early-return-rest`）**: 実機（DSM の READCC2 / CUANOPARM / SPROLL・ワイヤ）で ACS のコアと当 PJ が一致（`scripts/verify-early-return-rest.mjs` pass=4）。
+  READ の CC1・CC2 は効かせない（CC1 は原典だけ）、引数の無い CLEAR UNIT ALTERNATE は 0 として消す（否定応答にしない）、その場で戻ったレコードの SAVE PARTIAL の応答は否定応答の後・次のレコードで送る（置き場は 1 つ）。
+  SAVE PARTIAL の後ろに WTD が続くとき ACS が前の警報をもう一度鳴らすことには合わせない（D1）。
 - [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
     ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／

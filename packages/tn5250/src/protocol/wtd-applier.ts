@@ -55,6 +55,11 @@ export interface ApplyResult {
    */
   heldFrom?: number;
   /**
+   * **その場で戻る否定応答で終わった**（`abortRecord`）。ACS はこのときレコードの終わりの処理を飛ばし、SAVE PARTIAL の応答を
+   * 次のレコードの終わりで送る（`bSavePartial` を先頭で捨てない。`20260927-early-return-rest`。実機のワイヤでも否定応答の後に来た）
+   */
+  earlyReturn?: boolean;
+  /**
    * **このレコードで起きた退避の一覧**（起きた順。SAVE SCREEN / SAVE PARTIAL SCREEN）。
    * 空でなければ、**1 件につき 1 本の応答をホストへ返す必要がある**——返さないとホストは
    * 先へ進まない（SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
@@ -242,6 +247,7 @@ export function applyDataStream(
    */
   const abortRecord = (sense: number): ApplyResult => {
     result.senseCode = sense;
+    result.earlyReturn = true;
     result.alarm = committedCc2.alarm;
     if (committedCc2.messageWaiting === undefined) delete result.messageWaiting;
     else result.messageWaiting = committedCc2.messageWaiting;
@@ -275,8 +281,11 @@ export function applyDataStream(
         // Clear Unit Alternate は 1 バイトのパラメータ（アルタネート形式・通常 0x00）を伴う。
         // これを消費しないと後続コマンドの ESC 同期がずれ、画面本体を取りこぼす
         // （DBCS 端末 IBM-5555-C01 の SEU 等がこの命令を使う）。
-        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）
-        if (r.u8() !== 0x00) {
+        // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）。
+        // **引数が無い（レコードの終わり）なら 0 として消す**——ACS の長さの検査（`n5 > n2`）はちょうど引数が無い形を通し、実機の ACS のコアでも
+        // 否定応答にせず画面を消した（`20260927-early-return-rest`。ACS はレコードの外を読むが、受信の置き場はレコードごとに 0 で埋める〔`clearSaveBuff`〕ので
+        // 読むのは常に 0。以前の当 PJ は読み過ぎの例外でレコードごと捨てた）
+        if ((r.remaining > 0 ? r.u8() : 0x00) !== 0x00) {
           warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
           return abortRecord(SENSE.CLEAR_UNIT_ALTERNATE_PARAM);
         }
@@ -458,8 +467,10 @@ export function applyDataStream(
       case COMMAND.READ_INPUT_FIELDS: {
         const cut = tooShort(2, "read"); // CC1・CC2
         if (cut) return cut;
-        applyCc(r.u8(), buf, result);
-        applyCc2(r.u8(), result);
+        // **READ の CC1・CC2 は効かせない**（ACS は `lastReadCCbyte1/2` に控えるだけ。CC2 は先に AID が溜まっていたときだけ効く——
+        // `checkPendingAid`。当 PJ の先打ちは画面の側なので、その場合は拾えない）。実機の ACS のコアでも、READ MDT の CC2＝メッセージ待ちを
+        // 点けるは点かなかった（`20260927-early-return-rest`）。**CC1 は原典の読みだけで実機では測っていない**。~~CC1 で MDT を戻す・CC2 を効かせる~~
+        r.skip(2);
         result.readRequested = true;
         // **どの Read で待つかを残す。** `0x42` だけ応答の形式が違う
         // （SBA 無し・全欄・欄長そのまま。`buildReadInputFieldsResponse` の JSDoc に実測ごと控えた）
