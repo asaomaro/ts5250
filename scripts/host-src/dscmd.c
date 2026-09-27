@@ -1374,6 +1374,69 @@ int main(int argc, char *argv[]) {
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
         QsnDltBuf(cb, (Q_Fdbk_T *)0);
+    } else if (strcmp(what, "JHOME") == 0) {
+        /*
+         * **ホーム位置が J（DBCS 専用）欄のときの Home**（`20260927-key-edit-rest`。ACS `PS5250.processHome`: ホーム位置〔欄の先頭＝SO の桁〕に居なければそこへ移り、
+         * SO の桁なら 1 つ進める。居れば Record Backspace）。J 欄（5,10・12 桁・IC 5,10）と SBCS 欄（7,10）→ READ MDT。受けた AID で Record Backspace（F8）が出たかを見る
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xD1, 0xC8, 0xD6, 0xD4, 0xC5,                       /* "JHOME" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x24, 0x00, 0x0C,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x06,
+            0x13, 0x05, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 J 欄)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "CSRINP") == 0 || strcmp(what, "CSRFREE") == 0) {
+        /*
+         * **SOH のフラグ 0x10（DDS の CSRINPONLY。カーソルを入力欄だけに動かす）**（`20260927-key-edit-rest`。ACS `FFT5250.moveCursorToInput`）。
+         * CSRINP＝SOH（フラグ 0x10）/ CSRFREE＝SOH（フラグ 0。対照）。入力欄 5,10・5,40・9,20（6 桁）・IC 5,10 → READ MDT
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x01, 0x07, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x03, 0x02, 0xC3, 0xE2, 0xD9, 0xC9, 0xD5, 0xD7,                       /* "CSRINP"（CSRFREE も同じ見出し。フラグのバイトだけ違う） */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x06,
+            0x11, 0x05, 0x27, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x06,
+            0x11, 0x09, 0x13, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x06,
+            0x13, 0x05, 0x0A
+        };
+        unsigned char w[sizeof(scr)];
+        memcpy(w, scr, sizeof(scr));
+        if (strcmp(what, "CSRFREE") == 0) w[4] = 0x00;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)sizeof(w), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 CSRINP)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

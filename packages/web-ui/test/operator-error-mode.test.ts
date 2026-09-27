@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
+import { keybindingsStore } from "../src/stores/keybindings.js";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
 import { sessionsStore } from "../src/stores/sessions.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
@@ -96,6 +97,17 @@ describe("操作員エラー中の打鍵", () => {
     await input.trigger("keydown", { key: "A" });
     await nextTick();
     expect(value(input), "エラー中に文字が入った").toBe("");
+    expect(opmsg(w), "拒否したのにメッセージが消えた").toBe(ERR);
+  });
+
+  it("**文字の割り当て（Alt+@ = ¢）も文字キーとして拒否**（エラーを抜けて ¢ を打たない。`20260927-key-edit-rest` の独立点検）", async () => {
+    // 欄は英字だけを受けるので、割り当ての字も英字にする（¢ だと型の検査でも拒まれ、エラーの拒否と区別できない）
+    keybindingsStore.set("alt+@", "char:A");
+    const { w, input } = await mountInField();
+    await enterError(input, w);
+    await input.trigger("keydown", { key: "@", altKey: true });
+    await nextTick();
+    expect(value(input), "エラー中に割り当ての字が入った").toBe("");
     expect(opmsg(w), "拒否したのにメッセージが消えた").toBe(ERR);
   });
 

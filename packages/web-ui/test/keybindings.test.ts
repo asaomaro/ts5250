@@ -39,6 +39,18 @@ describe("useKeymap — カスタムバインド優先", () => {
     h({ key: "j", ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
     expect(sendAid).toHaveBeenCalledWith("F4");
   });
+
+  it("**文字の割り当て（`char:`）はペインでは何もしない**（欄が打つ。AID として送らない。`20260927-key-edit-rest`）", () => {
+    keybindingsStore.set("alt+@", "char:¢");
+    const sendAid = vi.fn();
+    const local = vi.fn();
+    const preventDefault = vi.fn();
+    const h = makeKeydownHandler({ sendAid, local, viewCycle: vi.fn(), playMacro: vi.fn(), isFocused: () => true });
+    h({ key: "@", ctrlKey: false, shiftKey: false, altKey: true, metaKey: false, preventDefault } as unknown as KeyboardEvent);
+    expect(sendAid).not.toHaveBeenCalled();
+    expect(local).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalled();
+  });
 });
 
 describe("既定バインド（初期値）", () => {

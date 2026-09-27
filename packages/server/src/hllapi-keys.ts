@@ -6,10 +6,9 @@
  *
  * ## 5250 に無いキーは黙って捨てない
  *
- * ニーモニックの表は **3270 由来**で、`PA1`〜`PA3`（`@x`/`@y`/`@z`）のように
- * **5250 に存在しないキー**が含まれる。ts5250 の AID キーは
- * `Enter` / `F1`〜`F24` / `PageUp` / `PageDown` / `Clear` / `Help` / `Print` / `SysReq` / `Attn`
- * （`mcp-tools.ts` の `AID_KEYS`）。
+ * ニーモニックの表は **3270 由来**で、**5250 に写せないキー**が含まれる。ts5250 の AID キーは
+ * `Enter` / `F1`〜`F24` / `PageUp` / `PageDown` / `Clear` / `Help` / `Print` / `RecordBackspace` / `PA1`〜`PA3` / `SysReq` / `Attn` / `TestRequest`
+ * （`mcp-tools.ts` の `AID_KEYS`。~~`PA1`〜`PA3`（`@x`/`@y`/`@z`）は 5250 に存在しない~~——5250 にも AID 0x6C・0x6E・0x6B がある。`20260927-key-edit-rest`）。
  *
  * **写せないものは `unsupported` として返し、呼び出し側が `HRC.UNDEFINED_COMBINATION`(20) で断る。**
  * 黙って無視すると「送ったつもりで送られていない」になり、自動化の失敗として最悪の形。
@@ -30,7 +29,7 @@ export type KeyStroke =
 export type AidKey =
   | "Enter" | "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
   | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" | "F21" | "F22" | "F23" | "F24"
-  | "PageUp" | "PageDown" | "Clear" | "Help" | "Print" | "RecordBackspace" | "SysReq" | "Attn";
+  | "PageUp" | "PageDown" | "Clear" | "Help" | "Print" | "RecordBackspace" | "PA1" | "PA2" | "PA3" | "SysReq" | "Attn" | "TestRequest";
 
 /** ホストへ送らない操作 */
 export type LocalAction =
@@ -57,7 +56,9 @@ const AID_BY_CHAR: Record<string, AidKey> = {
   "1": "F1", "2": "F2", "3": "F3", "4": "F4", "5": "F5", "6": "F6", "7": "F7", "8": "F8", "9": "F9",
   // PF10〜PF24
   a: "F10", b: "F11", c: "F12", d: "F13", e: "F14", f: "F15", g: "F16", h: "F17",
-  i: "F18", j: "F19", k: "F20", l: "F21", m: "F22", n: "F23", o: "F24"
+  i: "F18", j: "F19", k: "F20", l: "F21", m: "F22", n: "F23", o: "F24",
+  // PA1〜PA3（`20260927-key-edit-rest`。以前は 5250 に無いキーとして断っていた）
+  x: "PA1", y: "PA2", z: "PA3"
 };
 
 /** 1 文字のニーモニック → ローカル操作 */
@@ -83,6 +84,7 @@ const LOCAL_BY_CHAR: Record<string, LocalAction> = {
 const COMPOUND: Record<string, KeyStroke> = {
   "@A@H": { kind: "aid", key: "SysReq" },
   "@A@Q": { kind: "aid", key: "Attn" },
+  "@A@C": { kind: "aid", key: "TestRequest" }, // Test（`20260927-key-edit-rest`）
   "@A@F": { kind: "local", action: "eraseInput" }
 };
 
@@ -147,7 +149,7 @@ export function parseMnemonics(input: string): KeyStroke[] {
       i += 2;
       continue;
     }
-    // `@x`/`@y`/`@z`（PA1〜PA3）等、**5250 に無いキーはここへ落ちる**
+    // **5250 に写せないキーはここへ落ちる**（~~`@x`/`@y`/`@z`（PA1〜PA3）~~ は `20260927-key-edit-rest` で写せるようにした）
     flush();
     out.push({ kind: "unsupported", mnemonic: `@${next}` });
     i += 2;

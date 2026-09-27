@@ -1,0 +1,25 @@
+# **ホーム位置が J 欄のときの Home**（実機の ACS のコア。`20260927-key-edit-rest`）。DSM の JHOME（`scripts/host-src/dscmd.c`）: J 欄 5,10（IC）と SBCS 欄 7,10 → READ MDT。
+# 画面の直後のカーソル → Home → Home → Home と押して、dump のカーソルと、READ が受けた AID（Record Backspace は F8。出なければ最後の Enter の F1）を見る。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/j-field-home.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('JHOME')[enter]
+settle 3000
+dump start
+setcursor 7,12
+keys [home]
+settle 1000
+dump home1
+keys [home]
+settle 1000
+dump home2
+keys [home]
+settle 1000
+dump home3
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

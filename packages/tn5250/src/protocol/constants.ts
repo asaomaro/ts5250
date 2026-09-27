@@ -201,7 +201,11 @@ export const AID = {
   PAGE_UP: 0xf4, // Roll Down
   PAGE_DOWN: 0xf5, // Roll Up
   PRINT: 0xf6,
-  RECORD_BACKSPACE: 0xf8
+  RECORD_BACKSPACE: 0xf8,
+  // PA1〜PA3（ACS `DS5250.sendAid` の 108・110・107。欄データを付けない。`20260927-key-edit-rest`）
+  PA1: 0x6c,
+  PA2: 0x6e,
+  PA3: 0x6b
 } as const;
 
 /** 属性バイトの範囲（0x20–0x3F。画面上 1 桁を占有する） */

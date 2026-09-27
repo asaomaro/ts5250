@@ -471,7 +471,8 @@ electron.bat --build    :: 強制再ビルドしてから作る
      - 保存先は `--macros`（既定 `macros.json`）。**秘密を持つので `.gitignore` 済み**
    - **ACS と同じ既定のキー**: **Esc = Attn**、**Shift+Esc = SysReq**、**Pause = Clear**、**Ctrl+Pause = Print**、
      **Alt+F1 = Help**、**Ctrl+F1 = SO/SI 表示**、**Ctrl+F3 = 表示コード（カナ / 英）**、
-     **Ctrl+Home = 罫線の表示**、**Ctrl+F11 = カーソルの形の切替**。「⌨ キー」で外したり
+     **Ctrl+Home = 罫線の表示**、**Ctrl+F11 = カーソルの形の切替**、**Alt+@ = ¢・Alt+\\ = ¬・Alt+- = £**、
+     **Alt+Pause = Test Request**。PA1〜PA3 も「⌨ キー」で割り当てられます。「⌨ キー」で外したり
      別のキーへ割り当て直したりできます（~~Esc → Attn の既定は付いていません~~ → ACS に合わせて付けました。
      ~~Ctrl+F1 = カナ英・Ctrl+F3 = SO/SI~~ → ACS と逆だったので直しました。以前の既定のまま使っていた方は自動で入れ替わります）
    - **Attn（割込）/ SysReq（システム要求）**: 画面下部のキー行のボタン、または Esc / Shift+Esc

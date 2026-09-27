@@ -23,7 +23,7 @@ const KEY = "as400.keybindings";
  * `view:` / `macro:` / `local:` はいずれも**ホストへ送らない**ローカル処理
  * （`useKeymap.ts` で分岐する）。
  */
-export type BindingTarget = AidKey | `view:${string}` | `macro:${string}` | `local:${LocalEditAction}`;
+export type BindingTarget = AidKey | `view:${string}` | `macro:${string}` | `local:${LocalEditAction}` | `char:${string}`;
 /** 表示設定の順送り割当か。 */
 export function isViewBinding(t: string): t is `view:${string}` {
   return t.startsWith("view:");
@@ -47,6 +47,17 @@ export function isLocalBinding(t: string): t is `local:${LocalEditAction}` {
 /** `local:field-exit` → `field-exit` */
 export function localActionOf(t: string): LocalEditAction {
   return t.slice("local:".length) as LocalEditAction;
+}
+/**
+ * **文字を打つ割当か**（ACS の既定の `A512 = ¢`・`A92 = ¬`・`A45 = £` のように、キーに文字を割り当てる形。`20260927-key-edit-rest`）。
+ * 欄では普通の打鍵と同じ経路で打たれる（型・挿入・DBCS の検査も同じ）。ホストへは送らない
+ */
+export function isCharBinding(t: string): t is `char:${string}` {
+  return t.startsWith("char:");
+}
+/** `char:¢` → `¢` */
+export function charOf(t: string): string {
+  return t.slice("char:".length);
 }
 
 /**
@@ -85,7 +96,7 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
   },
   4: {
     // **ACS の既定の割り当て**（`AcsMapFunctions.MAP_5250`。ACS では `DefaultKeyboardRemap.getMapFile` がこの表を使う。
-    // `20260921-acs-default-keys`）。既存の機能に当たるものだけを入れた（単語単位の Tab・Test Request などは未対応）。
+    // `20260921-acs-default-keys`）。既存の機能に当たるものだけを入れた（~~単語単位の Tab・Test Request などは未対応~~ → 版 5・6 で足した）。
     // ~~Esc → Attn は既定に付けない~~（README の旧記述）。保存済みの割り当てが優先なので、同じキーを別用途に
     // 割り当てている人のものは奪わない（下の `load`）。
     // **End は入れない**: ACS の `B35 = [eof]` は Erase EOF（`[eraseeof]`）ではなく欄の末尾へ移る
@@ -106,6 +117,15 @@ const ADDED_BY_VERSION: Record<number, Record<string, BindingTarget>> = {
     // `C36 = [rule]`（Ctrl+Home＝罫線の表示）・`C122 = [altcsr]`（Ctrl+F11＝カーソルの形の切り替え）
     "ctrl+Home": "view:ruleLine",
     "ctrl+F11": "view:cursorShape"
+  },
+  6: {
+    // ACS の既定で Alt と記号のキーに割り当てた文字（`AcsMapFunctions.MAP_5250` の `A512 = ¢`〔@ のキー〕・`A92 = ¬`〔\ のキー〕・`A45 = £`〔- のキー〕。
+    // `20260927-key-edit-rest`）。~~台帳の「Alt+@ は ¬・Alt+\\ は ¢」~~ は逆だった。Java の `VK_AT` は @ が単独のキー（日本語の配列）
+    "alt+@": "char:¢",
+    "alt+\\": "char:¬",
+    "alt+-": "char:£",
+    // `A19 = [test]`（Alt+Pause＝Test Request。`20260927-key-edit-rest`）
+    "alt+Pause": "TestRequest"
   }
 };
 

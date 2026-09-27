@@ -407,7 +407,8 @@ SBA 付きで返していたときは 10/6/8 で切ると
 
 ### 6.2 SysReq / Attn（フラグレコード ＋ Cancel Invite の往復）
 
-`buildRecord(NO-OP, data, flags)` を送る。flag1 ビットで表現: **SysReq=SRQ(04)**、**Attn=ATN(40)**。
+`buildRecord(NO-OP, data, flags)` を送る。flag1 ビットで表現: **SysReq=SRQ(04)**、**Attn=ATN(40)**、**Test Request=TRQ(02)**
+（Test Request だけは施錠中は送らず、送ったら施錠して応答を待つ——ACS と同じ。ホストは Cancel Invite と WEC で応える。`20260927-key-edit-rest`）。
 Attn は常にデータ無し。**SysReq はシステム要求行に打たれた文字列を EBCDIC でデータに載せる**
 （打たずに実行＝データ無しならシステム要求メニューが出る）。システム要求行そのものは
 **ホストとの往復を伴わない端末側の機能**で、確定して初めてこのレコードを送る。

@@ -58,10 +58,13 @@ describe("ローカル操作（ホストへ送らない）", () => {
 });
 
 describe("**5250 に無いキーは黙って捨てない**", () => {
-  it("PA1〜PA3（@x/@y/@z）は unsupported", () => {
-    for (const m of ["@x", "@y", "@z"]) {
-      expect(parseMnemonics(m)).toEqual([{ kind: "unsupported", mnemonic: m }]);
-    }
+  it("~~PA1〜PA3（@x/@y/@z）は unsupported~~ → **PA1〜PA3 と Test（@A@C）を送る**（5250 にも AID 0x6C・0x6E・0x6B とヘッダの Test Request がある。`20260927-key-edit-rest`）", () => {
+    expect(parseMnemonics("@x@y@z")).toEqual([
+      { kind: "aid", key: "PA1" },
+      { kind: "aid", key: "PA2" },
+      { kind: "aid", key: "PA3" }
+    ]);
+    expect(parseMnemonics("@A@C")).toEqual([{ kind: "aid", key: "TestRequest" }]);
   });
 
   it("知らないニーモニックも残す", () => {
@@ -81,6 +84,6 @@ describe("**5250 に無いキーは黙って捨てない**", () => {
 
   it("hasUnsupported が拾う（呼び出し側が rc=20 に落とす）", () => {
     expect(hasUnsupported(parseMnemonics("AB@E"))).toBe(false);
-    expect(hasUnsupported(parseMnemonics("AB@x@E"))).toBe(true);
+    expect(hasUnsupported(parseMnemonics("AB@Q@E"))).toBe(true);
   });
 });

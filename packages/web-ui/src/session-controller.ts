@@ -1283,7 +1283,8 @@ export function sendKey(
   // **Enter に限らない**——F キー・Roll でも止まる（実機の ACS で確かめた）。原典が外すのは Help・Clear・
   // Record Backspace だけ（`processAIDCode` の 243・189・248。フラグキーは AID ではない）。
   // ~~Enter のときだけ検証する（`20260729-ffw-behavior-bits` D1）~~ は破棄した
-  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && key !== "RecordBackspace" && s.snapshot) {
+  // Test Request（ACS の 61）も検査を外す。**施錠中は通さない**（フラグのレコードだが、ACS の `keyDown` が施錠中に通すのは Attn・SysReq ほかだけ）
+  if (!isFlagKey(key) && key !== "Help" && key !== "Clear" && key !== "RecordBackspace" && key !== "TestRequest" && s.snapshot) {
     const hit = checkBeforeAid(s, key, cursor ?? s.cursor);
     if (hit) {
       s.notice = MSG_BY_VIOLATION[hit.reason];

@@ -9,10 +9,11 @@ import WatermarkOverlay from "./WatermarkOverlay.vue";
 import { viewSettings, resolveSbcsView } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
 import { logStore } from "../stores/log.js";
+import { snapToInput } from "../composables/csrInputOnly.js";
 import { sessionsStore, type HeldKey } from "../stores/sessions.js";
 import { systemsStore } from "../stores/systems.js";
 import { resolveWatermark } from "../composables/watermark.js";
-import {
+import { charBindingOf,
   isEscapeAidEvent,
   localEditActionOf,
   makeKeydownHandler,
@@ -327,13 +328,16 @@ function moveCell(dir: Dir): void {
   const snap = snapshot.value;
   if (!snap) return;
   // 端では反対側へ回り込む（5250 端末の矢印。最下行で ↓ は最上行へ）
-  const opts = { bounds: cursorBounds(snap), wrap: true };
+  // CSRINPONLY のときは窓の閉じ込めを解く（ACS `FFT5250.setCursorMoveToInput(true)` が `unrestrictWindowCursor` を呼ぶ）
+  const opts = { bounds: snap.cursorInputOnly === true ? { row1: 1, row2: snap.rows, col1: 1, col2: snap.cols } : cursorBounds(snap), wrap: true };
   let next = moveCursor(cursor.value, dir, snap.rows, snap.cols, opts);
   // DBCS（全角 2 桁）の桁間には止めない。右移動は tail を飛び越え、左/上/下・位置確定は lead へ丸める
   // （一律丸めだと lead で右が tail→lead に戻され進めない。review R1-2）。
   if (snap.cells[next.row - 1]?.[next.col - 1]?.kind === "dbcs-tail") {
     next = dir === "right" ? moveCursor(next, "right", snap.rows, snap.cols, opts) : roundToDbcsLead(next, snap.cells);
   }
+  // **SOH の CSRINPONLY（フラグ 0x10）なら入力欄へ寄せる**（ACS `FFT5250.moveCursorToInput`。`20260927-key-edit-rest`）
+  if (snap.cursorInputOnly === true) next = snapToInput(dir, next, snap.fields, snap.cells, snap.rows, snap.cols);
   onCursor(next.row, next.col);
 }
 // ACS の自動送り: 欄が満杯になったら次の入力欄へフォーカスを進める。
@@ -589,16 +593,29 @@ function homeKey(): void {
   }
   const first = editableFields()[0];
   const home = snap.home ?? (first ? { row: first.row, col: first.col } : { row: 1, col: 1 });
+  // **ホーム位置が SO の桁なら 1 つ進める**（ACS `processHome` の `IsSOChar`）。J 欄（空でも先頭に SO）・全角の状態の E 欄・先頭が SO の桁。
+  // 実測は空の J 欄だけ——E 欄・先頭が SO の O 欄は原典の読み（未確認）
+  // ACS のカーソルは SO の桁に止まらないので「既にホーム位置」にならず、Home を何度押しても移るだけで Record Backspace を送らない
+  // （実機の ACS のコア `scripts/acs-probe/j-field-home.txt`: 3 回押して 5,11 のまま・READ は最後の Enter。`20260927-key-edit-rest`）。
+  // ⚠ 当 PJ の列ビューは空の J 欄に SO の桁を持たないので、キャレットは欄の先頭の桁（5,10）に見える（台帳の E 欄の残りと同じ 1 桁の差）
+  const homeField = fieldAt(home.row, home.col, snap.fields, snap.cols, snap.rows);
+  const soAtHome =
+    homeField !== undefined &&
+    homeField.row === home.row &&
+    homeField.col === home.col &&
+    (homeField.dbcsType === "only" || (homeField.dbcsType === "either" && homeField.eitherDbcsOn === true) || snap.cells[home.row - 1]?.[home.col - 1]?.kind === "so");
   const at = cursor.value;
-  if (at.row === home.row && at.col === home.col) {
+  if (!soAtHome && at.row === home.row && at.col === home.col) {
     onAid("RecordBackspace");
     return;
   }
   noteFieldExited(); // ACS は出た欄の `fieldExitReqFlag` を立てる
-  onCursor(home.row, home.col);
+  // SO が最終桁なら次の行の 1 桁目（ACS は番地を 1 つ進めるだけ。最終行なら 1 行目へ）
+  const to = !soAtHome ? home : home.col < snap.cols ? { row: home.row, col: home.col + 1 } : { row: home.row < snap.rows ? home.row + 1 : 1, col: 1 };
+  onCursor(to.row, to.col);
   // DBCS 欄は caret を明示的に置く（頭出しと同じ理由。reconcileFocus はフォーカス中の DBCS 欄の caret を触らない）
-  const land = fieldAt(home.row, home.col, snap.fields, snap.cols, snap.rows);
-  if (land && !land.protected && land.dbcsType) gridRef.value?.setDbcsCaretAtColumn(land.index, home.row, home.col);
+  const land = fieldAt(to.row, to.col, snap.fields, snap.cols, snap.rows);
+  if (land && !land.protected && land.dbcsType) gridRef.value?.setDbcsCaretAtColumn(land.index, to.row, to.col);
 }
 
 /**
@@ -912,7 +929,10 @@ const rawKeydown = makeKeydownHandler({
   isFocused: () => props.focused,
   fieldSignKeys: () => is5250.value,
   // 汎用機の 3270 は Attn・SysReq・Help・Print を送れない（サーバーの `planKey3270` が拒否する）
-  canSendAid: (key) => !(state.value?.meta?.terminal === "3270" && state.value?.ibmI3270 === false && IBMI_ONLY_3270.has(key))
+  // Test Request は 5250 だけ（3270 に写す先が無い。既定の Alt+Pause で 3270 の利用者にエラーを出さない）
+  canSendAid: (key) =>
+    !(key === "TestRequest" && !is5250.value) &&
+    !(state.value?.meta?.terminal === "3270" && state.value?.ibmI3270 === false && IBMI_ONLY_3270.has(key))
 });
 
 // ---- キーボードによる矩形（ブロック）選択（free モードで Shift+矢印） ----
@@ -1135,6 +1155,7 @@ function onPaneCopy(): void {
 
 /** 欄外で文字入力・Backspace・Delete が押されたか（ACS のメッセージ対象） */
 function isProtectedEdit(ev: KeyboardEvent): boolean {
+  if (charBindingOf(ev) !== undefined) return true; // 文字の割り当ても欄外では保護域の文字（普通の文字と同じ）
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
   return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
 }
@@ -1246,6 +1267,8 @@ function isEditingKey(ev: KeyboardEvent): boolean {
   // Erase Field・Delete・Field±・Field Exit・Dup・Field Mark と文字だけで、`[deleteword]`（63623）は入っていない。実機の ACS のコアでも、
   // 先頭の Backspace（0005）の後の `[delete]` は拒否（inhibit=5・値そのまま）、`[deleteword]` は inhibit=0 で語を消した（`scripts/acs-probe/delete-word.txt` の m。`20260921-delete-word`）
   if (local !== undefined) return local !== "delete-word";
+  // 文字の割り当て（Alt+@ = ¢ など）は文字キー（ACS は文字キーもエラー中は拒否する。`20260927-key-edit-rest` の独立点検）
+  if (charBindingOf(ev) !== undefined) return true;
   if (ev.ctrlKey || ev.altKey || ev.metaKey) return false;
   return ev.key.length === 1 || ev.key === "Backspace" || ev.key === "Delete";
 }

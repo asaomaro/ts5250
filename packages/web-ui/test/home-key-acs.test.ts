@@ -160,4 +160,41 @@ describe("Home（ACS `processHome`）", () => {
     await key(el, "Home");
     expect(document.activeElement).toBe(inputOf(w, 1));
   });
+
+  /**
+   * **ホーム位置が J（DBCS 専用）欄の先頭〔SO の桁〕なら、Home は SO の次の桁へ移るだけで Record Backspace を送らない**（ACS `processHome`: 居る位置〔SO の次〕は
+   * ホーム位置〔SO の桁〕と違うので毎回「移る」側になり、SO の桁なら 1 つ進める。`20260927-key-edit-rest`）。
+   * 実機の ACS のコア（`scripts/acs-probe/j-field-home.txt`）: Home を 3 回押してもカーソルは 5,11 のまま、READ は最後の Enter（F1）を受けた
+   */
+  it("**J 欄がホーム位置なら Home を何度押しても Record Backspace を送らない**（ACS の実測）", async () => {
+    seed([fld(1, 5, { col: 10, length: 12, dbcsType: "only" }), fld(2, 7, { col: 10 })], { row: 5, col: 10 });
+    const w = mountPane();
+    await nextTick();
+    const el = await focusAt(w, 2, 2);
+    await key(el, "Home");
+    await key(document.activeElement!, "Home");
+    await key(document.activeElement!, "Home");
+    expect(sentKeys()).toEqual([]);
+    expect(document.activeElement).toBe(inputOf(w, 1));
+    // カーソルの桁は ACS（5,11）と 1 つずれる（空の J 欄の列ビューに SO の桁が無い。台帳の E 欄の残りと同じ差）
+  });
+
+  it("J 欄の先頭（ホーム位置の桁）にキャレットがあっても、Home は Record Backspace を送らない", async () => {
+    seed([fld(1, 5, { col: 10, length: 12, dbcsType: "only" }), fld(2, 7, { col: 10 })], { row: 5, col: 10 });
+    const w = mountPane();
+    await nextTick();
+    const el = await focusAt(w, 1, 0);
+    await key(el, "Home");
+    await key(document.activeElement!, "Home");
+    expect(sentKeys()).toEqual([]);
+  });
+
+  it("SBCS の欄がホーム位置なら従来どおり 2 回目で送る（対照）", async () => {
+    seed([fld(1, 5, { col: 10 }), fld(2, 7, { col: 10 })], { row: 5, col: 10 });
+    const w = mountPane();
+    await nextTick();
+    const el = await focusAt(w, 1, 0);
+    await key(el, "Home");
+    expect(sentKeys()).toEqual(["RecordBackspace"]);
+  });
 });
