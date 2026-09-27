@@ -959,8 +959,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   続くサインオン画面は処理する（`processPassthru`）——当 PJ と同じくセッションは続く。装置名は当 PJ だけ採る（ジョブ名の出どころ。`packages/server/src/session-manager.ts` の `entry.job`。decisions D1——**暫定**）。
   経路を `packages/tn5250/test/session.test.ts` の I906・Z123 のテストで固定（変異: I906 を成功の表から外すと落ちる）。ACS のコアの dump に起動応答のコード・装置名・`wsidReady` を足した（`scripts/acs-probe/AcsProbe.java`・`startup-i906.txt`）。
   ~~ACS が I906 でどう振る舞うかは実機で測っていない~~ → 社内機（QRMTSIGN *FRCSIGNON）へ自動サインオンを要求しても ACS のコア・当 PJ ともに **I902**＋サインオン画面で、I906 は出させられなかった。
-- [ ] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
+- [x] **I906 の実機での見え方**が未確認（出させる条件が分からない。*FRCSIGNON でも I902。起動応答に装置名が入るか・ACS の見え方）。閉じたら `20260927-startup-code-others` D1（装置名を採る＝暫定）を見直す。
   あわせて: ACS は応答コードを各バイトの下位 4 ビットの数字で分岐するので、拒否の表の数に当たる未知の文字列を ACS は拒否・当 PJ は装置名があれば開く（実在するかは未確認。同 research F7）。
+  **閉じた（`20260927-i906-realhost`）**: 社内機（QRMTSIGN *FRCSIGNON・QPWDLVL 0）で ACS のコアの自動サインオンを平文・暗号化の両方で試し、どちらも I902＋サインオン画面。
+  出させるにはシステム値の変更か誤った資格情報が要り、共有の実機では行わない——**実機で確かめる手段が無い**。`20260927-startup-code-others` D1（装置名を採る）は暫定のまま据え置く。
 - [x] **SCS の 1 バイトの制御と 0x2B オーダーの消費長**（下の【まとめ】から割った）。
   **完了（`20260921-scs-controls-acs`・PR #410）**: 制御の表を ACS の**既定の経路（Java 印刷＝JPS。`PrintSCS5250JPS`）**に合わせた
   （`packages/scs/src/scs.ts`）。~~`PrintSCS5250`（PDT 経路）の `scs_proc`~~ に合わせた最初の版は、独立点検で既定の経路ではないと分かり
