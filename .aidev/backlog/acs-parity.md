@@ -172,6 +172,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS（原典 `PS5250.processCharWithDBCSOpenContField`・`mergeDBCSString`・`checkWordsFitDBCSOpenContField`）は、カーソルから鎖の最後までのバイト列を作り直して字を差し込み、
   **隣り合う SI・SO を取り除いて並びを繋ぎ直し**、後続の区間へ**語単位で詰め直して**収まるかを見る。当 PJ は区間の中で数える（`20260921-insert-no-room` D3）。
   **実機の ACS のコアでの測定から始める**（`scripts/acs-probe.mjs`。継続の O 欄を DSM で出させる画面が要る）。
+  **測った（`20260927-cont-o-insert`・`scripts/acs-probe/cont-o-insert.txt`・DSM の CONTO）**: 先頭 8 桁 `SO あい SI X`・中間 8 桁 `YZ`・最終 8 桁（空）で、挿入モードの
+  A）並びの直後（SI の桁）に全角 → 先頭の区間は全角 3 字で埋まり、`X` は中間の区間へ語ごと送られ `X YZ` になった（カーソルは中間の区間の頭）／
+  B）並びの直後の半角の前に全角 → 並びに加わり、後ろは同じく送られる／C）中間の区間の頭に全角 → 中間の区間の中身が最終の区間まで送られた（`YZ` が最終へ）／
+  D）全角の並びの途中に半角 → 拒否（施錠 5）。当 PJ はまだ測っていない（画面の側の打鍵なので web-ui の実機検証が要る）。
+  **直すには上の「O 欄の挿入のあとのバイト列」と同じく、DBCS 欄の編集の値に SO/SI の位置を持たせる作り（web-ui の DBCS の編集と core の送信）が要る**——2 件は同じ作りの変更として一緒に進める。
 - [x] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
   **完了（`20260921-type-ahead`・PR #410）**: 施錠中（応答待ち・ホスト施錠）の端末のキーをセッションごとに溜め（`SessionState.typeAhead`）、
   解錠したら合成 keydown を同じ入口へ投げて打った順に再生する（`packages/web-ui/src/components/EmulatorPane.vue` の先打ちの節、
