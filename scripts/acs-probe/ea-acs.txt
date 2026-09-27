@@ -1,0 +1,19 @@
+# **EA（0x03）の後の書き始め・属性タイプ・長さ 3 以上を ACS はどう扱うか**（実機の ACS のコア。`20260927-ea-acs`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の EATEST*）: 1 本の WTD（CC2＝メッセージ待ち）で 6 行 2 桁に ABCDEFGHIJ → SBA 6,4 → EA〔行き先 6,6〕→ X → 6,20 に END。
+# dump の 6 行目を見る。否定応答のセンスは `scripts/tap-proxy.mjs` を挟んで採る（記録はパスワードを含むので読み終えたら消す）。
+# ⚠ 1 モードずつ流す（PARM を EATESTFF / EATEST00 / EATEST01 / EATEST3 / EATESTEND / EATESTOVER / EATESTWRAP に替える）。否定応答の後の CALL は効かない。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/ea-acs.txt AS400
+signon
+keys [enter]
+settle 1500
+
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EATESTFF')[enter]
+sleep 6000
+dump in-window
+sleep 8000
+settle 1000
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -940,6 +940,59 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
             if (rc == 0) break;
         }
+    } else if (strncmp(what, "EATEST", 6) == 0) {
+        /*
+         * **EA（0x03）の後の書き始め・属性タイプ・長さ 3 以上を ACS はどう扱うか**（`20260927-ea-acs`）。
+         * 1 本の WTD（CC2＝メッセージ待ちを点ける）: 6 行 2 桁に「ABCDEFGHIJ」→ SBA 6,4 → EA〔行き先 6,6〕→「X」→ 6,20 に「END」。
+         * EATESTFF＝タイプ 0xFF（長さ 2） / EATEST00＝タイプ 0x00 / EATEST01＝タイプ 0x01 / EATEST3＝長さ 3（0x00・0xFF） /
+         * EATESTEND＝行き先が画面の最後の桁（24,80）で、後ろに X が続く / EATESTOVER＝24,79 から XYZ（Z が画面の外）の後ろに X /
+         * EATESTWRAP＝24,78 から XYZ（最後の桁でちょうど終わる）→ IC → W の後ろに X。
+         * X がどこに書かれるか（6,6 か 6,7 か）・消えた範囲・END が書かれるか（否定応答なら書かれない）・メッセージ待ちを見る。先に消し、8 秒待って消す
+         */
+        static const unsigned char head[] = { 0x00, 0x01, 0x11, 0x06, 0x02, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xD1, 0x11, 0x06, 0x04 };
+        static const unsigned char tailx[] = { 0xE7, 0x11, 0x06, 0x14, 0xC5, 0xD5, 0xC4 };   /* X / SBA 6,20 / END */
+        static const char off[] = { 0x00, 0x02 };
+        unsigned char rec[64];
+        int n = 0, k;
+        memcpy(rec, head, sizeof(head)); n = sizeof(head);
+        if (strcmp(what, "EATESTWRAP") == 0) {
+            /* 最後の桁でちょうど終わる並びの後: SBA 24,78 に XYZ → IC 6,2 → W（W はどこへ行くか——ACS は位置を画面の大きさで割った余りに戻す） */
+            static const unsigned char wrap[] = { 0x11, 0x18, 0x4E, 0xE7, 0xE8, 0xE9, 0x13, 0x06, 0x02, 0xE6 };
+            memcpy(rec + n, wrap, sizeof(wrap)); n += sizeof(wrap);
+        } else if (strcmp(what, "EATESTOVER") == 0) {
+            /* 文字が画面の最後の桁を越える: SBA 24,79 に XYZ（Z は画面の外） */
+            static const unsigned char over[] = { 0x11, 0x18, 0x4F, 0xE7, 0xE8, 0xE9 };
+            memcpy(rec + n, over, sizeof(over)); n += sizeof(over);
+        } else if (strcmp(what, "EATESTEND") == 0) {
+            /* 行き先が画面の最後の桁: SBA 24,70 に 0123456789 → SBA 24,75 → EA 24,80（0xFF）→ X → 6,20 に END（X はどこへ行くか・否定応答か） */
+            static const unsigned char endp[] = { 0x11, 0x18, 0x46, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0x11, 0x18, 0x4B, 0x03, 0x18, 0x50, 0x02, 0xFF };
+            memcpy(rec + n, endp, sizeof(endp)); n += sizeof(endp);
+        } else {
+            rec[n++] = 0x03; rec[n++] = 0x06; rec[n++] = 0x06;
+            if (strcmp(what, "EATEST3") == 0) { rec[n++] = 0x03; rec[n++] = 0x00; rec[n++] = 0xFF; }
+            else if (strcmp(what, "EATEST00") == 0) { rec[n++] = 0x02; rec[n++] = 0x00; }
+            else if (strcmp(what, "EATEST01") == 0) { rec[n++] = 0x02; rec[n++] = 0x01; }
+            else if (strcmp(what, "EATESTFF") == 0) { rec[n++] = 0x02; rec[n++] = 0xFF; }
+            else { if (lg) { fprintf(lg, "unknown EATEST mode\n"); fclose(lg); } return 1; }
+        }
+        memcpy(rec + n, tailx, sizeof(tailx)); n += sizeof(tailx);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)rec, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD＋EA)", rc, fdbk);
+        sleep(8);
+        for (k = 0; k < 2; k++) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 メッセージ待ちを消す)", rc, fdbk);
+            if (rc == 0) break;
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**
