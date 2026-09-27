@@ -66,3 +66,9 @@
 - 理由: 「Windows で赤い」ことを製品の不具合と読み替えると、
   直す必要のない場所を触って退行を持ち込む。落ち方は 1 件ずつ原因まで見て分類した。
 - 影響: 差分はテスト 8 ファイル ＋ `.gitattributes` ＋ 記録に収まった。
+
+## 事後記録: deliver（2026-09-27）
+
+- 実装は既に main にある——PR #357（`7d3f600e`。`20260823-pccmd-windows-verify` と同じ PR）で develop に入り、#359（`e108d4ab`）で main に届いた。
+  deliver の承認が記録されず active（review）のまま残っていた（台帳の照合で発見）。新しいコミット・PR は作らない（事後記録モード）。
+- `dependsOn` が日付の無い slug（`pccmd-windows-verify`）で書かれており、`aidev status` が「work不明」と出していた。`20260823-pccmd-windows-verify` に直した。
