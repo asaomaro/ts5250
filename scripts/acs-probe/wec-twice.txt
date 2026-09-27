@@ -1,0 +1,30 @@
+# **溜まった AID を後の WRITE ERROR CODE が捨てるか**（実機の ACS のコア。`20260927-wec-only-unlock`）。DSM の WECTWICE: 画面 → 0x21 だけ → 10 秒 → 0x21 だけ → 10 秒 → READ MDT。
+# 1 回目の窓で Reset → AB → Enter（溜まる）。2 回目の窓では Reset だけ。READ が来た後に F3 を押す。READ が F1 を受けていれば溜まった AID は残った、F3 なら捨てられた。
+# ⚠ AB と Enter の間に間を置く（置かないと AB が入る前に Enter が処理され、欄が空のまま測ってしまう——1 回目の測定がそうだった）。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wec-twice.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WECTWICE')[enter]
+sleep 4000
+dump first-wec
+keys [reset]
+sleep 300
+keys AB
+sleep 300
+keys [enter]
+sleep 1000
+dump after-first-enter
+sleep 9000
+dump second-wec
+keys [reset]
+sleep 11000
+dump after-read
+keys [pf3]
+sleep 2000
+settle 2000
+dump after-f3
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

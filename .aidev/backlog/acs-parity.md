@@ -341,8 +341,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **エラーの分は完了（`20260927-host-error-hold`・PR）**: core はエラーのメッセージ（`systemMessage`）がある間 WTD から後ろを溜め、抜けたら順に流す（`Session5250.dismissHostError`）。
   保留が始まったら ACS の `initKeyboard` と同じく施錠を解き、AID の待ちはエラーの画面で解く。画面の側は抜けたら `dismiss-host-error` を送り（落ちたら次の画面・予約の解除で送り直す）、
   core はキー（Attn・SysReq を含む）・欄を書く前（ws・MCP）・HLLAPI の編集キー以外でも抜ける。実機（DSM の ERRMSGWTD / ERRMSGRST）で抜けた後の画面が ACS の Reset の後と同じ（pass=4）。
+- [x] **READ の無い WRITE ERROR CODE でも施錠を解き、先に押した AID を次の READ で送る**（下の「ホストのエラーの保留の残り」から割った）。**完了（`20260927-wec-only-unlock`）**:
+  ACS は 0x21 で `initKeyboard`（エラー状態なら施錠を解く）し、READ が出ていない間の AID を溜めて次の READ で送る（`pending_aid`・`checkPendingAid`）。後の 0x21・CC1 の施錠で溜めを捨てる。
+  実機の ACS のコア（DSM の WECONLY・WECTWICE）: 0x21 の後 Reset → AB → Enter で、10 秒後の READ が F1・AB を受けた／2 回目の 0x21 で Enter は捨てられ、後の F3 が届いた。
+  当 PJ は施錠のまま AID を拒んでいた（`packages/tn5250/src/session/session.ts` の `readOutstanding`・`deferredAid`。`scripts/verify-wec-only-unlock.mjs` pass=0 → 3）。
 - [ ] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
-  保留の無い WEC だけのレコードでも ACS は施錠を解く（当 PJ は READ まで施錠のまま）・ACS で AID がいつ応答扱いになるか（`20260927-host-error-hold` D4・D6）。
+  ~~保留の無い WEC だけのレコードでも ACS は施錠を解く~~（上の `[x]`）。`20260927-wec-only-unlock` の残り（decisions D2）: CANCEL INVITE・WSF・オペコード・RESTORE での `pending_read` の扱い、
+  溜めた AID の間も ACS は施錠しない、Attn / SysReq で溜めを捨てるかは未確認、早い Enter の後の F3 に ACS は欄を付けない（未確認）。
 - [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
   **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。
@@ -618,7 +623,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     「位置を持たないので写さない」は当たらない——論理値のまま直せる）~~ → 上の `20260921-dbcs-insert-room` で済んだ／~~(b) 継続欄の Erase EOF・Field Exit・Dup（ACS は続く区間まで消す・埋める・Field Exit の行き先は鎖の後ろ）~~ → 上の `20260921-continued-field-exit` で済んだ／(h) ~~Ctrl+Delete は ACS では
     `[deleteword]`（当 PJ は Erase EOF）・Ctrl+Backspace は ACS に割り当て無し（当 PJ は Erase Input）~~ → 上の `20260921-delete-word` で済んだ。残り: `¬ ¢ £` の Alt 入力（Alt+@・Alt+\\・Alt+-）・~~Ctrl+Home（罫線）・Ctrl+F11（カーソル形）~~ → 上の `20260921-default-keys-rule-cursor` で済んだ／
     ~~(j) G 欄は当 PJ が送信に SO/SI を付け（12 桁に 14 バイト）受信の生の DBCS が半角に化ける~~ → 上の `20260921-g-field-sosi` で済んだ／~~(d) CCSID 290 の `[ ] ^ ` { } ~ ¢` はエラー 0027~~ → **測定した（2026-09-22）。ACS の `KEY_JAPAN_KATAKANA`（290）だけの規則で、既定・`KEY_JAPAN_KATAKANA_EX`（930）・939・1399 は制限なし**（`scripts/acs-probe/ccsid290-invalid-chars.txt`）。~~利用者の ACS の選択（Katakana か Katakana Extended か）を人に確かめる要判断~~ → 下の「930 の申告の選択」で `20260922-katakana-variant-setting` により選べるようにした（決め打ちではなく設定に）／(g) 未対応の機能（SOH 0x10 の入力欄だけ移動は見える差が大きい見込み）／
-    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く。
+    ~~(q) IME 確定の余りを ACS は次の欄へ流す（当 PJ は捨てる）~~ → 上の `20260921-ime-flow` で済んだ／(e) J 欄がホーム位置のときの Home／(f) 解錠中に届いた WTD でカーソルが動く（`20260927-wec-only-unlock` の実機でも出た: READ の前の空の WTD〔CC2 0x08〕で ACS はカーソルを 5,12 に残し、当 PJ は IC の 5,10 へ戻す）。
     ~~**E（either）欄で SBCS と DBCS を混ぜられる差**~~ → 下の `[x]`（`20260927-either-field-mode`）で済んだ。
     **実装しない・閉じてよい**: (c) SBCS のコードページに無い字（ACS は黙って `?` にして送る＝情報を捨てるので合わせない候補）・(i) Field− の最終桁の表引き・(k) O 欄が全角で始まるときの先頭・
     (m) 満杯直後の Field Exit・(n) `mdtKeyed` の作り（持ち越しは塞がっている）・(o) Backtab の癖。**台帳の訂正**: `μ`→`µ` の置換は実装済み。

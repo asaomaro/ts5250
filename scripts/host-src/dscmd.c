@@ -1229,6 +1229,46 @@ int main(int argc, char *argv[]) {
             tag = "";
             QsnDltBuf((Q_Handle_T)buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "WECONLY") == 0 || strcmp(what, "WECTWICE") == 0) {
+        /*
+         * **READ の無い WRITE ERROR CODE だけのレコード**（`20260927-wec-only-unlock`）。ACS `processWriteErrorCode` → `initKeyboard` はエラー状態なら施錠を解く。
+         * 画面（5,10 に 10 桁の入力欄・IC）→ 0x21「WECONLY ERR」だけを撃つ → 10 秒待つ（この間に端末で Reset と打鍵と Enter を試す）→ READ MDT で受けた AID と欄を残す
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xE6, 0xC5, 0xC3, 0xD6, 0xD5, 0xD3, 0xE8,                /* "WECONLY" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A,
+            0x13, 0x05, 0x0A
+        };
+        static const unsigned char err[] = { 0x22, 0xE6, 0xC5, 0xC3, 0xD6, 0xD5, 0xD3, 0xE8, 0x40, 0xC5, 0xD9, 0xD9 };  /* 属性 22 "WECONLY ERR" */
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)sizeof(err), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x21 だけ)", rc, fdbk);
+        sleep(10);
+        if (strcmp(what, "WECTWICE") == 0) {
+            /* WECTWICE: もう一度 0x21 だけを撃ってから 10 秒待つ——先に溜まった AID を 2 回目の 0x21 が捨てるか（ACS `initKeyboard` の `pending_aid = 0`） */
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)sizeof(err), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x21 2 回目)", rc, fdbk);
+            sleep(10);
+        }
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

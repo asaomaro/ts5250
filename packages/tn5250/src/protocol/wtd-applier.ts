@@ -54,6 +54,8 @@ export interface ApplyResult {
    * 立っていれば、ここから後ろ（WTD とその後ろのコマンド）はまだ処理していない——呼び出し側が溜めて、抜けたときに処理する
    */
   heldFrom?: number;
+  /** このレコードに WRITE ERROR CODE（0x21 / 0x22）があった（ACS はここで `initKeyboard`＝エラー状態なら施錠を解く。`20260927-wec-only-unlock`） */
+  errorCodeWritten?: true;
   /**
    * **その場で戻る否定応答で終わった**（`abortRecord`）。ACS はこのときレコードの終わりの処理を飛ばし、SAVE PARTIAL の応答を
    * 次のレコードの終わりで送る（`bSavePartial` を先頭で捨てない。`20260927-early-return-rest`。実機のワイヤでも否定応答の後に来た）
@@ -229,6 +231,7 @@ export function applyDataStream(
       buf.cursorAddr = cursorBeforeRecord;
       result.cursorSet = true;
     }
+    if (errorCodeWritten) result.errorCodeWritten = true;
     result.lastWrite = buf.lastWrite;
     return result;
   };
