@@ -108,6 +108,8 @@ export interface RestoreResult {
   payload?: Uint8Array;
   /** 退避した画面が待っていた READ のコマンドバイト（ACS `Save5250Net.SavePendingRead`） */
   readCommand?: number;
+  /** 退避の時点で READ が出ていたか（ACS の `pending_read` が 0 でないか。RESTORE で戻す。`20260927-sysreq-line-hold`） */
+  readOutstanding?: boolean;
 }
 
 /**
@@ -641,7 +643,7 @@ export class ScreenBuffer {
      * （`20260920-restore-screen-parity` の cross 点検で実測）。
      * ACS も `Save5250Net` 1 つに画面と入力状態をまとめて入れている（research F1）。
      */
-    saved: { payload: Uint8Array; readCommand: number } | undefined;
+    saved: { payload: Uint8Array; readCommand: number; readOutstanding: boolean } | undefined;
   }[] = [];
 
   /**
@@ -728,7 +730,7 @@ export class ScreenBuffer {
    * 同じ深さが別の段を指す。いまは「同じ深さへの最後の attach が勝つ」ので結果は合うが、
    * 順序に依らない形にするなら単調増加のトークンにする（`20260920-restore-screen-parity` review ラウンド 1）。
    */
-  attachSaveContext(depth: number, ctx: { payload: Uint8Array; readCommand: number }): void {
+  attachSaveContext(depth: number, ctx: { payload: Uint8Array; readCommand: number; readOutstanding: boolean }): void {
     const entry = this.savedStack[depth - 1];
     if (entry === undefined) return;
     entry.saved = ctx;
@@ -798,7 +800,7 @@ export class ScreenBuffer {
     return {
       restored: true,
       ...(saved.saved !== undefined
-        ? { payload: saved.saved.payload, readCommand: saved.saved.readCommand }
+        ? { payload: saved.saved.payload, readCommand: saved.saved.readCommand, readOutstanding: saved.saved.readOutstanding }
         : {})
     };
   }

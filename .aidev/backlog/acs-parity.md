@@ -346,9 +346,15 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （CC1 は `20260927-unlocked-wtd-cursor` で撤回——ワイヤの実測で ACS は捨てなかった）。
   実機の ACS のコア（DSM の WECONLY・WECTWICE）: 0x21 の後 Reset → AB → Enter で、10 秒後の READ が F1・AB を受けた／2 回目の 0x21 で Enter は捨てられ、後の F3 が届いた。
   当 PJ は施錠のまま AID を拒んでいた（`packages/tn5250/src/session/session.ts` の `readOutstanding`・`deferredAid`。`scripts/verify-wec-only-unlock.mjs` pass=0 → 3）。
-- [ ] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
+- [x] **ホストのエラーの保留の残り**（上から割った）: SysReq の行を出している間の保留（ACS は同じ仕組みで止める）・同じレコードの WTD より前の CC2 が ACS では流すまで遅れる・
   ~~保留の無い WEC だけのレコードでも ACS は施錠を解く~~（上の `[x]`）。`20260927-wec-only-unlock` の残り（decisions D2）: CANCEL INVITE・WSF・オペコード・RESTORE での `pending_read` の扱い、
   溜めた AID の間も ACS は施錠しない、Attn / SysReq で溜めを捨てるかは未確認、早い Enter の後の F3 に ACS は欄を付けない（未確認）。
+  **完了（`20260927-sysreq-line-hold`）**: 実機の ACS のコア（DSM の LATEWTD・HOLDCC2。Reset で閉じる／送信で閉じるの 2 経路、HOLDCC2 は tap のワイヤでも 1 本のレコードと確認）で、
+  SysReq の行の間に届いた WTD は行を閉じるまで出ず、保留が始まったレコードの前の WTD のメッセージ待ちは抜けて流し終えてから点いた。当 PJ も同じにした
+  （`packages/tn5250/src/session/session.ts` の `setSysReqLine`・`heldCc2`、ホストの CLEAR UNIT・CUA・WEC で閉じる `wtd-applier.ts` の `onClearSysReq`、ws の `sysreq-line`、
+  画面の 0006。`scripts/verify-sysreq-line-hold.mjs` 既定 4/4・HOLDCC2 2/2・SUBMIT 5/5）。CANCEL INVITE で READ の印を下ろし、RESTORE で退避の時点の値に戻す（原典・単体）。
+  オペコード・WSF での `pending_read`（実機に現れない）・溜めた AID の間の施錠・Attn / SysReq で溜めを捨てるか・早い Enter の後の F3 は対象外として閉じた（decisions D1。未確認のまま）。
+  画面を持たない呼び出しは行を閉じてから送る（ACS は 0006。decisions D2）。
 - [x] **SOH の長さが 0 か 8 以上のとき**、ACS は sense（0x1005012B）で打ち切りフォーマットテーブルもメッセージ行も変えないが、~~当 PJ は無条件に `clearFormatTable()` する~~。
   **完了（`20260927-wtd-order-sense`・PR #423）**: 当 PJ も 0x1005012B で WTD を打ち切り、フォーマットテーブルを変えない（実機の DSM で ACS のワイヤのセンスと一致）。
 - [x] **メッセージ待ち表示（MW）を出さない**（優先度 中・深さ ◐）。

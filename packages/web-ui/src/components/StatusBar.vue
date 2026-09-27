@@ -22,11 +22,15 @@ const props = defineProps<{
   /** 操作ログの件数（このセッション分）。フッター内にトグルを置くため受け取る */
   logCount?: number;
   logOpen?: boolean;
+  /** SysReq の行を出している（この間のボタンの AID は送らずに `sysreq-key-invalid` を出す。ACS `processAIDCode`。`20260927-sysreq-line-hold`） */
+  sysReqOpen?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "toggle-log"): void;
   (e: "sysreq"): void;
+  /** SysReq の行を出している間に AID のボタンが押された（ペインが行を閉じて 0006 にする） */
+  (e: "sysreq-key-invalid"): void;
   /**
    * **キーボードで押したのと同じ扱いにする**（`20260802-key-palette`）。
    * ペイン側の keydown 処理へ流すので、キー設定（`ctrl+F1` 等）がボタンからも効く
@@ -99,6 +103,10 @@ const fkeys = computed<{ key: AidKey; label: string; hint?: string }[]>(() =>
       ]
 );
 function press(k: AidKey): void {
+  if (props.sysReqOpen) {
+    emit("sysreq-key-invalid");
+    return;
+  }
   // **ペインのカーソル（利用者が動かした位置）で送る**。`state.cursor` はホストが最後に置いた位置で、
   // 動かした後に押すと違う位置をホストへ返し、AID の前の検査（カーソル下の欄の MF 等）も別の欄を見る
   const hit = sendKey(props.state.sessionId, k, props.cursor ?? props.state.cursor);

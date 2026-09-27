@@ -1437,6 +1437,81 @@ int main(int argc, char *argv[]) {
             tag = "";
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "LATEWTD") == 0) {
+        /*
+         * **SysReq の行を出している間に届いた WTD を止めるか**（`20260927-sysreq-line-hold`。ACS `DS5250.checkContention` は `getMsgLinePos() != -1` の間待つ——
+         * WEC のエラーと SysReq の行が同じ仕組み）。画面（5,10 に入力欄）→ 8 秒待つ（この間に端末で SysReq の行を出す）→ WTD（5,2 に "LATE"・CC2 0x08）→ READ MDT
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xD3, 0xC1, 0xE3, 0xC5, 0xE6, 0xE3, 0xC4,               /* "LATEWTD" */
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x06,
+            0x13, 0x07, 0x0A
+        };
+        static const unsigned char late[] = { 0x00, 0x08, 0x11, 0x05, 0x02, 0xD3, 0xC1, 0xE3, 0xC5 };  /* 5,2 "LATE" */
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        sleep(8);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)late, (Q_Bin4)sizeof(late), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 LATE)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            tag = "[READ] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+    } else if (strcmp(what, "HOLDCC2") == 0) {
+        /*
+         * **保留が始まったレコードの、それより前の WTD の CC2 はいつ効くか**（`20260927-sysreq-line-hold`。ACS は `processWCC2` をレコードの終わりで呼ぶので、
+         * `checkContention` で止まった間は効かない——原典の読み）。メッセージ待ちを消してから 1 本のレコード: WTD（CC2 0x01＝点ける・3,2 に HOLDCC2）＋ 0x21 ＋ WTD（5,2 に HELD）。
+         * 12 秒待って（この間に端末で Reset）READ MDT。メッセージ待ちがいつ点くかを見る
+         */
+        static const unsigned char off[] = { 0x00, 0x02 };
+        static const unsigned char w1[] = { 0x00, 0x01, 0x11, 0x03, 0x02, 0xC8, 0xD6, 0xD3, 0xC4, 0xC3, 0xC3, 0xF2 };
+        static const unsigned char err[] = { 0x22, 0xC8, 0xD6, 0xD3, 0xC4, 0x40, 0xC5, 0xD9, 0xD9 };
+        static const unsigned char w2[] = { 0x00, 0x00, 0x11, 0x05, 0x02, 0xC8, 0xC5, 0xD3, 0xC4 };
+        Qsn_Cmd_Buf_T cb;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, off, 2, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 WTD CC2=02 先に消す)", rc, fdbk);
+        sleep(3);
+        inzFdbk(fdbk, sizeof(fdbk));
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w1, (Q_Bin4)sizeof(w1), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 CC2=01 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x21, (const char *)err, (Q_Bin4)sizeof(err), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x21 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)w2, (Q_Bin4)sizeof(w2), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 HELD → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutBuf（1 本のレコード）", rc, fdbk);
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
+        sleep(12);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "BADCMD") == 0) {
         /*
          * **未知のコマンド（0xFE）を出す。**

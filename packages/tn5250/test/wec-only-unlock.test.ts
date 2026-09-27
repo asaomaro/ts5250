@@ -139,3 +139,48 @@ describe("READ の無い WRITE ERROR CODE", () => {
     expect(written.length, "Attn のフラグレコードだけ").toBe(n + 1);
   });
 });
+
+/**
+ * **CANCEL INVITE と RESTORE SCREEN での「READ が出ているか」**（ACS: CANCEL INVITE は `pending_read = 0`、RESTORE の `setPendingReadAndAID` は戻す。`20260927-sysreq-line-hold`）
+ */
+describe("READ が出ているかの印", () => {
+  it("**CANCEL INVITE で下ろす**（READ が取り消された）", async () => {
+    const { s, feed } = await open();
+    const outstanding = () => (s as unknown as { readOutstanding: boolean }).readOutstanding;
+    expect(outstanding(), "前提: 最初の画面の READ が出ている").toBe(true);
+    feed(frame(OPCODE.CANCEL_INVITE, []));
+    await tick();
+    // 0x21 で解いて確かめる形は使えない——0x21 自身が印を下ろすので、印そのものを見る
+    expect(outstanding()).toBe(false);
+  });
+  it("**RESTORE SCREEN で戻す**: READ で待っていた画面を戻したら、READ が出ている印も戻る", async () => {
+    const { s, feed, written } = await open();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.SAVE_SCREEN]));
+    await tick();
+    const save = written.at(-1)!;
+    const payload = [...save.subarray(10, save.length - 2)]; // `ESC 12` ＋ 積荷
+    void s.sendAid("Enter", { timeoutMs: 1000 }).catch(() => undefined); // READ に応えた（印が下りる）
+    await tick();
+    const outstanding = () => (s as unknown as { readOutstanding: boolean }).readOutstanding;
+    expect(outstanding(), "前提: AID で下りた").toBe(false);
+    feed(frame(0x05, payload)); // ホストが退避した画面を戻す
+    await tick();
+    // 0x21 で解いて確かめる形は使えない——0x21 自身が印を下ろす（ACS の `initKeyboard` も同じ）ので、印そのものを見る
+    expect(outstanding(), "戻した画面は READ で待っていた").toBe(true);
+  });
+
+  it("**RESTORE は退避した時点の値を戻す**: AID に応えた後の SAVE（READ が出ていない）から戻したら、印は下りたまま", async () => {
+    const { s, feed, written } = await open();
+    const outstanding = () => (s as unknown as { readOutstanding: boolean }).readOutstanding;
+    void s.sendAid("Enter", { timeoutMs: 1000 }).catch(() => undefined); // 印が下りる
+    await tick();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.SAVE_SCREEN, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ESC, COMMAND.READ_MDT_FIELDS, 0x00, 0x00]));
+    await tick();
+    const save = written.find((w) => w[11] === 0x12)!;
+    const payload = [...save.subarray(10, save.length - 2)];
+    expect(outstanding(), "前提: この後の READ で印が立っている").toBe(true);
+    feed(frame(0x05, payload));
+    await tick();
+    expect(outstanding(), "退避の時点は READ が出ていなかった").toBe(false);
+  });
+});

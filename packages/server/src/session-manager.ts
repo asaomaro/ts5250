@@ -1874,6 +1874,10 @@ export class SessionManager {
   ): SessionEntry {
     const entry = this.assertWritable(id, user, holder);
     this.setReservation(entry, { holder, label, ttlMs, expiresAt: this.now() + ttlMs });
+    // 画面の側の SysReq の行を閉じる——予約の間は画面の側の知らせを受けないので、開いたままだとホストの出力が止まったまま自動操作が進めない
+    // （`20260927-sysreq-line-hold` の独立点検）
+    const s = entry.session as { setSysReqLine?: (open: boolean) => void };
+    s.setSysReqLine?.(false);
     return entry;
   }
 

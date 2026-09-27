@@ -368,6 +368,11 @@ export interface ScreenSnapshot {
    */
   messageWaiting?: boolean;
   /**
+   * **SysReq の行を出している**（画面の側が `sysreq-line` で知らせ、コアが持つ）。ACS はこの間ホストの WTD を止め、ホストの CLEAR UNIT・CUA・WEC で閉じる
+   * （`clearSysreqMode`）。立っているときだけ付与する（`20260927-sysreq-line-hold`）
+   */
+  sysReqLine?: boolean;
+  /**
    * **SOH が「欄データを返さない」と申告した F キーの番号**（1〜24。DDS の `CAnn`＝コマンド・アテンション）。
    * 申告が無ければ省略。UI は ME（必須入力）の検査をこのキーでは行わない
    * （ACS `DS5250.isSOH_PF` → `PS5250.processAIDCode`。`20260921-mandatory-check-acs`）。

@@ -8,6 +8,7 @@ import { sessionsStore } from "../src/stores/sessions.js";
 import { keybindingsStore } from "../src/stores/keybindings.js";
 import type { Cell, Field, ScreenSnapshot } from "@ts5250/tn5250";
 import type { WsClient } from "../src/ws-client.js";
+import { MSG_SYSREQ_KEY_INVALID } from "../src/composables/opMessages.js";
 
 /**
  * システム要求行（SysReq）の振る舞い。
@@ -177,6 +178,34 @@ describe("EmulatorPane のシステム要求行", () => {
   });
 
   /**
+   * **行を出す・閉じることをセッションへ知らせる**（ACS は行の間ホストの WTD を止める。`20260927-sysreq-line-hold`）。
+   * 取り消しは閉じる知らせを送り、確定は送らない（セッションが SysReq を送ってから閉じる——ACS と同じ順）
+   */
+  it("**開くと `sysreq-line` open、取り消すと close を送る。確定のときは close を送らない**", async () => {
+    const lineMsgs = (send: ReturnType<typeof vi.fn>) =>
+      send.mock.calls.map((c) => c[0] as { type: string; open?: boolean }).filter((m) => m.type === "sysreq-line").map((m) => m.open);
+    const send = vi.fn();
+    seed(send);
+    keybindingsStore.set("Escape", "SysReq");
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    expect(lineMsgs(send)).toEqual([true]);
+    await w.find(".sysreq input").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    expect(lineMsgs(send)).toEqual([true, false]);
+    await w.find(".pane").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    const inp = w.find(".sysreq input");
+    await inp.setValue("2");
+    await inp.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(lineMsgs(send), "確定では close を送らない").toEqual([true, false, true]);
+    w.unmount();
+  });
+
+  /**
    * 入力欄は `.pane` の子なので keydown がペインまでバブルする。
    * 素通しすると行の確定と 5250 の AID 送信が二重に走る（実行キーが最も危ない）。
    */
@@ -261,6 +290,115 @@ describe("EmulatorPane のシステム要求行", () => {
     sessionsStore.markLost(SID, "transport");
     await nextTick();
     expect(w.find(".sysreq").exists()).toBe(false);
+    w.unmount();
+  });
+});
+
+/**
+ * **行の後始末**（`20260927-sysreq-line-hold` の独立点検）。行を開いたまま画面の側が居なくなると、セッションの側でホストの出力が止まったまま残る
+ */
+describe("EmulatorPane のシステム要求行: セッションへの知らせ", () => {
+  const lineMsgs = (send: ReturnType<typeof vi.fn>) =>
+    send.mock.calls.map((c) => c[0] as { type: string; open?: boolean }).filter((m) => m.type === "sysreq-line").map((m) => m.open);
+  async function opened() {
+    const send = vi.fn();
+    seed(send);
+    const w = mount(EmulatorPane, { props: { sessionId: SID, focused: true }, attachTo: document.body });
+    await nextTick();
+    await (await sysReqButton(w))!.trigger("click");
+    await nextTick();
+    expect(lineMsgs(send)).toEqual([true]);
+    return { send, w };
+  }
+
+  it("**ペインがフォーカスを失って畳んだら close を送る**", async () => {
+    const { send, w } = await opened();
+    await w.setProps({ focused: false });
+    await nextTick();
+    expect(lineMsgs(send)).toEqual([true, false]);
+    w.unmount();
+  });
+
+  it("**切断で畳んだときは送らない**（送り先が無い。サーバーが接続の破棄で閉じる）", async () => {
+    const { send, w } = await opened();
+    sessionsStore.markLost(SID, "transport");
+    await nextTick();
+    expect(w.find(".sysreq").exists()).toBe(false);
+    expect(lineMsgs(send)).toEqual([true]);
+    w.unmount();
+  });
+
+  it("**ペインを閉じたら close を送る**", async () => {
+    const { send, w } = await opened();
+    w.unmount();
+    expect(lineMsgs(send)).toEqual([true, false]);
+  });
+
+  it("**二度開いても open は 1 回**", async () => {
+    const { send, w } = await opened();
+    keybindingsStore.set("Escape", "SysReq");
+    await w.find(".pane").trigger("keydown", { key: "Escape" });
+    await nextTick();
+    expect(lineMsgs(send)).toEqual([true]);
+    w.unmount();
+  });
+
+  it("**セッションが開いたと返した後に閉じたら（ホストの CLEAR UNIT・WEC）、画面の行も閉じる。close は送らない**", async () => {
+    const { send, w } = await opened();
+    const st = sessionsStore.get(SID)!;
+    st.snapshot = { ...snap(), sysReqLine: true } as ScreenSnapshot;
+    await nextTick();
+    expect(w.find(".sysreq").exists(), "開いたと返っただけでは閉じない").toBe(true);
+    st.snapshot = snap();
+    await nextTick();
+    expect(w.find(".sysreq").exists()).toBe(false);
+    expect(lineMsgs(send)).toEqual([true]);
+    w.unmount();
+  });
+
+  it("**取り消してすぐ開き直したとき、前の行の「閉じた」返事で新しい行を閉じない**", async () => {
+    const { w } = await opened();
+    const st = sessionsStore.get(SID)!;
+    st.snapshot = { ...snap(), sysReqLine: true } as ScreenSnapshot;
+    await nextTick();
+    await w.find(".sysreq input").trigger("keydown", { key: "Escape" }); // 取り消し（close を送る）
+    await nextTick();
+    await (await sysReqButton(w))!.trigger("click"); // すぐ開き直す
+    await nextTick();
+    st.snapshot = snap(); // 前の close の返事が遅れて届く
+    await nextTick();
+    expect(w.find(".sysreq").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("**フッターの SysReq をもう一度押しても open は 1 回**", async () => {
+    const { send, w } = await opened();
+    const btn = w.findAll("button.fk").find((b) => b.text().includes("SysReq"));
+    if (btn) {
+      await btn.trigger("click");
+      await nextTick();
+    }
+    expect(btn, "行を出している間もボタンは押せる").toBeDefined();
+    expect(send.mock.calls.filter((c) => (c[0] as { type: string }).type === "sysreq-line")).toHaveLength(1);
+    w.unmount();
+  });
+
+  it("開いた直後、セッションの返事がまだ来ていない画面では閉じない", async () => {
+    const { w } = await opened();
+    sessionsStore.get(SID)!.snapshot = snap();
+    await nextTick();
+    expect(w.find(".sysreq").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("**行を出している間に画面のボタンから別の AID を押すと、送らずに 0006 のエラーにして行を閉じる**（ACS `processAIDCode`）", async () => {
+    const { send, w } = await opened();
+    await w.findAll("button.fk").find((b) => b.text().trim().startsWith("F3") || b.text().includes("Enter"))!.trigger("click");
+    await nextTick();
+    expect(keyMessages(send)).toHaveLength(0);
+    expect(w.find(".sysreq").exists()).toBe(false);
+    expect(lineMsgs(send)).toEqual([true, false]);
+    expect(w.text()).toContain(MSG_SYSREQ_KEY_INVALID);
     w.unmount();
   });
 });

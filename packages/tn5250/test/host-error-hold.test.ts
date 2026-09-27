@@ -170,3 +170,129 @@ describe("ホストのエラーの間の WTD の保留", () => {
   });
 });
 
+/**
+ * **SysReq の行を出している間もホストの WTD を止める**（ACS `checkContention` はエラーのメッセージと SysReq の行を同じ仕組みで待つ。`20260927-sysreq-line-hold`）。
+ * 実機の ACS のコア（DSM の LATEWTD・`scripts/acs-probe/sysreq-line-hold.txt`）: 行を出している間に届いた 5 行目の LATE は、Reset で閉じるまで出なかった
+ */
+describe("SysReq の行の間の WTD の保留", () => {
+  it("**行を出している間は止め、閉じたら流す**", async () => {
+    const { s, feed, row } = await open();
+    s.setSysReqLine(true);
+    feed(frame(OPCODE.OUTPUT_ONLY, wtd(5, "LATE")));
+    await tick();
+    expect(row(5), "止めている").toBe("BASE");
+    s.setSysReqLine(false);
+    expect(row(5)).toBe("LATE");
+  });
+  it("**行から SysReq を送ったら、送った後で流す**（ACS もシステム要求を送ってから `clearSysreqMode`）", async () => {
+    const { s, feed, row, written } = await open();
+    s.setSysReqLine(true);
+    feed(frame(OPCODE.OUTPUT_ONLY, wtd(5, "LATE")));
+    await tick();
+    const n = written.length;
+    let rowAtSend = "";
+    const orig = s.telnet.sendRecord.bind(s.telnet);
+    (s.telnet as unknown as { sendRecord: (r: Uint8Array) => void }).sendRecord = (r) => {
+      rowAtSend = row(5);
+      orig(r);
+    };
+    await s.sendAid("SysReq", { sysReqText: "2" });
+    expect(written.length).toBe(n + 1);
+    expect(rowAtSend, "送るときはまだ止めている").toBe("BASE");
+    expect(row(5), "送った後に流れた").toBe("LATE");
+  });
+  it("閉じていなければ従来どおりすぐ描く（対照）", async () => {
+    const { feed, row } = await open();
+    feed(frame(OPCODE.OUTPUT_ONLY, wtd(5, "LATE")));
+    await tick();
+    expect(row(5)).toBe("LATE");
+  });
+});
+
+/**
+ * **保留が始まったレコードの、それより前の WTD の CC2 は流し終えてから効く**（ACS は `processWCC2` をレコードの終わりで呼ぶ。`20260927-sysreq-line-hold`）。
+ * 実機の ACS のコア（DSM の HOLDCC2・`scripts/acs-probe/hold-cc2.txt`）: WTD（CC2＝メッセージ待ちを点ける）＋ 0x21 ＋ WTD の 1 本のレコードで、メッセージ待ちは保留の間は消えたまま、Reset の後に点いた
+ */
+describe("保留の間の CC2", () => {
+  it("**メッセージ待ちは保留を抜けてから点く**", async () => {
+    const { s, feed } = await open();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01, ORDER.SBA, 3, 2, ...e("MW"), ...wec("ERR"), ...wtd(5, "HELD")]));
+    await tick();
+    expect(s.snapshot().systemMessage).toBe("ERR");
+    expect(s.snapshot().messageWaiting, "保留の間はまだ点かない").toBeUndefined();
+    s.dismissHostError();
+    expect(s.snapshot().messageWaiting, "抜けて流し終えたら点く").toBe(true);
+  });
+  it("保留が無ければ従来どおりすぐ点く（対照）", async () => {
+    const { s, feed } = await open();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01, ORDER.SBA, 3, 2, ...e("MW")]));
+    await tick();
+    expect(s.snapshot().messageWaiting).toBe(true);
+  });
+});
+
+describe("SysReq の行の閉じ方（ACS `clearSysreqMode`）", () => {
+  it("**ホストの CLEAR UNIT で閉じ、後ろの WTD は止めない**", async () => {
+    const { s, feed, row } = await open();
+    s.setSysReqLine(true);
+    expect(s.snapshot().sysReqLine).toBe(true);
+    feed(frame(OPCODE.OUTPUT_ONLY, [ESC, COMMAND.CLEAR_UNIT, ...wtd(5, "NEW")]));
+    await tick();
+    expect(s.snapshot().sysReqLine).toBeUndefined();
+    expect(row(5)).toBe("NEW");
+  });
+  it("**ホストの WEC で閉じる**（そのあとはエラーのメッセージで止める）", async () => {
+    const { s, feed } = await open();
+    s.setSysReqLine(true);
+    feed(frame(OPCODE.PUT_GET, wec("ERR")));
+    await tick();
+    expect(s.snapshot().sysReqLine).toBeUndefined();
+    expect(s.snapshot().systemMessage).toBe("ERR");
+  });
+  it("**行を出したまま別の AID を送ると、行を閉じて止めた出力を流してから送る**（自動操作を止めない）", async () => {
+    const { s, feed, row } = await open();
+    s.setSysReqLine(true);
+    feed(frame(OPCODE.OUTPUT_ONLY, wtd(5, "LATE")));
+    await tick();
+    void s.sendAid("Enter", { timeoutMs: 50 });
+    expect(s.snapshot().sysReqLine).toBeUndefined();
+    expect(row(5)).toBe("LATE");
+  });
+  it("**溜めの上限を超えたら、行だけの保留でも流す**（際限なく溜めない）", async () => {
+    const { s, feed, row } = await open();
+    s.setSysReqLine(true);
+    for (let i = 0; i < 502; i++) feed(frame(OPCODE.OUTPUT_ONLY, wtd(5, `L${i % 10}`)));
+    await tick();
+    expect(s.snapshot().sysReqLine).toBeUndefined();
+    expect(row(5)).not.toBe("BASE");
+  });
+});
+
+describe("保留の間の CC2 の合わせ方", () => {
+  it("**警報も持ち越す**（抜けて残りを流し終えてから鳴る）", async () => {
+    const { s, feed } = await open();
+    let alarms = 0;
+    s.on("alarm", () => alarms++);
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x04, ...wec("ERR"), ...wtd(5, "HELD")]));
+    await tick();
+    expect(alarms, "保留の間は鳴らない").toBe(0);
+    s.dismissHostError();
+    expect(alarms).toBe(1);
+  });
+  it("**同じレコードの後の WTD がメッセージ待ちを消せば消える**（ACS の `preprocessWCC2`。~~点けるが勝つ~~ は誤り）", async () => {
+    const { s, feed } = await open();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01, ...wec("ERR"), ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x02]));
+    await tick();
+    s.dismissHostError();
+    expect(s.snapshot().messageWaiting).toBeUndefined();
+  });
+  it("**持ち越しは止めたレコードの終わりで当て、後続のレコードの指定を上書きしない**", async () => {
+    const { s, feed } = await open();
+    feed(frame(OPCODE.PUT_GET, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x01, ...wec("ERR"), ...wtd(5, "HELD")]));
+    await tick();
+    feed(frame(OPCODE.OUTPUT_ONLY, [ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x02])); // 後続が消す
+    await tick();
+    s.dismissHostError();
+    expect(s.snapshot().messageWaiting, "後続の「消す」が最後").toBeUndefined();
+  });
+});

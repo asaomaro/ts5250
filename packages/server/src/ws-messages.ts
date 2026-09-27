@@ -138,6 +138,14 @@ export interface WsDismissHostError {
   type: "dismiss-host-error";
   seq: number;
 }
+/**
+ * **SysReq の行を出した・閉じた**（`20260927-sysreq-line-hold`）。ACS は行を出している間ホストの WTD を止める（エラーのメッセージと同じ `checkContention`）。
+ * 読み取り専用のセッションでは開くを受けない（SysReq を送れないので、確定で閉じる経路が無い）。閉じるは受ける
+ */
+export interface WsSysReqLine {
+  type: "sysreq-line";
+  open: boolean;
+}
 /** ハートビートの応答（`ping` への返し）。半開きソケットの検出に使う */
 export interface WsPong {
   type: "pong";
@@ -266,6 +274,7 @@ export type WsClientMessage =
   | WsPrinterOutputCancel
   | WsActivity
   | WsDismissHostError
+  | WsSysReqLine
   | WsPong
   | WsWatchSubscribe
   | WsWatchStart

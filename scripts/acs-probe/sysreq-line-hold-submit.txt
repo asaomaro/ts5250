@@ -1,0 +1,25 @@
+# **SysReq の行を送信で閉じたときも、止めていた WTD が流れるか**（別の経路でもう一度取る。`sysreq-line-hold.txt` は Reset で閉じる）。`20260927-sysreq-line-hold`。
+# DSM の LATEWTD（`scripts/host-src/dscmd.c`）: 画面 → 8 秒 → WTD（5,2 に LATE）→ READ MDT。待つ間に SysReq で行を出し、LATE が届いた後に dump → 空のまま Enter（SRQ を送る）
+# → システム要求のメニュー → F12 で戻った画面の 5 行目を見る。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/sysreq-line-hold-submit.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('LATEWTD')[enter]
+sleep 2500
+keys [sysreq]
+sleep 9000
+dump late-arrived
+keys [enter]
+settle 2500
+dump sysreq-menu
+keys [pf12]
+settle 2500
+dump back
+keys [enter]
+settle 2000
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

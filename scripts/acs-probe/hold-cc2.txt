@@ -1,0 +1,21 @@
+# **保留が始まったレコードの、それより前の WTD の CC2 はいつ効くか**（実機の ACS のコア。`20260927-sysreq-line-hold`）。DSM の HOLDCC2（`scripts/host-src/dscmd.c`）:
+# メッセージ待ちを消す → 1 本のレコード（WTD CC2＝点ける・0x21・WTD 5,2 HELD）→ 12 秒 → READ MDT。dump の mw= を、保留の間と Reset の後で見る。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/hold-cc2.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('HOLDCC2')[enter]
+sleep 2500
+dump off
+sleep 3000
+dump held
+keys [reset]
+sleep 1500
+dump after-reset
+sleep 9000
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

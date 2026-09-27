@@ -225,6 +225,10 @@ describe("WS から 3270 端末を開く", () => {
       await conn.handle(JSON.stringify({ type: "gui-select", fieldId: "x", value: "y" }));
       expect(sent[0]).toMatchObject({ type: "error", code: "PROTOCOL_ERROR" });
       expect((sent[0] as { message: string }).message).toContain("3270");
+      // SysReq の行（`20260927-sysreq-line-hold`）は 3270 に無い——断りもせず黙って捨てる（画面の側は端末を問わず送る）
+      sent.length = 0;
+      await conn.handle(JSON.stringify({ type: "sysreq-line", open: true }));
+      expect(sent).toEqual([]);
     } finally {
       tn3270.closeAll();
       await mini?.close();
