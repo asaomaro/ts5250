@@ -689,13 +689,21 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **実装順の案**: 例外→否定応答（短い 0x10050121・位置 0x10050122・後戻り 0x10050123 から。`applyWtd` を try/catch でくるみ、`settleCursor()` を通してから `senseCode` を立てる。
   **偽の否定応答の危険**が生じるので、受理側を先に揃える）→ EA・WEA・SOH・SF の検査。実在しない形（ホストの不具合や手書きの WTD だけ）は台帳に残す。
   ~~`20260921-negative-responses` D2 の「一対一でない」~~ は R11 の表（条件・センス・立てた後）で解消した。測り方 M1〜M6 は R11 の報告（scratchpad）。
-- [ ] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
+- [x] **否定応答で早く戻るときの CC2 と SAVE PARTIAL の応答**（優先度 低・節目 9 の独立点検の nit）。ACS `processCommand` は ESC が無い・CUA の引数・ROLL の指定の
   3 つで直ちに return し、レコードの終わりの `processWCC2`（CC2 の解錠・警報・メッセージ灯）と SAVE PARTIAL の応答を飛ばす（次のレコードの頭で `isPrepwcc2` も落ちる）。
   当 PJ は同じレコードで先に来た WTD の CC2 を効かせ、SAVE PARTIAL の応答も送る。当 PJ はキーボードを READ でも解くので、CC2 だけ落とすと ACS と同じにならない——
   **DSM で「WTD（CC2 解錠）＋不正な ROLL」を ACS のコアと当 PJ に出させて、解錠・警報の有無を測ってから**直す。
   **R11 の調査で訂正**: 直 return は「ESC が無い・CUA の引数・ROLL の指定」の 3 つでなく **8 か所**、WTD の中の誤りと WSF D9/72 は尾部が走る。**当 PJ は CC2 の解錠ビットでは解錠しない**
   （解錠は READ が来たときだけ。`session.ts`）ので、~~CC2 だけ落とすと ACS と同じにならない~~ は成り立たず、落ちる差は警報・メッセージ待ち・READ による解錠・SAVE PARTIAL の応答だけ。
   測ってから決める（`EARLYROLL` などを DSM で出させる案。ACS のプローブは `setAcsPackage(true)` を呼ばないので、SF の属性検査 0x10050130 は製品の ACS でしか採れない）。
+  **CC2 は完了（`20260927-early-return-cc2`・PR #423）**: DSM（`dscmd.c` の EARLYROLL）で WTD（CC2＝メッセージ待ちを点ける）＋不正な ROLL の 1 レコードを出させ、ACS のコアは点けず当 PJ は点けていた
+  （`scripts/acs-probe/early-return-cc2.txt`・`scripts/verify-early-return-cc2.mjs`）。その場で戻る否定応答（ESC が無い・CLEAR UNIT ALTERNATE の引数・ROLL の指定・WSF が短い）では、同じレコードの CC2 の警報・
+  メッセージ待ちを落とす（SAVE PARTIAL より前の CC2 は残す——ACS の SAVE PARTIAL はその場で効かせる。`wtd-applier.ts` の `abortRecord`）。直した後 pass=4。
+- [ ] **その場で戻る否定応答の残り**（`20260927-early-return-cc2` から割った。いずれも実機で測っていない）:
+  SAVE PARTIAL の後ろで戻ったとき、ACS は SAVE PARTIAL の応答を次のレコードの終わりに持ち越す（`bSavePartial` を先頭で捨てない）——当 PJ は同じレコードで送る。
+  ACS は WTD・READ・WRITE ERROR CODE の本体（CC・本文）が無いレコード、ROLL・CLEAR UNIT ALTERNATE の長さ不足も否定応答にする——当 PJ は否定応答にしない（読み過ぎの例外になる）。
+  ACS の READ の CC2 は溜めない（`lastReadCCbyte2`）——当 PJ は常に効かせる。SAVE PARTIAL の前の警報は ACS では 2 回鳴る（`pendingCCbyte2` を捨てない）——当 PJ は 1 回。
+
 - [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
     ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／

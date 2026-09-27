@@ -1,0 +1,20 @@
+# **同じレコードの後ろで否定応答になったとき、先に来た WTD の CC2（メッセージ待ち）が効くか**（実機の ACS のコア。`20260927-early-return-cc2`）。
+# 画面は DSM の試験プログラム（`scripts/host-src/dscmd.c` の EARLYROLL）: 1 本のレコードに WTD（CC2＝0x01 メッセージ待ちを点ける）＋ 不正な ROLL
+# 先にメッセージ待ちを消し（CC2＝0x02）、レコードの後 8 秒待ってからもう一度消す。dump の mw= を見る。
+# 作り方: DSCMD_LIB=<AS400_LIB> で scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。
+#
+# 実行: node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/early-return-cc2.txt AS400
+signon
+keys [enter]
+settle 1500
+dump a0-before
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EARLYROLL')[enter]
+sleep 1500
+dump a1-after-first-off
+sleep 4500
+dump a2-after-earlyroll
+sleep 8000
+settle 1000
+dump a3-after-mw-off
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

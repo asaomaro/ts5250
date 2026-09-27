@@ -766,7 +766,7 @@ node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順> PUB40
   | `settle [ms]` | 入力禁止が解けるまで（最長 15 秒）待ち、さらに ms 待つ（既定 800） |
   | `sleep <ms>` | 待つ |
   | `setcursor <行>,<桁>` | カーソルを置く |
-  | `dump [ラベル]` | 空でない行・カーソル（行,桁）・入力禁止の状態。DBCS は 1 文字が 2 桁ぶん重複して出る |
+  | `dump [ラベル]` | 空でない行・カーソル（行,桁）・入力禁止・挿入・メッセージ待ち（`mw=`）・通信状態・起動応答のコード（`startup=`）・装置名（`wsid=`）。DBCS は 1 文字が 2 桁ぶん重複して出る |
 
 - 手順の例:
   - `attn-restore.txt` — 未送信の打鍵が Attn → F12（SAVE / RESTORE SCREEN の往復）の後に残るか。ACS では残り、当 PJ では消える（`.aidev/backlog/acs-parity.md`）。

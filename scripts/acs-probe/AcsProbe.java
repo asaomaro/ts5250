@@ -59,7 +59,7 @@ public class AcsProbe {
     ps.GetScreen(buf, rows * cols, ECLPS.TEXT_PLANE);
     int pos = ps.GetCursorPos();
     OUT.print("=== " + label + " cursor=" + ((pos - 1) / cols + 1) + "," + ((pos - 1) % cols + 1)
-        + " inhibit=" + oia.InputInhibited() + " insert=" + oia.IsInsertMode() + commInfo() + "\n");
+        + " inhibit=" + oia.InputInhibited() + " insert=" + oia.IsInsertMode() + " mw=" + oia.IsMessageWaiting() + commInfo() + "\n");
     for (int r = 0; r < rows; r++) {
       String line = new String(buf, r * cols, cols);
       if (!line.isBlank()) OUT.print(String.format("%02d|%s", r + 1, line.replaceAll("\\s+$", "")) + "\n");

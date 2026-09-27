@@ -220,12 +220,31 @@ export function applyDataStream(
     return result;
   };
 
+  /**
+   * **SAVE PARTIAL の時点で効いていた CC2**。ACS の SAVE PARTIAL（ESC 0x03）は、それまでに溜めた WTD の CC2 をその場で効かせる
+   * （`processCommand` の case 3 の `processWCC2`）ので、その後ろで戻っても消えない（`abortRecord` はここまで戻す）
+   */
+  let committedCc2: { alarm: boolean; messageWaiting: boolean | undefined } = { alarm: false, messageWaiting: undefined };
+  /**
+   * **ACS がその場で戻る否定応答**（`DS5250.processCommand` の `return`）。レコードの終わりの CC2 の処理（`processWCC2`＝警報・メッセージ待ち）を
+   * 飛ばすので、**同じレコードで先に来た WTD の CC2 も効かせない**（`20260927-early-return-cc2`。社内機で WTD〔CC2＝メッセージ待ちを点ける〕＋不正な ROLL を
+   * DSM に出させ、ACS のコアは点けず当 PJ は点けていた——`scripts/acs-probe/early-return-cc2.txt`・`scripts/verify-early-return-cc2.mjs`）。
+   * SAVE PARTIAL より前の CC2 は残す（`committedCc2`）。WSF D9/72 のフラグ・WTD の中の誤りは ACS も終わりまで走るので、こちらを通さない。
+   * CC2 の解錠ビット（`unlockKeyboard`）は戻さない——読む箇所が無い（解錠は READ で決める。`session.ts`）
+   */
+  const abortRecord = (sense: number): ApplyResult => {
+    result.senseCode = sense;
+    result.alarm = committedCc2.alarm;
+    if (committedCc2.messageWaiting === undefined) delete result.messageWaiting;
+    else result.messageWaiting = committedCc2.messageWaiting;
+    return finish();
+  };
+
   while (r.remaining > 0) {
     const esc = r.u8();
     if (esc !== ESC) {
       warn(`expected ESC, got 0x${esc.toString(16)} — discarding rest of record (negative response 0x10050121)`);
-      result.senseCode = SENSE.COMMAND_EXPECTED;
-      break;
+      return abortRecord(SENSE.COMMAND_EXPECTED);
     }
     const cmd = r.u8();
     switch (cmd) {
@@ -239,8 +258,7 @@ export function applyDataStream(
         // **0 でなければ画面を消さずに否定応答**（ACS `DS5250.processCommand` の ESC 0x20: 0 以外は `sense_code = 0x10030101`）
         if (r.u8() !== 0x00) {
           warn("CLEAR UNIT ALTERNATE with a non-zero parameter (negative response 0x10030101)");
-          result.senseCode = SENSE.CLEAR_UNIT_ALTERNATE_PARAM;
-          return finish();
+          return abortRecord(SENSE.CLEAR_UNIT_ALTERNATE_PARAM);
         }
         // 27x132 へ切替えクリア。24x80 端末（alternate 未許可）でも `clearUnitAlternate()` が
         // 現在のサイズでクリアするので、`clearUnit()` へは倒さない——**罫線の扱いが違う**
@@ -275,6 +293,7 @@ export function applyDataStream(
         // **パラメータは応答へ写さない**（ホストは使っていない。`save-screen.ts` の注記）。
         // 記録として `saveRequests` に持つだけ。
         const params = r.bytes(5);
+        committedCc2 = { alarm: result.alarm, messageWaiting: result.messageWaiting };
         const partialDepth = buf.saveScreen();
         result.saveRequests.push({ kind: "partial", depth: partialDepth, params });
         buf.systemMessage = undefined; // 0x02 と同じ経路（ACS も同じメソッドで解除する）
@@ -318,8 +337,7 @@ export function applyDataStream(
         // **指定が不正なら画面を変えずに否定応答**（ACS `processRoll` が -1 を返すと `sense_code = 0x1005012C` でレコードの残りを読まない）
         if (!buf.roll(top, bottom, (dir & 0x80) !== 0 ? -lines : lines)) {
           warn(`invalid ROLL (top ${top} bottom ${bottom} lines ${lines}) (negative response 0x1005012C)`);
-          result.senseCode = SENSE.ROLL_PARAM;
-          return finish();
+          return abortRecord(SENSE.ROLL_PARAM);
         }
         break;
       }
@@ -382,8 +400,7 @@ export function applyDataStream(
         if (r.remaining < 4) {
           // 長さと class・type が読めない（ACS: `n5 + 4 > n2` で 0x10050121）
           warn("write structured field too short (negative response 0x10050121)");
-          result.senseCode = SENSE.COMMAND_EXPECTED;
-          return finish();
+          return abortRecord(SENSE.COMMAND_EXPECTED);
         }
         const sf = applyStructuredField(r);
         if (sf.reply) {
