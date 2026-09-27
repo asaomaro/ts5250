@@ -16,7 +16,8 @@ vi.mock("../src/spool-rescue.js", async (orig) => ({
 }));
 const { SessionManager } = await import("../src/session-manager.js");
 
-const SEND = [0xff, 0xfa, 0x27, 0x01, 0xff, 0xf0];
+// IBM i の実際の SEND（`USERVAR IBMRSEED<シード> VAR USERVAR`）。当 PJ は ACS と同じく SEND の順に答える（`20260927-telnet-rest`）
+const SEND = [0xff, 0xfa, 0x27, 0x01, 0x03, ...[..."IBMRSEED"].map((c) => c.charCodeAt(0)), 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x00, 0x03, 0xff, 0xf0];
 const startup = (code: number[]): number[] => {
   const body = [0x12, 0xa0, 0x90, 0x00, 0x04, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, ...code];
   return [0x00, body.length + 2, ...body];

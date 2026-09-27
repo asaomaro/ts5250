@@ -781,7 +781,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **完了（`20260927-early-return-rest`）**: 実機（DSM の READCC2 / CUANOPARM / SPROLL・ワイヤ）で ACS のコアと当 PJ が一致（`scripts/verify-early-return-rest.mjs` pass=4）。
   READ の CC1・CC2 は効かせない（CC1 は原典だけ）、引数の無い CLEAR UNIT ALTERNATE は 0 として消す（否定応答にしない）、その場で戻ったレコードの SAVE PARTIAL の応答は否定応答の後・次のレコードで送る（置き場は 1 つ）。
   SAVE PARTIAL の後ろに WTD が続くとき ACS が前の警報をもう一度鳴らすことには合わせない（D1）。
-- [ ] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
+- [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
+  HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）・ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）／
+  ゾーン D の負の数をホストが負として受け取るか（DDS の数値の欄で確かめる）／応答をコマンドの順に送らない（`[WSF Query][SAVE SCREEN]` などを 1 本のレコードで出させて ACS のワイヤと比べる。当 PJ は適用の後に固定の順）／
+  カーソル送りの番号の範囲と昇順でない定義（`standardFields` は画面順）／O 欄が全角で始まるときの先頭の桁の選択。
+- [x] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
+  **整理して閉じた（`20260927-checkpoint-rest`）**: 手を付けられる残り（HLLAPI の Tab / Backtab の 3270 の規則と MF の検査・ゾーン D の負の数をホストが負と読むか）は下の「節目の懸念の残り」に移した。
+  WSF の前の READ の保留（同じレコードで READ の後ろに WSF）は、実機のホストが送る形に現れず、DSM も入力のコマンドの後ろに出力のコマンドを 1 つのバッファで組めないので測れない——未確認のまま閉じる。
+  `FFT5250` の癖は写さないと決めたもの（以前から）。偽の否定応答は通常の画面の一巡で 0 件（2026-09-22。`20260927-wtd-sense-rest` でも社内機・PUB400 の 20 画面で 0 件）。DDS の Y の欄はコンパイルで落ちる（作れない）。
   - **R11 の調査（原典の読み。2026-09-22）で決着した分**: WSF の後の READ の保留の下ろし方は SF の class・type を問わず（`initKeyboard` 系も同じ）／`processPassthru` のオペコード 1・3・6・7・9 の動作／
     ヘッダのフラグ 2 の 0x80 は ACS 自身の読みに欠陥がある（末尾を読み落とす）／末尾の ESC 1 バイトは ACS が範囲外を 0 と読んで続行し、当 PJ は例外で READ ごと捨てる／
     **昇順でない SF は ACS が欄に入れない**（`FFT5250.checkNewField` は既存の欄より前の番地なら新しい欄を作らない。台帳の「昇順でない定義の画面は未確認」の答え）。
@@ -793,7 +800,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   - ゾーン D の負の数をホストが負として受け取るか（`20260921-field-minus-zone-d`）と、DDS の Y の欄（コンパイルで落ちた）。
   - 偽の否定応答: 通常の画面（DSPJOB・DSPLIBL・WRKSPLF・DSPMSG・WRKOBJ・プロンプト・GO MAIN・QCMD）を社内機と PUB400 で一巡させて 0 件（2026-09-22）。
     RESTORE PARTIAL（ACS は 2 バイトの長さを読む）・ESC 0xF4・出力側ヘッダのフラグ 2 の 0x80 は、その画面に出てこないので確かめていない。
-- [ ] **節目 10 の独立点検で確かめられなかった懸念・残した差**（優先度 低・未確認。`20260921-negative-responses`・`20260921-field-exit-checks`・`20260921-field-minus-zone-d` ほか）。
+- [x] **節目 10 の独立点検で確かめられなかった懸念・残した差**（優先度 低・未確認。`20260921-negative-responses`・`20260921-field-exit-checks`・`20260921-field-minus-zone-d` ほか）。
+  **整理して閉じた（`20260927-checkpoint-rest`）**: Field− の最終桁が英字のとき、ACS と同じくそのバイトの下位 4 ビットを使う（英大文字。`packages/web-ui/src/composables/fieldEdit.ts` の `NUMERIC_ONLY_EBCDIC`。原典・単体）。
+  応答の順・カーソル送りの番号・O 欄の先頭の全角の選択は下の「節目の懸念の残り」に移した。オペコード固有の動作・フラグ 2 の 0x80・末尾の ESC 1 バイト・4 バイトの WSF は、これまでの実機の記録（tap・トレース）に現れず、DSM でも出させられない——未確認のまま閉じる。
+  「3 つで直ちに return」は `20260927-early-return-cc2`・`20260927-short-command-sense` で直した。Field Exit の出し直しの回数・`mdtKeyed` の渡し方は値の差が無い作りの話で、閉じる。
   - `processPassthru` のオペコード固有の動作: ACS は opcode 1・3（フラグ 1 の 0x10/0x08 から READ の保留を決める）・opcode 9（保留 9）・opcode 6/7（受信と同時に READ の応答を返す）を持つ。
     当 PJ は 6/7 の空レコードに何も返さない。IBM i がオペコード 6/7/9 で入力待ちや即時読みを要求することがあるかは**未確認**（DSM の `QsnReadImm` が出すのはコマンド側の ESC 0x72）
   - 末尾の ESC 1 バイトだけのレコード: 当 PJ は例外を握りつぶして応答も画面イベントも無い。ACS は範囲外を 0 と読み、未知のコマンドとして続ける（`processCommand` の `default`）。
@@ -1002,7 +1012,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`packages/server/src/config-routes.ts` の `stripSource`）、参照されているプリンターの削除・種別の変更は FORBIDDEN（`config-store.ts` の `assertNotAssociated`）。
 - [x] **関連付けで起こしたプリンターを監査に残す**（上の「プリンターセッションを指す方式の残り」から割った。節目 10 の独立点検 C-N5）。**完了（`20260921-assoc-printer-audit`）**: `prepareAssociation` の結果を `ws_associated_printer` として 1 件記録する（成功は `ok`、使えない・開けない・時間切れは `error` と理由を `code` に。
   `packages/server/src/ws-handler.ts`）。設定名・装置名は載せない（spec D14）。テスト 5 件（時間切れは既存の 5 秒のテストに足した）、mutation 5 通り検出。
-- [ ] **関連付けプリンター（プリンターセッションを指す方式）の残り**（優先度 低・深さ △。上の `[x]` から割った）。**着手時に両側を再確認すること。**
+- [x] **関連付けプリンター（プリンターセッションを指す方式）の残り**（優先度 低・深さ △。上の `[x]` から割った）。**着手時に両側を再確認すること。**
+  **閉じた（`20260927-checkpoint-rest`）**: 残りはどれも ACS の画面の層（`SessionManager`・`AssociatedPrinterSession5250`・状態行の履歴）の振る舞いで、`acs-probe`（ECL のコア）では動かせない——ACS 側を測る手段が無い。
+  当 PJ の切断→繋ぎ直しの止め方・起こし方は単体で固定してある（`packages/server/test/associated-printer-session.test.ts`・`associated-printer-link.test.ts`）。ACS の 2 経路の数え方の食い違いはどちらが効くか確かめられない。
   - **表示の切断→繋ぎ直しの実機と ACS の GUI 状態**: 当 PJ の実機の測定は開く・閉じる・共有まで。切断→繋ぎ直しでのプリンターの止まり方・起き方は測っていない。
     ACS の GUI 層は `acs-probe` で動かせないので原典の読みまで（**未確認**）
   - 「一緒に閉じる」の数え方: ACS `SessionManager.stopAssociatedPrinterSession` は開いている全セッション（繋ぎ直し中も）を数えるが、`sessionLabelEvent` 側は状態 4・5 だけ数える
