@@ -116,8 +116,119 @@ describe("WTD の中のオーダーの誤り", () => {
     }
   });
 
-  it("SBA の行 1・桁 0 は否定応答にしない（ACS は番地 -1 として受ける。当 PJ は受けられず従来どおり例外——backlog）", () => {
-    expect(() => run([ORDER.SBA, 1, 0])).toThrow();
+  it("SBA の行 1・桁 0 は否定応答にしない（ACS は番地 -1 として受ける）", () => {
+    expect(run([ORDER.SBA, 1, 0]).r.senseCode).toBeUndefined();
+  });
+});
+
+/**
+ * **WTD の中の受理の残り**（`20260927-wtd-sense-rest`）。実機で DSM（WTDERR*）に 1 本の WTD を出させ、ACS のコアの画面・ワイヤ（tap）を採った:
+ * SBA 1,0 → 入力欄の SF → AB は 1 行 1 桁の入力欄に入る・FFW 0xC000 は入力欄・24,75 から TD 10 バイトは 0x10050121（24 行は空のまま）・
+ * 長さ 0 / 画面の末尾を越える / 長さ 5 の J / 先頭の無い継続欄の中間は 0x10050125（CC2 は効く・後ろの NEXT は書かない）
+ */
+describe("WTD の中の受理の残り（ACS の実測）", () => {
+  const NEXT = [ORDER.SBA, 6, 2, 0xd5, 0xc5, 0xe7, 0xe3];
+  const on = (order: number[], c = codec) => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...HEAD, ...order, ...NEXT]), buf, c, () => {});
+    const row = (n: number) => buf.snapshot().cells[n - 1]!.map((x) => x.char).join("").trimEnd();
+    return { r, buf, row, fields: buf.snapshot().fields.map((f) => [f.row, f.col, f.length]) };
+  };
+
+  it("**SBA 1,0 → SF → AB**: 欄は 1 行 1 桁から・AB が入る・後ろも書く", () => {
+    const { r, row, fields } = on([ORDER.SBA, 1, 0, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x05, 0xc1, 0xc2]);
+    expect(r.senseCode).toBeUndefined();
+    expect(fields).toEqual([[1, 1, 5]]);
+    expect(row(1)).toBe("AB");
+    expect(row(6)).toBe(" NEXT");
+  });
+
+  it("**FFW 0xC000** は入力欄として受ける", () => {
+    const { r, fields, row } = on([ORDER.SBA, 7, 9, ORDER.SF, 0xc0, 0x00, 0x24, 0x00, 0x05, 0xc1, 0xc2]);
+    expect(r.senseCode).toBeUndefined();
+    expect(fields).toEqual([[7, 10, 5]]);
+    expect(row(6)).toBe(" NEXT");
+  });
+
+  it("**画面の末尾を越える TD** は 1 バイトも書かずに 0x10050121", () => {
+    const { r, row } = on([ORDER.SBA, 24, 75, ORDER.TD, 0x00, 0x0a, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9]);
+    expect(r.senseCode).toBe(0x10050121);
+    expect(r.messageWaiting, "打ち切りなので CC2 は効かない（ACS の実測 mw=false）").toBeUndefined();
+    expect(row(24)).toBe("");
+    expect(row(6)).toBe("");
+  });
+
+  for (const [label, order] of [
+    ["長さ 0 の欄", [ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x00]],
+    ["画面の末尾を越える欄", [ORDER.SBA, 24, 70, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x14]],
+    ["長さ 5 の J 欄", [ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x82, 0x00, 0x24, 0x00, 0x05]],
+    ["先頭の無い継続欄の中間", [ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x86, 0x03, 0x24, 0x00, 0x05]]
+  ] as const) {
+    it(`**${label}** は 0x10050125（欄を入れず・後ろは書かない・CC2 は効く）`, () => {
+      const { r, fields, row } = on([...order], codecForCcsid(930));
+      expect(r.senseCode).toBe(0x10050125);
+      expect(fields).toEqual([]);
+      expect(row(6)).toBe("");
+      expect(r.messageWaiting).toBe(true);
+    });
+  }
+
+  it("継続欄は先頭 → 中間 → 最終の順なら受け、最終で順が戻る（次の画面の先頭を断らない）", () => {
+    const buf = new ScreenBuffer();
+    const seg = (row: number, fcw: number) => [ORDER.SBA, row, 9, ORDER.SF, 0x40, 0x00, 0x86, fcw, 0x24, 0x00, 0x05];
+    const r1 = applyDataStream(Uint8Array.from([...HEAD, ...seg(7, 1), ...seg(8, 3), ...seg(9, 2)]), buf, codec, () => {});
+    expect(r1.senseCode).toBeUndefined();
+    const r2 = applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ...HEAD, ...seg(7, 1), ...seg(8, 2)]), buf, codec, () => {});
+    expect(r2.senseCode).toBeUndefined();
+  });
+
+  it("**同じ位置に欄があれば検査せず FFW だけ書き換える**（長さ・FCW は前のまま。ACS `checkNewField` の `setFFW`）", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([...HEAD, ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x82, 0x80, 0x24, 0x00, 0x06]), buf, codecForCcsid(930), () => {});
+    const r = applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 7, 9, ORDER.SF, 0x48, 0x00, 0x24, 0x00, 0x00]), buf, codecForCcsid(930), () => {});
+    expect(r.senseCode).toBeUndefined();
+    const f = buf.orderedFields();
+    expect(f).toHaveLength(1);
+    expect([f[0]!.length, f[0]!.ffw, f[0]!.mdt, f[0]!.dbcsType]).toEqual([6, 0x4800, true, "open"]);
+  });
+
+  it("**後ろに始まる欄が先にあれば、新しい欄は入れず否定応答もしない**（昇順でない SF。ACS `checkNewField`）", () => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...HEAD,
+      ORDER.SBA, 8, 9, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x05,
+      ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x00 // 長さ 0 でも検査しない
+    ]), buf, codec, () => {});
+    expect(r.senseCode).toBeUndefined();
+    expect(buf.orderedFields().map((f) => buf.rowColOf(f.startAddr))).toEqual([{ row: 8, col: 10 }]);
+  });
+
+  it("**SBA 1,0 の SF の属性は 1 行 1 桁から効く**（桁を占めない。ACS `setAttributeToPlanes` の `row1col0*`）・CLEAR UNIT で捨てる", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(Uint8Array.from([...HEAD, ORDER.SBA, 1, 0, ORDER.SF, 0x40, 0x00, 0x24, 0x00, 0x05, 0xc1]), buf, codec, () => {});
+    expect(buf.snapshot("s", false).cells[0]![0]).toMatchObject({ char: "A", underline: true });
+    applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, 0xc1]), buf, codec, () => {});
+    expect(buf.snapshot("s", false).cells[0]![0]).toMatchObject({ char: "A", underline: false });
+  });
+
+  it("**長さ 1 の O 欄は受ける**（ACS `checkFieldLength` は符号付き数値・J・E・G だけを断る）", () => {
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x82, 0x80, 0x24, 0x00, 0x01], codecForCcsid(930)).r.senseCode).toBeUndefined();
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x47, 0x00, 0x24, 0x00, 0x01]).r.senseCode).toBe(0x10050125);
+  });
+
+  it("**継続欄の nn が 01/02/03 以外・ワードラップと MF の組**は 0x10050125（ACS `isValidContField`・`checkFieldValidity`）", () => {
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x86, 0x04, 0x24, 0x00, 0x05]).r.senseCode).toBe(0x10050125);
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x07, 0x86, 0x80, 0x24, 0x00, 0x05]).r.senseCode).toBe(0x10050125);
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x86, 0x80, 0x24, 0x00, 0x05]).r.senseCode).toBeUndefined();
+  });
+
+  it("自己点検欄の 33 桁の上限", () => {
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0xb1, 0xa0, 0x24, 0x00, 0x22]).r.senseCode).toBe(0x10050125);
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0xb1, 0xa0, 0x24, 0x00, 0x21]).r.senseCode).toBeUndefined();
+  });
+
+  it("**SF の属性が 0x20〜0x3F の外**は 0x10050130（製品の ACS の検査。原典）", () => {
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x40, 0x00, 0x10, 0x00, 0x05]).r.senseCode).toBe(0x10050130);
+    expect(on([ORDER.SBA, 7, 9, ORDER.SF, 0x10, 0x00, 0x05]).r.senseCode).toBe(0x10050130);
   });
 });
 

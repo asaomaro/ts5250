@@ -661,6 +661,7 @@ export class ScreenBuffer {
    */
   clearUnit(): void {
     this.resize(24, 80);
+    this.row1col0Attr = undefined;
     this.closeWindowsAndSelections();
     // **画面を消したら AID の申告も捨てる**（次の画面の SOH が来るまで「申告なし」＝送る側）。
     // 残すと、申告の無い画面で F12 の欄データを黙って落とすことになる。
@@ -1017,7 +1018,46 @@ export class ScreenBuffer {
     for (let i = from; i <= to; i++) this.cells[i] = null;
   }
 
-  /** SF オーダー: フィールド定義（attrByte は startAddr-1 に書かれた属性バイト） */
+  /**
+   * **継続欄の区間の順**（ACS `FFT5250.contFieldSegment`）。先頭・中間を受けた後は最終まで持ち、最終で `undefined` に戻る。
+   * 欄の表を消しても戻さない（ACS も `clearFFT` で触らない）。`wtd-applier.ts` の `fieldAddFailure` が読む
+   */
+  continuedSegment: ContinuedPart | undefined;
+
+  /**
+   * **同じ位置の欄の FFW だけを書き換える**（ACS `FFT5250.checkNewField` の `setFFW`。長さ・FCW・E 欄の全角の状態は前のまま）。`20260927-wtd-sense-rest`
+   */
+  updateFieldFfw(f: InternalField, ffw: number, attrByte: number): void {
+    f.ffw = ffw;
+    f.attrByte = attrByte;
+    f.mdt = (ffw & FFW.MDT) !== 0;
+  }
+
+  /**
+   * **ACS `FFT5250.checkNewField`**: 欄の表を入れた順に見て、`start` に始まる欄か、`start` より後ろに始まる欄（継続欄の中間・最終を除く）の
+   * 最初の 1 つを返す。見つかれば ACS は新しい欄を作らない（同じ位置なら FFW だけ書き換える）
+   */
+  checkNewField(start: number): InternalField | undefined {
+    for (const f of this.fields) {
+      if (f.startAddr === start) return f;
+      if (f.startAddr <= start || f.continued === "middle" || f.continued === "last") continue;
+      return f;
+    }
+    return undefined;
+  }
+
+  /**
+   * **1 行 1 桁の前（番地 -1）に置かれた属性**（SBA 1,0 の後の SF。ACS `PS5250.setAttributeToPlanes` の `row1col0ext` ほか）。
+   * 桁を占めず、画面の先頭から効く（`snapshot` が最初の属性にする）。CLEAR UNIT で捨てる。`20260927-wtd-sense-rest`
+   */
+  row1col0Attr: number | undefined;
+
+  /** 表にある欄の数（ACS は 600 欄で打ち止め） */
+  fieldCount(): number {
+    return this.fields.length;
+  }
+
+  /** SF オーダー: フィールド定義（attrByte は startAddr-1 に書かれた属性バイト）。同じ位置・後ろの欄の扱いは呼び出し側が `checkNewField` で決める */
   addField(
     startAddr: number,
     length: number,
@@ -1032,10 +1072,8 @@ export class ScreenBuffer {
     if (length < 1 || startAddr + length > this.size) {
       throw new As400Error("PROTOCOL_ERROR", `field out of range: start=${startAddr}, len=${length}`);
     }
-    // 同一開始アドレスの再定義は置換（画面再送で二重登録しない）。
-    // ただし **E 欄の全角の状態は引き継ぐ**——ACS `FFT5250.addFieldToFFT` は同じ位置の欄を作り直さず FFW を書き換えて使い回すので
-    // `EitherFieldDBCSOn` が残る（消えるのは CLEAR UNIT で欄の表ごと捨てたとき）。`20260927-either-field-mode` の review
-    const keepEither = dbcsType === "either" && this.fields.some((f) => f.startAddr === startAddr && f.eitherDbcsOn === true);
+    // 同じ位置の再定義はここへ来ない——`wtd-applier.ts` の `applySf` が `checkNewField` で見て FFW だけ書き換える（ACS `setFFW`）。
+    // E 欄の全角の状態もそれで残る（以前はここで置き換えて `keepEither` で引き継いでいた。`20260927-wtd-sense-rest` decisions D3）。念のため重複は除く
     this.fields = this.fields.filter((f) => f.startAddr !== startAddr);
     // 新しい欄が占める範囲に掛かる引き継ぎ境界は捨てる（その場所はもう別レイアウト）
     for (const e of this.retainedEnds) {
@@ -1050,8 +1088,7 @@ export class ScreenBuffer {
       ...(dbcsType !== undefined ? { dbcsType } : {}),
       ...(continued !== undefined ? { continued } : {}),
       ...(cursorProgression !== undefined ? { cursorProgression } : {}),
-      ...(selfCheck !== undefined ? { selfCheck } : {}),
-      ...(keepEither ? { eitherDbcsOn: true } : {})
+      ...(selfCheck !== undefined ? { selfCheck } : {})
     });
   }
 
@@ -1422,7 +1459,7 @@ export class ScreenBuffer {
         fieldEnds.add((row - 1) * this.cols + (colStart - 1));
       }
     }
-    let attr = DEFAULT_ATTR;
+    let attr = this.row1col0Attr !== undefined ? decodeAttribute(this.row1col0Attr) : DEFAULT_ATTR;
     for (let r = 0; r < this.rows; r++) {
       const rowCells: Cell[] = [];
       for (let c = 0; c < this.cols; c++) {

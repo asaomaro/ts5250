@@ -523,7 +523,7 @@ function buildFieldResponse(
     const rawPure = f.dbcsType === "pure" ? rawDbcsSendValue(buf, f, form) : undefined;
     if (rawPure !== undefined) {
       // 未編集の G 欄は原本のまま、末尾の NUL を落として送る（欄長まで詰めない。ACS の実測は上の `rawDbcsSendValue`）。
-      // 奇数長の欄は偶数へ丸める（組を割らない。下の編集した欄と同じ。ACS の奇数長の G は未測定）
+      // 奇数長の欄は偶数へ丸める（組を割らない。下の編集した欄と同じ。奇数長の G は SF で断るので、ここへは来ない——`wtd-applier.ts` の `fieldAddFailure`）
       const tmp = new ByteWriter();
       substituted += writeValue(tmp, rawPure, codec, true);
       const bytes = tmp.toUint8Array();
