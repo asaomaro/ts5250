@@ -959,7 +959,8 @@ function applyWtd(
         break;
       }
       case ORDER.WDSF: {
-        applyWdsf(r, buf, codec, addr, warn);
+        const bad = applyWdsf(r, buf, codec, addr, warn);
+        if (bad) return fail(bad.sense, bad.why);
         break;
       }
       case ORDER.WEA: {
@@ -1037,20 +1038,36 @@ function warnUnmappable(count: number, warn: WarnFn): void {
  * WDSF オーダー（0x15）: 拡張 5250 GUI 構造体（Create Window / Define Selection Field / Scroll Bar 等）。
  * 構造は [LL(2, 自身含む)] [class(1)=0xD9] [type(1)] [body...]。位置はデータストリームの現在アドレス。
  */
+/**
+ * **ACS が受け付ける WDSF の型**（`ENPTUI5250.processWSFOrder` の `switch`: 0x50〜0x55・0x58・0x59・0x5B・0x5F・0x60・0x61）。
+ * これ以外（とクラスが 0xD9 でないもの）は 0x10050111 で WTD を打ち切る。当 PJ が効かせない 0x52・0x54・0x55 も、ACS が受ける型なので否定応答にはしない
+ */
+const WDSF_KNOWN_TYPES: ReadonlySet<number> = new Set([0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x58, 0x59, 0x5b, 0x5f, 0x60, 0x61]);
+
+/**
+ * WDSF オーダー（0x15）。**否定応答にするときはセンスを返す**（ACS `ENPTUI5250.processWSFOrder` の頭の検査。`20260927-wdsf-sense`）:
+ * 長さ・クラス・型の 3 バイトより短い → 0x10050121、長さ（LL）が 4 未満 → 0x10050110、クラスが 0xD9 でない・知らない型 → 0x10050111。
+ * 構造体ごとの中身の検査（選択欄・窓の本体）は写していない（台帳）
+ */
 function applyWdsf(
   r: ByteReader,
   buf: ScreenBuffer,
   codec: Codec,
   addr: number,
   warn: WarnFn
-): void {
+): { sense: number; why: string } | undefined {
+  if (r.remaining < 4) return { sense: SENSE.COMMAND_EXPECTED, why: "WDSF too short" };
   const len = r.u16();
-  if (len < 4 || len - 2 > r.remaining) {
+  if (len < 4) return { sense: SENSE.WDSF_LENGTH, why: `WDSF length ${len}` };
+  if (r.peek() !== 0xd9) return { sense: SENSE.WDSF_CLASS, why: `WDSF class 0x${r.peek().toString(16)}` };
+  if (len - 2 > r.remaining) {
+    // 長さがレコードを越える（ACS は配列の外を読んで例外になり、否定応答なしに戻る——原典の読み）。従来どおり残りを捨てる
     warn(`invalid WDSF length ${len} — discarding rest of record`);
     r.skip(r.remaining);
-    return;
+    return undefined;
   }
   const sf = r.bytes(len - 2); // [class, type, ...body]
+  if (!WDSF_KNOWN_TYPES.has(sf[1]!)) return { sense: SENSE.WDSF_CLASS, why: `unknown WDSF type 0x${sf[1]!.toString(16)}` };
   const { row, col } = buf.rowColOf(addr);
   let event;
   try {
@@ -1088,9 +1105,11 @@ function applyWdsf(
       buf.clearGridLines();
       break;
     case "unknown":
+      // ACS は受けるが当 PJ は効かせない型（0x52 窓のカーソル制限の解除・0x54 欄への書き込み・0x55 マウス・ボタン）
       warn(`unhandled WDSF type 0x${event.type.toString(16)} — ignored`);
       break;
   }
+  return undefined;
 }
 
 /**
@@ -1269,6 +1288,10 @@ export const SENSE = {
   /** 知らないオペコード（ACS `processPassthru` の `default`。値は CLEAR UNIT ALTERNATE の引数の誤りと同じ） */
   UNKNOWN_OPCODE: 0x10030101,
   WSF_D972_FLAG: 0x10050112,
+  /** WDSF の長さ（LL）が 4 未満（ACS `ENPTUI5250.processWSFOrder`） */
+  WDSF_LENGTH: 0x10050110,
+  /** WDSF のクラスが 0xD9 でない・知らない型（同上） */
+  WDSF_CLASS: 0x10050111,
   /** 欄を表に入れられない（ACS `addFieldToFFT` が null。`fieldAddFailure`） */
   FIELD_ADD: 0x10050125,
   /** SF の属性が 0x20〜0x3F でない（製品の ACS の `isValidStartOfFieldAttribute`） */

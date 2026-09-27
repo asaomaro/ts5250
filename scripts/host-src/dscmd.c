@@ -1034,6 +1034,11 @@ int main(int argc, char *argv[]) {
         static const unsigned char fldend[] = { 0x11, 0x18, 0x45, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x14, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };   /* 24,70 から長さ 20 */
         static const unsigned char jodd[] = { 0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x24, 0x00, 0x05, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
         static const unsigned char contmid[] = { 0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x03, 0x24, 0x00, 0x05, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        /* WDSF の頭の検査（`20260927-wdsf-sense`。ACS `ENPTUI5250.processWSFOrder`）: LL が 3 / クラス 0xD8 / 知らない型 0x7F / ACS が受ける型 0x55（否定応答なし） */
+        static const unsigned char wdsfll[] = { 0x15, 0x00, 0x03, 0xD9, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        static const unsigned char wdsfcls[] = { 0x15, 0x00, 0x06, 0xD8, 0x50, 0x00, 0x00, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        static const unsigned char wdsftype[] = { 0x15, 0x00, 0x04, 0xD9, 0x7F, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
+        static const unsigned char wdsf55[] = { 0x15, 0x00, 0x04, 0xD9, 0x55, 0x11, 0x06, 0x02, 0xD5, 0xC5, 0xE7, 0xE3 };
         static const char off[] = { 0x00, 0x02 };
         unsigned char rec[64];
         const unsigned char *tail = sba;
@@ -1055,6 +1060,10 @@ int main(int argc, char *argv[]) {
         else if (strcmp(what, "WTDERRFLDEND") == 0) { tail = fldend; tl = sizeof(fldend); }
         else if (strcmp(what, "WTDERRJODD") == 0) { tail = jodd; tl = sizeof(jodd); }
         else if (strcmp(what, "WTDERRCONTMID") == 0) { tail = contmid; tl = sizeof(contmid); }
+        else if (strcmp(what, "WTDERRWDSFLL") == 0) { tail = wdsfll; tl = sizeof(wdsfll); }
+        else if (strcmp(what, "WTDERRWDSFCLS") == 0) { tail = wdsfcls; tl = sizeof(wdsfcls); }
+        else if (strcmp(what, "WTDERRWDSFTYPE") == 0) { tail = wdsftype; tl = sizeof(wdsftype); }
+        else if (strcmp(what, "WTDERRWDSF55") == 0) { tail = wdsf55; tl = sizeof(wdsf55); }
         else if (strcmp(what, "WTDERRSBA") != 0) { if (lg) { fprintf(lg, "unknown WTDERR mode\n"); fclose(lg); } return 1; }   /* 取り違えて SBA を流さない */
         memcpy(rec, head, sizeof(head));
         memcpy(rec + sizeof(head), tail, tl);

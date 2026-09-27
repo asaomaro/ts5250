@@ -325,3 +325,39 @@ describe("画面の終わりを越える文字の並び（ACS の実測）", () 
   });
 });
 
+/**
+ * **WDSF の頭の検査**（ACS `ENPTUI5250.processWSFOrder`。`20260927-wdsf-sense`）。実機の ACS のコア（ENPTUI 有効——当 PJ は常に申告する）のワイヤで
+ * LL が 3 → 0x10050110、クラス 0xD8・知らない型 0x7F → 0x10050111（後ろの NEXT は書かない・CC2 は効く）
+ */
+describe("WDSF の頭の検査（ACS の実測）", () => {
+  const NEXT = [ORDER.SBA, 6, 2, 0xd5, 0xc5, 0xe7, 0xe3];
+  const on = (order: number[]) => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([...HEAD, ...order, ...NEXT]), buf, codec, () => {});
+    return { r, row6: buf.snapshot().cells[5]!.map((c) => c.char).join("").trim() };
+  };
+  for (const [label, order, sense] of [
+    ["LL が 3", [ORDER.WDSF, 0x00, 0x03, 0xd9], 0x10050110],
+    ["クラスが 0xD8", [ORDER.WDSF, 0x00, 0x06, 0xd8, 0x50, 0x00, 0x00], 0x10050111],
+    ["知らない型 0x7F", [ORDER.WDSF, 0x00, 0x04, 0xd9, 0x7f], 0x10050111]
+  ] as const) {
+    it(`**${label}** は 0x${sense.toString(16)}（後ろは書かない・CC2 は効く）`, () => {
+      const { r, row6 } = on([...order]);
+      expect(r.senseCode).toBe(sense);
+      expect(row6).toBe("");
+      expect(r.messageWaiting).toBe(true);
+    });
+  }
+  it("**レコードの終わりで 4 バイトに足りない**は 0x10050121", () => {
+    const r = applyDataStream(Uint8Array.from([...HEAD, ORDER.WDSF, 0x00, 0x04]), new ScreenBuffer(), codec, () => {});
+    expect(r.senseCode).toBe(0x10050121);
+  });
+  it("ACS が受ける型（0x52・0x54・0x55）は、当 PJ が効かせなくても否定応答にしない", () => {
+    for (const t of [0x52, 0x54, 0x55]) {
+      const { r, row6 } = on([ORDER.WDSF, 0x00, 0x04, 0xd9, t]);
+      expect(r.senseCode, `0x${t.toString(16)}`).toBeUndefined();
+      expect(row6).toBe("NEXT");
+    }
+  });
+});
+

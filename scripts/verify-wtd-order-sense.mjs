@@ -17,12 +17,14 @@ const SENSE_OF = {
   // 受理の残り（`20260927-wtd-sense-rest`。ACS のコアの画面とワイヤ〔tap〕）: SBA 1,0・FFW 0xC000 は受ける（否定応答なし）、
   // 画面の末尾を越える TD・文字は 0x10050121 で打ち切る（CC2 も効かない）、欄を入れられない SF は 0x10050125
   WTDERRSBA10: null, WTDERRFFWC0: null, WTDERRTDEND: "10050121", WTDERRCHEND: "10050121",
-  WTDERRFLEN0: "10050125", WTDERRFLDEND: "10050125", WTDERRJODD: "10050125", WTDERRCONTMID: "10050125"
+  WTDERRFLEN0: "10050125", WTDERRFLDEND: "10050125", WTDERRJODD: "10050125", WTDERRCONTMID: "10050125",
+  // WDSF の頭の検査（`20260927-wdsf-sense`。ACS のコアを ENPTUI 有効〔当 PJ は常に申告〕で当てたワイヤ）: LL が 3 → 0x10050110、クラス 0xD8・知らない型 → 0x10050111
+  WTDERRWDSFLL: "10050110", WTDERRWDSFCLS: "10050111", WTDERRWDSFTYPE: "10050111"
 };
 /** CC2 まで落とす（レコードを打ち切る）モード——ACS のコアは mw=false・NEXT を書かなかった */
 const ABORT_MODES = new Set(["WTDERRTDEND", "WTDERRCHEND"]);
 /** 後ろの 6 行の NEXT を書かないモード（WTD の打ち切り） */
-const NO_NEXT = (m) => m.startsWith("WTDERRWEA") || ABORT_MODES.has(m) || /^WTDERR(FLEN0|FLDEND|JODD|CONTMID)$/.test(m);
+const NO_NEXT = (m) => m.startsWith("WTDERRWEA") || ABORT_MODES.has(m) || /^WTDERR(FLEN0|FLDEND|JODD|CONTMID|WDSFLL|WDSFCLS|WDSFTYPE)$/.test(m);
 /** SBCS のセッションで流すモード（社内機は SBCS の装置を自動構成しないので PUB400 の 37 で。`PUB400_*` と `PUB400_LIB` を使う） */
 const SBCS_MODES = new Set(["WTDERRWEA5"]);
 const MODES = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SENSE_OF);
