@@ -91,11 +91,15 @@ describe("0x22 の読み方", () => {
     expect(buf.snapshot().systemMessageArea).toEqual({ row: 22, col: 70, width: 11 });
   });
 
-  it("桁の 2 バイトが無いレコードでも例外にしない（0x21 と同じく読める範囲で）", () => {
+  it("**1 バイトも無いレコードは否定応答 0x10050121**（ACS は 0x21 と同じ長さの検査。`20260927-short-command-sense`）", () => {
     const buf = screen();
-    expect(() => apply(buf, [ESC, COMMAND.WRITE_ERROR_CODE_WINDOW])).not.toThrow();
-    // 桁が無ければ 0x21 と同じ扱い（メッセージ行の 1 行全体。`20260926-wec-msgline-row` decisions D4）
-    expect(buf.snapshot().systemMessageArea).toEqual({ row: 24, col: 1, width: 80 });
+    const before = rowText(buf, 24);
+    const r = applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_ERROR_CODE_WINDOW]), buf, codec, () => {});
+    expect(r.senseCode).toBe(0x10050121);
+    // その場で戻る: メッセージも位置も付かず、メッセージ行もそのまま
+    expect(buf.snapshot().systemMessage).toBeUndefined();
+    expect(buf.snapshot().systemMessageArea).toBeUndefined();
+    expect(rowText(buf, 24)).toBe(before);
   });
 
   it("開始桁だけあって終了桁が欠けるレコード（1 バイト）でも例外にしない", () => {
