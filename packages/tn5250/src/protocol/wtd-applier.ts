@@ -1104,8 +1104,15 @@ function applyWdsf(
     case "clear-grid-lines":
       buf.clearGridLines();
       break;
+    case "unrestrict-cursor":
+      // **窓のカーソル制限の解除**（ACS `ENPTUI5250.unrestrictWindowCursor`。`20260928-window-unrestrict`）: 中身がちょうど 2 バイトでなければ 0x10050110、
+      // そうでなければ直近の窓の制限を外す。実機の ACS のコア（DSM の WINRESTRICT / WINUNRESTRICT / WINUNRESTRICTBAD・`scripts/acs-probe/window-unrestrict.txt`）で、
+      // 制限つきの窓は矢印が窓の中を回り、0x52 の後は窓の外へ出た。中身 3 バイトはホストの次の読みが CPFA304（否定応答）
+      if (event.bodyLength !== 2) return { sense: SENSE.WDSF_LENGTH, why: `UNRESTRICT WINDOW CURSOR body ${event.bodyLength}` };
+      buf.unrestrictWindowCursor();
+      break;
     case "unknown":
-      // ACS は受けるが当 PJ は効かせない型（0x52 窓のカーソル制限の解除・0x54 欄への書き込み・0x55 マウス・ボタン）
+      // ACS は受けるが当 PJ は効かせない型（0x54 欄への書き込み・0x55 マウス・ボタン）
       warn(`unhandled WDSF type 0x${event.type.toString(16)} — ignored`);
       break;
   }
