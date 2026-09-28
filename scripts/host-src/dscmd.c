@@ -763,6 +763,52 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "WINRESTRICT") == 0 || strcmp(what, "WINUNRESTRICT") == 0 || strcmp(what, "WINUNRESTRICTBAD") == 0) {
+        /*
+         * **窓のカーソル制限（CREATE WINDOW の flag1 0x80）と、その解除（WDSF 0x52）**を測る画面（台帳「DS5250 の残り」の WDSF 0x52）。
+         * ACS `ENPTUI5250.unrestrictWindowCursor` は中身が 2 バイトなら直近の窓の制限を外し、そうでなければ 0x10050110。
+         *   (5,10) に深さ 5・幅 20 の制限つきの窓、窓の中の (7,14) に 6 桁の欄。WINUNRESTRICT は続く別のレコードの WTD で `15 00 06 D9 52 00 00`、
+         *   WINUNRESTRICTBAD は中身 3 バイトの `15 00 07 D9 52 00 00 00`。READ MDT で待つ
+         */
+        static const unsigned char win[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x0A,
+            0x15, 0x00, 0x0E, 0xD9, 0x51, 0x80, 0x00, 0x00, 0x05, 0x14, 0x05, 0x01, 0x80, 0x38, 0x38,
+            0x11, 0x07, 0x0D, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x07, 0x0E
+        };
+        static const unsigned char un[] = { 0x00, 0x00, 0x15, 0x00, 0x06, 0xD9, 0x52, 0x00, 0x00 };
+        static const unsigned char unbad[] = { 0x00, 0x00, 0x15, 0x00, 0x07, 0xD9, 0x52, 0x00, 0x00, 0x00 };
+        Qsn_Cmd_Buf_T cb;
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)win, (Q_Bin4)sizeof(win), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 制限つきの窓 → バッファ)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutBuf", rc, fdbk);
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
+        if (strcmp(what, "WINRESTRICT") != 0) {
+            /* 窓の後に別のレコードで 0x52（WTD＝CC 2 バイト＋WDSF） */
+            inzFdbk(fdbk, sizeof(fdbk));
+            if (strcmp(what, "WINUNRESTRICT") == 0) rc = QsnPutOutCmd(0x11, (const char *)un, (Q_Bin4)sizeof(un), 0, 0, (Q_Fdbk_T *)fdbk);
+            else rc = QsnPutOutCmd(0x11, (const char *)unbad, (Q_Bin4)sizeof(unbad), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WDSF 0x52)", rc, fdbk);
+        }
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "RESEQ") == 0) {
         /*
          * **再順序付け（SOH の本体 3 バイト目＋FCW 0x80nn）で READ MDT の欄の並びが変わるか**を測る画面（台帳「DS5250 の残り」の FCW 0x80xx）。

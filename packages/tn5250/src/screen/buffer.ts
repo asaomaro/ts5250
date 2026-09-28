@@ -354,6 +354,20 @@ export class ScreenBuffer {
     this.dropCursorOrders();
   }
 
+  /**
+   * **最後に作った窓**の番号（ACS `ENPTUI5250.enpwindow`）。作るたびに替わり、その窓を消す・窓を全部閉じると無くなる（前の窓には戻らない）。
+   * 退避と復元で持ち回る（ACS の退避を挟んだ後の `enpwindow` は未確認）
+   */
+  private currentWindowId: number | undefined;
+
+  /**
+   * **直近の窓のカーソル制限を外す**（WDSF 0x52。ACS `ENPTUI5250.unrestrictWindowCursor` は `enpwindow`＝最後に作った窓に掛ける）。その窓が無ければ何もしない
+   */
+  unrestrictWindowCursor(): void {
+    const w = this.guiWindows.find((x) => x.id === this.currentWindowId);
+    if (w) w.restrictCursor = false;
+  }
+
   /** GUI 構造体をすべて除去（REM_ALL_GUI_CONSTRUCTS 専用コマンド時） */
   clearGui(): void {
     this.closeWindowsAndSelections();
@@ -377,6 +391,7 @@ export class ScreenBuffer {
     this.guiSelections = [];
     this.guiWindows = [];
     this.guiScrollBars = [];
+    this.currentWindowId = undefined;
   }
 
   /** DEFINE SELECTION FIELD を GUI 選択フィールドとして登録（位置は 1 始まり row/col） */
@@ -420,6 +435,7 @@ export class ScreenBuffer {
       win.border = { cba: b.cba, ...(b.chars !== undefined ? { chars: { ...b.chars } } : {}) };
     }
     this.guiWindows.push(win);
+    this.currentWindowId = win.id;
     this.blankWindowArea(win);
   }
 
@@ -515,6 +531,8 @@ export class ScreenBuffer {
   }
 
   removeWindow(row: number, col: number): void {
+    // 最後に作った窓を消したら「直近の窓」は無くなる（ACS `removeWindow` は `enpwindow` を null にし、前の窓には戻さない）——
+    // 番号で引くので、消えた窓の番号が残っていても何にも当たらない（番号は使い回さない）
     this.guiWindows = removeByPos(this.guiWindows, row, col);
   }
 
@@ -615,6 +633,7 @@ export class ScreenBuffer {
     retainedEnds: Set<number>;
     guiSelections: GuiSelectionField[];
     guiWindows: GuiWindow[];
+    currentWindowId: number | undefined;
     guiScrollBars: GuiScrollBar[];
     guiGridLines: GuiGridLine[];
     /**
@@ -709,6 +728,7 @@ export class ScreenBuffer {
       retainedEnds: new Set(this.retainedEnds),
       guiSelections: this.guiSelections.map((s) => ({ ...s, choices: s.choices.map((c) => ({ ...c })) })),
       guiWindows: this.guiWindows.map((w) => ({ ...w })),
+      currentWindowId: this.currentWindowId,
       guiScrollBars: this.guiScrollBars.map((b) => ({ ...b })),
       guiGridLines: this.guiGridLines.map((g) => ({ ...g })),
       // ACS は `Save5250Net.saveInformation()` で CA マスク（SOH 5〜7 バイト目）と
@@ -793,6 +813,7 @@ export class ScreenBuffer {
     this.retainedEnds = saved.retainedEnds;
     this.guiSelections = saved.guiSelections;
     this.guiWindows = saved.guiWindows;
+    this.currentWindowId = saved.currentWindowId;
     this.guiScrollBars = saved.guiScrollBars;
     this.guiGridLines = saved.guiGridLines;
     // CA マスクとメッセージ行番号も戻す（ACS `Save5250Net.restoreNetNulls`）。
@@ -851,6 +872,8 @@ export class ScreenBuffer {
       b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
     // 本体 1 バイト目のフラグ 0x10＝カーソルを入力欄だけに動かす（ACS の SOH 分岐は長さ 1 以上ならこのバイトを見る）
     this.cursorInputOnly = b.length >= 1 && (b[0]! & 0x10) !== 0;
+    // **CSRINPONLY は直近の窓の制限を外す**（ACS `FFT5250.setCursorMoveToInput(true)` が `unrestrictWindowCursor()` を呼ぶ——一時的な回避ではなく窓の印を下ろす）
+    if (this.cursorInputOnly) this.unrestrictWindowCursor();
     // 本体 3 バイト目は再順序付けの先頭の欄の番号（ACS の SOH 分岐は長さ 3 以上ならこのバイトを採る）
     this.resequenceFirst = b.length >= 3 ? b[2]! : 0;
     // **本体 4 バイト目はメッセージ行の行番号**（ACS `DS5250` の SOH 分岐が
@@ -1703,7 +1726,7 @@ export class ScreenBuffer {
         ...s,
         choices: s.choices.map((c) => ({ ...c }))
       })),
-      windows: this.guiWindows.map((w) => ({ ...w })),
+      windows: this.guiWindows.map((w) => (w.id === this.currentWindowId ? { ...w, current: true } : { ...w })),
       scrollBars: this.guiScrollBars.map((b) => ({ ...b })),
       gridLines: this.guiGridLines.map((g) => ({ ...g }))
     };

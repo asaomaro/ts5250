@@ -42,9 +42,9 @@ function snap(windows: GuiWindow[] = []): ScreenSnapshot {
   } as ScreenSnapshot;
 }
 
-/** 実機 GRIDCL5 の窓。中身は 行 9〜16・桁 27〜56 */
+/** 実機 GRIDCL5 の窓。中身は 行 9〜16・桁 27〜56。最後に作った窓（`current`） */
 const WIN: GuiWindow = {
-  id: 1, row: 8, col: 24, width: 30, height: 8, restrictCursor: true, pulldown: false
+  id: 1, row: 8, col: 24, width: 30, height: 8, restrictCursor: true, pulldown: false, current: true
 };
 
 function seed(windows: GuiWindow[] = []): void {
@@ -157,6 +157,20 @@ describe("カーソルキーの移動範囲", () => {
       await placeCursor(w, 16, 40);
       await press(w, "ArrowDown");
       expect(cursorOf(w)).toBe("17/040"); // 窓の外へ出る
+      w.unmount();
+    });
+
+    /**
+     * **見るのは最後に作った窓（`current`）だけ**（ACS `processCursorMoveInWindow` は `enpwindow` しか見ない。`20260928-window-unrestrict`）。
+     * 前の窓が制限つきでも、最後の窓が制限なし（ホストが 0x52 で外した）なら閉じ込めない
+     */
+    it("最後に作った窓でない窓は、制限つきでも閉じ込めない", async () => {
+      seed([{ ...WIN, current: false }, { ...WIN, id: 2, row: 1, col: 1, width: 10, height: 3, restrictCursor: false, current: true }]);
+      const w = mountPane();
+      await nextTick();
+      await placeCursor(w, 16, 40);
+      await press(w, "ArrowDown");
+      expect(cursorOf(w)).toBe("17/040"); // 1 つ目の窓の外へ出る
       w.unmount();
     });
 

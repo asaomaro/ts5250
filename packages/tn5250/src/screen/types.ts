@@ -232,6 +232,11 @@ export interface GuiWindow {
   title?: GuiWindowTitle;
   /** カーソルをウィンドウ内に制限 */
   restrictCursor: boolean;
+  /**
+   * **最後に作った窓**（ACS `ENPTUI5250.enpwindow`）。立つときだけ付与。ACS の矢印の閉じ込め（`processCursorMoveInWindow`）はこの窓の `restrictCursor` だけを見る
+   * ——前の窓が制限つきでも閉じ込めない（`20260928-window-unrestrict`）
+   */
+  current?: boolean;
   /** プルダウンウィンドウ */
   pulldown: boolean;
   /**

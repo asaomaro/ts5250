@@ -212,6 +212,8 @@ export type WdsfEvent =
   | { kind: "remove-window" }
   | { kind: "remove-scrollbar" }
   | { kind: "remove-all" }
+  /** 窓のカーソル制限の解除（0x52）。`bodyLength` は class・type の後ろのバイト数（ACS は 2 のときだけ受ける） */
+  | { kind: "unrestrict-cursor"; bodyLength: number }
   | { kind: "unknown"; type: number };
 
 type Decode = (b: number) => number;
@@ -259,6 +261,8 @@ export function parseWdsf(sf: Uint8Array, decode: Decode): WdsfEvent {
       return { kind: "remove-scrollbar" };
     case WDSF_TYPE.REM_ALL_GUI_CONSTRUCTS:
       return { kind: "remove-all" };
+    case WDSF_TYPE.UNREST_WIN_CURS_MOVE:
+      return { kind: "unrestrict-cursor", bodyLength: r.remaining };
     case WDSF_TYPE.DRAW_ERASE_GRID_LINES:
       return { kind: "grid-lines", grid: parseGridLines(r) };
     case WDSF_TYPE.CLEAR_GRID_LINE_BUFFER:

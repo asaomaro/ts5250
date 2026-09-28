@@ -195,10 +195,11 @@ describe("WDSF GUI — 除去コマンド", () => {
 });
 
 describe("WDSF GUI — 堅牢性", () => {
-  it("未知の WDSF type は警告して読み飛ばす", () => {
-    const { buf, warns } = applyGui([...sba(1, 1), ...wdsf(0x52 /* UNREST_WIN_CURS_MOVE */, [0x00, 0x00])]);
+  // ~~0x52 で試していた~~——0x52 は `20260928-window-unrestrict` で効かせるようにした。当 PJ が効かせない型の例を 0x54 にした
+  it("当 PJ が効かせない WDSF type は警告して読み飛ばす", () => {
+    const { buf, warns } = applyGui([...sba(1, 1), ...wdsf(0x54 /* WRITE DATA */, [0x00, 0x00])]);
     expect(buf.snapshot("t", false).gui).toBeUndefined();
-    expect(warns.some((w) => w.includes("0x52"))).toBe(true);
+    expect(warns.some((w) => w.includes("0x54"))).toBe(true);
   });
 
   it("破損 WDSF 長は警告して残りを打ち切る", () => {

@@ -1,0 +1,13 @@
+schema: 11
+slug: window-unrestrict
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: DS5250 の残り（罫線の寿命・WDSF 0x52/0x54/0x55）
+harnessRevDelivered: unknown

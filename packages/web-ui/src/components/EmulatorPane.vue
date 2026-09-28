@@ -312,15 +312,16 @@ function reconcileFocus(pos: { row: number; col: number }): void {
  * ホストが「カーソルを窓に閉じ込める」と宣言した窓（CREATE WINDOW の flag1 bit0x80 =
  * `restrictCursor`）の**中に居るときだけ**その窓に閉じ込める。外に居るときは画面全体
  * ——窓の外から矢印で入ってくるのは妨げない。
+ * **見るのは最後に作った窓（`current`）だけ**（ACS `processCursorMoveInWindow` は `enpwindow` しか見ない。`20260928-window-unrestrict`）。
+ * ~~制限つきの窓のうち最後のもの~~——2 つ目の窓の制限をホストが外すと、1 つ目に閉じ込めていた
  *
  * 対象は**ホストが宣言した窓だけ**。文字や反転で描かれた窓はこちらの推測で見つけている
  * ものなので、外したときにカーソルが理由もなく閉じ込められる。
  */
 function cursorBounds(snap: ScreenSnapshot): CursorBounds {
   const screen = { row1: 1, row2: snap.rows, col1: 1, col2: snap.cols };
-  const wins = (snap.gui?.windows ?? []).filter((w) => w.restrictCursor);
-  const w = wins[wins.length - 1];
-  if (!w) return screen;
+  const w = (snap.gui?.windows ?? []).find((x) => x.current === true);
+  if (!w || !w.restrictCursor) return screen;
   // 窓の中身の範囲（ホストが送る位置は枠の左上で、中身はその 1 行下・3 桁右から）
   const inner = { row1: w.row + 1, row2: w.row + w.height, col1: w.col + 3, col2: w.col + w.width + 2 };
   const { row, col } = cursor.value;

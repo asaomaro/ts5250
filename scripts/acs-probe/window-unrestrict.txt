@@ -1,0 +1,33 @@
+# **窓のカーソル制限と、その解除（WDSF 0x52）**（ACS のコア・社内機。台帳「DS5250 の残り」の WDSF 0x52）。
+# 原典: `ENPTUI5250.unrestrictWindowCursor` は中身が 2 バイトなら直近の窓（`enpwindow`）の制限を外し、そうでなければ 0x10050110。
+# 画面は DSM の WINRESTRICT / WINUNRESTRICT / WINUNRESTRICTBAD（`scripts/host-src/dscmd.c`。(5,10) の窓・中に (7,14) の欄）。
+# 窓の中から矢印の上を 5 回押し、カーソルが窓の外（4 行目より上）へ出るかを見る。否定応答はメッセージ待ちで見る。測った後に DLTPGM と IFS の /tmp/dscmd.c・/tmp/dscmd.log を消す。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINRESTRICT')[enter]
+settle 3000
+dump r0
+keys [up][up][up][up][up]
+settle 500
+dump r1-up
+keys [enter]
+settle 2000
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINUNRESTRICT')[enter]
+settle 3000
+dump u0
+keys [up][up][up][up][up]
+settle 500
+dump u1-up
+keys [enter]
+settle 2000
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WINUNRESTRICTBAD')[enter]
+settle 3000
+dump b0
+keys [up][up][up][up][up]
+settle 500
+dump b1-up
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
