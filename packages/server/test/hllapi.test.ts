@@ -372,13 +372,13 @@ describe("欄を出るときの MF・自己点検", () => {
   const at = (row: number, col: number): number => (row - 1) * 80 + col;
 
   it("**MF に途中まで打って @T は止まる**——欄頭に戻り rc=5、後ろの Enter は送らない", async () => {
-    const { deps, sendAid } = await connected({ snapshot: mfScreen("AB") });
+    const { deps, sendAid, setField } = await connected({ snapshot: mfScreen("AB") });
     await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
     expect((await call(deps, HF.SEND_KEY, { data: "@T@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
     expect(sendAid).not.toHaveBeenCalled();
-    // カーソルは欄頭（次の Enter が運ぶカーソルで見る）
-    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
-    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+    // カーソルは欄頭（次に打つ字の行き先で見る。Enter は MF の違反で止まるので使えない）
+    expect((await call(deps, HF.SEND_KEY, { data: "X" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(setField).toHaveBeenCalledWith({ index: 1 }, "XB    ");
   });
 
   it("**止まった後ろの字は書かない**（ACS: Tab の後ろの CD は入らない）", async () => {
@@ -394,16 +394,16 @@ describe("欄を出るときの MF・自己点検", () => {
     expect((await call(a.deps, HF.SEND_KEY, { data: "@B" })).rc).toBe(HRC.FUNCTION_INHIBITED);
     const b = await connected({ snapshot: mfScreen("AB") });
     await call(b.deps, HF.SET_CURSOR, { pos: at(3, 22) });
-    expect((await call(b.deps, HF.SEND_KEY, { data: "@B@E" })).rc).toBe(HRC.SUCCESSFUL);
-    expect(b.sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+    expect((await call(b.deps, HF.SEND_KEY, { data: "@BX" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(b.setField).toHaveBeenCalledWith({ index: 1 }, "XB    ");
   });
 
   it("**@0（ホーム位置が欄の外）も止まる**", async () => {
-    const { deps, sendAid } = await connected({ snapshot: mfScreen("AB", {}, { home: { row: 7, col: 20 } }) });
+    const { deps, setField } = await connected({ snapshot: mfScreen("AB", {}, { home: { row: 7, col: 20 } }) });
     await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
-    expect((await call(deps, HF.SEND_KEY, { data: "@0@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
-    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
-    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+    expect((await call(deps, HF.SEND_KEY, { data: "@0X" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect((await call(deps, HF.SEND_KEY, { data: "X" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(setField).toHaveBeenCalledWith({ index: 1 }, "XB    ");
   });
 
   it.each([
@@ -485,6 +485,108 @@ describe("欄を出るときの MF・自己点検", () => {
     expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
     await call(deps, HF.SET_CURSOR, { pos: at(1, 1) });
     expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+});
+
+// `20260928-hllapi-aid-checks`: AID の前に MF → 自己点検（カーソル下の欄）、ME（画面が変更済み・CA キーを除く）を見る（ACS `processAIDCode`）。
+// 実機の ACS のコア: `.aidev/works/20260921-mandatory-check-acs/research.md` F2（ADJPGM の 9 場合）
+describe("AID の前の MF・自己点検・ME", () => {
+  const at = (row: number, col: number): number => (row - 1) * 80 + col;
+  /** (3,20) 6 桁の欄（`over`）、(5,20) の ME 欄（`me`）、(7,20) の素の欄。(3,20) に `value` */
+  const screen = (value: string, over: Partial<Field> = {}, me: Partial<Field> = {}, extra: Partial<ScreenSnapshot> = {}): ScreenSnapshot => {
+    const text = Array.from({ length: 24 }, () => "");
+    text[2] = " ".repeat(19) + value;
+    const fields = [
+      field({ index: 1, row: 3, col: 20, length: 6, mdt: value.trim() !== "", ...over }),
+      field({ index: 2, row: 5, col: 20, length: 6, mandatoryEnter: true, ...me }),
+      field({ index: 3, row: 7, col: 20, length: 6 })
+    ];
+    return { ...snap({ rows: 24, cols: 80, text, fields }), ...extra };
+  };
+
+  it("**カーソル下の MF が途中までなら Enter は送らず欄頭へ**（場合 5）", async () => {
+    const { deps, sendAid, setField } = await connected({ snapshot: screen("AB", { adjust: "mandatory-fill" }, { mdt: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+    await call(deps, HF.SEND_KEY, { data: "X" });
+    expect(setField).toHaveBeenCalledWith({ index: 1 }, "XB    ");
+  });
+
+  it("**MF は CA キーでも止まる**（場合 9）", async () => {
+    const { deps, sendAid } = await connected({ snapshot: screen("AB", { adjust: "mandatory-fill" }, { mdt: true }, { caKeys: [3] }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@3" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+  });
+
+  it("**カーソルの無い欄の MF は見ない**（場合 7）", async () => {
+    const { deps, sendAid } = await connected({ snapshot: screen("AB", { adjust: "mandatory-fill" }, { mdt: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(7, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalled();
+  });
+
+  it("**カーソル下の自己点検が合わなければ止まる**（欄頭へ）。カーソルの無い欄の自己点検は見ない", async () => {
+    const { deps, sendAid, setField } = await connected({ snapshot: screen("12340", { selfCheck: "mod10" }, { mdt: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+    await call(deps, HF.SEND_KEY, { data: "9" });
+    expect(setField).toHaveBeenCalledWith({ index: 1 }, "92340 ");
+    const other = await connected({ snapshot: screen("12340", { selfCheck: "mod10" }, { mdt: true }) });
+    await call(other.deps, HF.SET_CURSOR, { pos: at(7, 20) });
+    expect((await call(other.deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+
+  it("**施錠中は検査しない**（施錠の扱いは従来の経路。カーソルを動かさない）", async () => {
+    const { deps, sendAid } = await connected({ snapshot: screen("AB", { adjust: "mandatory-fill" }, { mdt: true }, { keyboardLocked: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    await call(deps, HF.SEND_KEY, { data: "@E" });
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 22 } }));
+  });
+
+  it("**画面が変更済みで ME が空なら止まり、ME の欄へ**（場合 2）", async () => {
+    const { deps, sendAid, setField } = await connected({ snapshot: screen("AB") });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+    await call(deps, HF.SEND_KEY, { data: "X" });
+    expect(setField).toHaveBeenCalledWith({ index: 2 }, "X     ");
+  });
+
+  it.each([
+    ["CA キー（場合 3）", "@3", { caKeys: [3] }, "AB"],
+    ["画面が未変更（場合 1）", "@E", {}, ""],
+    ["SysReq", "@A@H", {}, "AB"],
+    ["Test Request", "@A@C", {}, "AB"],
+    ["Clear", "@C", {}, "AB"],
+    ["Attn", "@A@Q", {}, "AB"]
+  ] as const)("ME を見ない: %s", async (_n, keys, extra, value) => {
+    const { deps, sendAid } = await connected({ snapshot: screen(value, {}, {}, extra as Partial<ScreenSnapshot>) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: keys })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalled();
+  });
+
+  it("**ME は内容ではなく MDT**——MDT のある空の ME は通る（場合 8）。継続欄は並びのどこかの MDT", async () => {
+    const a = await connected({ snapshot: screen("AB", {}, { mdt: true }) });
+    await call(a.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(a.deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+    const fields = [
+      field({ index: 1, row: 3, col: 20, length: 2, continued: "first", mdt: true }),
+      field({ index: 2, row: 3, col: 23, length: 2, continued: "last", mandatoryEnter: true }),
+      field({ index: 3, row: 7, col: 20, length: 6 })
+    ];
+    const b = await connected({ snapshot: snap({ rows: 24, cols: 80, fields }) });
+    await call(b.deps, HF.SET_CURSOR, { pos: at(7, 20) });
+    expect((await call(b.deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+
+  it("保護された ME は見ない", async () => {
+    const { deps } = await connected({ snapshot: screen("AB", {}, { protected: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
   });
 });
 

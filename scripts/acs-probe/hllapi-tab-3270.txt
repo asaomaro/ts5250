@@ -1,0 +1,44 @@
+# **3270 のコア（`PS3270.processTabKey` / `processBacktabKey`）の Tab・Backtab の行き先**（社内機を 3270 で。`20260928-hllapi-tab-3270`——廃止した work。
+#   HLLAPI は 5250 のセッションにしか繋がらず（`packages/server/src/app.ts` の `registerHllapiRoutes` は `SessionManager` だけ）、3270 の規則は要らなかった。
+#   3270 のペイン（`@ts5250/tn3270`）と ACS を比べるときの足場として残す）。
+# **実測（2026-09-28・社内機・ACS の 3270 のコア）**: メインメニュー（入力欄はコマンド行 20,7 だけ）で、保護域 2,5 からの Tab・欄頭からの Backtab・
+#   AB を打った後の Backtab はどれも 20,7。Clear はホストがすぐメニューを描き直すので、書式なしの画面は作れなかった。
+# 実行: PROBE_SESSION_TYPE=3270 node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/hllapi-tab-3270.txt
+# 原典: Tab は次の保護されていない欄の先頭（長さ 0 の欄を飛ばす・回り込む）。保護されていない欄が無ければ今いる欄の先頭、欄が 1 つも無い（書式なし）なら 1 行 1 桁。
+# Backtab は欄の 2 桁目以降ならその欄の先頭、そうでなければ前の保護されていない欄の先頭。欄が 1 つも無ければ 1 行 1 桁。
+signon
+keys [enter]
+settle 1500
+dump a0-initial
+
+# --- 1) 保護域から Tab / Backtab（基準） ---
+setcursor 2,5
+settle 300
+keys [tab]
+settle 500
+dump t1-tab-from-protected
+keys [backtab]
+settle 500
+dump t2-backtab-at-start
+keys AB[backtab]
+settle 500
+dump t3-backtab-mid
+
+# --- 2) Clear の直後（書式なし）で Tab ---
+keys [clear]
+settle 2500
+dump c0-after-clear
+setcursor 10,10
+settle 300
+keys [tab]
+settle 500
+dump c1-tab-unformatted
+setcursor 10,10
+settle 300
+keys [backtab]
+settle 500
+dump c2-backtab-unformatted
+
+keys [enter]
+settle 2000
+dump e0

@@ -180,7 +180,8 @@ public class AcsProbe {
     Properties p = new Properties();
     p.put(ECLSession.SESSION_HOST, env(prefix + "_HOST", ""));
     p.put(ECLSession.SESSION_HOST_PORT, env("PROBE_PORT", "23"));
-    p.put(ECLSession.SESSION_TYPE, ECLSession.SESSION_TYPE_5250_STR);
+    // 既定は 5250。`PROBE_SESSION_TYPE=3270` で 3270 のコア（`PS3270`）を当てる——IBM i は 3270 も受ける（`scripts/acs-probe/hllapi-tab-3270.txt`）
+    p.put(ECLSession.SESSION_TYPE, "3270".equals(env("PROBE_SESSION_TYPE", "")) ? ECLSession.SESSION_TYPE_3270_STR : ECLSession.SESSION_TYPE_5250_STR);
     // 既定のコードページは `acs-probe.mjs` が接頭辞で決めて渡す（PUB400 は英小文字のある 37。930 の SBCS には英小文字が無い）
     p.put(ECLSession.SESSION_CODE_PAGE, env("PROBE_CODEPAGE", "930"));
     // 2 = 24x80 / 5 = 27x132（HOD の psSize。`query-reply.ts` の注記と同じ値）

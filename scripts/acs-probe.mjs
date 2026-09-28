@@ -22,6 +22,7 @@
 //   PROBE_CODEPAGE_KEY（既定は指定しない。GUI の ACS が入れる `codePageKey`。KBDTYPE がこれで決まる。例 1399 は KEY_JAPAN_ENGLISH_EX_EURO）
 //   PROBE_PASSWORD_LEVEL（既定は指定しない。`PROBE_BYPASS_SIGNON=encrypted` の代替パスワードの計算に使う QPWDLVL。製品の ACS はサインオン・サーバーに聞く）
 //   PROBE_ASSOC_PRINTER（既定は指定しない。関連付けプリンターの装置名——ACS は NEW-ENVIRON に IBMASSOCPRT を足す）
+//   PROBE_SESSION_TYPE（既定は 5250。`3270` で 3270 のコア `PS3270` を当てる——IBM i は 3270 も受ける）
 //
 // 手順ファイルの文法（1 行 1 命令。`#` はコメント）は `scripts/README.md`「ACS のコアを直接動かす」。
 //
@@ -108,7 +109,7 @@ const env = {
   // ロケールは LANG だけでなく LC_ALL / LC_CTYPE でも決まる。落とすと JVM が POSIX になり、ASCII でない
   // パス（手順ファイル・ホームのキャッシュ）が読めなくなる（`20260919-backlog-acs-triage` review ラウンド 2）
   ...pick("PATH", "JAVA_HOME", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE"),
-  ...pick(`${prefix}_USER`, `${prefix}_PASSWORD`, `${prefix}_LIB`, "PROBE_PORT", "PROBE_DEVNAME", "PROBE_AUTORECONNECT", "PROBE_ENPTUI", "PROBE_BYPASS_SIGNON", "PROBE_CODEPAGE_KEY", "PROBE_PASSWORD_LEVEL", "PROBE_ASSOC_PRINTER"),
+  ...pick(`${prefix}_USER`, `${prefix}_PASSWORD`, `${prefix}_LIB`, "PROBE_PORT", "PROBE_DEVNAME", "PROBE_AUTORECONNECT", "PROBE_ENPTUI", "PROBE_BYPASS_SIGNON", "PROBE_CODEPAGE_KEY", "PROBE_PASSWORD_LEVEL", "PROBE_ASSOC_PRINTER", "PROBE_SESSION_TYPE"),
   [`${prefix}_HOST`]: host,
   // 930 の SBCS（290）には英小文字が無い。大文字小文字を区別する PUB400（QPWDLVL 3）では 37 を既定にする
   PROBE_CODEPAGE: process.env.PROBE_CODEPAGE ?? (prefix === "PUB400" ? "37" : "930"),
