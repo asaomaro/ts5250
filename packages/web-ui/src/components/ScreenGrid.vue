@@ -1826,7 +1826,8 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
  * ので、値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ）。落として揃えないと、空きが NUL のホストの欄を触っただけで値が変わったことになる
  */
 function trimPad(f: Field, s: string): string {
-  return wideFill(f) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
+  // 空きを全角空白で埋める E（full・open の全角の状態。`jeWidePad`）も全角空白を落とす。compact の E の空きは半角空白なので、打った全角空白は中身のまま
+  return wideFill(f) || jeWidePad(f, [...s]) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
 
 /** 欄の純論理値（SBCS＋DBCS、SO/SI 無し＝送信データそのもの）。
@@ -2319,7 +2320,8 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
   const out = [...chars];
   // **J・G の詰め物は全角空白**（ACS の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
   // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（欄長は偶数なので通常は来ない）
-  while (byteLen(out.join(""), f) < budget) out.push(wideFill(f) && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
+  const wide = wideFill(f) || jeWidePad(f, chars);
+  while (byteLen(out.join(""), f) < budget) out.push(wide && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
   while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
   return out;
@@ -2429,6 +2431,23 @@ function jeShapeOf(f: Field): JeShape | undefined {
   return si === kinds.length - 1 ? "full" : si >= 0 ? "compact" : "open";
 }
 
+/**
+ * **全角の状態の E の空きを全角空白で埋めるか**（`20260928-either-empty-view`）。full・open の E は SO の後ろの空きが DBCS の桁（ACS は NUL の組）なので、
+ * 空きを全角空白にして列ビューの先頭に SO の桁を立てる——半角空白で埋めると、空にした欄に SO の桁が無くなり、カーソルが 1 桁ずれる（ACS は空にしても SO を残し、
+ * カーソルは SO の次の桁。実機の ACS のコア `scripts/acs-probe/either-empty-type.txt`）。compact は SI を中身の直後に見せるので半角空白のまま
+ */
+function jeWidePad(f: Field, chars: readonly string[]): boolean {
+  return f.dbcsType === "either" && jeShapeOf(f) !== "compact" && eitherDbcsOn(f, { chars: [...chars] });
+}
+
+/**
+ * **複数行の貼り付けで欄の途中まで埋める空白**（独立点検の指摘）。空きが全角空白の欄（J・G・full/open の全角の E——`padDbcs`）は全角空白で埋める——
+ * 貼る位置は全角空白で詰めた列ビューで数えているので、半角空白で埋めると字が左へずれ、SO と SI の間に半角が混ざる
+ */
+function pasteFill(f: Field, dbcsOn: boolean): string {
+  return wideFill(f) || (f.dbcsType === "either" && dbcsOn && jeShapeOf(f) !== "compact") ? "\u3000" : " ";
+}
+
 /** E 欄の切り替え（`eitherSwitched`）に合わせて形を決める: 全角へ切り替えたら `full`、半角へなら形は無い */
 function noteEitherShape(index: number, dbcsOn: boolean): void {
   if (dbcsOn) jeShapeOverride.set(index, "full");
@@ -2465,7 +2484,7 @@ function jeMeta(f: Field, logical: string, e: EditState | undefined): { eitherDb
  * 値に空白でない字があればその字の種類で決まる（切り替えは先頭の字を打ったときにしか起きないので、先頭の字の種類が状態そのもの）。
  * 空白だけなら、この画面の中で切り替えた状態（`eitherSwitched`）か、コアが持ち続けている状態（`Field.eitherDbcsOn`。ホストの SO と送った値で決まる）
  */
-function eitherDbcsOn(f: Field, e: EditState | undefined): boolean {
+function eitherDbcsOn(f: Field, e: Pick<EditState, "chars"> | undefined): boolean {
   for (const c of e?.chars ?? []) {
     if (c === " ") continue;
     return isWideForDbcs(c);
@@ -3551,7 +3570,9 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   if (k === "End" && plain && !hasKeyBinding(ev)) {
     ev.preventDefault();
     ev.stopPropagation();
-    edit = end(edit); // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）
+    // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）。J・full/open の E は全角空白も空き（ACS `getEndPosition`。
+    // 実機の ACS のコア `scripts/acs-probe/je-field-end.txt`: J の `あい`＋全角空白は い の直後・空にした全角の E は SO の次）
+    edit = wideFill(f) || jeWidePad(f, edit.chars) ? end(edit, 0, (c) => c === " " || c === "\u3000") : end(edit);
     syncDbcs(el, f);
     return;
   }
@@ -3865,7 +3886,8 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
   const budget = visLen(field);
   let out = [...base];
   const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: out } as unknown as EditState) };
-  while (out.length < offset) out.push(" "); // 欄が offset に届いていなければ空白で埋める
+  const fill = () => pasteFill(field, eitherMode.dbcsOn);
+  while (out.length < offset) out.push(fill()); // 欄が offset に届いていなければ空白で埋める（空きが全角空白の欄は全角空白——`pasteFill`）
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;
@@ -3890,11 +3912,11 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
       // 元のまま残す。ここで i を進めないと後続が左へ詰まり、
       // 数値欄 "123" に "3A5" を貼ると "353"（正: "325"）になる。
       // out[i] に触れないので、既に入っている DBCS も壊さない（全角 1 文字 = 1 要素）。
-      while (out.length <= i) out.push(" "); // 疎配列の穴は join で消えるため空白で埋める
+      while (out.length <= i) out.push(fill()); // 疎配列の穴は join で消えるため空白で埋める
       i++;
       continue;
     }
-    while (out.length < i) out.push(" ");
+    while (out.length < i) out.push(fill());
     // 打鍵と同じ規則で上書きする: 桁数が変わったぶんは直後で調整し、後続の桁を動かさない
     // （全角の上に半角を貼ると 2 桁が 1 桁になり、その先の文字まで左へ詰まっていた）
     const before = byteLen(out.join(""), field);
@@ -3940,7 +3962,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
   const budget = visLen(field);
   let out = [...base.replace(/\s+$/, "")];
   const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: [...base] } as unknown as EditState) };
-  while (out.length < offset) out.push(" ");
+  while (out.length < offset) out.push(pasteFill(field, eitherMode.dbcsOn));
   let i = offset;
   for (const raw of line) {
     if (raw === "\n" || raw === "\r") continue;

@@ -108,8 +108,9 @@ describe("DBCS（J・E）の挿入: 末尾の全角空白は空き", () => {
       await at(1); // SO の次＝最初の全角
       await key("Insert");
       await key("う");
-      // J は末尾の全角空白が詰め物として値から落ちる（`trimPad`。ホストが SO…SI を整える）。E は全角空白も値のまま
-      expect(value()).toBe(type === "only" ? "うあい" : "うあい　　");
+      // 末尾の全角空白は詰め物として値から落ちる（`trimPad`）。~~E は全角空白も値のまま~~——SI が最後の桁の E（full）の空きも全角空白（`20260928-either-empty-view`）。
+      // どちらも送る値は SO＋字＋NUL の組＋SI（`jeExplicit`）で、NUL の組は `40 40` で届くので、打った全角空白と同じバイト列
+      expect(value()).toBe("うあい");
       expect(notices()).toEqual([]);
     });
 
@@ -119,7 +120,7 @@ describe("DBCS（J・E）の挿入: 末尾の全角空白は空き", () => {
       await at(3);
       await key("Insert");
       await key("う");
-      expect(value()).toBe(type === "only" ? "あいう" : "あいう　　");
+      expect(value()).toBe("あいう");
     });
 
     it(`${type}: 空きが無い（満杯）なら 0012 で値を変えない`, async () => {

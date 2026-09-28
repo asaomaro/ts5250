@@ -1,0 +1,29 @@
+# **全角の状態のまま空にした E 欄に打つと、ACS はどこに置いてどう送るか**（ACS のコア・社内機。台帳「E 欄の残り」の SO の桁）。
+# DSM の READDBCS（`scripts/host-src/dscmd.c`。E 欄は 17,10 の `SO あ SI`）で、SO の直後（17,11）から Erase EOF して空にし（ACS は SO だけを残す——`either-empty.txt`）、
+# 0x82 の待ちで い を打って Enter、0x52 の待ちで同じく空にしてから X を打って Enter。
+# **実測（2026-09-28・社内機・ACS のコア）**: い は `0e 4482`（SI を付けない）・カーソル 17,13。X は欄を半角へ切り替えて `e7`・カーソル 17,11。ホストの受け取りは /tmp/dscmd.log の QsnRtvDta。測った後に DLTPGM と IFS の /tmp/dscmd.c・/tmp/dscmd.log を消す。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READDBCS')[enter]
+sleep 5000
+setcursor 17,11
+settle 300
+keys [eraseeof]
+settle 300
+keys い
+settle 300
+dump typed-i
+keys [enter]
+sleep 3000
+setcursor 17,11
+settle 300
+keys [eraseeof]
+settle 300
+keys X
+settle 300
+dump typed-x
+keys [enter]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
