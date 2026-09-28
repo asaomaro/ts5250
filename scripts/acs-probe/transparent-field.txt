@@ -1,0 +1,26 @@
+# **透過の欄（FCW 0x8400）を ACS はどう送るか**（ACS のコア・社内機。台帳「DS5250 の残り」の FCW 0x84xx）。
+# 原典: `DS5250.sendAll` は READ MDT 系で `11 行 桁 10 長さ(2) 生バイト`（ヌルも落とさない）、READ INPUT 系でヌルを空白に換えない。
+# 画面は DSM の TRANSP（`scripts/host-src/dscmd.c`。(5,10) 透過の 8 桁 `AB`＋ヌル / (7,10) 素の 6 桁 `CD`＋ヌル）。ホストの受け取りは /tmp/dscmd.log の `[MDT]` / `[INP]`。
+# 測った後に DLTPGM と IFS の /tmp/dscmd.c・/tmp/dscmd.log を消す。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('TRANSP')[enter]
+settle 3000
+dump a0-mdt
+setcursor 5,12
+keys X
+setcursor 7,12
+keys Y
+keys [enter]
+settle 2500
+dump a1-inp
+setcursor 5,12
+keys X
+setcursor 7,12
+keys Y
+keys [enter]
+settle 2500
+dump a2-after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

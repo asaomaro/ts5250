@@ -1189,6 +1189,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
   let selfCheck: SelfCheckKind | undefined;
   let continued: ContinuedPart | undefined;
   let cursorProgression: number | undefined;
+  let transparent = false;
   const cont: SfContinued = {};
   // FCW は 0x80 以上（ACS も `>= 128` で続ける。属性は 0x20〜0x3F なので取り違えない）
   while (r.remaining >= 2 && r.peek() >= 0x80) {
@@ -1234,6 +1235,10 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
     //
     // 実機（IBM i 7.3・`TESTLIB/KEYDSPF` の `FLDCSRPRG(IN3)`）で採った値: 欄#1 に `0x8803`。
     else if ((fcw & 0xff00) === 0x8800) cursorProgression = fcw & 0x00ff;
+    // （上の 0x86 の `if` は単独で、この連なりは 0x82 からの else-if の続き。上位バイトは互いに排他なので取りこぼさない）
+    // **透過の欄（0x84xx）**。ACS `Field5250` は FCW の上位バイトで振り分け、0x84 なら下位バイトを問わず透過（`transparentField`）。
+    // 送るときに加工しない（`read-response.ts` の `transparentBytes`）
+    else if ((fcw & 0xff00) === 0x8400) transparent = true;
   }
   const attr = r.u8();
   const length = r.u16();
@@ -1255,7 +1260,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
     if (existing.startAddr === fieldStart) buf.updateFieldFfw(existing, ffw, attr);
     return fieldStart;
   }
-  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck);
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck, transparent);
   // 継続欄の区間の順を憶える（ACS `FFT5250.contFieldSegment`。最終の区間で戻す。**欄の表を消しても戻さない**——ACS も `clearFFT` で触らない）
   if (continued !== undefined) buf.continuedSegment = continued === "last" ? undefined : continued;
   return fieldStart;
