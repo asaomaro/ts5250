@@ -833,7 +833,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`scripts/verify-hllapi-tab-mandatory.mjs` pass=21。MF で Enter・ME 空で Enter は送らず欄へ、CA03 と未変更の Enter は送る）。単体 13 件・mutation 13 通り検出。
 - [ ] **AID の前の検査の残り**（上から割った。優先度 低）: HLLAPI はエラー 32（右寄せ・符号付き数値の欄に打って欄を出ずに AID）を見ない——Field Exit のニーモニックが無く、欄を出たかを追っていない
   （ACS は `fieldExitReqFlag`・`fieldExited`）。MCP の `send_key` は検査しない（ACS に無い入口。合わせるかは要判断）。
+- [x] **応答をコマンドの順に送る・SAVE SCREEN のオペコードのレコードは退避だけ**（下の項目から割った）。**完了（`20260928-response-order`・PR #446）**:
+  実機の ACS のコア（DSM の RESPORDER / RESPORDER2・`scripts/acs-probe/response-order.txt`・relay のワイヤ）: オペコード 03 の `[WSF Query][SAVE SCREEN]` は Query の応答 → 退避の応答、
+  オペコード 04 の `[SAVE SCREEN][WSF Query]` は**退避の応答だけ**（Query に答えない。原典 `DS5250.tokenizeData` の case 4 は `04 02` で始まれば `processSaveScreen()` だけ）。
+  当 PJ は応答の要る命令の順を `ApplyResult.responses` に積み、その順に送る（`packages/tn5250/src/session/session.ts`）。オペコード 04 は `streamOf` で先頭の 2 バイトだけ。
+  当 PJ のコアを実機に当てて一致（`scripts/verify-response-order.mjs` pass=2・2 回。直す前は `["save","query"]` が 2 つとも不一致）。単体 6 件・mutation 4 通り検出。
+  残り: 応答の**中身**はレコードを最後まで適用した後の画面で組む（ACS は命令の時点の画面。`[SAVE][WTD]` の退避の中身など）——下の項目に残す。
 - [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
+  ~~応答をコマンドの順に送らない~~（上の `[x]`）。応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）。
   ~~HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）~~——**事実と違う**: HLLAPI は 5250 の `SessionManager` にしか繋がらず
   （`packages/server/src/app.ts` の `registerHllapiRoutes`・`SessionEntry.session` は `Session5250`）、3270 のセッション（`Tn3270Manager`）には届かない（`20260928-hllapi-tab-3270` を廃止した理由）。
   ACS の 3270 のコアの Tab・Backtab は `scripts/acs-probe/hllapi-tab-3270.txt` に測ってある（3270 のペインと比べる足場）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／
