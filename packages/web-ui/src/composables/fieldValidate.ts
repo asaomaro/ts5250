@@ -169,8 +169,15 @@ export function isWideForDbcs(ch: string): boolean {
 export const SO_MARK = rawSentinel(0x0e);
 export const SI_MARK = rawSentinel(0x0f);
 export const isShiftMark = (ch: string): boolean => isRawSentinel(ch) && (sentinelByte(ch) === 0x0e || sentinelByte(ch) === 0x0f);
-/** 値が明示の並び（SO/SI の印を含む）か */
-export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some(isShiftMark);
+/**
+ * **死んだ桁の印**（継続した O 欄。`20260928-cont-o-cells`）。ACS は継続した O 欄の詰め直しで、並びを次の区間へ送った残りや SI の後ろの 1 桁を
+ * 「死んだ桁」（DBCSPlane 8・バイトは NUL）にし、次の詰め直しでその桁を捨てる（`PS5250.checkWordsFitDBCSOpenContField`・`processCharWithDBCSOpenContField`）。
+ * 空きの NUL（捨てない）と区別するため、値の中で生バイト 0x00 のセンチネルとして持つ。表示は空白 1 桁、送信は NUL（core の `setFieldCells`）
+ */
+export const DEAD_MARK = rawSentinel(0x00);
+export const isDeadMark = (ch: string): boolean => isRawSentinel(ch) && sentinelByte(ch) === 0x00;
+/** 値が明示の並び（SO/SI・死んだ桁の印を含む）か。死んだ桁は半角だけの区間の後ろにも残るので、それだけでも明示の並び */
+export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some((c) => isShiftMark(c) || isDeadMark(c));
 
 /** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
 export function viewChar(ch: string): string {

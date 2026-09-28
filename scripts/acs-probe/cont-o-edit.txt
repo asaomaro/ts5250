@@ -1,0 +1,135 @@
+# **継続欄の O の編集を巡ごとに測る**（実機の ACS のコア。台帳「継続欄の O」）。DSM の CONTOX（`scripts/host-src/dscmd.c`）:
+# (5,10) 先頭 8 桁 `SO あい SI X`＋埋め / (6,10) 中間 8 桁 `YZ`＋埋め / (7,10) 最終 8 桁（空）。巡ごとに画面を書き直し、1 巡に 1 件だけ打鍵して Enter。
+# ホストが受け取った READ MDT のバイト列は /tmp/dscmd.log の `[C01]`〜`[C12]`。CONTO の画面の読み（cont-o-insert.txt）が原典の読みと食い違ったので測り直す。
+# 作り方: DSCMD_LIB=<AS400_LIB> scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。PROBE_ENPTUI=true で流す。
+#
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-edit.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOX')[enter]
+settle 3000
+dump start
+# C01: ヌル埋め: SI（5,15）に全角 う を挿入
+setcursor 5,15
+settle 200
+keys [insert]う
+settle 400
+dump c01
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C02: ヌル埋め: X（5,16）に全角 え を挿入
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+dump c02
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C03: ヌル埋め: 中間の頭 Y（6,10）に全角 お を挿入
+setcursor 6,10
+settle 200
+keys [insert]お
+settle 400
+dump c03
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C04: ヌル埋め: あ の前（5,11）に半角 Q を挿入
+setcursor 5,11
+settle 200
+keys [insert]Q
+settle 400
+dump c04
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C05: ヌル埋め: X（5,16）に全角 か を上書き
+setcursor 5,16
+settle 200
+keys か
+settle 400
+dump c05
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C06: ヌル埋め: あ（5,11）で Delete
+setcursor 5,11
+settle 200
+keys [delete]
+settle 400
+dump c06
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C07: ヌル埋め: 中間の頭（6,10）で Backspace
+setcursor 6,10
+settle 200
+keys [backspace]
+settle 400
+dump c07
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C08: ヌル埋め: い（5,13）で Erase EOF
+setcursor 5,13
+settle 200
+keys [eraseeof]
+settle 400
+dump c08
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C09: 空白埋め: SI（5,15）に全角 う を挿入
+setcursor 5,15
+settle 200
+keys [insert]う
+settle 400
+dump c09
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C10: 空白埋め: X（5,16）に全角 え を挿入
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+dump c10
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C11: ヌル埋め: SO（5,10）に全角 き を挿入
+setcursor 5,10
+settle 200
+keys [insert]き
+settle 400
+dump c11
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# C12: ヌル埋め: い（5,13）に全角 き く を続けて挿入
+setcursor 5,13
+settle 200
+keys [insert]きく
+settle 400
+dump c12
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

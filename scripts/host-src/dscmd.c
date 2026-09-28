@@ -763,6 +763,51 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "CONTOX") == 0) {
+        /*
+         * **継続欄の O の編集を 1 巡に 1 件ずつ、ホストが受け取ったバイト列で測る画面**（台帳「継続欄の O」。CONTO の画面の読みでは
+         * 原典 `PS5250.processCharWithDBCSOpenContField` と食い違ったため、巡ごとに画面を書き直して READ MDT の生バイトで比べる）。
+         *   (5,10) 先頭 8 桁 `SO あい SI X`＋埋め / (6,10) 中間 8 桁 `YZ`＋埋め / (7,10) 最終 8 桁（空）。IC は 5,10。
+         *   埋めは 1〜8 巡と 11〜12 巡がヌル、9〜10 巡が空白。READ MDT を 12 回（ログは `[C01]`〜`[C12]`）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x01, 0x24, 0x00, 0x08,
+            0x0E, 0x44, 0x82, 0x44, 0x84, 0x0F, 0xE7, 0x00,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x03, 0x24, 0x00, 0x08,
+            0xE8, 0xE9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x02, 0x24, 0x00, 0x08,
+            0x13, 0x05, 0x0A
+        };
+        static char tags[12][8];
+        unsigned char s2[sizeof(scr)];
+        int k, j;
+        for (k = 0; k < 12; k++) {
+            sprintf(tags[k], "[C%02d] ", k + 1);
+            tag = tags[k];
+            memcpy(s2, scr, sizeof(scr));
+            if (k == 8 || k == 9) {
+                /* 埋めを空白に（先頭の区間の 8 桁目と中間の区間の 3〜8 桁目） */
+                s2[22] = 0x40;
+                for (j = 38; j < 44; j++) s2[j] = 0x40;
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)s2, (Q_Bin4)sizeof(s2), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 継続の O 欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "WINRESTRICT") == 0 || strcmp(what, "WINUNRESTRICT") == 0 || strcmp(what, "WINUNRESTRICTBAD") == 0) {
         /*
          * **窓のカーソル制限（CREATE WINDOW の flag1 0x80）と、その解除（WDSF 0x52）**を測る画面（台帳「DS5250 の残り」の WDSF 0x52）。
