@@ -212,7 +212,8 @@ describe("窓と罫線", () => {
   it("窓の前の罫線に穴、窓の後の罫線には無い", () => {
     const buf = new ScreenBuffer();
     applyDataStream(
-      Uint8Array.from(writeToDisplay([...wdsf(0x60, gridDrawBody), ORDER.SBA, 5, 10, ...win, ...wdsf(0x60, [...gridDrawBody.slice(0, 7), 0x0b, 0x02, 0x00, 0x09, 0x02, 0x00, 0x14, 0xff, 0xff, 0x01, 0x01])])),
+      // 深さは 0x0a（画面の行数に収まる範囲。`20260929-wdsf-minor-sense`: ACS `processDefineGridMinor` は行＋深さ−1 が画面を超えると 0x10050151）
+      Uint8Array.from(writeToDisplay([...wdsf(0x60, gridDrawBody), ORDER.SBA, 5, 10, ...win, ...wdsf(0x60, [...gridDrawBody.slice(0, 7), 0x0b, 0x02, 0x00, 0x09, 0x02, 0x00, 0x0a, 0xff, 0xff, 0x01, 0x01])])),
       buf, codec, () => {}
     );
     const lines = buf.snapshot("s", false).gui!.gridLines;
