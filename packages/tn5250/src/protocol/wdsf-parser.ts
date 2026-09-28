@@ -210,7 +210,8 @@ export type WdsfEvent =
   /** CLEAR GRID LINES（0x61）。`rect` は消す矩形（1 始まり）。形が崩れていれば無し */
   | { kind: "clear-grid-lines"; rect?: { row: number; col: number; width: number; height: number } }
   | { kind: "remove-selection" }
-  | { kind: "remove-window" }
+  /** REMOVE GUI WINDOW（0x59）。`flag` は 0x40＝引き下げの窓・0x00＝普通の窓（ほかは ACS は何も外さない） */
+  | { kind: "remove-window"; flag: number }
   | { kind: "remove-scrollbar" }
   | { kind: "remove-all" }
   /** 窓のカーソル制限の解除（0x52）。`bodyLength` は class・type の後ろのバイト数（ACS は 2 のときだけ受ける） */
@@ -257,7 +258,7 @@ export function parseWdsf(sf: Uint8Array, decode: Decode): WdsfEvent {
     case WDSF_TYPE.REM_GUI_SEL_FIELD:
       return { kind: "remove-selection" };
     case WDSF_TYPE.REM_GUI_WINDOW:
-      return { kind: "remove-window" };
+      return { kind: "remove-window", flag: r.remaining > 0 ? r.u8() : 0x00 };
     case WDSF_TYPE.REM_GUI_SCROLL_BAR_FIELD:
       return { kind: "remove-scrollbar" };
     case WDSF_TYPE.REM_ALL_GUI_CONSTRUCTS:
@@ -282,7 +283,7 @@ export function parseWdsf(sf: Uint8Array, decode: Decode): WdsfEvent {
 /** DEFINE SELECTION FIELD（0x50）: ヘッダ 16 バイト＋選択項目マイナー構造の並び */
 function parseSelectionField(r: ByteReader, decode: Decode): ParsedSelectionField {
   r.u8(); // flagbyte1（マウス/オートエンター特性。web 描画では未使用）
-  r.u8(); // flagbyte2（スクロールバー等）
+  const flag2 = r.u8(); // flagbyte2（0x80＝スクロール・バー付き）
   r.u8(); // flagbyte3
   const fieldType = r.u8();
   r.skip(5); // 予約
@@ -294,6 +295,10 @@ function parseSelectionField(r: ByteReader, decode: Decode): ParsedSelectionFiel
   r.u8(); // selection char
   r.u8(); // cancel AID
   // ここまでで 16 バイト（tn5250 の length-=16 に対応）
+  // **スクロール・バー付き（flag2 0x80）なら、続く 8 バイトが総数・つまみの位置（各 32 ビットの 2 進）で、選択肢のマイナーはその後ろから**
+  // （ACS `ENPTUIChoiceSelectionField`: マイナーは 28 バイト目から。実機の ACS のコア〔DSM の WDSFBEH の W2〕で型 0x21 のリストの選択肢がこの位置で読めた。
+  // `20260928-wdsf-behaviour`）。~~常に 20 バイト目から~~——8 バイトをマイナーと読み、選択肢が 1 つも出なかった
+  if ((flag2 & 0x80) !== 0) r.skip(8);
 
   const { kind, multiple } = selectionKind(fieldType);
   const choices: ParsedChoice[] = [];
@@ -327,8 +332,9 @@ function parseSelectionItem(content: Uint8Array, itemSize: number, decode: Decod
   const aidIncl = (fb1 & 0x04) !== 0;
   const numericIncl = (fb1 & 0x03) !== 0;
 
-  // flagbyte3 上位 3 ビットが全 0 なら以降無効（tn5250: minor structure ignored）
-  if ((fb3 & 0xe0) === 0) return { text: "", selected, available };
+  // **flagbyte3 に 0x80 が無ければ、その選択肢は無い**（ACS `ENPTUIChoiceText` は 0x80 でなければ例外で捨てる。実機の ACS のコア〔WDSFBEH の W1〕で
+  // 3 つのうち flag3＝0x40 の 2 つ目が消え、残りの 2 つが詰めて並んだ）。~~上位 3 ビットが全 0 なら空の選択肢として残す（tn5250）~~
+  if ((fb3 & 0x80) === 0) return null;
 
   const choice: ParsedChoice = { text: "", selected, available };
   if (offsetIncl && r.remaining > 0) r.u8(); // ニーモニックオフセット
@@ -469,13 +475,17 @@ function parseGridLines(r: ByteReader): ParsedGridLines {
   return { clearBuffer: (flag1 & 0x80) !== 0, defaultColor, defaultLine, items };
 }
 
-/** DEFINE SCROLL BAR FIELD（0x53）: 方向・総数・つまみ位置・サイズ（数値は 10 進 4 桁） */
+/**
+ * DEFINE SCROLL BAR FIELD（0x53）: 方向・総数・つまみ位置・サイズ。**総数・位置は 32 ビットの 2 進**（ACS `ENPTUIScrollBarField`。`20260928-wdsf-behaviour`）。
+ * ~~10 進 4 桁~~——256 以上で ACS と違う値になっていた
+ */
 function parseScrollBar(r: ByteReader): ParsedScrollBar {
   const fb1 = r.u8();
   const horizontal = (fb1 & 0x80) !== 0;
   r.u8(); // 予約
-  const total = 1000 * r.u8() + 100 * r.u8() + 10 * r.u8() + r.u8();
-  const sliderPos = 1000 * r.u8() + 100 * r.u8() + 10 * r.u8() + r.u8();
+  const u32 = (): number => ((r.u8() << 24) | (r.u8() << 16) | (r.u8() << 8) | r.u8()) >>> 0;
+  const total = u32();
+  const sliderPos = u32();
   const size = r.u8();
   return { horizontal, total, sliderPos, size };
 }

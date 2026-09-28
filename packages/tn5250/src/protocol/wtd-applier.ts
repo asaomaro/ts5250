@@ -1112,7 +1112,7 @@ function applyWdsf(
       buf.removeSelectionField(row, col);
       break;
     case "remove-window":
-      buf.removeWindow(row, col);
+      buf.removeWindow(row, col, event.flag);
       break;
     case "remove-scrollbar":
       buf.removeScrollBar(row, col);
