@@ -1,0 +1,34 @@
+# **WDSF の中身の読み方の差**（実機の ACS のコア。台帳「WDSF の中の否定応答」の挙動の差）。DSM の WDSFBEH の 4 巡を画面の dump で見る。
+# W1 flag3 に 0x80 の無い選択肢 / W2 スクロール・バー付きの選択のリスト / W3 0x59 のフラグ 0x40 / W4 0x59 のフラグ 0x00。
+# W3・W4 は窓がカーソルを制限するので、窓の中の欄から上へ 3 回動かして窓の外（4 行）へ出られるか——出られれば窓は外れている。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wdsf-behaviour.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WDSFBEH')[enter]
+settle 3000
+dump w1
+setcursor 20,10
+keys [enter]
+settle 2500
+dump w2
+setcursor 20,10
+keys [enter]
+settle 2500
+setcursor 7,14
+keys [up][up][up]
+settle 300
+dump w3
+setcursor 7,14
+keys [enter]
+settle 2500
+setcursor 7,14
+keys [up][up][up]
+settle 300
+dump w4
+setcursor 7,14
+keys [enter]
+settle 2500
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

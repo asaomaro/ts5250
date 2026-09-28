@@ -192,10 +192,13 @@ function cellKindFor(charKind: CharKind): CellKind {
   }
 }
 
-/** 位置一致で GUI 構造体を除去。一致が無ければ全除去（ホストが位置無指定で再構築する場合に対応） */
-function removeByPos<T extends { row: number; col: number }>(list: T[], row: number, col: number): T[] {
-  const matched = list.filter((g) => g.row === row && g.col === col);
-  return matched.length > 0 ? list.filter((g) => !(g.row === row && g.col === col)) : [];
+/**
+ * **位置の一致する最初の 1 つだけを外す**（ACS `removeGUISelectionField` / `removeGUIScrollBarField` / `removeGUIWindow` は番地の一致する最初の構造体だけ。
+ * 一致が無ければ何もしない。`20260928-wdsf-behaviour`）。~~一致が無ければ全除去（ホストが位置無指定で再構築する場合に対応）~~——ACS に無い推測だった
+ */
+function removeByPos<T extends { row: number; col: number }>(list: T[], row: number, col: number, match: (g: T) => boolean = () => true): T[] {
+  const i = list.findIndex((g) => g.row === row && g.col === col && match(g));
+  return i < 0 ? list : [...list.slice(0, i), ...list.slice(i + 1)];
 }
 
 /**
@@ -539,10 +542,22 @@ export class ScreenBuffer {
     this.guiSelections = removeByPos(this.guiSelections, row, col);
   }
 
-  removeWindow(row: number, col: number): void {
+  /**
+   * **REMOVE GUI WINDOW（0x59）**（ACS `ENPTUI5250.removeGUIWindow`）: フラグ 0x40 は引き下げの窓、0x00 は普通の窓だけを外す（ほかの値・種類の違う窓は何もしない）。
+   * 外した窓の範囲（位置から幅＋6 桁・深さ＋2 行）にすっかり入っている選択欄・スクロール・バーも外す。実機の ACS のコア（DSM の WDSFBEH の W3・W4）:
+   * 普通の窓に 0x40 ではカーソルの制限が残り、0x00 では外れた。~~フラグを見ずに外す~~
+   */
+  removeWindow(row: number, col: number, flag = 0x00): void {
+    if (flag !== 0x00 && flag !== 0x40) return;
+    const win = this.guiWindows.find((w) => w.row === row && w.col === col && w.pulldown === (flag === 0x40));
+    if (!win) return;
     // 最後に作った窓を消したら「直近の窓」は無くなる（ACS `removeWindow` は `enpwindow` を null にし、前の窓には戻さない）——
     // 番号で引くので、消えた窓の番号が残っていても何にも当たらない（番号は使い回さない）
-    this.guiWindows = removeByPos(this.guiWindows, row, col);
+    this.guiWindows = this.guiWindows.filter((w) => w !== win);
+    const top = win.row, left = win.col, bottom = win.row + win.height + 1, right = win.col + win.width + 5;
+    const inside = (r0: number, c0: number, r1: number, c1: number): boolean => r0 >= top && c0 >= left && r1 <= bottom && c1 <= right;
+    this.guiSelections = this.guiSelections.filter((g) => !inside(g.row, g.col, g.row, g.col));
+    this.guiScrollBars = this.guiScrollBars.filter((g) => !inside(g.row, g.col, g.row, g.col));
   }
 
   removeScrollBar(row: number, col: number): void {

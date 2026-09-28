@@ -63,7 +63,7 @@ function guiRecord(): Uint8Array {
 
   // スクロールバー（5,39）垂直 total=50 slider=25 size=4
   w.u8(ORDER.SBA).u8(5).u8(39);
-  writeWdsf(w, WDSF_TYPE.DEFINE_SCROLL_BAR_FIELD, [0x00, 0x00, 0, 0, 5, 0, 0, 0, 2, 5, 0x04]);
+  writeWdsf(w, WDSF_TYPE.DEFINE_SCROLL_BAR_FIELD, [0x00, 0x00, 0, 0, 0, 50, 0, 0, 0, 25, 0x04]); // 総数・位置は 32 ビットの 2 進
 
   w.u8(ESC).u8(COMMAND.READ_MDT_FIELDS).u8(0x00).u8(0x00);
   return buildRecord(OPCODE.PUT_GET, w.toUint8Array());

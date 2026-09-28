@@ -133,12 +133,12 @@ describe("WDSF GUI — DEFINE SELECTION FIELD (0x50)", () => {
 
 describe("WDSF GUI — DEFINE SCROLL BAR FIELD (0x53)", () => {
   it("方向・総数・つまみ位置・サイズを解析", () => {
-    // 垂直, 予約, total=100, slider=10, size=5
-    const body = [0x00, 0x00, 0, 1, 0, 0, 0, 0, 1, 0, 0x05];
+    // 垂直, 予約, total=300（0x0000012C）, slider=10, size=5。**総数・位置は 32 ビットの 2 進**（ACS `ENPTUIScrollBarField`。~~10 進 4 桁~~）
+    const body = [0x00, 0x00, 0x00, 0x00, 0x01, 0x2c, 0x00, 0x00, 0x00, 0x0a, 0x05];
     const { buf, warns } = applyGui([...sba(3, 7), ...wdsf(WDSF_TYPE.DEFINE_SCROLL_BAR_FIELD, body)]);
     expect(warns).toEqual([]);
     const s = buf.snapshot("t", false).gui!.scrollBars[0]!;
-    expect(s).toMatchObject({ row: 3, col: 7, horizontal: false, total: 100, sliderPos: 10, size: 5 });
+    expect(s).toMatchObject({ row: 3, col: 7, horizontal: false, total: 300, sliderPos: 10, size: 5 });
   });
 
   it("水平フラグ（0x80）を反映", () => {
@@ -265,5 +265,51 @@ describe("CFT・SOH での ENPTUI の構造体", () => {
     applyDataStream(Uint8Array.from([ESC, COMMAND.CLEAR_FORMAT_TABLE]), buf, codec, () => {});
     expect(gui(buf)?.windows ?? []).toHaveLength(0);
     expect(gui(buf)?.selectionFields ?? []).toHaveLength(0);
+  });
+});
+
+/**
+ * **WDSF の中身の読み方を ACS に合わせる**（`20260928-wdsf-behaviour`）。実機の ACS のコア（DSM の WDSFBEH・`scripts/acs-probe/wdsf-behaviour.txt`）で測った 4 巡
+ */
+describe("WDSF の読み方（ACS の実測）", () => {
+  /** 単一選択（0x11）のヘッダ 16 バイト（flag2・型・項目幅 5・行・数） */
+  const selHead = (flag2: number, type: number, rows: number, items: number): number[] =>
+    [0x00, flag2, 0x00, type, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, rows, items, 0x00, 0x00, 0x00, 0x00];
+  const choice = (flag3: number, ch: number): number[] => [0x08, 0x10, 0x00, 0x00, flag3, ch, ch, ch];
+
+  it("W1: flag3 に 0x80 の無い選択肢は無い（ACS は捨てる）", () => {
+    const { buf } = applyGui([...sba(5, 10), ...wdsf(WDSF_TYPE.DEFINE_SELECTION_FIELD, [...selHead(0x00, 0x11, 3, 3), ...choice(0x80, 0xc1), ...choice(0x40, 0xc2), ...choice(0x80, 0xc3)])]);
+    expect(buf.snapshot("t", false).gui!.selectionFields[0]!.choices.map((c) => c.text)).toEqual(["AAA", "CCC"]);
+  });
+
+  it("W2: スクロール・バー付き（flag2 0x80）は 8 バイト（総数・位置）の後ろから選択肢", () => {
+    const { buf } = applyGui([...sba(5, 10), ...wdsf(WDSF_TYPE.DEFINE_SELECTION_FIELD, [...selHead(0x80, 0x21, 2, 2), 0x00, 0x00, 0x01, 0x2c, 0x00, 0x00, 0x00, 0x10, ...choice(0x80, 0xc4), ...choice(0x80, 0xc5)])]);
+    expect(buf.snapshot("t", false).gui!.selectionFields[0]!.choices.map((c) => c.text)).toEqual(["DDD", "EEE"]);
+  });
+
+  /** (5,10) の普通の窓（深さ 6・幅 30）と、その中の (7,14) の選択欄 */
+  const winWithSel = [
+    ...sba(5, 10), ...wdsf(WDSF_TYPE.CREATE_WINDOW, [0x80, 0x00, 0x00, 0x06, 0x1e]),
+    ...sba(7, 14), ...wdsf(WDSF_TYPE.DEFINE_SELECTION_FIELD, [...selHead(0x00, 0x11, 1, 1), ...choice(0x80, 0xc6)])
+  ];
+  it("W3: 普通の窓にフラグ 0x40（引き下げの窓）の 0x59 は何も外さない。0x80 などほかの値も", () => {
+    for (const flag of [0x40, 0x80]) {
+      const { buf } = applyGui([...winWithSel, ...sba(5, 10), ...wdsf(WDSF_TYPE.REM_GUI_WINDOW, [flag, 0x00, 0x00])]);
+      const gui = buf.snapshot("t", false).gui!;
+      expect(gui.windows).toHaveLength(1);
+      expect(gui.selectionFields).toHaveLength(1);
+    }
+  });
+
+  it("W4: フラグ 0x00 の 0x59 は窓と、窓の中の選択欄を外す", () => {
+    const { buf } = applyGui([...winWithSel, ...sba(5, 10), ...wdsf(WDSF_TYPE.REM_GUI_WINDOW, [0x00, 0x00, 0x00])]);
+    expect(buf.snapshot("t", false).gui).toBeUndefined();
+  });
+
+  it("位置の一致しない 0x58・0x59 は何も外さない（~~一致が無ければ全除去~~）", () => {
+    const { buf } = applyGui([...winWithSel, ...sba(9, 9), ...wdsf(WDSF_TYPE.REM_GUI_SEL_FIELD, [0x00, 0x00]), ...sba(9, 9), ...wdsf(WDSF_TYPE.REM_GUI_WINDOW, [0x00, 0x00, 0x00])]);
+    const gui = buf.snapshot("t", false).gui!;
+    expect(gui.windows).toHaveLength(1);
+    expect(gui.selectionFields).toHaveLength(1);
   });
 });

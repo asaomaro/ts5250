@@ -1228,6 +1228,70 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "WDSFBEH") == 0) {
+        /*
+         * **WDSF の中身の読み方の差**を画面で測る（台帳「WDSF の中の否定応答」の「応答ではない挙動の差」。ACS `ENPTUI5250` ほか）。巡ごと（ログは `[W1]`〜`[W4]`）:
+         *   W1 (5,10) 単一選択の欄に 3 つの選択肢、2 つ目だけ flag3 が 0x40（0x80 が無い——ACS は捨てる）
+         *   W2 (5,10) スクロール・バー付き（flag2 0x80）の単一選択のリスト（型 0x21。0x11 は ACS が否定応答）。総数 0x0000012C・位置 0x00000010 の後に選択肢（ACS は 28 バイト目から）
+         *   W3 (5,10) カーソルを制限する窓（flag 0x80・深さ 6・幅 30）の中の (7,14) に欄。別のレコードで 0x59 のフラグ 0x40（引き下げの窓だけ——普通の窓は外れない）
+         *   W4 W3 と同じで 0x59 のフラグ 0x00（窓が外れ、カーソルが窓の外へ出られる）。W1・W2 の欄は (20,10) 6 桁
+         */
+        static const unsigned char fld[] = { 0x11, 0x14, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06, 0x13, 0x14, 0x0A };
+        static const unsigned char sel3[] = {
+            0x11, 0x05, 0x0A, 0x15, 0x00, 0x2C, 0xD9, 0x50, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x10, 0x00, 0x00, 0x80, 0xC1, 0xC1, 0xC1,
+            0x08, 0x10, 0x00, 0x00, 0x40, 0xC2, 0xC2, 0xC2,
+            0x08, 0x10, 0x00, 0x00, 0x80, 0xC3, 0xC3, 0xC3
+        };
+        static const unsigned char selsb[] = {
+            0x11, 0x05, 0x0A, 0x15, 0x00, 0x2C, 0xD9, 0x50, 0x00, 0x80, 0x00, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x2C, 0x00, 0x00, 0x00, 0x10,
+            0x08, 0x10, 0x00, 0x00, 0x80, 0xC4, 0xC4, 0xC4,
+            0x08, 0x10, 0x00, 0x00, 0x80, 0xC5, 0xC5, 0xC5
+        };
+        static const unsigned char win[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x09, 0xD9, 0x51, 0x80, 0x00, 0x00, 0x06, 0x1E };
+        static const unsigned char fldin[] = { 0x11, 0x07, 0x0D, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06, 0x13, 0x07, 0x0E };
+        static const unsigned char selin[] = {
+            0x11, 0x07, 0x0E, 0x15, 0x00, 0x1C, 0xD9, 0x50, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x08, 0x10, 0x00, 0x00, 0x80, 0xC6, 0xC6, 0xC6
+        };
+        static const unsigned char rem40[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x07, 0xD9, 0x59, 0x40, 0x00, 0x00 };
+        static const unsigned char rem00[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x07, 0xD9, 0x59, 0x00, 0x00, 0x00 };
+        static char wtags[4][8];
+        unsigned char w[160];
+        int k, n;
+        for (k = 0; k < 4; k++) {
+            sprintf(wtags[k], "[W%d] ", k + 1);
+            tag = wtags[k];
+            n = 0; w[n++] = 0x00; w[n++] = 0x00;
+            if (k == 0) { memcpy(w + n, sel3, sizeof(sel3)); n += sizeof(sel3); }
+            if (k == 1) { memcpy(w + n, selsb, sizeof(selsb)); n += sizeof(selsb); }
+            if (k >= 2) { memcpy(w + n, win, sizeof(win)); n += sizeof(win); memcpy(w + n, fldin, sizeof(fldin)); n += sizeof(fldin); }
+            else { memcpy(w + n, fld, sizeof(fld)); n += sizeof(fld); }
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WDSF)", rc, fdbk);
+            if (k >= 2) {
+                n = 0; w[n++] = 0x00; w[n++] = 0x00;
+                if (k == 2) { memcpy(w + n, rem40, sizeof(rem40)); n += sizeof(rem40); }
+                else { memcpy(w + n, rem00, sizeof(rem00)); n += sizeof(rem00); }
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 WDSF 0x59)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。
