@@ -792,8 +792,16 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **完了（`20260927-early-return-rest`）**: 実機（DSM の READCC2 / CUANOPARM / SPROLL・ワイヤ）で ACS のコアと当 PJ が一致（`scripts/verify-early-return-rest.mjs` pass=4）。
   READ の CC1・CC2 は効かせない（CC1 は原典だけ）、引数の無い CLEAR UNIT ALTERNATE は 0 として消す（否定応答にしない）、その場で戻ったレコードの SAVE PARTIAL の応答は否定応答の後・次のレコードで送る（置き場は 1 つ）。
   SAVE PARTIAL の後ろに WTD が続くとき ACS が前の警報をもう一度鳴らすことには合わせない（D1）。
+- [x] **節目の懸念の残りのうち HLLAPI の Tab・Backtab・Home の MF・自己点検**。**完了（`20260927-hllapi-tab-mandatory`）**: 欄を出る `@T`・`@B`・`@0` は、出る欄が MF（途中まで）・自己点検の違反なら
+  欄頭へ戻して `rc=5`、後ろのキーを処理しない（`packages/server/src/hllapi-leave-check.ts` の `leaveViolation`）。実機の ACS のコア（`scripts/acs-probe/hllapi-tab-mandatory.txt`。2 回）: ADJPGM の MF 欄に AB で
+  Tab・欄頭からの Backtab・Home は 7,20・inhibit=5、Tab の後ろの CD は入らない、欄の途中からの Backtab は止まらない。当 PJ（`scripts/verify-hllapi-tab-mandatory.mjs`）pass=12。単体 14 件・mutation 14 通り検出。
+  `setFieldExitReqFlag(true)` は AID の前の検査（エラー 32）にしか効かず、HLLAPI はその検査を持たない（下の項目）。
+- [ ] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）／
+  ペインの `mandatoryFillViolated`・`selfCheckViolated`（`packages/web-ui/src/composables/mandatoryCheck.ts`）は符号付き数値の符号の桁を除かない（ACS `isFieldFull`・`checkModulusField` は除く。HLLAPI は除く）。
+- [ ] **HLLAPI・MCP の AID の前の検査が無い**（上から割った。優先度 低）: ACS `processAIDCode` はカーソル下の欄の MF（20）・Field Exit 必須の欄を出ずに送る（32）・自己点検（21）・ME（7）を見て止まる。
+  ペインは `mandatoryCheck.ts` で見るが、HLLAPI の `@E` 等・MCP の `send_key` は core の `sendAid` へそのまま渡す（core にも server にも検査が無い）。ACS の HLLAPI はこの経路でも止まるはず（ECL の `sendKeys` で測れる）。
 - [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
-  HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）・ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）／
+  HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／
   ゾーン D の負の数をホストが負として受け取るか（DDS の数値の欄で確かめる）／応答をコマンドの順に送らない（`[WSF Query][SAVE SCREEN]` などを 1 本のレコードで出させて ACS のワイヤと比べる。当 PJ は適用の後に固定の順）／
   カーソル送りの番号の範囲と昇順でない定義（`standardFields` は画面順）／O 欄が全角で始まるときの先頭の桁の選択。
 - [x] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。

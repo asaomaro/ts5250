@@ -1,0 +1,83 @@
+# **MF の欄を出る Tab・Backtab・Home で ACS は止まるか・止まった後の字は入るか**（ACS のコア・社内機。`20260927-hllapi-tab-mandatory`）。
+# 原典: `PS5250.processTab` / `processBacktab` / `processHome`（ホーム位置でないとき）はどれも移動の後に `moveCursorWithMandFillCheck` を通す。
+# ECL の `sendKeys` は HLLAPI の SendKey と同じくキーの列を 1 本で渡す——止まった後ろに続く字が入るかを見る。
+# **実測（2026-09-28・社内機・ACS のコア。2 回で一致）**: AB を打って Tab → 欄頭 7,20・`inhibit=5`、続く `CD` は入らない（欄は `AB` のまま）。
+#   欄の途中からの Backtab は同じ欄の先頭へ戻るだけで止まらない（`inhibit=0`）。欄頭から前の欄へ出る Backtab → 7,20・`inhibit=5`。
+#   Home（ホーム位置は MF 欄の外）→ 7,20・`inhibit=5`。
+# 画面は ADJPGM（7,20=CHECK(MF) A 6 桁 / 11,20=CHECK(ME) A / 13,20=素の A）。F3 は CA03。実機にオブジェクトは作らない。
+signon
+keys [enter]
+settle 1200
+keys [home][eraseeof]ADDLIBLE ${LIB}[enter]
+settle 1500
+
+# --- 1) MF 欄に AB を打って Tab、続けて CD（1 本のキー列） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,21
+settle 300
+keys AB[tab]CD
+settle 800
+dump t1-tab-then-cd
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [pf3]
+settle 1500
+dump exit-1
+
+# --- 2) 同じく Backtab ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,21
+settle 300
+keys AB[backtab]
+settle 800
+dump t2-backtab
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [pf3]
+settle 1500
+dump exit-2
+
+# --- 2b) 打った後、欄の先頭へ戻して Backtab（前の欄へ出る） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,21
+settle 300
+keys AB
+settle 300
+setcursor 7,20
+settle 300
+keys [backtab]
+settle 800
+dump t2b-backtab-leave
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [pf3]
+settle 1500
+dump exit-2b
+
+# --- 3) 同じく Home（ホーム位置は MF 欄の外） ---
+keys [home][eraseeof]CALL ${LIB}/ADJPGM[enter]
+settle 2500
+setcursor 7,21
+settle 300
+keys AB[home]
+settle 800
+dump t3-home
+keys [reset]
+settle 500
+setcursor 13,20
+settle 300
+keys [pf3]
+settle 1500
+dump exit-3
+
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

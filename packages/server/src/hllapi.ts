@@ -41,6 +41,7 @@ import {
 } from "./hllapi-ps.js";
 import { decodeCp932, encodeCp932 } from "./hllapi-cp932.js";
 import { tabPosition, backtabPosition } from "@ts5250/tn5250";
+import { leaveViolation } from "./hllapi-leave-check.js";
 
 /** 短縮名 1 文字（`A`〜`Z`） */
 type PsName = string;
@@ -718,7 +719,9 @@ async function sendKey(
         if (r.rc !== HRC.SUCCESSFUL) return r;
         continue;
       }
-      moveCursor(snapshot, conn, stroke.action);
+      // **欄を出る前の MF・自己点検で止まったら、後ろのキーを処理しない**（ACS はエラー 20 / 21 の入力禁止で後ろの字を受けない。
+      // HLLAPI は入力禁止の状態を持たないので、入力禁止の欄へ打ったときと同じ `rc=5` で返す。`20260927-hllapi-tab-mandatory`）
+      if (!moveCursor(snapshot, conn, stroke.action)) return { rc: HRC.FUNCTION_INHIBITED };
       continue;
     }
     // 上で弾いているのでここには来ないが、**型で閉じておく**（分岐の追加漏れを防ぐ）
@@ -736,53 +739,58 @@ function homePos(snapshot: ScreenSnapshot): number {
   return (h.row - 1) * snapshot.cols + h.col;
 }
 
-/** ローカル操作でカーソルを動かす（ホストへ送らない） */
-function moveCursor(snapshot: ScreenSnapshot, conn: Connection, action: LocalAction): void {
+/**
+ * ローカル操作でカーソルを動かす（ホストへ送らない）。
+ * **Tab・Backtab・Home は欄を出る前の検査を通す**（ACS `moveCursorWithMandFillCheck`。`leaveViolation`）——
+ * 出る欄が MF・自己点検の違反なら、カーソルをその欄の先頭に置いて `false`（止まった）を返す。
+ */
+function moveCursor(snapshot: ScreenSnapshot, conn: Connection, action: LocalAction): boolean {
   const size = sizeOf(snapshot);
   const max = psLength(size);
+  // 止まったら出る欄の先頭へ。継続欄は**その区間の先頭**（ACS は区間ごとの `Field5250` の `getStartPos()`）
+  const leave = (to: number): boolean => {
+    const bad = leaveViolation(snapshot, conn.cursor, to);
+    conn.cursor = bad ? (fieldStart(bad, size) ?? conn.cursor) : to;
+    return bad === undefined;
+  };
   switch (action) {
     case "home": {
       // ホーム位置（IC、無ければ先頭の非バイパス欄。ACS `getHomePos`）。~~先頭の入力欄~~ はホーム位置を持たない画面
       // （3270）の代わり
-      if (snapshot.home !== undefined) {
-        conn.cursor = homePos(snapshot);
-        return;
-      }
+      if (snapshot.home !== undefined) return leave(homePos(snapshot));
       const first = nextInputField(snapshot, 0);
-      conn.cursor = first ? (fieldStart(first, size) ?? 1) : 1;
-      return;
+      return leave(first ? (fieldStart(first, size) ?? 1) : 1);
     }
     case "tab": {
       // ACS と同じ行き先（カーソル送り・継続欄・DBCS の SO。`tabPosition`）。入力欄が無ければ画面のホーム位置（ACS `processTab`）
       // ~~次の入力欄の先頭~~（`20260921-hllapi-tab-acs`。ペインの Tab と同じ規則にそろえた）
       const to = tabPosition(snapshot, conn.cursor);
-      if (to !== undefined) conn.cursor = to;
-      else if (snapshot.home !== undefined) conn.cursor = homePos(snapshot);
-      return;
+      if (to !== undefined) return leave(to);
+      if (snapshot.home !== undefined) return leave(homePos(snapshot));
+      return true;
     }
     case "backtab": {
       // ACS と同じ行き先（欄の途中ならその欄の先頭・カーソル送りの逆引き・継続欄。`backtabPosition`）。
       // ~~前の入力欄の先頭~~——欄の途中から押すと 1 つ前の欄へ飛んでいた（ペインは `20260921-backtab-acs` で直してあった）
       const to = backtabPosition(snapshot, conn.cursor);
-      if (to !== undefined) conn.cursor = to;
-      return;
+      return to !== undefined ? leave(to) : true;
     }
     case "left":
       conn.cursor = Math.max(1, conn.cursor - 1);
-      return;
+      return true;
     case "right":
       conn.cursor = Math.min(max, conn.cursor + 1);
-      return;
+      return true;
     case "up":
       conn.cursor = Math.max(1, conn.cursor - size.cols);
-      return;
+      return true;
     case "down":
       conn.cursor = Math.min(max, conn.cursor + size.cols);
-      return;
+      return true;
     default:
       // eraseEof / delete / backspace / newline / reset は
       // **画面の書き換えを伴う**ので、この版では位置だけ据え置く（docs に明記）
-      return;
+      return true;
   }
 }
 

@@ -355,6 +355,139 @@ describe("キー送信", () => {
   });
 });
 
+// `20260927-hllapi-tab-mandatory`: Tab・Backtab・Home は欄を出る前に MF・自己点検を見る（ACS `moveCursorWithMandFillCheck`）。
+// 実機の ACS のコア: MF 欄に AB で Tab・欄頭からの Backtab・Home は欄頭・入力禁止、Tab の後ろの字は入らない（`scripts/acs-probe/hllapi-tab-mandatory.txt`）
+describe("欄を出るときの MF・自己点検", () => {
+  /** 3 行目 20 桁目から `value` を置いた 24x80 の画面。欄は (3,20) の 6 桁（`over`）と (5,20)・(7,20) の素の欄 */
+  const mfScreen = (value: string, over: Partial<Field> = {}, extra: Partial<ScreenSnapshot> = {}): ScreenSnapshot => {
+    const text = Array.from({ length: 24 }, () => "");
+    text[2] = " ".repeat(19) + value;
+    const fields = [
+      field({ index: 1, row: 3, col: 20, length: 6, adjust: "mandatory-fill", mdt: true, value: value.trim(), ...over }),
+      field({ index: 2, row: 5, col: 20, length: 6 }),
+      field({ index: 3, row: 7, col: 20, length: 6 })
+    ];
+    return { ...snap({ rows: 24, cols: 80, text, fields }), ...extra };
+  };
+  const at = (row: number, col: number): number => (row - 1) * 80 + col;
+
+  it("**MF に途中まで打って @T は止まる**——欄頭に戻り rc=5、後ろの Enter は送らない", async () => {
+    const { deps, sendAid } = await connected({ snapshot: mfScreen("AB") });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+    // カーソルは欄頭（次の Enter が運ぶカーソルで見る）
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+  });
+
+  it("**止まった後ろの字は書かない**（ACS: Tab の後ろの CD は入らない）", async () => {
+    const { deps, setField } = await connected({ snapshot: mfScreen("AB") });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@TCD" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(setField).not.toHaveBeenCalled();
+  });
+
+  it("**欄頭からの @B（前の欄へ出る）は止まる**、欄の途中からの @B（同じ欄の先頭へ戻る）は止まらない", async () => {
+    const a = await connected({ snapshot: mfScreen("AB") });
+    await call(a.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(a.deps, HF.SEND_KEY, { data: "@B" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    const b = await connected({ snapshot: mfScreen("AB") });
+    await call(b.deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(b.deps, HF.SEND_KEY, { data: "@B@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(b.sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+  });
+
+  it("**@0（ホーム位置が欄の外）も止まる**", async () => {
+    const { deps, sendAid } = await connected({ snapshot: mfScreen("AB", {}, { home: { row: 7, col: 20 } }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@0@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 3, col: 20 } }));
+  });
+
+  it.each([
+    ["空", "", {}],
+    ["満杯", "ABCDEF", {}],
+    ["MDT が無い", "AB", { mdt: false }],
+    ["MF でない", "AB", { adjust: undefined }],
+    ["非表示（値が読めない）", "AB", { hidden: true }],
+    ["符号付き数値で符号の桁の手前まで埋まっている", "12345", { signedNumeric: true, numeric: true }]
+  ] as const)("MF で止まらない: %s", async (_n, value, over) => {
+    const { deps, sendAid } = await connected({ snapshot: mfScreen(value, over as Partial<Field>) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalledWith("Enter", expect.objectContaining({ cursor: { row: 5, col: 20 } }));
+  });
+
+  it("**継続欄の 2 区間目は、先頭区間の MDT で MF を見る**（core は MDT を先頭区間にだけ立てる）", async () => {
+    const text = Array.from({ length: 24 }, () => "");
+    text[2] = " ".repeat(19) + "12" + " " + "3";
+    const fields = [
+      field({ index: 1, row: 3, col: 20, length: 2, continued: "first", mdt: true }),
+      field({ index: 2, row: 3, col: 23, length: 3, continued: "last", adjust: "mandatory-fill" }),
+      field({ index: 3, row: 5, col: 20, length: 6 })
+    ];
+    const { deps } = await connected({ snapshot: snap({ rows: 24, cols: 80, text, fields }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 24) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+  });
+
+  it("**全角で終わる DBCS の MF は満杯**（SI の桁は PS では空白だが、空きではない）", async () => {
+    const text = Array.from({ length: 24 }, () => "");
+    const s = snap({ rows: 24, cols: 80, text, fields: [
+      field({ index: 1, row: 3, col: 20, length: 4, adjust: "mandatory-fill", mdt: true, dbcsType: "only" }),
+      field({ index: 2, row: 5, col: 20, length: 6 })
+    ] });
+    const line = s.cells[2]!;
+    line[19] = cell(" ", "so");
+    line[20] = cell("あ", "dbcs-lead");
+    line[21] = cell("", "dbcs-tail");
+    line[22] = cell(" ", "si");
+    const { deps } = await connected({ snapshot: s });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+
+  /** (3,20) の 10 桁の DBCS の MF 欄。`kinds` を先頭から置く */
+  const dbcsMf = (dbcsType: "either" | "only", kinds: [string, CellKind][]): ScreenSnapshot => {
+    const s = snap({ rows: 24, cols: 80, fields: [
+      field({ index: 1, row: 3, col: 20, length: 10, adjust: "mandatory-fill", mdt: true, dbcsType }),
+      field({ index: 2, row: 5, col: 20, length: 6 })
+    ] });
+    kinds.forEach(([ch, k], i) => (s.cells[2]![19 + i] = cell(ch, k)));
+    return s;
+  };
+  const wide = (n: number): [string, CellKind][] => Array.from({ length: n }, () => [["あ", "dbcs-lead"], ["", "dbcs-tail"]] as [string, CellKind][]).flat();
+
+  it.each([
+    ["全角のまま空にした E 欄（SO だけ残る）は空", "either", [[" ", "so"]], HRC.SUCCESSFUL],
+    ["J 欄の途中まで（SO あ ヌル… 欄の末尾に SI）は止まる", "only", [[" ", "so"], ...wide(1), [" ", "sbcs"], [" ", "sbcs"], [" ", "sbcs"], [" ", "sbcs"], [" ", "sbcs"], [" ", "sbcs"], [" ", "si"]], HRC.FUNCTION_INHIBITED],
+    ["満杯の J 欄（SO あいうえ SI）は通る", "only", [[" ", "so"], ...wide(4), [" ", "si"]], HRC.SUCCESSFUL]
+  ] as const)("DBCS の MF: %s", async (_n, t, kinds, rc) => {
+    const { deps } = await connected({ snapshot: dbcsMf(t, kinds as unknown as [string, CellKind][]) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(rc);
+  });
+
+  it("**自己点検の合わない値で @T は止まる**（MDT が無くても——自己点検は MDT を見ない）。合う値は通る", async () => {
+    const bad = await connected({ snapshot: mfScreen("12340", { adjust: undefined, selfCheck: "mod10", mdt: false }) });
+    await call(bad.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(bad.deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    const good = await connected({ snapshot: mfScreen("12344", { adjust: undefined, selfCheck: "mod10" }) });
+    await call(good.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(good.deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+
+  it("保護欄・欄の外から出るときは見ない", async () => {
+    const { deps } = await connected({ snapshot: mfScreen("AB", { protected: true }) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
+    await call(deps, HF.SET_CURSOR, { pos: at(1, 1) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@T" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+});
+
 describe("日本語（DBCS）", () => {
   it("**全角を含む画面がバイト単位で正しく返る**", async () => {
     const { deps } = await connected({ snapshot: snap({ text: ["サイン"], rows: 1, cols: 10 }) });
