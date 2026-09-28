@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import EmulatorPane from "../src/components/EmulatorPane.vue";
@@ -135,8 +136,8 @@ describe("IME 確定の余りを次の入力欄へ流す", () => {
     const w = mountPane();
     await nextTick();
     await commit(1, "あいうえおか");
-    expect(edited(1)).toBe("あいうえ");
-    expect(edited(2)).toBe("おか");
+    expect(edited(1)).toBe(o("{あいうえ}"));
+    expect(edited(2)).toBe(o("{おか}"));
     w.unmount();
   });
 
@@ -147,8 +148,8 @@ describe("IME 確定の余りを次の入力欄へ流す", () => {
     const w = mountPane();
     await nextTick();
     await commit(1, "あいう");
-    expect(edited(1)).toBe("あ");
-    expect(edited(2)).toBe("いうお");
+    expect(edited(1)).toBe(o("{あ}"));
+    expect(edited(2)).toBe(o("{いうお}"));
     w.unmount();
   });
 });
@@ -187,7 +188,7 @@ describe("IME 確定の余りは、満杯の欄が受けない字でも次の欄
     await nextTick();
     await commit(1, "ABあい");
     expect(edited(1)).toBe("AB");
-    expect(edited(2)).toBe("あい");
+    expect(edited(2)).toBe(o("{あい}"));
     w.unmount();
   });
 
@@ -226,7 +227,7 @@ describe("IME 確定の余りは、満杯の欄が受けない字でも次の欄
     el.value = el.value + "お";
     el.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
     for (let i = 0; i < 3; i++) await nextTick();
-    expect(edited(1)).toBe("あいうお");
+    expect(edited(1)).toBe(o("{あいうお}"));
     expect(edited(2), "満杯として次の欄へ流していない").toBeUndefined();
     w.unmount();
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { columnView, isFullWidth } from "../src/composables/fieldValidate.js";
@@ -98,7 +99,7 @@ describe("DBCS 欄への複数行ペースト", () => {
     (w.vm as unknown as { pasteAt: (r: number, c: number, t: string) => void }).pasteAt(1, 13, "ZZZ");
     const emitted = (w.emitted("edit") ?? []) as [number, string][];
     const value = [...emitted].reverse().find((e) => e[0] === 1)![1];
-    expect(value.startsWith("１    AAA")).toBe(true); // 元の内容はそのまま
+    expect(value.startsWith(o("{１}    AAA"))).toBe(true); // 元の内容はそのまま（O 欄の値は SO/SI の印を持つ。`20260928-o-field-cells`）
     expect(lastWordCol(value, "ZZZ")).toBe(13);
     w.unmount();
   });

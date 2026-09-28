@@ -1,0 +1,13 @@
+schema: 11
+slug: o-field-cells
+current: deliver
+approved: [requirements, research, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: O 欄の挿入のあとのバイト列が ACS と違う（並びの境目の SO/SI）
+harnessRevDelivered: unknown

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { GRID_PAD_X, GRID_PAD_Y } from "../src/composables/fitFont.js";
 import { nextTick } from "vue";
@@ -386,7 +387,7 @@ describe("ScreenGrid", () => {
     el.value = "日本語"; // IME が確定文字を挿入
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("日本語"); // DBCS 全角が取り込まれる
+    expect(emits.at(-1)![1]).toBe(o("{日本語}")); // DBCS 全角が取り込まれる（O 欄の値は SO/SI の印を持つ。`20260928-o-field-cells`）
   });
 
   it("IME 確定で欄のバイト予算（SO/SI・DBCS 2 バイト込み）を超える DBCS は切り捨てる", async () => {
@@ -402,7 +403,7 @@ describe("ScreenGrid", () => {
     el.value = "あいう"; // IME が 3 文字確定（8 バイト相当）
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("あい"); // 6 バイトに収まる「あい」のみ、「う」は切り捨て
+    expect(emits.at(-1)![1]).toBe(o("{あい}")); // 6 バイトに収まる「あい」のみ、「う」は切り捨て（い で最後のセルの SI まで埋まる）
   });
 
   it("既入力の後ろに IME 合成すると、既入力を残し候補が入力位置に出る（先頭に出ない）", async () => {
@@ -421,15 +422,17 @@ describe("ScreenGrid", () => {
     // 列ビュー " あいう     "（SO=0 / あ=1 / い=2 / う=3 / SI=4 / 以降パディング）。
     // 「う の直後」の論理カーソルは SI の後ろ（view 5）。value 末尾はパディング末尾であって
     // 既入力の直後ではない（欄長までスペース埋めされているため）。
-    el.setSelectionRange(5, 5);
+    // **O 欄は ACS と同じくカーソルを SI の上に置ける**。全角を打った直後の ACS のカーソルは SI の上で、そこで打てば並びが延びる
+    // （SI の後ろ〔view 5〕で打つと別の並びになる——ACS の上書きの表。`20260928-o-field-cells`）
+    el.setSelectionRange(4, 4);
     await input.trigger("compositionstart");
-    // 合成中は純論理値 prefix「あいう」（SO/SI 無し）＋候補 → 候補が先頭でなく入力位置に出る
-    expect(el.value).toBe("あいう");
-    expect(el.selectionStart).toBe(3); // caret は prefix の末尾＝合成開始位置（論理 3）
-    el.value = "あいうえお"; // IME が「えお」を既入力の後ろに挿入
+    // 合成中は値の prefix（SO の印は空白 1 桁）＋候補 → 候補が先頭でなく入力位置に出る
+    expect(el.value).toBe(" あいう");
+    expect(el.selectionStart).toBe(4); // caret は prefix の末尾＝合成開始位置（SI の上）
+    el.value = " あいうえお"; // IME が「えお」を既入力の後ろに挿入
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("あいうえお"); // 既入力＋確定分が二重化せず結合
+    expect(emits.at(-1)![1]).toBe(o("{あいうえお}")); // 既入力＋確定分が二重化せず結合（並びが延びる）
   });
 
   it("hidden（パスワード）欄は何も表示せず・実値は DOM に出ず・送信値は実入力", async () => {
@@ -534,7 +537,7 @@ describe("ScreenGrid", () => {
     await input.trigger("keydown", { key: "End" });
     await input.trigger("keydown", { key: "B" });
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("AあB"); // 純データ（末尾パディングは送らない）
+    expect(emits.at(-1)![1]).toBe(o("A{あ}B")); // 末尾パディングは送らない。O 欄は SO/SI の印を持つ（`20260928-o-field-cells`）
     expect(el.value).toBe("A あ B" + "  "); // columnView("AあB")：あ の後ろに SI スペース＋埋め
 
     // blur で休止表示へ。standalone mount では edit は props.edits へ反映されないため
@@ -604,8 +607,9 @@ describe("ScreenGrid", () => {
     expect((w2.find("input.grid-input").element as HTMLInputElement).value.startsWith("}")).toBe(true);
   });
 
-  it("DBCS 欄の矢印カーソルは SO/SI スペースをスキップする（ライブ列ビュー）", async () => {
-    // 論理 "AあB" → 列ビュー "A あ B"（index1=SO, index3=SI）。cursor は A/あ/B/末尾のみに止まる
+  // ~~SO/SI スペースをスキップする~~——ACS の O 欄はカーソルを SO・SI の桁にも置く（`ECLPS.moveCursor`。`20260928-o-field-cells`）
+  it("O 欄の矢印カーソルは SO・SI の桁にも止まる（ACS と同じ。全角は 1 回で 2 桁）", async () => {
+    // 論理 "AあB" → 列ビュー "A あ B"（index1=SO, index3=SI）
     const fields: Field[] = [
       { index: 1, row: 6, col: 10, length: 8, protected: false, hidden: false, numeric: false, dbcsType: "open", mdt: false, value: "" }
     ];
@@ -624,13 +628,17 @@ describe("ScreenGrid", () => {
     expect(el.value).toBe("A あ B" + "  "); // columnView("AあB")＋欄長までの埋め
     expect(el.selectionStart).toBe(0); // A の前
     await input.trigger("keydown", { key: "ArrowRight" });
-    expect(el.selectionStart).toBe(2); // SO(桁1) を飛ばして あ へ
+    expect(el.selectionStart).toBe(1); // SO
     await input.trigger("keydown", { key: "ArrowRight" });
-    expect(el.selectionStart).toBe(4); // SI(桁3) を飛ばして B へ
+    expect(el.selectionStart).toBe(2); // あ
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(3); // SI
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(4); // B
     await input.trigger("keydown", { key: "ArrowRight" });
     expect(el.selectionStart).toBe(5); // 末尾
     await input.trigger("keydown", { key: "ArrowLeft" });
-    expect(el.selectionStart).toBe(4); // B へ戻る（SI スキップ）
+    expect(el.selectionStart).toBe(4); // B へ戻る
     w.unmount();
   });
 
@@ -711,12 +719,13 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     await input.trigger("paste", { clipboardData: { getData: () => "日本語" } });
     let emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("日本語");
+    expect(emits.at(-1)![1]).toBe(o("{日本語}"));
     // 末尾へ移動してさらに貼り付け（cursor===len で typeChar にブロックされない回帰）
     await input.trigger("keydown", { key: "End" });
     await input.trigger("paste", { clipboardData: { getData: () => "あ" } });
     emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("日本語あ");
+    // End は SI の後ろ（ACS `getEndPosition`）なので、そこへの全角は別の並び（ACS の上書きの表）
+    expect(emits.at(-1)![1]).toBe(o("{日本語}{あ}"));
   });
 
   it("選択範囲を Delete/入力で削除・置換できる（SBCS）", async () => {
@@ -754,7 +763,7 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     el.setSelectionRange(1, 3);
     await input.trigger("keydown", { key: "Delete" });
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("う");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("{う}"));
     w.unmount();
     // あい を選択して え を入力 → えう（選択置換）
     w = mount(ScreenGrid, { props: { snapshot: makeSnap(fields), edits: new Map([[1, "あいう"]]), focused: true } });
@@ -763,9 +772,9 @@ describe("ScreenGrid", () => {
     await input.trigger("focus");
     el.setSelectionRange(1, 3);
     await input.trigger("compositionstart");
-    el.value = "え";
+    el.value += "え"; // 実 IME は prefix（O 欄は SO の印の 1 桁）へ追記する
     await input.trigger("compositionend");
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("えう");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("{えう}"));
     w.unmount();
   });
 
@@ -1778,7 +1787,7 @@ describe("DBCS 座標変換の集約（dbcsLayoutOf）", () => {
     el.value += "日";
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe("     日"); // 5 桁目に入る
+    expect(emits.at(-1)![1]).toBe(o("     {日}")); // 5 桁目に入る
     w.unmount();
   });
 });
@@ -1803,7 +1812,7 @@ describe("DBCS 欄の上書き（全角）", () => {
     (input.element as HTMLInputElement).setSelectionRange(1, 1);
     await input.trigger("paste", { clipboardData: { getData: () => "日" } } as unknown as ClipboardEvent);
     // 日 は SO+2+SI=4 桁を占めるので後続 BCDE を食う → A日F（挿入なら A日BCDEF）
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日F");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("A{日}F"));
     w.unmount();
   });
 
@@ -1819,7 +1828,7 @@ describe("DBCS 欄の上書き（全角）", () => {
     await input.trigger("compositionstart");
     el.value += "日"; // 実 IME は既存 value（prefix）へ追記する
     await input.trigger("compositionend");
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日F");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("A{日}F"));
     w.unmount();
   });
 
@@ -1835,7 +1844,7 @@ describe("DBCS 欄の上書き（全角）", () => {
     await input.trigger("keydown", { key: "Insert" }); // 挿入モードへ
     el.setSelectionRange(1, 1);
     await input.trigger("paste", { clipboardData: { getData: () => "日" } } as unknown as ClipboardEvent);
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A日BCDEF");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("A{日}BCDEF"));
     w.unmount();
   });
 });
@@ -2059,7 +2068,7 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     await typeKey(w, "End");
     await typeKey(w, "あ");
     // 送信値へ余計なスペースを入れない（桁揃えする実装では "A"*72 + " あ" になっていた）
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(72) + "あ");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("A".repeat(72) + "{あ}"));
     // またぐ全角の実体は 1 行目の末尾が持つ（input 幅でクリップされ左半分が行末に出る）
     expect((inputs[0]!.element as HTMLInputElement).value.endsWith("あ")).toBe(true);
     // 2 行目は「またいで来た後半桁」ぶんの空白 1 桁で始まり、桁数は 79 のまま
@@ -2094,8 +2103,10 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     const second = w.findAll("input.grid-input")[1]!;
     await second.trigger("focus");
     await typeKey(w, "End");
+    // End は SI の後ろ（ACS `getEndPosition`）。そこで Backspace は直前が単独の SI で 0065 なので、SI の上へ 1 つ戻ってから消す
+    await typeKey(w, "ArrowLeft");
     await typeKey(w, "Backspace");
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("A".repeat(74) + "あ");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(o("A".repeat(74) + "{あ}"));
     w.unmount();
   });
 });

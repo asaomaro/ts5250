@@ -162,7 +162,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`packages/web-ui/src/components/ScreenGrid.vue` の `acsInsertShortOfRoom`。打鍵・貼り付け・IME の確定の 3 経路とも。テスト `packages/web-ui/test/dbcs-insert-sosi-room.test.ts` 23 件）。
   C5 の「空の SO/SI が残るか」は原典の操作列で**残る**と確定（`A`・SO・SI・`X`・SO・`あい`…）。あわせて IME の確定で選択を複数字で置き換えると 2 字目以降に最終桁・必要桁の判定が掛からなかったのを直した。
   残り 2 つは下の兄弟の `[ ]` に割った。
-- [ ] **O 欄の挿入のあとのバイト列が ACS と違う（並びの境目の SO/SI）**（優先度 低・深さ ◐。`20260926-dbcs-insert-sosi-room` decisions D2 から割った）。
+- [x] **O 欄の挿入のあとのバイト列が ACS と違う（並びの境目の SO/SI）**（優先度 低・深さ ◐。`20260926-dbcs-insert-sosi-room` decisions D2 から割った）。
+  **完了（`20260928-o-field-cells`）**: 継続していない O 欄の編集を ACS と同じセルの並びで行うようにした——編集の値に SO/SI の印（0x0E・0x0F のセンチネル）を持ち、上書き・挿入・Delete・Backspace・
+  Erase EOF・Field Exit を ACS の表（`PS5250.inputChar` / `insertChar` / `processDeleteChar` / `processBackspace` / `eraseToEOF_Work`）どおりに行う（`packages/web-ui/src/composables/oFieldCells.ts`）。
+  コアは印を含む値を構造どおりのセルに置き、SO/SI を付け直さずに送る（`read-response.ts` の `writeValue`・`buffer.ts` の `setFieldCells`）。カーソルは SO・SI の桁にも止まる。
+  実機の ACS のコア（DSM の OEDIT・`scripts/acs-probe/o-field-edit.txt`）で 24 通り（上書き 8・挿入 8・削除系 8）を測り、ブラウザの当 PJ（`scripts/verify-browser-o-field.mjs`）で同じ打鍵をさせて
+  ホストが受け取ったバイト列が 3 巡とも一致（2 回。例: (i) `0e44810f0e44820fc2`・(ii) `0e0fe70e448144820f`・全角を消した後の `0e0f`）。単体 50 件余り・mutation 27 通り検出。
+  以前の近似（入るか・0012 かだけを合わせ、値は正規化した並び）は置き換えた。
   ACS は並びの直後の半角の字へ全角を入れると**別の並び**（…SI・SO・字・SI…）、並びの最初の全角へ半角を入れると**空の SO/SI**（SO・SI・字・SO…）を作る（原典 `PS5250.insertChar` の操作列）。
   当 PJ の DBCS 欄の編集の値は論理値で、SO/SI は送信時に codec が付け直す（`packages/tn5250/src/screen/buffer.ts` の `fieldValue`）ので、正規化した 1 つの並びになる。
   結果、入ったあと当 PJ は ACS より 2 桁多く空きが残り、続けて打つと ACS では 0012 になる挿入が入りうる。ホストへ送るバイト列も違う。
@@ -809,7 +815,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ACS の 3270 のコアの Tab・Backtab は `scripts/acs-probe/hllapi-tab-3270.txt` に測ってある（3270 のペインと比べる足場）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／
   ~~ゾーン D の負の数をホストが負として受け取るか（DDS の数値の欄で確かめる）~~——**閉じる**: 送るバイト（`F1 F2 40 40 40 D0`。`numeric-only-zone-d.test.ts`）は ACS のコアの画面の中身（`12   }`。
   `20260921-field-minus-zone-d` research F2）と同じで、ホストの読み方は当 PJ の実装を左右しない／応答をコマンドの順に送らない（`[WSF Query][SAVE SCREEN]` などを 1 本のレコードで出させて ACS のワイヤと比べる。当 PJ は適用の後に固定の順）／
-  カーソル送りの番号の範囲と昇順でない定義（`standardFields` は画面順）／O 欄が全角で始まるときの先頭の桁の選択。
+  カーソル送りの番号の範囲と昇順でない定義（`standardFields` は画面順）／~~O 欄が全角で始まるときの先頭の桁の選択~~（`20260928-o-field-cells` で解消——カーソルは SO の桁に止まる）。
 - [x] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   **整理して閉じた（`20260927-checkpoint-rest`）**: 手を付けられる残り（HLLAPI の Tab / Backtab の 3270 の規則と MF の検査・ゾーン D の負の数をホストが負と読むか）は下の「節目の懸念の残り」に移した。
   WSF の前の READ の保留（同じレコードで READ の後ろに WSF）は、実機のホストが送る形に現れず、DSM も入力のコマンドの後ろに出力のコマンドを 1 つのバッファで組めないので測れない——未確認のまま閉じる。

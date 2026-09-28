@@ -906,6 +906,44 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnReadMDT", rc, fdbk);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "OEDIT") == 0) {
+        /*
+         * **O（DBCS open）の欄の編集をセルの並びで測る画面**（`20260928-o-field-cells`）。ACS の O 欄は SO・SI・全角・半角のセルを直接書き換える
+         * （`PS5250.inputChar` / `insertChar` / `processDeleteChar` / `processBackspace`）ので、打鍵の結果をホストが受け取ったバイト列で比べる。
+         *   (3,10)・(5,10)・…・(17,10) に O（FCW 8280）12 桁を 8 つ（FFW 4000）。IC は 3,10。READ MDT を 3 回（ログは `[O1]`〜`[O3]`）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x0B, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x0D, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x0F, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x11, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x13, 0x03, 0x0A
+        };
+        int k;
+        for (k = 0; k < 3; k++) {
+            tag = k == 0 ? "[O1] " : k == 1 ? "[O2] " : "[O3] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 O の欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "DBCSFE") == 0) {
         /*
          * **DBCS の欄の種類ごとに、Field Exit の「欄の先頭」と ME を測る画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S1）。

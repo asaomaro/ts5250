@@ -33,9 +33,26 @@ import {
   isWideForDbcs,
   isFullWidth,
   isCertainWideGlyph,
+  SO_MARK,
+  SI_MARK,
+  isShiftMark,
+  hasShiftMarks,
   type DbcsViewLayout,
   type RejectReason
 } from "../composables/fieldValidate.js";
+import {
+  toCells,
+  fromCells,
+  cellOfEntry,
+  entryOfCell,
+  overwrite as oOverwrite,
+  insert as oInsert,
+  del as oDel,
+  backspace as oBackspace,
+  eraseToEnd as oEraseToEnd,
+  type OCell,
+  type OResult
+} from "../composables/oFieldCells.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import {
   detectFkeyLegends,
@@ -72,6 +89,7 @@ import { isFieldExitRequired, fieldExitRejection } from "../composables/mandator
 import {
   MSG_PROTECTED,
   MSG_NO_ROOM,
+  MSG_SHIFT_POSITION,
   MSG_EITHER_DBCS_MODE,
   MSG_EITHER_SBCS_MODE,
   MSG_FIELD_MINUS_INVALID,
@@ -1483,7 +1501,8 @@ const dtOpenValues = ref<readonly string[]>([]);
  * `optHints` はここ（`openOptAt`）で DOM を引いて移しているが、あちらは平坦なリストなので済んでいる。
  */
 function openDtFor(t: DateTimeTarget): void {
-  dtOpenValues.value = t.run.map((f) => logicalValue(f));
+  // 日付・時刻の選択は字だけを見る（O 欄の SO/SI の印は字ではない）
+  dtOpenValues.value = t.run.map((f) => [...logicalValue(f)].filter((c) => !isShiftMark(c)).join(""));
   dtOpenKey.value = t.run[0]!.index;
 }
 
@@ -1796,14 +1815,24 @@ function trimPad(f: Field, s: string): string {
  *  （ホスト値の f.value は SO/SI を空白として含むため、そのまま送ると二重 SO/SI・余分スペースになる）。 */
 function logicalValue(f: Field): string {
   const edited = props.edits.get(f.index);
-  if (edited !== undefined) return edited;
-  if (f.dbcsType || f.dbcsContent) return logicalFromCells(f);
+  if (edited !== undefined) return oExplicit(f, edited);
+  if (f.dbcsType || f.dbcsContent) return oExplicit(f, logicalFromCells(f));
   return f.value;
+}
+
+/**
+ * **O 欄の値を常に明示の並び（印入り）にする**。印の無い値（MCP・マクロが入れた値、SO/SI のセルを持たない画面）は全角の連なりに SO/SI の印を付ける
+ * ——編集中の値とセルの桁が必ず 1 対 1 になるように（暗黙の並びのままだとキャレットの対応が SO/SI の桁の分ずれる）
+ */
+function oExplicit(f: Field, value: string): string {
+  if (!isOCells(f) || hasShiftMarks(value) || ![...value].some(isWideForDbcs)) return value;
+  return trimPad(f, fromCells(toCells([...value], dbcsByteLength(value) + 2)).join(""));
 }
 
 /** 未編集 DBCS 欄のセルから純論理値を復元（sbcs 文字・dbcs-lead 文字を採用、so/si/dbcs-tail は除外）。
  *  行またぎ欄は全スライス（折返し先の行）を順に読む。 */
 function logicalFromCells(f: Field): string {
+  const oCells = isOCells(f);
   let s = "";
   for (const sl of slicesOf(f)) {
     const row = props.snapshot.cells[sl.row - 1];
@@ -1819,7 +1848,10 @@ function logicalFromCells(f: Field): string {
       // 既定は 0x20（通常・緑）。**0 にしてはいけない**——属性センチネルの範囲は 0x20–0x3F で、
       // 0x00 は「生バイトセンチネル」と解釈され、書き戻しで属性セルにならない（静かに劣化する）。
       else if (cell.kind === "attr") s += attrSentinel(cell.rawByte ?? 0x20);
-      // so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
+      // **O 欄（継続でない）は SO/SI を印として持つ**（ACS と同じセルの並びで編集する。`isOCells`・`20260928-o-field-cells`）
+      else if (oCells && cell.kind === "so") s += SO_MARK;
+      else if (oCells && cell.kind === "si") s += SI_MARK;
+      // それ以外の欄の so / si / dbcs-tail は論理データに含めない（SO/SI は送信時に付け直す・tail は lead が保持）
     }
   }
   return trimPad(f, s); // 末尾パディング空白を除去（G は全角空白も）
@@ -2117,6 +2149,64 @@ let composeReplacedSelection = false;
 // 合成開始時に選択を消す前の編集状態（確定した 1 字目を E 欄の規則で拒否したとき、消した選択を戻すため）
 let composeBeforeSelection: EditState | undefined;
 
+/**
+ * **O 欄（継続でない）はセルの並びで編集する**（`20260928-o-field-cells`）。値は SO/SI を印（`SO_MARK`/`SI_MARK`）として持ち、打鍵・挿入・Delete・Backspace・
+ * Erase EOF・Field Exit は ACS の表どおりにセルの上で行う（`composables/oFieldCells.ts`。実機の ACS のコアで 24 通りを測った）。
+ * 継続した O 欄は ACS が別の手順（`processCharWithDBCSOpenContField`）なので、従来の論理値のまま
+ */
+function isOCells(f: Field): boolean {
+  return f.dbcsType === "open" && f.continued === undefined;
+}
+
+/** 直近の O 欄の操作が ACS のエラー（0005・0012・0065）か「何もしない」で止まったか。止めた理由を呼び出し側が操作員メッセージにする */
+let oRejection: 0x05 | 0x12 | 0x65 | "noop" | undefined;
+
+/** O 欄の操作をセルの上で行い、編集の値へ戻す。止まったら `undefined`（理由は `oRejection`） */
+function oApply(e: EditState, f: Field, op: (cells: OCell[], c: number) => OResult): EditState | undefined {
+  oRejection = undefined;
+  const cells = toCells(e.chars, visLen(f));
+  const r = op(cells, cellOfEntry(e.chars, e.cursor));
+  if ("error" in r) {
+    oRejection = r.error;
+    return undefined;
+  }
+  if ("noop" in r) {
+    oRejection = "noop";
+    return undefined;
+  }
+  const chars = fromCells(r.cells);
+  return { ...e, chars, cursor: entryOfCell(chars, r.cursor) };
+}
+
+/** O 欄の止まった理由の操作員メッセージ（「何もしない」は出さない） */
+function oRejectionMessage(): string | undefined {
+  if (oRejection === 0x12) return MSG_NO_ROOM;
+  if (oRejection === 0x05) return MSG_PROTECTED;
+  if (oRejection === 0x65) return MSG_SHIFT_POSITION;
+  return undefined;
+}
+
+/**
+ * **O 欄の印の並びが崩れていたら組み直す**（当 PJ 独自の操作——選択の削除・語の削除・複数行の貼り付け——は ACS に無く、印を考えずに字を出し入れする）。
+ * 印が交互でない・全角が SO と SI の間に無い・半角が間にある、のどれかなら、印を外した論理値から SO/SI を付け直す（空の組は失う）
+ */
+function normalizeO(chars: readonly string[], f: Field): string[] {
+  let inRun = false;
+  let ok = true;
+  for (const ch of chars) {
+    if (ch === SO_MARK) {
+      if (inRun) ok = false;
+      inRun = true;
+    } else if (ch === SI_MARK) {
+      if (!inRun) ok = false;
+      inRun = false;
+    } else if (isWideForDbcs(ch) !== inRun) ok = false;
+  }
+  if (ok && !inRun) return [...chars];
+  const plain = chars.filter((c) => !isShiftMark(c));
+  return padDbcs(f, fromCells(toCells(plain, visLen(f))));
+}
+
 /** DBCS 欄はライブ列ビュー編集（純論理値・非パディング・挿入モード）で扱う。 */
 function isDbcsEdit(f: Field): boolean {
   // **申告が無くても中身が DBCS なら列ビューで編集する**（`dbcsContent`）。値は生バイトで
@@ -2171,6 +2261,8 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
  * 予算に対して `chars` が短くなり、欄の後ろの桁へカーソルが届かなくなる（E・O でも同じ）。独立点検 B-S2
  */
 function eraseToEndDbcs(f: Field, state: EditState): EditState {
+  // O 欄はカーソルが SI の上か並びの中なら SI を置いて閉じる（ACS `eraseToEOF_Work`）
+  if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c), cursor: c })) ?? state;
   return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
 }
 
@@ -2236,36 +2328,6 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
 }
 
 /**
- * **挿入モードの O 欄で、ACS なら SO/SI 込みの必要桁が空きに足りない場合か**（ACS `PS5250.insertChar` の必要桁と
- * `reserveRoomForInsert` の空きの数え方。`20260926-dbcs-insert-sosi-room`）。
- *
- * ACS は打つ字とカーソルの桁の種類で必要桁を決める。当 PJ の数え方（字を入れてから欄に収まるか）と食い違うのは、
- * 並びの境目の 2 つだけ（同 research F5）:
- * - (i) 全角の並びの**直後の半角の字**へ全角 → ACS は別の並び（SO・字・SI）で **4 桁**。当 PJ は前の並びに繋げて 2 桁
- * - (ii) 全角の並びの**最初の全角**へ半角 → ACS は SI・字・SO で **3 桁**（空の SO/SI が残る）。当 PJ は字の 1 桁
- * それ以外は桁数が一致するので見ない。空きは「末尾の半角空白を除いた値の桁数」から数える（ACS は末尾から空白を数え、
- * SO/SI・字で止まる——全角空白は並びの中にあるので数えない。`scripts/acs-probe/dbcs-insert-room.txt` の測定 F1＝O 欄の末尾が全角空白の満杯欄は 0012 と同じ）。
- *
- * 入ったあとの値は当 PJ の正規化した並びのまま（ACS の別の並び・空の SO/SI は論理値で表せない。同 decisions D2）。
- * 実機の ACS のコアで C3・C4 が 0012・C5 が入ることを測ってある（`scripts/acs-probe/dbcs-insert-room.txt`）
- */
-function acsInsertShortOfRoom(e: EditState, ch: string, f: Field): boolean {
-  if (f.dbcsType !== "open" || f.continued !== undefined) return false;
-  const prev = e.chars[e.cursor - 1];
-  const cur = e.chars[e.cursor];
-  if (cur === undefined) return false; // 末尾（全角の後ろなら SI の桁）は当 PJ と同じ桁数
-  const wide = isWideForDbcs(ch);
-  const prevWide = prev !== undefined && isWideForDbcs(prev);
-  const curWide = isWideForDbcs(cur);
-  let need = 0;
-  if (wide && !curWide && prevWide) need = 4; // (i)
-  else if (!wide && curWide && !prevWide) need = 3; // (ii)
-  if (need === 0) return false;
-  const room = visLen(f) - byteLen(e.chars.join("").replace(/ +$/, ""), f);
-  return room < need;
-}
-
-/**
  * **E 欄がいま全角（DBCS）の状態か。** ACS はこれを欄ごとの状態（`Field5250.EitherFieldDBCSOn`）として持ち、欄を空にしても保つ。
  * 値に空白でない字があればその字の種類で決まる（切り替えは先頭の字を打ったときにしか起きないので、先頭の字の種類が状態そのもの）。
  * 空白だけなら、この画面の中で切り替えた状態（`eitherSwitched`）か、コアが持ち続けている状態（`Field.eitherDbcsOn`。ホストの SO と送った値で決まる）
@@ -2316,10 +2378,11 @@ function eitherPasteStep(f: Field, mode: { dbcsOn: boolean }, cursor: number, ch
 
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
 function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
+  // O 欄（継続でない）は ACS の表どおりにセルの上で（選択を置き換える挿入も同じ表。最終のセルの判定だけ外す——SBCS・DBCS 欄と同じ当 PJ の決め）
+  if (isOCells(f)) return oApply(e, f, (cells, c) => (e.insertMode ? oInsert(cells, c, ch, { allowLastCell: replaced }) : oOverwrite(cells, c, ch)));
   const budget = visLen(f);
   // 選択を置き換える挿入（`replaced`）は、消した跡を埋めるだけなので最終桁の判定を掛けない
   if (e.insertMode && !replaced && atLastColumn(e, f)) return undefined;
-  if (e.insertMode && !replaced && acsInsertShortOfRoom(e, ch, f)) return undefined;
   const chars = [...e.chars];
   if (e.insertMode || e.cursor >= chars.length) {
     chars.splice(e.cursor, 0, ch);
@@ -2334,12 +2397,14 @@ function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditSta
 }
 
 function dbcsBackspace(e: EditState, f: Field): EditState {
+  if (isOCells(f)) return oApply(e, f, oBackspace) ?? e;
   if (e.cursor <= 0) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor - 1, 1);
   return { ...e, chars: padDbcs(f, chars), cursor: e.cursor - 1 };
 }
 function dbcsDelete(e: EditState, f: Field): EditState {
+  if (isOCells(f)) return oApply(e, f, oDel) ?? e;
   if (e.cursor >= e.chars.length) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor, 1);
@@ -2351,7 +2416,8 @@ function dbcsDeleteWord(e: EditState, f: Field): EditState {
   if (n === 0) return e;
   const chars = [...e.chars];
   chars.splice(e.cursor, n);
-  return { ...e, chars: padDbcs(f, chars) };
+  // O 欄は印を消しうるので並びを正す（語の削除は当 PJ の数え方。ACS は半角の語だけを語として消す）
+  return { ...e, chars: isOCells(f) ? normalizeO(chars, f) : padDbcs(f, chars) };
 }
 function dbcsMove(e: EditState, delta: number): EditState {
   return { ...e, cursor: Math.max(0, Math.min(e.cursor + delta, e.chars.length)) };
@@ -2424,8 +2490,9 @@ function writeSlices(f: Field, full: string): void {
  */
 function baselineValue(f: Field): string {
   const edited = props.edits.get(f.index);
-  if (edited !== undefined) return edited;
-  return trimPad(f, f.dbcsType ? logicalFromCells(f) : f.value);
+  // O 欄は `logicalValue` と同じく印入りの形で比べる（印の無い値が edits に残っていても「変更あり」にしない。独立レビューの指摘）
+  if (edited !== undefined) return oExplicit(f, edited);
+  return trimPad(f, f.dbcsType ? oExplicit(f, logicalFromCells(f)) : f.value);
 }
 
 function sync(inputEl: HTMLInputElement, f: Field): void {
@@ -2464,6 +2531,11 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
 /** DBCS 欄の sync: 列ビュー（SO/SI スペース込み）を行ごとのスライスへ割り、caret を論理カーソルの桁へ。 */
 function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
+  // O 欄の印の並びが崩れた操作（選択の削除・貼り付け・IME など当 PJ 独自の経路）の後は組み直す
+  if (isOCells(f)) {
+    const fixed = normalizeO(edit.chars, f);
+    if (fixed.join("") !== edit.chars.join("")) edit = { ...edit, chars: fixed, cursor: Math.min(edit.cursor, fixed.length) };
+  }
   // 表示はパディング込みの列ビュー（未入力桁にもカーソルを置けるようにするため）。
   // 送信値（emit）は末尾パディングを除いた純論理値。
   const logical = trimPad(f, editValue(edit));
@@ -3256,7 +3328,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
   // その他（Enter/F キー/PageUp/Down/Tab）はペインの keymap に委譲（preventDefault しない）
 }
 
-/** DBCS 欄の keydown: ライブ列ビュー上で論理カーソルを動かし、SO/SI をスキップする。
+/** DBCS 欄の keydown: ライブ列ビュー上で論理カーソルを動かし、SO/SI をスキップする（O 欄は SO/SI の印も要素なので止まる——ACS と同じ）。
  *  chars = 純論理値（非パディング・挿入モード）。表示・caret は syncDbcs が列ビューへ変換する。 */
 function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void {
   edit = edit!;
@@ -3291,14 +3363,27 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       emit("notice", MSG_PROTECTED);
       return;
     }
+    oRejection = undefined;
     edit = dbcsBackspace(edit, f);
+    // O 欄で止まった（直前が単独の SO/SI は 0065）。値もカーソルも変えない
+    const bsWhy = oRejectionMessage();
+    if (bsWhy) {
+      emit("notice", bsWhy);
+      return;
+    }
     mdtKeyed = true;
     syncDbcs(el, f);
     return;
   }
   if (k === "Delete" && plain) {
     ev.preventDefault();
+    oRejection = undefined;
     if (!deleteSelection(f, el)) edit = dbcsDelete(edit, f);
+    const delWhy = oRejectionMessage();
+    if (delWhy) {
+      emit("notice", delWhy);
+      return;
+    }
     mdtKeyed = true;
     syncDbcs(el, f);
     return;
@@ -3314,7 +3399,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   if (k === "ArrowLeft" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
     ev.preventDefault();
     if (edit.cursor > 0) {
-      ev.stopPropagation(); // 欄内移動（SO/SI はスキップ）。左端は委譲してペインのセル移動へ
+      ev.stopPropagation(); // 欄内移動（SO/SI はスキップ。O 欄は印に止まる）。左端は委譲してペインのセル移動へ
       edit = dbcsMove(edit, -1);
       syncDbcs(el, f);
     }
@@ -3360,8 +3445,16 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       base = { ...base, chars: [], cursor: 0 };
       eitherSwitched.set(f.index, isWideForDbcs(ch));
     }
+    oRejection = undefined;
     const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
+      // O 欄は ACS の表の理由どおり（0005・0012・0065。「何もしない」は黙る）
+      if (isOCells(f)) {
+        edit = beforeSelection;
+        const why = oRejectionMessage();
+        if (why) emit("notice", why);
+        return;
+      }
       // SO/SI 込みバイト予算超過は拒否（末尾パディングで吸収し切れない）。挿入なら ACS と同じくエラー 0012
       // （`20260921-insert-no-room` D2。最終桁の判定は `atLastColumn`——`20260921-dbcs-insert-room`）
       if (base.insertMode && !replaced) emit("notice", MSG_NO_ROOM);
@@ -3495,7 +3588,8 @@ function dbcsSelection(f: Field, el: HTMLInputElement): { text: string; ls: numb
     if (vpos >= start && vpos < end) {
       if (ls < 0) ls = li;
       le = li + 1;
-      text += logical[li];
+      // O 欄の SO/SI の印は字ではない（クリップボードへは出さない。削除の範囲には含める——`normalizeO` が並びを正す）
+      if (!isShiftMark(logical[li]!)) text += logical[li];
     }
   }
   return ls < 0 ? undefined : { text, ls, le };
@@ -3566,7 +3660,33 @@ function onInputClick(f: Field, ev: MouseEvent): void {
 /** 欄の値 base の offset 桁目から line を上書きする（ACS のペースト＝カーソル位置起点の上書き）。
  *  5250 の上書き入力と同じく、**書いた範囲だけ**を置き換えて前後の既存文字は残す
  *  （"123456" の先頭へ "789" を貼れば "789456"）。SO/SI 込みバイト予算で切り詰め、末尾空白は落とす。 */
+/**
+ * **O 欄への貼り付けは 1 字ずつの打鍵**（ACS `PS5250.pasteRect` は字ごとに `inputChar` / `insertChar` を通す）。セルの上で ACS の表を当てる（`oFieldCells.ts`）。
+ * 上書きは止まったところまで（0005 など）、挿入は 1 字でも止まれば何も貼らない（呼び出し側が 0012）。「何もしない」の字は位置を進めずに次の字へ。
+ * ~~論理値へ `overwriteInto` の桁合わせで書いてから並びを組み直す~~ は、組み直しで SO/SI の分だけ後ろの字の桁がずれた（独立レビューの指摘）
+ */
+function oPasteInto(field: Field, base: string, offset: number, line: string, insert: boolean): string | undefined {
+  const chars = padDbcs(field, [...base]);
+  let cells = toCells(chars, visLen(field));
+  let c = cellOfEntry(chars, offset);
+  for (const raw of line) {
+    if (raw === "\n" || raw === "\r") continue;
+    if (c >= cells.length) break;
+    const ch = inputChar(raw, field);
+    if (!acceptsChar(field, ch, sessionKind.value)) continue;
+    const r = insert ? oInsert(cells, c, ch) : oOverwrite(cells, c, ch);
+    if ("error" in r) {
+      if (insert) return undefined;
+      break;
+    }
+    if ("noop" in r) continue;
+    [cells, c] = [r.cells, r.cursor];
+  }
+  return trimPad(field, fromCells(cells).join(""));
+}
+
 function overwriteInto(field: Field, base: string, offset: number, line: string): string {
+  if (isOCells(field)) return oPasteInto(field, base, offset, line, false) ?? base;
   const budget = visLen(field);
   let out = [...base];
   const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: out } as unknown as EditState) };
@@ -3640,6 +3760,7 @@ function firstRejection(field: Field, text: string, base = "", offset = 0): Reje
  *  挿入で押し出されて消えるだけなので、あふれ判定に数えてはいけない
  *  （10 桁欄の "123" に "123" を挿せる。"123123123" にもう 3 桁は挿せない＝これがエラー）。 */
 function insertInto(field: Field, base: string, offset: number, line: string): string | undefined {
+  if (isOCells(field)) return oPasteInto(field, base, offset, line, true);
   const budget = visLen(field);
   let out = [...base.replace(/\s+$/, "")];
   const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: [...base] } as unknown as EditState) };
@@ -3896,7 +4017,8 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
         emit("notice", why === "either-dbcs" ? MSG_EITHER_DBCS_MODE : why === "either-sbcs" ? MSG_EITHER_SBCS_MODE : MSG_BY_REASON[why]);
         return;
       }
-      if (insertInto(f, editValue(e), at, text) === undefined) {
+      // O 欄は下の 1 字ずつの経路が ACS の表で止める（途中の字で止まればそこまで入る——ACS `pasteRect`）。事前の検査（欄全体の余地）は O 欄では 1 字ずつの試しになるので掛けない
+      if (!isOCells(f) && insertInto(f, editValue(e), at, text) === undefined) {
         emit("notice", MSG_NO_ROOM);
         return;
       }
@@ -4012,6 +4134,7 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
   const dbcs = isDbcsEdit(f);
   let e: EditState = { ...edit!, cursor: start };
   let noRoom = false;
+  let restoredSelection = false;
   let i = 0;
   for (; i < raws.length; i++) {
     // 上書きで欄の末尾に着いていたら、これ以上は入らない（余りを次の欄へ流す）。SBCS の `typeChar` は末尾で同じ状態を返して黙って捨てる。
@@ -4050,11 +4173,17 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
     const trial = dbcs ? dbcsType(base, ch, f, replacedSelection && i === 0) : e.insertMode ? insertChar(e, ch, lastTypeable(f)) : typeChar(e, ch);
     if (!trial || !fitsBytes(trial, f)) {
       noRoom = e.insertMode; // 挿入で入らなくなったらエラー 0012（上書きは入るところまでで止める。余りは次の欄へ流す）
+      // O 欄で 1 字目が止まったら、合成の始めに消した選択も戻す（打鍵の経路と同じ。`20260928-o-field-cells`）
+      if (isOCells(f) && i === 0 && replacedSelection && composeBeforeSelection) {
+        e = composeBeforeSelection;
+        restoredSelection = true;
+      }
       break;
     }
     e = { ...trial, insertMode: e.insertMode };
   }
-  const placed = e.chars !== edit!.chars; // 1 字でも置けたか（ACS は確定した字を 1 字ずつ打鍵として処理する）
+  // 1 字でも置けたか（ACS は確定した字を 1 字ずつ打鍵として処理する）。選択を戻した回は何も置いていない
+  const placed = !restoredSelection && e.chars !== edit!.chars;
   edit = e;
   editFieldIndex = f.index;
   mdtKeyed = placed;

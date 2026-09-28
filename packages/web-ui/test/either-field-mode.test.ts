@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -108,7 +109,7 @@ describe("E 欄の半角・全角", () => {
   it("O 欄（open）は混ぜられる（対象外）", async () => {
     const { type, value, notices } = await grid(fld("open"));
     await type("X", "あ");
-    expect(value()).toBe("Xあ");
+    expect(value()).toBe(o("X{あ}"));
     expect(notices()).toEqual([]);
   });
 
@@ -238,7 +239,7 @@ describe("E 欄の貼り付け", () => {
   it("O 欄は混ぜて貼れる（対象外）", async () => {
     const { paste, value } = await grid(fld("open"));
     await paste("Xあ");
-    expect(value()).toBe("Xあ");
+    expect(value()).toBe(o("X{あ}"));
   });
 });
 

@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
+import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -11,7 +13,8 @@ import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
  * - C3: `A`・SO・`あいう`・SI・`B`＋空き 2、`B` の桁へ全角 → ACS は 4 桁要るので 0012（当 PJ は前の並びに繋げて入れていた）
  * - C4: 同じ欄の最初の全角へ半角 → ACS は SI・字・SO の 3 桁要るので 0012（当 PJ は 1 桁で入れていた）
  * - C5: `A`・SO・`あい`・SI・`B`＋空き 4、最初の全角へ半角 → 入る
- * 入ったあとの値は当 PJ の正規化した並びのまま（ACS の空の SO/SI・別の並びは論理値で表せない。同 decisions D2）。
+ * ~~入ったあとの値は当 PJ の正規化した並びのまま（同 decisions D2）~~——`20260928-o-field-cells` で O 欄の値に SO/SI の印を持たせ、入ったあとの並び
+ * （別の並び・空の SO/SI）も ACS と同じにした（期待値は `o()` のセルの記法。`{`＝SO・`}`＝SI）。
  */
 const COLS = 80;
 const cell = (char = " ", kind: Cell["kind"] = "sbcs"): Cell =>
@@ -131,7 +134,7 @@ describe("O 欄の挿入: 空きが足りれば入る（値は当 PJ の正規�
   it("**C5: `A`・SO・`あい`・SI・`B`＋空き 4、最初の全角へ半角 → 入る**", async () => {
     const { insert, value, notices } = await open(openSnapshot(["A", ["あ", "い"], "B"]));
     await insert(2, "X");
-    expect(value()).toBe("AXあいB");
+    expect(value()).toBe(o("A{}X{あい}B"));
     expect(notices()).toEqual([]);
   });
 
@@ -139,14 +142,14 @@ describe("O 欄の挿入: 空きが足りれば入る（値は当 PJ の正規�
     const { insert, value } = await open(openSnapshot(["A", ["あ"], "B"]));
     // view: A=0・SO=1・あ=2・SI=3・B=4
     await insert(4, "え");
-    expect(value()).toBe("AあえB");
+    expect(value()).toBe(o("A{あ}{え}B"));
   });
 
   it("**境界: C3 の位置で空き 4 ちょうど → 入る**（`A`・SO・`あい`・SI・`B`＋空き 4。必要 4）", async () => {
     const { insert, value, notices } = await open(openSnapshot(["A", ["あ", "い"], "B"]));
     // view: A=0・SO=1・あ=2・い=3・SI=4・B=5
     await insert(5, "え");
-    expect(value()).toBe("AあいえB");
+    expect(value()).toBe(o("A{あい}{え}B"));
     expect(notices()).toEqual([]);
   });
 
@@ -162,27 +165,27 @@ describe("O 欄の挿入: 空きが足りれば入る（値は当 PJ の正規�
     const { insert, value, notices } = await open(openSnapshot(["AB", ["あ", "い"], "C"]));
     // view: A=0・B=1・SO=2・あ=3
     await insert(3, "X");
-    expect(value()).toBe("ABXあいC");
+    expect(value()).toBe(o("AB{}X{あい}C"));
     expect(notices()).toEqual([]);
   });
 
   it("並びの中の全角へ全角（必要 2）は空き 2 でも入る（ACS と同じ）", async () => {
     const { insert, value } = await open(openSnapshot(C3_C4));
     await insert(3, "え"); // い の桁
-    expect(value()).toBe("AあえいうB");
+    expect(value()).toBe(o("A{あえいう}B"));
   });
 
   it("半角の中へ半角（必要 1）は空き 2 でも入る", async () => {
     const { insert, value } = await open(openSnapshot(["AB", ["あ", "い", "う"], "C"]));
     // view: A=0・B=1・SO=2…
     await insert(1, "X");
-    expect(value()).toBe("AXBあいうC");
+    expect(value()).toBe(o("AXB{あいう}C"));
   });
 
   it("並びの中ほどの全角へ半角（SI・字・SO の 3 桁。当 PJ も 3 桁）は空き 3 で入る", async () => {
     const { insert, value } = await open(openSnapshot(["A", ["あ", "い"], "B"])); // 8 桁＋空き 4
     await insert(3, "X"); // い の桁
-    expect(value()).toBe("AあXいB");
+    expect(value()).toBe(o("A{あ}X{い}B"));
   });
 });
 
@@ -201,7 +204,7 @@ describe("既に ACS と一致している場合は変わらない（背景の�
   it("C1: 8 桁＋空き 4 の末尾へ全角 → 入る（4 桁ちょうど）", async () => {
     const { insert, value } = await open(openSnapshot(["ABCDEFGH"]));
     await insert(8, "あ");
-    expect(value()).toBe("ABCDEFGHあ");
+    expect(value()).toBe(o("ABCDEFGH{あ}"));
   });
   it("C2: 9 桁＋空き 3 の末尾へ全角 → 0012", async () => {
     const { insert, value, notices } = await open(openSnapshot(["ABCDEFGHI"]));
@@ -219,10 +222,12 @@ describe("既に ACS と一致している場合は変わらない（背景の�
 
 describe("対象外: この検査を掛けない場合", () => {
   it("上書きモードは変えない（C3 の位置へ全角を上書き）", async () => {
-    const { at, key, value } = await open(openSnapshot(C3_C4));
+    // B の桁（半角）から後ろが半角・半角・欄の終わり → ACS の上書きの表で 0005（実測 `o-field-edit.txt` の O1-7 と同じ形）
+    const { at, key, value, notices } = await open(openSnapshot(C3_C4));
     await at(6);
     await key("え");
-    expect(value()).toBe(OVERWRITE_C3);
+    expect(value()).toBeUndefined();
+    expect(notices()).toContain(MSG_PROTECTED);
   });
 
   it("継続欄は ACS の別の手順（併合と語詰め）なので、ここでは見ない（従来どおり入る）", async () => {
@@ -240,16 +245,16 @@ describe("対象外: この検査を掛けない場合", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("選択を置き換える挿入（`replaced`）には掛けない（満杯の欄で最初の全角を選び、半角で置き換える）", async () => {
-    // `A`・SO・`あいうえ`・SI・`B` で 12 桁ちょうど。あ を消すと空きは 2——(ii) の検査を掛けると 3 に足りず 0012 になるが、
-    // 置き換えは消した跡を埋めるだけなので掛けない（最終桁の判定と同じ扱い）。当 PJ の並びでは入る（`AXいうえB` は 11 桁）
+  // ~~選択を置き換える挿入には掛けない~~——ACS に選択の置き換えは無く、消してから挿入するのと同じ表を通す（`20260928-o-field-cells`）
+  it("選択を置き換える挿入も ACS の挿入の表を通る（満杯の欄で最初の全角を選び、半角で置き換える → 0012・選択も戻す）", async () => {
+    // `A`・SO・`あいうえ`・SI・`B` で 12 桁ちょうど。あ を消すと空きは 2——並びの中の全角へ半角は SI 字 SO の 3 桁で足りず 0012
     const { at, key, select, value, notices } = await open(openSnapshot(["A", ["あ", "い", "う", "え"], "B"]));
     await at(2);
     await key("Insert");
     await select(2, 3); // あ を選ぶ
     await key("X");
-    expect(value()).toBe("AXいうえB");
-    expect(notices()).toEqual([]);
+    expect(value()).toBeUndefined();
+    expect(notices()).toContain(MSG_NO_ROOM);
   });
 });
 
@@ -269,7 +274,7 @@ describe("貼り付け・IME の確定も同じ規則（C3・C4）", () => {
     await at(3);
     await key("Insert");
     await paste("XY");
-    expect(value()).toBe("ABXあいC");
+    expect(value()).toBe(o("AB{}X{あい}C"));
     expect(notices()).toContain(MSG_NO_ROOM);
   });
 
@@ -282,15 +287,15 @@ describe("貼り付け・IME の確定も同じ規則（C3・C4）", () => {
     expect(notices()).toContain(MSG_NO_ROOM);
   });
 
-  it("**IME の確定で選択を複数字で置き換えるとき、判定を外すのは 1 字目だけ**（2 字目が C4 相当なら 0012。以前は全部の字で外していた）", async () => {
-    // `A`・SO・`あいうえ`・SI・`B`（満杯）の あ を選び、`XY` を確定: X は置き換えで入る（`AXいうえB`＝11 桁・空き 1）。
-    // Y はカーソルが い（並びの最初の全角）で半角＝必要 3 に空き 1 → 0012。X までは入ったまま
+  // ~~判定を外すのは 1 字目だけ~~——O 欄は置き換えも ACS の挿入の表を通る（`20260928-o-field-cells`）
+  it("**IME の確定で選択を置き換えるときも ACS の挿入の表を通る**（1 字目が 0012 なら選択も戻す）", async () => {
+    // `A`・SO・`あいうえ`・SI・`B`（満杯）の あ を選び、`XY` を確定: X はカーソルが い（並びの中の全角）で半角＝必要 3 に空き 2 → 0012
     const { at, key, select, compose, value, notices } = await open(openSnapshot(["A", ["あ", "い", "う", "え"], "B"]));
     await at(2);
     await key("Insert");
     await select(2, 3);
     await compose("XY");
-    expect(value()).toBe("AXいうえB");
+    expect(value()).toBeUndefined();
     expect(notices()).toContain(MSG_NO_ROOM);
   });
 });

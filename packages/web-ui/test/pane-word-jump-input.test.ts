@@ -141,8 +141,9 @@ describe("入力欄の中の Ctrl+矢印（頭出し）", () => {
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", ctrlKey: true, bubbles: true, cancelable: true }));
     await nextTick();
 
-    // 桁 18 = "う" の先頭。列ビューでは SO(1)+あ(2)+い(2)+SI(1)+空白(1)+SO(1) の次＝index 6
-    expect(el.selectionStart).toBe(6);
+    // O 欄のキャレットは SI の上に置ける（ACS。`20260928-o-field-cells`）ので、「え のうしろ」＝ SI の上から。
+    // 全角は 1 字ごとが語頭（ACS `is1stCharacter`）なので、左の語頭は え（列ビュー index 7）。~~う の先頭（index 6）~~ は SI に止まれなかった頃の位置
+    expect(el.selectionStart).toBe(7);
     w.unmount();
   });
 
