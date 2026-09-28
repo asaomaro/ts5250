@@ -37,6 +37,7 @@ import {
   SI_MARK,
   isShiftMark,
   isDeadMark,
+  DEAD_MARK,
   hasShiftMarks,
   type DbcsViewLayout,
   type RejectReason
@@ -233,7 +234,7 @@ const emit = defineEmits<{
    * （`eitherDbcsOn` 関数と同じ判定）。空にした欄でもコアが正しい状態を復元できるように渡す
    * （`20260927-either-field-so`）
    */
-  (e: "edit", fieldIndex: number, value: string, eitherMeta?: { eitherDbcsOn: boolean }): void;
+  (e: "edit", fieldIndex: number, value: string, eitherMeta?: { eitherDbcsOn?: boolean; wire?: string }): void;
   (e: "cursor", row: number, col: number): void;
   (e: "gui-select", fieldId: number, choiceIndex: number, selected: boolean): void;
   (e: "gui-submit", fieldId: number): void;
@@ -2331,6 +2332,10 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
  * 予算に対して `chars` が短くなり、欄の後ろの桁へカーソルが届かなくなる（E・O でも同じ）。独立点検 B-S2
  */
 function eraseToEndDbcs(f: Field, state: EditState): EditState {
+  // 全角の E で SI が中身の直後にあれば、カーソルがその SI より前（中身の中か直後）なら SI も消える（ACS の 1 桁の内側の消去。`jeShapeOf`）
+  if (f.dbcsType === "either" && eitherDbcsOn(f, state) && jeShapeOf(f) === "compact" && state.cursor <= trimPad(f, state.chars.join("")).length) {
+    jeShapeOverride.set(f.index, "open");
+  }
   // O 欄はカーソルが SI の上か並びの中なら SI を置いて閉じる（ACS `eraseToEOF_Work`）
   if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c), cursor: c })) ?? state;
   return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
@@ -2395,6 +2400,64 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
     if (chars.length <= next) return; // 後続が無い＝これ以上は調整できない
     chars.splice(next, 1);
   }
+}
+
+/**
+ * **J・全角の E の欄の形**（`20260928-je-field-shape`。実機の ACS のコアの JEEDIT〔`scripts/acs-probe/je-field-edit.txt`〕の 23 通りをこの 3 つで説明できた）。ACS の J・全角の E の欄は
+ * SO・字・SI をセルに持ち（`PS5250` の DBCSPlane）、消去・挿入・削除は両端の 1 桁の内側で行う:
+ * - `full` — SI が欄の最後の桁（J の欄は作られたときからこの形。半角から全角へ切り替えた E も。空きは NUL の組で、READ MDT では `40 40`）
+ * - `compact` — SI が中身の直後（ホストが `SO あ SI` と書いた E。挿入・削除で SI も動く）
+ * - `open` — SI が無い（`compact` の E を中身の中から消したとき——SI も内側なので消える。ACS はその後の字に SI を足さない）
+ * 画面の値は論理値（字だけ）のまま扱い、送る値だけを印入り（`jeExplicit`）にする
+ */
+type JeShape = "full" | "compact" | "open";
+/** この画面の中で変わった形（切り替え・消去）。新しい画面で捨てる（`eitherSwitched` と同じ） */
+const jeShapeOverride = new Map<number, JeShape>();
+
+function jeShapeOf(f: Field): JeShape | undefined {
+  if (f.dbcsType === "only") return "full";
+  if (f.dbcsType !== "either") return undefined;
+  const o = jeShapeOverride.get(f.index);
+  if (o) return o;
+  const kinds: string[] = [];
+  for (const sl of slicesOf(f)) {
+    const row = props.snapshot.cells[sl.row - 1];
+    for (let i = 0; i < sl.width; i++) kinds.push(row?.[sl.col - 1 + i]?.kind ?? "sbcs");
+  }
+  if (kinds[0] !== "so") return "full"; // 半角の E が全角になるのは先頭での切り替えだけ（ACS は SO…NUL の組…SI を欄いっぱいに置く）
+  const si = kinds.lastIndexOf("si");
+  return si === kinds.length - 1 ? "full" : si >= 0 ? "compact" : "open";
+}
+
+/** E 欄の切り替え（`eitherSwitched`）に合わせて形を決める: 全角へ切り替えたら `full`、半角へなら形は無い */
+function noteEitherShape(index: number, dbcsOn: boolean): void {
+  if (dbcsOn) jeShapeOverride.set(index, "full");
+  else jeShapeOverride.delete(index);
+}
+
+/** 送る値（論理値）を J・全角の E の欄の形の印入りにする（ほかの欄・半角の E・既に印入りの値はそのまま） */
+function jeExplicit(f: Field, logical: string, e: EditState | undefined): string {
+  if (f.dbcsType !== "only" && !(f.dbcsType === "either" && eitherDbcsOn(f, e))) return logical;
+  if (hasShiftMarks(logical)) return logical;
+  const shape = jeShapeOf(f) ?? "compact";
+  const chars = [...trimPad(f, logical)];
+  if (shape === "open") return SO_MARK + chars.join("");
+  if (shape === "compact") return SO_MARK + chars.join("") + SI_MARK;
+  const pad = f.length - 2 - 2 * chars.length;
+  return pad < 0 ? SO_MARK + chars.join("") + SI_MARK : SO_MARK + chars.join("") + DEAD_MARK.repeat(pad) + SI_MARK;
+}
+
+/**
+ * **編集に添える付帯情報**: E 欄の全角・半角の状態（`20260927-either-field-so`）と、J・全角の E の送る形の値（`wire`。画面の値〔`edits`〕は字だけの論理値のまま——
+ * AID の送信でこちらを送る。`SessionState.wire`）。どちらも無い欄は `undefined`
+ */
+function jeMeta(f: Field, logical: string, e: EditState | undefined): { eitherDbcsOn?: boolean; wire?: string } | undefined {
+  const wire = jeExplicit(f, logical, e);
+  const meta: { eitherDbcsOn?: boolean; wire?: string } = {};
+  if (f.dbcsType === "either") meta.eitherDbcsOn = eitherDbcsOn(f, e);
+  // 空の欄は形を持たない（空の E の 0e は `eitherDbcsOn` を受けた core が置く——`20260927-either-field-so`）
+  if (logical !== "" && wire !== logical) meta.wire = wire;
+  return meta.eitherDbcsOn !== undefined || meta.wire !== undefined ? meta : undefined;
 }
 
 /**
@@ -2639,7 +2702,7 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   const placed = takeMdtKeyed(); // 先に下ろす（値が変わった回でも印を次の同期へ持ち越さない）
   if (logical !== baselineValue(f) || placed) {
     // E 欄は画面の側の状態も添える（空にした欄でもコアが状態を復元できるように。`20260927-either-field-so`）
-    emit("edit", f.index, logical, f.dbcsType === "either" ? { eitherDbcsOn: eitherDbcsOn(f, edit) } : undefined);
+    emit("edit", f.index, logical, jeMeta(f, logical, edit));
   }
   // 論理カーソルの表示桁（DBCS=2 桁）を AID 位置へ反映
   emit("cursor", s.row, s.col + (col - s.offset));
@@ -2898,7 +2961,9 @@ function eraseInputKey(): void {
     // MDT は、ホストが立てたもの（`f.mdt`）か、利用者が打ったもの（`edits`）のどちらか
     if (!f.mdt && !props.edits.has(f.index)) continue;
     // E 欄は状態も添える——ACS は Erase Input の後も全角の状態の E 欄を `0e` で送る（実機の ACS のコア。`20260927-either-field-so`）
-    emit("edit", f.index, "", f.dbcsType === "either" ? { eitherDbcsOn: eitherDbcsOn(f, undefined) } : undefined);
+    // J・全角の E は両端の 1 桁の内側だけを消す（ACS `eraseField_Work`）——SI が中身の直後にあった E は SI も消える（`jeShapeOf`）
+    if (f.dbcsType === "either" && jeShapeOf(f) === "compact" && eitherDbcsOn(f, undefined)) jeShapeOverride.set(f.index, "open");
+    emit("edit", f.index, "", jeMeta(f, "", undefined));
     writeSlices(f, " ".repeat(visLen(f)));
   }
   // 編集モデルは捨てる（値を消した欄の caret 位置を持ち越さない）。
@@ -2981,6 +3046,7 @@ watch(
     editFieldIndex = -1;
     fieldExitedIndex = -1;
     eitherSwitched.clear();
+    jeShapeOverride.clear();
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -3537,6 +3603,7 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     if (sw === "clear") {
       base = { ...base, chars: [], cursor: 0 };
       eitherSwitched.set(f.index, isWideForDbcs(ch));
+      noteEitherShape(f.index, isWideForDbcs(ch));
     }
     oRejection = undefined;
     // **継続した O 欄の打鍵は鎖で**（挿入は鎖の終わりまで詰め直し、上書きは区間の終わりで次の区間へ。選択の置き換えは区間の中の O 欄の操作のまま）
@@ -3810,6 +3877,7 @@ function overwriteInto(field: Field, base: string, offset: number, line: string)
     if (sw === "clear") {
       out = [];
       eitherSwitched.set(field.index, eitherMode.dbcsOn);
+      noteEitherShape(field.index, eitherMode.dbcsOn);
     } else if (sw !== undefined) {
       const blank = eitherMode.dbcsOn ? "\u3000" : " ";
       while (out.length <= i) out.push(blank);
@@ -3881,6 +3949,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     if (eitherPasteStep(field, eitherMode, i, ch) === "clear") {
       out = [];
       eitherSwitched.set(field.index, eitherMode.dbcsOn);
+      noteEitherShape(field.index, eitherMode.dbcsOn);
     }
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
@@ -4063,7 +4132,9 @@ function pasteFrom(
       mdtKeyed = true; // 貼った字は 1 字ずつの打鍵（ACS `pasteRect`）。同じ値でも MDT（SBCS 欄・複数行の主経路。節目 10 の独立点検 B-S2）
       sync(el, f);
     } else {
-      emit("edit", field.index, val);
+      const meta = jeMeta(field, val, undefined);
+      if (meta) emit("edit", field.index, val, meta);
+      else emit("edit", field.index, val);
       // :value バインドは v-memo でキャッシュされ再評価されないため、全スライスの input を直接更新する
       // （表示はセンチネル→空白。生のセンチネルは Nerd Font で可視化・桁溢れするため）
       slicesOf(field).forEach((_s, i) => {
@@ -4149,6 +4220,7 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
       if (sw === "clear") {
         e = { ...e, chars: [], cursor: 0 };
         eitherSwitched.set(f.index, eitherMode.dbcsOn);
+        noteEitherShape(f.index, eitherMode.dbcsOn);
       }
       const trial = dbcsType(e, ch, f);
       if (!trial || !fitsBytes(trial, f)) {
@@ -4318,6 +4390,7 @@ function commitInto(f: Field, el: HTMLInputElement, raws: readonly string[], sta
     if (sw === "clear") {
       base = { ...base, chars: [], cursor: 0 };
       eitherSwitched.set(f.index, isWideForDbcs(ch));
+      noteEitherShape(f.index, isWideForDbcs(ch));
     }
     // SBCS の挿入は打鍵と同じく余地を数える（ACS は確定した字を 1 字ずつ打鍵として処理する。
     // `20260921-insert-no-room`。以前は `typeChar` が末尾を黙って切り捨てていた）。継続欄も区間の中で数える（D3）

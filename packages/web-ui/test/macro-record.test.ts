@@ -129,6 +129,16 @@ describe("マクロ記録: 状態遷移", () => {
 });
 
 describe("マクロ記録: 何が積まれるか", () => {
+  it("J・全角の E の欄は、送った印入りの値（`wire`）を積む（再生で ACS と同じバイト列になる。`20260928-je-field-shape`）", async () => {
+    await open();
+    startRecording("s1");
+    const s = sessionsStore.get("s1")!;
+    s.edits.set(1, "あ");
+    (s.wire ??= new Map()).set(1, "\u{F000E}あ\u{F000F}");
+    sendKey("s1", "Enter", { row: 5, col: 25 });
+    expect(macroStateOf("s1")?.steps[0]?.fields).toEqual([{ field: 1, value: "\u{F000E}あ\u{F000F}" }]);
+  });
+
   it("画面ごとに「AID ＋ 編集した欄」を 1 ステップとして積む", async () => {
     await open();
     startRecording("s1");
