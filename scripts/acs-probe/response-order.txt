@@ -1,0 +1,20 @@
+# **1 本のレコードに応答の要る命令が 2 つあるとき、ACS は応答をどの順に返すか**（台帳「節目の懸念の残り」の応答の順）。DSM の RESPORDER（[WSF Query][SAVE SCREEN]）と
+# RESPORDER2（[SAVE SCREEN][WSF Query]）。ワイヤは `relay-5250.mjs` で採る（scripts/README.md「他クライアントの実測」）。記録にはパスワードが残るので解析したら shred。
+# 作り方・後片付けは cont-o-edit.txt と同じ。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('RESPORDER')[enter]
+settle 4000
+dump r1
+keys [enter]
+settle 3000
+dump r1-after
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('RESPORDER2')[enter]
+settle 4000
+dump r2
+keys [enter]
+settle 3000
+dump r2-after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

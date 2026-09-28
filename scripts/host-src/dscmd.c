@@ -1046,6 +1046,54 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "RESPORDER") == 0 || strcmp(what, "RESPORDER2") == 0) {
+        /*
+         * **1 本のレコードに応答の要る命令を 2 つ並べたとき、端末が応答をどの順に返すか**（台帳「節目の懸念の残り」の応答の順）。
+         * 画面を出してから、コマンド・バッファに RESPORDER は [WSF Query（D9 70）][SAVE SCREEN]、RESPORDER2 は [SAVE SCREEN][WSF Query] を積み、
+         * 最後の命令を `QsnPutInpCmd` で送る（バッファの中身と 1 本のレコードになる）。入力は 2 回読む（ログは `[1]` / `[2]`）。ワイヤは relay で採る
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x02, 0xD9, 0xC5, 0xE2, 0xD7,                 /* "RESP" */
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x05, 0x0A
+        };
+        static const char query[] = { 0x00, 0x05, (char)0xD9, 0x70, 0x00 };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        const int saveFirst = strcmp(what, "RESPORDER2") == 0;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        if (saveFirst) rc = QsnPutOutCmd(0x02, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+        else rc = QsnPutOutCmd(0xF3, query, 5, cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk(saveFirst ? "QsnPutOutCmd(0x02 SAVE SCREEN → バッファ)" : "QsnPutOutCmd(0xF3 WSF Query → バッファ)", rc, fdbk);
+        buf = QsnCrtInpBuf(8192, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            for (k = 0; k < 2; k++) {
+                tag = k == 0 ? "[1] " : "[2] ";
+                inzFdbk(fdbk, sizeof(fdbk));
+                if (k == 0) {
+                    if (saveFirst) rc = QsnPutInpCmd(0xF3, query, 5, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    else rc = QsnPutInpCmd(0x02, (const char *)0, 0, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk(saveFirst ? "QsnPutInpCmd(0xF3 WSF Query＋バッファ)" : "QsnPutInpCmd(0x02 SAVE SCREEN＋バッファ)", rc, fdbk);
+                } else {
+                    rc = QsnReadInp(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnReadInp", rc, fdbk);
+                }
+                if (lg) { fprintf(lg, "%sbytesRead=%d\n", tag, (int)bytesRead); fflush(lg); }
+            }
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。

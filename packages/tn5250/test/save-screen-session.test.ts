@@ -66,9 +66,13 @@ describe("SAVE SCREEN を受けたらホストへ返信する", () => {
  * 段の取り違えが起きても差が出ない（同 work review ラウンド 2 の指摘）。
  */
 describe("1 レコードに SAVE が 2 回", () => {
-  /** `ESC 02`（SAVE SCREEN）と `ESC 03 + 5 バイト`（SAVE PARTIAL）を 1 レコードに積む */
+  /**
+   * `ESC 02`（SAVE SCREEN）と `ESC 03 + 5 バイト`（SAVE PARTIAL）を 1 レコードに積む。
+   * **オペコードは PUT/GET（03）**——~~SAVE SCREEN（04）~~ のオペコードで `04 02` から始まるレコードは、ACS は SAVE SCREEN だけを処理して残りを読まない
+   * （`DS5250.tokenizeData` の case 4。実機のワイヤでも確かめた——`20260928-response-order`）
+   */
   const TWO_SAVES = [
-    0x00, 0x13, 0x12, 0xa0, 0x00, 0x00, 0x04, 0x00, 0x00, 0x04,
+    0x00, 0x13, 0x12, 0xa0, 0x00, 0x00, 0x04, 0x00, 0x00, 0x03,
     0x04, 0x02, // ESC SAVE SCREEN
     0x04, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00 // ESC SAVE PARTIAL ＋ パラメータ 5 バイト
   ];

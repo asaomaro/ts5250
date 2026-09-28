@@ -178,6 +178,8 @@ let seq = 0;
  * **オペコードごとに、どこからをデータストリームとして読むか**（ACS `DS5250.processPassthru`。`20260921-negative-responses` の節目の点検の指摘）。
  * - NOOP・CANCEL INVITE・メッセージ灯（0x00・0x0A・0x0B・0x0C）: 読まない（空）
  * - OUTPUT ONLY・RESTORE SCREEN（0x02・0x05）: 最初の 0x04 まで読み飛ばしてから（ACS `while (savebuff[n3] != 4) ++n3`）
+ * - SAVE SCREEN（0x04）でデータが `04 02` で始まり長さ 4 以上: **SAVE SCREEN だけ**（ACS `tokenizeData` の case 4 は `processSaveScreen()` だけを呼び、
+ *   レコードの残りを読まない。実機の ACS のコアでも `[SAVE SCREEN][WSF Query]` の Query に答えなかった——`20260928-response-order`）
  * - それ以外の ACS が知っているオペコード（0x01〜0x11）: そのまま
  * - 知らないオペコード: `undefined`（読まずに否定応答 0x10030101）
  */
@@ -188,6 +190,8 @@ function streamOf(opcode: number, data: Uint8Array): Uint8Array | undefined {
     case OPCODE.MESSAGE_LIGHT_ON:
     case OPCODE.MESSAGE_LIGHT_OFF:
       return new Uint8Array(0);
+    case OPCODE.SAVE_SCREEN:
+      return data.length >= 4 && data[0] === ESC && data[1] === COMMAND.SAVE_SCREEN ? data.subarray(0, 2) : data;
     case OPCODE.OUTPUT_ONLY:
     case OPCODE.RESTORE_SCREEN: {
       const at = data.indexOf(ESC);
@@ -1009,7 +1013,7 @@ export class Session5250 extends Emitter<SessionEvents> {
       // **退避 1 回につき応答 1 本**。`saveRequests` は起きた順に並んでいる
       // （1 レコードに SAVE が 2 回入る形に耐えるため。`20260920-restore-screen-parity` の
       // T4 独立点検で、頂点に添える実装だと先の段が空のまま残ることを実測した）。
-      for (const req of result.saveRequests) {
+      const sendSave = (req: (typeof result.saveRequests)[number]): void => {
         // SAVE SCREEN / SAVE PARTIAL はホストが応答を待つ要求。返さないとホストは先へ進まない
         // （SEU の F1 でヘルプが返らなかった／QSH が「待機中」で固まった原因）。
         // **opcode は受信の写し**（ACS `DS5250.processSaveScreen` と同じ。同 research F14）。
@@ -1037,6 +1041,44 @@ export class Session5250 extends Emitter<SessionEvents> {
             this.telnet.sendRecord(res.record);
           }
         } else this.telnet.sendRecord(res.record);
+      };
+      const sendWsf = (w: (typeof result.wsfReplies)[number]): void => {
+        if (w.kind === "query") {
+          // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）
+          this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
+        } else {
+          // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）。
+          // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
+          const reply = buildWsfD972Reply(w.flags, w.next);
+          if (reply) this.telnet.sendRecord(reply);
+        }
+      };
+      // **応答はコマンドの出てきた順に送る**（ACS `processCommand` は命令ごとにその場で送る。`20260928-response-order`——実機の ACS のコアで、
+      // 同じレコードの `[WSF Query][SAVE SCREEN]` は Query の応答が先だった。~~SAVE → WSF → READ SCREEN 系の固定の順~~）。
+      // READ SCREEN 系・READ IMMEDIATE 系は従来どおりレコードにつき 1 本（最初に出てきた位置で送る）
+      const once = new Set<string>();
+      let responded = result.wsfReplies.length > 0;
+      for (const slot of result.responses) {
+        if (slot.kind === "save") sendSave(result.saveRequests[slot.index]!);
+        else if (slot.kind === "wsf") sendWsf(result.wsfReplies[slot.index]!);
+        else if (!once.has(slot.kind)) {
+          once.add(slot.kind);
+          responded = true;
+          if (slot.kind === "read-screen-ext") {
+            // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
+            this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
+          } else if (slot.kind === "read-immediate") {
+            // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。`readRequested` と違い**入力待ちに入らない**。
+            // 中身の決まり（AID 0・画面単位の MDT が門番・**SBA 無しの平坦形式**）は `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
+            this.telnet.sendRecord(buildReadImmediateResponse(this.buf, this.codec).record);
+          } else if (slot.kind === "read-mdt-imm-alt") {
+            // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、送るのは **MDT の立った欄だけ**。返さないとホストが固まる
+            this.telnet.sendRecord(buildReadMdtImmediateAltResponse(this.buf, this.codec).record);
+          } else {
+            // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
+            this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
+          }
+        }
       }
       // **否定応答は最後**（ACS は WSF・READ SCREEN 等の応答を処理の途中で送り、否定応答は `tokenizeData` の終わりで送る。
       // `20260921-negative-responses` の節目の点検の指摘。~~退避の応答の後、Query 等の応答の前~~）。
@@ -1050,50 +1092,6 @@ export class Session5250 extends Emitter<SessionEvents> {
         }
         if (result.senseCode !== undefined) this.telnet.sendRecord(buildNegativeResponse(result.senseCode));
       };
-      // **WSF の応答は起きた順に全部**（ACS `processWSF` は WSF ごとにその場で送る。~~Query と D9/72 のどちらか 1 本~~）
-      for (const w of result.wsfReplies) {
-        if (w.kind === "query") {
-          // 5250 QUERY への応答（自動サインオン後の拡張ネゴシエーション）
-          this.telnet.sendRecord(buildQueryReply(this.terminalType, this.enhanced, this.screenSize));
-        } else {
-          // WSF D9/72 への応答（ACS と同じ）。返さないとホストが待ち続けてキーボードが施錠されたままになる（`20260921-wsf-d9-72`）。
-          // フラグ 0x80 は `wtd-applier` が否定応答にするのでここへは来ない（`buildWsfD972Reply` も返さない）
-          const reply = buildWsfD972Reply(w.flags, w.next);
-          if (reply) this.telnet.sendRecord(reply);
-        }
-      }
-      // **他の応答も、続けて全部送る**（`20260921-negative-responses` の節目 10 の独立点検 A-S1。~~READ SCREEN 系は 1 つだけ送って戻る~~ と、
-      // WSF の応答と同じレコードの画面読みの応答や、`READ SCREEN`＋`READ IMMEDIATE` の片方が落ち、ホストが待ち続けた）。ACS は各コマンドの
-      // 応答をその場で送る。当 PJ はレコードを最後まで適用してから送るので**コマンド順は追わず、この並びで固定**する
-      // （SAVE → WSF → READ SCREEN EXTENDED → READ IMMEDIATE → READ MDT IMMEDIATE ALT → READ SCREEN）。同じレコードにこれらが混ざる形は
-      // 実機で観測していない（**未確認**）
-      let responded = result.wsfReplies.length > 0;
-      if (result.readScreenExtendedRequested) {
-        // READ SCREEN EXTENDED への応答。0x62 とは形式が違う（行区切り 0xFF・カーソル前置なし）
-        this.telnet.sendRecord(buildReadScreenExtendedResponse(this.buf, this.codec, parsed.opcode));
-        responded = true;
-      }
-      if (result.readImmediateRequested) {
-        // **READ IMMEDIATE（0x72）への応答。** 利用者を待たずにその場で返す。
-        // `readRequested` と違い**入力待ちに入らない**——ホストは続けて何かを送ってくる。
-        // 中身の決まり（AID 0・画面単位の MDT が門番・**SBA 無しの平坦形式**）は
-        // `buildFlatFieldResponse` の JSDoc に原典と実機の実測ごと控えてある。
-        const { record } = buildReadImmediateResponse(this.buf, this.codec);
-        this.telnet.sendRecord(record);
-        responded = true;
-      }
-      if (result.readMdtImmediateAltRequested) {
-        // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、
-        // 送るのは **MDT の立った欄だけ**（名前どおり）。返さないとホストが固まる。
-        const { record } = buildReadMdtImmediateAltResponse(this.buf, this.codec);
-        this.telnet.sendRecord(record);
-        responded = true;
-      }
-      if (result.readScreenRequested) {
-        // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
-        this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
-        responded = true;
-      }
       // **否定応答は応答の最後**（ACS は `tokenizeData` の終わりで送る）。下の早期の戻りもすべてこれを通す
       sendNegative();
       // 応答だけのレコードは画面イベントを出さず、入力待ちにも入らない（画面は変えない。ホストは続けて何かを送ってくる）。

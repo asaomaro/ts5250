@@ -11,6 +11,12 @@ import {
 } from "./pc-command.js";
 import { parseWdsf } from "./wdsf-parser.js";
 
+/** 応答の要る命令 1 つ（`ApplyResult.responses`） */
+export type ResponseSlot =
+  | { kind: "save"; index: number }
+  | { kind: "wsf"; index: number }
+  | { kind: "read-screen-ext" | "read-immediate" | "read-mdt-imm-alt" | "read-screen" };
+
 /** WSF への応答の 1 本（`ApplyResult.wsfReplies`） */
 export type WsfReply = { kind: "query" } | { kind: "d972"; flags: number; next: number };
 
@@ -76,6 +82,12 @@ export interface ApplyResult {
   saveRequests: { kind: "full" | "partial"; depth: number; params?: Uint8Array }[];
   /** ホストが READ SCREEN を送ってきた（現在の画面イメージを送り返す必要がある） */
   readScreenRequested: boolean;
+  /**
+   * **応答の要る命令の出てきた順**（`20260928-response-order`）。ACS `DS5250.processCommand` は命令を順に処理し、SAVE・WSF・READ SCREEN 系の応答を
+   * その場で送る——同じレコードの `[WSF Query][SAVE SCREEN]` は Query の応答が先（実機の ACS のワイヤ）。呼び出し側はこの順に応答を組んで送る。
+   * `save` / `wsf` は `saveRequests` / `wsfReplies` の添字
+   */
+  responses: ResponseSlot[];
   /**
    * READ IMMEDIATE（0x72）が来た。**利用者を待たずにその場で欄を送り返す**
    * （`buildReadImmediateResponse`）。`readRequested` と違い**入力待ちに入らない**。
@@ -209,6 +221,7 @@ export function applyDataStream(
     wsfReplies: [],
     saveRequests: [],
     readScreenRequested: false,
+    responses: [],
     readImmediateRequested: false,
     readMdtImmediateAltRequested: false,
     readScreenExtendedRequested: false,
@@ -316,6 +329,7 @@ export function applyDataStream(
         // **加えてホストへ画面を送り返す必要がある**（呼び出し側が応答レコードを送る）。
         // 返信しないとホストは待ち続ける——SEU の F1 でヘルプが返らなかった原因。
         const fullDepth = buf.saveScreen();
+        result.responses.push({ kind: "save", index: result.saveRequests.length });
         result.saveRequests.push({ kind: "full", depth: fullDepth });
         // **退避のときにエラー表示は解除する**（ACS `DS5250.processSaveScreen` の冒頭が
         // `isErrorMode()` なら `clearErrorMode()` する）。窓の SAVE/RESTORE 往復で
@@ -334,6 +348,7 @@ export function applyDataStream(
         const params = r.bytes(5);
         committedCc2 = { alarm: result.alarm, messageWaiting: result.messageWaiting };
         const partialDepth = buf.saveScreen();
+        result.responses.push({ kind: "save", index: result.saveRequests.length });
         result.saveRequests.push({ kind: "partial", depth: partialDepth, params });
         buf.systemMessage = undefined; // 0x02 と同じ経路（ACS も同じメソッドで解除する）
         break;
@@ -392,11 +407,13 @@ export function applyDataStream(
         // ——実機で `QsnPutInpCmd(0x66)` を出させて確かめた
         // （`scripts/diag-5250-commands.mjs`）。
         result.readScreenRequested = true;
+        result.responses.push({ kind: "read-screen" });
         break;
       case COMMAND.READ_SCREEN_TO_PRINT_EXTENDED:
       case COMMAND.READ_SCREEN_TO_PRINT_EXT_GRID:
         // 拡張版。`READ SCREEN EXTENDED`(0x64) と同じ行区切り形式で返す
         result.readScreenExtendedRequested = true;
+        result.responses.push({ kind: "read-screen-ext" });
         break;
       case COMMAND.READ_IMMEDIATE:
         // **利用者を待たずに欄を送り返す**（原典 GNU tn5250 `tn5250_session_read_immediate`）。
@@ -407,6 +424,7 @@ export function applyDataStream(
         // IBM 自身が発行する API（DSM の `QsnReadImm`）で出させて往復を確かめた
         // （`scripts/diag-read-immediate.mjs`）。
         result.readImmediateRequested = true;
+        result.responses.push({ kind: "read-immediate" });
         break;
       case COMMAND.READ_IMMEDIATE_ALT:
         // **MDT の立った欄だけを即送信する**（名前どおり。`buildReadMdtImmediateAltResponse`）。
@@ -416,6 +434,7 @@ export function applyDataStream(
         // `QsnReadMDTImmAlt` を発行させたら**こちらは応答待ちで時間切れ、ホストは API から
         // 戻ってこなかった**（`scripts/diag-5250-commands.mjs`）。
         result.readMdtImmediateAltRequested = true;
+        result.responses.push({ kind: "read-mdt-imm-alt" });
         break;
       case COMMAND.WRITE_TO_DISPLAY: {
         // **エラーのメッセージを出している間は WTD を処理しない**（ACS `checkContention`。長さの検査より前——ACS も WTD の頭で待つ）
@@ -464,6 +483,7 @@ export function applyDataStream(
         }
         const sf = applyStructuredField(r);
         if (sf.reply) {
+          result.responses.push({ kind: "wsf", index: result.wsfReplies.length });
           result.wsfReplies.push(sf.reply);
           if (sf.reply.kind === "query") result.queryRequested = true;
         }
@@ -496,11 +516,13 @@ export function applyDataStream(
         // ホストが「既にあると仮定した画面」を取得するために送ってくる。返信しないと
         // ホストは停止し、後続のウィンドウ描画を送ってこない（キーボードがロックのまま）。
         result.readScreenRequested = true;
+        result.responses.push({ kind: "read-screen" });
         break;
       case COMMAND.READ_SCREEN_EXTENDED:
         // 拡張 5250 を申告した端末にはホストがこちらを送ってくる。応答形式は 0x62 と別
         // （buildReadScreenExtendedResponse 参照）。
         result.readScreenExtendedRequested = true;
+        result.responses.push({ kind: "read-screen-ext" });
         break;
       default:
         // **知らないコマンドは 1 バイト読み飛ばして続ける**（ACS `DS5250.processCommand` の `default: ++n5`。否定応答は返さない——
