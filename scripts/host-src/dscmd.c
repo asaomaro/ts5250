@@ -763,6 +763,41 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "RESEQ") == 0) {
+        /*
+         * **再順序付け（SOH の本体 3 バイト目＋FCW 0x80nn）で READ MDT の欄の並びが変わるか**を測る画面（台帳「DS5250 の残り」の FCW 0x80xx）。
+         * ACS `FFT5250.firstModifiedField` / `nextModifiedField` は SOH の番号の欄から FCW の番号を辿る（0xFF で終わり。辿った先が MDT でなければそこで止まる）。
+         *   SOH 先頭=2 / (5,10) #1 FCW 8003 / (7,10) #2 FCW 8001 / (9,10) #3 FCW 80FF。鎖は #2 → #1 → #3。各 6 桁。IC は 5,10。
+         *   READ MDT を 2 回（ログは `[R1]` / `[R2]`）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x01, 0x07, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x80, 0x03, 0x20, 0x00, 0x06,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x80, 0x01, 0x20, 0x00, 0x06,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x80, 0xFF, 0x20, 0x00, 0x06,
+            0x13, 0x05, 0x0A
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[R1] " : "[R2] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 再順序付け)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "TRANSP") == 0) {
         /*
          * **透過の欄（FCW 0x8400）をどう送るか**を測る画面（台帳「DS5250 の残り」の FCW 0x84xx）。ACS `DS5250.sendAll` は READ MDT 系で

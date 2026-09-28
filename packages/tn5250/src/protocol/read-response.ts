@@ -252,7 +252,7 @@ export function buildReadMdtResponse(
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
   // **CA キー（SOH で申告されたキー）では欄を 1 つも送らない。** カーソル位置と AID だけを返す。
-  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor, "mdt");
+  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.readMdtFields() : [], cursor, "mdt");
 }
 
 /**
@@ -265,7 +265,7 @@ export function buildReadMdtAltResponse(
   aid: number,
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
-  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.mdtFields() : [], cursor, "alt");
+  return buildFieldResponse(buf, codec, aid, sendsData(buf, aid) ? buf.readMdtFields() : [], cursor, "alt");
 }
 
 /**
@@ -305,7 +305,7 @@ export function buildReadMdtImmediateAltResponse(
   cursor?: { row: number; col: number }
 ): { record: Uint8Array; substituted: number } {
   // 欄データは加工しない（ALT。`FieldDataForm`）。AID 0 には SOH の申告が無いので門番は常に通る
-  return buildFieldResponse(buf, codec, 0, sendsData(buf, 0) ? buf.mdtFields() : [], cursor, "alt");
+  return buildFieldResponse(buf, codec, 0, sendsData(buf, 0) ? buf.readMdtFields() : [], cursor, "alt");
 }
 
 /**
@@ -388,7 +388,8 @@ function buildFlatFieldResponse(
 
   // **画面単位の MDT と SOH の申告が門番**。どちらかで落ちれば欄は 1 つも送らない
   // （0x72 は AID 0 ＝ホスト主導なので申告の対象外）。
-  const fields = buf.mdtFields().length > 0 && sendsData(buf, aid) ? buf.orderedFields() : [];
+  // 欄の並びは再順序付けに従う（`readInputFields`）
+  const fields = buf.mdtFields().length > 0 && sendsData(buf, aid) ? buf.readInputFields() : [];
   let substituted = 0;
   for (const f of foldContinued(buf, fields)) {
     // **透過の欄は生のバイトを欄長ぶん**（ヌルも 0x00 のまま。ACS `DS5250.sendAll` の READ INPUT 系——**原典のみ・未確認**。実機の DSM の 2 回目の読みが待たなかった）

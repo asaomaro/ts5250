@@ -1128,7 +1128,8 @@ function invalidSfAttribute(attr: number): { sense: number; why: string } | unde
  * - 欄が画面の終わりを越える・表が 600 欄に達している
  * - 継続欄（FCW 0x86nn の nn が 0x80 以外）: 区間の順（先頭 → 中間… → 最終）が崩れる・nn が 01/02/03 以外、行をまたぐ、MF・自己点検・符号付き数値・右寄せと組む
  * - ワードラップ（0x8680）: MF・自己点検・符号付き数値・右寄せ・I/O・数字のみ・数値のみ・Dup と組む
- * 再順序付け（FCW 0x80nn）とカーソル送り（0x88nn）× SOH の再順序付けの組は、当 PJ が再順序付けを持たないので見ない（decisions D7）
+ * - カーソル送り（FCW 0x88nn）の欄は、SOH で再順序付けを申告した画面では入れない（ACS `FFT5250.isValidCursorProgressField`。`20260928-resequence`。
+ *   ~~当 PJ が再順序付けを持たないので見ない（`20260927-wtd-sense-rest` decisions D7）~~）
  */
 function fieldAddFailure(
   buf: ScreenBuffer, start: number, length: number, ffw: number,
@@ -1190,6 +1191,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
   let continued: ContinuedPart | undefined;
   let cursorProgression: number | undefined;
   let transparent = false;
+  let nextResequence: number | undefined;
   const cont: SfContinued = {};
   // FCW は 0x80 以上（ACS も `>= 128` で続ける。属性は 0x20〜0x3F なので取り違えない）
   while (r.remaining >= 2 && r.peek() >= 0x80) {
@@ -1239,6 +1241,8 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
     // **透過の欄（0x84xx）**。ACS `Field5250` は FCW の上位バイトで振り分け、0x84 なら下位バイトを問わず透過（`transparentField`）。
     // 送るときに加工しない（`read-response.ts` の `transparentBytes`）
     else if ((fcw & 0xff00) === 0x8400) transparent = true;
+    // **再順序付け（0x80nn）**: 次の欄の番号（ACS `Field5250.nextResequence`）。READ の応答の並びに効く（`ScreenBuffer.readMdtFields`）
+    else if ((fcw & 0xff00) === 0x8000) nextResequence = fcw & 0xff;
   }
   const attr = r.u8();
   const length = r.u16();
@@ -1250,7 +1254,10 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
   // 後者は昇順でない SF（台帳の節目 9 の「昇順でない SF は ACS が欄に入れない」）
   const existing = buf.checkNewField(fieldStart);
   if (existing === undefined) {
-    const failure = fieldAddFailure(buf, fieldStart, length, ffw, dbcsType, selfCheck, cont);
+    const failure =
+      cursorProgression !== undefined && buf.resequenceFirst !== 0
+        ? "cursor progression in a resequenced format table"
+        : fieldAddFailure(buf, fieldStart, length, ffw, dbcsType, selfCheck, cont);
     if (failure !== undefined) return { sense: SENSE.FIELD_ADD, why: failure };
   }
   // 番地 -1（SBA 1,0 の後）の属性は桁を占めず 1 行 1 桁から効く（ACS `setAttributeToPlanes` の `row1col0*`）
@@ -1260,7 +1267,7 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
     if (existing.startAddr === fieldStart) buf.updateFieldFfw(existing, ffw, attr);
     return fieldStart;
   }
-  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck, transparent);
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck, transparent, nextResequence);
   // 継続欄の区間の順を憶える（ACS `FFT5250.contFieldSegment`。最終の区間で戻す。**欄の表を消しても戻さない**——ACS も `clearFFT` で触らない）
   if (continued !== undefined) buf.continuedSegment = continued === "last" ? undefined : continued;
   return fieldStart;
