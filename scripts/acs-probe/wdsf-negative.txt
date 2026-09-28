@@ -1,0 +1,23 @@
+# **WDSF の構造体ごとの長さ・引数の否定応答**（実機の ACS のコア。台帳「WDSF の中の否定応答」）。DSM の WDSFNEG の 15 巡。否定応答の巡はホストの読みが CPFA304 ですぐ戻り、
+# 対照の N15 だけが Enter を待つ。結果はホストのログ（`[N01]`〜`[N15]` の QsnReadMDT）で見る。Enter を多めに送る（DSM が終わった後はコマンド行で空の Enter）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wdsf-negative.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WDSFNEG')[enter]
+settle 4000
+setcursor 20,10
+keys [enter]
+settle 2500
+setcursor 20,10
+keys [enter]
+settle 2500
+setcursor 20,10
+keys [enter]
+settle 2500
+setcursor 20,10
+keys [enter]
+settle 2500
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

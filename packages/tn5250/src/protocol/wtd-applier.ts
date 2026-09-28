@@ -1091,6 +1091,8 @@ function applyWdsf(
   }
   const sf = r.bytes(len - 2); // [class, type, ...body]
   if (!WDSF_KNOWN_TYPES.has(sf[1]!)) return { sense: SENSE.WDSF_CLASS, why: `unknown WDSF type 0x${sf[1]!.toString(16)}` };
+  const shape = wdsfShapeSense(sf[1]!, len, sf, buf);
+  if (shape !== undefined) return { sense: shape, why: `WDSF 0x${sf[1]!.toString(16)} length ${len} / parameters` };
   const { row, col } = buf.rowColOf(addr);
   let event;
   try {
@@ -1144,6 +1146,44 @@ function applyWdsf(
       break;
   }
   return undefined;
+}
+
+/**
+ * **構造体ごとの長さ・引数の否定応答**（ACS `ENPTUI5250.processWSFOrder` と各構造体。`20260928-wdsf-negative`）。`len` は LL（自身の 2 バイトを含む）、`sf` は [クラス, 型, 本体…]。
+ * 実機の ACS のコア（DSM の WDSFNEG・`scripts/acs-probe/wdsf-negative.txt`）で、下の 14 通りがすべてホストの読みの CPFA304（否定応答）になり、正しい 0x5F は通った。
+ * 中身の細かい検査（マイナー構造体の長さ・選択肢の属性・罫線の値・構造体が画面の外）は写していない（台帳）
+ */
+function wdsfShapeSense(type: number, len: number, sf: Uint8Array, buf: ScreenBuffer): number | undefined {
+  const at = (i: number): number => sf[i - 2] ?? 0; // ACS の添字（LL の先頭から数える）
+  switch (type) {
+    case 0x50:
+      return len <= 20 ? SENSE.WDSF_MINOR : undefined; // 選択肢の無い選択欄
+    case 0x51:
+      return len <= 8 ? SENSE.WDSF_MINOR : undefined;
+    case 0x53:
+      return len <= 14 ? SENSE.WDSF_MINOR : undefined;
+    case 0x55:
+      return len < 7 || (len - 3) % 4 !== 0 ? SENSE.WDSF_LENGTH : undefined;
+    case 0x58:
+    case 0x5b:
+      return len !== 6 ? SENSE.WDSF_LENGTH : undefined;
+    case 0x59:
+    case 0x5f:
+      return len !== 7 ? SENSE.WDSF_LENGTH : undefined;
+    case 0x60:
+      if (len < 9 || (len > 11 && len < 18)) return SENSE.WDSF_LENGTH; // 12〜17 はマイナーの置き場が 7 バイトに満たない
+      return at(4) !== 0x01 ? SENSE.WSF_D972_FLAG : undefined; // 区画は 1 だけ（0x10050112）
+    case 0x61: {
+      if (len !== 11) return SENSE.WDSF_LENGTH;
+      if (at(4) !== 0x01) return SENSE.WSF_D972_FLAG;
+      const [row, col, width, depth] = [at(7), at(8), at(9), at(10)];
+      if (row === 0 || col === 0 || row > buf.rows || col > buf.cols) return SENSE.WDSF_GRID_POSITION;
+      if (width === 0 || depth === 0 || col + width - 1 > buf.cols || row + depth - 1 > buf.rows) return SENSE.WDSF_GRID_POSITION;
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -1404,6 +1444,10 @@ export const SENSE = {
   WDSF_LENGTH: 0x10050110,
   /** WDSF のクラスが 0xD9 でない・知らない型（同上） */
   WDSF_CLASS: 0x10050111,
+  /** WDSF の構造体が短すぎる（選択欄・窓・スクロール・バー。ACS `checkMajorLength`） */
+  WDSF_MINOR: 0x10050113,
+  /** 罫線（0x61）の矩形が画面の外（ACS `processClearGrid`） */
+  WDSF_GRID_POSITION: 0x10050151,
   /** 欄を表に入れられない（ACS `addFieldToFFT` が null。`fieldAddFailure`） */
   FIELD_ADD: 0x10050125,
   /** SF の属性が 0x20〜0x3F でない（製品の ACS の `isValidStartOfFieldAttribute`） */

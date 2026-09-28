@@ -170,7 +170,7 @@ describe("WDSF GUI — 除去コマンド", () => {
   it("REM_ALL_GUI_CONSTRUCTS で全 GUI を除去", () => {
     const buf = withOne();
     applyDataStream(
-      Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0, 0, ...wdsf(WDSF_TYPE.REM_ALL_GUI_CONSTRUCTS, [0x00])]),
+      Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0, 0, ...wdsf(WDSF_TYPE.REM_ALL_GUI_CONSTRUCTS, [0x00, 0x00, 0x00]) /* LL 7（ACS は 7 以外を否定応答） */]),
       buf,
       codec,
       () => {}
