@@ -1,0 +1,32 @@
+# **カーソル送り（FCW 0x88nn）の番号が区間を数えない並びの数を超えるとき**（実機の ACS のコア。台帳「節目の懸念の残り」の番号の範囲）。DSM の PROGRANGE:
+# (3,10) 欄 #1（FCW 8804）/ (5,10)〜(7,10) 継続欄 3 区間 / (9,10) 欄（FCW 8801）。欄の表は 5・区間を数えない並びは 3（番号 4 は並びの外）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/progression-range.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('PROGRANGE')[enter]
+settle 3000
+dump start
+# a: 番号 4（並びの外）の欄から Tab
+setcursor 3,10
+trykeys [tab]
+settle 300
+dump a-tab-out-of-range
+keys [reset]
+# b: 番号 1 の欄から Tab（並びの 1 番目＝3,10 へ）
+setcursor 9,10
+trykeys [tab]
+settle 300
+dump b-tab-to-1
+keys [reset]
+# c: 満杯の自動送り（番号 4 の欄に 6 桁）
+setcursor 3,10
+trykeys ABCDEF
+settle 300
+dump c-full-out-of-range
+keys [reset]
+setcursor 3,10
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

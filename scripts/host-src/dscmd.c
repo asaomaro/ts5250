@@ -1094,6 +1094,36 @@ int main(int argc, char *argv[]) {
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
         QsnDltBuf(cb, (Q_Fdbk_T *)0);
+    } else if (strcmp(what, "PROGRANGE") == 0) {
+        /*
+         * **カーソル送り（FCW 0x88nn）の番号が、継続欄の区間を数えない並び（ACS `FFT5250.getStandardFieldList`）の数を超えるとき**の行き先。
+         * ACS `nextNonByPassInputFieldPos` は番号を欄の表の数（区間も数える）で検査してから、区間を数えない並びで引く。
+         *   (3,10) 欄 #1（FCW 8804）6 桁 / (5,10)・(6,10)・(7,10) 継続欄 3 区間 6 桁ずつ / (9,10) 欄（FCW 8801）6 桁。欄の表は 5・並びは 3。IC は 3,10
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x88, 0x04, 0x20, 0x00, 0x06,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x01, 0x20, 0x00, 0x06,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x03, 0x20, 0x00, 0x06,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x02, 0x20, 0x00, 0x06,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x88, 0x01, 0x20, 0x00, 0x06,
+            0x13, 0x03, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 カーソル送りの番号の範囲)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。

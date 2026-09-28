@@ -33,7 +33,7 @@ import {
 import { play } from "../macro-engine.js";
 import { blocksManualInput } from "../macro-record.js";
 import { isKatakanaCcsid } from "../hostCodePages.js";
-import { isDbcsCcsid, progressionTarget, progressionNumberOf } from "@ts5250/tn5250/browser";
+import { isDbcsCcsid, progressionTarget, progressionNumberOf, progressionStuck } from "@ts5250/tn5250/browser";
 import { OVERLAY_SELECTOR } from "../composables/focusTrap.js";
 import { MSG_PROTECTED, MSG_RESERVE_BREAK, msgReserved, isOperatorError, MSG_MANDATORY_FILL, MSG_SELF_CHECK, MSG_SYSREQ_KEY_INVALID } from "../composables/opMessages.js";
 import { findFieldViolation, needsFieldExit, type MandatoryFinding } from "../composables/mandatoryCheck.js";
@@ -357,6 +357,16 @@ function onFieldFull(fieldIndex: number, viaFieldExit = false, leaving = false):
   // Field Exit は次の欄へ進む）。出た後の検査を掛けると、消去・右寄せの後の値で MF を見直して止め、自己点検も止めていた
   // （`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。Dup・満杯の自動送りは従来どおり掛ける
   if (viaFieldExit) muteLeaveCheckThroughKeyMove();
+  // 並びの外を指すカーソル送り: ACS は例外で送りを捨てる（`progressionStuckFrom`）。満杯の自動送りなら欄の最終桁に留まり、
+  // Field Exit・Field±・Dup（`viaFieldExit`・`leaving`）はカーソルを動かさない（消去の後の位置のまま。原典の手順——実測は満杯の場合だけ）
+  const stuck = progressionStuckFrom(fieldIndex);
+  if (stuck && (viaFieldExit || leaving)) return;
+  if (stuck) {
+    const cols = snapshot.value?.cols ?? 80;
+    const last = (stuck.row - 1) * cols + (stuck.col - 1) + stuck.length - 1;
+    onCursor(Math.floor(last / cols) + 1, (last % cols) + 1);
+    return;
+  }
   // ホストが指定したカーソル送り（FLDCSRPRG）が最優先。無ければ画面順の次へ
   const to = progressionStop(fieldIndex);
   if (to) { focusStop(to); return; }
@@ -532,6 +542,16 @@ function progressionStop(fromFieldIndex: number): HTMLElement | undefined {
   return inputForSlice(target.index, 0);
 }
 
+/**
+ * **カーソル送りの番号が並びの外で、ACS なら打鍵が捨てられる欄か**（`progressionStuck`。ACS は例外になりカーソルが動かない——
+ * Tab はその場のまま、満杯の自動送りは欄の最終桁に留まる。`20260928-progression-range`）
+ */
+function progressionStuckFrom(fromFieldIndex: number): Field | undefined {
+  const fields = snapshot.value?.fields ?? [];
+  const from = fields.find((f) => f.index === fromFieldIndex);
+  return from && !from.protected && from.cursorProgression !== undefined && progressionStuck(fields, from.cursorProgression) ? from : undefined;
+}
+
 /** タブ停止点へフォーカスする（入力欄なら先頭桁にキャレットを置く） */
 function focusStop(el: HTMLElement | undefined): void {
   if (!el) return;
@@ -682,6 +702,7 @@ function focusByOffset(delta: number): void {
     // ホストがカーソル送りを指定した欄からの前進だけは、その行き先を優先する
     const active = document.activeElement instanceof HTMLInputElement ? document.activeElement : stops[cur];
     if (delta > 0 && active instanceof HTMLInputElement) {
+      if (progressionStuckFrom(Number(active.dataset["fieldIndex"]))) return; // ACS は例外で Tab を捨てる（カーソルはそのまま）
       const to = progressionStop(Number(active.dataset["fieldIndex"]));
       if (to) { focusStop(to); return; }
     }

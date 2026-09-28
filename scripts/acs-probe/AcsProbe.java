@@ -150,7 +150,7 @@ public class AcsProbe {
       // 引数の書式も接続前に確かめる。サインオンの後で数値の誤りに気づくと、SIGNOFF せずに止まる
       switch (cmd) {
         case "signon", "dump" -> { }
-        case "keys" -> { if (arg.isEmpty()) throw new StepError(at + "keys の後に送る文字列が要ります"); }
+        case "keys", "trykeys" -> { if (arg.isEmpty()) throw new StepError(at + cmd + " の後に送る文字列が要ります"); }
         case "settle" -> { if (!arg.isEmpty() && !arg.matches("\\d+")) throw new StepError(at + "settle の引数はミリ秒の整数: " + arg); }
         case "sleep" -> { if (!arg.matches("\\d+")) throw new StepError(at + "sleep の引数はミリ秒の整数: " + arg); }
         case "setcursor" -> { if (!arg.matches("\\d+\\s*,\\s*\\d+")) throw new StepError(at + "setcursor の引数は 行,桁: " + arg); }
@@ -266,6 +266,15 @@ public class AcsProbe {
             }
           }
           case "keys" -> ps.SendKeys(arg.replace("${LIB}", lib));
+          // **ACS のコアが打鍵の処理の中で例外を投げても止まらずに続ける**（投げたこと自体が測りたい事実のとき。例外の種類だけを出す）。
+          // GUI の ACS ではイベントのスレッドが例外を受けて打鍵が捨てられる——その後のカーソル・画面を `dump` で見るため
+          case "trykeys" -> {
+            try {
+              ps.SendKeys(arg.replace("${LIB}", lib));
+            } catch (Throwable e) {
+              OUT.print("--- trykeys: " + e.getClass().getSimpleName() + "\n");
+            }
+          }
           case "settle" -> settle(arg.isEmpty() ? 800 : Long.parseLong(arg));
           case "sleep" -> Thread.sleep(Long.parseLong(arg));
           case "setcursor" -> {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tabPosition, backtabPosition, progressionTarget, progressionNumberOf } from "../src/screen/search.js";
+import { tabPosition, backtabPosition, progressionTarget, progressionNumberOf, progressionStuck } from "../src/screen/search.js";
 import type { Cell, Field, ScreenSnapshot } from "../src/screen/types.js";
 
 /**
@@ -114,5 +114,33 @@ describe("カーソル送りの送り先（節目 10 の独立点検で生き残
     // 標準の並びは [1, 2(first), 5] → 2 番は継続欄の先頭（5 行）。middle・last を数えていたら 2 番は 3（6 行）になる
     expect(rc(tabPosition(snap(fields), pos(3, 21)))).toEqual([5, 20]);
     expect(progressionNumberOf(fields as never, fields[4]!)).toBe(3);
+  });
+});
+
+/**
+ * **カーソル送りの番号が並びの外**（`20260928-progression-range`）。DSM の PROGRANGE と同じ形: 欄 #1（送り先 4）・継続欄 3 区間・欄（送り先 1）。
+ * 欄の表は 5・区間を数えない並びは 3。実機の ACS のコアは番号 4 の欄で Tab するとカーソルを動かさなかった（配列の外を引いて例外）
+ */
+describe("カーソル送りの番号が並びの外", () => {
+  const PR = () => [
+    f(1, 3, { cursorProgression: 4 }),
+    f(2, 5, { continued: "first" }), f(3, 6, { continued: "middle" }), f(4, 7, { continued: "last" }),
+    f(5, 9, { cursorProgression: 1 })
+  ];
+  it("表の数以内で並びの外なら動かない", () => {
+    expect(progressionStuck(PR(), 4)).toBe(true);
+    expect(rc(tabPosition(snap(PR()), pos(3, 20)))).toEqual([3, 20]);
+    expect(rc(tabPosition(snap(PR()), pos(3, 22)))).toEqual([3, 22]);
+  });
+  it("並びの中なら従う（番号 1 → 3,20）", () => {
+    expect(rc(tabPosition(snap(PR()), pos(9, 20)))).toEqual([3, 20]);
+  });
+  it("表の数を超える番号・0 は画面順へ倒れる（例外にならない）", () => {
+    const fields = PR();
+    fields[0] = f(1, 3, { cursorProgression: 6 });
+    expect(progressionStuck(fields, 6)).toBe(false);
+    expect(rc(tabPosition(snap(fields), pos(3, 20)))).toEqual([5, 20]);
+    expect(progressionStuck(fields, 0)).toBe(false);
+    expect(progressionStuck(fields, 3)).toBe(false);
   });
 });
