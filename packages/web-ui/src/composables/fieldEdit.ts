@@ -132,12 +132,13 @@ export function home(state: EditState): EditState {
  * ~~満杯欄なら末尾（len）に到達する~~ → ACS `Field5250.getEndPosition`（`PS5250.processEndField` が使う）は
  * 欄の終わりから非空白を探し、見つけた桁が最後の桁ならそこを、そうでなければ次の桁を返す（`20260921-acs-default-keys`）
  */
-export function end(state: EditState, from = 0): EditState {
+export function end(state: EditState, from = 0, isPad: (c: string) => boolean = (c) => c === " "): EditState {
   // `from` は探す下限（行をまたぐ欄の 2 行目以降では**今の行の先頭**。ACS `processEndField` がカーソルの行の先頭を下限に渡す）。
   // 下限から後ろに入力が無ければ下限に置く（ACS `getEndPosition` の `return n`。節目の点検の指摘: 欄全体を探して前の行へ戻っていた）
   const last = state.chars.length - 1;
   let i = last;
-  while (i >= from && state.chars[i] === " ") i--;
+  // `isPad` は空きとして飛ばす字（ACS `Field5250.getEndPosition` は 0x40 と NUL をバイトで飛ばす——J・全角の E の全角空白 `40 40` も飛ぶ）
+  while (i >= from && isPad(state.chars[i]!)) i--;
   if (i < from) return { ...state, cursor: clamp(from, 0, state.chars.length) };
   return { ...state, cursor: clamp(i === last ? last : i + 1, 0, state.chars.length) };
 }

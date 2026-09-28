@@ -660,8 +660,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   SI の位置が欄の形で決まる——full（SI が欄の最後の桁・空きは NUL の組。J の欄と切り替えた E）/ compact（SI が中身の直後）/ open（SI 以前から消去した E。SI が無い）。
   実機の ACS のコア（DSM の JEEDIT・`scripts/acs-probe/je-field-edit.txt` の 23 通り）をこの 3 つで説明でき、当 PJ は SI を常に中身の直後に置いていた。
   画面の側が形を決めて送る値だけを印入りにし（`ScreenGrid.vue` の `jeShapeOf`・`SessionState.wire`）、ブラウザからホストが受け取る 3 巡が ACS と一致（`scripts/verify-browser-je-field.mjs` pass=3）。単体 18 件・変異 17 通り検出。
+- [x] **全角の状態の E・J の欄のカーソルの桁と End**（下の「E 欄の残り」から割った）。**完了（`20260928-either-empty-view`）**: 空にした全角の E は ACS では SO の桁を残し、カーソルは SO の次
+  （`scripts/acs-probe/either-empty-type.txt`: 空にして い → `0e 4482`・17,13、先頭で X → `e7`・17,11）。当 PJ は空きを半角空白で詰めていたので SO の桁が無く 1 桁ずれ、先頭で X も打てなかった。
+  End も ACS `Field5250.getEndPosition` は J・全角の E で全角空白を飛ばす（`scripts/acs-probe/je-field-end.txt` の 6 通り。J の `あい`＋全角空白 5,15・空の J 3,11 など）のに、当 PJ は欄の最後へ行っていた
+  （直す前のブラウザで 5 通りが違った。例: 空の J 3,19）。full・open の E の空きを全角空白にし（`ScreenGrid.vue` の `jeWidePad`）、End で全角空白も飛ばす。
+  ブラウザの End の 6 通り＋バイト列が ACS と一致（`scripts/verify-browser-either-empty-view.mjs` pass=7）、既存の `verify-browser-je-field.mjs` も pass=3 のまま。単体 9 件・変異 9 通り検出。
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: ~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。~~「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）~~（上の `[x]`）。
-  全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
+  ~~全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる）~~（上の `[x]`。ACS が残すのは SO だけ）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
+  open の E の中身の末尾に打った全角空白は ACS は `40 40` で送るが、当 PJ は空きと区別できず落とす（`20260928-either-empty-view` decisions D2。O 欄の (a) と同じ課題）。
   挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
   **実測（`20260927-either-field-rest`・`scripts/acs-probe/either-empty.txt`）**: ACS は全角の状態の E 欄を SO の直後から Erase EOF すると **`0e`（SO だけ）を送り**、カーソルは SO の次の桁（17,11）。
   ~~当 PJ は空の値で何も送らない~~（上の `[x]` で直した）。

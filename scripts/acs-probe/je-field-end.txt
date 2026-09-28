@@ -1,0 +1,52 @@
+# **J・全角の E の欄の End（欄の終わり）の行き先**（実機の ACS のコア。`20260928-either-empty-view`）。DSM の JEEDIT（`je-field-edit.txt` と同じ画面）。
+# 原典 `Field5250.getEndPosition` は J・全角の E では SO・SI の桁を除いた内側を後ろから見て、0x40 と NUL を飛ばす（全角空白 `40 40` も飛ぶ）——それを実機で確かめる。
+# 作り方・後片付けは je-field-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/je-field-end.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('JEEDIT')[enter]
+settle 3000
+# e1: J `あい`＋全角空白×3（5,10）。SO の次から End
+setcursor 5,11
+keys [eof]
+settle 200
+dump e1-j-aiu-end
+# e2: J 空（全角空白×5。3,10）
+setcursor 3,11
+keys [eof]
+settle 200
+dump e2-j-empty-end
+# e3: E `SO あ SI`（11,10。SI が中身の直後）
+setcursor 11,11
+keys [eof]
+settle 200
+dump e3-e-compact-end
+# e4: E `SO あい SI`（13,10）を い から Erase EOF（SI も消える）→ End
+setcursor 13,13
+keys [eraseeof]
+setcursor 13,11
+keys [eof]
+settle 200
+dump e4-e-open-end
+# e5: E 空（9,10）の先頭で あ（全角へ切り替え）→ 先頭へ戻って End
+setcursor 9,10
+keys あ
+setcursor 9,11
+keys [eof]
+settle 200
+dump e5-e-switched-end
+# e6: 空にした全角の E（13,10 を SO の次から Erase EOF）→ End
+setcursor 13,11
+keys [eraseeof]
+setcursor 13,15
+keys [eof]
+settle 200
+dump e6-e-emptied-end
+keys [enter]
+settle 1500
+keys [enter]
+settle 1500
+keys [enter]
+settle 2000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

@@ -71,7 +71,12 @@ describe("DBCS の欄の Space キー", () => {
   it("**E（either）: DBCS の状態（全角の字が入っている）のときだけ全角空白**。空の欄・SBCS の字の後は SBCS の空白のまま", async () => {
     const dbcs = await grid(fld("either"));
     await dbcs.type("あ", " ");
-    expect(dbcs.value(), "あ の後の Space は全角空白").toBe("あ　");
+    // 切り替えた E は full（空きは全角空白。`20260928-either-empty-view`）なので、末尾の全角空白は詰め物として値から落ちる——
+    // 送る値の NUL の組は `40 40` で届くので、打った全角空白と同じバイト列。途中なら字として残る
+    expect(dbcs.value(), "あ の後の Space は全角空白（末尾は詰め物と同じ）").toBe("あ");
+    const mid = await grid(fld("either"));
+    await mid.type("あ", " ", "い");
+    expect(mid.value(), "途中の Space は全角空白").toBe("あ　い");
     const sbcs = await grid(fld("either"));
     await sbcs.type("X", " ", "Y");
     expect(sbcs.value(), "SBCS の字の後の Space は SBCS の空白").toBe("X Y");
