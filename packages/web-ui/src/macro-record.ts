@@ -105,7 +105,9 @@ export function recordSend(
   };
   if (sysReqText !== undefined) step.sysReqText = sysReqText;
 
-  for (const [index, value] of s.edits) {
+  for (const [index, logical] of s.edits) {
+    // 送った値と同じものを積む（J・全角の E は印入りの送る形〔`SessionState.wire`〕。`20260928-je-field-shape`）
+    const value = s.wire?.get(index) ?? logical;
     const f = snap.fields.find((x) => x.index === index);
     // 画面から消えた欄は照合材料を作れない。書き込み先が特定できないものは記録しない
     if (!f) continue;

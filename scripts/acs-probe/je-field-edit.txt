@@ -1,0 +1,109 @@
+# **J・E の欄の編集をバイト列で測る**（実機の ACS のコア。台帳「E 欄の残り」）。DSM の JEEDIT（(3,10)〜(17,10) に J・E の 12 桁の欄を 8 つ）。
+# ホストが受け取った READ MDT のバイト列は /tmp/dscmd.log の `[J1]`〜`[J3]`。エラーの場合は Reset してから次へ（手順の順は違っても、ホストへ届くのは欄の順）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/je-field-edit.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('JEEDIT')[enter]
+settle 3000
+dump j0
+# ===== 1 巡目: 上書き・切り替え =====
+# f0 J 空: SO の次から あい
+setcursor 3,11
+keys あい
+# f1 J あい: い の上に う
+setcursor 5,13
+keys う
+# f2 J あいう: 最後の組（7,19）に か
+setcursor 7,19
+keys か
+# f3 E 空: 先頭で あ（半角→全角の切り替え）
+setcursor 9,10
+keys あ
+# f4 E あ: SO の次で X（全角→半角の切り替え）
+setcursor 11,11
+keys X
+# f6 E AB: 先頭で あ（半角→全角の切り替え。AB は消える）
+setcursor 15,10
+keys あ
+# f5 E あい: い の上で X（先頭でない半角 → 0060）
+setcursor 13,13
+keys X
+settle 300
+dump j1-err60a
+keys [reset]
+# f7 J あい: X（半角 → 0060）
+setcursor 17,11
+keys X
+settle 300
+dump j1-err60b
+keys [reset]
+settle 300
+setcursor 3,11
+keys [enter]
+settle 3000
+# ===== 2 巡目: 挿入・削除・後退 =====
+# f0 J 空: SO の次に あ を挿入
+setcursor 3,11
+keys [insert]あ[insert]
+# f1 J あい: あ の前に う を挿入
+setcursor 5,11
+keys [insert]う[insert]
+# f2 J あいう: い で Delete
+setcursor 7,13
+keys [delete]
+# f3 E 空: あい と打って Backspace
+setcursor 9,10
+keys あい
+keys [backspace]
+# f4 E あ: SO の次に い を挿入
+setcursor 11,11
+keys [insert]い[insert]
+# f5 E あい: あ で Delete
+setcursor 13,11
+keys [delete]
+# f7 J あい: う の位置（17,15）で Backspace（い を消す）
+setcursor 17,15
+keys [backspace]
+# f6 E AB: B の上に あ を挿入（先頭でない全角 → 0061）
+setcursor 15,11
+keys [insert]あ
+settle 300
+dump j2-err61
+keys [reset]
+settle 300
+setcursor 3,11
+keys [enter]
+settle 3000
+# ===== 3 巡目: 消去 =====
+# f1 J あい: い で Erase EOF
+setcursor 5,13
+keys [eraseeof]
+# f3 E 空: AB と打ち、先頭で あ（切り替え）
+setcursor 9,10
+keys AB
+setcursor 9,10
+keys あ
+# f4 E あ: SO の次から Erase EOF して い（ACS は SI を付けない——either-empty-type.txt）
+setcursor 11,11
+keys [eraseeof]
+keys い
+# f5 E あい: い で Erase EOF
+setcursor 13,13
+keys [eraseeof]
+# f6 E AB: B で Erase EOF
+setcursor 15,11
+keys [eraseeof]
+# f7 J あい: あ で Delete
+setcursor 17,11
+keys [delete]
+# f2 J あいう: う の後ろ（7,17）で Erase EOF
+setcursor 7,17
+keys [eraseeof]
+settle 300
+dump j3
+setcursor 3,11
+keys [enter]
+settle 3000
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

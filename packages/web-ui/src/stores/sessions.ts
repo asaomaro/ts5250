@@ -156,6 +156,11 @@ export interface SessionState {
    * `edits` に載っている欄だけが対象——載っていない欄の状態は core が既に知っている
    */
   eitherDbcsOn?: Map<number, boolean>;
+  /**
+   * **ホストへ送る形の値**（`edits` と対。J・全角の E の欄は SO・NUL の組・SI の位置まで含めた印入りの値で送る——`20260928-je-field-shape`）。
+   * 画面の側の値（`edits`）は字だけの論理値のまま。載っている欄だけ、AID の送信で `edits` の値の代わりにこれを送る
+   */
+  wire?: Map<number, string>;
   cursor: { row: number; col: number };
   /**
    * **サーバーとの結びつき**（`20260908-session-lifetime-rules-fold`。規則は `session-link.ts`）。
@@ -512,6 +517,7 @@ export const sessionsStore = reactive({
       s.reservedBy = by;
       s.edits.clear();
       delete s.eitherDbcsOn; // edits と同じライフサイクル
+      delete s.wire;
       delete s.awaitingFieldExit; // 打ちかけを捨てたので、欄を出る待ちも無い
       delete s.typeAhead; // 利用者の打鍵を自動操作の画面へ流さない（`20260921-type-ahead` D5）
     } else {
@@ -555,6 +561,7 @@ export const sessionsStore = reactive({
     // ホスト発の新画面が来たらローカル編集差分はクリア（新フォーマット）
     s.edits.clear();
     delete s.eitherDbcsOn; // edits と同じライフサイクル
+    delete s.wire;
     delete s.awaitingFieldExit; // 打ちかけと一緒に捨てる（ACS も新しい欄は「出た」状態で作る）
   },
 

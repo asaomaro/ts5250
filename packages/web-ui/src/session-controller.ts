@@ -1311,7 +1311,8 @@ export function sendKey(
   const fields = carryFields
     ? [...s.edits.entries()].map(([field, value]) => ({
         field,
-        value,
+        // J・全角の E は SO・NUL の組・SI の位置まで含めた値で送る（`SessionState.wire`。`20260928-je-field-shape`）
+        value: s.wire?.get(field) ?? value,
         // E 欄の状態を添える（`onEdit` が `edits` と一緒に積む。`20260927-either-field-so`）
         ...(s.eitherDbcsOn?.has(field) ? { eitherDbcsOn: s.eitherDbcsOn.get(field)! } : {})
       }))

@@ -1299,8 +1299,9 @@ export class ScreenBuffer {
           cells.push({ type: "char", char: " ", charKind: b === 0x0e ? "so" : "si" });
           inShift = b === 0x0e;
           lead = undefined;
-        } else if (b === 0x00 && !inShift) {
-          // 死んだ桁（ACS の DBCSPlane 8）はバイトとしては NUL——空のセルに置く（送信で途中の NUL は空白、ALT では NUL のまま）。並びの外なので前半の持ち越しは無い
+        } else if (b === 0x00 && lead === undefined) {
+          // 死んだ桁（ACS の DBCSPlane 8）・J と全角の E の欄の空の組（ACS は SO と SI の間を NUL の組で持つ——`20260928-je-field-shape`）は、バイトとしては NUL——
+          // 空のセルに置く（送信で途中の NUL は空白、ALT では NUL のまま）
           cells.push(null);
         } else if (inShift && lead === undefined) lead = b;
         else if (inShift) {

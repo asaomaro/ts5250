@@ -656,6 +656,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **空にした E 欄の全角・半角の状態**（下の「E 欄の残り」から割った）。**完了（`20260927-either-field-so`）**: 画面の側が E 欄の状態を送る値に添え（ws の `fields[].eitherDbcsOn`）、
   コアはそれで状態を決め、全角のまま空なら先頭に SO を置く（`packages/tn5250/src/screen/buffer.ts` の `setFieldValue`・`placeEmptyShift`）。ACS のコア（2 経路・Erase Input も）で
   全角のまま空の E 欄は `0e`・半角へ切り替えて空の E 欄は何も送らない・空の J 欄は `0e`＋NUL＋`0f` と測り、当 PJ も同じ（`scripts/verify-either-empty.mjs` pass=3）。画面の `eitherSwitched` を欄ごとにした。
+- [x] **J・全角の E の欄の送るバイト列**（下の「E 欄の残り」から割った）。**完了（`20260928-je-field-shape`）**: ACS は J・全角の E の欄を SO・字・SI のセルで持ち、
+  SI の位置が欄の形で決まる——full（SI が欄の最後の桁・空きは NUL の組。J の欄と切り替えた E）/ compact（SI が中身の直後）/ open（SI 以前から消去した E。SI が無い）。
+  実機の ACS のコア（DSM の JEEDIT・`scripts/acs-probe/je-field-edit.txt` の 23 通り）をこの 3 つで説明でき、当 PJ は SI を常に中身の直後に置いていた。
+  画面の側が形を決めて送る値だけを印入りにし（`ScreenGrid.vue` の `jeShapeOf`・`SessionState.wire`）、ブラウザからホストが受け取る 3 巡が ACS と一致（`scripts/verify-browser-je-field.mjs` pass=3）。単体 18 件・変異 17 通り検出。
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: ~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。~~「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）~~（上の `[x]`）。
   全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
   挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
