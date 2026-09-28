@@ -1081,6 +1081,20 @@ export class ScreenBuffer {
     this.cells[addr] = { type: "attr", byte };
   }
 
+  /**
+   * **欄を空にする（MDT はそのまま）**（ACS `PS5250.eraseField_Work` の MDT を立てない形。WDSF 0x54 の書き込みの前）。継続欄は鎖の全区間。
+   * J 欄・全角の状態の E 欄は両端の 1 桁（SO・SI）を残す（ACS の 1 桁の内側）
+   */
+  eraseFieldCells(field: InternalField): void {
+    const inset = field.dbcsType === "only" || (field.dbcsType === "either" && field.eitherDbcsOn === true) ? 1 : 0;
+    const run = field.continued === undefined ? [field] : this.continuedRun(field);
+    for (const f of run) {
+      const from = f.startAddr + inset;
+      const to = f.startAddr + f.length - 1 - inset;
+      if (to >= from) this.eraseRange(from, to);
+    }
+  }
+
   /** from から to まで（両端含む・線形）を null（既定空白）にする */
   eraseRange(from: number, to: number): void {
     this.checkAddr(from);

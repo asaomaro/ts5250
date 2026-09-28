@@ -1,0 +1,20 @@
+# **WDSF 0x54（欄へのデータの書き込み。EBCDIC の形）**（実機の ACS のコア。台帳「WDSF の中の否定応答」の 0x54）。DSM の WRITEDATA:
+# D1 (5,10) の 10 桁の欄（初期値 OLDVALUE12）に NEW を書き、続けて Z / D2 欄の先頭でない (5,11) / D3 11 桁（欄より長い）/ D4 3 区間の継続欄に ABCDEFGHIJ。
+# D2・D3 は否定応答（ホストの読みが CPFA304）で打鍵なしに次の巡へ進むので、画面を見るのは D1 と D4。ホストのログの `[D1]`〜`[D4]` で否定応答と READ MDT を見る。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/write-data.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WRITEDATA')[enter]
+settle 3000
+dump d1
+setcursor 20,10
+keys [enter]
+settle 3000
+dump d4
+setcursor 20,10
+keys [enter]
+settle 2500
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

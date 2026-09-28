@@ -981,8 +981,9 @@ function applyWtd(
         break;
       }
       case ORDER.WDSF: {
-        const bad = applyWdsf(r, buf, codec, addr, warn);
-        if (bad) return fail(bad.sense, bad.why);
+        const res = applyWdsf(r, buf, codec, addr, warn);
+        if (typeof res === "number") addr = res; // 欄へ書いたぶん番地が進む（0x54。ACS `writeString`）
+        else if (res) return fail(res.sense, res.why);
         break;
       }
       case ORDER.WEA: {
@@ -1077,7 +1078,7 @@ function applyWdsf(
   codec: Codec,
   addr: number,
   warn: WarnFn
-): { sense: number; why: string } | undefined {
+): { sense: number; why: string } | number | undefined {
   if (r.remaining < 4) return { sense: SENSE.COMMAND_EXPECTED, why: "WDSF too short" };
   const len = r.u16();
   if (len < 4) return { sense: SENSE.WDSF_LENGTH, why: `WDSF length ${len}` };
@@ -1135,12 +1136,80 @@ function applyWdsf(
       if (event.bodyLength !== 2) return { sense: SENSE.WDSF_LENGTH, why: `UNRESTRICT WINDOW CURSOR body ${event.bodyLength}` };
       buf.unrestrictWindowCursor();
       break;
+    case "write-data":
+      return writeFieldData(buf, codec, addr, event.flag, event.data, warn);
     case "unknown":
-      // ACS は受けるが当 PJ は効かせない型（0x54 欄への書き込み・0x55 マウス・ボタン）
+      // ACS は受けるが当 PJ は効かせない型（0x55 マウス・ボタン）
       warn(`unhandled WDSF type 0x${event.type.toString(16)} — ignored`);
       break;
   }
   return undefined;
+}
+
+/**
+ * **WRITE DATA（WDSF 0x54）の EBCDIC の形（flag 0x80）**（ACS `ENPTUI5250.processWriteData`。`20260928-wdsf-write-data`）: 今の番地が入力欄の先頭で、
+ * データが欄（継続欄は区間の合計）に収まれば、欄を消して（MDT はそのまま）先頭から書く。継続欄は区間ごとに区間の長さで割って書き、番地は戻す。
+ * 継続でない欄は書いたぶん番地が進む（戻り値）。実機の ACS のコア（DSM の WRITEDATA・`scripts/acs-probe/write-data.txt`）: `OLDVALUE12` の欄に `NEW`＋続けて `Z` で `NEWZ`・
+ * MDT は立たない、3 区間の継続欄に `ABCDEFGHIJ` で `ABCD`/`EFGH`/`IJ`、欄の先頭でない番地・欄より長いデータはホストの読みが CPFA304（否定応答）。
+ * CCSID の形（0x40。Unicode のデータストリームだけ）と、DBCS の継続欄の区間ごとの SO/SI の閉じ方は扱わない（台帳）
+ */
+function writeFieldData(
+  buf: ScreenBuffer,
+  codec: Codec,
+  addr: number,
+  flag: number,
+  data: Uint8Array,
+  warn: WarnFn
+): { sense: number; why: string } | number | undefined {
+  if ((flag & 0x80) === 0) {
+    if ((flag & 0x40) !== 0) {
+      warn("WRITE DATA in the CCSID form — ignored");
+      return undefined;
+    }
+    return { sense: SENSE.WRITE_DATA, why: `WRITE DATA flag 0x${flag.toString(16)}` };
+  }
+  const field = buf.orderedFields().find((f) => f.startAddr === addr);
+  if (!field) return { sense: SENSE.WRITE_DATA, why: "WRITE DATA not at the start of a field" };
+  const run = field.continued === undefined ? [field] : buf.continuedRun(field);
+  const room = run.reduce((n, f) => n + f.length, 0);
+  if (data.length > room) return { sense: SENSE.WRITE_DATA_LENGTH, why: `WRITE DATA ${data.length} bytes into a ${room}-byte field` };
+  buf.eraseFieldCells(field);
+  if (run.length === 1) {
+    writeHostBytes(buf, codec, addr, data);
+    return addr + data.length;
+  }
+  let at = 0;
+  for (const seg of run) {
+    if (at >= data.length) break;
+    const piece = data.subarray(at, Math.min(data.length, at + seg.length));
+    writeHostBytes(buf, codec, seg.startAddr, piece);
+    at += piece.length;
+  }
+  return undefined;
+}
+
+/** 欄へ書くホストのバイト列（WTD の文字の並びと同じ読み方: SO/SI・並びの中の 2 バイトの組・1 バイトの字・NUL） */
+function writeHostBytes(buf: ScreenBuffer, codec: Codec, start: number, bytes: Uint8Array): void {
+  let addr = start;
+  let dbcs = false;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i]!;
+    if (b === SO) {
+      buf.setShift(addr++, "so");
+      dbcs = true;
+    } else if (b === SI) {
+      buf.setShift(addr++, "si");
+      dbcs = false;
+    } else if (dbcs && codec.decodeDbcsPair && i + 1 < bytes.length && b >= 0x40 && bytes[i + 1]! >= 0x40) {
+      const b2 = bytes[++i]!;
+      buf.setDbcs(addr, String.fromCharCode(codec.decodeDbcsPair(b, b2)), b, b2);
+      addr += 2;
+    } else if (b >= 0x40) buf.setChar(addr++, String.fromCharCode(codec.decodeByte(b)), b);
+    else if (b === 0x00) {
+      buf.eraseRange(addr, addr);
+      addr++;
+    } else buf.setChar(addr++, controlDataText(b), undefined, b);
+  }
 }
 
 /**
@@ -1338,7 +1407,11 @@ export const SENSE = {
   /** 欄を表に入れられない（ACS `addFieldToFFT` が null。`fieldAddFailure`） */
   FIELD_ADD: 0x10050125,
   /** SF の属性が 0x20〜0x3F でない（製品の ACS の `isValidStartOfFieldAttribute`） */
-  FIELD_ATTRIBUTE: 0x10050130
+  FIELD_ATTRIBUTE: 0x10050130,
+  /** WRITE DATA（WDSF 0x54）の形が分からない・欄の先頭でない（ACS `processWriteData`） */
+  WRITE_DATA: 0x10050140,
+  /** WRITE DATA のデータが欄より長い（同上） */
+  WRITE_DATA_LENGTH: 0x10050141
 } as const;
 
 /**

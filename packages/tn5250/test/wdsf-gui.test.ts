@@ -197,9 +197,10 @@ describe("WDSF GUI — 除去コマンド", () => {
 describe("WDSF GUI — 堅牢性", () => {
   // ~~0x52 で試していた~~——0x52 は `20260928-window-unrestrict` で効かせるようにした。当 PJ が効かせない型の例を 0x54 にした
   it("当 PJ が効かせない WDSF type は警告して読み飛ばす", () => {
-    const { buf, warns } = applyGui([...sba(1, 1), ...wdsf(0x54 /* WRITE DATA */, [0x00, 0x00])]);
+    // ~~0x54~~ は `20260928-wdsf-write-data` で効かせた（下の「WRITE DATA」）。残りは 0x55（マウス・ボタン）
+    const { buf, warns } = applyGui([...sba(1, 1), ...wdsf(0x55 /* PROGRAMMABLE MOUSE BUTTONS */, [0x00, 0x00, 0x00, 0x00])]);
     expect(buf.snapshot("t", false).gui).toBeUndefined();
-    expect(warns.some((w) => w.includes("0x54"))).toBe(true);
+    expect(warns.some((w) => w.includes("0x55"))).toBe(true);
   });
 
   it("破損 WDSF 長は警告して残りを打ち切る", () => {
@@ -311,5 +312,43 @@ describe("WDSF の読み方（ACS の実測）", () => {
     const gui = buf.snapshot("t", false).gui!;
     expect(gui.windows).toHaveLength(1);
     expect(gui.selectionFields).toHaveLength(1);
+  });
+});
+
+/**
+ * **WRITE DATA（WDSF 0x54）の EBCDIC の形**（`20260928-wdsf-write-data`）。実機の ACS のコア（DSM の WRITEDATA・`scripts/acs-probe/write-data.txt`）の 4 巡
+ */
+describe("WRITE DATA（0x54）", () => {
+  const e = (s: string): number[] => [...s].map((c) => ({ A: 0xc1, B: 0xc2, C: 0xc3, D: 0xc4, E: 0xc5, F: 0xc6, G: 0xc7, H: 0xc8, I: 0xc9, J: 0xd1, K: 0xd2, L: 0xd3, N: 0xd5, O: 0xd6, U: 0xe4, V: 0xe5, W: 0xe6, Z: 0xe9, "1": 0xf1, "2": 0xf2 })[c]!);
+  /** (5,10) 10 桁の欄（初期値 OLDVALUE12）と、(7,10)・(8,10)・(9,10) 4 桁ずつの継続欄 */
+  const screen = [
+    ...sba(5, 9), ORDER.SF, 0x40, 0x00, 0x20, 0x00, 0x0a, ...e("OLDVALUE12"),
+    ...sba(7, 9), ORDER.SF, 0x40, 0x00, 0x86, 0x01, 0x20, 0x00, 0x04,
+    ...sba(8, 9), ORDER.SF, 0x40, 0x00, 0x86, 0x03, 0x20, 0x00, 0x04,
+    ...sba(9, 9), ORDER.SF, 0x40, 0x00, 0x86, 0x02, 0x20, 0x00, 0x04
+  ];
+  const text = (buf: ScreenBuffer, row: number, from: number, n: number): string => buf.snapshot("t", false).cells[row - 1]!.slice(from - 1, from - 1 + n).map((c) => c.char || " ").join("");
+  const apply = (orders: number[]) => {
+    const buf = new ScreenBuffer();
+    const r = applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ...orders]), buf, codecForCcsid(37), () => {});
+    return { buf, r };
+  };
+
+  it("D1: 欄を消して先頭から書き、番地は書いたぶん進む（`NEW` の後の `Z`）。MDT は立てない", () => {
+    const { buf, r } = apply([...screen, ...sba(5, 10), ...wdsf(0x54, [0x80, 0x00, ...e("NEW")]), ...e("Z")]);
+    expect(r.senseCode).toBeUndefined();
+    expect(text(buf, 5, 10, 10)).toBe("NEWZ      ");
+    expect(buf.orderedFields()[0]!.mdt).toBe(false);
+  });
+  it("D2・D3: 欄の先頭でない番地は 0x10050140、欄より長いデータは 0x10050141", () => {
+    expect(apply([...screen, ...sba(5, 11), ...wdsf(0x54, [0x80, 0x00, ...e("NEW")])]).r.senseCode).toBe(0x10050140);
+    expect(apply([...screen, ...sba(5, 10), ...wdsf(0x54, [0x80, 0x00, ...e("ABCDEFGHIJK")])]).r.senseCode).toBe(0x10050141);
+  });
+  it("D4: 継続欄は区間の長さで割って書く", () => {
+    const { buf } = apply([...screen, ...sba(7, 10), ...wdsf(0x54, [0x80, 0x00, ...e("ABCDEFGHIJ")])]);
+    expect([text(buf, 7, 10, 4), text(buf, 8, 10, 4), text(buf, 9, 10, 4)]).toEqual(["ABCD", "EFGH", "IJ  "]);
+  });
+  it("形の分からない flag（0x80・0x40 のどちらも無い）は 0x10050140", () => {
+    expect(apply([...screen, ...sba(5, 10), ...wdsf(0x54, [0x00, 0x00, ...e("NEW")])]).r.senseCode).toBe(0x10050140);
   });
 });
