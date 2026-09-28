@@ -180,11 +180,24 @@ function transparentBytes(buf: ScreenBuffer, f: InternalField, codec: Codec): Ui
  */
 function rawDbcsSendValue(buf: ScreenBuffer, f: InternalField, form: FieldDataForm): string | undefined {
   const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  let per = run.map((seg) => buf.dbcsRawCells(seg));
+  // **継続した DBCS の欄は、どれかの区間が DBCS の構造を持てば半角だけの区間も桁ごとに読む**（ACS は区間の HostPlane を桁のまま連結する）。
+  // 読まないと下の桁ごとでない経路へ落ち、区間の境目の NUL が消えて桁が詰まる（実機の ACS の CONTOX: `…0f e7 40 e8 e9` の `40`。`20260928-cont-o-cells`）
+  if (run.length > 1 && per.some((c) => c?.some((x) => x !== undefined))) per = run.map((seg) => buf.dbcsRawCells(seg, true));
   const cells: (string | undefined)[] = [];
-  for (const seg of run) {
-    const c = buf.dbcsRawCells(seg);
+  // O・J の鎖は、ここまでの最後が SI で次の区間の頭が SO なら両方を落とす（区間の終わりで閉じた並びを繋ぐ。ACS `FFT5250.getFieldContents`）。
+  // 最終区間へ詰めたときは ACS と同じく長さを保って末尾に NUL を 2 つ残す（末尾の NUL なので送られない）
+  const squeeze = run.length > 1 && (run[0]!.dbcsType === "open" || run[0]!.dbcsType === "only");
+  const so = rawSentinel(0x0e);
+  const si = rawSentinel(0x0f);
+  for (let i = 0; i < per.length; i++) {
+    const c = per[i];
     if (c === undefined) return undefined;
-    cells.push(...c);
+    if (i > 0 && squeeze && cells[cells.length - 1] === si && c[0] === so) {
+      cells.pop();
+      cells.push(...c.slice(1));
+      if (i === per.length - 1) cells.push(undefined, undefined);
+    } else cells.push(...c);
   }
   let n = cells.length;
   while (n > 0 && cells[n - 1] === undefined) n--;

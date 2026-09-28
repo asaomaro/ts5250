@@ -36,6 +36,7 @@ import {
   SO_MARK,
   SI_MARK,
   isShiftMark,
+  isDeadMark,
   hasShiftMarks,
   type DbcsViewLayout,
   type RejectReason
@@ -53,6 +54,7 @@ import {
   type OCell,
   type OResult
 } from "../composables/oFieldCells.js";
+import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "../composables/oChainCells.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import {
   detectFkeyLegends,
@@ -1502,7 +1504,7 @@ const dtOpenValues = ref<readonly string[]>([]);
  */
 function openDtFor(t: DateTimeTarget): void {
   // 日付・時刻の選択は字だけを見る（O 欄の SO/SI の印は字ではない）
-  dtOpenValues.value = t.run.map((f) => [...logicalValue(f)].filter((c) => !isShiftMark(c)).join(""));
+  dtOpenValues.value = t.run.map((f) => [...logicalValue(f)].filter((c) => !isShiftMark(c) && !isDeadMark(c)).join(""));
   dtOpenKey.value = t.run[0]!.index;
 }
 
@@ -2150,12 +2152,64 @@ let composeReplacedSelection = false;
 let composeBeforeSelection: EditState | undefined;
 
 /**
- * **O 欄（継続でない）はセルの並びで編集する**（`20260928-o-field-cells`）。値は SO/SI を印（`SO_MARK`/`SI_MARK`）として持ち、打鍵・挿入・Delete・Backspace・
+ * **O 欄はセルの並びで編集する**（`20260928-o-field-cells`）。値は SO/SI を印（`SO_MARK`/`SI_MARK`）として持ち、打鍵・挿入・Delete・Backspace・
  * Erase EOF・Field Exit は ACS の表どおりにセルの上で行う（`composables/oFieldCells.ts`。実機の ACS のコアで 24 通りを測った）。
- * 継続した O 欄は ACS が別の手順（`processCharWithDBCSOpenContField`）なので、従来の論理値のまま
+ * **継続した O 欄も値は同じ形**（区間ごとに印入り。死んだ桁の印 `DEAD_MARK` も持つ）で、キーボードの打鍵・Delete・Backspace は鎖全体の操作
+ * （`isOChain`・`oChainApply`。ACS `processCharWithDBCSOpenContField`）、Erase EOF・Field Exit はカーソルの区間の消去＋続く区間の全消去。
+ * 貼り付け・IME は区間の中の O 欄の操作のまま（ACS の貼り付けの手順は未分析）
  */
 function isOCells(f: Field): boolean {
-  return f.dbcsType === "open" && f.continued === undefined;
+  return f.dbcsType === "open";
+}
+
+/** 継続した O 欄（鎖の操作で編集する。`20260928-cont-o-cells`） */
+function isOChain(f: Field): boolean {
+  return f.dbcsType === "open" && f.continued !== undefined;
+}
+
+/**
+ * **継続した O 欄の操作を鎖全体で行う**（`composables/oChainCells.ts`）。編集中の区間は編集の値、ほかの区間は今の値（印入り）をセルに展開して
+ * 操作し、カーソルの着いた区間へ編集とフォーカスを移し、ほかの区間は値を直接出す（`editAcrossContinued` と同じ分担）。止まったら `false`（理由は `oRejection`）
+ */
+function oChainApply(f: Field, op: (segs: OCell[][], pos: ChainPos) => ChainResult): boolean {
+  oRejection = undefined;
+  const cur = edit!;
+  const run = continuedRunOf(f);
+  const at = run.findIndex((x) => x.index === f.index);
+  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x)));
+  const r = op(segs, { seg: at, c: cellOfEntry(cur.chars, cur.cursor) });
+  if ("error" in r) {
+    oRejection = r.error;
+    return false;
+  }
+  if ("noop" in r) {
+    oRejection = "noop";
+    return false;
+  }
+  const values = r.segs.map((cells) => fromCells(cells));
+  run.forEach((x, k) => {
+    if (k !== r.cursor.seg) commitDbcsSegment(x, values[k]!);
+  });
+  const target = run[r.cursor.seg]!;
+  const chars = values[r.cursor.seg]!;
+  edit = { chars, cursor: entryOfCell(chars, r.cursor.c), insertMode: cur.insertMode };
+  editFieldIndex = target.index;
+  const targetEl = inputForSlice(target, 0);
+  // 同期しなかったときは印を下ろす（`editAcrossContinued` と同じ）
+  if (targetEl) syncDbcs(targetEl, target);
+  else void takeMdtKeyed();
+  return true;
+}
+
+/** 編集中でない DBCS の区間へ値を直接出す（`commitFieldValueDirect` の DBCS 版。表示は列ビュー——`:value` は他欄の更新では再評価されない） */
+function commitDbcsSegment(x: Field, chars: readonly string[]): void {
+  const logical = trimPad(x, chars.join(""));
+  if (logical !== baselineValue(x)) emit("edit", x.index, logical);
+  const lay = dbcsViewLayout(padDbcs(x, [...logical]).join(""), soMark(x), siMark(x));
+  slicesOf(x).forEach((sl, i) => {
+    const el = inputForSlice(x, i);
+    if (el) el.value = stripSentinels(dbcsSliceText(lay, sl));
+  });
 }
 
 /** 直近の O 欄の操作が ACS のエラー（0005・0012・0065）か「何もしない」で止まったか。止めた理由を呼び出し側が操作員メッセージにする */
@@ -2203,7 +2257,7 @@ function normalizeO(chars: readonly string[], f: Field): string[] {
     } else if (isWideForDbcs(ch) !== inRun) ok = false;
   }
   if (ok && !inRun) return [...chars];
-  const plain = chars.filter((c) => !isShiftMark(c));
+  const plain = chars.filter((c) => !isShiftMark(c) && !isDeadMark(c)); // 死んだ桁の印も外す（残すと明示の並びと読まれ SO/SI が付かない）
   return padDbcs(f, fromCells(toCells(plain, visLen(f))));
 }
 
@@ -2531,8 +2585,9 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
 /** DBCS 欄の sync: 列ビュー（SO/SI スペース込み）を行ごとのスライスへ割り、caret を論理カーソルの桁へ。 */
 function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
   if (!edit) return;
-  // O 欄の印の並びが崩れた操作（選択の削除・貼り付け・IME など当 PJ 独自の経路）の後は組み直す
-  if (isOCells(f)) {
+  // O 欄の印の並びが崩れた操作（選択の削除・貼り付け・IME など当 PJ 独自の経路）の後は組み直す。
+  // 継続した O 欄は区間をまたぐ並び（ホストが書いた形）がありうるので、字を置いた・消した回だけ（カーソルの移動だけで組み直して MDT を立てない）
+  if (isOCells(f) && (!isOChain(f) || mdtKeyed)) {
     const fixed = normalizeO(edit.chars, f);
     if (fixed.join("") !== edit.chars.join("")) edit = { ...edit, chars: fixed, cursor: Math.min(edit.cursor, fixed.length) };
   }
@@ -3356,6 +3411,16 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       syncDbcs(el, f);
       return;
     }
+    // **継続した O 欄は鎖で**（区間の頭なら前の区間の最後の桁を消す。鎖の頭は 0005。ACS `processBackspace`）
+    if (isOChain(f)) {
+      mdtKeyed = true;
+      if (!oChainApply(f, chainBackspace)) {
+        mdtKeyed = false;
+        const why = oRejectionMessage();
+        if (why) emit("notice", why);
+      }
+      return;
+    }
     // **欄の先頭では 0005 で止まる（SBCS 欄と同じ。カーソルも動かさない）**。~~前の欄の末尾へ移る~~・
     // ~~DBCS 欄の ACS は原典の手順上 0101~~ は実測と違った——ACS のコアで O の欄の先頭と、J の欄の SO の後ろ
     // （Tab で着く位置＝当 PJ の論理位置 0）で押すと、どちらも 0005 だった（`scripts/acs-probe/backspace-dbcs-field-start.txt`）
@@ -3378,7 +3443,19 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
   if (k === "Delete" && plain) {
     ev.preventDefault();
     oRejection = undefined;
-    if (!deleteSelection(f, el)) edit = dbcsDelete(edit, f);
+    // 選択の削除は 1 回だけ（native の選択は残るので、2 回呼ぶと縮んだ値に同じ範囲をもう一度当ててしまう）
+    const hadSelection = deleteSelection(f, el);
+    // 継続した O 欄は鎖全体を詰める（ACS `deleteCharInContField` と詰め直し）
+    if (isOChain(f) && !hadSelection) {
+      mdtKeyed = true;
+      if (!oChainApply(f, chainDelete)) {
+        mdtKeyed = false;
+        const why = oRejectionMessage();
+        if (why) emit("notice", why);
+      }
+      return;
+    }
+    if (!hadSelection) edit = dbcsDelete(edit, f);
     const delWhy = oRejectionMessage();
     if (delWhy) {
       emit("notice", delWhy);
@@ -3446,6 +3523,21 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
       eitherSwitched.set(f.index, isWideForDbcs(ch));
     }
     oRejection = undefined;
+    // **継続した O 欄の打鍵は鎖で**（挿入は鎖の終わりまで詰め直し、上書きは区間の終わりで次の区間へ。選択の置き換えは区間の中の O 欄の操作のまま）
+    if (isOChain(f) && !replaced) {
+      mdtKeyed = true;
+      const done = oChainApply(f, (segs, pos) => (base.insertMode ? chainInsert(segs, pos, ch) : chainOverwrite(segs, pos, ch)));
+      if (!done) {
+        mdtKeyed = false;
+        const why = oRejectionMessage();
+        if (why) emit("notice", why);
+        return;
+      }
+      // 鎖の終わりまで進んだら次の欄へ（ACS はカーソルが鎖の最後の区間の終わりに着いたとき）
+      const last = continuedRunOf(f).at(-1);
+      if (last && editFieldIndex === last.index) advanceIfFull(last);
+      return;
+    }
     const trial = dbcsType(base, ch, f, replaced);
     if (!trial) {
       // O 欄は ACS の表の理由どおり（0005・0012・0065。「何もしない」は黙る）
@@ -3589,7 +3681,7 @@ function dbcsSelection(f: Field, el: HTMLInputElement): { text: string; ls: numb
       if (ls < 0) ls = li;
       le = li + 1;
       // O 欄の SO/SI の印は字ではない（クリップボードへは出さない。削除の範囲には含める——`normalizeO` が並びを正す）
-      if (!isShiftMark(logical[li]!)) text += logical[li];
+      if (!isShiftMark(logical[li]!) && !isDeadMark(logical[li]!)) text += logical[li];
     }
   }
   return ls < 0 ? undefined : { text, ls, le };
@@ -4118,11 +4210,58 @@ function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;
+  // 継続した O 欄は確定した字を 1 字ずつ鎖の打鍵として（ACS は確定した字を 1 字ずつの打鍵として処理する。選択の置き換えは区間の中の操作のまま）
+  if (isOChain(f) && !composeReplacedSelection) {
+    commitIntoChain(f, [...el.value].slice(composePrefixLen), composeStart);
+    return;
+  }
   // el.value = 既入力prefix + 確定文字。prefix（composePrefixLen 文字）を除いた確定分だけを composeStart から流し込む（型フィルタ・バイト予算）。
   // 欄に入りきらない余りは、満杯で次の欄へ送るときに**次の欄へ流す**（ACS は確定した字を 1 字ずつの打鍵として処理する）
   const rest = commitInto(f, el, [...el.value].slice(composePrefixLen), composeStart, composeReplacedSelection);
   composeReplacedSelection = false;
   if (rest !== undefined && rest.length > 0) void flowToNextField(f, rest);
+}
+
+/**
+ * **継続した O 欄へ確定した字を 1 字ずつ鎖の打鍵として流す**（`oChainApply`。字ごとにカーソルの着いた区間から続ける）。止まったらその理由の操作員メッセージで終える
+ * （余りは捨てる——打鍵なら同じ所で止まる）。鎖の最後の区間の終わりに着いたら次の欄へ送る
+ */
+function commitIntoChain(f: Field, raws: readonly string[], start: number): void {
+  edit = { ...edit!, cursor: start };
+  const last = continuedRunOf(f).at(-1);
+  let cur = f;
+  let placed = false;
+  let full = false;
+  let i = 0;
+  for (; i < raws.length; i++) {
+    // 上書きで鎖の終わりに着いていたら、余りは次の欄へ流す（ACS は満杯で次の欄へ移り、続く字はそこで打つ。区間の中の `commitInto` と同じ）
+    if (!edit!.insertMode && last && editFieldIndex === last.index && edit!.cursor >= edit!.chars.length) {
+      full = true;
+      break;
+    }
+    const ch = inputChar(raws[i]!, cur);
+    if (!acceptsChar(cur, ch, sessionKind.value)) continue;
+    const ins = edit!.insertMode;
+    mdtKeyed = true;
+    if (!oChainApply(cur, (segs, pos) => (ins ? chainInsert(segs, pos, ch) : chainOverwrite(segs, pos, ch)))) {
+      mdtKeyed = false;
+      const why = oRejectionMessage();
+      if (why) emit("notice", why);
+      break;
+    }
+    placed = true;
+    cur = props.snapshot.fields.find((x) => x.index === editFieldIndex) ?? cur;
+  }
+  // 1 字も置けなければ、合成で書き換わった表示を編集の値へ戻す
+  if (!placed) {
+    const target = props.snapshot.fields.find((x) => x.index === editFieldIndex) ?? f;
+    const el = inputForSlice(target, 0);
+    if (el) syncDbcs(el, target);
+  }
+  if (last && editFieldIndex === last.index) {
+    if (placed || full) advanceIfFull(last); // 満杯なら次の欄へ（余りはそこへ流す）
+    if (full) void flowToNextField(last, raws.slice(i));
+  }
 }
 
 /**

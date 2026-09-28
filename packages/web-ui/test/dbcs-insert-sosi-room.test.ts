@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { o } from "./helpers/oMarks.js";
+import { DEAD_MARK } from "../src/composables/fieldValidate.js";
 import { MSG_PROTECTED } from "../src/composables/opMessages.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
@@ -230,10 +231,12 @@ describe("対象外: この検査を掛けない場合", () => {
     expect(notices()).toContain(MSG_PROTECTED);
   });
 
-  it("継続欄は ACS の別の手順（併合と語詰め）なので、ここでは見ない（従来どおり入る）", async () => {
+  // ~~継続欄は従来どおり入る（`AあいうえB`）~~ → 継続した O 欄は鎖の詰め直し（`20260928-cont-o-cells`。ACS の CONTOX の C02 と同じ形）:
+  // B の上の全角は SO が区間の最後の 3 桁に来るので、並びごと次の区間へ送り、残り 3 桁は死んだ桁
+  it("継続欄は鎖の詰め直し（ACS `processCharWithDBCSOpenContField`）で、SO が区間の最後の 3 桁なら次の区間へ送る", async () => {
     const { insert, value } = await open(openSnapshot(C3_C4, { continued: true }));
     await insert(6, "え");
-    expect(value()).toBe("AあいうえB");
+    expect(value()).toBe(o("A{あいう}") + DEAD_MARK.repeat(3));
   });
 
   // J 欄は全角だけなので (i)(ii)（全角と半角の境目）は起きない——O 欄に限る条件を外しても結果は変わらない（等価変異。decisions D5）。

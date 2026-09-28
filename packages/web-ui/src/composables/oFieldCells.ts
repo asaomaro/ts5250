@@ -10,13 +10,17 @@
  * 打鍵したバイト列（DSM の OEDIT・`scripts/acs-probe/o-field-edit.txt`）で確かめた。表の中の「黙って何もしない」は ACS の表のどの行にも
  * 当たらない形で、値もカーソルも変えずエラーも出さない（`noop`）
  */
-import { SO_MARK, SI_MARK, hasShiftMarks, isShiftMark, isWideForDbcs } from "./fieldValidate.js";
+import { SO_MARK, SI_MARK, DEAD_MARK, hasShiftMarks, isDeadMark, isWideForDbcs } from "./fieldValidate.js";
 
 export type OCellKind = "sb" | "so" | "si" | "lead" | "tail";
-/** 1 桁ぶんのセル。`sb` の空きは半角空白（ACS の NUL と同じに扱う）。`lead` が全角の字を持ち、`tail` は空 */
+/**
+ * 1 桁ぶんのセル。`sb` の空きは半角空白（ACS の NUL と同じに扱う）。`lead` が全角の字を持ち、`tail` は空。
+ * `dead` は継続した O 欄の死んだ桁（`sb` の空き。`DEAD_MARK`）——種類は半角なので、継続でない O 欄の表では空きの半角と同じに見える（ACS も DBCSPlane 8 は S に分類する）
+ */
 export interface OCell {
   k: OCellKind;
   ch: string;
+  dead?: true;
 }
 
 /** 操作の結果。`cursor` はセルの桁（0 起点）。`error` は ACS のエラー（0x05・0x12・0x65）。`noop` は黙って何もしない */
@@ -34,6 +38,7 @@ export function toCells(chars: readonly string[], length: number): OCell[] {
     for (const ch of chars) {
       if (ch === SO_MARK) out.push({ k: "so", ch: "" });
       else if (ch === SI_MARK) out.push({ k: "si", ch: "" });
+      else if (isDeadMark(ch)) out.push({ k: "sb", ch: " ", dead: true });
       else if (isWideForDbcs(ch)) out.push({ k: "lead", ch }, { k: "tail", ch: "" });
       else out.push({ k: "sb", ch });
     }
@@ -69,7 +74,7 @@ export function fromCells(cells: readonly OCell[]): string[] {
         i++;
       } else out.push(" ");
     } else if (c.k === "tail") out.push(" ");
-    else out.push(c.ch);
+    else out.push(c.dead ? DEAD_MARK : c.ch);
   }
   return out;
 }
@@ -82,7 +87,7 @@ export function fromCells(cells: readonly OCell[]): string[] {
 export function cellOfEntry(chars: readonly string[], index: number): number {
   if (hasShiftMarks(chars)) {
     let col = 0;
-    for (let i = 0; i < index && i < chars.length; i++) col += isShiftMark(chars[i]!) ? 1 : isWideForDbcs(chars[i]!) ? 2 : 1;
+    for (let i = 0; i < index && i < chars.length; i++) col += isWideForDbcs(chars[i]!) ? 2 : 1;
     return col;
   }
   let col = 0;
@@ -101,7 +106,7 @@ export function cellOfEntry(chars: readonly string[], index: number): number {
 export function entryOfCell(chars: readonly string[], col: number): number {
   let acc = 0;
   for (let i = 0; i < chars.length; i++) {
-    const w = isShiftMark(chars[i]!) ? 1 : isWideForDbcs(chars[i]!) ? 2 : 1;
+    const w = isWideForDbcs(chars[i]!) ? 2 : 1;
     if (col < acc + w) return i;
     acc += w;
   }
@@ -125,6 +130,18 @@ function inRun(cells: readonly OCell[], n: number): boolean {
 }
 /** 並びの中の全角（前半・後半とも。ACS `IsDBC00`） */
 const isD = (cells: readonly OCell[], n: number): boolean => (cells[n]?.k === "lead" || cells[n]?.k === "tail") && inRun(cells, n);
+
+/**
+ * 挿入の表で見るセルの種類（ACS `insertChar` の判定の順: 半角 → SO → SI → 並びの中の全角）。どれでもない（並びの外の全角・欄の外）は `undefined`。
+ * 継続した O 欄の挿入（`oChainCells.ts`）も同じ表を使う
+ */
+export function insertClassOf(cells: readonly OCell[], c: number): "S" | "O" | "I" | "D" | undefined {
+  if (isS(cells, c)) return "S";
+  if (isO(cells, c)) return "O";
+  if (isI(cells, c)) return "I";
+  if (isD(cells, c)) return "D";
+  return undefined;
+}
 
 /** 書き込みの 1 手（ACS の `putSO` / `putSI` / `putDBChar` / `putSBChar`）。`at` はカーソルからの相対 */
 type Op = { at: number; w: "so" | "si" | "db" | "sp" | "ch" };
@@ -314,6 +331,12 @@ export function del(cells: readonly OCell[], c: number): OResult {
  * 直前が単独の SO/SI なら 0065。欄の先頭は 0005（呼び出し側が先に止める——`backspace-dbcs-field-start.txt` の実測）
  */
 export function backspace(cells: readonly OCell[], c: number): OResult {
+  const n = backspaceTarget(cells, c);
+  return typeof n === "number" ? del(cells, n) : n;
+}
+
+/** Backspace が消す桁（`backspace` の判定だけ。継続した O 欄は区間の頭だけ別の規則なので、区間の中はこれを使う——`oChainCells.ts`） */
+export function backspaceTarget(cells: readonly OCell[], c: number): number | { error: 0x05 | 0x65 } {
   if (c <= 0) return { error: 0x05 };
   const sosi = (n: number): boolean => isO(cells, n) || isI(cells, n);
   let n: number;
@@ -324,7 +347,7 @@ export function backspace(cells: readonly OCell[], c: number): OResult {
     else return { error: 0x65 };
   } else n = c - 1;
   if (n < 0) return { error: 0x05 };
-  return del(cells, n);
+  return n;
 }
 
 /**

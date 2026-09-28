@@ -174,15 +174,34 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   結果、入ったあと当 PJ は ACS より 2 桁多く空きが残り、続けて打つと ACS では 0012 になる挿入が入りうる。ホストへ送るバイト列も違う。
   直すには DBCS 欄の編集の値に SO/SI の位置を持たせる（センチネル）必要があり、web-ui の全 DBCS 編集操作（Backspace・Delete・Erase EOF・貼り付け・IME）と core の送信に及ぶ。
   **「構造上できない」で退けたのではない**（AGENTS.md「判断の原則」1）——規模の判断で割った。
-- [ ] **継続欄（O）への挿入の余地の数え方が ACS と違う**（優先度 低・深さ △。`20260926-dbcs-insert-sosi-room` decisions D3 から割った。旧 (c)）。
-  ACS（原典 `PS5250.processCharWithDBCSOpenContField`・`mergeDBCSString`・`checkWordsFitDBCSOpenContField`）は、カーソルから鎖の最後までのバイト列を作り直して字を差し込み、
-  **隣り合う SI・SO を取り除いて並びを繋ぎ直し**、後続の区間へ**語単位で詰め直して**収まるかを見る。当 PJ は区間の中で数える（`20260921-insert-no-room` D3）。
-  **実機の ACS のコアでの測定から始める**（`scripts/acs-probe.mjs`。継続の O 欄を DSM で出させる画面が要る）。
+- [x] **継続欄（O）への挿入の余地の数え方が ACS と違う**（優先度 低・深さ △。`20260926-dbcs-insert-sosi-room` decisions D3 から割った。旧 (c)）。
+  **完了（`20260928-cont-o-cells`・PR #444）**: 継続した O 欄の打鍵（上書き・挿入）・Delete・Backspace・IME の確定を鎖全体の操作にした
+  （`packages/web-ui/src/composables/oChainCells.ts`。ACS `processCharWithDBCSOpenContField`・`mergeDBCSString`・`checkWordsFitDBCSOpenContField`・`inputChar` の区間送り・
+  `deleteCharInContField`・`processBackspace`）。値は区間ごとに SO/SI の印と**死んだ桁の印**（0x00 のセンチネル。ACS の DBCSPlane 8）を持ち、
+  コアは死んだ桁を NUL のセルに置き、送信で区間の境目の SI|SO を詰める（`FFT5250.getFieldContents`。`packages/tn5250/src/protocol/read-response.ts` の `rawDbcsSendValue`）。
+  実機の ACS のコアで**ホストが受け取ったバイト列**を 12 通り測り直し（DSM の CONTOX・`scripts/acs-probe/cont-o-edit.txt`。research F2）、12 通りとも原典の読みどおりだった。
+  ブラウザの当 PJ（`scripts/verify-browser-cont-o.mjs`）で同じ打鍵をさせ、バイト列とカーソルが 12 巡とも一致（3 回。pass=24。例: C02 `0e448244840f40400e44840fe740e8e9`・
+  C12 `0e44824487448844840fe740e8e9`）。単体 48 件（`o-chain-cells` 25・`o-chain-edit` 11・`o-chain-send` 12）・mutation 40 通り中 37 検出（3 は等価）。
+  あわせて、**書かれたままの継続した O 欄が区間の境目の NUL を落として送っていた**（`…0f e7 e8 e9`。ACS は `…0f e7 40 e8 e9`）のを直した。
+  ~~後続の区間へ**語単位で詰め直して**収まるかを見る~~ → 原典の詰め直しに語の判定は無く 1 バイトずつ（語送りは FCW 0x8680 の欄だけの別の段）。
+  ~~C）中間の区間の中身が最終の区間まで送られた（`YZ` が最終へ）~~・~~D）全角の並びの途中に半角 → 拒否（施錠 5）~~ → 画面の文字の読み違い。バイト列では C は中間の中で収まり（`…0e44850fe8e9`）、
+  D は受け付けて並びを割る（`0e0fd80e44820f40…`）。
+  （以下は起票当時の記述）ACS（原典 `PS5250.processCharWithDBCSOpenContField`・`mergeDBCSString`・`checkWordsFitDBCSOpenContField`）は、カーソルから鎖の最後までのバイト列を作り直して字を差し込み、
+  **隣り合う SI・SO を取り除いて並びを繋ぎ直し**、後続の区間へ詰め直して収まるかを見る。当 PJ は区間の中で数える（`20260921-insert-no-room` D3）。
   **測った（`20260927-cont-o-insert`・`scripts/acs-probe/cont-o-insert.txt`・DSM の CONTO）**: 先頭 8 桁 `SO あい SI X`・中間 8 桁 `YZ`・最終 8 桁（空）で、挿入モードの
-  A）並びの直後（SI の桁）に全角 → 先頭の区間は全角 3 字で埋まり、`X` は中間の区間へ語ごと送られ `X YZ` になった（カーソルは中間の区間の頭）／
-  B）並びの直後の半角の前に全角 → 並びに加わり、後ろは同じく送られる／C）中間の区間の頭に全角 → 中間の区間の中身が最終の区間まで送られた（`YZ` が最終へ）／
-  D）全角の並びの途中に半角 → 拒否（施錠 5）。当 PJ はまだ測っていない（画面の側の打鍵なので web-ui の実機検証が要る）。
-  **直すには上の「O 欄の挿入のあとのバイト列」と同じく、DBCS 欄の編集の値に SO/SI の位置を持たせる作り（web-ui の DBCS の編集と core の送信）が要る**——2 件は同じ作りの変更として一緒に進める。
+  A）並びの直後（SI の桁）に全角 → 先頭の区間は全角 3 字で埋まり、`X` は中間の区間へ送られ `X YZ` になった（カーソルは中間の区間の頭）／
+  B）並びの直後の半角の前に全角 → 並びごと中間へ送られる。
+- [ ] **継続した O 欄の残りの差**（優先度 低・深さ △。`20260928-cont-o-cells` から割った）。
+  (a) **空白（0x40）と NUL の区別**: ACS は末尾の 0x40 を中身として押し出し（CONTOX の C09・C10 で最終区間へ `404040404040`）、途中の NUL は ALT で `00` のまま送る。
+  当 PJ の O 欄の値は両方を半角空白で持つので、末尾の 0x40 を送らず、ALT で途中の NUL を `40` で送る（`packages/tn5250/test/o-chain-send.test.ts` の ALT の節に注記）。
+  直すにはセルの値に空きと空白の区別を持たせる（O 欄の値の表し方と core の置き場）。
+  (b) **語送り（FCW 0x8680）の欄の語送りの段**（`PS5250.processWordWrap`）は未実装・未測定。
+  (c) 継続した O 欄への**貼り付け**（ACS `PS5250` の貼り付けの節）は未分析——区間の中の O 欄の操作のまま。
+  (d) 単独の SO/SI での Delete（0065）で ACS はそれでも詰め直しを回す（死んだ桁を捨てる）——当 PJ は値を変えない（未測定）。
+  (e) **SI が区間の最後の桁のときの全角の挿入**: ACS は前半を区間の最後の桁に、後半を次の区間の頭に書いて並びを閉じない（画面は半角カナに崩れるが、ホストへは
+  `0e 4482 4487 4488 4481 4484 0f e7 40 e8 e9` と整ったバイト列が届く。カーソル 6,11。`scripts/acs-probe/cont-o-last-lead.txt`・2026-09-28）。当 PJ の O 欄の値は 1 字を区間の間で割って持てない
+  （web-ui は DBCS の変換表を持たない）ので 0012 で止める（`oChainCells.ts` の `reflow`）。直すには値に「区間の間で割った字」の表し方を足し、core がバイトを割って置く。
+  (f) 編集の値が消えた後（ホストが書き直さずに AID を送らない場合）は死んだ桁が空き（NUL）として読み戻り、次の詰め直しで捨てずに中身として残る（ACS は DBCSPlane 8 を保つ）。
 - [x] **施錠中・応答待ち中の打鍵（先打ち）を黙って捨てる**（優先度 高・深さ ◐・**方針決定済み：A 溜めて再生**）。
   **完了（`20260921-type-ahead`・PR #410）**: 施錠中（応答待ち・ホスト施錠）の端末のキーをセッションごとに溜め（`SessionState.typeAhead`）、
   解錠したら合成 keydown を同じ入口へ投げて打った順に再生する（`packages/web-ui/src/components/EmulatorPane.vue` の先打ちの節、

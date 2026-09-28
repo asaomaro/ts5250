@@ -1249,7 +1249,7 @@ export class ScreenBuffer {
    * MDT は `setFieldValue` と同じく並びの先頭の区間に立てる
    */
   private setFieldCells(field: InternalField, value: string): void {
-    const cells: InternalCell[] = [];
+    const cells: (InternalCell | null)[] = [];
     let inShift = false;
     let lead: number | undefined; // 並びの中の生バイトは 2 つで全角 1 字（未編集の原本の書き戻し）
     for (const ch of value) {
@@ -1261,6 +1261,9 @@ export class ScreenBuffer {
           cells.push({ type: "char", char: " ", charKind: b === 0x0e ? "so" : "si" });
           inShift = b === 0x0e;
           lead = undefined;
+        } else if (b === 0x00 && !inShift) {
+          // 死んだ桁（ACS の DBCSPlane 8）はバイトとしては NUL——空のセルに置く（送信で途中の NUL は空白、ALT では NUL のまま）。並びの外なので前半の持ち越しは無い
+          cells.push(null);
         } else if (inShift && lead === undefined) lead = b;
         else if (inShift) {
           cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "dbcs-lead", rawByte: lead! }, { type: "char", char: "", charKind: "dbcs-tail", rawByte: b });
@@ -1306,7 +1309,10 @@ export class ScreenBuffer {
     // 印は SO/SI のセル、全角は前半・後半の 2 セル、ほかは 1 セル、残りは空（NUL）。ホストが書いた DBCS の欄と同じ形になり、
     // 送信は未編集の DBCS の欄と同じ道（`dbcsRawFieldValue`・`rawDbcsSendValue`。ACS で実測済みの規則）を通る
     // （欄の種類は問わない——ホストが A 型の欄に置いた SO/SI 入りの原本〔snapshot の `dbcsContent`〕も同じ形で戻る）
-    if ([...value].some((c) => isRawSentinel(c) && (sentinelByte(c) === 0x0e || sentinelByte(c) === 0x0f))) {
+    // 継続した O 欄の**死んだ桁の印**（0x00。`20260928-cont-o-cells`）も明示の並び——半角だけの区間の後ろにも残る（継続していない欄には出ない）
+    const marks = (c: string): boolean =>
+      isRawSentinel(c) && (sentinelByte(c) === 0x0e || sentinelByte(c) === 0x0f || (sentinelByte(c) === 0x00 && field.dbcsType === "open" && field.continued !== undefined));
+    if ([...value].some(marks)) {
       this.setFieldCells(field, value);
       if (field.dbcsType === "either") {
         if (opts?.eitherDbcsOn !== undefined) field.eitherDbcsOn = opts.eitherDbcsOn;
@@ -1467,10 +1473,11 @@ export class ScreenBuffer {
    * **未編集の DBCS 欄を桁ごとに返す**（READ の応答用。`20260927-read-dbcs-fields`）。1 桁 1 要素で、空のセル（NUL）は `undefined`。
    * ACS `DS5250.sendAll` は DBCS の欄も末尾の NUL だけを落とし、ホストが書いた実空白は送る——`fieldValue` は末尾の空白を落とすので、
    * NUL と実空白を区別できるこちらを使う。構造を持たない（編集した・SBCS だけの）欄は `undefined`。
-   * **NUL だけの欄**も原本として返す（全桁 `undefined`）——構造の桁が無くても編集していない。ACS は G・O とも 0 バイトで送る（実機の READDBCS）
+   * **NUL だけの欄**も原本として返す（全桁 `undefined`）——構造の桁が無くても編集していない。ACS は G・O とも 0 バイトで送る（実機の READDBCS）。
+   * `force` は構造を持たない欄も桁ごとに返す（継続した DBCS の欄の半角だけの区間。ACS は区間を桁のまま連結する——`20260928-cont-o-cells`）
    */
-  dbcsRawCells(field: InternalField): (string | undefined)[] | undefined {
-    if (!this.hasDbcsStructure(field) && !this.allNul(field)) return undefined;
+  dbcsRawCells(field: InternalField, force = false): (string | undefined)[] | undefined {
+    if (!force && !this.hasDbcsStructure(field) && !this.allNul(field)) return undefined;
     const out: (string | undefined)[] = [];
     for (let i = 0; i < field.length; i++) out.push(this.dbcsRawCell(this.cells[field.startAddr + i]));
     return out;

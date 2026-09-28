@@ -1,0 +1,35 @@
+events:
+  - { ts: 2026-09-28T06:40:38Z, phase: requirements, event: start }
+  - { ts: 2026-09-28T06:41:39Z, phase: requirements, event: doccheck, metrics: { stage: start, phase: requirements, mode: same_session, size: 5052 } }
+  - { ts: 2026-09-28T06:41:39Z, phase: requirements, event: doccheck, metrics: { stage: report, phase: requirements, findings: 0 } }
+  - { ts: 2026-09-28T06:41:39Z, phase: requirements, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session } }
+  - { ts: 2026-09-28T06:41:39Z, phase: research, event: start }
+  - { ts: 2026-09-28T06:41:39Z, phase: research, event: approved }
+  - { ts: 2026-09-28T06:41:39Z, phase: design, event: start }
+  - { ts: 2026-09-28T06:45:27Z, phase: design, event: doccheck, metrics: { stage: start, phase: design, mode: same_session, size: 9225 } }
+  - { ts: 2026-09-28T06:45:27Z, phase: design, event: doccheck, metrics: { stage: report, phase: design, findings: 0 } }
+  - { ts: 2026-09-28T06:45:27Z, phase: design, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session } }
+  - { ts: 2026-09-28T06:45:27Z, phase: tasks, event: start }
+  - { ts: 2026-09-28T06:45:27Z, phase: tasks, event: doccheck, metrics: { stage: start, phase: tasks, mode: same_session, size: 2747 } }
+  - { ts: 2026-09-28T06:45:27Z, phase: tasks, event: doccheck, metrics: { stage: report, phase: tasks, findings: 0 } }
+  - { ts: 2026-09-28T06:45:27Z, phase: tasks, event: approved, metrics: { tasks_planned: 5, tasks_anchored: 5, doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session, ac_total: 7, ac_covered: 7, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-28T06:45:27Z, phase: coding, event: start }
+  - { ts: 2026-09-28T07:14:33Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T1, mode: delegated } }
+  - { ts: 2026-09-28T07:14:33Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T2, mode: delegated } }
+  - { ts: 2026-09-28T07:14:33Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T3, mode: delegated } }
+  - { ts: 2026-09-28T07:14:33Z, phase: coding, event: taskcheck, metrics: { stage: start, task: T4, mode: delegated } }
+  - { ts: 2026-09-28T07:14:33Z, phase: coding, event: taskcheck, metrics: { stage: start, task: cross, mode: delegated } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T1, findings: 0 } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T2, findings: 2 } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T3, findings: 1 } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: taskcheck, metrics: { stage: report, task: T4, findings: 4 } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: taskcheck, metrics: { stage: report, task: cross, findings: 3 } }
+  - { ts: 2026-09-28T07:38:19Z, phase: coding, event: approved, metrics: { tasks_done: 5, unplanned_lookups: 1, task_checks: 4, task_check_findings: 7, task_check_mode: delegated } }
+  - { ts: 2026-09-28T07:38:19Z, phase: test, event: start, metrics: { marks: 2 } }
+  - { ts: 2026-09-28T07:38:21Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
+  - { ts: 2026-09-28T07:39:02Z, phase: test, event: approved, metrics: { passed: 5773, failed: 0 } }
+  - { ts: 2026-09-28T07:39:02Z, phase: review, event: start, metrics: { marks: 4 } }
+  - { ts: 2026-09-28T07:39:02Z, phase: review, event: approved, metrics: { must: 1, should: 3, nit: 4, ac_total: 7, ac_covered: 7, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-28T07:39:02Z, phase: deliver, event: start }
+  - { ts: 2026-09-28T07:39:13Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 7, ac_covered: 7, tasks_no_ac: 0, tasks_ac_none: 0, amend: yes } }
+  - { ts: 2026-09-28T07:39:28Z, phase: deliver, event: approved, metrics: { files_changed: 14, insertions: 1333, deletions: 27 } }

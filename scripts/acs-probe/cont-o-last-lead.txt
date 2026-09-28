@@ -1,0 +1,48 @@
+# **継続した O 欄で、全角の前半が区間の最後の桁に来る挿入**（実機の ACS のコア。`20260928-cont-o-cells` の独立点検の指摘 3）。DSM の CONTOX の 1 巡目だけを使う。
+# 原典の詰め直し（`checkWordsFitDBCSOpenContField`）は前半が区間の最後の桁（残り 1 桁）に来る場合を守っていない。C12 の形（先頭 `SO い き く SI`）にしてから、
+# 区間の最後の桁の SI（5,17）で全角を挿入する。ホストのログの `[C01]` を見る。2〜12 巡は何もせず Enter。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-last-lead.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOX')[enter]
+settle 3000
+setcursor 5,13
+settle 200
+keys [insert]きく
+settle 400
+dump after-c12
+setcursor 5,17
+settle 200
+keys あ
+settle 400
+dump last-lead
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+dump end
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
