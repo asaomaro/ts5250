@@ -207,7 +207,8 @@ export type WdsfEvent =
   | { kind: "window"; window: ParsedWindow }
   | { kind: "scrollbar"; scrollbar: ParsedScrollBar }
   | { kind: "grid-lines"; grid: ParsedGridLines }
-  | { kind: "clear-grid-lines" }
+  /** CLEAR GRID LINES（0x61）。`rect` は消す矩形（1 始まり）。形が崩れていれば無し */
+  | { kind: "clear-grid-lines"; rect?: { row: number; col: number; width: number; height: number } }
   | { kind: "remove-selection" }
   | { kind: "remove-window" }
   | { kind: "remove-scrollbar" }
@@ -265,8 +266,14 @@ export function parseWdsf(sf: Uint8Array, decode: Decode): WdsfEvent {
       return { kind: "unrestrict-cursor", bodyLength: r.remaining };
     case WDSF_TYPE.DRAW_ERASE_GRID_LINES:
       return { kind: "grid-lines", grid: parseGridLines(r) };
-    case WDSF_TYPE.CLEAR_GRID_LINE_BUFFER:
-      return { kind: "clear-grid-lines" };
+    case WDSF_TYPE.CLEAR_GRID_LINE_BUFFER: {
+      // **矩形だけを消す**（ACS `ENPTUI5250.processClearGrid`: 区画 1・予約 2 バイト・行・桁・幅・深さ。`20260928-grid-window-hole`。
+      // 実機の ACS のコア〔DSM の GRIDLIFE の G6〕で 5,5 から幅 10・深さ 1 を指定すると罫線の面から 10 桁だけ消えた）。~~罫線を全部消す~~
+      if (r.remaining < 7) return { kind: "clear-grid-lines" };
+      r.skip(3);
+      const [row, col, width, height] = [r.u8(), r.u8(), r.u8(), r.u8()];
+      return { kind: "clear-grid-lines", rect: { row, col, width, height } };
+    }
     default:
       return { kind: "unknown", type };
   }

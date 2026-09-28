@@ -613,18 +613,32 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
   const left = g.col - 1;
   const bottom = top + Math.max(1, g.height);
   const right = left + Math.max(1, g.width);
-  const hLine = (bound: number): Record<string, string> => ({
-    left: left + "ch",
-    top: bound * 1.25 + "em",
-    width: right - left + "ch"
-  });
-  const vLine = (bound: number): Record<string, string> => ({
-    left: bound + "ch",
-    top: top * 1.25 + "em",
-    height: (bottom - top) * 1.25 + "em"
-  });
-  const push = (style: Record<string, string>, extra: string): void => {
-    out.push({ style, cls: `${cls} ${extra}` });
+  // **窓に削られた部分は描かない**（`g.holes`。ACS は窓を作ると窓の範囲の罫線の置き場を消す。`20260928-grid-window-hole`）。
+  // 線は ACS の置き場で持ち主のセル（上辺・内部の横罫・左辺・内部の縦罫は下・右の側、下辺・右辺は上・左の側）で判定する
+  const holes = g.holes ?? [];
+  /** 区間 [a, b) から、持ち主の行（桁）が穴に入るときの穴の桁（行）の範囲を除いた残り */
+  const cut = (a: number, b: number, owner: number, vertical: boolean): [number, number][] => {
+    let pieces: [number, number][] = [[a, b]];
+    for (const h of holes) {
+      const inOwner = vertical ? owner >= h.col && owner < h.col + h.width : owner >= h.row && owner < h.row + h.height;
+      if (!inOwner) continue;
+      const s = vertical ? h.row - 1 : h.col - 1;
+      const e = s + (vertical ? h.height : h.width);
+      pieces = pieces.flatMap(([x, y]): [number, number][] => [
+        ...(x < Math.min(y, s) ? [[x, Math.min(y, s)] as [number, number]] : []),
+        ...(Math.max(x, e) < y ? [[Math.max(x, e), y] as [number, number]] : [])
+      ]);
+    }
+    return pieces;
+  };
+  /** 横罫（境界 `bound`）。`owner` は持ち主の行（1 始まり） */
+  const hLine = (bound: number, owner: number): Record<string, string>[] =>
+    cut(left, right, owner, false).map(([x, y]) => ({ left: x + "ch", top: bound * 1.25 + "em", width: y - x + "ch" }));
+  /** 縦罫（境界 `bound`）。`owner` は持ち主の桁（1 始まり） */
+  const vLine = (bound: number, owner: number): Record<string, string>[] =>
+    cut(top, bottom, owner, true).map(([x, y]) => ({ left: bound + "ch", top: x * 1.25 + "em", height: (y - x) * 1.25 + "em" }));
+  const push = (styles: Record<string, string>[], extra: string): void => {
+    for (const style of styles) out.push({ style, cls: `${cls} ${extra}` });
   };
 
   // **単独の罫線（0x00–0x03）では 2 つの数値の意味が箱と違う。**
@@ -639,14 +653,16 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     const base = g.minorType === 0x00 ? top : g.minorType === 0x01 ? bottom : g.minorType === 0x02 ? left : right;
     for (let i = 0; i < repeat; i++) {
       const at = base + i * interval;
-      push(horizontal ? hLine(at) : vLine(at), horizontal ? "grid-h" : "grid-v");
+      // 上辺・左辺（0x00・0x02）は境界の下・右のセル、下辺・右辺（0x01・0x03）は上・左のセルが持ち主
+      const owner = g.minorType === 0x00 || g.minorType === 0x02 ? at + 1 : at;
+      push(horizontal ? hLine(at, owner) : vLine(at, owner), horizontal ? "grid-h" : "grid-v");
     }
   } else {
     // 箱（0x04–0x07）は四辺
-    push(hLine(top), "grid-h");
-    push(hLine(bottom), "grid-h");
-    push(vLine(left), "grid-v");
-    push(vLine(right), "grid-v");
+    push(hLine(top, top + 1), "grid-h");
+    push(hLine(bottom, bottom), "grid-h");
+    push(vLine(left, left + 1), "grid-v");
+    push(vLine(right, right), "grid-v");
     // **内部罫線は「本数と間隔」ではなく「行の間隔・桁の間隔」**（DDS の *TYPE の 2 引数）。
     // `(*TYPE HRZVRT 2 8)` は「2 行ごとに横罫・8 桁ごとに縦罫」で、
     // 箱が 6 行 × 40 桁なら横 2 本・縦 4 本になる（ACS の表示と一致）。
@@ -654,10 +670,10 @@ function gridSegments(g: GuiGridLine): { style: Record<string, string>; cls: str
     const value1 = g.value1;
     const value2 = g.value2;
     if ((g.minorType === 0x05 || g.minorType === 0x07) && value1 > 0) {
-      for (let b = top + value1; b < bottom; b += value1) push(hLine(b), "grid-h");
+      for (let b = top + value1; b < bottom; b += value1) push(hLine(b, b + 1), "grid-h"); // 内部の罫の持ち主は未確認（下の行とみなす）
     }
     if ((g.minorType === 0x06 || g.minorType === 0x07) && value2 > 0) {
-      for (let b = left + value2; b < right; b += value2) push(vLine(b), "grid-v");
+      for (let b = left + value2; b < right; b += value2) push(vLine(b, b + 1), "grid-v");
     }
   }
   return out;

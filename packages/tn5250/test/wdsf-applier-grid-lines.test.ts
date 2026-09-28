@@ -66,14 +66,15 @@ describe("CLEAR UNIT ALTERNATE と罫線の共存", () => {
     expect(gui!.gridLines[0]).toMatchObject({ minorType: 0x02, row: 5, col: 2, height: 20 });
   });
 
-  it("REM_ALL_GUI_CONSTRUCTS では引き続き罫線が消える（専用コマンドは効く）", () => {
+  // ~~REM_ALL_GUI_CONSTRUCTS では罫線が消える~~ → ACS の 0x5F は罫線の置き場に触らない（実機の ACS のコア・DSM の GRIDLIFE の G5。`20260928-grid-window-hole`）
+  it("REM_ALL_GUI_CONSTRUCTS でも罫線は残る（ACS と同じ）", () => {
     const buf = new ScreenBuffer({ alternate: "27x132" });
     const stream = [
       ...writeToDisplay(wdsf(0x60, gridDrawBody)),
-      ...writeToDisplay(wdsf(0x5f, [0x00]))
+      ...writeToDisplay(wdsf(0x5f, [0x00, 0x00, 0x00]))
     ];
     applyDataStream(Uint8Array.from(stream), buf, codec, () => {});
-    expect(buf.snapshot("t", false).gui).toBeUndefined();
+    expect(buf.snapshot("t", false).gui?.gridLines).toHaveLength(1);
   });
 
   /**
@@ -133,11 +134,15 @@ describe("CLEAR UNIT と罫線・窓の共存（S9R167D 実機トレース）", 
     expect(buf.snapshot("t", false).gui).toBeUndefined();
   });
 
-  it("REM_ALL_GUI_CONSTRUCTS は罫線も窓も両方消す（専用コマンドは変わらず効く）", () => {
+  // ~~REM_ALL_GUI_CONSTRUCTS は罫線も窓も両方消す~~ → 窓だけ（ACS の実測。上の「罫線は残る」と同じ）
+  it("REM_ALL_GUI_CONSTRUCTS は窓を消し、罫線は残す", () => {
     const buf = new ScreenBuffer({ alternate: "27x132" });
-    const stream = [...writeToDisplay(wdsf(0x60, gridDrawBody)), ...writeToDisplay(wdsf(0x5f, [0x00]))];
+    const win = wdsf(0x51, [0x00, 0x00, 0x00, 0x05, 0x14]);
+    const stream = [...writeToDisplay([...wdsf(0x60, gridDrawBody), ORDER.SBA, 5, 10, ...win]), ...writeToDisplay(wdsf(0x5f, [0x00, 0x00, 0x00]))];
     applyDataStream(Uint8Array.from(stream), buf, codec, () => {});
-    expect(buf.snapshot("t", false).gui).toBeUndefined();
+    const gui = buf.snapshot("t", false).gui!;
+    expect(gui.windows).toHaveLength(0);
+    expect(gui.gridLines).toHaveLength(1);
   });
 });
 
@@ -194,5 +199,44 @@ describe("CLEAR UNIT ALTERNATE と窓（実機 WINCUA）", () => {
     const gui = buf.snapshot("t", false).gui;
     expect(gui?.gridLines).toHaveLength(1);
     expect(gui?.windows ?? []).toEqual([]);
+  });
+});
+
+/**
+ * **窓を作ると、それまでの罫線に窓の範囲の穴が付く**（ACS `ENPTUIWindow.draw` → `clearGridBuf`。`20260928-grid-window-hole`。
+ * 実機の ACS のコア・DSM の GRIDLIFE の G4）。範囲は窓の位置から幅＋6 桁・深さ＋2 行。窓の後に引いた罫線には付かない
+ */
+describe("窓と罫線", () => {
+  // CREATE WINDOW: flag 0x00・深さ 5・幅 20（DSM の GRIDLIFE と同じ形）
+  const win = wdsf(0x51, [0x00, 0x00, 0x00, 0x05, 0x14]);
+  it("窓の前の罫線に穴、窓の後の罫線には無い", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(
+      Uint8Array.from(writeToDisplay([...wdsf(0x60, gridDrawBody), ORDER.SBA, 5, 10, ...win, ...wdsf(0x60, [...gridDrawBody.slice(0, 7), 0x0b, 0x02, 0x00, 0x09, 0x02, 0x00, 0x14, 0xff, 0xff, 0x01, 0x01])])),
+      buf, codec, () => {}
+    );
+    const lines = buf.snapshot("s", false).gui!.gridLines;
+    expect(lines).toHaveLength(2);
+    expect(lines[0]!.holes).toEqual([{ row: 5, col: 10, width: 26, height: 7 }]);
+    expect(lines[1]!.holes).toBeUndefined();
+  });
+});
+
+/**
+ * **CLEAR GRID LINES（0x61）は矩形だけを消す**（ACS `processClearGrid`。実機の ACS のコア・DSM の GRIDLIFE の G6: 5,5 から幅 10・深さ 1 で罫線の面から 10 桁だけ消えた）。
+ * ~~罫線を全部消す~~
+ */
+describe("CLEAR GRID LINES の矩形", () => {
+  it("それまでの罫線に矩形の穴が付き、線は残る", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(Uint8Array.from(writeToDisplay([...wdsf(0x60, gridDrawBody), ...wdsf(0x61, [0x01, 0x00, 0x00, 0x05, 0x05, 0x0a, 0x01])])), buf, codec, () => {});
+    const lines = buf.snapshot("s", false).gui!.gridLines;
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.holes).toEqual([{ row: 5, col: 5, width: 10, height: 1 }]);
+  });
+  it("矩形の無い（崩れた）0x61 は何もしない", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(Uint8Array.from(writeToDisplay([...wdsf(0x60, gridDrawBody), ...wdsf(0x61, [])])), buf, codec, () => {});
+    expect(buf.snapshot("s", false).gui!.gridLines[0]!.holes).toBeUndefined();
   });
 });

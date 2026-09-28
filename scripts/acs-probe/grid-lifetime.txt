@@ -1,0 +1,45 @@
+# **WDSF 0x60 の罫線の寿命**（実機の ACS のコア。台帳「DS5250 の残り」の罫線）。DSM の GRIDLIFE の 7 巡で、ACS の罫線の面（`ECLPS.GridPlane`＝描画の元）を `grid` で読む。
+# G1 罫線 / G2 CLEAR UNIT のみ / G3 CLEAR UNIT ALTERNATE（27x132）/ G4 CLEAR UNIT（24x80）＋罫線＋窓 / G5 罫線＋0x5F / G6 罫線の後の別のレコードで 0x61 / G7 1 本のレコードに [罫線][CLEAR UNIT][欄]
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/grid-lifetime.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('GRIDLIFE')[enter]
+settle 3000
+grid g1
+dump g1
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g2
+dump g2
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g3
+dump g3
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g4
+dump g4
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g5
+dump g5
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g6
+dump g6
+setcursor 20,10
+keys [enter]
+settle 2500
+grid g7
+dump g7
+setcursor 20,10
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

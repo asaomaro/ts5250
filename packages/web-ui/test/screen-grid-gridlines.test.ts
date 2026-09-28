@@ -457,3 +457,30 @@ describe("枠・見出しの属性から桁区切りを落とす", () => {
     expect(w.find(".gui-window-border").classes()).toContain("a-reverse");
   });
 });
+
+/**
+ * **窓に削られた罫線は描かない**（`20260928-grid-window-hole`）。実機の ACS のコア（DSM の GRIDLIFE の G4）: 5,5 から 40 桁×8 行の箱の後に 5,10 へ深さ 5・幅 20 の窓を作ると、
+ * 罫線の面から上辺の 5,10〜5,35（窓の位置から幅＋6 桁）が消え、左辺（5 桁）・右辺（45 桁）・下辺（13 行）は残った
+ */
+describe("窓の穴", () => {
+  const box = grid({ row: 5, col: 5, width: 40, height: 8, holes: [{ row: 5, col: 10, width: 26, height: 7 }] });
+  const lines = () => mount(ScreenGrid, { props: { snapshot: snapWithGui({ gridLines: [box] }), edits: new Map(), focused: true } }).findAll(".grid-line");
+
+  it("上辺は穴の前後の 2 本に割れ、ほかの辺は 1 本のまま", () => {
+    const l = lines();
+    const h = l.filter((x) => x.classes().includes("grid-h"));
+    expect(h.map((x) => [x.attributes("style")?.match(/left: ([\d.]+)ch/)?.[1], x.attributes("style")?.match(/width: ([\d.]+)ch/)?.[1]])).toEqual([
+      ["4", "5"],
+      ["35", "9"],
+      ["4", "40"]
+    ]);
+    expect(l.filter((x) => x.classes().includes("grid-v"))).toHaveLength(2);
+  });
+
+  it("縦罫は持ち主の桁が穴に入るときだけ削る（左辺 5 桁・右辺 44 桁は穴の外）", () => {
+    const inside = grid({ row: 5, col: 12, width: 10, height: 8, holes: [{ row: 5, col: 10, width: 26, height: 7 }] });
+    const l = mount(ScreenGrid, { props: { snapshot: snapWithGui({ gridLines: [inside] }), edits: new Map(), focused: true } }).findAll(".grid-line.grid-v");
+    // 左辺（持ち主 12 桁）・右辺（持ち主 21 桁）とも穴の中: 行 5〜11 を除いた 12・13 行だけが残る
+    expect(l.map((x) => x.attributes("style")?.match(/top: ([\d.]+)em/)?.[1])).toEqual(["13.75", "13.75"]);
+  });
+});

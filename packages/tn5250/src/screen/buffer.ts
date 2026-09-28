@@ -340,7 +340,7 @@ export class ScreenBuffer {
    *   （Clear Grid Line Buffer 0x61・GRDATR/GRDLIN 主構造の flag1 bit0 等）で
    *   寿命管理されているので、ここで消す必要はない
    *
-   * 罫線ごと消すのは `clearGui()`（REM_ALL_GUI_CONSTRUCTS 専用）だけ。
+   * ~~罫線ごと消すのは `clearGui()`（REM_ALL_GUI_CONSTRUCTS 専用）だけ~~——ACS は 0x5F でも罫線を残す（`removeAllGuiConstructs`）。罫線を消すのは 0x60 の消去の指定・0x61 の矩形・窓
    * ここでは全員に共通する「文字セル・サイズ」の変更だけを行う。
    */
   private resize(rows: 24 | 27, cols: 80 | 132): void {
@@ -368,10 +368,12 @@ export class ScreenBuffer {
     if (w) w.restrictCursor = false;
   }
 
-  /** GUI 構造体をすべて除去（REM_ALL_GUI_CONSTRUCTS 専用コマンド時） */
-  clearGui(): void {
+  /**
+   * **REMOVE ALL GUI CONSTRUCTS（0x5F）**: 窓・選択欄・スクロール・バーを外す。**罫線は残す**（ACS `ENPTUI5250.removeAllGUIConstructs` は罫線の置き場に触らない。
+   * 実機の ACS のコア・DSM の GRIDLIFE の G5。`20260928-grid-window-hole`）。~~罫線ごと消す（`clearGui`）~~
+   */
+  removeAllGuiConstructs(): void {
     this.closeWindowsAndSelections();
-    this.guiGridLines = [];
   }
 
   /**
@@ -437,6 +439,10 @@ export class ScreenBuffer {
     this.guiWindows.push(win);
     this.currentWindowId = win.id;
     this.blankWindowArea(win);
+    // **窓の範囲の罫線を消す**（ACS `ENPTUIWindow.draw` の `clearGridBuf`: 窓の位置から幅＋6 桁・深さ＋2 行。実機の ACS のコアで、罫線の箱の上辺のうち
+    // 窓の範囲の 26 桁が罫線の面から消えた——DSM の GRIDLIFE の G4・`scripts/acs-probe/grid-lifetime.txt`）。当 PJ の罫線は線の単位なので、範囲を穴として持たせる
+    const hole = { row, col, width: parsed.width + 6, height: parsed.height + 2 };
+    for (const g of this.guiGridLines) g.holes = [...(g.holes ?? []), hole];
   }
 
   /**
@@ -504,12 +510,15 @@ export class ScreenBuffer {
         value1: it.value1 !== GRID_DEFAULT ? it.value1 : 0,
         value2: it.value2 !== GRID_DEFAULT ? it.value2 : 0
       });
+      // （同じ場所への再描画は新しい線として置き換わるので、前の線の穴は引き継がない——ACS も置き場へ書き直す）
     }
   }
 
-  /** CLEAR GRID LINE BUFFER（0x61） */
-  clearGridLines(): void {
-    this.guiGridLines = [];
+  /**
+   * **CLEAR GRID LINES（0x61）の矩形**（1 始まり）を、それまでの罫線の穴にする（ACS `processClearGrid` は置き場の矩形だけを 0 にする。窓の穴と同じ扱い——`GuiGridLine.holes`）
+   */
+  clearGridRect(rect: { row: number; col: number; width: number; height: number }): void {
+    for (const g of this.guiGridLines) g.holes = [...(g.holes ?? []), rect];
   }
 
   /** DEFINE SCROLL BAR FIELD を GUI スクロールバーとして登録 */
