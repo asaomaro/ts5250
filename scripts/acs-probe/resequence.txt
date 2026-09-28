@@ -1,0 +1,28 @@
+# **再順序付け（SOH の本体 3 バイト目＋FCW 0x80nn）で ACS の READ MDT の欄の並びが変わるか**（ACS のコア・社内機。台帳「DS5250 の残り」の FCW 0x80xx）。
+# 原典: `FFT5250.firstModifiedField` / `nextModifiedField` は SOH の番号の欄から FCW の番号を辿る（0xFF で終わり、辿った先が MDT でなければそこで止まる）。
+# 画面は DSM の RESEQ（`scripts/host-src/dscmd.c`。鎖は #2(7,10) → #1(5,10) → #3(9,10)）。ホストの受け取りは /tmp/dscmd.log の `[R1]` / `[R2]`。
+# 1 回目は 3 欄とも打つ、2 回目は #2・#3 だけ打つ（#1 は MDT が無い——原典どおりなら #2 だけが届く）。測った後に DLTPGM と IFS の /tmp/dscmd.c・/tmp/dscmd.log を消す。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('RESEQ')[enter]
+settle 3000
+dump a0
+setcursor 5,10
+keys A
+setcursor 7,10
+keys B
+setcursor 9,10
+keys C
+keys [enter]
+settle 2500
+dump a1
+setcursor 7,10
+keys B
+setcursor 9,10
+keys C
+keys [enter]
+settle 2500
+dump a2
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

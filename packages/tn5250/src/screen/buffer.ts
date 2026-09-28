@@ -144,6 +144,8 @@ export interface InternalField {
   continued?: ContinuedPart;
   /** カーソル送り先の欄番号（FCW 0x88nn 由来。undefined = 画面順どおり） */
   cursorProgression?: number;
+  /** **再順序付けの次の欄の番号**（FCW 0x80nn の nn。0xFF で鎖の終わり。ACS `Field5250.nextResequence`）。立つときだけ付与 */
+  nextResequence?: number;
   /** **透過の欄**（FCW 0x84xx 由来。ACS `Field5250.transparentField`）。送るときにヌルも符号も加工せず生のバイトで送る。立つときだけ付与 */
   transparent?: boolean;
   /**
@@ -558,6 +560,7 @@ export class ScreenBuffer {
     // SOH の CA キーの申告も捨てる（ACS `processClearFMT`。`clearUnit` の注記）
     this.aidNoDataMask = 0;
     this.cursorInputOnly = false;
+    this.resequenceFirst = 0;
     this.dropCursorOrders();
     if (!this.alternate) {
       this.resize(24, 80);
@@ -621,6 +624,7 @@ export class ScreenBuffer {
      */
     aidNoDataMask: number;
     cursorInputOnly: boolean;
+    resequenceFirst: number;
     /** メッセージ行の行番号（ACS `Save5250Net.SaveSOH_msgline_num`）。 */
     msgLineRow: number;
     /**
@@ -674,6 +678,7 @@ export class ScreenBuffer {
     // （`scripts/acs-probe/clear-ca-mask.txt`。`20260927-clear-ca-mask`）。ホストが画面を作り直すときに SOH を送り直すかは未確認
     this.aidNoDataMask = 0;
     this.cursorInputOnly = false;
+    this.resequenceFirst = 0;
     this.resetMsgLineRow();
     this.noteClear();
   }
@@ -710,6 +715,7 @@ export class ScreenBuffer {
       // メッセージ行番号も退避する。同じものを積む（`20260920-restore-screen-parity` research F1）
       aidNoDataMask: this.aidNoDataMask,
       cursorInputOnly: this.cursorInputOnly,
+      resequenceFirst: this.resequenceFirst,
       msgLineRow: this.msgLineRow,
       icAddr: this.icAddr,
       // 応答を組み立てた直後に `attachSaveContext()` が埋める（まだ作られていない）
@@ -793,6 +799,7 @@ export class ScreenBuffer {
     // 戻さないと窓・ヘルプから戻った画面で `CAnn` の申告が消える
     this.aidNoDataMask = saved.aidNoDataMask;
     this.cursorInputOnly = saved.cursorInputOnly;
+    this.resequenceFirst = saved.resequenceFirst;
     this.msgLineRow = saved.msgLineRow;
     this.icAddr = saved.icAddr; // ACS `restoreNetNulls` の `WTD_IC_addr`・`homePos`
     // **画面を丸ごと戻したので全画面書き込みとして扱う。** 窓を閉じるときに来る命令なので、
@@ -829,6 +836,12 @@ export class ScreenBuffer {
   private cursorInputOnly = false;
 
   /**
+   * **再順序付けの先頭の欄の番号**（SOH の本体 3 バイト目。0 = 再順序付けなし。ACS `FFT5250.firstResequence`。`20260928-resequence`）。
+   * READ の応答の欄の並びを、この欄から FCW 0x80nn の番号を辿る鎖にする（`readMdtFields`・`readInputFields`）。CLEAR 系・CFT・SOH で 0 に戻す（ACS `processClearFMT`）
+   */
+  resequenceFirst = 0;
+
+  /**
    * SOH のヘッダ本体を受け取ってマスクを更新する。**7 バイト未満なら申告なし**（0）。
    * 本体は `[フラグ, 予約, 再順序付け, エラー行, マスク×3]`。
    */
@@ -838,6 +851,8 @@ export class ScreenBuffer {
       b.length >= 7 ? ((b[4]! << 16) | (b[5]! << 8) | b[6]!) : 0;
     // 本体 1 バイト目のフラグ 0x10＝カーソルを入力欄だけに動かす（ACS の SOH 分岐は長さ 1 以上ならこのバイトを見る）
     this.cursorInputOnly = b.length >= 1 && (b[0]! & 0x10) !== 0;
+    // 本体 3 バイト目は再順序付けの先頭の欄の番号（ACS の SOH 分岐は長さ 3 以上ならこのバイトを採る）
+    this.resequenceFirst = b.length >= 3 ? b[2]! : 0;
     // **本体 4 バイト目はメッセージ行の行番号**（ACS `DS5250` の SOH 分岐が
     // `data[i+5]`＝本体 4 バイト目を、1〜画面行数 の範囲でだけ `SOH_msgline_num` に採るのと同じ）。
     // `systemMessage` の寿命判定（`clearSystemMessageIfTouched`）と WRITE ERROR CODE の位置（`systemMessageArea`）に使う。
@@ -911,6 +926,7 @@ export class ScreenBuffer {
     // SOH の CA キーの申告も捨てる（ACS `processClearFMT` → `clearSOHPFKeyTable`。CFT でも。SOH はこの後で申告し直す）
     this.aidNoDataMask = 0;
     this.cursorInputOnly = false;
+    this.resequenceFirst = 0;
     this.dropCursorOrders();
     this.resetMsgLineRow();
   }
@@ -1077,7 +1093,8 @@ export class ScreenBuffer {
     continued?: ContinuedPart,
     cursorProgression?: number,
     selfCheck?: SelfCheckKind,
-    transparent = false
+    transparent = false,
+    nextResequence?: number
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -1100,7 +1117,8 @@ export class ScreenBuffer {
       ...(continued !== undefined ? { continued } : {}),
       ...(cursorProgression !== undefined ? { cursorProgression } : {}),
       ...(selfCheck !== undefined ? { selfCheck } : {}),
-      ...(transparent ? { transparent } : {})
+      ...(transparent ? { transparent } : {}),
+      ...(nextResequence !== undefined ? { nextResequence } : {})
     });
   }
 
@@ -1419,6 +1437,53 @@ export class ScreenBuffer {
   /** MDT の立ったフィールド（Read MDT Fields 応答用・画面順） */
   mdtFields(): readonly InternalField[] {
     return this.orderedFields().filter((f) => f.mdt);
+  }
+
+  /**
+   * **READ MDT 系で送る欄の並び**（ACS `FFT5250.firstModifiedField` / `nextModifiedField`）。再順序付けが無ければ `mdtFields()`。
+   * あれば `resequenceFirst` 番の欄から FCW 0x80nn の番号を辿る: 最初の欄に MDT が無ければ次へ進み、それ以降は**辿った先が MDT でなければそこで止まる**
+   * （実機の ACS のコアでも、鎖の 2 つ目に MDT が無いと 3 つ目に打っていても 1 欄だけ送った。`scripts/acs-probe/resequence.txt`）。
+   * 0xFF で終わり。番号 0・範囲外・一巡も終わりにする（ACS は例外で応答を作れない——当 PJ の判断。`20260928-resequence` decisions D2）。
+   * 番号は欄の表（`orderedFields()`＝番地の順）の 1 始まり。ACS の表は追加の順だが、昇順でない SF は表に入らない（`checkNewField`）ので同じ順になる（同 D3）。
+   * 継続欄の MDT は並びのどこかで見る（ACS は区間ごとの `isMDTField` だが `setMDT` が並びの全区間に立てる。鎖が中間の区間を指す形は未確認）
+   */
+  readMdtFields(): readonly InternalField[] {
+    if (this.resequenceFirst === 0) return this.mdtFields();
+    const table = this.orderedFields();
+    const hasMdt = (f: InternalField): boolean => (f.continued === undefined ? [f] : this.continuedRun(f)).some((x) => x.mdt);
+    const next = (f: InternalField): InternalField | undefined => {
+      const n = f.nextResequence ?? 0;
+      if (n === 0xff || n === 0) return undefined;
+      const g = table[n - 1];
+      return g !== undefined && hasMdt(g) ? g : undefined;
+    };
+    const out: InternalField[] = [];
+    let f = table[this.resequenceFirst - 1];
+    if (f !== undefined && !hasMdt(f)) f = next(f);
+    while (f !== undefined && !out.includes(f)) {
+      out.push(f);
+      f = next(f);
+    }
+    return out;
+  }
+
+  /**
+   * **READ INPUT 系で送る欄の並び**（ACS `FFT5250.firstInputField` / `nextInputField`）。再順序付けが無ければ `orderedFields()`。
+   * あれば同じ鎖を MDT を問わず辿る。番号 0 は表の次の欄、0xFF で終わり。範囲外・一巡は終わり
+   */
+  readInputFields(): readonly InternalField[] {
+    if (this.resequenceFirst === 0) return this.orderedFields();
+    const table = this.orderedFields();
+    const out: InternalField[] = [];
+    let i = this.resequenceFirst - 1;
+    while (i >= 0 && i < table.length && !out.includes(table[i]!)) {
+      const f = table[i]!;
+      out.push(f);
+      const n = f.nextResequence ?? 0;
+      if (n === 0xff) break;
+      i = n === 0 ? i + 1 : n - 1;
+    }
+    return out;
   }
 
   /** CC1 の MDT リセット等で使用 */

@@ -906,13 +906,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`scripts/verify-transparent-field.mjs`）がどちらも `11050a100008c1c2e7000000000011070ac3c4e8`。~~ACS `sendAll` は 0x10＋2 バイトの長さを前に付けて生で送る~~ は READ MDT 系だけの形（READ INPUT 系は前置なし）。
   READ INPUT 系は DSM の 2 回目の読みが CPFA306 で待たず、原典のみ（未確認）。セルの元のバイト（0x1C のセルも 0x1C）で 1 桁 1 バイト。単体 9 件・mutation 検出（decisions D4）。
   SAVE SCREEN の応答の SF の組み直しは DBCS の FCW しか書かない（透過・自己点検・継続欄・カーソル送りの FCW を落とす。当 PJ の復元は預けた画面から戻すので影響しない。ホストが中身を読むかは未確認）。
-- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x52/0x54/0x55・FCW 0x80xx）**（上の【まとめ】から割った。優先度 低）:
+- [x] **DS5250 の残りのうち FCW 0x80xx（再順序付け）**。**完了（`20260928-resequence`）**: SOH の本体 3 バイト目（先頭の欄の番号）と FCW 0x80nn（次の欄の番号）の鎖で READ の欄の並びを作る
+  （`packages/tn5250/src/screen/buffer.ts` の `readMdtFields`・`readInputFields`）。READ MDT 系は辿った先が MDT でなければ止まる（ACS の癖）。再順序付けのある画面のカーソル送りの欄は 0x10050125。
+  実機の ACS のコア（DSM の RESEQ・`scripts/acs-probe/resequence.txt`。2 回）: 3 欄に打つと `11070ac2 11050ac1 11090ac3`、#2・#3 だけだと `11070ac2`。当 PJ は直す前 `11050ac1 11070ac2 11090ac3`・`11070ac2 11090ac3`、
+  直した後 ACS と同じ（`scripts/verify-resequence.mjs` pass=2）。READ INPUT 系・カーソル送りの断りは原典のみ。単体 9 件・mutation 11 通り検出（2 通りは等価）。
+- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x52/0x54/0x55）**（上の【まとめ】から割った。優先度 低）:
   **罫線の原典の追記（2026-09-28）**: WDSF 0x60 の罫線は `ENPTUI5250.processDefineGrid` が罫線の置き場（`changeGridBuffer`）に入れ、CLEAR UNIT の `discardGridPlane` が捨てるのは
   `PS5250.GridPlane`（WSF の grid write/merge の面）だけ。ENPTUI の構造体は `isENPTUIConstructOnPS()` のときだけ `removeAllENPTUIConstructs` で捨てる——GUI がどちらから描くかを確かめれば、
   S9R167D の実測（CLEAR UNIT の後も表示）と原典の食い違いが解ける。`acs-probe` は `ECLPS.GridPlane`（public）を読めるが、ENPTUI 側の置き場は読めていない。
   **罫線**: ACS `processClearUnit` は `discardGridPlane` で罫線の面を捨てる（原典）が、実機（S9R167D）では同じレコードの CLEAR UNIT の後も ACS が罫線を表示し続けた記録がある（`buffer.ts` の `closeWindowsAndSelections` の注記）——
   原典と実測が食い違うので、DSM で「罫線 → CLEAR UNIT」「CLEAR UNIT ALTERNATE で画面の大きさを変える」を出させ、ACS の画素で確かめてから決める（`20260927-ds5250-clear` decisions D2）。
-  **WDSF 0x52**（窓のカーソル制限の解除）・**0x54**（欄へのデータ書き込み。EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）・**0x55**（マウス・ボタン → AID）と **FCW 0x80xx**（再順序付け）・~~**0x84xx**~~（上の `[x]`）は、
+  **WDSF 0x52**（窓のカーソル制限の解除）・**0x54**（欄へのデータ書き込み。EBCDIC 形〔flag 0x80〕と CCSID 形〔0x40〕）・**0x55**（マウス・ボタン → AID）・~~**FCW 0x80xx**~~・~~**0x84xx**~~（上の `[x]`）は、
   リポジトリ内の実機の記録に 0 件——DSM で出させて測るか、実例が出るまで待つ。
 - [x] **【まとめ】telnet のうち IBMRSEED の書式と USER・パスワードの正規化**（優先度 中）。**完了（`20260921-telnet-signon-vars`・PR #410）**:
   平文の自動サインオンで IBMRSEED は値なし（以前は ESC＋8 バイトの 0 で、7 個の 0x00 が空の VAR として読まれていた）、USER は前後の空白を落として大文字、
