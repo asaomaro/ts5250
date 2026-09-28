@@ -67,6 +67,25 @@ public class AcsProbe {
   }
 
   /**
+   * **罫線の面（`ECLPS.GridPlane`。ACS の描画 `ScreenText` が罫線を描く元）**の中身。0 でない桁を `行,桁=値` で並べる（最大 40 個）。
+   * WDSF 0x60 の罫線はレコードの終わりにこの面へ重ねられる（`ENPTUI5250.mergeGridBuffer`）ので、画素を見ずに「表示されているか」が分かる
+   */
+  private static void grid(String label) {
+    char[] g = ps.GridPlane;
+    int cols = ps.GetSizeCols();
+    StringBuilder sb = new StringBuilder();
+    int n = 0;
+    if (g != null) {
+      for (int i = 0; i < g.length; i++) {
+        if (g[i] == 0) continue;
+        if (n < 40) sb.append(' ').append(i / cols + 1).append(',').append(i % cols + 1).append('=').append(Integer.toHexString(g[i]));
+        n++;
+      }
+    }
+    OUT.print("=== grid " + label + " cells=" + n + (g == null ? " (null)" : "") + sb + "\n");
+  }
+
+  /**
    * 通信状態と、**実際に効いている** `autoReconnect`（private なのでリフレクションで読む）。
    * 設定を渡しただけでは効いたか分からない——効いていないのに「再接続しなかった」と読むと
    * 陰性と取り違える。
@@ -149,7 +168,7 @@ public class AcsProbe {
       String at = (i + 1) + " 行目: ";
       // 引数の書式も接続前に確かめる。サインオンの後で数値の誤りに気づくと、SIGNOFF せずに止まる
       switch (cmd) {
-        case "signon", "dump" -> { }
+        case "signon", "dump", "grid" -> { }
         case "keys", "trykeys" -> { if (arg.isEmpty()) throw new StepError(at + cmd + " の後に送る文字列が要ります"); }
         case "settle" -> { if (!arg.isEmpty() && !arg.matches("\\d+")) throw new StepError(at + "settle の引数はミリ秒の整数: " + arg); }
         case "sleep" -> { if (!arg.matches("\\d+")) throw new StepError(at + "sleep の引数はミリ秒の整数: " + arg); }
@@ -282,6 +301,7 @@ public class AcsProbe {
             ps.SetCursorPos(Integer.parseInt(rc[0].trim()), Integer.parseInt(rc[1].trim()));
           }
           case "dump" -> dump(arg);
+          case "grid" -> grid(arg);
           default -> throw new StepError("未定義の命令 " + t[0]); // loadSteps で弾いているので来ない
         }
       }

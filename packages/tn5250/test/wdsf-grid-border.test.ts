@@ -141,8 +141,8 @@ describe("ScreenBuffer のグリッド線状態", () => {
     apply(buf, gridBody({}, [item(GRID_MINOR.PLAIN_BOX, { row: 5, col: 10, erase: true })]));
     expect(buf.snapshot("t", false).gui.gridLines).toHaveLength(1);
 
-    // **すべて消えたら gui 自体が undefined になる**（GUI 構造体が 1 つも無い＝従来からの仕様）
-    buf.clearGridLines();
+    // **すべて消えたら gui 自体が undefined になる**（GUI 構造体が 1 つも無い＝従来からの仕様）。~~`clearGridLines()`（0x61）で全部消す~~ → 0x61 は矩形の穴（ACS）なので、残りも消去の指定で消す
+    apply(buf, gridBody({}, [item(GRID_MINOR.PLAIN_BOX, { row: 12, col: 10, erase: true })]));
     expect(buf.snapshot("t", false).gui).toBeUndefined();
   });
 

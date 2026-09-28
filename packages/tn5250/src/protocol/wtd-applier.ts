@@ -1118,13 +1118,15 @@ function applyWdsf(
       buf.removeScrollBar(row, col);
       break;
     case "remove-all":
-      buf.clearGui();
+      // 罫線は残す（ACS `removeAllGUIConstructs` は窓・選択欄・スクロール・バーだけを外す。実機の ACS のコア〔GRIDLIFE の G5〕でも残った）
+      buf.removeAllGuiConstructs();
       break;
     case "grid-lines":
       buf.applyGridLines(event.grid);
       break;
     case "clear-grid-lines":
-      buf.clearGridLines();
+      if (event.rect) buf.clearGridRect(event.rect);
+      else warn("CLEAR GRID LINES without a rectangle — ignored");
       break;
     case "unrestrict-cursor":
       // **窓のカーソル制限の解除**（ACS `ENPTUI5250.unrestrictWindowCursor`。`20260928-window-unrestrict`）: 中身がちょうど 2 バイトでなければ 0x10050110、

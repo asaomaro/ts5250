@@ -1159,6 +1159,75 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "GRIDLIFE") == 0) {
+        /*
+         * **WDSF 0x60 の罫線の寿命**を測る画面（台帳「DS5250 の残り」の罫線。ACS は罫線を ENPTUI の置き場に持ち、CLEAR UNIT は `GridPlane` だけを捨て、
+         * DBCS の画面ならレコードの終わりに置き場を重ね直す——`ENPTUI5250.mergeGridBuffer`。置き場を捨てるのは画面の大きさが変わるとき・0x60 の消去の指定・窓）。
+         * 巡ごと（ログは `[G1]`〜`[G7]`）: G1 罫線 / G2 CLEAR UNIT のみ / G3 CLEAR UNIT ALTERNATE（27x132）/ G4 CLEAR UNIT（24x80 へ戻る）＋罫線＋窓 /
+         * G5 罫線＋0x5F / G6 罫線、別のレコードで 0x61（5,5 から幅 10・深さ 1 の矩形）/ G7 1 本のレコードに [罫線][CLEAR UNIT][欄]。欄は (20,10) 6 桁
+         */
+        static const unsigned char fld[] = { 0x11, 0x14, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06, 0x13, 0x14, 0x0A };
+        static const unsigned char box[] = {
+            0x15, 0x00, 0x16, 0xD9, 0x60, 0x01, 0x20, 0x00, 0x20, 0x00, 0x04, 0x00,
+            0x0B, 0x04, 0x00, 0x05, 0x05, 0x28, 0x08, 0xFF, 0xFF, 0xFF, 0xFF
+        };
+        static const unsigned char win[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x0E, 0xD9, 0x51, 0x00, 0x00, 0x00, 0x05, 0x14, 0x05, 0x01, 0x80, 0x38, 0x38 };
+        static const unsigned char remall[] = { 0x15, 0x00, 0x07, 0xD9, 0x5F, 0x00, 0x00, 0x00 };
+        static const unsigned char clrgrid[] = { 0x15, 0x00, 0x0B, 0xD9, 0x61, 0x01, 0x00, 0x00, 0x05, 0x05, 0x0A, 0x01 }; /* 5,5 から幅 10・深さ 1 */
+        static const unsigned char zero = 0x00;
+        static char gtags[7][8];
+        unsigned char w[128];
+        int k, n;
+        Qsn_Cmd_Buf_T cb;
+        for (k = 0; k < 7; k++) {
+            sprintf(gtags[k], "[G%d] ", k + 1);
+            tag = gtags[k];
+            cb = QsnCrtCmdBuf(512, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (cb == 0) break;
+            /* WTD のデータ（CC 2 バイト＋オーダー）を巡ごとに組む */
+            n = 0; w[n++] = 0x00; w[n++] = 0x00;
+            if (k == 0 || k == 3 || k == 4 || k == 5 || k == 6) { memcpy(w + n, box, sizeof(box)); n += sizeof(box); }
+            if (k == 3) { memcpy(w + n, win, sizeof(win)); n += sizeof(win); }
+            if (k == 4) { memcpy(w + n, remall, sizeof(remall)); n += sizeof(remall); }
+            if (k != 6) { memcpy(w + n, fld, sizeof(fld)); n += sizeof(fld); }
+            inzFdbk(fdbk, sizeof(fdbk));
+            if (k == 2) rc = QsnPutOutCmd(0x20, (const char *)&zero, 1, cb, 0, (Q_Fdbk_T *)fdbk);
+            else if (k != 6) rc = QsnPutOutCmd(0x40, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk(k == 2 ? "QsnPutOutCmd(0x20 CLEAR UNIT ALTERNATE)" : "QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WTD)", rc, fdbk);
+            if (k == 6) {
+                /* 同じレコードで CLEAR UNIT の後に欄だけの WTD（S9R167D の形） */
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x40, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT 同じレコード)", rc, fdbk);
+                n = 0; w[n++] = 0x00; w[n++] = 0x00; memcpy(w + n, fld, sizeof(fld)); n += sizeof(fld);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, cb, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 欄)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutBuf(cb, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutBuf", rc, fdbk);
+            QsnDltBuf(cb, (Q_Fdbk_T *)0);
+            if (k == 5) {
+                /* 別のレコードで 0x61（罫線の置き場を消す） */
+                n = 0; w[n++] = 0x00; w[n++] = 0x00; memcpy(w + n, clrgrid, sizeof(clrgrid)); n += sizeof(clrgrid);
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 WDSF 0x61)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。

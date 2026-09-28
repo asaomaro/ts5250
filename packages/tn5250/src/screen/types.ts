@@ -289,6 +289,11 @@ export interface GuiGridLine {
    */
   value1: number;
   value2: number;
+  /**
+   * **この罫線を描いた後に作られた窓の範囲**（1 始まりのセルの矩形）。ACS は窓を作ると窓の範囲（位置から幅＋6 桁・深さ＋2 行）の罫線の置き場を消す
+   * （`ENPTUIWindow.draw` → `ENPTUI5250.clearGridBuf`）ので、その範囲に掛かる線は描かない（`20260928-grid-window-hole`）。窓の後に引いた罫線には付かない
+   */
+  holes?: { row: number; col: number; width: number; height: number }[];
 }
 
 export interface GuiScrollBar {

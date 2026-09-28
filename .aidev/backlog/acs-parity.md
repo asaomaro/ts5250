@@ -791,7 +791,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **WDSF の頭の検査の否定応答**（下の行から割った）。**完了（`20260927-wdsf-sense`）**: ACS `ENPTUI5250.processWSFOrder` と同じく、残りが 4 バイトに足りない → 0x10050121・LL < 4 → 0x10050110・
   クラスが 0xD9 でない・知らない型 → 0x10050111 で WTD を打ち切る（`packages/tn5250/src/protocol/wtd-applier.ts` の `applyWdsf`）。実機の ACS のコア（ENPTUI 有効・tap）と
   `scripts/verify-wtd-order-sense.mjs` の WDSF 3 モードが一致（pass=12）、通常の画面の一巡で否定応答 0 件。ENPTUI 無効の ACS は WDSF を読み飛ばす（当 PJ は常に申告する）。
-- [ ] **WDSF の中の否定応答**（上から割った。~~頭の検査~~ は上の `[x]`。残りは構造体ごとの中身の検査——中身の無い 0x55 は ACS で 0x10050110）: ACS `processWSFOrder`（窓・選択欄・スクロール・バー・罫線の中身の検査と否定応答）。当 PJ の `applyWdsf` は警告して読み飛ばす。**実機で測ってから**
+- [ ] **WDSF の中の否定応答**（上から割った。~~頭の検査~~ は上の `[x]`。残りは構造体ごとの中身の検査——中身の無い 0x55 は ACS で 0x10050110）:
+  **原典の突き合わせ（2026-09-28。`ENPTUI5250.processWSFOrder` ほか）**: 頭の検査は一致。構造体ごとの長さ（0x50 は LL≤20・0x51 は LL≤8・0x53 は LL≤14 で 0x10050113、0x58・0x5B は LL=6・0x59・0x5F は LL=7・0x61 は LL=11 以外で 0x10050110 など）、
+  マイナー構造体の長さ（0x10050113）、画面の外・型の組み合わせ（0x10050112）、罫線の値（0x10050150〜152）、0x54（0x10050140・141・155）が当 PJ に無い。いずれも崩れた構造体でしか起きない。
+  **応答ではない挙動の差**（実際のアプリで起きうる。優先して測る）: スクロール・バーの総数・位置は 32 ビットの 2 進（当 PJ は 10 進 4 桁で読む。`wdsf-parser.ts`）、スクロール・バーを伴う選択欄はマイナーが 28 バイト目から（当 PJ は 20）、
+  flag3 に 0x80 の無い選択肢を ACS は捨てる、0x59 のフラグが 00/40 以外なら ACS は何も外さない。ENPTUI を申告しない ACS は WDSF を LL で読み飛ばす（当 PJ は常に適用）。 ACS `processWSFOrder`（窓・選択欄・スクロール・バー・罫線の中身の検査と否定応答）。当 PJ の `applyWdsf` は警告して読み飛ばす。**実機で測ってから**
 - [x] **EA の属性タイプ・書き始めと、画面の終わりをまたぐ書き込み**（上の「否定応答・受理の残り」から割った）。
   **完了（`20260927-ea-acs`・PR #423）**: EA は ACS の `eraseToAddress` どおり（書き始めは行き先の次・タイプ 0x00 / 0xFF・DBCS の 0x05・その他は 0x1005012D・長さ 3 以上は 0x10050123）。
   画面の終わりを越える文字の並びは書かずに 0x10050121（CC2 も落とす）、最後の桁でちょうど終わった次は 1 行 1 桁から（EA の後だけ画面の外のまま）。
@@ -961,7 +965,12 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ も同じ（`scripts/verify-window-unrestrict.mjs` pass=3）。ENPTUI を申告しないと ACS は窓の構造体を作らない（当 PJ は常に申告する）。
   あわせて ACS に合わせた（独立レビューの指摘）: 解除・閉じ込めの対象は**最後に作った窓だけ**（`enpwindow`。消すと前の窓に戻らない）——画面の写しに `current` を出し、ペインはその窓だけで閉じ込める
   （~~制限つきの窓のうち最後のもの~~）。SOH の CSRINPONLY（0x10）も直近の窓の制限を外す（`setCursorMoveToInput(true)` → `unrestrictWindowCursor`）。単体 10 件・ペイン 1 件・mutation 12 通り検出（1 通りは等価）。
-- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）:
+- [x] **罫線の寿命（窓・0x5F・0x61・CLEAR UNIT）**（下の項目から割った）。**完了（`20260928-grid-window-hole`・PR #449）**: ACS のコアの罫線の面（`ECLPS.GridPlane`＝描画の元）を probe の `grid` で読み、
+  DSM の GRIDLIFE で測った（`scripts/acs-probe/grid-lifetime.txt`）: CLEAR UNIT・同じレコードの CLEAR UNIT の後も罫線は残る（DBCS の画面はレコードの終わりに置き場を重ね直す——`ENPTUI5250.mergeGridBuffer`）、
+  **窓を作ると窓の範囲（位置から幅＋6 桁・深さ＋2 行）の罫線が消える**、**0x5F は罫線を残す**、**0x61 は指定の矩形だけを消す**。当 PJ は罫線に穴（`GuiGridLine.holes`）を持たせ、画面は線分を穴で削る
+  （`packages/web-ui/src/components/ScreenGrid.vue` の `gridSegments`）。~~0x5F・0x61 で罫線を全部消す~~。ブラウザ（`scripts/verify-browser-grid-lifetime.mjs`）7 巡とも一致（2 回）。単体 6 件・mutation 6 通り検出。
+  原典と S9R167D の実測の食い違いは、置き場（残る）と面（CLEAR UNIT で捨てるがレコードの終わりに戻る）の 2 段で解けた。残り: 画面の大きさが変わるときは ACS は置き場も捨てる（このセッションは 27x132 にならず未測定）。
+- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）: ~~罫線の寿命~~（上の `[x]`）。
   **罫線の原典の追記（2026-09-28）**: WDSF 0x60 の罫線は `ENPTUI5250.processDefineGrid` が罫線の置き場（`changeGridBuffer`）に入れ、CLEAR UNIT の `discardGridPlane` が捨てるのは
   `PS5250.GridPlane`（WSF の grid write/merge の面）だけ。ENPTUI の構造体は `isENPTUIConstructOnPS()` のときだけ `removeAllENPTUIConstructs` で捨てる——GUI がどちらから描くかを確かめれば、
   S9R167D の実測（CLEAR UNIT の後も表示）と原典の食い違いが解ける。`acs-probe` は `ECLPS.GridPlane`（public）を読めるが、ENPTUI 側の置き場は読めていない。
