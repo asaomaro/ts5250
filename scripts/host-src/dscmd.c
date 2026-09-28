@@ -1019,6 +1019,33 @@ int main(int argc, char *argv[]) {
             logFdbk("QsnReadMDT", rc, fdbk);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "SIGNCHK") == 0) {
+        /*
+         * **符号付き数値の欄の MF と自己点検で、符号の桁を数えるか**を測る画面（`20260928-mandatory-sign-digit`。ACS `Field5250.isFieldFull`・`checkModulusField`）。
+         *   (3,10) 符号付き数値（FFW 4707＝シフト 7・MF）6 桁 / (5,10) 符号付き数値の自己点検（FFW 4700・FCW B1A0）6 桁 / (7,10) 素の欄 6 桁。IC は 3,10
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x47, 0x07, 0x20, 0x00, 0x06,
+            0x11, 0x05, 0x09, 0x1D, 0x47, 0x00, 0xB1, 0xA0, 0x20, 0x00, 0x06,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x03, 0x0A
+        };
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 符号付き数値の MF・自己点検)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnReadMDT", rc, fdbk);
+            logInpBuf(buf);
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。

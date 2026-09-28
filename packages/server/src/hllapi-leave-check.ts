@@ -40,7 +40,7 @@ export function fieldViolation(snapshot: ScreenSnapshot, here: Field): boolean {
   // HLLAPI で書いたパスワード欄はここから読めない——ACS なら止まるところを通す（docs/HLLAPI.md に既知の差として書いた）
   if (here.hidden) return false;
   const value = decodeCp932(fieldBytes(snapshot, here));
-  // 自己点検も符号付き数値の符号の桁を数えない（ACS `Field5250.checkModulusField`。**ペインの `selfCheckViolated` は除かない**——台帳に残した）
+  // 自己点検も符号付き数値の符号の桁を数えない（ACS `Field5250.checkModulusField`。ペインの `selfCheckViolated` も同じ——`20260928-mandatory-sign-digit`）
   const body = here.signedNumeric === true ? value.slice(0, -1) : value;
   if (mandatoryFillViolated(snapshot, here)) return true;
   return here.selfCheck !== undefined && body.trim().length > 0 && !selfCheckDigitOk(body, here.selfCheck);

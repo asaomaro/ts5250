@@ -1,0 +1,45 @@
+# **符号付き数値の欄の MF・自己点検は符号の桁を数えるか**（実機の ACS のコア。`20260928-mandatory-sign-digit`）。DSM の SIGNCHK:
+# (3,10) 符号付き数値の MF 6 桁 / (5,10) 符号付き数値の自己点検（M10）6 桁 / (7,10) 素の欄。原典 `Field5250.isFieldFull`・`checkModulusField` は符号の桁を除く。
+# 各場合で Tab を押し、欄を出られたか（カーソル・inhibit）を見る。1230 の M10 の検査桁は 2。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/sign-digit-check.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SIGNCHK')[enter]
+settle 3000
+# a: MF に数字 5 桁（符号の桁は空）→ Tab
+setcursor 3,10
+keys 12345
+setcursor 3,14
+keys [tab]
+settle 300
+dump a-mf-5digits
+keys [reset]
+# b: MF に数字 3 桁 → Tab（止まる）
+setcursor 3,10
+keys [eraseeof]123
+keys [tab]
+settle 300
+dump b-mf-3digits
+keys [reset]
+# c: 自己点検に 12302（合う）→ Tab
+setcursor 5,10
+keys 12302
+setcursor 5,14
+keys [tab]
+settle 300
+dump c-sc-ok
+keys [reset]
+# d: 自己点検に 12305（合わない）→ Tab（止まる）
+setcursor 5,10
+keys [eraseeof]12305
+setcursor 5,14
+keys [tab]
+settle 300
+dump d-sc-bad
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

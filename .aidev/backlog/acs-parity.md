@@ -821,8 +821,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   欄頭へ戻して `rc=5`、後ろのキーを処理しない（`packages/server/src/hllapi-leave-check.ts` の `leaveViolation`）。実機の ACS のコア（`scripts/acs-probe/hllapi-tab-mandatory.txt`。2 回）: ADJPGM の MF 欄に AB で
   Tab・欄頭からの Backtab・Home は 7,20・inhibit=5、Tab の後ろの CD は入らない、欄の途中からの Backtab は止まらない。当 PJ（`scripts/verify-hllapi-tab-mandatory.mjs`）pass=12。単体 14 件・mutation 14 通り検出。
   `setFieldExitReqFlag(true)` は AID の前の検査（エラー 32）にしか効かず、HLLAPI はその検査を持たない（下の項目）。
-- [ ] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）／
-  ペインの `mandatoryFillViolated`・`selfCheckViolated`（`packages/web-ui/src/composables/mandatoryCheck.ts`）は符号付き数値の符号の桁を除かない（ACS `isFieldFull`・`checkModulusField` は除く。HLLAPI は除く）。
+- [x] **ペインの MF・自己点検が符号付き数値の符号の桁を数える**（下の項目から割った）。**完了（`20260928-mandatory-sign-digit`・PR #445）**: `mandatoryFillViolated`・`selfCheckViolated`
+  （`packages/web-ui/src/composables/mandatoryCheck.ts` の `checkedBody`）は符号付き数値の欄で最終桁を除いて見る（ACS `Field5250.isFieldFull`・`isAllNulls`・`checkModulusField`。HLLAPI と同じ）。
+  実機の ACS のコア（DSM の SIGNCHK・`scripts/acs-probe/sign-digit-check.txt`）: 6 桁の符号付き数値の MF に数字 5 桁で Tab → 出られた・3 桁 → 止まった、M10 に 12302 → 出られた・12305 → 止まった。
+  ブラウザの当 PJ（`scripts/verify-browser-sign-digit.mjs`）pass=4（2 回）。直す前のコードは 5 桁で止めていた（pass=3・a が不一致）。単体 4 件・mutation 5 通り検出。
+- [ ] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）。
+  セッションは非表示の欄の値を外へ出さない（パスワード）ので、検査のためだけに値を読む口を足すかは判断が要る（`20260928-mandatory-sign-digit` で扱わなかった）。
+  ~~ペインの `mandatoryFillViolated`・`selfCheckViolated`（`packages/web-ui/src/composables/mandatoryCheck.ts`）は符号付き数値の符号の桁を除かない~~（上の `[x]`）。
 - [x] **HLLAPI の AID の前の MF・自己点検・ME**（上の項目から割った）。**完了（`20260928-hllapi-aid-checks`）**: AID キーの前に、カーソル下の欄の MF → 自己点検（欄頭へ）、画面が変更済みなら MDT の無い ME（その欄へ。CA キーは除く）を見て、
   違反なら送らずに `rc=5`（`packages/server/src/hllapi.ts` の `aidCheck`）。ACS のコアの 9 場合（`scripts/acs-probe/mandatory-me-mf.txt`）と同じ操作を当 PJ の HLLAPI で実機に当てて一致
   （`scripts/verify-hllapi-tab-mandatory.mjs` pass=21。MF で Enter・ME 空で Enter は送らず欄へ、CA03 と未変更の Enter は送る）。単体 13 件・mutation 13 通り検出。

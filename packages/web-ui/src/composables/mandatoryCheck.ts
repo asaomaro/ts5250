@@ -44,8 +44,18 @@ function mdtOf(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Fi
  */
 export function mandatoryFillViolated(f: Field, edits: ReadonlyMap<number, string>, fields: readonly Field[] = [f]): boolean {
   if (f.adjust !== "mandatory-fill" || !mdtOf(f, edits, fields)) return false;
-  const value = edits.get(f.index) ?? f.value;
+  const value = checkedBody(f, edits.get(f.index) ?? f.value);
   return value.trim().length > 0 && !isFull(f, value);
+}
+
+/**
+ * **検査に使う値**: 符号付き数値の欄は符号の桁（最終桁）を除く（ACS `Field5250.isFieldFull`・`isAllNulls`・`checkModulusField` は
+ * `endPos - 1` までを見る。HLLAPI の `hllapi-leave-check.ts` も同じ）。編集の値は末尾の空白が落ちていることがあるので、欄の長さまで埋めてから落とす
+ * ——そのまま最後の字を落とすと、符号の桁ではなく数字を落とす
+ */
+function checkedBody(f: Field, value: string): string {
+  if (f.signedNumeric !== true) return value;
+  return [...value.padEnd(f.length, " ")].slice(0, f.length - 1).join("");
 }
 
 /**
@@ -56,7 +66,7 @@ export function selfCheckViolated(f: Field, edits: ReadonlyMap<number, string>):
   if (f.selfCheck === undefined) return false;
   const edited = edits.get(f.index);
   if (f.hidden && edited === undefined) return false;
-  const value = edited ?? f.value;
+  const value = checkedBody(f, edited ?? f.value);
   return value.trim().length > 0 && !selfCheckDigitOk(value, f.selfCheck);
 }
 
@@ -150,5 +160,6 @@ export function isFieldExitRequired(f: Field): boolean {
  */
 function isFull(f: Field, value: string): boolean {
   const v = value.replace(/ +$/, "");
-  return (f.dbcsType ? dbcsByteLength(v, undefined, f.dbcsType === "pure") : v.length) >= f.length;
+  const n = f.signedNumeric === true ? f.length - 1 : f.length; // 符号の桁は数えない（`checkedBody`）
+  return (f.dbcsType ? dbcsByteLength(v, undefined, f.dbcsType === "pure") : v.length) >= n;
 }
