@@ -162,3 +162,44 @@ describe("カーソル送りの番号（前に継続欄があるとき）", () =
     w.unmount();
   });
 });
+
+/**
+ * **カーソル送りの番号が並びの外なら動かない**（`20260928-progression-range`。実機の ACS のコア・DSM の PROGRANGE: Tab で 3,10 のまま、
+ * 満杯まで打つと最終桁 3,15 に留まる）。欄の表は 5・区間を数えない並びは 3
+ */
+describe("カーソル送りの番号が並びの外", () => {
+  beforeEach(() =>
+    seed([
+      field(1, 3, { cursorProgression: 4, length: 6 }),
+      field(2, 5, { continued: "first" }), field(3, 6, { continued: "middle" }), field(4, 7, { continued: "last" }),
+      field(5, 9, { cursorProgression: 1 })
+    ])
+  );
+
+  it("Tab は動かない", async () => {
+    const w = mountPane();
+    await nextTick();
+    const els = inputs(w);
+    els[0]!.focus();
+    await nextTick();
+    await w.find(".pane").trigger("keydown", { key: "Tab" });
+    expect(document.activeElement).toBe(els[0]);
+    w.unmount();
+  });
+
+  it("満杯まで打っても次の欄へ送らず、カーソルは欄の最終桁", async () => {
+    const w = mountPane();
+    await nextTick();
+    const els = inputs(w);
+    els[0]!.focus();
+    await nextTick();
+    for (const ch of "ABCDEF") {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+      await nextTick();
+    }
+    await nextTick();
+    expect(document.activeElement).not.toBe(els[1]);
+    expect(w.text(), "ステータスバーのカーソル位置（行/桁）").toContain("03/015");
+    w.unmount();
+  });
+});

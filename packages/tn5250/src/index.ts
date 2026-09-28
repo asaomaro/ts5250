@@ -58,6 +58,7 @@ export {
   backtabPosition,
   progressionTarget,
   progressionNumberOf,
+  progressionStuck,
   screenText,
   findAllText,
   fieldAfterLabel,

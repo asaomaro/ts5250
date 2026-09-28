@@ -839,8 +839,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ は応答の要る命令の順を `ApplyResult.responses` に積み、その順に送る（`packages/tn5250/src/session/session.ts`）。オペコード 04 は `streamOf` で先頭の 2 バイトだけ。
   当 PJ のコアを実機に当てて一致（`scripts/verify-response-order.mjs` pass=2・2 回。直す前は `["save","query"]` が 2 つとも不一致）。単体 6 件・mutation 4 通り検出。
   残り: 応答の**中身**はレコードを最後まで適用した後の画面で組む（ACS は命令の時点の画面。`[SAVE][WTD]` の退避の中身など）——下の項目に残す。
+- [x] **カーソル送りの番号の範囲と昇順でない定義**（下の項目から割った）。**完了（`20260928-progression-range`・PR #447）**: 実機の ACS のコア（DSM の PROGRANGE・
+  `scripts/acs-probe/progression-range.txt`）で、番号が欄の表の数以内なのに区間を数えない並び（`FFT5250.getStandardFieldList`）の外だと ACS は配列の外を引いて例外になり、
+  Tab ではカーソルが動かず（3,10 のまま）、満杯まで打つと最終桁（3,15）に留まった。当 PJ は画面順の次へ倒していたので、`progressionStuck`
+  （`packages/tn5250/src/screen/search.ts`）で揃えた（ペインの Tab・満杯の自動送り・HLLAPI の Tab）。ブラウザ（`scripts/verify-browser-progression-range.mjs`）pass=3（2 回）。単体 5 件・mutation 5 通り検出。
+  ~~昇順でない定義（`standardFields` は画面順）~~ は差が無い——ACS の `checkNewField` は欄の表を位置の昇順に保ち、当 PJ も同じ `checkNewField` を持つ（decisions D1）。
 - [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
-  ~~応答をコマンドの順に送らない~~（上の `[x]`）。応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）。
+  ~~応答をコマンドの順に送らない~~（上の `[x]`）。~~カーソル送りの番号の範囲~~（上の `[x]`）。応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）。
   ~~HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）~~——**事実と違う**: HLLAPI は 5250 の `SessionManager` にしか繋がらず
   （`packages/server/src/app.ts` の `registerHllapiRoutes`・`SessionEntry.session` は `Session5250`）、3270 のセッション（`Tn3270Manager`）には届かない（`20260928-hllapi-tab-3270` を廃止した理由）。
   ACS の 3270 のコアの Tab・Backtab は `scripts/acs-probe/hllapi-tab-3270.txt` に測ってある（3270 のペインと比べる足場）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／

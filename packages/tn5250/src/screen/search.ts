@@ -135,6 +135,16 @@ export function progressionTarget(fields: readonly Field[], n: number): Field | 
   return standardFields(fields)[n - 1];
 }
 
+/**
+ * **カーソル送りの番号が、欄の表の数（区間も保護欄も数える）以内なのに区間を数えない並びの外か**（`20260928-progression-range`）。
+ * ACS `FFT5250.nextNonByPassInputFieldPos` は番号を欄の表の数で検査してから並び（`getStandardFieldList`）で引くので、この範囲では
+ * 配列の外を引いて例外になり、**打鍵が捨てられてカーソルは動かない**（実機の ACS のコア・DSM の PROGRANGE: Tab で 3,10 のまま、満杯まで打つと
+ * 最終桁 3,15 に留まる。`scripts/acs-probe/progression-range.txt`）。表の数を超える番号・0 は例外にならず画面順へ倒れる
+ */
+export function progressionStuck(fields: readonly Field[], n: number): boolean {
+  return n > 0 && n <= fields.length && n > standardFields(fields).length;
+}
+
 /** 欄のカーソル送りの番号（`progressionTarget` と同じ並びでの 1 起点。継続欄の 2 区間目以降は並びに無いので undefined） */
 export function progressionNumberOf(fields: readonly Field[], f: Field): number | undefined {
   const i = standardFields(fields).findIndex((x) => x.index === f.index);
@@ -155,6 +165,7 @@ function standardFields(fields: readonly Field[]): Field[] {
  * - カーソルの下の欄がカーソル送り（FCW 0x88nn）を持ち、送り先がバイパスでなければそこ
  * - そうでなければ、カーソルより後で始まる最初の入力欄（継続欄は先頭の区間だけ）。無ければ先頭の入力欄へ回り込む
  * - DBCS の欄で先頭が SO なら 1 桁進める（O の欄を除く）
+ * - カーソル送りの番号が並びの外（`progressionStuck`）なら動かない（`pos` を返す）
  * 入力欄が無ければ `undefined`（ACS は画面のホーム位置へ）
  */
 export function tabPosition(snapshot: ScreenSnapshot, pos: number): number | undefined {
@@ -162,6 +173,8 @@ export function tabPosition(snapshot: ScreenSnapshot, pos: number): number | und
   const here = fieldAtPos(snapshot, pos);
   let to: Field | undefined;
   if (here && !here.protected && here.cursorProgression !== undefined) {
+    // 並びの外を指す番号（`progressionStuck`）: ACS は例外で打鍵を捨てる——カーソルはそのまま
+    if (progressionStuck(snapshot.fields, here.cursorProgression)) return pos;
     const t = progressionTarget(snapshot.fields, here.cursorProgression);
     if (t && !t.protected) to = t;
   }
