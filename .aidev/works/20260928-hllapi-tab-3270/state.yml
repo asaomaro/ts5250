@@ -1,0 +1,14 @@
+schema: 11
+slug: hllapi-tab-3270
+current: tasks
+approved: [requirements, design, tasks]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 節目の懸念の残り（測る手段がある分）
+status: abandoned
+abandonedReason: 前提が誤り: HLLAPI は SessionManager（5250）にしか繋がらず、3270 のセッション（Tn3270Manager）には届かない（packages/server/src/app.ts:205・session-manager.ts:275）

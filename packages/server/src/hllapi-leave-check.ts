@@ -1,5 +1,8 @@
 /**
- * **欄を出るキー（Tab・Backtab・Home）の前の検査**——ACS `PS5250.moveCursorWithMandFillCheck`。
+ * **欄を出るキー（Tab・Backtab・Home）と AID の前の検査**——ACS `PS5250.moveCursorWithMandFillCheck`・`processAIDCode`。
+ *
+ * AID の前は、カーソル下の欄の MF → 自己点検、画面が変更済みなら ME（CA キーを除く）を見る（`fieldViolation`・`mandatoryEnterViolation`。
+ * `20260928-hllapi-aid-checks`。実機の ACS のコアで 9 場合を測ってある——`scripts/acs-probe/mandatory-me-mf.txt`）。
  *
  * ACS は Tab・Backtab・Home（ホーム位置でないとき）で行き先を決めたあと、**出る欄と行き先の欄が違えば**
  * 出る欄を MF（必須埋め）→ 自己点検の順に見て、違反ならカーソルを出る欄の先頭へ戻してエラー 20 / 21 で止まる。
@@ -25,15 +28,33 @@ export function leaveViolation(snapshot: ScreenSnapshot, from: number, to: numbe
   const here = fieldAt(snapshot, from);
   if (!here || here.protected) return undefined;
   if (fieldAt(snapshot, to)?.index === here.index) return undefined;
+  return fieldViolation(snapshot, here) ? here : undefined;
+}
+
+/**
+ * 欄 1 つの MF → 自己点検（ACS `checkMandatoryFillField` → `checkModulusField`）。違反なら true。保護欄は見ない。
+ */
+export function fieldViolation(snapshot: ScreenSnapshot, here: Field): boolean {
+  if (here.protected) return false;
   // 非表示欄はスナップショットに値が出ない（`fieldBytes` が空）ので判定しない。**ペインとの差**: ペインは打った値（編集）で判定できるが、
   // HLLAPI で書いたパスワード欄はここから読めない——ACS なら止まるところを通す（docs/HLLAPI.md に既知の差として書いた）
-  if (here.hidden) return undefined;
+  if (here.hidden) return false;
   const value = decodeCp932(fieldBytes(snapshot, here));
   // 自己点検も符号付き数値の符号の桁を数えない（ACS `Field5250.checkModulusField`。**ペインの `selfCheckViolated` は除かない**——台帳に残した）
   const body = here.signedNumeric === true ? value.slice(0, -1) : value;
-  if (mandatoryFillViolated(snapshot, here)) return here;
-  if (here.selfCheck !== undefined && body.trim().length > 0 && !selfCheckDigitOk(body, here.selfCheck)) return here;
-  return undefined;
+  if (mandatoryFillViolated(snapshot, here)) return true;
+  return here.selfCheck !== undefined && body.trim().length > 0 && !selfCheckDigitOk(body, here.selfCheck);
+}
+
+/**
+ * **ME（必須入力）の違反**（ACS `FFT5250.checkMandatoryFieldCheck`）: 画面が変更済み（ACS の `masterMDT`。ペインと同じく「どこかの欄に MDT」で近似）のとき、
+ * MDT の無い ME の欄のうち最初のもの（欄の表の順＝番号の順）。保護欄は見ない。**内容ではなく MDT**——打ってから消した欄は通る
+ */
+export function mandatoryEnterViolation(snapshot: ScreenSnapshot): Field | undefined {
+  if (!snapshot.fields.some((f) => f.mdt)) return undefined;
+  return [...snapshot.fields]
+    .sort((a, b) => a.index - b.index)
+    .find((f) => !f.protected && f.mandatoryEnter === true && !runHasMdt(snapshot.fields, f));
 }
 
 /**

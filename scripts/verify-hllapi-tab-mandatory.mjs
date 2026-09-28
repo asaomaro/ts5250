@@ -1,4 +1,5 @@
-// 実機検証（server の HLLAPI）: **MF の欄を出る @T・@B・@0 は ACS と同じく止まるか**（`20260927-hllapi-tab-mandatory`）。
+// 実機検証（server の HLLAPI）: **MF の欄を出る @T・@B・@0 は ACS と同じく止まるか**（`20260927-hllapi-tab-mandatory`）、
+// **AID の前の MF・ME は ACS と同じく止まるか**（`20260928-hllapi-aid-checks`。ACS のコアの 9 場合は `scripts/acs-probe/mandatory-me-mf.txt`）。
 //
 // 画面は ADJPGM（7,20=CHECK(MF) A 6 桁。`scripts/acs-probe/mandatory-me-mf.txt` と同じ。実機にオブジェクトは作らない）。
 // ACS のコア（`scripts/acs-probe/hllapi-tab-mandatory.txt`）: AB で Tab → 7,20・入力禁止・後ろの CD は入らない／欄の途中からの Backtab は止まらない／
@@ -75,6 +76,38 @@ for (const c of cases) {
   s.setField({ row: 7, col: 20 }, "ABCDEF");
   await s.sendAid("F3", { cursor: { row: 13, col: 20 }, timeoutMs: 10000 }).catch(() => {});
   await sleep(1500);
+}
+// ---- AID の前の検査（ADJPGM: 7,20=MF / 11,20=ME / 13,20=素の欄 / F3=CA03）----
+const valueAt = (row) => s.snapshot().fields.find((f) => f.row === row && f.col === 20)?.value ?? "";
+const onAdj = () => s.snapshot().fields.some((f) => f.row === 11 && f.col === 20 && !f.protected);
+const aidCases = [
+  // ACS 場合 5: MF に AB で Enter → MF エラー・欄頭
+  { name: "MF に AB で @E", at: [7, 20], keys: "AB@E", rc: 5, probeRow: 7, probe: "XB", stays: true },
+  // ACS 場合 2: 素の欄に打って Enter（ME 空）→ ME エラー・ME 欄へ
+  { name: "素の欄に打って @E（ME 空）", at: [13, 20], keys: "Z@E", rc: 5, probeRow: 11, probe: "X", stays: true },
+  // ACS 場合 3: 素の欄に打って F3（CA03）→ 送れた
+  { name: "素の欄に打って @3（CA03）", at: [13, 20], keys: "Z@3", rc: 0, stays: false },
+  // ACS 場合 1: 何も打たずに Enter → 送れた
+  { name: "何も打たずに @E", at: [13, 20], keys: "@E", rc: 0 }
+];
+for (const c of aidCases) {
+  await command(`CALL ${LIB}/ADJPGM`);
+  await sleep(1000);
+  await call(40, "", at(...c.at));
+  const r = await call(3, c.keys);
+  await sleep(1500);
+  log(`  ${c.name}: rc=${r.rc} ADJPGM のまま=${onAdj()}`);
+  check(r.rc === c.rc, `${c.name} の rc=${c.rc}`);
+  if (c.stays !== undefined) check(onAdj() === c.stays, `${c.name} の後 ${c.stays ? "送らずに ADJPGM のまま" : "送って ADJPGM を抜けた"}`);
+  if (c.probe !== undefined) {
+    await call(3, "X");
+    check(valueAt(c.probeRow).trim() === c.probe, `${c.name} の後のカーソルは ${c.probeRow},20（次の字で ${JSON.stringify(valueAt(c.probeRow).trim())}）`);
+  }
+  if (onAdj()) {
+    s.setField({ row: 7, col: 20 }, "ABCDEF");
+    await s.sendAid("F3", { cursor: { row: 13, col: 20 }, timeoutMs: 10000 }).catch(() => {});
+    await sleep(1500);
+  }
 }
 await command("SIGNOFF");
 s.disconnect();

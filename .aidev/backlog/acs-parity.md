@@ -798,11 +798,17 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   `setFieldExitReqFlag(true)` は AID の前の検査（エラー 32）にしか効かず、HLLAPI はその検査を持たない（下の項目）。
 - [ ] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）／
   ペインの `mandatoryFillViolated`・`selfCheckViolated`（`packages/web-ui/src/composables/mandatoryCheck.ts`）は符号付き数値の符号の桁を除かない（ACS `isFieldFull`・`checkModulusField` は除く。HLLAPI は除く）。
-- [ ] **HLLAPI・MCP の AID の前の検査が無い**（上から割った。優先度 低）: ACS `processAIDCode` はカーソル下の欄の MF（20）・Field Exit 必須の欄を出ずに送る（32）・自己点検（21）・ME（7）を見て止まる。
-  ペインは `mandatoryCheck.ts` で見るが、HLLAPI の `@E` 等・MCP の `send_key` は core の `sendAid` へそのまま渡す（core にも server にも検査が無い）。ACS の HLLAPI はこの経路でも止まるはず（ECL の `sendKeys` で測れる）。
+- [x] **HLLAPI の AID の前の MF・自己点検・ME**（上の項目から割った）。**完了（`20260928-hllapi-aid-checks`）**: AID キーの前に、カーソル下の欄の MF → 自己点検（欄頭へ）、画面が変更済みなら MDT の無い ME（その欄へ。CA キーは除く）を見て、
+  違反なら送らずに `rc=5`（`packages/server/src/hllapi.ts` の `aidCheck`）。ACS のコアの 9 場合（`scripts/acs-probe/mandatory-me-mf.txt`）と同じ操作を当 PJ の HLLAPI で実機に当てて一致
+  （`scripts/verify-hllapi-tab-mandatory.mjs` pass=21。MF で Enter・ME 空で Enter は送らず欄へ、CA03 と未変更の Enter は送る）。単体 13 件・mutation 13 通り検出。
+- [ ] **AID の前の検査の残り**（上から割った。優先度 低）: HLLAPI はエラー 32（右寄せ・符号付き数値の欄に打って欄を出ずに AID）を見ない——Field Exit のニーモニックが無く、欄を出たかを追っていない
+  （ACS は `fieldExitReqFlag`・`fieldExited`）。MCP の `send_key` は検査しない（ACS に無い入口。合わせるかは要判断）。
 - [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
-  HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／
-  ゾーン D の負の数をホストが負として受け取るか（DDS の数値の欄で確かめる）／応答をコマンドの順に送らない（`[WSF Query][SAVE SCREEN]` などを 1 本のレコードで出させて ACS のワイヤと比べる。当 PJ は適用の後に固定の順）／
+  ~~HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）~~——**事実と違う**: HLLAPI は 5250 の `SessionManager` にしか繋がらず
+  （`packages/server/src/app.ts` の `registerHllapiRoutes`・`SessionEntry.session` は `Session5250`）、3270 のセッション（`Tn3270Manager`）には届かない（`20260928-hllapi-tab-3270` を廃止した理由）。
+  ACS の 3270 のコアの Tab・Backtab は `scripts/acs-probe/hllapi-tab-3270.txt` に測ってある（3270 のペインと比べる足場）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／
+  ~~ゾーン D の負の数をホストが負として受け取るか（DDS の数値の欄で確かめる）~~——**閉じる**: 送るバイト（`F1 F2 40 40 40 D0`。`numeric-only-zone-d.test.ts`）は ACS のコアの画面の中身（`12   }`。
+  `20260921-field-minus-zone-d` research F2）と同じで、ホストの読み方は当 PJ の実装を左右しない／応答をコマンドの順に送らない（`[WSF Query][SAVE SCREEN]` などを 1 本のレコードで出させて ACS のワイヤと比べる。当 PJ は適用の後に固定の順）／
   カーソル送りの番号の範囲と昇順でない定義（`standardFields` は画面順）／O 欄が全角で始まるときの先頭の桁の選択。
 - [x] **節目 9 の独立点検で確かめられなかった懸念**（優先度 低・未確認）。
   **整理して閉じた（`20260927-checkpoint-rest`）**: 手を付けられる残り（HLLAPI の Tab / Backtab の 3270 の規則と MF の検査・ゾーン D の負の数をホストが負と読むか）は下の「節目の懸念の残り」に移した。

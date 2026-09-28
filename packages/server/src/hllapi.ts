@@ -41,7 +41,7 @@ import {
 } from "./hllapi-ps.js";
 import { decodeCp932, encodeCp932 } from "./hllapi-cp932.js";
 import { tabPosition, backtabPosition } from "@ts5250/tn5250";
-import { leaveViolation } from "./hllapi-leave-check.js";
+import { fieldViolation, leaveViolation, mandatoryEnterViolation } from "./hllapi-leave-check.js";
 
 /** 短縮名 1 文字（`A`〜`Z`） */
 type PsName = string;
@@ -726,11 +726,45 @@ async function sendKey(
     }
     // 上で弾いているのでここには来ないが、**型で閉じておく**（分岐の追加漏れを防ぐ）
     if (stroke.kind === "unsupported") return { rc: HRC.UNDEFINED_COMBINATION };
-    // AID キー——ホストへ送る
+    // AID キー——ホストへ送る。**その前に ACS と同じ検査**（止まったら送らずに `rc=5`。`aidCheck`）
+    if (!aidCheck(snapshot, conn, stroke.key)) return { rc: HRC.FUNCTION_INHIBITED };
     const r = await sendAid(deps, entry, conn, stroke.key, user);
     if (r.rc !== HRC.SUCCESSFUL) return r;
   }
   return ok();
+}
+
+/**
+ * 検査しない AID（ACS `processAIDCode` が外す 243・189・248・61＝Help・Clear・Record Backspace・Test Request と、AID ではないフラグキー。ペインと同じ）。
+ * Print・PA1〜3 は検査する（ペインと同じ。ACS の `processAIDCode` を通るかは原典で確かめていない——未確認）。
+ * Help のニーモニックは HLLAPI の表に無く、Record Backspace はホーム位置の `@0` が `sendAid` を直に呼ぶので、どちらもここへは来ないが、ペインの表とそろえておく
+ */
+const AID_UNCHECKED: ReadonlySet<AidKey> = new Set<AidKey>(["Help", "Clear", "RecordBackspace", "TestRequest", "Attn", "SysReq"]);
+
+/**
+ * **AID の前の検査**（ACS `PS5250.processAIDCode`。`20260928-hllapi-aid-checks`）。送ってよければ true。
+ * カーソル下の欄の MF → 自己点検（違反なら欄頭へ）、画面が変更済みなら ME（違反ならその欄の先頭へ。CA キーでは見ない——`DS5250.isSOH_PF`）。
+ * 実機の ACS のコア（ECL は HLLAPI と同じ経路）: MF は CA キーでも止まる、ME は CA キー・未変更の画面では見ない、AID はカーソルの無い欄の MF を見ない
+ * （`.aidev/works/20260921-mandatory-check-acs/research.md` F2）。
+ * **欄を出ずに送る右寄せ・符号付き数値のエラー 32（0x20。画面の表示は 0020）は見ない**——HLLAPI は「欄を出た」を追跡していない（台帳に残した）。
+ * **施錠中は見ない**（ペインは施錠を先に見て送らない。ACS の `keyDown` も施錠中の AID を受けない）——施錠の扱いは従来の経路に任せる
+ */
+function aidCheck(snapshot: ScreenSnapshot, conn: Connection, key: AidKey): boolean {
+  if (AID_UNCHECKED.has(key) || snapshot.keyboardLocked) return true;
+  const size = sizeOf(snapshot);
+  const here = fieldAt(snapshot, conn.cursor);
+  if (here && fieldViolation(snapshot, here)) {
+    conn.cursor = fieldStart(here, size) ?? conn.cursor;
+    return false;
+  }
+  const ca = /^F(\d+)$/.exec(key);
+  if (ca && snapshot.caKeys?.includes(Number(ca[1]))) return true;
+  const me = mandatoryEnterViolation(snapshot);
+  if (me) {
+    conn.cursor = fieldStart(me, size) ?? conn.cursor;
+    return false;
+  }
+  return true;
 }
 
 /** スナップショットのホーム位置（1 起点の PS 位置）。`home` を持つ画面だけで呼ぶ */
