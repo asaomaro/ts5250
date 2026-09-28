@@ -831,8 +831,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **HLLAPI の AID の前の MF・自己点検・ME**（上の項目から割った）。**完了（`20260928-hllapi-aid-checks`）**: AID キーの前に、カーソル下の欄の MF → 自己点検（欄頭へ）、画面が変更済みなら MDT の無い ME（その欄へ。CA キーは除く）を見て、
   違反なら送らずに `rc=5`（`packages/server/src/hllapi.ts` の `aidCheck`）。ACS のコアの 9 場合（`scripts/acs-probe/mandatory-me-mf.txt`）と同じ操作を当 PJ の HLLAPI で実機に当てて一致
   （`scripts/verify-hllapi-tab-mandatory.mjs` pass=21。MF で Enter・ME 空で Enter は送らず欄へ、CA03 と未変更の Enter は送る）。単体 13 件・mutation 13 通り検出。
-- [ ] **AID の前の検査の残り**（上から割った。優先度 低）: HLLAPI はエラー 32（右寄せ・符号付き数値の欄に打って欄を出ずに AID）を見ない——Field Exit のニーモニックが無く、欄を出たかを追っていない
-  （ACS は `fieldExitReqFlag`・`fieldExited`）。MCP の `send_key` は検査しない（ACS に無い入口。合わせるかは要判断）。
+- [x] **HLLAPI のエラー 32（0x20）**（下の項目から割った）。**完了（`20260928-hllapi-exit-required`・PR #448）**: 接続ごとに打ったまま欄を出ていない欄（`Connection.unexited`）を持ち、
+  その欄から AID を送らずに `rc=5`（`packages/server/src/hllapi.ts` の `aidCheck`。順は ACS の MF → 0x20 → 自己点検 → ME）。実機の ACS のコア（DSM の EXITREQ・`scripts/acs-probe/exit-required-aid.txt`）:
+  RZ・符号付き数値に打って Enter・同じ欄の中や別の欄を経た SetCursorPos・右の矢印は止まり、Tab・Backtab で着き直せば送れた。当 PJ の HLLAPI（`scripts/verify-hllapi-exit-required.mjs`）pass=12（2 回）。単体 12 件・mutation 6 通り検出。
+- [ ] **AID の前の検査の残り**（上から割った。優先度 低）: ~~HLLAPI はエラー 32 を見ない~~（上の `[x]`）。HLLAPI に Field Exit のニーモニックが無い（既知の差）。
+  MCP の `send_key` は検査しない（ACS に無い入口。合わせるかは要判断）。
 - [x] **応答をコマンドの順に送る・SAVE SCREEN のオペコードのレコードは退避だけ**（下の項目から割った）。**完了（`20260928-response-order`・PR #446）**:
   実機の ACS のコア（DSM の RESPORDER / RESPORDER2・`scripts/acs-probe/response-order.txt`・relay のワイヤ）: オペコード 03 の `[WSF Query][SAVE SCREEN]` は Query の応答 → 退避の応答、
   オペコード 04 の `[SAVE SCREEN][WSF Query]` は**退避の応答だけ**（Query に答えない。原典 `DS5250.tokenizeData` の case 4 は `04 02` で始まれば `processSaveScreen()` だけ）。

@@ -1,0 +1,76 @@
+# **右寄せ・符号付き数値の欄に打って欄を出ずに AID を押したとき**（実機の ACS のコア。台帳「AID の前の検査の残り」のエラー 32＝0x20）。DSM の EXITREQ:
+# (3,10) RZ 6 桁 / (5,10) 符号付き数値 6 桁 / (7,10) 素の欄。巡ごとに画面を書き直す。止まった巡は Reset して素の欄から Enter（ホストのログ `[En]` の READ のカーソルで、どこから送れたかが分かる）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/exit-required-aid.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EXITREQ')[enter]
+settle 3000
+# E1: RZ に 12 と打って Enter
+setcursor 3,10
+keys 12
+keys [enter]
+settle 500
+dump e1
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+# E2: RZ に 12 と打ち、同じ欄の中へカーソルを置き直して（SetCursorPos）Enter
+setcursor 3,10
+keys 12
+setcursor 3,11
+keys [enter]
+settle 500
+dump e2
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+# E3: RZ に 12 と打ち、素の欄へ置いてから RZ へ戻して Enter
+setcursor 3,10
+keys 12
+setcursor 7,10
+setcursor 3,12
+keys [enter]
+settle 500
+dump e3
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+# E4: RZ に 12 と打ち、Tab・Backtab で戻って Enter
+setcursor 3,10
+keys 12
+keys [tab]
+keys [backtab]
+keys [enter]
+settle 500
+dump e4
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+# E5: 符号付き数値に 12 と打って Enter
+setcursor 5,10
+keys 12
+keys [enter]
+settle 500
+dump e5
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+# E6: RZ に 12 と打ち、矢印で右へ 1 桁動かして Enter
+setcursor 3,10
+keys 12
+keys [right]
+keys [enter]
+settle 500
+dump e6
+keys [reset]
+setcursor 7,10
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

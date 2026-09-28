@@ -1,0 +1,43 @@
+# **右寄せの欄に打ってから矢印でカーソルを動かし AID を押したとき**（exit-required-aid.txt の続き。あちらの E6 は前の巡の Enter で 1 巡ずれて測れなかった）。DSM の EXITREQ の 1 巡目だけ。
+# E6a: 欄の中で右へ 1 桁 / E6b（2 巡目）: 欄の最終桁から右へ出る（ACS `processCursorMove` は欄の終わりで右へ出ると `fieldExited` を立てる）。残りの巡は Enter で流す
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EXITREQ')[enter]
+settle 3000
+setcursor 3,10
+keys 12
+keys [right]
+keys [enter]
+settle 500
+dump e6a
+keys [reset]
+settle 300
+dump e6a-after-reset
+setcursor 7,10
+keys [enter]
+settle 2500
+dump round2-start
+setcursor 3,10
+keys 12
+setcursor 3,15
+keys [right]
+keys [enter]
+settle 500
+dump e6b
+keys [reset]
+settle 300
+setcursor 7,10
+keys [enter]
+settle 2500
+dump after
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

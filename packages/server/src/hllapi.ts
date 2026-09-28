@@ -41,7 +41,7 @@ import {
 } from "./hllapi-ps.js";
 import { decodeCp932, encodeCp932 } from "./hllapi-cp932.js";
 import { tabPosition, backtabPosition } from "@ts5250/tn5250";
-import { fieldViolation, leaveViolation, mandatoryEnterViolation } from "./hllapi-leave-check.js";
+import { fieldViolation, leaveViolation, mandatoryEnterViolation, mandatoryFillOnly } from "./hllapi-leave-check.js";
 
 /** 短縮名 1 文字（`A`〜`Z`） */
 type PsName = string;
@@ -51,6 +51,12 @@ interface Connection {
   sessionId: string;
   /** 論理カーソル（1 起点の通し番号）。`Set Cursor` と移動ニーモニックで動く */
   cursor: number;
+  /**
+   * **打ったまま欄を出ていない右寄せ・符号付き数値の欄**（欄の番号。ACS の欄ごとの `fieldExitReqFlag` が下りている欄。`20260928-hllapi-exit-required`）。
+   * その欄にカーソルを置いたまま AID を押すと ACS はエラー 0x20（0020）で送らない。打鍵で欄の終わりに着くか、Tab・Backtab・Home・上下の矢印で
+   * その欄に着き直すと上がる（`Set Cursor`〔ECL の `SetCursorPos`〕と左右の矢印では上がらない——実機の ACS のコア。`scripts/acs-probe/exit-required-aid.txt`）
+   */
+  unexited?: number;
 }
 
 /**
@@ -708,7 +714,12 @@ async function sendKey(
       if (!field || !isInputField(field)) return { rc: HRC.FUNCTION_INHIBITED };
       const r = writeIntoField(deps, entry, snapshot, field, conn.cursor, stroke.text, user);
       if (r.rc !== HRC.SUCCESSFUL && r.rc !== HRC.DATA_ERROR) return r;
+      const start = fieldStart(field, sizeOf(snapshot)) ?? conn.cursor;
+      const reachedEnd = conn.cursor + stroke.text.length > start + field.length - 1;
       conn.cursor = Math.min(conn.cursor + stroke.text.length, psLength(sizeOf(snapshot)));
+      // 欄を出ずに AID を押せない欄へ打った（欄の終わりまで打てば ACS は旗を上げる——`unexited`）
+      if (needsFieldExit(field) && !reachedEnd) conn.unexited = field.index;
+      else if (conn.unexited === field.index) delete conn.unexited;
       continue;
     }
     if (stroke.kind === "local") {
@@ -722,6 +733,8 @@ async function sendKey(
       // **欄を出る前の MF・自己点検で止まったら、後ろのキーを処理しない**（ACS はエラー 20 / 21 の入力禁止で後ろの字を受けない。
       // HLLAPI は入力禁止の状態を持たないので、入力禁止の欄へ打ったときと同じ `rc=5` で返す。`20260927-hllapi-tab-mandatory`）
       if (!moveCursor(snapshot, conn, stroke.action)) return { rc: HRC.FUNCTION_INHIBITED };
+      // Tab・Backtab・Home・上下の矢印で着いた欄は旗が上がる（ACS `processTab` ほか・`processCursorMove` の上下）
+      if (ARRIVAL_ACTIONS.has(stroke.action) && conn.unexited !== undefined && fieldAt(snapshot, conn.cursor)?.index === conn.unexited) delete conn.unexited;
       continue;
     }
     // 上で弾いているのでここには来ないが、**型で閉じておく**（分岐の追加漏れを防ぐ）
@@ -741,18 +754,33 @@ async function sendKey(
  */
 const AID_UNCHECKED: ReadonlySet<AidKey> = new Set<AidKey>(["Help", "Clear", "RecordBackspace", "TestRequest", "Attn", "SysReq"]);
 
+/** 着いた欄の `fieldExitReqFlag` を上げる移動（ACS）。`Set Cursor` と左右の矢印は上げない（実機で確かめた） */
+const ARRIVAL_ACTIONS: ReadonlySet<string> = new Set(["tab", "backtab", "home", "up", "down"]);
+
+/** **欄を出ずに AID を押せない欄**（ACS `processAIDCode`: 符号付き数値・右寄せ〔RZ・RB〕で、自動 Enter でないもの。ペインの `needsFieldExit` と同じ） */
+function needsFieldExit(f: Field): boolean {
+  if (f.autoEnter === true) return false;
+  return f.signedNumeric === true || f.adjust === "right-zero" || f.adjust === "right-blank";
+}
+
 /**
  * **AID の前の検査**（ACS `PS5250.processAIDCode`。`20260928-hllapi-aid-checks`）。送ってよければ true。
  * カーソル下の欄の MF → 自己点検（違反なら欄頭へ）、画面が変更済みなら ME（違反ならその欄の先頭へ。CA キーでは見ない——`DS5250.isSOH_PF`）。
  * 実機の ACS のコア（ECL は HLLAPI と同じ経路）: MF は CA キーでも止まる、ME は CA キー・未変更の画面では見ない、AID はカーソルの無い欄の MF を見ない
  * （`.aidev/works/20260921-mandatory-check-acs/research.md` F2）。
- * **欄を出ずに送る右寄せ・符号付き数値のエラー 32（0x20。画面の表示は 0020）は見ない**——HLLAPI は「欄を出た」を追跡していない（台帳に残した）。
+ * **欄を出ずに送る右寄せ・符号付き数値のエラー 32（0x20。画面の表示は 0020）も見る**（`Connection.unexited`。`20260928-hllapi-exit-required`。~~HLLAPI は「欄を出た」を追跡していない~~）。
  * **施錠中は見ない**（ペインは施錠を先に見て送らない。ACS の `keyDown` も施錠中の AID を受けない）——施錠の扱いは従来の経路に任せる
  */
 function aidCheck(snapshot: ScreenSnapshot, conn: Connection, key: AidKey): boolean {
   if (AID_UNCHECKED.has(key) || snapshot.keyboardLocked) return true;
   const size = sizeOf(snapshot);
   const here = fieldAt(snapshot, conn.cursor);
+  // ACS の順: MF（0x14・欄頭へ）→ 打ったまま欄を出ていない右寄せ・符号付き数値（0x20・カーソルはそのまま）→ 自己点検（0x15・欄頭へ）
+  if (here && !here.protected && mandatoryFillOnly(snapshot, here)) {
+    conn.cursor = fieldStart(here, size) ?? conn.cursor;
+    return false;
+  }
+  if (here && conn.unexited === here.index && needsFieldExit(here) && here.mdt) return false;
   if (here && fieldViolation(snapshot, here)) {
     conn.cursor = fieldStart(here, size) ?? conn.cursor;
     return false;
@@ -845,6 +873,7 @@ async function sendAid(
   const rc = posToRowCol(conn.cursor, sizeOf(snapshot));
   try {
     const r = await entry.session.sendAid(key, rc ? { cursor: rc } : {});
+    delete conn.unexited; // 送ったら欄の表はホストが書き直す
     const after = r.screen;
     conn.cursor = rowColToPos(after.cursor.row, after.cursor.col, sizeOf(after)) ?? conn.cursor;
     return r.timedOut ? { rc: HRC.PS_BUSY } : ok();
