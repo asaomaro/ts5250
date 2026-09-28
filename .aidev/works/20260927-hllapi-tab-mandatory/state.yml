@@ -1,0 +1,13 @@
+schema: 11
+slug: hllapi-tab-mandatory
+current: deliver
+approved: [requirements, design, tasks, coding, test, review, deliver]
+mode: autonomous
+profile: full
+humanGates: []
+maxSendBacks: 3
+dependsOn: []
+harnessRev: unknown
+backlog: acs-parity.md
+backlogItem: 節目の懸念の残り（測る手段がある分）
+harnessRevDelivered: unknown
