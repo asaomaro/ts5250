@@ -135,6 +135,44 @@ function sendValue(buf: ScreenBuffer, f: InternalField, codec: Codec, form: Fiel
 }
 
 /**
+ * **透過の欄のバイト列**（ACS `FFT5250.getFieldContents`＝欄の全桁の HostPlane。継続欄は全区間の連結）。**1 桁 1 バイト**で、
+ * セルが持つ元のバイト（ワイヤへ書き戻す `hostByte`、無ければ `rawByte`）をそのまま出す——符号化し直すと 0x1C・0x1E のセルが `*`・`;` になる。
+ * 空のセルは 0x00、SO/SI は 0x0E/0x0F、元のバイトの無い全角は 2 桁に 1 バイトずつ割る——どのセルも 1 バイトなので、長さは欄の桁数と必ず一致する（平たい形は位置で区切るため、ここが崩れると後ろの欄がずれる）
+ */
+function transparentBytes(buf: ScreenBuffer, f: InternalField, codec: Codec): Uint8Array {
+  const run = f.continued === undefined ? [f] : buf.continuedRun(f);
+  const out: number[] = [];
+  for (const seg of run) {
+    let tail: number | undefined; // 全角の後半桁に出す 2 バイト目
+    for (let i = 0; i < seg.length; i++) {
+      const c = buf.cellAt(seg.startAddr + i);
+      if (c === null) {
+        out.push(0x00);
+        continue;
+      }
+      if (c.type === "attr") {
+        out.push(c.byte);
+        continue;
+      }
+      const own = c.hostByte ?? c.rawByte;
+      if (own !== undefined) {
+        out.push(own);
+        continue;
+      }
+      if (c.charKind === "so") out.push(0x0e);
+      else if (c.charKind === "si") out.push(0x0f);
+      else if (c.charKind === "dbcs-tail") out.push(tail ?? 0x40);
+      else {
+        const b = [...codec.encode(c.char).bytes].filter((x) => x !== 0x0e && x !== 0x0f);
+        out.push(b[0] ?? 0x40);
+        tail = b[1];
+      }
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/**
  * **未編集の DBCS 欄の送信値**（ホストが書いた原本のまま。`20260927-read-dbcs-fields`）。構造を持たない区間があれば `undefined`。
  * ACS `DS5250.sendAll` の規則を DBCS の欄にも当てる: 連結した後の**末尾の NUL だけ**を落とし（実空白は送る）、途中の NUL は 0x52 では 0x40、ALT ではそのまま。
  * 実機の ACS のコア（DSM の READDBCS）: O 欄の `SO あ SI`＋実空白 8 は 12 バイト、＋NUL 8 は 4 バイト、`SO あ SI NUL A` は 0x52 で `…0f 40 c1`・ALT で `…0f 00 c1`、
@@ -353,6 +391,11 @@ function buildFlatFieldResponse(
   const fields = buf.mdtFields().length > 0 && sendsData(buf, aid) ? buf.orderedFields() : [];
   let substituted = 0;
   for (const f of foldContinued(buf, fields)) {
+    // **透過の欄は生のバイトを欄長ぶん**（ヌルも 0x00 のまま。ACS `DS5250.sendAll` の READ INPUT 系——**原典のみ・未確認**。実機の DSM の 2 回目の読みが待たなかった）
+    if (f.transparent === true) {
+      w.bytes(transparentBytes(buf, f, codec));
+      continue;
+    }
     const width = flatWidth(buf, f);
     // 一旦別の入れ物へ書いてから**欄長ぶんに詰める**——DBCS（1 文字 2 バイト）や
     // センチネル（1 文字 1 バイト）が混ざると文字数では桁が合わないため、
@@ -521,7 +564,12 @@ function buildFieldResponse(
     // 末尾の NUL は落ち、実空白は残る（`FieldDataForm`）。SBCS の埋め込み属性はセンチネル。
     // 継続入力フィールドは全区間を連結した値になる。
     const rawPure = f.dbcsType === "pure" ? rawDbcsSendValue(buf, f, form) : undefined;
-    if (rawPure !== undefined) {
+    if (f.transparent === true) {
+      // **透過の欄は 0x10・長さ（2 バイト）・生のバイト**（ACS `DS5250.sendAll` の READ MDT 系。ヌルも落とさず、符号も畳まない）。
+      // 実機の ACS のコア（DSM の TRANSP）: `AB`＋`X` を打った 8 桁の欄は `10 00 08 c1 c2 e7 00 00 00 00 00`（`scripts/acs-probe/transparent-field.txt`）
+      const bytes = transparentBytes(buf, f, codec);
+      w.u8(0x10).u16(bytes.length).bytes(bytes);
+    } else if (rawPure !== undefined) {
       // 未編集の G 欄は原本のまま、末尾の NUL を落として送る（欄長まで詰めない。ACS の実測は上の `rawDbcsSendValue`）。
       // 奇数長の欄は偶数へ丸める（組を割らない。下の編集した欄と同じ。奇数長の G は SF で断るので、ここへは来ない——`wtd-applier.ts` の `fieldAddFailure`）
       const tmp = new ByteWriter();

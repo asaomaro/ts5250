@@ -144,6 +144,8 @@ export interface InternalField {
   continued?: ContinuedPart;
   /** カーソル送り先の欄番号（FCW 0x88nn 由来。undefined = 画面順どおり） */
   cursorProgression?: number;
+  /** **透過の欄**（FCW 0x84xx 由来。ACS `Field5250.transparentField`）。送るときにヌルも符号も加工せず生のバイトで送る。立つときだけ付与 */
+  transparent?: boolean;
   /**
    * **E（either）欄がいま全角（DBCS）の状態か**（ACS `Field5250.EitherFieldDBCSOn`。`20260927-either-field-mode`）。
    * 欄の中身から毎回求める値ではなく**欄ごとに持ち続ける状態**——ACS は欄を消しても SO/SI を残して DBCS のままにする。
@@ -1074,7 +1076,8 @@ export class ScreenBuffer {
     dbcsType?: DbcsFieldType,
     continued?: ContinuedPart,
     cursorProgression?: number,
-    selfCheck?: SelfCheckKind
+    selfCheck?: SelfCheckKind,
+    transparent = false
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -1096,7 +1099,8 @@ export class ScreenBuffer {
       ...(dbcsType !== undefined ? { dbcsType } : {}),
       ...(continued !== undefined ? { continued } : {}),
       ...(cursorProgression !== undefined ? { cursorProgression } : {}),
-      ...(selfCheck !== undefined ? { selfCheck } : {})
+      ...(selfCheck !== undefined ? { selfCheck } : {}),
+      ...(transparent ? { transparent } : {})
     });
   }
 
