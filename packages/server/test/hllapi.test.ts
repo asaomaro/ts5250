@@ -590,6 +590,93 @@ describe("AID の前の MF・自己点検・ME", () => {
   });
 });
 
+/**
+ * **打ったまま欄を出ていない右寄せ・符号付き数値の欄から AID**（ACS のエラー 0x20。`20260928-hllapi-exit-required`）。実機の ACS のコア（DSM の EXITREQ・
+ * `scripts/acs-probe/exit-required-aid.txt`）: RZ・符号付き数値に 12 と打って Enter は止まる。同じ欄の中・別の欄を経ての Set Cursor・右の矢印でも止まる。Tab・Backtab で着き直せば送れる
+ */
+describe("欄を出ずに AID（エラー 0x20）", () => {
+  const at = (row: number, col: number): number => (row - 1) * 80 + col;
+  /** (3,20) 6 桁の欄（`over`）、(5,20) の素の欄、(7,20) の素の欄 */
+  const screen = (over: Partial<Field> = {}): ScreenSnapshot => {
+    const fields = [
+      field({ index: 1, row: 3, col: 20, length: 6, mdt: true, ...over }),
+      field({ index: 2, row: 5, col: 20, length: 6 }),
+      field({ index: 3, row: 7, col: 20, length: 6 })
+    ];
+    return snap({ rows: 24, cols: 80, fields });
+  };
+  const RZ = { adjust: "right-zero" } as const;
+
+  it.each([
+    ["RZ に打って Enter（E1）", RZ, "12@E"],
+    ["同じ欄の中へ Set Cursor（E2）", RZ, "12", at(3, 21)],
+    ["右の矢印で欄の中を動く（E6a）", RZ, "12@Z@E"],
+    ["符号付き数値（E5）", { signedNumeric: true }, "12@E"],
+    ["右寄せ（RB）", { adjust: "right-blank" }, "12@E"]
+  ] as const)("止まる: %s", async (_n, over, keys, setTo?: number) => {
+    const { deps, sendAid } = await connected({ snapshot: screen(over) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    if (setTo !== undefined) {
+      await call(deps, HF.SEND_KEY, { data: keys });
+      await call(deps, HF.SET_CURSOR, { pos: setTo });
+      expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    } else expect((await call(deps, HF.SEND_KEY, { data: keys })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+  });
+
+  it("別の欄を経て Set Cursor で戻っても止まる（E3）", async () => {
+    const { deps, sendAid } = await connected({ snapshot: screen(RZ) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    await call(deps, HF.SEND_KEY, { data: "12" });
+    await call(deps, HF.SET_CURSOR, { pos: at(7, 20) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    expect(sendAid).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Tab・Backtab で着き直す（E4）", "12@T@B@E"],
+    ["欄の終わりまで打つ", "123456@E"],
+    ["Tab で別の欄へ出て、そこから送る", "12@T@E"]
+  ])("送れる: %s", async (_n, keys) => {
+    const { deps, sendAid } = await connected({ snapshot: screen(RZ) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(deps, HF.SEND_KEY, { data: keys })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalled();
+  });
+
+  it("欄の終わりまで打てば、Set Cursor で欄へ戻しても送れる（ACS は終わりに着いたとき旗を上げる——原典。未測定）", async () => {
+    const { deps, sendAid } = await connected({ snapshot: screen(RZ) });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    await call(deps, HF.SEND_KEY, { data: "123456" });
+    await call(deps, HF.SET_CURSOR, { pos: at(3, 22) });
+    expect((await call(deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+    expect(sendAid).toHaveBeenCalled();
+  });
+
+  it("MF の違反が先（欄頭へ戻す。0x20 はカーソルを動かさない——ACS の順）", async () => {
+    // MF かつ符号付き数値の欄に `12`（画面の値。MF と右寄せは FFW の同じビットなので併せ持てない）。打ってから Enter: MF で止まり欄頭へ戻るので、次の字は欄頭に入る
+    const text = Array.from({ length: 24 }, () => "");
+    text[2] = " ".repeat(19) + "12";
+    const fields = [field({ index: 1, row: 3, col: 20, length: 6, mdt: true, adjust: "mandatory-fill", signedNumeric: true }), field({ index: 2, row: 5, col: 20, length: 6 })];
+    const both = await connected({ snapshot: snap({ rows: 24, cols: 80, text, fields }) });
+    await call(both.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    await call(both.deps, HF.SEND_KEY, { data: "12" });
+    expect((await call(both.deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.FUNCTION_INHIBITED);
+    await call(both.deps, HF.SEND_KEY, { data: "9" });
+    expect(both.setField).toHaveBeenLastCalledWith({ index: 1 }, "92    ");
+  });
+
+  it("自動 Enter の欄・打っていない欄は見ない", async () => {
+    const a = await connected({ snapshot: screen({ ...RZ, autoEnter: true }) });
+    await call(a.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(a.deps, HF.SEND_KEY, { data: "12@E" })).rc).toBe(HRC.SUCCESSFUL);
+    const b = await connected({ snapshot: screen(RZ) });
+    await call(b.deps, HF.SET_CURSOR, { pos: at(3, 20) });
+    expect((await call(b.deps, HF.SEND_KEY, { data: "@E" })).rc).toBe(HRC.SUCCESSFUL);
+  });
+});
+
 describe("日本語（DBCS）", () => {
   it("**全角を含む画面がバイト単位で正しく返る**", async () => {
     const { deps } = await connected({ snapshot: snap({ text: ["サイン"], rows: 1, cols: 10 }) });

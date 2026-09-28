@@ -46,6 +46,12 @@ export function fieldViolation(snapshot: ScreenSnapshot, here: Field): boolean {
   return here.selfCheck !== undefined && body.trim().length > 0 && !selfCheckDigitOk(body, here.selfCheck);
 }
 
+/** MF だけの違反（AID の前の検査で、ACS の順〔MF → 0x20 → 自己点検〕に並べるため。保護欄・非表示欄は `fieldViolation` と同じく見ない） */
+export function mandatoryFillOnly(snapshot: ScreenSnapshot, here: Field): boolean {
+  if (here.protected || here.hidden) return false;
+  return mandatoryFillViolated(snapshot, here);
+}
+
 /**
  * **ME（必須入力）の違反**（ACS `FFT5250.checkMandatoryFieldCheck`）: 画面が変更済み（ACS の `masterMDT`。ペインと同じく「どこかの欄に MDT」で近似）のとき、
  * MDT の無い ME の欄のうち最初のもの（欄の表の順＝番号の順）。保護欄は見ない。**内容ではなく MDT**——打ってから消した欄は通る

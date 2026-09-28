@@ -1124,6 +1124,41 @@ int main(int argc, char *argv[]) {
             logInpBuf(buf);
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
+    } else if (strcmp(what, "EXITREQ") == 0) {
+        /*
+         * **右寄せ・符号付き数値の欄に打って欄を出ずに AID を押したとき（ACS のエラー 0x20）**を、カーソルの置き方を変えて巡ごとに測る画面
+         * （台帳「AID の前の検査の残り」。ACS `PS5250.processAIDCode` の `isFieldExitReqFlag()`・`fieldExited`）。
+         *   (3,10) RZ（FFW 4005）6 桁 / (5,10) 符号付き数値（FFW 4700）6 桁 / (7,10) 素の欄 6 桁。IC は 3,10。READ MDT を 6 回（ログは `[E1]`〜`[E6]`）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x05, 0x20, 0x00, 0x06,
+            0x11, 0x05, 0x09, 0x1D, 0x47, 0x00, 0x20, 0x00, 0x06,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x03, 0x0A
+        };
+        static char etags[6][8];
+        int k;
+        for (k = 0; k < 6; k++) {
+            sprintf(etags[k], "[E%d] ", k + 1);
+            tag = etags[k];
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 右寄せ・符号付き数値)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。
