@@ -106,9 +106,15 @@ describe("カーソルの形状と明滅", () => {
       props: { snapshot: snap([dbcs]), edits: new Map([[1, "あいう"]]), focused: true },
       attachTo: document.body
     });
-    (w.find("input.grid-input").element as HTMLInputElement).focus();
+    const el = w.find("input.grid-input").element as HTMLInputElement;
+    el.focus();
     await nextTick();
-    // 欄 3 桁目は SO、「あ」は 4〜5 桁目 → left 3ch / 幅 2ch
+    // O 欄はカーソルを SO に置ける（ACS。`20260928-o-field-cells`）: 欄 3 桁目の SO → left 2ch / 幅 1ch
+    expect(style(w, ".cursor")).toContain("left: 2ch");
+    expect(style(w, ".cursor")).toContain("width: 1ch");
+    // 右へ 1 つで「あ」（4〜5 桁目）→ left 3ch / 幅 2ch
+    await w.find("input.grid-input").trigger("keydown", { key: "ArrowRight" });
+    await nextTick();
     expect(style(w, ".cursor")).toContain("left: 3ch");
     expect(style(w, ".cursor")).toContain("width: 2ch");
     w.unmount();

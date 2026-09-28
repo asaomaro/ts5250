@@ -162,9 +162,9 @@ describe("Field Exit の「欄の先頭」は型で決まる（B-S1）", () => {
     expect(opmsg(w)).toBe(norm(MSG_MANDATORY_ENTER_EXIT));
   });
 
-  it("**O（open）: 先頭は先頭のまま**（Tab は SO を飛ばさない）——ME・MDT ありで 0021", async () => {
+  it("**O（open）: 先頭は SO の桁**（Tab は SO を飛ばさない。O 欄はカーソルを SO に置ける——`20260928-o-field-cells`）——ME・MDT ありで 0021", async () => {
     const { w, inputs } = await dbcsPane("open", { mandatoryEnter: true, mdt: true });
-    await at(inputs[0]!, 1);
+    await at(inputs[0]!, 0);
     await fieldExit();
     expect(opmsg(w)).toBe(norm(MSG_MANDATORY_ENTER_EXIT));
   });

@@ -1244,6 +1244,48 @@ export class ScreenBuffer {
     return f;
   }
 
+  /**
+   * **明示の並びの値を構造どおりのセルへ置く**（`setFieldValue` から）。桁が欄を越えれば FIELD_OVERFLOW（値の長さは出さない）。
+   * MDT は `setFieldValue` と同じく並びの先頭の区間に立てる
+   */
+  private setFieldCells(field: InternalField, value: string): void {
+    const cells: InternalCell[] = [];
+    let inShift = false;
+    let lead: number | undefined; // 並びの中の生バイトは 2 つで全角 1 字（未編集の原本の書き戻し）
+    for (const ch of value) {
+      if (isRawSentinel(ch)) {
+        const b = sentinelByte(ch);
+        if (b === 0x0e || b === 0x0f) {
+          // 組にならなかった前半の生バイトは捨てずに 1 セルで置く（ACS のセルも割れたバイトをそのまま持つ）
+          if (lead !== undefined) cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "sbcs", rawByte: lead });
+          cells.push({ type: "char", char: " ", charKind: b === 0x0e ? "so" : "si" });
+          inShift = b === 0x0e;
+          lead = undefined;
+        } else if (inShift && lead === undefined) lead = b;
+        else if (inShift) {
+          cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "dbcs-lead", rawByte: lead! }, { type: "char", char: "", charKind: "dbcs-tail", rawByte: b });
+          lead = undefined;
+        } else cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "sbcs", rawByte: b });
+      } else if (isAttrSentinel(ch)) cells.push({ type: "attr", byte: sentinelByte(ch) });
+      // 並びの中でも全角だけを 2 セルにする。半角（NUL を空白にした桁など）は 1 セル——2 セルにすると桁が倍になる（独立レビューの指摘）
+      else if (inShift && isFullWidth(ch)) {
+        cells.push({ type: "char", char: ch, charKind: "dbcs-lead" }, { type: "char", char: "", charKind: "dbcs-tail" });
+      } else cells.push({ type: "char", char: ch, charKind: "sbcs" });
+    }
+    // 末尾の半角空白（編集の詰め物）は空のセルにする（ACS は空きを NUL のまま持ち、送るときに末尾の NUL を落とす）
+    while (cells.length > 0) {
+      const last = cells[cells.length - 1]!;
+      if (last !== null && last.type === "char" && last.charKind === "sbcs" && last.char === " ") cells.pop();
+      else break;
+    }
+    if (cells.length > field.length) {
+      const { row, col } = this.rowColOf(field.startAddr);
+      throw new As400Error("FIELD_OVERFLOW", `field at (${row},${col}) accepts at most ${field.length} bytes`);
+    }
+    for (let i = 0; i < field.length; i++) this.cells[field.startAddr + i] = cells[i] ?? null;
+    (this.continuedRun(field)[0] ?? field).mdt = true;
+  }
+
   fieldAt(row1: number, col1: number): InternalField {
     const addr = this.addrOf(row1, col1);
     const f = this.fields.find((x) => x.startAddr === addr);
@@ -1259,6 +1301,18 @@ export class ScreenBuffer {
     if ((field.ffw & FFW.BYPASS) !== 0) {
       const { row, col } = this.rowColOf(field.startAddr);
       throw new As400Error("FIELD_PROTECTED", `field at (${row},${col}) is protected`);
+    }
+    // **明示の並び（SO/SI の印を含む値。O 欄の編集——`20260928-o-field-cells`）はセルを構造どおりに置く**:
+    // 印は SO/SI のセル、全角は前半・後半の 2 セル、ほかは 1 セル、残りは空（NUL）。ホストが書いた DBCS の欄と同じ形になり、
+    // 送信は未編集の DBCS の欄と同じ道（`dbcsRawFieldValue`・`rawDbcsSendValue`。ACS で実測済みの規則）を通る
+    // （欄の種類は問わない——ホストが A 型の欄に置いた SO/SI 入りの原本〔snapshot の `dbcsContent`〕も同じ形で戻る）
+    if ([...value].some((c) => isRawSentinel(c) && (sentinelByte(c) === 0x0e || sentinelByte(c) === 0x0f))) {
+      this.setFieldCells(field, value);
+      if (field.dbcsType === "either") {
+        if (opts?.eitherDbcsOn !== undefined) field.eitherDbcsOn = opts.eitherDbcsOn;
+        else noteEitherMode(field, [...value]);
+      }
+      return;
     }
     // **符号位置で数える。** センチネルは第 15 面（サロゲート対＝2 コード単位）なので、
     // `value.length` で数えると桁数を過大に見積もって FIELD_OVERFLOW になる。

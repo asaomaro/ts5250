@@ -489,10 +489,23 @@ export function buildReadImmediateResponse(
 function writeValue(w: ByteWriter, value: string, codec: Codec, noShift = false): number {
   let substituted = 0;
   let run = "";
+  // **明示の並び**（SO/SI の生バイトのセンチネルで区切られた全角の並び。O 欄の編集の値——web-ui の `SO_MARK`/`SI_MARK`。`20260928-o-field-cells`）:
+  // SO の印と SI の印の間は SO/SI を付けずに 2 バイトの組で書く（印そのものが SO/SI のバイトになる）
+  let inShift = false;
   const flushRun = (): void => {
     if (run.length > 0) {
       const enc = codec.encode(run);
       substituted += enc.substituted;
+      if (inShift) {
+        // 1 字ずつ書く: 全角は SO/SI を外した 2 バイト、半角（並びの中に置かれたもの。ACS のセルも持ちうる）は 1 バイトのまま。
+        // 並び全体を 1 度に符号化すると、半角が混ざったとき codec が並びの途中に SO/SI を足す（独立レビューの指摘）
+        for (const ch of run) {
+          const b = codec.encode(ch).bytes;
+          w.bytes(b.length >= 2 && b[0] === SO && b[b.length - 1] === SI ? b.subarray(1, b.length - 1) : b);
+        }
+        run = "";
+        return;
+      }
       // **純 DBCS の欄（G）は SO/SI を付けない**（ACS はこの欄の生の 2 バイト組をそのまま出す）。`encode` は全角の連なりを SO…SI で挟むので外す。
       // 全角だけの連なりのときだけ（半角が混ざって SO/SI が途中に入るものは触らない＝そもそも G には入らない）
       const b = enc.bytes;
@@ -507,7 +520,10 @@ function writeValue(w: ByteWriter, value: string, codec: Codec, noShift = false)
   for (const ch of value) {
     if (isRawSentinel(ch)) {
       flushRun();
-      w.u8(sentinelByte(ch));
+      const b = sentinelByte(ch);
+      w.u8(b);
+      if (b === SO) inShift = true;
+      else if (b === SI) inShift = false;
     } else {
       run += ch;
     }

@@ -506,7 +506,9 @@ describe("EmulatorPane 自由カーソル（非入力セルへの移動）", () 
     const el = input.element as HTMLInputElement;
     await input.trigger("focus");
     expect(el.value.replace(/ +$/, "")).toBe(" あいう"); // 列ビュー（SO/SI がスペース。末尾は欄長までパディング）
-    expect(el.selectionStart).toBe(1); // あ の前（SO=桁0 をスキップ）
+    expect(el.selectionStart).toBe(0); // 欄の先頭＝SO（O 欄はカーソルを SO に置ける。ACS——`20260928-o-field-cells`）
+    await input.trigger("keydown", { key: "ArrowRight" });
+    expect(el.selectionStart).toBe(1); // あ の前
     await input.trigger("keydown", { key: "ArrowRight" });
     expect(el.selectionStart).toBe(2); // い の前（1 論理文字・reconcileFocus に壊されない）
     await input.trigger("keydown", { key: "ArrowRight" });

@@ -34,8 +34,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
  */
 const PRODUCERS = [
   { file: "packages/tn5250/src/screen/field-validate.ts", count: 1, what: "型・コードページの拒否（`where()`）" },
-  // **2 か所**: `FIELD_PROTECTED` と、D5 で足した `FIELD_OVERFLOW`
-  { file: "packages/tn5250/src/screen/buffer.ts", count: 2, what: "5250 の FIELD_PROTECTED / FIELD_OVERFLOW" },
+  // **3 か所**: `FIELD_PROTECTED` と、D5 で足した `FIELD_OVERFLOW`、O 欄の明示の並びの `FIELD_OVERFLOW`（`setFieldCells`。`20260928-o-field-cells`）
+  { file: "packages/tn5250/src/screen/buffer.ts", count: 3, what: "5250 の FIELD_PROTECTED / FIELD_OVERFLOW ×2" },
   { file: "packages/tn3270/src/session/session.ts", count: 1, what: "3270 の FIELD_PROTECTED" },
   { file: "packages/server/src/tn3270-adapt.ts", count: 1, what: "3270 の欄解決（server 側）" },
   // D5 が足したもう 1 つ（DBCS 欄の桁あふれ）

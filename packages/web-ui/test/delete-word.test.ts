@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -173,11 +174,12 @@ describe("Delete Word（ScreenGrid）", () => {
   it("**DBCS（O）: 全角は 1 字ずつ・半角の語は語頭で語＋空白**（実機 d1〜d5。`AA あい BB` の列ビュー: AA␠⟦あい⟧␠BB）", async () => {
     const fields = [fld({ index: 1, col: 10, length: 12, dbcsType: "open", value: "AA あい BB" })];
     const cases: [string, number, string][] = [
-      ["d1 先頭の語", 0, "あい BB"],
-      ["d2 全角の先頭", 4, "AA い BB"],
-      ["d3 全角の 2 字目", 5, "AA あ BB"],
-      ["d4 全角の前の空白", 2, "AAあい BB"],
-      ["d5 最後の語", 8, "AA あい"]
+      // O 欄の値は SO/SI の印を持つ（`20260928-o-field-cells`）。論理値は実測のまま
+      ["d1 先頭の語", 0, o("{あい} BB")],
+      ["d2 全角の先頭", 4, o("AA {い} BB")],
+      ["d3 全角の 2 字目", 5, o("AA {あ} BB")],
+      ["d4 全角の前の空白", 2, o("AA{あい} BB")],
+      ["d5 最後の語", 8, o("AA {あい}")]
     ];
     for (const [name, caret, expected] of cases) {
       document.body.replaceChildren();

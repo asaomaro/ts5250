@@ -1,5 +1,5 @@
 import type { Field } from "@ts5250/tn5250";
-import { isDbcsOnly, isRawSentinel } from "@ts5250/tn5250/browser";
+import { isDbcsOnly, isRawSentinel, rawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
 import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
 import { isKatakana290InvalidChar } from "@ts5250/ebcdic/katakana";
 
@@ -105,6 +105,12 @@ export function dbcsByteLength(value: string, session?: SessionKind, noShift = f
     for (const ch of value) n += !isRawSentinel(ch) && isWideForDbcs(ch) ? 2 : 1;
     return n;
   }
+  // **明示の並び**（SO/SI の印を含む O 欄の値）: 印は 1 バイト、全角は 2 バイト、ほかは 1 バイト。暗黙の SO/SI は足さない
+  if (hasShiftMarks(value)) {
+    let n = 0;
+    for (const ch of value) n += isWideForDbcs(ch) ? 2 : 1;
+    return n;
+  }
   let bytes = 0;
   let inDbcs = false;
   for (const ch of value) {
@@ -154,6 +160,18 @@ export function isWideForDbcs(ch: string): boolean {
   return !isRawSentinel(ch) && isFullWidth(ch);
 }
 
+/**
+ * **明示の SO / SI の印**（O 欄の編集の値。`20260928-o-field-cells`）。ACS の O 欄は SO・SI をセルとして持ち、全角の並びが空になっても残す・
+ * 挿入で並びを分ける（`PS5250.insertChar` / `processDeleteChar`）。論理値から SO/SI を付け直す形ではその状態を表せないので、O 欄の編集の値は
+ * SO・SI を生バイトのセンチネル（0x0E・0x0F）として並びの中に持つ。**値に印が 1 つでもあれば明示の並び**として扱い、暗黙の SO/SI を足さない
+ * （`dbcsByteLength`・`dbcsViewLayout`・`columnView`、コアの送信の `writeValue` が同じ規則）
+ */
+export const SO_MARK = rawSentinel(0x0e);
+export const SI_MARK = rawSentinel(0x0f);
+export const isShiftMark = (ch: string): boolean => isRawSentinel(ch) && (sentinelByte(ch) === 0x0e || sentinelByte(ch) === 0x0f);
+/** 値が明示の並び（SO/SI の印を含む）か */
+export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some(isShiftMark);
+
 /** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
 export function viewChar(ch: string): string {
   return isRawSentinel(ch) ? " " : ch;
@@ -166,6 +184,8 @@ export function viewChar(ch: string): string {
  * これは表示専用。送信値は純論理値のまま（codec が本物の SO/SI を付与）。
  */
 export function columnView(logical: string, soMark = " ", siMark = " "): string {
+  // 明示の並び: 印を SO/SI の桁として描き、暗黙の SO/SI は足さない
+  if (hasShiftMarks(logical)) return [...logical].map((ch) => markView(ch, soMark, siMark)).join("");
   let out = "";
   let inDbcs = false;
   for (const ch of logical) {
@@ -183,12 +203,18 @@ export function columnView(logical: string, soMark = " ", siMark = " "): string 
   return out;
 }
 
+/** 明示の並びの 1 字の列ビュー（SO/SI の印はその印、ほかは `viewChar`） */
+function markView(ch: string, soMark: string, siMark: string): string {
+  if (isShiftMark(ch)) return sentinelByte(ch) === 0x0e ? soMark : siMark;
+  return viewChar(ch);
+}
+
 /** DBCS 列ビューのレイアウト（view 文字列と桁⇔view の各種マッピング）。 */
 export interface DbcsViewLayout {
   view: string;
   /** 論理カーソル lc（0..len）→ 列ビュー内の caret 位置 */
   caretOf: (lc: number) => number;
-  /** 列ビューの caret 位置 → 最も近い論理カーソル（SO/SI はスキップ） */
+  /** 列ビューの caret 位置 → 最も近い論理カーソル（暗黙の並びでは SO/SI はスキップ。明示の並び〔O 欄〕は印も論理の要素なので止まる） */
   logicalOf: (viewCaret: number) => number;
   /** 列ビューの caret 位置 → その位置**以降**の最初の論理カーソル（SO/SI はスキップ）。
    *  logicalOf（最近傍スナップ）は SI 桁で左右が同点になり左へ倒れるため、
@@ -207,13 +233,20 @@ export interface DbcsViewLayout {
 /**
  * DBCS 欄の編集用レイアウト。純論理値から列ビュー文字列と、論理カーソル⇔列ビュー caret の
  * 相互マッピングを作る。SO/SI は半角スペースとして列ビューに入るが、caret は論理境界にしか
- * 止まらない（＝カーソル移動時に SO/SI をスキップする）。
+ * 止まらない（＝カーソル移動時に SO/SI をスキップする）。**明示の並び（O 欄の印入りの値）は印が論理の要素なので、caret は SO/SI の桁にも止まる**
+ * （ACS の O 欄と同じ。`20260928-o-field-cells`）。
  */
 export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): DbcsViewLayout {
   let view = "";
   let inDbcs = false;
   const logToView: number[] = []; // logToView[li] = logical[li] の文字が入る view インデックス
+  const explicit = hasShiftMarks(logical); // 明示の並び: 印が SO/SI の桁（暗黙の SO/SI を足さない）
   for (const ch of logical) {
+    if (explicit) {
+      logToView.push(view.length);
+      view += markView(ch, soMark, siMark);
+      continue;
+    }
     const wide = isWideForDbcs(ch);
     if (wide && !inDbcs) {
       view += soMark; // SO
@@ -225,7 +258,7 @@ export function dbcsViewLayout(logical: string, soMark = " ", siMark = " "): Dbc
     logToView.push(view.length);
     view += viewChar(ch); // センチネルは空白（桁は保つが制御コードは見せない）
   }
-  if (inDbcs) view += siMark; // 末尾 SI
+  if (inDbcs && !explicit) view += siMark; // 末尾 SI
   const len = logToView.length;
   // 末尾カーソルは「最終文字の直後」。DBCS で終わる場合は末尾 SI の前に置く（SI を飛び越えない）。
   const endCaret = len > 0 ? logToView[len - 1]! + 1 : 0;

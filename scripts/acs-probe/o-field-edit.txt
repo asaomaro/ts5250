@@ -1,0 +1,167 @@
+# **O（DBCS open）欄の編集をセルの並びで測る**（ACS のコア・社内機。`20260928-o-field-cells`）。
+# 原典 `PS5250.inputChar` / `insertChar` / `processDeleteChar` / `processBackspace` / `eraseToEOF_Work` の読みから作った表（`packages/web-ui/src/composables/oFieldCells.ts`）を、
+# ホストが受け取ったバイト列（/tmp/dscmd.log の `[O1]`〜`[O3]`）で確かめる。画面は DSM の OEDIT（(3,10)〜(17,10) に O 12 桁を 8 つ。データは 10〜21 桁）。
+# 各行の終わりのコメントは、表から立てた予測のバイト列。エラーの行は Reset してから次へ。測った後に DLTPGM と IFS の /tmp/dscmd.c・/tmp/dscmd.log を消す。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('OEDIT')[enter]
+settle 3000
+dump a0
+
+# ===== 1 巡目: 上書き =====
+# 1) ABCD → 先頭に あ（S S S S → SO あ SI）            予測 0e44810f
+setcursor 3,10
+keys ABCD
+setcursor 3,10
+keys あ
+# 2) あ → SI の上に い（I S S → あ い SI）              予測 0e448144820f
+setcursor 5,10
+keys あ
+setcursor 5,13
+keys い
+# 3) あ → SI の上に X（I S → SI X）                     予測 0e44810fe7
+setcursor 7,10
+keys あ
+setcursor 7,13
+keys X
+# 4) あい → あ の上に X（D、2 つ後ろが D → SI X 空白 SO） 予測 0e0fe7400e0f
+setcursor 9,10
+keys あい
+setcursor 9,11
+keys X
+# 5) あ → SO の上に X（O、次が D → X 空白 SO）            予測 e7400e0f
+setcursor 11,10
+keys あ
+setcursor 11,10
+keys X
+# 6) AB → 先頭に あ（S S S S）                           予測 0e44810f
+setcursor 13,10
+keys AB
+setcursor 13,10
+keys あ
+# 7) 11 字 → 11 桁目に あ（S S E → 0005）               予測 c1c2c3c4c5c6c7c8c9d1d2
+setcursor 15,10
+keys ABCDEFGHIJK
+setcursor 15,20
+keys あ
+settle 300
+dump e1-7
+keys [reset]
+# 8) あ X → SO の上に い（O D → SO い）                  予測 0e44820fe7
+setcursor 17,10
+keys あX
+setcursor 17,10
+keys い
+settle 300
+dump r1
+keys [enter]
+settle 2500
+
+# ===== 2 巡目: 挿入 =====
+# 1) AB → B の上に挿入 あ（S → SO あ SI）                予測 c10e44810fc2
+setcursor 3,10
+keys AB
+setcursor 3,11
+keys [insert]あ[insert]
+# 2) あ B → B の上に挿入 い（(i) 別の並び）              予測 0e44810f0e44820fc2
+setcursor 5,10
+keys あB
+setcursor 5,14
+keys [insert]い[insert]
+# 3) あい → あ の上に挿入 X（(ii) SI X SO）              予測 0e0fe70e448144820f
+setcursor 7,10
+keys あい
+setcursor 7,11
+keys [insert]X[insert]
+# 4) あ → SI の上に挿入 い（I → あ い SI）              予測 0e448144820f
+setcursor 9,10
+keys あ
+setcursor 9,13
+keys [insert]い[insert]
+# 5) あ → SO の上に挿入 X（O → X SO あ SI）             予測 e70e44810f
+setcursor 11,10
+keys あ
+setcursor 11,10
+keys [insert]X[insert]
+# 6) あ → SI の上に挿入 X（I → SI X）                   予測 0e44810fe7
+setcursor 13,10
+keys あ
+setcursor 13,13
+keys [insert]X[insert]
+# 7) 12 字 → 挿入 X（空きなし → 0012）                  予測 c1c2c3c4c5c6c7c8c9d1d2d3
+setcursor 15,10
+keys ABCDEFGHIJKL
+setcursor 15,11
+keys [insert]X
+settle 300
+dump e2-7
+keys [reset]
+# 8) あ → SO の上に挿入 い（O → SO い あ SI）            予測 0e448244810f
+setcursor 17,10
+keys あ
+setcursor 17,10
+keys [insert]い[insert]
+settle 300
+dump r2
+keys [enter]
+settle 2500
+
+# ===== 3 巡目: 削除・後退・消去 =====
+# 1) あ → あ で Delete（SO SI が残る）                   予測 0e0f
+setcursor 3,10
+keys あ
+setcursor 3,11
+keys [delete]
+# 2) あ → SO で Delete（単独の SO → 0065）               予測 0e44810f
+setcursor 5,10
+keys あ
+setcursor 5,10
+keys [delete]
+settle 300
+dump e3-2
+keys [reset]
+# 3) あ X → X で Backspace（直前が単独の SI → 0065）      予測 0e44810fe7
+setcursor 7,10
+keys あX
+setcursor 7,14
+keys [backspace]
+settle 300
+dump e3-3
+keys [reset]
+# 4) あい → い で Backspace（直前の全角 2 桁）            予測 0e44820f
+setcursor 9,10
+keys あい
+setcursor 9,13
+keys [backspace]
+# 5) AB あ → SO から Erase EOF（並びごと消える）         予測 c1c2
+setcursor 11,10
+keys ABあ
+setcursor 11,12
+keys [eraseeof]
+# 6) あいう → い から Erase EOF（SI を置く）             予測 0e44810f
+setcursor 13,10
+keys あいう
+setcursor 13,13
+keys [eraseeof]
+# 7) あ → SI で Delete（次が SO でない → 0065）          予測 0e44810f
+setcursor 15,10
+keys あ
+setcursor 15,13
+keys [delete]
+settle 300
+dump e3-7
+keys [reset]
+# 8) あ｜い（別の並び）→ 継ぎ目の SI で Delete（SI SO を消す） 予測 0e448144820f
+setcursor 17,10
+keys あ
+setcursor 17,14
+keys い
+setcursor 17,13
+keys [delete]
+settle 300
+dump r3
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

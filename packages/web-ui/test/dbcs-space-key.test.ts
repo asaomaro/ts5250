@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -82,6 +83,7 @@ describe("DBCS の欄の Space キー", () => {
   it("**O（open）: Space は SBCS の空白のまま**（対象外）", async () => {
     const { type, value } = await grid(fld("open"));
     await type("あ", " ", "い");
-    expect(value()).toBe("あ い");
+    // SI の上の半角は SI の後ろへ（ACS の上書きの表）。後ろの い は別の並び（`20260928-o-field-cells`）
+    expect(value()).toBe(o("{あ} {い}"));
   });
 });

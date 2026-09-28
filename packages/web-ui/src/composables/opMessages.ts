@@ -83,6 +83,10 @@ export const MSG_PRINTER_SERVICE_HELD =
 
 /** ACS: "No room to insert data."（挿入ペーストが欄に収まらない。何も書き換えない） */
 export const MSG_NO_ROOM = "挿入する余地がありません";
+/**
+ * O 欄で、単独の SO/SI の上で Delete・その直後で Backspace を押した、最後の桁の SI の上に半角を打った（ACS のエラー 0065。`20260928-o-field-cells`）
+ */
+export const MSG_SHIFT_POSITION = "この位置（全角の区切り）では操作できません";
 
 /**
  * ACS のエラー 0022（`PS5250.processFieldPlusMinusAndExit`）: Field− は符号付き数値・数値専用の欄でしか使えない
@@ -113,6 +117,8 @@ export const MSG_SYSREQ_KEY_INVALID = "システム要求の行では実行キ�
 export function isOperatorError(text: string): boolean {
   return (
     text === MSG_NO_ROOM ||
+    // O 欄の SO/SI の位置の 0065（ACS も `setErrorCode` でエラー状態に入る。`20260928-o-field-cells`）
+    text === MSG_SHIFT_POSITION ||
     text === MSG_FIELD_MINUS_INVALID ||
     text === MSG_PROTECTED ||
     text === MSG_DUP_DISALLOWED ||

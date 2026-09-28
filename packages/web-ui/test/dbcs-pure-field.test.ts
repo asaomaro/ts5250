@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { o } from "./helpers/oMarks.js";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
@@ -284,8 +285,9 @@ describe("DBCS の欄の Erase EOF・Field Exit・Field± のあと", () => {
     await at(1); // 先頭の字の頭（SO の次）
     (w.vm as unknown as Grid).eraseEof();
     await nextTick();
-    for (let i = 0; i < 9; i++) await key("ArrowRight");
+    // O 欄は並びの途中からの Erase EOF で SI を置く（ACS `eraseToEOF_Work`。`20260928-o-field-cells`）: SO・SI・空き 8。カーソルは SI の上
+    for (let i = 0; i < 8; i++) await key("ArrowRight");
     await key("X");
-    expect(value(), "10 バイトの欄の最後の桁（10 桁目）に入る").toBe(" ".repeat(9) + "X");
+    expect(value(), "10 バイトの欄の最後の桁（10 桁目）に入る").toBe(o("{}" + " ".repeat(7) + "X"));
   });
 });
