@@ -353,8 +353,9 @@ describe("WDSF の頭の検査（ACS の実測）", () => {
     expect(r.senseCode).toBe(0x10050121);
   });
   // ~~0x52 も否定応答にしない~~——中身の無い 0x52 は ACS でも 0x10050110（`unrestrictWindowCursor` は中身 2 バイトだけを受ける。`20260928-window-unrestrict`。`window-unrestrict.test.ts`）
-  it("ACS が受ける型（0x54・0x55）は、当 PJ が効かせなくても否定応答にしない", () => {
-    for (const t of [0x54, 0x55]) {
+  // ~~0x54~~ は中身を効かせるようになった（`20260928-wdsf-write-data`。形の分からない 0x54 は ACS も否定応答 0x10050140）
+  it("ACS が受ける型（0x55）は、当 PJ が効かせなくても否定応答にしない", () => {
+    for (const t of [0x55]) {
       const { r, row6 } = on([ORDER.WDSF, 0x00, 0x04, 0xd9, t]);
       expect(r.senseCode, `0x${t.toString(16)}`).toBeUndefined();
       expect(row6).toBe("NEXT");

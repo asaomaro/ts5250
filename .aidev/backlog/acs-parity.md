@@ -973,7 +973,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **窓を作ると窓の範囲（位置から幅＋6 桁・深さ＋2 行）の罫線が消える**、**0x5F は罫線を残す**、**0x61 は指定の矩形だけを消す**。当 PJ は罫線に穴（`GuiGridLine.holes`）を持たせ、画面は線分を穴で削る
   （`packages/web-ui/src/components/ScreenGrid.vue` の `gridSegments`）。~~0x5F・0x61 で罫線を全部消す~~。ブラウザ（`scripts/verify-browser-grid-lifetime.mjs`）7 巡とも一致（2 回）。単体 6 件・mutation 6 通り検出。
   原典と S9R167D の実測の食い違いは、置き場（残る）と面（CLEAR UNIT で捨てるがレコードの終わりに戻る）の 2 段で解けた。残り: 画面の大きさが変わるときは ACS は置き場も捨てる（このセッションは 27x132 にならず未測定）。
-- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）: ~~罫線の寿命~~（上の `[x]`）。
+- [x] **WDSF 0x54（欄へのデータの書き込み）**（下の項目から割った）。**完了（`20260928-wdsf-write-data`・PR #451）**: EBCDIC の形（flag 0x80）を ACS `ENPTUI5250.processWriteData` どおりに効かせた
+  （欄の先頭で、欄〔継続欄は区間の合計〕に収まれば欄を消して〔MDT はそのまま〕書く・継続でない欄は番地が進む・継続欄は区間の長さで割る・欄の先頭でない／分からない flag は 0x10050140・長すぎれば 0x10050141。
+  `packages/tn5250/src/protocol/wtd-applier.ts` の `writeFieldData`）。実機の ACS のコア（DSM の WRITEDATA・`scripts/acs-probe/write-data.txt`）と当 PJ のコア（`scripts/verify-write-data.mjs` pass=5・2 回）で一致。
+  単体 4 件・mutation 6 通り検出。残り: CCSID の形（0x40）・DBCS の継続欄の区間の SO/SI の閉じ直し（未測定）。
+- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）: ~~罫線の寿命~~・~~0x54~~（上の `[x]`）。
   **罫線の原典の追記（2026-09-28）**: WDSF 0x60 の罫線は `ENPTUI5250.processDefineGrid` が罫線の置き場（`changeGridBuffer`）に入れ、CLEAR UNIT の `discardGridPlane` が捨てるのは
   `PS5250.GridPlane`（WSF の grid write/merge の面）だけ。ENPTUI の構造体は `isENPTUIConstructOnPS()` のときだけ `removeAllENPTUIConstructs` で捨てる——GUI がどちらから描くかを確かめれば、
   S9R167D の実測（CLEAR UNIT の後も表示）と原典の食い違いが解ける。`acs-probe` は `ECLPS.GridPlane`（public）を読めるが、ENPTUI 側の置き場は読めていない。

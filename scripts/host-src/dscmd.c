@@ -1292,6 +1292,55 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "WRITEDATA") == 0) {
+        /*
+         * **WDSF 0x54（欄へのデータの書き込み。EBCDIC の形・flag 0x80）**を測る画面（台帳「WDSF の中の否定応答」の 0x54。ACS `ENPTUI5250.processWriteData`）。
+         * 画面: (5,10) 10 桁の欄（初期値 `OLDVALUE12`）/ (7,10)・(8,10)・(9,10) 4 桁ずつの継続欄 / (20,10) 6 桁の欄。巡ごと（ログは `[D1]`〜`[D4]`）:
+         *   D1 (5,10) で `NEW` を書き、同じ WTD で続けて `Z`（書いた後の番地から）/ D2 (5,11)（欄の先頭でない）で書く / D3 (5,10) で 11 桁を書く /
+         *   D4 (7,10) の継続欄に `ABCDEFGHIJ`
+         */
+        static const unsigned char base[] = {
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x0A, 0xD6, 0xD3, 0xC4, 0xE5, 0xC1, 0xD3, 0xE4, 0xC5, 0xF1, 0xF2,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x01, 0x20, 0x00, 0x04,
+            0x11, 0x08, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x03, 0x20, 0x00, 0x04,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x86, 0x02, 0x20, 0x00, 0x04,
+            0x11, 0x14, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06
+        };
+        static const unsigned char d1[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x09, 0xD9, 0x54, 0x80, 0x00, 0xD5, 0xC5, 0xE6, 0xE9 };
+        static const unsigned char d2[] = { 0x11, 0x05, 0x0B, 0x15, 0x00, 0x09, 0xD9, 0x54, 0x80, 0x00, 0xD5, 0xC5, 0xE6 };
+        static const unsigned char d3[] = { 0x11, 0x05, 0x0A, 0x15, 0x00, 0x11, 0xD9, 0x54, 0x80, 0x00, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xD1, 0xD2 };
+        static const unsigned char d4[] = { 0x11, 0x07, 0x0A, 0x15, 0x00, 0x10, 0xD9, 0x54, 0x80, 0x00, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xD1 };
+        static const unsigned char ic[] = { 0x13, 0x14, 0x0A };
+        static char dtags[4][8];
+        unsigned char w[160];
+        int k, n;
+        for (k = 0; k < 4; k++) {
+            sprintf(dtags[k], "[D%d] ", k + 1);
+            tag = dtags[k];
+            n = 0; w[n++] = 0x00; w[n++] = 0x00;
+            memcpy(w + n, base, sizeof(base)); n += sizeof(base);
+            if (k == 0) { memcpy(w + n, d1, sizeof(d1)); n += sizeof(d1); }
+            if (k == 1) { memcpy(w + n, d2, sizeof(d2)); n += sizeof(d2); }
+            if (k == 2) { memcpy(w + n, d3, sizeof(d3)); n += sizeof(d3); }
+            if (k == 3) { memcpy(w + n, d4, sizeof(d4)); n += sizeof(d4); }
+            memcpy(w + n, ic, sizeof(ic)); n += sizeof(ic);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)w, (Q_Bin4)n, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 WDSF 0x54)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "SELFCHK") == 0) {
         /*
          * **自己点検欄（CHECK(M10)）で Field Exit と Tab を比べる画面**（`20260921-field-exit-checks` の節目 10 の独立点検 B-S5）。
