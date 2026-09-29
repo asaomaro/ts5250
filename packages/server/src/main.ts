@@ -81,6 +81,8 @@ interface Args {
   idleTimeoutMs: number | "never" | undefined;
   /** `--reconnect-grace`（ms）。未指定は `DEFAULT_RECONNECT_GRACE_MS` */
   reconnectGraceMs: number | undefined;
+  /** `--stalled-grace`（ms）。未指定は `DEFAULT_STALLED_GRACE_MS` */
+  stalledGraceMs: number | undefined;
 }
 
 /**
@@ -126,9 +128,23 @@ export function parseIdleTimeout(raw: string | undefined): number | "never" {
  * 長くするほど、タブが戻ったとき同じセッションに繋ぎ直せる——代わりに、戻らないタブの装置とジョブをその間ホストで掴んだままにする。
  */
 export function parseReconnectGrace(raw: string | undefined): number {
+  return parseGraceMinutes(raw, "--reconnect-grace");
+}
+
+/**
+ * `--stalled-grace` の値を ms へ（単位・範囲は `--reconnect-grace` と同じ）。
+ *
+ * **心拍が途絶えて切れたとき**（放置したタブが止まった見込み）の猶予（既定 10 分）。閉じたタブ・回線の瞬断の猶予（`--reconnect-grace`）より
+ * 短くはならない。タブを閉じた場合の保持は延ばさないので、閉じたタブがホストのジョブ・装置・枠を長く掴む副作用は増えない。
+ */
+export function parseStalledGrace(raw: string | undefined): number {
+  return parseGraceMinutes(raw, "--stalled-grace");
+}
+
+function parseGraceMinutes(raw: string | undefined, flag: string): number {
   const minutes = Number(raw);
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
-    throw new Error(`--reconnect-grace は 1〜1440 の整数（分）で指定してください（指定値: ${raw}）`);
+    throw new Error(`${flag} は 1〜1440 の整数（分）で指定してください（指定値: ${raw}）`);
   }
   return minutes * 60_000;
 }
@@ -165,6 +181,7 @@ function parseArgs(argv: string[]): Args {
     dtaqReceiveMaxWaitSec: undefined,
     idleTimeoutMs: undefined,
     reconnectGraceMs: undefined,
+    stalledGraceMs: undefined,
     maxWatches: undefined
   };
   for (let i = 0; i < argv.length; i++) {
@@ -220,6 +237,9 @@ function parseArgs(argv: string[]): Args {
     } else if (a === "--reconnect-grace") {
       // 転送（ブラウザ ↔ サーバー）が落ちたセッションをホストへ繋いだまま保つ時間。既定は 90 秒（`parseReconnectGrace`）
       args.reconnectGraceMs = parseReconnectGrace(argv[++i]);
+    } else if (a === "--stalled-grace") {
+      // 心拍が途絶えて切れたセッションを保つ時間。既定は 10 分（`parseStalledGrace`）
+      args.stalledGraceMs = parseStalledGrace(argv[++i]);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -244,13 +264,15 @@ function parseArgs(argv: string[]): Args {
 }
 
 /** `SessionManager` へ渡す寿命の設定（起動オプションから。指定が無いものは渡さず、マネージャの既定に任せる） */
-export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs">): {
+export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs" | "stalledGraceMs">): {
   idleTimeoutMs?: number | "never";
   reconnectGraceMs?: number;
+  stalledGraceMs?: number;
 } {
   return {
     ...(args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}),
-    ...(args.reconnectGraceMs !== undefined ? { reconnectGraceMs: args.reconnectGraceMs } : {})
+    ...(args.reconnectGraceMs !== undefined ? { reconnectGraceMs: args.reconnectGraceMs } : {}),
+    ...(args.stalledGraceMs !== undefined ? { stalledGraceMs: args.stalledGraceMs } : {})
   };
 }
 

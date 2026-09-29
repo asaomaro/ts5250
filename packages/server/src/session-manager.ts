@@ -127,6 +127,17 @@ export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
  */
 export const DEFAULT_RECONNECT_GRACE_MS = 90_000;
 
+/**
+ * **心拍が途絶えて切れた（`ws-handler` の `heartbeat timeout`）ときの猶予の既定**。WebSocket が**閉じた**とき（タブを閉じた・回線の瞬断）は
+ * 上の `DEFAULT_RECONNECT_GRACE_MS` のまま。
+ *
+ * 分けるのは、**戻る見込みの長さが違う**ため。閉じたタブは戻ってこないか、戻るなら数秒〜数十秒で繋ぎ直す（上の 90 秒の根拠）。
+ * 一方、心拍が途絶えるのは**タブが止まった**（メモリセーバー・スリープタブ・PC のスリープ）とき——数分〜数時間後に戻ることがあり、
+ * 90 秒ではホストへの接続をサインオフなしで閉じてしまう（戻ったタブは「既に終了しています」になる。実機で再現）。
+ * 長くするのは前者を除いた後者だけなので、**閉じたタブがホストのジョブ・装置・`maxSessions` の枠を長く掴む副作用は増えない**。
+ */
+export const DEFAULT_STALLED_GRACE_MS = 10 * 60_000;
+
 /** 常駐プリンターの既定の上限。表示の上限（8）とは別枠（design D3） */
 export const DEFAULT_MAX_RESIDENT_PRINTERS = 4;
 
@@ -700,10 +711,16 @@ export interface SessionManagerOptions {
    * 転送断でセッションを保持する猶予（ms）。既定 `DEFAULT_RECONNECT_GRACE_MS`。
    * **0 で無効**＝従来どおり即座に閉じる。
    *
-   * **テストのための注入口で、CLI オプションにも設定ファイルにも出していない**（D5）。
-   * 利用者から見える設定面を増やす前に、既定値で実地の様子を見る。
+   * CLI は `--reconnect-grace <分>`（`20260929-reconnect-grace-option`。当初は「CLI に出さず既定値で様子を見る」としていた〔D5〕が、
+   * 放置したタブが止まると 90 秒では足りないと分かったため足した）。設定ファイルには出していない。
+   * この値は **WebSocket が閉じたとき**（タブを閉じた・回線の瞬断）の猶予。心拍が途絶えたときは `stalledGraceMs`。
    */
   reconnectGraceMs?: number;
+  /**
+   * **心拍が途絶えて切れたとき**の猶予（ms）。既定 `DEFAULT_STALLED_GRACE_MS`。`reconnectGraceMs` より短くはならない
+   * （`max` を取る）。`reconnectGraceMs` が 0 以下（猶予なし）ならこちらも効かない。
+   */
+  stalledGraceMs?: number;
   /**
    * アイドルタイムアウトの既定（ms、または `"never"`＝切らない）。**既定 `"never"`**。
    * エントリ個別の値（`OpenOptions.idleTimeoutMs`）が無いときに使う。
@@ -802,12 +819,14 @@ export class SessionManager {
   /** 保持者トークンの発番。**単調増加**なので、後から取った者が常に新しい */
   private holderSeq = 0;
   private readonly reconnectGraceMs: number;
+  private readonly stalledGraceMs: number;
 
   constructor(opts: SessionManagerOptions = {}) {
     this.maxSessions = opts.maxSessions ?? 8;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? "never";
     this.maxResidentPrinters = opts.maxResidentPrinters ?? DEFAULT_MAX_RESIDENT_PRINTERS;
     this.reconnectGraceMs = opts.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS;
+    this.stalledGraceMs = opts.stalledGraceMs ?? DEFAULT_STALLED_GRACE_MS;
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -1712,21 +1731,31 @@ export class SessionManager {
    *   **`false` を「閉じてよい」と読まないこと**——既に猶予中のセッションを閉じることになる。
    *   呼び出し側で閉じる判断に使うなら `isHeld` と併せて見る。
    */
-  holdForReconnect(id: string): boolean {
-    if (this.reconnectGraceMs <= 0) return false;
+  holdForReconnect(id: string, stalled = false): boolean {
+    const graceMs = this.graceFor(stalled);
+    if (graceMs <= 0) return false;
     const entry = this.sessions.get(id);
     if (!entry || entry.hold.holding) return false;
-    entry.hold = beginHold(this.now() + this.reconnectGraceMs);
+    entry.hold = beginHold(this.now() + graceMs);
     const timer = setTimeout(() => {
       // **自分が張った猶予かを実体で確かめる**（`setReservation` が `entry.reservation === r` で
       // 同じ競合を閉じているのと同じ手）。`hold.holding` だけを見ると、
       // 一度解除されてから張り直された**別の猶予**を期限前に畳んでしまう
       const cur = this.sessions.get(id);
       if (cur?.holdTimer === timer) this.reapHold(id);
-    }, this.reconnectGraceMs);
+    }, graceMs);
     timer.unref?.();
     entry.holdTimer = timer;
     return true;
+  }
+
+  /**
+   * 猶予の長さ（ms）。**閉じたとき**は `reconnectGraceMs`、**心拍が途絶えたとき**（`stalled`）は `stalledGraceMs`（ただし前者より短くならない）。
+   * `reconnectGraceMs` が 0 以下なら、どちらも 0（猶予なしの逃げ道を、心拍の側だけ生かさない）
+   */
+  private graceFor(stalled: boolean): number {
+    if (this.reconnectGraceMs <= 0) return 0;
+    return stalled ? Math.max(this.stalledGraceMs, this.reconnectGraceMs) : this.reconnectGraceMs;
   }
 
   /**
@@ -1786,7 +1815,10 @@ export class SessionManager {
    * **座は判断より前に無条件で返す。** 中で返すと、他に見ている人が居る経路で返し損ねて
    * 孤児になる（前 work の D7 → D10 がこの順序で塞いだ）。
    */
-  disposition(id: string, ctx: { readonly role: ConnRole; readonly transportLost: boolean }): Disposition {
+  disposition(
+    id: string,
+    ctx: { readonly role: ConnRole; readonly transportLost: boolean; readonly stalled?: boolean }
+  ): Disposition {
     const entry = this.sessions.get(id) ?? this.printers.get(id);
     let wasHolder = false;
     if (entry) {
@@ -1811,7 +1843,7 @@ export class SessionManager {
     });
     // **既に猶予中なら期限を延ばさない**（`already`）——延ばすと、繋ぎ直せないまま
     // 切断を繰り返すクライアントが枠と装置記述を無期限に掴める
-    if (d.act === "hold" && !d.already) this.holdForReconnect(id);
+    if (d.act === "hold" && !d.already) this.holdForReconnect(id, ctx.stalled === true);
     if (d.act === "close") void this.close(id).catch(() => undefined);
     return d;
   }

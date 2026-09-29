@@ -598,7 +598,8 @@ export class WsConnection {
         // 半開き（TCP は死んでいるのに close イベントが来ない）。send はローカルで成功するので
         // 送信の失敗では気づけない。ここで自分から畳む
         wsLog.warn({ sessionId: this.sessionId }, "no client response; closing half-open websocket");
-        this.dispose("heartbeat timeout", { transportLost: true });
+        // 心拍が途絶えた＝タブが止まった見込み。戻る見込みが長いので、閉じたときより長く保持する（`DEFAULT_STALLED_GRACE_MS`）
+        this.dispose("heartbeat timeout", { transportLost: true, stalled: true });
         this.ws.close();
         return;
       }
@@ -1484,7 +1485,7 @@ export class WsConnection {
     return this.sessionId;
   }
 
-  private dispose(reason: string, opts?: { transportLost?: boolean }): void {
+  private dispose(reason: string, opts?: { transportLost?: boolean; stalled?: boolean }): void {
     // 後始末に入った印。`onOpen` が非同期の待ち（関連付けるプリンターの起動・接続）の後に見て、誰も持たないセッションを作らない
     this.disposed = true;
     // この接続が開いた SysReq の行は閉じる（`sysReqLineOpened`）。セッションが猶予で生き残っても、ホストの出力を止めたままにしない
@@ -1528,7 +1529,8 @@ export class WsConnection {
       // 「自分以外」を意味するのはそのため）
       this.deps.sessions.disposition(this.link.id, {
         role: this.link.role,
-        transportLost: opts?.transportLost === true
+        transportLost: opts?.transportLost === true,
+        stalled: opts?.stalled === true
       });
       this.link = undefined;
     }

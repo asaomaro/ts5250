@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import { WsConnection } from "../src/ws-handler.js";
-import { SessionManager, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
+import { SessionManager, DEFAULT_RECONNECT_GRACE_MS, DEFAULT_STALLED_GRACE_MS, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
@@ -197,6 +197,31 @@ describe("ハートビート", () => {
       expect(mgr.size).toBe(1);
       expect([...(mgr as unknown as { sessions: Map<string, unknown> }).sessions.keys()].some((k) => mgr.isHeld(k))).toBe(true);
       mgr.closeAll();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // **心拍が途絶えて切れたときの猶予は、閉じたときより長い**（`20260929-stalled-grace`）。放置したタブが止まると心拍に返事できず切れる。
+  // 戻るまで数分かかるので、WebSocket が閉じたとき（90 秒）と同じでは足りない
+  it("心拍で切れたセッションは 90 秒を超えても残り、10 分で畳まれる", async () => {
+    vi.useFakeTimers();
+    try {
+      let t = 0;
+      const { conn, mgr } = setup({ hb: { intervalMs: 1000, deadMs: 2500, now: () => t } });
+      await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+      for (const at of [1000, 2000, 3000]) {
+        t = at;
+        vi.advanceTimersByTime(1000);
+      }
+      const held = (): boolean => [...(mgr as unknown as { sessions: Map<string, unknown> }).sessions.keys()].some((k) => mgr.isHeld(k));
+      expect(held()).toBe(true);
+      vi.advanceTimersByTime(DEFAULT_RECONNECT_GRACE_MS + 1_000);
+      expect(mgr.size, "閉じたときの猶予（90 秒）を超えても残る").toBe(1);
+      expect(held()).toBe(true);
+      vi.advanceTimersByTime(DEFAULT_STALLED_GRACE_MS);
+      await Promise.resolve();
+      expect(mgr.size, "10 分を超えたら畳まれる").toBe(0);
     } finally {
       vi.useRealTimers();
     }
