@@ -951,7 +951,9 @@ export class Session5250 extends Emitter<SessionEvents> {
         // CLEAR UNIT・CUA・WEC は SysReq の行を閉じる（ACS `clearSysreqMode`）。その後ろの WTD は行では止めない（エラーなら止める）
         onClearSysReq: () => {
           this.sysReqLineOpen = false; // 画面へはこのレコードの画面（`sysReqLine` が消える）で伝わる
-        }
+        },
+        // READ SCREEN の応答は命令の時点の画面で組む（同じレコードの後ろの WTD を含めない。`20260929-response-content-timing`）
+        buildReadScreen: () => buildReadScreenResponse(this.buf, this.codec, parsed.opcode)
       });
       result0 = result;
       if (result.heldFrom !== undefined) {
@@ -1074,9 +1076,9 @@ export class Session5250 extends Emitter<SessionEvents> {
           } else if (slot.kind === "read-mdt-imm-alt") {
             // **READ MDT IMMEDIATE ALT（0x83）への応答。** `0x72` と同じく待たずに返すが、送るのは **MDT の立った欄だけ**。返さないとホストが固まる
             this.telnet.sendRecord(buildReadMdtImmediateAltResponse(this.buf, this.codec).record);
-          } else {
-            // READ SCREEN への応答（現在の画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。
-            this.telnet.sendRecord(buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
+          } else if (slot.kind === "read-screen") {
+            // READ SCREEN への応答（画面イメージを送り返す）。ASSUME 付き WINDOW で使われる。**命令の時点で組んだもの**（`slot.record`。無ければ今の画面）
+            this.telnet.sendRecord(slot.record ?? buildReadScreenResponse(this.buf, this.codec, parsed.opcode));
           }
         }
       }

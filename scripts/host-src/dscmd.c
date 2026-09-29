@@ -1094,6 +1094,113 @@ int main(int argc, char *argv[]) {
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
         QsnDltBuf(cb, (Q_Fdbk_T *)0);
+    } else if (strcmp(what, "SAVETIMING") == 0 || strcmp(what, "SAVETIMING2") == 0) {
+        /*
+         * **1 本のレコードに [SAVE SCREEN][画面を書き換える WTD] を載せたとき、退避の中身が命令の時点の画面か、レコードを適用し終えた画面か**
+         * （台帳「節目の懸念の残り」の応答の中身。ACS は SAVE SCREEN の命令に達した時点で退避を組むか、当 PJ は適用し終えてから組む）。
+         * 画面 (5,10) に "OLD" を出し、コマンド・バッファに SAVE SCREEN を積み、最後の命令として (5,10) を "NEW" に書き換える WTD を `QsnPutInpCmd` で送る
+         * （バッファの中身と 1 本のレコードになる: [SAVE SCREEN][WTD]）。SAVETIMING2 は逆順 [WTD][SAVE SCREEN]（比較の対照）。
+         * 退避の応答の画面データに OLD（D6 D3 C4）・NEW（D5 C5 E6）のどちらが入るかをワイヤ（relay）で見る。入力は 2 回読む（ログは `[1]` / `[2]`）
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x0A, 0xD6, 0xD3, 0xC4,                       /* (5,10) "OLD" */
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x07, 0x0A
+        };
+        static const unsigned char rewrite[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x0A, 0xD5, 0xC5, 0xE6,                       /* (5,10) "NEW" */
+            0x13, 0x07, 0x0A
+        };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        const int saveFirst = strcmp(what, "SAVETIMING") == 0;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        if (saveFirst) rc = QsnPutOutCmd(0x02, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+        else rc = QsnPutOutCmd(0x11, (const char *)rewrite, (Q_Bin4)sizeof(rewrite), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk(saveFirst ? "QsnPutOutCmd(0x02 SAVE SCREEN → バッファ)" : "QsnPutOutCmd(0x11 書き換え → バッファ)", rc, fdbk);
+        buf = QsnCrtInpBuf(8192, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            for (k = 0; k < 2; k++) {
+                tag = k == 0 ? "[1] " : "[2] ";
+                inzFdbk(fdbk, sizeof(fdbk));
+                if (k == 0) {
+                    if (saveFirst) rc = QsnPutInpCmd(0x11, (const char *)rewrite, (Q_Bin4)sizeof(rewrite), &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    else rc = QsnPutInpCmd(0x02, (const char *)0, 0, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk(saveFirst ? "QsnPutInpCmd(0x11 書き換え＋バッファ〔SAVE SCREEN〕)" : "QsnPutInpCmd(0x02 SAVE SCREEN＋バッファ〔書き換え〕)", rc, fdbk);
+                } else {
+                    rc = QsnReadInp(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnReadInp", rc, fdbk);
+                }
+                if (lg) { fprintf(lg, "%sbytesRead=%d\n", tag, (int)bytesRead); fflush(lg); }
+            }
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
+    } else if (strcmp(what, "READSCRTIMING") == 0 || strcmp(what, "READSCRTIMING2") == 0) {
+        /*
+         * **1 本のレコードに [READ SCREEN（0x62）][画面を書き換える WTD] を載せたとき、READ SCREEN の応答の中身が命令の時点の画面か、適用し終えた画面か**
+         * （`SAVETIMING` の READ SCREEN 版。SAVE の退避は不透明な保管物だが、READ SCREEN の応答はホストが中身を読む）。
+         * 画面 (5,10) に "OLD" を出し、コマンド・バッファに READ SCREEN を積み、最後の命令として (5,10) を "NEW" に書き換える WTD を `QsnPutInpCmd` で送る。
+         * READSCRTIMING2 は逆順 [WTD][READ SCREEN]（対照）。応答に OLD（D6 D3 C4）・NEW（D5 C5 E6）のどちらが入るかをワイヤ（relay）で見る。入力は 2 回読む
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x0A, 0xD6, 0xD3, 0xC4,                       /* (5,10) "OLD" */
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x06,
+            0x13, 0x07, 0x0A
+        };
+        static const unsigned char rewrite[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x0A, 0xD5, 0xC5, 0xE6,                       /* (5,10) "NEW" */
+            0x13, 0x07, 0x0A
+        };
+        Qsn_Cmd_Buf_T cb;
+        int k;
+        const int readFirst = strcmp(what, "READSCRTIMING") == 0;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 画面)", rc, fdbk);
+        cb = QsnCrtCmdBuf(256, 0, 0, (Qsn_Cmd_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnCrtCmdBuf", (Q_Bin4)cb, fdbk);
+        if (cb == 0) { if (lg) { fprintf(lg, "QsnCrtCmdBuf failed\n"); fclose(lg); } return 1; }
+        inzFdbk(fdbk, sizeof(fdbk));
+        if (readFirst) rc = QsnPutOutCmd(0x62, (const char *)0, 0, cb, 0, (Q_Fdbk_T *)fdbk);
+        else rc = QsnPutOutCmd(0x11, (const char *)rewrite, (Q_Bin4)sizeof(rewrite), cb, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk(readFirst ? "QsnPutOutCmd(0x62 READ SCREEN → バッファ)" : "QsnPutOutCmd(0x11 書き換え → バッファ)", rc, fdbk);
+        buf = QsnCrtInpBuf(8192, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+        if (buf != 0) {
+            for (k = 0; k < 2; k++) {
+                tag = k == 0 ? "[1] " : "[2] ";
+                inzFdbk(fdbk, sizeof(fdbk));
+                if (k == 0) {
+                    if (readFirst) rc = QsnPutInpCmd(0x11, (const char *)rewrite, (Q_Bin4)sizeof(rewrite), &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    else rc = QsnPutInpCmd(0x62, (const char *)0, 0, &bytesRead, buf, cb, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk(readFirst ? "QsnPutInpCmd(0x11 書き換え＋バッファ〔READ SCREEN〕)" : "QsnPutInpCmd(0x62 READ SCREEN＋バッファ〔書き換え〕)", rc, fdbk);
+                } else {
+                    rc = QsnReadInp(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                    logFdbk("QsnReadInp", rc, fdbk);
+                }
+                if (lg) { fprintf(lg, "%sbytesRead=%d\n", tag, (int)bytesRead); fflush(lg); }
+            }
+            tag = "";
+            QsnDltBuf(buf, (Q_Fdbk_T *)0);
+        }
+        QsnDltBuf(cb, (Q_Fdbk_T *)0);
     } else if (strcmp(what, "PROGRANGE") == 0) {
         /*
          * **カーソル送り（FCW 0x88nn）の番号が、継続欄の区間を数えない並び（ACS `FFT5250.getStandardFieldList`）の数を超えるとき**の行き先。
