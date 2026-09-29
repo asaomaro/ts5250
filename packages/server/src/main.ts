@@ -79,6 +79,8 @@ interface Args {
    * 未指定なら `SessionManager` の既定（＝永続）。共有サーバーで有限に戻すための口。
    */
   idleTimeoutMs: number | "never" | undefined;
+  /** `--reconnect-grace`（ms）。未指定は `DEFAULT_RECONNECT_GRACE_MS` */
+  reconnectGraceMs: number | undefined;
 }
 
 /**
@@ -116,6 +118,22 @@ export function parseIdleTimeout(raw: string | undefined): number | "never" {
 }
 
 /**
+ * `--reconnect-grace` の値を ms へ。
+ *
+ * 単位は**分**。ブラウザとサーバーの接続が切れたとき、**ホストへの接続を保ったまま待つ時間**（既定 90 秒）。
+ * 放置したタブが止まる（メモリセーバー・スリープタブ・PC のスリープ）と、ブラウザは心拍に返事できず接続が切れる。
+ * 猶予が切れるとサーバーがホストへの TCP をサインオフなしで閉じ、ホストにはジョブが切断された形で残る。
+ * 長くするほど、タブが戻ったとき同じセッションに繋ぎ直せる——代わりに、戻らないタブの装置とジョブをその間ホストで掴んだままにする。
+ */
+export function parseReconnectGrace(raw: string | undefined): number {
+  const minutes = Number(raw);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+    throw new Error(`--reconnect-grace は 1〜1440 の整数（分）で指定してください（指定値: ${raw}）`);
+  }
+  return minutes * 60_000;
+}
+
+/**
  * `--profiles` を渡さなかったときのサーバー設定の置き場。
  * **個人設定（`connections.json`）と同じ形**——既定パスがあり、無ければ空で始まる。
  */
@@ -146,6 +164,7 @@ function parseArgs(argv: string[]): Args {
     ifsUploadMaxDirectories: undefined,
     dtaqReceiveMaxWaitSec: undefined,
     idleTimeoutMs: undefined,
+    reconnectGraceMs: undefined,
     maxWatches: undefined
   };
   for (let i = 0; i < argv.length; i++) {
@@ -198,6 +217,9 @@ function parseArgs(argv: string[]): Args {
       // セッション設定を持たない接続にも効く「全体の既定」。既定は永続なので、
       // 有限に戻したい共有サーバーだけが指定する
       args.idleTimeoutMs = parseIdleTimeout(argv[++i]);
+    } else if (a === "--reconnect-grace") {
+      // 転送（ブラウザ ↔ サーバー）が落ちたセッションをホストへ繋いだまま保つ時間。既定は 90 秒（`parseReconnectGrace`）
+      args.reconnectGraceMs = parseReconnectGrace(argv[++i]);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
     } else if (a === "--users") {
@@ -221,10 +243,19 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+/** `SessionManager` へ渡す寿命の設定（起動オプションから。指定が無いものは渡さず、マネージャの既定に任せる） */
+export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs">): {
+  idleTimeoutMs?: number | "never";
+  reconnectGraceMs?: number;
+} {
+  return {
+    ...(args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}),
+    ...(args.reconnectGraceMs !== undefined ? { reconnectGraceMs: args.reconnectGraceMs } : {})
+  };
+}
+
 function buildDeps(args: Args): ToolDeps & { macros: MacroStore } {
-  const sessions = new SessionManager(
-    args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}
-  );
+  const sessions = new SessionManager(sessionManagerOptions(args));
   // 既定が永続でも掃除は回す——セッション設定や `--idle-timeout` で有限値が入りうるため
   sessions.startIdleSweep();
   // master key（.env の AS400_SECRET_KEY）。未設定なら自動サインオンのパスワード保存は無効（接続自体は可）。
