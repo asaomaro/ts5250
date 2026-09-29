@@ -191,7 +191,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   **測った（`20260927-cont-o-insert`・`scripts/acs-probe/cont-o-insert.txt`・DSM の CONTO）**: 先頭 8 桁 `SO あい SI X`・中間 8 桁 `YZ`・最終 8 桁（空）で、挿入モードの
   A）並びの直後（SI の桁）に全角 → 先頭の区間は全角 3 字で埋まり、`X` は中間の区間へ送られ `X YZ` になった（カーソルは中間の区間の頭）／
   B）並びの直後の半角の前に全角 → 並びごと中間へ送られる。
-- [ ] **継続した O 欄の残りの差**（優先度 低・深さ △。`20260928-cont-o-cells` から割った）。
+- [x] **継続した O 欄の残りの差**（優先度 低・深さ △。`20260928-cont-o-cells` から割った）。**【対応不要と判断（2026-09-30）】**: 継続した O 欄の基本（編集・挿入・削除・Erase EOF・送信の SO/SI と死んだ桁）は `20260927-cont-o-cells` ほかで
+  実機の ACS と揃えた。残る (a)〜(f) は、末尾の 0x40 と NUL の区別（ホストの CHAR 欄はどちらも空白で埋めるので受け取る値は同じ）・SI が区間の最後の桁のときの全角の挿入（ACS も画面は崩れる）・
+  貼り付け・単独の SO/SI の Delete など、通常の入力では起きない端の挙動。(b) の語送り（`FCW 0x8680`）は DDS の `WRDWRAP` を使う欄だけで、実装するには欄の値に NUL と空白の区別を持たせる作り直しが要る
+  （値の表し方・core・ScreenGrid の入力の全部に及ぶ）ので、使う画面が出てから測る。必須ではないので閉じる。
   (a) **空白（0x40）と NUL の区別**: ACS は末尾の 0x40 を中身として押し出し（CONTOX の C09・C10 で最終区間へ `404040404040`）、途中の NUL は ALT で `00` のまま送る。
   当 PJ の O 欄の値は両方を半角空白で持つので、末尾の 0x40 を送らず、ALT で途中の NUL を `40` で送る（`packages/tn5250/test/o-chain-send.test.ts` の ALT の節に注記）。
   直すにはセルの値に空きと空白の区別を持たせる（O 欄の値の表し方と core の置き場）。
@@ -665,7 +668,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   End も ACS `Field5250.getEndPosition` は J・全角の E で全角空白を飛ばす（`scripts/acs-probe/je-field-end.txt` の 6 通り。J の `あい`＋全角空白 5,15・空の J 3,11 など）のに、当 PJ は欄の最後へ行っていた
   （直す前のブラウザで 5 通りが違った。例: 空の J 3,19）。full・open の E の空きを全角空白にし（`ScreenGrid.vue` の `jeWidePad`）、End で全角空白も飛ばす。
   ブラウザの End の 6 通り＋バイト列が ACS と一致（`scripts/verify-browser-either-empty-view.mjs` pass=7）、既存の `verify-browser-je-field.mjs` も pass=3 のまま。単体 9 件・変異 9 通り検出。
-- [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）: ~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。~~「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）~~（上の `[x]`）。
+- [x] **E 欄の残り**（`20260927-either-field-mode` から割った）。**【対応不要と判断（2026-09-30）】**: 残りは伏せ字の E 欄・Dup・open の E の中身の末尾の全角空白・挿入モードの取り置きの状態の利用で、
+  いずれも DBCS の E 欄の特殊な組み合わせ（パスワードを DBCS の E 欄にする・E 欄で Dup を使う・E 欄の末尾に全角空白だけを打つ）でしか起きず、起きても送るバイト列の末尾の空白の差にとどまる。
+  必須ではないので測らずに閉じる。必要になったら、ここに書いた差から測る。~~貼り付けにはこの規則を掛けていない（decisions D2）~~（上の `[x]`）。~~「切り替えてから欄を空にし、そのまま AID を送る」とコアの状態が前のまま（D4）~~（上の `[x]`）。
   ~~全角の状態の空の E 欄は ACS では SO/SI の 2 桁を持つが、当 PJ の列ビューは持たない（カーソルの桁が 1 つずれる）~~（上の `[x]`。ACS が残すのは SO だけ）。伏せ字の E 欄と Dup は規則の外（ACS の挙動は未確認）。
   open の E の中身の末尾に打った全角空白は ACS は `40 40` で送るが、当 PJ は空きと区別できず落とす（`20260928-either-empty-view` decisions D2。O 欄の (a) と同じ課題）。
   挿入モードの取り置き（方針表「either 欄の DBCS 状態」）に状態を使うのは未着手。
@@ -809,8 +814,10 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   選択肢文字列（0x50 の 0x10・4 バイト未満）・選択肢の属性（0x01・4〜19 バイトの外）・メニューバーの区切り（0x09・selectionType=1 だけ・5〜8 バイトの外）、
   窓の枠（0x51 の 0x01・4〜13 バイトの外）・表題/脚注（0x10・6 バイト以下）、罫線のマイナー（0x60。自身の長さ 7〜11 の外・型 0〜7 の外・行/桁/横罫/縦罫が画面の外・反復/間隔が 0）で
   0x10050113／0x10050150／0x10050151／0x10050152 を返すようにした（`packages/tn5250/src/protocol/wtd-applier.ts` の `selectionMinorSense`・`windowMinorSense`・`gridMinorSense`）。
-  単体 26 件・変異 24 通り検出。**実機（DSM）は未検証**（原典の直読だけ。decisions D2）——次に着手する人は DSM の新しいモードでこの 26 通りの一部を確かめてから閉じる。
-- [ ] **WDSF の中の否定応答（残り）**（上から割った。~~頭の検査~~・~~構造体の長さ・区画・0x61 の矩形~~・~~マイナー構造体の長さ・型・位置~~ は上の `[x]`）:
+  単体 26 件・変異 24 通り検出。**実機で確かめた（2026-09-30）**: 実機の ACS のコア（DSM の WDSFMINOR・`scripts/acs-probe/wdsf-minor.txt`）で 15 通りが否定応答（CPFA304）・正しい対照 3 通りが通り、
+  当 PJ のコア（`scripts/verify-wdsf-minor.mjs`）も 18 巡とも一致（pass=18・2 回）。~~実機（DSM）は未検証（原典の直読だけ）~~。
+- [x] **WDSF の中の否定応答（残り）**（上から割った。~~頭の検査~~・~~構造体の長さ・区画・0x61 の矩形~~・~~マイナー構造体の長さ・型・位置~~ は上の `[x]`）。**【対応不要と判断（2026-09-30）】**: 残りは崩れた構造体を送るホストのプログラムの誤りを知らせるためだけの検査で、
+  正しい構造体では起きない。IBM i の OS が組む構造体では崩れず、DSM や手組みでしか出ない。必須ではないので閉じる（次の 4 つが残る）:
   選択肢の属性の値そのもの（属性番号が扱えるか）・0x54 の CCSID 形（Unicode DS 専用）・0x50/0x51/0x53 の構造体そのものが画面の外（0x10050112。窓の枠の計算が要る）・
   罫線の反復/間隔つきの矩形が画面の外へ出る総延長（型ごとに式が違う。`gridMinorSense` は単体の行/桁/横罫/縦罫だけ見て、反復・間隔を掛けた総延長は見ていない）が残る。
   いずれも崩れた構造体でしか起きない。ENPTUI を申告しない ACS は WDSF を LL で読み飛ばす（当 PJ は常に適用）。
@@ -851,7 +858,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （`packages/web-ui/src/composables/mandatoryCheck.ts` の `checkedBody`）は符号付き数値の欄で最終桁を除いて見る（ACS `Field5250.isFieldFull`・`isAllNulls`・`checkModulusField`。HLLAPI と同じ）。
   実機の ACS のコア（DSM の SIGNCHK・`scripts/acs-probe/sign-digit-check.txt`）: 6 桁の符号付き数値の MF に数字 5 桁で Tab → 出られた・3 桁 → 止まった、M10 に 12302 → 出られた・12305 → 止まった。
   ブラウザの当 PJ（`scripts/verify-browser-sign-digit.mjs`）pass=4（2 回）。直す前のコードは 5 桁で止めていた（pass=3・a が不一致）。単体 4 件・mutation 5 通り検出。
-- [ ] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）。
+- [x] **欄を出るときの MF・自己点検の小さな差**（`20260927-hllapi-tab-mandatory` の独立レビューから。優先度 低）。**【対応不要と判断（2026-09-30）】**: 残りは HLLAPI（自動操作の入口）が**非表示の欄**（パスワード欄）の MF・自己点検を見ない差だけ。
+  検査のためだけに、パスワードの値を外へ出す口を足すことになる——秘密を出さない原則（AGENTS.md「秘密の扱い」）と衝突する割に、非表示の欄に MF・自己点検を付ける画面は稀で、HLLAPI は AID の前の検査が
+  すでに ACS と揃っている（`20260928-hllapi-aid-checks`）。必須ではないので、秘密を出さない側を優先して閉じる。差の中身: HLLAPI は非表示の欄を検査しない（スナップショットに値が無い。ACS は止める）。
   セッションは非表示の欄の値を外へ出さない（パスワード）ので、検査のためだけに値を読む口を足すかは判断が要る（`20260928-mandatory-sign-digit` で扱わなかった）。
   ~~ペインの `mandatoryFillViolated`・`selfCheckViolated`（`packages/web-ui/src/composables/mandatoryCheck.ts`）は符号付き数値の符号の桁を除かない~~（上の `[x]`）。
 - [x] **HLLAPI の AID の前の MF・自己点検・ME**（上の項目から割った）。**完了（`20260928-hllapi-aid-checks`）**: AID キーの前に、カーソル下の欄の MF → 自己点検（欄頭へ）、画面が変更済みなら MDT の無い ME（その欄へ。CA キーは除く）を見て、
@@ -860,7 +869,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
 - [x] **HLLAPI のエラー 32（0x20）**（下の項目から割った）。**完了（`20260928-hllapi-exit-required`・PR #448）**: 接続ごとに打ったまま欄を出ていない欄（`Connection.unexited`）を持ち、
   その欄から AID を送らずに `rc=5`（`packages/server/src/hllapi.ts` の `aidCheck`。順は ACS の MF → 0x20 → 自己点検 → ME）。実機の ACS のコア（DSM の EXITREQ・`scripts/acs-probe/exit-required-aid.txt`）:
   RZ・符号付き数値に打って Enter・同じ欄の中や別の欄を経た SetCursorPos・右の矢印は止まり、Tab・Backtab で着き直せば送れた。当 PJ の HLLAPI（`scripts/verify-hllapi-exit-required.mjs`）pass=12（2 回）。単体 12 件・mutation 6 通り検出。
-- [ ] **AID の前の検査の残り**（上から割った。優先度 低）: ~~HLLAPI はエラー 32 を見ない~~（上の `[x]`）。HLLAPI に Field Exit のニーモニックが無い（既知の差）。
+- [x] **AID の前の検査の残り**（上から割った。優先度 低）。**【対応不要と判断（2026-09-30）】**: 残りは HLLAPI に Field Exit のニーモニックが無いこと（ACS の HLLAPI には有る機能の不足）と、MCP の `send_key` に検査が無いこと（ACS に無い入口で、
+  合わせる基準そのものが無い）。前者は自動操作で Field Exit を打つ必要が生じてから足せば足りる。必須ではないので閉じる。~~HLLAPI はエラー 32 を見ない~~（上の `[x]`）。HLLAPI に Field Exit のニーモニックが無い（既知の差）。
   MCP の `send_key` は検査しない（ACS に無い入口。合わせるかは要判断）。
 - [x] **応答をコマンドの順に送る・SAVE SCREEN のオペコードのレコードは退避だけ**（下の項目から割った）。**完了（`20260928-response-order`・PR #446）**:
   実機の ACS のコア（DSM の RESPORDER / RESPORDER2・`scripts/acs-probe/response-order.txt`・relay のワイヤ）: オペコード 03 の `[WSF Query][SAVE SCREEN]` は Query の応答 → 退避の応答、
@@ -878,7 +888,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   READ SCREEN・READ SCREEN TO PRINT の応答を命令に達した時点で組むようにした（`packages/tn5250/src/protocol/wtd-applier.ts` の `ResponseSlot.record`・`opts.buildReadScreen`、`session.ts`）。
   実機で当 PJ のコアも一致（`scripts/verify-read-screen-timing.mjs` pass=2・2 回）。単体 2 件・変異 3 通り検出。SAVE の本体は直さない: ACS の本体は Java の直列化で当 PJ とは別の形で、ホストには不透明な保管物、当 PJ の RESTORE は SAVE の命令の時点で取るローカルの退避スタックから復元するため画面に出ない（decisions D1）。
   **残り**: READ SCREEN EXTENDED（0x64・0x68）・READ IMMEDIATE（0x72）・READ MDT IMMEDIATE ALT（0x83）の応答の中身は未測定（同じ仕組みと推測できても実機で確かめるまで変えない）。
-- [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
+- [x] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）。**【対応不要と判断（2026-09-30）】**: 残りは READ SCREEN EXTENDED・READ IMMEDIATE・READ MDT IMMEDIATE ALT の応答の中身を命令の時点の画面で組むかどうかだけ。
+  同じレコードで READ の後ろに画面を書き換える WTD が続く形は、ホストが応答を待ってから次を送るので実際には現れず、READ SCREEN の測定（`20260929-response-content-timing`）でも DSM で作為的に組まないと再現しなかった。必須ではないので閉じる:
   ~~応答をコマンドの順に送らない~~（上の `[x]`）。~~カーソル送りの番号の範囲~~（上の `[x]`）。~~応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）~~（READ SCREEN は下の `[x]`。SAVE の本体は画面に出ない差。READ SCREEN EXTENDED・READ IMMEDIATE・READ MDT IMMEDIATE ALT は未測定で残る）。
   ~~HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）~~——**事実と違う**: HLLAPI は 5250 の `SessionManager` にしか繋がらず
   （`packages/server/src/app.ts` の `registerHllapiRoutes`・`SessionEntry.session` は `Session5250`）、3270 のセッション（`Tn3270Manager`）には届かない（`20260928-hllapi-tab-3270` を廃止した理由）。
@@ -1001,7 +1012,9 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   （欄の先頭で、欄〔継続欄は区間の合計〕に収まれば欄を消して〔MDT はそのまま〕書く・継続でない欄は番地が進む・継続欄は区間の長さで割る・欄の先頭でない／分からない flag は 0x10050140・長すぎれば 0x10050141。
   `packages/tn5250/src/protocol/wtd-applier.ts` の `writeFieldData`）。実機の ACS のコア（DSM の WRITEDATA・`scripts/acs-probe/write-data.txt`）と当 PJ のコア（`scripts/verify-write-data.mjs` pass=5・2 回）で一致。
   単体 4 件・mutation 6 通り検出。残り: CCSID の形（0x40）・DBCS の継続欄の区間の SO/SI の閉じ直し（未測定）。
-- [ ] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）: ~~罫線の寿命~~・~~0x54~~（上の `[x]`）。
+- [x] **DS5250 の残り（罫線の寿命・WDSF 0x54/0x55）**（上の【まとめ】から割った。優先度 低）。**【対応不要と判断（2026-09-30）】**: 残りは WDSF 0x55（プログラム可能なマウス・ボタンを AID に割り当てる）と、CLEAR UNIT ALTERNATE で画面の大きさを変えたときの罫線の扱い。
+  0x55 はリポジトリ内の実機の記録が 0 件で（IBM i の標準の画面は送らない）、実装するにはブラウザにボタンの割り当てを持たせる UI が要る。罫線の寿命は CLEAR UNIT の後も表示される実測（S9R167D）に合わせてあり、画面の大きさを変える場合だけが未測定。
+  必須ではないので閉じる: ~~罫線の寿命~~・~~0x54~~（上の `[x]`）。
   **罫線の原典の追記（2026-09-28）**: WDSF 0x60 の罫線は `ENPTUI5250.processDefineGrid` が罫線の置き場（`changeGridBuffer`）に入れ、CLEAR UNIT の `discardGridPlane` が捨てるのは
   `PS5250.GridPlane`（WSF の grid write/merge の面）だけ。ENPTUI の構造体は `isENPTUIConstructOnPS()` のときだけ `removeAllENPTUIConstructs` で捨てる——GUI がどちらから描くかを確かめれば、
   S9R167D の実測（CLEAR UNIT の後も表示）と原典の食い違いが解ける。`acs-probe` は `ECLPS.GridPlane`（public）を読めるが、ENPTUI 側の置き場は読めていない。
@@ -1129,7 +1142,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
     - telnet のオプションの状態機械（実害なし）
     - NEW-ENVIRON の応答方式（実害なし）
   （出典: `20260919-backlog-acs-triage` research N17・F4 の低、`20260919-backlog-acs-triage` の `acs-comparison.md` 領域 3）
-- [ ] **telnet の交渉前のテキスト・バックアップホスト**（上の【まとめ】から割った。どちらも機能の追加）: ACS `NVT.NVT_process_outbound` はバイナリ・EOR を交渉する前に届いたデータを NVT の文字として画面に書く
+- [x] **telnet の交渉前のテキスト・バックアップホスト**（上の【まとめ】から割った。どちらも機能の追加）。**【対応不要と判断（2026-09-30）】**: どちらも機能の追加で、差ではない。IBM i は交渉前にテキストを送らない（tap の記録）。バックアップホストは接続できないときの手動の切り替えで代えられる。
+  必須ではないので閉じる: ACS `NVT.NVT_process_outbound` はバイナリ・EOR を交渉する前に届いたデータを NVT の文字として画面に書く
   （BS・CR・LF などを処理し、WTD を組んで 5250 の画面へ流す）。IBM i は交渉前にテキストを送らない（tap の記録）ので、測るなら手元に偽のサーバーを立てて ACS のコアと当 PJ を当てる。
   バックアップホスト（接続できないときに次のホストへ）は当 PJ に無い（設定・接続の両方が要る）。
 - [x] **関連付けプリンター（IBMASSOCPRT）の装置名を書く方式**（上の【まとめ】telnet から割った）。`20260921-associated-printer`（PR #410）。
@@ -1202,7 +1216,8 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ は空ページを出していなかった（`packages/scs/src/scs.ts` の `flushPage`）。HTML の白紙は帳票のいちばん広いページの幅で描く。最後の FF の後ろは従来どおり出す（「合わせない候補」のまま）。原典だけ（ACS の紙とは未突き合わせ）。
 - [x] **SCS の SFSS の倍幅**（下の【まとめ】から割った）。**完了（`20260927-scs-sfss`）**: ACS の JPS は SFSS（`2B FD 04 02 横 縦`）の横が 0x20 の間、字・空白・HT・透過の字の進みを 2 倍にする
   （`JPSPrintableCharacters` の `getCharAdvance() × getWidthScale()`）。当 PJ も同じ桁に置く（`packages/scs/src/scs.ts` の `widthScale`。原典・単体 2 件・変異 5 通り検出）。字の見た目は通常の幅（decisions D2）、半分の幅（0x08）は 1 倍として扱う（D1）。
-- [ ] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。~~SFSS の倍幅~~ は上の `[x]`。残りは重ね打ち（非空白×非空白。実帳票を 1 件採ってから）・DGL（罫線。JPS は `processDefineGridLines` で描く）・SFSS の半分の幅（1 桁に 2 字）・最後の FF が無いジョブ（合わせない候補）・SIT の無い DBCS の詰め方。
+- [x] **【まとめ】SCS の解釈の差**（優先度 中〜低・深さ △）。**【対応不要と判断（2026-09-30）】**: 残りは重ね打ち（非空白×非空白）・DGL（罫線）・SFSS の半分の幅・最後の FF が無いジョブ・SIT の無い DBCS の詰め方で、いずれも**実際の帳票を 1 件採ってから**測る項目
+  （1 バイトの制御・0x2B・SO/SI の桁・SFSS の倍幅など、通常の帳票で出る差は済んでいる）。手元の実機に該当する帳票が無く、測る材料が無いので、帳票が出てから測る。必須ではないので閉じる。~~SFSS の倍幅~~ は上の `[x]`。残りは重ね打ち（非空白×非空白。実帳票を 1 件採ってから）・DGL（罫線。JPS は `processDefineGridLines` で描く）・SFSS の半分の幅（1 桁に 2 字）・最後の FF が無いジョブ（合わせない候補）・SIT の無い DBCS の詰め方。
   **着手時に両側を再確認すること。**
   - ~~1 バイトの制御（中・安い）~~ → 上の `20260921-scs-controls-acs` で済んだ
   - ~~0x2B オーダーの消費長（中）~~ → 同上。~~ACS: 長さの前置を見て、汎用に読み飛ばす。~~ は表にあるクラスについてだけ正しい
