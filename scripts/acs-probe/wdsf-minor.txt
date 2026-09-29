@@ -1,0 +1,22 @@
+# **WDSF のマイナー構造体の長さ・型・位置の否定応答を ACS のコアで測る**（台帳「WDSF の中の否定応答」。`20260928-wdsf-minor-sense` の原典の読みを実機で確かめる）。
+# DSM の WDSFMINOR（`scripts/host-src/dscmd.c`）。巡ごとに (5,10) で 1 つの WDSF を送り、否定応答ならホストの読みがすぐ CPFA304 で戻る（ログは `[M01]`〜`[M18]`。
+# M01〜M15 は否定応答のはず、M16〜M18 は正しい対照で Enter を待つ）。ホストのログの読みが CPFA304 かで判定する。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/wdsf-minor.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WDSFMINOR')[enter]
+settle 6000
+dump m-first
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
