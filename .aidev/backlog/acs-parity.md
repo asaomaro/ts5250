@@ -873,8 +873,13 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   Tab ではカーソルが動かず（3,10 のまま）、満杯まで打つと最終桁（3,15）に留まった。当 PJ は画面順の次へ倒していたので、`progressionStuck`
   （`packages/tn5250/src/screen/search.ts`）で揃えた（ペインの Tab・満杯の自動送り・HLLAPI の Tab）。ブラウザ（`scripts/verify-browser-progression-range.mjs`）pass=3（2 回）。単体 5 件・mutation 5 通り検出。
   ~~昇順でない定義（`standardFields` は画面順）~~ は差が無い——ACS の `checkNewField` は欄の表を位置の昇順に保ち、当 PJ も同じ `checkNewField` を持つ（decisions D1）。
+- [x] **READ SCREEN の応答の中身のタイミング**（下の「節目の懸念の残り」から割った）。**完了（`20260929-response-content-timing`）**: 実機の ACS のコア（DSM の READSCRTIMING・`scripts/acs-probe/read-screen-timing.txt`・relay のワイヤ）で、
+  `[READ SCREEN][WTD で OLD→NEW]` の応答は OLD（命令の時点の画面）、対照の `[WTD][READ SCREEN]` は NEW。SAVE SCREEN も同じ対（`save-timing.txt`）で命令の時点。当 PJ は適用し終えた画面で組んでいた（直す前の実機: `FAIL READSCRTIMING: ["NEW"]`）。
+  READ SCREEN・READ SCREEN TO PRINT の応答を命令に達した時点で組むようにした（`packages/tn5250/src/protocol/wtd-applier.ts` の `ResponseSlot.record`・`opts.buildReadScreen`、`session.ts`）。
+  実機で当 PJ のコアも一致（`scripts/verify-read-screen-timing.mjs` pass=2・2 回）。単体 2 件・変異 3 通り検出。SAVE の本体は直さない: ACS の本体は Java の直列化で当 PJ とは別の形で、ホストには不透明な保管物、当 PJ の RESTORE は SAVE の命令の時点で取るローカルの退避スタックから復元するため画面に出ない（decisions D1）。
+  **残り**: READ SCREEN EXTENDED（0x64・0x68）・READ IMMEDIATE（0x72）・READ MDT IMMEDIATE ALT（0x83）の応答の中身は未測定（同じ仕組みと推測できても実機で確かめるまで変えない）。
 - [ ] **節目の懸念の残り（測る手段がある分）**（上の節目 9・10 から移した。優先度 低）:
-  ~~応答をコマンドの順に送らない~~（上の `[x]`）。~~カーソル送りの番号の範囲~~（上の `[x]`）。応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）。
+  ~~応答をコマンドの順に送らない~~（上の `[x]`）。~~カーソル送りの番号の範囲~~（上の `[x]`）。~~応答の中身を命令の時点の画面で組まない（同じレコードの後ろの WTD が退避・READ SCREEN の中身に入る。未測定）~~（READ SCREEN は下の `[x]`。SAVE の本体は画面に出ない差。READ SCREEN EXTENDED・READ IMMEDIATE・READ MDT IMMEDIATE ALT は未測定で残る）。
   ~~HLLAPI の `@T` / `@B` は 3270 のセッションにも 5250 の規則を当てる（ACS `PS3270` の規則を読む）~~——**事実と違う**: HLLAPI は 5250 の `SessionManager` にしか繋がらず
   （`packages/server/src/app.ts` の `registerHllapiRoutes`・`SessionEntry.session` は `Session5250`）、3270 のセッション（`Tn3270Manager`）には届かない（`20260928-hllapi-tab-3270` を廃止した理由）。
   ACS の 3270 のコアの Tab・Backtab は `scripts/acs-probe/hllapi-tab-3270.txt` に測ってある（3270 のペインと比べる足場）・~~ACS の `processTab` / `processBacktab` は移動の後に MF の検査をして `setFieldExitReqFlag(true)` を立てる（HLLAPI はしない）~~（上の `[x]`）／

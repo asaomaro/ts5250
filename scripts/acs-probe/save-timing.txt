@@ -1,0 +1,23 @@
+# **[SAVE SCREEN][画面を書き換える WTD] を 1 本のレコードに載せたとき、ACS の退避の中身は命令の時点の画面か、適用し終えた画面か**（台帳「節目の懸念の残り」の応答の中身）。
+# DSM の SAVETIMING（[SAVE SCREEN][WTD で (5,10) を OLD→NEW]）と SAVETIMING2（[WTD][SAVE SCREEN]。対照）。ワイヤは `relay-5250.mjs` で採る。
+# 退避の応答（`04 12`）の画面データに OLD（D6 D3 C4）・NEW（D5 C5 E6）のどちらが入るかを見る。記録にはパスワードが残るので解析したら shred。
+# **結果（2026-09-29・ACS のコア）**: SAVETIMING の退避の応答には OLD（命令の時点の画面）、SAVETIMING2 には NEW。退避の本体は Java の直列化（zlib）で、画面の字は UTF-16 で入っている——
+# 当 PJ の退避の本体は別の形（WTD の並び）でホストには不透明な保管物、復元はローカルの退避スタック（SAVE の命令の時点で取る）から行うので、中身の差は画面に出ない（台帳）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SAVETIMING')[enter]
+settle 4000
+dump t1
+keys [enter]
+settle 3000
+dump t1-after
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SAVETIMING2')[enter]
+settle 4000
+dump t2
+keys [enter]
+settle 3000
+dump t2-after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

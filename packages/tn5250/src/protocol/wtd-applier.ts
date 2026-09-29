@@ -15,7 +15,12 @@ import { parseWdsf } from "./wdsf-parser.js";
 export type ResponseSlot =
   | { kind: "save"; index: number }
   | { kind: "wsf"; index: number }
-  | { kind: "read-screen-ext" | "read-immediate" | "read-mdt-imm-alt" | "read-screen" };
+  /**
+   * READ SCREEN（0x62）系。**応答は命令の時点の画面で組む**（`record`。ACS は READ SCREEN の命令に達した時点で画面を送る——実機の ACS のコア〔DSM の READSCRTIMING〕で
+   * `[READ SCREEN][WTD で OLD→NEW]` の応答は OLD、`[WTD][READ SCREEN]` は NEW。`20260929-response-content-timing`）。~~レコードを適用し終えた画面~~
+   */
+  | { kind: "read-screen"; record?: Uint8Array }
+  | { kind: "read-screen-ext" | "read-immediate" | "read-mdt-imm-alt" };
 
 /** WSF への応答の 1 本（`ApplyResult.wsfReplies`） */
 export type WsfReply = { kind: "query" } | { kind: "d972"; flags: number; next: number };
@@ -209,6 +214,8 @@ export function applyDataStream(
     holdWtd?: () => boolean;
     /** CLEAR UNIT・CLEAR UNIT ALTERNATE・WRITE ERROR CODE の頭で呼ぶ（ACS はここで `clearSysreqMode`＝SysReq の行を閉じる。`20260927-sysreq-line-hold`） */
     onClearSysReq?: () => void;
+    /** READ SCREEN（0x62・0x66・0x6a）の命令に達した時点の画面で応答のレコードを組む（`ResponseSlot` の `record`）。無ければ呼び出し側が適用し終えてから組む */
+    buildReadScreen?: () => Uint8Array;
   } = {}
 ): ApplyResult {
   const r = new ByteReader(data);
@@ -407,7 +414,7 @@ export function applyDataStream(
         // ——実機で `QsnPutInpCmd(0x66)` を出させて確かめた
         // （`scripts/diag-5250-commands.mjs`）。
         result.readScreenRequested = true;
-        result.responses.push({ kind: "read-screen" });
+        result.responses.push(opts.buildReadScreen ? { kind: "read-screen", record: opts.buildReadScreen() } : { kind: "read-screen" });
         break;
       case COMMAND.READ_SCREEN_TO_PRINT_EXTENDED:
       case COMMAND.READ_SCREEN_TO_PRINT_EXT_GRID:
@@ -516,7 +523,7 @@ export function applyDataStream(
         // ホストが「既にあると仮定した画面」を取得するために送ってくる。返信しないと
         // ホストは停止し、後続のウィンドウ描画を送ってこない（キーボードがロックのまま）。
         result.readScreenRequested = true;
-        result.responses.push({ kind: "read-screen" });
+        result.responses.push(opts.buildReadScreen ? { kind: "read-screen", record: opts.buildReadScreen() } : { kind: "read-screen" });
         break;
       case COMMAND.READ_SCREEN_EXTENDED:
         // 拡張 5250 を申告した端末にはホストがこちらを送ってくる。応答形式は 0x62 と別

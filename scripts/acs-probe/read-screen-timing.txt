@@ -1,0 +1,22 @@
+# **[READ SCREEN（0x62）][画面を書き換える WTD] を 1 本のレコードに載せたとき、ACS の READ SCREEN の応答の中身は命令の時点の画面か、適用し終えた画面か**（台帳「節目の懸念の残り」の応答の中身）。
+# DSM の READSCRTIMING（[READ SCREEN][WTD で (5,10) を OLD→NEW]）と READSCRTIMING2（[WTD][READ SCREEN]。対照）。ワイヤは `relay-5250.mjs` で採る。
+# READ SCREEN の応答（画面 1920 桁）に OLD（D6 D3 C4）・NEW（D5 C5 E6）のどちらが入るかを見る。記録にはパスワードが残るので解析したら shred。
+# **結果（2026-09-29・ACS のコア）**: READSCRTIMING の応答は OLD（命令の時点の画面）、READSCRTIMING2 は NEW。当 PJ は適用し終えた画面で組んでいた（直した: `20260929-response-content-timing`）。
+# 作り方・後片付けは cont-o-edit.txt と同じ。
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READSCRTIMING')[enter]
+settle 4000
+dump t1
+keys [enter]
+settle 3000
+dump t1-after
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('READSCRTIMING2')[enter]
+settle 4000
+dump t2
+keys [enter]
+settle 3000
+dump t2-after
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500
