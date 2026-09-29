@@ -20,6 +20,7 @@ import { ReplayTransport, parseTraceJsonl } from "@ts5250/tn5250";
 import {
   SessionManager,
   DEFAULT_RECONNECT_GRACE_MS,
+  DEFAULT_STALLED_GRACE_MS,
   ORPHAN_IDLE_TIMEOUT_MS
 } from "../src/session-manager.js";
 
@@ -30,7 +31,7 @@ const signon = () =>
 /** private な sweepIdle を叩く（`session-idle-timeout.test.ts` と同じ手） */
 const sweep = (mgr: SessionManager): void => (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
 
-function makeManager(opts: { reconnectGraceMs?: number; now?: () => number } = {}): SessionManager {
+function makeManager(opts: { reconnectGraceMs?: number; stalledGraceMs?: number; now?: () => number } = {}): SessionManager {
   return new SessionManager(opts);
 }
 const open = (mgr: SessionManager) => mgr.open({ transport: new ReplayTransport(signon()), host: "h" });
@@ -356,5 +357,73 @@ describe("猶予が明けたのに見ている人が居る場合（review ラウ
     sweep(mgr);
 
     expect(mgr.size).toBe(0);
+  });
+});
+
+/**
+ * **心拍が途絶えて切れたときは、閉じたときより長く保持する**（`20260929-stalled-grace`）。放置したタブが止まる（メモリセーバー・スリープタブ・PC のスリープ）と
+ * 心拍に返事できず切れる。数分〜数時間後に戻るので、WebSocket が閉じたとき（タブを閉じた・回線の瞬断）と同じ 90 秒では足りない。
+ * 閉じたときの保持は延ばさない——閉じたタブがホストのジョブ・装置・枠を長く掴む副作用を増やさないため
+ */
+describe("心拍が途絶えたときの猶予（stalled）", () => {
+  it("**閉じたときは 90 秒で畳み、心拍が途絶えたときは 10 分まで残す**（同じ時刻で分かれる）", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const closed = await open(mgr);
+    const stalled = await open(mgr);
+    expect(mgr.holdForReconnect(closed.id, false)).toBe(true);
+    expect(mgr.holdForReconnect(stalled.id, true)).toBe(true);
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+    expect(mgr.size, "閉じた側だけ畳まれる").toBe(1);
+    t += DEFAULT_STALLED_GRACE_MS - DEFAULT_RECONNECT_GRACE_MS - 2;
+    sweep(mgr);
+    expect(mgr.size, "10 分の手前ではまだ残る").toBe(1);
+    t += 2;
+    sweep(mgr);
+    expect(mgr.size, "10 分を超えたら畳まれる").toBe(0);
+  });
+
+  it("`disposition` の `stalled` が猶予の長さを決める（ws-handler の心拍の死判定がこれを渡す）", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await open(mgr);
+    const token = mgr.claim(entry.id);
+    mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true, stalled: true });
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+    expect(mgr.isHeld(entry.id), "90 秒を超えても保持されている").toBe(true);
+    mgr.closeAll();
+  });
+
+  it("**`stalled` を渡さなければ従来どおり 90 秒**（閉じたタブの保持を延ばさない）", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ now: () => t });
+    const entry = await open(mgr);
+    const token = mgr.claim(entry.id);
+    mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true });
+    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+
+  it("`stalledGraceMs` は閉じたときの猶予より短くならない（max）", async () => {
+    let t = 1_000_000;
+    const mgr = makeManager({ stalledGraceMs: 1_000, now: () => t });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    t += 1_001;
+    sweep(mgr);
+    expect(mgr.size, "1 秒では畳まれない（90 秒まで残る）").toBe(1);
+    t += DEFAULT_RECONNECT_GRACE_MS;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+
+  it("`reconnectGraceMs: 0`（猶予なしの逃げ道）は心拍の側も猶予に入れない", async () => {
+    const mgr = makeManager({ reconnectGraceMs: 0 });
+    const entry = await open(mgr);
+    expect(mgr.holdForReconnect(entry.id, true)).toBe(false);
+    mgr.closeAll();
   });
 });
