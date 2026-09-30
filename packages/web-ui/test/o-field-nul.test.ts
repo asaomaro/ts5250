@@ -23,10 +23,10 @@ afterEach(() => {
 });
 
 /** (5,10) に O 欄 8 桁。`hostSpaces` の桁だけホストが書いた空白（生バイト 0x40。空きは生バイトを持たない） */
-function snapshot(hostSpaces: number[] = []): ScreenSnapshot {
+function snapshot(hostSpaces: number[] = [], dbcsType: "open" | "either" = "open"): ScreenSnapshot {
   const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
   for (const c of hostSpaces) (cells[4]![9 + c] as Cell).rawByte = 0x40;
-  const f = { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "open" } as unknown as Field;
+  const f = { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType } as unknown as Field;
   return { sessionId: "d1", rows: 24, cols: COLS, cursor: { row: 5, col: 10 }, keyboardLocked: false, cells, fields: [f] } as unknown as ScreenSnapshot;
 }
 
@@ -94,6 +94,45 @@ describe("継続でない O 欄の値の空き（NUL）と空白", () => {
     await nextTick();
     await t.key(" ");
     expect(t.edits.get(1)).toBe(o("{あ}") + " ");
+  });
+});
+
+describe("半角の状態の E 欄の空き（NUL）と空白（`20260930-either-half-space`。実機の ACS: E に `A`＋空白を打つと `c1 40`）", () => {
+  it("打った末尾の空白は落とさない", async () => {
+    const t = await open(snapshot([], "either"));
+    await t.at(0);
+    await t.key("A");
+    await t.key(" ");
+    expect(t.edits.get(1)).toBe("A ");
+  });
+  it("手前の空きは NUL のまま・末尾の空きは値から落とす", async () => {
+    const t = await open(snapshot([], "either"));
+    await t.at(2);
+    await t.key("B");
+    expect(t.edits.get(1)).toBe("\u0000\u0000B");
+  });
+  it("End は末尾の空きの上に止まらず、中身の直後へ行く（続けて打つと中身の後ろに付く）", async () => {
+    const t = await open(snapshot([], "either"));
+    await t.at(0);
+    await t.key("A");
+    await t.key("Home");
+    await t.key("End");
+    await t.key("B");
+    expect(t.edits.get(1)).toBe("AB");
+  });
+  it("挿入モードは末尾の空きを押し出して入る（`ABC` の先頭へ `X` → `XABC`）", async () => {
+    const t = await open(snapshot([], "either"));
+    await t.at(0);
+    for (const ch of "ABC") await t.key(ch);
+    await t.at(0);
+    await t.key("Insert");
+    await t.key("X");
+    expect(t.edits.get(1)).toBe("XABC");
+  });
+  it("必須埋め: 空きがあれば満杯でない・打った空白は埋まっている", () => {
+    const f = { index: 1, row: 5, col: 10, length: 4, protected: false, hidden: false, numeric: false, mdt: true, value: "", dbcsType: "either", adjust: "mandatory-fill" } as unknown as Field;
+    const check = (v: string): boolean => mandatoryFillViolated(f, new Map([[1, v]]));
+    expect([check("A\u0000CD"), check("ABC "), check("ABC")]).toEqual([true, false, true]);
   });
 });
 

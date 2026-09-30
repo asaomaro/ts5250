@@ -18,10 +18,10 @@ const SO = rawSentinel(0x0e);
 const SI = rawSentinel(0x0f);
 
 /** (5,10) に O 欄 12 桁（空） */
-function oField(): ScreenBuffer {
+function oField(fcw = 0x80): ScreenBuffer {
   const buf = new ScreenBuffer();
   applyDataStream(
-    Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 9, ORDER.SF, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0c]),
+    Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 9, ORDER.SF, 0x40, 0x00, 0x82, fcw, 0x20, 0x00, 0x0c]),
     buf,
     codec,
     () => {}
@@ -30,8 +30,8 @@ function oField(): ScreenBuffer {
 }
 const mdt = (buf: ScreenBuffer): string => hex(parseRecord(buildReadMdtResponse(buf, codec, AID.ENTER, { row: 5, col: 10 }).record).data.subarray(6));
 const alt = (buf: ScreenBuffer): string => hex(parseRecord(buildReadMdtAltResponse(buf, codec, AID.ENTER, { row: 5, col: 10 }).record).data.subarray(6));
-const edit = (value: string): ScreenBuffer => {
-  const buf = oField();
+const edit = (value: string, fcw = 0x80): ScreenBuffer => {
+  const buf = oField(fcw);
   buf.setFieldValue(buf.orderedFields()[0]!, value, true);
   return buf;
 };
@@ -40,6 +40,21 @@ describe("継続でない O 欄の送信（空き〔NUL〕と空白）", () => {
   it("打った末尾の空白は送る（`A` ＋空白 → c1 40。READ MDT・ALT とも）", () => {
     expect(mdt(edit("A "))).toBe("c140");
     expect(alt(edit("A "))).toBe("c140");
+  });
+  it("半角の状態の E 欄も打った末尾の空白を送る（`A`＋空白 → c1 40）・末尾の空きは送らない", () => {
+    expect(mdt(edit("A ", 0x40))).toBe("c140");
+    expect(alt(edit("A ", 0x40))).toBe("c140");
+    expect(mdt(edit("A\u0000\u0000", 0x40))).toBe("c1");
+  });
+  it("E 欄の空白も生バイト 0x40 を持つ・並びの後ろの打った空白も送る（`SO あ SI`＋空白）", () => {
+    const b = edit(SO + "あ" + SI + " ", 0x40);
+    expect(mdt(b)).toBe("0e44810f40");
+    const f = b.orderedFields()[0]!;
+    const c = b.cellAt(f.startAddr + 4);
+    expect(c !== null && c?.type === "char" ? c.rawByte : undefined).toBe(0x40);
+    const p = edit("A ", 0x40);
+    const q = p.cellAt(p.orderedFields()[0]!.startAddr + 1);
+    expect(q !== null && q?.type === "char" ? q.rawByte : undefined).toBe(0x40);
   });
   it("末尾の空きは送らない（`A` だけ）", () => {
     expect(mdt(edit("A\u0000\u0000"))).toBe("c1");

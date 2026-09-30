@@ -1299,7 +1299,7 @@ export class ScreenBuffer {
   private setFieldCells(field: InternalField, value: string): void {
     const cells: (InternalCell | null)[] = [];
     // O 欄（継続の鎖も継続でないものも）は空き（NUL）と空白が別: 空白は中身（生バイト 0x40。末尾も落とさない）、空きは U+0000
-    const chain = field.dbcsType === "open";
+    const chain = field.dbcsType === "open" || field.dbcsType === "either"; // E も（半角の状態の空白は中身。`20260930-either-half-space`）
     let inShift = false;
     let lead: number | undefined; // 並びの中の生バイトは 2 つで全角 1 字（未編集の原本の書き戻し）
     for (const ch of value) {
@@ -1413,7 +1413,7 @@ export class ScreenBuffer {
         };
       } else {
         // O 欄の空白は中身（生バイト 0x40 を持たせて空きの桁と見分ける。`setFieldCells` と同じ）
-        const chainSpace = ch === " " && field.dbcsType === "open";
+        const chainSpace = ch === " " && (field.dbcsType === "open" || field.dbcsType === "either");
         this.cells[field.startAddr + i] =
           ch !== undefined ? { type: "char", char: ch, charKind: "sbcs", ...(chainSpace ? { rawByte: 0x40 } : {}) } : null;
       }

@@ -706,6 +706,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   実機のブラウザ: O 欄の READ MDT・ALT が ACS と一致（`scripts/verify-browser-space-typed.mjs` の f3・f4）、既存の実機スクリプト 9 本が一致のまま（o-field 3・je-field 3・cont-o 24・cont-o-paste 15・cont-o-lone-shift 16・either-remainder 4・either-empty-view 7・word-wrap 8・space-typed）。
   単体 `o-field-nul.test.ts`・`packages/tn5250/test/o-field-send.test.ts`（新規）ほか。変異 15 通り（等価 1 を除き全て検出）。PR #472。
   **残り**: 下の `[ ]`（J・G・全角の E の打った全角空白と詰め物の区別・半角の E の末尾の空白）。
+- [x] **半角の状態の E 欄の空き（NUL）と空白の区別**（下の「E 欄の残り」から割った）。**実装した**（`20260930-either-half-space`）。実機の ACS のコア（`space-typed.txt` の f2）で、半角の E に打った末尾の空白は `c1 40`
+  （READ MDT・ALT とも）と測り、当 PJ は `c1` だった。O 欄と同じ仕組み（値の U+0000＝空き）を半角の状態の E へ広げた（`ScreenGrid.vue` の `eitherHalf`・`trimPad`・`padDbcs`・`absorbDbcs`・End・必須埋め、core の `setFieldCells`）。
+  実機のブラウザ: `verify-browser-space-typed.mjs` pass=9（f2・f3・f4 が ACS と一致）、either-remainder 4・either-empty-view 7・je-field 3・o-field 3・cont-o 24 が一致のまま。変異 9 通り（等価 1 を除き全て検出）。PR #473。
+  **測って分かった残り（`space-typed-2.txt`・DSM の `SPACETY2`）**: ①SI の無い E（open）の SO の次で Erase EOF → `い`＋Space（全角空白）＋`う` を打って Backspace は `0e 4482 0e 4040 0f`（い の後ろに**新しい `SO 4040 SI` の組**ができる）。
+  compact の E の SI の桁への全角空白は `0e 4481 4040 0f`。当 PJ の open は SI 無しの並びで送る（台帳の元の記述「`40 40` で送る」は不正確）。②**通常の SBCS の欄に打った末尾の空白も `c1 40` で送る**（当 PJ は落とす。ホストの CHAR 欄は空白で埋めるので受け取る値は同じ）。
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）。上の `[x]`（伏せ字・Dup・挿入の余地）を除いた残り: 伏せ字で**中身が入って届く** DBCS 欄の編集（値をブラウザへ出さない設計のため編集が空から始まる。
   ACS は中身の上に上書きする。実機: 空の伏せ字の E は一致）と、open の E の中身の末尾に打った全角空白（下）。**【2026-09-30 に「対応不要」で閉じたが、利用者の指示で再開】**（以下は閉じたときの記述）: 残りは伏せ字の E 欄・Dup・open の E の中身の末尾の全角空白・挿入モードの取り置きの状態の利用で、
   いずれも DBCS の E 欄の特殊な組み合わせ（パスワードを DBCS の E 欄にする・E 欄で Dup を使う・E 欄の末尾に全角空白だけを打つ）でしか起きず、起きても送るバイト列の末尾の空白の差にとどまる。
