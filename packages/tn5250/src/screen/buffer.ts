@@ -65,6 +65,8 @@ const extentOf = (p: PendingWrite): WriteExtent => {
 
 /** コーデックがマップできなかったバイトのデコード結果（表示は空白・値はセンチネルで運ぶ） */
 const UNDISPLAYABLE = "\uFFFD";
+/** 空きの桁（NUL）を運ぶセンチネル（語送りの欄の値。`fieldValue`・`setFieldValue`） */
+const NUL_SENTINEL = rawSentinel(0x00);
 
 /**
  * 内部セル: 属性バイト or 文字（Unicode）。null = 未設定（既定属性の空白）。
@@ -148,6 +150,12 @@ export interface InternalField {
   nextResequence?: number;
   /** **透過の欄**（FCW 0x84xx 由来。ACS `Field5250.transparentField`）。送るときにヌルも符号も加工せず生のバイトで送る。立つときだけ付与 */
   transparent?: boolean;
+  /**
+   * **語送りの欄**（FCW 0x8680 由来。DDS の `WRDWRAP`）。打鍵・削除のあと、行末で語を次の行へ送る（ACS `PS5250.processWordWrap`。web-ui の `wordWrap.ts`）。
+   * 欄が 1 行に収まるとき・継続欄は立てない（ACS `Field5250` は行に収まる欄では `WrapField` を下ろす）。立つときだけ付与。
+   * 語送りは空きの桁（NUL）を語の間の詰め物に使うので、この欄の値は**途中の NUL と実空白を区別して**返す（`fieldValue`）
+   */
+  wordWrap?: boolean;
   /**
    * **E（either）欄がいま全角（DBCS）の状態か**（ACS `Field5250.EitherFieldDBCSOn`。`20260927-either-field-mode`）。
    * 欄の中身から毎回求める値ではなく**欄ごとに持ち続ける状態**——ACS は欄を消しても SO/SI を残して DBCS のままにする。
@@ -1155,7 +1163,8 @@ export class ScreenBuffer {
     cursorProgression?: number,
     selfCheck?: SelfCheckKind,
     transparent = false,
-    nextResequence?: number
+    nextResequence?: number,
+    wordWrap = false
   ): void {
     this.checkAddr(startAddr);
     if (length < 1 || startAddr + length > this.size) {
@@ -1179,7 +1188,8 @@ export class ScreenBuffer {
       ...(cursorProgression !== undefined ? { cursorProgression } : {}),
       ...(selfCheck !== undefined ? { selfCheck } : {}),
       ...(transparent ? { transparent } : {}),
-      ...(nextResequence !== undefined ? { nextResequence } : {})
+      ...(nextResequence !== undefined ? { nextResequence } : {}),
+      ...(wordWrap ? { wordWrap } : {})
     });
   }
 
@@ -1380,6 +1390,9 @@ export class ScreenBuffer {
       // 位置に、その属性バイトのセルを置き直す（桁ずれ・色ずれ・送信での破壊を防ぐ）。
       if (ch !== undefined && isAttrSentinel(ch)) {
         this.cells[field.startAddr + i] = { type: "attr", byte: sentinelByte(ch) };
+      } else if (ch !== undefined && ch === NUL_SENTINEL) {
+        // **空きの桁（NUL）**。語送りの欄の値が運ぶ（`fieldValue`）。生バイトのセルにすると READ MDT で 00 のまま出てしまう
+        this.cells[field.startAddr + i] = null;
       } else if (ch !== undefined && isRawSentinel(ch)) {
         // 表示できない SBCS バイト。生バイトを保ったまま置き直す（送信で元に戻る）
         this.cells[field.startAddr + i] = {
@@ -1478,9 +1491,15 @@ export class ScreenBuffer {
       // 送信側（read-response）はセンチネルを生バイト 1 つとして書き、前後を別 run で
       // encode するので、DBCS 欄でも SO/SI の整合は保たれる（属性は SBCS モードの 1 バイト）。
       } else if (c?.type === "attr") s += attrSentinel(c.byte);
-      else s += " ";
+      // 語送りの欄は空きの桁（NUL）を実空白と区別して返す（語送りが語の間の詰め物に使う。`InternalField.wordWrap`）
+      else s += field.wordWrap === true && c === null ? NUL_SENTINEL : " ";
     }
-    return keepTrailingBlanks ? s : s.replace(/ +$/, "");
+    if (keepTrailingBlanks) return s;
+    if (field.wordWrap !== true) return s.replace(/ +$/, "");
+    // 語送りの欄は末尾の空白と NUL（センチネル）を落とす
+    const cs = [...s];
+    while (cs.length > 0 && (cs[cs.length - 1] === " " || cs[cs.length - 1] === NUL_SENTINEL)) cs.pop();
+    return cs.join("");
   }
 
   /** 欄が SO/SI・DBCS の構造セルを持つ（＝ホストが描いた原本のまま。setFieldValue 後は全 SBCS）。 */
@@ -1777,6 +1796,8 @@ export class ScreenBuffer {
       if (f.continued !== undefined) field.continued = f.continued;
       // カーソル送り（FLDCSRPRG）。移動を組み立てるのは UI 側
       if (f.cursorProgression !== undefined) field.cursorProgression = f.cursorProgression;
+      // 語送り（WRDWRAP）。語送りを掛けるのは UI 側（ACS `processWordWrap`）
+      if (f.wordWrap === true) field.wordWrap = true;
       // 自己点検欄（CHECK(M10)/CHECK(M11)）。検算して送信を止めるのは UI 側（ACS も送信時に検査）
       if (f.selfCheck !== undefined) field.selfCheck = f.selfCheck;
       return field;

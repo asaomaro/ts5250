@@ -174,6 +174,12 @@ export interface Field {
    * `0x8803` で来ることを実測済み。
    */
   cursorProgression?: number;
+  /**
+   * **語送りの欄**（FCW `0x8680`。DDS の `WRDWRAP`）。打鍵・削除のあと、行末で語を次の行へ送る（ACS `PS5250.processWordWrap`）。
+   * 立つのは複数の行にまたがる単独の欄だけ。**この欄の `value` は途中の NUL（空きの桁）を `rawSentinel(0x00)` で返す**——語送りは空きを語の間の詰め物にするので、
+   * 実空白と区別して持ち回らないと ACS と同じ並びにならない。末尾の NUL と空白は落とす。
+   */
+  wordWrap?: boolean;
   mdt: boolean;
   value: string;
 }
