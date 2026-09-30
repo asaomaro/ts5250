@@ -727,6 +727,11 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   打った全角空白は中身として残す（`trimPad`・`padDbcs`・`logicalFromCells`・`jeExplicit`・End・挿入の余地・貼り付けの詰め物・表示・必須埋め）。
   実機のブラウザ: `verify-browser-space-typed.mjs` pass=12（J・E・E・O・O・J の READ MDT と ALT が全て ACS と一致）、je-field 3・either-remainder 4・either-empty-view 7・o-field 3・cont-o 24 が一致のまま。
   変異 10 通り全て検出。PR #476。**残り**: 下の `[ ]`（SI の無い E〔open〕の末尾の全角空白は ACS が `0e 4482 0e 4040 0f`・通常の SBCS の欄の末尾の空白は `c1 40`・伏せ字の DBCS 欄の中身）。
+- [x] **中身が入って届く伏せ字の DBCS 欄の編集**（下の「E 欄の残り」から割った）。**実装した**（`20260930-hidden-keep`）。実機の ACS のコア（DSM の `HIDDENC`・`scripts/acs-probe/hidden-dbcs-content.txt`）は、非表示の `SO あ い SI` の あ へ う を上書きして `0e 4483 4482 0f`・
+  Delete で `0e 4482 0f`（J・E も同じ形）と、中身の上に編集した。当 PJ は値をブラウザへ出さない設計（平文が外へ出ない不変条件）なので編集が空から始まり、残りの中身が消えた。中身は出さず、snapshot の `Cell.keep`（書いたかどうかだけ）から
+  web-ui が「触らない桁の目印」（桁の番号つき。`keepNarrow`・`keepWide`）で値を作り、保存の入口 `Session5250.setField` で core が元の中身へ戻す（`ScreenBuffer.mergeKeep`）。編集エンジンは目印を通常の字として扱う。
+  実機のブラウザ: `verify-browser-hidden-dbcs.mjs` pass=6（O・J・E の上書きと Delete）、either-remainder 4・space-typed 12・je-field 3・o-field 3・cont-o 24 が一致のまま。変異 7 通り全て検出。PR #477。
+  **未測定**: 伏せ字の欄の選択範囲の削除・貼り付け・語の削除。
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）。上の `[x]`（伏せ字・Dup・挿入の余地）を除いた残り: 伏せ字で**中身が入って届く** DBCS 欄の編集（値をブラウザへ出さない設計のため編集が空から始まる。
   ACS は中身の上に上書きする。実機: 空の伏せ字の E は一致）と、open の E の中身の末尾に打った全角空白（下）。**【2026-09-30 に「対応不要」で閉じたが、利用者の指示で再開】**（以下は閉じたときの記述）: 残りは伏せ字の E 欄・Dup・open の E の中身の末尾の全角空白・挿入モードの取り置きの状態の利用で、
   いずれも DBCS の E 欄の特殊な組み合わせ（パスワードを DBCS の E 欄にする・E 欄で Dup を使う・E 欄の末尾に全角空白だけを打つ）でしか起きず、起きても送るバイト列の末尾の空白の差にとどまる。

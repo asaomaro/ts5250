@@ -1,0 +1,31 @@
+# **中身が入って届く伏せ字（非表示）の DBCS 欄の編集**（台帳「E 欄の残り」）。DSM の HIDDENC（`scripts/host-src/dscmd.c`）:
+# (3,10) O `SO あ い SI`＋NUL / (5,10) J `SO あ い 4040×3 SI`（ホストが欄長へ整えた形）/ (7,10) E `SO あ い SI`＋NUL（どれも 12 桁・非表示）。READ MDT を 2 回（`[H1]`・`[H2]`）。
+#   1 巡目: 各欄の あ の頭（x,11）で 全角 う を上書き / 2 巡目: 各欄の あ の頭で Delete
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/hidden-dbcs-content.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('HIDDENC')[enter]
+settle 4000
+dump start
+setcursor 3,11
+keys う
+setcursor 5,11
+keys う
+setcursor 7,11
+keys う
+settle 400
+dump h1
+keys [enter]
+settle 3500
+setcursor 3,11
+keys [delete]
+setcursor 5,11
+keys [delete]
+setcursor 7,11
+keys [delete]
+settle 400
+dump h2
+keys [enter]
+settle 3500

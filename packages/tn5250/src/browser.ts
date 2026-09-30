@@ -44,7 +44,11 @@ export {
   isSplitLead,
   splitLeadChar,
   SPLIT_TAIL,
-  isSplitTail
+  isSplitTail,
+  // 中身が入って届く非表示の DBCS 欄の、触らない桁の目印
+  keepNarrow,
+  keepWide,
+  keepIndex
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
 /** 桁区切り（DSPATR(CS)）の連なり。画面と保存 HTML が同じ位置に区切りを引くために共有する */

@@ -68,7 +68,7 @@ import {
   type WindowRect,
   type OptionSpan
 } from "../composables/fkeyLegend.js";
-import { GRID_COLOR, columnSeparatorRuns, splitLead, SPLIT_TAIL, isSplitLead, isSplitTail } from "@ts5250/tn5250/browser";
+import { GRID_COLOR, columnSeparatorRuns, splitLead, SPLIT_TAIL, isSplitLead, isSplitTail, keepNarrow, keepWide } from "@ts5250/tn5250/browser";
 import type {
   ButtonStyle,
   WindowFrame,
@@ -1864,13 +1864,22 @@ function logicalFromCells(f: Field): string {
   // J・G・全角の E（詰め物が全角 1 桁の欄）は、書かなかった桁（生バイトの無い空白）2 つを全角 1 桁の空き（WIDE_NUL）にする
   const wideFree = wideFill(f) || jeWidePad(f, []);
   let freeRun = 0;
+  // 中身が入って届く非表示の DBCS 欄: 字は出ない（core が空白で出す）ので、中身のある桁は「触らない桁」の目印で持つ（保存のとき core が元の中身へ戻す。`keepNarrow`・`keepWide`）
+  const keepMode = f.hidden === true && !!f.dbcsType;
+  let off = -1; // 欄の先頭からの桁（スライスをまたいで数える）
   let s = "";
   for (const sl of slicesOf(f)) {
     const row = props.snapshot.cells[sl.row - 1];
     if (!row) continue;
     for (let i = 0; i < sl.width; i++) {
       const cell = row[sl.col - 1 + i];
+      off++;
       if (!cell) continue;
+      if (keepMode && cell.keep === true) {
+        freeRun = 0;
+        s += cell.kind === "dbcs-lead" ? keepWide(off) : keepNarrow(off);
+        continue;
+      }
       if (wideFree && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) {
         if (++freeRun % 2 === 0) s += WIDE_NUL;
         continue;

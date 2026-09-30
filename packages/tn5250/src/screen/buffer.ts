@@ -15,6 +15,7 @@ import {
   isSplitLead,
   isSplitTail,
   splitLeadChar,
+  keepIndex,
   isRawSentinel,
   sentinelByte
 } from "./attr-sentinel.js";
@@ -1362,6 +1363,32 @@ export class ScreenBuffer {
     (this.continuedRun(field)[0] ?? field).mdt = true;
   }
 
+  /**
+   * **非表示の DBCS 欄の、触らない桁の目印を元の中身へ戻す**（`keepNarrow`・`keepWide`。中身をブラウザへ出さないので、編集した値には目印が載って届く）。
+   * 目印が指す桁が欄の外・空きなら空白にする。非表示でない欄の値はそのまま（目印は通常の字ではないので、あとの検証が弾く）
+   */
+  mergeKeep(field: InternalField, value: string): string {
+    if (![...value].some((c) => keepIndex(c) !== undefined) || !this.isFieldHidden(field)) return value;
+    let out = "";
+    for (const ch of value) {
+      const k = keepIndex(ch);
+      if (k === undefined) {
+        out += ch;
+        continue;
+      }
+      const c = k.idx < field.length ? this.cells[field.startAddr + k.idx] : undefined;
+      if (c == null || c.type !== "char") {
+        out += k.wide ? "\u3000" : " ";
+        continue;
+      }
+      if (k.wide) {
+        const tail = this.cells[field.startAddr + k.idx + 1];
+        out += c.char === UNDISPLAYABLE && c.rawByte !== undefined ? rawSentinel(c.rawByte) + rawSentinel(tail?.type === "char" ? (tail.rawByte ?? 0x40) : 0x40) : c.char;
+      } else out += c.char === UNDISPLAYABLE && c.rawByte !== undefined ? rawSentinel(c.rawByte) : c.char;
+    }
+    return out;
+  }
+
   fieldAt(row1: number, col1: number): InternalField {
     const addr = this.addrOf(row1, col1);
     const f = this.fields.find((x) => x.startAddr === addr);
@@ -1776,6 +1803,8 @@ export class ScreenBuffer {
           if (rawByte !== undefined && !attr.nonDisplay) out.rawByte = rawByte;
           // 死んだ桁の印（継続した O 欄の編集の続き。web-ui の詰め直しが捨てる桁を見分ける）
           if (cell?.type === "char" && cell.dead === true) out.dead = true;
+          // 非表示の欄の中身のある桁（字は出さない。編集が触らない桁を目印で持つため）
+          if (attr.nonDisplay && cell?.type === "char" && cell.dead !== true && (charKind === "sbcs" || charKind === "dbcs-lead")) out.keep = true;
           rowCells.push(out);
         }
       }
