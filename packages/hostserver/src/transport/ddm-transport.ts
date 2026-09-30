@@ -19,6 +19,12 @@ export interface DdmTransportOptions {
   port: number;
   tls?: boolean | HostTlsOptions;
   timeoutMs?: number;
+  /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS 同梱の `jt400` も既定で入れない——`SocketProperties` の `keepAlive` は設定しなければ JVM の既定）。
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
+   * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
+   */
+  keepAlive?: boolean;
 }
 
 export interface DdmTransport {
@@ -46,10 +52,9 @@ export function openDdmTransport(opts: DdmTransportOptions): Promise<DdmTranspor
           ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {})
         })
       : netConnect({ host: opts.host, port: opts.port });
-    // **無通信でも生死が分かるようにする。** 無いと NAT やファイアウォールに落とされても
-    // どちらの端も気づかず、送ろうとして初めて分かる。
-    // 値は `host-connection.ts` と揃える（同じ性質の待ちを別の値にしない）
-    socket.setKeepAlive(true, 60_000);
+    // **TCP キープアライブは既定で入れない**（`host-connection.ts` と同じ。`20260930-hostserver-keepalive-off`）。
+    // 入れる環境（NAT やファイアウォールが無通信の接続を落とす）は値も揃える（同じ性質の待ちを別の値にしない）
+    if (opts.keepAlive === true) socket.setKeepAlive(true, 60_000);
 
     let buffer = Buffer.alloc(0);
     /** 受信済みで未消費のフレーム。要求より先に届くことがある（チェイン応答） */

@@ -21,6 +21,8 @@ export interface HostServerAuth {
   user: string;
   password: string;
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
+  /** TCP キープアライブ（既定 false＝ACS 同梱の `jt400` と同じ。常駐の待ち受けが途中の機器に落とされる環境だけ。`20260930-hostserver-keepalive-off`） */
+  keepAlive?: boolean;
 }
 
 /**
@@ -42,7 +44,8 @@ export function hostAuthFrom(opts: ConnectOptions): HostServerAuth {
     host: opts.host,
     user: opts.user,
     password: opts.password,
-    ...(opts.tls !== undefined ? { tls: opts.tls } : {})
+    ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+    ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
   };
 }
 
