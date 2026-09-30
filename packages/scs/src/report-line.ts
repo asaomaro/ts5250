@@ -95,6 +95,28 @@ export function reportLineSegs(
   return out;
 }
 
+/**
+ * **重ねて描く字の見せ方**（`LogicalPage.decor[].glyphs`。重ね打ちで下になった字・半分の幅の字）。読みを切り替えたときは生バイトを読み直す
+ * （`reportLineSegs` と同じ規則）。全角の判定は同じ `isFullWidth`——全角は 2 桁の箱に入れる
+ */
+export function overGlyphView(g: { text: string; scale: number; raw?: number | undefined }, alt?: SbcsReading): { text: string; wide: boolean; scale: number } {
+  const ch = displayableChar(g.text);
+  const wide = isFullWidth(ch);
+  const shown = !wide && alt !== undefined && g.raw !== undefined ? recode(g.raw, alt) : ch;
+  return { text: shown, wide, scale: g.scale };
+}
+
+/**
+ * **罫線の線の見た目**（ACS `JPSGridLine.getStroke`: 細は 0.75 pt・太は 1.5 pt・二重は 2 本〔太さは細か太のまま〕・点線は 7.2 の破線）。
+ * 画面・配布 HTML の CSS の値に使う（PDF は pt をそのまま使う）
+ */
+export function ruleLook(r: { dotted: boolean; weight: "thin" | "bold" | "pair" }): { px: number; style: "solid" | "dotted" | "double"; pt: number } {
+  const pt = r.weight === "bold" ? 1.5 : 0.75;
+  // 二重は 2 本の細線。CSS の double は 3px 以上で 2 本に見える
+  if (r.weight === "pair") return { px: 3, style: r.dotted ? "dotted" : "double", pt };
+  return { px: r.weight === "bold" ? 2 : 1, style: r.dotted ? "dotted" : "solid", pt };
+}
+
 /** その行に「読み直すと字が変わる桁」があるか */
 export function lineHasAlt(
   line: string,

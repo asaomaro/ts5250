@@ -26,8 +26,8 @@
 import { computed } from "vue";
 // **サブパスから取る**（`@ts5250/ebcdic/katakana` と同じ理由）。入口から取ると
 // `spool-html` まで画面側へ引き込むことになる——型は実行時に消えるので入口のままでよい。
-import { reportLineSegs, type ReportSeg, type SbcsReading } from "@ts5250/scs/report-line";
-import type { LogicalPage, ShiftMark } from "@ts5250/scs";
+import { reportLineSegs, overGlyphView, ruleLook, type ReportSeg, type SbcsReading } from "@ts5250/scs/report-line";
+import type { LogicalPage, ShiftMark, RowDecor } from "@ts5250/scs";
 import { isKatakanaCcsid } from "@ts5250/ebcdic/katakana";
 import { viewSettings, resolveSbcsView } from "../stores/viewSettings.js";
 import { screenFontStack } from "../composables/screenFonts.js";
@@ -63,6 +63,8 @@ const PAGE_BREAK = "─".repeat(20) + " (改ページ) " + "─".repeat(20);
 interface Row {
   segs: ReportSeg[];
   marks: readonly ShiftMark[];
+  /** 重ねて描く字・罫線（重ね打ち・半分の幅・DGL。`LogicalPage.decor`） */
+  decor?: RowDecor | undefined;
 }
 
 const rows = computed<Row[]>(() => {
@@ -72,7 +74,8 @@ const rows = computed<Row[]>(() => {
     p.lines.forEach((line, r) => {
       out.push({
         segs: reportLineSegs(line, p.raw?.[r] ?? [], alt.value),
-        marks: showMarks.value ? (p.shifts?.[r] ?? []) : []
+        marks: showMarks.value ? (p.shifts?.[r] ?? []) : [],
+        decor: p.decor?.[r]
       });
     });
   });
@@ -91,6 +94,28 @@ const rows = computed<Row[]>(() => {
 function markStyle(m: ShiftMark): Record<string, string> {
   const w = (m as { width?: number }).width ?? 0;
   return w > 0 ? { left: `${m.col - 1}ch`, marginLeft: "0", width: `${w}ch` } : { left: `${m.col - 1}ch` };
+}
+
+/** 重ねて描く字の見せ方（読みを切り替えたら生バイトを読み直す。`reportLineSegs` と同じ規則） */
+function glyphStyle(g: { x: number; text: string; scale: number; raw?: number | undefined }): { text: string; style: Record<string, string> } {
+  const v = overGlyphView(g, alt.value);
+  const style: Record<string, string> = { left: `${g.x}ch` };
+  if (v.wide) style["width"] = `${2 * v.scale}ch`;
+  if (v.scale !== 1) {
+    style["transform"] = `scaleX(${v.scale})`;
+    style["transformOrigin"] = "0 0";
+  }
+  return { text: v.text, style };
+}
+
+/** 罫線の線（`spool-html.ts` の `decorHtml` と同じ値。`ruleLook`） */
+function hRuleStyle(r: { x1: number; x2: number; dotted: boolean; weight: "thin" | "bold" | "pair" }): Record<string, string> {
+  const l = ruleLook(r);
+  return { left: `${r.x1}ch`, width: `${r.x2 - r.x1}ch`, borderBottom: `${l.px}px ${l.style} currentColor` };
+}
+function vRuleStyle(r: { x: number; dotted: boolean; weight: "thin" | "bold" | "pair" }): Record<string, string> {
+  const l = ruleLook(r);
+  return { left: `${r.x}ch`, borderLeft: `${l.px}px ${l.style} currentColor` };
 }
 
 /** その区間に出す字（読み直す設定なら `alt` 側） */
@@ -123,7 +148,22 @@ function partsOf(seg: ReportSeg): { text: string; href?: string }[] {
       :key="k"
     ><a v-if="p.href" :href="p.href" target="_blank" rel="noopener noreferrer">{{ p.text }}</a><template
       v-else
-    >{{ p.text }}</template></template></template></template></div>
+    >{{ p.text }}</template></template></template></template><template v-if="row.decor"><span
+      v-for="(g, n) in row.decor.glyphs ?? []"
+      :key="`g${n}`"
+      class="og"
+      :style="glyphStyle(g).style"
+    >{{ glyphStyle(g).text }}</span><span
+      v-for="(r, n) in row.decor.h ?? []"
+      :key="`h${n}`"
+      class="hr"
+      :style="hRuleStyle(r)"
+    /><span
+      v-for="(r, n) in row.decor.v ?? []"
+      :key="`v${n}`"
+      class="vr"
+      :style="vRuleStyle(r)"
+    /></template></div>
   </div>
 </template>
 
@@ -174,5 +214,31 @@ function partsOf(seg: ReportSeg): { text: string; href?: string }[] {
 }
 .so.strong {
   color: color-mix(in srgb, currentColor 65%, transparent);
+}
+/* 格子に載らないもの（重ね打ちで下になった字・半分の幅の字・罫線。`LogicalPage.decor`）。**重ねて置く**ので桁は動かず、選択・コピーにも入らない
+   （字は格子が持っている）。行の箱（`.ln`）の上端・下端に合わせる（`spool-html.ts` と同じ） */
+.og {
+  position: absolute;
+  top: 0;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hr {
+  position: absolute;
+  bottom: 0;
+  height: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.vr {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  pointer-events: none;
+  user-select: none;
 }
 </style>

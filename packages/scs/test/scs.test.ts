@@ -384,7 +384,7 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
   });
   /**
    * **SFSS（`2B FD 04 02 hh vv`）の横の倍率**（ACS `processSetFontSizeScaling` → `JPSFontSizeScaling`。`JPSPrintableCharacters` は字の進みに倍率を掛ける。`20260927-scs-sfss`）:
-   * 0x20 は 1 字で 2 桁（空白・HT も）、0x10・0x00 は元に戻す、0x08（半分）は桁の格子で表せないので 1 倍。SO/SI の桁は倍にしない
+   * 0x20 は 1 字で 2 桁（空白・HT も）、0x10・0x00 は元に戻す、0x08（半分）は格子に載らないので重ねて描く層へ（`scs-overlay.test.ts`）。SO/SI の桁は倍にしない
    */
   it("**SFSS の倍幅（0x20）は 1 字で 2 桁**・空白と HT も 2 桁・0x10 で戻る", () => {
     const dbl = [0x2b, 0xfd, 0x04, 0x02, 0x20, 0x00];
@@ -392,7 +392,8 @@ describe("SCS: 制御の表（ACS と同じ）", () => {
     expect(lines([...dbl, ...E("AB"), ...reg, ...E("CD")])).toEqual(["A B CD"]);
     expect(lines([...dbl, ...E("A"), 0x40, ...E("B")])).toEqual(["A   B"]);
     expect(lines([...dbl, ...E("A"), 0x05, ...E("B")])).toEqual(["A   B"]);
-    expect(lines([0x2b, 0xfd, 0x04, 0x02, 0x08, 0x00, ...E("AB")])).toEqual(["AB"]);
+    // 半分の幅（0x08）は 1 桁に 2 字入り桁の格子に載らないので、格子は空白のまま重ねて描く（`scs-overlay.test.ts`。~~1 倍として扱う~~ は破棄）
+    expect(lines([0x2b, 0xfd, 0x04, 0x02, 0x08, 0x00, ...E("AB")])).toEqual([""]);
   });
   it("SFSS の長さが 2〜4 の外なら受けない・長さ 3 は横だけ読む", () => {
     expect(lines([0x2b, 0xfd, 0x05, 0x02, 0x20, 0x00, 0x00, ...E("AB")])).toEqual(["AB"]);

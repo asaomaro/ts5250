@@ -25,8 +25,8 @@
 import type { LogicalPage } from "./scs.js";
 // **行の組み立ては共用**（`report-line.ts`）。画面（web-ui の ReportText）と同じ関数を通す
 // ——ここを別々に書くと「画面ではこう見えるのに保存した HTML では違う」が起きる。
-import { reportLineSegs, lineHasAlt, type ReportSeg, type SbcsReading } from "./report-line.js";
-import type { ShiftMark } from "./scs.js";
+import { reportLineSegs, lineHasAlt, overGlyphView, ruleLook, type ReportSeg, type SbcsReading } from "./report-line.js";
+import type { ShiftMark, RowDecor } from "./scs.js";
 // **フォントの候補は画面 HTML と共有する**（`@ts5250/base`）——2 か所に書くと候補がずれる
 import { EVIDENCE_FONTS, evidenceFontIndex } from "@ts5250/base";
 
@@ -124,7 +124,8 @@ function renderLine(
   line: string,
   raw: readonly (number | undefined)[],
   shifts: readonly ShiftMark[],
-  alt: SbcsReading | undefined
+  alt: SbcsReading | undefined,
+  decor?: RowDecor
 ): string {
   const body = reportLineSegs(line, raw, alt)
     .map((seg: ReportSeg) => {
@@ -134,7 +135,32 @@ function renderLine(
         : `<span class="va">${esc(seg.text)}</span><span class="vb">${esc(seg.alt)}</span>`;
     })
     .join("");
-  return body + shifts.map(markHtml).join("");
+  return body + shifts.map(markHtml).join("") + decorHtml(decor, alt);
+}
+
+/**
+ * **格子に載らないもの**（重ね打ちで下になった字・半分の幅の字・罫線。`LogicalPage.decor`）を、行の箱に**重ねて**描く。
+ * どれも `position:absolute` で幅を持たない扱い——桁は 1 つも動かず、選択・コピーにも入らない（`user-select:none`。字は格子が持っている）。
+ * 罫線は行の箱の下端（横）・上端から下端（縦）に置く——行の箱を隙間なく積んでいるので、縦線は行をまたいでつながる
+ */
+function decorHtml(d: RowDecor | undefined, alt: SbcsReading | undefined): string {
+  if (d === undefined) return "";
+  let out = "";
+  for (const g of d.glyphs ?? []) {
+    const v = overGlyphView(g, alt);
+    const box = v.wide ? `width:${2 * v.scale}ch;` : "";
+    const scale = v.scale !== 1 ? `transform:scaleX(${v.scale});transform-origin:0 0;` : "";
+    out += `<span class="og" style="left:${g.x}ch;${box}${scale}">${esc(v.text)}</span>`;
+  }
+  for (const r of d.h ?? []) {
+    const l = ruleLook(r);
+    out += `<span class="hr" style="left:${r.x1}ch;width:${r.x2 - r.x1}ch;border-bottom:${l.px}px ${l.style} currentColor"></span>`;
+  }
+  for (const r of d.v ?? []) {
+    const l = ruleLook(r);
+    out += `<span class="vr" style="left:${r.x}ch;border-left:${l.px}px ${l.style} currentColor"></span>`;
+  }
+  return out;
 }
 
 /**
@@ -171,7 +197,7 @@ function pageFigure(
   alt: SbcsReading | undefined
 ): string {
   const lines = p.lines
-    .map((l, r) => `<div class="ln">${renderLine(l, p.raw?.[r] ?? [], p.shifts?.[r] ?? [], alt)}</div>`)
+    .map((l, r) => `<div class="ln">${renderLine(l, p.raw?.[r] ?? [], p.shifts?.[r] ?? [], alt, p.decor?.[r])}</div>`)
     .join("");
   return (
     `<figure class="pg" data-page="${index + 1}">` +
@@ -266,6 +292,9 @@ figure.pg{display:none}
    ——出しても消しても桁が 1 つも動かないのはこのため。
    本物の { } と見分けが付くよう淡く描き、本文ではないので選択・コピーにも混ぜない。 */
 .ln{position:relative}
+.og{position:absolute;top:0;white-space:pre;pointer-events:none;user-select:none;-webkit-user-select:none;overflow:hidden}
+.hr{position:absolute;bottom:0;height:0;pointer-events:none;user-select:none}
+.vr{position:absolute;top:0;bottom:0;width:0;pointer-events:none;user-select:none}
 .so{display:none;position:absolute;top:0;width:1ch;margin-left:-.5ch;text-align:center;
 pointer-events:none;user-select:none;-webkit-user-select:none}
 #s1:checked ~ .page .so{display:inline-block;
