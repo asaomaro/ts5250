@@ -116,9 +116,33 @@ describe("継続した O 欄の上書き・Delete・Backspace・Erase EOF（ACS 
   it("C08: 並びの中で Erase EOF → SI で閉じて区間の残りを消す（続く区間の全消去は画面の側）", () => {
     expect(show(eraseToEnd(start()[0]!, 3, nulCell()))).toBe("<い>____");
   });
-  it("鎖の頭の Backspace は 0005、単独の SO/SI の Delete は 0065", () => {
+  it("鎖の頭の Backspace は 0005", () => {
     expect(chainBackspace(start(), { seg: 0, c: 0 })).toEqual({ error: 0x05 });
-    expect(chainDelete(start(), { seg: 0, c: 5 })).toEqual({ error: 0x65 });
+  });
+  // 単独の SO/SI の Delete（実機の ACS のコア D1〜D8。`scripts/acs-probe/cont-o-lone-shift.txt`）: 0065 を出すが詰め直しは回る
+  it("D1・D2: 単独の SO・SI の Delete は値を変えず 0065（欄は MDT のまま送られる）。カーソルも動かない", () => {
+    for (const c of [0, 5]) {
+      const r = chainDelete(start(), { seg: 0, c });
+      expect(r).toMatchObject({ warn: 0x65, cursor: { seg: 0, c } });
+      expect(ok(r).segs).toEqual(["<いえ>X_", "YZ______", "________"]);
+    }
+  });
+  it("D3・D4: 単独の SO/SI の次の Backspace は 0065 で何もしない（詰め直しも回らない）", () => {
+    expect(chainBackspace(start(), { seg: 0, c: 1 })).toEqual({ error: 0x65 });
+    expect(chainBackspace(start(), { seg: 0, c: 6 })).toEqual({ error: 0x65 });
+  });
+  it("区間の頭の Backspace が前の区間の最後の単独の SI を消すときも、0065 を出したうえで詰め直しが回る（カーソルは消そうとした桁）", () => {
+    const r = chainBackspace([seg("<いええ>"), seg("YZ"), seg("")], { seg: 1, c: 0 });
+    expect(r).toMatchObject({ warn: 0x65, cursor: { seg: 0, c: 7 } });
+    expect(ok(r).segs).toEqual(["<いええ>", "YZ______", "________"]);
+  });
+  it("D7・D8: 死んだ桁があるときは詰め直しで捨てられ、SI と SO の間が繋がる（SI でも SO でも同じ）", () => {
+    const a = (chainInsert(start(), { seg: 0, c: 6 }, "え") as { segs: OCell[][] }).segs; // <いえ>~~ / <え>X_YZ
+    for (const c of [5, 0]) {
+      const r = chainDelete(a, { seg: 0, c });
+      expect(r).toMatchObject({ warn: 0x65, cursor: { seg: 0, c } });
+      expect(ok(r).segs).toEqual(["<いええ>", "X_YZ____", "________"]);
+    }
   });
   it("死んだ桁の Delete は 2 桁（ACS: DBCSPlane が 0 でない桁）。区間の最後の 2 桁は次の区間の頭で上書きし、詰め直しで元の並びに戻る", () => {
     const a = (chainInsert(start(), { seg: 0, c: 6 }, "え") as { segs: OCell[][] }).segs; // <いえ>~~ / <え>X_YZ

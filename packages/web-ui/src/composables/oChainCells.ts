@@ -23,8 +23,11 @@ export interface ChainPos {
   c: number;
 }
 
-/** 鎖の操作の結果（`OResult` の鎖版）。`segs` は区間ごとのセル */
-export type ChainResult = { segs: OCell[][]; cursor: ChainPos } | { error: 0x05 | 0x12 | 0x65 } | { noop: true };
+/**
+ * 鎖の操作の結果（`OResult` の鎖版）。`segs` は区間ごとのセル。`warn` は操作は行ったがエラーも出す場合（単独の SO/SI の Delete は 0065 を出したうえで詰め直しを回す）——
+ * 呼び出し側は値を反映したうえでその理由を操作員メッセージにする
+ */
+export type ChainResult = { segs: OCell[][]; cursor: ChainPos; warn?: 0x65 } | { error: 0x05 | 0x12 | 0x65 } | { noop: true };
 
 /** 空き（NUL）。鎖の空きは空白と別（`OCell.nul`）——ACS の詰め直しは末尾の**空き**だけを余地に数え、空白は中身として押し出す */
 const empty = (): OCell => nulCell();
@@ -206,7 +209,8 @@ export function chainOverwrite(segs: readonly (readonly OCell[])[], pos: ChainPo
  * **Delete**（ACS `processDeleteChar` → `deleteCharInContField`）。消す桁数 k は SO+SI・SI+SO・全角・死んだ桁が 2、単独の SO/SI は 0065、ほかは 1
  * （次のセルは区間の中だけを見る——区間の最後の SO/SI の次は属性）。区間ごとに k 左へ詰め、**区間の最後の k 桁は次の区間の頭の k 桁**
  * （カーソルが区間の最後の k 桁の中でもそう書く——ACS の詰め方のまま）、最終区間の最後の k 桁は空き。そのあと操作無しの詰め直し（収まらなければ詰めたまま）。
- * 単独の SO/SI（0065）で ACS はそれでも詰め直しを回すが、ここでは値を変えない（未測定）
+ * 単独の SO/SI（0065）は**詰めずにエラーを出すが、詰め直しは回る**（実機の ACS のコア: `scripts/acs-probe/cont-o-lone-shift.txt` の D1〜D8——
+ * 死んだ桁が無ければ値は同じだが欄は MDT のまま送られ、死んだ桁があれば捨てられて SI と SO の間が繋がる。カーソルは動かない）
  */
 export function chainDelete(segs: readonly (readonly OCell[])[], pos: ChainPos): ChainResult {
   const cells = segs[pos.seg];
@@ -218,7 +222,10 @@ export function chainDelete(segs: readonly (readonly OCell[])[], pos: ChainPos):
   else if (x.k === "si") k = next === "so" ? 2 : 0;
   else if (x.k === "lead" || x.k === "tail" || x.dead) k = 2;
   else k = 1;
-  if (k === 0) return { error: 0x65 };
+  if (k === 0) {
+    const r = reflow(segs, pos, []);
+    return { segs: r?.segs ?? copy(segs), cursor: pos, warn: 0x65 };
+  }
   const out = copy(segs);
   for (let s = pos.seg; s < out.length; s++) {
     const orig = segs[s]!;
@@ -249,5 +256,37 @@ export function chainBackspace(segs: readonly (readonly OCell[])[], pos: ChainPo
     target = { seg: pos.seg, c: n };
   }
   const r = chainDelete(segs, target);
-  return "segs" in r ? { segs: r.segs, cursor: target } : r;
+  return "segs" in r ? { ...r, cursor: target } : r;
+}
+
+/**
+ * **貼り付け**（ACS `ECLPS.pasteLineWrap`）。貼った字は 1 字ずつの打鍵と同じに鎖の操作を通し（上書き・挿入とも）、**カーソルが最初の区間を出た字を置いたところで止まる**——
+ * 実機の ACS のコア（`scripts/acs-probe/cont-o-paste.txt`）で、全角 8 字は最初の区間の 3 字で、半角 16 字は 8 字で止まり、
+ * 全角が区間の残りに入らないとき（P3）はその字を次の区間の頭へ置いてから止まった。途中の字がエラー（0005・0012・0065）で止まればそこまでが入る。
+ * カーソルは動かさない（ACS の貼り付けは開始位置を引数に取り、カーソルを動かさない）ので、返す `cursor` は貼る前の位置
+ */
+export function chainPaste(
+  segs: readonly (readonly OCell[])[],
+  pos: ChainPos,
+  chars: readonly string[],
+  insert: boolean
+): { segs: OCell[][]; cursor: ChainPos; placed: number; error?: 0x05 | 0x12 | 0x65 } {
+  let cur: readonly (readonly OCell[])[] = segs;
+  let at = pos;
+  let placed = 0;
+  let error: 0x05 | 0x12 | 0x65 | undefined;
+  for (const ch of chars) {
+    const r = insert ? chainInsert(cur, at, ch) : chainOverwrite(cur, at, ch);
+    if ("error" in r) {
+      error = r.error;
+      break;
+    }
+    if ("noop" in r) break;
+    cur = r.segs;
+    at = r.cursor;
+    placed++;
+    if (at.seg !== pos.seg) break;
+  }
+  const out = { segs: copy(cur), cursor: pos, placed };
+  return error === undefined ? out : { ...out, error };
 }
