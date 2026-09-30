@@ -98,6 +98,43 @@ async function open(snapshot: ScreenSnapshot = chainSnapshot()) {
   return { edits, notices, inputs, active, at, key, compose, fieldFull };
 }
 
+describe("継続した O 欄の空き（NUL）と空白（0x40）（`20260930-cont-o-nul`）", () => {
+  /** (5,10) から 8 桁ずつ 3 区間の空の鎖。`hostSpaces` の桁だけホストが書いた空白（生バイト 0x40。空きは生バイトを持たない） */
+  function spacesSnapshot(hostSpaces: number[]): ScreenSnapshot {
+    const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
+    for (const c of hostSpaces) (cells[4]![9 + c] as Cell).rawByte = 0x40;
+    const seg = (index: number, row: number, continued: string): Field =>
+      ({ index, row, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType: "open", continued }) as unknown as Field;
+    return {
+      sessionId: "d1", rows: 24, cols: COLS, cursor: { row: 5, col: 10 }, keyboardLocked: false, cells,
+      fields: [seg(1, 5, "first"), seg(2, 6, "middle"), seg(3, 7, "last")]
+    } as unknown as ScreenSnapshot;
+  }
+
+  it("ホストが書いた空白は中身として残り、書かなかった桁は空き（NUL）として残る", async () => {
+    const t = await open(spacesSnapshot([1]));
+    await t.at(0, 3);
+    await t.key("B");
+    // 桁 0 は空き・桁 1 はホストの空白・桁 2 は空き・桁 3 が B
+    expect(t.edits.get(1)).toBe("\u0000 \u0000B");
+  });
+
+  it("打った空白は末尾でも落とさない（空きだけを詰め物として落とす）", async () => {
+    const t = await open(spacesSnapshot([]));
+    await t.at(0, 0);
+    await t.key("A");
+    await t.key(" ");
+    expect(t.edits.get(1)).toBe("A ");
+  });
+
+  it("空きだけの桁は末尾から落とす（何も打っていない鎖は編集にならない）", async () => {
+    const t = await open(spacesSnapshot([]));
+    await t.at(0, 0);
+    await t.key("A");
+    expect(t.edits.get(1)).toBe("A");
+  });
+});
+
 describe("継続した O 欄の打鍵（ScreenGrid）", () => {
   it("C01: SI の上に全角を挿入 → 先頭の区間が埋まり X が中間へ。フォーカスは中間の区間へ", async () => {
     const t = await open();
@@ -105,7 +142,7 @@ describe("継続した O 欄の打鍵（ScreenGrid）", () => {
     await t.key("Insert");
     await t.key("う");
     expect(t.edits.get(1)).toBe(o("{いえう}"));
-    expect(t.edits.get(2)).toBe("X YZ");
+    expect(t.edits.get(2)).toBe("X\u0000YZ");
     expect(t.edits.has(3)).toBe(false);
     expect(t.active()).toBe(t.inputs[1]);
     expect(t.active().selectionStart).toBe(0);
@@ -117,7 +154,7 @@ describe("継続した O 欄の打鍵（ScreenGrid）", () => {
     await t.key("Insert");
     await t.key("え");
     expect(t.edits.get(1)).toBe(o("{いえ}") + D + D);
-    expect(t.edits.get(2)).toBe(o("{え}X YZ"));
+    expect(t.edits.get(2)).toBe(o("{え}X\u0000YZ"));
     expect(t.active()).toBe(t.inputs[1]);
     expect(t.active().selectionStart).toBe(2); // 中間の SI の上（view は SO・え・SI——全角は 1 字）
   });
@@ -134,7 +171,7 @@ describe("継続した O 欄の打鍵（ScreenGrid）", () => {
     const t = await open();
     await t.at(0, 1); // い
     await t.key("Delete");
-    expect(t.edits.get(1)).toBe(o("{え}X YZ"));
+    expect(t.edits.get(1)).toBe(o("{え}X\u0000YZ"));
     expect(t.edits.get(2)).toBe("");
   });
 
@@ -153,7 +190,7 @@ describe("継続した O 欄の打鍵（ScreenGrid）", () => {
     await t.key("Insert");
     await t.compose("きく");
     expect(t.edits.get(1)).toBe(o("{いきく}"));
-    expect(t.edits.get(2)).toBe(o("{え}X YZ"));
+    expect(t.edits.get(2)).toBe(o("{え}X\u0000YZ"));
     expect(t.active()).toBe(t.inputs[1]);
     expect(t.active().selectionStart).toBe(0);
   });

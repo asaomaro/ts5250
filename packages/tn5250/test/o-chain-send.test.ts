@@ -74,10 +74,39 @@ describe("継続した O 欄の送信（ACS の CONTOX の測定）", () => {
   it("最終区間へ詰めたときも中身は同じ（ACS は長さを保ち末尾に NUL を 2 つ残す——末尾の NUL は送らない）", () => {
     expect(send(edit(chain(), undefined, SO + "いえう" + SI, SO + "か" + SI))).toBe("0e448244840fe740" + "0e448244844483" + "4486" + "0f");
   });
-  it("ALT（READ MDT ALT）では途中の死んだ桁を NUL のまま送る", () => {
-    const buf = edit(chain(), SO + "いえ" + SI + DEAD + DEAD, SO + "え" + SI + "X YZ");
-    // X と Y の間は ACS では NUL（`00`）。当 PJ の O 欄の値は空きと空白を区別しない（半角空白で持つ）ので `40`——既知の差（台帳）
-    expect(hex(parseRecord(buildReadMdtAltResponse(buf, codec, AID.ENTER, { row: 5, col: 10 }).record).data.subarray(6))).toBe("0e448244840f00000e44840fe740e8e9");
+  it("ALT（READ MDT ALT）では途中の死んだ桁も空き（U+0000）も NUL のまま送る（READ MDT では空きは 0x40）", () => {
+    const buf = edit(chain(), SO + "いえ" + SI + DEAD + DEAD, SO + "え" + SI + "X\u0000YZ");
+    expect(hex(parseRecord(buildReadMdtAltResponse(buf, codec, AID.ENTER, { row: 5, col: 10 }).record).data.subarray(6))).toBe("0e448244840f00000e44840fe700e8e9");
+    expect(send(buf)).toBe("0e448244840f40400e44840fe740e8e9");
+  });
+  it("**鎖の空白（U+0020）は中身**: 途中も末尾も ALT・READ MDT とも 0x40 で送る（空き U+0000 と別。ACS の C09・C10 の末尾の `40`。`20260930-cont-o-nul`）", () => {
+    const buf = edit(chain(), undefined, "A B" + " ".repeat(5), "  " + "\u0000".repeat(6));
+    // 先頭の区間は書かれたまま（`0e いえ 0f X` と途中の空き）。あとは打った空白が末尾の `40` まで
+    const head = "0e448244840fe740";
+    expect(send(buf)).toBe(head + "c140c2" + "4040404040" + "4040");
+    const alt = hex(parseRecord(buildReadMdtAltResponse(buf, codec, AID.ENTER, { row: 5, col: 10 }).record).data.subarray(6));
+    expect(alt).toBe("0e448244840fe700" + "c140c2" + "4040404040" + "4040");
+  });
+  it("**共有の値の置き方**: 明示の並び（SO/SI 入り）の鎖の末尾の空白は落とさず、空白のセルは生バイト 0x40・空きは空のセル（web-ui が見分ける手掛かり）", () => {
+    const buf = edit(chain(), SO + "い" + SI + "A B ", "\u0000");
+    expect(send(buf)).toBe("0e44820fc140c240"); // 末尾の空白（0x40）まで送る
+    const cells = buf.snapshot("s", false).cells[4]!;
+    expect(cells[13]!.char).toBe("A");
+    expect(cells[14]!.rawByte).toBe(0x40); // 途中の空白（中身）
+    expect(cells[16]!.rawByte).toBe(0x40); // 末尾の空白も落とさず中身のまま
+    // 中間の区間の空き（U+0000）は生バイトを持たない空のセル
+    expect(buf.snapshot("s", false).cells[5]![9]!.rawByte).toBeUndefined();
+  });
+  it("印の無い値（半角だけ。generic の経路）でも、鎖の空白は生バイト 0x40・空きは空のセル", () => {
+    const buf = edit(chain(), undefined, "A B\u0000C");
+    const cells = buf.snapshot("s", false).cells[5]!;
+    expect(cells[10]!.rawByte).toBe(0x40); // 空白（中身）
+    expect(cells[12]!.rawByte).toBeUndefined(); // 空き（U+0000）
+    expect(send(buf)).toBe("0e448244840fe740c140c240c3"); // 途中の空きは READ MDT では 0x40
+  });
+  it("末尾の空き（U+0000）は送らない", () => {
+    const buf = edit(chain(), undefined, "AB" + "\u0000\u0000\u0000\u0000");
+    expect(send(buf)).toBe("0e448244840fe740c1c2");
   });
   it("ALT で途中の死んだ桁は NUL（半角の間でも）", () => {
     const buf = edit(chain(), undefined, "A" + DEAD + "B");

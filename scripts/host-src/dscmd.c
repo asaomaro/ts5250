@@ -808,6 +808,41 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "CONTOP") == 0) {
+        /*
+         * **継続欄の O への貼り付けを、打鍵と並べて測る画面**（台帳「継続した O 欄の残り」(c)）。ACS の GUI の Ctrl+V は `ECLPS.pasteLineWrap`。
+         *   (5,10) 先頭 8 桁 / (6,10) 中間 8 桁 / (7,10) 最終 8 桁（どれも空＝ヌル）。IC は 5,10。READ MDT ALT を 8 回（ログは `[P1]`〜`[P8]`。
+         *   1〜4 が貼り付け、5〜8 が同じ文字列の打鍵）。手順は `scripts/acs-probe/cont-o-paste.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x01, 0x24, 0x00, 0x08,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x03, 0x24, 0x00, 0x08,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x02, 0x24, 0x00, 0x08,
+            0x13, 0x05, 0x0A
+        };
+        static char ptags[8][8];
+        int k;
+        for (k = 0; k < 8; k++) {
+            sprintf(ptags[k], "[P%d] ", k + 1);
+            tag = ptags[k];
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 継続の O 欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDTAlt", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "WINRESTRICT") == 0 || strcmp(what, "WINUNRESTRICT") == 0 || strcmp(what, "WINUNRESTRICTBAD") == 0) {
         /*
          * **窓のカーソル制限（CREATE WINDOW の flag1 0x80）と、その解除（WDSF 0x52）**を測る画面（台帳「DS5250 の残り」の WDSF 0x52）。

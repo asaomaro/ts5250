@@ -15,7 +15,7 @@
  * 語送り（FCW 0x8680）の欄の語送りの段（`processWordWrap`）は扱わない（未測定）
  */
 import { isWideForDbcs } from "./fieldValidate.js";
-import { backspaceTarget, insertClassOf, overwrite, type OCell, type OCellKind } from "./oFieldCells.js";
+import { backspaceTarget, insertClassOf, overwrite, nulCell, type OCell, type OCellKind } from "./oFieldCells.js";
 
 /** 鎖の中の位置（区間の番号と、その区間のセルの桁。どちらも 0 起点） */
 export interface ChainPos {
@@ -26,7 +26,8 @@ export interface ChainPos {
 /** 鎖の操作の結果（`OResult` の鎖版）。`segs` は区間ごとのセル */
 export type ChainResult = { segs: OCell[][]; cursor: ChainPos } | { error: 0x05 | 0x12 | 0x65 } | { noop: true };
 
-const empty = (): OCell => ({ k: "sb", ch: " " });
+/** 空き（NUL）。鎖の空きは空白と別（`OCell.nul`）——ACS の詰め直しは末尾の**空き**だけを余地に数え、空白は中身として押し出す */
+const empty = (): OCell => nulCell();
 const dead = (): OCell => ({ k: "sb", ch: " ", dead: true });
 const copy = (segs: readonly (readonly OCell[])[]): OCell[][] => segs.map((s) => s.map((x) => ({ ...x })));
 
@@ -35,9 +36,11 @@ interface Tok {
   k: OCellKind;
   ch: string;
   mark?: true;
+  /** 空き（NUL） */
+  nul?: true;
 }
 
-const isFree = (t: Tok): boolean => t.k === "sb" && t.ch === " ";
+const isFree = (t: Tok): boolean => t.k === "sb" && t.nul === true;
 
 /**
  * **カーソルから鎖の終わりまでを作り直して詰める**（ACS `processCharWithDBCSOpenContField` と `checkWordsFitDBCSOpenContField` の手順）。
@@ -50,7 +53,7 @@ function reflow(segs: readonly (readonly OCell[])[], pos: ChainPos, ops: readonl
     const cells = segs[s]!;
     for (let i = s === pos.seg ? pos.c : 0; i < cells.length; i++) {
       const x = cells[i]!;
-      if (!x.dead) rest.push({ k: x.k, ch: x.ch });
+      if (!x.dead) rest.push({ k: x.k, ch: x.ch, ...(x.nul ? { nul: true as const } : {}) });
     }
   }
   // 操作列の先頭が SO でカーソルのセルが SO なら（SI と SI も）、既存のその 1 つを食う（二重にしない）
@@ -98,7 +101,7 @@ function reflow(segs: readonly (readonly OCell[])[], pos: ChainPos, ops: readonl
         cells[n] = cell;
       };
       const take = (): void => {
-        put(at, { k: t.k, ch: t.ch });
+        put(at, { k: t.k, ch: t.ch, ...(t.nul ? { nul: true as const } : {}) });
         if (t.mark) markAt = { seg: s, c: at };
         idx++;
       };

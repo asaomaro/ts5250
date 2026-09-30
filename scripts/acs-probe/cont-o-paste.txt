@@ -1,0 +1,60 @@
+# **継続した O 欄への貼り付け**を、同じ文字列の打鍵と並べて測る（台帳「継続した O 欄の残り」(c)）。DSM の CONTOP（`scripts/host-src/dscmd.c`）:
+# (5,10)・(6,10)・(7,10) の 8 桁の O 欄 3 つ（継続欄。空）。1〜4 巡が貼り付け（`ECLPS.pasteLineWrap`＝ACS の GUI の Ctrl+V の入口。既定の設定）、
+# 5〜8 巡が同じ文字列の打鍵。ホストが受け取った READ MDT ALT のバイト列は /tmp/dscmd.log の `[P1]`〜`[P8]`。貼り付けが打鍵と同じなら P(n) と P(n+4) が一致する。
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-paste.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOP')[enter]
+settle 4000
+dump start
+# P1: 全角 8 字を先頭から
+paste 5,10,24,80 あいうえおかきく
+settle 400
+dump p1
+keys [enter]
+settle 2500
+# P2: 半角 16 字
+paste 5,10,24,80 ABCDEFGHIJKLMNOP
+settle 400
+dump p2
+keys [enter]
+settle 2500
+# P3: 半角と全角の混在
+paste 5,10,24,80 AあBいCう
+settle 400
+dump p3
+keys [enter]
+settle 2500
+# P4: 区間の途中（5,12）から全角 2 字
+paste 5,12,24,80 あい
+settle 400
+dump p4
+keys [enter]
+settle 2500
+# P5〜P8: 同じ文字列を打鍵
+setcursor 5,10
+keys あいうえおかきく
+settle 400
+dump p5
+keys [enter]
+settle 2500
+setcursor 5,10
+keys ABCDEFGHIJKLMNOP
+settle 400
+dump p6
+keys [enter]
+settle 2500
+setcursor 5,10
+keys AあBいCう
+settle 400
+dump p7
+keys [enter]
+settle 2500
+setcursor 5,12
+keys あい
+settle 400
+dump p8
+keys [enter]
+settle 2500

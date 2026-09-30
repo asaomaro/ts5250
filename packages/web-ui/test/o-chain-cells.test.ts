@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "../src/composables/oChainCells.js";
-import { eraseToEnd, toCells, fromCells, type OCell } from "../src/composables/oFieldCells.js";
+import { eraseToEnd, toCells, fromCells, nulCell, type OCell } from "../src/composables/oFieldCells.js";
 import { DEAD_MARK, SO_MARK, SI_MARK, hasShiftMarks, dbcsByteLength, columnView } from "../src/composables/fieldValidate.js";
 
 /**
  * **継続した O 欄の鎖の編集**（`20260928-cont-o-cells`）。期待値は実機の ACS のコアに同じ打鍵をさせてホストが受け取ったバイト列
  * （DSM の CONTOX・`scripts/acs-probe/cont-o-edit.txt`・research F2）を、区間ごとのセルの記法に直したもの:
- * `<` = SO、`>` = SI、全角は字（2 桁）、`_` = 空き、`~` = 死んだ桁、ほかは半角。区間は 8 桁ずつ 3 つ。
+ * `<` = SO、`>` = SI、全角は字（2 桁）、`_` = 空き（NUL）、`~` = 死んだ桁、`.` = 空白（0x40。中身）、ほかは半角。区間は 8 桁ずつ 3 つ。
  * 画面は先頭 `<いえ>X_`（い＝4482・え＝4484）・中間 `YZ______`・最終 空き
  */
 function seg(spec: string): OCell[] {
@@ -14,17 +14,18 @@ function seg(spec: string): OCell[] {
   for (const ch of spec) {
     if (ch === "<") out.push({ k: "so", ch: "" });
     else if (ch === ">") out.push({ k: "si", ch: "" });
-    else if (ch === "_") out.push({ k: "sb", ch: " " });
+    else if (ch === "_") out.push(nulCell());
+    else if (ch === ".") out.push({ k: "sb", ch: " " });
     else if (ch === "~") out.push({ k: "sb", ch: " ", dead: true });
     else if (/[　-鿿]/.test(ch)) out.push({ k: "lead", ch }, { k: "tail", ch: "" });
     else out.push({ k: "sb", ch });
   }
-  while (out.length < 8) out.push({ k: "sb", ch: " " });
+  while (out.length < 8) out.push(nulCell());
   return out;
 }
 function show(cells: readonly OCell[]): string {
   let s = "";
-  for (const c of cells) s += c.k === "so" ? "<" : c.k === "si" ? ">" : c.k === "tail" ? "" : c.dead ? "~" : c.ch === " " ? "_" : c.ch;
+  for (const c of cells) s += c.k === "so" ? "<" : c.k === "si" ? ">" : c.k === "tail" ? "" : c.dead ? "~" : c.nul ? "_" : c.ch === " " ? "." : c.ch;
   return s;
 }
 const start = (): OCell[][] => [seg("<いえ>X_"), seg("YZ"), seg("")];
@@ -113,7 +114,7 @@ describe("継続した O 欄の上書き・Delete・Backspace・Erase EOF（ACS 
     expect(ok(chainBackspace(start(), { seg: 1, c: 0 }))).toEqual({ segs: ["<いえ>XY", "Z_______", "________"], cursor: { seg: 0, c: 7 } });
   });
   it("C08: 並びの中で Erase EOF → SI で閉じて区間の残りを消す（続く区間の全消去は画面の側）", () => {
-    expect(show(eraseToEnd(start()[0]!, 3))).toBe("<い>____");
+    expect(show(eraseToEnd(start()[0]!, 3, nulCell()))).toBe("<い>____");
   });
   it("鎖の頭の Backspace は 0005、単独の SO/SI の Delete は 0065", () => {
     expect(chainBackspace(start(), { seg: 0, c: 0 })).toEqual({ error: 0x05 });
@@ -128,6 +129,42 @@ describe("継続した O 欄の上書き・Delete・Backspace・Erase EOF（ACS 
     // 半角の区間の死んだ桁も 2 桁ずつ消え、区間の最後の 2 桁は次の区間の頭（D E）。途中の空き（NUL）は中身として残る（捨てるのは死んだ桁だけ）
     const b = [seg("ABC~~"), seg("DE")];
     expect(ok(chainDelete(b, { seg: 0, c: 3 })).segs).toEqual(["ABC___DE", "________"]);
+  });
+});
+
+describe("空き（NUL）と空白（0x40）の区別（実機の ACS の C09・C10・P4・P7・P8。`20260930-cont-o-nul`）", () => {
+  it("C09: 空白で埋めた鎖への挿入は、空白を中身として最終区間まで押し出す（空きなら押し出さない）", () => {
+    const spaces = [seg("<いえ>X."), seg("YZ......"), seg("")];
+    expect(ok(chainInsert(spaces, { seg: 0, c: 5 }, "う"))).toEqual({ segs: ["<いえう>", "X.YZ....", "..______"], cursor: { seg: 1, c: 0 } });
+    // 同じ形で空白でなく空きなら、末尾は詰めない
+    const frees = [seg("<いえ>X_"), seg("YZ"), seg("")];
+    expect(ok(chainInsert(frees, { seg: 0, c: 5 }, "う")).segs).toEqual(["<いえう>", "X_YZ____", "________"]);
+  });
+
+  it("空白で欄いっぱいまで埋まった鎖には、空きが無いので入らない（0012）。空きで埋まっていれば入る", () => {
+    const full = [seg("<いえ>..."), seg("........"), seg("........")];
+    expect(chainInsert(full, { seg: 0, c: 5 }, "う")).toEqual({ error: 0x12 });
+    const empty = [seg("<いえ>___"), seg("________"), seg("________")];
+    expect("segs" in chainInsert(empty, { seg: 0, c: 5 }, "う")).toBe(true);
+  });
+
+  it("Delete で末尾に空くのは空き（NUL）: 空白は中身のまま詰めて残る", () => {
+    const r = ok(chainDelete([seg("<いえ>X."), seg("YZ"), seg("")], { seg: 0, c: 1 }));
+    expect(r.segs).toEqual(["<え>X.YZ", "________", "________"]);
+  });
+
+  it("明示の並び（SO/SI の印入り）の中の U+0000 も空きのセル。列ビューでは空白 1 桁", () => {
+    const v = [SO_MARK, "い", SI_MARK, "\u0000", "A"];
+    expect(toCells(v, 8, true).map((c) => (c.nul ? "_" : c.k === "so" ? "<" : c.k === "si" ? ">" : c.k === "tail" ? "" : c.ch))).toEqual(["<", "い", "", ">", "_", "A", "_", "_"]);
+    expect(columnView(v.join(""), "{", "}")).toBe("{い} A");
+  });
+
+  it("toCells / fromCells: U+0000 は空き（nul）のセルへ往復する。詰め物は padNul で空き、既定は従来の空白", () => {
+    const v = ["A", "\u0000", " ", "B"];
+    const cells = toCells(v, 6, true);
+    expect(cells.map((c) => (c.nul ? "_" : c.ch))).toEqual(["A", "_", " ", "B", "_", "_"]);
+    expect(fromCells(cells)).toEqual(["A", "\u0000", " ", "B", "\u0000", "\u0000"]);
+    expect(toCells(v, 5).map((c) => c.nul === true)).toEqual([false, true, false, false, false]); // 既定の詰め物は空白（鎖でない O 欄）
   });
 });
 

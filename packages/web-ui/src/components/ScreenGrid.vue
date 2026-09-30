@@ -53,6 +53,7 @@ import {
   del as oDel,
   backspace as oBackspace,
   eraseToEnd as oEraseToEnd,
+  nulCell,
   type OCell,
   type OResult
 } from "../composables/oFieldCells.js";
@@ -1827,6 +1828,8 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
  * ので、値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ）。落として揃えないと、空きが NUL のホストの欄を触っただけで値が変わったことになる
  */
 function trimPad(f: Field, s: string): string {
+  // 継続した O 欄の鎖は空き（NUL）と空白が別: 末尾の空きだけを詰め物として落とし、打った空白・ホストの空白は中身として残す（死んだ桁の印は残す）
+  if (isOChain(f)) return s.replace(/\u0000+$/, "");
   // 空きを全角空白で埋める E（full・open の全角の状態。`jeWidePad`）も全角空白を落とす。compact の E の空きは半角空白なので、打った全角空白は中身のまま
   return wideFill(f) || jeWidePad(f, [...s]) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
@@ -1861,7 +1864,9 @@ function logicalFromCells(f: Field): string {
     for (let i = 0; i < sl.width; i++) {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
-      if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
+      // 継続した O 欄の鎖は空き（ホストが書かなかった桁＝生バイトを持たない空白）を NUL で持つ。ホストが書いた空白（生バイト 0x40）は中身
+      if (isOChain(f) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
+      else if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
       // **埋め込み属性はセンチネルとして残す**（core の fieldValue と同じ扱い）。
       // 空白にすると、この値を編集して送り返した時点で core の setFieldValue が
       // ただの文字セルとして書き戻し、**属性が消えてホストのソースから制御コードが落ちる**。
@@ -2226,7 +2231,7 @@ function oChainApply(f: Field, op: (segs: OCell[][], pos: ChainPos) => ChainResu
   const cur = edit!;
   const run = continuedRunOf(f);
   const at = run.findIndex((x) => x.index === f.index);
-  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x)));
+  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x), true));
   const r = op(segs, { seg: at, c: cellOfEntry(cur.chars, cur.cursor) });
   if ("error" in r) {
     oRejection = r.error;
@@ -2308,7 +2313,7 @@ function normalizeO(chars: readonly string[], f: Field): string[] {
   }
   if (ok && !inRun) return [...chars];
   const plain = chars.filter((c) => !isShiftMark(c) && !isDeadMark(c)); // 死んだ桁の印も外す（残すと明示の並びと読まれ SO/SI が付かない）
-  return padDbcs(f, fromCells(toCells(plain, visLen(f))));
+  return padDbcs(f, fromCells(toCells(plain, visLen(f), isOChain(f))));
 }
 
 /** DBCS 欄はライブ列ビュー編集（純論理値・非パディング・挿入モード）で扱う。 */
@@ -2359,7 +2364,9 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
   // **J・G の詰め物は全角空白**（ACS の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
   // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（欄長は偶数なので通常は来ない）
   const wide = wideFill(f) || jeWidePad(f, chars);
-  while (byteLen(out.join(""), f) < budget) out.push(wide && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : " ");
+  // 継続した O 欄の鎖の詰め物は空き（NUL）。空白にすると中身として送られる
+  const blank = isOChain(f) ? "\u0000" : " ";
+  while (byteLen(out.join(""), f) < budget) out.push(wide && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : blank);
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
   while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
   return out;
@@ -2377,7 +2384,7 @@ function eraseToEndDbcs(f: Field, state: EditState): EditState {
     jeShapeOverride.set(f.index, "open");
   }
   // O 欄はカーソルが SI の上か並びの中なら SI を置いて閉じる（ACS `eraseToEOF_Work`）
-  if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c), cursor: c })) ?? state;
+  if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c, isOChain(f) ? nulCell() : undefined), cursor: c })) ?? state;
   return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
 }
 
@@ -3216,6 +3223,8 @@ function commitFieldValueDirect(x: Field, val: string): void {
  */
 function fillFollowingSegments(f: Field, fill: string): void {
   if (f.continued === undefined) return;
+  // 継続した O 欄の鎖は消した桁が空き（NUL）。空白で埋めると中身として送られる（`OCell.nul`）
+  if (isOChain(f) && fill === " ") fill = "\u0000";
   const run = continuedRunOf(f);
   const at = run.findIndex((x) => x.index === f.index);
   for (const x of run.slice(at + 1)) commitFieldValueDirect(x, fill.repeat(visLen(x)));
