@@ -179,10 +179,17 @@ export const isDeadMark = (ch: string): boolean => isRawSentinel(ch) && sentinel
 /** 値が明示の並び（SO/SI・死んだ桁の印を含む）か。死んだ桁は半角だけの区間の後ろにも残るので、それだけでも明示の並び */
 export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some((c) => isShiftMark(c) || isDeadMark(c) || isSplitLead(c) || isSplitTail(c));
 
+/**
+ * **全角 1 桁ぶんの空き（NUL の組）**。J・G・全角の E は空きが DBCS の桁（ACS は NUL の組で持つ）で、打った全角空白（U+3000＝中身）と値の文字で区別するために専用の文字を使う。
+ * U+3164（ハングルのフィラー）は全角幅で入力に現れない。見えるのは全角空白（`viewChar`）、ホストへは NUL の組（`jeExplicit`）。`20260930-wide-nul`
+ */
+export const WIDE_NUL = "\u3164";
+
 /** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
 export function viewChar(ch: string): string {
   // U+0000 は継続した O 欄の空き（NUL。`OCell.nul`）。桁は 1 つで、見えるのは空白
   // 区間の間で割れた全角の半分（継続した O 欄）も桁は 1 つで、見えるのは空白（ACS も画面は崩れる）
+  if (ch === WIDE_NUL) return "\u3000"; // 全角 1 桁の空き。見えるのは全角空白
   return isRawSentinel(ch) || ch === "\u0000" || isSplitLead(ch) || isSplitTail(ch) ? " " : ch;
 }
 

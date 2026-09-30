@@ -31,8 +31,10 @@ afterEach(() => {
 function gSnapshot(slots: string[], opts: { emptyCells?: boolean } = {}): { snapshot: ScreenSnapshot; field: Field } {
   const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
   if (!opts.emptyCells) {
+    // 書かれていない slot はホストが書かなかった桁（空き。生バイトの無い空白のまま）。ホストが 4040 を書いた桁は slots に "　" を渡す（打った全角空白と同じ中身）
     for (let i = 0; i < 6; i++) {
-      cells[4]![19 + i * 2] = cell(slots[i] ?? "　", "dbcs-lead");
+      if (slots[i] === undefined) continue;
+      cells[4]![19 + i * 2] = cell(slots[i], "dbcs-lead");
       cells[4]![20 + i * 2] = cell("", "dbcs-tail");
     }
   }
@@ -144,12 +146,13 @@ describe("G の欄の詰め物は全角空白（半角空白を途中に残さ�
     expect(edited()).toEqual([]);
   });
 
-  it("Space は全角空白（`20260921-dbcs-space-key`）で、末尾なら値から落ちる", async () => {
+  it("Space は全角空白（`20260921-dbcs-space-key`）で、打った全角空白は末尾でも値に残る", async () => {
     const { snapshot } = gSnapshot(["あ", "い", "う"]);
     const { key, at, value } = await open(snapshot);
     await at(4);
     await key(" ");
-    expect(value(), "全角空白を打ち足しても、末尾の全角空白は詰め物と同じ扱い").toBe("あいう");
+    // 打った全角空白は中身（実機の ACS は 4040 を送る。`20260930-wide-nul`）。離れた 5 スロット目に打ったので、手前の書かなかった 4 スロット目は全角空白として出る（G は詰めて送る）
+    expect(value(), "打った全角空白は残り、手前の空きの桁は全角空白で出る").toBe("あいう\u3000\u3000");
   });
 
   it("上書き: 全角 1 字が全角 1 字に替わるだけで桁は動かない", async () => {
@@ -212,7 +215,7 @@ function jSnapshot(slots: string[], fill = "\u3000"): ScreenSnapshot {
 
 describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空きへ打っても半角空白が混ざらない）", () => {
   it("**離れた空きの桁へ打つと、前の空きは全角空白**（半角空白の `あ   い` だと core の「全角しか入力できない」で送れなかった。実機の J で確かめた）", async () => {
-    const { key, at, value } = await open(jSnapshot(["あ"]));
+    const { key, at, value } = await open(jSnapshot(["あ"], ""));
     await at(4); // 4 スロット目（SO の次が 1）
     await key("い");
     expect(value()).toBe("あ\u3000\u3000い");
@@ -228,7 +231,7 @@ describe("J（DBCS 専用）の欄も、詰め物は全角空白（離れた空�
   });
 
   it("末尾の詰め物は値から落ちる（ホストが SO…SI を欄長へ整える。実機で確かめた）", async () => {
-    const { key, at, value } = await open(jSnapshot(["あ", "い"]));
+    const { key, at, value } = await open(jSnapshot(["あ", "い"], ""));
     await at(1);
     await key("う");
     expect(value()).toBe("うい");
