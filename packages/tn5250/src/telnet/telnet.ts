@@ -109,6 +109,14 @@ export class TelnetLayer {
   private record: number[] = [];
   private sb: number[] = [];
   private recordFn: ((record: Uint8Array) => void) | undefined;
+  /**
+   * **交渉が済むまでに届いた通常データ（NVT のテキスト）**の溜めと渡し先（`nvt-text.ts`）。BINARY か EOR の交渉に応じるまでが対象で、
+   * ACS `NVT5250.process_outbound` も両方の状態（`optstate[0]`・`optstate[25]`）のどちらも成立していない間は 5250 のレコードとして扱わない
+   */
+  private nvtBuf: number[] = [];
+  private nvtFn: ((text: Uint8Array) => void) | undefined;
+  private binaryOn = false;
+  private eorOn = false;
 
   /** 装置名（聞かれるたびに次を出す。`deviceName` が無ければ無い） */
   private readonly devNames: DeviceNameGenerator | undefined;
@@ -139,6 +147,22 @@ export class TelnetLayer {
 
   onRecord(fn: (record: Uint8Array) => void): void {
     this.recordFn = fn;
+  }
+
+  /** 交渉の前に届いたテキストの渡し先。1 回の受信（IAC のコマンドで区切る）ごとに 1 度呼ばれる */
+  onNvtText(fn: (text: Uint8Array) => void): void {
+    this.nvtFn = fn;
+  }
+
+  private nvtMode(): boolean {
+    return !this.binaryOn && !this.eorOn;
+  }
+
+  private flushNvt(): void {
+    if (this.nvtBuf.length === 0) return;
+    const text = Uint8Array.from(this.nvtBuf);
+    this.nvtBuf = [];
+    this.nvtFn?.(text);
   }
 
   /** 通信路が閉じたか。**交渉の返事を閉じた先へ送らない**ための門番 */
@@ -205,6 +229,7 @@ export class TelnetLayer {
       switch (this.state) {
         case ParseState.Data:
           if (b === IAC) this.state = ParseState.Iac;
+          else if (this.nvtMode()) this.nvtBuf.push(b);
           else this.record.push(b);
           break;
         case ParseState.Iac:
@@ -238,12 +263,22 @@ export class TelnetLayer {
           break;
       }
     }
+    // 受信の終わりで、溜めたテキストを渡す（IAC の途中・サブネゴシエーションの途中は次の受信で続ける）
+    if (this.state === ParseState.Data || this.state === ParseState.Iac) this.flushNvt();
   }
 
   private handleIac(b: number): void {
+    // 溜めたテキストは IAC のコマンドの手前で渡す（ACS `Telnet.receive`: IAC の次が IAC 以外なら、そこまでを処理する）。
+    // **ただし IAC EOR で終わるものはテキストではなく 5250 のレコード**として扱う（交渉の前でも。ACS は状態だけで決めるが、EOR で区切られた塊は
+    // バナーではありえない。交渉を省いたレコードを流す試験・記録の再生を壊さないための当 PJ の決め）
+    if (b === CMD.EOR && this.nvtBuf.length > 0) {
+      this.record.push(...this.nvtBuf);
+      this.nvtBuf = [];
+    } else if (b !== IAC) this.flushNvt();
     switch (b) {
       case IAC: // エスケープされた 0xFF
-        this.record.push(IAC);
+        if (this.nvtMode()) this.nvtBuf.push(IAC);
+        else this.record.push(IAC);
         this.state = ParseState.Data;
         break;
       case CMD.EOR: {
@@ -274,6 +309,11 @@ export class TelnetLayer {
   /** DO→WILL/WONT・WILL→DO/DONT の応答（クライアント側はネゴを開始しない） */
   private handleOptNeg(cmd: number, opt: number): void {
     const supported = SUPPORTED.has(opt);
+    // BINARY か EOR に応じた時点から 5250 のレコードとして受ける（それまでの通常データは NVT のテキスト）
+    if (supported && (cmd === CMD.DO || cmd === CMD.WILL)) {
+      if (opt === OPT.BINARY) this.binaryOn = true;
+      if (opt === OPT.EOR) this.eorOn = true;
+    }
     if (cmd === CMD.DO) {
       this.sendCmd(supported ? CMD.WILL : CMD.WONT, opt);
     } else if (cmd === CMD.WILL) {

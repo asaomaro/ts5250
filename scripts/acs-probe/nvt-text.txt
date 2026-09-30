@@ -1,0 +1,8 @@
+# **交渉の前に届いたテキストを ACS がどう画面に書くか**（台帳「telnet の交渉前のテキスト」。`NVT.NVT_process_outbound`）。
+# 偽のサーバー（`scripts/fake-nvt-server.mjs`）が BINARY も EOR も交渉せずに断片を送る。**全部届いてから**画面とカーソルを採る
+# （ACS は受信ごとに処理し、次の受信でも桁の位置を引き継ぐので、断片の切れ目は結果に効かない。`fake-nvt-server.mjs` を速く送らせて確かめた）。
+# 実行（別の端末で偽のサーバーを立て、接続先を渡す。`PROBE_CODEPAGE=37` は 930 だと英小文字が半角カナに見えるため）:
+#   FIRST_MS=1500 STEP_MS=400 PORT=23999 node scripts/fake-nvt-server.mjs &
+#   FAKE_HOST=127.0.0.1 FAKE_USER=X FAKE_PASSWORD=X PROBE_PORT=23999 PROBE_CODEPAGE=37 node scripts/acs-probe.mjs scripts/acs-probe/nvt-text.txt FAKE
+sleep 9000
+dump final

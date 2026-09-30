@@ -2,6 +2,7 @@ import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor, type KatakanaVariant } from "@ts5250/base";
 import { parseRecord, buildNegativeResponse, buildRecord } from "../protocol/gds.js";
 import { COMMAND, ESC, OPCODE } from "../protocol/constants.js";
+import { nvtTextToWtd, type NvtCursor } from "../telnet/nvt-text.js";
 import {
   buildReadMdtResponse,
   buildReadMdtAltResponse,
@@ -359,6 +360,7 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 交渉途中の接続へ Attn 等が流れる（独立点検の指摘）。画面が来れば `handleRecord` が `ready` にする
     if (initial) this.state = "negotiating";
     this.connGen++;
+    this.nvt.pos = 0; // 交渉の前のテキストの桁は、繋ぎ直しのたびに先頭から（telnet 層は新しい。5250 のレコードが来れば以後テキストにはならない）
     // RFC 2877 KBDTYPE/CODEPAGE/CHARSET を申告し、ホストにデバイス⇄ジョブ CCSID の変換をさせる
     const dev = deviceEnvFor(opts.ccsid ?? 37, opts.katakanaVariant);
     this.telnet = new TelnetLayer(transport, {
@@ -427,6 +429,8 @@ export class Session5250 extends Emitter<SessionEvents> {
         reject(new As400Error("SESSION_CLOSED", `closed during negotiation: ${reason}${hint}`));
       });
       this.telnet.onError((err) => this.warn(`transport error: ${err.message}`));
+      // 交渉の前に届いたテキスト（ゲートウェイのバナー等）は、合成した WTD で画面へ出す（ACS `NVT.NVT_process_outbound`。`nvt-text.ts`）
+      this.telnet.onNvtText((text) => this.handleNvtText(text));
       this.telnet.onRecord((rec) => this.handleRecord(rec));
     });
 
@@ -438,6 +442,31 @@ export class Session5250 extends Emitter<SessionEvents> {
   }
 
   private onceReady: (() => void) | undefined;
+
+  /** 交渉の前に届いたテキストの桁の位置（`nvt-text.ts`） */
+  private readonly nvt: NvtCursor = { pos: 0 };
+
+  /**
+   * **交渉の前に届いたテキストを画面へ書く**。合成した WTD を通常のレコードと同じ道（`handleRecord`）へ流す。
+   * ただし**起動応答の候補（最初の 5250 のレコード）には数えない**——バナーの後に本物の起動応答が来る構成を壊さないため。
+   * 画面に出したら接続の待ちは解く（時間切れにしない）が、**キーボードは施錠のまま**（ACS はここで解錠して NVT の入力を送れるが、
+   * 当 PJ は 5250 の AID を交渉前の相手へ送らない。読むだけ）
+   */
+  private handleNvtText(text: Uint8Array): void {
+    if (this.state === "closed") return;
+    const wtd = nvtTextToWtd(text, this.nvt, this.buf.cols, this.buf.rows);
+    const wasFirst = this.firstRecord; // 合成した WTD が最初のレコードの権利を使い切らないよう、終わったら戻す
+    try {
+      this.handleRecord(buildRecord(OPCODE.OUTPUT_ONLY, wtd));
+    } finally {
+      this.firstRecord = wasFirst;
+    }
+    if (this.onceReady !== undefined) {
+      if (this.state === "negotiating") this.state = "locked";
+      this.onceReady();
+      this.onceReady = undefined;
+    }
+  }
   /**
    * 交渉中の失敗を接続待ちへ返す口（`20260802-device-busy-record`）。
    * ホストが**失敗の起動応答**を返してきたときに使う——`onClose` では
