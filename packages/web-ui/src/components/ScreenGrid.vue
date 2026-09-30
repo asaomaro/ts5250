@@ -1867,7 +1867,9 @@ function logicalFromCells(f: Field): string {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
       // O 欄は空き（ホストが書かなかった桁＝生バイトを持たない空白）を NUL で持つ。ホストが書いた空白（生バイト 0x40）は中身
-      if ((isOCells(f) || eitherHalf(f)) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
+      // 継続した O 欄の死んだ桁（編集の続き。ホストが書き直さない限り残り、詰め直しで捨てる）は印で持つ
+      if (isOChain(f) && cell.dead === true) s += DEAD_MARK;
+      else if ((isOCells(f) || eitherHalf(f)) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
       else if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
       // **埋め込み属性はセンチネルとして残す**（core の fieldValue と同じ扱い）。
       // 空白にすると、この値を編集して送り返した時点で core の setFieldValue が

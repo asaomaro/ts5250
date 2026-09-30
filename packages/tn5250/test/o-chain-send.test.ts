@@ -56,6 +56,15 @@ describe("継続した O 欄の送信（ACS の CONTOX の測定）", () => {
   it("C02: 死んだ桁は NUL（途中なので空白）で送る", () => {
     expect(send(edit(chain(), SO + "いえ" + SI + DEAD + DEAD, SO + "え" + SI + "X YZ"))).toBe("0e448244840f40400e44840fe740e8e9");
   });
+  it("死んだ桁は AID のあとも画面に残り（snapshot の `dead`）、バイトとしては NUL で、ホストの書き直しで消える（実機 `cont-o-dead-kept.txt`）", () => {
+    const buf = edit(chain(), SO + "いえ" + SI + DEAD + DEAD, SO + "え" + SI + "X YZ");
+    const row5 = buf.snapshot("s", false).cells[4]!;
+    expect(row5.slice(9, 17).map((c) => c.dead === true)).toEqual([false, false, false, false, false, false, true, true]);
+    expect(buf.cellAt(buf.orderedFields()[0]!.startAddr + 6)).toBeNull();
+    // ホストが同じ桁へ書けば（新しいセルになるので）死んだ印は消える
+    applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 16, 0xc1]), buf, codec, () => {});
+    expect(buf.snapshot("s", false).cells[4]![15]!.dead).toBeUndefined();
+  });
   it("C03: 書かれたままの先頭の区間と編集した中間の区間", () => {
     expect(send(edit(chain(), undefined, SO + "お" + SI + "YZ"))).toBe("0e448244840fe7400e44850fe8e9");
   });
