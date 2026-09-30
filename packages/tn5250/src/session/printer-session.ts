@@ -32,6 +32,12 @@ export interface PrinterConnectOptions {
   /** 記号の無い装置名でも、使用中なら末尾の数字を繰り上げて答え直す（当 PJ の `deviceNameRetry`） */
   deviceNameRetry?: boolean | undefined;
   /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS はプリンターも端末と同じ設定 `SESSION_KEEPALIVE`〔既定 false〕）。入れると、一時的な回線断で無通信のあいだに探査が
+   * 失敗して接続が落ちる（Windows は 10 秒ほど）。**途中の機器が無通信の接続を落とす環境**（常駐プリンターが 15 分のアイドルで届かなくなる実測。`transport/tcp.ts`）だけ true にする
+   * （`20260930-printer-keepalive-off`）
+   */
+  keepAlive?: boolean | undefined;
+  /**
    * 自動サインオンの代替パスワードを作る関数（渡せば ACS と同じく暗号化して送る。`telnet.ts` の `passwordSubstitute`）。
    * 計算は QPWDLVL で分かれ、その値はサインオン・サーバーに聞く——このパッケージはホストサーバーに依存しないので呼び出し側が渡す
    */
@@ -161,7 +167,8 @@ export class PrinterSession extends Emitter<PrinterSessionEvents> {
         host: opts.host,
         port: opts.port ?? (opts.tls ? 992 : 23),
         ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.tls !== undefined ? { tls: opts.tls } : {})
+        ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+        keepAlive: opts.keepAlive === true // 既定は入れない（ACS と同じ）
       });
     }
 

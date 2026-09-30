@@ -437,6 +437,10 @@ export interface OpenPrinterOptions extends PrinterConnectOptions {
    */
   deviceNameRetry?: boolean;
   /**
+   * **TCP キープアライブを入れるか**（既定 false＝ACS と同じ。`PrinterSession` の `keepAlive`）。常駐プリンターが途中の機器に無通信の接続を落とされる環境だけ true
+   */
+  keepAlive?: boolean;
+  /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
    */

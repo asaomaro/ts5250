@@ -145,6 +145,7 @@ export function printerOptsFrom(t: ResolvedTarget): Parameters<SessionManager["o
   if (co.deviceName !== undefined) opts.deviceName = co.deviceName;
   // 常駐の経路（`{...t.connect}`）では渡っていたのに、ここだけ落ちていた（節目の点検の指摘）
   if (co.deviceNameRetry !== undefined) opts.deviceNameRetry = co.deviceNameRetry;
+  if (co.keepAlive !== undefined) opts.keepAlive = co.keepAlive; // 転記漏れに注意（上の注記）。既定は入れない（ACS と同じ）
   if (co.tls !== undefined) opts.tls = co.tls;
   if (co.user !== undefined) opts.user = co.user;
   if (co.password !== undefined) opts.password = co.password;
