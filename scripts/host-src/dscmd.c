@@ -849,6 +849,38 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "HIDDENC") == 0) {
+        /*
+         * **中身が入って届く伏せ字（非表示）の DBCS 欄の編集**（台帳「E 欄の残り」）。どれも 12 桁・非表示の属性（0x27）で `SO あい SI` ＋ NUL:
+         *   (3,10) O `SO あい SI`＋NUL / (5,10) J `SO あい 4040×3 SI`（ホストが整えた形）/ (7,10) E `SO あい SI`＋NUL。IC は 3,11。READ MDT を 2 回（ログは `[H1]`・`[H2]`）。手順は `scripts/acs-probe/hidden-dbcs-content.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x27, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x44, 0x82, 0x0F,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x27, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x44, 0x82, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x0F,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x27, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x44, 0x82, 0x0F,
+            0x13, 0x03, 0x0B
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[H1] " : "[H2] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 非表示の DBCS 欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "CONTOP") == 0) {
         /*
          * **継続欄の O への貼り付けを、打鍵と並べて測る画面**（台帳「継続した O 欄の残り」(c)）。ACS の GUI の Ctrl+V は `ECLPS.pasteLineWrap`。

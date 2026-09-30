@@ -525,6 +525,8 @@ export class Session5250 extends Emitter<SessionEvents> {
     // 「どの欄か」を入れるには呼び出し側で作るしかない（`20260920-field-error-no-value` research F3）。
     // 値は文言に入らないので、利用者が直せるのはこの位置だけが頼り
     const at = this.buf.rowColOf(field.startAddr);
+    // 中身が入って届く非表示の DBCS 欄は、触らない桁の目印を元の中身へ戻す（中身はブラウザへ出さない。`ScreenBuffer.mergeKeep`）
+    value = this.buf.mergeKeep(field, value);
     validateFieldContent(value, field, this.codec, this.buf.fieldValue(field), at);
     // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）。
     // **純 DBCS の欄（G）は SO/SI を数えない**——送信（`buildFieldResponse`）と同じ数え方（`encodedFieldLength`）。

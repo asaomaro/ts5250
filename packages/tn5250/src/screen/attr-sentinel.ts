@@ -113,6 +113,28 @@ export function splitLeadChar(ch: string): string {
 export const SPLIT_TAIL = String.fromCodePoint(SPLIT_TAIL_CP);
 export const isSplitTail = (ch: string): boolean => ch.codePointAt(0) === SPLIT_TAIL_CP;
 
+/**
+ * **中身が入って届く非表示（伏せ字）の DBCS 欄の、触らない桁の目印**。値（中身）はブラウザへ出さない（`Field.value`・セルの字は空）ので、編集は「その桁の元の中身」を
+ * 桁の番号つきの目印で持ち、保存のとき core が元の中身へ戻す（`ScreenBuffer.mergeKeep`）。ACS は伏せ字の欄の中身の上に上書きする（実機 `hidden-dbcs-content.txt`）。
+ * 半角 1 桁の目印は第 15 面（桁の番号 0〜255）、全角の目印は BMP の私用領域の末尾（0xF700＋桁の番号。全角幅として数えられる）
+ */
+const KEEP_NARROW_BASE = 0xf0100;
+const KEEP_WIDE_BASE = 0xf700;
+export function keepNarrow(idx: number): string {
+  return String.fromCodePoint(KEEP_NARROW_BASE + (idx & 0xff));
+}
+export function keepWide(idx: number): string {
+  return String.fromCodePoint(KEEP_WIDE_BASE + (idx & 0xff));
+}
+/** 触らない桁の目印なら、その桁の番号と全角か */
+export function keepIndex(ch: string): { idx: number; wide: boolean } | undefined {
+  const c = ch.codePointAt(0);
+  if (c === undefined) return undefined;
+  if (c >= KEEP_NARROW_BASE && c <= KEEP_NARROW_BASE + 0xff) return { idx: c - KEEP_NARROW_BASE, wide: false };
+  if (c >= KEEP_WIDE_BASE && c <= KEEP_WIDE_BASE + 0xff) return { idx: c - KEEP_WIDE_BASE, wide: true };
+  return undefined;
+}
+
 /** 文字列中のセンチネルを空白へ置換する（表示用）。正規表現の私用面リテラルを避け 1 文字ずつ判定する */
 export function stripSentinels(s: string): string {
   let out = "";

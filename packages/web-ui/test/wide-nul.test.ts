@@ -4,6 +4,7 @@ import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { mandatoryFillViolated } from "../src/composables/mandatoryCheck.js";
 import { SO_MARK, SI_MARK, DEAD_MARK, WIDE_NUL } from "../src/composables/fieldValidate.js";
+import { keepWide } from "@ts5250/tn5250/browser";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 
 /**
@@ -122,5 +123,36 @@ describe("必須埋め: 全角 1 桁の空きがあれば満杯でない", () =>
     const f = mf("pure");
     const check = (v: string): boolean => mandatoryFillViolated(f, new Map([[1, v]]));
     expect([check(`あ${WIDE_NUL}う`), check("あ　う")]).toEqual([true, false]);
+  });
+});
+
+describe("中身が入って届く伏せ字の DBCS 欄（`20260930-hidden-keep`。実機 `hidden-dbcs-content.txt`）", () => {
+  /** (5,10) の非表示の O 欄 12 桁: `SO あ い SI`＋空き。中身のある桁は keep（字は出ない） */
+  function hiddenO(): ScreenSnapshot {
+    const snap = snapshot("only");
+    const r = snap.cells[4]!;
+    r[9] = { ...cell(" ", "so"), nonDisplay: true } as Cell;
+    r[10] = { ...cell(" ", "dbcs-lead"), nonDisplay: true, keep: true } as Cell;
+    r[11] = { ...cell("", "dbcs-tail"), nonDisplay: true } as Cell;
+    r[12] = { ...cell(" ", "dbcs-lead"), nonDisplay: true, keep: true } as Cell;
+    r[13] = { ...cell("", "dbcs-tail"), nonDisplay: true } as Cell;
+    r[14] = { ...cell(" ", "si"), nonDisplay: true } as Cell;
+    r[20] = cell(" "); // J の SI の桁は使わない
+    const f = snap.fields[0] as unknown as { dbcsType: string; hidden: boolean };
+    f.dbcsType = "open";
+    f.hidden = true;
+    return snap;
+  }
+  it("先頭の字へ上書きすると、ほかの桁は触らない目印のまま値に残る（core が元の中身へ戻す）", async () => {
+    const t = await open(hiddenO());
+    await t.at(1);
+    await t.key("う");
+    expect(t.edits.get(1)).toBe(SO_MARK + "う" + keepWide(3) + SI_MARK);
+  });
+  it("Delete は削った桁の後ろの目印を詰める", async () => {
+    const t = await open(hiddenO());
+    await t.at(1);
+    await t.key("Delete");
+    expect(t.edits.get(1)).toBe(SO_MARK + keepWide(3) + SI_MARK);
   });
 });
