@@ -11,3 +11,7 @@
 
 ## D3: 挿入の余地は E の形（full か否か）で分ける
 - 原典 `insertChar` は J と全角の状態の E の余地の終点を最後の桁の 1 つ手前にする。full（SI が最後の桁）は空きが SI の手前なので数え方が変わらず、compact・open は最後の桁を除く。変異 `shape-full` が殺す（ちょうど 2 バイト空いた full の欄）
+
+## D4: 上流の独立点検（doccheck）の記録が残っていない
+- 経緯: requirements・design・tasks の `aidev doccheck start/report` を、出力を捨てる形（`| tail -0`）で連続して打ったため、失敗に気づかず記録が 0 件になった（`aidev verify` が design・tasks で WARN）
+- 扱い: 後から打ち直して時刻を辻褄合わせしない（規約）。点検そのもの（AC と design・tasks の対応は `aidev coverage --strict` で gap 0、書いた本人の同一セッション点検）は行ったが、**記録としては無い**ものとして扱う。次の work からは出力を捨てずに打つ
