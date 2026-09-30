@@ -11,6 +11,7 @@
  * 当たらない形で、値もカーソルも変えずエラーも出さない（`noop`）
  */
 import { SO_MARK, SI_MARK, DEAD_MARK, hasShiftMarks, isDeadMark, isWideForDbcs } from "./fieldValidate.js";
+import { splitLead, isSplitLead, splitLeadChar, SPLIT_TAIL, isSplitTail } from "@ts5250/tn5250/browser";
 
 export type OCellKind = "sb" | "so" | "si" | "lead" | "tail";
 /**
@@ -48,6 +49,9 @@ export function toCells(chars: readonly string[], length: number): OCell[] {
       else if (ch === SI_MARK) out.push({ k: "si", ch: "" });
       else if (isDeadMark(ch)) out.push({ k: "sb", ch: " ", dead: true });
       else if (ch === "\u0000") out.push(nulCell());
+      // 区間の間で割れた全角の半分（継続した O 欄。前半は字を運ぶ 1 セル・後半は目印の 1 セル）
+      else if (isSplitLead(ch)) out.push({ k: "lead", ch: splitLeadChar(ch) });
+      else if (isSplitTail(ch)) out.push({ k: "tail", ch: "" });
       else if (isWideForDbcs(ch)) out.push({ k: "lead", ch }, { k: "tail", ch: "" });
       else out.push({ k: "sb", ch });
     }
@@ -81,8 +85,8 @@ export function fromCells(cells: readonly OCell[]): string[] {
       if (cells[i + 1]?.k === "tail") {
         out.push(c.ch);
         i++;
-      } else out.push(" ");
-    } else if (c.k === "tail") out.push(" ");
+      } else out.push((i === cells.length - 1 && c.ch !== "" ? splitLead(c.ch) : undefined) ?? " "); // 区間の最後の桁の前半は、次の区間へ割れた全角の前半
+    } else if (c.k === "tail") out.push(i === 0 ? SPLIT_TAIL : " "); // 区間の頭の後半は、前の区間から割れてきた全角の後半
     else out.push(c.dead ? DEAD_MARK : c.nul ? "\u0000" : c.ch);
   }
   return out;

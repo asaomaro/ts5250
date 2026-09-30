@@ -1,5 +1,5 @@
 import type { Field } from "@ts5250/tn5250";
-import { isDbcsOnly, isRawSentinel, rawSentinel, sentinelByte } from "@ts5250/tn5250/browser";
+import { isDbcsOnly, isRawSentinel, rawSentinel, sentinelByte, isSplitLead, isSplitTail } from "@ts5250/tn5250/browser";
 import { isFullWidth, isCertainWideGlyph } from "@ts5250/base";
 import { isKatakana290InvalidChar } from "@ts5250/ebcdic/katakana";
 
@@ -177,12 +177,13 @@ export const isShiftMark = (ch: string): boolean => isRawSentinel(ch) && (sentin
 export const DEAD_MARK = rawSentinel(0x00);
 export const isDeadMark = (ch: string): boolean => isRawSentinel(ch) && sentinelByte(ch) === 0x00;
 /** 値が明示の並び（SO/SI・死んだ桁の印を含む）か。死んだ桁は半角だけの区間の後ろにも残るので、それだけでも明示の並び */
-export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some((c) => isShiftMark(c) || isDeadMark(c));
+export const hasShiftMarks = (value: string | readonly string[]): boolean => [...value].some((c) => isShiftMark(c) || isDeadMark(c) || isSplitLead(c) || isSplitTail(c));
 
 /** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
 export function viewChar(ch: string): string {
   // U+0000 は継続した O 欄の空き（NUL。`OCell.nul`）。桁は 1 つで、見えるのは空白
-  return isRawSentinel(ch) || ch === "\u0000" ? " " : ch;
+  // 区間の間で割れた全角の半分（継続した O 欄）も桁は 1 つで、見えるのは空白（ACS も画面は崩れる）
+  return isRawSentinel(ch) || ch === "\u0000" || isSplitLead(ch) || isSplitTail(ch) ? " " : ch;
 }
 
 /**

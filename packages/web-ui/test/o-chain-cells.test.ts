@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "../src/composables/oChainCells.js";
+import { splitLead, SPLIT_TAIL } from "@ts5250/tn5250/browser";
 import { eraseToEnd, toCells, fromCells, nulCell, type OCell } from "../src/composables/oFieldCells.js";
 import { DEAD_MARK, SO_MARK, SI_MARK, hasShiftMarks, dbcsByteLength, columnView } from "../src/composables/fieldValidate.js";
 
@@ -77,9 +78,30 @@ describe("継続した O 欄の挿入（ACS の 12 通りの測定）", () => {
     // 余地 3＋8＝11・中身 9（SO 字 SI＋XYZ＋FG）だが、SO を送った 3 桁が死んだ桁になり G が入らない
     expect(chainInsert([seg("ABCDEXYZ"), seg("FG")], { seg: 0, c: 5 }, "あ")).toEqual({ error: 0x12 });
   });
-  it("SI が区間の最後の桁のとき、その上の全角は 0012（ACS は前半・後半を区間の間で割る——当 PJ の値では持てない既知の差）", () => {
-    // 実機の ACS: `SO い き く 44 | 81 え SI X…`（`scripts/acs-probe/cont-o-last-lead.txt`）
-    expect(chainInsert([seg("<いきく>"), seg("<え>X_YZ"), seg("")], { seg: 0, c: 7 }, "あ")).toEqual({ error: 0x12 });
+  it("SI が区間の最後の桁のとき、その上の全角は前半を最後の桁に・後半を次の区間の頭に書く（実機の ACS: `SO い き く 44 | 81 え SI X…`。`scripts/acs-probe/cont-o-last-lead.txt`）", () => {
+    const r = chainInsert([seg("<いきく>"), seg("<え>X_YZ"), seg("")], { seg: 0, c: 7 }, "あ");
+    if (!("segs" in r)) throw new Error("止まった");
+    // 先頭の区間は SI を置かず前半で終わり、次の区間は後半・え・SI・X・空き・Y・Z（ホストへは `0e 4482 4487 4488 4481 4484 0f e7 40 e8 e9` が届く）
+    expect(r.segs[0]![7]).toEqual({ k: "lead", ch: "あ" });
+    expect(r.segs[0]!.filter((c) => c.k === "si")).toHaveLength(0);
+    expect(r.segs[1]!.map((c) => c.k)).toEqual(["tail", "lead", "tail", "si", "sb", "sb", "sb", "sb"]);
+    expect(r.cursor).toEqual({ seg: 1, c: 1 });
+  });
+  it("割れた全角の半分は列ビューでは空白 1 桁（ACS も画面は崩れる）", () => {
+    expect(columnView([SO_MARK, "い", splitLead("あ")!].join(""), "{", "}")).toBe("{い ");
+    expect(columnView([SPLIT_TAIL, "え", SI_MARK, "X"].join(""), "{", "}")).toBe(" え}X");
+  });
+  it("割れた全角の半分は値の中の 1 文字で往復する（前半は字を運ぶ・後半は目印。どちらも桁は 1 つ）", () => {
+    const cells0 = [...seg("<いきく>")].slice(0, 7);
+    cells0.push({ k: "lead", ch: "あ" });
+    const v0 = fromCells(cells0);
+    expect(v0.at(-1)).toBe(splitLead("あ"));
+    expect(toCells(v0, 8)[7]).toEqual({ k: "lead", ch: "あ" });
+    const v1 = fromCells([{ k: "tail", ch: "" }, ...seg("X").slice(0, 7)]);
+    expect(v1[0]).toBe(SPLIT_TAIL);
+    expect(toCells(v1, 8)[0]).toEqual({ k: "tail", ch: "" });
+    // 区間の頭でも終わりでもない孤立した半分は従来どおり空白
+    expect(fromCells([{ k: "sb", ch: "A" }, { k: "lead", ch: "あ" }, { k: "sb", ch: "B" }])).toEqual(["A", " ", "B"]);
   });
   it("隣り合う SI SO を取り除いたら見直す（`SI SI SO SO` の外側の組も繋ぐ）", () => {
     expect(ok(chainInsert([seg("<あ>><<い>__"), seg("")], { seg: 0, c: 0 }, "A")).segs).toEqual(["A<あい>_____", "________"]);
