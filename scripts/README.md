@@ -787,6 +787,19 @@ node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs <手順> PUB40
   - `cursorcl3.txt` — 保護された欄へ DSPATR(PC) を向ける画面で、Enter 後のカーソル（ACS も当 PJ も 3 行 12 桁）。
 - 手順の最後で `SIGNOFF` すること。途中で止めると、装置をしばらく掴んだままになる。
 
+
+### 交渉の前に届いたテキスト（NVT）を測る（偽のサーバー）
+
+IBM i は BINARY・EOR を交渉する前にテキストを送らないので、ゲートウェイのバナーなどの場面は**手元の偽のサーバー**で作る（`20260930-telnet-nvt-text`）。
+
+```sh
+# ACS のコアの画面を採る（`PROBE_CODEPAGE=37`。930 だと英小文字が半角カナに見える）
+FIRST_MS=1500 STEP_MS=400 PORT=23999 node scripts/fake-nvt-server.mjs &   # 断片は `CHUNKS_JSON` で差し替えられる
+FAKE_HOST=127.0.0.1 FAKE_USER=X FAKE_PASSWORD=X PROBE_PORT=23999 PROBE_CODEPAGE=37 node scripts/acs-probe.mjs scripts/acs-probe/nvt-text.txt FAKE
+# 当 PJ の画面が ACS のコアと同じか（9 通り。実機は要らない）
+node scripts/verify-nvt-text.mjs
+```
+
 ## 接続の寿命の実ブラウザ検証（瞬断・半開き）
 
 `verify-browser-reconnect.mjs` は、**ブラウザとサーバーの間に TCP 中継を挟み、瞬断を作って、ホストのセッションが生き残って元の画面に戻るか**を実機で測る。

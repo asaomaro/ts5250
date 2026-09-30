@@ -276,6 +276,9 @@ describe("TelnetLayer レコード枠組み", () => {
 
   it("IAC IAC を 0xFF 1 バイトに解除する（ネゴ混在・分割着信でも）", () => {
     const { t, records } = setup();
+    // 5250 のレコードとして受ける状態にしておく（交渉の前の通常データは NVT のテキストとして渡す。`nvt-text.ts`）
+    t.feed(IAC, CMD.DO, OPT.EOR);
+    t.takeSent();
     t.feed(1, IAC);
     t.feed(IAC, 2); // 分割された IAC IAC
     t.feed(IAC, CMD.DO, OPT.BINARY); // レコード途中のネゴシエーション
