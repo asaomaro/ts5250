@@ -215,8 +215,8 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
-      // キープアライブは表示の 5250 だけ（プリンターは常に入れる。`20260930-display-keepalive-off`）
-      if (session.keepAlive !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") opts.keepAlive = session.keepAlive;
+      // キープアライブは表示だけ（5250・3270・VT。ACS は端末の種類を問わず既定で入れない。プリンターは常に入れる。`20260930-display-keepalive-off`）
+      if (session.keepAlive !== undefined && session.sessionType === "display") opts.keepAlive = session.keepAlive;
       // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
       if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
         opts.associatedPrinter = session.associatedPrinter;

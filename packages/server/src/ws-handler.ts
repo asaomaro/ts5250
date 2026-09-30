@@ -731,6 +731,7 @@ export class WsConnection {
         ...(ccsid !== undefined ? { ccsid } : {}),
         ...(tls !== undefined ? { tls } : {}),
         ...(deviceName !== undefined ? { deviceName } : {}),
+        ...(connect?.keepAlive !== undefined ? { keepAlive: connect.keepAlive } : {}),
         ...(msg.readOnly !== undefined ? { readOnly: msg.readOnly } : {}),
         ...(this.user !== undefined ? { owner: this.user.username } : {})
       });
@@ -782,6 +783,7 @@ export class WsConnection {
         ...(ccsid !== undefined ? { ccsid } : {}),
         ...(tls !== undefined ? { tls } : {}),
         ...(deviceName !== undefined ? { deviceName } : {}),
+        ...(connect?.keepAlive !== undefined ? { keepAlive: connect.keepAlive } : {}),
         ...(msg.readOnly !== undefined ? { readOnly: msg.readOnly } : {}),
         ...(this.user !== undefined ? { owner: this.user.username } : {})
       });

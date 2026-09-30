@@ -16,6 +16,11 @@ export interface TcpConnectOptions {
   connectTimeoutMs?: number;
   /** TLS（telnet over SSL）。true で既定検証、オブジェクトで詳細指定 */
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
+  /**
+   * TCP キープアライブを入れるか（**既定 true**）。**表示セッションは既定で false にして呼ぶ**（ACS は既定で入れない——`SESSION_KEEPALIVE` の既定 false。
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる。`tn5250/src/transport/tcp.ts` の注記、`20260930-display-keepalive-off`）
+   */
+  keepAlive?: boolean;
 }
 
 /**
@@ -64,7 +69,7 @@ export class TcpTransport implements Transport {
       const socket = netConnect({ host: opts.host, port: opts.port });
       socket.setNoDelay(true);
       // **無通信でも生死が分かるようにする**（上の定数の注記）
-      socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
+      if (opts.keepAlive !== false) socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
       const timer = setTimeout(() => {
         socket.destroy();
         reject(
@@ -106,7 +111,7 @@ export class TcpTransport implements Transport {
       });
       socket.setNoDelay(true);
       // **無通信でも生死が分かるようにする**（上の定数の注記）
-      socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
+      if (opts.keepAlive !== false) socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
       const timer = setTimeout(() => {
         socket.destroy();
         reject(

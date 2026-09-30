@@ -54,6 +54,8 @@ export interface OpenVtOptions {
   readOnly?: boolean;
   owner?: string;
   connectTimeoutMs?: number;
+  /** TCP キープアライブ（既定 false＝ACS と同じ。`VtSession` の `keepAlive`） */
+  keepAlive?: boolean;
 }
 
 /** 1 フレーム（60fps）。これ以上細かくしても画面は追いつかない */
@@ -81,7 +83,8 @@ export class VtManager {
       ...(opts.deviceName !== undefined ? { deviceName: opts.deviceName } : {}),
       ...(opts.scrollback !== undefined ? { scrollback: opts.scrollback } : {}),
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
-      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {})
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
     });
     const entry: VtEntry = {
       id: randomUUID(),

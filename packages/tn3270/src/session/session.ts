@@ -56,6 +56,11 @@ export interface Connect3270Options {
    */
   tn3270e?: boolean;
   connectTimeoutMs?: number;
+  /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS は端末の種類を問わず既定で入れない——`SESSION_KEEPALIVE` の既定 false）。入れると、一時的な回線断で
+   * 無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。途中の機器が無通信の接続を落とす環境だけ true（`20260930-display-keepalive-off`）
+   */
+  keepAlive?: boolean;
   negotiateTimeoutMs?: number;
 }
 
@@ -173,7 +178,8 @@ export class Tn3270Session {
       ...(this.opts.connectTimeoutMs !== undefined
         ? { connectTimeoutMs: this.opts.connectTimeoutMs }
         : {}),
-      ...(this.opts.tls !== undefined ? { tls: this.opts.tls } : {})
+      ...(this.opts.tls !== undefined ? { tls: this.opts.tls } : {}),
+      keepAlive: this.opts.keepAlive === true // 既定は入れない（ACS と同じ）
     });
     this.attach(transport);
     await this.waitNegotiated(this.opts.negotiateTimeoutMs ?? 15_000);
