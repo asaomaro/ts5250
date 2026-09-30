@@ -44,10 +44,13 @@ describe("O 欄の明示の並び（コア）", () => {
     expect(send(buf)).toBe("0e0f" + "e7" + "0e4481" + "0f");
   });
 
-  it("末尾の半角空白は空のセル（NUL）にし、送るときに落ちる。途中の空白は送る", () => {
+  it("空白は途中でも末尾でも中身として送る（ACS は打った末尾の空白も送る。空きは U+0000 で持つ。`20260930-nul-typed-space`）", () => {
     const buf = oField();
     buf.setFieldValue(buf.orderedFields()[0]!, "A B" + SO + SI + "   ", true);
-    expect(send(buf)).toBe("c140c2" + "0e0f");
+    expect(send(buf)).toBe("c140c2" + "0e0f" + "404040");
+    const b2 = oField();
+    b2.setFieldValue(b2.orderedFields()[0]!, "A B" + SO + SI + "\u0000\u0000\u0000", true);
+    expect(send(b2)).toBe("c140c2" + "0e0f");
   });
 
   it("ALT でも同じバイト列（途中の NUL は無い）", () => {

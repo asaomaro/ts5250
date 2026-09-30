@@ -159,7 +159,9 @@ export function isFieldExitRequired(f: Field): boolean {
  * 末尾の空白は「埋まっていない」扱い（送信値も末尾空白を落としている）。
  */
 function isFull(f: Field, value: string): boolean {
-  const v = value.replace(/ +$/, "");
+  // O 欄は空き（NUL）が 1 桁でもあれば満杯でない・打った空白は埋まっている（ACS `isFieldFull` は NUL の有無だけを見る。値の空きは U+0000）
+  if (f.dbcsType === "open" && value.includes("\u0000")) return false;
+  const v = f.dbcsType === "open" ? value : value.replace(/ +$/, "");
   const n = f.signedNumeric === true ? f.length - 1 : f.length; // 符号の桁は数えない（`checkedBody`）
   return (f.dbcsType ? dbcsByteLength(v, undefined, f.dbcsType === "pure") : v.length) >= n;
 }

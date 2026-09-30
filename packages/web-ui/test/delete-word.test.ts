@@ -107,7 +107,8 @@ function putDbcsOpen(text: string): (cells: Cell[][]) => void {
       if (wide && !inWide) { cells[ROW - 1]![i++] = cell(" ", "so"); inWide = true; }
       if (!wide && inWide) { cells[ROW - 1]![i++] = cell(" ", "si"); inWide = false; }
       if (wide) { cells[ROW - 1]![i++] = cell(ch, "dbcs-lead"); cells[ROW - 1]![i++] = cell("", "dbcs-tail"); }
-      else cells[ROW - 1]![i++] = cell(ch);
+      // ホストが書いた空白は生バイト 0x40 を持つ（書かなかった桁は持たない＝空き。`20260930-nul-typed-space`）
+      else cells[ROW - 1]![i++] = ch === " " ? { ...cell(ch), rawByte: 0x40 } : cell(ch);
     }
     if (inWide) cells[ROW - 1]![i++] = cell(" ", "si");
   };
@@ -179,7 +180,7 @@ describe("Delete Word（ScreenGrid）", () => {
       ["d2 全角の先頭", 4, o("AA {い} BB")],
       ["d3 全角の 2 字目", 5, o("AA {あ} BB")],
       ["d4 全角の前の空白", 2, o("AA{あい} BB")],
-      ["d5 最後の語", 8, o("AA {あい}")]
+      ["d5 最後の語", 8, o("AA {あい} ")] // 語の前の空白はホストが書いた空白（中身）なので残る。末尾の空白も ACS は送る（`20260930-nul-typed-space`）
     ];
     for (const [name, caret, expected] of cases) {
       document.body.replaceChildren();

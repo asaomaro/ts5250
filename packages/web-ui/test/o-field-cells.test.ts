@@ -155,7 +155,7 @@ describe("値とセルの行き来", () => {
   it("印のある値はそのまま、無い値（古い値）は全角の連なりを SO/SI で挟む", () => {
     expect(show(toCells([SO_MARK, SI_MARK, "X"], L))).toBe("{}X");
     expect(show(toCells(["あ", "い", "X"], L))).toBe("{あい}X");
-    expect(fromCells(toCells(["あ", "X"], 6))).toEqual([SO_MARK, "あ", SI_MARK, "X", " "]);
+    expect(fromCells(toCells(["あ", "X"], 6))).toEqual([SO_MARK, "あ", SI_MARK, "X", "\u0000"]); // 詰め物は空き（NUL）
   });
 
   it("要素の添字とセルの桁（全角は 2 桁、後半の桁は前半の要素へ）", () => {

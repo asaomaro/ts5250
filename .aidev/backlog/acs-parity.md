@@ -208,7 +208,7 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   当 PJ は値を変えず MDT にもしなかった。P3 は貼り付けが全角を区間の残りに入れられないとき、ACS は打鍵と同じ操作で次の区間の頭へ置いて止まる（`AあBいCう` → `c1 0e4481 0f c2 0000 | 0e4482 0f`）。
   `oChainCells.ts` の `chainPaste`（1 字ずつの鎖の打鍵で、カーソルが最初の区間を出た字を置いて止まる。カーソルは動かさない）と `chainDelete` の `warn`（値を反映したうえで 0065 も出す）。
   実機のブラウザ: D1〜D8 が一致（16/16。`scripts/verify-browser-cont-o-lone-shift.mjs`）、P1〜P8 が P3 も含めて一致（15/15。P4 のカーソルは操作の違いで比べない）。
-  単体 `o-chain-paste.test.ts`（新規 6）・`o-chain-cells.test.ts`・`o-chain-edit.test.ts`。変異 10 通り（全て検出）。PR は #471（予定）。
+  単体 `o-chain-paste.test.ts`（新規 6）・`o-chain-cells.test.ts`・`o-chain-edit.test.ts`。変異 10 通り（全て検出）。PR #471。
   **残った差（バイト列に出ない）**: 0065 の操作員メッセージの文言（ACS の日本語は「画面の保護域にカーソルがある」、当 PJ は「この位置（全角の区切り）では操作できません」）。
 - [ ] **継続した O 欄の残りの差**（優先度 低・深さ △。`20260928-cont-o-cells` から割った）。**【2026-09-30 に「対応不要」で閉じたが、利用者の指示（「以下に対応してください」）で再開。(a) 空きと空白・(b) 語送り・(c) 貼り付け（P3 まで）・(d) 単独の SO/SI の Delete は済み（上の `[x]`）。残りは (e)・(f)】**
   **残りを実装していない理由（2026-09-30）**: ~~(d) 単独の SO/SI の Delete は、先に死んだ桁を作る手順が要り、ACS の詰め直しの結果を測っていない~~（測って揃えた。上の `[x]`）／(e) SI が区間の最後の桁のときの全角の挿入は、ACS 自身が画面を崩し
@@ -698,6 +698,14 @@ ACS 実体（`acsbundle.jar`）がユーザーから提供され、コアクラ�
   ②**Dup が 1 バイト足りなかった**（字の数で埋めていた）→ バイトで埋める（`SO あい SI`＋空き 6 の い の桁で 0x1C が 8 個）。
   ③**全角の状態の E への挿入で最後の桁を SI の分に取っておかなかった**（`SO あいうえ SI`＋空き 2 に全角 1 字は ACS は余地なし、当 PJ は通していた）→ `insertBudget`（full の形と J は従来どおり）。打鍵・貼り付けの両経路。
   単体 `packages/web-ui/test/either-remainder.test.ts`（13）。変異 8 通り（全て KILLED）。実機のブラウザは 4 巡とも ACS と一致。
+- [x] **継続でない O 欄の空き（NUL）と空白（0x40）の区別**（下の「E 欄の残り」の「継続でない O・J・E の値の空きと空白」のうち O）。**実装した**（`20260930-nul-typed-space`）。
+  実機の ACS のコア（DSM の `SPACETY`・`scripts/acs-probe/space-typed.txt`）で、O 欄に打った末尾の空白は欄データとして**送られる**（`A`＋空白 → `c1 40`、`あ`＋空白 → `0e 4481 0f 40 0e 0f`。READ MDT・ALT とも）と測り、
+  当 PJ は末尾の空白を落としていた（`c1`）。日本語機は入力欄の多くを O と宣言するので、ふつうの入力欄の末尾の空白の差だった。継続した O 欄の鎖の仕組み（値の U+0000＝空き・U+0020＝空白）を継続でない O 欄へ広げた
+  （web-ui の `trimPad`・`padDbcs`・`logicalFromCells`・`oFieldCells` の詰め物・End・`displayText`・必須埋めの満杯判定。core の `setFieldCells`・`setFieldValue`）。あわせて、ホストが RA・TD で書いた字に生バイトを持たせた
+  （空白か空きかの見分けは生バイト 0x40 に依る）。End が空きを飛ばさなかった（継続した O 欄の鎖にも潜在していた）不具合も直った。
+  実機のブラウザ: O 欄の READ MDT・ALT が ACS と一致（`scripts/verify-browser-space-typed.mjs` の f3・f4）、既存の実機スクリプト 9 本が一致のまま（o-field 3・je-field 3・cont-o 24・cont-o-paste 15・cont-o-lone-shift 16・either-remainder 4・either-empty-view 7・word-wrap 8・space-typed）。
+  単体 `o-field-nul.test.ts`・`packages/tn5250/test/o-field-send.test.ts`（新規）ほか。変異 15 通り（等価 1 を除き全て検出）。PR #472。
+  **残り**: 下の `[ ]`（J・G・全角の E の打った全角空白と詰め物の区別・半角の E の末尾の空白）。
 - [ ] **E 欄の残り**（`20260927-either-field-mode` から割った）。上の `[x]`（伏せ字・Dup・挿入の余地）を除いた残り: 伏せ字で**中身が入って届く** DBCS 欄の編集（値をブラウザへ出さない設計のため編集が空から始まる。
   ACS は中身の上に上書きする。実機: 空の伏せ字の E は一致）と、open の E の中身の末尾に打った全角空白（下）。**【2026-09-30 に「対応不要」で閉じたが、利用者の指示で再開】**（以下は閉じたときの記述）: 残りは伏せ字の E 欄・Dup・open の E の中身の末尾の全角空白・挿入モードの取り置きの状態の利用で、
   いずれも DBCS の E 欄の特殊な組み合わせ（パスワードを DBCS の E 欄にする・E 欄で Dup を使う・E 欄の末尾に全角空白だけを打つ）でしか起きず、起きても送るバイト列の末尾の空白の差にとどまる。

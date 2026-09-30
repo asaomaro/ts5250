@@ -1,0 +1,56 @@
+# **打った末尾の空白（半角 0x40・全角 4040）が ACS のコアから送られるか**（台帳「E 欄の残り」の open の E の末尾の全角空白と、継続でない O・J・E の空き〔NUL〕と空白の区別）。
+# DSM の SPACETY（`scripts/host-src/dscmd.c`）: 空の 12 桁の欄 (3,10) J / (5,10) E / (7,10) E / (9,10) O / (11,10) O / (13,10) J。
+# 1 巡目は READ MDT（ホストが受け取ったバイト列は /tmp/dscmd.log の `[T1]`）、2 巡目は READ MDT ALT（`[T2]`）。同じ打鍵を 2 回:
+#   f0 J: あ＋全角空白 / f1 E: あ＋全角空白（どちらも `あ　い` を打って Backspace。行の末尾の全角空白は probe の引数の処理で落ちる） / f2 E: A＋半角空白 / f3 O: A＋半角空白 / f4 O: あ＋半角空白 / f5 J: 全角空白だけ（先頭の Space で全角空白を打ち、あ を打って Backspace）
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/space-typed.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SPACETY')[enter]
+settle 4000
+dump start
+setcursor 3,11
+keys あ　い
+keys [backspace]
+setcursor 5,10
+keys あ　い
+keys [backspace]
+setcursor 7,10
+keys A B
+keys [backspace]
+setcursor 9,10
+keys A B
+keys [backspace]
+setcursor 11,10
+keys あ い
+keys [backspace]
+setcursor 13,11
+keys  あ
+keys [backspace]
+settle 400
+dump t1
+keys [enter]
+settle 3000
+setcursor 3,11
+keys あ　い
+keys [backspace]
+setcursor 5,10
+keys あ　い
+keys [backspace]
+setcursor 7,10
+keys A B
+keys [backspace]
+setcursor 9,10
+keys A B
+keys [backspace]
+setcursor 11,10
+keys あ い
+keys [backspace]
+setcursor 13,11
+keys  あ
+keys [backspace]
+settle 400
+dump t2
+keys [enter]
+settle 3000
