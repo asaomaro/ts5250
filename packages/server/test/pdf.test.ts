@@ -43,3 +43,22 @@ describe("renderSpoolPdf", () => {
     expect(isPdf(pdf)).toBe(true);
   });
 });
+
+describe("renderSpoolPdf — 格子に載らないもの（`20260930-scs-overlay`）", () => {
+  it("重ね打ちの字・半分の幅の字・罫線を足すと、PDF の描画命令が増える（壊れずに生成できる）", async () => {
+    const plain = await renderSpoolPdf([page(["___", "CD"])]);
+    const withDecor = await renderSpoolPdf([
+      {
+        rows: 2,
+        cols: 3,
+        lines: ["___", "CD"],
+        decor: [
+          { glyphs: [{ x: 0, text: "A", scale: 1 }, { x: 1.5, text: "B", scale: 0.5 }] },
+          { h: [{ x1: 0, x2: 3, dotted: false, weight: "pair" }], v: [{ x: 3, dotted: true, weight: "bold" }] }
+        ]
+      }
+    ]);
+    expect(isPdf(withDecor)).toBe(true);
+    expect(withDecor.length).toBeGreaterThan(plain.length);
+  });
+});

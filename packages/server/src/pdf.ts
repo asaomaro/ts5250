@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import type { LogicalPage } from "@ts5250/scs";
-import { displayableChar } from "@ts5250/scs";
+import { displayableChar, overGlyphView, ruleLook } from "@ts5250/scs";
 import { candidateFontPaths, findMonoCjkFont } from "./pdf-font.js";
 
 /**
@@ -25,6 +25,22 @@ export interface PdfOptions {
   margin?: number;
 }
 
+
+/** 罫線を引く（二重は 2 本の細線を 1.2 pt 離す。点線は 7.2 pt の破線。ACS `JPSGridLine`） */
+function strokeLine(doc: PDFKit.PDFDocument, x1: number, y1: number, x2: number, y2: number, width: number, dotted: boolean, pair: boolean): void {
+  const draw = (dx: number, dy: number): void => {
+    doc.save();
+    doc.lineWidth(width);
+    if (dotted) doc.dash(7.2 * 0.4, { space: 7.2 * 0.4 });
+    doc.moveTo(x1 + dx, y1 + dy).lineTo(x2 + dx, y2 + dy).stroke();
+    doc.restore();
+  };
+  if (pair) {
+    const horizontal = y1 === y2;
+    draw(horizontal ? 0 : -0.6, horizontal ? -0.6 : 0);
+    draw(horizontal ? 0 : 0.6, horizontal ? 0.6 : 0);
+  } else draw(0, 0);
+}
 
 export function renderSpoolPdf(
   pages: LogicalPage[],
@@ -69,13 +85,35 @@ export function renderSpoolPdf(
   for (const page of list) {
     doc.addPage();
     let y = margin;
-    for (const line of page.lines) {
+    // 桁の幅（等幅なので半角 1 字の幅）。重ねて描く字・罫線の位置に使う
+    const cw = doc.widthOfString("M");
+    for (const [r, line] of page.lines.entries()) {
       // **描けない字は半角スペースへ**（HTML・画面と同じ扱い。`displayableChar`）。
       // 復号コードページにマップの無いバイトはコーデックが U+FFFD で返すので、
       // 素通しすると紙に `◆` が混ざる——しかも多くのフォントで全角幅なので桁までずれる。
       const text = [...line].map(displayableChar).join("");
       // lineBreak:false で折り返さず 1 行として描く（等幅フォントで桁が揃う）
       doc.text(text.length > 0 ? text : " ", margin, y, { lineBreak: false });
+      // **格子に載らないもの**（重ね打ちで下になった字・半分の幅の字・罫線。`LogicalPage.decor`）を重ねて描く（画面・HTML と同じ位置。行の箱は `lineHeight`）
+      const d = page.decor?.[r];
+      if (d) {
+        for (const g of d.glyphs ?? []) {
+          const v = overGlyphView(g);
+          doc.save();
+          doc.translate(margin + g.x * cw, y);
+          if (v.scale !== 1) doc.scale(v.scale, 1);
+          doc.text(v.text, 0, 0, { lineBreak: false });
+          doc.restore();
+        }
+        for (const h of d.h ?? []) {
+          const l = ruleLook(h);
+          strokeLine(doc, margin + h.x1 * cw, y + lineHeight, margin + h.x2 * cw, y + lineHeight, l.pt, h.dotted, h.weight === "pair");
+        }
+        for (const v of d.v ?? []) {
+          const l = ruleLook(v);
+          strokeLine(doc, margin + v.x * cw, y, margin + v.x * cw, y + lineHeight, l.pt, v.dotted, v.weight === "pair");
+        }
+      }
       y += lineHeight;
     }
   }

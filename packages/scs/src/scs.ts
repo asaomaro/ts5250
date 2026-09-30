@@ -52,6 +52,11 @@ export interface LogicalPage {
    * **SO/SI 表示のために持つ。** 印をどう描くかは描く側の判断なので、ここでは位置だけを渡す。
    */
   shifts?: ShiftMark[][];
+  /**
+   * 行ごとの飾り（重ね打ちで下になった字・半分の幅の字・罫線。`lines` と同じ添字。**無いときは持たない**）。
+   * `lines` は 1 文字も変えない——PDF・テキスト・検索はこれまでどおり `lines` を使い続ける（重ね打ちで下になった字は検索に出ない）
+   */
+  decor?: (RowDecor | undefined)[];
 }
 
 /** SO/SI の位置（`LogicalPage.shifts`） */
@@ -61,6 +66,54 @@ export interface ShiftMark {
   /** SO/SI が占める桁の数（SPCC により 0 / 1 / 2）。印を桁の中に描くか、境目に描くかの判断に使う */
   width: number;
   kind: "so" | "si";
+}
+
+/**
+ * **桁の格子に載らない字**（`LogicalPage.decor` の行ごとの `glyphs`）。**格子の字の上に重ねて描く**。
+ *
+ * - **重ね打ちで下になった字**: ACS の JPS は 1 字ずつ `drawString` するだけで何も消さないので、CR で戻って別の字を打つと（`ABC` CR `___` の下線・二度打ちの太字・合成文字）
+ *   両方が紙に残る。格子は後の字を持ち、**先の字**をここへ残す（`scale` 1）。同じ字を重ねた太字もここへ残す（重ねて描くと濃くなる）
+ * - **半分の幅の字**（SFSS `2B FD .. 02` の横 0x08）: 1 字の進みが半桁なので桁の格子に置けず、**格子は空白のまま**ここで描く（`scale` 0.5。`x` は 0.5 刻み）
+ * ~~重ね打ちは後の字だけ~~（`20260921-scs-blank-overprint` の時点。非空白どうしは「実帳票を 1 件採ってから」としていた）
+ */
+export interface OverGlyph {
+  /** 字の左端（桁の境目。0 起点。左端が 0） */
+  x: number;
+  /** 字（全角なら 1 文字で 2 桁ぶん） */
+  text: string;
+  /** 横の倍率（1 か 0.5） */
+  scale: number;
+  /** SBCS の生バイト（表示コード切替で読み直す用。全角・半分の幅の全角は無い） */
+  raw?: number;
+}
+
+/** 罫線の種類（DGL `2B FD .. 00` の type: 0 実線・細／1 実線・太／2 実線・二重／8 点線・細／9 点線・太／10 点線・二重） */
+export interface RuleStyle {
+  dotted: boolean;
+  weight: "thin" | "bold" | "pair";
+}
+
+/** 横の罫線: その行の**下端**に、桁の境目 `x1` から `x2` まで（0 起点。ACS `JPSHorizontalGridLine`） */
+export interface HRule extends RuleStyle {
+  x1: number;
+  x2: number;
+}
+
+/** 縦の罫線: その行を上端から下端まで貫く、桁の境目 `x`（0 起点。ACS `JPSVerticalGridLine`）。縦線が始まった行の**下端**から引くので、始まった行の次の行から並ぶ */
+export interface VRule extends RuleStyle {
+  x: number;
+}
+
+/**
+ * **行ごとの飾り**（`LogicalPage.decor` の要素。`lines` と同じ添字）。格子に載らないものを行の側に持つ——描く側は行ごとの箱に重ねて描けばよい
+ * （SO/SI の印〔`shifts`〕と同じ流儀）。
+ */
+export interface RowDecor {
+  glyphs?: OverGlyph[];
+  /** 横罫線（この行の下端） */
+  h?: HRule[];
+  /** 縦罫線（この行を貫く） */
+  v?: VRule[];
 }
 
 // SCS 単バイト制御（ACS `PrintSCS5250` の表と同じ割り当て）
@@ -96,6 +149,23 @@ const ORDERS_2B = new Set([0xc1, 0xc2, 0xc6, 0xc8, 0xca, 0xd1, 0xd2, 0xd3, 0xd4,
 
 const MAX_ROW = 32767; // 暴走データでの過大確保を防ぐ安全上限
 const MAX_COL = 32767;
+
+/** DGL の種類（ACS `processDefineGridLines`）。知らない値は `undefined`（命令ごと無視） */
+function ruleStyleOf(type: number): RuleStyle | undefined {
+  const weight = type & 3;
+  if ((type & ~0x0b) !== 0 || weight === 3) return undefined; // 0 1 2 8 9 10 だけ（3・11 は無い）
+  return { dotted: (type & 8) !== 0, weight: weight === 1 ? "bold" : weight === 2 ? "pair" : "thin" };
+}
+
+/** SCD の字の間隔 → JPS の字幅（pt。ACS `JPSState.mapCharDistanceToCharWidth`） */
+function charWidthOf(distance: number): number {
+  if (distance <= 10 || distance === 255) return 7.2;
+  if (distance <= 12) return 6.0;
+  if (distance <= 13) return 5.3999999999999995;
+  if (distance <= 15) return 4.8;
+  if (distance <= 20) return 3.6;
+  return 4.235294117647059;
+}
 
 export class ScsDecoder {
   private readonly codec: Codec;
@@ -136,6 +206,21 @@ export class ScsDecoder {
     let widthScale = 1;
     let dbcsMode = false; // SO/SI シフト状態（DBCS コーデックのみ）
 
+    // ---- 桁の格子に載らないもの（`RowDecor`。`20260930-scs-overlay`） ----
+    let decorGrid: (RowDecor | undefined)[] = []; // 添字は row - 1
+    const decorAt = (r: number): RowDecor => (decorGrid[r - 1] ??= {});
+    /** JPS の字幅（pt。`JPSState.m_charWidth`）。罫線の位置（1/20 pt）を桁へ直すのに使う。SCD で変わる */
+    let charWidth = 7.2;
+    /** 縦の罫線（DGL）の溜め。ACS は縦線を溜め、**行が変わったあとに**線を引く（`JPSState.clearVerticalGridLines`） */
+    let vLines: { units: number; style: RuleStyle }[] = [];
+    let vStartRow = 0;
+    let canClearV = false;
+    /** 行を動かす。**行が変わったら**溜めた縦線を引ける状態にする（ACS `JPSState.setPosition` は Y が変わったときに立てる） */
+    const moveRow = (r: number): void => {
+      if (r !== row) canClearV = true;
+      row = r;
+    };
+
     const cellAt = (c: number): void => {
       // grid[row-1] を c 桁まで空白で伸ばす
       let line = grid[row - 1];
@@ -152,13 +237,38 @@ export class ScsDecoder {
       const v = grid[r - 1]?.[c - 1];
       return v !== undefined && v !== " ";
     };
+    /**
+     * **これから上書きする字を、重ね打ちの字として残す**（ACS の JPS は何も消さず、先の字も紙に残る）。空白と全角の継続桁（空文字列）は残さない。
+     * 全角の先頭桁の字はその全角ごと（2 桁ぶん）残す
+     */
+    const stash = (r: number, c: number): void => {
+      const v = grid[r - 1]?.[c - 1];
+      if (v === undefined || v === " " || v === "") return;
+      const raw = rawGrid[r - 1]?.[c - 1];
+      (decorAt(r).glyphs ??= []).push({ x: c - 1, text: v, scale: 1, ...(raw !== undefined ? { raw } : {}) });
+    };
+    /** 格子に載せずに重ねて描く字（半分の幅の字・半桁の位置から始まる字）。桁の数え（`maxCol`）だけは進める */
+    const overlay = (text: string, cols: number, scale: number, raw?: number): void => {
+      if (text !== " " && text !== "\u3000") (decorAt(row).glyphs ??= []).push({ x: col - 1, text, scale, ...(raw !== undefined ? { raw } : {}) });
+      if (row > maxRow) maxRow = row;
+      const end = Math.ceil(col - 1 + cols);
+      if (end > maxCol) maxCol = end;
+    };
     const put = (ch: string, rawByte?: number): void => {
       if (row < 1 || col < 1 || row > MAX_ROW || col > MAX_COL) return;
+      if (widthScale < 1 || !Number.isInteger(col)) {
+        // 半分の幅（SFSS の 0x08）の字と、半桁の位置に着いた字は桁の格子に置けない（1 桁に 2 字入る）。格子は空白のまま、重ねて描く
+        overlay(ch, widthScale, widthScale < 1 ? widthScale : 1, rawByte);
+        col += widthScale;
+        return;
+      }
       cellAt(col);
       // **空白（0x40）は下の字を消さない**——ACS の JPS は 1 字ずつ `drawString` するだけで何も消さず、空白は「空白のグリフを 1 桁ぶん描く」だけ。
       // CR で戻って同じ行へ重ね書きするとき、2 度目の空白は下の字の上を通り過ぎるだけ（`ABCDEF` CR `␠␠␠XY` は `ABCXYF`）。
       // `20260921-scs-blank-overprint`。書かないので、生バイトも下の字のまま残る。位置と `maxCol` は従来どおり進める
       if (!(ch === " " && occupied(row, col))) {
+        // **非空白の字を別の（または同じ）字で重ねたら、先の字を残す**（下線・二度打ちの太字・合成文字。上の `stash`）
+        stash(row, col);
         grid[row - 1]![col - 1] = ch;
         // 生バイトは SBCS の桁にだけ残す（読み直せるのはこれだけ）
         (rawGrid[row - 1] ??= [])[col - 1] = rawByte;
@@ -170,9 +280,16 @@ export class ScsDecoder {
     // 全角グリフ（2 桁を占める）。後半桁は継続（空文字列）にして join で桁を保つ
     const putWide = (ch: string): void => {
       if (row < 1 || col < 1 || row > MAX_ROW || col + 1 > MAX_COL) return;
+      if (widthScale < 1 || !Number.isInteger(col)) {
+        overlay(ch, 2 * widthScale, widthScale < 1 ? widthScale : 1);
+        col += 2 * widthScale;
+        return;
+      }
       cellAt(col + 1);
       // 全角空白も同じ（下の字を消さない）。下が半角 1 字だけでも、2 桁のどちらかに字があれば書かない
       if (!(ch === "\u3000" && (occupied(row, col) || occupied(row, col + 1)))) {
+        stash(row, col);
+        stash(row, col + 1);
         grid[row - 1]![col - 1] = ch;
         grid[row - 1]![col] = ""; // 継続桁
       }
@@ -209,12 +326,72 @@ export class ScsDecoder {
         raw.push(rawGrid[r] ?? []);
         shifts.push(shiftGrid[r] ?? []);
       }
-      pages.push({ rows: maxRow, cols: maxCol, lines, raw, shifts });
+      const decor: (RowDecor | undefined)[] = [];
+      for (let r = 0; r < maxRow; r++) decor.push(decorGrid[r]);
+      pages.push({ rows: maxRow, cols: maxCol, lines, raw, shifts, ...(decor.some((d) => d !== undefined) ? { decor } : {}) });
       grid = [];
       rawGrid = [];
       shiftGrid = [];
+      // 引かれずに残った縦線はページと一緒に捨てる（ACS は FF で新しい状態から始め、溜めた縦線を引かない）
+      decorGrid = [];
+      vLines = [];
+      vStartRow = 0;
+      canClearV = false;
       maxRow = 0;
       maxCol = 0;
+    };
+
+    // ---- 罫線（DGL `2B FD .. 00`。ACS `PrintSCS5250JPS.processDefineGridLines` と `JPSState` の縦線の溜め） ----
+    /** 溜めた縦線を引く。**行が変わったあとだけ**引き（`canClearV`）、始まった行の下端から今の行の下端まで＝始まった行の次の行から今の行までを貫く */
+    const flushV = (): void => {
+      if (!canClearV) return;
+      if (vLines.length > 0) {
+        for (let r = vStartRow + 1; r <= row; r++) {
+          for (const l of vLines) (decorAt(r).v ??= []).push({ x: l.units / 20 / charWidth, ...l.style });
+        }
+        if (row > maxRow) maxRow = row;
+        vLines = [];
+      }
+      canClearV = false;
+    };
+    const addV = (units: number, style: RuleStyle): void => {
+      flushV();
+      if (vLines.length === 0) vStartRow = row;
+      if (!vLines.some((l) => l.units === units)) vLines.push({ units, style });
+    };
+    const addH = (units1: number, units2: number, style: RuleStyle): void => {
+      flushV();
+      if (row < 1 || row > MAX_ROW) return;
+      (decorAt(row).h ??= []).push({ x1: units1 / 20 / charWidth, x2: units2 / 20 / charWidth, ...style });
+      if (row > maxRow) maxRow = row;
+    };
+    const word = (p: readonly number[], at: number): number => ((p[at]! << 8) | p[at + 1]!) << 16 >> 16; // ACS の `makeWord` は short
+    /** `len` は命令の長さ（自身を含む）、`params` は副コード 0 の後ろ（種類・選択・位置）。ACS の検査と同じ順で、通らなければ何もしない */
+    const dgl = (len: number, params: readonly number[]): void => {
+      if (len < 2 || len > 255 || (len > 3 && len % 2 === 1)) return;
+      if (len === 2) {
+        flushV(); // 「消す（既定）」
+        return;
+      }
+      const style = ruleStyleOf(params[0]!);
+      if (style === undefined) return;
+      if (len <= 3) return; // 種類だけ（何も引かない）
+      const sel = params[1]!;
+      const n = len - 4; // 位置のバイト数
+      if (sel === 0) flushV();
+      else if (sel === 0x40) for (let k = 0; k + 1 < n; k += 2) addV(word(params, 2 + k), style);
+      else if (sel === 0x80) for (let k = 0; k + 3 < n; k += 4) addH(word(params, 2 + k), word(params, 4 + k), style);
+      else if (sel === 0xc0) {
+        let first: number | undefined;
+        let last: number | undefined;
+        for (let k = 0; k + 1 < n; k += 2) {
+          const u = word(params, 2 + k);
+          first ??= u;
+          last = u;
+          addV(u, style);
+        }
+        if (first !== undefined && last !== undefined && first !== last) addH(first, last, style);
+      }
     };
 
     let i = 0;
@@ -258,16 +435,16 @@ export class ScsDecoder {
           break;
         case NL:
         case IRS:
-          row += 1;
+          moveRow(row + 1);
           col = 1;
           break;
         case LF:
         case VT: // JPS の VT は LF（`JPSVerticalTab extends JPSLineFeed`）
-          row += 1;
+          moveRow(row + 1);
           break;
         case FF:
           flushPage(true);
-          row = 1;
+          row = 1; // ページが変わる（縦線の溜めは `flushPage` が捨てた）
           col = 1;
           break;
         case BS:
@@ -299,9 +476,9 @@ export class ScsDecoder {
           const val = next();
           if (fn < 0 || val < 0) break;
           if (fn === PP_AHPP) col = val;
-          else if (fn === PP_AVPP) row = val;
+          else if (fn === PP_AVPP) moveRow(val);
           else if (fn === PP_RRPP) col += val;
-          else if (fn === PP_RDPP) row += val;
+          else if (fn === PP_RDPP) moveRow(row + val);
           break;
         }
         case SA:
@@ -315,16 +492,23 @@ export class ScsDecoder {
           next(); // JPS は何も置かない（~~グラフィック・エラー文字 `-`~~ は PDT 経路）
           break;
         case ORDER_2B:
-          this.skip2b(next, () => i, (to) => (i = to), (v) => (this.spcc = v), () => {
+          this.skip2b(next, () => i, (to) => (i = to), {
+            setSpcc: (v) => (this.spcc = v),
             // SSLD が行の途中に来たら、先に改行してから行送りを変える（ACS `JPSSingleLineDistance.process`: x が 0 でなければ CR と LF）
-            if (col !== 1) {
-              col = 1;
-              row += 1;
-            }
-          }, (h) => {
+            onSsld: () => {
+              if (col !== 1) {
+                col = 1;
+                moveRow(row + 1);
+              }
+            },
             // SFSS の横の倍率（ACS `JPSFontSizeScaling.mapScalingFactor`: 0x20 は 2 倍・0x08 は半分・それ以外は 1）
-            if (h === 0x08) this.warn?.("SCS: SFSS の半分の幅は桁の格子で表せないので 1 倍として扱う");
-            widthScale = h === 0x20 ? 2 : 1;
+            onSfss: (h) => {
+              widthScale = h === 0x20 ? 2 : h === 0x08 ? 0.5 : 1;
+            },
+            onScd: (distance) => {
+              charWidth = charWidthOf(distance);
+            },
+            onDgl: (len, params) => dgl(len, params)
           });
           break;
         default:
@@ -362,10 +546,15 @@ export class ScsDecoder {
     read: () => number,
     pos: () => number,
     seek: (to: number) => void,
-    setSpcc: (v: number) => void,
-    onSsld: () => void,
-    onSfss: (horizontal: number) => void
+    hooks: {
+      setSpcc: (v: number) => void;
+      onSsld: () => void;
+      onSfss: (horizontal: number) => void;
+      onScd: (distance: number) => void;
+      onDgl: (len: number, params: readonly number[]) => void;
+    }
   ): void {
+    const { setSpcc, onSsld, onSfss } = hooks;
     const at = pos(); // クラスの位置
     const cls = read();
     if (cls < 0) return;
@@ -383,6 +572,17 @@ export class ScsDecoder {
       // それ以外の長さは受けない（ACS は変えない）
       const sub = read();
       if (sub < 0) return;
+      if (sub === 0x00) {
+        // **2B FD .. 00 は DGL（罫線の定義）**（ACS `processDefineGridLines`）。種類・選択・位置を読んで `onDgl` へ
+        const params: number[] = [];
+        for (let k = 0; k < len - 2; k++) {
+          const v = read();
+          if (v < 0) return;
+          params.push(v);
+        }
+        hooks.onDgl(len, params);
+        return;
+      }
       if (sub === 0x02 && len >= 2 && len <= 4) {
         // **2B FD .. 02 は SFSS（字の大きさの倍率）**（ACS `processSetFontSizeScaling`。`20260927-scs-sfss`）: 長さ 2〜4 だけを受け、横の倍率は +4 のバイト（縦は +5。桁の格子に効かないので読み飛ばす）。
         // 長さ 2 のとき ACS は命令の外の次のバイトを横として読む（進めない）——同じく覗くだけにする
@@ -424,6 +624,17 @@ export class ScsDecoder {
         if (hi < 0 || lo < 0) return;
         const v = ((hi << 8) | lo) << 16 >> 16; // ACS の `makeWord` は short
         if (v >= 1) onSsld();
+        return;
+      }
+      if (sub === 0x29 && (len === 2 || len === 4)) {
+        // **2B D2 .. 29 は SCD（字の間隔）**（ACS `processSetCharacterDistance`）。長さは 2 か 4 だけ。0 以下は変えない。罫線の位置（1/20 pt）を桁へ直す字幅が変わる
+        let v = 0;
+        if (len === 4) {
+          const hi = read(), lo = read();
+          if (hi < 0 || lo < 0) return;
+          v = ((hi << 8) | lo) << 16 >> 16;
+        }
+        if (v > 0) hooks.onScd(v);
         return;
       }
       for (let k = 0; k < len - 2; k++) if (read() < 0) return;

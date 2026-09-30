@@ -303,3 +303,48 @@ describe("renderSpoolHtml — ページ", () => {
     expect(html).toMatch(/^<!DOCTYPE html>/);
   });
 });
+
+describe("renderSpoolHtml — 格子に載らないもの（重ね打ち・半分の幅・罫線。`20260930-scs-overlay`）", () => {
+  const decorPage = (): LogicalPage => ({
+    rows: 2,
+    cols: 6,
+    lines: ["___", "CD"],
+    decor: [
+      { glyphs: [{ x: 0, text: "A", scale: 1, raw: 0xc1 }, { x: 1.5, text: "B", scale: 0.5 }, { x: 2, text: "あ", scale: 1 }] },
+      { h: [{ x1: 0, x2: 5, dotted: false, weight: "thin" }], v: [{ x: 5, dotted: true, weight: "bold" }] }
+    ]
+  });
+
+  it("重ねて描く字は行の箱の中に `position:absolute` の桁位置で置く。半分の幅は scaleX、全角は 2 桁の箱", () => {
+    const html = renderSpoolHtml([decorPage()]);
+    expect(html).toContain('<span class="og" style="left:0ch;">A</span>');
+    expect(html).toContain('<span class="og" style="left:1.5ch;transform:scaleX(0.5);transform-origin:0 0;">B</span>');
+    expect(html).toContain('<span class="og" style="left:2ch;width:2ch;">あ</span>');
+  });
+
+  it("罫線: 横は行の下端・縦は行を貫く。点線・太さは CSS の値になる", () => {
+    const html = renderSpoolHtml([decorPage()]);
+    expect(html).toContain('<span class="hr" style="left:0ch;width:5ch;border-bottom:1px solid currentColor"></span>');
+    expect(html).toContain('<span class="vr" style="left:5ch;border-left:2px dotted currentColor"></span>');
+  });
+
+  it("横罫線の幅は x2 − x1（始まりが 0 でない線）。二重は double の 3px", () => {
+    const html = renderSpoolHtml([
+      { rows: 1, cols: 8, lines: ["A"], decor: [{ h: [{ x1: 2, x2: 7, dotted: false, weight: "pair" }] }] }
+    ]);
+    expect(html).toContain('<span class="hr" style="left:2ch;width:5ch;border-bottom:3px double currentColor"></span>');
+  });
+
+  it("選択・コピーに入らない（CSS で user-select:none）。決定的（同じ入力で同じ HTML）", () => {
+    const html = renderSpoolHtml([decorPage()]);
+    expect(html).toMatch(/\.og\{[^}]*user-select:none/);
+    expect(html).toMatch(/\.vr\{[^}]*user-select:none/);
+    expect(renderSpoolHtml([decorPage()])).toBe(html);
+  });
+
+  it("decor が無いページの HTML は従来と同じ（og・hr・vr の要素が出ない）", () => {
+    const html = renderSpoolHtml([{ rows: 1, cols: 2, lines: ["AB"] }]);
+    expect(html).not.toContain('class="og"');
+    expect(html).not.toContain('class="hr"');
+  });
+});
