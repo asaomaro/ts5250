@@ -125,7 +125,8 @@ describe("複数行の貼り付け（独立点検の指摘）", () => {
     const edits = (grid.emitted("edit") ?? []) as [number, string, { wire?: string }?][];
     const last = edits[edits.length - 1]!;
     expect(last[1]).toBe("\u3000\u3000い"); // SO(10)・空き(11-12)・空き(13-14)・い(15-16)
-    expect(last[2]?.wire).toBe(SO_MARK + "\u3000\u3000い" + DEAD_MARK.repeat(4) + SI_MARK);
+    // 貼っていない手前の桁は書かなかった桁（空き＝NUL の組）。READ MDT は 40 40・ALT は 00 00 で送る（`20260930-wide-nul`）
+    expect(last[2]?.wire).toBe(SO_MARK + DEAD_MARK.repeat(4) + "い" + DEAD_MARK.repeat(4) + SI_MARK);
   });
 });
 

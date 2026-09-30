@@ -244,7 +244,7 @@ describe("対象外: この検査を掛けない場合", () => {
   it("J 欄（全角専用）の挿入は従来どおり", async () => {
     const { insert, value, notices } = await open(openSnapshot([["あ", "い", "　", "　", "　"]], { type: "only" }));
     await insert(1, "う");
-    expect(value()).toBe("うあい");
+    expect(value()).toBe("うあい\u3000\u3000");
     expect(notices()).toEqual([]);
   });
 
