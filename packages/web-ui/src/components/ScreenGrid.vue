@@ -2316,7 +2316,9 @@ function isDbcsEdit(f: Field): boolean {
   // **申告が無くても中身が DBCS なら列ビューで編集する**（`dbcsContent`）。値は生バイトで
   // 届くので、素の SBCS 経路に流すと画面が空白になり、編集すると桁が壊れる。
   // 打てる文字の制限は `dbcsType` のまま（ホストが SBCS と申告した欄に全角は打たせない）。
-  return (!!f.dbcsType || !!f.dbcsContent) && !f.hidden;
+  // **伏せ字の欄も、DBCS を申告した欄は列ビューで編集する**（ACS は伏せ字の E に全角も打て、ふつうの E と同じ手順で編集する。実機の ACS のコア
+  // `scripts/acs-probe/either-remainder.txt` の X1）。値はブラウザへ出さないので（`Field.value` は空）、編集は空から始まり、表示は空白（`syncDbcs`）
+  return !!f.dbcsType || (!!f.dbcsContent && !f.hidden);
 }
 
 /**
@@ -2564,11 +2566,22 @@ function eitherPasteStep(f: Field, mode: { dbcsOn: boolean }, cursor: number, ch
   return "clear";
 }
 
+/**
+ * **挿入で使える桁数**（ACS `PS5250.insertChar`: J と、全角の状態の E は**欄の最後の桁を SI の分として除いて**余地を数える——`--n3`）。
+ * SI が欄の最後の桁にある形（`full`。空きは SO と SI の間の NUL）は空きが SI の手前なので欄長のまま。SI が中身の直後にある形（`compact`）と SI が無い形（`open`）の
+ * 全角の E は、最後の桁を空きに数えない——実機の ACS のコア（`scripts/acs-probe/either-insert.txt` の i1）: `SO あいうえ SI`＋空き 2 の E に全角 1 字は余地なし（0012）
+ * だった（当 PJ は空き 2 を数えて入れていた）
+ */
+function insertBudget(f: Field, chars: readonly string[]): number {
+  const budget = visLen(f);
+  return f.dbcsType === "either" && jeShapeOf(f) !== "full" && eitherDbcsOn(f, { chars: [...chars] } as unknown as EditState) ? budget - 1 : budget;
+}
+
 /** 文字入力（5250 既定＝上書き。insertMode なら挿入）。 */
 function dbcsType(e: EditState, ch: string, f: Field, replaced = false): EditState | undefined {
   // O 欄（継続でない）は ACS の表どおりにセルの上で（選択を置き換える挿入も同じ表。最終のセルの判定だけ外す——SBCS・DBCS 欄と同じ当 PJ の決め）
   if (isOCells(f)) return oApply(e, f, (cells, c) => (e.insertMode ? oInsert(cells, c, ch, { allowLastCell: replaced }) : oOverwrite(cells, c, ch)));
-  const budget = visLen(f);
+  const budget = e.insertMode && !replaced ? insertBudget(f, e.chars) : visLen(f);
   // 選択を置き換える挿入（`replaced`）は、消した跡を埋めるだけなので最終桁の判定を掛けない
   if (e.insertMode && !replaced && atLastColumn(e, f)) return undefined;
   const chars = [...e.chars];
@@ -2750,7 +2763,8 @@ function syncDbcs(inputEl: HTMLInputElement, f: Field): void {
     const el = inputForSlice(f, i);
     // **フォーカス中もセンチネルは見せない。** 休止時はテンプレートが stripSentinels を通すが、
     // ここは同期処理が直接代入するので、同じ処理を通さないと制御コードが豆腐で見える。
-    if (el) el.value = recoded ? displayText(stripSentinels(sliceValue(f, i))) : stripSentinels(dbcsSliceText(lay, sl));
+    // 伏せ字の欄は桁ぶんの空白（実値を DOM に出さない。`maskSafe`）
+    if (el) el.value = f.hidden ? " ".repeat(sl.width) : recoded ? displayText(stripSentinels(sliceValue(f, i))) : stripSentinels(dbcsSliceText(lay, sl));
   });
   const local = localCaret(lay.sliceRange(s.offset, s.offset + s.width), caret); // スライス内 caret
   target.setSelectionRange(local, local);
@@ -2935,7 +2949,7 @@ function dupKey(): void {
   }
   // 満杯まで打った直後でもカーソルの桁から埋める（ACS `processDupFM` は `fieldExited` を見ない）
   fieldExitedIndex = -1;
-  edit = dupFill(edit, rawSentinel(DUP_BYTE));
+  edit = dupFill(edit, rawSentinel(DUP_BYTE), isDbcsEdit(t.f) ? (c) => (isWideForDbcs(c) ? 2 : 1) : undefined);
   fillFollowingSegments(t.f, rawSentinel(DUP_BYTE)); // 継続欄は続く区間の全桁も Dup 文字（ACS `processDupFM`）
   sync(t.el, t.f);
   // **Field Exit が必須の欄でも次の欄へ移る**（ACS `PS5250.processDupFM` は FER も
@@ -4004,7 +4018,6 @@ function firstRejection(field: Field, text: string, base = "", offset = 0): Reje
  *  （10 桁欄の "123" に "123" を挿せる。"123123123" にもう 3 桁は挿せない＝これがエラー）。 */
 function insertInto(field: Field, base: string, offset: number, line: string): string | undefined {
   if (isOCells(field)) return oPasteInto(field, base, offset, line, true);
-  const budget = visLen(field);
   let out = [...base.replace(/\s+$/, "")];
   const eitherMode = { dbcsOn: eitherDbcsOn(field, { chars: [...base] } as unknown as EditState) };
   while (out.length < offset) out.push(pasteFill(field, eitherMode.dbcsOn));
@@ -4021,7 +4034,7 @@ function insertInto(field: Field, base: string, offset: number, line: string): s
     out.splice(i, 0, ch); // 挿入（後続は右へ）
     i++;
   }
-  if (byteLen(out.join(""), field) > budget) return undefined; // 入り切らない
+  if (byteLen(out.join(""), field) > insertBudget(field, [...base])) return undefined; // 入り切らない（E の全角の状態は最後の桁を SI の分に取っておく）
   return out.join("").replace(/\s+$/, "");
 }
 
@@ -4322,7 +4335,8 @@ function onCompositionStart(f: Field, ev: CompositionEvent): void {
   if (f.protected || inhibited.value) return;
   // hidden 欄は value が伏せ字（●）で実値ではないため、el.value を読む IME 経路に乗せてはならない
   // （乗せると ● 自体がモデルへ流れ込む）。パスワードに IME は不要なので合成を無効化する。
-  if (f.hidden) {
+  // （DBCS を申告した伏せ字の欄は通す——el.value は桁ぶんの空白＋合成中の字で、実値ではない。`syncDbcs`）
+  if (f.hidden && !f.dbcsType) {
     ev.preventDefault();
     return;
   }
@@ -4366,7 +4380,7 @@ function composeLogicalStart(f: Field, el: HTMLInputElement): number {
 function onCompositionEnd(f: Field, ev: CompositionEvent): void {
   composing.value = false;
   if (f.protected) return;
-  if (f.hidden) return; // 伏せ字 value を読み込まない（onCompositionStart で合成自体を止めている）
+  if (f.hidden && !f.dbcsType) return; // 伏せ字 value を読み込まない（onCompositionStart で合成自体を止めている）
   const el = ev.target as HTMLInputElement;
   if (!edit || editFieldIndex !== f.index) beginEdit(f, el);
   edit = edit!;

@@ -310,9 +310,12 @@ export function fieldSign(state: EditState, field: AdjustSpec, negative: boolean
  * 呼び出し側が `DUP_ENABLE` を確かめてから呼ぶ（原典 `display.c:1795-1835`）。
  */
 export const DUP_BYTE = 0x1c;
-export function dupFill(state: EditState, dupChar: string): EditState {
-  const chars = [...state.chars];
-  for (let i = state.cursor; i < chars.length; i++) chars[i] = dupChar;
+export function dupFill(state: EditState, dupChar: string, bytesOf: (ch: string) => number = () => 1): EditState {
+  // **バイトで埋める**（ACS `processDupFM` は欄の桁＝バイトごとに Dup 文字を置く）。DBCS の欄は全角 1 字が 2 バイトなので、字の数で埋めると 1 バイト足りなくなる
+  // （実機: `SO あい SI`＋空き 6 の E の い の上で Dup すると 0x1C は 8 個〔い 2＋空き 6〕。字の数だと 7 個だった。`scripts/acs-probe/either-remainder.txt` の X2）
+  let n = 0;
+  for (let i = state.cursor; i < state.chars.length; i++) n += bytesOf(state.chars[i]!);
+  const chars = [...state.chars.slice(0, state.cursor), ...Array<string>(n).fill(dupChar)];
   return { ...state, chars, cursor: chars.length };
 }
 
