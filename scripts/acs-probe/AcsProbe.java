@@ -173,6 +173,7 @@ public class AcsProbe {
         case "settle" -> { if (!arg.isEmpty() && !arg.matches("\\d+")) throw new StepError(at + "settle の引数はミリ秒の整数: " + arg); }
         case "sleep" -> { if (!arg.matches("\\d+")) throw new StepError(at + "sleep の引数はミリ秒の整数: " + arg); }
         case "setcursor" -> { if (!arg.matches("\\d+\\s*,\\s*\\d+")) throw new StepError(at + "setcursor の引数は 行,桁: " + arg); }
+        case "paste" -> { if (!arg.matches("\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+ .*")) throw new StepError(at + "paste の引数は 開始行,開始桁,終了行,終了桁 <本文>: " + arg); }
         default -> throw new StepError(at + "未定義の命令 " + cmd);
       }
       if (line.contains("${LIB}") && lib.isEmpty()) throw new StepError((i + 1) + " 行目: ${LIB} を使うが <接頭辞>_LIB が未設定（.env.verify）");
@@ -302,6 +303,14 @@ public class AcsProbe {
           }
           case "dump" -> dump(arg);
           case "grid" -> grid(arg);
+          case "paste" -> {
+            // 貼り付け（ACS の GUI の Ctrl+V の入口 `ECLPS.pasteLineWrap`）。`paste 開始行,開始桁,終了行,終了桁 <本文>`。本文の `\n` は改行、`\t` はタブ
+            int sp = arg.indexOf(' ');
+            String[] r4 = arg.substring(0, sp).split(",");
+            String text = arg.substring(sp + 1).replace("\\n", "\n").replace("\\t", "\t");
+            int rc = ps.pasteLineWrap(text, Integer.parseInt(r4[0].trim()), Integer.parseInt(r4[1].trim()), Integer.parseInt(r4[2].trim()), Integer.parseInt(r4[3].trim()));
+            OUT.print("paste rc=" + rc + "\n");
+          }
           default -> throw new StepError("未定義の命令 " + t[0]); // loadSteps で弾いているので来ない
         }
       }

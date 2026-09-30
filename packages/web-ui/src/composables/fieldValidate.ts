@@ -181,7 +181,8 @@ export const hasShiftMarks = (value: string | readonly string[]): boolean => [..
 
 /** 列ビューに出す 1 文字。センチネルは**空白 1 桁**にする（制御コードを見せない） */
 export function viewChar(ch: string): string {
-  return isRawSentinel(ch) ? " " : ch;
+  // U+0000 は継続した O 欄の空き（NUL。`OCell.nul`）。桁は 1 つで、見えるのは空白
+  return isRawSentinel(ch) || ch === "\u0000" ? " " : ch;
 }
 
 /**

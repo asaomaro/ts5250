@@ -1298,6 +1298,7 @@ export class ScreenBuffer {
    */
   private setFieldCells(field: InternalField, value: string): void {
     const cells: (InternalCell | null)[] = [];
+    const chain = field.dbcsType === "open" && field.continued !== undefined;
     let inShift = false;
     let lead: number | undefined; // 並びの中の生バイトは 2 つで全角 1 字（未編集の原本の書き戻し）
     for (const ch of value) {
@@ -1319,13 +1320,19 @@ export class ScreenBuffer {
           lead = undefined;
         } else cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "sbcs", rawByte: b });
       } else if (isAttrSentinel(ch)) cells.push({ type: "attr", byte: sentinelByte(ch) });
+      // **U+0000 は空きの桁（NUL）**。継続した O 欄の鎖の値が運ぶ（web-ui の `OCell.nul`）。空のセルに置く
+      else if (ch === "\u0000") cells.push(null);
       // 並びの中でも全角だけを 2 セルにする。半角（NUL を空白にした桁など）は 1 セル——2 セルにすると桁が倍になる（独立レビューの指摘）
       else if (inShift && isFullWidth(ch)) {
         cells.push({ type: "char", char: ch, charKind: "dbcs-lead" }, { type: "char", char: "", charKind: "dbcs-tail" });
-      } else cells.push({ type: "char", char: ch, charKind: "sbcs" });
+      } else {
+        // **継続した O 欄の鎖の空白は中身**（0x40。生バイトを持たせて、空きの桁〔NUL〕と見分けられるようにする——web-ui の `logicalFromCells`）
+        cells.push({ type: "char", char: ch, charKind: "sbcs", ...(chain && ch === " " ? { rawByte: 0x40 } : {}) });
+      }
     }
-    // 末尾の半角空白（編集の詰め物）は空のセルにする（ACS は空きを NUL のまま持ち、送るときに末尾の NUL を落とす）
-    while (cells.length > 0) {
+    // 末尾の半角空白（編集の詰め物）は空のセルにする（ACS は空きを NUL のまま持ち、送るときに末尾の NUL を落とす）。
+    // **継続した O 欄の鎖は除く**——鎖の空きは NUL（U+0000）で運ぶので、末尾の空白は打った・ホストが書いた中身（ACS は末尾の 0x40 を送る。C09・C10）
+    while (!chain && cells.length > 0) {
       const last = cells[cells.length - 1]!;
       if (last !== null && last.type === "char" && last.charKind === "sbcs" && last.char === " ") cells.pop();
       else break;
@@ -1390,6 +1397,8 @@ export class ScreenBuffer {
       // 位置に、その属性バイトのセルを置き直す（桁ずれ・色ずれ・送信での破壊を防ぐ）。
       if (ch !== undefined && isAttrSentinel(ch)) {
         this.cells[field.startAddr + i] = { type: "attr", byte: sentinelByte(ch) };
+      } else if (ch === "\u0000") {
+        this.cells[field.startAddr + i] = null; // 空きの桁（NUL）
       } else if (ch !== undefined && ch === NUL_SENTINEL) {
         // **空きの桁（NUL）**。語送りの欄の値が運ぶ（`fieldValue`）。生バイトのセルにすると READ MDT で 00 のまま出てしまう
         this.cells[field.startAddr + i] = null;
@@ -1402,7 +1411,10 @@ export class ScreenBuffer {
           rawByte: sentinelByte(ch)
         };
       } else {
-        this.cells[field.startAddr + i] = ch !== undefined ? { type: "char", char: ch, charKind: "sbcs" } : null;
+        // 継続した O 欄の鎖の空白は中身（生バイト 0x40 を持たせて空きの桁と見分ける。`setFieldCells` と同じ）
+        const chainSpace = ch === " " && field.dbcsType === "open" && field.continued !== undefined;
+        this.cells[field.startAddr + i] =
+          ch !== undefined ? { type: "char", char: ch, charKind: "sbcs", ...(chainSpace ? { rawByte: 0x40 } : {}) } : null;
       }
     }
     // **継続入力フィールドの MDT は先頭区間だけに立てる。**

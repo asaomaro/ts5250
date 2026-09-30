@@ -21,7 +21,16 @@ export interface OCell {
   k: OCellKind;
   ch: string;
   dead?: true;
+  /**
+   * **空きの桁（NUL。ホストが何も書かなかった桁・消して空にした桁）**。継続した O 欄の鎖だけが持つ（`toCells` の `padNul`）——ACS は空き（0x00）と空白（0x40）を区別し、
+   * 詰め直しでは空白を**中身**として押し出し、READ MDT ALT は途中の空きを 00 のまま送る（実機の ACS のコア `scripts/acs-probe/cont-o-paste.txt` の P4・P7・P8。
+   * `20260930-cont-o-nul`）。継続でない O 欄は従来どおり空きも空白（`ch:" "`）で持つ。値の文字は U+0000（`fromCells`）
+   */
+  nul?: true;
 }
+
+/** 空きの桁（NUL）のセル */
+export const nulCell = (): OCell => ({ k: "sb", ch: " ", nul: true });
 
 /** 操作の結果。`cursor` はセルの桁（0 起点）。`error` は ACS のエラー（0x05・0x12・0x65）。`noop` は黙って何もしない */
 export type OResult = { cells: OCell[]; cursor: number } | { error: 0x05 | 0x12 | 0x65 } | { noop: true };
@@ -32,13 +41,14 @@ const EMPTY: OCell = { k: "sb", ch: " " };
  * 編集の値をセルへ展開する。印があればその位置を SO/SI とし（明示の並び）、無ければ全角の連なりを SO…SI で挟む（暗黙の並び——印を持たない古い値）。
  * 桁が `length` に満たなければ空きで埋め、越えれば切る
  */
-export function toCells(chars: readonly string[], length: number): OCell[] {
+export function toCells(chars: readonly string[], length: number, padNul = false): OCell[] {
   const out: OCell[] = [];
   if (hasShiftMarks(chars)) {
     for (const ch of chars) {
       if (ch === SO_MARK) out.push({ k: "so", ch: "" });
       else if (ch === SI_MARK) out.push({ k: "si", ch: "" });
       else if (isDeadMark(ch)) out.push({ k: "sb", ch: " ", dead: true });
+      else if (ch === "\u0000") out.push(nulCell());
       else if (isWideForDbcs(ch)) out.push({ k: "lead", ch }, { k: "tail", ch: "" });
       else out.push({ k: "sb", ch });
     }
@@ -50,11 +60,11 @@ export function toCells(chars: readonly string[], length: number): OCell[] {
       if (!wide && inRun) out.push({ k: "si", ch: "" });
       inRun = wide;
       if (wide) out.push({ k: "lead", ch }, { k: "tail", ch: "" });
-      else out.push({ k: "sb", ch });
+      else out.push(ch === "\u0000" ? nulCell() : { k: "sb", ch });
     }
     if (inRun) out.push({ k: "si", ch: "" });
   }
-  while (out.length < length) out.push({ ...EMPTY });
+  while (out.length < length) out.push(padNul ? nulCell() : { ...EMPTY });
   return out.slice(0, length);
 }
 
@@ -74,7 +84,7 @@ export function fromCells(cells: readonly OCell[]): string[] {
         i++;
       } else out.push(" ");
     } else if (c.k === "tail") out.push(" ");
-    else out.push(c.dead ? DEAD_MARK : c.ch);
+    else out.push(c.dead ? DEAD_MARK : c.nul ? "\u0000" : c.ch);
   }
   return out;
 }
@@ -354,9 +364,9 @@ export function backspaceTarget(cells: readonly OCell[], c: number): number | { 
  * **Erase EOF・Field Exit・Field+ の消去**（ACS `eraseToEOF_Work`。research F5）: カーソルから欄の終わりを空きにし、カーソルが SI の上か並びの中なら、
  * カーソルの桁に SI を置いて並びを閉じる（SO の上からなら並びごと消える）
  */
-export function eraseToEnd(cells: readonly OCell[], c: number): OCell[] {
+export function eraseToEnd(cells: readonly OCell[], c: number, fill: OCell = EMPTY): OCell[] {
   const close = isI(cells, c) || inRun(cells, c);
-  const out = cells.map((x, i) => (i >= c ? { ...EMPTY } : { ...x }));
+  const out = cells.map((x, i) => (i >= c ? { ...fill } : { ...x }));
   if (close && c < out.length) out[c] = { k: "si", ch: "" };
   return out;
 }
