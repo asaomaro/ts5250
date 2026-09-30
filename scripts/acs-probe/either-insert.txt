@@ -1,0 +1,48 @@
+# **E（DBCS either）の欄への挿入を、状態（DBCS の中か）ごとに測る**（台帳「E 欄の残り」の挿入モードの取り置き）。DSM の EITHERI（`scripts/host-src/dscmd.c`）。
+# 6 つの欄へ 1 件ずつ挿入モードで打ち、Enter で READ MDT ALT（ログは `[I1]`）。エラー（余地なし）の欄は値が変わらず、送られない。
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-insert.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EITHERI')[enter]
+settle 4000
+dump start
+# i1: `SO あいうえ SI`＋空き 2 の い（3,13）に全角 か（4 バイト要る。SI の後ろの空き 2 のうち SI の分 1 を除くと余地は…）
+setcursor 3,13
+keys [insert]か
+settle 300
+dump i1
+keys [reset]
+# i2: 同じ欄（5,10）の い に半角 A
+setcursor 5,13
+keys [insert]A
+settle 300
+dump i2
+keys [reset]
+# i3: 満杯の `SO あいうえお SI`（7,10）の SI の桁（7,21）に半角 A
+setcursor 7,21
+keys [insert]A
+settle 300
+dump i3
+keys [reset]
+# i4: `ABCDEFGHIJ`＋空き 2（9,10）の C（9,12）に全角 あ（SO あ SI で 4 バイト要る）
+setcursor 9,12
+keys [insert]あ
+settle 300
+dump i4
+keys [reset]
+# i5: `ABCDEFGH`＋空き 4（11,10）の C（11,12）に全角 あ（ちょうど 4 バイト）
+setcursor 11,12
+keys [insert]あ
+settle 300
+dump i5
+keys [reset]
+# i6: 空の E（13,10）の先頭に全角 あ
+setcursor 13,10
+keys [insert]あ
+settle 300
+dump i6
+keys [reset]
+keys [enter]
+settle 2500

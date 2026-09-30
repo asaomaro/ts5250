@@ -1,0 +1,53 @@
+# **E（DBCS either）の欄の残りの挙動**（台帳「E 欄の残り」。伏せ字の E・Dup・満杯の E への挿入）。DSM の EITHERX（`scripts/host-src/dscmd.c`）。
+# 3 巡（ホストが受け取った欄は /tmp/dscmd.log の `[X1]`〜`[X3]`）:
+#   X1 伏せ字の E に全角・半角を打つ（1 つ目は全角の後の半角、2 つ目は半角の後の全角がエラーになるか） / X2 Dup 可の E で Dup / X3 満杯の E へ挿入モードで打つ
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/either-remainder.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('EITHERX')[enter]
+settle 4000
+dump start
+# X1: 伏せ字の E
+setcursor 3,10
+keys あA
+settle 300
+dump x1a
+keys [reset]
+settle 300
+setcursor 5,10
+keys AB
+settle 300
+dump x1b
+keys あ
+settle 300
+dump x1c
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# X2: Dup 可の E（`あい` の後ろ 7,15 の SI の桁で Dup。空の E の先頭で Dup）
+setcursor 7,13
+keys [dup]
+settle 300
+dump x2a
+setcursor 9,10
+keys [dup]
+settle 300
+dump x2b
+keys [enter]
+settle 2500
+# X3: 満杯の E へ挿入
+setcursor 11,13
+keys [insert]か
+settle 300
+dump x3a
+keys [reset]
+setcursor 13,12
+keys [insert]あ
+settle 300
+dump x3b
+keys [reset]
+keys [enter]
+settle 2500
