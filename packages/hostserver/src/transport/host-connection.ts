@@ -19,6 +19,12 @@ export interface HostConnectionOptions {
   port: number;
   tls?: boolean | HostTlsOptions;
   timeoutMs?: number;
+  /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS 同梱の `jt400` も既定で入れない——`SocketProperties` の `keepAlive` は設定しなければ JVM の既定）。
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
+   * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
+   */
+  keepAlive?: boolean;
 }
 
 /** 1 往復ぶんの読み取りタイムアウトを上書きするオプション */
@@ -117,11 +123,11 @@ export function openHostConnection(opts: HostConnectionOptions): Promise<HostCon
     };
 
     socket.setTimeout(timeoutMs);
-    // **TCP キープアライブを入れる。** 常駐監視（DTAQ の `wait=-1`）は read タイムアウトを
-    // 無効にして待つので、**相手が黙って消えても永久に待ち続ける**——OS に生存確認を
-    // させておかないと、切れた接続の上で待ち続ける状態を誰も検出できない
-    // （`20260723-dtaq-watch-notify` research R3）。要求ごとの短い接続には実害が無い。
-    socket.setKeepAlive(true, 60_000);
+    // **TCP キープアライブは既定で入れない**（ACS 同梱の `jt400` と同じ。`20260930-hostserver-keepalive-off`）。以前は既定で入れていた——
+    // 常駐監視（DTAQ の `wait=-1`）は read タイムアウトを無効にして待つので、**相手が黙って消えても永久に待ち続ける**（`20260723-dtaq-watch-notify` research R3）。
+    // ただし入れると、一時的な回線断で無通信のあいだの探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受けが途中の機器に落とされる環境だけ**
+    // セッション設定 `keepAlive: true` で入れる。要求ごとの短い接続には要らない。
+    if (opts.keepAlive === true) socket.setKeepAlive(true, 60_000);
     socket.on("timeout", () =>
       fail(
         new As400Error(

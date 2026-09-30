@@ -215,9 +215,9 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
-      // キープアライブは表示（5250・3270・VT）とプリンター。ACS は端末もプリンターも同じ設定で既定は入れない（`20260930-display-keepalive-off`・`printer-keepalive-off`）。
-      // 待ち行列・メッセージの待ち受けはホストサーバーの接続なので対象外
-      if (session.keepAlive !== undefined && (session.sessionType === "display" || session.sessionType === "printer")) opts.keepAlive = session.keepAlive;
+      // キープアライブは種別を問わず（表示・プリンターと、待ち行列・メッセージの待ち受けがホストサーバーの接続へ渡す分）。ACS は端末もプリンターも
+      // ホストサーバー（`jt400`）も既定で入れない（`20260930-display-keepalive-off`・`printer-keepalive-off`・`hostserver-keepalive-off`）
+      if (session.keepAlive !== undefined) opts.keepAlive = session.keepAlive;
       // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
       if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
         opts.associatedPrinter = session.associatedPrinter;

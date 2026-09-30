@@ -86,6 +86,12 @@ export interface NetPrintConnectOptions {
   password: string;
   port?: number;
   tls?: boolean | HostTlsOptions;
+  /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS 同梱の `jt400` も既定で入れない——`SocketProperties` の `keepAlive` は設定しなければ JVM の既定）。
+   * 入れると一時的な回線断で無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。**常駐の待ち受け**（DTAQ の `wait=-1`・メッセージ待ち）が
+   * 途中の機器に無通信の接続を落とされる環境だけ true にする（セッション設定 `keepAlive`。`20260930-hostserver-keepalive-off`）
+   */
+  keepAlive?: boolean;
   resolvePort?: boolean;
   timeoutMs?: number;
 }
@@ -119,6 +125,7 @@ export class NetPrintConnection {
       host: opts.host,
       port,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {}),
       timeoutMs
     });
     // **接続を 1 度包む**——request() の呼び出しごとに書くと 1 箇所の書き忘れが穴になる

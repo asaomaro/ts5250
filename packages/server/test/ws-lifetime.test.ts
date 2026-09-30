@@ -96,10 +96,10 @@ function setup(
 }
 
 /**
- * **TCP キープアライブは表示（5250・3270・VT）とプリンターで、既定は入れない**（`20260930-display-keepalive-off`・`printer-keepalive-off`）。ACS は既定で入れない。入れると一時的な回線断
+ * **TCP キープアライブは種別を問わず既定は入れない**（`20260930-display-keepalive-off`・`printer-keepalive-off`・`hostserver-keepalive-off`）。ACS は既定で入れない。入れると一時的な回線断
  * （LAN ケーブルの抜き差し）で接続が落ちる。途中の機器が無通信の接続を落とす環境だけ、セッション設定の `keepAlive: true` で入れる。
  */
-describe("設定の転記: keepAlive（表示とプリンター）", () => {
+describe("設定の転記: keepAlive（表示・プリンター・ホストサーバー）", () => {
   it("**表示セッションの keepAlive: true が open に届く**", async () => {
     const { conn, mgr } = setup({ keepAlive: true });
     await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
@@ -114,19 +114,19 @@ describe("設定の転記: keepAlive（表示とプリンター）", () => {
     mgr.closeAll();
   });
 
-  it("**解決の段では表示とプリンターだけ**（待ち行列・メッセージの待ち受けはホストサーバーの接続なので載せない）", () => {
+  it("**解決の段では種別を問わず載る**（待ち行列・メッセージの待ち受けがホストサーバーの接続へ渡す）", () => {
     const server = new ServerConfigStore({
       systems: [{ id: "sys", name: "sys", host: "h" }],
       sessions: [
         { id: "d", name: "d", system: "sys", sessionType: "display", keepAlive: true },
         { id: "p", name: "p", system: "sys", sessionType: "printer", keepAlive: true },
-        { id: "q", name: "q", system: "sys", sessionType: "dtaqwatch", keepAlive: true }
+        { id: "q", name: "q", system: "sys", sessionType: "dtaqwatch", keepAlive: true },
+        { id: "n", name: "n", system: "sys", sessionType: "display" }
       ]
     });
     const resolver = new ConfigResolver(server, new PersonalConfigStore());
-    expect(resolver.resolve({ session: "srv:d" }, undefined).connect.keepAlive).toBe(true);
-    expect(resolver.resolve({ session: "srv:p" }, undefined).connect.keepAlive).toBe(true);
-    expect("keepAlive" in resolver.resolve({ session: "srv:q" }, undefined).connect).toBe(false);
+    for (const ref of ["srv:d", "srv:p", "srv:q"]) expect(resolver.resolve({ session: ref }, undefined).connect.keepAlive, ref).toBe(true);
+    expect("keepAlive" in resolver.resolve({ session: "srv:n" }, undefined).connect).toBe(false);
   });
 
   // 3270・VT の表示にも同じ（ACS は端末の種類を問わず既定で入れない。`20260930-display-keepalive-off`）。マネージャは開く前に止めて、渡った材料だけを見る
