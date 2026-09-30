@@ -1,0 +1,104 @@
+# **継続した O 欄の単独の SO/SI での Delete・Backspace**（実機の ACS のコア。台帳「継続した O 欄の残りの差」(d)）。DSM の CONTOX（`scripts/host-src/dscmd.c`）:
+# (5,10) 先頭 8 桁 `SO あい SI X`＋NUL / (6,10) 中間 8 桁 `YZ`＋NUL / (7,10) 最終 8 桁（空）。巡ごとに画面を書き直し、1 巡に 1 件だけ打鍵して Enter。
+# ホストが受け取った READ MDT のバイト列は /tmp/dscmd.log の `[C01]`〜`[C12]`。
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）。PROBE_ENPTUI=true で流す。
+#
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-lone-shift.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOX')[enter]
+settle 3000
+dump start
+# D1: SO（5,10）で Delete
+setcursor 5,10
+settle 200
+keys [delete]
+settle 400
+dump d1
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D2: SI（5,15）で Delete
+setcursor 5,15
+settle 200
+keys [delete]
+settle 400
+dump d2
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D3: SO の次（5,11）で Backspace（SO を消す）
+setcursor 5,11
+settle 200
+keys [backspace]
+settle 400
+dump d3
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D4: SI の次（5,16）で Backspace（SI を消す）
+setcursor 5,16
+settle 200
+keys [backspace]
+settle 400
+dump d4
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D5: SO で Delete を 2 回（1 回目で死んだ桁ができたあとの 2 回目）
+setcursor 5,10
+settle 200
+keys [delete]
+settle 300
+keys [delete]
+settle 400
+dump d5
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D6: SI で Delete を 2 回
+setcursor 5,15
+settle 200
+keys [delete]
+settle 300
+keys [delete]
+settle 400
+dump d6
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D7: X（5,16）に全角 え を挿入して死んだ桁を作ってから（C02 と同じ）、先頭区間の SI（5,15）で Delete（単独の SI＝0065。詰め直しは回るか）
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+setcursor 5,15
+settle 200
+keys [delete]
+settle 400
+dump d7
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+# D8: 同じ挿入のあと、先頭区間の SO（5,10）で Delete
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+setcursor 5,10
+settle 200
+keys [delete]
+settle 400
+dump d8
+keys [reset]
+settle 300
+keys [enter]
+settle 2500

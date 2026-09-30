@@ -57,7 +57,7 @@ import {
   type OCell,
   type OResult
 } from "../composables/oFieldCells.js";
-import { chainInsert, chainOverwrite, chainDelete, chainBackspace, type ChainPos, type ChainResult } from "../composables/oChainCells.js";
+import { chainInsert, chainOverwrite, chainDelete, chainBackspace, chainPaste, type ChainPos, type ChainResult } from "../composables/oChainCells.js";
 import { splitLinks, type LinkPart } from "../composables/linkify.js";
 import {
   detectFkeyLegends,
@@ -2241,19 +2241,51 @@ function oChainApply(f: Field, op: (segs: OCell[][], pos: ChainPos) => ChainResu
     oRejection = "noop";
     return false;
   }
+  oChainCommit(run, r, cur.insertMode);
+  // 操作は行ったがエラーも出す（単独の SO/SI の Delete）: 呼び出し側が理由を操作員メッセージにする
+  if (r.warn !== undefined) oRejection = r.warn;
+  return true;
+}
+
+/** 鎖の操作の結果（区間ごとのセルとカーソル）を画面の値へ反映する。カーソルのある区間が編集の値、ほかの区間は直接出す */
+function oChainCommit(run: readonly Field[], r: { segs: OCell[][]; cursor: ChainPos }, insertMode: boolean): void {
   const values = r.segs.map((cells) => fromCells(cells));
   run.forEach((x, k) => {
     if (k !== r.cursor.seg) commitDbcsSegment(x, values[k]!);
   });
   const target = run[r.cursor.seg]!;
   const chars = values[r.cursor.seg]!;
-  edit = { chars, cursor: entryOfCell(chars, r.cursor.c), insertMode: cur.insertMode };
+  edit = { chars, cursor: entryOfCell(chars, r.cursor.c), insertMode };
   editFieldIndex = target.index;
   const targetEl = inputForSlice(target, 0);
   // 同期しなかったときは印を下ろす（`editAcrossContinued` と同じ）
   if (targetEl) syncDbcs(targetEl, target);
   else void takeMdtKeyed();
-  return true;
+}
+
+/**
+ * **継続した O 欄への単一行の貼り付け**（ACS `pasteLineWrap`。`chainPaste`）。1 字ずつの打鍵として鎖へ流し、カーソルが最初の区間を出たところで止まる。
+ * カーソルは動かさない。途中の字がエラーで止まればそこまでが入り、その理由を操作員メッセージにする
+ */
+function pasteIntoChain(f: Field, el: HTMLInputElement, text: string): void {
+  const chars = [...text].map((c) => inputChar(c, f)).filter((c) => acceptsChar(f, c, sessionKind.value));
+  const cur = edit!;
+  const run = continuedRunOf(f);
+  const at = run.findIndex((x) => x.index === f.index);
+  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x), true));
+  const r = chainPaste(segs, { seg: at, c: cellOfEntry(cur.chars, cur.cursor) }, chars, cur.insertMode);
+  if (r.error !== undefined) {
+    oRejection = r.error;
+    const why = oRejectionMessage();
+    if (why) emit("notice", why);
+  }
+  if (r.placed === 0) {
+    syncDbcs(el, f);
+    return;
+  }
+  mdtKeyed = true;
+  oChainCommit(run, r, cur.insertMode);
+  // ペーストで満杯になっても次の欄へ送らない（`onInputPaste` の末尾と同じ。ACS はカーソルを動かさない）
 }
 
 /** 編集中でない DBCS の区間へ値を直接出す（`commitFieldValueDirect` の DBCS 版。表示は列ビュー——`:value` は他欄の更新では再評価されない） */
@@ -3583,11 +3615,9 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     // **継続した O 欄は鎖で**（区間の頭なら前の区間の最後の桁を消す。鎖の頭は 0005。ACS `processBackspace`）
     if (isOChain(f)) {
       mdtKeyed = true;
-      if (!oChainApply(f, chainBackspace)) {
-        mdtKeyed = false;
-        const why = oRejectionMessage();
-        if (why) emit("notice", why);
-      }
+      if (!oChainApply(f, chainBackspace)) mdtKeyed = false;
+      const why = oRejectionMessage(); // 反映したうえでエラーも出す場合（区間の頭で前の区間の単独の SO/SI を消す）もある
+      if (why) emit("notice", why);
       return;
     }
     // **欄の先頭では 0005 で止まる（SBCS 欄と同じ。カーソルも動かさない）**。~~前の欄の末尾へ移る~~・
@@ -3617,11 +3647,9 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     // 継続した O 欄は鎖全体を詰める（ACS `deleteCharInContField` と詰め直し）
     if (isOChain(f) && !hadSelection) {
       mdtKeyed = true;
-      if (!oChainApply(f, chainDelete)) {
-        mdtKeyed = false;
-        const why = oRejectionMessage();
-        if (why) emit("notice", why);
-      }
+      if (!oChainApply(f, chainDelete)) mdtKeyed = false;
+      const why = oRejectionMessage(); // 単独の SO/SI は反映（詰め直し）したうえで 0065 も出す
+      if (why) emit("notice", why);
       return;
     }
     if (!hadSelection) edit = dbcsDelete(edit, f);
@@ -4279,6 +4307,10 @@ function onInputPaste(f: Field, ev: ClipboardEvent): void {
     if (vc !== null) {
       const lay = dbcsLayoutOf(f);
       edit = { ...edit!, cursor: lay.logicalOf(globalCaret(rangeOfInput(f, el, lay), vc)) };
+    }
+    if (isOChain(f)) {
+      pasteIntoChain(f, el, text);
+      return;
     }
     let e: EditState = edit!;
     const start = e;

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
-import { MSG_NO_ROOM, MSG_PROTECTED } from "../src/composables/opMessages.js";
+import { MSG_NO_ROOM, MSG_PROTECTED, MSG_SHIFT_POSITION } from "../src/composables/opMessages.js";
 import { DEAD_MARK } from "../src/composables/fieldValidate.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import { o } from "./helpers/oMarks.js";
@@ -253,5 +253,56 @@ describe("継続した O 欄の打鍵（ScreenGrid）", () => {
     await t.key("R");
     expect(t.notices).toEqual([MSG_NO_ROOM]);
     expect([t.edits.get(1), t.edits.get(2), t.edits.get(3)]).toEqual(before);
+  });
+});
+
+describe("継続した O 欄の貼り付けと単独の SO/SI の Delete（`20260930-cont-o-edge`）", () => {
+  const paste = async (el: HTMLInputElement, text: string) => {
+    const ev = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+    ev.clipboardData = { getData: () => text };
+    el.dispatchEvent(ev);
+    await nextTick();
+  };
+
+  /** 8 桁ずつ 3 区間の空の鎖（欄の値は空） */
+  function emptyChain(): ScreenSnapshot {
+    const snap = chainSnapshot();
+    const r5 = snap.cells[4]!;
+    for (let c = 9; c < 17; c++) r5[c] = cell();
+    snap.cells[5]![9] = cell();
+    snap.cells[5]![10] = cell();
+    for (const f of snap.fields) (f as { value: string }).value = "";
+    return snap;
+  }
+
+  it("P3: 全角が区間の残りに入らない貼り付けは、次の区間の頭へ置いて止まる（区間の値が両方へ届く）", async () => {
+    const t = await open(emptyChain());
+    await t.at(0, 0);
+    await paste(t.active(), "AあBいCう");
+    // 先頭の区間は `A SO あ SI B` ＋ 空き・死んだ桁、い は次の区間へ（`C`・`う` は入らない）
+    expect(t.edits.get(1)).toBe(`${o("A{あ}B")}\u0000${D}`);
+    expect(t.edits.get(2)).toBe(o("{い}"));
+  });
+
+  it("P1: 全角 8 字の貼り付けは最初の区間の 3 字で止まる", async () => {
+    const t = await open(emptyChain());
+    await t.at(0, 0);
+    await paste(t.active(), "あいうえおかきく");
+    expect(t.edits.get(1)).toBe(o("{あいう}"));
+    expect(t.edits.has(2)).toBe(false);
+  });
+
+  it("貼った字が今の字と同じでも欄は MDT になる（1 字ずつの打鍵と同じ）", async () => {
+    const t = await open();
+    await t.at(0, 1);
+    await paste(t.active(), "い");
+    expect(t.edits.has(1)).toBe(true);
+  });
+
+  it("D1: 単独の SI で Delete は 0065 を出すが、欄は MDT のまま（値は同じ）", async () => {
+    const t = await open();
+    await t.at(0, 3); // view: SO=0 い=1 え=2 SI=3
+    await t.key("Delete");
+    expect(t.notices).toEqual([MSG_SHIFT_POSITION]);
   });
 });
