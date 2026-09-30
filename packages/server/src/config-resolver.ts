@@ -42,6 +42,7 @@ export interface ResolvedTarget {
   /** deviceNameRetry はサーバー側（SessionManager）で解釈するので ConnectOptions に足して運ぶ */
   connect: ConnectOptions & {
     deviceNameRetry?: boolean;
+    keepAlive?: boolean;
     rescueAction?: "hold" | "delete";
     transformTo?: string;
     /** アイドルタイムアウト（**ms** or `"never"`）。設定の「分」はここで変換済み */
@@ -189,6 +190,7 @@ export class ConfigResolver {
   ): ConnectOptions {
     const opts: ConnectOptions & {
       deviceNameRetry?: boolean;
+      keepAlive?: boolean;
       rescueAction?: "hold" | "delete";
       transformTo?: string;
       idleTimeoutMs?: number | "never";
@@ -213,6 +215,8 @@ export class ConfigResolver {
     if (session) {
       if (session.deviceName !== undefined) opts.deviceName = session.deviceName;
       if (session.deviceNameRetry !== undefined) opts.deviceNameRetry = session.deviceNameRetry;
+      // キープアライブは表示の 5250 だけ（プリンターは常に入れる。`20260930-display-keepalive-off`）
+      if (session.keepAlive !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") opts.keepAlive = session.keepAlive;
       // 関連付けプリンターは 5250 の表示だけ（スキーマでも弾くが、手で書き換えたファイルでプリンターの申告に混ぜない）
       if (session.associatedPrinter !== undefined && session.sessionType === "display" && (session.terminal ?? "5250") === "5250") {
         opts.associatedPrinter = session.associatedPrinter;

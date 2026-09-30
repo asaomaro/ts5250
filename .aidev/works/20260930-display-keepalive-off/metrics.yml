@@ -1,0 +1,26 @@
+events:
+  - { ts: 2026-09-30T10:03:46Z, phase: requirements, event: start }
+  - { ts: 2026-09-30T10:03:46Z, phase: requirements, event: doccheck, metrics: { stage: start, phase: requirements, mode: same_session, size: 1948 } }
+  - { ts: 2026-09-30T10:03:46Z, phase: requirements, event: doccheck, metrics: { stage: report, phase: requirements, findings: 0 } }
+  - { ts: 2026-09-30T10:03:47Z, phase: requirements, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session, ac_total: 2, ac_covered: 2, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-30T10:03:47Z, phase: research, event: start }
+  - { ts: 2026-09-30T10:03:47Z, phase: research, event: approved }
+  - { ts: 2026-09-30T10:03:47Z, phase: design, event: start }
+  - { ts: 2026-09-30T10:03:47Z, phase: design, event: doccheck, metrics: { stage: start, phase: design, mode: same_session, size: 944 } }
+  - { ts: 2026-09-30T10:03:47Z, phase: design, event: doccheck, metrics: { stage: report, phase: design, findings: 0 } }
+  - { ts: 2026-09-30T10:03:47Z, phase: design, event: approved, metrics: { doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session } }
+  - { ts: 2026-09-30T10:03:47Z, phase: tasks, event: start }
+  - { ts: 2026-09-30T10:03:47Z, phase: tasks, event: doccheck, metrics: { stage: start, phase: tasks, mode: same_session, size: 1200 } }
+  - { ts: 2026-09-30T10:03:47Z, phase: tasks, event: doccheck, metrics: { stage: report, phase: tasks, findings: 0 } }
+  - { ts: 2026-09-30T10:03:48Z, phase: tasks, event: approved, metrics: { tasks_planned: 4, tasks_anchored: 4, doc_check_rounds: 1, doc_check_findings: 0, doc_check_mode: same_session, ac_total: 2, ac_covered: 2, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-30T10:03:48Z, phase: coding, event: start }
+  - { ts: 2026-09-30T10:05:24Z, phase: coding, event: taskcheck, metrics: { stage: start, task: cross, mode: same_session } }
+  - { ts: 2026-09-30T10:05:24Z, phase: coding, event: taskcheck, metrics: { stage: report, task: cross, findings: 0 } }
+  - { ts: 2026-09-30T10:05:24Z, phase: coding, event: approved, metrics: { tasks_done: 4, unplanned_lookups: 0, task_checks: 0 } }
+  - { ts: 2026-09-30T10:05:24Z, phase: test, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-30T10:05:26Z, phase: test, event: smoke, metrics: { result: pass, exit_code: 0, commands: 1 } }
+  - { ts: 2026-09-30T10:05:26Z, phase: test, event: approved, metrics: { passed: 2929, failed: 0 } }
+  - { ts: 2026-09-30T10:05:26Z, phase: review, event: start, metrics: { marks: 0 } }
+  - { ts: 2026-09-30T10:05:26Z, phase: review, event: approved, metrics: { must: 0, should: 0, nit: 0, ac_total: 2, ac_covered: 2, tasks_no_ac: 0, tasks_ac_none: 0 } }
+  - { ts: 2026-09-30T10:05:27Z, phase: deliver, event: start }
+  - { ts: 2026-09-30T10:05:42Z, phase: deliver, event: approved, metrics: { files_changed: 8, insertions: 148, deletions: 5 } }

@@ -74,6 +74,11 @@ export interface OpenOptions extends ConnectOptions {
    */
   deviceNameRetry?: boolean;
   /**
+   * **TCP キープアライブを入れるか**（表示セッション。既定 false＝ACS と同じ）。一時的な回線断（LAN ケーブルの抜き差し）で接続が落ちるのを避ける
+   * （`tn5250` の `Session5250` の `keepAlive`）。途中の機器が無通信の接続を落とす環境だけ true。プリンターには効かない（常に入れる）
+   */
+  keepAlive?: boolean;
+  /**
    * 書き出しできないスプールを取得したあと、ホスト側のスプールをどうするか。
    * **既定は保留**——削除は取り消せないので、利用者が明示的に選んだときだけ行う。
    */

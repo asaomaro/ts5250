@@ -61,14 +61,15 @@ class SpyManager extends SessionManager {
  * display / printer の 2 本を同じ値で用意し、**プリンター経路の転記漏れ**を突けるようにする。
  */
 function setup(
-  opts: { idleTimeout?: "never" | number; deviceNameRetry?: boolean; hb?: { intervalMs?: number; deadMs?: number; now?: () => number } } = {}
+  opts: { idleTimeout?: "never" | number; deviceNameRetry?: boolean; keepAlive?: boolean; hb?: { intervalMs?: number; deadMs?: number; now?: () => number } } = {}
 ) {
   const sent: WsServerMessage[] = [];
   let closed = false;
   const mgr = new SpyManager();
   const idle = {
     ...(opts.idleTimeout !== undefined ? { idleTimeout: opts.idleTimeout } : {}),
-    ...(opts.deviceNameRetry !== undefined ? { deviceNameRetry: opts.deviceNameRetry } : {})
+    ...(opts.deviceNameRetry !== undefined ? { deviceNameRetry: opts.deviceNameRetry } : {}),
+    ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
   };
   const server = new ServerConfigStore({
     systems: [{ id: "sys", name: "sys", host: "h" }],
@@ -91,6 +92,46 @@ function setup(
   );
   return { conn, sent, mgr, isClosed: () => closed };
 }
+
+/**
+ * **TCP キープアライブは表示の 5250 だけ・既定は入れない**（`20260930-display-keepalive-off`）。ACS は既定で入れない。入れると一時的な回線断
+ * （LAN ケーブルの抜き差し）で接続が落ちる。途中の機器が無通信の接続を落とす環境だけ、セッション設定の `keepAlive: true` で入れる。プリンターは常に入れる
+ */
+describe("設定の転記: keepAlive（表示だけ）", () => {
+  it("**表示セッションの keepAlive: true が open に届く**", async () => {
+    const { conn, mgr } = setup({ keepAlive: true });
+    await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    expect(mgr.openOpts[0]?.keepAlive).toBe(true);
+    mgr.closeAll();
+  });
+
+  it("未指定なら open に載らない（`Session5250` の既定 false＝入れない）", async () => {
+    const { conn, mgr } = setup();
+    await conn.handle(JSON.stringify({ type: "open", session: "srv:d" }));
+    expect("keepAlive" in (mgr.openOpts[0] ?? {})).toBe(false);
+    mgr.closeAll();
+  });
+
+  it("**解決の段でも表示の 5250 だけ**（プリンターの設定に書かれていても、接続の材料には載せない）", () => {
+    const server = new ServerConfigStore({
+      systems: [{ id: "sys", name: "sys", host: "h" }],
+      sessions: [
+        { id: "d", name: "d", system: "sys", sessionType: "display", keepAlive: true },
+        { id: "p", name: "p", system: "sys", sessionType: "printer", keepAlive: true }
+      ]
+    });
+    const resolver = new ConfigResolver(server, new PersonalConfigStore());
+    expect(resolver.resolve({ session: "srv:d" }, undefined).connect.keepAlive).toBe(true);
+    expect("keepAlive" in resolver.resolve({ session: "srv:p" }, undefined).connect).toBe(false);
+  });
+
+  it("**プリンターには届けない**（プリンターは常に入れる。無通信が正常な使い方）", async () => {
+    const { conn, mgr } = setup({ keepAlive: false });
+    await conn.handle(JSON.stringify({ type: "open", kind: "printer", session: "srv:p" }));
+    expect("keepAlive" in (mgr.printerOpts[0] ?? {})).toBe(false);
+    mgr.closeAll();
+  });
+});
 
 describe("設定の転記: 表示・プリンターの両方に効く", () => {
   it("表示セッションの idleTimeout（分）が ms で open に届く", async () => {
