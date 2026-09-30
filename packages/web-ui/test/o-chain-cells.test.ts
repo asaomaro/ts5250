@@ -179,16 +179,16 @@ describe("空き（NUL）と空白（0x40）の区別（実機の ACS の C09・
 
   it("明示の並び（SO/SI の印入り）の中の U+0000 も空きのセル。列ビューでは空白 1 桁", () => {
     const v = [SO_MARK, "い", SI_MARK, "\u0000", "A"];
-    expect(toCells(v, 8, true).map((c) => (c.nul ? "_" : c.k === "so" ? "<" : c.k === "si" ? ">" : c.k === "tail" ? "" : c.ch))).toEqual(["<", "い", "", ">", "_", "A", "_", "_"]);
+    expect(toCells(v, 8).map((c) => (c.nul ? "_" : c.k === "so" ? "<" : c.k === "si" ? ">" : c.k === "tail" ? "" : c.ch))).toEqual(["<", "い", "", ">", "_", "A", "_", "_"]);
     expect(columnView(v.join(""), "{", "}")).toBe("{い} A");
   });
 
-  it("toCells / fromCells: U+0000 は空き（nul）のセルへ往復する。詰め物は padNul で空き、既定は従来の空白", () => {
+  it("toCells / fromCells: U+0000 は空き（nul）のセルへ往復する。詰め物も空き", () => {
     const v = ["A", "\u0000", " ", "B"];
-    const cells = toCells(v, 6, true);
+    const cells = toCells(v, 6);
     expect(cells.map((c) => (c.nul ? "_" : c.ch))).toEqual(["A", "_", " ", "B", "_", "_"]);
     expect(fromCells(cells)).toEqual(["A", "\u0000", " ", "B", "\u0000", "\u0000"]);
-    expect(toCells(v, 5).map((c) => c.nul === true)).toEqual([false, true, false, false, false]); // 既定の詰め物は空白（鎖でない O 欄）
+    expect(toCells(v, 5).map((c) => c.nul === true)).toEqual([false, true, false, false, true]);
   });
 });
 

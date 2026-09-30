@@ -1311,6 +1311,79 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "SPACETY") == 0) {
+        /*
+         * **打った末尾の空白（0x40 / 全角空白 4040）が送られるかを、欄の種類ごとに測る画面**（台帳「E 欄の残り」の open の E の末尾の全角空白と、
+         * 継続でない O・J・E の空き〔NUL〕と空白の区別）。どれも空の 12 桁（FFW 4000）:
+         *   (3,10) J / (5,10) E / (7,10) E / (9,10) O / (11,10) O / (13,10) J。IC は 3,11。
+         * READ MDT を 1 回（ログは `[T1]`）と READ MDT ALT を 1 回（`[T2]`）。手順は `scripts/acs-probe/space-typed.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x20, 0x00, 0x0C,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x0B, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x20, 0x00, 0x0C,
+            0x11, 0x0D, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x00, 0x20, 0x00, 0x0C,
+            0x13, 0x03, 0x0B
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[T1] " : "[T2] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 J・E・O の空の欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = k == 0 ? QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk)
+                            : QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk(k == 0 ? "QsnReadMDT" : "QsnReadMDTAlt", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
+    } else if (strcmp(what, "SPACETY2") == 0) {
+        /*
+         * **SI の無い E（open）と通常の SBCS の欄に打った末尾の空白**（`SPACETY` の続き。台帳「E 欄の残り」の open の E の末尾の全角空白）。どれも 12 桁（FFW 4000）:
+         *   (3,10) E `SO あ SI`（compact）/ (5,10) E `SO あ SI`（compact）/ (7,10) 通常の SBCS の欄（空）/ (9,10) 通常の SBCS の欄 `AB`。IC は 3,11。
+         * READ MDT を 1 回（ログは `[U1]`）と READ MDT ALT を 1 回（`[U2]`）。手順は `scripts/acs-probe/space-typed-2.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x0C,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x20, 0x00, 0x0C, 0xC1, 0xC2,
+            0x13, 0x03, 0x0B
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[U1] " : "[U2] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 E・通常の欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = k == 0 ? QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk)
+                            : QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk(k == 0 ? "QsnReadMDT" : "QsnReadMDTAlt", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "EITHERI") == 0) {
         /*
          * **E（DBCS either）の欄への挿入を、状態（DBCS の中か）ごとに測る画面**（台帳「E 欄の残り」の挿入モードの取り置き）。各 12 桁。

@@ -288,6 +288,6 @@ describe("DBCS の欄の Erase EOF・Field Exit・Field± のあと", () => {
     // O 欄は並びの途中からの Erase EOF で SI を置く（ACS `eraseToEOF_Work`。`20260928-o-field-cells`）: SO・SI・空き 8。カーソルは SI の上
     for (let i = 0; i < 8; i++) await key("ArrowRight");
     await key("X");
-    expect(value(), "10 バイトの欄の最後の桁（10 桁目）に入る").toBe(o("{}" + " ".repeat(7) + "X"));
+    expect(value(), "10 バイトの欄の最後の桁（10 桁目）に入る").toBe(o("{}" + "\u0000".repeat(7) + "X"));
   });
 });

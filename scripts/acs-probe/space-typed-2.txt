@@ -1,0 +1,42 @@
+# **SI の無い E（open）と通常の SBCS の欄に打った末尾の空白が ACS のコアから送られるか**（`space-typed.txt` の続き。台帳「E 欄の残り」の open の E の末尾の全角空白）。
+# DSM の SPACETY2（`scripts/host-src/dscmd.c`）: (3,10) E `SO あ SI` / (5,10) E `SO あ SI` / (7,10) 通常の SBCS の欄（空）/ （12 桁。(9,10) の通常の欄 `AB` は打鍵しない）。
+# 1 巡目は READ MDT（ホストが受け取ったバイト列は /tmp/dscmd.log の `[U1]`）、2 巡目は READ MDT ALT（`[U2]`）。同じ打鍵を 2 回:
+#   f0 E: SO の次で Erase EOF（SI も消えて open になる）→ い＋Space（全角空白）＋う を打って Backspace で う を消す
+#   f1 E: `あ` の後ろ（SI の桁）で Space（全角空白）を打つ（`  い` を打って Backspace）
+#   f2 通常: `A B` を打って Backspace（A＋半角空白）
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/space-typed-2.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('SPACETY2')[enter]
+settle 4000
+dump start
+setcursor 3,11
+keys [eraseeof]
+keys い う
+keys [backspace]
+setcursor 5,13
+keys  い
+keys [backspace]
+setcursor 7,10
+keys A B
+keys [backspace]
+settle 400
+dump u1
+keys [enter]
+settle 3000
+setcursor 3,11
+keys [eraseeof]
+keys い う
+keys [backspace]
+setcursor 5,13
+keys  い
+keys [backspace]
+setcursor 7,10
+keys A B
+keys [backspace]
+settle 400
+dump u2
+keys [enter]
+settle 3000

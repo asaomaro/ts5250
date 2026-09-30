@@ -22,9 +22,9 @@ export interface OCell {
   ch: string;
   dead?: true;
   /**
-   * **空きの桁（NUL。ホストが何も書かなかった桁・消して空にした桁）**。継続した O 欄の鎖だけが持つ（`toCells` の `padNul`）——ACS は空き（0x00）と空白（0x40）を区別し、
-   * 詰め直しでは空白を**中身**として押し出し、READ MDT ALT は途中の空きを 00 のまま送る（実機の ACS のコア `scripts/acs-probe/cont-o-paste.txt` の P4・P7・P8。
-   * `20260930-cont-o-nul`）。継続でない O 欄は従来どおり空きも空白（`ch:" "`）で持つ。値の文字は U+0000（`fromCells`）
+   * **空きの桁（NUL。ホストが何も書かなかった桁・消して空にした桁）**。ACS は空き（0x00）と空白（0x40）を区別し、詰め直しでは空白を**中身**として押し出し、
+   * READ MDT ALT は途中の空きを 00 のまま送り、末尾の空白は送る（実機の ACS のコア `scripts/acs-probe/cont-o-paste.txt` の P4・P7・P8、`space-typed.txt`）。
+   * 継続した O 欄の鎖は `20260930-cont-o-nul`、継続でない O 欄は `20260930-nul-typed-space` で持たせた。値の文字は U+0000（`fromCells`）
    */
   nul?: true;
 }
@@ -35,13 +35,12 @@ export const nulCell = (): OCell => ({ k: "sb", ch: " ", nul: true });
 /** 操作の結果。`cursor` はセルの桁（0 起点）。`error` は ACS のエラー（0x05・0x12・0x65）。`noop` は黙って何もしない */
 export type OResult = { cells: OCell[]; cursor: number } | { error: 0x05 | 0x12 | 0x65 } | { noop: true };
 
-const EMPTY: OCell = { k: "sb", ch: " " };
 
 /**
  * 編集の値をセルへ展開する。印があればその位置を SO/SI とし（明示の並び）、無ければ全角の連なりを SO…SI で挟む（暗黙の並び——印を持たない古い値）。
  * 桁が `length` に満たなければ空きで埋め、越えれば切る
  */
-export function toCells(chars: readonly string[], length: number, padNul = false): OCell[] {
+export function toCells(chars: readonly string[], length: number): OCell[] {
   const out: OCell[] = [];
   if (hasShiftMarks(chars)) {
     for (const ch of chars) {
@@ -64,7 +63,7 @@ export function toCells(chars: readonly string[], length: number, padNul = false
     }
     if (inRun) out.push({ k: "si", ch: "" });
   }
-  while (out.length < length) out.push(padNul ? nulCell() : { ...EMPTY });
+  while (out.length < length) out.push(nulCell());
   return out.slice(0, length);
 }
 
@@ -314,7 +313,7 @@ export function insert(cells: readonly OCell[], c: number, ch: string, opts: { a
   // 選択の置き換え（当 PJ の操作。ACS の GUI は未測定）は消した跡を埋めるだけなので、最終のセルの判定を掛けない（SBCS・DBCS 欄と同じ決め）。空きは数える
   if ((c >= cells.length - 1 && !opts.allowLastCell) || c >= cells.length || freeCells(cells, c) < room) return { error: 0x12 };
   // 空きの分だけ右へずらす（末尾の空きが落ちる）。そのうえでカーソルから書く
-  const shifted = [...cells.slice(0, c), ...Array.from({ length: room }, () => ({ ...EMPTY })), ...cells.slice(c, cells.length - room)];
+  const shifted = [...cells.slice(0, c), ...Array.from({ length: room }, () => nulCell()), ...cells.slice(c, cells.length - room)];
   return done(apply(shifted, c, ops, ch), c, adv);
 }
 
@@ -332,7 +331,7 @@ export function del(cells: readonly OCell[], c: number): OResult {
   else k = 1;
   if (k === 0) return { error: 0x65 };
   const out = [...cells.slice(0, c), ...cells.slice(c + k)].map((y) => ({ ...y }));
-  while (out.length < cells.length) out.push({ ...EMPTY });
+  while (out.length < cells.length) out.push(nulCell());
   return { cells: out, cursor: c };
 }
 
@@ -364,7 +363,7 @@ export function backspaceTarget(cells: readonly OCell[], c: number): number | { 
  * **Erase EOF・Field Exit・Field+ の消去**（ACS `eraseToEOF_Work`。research F5）: カーソルから欄の終わりを空きにし、カーソルが SI の上か並びの中なら、
  * カーソルの桁に SI を置いて並びを閉じる（SO の上からなら並びごと消える）
  */
-export function eraseToEnd(cells: readonly OCell[], c: number, fill: OCell = EMPTY): OCell[] {
+export function eraseToEnd(cells: readonly OCell[], c: number, fill: OCell = nulCell()): OCell[] {
   const close = isI(cells, c) || inRun(cells, c);
   const out = cells.map((x, i) => (i >= c ? { ...fill } : { ...x }));
   if (close && c < out.length) out[c] = { k: "si", ch: "" };

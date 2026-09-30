@@ -1787,7 +1787,7 @@ describe("DBCS 座標変換の集約（dbcsLayoutOf）", () => {
     el.value += "日";
     await input.trigger("compositionend");
     const emits = w.emitted("edit") as [number, string][];
-    expect(emits.at(-1)![1]).toBe(o("     {日}")); // 5 桁目に入る
+    expect(emits.at(-1)![1]).toBe(o("\u0000".repeat(5) + "{日}")); // 5 桁目に入る（手前の 5 桁は空き〔NUL〕。ACS は途中の空きを READ MDT で 0x40・ALT で 0x00 で送る）
     w.unmount();
   });
 });
@@ -2031,7 +2031,7 @@ describe("DBCS 欄の行またぎ（折返し）", () => {
     expect((w.emitted("cursor") as [number, number][]).at(-1)).toEqual([21, 1]);
     await typeKey(w, "X");
     // 2 行目の先頭桁＝論理 74 桁目。1 行目の 74 桁ぶんは空白のまま保たれる
-    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe(" ".repeat(74) + "X");
+    expect((w.emitted("edit") as [number, string][]).at(-1)![1]).toBe("\u0000".repeat(74) + "X"); // 手前の桁は空き（NUL）のまま
     expect((second.element as HTMLInputElement).value.startsWith("X")).toBe(true);
     w.unmount();
   });

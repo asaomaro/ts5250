@@ -898,7 +898,8 @@ function applyWtd(
         for (; addr <= target; addr++) {
           if (fill === 0x00) buf.eraseRange(addr, addr);
           else if (isAttribute(fill)) buf.setAttr(addr, fill);
-          else buf.setChar(addr, String.fromCharCode(codec.decodeByte(fill)));
+          // 生バイトも持たせる（ホストが書いた 0x40 は中身の空白で、書かなかった桁〔空き〕と見分けるため。ACS の HostPlane は受信したバイトを持つ）
+          else buf.setChar(addr, String.fromCharCode(codec.decodeByte(fill)), fill);
         }
         break;
       }
@@ -976,7 +977,7 @@ function applyWtd(
         }
         const bytes = r.bytes(len);
         for (const tb of bytes) {
-          buf.setChar(addr++, String.fromCharCode(codec.decodeByte(tb)));
+          buf.setChar(addr++, String.fromCharCode(codec.decodeByte(tb)), tb);
         }
         break;
       }

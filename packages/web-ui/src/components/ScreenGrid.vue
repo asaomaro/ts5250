@@ -53,7 +53,6 @@ import {
   del as oDel,
   backspace as oBackspace,
   eraseToEnd as oEraseToEnd,
-  nulCell,
   type OCell,
   type OResult
 } from "../composables/oFieldCells.js";
@@ -883,7 +882,8 @@ interface Segment {
  * （930 カナ表と 1027 表で未定義バイトの集合が違うため）実際に現れる。
  */
 function displayText(s: string): string {
-  return s.includes("\uFFFD") ? s.replaceAll("\uFFFD", " ") : s;
+  // U+0000 は O 欄の空き（NUL）。桁は 1 つで、見えるのは空白（入力欄の値に NUL を出さない）
+  return s.includes("\uFFFD") || s.includes("\u0000") ? s.replaceAll("\uFFFD", " ").replaceAll("\u0000", " ") : s;
 }
 
 /**
@@ -1828,8 +1828,8 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
  * ので、値に含めても含めなくてもワイヤは同じ（実機の ACS のワイヤと同じ）。落として揃えないと、空きが NUL のホストの欄を触っただけで値が変わったことになる
  */
 function trimPad(f: Field, s: string): string {
-  // 継続した O 欄の鎖は空き（NUL）と空白が別: 末尾の空きだけを詰め物として落とし、打った空白・ホストの空白は中身として残す（死んだ桁の印は残す）
-  if (isOChain(f)) return s.replace(/\u0000+$/, "");
+  // O 欄は空き（NUL）と空白が別: 末尾の空きだけを詰め物として落とし、打った空白・ホストの空白は中身として残す（死んだ桁の印は残す。ACS は末尾の NUL だけを落とす）
+  if (isOCells(f)) return s.replace(/\u0000+$/, "");
   // 空きを全角空白で埋める E（full・open の全角の状態。`jeWidePad`）も全角空白を落とす。compact の E の空きは半角空白なので、打った全角空白は中身のまま
   return wideFill(f) || jeWidePad(f, [...s]) ? s.replace(/[ \u3000]+$/, "") : s.replace(/ +$/, "");
 }
@@ -1864,8 +1864,8 @@ function logicalFromCells(f: Field): string {
     for (let i = 0; i < sl.width; i++) {
       const cell = row[sl.col - 1 + i];
       if (!cell) continue;
-      // 継続した O 欄の鎖は空き（ホストが書かなかった桁＝生バイトを持たない空白）を NUL で持つ。ホストが書いた空白（生バイト 0x40）は中身
-      if (isOChain(f) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
+      // O 欄は空き（ホストが書かなかった桁＝生バイトを持たない空白）を NUL で持つ。ホストが書いた空白（生バイト 0x40）は中身
+      if (isOCells(f) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
       else if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
       // **埋め込み属性はセンチネルとして残す**（core の fieldValue と同じ扱い）。
       // 空白にすると、この値を編集して送り返した時点で core の setFieldValue が
@@ -2231,7 +2231,7 @@ function oChainApply(f: Field, op: (segs: OCell[][], pos: ChainPos) => ChainResu
   const cur = edit!;
   const run = continuedRunOf(f);
   const at = run.findIndex((x) => x.index === f.index);
-  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x), true));
+  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x)));
   const r = op(segs, { seg: at, c: cellOfEntry(cur.chars, cur.cursor) });
   if ("error" in r) {
     oRejection = r.error;
@@ -2272,7 +2272,7 @@ function pasteIntoChain(f: Field, el: HTMLInputElement, text: string): void {
   const cur = edit!;
   const run = continuedRunOf(f);
   const at = run.findIndex((x) => x.index === f.index);
-  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x), true));
+  const segs = run.map((x, k) => toCells(k === at ? cur.chars : [...logicalValue(x)], visLen(x)));
   const r = chainPaste(segs, { seg: at, c: cellOfEntry(cur.chars, cur.cursor) }, chars, cur.insertMode);
   if (r.error !== undefined) {
     oRejection = r.error;
@@ -2345,7 +2345,7 @@ function normalizeO(chars: readonly string[], f: Field): string[] {
   }
   if (ok && !inRun) return [...chars];
   const plain = chars.filter((c) => !isShiftMark(c) && !isDeadMark(c)); // 死んだ桁の印も外す（残すと明示の並びと読まれ SO/SI が付かない）
-  return padDbcs(f, fromCells(toCells(plain, visLen(f), isOChain(f))));
+  return padDbcs(f, fromCells(toCells(plain, visLen(f))));
 }
 
 /** DBCS 欄はライブ列ビュー編集（純論理値・非パディング・挿入モード）で扱う。 */
@@ -2396,8 +2396,8 @@ function padDbcs(f: Field, chars: readonly string[]): string[] {
   // **J・G の詰め物は全角空白**（ACS の空きは DBCS 空白 0x4040。半角空白を入れると途中に打った字の前に半角が残り、
   // 送るとき「全角しか入力できない」で止まる）。残りが 1 バイトのときだけ半角（欄長は偶数なので通常は来ない）
   const wide = wideFill(f) || jeWidePad(f, chars);
-  // 継続した O 欄の鎖の詰め物は空き（NUL）。空白にすると中身として送られる
-  const blank = isOChain(f) ? "\u0000" : " ";
+  // O 欄の詰め物は空き（NUL）。空白にすると中身として送られる
+  const blank = isOCells(f) ? "\u0000" : " ";
   while (byteLen(out.join(""), f) < budget) out.push(wide && budget - byteLen(out.join(""), f) >= 2 ? "\u3000" : blank);
   // 予算超過（ホスト値がそもそも長い等）は末尾から削る
   while (out.length > 0 && byteLen(out.join(""), f) > budget) out.pop();
@@ -2416,7 +2416,7 @@ function eraseToEndDbcs(f: Field, state: EditState): EditState {
     jeShapeOverride.set(f.index, "open");
   }
   // O 欄はカーソルが SI の上か並びの中なら SI を置いて閉じる（ACS `eraseToEOF_Work`）
-  if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c, isOChain(f) ? nulCell() : undefined), cursor: c })) ?? state;
+  if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c), cursor: c })) ?? state;
   return { ...state, chars: padDbcs(f, state.chars.slice(0, state.cursor)) };
 }
 
@@ -3668,7 +3668,8 @@ function onDbcsKeydown(f: Field, ev: KeyboardEvent, el: HTMLInputElement): void 
     ev.stopPropagation();
     // 末尾パディングを飛ばして実入力の直後へ（SBCS 欄と同じ意味）。J・full/open の E は全角空白も空き（ACS `getEndPosition`。
     // 実機の ACS のコア `scripts/acs-probe/je-field-end.txt`: J の `あい`＋全角空白は い の直後・空にした全角の E は SO の次）
-    edit = wideFill(f) || jeWidePad(f, edit.chars) ? end(edit, 0, (c) => c === " " || c === "\u3000") : end(edit);
+    // O 欄の詰め物は空き（NUL）。ACS の `getEndPosition` は 0x40 も NUL も空きとして飛ばす
+    edit = wideFill(f) || jeWidePad(f, edit.chars) ? end(edit, 0, (c) => c === " " || c === "\u3000") : isOCells(f) ? end(edit, 0, (c) => c === " " || c === "\u0000") : end(edit);
     syncDbcs(el, f);
     return;
   }
