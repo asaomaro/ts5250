@@ -67,7 +67,7 @@ import {
   type WindowRect,
   type OptionSpan
 } from "../composables/fkeyLegend.js";
-import { GRID_COLOR, columnSeparatorRuns } from "@ts5250/tn5250/browser";
+import { GRID_COLOR, columnSeparatorRuns, splitLead, SPLIT_TAIL, isSplitLead, isSplitTail } from "@ts5250/tn5250/browser";
 import type {
   ButtonStyle,
   WindowFrame,
@@ -1869,6 +1869,9 @@ function logicalFromCells(f: Field): string {
       // O 欄は空き（ホストが書かなかった桁＝生バイトを持たない空白）を NUL で持つ。ホストが書いた空白（生バイト 0x40）は中身
       // 継続した O 欄の死んだ桁（編集の続き。ホストが書き直さない限り残り、詰め直しで捨てる）は印で持つ
       if (isOChain(f) && cell.dead === true) s += DEAD_MARK;
+      // 継続した O 欄で、区間の最後の桁の全角の前半・区間の頭の後半は、区間の間で割れた全角の半分
+      else if (isOChain(f) && cell.kind === "dbcs-lead" && i === sl.width - 1) s += splitLead(cell.char) ?? cell.char;
+      else if (isOChain(f) && cell.kind === "dbcs-tail" && i === 0) s += SPLIT_TAIL;
       else if ((isOCells(f) || eitherHalf(f)) && cell.kind === "sbcs" && cell.char === " " && cell.rawByte === undefined) s += "\u0000";
       else if (cell.kind === "sbcs" || cell.kind === "dbcs-lead") s += cell.char;
       // **埋め込み属性はセンチネルとして残す**（core の fieldValue と同じ扱い）。
@@ -2336,7 +2339,11 @@ function oRejectionMessage(): string | undefined {
  * 印が交互でない・全角が SO と SI の間に無い・半角が間にある、のどれかなら、印を外した論理値から SO/SI を付け直す（空の組は失う）
  */
 function normalizeO(chars: readonly string[], f: Field): string[] {
-  let inRun = false;
+  // 継続した O 欄の区間は、前の区間から続く並び（SO が無い頭）や次の区間へ続く並び（SI が無い終わり）をもつことがある——SI が区間の最後の桁のときの
+  // 全角の挿入は、前半を区間の最後に・後半を次の区間の頭に書いて並びを閉じない（ACS。`20260930-split-char`）。区間の頭が SI・全角・割れた後半なら、並びの中から始まる
+  const chain = isOChain(f);
+  const first = chars.find((c) => c === SO_MARK || c === SI_MARK || isWideForDbcs(c) || isSplitTail(c));
+  let inRun = chain && first !== undefined && first !== SO_MARK && (first === SI_MARK || isWideForDbcs(first) || isSplitTail(first));
   let ok = true;
   for (const ch of chars) {
     if (ch === SO_MARK) {
@@ -2345,9 +2352,11 @@ function normalizeO(chars: readonly string[], f: Field): string[] {
     } else if (ch === SI_MARK) {
       if (!inRun) ok = false;
       inRun = false;
+    } else if (isSplitLead(ch) || isSplitTail(ch)) {
+      if (!chain || !inRun) ok = false; // 割れた半分は並びの中（鎖だけ）
     } else if (isWideForDbcs(ch) !== inRun) ok = false;
   }
-  if (ok && !inRun) return [...chars];
+  if (ok && (!inRun || chain)) return [...chars];
   const plain = chars.filter((c) => !isShiftMark(c) && !isDeadMark(c)); // 死んだ桁の印も外す（残すと明示の並びと読まれ SO/SI が付かない）
   return padDbcs(f, fromCells(toCells(plain, visLen(f))));
 }

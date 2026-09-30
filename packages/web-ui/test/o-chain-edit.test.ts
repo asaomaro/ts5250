@@ -3,9 +3,12 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import ScreenGrid from "../src/components/ScreenGrid.vue";
 import { MSG_NO_ROOM, MSG_PROTECTED, MSG_SHIFT_POSITION } from "../src/composables/opMessages.js";
-import { DEAD_MARK } from "../src/composables/fieldValidate.js";
+import { DEAD_MARK, SO_MARK, SI_MARK } from "../src/composables/fieldValidate.js";
+import { chainBackspace } from "../src/composables/oChainCells.js";
+import { toCells, fromCells } from "../src/composables/oFieldCells.js";
 import type { ScreenSnapshot, Cell, Field } from "@ts5250/tn5250";
 import { o } from "./helpers/oMarks.js";
+import { splitLead, SPLIT_TAIL } from "@ts5250/tn5250/browser";
 
 /**
  * **継続した O 欄の編集を画面の操作で確かめる**（`20260928-cont-o-cells`）。規則は `composables/oChainCells.ts`（ACS の手順。実機の ACS のコアの
@@ -332,5 +335,49 @@ describe("編集で作った死んだ桁は AID のあとも残り、次の詰�
     await t.key("Delete");
     expect(t.notices).toEqual([MSG_SHIFT_POSITION]);
     expect(t.edits.get(1)).toBe(o("{いええ}"));
+  });
+});
+
+describe("SI が区間の最後の桁のときの全角の挿入（`20260930-split-char`。実機 `cont-o-last-lead.txt`）", () => {
+  it("前半は先頭の区間の最後の桁・後半は次の区間の頭に置き、並びを閉じない（値は割れた全角の半分で運ぶ）", async () => {
+    const t = await open();
+    await t.at(0, 2);
+    await t.key("Insert");
+    await t.compose("き");
+    await t.compose("く");
+    await t.at(0, 4); // 区間の最後の桁の SI（view: SO い き く SI）。挿入モードは前の打鍵のまま
+    await t.compose("あ");
+    expect(t.notices).toEqual([]);
+    expect(t.edits.get(1)).toBe(o("{いきく") + splitLead("あ"));
+    expect(t.edits.get(2)).toBe(SPLIT_TAIL + "え" + o("}") + "X\u0000YZ");
+  });
+});
+
+describe("割れた全角を持つ鎖を読み戻す（`20260930-split-char`）", () => {
+  it("区間の最後の桁の前半と、次の区間の頭の後半は、値では割れた半分として戻る（編集しても壊れない）", async () => {
+    const snap = chainSnapshot();
+    const r5 = snap.cells[4]!;
+    // 先頭 `SO い き く` ＋ あ の前半（最後の桁）／ 中間 あ の後半・え・SI・X
+    r5[9] = cell(" ", "so");
+    r5[10] = cell("い", "dbcs-lead"); r5[11] = cell("", "dbcs-tail");
+    r5[12] = cell("き", "dbcs-lead"); r5[13] = cell("", "dbcs-tail");
+    r5[14] = cell("く", "dbcs-lead"); r5[15] = cell("", "dbcs-tail");
+    r5[16] = cell("あ", "dbcs-lead");
+    const r6 = snap.cells[5]!;
+    r6[9] = cell("", "dbcs-tail");
+    r6[10] = cell("え", "dbcs-lead"); r6[11] = cell("", "dbcs-tail");
+    r6[12] = cell(" ", "si");
+    r6[13] = cell("X");
+    const t = await open(snap);
+    await t.at(0, 2); // い の次（view: SO い き く 半分）
+    await t.key("Backspace"); // い を消す（鎖の Delete と詰め直し）
+    // 期待は同じセルを純関数で操作した結果（値から読み戻したセルが、割れた全角を保っていること）
+    const v0 = [SO_MARK, "い", "き", "く", splitLead("あ")!];
+    const v1 = [SPLIT_TAIL, "え", SI_MARK, "X"];
+    const want = chainBackspace([toCells(v0, 8), toCells(v1, 8), toCells([], 8)], { seg: 0, c: 3 });
+    if (!("segs" in want)) throw new Error("期待の操作が止まった");
+    expect(t.notices).toEqual([]);
+    expect(t.edits.get(1)).toBe(fromCells(want.segs[0]!).join("").replace(/\u0000+$/, ""));
+    expect(t.edits.get(2)).toBe(fromCells(want.segs[1]!).join("").replace(/\u0000+$/, ""));
   });
 });

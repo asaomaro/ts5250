@@ -1,6 +1,6 @@
 import { As400Error } from "@ts5250/base";
 import { FFW } from "../protocol/constants.js";
-import { isRawSentinel } from "./attr-sentinel.js";
+import { isRawSentinel, isSplitLead, isSplitTail, splitLeadChar } from "./attr-sentinel.js";
 import type { Codec } from "@ts5250/ebcdic";
 import type { InternalField } from "./buffer.js";
 import type { DbcsFieldType } from "./types.js";
@@ -55,7 +55,11 @@ export function validateFieldContent(
   // **センチネル（生バイトを運ぶ印）は利用者が打った文字ではない**ので型検証の対象から外す。
   // 埋め込み画面属性（SEU の色付きソース）と Dup 文字（0x1C）がこれに当たる。
   // 外さないと、数値欄で Dup を押した瞬間に「数字しか入らない」で自分の入力を弾いてしまう。
-  const typed = [...value].filter((ch) => !isRawSentinel(ch)).join("");
+  // 区間の間で割れた全角の半分（継続した O 欄）: 前半は字として検証し、後半は目印なので外す
+  const typed = [...value]
+    .filter((ch) => !isRawSentinel(ch) && !isSplitTail(ch))
+    .map((ch) => (isSplitLead(ch) ? splitLeadChar(ch) : ch))
+    .join("");
   // **ホストが置いた文字は弾かない**（上の `current` 参照）。許容集合を一律に広げると
   // ただの誤入力まで通ってしまうので、「その欄に元からある文字」だけを通す
   const fromHost = new Set([...current].filter((ch) => !isRawSentinel(ch)));

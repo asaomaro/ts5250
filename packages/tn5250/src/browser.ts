@@ -38,7 +38,13 @@ export {
   attrSentinel,
   // 任意の生バイト→センチネル。Dup キーが複写文字（0x1C）を値に入れるのに使う
   // （表示できない制御コードなので、文字としては持てない）
-  rawSentinel
+  rawSentinel,
+  // 区間の間で割れた全角の半分（継続した O 欄。値の中の 1 文字で運ぶ）
+  splitLead,
+  isSplitLead,
+  splitLeadChar,
+  SPLIT_TAIL,
+  isSplitTail
 } from "./screen/attr-sentinel.js";
 export { decodeAttribute } from "./screen/attributes.js";
 /** 桁区切り（DSPATR(CS)）の連なり。画面と保存 HTML が同じ位置に区切りを引くために共有する */

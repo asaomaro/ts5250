@@ -1,3 +1,4 @@
+import { isSplitLead, isSplitTail } from "../screen/attr-sentinel.js";
 import { codecForCcsid, type Codec } from "@ts5250/ebcdic";
 import { As400Error, deviceEnvFor, type KatakanaVariant } from "@ts5250/base";
 import { parseRecord, buildNegativeResponse, buildRecord } from "../protocol/gds.js";
@@ -528,7 +529,9 @@ export class Session5250 extends Emitter<SessionEvents> {
     // DBCS フィールドはバイト長で検証する（SO/SI 込みの再エンコード長が field.length を超えたら FIELD_OVERFLOW）。
     // **純 DBCS の欄（G）は SO/SI を数えない**——送信（`buildFieldResponse`）と同じ数え方（`encodedFieldLength`）。
     // 数えると全角 6 字（12 バイト）が入る欄に 6 字を置けず、ブラウザの Enter・MCP・HLLAPI・マクロが FIELD_OVERFLOW になる（独立点検 A-M1）
-    if (field.dbcsType !== undefined && this.codec.isDbcs) {
+    // 区間の間で割れた全角の半分（継続した O 欄）を含む値は、区間ごとには符号化できない（並びが区間をまたぐ）ので、桁の検査は `setFieldValue` のセルの数に任せる
+    const splitHalf = [...value].some((c) => isSplitLead(c) || isSplitTail(c));
+    if (field.dbcsType !== undefined && this.codec.isDbcs && !splitHalf) {
       const bytes = encodedFieldLength(value, this.codec, field.dbcsType === "pure");
       if (bytes > field.length) {
         // 長さを出さない理由は `buffer.ts` の同じ検査と同じ（`20260920-field-error-no-value` FR1）

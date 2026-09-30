@@ -90,6 +90,29 @@ export function attrSentinelByte(ch: string): number {
   return sentinelByte(ch);
 }
 
+/**
+ * **継続した O 欄で、区間の間で割れた全角の半分**（前半は区間の最後の桁・後半は次の区間の頭の桁。ACS は SI が区間の最後の桁のときの全角の挿入で
+ * 割って書く。実機 `scripts/acs-probe/cont-o-last-lead.txt`）を値の中の 1 文字で運ぶ。前半は字を運ぶ（第 16 面＋字）、後半は目印だけ（第 15 面の先頭）。
+ * どちらも BMP 外の符号位置なので、センチネル（U+DC00〜）・通常の字と重ならず、桁は 1 つ（半角幅）として数えられる。字が BMP 外なら作れない（`undefined`）
+ */
+const SPLIT_LEAD_BASE = 0x100000;
+const SPLIT_TAIL_CP = 0xf0000;
+export function splitLead(ch: string): string | undefined {
+  const c = ch.codePointAt(0);
+  return c !== undefined && c <= 0xffff ? String.fromCodePoint(SPLIT_LEAD_BASE + c) : undefined;
+}
+export function isSplitLead(ch: string): boolean {
+  const c = ch.codePointAt(0);
+  return c !== undefined && c >= SPLIT_LEAD_BASE && c <= SPLIT_LEAD_BASE + 0xffff;
+}
+/** 割れた全角の前半が運ぶ字 */
+export function splitLeadChar(ch: string): string {
+  return String.fromCodePoint((ch.codePointAt(0) ?? SPLIT_LEAD_BASE) - SPLIT_LEAD_BASE);
+}
+/** 割れた全角の後半の目印 */
+export const SPLIT_TAIL = String.fromCodePoint(SPLIT_TAIL_CP);
+export const isSplitTail = (ch: string): boolean => ch.codePointAt(0) === SPLIT_TAIL_CP;
+
 /** 文字列中のセンチネルを空白へ置換する（表示用）。正規表現の私用面リテラルを避け 1 文字ずつ判定する */
 export function stripSentinels(s: string): string {
   let out = "";

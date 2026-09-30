@@ -12,6 +12,9 @@ import {
   attrSentinel,
   rawSentinel,
   isAttrSentinel,
+  isSplitLead,
+  isSplitTail,
+  splitLeadChar,
   isRawSentinel,
   sentinelByte
 } from "./attr-sentinel.js";
@@ -1328,6 +1331,12 @@ export class ScreenBuffer {
           lead = undefined;
         } else cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "sbcs", rawByte: b });
       } else if (isAttrSentinel(ch)) cells.push({ type: "attr", byte: sentinelByte(ch) });
+      // 区間の間で割れた全角の半分（継続した O 欄。前半は区間の最後の桁の前半セル・後半は次の区間の頭の後半セル。送信は前半の字を 2 バイトに符号化し、後半は空）
+      else if (isSplitLead(ch)) cells.push({ type: "char", char: splitLeadChar(ch), charKind: "dbcs-lead" });
+      else if (isSplitTail(ch)) {
+        cells.push({ type: "char", char: "", charKind: "dbcs-tail" });
+        inShift = true; // 前の区間から続く並びの中（この区間に SO は無い）。続く全角は 2 セル
+      }
       // **U+0000 は空きの桁（NUL）**。O 欄の値が運ぶ（web-ui の `OCell.nul`）。空のセルに置く
       else if (ch === "\u0000") cells.push(null);
       // 並びの中でも全角だけを 2 セルにする。半角（NUL を空白にした桁など）は 1 セル——2 セルにすると桁が倍になる（独立レビューの指摘）
@@ -1375,7 +1384,7 @@ export class ScreenBuffer {
     // （欄の種類は問わない——ホストが A 型の欄に置いた SO/SI 入りの原本〔snapshot の `dbcsContent`〕も同じ形で戻る）
     // 継続した O 欄の**死んだ桁の印**（0x00。`20260928-cont-o-cells`）も明示の並び——半角だけの区間の後ろにも残る（継続していない欄には出ない）
     const marks = (c: string): boolean =>
-      isRawSentinel(c) && (sentinelByte(c) === 0x0e || sentinelByte(c) === 0x0f || (sentinelByte(c) === 0x00 && field.dbcsType === "open" && field.continued !== undefined));
+      isSplitLead(c) || isSplitTail(c) || isRawSentinel(c) && (sentinelByte(c) === 0x0e || sentinelByte(c) === 0x0f || (sentinelByte(c) === 0x00 && field.dbcsType === "open" && field.continued !== undefined));
     if ([...value].some(marks)) {
       this.setFieldCells(field, value);
       if (field.dbcsType === "either") {

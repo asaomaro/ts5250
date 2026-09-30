@@ -3,7 +3,8 @@ import { applyDataStream } from "../src/protocol/wtd-applier.js";
 import { buildReadMdtResponse, buildReadMdtAltResponse } from "../src/protocol/read-response.js";
 import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
-import { rawSentinel } from "../src/screen/attr-sentinel.js";
+import { validateFieldContent } from "../src/screen/field-validate.js";
+import { rawSentinel, splitLead, SPLIT_TAIL } from "../src/screen/attr-sentinel.js";
 import { ESC, COMMAND, ORDER, AID } from "../src/protocol/constants.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
@@ -64,6 +65,26 @@ describe("継続した O 欄の送信（ACS の CONTOX の測定）", () => {
     // ホストが同じ桁へ書けば（新しいセルになるので）死んだ印は消える
     applyDataStream(Uint8Array.from([ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 16, 0xc1]), buf, codec, () => {});
     expect(buf.snapshot("s", false).cells[4]![15]!.dead).toBeUndefined();
+  });
+  it("SI が区間の最後の桁のときの全角の挿入: 前半は先頭の区間の最後の桁・後半は次の区間の頭（実機の ACS `cont-o-last-lead.txt`: `0e 4482 4487 4488 4481 4484 0f e7 40 e8 e9`）", () => {
+    const buf = edit(chain(), SO + "いきく" + splitLead("あ"), SPLIT_TAIL + "え" + SI + "X\u0000YZ");
+    expect(send(buf)).toBe("0e448244874488448144840fe740e8e9");
+    // 画面へは 前半のセル（区間の最後）と後半のセル（次の区間の頭）として出る
+    const snap = buf.snapshot("s", false);
+    expect([snap.cells[4]![16]!.kind, snap.cells[5]![9]!.kind]).toEqual(["dbcs-lead", "dbcs-tail"]);
+    // 後半の後ろの全角 え は 2 セル（区間に SO が無くても、割れた後半のあとは並びの中）
+    expect(snap.cells[5]!.slice(9, 14).map((c) => c.kind)).toEqual(["dbcs-tail", "dbcs-lead", "dbcs-tail", "si", "sbcs"]);
+  });
+  it("割れた半分だけを含む値（SO/SI の印が無い）も構造どおりのセルに置く", () => {
+    const buf = edit(chain(), undefined, SPLIT_TAIL + "AB");
+    const snap = buf.snapshot("s", false);
+    expect(snap.cells[5]!.slice(9, 12).map((c) => c.kind)).toEqual(["dbcs-tail", "sbcs", "sbcs"]);
+  });
+  it("割れた全角の半分を含む値は型の検証を通る（前半は字として検証し、後半は目印として外す）", () => {
+    const buf = chain();
+    const [f0, f1] = buf.orderedFields();
+    expect(() => validateFieldContent(SO + "いきく" + splitLead("あ"), f0!, codec)).not.toThrow();
+    expect(() => validateFieldContent(SPLIT_TAIL + "え" + SI + "X", f1!, codec)).not.toThrow();
   });
   it("C03: 書かれたままの先頭の区間と編集した中間の区間", () => {
     expect(send(edit(chain(), undefined, SO + "お" + SI + "YZ"))).toBe("0e448244840fe7400e44850fe8e9");

@@ -123,9 +123,10 @@ function reflow(segs: readonly (readonly OCell[])[], pos: ChainPos, ops: readonl
         break;
       } else if (t.k === "lead" && left === 1) {
         // 前半が区間の最後の桁に来る（SI の上の全角で、SI が区間の最後の桁のとき）。ACS は前半をここに、後半を次の区間の頭に書き、
-        // 並びを閉じない（実機: `…4488 44 | 81 4484 0f…`・画面は崩れる。`scripts/acs-probe/cont-o-last-lead.txt`）。
-        // 当 PJ の値は 1 字を区間の間で割って持てないので 0012 で止める（既知の差。台帳）
-        return undefined;
+        // 並びを閉じない（実機: `…4488 44 | 81 4484 0f…`・画面は崩れるがホストへのバイト列は整う。`scripts/acs-probe/cont-o-last-lead.txt`）。
+        // 前半をここに置いて区間を終え、後半（次のトークン）は次の区間の頭に置く。値では割れた全角の半分（`splitLead`・`SPLIT_TAIL`）で運ぶ
+        take();
+        break;
       } else if (t.k === "tail" && left === 3 && buf[idx + 1]?.k !== "si") {
         take();
         put(at + 1, { k: "si", ch: "" });
