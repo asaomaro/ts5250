@@ -291,9 +291,9 @@ const sessionBase = {
    */
   deviceNameRetry: z.boolean().optional(),
   /**
-   * **TCP キープアライブ**（表示だけ＝5250・3270・VT。既定 false＝ACS と同じ。`20260930-display-keepalive-off`）。入れると、一時的な回線断（LAN ケーブルの抜き差し）でも
+   * **TCP キープアライブ**（表示＝5250・3270・VT とプリンター。既定 false＝ACS と同じ。`20260930-display-keepalive-off`・`printer-keepalive-off`）。入れると、一時的な回線断（LAN ケーブルの抜き差し）でも
    * 無通信のあいだに探査が失敗して接続が落ち、ホストにはジョブと装置が使用中のまま残る。**途中の機器が無通信の接続を落とす環境**
-   * （ファイアウォールのアイドル切断など）の表示セッションだけ true にする。プリンターは常に入れる
+   * （ファイアウォールのアイドル切断など）のセッションだけ true にする。常駐プリンターが 15 分のアイドルで届かなくなる環境はその例
    */
   keepAlive: z.boolean().optional(),
   /**

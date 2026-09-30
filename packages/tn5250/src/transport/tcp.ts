@@ -11,8 +11,8 @@ export interface TcpConnectOptions {
   /** TLS（telnet over SSL）。true で既定検証、オブジェクトで詳細指定 */
   tls?: boolean | { rejectUnauthorized?: boolean; ca?: string | string[] };
   /**
-   * TCP キープアライブを入れるか（**既定 true**——常駐プリンターなど、無通信が正常な使い方の呼び出し側は何も指定しない）。
-   * **5250 の表示セッションは既定で false にして呼ぶ**（`Session5250` の `keepAlive`。下の `KEEPALIVE_DELAY_MS` の注記）。
+   * TCP キープアライブを入れるか（このトランスポート自体の既定は true）。
+   * **5250 の表示セッションとプリンターは既定で false にして呼ぶ**（`Session5250`・`PrinterSession` の `keepAlive`。下の `KEEPALIVE_DELAY_MS` の注記）。
    */
   keepAlive?: boolean;
 }
@@ -43,11 +43,11 @@ export interface TcpConnectOptions {
  */
 const KEEPALIVE_DELAY_MS = 60_000;
 /*
- * ⚠ **表示セッションには既定で入れない**（`20260930-display-keepalive-off`）。ACS は既定で入れない（`SESSION_KEEPALIVE` の既定は false）。
+ * ⚠ **表示セッションもプリンターも既定では入れない**（`20260930-display-keepalive-off`・`printer-keepalive-off`）。ACS は端末もプリンターも同じ設定で既定は入れない（`SESSION_KEEPALIVE` の既定は false）。
  * 入れると**一時的な回線断で接続が落ちる**——Windows の Node は無通信 60 秒のあと **1 秒間隔で 10 回**探査し（間隔・回数は OS 固定）、
  * 10 秒ほどの LAN ケーブルの抜き差しで接続を落とす。ホストは落ちたことに気づかないのでジョブと装置が使用中のまま残り、繋ぎ直しも断られる。
  * ACS は操作しなければ何も送らず、繋ぎ直した後もそのまま続く。**キープアライブが要るのは、途中の機器が無通信の接続を落とす環境**
- * （常駐プリンターの 15 分・上の実測）で、その環境の表示セッションは `keepAlive: true`（セッション設定）で入れる。
+ * （常駐プリンターの 15 分・上の実測）で、その環境のセッション（常駐プリンターを含む）は `keepAlive: true`（セッション設定）で入れる。
  */
 
 /** 平文 TCP / TLS の Transport 実装（node:net・node:tls） */
