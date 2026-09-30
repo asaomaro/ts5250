@@ -46,6 +46,11 @@ export interface VtSessionOptions {
    */
   writeDelayMs?: number;
   connectTimeoutMs?: number;
+  /**
+   * **TCP キープアライブを入れるか**（既定 false。ACS は端末の種類を問わず既定で入れない——`SESSION_KEEPALIVE` の既定 false）。入れると、一時的な回線断で
+   * 無通信のあいだに探査が失敗して接続が落ちる（Windows は 10 秒ほど）。途中の機器が無通信の接続を落とす環境だけ true（`20260930-display-keepalive-off`）
+   */
+  keepAlive?: boolean;
   warn?: (message: string) => void;
 }
 
@@ -113,7 +118,8 @@ export class VtSession {
       host: this.opts.host,
       port: this.opts.port ?? 23,
       ...(this.opts.tls !== undefined ? { tls: this.opts.tls } : {}),
-      ...(this.opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: this.opts.connectTimeoutMs } : {})
+      ...(this.opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: this.opts.connectTimeoutMs } : {}),
+      keepAlive: this.opts.keepAlive === true // 既定は入れない（ACS と同じ）
     });
     this.attach(transport);
   }

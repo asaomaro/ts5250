@@ -15,6 +15,8 @@ import { SessionManager, DEFAULT_RECONNECT_GRACE_MS, DEFAULT_STALLED_GRACE_MS, t
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
+import { Tn3270Manager, type Open3270Options } from "../src/tn3270-manager.js";
+import { VtManager, type OpenVtOptions } from "../src/vt-manager.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(here, "..", "..", "tn5250", "test", "fixtures");
@@ -94,7 +96,7 @@ function setup(
 }
 
 /**
- * **TCP キープアライブは表示の 5250 だけ・既定は入れない**（`20260930-display-keepalive-off`）。ACS は既定で入れない。入れると一時的な回線断
+ * **TCP キープアライブは表示（5250・3270・VT）だけ・既定は入れない**（`20260930-display-keepalive-off`）。ACS は既定で入れない。入れると一時的な回線断
  * （LAN ケーブルの抜き差し）で接続が落ちる。途中の機器が無通信の接続を落とす環境だけ、セッション設定の `keepAlive: true` で入れる。プリンターは常に入れる
  */
 describe("設定の転記: keepAlive（表示だけ）", () => {
@@ -112,7 +114,7 @@ describe("設定の転記: keepAlive（表示だけ）", () => {
     mgr.closeAll();
   });
 
-  it("**解決の段でも表示の 5250 だけ**（プリンターの設定に書かれていても、接続の材料には載せない）", () => {
+  it("**解決の段でも表示だけ**（プリンターの設定に書かれていても、接続の材料には載せない）", () => {
     const server = new ServerConfigStore({
       systems: [{ id: "sys", name: "sys", host: "h" }],
       sessions: [
@@ -124,6 +126,42 @@ describe("設定の転記: keepAlive（表示だけ）", () => {
     expect(resolver.resolve({ session: "srv:d" }, undefined).connect.keepAlive).toBe(true);
     expect("keepAlive" in resolver.resolve({ session: "srv:p" }, undefined).connect).toBe(false);
   });
+
+  // 3270・VT の表示にも同じ（ACS は端末の種類を問わず既定で入れない。`20260930-display-keepalive-off`）。マネージャは開く前に止めて、渡った材料だけを見る
+  for (const terminal of ["3270", "vt"] as const) {
+    it(`**${terminal} の表示にも keepAlive が届く**`, async () => {
+      let got: Open3270Options | OpenVtOptions | undefined;
+      const stop = new Error("stop before connecting");
+      class Spy3270 extends Tn3270Manager {
+        override async open(opts: Open3270Options): Promise<never> {
+          got = opts;
+          throw stop;
+        }
+      }
+      class SpyVt extends VtManager {
+        override async open(opts: OpenVtOptions): Promise<never> {
+          got = opts;
+          throw stop;
+        }
+      }
+      const server = new ServerConfigStore({
+        systems: [{ id: "sys", name: "sys", host: "h" }],
+        sessions: [{ id: "t", name: "t", system: "sys", sessionType: "display", terminal, keepAlive: true }]
+      });
+      const conn = new WsConnection(
+        {
+          sessions: new SessionManager(),
+          resolver: new ConfigResolver(server, new PersonalConfigStore()),
+          ...(terminal === "3270" ? { tn3270: new Spy3270() } : { vt: new SpyVt() })
+        },
+        { send: () => undefined, close: () => undefined },
+        undefined,
+        {}
+      );
+      await conn.handle(JSON.stringify({ type: "open", terminal, session: "srv:t" }));
+      expect(got?.keepAlive).toBe(true);
+    });
+  }
 
   it("**プリンターには届けない**（プリンターは常に入れる。無通信が正常な使い方）", async () => {
     const { conn, mgr } = setup({ keepAlive: false });

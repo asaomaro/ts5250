@@ -40,6 +40,8 @@ export interface Open3270Options {
   readOnly?: boolean;
   owner?: string;
   connectTimeoutMs?: number;
+  /** TCP キープアライブ（既定 false＝ACS と同じ。`Tn3270Session` の `keepAlive`） */
+  keepAlive?: boolean;
   /**
    * 装置名（LU 名）。**渡し方はホストで変わる**——IBM i は NEW-ENVIRON の `DEVNAME`、
    * それ以外は端末タイプの `@名前`。どちらにするかは telnet 層が交渉を見て決める。
@@ -63,7 +65,8 @@ export class Tn3270Manager {
       ccsid: opts.ccsid ?? 37,
       ...(opts.tls !== undefined ? { tls: opts.tls } : {}),
       ...(opts.deviceName !== undefined ? { deviceName: opts.deviceName } : {}),
-      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {})
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
+      ...(opts.keepAlive !== undefined ? { keepAlive: opts.keepAlive } : {})
     });
     const entry: Tn3270Entry = {
       id: randomUUID(),
