@@ -808,6 +808,47 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "CONTOD") == 0) {
+        /*
+         * **編集で作った死んだ桁が、AID のあと（ホストが画面を書き直さないとき）も残るか**（台帳「継続した O 欄の残りの差」(f)）。
+         * CONTOX と同じ鎖（(5,10) `SO あい SI X`＋NUL / (6,10) `YZ`＋NUL / (7,10) 空）を 1 回書き、READ MDT（ログは `[E1]`）の後、
+         * **書き直さずに**解錠だけの WTD（CC1 00・CC2 08）を送って、もう一度 READ MDT（`[E2]`）する。手順は `scripts/acs-probe/cont-o-dead-kept.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x01, 0x24, 0x00, 0x08,
+            0x0E, 0x44, 0x82, 0x44, 0x84, 0x0F, 0xE7, 0x00,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x03, 0x24, 0x00, 0x08,
+            0xE8, 0xE9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x02, 0x24, 0x00, 0x08,
+            0x13, 0x05, 0x0A
+        };
+        static const unsigned char unlock[] = { 0x00, 0x08 };
+        int k;
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+        inzFdbk(fdbk, sizeof(fdbk));
+        rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+        logFdbk("QsnPutOutCmd(0x11 継続の O 欄)", rc, fdbk);
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[E1] " : "[E2] ";
+            if (k == 1) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnPutOutCmd(0x11, (const char *)unlock, (Q_Bin4)sizeof(unlock), 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnPutOutCmd(0x11 解錠だけ)", rc, fdbk);
+            }
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "CONTOP") == 0) {
         /*
          * **継続欄の O への貼り付けを、打鍵と並べて測る画面**（台帳「継続した O 欄の残り」(c)）。ACS の GUI の Ctrl+V は `ECLPS.pasteLineWrap`。

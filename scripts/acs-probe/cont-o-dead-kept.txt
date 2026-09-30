@@ -1,0 +1,31 @@
+# **編集で作った死んだ桁が、AID のあと（ホストが画面を書き直さないとき）も残るか**（台帳「継続した O 欄の残りの差」(f)）。DSM の CONTOD（`scripts/host-src/dscmd.c`）:
+# CONTOX と同じ鎖を 1 回書き、READ MDT（`[E1]`）→ 書き直さずに解錠だけの WTD → READ MDT（`[E2]`）。
+#   1 回目: X（5,16）に全角 え を挿入して死んだ桁を作り（C02 と同じ）、Enter。2 回目: SI（5,15）で Delete して Enter。
+# 死んだ桁が残っていれば詰め直しで捨てられ `0e 4482 4484 4484 0f e7 40 e8 e9`（cont-o-lone-shift.txt の D7 と同じ）、残っていなければ別の並びになる。
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-dead-kept.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOD')[enter]
+settle 3000
+dump start
+setcursor 5,16
+settle 200
+keys [insert]え
+settle 400
+dump e1
+keys [reset]
+settle 300
+keys [enter]
+settle 3000
+dump between
+setcursor 5,15
+settle 200
+keys [delete]
+settle 400
+dump e2
+keys [reset]
+settle 300
+keys [enter]
+settle 3000

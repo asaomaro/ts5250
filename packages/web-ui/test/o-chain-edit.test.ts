@@ -306,3 +306,31 @@ describe("継続した O 欄の貼り付けと単独の SO/SI の Delete（`2026
     expect(t.notices).toEqual([MSG_SHIFT_POSITION]);
   });
 });
+
+describe("編集で作った死んだ桁は AID のあとも残り、次の詰め直しで捨てる（`20260930-dead-kept`。実機 `cont-o-dead-kept.txt`）", () => {
+  /** 先頭 `SO い え SI`＋死んだ桁 2・中間 `SO え SI X`（C02 の直後の画面。ホストは書き直さない） */
+  function afterInsert(): ScreenSnapshot {
+    const snap = chainSnapshot();
+    const r5 = snap.cells[4]!;
+    r5[15] = { ...cell(" "), dead: true } as Cell;
+    r5[16] = { ...cell(" "), dead: true } as Cell;
+    snap.cells[5]![9] = cell(" ", "so");
+    snap.cells[5]![10] = cell("え", "dbcs-lead");
+    snap.cells[5]![11] = cell("", "dbcs-tail");
+    snap.cells[5]![12] = cell(" ", "si");
+    snap.cells[5]![13] = cell("X");
+    return snap;
+  }
+  it("死んだ桁を持つ鎖で SI の Delete は、死んだ桁を捨てて SI と SO の間を繋ぐ（先頭の区間が `SO い え え SI` になる）", async () => {
+    const snap = afterInsert();
+    // 先頭の区間は `SO い え SI`（SI は view の 3）＋死んだ桁 2（最後の 2 桁）
+    snap.cells[4]![14] = cell(" ", "si");
+    snap.cells[4]![15] = { ...cell(" "), dead: true } as Cell;
+    snap.cells[4]![16] = { ...cell(" "), dead: true } as Cell;
+    const t = await open(snap);
+    await t.at(0, 3);
+    await t.key("Delete");
+    expect(t.notices).toEqual([MSG_SHIFT_POSITION]);
+    expect(t.edits.get(1)).toBe(o("{いええ}"));
+  });
+});

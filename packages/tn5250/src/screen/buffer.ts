@@ -94,6 +94,12 @@ export type InternalCell =
        * 表示と送信で要る値が違うので、送信用だけをここに分けて持つ。
        */
       hostByte?: number;
+      /**
+       * **死んだ桁**（ACS の DBCSPlane 8。継続した O 欄の編集が区間の終わりに残す、字を置けない桁）。バイトとしては NUL（`cellAt` は null を返す）だが、
+       * 次の詰め直しで**捨てられる**（空きと違って中身にならない）。ホストが画面を書き直さない限り AID のあとも残る（実機の ACS のコア
+       * `scripts/acs-probe/cont-o-dead-kept.txt`）。書き込み・消去でセルごと置き換わって消える
+       */
+      dead?: true;
     }
   | null;
 
@@ -737,7 +743,8 @@ export class ScreenBuffer {
   /** 指定アドレスのセル（未書き込みは null）。SAVE SCREEN 応答の直列化で使う */
   cellAt(addr: number): InternalCell {
     this.checkAddr(addr);
-    return this.cells[addr] ?? null;
+    const c = this.cells[addr] ?? null;
+    return c !== null && c.type === "char" && c.dead === true ? null : c; // 死んだ桁はバイトとしては NUL
   }
 
   /**
@@ -1313,8 +1320,8 @@ export class ScreenBuffer {
           lead = undefined;
         } else if (b === 0x00 && lead === undefined) {
           // 死んだ桁（ACS の DBCSPlane 8）・J と全角の E の欄の空の組（ACS は SO と SI の間を NUL の組で持つ——`20260928-je-field-shape`）は、バイトとしては NUL——
-          // 空のセルに置く（送信で途中の NUL は空白、ALT では NUL のまま）
-          cells.push(null);
+          // 空のセルに置く（送信で途中の NUL は空白、ALT では NUL のまま）。継続した O 欄の鎖の死んだ桁は、詰め直しで捨てる印を保つ
+          cells.push(field.dbcsType === "open" && field.continued !== undefined ? { type: "char", char: " ", charKind: "sbcs", dead: true } : null);
         } else if (inShift && lead === undefined) lead = b;
         else if (inShift) {
           cells.push({ type: "char", char: UNDISPLAYABLE, charKind: "dbcs-lead", rawByte: lead! }, { type: "char", char: "", charKind: "dbcs-tail", rawByte: b });
@@ -1556,12 +1563,13 @@ export class ScreenBuffer {
 
   /** 欄の全桁が空のセル（NUL）か */
   private allNul(field: InternalField): boolean {
-    for (let i = 0; i < field.length; i++) if (this.cells[field.startAddr + i] != null) return false;
+    for (let i = 0; i < field.length; i++) if (this.cellAt(field.startAddr + i) !== null) return false;
     return true;
   }
 
   /** 未編集の DBCS 欄の 1 桁（センチネルは read-response が生バイトで書き出す）。空のセルは `undefined` */
   private dbcsRawCell(c: InternalCell | undefined | null): string | undefined {
+    if (c?.type === "char" && c.dead === true) return undefined; // 死んだ桁は NUL
     if (c?.type === "char") {
       switch (c.charKind) {
         case "so":
@@ -1757,6 +1765,8 @@ export class ScreenBuffer {
           };
           // 生バイトは非マスク SBCS のみ露出（カタカナ再解釈用。パスワードは出さない）
           if (rawByte !== undefined && !attr.nonDisplay) out.rawByte = rawByte;
+          // 死んだ桁の印（継続した O 欄の編集の続き。web-ui の詰め直しが捨てる桁を見分ける）
+          if (cell?.type === "char" && cell.dead === true) out.dead = true;
           rowCells.push(out);
         }
       }

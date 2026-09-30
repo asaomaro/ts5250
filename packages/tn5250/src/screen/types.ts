@@ -24,6 +24,8 @@ export interface Cell {
   nonDisplay: boolean;
   /** SBCS セルの生 EBCDIC バイト（カタカナ⇔英小文字の表示再解釈に使う。DBCS/制御桁は undefined） */
   rawByte?: number;
+  /** 死んだ桁（継続した O 欄の編集が区間の終わりに残した、バイトとしては NUL の桁。詰め直しで捨てる）。無ければ通常の桁 */
+  dead?: true;
 }
 
 /**
