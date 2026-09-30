@@ -23,6 +23,7 @@ import {
   DUP_BYTE,
   type EditState
 } from "../composables/fieldEdit.js";
+import { wordWrap, NUL as WRAP_NUL } from "../composables/wordWrap.js";
 import {
   acceptsChar,
   rejectReason,
@@ -1920,6 +1921,37 @@ function inputValue(f: Field): string {
   return v.length >= vl ? v.slice(0, vl) : v.padEnd(vl, " ");
 }
 
+/**
+ * **語送りの欄か**（FCW 0x8680。`20260930-word-wrap`）。編集モデルの空きの桁を NUL（U+0000）で持ち、打鍵・削除のあとに語送りを掛ける（`wordWrap.ts`）。
+ * DBCS の欄・非表示の欄・継続欄には掛けない（ACS は DBCS の欄を対象外にする。ほかは未測定）
+ */
+function isWrapEdit(f: Field): boolean {
+  return f.wordWrap === true && !isDbcsEdit(f) && !f.hidden && f.continued === undefined;
+}
+
+/** 語送りの欄の編集モデル初期値: core が途中の NUL を運ぶセンチネルを NUL に戻し、残りの桁も NUL で埋める（実空白と区別する） */
+function wrapInputValue(f: Field): string {
+  const cs = [...logicalValue(f)].map((c) => (isDeadMark(c) ? WRAP_NUL : c));
+  const vl = visLen(f);
+  while (cs.length < vl) cs.push(WRAP_NUL);
+  return cs.slice(0, vl).join("");
+}
+
+/** 語送りの欄の送信値: 末尾の NUL だけ落とし（打った空白は残す。ACS は末尾の NUL だけ落とす）、途中の NUL は core が運ぶセンチネルにする */
+function wrapWire(raw: string): string {
+  const cs = [...raw];
+  while (cs.length > 0 && cs[cs.length - 1] === WRAP_NUL) cs.pop();
+  return cs.map((c) => (c === WRAP_NUL ? rawSentinel(0x00) : c)).join("");
+}
+
+/** 編集の後に語送りを掛ける（`at` は打った桁・消した桁。ACS は欄の最終桁に打ったときは掛けない） */
+function wrapAfterEdit(f: Field, at: number): void {
+  if (!edit || !isWrapEdit(f) || at >= visLen(f) - 1) return;
+  const rowEnds = slicesOf(f).map((sl) => sl.offset + sl.width - 1);
+  const w = wordWrap(edit.chars, at, edit.cursor, rowEnds, props.snapshot.cols);
+  if (w) edit = { ...edit, chars: w.chars, cursor: w.cursor };
+}
+
 // SO/SI の表示マーク。showShiftMarks（ACS Ctrl+F 相当）が ON なら { } 、既定は空白。
 // displayChar（ホスト由来 SO/SI セル）と一致させる。
 function soMark(f?: Field): string {
@@ -2306,7 +2338,11 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
     editFieldIndex = f.index;
     return;
   }
-  edit = initEdit(inputValue(f), visLen(f), inputEl.selectionStart ?? 0);
+  if (isWrapEdit(f)) {
+    edit = { ...initEdit(wrapInputValue(f), visLen(f), inputEl.selectionStart ?? 0), pad: WRAP_NUL };
+  } else {
+    edit = initEdit(inputValue(f), visLen(f), inputEl.selectionStart ?? 0);
+  }
   edit.insertMode = insertMode.value;
   editFieldIndex = f.index;
 }
@@ -2653,8 +2689,10 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
     syncDbcs(inputEl, f);
     return;
   }
-  const full = editValue(edit);
-  const trimmed = full.replace(/ +$/, "");
+  // 語送りの欄は空きの桁（NUL）を表示では空白にし、送信値では実空白と区別する（`wrapWire`）
+  const wrap = isWrapEdit(f);
+  const full = wrap ? editValue(edit).replaceAll(WRAP_NUL, " ") : editValue(edit);
+  const trimmed = wrap ? wrapWire(editValue(edit)) : full.replace(/ +$/, "");
   // キャレットのあるスライスへ先にフォーカスを移す。focus/blur ハンドラは props（emit 前で古い）から
   // 値を書くため、その後に writeSlices で全スライスを正しい値へ上書きする（順序が逆だと古い値が残る）。
   const si = sliceIndexOf(f, edit.cursor);
@@ -2956,7 +2994,9 @@ function deleteWordKey(): void {
     syncDbcs(t.el, t.f);
     return;
   }
+  const dwAt = edit.cursor;
   edit = deleteWord(edit);
+  wrapAfterEdit(t.f, dwAt);
   sync(t.el, t.f);
 }
 
@@ -3343,7 +3383,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       emit("notice", MSG_PROTECTED);
       return;
     }
+    const bsAt = edit.cursor - 1;
     edit = backspace(edit);
+    wrapAfterEdit(f, bsAt);
     mdtKeyed = true; // 消えるものが無くても MDT（ACS `processDeleteChar` は `setMDT`）
     sync(el, f);
     return;
@@ -3358,7 +3400,9 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
         editAcrossContinued(f, del);
         return;
       }
+      const delAt = edit.cursor;
       edit = del(edit);
+      wrapAfterEdit(f, delAt);
     }
     mdtKeyed = true;
     sync(el, f);
@@ -3476,6 +3520,7 @@ function onInputKeydown(f: Field, ev: KeyboardEvent): void {
       return;
     }
     edit = trial;
+    wrapAfterEdit(f, typedAt); // 語送りの欄は行末の語を次の行へ（ACS `processWordWrap`）
     mdtKeyed = true;
     sync(el, f);
     advanceIfFull(f); // ACS: 満杯なら次の入力欄へ
@@ -4147,6 +4192,11 @@ function pasteFrom(
           cursor: lay.logicalAfter(lay.viewAtColumn(startOffset)),
           insertMode: insertMode.value
         };
+      } else if (isWrapEdit(f)) {
+        // 語送りの欄は空きの桁を NUL で持つ。**貼り付けには語送りを掛けない**（ACS の貼り付けの語送りは未測定。台帳の継続 O 欄の (c)）
+        const cs = [...val.replace(/ +$/, "")].map((c) => (isDeadMark(c) ? WRAP_NUL : c));
+        while (cs.length < visLen(f)) cs.push(WRAP_NUL);
+        edit = { ...initEdit(cs.join(""), visLen(f), startOffset), insertMode: insertMode.value, pad: WRAP_NUL };
       } else {
         edit = { ...initEdit(val, visLen(f), startOffset), insertMode: insertMode.value };
       }

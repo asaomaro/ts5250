@@ -1,0 +1,63 @@
+# **語送りの欄（FCW 0x8680）に打ったとき、ACS は欄をどう組むか**（台帳「継続した O 欄の残りの差」(b)。`PS5250.processWordWrap`）。
+# DSM の WRAPFLD（`scripts/host-src/dscmd.c`）。(5,70) から 30 桁の欄（5 行目の 11 桁＋6 行目の頭から 19 桁）。巡ごとに打って dump（画面とカーソル）を採り、Enter で
+# READ MDT ALT（W7 だけ READ MDT）を読む。ホストが受け取った欄のバイト列（NUL は 00・空白は 40）は /tmp/dscmd.log の `[W1]`〜`[W8]`。
+# 作り方・後片付けは cont-o-edit.txt と同じ。実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/word-wrap.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('WRAPFLD')[enter]
+settle 4000
+# W1: 語の途中で行末になる（aaa bbbb cccc dddd）
+keys aaa bbbb cccc dddd
+settle 300
+dump w1
+keys [enter]
+settle 2500
+# W2: 何行も送る
+keys one two three four five six
+settle 300
+dump w2
+keys [enter]
+settle 2500
+# W3: 打った後で真ん中を Delete（詰め直し）
+keys aaa bbbb cccc dddd
+setcursor 5,72
+keys [delete][delete]
+settle 300
+dump w3
+keys [enter]
+settle 2500
+# W4: 挿入モードで真ん中に打つ
+keys aaa bbbb cccc
+setcursor 5,73
+keys [insert]XXXX[insert]
+settle 300
+dump w4
+keys [enter]
+settle 2500
+# W5: 空白の無い長い語
+keys abcdefghijklmnopqrstuvwxyz
+settle 300
+dump w5
+keys [enter]
+settle 2500
+# W6: 打った後で Backspace
+keys aaa bbbb cccc dddd[backspace][backspace][backspace][backspace][backspace][backspace]
+settle 300
+dump w6
+keys [enter]
+settle 2500
+# W7: W1 と同じ打鍵を普通の READ MDT で読む（途中の NUL が空白になるか）
+keys aaa bbbb cccc dddd
+settle 300
+dump w7
+keys [enter]
+settle 2500
+# W8: 空白を続けて打つ
+keys aaa  bbbb   cccc dddd
+settle 300
+dump w8
+keys [enter]
+settle 2500
+keys [home][eraseeof]SIGNOFF[enter]
+settle 1500

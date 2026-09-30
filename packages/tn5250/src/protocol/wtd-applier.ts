@@ -1504,7 +1504,10 @@ function applySf(r: ByteReader, buf: ScreenBuffer, addr: number): number | { sen
     if (existing.startAddr === fieldStart) buf.updateFieldFfw(existing, ffw, attr);
     return fieldStart;
   }
-  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck, transparent, nextResequence);
+  // **語送りは 1 行に収まらない単独の欄だけ**（ACS `Field5250`: 語送りの欄が行の中に収まれば `WrapField` を下ろす）
+  // （継続欄は 1 行に収まる区間しか許されない〔`fieldAddFailure`〕ので、語送りの印が付いても幅の条件で外れる）
+  const wordWrap = cont.wrap === true && (fieldStart % buf.cols) + length > buf.cols;
+  buf.addField(fieldStart, length, ffw, attr, dbcsType, continued, cursorProgression, selfCheck, transparent, nextResequence, wordWrap);
   // 継続欄の区間の順を憶える（ACS `FFT5250.contFieldSegment`。最終の区間で戻す。**欄の表を消しても戻さない**——ACS も `clearFFT` で触らない）
   if (continued !== undefined) buf.continuedSegment = continued === "last" ? undefined : continued;
   return fieldStart;

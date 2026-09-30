@@ -12,6 +12,8 @@ export interface EditState {
   cursor: number;
   /** true=挿入モード / false=上書きモード（5250 既定は上書き） */
   insertMode: boolean;
+  /** 消して詰めたあとの空きの桁の字。既定は空白。語送りの欄は NUL（U+0000。空きと実空白を区別する。`wordWrap.ts`） */
+  pad?: string;
 }
 
 export function initEdit(value: string, fieldLength: number, cursor = 0): EditState {
@@ -70,7 +72,7 @@ export function backspace(state: EditState): EditState {
   const chars = [...state.chars];
   const pos = state.cursor - 1;
   chars.splice(pos, 1);
-  chars.push(" "); // フィールド長を維持
+  chars.push(state.pad ?? " "); // フィールド長を維持
   return { ...state, chars, cursor: pos };
 }
 
@@ -79,7 +81,7 @@ export function del(state: EditState): EditState {
   if (state.cursor >= state.chars.length) return state; // 末尾（後ろ）では削除対象が無い
   const chars = [...state.chars];
   chars.splice(state.cursor, 1);
-  chars.push(" ");
+  chars.push(state.pad ?? " ");
   return { ...state, chars };
 }
 
@@ -110,11 +112,12 @@ export function deleteWordLength(
 
 /** Delete Word（SBCS の欄）: `deleteWordLength` の分を削り、後ろを左へ詰めて欄の長さを保つ（`del` と同じ形）。カーソルは動かさない */
 export function deleteWord(state: EditState): EditState {
-  const n = deleteWordLength(state.chars, state.cursor);
+  // 語送りの欄の空きの桁（NUL）は空白と同じに数える（未測定。ACS `getDeleteCharacters` が NUL を空白と同じに見るかは未確認）
+  const n = deleteWordLength(state.pad === undefined ? state.chars : state.chars.map((c) => (c === state.pad ? " " : c)), state.cursor);
   if (n === 0) return state;
   const chars = [...state.chars];
   chars.splice(state.cursor, n);
-  while (chars.length < state.chars.length) chars.push(" ");
+  while (chars.length < state.chars.length) chars.push(state.pad ?? " ");
   return { ...state, chars };
 }
 
@@ -194,7 +197,7 @@ const NUMERIC_ONLY_EBCDIC: Readonly<Record<string, number>> = {
 /** Erase EOF: カーソル位置から欄末尾までを空白にする。カーソルは動かさない */
 export function eraseToEnd(state: EditState): EditState {
   const chars = [...state.chars];
-  for (let i = state.cursor; i < chars.length; i++) chars[i] = " ";
+  for (let i = state.cursor; i < chars.length; i++) chars[i] = state.pad ?? " ";
   return { ...state, chars };
 }
 

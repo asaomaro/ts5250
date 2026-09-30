@@ -1201,6 +1201,42 @@ int main(int argc, char *argv[]) {
             QsnDltBuf(buf, (Q_Fdbk_T *)0);
         }
         QsnDltBuf(cb, (Q_Fdbk_T *)0);
+    } else if (strcmp(what, "WRAPFLD") == 0) {
+        /*
+         * **語送りの欄（FCW 0x8680・DDS の WRDWRAP）に打ったとき ACS が欄をどう組むか**（台帳「継続した O 欄の残りの差」(b)。`PS5250.processWordWrap`）。
+         * (5,70) から 30 桁の欄 1 つ（5 行目の 70〜80 桁の 11 桁と、6 行目の頭から 19 桁）。巡ごとに画面を出し直し、**READ MDT ALT**（欄の中の NUL を NUL のまま送る）で読む
+         * （ログは `[W1]`〜`[W8]`。W7 だけ普通の READ MDT——途中の NUL が空白になるかの対照）。手順は `scripts/acs-probe/word-wrap.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x45, 0x1D, 0x40, 0x00, 0x86, 0x80, 0x20, 0x00, 0x1E,
+            0x11, 0x0B, 0x02, 0xE6, 0xD9, 0xC1, 0xD7,                   /* (11,2) "WRAP"（欄の外の目印） */
+            0x13, 0x05, 0x46
+        };
+        static char wtags[8][8];
+        int k;
+        for (k = 0; k < 8; k++) {
+            sprintf(wtags[k], "[W%d] ", k + 1);
+            tag = wtags[k];
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 語送りの欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = (k == 6)
+                    ? QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk)
+                    : QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk(k == 6 ? "QsnReadMDT" : "QsnReadMDTAlt", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "PROGRANGE") == 0) {
         /*
          * **カーソル送り（FCW 0x88nn）の番号が、継続欄の区間を数えない並び（ACS `FFT5250.getStandardFieldList`）の数を超えるとき**の行き先。
