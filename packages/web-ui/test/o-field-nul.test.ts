@@ -23,10 +23,10 @@ afterEach(() => {
 });
 
 /** (5,10) に O 欄 8 桁。`hostSpaces` の桁だけホストが書いた空白（生バイト 0x40。空きは生バイトを持たない） */
-function snapshot(hostSpaces: number[] = [], dbcsType: "open" | "either" = "open"): ScreenSnapshot {
+function snapshot(hostSpaces: number[] = [], dbcsType: "open" | "either" | undefined = "open", extra: Partial<Field> = {}): ScreenSnapshot {
   const cells: Cell[][] = Array.from({ length: 24 }, () => Array.from({ length: COLS }, () => cell()));
   for (const c of hostSpaces) (cells[4]![9 + c] as Cell).rawByte = 0x40;
-  const f = { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "", dbcsType } as unknown as Field;
+  const f = { index: 1, row: 5, col: 10, length: 8, protected: false, hidden: false, numeric: false, mdt: false, value: "", ...(dbcsType ? { dbcsType } : {}), ...extra } as unknown as Field;
   return { sessionId: "d1", rows: 24, cols: COLS, cursor: { row: 5, col: 10 }, keyboardLocked: false, cells, fields: [f] } as unknown as ScreenSnapshot;
 }
 
@@ -133,6 +133,22 @@ describe("半角の状態の E 欄の空き（NUL）と空白（`20260930-either
     const f = { index: 1, row: 5, col: 10, length: 4, protected: false, hidden: false, numeric: false, mdt: true, value: "", dbcsType: "either", adjust: "mandatory-fill" } as unknown as Field;
     const check = (v: string): boolean => mandatoryFillViolated(f, new Map([[1, v]]));
     expect([check("A\u0000CD"), check("ABC "), check("ABC")]).toEqual([true, false, true]);
+  });
+});
+
+describe("通常の文字欄の空き（NUL）と空白（`20260930-sbcs-nul`。実機の ACS: 通常の欄に `A`＋空白を打つと `c1 40`）", () => {
+  it("打った末尾の空白は落とさない", async () => {
+    const t = await open(snapshot([], undefined));
+    await t.at(0);
+    await t.key("A");
+    await t.key(" ");
+    expect(t.edits.get(1)).toBe("A ");
+  });
+  it("手前の書かなかった桁は NUL のまま・末尾の空きは値から落とす", async () => {
+    const t = await open(snapshot([], undefined));
+    await t.at(2);
+    await t.key("B");
+    expect(t.edits.get(1)).toBe("\u0000\u0000B");
   });
 });
 

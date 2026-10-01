@@ -303,7 +303,21 @@ const noShift = (f: Field | undefined): boolean => f?.dbcsType === "pure";
  */
 const wideFill = (f: Field | undefined): boolean => f?.dbcsType === "only" || f?.dbcsType === "pure";
 /** 欄のバイト予算で数える長さ（SO/SI・DBCS 2 バイト込み。SBCS だけのセッションは 1 字 1 バイト。`f` が G なら SO/SI 無し） */
-const byteLen = (value: string, f?: Field): number => dbcsByteLength(value, sessionKind.value, noShift(f));
+const byteLen = (value: string, f?: Field): number =>
+  f !== undefined && f.dbcsType === "either" && jeErased.has(f.index) && jeShapeOf(f) === "open" && eitherDbcsOn(f, { chars: [...value] }) ? openEBytes(value) : dbcsByteLength(value, sessionKind.value, noShift(f));
+
+/**
+ * **SI の無い E（open）のバイト長**（ACS。実機 `scripts/acs-probe/open-e-typing.txt`）: 先頭の字は SO の次に置かれ、2 字目以降は新しい `SO 字… SI` の組になる
+ * （`いう` → `0e 4482 0e 4483 0f`・`い` だけ → `0e 4482`）ので、中身 n 字は n=0 で 1・n=1 で 3・n≥2 で 2n+3 バイト。詰め物（全角 1 桁の空き）は 2 バイトずつ
+ */
+function openEBytes(value: string): number {
+  const cs = [...value];
+  let end = cs.length;
+  while (end > 0 && (cs[end - 1] === WIDE_NUL || cs[end - 1] === " ")) end--;
+  const n = end;
+  const pad = cs.slice(end).reduce((a, c) => a + (c === WIDE_NUL ? 2 : 1), 0);
+  return (n === 0 ? 1 : n === 1 ? 3 : 2 * n + 3) + pad;
+}
 
 /**
  * 入力 1 文字を格納する形へ直す。
@@ -1831,6 +1845,8 @@ function fitsBytes(candidate: EditState, f: Field): boolean {
 function trimPad(f: Field, s: string): string {
   // O 欄は空き（NUL）と空白が別: 末尾の空きだけを詰め物として落とし、打った空白・ホストの空白は中身として残す（死んだ桁の印は残す。ACS は末尾の NUL だけを落とす）
   if (isOCells(f)) return s.replace(/\u0000+$/, "");
+  // 通常の文字欄（空きを NUL で持つ。`usesNulPad`）も末尾の空きだけを落とし、打った空白は中身として残す
+  if (!isDbcsEdit(f) && usesNulPad(f)) return s.replace(/\u0000+$/, "");
   // 空きを全角空白で埋める E（full・open の全角の状態。`jeWidePad`）も全角空白を落とす。compact の E の空きは半角空白なので、打った全角空白は中身のまま
   // 半角の状態の E も空き（NUL）と空白が別（実機の ACS: 半角の E に打った末尾の空白も送る。`20260930-either-half-space`）
   if (eitherHalf(f, [...s])) return s.replace(/\u0000+$/, "");
@@ -1958,6 +1974,19 @@ function inputValue(f: Field): string {
  */
 function isWrapEdit(f: Field): boolean {
   return f.wordWrap === true && !isDbcsEdit(f) && !f.hidden && f.continued === undefined;
+}
+
+/**
+ * **空きの桁を NUL（U+0000）で持つ欄か**（語送りの欄＋通常の文字欄）。ACS は打った空白（0x40）を、末尾でも欄データとして送り（`A`＋空白 → `c1 40`。実機 `space-typed-2.txt`）、
+ * 書かなかった桁（NUL）は末尾なら送らず・途中なら READ MDT で 0x40・ALT で 0x00 で送る。対象は DBCS 欄でない・非表示でない・継続でない文字欄で、
+ * 数値・右寄せ・符号・自己点検・英字専用の欄は除く（これらの整形は詰め物が空白である前提）。`20260930-sbcs-nul`
+ */
+function usesNulPad(f: Field): boolean {
+  if (isWrapEdit(f)) return true;
+  return (
+    !isDbcsEdit(f) && !f.hidden && f.continued === undefined &&
+    !f.numeric && f.adjust === undefined && f.signedNumeric !== true && f.digitsOnly !== true && f.alphaOnly !== true && f.selfCheck === undefined
+  );
 }
 
 /** 語送りの欄の編集モデル初期値: core が途中の NUL を運ぶセンチネルを NUL に戻し、残りの桁も NUL で埋める（実空白と区別する） */
@@ -2409,7 +2438,7 @@ function beginEdit(f: Field, inputEl: HTMLInputElement): void {
     editFieldIndex = f.index;
     return;
   }
-  if (isWrapEdit(f)) {
+  if (usesNulPad(f)) {
     edit = { ...initEdit(wrapInputValue(f), visLen(f), inputEl.selectionStart ?? 0), pad: WRAP_NUL };
   } else {
     edit = initEdit(inputValue(f), visLen(f), inputEl.selectionStart ?? 0);
@@ -2446,6 +2475,8 @@ function eraseToEndDbcs(f: Field, state: EditState): EditState {
   // 全角の E で SI が中身の直後にあれば、カーソルがその SI より前（中身の中か直後）なら SI も消える（ACS の 1 桁の内側の消去。`jeShapeOf`）
   if (f.dbcsType === "either" && eitherDbcsOn(f, state) && jeShapeOf(f) === "compact" && state.cursor <= trimPad(f, state.chars.join("")).length) {
     jeShapeOverride.set(f.index, "open");
+    // 中身が全部消えたときだけ（残った中身が 1 つの並びのまま続く形は ACS を測っていない）
+    if (trimPad(f, state.chars.slice(0, state.cursor).join("")) === "") jeErased.add(f.index);
   }
   // O 欄はカーソルが SI の上か並びの中なら SI を置いて閉じる（ACS `eraseToEOF_Work`）
   if (isOCells(f)) return oApply(state, f, (cells, c) => ({ cells: oEraseToEnd(cells, c), cursor: c })) ?? state;
@@ -2524,6 +2555,11 @@ function keepByteLength(chars: string[], at: number, before: number, budget: num
 type JeShape = "full" | "compact" | "open";
 /** この画面の中で変わった形（切り替え・消去）。新しい画面で捨てる（`eitherSwitched` と同じ） */
 const jeShapeOverride = new Map<number, JeShape>();
+/**
+ * **Erase で SI も中身も消えた open の E**（ホストが `SO 字` と書いた open の E とは別）。ACS は消した欄の DBCSPlane を残すので、消したあとの 2 字目以降は新しい `SO 字… SI` の組になる
+ * （実機 `scripts/acs-probe/open-e-typing.txt`）。ホストが書いた open の E は `SO あ` の後ろへそのまま続く（J3 の測定）。新しい画面・切り替えで捨てる
+ */
+const jeErased = new Set<number>();
 
 function jeShapeOf(f: Field): JeShape | undefined {
   if (f.dbcsType === "only") return "full";
@@ -2567,6 +2603,7 @@ function pasteFill(f: Field, dbcsOn: boolean): string {
 
 /** E 欄の切り替え（`eitherSwitched`）に合わせて形を決める: 全角へ切り替えたら `full`、半角へなら形は無い */
 function noteEitherShape(index: number, dbcsOn: boolean): void {
+  jeErased.delete(index);
   if (dbcsOn) jeShapeOverride.set(index, "full");
   else jeShapeOverride.delete(index);
 }
@@ -2578,8 +2615,10 @@ function jeExplicit(f: Field, logical: string, e: EditState | undefined): string
   const shape = jeShapeOf(f) ?? "compact";
   const chars = [...trimPad(f, logical)];
   // 全角 1 桁の空き（WIDE_NUL）は NUL の組（死んだ桁と同じ生バイト 0x00 が 2 つ。READ MDT は 0x40・ALT は 0x00 で送る）
-  const body = chars.map((c) => (c === WIDE_NUL ? DEAD_MARK + DEAD_MARK : c)).join("");
-  if (shape === "open") return SO_MARK + body;
+  const elems = chars.map((c) => (c === WIDE_NUL ? DEAD_MARK + DEAD_MARK : c));
+  const body = elems.join("");
+  // SI の無い E（open）の送る形: 2 字目以降は新しい `SO 字… SI` の組（ACS。実機 `open-e-typing.txt`）
+  if (shape === "open") return jeErased.has(f.index) && elems.length >= 2 ? SO_MARK + elems[0]! + SO_MARK + elems.slice(1).join("") + SI_MARK : SO_MARK + body;
   if (shape === "compact") return SO_MARK + body + SI_MARK;
   const pad = f.length - 2 - 2 * chars.length;
   return pad < 0 ? SO_MARK + body + SI_MARK : SO_MARK + body + DEAD_MARK.repeat(pad) + SI_MARK;
@@ -2789,7 +2828,7 @@ function sync(inputEl: HTMLInputElement, f: Field): void {
     return;
   }
   // 語送りの欄は空きの桁（NUL）を表示では空白にし、送信値では実空白と区別する（`wrapWire`）
-  const wrap = isWrapEdit(f);
+  const wrap = usesNulPad(f);
   const full = wrap ? editValue(edit).replaceAll(WRAP_NUL, " ") : editValue(edit);
   const trimmed = wrap ? wrapWire(editValue(edit)) : full.replace(/ +$/, "");
   // キャレットのあるスライスへ先にフォーカスを移す。focus/blur ハンドラは props（emit 前で古い）から
@@ -3121,7 +3160,10 @@ function eraseInputKey(): void {
     if (!f.mdt && !props.edits.has(f.index)) continue;
     // E 欄は状態も添える——ACS は Erase Input の後も全角の状態の E 欄を `0e` で送る（実機の ACS のコア。`20260927-either-field-so`）
     // J・全角の E は両端の 1 桁の内側だけを消す（ACS `eraseField_Work`）——SI が中身の直後にあった E は SI も消える（`jeShapeOf`）
-    if (f.dbcsType === "either" && jeShapeOf(f) === "compact" && eitherDbcsOn(f, undefined)) jeShapeOverride.set(f.index, "open");
+    if (f.dbcsType === "either" && jeShapeOf(f) === "compact" && eitherDbcsOn(f, undefined)) {
+      jeShapeOverride.set(f.index, "open");
+      jeErased.add(f.index);
+    }
     emit("edit", f.index, "", jeMeta(f, "", undefined));
     writeSlices(f, " ".repeat(visLen(f)));
   }
@@ -3206,6 +3248,7 @@ watch(
     fieldExitedIndex = -1;
     eitherSwitched.clear();
     jeShapeOverride.clear();
+    jeErased.clear();
     if (props.focused && snap && !snap.keyboardLocked) {
       nextTick(() => focusCursorField());
     }
@@ -3241,7 +3284,7 @@ function deleteSelection(f: Field, el: HTMLInputElement): boolean {
   if (s === e) return false;
   const chars = [...edit.chars];
   chars.splice(s, e - s);
-  while (chars.length < visLen(f)) chars.push(" "); // 欄長（パディング）維持
+  while (chars.length < visLen(f)) chars.push(edit.pad ?? " "); // 欄長（パディング）維持
   edit = { ...edit, chars, cursor: Math.min(s, visLen(f)) };
   return true;
 }
@@ -4290,8 +4333,8 @@ function pasteFrom(
           cursor: lay.logicalAfter(lay.viewAtColumn(startOffset)),
           insertMode: insertMode.value
         };
-      } else if (isWrapEdit(f)) {
-        // 語送りの欄は空きの桁を NUL で持つ。**貼り付けには語送りを掛けない**（ACS の貼り付けの語送りは未測定。台帳の継続 O 欄の (c)）
+      } else if (usesNulPad(f)) {
+        // 語送りの欄・通常の文字欄は空きの桁を NUL で持つ。**貼り付けには語送りを掛けない**（ACS の貼り付けの語送りは未測定。台帳の継続 O 欄の (c)）
         const cs = [...val.replace(/ +$/, "")].map((c) => (isDeadMark(c) ? WRAP_NUL : c));
         while (cs.length < visLen(f)) cs.push(WRAP_NUL);
         edit = { ...initEdit(cs.join(""), visLen(f), startOffset), insertMode: insertMode.value, pad: WRAP_NUL };

@@ -57,7 +57,7 @@ export function validateFieldContent(
   // 外さないと、数値欄で Dup を押した瞬間に「数字しか入らない」で自分の入力を弾いてしまう。
   // 区間の間で割れた全角の半分（継続した O 欄）: 前半は字として検証し、後半は目印なので外す
   const typed = [...value]
-    .filter((ch) => !isRawSentinel(ch) && !isSplitTail(ch))
+    .filter((ch) => !isRawSentinel(ch) && !isSplitTail(ch) && ch !== "\u0000") // U+0000 は空きの桁（字ではない）
     .map((ch) => (isSplitLead(ch) ? splitLeadChar(ch) : ch))
     .join("");
   // **ホストが置いた文字は弾かない**（上の `current` 参照）。許容集合を一律に広げると

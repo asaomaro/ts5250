@@ -277,7 +277,8 @@ describe("既定のキー（ペイン結合）: Ctrl+Delete は Delete Word・Ct
     const w = mountPane();
     await nextTick();
     await key({ key: "Delete", ctrlKey: true }, 4);
-    expect(edited()).toBe("AAA");
+    // 語の間のホストが書いた空白は中身（通常の文字欄は打った空白・ホストの空白を末尾でも送る。`20260930-sbcs-nul`）
+    expect(edited()).toBe("AAA ");
     w.unmount();
   });
 

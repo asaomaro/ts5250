@@ -881,6 +881,79 @@ int main(int argc, char *argv[]) {
             }
         }
         tag = "";
+    } else if (strcmp(what, "CONTOS") == 0) {
+        /*
+         * **割れた全角（前半が区間の最後の桁・後半が次の区間の頭）を含む鎖の Delete・Backspace・上書き**（台帳「継続した O 欄の残りの差」）。ホストが割れた形を直接書く:
+         *   (5,10) 先頭 8 桁 `SO い き く 44`（最後の桁が あ の前半）/ (6,10) 中間 8 桁 `81 え SI X`＋NUL（頭が あ の後半）/ (7,10) 最終（空）。IC は 5,10。
+         * 巡ごとに画面を書き直し、READ MDT（ログは `[S1]`〜`[S8]`）。手順は `scripts/acs-probe/cont-o-split-edit.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x01, 0x24, 0x00, 0x08,
+            0x0E, 0x44, 0x82, 0x44, 0x87, 0x44, 0x88, 0x44,
+            0x11, 0x06, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x03, 0x24, 0x00, 0x08,
+            0x81, 0x44, 0x84, 0x0F, 0xE7, 0x00, 0x00, 0x00,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x80, 0x86, 0x02, 0x24, 0x00, 0x08,
+            0x13, 0x05, 0x0A
+        };
+        static char stags[8][8];
+        int k;
+        for (k = 0; k < 8; k++) {
+            sprintf(stags[k], "[S%d] ", k + 1);
+            tag = stags[k];
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 割れた全角の鎖)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(1024, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk("QsnReadMDT", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
+    } else if (strcmp(what, "OPENE") == 0) {
+        /*
+         * **SI の無い E（open）への打鍵**（台帳「E 欄の残り」）。(3,10)〜(13,10) の 6 つの E 欄（12 桁・どれも compact の `SO あ SI`）。SO の次で Erase EOF して open にしてから打つ。
+         * READ MDT を 1 回（ログは `[V1]`）と READ MDT ALT を 1 回（`[V2]`）。手順は `scripts/acs-probe/open-e-typing.txt`
+         */
+        static const unsigned char scr[] = {
+            0x00, 0x00,
+            0x11, 0x03, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x05, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x07, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x09, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x0B, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x11, 0x0D, 0x09, 0x1D, 0x40, 0x00, 0x82, 0x40, 0x20, 0x00, 0x0C, 0x0E, 0x44, 0x81, 0x0F,
+            0x13, 0x03, 0x0B
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            tag = k == 0 ? "[V1] " : "[V2] ";
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x40, (const char *)0, 0, 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x40 CLEAR UNIT)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            rc = QsnPutOutCmd(0x11, (const char *)scr, (Q_Bin4)sizeof(scr), 0, 0, (Q_Fdbk_T *)fdbk);
+            logFdbk("QsnPutOutCmd(0x11 E 欄)", rc, fdbk);
+            inzFdbk(fdbk, sizeof(fdbk));
+            buf = QsnCrtInpBuf(2048, 0, 0, (Qsn_Inp_Buf_T *)0, (Q_Fdbk_T *)fdbk);
+            if (buf != 0) {
+                inzFdbk(fdbk, sizeof(fdbk));
+                rc = k == 0 ? QsnReadMDT(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk)
+                            : QsnReadMDTAlt(0x00, 0x00, &bytesRead, buf, 0, 0, (Q_Fdbk_T *)fdbk);
+                logFdbk(k == 0 ? "QsnReadMDT" : "QsnReadMDTAlt", rc, fdbk);
+                logInpBuf(buf);
+                QsnDltBuf(buf, (Q_Fdbk_T *)0);
+            }
+        }
+        tag = "";
     } else if (strcmp(what, "CONTOP") == 0) {
         /*
          * **継続欄の O への貼り付けを、打鍵と並べて測る画面**（台帳「継続した O 欄の残り」(c)）。ACS の GUI の Ctrl+V は `ECLPS.pasteLineWrap`。

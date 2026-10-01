@@ -4,7 +4,8 @@ import { buildReadMdtResponse, buildReadMdtAltResponse } from "../src/protocol/r
 import { parseRecord } from "../src/protocol/gds.js";
 import { ScreenBuffer } from "../src/screen/buffer.js";
 import { rawSentinel } from "../src/screen/attr-sentinel.js";
-import { ESC, COMMAND, ORDER, AID } from "../src/protocol/constants.js";
+import { ESC, COMMAND, ORDER, AID, FFW } from "../src/protocol/constants.js";
+import { validateFieldContent } from "../src/screen/field-validate.js";
 import { codecForCcsid } from "@ts5250/ebcdic/codec";
 
 /**
@@ -112,6 +113,18 @@ describe("継続でない O 欄の送信（空き〔NUL〕と空白）", () => {
     const f = buf.orderedFields()[0]!;
     const c1 = buf.cellAt(f.startAddr + 1);
     expect(c1 !== null && c1?.type === "char" ? c1.rawByte : undefined).toBe(0x40);
+  });
+  it("値の U+0000（空きの桁）は型の検証の対象外（英字専用の欄でも途中の空きで弾かない）", () => {
+    const buf = new ScreenBuffer();
+    applyDataStream(
+      Uint8Array.from([ESC, COMMAND.CLEAR_UNIT, ESC, COMMAND.WRITE_TO_DISPLAY, 0x00, 0x00, ORDER.SBA, 5, 9, ORDER.SF, 0x40, 0x00, 0x20, 0x00, 0x00 + 0x0c]),
+      buf,
+      codec,
+      () => {}
+    );
+    const f = buf.orderedFields()[0]!;
+    f.ffw = (f.ffw & ~FFW.SHIFT_MASK) | FFW.SHIFT_ALPHA_ONLY; // 英字専用
+    expect(() => validateFieldContent("A\u0000B", f, codec)).not.toThrow();
   });
   it("空白だけの値も空きではない（`  ` → 40 40）", () => {
     expect(mdt(edit("  "))).toBe("4040");
