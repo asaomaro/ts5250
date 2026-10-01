@@ -1,0 +1,83 @@
+# **割れた全角（前半が区間の最後の桁・後半が次の区間の頭）を含む鎖の Delete・Backspace・上書き**（台帳「継続した O 欄の残りの差」）。DSM の CONTOS（`scripts/host-src/dscmd.c`）:
+# ホストが割れた形を書く（先頭 `SO い き く 44`／中間 `81 え SI X`）。1 巡に 1 操作で Enter。READ MDT は /tmp/dscmd.log の `[S1]`〜`[S8]`。
+#   S1 先頭の最後の桁（前半）で Delete / S2 中間の頭（後半）で Delete / S3 中間の 2 桁目で Backspace / S4 前半へ A / S5 前半へ う / S6 後半へ A / S7 後半へ う / S8 く で Delete
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/cont-o-split-edit.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('CONTOS')[enter]
+settle 3000
+dump start
+setcursor 5,17
+settle 200
+keys [delete]
+settle 400
+dump s1
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 6,10
+settle 200
+keys [delete]
+settle 400
+dump s2
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 6,11
+settle 200
+keys [backspace]
+settle 400
+dump s3
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 5,17
+settle 200
+keys A
+settle 400
+dump s4
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 5,17
+settle 200
+keys う
+settle 400
+dump s5
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 6,10
+settle 200
+keys A
+settle 400
+dump s6
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 6,10
+settle 200
+keys う
+settle 400
+dump s7
+keys [reset]
+settle 300
+keys [enter]
+settle 2500
+setcursor 5,15
+settle 200
+keys [delete]
+settle 400
+dump s8
+keys [reset]
+settle 300
+keys [enter]
+settle 2500

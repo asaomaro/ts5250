@@ -135,7 +135,7 @@ export function home(state: EditState): EditState {
  * ~~満杯欄なら末尾（len）に到達する~~ → ACS `Field5250.getEndPosition`（`PS5250.processEndField` が使う）は
  * 欄の終わりから非空白を探し、見つけた桁が最後の桁ならそこを、そうでなければ次の桁を返す（`20260921-acs-default-keys`）
  */
-export function end(state: EditState, from = 0, isPad: (c: string) => boolean = (c) => c === " "): EditState {
+export function end(state: EditState, from = 0, isPad: (c: string) => boolean = (c) => c === " " || c === "\u0000"): EditState {
   // `from` は探す下限（行をまたぐ欄の 2 行目以降では**今の行の先頭**。ACS `processEndField` がカーソルの行の先頭を下限に渡す）。
   // 下限から後ろに入力が無ければ下限に置く（ACS `getEndPosition` の `return n`。節目の点検の指摘: 欄全体を探して前の行へ戻っていた）
   const last = state.chars.length - 1;

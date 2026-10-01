@@ -1,0 +1,57 @@
+# **SI の無い E（open）への打鍵**（台帳「E 欄の残り」）。DSM の OPENE（`scripts/host-src/dscmd.c`）: 6 つの E（compact の `SO あ SI`）。各欄で SO の次（x,11）から Erase EOF して open にし、打つ:
+#   f0 いう / f1 い＋Space（`い う` を打って Backspace）/ f2 Space＋い（先頭の Space は全角空白）/ f3 いうえ / f4 い＋Space＋うう / f5 いうえおか（欄の長さを越える）
+# 1 巡目は READ MDT（`[V1]`）、2 巡目は READ MDT ALT（`[V2]`）。同じ打鍵を 2 回。エラーで止まらないよう欄の長さを越える f5 は最後。
+# 作り方: DSCMD_LIB=<AS400_LIB> node --env-file=.env --env-file=.env.verify scripts/build-dscmd.mjs（**測った後に DLTPGM と /tmp/dscmd.c・/tmp/dscmd.log を消す**）
+# 実行: PROBE_ENPTUI=true node --env-file=.env --env-file=.env.verify scripts/acs-probe.mjs scripts/acs-probe/open-e-typing.txt AS400
+signon
+keys [enter]
+settle 1500
+keys [home][eraseeof]CALL ${LIB}/DSCMD PARM('OPENE')[enter]
+settle 4000
+dump start
+setcursor 3,11
+keys [eraseeof]
+keys いう
+setcursor 5,11
+keys [eraseeof]
+keys い う
+keys [backspace]
+setcursor 7,11
+keys [eraseeof]
+keys  い
+setcursor 9,11
+keys [eraseeof]
+keys いうえ
+setcursor 11,11
+keys [eraseeof]
+keys い うう
+setcursor 13,11
+keys [eraseeof]
+keys いうえおか
+settle 400
+dump v1
+keys [enter]
+settle 3000
+setcursor 3,11
+keys [eraseeof]
+keys いう
+setcursor 5,11
+keys [eraseeof]
+keys い う
+keys [backspace]
+setcursor 7,11
+keys [eraseeof]
+keys  い
+setcursor 9,11
+keys [eraseeof]
+keys いうえ
+setcursor 11,11
+keys [eraseeof]
+keys い うう
+setcursor 13,11
+keys [eraseeof]
+keys いうえおか
+settle 400
+dump v2
+keys [enter]
+settle 3000
