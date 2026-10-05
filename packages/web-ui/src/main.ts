@@ -4,10 +4,12 @@ import { initTheme } from "./composables/useTheme.js";
 import { initSkin } from "./composables/useSkin.js";
 import { initViewSettings } from "./stores/viewSettings.js";
 import { initAppearance } from "./stores/appearance.js";
+import { installReloadGuard } from "./composables/reloadGuard.js";
 import "./styles.css";
 
 initTheme();
 initSkin();
 initViewSettings(); // **initTheme の後**（テーマの既定を外観の実効値から取る）
 initAppearance();
+installReloadGuard(); // F5・Ctrl+R での再読み込みを止める（開いているセッションを失わないため）
 createApp(App).mount("#app");
