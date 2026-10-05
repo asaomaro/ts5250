@@ -1427,6 +1427,35 @@ export function closeSession(sessionId: string): void {
   viewSettings.clearAll(sessionId);
 }
 
+/**
+ * **ページを離れるときに、開いているセッションを閉じる**（タブ・ブラウザ・VS Code のパネルを閉じた／再読み込み）。
+ *
+ * 通知が無いと、サーバーには「転送が落ちた」としか届かず、閉じたタブのセッションが猶予（既定 90 秒。心拍が途絶えていた
+ * ものは既定で無期限）のあいだホストの装置・ジョブと `maxSessions` の枠を掴んだままになる。
+ *
+ * - **WebSocket が生きているものは `{type:"close"}` を送る**（`closeSession` と同じ。サーバーは利用者の close をその場で閉じる）
+ * - **生きていないもの**（心拍が途絶えて切れていた・繋ぎ直し中）は **`sendBeacon`** で HTTP の口へ
+ *   （`/api/sessions/:id/close`）。ページの破棄の最中でも送れるのはこちら
+ * - **`persisted`（ページキャッシュへ入る）なら何もしない**——戻ってきたとき画面だけ残って、サーバーのセッションが無い状態になる
+ *
+ * 画面側の状態（`sessionsStore`）は触らない。ページごと消えるので、後始末は要らない（再読み込みで戻ることもない）。
+ */
+export function closeAllOnPageHide(ev: { persisted?: boolean } = {}): void {
+  if (ev.persisted) return;
+  for (const s of sessionsStore.all) {
+    if (s.connected) {
+      s.client.send({ type: "close" });
+      s.client.close();
+    } else {
+      try {
+        navigator.sendBeacon?.(`/api/sessions/${encodeURIComponent(s.sessionId)}/close`);
+      } catch {
+        /* 送れなくても、サーバーの猶予が拾う */
+      }
+    }
+  }
+}
+
 function hiddenIndexes(screen: { fields: { index: number; hidden: boolean }[] }): number[] {
   return screen.fields.filter((f) => f.hidden).map((f) => f.index);
 }
