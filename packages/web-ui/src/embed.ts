@@ -6,6 +6,7 @@ import { initViewSettings } from "./stores/viewSettings.js";
 import { initAppearance } from "./stores/appearance.js";
 import { systemsStore } from "./stores/systems.js";
 import { appKindFromQuery, initEmbedBridge, postToHost } from "./stores/embed.js";
+import { installReloadGuard } from "./composables/reloadGuard.js";
 import "./styles.css";
 
 /**
@@ -20,6 +21,7 @@ initTheme();
 initSkin();
 initViewSettings(); // **initTheme の後**（テーマの既定を外観の実効値から取る。`main.ts`と同じ順序を保つ）
 initAppearance();
+installReloadGuard(); // F5・Ctrl+R での再読み込みを止める（開いているセッションを失わないため）
 void systemsStore.refresh();
 initEmbedBridge();
 
