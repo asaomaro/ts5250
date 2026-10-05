@@ -51,6 +51,9 @@ export type HolderState =
  * 独立フィールドに持っていた頃は「期限はあるがタイマーは無い」という状態が型の上で作れた。
  * タイマーの実体は `session-manager` 側（Node の型を持ち込まないため）だが、
  * **判定に使うのはこの型だけ**。
+ *
+ * **無期限の猶予は `until: Infinity`**（心拍が途絶えたときの既定。`session-manager` の `DEFAULT_STALLED_GRACE_MS`）。
+ * `isHeldAt` が常に真を返すので、規則の側に「無期限」の枝は要らない。
  */
 export type HoldState = { readonly holding: false } | { readonly holding: true; readonly until: number };
 

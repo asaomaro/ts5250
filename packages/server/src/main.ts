@@ -79,10 +79,10 @@ interface Args {
    * 未指定なら `SessionManager` の既定（＝永続）。共有サーバーで有限に戻すための口。
    */
   idleTimeoutMs: number | "never" | undefined;
-  /** `--reconnect-grace`（ms）。未指定は `DEFAULT_RECONNECT_GRACE_MS` */
-  reconnectGraceMs: number | undefined;
-  /** `--stalled-grace`（ms）。未指定は `DEFAULT_STALLED_GRACE_MS` */
-  stalledGraceMs: number | undefined;
+  /** `--reconnect-grace`（ms または `"never"`）。未指定は `DEFAULT_RECONNECT_GRACE_MS`（90 秒） */
+  reconnectGraceMs: number | "never" | undefined;
+  /** `--stalled-grace`（ms または `"never"`）。未指定は `DEFAULT_STALLED_GRACE_MS`（`"never"`） */
+  stalledGraceMs: number | "never" | undefined;
 }
 
 /**
@@ -122,29 +122,32 @@ export function parseIdleTimeout(raw: string | undefined): number | "never" {
 /**
  * `--reconnect-grace` の値を ms へ。
  *
- * 単位は**分**。ブラウザとサーバーの接続が切れたとき、**ホストへの接続を保ったまま待つ時間**（既定 90 秒）。
- * 放置したタブが止まる（メモリセーバー・スリープタブ・PC のスリープ）と、ブラウザは心拍に返事できず接続が切れる。
+ * 単位は**分**、または `never`（＝時間では切らない）。**WebSocket が閉じたとき**（タブを閉じた・回線の瞬断）、
+ * **ホストへの接続を保ったまま待つ時間**（既定 90 秒）。心拍が途絶えて切れたときは `--stalled-grace`（既定 `never`）。
  * 猶予が切れるとサーバーがホストへの TCP をサインオフなしで閉じ、ホストにはジョブが切断された形で残る。
  * 長くするほど、タブが戻ったとき同じセッションに繋ぎ直せる——代わりに、戻らないタブの装置とジョブをその間ホストで掴んだままにする。
+ * `0` は受け付けない（`--idle-timeout` と同じく、未設定・転記漏れと見分けが付かないため）。
  */
-export function parseReconnectGrace(raw: string | undefined): number {
+export function parseReconnectGrace(raw: string | undefined): number | "never" {
   return parseGraceMinutes(raw, "--reconnect-grace");
 }
 
 /**
  * `--stalled-grace` の値を ms へ（単位・範囲は `--reconnect-grace` と同じ）。
  *
- * **心拍が途絶えて切れたとき**（放置したタブが止まった見込み）の猶予（既定 10 分）。閉じたタブ・回線の瞬断の猶予（`--reconnect-grace`）より
- * 短くはならない。タブを閉じた場合の保持は延ばさないので、閉じたタブがホストのジョブ・装置・枠を長く掴む副作用は増えない。
+ * **心拍が途絶えて切れたとき**（放置したタブが止まった見込み）の猶予。**既定は `never`**（時間では切らない。ACS と同じく、
+ * 利用者が閉じるかホストが切るまで残す。以前は 10 分）。閉じたタブ・回線の瞬断の猶予（`--reconnect-grace`）より短くはならない。
+ * タブを閉じた場合の保持は延ばさないので、閉じたタブがホストのジョブ・装置・枠を長く掴む副作用は増えない。
  */
-export function parseStalledGrace(raw: string | undefined): number {
+export function parseStalledGrace(raw: string | undefined): number | "never" {
   return parseGraceMinutes(raw, "--stalled-grace");
 }
 
-function parseGraceMinutes(raw: string | undefined, flag: string): number {
+function parseGraceMinutes(raw: string | undefined, flag: string): number | "never" {
+  if (raw === "never") return "never";
   const minutes = Number(raw);
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
-    throw new Error(`${flag} は 1〜1440 の整数（分）で指定してください（指定値: ${raw}）`);
+    throw new Error(`${flag} は 1〜1440 の整数（分）または never で指定してください（指定値: ${raw}）`);
   }
   return minutes * 60_000;
 }
@@ -238,7 +241,7 @@ function parseArgs(argv: string[]): Args {
       // 転送（ブラウザ ↔ サーバー）が落ちたセッションをホストへ繋いだまま保つ時間。既定は 90 秒（`parseReconnectGrace`）
       args.reconnectGraceMs = parseReconnectGrace(argv[++i]);
     } else if (a === "--stalled-grace") {
-      // 心拍が途絶えて切れたセッションを保つ時間。既定は 10 分（`parseStalledGrace`）
+      // 心拍が途絶えて切れたセッションを保つ時間。既定は never（`parseStalledGrace`）
       args.stalledGraceMs = parseStalledGrace(argv[++i]);
     } else if (a === "--web-root") {
       args.webRoot = argv[++i];
@@ -266,8 +269,8 @@ function parseArgs(argv: string[]): Args {
 /** `SessionManager` へ渡す寿命の設定（起動オプションから。指定が無いものは渡さず、マネージャの既定に任せる） */
 export function sessionManagerOptions(args: Pick<Args, "idleTimeoutMs" | "reconnectGraceMs" | "stalledGraceMs">): {
   idleTimeoutMs?: number | "never";
-  reconnectGraceMs?: number;
-  stalledGraceMs?: number;
+  reconnectGraceMs?: number | "never";
+  stalledGraceMs?: number | "never";
 } {
   return {
     ...(args.idleTimeoutMs !== undefined ? { idleTimeoutMs: args.idleTimeoutMs } : {}),

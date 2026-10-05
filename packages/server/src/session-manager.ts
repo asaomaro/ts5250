@@ -111,15 +111,22 @@ export type { IdleLimit } from "./session-lifetime.js";
 export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 /**
+ * 猶予の長さ。ms、または `"never"`（＝時間では切らない）。`IdleLimit` と同じ表し方
+ * （`0` を「切らない」の印にしない。`0` は「猶予なし＝その場で閉じる」に使っている）。
+ */
+export type GraceLimit = number | "never";
+
+/**
  * **転送が落ちたセッションを保持する既定の猶予**（ms。`20260908-session-survives-disconnect`
  * D5 / D12）。
  *
  * ブラウザ ↔ サーバーの WebSocket が落ちただけでホストの対話ジョブまで畳むと、画面遷移の
  * 途中状態ごと失われる（実機報告）。この間に繋ぎ直せば同じセッションへ戻れる。
  *
- * **有限であることが要**。ブラウザ経路の既定アイドル上限は `"never"` で、その根拠は
+ * **既定は有限**。ブラウザ経路の既定アイドル上限は `"never"` で、その根拠は
  * 「WS の切断と心拍が孤児を回収する」こと（`orphanSafeIdleTimeoutMs`）——猶予はその前提を
- * 外すので、掃除役に任せず自分で畳む。
+ * 外すので、掃除役に任せず自分で畳む。閉じたタブは戻ってこないのが普通なので、ここを無期限にすると
+ * 閉じるたびにセッションが残る（`--reconnect-grace never` で明示すればできる）。
  *
  * **値はクライアントの再試行が尽きるまでの壁時計から決める**（web-ui の
  * `session-controller`）。最悪ケースは
@@ -133,15 +140,25 @@ export const ORPHAN_IDLE_TIMEOUT_MS = 30 * 60_000;
 export const DEFAULT_RECONNECT_GRACE_MS = 90_000;
 
 /**
- * **心拍が途絶えて切れた（`ws-handler` の `heartbeat timeout`）ときの猶予の既定**。WebSocket が**閉じた**とき（タブを閉じた・回線の瞬断）は
- * 上の `DEFAULT_RECONNECT_GRACE_MS` のまま。
+ * **心拍が途絶えて切れた（`ws-handler` の `heartbeat timeout`）ときの猶予の既定**。**`"never"`＝時間では切らない**。
+ * WebSocket が**閉じた**とき（タブを閉じた・回線の瞬断）は上の `DEFAULT_RECONNECT_GRACE_MS`（90 秒）のまま。
  *
  * 分けるのは、**戻る見込みの長さが違う**ため。閉じたタブは戻ってこないか、戻るなら数秒〜数十秒で繋ぎ直す（上の 90 秒の根拠）。
- * 一方、心拍が途絶えるのは**タブが止まった**（メモリセーバー・スリープタブ・PC のスリープ）とき——数分〜数時間後に戻ることがあり、
- * 90 秒ではホストへの接続をサインオフなしで閉じてしまう（戻ったタブは「既に終了しています」になる。実機で再現）。
- * 長くするのは前者を除いた後者だけなので、**閉じたタブがホストのジョブ・装置・`maxSessions` の枠を長く掴む副作用は増えない**。
+ * 一方、心拍が途絶えるのは**タブが止まった**（メモリセーバー・スリープタブ・PC のスリープ）か、回線が黙って落ちたとき——
+ * 数分〜数時間後に戻る。~~10 分~~ としていたが、10 分を超えて放置したタブへ戻ると、サーバーがホストへの接続をサインオフなしで
+ * 閉じたあとだった（利用者の報告。戻ったタブは「既に終了しています」になる）。ACS に倣って時間では切らない——
+ * 端末のセッションは利用者が閉じるかホストが切るまで残る（利用者の指示）。
+ *
+ * 代わりに、**止まったまま二度と戻らないタブ**（スリープ中に PC を落とした・回線が切れたまま端末を閉じた）のセッションは、
+ * 利用者が閉じる・ホストが切る（`QINACTITV` など）・サーバーが終わるまで `maxSessions` の枠とホストの装置記述を掴む。
+ * 残ったものはセッション管理の一覧（`/api/sessions`）から開き直すか切断できる。時間で切りたいときは `--stalled-grace <分>`。
  */
-export const DEFAULT_STALLED_GRACE_MS = 10 * 60_000;
+export const DEFAULT_STALLED_GRACE_MS: GraceLimit = "never";
+
+/** 猶予を ms にする。`"never"` は `Infinity`（期限 `HoldState.until` が `Infinity` になり、規則の側は書き換えずに済む） */
+function graceToMs(v: GraceLimit): number {
+  return v === "never" ? Number.POSITIVE_INFINITY : v;
+}
 
 /** 常駐プリンターの既定の上限。表示の上限（8）とは別枠（design D3） */
 export const DEFAULT_MAX_RESIDENT_PRINTERS = 4;
@@ -717,19 +734,19 @@ function buildOutputStatus(
 export interface SessionManagerOptions {
   maxSessions?: number;
   /**
-   * 転送断でセッションを保持する猶予（ms）。既定 `DEFAULT_RECONNECT_GRACE_MS`。
-   * **0 で無効**＝従来どおり即座に閉じる。
+   * 転送断でセッションを保持する猶予（ms、または `"never"`＝時間では切らない）。既定 `DEFAULT_RECONNECT_GRACE_MS`（90 秒）。
+   * **0 で無効**＝その場で閉じる。
    *
    * CLI は `--reconnect-grace <分>`（`20260929-reconnect-grace-option`。当初は「CLI に出さず既定値で様子を見る」としていた〔D5〕が、
    * 放置したタブが止まると 90 秒では足りないと分かったため足した）。設定ファイルには出していない。
    * この値は **WebSocket が閉じたとき**（タブを閉じた・回線の瞬断）の猶予。心拍が途絶えたときは `stalledGraceMs`。
    */
-  reconnectGraceMs?: number;
+  reconnectGraceMs?: GraceLimit;
   /**
-   * **心拍が途絶えて切れたとき**の猶予（ms）。既定 `DEFAULT_STALLED_GRACE_MS`。`reconnectGraceMs` より短くはならない
+   * **心拍が途絶えて切れたとき**の猶予（ms、または `"never"`）。既定 `DEFAULT_STALLED_GRACE_MS`（`"never"`）。`reconnectGraceMs` より短くはならない
    * （`max` を取る）。`reconnectGraceMs` が 0 以下（猶予なし）ならこちらも効かない。
    */
-  stalledGraceMs?: number;
+  stalledGraceMs?: GraceLimit;
   /**
    * アイドルタイムアウトの既定（ms、または `"never"`＝切らない）。**既定 `"never"`**。
    * エントリ個別の値（`OpenOptions.idleTimeoutMs`）が無いときに使う。
@@ -834,8 +851,8 @@ export class SessionManager {
     this.maxSessions = opts.maxSessions ?? 8;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? "never";
     this.maxResidentPrinters = opts.maxResidentPrinters ?? DEFAULT_MAX_RESIDENT_PRINTERS;
-    this.reconnectGraceMs = opts.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS;
-    this.stalledGraceMs = opts.stalledGraceMs ?? DEFAULT_STALLED_GRACE_MS;
+    this.reconnectGraceMs = graceToMs(opts.reconnectGraceMs ?? DEFAULT_RECONNECT_GRACE_MS);
+    this.stalledGraceMs = graceToMs(opts.stalledGraceMs ?? DEFAULT_STALLED_GRACE_MS);
     this.rescueIntervalMs = opts.rescueIntervalMs ?? 10_000;
     this.now = opts.now ?? (() => Date.now());
     this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -1726,7 +1743,8 @@ export class SessionManager {
   }
 
   /**
-   * **繋ぎ直しを待って保持する**（転送が落ちたときだけ。D5）。期限が来たら自分で閉じる。
+   * **繋ぎ直しを待って保持する**（転送が落ちたときだけ。D5）。有限の猶予なら、期限が来たら自分で閉じる
+   * （心拍が途絶えたときの既定は無期限＝`"never"`。そのときは期限もタイマーも無い）。
    *
    * **表示セッションだけ**を対象にする——プリンターには常駐（`resident`）という別の仕組みが
    * 既にあり（design D1）、そちらは転送断でも元から閉じない。同じ id 空間だからといって
@@ -1746,6 +1764,9 @@ export class SessionManager {
     const entry = this.sessions.get(id);
     if (!entry || entry.hold.holding) return false;
     entry.hold = beginHold(this.now() + graceMs);
+    // **無期限（`"never"`）ならタイマーを張らない。** 期限は `Infinity` で、畳むのは利用者の切断・ホストの切断・`closeAll` だけ。
+    // `setTimeout` に `Infinity` を渡すと 1ms で発火する（Node は範囲外の遅延を 1 に丸める）ので、渡してはならない
+    if (!Number.isFinite(graceMs)) return true;
     const timer = setTimeout(() => {
       // **自分が張った猶予かを実体で確かめる**（`setReservation` が `entry.reservation === r` で
       // 同じ競合を閉じているのと同じ手）。`hold.holding` だけを見ると、

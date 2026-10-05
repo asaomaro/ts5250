@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReplayTransport, parseTraceJsonl, type Transport } from "@ts5250/tn5250";
 import { WsConnection } from "../src/ws-handler.js";
-import { SessionManager, DEFAULT_RECONNECT_GRACE_MS, DEFAULT_STALLED_GRACE_MS, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
+import { SessionManager, type GraceLimit, type OpenOptions, type OpenPrinterOptions } from "../src/session-manager.js";
 import { ConfigResolver } from "../src/config-resolver.js";
 import { PersonalConfigStore, ServerConfigStore } from "../src/config-store.js";
 import type { WsServerMessage } from "../src/ws-messages.js";
@@ -63,11 +63,18 @@ class SpyManager extends SessionManager {
  * display / printer の 2 本を同じ値で用意し、**プリンター経路の転記漏れ**を突けるようにする。
  */
 function setup(
-  opts: { idleTimeout?: "never" | number; deviceNameRetry?: boolean; keepAlive?: boolean; hb?: { intervalMs?: number; deadMs?: number; now?: () => number } } = {}
+  opts: {
+    idleTimeout?: "never" | number;
+    deviceNameRetry?: boolean;
+    keepAlive?: boolean;
+    hb?: { intervalMs?: number; deadMs?: number; now?: () => number };
+    /** `SessionManager` の猶予（未指定＝既定＝無期限） */
+    grace?: { reconnectGraceMs?: GraceLimit; stalledGraceMs?: GraceLimit };
+  } = {}
 ) {
   const sent: WsServerMessage[] = [];
   let closed = false;
-  const mgr = new SpyManager();
+  const mgr = new SpyManager(opts.grace ?? {});
   const idle = {
     ...(opts.idleTimeout !== undefined ? { idleTimeout: opts.idleTimeout } : {}),
     ...(opts.deviceNameRetry !== undefined ? { deviceNameRetry: opts.deviceNameRetry } : {}),
@@ -290,13 +297,16 @@ describe("ハートビート", () => {
     }
   });
 
-  // **心拍が途絶えて切れたときの猶予は、閉じたときより長い**（`20260929-stalled-grace`）。放置したタブが止まると心拍に返事できず切れる。
-  // 戻るまで数分かかるので、WebSocket が閉じたとき（90 秒）と同じでは足りない
-  it("心拍で切れたセッションは 90 秒を超えても残り、10 分で畳まれる", async () => {
+  // **有限に設定したとき、心拍が途絶えて切れたときの猶予は、閉じたときとは別**（`20260929-stalled-grace`）。放置したタブが止まると心拍に返事できず切れる。
+  // 戻るまで数分かかるので、WebSocket が閉じたときと同じ長さでは足りない
+  it("猶予を有限にすると、心拍で切れたセッションは 90 秒を超えても残り、10 分で畳まれる", async () => {
     vi.useFakeTimers();
     try {
       let t = 0;
-      const { conn, mgr } = setup({ hb: { intervalMs: 1000, deadMs: 2500, now: () => t } });
+      const { conn, mgr } = setup({
+        hb: { intervalMs: 1000, deadMs: 2500, now: () => t },
+        grace: { reconnectGraceMs: 90_000, stalledGraceMs: 10 * 60_000 }
+      });
       await conn.handle(JSON.stringify({ type: "open", host: "h" }));
       for (const at of [1000, 2000, 3000]) {
         t = at;
@@ -304,12 +314,67 @@ describe("ハートビート", () => {
       }
       const held = (): boolean => [...(mgr as unknown as { sessions: Map<string, unknown> }).sessions.keys()].some((k) => mgr.isHeld(k));
       expect(held()).toBe(true);
-      vi.advanceTimersByTime(DEFAULT_RECONNECT_GRACE_MS + 1_000);
+      vi.advanceTimersByTime(90_000 + 1_000);
       expect(mgr.size, "閉じたときの猶予（90 秒）を超えても残る").toBe(1);
       expect(held()).toBe(true);
-      vi.advanceTimersByTime(DEFAULT_STALLED_GRACE_MS);
+      vi.advanceTimersByTime(10 * 60_000);
       await Promise.resolve();
       expect(mgr.size, "10 分を超えたら畳まれる").toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // **心拍が途絶えて切れたときは、既定では時間で切らない**（利用者の指示。ACS に倣う）。畳むのは WebSocket だけで、ホストとのセッションは
+  // 利用者が閉じるかホストが切るまで残る。以前は 10 分でサインオフなしに閉じており、10 分を超えて放置したタブへ戻るとセッションが消えていた
+  it("**既定では、心拍が途絶えたあと 1 日経ってもセッションは残り、同じセッションへ繋ぎ直せる**", async () => {
+    vi.useFakeTimers();
+    try {
+      let t = 0;
+      const first = setup({ hb: { intervalMs: 1000, deadMs: 2500, now: () => t } });
+      const { conn, mgr, sent } = first;
+      await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+      const id = (sent.find((m) => m.type === "opened") as { sessionId: string }).sessionId;
+      for (const at of [1000, 2000, 3000]) {
+        t = at;
+        vi.advanceTimersByTime(1000);
+      }
+      expect(first.isClosed()).toBe(true);
+      vi.advanceTimersByTime(24 * 60 * 60_000);
+      await Promise.resolve();
+      expect(mgr.size).toBe(1);
+      expect(mgr.isHeld(id)).toBe(true);
+
+      // 戻ったタブ（新しい WebSocket）が同じセッションを引き取る
+      const back: WsServerMessage[] = [];
+      const again = new WsConnection(
+        { sessions: mgr, resolver: new ConfigResolver(new ServerConfigStore({ systems: [], sessions: [] }), new PersonalConfigStore()) },
+        { send: (d) => back.push(JSON.parse(d) as WsServerMessage), close: () => undefined }
+      );
+      await again.handle(JSON.stringify({ type: "open", sessionId: id, resume: true }));
+      expect(back.find((m) => m.type === "opened")).toMatchObject({ sessionId: id });
+      expect(mgr.isHeld(id)).toBe(false);
+
+      // 戻った利用者が明示的に閉じれば、その場で片づく
+      await again.handle(JSON.stringify({ type: "close" }));
+      expect(mgr.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 無期限にしたのは心拍の側だけ。タブを閉じた・回線が瞬断した（WebSocket の close が届いた）ときは従来どおり 90 秒
+  it("**既定でも、WebSocket が閉じたときは 90 秒で畳む**（閉じたタブの保持は延ばさない）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { conn, mgr } = setup();
+      await conn.handle(JSON.stringify({ type: "open", host: "h" }));
+      conn.onSocketClose();
+      vi.advanceTimersByTime(90_000 - 1_000);
+      expect(mgr.size).toBe(1);
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+      expect(mgr.size).toBe(0);
     } finally {
       vi.useRealTimers();
     }
