@@ -599,7 +599,8 @@ export class WsConnection {
         // 半開き（TCP は死んでいるのに close イベントが来ない）。send はローカルで成功するので
         // 送信の失敗では気づけない。ここで自分から畳む
         wsLog.warn({ sessionId: this.sessionId }, "no client response; closing half-open websocket");
-        // 心拍が途絶えた＝タブが止まった見込み。戻る見込みが長いので、閉じたときより長く保持する（`DEFAULT_STALLED_GRACE_MS`）
+        // 心拍が途絶えた＝タブが止まった見込み。閉じるのは WebSocket だけで、ホストとのセッションは残す
+        // （猶予は `stalledGraceMs`。既定は `"never"`＝時間では切らない。閉じたときの 90 秒とは別）
         this.dispose("heartbeat timeout", { transportLost: true, stalled: true });
         this.ws.close();
         return;

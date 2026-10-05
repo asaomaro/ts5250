@@ -224,3 +224,16 @@
       **着手時に両側を再確認すること**（委譲先の読みのみ）。
       （出典: `20260919-backlog-acs-triage` research F1-5）
 - [ ] ServiceManager（vscode-extension）のロックファイル調停プロトコルに、2ウィンドウが同時acquireしたとき『どちらも自分が勝者だと誤認し、両方が生き残る』レアな競合が実プロセス統合testで1回観測された（healthzは200のまま3分以上残存する孤児プロセス）。last-write-wins＋事後再読み取りは真の相互排他ではなく、[A-write,A-read(自分を見る),B-write,B-read(自分を見る)]という順序が理論上あり得る。単体プロセス内の疑似テストでは再現せず、全ファイル並行実行下でのみ1/11程度の頻度で観測（vscode-extension/test/serviceManager.multiprocess.integration.test.ts）。単一利用者のローカルツールとしての実害は限定的（余分なnode プロセスが1つ残る程度）だが、真の排他（advisory file lock等）への置き換えを検討する価値がある。（出典: .aidev/works/20260924-vscode-extension/test-result.md）
+- [x] **放置したタブへ 10 分を超えて戻ると、ホストとのセッションが消えている**（利用者の報告。2026-10-05）。
+      心拍が途絶えて切れたときの猶予が既定 10 分（`DEFAULT_STALLED_GRACE_MS`）で、切れるとサーバーがホストへの接続を
+      サインオフなしで閉じていた。**消し込み: ブランチ `fix/reconnect-grace-unlimited`。** 既定を `"never"`（時間では切らない）にした
+      （`packages/server/src/session-manager.ts` の `DEFAULT_STALLED_GRACE_MS`・`holdForReconnect`）。
+      `--stalled-grace` / `--reconnect-grace` は `never` も受け付ける。WebSocket が閉じたとき（タブを閉じた・回線の瞬断）の 90 秒は変えていない。
+      **実測**: server のテスト 1713 passed（0 failed / 3 skipped）。既定を 10 分へ戻すと 6 件、無期限でタイマーを張ると 2 件が落ちる。
+      **未確認**: ACS の原典（`acsbundle.jar`）はこの環境に無く開いていない。実機・実ブラウザ（止まったタブが戻る経路）も未検証。
+- [ ] **止まったまま戻らないタブのセッションが、利用者にもホストにも切られないまま残る**（上の変更の副作用）。
+      `maxSessions` の枠とホストの装置を掴む。いまの出口はセッション管理の一覧（`/api/sessions`）から開き直す・切断する、
+      ホストの `QINACTITV`、サーバーの終了、`--stalled-grace <分>`。一覧に「持ち主が戻っていない」印を出すかは未検討。
+- [ ] **繋ぎ直しのはしごは 5 回（最悪 87.2 秒）で打ち切る**（`packages/web-ui/src/session-controller.ts` の `RECONNECT_DELAYS_MS`）。
+      サーバーが無期限に待つようになっても、回線断が 87 秒を超えるとブラウザ側は「再接続」を押すまで戻らない
+      （ACS はホストとの回線が戻れば設定次第で自動で繋ぎ直す）。無期限に合わせて試行を続けるかは未検討。

@@ -21,7 +21,8 @@ import {
   SessionManager,
   DEFAULT_RECONNECT_GRACE_MS,
   DEFAULT_STALLED_GRACE_MS,
-  ORPHAN_IDLE_TIMEOUT_MS
+  ORPHAN_IDLE_TIMEOUT_MS,
+  type GraceLimit
 } from "../src/session-manager.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,8 +32,16 @@ const signon = () =>
 /** private な sweepIdle を叩く（`session-idle-timeout.test.ts` と同じ手） */
 const sweep = (mgr: SessionManager): void => (mgr as unknown as { sweepIdle: () => void }).sweepIdle();
 
-function makeManager(opts: { reconnectGraceMs?: number; stalledGraceMs?: number; now?: () => number } = {}): SessionManager {
-  return new SessionManager(opts);
+/**
+ * **有限の猶予**の値。心拍が途絶えたときの既定は無期限になったので、期限で畳む振る舞いを見る検査は
+ * この値を明示して渡す（以前の既定と同じ 90 秒・10 分）。既定そのものは末尾の describe が見る
+ */
+const FINITE_GRACE_MS = 90_000;
+const FINITE_STALLED_MS = 10 * 60_000;
+
+/** 有限の猶予を持つマネージャ（期限で畳む側の検査用）。既定のまま（無期限）を見るときは `new SessionManager()` を直接使う */
+function makeManager(opts: { reconnectGraceMs?: GraceLimit; stalledGraceMs?: GraceLimit; now?: () => number } = {}): SessionManager {
+  return new SessionManager({ reconnectGraceMs: FINITE_GRACE_MS, stalledGraceMs: FINITE_STALLED_MS, ...opts });
 }
 const open = (mgr: SessionManager) => mgr.open({ transport: new ReplayTransport(signon()), host: "h" });
 
@@ -51,7 +60,7 @@ describe("猶予保持（holdForReconnect）", () => {
     const mgr = makeManager({ now: () => t });
     const entry = await open(mgr);
     expect(mgr.holdForReconnect(entry.id)).toBe(true);
-    t += DEFAULT_RECONNECT_GRACE_MS - 1;
+    t += FINITE_GRACE_MS - 1;
     expect(mgr.holdForReconnect(entry.id)).toBe(false); // 2 回目は入らない
     // **返り値だけでは足りない。** `hold（旧 heldUntil）` を黙って上書きしていても false は返せるので、
     // **元の期限で**刈られることまで見る（そうでないと、切断を繰り返す相手が無期限に掴める）
@@ -84,7 +93,7 @@ describe("猶予保持（holdForReconnect）", () => {
     vi.useFakeTimers();
     try {
       mgr.holdForReconnect(entry.id);
-      vi.advanceTimersByTime(DEFAULT_RECONNECT_GRACE_MS + 1);
+      vi.advanceTimersByTime(FINITE_GRACE_MS + 1);
       expect(mgr.size).toBe(0);
       expect(() => mgr.get(entry.id)).toThrow();
     } finally {
@@ -97,7 +106,7 @@ describe("猶予保持（holdForReconnect）", () => {
     const mgr = makeManager({ now: () => t });
     const entry = await open(mgr);
     mgr.holdForReconnect(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.size).toBe(0);
     expect(() => mgr.get(entry.id)).toThrow();
@@ -110,7 +119,7 @@ describe("猶予保持（holdForReconnect）", () => {
     try {
       mgr.holdForReconnect(entry.id);
       mgr.addViewer(entry.id);
-      vi.advanceTimersByTime(DEFAULT_RECONNECT_GRACE_MS + 1);
+      vi.advanceTimersByTime(FINITE_GRACE_MS + 1);
       expect(mgr.size).toBe(1);
       expect(mgr.isHeld(entry.id)).toBe(false); // 猶予だけ解けて普通のセッションに戻る
     } finally {
@@ -124,7 +133,7 @@ describe("猶予保持（holdForReconnect）", () => {
     const mgr = makeManager({ now: () => t });
     const entry = await open(mgr);
     mgr.holdForReconnect(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS - 1;
+    t += FINITE_GRACE_MS - 1;
     sweep(mgr);
     expect(mgr.size).toBe(1);
     mgr.closeAll();
@@ -136,7 +145,7 @@ describe("猶予保持（holdForReconnect）", () => {
     const entry = await open(mgr);
     mgr.holdForReconnect(entry.id);
     mgr.addViewer(entry.id); // 猶予中に誰かが見に来た（セッション管理／MCP）
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.size).toBe(1);
     expect(mgr.isHeld(entry.id)).toBe(false); // 猶予だけ解けて普通のセッションに戻る
@@ -148,7 +157,7 @@ describe("猶予保持（holdForReconnect）", () => {
     const mgr = makeManager({ now: () => t });
     const entry = await open(mgr);
     mgr.holdForReconnect(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     expect(mgr.isHeld(entry.id)).toBe(false);
     mgr.closeAll();
   });
@@ -228,7 +237,7 @@ describe("猶予とアイドル上限の関係", () => {
       idleTimeoutMs: 60_000
     });
     mgr.holdForReconnect(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.size).toBe(0);
   });
@@ -253,7 +262,7 @@ describe("猶予が明けたのに見ている人が居る場合（review ラウ
     mgr.releaseHolder(entry.id, token);
     mgr.holdForReconnect(entry.id);
     mgr.addViewer(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
 
     expect(mgr.size).toBe(1);
@@ -278,7 +287,7 @@ describe("猶予が明けたのに見ている人が居る場合（review ラウ
     mgr.releaseHolder(entry.id, first);
     mgr.holdForReconnect(entry.id);
     mgr.addViewer(entry.id);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr); // 猶予は明けたが、見ている人が居るので残る
 
     mgr.claim(entry.id); // 手動の繋ぎ直しで持ち主が戻った
@@ -373,10 +382,10 @@ describe("心拍が途絶えたときの猶予（stalled）", () => {
     const stalled = await open(mgr);
     expect(mgr.holdForReconnect(closed.id, false)).toBe(true);
     expect(mgr.holdForReconnect(stalled.id, true)).toBe(true);
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.size, "閉じた側だけ畳まれる").toBe(1);
-    t += DEFAULT_STALLED_GRACE_MS - DEFAULT_RECONNECT_GRACE_MS - 2;
+    t += FINITE_STALLED_MS - FINITE_GRACE_MS - 2;
     sweep(mgr);
     expect(mgr.size, "10 分の手前ではまだ残る").toBe(1);
     t += 2;
@@ -390,7 +399,7 @@ describe("心拍が途絶えたときの猶予（stalled）", () => {
     const entry = await open(mgr);
     const token = mgr.claim(entry.id);
     mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true, stalled: true });
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.isHeld(entry.id), "90 秒を超えても保持されている").toBe(true);
     mgr.closeAll();
@@ -402,7 +411,7 @@ describe("心拍が途絶えたときの猶予（stalled）", () => {
     const entry = await open(mgr);
     const token = mgr.claim(entry.id);
     mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true });
-    t += DEFAULT_RECONNECT_GRACE_MS + 1;
+    t += FINITE_GRACE_MS + 1;
     sweep(mgr);
     expect(mgr.size).toBe(0);
   });
@@ -415,7 +424,7 @@ describe("心拍が途絶えたときの猶予（stalled）", () => {
     t += 1_001;
     sweep(mgr);
     expect(mgr.size, "1 秒では畳まれない（90 秒まで残る）").toBe(1);
-    t += DEFAULT_RECONNECT_GRACE_MS;
+    t += FINITE_GRACE_MS;
     sweep(mgr);
     expect(mgr.size).toBe(0);
   });
@@ -424,6 +433,173 @@ describe("心拍が途絶えたときの猶予（stalled）", () => {
     const mgr = makeManager({ reconnectGraceMs: 0 });
     const entry = await open(mgr);
     expect(mgr.holdForReconnect(entry.id, true)).toBe(false);
+    mgr.closeAll();
+  });
+});
+
+/**
+ * **心拍が途絶えて切れたときは、既定で時間では切らない**（利用者の指示。ACS に倣う——端末のセッションは利用者が閉じるか
+ * ホストが切るまで残る）。以前は 10 分でホストへの接続をサインオフなしで閉じており、10 分を超えて放置したタブへ戻ると
+ * セッションが消えていた。**WebSocket が閉じたとき（タブを閉じた・回線の瞬断）の 90 秒は変えていない**
+ */
+describe("心拍が途絶えたときの既定の猶予は無期限（時間では切らない）", () => {
+  const DAY = 24 * 60 * 60_000;
+
+  it("既定値: 閉じたときは 90 秒、心拍が途絶えたときは never", () => {
+    expect(DEFAULT_RECONNECT_GRACE_MS).toBe(90_000);
+    expect(DEFAULT_STALLED_GRACE_MS).toBe("never");
+  });
+
+  it("心拍が途絶えたあと、10 分を超えても何日経っても掃除役は刈らない", async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ now: () => t });
+    const entry = await open(mgr);
+    const token = mgr.claim(entry.id);
+    expect(mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true, stalled: true })).toEqual({ act: "hold", already: false });
+    for (const step of [90_000 + 1, 10 * 60_000, ORPHAN_IDLE_TIMEOUT_MS + 1, 30 * DAY]) {
+      t += step;
+      sweep(mgr);
+      expect(mgr.size, `+${step}ms`).toBe(1);
+      expect(mgr.isHeld(entry.id)).toBe(true);
+    }
+    mgr.closeAll();
+  });
+
+  it("**WebSocket が閉じたときは既定のまま 90 秒で畳む**（閉じたタブの保持は延ばさない）", async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ now: () => t });
+    const entry = await open(mgr);
+    const token = mgr.claim(entry.id);
+    mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: true });
+    t += 90_000 - 1;
+    sweep(mgr);
+    expect(mgr.size).toBe(1);
+    t += 2;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+
+  it("**タイマーも張らない**（`setTimeout` に Infinity を渡すと 1ms で発火して、その場で閉じてしまう）", async () => {
+    const mgr = new SessionManager();
+    const entry = await open(mgr);
+    vi.useFakeTimers();
+    try {
+      expect(mgr.holdForReconnect(entry.id, true)).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(30 * DAY);
+      expect(mgr.size).toBe(1);
+      expect(mgr.isHeld(entry.id)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+    mgr.closeAll();
+  });
+
+  it("アイドル上限を有限にしていても、猶予中は刈られない（猶予中の寿命を決めるのは猶予ひとつ）", async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ now: () => t, idleTimeoutMs: 60_000 });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    t += DAY;
+    sweep(mgr);
+    expect(mgr.size).toBe(1);
+    mgr.closeAll();
+  });
+
+  it("何日あとでも持ち主として戻れて、猶予が解ける", async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ now: () => t });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    t += 7 * DAY;
+    mgr.cancelHold(entry.id);
+    mgr.claim(entry.id);
+    expect(mgr.isHeld(entry.id)).toBe(false);
+    sweep(mgr);
+    expect(mgr.size).toBe(1);
+    mgr.closeAll();
+  });
+
+  it("`stalledGraceMs` を有限にすれば、従来どおりその時間で畳む", async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ stalledGraceMs: FINITE_STALLED_MS, now: () => t });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    t += FINITE_STALLED_MS - 1;
+    sweep(mgr);
+    expect(mgr.size).toBe(1);
+    t += 2;
+    sweep(mgr);
+    expect(mgr.size).toBe(0);
+  });
+
+  it('`reconnectGraceMs: "never"` なら閉じたときも無期限で、`stalledGraceMs` を有限にしても短くはならない（max）', async () => {
+    let t = 1_000_000;
+    const mgr = new SessionManager({ reconnectGraceMs: "never", stalledGraceMs: 60_000, now: () => t });
+    const closed = await open(mgr);
+    const stalled = await open(mgr);
+    mgr.holdForReconnect(closed.id, false);
+    mgr.holdForReconnect(stalled.id, true);
+    t += DAY;
+    sweep(mgr);
+    expect(mgr.size).toBe(2);
+    mgr.closeAll();
+  });
+
+  it("`reconnectGraceMs: 0`（猶予なしの逃げ道）は、既定の無期限より優先する", async () => {
+    const mgr = new SessionManager({ reconnectGraceMs: 0 });
+    const entry = await open(mgr);
+    expect(mgr.holdForReconnect(entry.id, true)).toBe(false);
+    mgr.closeAll();
+  });
+});
+
+/** 無期限にしても、**時間以外の理由では従来どおり確実に片づく**こと */
+describe("無期限の猶予中でも掃除される経路", () => {
+  it("利用者が明示的に閉じれば消える（`close`。セッション管理の一覧からの切断と同じ口）", async () => {
+    const mgr = new SessionManager();
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    await mgr.close(entry.id);
+    expect(mgr.size).toBe(0);
+  });
+
+  it("ホストが切れば消える（`closed` イベント）", async () => {
+    const mgr = new SessionManager();
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    // ホストが接続を閉じたときに `Session5250` が出すのと同じイベント
+    (entry.session as unknown as { emit: (ev: string) => void }).emit("closed");
+    expect(mgr.size).toBe(0);
+    expect(mgr.isHeld(entry.id)).toBe(false);
+  });
+
+  it("サーバーが終わるとき（`closeAll`）は全部閉じる", async () => {
+    const mgr = new SessionManager();
+    const a = await open(mgr);
+    await open(mgr);
+    mgr.holdForReconnect(a.id, true);
+    mgr.closeAll();
+    expect(mgr.size).toBe(0);
+  });
+
+  it("繋ぎ直した持ち主が、あとで自分で閉じれば（転送断でなければ）その場で閉じる", async () => {
+    const mgr = new SessionManager();
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    mgr.cancelHold(entry.id);
+    const token = mgr.claim(entry.id);
+    expect(mgr.disposition(entry.id, { role: { kind: "owner", token }, transportLost: false })).toEqual({ act: "close" });
+    expect(mgr.size).toBe(0);
+  });
+
+  it("猶予中のセッションも `maxSessions` の枠を数える（残した分だけ新規は開けなくなる。副作用の固定）", async () => {
+    const mgr = new SessionManager({ maxSessions: 1 });
+    const entry = await open(mgr);
+    mgr.holdForReconnect(entry.id, true);
+    await expect(open(mgr)).rejects.toMatchObject({ code: "SESSION_LIMIT" });
+    await mgr.close(entry.id);
+    await expect(open(mgr)).resolves.toBeDefined();
     mgr.closeAll();
   });
 });
