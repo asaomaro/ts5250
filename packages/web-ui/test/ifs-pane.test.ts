@@ -14,6 +14,8 @@ const realSelected = systemsStore.menuSystem;
 
 beforeEach(() => {
   systemsStore.menuSystem = "srv:s";
+  // 並び順は localStorage に覚える（`IfsPane.vue`）。前のテストの選びを持ち越さない
+  localStorage.removeItem("ts5250.ifs.sort");
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -75,6 +77,68 @@ async function paneWith(routes: Record<string, unknown>, status?: Record<string,
   await flushPromises();
   return wrapper;
 }
+
+describe("並び順", () => {
+  const rowNames = (w: { findAll: (s: string) => { text: () => string }[] }) =>
+    w.findAll(".entries li:not(.up) .name").map((x) => x.text());
+  const list = {
+    list: {
+      entries: [entry("b.txt", { size: 10 }), entry("sub", { isDirectory: true }), entry("a.txt", { size: 30 }), entry("c.txt", { size: 20 })],
+      hasMore: false,
+      canContinue: false
+    }
+  };
+  beforeEach(() => localStorage.removeItem("ts5250.ifs.sort"));
+
+  it("既定はサーバーが返した順のまま（並べ替えの方向ボタンも押せない）", async () => {
+    const w = await paneWith(list);
+    expect(rowNames(w)).toEqual(["b.txt", "sub", "a.txt", "c.txt"]);
+    expect((w.get('button[aria-label^="昇順"]').element as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("名前で並べると、フォルダが先で名前の昇順。方向ボタンで降順になる（フォルダは先のまま）", async () => {
+    const w = await paneWith(list);
+    await w.get('select[aria-label="並び順"]').setValue("name");
+    expect(rowNames(w)).toEqual(["sub", "a.txt", "b.txt", "c.txt"]);
+    await w.get('button[aria-label^="昇順"]').trigger("click");
+    expect(rowNames(w)).toEqual(["sub", "c.txt", "b.txt", "a.txt"]);
+  });
+
+  it("サイズで並べる", async () => {
+    const w = await paneWith(list);
+    await w.get('select[aria-label="並び順"]').setValue("size");
+    expect(rowNames(w)).toEqual(["sub", "b.txt", "c.txt", "a.txt"]);
+  });
+
+  it("**選んだ並び順を覚える**（開き直しても同じ。壊れた保存値は既定へ）", async () => {
+    const w = await paneWith(list);
+    await w.get('select[aria-label="並び順"]').setValue("size");
+    await w.get('button[aria-label^="昇順"]').trigger("click");
+    w.unmount();
+    const again = await paneWith(list);
+    expect(rowNames(again)).toEqual(["sub", "a.txt", "c.txt", "b.txt"]);
+
+    localStorage.setItem("ts5250.ifs.sort", "{壊れた");
+    expect(rowNames(await paneWith(list))).toEqual(["b.txt", "sub", "a.txt", "c.txt"]);
+    localStorage.setItem("ts5250.ifs.sort", JSON.stringify({ key: "owner", dir: "desc" }));
+    expect(rowNames(await paneWith(list))).toEqual(["b.txt", "sub", "a.txt", "c.txt"]);
+  });
+
+  it("続きがあるときは、並べ替えが読み込み済みの分だけだと伝える（サーバー順では出さない）", async () => {
+    const more = { list: { entries: [entry("a")], hasMore: true, canContinue: true, nextRestartId: 2 } };
+    const w = await paneWith(more);
+    expect(w.text()).not.toContain("並べ替えは読み込み済みの分だけ");
+    await w.get('select[aria-label="並び順"]').setValue("name");
+    expect(w.text()).toContain("並べ替えは読み込み済みの分だけ");
+  });
+
+  it("並べ替えても、選択中の行（名前で追う）と行の操作は変わらない", async () => {
+    const w = await paneWith(list);
+    await w.get('select[aria-label="並び順"]').setValue("name");
+    await w.findAll(".entries li:not(.up)")[1]?.trigger("click"); // a.txt
+    expect(w.find(".entries li.sel .name").text()).toBe("a.txt");
+  });
+});
 
 describe("一覧の表示", () => {
   it("ファイルとフォルダを並べる", async () => {
