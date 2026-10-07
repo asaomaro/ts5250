@@ -229,6 +229,7 @@ async function resolvePayload(
   if (file.port !== undefined) input.port = file.port;
   if (file.tls !== undefined) input.tls = file.tls;
   if (file.ccsid !== undefined) input.ccsid = file.ccsid;
+  if (file.spoolCcsid !== undefined) input.spoolCcsid = file.spoolCcsid;
   if (user !== undefined) input.user = user;
   if (password !== undefined) input.password = password;
   try {
@@ -258,6 +259,7 @@ function buildConnectPayload(file: Ts5250File, crypto: ExtensionSecretCrypto): C
   if (file.port !== undefined) payload.port = file.port;
   if (file.tls !== undefined) payload.tls = file.tls;
   if (file.ccsid !== undefined) payload.ccsid = file.ccsid;
+  if (file.spoolCcsid !== undefined) payload.spoolCcsid = file.spoolCcsid;
   if (file.katakanaVariant !== undefined) payload.katakanaVariant = file.katakanaVariant;
   if (file.terminal !== undefined) payload.terminal = file.terminal;
   if (file.deviceName !== undefined) payload.deviceName = file.deviceName;
@@ -316,6 +318,8 @@ async function handleSave(
   else delete next.tls;
   if (values.ccsid !== undefined) next.ccsid = values.ccsid;
   else delete next.ccsid;
+  if (values.spoolCcsid !== undefined) next.spoolCcsid = values.spoolCcsid;
+  else delete next.spoolCcsid;
   if (values.katakanaVariant !== undefined) next.katakanaVariant = values.katakanaVariant;
   else delete next.katakanaVariant;
   if (values.terminal !== undefined) next.terminal = values.terminal;

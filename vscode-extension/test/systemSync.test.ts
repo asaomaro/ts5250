@@ -12,6 +12,24 @@ function tempMappingPath(): string {
 const baseInput = { documentUri: "file:///a.ts5250", name: "a.ts5250", host: "AS400" };
 
 describe("syncSystem: 初回登録", () => {
+  it("**spoolCcsid をサーバーへ送る**（送らないとサーバーの既定 273 でスプールを復号して、日本語が化ける）", async () => {
+    const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(JSON.parse(init.body as string)).toMatchObject({ host: "AS400", spoolCcsid: 1399 });
+      return new Response(JSON.stringify({ system: { ref: "own:s-1" } }), { status: 201 });
+    });
+    await syncSystem({ ...baseInput, spoolCcsid: 1399 }, { port: 1, mappingFilePath: tempMappingPath(), fetchFn: fetchFn as unknown as typeof fetch });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("spoolCcsid が無ければ body にも載せない（既定に任せる）", async () => {
+    const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+      expect("spoolCcsid" in JSON.parse(init.body as string)).toBe(false);
+      return new Response(JSON.stringify({ system: { ref: "own:s-1" } }), { status: 201 });
+    });
+    await syncSystem(baseInput, { port: 1, mappingFilePath: tempMappingPath(), fetchFn: fetchFn as unknown as typeof fetch });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("対応表に無ければPOSTで新規登録し、返ってきたref（既にown:接頭辞付き）を対応表へ保存する", async () => {
     const mappingFilePath = tempMappingPath();
     const fetchFn = vi.fn(async (url: string, init: RequestInit) => {

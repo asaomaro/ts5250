@@ -36,6 +36,8 @@ export interface SystemSyncInput {
   port?: number;
   tls?: boolean;
   ccsid?: number;
+  /** スプールの復号CCSID。**送らないとサーバーの既定（273）で復号されて、日本語のスプールが化ける** */
+  spoolCcsid?: number;
   user?: string;
   /** 平文。ここで初めてネットワークへ乗る（サーバーへHTTPSではなくloopback） */
   password?: string;
@@ -76,6 +78,7 @@ function buildBody(input: SystemSyncInput): Record<string, unknown> {
   if (input.port !== undefined) body.port = input.port;
   if (input.tls !== undefined) body.tls = input.tls;
   if (input.ccsid !== undefined) body.ccsid = input.ccsid;
+  if (input.spoolCcsid !== undefined) body.spoolCcsid = input.spoolCcsid;
   if (input.user !== undefined) body.signonUser = input.user;
   if (input.password !== undefined) body.password = input.password;
   return body;

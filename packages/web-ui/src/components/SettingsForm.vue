@@ -9,7 +9,7 @@
  */
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import type { SettingsFormValues, EmbedAppKind, WatermarkValue } from "../embed-protocol.js";
-import { HOST_CODE_PAGE_OPTIONS, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
+import { HOST_CODE_PAGE_OPTIONS, SPOOL_CODE_PAGES, DEFAULT_SPOOL_CCSID, hostCodePageOptionId, hostCodePageOptionOf } from "../hostCodePages.js";
 import { SCREEN_SIZES, DEFAULT_SCREEN_SIZE, type ScreenSize } from "../screenSizes.js";
 import { WATERMARK_DEFAULTS, WATERMARK_VARS } from "../composables/watermark.js";
 import { settingsColumnsOf } from "../settingsLayout.js";
@@ -57,6 +57,11 @@ const wmForm = reactive({
 });
 /** 透かしの文字に使える差し込み変数（`{host}` 等）の説明 */
 const WM_VAR_HINT = WATERMARK_VARS.map((v) => `{${v.key}}=${v.label}`).join(" / ");
+// **スプールの復号CCSID**（spoolのみ。`ConfigCard.vue`のシステムの「スプール CCSID」と同じ一覧）。
+// 5250画面用のコードページとは別——送らないとサーバーの既定（273）で復号され、日本語のスプールが化ける。
+// 一覧に無い値でも、開いて保存しただけで消さない（`unrecognizedCcsid`と同じ理由）
+const spoolCcsid = ref<number | "unset">(props.initial?.spoolCcsid ?? "unset");
+const spoolCcsidIsListed = (n: number | "unset"): boolean => n === "unset" || SPOOL_CODE_PAGES.some((p) => p.ccsid === n);
 const user = ref(props.initial?.user ?? "");
 const password = ref("");
 
@@ -92,6 +97,7 @@ function build(): SettingsFormValues | undefined {
   } else if (unrecognizedCcsid !== undefined) {
     v.ccsid = unrecognizedCcsid;
   }
+  if (props.app === "spool" && spoolCcsid.value !== "unset") v.spoolCcsid = spoolCcsid.value;
   if (props.app === "emulator") {
     v.terminal = terminal.value;
     // 3270はモデルでサイズが決まる（設定ファイルはモデル指定を持たない。design.md参照）ので送らない
@@ -109,7 +115,7 @@ function build(): SettingsFormValues | undefined {
 // **`flush: "sync"`**——入力の直後（同じ処理の中）に「接続」が押されても、その時点で呼び出し側が変更を知っているようにする。
 // 既定（描画前にまとめて）だと、入力と押下が同じ処理で起きたとき`change`が押下より後に届き、保存を飛ばして古い設定で繋いだ
 // （実際の VSCode で再現。D34）
-watch([host, port, tls, codePageId, terminal, screenSize, deviceName, wmForm, user, password], () => emit("change", build()), {
+watch([host, port, tls, codePageId, spoolCcsid, terminal, screenSize, deviceName, wmForm, user, password], () => emit("change", build()), {
   deep: true,
   flush: "sync"
 });
@@ -170,6 +176,15 @@ function buildWatermark(): WatermarkValue | undefined {
               <option v-for="o in HOST_CODE_PAGE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
             </select>
           </div>
+          <div v-if="app === 'spool'" class="row">
+            <label for="sf-spool-ccsid">スプール CCSID</label>
+            <select id="sf-spool-ccsid" v-model="spoolCcsid" title="スプールの復号 CCSID（5250 画面用のコードページとは別）">
+              <option value="unset">未指定（{{ DEFAULT_SPOOL_CCSID }}）</option>
+              <option v-if="!spoolCcsidIsListed(spoolCcsid)" :value="spoolCcsid">{{ spoolCcsid }}</option>
+              <option v-for="p in SPOOL_CODE_PAGES" :key="p.ccsid" :value="p.ccsid">{{ p.label }}</option>
+            </select>
+          </div>
+          <p v-if="app === 'spool'" class="field-hint">日本語のスプールが化けるときは、ホストに合わせて 930・939・1399・5026・5035 から選びます</p>
         </fieldset>
         <fieldset v-else-if="g === 'signon'" class="group">
           <legend>サインオン</legend>

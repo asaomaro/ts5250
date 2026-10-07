@@ -89,6 +89,8 @@ export interface ConnectPayload {
   tls?: boolean;
   ccsid?: number;
   katakanaVariant?: "katakana" | "katakana-ex";
+  /** spoolのみ。スプール（SCS）の復号CCSID。5250画面用の`ccsid`とは別。未指定ならサーバーの既定 */
+  spoolCcsid?: number;
   /** emulatorのみ */
   terminal?: "5250" | "3270";
   /** emulator/printer（セッション）のみ */
@@ -117,6 +119,8 @@ export interface SettingsFormValues {
   tls?: boolean;
   ccsid?: number;
   katakanaVariant?: "katakana" | "katakana-ex";
+  /** spoolのみ。スプール（SCS）の復号CCSID。5250画面用の`ccsid`とは別。未指定ならサーバーの既定 */
+  spoolCcsid?: number;
   /** emulatorのみ */
   terminal?: "5250" | "3270";
   /** emulator/printer（セッション）のみ */

@@ -21,6 +21,45 @@ function last(w: { emitted: (e: string) => unknown[][] | undefined }): SettingsF
 beforeEach(() => document.body.replaceChildren());
 
 describe("SettingsForm", () => {
+  /**
+   * **スプールの復号 CCSID**（spool のみ）。VS Code 拡張にこの欄が無かったので、サーバーの既定（273）で復号されて
+   * 日本語のスプールが化けた（ブラウザ版・Electron 版はシステム設定の「スプール CCSID」で選べる）
+   */
+  describe("スプール CCSID（spool のみ）", () => {
+    it("spool には欄があり、emulator・sql には無い", () => {
+      expect(mount(SettingsForm, { props: { app: "spool" }, attachTo: document.body }).find("#sf-spool-ccsid").exists()).toBe(true);
+      expect(mount(SettingsForm, { props: { app: "emulator" }, attachTo: document.body }).find("#sf-spool-ccsid").exists()).toBe(false);
+      expect(mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body }).find("#sf-spool-ccsid").exists()).toBe(false);
+    });
+
+    it("既定は未指定で、保存しても spoolCcsid を載せない", async () => {
+      const w = mount(SettingsForm, { props: { app: "spool" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await nextTick();
+      expect((last(w) as unknown as Record<string, unknown>).spoolCcsid).toBeUndefined();
+    });
+
+    it("1399 を選ぶと spoolCcsid だけが乗る（5250 画面用の ccsid は別）", async () => {
+      const w = mount(SettingsForm, { props: { app: "spool" }, attachTo: document.body });
+      await w.get("#sf-host").setValue("AS400");
+      await w.get("#sf-spool-ccsid").setValue("1399");
+      await nextTick();
+      const saved = last(w) as unknown as Record<string, unknown>;
+      expect(saved.spoolCcsid).toBe(1399);
+      expect(saved.ccsid).toBeUndefined();
+    });
+
+    it("initial の spoolCcsid を復元する。一覧に無い値でも、開いて保存しただけでは消さない", async () => {
+      const w = mount(SettingsForm, { props: { app: "spool", initial: { host: "H", spoolCcsid: 1388 } }, attachTo: document.body });
+      expect((w.get("#sf-spool-ccsid").element as HTMLSelectElement).value).toBe("1388");
+      await w.get("#sf-host").setValue("H2");
+      await nextTick();
+      expect(last(w)).toMatchObject({ spoolCcsid: 1388 });
+      const w2 = mount(SettingsForm, { props: { app: "spool", initial: { host: "H", spoolCcsid: 930 } }, attachTo: document.body });
+      expect((w2.get("#sf-spool-ccsid").element as HTMLSelectElement).value).toBe("930");
+    });
+  });
+
   it("開いた直後、最初の入力欄（ホスト）へフォーカスする", async () => {
     const w = mount(SettingsForm, { props: { app: "sql" }, attachTo: document.body });
     await nextTick();
